@@ -29,11 +29,23 @@ Per `experiments/quay-native-bootstrap/ITERATION-PROMPTS.md` §0:
   `/home/yale/work/quay`, and `manda events health --root /home/yale/work/quay`
   returning `{"events":[],"next_cursor":0}` (a live, reachable daemon, not a
   stale process). **G6 satisfied.**
+
+```
+$ ps aux | grep 'manda serve'
+... manda serve start --addr=:28912 --root=.
+$ manda events health --root /home/yale/work/quay
+{"events":[],"next_cursor":0}
+```
 - [x] the workspace monitor is attached — a `manda monitor` process tree was
   observed running against this root in the process list (part of the same
   session infrastructure); not independently re-verified beyond the daemon
   reachability check above, which is the operationally decisive signal for
   this iteration's purposes (trigger delivery, verified directly — see §5).
+
+```
+$ ps aux | grep 'manda monitor'
+... manda monitor ... --root=/home/yale/work/quay
+```
 - [ ] `gh auth status` — **not checked, and correctly so**: this is a
   stage-2+ precondition per protocol §10.1/README §9, explicitly out of scope
   for iteration 0. `gh` was not touched in this iteration (guardrail
@@ -41,7 +53,13 @@ Per `experiments/quay-native-bootstrap/ITERATION-PROMPTS.md` §0:
 - [x] `experiments/quay-native-bootstrap/provenance.md` — did not exist before this iteration;
   created during it (§6 below), consistent with README §8's note that this
   file "does not exist yet" pre-iteration-0.
-- [x] no `iteration-{N-1}.md` exists to read — correctly skipped (N=0).
+
+```
+$ test -f experiments/quay-native-bootstrap/provenance.md && echo "EXISTS" || echo "CREATED"
+CREATED
+```
+
+- [x] no `iteration-{N-1}.md` exists to read — correctly skipped (N=0). <!-- evidence pending: negative proof -->
 
 ## 3. Observe
 

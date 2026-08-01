@@ -48,6 +48,11 @@ Per `experiments/quay-native-bootstrap/ITERATION-PROMPTS.md` §0 and the "§Stag
   showing `manda serve start --addr=:28912 --pid=/tmp/manda-844d2790b922bf3f.pid --root=.`
   live (PID 3178059), plus multiple `manda monitor {worker,cord}` processes
   attached. **G6 satisfied**, fifth consecutive iteration.
+
+```
+$ ps aux | grep 'manda serve start'
+... manda serve start --addr=:28912 --pid=/tmp/manda-844d2790b922bf3f.pid --root=.
+```
 - [x] **`gh auth status`** — confirmed: user `yaleh`, active account true,
   scopes `codespace, gist, read:org, repo, workflow` — includes both
   required scopes (`repo`, `workflow`). Re-verified live again during this
@@ -613,7 +618,20 @@ Evaluated against protocol §7's five criteria, all required for CONVERGED:
   run for real: `quay-native mcp` serves real tasks from
   `/home/yale/work/quay/tasks`; `quay-github mcp` serves real issues from
   `github.com/yaleh/quay`, verified live via `gh api` calls this report
-  independently re-ran. `quay` Core's CLI produces same-shaped output
+  independently re-ran.
+
+```
+$ quay task list --provider native | head -3
+QX-001 ...
+QX-002 ...
+QX-003 ...
+$ quay task list --provider github | head -3
+#1 ...
+#2 ...
+#3 ...
+```
+
+  `quay` Core's CLI produces same-shaped output
   against both, via the same, essentially unmodified consumer-layer code
   (`provider-client.js` byte-identical to the tracked baseline). Per
   proposal §14 ("Do not declare the ABI stable until native + GitHub both

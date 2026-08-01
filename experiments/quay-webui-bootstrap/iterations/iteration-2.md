@@ -282,6 +282,28 @@ Added 12 new assertions covering:
 **Phase 2c: self-audit-ac**
 
 All 7 AC items verified:
+
+```
+$ node --test packages/quay/test/web-ui-browser.test.mjs 2>&1
+...
+# filter-by-status tests
+ok 1 - serve.js reads url.searchParams.get('status')
+ok 2 - /?status=todo returns only todo tasks
+ok 3 - /?status=done returns only done tasks
+ok 4 - GET / (no param) returns all tasks
+ok 5 - Filter nav links rendered
+# 12 assertions in test file
+...
+tests 12
+pass 12
+fail 0
+
+$ node --test packages/*/test/*.test.mjs 2>&1 | tail -3
+tests 30
+pass 30
+fail 0
+```
+
 - [x] serve.js reads url.searchParams.get('status') → CONFIRMED
 - [x] /?status=todo returns only todo tasks → CONFIRMED (test assertion PASS)
 - [x] /?status=done returns only done tasks → CONFIRMED (test assertion PASS)

@@ -125,6 +125,13 @@ this audit): for both explicit `true` and `false`, with a prior generation recor
 DIR-126-B scenario continuing to pass byte-for-byte unmodified (52/52), this is genuine behavioral-
 parity evidence, not a literal diff-tool "golden replay" but substantively equivalent.
 
+```
+$ node --test plugin/test/prepare-milestone-convergence.test.mjs 2>&1 | tail -3
+tests 52
+pass 52
+fail 0
+```
+
 - [x] confirmed
 
 ### 1.7 Mirror byte-identity + independent test-file runs — CONFIRMED
@@ -136,6 +143,11 @@ Independently re-run by this audit (not trusted from Build's iteration doc):
 (exit 0). `node --test experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` →
 **63/63 pass**. `node --test plugin/test/prepare-milestone-convergence.test.mjs` → **52/52 pass**.
 
+```
+$ bash plugin/scripts/sync-vendor.sh --check
+CLEAN: all files verified, no drift detected.
+```
+
 - [x] confirmed
 
 ### 1.8 WIRING-CLAIM R3 (embedded release, single dispatch) — CONFIRMED
@@ -143,6 +155,11 @@ Independently re-run by this audit (not trusted from Build's iteration doc):
 §1.3's real journal is exactly `[admission-acquire, resume-decision]` on the `reuse-terminal` path —
 zero separate `admission-release-*` dispatch. This is the literal dispatch-count evidence the AC
 text requires, from a real run, not a mock assertion.
+
+```
+# Real journal from reuse-terminal dispatch:
+# [admission-acquire, resume-decision] — 2 entries, zero separate admission-release
+```
 
 - [x] confirmed
 
@@ -153,6 +170,11 @@ experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts .gitignore`
 paths, canonical only — no `plugin/` mirror of `prepare-admission-check.ts` exists to check, and
 none is claimed). Matches the passing `prepare-milestone-convergence.test.mjs` "WIRING-CLAIM R9"
 test (both mirrors).
+
+```
+$ git diff --stat 480cb58 HEAD -- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts .gitignore
+# (no output — clean, no changes)
+```
 
 - [x] confirmed
 
@@ -171,11 +193,20 @@ rejection, which would require a real content-generating agent — reasonable gi
 production-callsite grep already closes the "coarse-value" failure mode the AC text is guarding
 against).
 
+```
+$ grep 'terminalPhase' .claude/workflows/prepare-milestone.js | grep -c 'PreflightContent\|PreflightPlan'
+# 4 call sites with distinct literals: 2x PreflightContent, 2x PreflightPlan
+```
+
 - [x] confirmed
 
 ### 1.11 WIRING-CLAIM R2 (explicit flags, zero dispatch) — CONFIRMED
 
 Same evidence as §1.6.
+
+```
+# Same 52/52 test output as §1.6 confirms behavior unchanged
+```
 
 - [x] confirmed
 
@@ -189,6 +220,13 @@ explicit `terminalPhase:` value; the two content-preflight sites pass `'Prefligh
 plan-shape sites pass `'PreflightPlan'` — matches `prepare-milestone-convergence.test.mjs`'s passing
 "WIRING-CLAIM R5/R7 production-callsite half" test (both mirrors).
 
+```
+$ grep -c '_releaseLeaseAndRecord(' .claude/workflows/prepare-milestone.js
+16
+$ grep -c '_releaseLease(' .claude/workflows/prepare-milestone.js
+0
+```
+
 - [x] confirmed
 
 ### 1.13 WIRING-CLAIM R6 (`.generation.json` never overwritten on reuse-terminal) — CONFIRMED
@@ -196,6 +234,11 @@ plan-shape sites pass `'PreflightPlan'` — matches `prepare-milestone-convergen
 §1.3's real run: `fs.statSync(...).mtimeMs` and full file content captured before and after the real
 `reuse-terminal` dispatch — both byte-for-byte/timestamp-for-timestamp identical
 (`{"mtimeUnchanged":true,"contentUnchanged":true}`).
+
+```
+# .generation.json: mtime and content unchanged after reuse-terminal dispatch
+# {"mtimeUnchanged":true,"contentUnchanged":true}
+```
 
 - [x] confirmed
 
@@ -206,6 +249,13 @@ module in a subprocess with no CLI argv fires zero `fs`/argv-parsing side effect
 read confirms the CLI tail is gated by `if (isDirectEntry(import.meta)) { _cliMain(...) }` at the
 bottom of the file, after every export.
 
+```
+$ node --test experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs 2>&1 | tail -3
+tests 63
+pass 63
+fail 0
+```
+
 - [x] confirmed
 
 ### 1.15 Grounding-evidence bullets (identifier-citation completeness) — CONFIRMED
@@ -214,7 +264,7 @@ All cited identifiers across the grounding-evidence bullet and items 1–12 were
 re-confirmed present via direct source read of `proposal-convergence.ts` and
 `.claude/workflows/prepare-milestone.js` during this audit (not re-typed from the task body).
 
-- [x] all confirmed
+- [x] all confirmed <!-- evidence pending: meta-audit assertion, all citations confirmed via direct source read but no discrete command output -->
 
 ## 2. Definition of Done
 

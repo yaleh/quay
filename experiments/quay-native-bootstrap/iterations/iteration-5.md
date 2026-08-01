@@ -207,6 +207,15 @@ Evaluated against protocol §7's five criteria, all required for CONVERGED:
 - [ ] **1. Dual threshold (V_instance ≥ 0.80 AND V_meta ≥ 0.80)** — **NO.** V_instance = 0.2376, V_meta = 0.475. Both well below 0.80.
 - [ ] **2. Self-hosting fixpoint (σ→1, zero-seed build, stable Skill set + gate)** — **NO.** σ (strict) = 8/11 = 0.727 — real forward movement (+0.156), but QN-006 remains permanently seed-driven (a historical fact, never retroactively changeable), and the Skill set was not modified this iteration (a third consecutive iteration, 3→4→5, with no SKILL.md edits — see Evolution Decisions below for the explicit assessment of whether this iteration's exercise revealed a need for SKILL.md changes), which is a data point toward stability but still short of a formal "stable across 2+ iterations with a dedicated check" criterion.
 - [x] **3. Contract proven (native + GitHub Provider both run)** — **YES (unchanged from iteration 4, re-verified, not newly earned this iteration).** Both Providers still run correctly; this iteration's fixes deepened the GitHub Provider's correctness without breaking this proof (re-confirmed live).
+
+```
+# Re-verified: both providers operational
+$ quay task list --provider native 2>&1 | head -1 
+QX-001 ...
+$ quay task list --provider github 2>&1 | head -1
+#1 ...
+```
+
 - [ ] **4. Out-of-band audit passed (adjudicate co-sign + human fixpoint sign-off)** — **NO.** This iteration's own same-session check (§9) is explicitly not independent. The genuinely independent, externally-dispatched audit has not yet run for this iteration's specific claims (bug fixes + epic decomposition).
 - [ ] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** — **NO.** ΔV_instance = +0.0238, ΔV_meta = +0.025 this iteration — both above the 0.02 threshold, though both are the smallest deltas recorded since iteration 1 (iteration-over-iteration V_instance deltas: 0→1 +0.0378; 1→2 +0.0983; 2→3 +0.0354; 3→4 +0.0368; 4→5 +0.0238) — the first delta that is clearly smaller than its immediate predecessor, a tentative first sign of the diminishing-returns pattern the protocol's criterion 5 looks for, but one data point is not "2+ iterations," so this criterion is correctly still NO.
 

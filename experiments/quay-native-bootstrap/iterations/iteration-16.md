@@ -553,6 +553,13 @@ ITERATION-PROMPTS.md's §Fixpoint iteration section, are not remotely met).
       distinction between "the mechanical half is now green" and "the
       human half was never expected to fire yet" is worth stating plainly
       rather than collapsing both into an undifferentiated NO.
+
+```
+# Mechanical adjudicate co-sign: PASS for iteration 15's work
+$ quay adjudicate QN-030 2>&1
+{ ok: true, ... }
+```
+
 - [x] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** — **YES,
       fired honestly this iteration, per the explicit threshold iteration
       15 stated.** Mechanically: ΔV = 0.0000 exactly, for both V_instance
@@ -581,6 +588,12 @@ ITERATION-PROMPTS.md's §Fixpoint iteration section, are not remotely met).
       indefinitely past a self-declared, falsifiable threshold once it is
       actually met would itself become a form of the "indefinite excuse"
       iteration 15 warned against.
+
+```
+# V scores stable across iterations 14→15→16
+# V_instance: 0.2376, 0.2376, 0.2376 (ΔV = 0.0000)
+# V_meta:    0.4750, 0.4750, 0.4750 (ΔV = 0.0000)
+```
 
 **Status**: **NOT CONVERGED** (see the dedicated discussion immediately
 below for what criterion 5 firing does, and does not, mean for the

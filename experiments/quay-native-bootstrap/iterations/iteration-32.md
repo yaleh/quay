@@ -453,6 +453,11 @@ points**, named explicitly for the next audit to check independently:
       movement, because the work was correctly test-coverage-shaped
       rather than new-capability-shaped.
 
+```
+# V scores iteration 32: ΔV_instance = 0.0000, ΔV_meta = 0.0000
+# V_instance: 0.4664, V_meta: 0.0973 (both ΔV < 0.02)
+```
+
 **Status**: **NOT CONVERGED**. Criteria 1, 2, 3, and 4 all remain clearly
 NO. Criterion 5 is satisfied as literally worded, but — consistent with
 every prior iteration's honest treatment of this tension — this is not

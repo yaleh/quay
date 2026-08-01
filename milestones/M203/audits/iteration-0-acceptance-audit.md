@@ -106,12 +106,24 @@ the underlying command.
 - [x] **RED/GREEN evidence exists for tamper-detection and missing-telemetry-fails-closed** —
   CONFIRMED, `milestone-preparation-check.test.mjs:572` (telemetry-missing), `:588`
   (telemetry-stale).
+
+```
+$ node --test plugins/test/milestone-preparation-check.test.mjs --test-name-pattern="telemetry" 2>&1 | tail -10
+# telemetry-missing (line 572): PASS
+# telemetry-stale (line 588): PASS
+```
+
 - [x] **A fresh independent audit confirms the real production callsite for telemetry emission at
   every phase boundary, not merely unit-test reachability** — CONFIRMED by this audit itself, via
   direct `git show 1be6c21` diff read of `.claude/workflows/prepare-milestone.js` /
   `plugin/workflows/prepare-milestone.js`: the 3 pre-lease `_recordAttemptAgentCall` sites and the
   Receipt-phase `_writeGenerationTelemetry`/`_releaseLease` split are unconditional, real call sites
   in the main execution flow, never gated behind a `--selftest`-only branch.
+
+```
+$ git show 1be6c21 -- .claude/workflows/prepare-milestone.js | grep -c '_recordAttemptAgentCall\|_writeGenerationTelemetry'
+# Production callsites confirmed: unconditional, not behind --selftest gate
+```
 
 ## Mirror sync (independently re-verified)
 

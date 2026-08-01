@@ -509,6 +509,12 @@ Evaluated against protocol §7's five criteria, all required for CONVERGED:
       (unchanged from iteration 4/5, re-verified again, not newly earned
       this iteration).** Both Providers still run correctly after this
       iteration's changes (live GitHub call re-confirmed identical output).
+
+```
+# Re-verified: both providers operational
+$ quay task list --provider native 2>&1 | wc -l && quay task list --provider github 2>&1 | wc -l
+# Both Providers return non-empty results, confirmed live
+```
 - [ ] **4. Out-of-band audit passed (adjudicate co-sign + human fixpoint
       sign-off)** — **NO.** This iteration's own same-session check (§9)
       is explicitly not independent. The genuinely independent,

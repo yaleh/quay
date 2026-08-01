@@ -54,3 +54,21 @@ Additionally, the parser only matched `### Clause N` heading format, but the act
 - [x] Running `node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts .` against the real repo exits 0
 - [x] The script correctly parses DoD clause headings from `inherited-core.md` section `## Definition of DoD :: DoD`
 - [x] Unit tests verify the fix against both `## Definition of Done` and `## Definition of DoD :: DoD` heading formats
+
+```
+$ node --experimental-strip-types experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts .
+PASS: all 13 DoD clause(s) (Clauses 0-12) are documented in inherited-core.md's Definition of DoD section
+
+$ node --test --experimental-strip-types experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.test.mjs 2>&1 | tail -3
+tests 13
+pass 13
+fail 0
+
+$ node --test --experimental-strip-types experiments/quay-perpetual-stream/test/it0-enforcement-with-design-check.test.mjs 2>&1 | tail -3
+tests 20
+pass 20
+fail 0
+
+$ node --experimental-strip-types experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts --selftest
+PASS: all 4 self-test fixture cases pass
+```

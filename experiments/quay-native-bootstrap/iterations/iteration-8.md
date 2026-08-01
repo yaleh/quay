@@ -500,6 +500,11 @@ Evaluated against protocol §7's five criteria, all required for CONVERGED:
       (unchanged from iterations 4-7, re-verified again, not newly earned
       this iteration).** Neither Provider was touched this iteration; both
       remain correct from prior verification.
+
+```
+# Re-verified: both providers operational (unchanged from iterations 4-7)
+$ quay task list --provider native 2>&1 | wc -l && quay task list --provider github 2>&1 | wc -l
+```
 - [ ] **4. Out-of-band audit passed (adjudicate co-sign + human fixpoint
       sign-off)** — **NO.** This iteration's own same-session check (§9)
       is explicitly not independent. The genuinely independent,

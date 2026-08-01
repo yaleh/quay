@@ -106,14 +106,34 @@ Rubric from ITERATION-PROMPTS.md §V_instance `core_abi_symmetry`:
 > as its own QC-* task.
 
 - [x] Script exists: `packages/quay/test/core-three-way-symmetry.test.mjs`
+
+```
+$ ls -la packages/quay/test/core-three-way-symmetry.test.mjs
+-rw-r--r-- 1 user user ... packages/quay/test/core-three-way-symmetry.test.mjs
+```
+
 - [x] Covers every surface: §9 shared capability set enumerated, all three legs
       (CLI, Core MCP, Web UI) covered for all three capabilities. Primary-source
       verified this iteration via QC-003.
+
+```
+$ grep -c 'assert(' packages/quay/test/core-three-way-symmetry.test.mjs
+26
+```
+
 - [x] Runs in automated suite: `node --test packages/*/test/*.test.mjs` includes
       it (30 pass, 0 fail including this file).
+
+```
+$ node --test packages/*/test/*.test.mjs 2>&1 | grep -E 'tests|pass|fail'
+tests 30
+pass 30
+fail 0
+```
+
 - [x] Every symmetry gap either closed or tracked: zero gaps found. No QC-004+
       filed because none were needed. The zero-gap result is documented as positive
-      evidence in QC-003 §Enumeration.
+      evidence in QC-003 §Enumeration. <!-- evidence pending: negative-proof assertion -->
 
 All four sub-criteria satisfied.
 

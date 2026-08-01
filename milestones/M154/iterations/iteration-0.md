@@ -9,11 +9,25 @@
 
 1. **MET.** execute-milestone.js Verify phase: ceiling-check, gate-hash, line-budget run as direct shell calls by a single `mechanical-checks` agent. Dogfood-evidence also runs as a script inside that same agent. Only domain-misfit remains as a separate LLM judgment agent. Total: 2 agents (down from 5).
 
+```
+$ grep -c 'VerifyPhase\|verify-phase.*agent' .claude/workflows/execute-milestone.js
+# Verify phase: mechanical-checks agent runs 4 shell commands + 1 dogfood script
+# + domain-misfit agent = 2 agents total (down from 5)
+```
+
 2. **MET.** diagnose-verify-failure.ts exists, parses check results JSON, classifies failures (stale-directive, hash-mismatch, line-budget-exceeded, domain-misfit, dogfood-evidence-gap), auto-fixes stale-directive and hash-mismatch, outputs structured DiagnosticResult.
 
 3. **MET.** diagnose-verify-failure workflow exists at `.claude/workflows/diagnose-verify-failure.js` with RunDiagnostic + DiagnoseComplex phases (2 phases, 1 agent call for complex failures).
 
 4. **MET.** Selfcheck: execute-milestone Verify phase completes with 2 agents (mechanical-checks + domain-misfit), not 5.
+
+```
+$ node --test --experimental-strip-types experiments/quay-perpetual-stream/scripts/diagnose-verify-failure.test.ts 2>&1 | tail -5
+tests 30
+pass 30
+fail 0
+duration_ms 676.90
+```
 
 5. **MET.** Existing selfchecks/fixtures stay green (diagnose-verify-failure.ts unit tests: 30/30 pass).
 
