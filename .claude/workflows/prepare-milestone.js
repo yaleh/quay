@@ -1705,7 +1705,7 @@ Return {ok: <true if the commit was created or there was genuinely nothing to co
 
 Return {ok: <step 2 outcome was "merged">, mergeCommit: <the merge commit SHA printed by step 2, or null>, files: <conflict file list, or []>}.`,
     { label: 'prepare-merge', phase: 'Receipt',
-      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, mergeCommit: { type: 'string' }, files: { type: 'array', items: { type: 'string' } } } } }
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, mergeCommit: { type: 'string' }, files: { type: 'array', items: { type: 'string' } } } } }
   )
   if (!_mergeAgentResult || _mergeAgentResult.ok !== true) {
     log(`Prepare-merge FAILED — ${_mergeAgentResult?.code || _mergeAgentResult?.detail || 'agent returned nothing'}. Master is clean (the merge was auto-aborted); the worktree at ${_isolationPlan.worktreeRel} is left intact for human inspection. The Admission lease is already released.`)
