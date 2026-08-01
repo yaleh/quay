@@ -63,7 +63,7 @@ fields (e.g. `checkFiles?: boolean`) consistent with the `{ok, issues}` contract
 
 ## Chosen mechanism
 
-`registerConfigHandlers(server, deps)` in mcp-handlers.ts: registers a `config_validate`
+`registerConfigHandlers(server, cfg)` in mcp-handlers.ts (explicit-params convention, binding cfg.workspaceRoot): registers a `config_validate`
 tool whose handler calls the real `validateConfig()` (same module, no second
 implementation — grep-confirmable that mcp-handlers.ts has no gate-shape literals / no
 duplicated validation logic). `ok`/`issues` flow into structuredContent.
@@ -85,7 +85,7 @@ unwired MCP claim and the muddled `--json`-on-a-tool semantics. `mcp-handlers.ts
 
 ## Requested action
 
-1. `registerConfigHandlers(server, deps)` in mcp-handlers.ts registering `config_validate`
+1. `registerConfigHandlers(server, cfg)` in mcp-handlers.ts (explicit-params convention, binding cfg.workspaceRoot) registering `config_validate`
    with structured input (`checkFiles?: boolean`).
 2. Handler calls the REAL shared `validateConfig()` — no duplicated logic (grep-guard:
    gate-shape literals absent from mcp-handlers.ts).
@@ -101,6 +101,10 @@ unwired MCP claim and the muddled `--json`-on-a-tool semantics. `mcp-handlers.ts
 - [ ] `checkFiles: true` through MCP behaves identically to CLI `--check-files`.
 - [ ] No second validation implementation: `grep` shows gate-shape literals / validation
   logic present in the shared module but NOT duplicated in mcp-handlers.ts.
+
+- [ ] **Wiring AC (positive falsification):** a test asserts the `config_validate` handler
+  invokes `validateConfig` imported from `src/config-validate.ts` (spy/mock observed
+  invoked, mirroring DIR-099-A's AC15) — a dead/unwired registration cannot pass.
 - [ ] Tests: MCP-surface test driving the real handler, >=80% coverage on the new path.
 
 ## Definition of Done
