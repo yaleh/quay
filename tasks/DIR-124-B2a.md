@@ -78,9 +78,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/*stage-receipt*`
 - `plugin/test/*stage-receipt*`
 - `docs/plans/M275-dir-124-b2a.md`
-`milestones/M275/preparation.json`
-`milestones/M275/proposal-ledger.json`
-`milestones/M275/stage-journal.jsonl`
-`milestones/M275/receipts/*.json`
-`tasks/DIR-124-B2a.md`
-`.quay/config.yml`
+- `milestones/M275/preparation.json`
+- `milestones/M275/proposal-ledger.json`
+- `milestones/M275/stage-journal.jsonl`
+- `milestones/M275/receipts/*.json`
+- `tasks/DIR-124-B2a.md`
+- `.quay/config.yml`

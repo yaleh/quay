@@ -62,9 +62,9 @@ Standard inherited-core DoD clauses apply.
 
 - `tasks/DIR-124-F4.md`
 - `docs/plans/M274-dir-124-f4e.md`
-`milestones/M274/preparation.json`
-`milestones/M274/proposal-ledger.json`
-`milestones/M274/stage-journal.jsonl`
-`milestones/M274/receipts/*.json`
-`tasks/DIR-124-F4e.md`
-`.quay/config.yml`
+- `milestones/M274/preparation.json`
+- `milestones/M274/proposal-ledger.json`
+- `milestones/M274/stage-journal.jsonl`
+- `milestones/M274/receipts/*.json`
+- `tasks/DIR-124-F4e.md`
+- `.quay/config.yml`

@@ -61,9 +61,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`
 - `plugin/test/prepare-admission-check.test.mjs`
 - `docs/plans/M268-dir-124-f3b.md`
-`milestones/M268/preparation.json`
-`milestones/M268/proposal-ledger.json`
-`milestones/M268/stage-journal.jsonl`
-`milestones/M268/receipts/*.json`
-`tasks/DIR-124-F3b.md`
-`.quay/config.yml`
+- `milestones/M268/preparation.json`
+- `milestones/M268/proposal-ledger.json`
+- `milestones/M268/stage-journal.jsonl`
+- `milestones/M268/receipts/*.json`
+- `tasks/DIR-124-F3b.md`
+- `.quay/config.yml`

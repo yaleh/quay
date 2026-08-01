@@ -72,9 +72,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/task-schema.test.mjs`
 - `plugin/test/task-schema.test.mjs`
 - `docs/plans/M269-dir-124-f3c.md`
-`milestones/M269/preparation.json`
-`milestones/M269/proposal-ledger.json`
-`milestones/M269/stage-journal.jsonl`
-`milestones/M269/receipts/*.json`
-`tasks/DIR-124-F3c.md`
-`.quay/config.yml`
+- `milestones/M269/preparation.json`
+- `milestones/M269/proposal-ledger.json`
+- `milestones/M269/stage-journal.jsonl`
+- `milestones/M269/receipts/*.json`
+- `tasks/DIR-124-F3c.md`
+- `.quay/config.yml`
