@@ -1,0 +1,59 @@
+{
+  "taskId": "DIR-103-A",
+  "milestoneId": "M223",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M223-dir-103-a.md",
+  "planFile": "docs/plans/M223-dir-103-a.md",
+  "ledgerFile": "milestones/M223/proposal-ledger.json",
+  "telemetryFile": null,
+  "mechanismInventoryFile": "milestones/M223/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "a52aebe8a488f2d4017b6b22f62ab52df2c7e9288a7eb452ad25c9bfb9146720",
+    "charter": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+    "plan": "1d63ea343c163a28f8efe80ccb3d466dfa5278f6dd935daead8ab0faf49fec7b",
+    "sources": {
+      "packages/quay/bin/quay.ts": "70cfaf12071b3e96d57045e83b3548e09a25030aaca16a3fa5f97d8bf94882d8",
+      "packages/quay/src/gate/acceptance-runner.ts": "ec0f5e9628509b338a4e27e17ab771b82a484f5838686eb55e08e07452b47566",
+      "packages/quay/test/acceptance.test.mjs": "b40b88b1e3b1803fddbec570ddc03b98381b5ffbfca5d6d982f957f1267c1f5c"
+    },
+    "ledger": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "mechanismInventory": "e813d564bccbeefe1db875d1c9abb55d63c52b639acc61134a5f1d19cc489b67"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/bin/quay.ts",
+    "packages/quay/src/gate/acceptance-runner.ts",
+    "packages/quay/test/acceptance.test.mjs",
+    "docs/plans/M223-dir-103-a.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "manual-takeover"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "manual-takeover"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ],
+    "manualTakeover": true
+  },
+  "convergence": null
+}

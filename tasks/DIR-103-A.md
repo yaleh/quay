@@ -60,7 +60,11 @@ First independently landable mechanism; no dependencies within the split.
 
 ## Chosen mechanism
 
-Extend the `gate` command's flag parsing to accept `--dry-run` (short `-n`). When set,
+Extend the `gate` command's flag parsing to accept `--dry-run` (short `-n`): BOTH
+spellings MUST be registered as NON-value-taking boolean flags in `parseFlags`'
+known-boolean-flags set, so `-n` is parsed as a flag there (never a gate-local
+`-n`→`--dry-run` token rewrite, never left to fall through to `positional` where it
+would be misread as the task id). When set,
 the gate runner resolves the same runner options a real run would use (same cwd, same
 timeout, via `resolveRunnerOptions`), spawns the acceptance command DIRECTLY with its own
 stdout/stderr capture (a small sibling helper mirroring `coverage-floor`'s
@@ -72,17 +76,18 @@ explicitly chosen not to change that return shape (coverage-floor.ts keeps its o
 capture as "a tiny sibling rather than changing `runAcceptance`'s return shape"). Surfacing
 the command's output is the whole point of a dry-run, so the dry-run branch captures it
 directly. The dry-run result is not recorded anywhere durable; its only observable effect
-is the printed output and the process exit code.
+is the printed output and the process exit code. The CLI's own process exit code mirrors
+the acceptance command's code (`process.exitCode = r.code ?? 1`): 0 when the command
+exits 0, non-zero (the command's code, or 1) when it fails.
 
 `quay gate --help` documents `--dry-run`.
 
 ## Plan
 
-Resolved by milestone M223. The checked Plan (DIR-117-B prepared-gate artifact) is
-`docs/plans/M223-dir-103-a.md` — the authoritative stage-by-stage spec: milestone/task/charter/
-base-revision header, complete touch set, RED/implementation/GREEN stages with AC→stage mapping,
-line budgets, guardrails/rollback, and real-landing verification.
-
+Resolved via milestone M223. Checked Plan: `docs/plans/M223-dir-103-a.md` — manually
+revalidated after 3 prepare-milestone attempts exhausted the epoch full-review cap
+(reset quota 3/3); the task body (with grounded facts) is authoritative. 7 mechanical
+stages, all 8 AC indices mapped (AC3 `-n` short-flag coverage added).
 ## Finding
 
 `packages/quay/bin/quay.ts:1256-1299` — the `run` branch documents "NO positional id:
@@ -96,11 +101,15 @@ asserted, not assumed.
 
 ## Requested action
 
-1. Add `--dry-run`/`-n` to the `quay gate <task-id>` flag set.
+1. Add `--dry-run`/`-n` to the `quay gate <task-id>` flag set, both registered as
+   non-value-taking boolean flags in `parseFlags`' known-boolean-flags set (never a
+   gate-local token rewrite), so `-n` is parsed as a flag and never misread as the
+   task id.
 2. When set: spawn the acceptance command directly with its own stdout/stderr capture,
    using the same resolved cwd/timeout as a real run (NOT via `runAcceptance()`, whose
-   result carries no output text), print stdout/stderr + exit code, do NOT append a
-   GateEvent, do NOT write any lifecycle status field.
+   result carries no output text), print stdout/stderr + exit code and mirror that code
+   in the CLI's own `process.exitCode` (`process.exitCode = r.code ?? 1`), do NOT append
+   a GateEvent, do NOT write any lifecycle status field.
 3. Document `--dry-run` in `quay gate --help`.
 4. RED/GREEN tests: dry-run executes the command, prints result, appends zero GateEvents
    (`gate-log` empty), leaves `status` unchanged; a real `gate <id>` afterwards still
@@ -110,6 +119,11 @@ asserted, not assumed.
 
 - [ ] `quay gate --dry-run <task-id>` runs `task.extra.acceptance` with the same
   cwd/timeout/env as a real gate run and prints stdout/stderr + exit code.
+- [ ] `quay gate --dry-run <task-id>` mirrors the acceptance command's exit code in the
+  CLI's own `process.exitCode` (`process.exitCode = r.code ?? 1`): 0 when the command
+  exits 0, non-zero (the command's code, or 1) when it fails.
+- [ ] `quay gate -n <task-id>` behaves identically to `quay gate --dry-run <task-id>`
+  (`-n` is parsed as a non-value-taking boolean flag, never misread as the task id).
 - [ ] `quay gate --dry-run <task-id>` appends ZERO GateEvents (gate-event log unchanged —
   real before/after, not asserted).
 - [ ] `quay gate --dry-run <task-id>` leaves the task's `status` field unchanged (a
