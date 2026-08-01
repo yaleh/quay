@@ -11,7 +11,7 @@
   },
   "buildAdmissionRef": null,
   "baseCommit": "0acba760c7b132edcecb1f246d81a8cbaa615fd5",
-  "candidateCommit": "16c9a0eb099fd2747588223485d36c4acf24d7ef",
+  "candidateCommit": "d9441185",
   "changedFiles": [
     {
       "path": ".agents/skills/quay-directive",
@@ -50,7 +50,7 @@
     },
     {
       "path": ".claude/workflows/prepare-milestone.js",
-      "additions": 1558,
+      "additions": 1565,
       "deletions": 0
     },
     {
@@ -180,7 +180,7 @@
     },
     {
       "path": ".quay/prepare-epochs/DIR-112.json",
-      "additions": 72,
+      "additions": 74,
       "deletions": 0
     },
     {
@@ -216,6 +216,31 @@
     {
       "path": ".quay/prepare-epochs/DIR-124-A.json",
       "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A1.json",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A2.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A3.json",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A4.json",
+      "additions": 32,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A5.json",
+      "additions": 46,
       "deletions": 0
     },
     {
@@ -415,7 +440,7 @@
     },
     {
       "path": "docs/plans/M222-dir-112.md",
-      "additions": 458,
+      "additions": 219,
       "deletions": 0
     },
     {
@@ -489,6 +514,21 @@
       "deletions": 0
     },
     {
+      "path": "docs/plans/M243-dir-124-a2.md",
+      "additions": 250,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M245-dir-124-a4.md",
+      "additions": 347,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M246-dir-124-a5.md",
+      "additions": 465,
+      "deletions": 0
+    },
+    {
       "path": "docs/plans/adaptive-composite-milestone-select-and-execution.md",
       "additions": 382,
       "deletions": 0
@@ -496,6 +536,11 @@
     {
       "path": "docs/plans/immutable-runtime-generations-rollout.md",
       "additions": 894,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/exp6-queue-driven-concurrent-executor.md",
+      "additions": 499,
       "deletions": 0
     },
     {
@@ -954,8 +999,38 @@
       "deletions": 0
     },
     {
+      "path": "experiments/quay-perpetual-stream/charters/M247-gap-preflight-merged-markdown-low-identifier.md",
+      "additions": 26,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M248-dir-124-a1a.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M249-dir-124-a1b.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M250-dir-124-a3a.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M251-dir-124-a3b.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M252-gap-prepare-milestone-no-worktree-isolation.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
       "path": "experiments/quay-perpetual-stream/dashboard.md",
-      "additions": 599,
+      "additions": 598,
       "deletions": 10
     },
     {
@@ -1157,6 +1232,11 @@
       "path": "experiments/quay-perpetual-stream/scripts/human-steered-classify.ts",
       "additions": 9,
       "deletions": 4
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh",
+      "additions": 1,
+      "deletions": 1
     },
     {
       "path": "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts",
@@ -2230,32 +2310,32 @@
     },
     {
       "path": "milestones/M222/absorb-entry.md",
-      "additions": 34,
+      "additions": 36,
       "deletions": 0
     },
     {
-      "path": "milestones/M222/audits/iteration-0-acceptance-audit.md",
-      "additions": 112,
+      "path": "milestones/M222/build-evidence-manifest.json",
+      "additions": 4298,
       "deletions": 0
     },
     {
       "path": "milestones/M222/iterations/iteration-0.md",
-      "additions": 71,
+      "additions": 86,
       "deletions": 0
     },
     {
       "path": "milestones/M222/mechanism-inventory.json",
-      "additions": 27,
+      "additions": 37,
       "deletions": 0
     },
     {
       "path": "milestones/M222/preparation.json",
-      "additions": 84,
+      "additions": 82,
       "deletions": 0
     },
     {
       "path": "milestones/M222/proposal-ledger.json",
-      "additions": 130,
+      "additions": 610,
       "deletions": 0
     },
     {
@@ -2389,6 +2469,26 @@
       "deletions": 0
     },
     {
+      "path": "milestones/M239/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M246/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M247/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
       "path": "milestones/prepare-decisions/DIR-112.json",
       "additions": 19,
       "deletions": 0
@@ -2400,6 +2500,16 @@
     },
     {
       "path": "milestones/prepare-decisions/DIR-124-A.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-124-A1.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-124-A3.json",
       "additions": 13,
       "deletions": 0
     },
@@ -2679,6 +2789,11 @@
       "deletions": 0
     },
     {
+      "path": "milestones/prepare-telemetry/DIR-112/3366a535b8c5.json",
+      "additions": 332,
+      "deletions": 0
+    },
+    {
       "path": "milestones/prepare-telemetry/DIR-112/58e674f49232.json",
       "additions": 45,
       "deletions": 0
@@ -2791,6 +2906,66 @@
     {
       "path": "milestones/prepare-telemetry/DIR-124-A/d9fc66dca38f.json",
       "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A1/141b6518f6db.json",
+      "additions": 188,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/5e4172a049f5.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/97b3fadd6598.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/e4b7181defc8.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/fab7a506f562.json",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A3/f44440505b72.json",
+      "additions": 104,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A4/68e0de32f554.json",
+      "additions": 206,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A4/8a27b18c7307.json",
+      "additions": 206,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/24b4a4764f0a.json",
+      "additions": 158,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/40d1034fe8e6.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/4d39a3e48dd7.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/5ae4af17ba28.json",
+      "additions": 62,
       "deletions": 0
     },
     {
@@ -3049,6 +3224,11 @@
       "deletions": 0
     },
     {
+      "path": "package-lock.json",
+      "additions": 7,
+      "deletions": 9
+    },
+    {
       "path": "packages/quay-native/examples/sample-workspace/.quay/config.yml",
       "additions": 1,
       "deletions": 0
@@ -3120,8 +3300,8 @@
     },
     {
       "path": "packages/quay/test/cli.test.mjs",
-      "additions": 810,
-      "deletions": 753
+      "additions": 821,
+      "deletions": 755
     },
     {
       "path": "packages/quay/test/config-validate.test.mjs",
@@ -3625,7 +3805,7 @@
     },
     {
       "path": "plugin/test/prepare-milestone-convergence.test.mjs",
-      "additions": 2247,
+      "additions": 2281,
       "deletions": 0
     },
     {
@@ -3650,7 +3830,7 @@
     },
     {
       "path": "plugin/workflows/prepare-milestone.js",
-      "additions": 1558,
+      "additions": 1565,
       "deletions": 0
     },
     {
@@ -3805,8 +3985,8 @@
     },
     {
       "path": "tasks/DIR-112.md",
-      "additions": 658,
-      "deletions": 35
+      "additions": 669,
+      "deletions": 26
     },
     {
       "path": "tasks/DIR-113.md",
@@ -3925,27 +4105,47 @@
     },
     {
       "path": "tasks/DIR-124-A1.md",
-      "additions": 125,
+      "additions": 651,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A1a.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A1b.md",
+      "additions": 45,
       "deletions": 0
     },
     {
       "path": "tasks/DIR-124-A2.md",
-      "additions": 405,
+      "additions": 461,
       "deletions": 0
     },
     {
       "path": "tasks/DIR-124-A3.md",
-      "additions": 104,
+      "additions": 312,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A3a.md",
+      "additions": 41,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A3b.md",
+      "additions": 37,
       "deletions": 0
     },
     {
       "path": "tasks/DIR-124-A4.md",
-      "additions": 290,
+      "additions": 299,
       "deletions": 0
     },
     {
       "path": "tasks/DIR-124-A5.md",
-      "additions": 446,
+      "additions": 504,
       "deletions": 0
     },
     {
@@ -4070,7 +4270,7 @@
     },
     {
       "path": "tasks/gap-build-evidence-manifest-missing.md",
-      "additions": 69,
+      "additions": 271,
       "deletions": 0
     },
     {
@@ -4155,7 +4355,7 @@
     },
     {
       "path": "tasks/gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md",
-      "additions": 97,
+      "additions": 394,
       "deletions": 0
     },
     {
@@ -4200,7 +4400,7 @@
     },
     {
       "path": "tasks/gap-prepare-milestone-no-size-aware-routing-A.md",
-      "additions": 120,
+      "additions": 473,
       "deletions": 0
     },
     {
@@ -4216,6 +4416,11 @@
     {
       "path": "tasks/gap-prepare-milestone-no-size-aware-routing.md",
       "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-no-worktree-isolation.md",
+      "additions": 46,
       "deletions": 0
     },
     {
@@ -4294,5 +4499,11 @@
   "acEvidence": [],
   "runtimeEvidence": [],
   "deferredOrUnmet": [],
-  "iterationArtifactRefs": []
+  "iterationArtifactRefs": [
+    {
+      "path": "iterations/iteration-0.md",
+      "hash": "9014c3739f54ed0549db1d94d48812fcb91cc4fd820a259d730e90726d51edaf",
+      "kind": "iteration-report"
+    }
+  ]
 }
