@@ -1,0 +1,65 @@
+{
+  "taskId": "DIR-105",
+  "milestoneId": "M221",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M221-dir105.md",
+  "planFile": "docs/plans/M221-dir-105.md",
+  "ledgerFile": "milestones/M221/proposal-ledger.json",
+  "telemetryFile": null,
+  "mechanismInventoryFile": "milestones/M221/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "d4998b7c3fa36a04fe20e252a27c0e11654a367e9a6e448a24844827b10cca91",
+    "charter": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+    "plan": "c35dcde2d6722b66ad640d44fa037016cbd9ce53d9c628ae6df18f83e5eb83a7",
+    "sources": {
+      "packages/quay-native/src/store.ts": "ad7384a7cdf2de184e63b67bf286fd81e0b4ea5a6b5aaa18f5770720f320e2f2",
+      "packages/quay-native/bin/quay-native.ts": "7bc65edcbbaaddbe5893dc98e34596e16158f936f51ec8d5fda698261de1ff4f",
+      "packages/quay/src/init.ts": "ef058b4f8ccddf66079513ca4dc9f4a9625cb0d32d91fbf2663b79c0d7b673d4",
+      "packages/quay-native/test/default-status.test.mjs": "f9a7369d55560fd074bcdc4c95c02553a43a6ae04f79fd0865e8491b2e1fdf50",
+      ".quay/config.yml": "4b58825f94ebf791f4d6ba6ec92b052d9cc69a12e24b5508676f28dceb13c501",
+      "tasks/DIR-047.md": "edfea8d5504ffe9c4bc3f2b0d8b47c22522550a9593414456f5087f65e5a5639"
+    },
+    "ledger": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "mechanismInventory": "e813d564bccbeefe1db875d1c9abb55d63c52b639acc61134a5f1d19cc489b67"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay-native/src/store.ts",
+    "packages/quay-native/bin/quay-native.ts",
+    "packages/quay/src/init.ts",
+    "packages/quay-native/test/default-status.test.mjs",
+    ".quay/config.yml",
+    "tasks/DIR-047.md",
+    "docs/plans/M221-dir-105.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "manual-takeover"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "manual-takeover"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ],
+    "manualTakeover": true
+  },
+  "convergence": null
+}
