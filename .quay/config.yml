@@ -74,6 +74,12 @@ gates:
       script: "./plugin/scripts/tree-hygiene-check.sh"
     - name: worktree-branch-hygiene
       script: "./plugin/scripts/worktree-branch-hygiene-check.sh"
+    # M238/gap-build-evidence-manifest-missing: BuildEvidenceGate — mechanical pre-Audit
+    # manifest validation. Primary integration via execute-milestone.js direct invocation;
+    # standalone `quay gate --gate build-evidence` requires task.extra.manifest set.
+    - name: build-evidence
+      script: "./plugin/scripts/build-evidence-gate.ts"
+      cwd: "."
 
   testPass:
     - name: it0-dod-check-tests

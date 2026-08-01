@@ -492,6 +492,52 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
     return { outcome: 'needs-human', reason, phase: 'Build', verifyCacheUpdates }
   }
 
+  // ── Phase: Build-Evidence (M238/gap-build-evidence-manifest-missing) ─────────────────
+  // Deterministic post-Build evidence collection: runs build-evidence-collector.ts as a
+  // mechanical shell command wrapped in a formulaic agent helper (workflow DSL necessity),
+  // producing build-evidence-manifest.json under MILESTONE_ROOT for Audit consumption.
+  // SINGLETON and COMPOSITE paths both reach here — only the input evidence source differs
+  // (--per-phase-evidence for composite, --iteration-report for width-1).
+  phase('Build-Evidence')
+  const _evidenceCollectorWtPrefix = _useWorktree
+    ? `cd ${_isolationPlan.worktreeRel} && `
+    : ''
+  const evidenceManifestFile = `/tmp/build-evidence-manifest-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
+  const _milestoneRootCmd = `source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root ${_milestone}`
+  const collectorCmd = [
+    `${_evidenceCollectorWtPrefix}node --experimental-strip-types experiments/quay-perpetual-stream/scripts/build-evidence-collector.ts`,
+    `--build-result '${JSON.stringify(buildResult)}'`,
+    `--milestone-root $(${_milestoneRootCmd})`,
+    `--workspace .`,
+    `--milestone-id M${_milestone}`,
+    `--task-ids '${JSON.stringify(_taskIds)}'`,
+    `--composite ${_isComposite ? 'true' : 'false'}`,
+    `--attempt 1`,
+    `--session-id "$(echo $CLAUDE_CODE_SESSION_ID)"`,
+    `--output ${evidenceManifestFile}`,
+  ]
+  if (_isComposite && $a.compositeManifestFile) {
+    collectorCmd.push(`--per-phase-evidence /tmp/composite-build-evidence-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`)
+  }
+  const collectorResult = await agent(
+    `You are a MECHANICAL helper — run EXACTLY the command below and capture its stdout.
+Run:
+${collectorCmd.join(' \\\n  ')}
+Then Read the output file ${evidenceManifestFile} and confirm it is valid JSON with a "schemaVersion" field.
+Return {ok: <exit===0>, manifestPath: "${evidenceManifestFile}", manifest: <the parsed JSON>}.`,
+    { label: 'build-evidence-collector', phase: 'Build-Evidence',
+      schema: { type: 'object', required: ['ok', 'manifestPath'], properties: {
+        ok: { type: 'boolean' }, manifestPath: { type: 'string' },
+        manifest: { type: 'object', required: ['schemaVersion'], properties: {
+          schemaVersion: { type: 'string' },
+        } } } } }
+  )
+  if (!collectorResult?.ok) {
+    log(`Build-Evidence phase FAILED — collector returned ok=false.`)
+    return { outcome: 'needs-human', reason: 'build-evidence-collector-failed', phase: 'Build-Evidence', verifyCacheUpdates }
+  }
+  log(`Build evidence manifest written: ${collectorResult.manifestPath}`)
+
 // COMPOSITE-AUDIT-SHARD-PROMPT-BEGIN
 // DIR-119-D3 (M211): fenced per-shard read-only Audit prompt template. Contains ONLY: refute-first
 // AC/DoD inspection scoped to the shard's declared task IDs / AC indexes / integrated generation;
@@ -695,6 +741,8 @@ const auditResult = (_isComposite && $a.compositeManifestFile)
   : await agent(
   `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${_primaryTaskId}. FRESH CONTEXT — you have NOT seen the build.${_auditIsolationNote}
 
+MANIFEST REFERENCE (M238/gap-build-evidence-manifest-missing): the Build evidence manifest is at <MILESTONE_ROOT>/build-evidence-manifest.json where MILESTONE_ROOT is resolved via the ONE authoritative path-prefix rule (run \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root ${_milestone}\`). CONSUME IT AS AN INDEX: changedFiles, testsRun, acEvidence[] with {taskId, acIndex, disposition, evidenceClass, actualArtifact}. Entries with "producer":"build-agent" are ATTRIBUTED CLAIMS, not verified facts — independently check the referenced raw artifacts. A manifest field named "PASS" has NO authority.
+
 CHARGE (refute-first stance):
 1. AC SATISFACTION: read the task file tasks/${_primaryTaskId}.md's ## Acceptance Criteria.
    For EACH criterion, try to REFUTE that it is actually met — citing the concrete
@@ -807,6 +855,11 @@ const gates = await parallel([
   () => agent(`${_gateWt}Run worktree-branch-hygiene-check.sh. ${_typedMilestoneGateReturn} Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: _milestoneGateSchema }),
   ..._splitOrCommitGates,
+  () => agent(
+    `${_gateWt}Run node --experimental-strip-types experiments/quay-perpetual-stream/scripts/build-evidence-gate.ts --manifest $(${_milestoneRootCmd})/build-evidence-manifest.json --workspace .
+     ${_typedMilestoneGateReturn} Non-zero = manifest structurally incomplete or evidence-class incompatible -> HARD BLOCK before Audit.`,
+    { label: 'build-evidence', schema: _milestoneGateSchema },
+  ),
 ])
 
 const gatesFailed = gates.filter(Boolean).some(g => !g.ok)
