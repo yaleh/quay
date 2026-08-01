@@ -25,6 +25,8 @@ experiment/timing/*.log
 **/dist-sea/
 **/.quay/gate-events.jsonl
 **/.quay/prepare-leases/
+# DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
+.workflow-events/
 # gap-prepare-milestone-cross-generation-review-state-reset: cross-generation ProposalReview
 # checkpoint — same per-workspace gitignored runtime-state family as prepare-leases/, never
 # committed (the task's own '## Proposal'/AC/Plan stay the single authoritative content source).
