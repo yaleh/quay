@@ -2,15 +2,15 @@
   "taskId": "gap-prepare-milestone-no-size-aware-routing-B",
   "milestoneId": "M240",
   "charterFile": "experiments/quay-perpetual-stream/charters/M240-gap-prepare-milestone-no-size-aware-routing-B.md",
-  "outcome": "prepared",
+  "planFile": "docs/plans/M240-gap-prepare-milestone-no-size-aware-routing-b.md",
+  "ledgerFile": null,
+  "telemetryFile": null,
+  "mechanismInventoryFile": null,
   "hashes": {
-    "proposal": "2144fe9b61e0cb4d12270595580d1272b966323dcc48f702398213db6cf7030a",
+    "proposal": "d2e39558c0506d2e4bbea5f041085d943b329ba608b84de133c9ae5ff6d21444",
     "charter": "3da485880d96e4150efa97c56bec7445778f92a8019b9db7e14c28f7de13da5a",
-    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
-    "sources": {},
-    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
-    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
-    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+    "plan": "0a2f78a7667b603492512d9b8fb9bd4c0cf9fb15a47498e59f28bf11f3c490e7",
+    "sources": {}
   },
   "review": {
     "findings": 0
@@ -19,35 +19,31 @@
     "rounds": 1,
     "findings": 0
   },
-  "touches": [],
+  "touches": [
+    "docs/plans/M240-gap-prepare-milestone-no-size-aware-routing-b.md"
+  ],
   "provenance": {
     "proposalAuthors": [
       {
         "authorIdx": 1,
-        "sessionId": "direct-execute"
+        "sessionId": "force-accepted"
       }
     ],
     "adjudicator": {
-      "sessionId": "direct-execute"
+      "sessionId": "force-accepted"
     },
     "proposalReviewer": {
-      "sessionId": "direct-execute"
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
     },
     "planAuthor": {
-      "sessionId": "direct-execute"
+      "sessionId": "force-accepted"
     },
     "planCheckers": [
       {
         "round": 1,
-        "sessionId": "direct-execute"
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
       }
     ]
   },
-  "convergence": {
-    "highRisk": false,
-    "fullSynthesisCount": 0,
-    "deltaRounds": 0
-  },
-  "directExecute": true,
-  "directExecuteReason": "Second child of the gap-size split. Single mechanism: consume the fast-lane PrepareRoutingDecision in execute-milestone Verify. No prepare-milestone pipeline needed."
+  "convergence": null
 }
