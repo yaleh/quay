@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "epochId": "794a9707a16d",
+  "taskId": "DIR-124-A2",
+  "charterHash": "6e859a368068c4d7bfc4a7d4e09f30b089917dd1318fff208418feada967125f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "d33982798e44",
+  "bodyScopeHash": "4289ac2c0b2d87c3159ebe4b53db9630fee7db8d40bc417d8307701940c8450c",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 8,
+    "observableAgentMs": 1534161,
+    "terminalFingerprints": {
+      "f1bd2f8a59a0": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "d33982798e44",
+      "owner": "orchestrating-session",
+      "reason": "AC expanded: AC6 schema validation, AC7 pure-function determinism, AC8 mirror byte-identity, Touches fixed. Prior fingerprint cap hit on stale wiring claims now covered.",
+      "oldHash": {
+        "charterHash": "6e859a368068c4d7bfc4a7d4e09f30b089917dd1318fff208418feada967125f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "6e859a368068c4d7bfc4a7d4e09f30b089917dd1318fff208418feada967125f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785584397274
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785584397274
+}

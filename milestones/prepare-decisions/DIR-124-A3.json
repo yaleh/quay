@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-A3",
+  "charterHash": "995aa354673fc483a17669e434a51a3371d5d70bf5f63fb4c932147030899afd",
+  "scopeHash": "c8259f6452db3e4001a546e61561e008977efd8193d0fb095a1656b70131fc7a",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "split",
+  "reason": "ProposalReview: 3 independently landable mechanisms (> 2) — owner-exists rule lacks AC, deletionList JSON output lacks AC. Split as recommended.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785581969544,
+  "invalidations": []
+}

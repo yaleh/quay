@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-A1",
+  "charterHash": "7645946fd596a47f8f9f3b4f0adb2e508b51bc1076c30fb766c8ad8430ff80c5",
+  "scopeHash": "c42a7f0d17650e6972a5523878f4469aba7a318c083adf3a6b1828e7379a1fc7",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "split",
+  "reason": "ProposalReview: 3 independently landable mechanisms (> 2) — frontmatter-body drift, wiring-coverage gaps, cross-reference omissions. Split as recommended.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785581967666,
+  "invalidations": []
+}

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "recordId": "fab7a506f562",
+  "attemptId": "fab7a506f562",
+  "generationId": "fab7a506f562",
+  "admission": {
+    "key": ".::DIR-124-A2",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785584349052
+  },
+  "workspace": ".",
+  "taskId": "DIR-124-A2",
+  "milestoneId": "M243",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "6e859a368068c4d7bfc4a7d4e09f30b089917dd1318fff208418feada967125f",
+    "taskContract": "a9055caa366b2e440bb7b36cdf3c702e8f325ed4589cacb70ac1e1690855ddad",
+    "proposal": "4289ac2c0b2d87c3159ebe4b53db9630fee7db8d40bc417d8307701940c8450c",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-fingerprint-cap-exceeded",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785584369818,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "epoch-cap-admission",
+      "round": 0,
+      "startedAtMs": 1785584349052,
+      "endedAtMs": 1785584369818
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-fingerprint-cap-exceeded",
+      "recurrenceKey": "e969f3ea7c17",
+      "firstSeenGeneration": "fab7a506f562",
+      "lastSeenGeneration": "fab7a506f562"
+    }
+  ]
+}

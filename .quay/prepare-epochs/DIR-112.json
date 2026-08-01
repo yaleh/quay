@@ -5,14 +5,16 @@
   "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
   "parentEpochId": "8d8c6906164c",
-  "bodyScopeHash": null,
+  "bodyScopeHash": "1b30627b7066b8165dca6eb78972dd165c66daa84631933db3b3882f10cc8f80",
   "counters": {
-    "attempts": 0,
-    "fullReviews": 0,
-    "deltaRounds": 0,
-    "contentAgentDispatches": 0,
-    "observableAgentMs": 0,
-    "terminalFingerprints": {},
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 10,
+    "observableAgentMs": 4422725,
+    "terminalFingerprints": {
+      "e3b22c8ec07f": 1
+    },
     "tokensObserved": null
   },
   "overrides": [],

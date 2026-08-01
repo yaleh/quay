@@ -1,26 +1,36 @@
 {
   "mechanisms": [
     {
-      "id": "m-parallelize-isolated-blocks",
-      "owner": "DIR-112 implementer (M222)",
-      "proofSurface": "packages/quay/test/cli.test.mjs:run()/Promise.all()",
+      "id": "async-run-execfile",
+      "owner": "packages/quay/test/cli.test.mjs:run()",
+      "proofSurface": "packages/quay/test/cli.test.mjs:143-157",
       "dependsOn": [],
-      "independentlyShippable": true,
-      "rationale": "The core atomic behavior contract of the Proposal: convert run() from execFileSync to a promisified execFile preserving {status,stdout,stderr} and err.status??1 (never reject), wrap the 7 isolated own-workspace blocks (13/17/18/19/20/21/22) in async functions, Promise.all ONLY that set, and keep every shared-resource block (1-7, 8, 9, 10, 11, 12, 14, 15, 16, 23, 24, 25) strictly serial/async-uniform and awaited in existing order — excluding the config.yml write/restore pairs (419/449, 585/645, 701/781, 807/841), the 4b/5b status mutations (:295-301, :337-350), block 9's shared-store HTTP server, and block 25's allTasks.length===2 sanity. Delivers AC3 (>=40% wall-clock), AC5 (falsifiable seriality diff as the concurrency-safety evidence), AC6. Independently shippable as a single control-flow edit verified green by the full suite (docs/plans/M222-dir-112.md stages it RED→GREEN)."
+      "independentlyShippable": false,
+      "rationale": "Converts sync execFileSync subprocess dispatch to async execFile with manual Promise wrapper (close + error event handlers). Cannot ship independently because call-site signatures must change from const r = run(...) to const r = await run(...) — the return type changes from plain object to Promise. Must ship atomically with call-site await changes. This mechanism was described in the Proposal and Plan but was NOT committed (c2864b6b retains sync execFileSync)."
     },
     {
-      "id": "m-output-prefixing",
-      "owner": "DIR-112 implementer (M222)",
-      "proofSurface": "packages/quay/test/cli.test.mjs:assert()/prefix-helper",
+      "id": "block-extraction-three-phase",
+      "owner": "packages/quay/test/cli.test.mjs:main() + block13-block25",
+      "proofSurface": "packages/quay/test/cli.test.mjs:159-1735",
+      "dependsOn": [
+        "async-run-execfile"
+      ],
+      "independentlyShippable": true,
+      "rationale": "Extracts 13 blocks (block13-block25) into async functions, groups 7 own-workspace blocks (13,17,18,19,20,21,22) into Promise.all, and organizes remaining shared-resource blocks into serial phases. Ships independent structural value even without async run(): (a) code organization — each block is a named function with clear boundaries; (b) the concurrent-set membership is structurally proven (grep for mkdtempSync inside Promise.all blocks confirms own-workspace isolation); (c) the three-phase skeleton sets up for incremental concurrency fixes (e.g., converting seeding calls to async runNative). Actually committed in c2864b6b."
+    },
+    {
+      "id": "makeassert-prefixing",
+      "owner": "packages/quay/test/cli.test.mjs:makeAssert()",
+      "proofSurface": "packages/quay/test/cli.test.mjs:119-129",
       "dependsOn": [],
       "independentlyShippable": true,
-      "rationale": "Per-block output prefix (e.g. [qx45] PASS/FAIL) so interleaved concurrent output stays attributable to its origin block. Delivers AC4 via a deliberately-broken-assertion negative control run once. Independent of m-parallelize-isolated-blocks: it can ship alone (serial prefixing still gives attribution value) with a complete safety contract (output-only diff) and independent diagnostic value; shares the file but a distinct symbol, so the proofSurface does not collide."
+      "rationale": "makeAssert(tag) factory wraps the existing assert() logic with a block-level tag prefix (e.g., [search] PASS: ...). Ships independent debugging value: a deliberately-broken assertion in a concurrent block names its origin without requiring a serial re-run (AC-4). The failures counter safety is guaranteed by JavaScript event-loop serialization of synchronous assert() calls after await. Already committed in c2864b6b."
     }
   ],
   "inventory": {
     "ok": true,
     "count": 2,
-    "inventoryHash": "mi-6bfa5dce",
+    "inventoryHash": "mi-2251474c",
     "mechanismCount": 2
   },
   "source": "typed"
