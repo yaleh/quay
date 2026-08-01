@@ -131,6 +131,43 @@ function backtickIdentifiers(sentence) {
 }
 
 // ── extractMechanismClaims — find every wiring-verb sentence naming >=2 code identifiers. ────────
+// RC1 (2026-08-01, over-split root cause 1): collapse claims that are the SAME mechanism operation
+// repeated across an enumerated boundary/stage list. DIR-124-A1b's "14 mechanisms" were actually the
+// same `_emitStageEvent` instrumentation applied at 8 stage boundaries — each boundary's wiring
+// sentence ("call `_emitStageEvent` at `Prepared`", "…at `Build`", …) named the SAME core operation
+// plus ONE varying stage token, so the raw extractor counted one claim per boundary and the
+// mechanism count over-reported. The rule "same pattern repeated N times = 1 mechanism" means:
+// claims whose identifier sets are identical after removing STAGE_BOUNDARY_TOKENS (the workflow
+// phase vocabulary — Verify/Prepared/Build/…/Receipt) collapse to ONE representative claim, keeping
+// the union of their sentences for evidence but only ONE mechanism-claim entry.
+const STAGE_BOUNDARY_TOKENS = new Set([
+  // execute-milestone.js phase boundaries (workflow-event-schema.mjs VALID_STAGES)
+  "Verify", "Prepared", "Build", "Build-Evidence", "Audit", "Gate", "Reconcile", "Land",
+  // prepare-milestone.js phase boundaries
+  "Admission", "Preflight", "ProposalAuthors", "Adjudicate", "ProposalReview", "PlanAuthor",
+  "PlanCheck", "Receipt",
+]);
+// Matches a stage-boundary word ANYWHERE inside an identifier token — e.g. `phase('Build-Evidence')`,
+// `emit-event-<stage>-<kind>`, `_emitStageEvent` (contains "Stage"), `stageIndex`. A1b's boundary
+// claims embed the varying stage name inside the identifier (not as a bare backtick token), so the
+// exact-match Set above alone would miss them. Stripping stage words means two claims that differ
+// ONLY in which boundary they instrument collapse to the same pattern key.
+const STAGE_BOUNDARY_WORD_RE =
+  /(?:^|[^A-Za-z])(?:verify|prepared|build|audit|gate|reconcile|land|admission|preflight|proposalauthors|adjudicate|proposalreview|planauthor|plancheck|receipt|stage)(?:[^A-Za-z]|$)/i;
+function _stageStripped(id) {
+  return id.replace(STAGE_BOUNDARY_WORD_RE, "");
+}
+function _patternKey(identifiers) {
+  // The mechanism pattern key = the identifier set minus stage-boundary tokens AND stage words
+  // embedded in identifiers, sorted+joined. Two claims that instrument the same operation at
+  // different boundaries collapse to the same key.
+  return identifiers
+    .filter((id) => !STAGE_BOUNDARY_TOKENS.has(id))
+    .map((id) => _stageStripped(id.trim()))
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
 export function extractMechanismClaims(sectionText) {
   if (!sectionText) return [];
   const claims = [];
@@ -141,7 +178,22 @@ export function extractMechanismClaims(sectionText) {
       claims.push({ sentence, identifiers });
     }
   }
-  return claims;
+  // RC1: collapse same-pattern-repeated claims. Group by the stage-stripped pattern key; keep the
+  // first claim per key (representative) and merge the sentences of the collapsed group into it for
+  // evidence completeness. Order preserved (first-seen).
+  const byKey = new Map();
+  for (const c of claims) {
+    const key = _patternKey(c.identifiers);
+    if (key === "") continue; // all identifiers were stage tokens — not a real mechanism claim
+    if (!byKey.has(key)) byKey.set(key, { ...c, sentence: c.sentence });
+    else {
+      // merge sentences so the retained claim's evidence spans all repeated instances
+      const existing = byKey.get(key);
+      existing.sentence += " " + c.sentence;
+      // identifiers remain the representative's — the pattern key is what matters
+    }
+  }
+  return [...byKey.values()];
 }
 
 // ── Mechanism-subsection narrowing (gap-wiring-coverage-scope-narrowing, P0 #60) ────────────────

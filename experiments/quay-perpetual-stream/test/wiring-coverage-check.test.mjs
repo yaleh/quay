@@ -54,17 +54,21 @@ test("extractMechanismClaims: multiple independent claims in one section", () =>
 // only splitter, hiding real per-bullet claims from independent AC coverage. Confirmed real
 // recurrence: M198/DIR-119-D1 (26 blocking findings) and M199/DIR-126-A (13 blocking findings),
 // same root cause, neither content. ──
-test("extractMechanismClaims: a dense, un-blank-lined bullet list splits into one claim PER bullet, not one merged claim", () => {
+test("extractMechanismClaims: a dense, un-blank-lined bullet list collapses same-pattern-repeated bullets to ONE mechanism claim (RC1)", () => {
+  // RC1 (2026-08-01, over-split root cause 1): "same pattern repeated N times = 1 mechanism".
+  // The three bullets each invoke the SAME `--release` operation at a different prepare-phase
+  // boundary (ProposalAuthors / Adjudicate / PlanCheck). The stage names are enumeration tokens,
+  // not distinct mechanisms — so after stage-stripping they share ONE pattern key and collapse to a
+  // single representative claim (the union of the bullets' sentences kept as evidence).
   const text =
     "Every terminal return releases the lease:\n" +
     "- `ProposalAuthors` invokes `--release` on exit.\n" +
     "- `Adjudicate` invokes `--release` on exit.\n" +
     "- `PlanCheck` invokes `--release` on exit.\n";
   const claims = extractMechanismClaims(text);
-  assert.equal(claims.length, 3, "each bullet is its own claim, not one 3-identifier merged claim");
-  assert.deepEqual(claims[0].identifiers.sort(), ["--release", "ProposalAuthors"]);
-  assert.deepEqual(claims[1].identifiers.sort(), ["--release", "Adjudicate"]);
-  assert.deepEqual(claims[2].identifiers.sort(), ["--release", "PlanCheck"]);
+  assert.equal(claims.length, 1, "the three stage-boundary `--release` bullets collapse to ONE mechanism claim (same pattern repeated 3 times)");
+  assert.ok(claims[0].identifiers.includes("--release"), "the retained claim names the operation");
+  assert.ok(claims[0].sentence.includes("ProposalAuthors") && claims[0].sentence.includes("Adjudicate") && claims[0].sentence.includes("PlanCheck"), "the retained claim's sentence spans all repeated instances for evidence");
 });
 
 test("extractMechanismClaims: a continuation line under a bullet stays part of that bullet's own claim", () => {
