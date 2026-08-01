@@ -441,6 +441,21 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
                     'timeoutMs' field in that same workspace gates config is a lower-precedence
                     workspace-data alternative — a TIMEOUT failure's reason names both knobs
                     ("raise the gates config's timeoutMs / --timeout").
+
+// Environment contract — when the acceptance gate spawns a command:
+  The runner spawns `sh -c` (a clean shell — no .bashrc/.profile is sourced).
+  PATH is inherited from the invoking process, not a fixed system default.
+  Override the environment with a per-provider `acceptance_env` file:
+    acceptance_env  DIR-103-C: per-provider config key in .quay/config.yml's provider
+                    block — a path to an env file that is dot-sourced before every
+                    acceptance command dispatched through that provider. Relative paths
+                    resolve against the workspace root. If the configured file does not
+                    exist, the runner fails closed BEFORE executing the acceptance
+                    command. The QUAY_ACCEPTANCE_ENV env var overrides the config key
+                    when pre-set (mirrors the QUAY_ACCEPTANCE_CWD / QUAY_ACCEPTANCE_
+                    TIMEOUT_MS explicit-override-wins precedence — a pre-set env var is
+                    never clobbered).
+
   --dry-run         DIR-103-A: execute task.extra.acceptance with the same cwd/timeout/env as a
                     real gate run, print stdout/stderr + exit code, but do NOT append a GateEvent
                     or mutate task status. Short form: -n. Only valid with the default
