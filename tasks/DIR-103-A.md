@@ -14,6 +14,28 @@ extra:
 ---
 **type:** execution
 
+
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck round findings):**
+
+1. **`parseFlags` greedily consumes a flag's value** — `quay gate --dry-run <task-id>`
+   (flag-first) parses to `{flags:{dry-run:"<task-id>"}, id:undefined}` → the gate
+   branch's `if (!id)` emits the "missing required <task-id>" usage error. Only
+   id-first `gate <id> --dry-run` works today. The implementation MUST make `--dry-run`/
+   `-n` a **non-value-taking boolean flag** (a known-boolean-flags set in `parseFlags`),
+   not just a `-n`→`--dry-run` token rewrite — otherwise every test block and the
+   real-dispatch proof use a form the CLI cannot parse.
+2. **`quay gate --help` routes to a generic stub** (`printHelp("gate")`'s else-branch,
+   quay.ts:463; dispatch :493) that prints only "Usage: quay gate [...] / Run
+   `quay --help`...". The detailed usage line (:313) and flag-description block
+   (:385-397) render only under top-level `quay --help`. AC4 (`gate --help` lists
+   `--dry-run`) therefore requires adding a gate-specific flag-list rendering to
+   `printHelp`'s gate branch (or a help entry in the else-stub).
+3. **CLI binary path is `packages/quay/bin/quay.ts`**, NOT `quay.js` — no
+   `packages/quay/bin/quay.js` exists (only the gitignored `dist/quay.js` build
+   artifact, built by `packages/quay/scripts/build-dist.mjs`, package-relative — NOT a
+   repo-root `scripts/build-dist.mjs`). Test-suite convention: `node
+   packages/quay/bin/quay.ts ...` (acceptance.test.mjs:29, gate.test.mjs:29).
+
 ## Proposal
 
 Add `--dry-run` to `quay gate <task-id>` (NOT `quay run` — the original Proposal's
@@ -116,23 +138,3 @@ Standard inherited-core DoD clauses apply.
 - `packages/quay/src/gate/acceptance-runner.ts`
 - `packages/quay/test/acceptance.test.mjs`
 - `docs/plans/M223-dir-103-a.md`
-**Grounded facts for Plan authors (2026-08-01, from real PlanCheck round findings):**
-
-1. **`parseFlags` greedily consumes a flag's value** — `quay gate --dry-run <task-id>`
-   (flag-first) parses to `{flags:{dry-run:"<task-id>"}, id:undefined}` → the gate
-   branch's `if (!id)` emits the "missing required <task-id>" usage error. Only
-   id-first `gate <id> --dry-run` works today. The implementation MUST make `--dry-run`/
-   `-n` a **non-value-taking boolean flag** (a known-boolean-flags set in `parseFlags`),
-   not just a `-n`→`--dry-run` token rewrite — otherwise every test block and the
-   real-dispatch proof use a form the CLI cannot parse.
-2. **`quay gate --help` routes to a generic stub** (`printHelp("gate")`'s else-branch,
-   quay.ts:463; dispatch :493) that prints only "Usage: quay gate [...] / Run
-   `quay --help`...". The detailed usage line (:313) and flag-description block
-   (:385-397) render only under top-level `quay --help`. AC4 (`gate --help` lists
-   `--dry-run`) therefore requires adding a gate-specific flag-list rendering to
-   `printHelp`'s gate branch (or a help entry in the else-stub).
-3. **CLI binary path is `packages/quay/bin/quay.ts`**, NOT `quay.js` — no
-   `packages/quay/bin/quay.js` exists (only the gitignored `dist/quay.js` build
-   artifact, built by `packages/quay/scripts/build-dist.mjs`, package-relative — NOT a
-   repo-root `scripts/build-dist.mjs`). Test-suite convention: `node
-   packages/quay/bin/quay.ts ...` (acceptance.test.mjs:29, gate.test.mjs:29).
