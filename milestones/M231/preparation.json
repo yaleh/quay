@@ -1,0 +1,56 @@
+{
+  "taskId": "DIR-099-C",
+  "milestoneId": "M231",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M231-dir-099-c.md",
+  "planFile": "docs/plans/M231-dir-099-c.md",
+  "ledgerFile": "milestones/M231/proposal-ledger.json",
+  "telemetryFile": null,
+  "mechanismInventoryFile": "milestones/M231/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "0134650500cfd53e0aa2748bffa92e1fbc8924028830e35cf6f800be35913a4e",
+    "charter": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+    "plan": "0ad0ddd3d5c1fb71cbe4230fbaa17f5a2d3adbf95deac3cb5116786488c1c8e2",
+    "sources": {
+      "packages/quay/src/mcp-handlers.ts": "80a84a289940304d7f35df992df93c93098aa26279ebcee40b446d0df8f94856"
+    },
+    "ledger": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "mechanismInventory": "e813d564bccbeefe1db875d1c9abb55d63c52b639acc61134a5f1d19cc489b67"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/src/mcp-handlers.ts",
+    "packages/quay/test/mcp-config-validate.test.mjs",
+    "docs/plans/M231-dir-099-c.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "manual-takeover"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "manual-takeover"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ],
+    "manualTakeover": true
+  },
+  "convergence": null
+}

@@ -70,12 +70,11 @@ duplicated validation logic). `ok`/`issues` flow into structuredContent.
 
 ## Plan
 
-Resolved via milestone M231 (human-steered). Checked Plan: `docs/plans/M231-dir-099-c.md`
-(DIR-117-B prepared-gate artifact) — 7 ordered stages (RED real-subprocess MCP test →
-`registerConfigHandlers` + `config_validate` tool in mcp-handlers.ts → GREEN parity verify →
-schema/no-second-implementation grep → >=80% coverage → full-suite → post-Land audit), all 5
-AC items mapped, base revision `f8ecdf21`.
-
+Resolved via milestone M231. Checked Plan: `docs/plans/M231-dir-099-c.md` (base revision
+`933cc02d`, 2026-08-01) — manually authored after 4 prepare-milestone attempts exhausted
+the epoch full-review cap; the task body (Proposal contradictions fixed) is authoritative.
+4 mechanical stages (RED → registerConfigHandlers wiring → GREEN/parity → real-callsite
+evidence + audit), all 6 AC indices mapped.
 ## Finding
 
 The original DIR-099 Proposal claimed the MCP surface ("Accepts the same inputs as the
