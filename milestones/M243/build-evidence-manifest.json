@@ -11,7 +11,7 @@
   },
   "buildAdmissionRef": null,
   "baseCommit": "0acba760c7b132edcecb1f246d81a8cbaa615fd5",
-  "candidateCommit": "d1b63d2f",
+  "candidateCommit": "e768c6c5",
   "changedFiles": [
     {
       "path": ".agents/skills/quay-directive",
@@ -1100,32 +1100,47 @@
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/events.jsonl",
-      "additions": 6,
-      "deletions": 0
-    },
-    {
-      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/expectations.json",
-      "additions": 1,
-      "deletions": 0
-    },
-    {
-      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/events.jsonl",
       "additions": 7,
       "deletions": 0
     },
     {
-      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/expectations.json",
-      "additions": 1,
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/expectations.json",
+      "additions": 65,
       "deletions": 0
     },
     {
-      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/events.jsonl",
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/events.jsonl",
       "additions": 11,
       "deletions": 0
     },
     {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/expectations.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/events.jsonl",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/expectations.json",
-      "additions": 119,
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
@@ -1135,37 +1150,57 @@
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/concurrent-partial-survivor/expectations.json",
-      "additions": 1,
+      "additions": 91,
       "deletions": 0
     },
     {
-      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/events.jsonl",
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/concurrent-partial-survivor/meta.json",
       "additions": 6,
       "deletions": 0
     },
     {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/events.jsonl",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/expectations.json",
-      "additions": 1,
+      "additions": 52,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success-tampered/events.jsonl",
-      "additions": 17,
+      "additions": 16,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success-tampered/expectations.json",
-      "additions": 1,
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success-tampered/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success/events.jsonl",
-      "additions": 17,
+      "additions": 16,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success/expectations.json",
-      "additions": 135,
+      "additions": 195,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success/meta.json",
+      "additions": 27,
       "deletions": 0
     },
     {
@@ -1175,12 +1210,17 @@
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-defect-as-normative/expectations.json",
-      "additions": 1,
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-defect-as-normative/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/README.md",
-      "additions": 21,
+      "additions": 17,
       "deletions": 0
     },
     {
@@ -1190,42 +1230,62 @@
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/expectations.json",
-      "additions": 1,
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/meta.json",
+      "additions": 7,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/README.md",
-      "additions": 20,
+      "additions": 16,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/events.jsonl",
-      "additions": 9,
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/expectations.json",
-      "additions": 1,
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/meta.json",
+      "additions": 7,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/prepared-failure/events.jsonl",
-      "additions": 9,
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/prepared-failure/expectations.json",
-      "additions": 1,
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/prepared-failure/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/verify-failure/events.jsonl",
-      "additions": 2,
+      "additions": 3,
       "deletions": 0
     },
     {
       "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/verify-failure/expectations.json",
-      "additions": 1,
+      "additions": 96,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/verify-failure/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
@@ -2620,7 +2680,17 @@
     },
     {
       "path": "milestones/M243/absorb-entry.md",
-      "additions": 22,
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/audits/iteration-0-acceptance-audit.md",
+      "additions": 139,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/build-evidence-manifest.json",
+      "additions": 4849,
       "deletions": 0
     },
     {
@@ -3560,32 +3630,47 @@
     },
     {
       "path": "plugin/fixtures/workflow-replay/audit-refuted/events.jsonl",
-      "additions": 6,
-      "deletions": 0
-    },
-    {
-      "path": "plugin/fixtures/workflow-replay/audit-refuted/expectations.json",
-      "additions": 1,
-      "deletions": 0
-    },
-    {
-      "path": "plugin/fixtures/workflow-replay/cache-resume/events.jsonl",
       "additions": 7,
       "deletions": 0
     },
     {
-      "path": "plugin/fixtures/workflow-replay/cache-resume/expectations.json",
-      "additions": 1,
+      "path": "plugin/fixtures/workflow-replay/audit-refuted/expectations.json",
+      "additions": 65,
       "deletions": 0
     },
     {
-      "path": "plugin/fixtures/workflow-replay/composite-success/events.jsonl",
+      "path": "plugin/fixtures/workflow-replay/audit-refuted/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/cache-resume/events.jsonl",
       "additions": 11,
       "deletions": 0
     },
     {
+      "path": "plugin/fixtures/workflow-replay/cache-resume/expectations.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/cache-resume/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/composite-success/events.jsonl",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
       "path": "plugin/fixtures/workflow-replay/composite-success/expectations.json",
-      "additions": 119,
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/composite-success/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
@@ -3595,37 +3680,57 @@
     },
     {
       "path": "plugin/fixtures/workflow-replay/concurrent-partial-survivor/expectations.json",
-      "additions": 1,
+      "additions": 91,
       "deletions": 0
     },
     {
-      "path": "plugin/fixtures/workflow-replay/gate-failure/events.jsonl",
+      "path": "plugin/fixtures/workflow-replay/concurrent-partial-survivor/meta.json",
       "additions": 6,
       "deletions": 0
     },
     {
+      "path": "plugin/fixtures/workflow-replay/gate-failure/events.jsonl",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
       "path": "plugin/fixtures/workflow-replay/gate-failure/expectations.json",
-      "additions": 1,
+      "additions": 52,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/gate-failure/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/legacy-singleton-success-tampered/events.jsonl",
-      "additions": 17,
+      "additions": 16,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/legacy-singleton-success-tampered/expectations.json",
-      "additions": 1,
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success-tampered/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/legacy-singleton-success/events.jsonl",
-      "additions": 17,
+      "additions": 16,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/legacy-singleton-success/expectations.json",
-      "additions": 135,
+      "additions": 195,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success/meta.json",
+      "additions": 27,
       "deletions": 0
     },
     {
@@ -3635,12 +3740,17 @@
     },
     {
       "path": "plugin/fixtures/workflow-replay/m192-defect-as-normative/expectations.json",
-      "additions": 1,
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-defect-as-normative/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/m192-null-build/README.md",
-      "additions": 21,
+      "additions": 17,
       "deletions": 0
     },
     {
@@ -3650,42 +3760,62 @@
     },
     {
       "path": "plugin/fixtures/workflow-replay/m192-null-build/expectations.json",
-      "additions": 1,
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-null-build/meta.json",
+      "additions": 7,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/README.md",
-      "additions": 20,
+      "additions": 16,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/events.jsonl",
-      "additions": 9,
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/expectations.json",
-      "additions": 1,
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/meta.json",
+      "additions": 7,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/prepared-failure/events.jsonl",
-      "additions": 9,
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/prepared-failure/expectations.json",
-      "additions": 1,
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/prepared-failure/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/verify-failure/events.jsonl",
-      "additions": 2,
+      "additions": 3,
       "deletions": 0
     },
     {
       "path": "plugin/fixtures/workflow-replay/verify-failure/expectations.json",
-      "additions": 1,
+      "additions": 96,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/verify-failure/meta.json",
+      "additions": 6,
       "deletions": 0
     },
     {
@@ -3880,7 +4010,7 @@
     },
     {
       "path": "plugin/scripts/workflow-replay.ts",
-      "additions": 345,
+      "additions": 361,
       "deletions": 0
     },
     {
@@ -4155,7 +4285,7 @@
     },
     {
       "path": "plugin/test/workflow-replay.test.mjs",
-      "additions": 221,
+      "additions": 226,
       "deletions": 0
     },
     {
@@ -4844,6 +4974,11 @@
       "path": "iterations/iteration-0.md",
       "hash": "121b7547d616f2f2159ecb0513f02735775b50a3d6b50d27a9d33fd85579d136",
       "kind": "iteration-report"
+    },
+    {
+      "path": "audits/iteration-0-acceptance-audit.md",
+      "hash": "8d54a441a1996addbabb2eb54c32f7bc23347deea7e371c56d4913236f39984c",
+      "kind": "audit-artifact"
     }
   ]
 }

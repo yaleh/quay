@@ -43,28 +43,26 @@
     {
       "id": "m195-004",
       "description": "No Build after Prepared rejection",
-      "classification": "known-defect",
-      "internalCategory": "compatibility-only",
+      "classification": "normative",
+      "internalCategory": "normative",
       "check": {
         "predicate": "noBuildAfterPreparedFailure",
         "args": {}
       },
-      "expected": true,
-      "mappingNote": "compatibility-only -> known-defect: pre-reorder baseline for DIR-124-C"
+      "expected": true
     },
     {
       "id": "m195-005",
       "description": "No Land after Prepared rejection",
-      "classification": "known-defect",
-      "internalCategory": "compatibility-only",
+      "classification": "normative",
+      "internalCategory": "normative",
       "check": {
         "predicate": "stageSkipped",
         "args": {
           "stage": "land"
         }
       },
-      "expected": true,
-      "mappingNote": "compatibility-only -> known-defect: pre-reorder baseline for DIR-124-C"
+      "expected": true
     }
   ]
 }
