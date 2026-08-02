@@ -28,11 +28,15 @@
 // Run:
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
-//   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]
+//   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ)
+//   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (explicit persist)
 //
-// Storage: raw events append to <root>/.workflow-events/<runId>.jsonl (gitignored). --report
-// additionally writes a committed snapshot to <root>/milestones/fast-mode-telemetry/<YYYY-MM-DD>.json
-// so the roll-up the target is judged against survives the raw-events gitignore.
+// Storage: raw events append to <root>/.workflow-events/<runId>.jsonl (gitignored). The committed
+// roll-up under <root>/milestones/fast-mode-telemetry/<YYYY-MM-DD>.json is written ONLY by the
+// explicit --snapshot subcommand (task end / Land / day-end moments). --report is PURE READ — it
+// must never write a file, so an observation poll (outer Monitor, every 60s) cannot dirty the
+// working tree and deadlock restart-readiness-check.sh. The roll-up is the only persistent
+// per-task-duration history, so it stays git-tracked (gap-telemetry-report-writes-and-deadlocks-readiness).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -355,6 +359,10 @@ export function writeAggregateReport(report, root, dateStr = new Date().toISOStr
 
 // ── Human-readable report ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Human-readable report. aggFile is only shown when it was actually written (i.e. from
+ * --snapshot). --report passes null — it is pure-read and must NOT claim a write.
+ */
 function printHumanReport(report, aggFile) {
   console.log(`fast-mode telemetry report (generated ${report.generatedAt})`);
   if (report.since) console.log(`since: ${report.since}`);
@@ -373,7 +381,7 @@ function printHumanReport(report, aggFile) {
     console.log(`in-progress (start without end): ${report.inProgress.length}`);
     for (const p of report.inProgress) console.log(`  ${p.taskId} (runId ${p.runId})`);
   }
-  console.log(`aggregate written: ${aggFile}`);
+  if (aggFile) console.log(`aggregate snapshot written: ${aggFile}`);
 }
 
 // ── CLI entry point ──────────────────────────────────────────────────────────────────────────────────
@@ -383,12 +391,34 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
-  node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]`;
+  node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
+  node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)`;
 
 function getArgValue(args, name) {
   const idx = args.indexOf(name);
   if (idx === -1) return undefined;
   return args[idx + 1];
+}
+
+/**
+ * Read every event and build the report-with-meta shape. Shared by --report and --snapshot so
+ * both paths compute the SAME object from the SAME events — the persisted snapshot cannot diverge
+ * from a same-moment --report (AC4). PURE READ: never writes any file. Throws on a bad --since
+ * or an unreadable event store.
+ * @param {string} root
+ * @param {string|null} sinceArg
+ * @returns {Promise<{report: object}>}
+ */
+async function loadAndAggregate(root, sinceArg) {
+  let sinceMs = null;
+  if (sinceArg) {
+    sinceMs = Date.parse(sinceArg);
+    if (Number.isNaN(sinceMs)) throw new Error(`invalid --since "${sinceArg}" (expected an ISO timestamp)`);
+  }
+  const events = [];
+  for await (const e of readAllEvents(root)) events.push(e);
+  const report = aggregate(events, { sinceMs });
+  return { report: { generatedAt: new Date().toISOString(), since: sinceArg ?? null, ...report } };
 }
 
 /**
@@ -456,26 +486,40 @@ export async function main(argv) {
     return 0;
   }
 
-  // --report
+  // --report — PURE READ (gap-telemetry-report-writes-and-deadlocks-readiness). Computes the
+  // roll-up from .workflow-events/*.jsonl and prints it. NEVER writes the committed aggregate —
+  // persisting is the explicit --snapshot subcommand's job. An observation poll (outer Monitor,
+  // every 60s) therefore cannot dirty the working tree and deadlock restart-readiness-check.sh.
   if (args.includes("--report")) {
-    let sinceMs = null;
     const sinceArg = getArgValue(args, "--since");
-    if (sinceArg) {
-      sinceMs = Date.parse(sinceArg);
-      if (Number.isNaN(sinceMs)) {
-        console.error(`fast-mode-telemetry: invalid --since "${sinceArg}" (expected an ISO timestamp)`);
-        return 1;
-      }
-    }
-    const events = [];
+    let reportWithMeta;
     try {
-      for await (const e of readAllEvents(root)) events.push(e);
+      ({ report: reportWithMeta } = await loadAndAggregate(root, sinceArg));
     } catch (e) {
-      console.error(`fast-mode-telemetry: failed to read .workflow-events: ${e.message}`);
+      console.error(`fast-mode-telemetry: ${e.message}`);
       return 1;
     }
-    const report = aggregate(events, { sinceMs });
-    const reportWithMeta = { generatedAt: new Date().toISOString(), since: sinceArg ?? null, ...report };
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(reportWithMeta, null, 2));
+    } else {
+      printHumanReport(reportWithMeta, null);
+    }
+    return 0;
+  }
+
+  // --snapshot — the ONLY path that writes the committed aggregate, called at task end / Land /
+  // day-end moments. Computes the SAME report --report would, then persists it to
+  // milestones/fast-mode-telemetry/<date>.json and prints it (so --snapshot --json stdout is
+  // byte-identical to the file it wrote — AC4's no-divergence guarantee).
+  if (args.includes("--snapshot")) {
+    const sinceArg = getArgValue(args, "--since");
+    let reportWithMeta;
+    try {
+      ({ report: reportWithMeta } = await loadAndAggregate(root, sinceArg));
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
     let aggFile;
     try {
       aggFile = writeAggregateReport(reportWithMeta, root);

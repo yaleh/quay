@@ -1,6 +1,9 @@
 // @test-group engine
 // fast-mode-telemetry.test.mjs — gap-fast-mode-no-telemetry: RED/GREEN tests for the fast-mode
-// metering CLI (fast-mode-telemetry.ts, byte-identical mirrors). Covers AC2–AC5 and AC10 (DoD).
+// metering CLI (fast-mode-telemetry.ts, byte-identical mirrors). Covers AC2–AC5 and AC10 (DoD),
+// plus the --report write-split regression (gap-telemetry-report-writes-and-deadlocks-readiness):
+// AC1 --report is pure-read, AC2 --snapshot is the explicit persist, AC3 20x --report leaves
+// git status clean, AC4 --snapshot stdout is byte-identical to the file it wrote.
 //
 // Run:
 //   scripts/test.sh plugin/test/fast-mode-telemetry.test.mjs
@@ -11,6 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -60,6 +64,15 @@ function readEventsJsonl(root, runId) {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+function md5(str) {
+  return createHash("md5").update(str).digest("hex");
+}
+
+function gitCmd(tmpRoot, ...args) {
+  const res = spawnSync("git", ["-C", tmpRoot, ...args], { encoding: "utf8" });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
 async function importCli() {
@@ -258,17 +271,52 @@ test("AC10 — a start with no end is surfaced as in-progress, not dropped", asy
   }
 });
 
-// ── AC6: committed aggregate ─────────────────────────────────────────────────────────────────────────
+// ── AC1/AC2/AC3/AC4: --report pure-read, --snapshot explicit persist ─────────────────────────────────
+// gap-telemetry-report-writes-and-deadlocks-readiness: --report used to rewrite the TRACKED aggregate
+// file on every call, so any 60s observation poll kept the tree dirty and restart-readiness-check.sh's
+// "working tree clean" hard check could never pass. --report must be pure-read; persisting is the
+// explicit --snapshot subcommand.
 
-test("AC6 — --report writes the committed aggregate under milestones/fast-mode-telemetry/", async () => {
+test("AC1 — --report is pure-read: never creates the aggregate; never changes its md5", async () => {
   const tmp = makeTmpWorkspace();
   try {
     const s = runCli(tmp, "--task-start", "--taskId", "gap-test-1");
     const runId = s.stdout.trim();
     runCli(tmp, "--task-end", "--taskId", "gap-test-1", "--runId", runId, "--outcome", "done");
 
-    const rep = runCli(tmp, "--report");
-    assert.equal(rep.status, 0, rep.stderr);
+    // Before any --snapshot, --report must NOT create the aggregate file.
+    const rep1 = runCli(tmp, "--report");
+    assert.equal(rep1.status, 0, rep1.stderr);
+    const date = new Date().toISOString().slice(0, 10);
+    const aggFile = path.join(tmp, "milestones", "fast-mode-telemetry", `${date}.json`);
+    assert.ok(!fs.existsSync(aggFile), "--report must not create the aggregate file (pure read)");
+
+    // Persist once via --snapshot, capture md5, then hammer --report: md5 must stay put.
+    const snap = runCli(tmp, "--snapshot");
+    assert.equal(snap.status, 0, snap.stderr);
+    assert.ok(fs.existsSync(aggFile), "--snapshot must create the aggregate file");
+    const before = md5(fs.readFileSync(aggFile, "utf8"));
+    for (let i = 0; i < 5; i++) {
+      const r = runCli(tmp, "--report");
+      assert.equal(r.status, 0, r.stderr);
+    }
+    const after = md5(fs.readFileSync(aggFile, "utf8"));
+    assert.equal(after, before, "--report must not change the aggregate file's md5 (pure read)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC2 — --snapshot is the explicit persist: it writes the aggregate under milestones/fast-mode-telemetry/", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const s = runCli(tmp, "--task-start", "--taskId", "gap-test-1");
+    const runId = s.stdout.trim();
+    runCli(tmp, "--task-end", "--taskId", "gap-test-1", "--runId", runId, "--outcome", "done");
+
+    const snap = runCli(tmp, "--snapshot");
+    assert.equal(snap.status, 0, snap.stderr);
+    assert.match(snap.stdout, /aggregate snapshot written/, "--snapshot human output must report the written file");
 
     const date = new Date().toISOString().slice(0, 10);
     const aggFile = path.join(tmp, "milestones", "fast-mode-telemetry", `${date}.json`);
@@ -276,6 +324,67 @@ test("AC6 — --report writes the committed aggregate under milestones/fast-mode
     const agg = JSON.parse(fs.readFileSync(aggFile, "utf8"));
     assert.equal(agg.tasks.length, 1);
     assert.equal(agg.tasks[0].taskId, "gap-test-1");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC3 — 20 consecutive --report calls leave git status --porcelain empty", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // A real git repo so the "working tree stays clean" claim is meaningful. Mirror the real
+    // repo: .workflow-events/ is gitignored, the aggregate is tracked.
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+
+    const s = runCli(tmp, "--task-start", "--taskId", "gap-test-1");
+    const runId = s.stdout.trim();
+    runCli(tmp, "--task-end", "--taskId", "gap-test-1", "--runId", runId, "--outcome", "done");
+    const snap = runCli(tmp, "--snapshot");
+    assert.equal(snap.status, 0, snap.stderr);
+
+    const add = gitCmd(tmp, "add", "-A");
+    assert.equal(add.status, 0, add.stderr);
+    const commit = gitCmd(tmp, "commit", "-m", "seed aggregate");
+    assert.equal(commit.status, 0, commit.stderr);
+
+    for (let i = 0; i < 20; i++) {
+      const r = runCli(tmp, "--report");
+      assert.equal(r.status, 0, r.stderr);
+    }
+
+    const status = gitCmd(tmp, "status", "--porcelain");
+    assert.equal(status.stdout.trim(), "", `git status must be clean after 20 --report calls, got: ${JSON.stringify(status.stdout)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC4 — --snapshot --json stdout is byte-identical to the aggregate file; same-moment --report data matches", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const s = runCli(tmp, "--task-start", "--taskId", "gap-test-1");
+    const runId = s.stdout.trim();
+    runCli(tmp, "--task-end", "--taskId", "gap-test-1", "--runId", runId, "--outcome", "done");
+
+    const snap = runCli(tmp, "--snapshot", "--json");
+    assert.equal(snap.status, 0, snap.stderr);
+
+    const date = new Date().toISOString().slice(0, 10);
+    const aggFile = path.join(tmp, "milestones", "fast-mode-telemetry", `${date}.json`);
+    const fileContent = fs.readFileSync(aggFile, "utf8");
+    assert.equal(snap.stdout, fileContent, "--snapshot --json stdout must equal the file it wrote (byte-identical, no divergence)");
+
+    // Same-moment --report must carry the same data-bearing fields (the two paths cannot fork).
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    const fileObj = JSON.parse(fileContent);
+    for (const key of ["tasks", "orphaned", "inProgress", "meanMinutes", "medianMinutes", "tasksPerHour"]) {
+      assert.deepEqual(repObj[key], fileObj[key], `--report and --snapshot must agree on "${key}"`);
+    }
   } finally {
     cleanup(tmp);
   }
