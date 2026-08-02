@@ -76,7 +76,7 @@ export function computeCurrentHashes({ taskFile, charterFile, receipt }) {
 // into `hashes.telemetry` the exact same way `ledgerFile` is hash-bound into `hashes.ledger`, so a
 // later swap for a different/edited telemetry record is caught by checkPreparation()'s
 // `telemetry-stale`/`telemetry-missing` checks (Claim A.5) rather than silently passing.
-export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence, telemetryFile, mechanismInventoryFile }) {
+export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence, telemetryFile, mechanismInventoryFile, planCheckTypedFindings }) {
   const taskText = fs.readFileSync(taskFile, "utf8");
   const proposalSection = extractSection(taskText, "Proposal") || "";
   const charterText = fs.readFileSync(charterFile, "utf8");
@@ -104,7 +104,13 @@ export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planF
       ...(mechanismInventoryHash !== undefined ? { mechanismInventory: mechanismInventoryHash } : {}),
     },
     review: review ?? { findings: 0 },
-    planCheck: planCheck ?? { rounds: 1, findings: 0 },
+    // DIR-124-F-plancheck: typed findings carry a `classification` (grounded-fact-gap | task-specific
+    // | other) that F-learn's promotion loop needs to distinguish repo-invariant facts from task
+    // defects. Recorded additively — the scalar `planCheck.findings` stays for legacy callers.
+    planCheck: {
+      ...(planCheck ?? { rounds: 1, findings: 0 }),
+      ...(planCheckTypedFindings !== undefined ? { typedFindings: planCheckTypedFindings } : {}),
+    },
     touches,
     provenance: provenance ?? null,
     convergence: convergence ?? null,
@@ -988,6 +994,10 @@ function parseArgs(argv) {
     else if (a === "--review-session") out.reviewSession = argv[++i];
     else if (a === "--plan-author-session") out.planAuthorSession = argv[++i];
     else if (a === "--plancheck-sessions") out.planCheckSessions = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
+    // DIR-124-F-plancheck: typed PlanCheck findings (each with a `classification`) as a JSON file —
+    // the F-learn promotion loop's input. Validated on read (classification must be one of the
+    // three documented values; a malformed file fails closed, never silently dropped).
+    else if (a === "--plancheck-typed-findings") out.planCheckTypedFindingsFile = argv[++i];
     // DIR-125 — the derived typed finding ledger (hash-bound into the receipt) and its convergence
     // counters/metrics (mechanically re-verified against policy caps, never trusted as-is).
     else if (a === "--ledger") out.ledgerFile = argv[++i];
@@ -1041,10 +1051,10 @@ if (isDirectInvocation()) {
       taskFile, charterFile, planFile, outFile, taskId, milestoneId, sourceFiles,
       reviewFindings, planCheckRounds, planCheckFindings, touches,
       proposalAuthorSessions, adjudicatorSession, reviewSession, planAuthorSession, planCheckSessions,
-      ledgerFile, convergenceJson, telemetryFile, mechanismInventoryFile,
+      ledgerFile, convergenceJson, telemetryFile, mechanismInventoryFile, planCheckTypedFindingsFile,
     } = parsed;
     if (!taskFile || !charterFile || !planFile || !outFile || !taskId) {
-      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}'] [--telemetry telemetry.json] [--mechanism-inventory mechanism-inventory.json]");
+      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}'] [--telemetry telemetry.json] [--mechanism-inventory mechanism-inventory.json] [--plancheck-typed-findings plancheck-typed-findings.json]");
       process.exit(2);
     }
     if (ledgerFile && !fs.existsSync(ledgerFile)) {
@@ -1068,6 +1078,31 @@ if (isDirectInvocation()) {
         process.exit(2);
       }
     }
+    // DIR-124-F-plancheck: typed PlanCheck findings — read, validate, pass through. The field is
+    // ADDITIVE: a missing file means "no typed findings were recorded" (legacy path — the scalar
+    // planCheck.findings remains authoritative), so it is NOT an error. A PRESENT file that is
+    // malformed, or carries an invalid classification, fails closed (never silently dropped).
+    let planCheckTypedFindings = undefined;
+    if (planCheckTypedFindingsFile) {
+      if (!fs.existsSync(planCheckTypedFindingsFile)) {
+        planCheckTypedFindings = [];
+      } else {
+        const VALID_CLASSIFICATIONS = ["grounded-fact-gap", "task-specific", "other"];
+      try {
+        const parsedTf = JSON.parse(fs.readFileSync(planCheckTypedFindingsFile, "utf8"));
+        if (!Array.isArray(parsedTf)) throw new Error("expected a JSON array of typed findings");
+        for (const f of parsedTf) {
+          if (f && f.classification !== undefined && !VALID_CLASSIFICATIONS.includes(f.classification)) {
+            throw new Error(`invalid classification "${f.classification}" — must be one of ${VALID_CLASSIFICATIONS.join(", ")}`);
+          }
+        }
+          planCheckTypedFindings = parsedTf;
+        } catch (e) {
+          console.error(`ERROR: --plancheck-typed-findings file is not a valid typed-findings array: ${e.message}`);
+          process.exit(2);
+        }
+      }
+    }
     const provenance = (reviewSession || planAuthorSession || (planCheckSessions && planCheckSessions.length))
       ? {
           proposalAuthors: (proposalAuthorSessions || []).map((sessionId, i) => ({ authorIdx: i + 1, sessionId })),
@@ -1088,6 +1123,7 @@ if (isDirectInvocation()) {
       convergence,
       telemetryFile: telemetryFile || undefined,
       mechanismInventoryFile: mechanismInventoryFile || undefined,
+      planCheckTypedFindings,
     });
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(receipt, null, 2) + "\n");

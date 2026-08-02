@@ -1,7 +1,7 @@
 ---
 id: DIR-124-F-plancheck
 title: "PlanCheck typed findings: extend output schema with grounded-fact-gap classification"
-status: todo
+status: done
 labels:
   - directive
   - human-steered

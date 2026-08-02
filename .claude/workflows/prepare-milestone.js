@@ -1563,6 +1563,9 @@ let _planCheckFindings = 1
 let _planCheckRound = 0
 const MAX_PLANCHECK_ROUNDS = 3
 const _planCheckSessions = []
+// DIR-124-F-plancheck: typed findings (with classification) accumulated across PlanCheck rounds,
+// flowed to the receipt for F-learn's grounded-fact promotion loop.
+const _planCheckTypedFindings = []
 // gap-plancheck-blocking-only-convergence + gap-plancheck-no-diminishing-returns-exit
 // (2026-08-02): inline mirror of proposal-convergence.ts's `planCheckNextAction` (the workflow
 // DSL has no import capability — same constraint that produced `_normalizeExecuteArgsInline` and
@@ -1604,14 +1607,26 @@ ${_sessionIdInstruction}
 
 A finding is BLOCKING only if it would make the Plan unexecutable or wrong: a factually incorrect signature/path/command, a missing AC-to-stage mapping, a '- Files:' entry absent from the task's '## Touches', or a stage whose Command cannot verify its own AC. Wording, ordering preferences, optional extra tests, and cross-reference polish are NON-blocking.
 
-Return {findings: <integer count of ALL findings, 0 if none>, blocking: <integer count of BLOCKING findings only, 0 if none>, findingsDetail: <list each finding, marking each as BLOCKING or non-blocking>, sessionId: <your real session id>}.`,
+DIR-124-F-plancheck: also classify EACH finding you list in typedFindings as:
+- grounded-fact-gap: the finding is a REPO-INVARIANT fact (CLI binary path quay.ts vs quay.js, Node test-output format, Touches-entry matching, provider runtime defaults, module signatures, evidenceSurface) — a fact any Plan would need, not a defect of THIS task's Plan.
+- task-specific: the finding is a defect of THIS Plan (missing '- Files:' entry, wrong line budget, an AC unmapped to a stage) — fixing it changes only this Plan.
+- other: neither (e.g. a methodological or scoping observation).
+
+Return {findings: <integer count of ALL findings, 0 if none>, blocking: <integer count of BLOCKING findings only, 0 if none>, findingsDetail: <list each finding, marking each as BLOCKING or non-blocking>, typedFindings: <array, one entry per finding: {id, subsystem, severity, summary, blocking, classification}>, sessionId: <your real session id>}.`,
     { label: `plan-check-round-${_planCheckRound}`, phase: 'PlanCheck',
-      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, blocking: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
+      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, blocking: { type: 'number' }, findingsDetail: { type: 'string' }, typedFindings: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, subsystem: { type: 'string' }, severity: { type: 'string' }, summary: { type: 'string' }, blocking: { type: 'boolean' }, classification: { type: 'string' } } } }, sessionId: { type: 'string' } } } }
   )
   _epochThisGenDispatches += 1
   _planCheckFindings = checkResult?.findings ?? 1
   _planCheckBlocking = Number.isFinite(checkResult?.blocking) ? checkResult.blocking : null
   if (checkResult?.sessionId) _planCheckSessions.push(checkResult.sessionId)
+  // DIR-124-F-plancheck: accumulate each round's typed findings; the classification is the input
+  // F-learn needs to distinguish repo-invariant grounded facts from task-specific Plan defects.
+  if (Array.isArray(checkResult?.typedFindings)) {
+    for (const f of checkResult.typedFindings) {
+      _planCheckTypedFindings.push({ ...f, round: _planCheckRound })
+    }
+  }
 
   const _pcAction = _planCheckNextActionInline({
     round: _planCheckRound,
@@ -1681,6 +1696,11 @@ const _ledgerJson = JSON.stringify(_ledger, null, 2)
 // M206/X1: mechanism-inventory.json written beside proposal-ledger.json, same convention.
 const _inventoryFile = `milestones/${_milestoneId}/mechanism-inventory.json`
 const _inventoryJson = JSON.stringify({ mechanisms: _rawMechanisms || [], inventory: _mechanismInventory || {}, source: _mechanismInventorySource }, null, 2)
+// DIR-124-F-plancheck: typed PlanCheck findings (each with classification) written beside the
+// ledger and hash-absorbed into the receipt via --plancheck-typed-findings — the F-learn promotion
+// loop's input. Empty array is valid (no findings → nothing to promote).
+const _planCheckTypedFindingsFile = `milestones/${_milestoneId}/plancheck-typed-findings.json`
+const _planCheckTypedFindingsJson = JSON.stringify(_planCheckTypedFindings, null, 2)
 const _endedAtMs = _now()
 // M197: fullSynthesisCount records whether ProposalAuthors+Adjudicate actually ran THIS dispatch —
 // 0 under resumeFromAdjudicatedProposal (skipped), 1 on the cold/default path (unchanged). This is
@@ -1734,13 +1754,19 @@ ${_ledgerJson}
 ${_inventoryJson}
 \`\`\`
 
-3. Run: node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --mechanism-inventory ${_inventoryFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
+3. Write the file ${_planCheckTypedFindingsFile} with EXACTLY this content (create parent directories as needed) — the typed PlanCheck findings, each carrying a \`classification\` (grounded-fact-gap | task-specific | other) for F-learn's promotion loop:
+
+\`\`\`json
+${_planCheckTypedFindingsJson}
+\`\`\`
+
+4. Run: node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --mechanism-inventory ${_inventoryFile} --plancheck-typed-findings ${_planCheckTypedFindingsFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
 
 (Add --sources <comma-separated list> naming every source file the Plan-check actually inspected, and --touches <comma-separated list> matching the checked Plan's declared touch set, if either is non-empty — read them from the Plan file at ${_planFile}.)
 
-4. Then run: node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
+5. Then run: node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
 
-Return {ok: <step-4 command exit === 0>, receiptFile: "${_receiptFile}", detail: <step-4 command's printed line>}.`,
+Return {ok: <step-5 command exit === 0>, receiptFile: "${_receiptFile}", detail: <step-5 command's printed line>}.`,
   { label: 'receipt', phase: 'Receipt',
     schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, receiptFile: { type: 'string' }, detail: { type: 'string' } } } }
 )

@@ -1341,3 +1341,52 @@ test("DIR-126-E: empty tree on both populations → insufficient-samples with ex
   const out = execFileSync("node", ["--experimental-strip-types", PREP_CHECK_SCRIPT_E, "--capacity-report", "--workspace", dir], { encoding: "utf8" });
   assert.equal(JSON.parse(out).code, "insufficient-samples"); // exit 0 — execFileSync did not throw
 });
+
+// ── DIR-124-F-plancheck: typed findings with classification (grounded-fact-gap | task-specific | other)
+// are recorded additively in receipt.planCheck.typedFindings; the scalar planCheck.findings is
+// preserved for legacy callers. Missing file → empty (legacy path); present-but-malformed →
+// fail-closed; invalid classification → fail-closed.
+
+function typedFixtureWorkspace(tag) {
+  const dir = freshTmpDir();
+  const taskFile = path.join(dir, "task.md");
+  const charterFile = path.join(dir, "charter.md");
+  const planFile = path.join(dir, "plan.md");
+  fs.writeFileSync(taskFile, "---\nid: T\nstatus: todo\n---\n## Proposal\nfix\n\n## Plan\np\n\n## Acceptance Criteria\n- [ ] x\n");
+  fs.writeFileSync(charterFile, "type: execution\n");
+  fs.writeFileSync(planFile, "# Plan\n");
+  return { dir, taskFile, charterFile, planFile };
+}
+
+test("DIR-124-F: buildReceipt records typed findings (with classification) in planCheck.typedFindings, scalar findings preserved", () => {
+  const { taskFile, charterFile, planFile } = typedFixtureWorkspace("tf-record");
+  const typed = [
+    { id: "F1", subsystem: "cli-paths", severity: "major", summary: "CLI is quay.ts", blocking: true, classification: "grounded-fact-gap" },
+    { id: "F2", subsystem: "plan", severity: "minor", summary: "missing Files entry", blocking: false, classification: "task-specific" },
+  ];
+  const r = buildReceipt({ taskId: "T", charterFile, taskFile, planFile, planCheck: { rounds: 1, findings: 0 }, planCheckTypedFindings: typed });
+  assert.equal(r.planCheck.findings, 0, "scalar findings preserved for legacy callers (AC5)");
+  assert.deepEqual(r.planCheck.typedFindings, typed, "typed findings recorded with classification");
+  assert.equal(r.planCheck.typedFindings[0].classification, "grounded-fact-gap");
+});
+
+test("DIR-124-F: buildReceipt with no typed findings keeps the legacy planCheck shape unchanged", () => {
+  const { taskFile, charterFile, planFile } = typedFixtureWorkspace("tf-legacy");
+  const r = buildReceipt({ taskId: "T", charterFile, taskFile, planFile, planCheck: { rounds: 1, findings: 0 } });
+  assert.deepEqual(r.planCheck, { rounds: 1, findings: 0 }, "no typedFindings key when absent (legacy callers unaffected)");
+});
+
+test("DIR-124-F: --build with a missing --plancheck-typed-findings file treats it as empty (legacy path, not an error)", () => {
+  const { dir, taskFile, charterFile, planFile } = typedFixtureWorkspace("tf-missing");
+  const out = execFileSync("node", ["--experimental-strip-types", PREP_CHECK_SCRIPT_E, "--build", "--task-id", "T", "--task", taskFile, "--charter", charterFile, "--plan", planFile, "--out", path.join(dir, "r.json"), "--plancheck-typed-findings", path.join(dir, "no-such.json")], { encoding: "utf8" });
+  assert.ok(out.includes("WROTE"), "missing typed-findings file is not fatal");
+  const receipt = JSON.parse(fs.readFileSync(path.join(dir, "r.json"), "utf8"));
+  assert.deepEqual(receipt.planCheck.typedFindings, [], "missing file → empty typed findings");
+});
+
+test("DIR-124-F: --build with an invalid classification fails closed (never silently accepted)", () => {
+  const { dir, taskFile, charterFile, planFile } = typedFixtureWorkspace("tf-badclass");
+  const tf = path.join(dir, "tf.json");
+  fs.writeFileSync(tf, JSON.stringify([{ id: "X", summary: "s", classification: "bogus-value" }]));
+  assert.throws(() => execFileSync("node", ["--experimental-strip-types", PREP_CHECK_SCRIPT_E, "--build", "--task-id", "T", "--task", taskFile, "--charter", charterFile, "--plan", planFile, "--out", path.join(dir, "r.json"), "--plancheck-typed-findings", tf], { encoding: "utf8" }), /invalid classification/);
+});
