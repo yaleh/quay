@@ -266,7 +266,10 @@ function loadEvents(fixturePath: string): { events: StageEvent[] | null; errors:
     let evt: StageEvent;
     try { evt = JSON.parse(lines[i]); } catch { errors.push(`line ${i+1}: invalid JSON`); continue; }
     const v = validateEvent(evt);
-    if (!v.ok) { errors.push(`line ${i+1}: ${(v.errors||["unknown"]).join("; ")}`); continue; }
+    // validateEvent returns `.error` (string), NOT `.errors` (array) — the field-name mismatch
+    // silently rejected EVERY event as "unknown", load-failing every fixture (the M243 merge was
+    // reverted over exactly this). 2026-08-02, root cause of the 14/20 workflow-replay failures.
+    if (!v.ok) { errors.push(`line ${i+1}: ${v.error || "unknown"}`); continue; }
     events.push(evt);
   }
   if (events.length === 0 && errors.length === 0) errors.push("events.jsonl is empty");
