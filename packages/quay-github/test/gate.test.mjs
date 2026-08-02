@@ -1,3 +1,4 @@
+// @test-group product
 // QN-028 (iteration 17): gate-correctness tests for quay-github's checkGate
 // -- the task_check equivalent for GitHub-backed tasks. Mirrors the exact
 // case structure of packages/quay-native/test/gate-correctness.test.mjs

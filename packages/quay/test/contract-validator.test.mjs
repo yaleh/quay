@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 3 (exp5-M-CRYST-D1) — single-source contract validator: the load-
 // bearing piece that actually EVALUATES a document's `contracts:` self-
 // assertions (document-store.js round-trips them verbatim; this module reads

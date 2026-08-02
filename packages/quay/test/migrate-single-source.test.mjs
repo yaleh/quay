@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-039 AC/DoD: "Single-source: grep confirms both import paths write
 // through the ONE native-write function (no duplicated task-writing
 // logic)". This test makes that a machine-checked invariant instead of a

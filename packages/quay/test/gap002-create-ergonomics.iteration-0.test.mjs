@@ -1,3 +1,4 @@
+// @test-group product
 // M29-cli-create-ergonomics (iteration-0): GAP-002 + GAP-001 combined
 // RED->GREEN coverage, plus G-02 --help-text coverage.
 //

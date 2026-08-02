@@ -1,3 +1,4 @@
+// @test-group product
 // build-dist.test.mjs — M120 Stage 1.1 (DIR-060, release-blocking).
 //
 // Pins the ESM `dist/quay.js` bundle build (scripts/build-dist.mjs +

@@ -1,3 +1,4 @@
+// @test-group product
 // QENG-3 — complete/adjudicate/promote/retreat lifecycle.
 //
 // Layered per docs/plans/10-quay-lifecycle.md:

@@ -1,3 +1,4 @@
+// @test-group engine
 // probe-spec-wiring.test.mjs — DIR-056: verifies that readProbeSpec and
 // resolveRoutineAction are correctly wired for probe-spec-based routines.
 // Tests the plugin's own copies (plugin/scripts/), never the exp5 path.

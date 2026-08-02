@@ -1,3 +1,4 @@
+// @test-group engine
 // plugin/test/plugin-packaging.test.mjs — pins the DIR-040 (+ DIR-042-B) plugin-packaging invariants:
 //   1. the marketplace + plugin manifests are valid JSON with the shape Claude Code expects
 //   2. plugin.json's commands[] actually lists the 4 bundled skills

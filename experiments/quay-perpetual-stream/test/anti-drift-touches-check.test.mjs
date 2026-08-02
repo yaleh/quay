@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for anti-drift-touches-check.mjs — the NON-WAIVABLE after-the-fact HARD guardrail
 // (DIR-044 increment 4; charter Step 5). After a concurrent batch RAN, each build's ACTUAL touched
 // files (from `git diff --numstat`) are checked against what it DECLARED: a build that wrote OUTSIDE

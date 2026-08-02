@@ -1,3 +1,4 @@
+// @test-group engine
 // plugin-vendor-standalone.test.mjs — M120 Stage 3.2 (DIR-060).
 //
 // Proves the vendored Core bundle runs STANDALONE with ZERO node_modules

@@ -1,3 +1,4 @@
+// @test-group product
 // QN-042 (DIR-009): regression test for action.js's new deterministic
 // mock/file-log delivery mode in deliverTrigger() — a THIRD mode, additive
 // to (and independent of) the existing `manda` path and the stdout-print

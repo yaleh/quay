@@ -1,3 +1,4 @@
+// @test-group product
 // QN-034 (iteration 24): regression test for `bin/quay-github.ts` itself —
 // the GitHub Provider's own CLI dispatch layer (resolveRepo(), parseFlags(),
 // the cmd/sub branch table for mcp/manifest/task list|get|edit|check, and

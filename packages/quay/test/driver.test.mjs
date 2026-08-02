@@ -1,3 +1,4 @@
+// @test-group product
 // QENG-4 — the `quay run` driver (autonomous loop AS CODE, capstone).
 //
 // Layered per docs/plans/11-quay-driver.md:

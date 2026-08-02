@@ -1,3 +1,4 @@
+// @test-group engine
 // build-evidence-manifest.test.mjs — M238: RED/GREEN fixture tests for
 // build-evidence-manifest.ts, build-evidence-collector.ts, and build-evidence-gate.ts.
 //

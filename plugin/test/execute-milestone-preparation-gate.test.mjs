@@ -1,3 +1,4 @@
+// @test-group engine
 // execute-milestone-preparation-gate.test.mjs — DIR-117 iteration-2 item 5.
 //
 // PROBLEM this closes: the M191 iteration-0 acceptance audit REFUTED DIR-117's AC "when a

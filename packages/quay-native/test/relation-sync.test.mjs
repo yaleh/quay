@@ -1,3 +1,4 @@
+// @test-group product
 // M35-native-relation-sync: proves store.js's `write()` now performs
 // bidirectional parent/children relation sync (matching the github
 // provider's `writeRelations()` contract, github-client.js ~L771-830) --

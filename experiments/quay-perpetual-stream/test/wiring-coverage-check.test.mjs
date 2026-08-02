@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for wiring-coverage-check.mjs — the DIR-117/DIR-122 shared mechanism-claim wiring
 // coverage check. RED/GREEN pair per both directives' AC: an uncovered mechanism claim FAILS; the
 // same claim with a matching, evidence-requiring AC item PASSES.

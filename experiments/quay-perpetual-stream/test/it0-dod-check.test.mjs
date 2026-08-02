@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for it0-dod-check.ts — the DoD meta-enforcer (Clauses 0-9), charters
 // M25-dod-meta-enforcer / M32-dod-escrow-testfloor / M40-dir014-task-canonical-lifecycle-record /
 // DIR-026. These import the EXPORTED pure `runDodCheck({ milestoneId, charterFile, charterFileText,

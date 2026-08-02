@@ -1,3 +1,4 @@
+// @test-group product
 // QN-015: prove store.js's `write({ expectedStatus })` CAS option actually
 // closes the read-decide-write TOCTOU race described in QN-015's Proposal —
 // a Skill (e.g. quay:execute's gate-check step) that reads a task's status

@@ -1,3 +1,4 @@
+// @test-group product
 // ts-typecheck-gate.test.mjs — ADR-012 P0 (exp5-M-TS-MIGRATION-P0): the
 // `tsc --noEmit` type gate, wired as a `testPass` entry in the workspace's
 // gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS

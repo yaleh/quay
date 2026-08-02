@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for human-steered-classify.ts — DIR-062 child A (M125).
 // Run: node --test experiments/quay-perpetual-stream/test/human-steered-classify.test.mjs
 //      node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/human-steered-classify.test.mjs

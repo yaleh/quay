@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for loadbearing-test-gate.mjs — the mechanical enforcement of ADR-001 Decision clause 2
 // (load-bearing method-infra must be fixture-first + covered). Written RED-first (ADR-001 / DIR-019
 // discipline): this gate must EXEMPLARILY follow the very policy it enforces. The fix for any failing

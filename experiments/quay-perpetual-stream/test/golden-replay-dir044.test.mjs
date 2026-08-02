@@ -1,3 +1,4 @@
+// @test-group engine
 // Golden-replay proof for DIR-044 (increment 5): the recorded touches-disjoint pair DIR-039 ∥
 // DIR-042-A, replayed through the whole concurrent pipeline, must reproduce the frozen serial oracle.
 // Run: node --test experiments/quay-perpetual-stream/test/golden-replay-dir044.test.mjs

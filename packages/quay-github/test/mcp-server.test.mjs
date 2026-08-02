@@ -1,3 +1,4 @@
+// @test-group product
 // QN-048 (iteration 37): regression test for quay-github's own MCP stdio
 // transport (packages/quay-github/src/mcp-server.js, wired into
 // bin/quay-github.ts's `mcp` subcommand). Sibling gap to QN-034 (iteration

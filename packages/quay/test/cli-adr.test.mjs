@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 3 — Core CLI `quay adr` verbs, exercised end-to-end against a native
 // provider whose QUAY_NATIVE_ADR_DIR points at a throwaway dir. ADRs are a
 // SEPARATE kind: they must never appear in `quay task list`.

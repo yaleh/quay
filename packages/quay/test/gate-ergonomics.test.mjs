@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-046 — gate ergonomics for foreign worktrees + long suites.
 //
 // Three real frictions surfaced by the real archguard iteration (meta-cc

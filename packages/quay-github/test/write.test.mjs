@@ -1,3 +1,4 @@
+// @test-group product
 // QN-024 (iteration 10): unit tests for computeStatusWrite's pure
 // label-replacement/open-close decision logic, injected with a synthetic
 // current-label-name list -- no live `gh api` call in this file (mirrors

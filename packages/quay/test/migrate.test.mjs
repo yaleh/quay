@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-039 (A): pins migrateTasks()/writeOneTask() — the generic ABI
 // provider-to-provider migration engine. RED->GREEN per ADR-001: written
 // before src/migrate.js existed; these fake source/target clients exercise

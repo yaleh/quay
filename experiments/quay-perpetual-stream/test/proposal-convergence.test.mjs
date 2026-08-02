@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for proposal-convergence.ts — DIR-125's bounded ProposalReview convergence engine.
 // Pure-function coverage: caps, stable finding identity, ledger merge/resolution, split
 // recommendation, injected-clock budget status, the nextAction decision table, ledger

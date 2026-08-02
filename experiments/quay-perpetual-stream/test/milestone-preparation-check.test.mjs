@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for milestone-preparation-check.mjs — DIR-117 unit C. Exercises the fixture-fresh
 // PASS path plus 4 independent negative mutations (Proposal, charter, Plan, checked source file),
 // each expected to fail with its OWN distinct actionable code, and confirms an unrelated-file

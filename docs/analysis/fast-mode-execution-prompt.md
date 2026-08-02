@@ -86,7 +86,7 @@ node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --tas
 - 透传 flag（如 `--test-name-pattern=X`）要放在**文件列表之前**——node --test 只认文件前的 `--test-name-pattern`（放文件后被忽略，等于跑全文件）。
 - **全量套件仍只属于 fan-in**：merge 前跑一次无参 `scripts/test.sh`。任务内用 `--for-task` 覆盖不了的部分（如 `docs/`、`scripts/test.sh` 自身）由 fan-in 兜底。
 
-**测试文件放哪。** `scripts/test.sh` 的 glob 只覆盖 `packages/*/test/*.test.mjs` 和 `plugin/test/*.test.mjs`。放在 `experiments/quay-perpetual-stream/test/` 的测试**不会在 CI 跑**。需要 CI 覆盖就放 `plugin/test/`。若两处都放，注意 repo root 深度不同（`plugin/test/` 是 2 层，`experiments/.../test/` 是 3 层）——用向上查找标记目录的方式求根，别硬编码层数。
+**测试文件放哪（gap-test-suite-has-no-layer-grouping）。** `scripts/test.sh` 的 glob 现在覆盖全部三个目录：`packages/*/test/*.test.mjs`、`plugin/test/*.test.mjs`、`experiments/quay-perpetual-stream/test/*.test.mjs`。`experiments/.../test/` 的 44 个此前不可见的测试**现在总会出现在输出里**。分组是**声明**不是位置：每个测试文件顶部一行 `// @test-group <name>`（`product` / `engine` / `governance`，缺省 `engine`）。`governance` 组（exp5 度量层）**封存而非删除**——默认跑 `product,engine`，governance 文件靠 in-file 自跳过报 `skipped` 而非缺席。`experiments/.../test/` 下指向 `plugin/test/` 的 12 个符号链接按 `realpath` 去重，不会跑两遍。若两处都放，注意 repo root 深度不同（`plugin/test/` 是 2 层，`experiments/.../test/` 是 3 层）——用向上查找标记目录的方式求根，别硬编码层数。
 
 **关闭任务状态。** 这是当前流程的真实缺口：直接执行时没有任何机制更新任务状态，我刚发现 7 个任务的代码已在树里但 status 仍是 `todo`。实现完成后，先跑检测器核对，再手动改 `tasks/<id>.md` 的 `status:`：
 

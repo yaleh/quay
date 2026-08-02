@@ -1,3 +1,4 @@
+// @test-group product
 // npm-pack-e2e.test.mjs — M120 Stage 2.2 (DIR-060).
 //
 // End-to-end: run the REAL package.sh (build-dist.sh -> npm pack), install the

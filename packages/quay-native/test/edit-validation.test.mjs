@@ -1,3 +1,4 @@
+// @test-group product
 // QN-055 (iteration 44): `quay-native task edit` must reject a
 // missing/empty `id` positional argument rather than silently writing
 // tasks/undefined.md — the same class of bug `task create` was hardened

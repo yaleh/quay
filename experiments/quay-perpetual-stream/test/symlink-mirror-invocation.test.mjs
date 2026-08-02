@@ -1,3 +1,4 @@
+// @test-group engine
 // symlink-mirror-invocation.test.mjs — gap-touches-orthogonality-symlink-isdirect-mismatch.
 //
 // PROBLEM this closes: `experiments/quay-perpetual-stream/scripts/`-mirrored symlinks into

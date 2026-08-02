@@ -1,3 +1,4 @@
+// @test-group product
 // Unit tests for issueToViewModel's normalization rules (DESIGN.md §3), added
 // in iteration 5 to close 3 bugs found by iteration-4's independent audit:
 //   1. parent/children were unconditionally null/empty (no mapping at all).

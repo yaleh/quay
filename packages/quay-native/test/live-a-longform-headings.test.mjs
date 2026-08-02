@@ -1,3 +1,4 @@
+// @test-group product
 // LIVE-batch A (M75, DIR-044-LIVE proof) — offline unit test for the pure
 // section-parsing logic in packages/quay-native/src/store.js.
 //

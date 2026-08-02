@@ -1,3 +1,4 @@
+// @test-group product
 // QN-005 (iteration 2): gate-correctness deepening tests.
 // Covers Plan Phase 3's four cases:
 //   (a) heading-only-no-content task correctly fails author->ready with the

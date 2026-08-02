@@ -2,7 +2,7 @@
 id: gap-test-suite-has-no-layer-grouping
 title: "Test suite has no layer grouping — 44 methodology tests are invisible to
   CI and governance tests cannot be parked"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -64,24 +64,31 @@ ADR-019 已确立的模式：live-GitHub 测试**留在 glob 内**并自行 skip
 
 ## Acceptance Criteria
 
-- [ ] AC1: `// @test-group <name>` 声明约定被文档化，合法值为 `product` / `engine` / `governance`
-- [ ] AC2: `scripts/test.sh` 的 glob 包含 `experiments/quay-perpetual-stream/test/*.test.mjs`
-- [ ] AC3: 符号链接按 `realpath` 去重——12 个链接文件不被跑两次（可通过总测试数验证）
-- [ ] AC4: 无参数运行默认组 = `product,engine`；`governance` 报 skipped 而非缺席
-- [ ] AC5: `--group governance` 只跑 governance 组
-- [ ] AC6: `--group product,engine` 等价于无参数
-- [ ] AC7: 未声明组的文件视为 `engine`（遗漏声明不会静默消失）
-- [ ] AC8: governance 组的跳过发生在重量级 import **之前**（grep 确认：skip 分支在 `await import` / 顶层 `import` 之前）
-- [ ] AC9: 默认组墙钟 ≤416s（当前 378s 的 110%）——实测记录
-- [ ] AC10: 三个组的文件数被报告：`scripts/test.sh --list-groups` 输出各组计数
-- [ ] AC11: 零测试文件被删除或移动——`git diff --stat` 确认只有声明行新增和 `scripts/test.sh` 改动
+- [x] AC1: `// @test-group <name>` 声明约定被文档化，合法值为 `product` / `engine` / `governance`（scripts/test.sh 头注释 + docs/analysis/fast-mode-execution-prompt.md）
+- [x] AC2: `scripts/test.sh` 的 glob 包含 `experiments/quay-perpetual-stream/test/*.test.mjs`
+- [x] AC3: 符号链接按 `realpath` 去重——12 个链接文件不被跑两次（`--list-files` 总数为 157 == 去重后唯一 realpath 数；runner 测试断言）
+- [x] AC4: 无参数运行默认组 = `product,engine`；`governance` 报 skipped 而非缺席（skip-mode 实测 13 文件报 skipped，0.8s）
+- [x] AC5: `--group governance` 只跑 governance 组（`--list-files --group governance` = 13 个 governance 文件）
+- [x] AC6: `--group product,engine` 等价于无参数（`--list-files` 输出字节一致）
+- [x] AC7: 未声明组的文件视为 `engine`（runner 测试 AC7：临时无声明文件计入 engine）
+- [x] AC8: governance 组的跳过发生在重量级 import **之前**——skip 分支在动态 `await import("../scripts/*.ts")` 之前；skip-mode 13 文件合计 0.8s 证明被测模块未加载
+- [ ] AC9: 默认组墙钟 ≤416s（当前 378s 的 110%）——**我的估计不满足**，见下「Measured」；权威数字以 fan-in 全量跑为准
+- [x] AC10: 三个组的文件数被报告：`scripts/test.sh --list-groups` 输出 product/engine/governance/total
+- [x] AC11: 零测试文件被删除或移动。注：diff 还含（a）select-tests-for-touches.test.mjs 里 pin 旧 glob 的 AC11 结构断言被更新（glob 扩展正是本任务目的），（b）新增 plugin/test/runner-grouping.test.mjs + 3 个 fixture
 
 ## Definition of Done
 
-- [ ] 全部 165 个测试文件带组声明（或明确依赖 AC7 的缺省）
-- [ ] 默认组绿、墙钟实测记录在任务体
-- [ ] `--group governance` 可单独运行并绿（若不绿，说明封存期间已腐化——记录为发现，不在本任务修）
-- [ ] `scripts/test.sh` 无参数行为对 `product`+`engine` 与当前等价（无回归）
+- [x] 全部测试文件带组声明：156 个真实文件（86 product + 58 engine + 13 governance）。12 个 experiments 符号链接经 realpath 去重落到已声明的 plugin 文件。任务体原「165」计数已过期（未计入 quay-backlog 2 文件 + select-tests-for-touches 1 文件）
+- [ ] 默认组绿——**不绿**：默认套件现在暴露此前不可见的 engine 文件里的 3 个**既有**失败（在 master 主 checkout 同样复现，非 worktree 环境）：symlink-mirror-invocation.test.mjs ×2（fast-mode-telemetry 符号链接调用 guard 未触发；milestone-worktree 输出含时变 nowMs 无法字节一致）、it0-enforcement-with-design-check.test.mjs ×1（D1 real-object 演示报 2 个 DESIGN-MISSING：Clause 10/14 有 enforcement 但 inherited-core.md 缺对应 heading）。这些文件的 diff 只有声明行，非本任务引入；属既有缺陷，需另行跟踪修复，不在本任务修
+- [ ] `--group governance` 可单独运行并绿——**不绿**：chart2-s2-delivery-completeness.test.mjs 有 3 个既有失败（S2 交付完整性覆盖率对真实 repo 算成 0.0；master 原文件同样 3 fail）。candidate-synthesis.test.mjs 通过 24/24（早期归因错误，实为 node_modules 未就位时的加载失败误报）。封存期腐化，记录为发现，不在本任务修
+- [x] `scripts/test.sh` 无参数行为对 `product`+`engine` 与当前等价（机制等价；runner 测试 7/7 绿）
+
+## Measured (B3-2, worktree, load-caveat)
+
+- governance 13 文件 **skip-mode**（默认组）：0.835s —— pre-import 自跳过生效，被测模块不加载
+- governance 13 文件 **run-mode**（--group governance）：~4s，205 tests，202 pass / **3 fail（全在 chart2-s2-delivery-completeness，master 原文件同样 3 fail → 既有）；candidate-synthesis 24/24 通过**
+- engine 31 文件（默认组新增运行）：**86.8s**，883 tests，880 pass / 3 fail（symlink-mirror-invocation ×2 + it0-enforcement-with-design-check ×1，均在 master 主 checkout 复现 → 既有）
+- **AC9 估计**：当前基线 378s + engine 31 文件 ~87s + runner-grouping 测试 ~8s + governance skip ~1s ≈ **~474s**，约基线的 125%，**超出 416s 上限**。根因：任务成本模型假设「44 文件只有加载开销」，但 engine 组在默认组里**运行**（非仅加载），且其中 proposal-convergence（~63s）与 it0-dod-check（~60s）本身就很重。机制正确；AC9 以 fan-in 权威测量为准。
 
 ## Touches
 

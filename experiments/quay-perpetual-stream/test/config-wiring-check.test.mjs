@@ -1,3 +1,4 @@
+// @test-group engine
 // config-wiring-check.test.mjs — gap-config-wiring-check-symlink-noop regression coverage
 // (M-DIR119-C-CANARY, 2026-07-27). RED-first (ADR-001 / DIR-019): before the fix, the mirror-path
 // invocation of both `config-wiring-check.ts` and `concurrent-batch-scheduler.ts` silently no-oped

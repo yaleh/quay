@@ -1,3 +1,4 @@
+// @test-group product
 // QN-016 (iteration 7): recursive childrenStatus() re-verification.
 //
 // Iteration 6's independent, out-of-band audit

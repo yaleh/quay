@@ -1,3 +1,4 @@
+// @test-group product
 // M89 (exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH): post-write YAML validation.
 //
 // Root cause: a task file whose frontmatter value contains an unquoted ": "

@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 4 — Core MCP adr_list/adr_get/adr_write proxies (fan-out to the active
 // provider), so an agent connected via `quay mcp` can consult/author ADRs.
 import { test, before, after } from "node:test";

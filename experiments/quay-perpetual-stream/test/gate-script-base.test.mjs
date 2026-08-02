@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for gate-script-base.ts — shared framework primitives for TypeScript gate scripts.
 // Written RED-first per ADR-001 fixture-first discipline: this test file covers all exported
 // functions from the load-bearing gate-script-base.ts utility module (created M151/M152).

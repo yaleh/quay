@@ -1,3 +1,4 @@
+// @test-group engine
 // Tests for routine-file-gate.mjs — DIR-051 mechanical quality/dedup/rate gate. RED-first.
 import { test } from "node:test";
 import assert from "node:assert/strict";

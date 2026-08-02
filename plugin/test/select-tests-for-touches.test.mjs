@@ -1,3 +1,4 @@
+// @test-group engine
 // select-tests-for-touches.test.mjs — gap-test-selection-not-scoped-to-touches: RED/GREEN tests
 // for the mechanical per-task test selector (select-tests-for-touches.ts, byte-identical mirror).
 // Covers AC1–AC11 and the DoD's "tests cover AC2–AC9".
@@ -356,16 +357,18 @@ test("REGRESSION (round-1 NIT) — testBasenameFor collapses a .test. marker (fo
   assert.equal(cli.testBasenameFor("scripts/foo.test.mjs"), "foo.test.mjs");
 });
 
-// ── AC11: scripts/test.sh no-args behavior unchanged ─────────────────────────────────────────────────
+// ── AC11: scripts/test.sh no-args behavior (grouped layer, gap-test-suite-has-no-layer-grouping) ──
 
-test("AC11 — scripts/test.sh no-args full-suite branch is byte-for-behavior unchanged (structural)", () => {
+test("AC11 — scripts/test.sh no-args branch is the grouped default (structural)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  // The exact no-args branch must be present verbatim: the glob, the empty guard, and the exec line.
-  assert.match(src, /if \[ "\$#" -eq 0 \]; then/);
-  assert.match(src, /files=\(packages\/\*\/test\/\*\.test\.mjs plugin\/test\/\*\.test\.mjs\)/);
+  // The glob now spans ALL three test dirs (AC2); no-args routes through the grouped default
+  // (product,engine, AC4); the exec line keeps --test-concurrency=8.
+  assert.match(src, /local glob=\(packages\/\*\/test\/\*\.test\.mjs plugin\/test\/\*\.test\.mjs experiments\/quay-perpetual-stream\/test\/\*\.test\.mjs\)/);
+  assert.match(src, /run_selected "\$\(effective_groups\)"/);
+  assert.match(src, /effective_groups\(\) \{\n  echo "product,engine"/);
   assert.match(src, /exec node --test --test-concurrency=8 "\$\{files\[@\]\}"/);
-  // The explicit-file branch (else path) still runs through the same exec line.
-  assert.match(src, /else\n  exec node --test --test-concurrency=8 "\$@"/);
+  // The explicit-file branch still runs through the same exec line.
+  assert.match(src, /exec node --test --test-concurrency=8 "\$@"/);
 });
 
 test("AC11 — scripts/test.sh explicit-file form still runs (smoke, pinned name pattern)", () => {

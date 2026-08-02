@@ -1,3 +1,4 @@
+// @test-group product
 // M39 (DIR-022 Layer 2 phase 1) — `impl-row` and `line-budget` named gates.
 //
 // Both gates are thin async (task, client) => { ok, reason } wrappers over

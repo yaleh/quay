@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-039 (B): pins backlog-client.js — the read-only Backlog.md board
 // reader/mapper. RED->GREEN per ADR-001: written before src/backlog-client.js
 // existed. Uses a small synthetic fixture directory (isolated tmp dir) for

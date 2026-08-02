@@ -1,3 +1,4 @@
+// @test-group product
 // QN-070 (iteration 69): GitHub-Provider port of QN-030's (iteration 20)
 // gate-gameability regression test — live, executable proof that
 // `github-client.js#checkGate()` shares the same permanent, structural

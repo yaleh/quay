@@ -1,3 +1,4 @@
+// @test-group product
 // M26-adversarial-eval (DIR-001 item 4): targeted fault-injection regression
 // tests for the highest-risk real gaps this milestone's Phase A audit found
 // in quay-native's store.js. Each test asserts SAFE degradation (clear

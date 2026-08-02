@@ -1,3 +1,4 @@
+// @test-group product
 // loop-params.test.mjs — RED→GREEN tests for readLoopParams (DIR-045 AC2 / DIR-050 unified format)
 //
 // Contract: readLoopParams(workspaceRoot) → params | throws Error("FAIL-CLOSED: ...")

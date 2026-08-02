@@ -1,3 +1,4 @@
+// @test-group product
 // QC-002 (experiment 2, iteration 2): action delivery mode verification —
 // closes the action_delivery_mode "Done when" clause (0.5 → 1.0).
 //

@@ -1,3 +1,4 @@
+// @test-group product
 // QENG-1 — gate engine + GateEvent log.
 //
 // Layered per the plan:

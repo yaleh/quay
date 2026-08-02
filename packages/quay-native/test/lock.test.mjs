@@ -1,3 +1,4 @@
+// @test-group product
 // QN-006 concurrency test (AC#2, AC#3): two separate Node processes racing
 // writes on the same task id must not corrupt the file, and a simulated
 // stale lock must not permanently deadlock a future writer.

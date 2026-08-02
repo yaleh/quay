@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-041 (M57): RED->GREEN regression test for the MCP-level CREATE
 // routing -- confirms `task_write` with `id: CREATE_SENTINEL_ID` ("gh-new")
 // actually reaches client.create() (not client.setStatus/writeFields, which

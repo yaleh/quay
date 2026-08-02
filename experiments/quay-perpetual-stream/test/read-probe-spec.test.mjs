@@ -1,3 +1,4 @@
+// @test-group engine
 // Tests for read-probe-spec.mjs — DIR-056: probe spec loader. TDD RED→GREEN.
 // These tests exercise fail-closed behavior and happy-path parsing.
 import { test } from "node:test";

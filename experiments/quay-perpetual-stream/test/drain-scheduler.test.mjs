@@ -1,3 +1,4 @@
+// @test-group engine
 // Tests for drain-scheduler.ts — DIR-071 DRAIN step trigger logic.
 // Mirror routine-scheduler.test.mjs test shape: pure-function tests + CLI exit-code tests.
 // RED-first (ADR-001 / DIR-019).

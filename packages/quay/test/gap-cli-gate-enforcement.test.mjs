@@ -1,3 +1,4 @@
+// @test-group product
 // M31-cli-gate-enforcement, iteration-0.
 //
 // `quay task edit <id> --status <x>` writes a status transition

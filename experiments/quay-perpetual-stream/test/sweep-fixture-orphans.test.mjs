@@ -1,3 +1,4 @@
+// @test-group engine
 // Regression coverage for sweep-fixture-orphans.mjs's matching boundary — added 2026-07-31 per an
 // independent review of gap-prepare-milestone-convergence-test-fixture-pollutes-tracked-tree, which
 // flagged that the boundary between "real orphan" and "real tracked milestone/plan file" had only

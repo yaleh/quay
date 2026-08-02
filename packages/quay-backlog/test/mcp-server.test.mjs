@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-039 (B): regression test for quay-backlog's own MCP stdio transport
 // (src/mcp-server.js, wired into bin/quay-backlog.ts's `mcp` subcommand).
 // Mirrors quay-github's own mcp-server.test.mjs shape/header convention.

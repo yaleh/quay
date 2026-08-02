@@ -1,3 +1,4 @@
+// @test-group product
 // QN-031 (iteration 21): regression test for serve.js's HTTP list/detail/
 // action-button loop and action.js's composePayload() — the literal running
 // code behind the `skeleton` V_instance factor (protocol §5.1: "the v0 loop

@@ -1,3 +1,4 @@
+// @test-group product
 // QN-035 (iteration 25, DIR-006): compound/epic (children non-empty)
 // gate-correctness tests for quay-github's `checkGate()`/`childrenStatus()`.
 // Direct port of packages/quay-native/test/compound-gate.test.mjs +

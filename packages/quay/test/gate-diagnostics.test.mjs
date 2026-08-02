@@ -1,3 +1,4 @@
+// @test-group product
 // gate-diagnostics.test.mjs — RED/GREEN tests for per-entry required-field
 // diagnostics emitted by loadWorkspaceGates() (DIR-100-B, M227).
 //

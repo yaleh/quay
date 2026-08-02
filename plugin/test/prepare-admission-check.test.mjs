@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit + CLI tests for prepare-admission-check.ts — M200/DIR-126-A single-flight admission +
 // M201/DIR-126-B deterministic mechanical Preflight for prepare-milestone.js. RED/GREEN coverage
 // per the checked Plan (docs/plans/M200-dir-126-a.md, docs/plans/M201-dir-126-b.md):

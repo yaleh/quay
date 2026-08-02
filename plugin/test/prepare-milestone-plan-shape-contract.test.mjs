@@ -1,3 +1,4 @@
+// @test-group engine
 // gap-planauthor-shape-rules-not-injected (2026-08-02).
 //
 // The PlanAuthor prompt carries a `_planShapeContract` block stating the two constraints that

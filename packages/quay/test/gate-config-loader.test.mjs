@@ -1,3 +1,4 @@
+// @test-group product
 // gate-config-loader.test.mjs — direct unit tests of readGatesConfig's branch-A-terminal
 // behavior (DIR-120 Phase 2), including the silent-data-loss scenario named in the task's
 // own Proposal (problem-framing point 11 / AC item 5).
