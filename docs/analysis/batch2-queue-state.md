@@ -27,12 +27,14 @@
 | 任务 | 状态 |
 |---|---|
 | 用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务 | todo（用户手工提交，非本批范围；AC9 有序目标的达成依赖它们） |
+| `gap-select-preflight-json-real-store-too-slow`（**新任务**） | todo（2026-08-02 单独诊断：select-preflight.test.mjs 两个 CLI 测试合计 ~240s = 权威 559s 的 43%。命令本身对真实仓库 97-111s，测试 120s timeout 余量仅 ~8%，并发必被杀。**不加大 timeout**——真正的修是命令自身慢） |
 | 揭示的既有失败 | 3 engine（symlink-mirror ×2 + enforcement-with-design ×1）+ 3 governance（chart2-s2）—— 记录为发现，需另行建任务跟踪修复 |
 
 ## 本批最终状态
 
 - 已合并且全量绿：B2-0..B3-1（5 个）
-- **B3-2 合并 + 三步处置后 done**（机制完整，AC/DoD 全勾；全量 627s 为 AC9 过渡态）
+- **B3-2 合并 + 三步处置后 done**（机制完整，AC/DoD 全勾；权威全量 559s 为 AC9 过渡态——**627s 是 worktree 测量，不可当权威**）
+- **规模更正**：暴露的不是「44 个文件」而是 **903 个测试**（1218→2121，占当前总量 43%）——更坐实不该回退
 - 计量已接线：`--task-start`/`--task-end`/`--report` 首次工作（B3-2 67.8m needs-human → done；aggregate 已提交）
 - **两条 tick 常设规则已落地**（`bc57d318`）：fan-in 前必须 rebase master；测试不得硬编码全局计数（runner-grouping 已按此改造）
 

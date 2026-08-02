@@ -72,7 +72,7 @@ ADR-019 已确立的模式：live-GitHub 测试**留在 glob 内**并自行 skip
 - [x] AC6: `--group product,engine` 等价于无参数（`--list-files` 输出字节一致）
 - [x] AC7: 未声明组的文件视为 `engine`（runner 测试 AC7：临时无声明文件计入 engine）
 - [x] AC8: governance 组的跳过发生在重量级 import **之前**——skip 分支在动态 `await import("../scripts/*.ts")` 之前；skip-mode 13 文件合计 0.8s 证明被测模块未加载
-- [x] AC9: 默认组墙钟 ≤416s（当前 378s 的 110%）——**有序目标而非即时门槛**：上限在测试提速任务（用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务，+ 既有 gap-suite-speedup）完成后达成。当前过渡态实测 627s 如实记录（见 Measured）；上限设定时假设「44 文件只有加载开销」是错的——engine 组是运行（proposal-convergence ~63s + it0-dod-check ~60s 天生重），已按用户 2026-08-02 指示改为有序目标
+- [x] AC9: 默认组墙钟 ≤416s（当前 378s 的 110%）——**有序目标而非即时门槛**：上限在测试提速任务（用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务，+ 既有 gap-suite-speedup，+ 新增 `gap-select-preflight-json-real-store-too-slow`——select-preflight 单文件 240s 是最大成本源）完成后达成。当前过渡态实测 559s 如实记录（见 Measured）；上限设定时假设「44 文件只有加载开销」是错的——engine 组是运行（proposal-convergence ~63s + it0-dod-check ~60s 天生重，select-preflight ~240s 最重），已按用户 2026-08-02 指示改为有序目标
 - [x] AC10: 三个组的文件数被报告：`scripts/test.sh --list-groups` 输出 product/engine/governance/total
 - [x] AC11: 零测试文件被删除或移动。注：diff 还含（a）select-tests-for-touches.test.mjs 里 pin 旧 glob 的 AC11 结构断言被更新（glob 扩展正是本任务目的），（b）新增 plugin/test/runner-grouping.test.mjs + 3 个 fixture
 
@@ -89,7 +89,8 @@ ADR-019 已确立的模式：live-GitHub 测试**留在 glob 内**并自行 skip
 - governance 13 文件 **run-mode**（--group governance）：~4s，205 tests，202 pass / **3 fail（全在 chart2-s2-delivery-completeness，master 原文件同样 3 fail → 既有）；candidate-synthesis 24/24 通过**
 - engine 31 文件（默认组新增运行）：**86.8s**，883 tests，880 pass / 3 fail（symlink-mirror-invocation ×2 + it0-enforcement-with-design-check ×1，均在 master 主 checkout 复现 → 既有）
 - **AC9 估计（worktree）**：当前基线 378s + engine 31 文件 ~87s + runner-grouping 测试 ~8s + governance skip ~1s ≈ **~474s**。根因：任务成本模型假设「44 文件只有加载开销」，但 engine 组在默认组里**运行**（非仅加载），且其中 proposal-convergence（~63s）与 it0-dod-check（~60s）本身就很重。
-- **AC9 权威（fan-in 全量，2026-08-02 11:31 实测）**：**627s**（10m27s）—— 高于 worktree 估计，因为完整 suite 还含全部 product + engine 组。**这是过渡态**，AC9 已改写为有序目标：测试提速任务落地后 ≤416s（cli.test.mjs 后约 510s，再改 serve/mcp-server 后约 300s，用户估算 2026-08-02）。上限设定时假设错误（见成本约束段）。
+- **AC9 权威（fan-in 全量，2026-08-02 11:43 实测）**：**559s**（不是 worktree 测的 627s——worktree 无 node_modules 行为不同，不可当权威）。测试数从 1218 涨到 **2121**：**903 个此前从不运行的测试现在可见**，占当前总量的 43%。**这是过渡态**，AC9 已改写为有序目标：测试提速任务落地后 ≤416s（cli.test.mjs 后约 510s，再改 serve/mcp-server 后约 300s，用户估算 2026-08-02）。上限设定时假设错误（见成本约束段）。
+- **AC9 最大单一成本源（单独诊断，2026-08-02）**：`select-preflight.test.mjs` 两个 CLI 测试合计 **~240s = 559s 的 43%**。根因是命令本身对真实仓库就要 97-111s（559 任务 + O(n²) 正交对扫描），测试 `spawnCli` 的 120s timeout 余量仅 ~8%，并发负载下必然被杀——**注定 flaky 的测试设计**。**不加大 timeout**（那只是推后 flake 并让套件更慢）。单独任务：`gap-select-preflight-json-real-store-too-slow`。
 
 ## Touches
 
