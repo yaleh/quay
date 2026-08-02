@@ -1,10 +1,11 @@
 export const meta = {
   name: 'execute-milestone',
-  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Accepts both legacy {taskId,...} and DIR-119-B (M189) arbitrary-width {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} argument shapes, normalized to one internal task array (never rejected on array length) — see composite-args.ts/composite-contracts.ts. Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
+  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Accepts both legacy {taskId,...} and DIR-119-B (M189) arbitrary-width {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} argument shapes, normalized to one internal task array (never rejected on array length) — see composite-args.ts/composite-contracts.ts. Returns {outcome: "done"|"needs-human"|"revision-needed"}.',
   phases: [
     { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks + composite-preflight (DIR-119-B)' },
     { title: 'Prepared', detail: 'DIR-117-B/M195 — ENFORCED-BY-DEFAULT fail-closed Proposal/Plan preparation-receipt check before Build; a missing args.preparationReceiptFile returns {outcome:"revision-needed", reason:"preparation-receipt-missing", phase:"Prepared"} before Build (opt-in skip retired)' },
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
+    { title: 'Build-Evidence', detail: 'M238/gap-build-evidence-manifest-missing — deterministic post-Build evidence collection: runs build-evidence-collector.ts, producing build-evidence-manifest.json under MILESTONE_ROOT for Audit consumption. Internal sub-step of Build — NOT an independently-routed boundary' },
     { title: 'Audit',  detail: 'Step 6 — adversarial fresh-context acceptance audit' },
     { title: 'Gate',   detail: 'Step 6 — all absorb-phase mechanical gate checks' },
     { title: 'Reconcile', detail: 'DIR-119-D4/M212 — literal Reconcile phase between Gate and Land: sole success-path composite state writer (reconcile-apply), dispatched only for composite dispatches' },

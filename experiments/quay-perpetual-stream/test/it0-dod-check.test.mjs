@@ -111,15 +111,13 @@ const hasPass = (r, needle) => r.passes.some((p) => p.includes(needle));
 // flag — that is clause 11 working, not a bug). Assert ONLY on the four clauses this test actually
 // targets; clauses 10/11's own real-repo-shelling-out behavior is covered by their OWN dedicated
 // tests below ("clause10:"/"clause11:"), which correctly accept either PASS or FAIL as valid.
-// DIR-124-A4 (clause 14, workflow-metadata-conformance) is the same class: it shells out to the
-// REAL workflow files, which currently carry the documented RED baseline (Build-Evidence phase +
-// stale 'building' outcome + unclaimed 'revision-needed'), so it FAILs independently of the
-// synthetic fixture text — filtered here for the same reason clause 10/11 are; its own dedicated
-// coverage lives in workflow-metadata-conformance.test.mjs.
-test("clean milestone: clauses 0/1/2/5 pass (independent of ambient clause10/11/14 repo state)", () => {
+// Clause 14 (workflow-metadata-conformance) reads the REAL workflow files; its RED baseline was
+// CLOSED on 2026-08-02 (dev-session-handoff-2026-08-02b item 1) and it now PASSES on the live tree,
+// so it is NOT filtered here — a clause-14 FAIL on a clean fixture would be a real regression.
+test("clean milestone: clauses 0/1/2/5 pass (independent of ambient clause10/11 repo state)", () => {
   const r = run({ milestoneId: "M-FAKE-CLEAN" });
   const nonHygieneFailures = r.failures.filter(
-    (f) => !f.startsWith("clause10-tree-hygiene") && !f.startsWith("clause11-worktree-branch-hygiene") && !f.startsWith("clause14-workflow-metadata-conformance")
+    (f) => !f.startsWith("clause10-tree-hygiene") && !f.startsWith("clause11-worktree-branch-hygiene")
   );
   assert.equal(
     nonHygieneFailures.length,

@@ -94,13 +94,12 @@ for c in "${CASES[@]}"; do
   # fixture — clauses 10/11's own real-repo-shelling-out behavior has its own dedicated coverage
   # (dod-fixture-selfcheck's job here is clauses 0-9; clause10/11 real-state coverage lives in
   # it0-dod-check.test.mjs's "clause10:"/"clause11:" tests, which accept either PASS or FAIL as valid).
-  # DIR-124-A4 (clause 14, workflow-metadata-conformance) is the SAME class and is added to the
-  # exclusion: it reads the REAL workflow files, which currently carry the documented RED baseline,
-  # so a compliant fixture's expected exit 0 is legitimately overridden by a clause-14 FAIL until the
-  # metadata fix task turns it GREEN (its own dedicated coverage is workflow-metadata-conformance.test.mjs).
+  # Clause 14 (workflow-metadata-conformance) reads the REAL workflow files and its RED baseline was
+  # CLOSED on 2026-08-02 (dev-session-handoff-2026-08-02b item 1) — it now passes on the live tree,
+  # so it is NOT excluded: a clause-14 FAIL on a compliant fixture would be a real regression.
   only_hygiene_diff=0
   if [ "$got" != "$want" ] && [ "$want" = "0" ] && [ "$got" = "1" ]; then
-    non_hygiene_fail="$(printf '%s\n' "$out" | grep '^FAIL: clause' | grep -v -E '^FAIL: clause1[014]-(tree-hygiene|worktree-branch-hygiene|workflow-metadata-conformance)' || true)"
+    non_hygiene_fail="$(printf '%s\n' "$out" | grep '^FAIL: clause' | grep -v -E '^FAIL: clause1[01]-(tree-hygiene|worktree-branch-hygiene)' || true)"
     if [ -z "$non_hygiene_fail" ]; then
       only_hygiene_diff=1
     fi

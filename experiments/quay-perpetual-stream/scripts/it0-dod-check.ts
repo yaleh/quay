@@ -893,16 +893,9 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
 // executable body (phase-set alignment, return-outcome claims, re-entry multiplicity, worktree
 // logic, node-invocation convention, gate-count, cache/resume, mirror-byte-identity). Runs
 // UNCONDITIONALLY every check (mirrors clauses 10/11/13's shape — always dispositioned, never
-// conditionally-skippable).
-//
-// ADVISORY on the RED baseline (2026-08-02 decision): the live tree's workflow metadata carries
-// real drift (Build-Evidence body-only phase, stale 'building' claim, unclaimed 'revision-needed').
-// Making this clause BLOCKING while that RED baseline is open would fail-closed EVERY milestone's
-// DoD gate (any `failures` entry exits 1) — a deployment hazard, not a gate. So a FAIL is reported
-// as a WARN-level disposition (non-blocking) with the concrete drift listed, and the separate
-// metadata-fix task (DIR-124-A4's Plan step 6) is the step that closes the baseline and re-enables
-// this clause as a hard gate. The checker's drift detection is the deliverable; the block is gated
-// on the baseline closing.
+// conditionally-skippable). BLOCKING: the RED baseline was closed on 2026-08-02 (Build-Evidence
+// added to meta.phases, 'building' claim removed, 'revision-needed' claimed) — a FAIL now means
+// real drift and must fail the DoD gate.
 {
   const scriptPath = path.join(__dirname, "workflow-metadata-conformance.mjs");
   if (!fs.existsSync(scriptPath)) {
@@ -919,12 +912,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
       let parsed = null;
       try { parsed = JSON.parse(out); } catch (_) { /* parse failure handled below */ }
       const failCount = parsed && Array.isArray(parsed.failures) ? parsed.failures.length : "?";
-      const drift = parsed && Array.isArray(parsed.failures)
-        ? parsed.failures.map((f) => `${f.file}: ${f.check}: ${f.detail}`).join("; ")
-        : out.slice(0, 300);
-      // ADVISORY (non-blocking) — see the block comment above. Reported as a disposition, not a
-      // `failures` entry, so the loop is not blocked on the RED baseline.
-      passes.push(`clause14-workflow-metadata-conformance: WARN (advisory — RED baseline; metadata-fix task closes it) — ${failCount} FAIL(s): ${drift}`);
+      failures.push(`clause14-workflow-metadata-conformance: FAIL — ${failCount} FAIL(s): ${(parsed && Array.isArray(parsed.failures) ? parsed.failures.map((f) => `${f.file}: ${f.check}: ${f.detail}`).join("; ") : out.slice(0, 300))}`);
       dispositionedClauses.add("workflow-metadata-conformance");
     } else {
       throw new DodCheckEnvError(`ERROR: workflow-metadata-conformance.mjs usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);

@@ -118,42 +118,40 @@ test("C3: --json output carries failures[]/warnings[] and only failures drive ex
   assert.equal(warnOnly.status, 0, `WARN-only run must exit 0, got ${warnOnly.status}`);
 });
 
-// ── AC4/AC5/AC9/AC6/AC7/AC8: real-files RED baseline + parseability regression ──────────────────
-// COUPLING WARNING (DIR-124-A4 Landed evidence): the assertions below pin the CURRENT documented
-// RED baseline (Build-Evidence body-only phase, stale 'building' claim, unclaimed 'revision-needed'
-// outcome, unmentioned worktree/cache mechanisms). Plan step 6 of DIR-124-A4 — the separate
-// metadata-fix task — is EXPECTED to turn these GREEN; when it does, THIS TEST (and the
-// dod-fixture-selfcheck.sh clause-14 exclusion and the it0-dod-check.test.mjs clean-milestone
-// clause-14 filter) must be updated to the new baseline. That is the checker working, not a bug.
-test("AC4/AC5: real execute-milestone.js is parseable and produces the documented RED baseline findings", async () => {
+// ── AC4/AC5/AC9/AC6/AC7/AC8: real-files GREEN baseline + parseability regression ─────────────────
+// The RED baseline (Build-Evidence body-only phase, stale 'building' claim, unclaimed
+// 'revision-needed') was CLOSED on 2026-08-02 (dev-session-handoff-2026-08-02b item 1): Build-Evidence
+// added to meta.phases, 'building' removed from the description, 'revision-needed' claimed. These
+// assertions pin the GREEN baseline — a FAIL here means the drift REGRESSED, which is a real bug.
+test("AC4/AC5: real execute-milestone.js is parseable and produces ZERO phase-set/return-outcome FAILs (GREEN baseline)", async () => {
   const m = await loadModule();
   const src = fs.readFileSync(REAL_EXECUTE, "utf8");
 
   const meta = m.extractMeta(src);
   assert.equal(meta.ok, true, `extractMeta failed on real execute-milestone.js: ${meta.error}`);
   assert.equal(meta.name, "execute-milestone");
-  assert.equal(meta.phases.length, 7, `execute-milestone meta.phases must declare 7 phases, got ${meta.phases.length}`);
+  assert.equal(meta.phases.length, 8, `execute-milestone meta.phases must declare 8 phases (incl. Build-Evidence), got ${meta.phases.length}`);
 
   const phases = m.extractPhases(src);
   assert.deepEqual(phases.uniqueLabels, ["Verify", "Prepared", "Build", "Build-Evidence", "Audit", "Gate", "Reconcile", "Land"],
     "extractPhases must find all 8 body phase() call sites including Build-Evidence");
-  assert.ok(phases.uniqueLabels.includes("Build-Evidence"), "body must call Build-Evidence (drift class #1)");
+  assert.ok(phases.uniqueLabels.includes("Build-Evidence"), "body must call Build-Evidence");
 
   const outcomes = m.extractReturnOutcomes(src);
   assert.ok(outcomes.outcomeValues.includes("done"), "body returns 'done'");
   assert.ok(outcomes.outcomeValues.includes("needs-human"), "body returns 'needs-human'");
-  assert.ok(outcomes.outcomeValues.includes("revision-needed"), "body returns 'revision-needed' (drift class #2)");
-  assert.ok(!outcomes.outcomeValues.includes("building"), "body NEVER returns 'building' (drift class #2 stale claim)");
+  assert.ok(outcomes.outcomeValues.includes("revision-needed"), "body returns 'revision-needed'");
+  assert.ok(!outcomes.outcomeValues.includes("building"), "body NEVER returns 'building'");
 
   const res = m.checkFile(REAL_EXECUTE, src);
-  assert.ok(res.failures.some((f) => f.check === "phase-set" && /Build-Evidence/.test(f.detail)),
-    "RED baseline: Build-Evidence body-only phase must be a FAIL");
-  assert.ok(res.failures.some((f) => f.check === "return-outcomes" && /'building'/.test(f.detail)),
-    "RED baseline: stale 'building' claim must be a FAIL");
-  assert.ok(res.failures.some((f) => f.check === "return-outcomes" && /'revision-needed'/.test(f.detail)),
-    "RED baseline: unclaimed 'revision-needed' outcome must be a FAIL");
+  // GREEN baseline: the three drift classes are closed. A FAIL here is a regression.
+  assert.equal(res.failures.filter((f) => f.check === "phase-set").length, 0,
+    `no phase-set FAIL expected (Build-Evidence now in meta.phases): ${JSON.stringify(res.failures)}`);
+  assert.equal(res.failures.filter((f) => f.check === "return-outcomes").length, 0,
+    `no return-outcomes FAIL expected ('building' removed, 'revision-needed' claimed): ${JSON.stringify(res.failures)}`);
+  // WARN-level metadata omissions (worktree not mentioned) remain — out of A4's scope, advisory.
   assert.ok(res.warnings.some((w) => w.check === "worktree"),
-    "RED baseline: unmentioned worktree mechanism must be a WARN");
+    "unmentioned worktree mechanism is a WARN (metadata omission, not a false claim)");
 });
 
 test("AC4: real prepare-milestone.js is parseable; re-entrant phases reported as WARN (drift class #3/#9)", async () => {
@@ -188,11 +186,8 @@ test("AC9: mirror byte-identity check on the 4 real files (both pairs identical 
   assert.equal(result.mirrored.length, 2, "two mirror pairs expected");
   assert.ok(result.mirrored.every((mm) => mm.identical), `mirror pairs must be identical: ${JSON.stringify(result.mirrored)}`);
   assert.ok(!result.failures.some((f) => f.check === "mirror-identity"), "no mirror-identity FAIL expected on the live tree");
-  // The live tree currently carries the documented RED baseline (drift classes #1/#2).
-  assert.equal(result.ok, false);
-  const baselineChecks = result.failures.map((f) => f.check + ":" + f.detail);
-  assert.ok(result.failures.filter((f) => f.check === "phase-set" && /Build-Evidence/.test(f.detail)).length >= 2,
-    `Build-Evidence stale-metadata FAIL must appear for both execute mirrors: ${JSON.stringify(baselineChecks)}`);
+  // GREEN baseline (RED drift closed 2026-08-02): checkAll is fully ok.
+  assert.equal(result.ok, true, `checkAll must be ok (GREEN baseline): ${JSON.stringify(result.failures)}`);
 });
 
 test("real-sourcefiles-were-parseable regression: both real files parse across every extraction function", async () => {
@@ -362,11 +357,11 @@ test("C4: stale/clean fixture filenames never appear in .claude/workflows/", () 
 // ── AC3/C6: DoD-gate shell-out contract (the clause runs the script with --json from repo root) ──
 test("C6: the script's default invocation (no --files) resolves the 4 real workflow files from the workspace root", () => {
   // The DoD clause shells out with no --files and cwd = repo root; the checker must find the 4
-  // real files and report the RED baseline (ok:false) — proving the clause's child process is not
-  // vacuously green.
+  // real files and report the GREEN baseline (exit 0) — proving the clause's child process is not
+  // vacuously green (it actually reads and checks the files).
   const r = spawnSync("node", [SCRIPT, "--json"], { cwd: REPO_ROOT, encoding: "utf8" });
-  assert.equal(r.status, 1, `default invocation must exit 1 on the current RED baseline, got ${r.status}`);
+  assert.equal(r.status, 0, `default invocation must exit 0 on the GREEN baseline, got ${r.status}`);
   const json = JSON.parse(r.stdout);
   assert.equal(json.files.length, 4, `default invocation must check exactly 4 files, got ${json.files.length}`);
-  assert.ok(json.failures.length >= 6, `default invocation must surface the RED baseline (>=6 FAILs), got ${json.failures.length}`);
+  assert.equal(json.failures.length, 0, `default invocation must surface ZERO FAILs (GREEN baseline), got ${json.failures.length}`);
 });
