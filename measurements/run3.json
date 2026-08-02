@@ -1,0 +1,91 @@
+{
+  "filesTotal": 159,
+  "filesCaptured": 159,
+  "wallClockMs": 460928,
+  "sumDurationMs": 3266468.442791,
+  "ratioSumOverWall": 7.086721663233737,
+  "exitStatus": 1,
+  "runAt": "2026-08-02T16:18:26.457Z",
+  "slowest": [
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/cli.test.mjs",
+      "durationMs": 201548
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+      "durationMs": 184853
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/acceptance.test.mjs",
+      "durationMs": 179140
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs",
+      "durationMs": 178849
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/driver.test.mjs",
+      "durationMs": 167919
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/lifecycle.test.mjs",
+      "durationMs": 156001
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/delivery-standalone-smoke-gate.test.mjs",
+      "durationMs": 139188
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/plugin/test/prepare-milestone-convergence.test.mjs",
+      "durationMs": 111348
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/gap002-create-ergonomics.test.mjs",
+      "durationMs": 75563
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/cli-adr.test.mjs",
+      "durationMs": 69761
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/plugin/test/execute-milestone-worktree.test.mjs",
+      "durationMs": 67057
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/ts-typecheck-gate.test.mjs",
+      "durationMs": 62854
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/plugin/test/codex-stage1-adapter.test.mjs",
+      "durationMs": 60648
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/gate.test.mjs",
+      "durationMs": 60321
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/gap-cli-gate-enforcement.test.mjs",
+      "durationMs": 59634
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/dir032-audit-independence.test.mjs",
+      "durationMs": 54779
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/plugin/test/execute-milestone-disposition-conformance.test.mjs",
+      "durationMs": 51789
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/plugin/test/runner-grouping.test.mjs",
+      "durationMs": 50502
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/plugin/test/prepare-admission-check.test.mjs",
+      "durationMs": 50132
+    },
+    {
+      "file": "/tmp/quay-wt-costmodel/packages/quay/test/web-ui-browser.test.mjs",
+      "durationMs": 47883
+    }
+  ]
+}

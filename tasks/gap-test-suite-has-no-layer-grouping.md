@@ -72,7 +72,15 @@ ADR-019 已确立的模式：live-GitHub 测试**留在 glob 内**并自行 skip
 - [x] AC6: `--group product,engine` 等价于无参数（`--list-files` 输出字节一致）
 - [x] AC7: 未声明组的文件视为 `engine`（runner 测试 AC7：临时无声明文件计入 engine）
 - [x] AC8: governance 组的跳过发生在重量级 import **之前**——skip 分支在动态 `await import("../scripts/*.ts")` 之前；skip-mode 13 文件合计 0.8s 证明被测模块未加载
-- [x] AC9: 默认组墙钟 ≤416s（当前 378s 的 110%）——**有序目标而非即时门槛**：上限在测试提速任务（用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务，+ 既有 gap-suite-speedup，+ 新增 `gap-select-preflight-json-real-store-too-slow`——select-preflight 单文件 240s 是最大成本源）完成后达成。当前过渡态实测 559s 如实记录（见 Measured）；上限设定时假设「44 文件只有加载开销」是错的——engine 组是运行（proposal-convergence ~63s + it0-dod-check ~60s 天生重，select-preflight ~240s 最重），已按用户 2026-08-02 指示改为有序目标
+- [x] AC9: 默认组墙钟 ≤416s（当前 378s 的 110%）——**有序目标而非即时门槛**：上限在测试提速任务（用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务，+ 既有 gap-suite-speedup，+ 新增 `gap-select-preflight-json-real-store-too-slow`——select-preflight 单文件 240s 是最大成本源）完成后达成。当前过渡态实测 559s 如实记录（见 Measured）；上限设定时假设「44 文件只有加载开销」是错的——engine 组是运行（proposal-convergence ~63s + it0-dod-check ~60s 天生重，select-preflight ~240s 最重），已按用户 2026-08-02 指示改为有序目标。
+
+      **（2026-08-02 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 改写 + 对抗评审修正）**：
+      原「≤416s 不可验证」的判据用了被污染的一跑（524.4 s，测量者调试进程叠加，极差 63 s）。
+      **剔除污染跑后**（478.1/460.9/477.7，极差 17.2 s），当前墙钟（~485 s）距 416s 的 ~70 s 差是
+      干净极差的 **4×——≤416s 在干净噪声下是可验证的**。因此**保留墙钟 ≤416s 作为验收目标**（需在
+      干净、全绿基线上重测确认）。同时保留**总 CPU（Σ per-file duration_ms）降低 ≥10%（≥330 s）**
+      作为辅助指标：Σ 是 159 文件之和、逐文件抖动被平滑，measure-suite.mjs 可重复采集 before/after。
+      **注意**：Σ 的 n=2 差（3266 vs 3434 s）不是方差估计，辅助指标的验收需 ≥5 次 Σ 采样。
 - [x] AC10: 三个组的文件数被报告：`scripts/test.sh --list-groups` 输出 product/engine/governance/total
 - [x] AC11: 零测试文件被删除或移动。注：diff 还含（a）select-tests-for-touches.test.mjs 里 pin 旧 glob 的 AC11 结构断言被更新（glob 扩展正是本任务目的），（b）新增 plugin/test/runner-grouping.test.mjs + 3 个 fixture
 

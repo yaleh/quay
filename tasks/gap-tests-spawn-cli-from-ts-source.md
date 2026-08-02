@@ -39,6 +39,15 @@ Two results that contradict the obvious guess:
 entry. 129 × 2.1 s ≈ 271 s **of summed CPU** — but the suite runs at `--test-concurrency=8`, so
 **wall-clock is bounded by the slowest single file, not by the sum**.
 
+> **修正（`gap-suite-cost-model-is-wrong-optimizations-buy-nothing`, 2026-08-02 + 对抗评审）**：这个
+> 「墙钟由最慢单文件决定」的模型**已被实测否定**——套件 wall-clock（~485 s）远大于最慢文件的套件内
+> 时长（cli 201.5 s），比值 Σ/wall ≈ 7.1（并发度 8）说明 8 条 lane 近饱和。但**定量因果要更谨慎**：
+> 「118 s 单文件节省（隔离测得）→ 理论墙钟 15 s」这个映射**不成立**——隔离时长与套件内时长不同域
+> （in-suite cli 201.5 s vs 隔离 66 s，争用主导），所以**不能用「118 s 买 2 s」断言单文件优化无效**；
+> 只能说墙钟 491→489（2 s）**在噪声内不可判定**（干净噪声极差 17 s，含污染跑 63 s）。下方
+> 「cli.test.mjs … 墙钟 583 s → ~300 s」的预测未兑现（实际 489 s）。本任务的正确性理由
+> （测 `dist/quay.js` 真实产物）独立于提速理由而成立，改动保留。
+
 实测（2026-08-02，套件 583s / 1218 tests / 0 fail）：
 
 | 文件 | 耗时 | 占墙钟 | 成因 |

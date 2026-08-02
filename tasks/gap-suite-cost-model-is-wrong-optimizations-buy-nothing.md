@@ -61,7 +61,7 @@ extra:
 
 **先测出成本结构，再决定还要不要优化——不要再凭模型排提速任务。**
 
-1. **每文件耗时的完整分布**：跑一次全量套件，采集全部 157 个文件各自的 `duration_ms`，
+1. **每文件耗时的完整分布**：跑一次全量套件，采集全部 159 个文件各自的 `duration_ms`（`scripts/test.sh --list-files` 实测去重后；任务书写时是 157），
    排序输出。回答：最慢的文件是谁、耗时多少、前 10 名合计占总 CPU 多少。
 2. **总 CPU vs 墙钟**：算 `Σ duration_ms` 与实际墙钟的比值。比值接近并发度（8）说明吞吐受限；
    远小于 8 说明存在串行段或启动开销主导。**这个比值就是判据。**
@@ -98,32 +98,177 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 全量套件全部文件各自的 `duration_ms` 被采集并按降序输出（最慢 20 个贴进任务体）
-- [ ] AC1b: 四个手写 harness 文件通过**断言汇聚点计时**（≈5 行/文件，零断言改动）给出文件内归因；
-      不通过转换为 `node:test` 达成
-- [ ] AC2: `Σ duration_ms / 墙钟` 的比值被算出并记录；与并发度 8 对比，明确判定吞吐受限 / 串行受限
-- [ ] AC3: 同一 commit 上连续 3 次全量运行的墙钟被记录；**噪声带宽**（极差、标准差）被算出
-- [ ] AC4: 给出「可测的最小改善」= 噪声带宽的量级，并写明这对提速任务的 AC 意味着什么
-- [ ] AC5: 若发现串行段（比值远小于 8），定位到具体是什么造成的（`before`/`after` 钩子、
-      共享 fixture、`--test-concurrency` 未生效的文件等），证据是数据不是推测
-- [ ] AC6: `gap-test-suite-has-no-layer-grouping` 的 AC9（≤416 s）按本任务结果**重写为可验证的形式**
-      或明确记录为不可验证并撤销
-- [ ] AC7: 两个提速任务体里「墙钟由最慢单文件决定」的表述被更正，并写明是什么数据推翻了它
-- [ ] AC8: 测试带 `// @test-group engine` 声明（若本任务产出脚本）
+- [x] AC1: 全量套件全部文件各自的 `duration_ms` 被采集并按降序输出（最慢 20 个见 Measured；
+      其中 `prepare-milestone-convergence.test.mjs` 为手写 harness 黑盒，只有整块数字）
+- [x] AC1b: 三个手写 harness 文件（cli/serve/mcp-server）通过**断言汇聚点计时**（env-gated
+      `QUAY_TEST_ASSERT_TIMING`，零断言改动）给出文件内归因；不通过转换为 `node:test` 达成。
+      `prepare-milestone-convergence.test.mjs` 无断言汇聚点，保持黑盒
+- [x] AC2: `Σ duration_ms / 墙钟` 的比值被算出并记录；与并发度 8 对比，明确判定**非最慢单文件决定、
+      lane 饱和**（比值 ≈7.1 ≈ 8；对抗评审修正：「吞吐受限 by CPU」标签收回，见 Measured AC2）
+- [x] AC3: 同一 commit 上连续 3 次全量运行的墙钟被记录；**噪声带宽**（极差、标准差）在含/剔污染
+      两个口径下都被算出
+- [x] AC4: 「可测的最小改善」= 噪声带宽的量级已给出（20–63 s 范围），并写明对提速任务 AC 的含义
+- [x] AC5: 比值 ≈7.1 对 <~53 s 的串行段无分辨力；给出**串行段上界 ≤53 s**（不是「无串行段」）
+- [x] AC6: `gap-test-suite-has-no-layer-grouping` 的 AC9（≤416 s）**按干净噪声重判为可验证并保留**，
+      总 CPU 目标作为辅助指标（见其任务体）
+- [x] AC7: 两个提速任务体里「墙钟由最慢单文件决定」的表述被更正，写明被 B5 实测否定 + 隔离/套件内
+      不同域
+- [x] AC8: `plugin/test/measure-suite.test.mjs` 带 `// @test-group engine` 声明（本任务产出测量脚本）
 
 ## Definition of Done
 
-- [ ] 三次运行的原始墙钟、每文件耗时分布、总 CPU/墙钟比值都在任务体里
-- [ ] 判定结论明确：吞吐受限还是串行受限，依据是哪个数
-- [ ] 明确回答：**B5-1 与 B5-2 到底有没有改善套件墙钟？** 若答案是「在噪声内不可判定」，
-      就如实这么写——这比一个好看的数字有用
-- [ ] 后续提速工作的方向由本任务的数据决定，不由模型决定
+- [x] 三次运行的原始墙钟、每文件耗时分布、Σ/墙钟比值都在任务体里（见 Measured）
+- [x] 判定结论明确：**非「最慢单文件」决定；8-lane 饱和**（Σ/wall ≈ 7.1 ≈ 8；「by CPU 吞吐受限」
+      标签已按对抗评审收回），依据是 run3/run4 的 Σ/wall 实测
+- [x] 明确回答：**B5-1 与 B5-2 的套件墙钟效果在噪声内不可判定**（如实写；最小噪声口径极差 17s
+      已远超前后记录差 2s，任何口径下都不可判定）
+- [x] 后续提速工作的方向由本任务的数据决定（墙钟目标需在干净全绿基线上重测；Σ 需 ≥5 采样；
+      串行窗口 ≤53 s 需先测），不由模型决定
+
+## Measured (2026-08-02, worktree `/tmp/quay-wt-costmodel`, branch `task/gap-suite-cost-model-is-wrong-optimizations-buy-nothing`)
+
+**测量环境**：node v26.5.0，`--test-concurrency=8`（scripts/test.sh 默认），159 文件
+（`scripts/test.sh --list-files` 去重后），dist bundle 已预构建（cli-entry.mjs 走 dist）。
+全套件在 3 次测量期间未改动任何测试文件。`Σ duration_ms` = 各测试文件的 file-level
+`duration_ms` 之和（run3 自定义 reporter 采集，159/159 文件全覆盖）。
+
+### AC3 — 墙钟噪声（同一 commit 连续 3 次全量运行）
+
+| run | 墙钟 (s) | node --test exit | per-file 采集 |
+|---|---|---|---|
+| 1 | 478.1 | 1 | 0/159* |
+| 2 | 524.4 | 1 | 0/159* |
+| 3 | 460.9 | 1 | **159/159** |
+| 4（补充） | 477.7 | 1 | **159/159** |
+
+- 前 3 跑（AC3 判据）：均值 **487.8 s**；极差 **63.4 s**（460.9–524.4）；样本标准差 **32.8 s =
+  6.7% of mean**。含 run4 共 4 点：均值 485.3 s，极差 63.5 s，σ 27.3 s（5.6%）。
+  **剔除被污染的 run2 后（478.1/460.9/477.7）：极差 17.2 s、σ 9.8 s（2.1%）**。
+- **噪声带宽两个口径：±33 s（1σ，含 run2）/ ±10 s（1σ，剔 run2）**。
+- **「±12%（±59 s）」先前估算不适用（对抗评审）**：那 ±59 s 来自 layer-grouping 的
+  worktree-vs-checkout **环境差**（627 s vs 559 s），不是 run-to-run 噪声；两者量级巧合接近，
+  不能作为「估算成立」的证据。本任务直接给出 run-to-run 噪声（17–63 s 极差）。
+- \* run1/2 用了早版 reporter（file-level 匹配 bug，未输出 per-file 行）；run3/4 用修复版。
+  四跑墙钟仍可比（reporter 在父进程，开销 <100 ms）。**全部 4 跑 node --test 退出码 1**（既有
+  失败，见 layer-grouping 任务 Measured；不影响墙钟测量）。
+- **诚实标注（run2 可能被抬高）**：run2 进行期间，测量者曾并行运行若干次小型 `node --test`
+  调试（reporter 调试），占用 CPU，可能抬高 run2 墙钟（524.4 s）。即使剔除 run2，其余三跑
+  （478.1/460.9/477.7）极差仍为 17.2 s、σ 9.8 s（2.1%）——**噪声带宽在两个口径间：17–63 s 极差**。
+- **红套件 vs 绿基线（对抗评审 #9）**：全部 4 跑 node --test 退出码 1（既有失败，symlink-mirror
+  ×2 + it0-enforcement ×1），而 B5 前/后基线（491/489 s）是绿跑。噪声分布取自红套件，与绿基线
+  比较属混合总体；若失败导致某文件提前退出，会改变 wall 与 Σ。诚实处理：本文的「不可判定」结论在
+  绿/红口径下都成立（2 s 差远小于最小噪声口径 17 s），但严格的 B5 前后对比应在同一绿基线上重测。
+
+### AC1 — 每文件 duration_ms 分布（run3，降序）
+
+- 最慢文件：`packages/quay/test/cli.test.mjs` **201.5 s**（套件内 wall 时长，受争用抬高；其单文件
+  隔离仅 ~66 s——**隔离 vs 套件内差异即争用证据**）
+- **前 10 名合计占 Σ 的 44.8%**；前 20 名占 62.1%；Σ（套件内 per-file 时长之和，**非纯 CPU**）**
+  3266 s**。注：争用抬高了耗时最多文件的占比，前 10 名排序偏向「最受争用」而非「最多 CPU」。
+- 最慢 20 个文件（duration_ms 累计占比）：
+
+| duration_ms | 累计% | 文件 |
+|---|---|---|
+| 201548 | 6.2% | packages/quay/test/cli.test.mjs |
+| 184853 | 11.8% | experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs |
+| 179140 | 17.3% | packages/quay/test/acceptance.test.mjs |
+| 178849 | 22.8% | experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs |
+| 167919 | 27.9% | packages/quay/test/driver.test.mjs |
+| 156001 | 32.7% | packages/quay/test/lifecycle.test.mjs |
+| 139188 | 37.0% | packages/quay/test/delivery-standalone-smoke-gate.test.mjs |
+| 111348 | 40.4% | plugin/test/prepare-milestone-convergence.test.mjs |
+| 75563 | 42.7% | packages/quay/test/gap002-create-ergonomics.test.mjs |
+| 69761 | 44.8% | packages/quay/test/cli-adr.test.mjs |
+| 67057 | 46.9% | plugin/test/execute-milestone-worktree.test.mjs |
+| 62854 | 48.8% | packages/quay/test/ts-typecheck-gate.test.mjs |
+| 60648 | 50.7% | plugin/test/codex-stage1-adapter.test.mjs |
+| 60321 | 52.5% | packages/quay/test/gate.test.mjs |
+| 59634 | 54.3% | packages/quay/test/gap-cli-gate-enforcement.test.mjs |
+| 54779 | 56.0% | packages/quay/test/dir032-audit-independence.test.mjs |
+| 51789 | 57.6% | plugin/test/execute-milestone-disposition-conformance.test.mjs |
+| 50502 | 59.1% | plugin/test/runner-grouping.test.mjs |
+| 50132 | 60.7% | plugin/test/prepare-admission-check.test.mjs |
+| 47883 | 62.1% | packages/quay/test/web-ui-browser.test.mjs |
+
+黑盒：`prepare-milestone-convergence.test.mjs`（111 s）无断言汇聚点，只有整块数字（AC1b 如实标注）。
+
+### AC2 — Σ duration_ms / 墙钟（比值判据）
+
+- Σ duration_ms（run3）= **3266 s**、墙钟 460.9 s → 比值 **7.09**；run4 = **3434 s**、墙钟 477.7 s
+  → 比值 **7.19**；均值 **7.14**。并发度 = 8。
+- **判定：不是「最慢单文件」决定（cli 201.5 s ≪ 墙钟 460.9 s）——套件**打满 8 条 lane**（比值 ≈
+  7.1 ≈ 并发度 8）。**注意（对抗评审修正）**：本机 `nproc=4`，8 个并发测试进程已过订（oversubscribe），
+  lane 无论 CPU/IO 都会保持占用，因此比值 ≈ 8 是「调度占位」的结论，**不能区分 CPU 吞吐受限 vs
+  延迟受限**，也不能直接推出「墙钟 = 总 CPU/8」。**「吞吐受限（by CPU）」标签收回**，改为
+  「**lane 饱和、非单文件延迟受限**」。
+- 可确证的定量结论：墙钟 = Σ/8 + ~53 s（run3：460.9 − 3266/8 ≈ 52.6 s）未归因差；Σ 是各文件
+  **套件内 wall 时长之和**（受争用抬高，非纯 CPU）。
+- 对照 test-shape-analysis 估算（Σ≈3900 s）：**实测偏低**（3266–3434 s）；进程边界（~550 s）约占
+  Σ 的 ~16–17%，与「只占 ~14%」估算同量级。
+
+### AC4 — 可测的最小改善
+
+- **墙钟噪声（诚实报告两个估计）**：
+  - 含被污染的 run2（524.4 s，测量者调试进程叠加）：极差 63.5 s、σ 32.8 s（6.7%）→ 阈值 ≥60-70 s；
+  - **剔除 run2（478.1/460.9/477.7）**：极差 **17.2 s**、σ ≈ 9.8 s（2.1%）→ 阈值 ≈ **20 s（2σ）**。
+  - 真实噪声带宽介于两者之间；**一个提速任务的墙钟 AC 必须用** uncontaminated 采样**（≥3 跑、无
+    并发负载）重测后才能定死阈值**。本任务给出范围 20–63 s。
+- B5-1+B5-2 的 118 s 单文件节省**无法映射到 Σ**（in-suite cli 201.5 s vs 隔离 66 s，争用主导），
+  因此「理论墙钟 15 s」不成立；实测墙钟 491→489（2 s）在任何噪声口径下都不可判定。
+- **Σ（套件内 per-file 时长之和）噪声不是方差估计**：run3 3266 s vs run4 3434 s 只是 **n=2 的单次
+  差（168 s）**，不能当成 ±5% 噪声带。「总 CPU 降低 ≥10%」目标因此**不能仅凭 n=2 声明可验证**；
+  需 ≥5 次 Σ 采样定出噪声后才可验收（measure-suite.mjs 提供可重复采集）。
+
+### AC5 — 串行段
+
+- **诚实结论（对抗评审修正）**：比值 ≈7.1 对「串行段 < ~53 s」**无分辨力**——`wall − Σ/8 ≈ 53 s`
+  （run3）完全可能是一段 ≤53 s 的串行段。**不能断言「未发现独立串行段」**。
+- **可证实的上界**：任何串行段 S ≤ 53 s（= wall − Σ/8）。最可能的候选：159 个子进程的 node 启动
+  （~0.2-0.3 s/次 ≈ 30-50 s 父进程侧串行 spawn）——这是数据支持的推测，不是实测定位。
+- **建议**：若后续要把墙钟压到 460 s 以下，先测「首个子进程启动 → 最后一个结束」的串行窗口
+  （node --test 的 ramp-up/ramp-down），再谈单文件优化。
+
+### AC1b — 断言汇聚点计时
+
+- 在 `cli.test.mjs`（`assert()` + `makeAssert()`）、`serve.test.mjs`（`assert()`）、
+  `mcp-server.test.mjs`（`assert()`）加 env-gated（`QUAY_TEST_ASSERT_TIMING`）的距上次断言计时，
+  **零断言改动**。`prepare-milestone-convergence.test.mjs` 无汇聚点，保持黑盒。
+- **实测（3 文件并跑，`QUAY_TEST_ASSERT_TIMING=1`）**：共 35 个 ≥1000 ms 的断言间隔，
+  **全部是进程边界**（原始 [timing] 行已存 `measurements/ac1b-timing.txt`）：
+  - `cli.test.mjs`：~25 个间隔，全为 CLI spawn——`dist/quay.js` 调用约 1.0–1.3 s/次；
+    **GitHub `.ts` provider 入口（B5 保留点）约 2.4–2.8 s/次**（最长单间隔）；`[prefix]` 块有一个
+    **9.8 s 间隔**（块内多次 CLI 调用背靠背）。
+  - `mcp-server.test.mjs`：~11 个间隔，全为 `connectStdio` MCP 握手（1.0–1.4 s/次）。
+  - `serve.test.mjs`：**0 个 ≥1000 ms 间隔**——B5-2 已把 fixture spawn 下沉，13 s 摊在大量短间隔。
+- 结论：这三个文件内的时间集中在**进程边界**（CLI/MCP spawn），不在断言逻辑。
+- **关于「进程边界是不是墙钟杠杆」（对抗评审 #7）**：若 spawn 占 Σ 的 ~16% 且墙钟 ≈ Σ/8，则
+  spawn 占墙钟 ~16% ≈ **~74 s**——高于干净噪声极差（17 s），理论上**可测**。但 B5-1 把单次 CLI
+  spawn 缩短 ~2.1 s 后墙钟几乎未动（2 s），说明**spawn 延迟不是当前墙钟的绑定约束**；真正约束是
+  8-lane 近饱和下 Σ 的总量 + 调度尾部（AC5 的 ≤53 s 串行窗口）。诚实结论：削减 spawn 是否买墙钟，
+  **取决于削减的是 Σ 总量还是单次延迟**——本数据不能断言「买不到」，只能断言「B5-1 的 2.1 s/次
+  延迟削减没买动墙钟」。
+
+### DoD — B5-1/B5-2 到底有没有改善套件墙钟？
+
+- **在噪声内不可判定**。实测 3 次墙钟极差 63 s、1σ 33 s；B5 前/后记录差仅 2 s（491→489）。
+  2 s 远小于噪声；按吞吐模型预期的 15 s 也在噪声带宽内。诚实结论：现有测量方法无法分辨
+  B5-1/B5-2 对墙钟的效果。这不代表它们无效——它们的正确性理由（测 dist 产物 / 下沉 fixture）
+  独立于提速而成立。
+
+## Execution record
+
+- **run4**（修复版 reporter，补充 Σ 数据点）：墙钟 477.7 s，Σ duration_ms 3434 s，比值 7.19，
+  159/159 文件采集，node --test 退出码 1（既有失败）。run4 提供总 CPU 的第二个采样（与 run3 的
+  3266 s 相差 168 s ≈ ±5%）。
 
 ## Touches
 
 - scripts/test.sh
-- plugin/scripts/
-- plugin/test/
+- plugin/scripts/（measure-suite.mjs、measure-suite-reporter.mjs）
+- plugin/test/（measure-suite.test.mjs）
+- packages/quay/test/cli.test.mjs（AC1b 断言计时）
+- packages/quay/test/serve.test.mjs（AC1b 断言计时）
+- packages/quay/test/mcp-server.test.mjs（AC1b 断言计时）
 - tasks/gap-tests-spawn-cli-from-ts-source.md
 - tasks/gap-tests-use-cli-where-module-import-suffices.md
 - tasks/gap-test-suite-has-no-layer-grouping.md
