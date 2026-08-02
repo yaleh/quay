@@ -22,7 +22,8 @@
 #   scripts/test.sh --list-files                     # print the selected file list (test support / AC6)
 #   scripts/test.sh <file...>                         # just the given file(s), same default concurrency
 #   scripts/test.sh --test-name-pattern=X <file>   # any extra node --test flag passes through
-#   scripts/test.sh --experimental-test-coverage   # flags-only form also passes through
+#   scripts/test.sh --test-concurrency=4           # flags-only: extra node --test flag + the DEFAULT glob
+#   scripts/test.sh --experimental-test-coverage   # flags-only form also passes through (default glob kept)
 #   QUAY_TEST_LIVE_GITHUB=1 scripts/test.sh   # opt IN to the 3 live/conformance files too
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
@@ -48,6 +49,21 @@
 # --test-concurrency=8 is the default (ADR-019: measured 10.3% faster than the runtime default
 # with zero correctness regression across repeated runs, 514/514 pass at concurrency 4/8/16).
 # A later --test-concurrency=N on the command line overrides this (node --test is last-flag-wins).
+#
+# gap-test-sh-flags-only-form-silently-runs-a-different-suite: the flags-only form
+# (scripts/test.sh --test-concurrency=4, --experimental-test-coverage, ...) MUST keep the default
+# file glob. Before the fix, "flags + no files" fell through to `node --test` with an EMPTY file
+# list, so node auto-discovered ~3.7x more tests (8573 vs 2296, measured 2026-08-02) — a
+# documented invocation silently swapped the whole suite. Now any remaining all-flag args are
+# extra node --test flags PREPENDED to the selected glob, and every run self-reports its selection
+# ("selected N files (groups=…)") so a changed selection can never be silent (AC4).
+#
+# SCOPE LIMITATION (REFUTE round-1, MAJOR → documented): only the `=` spelling of a value-taking
+# flag (--test-concurrency=4, --test-name-pattern=X, ...) is covered by the flags-only branch.
+# The SPACE-separated form (--test-concurrency 4) presents a bare non-flag token that is
+# indistinguishable from a file path, so it still falls to the explicit-file branch — and, with no
+# files, node auto-discovers (the pre-fix behavior, unchanged). Use the `=` form for flags-only
+# runs; the space form with a value requires an explicit file list.
 #
 # gap-split-or-commit-not-continuously-checked: this script also runs the WHOLE-TASK-STORE
 # split-or-commit scan (it0-split-or-commit-check.ts, DIR-026's PARENT-DONE-IFF-CHILDREN /
@@ -186,10 +202,12 @@ build_dist_once() {
   fi
 }
 
-# run_selected <groups-csv> — build the selected file list and exec node --test. Runs the
-# split-or-commit whole-store scan first (same invariant as the default/no-args path).
+# run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
+# --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
+# path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
+# last-flag-wins, so a user --test-concurrency=N still overrides the default 8.
 run_selected() {
-  local groups="$1"
+  local groups="$1"; shift
   build_dist_once
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
@@ -200,10 +218,32 @@ run_selected() {
     echo "scripts/test.sh: no test files matched groups '$groups' (packages/*/test/*.test.mjs, plugin/test/*.test.mjs, experiments/quay-perpetual-stream/test/*.test.mjs)" >&2
     exit 1
   fi
-  exec node --test --test-concurrency=8 "${files[@]}"
+  # gap-test-sh-flags-only-form-silently-runs-a-different-suite (AC4): every GLOB-SELECTED run
+  # (default no-args, --group, flags-only) SELF-REPORTS its selection before executing, so a
+  # changed selection can never be silent — the 2296→8573 defect hid precisely because nothing
+  # stated how many files were being selected. Explicit-file and --for-task runs name their files
+  # explicitly, so their selection is already visible. N here is exactly what `--list-files` prints
+  # (the same select_files output), so AC4's "N == --list-files count" holds by construction.
+  echo "selected ${#files[@]} files (groups=${groups})"
+  exec node --test --test-concurrency=8 "$@" "${files[@]}"
 }
 
 # ── argument dispatch ────────────────────────────────────────────────────────────────────────────
+
+# all_flags "$@" — return 0 iff EVERY argument starts with '-'. Detects the flags-only invocation
+# form (gap-test-sh-flags-only-form-silently-runs-a-different-suite): when nothing but node --test
+# flags remain after subcommand handling, treat them as extra flags + the selected glob rather than
+# as file paths. An empty "$@" returns 0, but every caller checks $# -eq 0 first.
+all_flags() {
+  local a
+  for a in "$@"; do
+    case "$a" in
+      -*) ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
 
 groups=""
 if [ "${1:-}" = "--group" ]; then
@@ -233,6 +273,11 @@ elif [ -n "${groups}" ]; then
   if [ "$#" -eq 0 ]; then
     # Run the glob filtered to the requested groups.
     run_selected "$groups"
+  elif all_flags "$@"; then
+    # gap-test-sh-flags-only-...: bare node --test flags + the group's glob (e.g.
+    # `--group governance --test-concurrency=4`). Previously this fell to the explicit-file branch
+    # with an EMPTY file list → node --test auto-discovered a 3.7x-larger, different suite.
+    run_selected "$groups" "$@"
   else
     # Explicit files with the group env set (in-file skips apply).
     export QUAY_TEST_GROUPS="$groups"
@@ -318,6 +363,13 @@ elif [ "${1:-}" = "--for-task" ]; then
     exit "${sel_code}"
   fi
   exit "${test_code}"
+elif all_flags "$@"; then
+  # gap-test-sh-flags-only-...: bare node --test flags + the DEFAULT glob (the documented
+  # `--test-concurrency=4` and `--experimental-test-coverage` forms). Previously these fell to the
+  # explicit-file branch with an empty file list → node auto-discovered a 3.7x-larger suite (8573
+  # vs 2296). node --test is last-flag-wins, so the user's own --test-concurrency=N still overrides
+  # the default 8.
+  run_selected "$(effective_groups)" "$@"
 else
   build_dist_once
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="

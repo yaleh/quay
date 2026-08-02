@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,27 @@ function runTestSh(...args) {
   const r = spawnSync("bash", [testSh, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 120000, env: cleanEnv });
   assert.equal(r.status, 0, `scripts/test.sh ${args.join(" ")} exited ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
   return r.stdout;
+}
+
+// runTestShRaw — like runTestSh but does NOT assert exit 0. The flags-only regression below
+// runs `--group governance`, which currently has 3 PRE-EXISTING failures (chart2-s2-... asserts
+// cov=0 but the repo's real S2 evidence is cov=1) — the count comparison is the invariant, not
+// the exit code. Longer timeout: the governance sub-suite (~205 tests) + coverage takes ~15s.
+function runTestShRaw(...args) {
+  const cleanEnv = { ...process.env };
+  for (const k of Object.keys(cleanEnv)) {
+    if (k.startsWith("NODE_TEST_")) delete cleanEnv[k];
+  }
+  return spawnSync("bash", [testSh, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 300000, env: cleanEnv });
+}
+
+function parseTestCount(out) {
+  // Take the LAST `ℹ tests N` — node's final reporter summary — not the first. A governance test
+  // or spawned subprocess could legitimately emit an earlier `ℹ tests N` line of its own; only the
+  // final summary is the outer run's total (REFUTE round-1 MINOR).
+  const all = [...out.matchAll(/ℹ tests (\d+)\b/g)];
+  assert.ok(all.length > 0, `reporter summary missing ℹ tests:\n${out.slice(-500)}`);
+  return Number(all[all.length - 1][1]);
 }
 
 // Ground truth is COMPUTED at runtime, never snapshotted. A hardcoded `EXPECTED_ENGINE = 58`
@@ -105,4 +126,63 @@ test("--group governance --list-files lists exactly the governance files", () =>
   // Relationship: --group governance's file list has exactly governance's count.
   assert.equal(out.length, g.governance);
   for (const f of out) assert.match(f, /experiments\/quay-perpetual-stream\/test\//);
+});
+
+// ── AC1/AC2/AC4/AC6: flags-only keeps the selected set (gap-test-sh-flags-only-...) ───────────────
+
+// gap-test-sh-flags-only-form-silently-runs-a-different-suite: `scripts/test.sh --test-concurrency=4`
+// (and the documented `--experimental-test-coverage` form) MUST run the SAME test set as the
+// equivalent no-flag invocation. Before the fix, "flags + no files" fell through to
+// `exec node --test ... "$@"` with an EMPTY file list → node auto-discovered ~3.7x more tests
+// (8573 vs 2296, measured 2026-08-02), silently swapping the suite.
+//
+// The behavioral pin runs through `--group governance` (the smallest NON-RECURSIVE group — its
+// files never spawn test.sh, so this cannot recurse) because the full product,engine default is
+// ~2296 tests / ~7min and would recurse through this very file. The literal default-glob before/
+// after counts are recorded in the task DoD, and the structural test below pins the DEFAULT-glob
+// branch's existence. All counts are RELATIONSHIPS computed at runtime, never hardcoded.
+test("AC1/AC2/AC6: flags-only forms run the same test count as the group default; AC4 self-report", () => {
+  const base = runTestShRaw("--group", "governance");
+  const baseCount = parseTestCount(`${base.stdout}\n${base.stderr}`);
+  // AC4: every run self-reports its selection before executing (this is what makes a changed
+  // selection impossible to hide), and N must equal the --list-files count.
+  const baseSel = base.stdout.match(/selected (\d+) files \(groups=([^)]+)\)/);
+  assert.ok(baseSel, `run must self-report its selection (AC4):\n${base.stdout.slice(-300)}`);
+  assert.equal(baseSel[2], "governance");
+  const listed = runTestSh("--group", "governance", "--list-files").trim().split("\n").filter(Boolean).length;
+  assert.equal(Number(baseSel[1]), listed, "self-reported N must equal the --list-files count (AC4)");
+
+  // AC1/AC6: a bare --test-concurrency=4 must NOT change the selected set (it only changes
+  // node's concurrency). Runtime-computed equality — no hardcoded count (the 2296 literal goes
+  // stale the moment a test file is added).
+  const flagged = runTestShRaw("--group", "governance", "--test-concurrency=4");
+  assert.equal(
+    parseTestCount(`${flagged.stdout}\n${flagged.stderr}`),
+    baseCount,
+    "AC1: --test-concurrency=4 must keep the same test set (before the fix it ran ~3.7x more)"
+  );
+  const flaggedSel = flagged.stdout.match(/selected (\d+) files \(groups=([^)]+)\)/);
+  assert.ok(flaggedSel, `flags-only run must self-report its selection (AC4):\n${flagged.stdout.slice(-300)}`);
+  assert.equal(Number(flaggedSel[1]), listed, "flags-only self-reported N must equal --list-files count");
+
+  // AC2: the documented coverage form likewise keeps the same selection.
+  const covered = runTestShRaw("--group", "governance", "--experimental-test-coverage");
+  assert.equal(
+    parseTestCount(`${covered.stdout}\n${covered.stderr}`),
+    baseCount,
+    "AC2: --experimental-test-coverage must keep the same test set"
+  );
+});
+
+test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes extra flags to run_selected", () => {
+  // The behavioral pin above exercises the branch via --group governance. This structural check
+  // pins that the SAME branch also exists in the no--group (default product,engine) dispatch, and
+  // that the exec line keeps the default concurrency BEFORE the user's flags → node last-flag-wins
+  // honors the user's --test-concurrency=N (AC3 mechanism).
+  const src = readFileSync(testSh, "utf8");
+  assert.match(src, /elif all_flags "\$@"; then/, "default dispatch must have a flags-only branch");
+  assert.match(src, /run_selected "\$\(effective_groups\)" "\$@"/, "flags-only must route to the default glob");
+  assert.match(src, /exec node --test --test-concurrency=8 "\$@" "\$\{files\[@\]\}"/, "user flags must precede the file list (last-flag-wins)");
+  // The --group dispatch has the same flags-only branch, routing to the group's glob.
+  assert.match(src, /run_selected "\$groups" "\$@"/, "group flags-only must route to the group glob");
 });
