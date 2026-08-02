@@ -142,10 +142,36 @@ list_groups() {
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
+# build_dist_once — build dist/quay.js ONCE per invocation, before any test runs
+# (gap-tests-spawn-cli-from-ts-source, AC5). cli-entry.mjs
+# (packages/quay/test/helpers/cli-entry.mjs) routes CLI-spawning tests through the
+# prebuilt bundle when present AND fresh; a missing/stale bundle silently falling
+# back to the slow .ts path — or, worse, silently passing tests over old code — is
+# the failure mode AC5 exists to make impossible. Build failure is FATAL: never
+# run tests against a bundle whose freshness we cannot guarantee.
+build_dist_once() {
+  # Core bundle first (the critical path — cli.test.mjs routes through QUAY_CLI).
+  echo "== build dist/quay.js (packages/quay/scripts/build-dist.mjs) =="
+  if ! node "${repo_root}/packages/quay/scripts/build-dist.mjs"; then
+    echo "scripts/test.sh: core dist build FAILED — refusing to run tests against a possibly-stale bundle" >&2
+    exit 1
+  fi
+  # Native provider bundle too: QUAY_NATIVE_CLI (cli-entry.mjs) resolves to it
+  # for the AC9 conversions (serve.test.mjs / mcp-server.test.mjs use the native
+  # CLI to seed fixtures). A missing native bundle would silently fall back to
+  # the slow .ts path with a MISSING warning on every test process.
+  echo "== build dist/quay-native.js (packages/quay-native/scripts/build-dist.mjs) =="
+  if ! node "${repo_root}/packages/quay-native/scripts/build-dist.mjs"; then
+    echo "scripts/test.sh: native dist build FAILED — refusing to run tests against a possibly-stale bundle" >&2
+    exit 1
+  fi
+}
+
 # run_selected <groups-csv> — build the selected file list and exec node --test. Runs the
 # split-or-commit whole-store scan first (same invariant as the default/no-args path).
 run_selected() {
   local groups="$1"
+  build_dist_once
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
   export QUAY_TEST_GROUPS="$groups"
@@ -191,6 +217,7 @@ elif [ -n "${groups}" ]; then
   else
     # Explicit files with the group env set (in-file skips apply).
     export QUAY_TEST_GROUPS="$groups"
+    build_dist_once
     exec node --test --test-concurrency=8 "$@"
   fi
 fi
@@ -259,6 +286,7 @@ elif [ "${1:-}" = "--for-task" ]; then
   mapfile -t files <<< "${sel_out}"
   # Run the selected set. A thin selector (sel_code != 0) still runs what was selected but the overall
   # exit is non-zero — fail-loud under-selection must never be masked by a green test run.
+  build_dist_once
   set +e
   # Pass-through flags (e.g. --test-name-pattern=X) must precede the file list: node --test only
   # honors --test-name-pattern when it appears BEFORE the named files (after them it is ignored,
@@ -272,6 +300,7 @@ elif [ "${1:-}" = "--for-task" ]; then
   fi
   exit "${test_code}"
 else
+  build_dist_once
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
   # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not

@@ -29,10 +29,15 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+// gap-tests-spawn-cli-from-ts-source (AC9): route native CLI fixture-seeding
+// through the prebuilt dist bundle (freshness-checked by cli-entry.mjs) instead
+// of the .ts source. The provider cwd (config.yml `path:`) stays pinned to the
+// SOURCE bin dir — it is independent of which entry binary mcp_entry launches.
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -1233,7 +1238,7 @@ async function main() {
   // Fixture: a workspace with tasks carrying multiple labels, so the label
   // nav renders with counts and the "N more labels" overflow.
   {
-    const nativeBin = path.resolve(__dirname, "../../quay-native/bin/quay-native.ts");
+    const nativeBin = QUAY_NATIVE_CLI;
     const nativeProviderDir = path.resolve(__dirname, "../../quay-native");
 
     const qx34TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx34-tasks-"));
