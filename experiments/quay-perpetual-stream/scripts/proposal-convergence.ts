@@ -225,7 +225,17 @@ export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInve
       const subFindings = blockingOpen(ledger).filter((f) => f.subsystem === subsystem);
       const allRepairable = subFindings.every((f) => f.repairable === true);
       repairable = allRepairable;
-      return { recommend: true, code: "split-subsystem-blocking-cluster", reason: `subsystem "${subsystem}" has ${count} distinct-root-cause independent blocking findings (>= 3)`, repairable };
+      // RC2 (2026-08-01, over-split root cause 2): an ALL-repairable subsystem cluster is NOT a
+      // split — a single focused-revision round can close every finding (e.g. DIR-124-A4's 16
+      // wiring-coverage findings in one subsystem, all repairable:true). Splitting a repairable
+      // cluster fragments it into an unfinished multi-milestone split when one revision would have
+      // converged. Route to the focused-revision loop instead (recommend:false with an
+      // informational code); only a NON-repairable cluster (findings that cannot be resolved
+      // without a charter/scope change) recommends split.
+      if (allRepairable) {
+        return { recommend: false, code: "repairable-cluster-revision", reason: `subsystem "${subsystem}" has ${count} ALL-repairable blocking findings — route to one focused-revision round, not a split`, repairable: true };
+      }
+      return { recommend: true, code: "split-subsystem-blocking-cluster", reason: `subsystem "${subsystem}" has ${count} distinct-root-cause independent blocking findings (>= 3)`, repairable: false };
     }
   }
   // M206/M1: prefer inventory-derived count over the legacy scalar mechanismCount.

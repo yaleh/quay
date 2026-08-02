@@ -12,6 +12,15 @@ extra:
 ---
 **type:** execution
 
+**Reclassified (2026-08-02, ADR-021 review):** the 14 WIRING-CLAIMs in the original proposal were
+coverage entries (one start + one end event per boundary × 8 boundaries + mirror parity), NOT 14
+independent mechanisms. This task is **1 mechanism** (stage-event emission instrumentation) that
+calls the A1a schema module at 16 call sites. The split decision at
+`milestones/prepare-decisions/DIR-124-A1b.json` is SUPERSEDED — A1b was already a level-2 leaf
+when it re-triggered `split-multi-mechanism`. Per ADR-021 Principle 4 (`split-recursive-guard`),
+auto-splitting deeper compounds the defect. The fix: execute as a single milestone with the AC
+checkboxes below covering all 8 boundaries + mirror parity + fire-and-forget semantics.
+
 ## Proposal
 
 Split from DIR-124-A1. Instrument `execute-milestone.js` and `prepare-milestone.js` to emit structured stage events using the A1a schema module at all 8 cross-workflow boundaries.
@@ -300,6 +309,38 @@ Each new call/dispatch/ownership/enforcement relationship claimed below requires
 **WIRING-CLAIM (A1b-FIELD-DERIVATION):** All field values are derived from in-scope variables already present at the `_emitStageEvent` call site -- NO new agent dispatches, file reads, or git commands are introduced to compute event fields beyond what the phase already does. `timing.startedAtMs`/`endedAtMs` use `Date.now()` at the call site; `observedWrites` at Build/Land end events use `git diff --name-only` between the pre-phase and post-phase working tree state.
 
 ### Alternatives considered and rejected
+
+[See original task body for alternatives analysis — unchanged by this reclassification.]
+
+## Acceptance Criteria
+
+- [ ] **AC1:** `_emitStageEvent(eventObj)` helper function exists in all 4 workflow mirrors (byte-identical) — A1b-EMIT-HELPER
+- [ ] **AC2:** `_emitStageEvent` called at exactly 16 call sites (one start + one end per boundary × 8 boundaries) — A1b-BOUNDARIES
+- [ ] **AC3:** No return value from any `_emitStageEvent` call is read, parsed, or branched on — A1b-FIRE-AND-FORGET, A1b-NO-COUPLING
+- [ ] **AC4:** Schema consumed ONLY via `--emit-event '<json>'` CLI — zero schema definitions embedded in workflow files — A1b-SCHEMA-CONSUMPTION
+- [ ] **AC5:** Mirror parity verifiable by `diff` at Land — A1b-MIRROR-PARITY
+- [ ] **AC6:** E1 fires AFTER admission `--acquire` success and BEFORE any content agent dispatch — A1b-E1-ARCHITECTURAL
+- [ ] **AC7:** Every boundary produces exactly one start + one end event pair — A1b-START-END-PAIRS
+- [ ] **AC8:** Event log written to gitignored `.workflow-events/<runId>.jsonl` — A1b-EVENT-LOG-PATH
+- [ ] **AC9:** `runId` derived from existing `$a.charterFile`/`$a.milestoneId` — no second derivation path — A1b-RUNID-DERIVATION
+- [ ] **AC10:** Zero interaction with existing telemetry systems (`_phaseTimings`, `_convergenceScript`, gate-event-store) — A1b-NO-TELEMETRY-INTERACTION
+
+## Definition of Done
+
+Standard `inherited-core.md` DoD clauses apply. Per DIR-026 Reading A, source code and fixtures alone are necessary but insufficient.
+
+- [ ] Tests pass: all 4 mirrors instrumented, byte-identical `_emitStageEvent`, correct boundary coverage, fire-and-forget semantics verified
+- [ ] `diff` confirms byte-identical mirrors at Land
+- [ ] Independent wiring audit confirms zero coupling to scheduling/gating/telemetry
+
+## Touches
+
+- .claude/workflows/execute-milestone.js
+- plugin/workflows/execute-milestone.js
+- .claude/workflows/prepare-milestone.js
+- plugin/workflows/prepare-milestone.js
+- experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs
+- plugin/scripts/workflow-event-schema.mjs
 
 **Alt1: Agent structured-output emission.** Would require content agents to include a `stageEvent` field in their structured-output schema. Rejected for three reasons: (a) the Prepare admission boundary (E1) fires before any content agent exists -- no agent to emit through, so E1 would be unrepresentable; (b) agents can crash, return unparseable JSON, or skip the field entirely -- emission-by-construction is impossible to guarantee; (c) it couples all content agents to the observability contract, requiring every agent prompt template across both workflows to be updated and maintained. The split review's blocking finding explicitly identifies this as architecturally wrong.
 

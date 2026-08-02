@@ -8,42 +8,37 @@ labels:
   - human-steered
 parent: DIR-124
 children:
-  - DIR-124-F1
-  - DIR-124-F2
-  - DIR-124-F3
-  - DIR-124-F4
-  - DIR-124-F5
-  - DIR-124-F6
+  - DIR-124-F-core
+  - DIR-124-F-plancheck
+  - DIR-124-F-learn
 extra:
   schema: v1
 ---
 
 **type:** execution
 
-## Split into independently landable children (2026-08-01)
+## Reclassified split (2026-08-02, ADR-021 review)
 
-This task has been split into six independently landable sub-tasks, each assigned its own M-number
-and milestone charter:
+The original 2026-08-01 split decision decomposed this task into 6 children (F1-F6, each ~80 lines,
+7-9 AC). Per ADR-021 Principle 1 (meta-mechanism granularity), that was TOO FINE — implementation
+steps, not architectural decisions. The 6 children are merged into **3** — each 1 mechanism,
+atomic-but-meaningful:
 
-| Child | M-number | Title | Mechanism |
-|-------|----------|-------|-----------|
-| [DIR-124-F1](DIR-124-F1.md) | **M257** | Template hygiene gate (reject non-`##`-heading content after `## Touches`) | `task-schema.ts` `checkTouches`/`extractSection` reject prose after `## Touches` (`touches-overbroad`); surfaced via `prepare-admission-check.ts` detector shape; M205 `_stripWrappingBacktick` preserved |
-| [DIR-124-F2](DIR-124-F2.md) | **M258** | PlanCheck typed findings (extended `_findingSchema` with classification) | PlanCheck schema `{findings: number}` → typed array with DIR-125 shape + `classification` ∈ {`grounded-fact-gap`, `task-specific`, `other`}; legacy-scalar tolerance |
-| [DIR-124-F3](DIR-124-F3.md) | **M259** | Touches coverage fix (`task-schema.ts` + `prepare-admission-check.ts` into Touches) | Amends the task `## Touches` (task_write, early) so the hygiene-gate implementation files are covered and Plan `- Files:` lines don't trip `preflight-touches-mismatch` |
-| [DIR-124-F4](DIR-124-F4.md) | **M260** | Fact-class reconciliation (5 vs 6 vs 8 fact classes) | One canonical category whitelist (the 8 seed-doc sections incl. `evidence-surface`); `--validate`/`--promote` reject unknown categories |
-| [DIR-124-F5](DIR-124-F5.md) | **M261** | Seed integrity (correct the false §3 first bullet in `repo-ground-truth.md`) | M205 correction: `loader.ts (new)` matches cleanly; the real `preflight-touches-mismatch` cause is an undeclared Plan `- Files:` line; seed encodes the corrected fact |
-| [DIR-124-F6](DIR-124-F6.md) | **M262** | Learning-loop classification trust (agent-assisted + mechanically validated) | `grounded-fact-gap` finding promotes via the finding ledger with a version bump; mechanically validated (category whitelist, duplicate exact-match, non-blocking); already-registered fact = injection defect |
+| Child | M-number | Title | Mechanism | Merges |
+|-------|----------|-------|-----------|--------|
+| [DIR-124-F-core](DIR-124-F-core.md) | **M257** | Registry data + CLI + seed + validation | Versioned, hash-bound `ground-truth-registry.json` + `.ts` CLI (`--inject`/`--validate`/`--promote`/`--selftest`) seeded from the 8 `repo-ground-truth.md` sections with M205 correction; category whitelist enforcement | ← F1+F3+F4+F5 |
+| [DIR-124-F-plancheck](DIR-124-F-plancheck.md) | **M258** | PlanCheck typed findings with `grounded-fact-gap` classification | Extend PlanCheck's output schema from `{findings: number}` to typed array with `classification ∈ {grounded-fact-gap, task-specific, other}`; legacy-scalar tolerance | ← F2 |
+| [DIR-124-F-learn](DIR-124-F-learn.md) | **M259** | Learning-loop classification trust (agent-assisted + mechanically validated) | `grounded-fact-gap` promotes via the finding ledger with version bump; mechanically validated (category whitelist, duplicate exact-match, non-blocking); already-registered → injection defect | ← F6 |
 
-**Dependency order:** F2 (typed findings) is the learning-loop prerequisite for F6; F1/F5 are the
-mechanical preflight/seed fixes; F3 is the Touches-coverage fix for the milestone's own files; F4
-reconciles the fact-class enumeration. Each child is independently reviewable and landable. This
-parent is **done** when all six children are done.
+**Dependency order:** F-plancheck (typed findings) is the prerequisite for F-learn. F-core has no
+dependencies and can proceed first. Each child is 1 mechanism, independently reviewable and
+landable. This parent is **done** when all three children are done.
+
+**The 6 original stub files (DIR-124-F1..F6) are deleted.** Their content is preserved in the
+proposal text of the three replacement children.
 
 **Original parent charter:** `experiments/quay-perpetual-stream/charters/M232-dir-124-f.md`
 (preserved for context).
-
-**Parent plan:** N/A (resolved via the human-steered milestone; child plans at
-`docs/plans/M257-dir-124-f1.md` through `docs/plans/M262-dir-124-f6.md`).
 
 ---
 

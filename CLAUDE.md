@@ -99,6 +99,27 @@ Key cross-cutting facts (require reading several files to see):
 
 - Development is driven via **background Claude Code workflows at milestone granularity** (→ ADR-009), with a **scheduled milestone e2e incl. browser tests** (Playwright/chrome-devtools) that keeps `L_T` on the real product surface (→ ADR-010). Follow DIR-027 steering hygiene (`.halt` or private worktree; never race the loop on `master`).
 
+## Split-decision routing policy (DIR-124-A1b, 2026-08-01)
+
+When prepare-milestone returns `outcome: 'needs-human', reason: 'split-recommended'`, the orchestrator MUST route by `splitRecommendation.code`, NOT auto-approve all splits indiscriminately:
+
+| Code | Action | Rationale |
+|---|---|---|
+| `split-multi-mechanism` | **Auto-record split** + create children | Not repairable — scope requires charter edit. >2 independently landable mechanisms. |
+| `split-touch-set-too-large` | **Auto-record split** + narrow touches | Not repairable — surface too broad (>8 files). |
+| `split-subsystem-blocking-cluster` | **Consume repairable bypass FIRST** | Repairable — one focused delta revision may close ALL findings. Only split if bypass fails (findings persist after the focused revision). The bypass is a ONE-SHOT per generation (`splitBypassAvailable` consumed once at `deltaRound === 0`). |
+| `split-recursive-guard` | **Route to needs-human** — do NOT auto-split | Level-2+ leaf still multi-mechanism. The real defect is UPSTREAM decomposition was too shallow (e.g., DIR-124-A→A1→A1b should have produced more children at level 2 rather than a level-3 leaf that still spans 8 boundaries). Auto-splitting deeper compounds the problem. |
+
+**After recording a split decision** (via `--record-split-decision --decision split`), the orchestrator MUST verify the split is enacted:
+1. Parent task's `children:` frontmatter is populated
+2. Each child's `tasks/<childId>.md` file EXISTS on disk
+3. Each child has `status: todo` + `parent:` backlink
+4. M-numbers are assigned (if development-class)
+
+A split decision where children haven't been created is **incomplete** — the task is in limbo (`status: todo`, no way to execute). The split-completion check is as important as the split decision itself.
+
+**The `> 2` mechanism threshold in `checkSplitRecommendation` is correctly calibrated — do NOT adjust it.** The five DIR-126 children (1 mechanism each, all completed) and the DIR-124-B/F splits (4/6 mechanisms, correctly decomposed) confirm the threshold. Overcounting of coverage items as mechanisms is a calibration issue in `extractMechanismClaims`, not a threshold defect.
+
 ## GIT review checklist
 
 - Before calling a milestone done, ask **which of `L_T`/`L_C`/`L_D`/`L_G`/`L_S` is still dark** (ADR-006/007) and prefer **hard checks over prose** (ADR-004 — prose gets paraphrased away). See `docs/references/` for the framework and its limits (the continuous math is not rigor).

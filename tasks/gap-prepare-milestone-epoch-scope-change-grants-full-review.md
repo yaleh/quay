@@ -9,12 +9,20 @@ labels:
   - milestone-candidate
   - human-steered
 parent: null
-children:
-  - gap-prepare-milestone-epoch-scope-change-grants-full-review-A
+children: []
 extra:
   schema: v1
 ---
 **type:** execution
+
+**Reclassified (2026-08-02, ADR-021 review):** this task has exactly **1 mechanism** (bodyScopeHash
+scope-change grant). The A-J implementation steps in the Proposal are details of that single
+mechanism, not independent mechanisms. The split decision at
+`milestones/prepare-decisions/gap-prepare-milestone-epoch-scope-change-grants-full-review.json`
+is SUPERSEDED. The child task stub (gap-prepare-milestone-epoch-scope-change-grants-full-review-A)
+is deleted — its 9 ACs are merged back into this parent's AC section.
+The original ProposalReview returned `split-subsystem-blocking-cluster` (wiring-coverage gaps) —
+correct response is to add AC checkboxes covering the claims, not to split.
 
 ## Split into an independently landable child (2026-08-01)
 

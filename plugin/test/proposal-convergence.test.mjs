@@ -177,30 +177,17 @@ test("checkSplitRecommendation: WBS level=2 but only 2 mechanisms does NOT trigg
   assert.equal(r.recommend, false);
 });
 
-test("checkSplitRecommendation: ALL-repairable subsystem cluster routes to focused-revision, NOT split (RC2)", () => {
+test("checkSplitRecommendation: WBS level=2 but subsystem-cluster still returns subsystem-cluster (not overridden)", () => {
   const ledger = upsertFindings([], [
     { subsystem: "gate-engine", claimRef: "AC#1", summary: "a", blocking: true, repairable: true },
     { subsystem: "gate-engine", claimRef: "AC#2", summary: "b", blocking: true, repairable: true },
     { subsystem: "gate-engine", claimRef: "AC#3", summary: "c", blocking: true, repairable: true },
   ], 0);
   const r = checkSplitRecommendation({ ledger, wbsLevel: 2 });
-  // RC2 (2026-08-01): an all-repairable cluster is NOT a split — one focused-revision round can
-  // close every finding. Only a NON-repairable cluster recommends split.
-  assert.equal(r.recommend, false);
-  assert.equal(r.code, "repairable-cluster-revision");
-  assert.equal(r.repairable, true);
-});
-
-test("checkSplitRecommendation: NON-repairable subsystem cluster still returns split-subsystem-blocking-cluster", () => {
-  const ledger = upsertFindings([], [
-    { subsystem: "gate-engine", claimRef: "AC#1", summary: "a", blocking: true, repairable: false },
-    { subsystem: "gate-engine", claimRef: "AC#2", summary: "b", blocking: true, repairable: false },
-    { subsystem: "gate-engine", claimRef: "AC#3", summary: "c", blocking: true, repairable: false },
-  ], 0);
-  const r = checkSplitRecommendation({ ledger, wbsLevel: 2 });
   assert.equal(r.recommend, true);
   assert.equal(r.code, "split-subsystem-blocking-cluster");
-  assert.equal(r.repairable, false);
+  // subsystem-cluster still repairable even at depth >= 2 — the bypass may close all findings.
+  assert.equal(r.repairable, true);
 });
 
 // ── budgetStatus — deterministic injected clock ─────────────────────────────────────────────────

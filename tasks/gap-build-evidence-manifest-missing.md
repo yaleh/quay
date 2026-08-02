@@ -8,14 +8,18 @@ labels:
   - milestone-candidate
   - human-steered
 parent: null
-children:
-  - gap-build-evidence-path
-  - gap-build-evidence-per-phase
-  - gap-build-evidence-git-fail-soft
+children: []
 extra:
   schema: v1
 ---
 **type:** execution
+
+**Reclassified (2026-08-02, ADR-021 review):** mechanism 1 (manifest output path fix) was already
+committed (`2b1d67c2`). The remaining 2 mechanisms (per-phase evidence consumption, git failure
+fail-soft) ≤ 2 threshold — do not trigger `split-multi-mechanism`. The split decision at
+`milestones/prepare-decisions/gap-build-evidence-manifest-missing.json` is SUPERSEDED. The 3 stub
+child task files (gap-build-evidence-path/per-phase/git-fail-soft) are deleted.
+Execute as a single milestone for the remaining 2 mechanisms.
 
 ## Split into independently landable children (2026-08-01)
 
