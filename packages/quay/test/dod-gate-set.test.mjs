@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-042-A (M59) — the generic, runner-agnostic DoD gate SET: `test-pass`,
 // `coverage-floor`, `red-green`. All three take their actual command(s) (+
 // threshold/pattern) as pure workspace config (`.quay/gates.yml`), same

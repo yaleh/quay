@@ -1,3 +1,4 @@
+// @test-group product
 // package-json-bin.test.mjs — M120 Stage 2.1 (DIR-060).
 //
 // Pins the distribution-manifest fields the Node-floor fix depends on, and

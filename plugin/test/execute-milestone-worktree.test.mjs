@@ -1,3 +1,4 @@
+// @test-group engine
 // execute-milestone-worktree.test.mjs — DIR-123: per-milestone git-worktree isolation for
 // execute-milestone.js. Drives the REAL, unmodified workflow source (both mirrors) with a mock agent()
 // that — for the worktree CLI commands the prompts emit — EXECUTES THE REAL OPERATIONS against a

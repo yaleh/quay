@@ -1,3 +1,4 @@
+// @test-group engine
 // run-identity.test.mjs — DIR-124-B1 (M253): RED/GREEN fixture tests for run-identity.ts
 // (canonical RunIdentity factory + CLI, experiments + plugin mirrors).
 //

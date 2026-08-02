@@ -1,3 +1,4 @@
+// @test-group engine
 // RED tests for prepare-milestone-size-estimate.ts — M239 gap-prepare-milestone-no-size-aware-routing-A
 // Byte-identical mirror: works in BOTH experiments/quay-perpetual-stream/test/ and plugin/test/
 //

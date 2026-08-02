@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 1 — native ADR store. ADRs are a SEPARATE kind from tasks: a decision
 // lifecycle (proposed/accepted/superseded/deprecated/rejected), NOT todo→done;
 // no parent/children/role; global ADR-NNN id. RED-first per ADR-001 (TDD).

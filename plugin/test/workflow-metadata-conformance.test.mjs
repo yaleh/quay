@@ -1,3 +1,4 @@
+// @test-group engine
 // workflow-metadata-conformance.test.mjs — DIR-124-A4: RED/GREEN + regression tests for
 // workflow-metadata-conformance.mjs, the workflow metadata-vs-executable-driver conformance checker.
 //

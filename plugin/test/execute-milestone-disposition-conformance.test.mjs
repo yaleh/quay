@@ -1,3 +1,4 @@
+// @test-group engine
 // execute-milestone-disposition-conformance.test.mjs — M180
 // gap-absorb-entry-clause-disposition-sequencing (it0-dod-check.ts clause1/clause2/clause7).
 //

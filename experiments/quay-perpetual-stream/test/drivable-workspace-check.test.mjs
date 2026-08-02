@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for drivable-workspace-check.ts — DIR-062 child A (M125).
 // DIR-120-B (2026-07-28): DEFAULT_REGISTRY_PATH was removed from the module (a
 // directory-relative guess correct from only one of the module's two live locations);

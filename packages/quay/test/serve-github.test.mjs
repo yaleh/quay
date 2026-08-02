@@ -1,3 +1,4 @@
+// @test-group product
 // QN-061 (iteration 57): live cross-Provider (GitHub) regression test for
 // the Web UI (`quay serve`, src/serve.js) — the third of the proposal's
 // three sibling ABI bindings (quay-proposal.md §9: CLI, Core MCP, Web UI;

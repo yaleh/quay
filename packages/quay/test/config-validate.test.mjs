@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-099-A — config-validate module + CLI `quay config validate`.
 //
 // Test layers:

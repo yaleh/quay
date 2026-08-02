@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for touches-orthogonality-check.mjs — the single-source milestone-`touches`
 // disjointness check (DIR-044 increment 1, the concurrent-scheduler pre-flight). Written RED-first
 // (ADR-001 / DIR-019 discipline): the fix for any failing case belongs in the MODULE, never in the

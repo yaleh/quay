@@ -1,3 +1,4 @@
+// @test-group engine
 // Tests for drain-dispose-corruption-check.ts — gap-drain-dispose-body-corruption.
 // Mirror drain-scheduler.test.mjs's own test shape: pure-function tests + CLI exit-code tests.
 import { test } from "node:test";

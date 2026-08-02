@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 5 (exp5-M-CRYST-D1) — proves the doc-<id> gate's FAIL path end-to-end
 // against a REAL synthetic violating document fixture (never a real doc
 // deliberately broken — see experiments/quay-perpetual-stream/fixtures/

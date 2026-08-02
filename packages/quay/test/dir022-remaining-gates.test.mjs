@@ -1,3 +1,4 @@
+// @test-group product
 // M43 (DIR-022 remainder, exp5-M-DIR022-REMAINING-GATES) — `vmeta-lag` and
 // `dogfood-evidence` named gates.
 //

@@ -1,3 +1,4 @@
+// @test-group engine
 // prepare-milestone-preparation-e2e.test.mjs — DIR-117 iteration-2 item 1.
 //
 // PROBLEM this closes: the M191 iteration-0 acceptance audit REFUTED the AC "a fixture with an

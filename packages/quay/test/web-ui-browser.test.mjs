@@ -1,3 +1,4 @@
+// @test-group product
 // QC-001 (experiment 2, iteration 1): browser-automation verification of
 // packages/quay's Web UI pages — GET / and GET /task/:id flows.
 // QC-002 (experiment 2, iteration 2): extends browser-automation verification

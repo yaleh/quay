@@ -1,3 +1,4 @@
+// @test-group product
 // E3 (exp5-M-CRYST-E3, DIR-030 item 2/4) — `adr-<id>` named gate: adr-as-contract
 // enforcement, the "continuously applied" half E1 deferred.
 //

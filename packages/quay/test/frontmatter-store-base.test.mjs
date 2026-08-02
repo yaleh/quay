@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 1 (exp5-M-CRYST-D1) — shared frontmatter-store-base helper, factored
 // out of adr-store.js so document-store.js can reuse the same
 // parse/serialize/lock/filename-resolution logic without coupling the two

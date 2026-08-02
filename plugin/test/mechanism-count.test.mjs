@@ -1,3 +1,4 @@
+// @test-group engine
 // mechanism-count.test.mjs — calibration of the mechanism-count confirmation
 // (tasks/gap-extract-mechanism-claims-calibration). `countMechanisms` turns the raw claim count
 // (which over-counts coverage items as mechanisms and under-counts verb-invisible CLAIM markers)

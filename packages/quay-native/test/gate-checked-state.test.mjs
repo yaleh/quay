@@ -1,3 +1,4 @@
+// @test-group product
 // QN-019 (iteration 8): tighten the author->ready gate to require AC
 // checked-state, not merely checkbox presence — closing the asymmetry with
 // execute->done (which already requires full-checked state) that iteration

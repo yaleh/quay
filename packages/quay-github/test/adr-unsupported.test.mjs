@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 6 — the GitHub provider declares ADRs UNSUPPORTED (they are architectural
 // decisions, not GitHub Issues). Degrades cleanly: adr_list → empty, adr_get /
 // adr_write → isError. These handlers never touch the gh CLI, so this runs offline.

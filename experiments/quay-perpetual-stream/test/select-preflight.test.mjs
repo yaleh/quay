@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for select-preflight.ts — DIR-072/M153.
 // Run: node --test experiments/quay-perpetual-stream/test/select-preflight.test.mjs
 //      node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/select-preflight.test.mjs

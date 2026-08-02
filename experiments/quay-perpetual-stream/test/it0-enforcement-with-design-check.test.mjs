@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for it0-enforcement-with-design-check.ts — the ADR-011 bidirectional invariant gate
 // (every DoD clause documented in inherited-core.md must have a matching enforcement block in
 // it0-dod-check.ts, and vice versa). Written to close the ADR-001 clause 2 gap: this load-bearing

@@ -1,3 +1,4 @@
+// @test-group product
 // QN-012 (iteration 6): compound-aware check() re-verification.
 //
 // Before this fix, store.js's check() had no role-aware branch at all — a

@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 5 (exp5-M-CRYST-D1) — `quay-native doc` CLI verb: the consult surface
 // for the document-management capability (list/get/write mirror `adr`'s own
 // shape; `validate` is the NEW verb printing contract-validator.js's

@@ -1,3 +1,4 @@
+// @test-group product
 // QN-030 (iteration 20): live, executable proof of a permanent, structural
 // boundary named in prose since iteration 2 (QN-005) and re-cited in
 // iterations 9, 11, 12, 13, 16, 17, 18, 19: `store.js`'s `check()` gate

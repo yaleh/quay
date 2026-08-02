@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for concurrent-batch-scheduler.mjs — the two-level scheduler's ASSEMBLY core
 // (DIR-044 increment 2). Given rank-ordered candidate charters, greedily assemble a maximal
 // touches-DISJOINT, execution-type batch that touches NO shared exp5 state, deferring the rest to a

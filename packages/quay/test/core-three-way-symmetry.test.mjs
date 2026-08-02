@@ -1,3 +1,4 @@
+// @test-group product
 // QN-044 (DIR-010): Core-level three-way symmetry test — CLI vs. Core MCP
 // vs. Web UI, scoped EXACTLY to the capability set quay-proposal.md §9
 // itself lists as shared across the three sibling bindings ("The Web UI is

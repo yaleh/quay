@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-047: configurable creation default status via .quay/config.yml.
 //
 // RED→GREEN tests (ADR-001) for:

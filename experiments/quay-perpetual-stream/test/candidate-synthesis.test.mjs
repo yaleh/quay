@@ -1,3 +1,4 @@
+// @test-group governance
 // candidate-synthesis.test.mjs — M188/DIR-119-A Stage 1.1/1.3/1.4/1.5 tests.
 //
 // RED (Stage 1.1): the CURRENT SELECT representation (select-preflight.ts's CandidateEntry) is
@@ -19,21 +20,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getCandidates } from "../scripts/select-preflight.ts";
-import { CONTRACT_VERSION, makeSingletonCandidate, normalizeLegacyCall, selftest as contractsSelftest } from "../scripts/candidate-contracts.ts";
-import { buildCouplingGraph, selftest as couplingSelftest } from "../scripts/coupling-graph.ts";
-import { synthesizeCandidates, scoreCandidate, selftest as synthesisSelftest } from "../scripts/candidate-synthesis.ts";
-import { choosePortfolio, assertPortfolioDisjoint, selftest as portfolioSelftest } from "../scripts/portfolio-choice.ts";
-import { runPreparationFeedbackLoop, MAX_PREPARATION_ROUNDS, selftest as preparationSelftest } from "../scripts/preparation-feedback.ts";
-import {
-  FIXTURE_A_WORKFLOW_HARDENING,
-  FIXTURE_B_MULTI_SHAPE,
-  FIXTURE_C_NEXT_GENERATION_SPLIT,
-  FIXTURE_D_TEN_TASK_RECONCILE,
-  FIXTURE_E_DISCONNECTED_REJECTED,
-  FIXTURE_F_NO_DOUBLE_MEMBERSHIP,
-  ALL_HISTORICAL_FIXTURES,
-} from "../scripts/candidate-synthesis-fixtures.ts";
+if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
+  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
+} else {
+const { getCandidates } = await import("../scripts/select-preflight.ts");
+const { CONTRACT_VERSION, makeSingletonCandidate, normalizeLegacyCall, selftest: contractsSelftest } = await import("../scripts/candidate-contracts.ts");
+const { buildCouplingGraph, selftest: couplingSelftest } = await import("../scripts/coupling-graph.ts");
+const { synthesizeCandidates, scoreCandidate, selftest: synthesisSelftest } = await import("../scripts/candidate-synthesis.ts");
+const { choosePortfolio, assertPortfolioDisjoint, selftest: portfolioSelftest } = await import("../scripts/portfolio-choice.ts");
+const { runPreparationFeedbackLoop, MAX_PREPARATION_ROUNDS, selftest: preparationSelftest } = await import("../scripts/preparation-feedback.ts");
+const { FIXTURE_A_WORKFLOW_HARDENING, FIXTURE_B_MULTI_SHAPE, FIXTURE_C_NEXT_GENERATION_SPLIT, FIXTURE_D_TEN_TASK_RECONCILE, FIXTURE_E_DISCONNECTED_REJECTED, FIXTURE_F_NO_DOUBLE_MEMBERSHIP, ALL_HISTORICAL_FIXTURES, } = await import("../scripts/candidate-synthesis-fixtures.ts");
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -289,3 +286,5 @@ test("preparation-feedback.ts selftest suite passes", () => {
 test("CONTRACT_VERSION is stable and referenced consistently", () => {
   assert.equal(CONTRACT_VERSION, 1);
 });
+
+}

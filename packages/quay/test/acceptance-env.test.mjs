@@ -1,3 +1,4 @@
+// @test-group product
 // QENG-2 / DIR-103-C — acceptance_env env file sourcing tests
 // M225: per-provider acceptance_env + clean-environment contract
 //

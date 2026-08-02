@@ -1,3 +1,4 @@
+// @test-group product
 // QN-027 (iteration 13): regression test for provider-client.js's new
 // taskCheck() passthrough. Prior to this task, Core had taskList/taskGet/
 // taskWrite passthroughs but no taskCheck, so the task_check MCP tool

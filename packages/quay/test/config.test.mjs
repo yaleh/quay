@@ -1,3 +1,4 @@
+// @test-group product
 // QN-032 (iteration 22): regression test for config.js's findConfig/
 // loadConfig/activeProvider — the literal first link in the `skeleton`
 // V_instance factor's own chain (protocol §5.1: "config -> mcp -> serve ->

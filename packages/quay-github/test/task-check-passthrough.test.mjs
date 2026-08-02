@@ -1,3 +1,4 @@
+// @test-group product
 // QN-071 (iteration 76): closes the GitHub-Provider-side sibling of QN-069
 // (iteration 66). QN-068 (iteration 64) added direct-Provider unit test
 // coverage for the gate's `needs-human` soft-stop and unrecognized-status

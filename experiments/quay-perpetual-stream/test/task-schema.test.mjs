@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for task-schema.mjs — the canonical task/ADR authoring-schema validator.
 // Backfilled (2026-07-19) to pay the coverage debt on this load-bearing gate and to dogfood the
 // ADR-TDD policy (load-bearing method-infra gates must be fixture-first + covered). Run:

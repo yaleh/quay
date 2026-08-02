@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-041 (M57): RED->GREEN regression tests for the real issue CREATE path
 // -- the last remaining write-surface gap this milestone closes (title/body/
 // status/labels/parent/children write were ALL already implemented before

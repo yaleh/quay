@@ -1,3 +1,4 @@
+// @test-group engine
 // milestone-worktree.test.mjs — DIR-123: unit tests for the per-milestone git-worktree isolation
 // primitive (scripts/milestone-worktree.ts) plus the SAME-FILE-CONFLICT pre-dispatch decision
 // (concurrent-batch-scheduler.ts's worktreeDispatchEligibility, which reuses touches-orthogonality-

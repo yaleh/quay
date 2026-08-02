@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for it0-split-or-commit-check.ts — the DIR-026 single-source enforcement of the
 // PARENT-DONE-IFF-CHILDREN, SELECT-SPLIT, and CHILD-LINK-SYMMETRY rules. Written to close the
 // ADR-001 clause 2 gap: this load-bearing script (imported by nothing else, but wrapped/registered

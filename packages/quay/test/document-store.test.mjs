@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 2 (exp5-M-CRYST-D1) — native document-management store. A "document"
 // is a SEPARATE kind from both tasks and ADRs: a managed method-artifact
 // (skill/methodology-doc/etc.), NOT a decision (no accept/reject lifecycle)

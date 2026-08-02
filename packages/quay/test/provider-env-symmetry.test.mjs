@@ -1,3 +1,4 @@
+// @test-group product
 // QN-045: regression test closing the config-resolution asymmetry named,
 // but honestly NOT fixed, in DESIGN.md §4.4 at iteration 33 (DIR-010).
 //

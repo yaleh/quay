@@ -1,3 +1,4 @@
+// @test-group engine
 // workflow-invariant-ownership.test.mjs — DIR-124-A3a: RED/GREEN tests for
 // workflow-invariant-ownership.mjs, the invariant-ownership manifest enforcement script.
 //

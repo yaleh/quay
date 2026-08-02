@@ -1,3 +1,4 @@
+// @test-group engine
 // Tests for routine-scheduler.mjs — DIR-051 routine trigger logic + DIR-056 probe support.
 // RED-first (ADR-001 / DIR-019).
 import { test } from "node:test";

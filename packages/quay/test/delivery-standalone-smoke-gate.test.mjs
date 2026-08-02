@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-035-D (M52) — `delivery-standalone-smoke` wired as a named gate declared in the
 // workspace's gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS repo;
 // a legacy `.quay/gates.yml` only for a workspace with no `config.yml`).

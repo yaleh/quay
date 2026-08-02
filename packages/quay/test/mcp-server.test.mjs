@@ -1,3 +1,4 @@
+// @test-group product
 // QN-036 (DIR-007): regression test for Core's own MCP server
 // (packages/quay/src/mcp-server.js, wired into bin/quay.js's `mcp`
 // subcommand). Spawns the REAL `quay mcp` binary as a subprocess MCP

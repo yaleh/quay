@@ -1,3 +1,4 @@
+// @test-group engine
 // composite-land.test.mjs — sibling test for composite-land.ts (ADR-001 Decision clause 2:
 // load-bearing method-infra MUST carry a `<name>.test.mjs` sibling — loadbearing-test-gate.sh
 // enforces this by exact filename match).

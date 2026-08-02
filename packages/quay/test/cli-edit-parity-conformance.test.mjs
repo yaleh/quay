@@ -1,3 +1,4 @@
+// @test-group product
 // M16-cli-edit-parity-impl (design doc §5, Done-when 5/6/7): CLI-level
 // two-provider conformance probes for the newly-relaxed `quay task edit`
 // flag surface (design doc §1.2). This is the "new sibling

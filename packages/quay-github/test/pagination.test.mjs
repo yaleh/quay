@@ -1,3 +1,4 @@
+// @test-group product
 // QN-014 (iteration 6): genuinely exercise the DEFAULT_MAX_ISSUES overflow
 // throw path in quay-github's paging logic, which iteration 5 deferred
 // (view-model.test.mjs's own header comment: "no live large-repo fixture is

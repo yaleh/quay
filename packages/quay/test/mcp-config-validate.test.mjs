@@ -1,3 +1,4 @@
+// @test-group product
 // mcp-config-validate.test.mjs — MCP config_validate tool surface tests (DIR-099-C).
 //
 // AC1: config_validate registered via registerConfigHandlers (grep-confirmable in mcp-handlers.ts),

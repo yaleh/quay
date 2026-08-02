@@ -1,3 +1,4 @@
+// @test-group engine
 // workflow-event-schema.test.mjs — DIR-124-A1a: RED/GREEN tests for
 // workflow-event-schema.mjs (experiments and plugin mirrors).
 //

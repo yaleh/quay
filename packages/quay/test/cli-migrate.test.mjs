@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-039 (A): end-to-end CLI test for `quay migrate --from <p> --to <p>`,
 // spawning the REAL bin/quay.js binary (mirrors cli.test.mjs's own
 // isolation pattern) against two isolated native provider task stores

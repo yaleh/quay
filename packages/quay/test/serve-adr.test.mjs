@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 5 — ADR web views (/adr list, /adr/<id> detail). ADRs render live from
 // the native store's adr/ dir; the task list (/) must NOT show them.
 import { test, before, after } from "node:test";

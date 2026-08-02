@@ -1,3 +1,4 @@
+// @test-group product
 // gate-list-verbose.test.mjs — RED/GREEN tests for DIR-104
 // quay gate --list --verbose (provenance + diagnostics)
 //

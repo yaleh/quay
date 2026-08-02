@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 2 — ADR ABI over MCP: the native provider's adr_list/adr_get/adr_write
 // tools, exercised through a live MCP client (the same transport Core uses).
 import { test, before, after } from "node:test";

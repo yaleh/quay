@@ -1,3 +1,4 @@
+// @test-group engine
 // execute-milestone-build-phase-gate.test.mjs — gap-build-phase-null-result-not-gated.
 //
 // PROBLEM this closes: the Build-phase result gate in execute-milestone.js used to reject only

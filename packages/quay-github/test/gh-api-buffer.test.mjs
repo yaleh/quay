@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-037 (M55): RED->GREEN regression test for the ENOBUFS/maxBuffer
 // overflow live-verified against a REAL foreign repo (yaleh/archguard) —
 // `execFileSync("gh", ["api", ...])` with NO `maxBuffer` option overflows

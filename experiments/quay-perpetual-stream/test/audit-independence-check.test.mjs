@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for audit-independence-check.mjs — the single-source DIR-032 audit-independence rule
 // (DIR-034 anti-forgery corroboration extension). Written RED-first (ADR-001 / DIR-019 discipline):
 // the fix for any failing case belongs in the MODULE, never in the fixtures.

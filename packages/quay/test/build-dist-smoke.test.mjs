@@ -1,3 +1,4 @@
+// @test-group product
 // build-dist-smoke.test.mjs — M120 Stage 1.2 (DIR-060).
 //
 // Proves the built ESM `dist/quay.js` bundle is STANDALONE-runnable: invoked by

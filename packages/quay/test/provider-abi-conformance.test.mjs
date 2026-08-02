@@ -1,3 +1,4 @@
+// @test-group product
 // M03-abi-eval (exp5, DIR-001 items 1-2): differential conformance suite —
 // runs the SAME scenario set (task_list / task_get / task_write(status) /
 // task_check) against both the native and github Providers' own MCP

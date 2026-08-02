@@ -1,3 +1,4 @@
+// @test-group product
 // DIR-098: quay init tests — RED->GREEN per ADR-001.
 //
 // Tests cover AC1-AC6 from the task's Acceptance Criteria.

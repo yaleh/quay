@@ -1,3 +1,4 @@
+// @test-group product
 // QN-046 (closes discussion-doc §2.1's "browser-automation Web UI
 // verification" proposal — the one remaining un-issued item named in
 // iterations 21/29/31/33/34's own problem lists; also closes QN-031's own

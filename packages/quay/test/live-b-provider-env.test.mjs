@@ -1,3 +1,4 @@
+// @test-group product
 // live-b-provider-env.test.mjs — direct offline unit test for the PURE Core
 // function resolveProviderEnv() in packages/quay/src/provider-env.js (M76,
 // LIVE-batch B / DIR-044-LIVE).

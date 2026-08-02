@@ -1,3 +1,4 @@
+// @test-group product
 // QN-033 (iteration 23): regression test for `bin/quay.js` itself — the Core
 // CLI's own dispatch layer (parseFlags(), the `cmd`/`sub` branch table,
 // resolveProviderEnv(), withProvider(), and the top-level `main().catch(...)`

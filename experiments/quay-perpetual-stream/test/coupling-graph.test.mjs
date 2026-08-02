@@ -1,3 +1,4 @@
+// @test-group governance
 // coupling-graph.test.mjs — sibling test for coupling-graph.ts (ADR-001 Decision clause 2:
 // load-bearing method-infra, imported by candidate-synthesis.ts, MUST carry a `<name>.test.mjs`
 // sibling — loadbearing-test-gate.sh enforces this by exact filename match).
@@ -5,16 +6,11 @@
 // Run: node --test experiments/quay-perpetual-stream/test/coupling-graph.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  buildCouplingGraph,
-  deriveSharedImplementationEdges,
-  deriveSharedSemanticResourceEdges,
-  deriveInternalOrderEdges,
-  mergeEdges,
-  hasProhibitingEdge,
-  supportingNeighbors,
-  selftest,
-} from "../scripts/coupling-graph.ts";
+
+if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
+  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
+} else {
+const { buildCouplingGraph, deriveSharedImplementationEdges, deriveSharedSemanticResourceEdges, deriveInternalOrderEdges, mergeEdges, hasProhibitingEdge, supportingNeighbors, selftest, } = await import("../scripts/coupling-graph.ts");
 
 function mk(id, touches, deps = [], sem = []) {
   return {
@@ -101,3 +97,5 @@ test("supportingNeighbors includes a clean supporting neighbor", () => {
   const g = buildCouplingGraph({ tasks: [mk("A", ["x.ts"]), mk("B", ["x.ts"])] });
   assert.deepEqual(supportingNeighbors(g, "A"), ["B"]);
 });
+
+}

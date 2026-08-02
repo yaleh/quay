@@ -1,3 +1,4 @@
+// @test-group product
 // M29-cli-create-ergonomics, iteration-1 (independent re-derivation).
 //
 // This file is written from scratch by iteration-1, without reading

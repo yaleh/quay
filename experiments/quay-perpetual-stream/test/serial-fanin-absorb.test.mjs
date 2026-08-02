@@ -1,3 +1,4 @@
+// @test-group engine
 // Unit tests for serial-fanin-absorb.mjs — the deterministic serial fan-in ABSORB plan (DIR-044
 // increment 3). Background builds finish in NONDETERMINISTIC order, so the fan-in must be
 // reproducible: it merges one-at-a-time in a deterministic order (sorted by milestone id), advances

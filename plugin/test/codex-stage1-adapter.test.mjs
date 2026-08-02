@@ -1,3 +1,4 @@
+// @test-group engine
 // plugin/test/codex-stage1-adapter.test.mjs — DIR-121 (Codex adoption Stage 1) adapter
 // + negative-test suite. Mechanically proves the four Codex surfaces are present,
 // minimal, single-sourced, and safe:

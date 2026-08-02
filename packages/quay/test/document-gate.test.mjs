@@ -1,3 +1,4 @@
+// @test-group product
 // Stage 4 (exp5-M-CRYST-D1) — `doc-<id>` named gate: document-as-contract
 // enforcement, parallel to E3's `adr-<id>` gate (adr-gate.test.mjs) but
 // in-process (no shell-out via runAcceptance): a document's `contracts`

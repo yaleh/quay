@@ -1,3 +1,4 @@
+// @test-group product
 // M44 (DIR-032, exp5-M-DIR032-AUDIT-INDEPENDENCE) — `audit-independence` named gate.
 //
 // Thin async (task, client) => { ok, reason } wrapper over

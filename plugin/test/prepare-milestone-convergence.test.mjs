@@ -1,3 +1,4 @@
+// @test-group engine
 // prepare-milestone-convergence.test.mjs — DIR-125: real workflow-integration coverage for
 // prepare-milestone.js's BOUNDED ProposalReview convergence loop (both `.claude`/`plugin` mirrors).
 //
