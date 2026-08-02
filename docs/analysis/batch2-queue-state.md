@@ -35,19 +35,9 @@
 
 | 分支 | 状态 |
 |---|---|
-| **M222**（DIR-112） | **第一**。rebase 到 B5-1 之上解冲突：保留异步结构 + 换 QUAY_CLI。理由（可测量性）：异步化改变单文件占 lane 的方式，是三者中唯一可能降低墙钟的；效果必须在 M246 加进 ~1600 行测试**之前**测得，且可对 20–63s 噪声带宽判定 |
-| M246（DIR-124-A5） | **第二**。独立新文件（+9161），干净合并，与近期改动无冲突 |
-| **M243**（DIR-124-A2） | **最后，当任务不当合并**。**B 回退**（时间盒内未恢复）。单一根因：`validateEvent` 返回 `.error` 非 `.errors`（runner bug，`095ddbf0` 已修，随 revert `88e17bf2` 成孤儿，恢复时必须一并带回）。完整恢复 12 fixtures 还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome） |
-
-## 在飞（B7）
-
-| 任务 | dispatch | runId | worktree |
-|---|---|---|---|
-| `gap-telemetry-report-writes-and-deadlocks-readiness` | 17:10Z | fm-gap-telemetry-report-writes-and-deadlocks-readiness-1785690646974-mw97c6 | /tmp/quay-wt-telemetry-readiness |
-
-B7-1：把 `--report` 的写拆成显式 `--snapshot`/`--flush` 子命令，`--report` 变纯读。根因是职责错位（读操作在写）不是 gitignore——聚合保持跟踪、不放宽 readiness 干净树检查、不 gitignore 绕过。`.halt` 保留（去留等外层裁定），本任务是用户驱动的例外派发。外层已停两个 inner Monitor（各 60s 调一次 --report），树可保持干净，AC3（20 次 --report 后 git status --porcelain 为空）可真实验证。
-
-进度（17:23 tick）：subagent 已提交 `84577dd3`（--report 纯读 + --snapshot 显式落盘 + inner-state.sh 纯读契约 + AC1-4 测试），任务体还在更新（未返回）。外层 17:20 提交 `0baf1e03`（inner-stalled.sh READONLY mode）与 `d9f1fd8c`（option A 授权 + 合并顺序）——**与 B7-1 无文件重叠**（外层只改 inner-stalled.sh，B7-1 改 inner-state.sh），rebase 无冲突。合并序列已定：**M222 → M246 → M243**（可测量性排序，人授权）。`--task-end` 后须跟 `--snapshot` 显式落盘（外层已更新 execution-prompt）。
+| **M222**（DIR-112） | ✅ **已合并** `6721ec28`，全量绿（2139/2121/0/18，447.6s）。墙钟差值 489−447.6=41.4s，**落在 20–63s 噪声带宽内 → 如实判定「不可判定」**（非改善）。cli.test.mjs 单文件 58.2s vs 66s 基线，方向性。done |
+| M246（DIR-124-A5） | ✅ **已合并**（M246 merge），全量绿（2275/2257/0/18，429.9s，+136 测试）。独立新文件干净合并。done |
+| **M243**（DIR-124-A2） | **在飞**（subagent 已派发 17:44Z，worktree `/tmp/quay-wt-m243`，runId fm-DIR-124-A2-1785693890531-06eeel）。恢复策略：`git revert 88e17bf2` 重放语料 + **必须带回 095ddbf0**（validateEvent `.error` 修复，随 revert 成孤儿）+ 修 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome）。负控制守则：GREEN tampered 恢复 fail-detect 前不重写期望值 |
 
 ## 已完成 B6
 
@@ -59,12 +49,10 @@ B7-1：把 `--report` 的写拆成显式 `--snapshot`/`--flush` 子命令，`--r
 
 | 任务 | 说明 |
 |---|---|
-| **M222**（DIR-112） | **第一**。rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI；合并后单独测 cli.test.mjs + 全量各一次，差值对 20–63s 噪声带宽判定 |
-| **M246**（DIR-124-A5） | **第二**。独立新文件，干净合并 |
-| **M243 恢复** | **最后，当任务不当合并**。必须一并带回 `095ddbf0`（validateEvent 返回 `.error` 非 `.errors`，runner bug，随 revert `88e17bf2` 成了孤儿——已核实：该 commit 仍在对象库，但文件不在 HEAD 树，不带回 bug 原样回来）。完整恢复还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome）。M239 已推迟 |
+| **M243 恢复（在飞）** | subagent 已派发 17:44Z（runId fm-DIR-124-A2-1785693890531-06eeel，worktree /tmp/quay-wt-m243）。带回 095ddbf0 + 修 5 类 A1a 差异 + 负控制守则。fan-in 后全量验证 |
 | 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**（外层实测：本会话 Task/Agent 未进工具前六，并发是关的；下一批默认并发，不默认串行）。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
-| AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
+| AC6（已部分达成） | `.halt` 已由外层解除（17:43Z，readiness READY）。剩余：/loop 自排程已补（ScheduleWakeup 兜底） |
 
 ## 工作方式调整（外层实测 2026-08-02，含 subagent transcript 的完整分解）
 
