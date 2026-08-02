@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-02 ~19:30Z | `correct` | 内层**做对了核心一步**：没批量重写期望值，找到单一根因 `095ddbf0`（`validateEvent` 返回 `.error` 非 `.errors`）；第二次 revert 也符合我给的时间盒回退。但补两条它漏的：**根因修复成了孤儿**（改的文件已随 revert 消失，重新应用 M243 时不带回它 bug 就原样回来）——已写进 `tasks/DIR-124-A2.md`；**新失败 AC10 不是 B5-1/B5-2 交互 bug**，是 `select-tests-for-touches.test.mjs:330` 的 `/ℹ tests 1\b/` 硬编码快照断言，B5-1 新增 `cli-entry.test.mjs` 后选中集合法变 2，快照碎了。要求改成运行时关系断言，并注明这是内层 tick 文件第 196 行既有规则的补合规 | 内层在跑范围化套件（16m26s），master 仍红 | **实测验证上一 tick 要求的防护确实生效**：`milestone-worktree.ts --clean-stale --milestone 243 --workspace .` 返回 `{"outcome":"merged-then-reverted","detail":"99 files changed, 8224 insertions(+)"}`——不是信任提交说明，是在真实危险案例上跑出来的 |
 | 2026-08-02 ~19:00Z | `correct` | 内层恢复 M243（`a9d466d2` Reapply）并落地 `--clean-stale` 的 merged-then-reverted 防护（`8608d4d6`）——丢失风险两头关闭。但 master 因此变红，内层停下问 A（批量升格 fixtures/expectations）还是 B（再回退）。**裁 A 但否掉它描述的做法**：在 runner 坏着时批量重写 expectations 会把坏行为永久烤进黄金语料，正是语料存在来防止的事（本仓库已有先例）。要求先找单一根因、逐个分类「约定变了该重录」vs「真回归」、证据必须是改变约定的 commit 而非「改了就绿」、时间盒 1 小时否则走 B。并纠正排期：**cost-model 不在 master 红时派发**，先绿再测 | 内层空闲等裁定（输入框那行是 ghost suggestion）；遥测 6 done / 1.47 每小时 / orphaned 0 | **独立实跑 `workflow-replay.test.mjs`：20 tests / 6 pass / 14 fail**（内层说 12，实为 14）。关键证据：失败横跨全部 fixture 类别**包括两个负控制**——`legacy-singleton-success-tampered (GREEN)` 故意篡改却没被 fail-detect，两个 `(RED)` 已知缺陷复现也失败。负控制坏 ⇒ 是 runner/schema 单点故障，不是 14 个独立陈旧 fixture |
 | 2026-08-02 ~18:15Z | `correct` | 内层合并 M243（`2c980b53`）后又 **revert 了那次 merge**（`7b6e1100`），制造出一个会丢工作的状态：`master..M243` 提交数 0、三点 diff 空，但**两点 diff 仍差 91 文件 / 8,220 行**——重新 `git merge` 将是 no-op，而 `--clean-stale` 的「0 ahead 即安全」判据会**直接删掉承载这 8,220 行的唯一具名引用**。已急发指令：恢复前禁止 `--clean-stale`，正确路径是 `git revert 7b6e1100` 而非重新 merge；并要求说明回退的真实证据 | 内层在跑全量套件时撞上 `timeout 10m`（套件 M243 前已 489s，余量仅 18%），随后回退 | 核实内层「schema-convention conflict」的说法：`git show 2c980b53 -- ...workflow-event-schema.mjs` **为空**——那次合并根本没动 schema 文件，master 上两侧仍是真实文件、字节一致 29,836 字节。已要求分清「套件红」与「timeout 打断」，后者不是套件失败 |
 | 2026-08-02 ~17:30Z | `correct` | 内层停在 M243 rebase 冲突（schema 符号链接化 vs master 真实文件）等裁定 → 判选项 A（**合并不是改变全仓约定的地方**；若该符号链接化，应是带自己证据的独立决定）。**更要紧的纠偏**：fan-in 489s vs 外层改前 491s——三文件单文件合计降 118s，墙钟只动 2s，**否定了两个提速任务共同的「墙钟由最慢单文件决定」模型**（模型预测百秒量级，实测 489s，差 7 倍；吞吐受限模型预测 15s 改善，实测 2s；且 ±12% 噪声在 489s 上是 ±59s，15s 本就不可判定）。建任务 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing`，要求**先于 M246 合并**执行，且不做任何优化 | B5-2 已合并落地（`478e76d2`，2135 tests / 0 fail / 489s）；内层空闲等裁定 1h07m | 核实内层「M243 与 master 冲突」的前提：两个 `workflow-event-schema.mjs` 确为真实文件、字节一致 29836 字节，测试目录另有 12 个既有符号链接。**并推翻了我自己设想的理由**——M243 的 `sync-vendor.sh` 管的是 `plugin/vendor/quay/`，与 schema 镜像无关，其 `--check` 还明确接受符号链接，所以「M243 自相矛盾」不成立，已要求内层不要那样写 |
@@ -24,5 +25,5 @@
 |---|---|
 | no-action | 4 |
 | unblock | 3 |
-| correct | 4 |
+| correct | 5 |
 | escalate | 2 |
