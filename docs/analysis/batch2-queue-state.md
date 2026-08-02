@@ -40,6 +40,7 @@
 
 | 任务 | 说明 |
 |---|---|
+| **滞留分支合并**（人裁定 2026-08-02，escalations.md #2）：M243 → M246 → M222，M239 推迟。**B5-2 完成前不合并**（套件构成稳定是 B5-2 实测的前提）。M222 rebase 到 B5-1 之上：保留异步 run()/runNative() + 二进制换 QUAY_CLI 常量，重测叠加数字（AC9 真实进度） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
 
