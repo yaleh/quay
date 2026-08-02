@@ -205,6 +205,10 @@ node orchestration/watch/inner-forensics.mjs timecost --since <外层 loop 起�
 的唯一依据（见 `orchestration/throughput-decomposition.md`）。**注意窗口**：分析外层的影响必须
 `--since` 外层 loop 起点，否则会把 loop 之前的空转算到外层头上。
 
+**`/clear` 会切断历史。** 内层被 `/clear` 后会新建会话文件，工具的 auto-pick 只拿到最新那个。
+请求窗口早于它首条记录时，工具会打印 `⚠ … 个更早的会话未被包含`，并给出 `--session <id>`。
+**看到那条警告就说明本次输出不是完整窗口**——跨 `/clear` 的分析要逐个会话跑再合并。
+
 ### 2. 分类本 tick 的动作
 
 **必须**记录本 tick 属于哪一类——这是判断分层是否退化的唯一依据：

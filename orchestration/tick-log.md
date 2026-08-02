@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-02 ~16:25Z | `no-action` | 内层从 `/clear` 恢复正常，无需介入：它读了外层简报、挂了自己的 Monitor 盯 run4、更新了队列文件、并明确「subagent 一返回先进 worktree 提交」。**内层 tick 的冷启动设计第一次真实受检并通过** | 新会话 `3bbd3095`；B6-1 在飞 39 分钟（阈值 90）；subagent 在做 AC1b 的断言汇聚点计时；worktree 未提交条目 3→7，仍 0 领先 | 取证工具在 `/clear` 后暴露**静默截断**：auto-pick 指向 0.4MB 的新会话，同日 11MB 旧会话不再可见而输出看起来完整。已修——请求窗口早于本会话首条记录时打印被排除的会话及其 `--session` 用法 |
 | 2026-08-02 ~16:10Z | `no-action` | 内层正常推进（B6-1 cost-model 在飞 19 分钟，subagent 在隔离工作树 `/tmp/quay-wt-costmodel` 里干活），无需介入。本 tick 的实质产出是修好了外层自己的取证工具 | B6-1 在飞 19 分钟（阈值 90），遥测 6 done / 1.47 每小时 / orphaned 0 | **新工具首次实用即暴露自身盲区**：`verify 全量套件` 零命中，但工具自带的「零命中≠没做过」警告拦住了误判——真因是 subagent 的工具调用在 `<会话>/subagents/agent-*.jsonl`，不在主 transcript。合并 30 个 subagent 文件后**吞吐分解结论再次翻转**：空转 49.4%→**14.0%**（之前把 subagent 干活期间的主会话安静判成了等裁定），测试合计 **36%** 才是最大可优化项。同一分析错了三次：窗口、归因方向、范围 |
 | 2026-08-02 ~20:10Z | `unblock` | 内层空闲等派发 → 派发 cost-model（master 已绿，我上一 tick 设的前置满足）。附两条实测要求：不做任何优化、AC3 连跑 3 次是硬要求；AC1b 用断言汇聚点计时不许转 `node:test`。并通报吞吐分解结论 | 内层空闲 30m20s 后收到派发；Monitor 随即报 `START 在飞任务变为 gap-suite-cost-model-…`（本次为真阳性） | master 绿独立核实：上一 tick 报红的 `select-tests-for-touches` 19/19 通过，`2389e138` 确已把 AC10 快照断言改成关系断言。**人指出我的吞吐分析窗口错了**——按外层 loop 起点（`f52d63ed` 12:29:10Z）重算：测试从 8% 涨到 **32%**（全量 29.2% + 范围化 3.0%），初版「测试非瓶颈」不成立；且**外层 loop 没降低空转比例（46.5%→53.8%），停摆频率也几乎未变**——外层把「等人」换成「等外层」，等待时长没变 |
 | 2026-08-02 ~19:30Z | `correct` | 内层**做对了核心一步**：没批量重写期望值，找到单一根因 `095ddbf0`（`validateEvent` 返回 `.error` 非 `.errors`）；第二次 revert 也符合我给的时间盒回退。但补两条它漏的：**根因修复成了孤儿**（改的文件已随 revert 消失，重新应用 M243 时不带回它 bug 就原样回来）——已写进 `tasks/DIR-124-A2.md`；**新失败 AC10 不是 B5-1/B5-2 交互 bug**，是 `select-tests-for-touches.test.mjs:330` 的 `/ℹ tests 1\b/` 硬编码快照断言，B5-1 新增 `cli-entry.test.mjs` 后选中集合法变 2，快照碎了。要求改成运行时关系断言，并注明这是内层 tick 文件第 196 行既有规则的补合规 | 内层在跑范围化套件（16m26s），master 仍红 | **实测验证上一 tick 要求的防护确实生效**：`milestone-worktree.ts --clean-stale --milestone 243 --workspace .` 返回 `{"outcome":"merged-then-reverted","detail":"99 files changed, 8224 insertions(+)"}`——不是信任提交说明，是在真实危险案例上跑出来的 |
@@ -25,7 +26,7 @@
 
 | 类型 | 次数 |
 |---|---|
-| no-action | 5 |
+| no-action | 6 |
 | unblock | 4 |
 | correct | 5 |
 | escalate | 2 |

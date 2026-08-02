@@ -89,13 +89,35 @@ function classify(name, input) {
   return "其它 Bash";
 }
 
+// /clear 会新建会话文件，auto-pick 只拿到最新那个。若请求窗口早于它的首条记录，
+// 更早的历史就被**静默截断**了 —— 2026-08-02 实测：clear 后自动选中 0.4MB 的新会话，
+// 而同一天 11MB 的旧会话不再可见，输出看起来完整。必须报出来。
+function earlierSessions(file, sinceMs, firstMs) {
+  if (!sinceMs || sinceMs >= firstMs) return [];
+  const out = [];
+  for (const f of fs.readdirSync(PROJ)) {
+    if (!f.endsWith(".jsonl") || f.includes(SELF) || path.join(PROJ, f) === file) continue;
+    const p2 = path.join(PROJ, f);
+    let st; try { st = fs.statSync(p2); } catch { continue; }
+    if (st.mtimeMs >= sinceMs) out.push({ f, mb: (st.size / 1e6).toFixed(1) });
+  }
+  return out;
+}
+
 function banner(file, rows, sinceMs) {
   const fp = fs.statSync(file);
   const set = transcriptSet(file);
   console.log(`会话文件 ${path.basename(file)}  ${(fp.size / 1e6).toFixed(1)}MB  ${rows.length} 条`
     + (set.length > 1 ? `  (含 ${set.length - 1} 个 subagent transcript)` : "  (无 subagent transcript)"));
   console.log(`窗口 ${sinceMs ? new Date(sinceMs).toISOString() : "(全部)"} → ${new Date(rows.at(-1).t).toISOString()}`);
-  console.log(`指纹：首条 ${new Date(rows[0].t).toISOString()}  —— 若这不是你想分析的会话，用 --session 指定\n`);
+  console.log(`指纹：首条 ${new Date(rows[0].t).toISOString()}  —— 若这不是你想分析的会话，用 --session 指定`);
+  const earlier = earlierSessions(file, sinceMs, rows[0].t);
+  if (earlier.length) {
+    console.log(`\n  ⚠ 请求窗口早于本会话首条记录，${earlier.length} 个更早的会话未被包含（很可能是 /clear 造成的断裂）：`);
+    for (const e of earlier) console.log(`      ${e.f.slice(0, 8)}  ${e.mb}MB   —— 用 --session ${e.f.replace(/\.jsonl$/, "")} 单独分析`);
+    console.log(`     本次输出只覆盖 ${new Date(rows[0].t).toISOString()} 之后，不是完整窗口。`);
+  }
+  console.log("");
 }
 
 function timecost(file, sinceMs) {
