@@ -1,5 +1,40 @@
 # meta-cc 问题报告（2026-08-02，外层实测）
 
+> ## ✅ 复测（同日，升级后）：四条全部修复
+>
+> 工具集也换了（`query_tools` → `query_session_content` 等）。逐条复测：
+>
+> | # | 原问题 | 复测结果 |
+> |---|---|---|
+> | 1 | `jq_filter` 被忽略 | **已修**。`.[] \| .timestamp` 返回纯时间戳数组，不再是完整记录 |
+> | 2 | 文档 schema 与实际返回不符 | **基本已修**，见下方残留项 |
+> | 3 | `output_format: "tsv"` 被忽略 | **已修**。返回 `#` 前缀的 envelope 注释 + 表头 + 制表符行 |
+> | 4 | `scope: "session"` 串到别的会话 | **已修**。新增 `session_id` 参数并在文档里明确与 `scope` 的区别；实测只返回该会话记录 |
+>
+> **交叉验证通过**：对同一问题（内层会话自 12:29:10Z 起跑了几次全量套件），meta-cc 与外层自写的
+> `inner-forensics.mjs` 给出 **7 条、时刻逐条一致**。两个独立实现吻合。
+>
+> ### 最大的改进：`include_subagents` 默认 true
+>
+> 这正好补上外层今天付出代价才发现的盲区——内层把任务派给 subagent，工具调用落在
+> `<会话 UUID>/subagents/agent-*.jsonl`，不在主 transcript 里。外层的自写解析器一开始漏了它，
+> 导致吞吐分解**第三次算错**（把 subagent 干活期间的主会话安静判成「等外层裁定」，空转 49% vs
+> 实际 14%）。实测差距：同一查询含 subagent 223 条、不含 15 条。
+>
+> ### 残留两项（都很小，但都属于「看起来对」的那一类）
+>
+> **a) 文档字段名与实际不符**：`query_session_content` 的描述写
+> `role=tool outputs: {timestamp, session_id, turn, ...}`，实际字段是 **`sessionId`**（驼峰）。
+> 按文档写的 `.session_id` 得到的是**空列而不是报错**——tsv 输出里就是一整列空白。
+>
+> **b) 默认 `scope: "project"` 会混入外层自己的会话。** 实测：一个用来查「内层跑了什么」的查询，
+> 返回的前 8 条全是**外层自己的命令**。这不是缺陷，但它是外层最常用的场景，
+> 而错误的结果看起来完全正常。**要点：查内层必须传 `session_id`**，光靠 `contains` 会串。
+> 建议在 `scope` 的描述里点明这一点。
+>
+> 下面是升级前的原始报告，保留备查。
+
+
 **背景**：外层需要「查内层会话到底跑没跑某条命令」。这本该是 meta-cc 的强项，实测后改用了自写的
 transcript 解析器（`orchestration/watch/inner-forensics.mjs`）。按 CLAUDE.md「report/fix issues
 rather than working around them」，把不用它的理由如实列出。

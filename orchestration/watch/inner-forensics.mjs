@@ -8,7 +8,11 @@
 // initialize → notifications/initialized → tools/call，行分隔 JSON-RPC，几十行代码。
 // 真正的原因是 `jq_filter` 被忽略（判据：`.[] | .timestamp` 仍返回完整记录），无法定向查询；
 // 全量 10,868 条 × ~2KB，拉 ~20MB 回来在客户端过滤比直接读 transcript 更差。
-// 详见 orchestration/meta-cc-issues.md。jq_filter 修好后本文件应整体换成 meta-cc 查询。
+// **2026-08-02 晚更新**：meta-cc 已升级，jq_filter / tsv / session_id 全部修复，且
+// `include_subagents` 默认 true（正是本文件后来才补上的盲区）。交叉验证：同一问题两边给出
+// 7 条、时刻逐条一致。**此后 ad-hoc 核实优先用 meta-cc**；本文件保留是因为 Monitor 脚本要在
+// shell 里跑，走 MCP 需要每个脚本抄一遍 spawn + JSON-RPC 握手的样板。
+// 用 meta-cc 查内层时**必须传 session_id** —— 默认 scope 是 project，会混进外层自己的会话。
 //
 // 两条硬约束，来自 2026-08-02 外层自己犯的两个错：
 //   1. 会话选择必须打印出来并给出指纹 —— 那天第一次分析选错了会话文件，
