@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T22:47:51.676Z",
+  "generatedAt": "2026-08-02T23:54:32.594Z",
   "since": null,
   "tasks": [
     {
@@ -48,6 +48,11 @@
       "outcome": "needs-human"
     },
     {
+      "taskId": "gap-sync-vendor-drift-mislabelled-as-task-schema",
+      "minutes": 60.002183333333335,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-telemetry-report-writes-and-deadlocks-readiness",
       "minutes": 23.2206,
       "outcome": "done"
@@ -75,7 +80,7 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 44.046121428571425,
-  "medianMinutes": 40.256675,
-  "tasksPerHour": 1.3622084772503888
+  "meanMinutes": 45.10985888888888,
+  "medianMinutes": 40.25695,
+  "tasksPerHour": 1.330086182441567
 }
