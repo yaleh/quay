@@ -23,6 +23,21 @@ Schedule ahead of the paused prepare-shape tasks.
 
 ## Proposal
 
+### Grounded fact — 实测偏差 (2026-08-02, 直接运行 extractMechanismClaims)
+
+函数中已有的 `_patternKey` RC1 合并逻辑**不足**。加了它之后的实测结果：
+
+| 任务 | 真实机制数 | 提取数 | 偏差 |
+|---|---|---|---|
+| DIR-124-A1b | 1 | 24 | 过计 24x |
+| DIR-124-A4 | 1 | 18 | 过计 18x |
+| DIR-126-D | 1 | 21 | 过计 21x |
+| DIR-124-A | 5 | 22 | 过计 4.4x |
+| DIR-124-B | 4 | **2** | **欠计 — 真该拆的漏判** |
+
+缺陷是**双向**的：不仅把覆盖率条目计为机制（过计），也把真正独立的机制合并掉（欠计）。
+修过计时必须同时保住 DIR-124-B 的 4 个独立机制不被误合并。
+
 `extractMechanismClaims` in `wiring-coverage-check.ts` counts each coverage item as an independent
 mechanism — e.g., "8 phase boundaries" produces 8 mechanism claims instead of 1. This is the root
 cause of 4 false `split-multi-mechanism` triggers on 2026-08-01 (DIR-124-A1b: 14 claims → 1
