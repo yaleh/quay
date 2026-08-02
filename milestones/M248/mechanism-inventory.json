@@ -1,0 +1,19 @@
+{
+  "mechanisms": [
+    {
+      "id": "M1-workflow-event-schema-module",
+      "owner": "DIR-124-A1a",
+      "proofSurface": "experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "The canonical stage-event schema v1 module is the sole deliverable. It provides validateEvent, parseEventStream, emitEvent, CLI surface (--validate, --selftest, --json, --emit-event), and exported constants (SCHEMA_VERSION, VALID_STAGES, etc.). All exports serve one atomic contract: provide the canonical stage-event schema v1. The module is inert until invoked — zero npm dependencies, zero side effects on load, zero behavior change to any existing system. Downstream consumers (A2, A5, DIR-124-B) can import from this module without any other DIR-124 changes. The byte-identical mirror at plugin/scripts/ is a dependent artifact, not a separate mechanism (mirror-diff is an existing gate, not a new mechanism introduced by this child). The test file (workflow-event-schema.test.mjs) is validation, not a separately shippable mechanism."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-a4819672",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}

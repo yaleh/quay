@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "epochId": "b54fbff8193a",
+  "taskId": "gap-prepare-milestone-epoch-scope-change-grants-full-review-A",
+  "charterHash": "67008cb6ac3188148d1e57a405f70cdc29308ada96a67b6d70f1fce9fc91478e",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": null,
+  "bodyScopeHash": "427b50e193c0cad7672631d98366f5d4e909693f456d58b311db0a86ae55eafb",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 5,
+    "observableAgentMs": 1106144,
+    "terminalFingerprints": {
+      "a2ae225bf1eb": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785603465769
+}

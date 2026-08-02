@@ -1,19 +1,18 @@
 {
   "schemaVersion": 1,
-  "epochId": "b4bed25d47f4",
+  "epochId": "3216e87cca77",
   "taskId": "gap-build-evidence-manifest-missing",
   "charterHash": "fa8dc329bde400bd13549ada495e301fc385ea2b10491ef4bb7533e692bc281a",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": "a175d2923b94",
-  "bodyScopeHash": null,
+  "parentEpochId": "b4bed25d47f4",
+  "bodyScopeHash": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
   "counters": {
-    "attempts": 2,
+    "attempts": 1,
     "fullReviews": 1,
     "deltaRounds": 0,
-    "contentAgentDispatches": 8,
-    "observableAgentMs": 963224,
+    "contentAgentDispatches": 2,
+    "observableAgentMs": 45566,
     "terminalFingerprints": {
-      "2d86004634ea": 1,
       "a2ae225bf1eb": 1
     },
     "tokensObserved": null
@@ -33,6 +32,20 @@
         "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
       },
       "timestamp": 1785570570049
+    },
+    {
+      "fromEpochId": "b4bed25d47f4",
+      "owner": "orchestrating-session",
+      "reason": "Proposal passed review cleanly (empty ledger). Code already landed (M238, 54c6c301). New epoch to bypass full-review cap and complete receipt.",
+      "oldHash": {
+        "charterHash": "fa8dc329bde400bd13549ada495e301fc385ea2b10491ef4bb7533e692bc281a",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "fa8dc329bde400bd13549ada495e301fc385ea2b10491ef4bb7533e692bc281a",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785587641973
     }
   ],
   "policy": {
@@ -43,5 +56,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785570570049
+  "createdAtMs": 1785587641973
 }

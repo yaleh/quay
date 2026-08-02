@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 2,
+  "recordId": "0cb1607e6745",
+  "attemptId": "0cb1607e6745",
+  "generationId": "0cb1607e6745",
+  "admission": {
+    "key": ".::gap-build-evidence-git-fail-soft",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785601612592
+  },
+  "workspace": ".",
+  "taskId": "gap-build-evidence-git-fail-soft",
+  "milestoneId": "M265",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "76e300d05d7329263c8ebf0c9fb49dd128494f01cfae04099951525818accaba",
+    "taskContract": "456238df7b3e816ded0ef31995c8e810b1a4cb6864946d1b2b83d6d4fde9839f",
+    "proposal": "8b44669f83e0851e6586c5b137682899f90ed38beecf8a418670400a515bcce2",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightPlan",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785603399529,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785601612592,
+      "endedAtMs": 1785601888186
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785601888186,
+      "endedAtMs": 1785602366738
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785602366738,
+      "endedAtMs": 1785602747427
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785602747427,
+      "endedAtMs": 1785603134305
+    },
+    {
+      "phase": "preflight-rejected",
+      "round": 0,
+      "startedAtMs": 1785603134305,
+      "endedAtMs": 1785603399529
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "preflight-rejected",
+      "recurrenceKey": "643771f062d2",
+      "firstSeenGeneration": "0cb1607e6745",
+      "lastSeenGeneration": "0cb1607e6745"
+    },
+    {
+      "code": "2869dfb3",
+      "recurrenceKey": "9b4aa8ae68d5",
+      "firstSeenGeneration": "0cb1607e6745",
+      "lastSeenGeneration": "0cb1607e6745"
+    },
+    {
+      "code": "cd55211c",
+      "recurrenceKey": "61c243cd465b",
+      "firstSeenGeneration": "0cb1607e6745",
+      "lastSeenGeneration": "0cb1607e6745"
+    },
+    {
+      "code": "2fbdaf97",
+      "recurrenceKey": "007005cd91a6",
+      "firstSeenGeneration": "0cb1607e6745",
+      "lastSeenGeneration": "0cb1607e6745"
+    }
+  ]
+}

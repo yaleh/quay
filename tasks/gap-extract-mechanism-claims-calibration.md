@@ -13,6 +13,12 @@ extra:
   schema: v1
 ---
 
+**PRIORITY RAISED (2026-08-02, prepare-pipeline reduction — `docs/analysis/prepare-pipeline-reduction-plan.md`):**
+Under the reduced pipeline, prepare keeps exactly three mechanical confirmations —
+mechanism count, AC executability, Touches completeness. This task underpins one of them,
+so its correctness moves from "fixes a false positive" to "core mechanism correctness".
+Schedule ahead of the paused prepare-shape tasks.
+
 **type:** execution
 
 ## Proposal

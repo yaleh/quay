@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-119-D2",
+  "charterHash": "b65f46826e911bd28dcf8a0f60b0b11c57a4198dcbcc7019470fcd329299abb5",
+  "scopeHash": "04aae68b5af7f5fe7ffad7fb50cdf5c39156d811c1e3a70cd08ae4644f637f4d",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "PlanCheck round-1 jq filter defect (unguarded .label startswith) fixed in plan rounds 2/3 (guarded (.label // \"\") form). Remaining round-3 finding is LOW descriptive (stale hash assertion). Force-accept.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785598725999,
+  "invalidations": []
+}

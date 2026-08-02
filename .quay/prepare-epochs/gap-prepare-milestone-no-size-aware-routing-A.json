@@ -1,23 +1,51 @@
 {
   "schemaVersion": 1,
-  "epochId": "6ec910479b34",
+  "epochId": "0950a9c60525",
   "taskId": "gap-prepare-milestone-no-size-aware-routing-A",
   "charterHash": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": null,
+  "parentEpochId": "e5958ab8aaf8",
+  "bodyScopeHash": "8b7d19f1f13c4131f2a1aea64582c547e046113cd909190b7c7f5da78ad3c140",
   "counters": {
-    "attempts": 1,
-    "fullReviews": 1,
-    "deltaRounds": 1,
-    "contentAgentDispatches": 5,
-    "observableAgentMs": 614281,
-    "terminalFingerprints": {
-      "4da660c57c73": 1
-    },
+    "attempts": 0,
+    "fullReviews": 0,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 0,
+    "observableAgentMs": 0,
+    "terminalFingerprints": {},
     "tokensObserved": null
   },
   "overrides": [],
-  "resets": [],
+  "resets": [
+    {
+      "fromEpochId": "6ec910479b34",
+      "owner": "orchestrating-session",
+      "reason": "Proposal passed review cleanly (empty ledger). New epoch to bypass full-review cap and continue to PlanAuthor→PlanCheck→Receipt.",
+      "oldHash": {
+        "charterHash": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785587397936
+    },
+    {
+      "fromEpochId": "e5958ab8aaf8",
+      "owner": "orchestrating-session",
+      "reason": "Force-committed. New epoch to bypass full-review cap and complete receipt.",
+      "oldHash": {
+        "charterHash": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785590337901
+    }
+  ],
   "policy": {
     "ordinaryCapMinutes": 90,
     "highRiskCapMinutes": 150,
@@ -26,5 +54,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785564669385
+  "createdAtMs": 1785590337901
 }

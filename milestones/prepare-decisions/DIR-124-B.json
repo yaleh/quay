@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-B",
+  "charterHash": "53865e942fd0dd3e8fea146cf9d8a19bb6ce44142e520680448949cc1f58f0f3",
+  "scopeHash": "7950317f3de6f6f93ecfa535d46c2592cf8a5bf1b600436678ce422424f6f5f3",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "split",
+  "reason": "4 independently landable mechanisms: (1) RunIdentity mint + stage journal store, (2) Verify cache lookup replacement + persist, (3) resume dispatch, (4) receipt envelope wiring. Real findings: stale phase enumeration (missing Build-Evidence L501), golden-replay sequence contradiction.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785597404002,
+  "invalidations": []
+}

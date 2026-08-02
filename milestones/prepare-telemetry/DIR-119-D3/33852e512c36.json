@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "recordId": "33852e512c36",
+  "attemptId": "33852e512c36",
+  "generationId": "33852e512c36",
+  "admission": {
+    "key": ".::DIR-119-D3",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785595778456
+  },
+  "workspace": ".",
+  "taskId": "DIR-119-D3",
+  "milestoneId": "M211",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "f2ef67214d81282dae57f24bc56de701c1502ddee1e4f0d115384be8a7d5016a",
+    "taskContract": "32dccaf306eb5777d66b830517b3e40a2c2e4c1b111747e71869283f03e54e33",
+    "proposal": "6475aa178a32b5e0c7acad0cda2b62695f15555768317103beaf391bf318bff0",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-identity-mismatch",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785595790986,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "epoch-identity-mismatch",
+      "round": 0,
+      "startedAtMs": 1785595778456,
+      "endedAtMs": 1785595790986
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-identity-mismatch",
+      "recurrenceKey": "9bcc018e814f",
+      "firstSeenGeneration": "33852e512c36",
+      "lastSeenGeneration": "33852e512c36"
+    }
+  ]
+}

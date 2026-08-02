@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "epochId": "2708069cf084",
+  "taskId": "DIR-124-F4b",
+  "charterHash": "7bb3283bf7e718a892d83ed56e84694a775a29c12ce0e8eb7184e691dcc88d91",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "3f0242545489",
+  "bodyScopeHash": "c9e34e75e31f4ca6c6dde89dec7850ae33b2651cfd7f77b97bfe2b98d90bfeeb",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 5,
+    "observableAgentMs": 534305,
+    "terminalFingerprints": {
+      "4da660c57c73": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "3f0242545489",
+      "owner": "orchestrating-session",
+      "reason": "AC coverage added (1845a772); reset epoch to re-review with covered claims",
+      "oldHash": {
+        "charterHash": "7bb3283bf7e718a892d83ed56e84694a775a29c12ce0e8eb7184e691dcc88d91",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "7bb3283bf7e718a892d83ed56e84694a775a29c12ce0e8eb7184e691dcc88d91",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785605184464
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785605184464
+}

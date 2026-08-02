@@ -1,20 +1,19 @@
 {
   "schemaVersion": 1,
-  "epochId": "da4396693993",
+  "epochId": "c64d2c4b31e4",
   "taskId": "DIR-119-D5",
   "charterHash": "c85475488065a03b04c52fff8abf4378a1f549a53b58f7638982a38bfe62cb85",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": "0bd4af0a68d2",
-  "bodyScopeHash": null,
+  "parentEpochId": "da4396693993",
+  "bodyScopeHash": "01e4f04fc79de186739eba386e783b7da0d415e67bdba435ecb473fadbda0db8",
   "counters": {
-    "attempts": 2,
+    "attempts": 1,
     "fullReviews": 1,
-    "deltaRounds": 0,
-    "contentAgentDispatches": 8,
-    "observableAgentMs": 1145786,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 10,
+    "observableAgentMs": 3691600,
     "terminalFingerprints": {
-      "2d86004634ea": 1,
-      "a2ae225bf1eb": 1
+      "e3b22c8ec07f": 1
     },
     "tokensObserved": null
   },
@@ -33,6 +32,20 @@
         "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
       },
       "timestamp": 1785570571630
+    },
+    {
+      "fromEpochId": "da4396693993",
+      "owner": "orchestrating-session",
+      "reason": "proposal passed cleanly (empty ledger), epoch cap hit, continue to receipt",
+      "oldHash": {
+        "charterHash": "c85475488065a03b04c52fff8abf4378a1f549a53b58f7638982a38bfe62cb85",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "c85475488065a03b04c52fff8abf4378a1f549a53b58f7638982a38bfe62cb85",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785595927917
     }
   ],
   "policy": {
@@ -43,5 +56,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785570571630
+  "createdAtMs": 1785595927917
 }

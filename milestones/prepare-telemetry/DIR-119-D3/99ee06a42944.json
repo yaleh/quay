@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "recordId": "99ee06a42944",
+  "attemptId": "99ee06a42944",
+  "generationId": "99ee06a42944",
+  "admission": {
+    "key": ".::DIR-119-D3",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785595834491
+  },
+  "workspace": ".",
+  "taskId": "DIR-119-D3",
+  "milestoneId": "M211",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "f2ef67214d81282dae57f24bc56de701c1502ddee1e4f0d115384be8a7d5016a",
+    "taskContract": "323eb896a65d0dcd952f00770ad9b047820136bba62b4fc896028e1343afc5a6",
+    "proposal": "36f68f7fb6a24cbcd4badd414b2a2580dbf6937d7313a8f0ad5512cb4adfc219",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "plancheck-rounds-exceeded",
+    "phase": "PlanCheck",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785599909155,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785595834491,
+      "endedAtMs": 1785595868862
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785595868862,
+      "endedAtMs": 1785596589543
+    },
+    {
+      "phase": "ProposalReview-delta-round-2",
+      "round": 2,
+      "startedAtMs": 1785596589543,
+      "endedAtMs": 1785596966507
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785596966507,
+      "endedAtMs": 1785597341099
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785597341099,
+      "endedAtMs": 1785597695993
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785597695993,
+      "endedAtMs": 1785598306967
+    },
+    {
+      "phase": "PlanCheck-round-3",
+      "round": 3,
+      "startedAtMs": 1785598306967,
+      "endedAtMs": 1785599494866
+    },
+    {
+      "phase": "plancheck-rounds-exceeded",
+      "round": 0,
+      "startedAtMs": 1785599494866,
+      "endedAtMs": 1785599909155
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "plancheck-rounds-exceeded",
+      "recurrenceKey": "d19d6982ab15",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "4474d08d",
+      "recurrenceKey": "97029c7bbc21",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "e726b895",
+      "recurrenceKey": "aba4fe34d58f",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "dcf1597f",
+      "recurrenceKey": "215ba6aa61d0",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "91c46fd3",
+      "recurrenceKey": "34e17d12f8f7",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "16c35ac4",
+      "recurrenceKey": "23c03ee4bab4",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "e9a331d3",
+      "recurrenceKey": "1d711bf963db",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "583ad8a0",
+      "recurrenceKey": "865394e7c707",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    },
+    {
+      "code": "12b0fb7e",
+      "recurrenceKey": "08ff9faea88e",
+      "firstSeenGeneration": "99ee06a42944",
+      "lastSeenGeneration": "99ee06a42944"
+    }
+  ]
+}

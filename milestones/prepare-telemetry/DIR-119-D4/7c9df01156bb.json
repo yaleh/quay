@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "recordId": "7c9df01156bb",
+  "attemptId": "7c9df01156bb",
+  "generationId": null,
+  "admission": null,
+  "workspace": ".",
+  "taskId": "DIR-119-D4",
+  "milestoneId": null,
+  "class": null,
+  "highRisk": null,
+  "hashes": null,
+  "decision": {
+    "kind": "not-evaluated",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": 0,
+  "contentAgentMs": 0,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "prepare-already-running",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785595872014,
+  "telemetryWriteOk": true,
+  "phaseTimings": [],
+  "findingCodes": [
+    {
+      "code": "prepare-already-running",
+      "recurrenceKey": "090fbc26cac5",
+      "firstSeenGeneration": "7c9df01156bb",
+      "lastSeenGeneration": "7c9df01156bb"
+    }
+  ]
+}

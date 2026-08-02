@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "epochId": "4c199c34c736",
+  "taskId": "DIR-124-F4e",
+  "charterHash": "f092230d7d1a0c7206db951c35a584c44041eb608d5732d7703e2ae4db46fc38",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "d4a8302b8c19",
+  "bodyScopeHash": "748017aaeffbee0aa50aca5cddc6839c88e7e418644b3b08b5f28fc27933be48",
+  "counters": {
+    "attempts": 0,
+    "fullReviews": 0,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 0,
+    "observableAgentMs": 0,
+    "terminalFingerprints": {},
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "d4a8302b8c19",
+      "owner": "orchestrating-session",
+      "reason": "Clean pass (empty ledger) hit full-review cap after AC fix (eca1a309); reset to proceed to PlanAuthor",
+      "oldHash": {
+        "charterHash": "f092230d7d1a0c7206db951c35a584c44041eb608d5732d7703e2ae4db46fc38",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "f092230d7d1a0c7206db951c35a584c44041eb608d5732d7703e2ae4db46fc38",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785604944329
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785604944329
+}

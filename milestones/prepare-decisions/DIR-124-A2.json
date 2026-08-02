@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-A2",
+  "charterHash": "6e859a368068c4d7bfc4a7d4e09f30b089917dd1318fff208418feada967125f",
+  "scopeHash": "fa47d47113be21ddbe423fd82d58927b1951fa1947c67f9097293d86f98a3aba",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "Non-critical for execute-milestone: A2 produces golden replay corpus consumed by DIR-124-B/C/D/E. Proposal already passed review. Remaining mechanical issues (touches, epoch-status parse) are infra gaps, not A2 content defects. Force-commit to unblock.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785587365154,
+  "invalidations": []
+}

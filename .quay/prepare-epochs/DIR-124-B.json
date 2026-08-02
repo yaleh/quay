@@ -1,23 +1,39 @@
 {
   "schemaVersion": 1,
-  "epochId": "d40b767afcdc",
+  "epochId": "96a4e62be3f4",
   "taskId": "DIR-124-B",
   "charterHash": "53865e942fd0dd3e8fea146cf9d8a19bb6ce44142e520680448949cc1f58f0f3",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": null,
+  "parentEpochId": "d40b767afcdc",
+  "bodyScopeHash": "1b03dc7f6370ef1be554d490e8116088909333af043dc0a6555b71e5730ce1a2",
   "counters": {
     "attempts": 1,
     "fullReviews": 1,
     "deltaRounds": 0,
-    "contentAgentDispatches": 8,
-    "observableAgentMs": 2492137,
+    "contentAgentDispatches": 2,
+    "observableAgentMs": 47797,
     "terminalFingerprints": {
-      "38e402758377": 1
+      "a2ae225bf1eb": 1
     },
     "tokensObserved": null
   },
   "overrides": [],
-  "resets": [],
+  "resets": [
+    {
+      "fromEpochId": "d40b767afcdc",
+      "owner": "orchestrating-session",
+      "reason": "proposal passed cleanly (empty ledger), epoch cap hit, continue to receipt",
+      "oldHash": {
+        "charterHash": "53865e942fd0dd3e8fea146cf9d8a19bb6ce44142e520680448949cc1f58f0f3",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "53865e942fd0dd3e8fea146cf9d8a19bb6ce44142e520680448949cc1f58f0f3",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785596171150
+    }
+  ],
   "policy": {
     "ordinaryCapMinutes": 90,
     "highRiskCapMinutes": 150,
@@ -26,5 +42,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785565840903
+  "createdAtMs": 1785596171150
 }

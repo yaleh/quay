@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "epochId": "0762c94da6d7",
+  "taskId": "DIR-124-F6",
+  "charterHash": "6bfd149132e9f217d272de0460db93b33feeacc3beb4ecd1c86aa0150c3ae117",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "0583ba3e1202",
+  "bodyScopeHash": "cef8306c2f047eec3c42c80abfb3acf9d3dfc2f48101f3e3d10fe0a4a84903d8",
+  "counters": {
+    "attempts": 0,
+    "fullReviews": 0,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 0,
+    "observableAgentMs": 0,
+    "terminalFingerprints": {},
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "bd4f29811f6b",
+      "owner": "orchestrating-session",
+      "reason": "Clean pass (empty ledger) hit epoch full-review cap (1); reset epoch to allow re-review to proceed to PlanAuthor",
+      "oldHash": {
+        "charterHash": "6bfd149132e9f217d272de0460db93b33feeacc3beb4ecd1c86aa0150c3ae117",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "6bfd149132e9f217d272de0460db93b33feeacc3beb4ecd1c86aa0150c3ae117",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785602221879
+    },
+    {
+      "fromEpochId": "0583ba3e1202",
+      "owner": "orchestrating-session",
+      "reason": "Clean pass (empty ledger) hit full-review cap; reset to proceed to PlanAuthor",
+      "oldHash": {
+        "charterHash": "6bfd149132e9f217d272de0460db93b33feeacc3beb4ecd1c86aa0150c3ae117",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "6bfd149132e9f217d272de0460db93b33feeacc3beb4ecd1c86aa0150c3ae117",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785605243250
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785605243250
+}

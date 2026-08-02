@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "recordId": "552f19c64f6a",
+  "attemptId": "552f19c64f6a",
+  "generationId": "552f19c64f6a",
+  "admission": {
+    "key": ".::gap-prepare-milestone-no-size-aware-routing-B",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785595637283
+  },
+  "workspace": ".",
+  "taskId": "gap-prepare-milestone-no-size-aware-routing-B",
+  "milestoneId": "M240",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "3da485880d96e4150efa97c56bec7445778f92a8019b9db7e14c28f7de13da5a",
+    "taskContract": "3c59947633808d45539a620f48fdeb3f56b7592434e3a583e4aa41cbca94f6b6",
+    "proposal": "742a12ec8cfa8ab2c54951b7b458eb7989f6ab4bb6e708f9af919c01ed7c32b6",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-full-review-cap-exceeded",
+    "phase": "ProposalReview",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785596604800,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785595637283,
+      "endedAtMs": 1785596173610
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785596173610,
+      "endedAtMs": 1785596597615
+    },
+    {
+      "phase": "epoch-cap-full-review",
+      "round": 0,
+      "startedAtMs": 1785596597615,
+      "endedAtMs": 1785596604800
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-full-review-cap-exceeded",
+      "recurrenceKey": "78eac9bc8bbd",
+      "firstSeenGeneration": "552f19c64f6a",
+      "lastSeenGeneration": "552f19c64f6a"
+    }
+  ]
+}

@@ -1,23 +1,40 @@
 {
   "schemaVersion": 1,
-  "epochId": "d7edc6827337",
+  "epochId": "278c3e392eff",
   "taskId": "gap-prepare-milestone-no-size-aware-routing-B",
   "charterHash": "3da485880d96e4150efa97c56bec7445778f92a8019b9db7e14c28f7de13da5a",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": null,
+  "parentEpochId": "d7edc6827337",
+  "bodyScopeHash": "560b739f5b28486f5dc84f9f425d994926fdd550a858f80899c5a513514e3d26",
   "counters": {
-    "attempts": 1,
+    "attempts": 2,
     "fullReviews": 1,
-    "deltaRounds": 1,
-    "contentAgentDispatches": 5,
-    "observableAgentMs": 758008,
+    "deltaRounds": 2,
+    "contentAgentDispatches": 15,
+    "observableAgentMs": 3667391,
     "terminalFingerprints": {
-      "4da660c57c73": 1
+      "4da660c57c73": 1,
+      "38e402758377": 1
     },
     "tokensObserved": null
   },
   "overrides": [],
-  "resets": [],
+  "resets": [
+    {
+      "fromEpochId": "d7edc6827337",
+      "owner": "orchestrating-session",
+      "reason": "proposal passed cleanly (empty ledger), epoch cap hit, continue to receipt",
+      "oldHash": {
+        "charterHash": "3da485880d96e4150efa97c56bec7445778f92a8019b9db7e14c28f7de13da5a",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "3da485880d96e4150efa97c56bec7445778f92a8019b9db7e14c28f7de13da5a",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785596626137
+    }
+  ],
   "policy": {
     "ordinaryCapMinutes": 90,
     "highRiskCapMinutes": 150,
@@ -26,5 +43,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785564591668
+  "createdAtMs": 1785596626137
 }

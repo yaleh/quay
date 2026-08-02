@@ -1,18 +1,19 @@
 {
   "schemaVersion": 1,
-  "epochId": "2b7302bc0bee",
+  "epochId": "fc72e013fb12",
   "taskId": "DIR-119-D2",
-  "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+  "charterHash": "b65f46826e911bd28dcf8a0f60b0b11c57a4198dcbcc7019470fcd329299abb5",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": "c7966031997d",
+  "parentEpochId": "2b7302bc0bee",
+  "bodyScopeHash": "e96a169481a45d992117508ca71f5f05d93a51918e042c47026208637ea3c3e1",
   "counters": {
     "attempts": 1,
     "fullReviews": 1,
-    "deltaRounds": 2,
-    "contentAgentDispatches": 12,
-    "observableAgentMs": 5483717,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 10,
+    "observableAgentMs": 2651415,
     "terminalFingerprints": {
-      "e3b22c8ec07f": 1
+      "38e402758377": 1
     },
     "tokensObserved": null
   },
@@ -45,6 +46,20 @@
         "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
       },
       "timestamp": 1785525123292
+    },
+    {
+      "fromEpochId": "2b7302bc0bee",
+      "owner": "orchestrating-session",
+      "reason": "charter changed since epoch record — source files updated, re-preparing",
+      "oldHash": {
+        "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "b65f46826e911bd28dcf8a0f60b0b11c57a4198dcbcc7019470fcd329299abb5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785595821045
     }
   ],
   "policy": {
@@ -55,5 +70,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785525123292
+  "createdAtMs": 1785595821045
 }

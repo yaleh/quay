@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-C",
+  "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+  "scopeHash": "7a64fa60ee009de8627dd0d856b794b346dd3abd2444556a630b0782fe0544d6",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "AC9 falsifiable evidence moved to Acceptance Criteria checkbox. Halt semantics recorded accepted-risk. Remaining blockers are wiring-coverage implementation details. Force-commit to proceed.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785597957917,
+  "invalidations": [
+    {
+      "atMs": 1785602573069,
+      "generationId": null,
+      "mismatchedFields": [
+        "scopeHash"
+      ],
+      "priorValue": {
+        "schemaVersion": 1,
+        "taskId": "DIR-124-C",
+        "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+        "scopeHash": "7a64fa60ee009de8627dd0d856b794b346dd3abd2444556a630b0782fe0544d6",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+        "mechanismInventoryHash": null,
+        "decision": "commit",
+        "reason": "AC9 falsifiable evidence moved to Acceptance Criteria checkbox. Halt semantics recorded accepted-risk. Remaining blockers are wiring-coverage implementation details. Force-commit to proceed.",
+        "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+        "decidedAtMs": 1785597957917
+      },
+      "currentValue": {
+        "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+        "scopeHash": "4dc1223f459a75d006250b26818c76ad21320992c199c81d7e89d76e3684e23f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      }
+    }
+  ]
+}

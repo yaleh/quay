@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+  "charterHash": "ec22586470b1f6409483614f0115f39b9e6af4d46dda1ce58222a8c78665eb10",
+  "scopeHash": "644386c02858c73829045fd0d1547db10b49ff2f33b6a0665926ba66b13b28ef",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "Documentation-only deliverable (accepted-risk). No code changes. Task body documents real-incidence scan results and accepted-risk reasoning. /tmp/ scan script is transient and not committable. Not critical for execute-milestone.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785589040748,
+  "invalidations": []
+}

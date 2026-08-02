@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "recordId": "099d46a2c6c0",
+  "attemptId": "099d46a2c6c0",
+  "generationId": "099d46a2c6c0",
+  "admission": {
+    "key": ".::gap-build-evidence-git-fail-soft",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785604233641
+  },
+  "workspace": ".",
+  "taskId": "gap-build-evidence-git-fail-soft",
+  "milestoneId": "M265",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "76e300d05d7329263c8ebf0c9fb49dd128494f01cfae04099951525818accaba",
+    "taskContract": "a1a057ecc0bf5aec6b2825e19200a17927755f40a20c0fcae738e8b0ccf9ddc1",
+    "proposal": "8b44669f83e0851e6586c5b137682899f90ed38beecf8a418670400a515bcce2",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-full-review-cap-exceeded",
+    "phase": "ProposalReview",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785604807801,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785604233641,
+      "endedAtMs": 1785604556945
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785604556945,
+      "endedAtMs": 1785604801565
+    },
+    {
+      "phase": "epoch-cap-full-review",
+      "round": 0,
+      "startedAtMs": 1785604801565,
+      "endedAtMs": 1785604807801
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-full-review-cap-exceeded",
+      "recurrenceKey": "75e25c133e15",
+      "firstSeenGeneration": "099d46a2c6c0",
+      "lastSeenGeneration": "099d46a2c6c0"
+    }
+  ]
+}

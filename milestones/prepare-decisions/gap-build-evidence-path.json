@@ -9,5 +9,78 @@
   "reason": "Proposal passed cleanly (empty ledger); epoch full-review cap (1) met for unchanged scope — COMMIT to proceed to PlanAuthor per DIR-125/M206. No content findings.",
   "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
   "decidedAtMs": 1785602109862,
-  "invalidations": []
+  "invalidations": [
+    {
+      "atMs": 1785603990862,
+      "generationId": null,
+      "mismatchedFields": [
+        "scopeHash"
+      ],
+      "priorValue": {
+        "schemaVersion": 1,
+        "taskId": "gap-build-evidence-path",
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "scopeHash": "c18ccc6eb33c172de67f240c3912d7856a8aafd65536bd4521dc9e3791906485",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+        "mechanismInventoryHash": null,
+        "decision": "commit",
+        "reason": "Proposal passed cleanly (empty ledger); epoch full-review cap (1) met for unchanged scope — COMMIT to proceed to PlanAuthor per DIR-125/M206. No content findings.",
+        "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+        "decidedAtMs": 1785602109862
+      },
+      "currentValue": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "scopeHash": "6b095bd065fc9cbbd6de3ab05c16209284fda069aa7da86ad2dd9887f1ba8619",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      }
+    },
+    {
+      "atMs": 1785604258954,
+      "generationId": null,
+      "mismatchedFields": [
+        "scopeHash"
+      ],
+      "priorValue": {
+        "schemaVersion": 1,
+        "taskId": "gap-build-evidence-path",
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "scopeHash": "c18ccc6eb33c172de67f240c3912d7856a8aafd65536bd4521dc9e3791906485",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+        "mechanismInventoryHash": null,
+        "decision": "commit",
+        "reason": "Proposal passed cleanly (empty ledger); epoch full-review cap (1) met for unchanged scope — COMMIT to proceed to PlanAuthor per DIR-125/M206. No content findings.",
+        "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+        "decidedAtMs": 1785602109862
+      },
+      "currentValue": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "scopeHash": "6b095bd065fc9cbbd6de3ab05c16209284fda069aa7da86ad2dd9887f1ba8619",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      }
+    },
+    {
+      "atMs": 1785604742398,
+      "generationId": null,
+      "mismatchedFields": [
+        "scopeHash"
+      ],
+      "priorValue": {
+        "schemaVersion": 1,
+        "taskId": "gap-build-evidence-path",
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "scopeHash": "c18ccc6eb33c172de67f240c3912d7856a8aafd65536bd4521dc9e3791906485",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+        "mechanismInventoryHash": null,
+        "decision": "commit",
+        "reason": "Proposal passed cleanly (empty ledger); epoch full-review cap (1) met for unchanged scope — COMMIT to proceed to PlanAuthor per DIR-125/M206. No content findings.",
+        "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+        "decidedAtMs": 1785602109862
+      },
+      "currentValue": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "scopeHash": "6b095bd065fc9cbbd6de3ab05c16209284fda069aa7da86ad2dd9887f1ba8619",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      }
+    }
+  ]
 }

@@ -2,52 +2,94 @@
   "taskId": "DIR-124-A1a",
   "milestoneId": "M248",
   "charterFile": "experiments/quay-perpetual-stream/charters/M248-dir-124-a1a.md",
-  "outcome": "prepared",
+  "planFile": "docs/plans/M248-dir-124-a1a.md",
+  "ledgerFile": "milestones/M248/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-124-A1a/c3f2340a4917.json",
+  "mechanismInventoryFile": "milestones/M248/mechanism-inventory.json",
   "hashes": {
-    "proposal": "ec4d99be69f5149e61767a87e444073d18eaddc5d9784e59f7236e4aa36136e1",
+    "proposal": "84707233621ce8a7c27a5a346367d99099c46f9acc7ec433222c5fa471e0dafa",
     "charter": "07975f610c2584b6663bb710d4917e7499a32932ff646e80cda4d155567c9cb3",
-    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
-    "sources": {},
-    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
-    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
-    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+    "plan": "d7b91677af5f66bef3e1f7bf1753366e015e7a935f82e07a40545b0a0c48d909",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs": "fb6b68a7664f028e8294ed49a38f0c2ac585bb3c14ee7b946bd641be143f580f",
+      "plugin/scripts/workflow-event-schema.mjs": "fb6b68a7664f028e8294ed49a38f0c2ac585bb3c14ee7b946bd641be143f580f",
+      "experiments/quay-perpetual-stream/test/workflow-event-schema.test.mjs": "2c146a319e87fe100ee453fde7d7af46ab1840cb1203969aacb71e2116bac22c",
+      "plugin/test/workflow-event-schema.test.mjs": "2c146a319e87fe100ee453fde7d7af46ab1840cb1203969aacb71e2116bac22c",
+      ".gitignore": "83bbd2bb33793493aa8018573d76231f164015a29ca1ad0f40ae105df49ead6c",
+      "plugin/workflows/execute-milestone.js": "372917e4e29d1fff27fd871418f1417adca190acd10d831ccbef64d732ceb548",
+      "plugin/workflows/prepare-milestone.js": "961424d9b71e2124520443e902acf0eaa561be733a1d00a1dbd12e5d36349038"
+    },
+    "ledger": "5a9b7512be669b56a3afd6c80210b2b6d5d14aaf67cc5e4797d6d578677b9b0c",
+    "telemetry": "99aebf7b1ba21156c0bff43e4248c095032f0172ea43deda221657b8c66ac05f",
+    "mechanismInventory": "493f05e1b92c918147ca9f20891f101190486d87a866aa1a8825e66bdedec77a"
   },
   "review": {
     "findings": 0
   },
   "planCheck": {
-    "rounds": 1,
+    "rounds": 3,
     "findings": 0
   },
-  "touches": [],
+  "touches": [
+    "experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs",
+    "experiments/quay-perpetual-stream/test/workflow-event-schema.test.mjs",
+    "plugin/scripts/workflow-event-schema.mjs",
+    "plugin/test/workflow-event-schema.test.mjs",
+    ".gitignore"
+  ],
   "provenance": {
     "proposalAuthors": [
       {
         "authorIdx": 1,
-        "sessionId": "direct-execute"
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      },
+      {
+        "authorIdx": 2,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
       }
     ],
     "adjudicator": {
-      "sessionId": "direct-execute"
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
     },
     "proposalReviewer": {
-      "sessionId": "direct-execute"
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
     },
     "planAuthor": {
-      "sessionId": "direct-execute"
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
     },
     "planCheckers": [
       {
         "round": 1,
-        "sessionId": "direct-execute"
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      },
+      {
+        "round": 2,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      },
+      {
+        "round": 3,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
       }
     ]
   },
   "convergence": {
     "highRisk": false,
-    "fullSynthesisCount": 0,
-    "deltaRounds": 0
-  },
-  "directExecute": true,
-  "directExecuteReason": "Leaf sub-task split from parent. Single mechanism. No prepare-milestone pipeline needed."
+    "fullSynthesisCount": 1,
+    "deltaRounds": 1,
+    "proposalReviewRounds": 2,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785590754108788200,
+    "endedAtMs": 1785591593802,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "1fe86b62eb2a41c2"
+      },
+      {
+        "round": 1,
+        "hash": "1a114e24c397"
+      }
+    ]
+  }
 }

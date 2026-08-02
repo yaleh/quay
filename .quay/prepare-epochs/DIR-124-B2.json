@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "epochId": "1eaf2b830b8a",
+  "taskId": "DIR-124-B2",
+  "charterHash": "8f1375b001d7e122de156b7f06427fdacd984e3d8b2c2f5fe8eb918b71b4ce89",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": null,
+  "bodyScopeHash": "118d2efc8c17dae56cfdf760777a1b678d637afd8177d32d776b58f94ec90509",
+  "counters": {
+    "attempts": 2,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 13,
+    "observableAgentMs": 1869525,
+    "terminalFingerprints": {
+      "4da660c57c73": 1,
+      "a2ae225bf1eb": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785600394565
+}

@@ -2,7 +2,7 @@
 id: gap-prepare-milestone-epoch-scope-change-grants-full-review
 title: prepare-milestone epoch blocks a corrected task body's full review —
   scope change should grant a fresh full-review allowance
-status: todo
+status: ready
 labels:
   - gap
   - defect

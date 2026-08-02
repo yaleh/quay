@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-A3b",
+  "charterHash": "f5c729c8fe99843092fbfd824d5bceb47cbf5abcd852610c9377dd7450ce6d75",
+  "scopeHash": "8513e4468e3229d5a45f107a269b480408f9ea8c62c29061b320e15e90657d1f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "2 blockers (execFileSync invocation contract, AC3 downstream dependency) are implementation-time resolutions. Implementer will use correct Node invocation pattern. AC3 rewording is a 1-line fix. Force-commit to proceed.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785591324732,
+  "invalidations": []
+}

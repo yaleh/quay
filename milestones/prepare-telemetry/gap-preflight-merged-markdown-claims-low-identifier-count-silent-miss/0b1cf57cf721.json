@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "recordId": "0b1cf57cf721",
+  "attemptId": "0b1cf57cf721",
+  "generationId": null,
+  "admission": null,
+  "workspace": ".",
+  "taskId": "gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+  "milestoneId": null,
+  "class": null,
+  "highRisk": null,
+  "hashes": null,
+  "decision": {
+    "kind": "not-evaluated",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": 0,
+  "contentAgentMs": 0,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "admission-check-failed",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785587221459,
+  "telemetryWriteOk": true,
+  "phaseTimings": [],
+  "findingCodes": [
+    {
+      "code": "admission-check-failed",
+      "recurrenceKey": "519c2ec43a97",
+      "firstSeenGeneration": "0b1cf57cf721",
+      "lastSeenGeneration": "0b1cf57cf721"
+    }
+  ]
+}

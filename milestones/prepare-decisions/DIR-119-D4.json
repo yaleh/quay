@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-119-D4",
+  "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+  "scopeHash": "1eff3315c66ee73a05984b9e56a1ff84dab8df94cb726d3835195ad2effa0065",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "PlanCheck 3-round failure was environmental: Stage 4 command trips on split-or-commit pre-check over uncommitted split drift (now committed). Plan substance correct (all ACs mapped, line anchors verified live). Round-2 AC5 grep gap is a plan-refinement note, not a defect. Force-accept.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785598431234,
+  "invalidations": []
+}

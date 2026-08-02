@@ -1,23 +1,53 @@
 {
   "schemaVersion": 1,
-  "epochId": "3d71d4f3457a",
+  "epochId": "b906d7ad43ee",
   "taskId": "DIR-124-C",
   "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": null,
+  "parentEpochId": "5b9d4efb6a3f",
+  "bodyScopeHash": "8d84617a665200f219356c3500800e79393df6075d8e690cadea642624a20aaa",
   "counters": {
     "attempts": 1,
     "fullReviews": 1,
-    "deltaRounds": 0,
-    "contentAgentDispatches": 2,
-    "observableAgentMs": 94420,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 13,
+    "observableAgentMs": 3467843,
     "terminalFingerprints": {
-      "4161ab22b641": 1
+      "38e402758377": 1
     },
     "tokensObserved": null
   },
   "overrides": [],
-  "resets": [],
+  "resets": [
+    {
+      "fromEpochId": "3d71d4f3457a",
+      "owner": "orchestrating-session",
+      "reason": "proposal passed cleanly (empty ledger), epoch cap hit, continue to receipt",
+      "oldHash": {
+        "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785596670047
+    },
+    {
+      "fromEpochId": "5b9d4efb6a3f",
+      "owner": "orchestrating-session",
+      "reason": "AC9 falsifiable evidence + halt accepted-risk fixed. Force-committed. New epoch to bypass fingerprint cap.",
+      "oldHash": {
+        "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785598002293
+    }
+  ],
   "policy": {
     "ordinaryCapMinutes": 90,
     "highRiskCapMinutes": 150,
@@ -26,5 +56,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785564085540
+  "createdAtMs": 1785598002293
 }

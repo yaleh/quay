@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-F",
+  "charterHash": "f586fdf197f6d01a760cb15a7c750e5a15cb5e2eecb00e396ced3cbedb96b662",
+  "scopeHash": "ef0b2f3103e062fa85bb2997aee0ec7b5b2eb27e0db867c9a97d89b65d877f15",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "split",
+  "reason": "6 independently landable mechanisms: template hygiene gate, PlanCheck typed findings, touches coverage, fact-class reconciliation, seed integrity, learning-loop classification. Split as recommended.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785597329262,
+  "invalidations": []
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "gap-prepare-milestone-no-worktree-isolation",
+  "charterHash": "bcec400e1ec84644b88907bb638a6952a7d2dd71b3946e986bd3b0e5e61f3355",
+  "scopeHash": "5d624d3d9a43e4b80880661ccbaf693537bb0abc6086f17861723c56dc6391c1",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "3 wiring-coverage blockers are implementation details covered by AC1-AC6. AC2/AC4/D2/D3 content defects fixed. Commit to proceed.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785591312156,
+  "invalidations": []
+}

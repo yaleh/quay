@@ -1,0 +1,290 @@
+{
+  "schemaVersion": 2,
+  "recordId": "b3d8d57decaa",
+  "attemptId": "b3d8d57decaa",
+  "generationId": "b3d8d57decaa",
+  "admission": {
+    "key": ".::DIR-124-A1b",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785590114379
+  },
+  "workspace": ".",
+  "taskId": "DIR-124-A1b",
+  "milestoneId": "M249",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "2b0aaa31f950d1d198456edb1831ba94926896bdc1dfeb4c7bae39ffb3a1ab56",
+    "taskContract": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+    "proposal": "087e0cb1d5b9e7a8f33d5d3517554436165433daea71974570065a1ea559d682",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "split-recommended",
+    "phase": "ProposalReview",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785591160055,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785590114379,
+      "endedAtMs": 1785590389707
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785590389707,
+      "endedAtMs": 1785590681970
+    },
+    {
+      "phase": "split-recommended",
+      "round": 0,
+      "startedAtMs": 1785590681970,
+      "endedAtMs": 1785591160055
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "split-recommended",
+      "recurrenceKey": "18ab34b769d4",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "4d2abb49",
+      "recurrenceKey": "04ff0cab6262",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "d4490994",
+      "recurrenceKey": "3ac80792d62b",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "9449a448",
+      "recurrenceKey": "792534d2c895",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "ab714dcc",
+      "recurrenceKey": "4a717ca756e5",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "e54a6fa4",
+      "recurrenceKey": "463d0e4eed0b",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "d57b1894",
+      "recurrenceKey": "e23d762f8327",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "0794092e",
+      "recurrenceKey": "ea6103567075",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "ef0208e6",
+      "recurrenceKey": "57114d0b379f",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "2466677e",
+      "recurrenceKey": "5347c88480d4",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "0eabd2d2",
+      "recurrenceKey": "bdb43e3c0567",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "682ed361",
+      "recurrenceKey": "13eb561f0d58",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "3af3a87f",
+      "recurrenceKey": "45a1e5ab9816",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "d5a15ed1",
+      "recurrenceKey": "195d410220b7",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "1a0e4a07",
+      "recurrenceKey": "71105c0a75d3",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "518f05c3",
+      "recurrenceKey": "647710bd6d76",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "9aa53e4b",
+      "recurrenceKey": "b347b09ceef2",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "d2936a5b",
+      "recurrenceKey": "9309d846613b",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "22173572",
+      "recurrenceKey": "4f21365365fd",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "f4f60877",
+      "recurrenceKey": "e265fc8d527a",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "b79577a6",
+      "recurrenceKey": "2ca5497aa1a8",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "90faf8f8",
+      "recurrenceKey": "6d33c458edd0",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "2244e1d5",
+      "recurrenceKey": "06852f1e11ab",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "ee2edc21",
+      "recurrenceKey": "67c2be8599c6",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "a11d4bd1",
+      "recurrenceKey": "ad1a3d6ef14d",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "1986ea4f",
+      "recurrenceKey": "36fecc28909c",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "3f9678bc",
+      "recurrenceKey": "d63189618975",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "efe70563",
+      "recurrenceKey": "08a76f2cc6a5",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "ba92bd69",
+      "recurrenceKey": "1e687dcecbff",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "b82be28f",
+      "recurrenceKey": "7b6e9e17ba25",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "f035bf04",
+      "recurrenceKey": "2a1f2af33929",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "7ffe3ae3",
+      "recurrenceKey": "0a920b644223",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "714ff00f",
+      "recurrenceKey": "d872337771c2",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "4731f14b",
+      "recurrenceKey": "a9963e48d3e5",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "5f569236",
+      "recurrenceKey": "03728a193c6d",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "13d9b165",
+      "recurrenceKey": "3ef355993344",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    },
+    {
+      "code": "b0ed6bf2",
+      "recurrenceKey": "d1acfcf8905b",
+      "firstSeenGeneration": "b3d8d57decaa",
+      "lastSeenGeneration": "b3d8d57decaa"
+    }
+  ]
+}

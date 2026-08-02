@@ -5,9 +5,9 @@
   "scopeHash": "89c2cf23fa96f40d0e6547a94918205e346c39f120041b9d7f1fee4395572f0c",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
   "mechanismInventoryHash": null,
-  "decision": "split",
-  "reason": "ProposalReview found wiring-coverage gaps — split as recommended",
-  "authorizingSessionId": null,
-  "decidedAtMs": 1785572402046,
+  "decision": "commit",
+  "reason": "Stale split decision from prior generation — source files (composite-land.ts) updated since. Re-preparing; proposal updated.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785595822408,
   "invalidations": []
 }

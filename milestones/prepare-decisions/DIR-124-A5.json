@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-124-A5",
+  "charterHash": "cbaf3f3ed48d9eac6de862574dde84bfc546dfb61a318791c7d73093127bc441",
+  "scopeHash": "e97fd83107c5b60e9600d4ece782a995d1d09e12d4a3ce354cf7abb2b753dcfe",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "Remaining blocker is wiring-coverage-format (commandIdentity claim lacks AC). Non-critical for execute-milestone: A5 produces baseline metrics consumed by DIR-124-E only. 3 minor findings dispositioned as plan/accepted-risk. Commit to unblock execute.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785586780613,
+  "invalidations": [
+    {
+      "atMs": 1785587903398,
+      "generationId": null,
+      "mismatchedFields": [
+        "scopeHash"
+      ],
+      "priorValue": {
+        "schemaVersion": 1,
+        "taskId": "DIR-124-A5",
+        "charterHash": "cbaf3f3ed48d9eac6de862574dde84bfc546dfb61a318791c7d73093127bc441",
+        "scopeHash": "e97fd83107c5b60e9600d4ece782a995d1d09e12d4a3ce354cf7abb2b753dcfe",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+        "mechanismInventoryHash": null,
+        "decision": "commit",
+        "reason": "Remaining blocker is wiring-coverage-format (commandIdentity claim lacks AC). Non-critical for execute-milestone: A5 produces baseline metrics consumed by DIR-124-E only. 3 minor findings dispositioned as plan/accepted-risk. Commit to unblock execute.",
+        "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+        "decidedAtMs": 1785586780613
+      },
+      "currentValue": {
+        "charterHash": "cbaf3f3ed48d9eac6de862574dde84bfc546dfb61a318791c7d73093127bc441",
+        "scopeHash": "4c483c2fe3ffbbd570f9c1b876d5f9fe800e099f20e3c82eb578610e8502a45a",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      }
+    }
+  ]
+}

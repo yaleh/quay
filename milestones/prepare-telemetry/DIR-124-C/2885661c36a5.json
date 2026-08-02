@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "recordId": "2885661c36a5",
+  "attemptId": "2885661c36a5",
+  "generationId": "2885661c36a5",
+  "admission": {
+    "key": ".::DIR-124-C",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785602534378
+  },
+  "workspace": ".",
+  "taskId": "DIR-124-C",
+  "milestoneId": "M237",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+    "taskContract": "49932c7d37c14bec34e42293ea4ddc88ccd3278fccc49cac0d51cf92ac5910eb",
+    "proposal": "8d84617a665200f219356c3500800e79393df6075d8e690cadea642624a20aaa",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "plancheck-rounds-exceeded",
+    "phase": "PlanCheck",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785606424483,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785602534378,
+      "endedAtMs": 1785602729291
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785602729291,
+      "endedAtMs": 1785603005388
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785603005388,
+      "endedAtMs": 1785604218636
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785604218636,
+      "endedAtMs": 1785604447453
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785604447453,
+      "endedAtMs": 1785604836325
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785604836325,
+      "endedAtMs": 1785605366898
+    },
+    {
+      "phase": "PlanCheck-round-3",
+      "round": 3,
+      "startedAtMs": 1785605366898,
+      "endedAtMs": 1785606002221
+    },
+    {
+      "phase": "plancheck-rounds-exceeded",
+      "round": 0,
+      "startedAtMs": 1785606002221,
+      "endedAtMs": 1785606424483
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "plancheck-rounds-exceeded",
+      "recurrenceKey": "821409fe13d1",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "4eff250e",
+      "recurrenceKey": "3d22ee7b0e05",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "3a5a6855",
+      "recurrenceKey": "87e6ffb88cc1",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "da71bfa0",
+      "recurrenceKey": "a4d0493563d3",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "7ff5f06b",
+      "recurrenceKey": "e07e797622c7",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "4a164d30",
+      "recurrenceKey": "f60ed69c38d3",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "463a12a2",
+      "recurrenceKey": "5d5d3e0072f6",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "29828626",
+      "recurrenceKey": "b855f9fdad4d",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    },
+    {
+      "code": "11157479",
+      "recurrenceKey": "05adb0610200",
+      "firstSeenGeneration": "2885661c36a5",
+      "lastSeenGeneration": "2885661c36a5"
+    }
+  ]
+}

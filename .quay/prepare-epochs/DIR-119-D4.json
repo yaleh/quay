@@ -1,18 +1,19 @@
 {
   "schemaVersion": 1,
-  "epochId": "8ea1288b9aa6",
+  "epochId": "53ba4c8a895c",
   "taskId": "DIR-119-D4",
   "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": "e265af63668d",
+  "parentEpochId": "0c74de7b970f",
+  "bodyScopeHash": "66027f345838cee2d4e043312f5bfe3023f5e14f213996154f84c476d0c0f19d",
   "counters": {
-    "attempts": 1,
-    "fullReviews": 1,
-    "deltaRounds": 0,
-    "contentAgentDispatches": 6,
-    "observableAgentMs": 2813687,
+    "attempts": 2,
+    "fullReviews": 2,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 18,
+    "observableAgentMs": 3534949,
     "terminalFingerprints": {
-      "e3b22c8ec07f": 1
+      "38e402758377": 2
     },
     "tokensObserved": null
   },
@@ -31,6 +32,34 @@
         "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
       },
       "timestamp": 1785544382714
+    },
+    {
+      "fromEpochId": "8ea1288b9aa6",
+      "owner": "orchestrating-session",
+      "reason": "charter changed since epoch record — source files updated, re-preparing",
+      "oldHash": {
+        "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785595821928
+    },
+    {
+      "fromEpochId": "0c74de7b970f",
+      "owner": "orchestrating-session",
+      "reason": "proposal passed cleanly (empty ledger), epoch cap hit, continue to receipt",
+      "oldHash": {
+        "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785595847545
     }
   ],
   "policy": {
@@ -41,5 +70,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785544382714
+  "createdAtMs": 1785595847545
 }

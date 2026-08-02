@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "gap-prepare-milestone-no-size-aware-routing-A",
+  "charterHash": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
+  "scopeHash": "5e0c2d10442a1968e448d1e359ebb029a57f75e9dcf74322314ce36d44adc025",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "3 wiring-coverage blockers (_ROUTING_POLICY, buildRoutingDecision, routing insertion point) are mechanism implementation details, not independent AC items. 4 minor findings dispositioned (plan/accepted-risk). Commit to proceed to receipt.",
+  "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+  "decidedAtMs": 1785590238547,
+  "invalidations": []
+}

@@ -2,7 +2,7 @@
 id: gap-recursive-guard-only-covers-multi-mechanism
 title: "split-recursive-guard only fires for split-multi-mechanism — a depth-2+
   leaf triggering any other split code still auto-splits"
-status: todo
+status: ready
 labels:
   - gap
   - defect

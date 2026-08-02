@@ -10,6 +10,13 @@ labels:
 extra:
   schema: v1
 ---
+
+**PAUSED (2026-08-02, prepare-pipeline reduction — `docs/analysis/prepare-pipeline-reduction-plan.md`):**
+`blocked-by: prepare-pipeline-reduction`. This task's premise assumes the CURRENT prepare
+pipeline shape (ProposalReview + 3-round PlanCheck). That shape is being reduced to three
+mechanical confirmations (mechanism count, AC executability, Touches completeness), which
+changes this task's value. NOT cancelled — re-evaluate after stage B–D of the reduction plan
+lands and real dispatch data is available. Do not schedule until then.
 **type:** execution
 
 ## Proposal

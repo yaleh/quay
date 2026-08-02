@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "epochId": "aca66826035d",
+  "taskId": "gap-build-evidence-git-fail-soft",
+  "charterHash": "76e300d05d7329263c8ebf0c9fb49dd128494f01cfae04099951525818accaba",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "2b8361093584",
+  "bodyScopeHash": "8b44669f83e0851e6586c5b137682899f90ed38beecf8a418670400a515bcce2",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 10,
+    "observableAgentMs": 1215526,
+    "terminalFingerprints": {
+      "38e402758377": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "2b8361093584",
+      "owner": "orchestrating-session",
+      "reason": "Clean pass (empty ledger) hit full-review cap; reset to proceed to PlanAuthor",
+      "oldHash": {
+        "charterHash": "76e300d05d7329263c8ebf0c9fb49dd128494f01cfae04099951525818accaba",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "76e300d05d7329263c8ebf0c9fb49dd128494f01cfae04099951525818accaba",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785604843642
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785604843642
+}

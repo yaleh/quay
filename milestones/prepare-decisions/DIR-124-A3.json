@@ -6,8 +6,8 @@
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
   "mechanismInventoryHash": null,
   "decision": "split",
-  "reason": "ProposalReview: 3 independently landable mechanisms (> 2) — owner-exists rule lacks AC, deletionList JSON output lacks AC. Split as recommended.",
+  "reason": "Split into sub-tasks: A3a (manifest + enforcement), A3b (DoD gate integration)",
   "authorizingSessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
-  "decidedAtMs": 1785581969544,
+  "decidedAtMs": 1785590088176,
   "invalidations": []
 }

@@ -3,7 +3,7 @@
 - **Milestone:** M239
 - **Task:** `gap-prepare-milestone-no-size-aware-routing-A`
 - **Charter:** `experiments/quay-perpetual-stream/charters/M239-gap-prepare-milestone-no-size-aware-routing-A.md`
-- **Base revision:** `65f414c4` (master HEAD short-sha at plan authoring, 2026-08-01)
+- **Base revision:** `1f36910f` (current HEAD short-sha at Plan authoring, 2026-08-01)
 - **Class:** development · **Value type:** capabilityGrowth · **type:** execution
 
 ## Purpose

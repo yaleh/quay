@@ -2,7 +2,7 @@
 id: gap-planauthor-shape-rules-not-injected
 title: "Mechanical plan-shape rules run AFTER PlanAuthor — 46 PreflightPlan
   rejections discard already-authored plans"
-status: todo
+status: ready
 labels:
   - gap
   - defect

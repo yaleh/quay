@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "recordId": "dac1e612a95c",
+  "attemptId": "dac1e612a95c",
+  "generationId": "dac1e612a95c",
+  "admission": {
+    "key": ".::gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785587247672
+  },
+  "workspace": ".",
+  "taskId": "gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+  "milestoneId": "M247",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "ec22586470b1f6409483614f0115f39b9e6af4d46dda1ce58222a8c78665eb10",
+    "taskContract": "18e1543d84e567a3c911436aceabdd4ed22f00c54ea92534fb23821a216c5396",
+    "proposal": "cf49d72688b6b85718c3a094dc0830ae9666ad1715ee7e197903968105b24102",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightPlan",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785588350387,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785587247672,
+      "endedAtMs": 1785587589937
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785587589937,
+      "endedAtMs": 1785587740184
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785587740184,
+      "endedAtMs": 1785587996907
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785587996907,
+      "endedAtMs": 1785588190486
+    },
+    {
+      "phase": "preflight-rejected",
+      "round": 0,
+      "startedAtMs": 1785588190486,
+      "endedAtMs": 1785588350387
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "preflight-rejected",
+      "recurrenceKey": "5a8cf02d967f",
+      "firstSeenGeneration": "dac1e612a95c",
+      "lastSeenGeneration": "dac1e612a95c"
+    },
+    {
+      "code": "0934d561",
+      "recurrenceKey": "d625d7fa6273",
+      "firstSeenGeneration": "dac1e612a95c",
+      "lastSeenGeneration": "dac1e612a95c"
+    },
+    {
+      "code": "7e9cc137",
+      "recurrenceKey": "e45bef801dfa",
+      "firstSeenGeneration": "dac1e612a95c",
+      "lastSeenGeneration": "dac1e612a95c"
+    },
+    {
+      "code": "3401bbf2",
+      "recurrenceKey": "5f7b3d5dcc93",
+      "firstSeenGeneration": "dac1e612a95c",
+      "lastSeenGeneration": "dac1e612a95c"
+    },
+    {
+      "code": "76b191dc",
+      "recurrenceKey": "5e141bdf9b7c",
+      "firstSeenGeneration": "dac1e612a95c",
+      "lastSeenGeneration": "dac1e612a95c"
+    }
+  ]
+}

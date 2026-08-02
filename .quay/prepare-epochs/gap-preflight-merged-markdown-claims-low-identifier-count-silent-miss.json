@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "epochId": "caef05d24717",
+  "taskId": "gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+  "charterHash": "ec22586470b1f6409483614f0115f39b9e6af4d46dda1ce58222a8c78665eb10",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": null,
+  "bodyScopeHash": "cf49d72688b6b85718c3a094dc0830ae9666ad1715ee7e197903968105b24102",
+  "counters": {
+    "attempts": 2,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 11,
+    "observableAgentMs": 1228812,
+    "terminalFingerprints": {
+      "4da660c57c73": 2
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785588361208
+}

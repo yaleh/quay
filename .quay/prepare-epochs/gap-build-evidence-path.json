@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "epochId": "05598874f655",
+  "taskId": "gap-build-evidence-path",
+  "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "683930b5bb23",
+  "bodyScopeHash": "d06e910880edad24770c25261a2487e48cc4423d6bbf139d80c7bbf8e4250734",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 3,
+    "observableAgentMs": 857061,
+    "terminalFingerprints": {
+      "4da660c57c73": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "da87578dd1b5",
+      "owner": "orchestrating-session",
+      "reason": "Clean pass (empty ledger) hit epoch full-review cap (1); reset epoch to allow re-review to proceed to PlanAuthor",
+      "oldHash": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785602219340
+    },
+    {
+      "fromEpochId": "02f698748759",
+      "owner": "orchestrating-session",
+      "reason": "Clean pass (empty ledger) hit full-review cap again; reset epoch to allow re-review to reach PlanAuthor",
+      "oldHash": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785604682502
+    },
+    {
+      "fromEpochId": "683930b5bb23",
+      "owner": "orchestrating-session",
+      "reason": "COMMIT decision on file (5b9b5f1b); clean pass twice, full-review cap met — reset to proceed to PlanAuthor per M206",
+      "oldHash": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "bcdf31d5908cc22cac8448026e2efc2aa75bf85310f6323cc1077e75f39a3581",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785604701885
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785604701885
+}

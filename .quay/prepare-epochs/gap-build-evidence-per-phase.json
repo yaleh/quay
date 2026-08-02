@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "epochId": "d489df16042e",
+  "taskId": "gap-build-evidence-per-phase",
+  "charterHash": "aa0adaeca32872e900c3a0589bbd73f4eb5701aa773fe865f1110586bd9dbb6f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "18a9b41686e7",
+  "bodyScopeHash": "b610847a33e5215b67d7e54cdf3a636eade79a9d072d19c9a46fe79076a90740",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 5,
+    "observableAgentMs": 684066,
+    "terminalFingerprints": {
+      "4da660c57c73": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "18a9b41686e7",
+      "owner": "orchestrating-session",
+      "reason": "AC coverage added (1845a772); reset epoch to re-review with covered claims",
+      "oldHash": {
+        "charterHash": "aa0adaeca32872e900c3a0589bbd73f4eb5701aa773fe865f1110586bd9dbb6f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "aa0adaeca32872e900c3a0589bbd73f4eb5701aa773fe865f1110586bd9dbb6f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785605185368
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785605185368
+}

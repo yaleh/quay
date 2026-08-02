@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "recordId": "d8421a201be4",
+  "attemptId": "d8421a201be4",
+  "generationId": "d8421a201be4",
+  "admission": {
+    "key": ".::DIR-124-B2a",
+    "ownerExecutionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534",
+    "fencingToken": 0,
+    "acquiredAt": 1785604229034
+  },
+  "workspace": ".",
+  "taskId": "DIR-124-B2a",
+  "milestoneId": "M275",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "74fb17dbfef82b872f8852749c939c0f5fec0f6bc012a7169f2ffa86f1f2a750",
+    "taskContract": "068e756e54d440a0b272311076e3134ee1405d5983fd05bac1c3ee98e2c9487c",
+    "proposal": "13bfe5333a8daced948117e0568dea08f9d2dbe68c3ebd8ba8d918f4761d8b5f",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-full-review-cap-exceeded",
+    "phase": "ProposalReview",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785604773577,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785604229034,
+      "endedAtMs": 1785604495974
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785604495974,
+      "endedAtMs": 1785604767228
+    },
+    {
+      "phase": "epoch-cap-full-review",
+      "round": 0,
+      "startedAtMs": 1785604767228,
+      "endedAtMs": 1785604773577
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-full-review-cap-exceeded",
+      "recurrenceKey": "92a1ac4adc5b",
+      "firstSeenGeneration": "d8421a201be4",
+      "lastSeenGeneration": "d8421a201be4"
+    }
+  ]
+}
