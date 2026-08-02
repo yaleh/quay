@@ -1,6 +1,0 @@
-{
-  "synthetic": false,
-  "description": "Prepared failure: stale receipt. Verify passes before Prepared fires revision-needed. Post-M195 enforced-default fail-closed.",
-  "generatedAt": "2026-08-01T12:00:00.000Z",
-  "workflowCommit": "74fe7791"
-}
