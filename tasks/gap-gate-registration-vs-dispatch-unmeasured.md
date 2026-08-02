@@ -88,13 +88,13 @@ registered gates: 16  (ADR string entries, no script: 2)
 
 ── registered (name → script/command, per-gate dispatched-by) ──
 impl-row  →  ./plugin/scripts/it0-impl-row-check.sh
-    dispatched-by: it0-dod-check.ts:23/119/282/287/313/410 (script-basename), it0-dod-check.ts:293 (name), OUTER-LOOP.md:161 (name)
+    dispatched-by: it0-dod-check.ts:287/313 (script-basename), it0-dod-check.ts:293 (name), OUTER-LOOP.md:161 (name)
 line-budget  →  ./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh
-    dispatched-by: .claude/workflows/execute-milestone.js:222 (script-basename), .claude/workflows/execute-milestone.js:937 (name), plugin/workflows/execute-milestone.js:222/937, it0-dod-check.ts:18/119/261/263/277 (script-basename), OUTER-LOOP.md:99 (script-basename), diagnose-verify-failure.js:120 (name)
+    dispatched-by: .claude/workflows/execute-milestone.js:222 (script-basename), .claude/workflows/execute-milestone.js:937 (name), plugin/workflows/execute-milestone.js:222/937, it0-dod-check.ts:263/277 (script-basename), OUTER-LOOP.md:99 (script-basename), diagnose-verify-failure.js:120 (name, diagnostic label — noise)
 vmeta-lag  →  ./plugin/scripts/vmeta-lag-check.sh
-    dispatched-by: .claude/workflows/execute-milestone.js:844/935 (script-basename), :907 (name), plugin/workflows/*:844/935/907, OUTER-LOOP.md:161 (name)
+    dispatched-by: .claude/workflows/execute-milestone.js:844/935 (script-basename), plugin/workflows/*:844/935, OUTER-LOOP.md:161 (name)
 audit-independence  →  ./plugin/scripts/audit-independence-check.sh
-    dispatched-by: it0-dod-check.ts:58/792/808/827/854 (script-basename), OUTER-LOOP.md:162 (name)
+    dispatched-by: it0-dod-check.ts:827/854 (script-basename), OUTER-LOOP.md:162 (name)
 dogfood-evidence  →  ./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh
     dispatched-by: .claude/workflows/execute-milestone.js:226/1258/1313 (script-basename), plugin/workflows/*:226/1258/1313
 drivable-workspace  →  ./plugin/scripts/drivable-workspace-check.sh
@@ -106,17 +106,17 @@ anti-gaming  →  ./plugin/scripts/anti-gaming-guard.sh
 loadbearing-test  →  ./plugin/scripts/loadbearing-test-gate.sh
     dispatched-by: no-known-dispatcher
 tree-hygiene  →  ./plugin/scripts/tree-hygiene-check.sh
-    dispatched-by: .claude/workflows/execute-milestone.js:436/939/1327 (script-basename), plugin/workflows/*, it0-dod-check.ts:49/739/740/748/762 (script-basename), :348 (name), OUTER-LOOP.md:162 (name), :245 (script-basename)
+    dispatched-by: .claude/workflows/execute-milestone.js:436/939/1327 (script-basename), plugin/workflows/*, it0-dod-check.ts:748/762 (script-basename), OUTER-LOOP.md:162 (name), :245 (script-basename)
 worktree-branch-hygiene  →  ./plugin/scripts/worktree-branch-hygiene-check.sh
-    dispatched-by: .claude/workflows/execute-milestone.js:941/1327 (script-basename), plugin/workflows/*, it0-dod-check.ts:55/772/786 (script-basename), :348 (name), OUTER-LOOP.md:162 (name), :245 (script-basename)
+    dispatched-by: .claude/workflows/execute-milestone.js:941/1327 (script-basename), plugin/workflows/*, it0-dod-check.ts:772/786 (script-basename), OUTER-LOOP.md:162 (name), :245 (script-basename)
 build-evidence  →  ./plugin/scripts/build-evidence-gate.ts
-    dispatched-by: .claude/workflows/execute-milestone.js:945 (script-basename), plugin/workflows/execute-milestone.js:945
+    dispatched-by: .claude/workflows/execute-milestone.js:945 (script-basename), :581/:825 (name, collector/manifest refs — noise), plugin/workflows/*
 it0-dod-check-tests  →  node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
     dispatched-by: no-known-dispatcher
 ts-typecheck  →  for d in packages/*/; do npx tsc --noEmit -p "$d" || exit 1; done
     dispatched-by: no-known-dispatcher
 split-or-commit  →  node plugin/scripts/it0-split-or-commit-check.ts .
-    dispatched-by: .claude/workflows/execute-milestone.js:931/1161/1169/1172/1174 (name), :1155 (script-basename), plugin/workflows/*, OUTER-LOOP.md:98/280/286 (script-basename)
+    dispatched-by: .claude/workflows/execute-milestone.js:931/1169/1172/1174 (name), plugin/workflows/*, OUTER-LOOP.md:98/280/286 (script-basename)
 enforcement-with-design  →  node plugin/scripts/it0-enforcement-with-design-check.ts .
     dispatched-by: no-known-dispatcher
 
@@ -140,13 +140,21 @@ build-evidence-collector.ts  —  execute-milestone.js:8/569/581 (+plugin mirror
 delivery-manifest-check.ts, drain-dispose-corruption-check.ts, milestone-preparation-check.ts,
 prepare-admission-check.ts, wiring-coverage-check.ts, routine-file-gate.ts, etc.)
 
-── registration-name vs run-script mismatches ──
-drivable-workspace: registered drivable-workspace-check.sh, live drivable-workspace-check.ts (wrapper-pair) — OUTER-LOOP.md:103
-line-budget: registered it0-ceiling-line-budget-check.sh, live it0-dashboard-line-budget-check.sh (different-script) — .claude/workflows/execute-milestone.js:937, plugin/workflows/execute-milestone.js:937
-split-or-commit: registered it0-split-or-commit-check.ts, live it0-split-or-commit-check.sh (wrapper-pair) — .claude/workflows/execute-milestone.js:1172, plugin/workflows/execute-milestone.js:1172
+── registration-name vs run-script mismatches (different-script divergences only) ──
+line-budget: registered it0-ceiling-line-budget-check.sh, live it0-dashboard-line-budget-check.sh — .claude/workflows/execute-milestone.js:937, plugin/workflows/execute-milestone.js:937
 ```
+*(`--json` also emits an `aliasPairs` array for same-gate sh/ts wrapper pairs — drivable-workspace
+`drivable-workspace-check.sh` vs `.ts` @ OUTER-LOOP.md:103 and split-or-commit `it0-split-or-commit-check.ts`
+vs `.sh` @ execute-milestone.js:1172 — so `mismatches` stays true-positive.)
 
-**Baseline headline**: 16 registered, 10 dispatched on the scanned surfaces, 6 `no-known-dispatcher`; `it0-dashboard-line-budget-check.sh` confirmed dispatched-but-unregistered; `line-budget` is the one `different-script` mismatch (ceiling vs dashboard), the other two are `wrapper-pair` sh/ts aliases. This is the stage-1 fact table a human reads against the two-phase exp6 context — no verdict, no deletion, no blocking.
+**Baseline headline**: 16 registered, 10 dispatched on the scanned surfaces, 6 `no-known-dispatcher`; `it0-dashboard-line-budget-check.sh` confirmed dispatched-but-unregistered; `line-budget` is the single genuine registration-vs-run divergence (`different-script`, ceiling vs dashboard). This is the stage-1 fact table a human reads against the two-phase exp6 context — no verdict, no deletion, no blocking.
+
+**Adversarial review (round 1, read-only subagent) + fixes**: the reviewer confirmed all 10 ACs have passing evidence, and surfaced 2 MAJOR / 2 MINOR / 1 NIT findings, all fixed in the branch:
+- MAJOR/AC6: `mismatches` carried 2 benign sh/ts wrapper-pairs alongside the real `line-budget` divergence → split into `mismatches` (different-script only) + additive `aliasPairs`.
+- MAJOR/AC3-latent: `DISPATCH_MARKER_RE` used `\bnode \b`, missing verb-flag forms (`node --experimental-strip-types …`, `bash -e`) → now `\b(node|bash|run|sh|exec|execute)\b`, with a regression test (AC3-extra).
+- MINOR/AC3: comment/prose/error-label lines polluted dispatch lists → both match kinds now skip pure-comment lines; the residual noise (diagnostic label `line-budget-exceeded` @ diagnose-verify-failure.js:120, collector/manifest name-refs @ execute-milestone.js:581/825) is documented in the table above.
+- MINOR/AC2-latent: `cleanScalar` stripped `#`-comments before quotes → quotes are now stripped first; comment strip applies only to unquoted scalars.
+- NIT/AC8: `--json | head -0` (EPIPE) exited 1 → stdout error swallowed; exit stays 0 (AC8-extra test).
 
 ## Touches
 

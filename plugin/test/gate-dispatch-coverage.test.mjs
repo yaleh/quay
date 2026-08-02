@@ -20,6 +20,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import { DISPATCH_MARKER_RE } from "../../plugin/scripts/gate-dispatch-coverage.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // REPO_ROOT must resolve to the same directory regardless of where this test lives.
@@ -58,6 +60,8 @@ const FIXTURE_CONFIG = `gates:
   testPass:
     - name: split-or-commit
       command: "node plugin/scripts/it0-split-or-commit-check.ts ."
+    - name: flag-dispatched
+      command: "node plugin/scripts/flag-dispatched-check.ts ."
 `;
 
 const FIXTURE_WORKFLOW = `// Gate phase (fixture)
@@ -67,6 +71,8 @@ const gates = await parallel([
 ])
 // Post-land split-or-commit
 bash plugin/scripts/it0-split-or-commit-check.sh .
+// Flag-verb name dispatch (no registered basename on the line)
+node --experimental-strip-types flag-dispatched-check .
 `;
 
 const FIXTURE_DOD = `// Clause 3: Line-budget gate — reuse it0-ceiling-line-budget-check.sh directly
@@ -156,13 +162,35 @@ test("AC2: parses .quay/config.yml gates: → all registered gates (count assert
     writeFixture(tmp);
     const report = runCliJson(tmp);
     const names = report.registered.map((g) => g.name);
-    assert.equal(report.registered.length, 5, "fixture registers exactly 5 gates");
-    for (const n of ["line-budget", "alpha-check", "never-run", "omega-gate", "split-or-commit"]) {
+    assert.equal(report.registered.length, 6, "fixture registers exactly 6 gates");
+    for (const n of ["line-budget", "alpha-check", "never-run", "omega-gate", "split-or-commit", "flag-dispatched"]) {
       assert.ok(names.includes(n), `registered gates must include ${n}; got ${names}`);
     }
     // testPass gate keeps its command as `script` (AC7: name+script shape)
     const soc = report.registered.find((g) => g.name === "split-or-commit");
     assert.equal(soc.script, "node plugin/scripts/it0-split-or-commit-check.ts .");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// Regression for the adversarial finding "dispatch-marker regex misses verb-flag forms": a gate
+// dispatched ONLY by name on a `node --experimental-strip-types …` line must be caught (the old
+// `\bnode \b` failed when a flag followed the verb), and camelCase prose must NOT be a marker.
+test("AC3-extra: dispatch marker matches verb-flag forms and name-only dispatches (adversarial fix)", () => {
+  assert.ok(DISPATCH_MARKER_RE.test("node --experimental-strip-types flag-dispatched-check ."), "node --flag must be a dispatch marker");
+  assert.ok(DISPATCH_MARKER_RE.test("bash -e foo.sh"), "bash -e must be a dispatch marker");
+  assert.ok(DISPATCH_MARKER_RE.test("quay gate --gate split-or-commit"), "quay gate must be a dispatch marker");
+  assert.ok(!DISPATCH_MARKER_RE.test("someNode runs here"), "camelCase prose must not be a marker");
+  assert.ok(!DISPATCH_MARKER_RE.test("node_modules path"), "node_modules must not be a marker");
+  // end-to-end: flag-dispatched has no registered basename on its dispatch line, only a name mention
+  const tmp = makeTmpWorkspace();
+  try {
+    writeFixture(tmp);
+    const report = runCliJson(tmp);
+    const fd = report.registered.find((g) => g.name === "flag-dispatched");
+    assert.ok(fd.dispatchedBy.length > 0, "flag-dispatched must be dispatched via name on a node --flag line");
+    assert.ok(refsContain(fd.dispatchedBy, ".claude/workflows/execute-milestone.js", "flag-dispatched-check", FIXTURE_WORKFLOW));
   } finally {
     cleanup(tmp);
   }
@@ -245,6 +273,13 @@ test("AC6: line-budget registers it0-ceiling-… but the live script is it0-dash
     assert.equal(mm.registeredScript, "it0-ceiling-line-budget-check.sh");
     assert.equal(mm.liveScript, "it0-dashboard-line-budget-check.sh");
     assert.equal(mm.kind, "different-script", "ceiling vs dashboard is a real (non-wrapper) mismatch");
+    // adversarial fix: `mismatches` must contain ONLY true different-script divergences — a
+    // sh/ts wrapper pair is NOT a divergence and belongs in `aliasPairs` instead.
+    assert.ok(!report.mismatches.some((m) => m.kind === "wrapper-pair"), "mismatches must exclude wrapper-pair entries");
+    assert.ok(report.mismatches.every((m) => m.kind === "different-script"), "every mismatch must be different-script");
+    const ap = report.aliasPairs.find((a) => a.gate === "split-or-commit");
+    assert.ok(ap, "aliasPairs must include the split-or-commit sh/ts wrapper pair");
+    assert.equal(ap.kind, "wrapper-pair");
   } finally {
     cleanup(tmp);
   }
@@ -263,7 +298,22 @@ test("AC8: constant exit 0 — even with a missing config / missing surfaces", (
     assert.ok(Array.isArray(report.undispatched));
     assert.ok(Array.isArray(report.unregistered));
     assert.ok(Array.isArray(report.mismatches));
+    assert.ok(Array.isArray(report.aliasPairs));
     assert.ok(!/process\.exit\(\s*[1-9]/.test(SRC), "no non-zero process.exit path in source");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC8-extra: constant exit 0 even when stdout closes early (EPIPE, adversarial fix)", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    writeFixture(tmp);
+    const res = spawnSync("bash", ["-c", `node --experimental-strip-types ${CLI} --root ${tmp} --json | head -0; echo "PIPESTATUS=\${PIPESTATUS[0]}"`], { encoding: "utf8" });
+    // The pipeline's first process (the tool) must exit 0 despite the downstream `head -0` closing stdout.
+    const m = res.stdout.match(/PIPESTATUS=(\d+)/);
+    assert.ok(m, `expected PIPESTATUS marker in output; got: ${res.stdout}`);
+    assert.equal(Number(m[1]), 0, `tool must exit 0 on EPIPE; got PIPESTATUS ${m[1]}`);
   } finally {
     cleanup(tmp);
   }
@@ -285,6 +335,7 @@ test("AC10/DoD: real-repo run produces a gate-dispatch baseline (exit 0)", () =>
   assert.ok(Array.isArray(report.undispatched), "undispatched array present");
   assert.ok(Array.isArray(report.unregistered), "unregistered array present");
   assert.ok(Array.isArray(report.mismatches), "mismatches array present");
+  assert.ok(Array.isArray(report.aliasPairs), "aliasPairs array present");
   // Every registered gate must carry a name, script and dispatchedBy array (AC7 shape).
   for (const g of report.registered) {
     assert.ok(typeof g.name === "string" && g.name.length > 0, "registered.name present");

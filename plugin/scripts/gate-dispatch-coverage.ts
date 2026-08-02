@@ -49,12 +49,16 @@ export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.m
 
 // ── Config parsing (.quay/config.yml `gates:` section) ────────────────────────────────────────────────
 
-/** Strip surrounding quotes and inline ` # ...` comments from a YAML scalar. */
+/**
+ * Strip surrounding quotes and inline ` # ...` comments from a YAML scalar.
+ * Quotes are stripped FIRST so a `#` inside a quoted value is preserved as data; the inline-comment
+ * strip applies only to unquoted scalars (in YAML, `#` inside double quotes is not a comment).
+ */
 export function cleanScalar(v) {
   let s = String(v ?? "").trim();
-  s = s.replace(/\s+#.*$/, "").trim();
   if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1);
   if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1);
+  s = s.replace(/\s+#.*$/, "").trim();
   return s;
 }
 
@@ -214,14 +218,26 @@ export function dedupeRefs(refs) {
  * comment mentions of a gate name (e.g. it0-dod-check.ts clause descriptions) from drowning the
  * dispatch signal while still catching genuine name dispatches like `quay gate --gate split-or-commit`
  * or the workflow's Gate-phase `Run it0-dashboard-line-budget-check.sh` prompt.
+ *
+ * The verb alternation uses `\b…\b` (word boundaries around the verb only) so verb-flag forms are
+ * matched too: `\bnode\b` matches inside `node --experimental-strip-types …` and `\bbash\b` inside
+ * `bash -e …`, while camelCase prose (`someNode`, `node_modules`, `bashful`) does not match.
  */
-export const DISPATCH_MARKER_RE = /quay gate|--gate\b|\bRun \b|\brun \b|\bbash \b|\bnode \b|\bexec\b|→/i;
+export const DISPATCH_MARKER_RE = /\b(?:Run|run|bash|node|sh|exec|execute)\b|quay gate|--gate\b|→/i;
+
+/** A line that is purely a comment (`//`, `#`, `*`) and carries no executable instruction. */
+export function isCommentLine(line) {
+  return /^\s*(\/\/|#|\*|<!--)/.test(line);
+}
 
 /**
  * For one registered gate, collect every surface line that references the gate — either by its
  * registered script's basename (strongest, always counted) or by its gate NAME appearing on the
- * line together with a dispatch marker (weaker, e.g. `quay gate --gate split-or-commit`). Returns
- * [{ file, line, via }].
+ * line together with a dispatch marker (weaker, e.g. `quay gate --gate split-or-commit`). Both match
+ * kinds skip pure-comment lines so doc-comment mentions (a `//` clause header naming a script, a
+ * prose note about a gate) do not pollute the dispatch list — only executable/instruction lines
+ * (a shell-out `path.join(...)`, a Gate-phase `Run …` prompt, a `quay gate` invocation, an
+ * OUTER-LOOP.md `→ …` instruction) count as dispatch points. Returns [{ file, line, via }].
  */
 export function scanGateDispatchers(gate, surfaces) {
   const base = extractScriptBasename(gate.script ?? gate.command ?? "");
@@ -232,8 +248,8 @@ export function scanGateDispatchers(gate, surfaces) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       let via = null;
-      if (base && line.includes(base)) via = "script-basename";
-      else if (name && line.includes(name) && DISPATCH_MARKER_RE.test(line)) via = "name";
+      if (base && !isCommentLine(line) && line.includes(base)) via = "script-basename";
+      else if (name && !isCommentLine(line) && line.includes(name) && DISPATCH_MARKER_RE.test(line)) via = "name";
       if (via) refs.push({ file: surf.rel, line: i + 1, via });
     }
   }
@@ -291,12 +307,16 @@ export const CHECK_ACTIONS = new Set(["check", "gate", "guard"]);
 /**
  * Pair a registered gate with an unregistered live script when the live script's basename contains
  * the gate name and the live script is a check-like script — the AC6 signal that the gate's
- * registered script and the actually-run script differ. `kind`:
- *   "different-script" — stems differ beyond the extension (line-budget: ceiling vs dashboard).
- *   "wrapper-pair"     — same stem, different extension (drivable-workspace-check.sh vs .ts).
+ * registered script and the actually-run script differ.
+ *   "different-script" (→ `mismatches`) — stems differ beyond the extension; a REAL registration-vs-
+ *     run divergence (line-budget: registered it0-ceiling-…, live it0-dashboard-…).
+ *   "wrapper-pair"     (→ `aliasPairs`) — same stem, different extension (drivable-workspace-check.sh
+ *     vs .ts); the registered script and the live script are the SAME gate in wrapper/module form,
+ *     NOT a divergence. Reported separately so `mismatches` stays a true-positive list.
  */
-export function detectMismatches(registered, unregistered) {
-  const out = [];
+export function detectDivergences(registered, unregistered) {
+  const mismatches = [];
+  const aliasPairs = [];
   for (const u of unregistered) {
     if (!CHECK_ACTIONS.has(scriptAction(u.script))) continue;
     for (const g of registered) {
@@ -305,16 +325,20 @@ export function detectMismatches(registered, unregistered) {
       if (!g.name || !u.script.includes(g.name)) continue;
       const sameStem =
         regBase.replace(/\.(?:sh|ts|mjs)$/, "") === u.script.replace(/\.(?:sh|ts|mjs)$/, "");
-      out.push({
+      const entry = {
         gate: g.name,
         registeredScript: regBase,
         liveScript: u.script,
         refs: u.dispatchedBy,
         kind: sameStem ? "wrapper-pair" : "different-script",
-      });
+      };
+      if (sameStem) aliasPairs.push(entry);
+      else mismatches.push(entry);
     }
   }
-  return out.sort((a, b) => (a.gate < b.gate ? -1 : a.gate > b.gate ? 1 : 0));
+  mismatches.sort((a, b) => (a.gate < b.gate ? -1 : a.gate > b.gate ? 1 : 0));
+  aliasPairs.sort((a, b) => (a.gate < b.gate ? -1 : a.gate > b.gate ? 1 : 0));
+  return { mismatches, aliasPairs };
 }
 
 // ── Report assembly ──────────────────────────────────────────────────────────────────────────────────
@@ -329,11 +353,11 @@ export function buildReport(configText, surfaces, srcFile = "config") {
     dispatchedBy: scanGateDispatchers(g, surfaces),
   }));
   const unregistered = scanUnregistered(registered, surfaces);
-  const mismatches = detectMismatches(registered, unregistered);
+  const { mismatches, aliasPairs } = detectDivergences(registered, unregistered);
   const undispatched = registered
     .filter((g) => g.dispatchedBy.length === 0)
     .map((g) => ({ name: g.name, script: g.script }));
-  return { registered, undispatched, unregistered, mismatches, adr, surfacesScanned: surfaces.map((s) => s.rel) };
+  return { registered, undispatched, unregistered, mismatches, aliasPairs, adr, surfacesScanned: surfaces.map((s) => s.rel) };
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────────────────────────────
@@ -364,11 +388,18 @@ export function renderReport(report) {
     lines.push(`${u.script}  —  ${refs}`);
   }
   lines.push("");
-  lines.push("── registration-name vs run-script mismatches ──");
+  lines.push("── registration-name vs run-script mismatches (different-script divergences only) ──");
   if (report.mismatches.length === 0) lines.push("(none)");
   for (const m of report.mismatches) {
     const refs = m.refs.map((r) => `${r.file}:${r.line}`).join(", ");
-    lines.push(`${m.gate}: registered ${m.registeredScript}, live ${m.liveScript} (${m.kind}) — ${refs}`);
+    lines.push(`${m.gate}: registered ${m.registeredScript}, live ${m.liveScript} — ${refs}`);
+  }
+  lines.push("");
+  lines.push("── alias pairs (registered script vs same-gate .sh/.ts wrapper — NOT divergences) ──");
+  if (report.aliasPairs.length === 0) lines.push("(none)");
+  for (const m of report.aliasPairs) {
+    const refs = m.refs.map((r) => `${r.file}:${r.line}`).join(", ");
+    lines.push(`${m.gate}: registered ${m.registeredScript}, live ${m.liveScript} — ${refs}`);
   }
   return lines.join("\n");
 }
@@ -384,6 +415,10 @@ export function main(argv = process.argv.slice(2)) {
     else if (a === "--root") root = argv[++i];
   }
 
+  // AC8: keep exit 0 even when stdout closes early (e.g. `--json | head -0` → EPIPE). Swallowing the
+  // EPIPE error lets main() return 0 instead of the process dying with a non-zero status.
+  process.stdout.on("error", () => {});
+
   const workspaceRoot = root ? path.resolve(root) : findWorkspaceRoot();
   let report;
   try {
@@ -394,7 +429,7 @@ export function main(argv = process.argv.slice(2)) {
   } catch (err) {
     // Report the failure, never exit non-zero (AC8). JSON stays in the AC7 shape.
     process.stderr.write(`[gate-dispatch-coverage] error (reported, exit stays 0): ${(err && err.message) || err}\n`);
-    report = { registered: [], undispatched: [], unregistered: [], mismatches: [], adr: [], surfacesScanned: [] };
+    report = { registered: [], undispatched: [], unregistered: [], mismatches: [], aliasPairs: [], adr: [], surfacesScanned: [] };
   }
 
   if (json) {
@@ -403,6 +438,7 @@ export function main(argv = process.argv.slice(2)) {
       undispatched: report.undispatched,
       unregistered: report.unregistered,
       mismatches: report.mismatches,
+      aliasPairs: report.aliasPairs ?? [],
     };
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
   } else {
