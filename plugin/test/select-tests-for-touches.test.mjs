@@ -314,20 +314,29 @@ test("AC1 — experiments and plugin mirrors are byte-identical", () => {
 
 // ── AC10: scripts/test.sh --for-task runs exactly the selected set ───────────────────────────────────
 
-test("AC10 — scripts/test.sh --for-task <id> runs the selected set (real task, no recursion)", () => {
-  // The task under implementation selects EXACTLY plugin/test/select-tests-for-touches.test.mjs
-  // (its own test file: 3 of 5 touches resolve → coverage 0.6, not thin). Running it through
-  // test.sh re-enters THIS file in a subprocess, so we pin --test-name-pattern to a single AC that
-  // does not itself recurse (avoids infinite recursion while proving the plumbing end-to-end).
+test("AC10 — scripts/test.sh --for-task <id> runs exactly the selected set (real task, no recursion)", () => {
+  // Relationship, not snapshot (tick rule "测试不得硬编码全局计数"): the number of tests the
+  // subprocess runs must equal the number of files the selector actually selected — computed at
+  // runtime, never pinned to a literal. A snapshot like /ℹ tests 1\b/ breaks the moment anyone
+  // adds a test file to the task's Touches set (observed 2026-08-02: B5-1's cli-entry.test.mjs /
+  // an M243 worktree residue made the selected set legitimately grow to 2).
   const taskId = "gap-test-selection-not-scoped-to-touches";
+  // Compute the selected file count at runtime (paths-only; one file per line).
+  const sel = runCli(REPO_ROOT, "--task", taskId, "--paths-only").stdout
+    .trim().split("\n").filter(Boolean);
+  assert.ok(sel.length >= 1, `selector must select ≥1 file for ${taskId}, got ${sel.length}: ${sel.join(",")}`);
+  // Run test.sh --for-task pinned to a single non-recursive AC so each selected file contributes
+  // exactly one subprocess test (the AC2 pattern; avoids infinite recursion through this file).
   const res = spawnTestSh(["--for-task", taskId, "--test-name-pattern", "AC2"]);
   assert.equal(res.status, 0, `test.sh --for-task must exit 0, got ${res.status}\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
   const combined = `${res.stdout}\n${res.stderr}`;
-  // The subprocess must have run exactly the pinned AC subset of the selected file (the file's own
-  // name is not echoed by node's reporter when --test-name-pattern matches, so assert on the run).
+  // The pinned AC must have run in the subprocess (plumbing proof).
   assert.match(combined, /AC2 — a direct \*\.test\.mjs Touches entry resolves to that file/, "the pinned AC should run in the subprocess");
-  // `\b` after `1` rejects the prefix-collision cases (tests 12..18 would otherwise match /tests 1/).
-  assert.match(combined, /ℹ tests 1\b/, `exactly one test (the pinned AC) should run: ${combined}`);
+  // Relationship: subprocess ran one test per selected file (each file's AC2 = 1 test). Parse the
+  // reporter's total and compare against the RUNTIME selected count — not a hardcoded literal.
+  const m = combined.match(/ℹ tests (\d+)\b/);
+  assert.ok(m, `reporter summary missing: ${combined}`);
+  assert.equal(Number(m[1]), sel.length, `subprocess must run exactly ${sel.length} test(s) (one per selected file), ran ${m[1]}: ${combined}`);
   assert.doesNotMatch(combined, /AC10 —/, "only the pinned AC subset should run in the subprocess");
 });
 

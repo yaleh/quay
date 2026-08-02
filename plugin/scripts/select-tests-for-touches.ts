@@ -51,7 +51,13 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
 // Directories skipped when scanning the repo for test files (VCS / deps / runtime state).
-const SKIP_DIRS = new Set([".git", "node_modules", ".quay", ".workflow-events"]);
+// `worktrees` is excluded because `milestones/M*/worktrees/` are per-milestone git worktrees
+// checked out from the SAME repo — their plugin/test files are byte-identical mirrors of the main
+// checkout, so scanning them makes the selector resolve each mirrored test TWICE (observed
+// 2026-08-02: an M243 worktree residue made `--for-task gap-test-selection-...` select 2 copies of
+// select-tests-for-touches.test.mjs). The main checkout under `milestones/M*/worktrees/` is not a
+// distinct test source; skipping it is the mirror-fold rule applied to worktree mirrors.
+const SKIP_DIRS = new Set([".git", "node_modules", ".quay", ".workflow-events", "worktrees"]);
 // The two mirror root prefixes (single-source mirror convention: `experiments/…/scripts/X` ↔
 // `plugin/scripts/X`). Only these two scripts dirs are mirrors — tests under the experiments test dir
 // are NOT folded (they are not in the `scripts/test.sh` default glob).
