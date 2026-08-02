@@ -49,10 +49,10 @@
 
 | 任务 | 说明 |
 |---|---|
-| **下一批：flags-only 缺陷（派发中）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`。test.sh dispatch 无「裸标志+默认 glob」分支，`--test-concurrency=4` 被当文件参数 → node 自发现 2296→8573（3.7×）。**先修工具再谈测量**。AC1=两种调用测试数相同，AC4=每次打印 selected N files |
-| **M136 sync-vendor 错标（诊断搁置）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，**已记 needs-human（86 min）**。两轮修复隔离绿但全量红，torn-read retry 未覆盖真正路径。**诊断搁置**：诊断工具本身是坏的（flags-only 静默换套件），并发失败不能用坏的 runner 测。等 test.sh 修复后再测 |
-| **`--test-concurrency=4 vs 8` 实测（在飞）** | `gap-suite-concurrency-4-vs-8-measurement`，派发 21:31Z，runId fm-gap-suite-concurrency-4-vs-8-measurement-1785706293549-4af9ik。flags-only 修复已通（依赖链第一环）。6 次全量（c4×3+c8×3），selected N files 一致判据 + 20-63s 噪声带 + 崩溃独立维度。**flags-only 修复行为核实通过**：`--group governance` selected 13 files，默认 205 == c4 205（外层 master 实测） |
-| 下一批 gap 任务（flags-only 后） | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
+| **M136 第三轮修复（下一步）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，needs-human。**机制已确认（2026-08-02 22:50）**：跨文件状态干扰——build-dist/npm-pack 重建 `packages/quay/dist/quay.js`（源侧），vendor 镜像不同步 → M136 --check 在全量并行时 DRIFT（配对跑绿但跑后 DRIFT 证实）。**非竞态、非并发度相关**（4vs8 6/6 证实 c4/c8 都红）。修法方向：--check 前先 --sync-dist，或 build-dist 后同步 vendor |
+| **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done。裸标志分支 + selected N 自报，全量验证 2298/2279/1（仅 M136） |
+| **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。**外层决定：不改默认，保持 8**（34s 差值在噪声带内、稳定性相同、ADR-019 未推翻）。「系统性全量崩溃」线索**关闭**：6 次干净单套件零 Promise-pending，与双套件并跑诊断一致 |
+| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
 
