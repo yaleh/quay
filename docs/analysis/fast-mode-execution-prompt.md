@@ -18,6 +18,7 @@
 
 每个任务按这个循环：
 
+0. **遥测开始**（必做，见下方「遥测」节）：实现开始前先发 `--task-start` 事件，拿住打印的 `runId`
 1. **读任务文件** `tasks/<id>.md` 的 `## Proposal` / `## Acceptance Criteria` / `## Touches`
 2. **读真实代码**——不要从任务描述推断现状。任务体可能过时（下面「已知陷阱」有实例）
 3. **实现**——先写测试（RED），再实现，再跑测试（GREEN）
@@ -27,6 +28,32 @@
 7. **跑测试**（见下）
 8. **关闭任务状态**（见下）——用 `task-status-drift-check.ts` 检测器核对：实现已落地的任务若仍 `todo`/`ready` 会被标为 `status-drift-suspect`，逐个复核后关闭
 9. **提交**
+10. **遥测结束**（必做，见下方「遥测」节）：提交前发 `--task-end` 事件；可跑 `--report` 确认汇总落盘
+
+## 遥测（必做，gap-fast-mode-no-telemetry 落地后生效）
+
+每个快速模式任务必须为一次完整的任务执行发一对 stage event——这是 **1 任务/小时** 目标唯一的计量来源
+（`prepare-milestone` / `execute-milestone` 两条 workflow 的 `_emitStageEvent` 在直接模式下不会触发）。
+
+用 `fast-mode-telemetry.ts`（复用 A1a `workflow-event-schema.mjs`，不发明第二套格式）：
+
+```bash
+# 实现开始前：发出 start 事件，打印 runId（自己拿好）
+RUN=$(node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
+  --task-start --taskId <id>)
+
+# ... 实现 + 审查 + 修 + 同步镜像 + 跑测试 ...
+
+# 实现完成、准备提交前：发出 end 事件
+node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
+  --task-end --taskId <id> --runId "$RUN" --outcome done
+```
+
+- `outcome` 三选一：`done`（AC/DoD 全部证明）、`needs-human`（需要人工介入 / 真实 dispatch 验证）、
+  `abandoned`（中途放弃、没有完成 commit）。
+- 原始事件落在 `.workflow-events/`（gitignored）。`--report` 把汇总写到
+  `milestones/fast-mode-telemetry/<date>.json`（提交保留）——这就是 1 小时目标对账用的持久化数据。
+- 汇总：`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report [--since <iso>] [--json]`
 
 ## 硬性约束
 
