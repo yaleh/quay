@@ -49,10 +49,11 @@
 
 | 任务 | 说明 |
 |---|---|
-| **M243 恢复（在飞）** | subagent 已派发 17:44Z（runId fm-DIR-124-A2-1785693890531-06eeel，worktree /tmp/quay-wt-m243）。带回 095ddbf0 + 修 5 类 A1a 差异 + 负控制守则。fan-in 后全量验证 |
-| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**（外层实测：本会话 Task/Agent 未进工具前六，并发是关的；下一批默认并发，不默认串行）。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
+| **M136 sync-vendor 错标（在飞）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，派发 19:17Z，runId fm-gap-sync-vendor-drift-mislabelled-as-task-schema-1785698309174-7d8kss，worktree /tmp/quay-wt-syncvendor。修 sync-vendor.sh:82 错标 + 选同步时机 + M136 归属 |
+| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
-| AC6（已部分达成） | `.halt` 已由外层解除（17:43Z，readiness READY）。剩余：/loop 自排程已补（ScheduleWakeup 兜底） |
+| AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
+| **`--test-concurrency=4 vs 8` 实验** | 外层建议，记于 orchestration/throughput-decomposition.md。本次并发崩溃是第一个真实证据：4 核跑 2 个 c8 套件 = 4 倍过订 → runner 崩溃 |
 
 ## 工作方式调整（外层实测 2026-08-02，含 subagent transcript 的完整分解）
 
