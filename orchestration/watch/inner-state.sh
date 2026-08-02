@@ -22,7 +22,9 @@ for t in d.get("orphaned",[]):
   tasks=$(printf '%s\n' "$snap" | sed -n 's/^TASKS //p')
   if [ "$tasks" != "$prev_tasks" ] && [ -n "$prev_tasks$tasks" ]; then
     if [ -z "$tasks" ]; then
-      echo "IDLE 内层无在飞任务（上一批: ${prev_tasks:-none}）—— 可能在等裁定"
+      # 只作「批次结束」用。停摆检测已移交 inner-stalled.sh —— 本信号实测只覆盖 46% 的空转
+      # （2026-08-02，orchestration/throughput-decomposition.md），且漏掉最大的一次 25.7 分钟。
+      echo "BATCH-END 在飞任务清空（上一批: ${prev_tasks:-none}）"
     else
       echo "START 在飞任务变为: $tasks"
     fi
