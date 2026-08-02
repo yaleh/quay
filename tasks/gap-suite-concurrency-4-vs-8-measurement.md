@@ -106,5 +106,13 @@ method: `bash scripts/test.sh --test-concurrency=N` — `=` spelling only; stric
 | 3 | 4 | 406 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
 | 4 | 8 | 440 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
 | 5 | 8 | 430 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
+| 6 | 8 | 444 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
+
+**判定（6 次全量齐，2026-08-02 22:47）**：
+- c4 ×3：414/398/406s → **中位数 406s**；c8 ×3：440/430/444s → **中位数 440s**
+- **差值 34s，落在 20–63s 噪声带宽内 → 不可判定**（不足以断言并发度对墙钟的可测影响）。如实写，不报成改善/恶化。
+- **稳定性（独立维度）**：c4 与 c8 都 **0 'Promise pending'**、都只有 M136 一个失败、N 全部 163——**并发度 4 与 8 在本机对稳定性无可测差异**（此次测量无崩溃，即便 c8 是 2 倍过订）。
+- **M136 在 c4 和 c8 下都失败（6/6）**——确证 M136 与并发度无关，是另一种机制（全量红/隔离绿），非 c8 特有。对 M136 诊断是重要负面证据：排除「过订导致」。
+- 对「c4 是否应设为本机默认」的倾向：**数据不支持仅凭墙钟改默认**（差值在噪声内）。但 c4 墙钟中位数略低（406 vs 440）且稳定性相同——**若外层想改默认，这数据不反对，但需单独决策**，不是本任务的结论。
 
 run1/run2 note: M136 sync-vendor test FAILED under c4 (c8 full-red/isolated-green is the known baseline; **c4 red too — M136 is NOT c8-specific**, useful negative evidence for M136 diagnosis). No 'Promise pending'. ~~duration_ms ≈ 410062 ≈ wall 414 ⇒ Σ/wall ≈ 0.99 — c4 lanes not saturated~~ **划掉（外层更正）**：duration_ms 就是墙钟本身，0.99 是墙钟/墙钟必然近 1，与并发度无关。不得据此推饱和结论。
