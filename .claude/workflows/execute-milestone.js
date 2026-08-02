@@ -590,6 +590,9 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
   ]
   if (_isComposite && $a.compositeManifestFile) {
     collectorCmd.push(`--per-phase-evidence /tmp/composite-build-evidence-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`)
+    collectorCmd.push(`--composite-manifest ${$a.compositeManifestFile}`)
+  } else {
+    collectorCmd.push(`--iteration-report $(${_milestoneRootCmd})/iterations/iteration-0.md`)
   }
   const collectorResult = await agent(
     `You are a MECHANICAL helper — run EXACTLY the command below and capture its stdout.

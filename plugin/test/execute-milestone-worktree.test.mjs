@@ -222,8 +222,13 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       if (!isEmitEvent && calls[i].prompt !== GOLDEN.calls[i].prompt) diffIdx.push(i);
     }
     // (3) EXACTLY ONE non-emit prompt may differ — the Land main agent (no label, phase Land):
-    // #4's stale-text fix.
+    // #4's stale-text fix. The golden fixture was REGENERATED for the M264/M265 mechanism
+    // (per-phase evidence consumption): the width-1 Build-Evidence collector invocation now
+    // pushes --iteration-report <MILESTONE_ROOT>/iterations/iteration-0.md, and the fixture's
+    // call 13 carries that new line (asserted below). This is a DELIBERATE Build-Evidence
+    // mechanism change for gap-build-evidence-manifest-missing, NOT a DIR-123 regression.
     assert.equal(diffIdx.length, 1, `expected exactly 1 non-emit legacy prompt delta (Land step-1 fix), got ${diffIdx.length} at [${diffIdx}]`);
+    assert.match(GOLDEN.calls[13].prompt, /--iteration-report \$\(source experiments\/quay-perpetual-stream\/scripts\/gate-script-lib\.sh && gate_resolve_milestone_root 999\)\/iterations\/iteration-0\.md/, 'golden fixture call 13 must carry the --iteration-report push for the width-1 path');
     const li = diffIdx[0];
     assert.equal(GOLDEN.calls[li].phase, 'Land');
     assert.equal(GOLDEN.calls[li].label, null);

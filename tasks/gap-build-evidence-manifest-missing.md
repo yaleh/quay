@@ -2,7 +2,7 @@
 id: gap-build-evidence-manifest-missing
 title: Build returns a verdict and sparse iteration metadata but no canonical,
   hash-bound evidence manifest for independent Audit
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -20,6 +20,29 @@ fail-soft) ≤ 2 threshold — do not trigger `split-multi-mechanism`. The split
 `milestones/prepare-decisions/gap-build-evidence-manifest-missing.json` is SUPERSEDED. The 3 stub
 child task files (gap-build-evidence-path/per-phase/git-fail-soft) are deleted.
 Execute as a single milestone for the remaining 2 mechanisms.
+
+**Completed (2026-08-02, M264+M265 mechanisms):** both remaining mechanisms are implemented and
+tested in a single milestone (commit on branch `task/gap-build-evidence`):
+- **M264 per-phase evidence consumption** — the collector now consumes `--per-phase-evidence`
+  (composite `PhaseEvidence[]` + `--composite-manifest` envelope for the task→phase mapping via
+  `mapEvidenceToTasks`) and `--iteration-report` (width-1 markdown) into real `acEvidence` rows
+  with `producer:"build-agent"` provenance; `reconcileEvidence(plannedAcEvidence, [])` empty-array
+  stub is removed. Both workflow mirrors push the flags at the production callsite.
+- **M265 fail-closed on git failure** — `git merge-base`/`git diff` failure now returns
+  `{ok:false, reason:"git-failure"}` from the collector (no empty-baseCommit manifest emitted), and
+  the gate blocks empty `baseCommit` / a git-diff command failure with the stable `git-failure`
+  reason code instead of silently skipping the changed-files drift check. A legitimately empty diff
+  (`baseCommit === candidateCommit`) is NOT blocked.
+- Evidence: 23/23 build-evidence tests + 24/24 worktree/golden-replay tests + 14/14 composite-build
+  + 15/15 composite-manifest-synthesis pass in both mirrors; collector/gate/workflow/test mirrors
+  byte-identical (AC12).
+- Adversarial-review fixes (independent reviewer): (1) real-workflow evidence class is only credited
+  from an EXPLICIT structured declaration ("Real-workflow evidence:" / "Evidence class:
+  real-workflow") — never from incidental prose words ("journal", "live run", "workflow run"),
+  closing the M203 fail-open; (2) a composite milestone no longer falls back to the width-1
+  iteration report when per-phase evidence is absent (per-phase attribution is required, fail-closed);
+  (3) per-phase evidence without a task→phase map is never mis-credited to taskIds[0] (fail-closed);
+  (4) the "Files changed:" parser now handles bullet-prefixed lines. Regression tests added for each.
 
 ## Split into independently landable children (2026-08-01)
 
@@ -64,7 +87,7 @@ Three TypeScript modules, byte-identical at `experiments/quay-perpetual-stream/s
 |---|---|---|
 | **Schema + validation** | Canonical `BuildEvidenceManifest` type (schema version `"1"`, no alternative schema), `planEvidenceRows()`, `validateManifestShape()`, `manifestRefForReceipt()`, evidence-class ordering | `build-evidence-manifest.ts` (454 lines) |
 | **Deterministic collector** | Post-Build mechanical shell command; consumes `BuildResult`, an optional `BuildAdmissionDecision`, and opt-in test/claim data; writes one manifest JSON | `build-evidence-collector.ts` (383 lines) |
-| **Mechanical gate** | Pre-Audit validation: structural completeness, evidence-class compatibility, deferral authorization, artifact hash/reachability, changed-files drift; 12 distinct reason codes | `build-evidence-gate.ts` (332 lines) |
+| **Mechanical gate** | Pre-Audit validation: structural completeness, evidence-class compatibility, deferral authorization, artifact hash/reachability, changed-files drift; 13 distinct reason codes (incl. M265 `git-failure`) | `build-evidence-gate.ts` |
 | **Workflow integration** | `execute-milestone.js` invokes the collector as a Build-Evidence phase (a formulaic agent helper running exactly one shell command), then runs the gate in the parallel `Gate` phase before Audit dispatch | `.claude/workflows/execute-milestone.js` lines 495-538, 858-862, 744 |
 | **Gate registration** | `build-evidence` gate registered as a fixed workspace gate in `.quay/config.yml` (script: `./plugin/scripts/build-evidence-gate.ts`), enabling standalone `quay gate --gate build-evidence <task-id>` | `.quay/config.yml` lines 77-82 |
 
@@ -149,13 +172,14 @@ Audit phase (agent)
 - **Candidate commit missing/invalid:** `candidate-commit-invalid` -- gate blocks.
 - **buildAdmissionRef null without advisory mode:** `build-admission-unavailable` -- gate blocks. In `--advisory` mode, null admission is allowed (for manual/gap-fill milestones without a formal admission decision).
 - **plannedAcEvidence empty with non-null admission:** `no-planned-evidence` -- gate blocks. Vacuous manifests (no ACs to evidence) are only allowed when admission is absent.
-- **Planned AC row unmatched:** `planned-ac-unmatched` -- gate blocks. Every planned row must have exactly one acEvidence row.
+- **Planned AC row unmatched:** `planned-ac-unmatched` -- gate blocks. Every planned row must have exactly one acEvidence row. (M264: the collector now consumes per-phase evidence / iteration report into real acEvidence rows, so a planned row with matching per-phase evidence is matched, not false-positively unmatched.)
 - **Unmet disposition:** `required-evidence-unmet` -- hard block. No amount of other satisfied ACs can compensate.
 - **Evidence class weaker than required:** `evidence-class-mismatch` -- hard block.
 - **Unauthorized deferral:** `unauthorized-deferral` -- hard block. Build producer cannot self-exempt.
 - **Artifact path traversal/absolute:** `artifact-out-of-root` -- hard block.
 - **Artifact hash mismatch:** `artifact-hash-mismatch` -- hard block (but missing declared files are not a hard block -- they may be generated later).
 - **Changed files drift:** `changed-files-mismatch` -- hard block. Gate re-derives from git and compares count and per-file add/del stats.
+- **Git failure (M265):** `git-failure` -- hard block. The collector returns `{ok:false, reason:"git-failure"}` (no manifest written) when `git merge-base`/`git diff` fail; the gate blocks a manifest with empty `baseCommit` or a git-diff command failure with the same stable `git-failure` reason code. A legitimately empty diff (`baseCommit === candidateCommit`) is NOT blocked.
 - **Duplicate AC evidence rows:** `duplicate-ac-evidence` -- hard block. Same `{taskId, acIndex}` appearing twice.
 - **Collector invoked without done outcome:** returns `{ok: false, reason: "build-outcome-not-done"}`.
 - **Collector invoked without merge commit:** returns `{ok: false, reason: "missing-merge-commit"}`.
@@ -209,7 +233,7 @@ All 12 Acceptance Criteria are addressed by the three modules, their tests, and 
 
 - **AC5** (evidence-class compatibility): `isEvidenceClassCompatible()` strict total order; gate blocks `evidence-class-mismatch`; AC5 test validates all 6 ordering cases including M203 failure mode.
 
-- **AC6** (gate after Build, before Audit): gate in `execute-milestone.js` parallel() call line 859; 12 distinct reason codes; gate failure returns `needs-human` before Audit; AC6 test covers unmet, class-mismatch, unauthorized-deferral, duplicate-ac, planned-ac-unmatched.
+- **AC6** (gate after Build, before Audit): gate in `execute-milestone.js` parallel() call line 859; 13 distinct reason codes (incl. M265 `git-failure`); gate failure returns `needs-human` before Audit; AC6 test covers unmet, class-mismatch, unauthorized-deferral, duplicate-ac, planned-ac-unmatched, git-failure.
 
 - **AC7** (authorized deferral): `DEFERRAL_POLICY` map with two keys; gate rejects `authorizedBy:""` or `"none"` with `unauthorized-deferral`; AC7 test: authorized passes, unauthorized fails.
 
@@ -251,7 +275,7 @@ Rejected: TypeScript provides type safety; the `BuildEvidenceManifest` interface
 ### Files created
 - `experiments/quay-perpetual-stream/scripts/build-evidence-manifest.ts` (454 lines) — canonical schema, validation, evidence-class compatibility, receipt hash-binding
 - `experiments/quay-perpetual-stream/scripts/build-evidence-collector.ts` (383 lines) — deterministic post-Build collector for singleton + composite paths
-- `experiments/quay-perpetual-stream/scripts/build-evidence-gate.ts` (332 lines) — pre-Audit mechanical gate with 12 reason codes + self-contained deferral policy
+- `experiments/quay-perpetual-stream/scripts/build-evidence-gate.ts` — pre-Audit mechanical gate with 13 reason codes (incl. M265 `git-failure`) + self-contained deferral policy
 - `experiments/quay-perpetual-stream/test/build-evidence-manifest.test.mjs` (675 lines) — 13 tests covering all ACs
 - Byte-identical mirrors at `plugin/scripts/` and `plugin/test/` (verified via diff)
 
@@ -266,14 +290,47 @@ Rejected: TypeScript provides type safety; the `BuildEvidenceManifest` interface
 - All byte-identical mirrors confirmed via diff
 - execute-milestone-build-phase-gate.test.mjs: 10/10 pass (no regression)
 
+## Implementation Evidence (M264+M265, remaining 2 mechanisms — this milestone)
+
+### Files modified
+- `experiments/quay-perpetual-stream/scripts/build-evidence-collector.ts` + `plugin/scripts/` mirror —
+  M264: consumes `perPhaseEvidenceFile`/`compositeManifestFile`/`iterationReport` into `acEvidence`
+  rows with `producer:"build-agent"` provenance (via `mapEvidenceToTasks` from composite-build.ts,
+  unwrapping `.manifest.phases`); `reconcileEvidence(plannedAcEvidence, [])` empty-stub removed.
+  M265: `deriveGitState()` distinguishes a git command failure from a legitimately empty diff and
+  returns `{ok:false, reason:"git-failure"}` (never emits an empty-baseCommit manifest).
+- `experiments/quay-perpetual-stream/scripts/build-evidence-gate.ts` + `plugin/scripts/` mirror —
+  M265: added `git-failure` reason code; the changed-files drift check is now fail-closed on empty
+  `baseCommit` or a git-diff command failure (a legit `baseCommit === candidateCommit` empty diff
+  is NOT blocked).
+- `.claude/workflows/execute-milestone.js` + `plugin/workflows/execute-milestone.js` — Build-Evidence
+  phase pushes `--per-phase-evidence` + `--composite-manifest` for composite and `--iteration-report`
+  for width-1.
+- `experiments/quay-perpetual-stream/test/build-evidence-manifest.test.mjs` + `plugin/test/` mirror —
+  +6 tests (M264 composite per-phase, M264 width-1 iteration report, M264 no-evidence-fail-closed,
+  M265 empty-baseCommit gate block, M265 git-diff-failure gate block, M265 legit-empty-diff pass);
+  collector smoke test updated for fail-closed git behavior; `runModule` now shell-quotes JSON args.
+- `experiments/quay-perpetual-stream/fixtures/worktree/golden-legacy-prompts.json` — call 13
+  regenerated to carry the width-1 `--iteration-report` push.
+- `plugin/test/execute-milestone-worktree.test.mjs` — golden-replay assertion updated: fixture
+  regenerated for M264, so the only non-emit prompt delta is Land's step-1 fix.
+
+### Test results (this milestone)
+- 19/19 build-evidence tests pass from BOTH mirrors (experiments + plugin)
+- 24/24 execute-milestone-worktree tests pass (golden replay + worktree lifecycle, both mirrors)
+- 14/14 composite-build + 15/15 composite-manifest-synthesis tests pass (no regression from the
+  collector's new composite-build.ts import)
+- build-evidence-manifest.ts --selftest: all fixture cases PASS
+- All collector/gate/workflow/test mirrors byte-identical (diff exit 0)
+
 ## Acceptance Criteria
 
-- [x] Singleton and composite Build produce the same versioned manifest schema through real production callsites. (EVIDENCE: same build-evidence-collector.ts used for both paths; --per-phase-evidence flag for composite, --iteration-report for width-1; selftest validates schema version "1" and rejects unknown versions; AC1 test passes)
+- [x] Singleton and composite Build produce the same versioned manifest schema through real production callsites. (EVIDENCE: same build-evidence-collector.ts used for both paths; --per-phase-evidence flag for composite, --iteration-report for width-1; M264: the collector now CONSUMES both inputs into acEvidence rows (composite via mapEvidenceToTasks(phases, evidence) + --composite-manifest envelope, width-1 via iteration-report parsing) so both paths produce schema "1" with populated acEvidence; selftest validates schema version "1" and rejects unknown versions; AC1 + M264 tests pass)
 - [x] Exactly one hash-bound BuildAdmission decision supplies one planned evidence row per charter AC before editing; missing/duplicate rows and copied requirement text fail validation. (EVIDENCE: planEvidenceRows() produces 1:1 projection, rejects duplicate {taskId, acIndex} with "duplicate-ac" reason code; validateManifestShape rejects requirementText/acText/criterion fields with "no-second-authority"; AC2 test passes; selftest passes)
-- [x] `baseCommit`, `candidateCommit`, and `changedFiles` are mechanically derived and match Git; an agent-authored contradiction fails validation. (EVIDENCE: collector uses git merge-base and git diff --numstat; gate re-derives changedFiles and compares — "changed-files-mismatch" reason code blocks; AC3 test validates sha256 determinism)
+- [x] `baseCommit`, `candidateCommit`, and `changedFiles` are mechanically derived and match Git; an agent-authored contradiction fails validation. (EVIDENCE: collector uses git merge-base and git diff --numstat; M265: a git merge-base/diff command FAILURE now fails closed — collector returns {ok:false, reason:"git-failure"} and the gate blocks empty baseCommit / git-diff failure with the stable `git-failure` reason code (a legitimately empty baseCommit===candidateCommit diff is NOT blocked); gate re-derives changedFiles and compares — "changed-files-mismatch" reason code blocks; AC3 + M265 tests validate)
 - [x] Test/result, AC, runtime, deferred, and iteration entries identify their evidence source and distinguish mechanically observed facts from producer claims. (EVIDENCE: acEvidence[].producer field is "mechanical" or "build-agent"; runtimeEvidence[].producer always "build-agent" by construction; AC4 test passes)
 - [x] Every planned row has one final disposition and raw evidence reference. Evidence-class compatibility rejects source grep or mocked execution for a `real-workflow` requirement and rejects same-generation evidence for a `cross-generation` requirement. (EVIDENCE: isEvidenceClassCompatible() implements strict total order source < unit < integration < real-workflow < cross-generation; gate rejects evidence-class-mismatch; AC5 test validates all 6 ordering cases including M203 failure mode)
-- [x] `BuildEvidenceGate` runs after every reachable singleton/composite Build and before Audit; missing, pending, unmet, weaker-than-required, or unreferenced required evidence dispatches zero Audit work and returns a stable typed result. (EVIDENCE: gate in execute-milestone.js parallel() call at line 859 after split-or-commit gates; 12 distinct reason codes; gate failure returns needs-human before Audit dispatch; AC6 test validates unmet, class-mismatch, unauthorized-deferral, duplicate-ac, planned-ac-unmatched reason codes)
+- [x] `BuildEvidenceGate` runs after every reachable singleton/composite Build and before Audit; missing, pending, unmet, weaker-than-required, or unreferenced required evidence dispatches zero Audit work and returns a stable typed result. (EVIDENCE: gate in execute-milestone.js parallel() call at line 859 after split-or-commit gates; 13 distinct reason codes including M265's `git-failure` (empty baseCommit / git-diff command failure is a hard block, never a silently-skipped drift check); gate failure returns needs-human before Audit dispatch; AC6 + M265 tests validate unmet, class-mismatch, unauthorized-deferral, duplicate-ac, planned-ac-unmatched, git-failure reason codes)
 - [x] An explicit weaker-evidence deferral is accepted only when authorized by the bound execution policy, remains visible in the manifest/receipt/Audit prompt, and cannot be authored solely by the Build producer. (EVIDENCE: self-contained deferral policy map in build-evidence-gate.ts with "cross-generation-not-yet-available" and "external-service-unavailable" keys; gate rejects authorizedBy:"" or "none" with "unauthorized-deferral"; AC7 test: authorized deferral passes, unauthorized fails)
 - [x] Missing, duplicate, out-of-root, stale-candidate, or hash-mismatched artifact references fail closed with stable reason codes. (EVIDENCE: gate checks path traversal (artifact-out-of-root), sha256 mismatch (artifact-hash-mismatch), duplicate AC mapping (duplicate-ac-evidence); AC8 test validates both out-of-root and hash-mismatch paths)
 - [x] The DIR-124-B Build receipt hash-binds exactly one manifest. Changing manifest bytes or candidate commit invalidates the receipt. (EVIDENCE: manifestRefForReceipt() produces {hash: sha256 of sorted-key canonical JSON, path, candidateCommit}; AC9 test confirms hash determinism and that changing candidateCommit/changedFiles changes hash)
@@ -286,7 +343,7 @@ Rejected: TypeScript provides type safety; the `BuildEvidenceManifest` interface
 - [x] Standard inherited-core.md DoD clauses apply. (EVIDENCE: implementation, tests, selftest, and mirror verification all complete)
 - [ ] All five dependencies are done and their installed production paths are used, not duplicated. (PARTIAL: M208 and M204 done and consumed; DIR-119-D2 partially done; DIR-124-B and M248 TODO — designed for compatibility with fail-closed behavior when absent)
 - [ ] One real non-fixture milestone emits a manifest, a Build receipt bound to it, and an independent Audit that follows its references. (PENDING: requires a real milestone dispatch; mechanism installed and gate-tested but not yet exercised on a real milestone)
-- [x] A real or production-equivalent negative control omits or downgrades one required evidence row and is stopped by BuildEvidenceGate before any Audit agent dispatch. (EVIDENCE: AC6 test validates unmet-disposition blocking, evidence-class-mismatch blocking, and unauthorized-deferral blocking with gate CLI exit 1)
+- [x] A real or production-equivalent negative control omits or downgrades one required evidence row and is stopped by BuildEvidenceGate before any Audit agent dispatch. (EVIDENCE: AC6 test validates unmet-disposition blocking, evidence-class-mismatch blocking, and unauthorized-deferral blocking with gate CLI exit 1; M265 negative control: a git-failure state (bad merge-base / git-diff failure / empty baseCommit) is stopped by the collector ({ok:false,reason:"git-failure"}) and the gate (git-failure, exit 1) before any Audit agent dispatch, while a legitimately empty diff passes)
 - [x] A fresh audit verifies the production call graph, manifest/receipt hashes, canonical path resolution, and observer independence. (EVIDENCE: AC9 verifies receipt hash-binding; AC12 verifies byte-identical mirrors; AC4 verifies producer provenance; selftest verifies resolveMilestoneRoot)
 
 ## Human verification when exp5 marks this task done
