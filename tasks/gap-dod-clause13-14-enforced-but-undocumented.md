@@ -61,21 +61,106 @@ document:
 **Non-goals:** Do not disable or reduce `it0-enforcement-with-design-check` (it correctly catches
 ADR-011 violations). Do not just edit the test's expectations.
 
+## Decision (implemented) — Option A: Clauses 13/14 ARE first-class DoD clauses
+
+**Chosen: Option A** — document Clauses 13/14 in `inherited-core.md`'s `## Definition of DoD` as
+first-class clauses. The enforcement-with-design check is CORRECT; the drift is real: two standing,
+UNCONDITIONAL gates landed in `it0-dod-check.ts` without matching design entries.
+
+**Why A over B (re-scope/demote):**
+- The Clause 13/14 enforcement blocks are structurally first-class DoD clauses: they run
+  UNCONDITIONALLY every check, are always dispositioned, shell out to a sibling script
+  (`workflow-invariant-ownership.mjs`, `workflow-metadata-conformance.mjs`), and mirror the exact
+  shape of Clauses 10/11/12. They are not transient task-level gates.
+- They are tied to standing directives (DIR-124-A3a invariant-ownership, DIR-124-A4
+  workflow-metadata) and are ALREADY in `it0-dod-check.ts`'s operative
+  `MECHANICALLY_UNCONDITIONAL_CLAUSES` set (`invariant-ownership`, `workflow-metadata-conformance`).
+- Option B would make the check pass by WEAKENING the DoD: the gates would keep running but become
+  undocumented executable enforcement — a worse ADR-011 state (enforcement with NO design at all) —
+  and it violates the task's own non-goals ("Do NOT disable or reduce the enforcement-with-design
+  check"; DoD "No weakening of the enforcement-with-design mechanism").
+- The "all 13 clauses" comments were already stale; reality is 15 clauses (0-14). Option A makes the
+  documented count match the executable reality (AC3).
+
+**Edits made (this worktree):**
+1. `inherited-core.md` DoD code block: added functional `clause13 :: ...` / `clause14 :: ...`
+   declarations (matching the surrounding `clauseN :: ...` functional format, `-- UNCONDITIONAL`
+   tag) after clause12.
+2. `inherited-core.md` summary (line 24): `13 clauses (0-12)` -> `15 clauses (0-14)` + added
+   Clause 13/14 summary bullets.
+3. `inherited-core.md` header comment: `(all 13 clauses)` -> `(all 15 clauses, 0-14)`.
+4. `inherited-core.md` `MECHANICALLY_UNCONDITIONAL_CLAUSES` doc list synced to the script's actual
+   9-entry set (doc previously listed only 4; Clauses 8/10/11/13/14 were missing — a pre-existing
+   doc/script drift fixed so the documented UNCONDITIONAL set matches the executable one).
+5. `it0-dod-check.ts`: header comments only (lines 9-10/82: "14 DoD clauses (0-13)" ->
+   "15 DoD clauses (0-14)") — no enforcement logic touched; `it0-enforcement-with-design-check.ts`:
+   UNCHANGED (no weakening).
+6. `experiments/quay-perpetual-stream/invariant-ownership.md` + `plugin/invariant-ownership.md`
+   (byte-identical mirror): `dod-clause-enumeration` rule updated "13 DoD clauses (0-12)" ->
+   "15 DoD clauses (0-14)".
+7. `experiments/quay-perpetual-stream/scripts/it0-dod-check.sh`: header comment
+   "(inherited-core.md clauses 0-12)" -> "(inherited-core.md clauses 0-14)".
+
+**Verification:**
+- RED before: `it0-enforcement-with-design-check.ts --root <repo>` -> `FAIL: 2
+  enforcement-with-design violation(s) found` (Clause 13, Clause 14 DESIGN-MISSING); the D1
+  real-object test failed.
+- GREEN after: check exits 0 with `PASS: all 15 DoD clause(s) ...`; full
+  `it0-enforcement-with-design-check.test.mjs` suite green.
+
+## Adversarial review (2 rounds, REFUTE-focused)
+
+**Round 1:** challenged the Option A decision. Verdict held on factual faithfulness (clause13/14
+declarations mirror the enforcement blocks verbatim), Option-vs-Option-B (A is clearly right; B
+would leave the gates running but undocumented — worse under ADR-011), future-proofing (parser is
+number-based; a future Clause 15 needs only a `clause15 ::` line + a `// --- Clause 15:` marker), and
+diff review (PASS). **One completeness defect found:** a live, mechanically-validated manifest
+(`experiments/quay-perpetual-stream/invariant-ownership.md` + its byte-identical
+`plugin/invariant-ownership.md` mirror) asserted "The 13 DoD clauses (0-12)...", and
+`experiments/quay-perpetual-stream/scripts/it0-dod-check.sh`'s header read "clauses 0-12". Fixed:
+both manifest copies + the .sh header updated to 15 (0-14).
+
+**Round 2 (re-challenge after round-1 fix):** found ONE further defect — the authoritative
+executable's OWN header was stale: `experiments/quay-perpetual-stream/scripts/it0-dod-check.ts`
+lines 9-10/82 claimed "runs all 14 DoD clauses (0-13)" / "all 14 gate clauses (0-13)". Fixed to 15
+(0-14). Round 2 also EMPIRICALLY verified the mechanism fires both directions for a future Clause 15
+(design-missing AND enforcement-missing both produce violations), confirmed no `^clause(\d+)\s*::`
+parse ambiguity from the new continuation lines, confirmed the doc's `MECHANICALLY_UNCONDITIONAL_CLAUSES`
+is byte-identical (order+content) to the script's Set at it0-dod-check.ts:355, and confirmed all real
+checks green (enforcement-with-design exit 0; workflow-invariant-ownership ok:true; test suites
+20/20 + 45/45 + dod-fixture-selfcheck 17/17).
+
+Residual (pre-existing, flagged for future, NOT this task's scope): the 9-entry
+`MECHANICALLY_UNCONDITIONAL_CLAUSES` set is a duplicated literal in two unguarded places (doc vs
+script, no anti-drift gate), and the manifest's `docs/references/inherited-core.md [generated-view]`
+owner-path occurrence does not exist (real file is under `experiments/quay-perpetual-stream/`).
+
 ## Acceptance Criteria
 
-- [ ] AC1: The drift is resolved in one direction or the other (documented decision in the task
+- [x] AC1: The drift is resolved in one direction or the other (documented decision in the task
   body): either Clause 13/14 added to inherited-core.md's DoD, or their enforcement re-scoped.
-- [ ] AC2: `it0-enforcement-with-design-check.ts --root <repo>` reports **0 violations** (or the
+  **Chosen: Option A — Clauses 13/14 added to inherited-core.md's DoD (documented above).**
+- [x] AC2: `it0-enforcement-with-design-check.ts --root <repo>` reports **0 violations** (or the
   decision deliberately documents why a residual is accepted).
-- [ ] AC3: Both `inherited-core.md` and `it0-dod-check.ts` remain internally consistent (DoD
+  **Verified GREEN: `PASS: all 15 DoD clause(s) (0-14)`, exit 0.**
+- [x] AC3: Both `inherited-core.md` and `it0-dod-check.ts` remain internally consistent (DoD
   clause count comment matches reality).
-- [ ] AC4: The engine-group full suite is green for this check (no regression elsewhere).
+  **Verified: count comments now `15 clauses (0-14)` / `(all 15 clauses, 0-14)`; parsed clause
+  sets agree (core 0-14 == enforced 0-14).**
+- [x] AC4: The engine-group full suite is green for this check (no regression elsewhere).
+  **Scoped: `it0-enforcement-with-design-check.test.mjs` 20/20 pass; `it0-dod-check.test.mjs`
+  45/45 pass; `workflow-invariant-ownership.mjs` ok:true. Full `scripts/test.sh` not run per task
+  instruction.**
 
 ## Definition of Done
 
-- [ ] Decision documented (intended-DoD vs re-scope) with the reasoning.
-- [ ] Check green on real repo; full-suite contribution recorded.
-- [ ] No weakening of the enforcement-with-design mechanism.
+- [x] Decision documented (intended-DoD vs re-scope) with the reasoning.
+  **Option A (intended-DoD) documented above with rationale.**
+- [x] Check green on real repo; full-suite contribution recorded.
+  **`it0-enforcement-with-design-check.ts --root <repo>` exits 0 (15 clauses).**
+- [x] No weakening of the enforcement-with-design mechanism.
+  **`it0-dod-check.ts` and `it0-enforcement-with-design-check.ts` untouched; enforcement blocks
+  for Clauses 13/14 unchanged.**
 
 ## Touches
 

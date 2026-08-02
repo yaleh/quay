@@ -100,7 +100,7 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 ---
 
 ## Invariant: dod-clause-enumeration
-- **Rule:** The 13 DoD clauses (0-12) are the single executable enforcer defined in it0-dod-check.ts.
+- **Rule:** The 15 DoD clauses (0-14) are the single executable enforcer defined in it0-dod-check.ts.
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/it0-dod-check.ts` `[authoritative]`
 - **Other occurrences:**
   - `docs/references/inherited-core.md` `[generated-view]` -- prose description of the DoD clauses; the executable enforcer is authoritative
