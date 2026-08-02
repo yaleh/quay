@@ -11,30 +11,26 @@
 |---|---|
 | B2-0 `DIR-124-F-plancheck` DoD | ✔ `14c99720` |
 | B2-1 `gap-fast-mode-no-telemetry` | ✔ merge `a13d2628` |
+| B2-2 `gap-test-selection-not-scoped-to-touches` | ✔ merge `462b8391`，全量 1206 tests 0 fail；AC12 实测 8.3s vs 全量 ~378s |
 | B2-3 `gap-suite-speedup` | ✔ merge `42ea36b0`，实测 378s ≤ 480s |
 
 ## 进行中
 
 | 任务 | 状态 |
 |---|---|
-| B2-2 `gap-test-selection-not-scoped-to-touches` | 实现 GREEN（16/16）未提交；对抗审查终报中（1 BUG + 2 ADVISORY + 4 NIT，实现已在 worktree 内修掉 `--allow-thin` 空集/`--json` 吞掉路径）；审查完成后 resume implementer 收尾提交 → fan-in merge → 全量 suite |
-| B3-1 `gap-gate-registration-vs-dispatch-unmeasured` | 已并发派发 10:08:36Z，worktree `/tmp/quay-wt-gatedispatch`，待其返回后 fan-in merge |
+| B3-1 `gap-gate-registration-vs-dispatch-unmeasured` | 派发 10:08:36Z，worktree `/tmp/quay-wt-gatedispatch`，运行中 |
+| B3-2 `gap-test-suite-has-no-layer-grouping` | 派发 10:29:46Z（B2-2 合并后，无重叠），worktree `/tmp/quay-wt-layergroup`，运行中 |
 
-## 待执行（B2 之后）
+## 待执行
 
-编排会话已用 `checkTouchesPair` 实测正交性，**不要重新猜测**：
+| 任务 | 状态 |
+|---|---|
+| — | 无（批次 2 + B3-1/B3-2 后停止并报告，不自动进入下一批） |
 
-| 对 | disjoint | 重叠 |
-|---|---|---|
-| B2-2 vs `gap-gate-registration-vs-dispatch-unmeasured` | **true** | — |
-| B2-2 vs `gap-test-suite-has-no-layer-grouping` | false | `docs/analysis/fast-mode-execution-prompt.md`、`scripts/test.sh` |
-| 两个新任务之间 | **true** | — |
+## 正交性决策（已执行，2026-08-02 实测）
 
-因此：
-
-**B3-1 `gap-gate-registration-vs-dispatch-unmeasured`** — 与 B2-2 不相交，**现在就可以并发派发**，不必等 B2-2。
-
-**B3-2 `gap-test-suite-has-no-layer-grouping`** — 与 B2-2 冲突（两个文件），**必须等 B2-2 合并后**再派发。
+`checkTouchesPair` 实测结果（历史决策，不再重猜）：B2-2 vs B3-1 disjoint=true；B2-2 vs B3-2 重叠（`fast-mode-execution-prompt.md`、`scripts/test.sh`）；B3-1 vs B3-2 之间 disjoint=true。
+因此 B3-1 与 B2-2 并发派发（10:08:36Z），B3-2 等 B2-2 合并后派发（10:29:46Z）。
 
 ## 两个新任务的要点
 
