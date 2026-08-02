@@ -47,6 +47,8 @@
 
 B7-1：把 `--report` 的写拆成显式 `--snapshot`/`--flush` 子命令，`--report` 变纯读。根因是职责错位（读操作在写）不是 gitignore——聚合保持跟踪、不放宽 readiness 干净树检查、不 gitignore 绕过。`.halt` 保留（去留等外层裁定），本任务是用户驱动的例外派发。外层已停两个 inner Monitor（各 60s 调一次 --report），树可保持干净，AC3（20 次 --report 后 git status --porcelain 为空）可真实验证。
 
+进度（17:23 tick）：subagent 已提交 `84577dd3`（--report 纯读 + --snapshot 显式落盘 + inner-state.sh 纯读契约 + AC1-4 测试），任务体还在更新（未返回）。外层 17:20 提交 `0baf1e03`（inner-stalled.sh READONLY mode）与 `d9f1fd8c`（option A 授权 + 合并顺序）——**与 B7-1 无文件重叠**（外层只改 inner-stalled.sh，B7-1 改 inner-state.sh），rebase 无冲突。合并序列已定：**M222 → M246 → M243**（可测量性排序，人授权）。`--task-end` 后须跟 `--snapshot` 显式落盘（外层已更新 execution-prompt）。
+
 ## 已完成 B6
 
 | 任务 | merge | 关键 |
