@@ -62,10 +62,37 @@ extra:
 （本次的 `milestone/M222/iteration-0` 与 B5-1 都改 `packages/quay/test/cli.test.mjs`）。
 本任务只负责**让它可见**。
 
+### 追加：`--clean-stale` 的「0 ahead 即安全」规则在 revert-of-merge 之后不成立
+
+2026-08-02 实证。内层合并 `milestone/M243/iteration-0`（`2c980b53`）后又 revert 了那次 merge
+（`7b6e1100`）。此后：
+
+```
+git rev-list --count master..milestone/M243/iteration-0   →  0        ← 看起来已合并
+git diff master...milestone/M243/iteration-0 --shortstat  →  （空）    ← 三点 diff 用 merge-base
+git diff master..milestone/M243/iteration-0  --shortstat  →  91 files changed, 8220 insertions(+)
+```
+
+**提交数说已合并，内容说差 8,220 行。** 这是「revert 一个 merge」的标准后果：merge 提交仍在
+master 历史里，所以 merge-base 前移，但内容被 revert 撤掉了。重新 `git merge` 会是 no-op。
+
+`milestone-worktree.ts` 的 `--clean-stale` 判据是
+`rev-list --count <branch> --not master`（`plugin/scripts/milestone-worktree.ts:184`），源码注释写着
+「0 ahead → unambiguously safe to clean」。**对这个分支它现在是错的**——一次 `--clean-stale`
+就会删掉承载那 8,220 行的唯一具名引用。
+
+**因此检测器不能只看提交数。** 判「已合并」必须同时满足：提交数为 0 **且**两点 diff 为空。
+两者不一致本身就是一个要报的状态（`merged-then-reverted`），因为它意味着有人 revert 了一次 merge，
+而那份工作既不在 master 也不再被任何常规检查看见。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 检查能列出全部带提交的滞留分支，输出分支名 / 领先提交数 / 插入行数 / 最后提交日期
-- [ ] AC2: 零领先分支**不**出现在告警里（当前实测应为 20 个，全部静默）
+- [ ] AC2: 零领先**且**两点 diff 为空的分支不出现在告警里
+- [ ] AC2b: **提交数为 0 但两点 diff 非空**的分支报为 `merged-then-reverted` —— 用
+      `milestone/M243/iteration-0` 的真实状态 pin 住（8,220 行差异，0 提交领先）
+- [ ] AC2c: `milestone-worktree.ts --clean-stale` 拒绝清理 `merged-then-reverted` 分支；
+      当前它的 `rev-list --count <branch> --not master` 判据会把它当作可安全删除
 - [ ] AC3: 在当前仓库实跑，恰好报出 M222 / M239 / M243 / M246 四个 —— 用真实仓库验证，不是 fixture
 - [ ] AC4: `restart-readiness-check.sh` 打印滞留分支；**存在滞留不阻断**，但输出中必须出现
 - [ ] AC5: `orchestration/orchestrator-loop-tick.md` 步骤 1 的观察命令包含该检查
