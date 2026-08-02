@@ -102,22 +102,37 @@ on the real store (~6s on this task's smaller worktree store), so 60s is ~7× he
 `--test-concurrency=8` while still FAILING if the command ever regresses back toward the pre-fix
 ~83s. No blanket timeout bump; the command is genuinely fast now.
 
+**Honest limitation (from adversarial review round 1):** the 60s wall-clock guard only fires against a
+store as large as the developer's real workspace (1.3G `milestones/` tree, 69,725 walked files). On a
+small fresh checkout the pre-fix code runs in ~32s, so a wall-clock timeout alone would NOT catch a
+re-introduced regression in CI. The CI-effective lock is therefore the two **walk-count regression
+tests** added to `select-preflight.test.mjs` (assert `fs.readdirSync` call counts):
+
+- `scanOrthogonalPairs: walk-count regression — at most ONE tree walk per invocation` — FAILS on the
+  pre-fix code (~20 walks → ~240 readdirSync calls) and PASSES on the fix (1 walk → 12 calls).
+- `coupling-graph: walk-count regression — shared files list does ZERO additional tree walks` — FAILS
+  on the pre-fix code (9 walks) and PASSES on the fix (0 readdirSync calls).
+- Verified RED: both fail on parent `7adcf012`; both pass on this branch. Deterministic (call-count,
+  not wall-clock), so not flaky.
+
 ## Acceptance Criteria
 
 - [x] AC1: Per-phase profiling of `select-preflight.ts --json` on the real store (getTaskList /
   scanOrthogonalPairs / serialization), timings recorded in the task body — see **Profiling** table.
+  (Independent re-measurement by review round 1 reproduced it: old 75.7s → new 7.8s.)
 - [x] AC2: The dominant cost is addressed with the profiling evidence cited (not guessed) — the
   repeated full-tree walks in `expandGlobs` (ortho-scan 52.9s + portfolio 23.4s of the 83.4s) are
   eliminated via walk-once sharing; the evidence table is cited above.
 - [x] AC3: The two CLI-shape tests pass with real headroom under `--test-concurrency=8` (not at
   the timeout ceiling) — post-fix command ≈8-9.5s on the real store; `spawnCli` timeout lowered to
-  60s (~7× headroom). In the worktree the two CLI tests measured 7.9s / 6.8s.
+  60s (~7× headroom). In the worktree the two CLI tests measured 7.9s / 6.8s (5.7s / 5.1s under
+  `--test-concurrency=8`). Regression lock is the walk-count tests (see Regression guard).
 - [x] AC4: The file's contribution to the full-suite wall-clock is materially reduced from ~240s —
   the command dropped 83.4s → ~8.3s (~10×), so the two CLI tests each drop from ~120s (timeout-killed)
   to ~8s; the file's contribution falls from ~240s to a small fraction of that.
 - [x] AC5: Assertions unchanged — the CLI-shape contract tests still validate the full preflight JSON
   (`halt`, `pendingDirectives`, `candidates`, `milestoneCounter`, `portfolio`); output verified
-  byte-identical pre/post fix.
+  byte-identical pre/post fix (independently re-verified by review round 1).
 
 ## Definition of Done
 
@@ -127,7 +142,32 @@ on the real store (~6s on this task's smaller worktree store), so 60s is ~7× he
   of CLI wall-time plus the (fast) unit tests.
 - [x] No test assertion weakened; no blanket timeout bump as the fix — timeout was LOWERED after the
   command was made fast, as a regression guard; all CLI-shape assertions unchanged; 3 new
-  behavior-equivalence tests lock the walk-once path's correctness.
+  behavior-equivalence tests lock the walk-once path's correctness AND 2 new walk-count regression
+  tests FAIL on the pre-fix code (verified against parent `7adcf012`) and PASS on the fix.
+
+## Adversarial review (round 1)
+
+Independent review agent reproduced the ~10× speedup (old 75.7s → new 7.8s on the real store) and
+confirmed byte-identical output, the coupling-graph `files` threading, no stale-walk risk
+(`buildPreflightResult` is fully synchronous), and no other caller misuses the additive params
+(grep-verified across `concurrent-batch-scheduler`, `composite-manifest-synthesis` ×2,
+`golden-replay-dir044`, `task-schema` ×2, `anti-drift-touches-check`). Findings and fixes:
+
+- **MAJOR** — the 3 behavior-equivalence tests pass on the pre-fix code (not regression locks).
+  → FIXED: added the 2 walk-count regression tests above (verified RED on `7adcf012`).
+- **MAJOR** — the 60s timeout guard would not fire on a small CI checkout (pre-fix ~32s there).
+  → FIXED: documented the limitation and made the walk-count tests the CI-effective regression lock.
+- **MINOR** — `MATCH_RE_CACHE` is an unbounded module-level Map. Accepted: glob→RegExp is pure and
+  the set of distinct globs is bounded by store content; no eviction needed for a bounded, one-shot
+  CLI process. Left as-is.
+- **MINOR** — the `deriveTouches`→`walkRepo` auto-derivation fallback is not covered by walk-once.
+  Accepted: this run's candidates all declared `## Touches`, so the fallback never fired; it is a
+  latent cost, not a regression. Noted for a future task if the store gains many non-declaring
+  candidates.
+- **NIT** — `preflightFiles` is walked eagerly (not lazily) when candidates exist. Accepted: the
+  eager walk is a strict win (the old coupling-graph walked even for empty globs).
+- **NIT** — profiling table not reproducible from committed code (the `SELECT_PREFLIGHT_PROFILE`
+  instrumentation was temporary). Accepted: review independently reproduced the numbers.
 
 ## Touches
 

@@ -412,6 +412,83 @@ test("coupling-graph: shared precomputed files yield identical shared-implementa
   }
 });
 
+// The two tests below are the REAL regression locks for the walk-once fix: they FAIL on the pre-fix
+// code (which re-walked the tree ~2×C(topN,2) times in scanOrthogonalPairs and once per task in
+// buildCouplingGraph) and PASS on the fixed code. They assert on the NUMBER of fs.readdirSync calls
+// (walkFiles is the only reader of the tree), not on wall-clock, so they are deterministic. The
+// `fs` import here is the same Node module singleton the walked modules use, so patching its
+// `readdirSync` intercepts the walks.
+test("scanOrthogonalPairs: walk-count regression — at most ONE tree walk per invocation", () => {
+  const tmp = fs.mkdtempSync("select-preflight-walkcount-scan-");
+  try {
+    const N_DIRS = 8;
+    for (let i = 0; i < N_DIRS; i++) {
+      fs.mkdirSync(path.join(tmp, `d${i}`), { recursive: true });
+      fs.writeFileSync(path.join(tmp, `d${i}`, "f.ts"), "x");
+    }
+    const tasksDir = path.join(tmp, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    // 5 top-N candidates, each declared + precise + pairwise-disjoint → all 10 pairs expand BOTH
+    // sides, so pre-fix code issues ~20 expandGlobs calls, each a full walkFiles.
+    const candidates = [];
+    for (let i = 0; i < 5; i++) {
+      const id = `C${i}`;
+      fs.writeFileSync(path.join(tasksDir, `${id}.md`), `## Touches\n\n- \`d${i}/f.ts\`\n`);
+      candidates.push({ id, title: id, rank: i, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" });
+    }
+    const realReaddirSync = fs.readdirSync;
+    let readdirCalls = 0;
+    fs.readdirSync = (...a) => { readdirCalls++; return realReaddirSync(...a); };
+    try {
+      const result = scanOrthogonalPairs(tmp, candidates);
+      assert.equal(result.pairs.length, 10, "fixture must produce all 10 disjoint pairs");
+    } finally {
+      fs.readdirSync = realReaddirSync;
+    }
+    // ONE walkFiles over the fixture reads: root + N_DIRS + tasks dir = N_DIRS + 2 directories.
+    const oneWalk = N_DIRS + 2;
+    assert.ok(
+      readdirCalls <= oneWalk,
+      `walk-once violated: ${readdirCalls} readdirSync calls (one walk = ${oneWalk}; pre-fix code did ~20 walks)`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("coupling-graph: walk-count regression — shared files list does ZERO additional tree walks", () => {
+  const tmp = fs.mkdtempSync("select-preflight-walkcount-coupling-");
+  try {
+    const N = 9;
+    for (let i = 0; i < N; i++) {
+      fs.mkdirSync(path.join(tmp, `d${i}`), { recursive: true });
+      fs.writeFileSync(path.join(tmp, `d${i}`, "f.ts"), "x");
+    }
+    const mk = (id, touches) => ({
+      version: 1, id, status: "todo", labels: [], valueType: "capabilityGrowth",
+      eligible: true, estimatedValue: 5, deliverySurface: [], touches, semanticResources: [],
+      dependsOn: [], verificationBoundary: "scripts/test.sh", acCount: 1, lineEstimate: 50, sourceHash: "h",
+    });
+    const tasks = Array.from({ length: N }, (_, i) => mk(`T${i}`, [`d${i}/f.ts`]));
+    const files = walkFiles(tmp); // the ONE shared walk, taken before the assertion
+    const realReaddirSync = fs.readdirSync;
+    let readdirCalls = 0;
+    fs.readdirSync = (...a) => { readdirCalls++; return realReaddirSync(...a); };
+    try {
+      buildCouplingGraph({ tasks, workspaceRoot: tmp, files });
+    } finally {
+      fs.readdirSync = realReaddirSync;
+    }
+    assert.equal(
+      readdirCalls,
+      0,
+      `shared-files coupling-graph must not re-walk the tree: ${readdirCalls} readdirSync calls (pre-fix code did ${N} walks)`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
 function spawnCli(args) {
   try {
