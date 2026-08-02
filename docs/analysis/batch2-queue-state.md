@@ -56,7 +56,7 @@
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
 
-**重要更正（2026-08-02 21:00）**：之前基于 c4 全量（`full-suite-m136-c4.log` 的 8037 失败）的推理**全部作废**——那根本不是 c4，是 flags-only 缺陷导致 node 自发现跑出的不同套件（2296→8573）。外层 c4 数据同样作废。M136 的「全量红」证据仅剩外层干净窗口 c8（458s/1 fail M136）一条，其余 c4 崩溃数据不可信。
+**数据有效性精确边界（2026-08-02 21:05，inner-forensics 取证）**：flags-only 缺陷只在「裸标志 + 无文件列表」时触发。我的 8 次全量调用中 **7 次无标志（有效）**、**1 次裸标志 18:35:44 `--test-concurrency=4 > full-suite-m243-c4.log`（被污染，8037 失败作废）**。20:16 那次 `--test-concurrency=4` + 4 显式文件（重型子集 332/332 绿）**有效**（有文件列表，node 跑指定文件）。外层那组 `--test-concurrency=4`（8573）同样作废。**结论：M243 后崩溃、M136 全量红/隔离绿、干净窗口 load1=0.39 仍 fail 1 均为有效观察**，继续作证据。污染的范围要查（inner-forensics 秒级），不要凭印象估。
 
 ## 工作方式调整（外层实测 2026-08-02，含 subagent transcript 的完整分解）
 
