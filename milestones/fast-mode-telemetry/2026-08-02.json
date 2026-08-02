@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T12:07:58.346Z",
+  "generatedAt": "2026-08-02T12:31:12.254Z",
   "since": null,
   "tasks": [
     {
@@ -9,7 +9,23 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [],
+  "inProgress": [
+    {
+      "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
+      "runId": "fm-gap-dod-clause13-14-enforced-but-undocumented-1785673841706-w7y7uz",
+      "startedAtMs": 1785673841720
+    },
+    {
+      "taskId": "gap-select-preflight-json-real-store-too-slow",
+      "runId": "fm-gap-select-preflight-json-real-store-too-slow-1785673841089-yoji1f",
+      "startedAtMs": 1785673841100
+    },
+    {
+      "taskId": "gap-symlink-mirror-invocation-test-contract-mismatch",
+      "runId": "fm-gap-symlink-mirror-invocation-test-contract-mismatch-1785673841393-d330u6",
+      "startedAtMs": 1785673841406
+    }
+  ],
   "meanMinutes": 67.84928333333333,
   "medianMinutes": 67.84928333333333,
   "tasksPerHour": 0.8843129514755376
