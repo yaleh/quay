@@ -98,8 +98,9 @@ plugin/vendor/quay/dist/quay.js   1,315,188 字节   19:04:25
 ## Definition of Done
 
 - [x] AC3/AC6 的实测输出贴进任务体
-- [x] `scripts/test.sh` 绿（M136 所在文件 34/34 通过；REFUTE 对抗审查在本 worktree 跑全量套件：
-      2296 tests, 2278 pass, 0 fail, 18 skipped, exit 0）
+- [x] `scripts/test.sh` 绿（M136 所在文件 34/34 通过；并发缺陷修正后针对性范围验证
+      plugin-packaging + build-dist + npm-pack-e2e 并行（concurrency 8）连跑 8 次全绿；
+      全量套件留给外层 fan-in）
 - [x] 明确记录：**错误消息指向错误的文件，比缺少错误消息更糟**——它把调查引向了错误的方向，
       本次实测代价是三轮误判（内层两轮判为 flaky、外层一轮怀疑 M243 引入）
 
@@ -198,3 +199,32 @@ GREEN（M136 34/34 通过）。**错误消息指向错误的文件，比缺少�
 
 M136 实测：`scripts/test.sh --for-task gap-sync-vendor-drift-mislabelled-as-task-schema --allow-thin`
 → `plugin/test/plugin-packaging.test.mjs` 34/34 pass（M136 ✔）。
+
+### 并发缺陷修正（coordinator 第二轮发现）
+
+全量套件（`--test-concurrency=8`）下 M136 仍会失败（`must exit 0`），但隔离跑
+plugin-packaging.test.mjs 34/34 绿、套件跑完后 `--check` 也干净。根因：
+`packages/quay/test/build-dist.test.mjs`（test d，跑 `build-dist.sh`）与
+`packages/quay/test/npm-pack-e2e.test.mjs`（before hook，跑 `package.sh`）会在测试**中途**
+重建 `packages/quay/dist/quay.js`；esbuild 是**原地写**（truncate+write，实测文件在构建期间
+经过 size 0 / 部分长度，全量套件负载下可延续数秒）。M136 的 `--check` 与它们并行时，`cmp`
+读到写了一半的文件 → 假 DRIFT。`--sync-dist` 只在套件开头同步一次，覆盖不到「测试中途重建」。
+
+**第一版修正（60×50ms=3s 有界重试）仍不够**：全量套件复跑仍挂 M136（5729ms），根因是负载下
+重建持续时间超过 3s 预算，重试耗尽时源文件仍在写。改为**稳定性检测**：
+`cmp_or_report` 在文件不同时观察源文件的 size/mtime——只要它在变，就说明重建进行中，**继续等**
+（预算 200×50ms=10s）；只有源文件在连续多次读取间稳定、且尺寸接近完整（≥ 目标一半）仍然不同，
+才判定为真 drift 并立即上报。构建是确定性的（连跑两次 sha256 相同），所以重建完成后源文件
+必然回到与镜像一致 → 重试期间的 `cmp` 直接命中 OK。这既不掩盖真事（稳定全尺寸差异立即 DRIFT），
+又对「并行重建中途」免疫。验证：
+1. 干净树 `--check` CLEAN（常见路径零重试延迟）
+2. 真陈旧 vendored（稳定全尺寸差异）→ DRIFT，exit 1（~0.67s，不掩盖）
+3. 确定性撕裂读：源为部分尺寸 4s 后恢复 → CLEAN（等到稳定，~4.4s）
+4. 确定性撕裂读：源为 size 0（truncate）3s 后恢复 → CLEAN（~3.3s）
+5. coordinator 复现组合（plugin-packaging + build-dist + npm-pack-e2e，concurrency 8）
+   连跑 **8 次全绿**（M136 ✔，fail 0）——这是本缺陷的针对性子集，全量留给外层 fan-in。
+
+注：coordinator 列的 4 个重建 dist 的测试文件中，实测只有 `build-dist.test.mjs`（test d，跑
+`build-dist.sh`）与 `npm-pack-e2e.test.mjs`（before，跑 `package.sh`）会写规范
+`packages/quay/dist/quay.js`；`build-dist-smoke.test.mjs` 写临时树、`package-json-bin.test.mjs`
+只读 manifest。但修复对任意数量的并发重建都成立。

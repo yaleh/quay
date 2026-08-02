@@ -94,14 +94,51 @@ cmp_or_report() {
   fi
   if cmp -s "$src" "$dst"; then
     echo "[sync-vendor --check] OK (identical): $label"
-  elif [ "$expected" = "expected-diff" ]; then
-    echo "[sync-vendor --check] OK (expected-diff): $label"
-  else
-    echo "[sync-vendor --check] DRIFT: $label differs between source and destination" >&2
-    echo "[sync-vendor --check]   src: $src" >&2
-    echo "[sync-vendor --check]   dst: $dst" >&2
-    DRIFT=1
+    return
   fi
+  if [ "$expected" = "expected-diff" ]; then
+    echo "[sync-vendor --check] OK (expected-diff): $label"
+    return
+  fi
+  # Files differ. In a parallel test suite (--test-concurrency=8) the source
+  # dist bundle is rebuilt by OTHER test files (build-dist.test.mjs test (d),
+  # npm-pack-e2e.test.mjs before-hook) while this check runs; esbuild writes
+  # dist/quay.js IN-PLACE (truncate + write, verified: the file passes through
+  # size 0 / partial sizes during the rebuild, which under full-suite load can
+  # last several seconds), so a concurrent read can catch the file mid-write —
+  # a false DRIFT that resolves when the rebuild completes. The build is
+  # deterministic, so a GENUINE drift is a source file that is STABLE (not being
+  # rewritten) and still differs. Distinguish the two: while the source's
+  # size/mtime keep changing it is mid-rebuild — wait (bounded); only report
+  # DRIFT once the source is stable across consecutive reads at a full size
+  # (a stable tiny file is a partial write still landing, not drift). A settled
+  # identical source (the norm) reports OK. Bounded at 200x50ms = 10s to cover
+  # sustained rebuilds under load (gap-sync-vendor-drift-mislabelled-as-task-schema).
+  local dst_size cur_size cur_mtime prev_size="" prev_mtime="" stable=0 i
+  dst_size="$(stat -c %s "$dst" 2>/dev/null || echo 0)"
+  for ((i = 0; i < 200; i++)); do
+    sleep 0.05
+    if cmp -s "$src" "$dst"; then
+      echo "[sync-vendor --check] OK (identical): $label"
+      return
+    fi
+    cur_size="$(stat -c %s "$src" 2>/dev/null || echo 0)"
+    cur_mtime="$(stat -c %Y "$src" 2>/dev/null || echo 0)"
+    if [ -n "$prev_size" ] && [ "$cur_size" = "$prev_size" ] && [ "$cur_mtime" = "$prev_mtime" ]; then
+      stable=$((stable + 1))
+    else
+      stable=0
+    fi
+    prev_size="$cur_size"
+    prev_mtime="$cur_mtime"
+    if [ "$stable" -ge 3 ] && [ "$cur_size" -ge "$((dst_size / 2))" ]; then
+      break  # source stable at a full size but still differs -> genuine drift
+    fi
+  done
+  echo "[sync-vendor --check] DRIFT: $label differs between source and destination" >&2
+  echo "[sync-vendor --check]   src: $src" >&2
+  echo "[sync-vendor --check]   dst: $dst" >&2
+  DRIFT=1
 }
 
 # ---------------------------------------------------------------------------
