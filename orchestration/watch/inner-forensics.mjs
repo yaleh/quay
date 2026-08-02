@@ -166,7 +166,16 @@ function verify(file, sinceMs, pattern) {
   const rows = load(file, sinceMs);
   const byKind = KINDS.has(pattern);
   const re = byKind ? null : new RegExp(pattern, "i");
-  if (!rows.length) return console.log("窗口内无数据");
+  if (!rows.length) {
+    // 无数据时**仍要**报出选了哪个会话与什么窗口 —— 2026-08-02 实测：一次 `--since` 写成了未来
+    // 时刻（查 17:30Z 而当时 UTC 是 17:24），得到「窗口内无数据」，与「选错会话」完全不可区分，
+    // 花了几分钟手工诊断才发现是自己写错了时间。
+    console.log(`会话文件 ${path.basename(file)}  0 条`);
+    console.log(`窗口 ${sinceMs ? new Date(sinceMs).toISOString() : "(全部)"} → (无记录)`);
+    if (sinceMs && sinceMs > Date.now()) console.log(`  ⚠ --since 是**未来时刻**（当前 ${new Date().toISOString()}）—— 零结果由此而来`);
+    else console.log(`  ⚠ 零结果与「选错会话/窗口」不可区分；用 --session 指定后重试`);
+    return;
+  }
   banner(file, rows, sinceMs);
   const pending = new Map(), hits = [];
   for (const r of rows) {
