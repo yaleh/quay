@@ -85,6 +85,43 @@ master 历史里，所以 merge-base 前移，但内容被 revert 撤掉了。�
 两者不一致本身就是一个要报的状态（`merged-then-reverted`），因为它意味着有人 revert 了一次 merge，
 而那份工作既不在 master 也不再被任何常规检查看见。
 
+### 追加二：`--clean-stale` 会 `--force` 删掉未提交的工作（2026-08-02 实测，有活实例）
+
+内层会话被 `/clear` 时暴露的。当时 `/tmp/quay-wt-costmodel`（在册 worktree，分支
+`task/gap-suite-cost-model-…`）的状态是：
+
+```
+领先 master ......... 0
+两点 diff ........... 空
+git status --porcelain 3 条：measurements/、plugin/scripts/measure-suite.mjs（95 行）、
+                              plugin/scripts/measure-suite-reporter.mjs（34 行）
+```
+
+`cleanStale` 的判据是「0 领先 **且** 两点 diff 为空 → 已证明无工作丢失」，**这两个条件都只看已提交
+的内容**。工作树里 129 行未提交的交付物不在证明范围内。而它的删除动作是：
+
+```js
+const rm = _gitOk(workspace, ["worktree", "remove", rel, "--force"]);   // ← --force
+```
+
+**git 本身是保护这一点的**——实测（一次性 worktree，非在飞那个）：
+
+```
+$ git worktree remove /tmp/wt-probe-XXXX
+fatal: '/tmp/wt-probe-XXXX' contains modified or untracked files, use --force to delete it
+```
+
+**代码显式绕过了这层保护。** 而且文件头注释（`milestone-worktree.ts:144-145`）写的正好相反：
+「`--force` is deliberately NOT used on the worktree remove beyond what is needed」。
+**注释与代码在一条安全属性上互相矛盾**，本仓库同族文件的既定原则是「THE CODE WINS」——
+那么胜出的这一方会毁掉未提交的工作。
+
+无任何测试 pin 住这一点（`grep force|dirty|untracked` 在 worktree 测试里零命中）。
+
+**修法**：`cleanStale` 在删除前必须检查 `git status --porcelain`（在**该 worktree 内**，不是主
+检出）。非空 → 返回新的 `has-uncommitted` 而不是 `cleaned`；删除时去掉 `--force`，让 git 的既有
+保护成为最后一道闸。「0 领先」只证明没有已提交的工作，**不证明没有工作**。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 检查能列出全部带提交的滞留分支，输出分支名 / 领先提交数 / 插入行数 / 最后提交日期
@@ -93,6 +130,12 @@ master 历史里，所以 merge-base 前移，但内容被 revert 撤掉了。�
       `milestone/M243/iteration-0` 的真实状态 pin 住（8,220 行差异，0 提交领先）
 - [ ] AC2c: `milestone-worktree.ts --clean-stale` 拒绝清理 `merged-then-reverted` 分支；
       当前它的 `rev-list --count <branch> --not master` 判据会把它当作可安全删除
+- [ ] AC2d: `cleanStale` 在删除前检查该 **worktree 内**的 `git status --porcelain`；非空返回
+      `has-uncommitted`，不删
+- [ ] AC2e: `worktree remove` 去掉 `--force`，让 git 的「contains modified or untracked files」
+      成为最后一道闸；实测证明该保护存在且当前被显式绕过
+- [ ] AC2f: 文件头注释与代码对齐 —— 注释现称「--force is deliberately NOT used」，代码用了。
+      测试 pin 住「dirty worktree 不被删除」，当前零测试覆盖
 - [ ] AC3: 在当前仓库实跑，恰好报出 M222 / M239 / M243 / M246 四个 —— 用真实仓库验证，不是 fixture
 - [ ] AC4: `restart-readiness-check.sh` 打印滞留分支；**存在滞留不阻断**，但输出中必须出现
 - [ ] AC5: `orchestration/orchestrator-loop-tick.md` 步骤 1 的观察命令包含该检查
