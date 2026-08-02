@@ -185,8 +185,20 @@ export function cleanStaleWorktree({ workspace, milestone }) {
     const aheadCount = ahead.ok ? Number(ahead.out) : NaN;
     if (!Number.isFinite(aheadCount)) return { outcome: "error", code: "cannot-count-ahead", detail: ahead.out };
     if (aheadCount > 0) return { outcome: "has-commits", aheadCount, branch };
+    // 0 ahead is NOT sufficient after a revert-of-merge (gap-stranded-worktree-branches-have-no-alarm-channel,
+    // 2026-08-02): `git revert <merge>` leaves the merge commit in master history so rev-list --count
+    // reports 0 while the branch's CONTENT (two-dot diff) is still 8k+ lines off master. Treat
+    // "0 commits ahead BUT non-empty two-dot diff" as `merged-then-reverted`: real work that neither
+    // master nor any routine check will see — refuse to clean, escalate to needs-human.
+    const twodot = _gitOk(workspace, ["diff", "--quiet", "master", branch]);
+    if (twodot.ok) {
+      // diff --quiet exits 0 → no content difference → genuinely merged, safe to clean.
+    } else {
+      const diffStat = _gitOk(workspace, ["diff", "--shortstat", "master", branch]);
+      return { outcome: "merged-then-reverted", branch, detail: diffStat.ok ? diffStat.out : "two-dot diff non-empty", worktreeRel: rel };
+    }
   }
-  // 0 commits ahead (or branch already gone but path/metadata lingering) → clean.
+  // 0 commits ahead AND empty two-dot diff (or branch already gone but path/metadata lingering) → clean.
   if (pathExists) {
     const rm = _gitOk(workspace, ["worktree", "remove", rel, "--force"]);
     if (!rm.ok) _gitOk(workspace, ["worktree", "prune"]); // corrupt metadata → prune the registration
