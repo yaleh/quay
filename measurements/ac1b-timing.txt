@@ -1,0 +1,35 @@
+[timing] +1234ms: quay task list (no --json) exits 0
+[timing] +1283ms: quay task view CLI-1 --json exits 0
+[timing] +1167ms: quay task view <unknown id> exits 1
+[timing] +1138ms: quay task edit --status ready --json exits 0
+[timing] +1117ms: quay task check <passing task> --json exits 0
+[timing] +1026ms: quay task check <failing task> --json exits 1 (mirrors result.ok)
+[timing] +1065ms: quay task edit CLI-2 --status ready --enforce-gate exits 1 (gate fails)
+[timing] +1095ms: quay task edit --enforce-gate refusal performs NO write — CLI-2 status unchanged
+[timing] +1200ms: quay task edit CLI-2 --status ready (no --enforce-gate) still succeeds unguarded
+[timing] +2388ms: quay task edit CLI-1 --status todo --enforce-gate exits 0 when the gate passes
+[timing] +1060ms: quay task edit CLI-2 --labels a,b --enforce-gate (no --status field) succeeds as
+[timing] +1311ms: quay action list CLI-1 --json exits 0
+[timing] +1272ms: quay action list <done task> --json exits 0
+[timing] +1167ms: quay action run CLI-1 advance --json exits 0
+[timing] +2010ms: quay --provider github task list --json exits 0 (proves resolveProviderEnv()'s a
+[timing] +1197ms: quay serve --port <n>, spawned as a real subprocess, becomes reachable on the ex
+[timing] +2537ms: quay action run gh-3 advance --json --provider github exits 0 (real GitHub-backe
+[timing] +2637ms: quay task view gh-3 --json --provider github exits 0 (real GitHub-backed task, e
+[timing] +2782ms: quay action list gh-3 --json --provider github exits 0 (real GitHub-backed task,
+[timing] +2354ms: quay task check gh-3 --json --provider github exits 1 (mirrors result.ok for gh-
+[timing][prefix] +9775ms: quay task list --prefix PRFA exits 0
+[timing][search] +1254ms: quay task list --search body-term exits 0 (QX-023, CB-016)
+[timing] +1616ms: quay task list --format json exits 0
+[timing] +1665ms: quay task view --format json exits 0
+[timing] +2618ms: task_list via quay mcp (provider=github) returns real, non-empty task data aggre
+[timing] +1185ms: task_get via quay mcp (provider=github) returns gh-3's real id
+[timing] +1236ms: task_check via quay mcp (provider=github) does not error for gh-3 (the gate itse
+[timing] +1309ms: action_list via quay mcp (provider=github) includes the "advance" button for gh-
+[timing] +1204ms: task_list with prefix='PFXA' does not return isError:true
+[timing] +1314ms: task_list with search='toggle' does not return isError:true
+[timing] +1110ms: task_list with no pagination params returns no error
+[timing] +1352ms: task_list label=['experiment-4','iteration-9'] returns no error (QX-032)
+[timing] +1012ms: task_list with non-matching status returns no error (QX-042 empty case)
+[timing] +1030ms: gate_run on GATE-PASS returns no error
+[timing] +1049ms: DIR-084 lifecycle_complete on ENV-LC returns no error

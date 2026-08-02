@@ -118,7 +118,16 @@ const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-g
 const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;
+let _lastAssertMs = 0; // AC1b assertion-gap timing (gap-suite-cost-model-is-wrong-optimizations-buy-nothing)
 function assert(cond, msg) {
+  if (process.env.QUAY_TEST_ASSERT_TIMING) {
+    const now = Date.now();
+    if (_lastAssertMs) {
+      const gap = now - _lastAssertMs;
+      if (gap >= 1000) console.error(`[timing] +${Math.round(gap)}ms: ${String(msg).slice(0, 80)}`);
+    }
+    _lastAssertMs = now;
+  }
   if (!cond) {
     failures++;
     console.error(`FAIL: ${msg}`);
