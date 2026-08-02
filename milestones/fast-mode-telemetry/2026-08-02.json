@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T17:10:00.195Z",
+  "generatedAt": "2026-08-02T17:34:00.527Z",
   "since": null,
   "tasks": [
     {
@@ -23,6 +23,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-telemetry-report-writes-and-deadlocks-readiness",
+      "minutes": 23.2206,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-test-suite-has-no-layer-grouping",
       "minutes": 67.84928333333333,
       "outcome": "needs-human"
@@ -40,7 +45,7 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 45.38551428571429,
-  "medianMinutes": 40.2564,
-  "tasksPerHour": 1.3220077142297764
+  "meanMinutes": 42.6149,
+  "medianMinutes": 40.25631666666666,
+  "tasksPerHour": 1.4079582493447127
 }

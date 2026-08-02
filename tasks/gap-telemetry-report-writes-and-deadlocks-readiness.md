@@ -1,8 +1,8 @@
 ---
 id: gap-telemetry-report-writes-and-deadlocks-readiness
-title: "--report rewrites a tracked file, so any telemetry polling keeps the
-  tree dirty and readiness can never pass"
-status: todo
+title: --report rewrites a tracked file, so any telemetry polling keeps the tree
+  dirty and readiness can never pass
+status: done
 labels:
   - gap
   - defect

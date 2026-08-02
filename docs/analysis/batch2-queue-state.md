@@ -31,13 +31,13 @@
 | `gap-tests-spawn-cli-from-ts-source`（用户建 `fa0500ad`） | `7032e704` | cli-entry.mjs 载体 + cli.test.mjs 131s→66s；done |
 | `gap-tests-use-cli-where-module-import-suffices`（用户建 `0f0c8d10`） | `478e76d2` | sink 不必要的 fixture 进程（serve/mcp-server tests）；done，34.5 min |
 
-## 滞留分支合并（人裁定 M243 → M246 → M222，M239 推迟）
+## 滞留分支合并（人裁定顺序 M222 → M246 → M243，M239 推迟）
 
 | 分支 | 状态 |
 |---|---|
-| **M243**（DIR-124-A2） | **B 回退**（时间盒内未恢复）。单一根因找到：`validateEvent` 返回 `.error` 非 `.errors`（runner bug，`095ddbf0` 已修）。但完整恢复 12 fixtures 还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome），触及语义修复→时间盒出口。**revert `88e17bf2`**，master 绿。恢复时必须一并带回 `095ddbf0`（已记入 DIR-124-A2.md「恢复时必须一并带回的修复」节） |
-| M246（DIR-124-A5） | 待 M243 裁定后 |
-| M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
+| **M222**（DIR-112） | **第一**。rebase 到 B5-1 之上解冲突：保留异步结构 + 换 QUAY_CLI。理由（可测量性）：异步化改变单文件占 lane 的方式，是三者中唯一可能降低墙钟的；效果必须在 M246 加进 ~1600 行测试**之前**测得，且可对 20–63s 噪声带宽判定 |
+| M246（DIR-124-A5） | **第二**。独立新文件（+9161），干净合并，与近期改动无冲突 |
+| **M243**（DIR-124-A2） | **最后，当任务不当合并**。**B 回退**（时间盒内未恢复）。单一根因：`validateEvent` 返回 `.error` 非 `.errors`（runner bug，`095ddbf0` 已修，随 revert `88e17bf2` 成孤儿，恢复时必须一并带回）。完整恢复 12 fixtures 还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome） |
 
 ## 在飞（B7）
 
@@ -59,9 +59,9 @@ B7-1：把 `--report` 的写拆成显式 `--snapshot`/`--flush` 子命令，`--r
 
 | 任务 | 说明 |
 |---|---|
-| **M243 恢复** | 必须一并带回 `095ddbf0`（validateEvent 返回 `.error` 非 `.errors`，runner bug，随 revert `88e17bf2` 成了孤儿——已核实：该 commit 仍在对象库，但文件不在 HEAD 树，不带回 bug 原样回来）。完整恢复还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome） |
-| M246（DIR-124-A5） | 待 M243 裁定后；M246 与 M222 的合并**按人裁定顺序**，M239 已推迟 |
-| M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
+| **M222**（DIR-112） | **第一**。rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI；合并后单独测 cli.test.mjs + 全量各一次，差值对 20–63s 噪声带宽判定 |
+| **M246**（DIR-124-A5） | **第二**。独立新文件，干净合并 |
+| **M243 恢复** | **最后，当任务不当合并**。必须一并带回 `095ddbf0`（validateEvent 返回 `.error` 非 `.errors`，runner bug，随 revert `88e17bf2` 成了孤儿——已核实：该 commit 仍在对象库，但文件不在 HEAD 树，不带回 bug 原样回来）。完整恢复还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome）。M239 已推迟 |
 | 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**（外层实测：本会话 Task/Agent 未进工具前六，并发是关的；下一批默认并发，不默认串行）。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
