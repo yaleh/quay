@@ -24,17 +24,22 @@
 | `gap-symlink-mirror-invocation-test-contract-mismatch` | `1f824aee` | 测试契约模型：exit-0+Usage 合法 + clock 字段 redact |
 | `gap-dod-clause13-14-enforced-but-undocumented` | `f10f6860` | Option A 文档补 Clause 13/14，PASS all 15 clauses |
 
-## 在飞（B5，串行——外层 checkTouchesPair 复核 OVERLAP 不可同批）
+## 在飞（B5，串行）
 
 | 任务 | dispatch | runId | worktree |
 |---|---|---|---|
-| `gap-tests-spawn-cli-from-ts-source`（用户建 `fa0500ad`） | 13:22:17Z | fm-gap-tests-spawn-cli-from-ts-source-1785676937127-z8534e | /tmp/quay-wt-spawncli |
+| `gap-tests-use-cli-where-module-import-suffices`（用户建 `0f0c8d10`） | 13:45:01Z | fm-gap-tests-use-cli-where-module-import-suffices-1785678301009-hn9gyi | /tmp/quay-wt-usecli |
+
+## 已完成 B5
+
+| 任务 | merge | 关键 |
+|---|---|---|
+| `gap-tests-spawn-cli-from-ts-source`（用户建 `fa0500ad`） | `7032e704` | cli-entry.mjs 载体 + cli.test.mjs 131s→66s；done |
 
 ## 待执行（按顺序）
 
 | 任务 | 说明 |
 |---|---|
-| `gap-tests-use-cli-where-module-import-suffices`（用户建 `0f0c8d10`） | 等 spawn-cli merge（复用 cli-entry.mjs 载体），串行 |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
 
