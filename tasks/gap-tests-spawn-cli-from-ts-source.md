@@ -2,7 +2,7 @@
 id: gap-tests-spawn-cli-from-ts-source
 title: "Tests spawn the CLI from .ts source at 3.5s each — the prebuilt bundle
   costs 1.4s for the same behavior"
-status: todo
+status: done
 labels:
   - gap
   - defect
