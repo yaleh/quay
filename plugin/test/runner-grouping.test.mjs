@@ -31,32 +31,36 @@ function runTestSh(...args) {
   return r.stdout;
 }
 
-// Ground truth after the declaration sweep: 86 product (4 packages), 58 engine
-// (27 plugin incl. this very test file + 31 execution-path experiments), 13 governance
-// (metering experiments).
-const EXPECTED_PRODUCT = 86;
-const EXPECTED_ENGINE = 58;
-const EXPECTED_GOVERNANCE = 13;
-const EXPECTED_TOTAL = EXPECTED_PRODUCT + EXPECTED_ENGINE + EXPECTED_GOVERNANCE; // 157 unique realpaths
-
-test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob", () => {
-  const out = runTestSh("--list-groups");
+// Ground truth is COMPUTED at runtime, never snapshotted. A hardcoded `EXPECTED_ENGINE = 58`
+// goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
+// (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
+// rule "测试不得硬编码全局计数", all assertions here are RELATIONSHIPS over the live glob:
+//   product + engine + governance == total (the deduped realpath partition), and
+//   --list-files count == --list-groups total. New files change the numbers, not the invariants.
+function parseGroups(out) {
   const parse = (label) => {
     const m = out.match(new RegExp(`^${label}:\\s+(\\d+)`, "m"));
     assert.ok(m, `--list-groups missing ${label}: ${out}`);
     return Number(m[1]);
   };
-  assert.equal(parse("product"), EXPECTED_PRODUCT);
-  assert.equal(parse("engine"), EXPECTED_ENGINE);
-  assert.equal(parse("governance"), EXPECTED_GOVERNANCE);
-  assert.equal(parse("total"), EXPECTED_TOTAL);
+  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), total: parse("total") };
+}
+
+test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob", () => {
+  const out = runTestSh("--list-groups");
+  const g = parseGroups(out);
+  // Relationship, not snapshot: the three groups partition the deduped realpath total.
+  assert.equal(g.product + g.engine + g.governance, g.total);
+  // Structural sanity independent of absolute counts.
+  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0);
 });
 
-test("AC3: realpath dedup — default --list-files has exactly the unique-realpath total (12 symlinks not double-run)", () => {
+test("AC3: realpath dedup — --list-files count equals --list-groups total (12 symlinks not double-run)", () => {
   const files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
-  assert.equal(files.length, EXPECTED_TOTAL);
+  const g = parseGroups(runTestSh("--list-groups"));
+  assert.equal(files.length, g.total);
   // all paths are already realpaths (no duplicates by construction)
-  assert.equal(new Set(files).size, EXPECTED_TOTAL);
+  assert.equal(new Set(files).size, g.total);
 });
 
 test("AC6: --group product,engine selects the same files as no-args", () => {
@@ -82,19 +86,23 @@ test("--group product runs a product fixture; product has no skip block", () => 
 
 test("AC7: an undeclared file defaults to engine in --list-groups", () => {
   const tempFile = join(repoRoot, "plugin", "test", "zz-runner-grouping-undeclared.test.mjs");
+  const before = parseGroups(runTestSh("--list-groups"));
   try {
     writeFileSync(tempFile, 'import { test } from "node:test";\ntest("und", () => {});\n');
-    const out = runTestSh("--list-groups");
-    const m = out.match(/^engine:\s+(\d+)/m);
-    assert.ok(m, `engine count missing: ${out}`);
-    assert.equal(Number(m[1]), EXPECTED_ENGINE + 1, "undeclared file should count as engine");
+    const after = parseGroups(runTestSh("--list-groups"));
+    // Relationship: one undeclared file → exactly +1 engine and +1 total. No absolute count.
+    assert.equal(after.engine, before.engine + 1, "undeclared file should count as engine");
+    assert.equal(after.total, before.total + 1);
+    assert.equal(after.product, before.product, "undeclared file must not touch product");
   } finally {
     if (existsSync(tempFile)) rmSync(tempFile);
   }
 });
 
-test("--group governance --list-files lists exactly the 13 governance files", () => {
+test("--group governance --list-files lists exactly the governance files", () => {
   const out = runTestSh("--group", "governance", "--list-files").trim().split("\n").filter(Boolean);
-  assert.equal(out.length, EXPECTED_GOVERNANCE);
+  const g = parseGroups(runTestSh("--list-groups"));
+  // Relationship: --group governance's file list has exactly governance's count.
+  assert.equal(out.length, g.governance);
   for (const f of out) assert.match(f, /experiments\/quay-perpetual-stream\/test\//);
 });
