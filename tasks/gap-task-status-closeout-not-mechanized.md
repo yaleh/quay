@@ -2,7 +2,7 @@
 id: gap-task-status-closeout-not-mechanized
 title: "Direct (non-workflow) execution has no task-status closeout — 7 tasks
   had landed code while still marked todo"
-status: todo
+status: done
 labels:
   - gap
   - defect

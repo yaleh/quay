@@ -25,7 +25,7 @@
 5. **修**审查发现的真实问题，需要就再来一轮。收敛判据：审查者跑完测试后找不出真实缺陷
 6. **同步镜像**（见下）
 7. **跑测试**（见下）
-8. **关闭任务状态**（见下）
+8. **关闭任务状态**（见下）——用 `task-status-drift-check.ts` 检测器核对：实现已落地的任务若仍 `todo`/`ready` 会被标为 `status-drift-suspect`，逐个复核后关闭
 9. **提交**
 
 ## 硬性约束
@@ -48,7 +48,11 @@
 
 **测试文件放哪。** `scripts/test.sh` 的 glob 只覆盖 `packages/*/test/*.test.mjs` 和 `plugin/test/*.test.mjs`。放在 `experiments/quay-perpetual-stream/test/` 的测试**不会在 CI 跑**。需要 CI 覆盖就放 `plugin/test/`。若两处都放，注意 repo root 深度不同（`plugin/test/` 是 2 层，`experiments/.../test/` 是 3 层）——用向上查找标记目录的方式求根，别硬编码层数。
 
-**关闭任务状态。** 这是当前流程的真实缺口：直接执行时没有任何机制更新任务状态，我刚发现 7 个任务的代码已在树里但 status 仍是 `todo`。你必须手动改 `tasks/<id>.md` 的 `status:`：
+**关闭任务状态。** 这是当前流程的真实缺口：直接执行时没有任何机制更新任务状态，我刚发现 7 个任务的代码已在树里但 status 仍是 `todo`。实现完成后，先跑检测器核对，再手动改 `tasks/<id>.md` 的 `status:`：
+
+```bash
+node --experimental-strip-types plugin/scripts/task-status-drift-check.ts   # 报告 status-drift-suspect 供人工复核
+```
 
 - 全部 AC 已由测试证明 → `done`
 - 代码完成但某条 AC 要求「真实 dispatch 验证」→ `ready`（不是 `done`）
