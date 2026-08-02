@@ -108,9 +108,12 @@ async function main() {
   // AC7 (≥1 real end-to-end call): these TWO fixtures are the retained real
   // `quay-native task create` invocations for this file — they prove the CLI
   // entry actually connects, so a broken entry cannot go silent. Every other
-  // fixture below sinks to the validated store write (seedTask).
+  // fixture below sinks to the validated store write (seedTask). SRV-1 also
+  // carries a `--labels` flag so the retained CLI call still exercises the
+  // CLI's own comma-splitting/validation path (the sunk fixtures pass labels
+  // as store arrays directly), keeping per-file CLI-flag coverage intact.
   execFileSync("node", [nativeBin, "task", "create", "SRV-1", "--title", "Servable task one",
-    "--status", "todo", "--body", VALID_SECTIONS], {
+    "--status", "todo", "--body", VALID_SECTIONS, "--labels", "cli-flag-proof"], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "SRV-2", "--title", "Servable task two (done, no button)",

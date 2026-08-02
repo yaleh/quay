@@ -108,7 +108,7 @@ CLI/MCP 入口确实接得上。全部下沉会让入口坏掉时隐形。
 | 文件 | 改前 | 改后 | 目标 | 说明 |
 |---|---|---|---|---|
 | `serve.test.mjs` | **53.9 s** | **13.0 s** | ≤60 s | 178 个 fixture 进程 → 0（store 写入）+ 保留 2 个真实 CLI 调用 |
-| `mcp-server.test.mjs` | **30.1 s** | **17.9 s** | ≤60 s | fixture 进程全下沉 + connectStdio 15→12 |
+| `mcp-server.test.mjs` | **30.1 s** | **17.9 s** | ≤60 s | fixture 进程全下沉 + connectStdio 14→12 |
 | 两文件并跑（并发 8） | max 53.9 s | max 17.9 s（并跑实测 19.8 s） | — | 关键路径从 ~54 s 降到 ~18 s |
 | 全量套件（583 s 基线，任务体记录） | — | 增量：两关键文件合计省 ~53 s 墙钟 | — | 权威全量数由 orchestrator fan-in 记录 |
 
@@ -145,7 +145,7 @@ M35 relation 同步 —— 与 CLI 完全同一条校验路径，只是不 spawn
 
 **下沉计数：** 34/36 call site 下沉为 store 写入（覆盖 ~178 次进程 spawn，含循环体），2 个保留（SRV-1/SRV-2，AC7）。
 
-### AC4/AC5 —— mcp-server.test.mjs 连接归并表（15 → 12 次 connectStdio）
+### AC4/AC5 —— mcp-server.test.mjs 连接归并表（14 → 12 次 connectStdio）
 
 | 连接 | 服务块 | 分组依据（注释处可查） | 处理 |
 |---|---|---|---|
@@ -170,10 +170,14 @@ M35 relation 同步 —— 与 CLI 完全同一条校验路径，只是不 spawn
 
 ### AC7 —— 真实端到端调用保留
 
-- `serve.test.mjs`：保留 SRV-1/SRV-2 两个真实 `quay-native task create` CLI 调用（主块注释标明 AC7）。
-  另有 serve 服务器内部每次 `startServer()` 真实 spawn native MCP 子进程（provider 连接本身即真实进程）。
-- `mcp-server.test.mjs`：文件本质即真实 MCP 握手 —— 12 个 `connectStdio` 全是真实 `quay mcp` / `quay-native mcp` 子进程，
-  含直连 native（directA）。fixture 虽下沉 store 写入，但被测入口（MCP server）全部保持真实进程接线。
+- `serve.test.mjs`：保留 SRV-1/SRV-2 两个真实 `quay-native task create` CLI 调用（主块注释标明 AC7），
+  且 SRV-1 带 `--labels cli-flag-proof`，故被保留下来的真实 CLI 调用仍覆盖 `task create --labels` 的
+  逗号切分/校验路径（下沉 fixture 直接传 store 数组，不经过该 CLI 路径）。另有 serve 服务器内部每次
+  `startServer()` 真实 spawn native MCP 子进程（provider 连接本身即真实进程）。
+- `mcp-server.test.mjs`：文件本质即真实 MCP 握手 —— 12 个 `connectStdio` 全是真实 `quay mcp` / `quay-native mcp`
+  子进程，含直连 native（directA）。**注意：本文件已归零 CLI `task create`/`task edit` spawn**——被测入口
+  （MCP server）全部保持真实进程接线，但 `task create`/`task edit` 子命令在此文件内不再被触达；该入口的
+  接线证明由 serve.test.mjs 保留的真实 CLI 调用承担（跨文件覆盖，不会全静默）。
 
 ### AC9 —— 其余 16 个 CLI-only 文件逐个实测（单文件 wall-clock，worktree）
 
@@ -203,10 +207,31 @@ M35 relation 同步 —— 与 CLI 完全同一条校验路径，只是不 spawn
 
 - **下沉：** serve 34/36 个 call site（~178 次 spawn）、mcp-server 全部 fixture spawn（create+edit 合一为 store write）
   → 0 进程造 fixture，全部走与 CLI 相同的 `store.write` 校验路径。
-- **保留：** serve SRV-1/SRV-2（AC7 真实 CLI 入口证明）；mcp-server 12 个真实 MCP 连接（隔离/cwd/env/计数断言约束下的最少必要数）。
+- **保留：** serve SRV-1/SRV-2（AC7 真实 CLI 入口证明，SRV-1 带 `--labels` 保住 CLI `--labels` 路径覆盖）；
+  mcp-server 12 个真实 MCP 连接（隔离/cwd/env/计数断言约束下的最少必要数）。
 - **store.ts 未修改**：本任务作为**消费者** import `createStore`（已是导出），Touches 中 `store.ts` 为被依赖方。
 - **共省墙钟：** 两关键路径文件单跑从 84 s（53.9+30.1）→ 30.9 s（13.0+17.9）；并发关键路径 max 54 s → 18 s（省 ~36 s 墙钟）。
   断言零变化（201/202 计数、文本均不变），测试数不减。
+
+### 对抗性评审记录（2026-08-02，Round 1 + 自核）
+
+REFUTE-focused reviewer（独立 agent，运行 410 s，跑通两文件）结论：**NO BLOCKERS**，fixture 分类正确、
+连接归并隔离安全、AC7/AC10/AC11 达标。发现与处置：
+
+| # | 严重度 | 发现 | 处置 |
+|---|---|---|---|
+| 1 | MINOR | serve 不再经 CLI `task create --labels` 路径（下沉 fixture 直接传数组）；执行记录「零覆盖损失」略夸大 | 已修：保留的真实 CLI 调用 SRV-1 加 `--labels cli-flag-proof`，CLI `--labels` 路径在该文件内仍被触达；并修正任务体措辞 |
+| 2 | NIT | 执行记录 connectStdio 计数 15→12 不准（父提交实为 14 次真实握手） | 已修：改为 14→12 |
+| 3 | MINOR | mcp-server 已归零 CLI create/edit spawn；AC7 由 12 个真实 MCP 握手 + serve 的 CLI 证明跨文件承担 | 已记录：AC7 节注明该文件不再触达 CLI create/edit 子命令，跨文件不静默 |
+| 4 | NIT | serve L1351 `envOverride41` 死变量（父提交即有） | 不动（pre-existing，非本任务引入） |
+| 5 | NIT | serve L1519 注释不精确（父提交即有） | 不动（pre-existing，逐字搬移） |
+
+评审确认干净项：断言计数 201/202 前后不变、断言文本零 diff；块 17/19 并入 `core` 无隔离泄漏
+（MCP-B1 在 tasksDirB；块 6/7 只写 MCP-A1；块 17 `_version` 与计数无关；块 19 两 search term 只命中
+FENCE-1/2）；`core.close()` 位置正确；QX-034 遮蔽块一致；`envOverride*` 删除无悬挂引用。
+
+Round 2：评审无 blocker，故以自核替代第二轮独立评审 —— 改动后重跑 serve.test.mjs（含 `--labels` 的 SRV-1）
+确认全绿，断言计数仍 201/202。
 
 ## Touches
 
