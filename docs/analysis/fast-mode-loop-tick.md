@@ -52,19 +52,27 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 读队列文件。若与 `git log` / `git worktree list` 不一致，**以 git 为准**并修正文件——文件可能是 compact 前的旧快照。
 
-### 2. Fan-in 已返回的任务（串行，一次一个）
+### 2. Fan-in 已返回的任务（合并串行，全量套件批量）
 
-对每个已返回但未合并的 subagent：
+**先逐个合并，再统一跑一次全量套件。**
+
+对每个已返回但未合并的 subagent，逐个：
 
 1. `git merge --no-ff task/<taskId>`
-2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续派发**，报告
-3. 跑全量 `scripts/test.sh`
-4. 非绿 → **立即停止**，不再合并任何东西，报告
-5. 绿 → `git worktree remove` + `git branch -d`
-6. 关闭任务状态（AC 和 DoD 都勾；勾不上写理由或留 `ready`）
-7. 记录耗时到计量表
+2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
+3. 跑 `scripts/test.sh --for-task <taskId>`（该任务自己的选中集，秒级）
+4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
 
-**合并必须串行。** 并发合并会在共享工作树上撞车。
+全部合并完成后，**跑一次**全量 `scripts/test.sh`：
+
+5. 非绿 → **立即停止**，不再合并任何东西；逐个回退或 `git bisect` 定位是哪个 merge 导致，报告
+6. 绿 → 对每个已合并任务：`git worktree remove` + `git branch -d`，关闭任务状态（AC 和 DoD 都勾；勾不上写理由或留 `ready`），记录耗时
+
+**为什么批量：** 全量套件 ~7 分钟（418s 实测）。逐个合并各跑一次，3 个任务就是 21 分钟纯重复。批量后 7 分钟。B2/B3 这批 5 个任务在旧方式下花了约 35 分钟在重复跑同一套件上。
+
+**不削弱任何断言**——合并仍逐个、每个仍有选中集把关、全量仍然跑，只是把全量的验证点从「每次合并」移到「一批合并」。红了用 bisect 定位，比省下的时间便宜。
+
+**合并本身必须串行。** 并发合并会在共享工作树上撞车。
 
 ### 3. 检查停止条件
 
@@ -75,6 +83,28 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 - 上一步全量 suite 非绿
 - 有未解决的合并冲突
 - 就绪队列为空
+
+### 3.5 计量（强制，不可跳过）
+
+派发前对每个任务：
+
+```bash
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-start --taskId <id>
+# 记下打印的 runId
+```
+
+fan-in 关闭任务时：
+
+```bash
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
+  --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned>
+```
+
+**这不是可选步骤。** 工具在 B2-1 造好并合并了，但截至 2026-08-02 11:08 `--report` 返回
+`{tasks: [], tasksPerHour: 0}`——一次都没被调用过。所有耗时数字仍靠 commit 时间戳反推，
+正是这个工具本该消除的考古。
+
+没有计量，「1 任务/小时」无法判定，也无法知道任何优化是否真的有效。
 
 ### 4. 派发就绪任务
 
