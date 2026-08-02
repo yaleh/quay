@@ -33,7 +33,10 @@ const SCRIPTS = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "sc
 // ── TypeScript module test helper ───────────────────────────────────────────────────────────────────
 
 function runModule(modulePath, ...args) {
-  const cmd = `node --experimental-strip-types ${modulePath} ${args.join(" ")}`;
+  // Shell-quote any arg that contains whitespace or quote characters (e.g. inline JSON for
+  // --build-result) so the double quotes survive to JSON.parse inside the CLI module.
+  const shq = (a) => (/[\s"']/.test(a) ? `'${String(a).replace(/'/g, `'\\''`)}'` : a);
+  const cmd = `node --experimental-strip-types ${modulePath} ${args.map(shq).join(" ")}`;
   try {
     const stdout = execSync(cmd, { cwd: REPO_ROOT, encoding: "utf8", timeout: 30_000 });
     return { exitCode: 0, stdout };
@@ -373,11 +376,13 @@ test("AC6 — BuildEvidenceGate reason codes cover all blocking conditions", asy
   }
 
   // Valid manifest passes gate (in advisory mode, buildAdmissionRef=null is OK)
+  // baseCommit === candidateCommit === a real commit → legitimately empty diff → drift check passes.
   {
+    const okCommit = realCommitOf();
     const m = {
       schemaVersion: "1",
-      candidateCommit: "abc123",
-      baseCommit: "def456",
+      candidateCommit: okCommit,
+      baseCommit: okCommit,
       buildAdmissionRef: null,
       runIdentity: { milestoneId: "M238", taskIds: ["T1"], composite: false, attempt: 1, sessionId: "s" },
       changedFiles: [],
@@ -404,11 +409,13 @@ test("AC7 — authorized deferral passes gate", async (t) => {
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
 
   // Authorized deferral with real policy key passes
+  // baseCommit === candidateCommit === a real commit → legitimately empty diff → drift check passes.
   {
+    const okCommit = realCommitOf();
     const m = {
       schemaVersion: "1",
-      candidateCommit: "abc123",
-      baseCommit: "def456",
+      candidateCommit: okCommit,
+      baseCommit: okCommit,
       buildAdmissionRef: null,
       runIdentity: { milestoneId: "M238", taskIds: ["T1"], composite: false, attempt: 1, sessionId: "s" },
       changedFiles: [],
@@ -509,16 +516,18 @@ test("AC8 — artifact hash and out-of-root checks", async (t) => {
   }
 
   // Correct hash passes
+  // baseCommit === candidateCommit === a real commit → legitimately empty diff → drift check passes.
   {
     const { createHash } = await import("node:crypto");
+    const okCommit = realCommitOf();
     const testFile = path.join(scratch, "good.txt");
     fs.writeFileSync(testFile, "good content");
     const goodHash = createHash("sha256").update("good content").digest("hex");
 
     const m = {
       schemaVersion: "1",
-      candidateCommit: "abc123",
-      baseCommit: "def456",
+      candidateCommit: okCommit,
+      baseCommit: okCommit,
       buildAdmissionRef: null,
       runIdentity: { milestoneId: "M238", taskIds: ["T1"], composite: false, attempt: 1, sessionId: "s" },
       changedFiles: [],
@@ -635,35 +644,47 @@ test("selftest — build-evidence-manifest.ts --selftest passes", async (t) => {
   assert.equal(r.exitCode, 0, `selftest must pass, got exit=${r.exitCode}\n${r.stdout}`);
 });
 
-// Collector dry-run smoke test (no real git tree needed, just validates CLI argument parsing)
-test("collector — dry-run CLI argument parsing", async (t) => {
+// Collector dry-run smoke test — CLI argument parsing + fail-closed git behavior (M265)
+test("collector — dry-run CLI argument parsing + git-failure fail-closed", async (t) => {
   const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "collector-smoke-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = execSync("git rev-parse HEAD", { cwd: REPO_ROOT, encoding: "utf8" }).trim();
   const output = path.join(scratch, "manifest.json");
 
-  // Valid invocation (without a real git tree, the collector will fail gracefully)
+  // Success path with a REAL git commit — the collector derives baseCommit/changedFiles and emits a manifest.
   const r = runModule(
     collectorPath,
-    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: "abc123" }),
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
     "--milestone-root", scratch,
     "--workspace", REPO_ROOT,
     "--milestone-id", "M999",
     "--task-ids", JSON.stringify(["T1"]),
     "--output", output
   );
+  assert.equal(r.exitCode, 0, `collector must succeed with a real commit: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  assert.ok(fs.existsSync(output), `output file must exist: ${output}`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  assert.equal(manifest.schemaVersion, "1");
+  assert.equal(manifest.runIdentity.milestoneId, "M999");
+  assert.equal(manifest.candidateCommit, realCommit);
+  assert.ok(manifest.baseCommit, "baseCommit must be mechanically derived (non-empty)");
+  assert.equal(manifest.buildAdmissionRef, null);
 
-  // The collector should produce a manifest even without real git state
-  // (it will have empty changedFiles/iterationArtifacts if git fails)
-  if (r.exitCode === 0) {
-    assert.ok(fs.existsSync(output), `output file must exist: ${output}`);
-    const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
-    assert.equal(manifest.schemaVersion, "1");
-    assert.equal(manifest.runIdentity.milestoneId, "M999");
-    assert.equal(manifest.candidateCommit, "abc123");
-    assert.equal(manifest.buildAdmissionRef, null);
-  }
-  // If exit code != 0, it's likely because git merge-base fails (no origin/master in test env)
-  // — that's fine for this smoke test
+  // M265: a NON-EXISTENT candidate commit → git merge-base fails → collector FAILS CLOSED with
+  // reason "git-failure" and writes NO manifest (never an empty-baseCommit fail-soft manifest).
+  const badOutput = path.join(scratch, "bad-manifest.json");
+  const rBad = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: "deadbeef0000000000000000000000000000000000" }),
+    "--milestone-root", scratch,
+    "--workspace", REPO_ROOT,
+    "--milestone-id", "M999",
+    "--task-ids", JSON.stringify(["T1"]),
+    "--output", badOutput
+  );
+  assert.equal(rBad.exitCode, 1, `git failure must fail closed, got exit=${rBad.exitCode}`);
+  assert.ok(rBad.stdout.includes("git-failure"), `expected git-failure reason, got: ${rBad.stdout}`);
+  assert.ok(!fs.existsSync(badOutput), "no manifest may be written on git failure");
 
   // Missing required flag → error
   const r2 = runModule(collectorPath);
@@ -671,5 +692,354 @@ test("collector — dry-run CLI argument parsing", async (t) => {
   const combined = (r2.stdout || "") + (r2.stderr || "");
   assert.ok(combined.includes("error") || combined.includes("missing"), `expected error, got stdout="${r2.stdout}" stderr="${r2.stderr}"`);
 
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+// ── M264 mechanism 2: per-phase evidence consumption ────────────────────────────────────────────────
+
+function realCommitOf() {
+  return execSync("git rev-parse HEAD", { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+}
+
+test("M264 — collector consumes composite per-phase evidence into acEvidence rows with producer provenance", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-per-phase-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [
+      { taskId: "T1", acIndex: 0, requiredClass: "unit", plannedCommand: "scripts/test.sh", plannedArtifact: "" },
+      { taskId: "T1", acIndex: 1, requiredClass: "source" },
+    ],
+  }));
+
+  const evidence = path.join(scratch, "evidence.json");
+  fs.writeFileSync(evidence, JSON.stringify([
+    { phaseId: "p0", files: ["a.ts"], commits: [realCommit], tests: ["scripts/test.sh"] },
+  ]));
+
+  const envelope = path.join(scratch, "envelope.json");
+  fs.writeFileSync(envelope, JSON.stringify({
+    manifest: {
+      candidateId: "M999", taskIds: ["T1"],
+      phases: [{ id: "p0", taskIds: ["T1"], requires: [], auditShardIds: [] }],
+    },
+  }));
+
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M999", "--task-ids", JSON.stringify(["T1"]), "--composite", "true",
+    "--admission-decision", admission,
+    "--per-phase-evidence", evidence,
+    "--composite-manifest", envelope,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  assert.ok(manifest.baseCommit, "baseCommit must be derived");
+  const rows = manifest.acEvidence;
+  assert.equal(rows.length, 2, `expected 2 acEvidence rows, got ${rows.length}`);
+  assert.ok(rows.every((row) => row.disposition === "satisfied"), "planned row with matching per-phase evidence must be matched, not unmet");
+  assert.ok(rows.every((row) => row.producer === "build-agent"), "per-phase rows must carry producer build-agent");
+  assert.equal(rows[0].evidenceClass, "unit", "tests present in phase evidence → unit");
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+test("M264 — collector consumes width-1 iteration report into acEvidence rows (no planned-ac-unmatched false positive)", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-iter-report-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [{ taskId: "T1", acIndex: 0, requiredClass: "unit" }],
+  }));
+
+  const iterReport = path.join(scratch, "iteration-0.md");
+  fs.writeFileSync(iterReport, [
+    "# M100 Iteration 0",
+    "- **Build commit:** " + realCommit,
+    "## Build Evidence",
+    "- **Tests:** scripts/test.sh 12/12 GREEN",
+    "- **Files changed:** packages/quay/src/foo.ts",
+    "## Disposition",
+    "Done",
+  ].join("\n"));
+
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M100", "--task-ids", JSON.stringify(["T1"]), "--composite", "false",
+    "--admission-decision", admission,
+    "--iteration-report", iterReport,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  const rows = manifest.acEvidence;
+  assert.equal(rows.length, 1, `expected 1 acEvidence row, got ${rows.length}`);
+  assert.equal(rows[0].disposition, "satisfied", "planned row must be matched from the iteration report");
+  assert.equal(rows[0].producer, "build-agent");
+  assert.equal(rows[0].evidenceClass, "unit", "Tests: line → unit");
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+test("M264 — per-phase evidence and iteration report are NOT consumed when absent (planned rows stay unmet, no false satisfied)", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-no-evidence-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [{ taskId: "T1", acIndex: 0, requiredClass: "unit" }],
+  }));
+
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M100", "--task-ids", JSON.stringify(["T1"]), "--composite", "false",
+    "--admission-decision", admission,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  const rows = manifest.acEvidence;
+  assert.equal(rows.length, 1, `expected 1 acEvidence row, got ${rows.length}`);
+  assert.equal(rows[0].disposition, "unmet", "no per-phase evidence / iteration report → planned row stays unmet (fail-closed)");
+  assert.equal(rows[0].producer, "mechanical", "unmatched mechanical stub row");
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+// ── M265 mechanism 3: fail-closed on git failure ────────────────────────────────────────────────────
+
+test("M265 — gate blocks empty baseCommit with git-failure (drift check never silently skipped)", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-git-gate-"));
+  const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
+
+  const m = {
+    schemaVersion: "1", candidateCommit: "abc123", baseCommit: "",
+    changedFiles: [], buildAdmissionRef: null, acEvidence: [], plannedAcEvidence: [], iterationArtifactRefs: [],
+  };
+  const manifestPath = path.join(scratch, "empty-base.json");
+  fs.writeFileSync(manifestPath, JSON.stringify(m));
+  const r = runModule(gateScript, "--manifest", manifestPath, "--workspace", REPO_ROOT, "--advisory");
+  assert.equal(r.exitCode, 1, `empty baseCommit must block, got exit=${r.exitCode}`);
+  assert.ok(r.stdout.includes("git-failure"), `expected git-failure, got: ${r.stdout}`);
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+test("M265 — gate blocks git diff failure with git-failure (bad baseCommit)", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-git-gate-badbase-"));
+  const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
+  const realCommit = realCommitOf();
+
+  const m = {
+    schemaVersion: "1", candidateCommit: realCommit, baseCommit: "deadbeef0000000000000000000000000000000000",
+    changedFiles: [], buildAdmissionRef: null, acEvidence: [], plannedAcEvidence: [], iterationArtifactRefs: [],
+  };
+  const manifestPath = path.join(scratch, "bad-base.json");
+  fs.writeFileSync(manifestPath, JSON.stringify(m));
+  const r = runModule(gateScript, "--manifest", manifestPath, "--workspace", REPO_ROOT, "--advisory");
+  assert.equal(r.exitCode, 1, `git diff failure must block, got exit=${r.exitCode}`);
+  assert.ok(r.stdout.includes("git-failure"), `expected git-failure, got: ${r.stdout}`);
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+test("M265 — legitimate empty diff (baseCommit === candidateCommit) is NOT blocked", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-git-gate-legit-"));
+  const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
+  const realCommit = realCommitOf();
+
+  const m = {
+    schemaVersion: "1", candidateCommit: realCommit, baseCommit: realCommit,
+    changedFiles: [], buildAdmissionRef: null, acEvidence: [], plannedAcEvidence: [], iterationArtifactRefs: [],
+  };
+  const manifestPath = path.join(scratch, "legit-empty.json");
+  fs.writeFileSync(manifestPath, JSON.stringify(m));
+  const r = runModule(gateScript, "--manifest", manifestPath, "--workspace", REPO_ROOT, "--advisory");
+  assert.equal(r.exitCode, 0, `legit empty diff must pass, got exit=${r.exitCode}: ${r.stdout}`);
+  assert.ok(r.stdout.includes("PASS"), `expected PASS, got: ${r.stdout}`);
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+// ── Adversarial-review regression tests (M264/M265 bug fixes) ───────────────────────────────────────
+
+// Bug 1 (fail-open): incidental prose ("journal", "live run", "workflow run") must NOT upgrade the
+// evidence class to real-workflow. Only an explicit structured declaration may.
+test("M264 regress — incidental prose does NOT upgrade evidence class to real-workflow (no fail-open)", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-no-failopen-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [{ taskId: "T1", acIndex: 0, requiredClass: "real-workflow" }],
+  }));
+
+  // Report mentions "journal" / "workflow run" / "live run" ONLY as incidental prose, no explicit
+  // structured declaration. The AC requires real-workflow; the collector must infer unit/source,
+  // so the gate BLOCKS with evidence-class-mismatch (never a fail-open PASS).
+  const iterReport = path.join(scratch, "iteration-0.md");
+  fs.writeFileSync(iterReport, [
+    "# M100 Iteration 0",
+    "- **Build commit:** " + realCommit,
+    "## Build Evidence",
+    "- **Tests:** scripts/test.sh 12/12 GREEN",
+    "Evidence journal: I recorded each step in my session journal during the live run; the workflow run for this milestone completed.",
+    "## Disposition",
+    "Done",
+  ].join("\n"));
+
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M100", "--task-ids", JSON.stringify(["T1"]), "--composite", "false",
+    "--admission-decision", admission,
+    "--iteration-report", iterReport,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  const row = manifest.acEvidence[0];
+  assert.equal(row.evidenceClass, "unit", `incidental prose must not upgrade to real-workflow; got ${row.evidenceClass}`);
+  assert.notEqual(row.evidenceClass, "real-workflow", "no fail-open real-workflow credit from prose");
+
+  // Gate must block (unit < real-workflow) — the M203 failure mode is prevented.
+  const g = runModule(gateScript, "--manifest", output, "--workspace", REPO_ROOT, "--advisory");
+  assert.equal(g.exitCode, 1, `gate must block weaker class, got exit=${g.exitCode}: ${g.stdout}`);
+  assert.ok(g.stdout.includes("evidence-class-mismatch"), `expected evidence-class-mismatch, got: ${g.stdout}`);
+
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+// Bug 1 (positive): an EXPLICIT structured declaration DOES credit real-workflow (attributed claim).
+test("M264 regress — explicit structured real-workflow declaration is credited (attributed)", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-explicit-rw-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [{ taskId: "T1", acIndex: 0, requiredClass: "real-workflow" }],
+  }));
+
+  const iterReport = path.join(scratch, "iteration-0.md");
+  fs.writeFileSync(iterReport, [
+    "# M100 Iteration 0",
+    "## Build Evidence",
+    "- **Real-workflow evidence:** milestones/M100/workflow-journal.md",
+    "## Disposition",
+    "Done",
+  ].join("\n"));
+
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M100", "--task-ids", JSON.stringify(["T1"]), "--composite", "false",
+    "--admission-decision", admission,
+    "--iteration-report", iterReport,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  const row = manifest.acEvidence[0];
+  assert.equal(row.evidenceClass, "real-workflow", `explicit declaration must credit real-workflow; got ${row.evidenceClass}`);
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+// Bug 2 (fail-open): a COMPOSITE milestone must NOT fall back to the width-1 iteration report when
+// per-phase evidence is absent — per-phase attribution would be silently bypassed.
+test("M264 regress — composite with no per-phase evidence does NOT fall back to iteration report", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-composite-nofb-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [
+      { taskId: "T1", acIndex: 0, requiredClass: "unit" },
+      { taskId: "T2", acIndex: 0, requiredClass: "unit" },
+    ],
+  }));
+
+  // Iteration report exists (Build always writes it) but per-phase evidence file is ABSENT.
+  const iterReport = path.join(scratch, "iterations", "iteration-0.md");
+  fs.mkdirSync(path.dirname(iterReport), { recursive: true });
+  fs.writeFileSync(iterReport, [
+    "# M200 Iteration 0",
+    "## Build Evidence",
+    "- **Tests:** scripts/test.sh GREEN",
+    "- **Files changed:** packages/quay/src/foo.ts",
+  ].join("\n"));
+
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M200", "--task-ids", JSON.stringify(["T1", "T2"]), "--composite", "true",
+    "--admission-decision", admission,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  const rows = manifest.acEvidence;
+  assert.equal(rows.length, 2, `expected 2 acEvidence rows, got ${rows.length}`);
+  assert.ok(rows.every((row) => row.disposition === "unmet"), "composite with no per-phase evidence must NOT credit members from the aggregate iteration report (fail-closed)");
+  assert.ok(rows.every((row) => row.producer === "mechanical"), "unmatched composite rows must be mechanical unmet stubs");
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
+// Bug 3 (mis-attribution): per-phase evidence WITHOUT a task→phase map (empty composite-manifest
+// envelope) must NOT be mis-credited to taskIds[0] — all planned rows stay unmatched (fail-closed).
+test("M264 regress — per-phase evidence without phases is NOT mis-credited to taskIds[0]", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-nophases-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  const admission = path.join(scratch, "admission.json");
+  fs.writeFileSync(admission, JSON.stringify({
+    requiredEvidence: [
+      { taskId: "T1", acIndex: 0, requiredClass: "unit" },
+      { taskId: "T2", acIndex: 0, requiredClass: "unit" },
+      { taskId: "T3", acIndex: 0, requiredClass: "unit" },
+    ],
+  }));
+
+  const evidence = path.join(scratch, "evidence.json");
+  fs.writeFileSync(evidence, JSON.stringify([
+    { phaseId: "p0", files: ["a.ts"], commits: [realCommit], tests: ["scripts/test.sh"] },
+  ]));
+
+  // NO --composite-manifest envelope → phases empty → cannot attribute → no satisfied rows.
+  const output = path.join(scratch, "manifest.json");
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M200", "--task-ids", JSON.stringify(["T1", "T2", "T3"]), "--composite", "true",
+    "--admission-decision", admission,
+    "--per-phase-evidence", evidence,
+    "--output", output,
+  );
+  assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  const rows = manifest.acEvidence;
+  assert.equal(rows.length, 3, `expected 3 acEvidence rows, got ${rows.length}`);
+  assert.ok(rows.every((row) => row.disposition === "unmet"), "per-phase evidence without a task→phase map must not be credited to any task (fail-closed)");
+  assert.ok(!rows.some((row) => row.producer === "build-agent" && row.disposition === "satisfied"), "no task may be credited satisfied without phase attribution");
   fs.rmSync(scratch, { recursive: true, force: true });
 });

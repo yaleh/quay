@@ -61,16 +61,24 @@ const REASON_CODES = {
   ARTIFACT_HASH_MISMATCH: "artifact-hash-mismatch",
   DUPLICATE_AC_EVIDENCE: "duplicate-ac-evidence",
   CHANGED_FILES_MISMATCH: "changed-files-mismatch",
+  GIT_FAILURE: "git-failure",
   GATE_INTERNAL_ERROR: "gate-internal-error",
 } as const;
 
-// ── git helpers (inline; same as collector) ─────────────────────────────────────────────────────────
+// ── git helpers (inline; same as collector — fail-closed: distinguishes failure from empty) ─────────
 
-function git(args: string[], cwd: string): string {
+interface GitResult {
+  ok: boolean;
+  stdout: string;
+  error?: string;
+}
+
+function git(args: string[], cwd: string): GitResult {
   try {
-    return execSync(`git ${args.join(" ")}`, { cwd, encoding: "utf8", timeout: 10_000 }).trim();
-  } catch {
-    return "";
+    const stdout = execSync(`git ${args.join(" ")}`, { cwd, encoding: "utf8", timeout: 10_000 }).trim();
+    return { ok: true, stdout };
+  } catch (e) {
+    return { ok: false, stdout: "", error: (e as Error).message };
   }
 }
 
@@ -215,51 +223,68 @@ export function gateBuildEvidence(
     // Missing files that are declared are not a hard block — they may be generated later
   }
 
-  // 8. Changed files drift check: re-derive from git and compare
-  if (manifest.baseCommit && manifest.candidateCommit) {
-    const output = git(["diff", "--numstat", `${manifest.baseCommit}..${manifest.candidateCommit}`], workspaceRoot);
-    if (output) {
-      const currentFiles = new Map<string, { additions: number; deletions: number }>();
-      for (const line of output.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const parts = trimmed.split("\t");
-        if (parts.length >= 3) {
-          const a = parseInt(parts[0], 10);
-          const d = parseInt(parts[1], 10);
-          if (!isNaN(a) && !isNaN(d)) {
-            currentFiles.set(parts[2], { additions: a, deletions: d });
-          }
+  // 8. Changed files drift check: re-derive from git and compare. FAIL-CLOSED on git failure
+  // (M265 mechanism 3): an empty baseCommit (collector git merge-base failure or hand-authored
+  // manifest) OR a git diff command failure is a hard block — the drift check is never silently
+  // skipped. A legitimately empty diff (baseCommit === candidateCommit → no changes) is NOT a block.
+  if (!manifest.baseCommit) {
+    return {
+      ok: false,
+      reason: "git-failure",
+      reasonCode: REASON_CODES.GIT_FAILURE,
+      detail: "baseCommit is empty — collector git merge-base failed or the manifest is hand-authored; changed-files drift check cannot be verified",
+    };
+  }
+  if (manifest.candidateCommit) {
+    const diff = git(["diff", "--numstat", `${manifest.baseCommit}..${manifest.candidateCommit}`], workspaceRoot);
+    if (!diff.ok) {
+      return {
+        ok: false,
+        reason: "git-failure",
+        reasonCode: REASON_CODES.GIT_FAILURE,
+        detail: `git diff --numstat ${manifest.baseCommit}..${manifest.candidateCommit} failed: ${diff.error}`,
+      };
+    }
+    const currentFiles = new Map<string, { additions: number; deletions: number }>();
+    for (const line of diff.stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split("\t");
+      if (parts.length >= 3) {
+        const a = parseInt(parts[0], 10);
+        const d = parseInt(parts[1], 10);
+        if (!isNaN(a) && !isNaN(d)) {
+          currentFiles.set(parts[2], { additions: a, deletions: d });
         }
       }
+    }
 
-      if (currentFiles.size !== manifest.changedFiles.length) {
+    if (currentFiles.size !== manifest.changedFiles.length) {
+      return {
+        ok: false,
+        reason: "changed-files-mismatch",
+        reasonCode: REASON_CODES.CHANGED_FILES_MISMATCH,
+        detail: `manifest has ${manifest.changedFiles.length} changed files, git shows ${currentFiles.size}`,
+      };
+    }
+
+    for (const mf of manifest.changedFiles) {
+      const cur = currentFiles.get(mf.path);
+      if (!cur) {
         return {
           ok: false,
           reason: "changed-files-mismatch",
           reasonCode: REASON_CODES.CHANGED_FILES_MISMATCH,
-          detail: `manifest has ${manifest.changedFiles.length} changed files, git shows ${currentFiles.size}`,
+          detail: `file "${mf.path}" is in manifest changedFiles but not in git diff`,
         };
       }
-
-      for (const mf of manifest.changedFiles) {
-        const cur = currentFiles.get(mf.path);
-        if (!cur) {
-          return {
-            ok: false,
-            reason: "changed-files-mismatch",
-            reasonCode: REASON_CODES.CHANGED_FILES_MISMATCH,
-            detail: `file "${mf.path}" is in manifest changedFiles but not in git diff`,
-          };
-        }
-        if (cur.additions !== mf.additions || cur.deletions !== mf.deletions) {
-          return {
-            ok: false,
-            reason: "changed-files-mismatch",
-            reasonCode: REASON_CODES.CHANGED_FILES_MISMATCH,
-            detail: `file "${mf.path}" add/del mismatch: manifest (+${mf.additions}/-${mf.deletions}), git (+${cur.additions}/-${cur.deletions})`,
-          };
-        }
+      if (cur.additions !== mf.additions || cur.deletions !== mf.deletions) {
+        return {
+          ok: false,
+          reason: "changed-files-mismatch",
+          reasonCode: REASON_CODES.CHANGED_FILES_MISMATCH,
+          detail: `file "${mf.path}" add/del mismatch: manifest (+${mf.additions}/-${mf.deletions}), git (+${cur.additions}/-${cur.deletions})`,
+        };
       }
     }
   }
