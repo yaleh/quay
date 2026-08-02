@@ -2,7 +2,7 @@
 id: gap-test-suite-has-no-layer-grouping
 title: "Test suite has no layer grouping — 44 methodology tests are invisible to
   CI and governance tests cannot be parked"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
