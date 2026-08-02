@@ -1,0 +1,54 @@
+{
+  "assertions": [
+    {
+      "id": "m192-001",
+      "description": "Build phase has events without agent outcome (null passthrough \u2014 mixed outcomes)",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: null outcome from crashed agent passed through pre-M208 gate",
+      "check": {
+        "predicate": "buildPhaseHasNoAgentOutcome",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "m192-002",
+      "description": "Audit entered after null Build result",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: workflow entered Audit without valid buildResult",
+      "check": {
+        "predicate": "auditAfterNullBuild",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "m192-003",
+      "description": "Gate entered despite null Build",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: workflow reached Gate without valid buildResult",
+      "check": {
+        "predicate": "hasStage",
+        "args": {
+          "stage": "gate"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "m192-004",
+      "description": "Land entered despite null Build (full passthrough)",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: complete null-passthrough to Land",
+      "check": {
+        "predicate": "landMergeOccurs",
+        "args": {}
+      },
+      "expected": true
+    }
+  ]
+}

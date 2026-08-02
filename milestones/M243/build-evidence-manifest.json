@@ -1,0 +1,4984 @@
+{
+  "schemaVersion": "1",
+  "runIdentity": {
+    "milestoneId": "M243",
+    "taskIds": [
+      "DIR-124-A2"
+    ],
+    "composite": false,
+    "attempt": 1,
+    "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+  },
+  "buildAdmissionRef": null,
+  "baseCommit": "0acba760c7b132edcecb1f246d81a8cbaa615fd5",
+  "candidateCommit": "e768c6c5",
+  "changedFiles": [
+    {
+      "path": ".agents/skills/quay-directive",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": ".agents/skills/quay-task-operator",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": ".claude/skills/quay-directive",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": ".claude/skills/quay-directive/SKILL.md",
+      "additions": 0,
+      "deletions": 41
+    },
+    {
+      "path": ".claude/skills/quay-task-to-plan/SKILL.md",
+      "additions": 11,
+      "deletions": 5
+    },
+    {
+      "path": ".claude/workflows/drain-directives.js",
+      "additions": 94,
+      "deletions": 23
+    },
+    {
+      "path": ".claude/workflows/execute-milestone.js",
+      "additions": 948,
+      "deletions": 63
+    },
+    {
+      "path": ".claude/workflows/prepare-milestone.js",
+      "additions": 1565,
+      "deletions": 0
+    },
+    {
+      "path": ".claude/workflows/run-routines.js",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": ".claude/workflows/select-preflight.js",
+      "additions": 4,
+      "deletions": 2
+    },
+    {
+      "path": ".codex/config.toml",
+      "additions": 20,
+      "deletions": 0
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "additions": 24,
+      "deletions": 0
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "additions": 21,
+      "deletions": 0
+    },
+    {
+      "path": ".gitignore",
+      "additions": 20,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/config.yml",
+      "additions": 52,
+      "deletions": 6
+    },
+    {
+      "path": ".quay/gates.yml",
+      "additions": 0,
+      "deletions": 125
+    },
+    {
+      "path": ".quay/loop.yml",
+      "additions": 0,
+      "deletions": 14
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-099-A.json",
+      "additions": 60,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-099-B.json",
+      "additions": 81,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-099-C.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-099.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-100-A.json",
+      "additions": 59,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-100-B.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-100-C.json",
+      "additions": 59,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-100.json",
+      "additions": 57,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-101.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-103-A.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-103-B.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-103-C-proposal-revised.body.md",
+      "additions": 141,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-103-C.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-103.json",
+      "additions": 43,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-104.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-105.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-112.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-119-D2.json",
+      "additions": 59,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-119-D3.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-119-D4.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-119-D5.json",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-122.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-123.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A.json",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A1.json",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A2.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A3.json",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A4.json",
+      "additions": 32,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-A5.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-B.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-C.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/DIR-124-F.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/gap-build-evidence-manifest-missing.json",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/gap-prepare-milestone-epoch-scope-change-grants-full-review.json",
+      "additions": 60,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/gap-prepare-milestone-no-size-aware-routing-A.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/gap-prepare-milestone-no-size-aware-routing-B.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/gap-prepare-milestone-no-size-aware-routing-C.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": ".quay/prepare-epochs/gap-prepare-milestone-no-size-aware-routing.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": "AGENTS.md",
+      "additions": 71,
+      "deletions": 0
+    },
+    {
+      "path": "CLAUDE.md",
+      "additions": 40,
+      "deletions": 2
+    },
+    {
+      "path": "README.md",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": "adr/ADR-019-test-taxonomy-is-structural-in-file-skip-one-canonical-runne.md",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "adr/ADR-020-runtime-contract-ground-truth-registry.md",
+      "additions": 61,
+      "deletions": 0
+    },
+    {
+      "path": "docs/milestone-workflow-performance-and-capability-regression-analysis.md",
+      "additions": 527,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M192-dir-120.md",
+      "additions": 424,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M195-dir-117-b.md",
+      "additions": 343,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M197-gap-prepare-milestone-resume.md",
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M198-dir-119-d1.md",
+      "additions": 405,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M200-dir-126-a.md",
+      "additions": 402,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M201-dir-126-b.md",
+      "additions": 467,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M202-dir-126-c.md",
+      "additions": 491,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M203-dir-126-d.md",
+      "additions": 661,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M204-dir-126-e.md",
+      "additions": 520,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md",
+      "additions": 415,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md",
+      "additions": 238,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M207-gap-dir126d-deferred-phase-timing-recurrence-tracking.md",
+      "additions": 185,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M208-gap-build-phase-null-result-not-gated.md",
+      "additions": 149,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M209-gap-touches-orthogonality-symlink-isdirect-mismatch.md",
+      "additions": 214,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M210-dir-119-d2.md",
+      "additions": 301,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M211-dir-119-d3.md",
+      "additions": 318,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M212-dir-119-d4.md",
+      "additions": 350,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M213-dir-119-d5.md",
+      "additions": 315,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M214-dir-123.md",
+      "additions": 443,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M215-dir-099.md",
+      "additions": 362,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M217-dir-100.md",
+      "additions": 319,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M218-dir-101.md",
+      "additions": 321,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M220-dir-104.md",
+      "additions": 645,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M221-dir-105.md",
+      "additions": 408,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M222-dir-112.md",
+      "additions": 219,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M223-dir-103-a.md",
+      "additions": 753,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M224-dir-103-b.md",
+      "additions": 85,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M225-dir-103-c.md",
+      "additions": 516,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M226-dir-100-a.md",
+      "additions": 394,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M227-dir-100-b.md",
+      "additions": 468,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M228-dir-100-c.md",
+      "additions": 457,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M229-dir-099-a.md",
+      "additions": 600,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M230-dir-099-b.md",
+      "additions": 95,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M231-dir-099-c.md",
+      "additions": 92,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M233-gap-prepare-milestone-epoch-scope-change-grants-full-review.md",
+      "additions": 272,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M236-dir-124-b.md",
+      "additions": 405,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M238-gap-build-evidence-manifest-missing.md",
+      "additions": 309,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M239-gap-prepare-milestone-no-size-aware-routing-a.md",
+      "additions": 369,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M240-gap-prepare-milestone-no-size-aware-routing-b.md",
+      "additions": 268,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M243-dir-124-a2.md",
+      "additions": 250,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M245-dir-124-a4.md",
+      "additions": 347,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/M246-dir-124-a5.md",
+      "additions": 465,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/adaptive-composite-milestone-select-and-execution.md",
+      "additions": 382,
+      "deletions": 0
+    },
+    {
+      "path": "docs/plans/immutable-runtime-generations-rollout.md",
+      "additions": 894,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/exp6-queue-driven-concurrent-executor.md",
+      "additions": 499,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-adaptive-task-packing-and-overlap-concurrency.md",
+      "additions": 905,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-execute-milestone-build-efficiency.md",
+      "additions": 383,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-harness-crystallization-roadmap.md",
+      "additions": 543,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-immutable-runtime-generations-and-atomic-activation.md",
+      "additions": 751,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-milestone-workflow-git-crystallization.md",
+      "additions": 568,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-milestone-workflow-stage-pipelining-and-leases.md",
+      "additions": 644,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-milestone-workflow-task-sizing-and-adaptive-execution.md",
+      "additions": 363,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-milestone-workflow-throughput-capacity-model.md",
+      "additions": 445,
+      "deletions": 0
+    },
+    {
+      "path": "docs/proposals/quay-prepare-execute-feedback-convergence.md",
+      "additions": 992,
+      "deletions": 0
+    },
+    {
+      "path": "docs/references/repo-ground-truth.md",
+      "additions": 79,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-continuous-bootstrap/audits/iteration-19-adjudicate.md",
+      "additions": 76,
+      "deletions": 11
+    },
+    {
+      "path": "experiments/quay-core-bootstrap/audits/iteration-3-adjudicate.md",
+      "additions": 21,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-0.md",
+      "additions": 19,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-16.md",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-32.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-4.md",
+      "additions": 19,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-5.md",
+      "additions": 9,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-6.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-7.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-8.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-native-bootstrap/iterations/iteration-9.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/.quay/loop.yml",
+      "additions": 14,
+      "deletions": 8
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/OUTER-LOOP.md",
+      "additions": 124,
+      "deletions": 12
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/backlog.md",
+      "additions": 100,
+      "deletions": 32
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M-DIR119-C-CANARY.md",
+      "additions": 124,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M177-dir115-domain-misfit-context.md",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M178-dir113-touches-preflight.md",
+      "additions": 83,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M179-dir070f-methodology-skills.md",
+      "additions": 55,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M181-select-preflight-human-steered-leak.md",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M185-dir116-concurrent-batch-value-type.md",
+      "additions": 55,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M186-dir120-config-crystallization-phase0-1.md",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M187-gap-halt-restart-readiness-fix.md",
+      "additions": 50,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M188-dir119a-select-candidate-synthesis.md",
+      "additions": 96,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M189-dir119b-composite-execution.md",
+      "additions": 100,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M191-dir117-dir122-composite.md",
+      "additions": 136,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M192-dir120-config-crystallization-phase2-3.md",
+      "additions": 90,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M193-dir125-bound-prepare-milestone-convergence.md",
+      "additions": 55,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M194-dir120b-drivable-workspace-check-fix.md",
+      "additions": 60,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M195-dir117b-prepared-gate-real-proof.md",
+      "additions": 83,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M196-dir119d-composite-wiring.md",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M197-gap-prepare-milestone-resume.md",
+      "additions": 65,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M198-dir119d1-manifest-synthesis.md",
+      "additions": 53,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M199-dir126-prepare-flow-efficiency.md",
+      "additions": 82,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M200-dir126a-single-flight-admission.md",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M201-dir126b-deterministic-preflight.md",
+      "additions": 69,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M202-dir126c-generation-aware-resume.md",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M203-dir126d-prepare-telemetry.md",
+      "additions": 67,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M204-dir126e-capacity-report.md",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M206-gap-split-decision-finality.md",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M207-gap-dir126d-deferred-enrichment.md",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M208-gap-build-phase-null-result-not-gated.md",
+      "additions": 40,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M209-gap-touches-orthogonality-symlink-isdirect-mismatch.md",
+      "additions": 41,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M210-dir119d2-build-phase-dag.md",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M211-dir119d3-audit-readonly-shards.md",
+      "additions": 49,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M212-dir119d4-reconcile-gate-attribution.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M213-dir119d5-land-e2e-audit.md",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M214-dir123-worktree-isolation.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M215-dir099-config-validate.md",
+      "additions": 49,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M216-dir122-gap-schema-closure.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M217-dir100.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M218-dir101.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M219-dir103.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M220-dir104.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M221-dir105.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M222-dir112.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M223-dir-103-a.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M224-dir-103-b.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M225-dir-103-c.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M226-dir-100-a.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M227-dir-100-b.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M228-dir-100-c.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M229-dir-099-a.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M230-dir-099-b.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M231-dir-099-c.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M232-dir-124-f.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M233-gap-prepare-milestone-epoch-scope-change-grants-full-review.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M234-gap-prepare-milestone-no-size-aware-routing.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M235-dir-124-a.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M236-dir-124-b.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M237-dir-124-c.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M238-gap-build-evidence-manifest-missing.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M239-gap-prepare-milestone-no-size-aware-routing-A.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M240-gap-prepare-milestone-no-size-aware-routing-B.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M241-gap-prepare-milestone-no-size-aware-routing-C.md",
+      "additions": 34,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M242-dir-124-a1.md",
+      "additions": 36,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M243-dir-124-a2.md",
+      "additions": 36,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M244-dir-124-a3.md",
+      "additions": 36,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M245-dir-124-a4.md",
+      "additions": 36,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M246-dir-124-a5.md",
+      "additions": 36,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M247-gap-preflight-merged-markdown-low-identifier.md",
+      "additions": 26,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M248-dir-124-a1a.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M249-dir-124-a1b.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M250-dir-124-a3a.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M251-dir-124-a3b.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/charters/M252-gap-prepare-milestone-no-worktree-isolation.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/dashboard.md",
+      "additions": 600,
+      "deletions": 10
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/dir120-replay-findings.json",
+      "additions": 55,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/fixture-charter.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/fixture-plan-malformed.md",
+      "additions": 12,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/fixture-plan.md",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/fixture-source.ts",
+      "additions": 3,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/fixture-task.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/preparation/wiring-uncovered-claim-task.md",
+      "additions": 35,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/scheduler/cap-growth-explicit.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/scheduler/exec-a.md",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/scheduler/exec-b.md",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/scheduler/exec-c-overlaps-a.md",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/scheduler/governance-integrity-clean.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/scheduler/learning-d.md",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/events.jsonl",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/expectations.json",
+      "additions": 65,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/audit-refuted/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/events.jsonl",
+      "additions": 11,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/expectations.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/cache-resume/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/events.jsonl",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/expectations.json",
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/composite-success/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/concurrent-partial-survivor/events.jsonl",
+      "additions": 11,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/concurrent-partial-survivor/expectations.json",
+      "additions": 91,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/concurrent-partial-survivor/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/events.jsonl",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/expectations.json",
+      "additions": 52,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/gate-failure/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success-tampered/events.jsonl",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success-tampered/expectations.json",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success-tampered/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success/events.jsonl",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success/expectations.json",
+      "additions": 195,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/legacy-singleton-success/meta.json",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-defect-as-normative/events.jsonl",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-defect-as-normative/expectations.json",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-defect-as-normative/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/README.md",
+      "additions": 17,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/events.jsonl",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/expectations.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m192-null-build/meta.json",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/README.md",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/events.jsonl",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/expectations.json",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/m195-stale-prepared/meta.json",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/prepared-failure/events.jsonl",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/prepared-failure/expectations.json",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/prepared-failure/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/verify-failure/events.jsonl",
+      "additions": 3,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/verify-failure/expectations.json",
+      "additions": 96,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/workflow-replay/verify-failure/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/fixtures/worktree/golden-legacy-prompts.json",
+      "additions": 100,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/inherited-core.md",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/build-evidence-collector.ts",
+      "additions": 383,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/build-evidence-gate.ts",
+      "additions": 332,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/build-evidence-manifest.ts",
+      "additions": 454,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/candidate-contracts.ts",
+      "additions": 277,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/candidate-synthesis-fixtures.ts",
+      "additions": 132,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/candidate-synthesis.ts",
+      "additions": 465,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-args.ts",
+      "additions": 228,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-audit.ts",
+      "additions": 352,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-build.ts",
+      "additions": 299,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-contracts.ts",
+      "additions": 393,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-land.ts",
+      "additions": 143,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-manifest-synthesis.ts",
+      "additions": 545,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-preflight.ts",
+      "additions": 167,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/composite-reconcile.ts",
+      "additions": 363,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/config-wiring-check.ts",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/config-wiring-selfcheck.sh",
+      "additions": 32,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/coupling-graph.ts",
+      "additions": 282,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/derive-touches-heuristic-selfcheck.sh",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/derive-touches-heuristic.test.ts",
+      "additions": 288,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/derive-touches-heuristic.ts",
+      "additions": 188,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/drain-dispose-corruption-check.ts",
+      "additions": 124,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/drivable-workspace-check.sh",
+      "additions": 1,
+      "deletions": 23
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/drivable-workspace-check.ts",
+      "additions": 1,
+      "deletions": 234
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/gate-script-base.ts",
+      "additions": 6,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/human-steered-classify.ts",
+      "additions": 9,
+      "deletions": 4
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts",
+      "additions": 1183,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/milestone-worktree.ts",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/portfolio-choice.ts",
+      "additions": 403,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/preparation-feedback.ts",
+      "additions": 165,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts",
+      "additions": 931,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts",
+      "additions": 2521,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh",
+      "additions": 9,
+      "deletions": 2
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/select-preflight.ts",
+      "additions": 533,
+      "deletions": 8
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs",
+      "additions": 107,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/task-schema.ts",
+      "additions": 88,
+      "deletions": 8
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh",
+      "additions": 26,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts",
+      "additions": 294,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/scripts/workflow-replay.ts",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/build-evidence-manifest.test.mjs",
+      "additions": 675,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/candidate-contracts.test.mjs",
+      "additions": 94,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/candidate-synthesis.test.mjs",
+      "additions": 291,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-args.test.mjs",
+      "additions": 93,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-audit.test.mjs",
+      "additions": 288,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-build.test.mjs",
+      "additions": 206,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-contracts.test.mjs",
+      "additions": 148,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-land.test.mjs",
+      "additions": 56,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-manifest-synthesis.test.mjs",
+      "additions": 351,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-preflight.test.mjs",
+      "additions": 78,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/composite-reconcile.test.mjs",
+      "additions": 310,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs",
+      "additions": 168,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/config-wiring-check.test.mjs",
+      "additions": 85,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/coupling-graph.test.mjs",
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/drain-dispose-corruption-check.test.mjs",
+      "additions": 159,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs",
+      "additions": 27,
+      "deletions": 12
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/clean-content-pair/charter.md",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/clean-content-pair/task.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/invalid-plan-command/ambiguous.md",
+      "additions": 8,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/invalid-plan-command/bad.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/invalid-plan-command/good.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/ambiguous.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/ascii-dash-prose.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/bad.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/code-span-subtraction.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/frontloaded-identifiers-crammed-claims.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/good.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/round2-stopword-opening-second-claim.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/trailing-identifier-ascii-dash-aside.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/missing-precedent/ambiguous.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/missing-precedent/bad.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/missing-precedent/good.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/stale-ac-refs/ambiguous.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/stale-ac-refs/bad.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/stale-ac-refs/good.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/touches-mismatch/charter-bad.md",
+      "additions": 9,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/touches-mismatch/charter-good.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/touches-mismatch/plan-ambiguous.md",
+      "additions": 8,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/touches-mismatch/plan-bad.md",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/touches-mismatch/plan-good.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/fixtures/preflight/touches-mismatch/task.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/gate-script-base.test.mjs",
+      "additions": 10,
+      "deletions": 4
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/human-steered-classify.test.mjs",
+      "additions": 12,
+      "deletions": 4
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs",
+      "additions": 1343,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/milestone-worktree.test.mjs",
+      "additions": 318,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/portfolio-choice.test.mjs",
+      "additions": 159,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/preparation-feedback.test.mjs",
+      "additions": 64,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs",
+      "additions": 1076,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+      "additions": 2991,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/select-preflight.test.mjs",
+      "additions": 175,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/sweep-fixture-orphans.test.mjs",
+      "additions": 136,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs",
+      "additions": 98,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/task-schema.test.mjs",
+      "additions": 68,
+      "deletions": 1
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs",
+      "additions": 300,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-perpetual-stream/test/workflow-replay.test.mjs",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "experiments/quay-webui-bootstrap/iterations/iteration-2.md",
+      "additions": 22,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M-DIR119-C-CANARY/audits/iteration-0-acceptance-audit.md",
+      "additions": 242,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M-DIR119-C-CANARY/iterations/iteration-0.md",
+      "additions": 311,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M150/iterations/iteration-0.md",
+      "additions": 8,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M154/iterations/iteration-0.md",
+      "additions": 14,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M157/iterations/iteration-0.md",
+      "additions": 18,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M175/audits/iteration-0-acceptance-audit.md",
+      "additions": 107,
+      "deletions": 136
+    },
+    {
+      "path": "milestones/M175/iterations/iteration-1.md",
+      "additions": 188,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M176/audits/iteration-0-acceptance-audit.md",
+      "additions": 76,
+      "deletions": 83
+    },
+    {
+      "path": "milestones/M176/iterations/iteration-1.md",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M177/audits/iteration-0-acceptance-audit.md",
+      "additions": 277,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M177/iterations/iteration-0.md",
+      "additions": 176,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M177/iterations/iteration-1.md",
+      "additions": 173,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M178/audits/iteration-0-acceptance-audit.md",
+      "additions": 209,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M178/iterations/iteration-0.md",
+      "additions": 294,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M179/audits/iteration-0-acceptance-audit.md",
+      "additions": 273,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M179/iterations/iteration-0.md",
+      "additions": 100,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M179/iterations/iteration-1.md",
+      "additions": 64,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M180/audits/iteration-0-acceptance-audit.md",
+      "additions": 198,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M180/iterations/iteration-0.md",
+      "additions": 94,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M180/iterations/iteration-1.md",
+      "additions": 135,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M181/audits/iteration-0-acceptance-audit.md",
+      "additions": 194,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M181/iterations/iteration-0.md",
+      "additions": 105,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M185/audits/iteration-0-acceptance-audit.md",
+      "additions": 149,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M185/iterations/iteration-0.md",
+      "additions": 149,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M186/audits/iteration-0-acceptance-audit.md",
+      "additions": 178,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M186/iterations/iteration-0.md",
+      "additions": 230,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M187/audits/iteration-0-acceptance-audit.md",
+      "additions": 189,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M187/iterations/iteration-0.md",
+      "additions": 184,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M188/audits/iteration-0-acceptance-audit.md",
+      "additions": 127,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M188/iterations/iteration-0.md",
+      "additions": 241,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M188/iterations/iteration-1.md",
+      "additions": 163,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M189/audits/iteration-0-acceptance-audit.md",
+      "additions": 237,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M189/iterations/iteration-0.md",
+      "additions": 169,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M191/audits/iteration-0-acceptance-audit.md",
+      "additions": 183,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M191/iterations/iteration-0.md",
+      "additions": 129,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M192/absorb-entry.md",
+      "additions": 17,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M192/audits/iteration-0-acceptance-audit.md",
+      "additions": 176,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M192/preparation.json",
+      "additions": 100,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M192/proposal-ledger.json",
+      "additions": 58,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M193/audits/iteration-0-acceptance-audit.md",
+      "additions": 109,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M193/iterations/iteration-0.md",
+      "additions": 186,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M194/absorb-entry.md",
+      "additions": 69,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M194/audits/iteration-0-acceptance-audit.md",
+      "additions": 190,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M194/iterations/iteration-0.md",
+      "additions": 257,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/absorb-entry.md",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/audits/independent-wiring-audit.md",
+      "additions": 340,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/audits/iteration-0-acceptance-audit.md",
+      "additions": 137,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/iterations/iteration-0.md",
+      "additions": 107,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/negative-control-evidence.md",
+      "additions": 64,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/negative-control/post-flip-omitted-receipt-journal.jsonl",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/negative-control/preparation-tampered.json",
+      "additions": 95,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/preparation.json",
+      "additions": 95,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M195/proposal-ledger.json",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M197/absorb-entry.md",
+      "additions": 83,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M197/audits/iteration-0-acceptance-audit.md",
+      "additions": 114,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M197/iterations/iteration-0.md",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M197/preparation.json",
+      "additions": 58,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M197/resume-flag-real-journal-proof.md",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/absorb-entry.md",
+      "additions": 101,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/audits/iteration-0-acceptance-audit.md",
+      "additions": 155,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/composite-preflight-check-output-real-portfolio.txt",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/composite-preflight-check-output.txt",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/execute-milestone-zero-diff-proof.txt",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/proof-manifest-DIR-100+DIR-101.json",
+      "additions": 89,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/real-portfolio-manifest-DIR-099+DIR-103+DIR-104.json",
+      "additions": 131,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/scratch-proof-charter-real-portfolio.md",
+      "additions": 11,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/scratch-proof-charter.md",
+      "additions": 9,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/select-preflight-js-real-dispatch.json",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/select-preflight-real-run.json",
+      "additions": 23,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/evidence/select-preflight-real-run.stderr.txt",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/iterations/iteration-0.md",
+      "additions": 203,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/preparation.json",
+      "additions": 97,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M198/proposal-ledger.json",
+      "additions": 170,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/absorb-entry.md",
+      "additions": 185,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/audits/iteration-0-acceptance-audit.md",
+      "additions": 115,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/evidence/real-two-concurrent-dispatch-LOSER-journal.jsonl",
+      "additions": 2,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/evidence/real-two-concurrent-dispatch-WINNER-journal-excerpt.jsonl",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/evidence/real-two-concurrent-workflow-dispatch-proof.md",
+      "additions": 56,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/iterations/iteration-0.md",
+      "additions": 167,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/preparation.json",
+      "additions": 93,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/proposal-ledger.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M200/stage9-two-process-race-evidence.md",
+      "additions": 85,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M201/absorb-entry.md",
+      "additions": 173,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M201/audits/iteration-0-acceptance-audit.md",
+      "additions": 251,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M201/iterations/iteration-0.md",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M201/preparation.json",
+      "additions": 79,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M202/absorb-entry.md",
+      "additions": 39,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M202/audits/iteration-0-acceptance-audit.md",
+      "additions": 368,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M202/iterations/iteration-0.md",
+      "additions": 114,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M202/preparation.json",
+      "additions": 76,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M203/absorb-entry.md",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M203/audits/iteration-0-acceptance-audit.md",
+      "additions": 387,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M203/iterations/iteration-0.md",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M203/preparation.json",
+      "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M203/telemetry-real-journal-proof.md",
+      "additions": 378,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M204/absorb-entry.md",
+      "additions": 135,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M204/audits/iteration-0-acceptance-audit.md",
+      "additions": 81,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M204/iterations/iteration-0.md",
+      "additions": 138,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M204/preparation.json",
+      "additions": 76,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M204/proposal-ledger.json",
+      "additions": 72,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M205/absorb-entry.md",
+      "additions": 81,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M205/audits/iteration-0-acceptance-audit.md",
+      "additions": 198,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M205/iterations/iteration-0.md",
+      "additions": 111,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M205/preparation.json",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M205/proposal-ledger.json",
+      "additions": 72,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M206/absorb-entry.md",
+      "additions": 48,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M206/audits/iteration-0-acceptance-audit.md",
+      "additions": 129,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M206/iterations/iteration-0.md",
+      "additions": 81,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M206/preparation.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M206/proposal-ledger.json",
+      "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M207/absorb-entry.md",
+      "additions": 95,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M207/audits/iteration-0-acceptance-audit.md",
+      "additions": 201,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M207/iterations/iteration-0.md",
+      "additions": 145,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M207/preparation.json",
+      "additions": 67,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M208/mechanism-inventory.json",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M208/preparation.json",
+      "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M208/proposal-ledger.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M209/preparation.json",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M210/absorb-entry.md",
+      "additions": 72,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M210/audits/iteration-0-acceptance-audit.md",
+      "additions": 107,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M210/iterations/iteration-0.md",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M210/mechanism-inventory.json",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M210/preparation.json",
+      "additions": 101,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M210/proposal-ledger.json",
+      "additions": 130,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M211/absorb-entry.md",
+      "additions": 47,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M211/audits/iteration-0-acceptance-audit.md",
+      "additions": 102,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M211/iterations/iteration-0.md",
+      "additions": 225,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M211/mechanism-inventory.json",
+      "additions": 39,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M211/preparation.json",
+      "additions": 89,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M211/proposal-ledger.json",
+      "additions": 50,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M212/absorb-entry.md",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M212/iterations/iteration-0.md",
+      "additions": 162,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M212/mechanism-inventory.json",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M212/preparation.json",
+      "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M212/proposal-ledger.json",
+      "additions": 114,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M213/mechanism-inventory.json",
+      "additions": 40,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M213/preparation.json",
+      "additions": 102,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M213/proposal-ledger.json",
+      "additions": 114,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M214/mechanism-inventory.json",
+      "additions": 57,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M214/preparation.json",
+      "additions": 112,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M214/proposal-ledger.json",
+      "additions": 178,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M218/mechanism-inventory.json",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M218/preparation.json",
+      "additions": 93,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M218/proposal-ledger.json",
+      "additions": 98,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M221/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M221/preparation.json",
+      "additions": 65,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M221/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M222/absorb-entry.md",
+      "additions": 36,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M222/build-evidence-manifest.json",
+      "additions": 4298,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M222/iterations/iteration-0.md",
+      "additions": 33,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M222/mechanism-inventory.json",
+      "additions": 37,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M222/preparation.json",
+      "additions": 82,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M222/proposal-ledger.json",
+      "additions": 610,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M223/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M223/preparation.json",
+      "additions": 59,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M223/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M224/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M224/preparation.json",
+      "additions": 58,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M224/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M225/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M225/preparation.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M225/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M226/mechanism-inventory.json",
+      "additions": 19,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M226/preparation.json",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M226/proposal-ledger.json",
+      "additions": 82,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M227/mechanism-inventory.json",
+      "additions": 19,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M227/preparation.json",
+      "additions": 83,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M227/proposal-ledger.json",
+      "additions": 66,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M228/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M228/preparation.json",
+      "additions": 56,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M228/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M230/absorb-entry.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M230/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M230/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M230/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M231/absorb-entry.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M231/mechanism-inventory.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M231/preparation.json",
+      "additions": 56,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M231/proposal-ledger.json",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M239/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/absorb-entry.md",
+      "additions": 25,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/audits/iteration-0-acceptance-audit.md",
+      "additions": 139,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/build-evidence-manifest.json",
+      "additions": 4849,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/iterations/iteration-0.md",
+      "additions": 56,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M243/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M246/absorb-entry.md",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M246/audits/iteration-0-acceptance-audit.md",
+      "additions": 231,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M246/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M247/preparation.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M248/absorb-entry.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M248/preparation.json",
+      "additions": 53,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M250/absorb-entry.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M250/preparation.json",
+      "additions": 53,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M251/preparation.json",
+      "additions": 52,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M252/absorb-entry.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/M252/preparation.json",
+      "additions": 53,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-112.json",
+      "additions": 19,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-119-D5.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-124-A.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-124-A1.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/DIR-124-A3.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/gap-build-evidence-manifest-missing.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/gap-build-phase-null-result-not-gated.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/gap-prepare-milestone-epoch-scope-change-grants-full-review.json",
+      "additions": 13,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-decisions/gap-touches-orthogonality-symlink-isdirect-mismatch.json",
+      "additions": 38,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-A/0894843997b8.json",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-A/6316cef9c201.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-A/9e0a7ececd78.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-A/b83afd1a8f13.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-A/bc41f8e45b20.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-B/022cbe1b690c.json",
+      "additions": 92,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-B/195dde778eef.json",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-B/45a825c4822c.json",
+      "additions": 92,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-B/6fc3e4097fac.json",
+      "additions": 98,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-B/ace940b9da94.json",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-B/da2dabe9d417.json",
+      "additions": 92,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-C/09e9d2618603.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-C/178bd212fbfd.json",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-C/9c0d06e41080.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-C/d773159ab00a.json",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099-C/d7aed06dea72.json",
+      "additions": 104,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099/3b08da5e5158.json",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099/830c07bdcce8.json",
+      "additions": 164,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099/cc3191743bd2.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-099/d8424846e2f1.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-A/9140951127d1.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-A/9f6772f6d6a9.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-A/efe0a9e88e54.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-B/4c4b0de7da2b.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-B/7deb540a288b.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-C/4bfecfffdc05.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-C/a82a5a3b923d.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100-C/ff40a20788a7.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100/0bfaaad3763e.json",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-100/1c171eebe3ab.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-101/33a38589904e.json",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-A/22df33280312.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-A/90fae024885e.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-A/98e18603b772.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-B/5a17243eed69.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-B/641bb23695c5.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-B/66d4c8a05eb1.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-B/73101b164460.json",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-B/db46ea147989.json",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-C/991b5936f363.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-C/be50c5dcbf8c.json",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-C/cdcf87da26f5.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103-C/f9cc8bd1ed08.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-103/80706b73a0a4.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-104/4894972d7cd2.json",
+      "additions": 158,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-104/cc93f06128d6.json",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-105/0e4dce7b557a.json",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-105/643492360591.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-105/9f615dc8a252.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-105/cffde365fdb1.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/2ee053a1a58f.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/3366a535b8c5.json",
+      "additions": 332,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/58e674f49232.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/7ea2bcde3bca.json",
+      "additions": 152,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/c4bbb9530d40.json",
+      "additions": 152,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/f8f76f9a6493.json",
+      "additions": 284,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-112/fd0ce0b28a7c.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D2/11a68135db2e.json",
+      "additions": 182,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D2/77fe967c0763.json",
+      "additions": 158,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D2/f643d49cb29c.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D3/102512f5fe1e.json",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D3/79dfb6874cc2.json",
+      "additions": 104,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D3/8cbfc240456f.json",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D4/1dc5eb043d4d.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D4/d03c028b6737.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D5/1af275550cef.json",
+      "additions": 182,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D5/83bb97d54024.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D5/ac338764f090.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-119-D5/e70d643eb569.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-122/32785086b7c2.json",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-123/aa7c0138f581.json",
+      "additions": 176,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A/3422f62a1c9e.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A/5f2c1b9c4fc7.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A/8d9d80c51970.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A/d9fc66dca38f.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A1/141b6518f6db.json",
+      "additions": 188,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/5e4172a049f5.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/97b3fadd6598.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/e4b7181defc8.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A2/fab7a506f562.json",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A3/f44440505b72.json",
+      "additions": 104,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A4/68e0de32f554.json",
+      "additions": 206,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A4/8a27b18c7307.json",
+      "additions": 206,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/24b4a4764f0a.json",
+      "additions": 158,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/40d1034fe8e6.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/4d39a3e48dd7.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-A5/5ae4af17ba28.json",
+      "additions": 62,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-B/6312858f6805.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-C/a749b613917e.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-124-F/92417964669f.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/18d336692269.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/2a107fcb5cc9.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/2b801a8792aa.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/454f7ead5eb4.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/46fa645e89b9.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/64ed98bf7306.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/DIR-126-E/7bf870b7fe95.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-evidence-manifest-missing/38a153da757b.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-evidence-manifest-missing/a351e3d827dd.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-evidence-manifest-missing/f9700f39fbfa.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-phase-null-result-not-gated/1869c7284160.json",
+      "additions": 152,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-phase-null-result-not-gated/3851755d926a.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-phase-null-result-not-gated/9e2e83898e32.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-phase-null-result-not-gated/ab52f856a572.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-build-phase-null-result-not-gated/b2a20c1af29c.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-dir126d-deferred-phase-timing-recurrence-tracking/86de375b56db.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-dir126d-deferred-phase-timing-recurrence-tracking/ca5bb88535f7.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-dir126d-deferred-phase-timing-recurrence-tracking/dd06ce1ed5b8.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-dir126d-deferred-phase-timing-recurrence-tracking/e58d5b1ac2d2.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-dir126d-deferred-phase-timing-recurrence-tracking/ffc333d19352.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-epoch-scope-change-grants-full-review/06eba9515a05.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-epoch-scope-change-grants-full-review/a0cce75fda08.json",
+      "additions": 146,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-epoch-scope-change-grants-full-review/bdf6835570aa.json",
+      "additions": 152,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-epoch-scope-change-grants-full-review/edeeff0e6e80.json",
+      "additions": 74,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-no-size-aware-routing-A/a3269f1b6b17.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-no-size-aware-routing-B/0b540abf29b8.json",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-no-size-aware-routing-C/552829955cc1.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-no-size-aware-routing/0dafbd75577f.json",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/0eba810e4ccb.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/30b57d372e50.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/31161d095578.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/9e892ae0acee.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/c2ae58fd6875.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/ef57a199607a.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-touches-orthogonality-symlink-isdirect-mismatch/163b4dcdb70d.json",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-touches-orthogonality-symlink-isdirect-mismatch/39398d203074.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-touches-orthogonality-symlink-isdirect-mismatch/928b5d6440f3.json",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-touches-orthogonality-symlink-isdirect-mismatch/e6e676ccc347.json",
+      "additions": 116,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-touches-orthogonality-symlink-isdirect-mismatch/f95c311b24a1.json",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/06ae2770b33b.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/0757190aed41.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/280d286beda8.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/29fefa2d9d6e.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/2fe141fdc3da.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/54922b2aeb26.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/bca971f8c0b8.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/cae260518768.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/f13f08a032f3.json",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay-native/examples/sample-workspace/.quay/config.yml",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/bin/quay.ts",
+      "additions": 284,
+      "deletions": 49
+    },
+    {
+      "path": "packages/quay/src/config-validate.ts",
+      "additions": 863,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/src/gate/acceptance-runner.ts",
+      "additions": 84,
+      "deletions": 2
+    },
+    {
+      "path": "packages/quay/src/gate/config/loader.ts",
+      "additions": 361,
+      "deletions": 98
+    },
+    {
+      "path": "packages/quay/src/gate/config/types.ts",
+      "additions": 23,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/src/gate/config/utils.ts",
+      "additions": 5,
+      "deletions": 1
+    },
+    {
+      "path": "packages/quay/src/gate/registry.ts",
+      "additions": 47,
+      "deletions": 96
+    },
+    {
+      "path": "packages/quay/src/loop-params.ts",
+      "additions": 41,
+      "deletions": 13
+    },
+    {
+      "path": "packages/quay/src/mcp-handlers.ts",
+      "additions": 78,
+      "deletions": 1
+    },
+    {
+      "path": "packages/quay/test/acceptance-env.test.mjs",
+      "additions": 247,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/acceptance.test.mjs",
+      "additions": 311,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/adr-gate.test.mjs",
+      "additions": 11,
+      "deletions": 5
+    },
+    {
+      "path": "packages/quay/test/build-dist-smoke.test.mjs",
+      "additions": 7,
+      "deletions": 1
+    },
+    {
+      "path": "packages/quay/test/cli.test.mjs",
+      "additions": 791,
+      "deletions": 741
+    },
+    {
+      "path": "packages/quay/test/config-validate.test.mjs",
+      "additions": 1406,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/delivery-standalone-smoke-gate.test.mjs",
+      "additions": 26,
+      "deletions": 17
+    },
+    {
+      "path": "packages/quay/test/dir022-remaining-gates.test.mjs",
+      "additions": 21,
+      "deletions": 17
+    },
+    {
+      "path": "packages/quay/test/dir032-audit-independence.test.mjs",
+      "additions": 17,
+      "deletions": 14
+    },
+    {
+      "path": "packages/quay/test/gate-config-loader.test.mjs",
+      "additions": 127,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/gate-diagnostics.test.mjs",
+      "additions": 508,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/gate-list-verbose.test.mjs",
+      "additions": 339,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/it0-gates.test.mjs",
+      "additions": 16,
+      "deletions": 13
+    },
+    {
+      "path": "packages/quay/test/loop-params.test.mjs",
+      "additions": 76,
+      "deletions": 3
+    },
+    {
+      "path": "packages/quay/test/mcp-config-validate.test.mjs",
+      "additions": 327,
+      "deletions": 0
+    },
+    {
+      "path": "packages/quay/test/ts-typecheck-gate.test.mjs",
+      "additions": 21,
+      "deletions": 12
+    },
+    {
+      "path": "plugin/.claude-plugin/plugin.json",
+      "additions": 4,
+      "deletions": 2
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/audit-refuted/events.jsonl",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/audit-refuted/expectations.json",
+      "additions": 65,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/audit-refuted/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/cache-resume/events.jsonl",
+      "additions": 11,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/cache-resume/expectations.json",
+      "additions": 73,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/cache-resume/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/composite-success/events.jsonl",
+      "additions": 10,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/composite-success/expectations.json",
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/composite-success/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/concurrent-partial-survivor/events.jsonl",
+      "additions": 11,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/concurrent-partial-survivor/expectations.json",
+      "additions": 91,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/concurrent-partial-survivor/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/gate-failure/events.jsonl",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/gate-failure/expectations.json",
+      "additions": 52,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/gate-failure/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success-tampered/events.jsonl",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success-tampered/expectations.json",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success-tampered/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success/events.jsonl",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success/expectations.json",
+      "additions": 195,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/legacy-singleton-success/meta.json",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-defect-as-normative/events.jsonl",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-defect-as-normative/expectations.json",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-defect-as-normative/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-null-build/README.md",
+      "additions": 17,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-null-build/events.jsonl",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-null-build/expectations.json",
+      "additions": 54,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m192-null-build/meta.json",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/README.md",
+      "additions": 16,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/events.jsonl",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/expectations.json",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/m195-stale-prepared/meta.json",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/prepared-failure/events.jsonl",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/prepared-failure/expectations.json",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/prepared-failure/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/verify-failure/events.jsonl",
+      "additions": 3,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/verify-failure/expectations.json",
+      "additions": 96,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/fixtures/workflow-replay/verify-failure/meta.json",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/gate-scripts/drain-dispose-corruption-check.ts",
+      "additions": 124,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/anti-drift-touches-check.ts",
+      "additions": 2,
+      "deletions": 3
+    },
+    {
+      "path": "plugin/scripts/build-evidence-collector.ts",
+      "additions": 383,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/build-evidence-gate.ts",
+      "additions": 332,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/build-evidence-manifest.ts",
+      "additions": 454,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/candidate-contracts.ts",
+      "additions": 277,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/candidate-synthesis.ts",
+      "additions": 465,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/codex-stage1-live-proof-check.ts",
+      "additions": 132,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/codex-stage1-selfcheck.sh",
+      "additions": 108,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-args.ts",
+      "additions": 228,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-audit.ts",
+      "additions": 352,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-build.ts",
+      "additions": 299,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-contracts.ts",
+      "additions": 393,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-land.ts",
+      "additions": 143,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-manifest-synthesis.ts",
+      "additions": 545,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-preflight.ts",
+      "additions": 167,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/composite-reconcile.ts",
+      "additions": 363,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/concurrent-batch-scheduler.ts",
+      "additions": 141,
+      "deletions": 4
+    },
+    {
+      "path": "plugin/scripts/config-wiring-check.ts",
+      "additions": 572,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/coupling-graph.ts",
+      "additions": 282,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/drivable-workspace-check.sh",
+      "additions": 6,
+      "deletions": 2
+    },
+    {
+      "path": "plugin/scripts/drivable-workspace-check.ts",
+      "additions": 50,
+      "deletions": 14
+    },
+    {
+      "path": "plugin/scripts/gate-script-base.ts",
+      "additions": 132,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/milestone-preparation-check.ts",
+      "additions": 1183,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/milestone-worktree.ts",
+      "additions": 384,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/portfolio-choice.ts",
+      "additions": 403,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/preparation-feedback.ts",
+      "additions": 165,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/prepare-admission-check.ts",
+      "additions": 931,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/proposal-convergence.ts",
+      "additions": 2521,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/routine-file-gate.ts",
+      "additions": 2,
+      "deletions": 3
+    },
+    {
+      "path": "plugin/scripts/routine-scheduler.ts",
+      "additions": 2,
+      "deletions": 4
+    },
+    {
+      "path": "plugin/scripts/serial-fanin-absorb.ts",
+      "additions": 2,
+      "deletions": 3
+    },
+    {
+      "path": "plugin/scripts/sync-vendor.sh",
+      "additions": 99,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/task-schema.ts",
+      "additions": 88,
+      "deletions": 8
+    },
+    {
+      "path": "plugin/scripts/touches-orthogonality-check.ts",
+      "additions": 2,
+      "deletions": 3
+    },
+    {
+      "path": "plugin/scripts/tree-hygiene-check.sh",
+      "additions": 26,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/wiring-coverage-check.ts",
+      "additions": 294,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/workflow-event-schema.mjs",
+      "additions": 110,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/scripts/workflow-replay.ts",
+      "additions": 361,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/loop-driver/SKILL.md",
+      "additions": 5,
+      "deletions": 5
+    },
+    {
+      "path": "plugin/skills/quay-directive/SKILL.md",
+      "additions": 13,
+      "deletions": 10
+    },
+    {
+      "path": "plugin/skills/quay-native-methodology/SKILL.md",
+      "additions": 68,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-native-methodology/reference/directive-lifecycle.md",
+      "additions": 75,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-native-methodology/reference/g3-audit-discipline.md",
+      "additions": 82,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-native-methodology/reference/gate-mechanics.md",
+      "additions": 76,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-native-methodology/reference/patterns.md",
+      "additions": 143,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-task-operator/SKILL.md",
+      "additions": 100,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-task-to-plan/SKILL.md",
+      "additions": 11,
+      "deletions": 5
+    },
+    {
+      "path": "plugin/skills/quay-webui-bootstrap-methodology/SKILL.md",
+      "additions": 59,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-webui-bootstrap-methodology/reference/effectiveness-timing-corpus.md",
+      "additions": 160,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/quay-webui-bootstrap-methodology/reference/visual-review-mechanism.md",
+      "additions": 192,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/skills/routines/SKILL.md",
+      "additions": 3,
+      "deletions": 4
+    },
+    {
+      "path": "plugin/sync.sh",
+      "additions": 2,
+      "deletions": 1
+    },
+    {
+      "path": "plugin/test/build-evidence-manifest.test.mjs",
+      "additions": 675,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/codex-stage1-adapter.test.mjs",
+      "additions": 557,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/composite-audit.test.mjs",
+      "additions": 288,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/composite-build.test.mjs",
+      "additions": 206,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/composite-manifest-synthesis.test.mjs",
+      "additions": 351,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/composite-reconcile.test.mjs",
+      "additions": 310,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/execute-milestone-build-phase-gate.test.mjs",
+      "additions": 201,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/execute-milestone-disposition-conformance.test.mjs",
+      "additions": 223,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/execute-milestone-preparation-gate.test.mjs",
+      "additions": 293,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/execute-milestone-worktree.test.mjs",
+      "additions": 519,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/clean-content-pair/charter.md",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/clean-content-pair/task.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/invalid-plan-command/ambiguous.md",
+      "additions": 8,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/invalid-plan-command/bad.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/invalid-plan-command/good.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/ambiguous.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/ascii-dash-prose.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/bad.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/code-span-subtraction.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/frontloaded-identifiers-crammed-claims.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/good.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/round2-stopword-opening-second-claim.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/merged-markdown-claims/trailing-identifier-ascii-dash-aside.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/missing-precedent/ambiguous.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/missing-precedent/bad.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/missing-precedent/good.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/stale-ac-refs/ambiguous.md",
+      "additions": 29,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/stale-ac-refs/bad.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/stale-ac-refs/good.md",
+      "additions": 27,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/touches-mismatch/charter-bad.md",
+      "additions": 9,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/touches-mismatch/charter-good.md",
+      "additions": 5,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/touches-mismatch/plan-ambiguous.md",
+      "additions": 8,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/touches-mismatch/plan-bad.md",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/touches-mismatch/plan-good.md",
+      "additions": 6,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/fixtures/preflight/touches-mismatch/task.md",
+      "additions": 28,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/plugin-packaging.test.mjs",
+      "additions": 115,
+      "deletions": 6
+    },
+    {
+      "path": "plugin/test/prepare-admission-check.test.mjs",
+      "additions": 1076,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/prepare-milestone-convergence.test.mjs",
+      "additions": 2281,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/prepare-milestone-preparation-e2e.test.mjs",
+      "additions": 407,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/test/probe-spec-wiring.test.mjs",
+      "additions": 14,
+      "deletions": 3
+    },
+    {
+      "path": "plugin/test/workflow-replay.test.mjs",
+      "additions": 226,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/workflows/drain-directives.js",
+      "additions": 94,
+      "deletions": 23
+    },
+    {
+      "path": "plugin/workflows/execute-milestone.js",
+      "additions": 948,
+      "deletions": 63
+    },
+    {
+      "path": "plugin/workflows/prepare-milestone.js",
+      "additions": 1565,
+      "deletions": 0
+    },
+    {
+      "path": "plugin/workflows/run-routines.js",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/agents-claude-drift-check.ts",
+      "additions": 209,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/test-coverage-check.ts",
+      "additions": 282,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/test.sh",
+      "additions": 17,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-055.md",
+      "additions": 37,
+      "deletions": 9
+    },
+    {
+      "path": "tasks/DIR-057.md",
+      "additions": 22,
+      "deletions": 2
+    },
+    {
+      "path": "tasks/DIR-070-F.md",
+      "additions": 49,
+      "deletions": 10
+    },
+    {
+      "path": "tasks/DIR-070.md",
+      "additions": 49,
+      "deletions": 21
+    },
+    {
+      "path": "tasks/DIR-071.md",
+      "additions": 22,
+      "deletions": 9
+    },
+    {
+      "path": "tasks/DIR-073.md",
+      "additions": 16,
+      "deletions": 3
+    },
+    {
+      "path": "tasks/DIR-074.md",
+      "additions": 49,
+      "deletions": 1
+    },
+    {
+      "path": "tasks/DIR-078.md",
+      "additions": 45,
+      "deletions": 2
+    },
+    {
+      "path": "tasks/DIR-099-A.md",
+      "additions": 344,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-099-B.md",
+      "additions": 134,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-099-C.md",
+      "additions": 531,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-099.md",
+      "additions": 54,
+      "deletions": 93
+    },
+    {
+      "path": "tasks/DIR-100-A.md",
+      "additions": 149,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-100-B.md",
+      "additions": 117,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-100-C.md",
+      "additions": 140,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-100.md",
+      "additions": 62,
+      "deletions": 95
+    },
+    {
+      "path": "tasks/DIR-101.md",
+      "additions": 28,
+      "deletions": 7
+    },
+    {
+      "path": "tasks/DIR-103-A.md",
+      "additions": 159,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-103-B.md",
+      "additions": 151,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-103-C.md",
+      "additions": 155,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-103.md",
+      "additions": 65,
+      "deletions": 100
+    },
+    {
+      "path": "tasks/DIR-104.md",
+      "additions": 101,
+      "deletions": 21
+    },
+    {
+      "path": "tasks/DIR-105.md",
+      "additions": 54,
+      "deletions": 5
+    },
+    {
+      "path": "tasks/DIR-109.md",
+      "additions": 24,
+      "deletions": 11
+    },
+    {
+      "path": "tasks/DIR-110.md",
+      "additions": 28,
+      "deletions": 11
+    },
+    {
+      "path": "tasks/DIR-111.md",
+      "additions": 22,
+      "deletions": 8
+    },
+    {
+      "path": "tasks/DIR-112.md",
+      "additions": 669,
+      "deletions": 26
+    },
+    {
+      "path": "tasks/DIR-113.md",
+      "additions": 88,
+      "deletions": 20
+    },
+    {
+      "path": "tasks/DIR-114.md",
+      "additions": 364,
+      "deletions": 20
+    },
+    {
+      "path": "tasks/DIR-115.md",
+      "additions": 123,
+      "deletions": 15
+    },
+    {
+      "path": "tasks/DIR-116.md",
+      "additions": 65,
+      "deletions": 14
+    },
+    {
+      "path": "tasks/DIR-117-B.md",
+      "additions": 217,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-117.md",
+      "additions": 473,
+      "deletions": 37
+    },
+    {
+      "path": "tasks/DIR-118.md",
+      "additions": 296,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-A.md",
+      "additions": 195,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-B.md",
+      "additions": 222,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-C.md",
+      "additions": 120,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-D.md",
+      "additions": 164,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-D1.md",
+      "additions": 927,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-D2.md",
+      "additions": 329,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-D3.md",
+      "additions": 202,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-D4.md",
+      "additions": 233,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119-D5.md",
+      "additions": 633,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-119.md",
+      "additions": 158,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-120-B.md",
+      "additions": 255,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-120.md",
+      "additions": 746,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-121.md",
+      "additions": 260,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-122.md",
+      "additions": 311,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-123.md",
+      "additions": 308,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A.md",
+      "additions": 454,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A1.md",
+      "additions": 651,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A1a.md",
+      "additions": 46,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A1b.md",
+      "additions": 45,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A2.md",
+      "additions": 461,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A3.md",
+      "additions": 312,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A3a.md",
+      "additions": 41,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A3b.md",
+      "additions": 37,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A4.md",
+      "additions": 299,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-A5.md",
+      "additions": 504,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-B.md",
+      "additions": 138,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-C.md",
+      "additions": 141,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-D.md",
+      "additions": 175,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-E.md",
+      "additions": 139,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124-F.md",
+      "additions": 164,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-124.md",
+      "additions": 168,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-125.md",
+      "additions": 305,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-126-A.md",
+      "additions": 779,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-126-B.md",
+      "additions": 679,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-126-C.md",
+      "additions": 825,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-126-D.md",
+      "additions": 1063,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-126-E.md",
+      "additions": 948,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/DIR-126.md",
+      "additions": 208,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/QN-017.md",
+      "additions": 9,
+      "deletions": 1
+    },
+    {
+      "path": "tasks/QN-020.md",
+      "additions": 10,
+      "deletions": 3
+    },
+    {
+      "path": "tasks/QN-022.md",
+      "additions": 8,
+      "deletions": 1
+    },
+    {
+      "path": "tasks/TG.md",
+      "additions": 9,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN.md",
+      "additions": 32,
+      "deletions": 7
+    },
+    {
+      "path": "tasks/exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK.md",
+      "additions": 44,
+      "deletions": 9
+    },
+    {
+      "path": "tasks/exp5-M-TS-MIGRATION-P4.md",
+      "additions": 23,
+      "deletions": 3
+    },
+    {
+      "path": "tasks/exp5-M-TS-MIGRATION.md",
+      "additions": 11,
+      "deletions": 1
+    },
+    {
+      "path": "tasks/gap-absorb-charter-audit-not-committed.md",
+      "additions": 231,
+      "deletions": 26
+    },
+    {
+      "path": "tasks/gap-absorb-entry-clause-disposition-sequencing.md",
+      "additions": 201,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-audit-findings-not-backpropagated-to-earlier-detectors.md",
+      "additions": 122,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-build-evidence-manifest-missing.md",
+      "additions": 271,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-build-phase-iteration-evidence-path-not-single-sourced.md",
+      "additions": 103,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-build-phase-null-result-not-gated.md",
+      "additions": 608,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-ceiling-check-blind-to-task-canonical-gap-ids.md",
+      "additions": 113,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-cli-serve-port-test-flaky-ci-timeout.md",
+      "additions": 40,
+      "deletions": 5
+    },
+    {
+      "path": "tasks/gap-config-wiring-check-symlink-noop.md",
+      "additions": 118,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-decide-resume-generation-path-unsanitized-taskid.md",
+      "additions": 105,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-dir126d-deferred-phase-timing-recurrence-tracking.md",
+      "additions": 837,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-drain-dispose-body-corruption.md",
+      "additions": 109,
+      "deletions": 11
+    },
+    {
+      "path": "tasks/gap-execute-milestone-build-admission-and-verification-fuse.md",
+      "additions": 177,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-execute-milestone-no-worktree-isolation.md",
+      "additions": 114,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-halt-sentinel-path-mismatch.md",
+      "additions": 164,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-milestone-preparation-check-raw-nul-bytes.md",
+      "additions": 63,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-orphaned-check-scripts-not-wired.md",
+      "additions": 119,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-preflight-bare-filename-false-positive.md",
+      "additions": 173,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-preflight-merged-markdown-ascii-dash-false-positive.md",
+      "additions": 205,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-preflight-merged-markdown-claims-code-span-subtraction-false-positive.md",
+      "additions": 139,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md",
+      "additions": 394,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-preflight-touches-mismatch-plan-files-annotation.md",
+      "additions": 91,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-admission-check-plan-files-backtick-asymmetry.md",
+      "additions": 104,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-convergence-test-fixture-pollutes-tracked-tree.md",
+      "additions": 173,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-cross-generation-no-incremental-reuse.md",
+      "additions": 252,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-cross-generation-review-state-reset.md",
+      "additions": 306,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening.md",
+      "additions": 259,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-epoch-scope-change-grants-full-review.md",
+      "additions": 314,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-lease-read-race.md",
+      "additions": 141,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-no-size-aware-routing-A.md",
+      "additions": 473,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-no-size-aware-routing-B.md",
+      "additions": 105,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-no-size-aware-routing-C.md",
+      "additions": 82,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-no-size-aware-routing.md",
+      "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-no-worktree-isolation.md",
+      "additions": 226,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-noisy-agent-raw-json-parse.md",
+      "additions": 98,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-split-decision-no-finality.md",
+      "additions": 956,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-task-epoch-budget-reset.md",
+      "additions": 302,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-prepare-milestone-workflow-dynamic-import.md",
+      "additions": 97,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-select-preflight-getTaskList-timeout-too-short.md",
+      "additions": 86,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-split-or-commit-not-continuously-checked.md",
+      "additions": 218,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-symlink-mirror-noop-affects-5-more-scripts.md",
+      "additions": 97,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-task-schema-plugin-mirror-touches-drift.md",
+      "additions": 99,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-touches-orthogonality-symlink-isdirect-mismatch.md",
+      "additions": 503,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-wiring-coverage-check-merged-markdown-list.md",
+      "additions": 80,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-wiring-coverage-check-owns-false-positive.md",
+      "additions": 128,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-wiring-coverage-check-table-rows.md",
+      "additions": 84,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md",
+      "additions": 724,
+      "deletions": 0
+    },
+    {
+      "path": "tasks/gap-workflow-name-dispatch-stale-script-cache.md",
+      "additions": 72,
+      "deletions": 21
+    }
+  ],
+  "testsRun": [],
+  "plannedAcEvidence": [],
+  "acEvidence": [],
+  "runtimeEvidence": [],
+  "deferredOrUnmet": [],
+  "iterationArtifactRefs": [
+    {
+      "path": "iterations/iteration-0.md",
+      "hash": "121b7547d616f2f2159ecb0513f02735775b50a3d6b50d27a9d33fd85579d136",
+      "kind": "iteration-report"
+    },
+    {
+      "path": "audits/iteration-0-acceptance-audit.md",
+      "hash": "8d54a441a1996addbabb2eb54c32f7bc23347deea7e371c56d4913236f39984c",
+      "kind": "audit-artifact"
+    }
+  ]
+}
