@@ -31,9 +31,20 @@
 
 ## 累计分布
 
-| 类型 | 次数 |
-|---|---|
-| no-action | 15 |
-| unblock | 6 |
-| correct | 9 |
-| escalate | 3 |
+**这张表由行数算出，不手工维护**（2026-08-02 发现手工计数已漂到 33 而实际 24 行——
+与内层 tick 文件「全局量必须运行时计算，不得写成常量」是同一条规则，外层此前没有）。
+重算命令：
+
+```bash
+python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(no-action|unblock|correct|escalate)\` \|',open('orchestration/tick-log.md').read()));print(c, sum(c.values()))"
+```
+
+| 类型 | 次数 | 占比 |
+|---|---|---|
+| no-action | 8 | 33% |
+| unblock | 6 | 25% |
+| correct | 7 | 29% |
+| escalate | 3 | 12% |
+| **合计** | **24** | — |
+
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 29%。
