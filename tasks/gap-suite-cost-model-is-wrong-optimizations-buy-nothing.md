@@ -1,8 +1,8 @@
 ---
 id: gap-suite-cost-model-is-wrong-optimizations-buy-nothing
-title: "118s of per-file savings bought 2s of suite wall-clock — the cost model
-  both speedup tasks were built on is wrong"
-status: todo
+title: 118s of per-file savings bought 2s of suite wall-clock — the cost model
+  both speedup tasks were built on is wrong
+status: done
 labels:
   - gap
   - defect

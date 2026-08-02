@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T15:29:22.719Z",
+  "generatedAt": "2026-08-02T16:56:52.544Z",
   "since": null,
   "tasks": [
     {
@@ -10,6 +10,11 @@
     {
       "taskId": "gap-select-preflight-json-real-store-too-slow",
       "minutes": 40.25695,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-cost-model-is-wrong-optimizations-buy-nothing",
+      "minutes": 72.18956666666666,
       "outcome": "done"
     },
     {
@@ -35,7 +40,7 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 40.918172222222225,
-  "medianMinutes": 40.25631666666666,
-  "tasksPerHour": 1.4663411570327824
+  "meanMinutes": 45.38551428571429,
+  "medianMinutes": 40.2564,
+  "tasksPerHour": 1.3220077142297764
 }

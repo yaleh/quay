@@ -24,17 +24,12 @@
 | `gap-symlink-mirror-invocation-test-contract-mismatch` | `1f824aee` | 测试契约模型：exit-0+Usage 合法 + clock 字段 redact |
 | `gap-dod-clause13-14-enforced-but-undocumented` | `f10f6860` | Option A 文档补 Clause 13/14，PASS all 15 clauses |
 
-## 在飞（B5，串行）
-
-| 任务 | dispatch | runId | worktree |
-|---|---|---|---|
-| `gap-tests-use-cli-where-module-import-suffices`（用户建 `0f0c8d10`） | 13:45:01Z | fm-gap-tests-use-cli-where-module-import-suffices-1785678301009-hn9gyi | /tmp/quay-wt-usecli |
-
-## 已完成 B5
+## 已完成 B5（全部 merge）
 
 | 任务 | merge | 关键 |
 |---|---|---|
 | `gap-tests-spawn-cli-from-ts-source`（用户建 `fa0500ad`） | `7032e704` | cli-entry.mjs 载体 + cli.test.mjs 131s→66s；done |
+| `gap-tests-use-cli-where-module-import-suffices`（用户建 `0f0c8d10`） | `478e76d2` | sink 不必要的 fixture 进程（serve/mcp-server tests）；done，34.5 min |
 
 ## 滞留分支合并（人裁定 M243 → M246 → M222，M239 推迟）
 
@@ -48,19 +43,30 @@
 
 | 任务 | dispatch | runId | worktree |
 |---|---|---|---|
-| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` | 15:44:35Z | fm-gap-suite-cost-model-is-wrong-optimizations-buy-nothing-1785685475162-odoz6u | /tmp/quay-wt-costmodel |
+| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` | 15:44:35Z | fm-gap-suite-cost-model-is-wrong-optimizations-buy-nothing-1785685475162-odoz6u | ~~/tmp/quay-wt-costmodel~~（已合并移除） |
+
+B6-1 已完成：merge `4282632c`，全量绿（2136/2118/0/18，445.95s），任务置 done，计量 72 min。见「已完成 B6」。
+
+## 已完成 B6
+
+| 任务 | merge | 关键 |
+|---|---|---|
+| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` | `4282632c` | 成本模型实测：**非「最慢单文件」决定、8-lane 饱和**（Σ/wall ≈7.1）；噪声带宽 17–63s；B5-1/B5-2 墙钟效果在噪声内不可判定；AC1b 断言汇聚点计时（env-gated，零断言改动）+ `measure-suite.mjs` 可重复测量工具。done，72 min |
 
 ## 待执行（按顺序）
 
 | 任务 | 说明 |
 |---|---|
-| cost-model 落地后：M246/M222 或下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**（外层实测：本会话 Task/Agent 未进工具前六，并发是关的；下一批默认并发，不默认串行） |
+| **M243 恢复** | 必须一并带回 `095ddbf0`（validateEvent 返回 `.error` 非 `.errors`，runner bug，随 revert `88e17bf2` 成了孤儿——已核实：该 commit 仍在对象库，但文件不在 HEAD 树，不带回 bug 原样回来）。完整恢复还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome） |
+| M246（DIR-124-A5） | 待 M243 裁定后；M246 与 M222 的合并**按人裁定顺序**，M239 已推迟 |
+| M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
+| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**（外层实测：本会话 Task/Agent 未进工具前六，并发是关的；下一批默认并发，不默认串行）。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
 
-## 工作方式调整（外层实测 2026-08-02，本会话 10.3h transcript）
+## 工作方式调整（外层实测 2026-08-02，含 subagent transcript 的完整分解）
 
-- 时间去向：空转等裁定 49% / 全量套件 13% / 其它 Bash 11% / 范围化测试 2%。37 次停摆最长 26/22/21/21/19/17 分钟，全贴外层 20 分钟 tick 间隔 → **瓶颈是外层延迟不是测试**
+- **时间去向（修正版，含 subagent transcript）：空转 14% / 全量套件 26.2% + 范围化 9.7% = 测试 36%**。早先「空转 49%、测试不是瓶颈」的分解漏了 subagent transcript，是错的（`940a3f5b` 修正）——**测试是最大的可优化项**
 - 迭代阶段一律 `--for-task`（68s vs 489s，7.2×），全量只在合并前跑一次
 - 下一批先 checkTouchesPair 组可并发批次，不默认串行
 
