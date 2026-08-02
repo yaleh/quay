@@ -37,7 +37,7 @@
 |---|---|
 | **M222**（DIR-112） | ✅ **已合并** `6721ec28`，全量绿（2139/2121/0/18，447.6s）。墙钟差值 489−447.6=41.4s，**落在 20–63s 噪声带宽内 → 如实判定「不可判定」**（非改善）。cli.test.mjs 单文件 58.2s vs 66s 基线，方向性。done |
 | M246（DIR-124-A5） | ✅ **已合并**（M246 merge），全量绿（2275/2257/0/18，429.9s，+136 测试）。独立新文件干净合并。done |
-| **M243**（DIR-124-A2） | **在飞**（subagent 已派发 17:44Z，worktree `/tmp/quay-wt-m243`，runId fm-DIR-124-A2-1785693890531-06eeel）。恢复策略：`git revert 88e17bf2` 重放语料 + **必须带回 095ddbf0**（validateEvent `.error` 修复，随 revert 成孤儿）+ 修 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome）。负控制守则：GREEN tampered 恢复 fail-detect 前不重写期望值 |
+| **M243**（DIR-124-A2） | **在飞**（subagent 已派发 17:44Z，worktree `/tmp/quay-wt-m243`，runId fm-DIR-124-A2-1785693890531-06eeel）。恢复策略：`git revert 88e17bf2` 重放语料 + **必须带回 095ddbf0**（validateEvent `.error` 修复，随 revert 成孤儿）+ 修 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome）。负控制守则：GREEN tampered 恢复 fail-detect 前不重写期望值。**进度（18:12 tick）**：revert 重放已提交 `c6ebbfb7`（87 文件 / 8221 行），分支上的 workflow-replay.ts 已是 `.error` 修复版（272 行），095ddbf0 确为分支祖先；subagent 未返回，工作树干净——在途为 5 类 A1a 修复 + 负控制验证 |
 
 ## 已完成 B6
 
