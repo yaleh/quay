@@ -14,8 +14,12 @@
 //   (c) failure path via the QUAY_BUILD_DIST_ENTRY env-var testability hook:
 //       a nonexistent entry makes buildDist() reject (loud, non-zero).
 //   (d) shell wrapper: `bash scripts/build-dist.sh` exits 0 and writes the
-//       canonical dist/quay.js (no bash coverage tool in this repo — RED/GREEN
-//       exit-code + existence assertion, per the plan's shell strategy).
+//       configured outfile. The outfile is redirected to THIS test's own temp
+//       dir (QUAY_BUILD_DIST_OUTFILE hook) so the real wrapper is exercised
+//       without rewriting the shared packages/quay/dist/quay.js that M136's
+//       sync-vendor --check reads concurrently in the full suite
+//       (no bash coverage tool in this repo — RED/GREEN exit-code + existence
+//       assertion, per the plan's shell strategy).
 //
 // The runnable-bundle assertions build into a DEPTH-MATCHED temp tree
 // (<root>/l1/l2/pkg/{package.json,dist/quay.js}) so BOTH src/version.ts's
@@ -38,7 +42,6 @@ import { buildDist } from "../scripts/build-dist.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
 const scriptSh = path.join(pkgDir, "scripts", "build-dist.sh");
-const canonicalOut = path.join(pkgDir, "dist", "quay.js");
 
 // Build target inside a temp tree whose depth mirrors packages/quay/dist so the
 // bundle's own relative reads (version.ts, registry.ts REPO_ROOT) stay in temp.
@@ -91,9 +94,26 @@ test("(c) failure path: a nonexistent QUAY_BUILD_DIST_ENTRY makes buildDist() re
   }
 });
 
-test("(d) shell wrapper: `bash scripts/build-dist.sh` exits 0 and writes the canonical dist/quay.js", () => {
+test("(d) shell wrapper: `bash scripts/build-dist.sh` exits 0 and writes the configured outfile", () => {
   // RED before build-dist.sh exists / GREEN after. No bash coverage tool in
   // this repo (confirmed: no kcov/bashcov) — exit-code + existence is the check.
-  execFileSync("bash", [scriptSh], { encoding: "utf8", stdio: "pipe" });
-  assert.ok(fs.existsSync(canonicalOut), `build-dist.sh must write ${canonicalOut}`);
+  // The outfile is redirected to THIS TEST's own temp dir via the
+  // QUAY_BUILD_DIST_OUTFILE testability hook (sibling of QUAY_BUILD_DIST_ENTRY),
+  // so the wrapper is exercised for real but NEVER rewrites the shared
+  // packages/quay/dist/quay.js that M136's sync-vendor --check reads concurrently
+  // in the same full-suite run (gap-sync-vendor-drift-mislabelled-as-task-schema,
+  // round 3: eliminate the interference source).
+  const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m120-builddist-sh-"));
+  try {
+    const out = path.join(outRoot, "dist", "quay.js");
+    fs.mkdirSync(path.join(outRoot, "dist"), { recursive: true });
+    execFileSync("bash", [scriptSh], {
+      encoding: "utf8",
+      stdio: "pipe",
+      env: { ...process.env, QUAY_BUILD_DIST_OUTFILE: out },
+    });
+    assert.ok(fs.existsSync(out), `build-dist.sh must write ${out}`);
+  } finally {
+    fs.rmSync(outRoot, { recursive: true, force: true });
+  }
 });

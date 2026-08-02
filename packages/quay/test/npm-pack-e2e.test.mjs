@@ -32,19 +32,42 @@ import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
-const packageSh = path.join(pkgDir, "scripts", "package.sh");
+const repoRoot = path.resolve(pkgDir, "..", "..");
 const nativeBin = path.join(pkgDir, "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
 
+// Copy the package tree into a FRESH temp dir so package.sh's build-dist step
+// (esbuild -> dist/quay.js) and `npm pack` both run inside the temp copy, never
+// rewriting the shared packages/quay/dist/quay.js that M136's sync-vendor
+// --check reads concurrently in the same full-suite run
+// (gap-sync-vendor-drift-mislabelled-as-task-schema, round 3: eliminate the
+// interference source, don't mask the check). The repo's node_modules is
+// symlinked into the copy so build-dist.mjs's `import * as esbuild` resolves.
+function makeTempPackageCopy() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m120-e2e-pkg-"));
+  for (const rel of ["package.json", "bin", "src", "scripts", "README.md", "CHANGELOG.md", "LICENSE.md"]) {
+    fs.cpSync(path.join(pkgDir, rel), path.join(root, rel), { recursive: true });
+  }
+  fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(root, "node_modules"), "dir");
+  return root;
+}
+
 let scratch; // install prefix
 let installedBin; // node_modules/quay/dist/quay.js
 let tgz;
+let tempPkg; // isolated temp copy of the package tree package.sh ran in
 
 before(() => {
-  // Real package.sh run: builds dist/, then npm pack -> quay-<version>.tgz.
-  execFileSync("bash", [packageSh], { encoding: "utf8", cwd: pkgDir, stdio: "pipe" });
-  tgz = path.join(pkgDir, `quay-${pkgVersion}.tgz`);
+  // Real package.sh run, in a temp COPY of the package tree: builds dist/, then
+  // npm pack -> quay-<version>.tgz, all inside the isolated copy.
+  tempPkg = makeTempPackageCopy();
+  execFileSync("bash", [path.join(tempPkg, "scripts", "package.sh")], {
+    encoding: "utf8",
+    cwd: tempPkg,
+    stdio: "pipe",
+  });
+  tgz = path.join(tempPkg, `quay-${pkgVersion}.tgz`);
   assert.ok(fs.existsSync(tgz), `package.sh must produce ${tgz}`);
 
   // Install the tarball into a scratch prefix (isolated from the repo).
@@ -59,7 +82,7 @@ before(() => {
 
 after(() => {
   if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
-  if (tgz && fs.existsSync(tgz)) fs.rmSync(tgz, { force: true });
+  if (tempPkg) fs.rmSync(tempPkg, { recursive: true, force: true });
 });
 
 test("the installed tarball's bin resolves to dist/quay.js and it exists", () => {

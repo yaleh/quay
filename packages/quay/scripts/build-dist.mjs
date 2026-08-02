@@ -42,13 +42,17 @@ export const REQUIRE_BANNER =
 /**
  * Build the ESM dist bundle. Resolves the entrypoint from (in order) the
  * `entry` option, the QUAY_BUILD_DIST_ENTRY env var (a testability hook for the
- * failure path), then bin/quay.ts. Throws (loudly, non-zero when run as a
- * script) on any esbuild failure or a reported-success-but-missing outfile.
+ * failure path), then bin/quay.ts. Resolves the outfile from (in order) the
+ * `outfile` option, the QUAY_BUILD_DIST_OUTFILE env var (a testability hook,
+ * sibling of QUAY_BUILD_DIST_ENTRY — lets a test build into its own temp dir
+ * instead of the shared packages/quay/dist/quay.js), then dist/quay.js.
+ * Throws (loudly, non-zero when run as a script) on any esbuild failure or a
+ * reported-success-but-missing outfile.
  * @returns the absolute path of the written bundle.
  */
 export async function buildDist(opts = {}) {
   const entry = opts.entry ?? process.env.QUAY_BUILD_DIST_ENTRY ?? DEFAULT_ENTRY;
-  const outfile = opts.outfile ?? DEFAULT_OUTFILE;
+  const outfile = opts.outfile ?? process.env.QUAY_BUILD_DIST_OUTFILE ?? DEFAULT_OUTFILE;
 
   let result;
   try {
