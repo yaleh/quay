@@ -33,17 +33,28 @@ Two results that contradict the obvious guess:
 2. **The cost is module-graph loading** — 40 `src/*.ts` files, 5,505 lines, 16 top-level imports in
    `quay.ts`. The prebuilt bundle collapses that to one file and saves **2.1 s per invocation (61%)**.
 
-### Scale
+### Scale — 但要按关键路径读，不是按总和
 
 `grep` across the CI glob (113 non-symlink test files): **129 call sites** reference a quay CLI
-entry (`quay.ts` / `bin/quay` / `quay-native.js`).
+entry. 129 × 2.1 s ≈ 271 s **of summed CPU** — but the suite runs at `--test-concurrency=8`, so
+**wall-clock is bounded by the slowest single file, not by the sum**.
 
-```
-129 × 2.1 s ≈ 271 s
-```
+实测（2026-08-02，套件 583s / 1218 tests / 0 fail）：
 
-The full suite was 418 s before B3-2's grouping change and is ~474 s after. **This one change is
-worth roughly 271 s** — more than half the suite — without touching a single assertion.
+| 文件 | 耗时 | 占墙钟 | 成因 |
+|---|---|---|---|
+| `packages/quay/test/cli.test.mjs` | **436 s** | **75%** | 67 次 `run()` → `execFileSync("node", [quay.ts, …])` |
+| `packages/quay/test/serve.test.mjs` | 280 s | — | 36 次经 `quay-native.ts` 造 fixture（服务器本身是进程内启动） |
+| `packages/quay/test/mcp-server.test.mjs` | 142 s | — | 15 次 `connectStdio()` MCP 握手 |
+| 其余 110 个文件 | 各 <60 s | — | 不在关键路径上 |
+
+文件耗时总和 858 s+ 远超墙钟 583 s，因为它们并行。**因此只有落在关键路径上的节省才真正缩短套件。**
+
+对本任务（换执行载体）而言：
+
+- `cli.test.mjs` 的 67 次调用 × 2.1 s = **141 s**，该文件 436 s → ~295 s，墙钟 583 s → **~300 s**
+- 之后墙钟由 `serve.test.mjs`（280 s）接管
+- **其余 62 个调用点对墙钟几乎无影响**——改它们是账面数字，不是等待时间
 
 ## Chosen mechanism
 
@@ -73,23 +84,34 @@ this changes nothing for them. Reducing the *number* of CLI spawns is
 
 ## Acceptance Criteria
 
-- [ ] AC1: `packages/quay/test/helpers/cli-entry.mjs` exports `QUAY_CLI`, resolved once per process
-- [ ] AC2: Resolves to `dist/quay.js` when it exists and is newer than every `src/**/*.ts` and `bin/*.ts`
-- [ ] AC3: Falls back to `bin/quay.ts` when `dist/quay.js` is absent
-- [ ] AC4: Falls back to `bin/quay.ts` when `dist/quay.js` is STALE, and warns once on stderr
-- [ ] AC5: `scripts/test.sh` builds `dist/quay.js` once before the run; build failure is fatal (never silently run against a stale bundle)
-- [ ] AC6: All 129 CLI call sites use `QUAY_CLI` — zero remaining hardcoded `bin/quay.ts` literals in test files (grep-confirmable)
-- [ ] AC7: `quay-native` / `quay-github` / `quay-backlog` CLI entries get the same treatment, or are explicitly documented as out of scope with a reason
-- [ ] AC8: Suite wall-clock measured before and after, both recorded in the task; the delta is the deliverable
-- [ ] AC9: Zero assertion changes — `git diff` shows only entry-path substitutions in test files
-- [ ] AC10: A developer running `node --test packages/quay/test/cli.test.mjs` with no prior build still passes (AC3 path)
-- [ ] AC11: Test declares `// @test-group product` per [[gap-test-suite-has-no-layer-grouping]]
+### 必做 — 关键路径（决定墙钟）
+
+- [ ] AC1: `packages/quay/test/helpers/cli-entry.mjs` exports `QUAY_CLI`（以及 `QUAY_NATIVE_CLI`），resolved once per process
+- [ ] AC2: 解析到 `dist/quay.js`（当存在且比所有 `src/**/*.ts`、`bin/*.ts` 新）
+- [ ] AC3: `dist/quay.js` 缺失时回退到 `bin/quay.ts`
+- [ ] AC4: `dist/quay.js` 陈旧时回退到 `bin/quay.ts` 并在 stderr 告警一次
+- [ ] AC5: `scripts/test.sh` 在开跑前构建一次 `dist/quay.js`；构建失败即致命（绝不静默用陈旧 bundle）
+- [ ] AC6: **`cli.test.mjs` 的 67 个调用点全部改用 `QUAY_CLI`** —— 这是唯一决定墙钟的文件
+- [ ] AC7: 该文件改前/改后耗时实测记录；**目标 436 s → ≤320 s**
+- [ ] AC8: 套件墙钟改前/改后实测记录；**目标 583 s → ≤380 s**
+
+### 按实测决定 — 非关键路径
+
+- [ ] AC9: `serve.test.mjs`（36 处经 `quay-native.ts`）与 `mcp-server.test.mjs` 改用常量；**但注意这两个的主要成本不是 strip-types**（见 [[gap-tests-use-cli-where-module-import-suffices]] 的成因分析），换载体只解决其中一部分
+- [ ] AC10: 其余 ~62 个调用点：**逐个改的收益需先实测证明**。若某文件耗时 <60 s，改它对墙钟无影响——记录这个判断，不要为了「全部改完」而改
+
+### 通用
+
+- [ ] AC11: 零断言改动 —— `git diff` 只含入口路径替换
+- [ ] AC12: 开发者不预先构建直接 `node --test packages/quay/test/cli.test.mjs` 仍通过（AC3 路径）
+- [ ] AC13: 测试带 `// @test-group product` 声明
 
 ## Definition of Done
 
-- [ ] Before/after suite wall-clock recorded; expected ≈271 s saved, actual reported either way
-- [ ] `scripts/test.sh` green
-- [ ] Stale-bundle fallback exercised by a real test (touch a `src/*.ts`, confirm fallback + warning)
+- [ ] `cli.test.mjs` 与套件墙钟的改前/改后实测都记录在任务体（AC7/AC8 是本任务的交付物本身）
+- [ ] `scripts/test.sh` 绿
+- [ ] 陈旧 bundle 回退路径被真实演练（touch 一个 `src/*.ts`，确认回退 + 告警）
+- [ ] 非关键路径调用点的取舍有明确记录 —— 改了哪些、为什么、没改哪些、为什么
 
 ## Touches
 

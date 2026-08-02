@@ -14,94 +14,100 @@ extra:
 
 ## Proposal
 
-Of 113 non-symlink test files in the CI glob:
+套件墙钟由**最慢的单个文件**决定（`--test-concurrency=8` 并行），不是由调用点总数决定。实测
+2026-08-02（583 s / 1218 tests / 0 fail）：
 
-```
-直接 import src 模块: 59 文件   （毫秒级）
-只走 CLI 不 import:   18 文件   （每次 spawn 1.4–3.5 s）
-```
+| 文件 | 耗时 | 真实成因 | 补救手段 |
+|---|---|---|---|
+| `packages/quay/test/cli.test.mjs` | **436 s** | 67 次 `run()` → `execFileSync("node", [quay.ts, …])` | **换载体**即可 → [[gap-tests-spawn-cli-from-ts-source]] |
+| `packages/quay/test/serve.test.mjs` | **280 s** | **36 次经 `quay-native.ts` 造 fixture**；服务器本身是进程内启动（`spawn(` 计数为 0） | **不起进程造 fixture** ← 本任务 |
+| `packages/quay/test/mcp-server.test.mjs` | **142 s** | **15 次 `connectStdio()`**，每次起一个 MCP server 子进程并做协议握手 | **共享连接** ← 本任务 |
+| 其余 110 个文件 | 各 <60 s | — | 对墙钟无影响，不动 |
 
-The 18, by CLI call-site count:
+三个文件三种成因，**不能用同一个手段**。这是本任务与 [[gap-tests-spawn-cli-from-ts-source]] 的分工：
+那个任务换执行载体（对 `cli.test.mjs` 有效），本任务消除不必要的进程本身（对另外两个有效）。
 
-| 文件 | CLI 处 |
-|---|---|
-| `packages/quay/test/cli.test.mjs` | 24 |
-| `packages/quay/test/mcp-server.test.mjs` | 9 |
-| `packages/quay-github/test/cli.test.mjs` | 4 |
-| `plugin/test/codex-stage1-adapter.test.mjs` | 3 |
-| `provider-abi-conformance` / `package-json-bin` / `gap002-create-ergonomics.iteration-0` / `gap-cli-gate-enforcement` / `cli-migrate` / `cli-edit-parity-conformance` / `quay-github/mcp-server` | 2 each |
-| `mcp-adr` / `init` / `gap002-create-ergonomics` / `cli-adr` / `quay-github/task-check-passthrough` / `quay-github/create-mcp` / `quay-backlog/mcp-server` | 1 each |
+### serve.test.mjs — 用 CLI 造 fixture
 
-[[gap-tests-spawn-cli-from-ts-source]] makes each spawn ~2.1 s cheaper. This task reduces how many
-spawns are needed at all — a smaller but more durable win, because it removes work rather than
-speeding it up.
+36 处 spawn 全部是 `execFileSync("node", [nativeBin, "task", "create", …])`，`nativeBin` 指向
+`quay-native/bin/quay-native.ts`。**它们不测 serve，它们在准备数据。**
 
-### The distinction that decides each case
+native provider 的存储格式就是 `tasks/*.md` 的 YAML frontmatter——一个 fixture 直接 `writeFileSync`
+一个 markdown 文件即可，无需起一个 TypeScript CLI 进程。
 
-A CLI spawn is **necessary** when the assertion is about the CLI contract itself:
+**但要小心：** 直接写文件会绕过 `quay-native` 的写入校验（frontmatter schema、id 唯一性、relation
+同步）。若某个 fixture 的正确性依赖那些校验，绕过它就是在测一个不可能存在的状态。所以：
 
-- argument parsing (flag-before-id, greedy value consumption, unknown-flag handling)
-- exit codes
-- stdout/stderr shape and routing
-- process-level behavior (env var handling, cwd resolution, signal handling)
+- 纯数据 fixture（「存在两个 task，一个 todo 一个 done」）→ 直接写文件
+- 依赖写入语义的 fixture（「创建时 relation 被同步」）→ 保留 CLI，或改为直接 `import` store 模块调用其写入函数
 
-A CLI spawn is **incidental** when the assertion is about logic that happens to be reachable through
-the CLI:
+第二种优于第一种：`import` store 模块既有校验又无进程开销。
 
-- "creating a task with these fields produces this frontmatter"
-- "this config shape yields these gates"
-- "this lifecycle transition is rejected"
+### mcp-server.test.mjs — 每个测试一次握手
 
-The second class should `import` the module and call the function. Same assertion, ~3.5 s → ~0 s.
+15 次 `connectStdio()`，每次 `StdioClientTransport` + `client.connect()`。握手本身不可省，但
+**连接数可以省**：多个只读断言可以复用同一个 client，只有需要不同 workspace/env 的才必须新建。
 
-**This is a judgment call per test, not a mechanical rewrite.** The task is to make the judgment
-explicitly, case by case, and record it — not to convert everything.
+**边界：** 测试隔离不能牺牲。共享 client 的前提是那组测试不互相污染状态。凡是写操作、或依赖不同
+`cwd`/`env` 的，必须保留独立连接。
 
 ## Chosen mechanism
 
-Work the 18 files in descending CLI-call order (`cli.test.mjs` first — 24 sites, the single largest
-concentration). For each CLI call site:
+按关键路径逐个处理，每个用它自己的手段：
 
-1. Read what the test actually asserts
-2. Classify **contract** (keep the spawn) or **incidental** (convert to a module import)
-3. Convert only the incidental ones; the assertion text must survive unchanged
-4. Record the classification in a comment at the call site so the next reader does not re-derive it
+1. **`serve.test.mjs`（280 s → 目标 ≤60 s）**：把 36 个 `task create` fixture 分类——纯数据的改为
+   直接写 markdown 或 `import` store 模块；依赖写入语义的保留。记录每个的分类理由。
+2. **`mcp-server.test.mjs`（142 s → 目标 ≤60 s）**：把 15 次 `connectStdio` 归并到最少必要连接数，
+   按 workspace/env/读写性质分组。保留隔离，只合并真正无冲突的。
+3. **其余 16 个只走 CLI 的文件**：**先实测再决定**。耗时 <60 s 的文件不在关键路径上，改它们对墙钟
+   无影响——记录这个判断即可，不作为验收条件。
 
-**Hard rule: coverage must not shrink.** A converted test asserts the same thing about the same
-code path. If converting would lose coverage of the CLI layer, it is contract, not incidental —
-keep the spawn.
+**保留 ≥1 次真实端到端调用。** 即使一个文件的所有断言都可以下沉，也必须留一次真实进程调用证明
+CLI/MCP 入口确实接得上。全部下沉会让入口坏掉时隐形。
 
-**Keep at least one end-to-end spawn per CLI surface.** Even when every individual assertion in a
-file is incidental, one real spawn must remain to prove the CLI wires to the module at all.
-Converting a file to 100% imports would make a broken CLI entry point invisible.
-
-**Deliberately NOT done:** no mass mechanical conversion, no assertion rewrites, no file
-reorganization. If a file's sites are all genuinely contract-level, it is left alone and that
-finding is recorded — a file that legitimately needs 24 spawns is a valid outcome.
+**覆盖不得缩小。** 下沉后的断言必须断言同一件事、覆盖同一条代码路径。若下沉会丢失对某层的覆盖，
+那它就不是「不必要的进程」，保留。
 
 ## Acceptance Criteria
 
-- [ ] AC1: All 18 files reviewed; each CLI call site classified `contract` or `incidental` in a comment
-- [ ] AC2: Every `incidental` site converted to a direct module import with the assertion text unchanged
-- [ ] AC3: Every file retains ≥1 real CLI spawn (end-to-end wiring proof)
-- [ ] AC4: Zero assertions weakened or deleted — `git diff` reviewed for assertion-text changes; any change justified in the commit
-- [ ] AC5: Per-file wall-clock recorded before and after for the top 4 files (`cli.test.mjs`, `quay/mcp-server`, `quay-github/cli`, `codex-stage1-adapter`)
-- [ ] AC6: Suite wall-clock recorded before and after
-- [ ] AC7: Files where all sites are contract-level are documented as such, with the reason — not silently skipped
-- [ ] AC8: Test count unchanged or higher — conversion must not drop test cases (`node --test` count compared)
-- [ ] AC9: Group declarations preserved per [[gap-test-suite-has-no-layer-grouping]]
+### 必做 — 关键路径
+
+- [ ] AC1: `serve.test.mjs` 的 36 个 fixture 创建点逐个分类（纯数据 / 依赖写入语义），分类理由记在call site 注释
+- [ ] AC2: 纯数据类改为直接写文件或 `import` store 模块；依赖写入语义的保留 CLI 或改用 store 模块的写入函数
+- [ ] AC3: `serve.test.mjs` 改前/改后耗时实测；**目标 280 s → ≤60 s**
+- [ ] AC4: `mcp-server.test.mjs` 的 15 次 `connectStdio` 按 workspace/env/读写性质分组，归并到最少必要连接数
+- [ ] AC5: 写操作与不同 `cwd`/`env` 的测试保留独立连接 —— 分组依据记在注释
+- [ ] AC6: `mcp-server.test.mjs` 改前/改后耗时实测；**目标 142 s → ≤60 s**
+- [ ] AC7: 两个文件各保留 ≥1 次真实端到端调用（入口接线证明）
+- [ ] AC8: 套件墙钟改前/改后实测
+
+### 按实测决定
+
+- [ ] AC9: 其余 16 个只走 CLI 的文件 —— 逐个记录耗时与「是否值得改」的判断；**耗时 <60 s 的明确记录为不改及原因**，不要为凑数而改
+
+### 通用
+
+- [ ] AC10: 零断言弱化或删除 —— `git diff` 审查断言文本变化，任何变化在 commit 说明
+- [ ] AC11: 测试数不减 —— `node --test` 计数改前/改后对比
+- [ ] AC12: 组声明保留（[[gap-test-suite-has-no-layer-grouping]]）
 
 ## Definition of Done
 
-- [ ] 18 files reviewed, classifications recorded at each site
-- [ ] Before/after timings for the top 4 files and the suite
-- [ ] `scripts/test.sh` green with an unchanged-or-higher test count
-- [ ] A short summary in the task body: how many sites were contract vs incidental, and the total saved
+- [ ] `serve.test.mjs`、`mcp-server.test.mjs`、套件三组改前/改后耗时都记录在任务体
+- [ ] 每个改动点的分类理由可查（注释或任务体）
+- [ ] `scripts/test.sh` 绿且测试数不减
+- [ ] 任务体给出小结：多少点下沉、多少点保留、各自理由、总共省了多少墙钟
 
 ## Touches
 
-- packages/quay/test/cli.test.mjs
+关键路径（必做）：
+
+- packages/quay/test/serve.test.mjs
 - packages/quay/test/mcp-server.test.mjs
+- packages/quay-native/src/store.ts
+
+非关键路径（先实测再决定是否改；列出以便 Touches 覆盖）：
+
 - packages/quay/test/provider-abi-conformance.test.mjs
 - packages/quay/test/package-json-bin.test.mjs
 - packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs
@@ -118,3 +124,6 @@ finding is recorded — a file that legitimately needs 24 spawns is a valid outc
 - packages/quay-github/test/create-mcp.test.mjs
 - packages/quay-backlog/test/mcp-server.test.mjs
 - plugin/test/codex-stage1-adapter.test.mjs
+
+`packages/quay/test/cli.test.mjs` 不在本任务范围 —— 它的成因是执行载体，归
+[[gap-tests-spawn-cli-from-ts-source]]。
