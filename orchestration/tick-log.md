@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-02 21:24Z | `unblock` | flags-only 修复已合并（`774ec960`），**行为核实通过**，依赖链第一环打通；已派发 4vs8 实验并给出三条判据 | 遥测 done 12；树干净 | **按新规则用行为验而非 grep**：`--group governance` 打印 `selected 13 files (groups=governance)`（AC4 ✓）；默认 `205` == `--test-concurrency=4` `205`（AC1 ✓，裸标志不再改选择集）。内层的对抗审查还发现一个残留：**空格形式 `--test-concurrency 4` 仍走 explicit-file 分支**，只有 `=` 拼写受支持——已提醒它跑实验时必须用 `=`，否则重蹈静默换选择集 |
 | 2026-08-02 21:04Z | `no-action` | 内层在做 flags-only 修复（在飞 15 分钟），无需介入。修复尚未合并——符合预期 | 遥测 done 12 / 1.45 每小时 / orphaned 0；树干净；默认文件集 163 个 | **外层核实自身又出假阳性，第三次**：grep `flags-only` 与 `selected .* files` 想确认修复是否落地，两处都命中——**但命中的是缺陷本身**（`flags-only` 命中头部第 25 行那句错误承诺；`selected N files` 命中 `--for-task` 的既有错误消息）。**根因是结构性的：描述缺陷的词必然出现在缺陷自己的文档里**，所以 grep 这些词找到的是缺陷不是修复。已写进步骤 0：判据只能是行为或读实际 diff |
 | 2026-08-02 21:00Z | `correct` | 内层提出「早先对全量崩溃的推断需重新审视」——方向对但有**过度撤回**风险。外层用取证工具划定污染范围后告知：**内层数据全部有效，只有外层那次 c4 作废** | 内层在做 flags-only 修复（subagent，worktree `/tmp/quay-wt-flags-only`）；遥测 inProgress 1 | **用 `inner-forensics.mjs` 查了 17:44Z 之后内层的全部 12 次全量调用，无一传裸标志**（全是 `bash scripts/test.sh`），故 flags-only 缺陷污染不到它。可继续作为证据的：M243 后崩溃、M136 全量红/隔离绿、干净窗口仍 fail 1。须划掉的：外层的「c4 全量 8037 失败」及基于它的「c4 也崩 ⇒ 系统性」推断——那次跑的是另一个测试集，证明不了 c4 的任何事。**污染范围要查不要估**：秒级、零 CPU 干扰，比重跑便宜也比凭印象可靠 |
 | 2026-08-02 20:55Z | `correct` | **撤回外层自己的 c4 对照数据**（内层已在用它推理），并按依赖链裁定：M136 诊断搁置、全量崩溃不并进 4vs8、下一批派发新建的工具修复任务 | 内层空闲待裁定；`gap-sync-vendor-drift-…` 已收尾；遥测 inProgress 0 | **查明我的实验为何作废，根因是仓库的真实缺陷**：`scripts/test.sh` 的 dispatch 只有四条分支，**无「裸标志 + 默认 glob」分支**，`--test-concurrency=4` 被当成文件参数 ⇒ `node --test` 无文件列表 ⇒ 自行发现一切，**2296 → 8573（3.7 倍）**。而头部第 25 行与 CLAUDE.md 都把 flags-only 列为受支持用法。已建任务 `gap-test-sh-flags-only-form-silently-runs-a-different-suite`。**外层本 tick 犯了两个错并都已更正**：先误判日志被两次运行污染（实为单次，`ℹ tests` 只出现 1 次），又在确认原因前删掉了日志证据 |
@@ -55,10 +56,10 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 17 | 45% |
-| unblock | 6 | 16% |
-| correct | 12 | 32% |
+| no-action | 17 | 44% |
+| unblock | 7 | 18% |
+| correct | 12 | 31% |
 | escalate | 3 | 8% |
-| **合计** | **38** | — |
+| **合计** | **39** | — |
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 32%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 31%。
