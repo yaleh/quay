@@ -33,7 +33,7 @@
 
 | 类型 | 次数 |
 |---|---|
-| no-action | 13 |
+| no-action | 14 |
 | unblock | 6 |
 | correct | 8 |
 | escalate | 3 |
