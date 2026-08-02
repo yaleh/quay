@@ -10,19 +10,19 @@
 
 | AC | 内容 | 状态 |
 |---|---|---|
-| AC2 | 3 个既有失败各有 open 任务 | ✔ 已建（symlink-mirror / dod-clause / select-preflight） |
+| AC2 | 3 个既有失败各有 open 任务 | ✔ 已建 + **已修**（全 done） |
 | AC4 | readiness 补 suite-green | ✔ 已补（`52cde788`，实跑 NOT READY 验证过） |
-| AC1 | 套件 0 失败 | ⏳ 4 个失败任务在飞 |
-| AC3 | select-preflight ≤30s | ⏳ 在飞（当前 111s） |
-| AC5 | tick 队列补充步骤 | ⏳ 未做（AC1 前置后做） |
+| AC1 | 套件 0 失败 | ✔ **达成**（2128 tests / 2110 pass / 18 skip / **0 fail**） |
+| AC3 | select-preflight ≤30s | ✔ **达成**（83.4s → 8.3s，~10×，merge `ae94205a`） |
+| AC5 | tick 队列补充步骤 | ⏳ 未做（下一项） |
 
-## 在飞（B4 第一批，全部 checkTouchesPair 实测 disjoint，派发 12:31:48Z）
+## B4 已完成（2026-08-02，全部 merge + 全量绿）
 
-| 任务 | worktree | runId | 状态 |
-|---|---|---|---|
-| `gap-select-preflight-json-real-store-too-slow` | `/tmp/quay-wt-selectpreflight` | fm-...-1785673841089-yoji1f | AC3 直接目标 |
-| `gap-symlink-mirror-invocation-test-contract-mismatch` | `/tmp/quay-wt-symlinkmirror` | fm-...-1785673841393-d330u6 | 修测试契约模型 |
-| `gap-dod-clause13-14-enforced-but-undocumented` | `/tmp/quay-wt-dodclause` | fm-...-1785673841706-w7y7uz | ADR-011 双向漂移 |
+| 任务 | merge | 关键 |
+|---|---|---|
+| `gap-select-preflight-json-real-store-too-slow` | `ae94205a` | walk-once 共享：83.4s→8.3s；2 walk-count 回归锁 |
+| `gap-symlink-mirror-invocation-test-contract-mismatch` | `1f824aee` | 测试契约模型：exit-0+Usage 合法 + clock 字段 redact |
+| `gap-dod-clause13-14-enforced-but-undocumented` | `f10f6860` | Option A 文档补 Clause 13/14，PASS all 15 clauses |
 
 ## 待执行（按顺序）
 
@@ -31,6 +31,7 @@
 | `gap-tests-spawn-cli-from-ts-source`（用户建 `fa0500ad`） | 与 use-cli **重叠**（实测 OVERLAP），不能与它同批 |
 | `gap-tests-use-cli-where-module-import-suffices`（用户建 `0f0c8d10`） | 与 spawn-cli 重叠，串行/等 merge |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
+| AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
 
 ## 揭示的既有失败（已建任务，勿重复）
 
