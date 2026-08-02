@@ -113,7 +113,7 @@ this changes nothing for them. Reducing the *number* of CLI spawns is
 | `packages/quay/test/cli.test.mjs` (AC7) | 131.1 s | 66.2 s | **-64.9 s (-50%)** | 122 PASS / 0 FAIL 前后一致 |
 | `packages/quay/test/serve.test.mjs` (AC9) | 280 s* | 53.1 s | -227 s | 170 PASS / 0 FAIL |
 | `packages/quay/test/mcp-server.test.mjs` (AC9) | 142 s* | 33.5 s | -108 s | 206 PASS / 0 FAIL |
-| `packages/quay/test/helpers/cli-entry.test.mjs` + `cli-entry.test.mjs`（新增） | — | 0.3 s | — | 7 PASS / 0 FAIL |
+| `packages/quay/test/cli-entry.test.mjs`（新增，测 helper `helpers/cli-entry.mjs`） | — | 0.3 s | — | 7 PASS / 0 FAIL |
 
 \* 任务体全套件争用下实测值（隔离单文件会更快）；改前单文件基线 cli.test.mjs=131.1 s 为本任务实测。
 
