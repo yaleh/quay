@@ -49,11 +49,11 @@
 
 | 任务 | 说明 |
 |---|---|
-| **M136 sync-vendor 错标（在飞）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，派发 19:17Z，runId fm-gap-sync-vendor-drift-mislabelled-as-task-schema-1785698309174-7d8kss，worktree /tmp/quay-wt-syncvendor。修 sync-vendor.sh:82 错标 + 选同步时机 + M136 归属 |
+| **M136 sync-vendor 错标（外层全量验证中）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`。两轮修复已 merge（`2d9add7e`：错标 + 并发重建免疫 `cmp_or_report`），隔离/范围化/c4 子集全绿。**全量验证由外层在干净窗口（load1=0.40）独立跑**——接受与否等外层结果，不凭受限视角接受（M136 历史教训：错标致三轮误诊、计数 27≠25 短路未跑）。遥测 65+ min（阈值 90），外层绿则 --task-end done，非绿则停止派发报告 |
+| **`--test-concurrency=4 vs 8` 实测（已建任务）** | `gap-suite-concurrency-4-vs-8-measurement`。同一 commit 各 ≥3 次，对照 20–63s 噪声带宽。**不把 c4 设为本机默认**（那是没测过改全局参数）。线索在 orchestration/throughput-decomposition.md §163-217 |
 | 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
-| **`--test-concurrency=4 vs 8` 实验** | 外层建议，记于 orchestration/throughput-decomposition.md。本次并发崩溃是第一个真实证据：4 核跑 2 个 c8 套件 = 4 倍过订 → runner 崩溃 |
 
 ## 工作方式调整（外层实测 2026-08-02，含 subagent transcript 的完整分解）
 
