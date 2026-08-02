@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-02 ~16:10Z | `no-action` | 内层正常推进（B6-1 cost-model 在飞 19 分钟，subagent 在隔离工作树 `/tmp/quay-wt-costmodel` 里干活），无需介入。本 tick 的实质产出是修好了外层自己的取证工具 | B6-1 在飞 19 分钟（阈值 90），遥测 6 done / 1.47 每小时 / orphaned 0 | **新工具首次实用即暴露自身盲区**：`verify 全量套件` 零命中，但工具自带的「零命中≠没做过」警告拦住了误判——真因是 subagent 的工具调用在 `<会话>/subagents/agent-*.jsonl`，不在主 transcript。合并 30 个 subagent 文件后**吞吐分解结论再次翻转**：空转 49.4%→**14.0%**（之前把 subagent 干活期间的主会话安静判成了等裁定），测试合计 **36%** 才是最大可优化项。同一分析错了三次：窗口、归因方向、范围 |
 | 2026-08-02 ~20:10Z | `unblock` | 内层空闲等派发 → 派发 cost-model（master 已绿，我上一 tick 设的前置满足）。附两条实测要求：不做任何优化、AC3 连跑 3 次是硬要求；AC1b 用断言汇聚点计时不许转 `node:test`。并通报吞吐分解结论 | 内层空闲 30m20s 后收到派发；Monitor 随即报 `START 在飞任务变为 gap-suite-cost-model-…`（本次为真阳性） | master 绿独立核实：上一 tick 报红的 `select-tests-for-touches` 19/19 通过，`2389e138` 确已把 AC10 快照断言改成关系断言。**人指出我的吞吐分析窗口错了**——按外层 loop 起点（`f52d63ed` 12:29:10Z）重算：测试从 8% 涨到 **32%**（全量 29.2% + 范围化 3.0%），初版「测试非瓶颈」不成立；且**外层 loop 没降低空转比例（46.5%→53.8%），停摆频率也几乎未变**——外层把「等人」换成「等外层」，等待时长没变 |
 | 2026-08-02 ~19:30Z | `correct` | 内层**做对了核心一步**：没批量重写期望值，找到单一根因 `095ddbf0`（`validateEvent` 返回 `.error` 非 `.errors`）；第二次 revert 也符合我给的时间盒回退。但补两条它漏的：**根因修复成了孤儿**（改的文件已随 revert 消失，重新应用 M243 时不带回它 bug 就原样回来）——已写进 `tasks/DIR-124-A2.md`；**新失败 AC10 不是 B5-1/B5-2 交互 bug**，是 `select-tests-for-touches.test.mjs:330` 的 `/ℹ tests 1\b/` 硬编码快照断言，B5-1 新增 `cli-entry.test.mjs` 后选中集合法变 2，快照碎了。要求改成运行时关系断言，并注明这是内层 tick 文件第 196 行既有规则的补合规 | 内层在跑范围化套件（16m26s），master 仍红 | **实测验证上一 tick 要求的防护确实生效**：`milestone-worktree.ts --clean-stale --milestone 243 --workspace .` 返回 `{"outcome":"merged-then-reverted","detail":"99 files changed, 8224 insertions(+)"}`——不是信任提交说明，是在真实危险案例上跑出来的 |
 | 2026-08-02 ~19:00Z | `correct` | 内层恢复 M243（`a9d466d2` Reapply）并落地 `--clean-stale` 的 merged-then-reverted 防护（`8608d4d6`）——丢失风险两头关闭。但 master 因此变红，内层停下问 A（批量升格 fixtures/expectations）还是 B（再回退）。**裁 A 但否掉它描述的做法**：在 runner 坏着时批量重写 expectations 会把坏行为永久烤进黄金语料，正是语料存在来防止的事（本仓库已有先例）。要求先找单一根因、逐个分类「约定变了该重录」vs「真回归」、证据必须是改变约定的 commit 而非「改了就绿」、时间盒 1 小时否则走 B。并纠正排期：**cost-model 不在 master 红时派发**，先绿再测 | 内层空闲等裁定（输入框那行是 ghost suggestion）；遥测 6 done / 1.47 每小时 / orphaned 0 | **独立实跑 `workflow-replay.test.mjs`：20 tests / 6 pass / 14 fail**（内层说 12，实为 14）。关键证据：失败横跨全部 fixture 类别**包括两个负控制**——`legacy-singleton-success-tampered (GREEN)` 故意篡改却没被 fail-detect，两个 `(RED)` 已知缺陷复现也失败。负控制坏 ⇒ 是 runner/schema 单点故障，不是 14 个独立陈旧 fixture |
@@ -24,7 +25,7 @@
 
 | 类型 | 次数 |
 |---|---|
-| no-action | 4 |
+| no-action | 5 |
 | unblock | 4 |
 | correct | 5 |
 | escalate | 2 |

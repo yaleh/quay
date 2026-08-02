@@ -29,9 +29,27 @@ function pickInner() {
   return files[0].p;
 }
 
+// 内层把任务派给 subagent 执行，而 subagent 的工具调用**不在主 transcript 里**——它们在
+// <会话 UUID>/subagents/agent-*.jsonl。2026-08-02 实测：cost-model 派发后主 transcript 里
+// 全量套件 0 命中，而 subagent transcript 正在活跃写入。不合并这些文件，本工具在最需要它的
+// 场景（核实被委派的工作）完全失效。
+function transcriptSet(file) {
+  const set = [file];
+  const dir = file.replace(/\.jsonl$/, "") + "/subagents";
+  try {
+    for (const f of fs.readdirSync(dir)) if (f.endsWith(".jsonl")) set.push(path.join(dir, f));
+  } catch { /* 无 subagent 目录 */ }
+  return set;
+}
+
 function load(file, sinceMs) {
+  return transcriptSet(file).flatMap((f) => loadOne(f, sinceMs)).sort((a, b) => a.t - b.t);
+}
+
+function loadOne(file, sinceMs) {
   const out = [];
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+  let text; try { text = fs.readFileSync(file, "utf8"); } catch { return out; }
+  for (const line of text.split("\n")) {
     if (!line.startsWith("{")) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
     if (!o.timestamp) continue;
@@ -45,7 +63,7 @@ function load(file, sinceMs) {
       text: c.filter((x) => x?.type === "text").map((x) => x.text).join(""),
     });
   }
-  return out.sort((a, b) => a.t - b.t);
+  return out;
 }
 
 // 命令分类：全量套件 vs 范围化。
@@ -70,7 +88,9 @@ function classify(name, input) {
 
 function banner(file, rows, sinceMs) {
   const fp = fs.statSync(file);
-  console.log(`会话文件 ${path.basename(file)}  ${(fp.size / 1e6).toFixed(1)}MB  ${rows.length} 条`);
+  const set = transcriptSet(file);
+  console.log(`会话文件 ${path.basename(file)}  ${(fp.size / 1e6).toFixed(1)}MB  ${rows.length} 条`
+    + (set.length > 1 ? `  (含 ${set.length - 1} 个 subagent transcript)` : "  (无 subagent transcript)"));
   console.log(`窗口 ${sinceMs ? new Date(sinceMs).toISOString() : "(全部)"} → ${new Date(rows.at(-1).t).toISOString()}`);
   console.log(`指纹：首条 ${new Date(rows[0].t).toISOString()}  —— 若这不是你想分析的会话，用 --session 指定\n`);
 }
