@@ -55,8 +55,8 @@ removed.
 
 Standard `inherited-core.md` DoD clauses apply.
 
-- [ ] Tests pass: PlanCheck emits typed findings with correct classification for known fact classes
-- [ ] Legacy callers (receipt, checkpoint) still read `findings` as number without breakage
+- [x] Tests pass: PlanCheck emits typed findings with correct classification for known fact classes
+- [x] Legacy callers (receipt, checkpoint) still read `findings` as number without breakage
 
 ## Touches
 
