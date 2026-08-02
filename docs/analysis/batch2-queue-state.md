@@ -19,13 +19,20 @@
 
 | 任务 | 状态 |
 |---|---|
-| B3-2 `gap-test-suite-has-no-layer-grouping` | 派发 10:29:46Z，worktree `/tmp/quay-wt-layergroup`，运行中 |
+| — | 无（stop-condition 已触发，等人工处置 B3-2） |
 
 ## 待执行
 
 | 任务 | 状态 |
 |---|---|
-| — | 无（批次 2 + B3-1/B3-2 后停止并报告，不自动进入下一批） |
+| B3-2 `gap-test-suite-has-no-layer-grouping` | **needs-human**（merge `56dd8267` 已入 master，fan-in 全量红）。两个根因：(1) AC9 硬约束违反——实测 627s >> 416s 上限（引擎组 31 文件在默认组里运行，proposal-convergence ~63s + it0-dod-check ~60s 太重）；(2) runner-grouping.test.mjs 3 失败——EXPECTED_ENGINE=58 硬编码，但 B3-1 的 gate-dispatch-coverage.test.mjs 在 B3-2 worktree 创建后并入 master 且默认 engine，把真实计数推到 59。处置待人工：修 AC9（引擎组太重，需机制级改动）或回退 merge |
+| 用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务 | todo（用户手工提交，非本批范围） |
+
+## 本批最终状态
+
+- 已合并且全量绿：B2-0..B3-1（5 个）
+- **B3-2 合并但全量红 → needs-human**（67.8m，telemetry 首条）
+- 计量已接线：`--task-start`/`--task-end`/`--report` 首次工作（aggregate 已提交 `b1e51244`）
 
 ## 正交性决策（已执行，2026-08-02 实测）
 
