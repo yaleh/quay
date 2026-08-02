@@ -1,0 +1,1 @@
+../../../plugin/scripts/select-tests-for-touches.ts

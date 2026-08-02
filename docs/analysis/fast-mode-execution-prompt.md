@@ -71,7 +71,20 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 
 理由：非零基线让「我是否弄坏了什么」变成对一个移动目标做计数差分，新失败会藏在旧失败里。基线绿了之后，**任何**失败都是真信号。
 
-批次 0 完成后，每个任务改动前后各跑一次 `scripts/test.sh`，期望值恒为 0。
+批次 0 完成后，**任务内的测试验证**用下面的 `--for-task` 机械选择器（不再手挑文件、也不跑全量）；**全量套件保留给 fan-in**（merge 到 master 前）跑，期望值恒为 0。
+
+**任务内测试步骤（`--for-task`，gap-test-selection-not-scoped-to-touches）。** 用机械选择器按任务的 `## Touches` 决定测试集，消除手挑文件的隐性判断：
+
+```bash
+scripts/test.sh --for-task <task-id>            # 只跑该任务 Touches 解析出的测试集
+scripts/test.sh --for-task <task-id> --allow-thin  # 覆盖 <50% 时仍要跑（降级为警告）
+node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task <id> --json  # 查看选中集与 unresolved 明细
+```
+
+- 解析规则（最特定优先）：直接 `*.test.mjs` → basename 配对 `<dir>/foo.ts` → `*/test/foo.test.mjs` → 镜像折叠（`experiments/.../scripts/X.ts` ≡ `plugin/scripts/X.ts`）→ 任务体可选的 `## Test-Files` 声明 → 解析不到的 Touches 条目进 `unresolved`，**绝不静默丢弃**。
+- 覆盖 <50% 会 fail-loud（exit 1，`test-selection-thin`）；确需放行用 `--allow-thin`（降级为 stderr 警告，exit 0）。
+- 透传 flag（如 `--test-name-pattern=X`）要放在**文件列表之前**——node --test 只认文件前的 `--test-name-pattern`（放文件后被忽略，等于跑全文件）。
+- **全量套件仍只属于 fan-in**：merge 前跑一次无参 `scripts/test.sh`。任务内用 `--for-task` 覆盖不了的部分（如 `docs/`、`scripts/test.sh` 自身）由 fan-in 兜底。
 
 **测试文件放哪。** `scripts/test.sh` 的 glob 只覆盖 `packages/*/test/*.test.mjs` 和 `plugin/test/*.test.mjs`。放在 `experiments/quay-perpetual-stream/test/` 的测试**不会在 CI 跑**。需要 CI 覆盖就放 `plugin/test/`。若两处都放，注意 repo root 深度不同（`plugin/test/` 是 2 层，`experiments/.../test/` 是 3 层）——用向上查找标记目录的方式求根，别硬编码层数。
 
