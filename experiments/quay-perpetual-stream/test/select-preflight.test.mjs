@@ -18,8 +18,11 @@ import {
   computeHumanSteered,
   isEpicBlockedByHumanSteeredChildren,
   classifyCandidate,
+  scanOrthogonalPairs,
   GETTASKLIST_TIMEOUT_MS_FLOOR,
 } from "../scripts/select-preflight.ts";
+import { walkFiles, expandGlobs } from "../scripts/touches-orthogonality-check.ts";
+import { buildCouplingGraph } from "../scripts/coupling-graph.ts";
 
 const SCRIPT = fileURLToPath(new URL("../scripts/select-preflight.ts", import.meta.url));
 
@@ -336,13 +339,168 @@ test("M181 vacuous case: epic with zero currently-open children (all done) is no
   }
 });
 
+// ── walk-once expansion (gap-select-preflight-json-real-store-too-slow) ───────────────────────────
+// The perf fix makes scanOrthogonalPairs walk the workspace tree AT MOST ONCE per invocation and
+// share one precomputed file list across the orthogonality scan AND the portfolio's coupling-graph
+// expansion (previously ~29 full-tree walks per preflight run against the real store). These tests
+// lock the CORRECTNESS of the walk-once path: every optional `files`/`preflightFiles` shortcut must
+// produce byte-identical results to the plain per-call walk path. (The wall-clock win is profiled
+// separately against the real store — see the task body; these are behavior locks, not timing locks.)
+
+test("scanOrthogonalPairs: walk-once (preflightFiles) path is behavior-identical to per-call walk", () => {
+  const tmp = fs.mkdtempSync("select-preflight-walkonce-");
+  try {
+    const tasksDir = path.join(tmp, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.mkdirSync(path.join(tmp, "packages", "quay", "src"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "packages", "quay-native", "src"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "packages", "quay", "src", "a.ts"), "x");
+    fs.writeFileSync(path.join(tmp, "packages", "quay-native", "src", "b.ts"), "x");
+    fs.writeFileSync(path.join(tasksDir, "ORTHO-A.md"), "## Touches\n\n- `packages/quay/src/a.ts`\n");
+    fs.writeFileSync(path.join(tasksDir, "ORTHO-B.md"), "## Touches\n\n- `packages/quay-native/src/b.ts`\n");
+    const candidates = [
+      { id: "ORTHO-A", title: "A", rank: 1, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" },
+      { id: "ORTHO-B", title: "B", rank: 2, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" },
+    ];
+    const files = walkFiles(tmp);
+    const withFiles = scanOrthogonalPairs(tmp, candidates, undefined, files);
+    const without = scanOrthogonalPairs(tmp, candidates);
+    assert.deepEqual(withFiles.pairs, without.pairs, "pairs must be identical");
+    assert.equal(withFiles.checkedCount, without.checkedCount, "checkedCount must be identical");
+    assert.deepEqual(withFiles.log, without.log, "log must be identical");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("expandGlobs: a precomputed walkFiles list yields the same expansion as a fresh walk", () => {
+  const tmp = fs.mkdtempSync("select-preflight-expandglobs-");
+  try {
+    fs.mkdirSync(path.join(tmp, "src", "deep"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "src", "a.ts"), "x");
+    fs.writeFileSync(path.join(tmp, "src", "deep", "b.ts"), "x");
+    fs.writeFileSync(path.join(tmp, "src", "c.js"), "x");
+    const files = walkFiles(tmp);
+    const fresh = expandGlobs(["src/**/*.ts"], tmp);
+    const shared = expandGlobs(["src/**/*.ts"], tmp, files);
+    assert.deepEqual([...shared].sort(), [...fresh].sort(), "expanded sets must be identical");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("coupling-graph: shared precomputed files yield identical shared-implementation edges", () => {
+  const tmp = fs.mkdtempSync("select-preflight-coupling-files-");
+  try {
+    fs.mkdirSync(path.join(tmp, "shared"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "other"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "shared", "file.ts"), "x");
+    fs.writeFileSync(path.join(tmp, "other", "file.ts"), "x");
+    const mk = (id, touches) => ({
+      version: 1, id, status: "todo", labels: [], valueType: "capabilityGrowth",
+      eligible: true, estimatedValue: 5, deliverySurface: [], touches, semanticResources: [],
+      dependsOn: [], verificationBoundary: "scripts/test.sh", acCount: 1, lineEstimate: 50, sourceHash: "h",
+    });
+    const tasks = [mk("A", ["shared/file.ts"]), mk("B", ["shared/file.ts"]), mk("C", ["other/file.ts"])];
+    const files = walkFiles(tmp);
+    const withFiles = buildCouplingGraph({ tasks, workspaceRoot: tmp, files });
+    const without = buildCouplingGraph({ tasks, workspaceRoot: tmp });
+    assert.deepEqual(withFiles.edges, without.edges, "coupling edges must be identical");
+    assert.deepEqual([...withFiles.byTask.keys()].sort(), [...without.byTask.keys()].sort(), "adjacency keys identical");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The two tests below are the REAL regression locks for the walk-once fix: they FAIL on the pre-fix
+// code (which re-walked the tree ~2×C(topN,2) times in scanOrthogonalPairs and once per task in
+// buildCouplingGraph) and PASS on the fixed code. They assert on the NUMBER of fs.readdirSync calls
+// (walkFiles is the only reader of the tree), not on wall-clock, so they are deterministic. The
+// `fs` import here is the same Node module singleton the walked modules use, so patching its
+// `readdirSync` intercepts the walks.
+test("scanOrthogonalPairs: walk-count regression — at most ONE tree walk per invocation", () => {
+  const tmp = fs.mkdtempSync("select-preflight-walkcount-scan-");
+  try {
+    const N_DIRS = 8;
+    for (let i = 0; i < N_DIRS; i++) {
+      fs.mkdirSync(path.join(tmp, `d${i}`), { recursive: true });
+      fs.writeFileSync(path.join(tmp, `d${i}`, "f.ts"), "x");
+    }
+    const tasksDir = path.join(tmp, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    // 5 top-N candidates, each declared + precise + pairwise-disjoint → all 10 pairs expand BOTH
+    // sides, so pre-fix code issues ~20 expandGlobs calls, each a full walkFiles.
+    const candidates = [];
+    for (let i = 0; i < 5; i++) {
+      const id = `C${i}`;
+      fs.writeFileSync(path.join(tasksDir, `${id}.md`), `## Touches\n\n- \`d${i}/f.ts\`\n`);
+      candidates.push({ id, title: id, rank: i, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" });
+    }
+    const realReaddirSync = fs.readdirSync;
+    let readdirCalls = 0;
+    fs.readdirSync = (...a) => { readdirCalls++; return realReaddirSync(...a); };
+    try {
+      const result = scanOrthogonalPairs(tmp, candidates);
+      assert.equal(result.pairs.length, 10, "fixture must produce all 10 disjoint pairs");
+    } finally {
+      fs.readdirSync = realReaddirSync;
+    }
+    // ONE walkFiles over the fixture reads: root + N_DIRS + tasks dir = N_DIRS + 2 directories.
+    const oneWalk = N_DIRS + 2;
+    assert.ok(
+      readdirCalls <= oneWalk,
+      `walk-once violated: ${readdirCalls} readdirSync calls (one walk = ${oneWalk}; pre-fix code did ~20 walks)`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("coupling-graph: walk-count regression — shared files list does ZERO additional tree walks", () => {
+  const tmp = fs.mkdtempSync("select-preflight-walkcount-coupling-");
+  try {
+    const N = 9;
+    for (let i = 0; i < N; i++) {
+      fs.mkdirSync(path.join(tmp, `d${i}`), { recursive: true });
+      fs.writeFileSync(path.join(tmp, `d${i}`, "f.ts"), "x");
+    }
+    const mk = (id, touches) => ({
+      version: 1, id, status: "todo", labels: [], valueType: "capabilityGrowth",
+      eligible: true, estimatedValue: 5, deliverySurface: [], touches, semanticResources: [],
+      dependsOn: [], verificationBoundary: "scripts/test.sh", acCount: 1, lineEstimate: 50, sourceHash: "h",
+    });
+    const tasks = Array.from({ length: N }, (_, i) => mk(`T${i}`, [`d${i}/f.ts`]));
+    const files = walkFiles(tmp); // the ONE shared walk, taken before the assertion
+    const realReaddirSync = fs.readdirSync;
+    let readdirCalls = 0;
+    fs.readdirSync = (...a) => { readdirCalls++; return realReaddirSync(...a); };
+    try {
+      buildCouplingGraph({ tasks, workspaceRoot: tmp, files });
+    } finally {
+      fs.readdirSync = realReaddirSync;
+    }
+    assert.equal(
+      readdirCalls,
+      0,
+      `shared-files coupling-graph must not re-walk the tree: ${readdirCalls} readdirSync calls (pre-fix code did ${N} walks)`,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
 function spawnCli(args) {
   try {
     const stdout = execFileSync("node", ["--experimental-strip-types", SCRIPT, ...args], {
       encoding: "utf8",
       maxBuffer: 50 * 1024 * 1024,
-      timeout: 120000,
+      // gap-select-preflight-json-real-store-too-slow regression guard: the CLI command measured
+      // ~83s on the real store before the walk-once fix and ~8s after. 60000ms gives ~7x headroom
+      // over the fixed real-store cost (and ~10x over this worktree's smaller store) while still
+      // FAILING if the command ever regresses back toward the pre-fix ~83s under concurrency. The
+      // prior 120000ms was the pre-fix ceiling with only ~8% headroom — the flake source.
+      timeout: 60000,
     });
     return { status: 0, stdout, stderr: "" };
   } catch (err) {
