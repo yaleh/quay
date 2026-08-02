@@ -228,3 +228,28 @@ plugin-packaging.test.mjs 34/34 绿、套件跑完后 `--check` 也干净。根�
 `build-dist.sh`）与 `npm-pack-e2e.test.mjs`（before，跑 `package.sh`）会写规范
 `packages/quay/dist/quay.js`；`build-dist-smoke.test.mjs` 写临时树、`package-json-bin.test.mjs`
 只读 manifest。但修复对任意数量的并发重建都成立。
+
+### 跨文件状态干扰诊断（2026-08-02 22:50，外层假设验证）
+
+**外层假设**：M136 全量红/隔离绿 ⇒ 与并发度无关，是**跨文件状态干扰，不是竞态**。5 个测试文件写
+dist/ 或 vendor/，M136 通过 `sync-vendor --check` 读它们。
+
+**验证**（主 checkout 配对跑）：
+1. `plugin-packaging.test.mjs + plugin-vendor-standalone.test.mjs` 配对 → **M136 绿**（37/37）。
+   核实 `plugin-vendor-standalone` 是**只读复制**（copyFileSync 到 mkdtemp 临时目录，不写回
+   vendor/quay）——不是干扰源。
+2. `plugin-packaging.test.mjs + build-dist.test.mjs` 配对 → **M136 绿**（38/38），但**跑后**
+   `sync-vendor --check` 报 **DRIFT: vendor/quay/dist/quay.js differs**。
+
+**机制确认**：`build-dist.test.mjs`（跑 `build-dist.sh`）重建 `packages/quay/dist/quay.js`（源侧），
+但 `plugin/vendor/quay/dist/quay.js`（镜像侧）**不同步**。配对跑时 M136 的 `--check` 恰好避开重建
+窗口所以绿；全量套件里 M136 与 build-dist 在不同文件进程**并行**，`--check` 撞上重建窗口 → 红。
+
+**结论**：M136 全量红 = **源 dist 被并行测试重建、vendor 镜像不同步**，确定性（非竞态）、与并发度
+无关。c4/c8 下都红（4vs8 任务 6/6 证实）与此一致。**subagent 第二轮修复（`cmp_or_report` 等源
+稳定再判 DRIFT）未覆盖此路径**——它等的是「源文件稳定」，但重建完成后源与镜像仍不同（镜像没同步），
+等到稳定也 DRIFT。
+
+**真正的修法方向**：M136 的 `--check` 前先 `--sync-dist`（确保 vendor 与当前源同步），或
+build-dist 测试重建后立即同步 vendor（test.sh 已有 `--sync-dist` 钩子但只在开头跑一次）。下一轮
+修复应按此方向。
