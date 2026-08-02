@@ -156,6 +156,8 @@ vs `.sh` @ execute-milestone.js:1172 — so `mismatches` stays true-positive.)
 - MINOR/AC2-latent: `cleanScalar` stripped `#`-comments before quotes → quotes are now stripped first; comment strip applies only to unquoted scalars.
 - NIT/AC8: `--json | head -0` (EPIPE) exited 1 → stdout error swallowed; exit stays 0 (AC8-extra test).
 
+**Adversarial review (round 2, re-challenge of the fixes only)**: 1 MAJOR + 2 MINOR. The MAJOR was a real regression introduced by the round-1 `cleanScalar` fix: a quoted scalar followed by a trailing comment (`"./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013…`) no longer ended in `"`, so the quote-strip failed and the literal quotes survived, corrupting AC7 `registered[].script` and drifting from the recorded baseline. Fixed by locating the real closing quote (skipping `\"` escapes) and dropping only the trailing `# comment` after it; a `#` inside quotes stays data. New AC2-extra regression test covers quoted-with-trailing-comment, quoted-`#`, and `\"`-escaped commands. The 2 MINORs (name-substring noise for `build-evidence` at execute-milestone.js:581/825, and it0-dod-check.ts error-string lines at the real shell-out sites) are pre-existing, verdict-neutral, and annotated in the baseline table above. Final: 12/12 tests green.
+
 ## Touches
 
 - plugin/scripts/gate-dispatch-coverage.ts

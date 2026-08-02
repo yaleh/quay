@@ -49,15 +49,34 @@ export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.m
 
 // ── Config parsing (.quay/config.yml `gates:` section) ────────────────────────────────────────────────
 
+/** Index of the closing `quote` starting the scan at `start`, skipping `\quote` escapes; -1 if none. */
+function findClosingQuote(s, quote, start) {
+  for (let i = start; i < s.length; i++) {
+    if (s[i] !== quote) continue;
+    let bs = 0;
+    for (let j = i - 1; j >= 0 && s[j] === "\\"; j--) bs++;
+    if (bs % 2 === 0) return i; // not escaped → real closing quote
+  }
+  return -1;
+}
+
 /**
  * Strip surrounding quotes and inline ` # ...` comments from a YAML scalar.
- * Quotes are stripped FIRST so a `#` inside a quoted value is preserved as data; the inline-comment
- * strip applies only to unquoted scalars (in YAML, `#` inside double quotes is not a comment).
+ *
+ * A quoted scalar's VALUE ends at its closing quote (found by skipping `\"` escapes); anything after
+ * the closing quote is a trailing `# comment` and is dropped. A `#` INSIDE the quotes is data and is
+ * preserved. Unquoted scalars strip the inline ` # ...` comment directly.
  */
 export function cleanScalar(v) {
   let s = String(v ?? "").trim();
-  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1);
-  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1);
+  if (s.startsWith('"')) {
+    const close = findClosingQuote(s, '"', 1);
+    if (close > 0) return s.slice(1, close);
+  }
+  if (s.startsWith("'")) {
+    const close = findClosingQuote(s, "'", 1);
+    if (close > 0) return s.slice(1, close);
+  }
   s = s.replace(/\s+#.*$/, "").trim();
   return s;
 }

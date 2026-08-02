@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-import { DISPATCH_MARKER_RE } from "../../plugin/scripts/gate-dispatch-coverage.ts";
+import { DISPATCH_MARKER_RE, cleanScalar } from "../../plugin/scripts/gate-dispatch-coverage.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -169,6 +169,28 @@ test("AC2: parses .quay/config.yml gates: → all registered gates (count assert
     // testPass gate keeps its command as `script` (AC7: name+script shape)
     const soc = report.registered.find((g) => g.name === "split-or-commit");
     assert.equal(soc.script, "node plugin/scripts/it0-split-or-commit-check.ts .");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// Regression for the Round-2 adversarial finding: a QUOTED scalar followed by a trailing comment
+// (e.g. `"./packages/.../smoke.sh"   # ADR-013 comment`) must yield the unquoted path, and a `#`
+// INSIDE quotes is data, not a comment.
+test("AC2-extra: cleanScalar strips a quoted scalar's trailing comment and keeps quoted # (adversarial fix)", () => {
+  assert.equal(cleanScalar('"./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013 / DIR-035-D'), "./packages/quay/test/delivery-standalone-smoke.sh");
+  assert.equal(cleanScalar("'ADR-007'   # dark-axis instrument regression gate"), "ADR-007");
+  assert.equal(cleanScalar('"f # not a comment"'), "f # not a comment");
+  assert.equal(cleanScalar('"for d in packages/*/; do npx tsc --noEmit -p \\"$d\\" || exit 1; done"'), 'for d in packages/*/; do npx tsc --noEmit -p \\"$d\\" || exit 1; done');
+  assert.equal(cleanScalar("./plugin/scripts/a.sh   # plain comment"), "./plugin/scripts/a.sh");
+  // end-to-end: a quoted script path with a trailing comment parses unquoted in the report
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.mkdirSync(path.join(tmp, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, ".quay", "config.yml"), `gates:\n  fixed:\n    - name: quoted-gate\n      script: "./plugin/scripts/quoted-gate.sh"   # trailing comment\n`);
+    const report = runCliJson(tmp);
+    const q = report.registered.find((g) => g.name === "quoted-gate");
+    assert.equal(q.script, "./plugin/scripts/quoted-gate.sh", "quoted script + trailing comment must parse unquoted");
   } finally {
     cleanup(tmp);
   }
