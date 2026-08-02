@@ -3,7 +3,7 @@ id: gap-symlink-mirror-invocation-test-contract-mismatch
 title: "symlink-mirror-invocation.test.mjs asserts a uniform no-args CLI contract
   that two real scripts legitimately violate — fast-mode-telemetry (exit 0 +
   usage on no-args) and milestone-worktree (output embeds Date.now())"
-status: todo
+status: done
 labels:
   - gap
   - defect

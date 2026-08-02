@@ -3,7 +3,7 @@ id: gap-dod-clause13-14-enforced-but-undocumented
 title: "DoD Clause 13/14 are enforced in it0-dod-check.ts but absent from
   inherited-core.md's Definition of DoD — a real ADR-011 drift the grouping
   surfaced, not a checker bug"
-status: todo
+status: done
 labels:
   - gap
   - defect
