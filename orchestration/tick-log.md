@@ -35,5 +35,5 @@
 |---|---|
 | no-action | 13 |
 | unblock | 6 |
-| correct | 7 |
+| correct | 8 |
 | escalate | 3 |
