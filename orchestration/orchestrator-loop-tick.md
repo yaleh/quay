@@ -186,6 +186,25 @@ cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状�
 **以 git 和实测为准，不以内层的自述为准。** 内层报告过「AC9 满足」而实测 627s 超限；报告过任务
 done 而 DoD 未勾。每个 tick 都要独立核实至少一项它声称完成的事。
 
+**核实优先查 transcript，不要靠重跑。** 重跑一次全量套件是 8 分钟 + 8 路满载，还会把内层的
+timeout 余量压成 flaky（步骤 0c）。查 transcript 是秒级、零干扰：
+
+```bash
+node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <上次 tick 的 ISO 时刻>
+node orchestration/watch/inner-forensics.mjs timecost --since <外层 loop 起点或本班次起点>
+```
+
+`verify` 接**类别**（`全量套件` / `范围化测试` / `其它 Bash`，与 `timecost` 同源，不会分歧）
+或任意正则。它列出每次调用的时刻、真实耗时、命令——内层声称「跑了全量套件」是真是假，一眼可判。
+
+**零命中不等于「内层没做过」**，它与「查询写错了」不可区分。工具会自己提示这一点：先用类别形式
+复核，确认查询正确后零命中才是证据。这条是实测出来的——自检时手写正则得 0 命中，而同一份数据
+`timecost` 报 8 次。
+
+`timecost` 给出空转 / 全量套件 / 范围化测试 / 其它 / 生成的分解，是判断「该修延迟还是该修测试」
+的唯一依据（见 `orchestration/throughput-decomposition.md`）。**注意窗口**：分析外层的影响必须
+`--since` 外层 loop 起点，否则会把 loop 之前的空转算到外层头上。
+
 ### 2. 分类本 tick 的动作
 
 **必须**记录本 tick 属于哪一类——这是判断分层是否退化的唯一依据：
