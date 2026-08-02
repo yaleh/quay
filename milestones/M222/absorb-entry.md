@@ -38,3 +38,7 @@
 ## Adversarial audit disposition (M222)
 
 (skipped — ABSORB gates did not pass; HARD BLOCK at build-evidence gate prevents Audit dispatch)
+
+adversarial-audit disposition: REFUTED — AC-3 (≥40% wall-clock reduction from 108.9s baseline) is not achieved (best measured result ~92s = ~15% reduction; median ~99s = ~9% reduction; 40% target = 65.34s). AC-1/2/4/5/7/8 confirmed met by independent grep/diff/test-run verification.
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward
