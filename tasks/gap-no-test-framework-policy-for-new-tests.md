@@ -57,14 +57,38 @@ extra:
 **它不提速。** 统一框架不减少任何 CPU。它买的是：诚实的断言计数、逐测试归因、逐测试失败隔离、
 一种写法。在当前满屏都是套件成本的语境里，这一点必须说明白，免得被当成提速手段排期。
 
-## 不做：不设进程/模块比例的数值门槛
+## 顺带确立：测试层次的选择原则（不是覆盖率）
 
-同一份分析发现另一个真实缺口：**没有政策说「每个入口保留几次真实端到端检查、其余走 import」**
-（唯一的规则写在 `gap-tests-use-cli-where-module-import-suffices` 的任务体里，那是为一个任务写的）。
+同一份分析发现另一个真实缺口：**没有政策说什么该用单元测试、什么该走端到端**。本任务把它写成
+文字规则。原则是**「在你愿意保持稳定的边界上测试」**，分三层：
 
-本任务**把这条规则写成文字**，但**不机械化任何数值阈值**——`gap-suite-cost-model-is-wrong-optimizations-buy-nothing`
-的成本数据还没出来。在不知道成本结构时先设一个上限，本仓库刚犯过一次（AC9 的 416s，
-见 `gap-test-suite-has-no-layer-grouping` 的成本约束段）。**不重犯。**
+| 被测对象 | 用什么 | 理由 |
+|---|---|---|
+| **用户依赖的契约**：CLI 命令、MCP 工具、Provider ABI、web 路由 | **必须** ≥1 次真实端到端检查 | B5-1 的理由在此成立——测 `dist/quay.js`（`npm pack` 发的就是它）比测只存在于本仓库的源码更接近真实契约 |
+| **分支密集的纯函数**：`checkSplitRecommendation`、`planCheckNextAction`、`checkTouchesPair` 等 | 直接 `import` 单元测试 | 经 CLI 测这些既慢又不精确——一个失败的 CLI 断言只说「输出里没有 X」，不说哪个分支错了。**实测这五个函数已全部如此，不需要补** |
+| **内部实现细节** | **不测** | 测了就是把重构成本预付掉：行为没变而测试红 |
+
+**不设任何数值阈值**——`gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 的成本数据还没
+出来。在不知道成本结构时先设上限，本仓库刚犯过一次（AC9 的 416s，见
+`gap-test-suite-has-no-layer-grouping` 的成本约束段）。**不重犯。**
+
+### 明确不做：不把覆盖率作为目标
+
+三条理由：
+
+1. **覆盖率从未被测过**。`scripts/test.sh --experimental-test-coverage` 可用、CLAUDE.md 有记载，
+   但**没有 CI 任务，没有任何地方记着一个数**。给一个从未测量的量设目标，就是 416s 那个错误
+2. **覆盖率可 game**。本仓库自己就带着 `gate-gameability.test.mjs`——它知道指标会被 game。
+   覆盖率百分比会招来「执行了行但什么都不断言」的测试
+3. **该做的地方已经做了**。五个分支密集的纯决策函数全部已有直接 import 的单元测试。
+   2.1:1 的进程/模块比**不意味着决策逻辑没被单元测试**
+
+**真正缺的不是覆盖率，是契约清单。** 实测：`core-three-way-symmetry`、`provider-abi-conformance`、
+`cli-edit-parity-conformance`、`provider-env-symmetry` 四个测试已经在做**表面对称性/一致性**检查，
+但**没有任何一处枚举全部 CLI 命令或全部 MCP 工具**（`grep` 零命中）。有了清单，
+「每个契约 ≥1 次端到端检查」就是**可机械检查的完备性，且不可 game**——你不能靠多写测试提高它，
+只能靠真的覆盖一个此前没覆盖的契约。**这比覆盖率百分比强得多**，但它是独立的一块工作，
+不在本任务范围内。
 
 ## Acceptance Criteria
 
@@ -74,8 +98,9 @@ extra:
 - [ ] AC4: **名单只能变短** —— 有文件被加入名单时检查失败；用一个临时新文件真实演练这条
 - [ ] AC5: 新文件必须带 `// @test-group` 声明；缺声明的**新**文件失败（存量缺省仍为 `engine`）
 - [ ] AC6: 检查接进 `scripts/test.sh`，与其它 engine 组检查同样运行
-- [ ] AC7: 「每个入口保留 ≥1 次真实端到端检查」写成文字规则，**不设数值阈值**，并注明阈值待
-      `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 的数据
+- [ ] AC7: 三层选择原则（契约→端到端 / 分支密集纯函数→import 单元测试 / 内部细节→不测）写成文字规则，
+      **不设数值阈值**，并注明阈值待 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 的数据
+- [ ] AC7b: 明确记录**不以覆盖率为目标**及其三条理由；若将来要看覆盖率，它是参考不是目标
 - [ ] AC8: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
