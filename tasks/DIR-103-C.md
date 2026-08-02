@@ -2,7 +2,7 @@
 id: DIR-103-C
 title: "Reproducible acceptance environment: per-provider acceptance_env env
   file + clean-environment contract documentation"
-status: todo
+status: ready
 labels:
   - directive
   - human-steered

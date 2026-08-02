@@ -1,7 +1,7 @@
 ---
 id: DIR-099-B
 title: "Provider env validation (check #9), corrected: native tasks_dir is optional (warn), github missing QUAY_GITHUB_REPO also defaults (warn); present-but-malformed → error"
-status: todo
+status: done
 labels:
   - directive
   - human-steered

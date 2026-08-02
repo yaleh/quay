@@ -2,7 +2,7 @@
 id: DIR-099-A
 title: "config validate core: YAML/provider/gate/loop/routine checks + CLI
   command + --check-files/--json output"
-status: todo
+status: done
 labels:
   - directive
   - human-steered

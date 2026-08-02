@@ -2,7 +2,7 @@
 id: DIR-099-C
 title: "MCP config_validate tool surface: registerConfigHandlers + CLI-MCP
   verdict parity"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
