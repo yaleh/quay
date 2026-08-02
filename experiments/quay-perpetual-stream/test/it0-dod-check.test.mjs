@@ -111,10 +111,15 @@ const hasPass = (r, needle) => r.passes.some((p) => p.includes(needle));
 // flag — that is clause 11 working, not a bug). Assert ONLY on the four clauses this test actually
 // targets; clauses 10/11's own real-repo-shelling-out behavior is covered by their OWN dedicated
 // tests below ("clause10:"/"clause11:"), which correctly accept either PASS or FAIL as valid.
-test("clean milestone: clauses 0/1/2/5 pass (independent of ambient clause10/11 repo state)", () => {
+// DIR-124-A4 (clause 14, workflow-metadata-conformance) is the same class: it shells out to the
+// REAL workflow files, which currently carry the documented RED baseline (Build-Evidence phase +
+// stale 'building' outcome + unclaimed 'revision-needed'), so it FAILs independently of the
+// synthetic fixture text — filtered here for the same reason clause 10/11 are; its own dedicated
+// coverage lives in workflow-metadata-conformance.test.mjs.
+test("clean milestone: clauses 0/1/2/5 pass (independent of ambient clause10/11/14 repo state)", () => {
   const r = run({ milestoneId: "M-FAKE-CLEAN" });
   const nonHygieneFailures = r.failures.filter(
-    (f) => !f.startsWith("clause10-tree-hygiene") && !f.startsWith("clause11-worktree-branch-hygiene")
+    (f) => !f.startsWith("clause10-tree-hygiene") && !f.startsWith("clause11-worktree-branch-hygiene") && !f.startsWith("clause14-workflow-metadata-conformance")
   );
   assert.equal(
     nonHygieneFailures.length,
@@ -525,7 +530,18 @@ test("clause12: '## Audit-independence check' section missing required 'Artifact
   assert.throws(() => run({ milestoneId: "M-FAKE-AUDITNOARTIFACT", absorb }), /missing required "Artifact:/);
 });
 
-// ── Clause 5 self-exemption scan now ALSO covers clauses 10/11/12 names ────────────────────────────
+// ── Clause 14: workflow-metadata conformance (DIR-124-A4) ─────────────────────────────────────────
+// Same real-repo-shelling-out class as clauses 10/11: the checker reads the REAL workflow files
+// (which currently carry the documented RED baseline), so this test only asserts disposition
+// (PASS or FAIL, ALWAYS present) — the RED/GREEN behavior is covered by its own dedicated
+// workflow-metadata-conformance.test.mjs.
+test("clause14: workflow-metadata-conformance gate runs the real checker and dispositions it (PASS or FAIL, but ALWAYS present)", () => {
+  const r = run({ milestoneId: "M-FAKE-WMC" });
+  const disposed = hasPass(r, "clause14-workflow-metadata-conformance") || hasFail(r, "clause14-workflow-metadata-conformance");
+  assert.ok(disposed, `clause14 must always be dispositioned (pass or fail): ${JSON.stringify({ passes: r.passes, failures: r.failures })}`);
+});
+
+// ── Clause 5 self-exemption scan now ALSO covers clauses 10/11/12/14 names ─────────────────────────
 test("clause5: charter exempts tree-hygiene with NO matching WAIVER line → failure", () => {
   const charter = `## Charter excerpt\n\n**Milestone id:** MID\n\n### Explicitly OUT of scope\n- tree-hygiene: exempt for this milestone, no scratch-file check needed.\n`;
   const r = run({ milestoneId: "M-FAKE-EXEMPTTH", charter });
