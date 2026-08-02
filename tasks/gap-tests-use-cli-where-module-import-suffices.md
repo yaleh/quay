@@ -2,7 +2,7 @@
 id: gap-tests-use-cli-where-module-import-suffices
 title: "18 test files test logic through a 3.5s CLI spawn instead of importing
   the module"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate

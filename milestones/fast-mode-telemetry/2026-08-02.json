@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T14:03:24.980Z",
+  "generatedAt": "2026-08-02T14:23:23.715Z",
   "since": null,
   "tasks": [
     {
@@ -26,17 +26,16 @@
       "taskId": "gap-tests-spawn-cli-from-ts-source",
       "minutes": 22.43315,
       "outcome": "done"
+    },
+    {
+      "taskId": "gap-tests-use-cli-where-module-import-suffices",
+      "minutes": 34.45701666666667,
+      "outcome": "done"
     }
   ],
   "orphaned": [],
-  "inProgress": [
-    {
-      "taskId": "gap-tests-use-cli-where-module-import-suffices",
-      "runId": "fm-gap-tests-use-cli-where-module-import-suffices-1785678301009-hn9gyi",
-      "startedAtMs": 1785678301022
-    }
-  ],
-  "meanMinutes": 42.21040333333333,
-  "medianMinutes": 40.2564,
-  "tasksPerHour": 1.4214505255063108
+  "inProgress": [],
+  "meanMinutes": 40.918172222222225,
+  "medianMinutes": 40.25631666666666,
+  "tasksPerHour": 1.4663411570327824
 }
