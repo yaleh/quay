@@ -84,7 +84,6 @@
 //
 // Run: node test/mcp-server.test.mjs
 
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -92,6 +91,7 @@ import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { createStore } from "../../quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // gap-tests-spawn-cli-from-ts-source (AC9): route CLI subprocess spawns through
@@ -102,6 +102,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const coreBin = QUAY_CLI;
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
+
+// gap-tests-use-cli-where-module-import-suffices (AC1/AC2): fixture seeding goes
+// through the quay-native store module's write() — the SAME validated write
+// path bin/quay-native.ts's `task create`/`task edit` are thin wrappers over
+// (status whitelist, ADV-004 path guard, M89 post-write YAML validation, M35
+// relation sync), without a Node subprocess per fixture. `task edit --extra`
+// is expressed directly via write()'s `extra` field (one call instead of
+// create+edit). Every fixture below is a flat id/title/status/labels/body/extra
+// pure-data task with no cross-file write-semantic dependency → seedTask().
+function seedTask(tasksDir, id, fields) {
+  return createStore(tasksDir).write(id, { labels: [], ...fields });
+}
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
@@ -164,14 +176,20 @@ async function main() {
     ].join("\n")
   );
 
-  execFileSync("node", [nativeBin, "task", "create", "MCP-A1", "--title", "Provider-A-only task",
-    "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDirA },
-  });
-  execFileSync("node", [nativeBin, "task", "create", "MCP-B1", "--title", "Provider-B-only task",
-    "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDirB },
-  });
+  // Pure-data fixtures → store write (same validated path as `task create`).
+  seedTask(tasksDirA, "MCP-A1", { title: "Provider-A-only task", status: "todo", body: VALID_SECTIONS + AC_DOD_CHECKED });
+  seedTask(tasksDirB, "MCP-B1", { title: "Provider-B-only task", status: "todo", body: VALID_SECTIONS + AC_DOD_CHECKED });
+
+  // AC4 (connection consolidation): blocks 17 (QN-035 _version) and 19
+  // (QN-044 fence-search) are READ-ONLY and id/search-scoped (no store-wide
+  // count assertions, no writes), so they share the primary `core` connection
+  // (default provider "native" = tasksDirA) instead of spawning their own
+  // `quay mcp` subprocess. Their fixture tasks live here in tasksDirA.
+  seedTask(tasksDirA, "VSN-1", { title: "Version test task", status: "todo", body: "# VSN-1 body" });
+  seedTask(tasksDirA, "FENCE-1", { title: "Task with fenced code block", status: "todo",
+    body: "## Proposal\nSome prose.\n```bash\n# bash-comment-token\necho hello\n```\n## AC\n- [x] done\n## DoD\n- [x] done\n" });
+  seedTask(tasksDirA, "FENCE-2", { title: "Task with heading outside fence", status: "todo",
+    body: "## Proposal-outside-fence\nSome prose.\n## AC\n- [x] done\n## DoD\n- [x] done\n" });
 
   // ---- 1. Connect the real `quay mcp` subprocess ----
   const { client: core, transport: coreTransport } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot);
@@ -381,7 +399,11 @@ async function main() {
     fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
   }
 
-  await core.close();
+  // NOTE (AC4 connection consolidation): `core` is deliberately NOT closed here
+  // — blocks 17 (QX-035) and 19 (QX-044) below are read-only and id/search-
+  // scoped, so they reuse this same connection (default provider "native" =
+  // tasksDirA, where their VSN-1/FENCE-1/FENCE-2 fixtures were seeded). It is
+  // closed just before the QENG gate block below, after block 19's assertions.
 
   // ---- 10. (QN-060) live cross-Provider (GitHub) aggregation through
   //      `quay mcp`, against the real, live yaleh/quay issue gh-3 ----
@@ -544,18 +566,10 @@ async function main() {
       "## AC\n- [x] a sufficiently long acceptance criterion line\n" +
       "## DoD\n- [x] a sufficiently long definition-of-done line\n";
 
-    execFileSync("node", [nativeBin, "task", "create", "PFXA-001", "--title", "Prefix A task 1",
-      "--status", "todo", "--body", MINIMAL_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "create", "PFXA-002", "--title", "Prefix A task 2",
-      "--status", "todo", "--body", MINIMAL_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "create", "PFXB-001", "--title", "Prefix B task 1",
-      "--status", "done", "--body", MINIMAL_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
-    });
+    // Pure-data fixtures → store write.
+    seedTask(prefixTasksDir, "PFXA-001", { title: "Prefix A task 1", status: "todo", body: MINIMAL_BODY });
+    seedTask(prefixTasksDir, "PFXA-002", { title: "Prefix A task 2", status: "todo", body: MINIMAL_BODY });
+    seedTask(prefixTasksDir, "PFXB-001", { title: "Prefix B task 1", status: "done", body: MINIMAL_BODY });
 
     fs.writeFileSync(
       path.join(prefixWorkspaceRoot, ".quay", "config.yml"),
@@ -662,10 +676,8 @@ async function main() {
       "## Plan\nA sufficiently long plan section.\n" +
       "## AC\n- [x] a sufficiently long acceptance criterion line\n" +
       "## DoD\n- [x] a sufficiently long definition-of-done line\n";
-    execFileSync("node", [nativeBin, "task", "create", "SCH-001", "--title", "Schema test task",
-      "--status", "todo", "--body", MINIMAL_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: schemaTasksDir },
-    });
+    // Pure-data fixture → store write.
+    seedTask(schemaTasksDir, "SCH-001", { title: "Schema test task", status: "todo", body: MINIMAL_BODY });
 
     const { client: coreSchema } = await connectStdio("node", [coreBin, "mcp"], schemaWorkspaceRoot);
 
@@ -762,26 +774,15 @@ async function main() {
       ].join("\n")
     );
 
-    // SRCH-1: title match for "toggle"
-    execFileSync("node", [nativeBin, "task", "create", "SRCH-1",
-      "--title", "toggle feature task",
-      "--status", "todo",
-      "--body", "## Proposal\nThis task is about toggling something.\n## Plan\nImplement the toggle.\n## AC\n- [x] toggle works\n## DoD\n- [x] toggle is tested\n"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir } });
-
+    // Pure-data fixtures → store write (search-behavior distinction lives in body text).
+    seedTask(srchTasksDir, "SRCH-1", { title: "toggle feature task", status: "todo",
+      body: "## Proposal\nThis task is about toggling something.\n## Plan\nImplement the toggle.\n## AC\n- [x] toggle works\n## DoD\n- [x] toggle is tested\n" });
     // SRCH-2: heading-only body — "Proposal" only appears in ## Proposal heading
-    execFileSync("node", [nativeBin, "task", "create", "SRCH-2",
-      "--title", "regular task",
-      "--status", "todo",
-      "--body", "## Proposal\n## Plan\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir } });
-
+    seedTask(srchTasksDir, "SRCH-2", { title: "regular task", status: "todo",
+      body: "## Proposal\n## Plan\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n" });
     // SRCH-3: prose body containing unique token
-    execFileSync("node", [nativeBin, "task", "create", "SRCH-3",
-      "--title", "another task",
-      "--status", "todo",
-      "--body", "## Proposal\nContains unique-xyzzy-prose token in a prose line.\n## Plan\nN/A\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir } });
+    seedTask(srchTasksDir, "SRCH-3", { title: "another task", status: "todo",
+      body: "## Proposal\nContains unique-xyzzy-prose token in a prose line.\n## Plan\nN/A\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n" });
 
     const { client: coreSrch } = await connectStdio("node", [coreBin, "mcp"], srchWorkspaceRoot);
 
@@ -892,17 +893,12 @@ async function main() {
     const PAG_BODY =
       "## Proposal\nPagination fixture task.\n## Plan\nN/A\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n";
 
+    // Pure-data fixtures → store write.
     for (const id of ["PAG-1", "PAG-2", "PAG-3"]) {
-      execFileSync("node", [nativeBin, "task", "create", id,
-        "--title", `Pagination task ${id}`,
-        "--status", "todo", "--body", PAG_BODY],
-        { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pagTasksDir } });
+      seedTask(pagTasksDir, id, { title: `Pagination task ${id}`, status: "todo", body: PAG_BODY });
     }
     // PAG-4 has a unique title token for combined search+pagination test
-    execFileSync("node", [nativeBin, "task", "create", "PAG-4",
-      "--title", "pag-special token task",
-      "--status", "todo", "--body", PAG_BODY],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pagTasksDir } });
+    seedTask(pagTasksDir, "PAG-4", { title: "pag-special token task", status: "todo", body: PAG_BODY });
 
     const { client: corePag } = await connectStdio("node", [coreBin, "mcp"], pagWorkspaceRoot);
 
@@ -1037,22 +1033,11 @@ async function main() {
 
     const MLT_BODY = "## Proposal\nMulti-label fixture.\n## AC\n- [x] ok\n## DoD\n- [x] done\n";
 
-    execFileSync("node", [nativeBin, "task", "create", "MLT-1",
-      "--title", "Multi-label task 1",
-      "--status", "todo", "--body", MLT_BODY, "--labels", "experiment-4,iteration-5"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
-    execFileSync("node", [nativeBin, "task", "create", "MLT-2",
-      "--title", "Multi-label task 2",
-      "--status", "todo", "--body", MLT_BODY, "--labels", "experiment-4,iteration-9"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
-    execFileSync("node", [nativeBin, "task", "create", "MLT-3",
-      "--title", "Multi-label task 3",
-      "--status", "todo", "--body", MLT_BODY, "--labels", "experiment-4"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
-    execFileSync("node", [nativeBin, "task", "create", "MLT-4",
-      "--title", "Multi-label task 4",
-      "--status", "todo", "--body", MLT_BODY, "--labels", "iteration-9"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
+    // Pure-data fixtures (labels as plain arrays) → store write.
+    seedTask(mltTasksDir, "MLT-1", { title: "Multi-label task 1", status: "todo", body: MLT_BODY, labels: ["experiment-4", "iteration-5"] });
+    seedTask(mltTasksDir, "MLT-2", { title: "Multi-label task 2", status: "todo", body: MLT_BODY, labels: ["experiment-4", "iteration-9"] });
+    seedTask(mltTasksDir, "MLT-3", { title: "Multi-label task 3", status: "todo", body: MLT_BODY, labels: ["experiment-4"] });
+    seedTask(mltTasksDir, "MLT-4", { title: "Multi-label task 4", status: "todo", body: MLT_BODY, labels: ["iteration-9"] });
 
     const { client: coreMlt } = await connectStdio("node", [coreBin, "mcp"], mltWorkspaceRoot);
 
@@ -1125,39 +1110,16 @@ async function main() {
   // ---- Block 17: QX-035 (experiment 4, iteration 10) — task_list _version field
   //   and tool description Version: mitigation for ENV-001. ----
   {
-    // Set up a minimal workspace to call task_list.
-    const vsnTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-vsn-tasks-"));
-    const vsnWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-vsn-workspace-"));
-    // Create one task to ensure task_list returns something.
-    fs.writeFileSync(path.join(vsnTasksDir, "VSN-1.md"), [
-      "---",
-      "id: VSN-1",
-      "title: Version test task",
-      "status: todo",
-      "role: primitive",
-      "labels: []",
-      "---",
-      "# VSN-1 body",
-    ].join("\n") + "\n");
-    fs.mkdirSync(path.join(vsnWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(path.join(vsnWorkspaceRoot, ".quay", "config.yml"), [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir}"`,
-      `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${vsnTasksDir}"`,
-      "",
-    ].join("\n"));
-
-    const { client: coreVsn, transport: coreVsnTransport } = await connectStdio(
-      "node", [coreBin, "mcp"], vsnWorkspaceRoot
-    );
-
+    // AC4 (connection consolidation): this block is READ-ONLY and asserts only
+    // the `_version` field + tool description — it has no store-wide count and
+    // no writes — so it shares the primary `core` connection (default provider
+    // "native" = tasksDirA, where VSN-1 was seeded at the top) instead of
+    // spawning its own `quay mcp` subprocess. Isolation is preserved: no other
+    // assertion depends on the exact task set in tasksDirA (all are id-scoped),
+    // and VSN-1 is never written to by any other block.
     // (a) task_list response includes _version field (string, non-empty) — Mitigation A
     {
-      const r = await coreVsn.callTool({
+      const r = await core.callTool({
         name: "task_list",
         arguments: {},
       });
@@ -1169,7 +1131,7 @@ async function main() {
 
     // (b) task_list tool description includes "Version:" — Mitigation B
     {
-      const toolsResult = await coreVsn.listTools();
+      const toolsResult = await core.listTools();
       const taskListTool = (toolsResult.tools ?? []).find((t) => t.name === "task_list");
       assert(!!taskListTool, "listTools() includes task_list (QX-035 description check)");
       if (taskListTool) {
@@ -1179,10 +1141,6 @@ async function main() {
         );
       }
     }
-
-    await coreVsnTransport.close();
-    fs.rmSync(vsnTasksDir, { recursive: true, force: true });
-    fs.rmSync(vsnWorkspaceRoot, { recursive: true, force: true });
   }
 
   // ---- Block 18: QX-042 (experiment 4, iteration 11) — pagination edge cases (SH-004) ----
@@ -1215,16 +1173,11 @@ async function main() {
       ].join("\n")
     );
 
-    const envOverride42 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx42TasksDir };
     const QX42_BODY = "## Proposal\nEdge case fixture.\n## AC\n- [x] done\n## DoD\n- [x] done\n";
 
-    // Create 3 tasks for clamping assertions
+    // Create 3 tasks for clamping assertions. Pure-data fixtures → store write.
     for (let i = 1; i <= 3; i++) {
-      execFileSync("node", [nativeBin, "task", "create", `QX42-${i}`,
-        "--title", `Edge case task ${i}`,
-        "--status", "todo",
-        "--body", QX42_BODY],
-        { env: envOverride42 });
+      seedTask(qx42TasksDir, `QX42-${i}`, { title: `Edge case task ${i}`, status: "todo", body: QX42_BODY });
     }
 
     const { client: coreQx42, transport: coreQx42Transport } = await connectStdio(
@@ -1280,45 +1233,21 @@ async function main() {
   //            → search for "bash-comment-token" must MATCH (not stripped in fence)
   //   FENCE-2: body has `## Proposal-outside-fence` heading OUTSIDE any fence
   //            → search for "Proposal-outside-fence" must NOT MATCH (heading stripped)
+  // The FENCE-1/FENCE-2 fixture tasks live in tasksDirA (seeded at the top) and
+  // this block reuses the shared `core` connection (see AC4 comment below).
   {
-    const qx44TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-qx44-tasks-"));
-    const qx44WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-qx44-workspace-"));
-    fs.mkdirSync(path.join(qx44WorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(qx44WorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir}"`,
-        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${qx44TasksDir}"`,
-        "",
-      ].join("\n")
-    );
 
-    // FENCE-1: body has a fenced code block containing "# bash-comment-token"
-    execFileSync("node", [nativeBin, "task", "create", "FENCE-1",
-      "--title", "Task with fenced code block",
-      "--status", "todo",
-      "--body", "## Proposal\nSome prose.\n```bash\n# bash-comment-token\necho hello\n```\n## AC\n- [x] done\n## DoD\n- [x] done\n"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx44TasksDir } });
-
-    // FENCE-2: body has a heading outside any fence — "## Proposal-outside-fence"
-    execFileSync("node", [nativeBin, "task", "create", "FENCE-2",
-      "--title", "Task with heading outside fence",
-      "--status", "todo",
-      "--body", "## Proposal-outside-fence\nSome prose.\n## AC\n- [x] done\n## DoD\n- [x] done\n"],
-      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx44TasksDir } });
-
-    const { client: coreQx44, transport: coreQx44Transport } = await connectStdio(
-      "node", [coreBin, "mcp"], qx44WorkspaceRoot
-    );
+    // AC4 (connection consolidation): this block is READ-ONLY and search-scoped
+    // (asserts only which ids a given search term returns) — no store-wide count,
+    // no writes — so it shares the primary `core` connection (default provider
+    // "native" = tasksDirA, where FENCE-1/FENCE-2 were seeded at the top) instead
+    // of spawning its own `quay mcp` subprocess. Isolation preserved: the two
+    // search terms match only FENCE-1/FENCE-2, so the presence of the other
+    // tasksDirA tasks (MCP-A1/VSN-1/…) does not affect either assertion.
 
     // Positive: "bash-comment-token" is inside a fenced code block — must be findable
     {
-      const r = await coreQx44.callTool({ name: "task_list", arguments: { search: "bash-comment-token" } });
+      const r = await core.callTool({ name: "task_list", arguments: { search: "bash-comment-token" } });
       assert(r.isError !== true, "task_list search='bash-comment-token' returns no error (QX-044, SH-005)");
       const ids = (r.structuredContent?.tasks ?? []).map((t) => t.id);
       assert(
@@ -1329,7 +1258,7 @@ async function main() {
 
     // Negative: "Proposal-outside-fence" is a ## heading outside any fence — must NOT be findable
     {
-      const r = await coreQx44.callTool({ name: "task_list", arguments: { search: "Proposal-outside-fence" } });
+      const r = await core.callTool({ name: "task_list", arguments: { search: "Proposal-outside-fence" } });
       assert(r.isError !== true, "task_list search='Proposal-outside-fence' returns no error (QX-044, SH-005)");
       const ids = (r.structuredContent?.tasks ?? []).map((t) => t.id);
       assert(
@@ -1337,11 +1266,12 @@ async function main() {
         `task_list search='Proposal-outside-fence': FENCE-2 is NOT found (heading outside fence IS stripped) (SH-005, QX-044). Got: [${ids.join(", ")}]`
       );
     }
-
-    await coreQx44Transport.close();
-    fs.rmSync(qx44TasksDir, { recursive: true, force: true });
-    fs.rmSync(qx44WorkspaceRoot, { recursive: true, force: true });
   }
+
+  // All blocks that reuse the primary `core` connection (2-9, 17, 19) are done —
+  // close it before the gate block, which needs its own workspace/connection
+  // (write operations + default-cwd semantics tied to its own workspace root).
+  await core.close();
 
   // ---- 12. QENG gate/lifecycle MCP tools (M53/exp5-M-GATE-MCP-PARITY-GAP) ----
   // gate_run, gate_log, lifecycle_complete, lifecycle_adjudicate,
@@ -1367,32 +1297,13 @@ async function main() {
 
     // GATE-PASS: status=ready, extra.acceptance is a trivially-true shell
     // command -- gate_run should PASS and lifecycle_complete should advance
-    // it to done.
-    execFileSync("node", [nativeBin, "task", "create", "GATE-PASS", "--title", "Gate MCP tool demo (pass)",
-      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "edit", "GATE-PASS", "--extra", JSON.stringify({ acceptance: "true" })], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
-
-    // GATE-FAIL: status=ready, extra.acceptance is a trivially-false command
-    // -- gate_run should FAIL (ok:false, not isError) and lifecycle_complete
-    // should leave it ready.
-    execFileSync("node", [nativeBin, "task", "create", "GATE-FAIL", "--title", "Gate MCP tool demo (fail)",
-      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "edit", "GATE-FAIL", "--extra", JSON.stringify({ acceptance: "false" })], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
-
-    // GATE-TODO: status=todo -- used for lifecycle_promote (todo->ready via
-    // the 'dod' gate) and as an illegal-retreat target (todo has no back edge).
-    execFileSync("node", [nativeBin, "task", "create", "GATE-TODO", "--title", "Gate MCP tool demo (todo)",
-      "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
+    // it to done. GATE-FAIL: extra.acceptance is a trivially-false command.
+    // GATE-TODO: status=todo (lifecycle_promote target + illegal-retreat target).
+    // Pure-data fixtures (the acceptance meter lives in `extra`, expressed in one
+    // store write instead of the CLI's create+edit pair) → store write.
+    seedTask(gateTasksDir, "GATE-PASS", { title: "Gate MCP tool demo (pass)", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: "true" } });
+    seedTask(gateTasksDir, "GATE-FAIL", { title: "Gate MCP tool demo (fail)", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: "false" } });
+    seedTask(gateTasksDir, "GATE-TODO", { title: "Gate MCP tool demo (todo)", status: "todo", body: VALID_SECTIONS + AC_DOD_CHECKED });
 
     const { client: coreGate, transport: coreGateTransport } = await connectStdio(
       "node", [coreBin, "mcp"], gateWorkspaceRoot
@@ -1421,23 +1332,10 @@ async function main() {
     // These assertions target the MCP cwd parameter specifically.
     const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-gate-cwd-"));
     // GATE-CWD-EXPLICIT: acceptance command checks that pwd equals worktreeDir (not gateWorkspaceRoot).
-    execFileSync("node", [nativeBin, "task", "create", "GATE-CWD-EXPLICIT", "--title", "Gate cwd explicit (MCP)",
-      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "edit", "GATE-CWD-EXPLICIT",
-      "--extra", JSON.stringify({ acceptance: `test "$(pwd)" = "${worktreeDir}"` })], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
     // GATE-CWD-DEFAULT: acceptance command checks that pwd equals gateWorkspaceRoot (default).
-    execFileSync("node", [nativeBin, "task", "create", "GATE-CWD-DEFAULT", "--title", "Gate cwd default (MCP)",
-      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "edit", "GATE-CWD-DEFAULT",
-      "--extra", JSON.stringify({ acceptance: `test "$(pwd)" = "${gateWorkspaceRoot}"` })], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
-    });
+    // Pure-data fixtures (the acceptance command lives in `extra`) → store write.
+    seedTask(gateTasksDir, "GATE-CWD-EXPLICIT", { title: "Gate cwd explicit (MCP)", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: `test "$(pwd)" = "${worktreeDir}"` } });
+    seedTask(gateTasksDir, "GATE-CWD-DEFAULT", { title: "Gate cwd default (MCP)", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: `test "$(pwd)" = "${gateWorkspaceRoot}"` } });
 
     // Assertion 1: explicit cwd wins (MCP path) -- gate runs in worktreeDir, not gateWorkspaceRoot.
     {
@@ -1622,34 +1520,12 @@ async function main() {
       );
 
       // ENV-LC: ready, acceptance=true -- for lifecycle_complete.
-      execFileSync("node", [nativeBin, "task", "create", "ENV-LC",
-        "--title", "Env LC test (DIR-084)",
-        "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
-      });
-      execFileSync("node", [nativeBin, "task", "edit", "ENV-LC",
-        "--extra", JSON.stringify({ acceptance: "true" })], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
-      });
-
-      // ENV-LP: todo, AC/DoD checked -- for lifecycle_promote (todo->ready via dod gate).
-      execFileSync("node", [nativeBin, "task", "create", "ENV-LP",
-        "--title", "Env LP test (DIR-084)",
-        "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
-      });
-
+      // ENV-LP: todo, AC/DoD checked -- for lifecycle_promote.
       // ENV-CWD: ready, acceptance checks that pwd == presetCwdDir.
-      // This verifies that QUAY_ACCEPTANCE_CWD was properly restored after lifecycle calls.
-      execFileSync("node", [nativeBin, "task", "create", "ENV-CWD",
-        "--title", "Env CWD check (DIR-084)",
-        "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
-      });
-      execFileSync("node", [nativeBin, "task", "edit", "ENV-CWD",
-        "--extra", JSON.stringify({ acceptance: `test "$(pwd)" = "${presetCwdDir}"` })], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
-      });
+      // Pure-data fixtures (acceptance command lives in `extra`) → store write.
+      seedTask(envPresetTasksDir, "ENV-LC", { title: "Env LC test (DIR-084)", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: "true" } });
+      seedTask(envPresetTasksDir, "ENV-LP", { title: "Env LP test (DIR-084)", status: "todo", body: VALID_SECTIONS + AC_DOD_CHECKED });
+      seedTask(envPresetTasksDir, "ENV-CWD", { title: "Env CWD check (DIR-084)", status: "ready", body: VALID_SECTIONS + AC_DOD_CHECKED, extra: { acceptance: `test "$(pwd)" = "${presetCwdDir}"` } });
 
       // Start quay mcp with QUAY_ACCEPTANCE_CWD pre-set to presetCwdDir.
       const { client: coreEnv, transport: coreEnvTransport } = await connectStdio(

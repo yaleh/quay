@@ -30,6 +30,7 @@ import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
 import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { createStore } from "../../quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // gap-tests-spawn-cli-from-ts-source (AC9): route native CLI fixture-seeding
@@ -38,6 +39,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // SOURCE bin dir — it is independent of which entry binary mcp_entry launches.
 const nativeBin = QUAY_NATIVE_CLI;
 const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
+
+// gap-tests-use-cli-where-module-import-suffices (AC1/AC2): fixture seeding now
+// goes through the quay-native store module's write() — the SAME validated
+// write path the CLI's `task create` subcommand uses (bin/quay-native.ts is a
+// thin wrapper over store.write(id, {title, status, labels, body})), so this
+// preserves every write semantic the fixtures depend on (status whitelist
+// validation, ADV-004 path-traversal guard, M89 post-write YAML validation,
+// M35 parent/children relation sync) WITHOUT spawning a Node process per
+// fixture. All serve fixtures below are flat id/title/status/labels/body
+// pure-data tasks — none depend on cross-file write semantics (parent/child
+// relation sync), so every one classifies as "pure data → seedTask()". The one
+// retained real CLI invocation (the primary SRV-1/SRV-2 block) is the AC7
+// end-to-end entry-wiring proof (a broken `quay-native task create` would go
+// silent if we sank every spawn).
+function seedTask(tasksDir, id, fields) {
+  return createStore(tasksDir).write(id, { labels: [], ...fields });
+}
 
 let failures = 0;
 function assert(cond, msg) {
@@ -87,8 +105,15 @@ async function main() {
   // Two tasks: one at `todo` (has a matching action_button per provider.yml's
   // whenStatus: ["todo","ready"]) and one at `done` (NO matching action
   // button — the negative control, mirroring QN-030's GAME-C discipline).
+  // AC7 (≥1 real end-to-end call): these TWO fixtures are the retained real
+  // `quay-native task create` invocations for this file — they prove the CLI
+  // entry actually connects, so a broken entry cannot go silent. Every other
+  // fixture below sinks to the validated store write (seedTask). SRV-1 also
+  // carries a `--labels` flag so the retained CLI call still exercises the
+  // CLI's own comma-splitting/validation path (the sunk fixtures pass labels
+  // as store arrays directly), keeping per-file CLI-flag coverage intact.
   execFileSync("node", [nativeBin, "task", "create", "SRV-1", "--title", "Servable task one",
-    "--status", "todo", "--body", VALID_SECTIONS], {
+    "--status", "todo", "--body", VALID_SECTIONS, "--labels", "cli-flag-proof"], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "SRV-2", "--title", "Servable task two (done, no button)",
@@ -189,14 +214,9 @@ async function main() {
     );
 
     // Seed tasks with two distinct prefixes: PFXA and PFXB
-    execFileSync("node", [nativeBin, "task", "create", "PFXA-1", "--title", "Prefix A task",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pfxTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "create", "PFXB-1", "--title", "Prefix B task",
-      "--status", "done", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pfxTasksDir },
-    });
+    // Pure-data fixture (flat id/title/status/body; no write semantics) → store write.
+    seedTask(pfxTasksDir, "PFXA-1", { title: "Prefix A task", status: "todo", body: VALID_SECTIONS });
+    seedTask(pfxTasksDir, "PFXB-1", { title: "Prefix B task", status: "done", body: VALID_SECTIONS });
 
     const pfxPort = port + 1;
     const pfxOriginalCwd = process.cwd();
@@ -255,20 +275,13 @@ async function main() {
     );
 
     // Create tasks in sequence with distinct mtimes.
-    execFileSync("node", [nativeBin, "task", "create", "SRT-A", "--title", "Sort A (oldest)",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
-    });
+    // Pure-data fixtures (distinct mtime via the spin-waits between writes; the
+    // store write uses fs.writeFileSync so mtime ordering is preserved) → store write.
+    seedTask(sortTasksDir, "SRT-A", { title: "Sort A (oldest)", status: "todo", body: VALID_SECTIONS });
     const t0 = Date.now(); while (Date.now() - t0 < 50) { /* spin wait for distinct mtime */ }
-    execFileSync("node", [nativeBin, "task", "create", "SRT-B", "--title", "Sort B (middle)",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
-    });
+    seedTask(sortTasksDir, "SRT-B", { title: "Sort B (middle)", status: "todo", body: VALID_SECTIONS });
     const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
-    execFileSync("node", [nativeBin, "task", "create", "SRT-C", "--title", "Sort C (most recent)",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
-    });
+    seedTask(sortTasksDir, "SRT-C", { title: "Sort C (most recent)", status: "todo", body: VALID_SECTIONS });
 
     const sortPort = port + 2;
     const sortOrigCwd = process.cwd();
@@ -330,14 +343,9 @@ async function main() {
 
     // SRV2-1: todo status → should have Advance button on list page.
     // SRV2-2: done status → should NOT have Advance button (whenStatus: ["todo","ready"]).
-    execFileSync("node", [nativeBin, "task", "create", "SRV2-1", "--title", "List action task (todo)",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: actTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "create", "SRV2-2", "--title", "List action task (done, no button)",
-      "--status", "done", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: actTasksDir },
-    });
+    // Pure-data fixtures → store write.
+    seedTask(actTasksDir, "SRV2-1", { title: "List action task (todo)", status: "todo", body: VALID_SECTIONS });
+    seedTask(actTasksDir, "SRV2-2", { title: "List action task (done, no button)", status: "done", body: VALID_SECTIONS });
 
     const actPort = port + 3;
     const actOrigCwd = process.cwd();
@@ -438,20 +446,16 @@ async function main() {
     );
 
     // UX3-1: todo with all ACs checked (gate passes) — tests back-link, tooltip, success redirect
-    execFileSync("node", [nativeBin, "task", "create", "UX3-1", "--title", "Gate-pass task (todo, all ACs checked)",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: ux3TasksDir },
-    });
     // UX3-2: todo with unchecked ACs — tests gate-fail redirect and error banner
+    // Pure-data fixtures (the gate-pass/fail distinction lives in the BODY text,
+    // not in any write semantic) → store write.
+    seedTask(ux3TasksDir, "UX3-1", { title: "Gate-pass task (todo, all ACs checked)", status: "todo", body: VALID_SECTIONS });
     const UNCHECKED_SECTIONS =
       "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
       "## Plan\nThis is a sufficiently long plan section so the gate's minimum-content check passes cleanly.\n" +
       "## AC\n- [ ] a sufficiently long acceptance criterion line — NOT YET CHECKED\n" +
       "## DoD\n- [ ] a sufficiently long definition-of-done line — NOT YET CHECKED\n";
-    execFileSync("node", [nativeBin, "task", "create", "UX3-2", "--title", "Gate-blocked task (todo, ACs unchecked)",
-      "--status", "todo", "--body", UNCHECKED_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: ux3TasksDir },
-    });
+    seedTask(ux3TasksDir, "UX3-2", { title: "Gate-blocked task (todo, ACs unchecked)", status: "todo", body: UNCHECKED_SECTIONS });
 
     const ux3Port = port + 4;
     const ux3OrigCwd = process.cwd();
@@ -657,15 +661,10 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${m33TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${m33TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
     // M33-P1: gate-pass todo task, used for the "print"-degraded banner assertion.
-    execFileSync("node", [nativeBin, "task", "create", "M33-P1", "--title", "M33 print-mode banner test task",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: m33TasksDir },
-    });
     // M33-M1: gate-pass todo task, used for the "mock"-mode banner assertion.
-    execFileSync("node", [nativeBin, "task", "create", "M33-M1", "--title", "M33 mock-mode banner test task",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: m33TasksDir },
-    });
+    // Pure-data fixtures → store write.
+    seedTask(m33TasksDir, "M33-P1", { title: "M33 print-mode banner test task", status: "todo", body: VALID_SECTIONS });
+    seedTask(m33TasksDir, "M33-M1", { title: "M33 mock-mode banner test task", status: "todo", body: VALID_SECTIONS });
 
     const m33Port = port + 16;
     const m33OrigCwd = process.cwd();
@@ -760,21 +759,11 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx16TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx16TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    // BOTH-1: has both labels "bug" and "cli"
-    execFileSync("node", [nativeBin, "task", "create", "BOTH-1", "--title", "Has both labels",
-      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "bug,cli"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx16TasksDir },
-    });
-    // BUGONLY-1: has only label "bug"
-    execFileSync("node", [nativeBin, "task", "create", "BUGONLY-1", "--title", "Has only bug label",
-      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "bug"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx16TasksDir },
-    });
-    // NOLAB-1: no labels
-    execFileSync("node", [nativeBin, "task", "create", "NOLAB-1", "--title", "Has no labels",
-      "--status", "done", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx16TasksDir },
-    });
+    // BOTH-1: has both labels "bug" and "cli"; BUGONLY-1: only "bug"; NOLAB-1: none.
+    // Pure-data fixtures (labels are a plain array in frontmatter) → store write.
+    seedTask(qx16TasksDir, "BOTH-1", { title: "Has both labels", status: "todo", body: VALID_SECTIONS, labels: ["bug", "cli"] });
+    seedTask(qx16TasksDir, "BUGONLY-1", { title: "Has only bug label", status: "todo", body: VALID_SECTIONS, labels: ["bug"] });
+    seedTask(qx16TasksDir, "NOLAB-1", { title: "Has no labels", status: "done", body: VALID_SECTIONS });
 
     const qx16Port = port + 5;
     const qx16OrigCwd = process.cwd();
@@ -863,21 +852,11 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx20TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx20TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    // TOGGLE-1: has labels "alpha" and "beta"
-    execFileSync("node", [nativeBin, "task", "create", "TOGGLE-1", "--title", "Alpha beta task",
-      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "alpha,beta"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx20TasksDir },
-    });
-    // TOGGLE-2: has label "alpha" only
-    execFileSync("node", [nativeBin, "task", "create", "TOGGLE-2", "--title", "Alpha only task",
-      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "alpha"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx20TasksDir },
-    });
-    // TOGGLE-3: has label "gamma" only (not alpha or beta)
-    execFileSync("node", [nativeBin, "task", "create", "TOGGLE-3", "--title", "Gamma search task",
-      "--status", "done", "--body", VALID_SECTIONS, "--labels", "gamma"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx20TasksDir },
-    });
+    // TOGGLE-1: labels "alpha"+"beta"; TOGGLE-2: "alpha" only; TOGGLE-3: "gamma" only (done).
+    // Pure-data fixtures (labels as plain array) → store write.
+    seedTask(qx20TasksDir, "TOGGLE-1", { title: "Alpha beta task", status: "todo", body: VALID_SECTIONS, labels: ["alpha", "beta"] });
+    seedTask(qx20TasksDir, "TOGGLE-2", { title: "Alpha only task", status: "todo", body: VALID_SECTIONS, labels: ["alpha"] });
+    seedTask(qx20TasksDir, "TOGGLE-3", { title: "Gamma search task", status: "done", body: VALID_SECTIONS, labels: ["gamma"] });
 
     const qx20Port = port + 6;
     const qx20OrigCwd = process.cwd();
@@ -983,26 +962,17 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx23TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx23TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    // BSRCH-1: unique term ONLY in body, not in title
+    // BSRCH-1: unique term ONLY in body, not in title; BSRCH-2: control (no match).
+    // Pure-data fixtures (search-behavior distinction lives in body text) → store write.
     const bodyOnlyBody = VALID_SECTIONS + "\nThis body contains xyzzy-unique-body-term here.\n";
-    execFileSync("node", [nativeBin, "task", "create", "BSRCH-1", "--title", "Unrelated title only",
-      "--status", "todo", "--body", bodyOnlyBody], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx23TasksDir },
-    });
-    // BSRCH-2: term NOT in title or body (control — must be excluded)
-    execFileSync("node", [nativeBin, "task", "create", "BSRCH-2", "--title", "Other task no match",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx23TasksDir },
-    });
+    seedTask(qx23TasksDir, "BSRCH-1", { title: "Unrelated title only", status: "todo", body: bodyOnlyBody });
+    seedTask(qx23TasksDir, "BSRCH-2", { title: "Other task no match", status: "todo", body: VALID_SECTIONS });
     // QX-024 setup: 30 tasks with distinct labels (label-01 through label-30)
-    // to trigger the "more labels" truncation threshold (25).
+    // to trigger the "more labels" truncation threshold (25). Pure data → store write.
     for (let i = 1; i <= 30; i++) {
       const labelId = `LBL${String(i).padStart(2, "0")}`;
       const labelName = `label-${String(i).padStart(2, "0")}`;
-      execFileSync("node", [nativeBin, "task", "create", labelId, "--title", `Label task ${i}`,
-        "--status", "todo", "--body", VALID_SECTIONS, "--labels", labelName], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx23TasksDir },
-      });
+      seedTask(qx23TasksDir, labelId, { title: `Label task ${i}`, status: "todo", body: VALID_SECTIONS, labels: [labelName] });
     }
 
     const qx23Port = port + 7;
@@ -1091,20 +1061,16 @@ async function main() {
     // Then create 5 tasks with each of "zzz-rare-a" through "zzz-rare-y" (25 rare labels).
     // With frequency sort, "freq-common" should appear first in the nav.
     // "zzz-rare-*" labels come last alphabetically but may fill top-25 slots if not sorted by freq.
+    // Pure-data fixtures (30 freq-common + 26 rare-label tasks; label frequency
+    // is derived from the label arrays by serve, no write semantics) → store write.
     for (let i = 1; i <= 30; i++) {
-      execFileSync("node", [nativeBin, "task", "create", `FREQ-${String(i).padStart(2, "0")}`, "--title", `Freq task ${i}`,
-        "--status", "todo", "--body", VALID_SECTIONS, "--labels", "freq-common"], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx26TasksDir },
-      });
+      seedTask(qx26TasksDir, `FREQ-${String(i).padStart(2, "0")}`, { title: `Freq task ${i}`, status: "todo", body: VALID_SECTIONS, labels: ["freq-common"] });
     }
     // 26 rare labels (zzz-rare-a through zzz-rare-z) each on 1 task.
     // With freq sort, "freq-common" (30 tasks) beats all of these.
     for (let i = 0; i < 26; i++) {
       const rareLabel = `zzz-rare-${String.fromCharCode(97 + i)}`; // zzz-rare-a .. zzz-rare-z
-      execFileSync("node", [nativeBin, "task", "create", `RARE-${String.fromCharCode(65 + i)}`, "--title", `Rare label task ${i}`,
-        "--status", "todo", "--body", VALID_SECTIONS, "--labels", rareLabel], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx26TasksDir },
-      });
+      seedTask(qx26TasksDir, `RARE-${String.fromCharCode(65 + i)}`, { title: `Rare label task ${i}`, status: "todo", body: VALID_SECTIONS, labels: [rareLabel] });
     }
     // Active label that would be position >25 alphabetically but should appear due to pinning.
     // "zzz-rare-z" is the last alphabetically of the rare labels and won't appear in top-25
@@ -1183,17 +1149,10 @@ async function main() {
     );
     // HDNG-1: body is ONLY heading lines — no prose content at all.
     // Searching "Proposal" must NOT return this task (headings stripped).
-    execFileSync("node", [nativeBin, "task", "create", "HDNG-1", "--title", "Heading-only body task",
-      "--status", "todo", "--body", "## Proposal\n## Plan\n## AC\n## DoD\n"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx28TasksDir },
-    });
     // HDNG-2: body has a unique prose token "xyzzy-prose-only-42z" in a non-heading line.
-    // This token must NOT contain "Proposal" or "Plan" (to avoid matching the exclusion test).
-    // The heading line "## Proposal" is present but must be stripped before search indexing.
-    execFileSync("node", [nativeBin, "task", "create", "HDNG-2", "--title", "Prose body task",
-      "--status", "todo", "--body", "## Proposal\n## Plan\nThis line has xyzzy-prose-only-42z token.\n## AC\n## DoD\n"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx28TasksDir },
-    });
+    // Pure-data fixtures (search-index behavior lives in body text) → store write.
+    seedTask(qx28TasksDir, "HDNG-1", { title: "Heading-only body task", status: "todo", body: "## Proposal\n## Plan\n## AC\n## DoD\n" });
+    seedTask(qx28TasksDir, "HDNG-2", { title: "Prose body task", status: "todo", body: "## Proposal\n## Plan\nThis line has xyzzy-prose-only-42z token.\n## AC\n## DoD\n" });
 
     const qx28Port = port + 9;
     const qx28OrigCwd = process.cwd();
@@ -1253,28 +1212,20 @@ async function main() {
     // LABEL_NAV_MAX=25 truncation so the details/summary expand appears.
     // We'll create 30 distinct labels (A-label-01..A-label-20 + B-label-01..B-label-10),
     // plus a known "common-label" that appears on 3 tasks to verify the count display.
-    const envOverride = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx34TasksDir };
     const COMMON_LABEL = "common-label";
     const SEARCH_TERM = "searchable-unique-qx34";
 
     // Create 3 tasks with common-label (count should be 3 in nav)
+    // Pure-data fixtures (labels as plain arrays) → store write.
     for (let i = 1; i <= 3; i++) {
       const id = `QX34-${String(i).padStart(2, "0")}`;
       const title = i === 1 ? `Task with ${SEARCH_TERM} in title` : `Task ${id}`;
-      execFileSync("node", [nativeBin, "task", "create", id,
-        "--title", title,
-        "--status", "todo",
-        "--labels", `${COMMON_LABEL},A-label-${String(i).padStart(2, "0")}`],
-        { env: envOverride });
+      seedTask(qx34TasksDir, id, { title, status: "todo", labels: [COMMON_LABEL, `A-label-${String(i).padStart(2, "0")}`] });
     }
     // Create 22 more tasks each with a unique rare label to push total distinct labels > 25
     for (let i = 4; i <= 25; i++) {
       const id = `QX34-${String(i).padStart(2, "0")}`;
-      execFileSync("node", [nativeBin, "task", "create", id,
-        "--title", `Task ${id}`,
-        "--status", "todo",
-        "--labels", `rare-label-${String(i).padStart(2, "0")}`],
-        { env: envOverride });
+      seedTask(qx34TasksDir, id, { title: `Task ${id}`, status: "todo", labels: [`rare-label-${String(i).padStart(2, "0")}`] });
     }
 
     const qx34Port = port + 10;
@@ -1334,26 +1285,15 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx37TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx37TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    const envOverride37 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx37TasksDir };
     const MIXED_LABEL = "mixed-status-label";
 
-    // Create 2 todo tasks with MIXED_LABEL
+    // Create 2 todo tasks with MIXED_LABEL, and 3 done tasks (global total = 5, todo-scoped = 2).
+    // Pure-data fixtures (counts derived from status+labels in frontmatter) → store write.
     for (let i = 1; i <= 2; i++) {
-      const id = `SC37-TODO-${i}`;
-      execFileSync("node", [nativeBin, "task", "create", id,
-        "--title", `Todo task ${i}`,
-        "--status", "todo",
-        "--labels", MIXED_LABEL],
-        { env: envOverride37 });
+      seedTask(qx37TasksDir, `SC37-TODO-${i}`, { title: `Todo task ${i}`, status: "todo", labels: [MIXED_LABEL] });
     }
-    // Create 3 done tasks with MIXED_LABEL (global total = 5, todo-scoped = 2)
     for (let i = 1; i <= 3; i++) {
-      const id = `SC37-DONE-${i}`;
-      execFileSync("node", [nativeBin, "task", "create", id,
-        "--title", `Done task ${i}`,
-        "--status", "done",
-        "--labels", MIXED_LABEL],
-        { env: envOverride37 });
+      seedTask(qx37TasksDir, `SC37-DONE-${i}`, { title: `Done task ${i}`, status: "done", labels: [MIXED_LABEL] });
     }
 
     let qx37Server = null;
@@ -1487,14 +1427,8 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx43TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx43TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    const envOverride43 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx43TasksDir };
-
-    // Create a task with a label so label nav renders
-    execFileSync("node", [nativeBin, "task", "create", "UQ30-1",
-      "--title", "Task with label",
-      "--status", "todo",
-      "--labels", "test-label"],
-      { env: envOverride43 });
+    // Pure-data fixture (one labeled task so label nav renders) → store write.
+    seedTask(qx43TasksDir, "UQ30-1", { title: "Task with label", status: "todo", labels: ["test-label"] });
 
     let qx43Server = null;
     const qx43OrigCwd = process.cwd();
@@ -1551,15 +1485,10 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx46TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx46TasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    const envOverride46 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx46TasksDir };
-
-    // Create 25 tasks matching "xyzzy-qx46" in title
+    // Create 25 tasks matching "xyzzy-qx46" in title. Pure-data fixtures → store write.
     for (let i = 1; i <= 25; i++) {
       const id = `PGSRCH-${String(i).padStart(2, "0")}`;
-      execFileSync("node", [nativeBin, "task", "create", id,
-        "--title", `xyzzy-qx46 task ${i}`,
-        "--status", "todo"],
-        { env: envOverride46 });
+      seedTask(qx46TasksDir, id, { title: `xyzzy-qx46 task ${i}`, status: "todo" });
     }
 
     let qx46Server = null;
@@ -1590,11 +1519,9 @@ async function main() {
       );
 
       // Single-page search (only 1 task matches unique term) → banner has NO page indicator
-      // "xyzzy-qx46-unique-singleton" only appears in PGSRCH-01's title (add it now)
-      execFileSync("node", [nativeBin, "task", "create", "PGSRCH-SINGLE",
-        "--title", "xyzzy-qx46-unique-singleton task",
-        "--status", "todo"],
-        { env: envOverride46 });
+      // "xyzzy-qx46-unique-singleton" only appears in PGSRCH-01's title (add it now).
+      // Pure-data fixture → store write.
+      seedTask(qx46TasksDir, "PGSRCH-SINGLE", { title: "xyzzy-qx46-unique-singleton task", status: "todo" });
 
       const singleResp = await get(qx46Port, "/?q=xyzzy-qx46-unique-singleton");
       assert(singleResp.status === 200, "GET /?q=xyzzy-qx46-unique-singleton returns 200 (QX-046 single-page)");
@@ -1638,10 +1565,9 @@ async function main() {
       path.join(pgszWorkspaceRoot, ".quay", "config.yml"),
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${pgszTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${pgszTasksDir.replaceAll("\\", "\\\\")}"\n`
     );
-    const pgszEnv = { ...process.env, QUAY_NATIVE_TASKS_DIR: pgszTasksDir };
+    // Pure-data fixtures (5 flat tasks for pageSize tests) → store write.
     for (let i = 1; i <= 5; i++) {
-      execFileSync("node", [nativeBin, "task", "create", `PGSZ-${i}`,
-        "--title", `pgsz task ${i}`, "--status", "todo"], { env: pgszEnv });
+      seedTask(pgszTasksDir, `PGSZ-${i}`, { title: `pgsz task ${i}`, status: "todo" });
     }
 
     let pgszServer = null;
@@ -1752,11 +1678,10 @@ async function main() {
       `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${badTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${badTasksDir.replaceAll("\\", "\\\\")}"\n`
     );
 
-    // One well-formed task, written the normal way...
-    execFileSync("node", [nativeBin, "task", "create", "BADFM-GOOD", "--title", "Good task",
-      "--status", "todo", "--body", VALID_SECTIONS], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: badTasksDir },
-    });
+    // One well-formed task — pure-data fixture → store write (the validated
+    // path, so BADFM-GOOD is guaranteed well-formed, which is the whole point
+    // of the negative control).
+    seedTask(badTasksDir, "BADFM-GOOD", { title: "Good task", status: "todo", body: VALID_SECTIONS });
     // ...and one malformed task file written directly to disk (no CLI path
     // validates frontmatter shape, so this simulates hand-edited/corrupted
     // task-store content, the DIR-001 "malformed frontmatter" category).
@@ -1826,10 +1751,8 @@ async function main() {
       "- [ ] an unchecked item\n" +
       "- [x] a checked item\n" +
       "- a plain unordered item with no checkbox\n";
-    execFileSync("node", [nativeBin, "task", "create", "CBX-1", "--title", "Checkbox render task",
-      "--status", "todo", "--body", CHECKBOX_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: cbTasksDir },
-    });
+    // Pure-data fixture (checkbox body rendered by renderMarkdown) → store write.
+    seedTask(cbTasksDir, "CBX-1", { title: "Checkbox render task", status: "todo", body: CHECKBOX_BODY });
 
     const cbPort = port + 17;
     const cbOrigCwd = process.cwd();
