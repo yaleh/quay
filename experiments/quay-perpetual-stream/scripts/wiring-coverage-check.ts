@@ -154,19 +154,58 @@ const STAGE_BOUNDARY_TOKENS = new Set([
 // ONLY in which boundary they instrument collapse to the same pattern key.
 const STAGE_BOUNDARY_WORD_RE =
   /(?:^|[^A-Za-z])(?:verify|prepared|build|audit|gate|reconcile|land|admission|preflight|proposalauthors|adjudicate|proposalreview|planauthor|plancheck|receipt|stage)(?:[^A-Za-z]|$)/i;
+
+// Explicit mechanism-claim markers — `**WIRING-CLAIM (X):**`, `**[WIRING CLAIM N — …]**`,
+// `- **CLAIM-B1:** …`. A marker line IS a mechanism claim by declaration: real Proposals (DIR-124-B's
+// CLAIM-B1..B14, DIR-124-A4's findings) express mechanism claims as markers whose sentences use
+// verbs OUTSIDE the narrow WIRING_VERB_RE set ("appends", "binds", "replaced", "returns", "maps",
+// "validates") — requiring a wiring verb for them under-counts the genuine mechanism inventory
+// (measured: DIR-124-B extracted 2 of its 4 mechanisms because 12 of its 14 CLAIM markers were
+// verb-invisible). The marker's existence IS the claim; the surrounding text is its evidence.
+const CLAIM_MARKER_RE =
+  /(?:^|\s)[-*]?\s*\*\*\s*\[?\s*(?:WIRING[- ]CLAIM|CLAIM)[-\s]*[A-Za-z0-9-]*\s*[):.]?\s*\*\*/;
+
+// gap-extract-mechanism-claims-calibration (RC2): strip enumeration and mirror-file labels from an
+// identifier so claims that differ ONLY in which enumerated item / mirror they name collapse to one
+// mechanism. Numeric/alpha enumeration: E1..E8, AC1..AC14, C1..C8, B1..B14, WIRING-CLAIM-1, finding
+// suffixes. Mirror enumeration: `execute-milestone.js` / `prepare-milestone.js` → `workflow` (the
+// SAME operation wired into both mirrors is one mechanism, not two).
+const ENUM_LABEL_RE = /[-_.]?(?:e|ac|c|m|b|a|w|find|finding|claim|clause)\s*[-_.]?\d+\b/gi;
+const MIRROR_NAME_RE = /\b(?:execute-milestone|prepare-milestone)(?:\.js)?\b/gi;
+
 function _stageStripped(id) {
-  return id.replace(STAGE_BOUNDARY_WORD_RE, "");
+  let x = id
+    .replace(STAGE_BOUNDARY_WORD_RE, "")
+    .replace(ENUM_LABEL_RE, "")
+    .replace(MIRROR_NAME_RE, "workflow");
+  // CamelCase-embedded stage words — `_emitStageEvent` carries "Stage" at a case boundary
+  // (emit+Stage+Event), which STAGE_BOUNDARY_WORD_RE's `[^A-Za-z]` delimiter never sees; strip it
+  // so the identifier normalizes to `_emitEvent` like the event family below.
+  x = x.replace(/([a-z])(stage)([A-Z])/gi, "$1$3");
+  // Event-emission label family (DIR-124-A1b/A): `_emitStageEvent`, `emit-event-<stage>-<eventKind>`,
+  // `emit-eventstart`, `emit-eventend`, `--emit-event` are the SAME operation's identifiers with
+  // varying stage/kind/start/end decorations — collapse to one token so claims about the emission
+  // mechanism connect regardless of which variant they name.
+  x = x.replace(/(?:^|[^a-z])emit[-_ ]?event[a-z0-9-]*/i, "emitevent");
+  return x;
+}
+// The normalized identifier SET for a claim — stage/enumeration/mirror labels stripped, exact stage
+// tokens removed. Shared by `_patternKey` (RC1 exact-key merge) and `countMechanisms` (RC2
+// connectivity clustering).
+function _normalizedIdents(identifiers) {
+  return [
+    ...new Set(
+      identifiers
+        .filter((id) => !STAGE_BOUNDARY_TOKENS.has(id))
+        .map((id) => _stageStripped(id.trim()))
+        .filter(Boolean)
+    ),
+  ];
 }
 function _patternKey(identifiers) {
-  // The mechanism pattern key = the identifier set minus stage-boundary tokens AND stage words
-  // embedded in identifiers, sorted+joined. Two claims that instrument the same operation at
-  // different boundaries collapse to the same key.
-  return identifiers
-    .filter((id) => !STAGE_BOUNDARY_TOKENS.has(id))
-    .map((id) => _stageStripped(id.trim()))
-    .filter(Boolean)
-    .sort()
-    .join(" ");
+  // The mechanism pattern key = the normalized identifier set, sorted+joined. Two claims that
+  // instrument the same operation at different boundaries collapse to the same key.
+  return _normalizedIdents(identifiers).sort().join(" ");
 }
 export function extractMechanismClaims(sectionText) {
   if (!sectionText) return [];
@@ -194,6 +233,64 @@ export function extractMechanismClaims(sectionText) {
     }
   }
   return [...byKey.values()];
+}
+
+// ── countMechanisms — RC2 connectivity clustering (gap-extract-mechanism-claims-calibration). ─────
+// `extractMechanismClaims` counts CLAIMS; a single mechanism legitimately produces many claims (the
+// 14 WIRING-CLAIM markers of DIR-124-A1b are 14 coverage items of ONE `_emitStageEvent` mechanism;
+// DIR-124-A4's 16 findings are implementation details of ONE conformance script). The mechanism COUNT
+// that feeds the `> 2 → split` decision must count MECHANISMS, not claims. Claims whose normalized
+// identifier sets OVERLAP are the same mechanism (they name the same core components); disjoint
+// claims are distinct mechanisms (DIR-124-B's run-identity / stage-receipt / workflow-journal /
+// workflow-resume families stay separate). Deterministic: first-seen component order, no randomness.
+export function countMechanisms(sectionText) {
+  // Own claim extraction: the verb-based rule PLUS explicit claim markers (`**WIRING-CLAIM (X):**`,
+  // `**CLAIM-B1:**`), so a verb-invisible marker still counts toward the mechanism inventory. This
+  // is scoped to the COUNT path only — `extractMechanismClaims` stays verb-based so the
+  // wiring-coverage check does not surface new uncovered claims on DONE tasks (the module's
+  // documented anti-regression stance).
+  const claims = [];
+  for (const sentence of splitSentences(sectionText)) {
+    const identifiers = backtickIdentifiers(sentence);
+    if (CLAIM_MARKER_RE.test(sentence) && identifiers.length >= 1) {
+      claims.push({ sentence, identifiers });
+      continue;
+    }
+    if (!WIRING_VERB_RE.test(sentence)) continue;
+    if (identifiers.length >= 2) claims.push({ sentence, identifiers });
+  }
+  const components = []; // [{ key:Set, reps:[claim] }]
+  for (const c of claims) {
+    const norm = new Set(_normalizedIdents(c.identifiers));
+    if (norm.size === 0) continue;
+    let merged = -1;
+    for (let i = 0; i < components.length; i++) {
+      const overlap = [...norm].filter((x) => components[i].key.has(x)).length;
+      if (overlap > 0) {
+        if (merged < 0) {
+          for (const x of norm) components[i].key.add(x);
+          components[i].reps.push(c);
+          merged = i;
+        } else {
+          for (const x of components[i].key) components[merged].key.add(x);
+          components[merged].reps.push(...components[i].reps);
+          components.splice(i, 1);
+          i--;
+        }
+      }
+    }
+    if (merged < 0) components.push({ key: new Set(norm), reps: [c] });
+  }
+  return {
+    mechanismCount: components.length,
+    claims: claims.length,
+    mechanisms: components.map((comp, i) => ({
+      mechanismId: "M" + (i + 1),
+      identifiers: [...comp.key],
+      claimCount: comp.reps.length,
+      sentence: comp.reps[0].sentence,
+    })),
+  };
 }
 
 // ── Mechanism-subsection narrowing (gap-wiring-coverage-scope-narrowing, P0 #60) ────────────────
