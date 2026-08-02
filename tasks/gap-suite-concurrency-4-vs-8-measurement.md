@@ -89,3 +89,19 @@ extra:
 - orchestration/throughput-decomposition.md（引用，可能补充结果）
 - measurements/（若复用 measure-suite 工具）
 - 无产品代码改动
+
+---
+
+## Measurement log (2026-08-02, gap-suite-concurrency-4-vs-8)
+
+commit: `798b0bfdbd46217e60a48cd82c191c5a1eb4bed0` (master HEAD, clean tree)
+method: `bash scripts/test.sh --test-concurrency=N` — `=` spelling only; strict single-suite; serial; start at load1<2; no residual test.sh/node --test between runs; every run self-reports `selected N files (groups=product,engine)`; contract: N identical across all 6 runs (only concurrency changes). Wall clock = marker-to-marker (HH:MM:SS).
+
+**口径定死（2026-08-02 22:06，外层更正）**：`ℹ duration_ms`（node --test 顶层那一行）**就是该次运行的墙钟本身**，不是每文件耗时之和（外层 clean-window 实测 454279ms = 454s ≈ 实测墙钟 458s）。**本任务的墙钟判定只用 marker-to-marker 实测墙钟，不用 duration_ms 作 Σ 或比值**。B6-1 的 Σ=3266s 是**每测试文件各自的 duration 之和**（从 --test-reporter 的 per-file 记录取），是另一个量；本任务不采集它，**也不从顶层 duration_ms 推 Σ/wall 比值**。任何饱和度结论（lane 饱和/未饱和）不得由 duration_ms 推出。
+
+| run | conc | wall(s) | selected N | tests | pass | fail | skip | cancelled | Promise-pending | failed files |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 4 | 414 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
+| 2 | 4 | 398 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
+
+run1/run2 note: M136 sync-vendor test FAILED under c4 (c8 full-red/isolated-green is the known baseline; **c4 red too — M136 is NOT c8-specific**, useful negative evidence for M136 diagnosis). No 'Promise pending'. ~~duration_ms ≈ 410062 ≈ wall 414 ⇒ Σ/wall ≈ 0.99 — c4 lanes not saturated~~ **划掉（外层更正）**：duration_ms 就是墙钟本身，0.99 是墙钟/墙钟必然近 1，与并发度无关。不得据此推饱和结论。
