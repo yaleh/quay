@@ -73,11 +73,17 @@ test("DIR-120 Phase 2 RED: config.yml present with NO gates: key, real-content s
     ].join("\n")
   );
   const cfg = readGatesConfig(ws);
+  // DIR-104: the loader records srcFile provenance on any resolved file; the
+  // empty CONTENT shape is what branch-A-terminal asserts.
   assert.deepEqual(
-    cfg,
+    {
+      it0: cfg.it0, adr: cfg.adr, fixed: cfg.fixed,
+      testPass: cfg.testPass, coverageFloor: cfg.coverageFloor, redGreen: cfg.redGreen,
+    },
     EMPTY_SHAPE,
     "DIR-120 Phase 2: once config.yml exists, branch A is terminal — a real-content sibling gates.yml must NOT be silently used as a fallback"
   );
+  assert.equal(cfg.srcFile, path.join(ws, ".quay", "config.yml"), "srcFile provenance (DIR-104)");
 });
 
 // ---------------------------------------------------------------------------
@@ -109,7 +115,15 @@ test("GREEN (branch B unchanged): malformed legacy gates.yml -> empty shape, no 
   const ws = tmpWs("branch-b-malformed");
   fs.writeFileSync(path.join(ws, ".quay", "gates.yml"), "fixed: [unclosed\n  - bad: {");
   const cfg = readGatesConfig(ws);
-  assert.deepEqual(cfg, EMPTY_SHAPE);
+  assert.deepEqual(
+    {
+      it0: cfg.it0, adr: cfg.adr, fixed: cfg.fixed,
+      testPass: cfg.testPass, coverageFloor: cfg.coverageFloor, redGreen: cfg.redGreen,
+    },
+    EMPTY_SHAPE,
+    "malformed -> empty content shape"
+  );
+  assert.equal(cfg.srcFile, path.join(ws, ".quay", "gates.yml"), "srcFile recorded on resolved file (DIR-104)");
 });
 
 test("GREEN: config.yml present with an EMPTY gates: section -> empty shape (not an error)", () => {
@@ -119,7 +133,15 @@ test("GREEN: config.yml present with an EMPTY gates: section -> empty shape (not
     "providers:\n  native:\n    enabled: true\ngates: {}\n"
   );
   const cfg = readGatesConfig(ws);
-  assert.deepEqual(cfg, EMPTY_SHAPE);
+  assert.deepEqual(
+    {
+      it0: cfg.it0, adr: cfg.adr, fixed: cfg.fixed,
+      testPass: cfg.testPass, coverageFloor: cfg.coverageFloor, redGreen: cfg.redGreen,
+    },
+    EMPTY_SHAPE,
+    "empty gates: section -> empty content shape"
+  );
+  assert.equal(cfg.srcFile, path.join(ws, ".quay", "config.yml"), "srcFile provenance (DIR-104)");
 });
 
 test("GREEN: no workspaceRoot -> empty shape (existing guard, unchanged)", () => {

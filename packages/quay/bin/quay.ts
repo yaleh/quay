@@ -1306,9 +1306,19 @@ Description:
         for (const r of rows) {
           console.log(`${pad(r.name, nameWidth)}  ${pad(r.source, sourceWidth)}  ${pad(r.type, typeWidth)}  ${r.detail}`);
         }
-        // AC4/AC5: diagnostics section.
+        // AC4/AC5: diagnostics section. The count-label must agree with the
+        // per-line severity labels (DIR-100-C moved missing-required-field to
+        // ERROR while shadowed-legacy stays WARNING) — compute per-level counts
+        // instead of assuming all diagnostics are warnings.
         if (diagnostics.length > 0) {
-          console.log(`\n## Diagnostics (${diagnostics.length} warning${diagnostics.length === 1 ? "" : "s"})`);
+          const errCount = diagnostics.filter((d) => d.level === "ERROR").length;
+          const warnCount = diagnostics.filter((d) => d.level === "WARNING").length;
+          const label = errCount > 0 && warnCount > 0
+            ? `${errCount} error${errCount === 1 ? "" : "s"}, ${warnCount} warning${warnCount === 1 ? "" : "s"}`
+            : errCount > 0
+              ? `${errCount} error${errCount === 1 ? "" : "s"}`
+              : `${warnCount} warning${warnCount === 1 ? "" : "s"}`;
+          console.log(`\n## Diagnostics (${label})`);
           for (const d of diagnostics) {
             console.log(`\n${d.level}: ${d.message}`);
           }

@@ -69,7 +69,8 @@ test("Section 1: loadWorkspaceGateMetadata returns rows with source file:line an
   const badDiag = meta.diagnostics.find(function(d) { return d.message.includes("bad-row"); });
   assert.ok(badDiag, "should have a diagnostic naming bad-row");
   assert.match(badDiag.message, /missing required field.*script/);
-  assert.equal(badDiag.level, "WARNING");
+  // DIR-100-C: missing required field ⇒ gate not registered ⇒ ERROR level (not WARNING)
+  assert.equal(badDiag.level, "ERROR");
 
   // AC9: loadWorkspaceGates still works (contract preserved)
   const gates = loadWorkspaceGates(ws);
@@ -184,7 +185,7 @@ test("Section 4: gate --list --verbose appends ## Diagnostics section (AC4, AC5)
 
   // AC5: diagnostics section
   assert.match(out, /## Diagnostics/, "should have diagnostics section");
-  assert.match(out, /WARNING.*bad-row/, "should mention bad-row");
+  assert.match(out, /ERROR.*bad-row/, "should mention bad-row");
   assert.match(out, /missing required field/, "should mention missing required field");
 });
 

@@ -237,7 +237,9 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       const { result, phases } = await runWorkflow(workflowFile, args, makeWorktreeMock(dir, milestone, recorder));
 
       assert.equal(result.outcome, 'done', JSON.stringify(result));
-      assert.deepEqual(phases, ['Verify', 'Prepared', 'Build', 'Audit', 'Gate', 'Land']);
+      // Build-Evidence (54c6c301, M238) runs between Build and Audit — the hash-bound evidence
+      // manifest is produced post-Build for Audit's independent consumption.
+      assert.deepEqual(phases, ['Verify', 'Prepared', 'Build', 'Build-Evidence', 'Audit', 'Gate', 'Land']);
 
       // (a) worktree-create emitted the REAL --add command and it really created the worktree.
       // (_milestone is the bare number "191" — the workflow strips the "M" prefix; the CLI accepts both.)

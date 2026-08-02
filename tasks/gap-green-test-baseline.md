@@ -2,7 +2,7 @@
 id: gap-green-test-baseline
 title: "Restore a green scripts/test.sh baseline — 18 failures across 7 root
   causes, at least 4 of them real defects"
-status: todo
+status: done
 labels:
   - gap
   - defect

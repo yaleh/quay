@@ -1,10 +1,15 @@
-# ADR-020: Runtime-contract ground-truth registry for PlanAuthor/PlanCheck
-
-**Status:** proposed
-**Date:** 2026-08-01
-**Related:** [[ADR-019]], DIR-124-B, DIR-124-D, DIR-124-F, inherited-core.md `evidenceSurface`
-
+---
+id: ADR-020
+title: Runtime-contract ground-truth registry for PlanAuthor/PlanCheck
+status: proposed
+date: 2026-08-01
+related: "[[ADR-019]], DIR-124-B, DIR-124-D, DIR-124-F, inherited-core.md evidenceSurface"
+---
 ## Context
+
+Related: [[ADR-019]], DIR-124-B, DIR-124-D, DIR-124-F, inherited-core.md `evidenceSurface`
+
+The prepare-milestone pipeline's PlanAuthor writes a grounded plan, and PlanCheck verifies
 
 The prepare-milestone pipeline's PlanAuthor writes a grounded plan, and PlanCheck verifies
 it against the live repo. Across the 2026-07-31 → 2026-08-01 product-task batch, PlanCheck

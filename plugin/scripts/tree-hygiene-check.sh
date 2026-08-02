@@ -51,8 +51,8 @@ fi
 # same two shapes) specifically so they never pollute `git status --porcelain`'s `??` output —
 # which means the `scratch` check above, being git-status-based, has ZERO visibility into this
 # class. Scan the filesystem directly instead (belt-and-suspenders: .gitignore is the primary
-# fix, this is defense-in-depth visibility + a periodic-sweep prompt — see
-# experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs for the removal mechanism).
+# fix, this is defense-in-depth visibility + a periodic-sweep prompt — the sweep-fixture-orphans
+# cleanup mechanism in the source repo's scripts/ handles actual removal).
 fixture_orphans=$( { \
     find "$ROOT/docs/plans" -maxdepth 1 -type f \( -regex '.*/M9[0-9][0-9][0-9][0-9][0-9]-.*\.md' -o -regex '.*/M997-.*\.md' \) 2>/dev/null; \
     find "$ROOT/milestones" -maxdepth 1 -type d \( -regex '.*/M9[0-9][0-9][0-9][0-9][0-9]' -o -regex '.*/M997' \) 2>/dev/null; \
@@ -64,8 +64,8 @@ if [ -n "$fixture_orphans" ]; then
   echo "              variant) — debris from a prior prepare-milestone-convergence.test.mjs or"
   echo "              prepare-milestone-preparation-e2e.test.mjs run killed before its own"
   echo "              cleanup ran. Non-blocking (already gitignored, cannot pollute the tracked"
-  echo "              tree), but consumes disk/inodes indefinitely if left. Clear with:"
-  echo "                node experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs"
+  echo "              tree), but consumes disk/inodes indefinitely if left. Clear with the source"
+  echo "              repo's sweep-fixture-orphans cleanup script (experiments/.../scripts/)."
   echo "$fixture_orphans" | sed 's/^/  /'
 fi
 

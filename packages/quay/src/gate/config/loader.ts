@@ -137,6 +137,14 @@ function parseGatesConfig(text: string, srcFile?: string): {
   try { doc = YAML.parseDocument(text, { keepSourceTokens: true, lineCounter: lc }); }
   catch { return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] }; }
 
+  // Fail-quiet on syntax errors: parseDocument reports errors (does not throw)
+  // and can still expose a partial tree — proceeding would fabricate phantom
+  // gates from malformed input. Treat any parse error as "no config" (DIR-104
+  // provenance still recorded), matching readGatesConfig's documented contract.
+  if (doc.errors.length > 0) {
+    return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] };
+  }
+
   if (!doc.contents || !YAML.isMap(doc.contents)) {
     return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] };
   }
@@ -175,7 +183,7 @@ function parseGatesConfig(text: string, srcFile?: string): {
         for (const pair of item.items) {
           if (YAML.isScalar(pair.key)) {
             const k = String(pair.key.value);
-            data[k] = YAML.isScalar(pair.value) ? pair.value.value : (pair.value as Record<string, unknown>)?.toJSON?.() ?? null;
+            data[k] = YAML.isScalar(pair.value) ? pair.value.value : ((pair.value as { toJSON?: () => unknown })?.toJSON?.() ?? null);
           }
         }
         return { data, line };

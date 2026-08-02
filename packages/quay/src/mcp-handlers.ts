@@ -670,7 +670,7 @@ export function registerConfigHandlers(
         const result = validateConfig({ workspaceRoot: cfg.workspaceRoot, checkFiles: checkFiles ?? false });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          structuredContent: result as Record<string, unknown>,
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
         return {
