@@ -36,11 +36,19 @@
 |---|---|---|
 | `gap-tests-spawn-cli-from-ts-source`（用户建 `fa0500ad`） | `7032e704` | cli-entry.mjs 载体 + cli.test.mjs 131s→66s；done |
 
+## 滞留分支合并（人裁定 M243 → M246 → M222，M239 推迟）
+
+| 分支 | 状态 |
+|---|---|
+| **M243**（DIR-124-A2） | **STOP**：merge 后全量红 → 已 revert（`7b6e1100`）。根因：M243 corpus 用 2026-08-01 旧 stage 约定（verify/build/audit 小写 + 缺 recordedAtMs），与 B2-1 schema 演进（大写枚举 + recordedAtMs 必填）系统性冲突。分支保留（`e8b4d49e`），等人工裁定：批量升格 corpus 到新约定 / schema 兼容旧 stage / M243 推迟 |
+| M246（DIR-124-A5） | 待 M243 裁定后 |
+| M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
+
 ## 待执行（按顺序）
 
 | 任务 | 说明 |
 |---|---|
-| **滞留分支合并**（人裁定 2026-08-02，escalations.md #2）：M243 → M246 → M222，M239 推迟。**B5-2 完成前不合并**（套件构成稳定是 B5-2 实测的前提）。M222 rebase 到 B5-1 之上：保留异步 run()/runNative() + 二进制换 QUAY_CLI 常量，重测叠加数字（AC9 真实进度） |
+| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing`（外层建） | **优先级最高**：采集全部 157 文件 duration_ms 分布、算 Σduration/墙钟 vs 并发度 8、同 commit 连跑 3 次量噪声。**不做任何优化** |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
 
