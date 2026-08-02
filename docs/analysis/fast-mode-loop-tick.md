@@ -58,6 +58,14 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 对每个已返回但未合并的 subagent，逐个：
 
+0. **先 rebase 到当前 master**：
+   ```bash
+   git -C /tmp/quay-wt-<slug> rebase master
+   ```
+   worktree 建立时对 master 取了快照，之后并发合并的其它任务它看不到。B3-2 就是这样红的——
+   它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
+   **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
+   rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
 1. `git merge --no-ff task/<taskId>`
 2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
 3. 跑 `scripts/test.sh --for-task <taskId>`（该任务自己的选中集，秒级）
@@ -141,6 +149,14 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
 | 队列文件与 git 状态矛盾且无法判定 | 停，报告两边的实际内容 |
 
 这是**保守默认**。ADR-021 原则：不要在证据不足时把策略机械化。这些判断目前由人做，等积累了足够多的真实案例再考虑规则化。
+
+## 测试不得硬编码全局计数
+
+`EXPECTED_ENGINE = 58` 这类断言在任何人新增一个测试文件时都会红。B3-2 的三个失败里有一个正是
+如此——真实缺陷不是计数漂移，是**断言形态本身脆弱**。
+
+全局量（文件数、测试数、组成员数）必须**运行时计算**，不得写成常量。断言可以是「product 组 +
+engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，不能是「== 58」这类**快照**。
 
 ## 每个 tick 必报
 
