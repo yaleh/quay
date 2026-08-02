@@ -107,7 +107,7 @@ export function fallbackWarning(res) {
   return null;
 }
 
-function warnOnce(label, res) {
+function warnOnce(res) {
   const msg = fallbackWarning(res);
   if (msg) console.error(msg);
 }
@@ -116,8 +116,8 @@ function warnOnce(label, res) {
 const _core = resolveCliEntry(QUAY_PKG_DIR, { binName: "quay.ts", distName: "quay.js" });
 const _native = resolveCliEntry(QUAY_NATIVE_PKG_DIR, { binName: "quay-native.ts", distName: "quay-native.js" });
 
-warnOnce("core", _core);
-warnOnce("native", _native);
+warnOnce(_core);
+warnOnce(_native);
 
 export const QUAY_CLI = _core.entry;
 export const QUAY_NATIVE_CLI = _native.entry;
