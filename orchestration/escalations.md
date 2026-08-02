@@ -7,7 +7,16 @@
 
 ---
 
-## 1. `DIR-124-A2` 标记为 done，但机制从未落地 —— 重建还是降范围？
+## 1. ~~`DIR-124-A2` 标记为 done，但机制从未落地~~ —— **已决（2026-08-02，选项 A）**
+
+**人的裁定**：先做 DIR-124 全链复核再决定排期。复核已完成 → `orchestration/dir-124-chain-audit.md`。
+
+**结果**：真阳性有 **两个**，不是一个——`A5`（baseline metrics）与 `A2` 同一形态（done + AC 零勾选 + 代码零落地）。
+两者状态已改回 `todo`；**不排期**，因为它们是 B/C/D/E 的前置而 B/C/D/E 全未开工——没有东西被错误证明过。
+顺带拆掉一个陷阱：A1 一旦闭合，PARENT-DONE-IFF-CHILDREN 会让 DIR-124-A 在 A2/A5 仍假 done 时一起闭合。
+
+<details><summary>原始升级内容</summary>
+
 
 **发现时刻**：2026-08-02 ~15:15Z 外层 tick（`task-status-drift-check.ts` 的 `reverse-drift-suspect`）
 
@@ -45,6 +54,8 @@ DIR-124 拆分链上的一环——单独复活它可能连带 A1/A3/A4/A5 的�
 
 **建议 A**：真正的问题不是 A2 一个任务，而是「有多少 done 是这样 done 的」还没有答案。先量出规模
 再决定排期。
+
+</details>
 
 ---
 
