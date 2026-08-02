@@ -264,3 +264,52 @@ dist/ 或 vendor/，M136 通过 `sync-vendor --check` 读它们。
   若如此，修法是让这些测试不再改写共享产物。
 - **验收判据**：修完后 M136 在全量套件里**真的绿**（不是因为 --check 先同步过）。**负控制**：故意把
   vendor 副本改脏，跑全量，M136 必须红。负控制不通过 = 修法是掩盖不是修复。
+
+### 第三轮修复（2026-08-02，干扰源消除：共享产物写入 → 测试自身临时目录）
+
+**先回答问题：那 5 个写 dist/vendor 的文件里，哪些必须写共享路径？——一个都不必须。**
+
+逐个核实每个写点（写 `packages/quay/dist/quay.js` 共享路径 vs 写 mkdtemp 临时路径）：
+
+| 文件 | 写点核实 | 共享路径? | 处理 |
+|---|---|---|---|
+| `packages/quay/test/build-dist.test.mjs` | (a)(b)(c) `buildDist({outfile})` 写 tempTree；**(d) `bash build-dist.sh` 写 canonical `dist/quay.js`** | **test (d) 是** | test (d) 改用 `QUAY_BUILD_DIST_OUTFILE` env hook（新加，`QUAY_BUILD_DIST_ENTRY` 的孪生 hook）把 outfile 指到本测试 mkdtemp 目录，wrapper 本体照跑，写完删除 |
+| `packages/quay/test/build-dist-smoke.test.mjs` | `buildDist({outfile: bundle})`，bundle 在 `mkdtemp/bundleRoot` 树 | 否 | 无需改 |
+| `packages/quay/test/cli-entry.test.mjs` | `makeFakePkg` 全写 mkdtemp 假树 | 否 | 无需改 |
+| `packages/quay/test/npm-pack-e2e.test.mjs` | before 跑 `bash package.sh`（内部 build-dist.sh）→ canonical `dist/quay.js`；其余写 scratch/temp | **before 是** | 把 package.sh 整个搬到 `mkdtemp` 的包树副本里跑（package.json+bin+src+scripts+README+LICENSE 复制 + node_modules 符号链接），tgz 在临时目录产出，装到 scratch 验证，after 清理 |
+| `plugin/test/plugin-vendor-standalone.test.mjs` | 只读 vendor/quay，copyFileSync 到 mkdtemp | 否 | 无需改（已核实只读） |
+
+结论与第 2 轮 coordinator 的猜测一致但更精确：**真正改写共享 `packages/quay/dist/quay.js` 的只有
+build-dist.test.mjs test (d) 与 npm-pack-e2e.test.mjs before 两个写点**；build-dist-smoke / cli-entry /
+plugin-vendor-standalone 本来就写临时目录（task 描述的「2/1/4 处写」是把临时目录写也计入了，逐写点核实后
+它们不碰共享产物）。两处共享写点都已改为「构建到测试自己的 mkdtemp 目录，验证完删除」。
+
+**`--check` 保持只读**：未改 `sync-vendor.sh --check` 任何逻辑（既未加 --sync-dist 前置，也未降级/跳过）。
+build_dist_once 仍是套件开跑前构建源 dist + `--sync-dist` 镜像一次；此后不再有任何测试中途重建共享
+`packages/quay/dist/quay.js`，所以 M136 的 `--check` 在并行套件里看到的源与镜像始终一致。
+
+**全量套件验收（修后干净树）**：`scripts/test.sh`（concurrency 8）2298 tests，**fail 0**，M136 绿。不是
+因为 --check 先同步过——修的是干扰源（共享产物不再被中途重写）。
+
+**负控制（改脏 vendor → 全量必红）**：改脏 `plugin/skills/author/SKILL.md`（`--sync-dist` 不碰 git 跟踪的
+skills；但 `--check` 扫它，且它是真实独立文件非符号链接，所以脏能存活到 M136 检查）→ 全量套件复跑，
+M136 **必须红**。实测 `sync-vendor.sh --check` 报：
+
+```
+[sync-vendor --check] DRIFT: skills/author differs between source and destination
+[sync-vendor --check]   src: .../packages/quay-native/skills/author/SKILL.md
+[sync-vendor --check]   dst: .../plugin/skills/author/SKILL.md
+[sync-vendor --check] FAIL: drift detected (see DRIFT lines above).
+```
+
+exit 1。全量套件（concurrency 8）复跑：**M136 ✖（fail 2 之一；另一个失败是「author/execute skills
+byte-identical」——同一份脏文件被两个断言扫到，预期内）**。改脏后 `git checkout` 还原，`--check` 复归
+CLEAN。负控制通过 = 修法不是掩盖。
+
+**负控制为什么改脏 skills 而非 dist bundle**：改脏 `plugin/vendor/quay/dist/quay.js` 会被
+`build_dist_once` 的 `--sync-dist` 在套件开跑时**合法地还原**（那是选定的随测试自动同步时机，不是 --check
+在掩盖），所以 M136 会绿——那不能证明「修法掩盖」。改脏一个 `--sync-dist` 不碰、但 `--check` 会扫的
+git 跟踪 vendored 文件，才能存活到 M136 的 `--check` 并验证它是只读真门。
+
+**Touches 新增**：`packages/quay/test/build-dist.test.mjs`、`packages/quay/test/npm-pack-e2e.test.mjs`、
+`packages/quay/scripts/build-dist.mjs`（新加 `QUAY_BUILD_DIST_OUTFILE` testability hook）。
