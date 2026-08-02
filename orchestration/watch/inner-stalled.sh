@@ -18,8 +18,17 @@ while true; do
   inner=$(ls -t "$DIR"/*.jsonl 2>/dev/null | grep -v "$SELF" | head -1)
   [ -z "$inner" ] && { sleep 30; continue; }
   quiet=$(( $(date +%s) - $(stat -c %Y "$inner") ))
-  busy=$(node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json 2>/dev/null \
-         | python3 -c 'import sys,json;print(len((json.load(sys.stdin) or {}).get("inProgress",[])))' 2>/dev/null || echo 0)
+  # READONLY=1 时不碰遥测。理由（2026-08-02 实测）：`--report` 会改写被 git 跟踪的
+  # milestones/fast-mode-telemetry/<date>.json，而 restart-readiness-check.sh 硬性要求干净树 ——
+  # 本脚本每 60 秒调一次，等于让 readiness 永不通过、`.halt` 永不可解。
+  # 修复见 gap-telemetry-report-writes-and-deadlocks-readiness；在它落地前，本监视器以只读模式运行，
+  # 代价是失去两级判据、一律按 CONFIRM_S 报 STALLED（会把「在等自己的 subagent」也报出来）。
+  if [ "${READONLY:-0}" = "1" ]; then
+    busy=0
+  else
+    busy=$(node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json 2>/dev/null \
+           | python3 -c 'import sys,json;print(len((json.load(sys.stdin) or {}).get("inProgress",[])))' 2>/dev/null || echo 0)
+  fi
   thr=$CONFIRM_S; lvl=STALLED
   [ "${busy:-0}" -gt 0 ] && { thr=$MAYBE_S; lvl="STALLED-MAYBE(在飞${busy}，可能在等 subagent)"; }
   if [ "$quiet" -ge "$thr" ]; then
