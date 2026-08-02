@@ -1,16 +1,16 @@
 {
-  "generatedAt": "2026-08-02T08:59:56.204Z",
+  "generatedAt": "2026-08-02T11:37:37.330Z",
   "since": null,
   "tasks": [
     {
-      "taskId": "gap-fast-mode-no-telemetry",
-      "minutes": 15.473333333333333,
-      "outcome": "done"
+      "taskId": "gap-test-suite-has-no-layer-grouping",
+      "minutes": 67.84928333333333,
+      "outcome": "needs-human"
     }
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 15.473333333333333,
-  "medianMinutes": 15.473333333333333,
-  "tasksPerHour": 3.8776389487289964
+  "meanMinutes": 67.84928333333333,
+  "medianMinutes": 67.84928333333333,
+  "tasksPerHour": 0.8843129514755376
 }
