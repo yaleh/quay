@@ -1,6 +1,6 @@
 ---
 id: gap-suite-concurrency-4-vs-8-measurement
-status: todo
+status: done
 labels:
   - gap
   - measurement
