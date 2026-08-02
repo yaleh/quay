@@ -1,5 +1,27 @@
 # DIR-124 全链状态复核（2026-08-02）
 
+> ## ⚠ 更正（同日晚些，下一个 tick）
+>
+> **下面的核心结论是错的。A2 和 A5 的代码写了，而且通过了验收——它们躺在没有合并的 worktree
+> 分支上。**
+>
+> - `milestone/M243/iteration-0`（DIR-124-A2）：`workflow-replay.ts` 361 行 + 12 个 fixture +
+>   182 行测试，**+8,351 行**，含一个 acceptance-audit 提交
+> - `milestone/M246/iteration-0`（DIR-124-A5）：`workflow-baseline-metrics.ts` 1,422 行 +
+>   802 行测试，**+9,161 行**，同样含 acceptance-audit 提交
+>
+> **真实故障不是「标了 done 却没做」，是「做完并验收后，Land 从未合并」。** 两者的处置完全相反：
+> 前者要重建，后者只要合并。
+>
+> **我为什么漏了**：复核脚本只在 **master 的工作树**上查文件是否存在，从不看分支。在一个 Land
+> 走 worktree 分支的流水线里，「这件事做了没有」**不能只问 master**。这是本次复核方法论上的硬
+> 缺陷，比它发现的任何一条都重要。
+>
+> 下面「必须报 A2、A5」的真值集因此也是错的——见 `orchestration/escalations.md` #2 的修正版。
+> 保留原文不删，因为对 `it0` 检测器而言这仍是有效的输入：**检测器同样只看 master，所以它也会
+> 把「滞留未合并」误判成「从未落地」**，那是它必须区分的第三类。
+
+
 **触发**：`task-status-drift-check.ts` 报 `DIR-124-A2` 为 `reverse-drift-suspect`。人裁定
 （escalations #1 选项 A）：先做全链复核再决定排期。
 

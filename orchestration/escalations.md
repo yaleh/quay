@@ -7,7 +7,60 @@
 
 ---
 
-## 1. ~~`DIR-124-A2` 标记为 done，但机制从未落地~~ —— **已决（2026-08-02，选项 A）**
+## 2. 四个 worktree 分支滞留着 **24,989 行已验收但从未合并**的工作 —— 合并还是丢弃？
+
+**发现时刻**：2026-08-02 ~16:10Z 外层 tick（复核 #1 的排期结论时顺带查 `git worktree list`）
+
+**这同时推翻了 #1 的核心结论**：A2/A5 不是「标了 done 却没做」，是**做完并通过验收后 Land 从未合并**。
+
+**现象**
+
+| 分支 | 任务 | 未合并 | 内容 |
+|---|---|---|---|
+| `milestone/M243/iteration-0` | DIR-124-A2 | **+8,351** | `workflow-replay.ts` 361 行、12 个 fixture、182 行测试、`sync-vendor.sh`、AC write-back + acceptance-audit 提交 |
+| `milestone/M246/iteration-0` | DIR-124-A5 | **+9,161** | `workflow-baseline-metrics.ts` 1,422 行 ×2 侧、802 行测试 ×2 侧、build-evidence-manifest |
+| `milestone/M239/iteration-0` | gap-prepare-milestone-no-size-aware-routing-A | **+6,901** | `prepare-milestone-size-estimate.ts` 437 行、513 行测试 ×2 侧、`prepare-milestone.js` 的 fast-lane 路由 |
+| `milestone/M222/iteration-0` | DIR-112 | **+576** | `cli.test.mjs` 的 async execFile 改造 |
+
+- **全部滞留于 2026-08-01**（驱动模式那天，33+ 次串行 prepare 的批次）
+- **四个分支 `git merge-tree` 全部干净，无冲突**
+- master 上 `milestones/M243/` 只有 `absorb-entry.md` + `preparation.json`，**没有 `audits/`、没有
+  `iterations/`** —— Land 阶段确实从未跑完（CAPTURE 提交是 Land 写的）
+- 另有 **20 个零领先分支** + 26 个 worktree 目录，`milestones/` 占 **1.3G**
+
+**外层已尝试什么**
+
+1. 用 `git merge-tree` 逐个试合并（不落地），确认四个都无冲突
+2. 确认工作确实不在 master：`grep -rl 'workflow-replay|baseline-metrics'` 在 master 上零命中
+3. 确认这不是 `--clean-stale` 的漏洞：按 CLAUDE.md，带提交的分支**本就应该 fail-closed 保留**，
+   机制是按设计工作的
+
+**为什么超出授权**
+
+1. **合并 25k 行是落地代码的决定**，不是解阻塞——外层不直接改代码
+2. **`milestone/M222/iteration-0` 改的正是 `packages/quay/test/cli.test.mjs`，而内层此刻在飞的
+   B5-1 正在重写同一个文件**。现在合并 M222 = 制造一次真实冲突
+3. 这四个分支携带的是 **2026-08-01 的前提**，其中 M239 的 fast-lane 路由与我们之后关于
+   prepare 管线的决定可能已经不一致——「还要不要」是范围决定
+
+**选项**
+
+| 选项 | 含义 | 代价 / 风险 |
+|---|---|---|
+| **A（建议）** | 按分支逐个决定，**顺序：M243 → M246 → M239 → M222**。前三个与内层在飞工作无重叠，可在下一个内层空档由**内层**执行 `rebase master` + `merge --no-ff` + 跑全量套件；**M222 必须等 B5-1 落地后再谈**（同文件） | 每个合并后要跑一次全量套件（~8 分钟），共约 40 分钟；M239 的 fast-lane 路由需先确认是否仍符合当前方向 |
+| B | 只合并 M243 + M246（DIR-124-A2/A5 的基线工具），M239/M222 另议 | 最小；但 M239 的 6,901 行继续悬着 |
+| C | 全部丢弃，需要时重建 | 丢掉 25k 行已验收的工作。**不建议** |
+
+**建议 A**，但有一个前提问题需要你先答：**M239 的 size-aware fast-lane 路由是否仍符合当前方向？**
+我们这几天关于 prepare 管线的结论是「减少 proposal/plan 耗时」，fast-lane 路由方向一致，但它是
+按 8-01 的管线形态写的。这个答案决定 M239 是合并还是重做。
+
+**另有一件不需要你决定的**：20 个零领先分支 + 1.3G 的 `milestones/` 目录属于常规清理，外层已建
+任务，不占用你的判断。
+
+---
+
+## 1. ~~`DIR-124-A2` 标记为 done，但机制从未落地~~ —— **已决（2026-08-02，选项 A）；结论后被 #2 推翻**
 
 **人的裁定**：先做 DIR-124 全链复核再决定排期。复核已完成 → `orchestration/dir-124-chain-audit.md`。
 
