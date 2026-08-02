@@ -7,6 +7,49 @@
 
 ---
 
+## 3. `.halt` 何时解除 —— readiness 只差一项，而那一项是外层自己造成的
+
+**发现时刻**：2026-08-02 ~17:10Z（Monitor 报 `BATCH-END` 后按 tick 步骤 4 组批时）
+
+**现象**
+
+内层报停止条件：`.halt` 存在（06:48 放置），**循环暂停，不自行派发新任务**——它在正确地守规则。
+所以补队列没有意义，除非解除暂停。
+
+跑 `restart-readiness-check.sh`：**NOT READY**，但**唯一**失败项是「工作树不干净」，
+其余全部绿，**包含全量套件**：
+
+```
+[FAIL] working tree NOT clean:  M milestones/fast-mode-telemetry/2026-08-02.json
+[ok]   no MERGE_HEAD / no unmerged index / master 未被 stray worktree 占用
+[ok]   task-schema / dod-fixture / vmeta-lag / loadbearing-test-gate 全绿
+[ok]   full-test-suite (scripts/test.sh) 绿
+NOT READY ✗
+```
+
+**那一项是外层自己造成的死锁**：该文件被 git 跟踪，而 `--report` 每次调用都改写它
+（实测 md5 `f177326fc890` → `34b6854e76b1`），外层的 Monitor **每 60 秒**调一次。
+⇒ 任何提交后 60 秒内工作树必然变脏 ⇒ readiness 永远通不过。
+已建任务 [[gap-telemetry-report-writes-and-deadlocks-readiness]]（根因：`--report` 是读操作却在写）。
+
+**为什么超出授权**
+
+解除 `.halt` = 启动无人值守运行，是范围级动作，不是解阻塞。exp6-phase1 的 AC6 明确要求
+「readiness READY 后才 rm `.halt`」。
+
+**选项**
+
+| 选项 | 含义 | 代价 |
+|---|---|---|
+| **A（建议）** | 先派发 `gap-telemetry-report-writes-and-deadlocks-readiness`（外层临时停掉 Monitor 以便树能干净），修好后重跑 readiness，READY 再由**你**决定解除 | 一个任务的量；解除 `.halt` 的决定仍在你手里，且届时判据是干净的 |
+| B | 临时停 Monitor + 提交该文件 → 树干净 → 解除 `.halt` | 最快；但死锁没修，Monitor 一重挂就复现，且会持续产生噪声提交 |
+| C | 保持 `.halt`，继续由外层逐个显式派发 | 今天一整天就是这个模式，有效但吞吐受限于外层的派发节奏 |
+
+**建议 A**。另外内层挂起两个问题等你：M243 → M246 → M222 的合并顺序是否照队列文件执行
+（我理解你已在 escalations #2 裁定过，需要你确认内层可以照做）；以及 `.halt` 保留到什么时候。
+
+---
+
 ## 2. 四个 worktree 分支滞留着 **24,989 行已验收但从未合并**的工作 —— 合并还是丢弃？
 
 **发现时刻**：2026-08-02 ~16:10Z 外层 tick（复核 #1 的排期结论时顺带查 `git worktree list`）
