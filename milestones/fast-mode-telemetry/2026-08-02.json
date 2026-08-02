@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T13:43:23.964Z",
+  "generatedAt": "2026-08-02T14:03:24.980Z",
   "since": null,
   "tasks": [
     {
@@ -21,17 +21,22 @@
       "taskId": "gap-test-suite-has-no-layer-grouping",
       "minutes": 67.84928333333333,
       "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-tests-spawn-cli-from-ts-source",
+      "minutes": 22.43315,
+      "outcome": "done"
     }
   ],
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-tests-spawn-cli-from-ts-source",
-      "runId": "fm-gap-tests-spawn-cli-from-ts-source-1785676937127-z8534e",
-      "startedAtMs": 1785676937141
+      "taskId": "gap-tests-use-cli-where-module-import-suffices",
+      "runId": "fm-gap-tests-use-cli-where-module-import-suffices-1785678301009-hn9gyi",
+      "startedAtMs": 1785678301022
     }
   ],
-  "meanMinutes": 47.154716666666666,
-  "medianMinutes": 40.256675,
-  "tasksPerHour": 1.272407178779924
+  "meanMinutes": 42.21040333333333,
+  "medianMinutes": 40.2564,
+  "tasksPerHour": 1.4214505255063108
 }
