@@ -11,6 +11,20 @@ extra:
 ---
 **type:** execution
 
+**CLOSEOUT STATUS (2026-08-02, dev-session-handoff-2026-08-02b item 3):** the mechanism IS landed —
+`prepare-milestone.js` accepts `isolationMode: 'worktree'`, creates a real worktree via
+`milestone-worktree.ts --add` before Admission, routes content phases through
+`_worktreeIsolationNote`, and prepare-merge commits + merges + removes (verified by the
+task-status-drift-check detector: 11/12 symbols resolve; the mechanism is in the tree). It stays
+**ready** because the ACs demand REAL DISPATCH verification that fast-mode direct execution cannot
+produce: a real prepare-milestone dispatch with `isolationMode:'worktree'` under the outer loop
+proving AC2 (zero primary diffs until merge), AC3 (exactly one merge commit), AC4 (single-task
+dispatch → prepared receipt + clean merge), AC7 (clean-stale recovery on a real stranded worktree),
+AC8 (concurrent return shape). The mechanical sub-parts (milestone-worktree.ts `--add`/`--clean-stale`/
+`--merge`/`--remove`) have unit coverage in `experiments/quay-perpetual-stream/test/milestone-worktree.test.mjs`.
+What is missing before `done`: the real-dispatch proof of AC2/AC3/AC4/AC7/AC8 (and AC1's golden-replay
+verification under the prepare workflow's own mocks).
+
 ## Proposal
 
 **Problem framing:** `prepare-milestone.js` currently operates directly on the shared working tree (`master`) with no isolation boundary. Every phase -- Admission, Preflight, ProposalAuthors, Adjudicate, ProposalReview, PlanAuthor, PlanCheck, Receipt -- edits task bodies (via `task_write` in the Adjudicate phase), writes plan files (`docs/plans/M<NN>-<slug>.md` in the PlanAuthor phase), creates receipts and ledgers (`milestones/M<NN>/preparation.json` + `proposal-ledger.json` + `mechanism-inventory.json` in the Receipt phase), and writes checkpoints (`.quay/prepare-checkpoints/_input-*.json` in the ProposalReview phase) directly on the primary checkout. There is no git-level isolation boundary.

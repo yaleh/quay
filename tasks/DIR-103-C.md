@@ -14,6 +14,8 @@ extra:
 ---
 **type:** execution
 
+**CLOSEOUT STATUS (2026-08-02, dev-session-handoff-2026-08-02b item 3):** the per-provider acceptance_env mechanism IS landed (pinAcceptanceEnv/QUAY_ACCEPTANCE_ENV wired; task-status-drift-check confirms 4/4 symbols resolve). Stays **ready**: the ACs are unchecked — they demand REAL GATE-RUN falsification (an acceptance_env gate run reaching the env file's exports, a missing-file run failing closed, MCP- and CLI-side reachability) plus README documentation, which have not been recorded as verified. Remaining: run the falsification tests against the real gate-run path and record them, or promote the ACs a reviewer can prove mechanically.
+
 ## Proposal
 
 Give acceptance commands a reproducible baseline environment two ways:

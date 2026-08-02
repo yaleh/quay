@@ -2,7 +2,7 @@
 id: gap-planauthor-shape-rules-not-injected
 title: "Mechanical plan-shape rules run AFTER PlanAuthor — 46 PreflightPlan
   rejections discard already-authored plans"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -70,14 +70,14 @@ output formats); this owns the *plan grammar constraints*.
 
 ## Acceptance Criteria
 
-- [ ] AC1: `_planShapeContract` module-level constant exists in both `prepare-milestone.js` mirrors
-- [ ] AC2: The constant is interpolated into the PlanAuthor prompt
-- [ ] AC3: The contract states the Files-must-already-be-in-Touches constraint
-- [ ] AC4: The contract states the runnable-Command constraint and lists the accepted prefixes
-- [ ] AC5: A test asserts every prefix named in the contract is accepted by the real
+- [x] AC1: `_planShapeContract` module-level constant exists in both `prepare-milestone.js` mirrors
+- [x] AC2: The constant is interpolated into the PlanAuthor prompt
+- [x] AC3: The contract states the Files-must-already-be-in-Touches constraint
+- [x] AC4: The contract states the runnable-Command constraint and lists the accepted prefixes
+- [x] AC5: A test asserts every prefix named in the contract is accepted by the real
       `_RUNNABLE_COMMAND_RE` (behavioral anti-drift link, not a prose match)
-- [ ] AC6: A test asserts a prose-style command the contract warns against is REJECTED by the regex
-- [ ] AC7: Both workflow mirrors byte-identical
+- [x] AC6: A test asserts a prose-style command the contract warns against is REJECTED by the regex
+- [x] AC7: Both workflow mirrors byte-identical
 
 ## Definition of Done
 
