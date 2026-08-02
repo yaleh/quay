@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-02 ~17:35Z | `unblock` | 人授权选项 A 且合并顺序交给外层，声明数小时不干预。动作：停掉两个 Monitor（两者都每 60 秒调 `--report`）→ 派发死锁修复任务 → 裁定合并顺序 **M222 → M246 → M243** → 给 `inner-stalled.sh` 加 `READONLY` 模式并以 10 分钟阈值重挂 | 内层在做 `gap-telemetry-report-writes-and-deadlocks-readiness`，subagent 在飞 | **实测确认脏源就是外层自己**：提交后静置 120 秒，已跟踪文件被修改数 **0**；`READONLY=1` 下聚合文件 md5 前后一致（`f8124a9e8c8c` 不变）。合并顺序的理由是可测量性——M222 是三者中唯一可能降低墙钟的（异步化改变单文件占 lane 的方式），而它的效果只有在 M246 加进约 1600 行测试**之前**才测得出来；噪声带宽已知 20–63s，可对着真实阈值判定 |
 | 2026-08-02 ~17:10Z | `escalate` | Monitor 报 `BATCH-END`（cost-model 完成，遥测清空）→ 按步骤 4 组批。但内层报**停止条件 `.halt` 存在、不派发新任务**，补队列无意义。改为跑 readiness 把判据给人：**NOT READY，唯一失败项是工作树不干净**，其余全绿含全量套件。查明成因是**外层自己造成的死锁**（见右），已建任务并升级 `.halt` 解除决定给人 | 内层空闲，`.halt` 生效中；遥测 done 7 / inProgress 0 / orphaned 0；内层挂起两个问题：合并顺序确认、`.halt` 保留到何时 | **实测闭环**：readiness 要求干净树 → `milestones/fast-mode-telemetry/<date>.json` 被跟踪 → `--report` 每次改写（md5 `f177326fc890`→`34b6854e76b1`）→ **外层 Monitor 每 60 秒调一次** ⇒ 提交后 60 秒内必脏 ⇒ readiness 永不通过 ⇒ `.halt` 永不可解。此死锁是外层今晚引入 Monitor 后才稳定成立的 |
 | 2026-08-02 ~16:55Z | `no-action` | 内层正常推进且**自我纠偏**，无需介入。cost-model 已合并（`4282632c`），worktree 未提交 0 条、领先 0——`/clear` 事故的丢失风险完全解除。下一实验（并发度 4 vs 8）已记入吞吐文档，未派发 | B6-1 在飞 59 分钟（阈值 90），正在跑 `--for-task` scoped test（按外层要求） | **核实我设的硬约束全部守住**：AC1b 用 env-gated `QUAY_TEST_ASSERT_TIMING` 断言汇聚点计时、零断言改动、未转 node:test；`prepare-milestone-convergence` 无汇聚点则**如实标为黑盒**。**独立核实内层撤回的依据**：`nproc=4`（4 物理核/每核 1 线程）而 `--test-concurrency=8` → 2 倍过订属实，比值 7.14 确实只证明 lane 占满、不能证 CPU 受限。**外层自己的估算也对了账**：Σ 估 3900s 实测 3266–3434s（高估 15–19%），进程边界估 14% 实测 16–17% |
 | 2026-08-02 ~16:25Z | `no-action` | 内层从 `/clear` 恢复正常，无需介入：它读了外层简报、挂了自己的 Monitor 盯 run4、更新了队列文件、并明确「subagent 一返回先进 worktree 提交」。**内层 tick 的冷启动设计第一次真实受检并通过** | 新会话 `3bbd3095`；B6-1 在飞 39 分钟（阈值 90）；subagent 在做 AC1b 的断言汇聚点计时；worktree 未提交条目 3→7，仍 0 领先 | 取证工具在 `/clear` 后暴露**静默截断**：auto-pick 指向 0.4MB 的新会话，同日 11MB 旧会话不再可见而输出看起来完整。已修——请求窗口早于本会话首条记录时打印被排除的会话及其 `--session` 用法 |
@@ -29,6 +30,6 @@
 | 类型 | 次数 |
 |---|---|
 | no-action | 7 |
-| unblock | 4 |
+| unblock | 5 |
 | correct | 5 |
 | escalate | 3 |
