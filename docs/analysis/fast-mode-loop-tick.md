@@ -2,7 +2,7 @@
 
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 
-**调用方式**（不复用 `.claude/loop.md`——那份指向 exp5 的 OUTER-LOOP，语义冲突）：
+**调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
 
 ```
 /loop 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令
@@ -30,9 +30,15 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 
 ## 停止哨兵
 
-`.halt-fast-mode`（仓库根）
+`.halt`（仓库根）
 
-**不要用 `.halt`。** 那个哨兵挡的是 exp5 的 OUTER-LOOP 路径，当前有意保持存在。两条路各有各的开关。
+exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循环」改为**快速模式的唯一停止开关**。
+存在即暂停；移除即放行。
+
+移除前跑 `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh`——
+它检查工作树干净、无半途 merge、master 未被占用等硬条件。注意它有一条是「working tree clean」，
+而快速模式下开发会话本就在 master 上工作，所以**在飞任务未落地时它会 FAIL 是预期的**，
+不是故障；等在飞任务合并完、树干净了再移除。
 
 ---
 
@@ -40,7 +46,7 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 
 ### 0. 哨兵
 
-`.halt-fast-mode` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
+`.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
 
 ### 1. 读状态
 
@@ -64,7 +70,7 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 
 任一满足 → 不派发新任务，报告后重新排程：
 
-- `.halt-fast-mode` 存在
+- `.halt` 存在
 - needs-human 积压 ≥ 3
 - 上一步全量 suite 非绿
 - 有未解决的合并冲突
