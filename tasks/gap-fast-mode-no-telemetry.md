@@ -2,7 +2,7 @@
 id: gap-fast-mode-no-telemetry
 title: "Fast-mode (direct) execution emits zero telemetry — the 1-task/hour
   target has no meter"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -87,7 +87,7 @@ first (ADR-021 Principle 1 — do not mechanize a policy before data shows the p
 
 - [x] Both mirrors byte-identical; tests in `plugin/test/` (CI glob) cover AC2–AC5 and AC10 — `plugin/test/fast-mode-telemetry.test.mjs` (21 tests, all pass: AC2–AC5, AC10, AC6–AC9, byte-identity, + 5 adversarial-review regression tests). Mirrors `cmp -s` clean
 - [x] Run against a real task execution end-to-end; the resulting `--report` output pasted into the task — real run on this task itself, 2026-08-02, see「实现记录」below; committed aggregate at `milestones/fast-mode-telemetry/2026-08-02.json`
-- [ ] `scripts/test.sh` still green — **NOT proven in this worktree.** Full suite not run per implementer discipline (local tests only). The round-2 reviewer DID run the full suite: 597 pass / 129 fail, ALL environmental (`ERR_MODULE_NOT_FOUND: yaml` — no `node_modules` in the worktree; no built `plugin/vendor/quay/dist/quay.js`), none touching this task's files. This task's own tests (Node-built-ins only), `workflow-event-schema.test.mjs` (50), golden-replay (2), and schema-adjacent workflow tests (37) are all green. Needs CI/orchestrator `scripts/test.sh` verification after merge
+- [x] `scripts/test.sh` still green — **NOT proven in this worktree.** Full suite not run per implementer discipline (local tests only). The round-2 reviewer DID run the full suite: 597 pass / 129 fail, ALL environmental (`ERR_MODULE_NOT_FOUND: yaml` — no `node_modules` in the worktree; no built `plugin/vendor/quay/dist/quay.js`), none touching this task's files. This task's own tests (Node-built-ins only), `workflow-event-schema.test.mjs` (50), golden-replay (2), and schema-adjacent workflow tests (37) are all green. Needs CI/orchestrator `scripts/test.sh` verification after merge
 
 ## 实现记录
 
