@@ -1,10 +1,15 @@
 {
-  "generatedAt": "2026-08-02T18:04:18.461Z",
+  "generatedAt": "2026-08-02T19:04:53.412Z",
   "since": null,
   "tasks": [
     {
       "taskId": "DIR-112",
       "minutes": 10.43525,
+      "outcome": "done"
+    },
+    {
+      "taskId": "DIR-124-A2",
+      "minutes": 59.87506666666667,
       "outcome": "done"
     },
     {
@@ -55,7 +60,7 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 35.14519666666667,
-  "medianMinutes": 37.356625,
-  "tasksPerHour": 1.7072034215391594
+  "meanMinutes": 37.39336666666667,
+  "medianMinutes": 40.256233333333334,
+  "tasksPerHour": 1.6045626630748233
 }

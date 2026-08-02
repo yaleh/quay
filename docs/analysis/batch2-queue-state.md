@@ -37,7 +37,7 @@
 |---|---|
 | **M222**（DIR-112） | ✅ **已合并** `6721ec28`，全量绿（2139/2121/0/18，447.6s）。墙钟差值 489−447.6=41.4s，**落在 20–63s 噪声带宽内 → 如实判定「不可判定」**（非改善）。cli.test.mjs 单文件 58.2s vs 66s 基线，方向性。done |
 | M246（DIR-124-A5） | ✅ **已合并**（M246 merge），全量绿（2275/2257/0/18，429.9s，+136 测试）。独立新文件干净合并。done |
-| **M243**（DIR-124-A2） | **在飞**（subagent 已派发 17:44Z，worktree `/tmp/quay-wt-m243`，runId fm-DIR-124-A2-1785693890531-06eeel）。恢复策略：`git revert 88e17bf2` 重放语料 + **必须带回 095ddbf0**（validateEvent `.error` 修复，随 revert 成孤儿）+ 修 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome）。负控制守则：GREEN tampered 恢复 fail-detect 前不重写期望值。**进度（18:12 tick）**：revert 重放已提交 `c6ebbfb7`（87 文件 / 8221 行），分支上的 workflow-replay.ts 已是 `.error` 修复版（272 行），095ddbf0 确为分支祖先；subagent 未返回，工作树干净——在途为 5 类 A1a 修复 + 负控制验证 |
+| **M243**（DIR-124-A2） | ✅ **已 merge `3dfba2c6` + 收尾完成**。单套件最终验证：2296/2277/1 fail（仅 M136）/18 skip，491.5s。**判定：M243 代码干净，大规模崩溃是并发争抢产物**（4 核跑 2 个 c8 套件 = 4 倍过订；对照 M243 前单套件同样无崩溃）。095ddbf0 带回（.error 在场）、5 类 A1a 差异逐个有证据、负控制真 fail-detect。任务 done，计量 60 min。**遗留：M136（vendor sync flaky）是既有问题，独立于 M243，见「待查」** |
 
 ## 已完成 B6
 
@@ -64,6 +64,8 @@
 
 - 3 engine：symlink-mirror ×2 + enforcement-with-design ×1（open 任务在飞）
 - 3 governance：chart2-s2（B3-2 记录为发现，需另建任务——本批未覆盖）
+- **M136 sync-vendor flaky**（2026-08-02 实测，需建任务）：`sync-vendor.sh --check` 在 dist 重建后报 `vendor/task-schema.ts differs`（`packages/quay/dist/quay.js` vs `plugin/vendor/quay/dist/quay.js` 镜像不同步）。sync 后 check 干净、dist 重建又 drift——与 test.sh 的 `build_dist_once` 时序竞争。对照（M243 前）也失败，非 M243 引入。证据：`--check` 直接跑 exit 1 + DRIFT 行
+- **并发跑 2 个 c8 套件 = runner 崩溃**（2026-08-02 教训）：4 核机器上 `--test-concurrency=8` 已过订 2×，两个套件同时跑 = 4 倍过订 → 127/237 文件 'Promise pending' 崩溃。**全量套件必须严格串行跑**（同一时刻只跑一个），这验证了外层建议的 `--test-concurrency=4 vs 8` 实验值得做（记于 orchestration/throughput-decomposition.md）
 
 ## 已完成（B2/B3 全批次）
 
