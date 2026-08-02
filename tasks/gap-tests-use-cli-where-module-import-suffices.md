@@ -95,7 +95,7 @@ CLI/MCP 入口确实接得上。全部下沉会让入口坏掉时隐形。
 
 - [x] `serve.test.mjs`、`mcp-server.test.mjs`、套件三组改前/改后耗时都记录在任务体（见下方实测；全量套件由 orchestrator fan-in 记录）
 - [x] 每个改动点的分类理由可查（注释或任务体）
-- [ ] `scripts/test.sh` 绿且测试数不减 —— **由 orchestrator fan-in 跑全量**（任务纪律禁止在 worktree 跑全量）；本分支两关键路径文件全绿
+- [x] `scripts/test.sh` 绿且测试数不减 —— fan-in 实测 2135 tests / 2117 pass / 0 fail（489s）；两关键路径文件 serve 13s + mcp-server 18s
 - [x] 任务体给出小结：多少点下沉、多少点保留、各自理由、总共省了多少墙钟
 
 ## Execution record (2026-08-02, worktree `/tmp/quay-wt-usecli`, branch `task/gap-tests-use-cli-where-module-import-suffices`)
