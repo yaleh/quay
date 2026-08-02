@@ -51,7 +51,7 @@
 |---|---|
 | **下一批：flags-only 缺陷（派发中）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`。test.sh dispatch 无「裸标志+默认 glob」分支，`--test-concurrency=4` 被当文件参数 → node 自发现 2296→8573（3.7×）。**先修工具再谈测量**。AC1=两种调用测试数相同，AC4=每次打印 selected N files |
 | **M136 sync-vendor 错标（诊断搁置）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，**已记 needs-human（86 min）**。两轮修复隔离绿但全量红，torn-read retry 未覆盖真正路径。**诊断搁置**：诊断工具本身是坏的（flags-only 静默换套件），并发失败不能用坏的 runner 测。等 test.sh 修复后再测 |
-| **`--test-concurrency=4 vs 8` 实测（依赖前置）** | `gap-suite-concurrency-4-vs-8-measurement`。**阻塞于 flags-only 修复**——改并发度不能同时改选择集。修复后才能正确执行 |
+| **`--test-concurrency=4 vs 8` 实测（在飞）** | `gap-suite-concurrency-4-vs-8-measurement`，派发 21:31Z，runId fm-gap-suite-concurrency-4-vs-8-measurement-1785706293549-4af9ik。flags-only 修复已通（依赖链第一环）。6 次全量（c4×3+c8×3），selected N files 一致判据 + 20-63s 噪声带 + 崩溃独立维度。**flags-only 修复行为核实通过**：`--group governance` selected 13 files，默认 205 == c4 205（外层 master 实测） |
 | 下一批 gap 任务（flags-only 后） | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
