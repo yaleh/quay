@@ -91,11 +91,17 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+// gap-tests-spawn-cli-from-ts-source (AC9): route CLI subprocess spawns through
+// the prebuilt dist bundles (freshness-checked by cli-entry.mjs) instead of the
+// .ts sources. coreBin is the Core MCP server's 15 connectStdio() handshakes;
+// nativeBin seeds fixtures + the provider MCP server. nativeProviderDir stays
+// pinned to the SOURCE bin dir (provider cwd via config.yml `path:`).
+const coreBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 

@@ -102,11 +102,19 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+// gap-tests-spawn-cli-from-ts-source: route CLI spawns through the prebuilt
+// dist bundle (freshness-checked by cli-entry.mjs) instead of the .ts source —
+// the bundle skips the ~2.1s/process TS module-graph load. coreBin is the 67
+// run() call sites (the wall-clock lever); nativeBin seeds fixtures + the
+// provider MCP server. nativeProviderDir stays pinned to the SOURCE bin dir:
+// it is the provider's cwd (config.yml `path:`), independent of which entry
+// binary the mcp_entry launches.
+const coreBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
@@ -534,8 +542,8 @@ async function main() {
     child.stderr.on("data", (c) => (stderr += c));
     try {
       // Poll for the server to come up (real subprocess start-up latency).
-      // 30s budget (300 * 100ms): a real `node bin/quay.ts serve` cold start
-      // (module resolution + TS strip-types + provider MCP handshake) can
+      // 30s budget (300 * 100ms): a real `quay serve` cold start via the
+      // prebuilt bundle (spawned through QUAY_CLI; provider MCP handshake) can
       // exceed the previous 5s budget under CPU contention from concurrently
       // -scheduled test files (this repo's default `scripts/test.sh` run
       // uses --test-concurrency=8) or a slower CI runner -- a fixed 5s
