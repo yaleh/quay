@@ -1,7 +1,22 @@
 {
-  "generatedAt": "2026-08-02T13:03:09.133Z",
+  "generatedAt": "2026-08-02T13:22:17.471Z",
   "since": null,
   "tasks": [
+    {
+      "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
+      "minutes": 40.256233333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-select-preflight-json-real-store-too-slow",
+      "minutes": 40.25695,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-symlink-mirror-invocation-test-contract-mismatch",
+      "minutes": 40.2564,
+      "outcome": "done"
+    },
     {
       "taskId": "gap-test-suite-has-no-layer-grouping",
       "minutes": 67.84928333333333,
@@ -11,22 +26,12 @@
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
-      "runId": "fm-gap-dod-clause13-14-enforced-but-undocumented-1785673841706-w7y7uz",
-      "startedAtMs": 1785673841720
-    },
-    {
-      "taskId": "gap-select-preflight-json-real-store-too-slow",
-      "runId": "fm-gap-select-preflight-json-real-store-too-slow-1785673841089-yoji1f",
-      "startedAtMs": 1785673841100
-    },
-    {
-      "taskId": "gap-symlink-mirror-invocation-test-contract-mismatch",
-      "runId": "fm-gap-symlink-mirror-invocation-test-contract-mismatch-1785673841393-d330u6",
-      "startedAtMs": 1785673841406
+      "taskId": "gap-tests-spawn-cli-from-ts-source",
+      "runId": "fm-gap-tests-spawn-cli-from-ts-source-1785676937127-z8534e",
+      "startedAtMs": 1785676937141
     }
   ],
-  "meanMinutes": 67.84928333333333,
-  "medianMinutes": 67.84928333333333,
-  "tasksPerHour": 0.8843129514755376
+  "meanMinutes": 47.154716666666666,
+  "medianMinutes": 40.256675,
+  "tasksPerHour": 1.272407178779924
 }
