@@ -72,6 +72,7 @@ export function parseGates(configText, srcFile = "config") {
   let inGates = false;
   let curSection = null;
   let curItem = null;
+  let itemIndent = -1; // indent of the current `- ` list item (fields are deeper)
 
   const flushItem = () => {
     if (curItem && curItem.name) {
@@ -84,6 +85,7 @@ export function parseGates(configText, srcFile = "config") {
       });
     }
     curItem = null;
+    itemIndent = -1;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -98,22 +100,15 @@ export function parseGates(configText, srcFile = "config") {
     }
 
     // Leaving the gates block: another top-level `key:` at column 0 (e.g. `loop:`).
-    if (indent === 0 && /^[A-Za-z][\w-]*:$/.test(content)) {
+    if (indent === 0 && /^[A-Za-z][\w-]*:\s*(?:#.*)?$/.test(content)) {
       flushItem();
       break;
     }
 
-    // Section header at indent 2: `  it0:`, `  adr:`, `  fixed:`, `  testPass:`, ...
-    if (indent === 2 && /^[A-Za-z][\w-]*:$/.test(content)) {
-      flushItem();
-      curSection = content.slice(0, -1);
-      curItem = null;
-      continue;
-    }
-
-    // List item at indent >= 4: `- name: ...` or (adr) `- "ADR-001"`.
+    // List item: `- name: ...` (or an adr scalar `- "ADR-001"`). Any item starts a new record.
     if (content.startsWith("- ")) {
       flushItem();
+      itemIndent = indent;
       const rest = content.slice(2).trim();
       const nm = rest.match(/^name:\s*(.+)$/);
       if (nm) {
@@ -124,8 +119,17 @@ export function parseGates(configText, srcFile = "config") {
       continue;
     }
 
-    // Field within an item at indent >= 6: `name:` / `script:` / `command:` / ...
-    if (curItem && indent >= 6) {
+    // Section header: a `key:` line (with no value after the colon, optional trailing comment)
+    // that is shallower than the current item, or appears with no active item. Indentation-relative,
+    // so any valid YAML layout (`  it0:`/`    - name:`/`      script:` or tighter) parses the same.
+    if (/^[A-Za-z][\w-]*:\s*(?:#.*)?$/.test(content) && (curItem === null || indent < itemIndent)) {
+      flushItem();
+      curSection = content.slice(0, -1);
+      continue;
+    }
+
+    // Field within the current item: deeper than the item line. `name:` / `script:` / `command:` / ...
+    if (curItem && indent > itemIndent && itemIndent >= 0) {
       const fm = content.match(/^(name|script|command|argsKey|cwd|floor|red|green|pattern|timeoutMs):\s*(.*)$/);
       if (fm) {
         const key = fm[1];

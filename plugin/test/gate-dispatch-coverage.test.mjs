@@ -4,9 +4,9 @@
 // (fixture tests) plus AC1 (mirror), AC8 (constant exit 0), AC9 (zero writes) and the AC10/DoD
 // real-repo baseline run.
 //
-// DoD grouping note: `// @test-group engine` is intentionally NOT added — the dependency task
-// (gap-test-suite-has-no-layer-grouping) is not yet merged and no existing plugin/test file shows
-// the annotation, so the default (un-grouped) convention is used.
+// DoD grouping note: the layer-grouping annotation from gap-test-suite-has-no-layer-grouping is
+// intentionally NOT added — that task is not yet merged (status: todo) and no existing plugin/test
+// file shows the annotation, so the default (un-annotated = engine) convention is used here.
 //
 // Run:
 //   scripts/test.sh plugin/test/gate-dispatch-coverage.test.mjs
