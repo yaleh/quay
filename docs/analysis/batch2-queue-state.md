@@ -49,7 +49,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| **M136 第三轮修复（下一步）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，needs-human。**机制已确认（2026-08-02 22:50）**：跨文件状态干扰——build-dist/npm-pack 重建 `packages/quay/dist/quay.js`（源侧），vendor 镜像不同步 → M136 --check 在全量并行时 DRIFT（配对跑绿但跑后 DRIFT 证实）。**非竞态、非并发度相关**（4vs8 6/6 证实 c4/c8 都红）。修法方向：--check 前先 --sync-dist，或 build-dist 后同步 vendor |
+| **M136 第三轮修复（在飞）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，needs-human。**机制已确认**：跨文件状态干扰——build-dist/npm-pack 重建 `packages/quay/dist/quay.js`（源侧），vendor 镜像不同步 → M136 --check 全量 DRIFT。**修法（外层裁定）**：✗ 不做 `--check 前 --sync-dist`（掩盖）；✓ 消除干扰源——5 个写 dist/vendor 的测试改为临时目录构建。**负控制**：改脏 vendor → 全量 M136 必须红。派发 23:0xZ，runId fm-...-o45wve，worktree /tmp/quay-wt-m136r3 |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done。裸标志分支 + selected N 自报，全量验证 2298/2279/1（仅 M136） |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。**外层决定：不改默认，保持 8**（34s 差值在噪声带内、稳定性相同、ADR-019 未推翻）。「系统性全量崩溃」线索**关闭**：6 次干净单套件零 Promise-pending，与双套件并跑诊断一致 |
 | 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
