@@ -23,14 +23,21 @@ while true; do
   # 本脚本每 60 秒调一次，等于让 readiness 永不通过、`.halt` 永不可解。
   # 修复见 gap-telemetry-report-writes-and-deadlocks-readiness；在它落地前，本监视器以只读模式运行，
   # 代价是失去两级判据、一律按 CONFIRM_S 报 STALLED（会把「在等自己的 subagent」也报出来）。
-  if [ "${READONLY:-0}" = "1" ]; then
+  # 结构信号优先于遥测代理：合并与验证跑**不在任务括号内**，遥测 inProgress 为空，
+  # 于是两级判据退化成 90 秒阈值直接误报。2026-08-02 实测：内层在跑 M246 的全量套件
+  # （11 个 `node --test` 进程），inProgress 却是 []，报出一次假 STALLED。
+  # 数测试进程比问遥测更直接，且不依赖内层是否记了计量。
+  testprocs=$(pgrep -c -f 'node --test' 2>/dev/null || echo 0)
+  if [ "${testprocs:-0}" -gt 0 ]; then
+    busy=$testprocs
+  elif [ "${READONLY:-0}" = "1" ]; then
     busy=0
   else
     busy=$(node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json 2>/dev/null \
            | python3 -c 'import sys,json;print(len((json.load(sys.stdin) or {}).get("inProgress",[])))' 2>/dev/null || echo 0)
   fi
   thr=$CONFIRM_S; lvl=STALLED
-  [ "${busy:-0}" -gt 0 ] && { thr=$MAYBE_S; lvl="STALLED-MAYBE(在飞${busy}，可能在等 subagent)"; }
+  [ "${busy:-0}" -gt 0 ] && { thr=$MAYBE_S; lvl="STALLED-MAYBE(在飞/测试进程 ${busy}，可能在等自己的活)"; }
   if [ "$quiet" -ge "$thr" ]; then
     out=$(tail -c 200000 "$inner" | python3 -c '
 import sys,json
