@@ -28,7 +28,7 @@
 7. **跑测试**（见下）
 8. **关闭任务状态**（见下）——用 `task-status-drift-check.ts` 检测器核对：实现已落地的任务若仍 `todo`/`ready` 会被标为 `status-drift-suspect`，逐个复核后关闭
 9. **提交**
-10. **遥测结束**（必做，见下方「遥测」节）：提交前发 `--task-end` 事件；可跑 `--report` 确认汇总落盘
+10. **遥测结束**（必做，见下方「遥测」节）：提交前发 `--task-end` 事件；**再跑 `--snapshot` 落盘汇总**（`--report` 是纯读，不落盘）
 
 ## 遥测（必做，gap-fast-mode-no-telemetry 落地后生效）
 
@@ -51,9 +51,11 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 
 - `outcome` 三选一：`done`（AC/DoD 全部证明）、`needs-human`（需要人工介入 / 真实 dispatch 验证）、
   `abandoned`（中途放弃、没有完成 commit）。
-- 原始事件落在 `.workflow-events/`（gitignored）。`--report` 把汇总写到
-  `milestones/fast-mode-telemetry/<date>.json`（提交保留）——这就是 1 小时目标对账用的持久化数据。
-- 汇总：`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report [--since <iso>] [--json]`
+- 原始事件落在 `.workflow-events/`（gitignored）。**写持久化汇总只走显式 `--snapshot`**：
+  `milestones/fast-mode-telemetry/<date>.json`（提交保留，1 小时目标对账用的持久化数据）。
+  **任务收尾 / Land / 日终必须跑一次 `--snapshot`**，否则聚合不会更新。
+- 落盘（提交前）：`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot [--since <iso>] [--json]`
+- 观察（纯读，可任意频率调用、不脏树）：`node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report [--since <iso>] [--json]`
 
 ## 硬性约束
 

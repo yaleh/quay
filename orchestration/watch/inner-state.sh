@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # 外层对内层的事件式监测。每行 stdout 是一个事件。
 # 只在「状态转变」时发声——不刷屏，不把常规推进当事件。
+#
+# 纯读契约（gap-telemetry-report-writes-and-deadlocks-readiness）：本脚本每 60 秒调一次
+# `fast-mode-telemetry.ts --report --json`。若 `--report` 写文件，任何提交后 60 秒内工作树必
+# 脏，restart-readiness-check.sh 的「工作树干净」硬检查永远不通过 → `.halt` 永不可解。
+# 观测命令不得改变被观测对象。`--report` 已是纯读（写只走显式 `--snapshot`）；此处禁止加入
+# 任何写路径。本脚本除 `git log`/`git show` 外不写任何文件。
 cd /home/yale/work/quay || exit 1
 prev_tasks=""; prev_head=""; alerted=""; first=1
 while true; do

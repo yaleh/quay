@@ -96,6 +96,14 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 5. 非绿 → **立即停止**，不再合并任何东西；逐个回退或 `git bisect` 定位是哪个 merge 导致，报告
 6. 绿 → 对每个已合并任务：`git worktree remove` + `git branch -d`，关闭任务状态（AC 和 DoD 都勾；勾不上写理由或留 `ready`），记录耗时
 
+**Land 时刻落盘汇总（必做，gap-telemetry-report-writes-and-deadlocks-readiness）**：全批合并 + 关闭完成后
+跑一次显式 `--snapshot`，否则被 git 跟踪的聚合文件不会反映本批结果（`--report` 已是纯读、不落盘，
+聚合只随 `--snapshot` 变化）：
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot
+```
+落盘后随本 tick 的正常提交一起提交，**不要**为聚合单开「refresh telemetry aggregate」式提交。
+
 **为什么批量：** 全量套件 ~7 分钟（418s 实测）。逐个合并各跑一次，3 个任务就是 21 分钟纯重复。批量后 7 分钟。B2/B3 这批 5 个任务在旧方式下花了约 35 分钟在重复跑同一套件上。
 
 **不削弱任何断言**——合并仍逐个、每个仍有选中集把关、全量仍然跑，只是把全量的验证点从「每次合并」移到「一批合并」。红了用 bisect 定位，比省下的时间便宜。
