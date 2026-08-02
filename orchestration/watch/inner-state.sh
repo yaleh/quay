@@ -2,7 +2,7 @@
 # 外层对内层的事件式监测。每行 stdout 是一个事件。
 # 只在「状态转变」时发声——不刷屏，不把常规推进当事件。
 cd /home/yale/work/quay || exit 1
-prev_tasks=""; prev_head=""; alerted=""
+prev_tasks=""; prev_head=""; alerted=""; first=1
 while true; do
   snap=$(node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json 2>/dev/null \
     | python3 -c '
@@ -25,6 +25,9 @@ for t in d.get("orphaned",[]):
       # 只作「批次结束」用。停摆检测已移交 inner-stalled.sh —— 本信号实测只覆盖 46% 的空转
       # （2026-08-02，orchestration/throughput-decomposition.md），且漏掉最大的一次 25.7 分钟。
       echo "BATCH-END 在飞任务清空（上一批: ${prev_tasks:-none}）"
+    elif [ "$first" = 1 ]; then
+      # 重挂时的基线读数，不是状态转变。每次冷启动都会出现——标对而不是隐藏。
+      echo "INIT 挂载时的在飞任务: $tasks"
     else
       echo "START 在飞任务变为: $tasks"
     fi
@@ -39,6 +42,7 @@ for t in d.get("orphaned",[]):
 
   # 结构判据，不匹配提交消息的散文。2026-08-02 第一次发声即误报：
   # 外层自己一条讨论 revert 的提交被 *[Rr]evert* 命中。会叫狼来了的检测器最后没人理。
+  first=0
   head=$(git log -1 --format='%h' 2>/dev/null)
   if [ "$head" != "$prev_head" ] && [ -n "$prev_head" ]; then
     # (a) 真正的 revert：git 自己在 body 里生成 "This reverts commit <sha>"
