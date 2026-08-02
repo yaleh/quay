@@ -114,7 +114,8 @@ fi
 # ---------------------------------------------------------------------------
 # 3. Task-schema files (group 2 — expected-different)
 # ---------------------------------------------------------------------------
-EXPERIMENT_SCRIPTS="${REPO_ROOT}/experiments/quay-perpetual-stream/scripts"
+EXPERIMENT_DIR="${REPO_ROOT}/experiments/quay-perpetual-stream"
+EXPERIMENT_SCRIPTS="${EXPERIMENT_DIR}/scripts"
 
 if $CHECK_MODE; then
   echo "[sync-vendor --check] verifying task-schema files (expected-diff) ..."
