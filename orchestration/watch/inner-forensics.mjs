@@ -4,8 +4,11 @@
 //   timecost [--since <ISO>]        时间成本分解（空转 / 全量套件 / 范围化测试 / 其它 / 生成）
 //   verify <正则> [--since <ISO>]   内层到底跑没跑某条命令 —— 秒级、零 CPU 干扰
 //
-// 为什么不用 meta-cc：它只装了 `meta-cc-mcp`（stdio MCP server），没有普通 CLI，
-// 脚本里调不了。meta-cc MCP 仍是交互式 ad-hoc 查询的正确路径；此处只做可重复的固定查询。
+// 为什么不用 meta-cc（2026-08-02 实测，更正）：**不是因为脚本调不了 MCP** —— 实测可以，
+// initialize → notifications/initialized → tools/call，行分隔 JSON-RPC，几十行代码。
+// 真正的原因是 `jq_filter` 被忽略（判据：`.[] | .timestamp` 仍返回完整记录），无法定向查询；
+// 全量 10,868 条 × ~2KB，拉 ~20MB 回来在客户端过滤比直接读 transcript 更差。
+// 详见 orchestration/meta-cc-issues.md。jq_filter 修好后本文件应整体换成 meta-cc 查询。
 //
 // 两条硬约束，来自 2026-08-02 外层自己犯的两个错：
 //   1. 会话选择必须打印出来并给出指纹 —— 那天第一次分析选错了会话文件，
