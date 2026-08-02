@@ -160,12 +160,13 @@ test("AC2: real store — batch-1 todo tasks (code not landed) are NOT flagged; 
   }
 
   // These are MEASURED drift (2026-08-02): implementing code present in the tree while status was
-  // todo/ready — the detector's whole reason to exist.
+  // todo/ready — the detector's whole reason to exist. (DIR-099 was reconciled to `done` by batch
+  // 0.3, so it is correctly no longer in the todo/ready scan set; these three remain ready because
+  // their ACs demand real-dispatch evidence.)
   for (const landed of [
     "gap-planauthor-shape-rules-not-injected",
     "gap-prepare-milestone-no-worktree-isolation",
     "gap-prepare-milestone-epoch-scope-change-grants-full-review",
-    "DIR-099",
   ]) {
     assert.ok(
       suspects.some((s) => s.taskId === landed),
