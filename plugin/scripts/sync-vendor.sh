@@ -7,6 +7,24 @@
 # source of truth (ADR-004 single-source discipline, same discipline DIR-040
 # item 3 requires).
 #
+# SYNC TIMING of the vendored dist bundle (gap-sync-vendor-drift-mislabelled-as-
+# task-schema, M136): the vendored plugin/vendor/quay/dist/quay.js is a gitignored
+# GENERATED mirror, consumed live by the plugin's MCP server (plugin/.mcp.json ->
+# ${CLAUDE_PLUGIN_ROOT}/vendor/quay/dist/quay.js). The chosen timing is
+# "auto-sync with tests" (option (a)):
+#   - `scripts/test.sh` rebuilds the SOURCE dist on every run (build_dist_once),
+#     then re-mirrors it here via `--sync-dist` — so a fresh vendored copy is
+#     guaranteed before every test run, and `sync-vendor.sh --check` in the M136
+#     packaging test sees a consistent mirror (never a deterministic false DRIFT
+#     caused by a newer source build alone).
+#   - `npm install` still regenerates it via the root `postinstall` (fresh clone +
+#     install is self-consistent), and the release publish
+#     (.github/workflows/publish-plugin-dist.yml) does the same before building
+#     the dist-plugin orphan branch.
+# It is never hand-synced and never silently stale: --check is a HARD gate (a
+# stale vendored mirror fails loudly, exit 1) — not advisory, not skippable.
+# This script (no flags) still does a full rebuild+mirror at any time.
+#
 # Why a vendored copy at all (not a runtime reference into packages/quay):
 # Claude Code copies only the `plugin/` subtree into its install cache
 # (plugins-reference: "plugins are copied to a cache, so paths referencing
@@ -15,7 +33,7 @@
 # So plugin/vendor/quay/{bin,src} MUST live inside plugin/, kept in sync by
 # this script rather than drifting as a hand-maintained duplicate.
 #
-# Usage: bash plugin/scripts/sync-vendor.sh [--check]
+# Usage: bash plugin/scripts/sync-vendor.sh [--check] [--sync-dist]
 #   (run from anywhere; resolves paths from its own location)
 #
 # --check: dry-run verification mode. Verifies that each file this script
@@ -23,6 +41,12 @@
 #   a symlink (which guarantees identity), or an expected-different file
 #   (task-schema group — attribution-only diffs). Exits 0 when clean,
 #   non-zero when drift is detected. Does NOT copy anything.
+#
+# --sync-dist: mirror an ALREADY-BUILT source dist bundle to the vendored copy
+#   WITHOUT rebuilding. Used by scripts/test.sh after its build_dist_once step,
+#   so the vendored mirror stays fresh before every test run (see SYNC TIMING
+#   above). Fails loudly if the source bundle is missing — never silently
+#   paper over a stale/missing vendored copy.
 
 set -euo pipefail
 
@@ -37,12 +61,18 @@ DEST="${PLUGIN_DIR}/vendor/quay"
 # Parse flags
 # ---------------------------------------------------------------------------
 CHECK_MODE=false
+SYNC_DIST_MODE=false
 for arg in "$@"; do
   case "$arg" in
     --check) CHECK_MODE=true ;;
+    --sync-dist) SYNC_DIST_MODE=true ;;
     *) echo "ERROR: unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+if $CHECK_MODE && $SYNC_DIST_MODE; then
+  echo "ERROR: --check and --sync-dist are mutually exclusive" >&2
+  exit 2
+fi
 
 # Track drift for --check exit code
 DRIFT=0
@@ -79,8 +109,19 @@ cmp_or_report() {
 # ---------------------------------------------------------------------------
 if $CHECK_MODE; then
   echo "[sync-vendor --check] verifying vendor dist bundle ..."
-  cmp_or_report "vendor/task-schema.ts" \
+  cmp_or_report "vendor/quay/dist/quay.js" \
     "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+elif $SYNC_DIST_MODE; then
+  # --sync-dist: mirror an already-built source bundle, no rebuild (see header
+  # comment — used by scripts/test.sh so the vendored mirror stays fresh before
+  # every test run).
+  if [ ! -f "${SRC}/dist/quay.js" ]; then
+    echo "ERROR: --sync-dist requires a built source bundle: ${SRC}/dist/quay.js (run the build first)" >&2
+    exit 2
+  fi
+  echo "[sync-vendor --sync-dist] mirroring packages/quay/dist/quay.js -> plugin/vendor/quay/dist/quay.js (no rebuild)"
+  mkdir -p "${DEST}/dist"
+  cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
 else
   if [ ! -d "$SRC" ]; then
     echo "ERROR: source not found: $SRC" >&2
@@ -92,6 +133,14 @@ else
   bash "${SRC}/scripts/build-dist.sh"
   mkdir -p "${DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+fi
+
+# --sync-dist is dist-bundle-only: mirror the source bundle and stop. All other
+# vendored assets (skills, scripts, A2 corpus, package.json) are TRACKED in git
+# and kept in sync by the normal commit flow — this mode must never touch them.
+if $SYNC_DIST_MODE; then
+  echo "[sync-vendor --sync-dist] done."
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------

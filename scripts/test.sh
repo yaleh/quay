@@ -30,9 +30,12 @@
 #   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
 #   (AC7) — the current work surface, so a missed declaration never silently vanishes.
 #
-#   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI
-#   - engine      methodology EXECUTION path (plugin/test + the execution-path tests under
-#                 experiments/quay-perpetual-stream/test/)
+#   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
+#                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
+#                 sync-vendor.sh --check scan) is a PRODUCT packaging path, not engine
+#                 (AC8 of gap-sync-vendor-drift-mislabelled-as-task-schema).
+#   - engine      methodology EXECUTION path (the rest of plugin/test + the execution-path
+#                 tests under experiments/quay-perpetual-stream/test/)
 #   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
 #                 skip block makes it visible as `skipped` in default runs instead of absent)
 #
@@ -163,6 +166,22 @@ build_dist_once() {
   echo "== build dist/quay-native.js (packages/quay-native/scripts/build-dist.mjs) =="
   if ! node "${repo_root}/packages/quay-native/scripts/build-dist.mjs"; then
     echo "scripts/test.sh: native dist build FAILED — refusing to run tests against a possibly-stale bundle" >&2
+    exit 1
+  fi
+  # gap-sync-vendor-drift-mislabelled-as-task-schema (M136): the vendored plugin
+  # dist (plugin/vendor/quay/dist/quay.js) is a gitignored GENERATED mirror
+  # consumed live by the plugin's MCP server (plugin/.mcp.json). Rebuilding the
+  # SOURCE dist above without re-mirroring it made sync-vendor.sh --check fail
+  # DETERMINISTICALLY on every suite (a newer source build vs an untouched
+  # vendored copy) while its DRIFT message mislabeled the compared file — the
+  # root cause of M136 being read as "flaky" for three rounds. The chosen sync
+  # timing (documented in plugin/scripts/sync-vendor.sh's header comment) is
+  # "auto-sync with tests": mirror the just-built source bundle to the vendored
+  # copy now (no rebuild) so --check sees a consistent mirror. Fails loudly —
+  # a broken mirror must never be silently papered over.
+  echo "== mirror vendored plugin dist (plugin/scripts/sync-vendor.sh --sync-dist) =="
+  if ! bash "${repo_root}/plugin/scripts/sync-vendor.sh" --sync-dist; then
+    echo "scripts/test.sh: vendored dist mirror FAILED — refusing to run tests against a possibly-stale plugin bundle" >&2
     exit 1
   fi
 }

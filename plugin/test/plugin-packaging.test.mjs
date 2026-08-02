@@ -1,4 +1,8 @@
-// @test-group engine
+// @test-group product
+// gap-sync-vendor-drift-mislabelled-as-task-schema (AC8): declared `product`, not `engine` —
+// plugin-packaging tests (incl. M136's sync-vendor.sh --check scan) verify the PRODUCT packaging
+// path (the vendored plugin bundle), not the methodology-execution path. Both stay in the default
+// `product,engine` suite, so this only changes `--group engine`-only runs (none exist in CI/workflows).
 // plugin/test/plugin-packaging.test.mjs — pins the DIR-040 (+ DIR-042-B) plugin-packaging invariants:
 //   1. the marketplace + plugin manifests are valid JSON with the shape Claude Code expects
 //   2. plugin.json's commands[] actually lists the 4 bundled skills
@@ -213,19 +217,31 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
   // at every milestone that touched SYNC_SCRIPTS (M188 +5, M189 +7, M191 +2, M193 +1) — and this
   // milestone's own +2 (composite-manifest-synthesis, gate-script-base) was the one time that
   // bump was missed, leaving a real, live-failing assertion on master. Deriving the expected count
-  // directly from sync-vendor.sh's own SYNC_SCRIPTS array closes this whole class of drift.
+  // directly from sync-vendor.sh's own arrays closes this whole class of drift.
+  // gap-sync-vendor-drift-mislabelled-as-task-schema: the DIR-124-A2 golden replay corpus (M243)
+  // added a SECOND `scripts/`-labeled cmp_or_report loop (A2_SCRIPTS: workflow-event-schema.mjs,
+  // workflow-replay.ts), so the --check output reports SYNC_SCRIPTS + A2_SCRIPTS `scripts/` entries.
+  // The assertion used to derive only from SYNC_SCRIPTS (25) — latent-broken (27 !== 25) and masked
+  // by the mislabeled-DRIFT failure this task fixed; it never ran GREEN on master. Sum both arrays.
+  // A future milestone adding a THIRD `scripts/`-labeled cmp_or_report loop must extend this sum —
+  // the assertion fails loudly until it does (new-array introduction is not auto-derived).
   const okCount = (result.match(/OK \(identical\): scripts\//g) || []).length;
   const syncScriptText = readFileSync(syncScript, 'utf8');
-  const syncScriptsBlock = syncScriptText.match(/SYNC_SCRIPTS=\(([\s\S]*?)\)/);
-  assert.ok(syncScriptsBlock, 'sync-vendor.sh must declare a SYNC_SCRIPTS=(...) array');
-  const expectedCount = syncScriptsBlock[1]
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('#')).length;
+  const countArrayEntries = (arrayName) => {
+    const block = syncScriptText.match(new RegExp(`${arrayName}=\\(([\\s\\S]*?)\\)`));
+    assert.ok(block, `sync-vendor.sh must declare a ${arrayName}=() array`);
+    return block[1]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#')).length;
+  };
+  const syncScriptsCount = countArrayEntries('SYNC_SCRIPTS');
+  const a2ScriptsCount = countArrayEntries('A2_SCRIPTS');
+  const expectedCount = syncScriptsCount + a2ScriptsCount;
   assert.equal(
     okCount,
     expectedCount,
-    `--check must report exactly ${expectedCount} identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array, ${expectedCount} entries)`
+    `--check must report exactly ${expectedCount} identical scripts/ entries (SYNC_SCRIPTS ${syncScriptsCount} + A2_SCRIPTS ${a2ScriptsCount}, dynamically scanned from sync-vendor.sh arrays)`
   );
 });
 
