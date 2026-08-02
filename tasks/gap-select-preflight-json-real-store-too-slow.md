@@ -109,7 +109,7 @@ re-introduced regression in CI. The CI-effective lock is therefore the two **wal
 tests** added to `select-preflight.test.mjs` (assert `fs.readdirSync` call counts):
 
 - `scanOrthogonalPairs: walk-count regression — at most ONE tree walk per invocation` — FAILS on the
-  pre-fix code (~20 walks → ~240 readdirSync calls) and PASSES on the fix (1 walk → 12 calls).
+  pre-fix code (20 walks → 200 readdirSync calls) and PASSES on the fix (1 walk → 10 calls).
 - `coupling-graph: walk-count regression — shared files list does ZERO additional tree walks` — FAILS
   on the pre-fix code (9 walks) and PASSES on the fix (0 readdirSync calls).
 - Verified RED: both fail on parent `7adcf012`; both pass on this branch. Deterministic (call-count,
@@ -125,8 +125,9 @@ tests** added to `select-preflight.test.mjs` (assert `fs.readdirSync` call count
   eliminated via walk-once sharing; the evidence table is cited above.
 - [x] AC3: The two CLI-shape tests pass with real headroom under `--test-concurrency=8` (not at
   the timeout ceiling) — post-fix command ≈8-9.5s on the real store; `spawnCli` timeout lowered to
-  60s (~7× headroom). In the worktree the two CLI tests measured 7.9s / 6.8s (5.7s / 5.1s under
-  `--test-concurrency=8`). Regression lock is the walk-count tests (see Regression guard).
+  60s (~7× headroom). In the worktree the two CLI tests measured ~5-8s (run-to-run variance across
+  runs; `--test-concurrency` parallelizes across test FILES, not within one, so the per-test figure
+  is the same either way). Regression lock is the walk-count tests (see Regression guard).
 - [x] AC4: The file's contribution to the full-suite wall-clock is materially reduced from ~240s —
   the command dropped 83.4s → ~8.3s (~10×), so the two CLI tests each drop from ~120s (timeout-killed)
   to ~8s; the file's contribution falls from ~240s to a small fraction of that.
