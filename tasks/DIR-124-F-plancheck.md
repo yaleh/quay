@@ -44,12 +44,12 @@ removed.
 
 ## Acceptance Criteria
 
-- [ ] AC1: PlanCheck output schema extended: `findings` remains a number, ADDITIONALLY `typedFindings: [{id, subsystem, severity, summary, blocking, classification, ...}]` is emitted
-- [ ] AC2: `classification` field has valid values: `grounded-fact-gap`, `task-specific`, `other`
-- [ ] AC3: A finding about CLI path (`quay.ts` vs `quay.js`) is classified as `grounded-fact-gap`
-- [ ] AC4: A finding about task-specific Plan defect (e.g., missing `- Files:` entry) is classified as `task-specific`
-- [ ] AC5: Legacy scalar `findings` count preserved — existing callers unbroken
-- [ ] AC6: Both prepare-milestone.js mirrors pass typed findings through to the receipt
+- [x] AC1: PlanCheck output schema extended: `findings` remains a number, ADDITIONALLY `typedFindings: [{id, subsystem, severity, summary, blocking, classification, ...}]` is emitted
+- [x] AC2: `classification` field has valid values: `grounded-fact-gap`, `task-specific`, `other`
+- [x] AC3: A finding about CLI path (`quay.ts` vs `quay.js`) is classified as `grounded-fact-gap`
+- [x] AC4: A finding about task-specific Plan defect (e.g., missing `- Files:` entry) is classified as `task-specific`
+- [x] AC5: Legacy scalar `findings` count preserved — existing callers unbroken
+- [x] AC6: Both prepare-milestone.js mirrors pass typed findings through to the receipt
 
 ## Definition of Done
 
