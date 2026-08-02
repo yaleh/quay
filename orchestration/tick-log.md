@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-02 ~16:30Z | `unblock` | 消解人对 escalations #2 的裁定：**M239 推迟**，合并顺序 M243 → M246 → M222（B5-2 之后）。查 M222 的 diff 发现它把 `cli.test.mjs` 的 `run()` 改成**异步 execFile**——与 B5-1 的换二进制是**不同杠杆且叠加**，B5-1 任务体的 436s→~295s 估算只算了换二进制。已通报内层：不要在测速任务在飞时合并任何分支（会改变套件构成毁掉基线），M222 需 rebase 到 B5-1 之上、保留异步结构 + 换用 `QUAY_CLI` 常量，然后重测 | **B5-1 已落地**（合并 `7032e704`，cli.test.mjs 单文件 131s→66s，serve/mcp-server 也换了常量）；B5-2 在飞 | 怀疑内层越界并发 serve.test.mjs → **核实后推翻**：遥测显示 B5-1 已 done、B5-2 才 inProgress，串行守住了。**欠账：B5-1 的 AC8 明写「权威全套件数字留给 orchestrator fan-in」——这笔账在外层，待内层空闲时跑** |
 | 2026-08-02 ~16:10Z | `escalate` | **推翻了上一 tick 自己的结论**：A2/A5 不是「从未落地」，是**做完验收后 Land 从未合并**——`git worktree list` 查出 4 个分支带 **24,989 行未合并工作**（M243 +8351 / M246 +9161 / M239 +6901 / M222 +576），全部滞留 2026-08-01，`merge-tree` 全部无冲突。已更正复核文档与 A2/A5 任务体；升级 escalations #2（合并是落地决定，且 M222 与在飞的 B5-1 同改 `cli.test.mjs`）；建任务 `gap-stranded-worktree-branches-have-no-alarm-channel` | B5-1 在飞 22 分钟（阈值 90），subagent 在改 AC12 | 我的复核脚本**只查 master 工作树、从不看分支**——在 Land 走 worktree 分支的流水线里，「做了没有」不能只问 master。这个方法论缺陷比复核发现的任何一条都重要 |
 | 2026-08-02 ~15:45Z | `correct` | 按人的裁定（escalations #1 选项 A）做 DIR-124 全链复核，22 个任务机械核查 → `orchestration/dir-124-chain-audit.md`。**真阳性是两个不是一个**：A2 + **A5**（同形态：done + AC 零勾 + 代码零落地），状态均改回 `todo`；不排期（是未开工的 B/C/D/E 的前置，无回溯性损害）。拆掉 PARENT-DONE-IFF-CHILDREN 会让 DIR-124-A 带着假 done 子任务闭合的陷阱。明确不补勾 A1a/A3/A3a/A3b 的 AC——事后照代码补勾是制造证据 | B5-1 spawn-cli 仍在飞 | 复核脚本自身两个缺陷（反引号、`(new)` 后缀带空格被当散文丢弃）在过程中发现并修正——**第一版结果因此漏掉了 A5**，已记进复核文档 |
 | 2026-08-02 ~15:15Z | `escalate` | 查证漂移检查器报的 5 个 reverse-drift-suspect：**A2 真阳性**（done 但 AC 全未勾、全仓无 `*workflow*replay*`）→ 升级给人（范围决定，escalations #1，建议选项 A）；**B1 假阳性**（run-identity 代码与测试都在，只缺 milestones/M253 簿记）→ 建任务 `gap-reverse-drift-check-buries-true-positives-in-noise`。消歧了授权表里「可补建任务」与「不可写 tasks/」的自相矛盾：`tasks/` 是队列不是代码，外层可写，前提是在飞任务的 Touches 不含 `tasks/`（已核 B5-1 不含） | B5-1 spawn-cli 在飞，subagent 在跑；遥测 inProgress=1 | **AC3 干净复测 8.0/8.1/8.6s**（内层声称 8.3s 属实；上次 23s 确为负载污染）；`inFlight` 是我读错的字段名，实为 `inProgress`，遥测无缺陷 |
@@ -18,6 +19,6 @@
 | 类型 | 次数 |
 |---|---|
 | no-action | 3 |
-| unblock | 2 |
+| unblock | 3 |
 | correct | 1 |
 | escalate | 2 |
