@@ -1,0 +1,68 @@
+{
+  "assertions": [
+    {
+      "id": "m195-001",
+      "description": "Verify completes >=5 checks before Prepared fires (cost paid before Gate)",
+      "classification": "known-defect",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "compatibility-only => known-defect: baseline for DIR-124-C reorder; correct-by-design",
+      "check": {
+        "predicate": "verifyHasAgentDispatches",
+        "args": {
+          "min": 5
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "m195-002",
+      "description": "Prepared returns revision-needed after Verify",
+      "classification": "known-defect",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "compatibility-only => known-defect: Prepared fires after Verify cost; DIR-124-C baseline",
+      "check": {
+        "predicate": "preparedOutcomeEquals",
+        "args": {
+          "expectedOutcome": "revision-needed"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "m195-003",
+      "description": "Verify before Prepared (correct-by-design ordering)",
+      "classification": "known-defect",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "compatibility-only => known-defect: Prepared is pre-Build gate, not pre-Verify gate",
+      "check": {
+        "predicate": "verifyBeforePrepared",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "m195-004",
+      "description": "No Build after Prepared rejection",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "noBuildAfterPreparedFailure",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "m195-005",
+      "description": "No Land after Prepared rejection",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "Land"
+        }
+      },
+      "expected": true
+    }
+  ]
+}

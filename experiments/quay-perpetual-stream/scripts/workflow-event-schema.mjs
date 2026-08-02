@@ -63,6 +63,12 @@ export const VALID_STAGES = Object.freeze([
 export const VALID_OUTCOMES = Object.freeze([
   "done",
   "needs-human",
+  // prepare-milestone phase boundaries (Preflight/ProposalAuthors/Adjudicate/PlanAuthor/
+  // PlanCheck/Receipt) and execute-milestone's Prepared phase return `revision-needed` when a
+  // deterministic re-run may suffice — a gateable rejection, not a hard human block. The A2
+  // prepared-failure / m195-stale-prepared fixtures encode it as the Prepared outcome. Purely
+  // additive — SCHEMA_VERSION is NOT bumped (M207 additive-growth precedent).
+  "revision-needed",
   "skipped",
   "error",
   // fast-mode (direct) execution — gap-fast-mode-no-telemetry (2026-08-02): a task abandoned
@@ -108,7 +114,7 @@ export const REQUIRED_FIELDS = Object.freeze([
   "recordedAtMs",
 ]);
 
-/** @typedef {"done"|"needs-human"|"skipped"|"error"|"abandoned"|null} Outcome */
+/** @typedef {"done"|"needs-human"|"revision-needed"|"skipped"|"error"|"abandoned"|null} Outcome */
 /** @typedef {"admission-contention"|"cache-hit"|"prepared-blocked"|null} WaitReason */
 /** @typedef {"worktree"|null} IsolationMode */
 /** @typedef {"serial"|"concurrent"|null} DispatchMode */

@@ -1,0 +1,80 @@
+{
+  "assertions": [
+    {
+      "id": "lss-001",
+      "description": "Phase sequence Verify->Prepared->Build->Audit->Gate->Land",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "phaseSequenceEquals",
+        "args": {
+          "sequence": [
+            "Verify",
+            "Prepared",
+            "Build",
+            "Audit",
+            "Gate",
+            "Land"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-002",
+      "description": "Build before Audit",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageOrderedBefore",
+        "args": {
+          "A": "Build",
+          "B": "Audit"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-TAMPERED",
+      "description": "Build dispatches 2 agents (DELIBERATELY WRONG — actual is 1)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "Build",
+          "count": 2
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-004",
+      "description": "Terminal outcome is done",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-005",
+      "description": "Verify dispatches 5 agents",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "Agent count may change",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "Verify",
+          "count": 5
+        }
+      },
+      "expected": true
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+{
+  "assertions": [
+    {
+      "id": "lss-001",
+      "description": "Phase sequence is Verify->Prepared->Build->Audit->Gate->Land",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "phaseSequenceEquals",
+        "args": {
+          "sequence": [
+            "Verify",
+            "Prepared",
+            "Build",
+            "Audit",
+            "Gate",
+            "Land"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-002",
+      "description": "Build before Audit",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageOrderedBefore",
+        "args": {
+          "A": "Build",
+          "B": "Audit"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-003",
+      "description": "Audit before Land",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageOrderedBefore",
+        "args": {
+          "A": "Audit",
+          "B": "Land"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-004",
+      "description": "Gate after Audit",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageOrderedBefore",
+        "args": {
+          "A": "Audit",
+          "B": "Gate"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-005",
+      "description": "No Reconcile phase (width-1 skip)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "Reconcile"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-006",
+      "description": "Land merge occurs (done + candidateCommit)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "landMergeOccurs",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-007",
+      "description": "Terminal outcome is done",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-008",
+      "description": "No isolation mode (legacy serial path)",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "No-isolation path is legacy default",
+      "check": {
+        "predicate": "isolationModeEquals",
+        "args": {
+          "expectedMode": null
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-009",
+      "description": "Dispatch mode is serial",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "Serial dispatch mode for legacy path",
+      "check": {
+        "predicate": "dispatchModeEquals",
+        "args": {
+          "expectedMode": "serial"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-010",
+      "description": "Verify dispatches 5 distinct agents",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "Agent count may change with parallelization",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "Verify",
+          "count": 5
+        }
+      },
+      "expected": true
+    }
+  ],
+  "meta": {
+    "synthetic": true,
+    "generatedAt": "2026-08-01T00:00:00Z",
+    "workflowCommit": "74fe7791",
+    "baseline": {
+      "phaseSequence": [
+        "Verify",
+        "Prepared",
+        "Build",
+        "Audit",
+        "Gate",
+        "Land"
+      ],
+      "agentCounts": {
+        "Verify": 5,
+        "Prepared": 1,
+        "Build": 1,
+        "Audit": 1,
+        "Gate": 1,
+        "Land": 1
+      },
+      "outcome": {
+        "outcome": "done",
+        "reason": null,
+        "phase": "Land"
+      },
+      "sharedStateMutations": [
+        ".quay/gate-events.jsonl",
+        "dashboard.md",
+        "fixtures/workflow-replay/",
+        "milestone_counter",
+        "milestones/M243/audits/iteration-0-adversarial-audit.md",
+        "test/workflow-replay.test.mjs",
+        "workflow-replay.ts"
+      ],
+      "schedulingDecisions": [
+        "audit-adversarial",
+        "build-implement",
+        "gate-checks",
+        "land-merge",
+        "prepared-check",
+        "verify-ceiling-check",
+        "verify-dogfood-evidence",
+        "verify-domain-misfit",
+        "verify-gate-hash",
+        "verify-line-budget"
+      ]
+    }
+  }
+}

@@ -114,7 +114,8 @@ fi
 # ---------------------------------------------------------------------------
 # 3. Task-schema files (group 2 — expected-different)
 # ---------------------------------------------------------------------------
-EXPERIMENT_SCRIPTS="${REPO_ROOT}/experiments/quay-perpetual-stream/scripts"
+EXPERIMENT_DIR="${REPO_ROOT}/experiments/quay-perpetual-stream"
+EXPERIMENT_SCRIPTS="${EXPERIMENT_DIR}/scripts"
 
 if $CHECK_MODE; then
   echo "[sync-vendor --check] verifying task-schema files (expected-diff) ..."
@@ -197,6 +198,87 @@ fi
 if ! $CHECK_MODE; then
   for f in "${PLUGIN_DIR}/scripts/task-schema.ts" "${PLUGIN_DIR}/scripts/task-schema-check.ts" "${PLUGIN_DIR}/scripts/task-schema-check.sh"; do
     perl -0pi -e 's/\(exp5 \/\s*\n(\/\/|#) canonical-task-schema/(canonical-task-schema/g; s/exp5-M-CRYST-B1\/DIR-028/DIR-028/g; s/\bexp5\b\s*\/\s*//g' "$f"
+  done
+fi
+
+# ---------------------------------------------------------------------------
+# 5.5. DIR-124-A2 golden replay corpus (workflow-event-schema, replay runner, test, fixtures)
+# ---------------------------------------------------------------------------
+A2_SCRIPTS=(
+  workflow-event-schema.mjs
+  workflow-replay.ts
+)
+A2_TEST_FILES=(
+  workflow-replay.test.mjs
+)
+A2_FIXTURE_CASES=(
+  legacy-singleton-success
+  composite-success
+  cache-resume
+  verify-failure
+  prepared-failure
+  audit-refuted
+  gate-failure
+  concurrent-partial-survivor
+  m192-null-build
+  m195-stale-prepared
+  legacy-singleton-success-tampered
+  m192-defect-as-normative
+)
+
+if $CHECK_MODE; then
+  echo "[sync-vendor --check] verifying DIR-124-A2 golden replay corpus ..."
+  for s in "${A2_SCRIPTS[@]}"; do
+    cmp_or_report "scripts/${s}" \
+      "${EXPERIMENT_SCRIPTS}/${s}" \
+      "${PLUGIN_DIR}/scripts/${s}"
+  done
+  for t in "${A2_TEST_FILES[@]}"; do
+    cmp_or_report "test/${t}" \
+      "${EXPERIMENT_DIR}/test/${t}" \
+      "${PLUGIN_DIR}/test/${t}"
+  done
+  for c in "${A2_FIXTURE_CASES[@]}"; do
+    for f in events.jsonl expectations.json; do
+      cmp_or_report "fixtures/workflow-replay/${c}/${f}" \
+        "${EXPERIMENT_DIR}/fixtures/workflow-replay/${c}/${f}" \
+        "${PLUGIN_DIR}/fixtures/workflow-replay/${c}/${f}"
+    done
+    # README.md is optional (only for synthetic fixtures)
+    if [ -f "${PLUGIN_DIR}/fixtures/workflow-replay/${c}/README.md" ]; then
+      cmp_or_report "fixtures/workflow-replay/${c}/README.md" \
+        "${EXPERIMENT_DIR}/fixtures/workflow-replay/${c}/README.md" \
+        "${PLUGIN_DIR}/fixtures/workflow-replay/${c}/README.md"
+    fi
+  done
+else
+  echo "[sync-vendor] mirroring DIR-124-A2 golden replay corpus -> plugin/ ..."
+  for s in "${A2_SCRIPTS[@]}"; do
+    src_file="${EXPERIMENT_SCRIPTS}/${s}"
+    if [ -L "$src_file" ]; then
+      echo "[sync-vendor] skipping symlink: ${s}"
+      continue
+    fi
+    cp "${src_file}" "${PLUGIN_DIR}/scripts/${s}"
+  done
+  for t in "${A2_TEST_FILES[@]}"; do
+    src_file="${EXPERIMENT_DIR}/test/${t}"
+    if [ -L "$src_file" ]; then
+      echo "[sync-vendor] skipping symlink: ${t}"
+      continue
+    fi
+    cp "${src_file}" "${PLUGIN_DIR}/test/${t}"
+  done
+  for c in "${A2_FIXTURE_CASES[@]}"; do
+    mkdir -p "${PLUGIN_DIR}/fixtures/workflow-replay/${c}"
+    cp "${EXPERIMENT_DIR}/fixtures/workflow-replay/${c}/events.jsonl" \
+       "${PLUGIN_DIR}/fixtures/workflow-replay/${c}/events.jsonl"
+    cp "${EXPERIMENT_DIR}/fixtures/workflow-replay/${c}/expectations.json" \
+       "${PLUGIN_DIR}/fixtures/workflow-replay/${c}/expectations.json"
+    if [ -f "${EXPERIMENT_DIR}/fixtures/workflow-replay/${c}/README.md" ]; then
+      cp "${EXPERIMENT_DIR}/fixtures/workflow-replay/${c}/README.md" \
+         "${PLUGIN_DIR}/fixtures/workflow-replay/${c}/README.md"
+    fi
   done
 fi
 

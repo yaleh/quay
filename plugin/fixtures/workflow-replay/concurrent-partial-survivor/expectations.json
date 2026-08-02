@@ -1,0 +1,91 @@
+{
+  "assertions": [
+    {
+      "id": "cps-001",
+      "description": "Worktree isolation active in Build",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "worktreeFieldsPopulated",
+        "args": {
+          "stage": "Build"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-002",
+      "description": "Reconcile runs for composite concurrent",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "reconcilePhaseExists",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-003",
+      "description": "Land merge occurs (survivor committed)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "landMergeOccurs",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-004",
+      "description": "Dispatch mode is concurrent",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "dispatchModeEquals",
+        "args": {
+          "expectedMode": "concurrent"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-005",
+      "description": "Single-flight Land lock held (>=2 Land events)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "landLockHeld",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-006",
+      "description": "Terminal outcome done for survivor",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-007",
+      "description": "Audit shard count is 2",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "per-shard agent count may change",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "Audit",
+          "count": 2
+        }
+      },
+      "expected": true
+    }
+  ]
+}
