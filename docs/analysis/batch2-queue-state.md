@@ -49,11 +49,14 @@
 
 | 任务 | 说明 |
 |---|---|
-| **M136 sync-vendor 错标（外层全量验证中）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`。两轮修复已 merge（`2d9add7e`：错标 + 并发重建免疫 `cmp_or_report`），隔离/范围化/c4 子集全绿。**全量验证由外层在干净窗口（load1=0.40）独立跑**——接受与否等外层结果，不凭受限视角接受（M136 历史教训：错标致三轮误诊、计数 27≠25 短路未跑）。遥测 65+ min（阈值 90），外层绿则 --task-end done，非绿则停止派发报告 |
-| **`--test-concurrency=4 vs 8` 实测（已建任务）** | `gap-suite-concurrency-4-vs-8-measurement`。同一 commit 各 ≥3 次，对照 20–63s 噪声带宽。**不把 c4 设为本机默认**（那是没测过改全局参数）。线索在 orchestration/throughput-decomposition.md §163-217 |
-| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
+| **下一批：flags-only 缺陷（派发中）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`。test.sh dispatch 无「裸标志+默认 glob」分支，`--test-concurrency=4` 被当文件参数 → node 自发现 2296→8573（3.7×）。**先修工具再谈测量**。AC1=两种调用测试数相同，AC4=每次打印 selected N files |
+| **M136 sync-vendor 错标（诊断搁置）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，**已记 needs-human（86 min）**。两轮修复隔离绿但全量红，torn-read retry 未覆盖真正路径。**诊断搁置**：诊断工具本身是坏的（flags-only 静默换套件），并发失败不能用坏的 runner 测。等 test.sh 修复后再测 |
+| **`--test-concurrency=4 vs 8` 实测（依赖前置）** | `gap-suite-concurrency-4-vs-8-measurement`。**阻塞于 flags-only 修复**——改并发度不能同时改选择集。修复后才能正确执行 |
+| 下一批 gap 任务（flags-only 后） | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
+
+**重要更正（2026-08-02 21:00）**：之前基于 c4 全量（`full-suite-m136-c4.log` 的 8037 失败）的推理**全部作废**——那根本不是 c4，是 flags-only 缺陷导致 node 自发现跑出的不同套件（2296→8573）。外层 c4 数据同样作废。M136 的「全量红」证据仅剩外层干净窗口 c8（458s/1 fail M136）一条，其余 c4 崩溃数据不可信。
 
 ## 工作方式调整（外层实测 2026-08-02，含 subagent transcript 的完整分解）
 
