@@ -51,7 +51,10 @@ if (args[0] === "api" && args.length === 2 && /^repos\/[^/]+\/[^/]+\/issues\/\d+
     const issues = JSON.parse(process.env.FAKE_GH_ISSUES_JSON);
     const issue = issues[m[1]];
     if (issue === undefined) {
-      process.stderr.write(`fake-gh: FAKE_GH_ISSUES_JSON has no entry for issue number ${m[1]} (requested: ${args[1]})\n`);
+      // Mimic gh's own single-issue-miss: github-client.js#get() catches the
+      // exec failure and returns null ("no such task"), exactly as it does
+      // for a live 404.
+      process.stderr.write(`gh: Not Found (HTTP 404)\n`);
       process.exit(1);
     }
     process.stdout.write(JSON.stringify(issue));
@@ -60,13 +63,35 @@ if (args[0] === "api" && args.length === 2 && /^repos\/[^/]+\/[^/]+\/issues\/\d+
   process.stdout.write(process.env.FAKE_GH_ISSUE_JSON || "{}");
   process.exit(0);
 }
-if (args[0] === "api" && args[1] === "repos/yaleh/quay-fixture/issues") {
-  // Paged list call (PR-ABI-002's get()-side parentIndex build). Always
-  // answer with an empty page -- terminates pagination immediately
-  // (pageIssues' own "batch.length < perPage" break condition) and this
-  // fixture's assertions never depend on `parent`.
-  process.stdout.write("[]");
-  process.exit(0);
+if (args[0] === "api" && args[1] && args[1].endsWith("/issues")) {
+  // Paged list call (used by list()'s fetchAllIssues AND by PR-ABI-002's
+  // get()-side parentIndex build).
+  const listUrl = args[1];
+  if (listUrl === "repos/yaleh/quay-fixture/issues") {
+    // task-check-passthrough's get()-side parentIndex build. Always answer
+    // with an empty page -- terminates pagination immediately (pageIssues'
+    // own "batch.length < perPage" break condition) and that fixture's
+    // assertions never depend on `parent`.
+    process.stdout.write("[]");
+    process.exit(0);
+  }
+  if (listUrl === "repos/nonexistent-owner-xyz-123/nonexistent-repo-abc/issues") {
+    // QN-064's unreachable-owner/repo failure path: mimic gh's live 404 so
+    // the failure is a well-formed single page that fetchAllIssues() chokes
+    // on, matching the assertion that gh's own diagnostic appears on stderr.
+    process.stderr.write(`gh: Not Found (HTTP 404)\n`);
+    process.exit(1);
+  }
+  if (process.env.FAKE_GH_ISSUES_JSON) {
+    // cli.test.mjs / mcp-server.test.mjs (gap-suite-speedup hermetic
+    // conversion): serve the full fixture issue set as the page content so
+    // task_list / task_get / task_check all resolve against the same canned
+    // data, with zero live network. One page suffices (pageIssues breaks
+    // when batch.length < per_page).
+    const issues = JSON.parse(process.env.FAKE_GH_ISSUES_JSON);
+    process.stdout.write(JSON.stringify(Object.values(issues)));
+    process.exit(0);
+  }
 }
-process.stderr.write(`fake-gh: unsupported invocation (this fixture only supports a single-issue GET, or an empty paged list): ${JSON.stringify(args)}\n`);
+process.stderr.write(`fake-gh: unsupported invocation (this fixture only supports a single-issue GET, or a paged list): ${JSON.stringify(args)}\n`);
 process.exit(1);
