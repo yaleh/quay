@@ -8,6 +8,61 @@
 
 ---
 
+## 冷启动（新会话 / `/clear` 后的空上下文）
+
+**按顺序做完这 7 步再进 tick 步骤。** 不要凭记忆——你没有记忆。
+
+```bash
+cd /home/yale/work/quay
+```
+
+**1. 读机制与目标**（顺序有意）
+
+| 文件 | 得到什么 |
+|---|---|
+| 本文件其余部分 | 外层的职责、授权边界、tick 步骤 |
+| `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、20 条 AC、DoD、四项已定决策 |
+| `orchestration/tick-log.md` | **历史 tick 与动作类型累计分布**——退化判据的唯一来源 |
+| `orchestration/escalations.md` | 已攒给人、尚未处理的非常规项 |
+| `docs/analysis/batch2-queue-state.md` | 内层自报的队列状态（**可能是旧快照，以 git 为准**） |
+| `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` | 四项原则 |
+
+**2. 建立实况**（以实测为准，不以上面任何文件的自述为准）
+
+```bash
+git log --oneline -10 && git status --short
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
+node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
+```
+
+**3. 找到内层会话**
+
+```bash
+tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} #{pane_current_path}"
+```
+
+内层是 `cwd` 为 `/home/yale/work/quay` 且**不是你自己**的那个 pane（历史上是 `quay-0:0.0`；用
+`tmux capture-pane -p -t <target> | tail -20` 确认它在跑开发任务而非编排）。找不到就升级给人。
+
+**4. 重建 cron —— 这一步最容易漏**
+
+`CronCreate` 的任务是**会话内的**，会话一结束就没了。新会话必须重建，否则外层再也不会自动触发：
+
+```
+CronCreate(cron="*/20 * * * *", prompt="执行 orchestration/orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
+```
+
+**5. 核对前置条件**
+
+`.halt` 是否还在、套件是否绿、内层 loop 是否已启动。见目标任务的 AC1–AC6。
+
+**6. 补记一次 tick**
+
+冷启动本身算一次 tick，动作类型通常是 `no-action`（只是恢复）或 `unblock`（恢复时发现内层停摆）。
+在 `tick-log.md` 记一行，注明「冷启动恢复」。
+
+**7. 进入正常 tick 步骤**
+
 ## 定位
 
 双层持续开发的**外层**。内层是开发会话（tmux `quay-0:0.0`），它执行任务；外层观察它、消解它的停摆、
