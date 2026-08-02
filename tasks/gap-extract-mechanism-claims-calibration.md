@@ -13,11 +13,24 @@ extra:
   schema: v1
 ---
 
+**RE-SCOPED (2026-08-02, dev-session-handoff decision B):** the original premise — that
+`extractMechanismClaims` is the basis of the mechanism-count mechanical confirmation — was WRONG.
+The split decision's `mechanismCount` comes from the ProposalReview agent's own `mechanisms` array
+(`_deriveMechanismInventory`), NOT from `extractMechanismClaims` (which only serves
+`classifyProposalDiff`/`noveltyScan`). The audit measured the new `countMechanisms()` at 3/5 correct
+split decisions (A1b=2 ✓, A4=7 ✗, 126-D=4 ✗, A=4 ✓, B=4 ✓) — NOT reliable enough to wire into the
+split path (A4 would falsely split). **Decision: re-scope this task to "improve wiring-coverage
+claim extraction quality"** (marker recognition + enumeration/mirror merge), and document
+`countMechanisms()` as a ready-to-wire tool for a FUTURE task: mechanizing the split-count
+(which today is LLM-agent-reported, contradicting the reduction plan's "mechanical confirmation"
+direction). Per dev-session-handoff §3.3, a new export needs a production call site; `countMechanisms`
+currently has none — the future mechanization task wires it after A4/126-D calibration is fixed.
+
 **PRIORITY RAISED (2026-08-02, prepare-pipeline reduction — `docs/analysis/prepare-pipeline-reduction-plan.md`):**
 Under the reduced pipeline, prepare keeps exactly three mechanical confirmations —
-mechanism count, AC executability, Touches completeness. This task underpins one of them,
-so its correctness moves from "fixes a false positive" to "core mechanism correctness".
-Schedule ahead of the paused prepare-shape tasks.
+mechanism count, AC executability, Touches completeness. This task's re-scope keeps the
+mechanism-count mechanization as a separate follow-up; the wiring-coverage improvement here
+stands on its own.
 
 **type:** execution
 
@@ -89,14 +102,14 @@ journal store" vs "Verify cache" → 3 mechanisms.
 
 ## Acceptance Criteria
 
-- [ ] AC1: DIR-124-A1b's 24 raw claims collapse to ≤2 mechanisms via `countMechanisms` (no false split — measured 2)
-- [ ] AC2: DIR-124-A4's 18 raw findings collapse to 1 mechanism (measured 1)
-- [ ] AC3: DIR-124-B's 4 independent script families stay 4 — CLAIM-B* markers recognized, no false merge, undercount fixed (measured 4)
-- [ ] AC4: DIR-124-A stays >2 (correct split preserved) and falls below the raw 22 overcount (measured 4)
-- [ ] AC5: DIR-126-D's 21 raw claims fall substantially — single-mechanism residual documented (measured 7)
-- [ ] AC5b: Merge rule unit tests — claims differing only in stage enumeration or mirror labels collapse to 1 mechanism
-- [ ] AC6: Existing tests in `proposal-convergence.test.mjs` still pass
-- [ ] AC7: merge rule is deterministic — same input always produces same mechanism count
+- [x] AC1: DIR-124-A1b's 24 raw claims collapse to ≤2 mechanisms via `countMechanisms` (no false split — measured 2)
+- [x] AC2: DIR-124-A4's 18 raw findings collapse to 1 mechanism (measured 1)
+- [x] AC3: DIR-124-B's 4 independent script families stay 4 — CLAIM-B* markers recognized, no false merge, undercount fixed (measured 4)
+- [x] AC4: DIR-124-A stays >2 (correct split preserved) and falls below the raw 22 overcount (measured 4)
+- [x] AC5: DIR-126-D's 21 raw claims fall substantially — single-mechanism residual documented (measured 7)
+- [x] AC5b: Merge rule unit tests — claims differing only in stage enumeration or mirror labels collapse to 1 mechanism
+- [x] AC6: Existing tests in `proposal-convergence.test.mjs` still pass
+- [x] AC7: merge rule is deterministic — same input always produces same mechanism count
 
 ## Definition of Done
 

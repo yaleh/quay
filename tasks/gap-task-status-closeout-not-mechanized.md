@@ -72,13 +72,13 @@ worse than the leak it prevents — ADR-021 Principle 1.
 
 ## Acceptance Criteria
 
-- [ ] AC1: `task-status-drift-check.ts` exists in both mirrors, byte-identical
-- [ ] AC2: Run over the current task store, it flags zero false positives among tasks whose code genuinely is not landed (spot-check ≥5 `todo` tasks)
-- [ ] AC3: Given a synthetic fixture task whose declared symbols all exist, it reports `status-drift-suspect`
-- [ ] AC4: Given a fixture task whose symbols do not exist, it reports nothing
-- [ ] AC5: Exits 0 in all cases (report-only, never a gate)
-- [ ] AC6: Never writes to `tasks/**` — grep-confirmable, zero write calls
-- [ ] AC7: `--json` mode emits `{suspects: [{taskId, matchedSymbols, touchesAllExist}]}`
+- [x] AC1: `task-status-drift-check.ts` exists in both mirrors, byte-identical
+- [x] AC2: Run over the current task store, it flags zero false positives among tasks whose code genuinely is not landed (spot-check ≥5 `todo` tasks)
+- [x] AC3: Given a synthetic fixture task whose declared symbols all exist, it reports `status-drift-suspect`
+- [x] AC4: Given a fixture task whose symbols do not exist, it reports nothing
+- [x] AC5: Exits 0 in all cases (report-only, never a gate)
+- [x] AC6: Never writes to `tasks/**` — grep-confirmable, zero write calls
+- [x] AC7: `--json` mode emits `{suspects: [{taskId, matchedSymbols, touchesAllExist}]}`
 
 ## Definition of Done
 

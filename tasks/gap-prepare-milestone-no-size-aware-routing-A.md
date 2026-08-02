@@ -2,7 +2,7 @@
 id: gap-prepare-milestone-no-size-aware-routing-A
 title: "Size estimation + fast-lane routing: estimateTaskSize +
   PrepareRoutingDecision in prepare-milestone"
-status: done
+status: todo
 labels:
   - gap
   - defect

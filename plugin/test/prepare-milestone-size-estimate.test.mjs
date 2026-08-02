@@ -37,8 +37,8 @@ function findRepoRoot(startDir) {
 const REPO_ROOT = findRepoRoot(__dirname);
 
 // M239 TDD RED guard (ADR-019 decision #1 pattern): the estimator script is not yet
-// implemented — task gap-prepare-milestone-no-size-aware-routing-A is status:done but the
-// code never landed. A static import would crash this whole file (ERR_MODULE_NOT_FOUND);
+// implemented — task gap-prepare-milestone-no-size-aware-routing-A was restored to todo on
+// 2026-08-02 (status:done but the code never landed — reverse-drift-check confirmed). A static import would crash this whole file (ERR_MODULE_NOT_FOUND);
 // a self-declared skip keeps the TDD RED tests visible without polluting the green
 // baseline. The skip auto-clears when the script is implemented (M239 lands).
 let estModule = null;
@@ -50,7 +50,7 @@ try {
 
 if (!estModule) {
   test("M239 size-estimate RED guard",
-    { skip: "prepare-milestone-size-estimate.ts not implemented yet — TDD RED test self-skips (ADR-019); activates once M239 lands" },
+    { skip: "prepare-milestone-size-estimate.ts not implemented yet — TDD RED test self-skips (ADR-019); task gap-prepare-milestone-no-size-aware-routing-A restored to todo (code never landed, reverse-drift-check verified); self-skip keeps the RED signal visible without failing the green baseline" },
     () => {});
 } else {
 const {

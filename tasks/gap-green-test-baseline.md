@@ -64,18 +64,18 @@ decision in the commit message. Never relax an assertion merely to get green.
 
 ## Acceptance Criteria
 
-- [ ] AC1: `npx tsc --noEmit` exits 0 (root cause #1)
-- [ ] AC2: M63 A2/C1/D1 ts-typecheck gate tests pass
-- [ ] AC3: Diagnostic header count-label and body severity labels agree (root cause #3)
-- [ ] AC4: Section 1 / Section 4 diagnostic tests pass against the resolved severity
-- [ ] AC5: The three gate-config-loader `deepEqual` tests pass (root cause #2)
-- [ ] AC6: `grep -E 'experiments/quay-perpetual-stream|exp5' plugin/scripts/tree-hygiene-check.sh` returns nothing (root cause #4)
-- [ ] AC7: `sync-vendor.sh --check` exits 0 (root cause #5)
-- [ ] AC8: Both `execute-milestone.js` golden-replay tests pass, with the phase-sequence change either reverted or the golden regenerated under an explicit recorded decision (root cause #6)
-- [ ] AC9: `adr list --applies-to` tests pass (root cause #7)
-- [ ] AC10: `prepare-milestone-size-estimate.test.mjs` passes (root cause #8)
-- [ ] AC11: `scripts/test.sh` reports **0 failures**
-- [ ] AC12: No assertion was weakened to reach green — every test-side change is justified in its commit message as a contract decision
+- [x] AC1: `npx tsc --noEmit` exits 0 (root cause #1)
+- [x] AC2: M63 A2/C1/D1 ts-typecheck gate tests pass
+- [x] AC3: Diagnostic header count-label and body severity labels agree (root cause #3)
+- [x] AC4: Section 1 / Section 4 diagnostic tests pass against the resolved severity
+- [x] AC5: The three gate-config-loader `deepEqual` tests pass (root cause #2)
+- [x] AC6: `grep -E 'experiments/quay-perpetual-stream|exp5' plugin/scripts/tree-hygiene-check.sh` returns nothing (root cause #4)
+- [x] AC7: `sync-vendor.sh --check` exits 0 (root cause #5)
+- [x] AC8: Both `execute-milestone.js` golden-replay tests pass, with the phase-sequence change either reverted or the golden regenerated under an explicit recorded decision (root cause #6)
+- [x] AC9: `adr list --applies-to` tests pass (root cause #7)
+- [x] AC10: `prepare-milestone-size-estimate.test.mjs` passes (root cause #8)
+- [x] AC11: `scripts/test.sh` reports **0 failures**
+- [x] AC12: No assertion was weakened to reach green — every test-side change is justified in its commit message as a contract decision
 
 ## Definition of Done
 
