@@ -32,7 +32,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import { checkTask } from "./task-schema.ts";
 import { classify, type ClassifyResult } from "./human-steered-classify.ts";
 import { loadRegistry, type Registry } from "./drivable-workspace-check.ts";
-import { parseTouches, checkTouchesPair, expandGlobs } from "./touches-orthogonality-check.ts";
+import { parseTouches, checkTouchesPair, expandGlobs, walkFiles } from "./touches-orthogonality-check.ts";
 import { deriveTouches } from "./derive-touches-heuristic.ts";
 // M188/DIR-119-A Stage 1.6: wire SELECT-integrated composite candidate synthesis through the ONE
 // place OUTER-LOOP's `select` step already invokes (this script's `buildPreflightResult`). Additive
@@ -286,13 +286,32 @@ export function scanOrthogonalPairs(
   workspaceRoot: string,
   candidates: CandidateEntry[],
   opts?: { topN?: number },
+  preflightFiles?: string[],
 ): OrthogonalScanResult {
   const topN = opts?.topN ?? 5;
   const sorted = [...candidates].sort((a, b) => a.rank - b.rank).slice(0, topN);
   const touchesById = new Map<string, CandidateTouches>();
   for (const c of sorted) touchesById.set(c.id, getCandidateParsedTouches(workspaceRoot, c.id));
 
-  const expand = (globs: string[]) => expandGlobs(globs, workspaceRoot);
+  // gap-select-preflight-json-real-store-too-slow: walk the tree AT MOST ONCE per invocation and
+  // memoize each distinct glob-set's expansion, instead of re-walking the whole tree for every
+  // (pair, side) — the old code issued ~2×C(topN,2) expandGlobs calls, each a full walkFiles over the
+  // (potentially very large) workspace tree. checkTouchesPair's single-source logic is unchanged; only
+  // the injected `expand` is made walk-once. `sharedFiles` is computed lazily so an all-conservative
+  // scan (nothing to expand) never walks at all; `preflightFiles` (when provided) lets the caller share
+  // one walk across this scan and the portfolio's coupling-graph expansion.
+  let sharedFiles: string[] | null = null;
+  const expandMemo = new Map<string, Set<string>>();
+  const expand = (globs: string[]) => {
+    const key = globs.join("\u0000");
+    let set = expandMemo.get(key);
+    if (set === undefined) {
+      if (sharedFiles === null) sharedFiles = preflightFiles ?? walkFiles(workspaceRoot);
+      set = expandGlobs(globs, workspaceRoot, sharedFiles);
+      expandMemo.set(key, set);
+    }
+    return set;
+  };
   const pairs: OrthogonalPair[] = [];
   const log: string[] = [];
 
@@ -502,9 +521,13 @@ export function synthesizeCandidatePortfolio(
   entries: CandidateEntry[],
   cadence: CadenceResult | null = null,
   allTasks: any[] | null = null,
+  files?: string[],
 ): MilestonePortfolio {
   const facts = buildTaskCandidateFacts(workspaceRoot, entries);
-  const candidates = synthesizeCandidates(facts, { workspaceRoot });
+  // gap-select-preflight-json-real-store-too-slow: `files` (a precomputed walkFiles(workspaceRoot)
+  // list) is threaded into the coupling-graph so every task's Touches are expanded against ONE shared
+  // tree walk instead of each task re-walking the whole store.
+  const candidates = synthesizeCandidates(facts, { workspaceRoot, files });
 
   const constraints: PortfolioConstraints = {};
 
@@ -613,15 +636,23 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
   // Filter out human-steered candidates (they must not be selected autonomously)
   const autonomousCandidates = candidates.filter((c) => !c.humanSteered);
 
+  // gap-select-preflight-json-real-store-too-slow: walk the tree ONCE for the whole preflight and
+  // share the file list across the orthogonality scan's pairwise expansions AND the portfolio's
+  // coupling-graph per-task expansion. The real store's tree is large (incl. milestones/ worktrees);
+  // the OLD code re-walked it ~29 times per run (20 pairwise expansions + 9 coupling-graph task
+  // expansions) — profiling: ortho-scan 52.9s + portfolio 23.4s of the 83.4s total.
+  const preflightFiles: string[] | undefined =
+    autonomousCandidates.length > 0 ? walkFiles(workspaceRoot) : undefined;
+
   // 9. Pre-charter orthogonality scan (DIR-113 item 3) — BEFORE any charter-authoring fork.
-  const orthogonalScan = scanOrthogonalPairs(workspaceRoot, autonomousCandidates);
+  const orthogonalScan = scanOrthogonalPairs(workspaceRoot, autonomousCandidates, undefined, preflightFiles);
 
   // 10. M188/DIR-119-A Stage 1.6: synthesize singleton + composite MilestoneCandidate shapes and
   // choose a portfolio — BEFORE final (legacy) candidate truncation happens downstream in the
   // OUTER-LOOP workflow wrapper. Additive: `candidates` above is completely unchanged. Passes the
   // already-computed `cadence` verdict and the FULL task list (for real status-aware dependency
   // resolution) — AC5 follow-up (cadence + inter-candidate dependency constraints).
-  const portfolio = synthesizeCandidatePortfolio(workspaceRoot, autonomousCandidates, cadence, tasks);
+  const portfolio = synthesizeCandidatePortfolio(workspaceRoot, autonomousCandidates, cadence, tasks, preflightFiles);
 
   return {
     halt: haltCheck.halt,

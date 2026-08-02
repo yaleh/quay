@@ -31,6 +31,13 @@ export interface BuildCouplingGraphInput {
   /** Root to expand Touches globs against. When omitted, `touches` entries are treated as already
    * being concrete file paths (useful for fixtures that hand-author exact paths). */
   workspaceRoot?: string;
+  /** Pre-computed walkFiles(workspaceRoot) list for walk-once callers
+   * (gap-select-preflight-json-real-store-too-slow): when the same tree is expanded for every task's
+   * Touches in one process, sharing a file list avoids re-walking the whole tree per task. Must be
+   * consistent with `workspaceRoot` and the tree AT CALL TIME — callers that mutate the tree must
+   * not pass a stale list. When omitted, each task's Touches are expanded against the tree on demand
+   * (unchanged behavior). */
+  files?: string[];
 }
 
 export interface CouplingGraph {
@@ -44,16 +51,16 @@ function pairKey(a: string, b: string): string {
   return a < b ? `${a} ${b}` : `${b} ${a}`;
 }
 
-function expandTouches(touches: string[], workspaceRoot?: string): Set<string> {
+function expandTouches(touches: string[], workspaceRoot?: string, files?: string[]): Set<string> {
   if (!workspaceRoot) return new Set(touches);
-  return expandGlobs(touches, workspaceRoot);
+  return expandGlobs(touches, workspaceRoot, files);
 }
 
 // ── deriveSharedImplementationEdges ────────────────────────────────────────────────────────────────
-export function deriveSharedImplementationEdges(tasks: TaskCandidate[], workspaceRoot?: string): CouplingEdge[] {
+export function deriveSharedImplementationEdges(tasks: TaskCandidate[], workspaceRoot?: string, files?: string[]): CouplingEdge[] {
   const out: CouplingEdge[] = [];
   const expanded = new Map<string, Set<string>>();
-  for (const t of tasks) expanded.set(t.id, expandTouches(t.touches, workspaceRoot));
+  for (const t of tasks) expanded.set(t.id, expandTouches(t.touches, workspaceRoot, files));
   for (let i = 0; i < tasks.length; i++) {
     for (let j = i + 1; j < tasks.length; j++) {
       const a = tasks[i];
@@ -140,9 +147,9 @@ export function mergeEdges(edgeLists: CouplingEdge[][]): CouplingEdge[] {
 
 // ── buildCouplingGraph ─────────────────────────────────────────────────────────────────────────────
 export function buildCouplingGraph(input: BuildCouplingGraphInput): CouplingGraph {
-  const { tasks, explicitEdges = [], workspaceRoot } = input;
+  const { tasks, explicitEdges = [], workspaceRoot, files } = input;
   const derived = mergeEdges([
-    deriveSharedImplementationEdges(tasks, workspaceRoot),
+    deriveSharedImplementationEdges(tasks, workspaceRoot, files),
     deriveSharedSemanticResourceEdges(tasks),
     deriveInternalOrderEdges(tasks),
     explicitEdges,

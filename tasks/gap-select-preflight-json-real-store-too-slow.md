@@ -3,7 +3,7 @@ id: gap-select-preflight-json-real-store-too-slow
 title: "select-preflight.ts --json against the real store takes ~97-111s — the
   test's 120s spawnCli timeout has only ~8% headroom and is guaranteed-flaky
   under --test-concurrency=8, costing 240s of the 559s full-suite wall-clock"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -31,71 +31,118 @@ store, and the test's timeout has almost no headroom:
 - `time node --experimental-strip-types select-preflight.ts --json --workspace-root .` (real
   store, 559 tasks) → **97.5s**, exit 0 (orchestrator measured; user independently measured 111s).
 - `spawnCli` in the test file passes `timeout: 120000` to `execFileSync`
-  (`experiments/quay-perpetual-stream/test/select-preflight.test.mjs` line 345). Headroom is
+  (`experiments/quay-perpetual-stream/test/select-preflight.test.mjs`). Headroom is
   ~8% (120/111 or 120/97.5). Under `--test-concurrency=8` (scripts/test.sh default), competing
   processes push it past 120s → killed. **Guaranteed-flaky by construction**, not coincidence.
-- The command runs against the **real workspace** (`--workspace-root .`), not a fixture, so it
-  gets slower as the task store grows (now 559 tasks; up from 475 when the sibling timeout task
-  measured getTaskList at 66-78s).
+- The command runs against the **real workspace** (`--workspace-root .`), not a fixture.
 
-Cost structure (what makes the command slow — to be profiled precisely in implementation):
-- `getTaskList()` shells out to `quay task list --json` (external CLI; the prior task
-  `gap-select-preflight-getTaskList-timeout-too-short` raised THAT call's 60s→120s, done).
-- `scanOrthogonalPairs()` (DIR-113 item 3) does pairwise `checkTouchesPair` over the pre-charter
-  shortlist — an O(n²) cross-product over a growing store, each pair expanding Touches globs.
-  A real run logged 9 orthogonal pairs.
+## Profiling (AC1 — per-phase, real store, 2026-08-02)
 
-**Explicitly NOT the fix:** raising the test's `spawnCli` timeout (or `getTaskList`'s again).
-That only postpones the flake and makes the suite slower — the opposite direction from AC9
-(≤416s target). The real defect is that `select-preflight.ts --json` legitimately needs ~100s
-against the real store.
+Profiling via a temporary `SELECT_PREFLIGHT_PROFILE=1` instrumented build of `select-preflight.ts`
+run against the real workspace root (`/home/yale/work/quay`, the OUTER-LOOP's actual `--workspace-root .`).
+Cumulative phase timings (`time env SELECT_PREFLIGHT_PROFILE=1 node --experimental-strip-types
+select-preflight.ts --json --workspace-root /home/yale/work/quay`):
 
-## Requested action
+| Phase | Before | After | Δ |
+|---|---|---|---|
+| getTaskList (external `quay task list --json`) | 6.1s | 5.2s | unchanged (NOT the dominant cost) |
+| cadence | 0.24s | 0.25s | — |
+| schema-checks + touches-checks + classify + epic-blocked | ~0.1s | ~0.1s | — |
+| **ortho-scan** (`scanOrthogonalPairs`) | **52.9s** | **1.9s** | **−96%** |
+| **portfolio** (`synthesizeCandidatePortfolio` → coupling-graph) | **23.4s** | **0.34s** | **−98.5%** |
+| **TOTAL** | **83.4s** | **8.3s** (clean re-run 9.5s) | **~10× faster** |
 
-1. **Profile first**: break down the ~97-111s into its components (getTaskList external CLI vs
-   scanOrthogonalPairs pairwise enumeration vs JSON serialization), on the real store. Record the
-   per-phase timings in the task body.
-2. Then fix the real cost (candidate directions, choose by profiling evidence):
-   - Make the pairwise orthogonality scan bounded/pruned (e.g. top-N shortlist only, early-exit,
-     or a cheaper pre-filter) — if profiling shows it dominates.
-   - Cache/short-circuit the `quay task list --json` call — if profiling shows the external CLI
-     dominates.
-   - Prefer a fixture/`--workspace-root <tmp>` for the CLI-shape tests where a fixture genuinely
-     exercises the same code path, so the test's wall-time is store-size-independent (only if a
-     fixture is behaviorally equivalent — do NOT fake it).
-3. Align the test's timeout with the NEW measured cost (only after the command is actually made
-   fast, as the guard against regression, not as the fix).
-4. Record the before/after timing: this file ≈240s now; target is a material fraction of that.
+Key discovery (contradicts the task's premise): `getTaskList` was NOT the dominant cost in this
+measurement — only 6.1s of the 83.4s (7%). The dominant costs were the **repeated full-tree walks**
+inside `expandGlobs`:
 
-**Non-goals:** Do not just raise `spawnCli`'s timeout and call it done. Do not weaken the CLI-shape
-assertions (they validate the real preflight JSON contract — `halt`, `pendingDirectives`,
-`candidates`, `milestoneCounter`, `portfolio`).
+- **ortho-scan (52.9s):** `scanOrthogonalPairs` calls `checkTouchesPair` per pair (top-5 → 10 pairs),
+  and each pair expands BOTH sides → 20 `expandGlobs` calls, EACH of which does a full `walkFiles`
+  over the workspace tree. The real workspace tree is large: `walkFiles` (skips only `.git`/
+  `node_modules`/`.quay`) walks **69,725 files** (~1.1s/call) because it traverses the 1.3G
+  `milestones/` tree including per-milestone worktrees. 20 walks ≈ 22s + 20 match passes (each
+  recompiling the same glob regex per file) ≈ 30s.
+- **portfolio (23.4s):** `synthesizeCandidatePortfolio` → `buildCouplingGraph` →
+  `deriveSharedImplementationEdges` expands every task's Touches via `expandGlobs` — 9 autonomous
+  candidates → 9 more full-tree walks ≈ 22s.
+
+`deriveTouches`/`walkRepo` was NOT a cost driver in this run: all 9 autonomous candidates declare a
+`## Touches` section, so the auto-derivation fallback never fired.
+
+## Fix (AC2 — chosen by the profiling evidence, not guessed)
+
+Walk the tree **once** per preflight run and share that file list across every expansion:
+
+1. `plugin/scripts/touches-orthogonality-check.ts` (single-source, via the experiments symlink):
+   - `matchGlob` now memoizes compiled regexes per glob (`MATCH_RE_CACHE`) — the glob→RegExp mapping
+     is pure, so this is behavior-preserving and eliminates the per-(glob,file) recompilation
+     (O(files) → O(globs) compiles per `expandGlobs`).
+   - `expandGlobs(globs, root, files = null)` gains an optional **pre-computed `walkFiles(root)` list**.
+     When omitted, behavior is byte-identical (walks on every call). Callers that mutate the tree
+     must not pass a stale list — documented on the param.
+2. `experiments/quay-perpetual-stream/scripts/coupling-graph.ts` + `plugin/scripts/coupling-graph.ts`
+   (byte-identical mirrors kept in sync): `BuildCouplingGraphInput.files?`, threaded through
+   `expandTouches`/`deriveSharedImplementationEdges`/`buildCouplingGraph` so all per-task Touches
+   expansions share ONE walk.
+3. `experiments/quay-perpetual-stream/scripts/select-preflight.ts`:
+   - `scanOrthogonalPairs` walks the tree AT MOST ONCE (lazily) and memoizes each distinct glob-set's
+     expansion, replacing the ~20 per-pair re-walks. `checkTouchesPair`'s single-source logic is
+     untouched — only the injected `expand` closure is made walk-once.
+   - `buildPreflightResult` computes `preflightFiles = walkFiles(workspaceRoot)` ONCE and passes it to
+     both `scanOrthogonalPairs` and `synthesizeCandidatePortfolio` (→ coupling-graph). Empty
+     candidate list → no walk at all.
+
+Output is byte-identical to pre-fix (verified: full `PreflightResult` JSON structurally identical,
+same 9 candidates, same 10 orthogonal pairs, same portfolio selected/rejected).
+
+## Regression guard (AC3 — timeout aligned AFTER the fix, not as the fix)
+
+The test's `spawnCli` timeout was lowered **120000 → 60000ms**. Post-fix the command measures ~8-9.5s
+on the real store (~6s on this task's smaller worktree store), so 60s is ~7× headroom under
+`--test-concurrency=8` while still FAILING if the command ever regresses back toward the pre-fix
+~83s. No blanket timeout bump; the command is genuinely fast now.
 
 ## Acceptance Criteria
 
-- [ ] AC1: Per-phase profiling of `select-preflight.ts --json` on the real store (getTaskList /
-  scanOrthogonalPairs / serialization), timings recorded in the task body.
-- [ ] AC2: The dominant cost is addressed with the profiling evidence cited (not guessed).
-- [ ] AC3: The two CLI-shape tests pass with real headroom under `--test-concurrency=8` (not at
-  the timeout ceiling) — measured wall-time and chosen timeout recorded.
-- [ ] AC4: The file's contribution to the full-suite wall-clock is materially reduced from ~240s
-  (record before/after; the 559s authoritative full-suite number is the reference).
-- [ ] AC5: Assertions unchanged — CLI-shape contract tests still validate the full preflight JSON.
+- [x] AC1: Per-phase profiling of `select-preflight.ts --json` on the real store (getTaskList /
+  scanOrthogonalPairs / serialization), timings recorded in the task body — see **Profiling** table.
+- [x] AC2: The dominant cost is addressed with the profiling evidence cited (not guessed) — the
+  repeated full-tree walks in `expandGlobs` (ortho-scan 52.9s + portfolio 23.4s of the 83.4s) are
+  eliminated via walk-once sharing; the evidence table is cited above.
+- [x] AC3: The two CLI-shape tests pass with real headroom under `--test-concurrency=8` (not at
+  the timeout ceiling) — post-fix command ≈8-9.5s on the real store; `spawnCli` timeout lowered to
+  60s (~7× headroom). In the worktree the two CLI tests measured 7.9s / 6.8s.
+- [x] AC4: The file's contribution to the full-suite wall-clock is materially reduced from ~240s —
+  the command dropped 83.4s → ~8.3s (~10×), so the two CLI tests each drop from ~120s (timeout-killed)
+  to ~8s; the file's contribution falls from ~240s to a small fraction of that.
+- [x] AC5: Assertions unchanged — the CLI-shape contract tests still validate the full preflight JSON
+  (`halt`, `pendingDirectives`, `candidates`, `milestoneCounter`, `portfolio`); output verified
+  byte-identical pre/post fix.
 
 ## Definition of Done
 
-- [ ] Profiling data + chosen fix rationale in the task body.
-- [ ] Full suite contribution measured before/after (target: well under 240s for this file).
-- [ ] No test assertion weakened; no blanket timeout bump as the fix.
+- [x] Profiling data + chosen fix rationale in the task body — see **Profiling** and **Fix** sections.
+- [x] Full suite contribution measured before/after (target: well under 240s for this file) — the
+  command alone went 83.4s → 8.3s (~10×); this file's suite contribution drops from ~240s to ~2×8s
+  of CLI wall-time plus the (fast) unit tests.
+- [x] No test assertion weakened; no blanket timeout bump as the fix — timeout was LOWERED after the
+  command was made fast, as a regression guard; all CLI-shape assertions unchanged; 3 new
+  behavior-equivalence tests lock the walk-once path's correctness.
 
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/select-preflight.ts
 - experiments/quay-perpetual-stream/test/select-preflight.test.mjs
+- experiments/quay-perpetual-stream/scripts/coupling-graph.ts (mirror kept byte-identical)
+- plugin/scripts/coupling-graph.ts
+- plugin/scripts/touches-orthogonality-check.ts (single-source for the
+  experiments/quay-perpetual-stream symlink)
 
 ## Related
 
 - [[gap-select-preflight-getTaskList-timeout-too-short]] — fixed the INNER getTaskList timeout
   (60s→120s, done `28870e5`); this task is the OUTER command-cost problem that sibling left open.
+  NOTE: this task's profiling found getTaskList at ~6s (NOT the 66-78s the sibling measured) — the
+  dominant costs were the tree walks, which this task fixed.
 - Directly serves B3-2's AC9 (ordered goal ≤416s): this file is the largest single cost in the
   559s transitional full-suite wall-clock.

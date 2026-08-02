@@ -95,8 +95,18 @@ export function parseTouches(text) {
 
 // ── matchGlob ────────────────────────────────────────────────────────────────────────────────────
 // Minimal glob matcher over a repo-relative POSIX path. `**` crosses separators; `*` does not.
+// gap-select-preflight-json-real-store-too-slow: compiled regexes are memoized per glob. The glob
+// → RegExp mapping is pure (same glob always compiles to the same pattern), so a module-level cache
+// is behavior-preserving and turns the previous per-(glob,file) recompilation into a single compile
+// per distinct glob — the difference between O(files) and O(globs) compilations per expandGlobs call
+// over a large tree.
+const MATCH_RE_CACHE = new Map();
 export function matchGlob(glob, filePath) {
-  const re = globToRegExp(glob);
+  let re = MATCH_RE_CACHE.get(glob);
+  if (re === undefined) {
+    re = globToRegExp(glob);
+    MATCH_RE_CACHE.set(glob, re);
+  }
   return re.test(filePath);
 }
 
@@ -149,8 +159,14 @@ export function walkFiles(root) {
 }
 
 // Expand globs to the concrete set of repo-relative files under `root` that match any of them.
-export function expandGlobs(globs, root) {
-  const all = walkFiles(root);
+// `files` is an optional PRE-COMPUTED walkFiles(root) list for walk-once callers
+// (gap-select-preflight-json-real-store-too-slow): when the same tree is expanded many times in one
+// process (e.g. select-preflight's pairwise orthogonality scan + coupling-graph, ~29 expandGlobs
+// calls per run against the real store), passing a shared file list avoids re-walking the whole tree
+// per call. When omitted, behavior is unchanged (walks on every call). Callers that MUTATE the tree
+// between calls must NOT pass a stale precomputed list.
+export function expandGlobs(globs, root, files = null) {
+  const all = files ?? walkFiles(root);
   const set = new Set();
   for (const g of globs) {
     for (const f of all) if (matchGlob(g, f)) set.add(f);
