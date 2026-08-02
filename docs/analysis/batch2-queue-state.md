@@ -44,13 +44,25 @@
 | M246（DIR-124-A5） | 待 M243 裁定后 |
 | M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
 
+## 在飞（B6）
+
+| 任务 | dispatch | runId | worktree |
+|---|---|---|---|
+| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` | 15:44:35Z | fm-gap-suite-cost-model-is-wrong-optimizations-buy-nothing-1785685475162-odoz6u | /tmp/quay-wt-costmodel |
+
 ## 待执行（按顺序）
 
 | 任务 | 说明 |
 |---|---|
-| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing`（外层建） | **master 绿后再派**（现 445s/0 fail 是干净基线）。采集 157 文件 duration_ms、Σ/墙钟 vs 并发 8、同 commit 3 次测噪声。不做优化 |
+| cost-model 落地后：M246/M222 或下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**（外层实测：本会话 Task/Agent 未进工具前六，并发是关的；下一批默认并发，不默认串行） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
+
+## 工作方式调整（外层实测 2026-08-02，本会话 10.3h transcript）
+
+- 时间去向：空转等裁定 49% / 全量套件 13% / 其它 Bash 11% / 范围化测试 2%。37 次停摆最长 26/22/21/21/19/17 分钟，全贴外层 20 分钟 tick 间隔 → **瓶颈是外层延迟不是测试**
+- 迭代阶段一律 `--for-task`（68s vs 489s，7.2×），全量只在合并前跑一次
+- 下一批先 checkTouchesPair 组可并发批次，不默认串行
 
 ## 揭示的既有失败（已建任务，勿重复）
 
