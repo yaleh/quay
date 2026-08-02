@@ -27,7 +27,12 @@ while true; do
   # 于是两级判据退化成 90 秒阈值直接误报。2026-08-02 实测：内层在跑 M246 的全量套件
   # （11 个 `node --test` 进程），inProgress 却是 []，报出一次假 STALLED。
   # 数测试进程比问遥测更直接，且不依赖内层是否记了计量。
-  testprocs=$(pgrep -c -f 'node --test' 2>/dev/null || echo 0)
+  # Node 的 comm 是 `node-MainThread`（2026-08-02 查明）——`pgrep -f 'node --test'` 会匹配到
+  # 命令行里含该字样的任何进程（包括外层自己的 tick 命令），`grep -cx node` 则永远为 0。
+  # 用 comm 精确匹配，并以 load1 作为独立的第二判据。
+  testprocs=$(ps -e -o comm= | grep -cx node-MainThread 2>/dev/null || echo 0)
+  load1=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+  if [ "$(echo "$load1 > 1" | bc -l 2>/dev/null || echo 0)" = "1" ]; then testprocs=$((testprocs + 1)); fi
   if [ "${testprocs:-0}" -gt 0 ]; then
     busy=$testprocs
   elif [ "${READONLY:-0}" = "1" ]; then

@@ -185,6 +185,18 @@ tmux capture-pane -p -t quay-0:0.0 | md5sum      # 两次相同 = 空闲
 
 真实情况是负载一路在回落：**16.62 → 12.26 → 7.28 → 4.33**，套件早就在陆续退出。
 
+**Node 进程的 `comm` 是 `node-MainThread`，不是 `node`。** 2026-08-02 查明这是外层一整天进程计数
+出错的总根因：`ps -e -o comm= | grep -cx node` **永远返回 0**，而我用它当作「没有东西在跑」的证据
+判过停摆。一整天在两个坏方法之间摇摆——`pgrep -f` 匹配命令行散文（多计，把自己的 tick 命令算进去），
+`comm=node` 永不匹配（少计到零）。**正确写法**：
+
+```bash
+ps -e -o comm= | grep -cx node-MainThread     # 或 pgrep -xc node
+cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎的第二判据
+```
+
+**判停摆要两个独立判据同时成立**（进程数为 0 **且** load1 < 1），单靠任一个都被骗过。
+
 **数进程要么用 `comm` 精确匹配，要么显式排除自身**（`grep -v` 掉 `grep`/`ps`/`capture-pane`/
 `claude`）。`pgrep -f` 的模糊匹配在一个「命令行里到处写着脚本名」的编排会话里是不可用的。
 
