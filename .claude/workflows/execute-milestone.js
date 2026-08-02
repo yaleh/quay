@@ -62,6 +62,63 @@ if (_isComposite) {
   log(`Composite call: ${_taskIds.length} member tasks [${_taskIds.join(', ')}] — this first implementation drives Build/Audit/Gate/Land through the primary task ${_primaryTaskId}; full membership is threaded through for evidence/Land marking.`)
 }
 
+// ── DIR-124-A1b: stage-event emission (A1b-EMIT-HELPER). ──────────────────────────────
+// Fire-and-forget structured stage events at the 8 cross-workflow boundaries (E2-E8 in this file,
+// E1 Admission in prepare-milestone.js), consumed via A1a's workflow-event-schema.mjs --emit-event
+// CLI (A1b-SCHEMA-CONSUMPTION: zero schema logic embedded here). The result is NEVER parsed,
+// branched on, or fed into any scheduling/gating decision (A1b-FIRE-AND-FORGET, A1b-NO-COUPLING).
+let _stageEventIndex = 0
+// Sandbox-safe clock (f6db2a8/7357a91 regression class): the workflow sandbox CRASHES on a live
+// Date.now()/new Date() call. A DEDICATED monotonic counter (seeded from $a.queuedAtMs when the
+// caller supplies a real epoch) — NEVER the runtime's `$a.now`, so stage-event reads cannot perturb
+// the workflow's own budget/elapsed-time logic (the convergence soft-budget test injects a
+// deterministic `$a.now` clock; consuming it for observability would advance the budget).
+let _emitNowCounter = Number.isFinite($a.queuedAtMs) ? $a.queuedAtMs : 0
+const _emitNow = () => { _emitNowCounter += 1; return _emitNowCounter }
+async function _emitStageEvent(partial) {
+  // Defaults shared by every stage event (A1a REQUIRED_FIELDS); call sites supply the
+  // boundary-specific overrides. `_stageEventIndex` counts start events per file (A1b spec).
+  // `_runId` is computed at CALL time (not at helper definition): `_milestone` is declared later in
+  // the file, and E2-Verify is the first call site — after it is initialized.
+  const _runId = 'M' + _milestone
+  const _nowMs = _emitNow()
+  const eventObj = {
+    schemaVersion: '1',
+    runId: _runId,
+    candidateId: `${_runId}-${_primaryTaskId}`,
+    taskId: _primaryTaskId,
+    attempt: 0,
+    timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _nowMs, endedAtMs: null },
+    agentLabel: 'workflow-runner',
+    commandIdentity: null,
+    executionCwd: process.cwd(),
+    worktreePath: _useWorktree ? _isolationPlan.worktreeRel : null,
+    baseCommit: $a.baseCommit ?? null,
+    candidateCommit: null,
+    outcome: null,
+    waitReason: null,
+    resourceClaim: null,
+    observedWrites: [],
+    isolationMode: _useWorktree ? 'worktree' : null,
+    dispatchMode: 'serial',
+    recordedAtMs: _nowMs,
+    ...partial,
+  }
+  if (eventObj.eventKind === 'start') { _stageEventIndex += 1; eventObj.stageIndex = _stageEventIndex }
+  const json = JSON.stringify(eventObj)
+  const schemaPath = 'experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs'
+  await agent(
+    `Run exactly this shell command and report its stdout verbatim:
+node --no-warnings --experimental-strip-types ${schemaPath} --emit-event '${json.replace(/'/g, "'\\''")}'
+Do not paraphrase or reformat the command's stdout. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    {
+      label: `emit-event-${eventObj.stage}-${eventObj.eventKind}`,
+      phase: eventObj.stage,
+      schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } },
+    }
+  )
+}
+
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
@@ -103,6 +160,11 @@ const _isolationPlan = (() => {
   return { isolated: true, milestoneNum: num, worktreeRel: `${root}/worktrees/iteration-0`, branch: `milestone/M${num}/iteration-0` }
 })()
 const _useWorktree = _isolationPlan.isolated === true
+// A1b E2 start — structured stage event at the Verify boundary (A1b-START-END-PAIRS). Fires AFTER
+// `_milestone` AND `_useWorktree`/`_isolationPlan` are initialized (the helper derives runId and
+// worktreePath from them) but before any Verify check dispatch.
+const _e2StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Verify', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e2StartedAtMs, endedAtMs: null }, commandIdentity: 'it0-checks' })
 // A REQUESTED-but-unusable isolation FAILS CLOSED rather than silently building on the shared checkout
 // — this covers BOTH `isolationMode:'worktree'` with no derivable numeric milestone AND any unknown
 // non-empty mode (a caller typo like 'worktre' must not silently drop isolation and reopen the
@@ -219,6 +281,8 @@ if (verifyFailed) {
   return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify', verifyJournal: allVerifyResults, verifyCacheUpdates }
 }
 log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${scriptCount} script + ${_dmEntry ? 1 : 0} agent).`)
+// A1b E2 end — Verify success.
+await _emitStageEvent({ stage: 'Verify', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e2StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'it0-checks' })
 
 // ── Phase: Prepared (DIR-117/M191; ENFORCED-BY-DEFAULT since DIR-117-B/M195) ─────────
 // Fail-closed pre-Build gate on the Proposal→Plan preparation receipt (milestone-preparation-
@@ -232,6 +296,9 @@ log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${
 // (milestones/M195/negative-control/). OUTER-LOOP's `prepare(c)` step produces a receipt for every
 // legitimate dispatch; a receipt-less dispatch is now always a caller bug, never a supported shape.
 phase('Prepared')
+// A1b E3 start — Prepared boundary.
+const _e3StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Prepared', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e3StartedAtMs, endedAtMs: null }, commandIdentity: 'milestone-preparation-check' })
 if (!$a.preparationReceiptFile) {
   log(`Prepared phase FAILED — preparation-receipt-missing: no preparationReceiptFile supplied (enforced-by-default since DIR-117-B/M195; the pre-DIR-117-B opt-in skip is retired).`)
   return { outcome: 'revision-needed', reason: 'preparation-receipt-missing', phase: 'Prepared', verifyCacheUpdates }
@@ -261,6 +328,8 @@ if (!preparedResult || preparedResult.ok !== true) {
   return { outcome: 'revision-needed', reason: preparedResult?.code || 'preparation-check-failed', phase: 'Prepared', verifyCacheUpdates }
 }
 log(`Prepared phase PASSED — ${preparedResult.code}: ${preparedResult.detail}`)
+// A1b E3 end — Prepared success.
+await _emitStageEvent({ stage: 'Prepared', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e3StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'milestone-preparation-check' })
 
 // ── Composite per-phase DAG dispatcher (DIR-119-D2 / M210) ───────────────────────────
 // Replaces the single monolithic composite Build agent with a REAL phase-DAG dispatch:
@@ -387,6 +456,9 @@ Return {outcome: "done"|"needs-human", reason, mergeCommit: "<short-sha>", evide
 
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
+// A1b E4 start — Build boundary.
+const _e4StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Build', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e4StartedAtMs, endedAtMs: null }, commandIdentity: 'build-integrate' })
 // DIR-123: under worktree isolation, create the REAL per-milestone worktree BEFORE building, so every
 // edit/test/commit below happens on the worktree branch, not the shared checkout. milestone-worktree.ts
 // performs the real `git worktree add` (fail-closed on a pre-existing path/branch — a same-milestone
@@ -537,6 +609,8 @@ Return {ok: <exit===0>, manifestPath: "${evidenceManifestFile}", manifest: <the 
     return { outcome: 'needs-human', reason: 'build-evidence-collector-failed', phase: 'Build-Evidence', verifyCacheUpdates }
   }
   log(`Build evidence manifest written: ${collectorResult.manifestPath}`)
+  // A1b E4 end — Build success (after Build-Evidence sub-phase; the sub-phase is NOT a boundary).
+  await _emitStageEvent({ stage: 'Build', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e4StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'build-integrate', candidateCommit: buildResult?.mergeCommit ?? null })
 
 // COMPOSITE-AUDIT-SHARD-PROMPT-BEGIN
 // DIR-119-D3 (M211): fenced per-shard read-only Audit prompt template. Contains ONLY: refute-first
@@ -717,6 +791,9 @@ Read-only otherwise: do NOT edit any repository file. Return {candidateId, shard
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
+// A1b E5 start — Audit boundary.
+const _e5StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Audit', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e5StartedAtMs, endedAtMs: null }, commandIdentity: 'audit' })
 
 // DIR-123: threaded into the Audit prompt ONLY under worktree isolation ('' otherwise → byte-identical
 // legacy). CRITICAL for correctness: the build being audited lives in the WORKTREE, not the primary
@@ -802,6 +879,8 @@ if (auditResult?.outcome === 'needs-human') {
   return { outcome: 'needs-human', reason: auditResult.reason, phase: 'Audit', verifyCacheUpdates }
 }
 log(`Audit phase complete: verdict=${auditResult?.verdict}, sessionId=${auditResult?.auditSessionId}`)
+// A1b E5 end — Audit success.
+await _emitStageEvent({ stage: 'Audit', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e5StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'audit' })
 
 // ── Session-ID pass-through (DIR-093 fix v2): pass audit session ID directly ─────────
 // to Gate agents rather than relying on file write-back (which breaks because workflow
@@ -815,6 +894,9 @@ if (AUDIT_SESSION_ID) {
 
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
 phase('Gate')
+// A1b E6 start — Gate boundary.
+const _e6StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Gate', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e6StartedAtMs, endedAtMs: null }, commandIdentity: 'mechanical-gates' })
 // DIR-123: under worktree isolation, the build's task-file / working-tree changes live in the WORKTREE
 // (Land has not merged), so gates that inspect the working tree / task store must run against the
 // worktree path, not the pre-build primary checkout. Prefixed onto every gate prompt ONLY in worktree
@@ -905,6 +987,8 @@ Return {failedTaskIds: [...], passingTaskIds: [...], milestoneFailures: [...]}.`
   return { outcome: 'needs-human', reason: 'gate-failed', phase: 'Gate', verifyCacheUpdates }
 }
 log(`Gate phase PASSED — all ${gates.filter(Boolean).length} mechanical gates green.`)
+// A1b E6 end — Gate success.
+await _emitStageEvent({ stage: 'Gate', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e6StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'mechanical-gates' })
 
 // ── Phase: Reconcile (DIR-119-D4 / M212) ─────────────────────────────────────────────
 // Literal Reconcile phase between Gate and Land. For a COMPOSITE dispatch this is the ONLY phase
@@ -917,6 +1001,9 @@ log(`Gate phase PASSED — all ${gates.filter(Boolean).length} mechanical gates 
 const IS_CONCURRENT = $a.mode === 'concurrent'
 if (_isComposite && $a.compositeManifestFile) {
   phase('Reconcile')
+  // A1b E7 start — Reconcile boundary (composite only; the width-1 else-branch below emits skipped).
+  const _e7StartedAtMs = _emitNow()
+  await _emitStageEvent({ stage: 'Reconcile', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e7StartedAtMs, endedAtMs: null }, commandIdentity: 'reconcile-apply' })
   const _reconcileWt = _useWorktree
     ? `WORKTREE ISOLATION (DIR-123): first \`cd ${_isolationPlan.worktreeRel}\` (the build worktree, branch ${_isolationPlan.branch}) and apply your writes THERE (task files / dashboard / absorb live in the worktree; Land has not merged the primary checkout yet). Then `
     : ''
@@ -949,16 +1036,25 @@ Return {applied: <bool>, result: <the ReconcileResult JSON>}.`,
       } } }
   )
   log(`Reconcile phase complete: applied=${reconcileApply?.applied}, result.ok=${reconcileApply?.result?.ok}${reconcileApply?.result?.reason ? ` reason=${reconcileApply.result.reason}` : ''}`)
+  // A1b E7 end — Reconcile success (composite path).
+  await _emitStageEvent({ stage: 'Reconcile', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e7StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'reconcile-apply' })
   if (!reconcileApply?.applied || !reconcileApply?.result?.ok) {
     log(`Reconcile contract violation (${reconcileApply?.result?.reason || 'reconcile-apply-did-not-apply'}) — zero mutations applied; cannot proceed to Land.`)
     return { outcome: 'needs-human', reason: reconcileApply?.result?.reason || 'reconcile-contract-violation', phase: 'Reconcile', verifyCacheUpdates }
   }
 } else {
   log('Reconcile phase skipped (width-1 / manifest-less dispatch — success-path writes remain in Land per golden replay).')
+  // A1b E7 skipped — width-1 / manifest-less: emit start+end with outcome:'skipped' (event-log completeness).
+  const _e7SkippedAtMs = _emitNow()
+  await _emitStageEvent({ stage: 'Reconcile', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e7SkippedAtMs, endedAtMs: null }, commandIdentity: 'reconcile-apply' })
+  await _emitStageEvent({ stage: 'Reconcile', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e7SkippedAtMs, endedAtMs: _emitNow() }, outcome: 'skipped', commandIdentity: 'reconcile-apply' })
 }
 
 // ── Phase: Land (step 6 merge + step 7 dashboard) ────────────────────────────────────
 phase('Land')
+// A1b E8 start — Land boundary.
+const _e8StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Land', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e8StartedAtMs, endedAtMs: null }, commandIdentity: 'land' })
 // CONCERNS verdict: recorded, non-blocking. Log it and proceed.
 if (auditResult?.verdict === 'CONCERNS') {
   log(`Audit CONCERNS (non-blocking): ${auditResult?.concernsDetail || auditResult?.detail || 'see audit artifact'}`)
@@ -1254,4 +1350,6 @@ if (!postLandCheck?.ok) {
 log(`Land post-mutation split-or-commit check PASSED — whole task store re-scanned after lifecycle writes, no violations.`)
 
 log(`Land phase complete — milestone ${_primaryTaskId} done.`)
+// A1b E8 end — Land success.
+await _emitStageEvent({ stage: 'Land', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e8StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', commandIdentity: 'land' })
 return { outcome: 'done', taskId: _primaryTaskId, taskIds: _taskIds, verifyCacheUpdates }

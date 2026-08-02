@@ -98,6 +98,8 @@ function makeWorktreeMock(repo, milestone, recorder) {
   const wtRel = worktreeRelPath(parseMilestoneNum(milestone));
   const agent = async function (prompt, opts = {}) {
     const label = opts.label;
+    // DIR-124-A1b: fire-and-forget stage-event emissions are observational no-ops.
+    if (label && label.startsWith('emit-event-')) return { raw: null };
     if (VERIFY_LABELS.includes(label)) return verifyStub(label);
     if (label === 'preparation-check') return { ok: true, code: 'PASS: prepared', detail: 'stub' };
     if (label === 'post-land-split-or-commit') return { ok: true, detail: 'stub' };
@@ -184,6 +186,7 @@ function makeLegacyCaptureMock() {
   const agent = async function (prompt, opts = {}) {
     calls.push({ label: opts.label ?? null, phase: opts.phase ?? null, prompt });
     const label = opts.label;
+    if (label && label.startsWith('emit-event-')) return { raw: null };
     if (VERIFY_LABELS.includes(label)) return verifyStub(label);
     if (label === 'preparation-check') return { ok: true, code: 'PASS: prepared', detail: 'stub' };
     if (label === 'post-land-split-or-commit') return { ok: true, detail: 'stub' };
@@ -212,10 +215,15 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     for (let i = 0; i < calls.length; i++) {
       assert.equal(calls[i].label, GOLDEN.calls[i].label, `call[${i}] label changed`);
       assert.equal(calls[i].phase, GOLDEN.calls[i].phase, `call[${i}] phase changed`);
-      if (calls[i].prompt !== GOLDEN.calls[i].prompt) diffIdx.push(i);
+      // DIR-124-A1b: stage-event emission prompts embed Date.now() timestamps
+      // (recordedAtMs / timing.startedAtMs) — intentionally non-deterministic, so their exact
+      // text is excluded from the prompt-delta check (their label/phase/count above still pin them).
+      const isEmitEvent = String(calls[i].label).startsWith('emit-event-');
+      if (!isEmitEvent && calls[i].prompt !== GOLDEN.calls[i].prompt) diffIdx.push(i);
     }
-    // (3) EXACTLY ONE prompt may differ — the Land main agent (no label, phase Land): #4's stale-text fix.
-    assert.equal(diffIdx.length, 1, `expected exactly 1 legacy prompt delta (Land step-1 fix), got ${diffIdx.length} at [${diffIdx}]`);
+    // (3) EXACTLY ONE non-emit prompt may differ — the Land main agent (no label, phase Land):
+    // #4's stale-text fix.
+    assert.equal(diffIdx.length, 1, `expected exactly 1 non-emit legacy prompt delta (Land step-1 fix), got ${diffIdx.length} at [${diffIdx}]`);
     const li = diffIdx[0];
     assert.equal(GOLDEN.calls[li].phase, 'Land');
     assert.equal(GOLDEN.calls[li].label, null);
@@ -517,5 +525,43 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+}
+
+
+// ── DIR-124-A1b: stage-event emission — every emit-event agent prompt embeds schema-valid StageEvent
+// JSON (validatable against A1a's validateEvent), and the boundaries' start+end pairs are present.
+// Fire-and-forget is already proven by the golden replay (workflow result identical with emit calls).
+import { validateEvent } from '../../experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs';
+
+for (const [mirrorName, workflowFile] of MIRRORS) {
+  test(`[${mirrorName}] DIR-124-A1b — every emit-event prompt embeds schema-valid JSON; start+end pairs per boundary`, async () => {
+    const { agent, calls } = makeLegacyCaptureMock();
+    const phases = [];
+    const result = await loadWorkflow(workflowFile)(
+      LEGACY_ARGS, (p) => phases.push(p), () => {}, (fns) => Promise.all(fns.map((f) => f())), agent,
+    );
+    const emitCalls = calls.filter((c) => String(c.label).startsWith('emit-event-'));
+    assert.ok(emitCalls.length >= 14, `expected >=14 emit-event calls, got ${emitCalls.length}`);
+
+    const byStage = {};
+    for (const c of emitCalls) {
+      const jsonMatch = c.prompt.match(/--emit-event '([\s\S]*?)'\n/);
+      assert.ok(jsonMatch, `emit-event prompt must embed a --emit-event '<json>' command:\n${c.prompt.slice(0, 200)}`);
+      const event = JSON.parse(jsonMatch[1].replace(/'\\''/g, "'"));
+      const v = validateEvent(event);
+      assert.ok(v.ok, `emit-event ${c.label} must be schema-valid: ${v.error}`);
+      assert.equal(event.schemaVersion, '1');
+      assert.equal(String(c.label), `emit-event-${event.stage}-${event.eventKind}`);
+      if (event.eventKind === 'start') { assert.equal(event.outcome, null); assert.equal(event.timing.endedAtMs, null); }
+      else { assert.ok(['done', 'skipped', 'needs-human'].includes(event.outcome), `end outcome=${event.outcome}`); }
+      (byStage[event.stage] = byStage[event.stage] || []).push(event.eventKind);
+    }
+    for (const stage of ['Verify', 'Prepared', 'Build', 'Audit', 'Gate', 'Reconcile', 'Land']) {
+      assert.ok(byStage[stage], `stage ${stage} must emit events`);
+      assert.equal(byStage[stage].filter((k) => k === 'start').length, 1, `${stage} exactly one start`);
+      assert.equal(byStage[stage].filter((k) => k === 'end').length, 1, `${stage} exactly one end`);
+    }
+    assert.ok(result.outcome === 'done' || result.outcome === 'needs-human', `result outcome ${result.outcome}`);
   });
 }

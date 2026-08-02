@@ -140,6 +140,7 @@ function makeAgentMock(taskFileOnDisk) {
 
   const agentMock = async (prompt, opts = {}) => {
     const label = opts.label || '';
+    if (label.startsWith('emit-event-')) return { raw: null };
 
     // M200/DIR-126-A: the new Admission phase's agent()-dispatched CLI calls. Mocked directly
     // (never touching real .quay/prepare-leases/ state — this file's job is proving the

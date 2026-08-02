@@ -98,6 +98,7 @@ const BUILD_SHORT_CIRCUIT = { outcome: 'needs-human', reason: 'test-short-circui
 function makeAgentMock() {
   return async function agentMock(prompt, opts = {}) {
     const label = opts.label;
+    if (label && label.startsWith('emit-event-')) return { raw: null };
     if (VERIFY_LABELS.includes(label)) return verifyStub(label);
     if (label === 'preparation-check') return runRealPreparationCheck(prompt);
     if (opts.phase === 'Build') return BUILD_SHORT_CIRCUIT;

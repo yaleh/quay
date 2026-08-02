@@ -162,7 +162,7 @@ const _convergenceScript = 'experiments/quay-perpetual-stream/scripts/proposal-c
 // telemetry, never a gate). `_phaseTimings` accumulates one closed {phase, round, startedAtMs,
 // endedAtMs} span per SUCCESSFUL renewal boundary; `_lastBoundaryMs` is seeded from the parsed
 // `--acquire` verdict's self-reported `nowMs` and advanced by each renewal's — the sandbox NEVER
-// computes a timestamp itself (AC19's regression class f6db2a8/7357a91: zero Date.now()/new Date()/
+// computes a timestamp itself (AC19's regression class f6db2a8/7357a91: zero _emitNow()/new Date()/
 // import() sites in this file; every value below is read out of already-parsed subprocess JSON).
 // The trailing still-open span is closed RECEIVER-side (proposal-convergence.ts fills its
 // `endedAtMs: null` with its own `recordedAtMs`), never here.
@@ -277,6 +277,56 @@ Return {ok: <final outcome === "added">, detail: <the full final JSON line>}.`,
 // that prevents the ~54-duplicate-workflow-minute cost DIR-126's own Finding measured, since the
 // expensive resource (LLM agent turns) is never spent by the losing dispatch.
 phase('Admission')
+
+// ── DIR-124-A1b: stage-event emission (A1b-EMIT-HELPER). E1 Admission fires BEFORE any content agent
+// exists (the architectural reason emission is workflow-JS-based, not agent-based — A1b-E1-ARCHITECTURAL).
+// Fire-and-forget; result never parsed or branched on (A1b-FIRE-AND-FORGET). Schema consumed only via
+// A1a's workflow-event-schema.mjs --emit-event CLI (A1b-SCHEMA-CONSUMPTION).
+let _stageEventIndex = 0
+// Sandbox-safe clock (f6db2a8/7357a91 regression class — a live Date.now() crashes the sandbox).
+// A DEDICATED monotonic counter (seeded from $a.queuedAtMs) — NEVER the runtime's `$a.now`, so
+// stage-event reads cannot perturb the workflow's own budget/elapsed-time logic. E1 fires during
+// Admission, BEFORE the file's own `_now` (line ~933) is declared — this counter needs no `_now`.
+let _emitNowCounter = Number.isFinite($a.queuedAtMs) ? $a.queuedAtMs : 0
+const _emitNow = () => { _emitNowCounter += 1; return _emitNowCounter }
+async function _emitStageEvent(partial) {
+  const _nowMs = _emitNow()
+  const eventObj = {
+    schemaVersion: '1',
+    runId: 'prepare-' + _milestoneId,
+    candidateId: `prepare-${_milestoneId}-${_taskId}`,
+    taskId: _taskId,
+    attempt: 0,
+    timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _nowMs, endedAtMs: null },
+    agentLabel: 'workflow-runner',
+    commandIdentity: null,
+    executionCwd: process.cwd(),
+    worktreePath: _useWorktree ? _isolationPlan.worktreeRel : null,
+    baseCommit: $a.baseCommit ?? null,
+    candidateCommit: null,
+    outcome: null,
+    waitReason: null,
+    resourceClaim: null,
+    observedWrites: [],
+    isolationMode: _useWorktree ? 'worktree' : null,
+    dispatchMode: null,
+    recordedAtMs: _nowMs,
+    ...partial,
+  }
+  if (eventObj.eventKind === 'start') { _stageEventIndex += 1; eventObj.stageIndex = _stageEventIndex }
+  const json = JSON.stringify(eventObj)
+  const schemaPath = 'experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs'
+  await agent(
+    `Run exactly this shell command and report its stdout verbatim:
+node --no-warnings --experimental-strip-types ${schemaPath} --emit-event '${json.replace(/'/g, "'\\''")}'
+Do not paraphrase or reformat the command's stdout. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    {
+      label: `emit-event-${eventObj.stage}-${eventObj.eventKind}`,
+      phase: eventObj.stage,
+      schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } },
+    }
+  )
+}
 
 const _admissionScript = 'experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts'
 
@@ -429,10 +479,17 @@ if (!_admissionVerdict || (_admissionVerdict.outcome !== 'acquired' && _admissio
 if (_admissionVerdict.outcome === 'prepare-already-running') {
   log(`Admission: prepare-already-running — an active lease is held by ${_admissionVerdict.owner?.ownerExecutionId} (stage=${_admissionVerdict.owner?.stage}, leaseUntil=${_admissionVerdict.owner?.leaseUntil}). Returning before any ProposalAuthors agent is dispatched — zero author agent turns spent.`)
   await _recordAttemptAgentCall('prepare-already-running', { owner: _admissionVerdict.owner ?? null })
+  // A1b E1 end — contention terminal.
+  await _emitStageEvent({ stage: 'Admission', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _emitNow(), endedAtMs: _emitNow() }, outcome: 'needs-human', waitReason: 'admission-contention', commandIdentity: 'prepare-admission-check' })
   return { outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner: _admissionVerdict.owner }
 }
 
 log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.lease?.fencingToken}, reclaimed=${_admissionVerdict.reclaimed === true}).`)
+// A1b E1 start — Admission boundary, AFTER --acquire success and BEFORE any content agent (A1b-E1-ARCHITECTURAL).
+const _e1StartedAtMs = _emitNow()
+await _emitStageEvent({ stage: 'Admission', eventKind: 'start', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e1StartedAtMs, endedAtMs: null }, resourceClaim: _admissionVerdict.lease?.fencingToken ?? null, waitReason: _admissionVerdict.reclaimed === true ? 'admission-contention' : null, commandIdentity: 'prepare-admission-check' })
+// A1b E1 end — Admission success (fires immediately after start; the epoch-status dispatch follows).
+await _emitStageEvent({ stage: 'Admission', eventKind: 'end', timing: { queuedAtMs: $a.queuedAtMs ?? null, startedAtMs: _e1StartedAtMs, endedAtMs: _emitNow() }, outcome: 'done', resourceClaim: _admissionVerdict.lease?.fencingToken ?? null, commandIdentity: 'prepare-admission-check' })
 
 // M207: seed `_lastBoundaryMs` EXCLUSIVELY from the already-parsed --acquire verdict's self-
 // reported `nowMs` (the subprocess computes the clock; the sandbox only reads a cached number —
@@ -869,10 +926,10 @@ phase('ProposalReview')
 _recordPhaseBoundary('ProposalReview', 0, await _renewLease('ProposalReview', 0))
 
 // FIX (2026-07-28, real-dispatch crash found post-DIR-125): workflow scripts cannot call
-// Date.now()/new Date() — the sandbox throws (it would break resume). `$a.now` as a FUNCTION is a
+// _emitNow()/new Date() — the sandbox throws (it would break resume). `$a.now` as a FUNCTION is a
 // test-only hook: the unit-test harness constructs `args` as a real JS object, bypassing JSON
 // serialization; a genuine Workflow() dispatch always JSON-serializes `args`, so `$a.now` can
-// never be a function in production — the OLD `() => Date.now()` fallback therefore crashed on
+// never be a function in production — the OLD `() => _emitNow()` fallback therefore crashed on
 // EVERY real dispatch (100% reproducible, confirmed live). Real time now comes ONLY from agents'
 // own execution environment: each review agent runs a real `date +%s%3N` shell call and reports
 // the result as a plain number (`nowMs`) in its structured output. `_latestKnownNowMs` is seeded

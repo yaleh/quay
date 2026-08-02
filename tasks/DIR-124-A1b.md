@@ -1,7 +1,7 @@
 ---
 id: DIR-124-A1b
 title: Stage-event emission instrumentation at 8 workflow boundaries
-status: todo
+status: done
 labels:
   - directive
   - milestone-candidate
@@ -314,16 +314,16 @@ Each new call/dispatch/ownership/enforcement relationship claimed below requires
 
 ## Acceptance Criteria
 
-- [ ] **AC1:** `_emitStageEvent(eventObj)` helper function exists in all 4 workflow mirrors (byte-identical) — A1b-EMIT-HELPER
-- [ ] **AC2:** `_emitStageEvent` called at exactly 16 call sites (one start + one end per boundary × 8 boundaries) — A1b-BOUNDARIES
-- [ ] **AC3:** No return value from any `_emitStageEvent` call is read, parsed, or branched on — A1b-FIRE-AND-FORGET, A1b-NO-COUPLING
-- [ ] **AC4:** Schema consumed ONLY via `--emit-event '<json>'` CLI — zero schema definitions embedded in workflow files — A1b-SCHEMA-CONSUMPTION
-- [ ] **AC5:** Mirror parity verifiable by `diff` at Land — A1b-MIRROR-PARITY
-- [ ] **AC6:** E1 fires AFTER admission `--acquire` success and BEFORE any content agent dispatch — A1b-E1-ARCHITECTURAL
-- [ ] **AC7:** Every boundary produces exactly one start + one end event pair — A1b-START-END-PAIRS
-- [ ] **AC8:** Event log written to gitignored `.workflow-events/<runId>.jsonl` — A1b-EVENT-LOG-PATH
-- [ ] **AC9:** `runId` derived from existing `$a.charterFile`/`$a.milestoneId` — no second derivation path — A1b-RUNID-DERIVATION
-- [ ] **AC10:** Zero interaction with existing telemetry systems (`_phaseTimings`, `_convergenceScript`, gate-event-store) — A1b-NO-TELEMETRY-INTERACTION
+- [x] **AC1:** `_emitStageEvent(eventObj)` helper function exists in all 4 workflow mirrors (byte-identical) — A1b-EMIT-HELPER
+- [x] **AC2:** `_emitStageEvent` called at exactly 16 call sites (one start + one end per boundary × 8 boundaries) — A1b-BOUNDARIES
+- [x] **AC3:** No return value from any `_emitStageEvent` call is read, parsed, or branched on — A1b-FIRE-AND-FORGET, A1b-NO-COUPLING
+- [x] **AC4:** Schema consumed ONLY via `--emit-event '<json>'` CLI — zero schema definitions embedded in workflow files — A1b-SCHEMA-CONSUMPTION
+- [x] **AC5:** Mirror parity verifiable by `diff` at Land — A1b-MIRROR-PARITY
+- [x] **AC6:** E1 fires AFTER admission `--acquire` success and BEFORE any content agent dispatch — A1b-E1-ARCHITECTURAL
+- [x] **AC7:** Every boundary produces exactly one start + one end event pair — A1b-START-END-PAIRS
+- [x] **AC8:** Event log written to gitignored `.workflow-events/<runId>.jsonl` — A1b-EVENT-LOG-PATH
+- [x] **AC9:** `runId` derived from existing `$a.charterFile`/`$a.milestoneId` — no second derivation path — A1b-RUNID-DERIVATION
+- [x] **AC10:** Zero interaction with existing telemetry systems (`_phaseTimings`, `_convergenceScript`, gate-event-store) — A1b-NO-TELEMETRY-INTERACTION
 
 ## Definition of Done
 

@@ -158,6 +158,8 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
 
   const agentMock = async (prompt, opts = {}) => {
     const label = opts.label || '';
+    // DIR-124-A1b: fire-and-forget stage-event emissions are observational no-ops.
+    if (label.startsWith('emit-event-')) return { raw: null };
 
     // M200/DIR-126-A: the new Admission phase's agent()-dispatched CLI calls. Mocked directly
     // (never touching real .quay/prepare-leases/ state) — this file's job is proving the
@@ -882,6 +884,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     const calls = { authors: [], recordAttempts: 0 };
     const agentMock = async (prompt, opts = {}) => {
       const label = opts.label || '';
+      if (label.startsWith('emit-event-')) return { raw: null };
       if (label === 'admission-acquire') return { raw: 'not valid json {{{' };
       // M203/DIR-126-D Claim A.3 — the new fire-and-forget --record-attempt dispatch this exact
       // site (admission-check-failed) now makes, additive and never inspected/branched on by the
@@ -924,6 +927,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     const calls = { authors: [], preflightContent: 0 };
     const agentMock = async (prompt, opts = {}) => {
       const label = opts.label || '';
+      if (label.startsWith('emit-event-')) return { raw: null };
       if (label === 'admission-acquire') {
         return { raw: noisyPrefix + JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
       }
