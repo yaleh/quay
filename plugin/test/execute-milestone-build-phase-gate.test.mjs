@@ -97,6 +97,9 @@ function makeAgentMock(buildReturnValue) {
   const state = { dispatchedPastBuild: false };
   const agentMock = async function (prompt, opts = {}) {
     const label = opts.label;
+    // DIR-124-A1b: fire-and-forget stage-event emissions are observational no-ops — must NOT be
+    // counted as a dispatch past Build.
+    if (label && label.startsWith('emit-event-')) return { raw: null };
     if (VERIFY_LABELS.includes(label)) return verifyStub(label);
     if (label === 'preparation-check') {
       // Real Prepared-phase check against the real, valid receipt we wrote to disk.
