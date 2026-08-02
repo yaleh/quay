@@ -7,7 +7,12 @@ labels:
   - milestone-candidate
 parent: null
 children: []
-extra: {}
+extra:
+  selected_files_contract: 每次运行必须记录自报的 `selected N files`（run_selected 输出），N 在 6+
+    次运行中必须完全一致——这是『只改并发不改选择集』的机械判据。若 N 不一致，该次运行作废，不得计入墙钟判定。
+  spelling: 必须用 `=` 拼写（`--test-concurrency=4`）。空格形式 `--test-concurrency 4` 仍走
+    explicit-file 分支（对抗审查 MAJOR，flags-only 任务的 scope
+    limitation），会静默换掉选择集——那正是本次要防的事。
 ---
 ---
 id: gap-suite-concurrency-4-vs-8-measurement

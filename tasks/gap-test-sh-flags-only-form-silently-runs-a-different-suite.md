@@ -1,8 +1,8 @@
 ---
 id: gap-test-sh-flags-only-form-silently-runs-a-different-suite
-title: "scripts/test.sh's documented flags-only form drops the file glob and
-  runs 3.7x the tests"
-status: todo
+title: scripts/test.sh's documented flags-only form drops the file glob and runs
+  3.7x the tests
+status: done
 labels:
   - gap
   - defect

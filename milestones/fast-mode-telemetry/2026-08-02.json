@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T20:44:45.440Z",
+  "generatedAt": "2026-08-02T21:31:16.620Z",
   "since": null,
   "tasks": [
     {
@@ -48,6 +48,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-test-sh-flags-only-form-silently-runs-a-different-suite",
+      "minutes": 42.83965,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-test-suite-has-no-layer-grouping",
       "minutes": 67.84928333333333,
       "outcome": "needs-human"
@@ -65,7 +70,7 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 41.459241666666664,
-  "medianMinutes": 40.25631666666666,
-  "tasksPerHour": 1.447204473309027
+  "meanMinutes": 41.56542692307692,
+  "medianMinutes": 40.2564,
+  "tasksPerHour": 1.4435073675783248
 }
