@@ -14,6 +14,7 @@
 | B2-2 `gap-test-selection-not-scoped-to-touches` | ✔ merge `462b8391`，全量 1206 tests 0 fail；AC12 实测 8.3s vs 全量 ~378s |
 | B2-3 `gap-suite-speedup` | ✔ merge `42ea36b0`，实测 378s ≤ 480s |
 | B3-1 `gap-gate-registration-vs-dispatch-unmeasured` | ✔ merge `02c30cde`，全量 1218 tests 0 fail（418s）；真实基线已入任务体（16 gate/6 未派发/24 未注册/line-budget mismatch） |
+| B3-2 `gap-test-suite-has-no-layer-grouping` | ✔ merge `56dd8267`；**三步处置完成**（不回退）：(1) runner-grouping 硬编码计数改运行时关系断言 `0e26e6a6`；(2) AC9 改写为有序目标 + 627s 过渡态记录 `3f0bd792`；(3) needs-human → done。揭示 3 既有 engine + 3 既有 governance 失败，记录为发现 |
 
 ## 进行中
 
@@ -25,14 +26,15 @@
 
 | 任务 | 状态 |
 |---|---|
-| B3-2 `gap-test-suite-has-no-layer-grouping` | **needs-human**（merge `56dd8267` 已入 master，fan-in 全量红）。两个根因：(1) AC9 硬约束违反——实测 627s >> 416s 上限（引擎组 31 文件在默认组里运行，proposal-convergence ~63s + it0-dod-check ~60s 太重）；(2) runner-grouping.test.mjs 3 失败——EXPECTED_ENGINE=58 硬编码，但 B3-1 的 gate-dispatch-coverage.test.mjs 在 B3-2 worktree 创建后并入 master 且默认 engine，把真实计数推到 59。处置待人工：修 AC9（引擎组太重，需机制级改动）或回退 merge |
-| 用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务 | todo（用户手工提交，非本批范围） |
+| 用户新建 `fa0500ad`/`0f0c8d10` 两个 test-suite-cost 任务 | todo（用户手工提交，非本批范围；AC9 有序目标的达成依赖它们） |
+| 揭示的既有失败 | 3 engine（symlink-mirror ×2 + enforcement-with-design ×1）+ 3 governance（chart2-s2）—— 记录为发现，需另行建任务跟踪修复 |
 
 ## 本批最终状态
 
 - 已合并且全量绿：B2-0..B3-1（5 个）
-- **B3-2 合并但全量红 → needs-human**（67.8m，telemetry 首条）
-- 计量已接线：`--task-start`/`--task-end`/`--report` 首次工作（aggregate 已提交 `b1e51244`）
+- **B3-2 合并 + 三步处置后 done**（机制完整，AC/DoD 全勾；全量 627s 为 AC9 过渡态）
+- 计量已接线：`--task-start`/`--task-end`/`--report` 首次工作（B3-2 67.8m needs-human → done；aggregate 已提交）
+- **两条 tick 常设规则已落地**（`bc57d318`）：fan-in 前必须 rebase master；测试不得硬编码全局计数（runner-grouping 已按此改造）
 
 ## 正交性决策（已执行，2026-08-02 实测）
 
