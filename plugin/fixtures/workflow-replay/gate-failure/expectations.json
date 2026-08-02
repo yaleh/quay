@@ -13,7 +13,7 @@
     },
     {
       "id": "gf-002",
-      "description": "Gate failure blocks reconcile and land",
+      "description": "Gate failure blocks Reconcile and Land",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
@@ -37,13 +37,13 @@
     },
     {
       "id": "gf-004",
-      "description": "Terminal phase is gate",
+      "description": "Terminal phase is Gate",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "outcomePhaseEquals",
         "args": {
-          "expectedPhase": "gate"
+          "expectedPhase": "Gate"
         }
       },
       "expected": true

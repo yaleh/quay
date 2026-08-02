@@ -2,19 +2,19 @@
   "assertions": [
     {
       "id": "lss-001",
-      "description": "Phase sequence verify->prepared->build->audit->gate->land",
+      "description": "Phase sequence Verify->Prepared->Build->Audit->Gate->Land",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "phaseSequenceEquals",
         "args": {
           "sequence": [
-            "verify",
-            "prepared",
-            "build",
-            "audit",
-            "gate",
-            "land"
+            "Verify",
+            "Prepared",
+            "Build",
+            "Audit",
+            "Gate",
+            "Land"
           ]
         }
       },
@@ -28,21 +28,21 @@
       "check": {
         "predicate": "stageOrderedBefore",
         "args": {
-          "A": "build",
-          "B": "audit"
+          "A": "Build",
+          "B": "Audit"
         }
       },
       "expected": true
     },
     {
       "id": "lss-TAMPERED",
-      "description": "Build dispatches 2 agents (DELIBERATELY WRONG \u2014 actual is 1)",
+      "description": "Build dispatches 2 agents (DELIBERATELY WRONG — actual is 1)",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "agentCountForStage",
         "args": {
-          "stage": "build",
+          "stage": "Build",
           "count": 2
         }
       },
@@ -70,7 +70,7 @@
       "check": {
         "predicate": "agentCountForStage",
         "args": {
-          "stage": "verify",
+          "stage": "Verify",
           "count": 5
         }
       },

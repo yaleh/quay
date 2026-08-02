@@ -2,19 +2,19 @@
   "assertions": [
     {
       "id": "lss-001",
-      "description": "Phase sequence is verify->prepared->build->audit->gate->land",
+      "description": "Phase sequence is Verify->Prepared->Build->Audit->Gate->Land",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "phaseSequenceEquals",
         "args": {
           "sequence": [
-            "verify",
-            "prepared",
-            "build",
-            "audit",
-            "gate",
-            "land"
+            "Verify",
+            "Prepared",
+            "Build",
+            "Audit",
+            "Gate",
+            "Land"
           ]
         }
       },
@@ -28,8 +28,8 @@
       "check": {
         "predicate": "stageOrderedBefore",
         "args": {
-          "A": "build",
-          "B": "audit"
+          "A": "Build",
+          "B": "Audit"
         }
       },
       "expected": true
@@ -42,8 +42,8 @@
       "check": {
         "predicate": "stageOrderedBefore",
         "args": {
-          "A": "audit",
-          "B": "land"
+          "A": "Audit",
+          "B": "Land"
         }
       },
       "expected": true
@@ -56,21 +56,21 @@
       "check": {
         "predicate": "stageOrderedBefore",
         "args": {
-          "A": "audit",
-          "B": "gate"
+          "A": "Audit",
+          "B": "Gate"
         }
       },
       "expected": true
     },
     {
       "id": "lss-005",
-      "description": "No reconcile phase (width-1 skip)",
+      "description": "No Reconcile phase (width-1 skip)",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "reconcile"
+          "stage": "Reconcile"
         }
       },
       "expected": true
@@ -136,7 +136,7 @@
       "check": {
         "predicate": "agentCountForStage",
         "args": {
-          "stage": "verify",
+          "stage": "Verify",
           "count": 5
         }
       },
@@ -149,25 +149,25 @@
     "workflowCommit": "74fe7791",
     "baseline": {
       "phaseSequence": [
-        "verify",
-        "prepared",
-        "build",
-        "audit",
-        "gate",
-        "land"
+        "Verify",
+        "Prepared",
+        "Build",
+        "Audit",
+        "Gate",
+        "Land"
       ],
       "agentCounts": {
-        "verify": 5,
-        "prepared": 1,
-        "build": 1,
-        "audit": 1,
-        "gate": 1,
-        "land": 1
+        "Verify": 5,
+        "Prepared": 1,
+        "Build": 1,
+        "Audit": 1,
+        "Gate": 1,
+        "Land": 1
       },
       "outcome": {
         "outcome": "done",
         "reason": null,
-        "phase": "land"
+        "phase": "Land"
       },
       "sharedStateMutations": [
         ".quay/gate-events.jsonl",

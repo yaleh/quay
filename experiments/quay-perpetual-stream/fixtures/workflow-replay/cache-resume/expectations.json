@@ -8,7 +8,7 @@
       "check": {
         "predicate": "hasStage",
         "args": {
-          "stage": "verify"
+          "stage": "Verify"
         }
       },
       "expected": true
@@ -21,7 +21,7 @@
       "check": {
         "predicate": "fieldEquals",
         "args": {
-          "stage": "verify",
+          "stage": "Verify",
           "field": "source",
           "expectedValue": "cache"
         }
@@ -43,13 +43,13 @@
     },
     {
       "id": "cr-004",
-      "description": "Prepared phase passes cached receipt",
+      "description": "Prepared phase passes cached Receipt",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "hasStage",
         "args": {
-          "stage": "prepared"
+          "stage": "Prepared"
         }
       },
       "expected": true
@@ -63,7 +63,7 @@
       "check": {
         "predicate": "agentCountForStage",
         "args": {
-          "stage": "verify",
+          "stage": "Verify",
           "count": 6
         }
       },

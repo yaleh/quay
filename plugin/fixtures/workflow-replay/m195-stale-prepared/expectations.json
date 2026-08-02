@@ -2,7 +2,7 @@
   "assertions": [
     {
       "id": "m195-001",
-      "description": "Verify completes >=5 checks before Prepared fires (cost paid before gate)",
+      "description": "Verify completes >=5 checks before Prepared fires (cost paid before Gate)",
       "classification": "known-defect",
       "internalCategory": "compatibility-only",
       "mappingNote": "compatibility-only => known-defect: baseline for DIR-124-C reorder; correct-by-design",
@@ -59,7 +59,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "land"
+          "stage": "Land"
         }
       },
       "expected": true

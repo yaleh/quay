@@ -42,6 +42,10 @@ const VALID_CLASSIFICATIONS = ["normative","compatibility-only","known-defect"];
 const VALID_INTERNAL_CATEGORIES = ["normative","compatibility-only","observed-but-undesired","explicitly-open-defect"];
 
 type PredicateFn = (events: StageEvent[], args: Record<string, unknown>) => unknown;
+// `"workflow-runner"` is the A1a canonical sentinel for pre-agent stage boundaries (stage-start
+// events), NOT an agent dispatch. Agent aggregation (counts, scheduling decisions, dispatch-count
+// predicates) must exclude it so the boundary marker does not inflate agent tallies.
+const isAgent = (l: string | null | undefined): boolean => !!l && l !== "workflow-runner";
 const PREDICATES: Record<string, PredicateFn> = {
   stageOrderedBefore(events, args) {
     const a = String(args.A), b = String(args.B);
@@ -52,7 +56,7 @@ const PREDICATES: Record<string, PredicateFn> = {
   },
   agentCountForStage(events, args) {
     const stage = String(args.stage), count = args.count as number;
-    const labels = new Set(events.filter(e => e.stage === stage && e.agentLabel).map(e => e.agentLabel!));
+    const labels = new Set(events.filter(e => e.stage === stage && isAgent(e.agentLabel)).map(e => e.agentLabel!));
     return labels.size === count ? true : labels.size;
   },
   fieldEquals(events, args) {
@@ -119,69 +123,69 @@ const PREDICATES: Record<string, PredicateFn> = {
     return terminal.stage === expected ? true : terminal.stage;
   },
   landMergeOccurs(events, _args) {
-    const landEnd = events.find(e => e.stage === "land" && e.outcome != null);
+    const landEnd = events.find(e => e.stage === "Land" && e.outcome != null);
     if (!landEnd) return "no land end event";
     return landEnd.outcome === "done" && landEnd.candidateCommit != null ? true : `outcome=${landEnd.outcome}, commit=${landEnd.candidateCommit}`;
   },
   reconcilePhaseExists(events, _args) {
-    return events.some(e => e.stage === "reconcile") ? true : "reconcile phase not found";
+    return events.some(e => e.stage === "Reconcile") ? true : "reconcile phase not found";
   },
   worktreeCreatedInBuild(events, _args) {
-    const evt = events.find(e => e.stage === "build" && e.worktreePath != null);
+    const evt = events.find(e => e.stage === "Build" && e.worktreePath != null);
     return evt != null ? true : "no build event with worktreePath";
   },
   gateFailureBlocksReconcileLand(events, _args) {
-    const gf = events.find(e => e.stage === "gate" && e.outcome === "needs-human");
+    const gf = events.find(e => e.stage === "Gate" && e.outcome === "needs-human");
     if (!gf) return "no gate failure";
     const idx = events.indexOf(gf);
-    const hasR = events.slice(idx+1).some(e => e.stage === "reconcile");
-    const hasL = events.slice(idx+1).some(e => e.stage === "land");
+    const hasR = events.slice(idx+1).some(e => e.stage === "Reconcile");
+    const hasL = events.slice(idx+1).some(e => e.stage === "Land");
     return !hasR && !hasL ? true : `reconcile=${hasR}, land=${hasL}`;
   },
   landLockHeld(events, _args) {
-    const evts = events.filter(e => e.stage === "land");
+    const evts = events.filter(e => e.stage === "Land");
     return evts.length >= 2 ? true : `only ${evts.length} land events`;
   },
   survivorMilestoneCounterAdvanced(events, _args) {
-    return events.some(e => e.stage === "land" && e.outcome === "done") ? true : "no done land event";
+    return events.some(e => e.stage === "Land" && e.outcome === "done") ? true : "no done land event";
   },
   buildPhaseHasNoAgentOutcome(events, _args) {
-    const bld = events.filter(e => e.stage === "build");
+    const bld = events.filter(e => e.stage === "Build");
     return bld.some(e => e.outcome == null) && bld.some(e => e.outcome != null) ? true : `build events=${bld.length}`;
   },
   auditAfterNullBuild(events, _args) {
-    const bIdx = events.findIndex(e => e.stage === "build"), aIdx = events.findIndex(e => e.stage === "audit");
+    const bIdx = events.findIndex(e => e.stage === "Build"), aIdx = events.findIndex(e => e.stage === "Audit");
     if (bIdx === -1) return "no build"; if (aIdx === -1) return "no audit";
     return aIdx > bIdx ? true : "audit not after build";
   },
   verifyBeforePrepared(events, _args) {
-    const vIdx = events.findIndex(e => e.stage === "verify"), pIdx = events.findIndex(e => e.stage === "prepared");
+    const vIdx = events.findIndex(e => e.stage === "Verify"), pIdx = events.findIndex(e => e.stage === "Prepared");
     if (vIdx === -1) return "no verify"; if (pIdx === -1) return "no prepared";
     return vIdx < pIdx ? true : "verify not before prepared";
   },
   verifyHasAgentDispatches(events, args) {
     const min = args.min as number;
-    const n = events.filter(e => e.stage === "verify" && e.agentLabel).length;
+    const n = events.filter(e => e.stage === "Verify" && isAgent(e.agentLabel)).length;
     return n >= min ? true : `expected >=${min}, got ${n}`;
   },
   preparedOutcomeEquals(events, args) {
     const expected = args.expectedOutcome as string;
-    const evt = events.find(e => e.stage === "prepared" && e.outcome != null);
+    const evt = events.find(e => e.stage === "Prepared" && e.outcome != null);
     if (!evt) return "no prepared end event";
     return evt.outcome === expected ? true : evt.outcome;
   },
   noBuildAfterPreparedFailure(events, _args) {
-    const idx = events.findIndex(e => e.stage === "prepared" && e.outcome === "revision-needed");
+    const idx = events.findIndex(e => e.stage === "Prepared" && e.outcome === "revision-needed");
     if (idx === -1) return "no prepared failure";
-    return !events.slice(idx+1).some(e => e.stage === "build") ? true : "build after prepared failure";
+    return !events.slice(idx+1).some(e => e.stage === "Build") ? true : "build after prepared failure";
   },
   auditCompletesBeforeLand(events, _args) {
-    const aIdx = events.findIndex(e => e.stage === "audit"), lIdx = events.findIndex(e => e.stage === "land");
+    const aIdx = events.findIndex(e => e.stage === "Audit"), lIdx = events.findIndex(e => e.stage === "Land");
     if (aIdx === -1) return "no audit"; if (lIdx === -1) return "no land";
     return aIdx < lIdx ? true : "audit not before land";
   },
   gateRunsAfterAudit(events, _args) {
-    const aIdx = events.findIndex(e => e.stage === "audit"), gIdx = events.findIndex(e => e.stage === "gate");
+    const aIdx = events.findIndex(e => e.stage === "Audit"), gIdx = events.findIndex(e => e.stage === "Gate");
     if (aIdx === -1) return "no audit"; if (gIdx === -1) return "no gate";
     return gIdx > aIdx ? true : "gate not after audit";
   },
@@ -208,7 +212,7 @@ function buildStateVector(events: StageEvent[]): StateVector {
   const agentLabelsPerStage = new Map<string, Set<string>>();
   for (const e of events) {
     if (!seen.has(e.stage)) { seen.add(e.stage); phaseSequence.push(e.stage); }
-    if (e.agentLabel) {
+    if (isAgent(e.agentLabel)) {
       if (!agentLabelsPerStage.has(e.stage)) agentLabelsPerStage.set(e.stage, new Set());
       agentLabelsPerStage.get(e.stage)!.add(e.agentLabel);
     }
@@ -220,7 +224,7 @@ function buildStateVector(events: StageEvent[]): StateVector {
   const allWrites = new Set<string>();
   for (const e of events) { if (e.observedWrites) for (const w of e.observedWrites) allWrites.add(w); }
   const scheduling = new Set<string>();
-  for (const e of events) { if (e.agentLabel) scheduling.add(e.agentLabel); }
+  for (const e of events) { if (isAgent(e.agentLabel)) scheduling.add(e.agentLabel); }
   return { phaseSequence, agentCounts, outcome, sharedStateMutations: [...allWrites].sort(), schedulingDecisions: [...scheduling].sort() };
 }
 

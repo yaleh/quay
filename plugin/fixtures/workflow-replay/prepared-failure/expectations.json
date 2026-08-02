@@ -31,7 +31,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "audit"
+          "stage": "Audit"
         }
       },
       "expected": true
@@ -44,7 +44,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "land"
+          "stage": "Land"
         }
       },
       "expected": true
@@ -64,7 +64,7 @@
     },
     {
       "id": "pf-006",
-      "description": "Verify has >=5 agent dispatches (cost paid before gate)",
+      "description": "Verify has >=5 agent dispatches (cost paid before Gate)",
       "classification": "compatibility-only",
       "internalCategory": "compatibility-only",
       "mappingNote": "cost-signal baseline",

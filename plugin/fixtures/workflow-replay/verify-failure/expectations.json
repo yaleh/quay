@@ -8,7 +8,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "build"
+          "stage": "Build"
         }
       },
       "expected": true
@@ -21,7 +21,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "prepared"
+          "stage": "Prepared"
         }
       },
       "expected": true
@@ -34,7 +34,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "audit"
+          "stage": "Audit"
         }
       },
       "expected": true
@@ -47,7 +47,7 @@
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "land"
+          "stage": "Land"
         }
       },
       "expected": true
@@ -67,13 +67,13 @@
     },
     {
       "id": "vf-006",
-      "description": "Terminal phase is verify",
+      "description": "Terminal phase is Verify",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "outcomePhaseEquals",
         "args": {
-          "expectedPhase": "verify"
+          "expectedPhase": "Verify"
         }
       },
       "expected": true
@@ -87,7 +87,7 @@
       "check": {
         "predicate": "hasStage",
         "args": {
-          "stage": "verify"
+          "stage": "Verify"
         }
       },
       "expected": true

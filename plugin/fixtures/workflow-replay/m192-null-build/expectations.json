@@ -2,7 +2,7 @@
   "assertions": [
     {
       "id": "m192-001",
-      "description": "Build phase has events without agent outcome (null passthrough \u2014 mixed outcomes)",
+      "description": "Build phase has events without agent outcome (null passthrough — mixed outcomes)",
       "classification": "known-defect",
       "internalCategory": "observed-but-undesired",
       "mappingNote": "observed-but-undesired => known-defect: null outcome from crashed agent passed through pre-M208 gate",
@@ -33,7 +33,7 @@
       "check": {
         "predicate": "hasStage",
         "args": {
-          "stage": "gate"
+          "stage": "Gate"
         }
       },
       "expected": true

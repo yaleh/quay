@@ -37,26 +37,26 @@
     },
     {
       "id": "ar-004",
-      "description": "Terminal phase is land (Land short-circuits)",
+      "description": "Terminal phase is Land (Land short-circuits)",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "outcomePhaseEquals",
         "args": {
-          "expectedPhase": "land"
+          "expectedPhase": "Land"
         }
       },
       "expected": true
     },
     {
       "id": "ar-005",
-      "description": "No reconcile (width-1)",
+      "description": "No Reconcile (width-1)",
       "classification": "normative",
       "internalCategory": "normative",
       "check": {
         "predicate": "stageSkipped",
         "args": {
-          "stage": "reconcile"
+          "stage": "Reconcile"
         }
       },
       "expected": true

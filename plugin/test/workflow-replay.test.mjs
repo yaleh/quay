@@ -32,7 +32,7 @@ describe("legacy-singleton-success", () => {
   it("phase sequence matches baseline", () => {
     const r = runWorkflowReplay(fp("legacy-singleton-success"));
     const seq = r.stateVector.phaseSequence;
-    assert.deepEqual(seq, ["verify","prepared","build","audit","gate","land"]);
+    assert.deepEqual(seq, ["Verify","Prepared","Build","Audit","Gate","Land"]);
   });
 });
 
@@ -149,11 +149,38 @@ describe("determinism", () => {
   });
 });
 
+describe("baseline invariance (AC3)", () => {
+  it("state vector matches meta.baseline across all 5 dimensions", () => {
+    const r = runWorkflowReplay(fp("legacy-singleton-success"));
+    const manifest = JSON.parse(fs.readFileSync(path.join(fp("legacy-singleton-success"), "expectations.json"), "utf8"));
+    const baseline = manifest.meta.baseline;
+    assert.deepEqual(r.stateVector.phaseSequence, baseline.phaseSequence, "phaseSequence");
+    assert.deepEqual(r.stateVector.agentCounts, baseline.agentCounts, "agentCounts");
+    assert.deepEqual(r.stateVector.outcome, baseline.outcome, "outcome");
+    assert.deepEqual(r.stateVector.sharedStateMutations, baseline.sharedStateMutations, "sharedStateMutations");
+    assert.deepEqual(r.stateVector.schedulingDecisions, baseline.schedulingDecisions, "schedulingDecisions");
+  });
+});
+
+// A minimal A1a-v1-schema-conformant StageEvent, so the schema-validation tests exercise the
+// exact failure path they name (bad version / missing field / bad classification) instead of
+// being rejected for the unrelated drift (lowercase stage, missing recordedAtMs/endedAtMs).
+function minimalValidEvent(overrides = {}) {
+  return JSON.stringify(Object.assign({
+    schemaVersion: "1", runId: "x", candidateId: "x", taskId: "x", stage: "Verify",
+    attempt: 1, timing: { queuedAtMs: 1, startedAtMs: 1, endedAtMs: null },
+    agentLabel: "workflow-runner", commandIdentity: null, executionCwd: "/tmp",
+    worktreePath: null, baseCommit: null, candidateCommit: null, outcome: null,
+    waitReason: null, resourceClaim: null, observedWrites: [], isolationMode: null,
+    dispatchMode: null, recordedAtMs: 1,
+  }, overrides));
+}
+
 describe("schema validation", () => {
   it("bad schema version is rejected", () => {
     const tmp = path.join(FIXTURES_DIR, "_tmp-bad-schema");
     fs.mkdirSync(tmp, { recursive: true });
-    fs.writeFileSync(path.join(tmp, "events.jsonl"), '{"schemaVersion":"99","runId":"x","candidateId":"x","taskId":"x","stage":"verify","attempt":1,"timing":{"queuedAtMs":1,"startedAtMs":1}}\n');
+    fs.writeFileSync(path.join(tmp, "events.jsonl"), minimalValidEvent({ schemaVersion: "99" }) + "\n");
     fs.writeFileSync(path.join(tmp, "expectations.json"), '{"assertions":[]}');
     const r = runWorkflowReplay(tmp);
     assert.ok(!r.ok || r.errors.length > 0, `bad schema rejected, got ${r.verdict}`);
@@ -163,7 +190,9 @@ describe("schema validation", () => {
   it("missing required field is rejected", () => {
     const tmp = path.join(FIXTURES_DIR, "_tmp-missing-field");
     fs.mkdirSync(tmp, { recursive: true });
-    fs.writeFileSync(path.join(tmp, "events.jsonl"), '{"schemaVersion":"1"}\n');
+    const e = JSON.parse(minimalValidEvent());
+    delete e.recordedAtMs; // the A1a v1 mandatory field this corpus restore is about
+    fs.writeFileSync(path.join(tmp, "events.jsonl"), JSON.stringify(e) + "\n");
     fs.writeFileSync(path.join(tmp, "expectations.json"), '{"assertions":[]}');
     const r = runWorkflowReplay(tmp);
     assert.ok(!r.ok || r.errors.length > 0, `missing fields rejected, got ${r.verdict}`);
@@ -173,10 +202,11 @@ describe("schema validation", () => {
   it("unknown classification label is rejected", () => {
     const tmp = path.join(FIXTURES_DIR, "_tmp-bad-class");
     fs.mkdirSync(tmp, { recursive: true });
-    fs.writeFileSync(path.join(tmp, "events.jsonl"), '{"schemaVersion":"1","runId":"x","candidateId":"x","taskId":"x","stage":"verify","attempt":1,"timing":{"queuedAtMs":1,"startedAtMs":1}}\n');
-    fs.writeFileSync(path.join(tmp, "expectations.json"), JSON.stringify({assertions:[{id:"a1",description:"t",classification:"invalid-label",internalCategory:"normative",check:{predicate:"hasStage",args:{stage:"verify"}},expected:true}]}));
+    fs.writeFileSync(path.join(tmp, "events.jsonl"), minimalValidEvent() + "\n");
+    fs.writeFileSync(path.join(tmp, "expectations.json"), JSON.stringify({assertions:[{id:"a1",description:"t",classification:"invalid-label",internalCategory:"normative",check:{predicate:"hasStage",args:{stage:"Verify"}},expected:true}]}));
     const r = runWorkflowReplay(tmp);
-    assert.ok(!r.ok || r.errors.length > 0, `bad classification rejected, got ${r.verdict}`);
+    assert.equal(r.verdict, "expectations-invalid", `bad classification rejected, got ${r.verdict}`);
+    assert.ok(!r.ok, "bad classification -> !ok");
     fs.rmSync(tmp, { recursive: true });
   });
 });
