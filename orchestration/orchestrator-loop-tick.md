@@ -52,6 +52,15 @@ tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{p
 CronCreate(cron="*/20 * * * *", prompt="执行 orchestration/orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
 ```
 
+**4b. 重挂 Monitor —— 和 cron 一样是会话内的**
+
+`Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询：
+
+```
+Monitor({command: "/home/yale/work/quay/orchestration/watch/inner-state.sh",
+         description: "内层状态转变", persistent: true, timeout_ms: 3600000})
+```
+
 **5. 核对前置条件**
 
 `.halt` 是否还在、套件是否绿、内层 loop 是否已启动。见目标任务的 AC1–AC6。
@@ -126,6 +135,29 @@ tmux capture-pane -p -t quay-0:0.0 | md5sum      # 两次相同 = 空闲
 
 **d) cron 只在本会话空闲时触发。** 外层正在和人对话时，`*/20` 的 tick 不会 fire。人机对话期间外层
 事实上是停的——所以**每次对话结束前手动补一次 tick**，不要假设 cron 会接上。
+
+### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
+
+20 分钟 tick 的盲区是**内层停摆后的等待时间**。`orchestration/watch/inner-state.sh` 只在**状态
+转变**时发声，挂成 `persistent` Monitor：
+
+| 事件 | 含义 |
+|---|---|
+| `IDLE` | 在飞任务清空 —— 内层可能在等裁定 |
+| `START` | 在飞集合变化 —— 新一批开工 |
+| `OVER90` | 单任务超 90 分钟 —— 内层自己的停摆阈值 |
+| `ORPHAN` | 有 `--task-start` 无 `--task-end` |
+| `RISKY` | master 出现 revert / `--ours` / `--theirs` / force 类提交 |
+
+**它买什么、不买什么**（2026-08-02 实测得出，别搞混）：
+
+- **买的是死时间**。它把「内层停下等裁定」到「外层发现」的延迟从最多 20 分钟压到 ~1 分钟
+- **不买纠偏质量**。同期四次 `correct` 没有一次是延迟受限的——它们受限于视角，见步骤 2 的
+  「外层的价值来自视角」。**更快的监测不会让外层看得更准**
+
+**已知盲区**：`IDLE` 只是「无在飞任务」的代理，不是内层真的在等裁定。修复类工作（如 M243 抢救）
+跑在 `--task-start`/`--task-end` 之外，遥测看不见，此时内层在忙而信号显示 IDLE。真正的信号要内层
+主动写——见 [[gap-no-explicit-blocked-signal-from-inner-layer]]。
 
 ### 1. 观察（只读，不动手）
 
