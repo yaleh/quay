@@ -1,0 +1,1 @@
+../../../plugin/scripts/gate-dispatch-coverage.ts
