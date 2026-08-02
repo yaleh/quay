@@ -6,8 +6,8 @@
 // tree-hygiene/worktree-branch-hygiene/audit-independence checks into this MECHANICAL gate).
 //
 // Given a milestone id, a charter file path, and an ABSORB-entry text file (a fixture standing in
-// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 14 DoD
-// clauses (0-13) defined in `inherited-core.md`'s "Definition of Done" section:
+// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 15 DoD
+// clauses (0-14) defined in `inherited-core.md`'s "Definition of Done" section:
 //   1. Adversarial-audit gate  — documentation-discipline check only (does NOT re-run the audit
 //      subagent or re-derive its verdict): does the ABSORB-entry text contain an explicit
 //      disposition statement for this gate (a stated verdict, or an explicit "neither condition
@@ -79,7 +79,7 @@
 // below for the section-isolation logic that makes the combined-fixture shape safe.
 //
 // Exit codes:
-//   0 = all 14 gate clauses (0-13) PASS or legitimately N/A (with disposition present), AND no
+//   0 = all 15 gate clauses (0-14) PASS or legitimately N/A (with disposition present), AND no
 //       undeclared self-exemption found.
 //   1 = at least one gate clause FAILs, OR a self-exemption is found with no waiver line.
 //   2 = usage/environment error (missing args, files not found, node unavailable, sibling script

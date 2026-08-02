@@ -21,7 +21,7 @@ Select :: Board -> Task                                     -- OUTER-LOOP step 1
   SPLIT-OR-COMMIT (DIR-026): completable-in-one -> select; else split first
   schema stamp: extra.schema:"v1" + Proposal + Plan + AC + DoD (task-schema-check.sh)
 
-DoD :: Task x Charter x Evidence -> {PASS, FAIL}            -- 13 clauses (0-12)
+DoD :: Task x Charter x Evidence -> {PASS, FAIL}            -- 15 clauses (0-14)
   Clause 0: AC+DoD present, checklist-form, boxes unchecked at SELECT -> ticked ONLY by Audit
   Clause 1: adversarial acceptance audit (REFUTE-first, UNCONDITIONAL per milestone)
   Clause 2: V_meta consolidation-lag (vmeta-lag-check.ts, K=2 ALARM)
@@ -32,6 +32,8 @@ DoD :: Task x Charter x Evidence -> {PASS, FAIL}            -- 13 clauses (0-12)
   Clause 8: task canonical-lifecycle-record
   Clause 9: SPLIT-OR-COMMIT / needs-human legitimacy (external only)
   Clause 10: tree-hygiene; Clause 11: worktree-branch-hygiene; Clause 12: audit-independence
+  Clause 13: invariant-ownership (one authoritative owner per invariant; owner paths resolve)
+  Clause 14: workflow-metadata conformance (meta surface vs executable body, byte-identity)
   MECHANICAL: it0-dod-check.ts + quay gate (QENG engine) -- the SINGLE executable source
 
 Class-Route :: Task -> development | methodology            -- DIR-014 two-class policy
@@ -412,12 +414,12 @@ designOnlyImplRow(m) = if designOnlyMilestone(m) then
 ## Definition of DoD :: DoD
 
 ```
--- SINGLE executable source: scripts/it0-dod-check.ts (all 13 clauses).
+-- SINGLE executable source: scripts/it0-dod-check.ts (all 15 clauses, 0-14).
 -- Wired into OUTER-LOOP.md step 6 as HARD BLOCK on step 7's milestone_counter++.
 -- Fixture-pinned: scripts/dod-fixture-selfcheck.sh. QENG gate engine wraps it.
 -- AC/DoD live in the TASK, not the charter (DIR-020/M34). Checklist form (- [ ] / - [x]) MANDATED.
 
-MECHANICALLY_UNCONDITIONAL_CLAUSES = ["line-budget","impl-row","escrow-delta-v","test-floor"]
+MECHANICALLY_UNCONDITIONAL_CLAUSES = ["line-budget","impl-row","escrow-delta-v","test-floor","task-canonical-lifecycle-record","tree-hygiene","worktree-branch-hygiene","invariant-ownership","workflow-metadata-conformance"]
 
 clause0 :: Task -> {PASS, FAIL}
 clause0(t) = hasSection(t.body, "## Acceptance Criteria", nonEmpty)
@@ -487,6 +489,17 @@ clause12 :: ABSORBEntry -> {PASS, FAIL, N_A}
 clause12(entry) = if hasSection(entry, "## Audit-independence check")
   then verified(entry.artifactPath, entry.orchestratorId, audit-independence-check.ts)
   else N_A                                                               -- section absent -> documented no-op
+
+clause13 :: InvariantOwnershipManifest -> {PASS, FAIL}                   -- UNCONDITIONAL
+clause13(manifest) = ∀i ∈ manifest.invariants: oneAuthoritativeOwner(i, manifest)
+                     ∧ allOwnerPathsResolve(manifest)                    -- workflow-invariant-ownership.mjs
+exec: scripts/workflow-invariant-ownership.mjs
+
+clause14 :: InstalledWorkflows -> {PASS, FAIL}                           -- UNCONDITIONAL
+clause14(workflows) = ∀w ∈ workflows: metaMatchesBody(w)                 -- phase-set, outcome-claims, re-entry,
+                                                                         -- worktree-logic, node-invocation,
+                                                                         -- gate-count, cache/resume, byte-identity
+exec: scripts/workflow-metadata-conformance.mjs
 ```
 
 ---
