@@ -58,6 +58,75 @@ if [ "$#" -eq 0 ]; then
     exit 1
   fi
   exec node --test --test-concurrency=8 "${files[@]}"
+elif [ "${1:-}" = "--for-task" ]; then
+  # gap-test-selection-not-scoped-to-touches: mechanical per-task test selection. `scripts/test.sh
+  # --for-task <id>` delegates to select-tests-for-touches.ts (which resolves the task's ## Touches
+  # to a test set) and runs EXACTLY that set. Additive: the full-suite default and the explicit-file
+  # form above are unchanged. `--allow-thin` passes through to the selector (see its exit codes).
+  task_id="${2:-}"
+  if [ -z "${task_id}" ]; then
+    echo "scripts/test.sh: --for-task requires a task id" >&2
+    exit 2
+  fi
+  shift 2
+  allow_thin_flag=""
+  sel_mode="--paths-only"     # default: emit paths for test.sh to run
+  explicit_mode=""            # set when the user passed --json/--paths-only and wants output, not a run
+  rest_args=()
+  for a in "$@"; do
+    if [ "${a}" = "--allow-thin" ]; then
+      allow_thin_flag="--allow-thin"
+    elif [ "${a}" = "--json" ] || [ "${a}" = "--paths-only" ]; then
+      # Selector-only output modes. Forwarding them to `node --test` is a fatal "bad option" error;
+      # instead honor them as a "show me the selection" request: run the selector in that mode and
+      # print its output, never a test run.
+      sel_mode="${a}"
+      explicit_mode=1
+    else
+      rest_args+=("${a}")
+    fi
+  done
+  if sel_out="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/select-tests-for-touches.ts" --root "${repo_root}" --task "${task_id}" ${sel_mode} ${allow_thin_flag})"; then
+    sel_code=0
+  else
+    sel_code=$?
+  fi
+  if [ -n "${explicit_mode}" ]; then
+    # The user asked for the selector's output, not a test execution — print it and exit with the
+    # selector's own code (so `test-selection-thin` still surfaces non-zero).
+    printf '%s\n' "${sel_out}"
+    exit "${sel_code}"
+  fi
+  # A here-string always appends a newline, so `mapfile <<< ""` yields a 1-element [""] array — the
+  # empty case MUST be guarded on the string itself, not on the array length.
+  if [ -z "${sel_out}" ]; then
+    if [ "${sel_code}" -eq 2 ]; then
+      echo "scripts/test.sh: --for-task ${task_id} — selector could not resolve the task (exit 2)" >&2
+      exit 2
+    fi
+    if [ -n "${allow_thin_flag}" ]; then
+      # --allow-thin + zero tests to run: nothing to do, and the user explicitly accepted thin.
+      echo "scripts/test.sh: --for-task ${task_id} — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in" >&2
+      exit 0
+    fi
+    echo "scripts/test.sh: --for-task ${task_id} selected no test files (selector exit ${sel_code}); add --allow-thin to force" >&2
+    exit 1
+  fi
+  mapfile -t files <<< "${sel_out}"
+  # Run the selected set. A thin selector (sel_code != 0) still runs what was selected but the overall
+  # exit is non-zero — fail-loud under-selection must never be masked by a green test run.
+  set +e
+  # Pass-through flags (e.g. --test-name-pattern=X) must precede the file list: node --test only
+  # honors --test-name-pattern when it appears BEFORE the named files (after them it is ignored,
+  # which would run the whole file — and for this self-referential test, recurse).
+  node --test --test-concurrency=8 "${rest_args[@]}" "${files[@]}"
+  test_code=$?
+  set -e
+  if [ "${sel_code}" -ne 0 ]; then
+    echo "scripts/test.sh: --for-task ${task_id} — test-selection-thin (selector exit ${sel_code}); re-run with --allow-thin to suppress" >&2
+    exit "${sel_code}"
+  fi
+  exit "${test_code}"
 else
   exec node --test --test-concurrency=8 "$@"
 fi
