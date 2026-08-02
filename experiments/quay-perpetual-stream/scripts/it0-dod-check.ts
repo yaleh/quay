@@ -6,8 +6,8 @@
 // tree-hygiene/worktree-branch-hygiene/audit-independence checks into this MECHANICAL gate).
 //
 // Given a milestone id, a charter file path, and an ABSORB-entry text file (a fixture standing in
-// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 13 DoD
-// clauses (0-12) defined in `inherited-core.md`'s "Definition of Done" section:
+// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 14 DoD
+// clauses (0-13) defined in `inherited-core.md`'s "Definition of Done" section:
 //   1. Adversarial-audit gate  — documentation-discipline check only (does NOT re-run the audit
 //      subagent or re-derive its verdict): does the ABSORB-entry text contain an explicit
 //      disposition statement for this gate (a stated verdict, or an explicit "neither condition
@@ -79,7 +79,7 @@
 // below for the section-isolation logic that makes the combined-fixture shape safe.
 //
 // Exit codes:
-//   0 = all 13 gate clauses (0-12) PASS or legitimately N/A (with disposition present), AND no
+//   0 = all 14 gate clauses (0-13) PASS or legitimately N/A (with disposition present), AND no
 //       undeclared self-exemption found.
 //   1 = at least one gate clause FAILs, OR a self-exemption is found with no waiver line.
 //   2 = usage/environment error (missing args, files not found, node unavailable, sibling script
@@ -352,7 +352,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
   // 12 (audit-independence) is, by contrast, CONDITIONALLY dispositioned (like clauses 1/2) — it
   // legitimately N/A-passes when no audit ran this milestone — so it is NOT listed here, mirroring
   // clauses 1/2's own placement.
-  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record", "tree-hygiene", "worktree-branch-hygiene", "invariant-ownership"]);
+  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record", "tree-hygiene", "worktree-branch-hygiene", "invariant-ownership", "workflow-metadata-conformance"]);
   const clauseNames = [
     { key: "adversarial-audit", pattern: /adversarial[- ]audit/i },
     { key: "V_meta consolidation-lag", pattern: /V_meta consolidation[- ]lag|V_meta[- ]lag/i },
@@ -365,6 +365,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
     { key: "worktree-branch-hygiene", pattern: /worktree[- ]branch[- ]hygiene|worktree\/branch[- ]hygiene/i },
     { key: "audit-independence", pattern: /audit[- ]independence/i },
     { key: "invariant-ownership", pattern: /invariant[- ]ownership/i },
+    { key: "workflow-metadata-conformance", pattern: /workflow[- ]metadata[- ]conformance|workflow metadata/i },
   ];
   const outOfScopeMatch = charterText.match(/##+ Explicitly OUT of scope[\s\S]*?(\n##+ |$)/i);
   const outOfScopeText = outOfScopeMatch ? outOfScopeMatch[0] : "";
@@ -883,6 +884,39 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
       dispositionedClauses.add("invariant-ownership");
     } else {
       throw new DodCheckEnvError(`ERROR: workflow-invariant-ownership.mjs usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
+    }
+  }
+}
+
+// --- Clause 14: Workflow-metadata conformance (DIR-124-A4) — shell out to workflow-metadata-conformance.mjs ---
+// Mechanically compares each installed workflow's `export const meta` metadata surface against its
+// executable body (phase-set alignment, return-outcome claims, re-entry multiplicity, worktree
+// logic, node-invocation convention, gate-count, cache/resume, mirror-byte-identity). Runs
+// UNCONDITIONALLY every check (mirrors clauses 10/11/13's shape — always dispositioned, never
+// conditionally-skippable). Exit 0 = clean (PASS); exit 1 = >=1 FAIL (RED baseline — the metadata
+// fix task must turn it GREEN); exit 2 = usage/environment error surfaced as DodCheckEnvError.
+// The checker resolves the 4 real workflow files from its own script location (repo root), so it
+// works regardless of the caller's cwd (it0-dod-check.sh runs from the experiment root).
+{
+  const scriptPath = path.join(__dirname, "workflow-metadata-conformance.mjs");
+  if (!fs.existsSync(scriptPath)) {
+    throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
+  }
+  try {
+    const out = execFileSync("node", [scriptPath, "--json"], { encoding: "utf8" });
+    const parsed = JSON.parse(out);
+    passes.push(`clause14-workflow-metadata-conformance: PASS — ${parsed.files.length} workflow file(s), ${parsed.failures.length} FAIL(s), ${parsed.warnings.length} WARN(s)`);
+    dispositionedClauses.add("workflow-metadata-conformance");
+  } catch (e) {
+    const out = (e.stdout || "").toString().trim();
+    if (e.status === 1) {
+      let parsed = null;
+      try { parsed = JSON.parse(out); } catch (_) { /* parse failure handled below */ }
+      const failCount = parsed && Array.isArray(parsed.failures) ? parsed.failures.length : "?";
+      failures.push(`clause14-workflow-metadata-conformance: FAIL — ${failCount} FAIL(s): ${(parsed && Array.isArray(parsed.failures) ? parsed.failures.map((f) => `${f.file}: ${f.check}: ${f.detail}`).join("; ") : out.slice(0, 300))}`);
+      dispositionedClauses.add("workflow-metadata-conformance");
+    } else {
+      throw new DodCheckEnvError(`ERROR: workflow-metadata-conformance.mjs usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
     }
   }
 }
