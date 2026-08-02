@@ -40,7 +40,7 @@
 
 | 分支 | 状态 |
 |---|---|
-| **M243**（DIR-124-A2） | **STOP**：merge 后全量红 → 已 revert（`7b6e1100`）。根因：M243 corpus 用 2026-08-01 旧 stage 约定（verify/build/audit 小写 + 缺 recordedAtMs），与 B2-1 schema 演进（大写枚举 + recordedAtMs 必填）系统性冲突。分支保留（`e8b4d49e`），等人工裁定：批量升格 corpus 到新约定 / schema 兼容旧 stage / M243 推迟 |
+| **M243**（DIR-124-A2） | **B 回退**（时间盒内未恢复）。单一根因找到：`validateEvent` 返回 `.error` 非 `.errors`（runner bug，`095ddbf0` 已修）。但完整恢复 12 fixtures 还需修语料 5 类 A1a 差异（recordedAtMs/stage 大小写/endedAtMs/agentLabel/outcome），触及语义修复→时间盒出口。**revert `88e17bf2`**，master 绿。恢复时必须一并带回 `095ddbf0`（已记入 DIR-124-A2.md「恢复时必须一并带回的修复」节） |
 | M246（DIR-124-A5） | 待 M243 裁定后 |
 | M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
 
@@ -48,7 +48,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing`（外层建） | **优先级最高**：采集全部 157 文件 duration_ms 分布、算 Σduration/墙钟 vs 并发度 8、同 commit 连跑 3 次量噪声。**不做任何优化** |
+| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing`（外层建） | **master 绿后再派**（现 445s/0 fail 是干净基线）。采集 157 文件 duration_ms、Σ/墙钟 vs 并发 8、同 commit 3 次测噪声。不做优化 |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6：跑 readiness check（含 suite-green）→ READY 后 rm .halt + /loop | 前置 AC1-AC5 全满足后 |
 
