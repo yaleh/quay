@@ -2,7 +2,7 @@
 id: gap-gate-registration-vs-dispatch-unmeasured
 title: "15 gates registered, 6 dispatched by the live Gate phase — nothing
   measures the difference"
-status: todo
+status: done
 labels:
   - gap
   - defect
