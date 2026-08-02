@@ -40,9 +40,11 @@
 
 改完必用 `cmp -s A B && echo OK || echo DIFF` 验证。
 
-**测试基线。** `scripts/test.sh` 当前有 **18 个预先存在的失败**，全部在这些未受影响的表面：gate engine（M63 / Section 1 / Section 4 / DIR-120 Phase 2）、adr list（E3 A4）、sync-vendor（M136 / DIR-070-B）、execute-milestone worktree（GOLDEN REPLAY / WORKTREE MODE）、size-estimate。**不要去修它们**，它们不在本批任务范围内。你的任务只需保证：不新增失败。
+**测试基线必须是绿的。** 批次 0（下面第一组任务）的目标就是把 `scripts/test.sh` 修到 **0 失败**。在那之前不要开始批次 1。
 
-验证方法：改动前后各跑一次 `scripts/test.sh`，比较失败数。若增加了，是你引入的。
+理由：非零基线让「我是否弄坏了什么」变成对一个移动目标做计数差分，新失败会藏在旧失败里。基线绿了之后，**任何**失败都是真信号。
+
+批次 0 完成后，每个任务改动前后各跑一次 `scripts/test.sh`，期望值恒为 0。
 
 **测试文件放哪。** `scripts/test.sh` 的 glob 只覆盖 `packages/*/test/*.test.mjs` 和 `plugin/test/*.test.mjs`。放在 `experiments/quay-perpetual-stream/test/` 的测试**不会在 CI 跑**。需要 CI 覆盖就放 `plugin/test/`。若两处都放，注意 repo root 深度不同（`plugin/test/` 是 2 层，`experiments/.../test/` 是 3 层）——用向上查找标记目录的方式求根，别硬编码层数。
 
@@ -57,9 +59,48 @@
 
 **不要为了让测试通过而放宽断言。** 若已有测试与你的改动冲突，判断哪个是对的：若测试编码的是你正在改变的旧行为，改测试并在 commit message 说明；若测试是对的，改你的实现。
 
-## 任务清单（按此顺序）
+## 任务清单（严格按此顺序）
 
-### 1. `gap-extract-mechanism-claims-calibration` ⭐ 先做这个
+### 批次 0 — 先把项目搞干净（必须全部完成后才进批次 1）
+
+**0.1 `gap-green-test-baseline`** ⭐ 最先做
+
+`scripts/test.sh` 18 个失败 / 8 个根因，其中至少 4 组是**真实缺陷**：
+
+| 根因 | 失败数 | 是否真缺陷 |
+|---|---|---|
+| `tsc --noEmit` 2 个类型错误（`gate/config/loader.ts:178`、`mcp-handlers.ts:673`） | 3 | **是——产品类型错误** |
+| gate loader 新增 `srcFile` 字段，3 个 deepEqual 测试未更新 | 3 | 测试滞后 |
+| 诊断严重度 WARNING→ERROR，且**实现自相矛盾**（header 印 `(2 warnings)`，body 印 `ERROR:`） | 2 | **是——输出自相矛盾** |
+| `plugin/scripts/tree-hygiene-check.sh` 泄漏 `experiments/quay-perpetual-stream` 路径 | 2 | **是——破坏 plugin 可移植性** |
+| `sync-vendor.sh --check` 非零退出 | 1 | 可能与上同源 |
+| execute-milestone golden replay「phase sequence must be unchanged」 | 4 | **是——防漂移哨兵正在报警** |
+| `adr list --applies-to` | 2 | 待诊断 |
+| `prepare-milestone-size-estimate` | 1 | 待诊断 |
+
+最后一组之外，第 6 组尤其要重视：**golden replay 测试存在的唯一目的就是在 phase 序列被无意改动时失败。它正在失败。**把它当背景噪音就等于废掉这个机制。
+
+任务体已列出修复顺序和 12 条 AC。对每个根因：判断是**实现**还是**测试**编码了正确契约，修那一边，并在 commit message 说明这个判断。**绝不为了变绿而放宽断言。**
+
+**0.2 `gap-task-status-closeout-not-mechanized`**
+
+直接执行模式没有任务状态关闭步骤——已实测 7 个任务代码在树里但 status 仍是 `todo`（详见任务体表格）。后果：任务板谎报完成情况，调度读的就是这块板，已完成的任务可能被再次选中、准备、派发。
+
+做一个**检测器**（不是门禁）：`task-status-drift-check.ts`，扫描 todo/ready 任务，若其 AC 中声明的符号已在代码中出现且 Touches 文件全部存在，则报告 `status-drift-suspect` 供人工复核。永远退出 0，永远不写 `tasks/**`——`done` 还是 `ready` 取决于 AC 是否要求真实 dispatch，脚本判断不了。
+
+任务体明确说明了「不做阻塞门禁」的理由（假阳性必然存在，模糊信号上的硬门禁比它防的泄漏更糟）。
+
+**0.3 全量核对任务体与代码**
+
+跑 0.2 的检测器，复核输出。对每个 suspect：读代码确认，然后改 `status`（`done` 或 `ready`）。
+
+同时注意反向漂移——任务体描述与代码矛盾。已确认实例：`gap-planauthor-shape-rules-not-injected` 原本断言「stage 格式没注入 PlanAuthor」，读代码发现**早就注入了**（1482-1489 行），真正缺的是另外两个约束。发现此类矛盾时：**先修任务体，再实现**。
+
+---
+
+### 批次 1 — 机制修复（批次 0 全绿后才开始）
+
+**1.1 `gap-extract-mechanism-claims-calibration`** ⭐
 
 `extractMechanismClaims`（`experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts`）是收缩后 prepare 仅存三项机械确认之一的基础，当前**两个方向都错**。我已实测：
 
@@ -84,25 +125,25 @@ const { extractSection } = await import(`${R}/experiments/quay-perpetual-stream/
 
 任务体的 AC 已列出这 5 个校准目标。上表的实测数字请写进任务体作为 grounded fact。
 
-### 2. `DIR-124-F-plancheck`
+**1.2 `DIR-124-F-plancheck`**
 
 PlanCheck 输出 schema 从标量 `{findings: number}` 扩展为带 `classification` 的类型化数组。这是让 `planCheckNextAction` 的 blocking-only 判据发挥全部效力的前提——当前走标量回退路径。
 
-相关代码已落地：`proposal-convergence.ts` 的 `planCheckNextAction`，`.claude/workflows/prepare-milestone.js` 的 `_planCheckNextActionInline` 和 PlanCheck 循环（agent schema 已含 `blocking` 字段）。你要做的是让 `classification` 也типизирован并流到收据。
+相关代码已落地：`proposal-convergence.ts` 的 `planCheckNextAction`，`.claude/workflows/prepare-milestone.js` 的 `_planCheckNextActionInline` 和 PlanCheck 循环（agent schema 已含 `blocking` 字段）。你要做的是让 `classification` 也类型化，并让它流到收据。
 
-### 3. `DIR-124-A1b`
+**1.3 `DIR-124-A1b`**
 
 1 个机制：在 8 个阶段边界发射 stage event。A1a（`workflow-event-schema.mjs`）已完成，直接引用。任务体已重分类并补了 10 条 AC。
 
-### 4. `DIR-124-A4`
+**1.4 `DIR-124-A4`**
 
 1 个机制：`workflow-metadata-conformance.mjs` 一致性检查脚本 + DoD clause 13。任务体已补 11 条 AC。注意它的 8 个 WIRING-CLAIM 是同一脚本的实现细节，不是 8 个机制。
 
-### 5. `DIR-124-B1`
+**1.5 `DIR-124-B1`**
 
 RunIdentity 铸造。8 AC / 235 行。DIR-124-B 的 4 路拆分是正确拆分，B1 无依赖可直接做。
 
-### 6. `gap-build-evidence-manifest-missing`（status 已是 `ready`）
+**1.6 `gap-build-evidence-manifest-missing`**（status 已是 `ready`）
 
 余下 2 个机制（per-phase 证据消费、git 失败 fail-soft）。机制 1（输出路径）已在 `2b1d67c2` 提交。
 
@@ -112,7 +153,10 @@ RunIdentity 铸造。8 AC / 235 行。DIR-124-B 的 4 路拆分是正确拆分�
 
 ## 开始前
 
-先跑一次 `scripts/test.sh` 记下失败数作为基线（应该是 18）。然后从任务 1 开始。
+先跑一次 `scripts/test.sh`，确认失败数是 18（若不是，说明树已变动，先搞清为什么）。
+然后从 **0.1** 开始。
+
+**批次 0 未全绿之前不要进批次 1。** 这不是流程洁癖——非零基线下你无法判断自己是否引入了回归，而批次 1 要改的正是决定拆分与收敛的核心机制，最需要可靠信号。
 
 ---
 
