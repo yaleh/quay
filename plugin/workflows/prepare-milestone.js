@@ -8,7 +8,7 @@ export const meta = {
     { title: 'Adjudicate', detail: 'One agent reconciles the N proposals into ONE Proposal, writes it back to the task' },
     { title: 'ProposalReview', detail: 'DIR-125 bounded convergence: ONE full independent review, then (only if blocking findings remain) up to 2 (3 highRisk) focused-revise + delta-review rounds against a typed finding ledger, gated by a 45m/75m soft budget and a subsystem/mechanism/touch-set split checkpoint' },
     { title: 'PlanAuthor', detail: 'Authors docs/plans/M<NN>-<slug>.md mapping every AC to phases/stages' },
-    { title: 'PlanCheck', detail: 'Up to 3 rounds; independent (non-author) agent grounds-checks the Plan; success only at F_i=0' },
+    { title: 'PlanCheck', detail: 'Up to 3 rounds; independent (non-author) agent grounds-checks the Plan; converges at ZERO BLOCKING findings (non-blocking findings are dispositioned, not gating); stops early on diminishing returns when a round fails to shrink the blocking set' },
     { title: 'Receipt', detail: 'Writes milestones/M<NN>/preparation.json + proposal-ledger.json (derived verification receipt + finding ledger only)' },
   ],
 }
@@ -1018,6 +1018,24 @@ function _groupBlockingByRootCause() {
 }
 
 function _splitCheck() {
+  const verdict = _rawSplitTriggers()
+  // gap-recursive-guard-only-covers-multi-mechanism (2026-08-02): the wbsLevel guard applies to
+  // EVERY split trigger, not just split-multi-mechanism. Mirrors proposal-convergence.ts's
+  // checkSplitRecommendation wrapper. Runs AFTER trigger evaluation so it fires only when a split
+  // would actually have been recommended.
+  if (verdict.recommend === true && _wbsLevel >= 2) {
+    return {
+      recommend: true,
+      code: 'split-recursive-guard',
+      reason: `level-${_wbsLevel} leaf still triggers ${verdict.code} — upstream decomposition too shallow, needs human diagnosis before further split (original trigger: ${verdict.reason})`,
+      repairable: false,
+      originalCode: verdict.code,
+    }
+  }
+  return verdict
+}
+
+function _rawSplitTriggers() {
   // M206/M2: rootCauseKey-based clustering supersedes per-finding counting.
   const bySubsystem = _groupBlockingByRootCause()
   let repairable = true
@@ -1046,12 +1064,8 @@ function _splitCheck() {
     effectiveCount = _mechanismCount
   }
   if (Number.isFinite(effectiveCount) && effectiveCount > 2) {
-    // DIR-124-A1b (2026-08-01): a level-2+ leaf that still triggers split-multi-mechanism
-    // means upstream decomposition was too shallow — flag as recursive-guard (needs-human)
-    // rather than auto-splitting deeper.
-    if (_wbsLevel >= 2) {
-      return { recommend: true, code: 'split-recursive-guard', reason: `level-${_wbsLevel} leaf still multi-mechanism (${effectiveCount} > 2) — upstream decomposition too shallow, needs human diagnosis before further split`, repairable: false }
-    }
+    // The wbsLevel recursive guard is applied by the `_splitCheck` wrapper above, uniformly
+    // across all triggers (DIR-124-A1b was the motivating case).
     return { recommend: true, code: 'split-multi-mechanism', reason: `candidate contains ${effectiveCount} independently landable mechanisms (> 2)`, repairable: false }
   }
   return { recommend: false }
@@ -1452,6 +1466,21 @@ _recordPhaseBoundary('PlanAuthor', 0, await _renewLease('PlanAuthor', 0))
 const _slug = _taskId.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 const _planFile = `docs/plans/${_milestoneId}-${_slug}.md`
 
+// gap-planauthor-shape-rules-not-injected (2026-08-02): the stage FORMAT was already injected
+// below, but the two CONSTRAINTS that `PreflightPlan` actually rejects on were not — producing 46
+// PreflightPlan terminals against only 3 for the equivalently-shaped PreflightContent gate (which
+// runs BEFORE its agents). Both constraints are stated here, in the prompt, so a conforming plan
+// is written on the first attempt instead of authored-then-rejected.
+//   1. preflightTouchesMismatch(secondaryLabel:'plan-files') — every '- Files:' path must ALREADY
+//      appear in the task's '## Touches'.
+//   2. preflightInvalidPlanCommand — every '- Command:' must match prepare-admission-check.ts's
+//      _RUNNABLE_COMMAND_RE. The prefix list below is anti-drift-tested against that real regex.
+const _planShapeContract = `MECHANICAL PREFLIGHT CONSTRAINTS (prepare-admission-check.ts --preflight-plan rejects the Plan mechanically on either of these, BEFORE any Plan-check reviewer sees it):
+
+A. EVERY \`- Files:\` path must ALREADY be declared in the task's \`## Touches\` section. Naming a real file that the task body does not list is a rejection, not a correction — if a stage genuinely needs a file the task omits, add it to the task's \`## Touches\` via task_write FIRST, then name it in the Plan.
+
+B. EVERY \`- Command:\` must be a RUNNABLE command line, not a prose description. It must start with one of: \`node\`, \`npm\`, \`npx\`, \`bash\`, \`sh\`, \`git\`, \`scripts/\`, or a backtick. Prose such as "Verify the output matches" or "Run the test suite" is REJECTED — write \`scripts/test.sh path/to/file.test.mjs\` instead.`
+
 // gap-prepare-milestone-task-epoch-budget-reset: check BEFORE dispatching PlanAuthor.
 {
   const _epochCap = _checkEpochCapsInline(false)
@@ -1473,6 +1502,8 @@ MECHANICAL STAGE FORMAT (DIR-117 iteration-2 item 3 — milestone-preparation-ch
   - Command: <the RED/implementation/GREEN mechanical check to run, e.g. a test/build command — "Check:" is an accepted synonym>
 
 Every task AC item's index must appear in at least one stage's \`- AC:\` list, or the checked Plan will be rejected mechanically.
+
+${_planShapeContract}
 
 Write the file at ${_planFile}. Then update task ${_taskId}'s \`## Plan\` section (via \`task_write\`, splicing into the current body, preserving all other sections) to reference ${_planFile} (replacing any prior N/A/stale reference).
 
@@ -1532,6 +1563,25 @@ let _planCheckFindings = 1
 let _planCheckRound = 0
 const MAX_PLANCHECK_ROUNDS = 3
 const _planCheckSessions = []
+// gap-plancheck-blocking-only-convergence + gap-plancheck-no-diminishing-returns-exit
+// (2026-08-02): inline mirror of proposal-convergence.ts's `planCheckNextAction` (the workflow
+// DSL has no import capability — same constraint that produced `_normalizeExecuteArgsInline` and
+// `_checkEpochCapsInline`). Kept byte-for-logic identical to the .ts single source.
+let _planCheckBlocking = null      // typed blocking count when the reviewer supplies one
+let _planCheckPriorBlocking = null // previous round's blocking count, for the diminishing-returns exit
+let _planCheckTerminal = null      // {code, reason} when the loop stops on a non-success terminal
+function _planCheckNextActionInline({ round, findings, blocking, priorBlocking, maxRounds }) {
+  const typed = Number.isFinite(blocking)
+  const effective = typed ? blocking : findings
+  if (effective === 0) return { action: 'stop-plan-checked' }
+  if (typed && Number.isFinite(priorBlocking) && round >= 2 && blocking >= priorBlocking) {
+    return { action: 'stop-needs-human', code: 'plancheck-diminishing-returns', reason: `PlanCheck round ${round} did not reduce blocking findings (${priorBlocking} -> ${blocking}); further rounds will not converge` }
+  }
+  if (round >= maxRounds) {
+    return { action: 'stop-needs-human', code: 'plancheck-rounds-exceeded', reason: `Plan-check cap (${maxRounds}) exhausted with ${effective} ${typed ? 'blocking ' : ''}finding(s) still open` }
+  }
+  return { action: 'dispatch-plancheck-round' }
+}
 
 while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
   _planCheckRound += 1
@@ -1552,19 +1602,38 @@ Verify against the CURRENT repository: signatures, call sites, dependency order,
 
 ${_sessionIdInstruction}
 
-Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding>, sessionId: <your real session id>}.`,
+A finding is BLOCKING only if it would make the Plan unexecutable or wrong: a factually incorrect signature/path/command, a missing AC-to-stage mapping, a '- Files:' entry absent from the task's '## Touches', or a stage whose Command cannot verify its own AC. Wording, ordering preferences, optional extra tests, and cross-reference polish are NON-blocking.
+
+Return {findings: <integer count of ALL findings, 0 if none>, blocking: <integer count of BLOCKING findings only, 0 if none>, findingsDetail: <list each finding, marking each as BLOCKING or non-blocking>, sessionId: <your real session id>}.`,
     { label: `plan-check-round-${_planCheckRound}`, phase: 'PlanCheck',
-      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
+      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, blocking: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
   )
   _epochThisGenDispatches += 1
   _planCheckFindings = checkResult?.findings ?? 1
+  _planCheckBlocking = Number.isFinite(checkResult?.blocking) ? checkResult.blocking : null
   if (checkResult?.sessionId) _planCheckSessions.push(checkResult.sessionId)
-  if (_planCheckFindings === 0) {
-    log(`PlanCheck round ${_planCheckRound} PASSED — F_i=0.`)
+
+  const _pcAction = _planCheckNextActionInline({
+    round: _planCheckRound,
+    findings: _planCheckFindings,
+    blocking: _planCheckBlocking,
+    priorBlocking: _planCheckPriorBlocking,
+    maxRounds: MAX_PLANCHECK_ROUNDS,
+  })
+  if (_pcAction.action === 'stop-plan-checked') {
+    log(`PlanCheck round ${_planCheckRound} PASSED — ${_planCheckBlocking === null ? 'F_i=0' : `zero blocking findings (${_planCheckFindings} non-blocking noted)`}.`)
+    // The receipt records zero REMAINING blocking findings; non-blocking ones are dispositioned
+    // in findingsDetail and do not gate.
+    _planCheckFindings = 0
     break
   }
-  log(`PlanCheck round ${_planCheckRound}: ${_planCheckFindings} finding(s) — ${checkResult?.findingsDetail || ''}`)
-  if (_planCheckRound >= MAX_PLANCHECK_ROUNDS) break
+  log(`PlanCheck round ${_planCheckRound}: ${_planCheckFindings} finding(s)${_planCheckBlocking === null ? '' : ` (${_planCheckBlocking} blocking)`} — ${checkResult?.findingsDetail || ''}`)
+  _planCheckPriorBlocking = _planCheckBlocking
+  if (_pcAction.action === 'stop-needs-human') {
+    _planCheckTerminal = { code: _pcAction.code, reason: _pcAction.reason }
+    log(`PlanCheck stopping: ${_pcAction.code} — ${_pcAction.reason}`)
+    break
+  }
   // Revise: re-invoke the Plan author with the findings before the next round.
   await agent(
     `${_worktreeIsolationNote}Revise ${_planFile} (task ${_taskId}) to resolve these Plan-check findings, then re-write the file: ${checkResult?.findingsDetail || ''}`,
@@ -1575,9 +1644,14 @@ Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding
 }
 
 if (_planCheckFindings !== 0) {
-  log(`PlanCheck exhausted ${MAX_PLANCHECK_ROUNDS} rounds without reaching F_i=0.`)
-  await _releaseLeaseAndRecord('plancheck-rounds-exceeded', { terminalPhase: 'PlanCheck', outcome: 'revision-needed', reason: 'plancheck-rounds-exceeded', cacheable: false })
-  return { outcome: 'revision-needed', reason: 'plancheck-rounds-exceeded', phase: 'PlanCheck' }
+  // The terminal code comes from `_planCheckNextActionInline` — either the round cap
+  // (plancheck-rounds-exceeded) or the diminishing-returns exit. Defaults to the cap for the
+  // legacy path where the loop fell through without setting a terminal.
+  const _pcCode = _planCheckTerminal?.code || 'plancheck-rounds-exceeded'
+  const _pcReason = _planCheckTerminal?.reason || `PlanCheck exhausted ${MAX_PLANCHECK_ROUNDS} rounds without reaching zero blocking findings.`
+  log(`PlanCheck terminal: ${_pcCode} — ${_pcReason}`)
+  await _releaseLeaseAndRecord(_pcCode, { terminalPhase: 'PlanCheck', outcome: 'revision-needed', reason: _pcCode, cacheable: false })
+  return { outcome: 'revision-needed', reason: _pcCode, phase: 'PlanCheck', detail: _pcReason }
 }
 
 // ── Phase: Receipt ────────────────────────────────────────────────────────────────────

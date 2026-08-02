@@ -18,6 +18,7 @@ import {
   checkpointPath, buildReviewCheckpoint, validateReviewCheckpoint, classifyProposalDiff, noveltyScan,
   CHECKPOINT_SCHEMA_VERSION,
   epochPath, buildEpochRecord, checkEpochCaps, DEFAULT_EPOCH_POLICY, EPOCH_SCHEMA_VERSION,
+  scopeHash, splitScopeHash, decideSplitAdjudication, planCheckNextAction,
 } from "../scripts/proposal-convergence.ts";
 import { PREFLIGHT_POLICY_VERSION } from "../scripts/prepare-admission-check.ts";
 
@@ -191,16 +192,246 @@ test("checkSplitRecommendation: ALL-repairable subsystem cluster routes to focus
   assert.equal(r.repairable, true);
 });
 
-test("checkSplitRecommendation: NON-repairable subsystem cluster still returns split-subsystem-blocking-cluster", () => {
-  const ledger = upsertFindings([], [
-    { subsystem: "gate-engine", claimRef: "AC#1", summary: "a", blocking: true, repairable: false },
-    { subsystem: "gate-engine", claimRef: "AC#2", summary: "b", blocking: true, repairable: false },
-    { subsystem: "gate-engine", claimRef: "AC#3", summary: "c", blocking: true, repairable: false },
-  ], 0);
-  const r = checkSplitRecommendation({ ledger, wbsLevel: 2 });
+const NON_REPAIRABLE_CLUSTER = [
+  { subsystem: "gate-engine", claimRef: "AC#1", summary: "a", blocking: true, repairable: false },
+  { subsystem: "gate-engine", claimRef: "AC#2", summary: "b", blocking: true, repairable: false },
+  { subsystem: "gate-engine", claimRef: "AC#3", summary: "c", blocking: true, repairable: false },
+];
+
+test("checkSplitRecommendation: NON-repairable subsystem cluster at depth 0 returns split-subsystem-blocking-cluster", () => {
+  const ledger = upsertFindings([], NON_REPAIRABLE_CLUSTER, 0);
+  const r = checkSplitRecommendation({ ledger, wbsLevel: 0 });
   assert.equal(r.recommend, true);
   assert.equal(r.code, "split-subsystem-blocking-cluster");
   assert.equal(r.repairable, false);
+});
+
+// ── gap-recursive-guard-only-covers-multi-mechanism (2026-08-02) ────────────────────────────────
+// The wbsLevel>=2 guard applies to EVERY split trigger, not only split-multi-mechanism.
+
+test("recursive guard: depth 2 + NON-repairable subsystem cluster returns split-recursive-guard (AC1)", () => {
+  const ledger = upsertFindings([], NON_REPAIRABLE_CLUSTER, 0);
+  const r = checkSplitRecommendation({ ledger, wbsLevel: 2 });
+  assert.equal(r.recommend, true);
+  assert.equal(r.code, "split-recursive-guard");
+  assert.equal(r.repairable, false);
+  assert.equal(r.originalCode, "split-subsystem-blocking-cluster");
+  // The originating trigger's reason survives as diagnostic context.
+  assert.match(r.reason, /gate-engine/);
+});
+
+test("recursive guard: depth 2 + oversized touch set returns split-recursive-guard (AC2)", () => {
+  const r = checkSplitRecommendation({ ledger: [], touchSetSize: 12, smallMilestoneTouchBoundary: 8, wbsLevel: 2 });
+  assert.equal(r.recommend, true);
+  assert.equal(r.code, "split-recursive-guard");
+  assert.equal(r.originalCode, "split-touch-set-too-large");
+});
+
+test("recursive guard: depth 3 + multi-mechanism returns split-recursive-guard (AC3)", () => {
+  const r = checkSplitRecommendation({ ledger: [], mechanismCount: 4, wbsLevel: 3 });
+  assert.equal(r.recommend, true);
+  assert.equal(r.code, "split-recursive-guard");
+  assert.equal(r.originalCode, "split-multi-mechanism");
+});
+
+test("recursive guard: depth 2 with NO trigger firing does NOT fire the guard (AC4)", () => {
+  const r = checkSplitRecommendation({ ledger: [], mechanismCount: 1, touchSetSize: 3, wbsLevel: 2 });
+  assert.equal(r.recommend, false);
+  assert.equal(r.code, undefined);
+});
+
+test("recursive guard: depth 2 + ALL-repairable cluster stays repairable-cluster-revision, not guarded (AC4)", () => {
+  // recommend:false verdicts are never converted — the guard only intercepts real split verdicts.
+  const ledger = upsertFindings([], [
+    { subsystem: "gate-engine", claimRef: "AC#1", summary: "a", blocking: true, repairable: true },
+    { subsystem: "gate-engine", claimRef: "AC#2", summary: "b", blocking: true, repairable: true },
+    { subsystem: "gate-engine", claimRef: "AC#3", summary: "c", blocking: true, repairable: true },
+  ], 0);
+  const r = checkSplitRecommendation({ ledger, wbsLevel: 2 });
+  assert.equal(r.recommend, false);
+  assert.equal(r.code, "repairable-cluster-revision");
+});
+
+test("recursive guard: depth 1 + oversized touch set keeps the original code (AC5)", () => {
+  const r = checkSplitRecommendation({ ledger: [], touchSetSize: 12, smallMilestoneTouchBoundary: 8, wbsLevel: 1 });
+  assert.equal(r.recommend, true);
+  assert.equal(r.code, "split-touch-set-too-large");
+  assert.equal(r.originalCode, undefined);
+});
+
+// ── gap-split-decision-finality-not-enforced (2026-08-02) ──────────────────────────────────────
+// A SPLIT ruling binds to the SURFACE (charter + touches), not the AC count, so responding to the
+// ruling by adding AC checkboxes does not erase it and cause a redundant re-derivation.
+describe("splitScopeHash / SPLIT decision finality", () => {
+  const TOUCHES = ["a.ts", "b.ts"];
+  const bodyWithACs = (n) =>
+    `## Acceptance Criteria\n\n${Array.from({ length: n }, (_, i) => `- [ ] AC${i + 1}`).join("\n")}\n\n## Touches\n\n- a.ts\n- b.ts\n`;
+
+  test("AC1: splitScopeHash hashes touches only — AC count does not affect it", () => {
+    const h3 = splitScopeHash({ declaredTouches: TOUCHES });
+    const h9 = splitScopeHash({ declaredTouches: TOUCHES });
+    assert.equal(h3, h9);
+    // Contrast: scopeHash DOES change with AC count.
+    assert.notEqual(
+      scopeHash({ taskBody: bodyWithACs(3), declaredTouches: TOUCHES }),
+      scopeHash({ taskBody: bodyWithACs(9), declaredTouches: TOUCHES }),
+    );
+  });
+
+  test("AC1: splitScopeHash is order-insensitive but content-sensitive on touches", () => {
+    assert.equal(
+      splitScopeHash({ declaredTouches: ["b.ts", "a.ts"] }),
+      splitScopeHash({ declaredTouches: ["a.ts", "b.ts"] }),
+    );
+    assert.notEqual(
+      splitScopeHash({ declaredTouches: ["a.ts", "b.ts"] }),
+      splitScopeHash({ declaredTouches: ["a.ts", "b.ts", "c.ts"] }),
+    );
+  });
+
+  test("AC5: a SPLIT record survives an AC-checkbox edit (the 15-redundant-dispatch scenario)", () => {
+    const atSplit = { charterHash: "ch", scopeHash: scopeHash({ taskBody: bodyWithACs(3), declaredTouches: TOUCHES }), splitScopeHash: splitScopeHash({ declaredTouches: TOUCHES }), reviewPolicyHash: "rp" };
+    const record = { decision: "split", ...atSplit };
+    // Author responds to the ruling by adding 6 AC checkboxes. Touches unchanged.
+    const now = {
+      charterHash: "ch",
+      scopeHash: scopeHash({ taskBody: bodyWithACs(9), declaredTouches: TOUCHES }),
+      splitScopeHash: splitScopeHash({ declaredTouches: TOUCHES }),
+      reviewPolicyHash: "rp",
+    };
+    assert.notEqual(now.scopeHash, atSplit.scopeHash, "precondition: AC edit changed scopeHash");
+    const v = decideSplitAdjudication(record, now);
+    assert.equal(v.verdict, "content-dispatch-blocked");
+    assert.equal(v.outcome, "needs-human");
+  });
+
+  test("AC6: a SPLIT record IS invalidated by a Touches change (surface genuinely changed)", () => {
+    const record = {
+      decision: "split", charterHash: "ch", reviewPolicyHash: "rp",
+      scopeHash: scopeHash({ taskBody: bodyWithACs(3), declaredTouches: TOUCHES }),
+      splitScopeHash: splitScopeHash({ declaredTouches: TOUCHES }),
+    };
+    const widened = ["a.ts", "b.ts", "c.ts"];
+    const v = decideSplitAdjudication(record, {
+      charterHash: "ch", reviewPolicyHash: "rp",
+      scopeHash: scopeHash({ taskBody: bodyWithACs(3), declaredTouches: widened }),
+      splitScopeHash: splitScopeHash({ declaredTouches: widened }),
+    });
+    assert.equal(v.verdict, "decision-invalidated");
+  });
+
+  test("AC7: a legacy SPLIT record with no splitScopeHash falls back to the full scopeHash match", () => {
+    const legacy = { decision: "split", charterHash: "ch", scopeHash: "sh", reviewPolicyHash: "rp" };
+    // Matching legacy hashes still block.
+    assert.equal(
+      decideSplitAdjudication(legacy, { charterHash: "ch", scopeHash: "sh", reviewPolicyHash: "rp", splitScopeHash: "anything" }).verdict,
+      "content-dispatch-blocked",
+    );
+    // Mismatching legacy hashes still invalidate — no behavior change for pre-existing records.
+    assert.equal(
+      decideSplitAdjudication(legacy, { charterHash: "ch", scopeHash: "sh-CHANGED", reviewPolicyHash: "rp", splitScopeHash: "anything" }).verdict,
+      "decision-invalidated",
+    );
+  });
+
+  test("AC4: COMMIT records still use scopeHash — an AC edit correctly invalidates them", () => {
+    const record = {
+      decision: "commit", charterHash: "ch", reviewPolicyHash: "rp",
+      scopeHash: scopeHash({ taskBody: bodyWithACs(3), declaredTouches: TOUCHES }),
+      splitScopeHash: splitScopeHash({ declaredTouches: TOUCHES }),
+    };
+    const v = decideSplitAdjudication(record, {
+      charterHash: "ch", reviewPolicyHash: "rp",
+      scopeHash: scopeHash({ taskBody: bodyWithACs(9), declaredTouches: TOUCHES }),
+      splitScopeHash: splitScopeHash({ declaredTouches: TOUCHES }),
+    });
+    assert.equal(v.verdict, "decision-invalidated", "a COMMIT ruling IS about the reviewed content");
+    assert.deepEqual(v.mismatchedFields, ["scopeHash"]);
+  });
+});
+
+// ── planCheckNextAction — gap-plancheck-blocking-only-convergence (2026-08-02) ──────────────────
+describe("planCheckNextAction: blocking-only convergence", () => {
+  const MAX = 3;
+
+  test("AC2: zero blocking with non-zero total findings -> stop-plan-checked", () => {
+    const r = planCheckNextAction({ round: 1, findings: 7, blocking: 0, maxRounds: MAX });
+    assert.equal(r.action, "stop-plan-checked");
+  });
+
+  test("AC3: blocking > 0 below the cap -> dispatch another round", () => {
+    const r = planCheckNextAction({ round: 1, findings: 9, blocking: 4, maxRounds: MAX });
+    assert.equal(r.action, "dispatch-plancheck-round");
+  });
+
+  test("AC4: blocking > 0 at the cap -> stop-needs-human/plancheck-rounds-exceeded", () => {
+    const r = planCheckNextAction({ round: 3, findings: 5, blocking: 2, priorBlocking: 4, maxRounds: MAX });
+    assert.equal(r.action, "stop-needs-human");
+    assert.equal(r.code, "plancheck-rounds-exceeded");
+  });
+
+  test("AC5: legacy scalar path (blocking absent) + findings 0 -> stop-plan-checked", () => {
+    const r = planCheckNextAction({ round: 1, findings: 0, maxRounds: MAX });
+    assert.equal(r.action, "stop-plan-checked");
+  });
+
+  test("AC6: legacy scalar path + findings > 0 below cap -> dispatch (unchanged behavior)", () => {
+    const r = planCheckNextAction({ round: 1, findings: 3, maxRounds: MAX });
+    assert.equal(r.action, "dispatch-plancheck-round");
+  });
+
+  test("AC6: legacy scalar path + findings > 0 at cap -> rounds-exceeded (unchanged behavior)", () => {
+    const r = planCheckNextAction({ round: 3, findings: 3, maxRounds: MAX });
+    assert.equal(r.action, "stop-needs-human");
+    assert.equal(r.code, "plancheck-rounds-exceeded");
+  });
+
+  test("the real-world case: 7 nits and 0 blockers now passes where F_i=0 would have burned 3 rounds", () => {
+    // Round 1 under the old rule: findings=7 !== 0 -> revise, round 2, round 3, rounds-exceeded.
+    assert.equal(planCheckNextAction({ round: 1, findings: 7, blocking: 0, maxRounds: MAX }).action, "stop-plan-checked");
+  });
+});
+
+// ── planCheckNextAction diminishing returns — gap-plancheck-no-diminishing-returns-exit ─────────
+describe("planCheckNextAction: diminishing-returns exit", () => {
+  const MAX = 3;
+
+  test("AC2: blocking count unchanged from the prior round at round 2 -> diminishing-returns stop", () => {
+    const r = planCheckNextAction({ round: 2, findings: 5, blocking: 3, priorBlocking: 3, maxRounds: MAX });
+    assert.equal(r.action, "stop-needs-human");
+    assert.equal(r.code, "plancheck-diminishing-returns");
+  });
+
+  test("AC2: blocking count REGRESSED -> diminishing-returns stop", () => {
+    const r = planCheckNextAction({ round: 2, findings: 8, blocking: 5, priorBlocking: 3, maxRounds: MAX });
+    assert.equal(r.action, "stop-needs-human");
+    assert.equal(r.code, "plancheck-diminishing-returns");
+  });
+
+  test("AC3: blocking count decreased -> keep going", () => {
+    const r = planCheckNextAction({ round: 2, findings: 6, blocking: 2, priorBlocking: 5, maxRounds: MAX });
+    assert.equal(r.action, "dispatch-plancheck-round");
+  });
+
+  test("AC4: round 1 never triggers the exit even with a priorBlocking value present", () => {
+    const r = planCheckNextAction({ round: 1, findings: 5, blocking: 3, priorBlocking: 3, maxRounds: MAX });
+    assert.equal(r.action, "dispatch-plancheck-round");
+  });
+
+  test("AC5: absent priorBlocking never triggers the exit", () => {
+    const r = planCheckNextAction({ round: 2, findings: 5, blocking: 3, priorBlocking: null, maxRounds: MAX });
+    assert.equal(r.action, "dispatch-plancheck-round");
+  });
+
+  test("AC5: legacy scalar path never triggers the exit (no blocking series to compare)", () => {
+    const r = planCheckNextAction({ round: 2, findings: 3, priorBlocking: 3, maxRounds: MAX });
+    assert.equal(r.action, "dispatch-plancheck-round");
+  });
+
+  test("AC6: zero blocking wins over the diminishing-returns exit", () => {
+    const r = planCheckNextAction({ round: 2, findings: 4, blocking: 0, priorBlocking: 0, maxRounds: MAX });
+    assert.equal(r.action, "stop-plan-checked");
+  });
 });
 
 // ── budgetStatus — deterministic injected clock ─────────────────────────────────────────────────

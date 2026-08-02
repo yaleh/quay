@@ -744,7 +744,10 @@ export function preflightTouchesMismatch({ taskBody, secondaryBody, secondaryLab
 // Reuses milestone-preparation-check.ts's existing parsePlanStages/validatePlanStructure — the same
 // mechanical '### Stage N'/'- AC:'/'- Files:'/'- Command:' block shape that module already parses at
 // Receipt time — never a third Markdown parser (task's own Chosen-mechanism table).
-const _RUNNABLE_COMMAND_RE = /^(?:node|npm|npx|bash|sh|git|scripts\/|`)/i;
+// Exported so the PlanAuthor prompt contract (`_planShapeContract` in prepare-milestone.js) can be
+// anti-drift-tested against the REAL acceptance rule rather than a prose restatement of it
+// (gap-planauthor-shape-rules-not-injected, 2026-08-02).
+export const _RUNNABLE_COMMAND_RE = /^(?:node|npm|npx|bash|sh|git|scripts\/|`)/i;
 export function preflightInvalidPlanCommand({ planBody, acCount }) {
   const code = "preflight-invalid-plan-command";
   const structural = validatePlanStructure(planBody, acCount);

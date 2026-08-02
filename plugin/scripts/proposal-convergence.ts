@@ -215,6 +215,31 @@ export function groupBlockingByRootCause(ledger) {
 }
 
 export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInventory, touchSetSize, smallMilestoneTouchBoundary = 8, wbsLevel = 0 } = {}) {
+  const verdict = _rawSplitTriggers({ ledger, mechanismCount, mechanismInventory, touchSetSize, smallMilestoneTouchBoundary });
+  // gap-recursive-guard-only-covers-multi-mechanism (2026-08-02): the wbsLevel guard applies to
+  // EVERY split trigger, not just split-multi-mechanism. A leaf that has already survived two
+  // rounds of decomposition and STILL trips any split signal has an upstream structural defect —
+  // the trigger code names the symptom, it does not change the conclusion that splitting deeper
+  // compounds the problem. The guard runs AFTER trigger evaluation (never before) so it fires
+  // only when a split would actually have been recommended, and it preserves the originating
+  // trigger's reason text as diagnostic context for the human who picks it up.
+  if (verdict.recommend === true && Number.isFinite(wbsLevel) && wbsLevel >= 2) {
+    return {
+      recommend: true,
+      code: "split-recursive-guard",
+      reason: `level-${wbsLevel} leaf still triggers ${verdict.code} — upstream decomposition too shallow, needs human diagnosis before further split (original trigger: ${verdict.reason})`,
+      repairable: false,
+      originalCode: verdict.code,
+    };
+  }
+  return verdict;
+}
+
+// ── _rawSplitTriggers — the three split triggers, evaluated WITHOUT the wbsLevel guard.
+// Separated so `checkSplitRecommendation` can evaluate "would a split fire?" before deciding
+// whether depth turns that into a recursive-guard verdict. Not exported: the guard is not
+// optional at any production callsite.
+function _rawSplitTriggers({ ledger, mechanismCount, mechanismInventory, touchSetSize, smallMilestoneTouchBoundary }) {
   // M206/M2: use rootCauseKey-based clustering. Each distinct rootCauseKey counts as one cluster
   // member; legacy findings without rootCauseKey each count individually (id fallback).
   const bySubsystem = groupBlockingByRootCause(ledger);
@@ -247,20 +272,63 @@ export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInve
     effectiveCount = mechanismCount;
   }
   if (Number.isFinite(effectiveCount) && effectiveCount > 2) {
-    // DIR-124-A1b (2026-08-01): a level-2+ leaf that still triggers split-multi-mechanism is a
-    // structural anomaly — the UPSTREAM decomposition was too shallow. Flag as recursive-guard
-    // (needs-human) rather than auto-splitting deeper (which would produce level-3+ leaves that
-    // inevitably trigger the same signal because the real scope problem is at level 1 or 2).
-    if (Number.isFinite(wbsLevel) && wbsLevel >= 2) {
-      return { recommend: true, code: "split-recursive-guard", reason: `level-${wbsLevel} leaf still multi-mechanism (${effectiveCount} > 2) — upstream decomposition too shallow, needs human diagnosis before further split`, repairable: false };
-    }
     // split-multi-mechanism is NEVER repairable — scope that cannot be changed without charter edit.
+    // The wbsLevel recursive guard is applied by the `checkSplitRecommendation` wrapper above,
+    // uniformly across all three triggers (DIR-124-A1b was the motivating case).
     return { recommend: true, code: "split-multi-mechanism", reason: `candidate contains ${effectiveCount} independently landable mechanisms (> 2)`, repairable: false };
   }
   if (Number.isFinite(touchSetSize) && Number.isFinite(smallMilestoneTouchBoundary) && touchSetSize > smallMilestoneTouchBoundary) {
     return { recommend: true, code: "split-touch-set-too-large", reason: `checked touch set (${touchSetSize}) exceeds the small-milestone boundary (${smallMilestoneTouchBoundary})`, repairable: false };
   }
   return { recommend: false };
+}
+
+// ── planCheckNextAction — gap-plancheck-blocking-only-convergence +
+// gap-plancheck-no-diminishing-returns-exit (2026-08-02). The PlanCheck analogue of `nextAction`.
+//
+// PlanCheck's original success condition was `findings === 0` — zero findings of ANY severity. A
+// grounded reviewer can always name a non-blocking improvement (wording, a cross-reference, an
+// optional extra test), so that condition is effectively unreachable and the round cap became the
+// only terminator — and hitting the cap is a FAILURE terminal. Telemetry over 232 dispatches:
+// 57 tasks entered round 1, 53 still ran round 3 (93%), and 45 of 57 (79%) ended in
+// `plancheck-rounds-exceeded`, burning 31.6h — 43% of all prepare-milestone wall-clock.
+// ProposalReview never had this defect: `nextAction` stops at zero BLOCKING findings.
+//
+// Two terminating conditions beyond the cap:
+//   1. blocking === 0            → stop-plan-checked (the real success condition)
+//   2. blocking >= priorBlocking → stop-needs-human/plancheck-diminishing-returns (round N did
+//      not shrink the blocking set, so rounds N+1.. will not either)
+//
+// Legacy tolerance: PlanCheck's current agent schema returns a scalar `{findings: <count>}` with
+// no severity split (typed findings are DIR-124-F-plancheck's scope). When `blocking` is not a
+// finite number, this falls back to `findings === 0` — byte-for-behavior the pre-existing rule.
+// The mechanism therefore lands NOW and gets strictly better when typed findings arrive.
+export function planCheckNextAction({ round, findings, blocking, priorBlocking, maxRounds }) {
+  const typed = Number.isFinite(blocking);
+  const effective = typed ? blocking : findings;
+
+  if (effective === 0) return { action: "stop-plan-checked" };
+
+  // Diminishing returns: only meaningful once a prior round exists to compare against, and only
+  // on the typed path (the scalar path has no blocking series to compare). `>=` not `>` — a round
+  // that holds steady is as non-convergent as one that regresses.
+  if (typed && Number.isFinite(priorBlocking) && round >= 2 && blocking >= priorBlocking) {
+    return {
+      action: "stop-needs-human",
+      code: "plancheck-diminishing-returns",
+      reason: `PlanCheck round ${round} did not reduce blocking findings (${priorBlocking} -> ${blocking}); further rounds will not converge`,
+    };
+  }
+
+  if (round >= maxRounds) {
+    return {
+      action: "stop-needs-human",
+      code: "plancheck-rounds-exceeded",
+      reason: `Plan-check cap (${maxRounds}) exhausted with ${effective} ${typed ? "blocking " : ""}finding(s) still open`,
+    };
+  }
+
+  return { action: "dispatch-plancheck-round" };
 }
 
 // ── budgetStatus — a deterministic, injectable-clock-friendly pure function: pass `nowMs` from
@@ -1093,6 +1161,21 @@ export function scopeHash({ taskBody, declaredTouches }) {
   return sha256(_canonicalJSON({ acBoxCount, touchesSorted }));
 }
 
+// ── splitScopeHash — gap-split-decision-finality-not-enforced (2026-08-02).
+// A SPLIT ruling is about STRUCTURE — how many independently landable mechanisms the surface
+// contains — not about the exact AC count. Binding a SPLIT record to `scopeHash` (which includes
+// acBoxCount) means the natural response to a split recommendation (adding AC checkboxes) erases
+// the ruling, and the next dispatch re-runs the whole pipeline to re-derive the same verdict.
+// Telemetry showed 15 such redundant dispatches (~3.5h wasted): DIR-126-E alone was told to split
+// 5 times. `splitScopeHash` hashes the SURFACE only, so an AC edit preserves the ruling while a
+// genuine Touches change correctly invalidates it.
+// COMMIT records deliberately keep `scopeHash`: a COMMIT ruling IS about the specific reviewed
+// content, so an AC edit SHOULD invalidate it.
+export function splitScopeHash({ declaredTouches }) {
+  const touchesSorted = [...(declaredTouches || [])].sort();
+  return sha256(_canonicalJSON({ touchesSorted }));
+}
+
 // ── _decisionRecordPath — committed decision record under milestones/prepare-decisions/. ──────
 function _decisionRecordPath(workspace, taskId) {
   const seg = _safeTaskIdSegment(taskId);
@@ -1103,7 +1186,7 @@ function _decisionRecordPath(workspace, taskId) {
 // decision records. Four verdicts: no-decision-on-file, skip-split-adjudication (COMMIT match),
 // decision-invalidated (COMMIT mismatch), content-dispatch-blocked (SPLIT match).
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-export function decideSplitAdjudication(record, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash }) {
+export function decideSplitAdjudication(record, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash, splitScopeHash: currentSplitScopeHash }) {
   if (!record || typeof record !== "object" || !record.decision) {
     return { verdict: "no-decision-on-file" };
   }
@@ -1126,10 +1209,18 @@ export function decideSplitAdjudication(record, { charterHash, scopeHash: curren
     }
   }
   if (record.decision === "split") {
-    if (match) {
+    // gap-split-decision-finality-not-enforced (2026-08-02): a SPLIT ruling binds to the SURFACE
+    // (charter + touches), not to the AC count. Adding AC checkboxes — the natural response to a
+    // split recommendation — must not erase the ruling and trigger a redundant re-derivation.
+    // Records written before this change carry no `splitScopeHash`; they fall back to the legacy
+    // full `match` (conservative — no behavior change for existing records).
+    const splitMatch = record.splitScopeHash != null && currentSplitScopeHash != null
+      ? record.charterHash === charterHash && record.splitScopeHash === currentSplitScopeHash && record.reviewPolicyHash === reviewPolicyHash
+      : match;
+    if (splitMatch) {
       return { verdict: "content-dispatch-blocked", outcome: "needs-human", reason: "split-decision-blocks-dispatch", phase: "Admission", record };
     }
-    // SPLIT record with mismatched hashes — the ruling no longer applies; proceed.
+    // SPLIT record whose SURFACE changed — the ruling no longer applies; proceed.
     return { verdict: "decision-invalidated", record };
   }
   return { verdict: "no-decision-on-file" };
@@ -1221,6 +1312,10 @@ export function _recordSplitDecisionCli({ taskId, workspace, charterFile, decisi
       taskId,
       charterHash,
       scopeHash: currentScopeHash,
+      // gap-split-decision-finality-not-enforced (2026-08-02): additive field (schemaVersion stays
+      // 1 per the M207 additive-growth precedent). Consumed ONLY for `decision: "split"` records;
+      // COMMIT adjudication keeps using `scopeHash`.
+      splitScopeHash: splitScopeHash({ declaredTouches }),
       reviewPolicyHash,
       mechanismInventoryHash: null, // audit-only, excluded from match
       decision,
@@ -1259,7 +1354,8 @@ export function _decideSplitCli({ taskId, workspace, charterFile }) {
         // Unparseable record — treated as no-decision-on-file.
       }
     }
-    const verdict = decideSplitAdjudication(record, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash });
+    const currentSplitScopeHash = splitScopeHash({ declaredTouches });
+    const verdict = decideSplitAdjudication(record, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash, splitScopeHash: currentSplitScopeHash });
     // If decision-invalidated and we mutated the record (COMMIT mismatch), write back the augmented record.
     if (verdict.verdict === "decision-invalidated" && verdict.record && record) {
       try {
@@ -1268,7 +1364,7 @@ export function _decideSplitCli({ taskId, workspace, charterFile }) {
         // Write failure non-fatal — the CLI surface still reports the correct verdict.
       }
     }
-    return { ok: true, ...verdict, hashes: { charterHash, scopeHash: currentScopeHash, reviewPolicyHash } };
+    return { ok: true, ...verdict, hashes: { charterHash, scopeHash: currentScopeHash, reviewPolicyHash, splitScopeHash: currentSplitScopeHash } };
   } catch (err) {
     return { ok: false, error: err.message };
   }
