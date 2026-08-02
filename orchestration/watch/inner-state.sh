@@ -35,11 +35,21 @@ for t in d.get("orphaned",[]):
   done
   alerted="$alerted $(printf '%s\n' "$snap" | grep -E '^(OVER90|ORPHAN)' | cut -d' ' -f1-2 | tr '\n' ' ')"
 
-  head=$(git log -1 --format='%h %s' 2>/dev/null)
+  # 结构判据，不匹配提交消息的散文。2026-08-02 第一次发声即误报：
+  # 外层自己一条讨论 revert 的提交被 *[Rr]evert* 命中。会叫狼来了的检测器最后没人理。
+  head=$(git log -1 --format='%h' 2>/dev/null)
   if [ "$head" != "$prev_head" ] && [ -n "$prev_head" ]; then
-    case "$head" in
-      *[Rr]evert*|*--ours*|*--theirs*|*force*) echo "RISKY master 新提交: $head" ;;
-    esac
+    # (a) 真正的 revert：git 自己在 body 里生成 "This reverts commit <sha>"
+    if git show "$head" --format=%B -s 2>/dev/null | grep -qi '^This reverts commit'; then
+      echo "REVERT master: $(git log -1 --format='%h %s' "$head") | $(git show "$head" --shortstat --format= | tr -d '\n')"
+    else
+      # (b) 大规模净删除：结构上可测，且能捕获「大批工作消失」而不依赖措辞
+      del=$(git show "$head" --shortstat --format= 2>/dev/null | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+')
+      ins=$(git show "$head" --shortstat --format= 2>/dev/null | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+')
+      if [ -n "$del" ] && [ "$del" -gt 1000 ] && [ "$del" -gt $(( ${ins:-0} * 3 )) ]; then
+        echo "MASSDELETE master: $(git log -1 --format='%h %s' "$head") | -${del} +${ins:-0}"
+      fi
+    fi
   fi
   prev_head="$head"
   sleep 60
