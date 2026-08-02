@@ -14,6 +14,13 @@
 # The pending-directive count is INFORMATIONAL (the loop DRAINs pending directives — a non-zero count
 # is not a blocker, but is reported so you know what the loop's first act will process).
 #
+# Checks 1-5 are the exp5-era git/selfcheck gate. Check 6 (full `scripts/test.sh`) was added
+# 2026-08-02 for fast mode: the exp5 selfchecks never run scripts/test.sh (verified: the four
+# run_check entries only cover task-schema/dod-fixture/vmeta-lag/loadbearing), but fast mode runs
+# directly on master and its loop tick stops on "full suite not green". A READY ✓ here is only
+# meaningful if the suite actually passes — otherwise un-halting hands the loop a guaranteed
+# self-stop. Check 6 is deliberately slow (~560s on this repo): un-halt is a rare deliberate action.
+#
 # Usage:  experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
 
 set -u
@@ -57,6 +64,20 @@ run_check "vmeta-lag-selfcheck"    bash "$SCR/vmeta-lag-selfcheck.sh"
 run_check "loadbearing-test-gate"  bash "$SCR/loadbearing-test-gate.sh" \
   --scripts "$SCR" --tests experiments/quay-perpetual-stream/test --import-root "$SCR" \
   --registry packages/quay/src/gate/registry.js --outer-loop experiments/quay-perpetual-stream/OUTER-LOOP.md
+
+# 6. Full test suite green (the fast-mode tick's hard stop condition, NOT covered by the exp5-era
+#    selfchecks above — those only run task-schema/dod-fixture/vmeta-lag/loadbearing, never
+#    scripts/test.sh). Fast mode runs DIRECTLY on master and its tick stops on "full suite not
+#    green", so a READY here must mean the suite actually passes — otherwise un-halting hands a
+#    self-stopping loop to the next tick. This is the fast-mode "is master safe to hand to the
+#    loop?" gate; it is deliberately the SLOW check (~560s on this repo) — un-halt is a rare,
+#    deliberate action. Fast mode's default group is product,engine (governance self-skips).
+if [ -f "$ROOT/scripts/test.sh" ]; then
+  run_check "full-test-suite (scripts/test.sh)" bash "$ROOT/scripts/test.sh"
+else
+  # exp5 (no fast-mode): scripts/test.sh may not exist; the loop's own checks above are the gate.
+  ok "full-test-suite skipped (no scripts/test.sh — exp5-only repo, selfchecks are the gate)"
+fi
 
 # INFORMATIONAL: pending directives the loop's first DRAIN will process (not a hard blocker).
 pend="$(node packages/quay/bin/quay.ts task list --label directive --json 2>/dev/null \
