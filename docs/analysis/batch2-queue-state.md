@@ -13,13 +13,13 @@
 | B2-1 `gap-fast-mode-no-telemetry` | ✔ merge `a13d2628` |
 | B2-2 `gap-test-selection-not-scoped-to-touches` | ✔ merge `462b8391`，全量 1206 tests 0 fail；AC12 实测 8.3s vs 全量 ~378s |
 | B2-3 `gap-suite-speedup` | ✔ merge `42ea36b0`，实测 378s ≤ 480s |
+| B3-1 `gap-gate-registration-vs-dispatch-unmeasured` | ✔ merge `02c30cde`，全量 1218 tests 0 fail（418s）；真实基线已入任务体（16 gate/6 未派发/24 未注册/line-budget mismatch） |
 
 ## 进行中
 
 | 任务 | 状态 |
 |---|---|
-| B3-1 `gap-gate-registration-vs-dispatch-unmeasured` | 派发 10:08:36Z，worktree `/tmp/quay-wt-gatedispatch`，运行中 |
-| B3-2 `gap-test-suite-has-no-layer-grouping` | 派发 10:29:46Z（B2-2 合并后，无重叠），worktree `/tmp/quay-wt-layergroup`，运行中 |
+| B3-2 `gap-test-suite-has-no-layer-grouping` | 派发 10:29:46Z，worktree `/tmp/quay-wt-layergroup`，运行中 |
 
 ## 待执行
 
