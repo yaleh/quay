@@ -1,0 +1,6 @@
+{
+  "synthetic": false,
+  "description": "Cache-resume: all 6 it0 checks return from cache with source:cache. Zero fresh agent dispatches at Verify.",
+  "generatedAt": "2026-08-01T12:00:00.000Z",
+  "workflowCommit": "74fe7791"
+}
