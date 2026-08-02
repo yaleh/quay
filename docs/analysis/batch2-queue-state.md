@@ -17,7 +17,8 @@
 
 | 任务 | 状态 |
 |---|---|
-| B2-2 `gap-test-selection-not-scoped-to-touches` | subagent 运行中，对抗审查进行中 |
+| B2-2 `gap-test-selection-not-scoped-to-touches` | 实现 GREEN（16/16）未提交；对抗审查终报中（1 BUG + 2 ADVISORY + 4 NIT，实现已在 worktree 内修掉 `--allow-thin` 空集/`--json` 吞掉路径）；审查完成后 resume implementer 收尾提交 → fan-in merge → 全量 suite |
+| B3-1 `gap-gate-registration-vs-dispatch-unmeasured` | 已并发派发 10:08:36Z，worktree `/tmp/quay-wt-gatedispatch`，待其返回后 fan-in merge |
 
 ## 待执行（B2 之后）
 
