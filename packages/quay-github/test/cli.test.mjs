@@ -53,18 +53,38 @@
 // existing, reachable issue's body) — this is a live `gh api` call FAILING
 // mid-session, from a Provider process that started successfully.
 //
+// gap-suite-speedup (task gap-suite-speedup) — CONTRACT DECISION: this file
+// now runs against the fake `gh` executable (test/fixtures/fake-gh.mjs,
+// PATH-shadowed exactly as task-check-passthrough.test.mjs does), NOT the
+// live yaleh/quay GitHub repo. Rationale: the live-network dependence was
+// the dominant wall-clock cost (24.3s in CI, ~9s here) AND made the suite
+// network-flaky, and the same fake-gh process-boundary injection
+// task-check-passthrough introduced makes every read-only surface
+// (`task list/get/check`, the manifest, the flag-validation errors, and
+// QN-064's fetchAllIssues-failure path) exercisable hermetically with
+// byte-identical behavior — github-client.js cannot tell the fake `gh`
+// from the real one (it shells out via execFileSync("gh", ...) either way).
+// Every assertion below is preserved unchanged; only the data source moved
+// from the live repo to the canned fixture. The fake gh fails for the
+// unreachable-owner repo (test 9) with gh's own "gh: Not Found (HTTP 404)"
+// diagnostic, preserving the fetchAllIssues-failure-path exercise. The
+// residual gap that was previously "the real CLI against real GitHub" is
+// covered by the repo's opt-in live files (QUAY_TEST_LIVE_GITHUB=1) rather
+// than by this default-suite file.
+//
 // Run: node test/cli.test.mjs
-// Precondition: `gh auth status` must show an authenticated session with
-// read access to yaleh/quay (already a standing stage-2+ precondition of
-// this experiment, re-confirmed at the start of every iteration).
+// Precondition (removed by gap-suite-speedup): `gh auth status` was a
+// standing stage-2+ precondition; this file no longer needs it.
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bin = path.join(__dirname, "..", "bin", "quay-github.ts");
+const fakeGhScript = path.join(__dirname, "fixtures", "fake-gh.mjs");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -76,11 +96,76 @@ function assert(cond, msg) {
   }
 }
 
+/** Build a fresh PATH-shadow dir containing exactly one executable named
+ * `gh` that delegates to fixtures/fake-gh.mjs. A fresh dir per test run
+ * avoids any cross-test/cross-process race on a shared shim location. */
+function makeFakeGhPathDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-fake-gh-path-"));
+  const shimPath = path.join(dir, "gh");
+  fs.writeFileSync(
+    shimPath,
+    `#!/bin/sh\nexec node "${fakeGhScript}" "$@"\n`,
+    { mode: 0o755 }
+  );
+  return dir;
+}
+
+// Canned fixture issues #3/#4 served by fake-gh.mjs for the yaleh/quay
+// backing repo (the numbers/ids the assertions expect). Realistic enough to
+// make check()/get() produce well-formed view-models; content is otherwise
+// irrelevant to the assertions (which check id/title presence, boolean ok,
+// and exit-code mirroring, never specific live-repo content).
+const FIXTURE_ISSUES = {
+  3: {
+    number: 3,
+    title: "fixture issue 3",
+    body:
+      "## Proposal\nfixture proposal\n" +
+      "## Plan\nfixture plan\n" +
+      "## AC\n- [ ] an unchecked acceptance criterion\n" +
+      "## DoD\n- [x] a checked definition of done\n",
+    labels: [{ name: "status:ready" }],
+    state: "open",
+    pull_request: undefined,
+    html_url: "https://github.com/yaleh/quay/issues/3",
+    user: { login: "fixture-user" },
+  },
+  4: {
+    number: 4,
+    title: "fixture issue 4",
+    body:
+      "## Proposal\nfixture proposal\n" +
+      "## Plan\nfixture plan\n" +
+      "## AC\n- [x] a checked acceptance criterion\n" +
+      "## DoD\n- [x] a checked definition of done\n",
+    labels: [{ name: "status:ready" }],
+    state: "open",
+    pull_request: undefined,
+    html_url: "https://github.com/yaleh/quay/issues/4",
+    user: { login: "fixture-user" },
+  },
+};
+
+// The PATH-shadow dir lives for the whole run (created lazily). Every CLI
+// subprocess inherits the fake-gh PATH, so no invocation in this file ever
+// reaches the real `gh` binary or the network.
+let fakeGhDir = null;
+function fakeGhEnv(envOverride = {}) {
+  fakeGhDir ??= makeFakeGhPathDir();
+  return {
+    ...process.env,
+    PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
+    QUAY_GITHUB_REPO: "yaleh/quay",
+    FAKE_GH_ISSUES_JSON: JSON.stringify(FIXTURE_ISSUES),
+    ...envOverride,
+  };
+}
+
 function run(args, envOverride = {}) {
   try {
     const out = execFileSync("node", [bin, ...args], {
       encoding: "utf8",
-      env: { ...process.env, QUAY_GITHUB_REPO: "yaleh/quay", ...envOverride },
+      env: fakeGhEnv(envOverride),
     });
     return { status: 0, stdout: out, stderr: "" };
   } catch (err) {
@@ -113,7 +198,7 @@ function main() {
     assert(m.id === "github" && m.name === "quay-github", "quay-github manifest returns the correct provider self-declaration");
   }
 
-  // 2. `task list --json` — data.read, live against the real repo.
+  // 2. `task list --json` — data.read, against the canned fixture issues.
   {
     const r = run(["task", "list", "--json"]);
     assert(r.status === 0, "quay-github task list --json exits 0");
@@ -121,7 +206,7 @@ function main() {
     assert(Array.isArray(tasks), "quay-github task list --json emits a JSON array");
     assert(
       tasks.some((t) => t.id === "gh-3") && tasks.some((t) => t.id === "gh-4"),
-      "quay-github task list --json includes the repo's known real issues (gh-3, gh-4)"
+      "quay-github task list --json includes the fixture issues (gh-3, gh-4)"
     );
   }
 
@@ -132,7 +217,7 @@ function main() {
     assert(r.stdout.includes("gh-3") && r.stdout.includes("\t"), "quay-github task list (no --json) emits tab-separated lines");
   }
 
-  // 3. `task get gh-3 --json` — happy path, single-issue live lookup.
+  // 3. `task get gh-3 --json` — happy path, single-issue fixture lookup.
   {
     const r = run(["task", "get", "gh-3", "--json"]);
     assert(r.status === 0, "quay-github task get gh-3 --json exits 0");
@@ -141,17 +226,17 @@ function main() {
     assert(typeof t.title === "string" && t.title.length > 0, "quay-github task get --json returns a non-empty title");
   }
 
-  // 3b. "no such task" error path (a real 404 from the live GitHub API).
+  // 3b. "no such task" error path (a 404 from the fake gh for a missing id).
   {
     const r = run(["task", "get", "gh-999999", "--json"]);
     assert(r.status === 1, "quay-github task get <nonexistent id> exits 1");
     assert(r.stderr.includes("no such task"), "quay-github task get <nonexistent id> prints 'no such task' to stderr");
   }
 
-  // 4. `task check` — gate, both directions, against real, known-status
-  //    live issues (gh-3 is status:ready with unchecked ACs -> ok:false;
-  //    the exact reason string isn't asserted narrowly since issue content
-  //    could evolve, but the ok/gate/exit-code triad is asserted).
+  // 4. `task check` — gate, both directions, against fixture issues with
+  //    known statuses (gh-3 has an unchecked AC -> ok:false; the exact
+  //    reason string isn't asserted narrowly since issue content could
+  //    evolve, but the ok/gate/exit-code triad is asserted).
   {
     const r = run(["task", "check", "gh-3", "--json"]);
     const result = JSON.parse(r.stdout);
@@ -211,12 +296,12 @@ function main() {
     );
   }
 
-  // 9. Live `gh api` failure DURING `task list` (QN-064, iteration 60) —
-  //    a well-formed but unreachable owner/repo passes resolveRepo()'s own
-  //    parse (unlike test 8's malformed-format value), so a real `gh api`
-  //    network round-trip is attempted and genuinely 404s. Exercises
-  //    list()'s completely unhandled fetchAllIssues() failure path,
-  //    distinct from test 8's pre-network resolveRepo() throw.
+  // 9. `gh api` failure DURING `task list` (QN-064, iteration 60) — a
+  //    well-formed but unreachable owner/repo passes resolveRepo()'s own
+  //    parse (unlike test 8's malformed-format value), so the fake gh fails
+  //    the paged-list call with gh's own "Not Found (HTTP 404)" diagnostic,
+  //    exercising list()'s completely unhandled fetchAllIssues() failure
+  //    path, distinct from test 8's pre-network resolveRepo() throw.
   {
     const r = run(["task", "list", "--json"], {
       QUAY_GITHUB_REPO: "nonexistent-owner-xyz-123/nonexistent-repo-abc",
@@ -228,6 +313,8 @@ function main() {
       `quay-github <task list, unreachable owner/repo> stderr carries gh's own diagnostic (got: ${JSON.stringify(r.stderr.slice(0, 200))})`
     );
   }
+
+  if (fakeGhDir) fs.rmSync(fakeGhDir, { recursive: true, force: true });
 
   console.log(failures === 0 ? "\nAll QN-034 bin/quay-github.ts CLI dispatch tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;

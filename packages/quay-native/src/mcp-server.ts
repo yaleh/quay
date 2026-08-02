@@ -229,4 +229,17 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
   await server.connect(transport);
   // Server now runs until stdin closes; log to stderr (stdout is the MCP channel).
   console.error(`quay-native mcp: serving tasks from ${tasksDir}, ADRs from ${resolvedAdrDir}`);
+
+  // gap-suite-speedup (task gap-suite-speedup): when the client disconnects
+  // (stdin EOF), close the transport so the process exits promptly. The SDK
+  // StdioServerTransport only watches stdin for 'data'/'error', never
+  // 'end'/'close' — so a disconnected server whose event loop still holds a
+  // live handle would otherwise never drain, and an SDK client's
+  // StdioClientTransport.close() would fall back to its 2s SIGTERM timeout.
+  // Closing the transport on stdin EOF drains those handles so the process
+  // exits on its own. No behavior change to serving: only shutdown becomes
+  // prompt.
+  process.stdin.on("close", () => {
+    void transport.close();
+  });
 }

@@ -25,30 +25,46 @@
 //      real, existing task id, so no live write to any real GitHub issue
 //      ever occurs.
 //   7. (QN-064, iteration 60) task_list against a SEPARATE subprocess
-//      started with a well-formed but unreachable owner/repo -- a live
-//      `gh api` network round-trip is attempted and genuinely 404s,
-//      exercising list()'s completely unhandled fetchAllIssues() failure
-//      path (github-client.js has no try/catch around it, unlike get()'s
-//      already-caught not-found path). Distinct from QN-062 (iteration 58,
-//      Core's own Provider subprocess-STARTUP-crash angle via a malformed
-//      QUAY_GITHUB_REPO value, caught before any gh api call) and QN-063
-//      (iteration 59, malformed input VALUE inside an existing issue's
-//      body) -- this is a live gh api call FAILING mid-session, against
+//      started with a well-formed but unreachable owner/repo -- the fake gh
+//      fails the paged-list call with gh's own "Not Found (HTTP 404)"
+//      diagnostic, exercising list()'s completely unhandled fetchAllIssues()
+//      failure path (github-client.js has no try/catch around it, unlike
+//      get()'s already-caught not-found path). Distinct from QN-062
+//      (iteration 58, Core's own Provider subprocess-STARTUP-crash angle via
+//      a malformed QUAY_GITHUB_REPO value, caught before any gh api call)
+//      and QN-063 (iteration 59, malformed input VALUE inside an existing
+//      issue's body) -- this is a `gh api` call FAILING mid-session, against
 //      quay-github's own MCP server (not Core's), from a Provider process
 //      that started and connected successfully. Asserts isError:true and
 //      that a second, independent call also returns isError:true (the
 //      quay-github mcp process itself survives the failure).
 //
+// gap-suite-speedup (task gap-suite-speedup) — CONTRACT DECISION: as with
+// cli.test.mjs, this file now runs against the fake `gh` executable
+// (test/fixtures/fake-gh.mjs, PATH-shadowed), NOT the live yaleh/quay repo.
+// The live-network dependence was the dominant wall-clock cost (30.6s in
+// CI, ~12s here) and made the suite network-flaky; the fake gh makes every
+// surface exercisable hermetically. Every assertion is preserved unchanged:
+// task_list still yields gh-3/gh-4 (now the canned fixture issues), the
+// MCP-vs-CLI byte-identical cross-checks still hold (both legs shell out to
+// the same fake gh), the unknown-id / unknown-write error paths still
+// isError, and QN-064's fetchAllIssues-failure path is still exercised (the
+// fake gh fails the unreachable owner/repo with gh's own "Not Found (HTTP
+// 404)" diagnostic). The residual "real CLI/MCP against real GitHub"
+// coverage lives in the repo's opt-in live files (QUAY_TEST_LIVE_GITHUB=1).
+//
 // Run: node test/mcp-server.test.mjs
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bin = path.join(__dirname, "..", "bin", "quay-github.ts");
-const repoEnv = { ...process.env, QUAY_GITHUB_REPO: "yaleh/quay" };
+const fakeGhScript = path.join(__dirname, "fixtures", "fake-gh.mjs");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -59,6 +75,66 @@ function assert(cond, msg) {
     console.log(`PASS: ${msg}`);
   }
 }
+
+/** Build a fresh PATH-shadow dir containing exactly one executable named
+ * `gh` that delegates to fixtures/fake-gh.mjs. A fresh dir per test run
+ * avoids any cross-test/cross-process race on a shared shim location. */
+function makeFakeGhPathDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-fake-gh-path-"));
+  const shimPath = path.join(dir, "gh");
+  fs.writeFileSync(
+    shimPath,
+    `#!/bin/sh\nexec node "${fakeGhScript}" "$@"\n`,
+    { mode: 0o755 }
+  );
+  return dir;
+}
+
+// Canned fixture issues #3/#4 served by fake-gh.mjs for the yaleh/quay
+// backing repo (same fixture as cli.test.mjs). Realistic enough to make
+// check()/get() produce well-formed view-models; content is otherwise
+// irrelevant to the assertions (which check id presence and byte-identical
+// MCP-vs-CLI consistency, never specific live-repo content).
+const FIXTURE_ISSUES = {
+  3: {
+    number: 3,
+    title: "fixture issue 3",
+    body:
+      "## Proposal\nfixture proposal\n" +
+      "## Plan\nfixture plan\n" +
+      "## AC\n- [ ] an unchecked acceptance criterion\n" +
+      "## DoD\n- [x] a checked definition of done\n",
+    labels: [{ name: "status:ready" }],
+    state: "open",
+    pull_request: undefined,
+    html_url: "https://github.com/yaleh/quay/issues/3",
+    user: { login: "fixture-user" },
+  },
+  4: {
+    number: 4,
+    title: "fixture issue 4",
+    body:
+      "## Proposal\nfixture proposal\n" +
+      "## Plan\nfixture plan\n" +
+      "## AC\n- [x] a checked acceptance criterion\n" +
+      "## DoD\n- [x] a checked definition of done\n",
+    labels: [{ name: "status:ready" }],
+    state: "open",
+    pull_request: undefined,
+    html_url: "https://github.com/yaleh/quay/issues/4",
+    user: { login: "fixture-user" },
+  },
+};
+
+const fakeGhDir = makeFakeGhPathDir();
+// Base env shared by the main MCP client, the direct-CLI cross-checks, and
+// the broken-repo client: PATH-shadowed fake gh + the canned fixture issues.
+const repoEnv = {
+  ...process.env,
+  PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
+  QUAY_GITHUB_REPO: "yaleh/quay",
+  FAKE_GH_ISSUES_JSON: JSON.stringify(FIXTURE_ISSUES),
+};
 
 function cliJson(args) {
   const out = execFileSync("node", [bin, ...args], { env: repoEnv, encoding: "utf8" });
@@ -77,8 +153,7 @@ async function main() {
 
   // NOTE (added iteration 75, CI-hang fix): everything from here to the
   // matching `finally` below MUST stay inside this try/finally. Without
-  // it, any live `gh api` failure this file did not anticipate (e.g. a
-  // permissions/rate-limit error different from the "unknown id"/
+  // it, any unexpected failure (different from the "unknown id"/
   // "unreachable repo" cases explicitly tested below) throws mid-`main()`
   // and skips `client.close()` entirely, leaving the child `quay-github
   // mcp` subprocess (and its stdio pipes) alive -- which hangs `node
@@ -103,10 +178,10 @@ async function main() {
     const listResult = await client.callTool({ name: "task_list", arguments: {} });
     assert(
       listResult.isError !== true && listResult.structuredContent?.tasks,
-      `task_list succeeds against the live yaleh/quay repo, not isError (got: ${JSON.stringify(listResult).slice(0, 300)})`
+      `task_list succeeds against the canned fixture repo, not isError (got: ${JSON.stringify(listResult).slice(0, 300)})`
     );
     const ids = (listResult.structuredContent?.tasks ?? []).map((t) => t.id).sort();
-    assert(ids.includes("gh-3") && ids.includes("gh-4"), `task_list includes the real, currently-open issues gh-3 and gh-4 (got: ${JSON.stringify(ids)})`);
+    assert(ids.includes("gh-3") && ids.includes("gh-4"), `task_list includes the fixture issues gh-3 and gh-4 (got: ${JSON.stringify(ids)})`);
 
     // ---- 3. task_get for gh-3, cross-checked against the direct CLI ----
     {
@@ -154,12 +229,15 @@ async function main() {
   // Separate subprocess/transport (a distinct env from the main `repoEnv`
   // client above), started with a well-formed but unreachable owner/repo
   // so the process itself starts and connects fine (unlike QN-062's
-  // startup-crash angle) and the failure occurs live, inside list()'s own
-  // unhandled fetchAllIssues() call.
+  // startup-crash angle) and the failure occurs inside list()'s own
+  // unhandled fetchAllIssues() call. The fake gh fails the paged-list call
+  // for this repo with gh's own 404 diagnostic.
   {
     const brokenEnv = {
       ...process.env,
+      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
       QUAY_GITHUB_REPO: "nonexistent-owner-xyz-123/nonexistent-repo-abc",
+      FAKE_GH_ISSUES_JSON: JSON.stringify(FIXTURE_ISSUES),
     };
     const brokenTransport = new StdioClientTransport({
       command: "node",
@@ -186,6 +264,8 @@ async function main() {
       await brokenClient.close();
     }
   }
+
+  fs.rmSync(fakeGhDir, { recursive: true, force: true });
 
   if (failures > 0) {
     console.error(`\n${failures} FAILURE(S)`);

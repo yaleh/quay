@@ -49,6 +49,24 @@
 // write of any kind against the real yaleh/quay repository, occurs anywhere
 // in this file.
 //
+// gap-suite-speedup (task gap-suite-speedup): the non-adversarial cases
+// below were originally each served by their OWN freshly-spawned MCP server
+// process (11 github-mcp + 4 Core-mcp process spawns). Each spawn costs
+// ~1s of node startup; each Core spawn additionally pays the full cost of
+// booting a second nested provider process. The cases are stateless per
+// call (github-client.js re-fetches via `gh` for every check()/get()), so
+// the fake-gh multi-issue fixture (FAKE_GH_ISSUES_JSON, QN-072) lets the
+// four direct github-mcp cases share ONE `quay-github mcp` process and the
+// four Core-aggregation cases share ONE `quay mcp` process — every
+// assertion below is byte-identical to the pre-consolidation version, only
+// the process that serves the request differs. The three adversarial
+// break/restore cases MUST keep their own fresh spawns (they mutate
+// github-client.js on disk between checks). Also relies on the
+// gap-suite-speedup src fix: all three MCP server entry points now exit
+// promptly on stdin EOF (previously a disconnected server whose event loop
+// held a live child handle waited out the SDK client's full 2s SIGTERM
+// timeout — and orphaned Provider processes were left running).
+//
 // Run: node test/task-check-passthrough.test.mjs
 
 import { execFileSync } from "node:child_process";
@@ -179,6 +197,35 @@ async function withGithubMcpForMulti(issuesByNumber, run) {
   }
 }
 
+// gap-suite-speedup: one Core `quay mcp` workspace+env factory shared by all
+// four Core-aggregation cases, so a single Core server (which lazily boots
+// the nested github Provider once) serves every case.
+function makeCoreEnv(fakeGhDir, issuesByNumber) {
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn071-workspace-"));
+  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  github:",
+      "    enabled: true",
+      `    path: "${githubProviderDir}"`,
+      `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
+      "    env:",
+      '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
+      "",
+    ].join("\n")
+  );
+  return {
+    workspaceRoot,
+    env: {
+      ...process.env,
+      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
+      FAKE_GH_ISSUES_JSON: JSON.stringify(issuesByNumber),
+    },
+  };
+}
+
 async function main() {
   // --- Sanity check: the fake gh binary itself, invoked directly, returns
   //     exactly the canned issue and nothing else (confirms the fixture's
@@ -204,185 +251,160 @@ async function main() {
     fs.rmSync(fakeGhDir, { recursive: true, force: true });
   }
 
-  // --- Case 1: needs-human — Core's taskCheck() passthrough, over a real
-  //     stdio MCP connection to `quay-github mcp` (PATH-shadowed, no live
-  //     network), surfaces the soft-stop shape unchanged. ---
-  await withGithubMcpFor(mkIssueJson({ number: 501, labels: ["status:needs-human"] }), async (client) => {
-    const r = await client.callTool({ name: "task_check", arguments: { id: "gh-501" } });
-    assert(r.isError !== true, "task_check via quay-github mcp for a needs-human-labeled fixture issue does not error");
-    assert(
-      r.structuredContent?.gate === "none" &&
-        r.structuredContent?.ok === false &&
-        r.structuredContent?.reason === "soft stop; human action required",
-      `quay-github's own task_check tool surfaces the needs-human soft-stop shape unchanged (got: ${JSON.stringify(r.structuredContent)})`
-    );
-  });
-
-  // --- Case 1b: the same needs-human fixture issue, now through Core's
-  //     `quay mcp` aggregation layer (provider-client.js#taskCheck()) —
-  //     the actual gap this task closes, matching QN-069's own scope one
-  //     layer up from quay-github's own MCP tool. ---
-  {
-    const fakeGhDir = makeFakeGhPathDir();
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn071-workspace-"));
-    fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(workspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  github:",
-        "    enabled: true",
-        `    path: "${githubProviderDir}"`,
-        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
-        "    env:",
-        '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
-        "",
-      ].join("\n")
-    );
-    const coreEnv = {
-      ...process.env,
-      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
-      FAKE_GH_ISSUE_JSON: mkIssueJson({ number: 502, labels: ["status:needs-human"] }),
-    };
-    const { client: core } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot, coreEnv);
-    try {
-      const r = await core.callTool({ name: "task_check", arguments: { id: "gh-502", provider: "github" } });
-      assert(r.isError !== true, "task_check via quay mcp (provider=github, PATH-shadowed fixture) does not error for a needs-human fixture issue");
-      assert(
-        r.structuredContent?.gate === "none" &&
-          r.structuredContent?.ok === false &&
-          r.structuredContent?.reason === "soft stop; human action required",
-        `Core's taskCheck() passthrough surfaces the needs-human soft-stop shape unchanged through the GitHub Provider (got: ${JSON.stringify(r.structuredContent)})`
-      );
-    } finally {
-      await core.close();
-      fs.rmSync(fakeGhDir, { recursive: true, force: true });
-      fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  }
-
-  // --- Case 2: unrecognized status — same two layers (quay-github's own
-  //     tool, then Core's aggregated passthrough), for a status:* label
-  //     value the Provider does not recognize at all. ---
-  await withGithubMcpFor(mkIssueJson({ number: 503, labels: ["status:bogus-status-value"] }), async (client) => {
-    const r = await client.callTool({ name: "task_check", arguments: { id: "gh-503" } });
-    assert(r.isError !== true, "task_check via quay-github mcp for an unrecognized-status-labeled fixture issue does not error");
-    assert(
-      r.structuredContent?.gate === "unknown" &&
-        r.structuredContent?.ok === false &&
-        r.structuredContent?.reason === "unrecognized status bogus-status-value",
-      `quay-github's own task_check tool surfaces the unrecognized-status shape unchanged (got: ${JSON.stringify(r.structuredContent)})`
-    );
-  });
-
-  {
-    const fakeGhDir = makeFakeGhPathDir();
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn071-workspace2-"));
-    fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(workspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  github:",
-        "    enabled: true",
-        `    path: "${githubProviderDir}"`,
-        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
-        "    env:",
-        '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
-        "",
-      ].join("\n")
-    );
-    const coreEnv = {
-      ...process.env,
-      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
-      FAKE_GH_ISSUE_JSON: mkIssueJson({ number: 504, labels: ["status:bogus-status-value"] }),
-    };
-    const { client: core } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot, coreEnv);
-    try {
-      const r = await core.callTool({ name: "task_check", arguments: { id: "gh-504", provider: "github" } });
-      assert(r.isError !== true, "task_check via quay mcp (provider=github, PATH-shadowed fixture) does not error for an unrecognized-status fixture issue");
-      assert(
-        r.structuredContent?.gate === "unknown" &&
-          r.structuredContent?.ok === false &&
-          r.structuredContent?.reason === "unrecognized status bogus-status-value",
-        `Core's taskCheck() passthrough surfaces the unrecognized-status shape unchanged through the GitHub Provider (got: ${JSON.stringify(r.structuredContent)})`
-      );
-    } finally {
-      await core.close();
-      fs.rmSync(fakeGhDir, { recursive: true, force: true });
-      fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  }
-
-  // --- Case 3 (QN-072, iteration 86): compound (epic) task childrenStatus
-  //     rollup — genuinely distinct from Cases 1/2 above (different check()
-  //     branch entirely: status==="done" with role==="compound", not the
-  //     needs-human/unrecognized-status shortcuts). Confirmed by grep before
-  //     writing this: no existing test anywhere calls Core's taskCheck()
-  //     passthrough (either `quay-github mcp`'s own tool or `quay mcp`'s
-  //     aggregation) for a compound GitHub-backed task — QN-035's own
-  //     childrenStatus()/checkGate() compound support has only ever been
-  //     exercised directly against github-client.js (compound-gate.test.mjs,
-  //     gate-gameability.test.mjs, view-model.test.mjs), never through the
-  //     MCP passthrough layer this file exists to cover. ---
+  // --- Cases 1-4 (direct github-mcp layer), served by ONE shared
+  //     `quay-github mcp` process (gap-suite-speedup consolidation; see
+  //     header note). Assertions are byte-identical to the pre-consolidation
+  //     per-case versions. ---
   await withGithubMcpForMulti(
     {
+      501: mkIssueObj({ number: 501, labels: ["status:needs-human"] }),
+      503: mkIssueObj({ number: 503, labels: ["status:bogus-status-value"] }),
       601: mkIssueObj({ number: 601, labels: ["status:todo"], state: "open" }), // child still todo
       600: mkIssueObj({ number: 600, labels: [], state: "closed", childRefs: [601] }), // epic marked done (closed), one child not done
+      611: mkIssueObj({ number: 611, labels: ["status:todo"], state: "open" }), // child still todo
+      610: mkIssueObj({ number: 610, labels: ["status:ready"], state: "open", childRefs: [611] }), // epic ready, AC complete, one child not done
     },
     async (client) => {
-      const r = await client.callTool({ name: "task_check", arguments: { id: "gh-600" } });
-      assert(r.isError !== true, "task_check via quay-github mcp for a compound (epic) issue does not error");
-      assert(
-        r.structuredContent?.gate === "none" &&
-          r.structuredContent?.ok === false &&
-          typeof r.structuredContent?.reason === "string" &&
-          r.structuredContent.reason.includes("gh-601") &&
-          Array.isArray(r.structuredContent?.childrenStatus) &&
-          r.structuredContent.childrenStatus.length === 1,
-        `quay-github's own task_check tool surfaces the compound "done but a child not done" shape unchanged, including childrenStatus (got: ${JSON.stringify(r.structuredContent)})`
-      );
+      // --- Case 1: needs-human — Core's taskCheck() passthrough, over a real
+      //     stdio MCP connection to `quay-github mcp` (PATH-shadowed, no live
+      //     network), surfaces the soft-stop shape unchanged. ---
+      {
+        const r = await client.callTool({ name: "task_check", arguments: { id: "gh-501" } });
+        assert(r.isError !== true, "task_check via quay-github mcp for a needs-human-labeled fixture issue does not error");
+        assert(
+          r.structuredContent?.gate === "none" &&
+            r.structuredContent?.ok === false &&
+            r.structuredContent?.reason === "soft stop; human action required",
+          `quay-github's own task_check tool surfaces the needs-human soft-stop shape unchanged (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
+
+      // --- Case 2: unrecognized status — the same direct github-mcp layer,
+      //     for a status:* label value the Provider does not recognize. ---
+      {
+        const r = await client.callTool({ name: "task_check", arguments: { id: "gh-503" } });
+        assert(r.isError !== true, "task_check via quay-github mcp for an unrecognized-status-labeled fixture issue does not error");
+        assert(
+          r.structuredContent?.gate === "unknown" &&
+            r.structuredContent?.ok === false &&
+            r.structuredContent?.reason === "unrecognized status bogus-status-value",
+          `quay-github's own task_check tool surfaces the unrecognized-status shape unchanged (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
+
+      // --- Case 3 (QN-072, iteration 86): compound (epic) task childrenStatus
+      //     rollup — genuinely distinct from Cases 1/2 above (different check()
+      //     branch entirely: status==="done" with role==="compound", not the
+      //     needs-human/unrecognized-status shortcuts). ---
+      {
+        const r = await client.callTool({ name: "task_check", arguments: { id: "gh-600" } });
+        assert(r.isError !== true, "task_check via quay-github mcp for a compound (epic) issue does not error");
+        assert(
+          r.structuredContent?.gate === "none" &&
+            r.structuredContent?.ok === false &&
+            typeof r.structuredContent?.reason === "string" &&
+            r.structuredContent.reason.includes("gh-601") &&
+            Array.isArray(r.structuredContent?.childrenStatus) &&
+            r.structuredContent.childrenStatus.length === 1,
+          `quay-github's own task_check tool surfaces the compound "done but a child not done" shape unchanged, including childrenStatus (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
+
+      // --- Case 4 (QN-073, iteration 87): a distinct, previously-uncovered
+      //     passthrough shape one branch over from Case 3's — the
+      //     `status:ready` compound (epic) rollup, i.e. the execute->done gate
+      //     (github-client.js#checkGate()'s own `status === "ready"` branch),
+      //     NOT the done-terminal branch Case 3 covered. Here `childrenOk` is
+      //     directly ANDed into the gate's own `ok` value. ---
+      {
+        const r = await client.callTool({ name: "task_check", arguments: { id: "gh-610" } });
+        assert(r.isError !== true, "task_check via quay-github mcp for a ready-status compound (epic) issue does not error");
+        assert(
+          r.structuredContent?.gate === "execute->done" &&
+            r.structuredContent?.ok === false &&
+            typeof r.structuredContent?.reason === "string" &&
+            r.structuredContent.reason.includes("gh-611") &&
+            Array.isArray(r.structuredContent?.childrenStatus) &&
+            r.structuredContent.childrenStatus.length === 1,
+          `quay-github's own task_check tool surfaces the ready-compound "AC complete but a child still todo" shape unchanged, including childrenStatus (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
     }
   );
 
+  // --- Cases 1b/2-core/3-core/4-core: the SAME fixture issues now through
+  //     Core's `quay mcp` aggregation layer (provider-client.js#taskCheck())
+  //     — the actual gap this task closes, matching QN-069's own scope one
+  //     layer up from quay-github's own MCP tool. Served by ONE shared Core
+  //     server (gap-suite-speedup consolidation). ---
   {
     const fakeGhDir = makeFakeGhPathDir();
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn072-workspace-"));
-    fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(workspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  github:",
-        "    enabled: true",
-        `    path: "${githubProviderDir}"`,
-        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
-        "    env:",
-        '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
-        "",
-      ].join("\n")
-    );
-    const coreEnv = {
-      ...process.env,
-      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
-      FAKE_GH_ISSUES_JSON: JSON.stringify({
-        603: mkIssueObj({ number: 603, labels: [], state: "closed" }), // child genuinely done
-        602: mkIssueObj({ number: 602, labels: [], state: "closed", childRefs: [603] }), // epic done, child genuinely done -> ok:true
-      }),
-    };
+    const { workspaceRoot, env: coreEnv } = makeCoreEnv(fakeGhDir, {
+      502: mkIssueObj({ number: 502, labels: ["status:needs-human"] }),
+      504: mkIssueObj({ number: 504, labels: ["status:bogus-status-value"] }),
+      603: mkIssueObj({ number: 603, labels: [], state: "closed" }), // child genuinely done
+      602: mkIssueObj({ number: 602, labels: [], state: "closed", childRefs: [603] }), // epic done, child genuinely done -> ok:true
+      613: mkIssueObj({ number: 613, labels: [], state: "closed" }), // child genuinely done
+      612: mkIssueObj({ number: 612, labels: ["status:ready"], state: "open", childRefs: [613] }), // epic ready, AC complete, child genuinely done -> ok:true
+    });
     const { client: core } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot, coreEnv);
     try {
-      const r = await core.callTool({ name: "task_check", arguments: { id: "gh-602", provider: "github" } });
-      assert(r.isError !== true, "task_check via quay mcp (provider=github) does not error for a compound epic with a genuinely-done child");
-      assert(
-        r.structuredContent?.gate === "none" &&
-          r.structuredContent?.ok === true &&
-          Array.isArray(r.structuredContent?.childrenStatus) &&
-          r.structuredContent.childrenStatus.length === 1 &&
-          r.structuredContent.childrenStatus[0].id === "gh-603" &&
-          r.structuredContent.childrenStatus[0].status === "done",
-        `Core's taskCheck() passthrough surfaces the compound "all children done" positive shape unchanged through the GitHub Provider, including per-child ids/statuses (got: ${JSON.stringify(r.structuredContent)})`
-      );
+      // Case 1b: the needs-human fixture issue through Core's aggregation.
+      {
+        const r = await core.callTool({ name: "task_check", arguments: { id: "gh-502", provider: "github" } });
+        assert(r.isError !== true, "task_check via quay mcp (provider=github, PATH-shadowed fixture) does not error for a needs-human fixture issue");
+        assert(
+          r.structuredContent?.gate === "none" &&
+            r.structuredContent?.ok === false &&
+            r.structuredContent?.reason === "soft stop; human action required",
+          `Core's taskCheck() passthrough surfaces the needs-human soft-stop shape unchanged through the GitHub Provider (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
+
+      // Case 2-core: the unrecognized-status fixture issue through Core's
+      // aggregation.
+      {
+        const r = await core.callTool({ name: "task_check", arguments: { id: "gh-504", provider: "github" } });
+        assert(r.isError !== true, "task_check via quay mcp (provider=github, PATH-shadowed fixture) does not error for an unrecognized-status fixture issue");
+        assert(
+          r.structuredContent?.gate === "unknown" &&
+            r.structuredContent?.ok === false &&
+            r.structuredContent?.reason === "unrecognized status bogus-status-value",
+          `Core's taskCheck() passthrough surfaces the unrecognized-status shape unchanged through the GitHub Provider (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
+
+      // Case 3-core: compound epic with a genuinely-done child (positive
+      // shape).
+      {
+        const r = await core.callTool({ name: "task_check", arguments: { id: "gh-602", provider: "github" } });
+        assert(r.isError !== true, "task_check via quay mcp (provider=github) does not error for a compound epic with a genuinely-done child");
+        assert(
+          r.structuredContent?.gate === "none" &&
+            r.structuredContent?.ok === true &&
+            Array.isArray(r.structuredContent?.childrenStatus) &&
+            r.structuredContent.childrenStatus.length === 1 &&
+            r.structuredContent.childrenStatus[0].id === "gh-603" &&
+            r.structuredContent.childrenStatus[0].status === "done",
+          `Core's taskCheck() passthrough surfaces the compound "all children done" positive shape unchanged through the GitHub Provider, including per-child ids/statuses (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
+
+      // Case 4-core: ready-compound epic with a genuinely-done child
+      // (positive shape).
+      {
+        const r = await core.callTool({ name: "task_check", arguments: { id: "gh-612", provider: "github" } });
+        assert(r.isError !== true, "task_check via quay mcp (provider=github) does not error for a ready-status compound epic with a genuinely-done child");
+        assert(
+          r.structuredContent?.gate === "execute->done" &&
+            r.structuredContent?.ok === true &&
+            Array.isArray(r.structuredContent?.childrenStatus) &&
+            r.structuredContent.childrenStatus.length === 1 &&
+            r.structuredContent.childrenStatus[0].id === "gh-613" &&
+            r.structuredContent.childrenStatus[0].status === "done",
+          `Core's taskCheck() passthrough surfaces the ready-compound "AC complete and all children done" positive shape unchanged through the GitHub Provider, including per-child ids/statuses (got: ${JSON.stringify(r.structuredContent)})`
+        );
+      }
     } finally {
       await core.close();
       fs.rmSync(fakeGhDir, { recursive: true, force: true });
@@ -432,88 +454,6 @@ async function main() {
       }
       const restored = fs.readFileSync(srcPath, "utf8");
       assert(restored === original, "adversarial check (QN-072): github-client.js is byte-identical to its original content after the isCompound break/restore cycle");
-    }
-  }
-
-  // --- Case 4 (QN-073, iteration 87): a distinct, previously-uncovered
-  //     passthrough shape one branch over from Case 3's — the
-  //     `status:ready` compound (epic) rollup, i.e. the execute->done gate
-  //     (github-client.js#checkGate()'s own `status === "ready"` branch),
-  //     NOT the done-terminal branch Case 3 covered. This is genuinely
-  //     different code (a separate `if` block, its own `isCompound`/
-  //     `childrenOk` computation at line ~410) and, unlike Case 3's
-  //     `done`-branch rollup (informational/corrective metadata only),
-  //     here `childrenOk` is directly ANDed into the gate's own `ok` value
-  //     (`const ok = acOk && childrenOk`) — a false positive/negative here
-  //     would silently let (or block) a real ready->done transition, not
-  //     merely omit metadata. Confirmed by grep before writing this: no
-  //     existing test (this file, compound-gate.test.mjs,
-  //     gate-gameability.test.mjs, view-model.test.mjs, or
-  //     packages/quay/test/mcp-server.test.mjs) connects a
-  //     `status:ready`-labeled compound fixture to either quay-github mcp's
-  //     own task_check tool or Core's quay mcp aggregation. ---
-  await withGithubMcpForMulti(
-    {
-      611: mkIssueObj({ number: 611, labels: ["status:todo"], state: "open" }), // child still todo
-      610: mkIssueObj({ number: 610, labels: ["status:ready"], state: "open", childRefs: [611] }), // epic ready, AC complete, one child not done
-    },
-    async (client) => {
-      const r = await client.callTool({ name: "task_check", arguments: { id: "gh-610" } });
-      assert(r.isError !== true, "task_check via quay-github mcp for a ready-status compound (epic) issue does not error");
-      assert(
-        r.structuredContent?.gate === "execute->done" &&
-          r.structuredContent?.ok === false &&
-          typeof r.structuredContent?.reason === "string" &&
-          r.structuredContent.reason.includes("gh-611") &&
-          Array.isArray(r.structuredContent?.childrenStatus) &&
-          r.structuredContent.childrenStatus.length === 1,
-        `quay-github's own task_check tool surfaces the ready-compound "AC complete but a child still todo" shape unchanged, including childrenStatus (got: ${JSON.stringify(r.structuredContent)})`
-      );
-    }
-  );
-
-  {
-    const fakeGhDir = makeFakeGhPathDir();
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn073-workspace-"));
-    fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(workspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  github:",
-        "    enabled: true",
-        `    path: "${githubProviderDir}"`,
-        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
-        "    env:",
-        '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
-        "",
-      ].join("\n")
-    );
-    const coreEnv = {
-      ...process.env,
-      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
-      FAKE_GH_ISSUES_JSON: JSON.stringify({
-        613: mkIssueObj({ number: 613, labels: [], state: "closed" }), // child genuinely done
-        612: mkIssueObj({ number: 612, labels: ["status:ready"], state: "open", childRefs: [613] }), // epic ready, AC complete, child genuinely done -> ok:true
-      }),
-    };
-    const { client: core } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot, coreEnv);
-    try {
-      const r = await core.callTool({ name: "task_check", arguments: { id: "gh-612", provider: "github" } });
-      assert(r.isError !== true, "task_check via quay mcp (provider=github) does not error for a ready-status compound epic with a genuinely-done child");
-      assert(
-        r.structuredContent?.gate === "execute->done" &&
-          r.structuredContent?.ok === true &&
-          Array.isArray(r.structuredContent?.childrenStatus) &&
-          r.structuredContent.childrenStatus.length === 1 &&
-          r.structuredContent.childrenStatus[0].id === "gh-613" &&
-          r.structuredContent.childrenStatus[0].status === "done",
-        `Core's taskCheck() passthrough surfaces the ready-compound "AC complete and all children done" positive shape unchanged through the GitHub Provider, including per-child ids/statuses (got: ${JSON.stringify(r.structuredContent)})`
-      );
-    } finally {
-      await core.close();
-      fs.rmSync(fakeGhDir, { recursive: true, force: true });
-      fs.rmSync(workspaceRoot, { recursive: true, force: true });
     }
   }
 

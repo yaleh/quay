@@ -173,4 +173,18 @@ export async function startMcpServer(): Promise<void> {
       }
     }
   };
+
+  // gap-suite-speedup (task gap-suite-speedup): when the client disconnects
+  // (stdin EOF), close the transport — which runs the onclose handler above
+  // and terminates every Provider subprocess this Core server spawned. The
+  // SDK StdioServerTransport only watches stdin for 'data'/'error', never
+  // 'end'/'close', so without this the Core process (and each still-alive
+  // Provider child) survives stdin EOF — an SDK client's
+  // StdioClientTransport.close() must then fall back to its 2s SIGTERM
+  // timeout, and a Provider child orphaned by that SIGTERM keeps running
+  // indefinitely. Closing the transport on stdin EOF makes the whole tree
+  // exit promptly on disconnect. No change to serving behavior.
+  process.stdin.on("close", () => {
+    void transport.close();
+  });
 }
