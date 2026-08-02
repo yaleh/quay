@@ -39,13 +39,13 @@
 | M246（DIR-124-A5） | 待 M243 裁定后 |
 | M222（DIR-112） | 待 M246 后；rebase 到 B5-1 之上，保留异步 + 换 QUAY_CLI |
 
-## 在飞（B6）
+## 在飞（B7）
 
 | 任务 | dispatch | runId | worktree |
 |---|---|---|---|
-| `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` | 15:44:35Z | fm-gap-suite-cost-model-is-wrong-optimizations-buy-nothing-1785685475162-odoz6u | ~~/tmp/quay-wt-costmodel~~（已合并移除） |
+| `gap-telemetry-report-writes-and-deadlocks-readiness` | 17:10Z | fm-gap-telemetry-report-writes-and-deadlocks-readiness-1785690646974-mw97c6 | /tmp/quay-wt-telemetry-readiness |
 
-B6-1 已完成：merge `4282632c`，全量绿（2136/2118/0/18，445.95s），任务置 done，计量 72 min。见「已完成 B6」。
+B7-1：把 `--report` 的写拆成显式 `--snapshot`/`--flush` 子命令，`--report` 变纯读。根因是职责错位（读操作在写）不是 gitignore——聚合保持跟踪、不放宽 readiness 干净树检查、不 gitignore 绕过。`.halt` 保留（去留等外层裁定），本任务是用户驱动的例外派发。外层已停两个 inner Monitor（各 60s 调一次 --report），树可保持干净，AC3（20 次 --report 后 git status --porcelain 为空）可真实验证。
 
 ## 已完成 B6
 
