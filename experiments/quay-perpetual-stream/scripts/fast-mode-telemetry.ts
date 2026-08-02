@@ -1,0 +1,1 @@
+../../../plugin/scripts/fast-mode-telemetry.ts

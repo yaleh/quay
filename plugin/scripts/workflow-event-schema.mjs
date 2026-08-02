@@ -52,10 +52,24 @@ export const VALID_STAGES = Object.freeze([
   "PlanAuthor",
   "PlanCheck",
   "Receipt",
+  // fast-mode (direct, non-workflow) execution — gap-fast-mode-no-telemetry (2026-08-02).
+  // Single "Fast" stage; start/end distinguished by the A1b `eventKind` extra field
+  // ('start'/'end'), matching execute-milestone.js `_emitStageEvent`'s convention. Purely
+  // additive — SCHEMA_VERSION is NOT bumped (M207 additive-growth precedent).
+  "Fast",
 ]);
 
 /** Valid stage-outcome values. */
-export const VALID_OUTCOMES = Object.freeze(["done", "needs-human", "skipped", "error"]);
+export const VALID_OUTCOMES = Object.freeze([
+  "done",
+  "needs-human",
+  "skipped",
+  "error",
+  // fast-mode (direct) execution — gap-fast-mode-no-telemetry (2026-08-02): a task abandoned
+  // without a completion commit (start emitted, --task-end never reached with a terminal
+  // outcome). Purely additive — SCHEMA_VERSION is NOT bumped.
+  "abandoned",
+]);
 
 /** Valid wait-reason values. */
 export const VALID_WAIT_REASONS = Object.freeze([
@@ -94,7 +108,7 @@ export const REQUIRED_FIELDS = Object.freeze([
   "recordedAtMs",
 ]);
 
-/** @typedef {"done"|"needs-human"|"skipped"|"error"|null} Outcome */
+/** @typedef {"done"|"needs-human"|"skipped"|"error"|"abandoned"|null} Outcome */
 /** @typedef {"admission-contention"|"cache-hit"|"prepared-blocked"|null} WaitReason */
 /** @typedef {"worktree"|null} IsolationMode */
 /** @typedef {"serial"|"concurrent"|null} DispatchMode */

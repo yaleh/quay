@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-08-02T08:59:56.204Z",
+  "since": null,
+  "tasks": [
+    {
+      "taskId": "gap-fast-mode-no-telemetry",
+      "minutes": 15.473333333333333,
+      "outcome": "done"
+    }
+  ],
+  "orphaned": [],
+  "inProgress": [],
+  "meanMinutes": 15.473333333333333,
+  "medianMinutes": 15.473333333333333,
+  "tasksPerHour": 3.8776389487289964
+}
