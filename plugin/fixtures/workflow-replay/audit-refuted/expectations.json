@@ -1,0 +1,65 @@
+{
+  "assertions": [
+    {
+      "id": "ar-001",
+      "description": "Audit completes before Land",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "auditCompletesBeforeLand",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "ar-002",
+      "description": "Gate runs after Audit",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "gateRunsAfterAudit",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "ar-003",
+      "description": "Terminal outcome needs-human",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "needs-human"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "ar-004",
+      "description": "Terminal phase is land (Land short-circuits)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomePhaseEquals",
+        "args": {
+          "expectedPhase": "land"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "ar-005",
+      "description": "No reconcile (width-1)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "reconcile"
+        }
+      },
+      "expected": true
+    }
+  ]
+}

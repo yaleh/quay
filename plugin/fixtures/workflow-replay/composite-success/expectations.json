@@ -1,0 +1,103 @@
+{
+  "assertions": [
+    {
+      "id": "cs-001",
+      "description": "Worktree created in Build",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "worktreeCreatedInBuild",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-002",
+      "description": "Worktree fields populated in Build",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "worktreeFieldsPopulated",
+        "args": {
+          "stage": "build"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-003",
+      "description": "Reconcile phase exists",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "reconcilePhaseExists",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-004",
+      "description": "Land merge occurs",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "landMergeOccurs",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-005",
+      "description": "Terminal outcome done",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-006",
+      "description": "Audit before Gate",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "gateRunsAfterAudit",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-007",
+      "description": "Reconcile before Land",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageOrderedBefore",
+        "args": {
+          "A": "reconcile",
+          "B": "land"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cs-008",
+      "description": "Audit per-shard count",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "per-shard agent count may change",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "audit",
+          "count": 3
+        }
+      },
+      "expected": true
+    }
+  ]
+}
