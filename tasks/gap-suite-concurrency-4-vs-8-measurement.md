@@ -103,5 +103,6 @@ method: `bash scripts/test.sh --test-concurrency=N` — `=` spelling only; stric
 |---|---|---|---|---|---|---|---|---|---|---|
 | 1 | 4 | 414 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
 | 2 | 4 | 398 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
+| 3 | 4 | 406 | 163 | 2298 | 2279 | 1 | 18 | 0 | 0 | 1 — M136 (DIR-070-A) sync-vendor.sh --check FAIL |
 
 run1/run2 note: M136 sync-vendor test FAILED under c4 (c8 full-red/isolated-green is the known baseline; **c4 red too — M136 is NOT c8-specific**, useful negative evidence for M136 diagnosis). No 'Promise pending'. ~~duration_ms ≈ 410062 ≈ wall 414 ⇒ Σ/wall ≈ 0.99 — c4 lanes not saturated~~ **划掉（外层更正）**：duration_ms 就是墙钟本身，0.99 是墙钟/墙钟必然近 1，与并发度无关。不得据此推饱和结论。
