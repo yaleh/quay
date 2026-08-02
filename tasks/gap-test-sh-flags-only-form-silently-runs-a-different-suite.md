@@ -67,24 +67,46 @@ exec node --test --test-concurrency=8 "$@"     # "$@" 就是那个标志，没�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `scripts/test.sh --test-concurrency=4` 的测试数与默认调用**相同**（当前 8573 vs 2296）
-- [ ] AC2: `scripts/test.sh --experimental-test-coverage`（文档化的那个形式）同样保持默认选择集
-- [ ] AC3: 用户传的 `--test-concurrency=N` 确实生效（last-flag-wins），用一个可观测差异证明
-      （如墙钟或 node 进程数），不能只看命令行
-- [ ] AC4: 每次运行打印「selected N files (groups=…)」，N 与 `--list-files` 的行数一致
-- [ ] AC5: 头部第 25 行的说明与实现一致；若改为不支持，则该行删除且 CLAUDE.md 同步
-- [ ] AC6: 回归测试 pin 住 AC1 —— 断言两种调用的测试数相等（**运行时计算，不写死 2296**）
-- [ ] AC7: 测试带 `// @test-group engine` 声明
+- [x] AC1: `scripts/test.sh --test-concurrency=4` 的测试数与默认调用**相同**。
+      实测（2026-08-02，worktree）：改后默认与 `--test-concurrency=4` 均为 **2298**（含新增 2 个
+      回归测试，相等 ✓）；改前默认 2296 / flags-only 8573（外层主 checkout）。
+- [x] AC2: `scripts/test.sh --experimental-test-coverage` 保持默认选择集。
+      实测：governance 代理 205 == 205（coverage 不改选择集）。
+- [x] AC3: 用户传的 `--test-concurrency=N` 生效（last-flag-wins）——墙钟实测：
+      `--group governance --test-concurrency=1` = 10.997s vs `--test-concurrency=16` = 6.307s
+      （同为 205 tests，差异可观测）。
+- [x] AC4: 每次（glob 选择）运行打印「selected N files (groups=…)」：`selected 163 files
+      (groups=product,engine)` / `selected 13 files (groups=governance)`，N 与 `--list-files`
+      行数一致（163/13）。
+- [x] AC5: 头部第 25 行（flags-only 形式）已实现成立；CLAUDE.md 已同步。
+- [x] AC6: 回归测试 `AC1/AC2/AC6: flags-only forms run the same test count as the group default;
+      AC4 self-report` 运行时计算断言 205 == 205 == 205（governance 代理，不写死 2296）。
+- [x] AC7: 测试带 `// @test-group engine` 声明（runner-grouping.test.mjs 顶部）。
 
 ## Definition of Done
 
-- [ ] AC1/AC2 的实测测试数（改前/改后）贴进任务体
-- [ ] `scripts/test.sh` 绿
-- [ ] 明确记录：**一个改变了测量对象却不声明的工具，会让所有基于它的测量静默作废**——
-      本次实测代价是一整组对照实验数据
+- [x] AC1/AC2 实测测试数（改前/改后）贴进任务体：
+  - 改前（外层 2026-08-02 主 checkout，即任务体顶部数据）：默认 2296 / flags-only **8573**（3.7x）
+  - 改前（本 worktree 全新 checkout，auto-discovery 文件群不同）：默认 2296 / flags-only 2430
+  - 改后（本 worktree）：默认与 `--test-concurrency=4` 均为 **2298**（含新增 2 个回归测试；相等 ✓）；
+    coverage 保持默认选择集（governance 205 == 205）
+- [x] `scripts/test.sh` 绿：`--for-task` 迭代 9/9；select-tests-for-touches 19/19；改后全量套件唯一
+      失败为 AC11（本改动 exec 行变更所致，已同步修 regex → 该文件 19/19 绿）。注：M136
+      (sync-vendor --check) 在首次全新 checkout 默认跑失败、在改后跑通过（既有/不稳定，非本改动引入）。
+- [x] 明确记录：**一个改变了测量对象却不声明的工具，会让所有基于它的测量静默作废**——
+      本次实测代价是一整组对照实验数据（外层 c4 vs c8 对照整组作废）。
+
+## 额外记录（REFUTE round-1）
+
+- 对抗审查 1 轮（general-purpose REFUTE agent）：无 critical；1 MAJOR → 已文档化
+  （space 形式 `--test-concurrency 4` 的 value token 与文件路径不可区分，仍走 explicit-file 分支，
+  与改前行为一致；flags-only 仅支持 `=` 拼写，已写进 test.sh 头注释 + CLAUDE.md）；1 MINOR →
+  已修（parseTestCount 取 last match）；3 NIT → 已处理（AC4 措辞限定 glob 选择、`--help` 噪音保留、
+  all_flags 空参契约注释）。
 
 ## Touches
 
 - scripts/test.sh
 - plugin/test/runner-grouping.test.mjs
+- plugin/test/select-tests-for-touches.test.mjs (AC11 structural regex — 本改动的 exec 行变更使旧 regex 失配)
 - CLAUDE.md
