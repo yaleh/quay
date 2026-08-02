@@ -2,6 +2,9 @@
 
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 
+**这份文件必须能在 `/clear` 后的空上下文里独立启动。** 若你刚被清空上下文，按「冷启动」一节先建立
+状态，再进入 tick 步骤。
+
 **调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
 
 ```
@@ -9,6 +12,23 @@
 ```
 
 ---
+
+## 冷启动（`/clear` 后的空上下文）
+
+按顺序读这四份，然后从 tick 步骤 1 开始：
+
+1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）
+2. `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD
+3. `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` —— 四项原则
+4. 本文件其余部分
+
+再跑这三条建立实况（**以实测为准，不以队列文件为准**——它可能是 compact 前的旧快照）：
+
+```bash
+git log --oneline -10 && git status --short
+node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
+```
 
 ## 定位：看护，不是调度
 
@@ -114,16 +134,34 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
 
 没有计量，「1 任务/小时」无法判定，也无法知道任何优化是否真的有效。
 
-### 4. 派发就绪任务
+### 4. 派发就绪任务（并发）
 
-并发上限 **3 个在飞 subagent**（含本 tick 之前就在跑的）。
+**并发上限 3 个在飞 subagent。** 并发是打破「外层变瓶颈」的手段——串行时外层的 20 分钟 tick 频率
+会和任务完成频率同量级，分层退化成单层加延迟。
 
 派发前对每个候选：
 
-- 依赖满足（父任务/前置任务已 done）
-- 与**所有在飞任务**做 `checkTouchesPair`——重叠则跳过，等下一 tick
+1. **依赖就绪**：父任务 done、无未满足前置。用 `it0-split-or-commit-check.ts` 的
+   PARENT-DONE-IFF-CHILDREN 语义，不自己重新发明
+2. **并发资格**：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞
+   任务和彼此**两两检查
 
-派发形态见 `docs/analysis/fast-mode-batch2-prompt.md`：后台 `Agent(run_in_background)`，subagent 自建 `/tmp/quay-wt-<slug>` worktree 和 `task/<id>` 分支，内部起独立对抗审查（硬上限 2 轮），只提交不合并。
+```bash
+node --experimental-strip-types -e "
+const R='$(pwd)'; const fs=await import('node:fs');
+const m=await import(R+'/plugin/scripts/touches-orthogonality-check.ts');
+const A=m.parseTouches(fs.readFileSync(R+'/tasks/<A>.md','utf8'));
+const B=m.parseTouches(fs.readFileSync(R+'/tasks/<B>.md','utf8'));
+const expand=(g)=>new Set(g.map(x=>m.normalizePath(x.replace(/ \(.*\)\$/,'').trim())));
+console.log(m.checkTouchesPair(A,B,expand));
+"
+```
+
+重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
+
+派发形态：后台 `Agent(run_in_background)`，subagent 自建 `/tmp/quay-wt-<slug>` worktree 和
+`task/<id>` 分支，内部起独立对抗审查（硬上限 2 轮），只提交不合并。
+`milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
 
 ### 5. 写回状态
 
@@ -157,6 +195,26 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
 
 全局量（文件数、测试数、组成员数）必须**运行时计算**，不得写成常量。断言可以是「product 组 +
 engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，不能是「== 58」这类**快照**。
+
+## 发现问题时建任务（有证据才建）
+
+内层要能自己发现问题并建任务，否则 12 小时无人值守只会产出代码不产出待办。
+
+**建任务的门槛：有可复现证据。** 三者之一即可：
+
+- 一个失败的测试（贴出失败输出）
+- 一个 grep/实测结果（贴出命令与输出）
+- 一次真实运行的耗时或行为记录
+
+**没有证据的观察不建任务**——记进队列状态文件的「待查」一节，等有证据再升格。这条是为了防止
+12 小时产出十几个噪声任务。
+
+建的任务必须有：`## Proposal`（问题 + 证据 + 选定机制）、`## Acceptance Criteria`（可机械验证）、
+`## Touches`。缺任一项的不算建成。
+
+**发现问题必须处置**：修，或建任务。**不要静音、不要降级后就走。** 本项目已有四次
+「造了检测机制 → 它正确报警 → 警报无人处理」（RED 测试被改 skip、golden replay 被当预存失败、
+clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 
 ## 每个 tick 必报
 
