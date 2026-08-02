@@ -1,8 +1,8 @@
 ---
 id: gap-sync-vendor-drift-mislabelled-as-task-schema
-title: "M136 fails deterministically and its error names a file that does not
-  exist — the drift is the vendored dist bundle"
-status: todo
+title: M136 fails deterministically and its error names a file that does not
+  exist — the drift is the vendored dist bundle
+status: needs-human
 labels:
   - gap
   - defect
