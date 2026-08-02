@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-08-02T17:34:00.527Z",
+  "generatedAt": "2026-08-02T17:54:54.870Z",
   "since": null,
   "tasks": [
+    {
+      "taskId": "DIR-112",
+      "minutes": 10.43525,
+      "outcome": "done"
+    },
     {
       "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
       "minutes": 40.256233333333334,
@@ -45,7 +50,7 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 42.6149,
-  "medianMinutes": 40.25631666666666,
-  "tasksPerHour": 1.4079582493447127
+  "meanMinutes": 39.03938333333334,
+  "medianMinutes": 40.256233333333334,
+  "tasksPerHour": 1.5369095225633258
 }
