@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 00:20Z | `correct` | Monitor 首次报 `ORPHAN`（今日 orphaned 一直为 0，AC9 要求无 orphaned）。查证为**在研工具自身污染生产遥测**，已要求合并前修 | 三任务并发中（12/12/14 分钟）；`done 15` / `inProgress 3` / `orphaned 1` | **幽灵记录的来源**：runId 前缀 `blk-` 来自 `/tmp/quay-wt-blocked/plugin/scripts/inner-blocked-signal.ts:293`，事件文件落在**真实** `.workflow-events/`（非 worktree），内容是演示数据（`blockedQuestion` 为今晚 M243 那个问题的回放）。**即：正在开发的「让阻塞可观测」的工具污染了用来观测它的遥测存储**。与「测试写进真实 `tasks/`」「M136 跨测试干扰」同族。要求：工具支持 `--root`、测试传临时 root（判据：跑完测试后真实事件目录不新增文件）；清掉幽灵记录并在任务体注明是测试产物 |
 | 2026-08-03 00:07Z | `unblock` | 人批准后一并推下两件：内层 `/loop` 启动（AC6 后半）与并发批次。**AC13 达成** | **遥测证据：`inProgress 3`** = `blocked-signal` + `test-framework-policy` + `relation-sync`——无人值守窗口内首次真实并发 | **组批用 `checkTouchesPair` 实测两两正交，非目测**：relation-sync × 其余四候选全 DISJOINT；blocked-signal × test-framework-policy DISJOINT。**排除的**：`stranded-worktree` 与 blocked-signal、reverse-drift 双双 OVERLAP，留下一批。优先级理由：blocked-signal 修的正是今晚让内层停摆两次的推进信号（22:05/22:24），且是阶段 2「层间通信不能靠读屏」的解法；test-framework-policy 的棘轮针对 relation-sync 此刻卡住的「手写 harness 说不出话」 |
 | 2026-08-03 00:08Z | `correct` | 独立全量核实 M136 三轮修复：**M136 确已消失、负控制成立**（内层做对）。但**套件仍非绿**——换成 `relation-sync.test.mjs`，故内层「主要任务全部落地」的收尾陈述中「套件绿」不成立。已建任务并派为下一批 | 遥测 done 15 / orphaned 0 / 1.33 每小时；`.halt` 已解除 6.4 小时 | **外层独立全量**（00:03Z，439s）：2298 tests / 2279 pass / **fail 1**。查证新失败与 M136 同族：隔离 1/1 绿、套件红、第三轮未触及（`615d143b`/`93566f05`）⇒ **修好 M136 没修好这个类**。已排除目录撞车。**真正卡住诊断的是 harness**：失败仅一行文件级信息、无断言细节——它是 `test-shape-analysis.md` 识别的 34 个手写 harness 之一。M136 排查耗掉整晚同有此因（`plugin-packaging.test.mjs` 亦然）。新任务的机制定为「先让它能说话，再诊断它」 |
 | 2026-08-02 23:44Z | `no-action` | M136 第三轮已合并（`413c6436`），修法形状正确，负控制已执行且通过；内层在跑最终全量验证，无需介入 | 任务 49 分钟（阈值 90）；`node-MainThread` 29 / `load1=7.54`；遥测 done 14 / orphaned 0 | **核实修法是消除干扰源而非掩盖**：`build-dist.mjs` 改为接受目标路径，`build-dist.test.mjs` 与 `npm-pack-e2e.test.mjs` 改为 `import { buildDist }` 后构建到临时树，不再重写共享 `dist/quay.js`。**内层绕开了一个负控制陷阱**：改脏 dist bundle 会被 `--sync-dist` 覆盖使负控制失效，故改脏 `plugin/skills/author/SKILL.md`（`--sync-dist` 不碰它）——判断正确。**外层第五次栽在同一个坑**：我数出「共享路径引用 1→3」并起疑，实际那 3 处**全是注释**，写的正是「不再重写共享 dist」本身 |
@@ -66,10 +67,10 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 21 | 43% |
+| no-action | 21 | 42% |
 | unblock | 10 | 20% |
-| correct | 15 | 31% |
+| correct | 16 | 32% |
 | escalate | 3 | 6% |
-| **合计** | **49** | — |
+| **合计** | **50** | — |
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 31%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 32%。
