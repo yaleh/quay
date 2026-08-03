@@ -1,8 +1,8 @@
 ---
 id: gap-no-explicit-blocked-signal-from-inner-layer
-title: "The inner layer stops and waits with no way to say so — the outer can
-  only infer it from an absence"
-status: todo
+title: The inner layer stops and waits with no way to say so — the outer can
+  only infer it from an absence
+status: done
 labels:
   - gap
   - milestone-candidate

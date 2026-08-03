@@ -1,8 +1,8 @@
 ---
 id: gap-no-test-framework-policy-for-new-tests
-title: "No policy says which test framework new tests use — 34 files drifted to
-  a hand-rolled harness with nothing to stop the 35th"
-status: todo
+title: No policy says which test framework new tests use — 34 files drifted to a
+  hand-rolled harness with nothing to stop the 35th
+status: done
 labels:
   - gap
   - milestone-candidate
