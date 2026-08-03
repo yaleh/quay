@@ -64,8 +64,75 @@
 #     显式设置的环境变量 SESSION_TARGETS 优先于该文件；generic 项目没有该文件 → 零配置默认。
 #   - 阈值（INTERVAL/STALL_MIN/LOOP_MIN/OVERDUE_MIN）含义与默认值见随包的两份 tick 文档（AC5）。
 #
-# 用法：  plugin/scripts/session-liveness.sh [--once]
+# 用法：  plugin/scripts/session-liveness.sh [--once] [--mask] [--api-errors <t>] [--last-input <t>]
 #   --once   跑一轮，打印每个目标的 SESSION-STATUS 行，退出（冷启动/安装后自检接缝，AC7）。
+#   --mask   测试接缝：从 stdin 读 pane 文本，打印屏蔽易变区后的内容（AC1 单测直接调用）。
+#   --api-errors <t>  测试接缝：打印 transcript <t> 最近 API_ERROR_WINDOW 条记录里
+#                     isApiErrorMessage 结构字段计数（AC9 单测）。
+#   --last-input <t>  测试接缝：打印 transcript <t> 最近 type=user 记录时间戳的 epoch（AC7 单测）。
+# 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN / FRESH_SECS / API_ERROR_WINDOW / API_ERROR_MIN（阈值）
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 阶段二（gap-session-liveness-stage-2-screen-signal-and-payload，2026-08-03）：
+# 屏幕语义标志 + 屏蔽易变区 + 交叉正控制 + payload + 每类阈值。承接前任务未完成的
+# AC9-AC14（阶段一 = 信号源 + 基线，见上）。各 AC 的实现点：
+#   AC1（原AC10/规格AC18）主信号改语义标志：`esc to interrupt` 按【存在性】判忙，
+#       不按计数（实测管理者 4 次/内层 1 次——计数无意义）。屏蔽转圈耗时行（✽）、
+#       token 计数行（`/clear to save …`）、提示语行；`✻ …` 残留不得作为忙的判据。
+#       判忙 = esc 标志存在 或 屏蔽易变区后的内容区有变化——后者保住非 TUI 探针 /
+#       subagent 输出这类真活动（TUI 之外还有内容在变）。屏蔽规则集中在 mask_pane()，
+#       逐条附「为什么它不是活动信号」（见函数注释）。
+#   AC2（原AC11/规格AC18正控制）标志失效必须可发现：屏幕与 transcript 交叉正控制——
+#       transcript 刚写过（会话确定在动）而屏幕判空闲 ⇒ 报 SESSION-MARKER-STALE。
+#       只对「心跳源是 transcript」的目标成立（tick 日志是 loop 写的，不是会话活动的证据）。
+#       不是造人工忙会话。不一致率基线：脚本不统计，由观察者从事件流里数（全忙会话同时
+#       报 = TUI 文案变了，比率跳到 100%）。
+#   AC3（原AC12）假阳性可解释：每个事件带成因——是屏上哪一部分造成的（哪个标志 / 哪个区）。
+#   AC4（原AC9/规格AC17）屏幕与 transcript 的取舍写在下文「两种信号」节。
+#   AC5（原AC13/损失函数结论一）两类漏报反向调参：不可自愈类（GONE/OVERDUE/CANT-SEND）
+#       宁可误报、可自愈类（IDLE/RESUMED）从严。当前默认曾调反（IDLE 60s 即报、
+#       OVERDUE 等 45min）；改后 OVERDUE_MIN 默认 45→30（不可自愈，早报 15min；阶段一
+#       实测 transcript 长任务最大间隙 20.5min，30min 仍留 ≥9min 余量）；IDLE 从严 =
+#       默认 LOOP_MIN=20 的噪声闸门（刚动过=正常收尾→静默；心跳陈旧/未知才报）。
+#       逐事件类别与阈值理由见下节。
+#   AC6（原AC14/损失函数结论二）SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）：
+#       判据是「收到事件后无需再采样即可判真假」——原来外层每次 3-4 次调用，改后 1 次。
+#   AC7（原AC14b）事件还带「会话最后一次收到输入的时刻」（transcript 最近 type=user 记录
+#       的时间戳）：紧贴恢复→外部唤醒、远早→自身 loop。取不到时明说「取不到」，不省略
+#       （省略与「不是外部唤醒」同形）。
+#   AC9（盲点13，2026-08-03 17:4xZ）区分「空闲因为没活干」与「空闲因为发不出请求」：
+#       判据是【结构性】字段 isApiErrorMessage（顶层 JSON 键 `"isApiErrorMessage":true`，
+#       只有 API 被拒记录才有——archguard 被 429 拒绝会话最近 200 条为 6，健康/陈旧会话为 0）。
+#       不用 429 文案（绑死供应商文案，换端点即失效）；不用「transcript 是否增长」
+#       （429 也会被写进 transcript——archguard 被拒期间最新写入 17:44:31，增长分不开两种
+#       空闲，而记录的类型可以）。空闲会话最近 API_ERROR_WINDOW 条记录含 ≥API_ERROR_MIN
+#       条 ⇒ 报 SESSION-IDLE-CANT-SEND，按不可自愈类处理（宁可误报，立即升级给人）；
+#       无该标记的空闲仍走常规 SESSION-IDLE。
+#
+# 两种信号（AC4/规格AC17）：各自的盲区与同时用时以谁为准
+#   - 屏幕（tmux capture-pane）：语义清晰、即时、是「人真正看的那几个标志」；但依赖 tmux，
+#     且 TUI 布局/文案一改标志就失效——失效形态是【静默】（找不到 esc to interrupt 就永远
+#     判空闲）。易变区（转圈耗时/token 计数/提示语/✻ 残留）必须屏蔽，否则把 chrome 的抖动
+#     读成活动（姊妹任务确认的假阳性源）。
+#   - transcript（~/.claude/projects/<slug>/<id>.jsonl）：不依赖 tmux、不受重绘影响、stat 便宜；
+#     但只在【工具调用】时写（读代码/纯思考/等 subagent 时主 transcript 不写——subagent 写
+#     在 <id>/subagents/，heartbeat_mtime 并上），且 pid→文件映射受 /clear 与 --resume 解耦，
+#     会话 id 是【配置不去推断】（SESSION_TRANSCRIPTS）。
+#   同时用时以谁为准：忙闲以屏幕为准（即时、语义）；心跳/逾期以 transcript 为准（不依赖
+#   TUI）；二者冲突（transcript 刚写过而屏幕判空闲）⇒ 屏幕标志存疑，报 SESSION-MARKER-STALE。
+#
+# 逐事件类别与阈值理由（AC5）：
+#   SESSION-GONE              不可自愈（无界）→ 无阈值，立即报（宁可误报）
+#   SESSION-IDLE              可自愈（上界=外层 20min tick）→ 从严：默认 LOOP_MIN=20
+#                             噪声闸门，心跳陈旧/未知才报；LOOP_MIN=0（管理者显式配置）
+#                             = 知悉全部（其明确选择，见 orchestration/session-liveness.env）
+#   SESSION-RESUMED           可自愈但唯一正向信号 → 立即报、保留（便宜，且是唯一能确认
+#                             会话还在按期活动的正向信号）
+#   SESSION-OVERDUE           不可自愈（无界）→ 宁可误报：默认 OVERDUE_MIN=30（原 45），
+#                             阶段一实测 transcript 最大间隙 20.5min，30min 早报 15min 且留余量
+#   SESSION-IDLE-CANT-SEND    不可自愈（发不出请求不会自愈）→ 宁可误报：见即报（AC9）
+#   SESSION-MARKER-STALE      检测类（标志失效）→ 无阈值、见即报，随事件流观察不一致率
+#   REPO-STALL                仓库信号（非会话面，AC8 裁定承载）→ STALL_MIN=45 保持
 # 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN（阈值）
 #         SESSION_TARGETS / SESSION_HEARTBEATS / SESSION_TRANSCRIPTS（多目标覆盖；每行 "<名字> <值>"）
 #         SESSION_ROOT（测试接缝：覆盖自定位的项目根）
@@ -74,11 +141,19 @@ set -uo pipefail
 INTERVAL=${INTERVAL:-60}
 STALL_MIN=${STALL_MIN:-45}          # 未暂停的项目超过这么久没有新提交 = 停滞（REPO-STALL）
 LOOP_MIN=${LOOP_MIN:-20}            # SESSION-IDLE 静默判据的边界（抑制阈值；见 EXPECTED_CYCLE_MIN）
-OVERDUE_MIN=${OVERDUE_MIN:-45}      # 超过它就认为会话没在动（>2× 周期，容忍跑重活的长时段）
+OVERDUE_MIN=${OVERDUE_MIN:-30}      # 超过它就认为会话没在动。AC5（原AC13）不可自愈类宁可误报：
+                                    # 默认 45→30（阶段一实测 transcript 长任务最大间隙 20.5min，
+                                    # 30min 早报 15min 且仍留 ≥9min 余量）。
+# 阶段二新增阈值（AC2/AC9）：
+FRESH_SECS=${FRESH_SECS:-15}        # SESSION-MARKER-STALE 的「刚写过」窗口：transcript mtime 距 now
+                                    # ≤ 此秒数 = 会话确定在动（工具调用刚发生）。
+API_ERROR_WINDOW=${API_ERROR_WINDOW:-200}  # AC9：扫最近多少条 transcript 记录找 isApiErrorMessage
+API_ERROR_MIN=${API_ERROR_MIN:-1}          # AC9：窗口内 ≥ 此条即判「发不出请求」（宁可误报一侧）
 # 文案常数（LOOP_MIN 含义拆分，2026-08-03）：OVERDUE 消息里的「预期周期」是固定描述，不是运行时
 # 阈值——LOOP_MIN 可以被设成 0（管理者配置），而「预期周期 0 分钟」是文案 bug。两个含义拆开。
 EXPECTED_CYCLE_MIN=20
-declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UNHALT_TS
+declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UNHALT_TS \
+  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE
 
 # ── 版本可见性（2026-08-03 管理者建议，非规格）──
 # 启动时打一行指纹到 stderr——「跑的是哪个版本」可从外部查：对比这行的 md5 与当前文件的 md5，
@@ -87,10 +162,68 @@ declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UN
 printf 'session-liveness: starting pid=%s file=%s md5=%s\n' \
   "$$" "$(basename "${BASH_SOURCE[0]}")" "$(md5sum "${BASH_SOURCE[0]}" 2>/dev/null | cut -c1-16)" >&2
 
+# ── 阶段二新增的纯函数（在 case 之前定义，供测试接缝直接调用）────────────────────────────
+
+# mask_pane —— 屏蔽「不是会话内容」的易变区（AC1/规格 AC18）。每条屏蔽规则附「为什么它不是
+# 活动信号」：
+#   * `/clear to save …`（token 计数行）：停泊会话唯一会变的东西——姊妹任务确认的假阳性源
+#     （archguard 停泊 pane 只有 150.2k→151.2k 变，被判成一堆事件）。这是提示语行的 chrome。
+#   * 含 ✽ 的行（转圈耗时行）：活跃 spinner，每秒跳——「人不看的部分」。
+#   * 含 ✻ 的行（`✻ Baked for …` 残留）：上一次动作留在屏上的字，五个会话全部存在（含空闲的），
+#     不能当忙的判据（外层实测：两个停泊 pane 各 2/1，而它们 esc=0）。
+# 注意：不按关键词 `tokens` 一刀切——subagent 任务行 `◯ general-purpose … ↓ 57.3k tokens`
+# 是真内容，随真实工作而变，必须保留（滤掉它=把假阳性换成假阴性，后者静默、更糟）。
+# 输出保留真内容；剥离后内容区为空时主循环的 busy_sem（esc 标志）仍能独立判忙，
+# 不会静默判空闲（AC1 的「剥离后内容区不得为空」防过滤保障）。
+mask_pane() {
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *'/clear to save'*) continue ;;   # token 计数行（chrome）
+      *'✽'*) continue ;;                # 转圈耗时行（活跃 spinner，每秒跳）
+      *'✻'*) continue ;;                # `✻ …` 残留（上一次动作的字，空闲会话也有）
+      *) printf '%s\n' "$line" ;;
+    esac
+  done
+}
+
+# transcript_api_error_count —— 最近 API_ERROR_WINDOW 条记录里「结构性」isApiErrorMessage 字段
+# 的计数（AC9）。结构字段 = 顶层 JSON 键 `"isApiErrorMessage":true`（只有 API 被拒记录才有，
+# 实测 archguard 被 429 拒绝会话最近 200 条为 6、健康/陈旧会话为 0）。
+# 不用 429 文案（绑死供应商文案，换端点即失效）；不用「transcript 是否增长」（429 也会被写进
+# transcript，增长分不开两种空闲——被拒会话实测仍在增长，而记录的类型可以）。
+# grep 模式 `"isApiErrorMessage":…true` 只命中顶层键：content 里文字提及该字段的形式是
+# `isApiErrorMessage: true` 或转义键 `\"isApiErrorMessage\":…`，前导不是裸 `"`，不会误命中。
+transcript_api_error_count() {
+  local t=$1 n
+  n=$(tail -n "$API_ERROR_WINDOW" "$t" 2>/dev/null | grep -c '"isApiErrorMessage"[[:space:]]*:[[:space:]]*true' 2>/dev/null || true)
+  [ -z "$n" ] && n=0
+  printf '%s\n' "$n"
+}
+
+# last_user_input_epoch —— transcript 里最近一条 type=user 记录的时间戳转 epoch（AC7）。
+# 会话收到输入（打字 / send-keys / loop 注入的提示）都会写 type=user 记录；「最后一次收到输入
+# 的时刻」= 最近一条这种记录的 timestamp。返回空 = 取不到（无匹配/解析失败）。
+last_user_input_epoch() {
+  local t=$1 line ts
+  line=$(grep '"type":"user"' "$t" 2>/dev/null | tail -1)
+  [ -n "$line" ] || return 1
+  ts=$(printf '%s' "$line" | grep -o '"timestamp":"[^"]*"' | head -1 | cut -d'"' -f4)
+  [ -n "$ts" ] || return 1
+  date -d "$ts" +%s 2>/dev/null || return 1
+}
+
 ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;
-  -h|--help) echo "用法: $0 [--once]"; exit 0 ;;
+  --mask) mask_pane; exit 0 ;;
+  --api-errors)
+    [ -n "${2:-}" ] || { echo "用法: $0 --api-errors <transcript>" >&2; exit 2; }
+    transcript_api_error_count "$2"; exit 0 ;;
+  --last-input)
+    [ -n "${2:-}" ] || { echo "用法: $0 --last-input <transcript>" >&2; exit 2; }
+    if last_user_input_epoch "$2"; then :; else echo "取不到"; fi
+    exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--mask] [--api-errors <t>] [--last-input <t>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -228,6 +361,11 @@ while true; do
     halted=$([ -f "$root/.halt" ] && echo 1 || echo 0)
     resumed=0   # 本轮该目标是否已报 SESSION-RESUMED（OVERDUE 与 RESUMED 不得同轮同目标同发）
 
+    # 该目标的 transcript 路径（AC2/AC7/AC9 用）：SESSION_TRANSCRIPTS 配置了才有；
+    # 没有 → tr_path 空，AC2 交叉正控制与 AC9 发不出请求检查对该目标不适用（tick 日志不是会话证据）。
+    tr_path=""
+    tr_path=$(transcript_for "$name" "$root" || true)
+
     # 停机基线（协调方 2026-08-03 样本）：解除停机那一刻重置陈旧度起点。监视器每轮自己观察
     # .halt 从存在→不存在，不需要额外状态源。archguard 停泊 310 分钟后删 .halt，同一轮打出
     # OVERDUE 误报——根因是基线没重置，不是源选错也不是缺抑制。
@@ -279,37 +417,106 @@ while true; do
     # 人 2026-08-03 指出：「我可以接受让 outer 等待，但应当是你及时知道发生了什么并决定让它等待。」
     # 原来的事件集只有滞后指标：会话跑完一次操作转入空闲时，进程活着、刚提交过，全部静默。
     #
-    # 判据是相邻两轮（相隔一个 INTERVAL）的 pane 哈希是否相同。这不是忙等——一轮只抓一次。
-    # 双向验过：忙的 pane 因为 TUI 有秒级递增计时器，哈希必变；空闲的必不变。
+    # 判据（阶段二，AC1/规格 AC18）：屏幕信号改为【语义标志 + 屏蔽易变区】，不是整屏哈希。
+    #   忙 = `esc to interrupt` 存在（按【存在性】判，不按计数——实测管理者 4 次/内层 1 次，
+    #   计数无意义）或 屏蔽易变区后的内容区有变化（保住非 TUI 探针 / subagent 输出这类真活动）。
+    #   闲 = 两样都没有。易变区（转圈耗时 ✽ / token 计数 /clear to save / ✻ 残留）被 mask_pane
+    #   剥离，所以「停泊会话只有 token 计数器在变」不会判忙（姊妹任务的假阳性源在此吸收）。
     # 不用 /proc CPU 增量：空闲的 Claude Code TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
     if [ "$alive" = "1" ]; then
-      h=$(tmux capture-pane -p -t "$target" 2>/dev/null | md5sum | cut -c1-16)
+      raw=$(tmux capture-pane -p -t "$target" 2>/dev/null)
+      busy_esc=$(printf '%s\n' "$raw" | grep -c 'esc to interrupt' 2>/dev/null || true)
+      [ -z "$busy_esc" ] && busy_esc=0
+      busy_sem=$([ "$busy_esc" -ge 1 ] 2>/dev/null && echo 1 || echo 0)
+      masked=$(printf '%s\n' "$raw" | mask_pane)
+      h=$(printf '%s' "$masked" | md5sum | cut -c1-16)
       if [ -n "${PREV_HASH[$name]:-}" ]; then
-        idle=$([ "$h" = "${PREV_HASH[$name]}" ] && echo 1 || echo 0)
+        content_changed=$([ "$h" = "${PREV_HASH[$name]}" ] && echo 0 || echo 1)
+        busy=$(( busy_sem || content_changed ))
+        idle=$(( 1 - busy ))
         if [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
           if [ "$idle" = "1" ]; then
             hb=$(heartbeat_for "$name" "$root"); hmin="?"
             hmod=$(heartbeat_mtime "${hb:-/nonexistent}")
             [ "$hmod" != "0" ] && hmin=$(( ( $(date +%s) - hmod ) / 60 ))
             halt_msg=$([ "$halted" = "1" ] && echo "（该项目已暂停，空闲是预期状态）" || echo "")
-            # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
-            # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
-            # hmin < LOOP_MIN 的空闲 = 正常收尾 → 静默；hmin ≥ LOOP_MIN 或未知（无心跳文件）=
-            # 「空闲了但没动」，会话可能跑一半就停 / 已死 → 报。SESSION-RESUMED 保留不静默
-            # （它便宜，且是唯一能确认会话还在按期活动的正向信号）。
-            if [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
+            # AC9（盲点13）：空闲且发不出请求（最近 transcript 记录带结构性 isApiErrorMessage）。
+            # 这是「不可自愈类」——发不出请求不会自己好，按 AC5 宁可误报一侧，见即报（升级给人）。
+            # 与常规 IDLE 互斥：能发请求才谈「没活干」，故这里直接二选一。
+            api_n=0; api_blocked=0
+            if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+              api_n=$(transcript_api_error_count "$tr_path")
+              api_blocked=$([ "$api_n" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
+            fi
+            PREV_API_BLOCKED[$name]=$api_blocked
+            if [ "$api_blocked" = "1" ]; then
+              echo "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+            elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
+              # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
+              # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
+              # hmin < LOOP_MIN 的空闲 = 正常收尾 → 静默；hmin ≥ LOOP_MIN 或未知（无心跳文件）=
+              # 「空闲了但没动」，会话可能跑一半就停 / 已死 → 报。SESSION-RESUMED 保留不静默
+              # （它便宜，且是唯一能确认会话还在按期活动的正向信号）。
               echo "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
             fi
           else
             resumed=1
-            echo "SESSION-RESUMED $name 的会话恢复活动（此前空闲）"
+            # AC6/AC7：SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）+ 上次收到输入时刻。
+            # 判据：收到事件后无需再采样即可判真假（原外层 3-4 次调用，改后 1 次）。
+            cause_parts=()
+            [ "$busy_sem" = "1" ] && [ "${PREV_BUSY_SEM[$name]:-0}" = "0" ] && cause_parts+=("esc to interrupt 标志出现")
+            [ "$content_changed" = "1" ] && cause_parts+=("屏蔽易变区后的屏幕内容区变化")
+            cause=""
+            for part in "${cause_parts[@]:-}"; do
+              [ -n "$part" ] || continue
+              [ -n "$cause" ] && cause="$cause + $part" || cause="$part"
+            done
+            [ -n "$cause" ] && cause="$cause" || cause="状态变化"
+            lastin="取不到"
+            if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
+              if lep=$(last_user_input_epoch "$tr_path") && [ -n "$lep" ]; then
+                lmin=$(( ( $(date +%s) - lep ) / 60 ))
+                [ "$lmin" -lt 0 ] && lmin=0
+                lastin="${lmin} 分钟前"
+              fi
+            fi
+            echo "SESSION-RESUMED $name 的会话恢复活动（此前空闲；成因：${cause}；上次收到输入：${lastin}）"
           fi
         fi
         PREV_IDLE[$name]=$idle
+        # AC2（交叉正控制）：transcript 刚写过（会话确定在动）而屏幕判空闲 ⇒ 屏幕标志可能失效。
+        # 只对「心跳是 transcript」的目标成立——tick 日志是 loop 写的，不是会话活动的证据。
+        # 假→真沿报一次；不一致率基线由观察者从事件流里数（全忙会话同时报 = TUI 文案变了）。
+        if [ "$idle" = "1" ] && [ "$halted" = "0" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+          hmod2=$(heartbeat_mtime "$tr_path")
+          if [ "$hmod2" != "0" ]; then
+            age=$(( $(date +%s) - hmod2 ))
+            fresh=$([ "$age" -le "$FRESH_SECS" ] 2>/dev/null && echo 1 || echo 0)
+            if [ "$fresh" = "1" ] && [ "${PREV_MARKER_STALE[$name]:-0}" = "0" ]; then
+              echo "SESSION-MARKER-STALE $name 的屏幕标志可能失效：transcript ${age}s 前刚写过（会话确定在动）但屏幕判空闲——检查 esc to interrupt 是否还在渲染"
+            fi
+            PREV_MARKER_STALE[$name]=$fresh
+          fi
+        else
+          PREV_MARKER_STALE[$name]=0
+        fi
+        # AC9（盲点13）每轮复查：覆盖「早已空闲、随后才被 429」的情形（转换时已查一次并钉住
+        # PREV_API_BLOCKED；这里对持续空闲会话每轮复查，假→真沿再报一次）。
+        if [ "$idle" = "1" ] && [ "$halted" = "0" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+          api_n2=$(transcript_api_error_count "$tr_path")
+          api_blocked2=$([ "$api_n2" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
+          if [ "$api_blocked2" = "1" ] && [ "${PREV_API_BLOCKED[$name]:-0}" = "0" ]; then
+            echo "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n2} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+          fi
+          PREV_API_BLOCKED[$name]=$api_blocked2
+        else
+          PREV_API_BLOCKED[$name]=0
+        fi
       fi
       PREV_HASH[$name]=$h
+      PREV_BUSY_SEM[$name]=$busy_sem
     else
-      PREV_HASH[$name]=""; PREV_IDLE[$name]="unset"
+      PREV_HASH[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。
