@@ -1,6 +1,6 @@
 ---
 id: gap-test-coverage-check-parses-stale-files-variable
-status: todo
+status: done
 labels: []
 parent: null
 children: []
@@ -158,6 +158,21 @@ $ scripts/test.sh --for-task gap-test-coverage-check-parses-stale-files-variable
 ✔ AC5: canonical set == scripts/test.sh --list-files (realpath-deduped)
 ℹ tests 5 · pass 5 · fail 0
 ```
+
+## 合并后修复（fan-in 发现，2026-08-03T02:49Z）
+
+**合并后 AC4 在主检出红、在 agent worktree 绿**——本仓「隔离绿/套件红」类的第 3 个实例（前两个：
+M136、relation-sync）。根因：`discoverProductTierTestFiles` 用**纯文件系统遍历** repo 找 `test/*.test.mjs`，
+而主检出上有 3549 个 gitignored 的陈旧 `**/worktrees/` 测试文件（21 个未回收的已合并 worktree），被当成
+真实测试文件 → 全部报成孤儿。agent 的 worktree 里这些 gitignored 文件不存在，所以隔离绿。
+
+**修复（`63afe8f8`）**：发现改为**基于 git 索引**（`git ls-files`）——「真实测试文件」= git 跟踪的文件。
+索引在任意检出（主检出 / linked worktree）下**逐字节相同**，所以从根上消除该类：不再有「哪个检出看到不同文件集」。
+非 git 的 scratch fixture（selftest/单测）回退到 fs-walk——非 git 目录按构造没有 gitignore 工件，不会误收。
+验证：单测 5/5、selftest 10/10、AC4 主检出零孤儿。
+
+**教训**：这次 red 被 scoped 测试抓到（合并后立刻跑单文件），不是全量才暴露——fan-in 的「merge 后先跑
+scope 再跑全量」顺序是对的。
 
 ## Touches
 
