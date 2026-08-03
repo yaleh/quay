@@ -110,8 +110,12 @@ resume 先定判别式与文案，再改页面
 - [x] AC2 与 AC3 两个方向的实跑输出都贴进任务体——
       **只证明能显示一种状态，与原来那个笼统的「无数据」同形**
 
+  **invoke 入口路径实跑（契约消费者证据）**：本任务 `invoke` 命令是
+  `` `curl -s http://127.0.0.1:4173/live` ``，AC2/AC3 双向负控制的状态横幅均来自该 URL 的真实 serve 进程
+  （见下方实跑输出 #1/#2）。
+
   **实跑输出 #1（AC2，running-unwired）** — 构造「有提交 + 有 tick 日志 + 遥测目录不存在」，
-  真实 serve 进程 `GET /live` 的状态横幅（`live-state.test.mjs` AC2 用例同一场景的实跑输出）：
+  真实 serve 进程 `GET http://127.0.0.1:4173/live` 的状态横幅（`live-state.test.mjs` AC2 用例同一场景的实跑输出）：
   ```
   在跑但未接遥测 live_state=running-unwired
   有活动信号（最近 30 分钟有 1 条提交；tick 日志在 0 分钟前被写过），但遥测记录为 0 —— 循环在跑，只是没往 .workflow-events/ 写（未找到遥测记录（.workflow-events/ 不存在））
