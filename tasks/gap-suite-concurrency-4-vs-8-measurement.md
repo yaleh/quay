@@ -140,3 +140,19 @@ method: `bash scripts/test.sh --test-concurrency=N` — `=` spelling only; stric
 - 对「c4 是否应设为本机默认」的倾向：**数据不支持仅凭墙钟改默认**（差值在噪声内）。但 c4 墙钟中位数略低（406 vs 440）且稳定性相同——**若外层想改默认，这数据不反对，但需单独决策**，不是本任务的结论。
 
 run1/run2 note: M136 sync-vendor test FAILED under c4 (c8 full-red/isolated-green is the known baseline; **c4 red too — M136 is NOT c8-specific**, useful negative evidence for M136 diagnosis). No 'Promise pending'. ~~duration_ms ≈ 410062 ≈ wall 414 ⇒ Σ/wall ≈ 0.99 — c4 lanes not saturated~~ **划掉（外层更正）**：duration_ms 就是墙钟本身，0.99 是墙钟/墙钟必然近 1，与并发度无关。不得据此推饱和结论。
+
+### 新增实测（2026-08-03，外层：cancelled 与负载相关，不是文件慢）
+
+**cancelled 是并发/负载把文件挤到超时，不是文件本身慢**——今晚三次 cancelled 全落在同一两文件
+（runner-grouping 85935ms、session-liveness 71190ms），而它们在低负载窗口能跑完。同套件、同 c8、
+不同负载窗口的 cancelled 对照（比事后补测更可信的活数据）：
+
+| run | conc | 窗口 load1 | psi-cpu avg10 | cancelled | 结果 |
+|---|---|---|---|---|---|
+| suite14（2026-08-03） | 8 | **~3.5**（干净窗口） | <40 | **0** | 2148/2126/0/**0** 全绿 |
+| 套件（token-waiter 合并后，2026-08-03） | 8 | **~20.5** | **91.52** | **2**（runner-grouping + session-liveness 文件级取消） | 待确认 |
+
+**⇒ 明确显式 `--test-concurrency=8` 在 nproc=4 上是 4× 超订（CLAUDE.md 逐字记为 4.25×），
+在负载窗口下把重型文件挤到 'Promise pending' 取消**——cancelled 是假绿载体（fail 0 掩盖）。
+**建议**：全量跑用默认并发（推导值 `max(1,floor(nproc/2.1))`）或等低负载窗口；显式 8 只在该机器
+空闲时用。本批 token-waiter/mkdtemp/task-list-route 的全量验证按此执行。
