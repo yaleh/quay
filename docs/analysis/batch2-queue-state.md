@@ -671,6 +671,14 @@ filesCaptured==155/155，此刻 cpu avg10=91.03、load1=16.02、1 套件在跑�
 parser 轻量工作不占主要负载。sigma 每次测量前后记录资源闸输出、filesCaptured < 155 作废重测
 （那个分布决定下一步优化方向，测歪了会把工作引到错的地方）
 
+### Tick 心跳（06T03:52Z）：sigma 第二轮测量；parser 已暂停测试
+
+- sigma **第二轮测量**（进程 422051，11min——第一轮可能 filesCaptured < 155 已作废重测）；gate 检查输出
+  GO GO GO GO GO WAIT（sigma 在监控）
+- **发现 parser 在跑测试进程**（1 进程）——已消息 parser 暂停测试给 sigma 安静窗口（外层建议）
+- 压力 98.77（sigma 167 进程套件的单套件稳态 + parser 微量负载）
+- stranded + webobs 全量仍等 sigma 测完
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
