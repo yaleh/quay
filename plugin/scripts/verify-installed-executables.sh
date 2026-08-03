@@ -7,7 +7,7 @@
 # 无法区分「生成的差异」与「用户改过的差异」）。本检查把那条原则做成机械断言。
 #
 # 配置类文件【显式列为例外】，理由是它们属于「可以生成」的一类：
-#   - orchestration/orchestrator-loop-tick.md、docs/analysis/fast-mode-loop-tick.md —— tick 文档
+#   - plugin/loop/orchestrator-loop-tick.md、plugin/loop/fast-mode-loop-tick.md —— tick 文档
 #     是散文，placeholder 替换（本地化）是对的（AC8 用负控制钉住，不许改这条路径）；
 #   - orchestration/session-liveness.env —— quay-init --loop 生成的每项目配置（SESSION_TMUX_SESSION）。
 # 本检查只看 <workspace>/plugin/scripts/ 下的已铺文件：每个与 <plugin-src>/scripts/ 里同名源文件
