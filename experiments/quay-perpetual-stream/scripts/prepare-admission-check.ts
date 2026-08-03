@@ -35,6 +35,15 @@
 // real shell command inside the SAME agent's own turn, so its Node process genuinely inherits the
 // shell environment and reads `process.env.CLAUDE_CODE_SESSION_ID` directly — fail-closed
 // (`missing-session-id`) if unset, never a caller-asserted placeholder.
+//
+// SHALLOW-CLONE BEHAVIOR (2026-08-03, CI red): the precedent/stale-AC checks ask git
+// (`git cat-file -e <sha>^{commit}`) whether a cited commit exists in the WORKSPACE. In a shallow
+// clone (actions/checkout default depth-1), old commits are absent → EVERY real precedent is judged
+// missing. Both codes are PREFLIGHT_CALIBRATED false (non-blocking, record-only), so the production
+// impact is log noise, not blocked work — but a `missing-precedent`/`stale-ac-refs` finding under a
+// shallow clone does NOT mean the precedent is really missing; re-run on a full clone to confirm.
+// Tests must not cite this repo's real history (hermetic temp-repo fixtures instead, see
+// plugin/test/prepare-admission-check.test.mjs makeGitWorkspaceWithCommit).
 
 import fs from "node:fs";
 import path from "node:path";
