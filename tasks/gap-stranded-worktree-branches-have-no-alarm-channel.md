@@ -1,8 +1,8 @@
 ---
 id: gap-stranded-worktree-branches-have-no-alarm-channel
-title: "Land fails closed and preserves the branch — but nothing ever tells
-  anyone, so 25k lines sat stranded for a day"
-status: todo
+title: Land fails closed and preserves the branch — but nothing ever tells
+  anyone, so 25k lines sat stranded for a day
+status: done
 labels:
   - gap
   - defect

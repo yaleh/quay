@@ -2,7 +2,7 @@
 id: gap-task-body-has-n-parsers-and-no-authority
 title: "Two ## Touches parsers disagree on the same line, and the one fast mode
   uses for concurrency eligibility is the wrong one"
-status: todo
+status: done
 labels:
   - gap
   - defect
