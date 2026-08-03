@@ -57,6 +57,12 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
       且不含任何会意外产生 release 的步骤。落地于 `escalations.md`。
       *（此 AC 关乎「让别人装得到」，与 AC2 的本地验证是两件事，都要。）*
 
+- [ ] **AC3 的前置（2026-08-03 实测补入）**：**先清掉 archguard 的热拷贝残留，再装**。
+      它身上仍有当初 `cp` 进去的 `orchestrator-loop-tick.md` / `fast-mode-loop-tick.md` /
+      `heavy-op-token.sh`，而 `quay-init` 对内容不同的已存在文件走 `CONFLICT ... skip unless --force`。
+      **不先清，测到的是「在已有副本上覆盖」而不是「装到干净项目」**，且会以「跳过 N 个文件」
+      的形式**看起来成功**。已写进 archguard 的 `goals-and-ac.md` 1b（提交 `bd98154`）。
+
 - [ ] **AC3（随 AC2 解冻）**：archguard **用 build 出来并安装的那份**重做冷启动（`quay-init --loop`，**不是 `cp`**），
       并产出一份区分「交付物缺失 / archguard 特有 / 已回填」的差异报告。
       判据：archguard 仓中存在该报告，且其 git 历史显示机制文件**来自 plugin 安装**而非从 quay 开发树复制。
@@ -107,6 +113,12 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
 |---|---|---|
 | `plugin/scripts/session-liveness.sh` | **quay 外层 + 内层**（走项目正常流程） | 它已是**产品组件**——在 `plugin/scripts/` 里、由 `quay-init` 铺给每个采用者。留在旁路会话等于绕过项目自己的闸（任务体/Contract/派发评审/fan-in/棘轮） |
 | `orchestration/session-liveness.env` | 管理者 | 本机拓扑，是**数据不是代码** |
+
+**AC6 的边界澄清（2026-08-03，人授权后补记）**：我往 archguard 的 `goals-and-ac.md` 里写了一行。
+AC6 要求「外层的目标与 AC 是它自己写的」——**这条仍然成立**，我写的不是它的目标或 AC，
+而是**一条阻塞前置的成因**，那属于跨项目次序仲裁，是管理者的活。
+人的原话：「这样的事情你自己可以判断，不用问我。」
+**区分**：目标与判据归外层；**什么挡着它、次序怎么排**归管理者。
 | `send-keys-verified.sh` 等纯跨项目助手 | tools 会话 | 不属于任何单个项目 |
 
 **这条演化本身值得记**：同一个东西从「管理者的私有仪器」→「跨项目机件」→「产品组件」，
