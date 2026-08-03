@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -182,4 +183,27 @@ test("main: malformed manifest → exit 1 (HARD FAIL, not OK)", async () => {
 
 test("main: no manifest arg → exit 2", async () => {
   assert.equal(await main(["node", "s"]), 2);
+});
+
+// ── EMPTY-SET fail-closed (gap-checks-that-verify-an-empty-set-must-fail-closed) ────────────────
+test("checkAntiDrift: EMPTY builds manifest FAILS CLOSED — 0 builds is 'never looked'", () => {
+  // A manifest of zero builds must NOT pass a NON-WAIVABLE guardrail: "ANTI-DRIFT OK: 0 builds" is
+  // indistinguishable from "the check never ran" (serial-fanin-absorb already throws on empty builds).
+  assert.throws(() => checkAntiDrift([]), /empty builds manifest/i);
+  // Explicit --allow-empty escape hatch (default deny).
+  const waived = checkAntiDrift([], { allowEmpty: true });
+  assert.equal(waived.ok, true);
+  assert.equal(waived.violations.length, 0);
+});
+
+test("main: EMPTY manifest → exit 1 (HARD FAIL, not OK); --allow-empty → exit 0", async () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "antidrift-empty-"));
+  const empty = path.join(scratch, "empty-manifest.json");
+  fs.writeFileSync(empty, JSON.stringify([]));
+  try {
+    assert.equal(await main(["node", "s", empty]), 1, "empty manifest must fail-closed");
+    assert.equal(await main(["node", "s", empty, "--allow-empty"]), 0, "--allow-empty waives the empty-set guard");
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
 });

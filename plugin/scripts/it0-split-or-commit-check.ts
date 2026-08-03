@@ -294,7 +294,7 @@ export function selftest(): boolean {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 function usage(): never {
-  console.error("usage: node it0-split-or-commit-check.ts [--tasks-dir <dir>] <workspace-root>");
+  console.error("usage: node it0-split-or-commit-check.ts [--allow-empty] [--tasks-dir <dir>] <workspace-root>");
   console.error("       node it0-split-or-commit-check.ts --selftest");
   process.exit(2);
 }
@@ -320,6 +320,14 @@ if (isDirect) {
     process.exit(2);
   }
   const taskMap = loadTasks(tasksDir);
+  // EMPTY-SET guard (gap-checks-that-verify-an-empty-set-must-fail-closed): a workspace whose task
+  // set is EMPTY would make every rule vacuous — "PASS: 0 task(s) checked" is indistinguishable from
+  // "never looked". Fail-closed by default; an explicit --allow-empty waives it (default deny).
+  const allowEmpty = args.includes("--allow-empty");
+  if (taskMap.size === 0 && !allowEmpty) {
+    console.log(`FAIL: 0 task(s) checked — the task set is empty, so this gate verified nothing (fail-closed: 'no problems' must not be indistinguishable from 'never looked'; pass --allow-empty to waive)`);
+    process.exit(1);
+  }
   const { failures } = runChecks(taskMap);
   if (failures.length > 0) {
     console.log(`FAIL: ${failures.length} split-or-commit violation(s) found:`);

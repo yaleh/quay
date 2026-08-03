@@ -291,6 +291,21 @@ test("CLI: against THIS repo's own real tasks/ (D1 real-object demonstration) �
   assert.equal(r.status, 0, `expected PASS against the real repo; got stdout=${r.stdout} stderr=${r.stderr}`);
 });
 
+// ── EMPTY-SET fail-closed (gap-checks-that-verify-an-empty-set-must-fail-closed) ────────────────
+test("CLI: EMPTY tasks dir → exit 1 (empty-set fail-closed); --allow-empty → exit 0", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "split-or-commit-empty-"));
+  fs.mkdirSync(path.join(root, "tasks"));
+  try {
+    const hard = spawnCli([root]);
+    assert.equal(hard.status, 1, "an empty task set must fail-closed ('0 tasks checked' is indistinguishable from 'never looked')");
+    assert.match(hard.stdout, /empty|fail-closed/i);
+    const waived = spawnCli(["--allow-empty", root]);
+    assert.equal(waived.status, 0, "--allow-empty waives the empty-set guard (default deny)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function spawnCli(args) {
   try {
     const stdout = execFileSync("node", [SCRIPT, ...args], { encoding: "utf8" });

@@ -30,15 +30,28 @@ export function fileWithinDeclared(file, declaredGlobs) {
 
 // ── checkAntiDrift ───────────────────────────────────────────────────────────────────────────────
 // builds: [{ id, declaredGlobs:[glob...], actualFiles:[path...] }].
+// opts: { allowEmpty } — when true, a ZERO-build manifest is waived (explicit --allow-empty escape
+// hatch, default deny). The pure function throws on empty-unless-allowEmpty exactly like it throws
+// on a malformed manifest, so the CLI maps both to HARD FAIL (never a silent OK).
 // Returns { ok, violations:[{type, ...}] }. ok=false on ANY violation (HARD FAIL). Two violation
 // kinds: "out-of-declared" (a build wrote a file matching none of its declared globs) and
 // "cross-build-overlap" (two builds actually touched the same file).
-export function checkAntiDrift(builds) {
+export function checkAntiDrift(builds, opts) {
   // (a-1) FAIL-CLOSED on a malformed manifest — a NON-WAIVABLE guardrail must not silently pass on bad
   // input (DIR-049 wiring-audit finding: `b.actualFiles || []` treated a wrong-field-name manifest as
   // empty → ANTI-DRIFT OK). Match serial-fanin-absorb's strictness: every build needs a string id and
   // array declaredGlobs/actualFiles, else throw (the CLI maps the throw to HARD FAIL, not OK).
   if (!Array.isArray(builds)) throw new Error("checkAntiDrift: manifest must be a JSON array of builds");
+  // (a-0) EMPTY-SET guard (gap-checks-that-verify-an-empty-set-must-fail-closed): a manifest of ZERO
+  // builds means no batch actually ran, so this NON-WAIVABLE guardrail would "verify" nothing and
+  // report ANTI-DRIFT OK — indistinguishable from "never looked". serial-fanin-absorb already throws
+  // on an empty builds array (computeFanIn: "empty builds — nothing to absorb"); this guard makes the
+  // after-the-fact guardrail equally strict, with an explicit --allow-empty escape hatch (default deny).
+  if (builds.length === 0 && !(opts && opts.allowEmpty)) {
+    throw new Error(
+      "checkAntiDrift: empty builds manifest (0 builds) — no batch actually ran, so this NON-WAIVABLE guardrail verified nothing (fail-closed: 'no problems' must not be indistinguishable from 'never looked'; pass --allow-empty to waive)"
+    );
+  }
   for (const b of builds) {
     if (!b || typeof b.id !== "string" || !b.id) throw new Error("checkAntiDrift: every build needs a string id");
     if (!Array.isArray(b.declaredGlobs)) throw new Error(`checkAntiDrift: build "${b.id}" is missing an array declaredGlobs (fail-closed — a NON-WAIVABLE guardrail does not pass on a malformed manifest)`);
@@ -75,12 +88,13 @@ export function checkAntiDrift(builds) {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 function usage() {
-  process.stderr.write("Usage: anti-drift-touches-check.mjs <ran-batch-manifest.json>\n");
+  process.stderr.write("Usage: anti-drift-touches-check.mjs [--allow-empty] <ran-batch-manifest.json>\n");
 }
 
 export async function main(argv) {
   const args = argv.slice(2).filter((a) => a !== undefined);
-  const files = args;
+  const allowEmpty = args.includes("--allow-empty");
+  const files = args.filter((a) => a !== "--allow-empty");
   if (files.length !== 1) { usage(); return 2; }
   if (!fs.existsSync(files[0])) { process.stderr.write(`ERROR: manifest not found: ${files[0]}\n`); return 2; }
   let builds;
@@ -93,7 +107,7 @@ export async function main(argv) {
   if (!Array.isArray(builds)) { process.stderr.write("ERROR: manifest must be a JSON array of builds\n"); return 2; }
   let r;
   try {
-    r = checkAntiDrift(builds);
+    r = checkAntiDrift(builds, { allowEmpty });
   } catch (e) {
     // malformed manifest → fail-closed HARD FAIL (never silently pass a NON-WAIVABLE guardrail)
     process.stdout.write(`ANTI-DRIFT HARD FAIL: malformed manifest — ${e.message}\n`);

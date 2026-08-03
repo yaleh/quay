@@ -10,15 +10,16 @@
 #
 # Usage:
 #   loadbearing-test-gate.sh --scripts <dir> [--tests <dir>] [--import-root <dir> ...] \
-#                            [--registry <file>] [--outer-loop <file>]
+#                            [--registry <file>] [--outer-loop <file>] [--allow-empty]
 #
 # Exit codes: 0 = PASS (every load-bearing script has a sibling *.test.mjs or *.test.ts); 1 = FAIL (>=1
-# load-bearing script lacks a sibling test); 2 = usage/environment error.
+# load-bearing script lacks a sibling test, or the scripts dir is EMPTY — an empty dir is
+# indistinguishable from 'never looked' unless --allow-empty is passed); 2 = usage/environment error.
 
 set -u
 
 if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 --scripts <dir> [--tests <dir>] [--import-root <dir> ...] [--registry <file>] [--outer-loop <file>]" >&2
+  echo "Usage: $0 --scripts <dir> [--tests <dir>] [--import-root <dir> ...] [--registry <file>] [--outer-loop <file>] [--allow-empty]" >&2
   exit 2
 fi
 
