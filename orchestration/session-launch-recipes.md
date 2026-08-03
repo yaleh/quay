@@ -13,7 +13,7 @@
 | 角色 | 模型 | 项目 |
 |---|---|---|
 | 管理者 + quay 外层 | **opus** | quay |
-| 外层 | **deepseek-v4-pro** | archguard / meta-cc |
+| 外层 | ~~deepseek-v4-pro~~ → **deepseek-v4-flash**（人 2026-08-03 裁定：pro 偏贵） | archguard / meta-cc |
 | 内层 | **deepseek-v4-flash** | 三个项目 |
 
 ### quay 管理者 / quay 外层（opus）
@@ -26,7 +26,11 @@ claude --permission-mode bypassPermissions
 `ANTHROPIC*`/`DEEPSEEK*` 变量数是 **0**，只有 `CLAUDE_CODE_DISABLE_MOUSE=1` 与
 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`，模型走账号默认。
 
-### archguard / meta-cc 外层（deepseek-v4-pro）
+### archguard / meta-cc 外层（deepseek-v4-flash）
+
+**2026-08-03 变更**：原为 `deepseek-v4-pro`，人裁定改 `deepseek-v4-flash`——pro 偏贵。
+⇒ **三个项目的内外层现在全部是 flash，只有 quay 的管理者与外层是 opus。**
+
 
 ```bash
 CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 \
@@ -34,7 +38,7 @@ CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000 \
 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 \
 CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 \
 CLAUDE_CODE_DISABLE_MOUSE=1 \
-claude-deepseek --model deepseek-v4-pro --permission-mode bypassPermissions
+claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions
 ```
 
 ### 内层（deepseek-v4-flash，三个项目通用）
@@ -88,7 +92,7 @@ exec claude "$@"
 | `quay-0` | `0 inner` | 内层 | `deepseek-v4-flash` |
 | | `1 outer` | 外层（管理者） | 默认（opus）——**不走 deepseek 端点**，已实测 |
 | `archguard-2` | `0 inner` | 内层 | `deepseek-v4-flash` |
-| | `1 outer` | 外层 | `deepseek-v4-pro` |
+| | `1 outer` | 外层 | `deepseek-v4-flash`（2026-08-03 起，原 pro） |
 | `meta-cc-4` | `0` | 未启动 | — |
 
 ### 为什么是 window 不是 pane（实测，不是偏好）
@@ -149,3 +153,23 @@ exec claude "$@"
 
 **这是一个有意的选择，不是疏漏**：把一个可恢复的失败留给运行时，比预付一次昂贵的穷举测量便宜。
 记在这里，是为了让将来看到那个报错的人**知道原因、知道改哪个变量**，而不必重新诊断。
+
+
+## 成本上的一处隐患（2026-08-03，人裁定换 flash 之后发现）
+
+`claude-deepseek` 包装脚本设的是：
+
+```
+ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro
+ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro
+```
+
+**主会话用 `--model deepseek-v4-flash` 只约束主会话本身。**
+Claude Code 内部按别名派生的 **subagent** 走的是上面这三条映射——
+凡是解析到 `opus`/`sonnet` 别名的 subagent，**仍然落到 `deepseek-v4-pro`**。
+
+⇒ **换 flash 未必省下 subagent 的钱。** 这条**未实测**，
+要确认得看一次真实 subagent 调用落在哪个模型上。
+若要彻底走 flash，需把 `ANTHROPIC_DEFAULT_{SONNET,OPUS}_MODEL` 也指向 flash——
+但那会让「需要更强模型的 subagent」也降级，**是取舍不是纯优化**。
