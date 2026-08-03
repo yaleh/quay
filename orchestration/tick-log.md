@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 01:23Z | `correct` | **AC1 未达成**——外层自己的两次全量在同一 commit 上结果不同。建任务并派发调整 | 内层空闲候机（它主动不派发、不跑测试以免与外层争抢——纪律正确） | **「可重现」这条今晚第一次兑现价值，且用在外层自己身上**：第 1 次 2344/0 fail/443s/exit 0；第 2 次 2344/**fail 1**/472s/exit 1。**若按第一次宣布达成即为错误。**失败项 `AC11 — scripts/test.sh explicit-file form`（`select-tests-for-touches.test.mjs:384`），隔离下 3/3 绿 ⇒ **今晚第三个「隔离绿/套件红」实例**（M136、relation-sync、本项）。机制比前两个清楚：该测试**在套件内 spawn 完整的 `scripts/test.sh`**（第 73 行，timeout 60s），而 `test.sh` 自 B5-1 起先跑致命的 `build_dist_once`；外层并发 8 跑在 4 核（已 2 倍过订）⇒ 嵌套运行要在争抢中完成 esbuild + 一轮测试，60s 预算下失败可预期。**在 runner 内起 runner，把外层负载变成了内层的成败条件** |
 | 2026-08-03 01:04Z | `no-action` | 内层在做两个已合并任务的 fan-in 收尾（删 worktree 与分支），未重做任何任务，无需介入 | 两任务在飞 56 分钟（阈值 90，代码已合并、遥测待收尾）；`orphaned 0` | **排除了「重做 relation-sync」的疑虑**：面板那行是清单旧标签，实际输出是 `Deleted branch task/inner-blocked-signal` 等 fan-in 清理；`load 8.15` 来自 claude 会话本身，无套件在跑。**窗口 7.33/12 小时（61%），真实吞吐 0.95/hr**（目标 1.5）。两任务收尾时该数会跳升——**那将是「并发提升真实吞吐、压低旧口径」的第一次直接演示**，值得下一 tick 对照记录 |
 | 2026-08-03 00:56Z | `correct` | **内层纠正了外层的诊断，外层认错**；并指出两任务已合并但遥测未收尾 | blocked-signal + test-framework-policy 代码均已落 master（`eafde330` 等），遥测仍显示两者在飞 49 分钟 | **我的诊断半对半错**：两次 `ORPHAN` 我判为「测试写进真实事件存储＝污染」；内层的更准确——`blk-` 是**合法的新 eventKind**，是 master 旧 `aggregate` 不认识 `blocked` 段才误判为「有结束无开始」。外层已核实：master 的 `fast-mode-telemetry.ts` 现有 4 处 `blocked` 处理，合并后误报自愈，其 Rollout note 的风险已关闭。**区别有意义：前者要修测试，后者要升级读取方，处置完全不同。**对的那半是「测试必须传 `--root`」——演练确实写过真实存储。**死时间基线首次存在**：检测延迟 **<1s**（inotifywait 与写入同秒，此前是 20 分钟 tick），单次死时间 **8.2s** |
 | 2026-08-03 00:55Z | `no-action` | `relation-sync` 收尾（48.8 分钟 `done`），套件最后一个已知失败的修复已落 master；两任务仍并发在飞 47 分钟 | `done 16` / `inProgress 2` / `orphaned 0`；`load1=4.43` | 核实修复实质在 master：`mkdtemp` 已用、失败路径改 `fs.writeSync(2,…)`+`process.exitCode`。**第六次同一坑（镜像形态）**：grep `process.exit(1)` 得 4 处命中，**全是注释**——内容正是「为什么它是错的、已改掉」。**修复的说明里必然写着缺陷的名字**，所以查「缺陷还在不在」和查「修复到位没有」，grep 关键词都会给反向答案。已补进步骤 0。**AC1 待验**：套件最后一次实测（00:03Z）为 fail 1（relation-sync），修复已合并但未复跑——两任务在飞期间不跑，避免争抢 |
@@ -74,10 +75,10 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 24 | 42% |
-| unblock | 10 | 18% |
-| correct | 20 | 35% |
+| no-action | 24 | 41% |
+| unblock | 10 | 17% |
+| correct | 21 | 36% |
 | escalate | 3 | 5% |
-| **合计** | **57** | — |
+| **合计** | **58** | — |
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 35%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 36%。
