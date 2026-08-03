@@ -1135,3 +1135,42 @@ workspace；CI `actions/checkout@v4` 默认 depth-1 浅克隆没有旧提交 →
 **另两条已落地**：①浅克隆行为说明写进 prepare-admission-check.ts 文件头（missing-precedent 在浅克隆下
 ≠ precedent 真缺失；PREFLIGHT_CALIBRATED false 非阻断，生产影响是日志噪声）；②test-isolation 契约补
 **第五条 R5**（测试不得依赖运行环境仓库的 git 历史，浅克隆必须绿）。
+
+---
+
+## 内层 tick 记录（2026-08-03 08:0xZ–08:2xZ）
+
+### sigma 收尾 + fan-in
+
+sigma agent 完成，分支 9e0d5899（恰好 3 文件：2 交付物 + 任务体）已合并（cf04858c）。
+
+**核心结论**（交付 `docs/analysis/suite-sigma-2026-08-03.{json,md}`）：
+- Σ/wall ≈ 7 不变（6.13–7.06）——8-lane 饱和结论成立
+- 受控 back-to-back **ΔΣ = −308.6s（−8.2%）**（A3 3467 vs C2 3776），对受控噪声 ~167–267s 是 **1.2–1.9×，边缘可判定**
+- **外层用错分母被证实**：cli.test.mjs 占 Σ 的 ~4.9%，不是 wall 的 34.8%（三个优化建议被高估 ~7×）
+- ±1000s 是 3 次混条件运行的原始极差上界（run B 内存退化）；受控噪声 ~167–267s
+- 负控制 run D（8 CPU hog）：**CPU 压力不杀测试**（155/155 仍捕获），是拖慢（Σ 高估 +59%）——修正了任务体「cancelled → Σ 偏低」的前提；复现 cancelled 需内存压力
+- DoD「2x 绿」部分达成：run #1 绿（2034）；run #2 被 worktree 内过期 resource-gate 测试阻塞（master 上已修复）
+
+### fan-in 套件 #1 红：M136 sync-vendor 漂移（已修）
+
+2052 tests / 2032 pass / **1 fail** / 0 cancelled。失败 `plugin/test/plugin-packaging.test.mjs:205`（M136 sync-vendor --check）。
+
+**根因**：CI-red hermetic 修复（7d876253）只改了 `plugin/scripts/prepare-admission-check.ts`（加了 SHALLOW-CLONE 注释），
+**没同步 `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts`**（sync-vendor 的规范源）。
+sync-vendor --check 判持久漂移 → M136 红。非合并引入、非竞态（git 干净、复现稳定）。
+
+**修**：3bf2479e 把同一段注释同步到 experiments 源，两边恢复一致；sync-vendor --check CLEAN；scoped M136 34/34 绿。
+
+### tmpdirs 派发（外层 人裁定，08:07Z）
+
+`gap-tests-never-clean-up-their-tmpdirs` 已派发（worktree 隔离，telemetry fm-...-tlg485）。
+- **搭车归因**：AC1 搭 fan-in 套件的前后计数，不另起全量套件（资源互斥规避）
+- 三条提醒已含任务体：AC2 只修泄漏量前 5；不加全局 process.on(exit) 钩子；AC7 记录一次性清理（158,757 条目 / 2,454 MB）+ 清理≠修复
+- 协调方已通知 agent 做第一次后计数（样本 #1 修复前）
+
+### 待办
+
+- **重跑全量套件 #2**（pid 789105）验证 M136 修复 → 绿则关 sigma + telemetry --task-end
+- **push 到 origin**（当前 14 commits 领先）→ CI 验证 hermetic 修复转绿
+- tmpdirs fan-in（agent 在飞）

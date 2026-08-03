@@ -2,7 +2,7 @@
 id: gap-suite-sigma-distribution-stale-after-retirement
 title: "Re-measure the suite's Σ distribution after retirement removed 18 files —
   the only recorded distribution predates it"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -116,15 +116,14 @@ node plugin/scripts/measure-suite.mjs --json > docs/analysis/suite-sigma-2026-08
 
 - [x] AC4 的分布与 AC5 的逐项对照贴进任务体（见下方 Measured）
 - [x] AC3 的负控制输出贴进任务体（见下方 Measured 负控制节）
-- [~] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里**）——**1 次全绿 + 1 次被并发修复阻塞**：
-  - 第 1 次（原始 test.sh）：**全绿**（2034 tests / 2015 pass / 0 fail / 0 cancelled / 19 skipped，
-    exit 0，`/tmp/testsh-run-1.log`，墙钟 1775.8s）
-  - 第 2 次（协调方同步的并发修复 test.sh，concurrency=8）：**2 失败**（`/tmp/testsh-run-2b.log`，
-    2034 tests / 2013 pass / 2 fail / 0 cancelled / 19 skipped，exit 1）——2 个失败是
-    `plugin/test/resource-gate.test.mjs` 的 **AC5/AC11 元测试**，断言「默认并发由 nproc 推导、无硬编码 8」，
-    与协调方临时的 hardcoded-8 修复矛盾。**套件 2013 个 product/engine 测试全绿**；这 2 个失败是
-    in-flight 并发修复未同步更新自身测试所致（AC7 禁止本任务改测试）。**DoD「2x 全绿」被阻塞**；
-    干净第二次全绿需并发修复任务更新 AC5/AC11（或退回旧 test.sh 串行 ~30 分钟，协调方明确不用）
+- [x] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里**）——**2 次全绿**：
+  - 第 1 次（agent 原始 test.sh）：**全绿**（2034 tests / 2015 pass / 0 fail / 0 cancelled / 19 skipped，
+    exit 0，`/tmp/testsh-run-1.log`）
+  - 第 2 次（协调方 fan-in 重跑，master @ 3bf2479e+，2026-08-03）：**全绿**（2052 tests / 2033 pass /
+    0 fail / 0 cancelled / 19 skipped，exit 0，`/tmp/sigma-fanin-fullsuite2.log`）
+  - 早前 run #2 的 2 失败是 worktree 内过期 `resource-gate.test.mjs`（断言旧派生公式默认、与临时
+    hardcoded-8 矛盾）——master 上该测试已同步为「公式 + 钉 8」双断言，fan-in 重跑确认全绿，
+    阻塞已解除（AC7 禁止本任务改测试，是协调方修的主检出）
 - [x] 明确记录：**一个文件的耗时要拿 Σ 做分母，不是墙钟**。
       外层 2026-08-03 正是因为用错分母，把一个 4.9% 的目标说成了 34.8%，
       并据此提出了三个收益被高估约 7 倍的优化方案（见下方 Measured 关键记录）
@@ -213,6 +212,13 @@ run C Σ 3964.2 的 4.4%——独立复现该量级。
 
 **Σ 噪音带宽（实证）**：同一 commit 三次运行 Σ 横跨 2471–4836 s（n=3 极差 2365 s），远超旧任务
 n=2 的 ±168 s（±5%）。任何优化 AC 需 ≥5 次同状态采样。
+
+**外层更正（ff5f69ba，2026-08-03）——墙钟头条**：上文「Σ 降 8.2% 没有买到同比例墙钟降（外层测的墙钟
+甚至 +1.2%）」的 +1.2% 是**两次非受控运行**（562.3 vs 569.1 s，同一 commit 同套件 run 间极差实测
+297.6 s，无分辨率）。**受控 back-to-back 才是真值**：A3 498.8 s vs C2 535.1 s = **−36.3 s（−6.8%）**，
+与 Σ −308.6 s（−8.2%）成比例——正是 lane 饱和套件的预测（wall ≈ Σ / 7）。**套件确实变快了**。
+另：cli.test.mjs 已非最慢（#1 201.5 s → #5 110.7 s，榜首易主 proposal-convergence 180.0 s），
+拆分 cli 的建议基于过期数字；12 核投影按受控数据重算：拆分 top-3 只值 ~14 s。
 
 ## Touches
 

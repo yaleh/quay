@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T05:44:12.242Z",
+  "generatedAt": "2026-08-03T08:28:50.397Z",
   "since": null,
   "tasks": [
     {
@@ -88,6 +88,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-stranded-worktree-branches-have-no-alarm-channel",
+      "minutes": 91.67928333333333,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-suite-concurrency-4-vs-8-measurement",
       "minutes": 76.29515,
       "outcome": "done"
@@ -95,6 +100,11 @@
     {
       "taskId": "gap-suite-cost-model-is-wrong-optimizations-buy-nothing",
       "minutes": 72.18956666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-suite-sigma-distribution-stale-after-retirement",
+      "minutes": 150.61753333333334,
       "outcome": "done"
     },
     {
@@ -110,6 +120,11 @@
     {
       "taskId": "gap-sync-vendor-drift-mislabelled-as-task-schema",
       "minutes": 60.002183333333335,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-task-body-has-n-parsers-and-no-authority",
+      "minutes": 56.186366666666665,
       "outcome": "done"
     },
     {
@@ -151,17 +166,28 @@
       "taskId": "gap-tests-use-cli-where-module-import-suffices",
       "minutes": 34.45701666666667,
       "outcome": "done"
+    },
+    {
+      "taskId": "gap-web-cannot-show-what-the-loop-is-doing-now",
+      "minutes": 37.52603333333333,
+      "outcome": "done"
     }
   ],
   "orphaned": [],
-  "inProgress": [],
-  "meanMinutes": 51.50209777777778,
+  "inProgress": [
+    {
+      "taskId": "gap-tests-never-clean-up-their-tmpdirs",
+      "runId": "fm-gap-tests-never-clean-up-their-tmpdirs-1785744545014-tlg485",
+      "startedAtMs": 1785744545064
+    }
+  ],
+  "meanMinutes": 55.32565147058823,
   "medianMinutes": 56.32075833333333,
-  "tasksPerHour": 1.5592016973931664,
-  "serialEquivalentPerHour": 1.1650010890602773,
+  "tasksPerHour": 1.5465407560112865,
+  "serialEquivalentPerHour": 1.0844879076009926,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T05:44:12.215Z",
-  "windowHours": 19.240615277777778,
+  "windowEnd": "2026-08-03T08:28:50.374Z",
+  "windowHours": 21.984548333333333,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0
