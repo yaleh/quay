@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 05:45Z | `correct` | 回答「套件耗时缩短了吗」——实测否定，并定位到真正的关键路径；核实 retire 落地 | **retire 已 done、AC 全勾、落地 master：51 文件删除、净 −23,560 行**；在飞清空；仓库 **496 MB**；完成 29，吞吐 1.508/h（AC18 达标保持） | **套件没有变快**：562.3s → **569.1s（+1.2%，噪声内）**，而测试数 2436 → **2034（−16.5%）**、文件 173 → 155。**我预期 >10% 降幅，错了。** 原因实测到：**`packages/quay/test/cli.test.mjs` 单文件 198.1s = 套件墙钟的 34.8%**——套件被这一个文件锁死，删掉散在另外 18 个文件里的 402 个测试碰不到关键路径。**顺带纠正今晚的叙述**：墙钟表显示崩溃的 batch4a 反而**最快**（397.7s），因为 2 个文件被 cancelled ⇒ **饥饿的表现是「杀掉测试」不是「拖慢套件」**。**又一次 grep 模式错误（第 12 次）**：`computeTouchesExpansion` 我按 `export function` 找报 0，实为 `concurrent-batch-scheduler.ts:31` 的模块私有函数，抽取正确；套件 fail 0 才是决定性判据 |
 | 2026-08-03 05:33Z | `correct` | 合并前核实 retire 分支的 25k 行删除；排除一次自己的假警；提醒 rebase | 在飞仅 retire(48m)；resource-awareness 与 serve 已 done（合并套件 **2436/2416/0 fail/0 cancelled** 绿）；**完成 29，吞吐 1.53/h** | **AC18 达标**：`tasksPerHour` = **1.525** ≥ 目标 1.5（窗口 19.01h、完成 29）——用的是 00:22Z 更正后的墙钟口径，当时明写「此更正不利于当前数据」。**retire 分支 −25,057 净行、51 个文件删除**，全部是管线；三个真闸处置正确、exp5 封存机器误删 **0**、快速模式三个导出都在。**外层一次假警已排除**：`git diff --diff-filter=D master..branch` 把 `resource-gate.sh` 等三个列为删除，实为分支 merge-base(04:42Z) 早于它们落地(04:52/05:08) ⇒ **该判据同时包含「删了」与「从没有过」**，正确判据是 `git show <commit> --diff-filter=D`。已提醒 rebase（分支落后 24 个提交） |
 | 2026-08-03 05:24Z | `no-action`（未介入；核实两个 P1 的落地质量） | 独立核实资源闸与 serve 修复；记录闸的一处诚实限度 | 三路并发（resource-awareness 36m / retire 41m / serve 25m）；完成 27，吞吐 1.43/h；压力 93.06 有一个套件在跑；**仓库 532 MB、`milestones/` 60 MB 收缩保持**；web 200 | **资源闸是真闸**：实测退出码 **1**（我第一次测成 0 是 `$?` 取到管道末端 `sed`——第 10 次同类错误），`scripts/test.sh:157` 已接入 `if ! bash resource-gate.sh`。**AC10 孤儿进程单列当场抓到 2 个**（`/tmp/quay-wt-m264 (deleted)`，ppid=1）。**serve 修复**：`.malformed-row` 样式 + provider 用文件名兜底 ⇒ 畸形任务可见地渲染而非静默消失。**闸的诚实限度**：它是预检不是调节器——`dcaddad9` 记录它先报 GO、随后压力升到 93，**它能阻止「在饥饿中启动」，不能阻止「启动后变饥饿」**，这是任务体「不做：不自动重试、不自动排队、不后台守护」的直接后果，是设计不是缺陷 |
 | 2026-08-03 05:05Z | `correct`（correct-self：纠正外层自己对 needs-human 代价的夸大） | 读 idle instrumentation 的 24 条样本，据此证伪 fork 的空转归因并确认资源闸的排序 | 三路并发（resource-awareness 16m / retire 21m / serve 5m），两两 DISJOINT 已复核；完成 27，吞吐 1.45/h；**仓库 532 MB**、`milestones/` **60 MB**，收缩保持 | **idle 日志 24/24 全是 `awaiting-subagent`**，`awaiting-ruling`/`queue-empty`/`no-reason` **皆 0**，覆盖 2h11m、中位间隔 5.2min。**⇒ fork 把 42.6% 空转归因于外层 20 分钟 tick 被直接证伪**——内层的空转全部是等自己的 subagent，与更早的间隙分布（最长 18.6min、20min 以上零个）同向。**缩短外层 tick 买不到任何东西。** 杠杆是并发吞吐而它 CPU 受限 ⇒ **资源闸排 P1 首位的第三条独立证据**。**并纠正外层自己**：02:56:48 那条显示 needs-human 阻塞期内层手上有 3 个任务、已在并发上限，`needs-human=7` 只阻止新派发 ⇒ **那个窗口的实际代价是零**，先前说「卡死派发」是夸大 |
@@ -92,9 +93,9 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 |---|---|---|
 | no-action | 28 | 38% |
 | unblock | 11 | 15% |
-| correct | 31 | 42% |
+| correct | 32 | 43% |
 | escalate | 3 | 4% |
-| **合计** | **73** | — |
+| **合计** | **74** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
@@ -103,4 +104,4 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 **2026-08-03 已连续 3 个 tick 是 (b) 类**：(1) 实测推翻外层自己写的 `2×` 超订数字；(2) `checkTouchesPair` 调用签名错致 10 对全误报；(3) `turn-ended-idle` 该不该进阻塞信号的设计错误。**同期内层表现良好**：主动采纳 PSI 判据、自主派发正交批次、10 分钟内执行完外层指令。**这说明当前瓶颈是外层的下笔质量，不是内层的执行**——而退化判据会得出相反的结论。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
 修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 42%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 43%。
