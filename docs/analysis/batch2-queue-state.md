@@ -289,6 +289,17 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
   AC6 基线违规（`resource-awareness: dispatch-review-missing`）待其派发时补 `## Dispatch review` 自清
 - **在飞（3，满）**：inventory + reclaim + test-isolation
 
+### Tick 心跳（03T03:52Z）
+
+- 无 `.halt`；无停止条件。**3 在飞全活跃**（transcript 03:51-03:52 均更新）：
+  - inventory：staged 未提交（runtime-usage-inventory.{json,md,ts} + test + 任务体），03:41-03:51 曾等其
+    内部 REFUTE reviewer（正常 parent-wait，非停摆），已恢复
+  - reclaim：已提交 1 commit `83c7e5d3`（fix milestone-worktree merged-then-reverted criterion + 卫生 gate + drop --force）
+  - testiso：无 commit 但活跃
+- 外层推了 2 个 task 提交（`58d68d8b`/`fd770df3`）——新 backlog 任务（eligibility-blinded、
+  quantified-stop-conditions、web-can't-show-loop-state 等），**不碰在飞 Touches，无 fan-in 冲突**，排队后续
+- 本 tick 不派发（并发满 3）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
