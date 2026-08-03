@@ -63,6 +63,12 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 ```
 两者满足 → 没有任何东西在跑，通知不会来了，**去核对产出/续跑**。每跑完一步就落盘（任务体/队列文件），不要攒到最后——即使 agent 静默停止，已落盘数据不丢，可从缺口续跑。
 
+**跑全量前用 CPU pressure 判据（2026-08-03，外层更正：load 是代理信号，pressure 才是直接证据）**：
+重型测试超时是「任务在等 CPU」的直接结果，load 会骗人（claude 会话常驻使 load 永不降）。用
+`/proc/pressure/cpu` 的 **`some avg10 < 40`** 才跑全量；memory `some avg10` 也应接近 0（本机 swap=0、
+MemAvailable ~5G，OOM 无降级段）。参考：nproc=4 而 test.sh 默认 `--test-concurrency=8`（设计性 2 倍超订），
+两层绝不同时跑全量套件（资源感知任务 `gap-no-resource-awareness-heavy-ops-run-blind` 已建，排队中）。
+
 ## 状态单一来源
 
 `docs/analysis/batch2-queue-state.md`
