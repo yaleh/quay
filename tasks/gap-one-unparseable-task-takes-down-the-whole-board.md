@@ -141,6 +141,16 @@ changed: 管理者已止血并把两层缺陷交给外层。**外层核实了「
 - `packages/quay/src/mcp-handlers.ts` / `bin/quay.ts` / `gate/driver.ts` / `migrate.ts`：
   消费新返回形状；CLI 把不可解析文件报在 stderr（--json 保持可解析）。
 
+### invoke 入口路径实跑（契约消费者证据）
+
+本任务的 `invoke` 命令入口路径是 `packages/quay/bin/quay.ts`。AC2/AC4/AC5 的 HTTP 往返全部由它承载：
+
+```
+node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173
+```
+
+（`GET /` 的注入/删除双向往返与 AC5 的 500 负控制均经该进程；见下方 AC4/AC5 输出。）
+
 ### AC4 实跑输出（双向负控制，真实 HTTP）
 
 ```
