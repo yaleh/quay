@@ -242,6 +242,19 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
 - **不派发**：needs-human=7 停止条件持续成立——`gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion`
   与 `gap-test-isolation-contract-is-unwritten` 仍排队，等外层处置积压或放行
 
+### Tick 更新（03T03:08Z）：外层裁定恢复派发 + dispatch-gate 合并 + inventory 已派
+
+- **外层裁定（03T03:06Z）**：**needs-human=7 不构成停止派发的理由**。7 个全历史遗留（07-29→08-02 05:54，
+  早于无人值守窗口 17:43Z ≥12h）；窗口内新增 needs-human **0**；遥测唯一 needs-human 结局已 done。
+  停止条件判据有缺陷：fast-mode-loop-tick.md:156 意图是「产出速度 > 消解速度」，被读成「总数」⇒ 永久卡死
+  （解开历史任务需要派发）。**修法：判据改为窗口内新增数。** 已改 tick 文档两处（Step 3 + 判断边界表），
+  提交 `9a…`。7 个 DIR 去留是范围决定已升级给人（orchestration/escalations.md），本轮不处理
+- **dispatch-gate 已合并** `663fc5c8`（Contract 六键机制，REFUTE round-2 PASS，11 文件）。scoped 57/56/0 绿。
+  **批全量正在跑**（`bt01s74hv`）。合并后 agent 曾停摆（staged 未提交等验证通知），已恢复完成提交
+- **inventory 已派发**（`a86265c011c3f0088`，/tmp/quay-wt-inventory，runId `fm-...-yylhln`）——
+  外层裁定下一批第一，与在飞 DISJOINT 实测。全量绿后关 dispatch-gate
+- **在飞（2）**：m264（诊断中）+ inventory（实现中）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
