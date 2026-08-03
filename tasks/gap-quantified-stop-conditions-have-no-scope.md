@@ -1,7 +1,7 @@
 ---
 id: gap-quantified-stop-conditions-have-no-scope
-title: "A stop condition that says >=3 without naming its set and window
-  deadlocked dispatch — check every quantified threshold in the driver docs"
+title: "Driver-doc prose hygiene: quantified thresholds must name set and
+  window; named paths must resolve"
 status: todo
 labels:
   - gap
@@ -40,10 +40,35 @@ extra:
 这两类现已在文档里用 `<!-- unmechanized: -->` / `<!-- unmechanizable: -->` 显式标记
 （2026-08-03 外层直接编辑），**本检查必须跳过被标记的段落**——标记的存在就是为了让范围可判定。
 
+### 第二类缺陷：点名了已不存在的东西（人 2026-08-03 指出）
+
+人指出 CLAUDE.md 里的 `quay.js` 是**阶段性文本，应当在合适的时候删除**，并且这属于同一个检查。
+
+**外层实测**：CLAUDE.md 里被反引号点名的路径中，**5 条真过期**，全是 `.js`→`.ts` 迁移遗留
+（`packages/quay/bin/quay.js`、`quay-native.js`、`src/serve.js`、`src/mcp-server.js`、
+`it0-dod-check.mjs`、`lifecycle.js`）。已由外层直接修掉。
+
+**为什么它和阈值检查是同一类**：两者都是**散文声称的东西与真实情况不符**，
+都可机械判定，且都是**读者按字面执行就会出错**。
+
+**但这个判定极易过度报告**——外层第一版检查把 18 条**局部路径**（`OUTER-LOOP.md` 这种
+在文中作为简称提到、实际位于子目录的）误判为过期。正确判据分三层：
+
+| 情形 | 判定 |
+|---|---|
+| 精确路径存在 | 通过 |
+| 精确路径不存在，但 basename 在仓库中存在 | **局部引用，通过**（这是合法文风） |
+| basename 不存在，但同名不同扩展名存在 | **过期**——扩展名已变 |
+| 都不存在，且不含占位模式 | **过期** |
+| 含占位模式（`NNN`、`<...>`、`*`） | **跳过**（如 `tasks/DIR-NNN.md`） |
+
+最后一行是实测得出的：不排除占位模式，CLAUDE.md 会永远剩一条假阳性。
+
 ## Contract
 
 ```
 measure  unscoped_count = `node plugin/scripts/threshold-scope-check.ts --json` 输出的 violations 字段长度
+measure  stalepath_count = `node plugin/scripts/threshold-scope-check.ts --json` 输出的 stalePaths 字段长度
 measure  marked_count   = `node plugin/scripts/threshold-scope-check.ts --json` 输出的 skippedByMarker 字段长度
 band     ceiling = 0 新增                                          # 与 contract-violations 同款 shrink-only
 invariant 被扫描的文档集合在改前后一致                                # 变了则计数不可比
@@ -95,6 +120,11 @@ resume   每扫完一个文档即写盘                                        #
       `docs/analysis/threshold-scope-violations.md`
 - [ ] AC6: 名单是 shrink-only 棘轮，新增即失败；与 `contract-violations.md` 同款
 - [ ] AC7: 报出而不阻断；接进 `scripts/test.sh` 的 governance 组
+- [ ] AC9: 过期引用判定按上表**三层**实现；用 CLAUDE.md 实跑，
+      **18 条局部路径必须不报**（外层第一版检查正是在这里过度报告）
+- [ ] AC10: 含占位模式（`NNN`/`<...>`/`*`）的路径**跳过**；用 `tasks/DIR-NNN.md` 验证
+- [ ] AC11: **负控制**——人为在扫描的文档里加一条指向不存在文件的引用 ⇒ 必须报出；
+      改成真实存在的路径 ⇒ 必须不报
 - [ ] AC8: 测试带 `// @test-group governance` 声明
 
 ## Definition of Done
@@ -115,7 +145,9 @@ resume   每扫完一个文档即写盘                                        #
 
 reviewer: outer
 at: 2026-08-03T03:26:00Z
-changed: 范围从「所有决策性散文都要有执行者」收窄到「只查带量词的停止条件」——
+changed: 范围两次调整。(1) 从「所有决策性散文都要有执行者」收窄到「只查带量词的停止条件」——
   依据是 `normative-prose-audit.md` 的逐条判定：36 条里 4 条不该被修（1 条 ADR-021 有意不机械化、
   3 条是本质不可机械化的思维纪律），通用检查会对它们持续报假警而被忽略；
-  并要求 AC3 显式报出 `skippedByMarker` 数量，因为静默跳过与「没发现问题」不可区分
+  并要求 AC3 显式报出 `skippedByMarker` 数量，因为静默跳过与「没发现问题」不可区分。
+  (2) 人指出 CLAUDE.md 的 `quay.js` 是阶段性文本、属同一个检查，故加入第二类判定「点名的路径必须解析」，
+  并把外层第一版检查的过度报告（18 条局部路径误判）写成 AC9 的显式反例——判据必须分三层，不是简单的存在性检查
