@@ -1,7 +1,6 @@
 ---
 id: gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed
-title: The ## Contract ratchet has no runner — it grew 1 → 12 unnoticed, and 6 of 7
-  invoke-evidence-missing findings are false
+title: "The ## Contract ratchet has no runner — it grew 1 → 12 unnoticed, and 6 of 7 invoke-evidence-missing findings are false"
 status: done
 labels:
   - gap
