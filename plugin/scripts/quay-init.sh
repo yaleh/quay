@@ -101,13 +101,23 @@ PLUGIN_ROOT="$(cd "$PLUGIN_ROOT" && pwd)"
 PLUGIN_VERSION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN_ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo unknown)"
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────
-COPIED=0; SKIPPED=0; CONFLICTED=0
+COPIED=0; SKIPPED=0; CONFLICTED=0; CLEANED=0
+# Backup timestamp for AC4 residue cleanup: every cleanup in one run is grouped under a single
+# per-run backup dir (<workspace>/.quay/quay-init-backups/<ts>/), so "backup 在哪" is one line.
+BACKUP_TS="$(date +%s)"
 
 # idempotent copy of one file. If RENDER is set, it is a prepared temp copy of SRC
 # (e.g. a substitution-rendered tick doc) and is what gets copied to DST.
-# Usage: copy_one <src> <dst> [render]
+# CLEAN (4th arg: "clean"|"preserve", default preserve) distinguishes two conflict classes:
+#   clean    — PRODUCT-OWNED files (loop mechanism executables: 可执行文件一律原样复制，只生成配置).
+#              A same-name-different-content target is RESIDUE (a stale hot-copy leftover) and is
+#              DISPOSED OF: backed up under <workspace>/.quay/quay-init-backups/<ts>/ and replaced
+#              with the product content, with a visible report (gap-cold-start-...-eight-steps AC4).
+#   preserve — localizable files (tick docs / prose): the conflict is listed and the target is left
+#              untouched (upgrade path: local changes are never silently overwritten).
+# Usage: copy_one <src> <dst> [render] [clean|preserve]
 copy_one() {
-  local src="$1" dst="$2" render="${3:-}"
+  local src="$1" dst="$2" render="${3:-}" clean="${4:-preserve}"
   local eff_src="$src"
   if [ -n "$render" ]; then eff_src="$render"; fi
   local fname
@@ -129,6 +139,23 @@ copy_one() {
     else
       echo "  skipped (identical): $dst"
     fi
+  elif [ "$clean" = "clean" ]; then
+    # AC4 residue cleanup: the target has a same-name file whose content differs from the product —
+    # a stale hot-copy leftover. Dispose of it VISIBLY: back it up and replace it. 不静默覆盖 — the
+    # backup path is always reported, never a silent overwrite.
+    CLEANED=$((CLEANED + 1))
+    if [ "$DRY_RUN" = true ]; then
+      echo "  would-clean-residue: $dst (stale copy differs from the product — would back up + replace)"
+    else
+      local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
+      mkdir -p "$backup_dir"
+      cp "$dst" "$backup_dir/$fname"
+      mkdir -p "$(dirname "$dst")"
+      cp "$eff_src" "$dst"
+      echo "  cleaned-residue: $dst"
+      echo "    backup: $backup_dir/$fname"
+    fi
+    COPIED=$((COPIED + 1))
   else
     if [ "$FORCE" = true ]; then
       if [ "$DRY_RUN" = true ]; then
@@ -189,6 +216,82 @@ s = s.replace("plugin/loop/orchestrator-loop-tick.md", "orchestration/orchestrat
 s = s.replace("plugin/loop/fast-mode-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md")
 open(dst, "w", encoding="utf-8").write(s)
 PYEOF
+}
+
+# detect_test_command <root>: AC2 (gap-cold-start-...-eight-steps) — the target project's test
+# command is DETECTABLE, not something the human must already know. Priority ladder (first match
+# wins; measured on three real projects, each on a different rung):
+#   scripts/test.sh            → "bash scripts/test.sh"  (quay's own convention)
+#   package.json scripts.test  → "npm test"              (e.g. archguard: "vitest run" via npm test)
+#   go.mod                     → "go test ./..."         (e.g. meta-cc)
+#   Cargo.toml                 → "cargo test"
+# Prints the detected command on stdout and returns 0; returns 1 (silent) when nothing is detected.
+# The caller FAILS CLOSED on a miss — this function never guesses a default (AC3 negative control).
+detect_test_command() {
+  local root="$1"
+  if [ -f "$root/scripts/test.sh" ]; then
+    echo "bash scripts/test.sh"
+    return 0
+  fi
+  if [ -f "$root/package.json" ]; then
+    if python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+    scripts = d.get("scripts")
+    if isinstance(scripts, dict) and isinstance(scripts.get("test"), str) and scripts["test"].strip():
+        sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)
+' "$root/package.json" 2>/dev/null; then
+      echo "npm test"
+      return 0
+    fi
+  fi
+  if [ -f "$root/go.mod" ]; then
+    echo "go test ./..."
+    return 0
+  fi
+  if [ -f "$root/Cargo.toml" ]; then
+    echo "cargo test"
+    return 0
+  fi
+  return 1
+}
+
+# write_provider_config: generate/ensure the target's .quay/config.yml provider mcp_entry is
+# PROJECT-LOCAL (AC7b, gap-cold-start-...-eight-steps). The cold-started loop must NOT depend on the
+# quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
+# If the target has no config yet, write one whose provider uses ABSOLUTE project-local paths (never
+# a bare `quay-native` that PATH-resolves to the dev tree). If a config already exists, the project
+# owns it — just note the AC7b requirement (a future --force could patch it; not silently rewritten).
+write_provider_config() {
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-write: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b)"
+    return
+  fi
+  if [ -f "$cfg" ]; then
+    echo "  note: .quay/config.yml already exists — keep the provider mcp_entry on project-local absolute paths, never a PATH-resolved quay-native (AC7b)"
+    return
+  fi
+  mkdir -p "$WORKSPACE_ROOT/.quay" "$WORKSPACE_ROOT/tasks"
+  cat > "$cfg" <<EOF
+# Generated by quay-init --loop (gap-cold-start-...-eight-steps AC7b).
+# The provider mcp_entry uses ABSOLUTE project-local paths — never a PATH-resolved
+# \`quay-native\` symlink into the quay dev tree. The native provider runtime must be
+# present in the target (npm install / the cold-start dist extraction).
+providers:
+  native:
+    enabled: true
+    path: "${WORKSPACE_ROOT}/packages/quay-native"
+    tasks_dir: "${WORKSPACE_ROOT}/tasks"
+    mcp_entry: ["node", "${WORKSPACE_ROOT}/packages/quay-native/bin/quay-native.ts", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
+EOF
+  echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b)"
 }
 
 # write_state_file: record what --loop laid down, for the upgrade path (AC5).
@@ -278,13 +381,30 @@ fi
 
 if [ "$DO_LOOP" = true ]; then
   local_base_copied="$COPIED"; local_base_skipped="$SKIPPED"; local_base_conflicted="$CONFLICTED"
-  # --test-command is REQUIRED: the 判绿 convention (grep 'cancelled 0' / FULL-SUITE-EXIT / tests=N)
-  # needs a concrete test command, and the AC4 negative control forbids leaking the quay-specific
-  # default (scripts/test.sh) into the laid-down copy. Fail-closed rather than guess.
+  # AC2 (gap-cold-start-...-eight-steps): the target project's test command is DETECTABLE, not
+  # something the human must know in advance. An explicit --test-command always wins; otherwise the
+  # priority ladder (scripts/test.sh → package.json scripts.test → go.mod → Cargo.toml) detects it
+  # and a successful detection is PRINTED for the human to confirm. A detection MISS FAILS CLOSED
+  # (AC3) naming every location searched — the 判绿 convention (grep 'cancelled 0' / FULL-SUITE-EXIT /
+  # tests=N) needs a concrete command, and a guessed default is exactly what the negative control
+  # forbids (no leaking the quay-specific scripts/test.sh into a laid-down copy that doesn't use it).
   if [ -z "$TEST_COMMAND" ]; then
-    echo "ERROR: --loop requires --test-command <cmd> (the target project's test command, e.g. 'npm test' or 'node --test')." >&2
-    echo "       There is no universal default: quay uses scripts/test.sh, archguard uses npm test, meta-cc uses go test." >&2
-    exit 2
+    if DETECTED="$(detect_test_command "$WORKSPACE_ROOT")"; then
+      TEST_COMMAND="$DETECTED"
+      echo "  detected test command: $TEST_COMMAND (from the target project — confirm this is correct)"
+    else
+      echo "ERROR: --loop needs the target project's test command but none could be detected in $WORKSPACE_ROOT." >&2
+      echo "       Searched these detection sources (in order):" >&2
+      echo "         - scripts/test.sh" >&2
+      echo "         - package.json (a scripts.test entry)" >&2
+      echo "         - go.mod" >&2
+      echo "         - Cargo.toml" >&2
+      echo "       There is no universal default (quay uses scripts/test.sh, archguard uses npm test, meta-cc uses go test)." >&2
+      echo "       Pass --test-command <cmd> explicitly to set the target's test command." >&2
+      exit 2
+    fi
+  else
+    echo "  using explicit --test-command: $TEST_COMMAND"
   fi
 
   echo "  loop (two-layer mechanism):"
@@ -319,7 +439,10 @@ if [ "$DO_LOOP" = true ]; then
   )
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
-      copy_one "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s"
+      # 4th arg "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never
+      # silently skipped. Mechanism executables must be current (verify-installed-executables.sh
+      # fails closed on any drift, so a leftover stale copy would otherwise abort the install).
+      copy_one "$PLUGIN_ROOT/scripts/$s" "$WORKSPACE_ROOT/plugin/scripts/$s" "" clean
     else
       echo "  WARN: loop mechanism script missing from plugin: plugin/scripts/$s" >&2
     fi
@@ -377,9 +500,24 @@ if [ "$DO_LOOP" = true ]; then
   if [ ! -f "$sl_src" ]; then
     echo "  WARN: session-liveness.sh missing from plugin: $sl_src" >&2
   else
-    copy_one "$sl_src" "$sl_dst"
+    # 4th arg "clean": session-liveness.sh is an executable that must be current (AC4 residue
+    # cleanup — a stale copy is backed up + replaced, never silently left in place).
+    copy_one "$sl_src" "$sl_dst" "" clean
     write_session_env
   fi
+
+  # AC7b (gap-cold-start-...-eight-steps): lay down the runtime INTO the target. The target's loop
+  # must NOT depend on the quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/
+  # packages/quay-native/dist/). The built core runtime (vendor/quay/dist/quay.js) is copied into the
+  # target so the target's .quay/config.yml can point its provider mcp_entry at a PROJECT-LOCAL copy.
+  # A plugin source without the built bundle (a raw checkout that hasn't run sync-vendor.sh) warns
+  # instead of failing — the runtime is a generated artifact, not a tracked source.
+  if [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ]; then
+    copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/vendor/quay/dist/quay.js" "" clean
+  else
+    echo "  WARN: plugin has no built runtime (vendor/quay/dist/quay.js) — skipping runtime lay-down (AC7b). Run sync-vendor.sh to build it." >&2
+  fi
+  write_provider_config
 
   # Upgrade-path state record (AC5): detect prior plugin version + already-laid assets.
   if [ -f "$WORKSPACE_ROOT/.quay/quay-init-state.json" ]; then
@@ -401,6 +539,12 @@ fi
 
 # ── summary ─────────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init complete."
+
+# AC4: residue disposal is VISIBLE — when any stale same-name product file was cleaned, report
+# the count and the backup location (never a silent overwrite).
+if [ "$CLEANED" -gt 0 ]; then
+  echo "cleaned-residue: ${CLEANED} stale same-name product file(s) — backups under ${WORKSPACE_ROOT}/.quay/quay-init-backups/${BACKUP_TS}/"
+fi
 
 if [ "$CONFLICTED" -gt 0 ]; then
   echo "Conflicts detected. To overwrite: /quay:init --force"
