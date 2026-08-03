@@ -231,3 +231,13 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
   **本 tick 不派发新任务**（纪律：停下等人）；fan-in 照常（全量绿 → 关 test-coverage → 在飞返回后逐个收尾）
 - **阻塞信号**：无记录（非停止状态）
 - **计量**：test-coverage runId `fm-...-4w3tpe`（fan-in 完成后 `--task-end`）
+
+### Tick 更新（03T03:00Z）：test-coverage 已关闭
+
+- **全量绿**：2372 tests / 2354 pass / **0 fail / 0 cancelled** / 18 skip，FULL-SUITE-EXIT=0，selected 169。
+  **参考值 tests 从 2361 → 2372**（+5 test-coverage-check +6 inner-idle-log 测试）
+- **test-coverage done**：worktree `/tmp/quay-wt-tccheck` 移除、分支 `task/test-coverage-fix` 删除、
+  任务体提交（post-merge discovery fix note + status done）、`--task-end`（`fm-...-4w3tpe`, done）
+- **在飞（2）**：dispatch-gate + m264 仍在
+- **不派发**：needs-human=7 停止条件持续成立——`gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion`
+  与 `gap-test-isolation-contract-is-unwritten` 仍排队，等外层处置积压或放行
