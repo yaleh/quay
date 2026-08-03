@@ -7,8 +7,13 @@
  * glob never matched `plugin/test/`) so it cannot recur under a different, not-yet-invented path.
  *
  * SINGLE-SOURCE (ADR-004): the canonical glob patterns are PARSED from `scripts/test.sh`'s own
- * `files=(...)` line, never re-typed here — if that script's glob ever changes, this check's
+ * glob declaration line, never re-typed here — if that script's glob ever changes, this check's
  * notion of "canonical" changes with it automatically, with no second copy to fall out of sync.
+ * Both spellings the script has used are accepted (gap-test-coverage-check-parses-stale-files-
+ * variable): the current `local glob=(...)` (layer-grouping rename) and the legacy `files=(...)`
+ * line. An empty/absent glob is a PARSE FAILURE (fail-loud) — a silently-empty canonical set would
+ * make the check mis-report every discovered test file as an orphan (the exact DIR-110 failure
+ * class this check exists to catch), so a broken single-source link must never be quiet.
  *
  * Scope (matches ADR-019's Decision #4 text verbatim: "any package's `test/` directory (or
  * `plugin/test/`)"): a `**\/test/*.test.mjs`-shaped file is compared against the canonical set
@@ -32,6 +37,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,15 +66,45 @@ function readFileSafe(p: string): string {
   }
 }
 
-/** Parse the space-separated glob patterns out of `scripts/test.sh`'s `files=(...)` line. */
+/**
+ * Parse the space-separated glob patterns out of `scripts/test.sh`'s canonical glob declaration.
+ *
+ * Single-source (ADR-004): the glob is read from test.sh's OWN line, never re-typed here. Matches
+ * BOTH spellings the script has used (AC1 of gap-test-coverage-check-parses-stale-files-variable):
+ *   - current: `local glob=(packages/*\/test/*.test.mjs plugin/test/*.test.mjs experiments/...)`
+ *     inside `build_deduped_files()` (layer-grouping rename);
+ *   - legacy:  `files=(...)` from before the rename.
+ * An empty or absent glob is a PARSE FAILURE — the check's single-source premise is broken, so this
+ * THROWS (fail-loud, AC2) rather than silently returning `[]` (which would make every discovered
+ * test file an "orphan": the check going red for the wrong reason, or worse, green against a
+ * genuinely-empty canonical set). The guard is the POST-FILTER non-emptiness check — it catches not
+ * only a missing line and `glob=()` but also whitespace-only content (`glob=( )`, `glob=(\n)`),
+ * which `.split(/\s+/).filter(Boolean)` would otherwise reduce to `[]` (REFUTE round-1 MAJOR). The
+ * runtime `local files=() f` array in `run_selected()` can therefore never masquerade as the glob.
+ */
 function parseCanonicalGlobs(repoRoot: string): string[] {
   const src = readFileSafe(path.join(repoRoot, "scripts", "test.sh"));
-  const m = src.match(/files=\(([^)]*)\)/);
-  if (!m) return [];
-  return m[1]
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Prefer the CURRENT `glob=` spelling; fall back to legacy `files=` only when NO `glob=` line
+  // exists at all — a stray legacy line must never shadow the live one (leftmost-match ordering,
+  // REFUTE round-1 MINOR).
+  const m =
+    src.match(/(?:^|\n)[ \t]*(?:local[ \t]+)?glob=\(([^)]*)\)/) ??
+    src.match(/(?:^|\n)[ \t]*(?:local[ \t]+)?files=\(([^)]*)\)/);
+  const patterns = m
+    ? m[1]
+        .split(/\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  if (patterns.length === 0) {
+    throw new Error(
+      "cannot parse a non-empty canonical glob from scripts/test.sh " +
+        "(expected a `local glob=(...)` line, or a legacy `files=(...)` line). " +
+        "An unparseable/empty glob is a single-source break (ADR-004) — failing loudly instead of " +
+        "silently reporting zero canonical files."
+    );
+  }
+  return patterns;
 }
 
 function globSegmentToRegex(seg: string): RegExp {
@@ -183,7 +219,14 @@ function main(argv: string[]): number {
   if (args.includes("--selftest")) return runSelftest();
   const asJson = args.includes("--json");
 
-  const report = findOrphans(REPO_ROOT);
+  let report: OrphanReport;
+  try {
+    report = findOrphans(REPO_ROOT);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`test-coverage-check: ${msg}`);
+    return 2; // usage/environment error (single-source link broken) — matches header contract
+  }
   if (asJson) {
     console.log(JSON.stringify({ ok: report.orphans.length === 0, ...report }, null, 2));
   } else {
@@ -213,13 +256,104 @@ function runSelftest(): number {
     }
   }
 
-  // ── parseCanonicalGlobs / expandGlob against the REAL repo ──
-  const globs = parseCanonicalGlobs(REPO_ROOT);
+  // ── parseCanonicalGlobs against the REAL repo (AC1: current `local glob=(...)` spelling) ──
+  let globs: string[];
+  try {
+    globs = parseCanonicalGlobs(REPO_ROOT);
+  } catch (e) {
+    globs = [];
+    check("parseCanonicalGlobs parses the real test.sh glob", false, String(e));
+  }
   check(
-    "parseCanonicalGlobs finds the two known patterns",
-    globs.includes("packages/*/test/*.test.mjs") && globs.includes("plugin/test/*.test.mjs"),
+    "AC1: parseCanonicalGlobs finds all three canonical patterns (packages, plugin, experiments)",
+    globs.length === 3 &&
+      globs.includes("packages/*/test/*.test.mjs") &&
+      globs.includes("plugin/test/*.test.mjs") &&
+      globs.includes("experiments/quay-perpetual-stream/test/*.test.mjs"),
     JSON.stringify(globs)
   );
+
+  // ── AC1: legacy `files=(...)` spelling still parses (pre-rename test.sh) ──
+  const legacyScratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-coverage-check-legacy-"));
+  try {
+    fs.mkdirSync(path.join(legacyScratch, "scripts"), { recursive: true });
+    fs.writeFileSync(
+      path.join(legacyScratch, "scripts", "test.sh"),
+      'files=(packages/*/test/*.test.mjs plugin/test/*.test.mjs)\nexec node --test "${files[@]}"\n'
+    );
+    const legacyGlobs = parseCanonicalGlobs(legacyScratch);
+    check(
+      "AC1: legacy `files=(...)` spelling parses",
+      legacyGlobs.includes("packages/*/test/*.test.mjs") && legacyGlobs.includes("plugin/test/*.test.mjs"),
+      JSON.stringify(legacyGlobs)
+    );
+  } catch (e) {
+    check("AC1: legacy `files=(...)` spelling parses", false, String(e));
+  } finally {
+    fs.rmSync(legacyScratch, { recursive: true, force: true });
+  }
+
+  // ── AC2: an empty/absent glob is a PARSE FAILURE (fail-loud), never a silent [] ──
+  const brokenScratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-coverage-check-broken-"));
+  try {
+    fs.mkdirSync(path.join(brokenScratch, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(brokenScratch, "scripts", "test.sh"), "exec node --test\n");
+    let threw = false;
+    try {
+      parseCanonicalGlobs(brokenScratch);
+    } catch {
+      threw = true;
+    }
+    check("AC2: no glob line → parseCanonicalGlobs THROWS (fail-loud, not silent [])", threw);
+
+    // The runtime `local files=() f` array (empty capture) must NOT be mistaken for the glob —
+    // before the fix it was the FIRST `files=(...)` match, silently yielding [].
+    fs.writeFileSync(
+      path.join(brokenScratch, "scripts", "test.sh"),
+      'local files=() f\nexec node --test "${files[@]}"\n'
+    );
+    threw = false;
+    try {
+      parseCanonicalGlobs(brokenScratch);
+    } catch {
+      threw = true;
+    }
+    check("AC2: runtime `local files=() f` (empty) is NOT parsed as the glob → fail-loud", threw);
+  } finally {
+    fs.rmSync(brokenScratch, { recursive: true, force: true });
+  }
+
+  // ── AC5: canonical set == scripts/test.sh's OWN default selection (--list-files), both
+  // realpath-deduped (matching build_deduped_files). If the two ever diverge, the check is
+  // failing its ADR-004 single-source purpose. Wrapped so a throw from canonicalTestFiles
+  // (broken test.sh) surfaces as a FAIL, not an uncaught stack trace (REFUTE round-1 MINOR). ──
+  {
+    let ac5 = false;
+    let detail = "";
+    try {
+      const canonReal = new Set(
+        [...canonicalTestFiles(REPO_ROOT)].map((f) => {
+          try {
+            return fs.realpathSync(path.join(REPO_ROOT, f));
+          } catch {
+            return path.join(REPO_ROOT, f);
+          }
+        })
+      );
+      const listOut = spawnSync("bash", ["scripts/test.sh", "--list-files"], { cwd: REPO_ROOT, encoding: "utf8" });
+      const listSet = new Set(listOut.status === 0 ? listOut.stdout.trim().split("\n").filter(Boolean) : []);
+      ac5 =
+        listOut.status === 0 && canonReal.size === listSet.size && [...canonReal].every((f) => listSet.has(f));
+      detail = `canonical=${canonReal.size} list-files=${listSet.size}`;
+    } catch (e) {
+      detail = String(e);
+    }
+    check(
+      "AC5: canonical set == scripts/test.sh --list-files (realpath-deduped)",
+      ac5,
+      detail
+    );
+  }
 
   // ── real repo tree: zero known orphans right now (DIR-110 AC4) ──
   const realReport = findOrphans(REPO_ROOT);
@@ -237,7 +371,7 @@ function runSelftest(): number {
     fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true });
     fs.writeFileSync(
       path.join(scratch, "scripts", "test.sh"),
-      'files=(packages/*/test/*.test.mjs plugin/test/*.test.mjs)\nexec node --test "${files[@]}"\n'
+      'local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs)\nexec node --test "${glob[@]}"\n'
     );
     fs.mkdirSync(path.join(scratch, "packages", "pkg-a", "test"), { recursive: true });
     fs.writeFileSync(path.join(scratch, "packages", "pkg-a", "test", "a.test.mjs"), "// fixture\n");

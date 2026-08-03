@@ -65,21 +65,102 @@ local glob=(packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-p
 
 ## Acceptance Criteria
 
-- [ ] AC1: `parseCanonicalGlobs` 能解析当前 test.sh 的 `glob=(...)` 行（且仍兼容旧 `files=`）
-- [ ] AC2: 解析出非空 glob（空 = fail-loud，不是静默成功）
-- [ ] AC3: `node --experimental-strip-types scripts/test-coverage-check.ts --selftest` 绿
-- [ ] AC4: `node --experimental-strip-types scripts/test-coverage-check.ts` 常规模式绿（不再误报全文件不可达）
-- [ ] AC5: 与 `scripts/test.sh` 默认 glob 的实际文件集一致（ADR-004 单一来源保持）
-- [ ] AC6: 测试带 `// @test-group engine` 声明（若产出脚本/测试）
+- [x] AC1: `parseCanonicalGlobs` 能解析当前 test.sh 的 `glob=(...)` 行（且仍兼容旧 `files=`）
+      —— 实现在 `scripts/test-coverage-check.ts`：先匹配当前 `local glob=(...)`（3 个 pattern 全解析出），
+      无 `glob=` 时回退旧 `files=(...)`；解析后再做非空过滤，保证运行时 `local files=() f`（空捕获）
+      不会被误当成 glob（REFUTE round-1 修正：空白-only 内容如 `glob=( )` 也 fail-loud）。
+- [x] AC2: 解析出非空 glob（空 = fail-loud，不是静默成功）——无 glob 行 / `glob=()` / 空白-only / 空捕获
+      一律 **throw**，CLI 捕获后 stderr 打印原因、exit 2；selftest 与单测都验证了 fail-loud 路径
+      （含 `glob=( )`、`glob=(\n)`、`local glob=( ) f` 等 6 种坏形态）。
+- [x] AC3: `node --experimental-strip-types scripts/test-coverage-check.ts --selftest` 绿
+      —— `test-coverage-check --selftest: 10 passed, 0 failed`（见 DoD 实测）。
+- [x] AC4: `node --experimental-strip-types scripts/test-coverage-check.ts` 常规模式绿（不再误报全文件不可达）
+      —— `canonical=181 discovered=123, PASS: 0 orphan(s)`（见 DoD 实测）。
+- [x] AC5: 与 `scripts/test.sh` 默认 glob 的实际文件集一致（ADR-004 单一来源保持）
+      —— selftest + 单测都做了 realpath-dedup 后的集合比对：canonical set == `scripts/test.sh --list-files`（168 个）。
+- [x] AC6: 测试带 `// @test-group engine` 声明——产出 `plugin/test/test-coverage-check.test.mjs`，第 1 行即声明。
 
 ## Definition of Done
 
-- [ ] AC3/AC4 的实测输出贴进任务体
-- [ ] 明确记录：**解析器与它声称的单一来源漂移，会让检查静默失效**——ADR-004 的执行机制本身
-      需要自检（空 glob fail-loud）
-- [ ] 记录这次最初被误判为「孤儿脚本」的经过：实际有 CI 接线，是解析失效
+- [x] AC3/AC4 的实测输出贴进任务体（见下方「实测输出」）
+- [x] 明确记录：**解析器与它声称的单一来源漂移，会让检查静默失效**——ADR-004 的执行机制本身
+      需要自检（空 glob fail-loud）（见下方「Resolution」）
+- [x] 记录这次最初被误判为「孤儿脚本」的经过：实际有 CI 接线，是解析失效（见下方「Resolution」）
+
+## Resolution
+
+**修复**（`scripts/test-coverage-check.ts`）：`parseCanonicalGlobs` 现在同时匹配当前 `local glob=(...)`
+（layer-grouping 改名后）与旧 `files=(...)`（AC1），并要求捕获**非空**——无 glob / 空 glob 一律
+throw（fail-loud，AC2），CLI 捕获后 exit 2，不再静默返回 `[]`。
+
+**这个缺陷的机制比「孤儿脚本」更微妙**：不只是正则没匹配到 `glob=`。旧正则 `/files=\(([^)]*)\)/`
+对 test.sh **匹配到了**——它匹配到了 `run_selected()` 里运行时数组 `local files=() f`（空捕获），
+于是 `parseCanonicalGlobs` 返回 `[]`。空 canonical 集 → `discoverProductTierTestFiles` 发现的每一个
+product/plugin-tier 测试文件都成了「孤儿」→ CI 的 `test-coverage-check` 步骤误报红（或更糟：对
+一个真正空集的 glob 反而绿）。**解析器与它声称的单一来源漂移，会让检查静默失效**——ADR-004 的
+执行机制本身需要自检，这就是「空 glob = fail-loud」的由来。
+
+**最初被误判为「孤儿脚本」的经过**：外层/policy 子代理观察到其 selftest 红，一度以为
+`test-coverage-check.ts` 是没有接线、被遗忘的脚本。实查 `.github/workflows/ci.yml:34-35` 与
+`adr/ADR-019` enforcement 后确认**它有 CI 接线**——真实缺陷是解析器与 test.sh 结构漂移，
+不是孤儿。
+
+**产出**：修复 + `plugin/test/test-coverage-check.test.mjs`（AC1/AC2/AC4/AC5 的 RED/GREEN 单测，
+`// @test-group engine` 声明）。CI 接线无需改动（`--selftest` + 常规模式的命令面不变）。
+
+## 实测输出
+
+### AC3 selftest（worktree `task/test-coverage-fix`）
+
+```
+$ node --experimental-strip-types scripts/test-coverage-check.ts --selftest
+test-coverage-check --selftest: 10 passed, 0 failed
+```
+
+### AC4 常规模式
+
+```
+$ node --experimental-strip-types scripts/test-coverage-check.ts
+test-coverage-check — canonical=181 discovered=123
+PASS: 0 orphan(s) — every discovered product/plugin-tier test file is reachable by scripts/test.sh
+```
+
+（canonical/discovered 各含本任务新加的 `plugin/test/test-coverage-check.test.mjs`，修复前为
+canonical=180 discovered=122。）
+
+### AC5 文件集一致性（realpath-dedup 后 == test.sh 自身默认选择）
+
+```
+$ bash scripts/test.sh --list-files | wc -l
+168
+```
+
+`canonicalTestFiles` 展开 3 个 pattern 后 realpath-dedup 得 168 个绝对路径，与
+`scripts/test.sh --list-files` 逐项相等（selftest 与单测都断言）。
+
+### 失败路径（空 glob = fail-loud）
+
+```
+$ node --experimental-strip-types scripts/test-coverage-check.ts   # scripts/test.sh 无 glob 行
+test-coverage-check: cannot parse a non-empty canonical glob from scripts/test.sh (expected a `local glob=(...)` line, or a legacy `files=(...)` line). An unparseable/empty glob is a single-source break (ADR-004) — failing loudly instead of silently reporting zero canonical files.
+$ echo $?
+2
+```
+
+### 单测（AC1/AC2/AC4/AC5）
+
+```
+$ scripts/test.sh --for-task gap-test-coverage-check-parses-stale-files-variable
+✔ AC1: parses the CURRENT `local glob=(...)` line from scripts/test.sh
+✔ AC1: legacy `files=(...)` spelling still parses
+✔ AC2: empty/absent glob is a parse FAILURE (throws, never silent [])
+✔ AC4: real repo tree has zero orphans (canonical glob non-empty)
+✔ AC5: canonical set == scripts/test.sh --list-files (realpath-deduped)
+ℹ tests 5 · pass 5 · fail 0
+```
 
 ## Touches
 
 - scripts/test-coverage-check.ts
-- .github/workflows/ci.yml（若需调整接线）
+- plugin/test/test-coverage-check.test.mjs
+- .github/workflows/ci.yml
