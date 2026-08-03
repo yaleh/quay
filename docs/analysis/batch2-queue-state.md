@@ -1350,3 +1350,26 @@ pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过�
 `/tmp/quay-wt-coldstart`（分支 task/gap-...-cannot-ship），telemetry fm-...-36fiim。
 范围裁定已写任务体（test.sh 不搬、不进 Touches）；AC8 改名负控制实跑输出必须贴任务体（DoD 硬要求）。
 闸口外层已过（task-contract-check 0 违规、Touches 补齐 18 条）。
+
+## 外层队列状态（2026-08-03T10:35Z，停机解除后的第一批）
+
+**`.halt` 已由管理者解除**（依据：人指示产品化交付优先 + archguard 已停机让出资源；
+原「archguard 跑满 2 小时」的条件被取代）。解除前的全量套件判决：
+`tests 2073 / pass 2054 / fail 0 / cancelled 0 / skipped 19`，498s，selected 158 files
+（`/tmp/suite.log`）——tests 与参考值 2073 逐位相同。**退出码未被捕获，如实记录。**
+
+| 顺序 | 任务 | 状态 | 并发资格 |
+|---|---|---|---|
+| 1 | `gap-loop-mechanism-lives-outside-the-package-and-cannot-ship` | **在飞**（`fm-...-36fiim`，10:34:44Z） | — |
+| 2 | `gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed` | 待派 | 与 #1 **DISJOINT**，但见下 |
+| 3 | `gap-tasksperhour-counts-halted-time-as-slow-work` | 待派 | 与 #1 **OVERLAP** `plugin/scripts/fast-mode-telemetry.ts` ⇒ 不同批 |
+
+**#2 为什么按住不派**：#1 有一个未回答的范围问题——`scripts/test.sh` 搬不搬进 `plugin/`
+（任务体缺口二与 Chosen mechanism 打架）。#2 的 `## Touches` 含 `scripts/test.sh`。
+**若 #1 的答案是「搬」，现在这个 DISJOINT 判决立刻失效。**
+判据成立于一个未回答的问题之上时，它不是判据。**#1 回答后立即重跑 `checkTouchesPair` 再决定。**
+
+**#3 的优先级**：管理者已定「排在产品化之后」。它记录的是
+`tasksPerHour` 把停机墙钟算进分母（实测：21 分 16 秒纯停机、同一批 37 个收尾任务，
+读数 1.5621 → 1.5391；分子固定 37 ⇒ 37/1.5 把窗口上限锁在 24.67h）。
+**建它是为了修仪器，不是为了挑轻任务把数拉回来**——AC6 专门断言分子不按任务大小加权。
