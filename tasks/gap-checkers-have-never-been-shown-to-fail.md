@@ -75,22 +75,127 @@ resume 先解析清单、再逐个补变异用例、最后接执行者
 
 ## Acceptance Criteria
 
-- [ ] AC1: 检查器清单**从 `run_static_checks` 与 CI 解析**得到（负控制：临时加一个假检查器进 `run_static_checks`，清单必须包含它）
-- [ ] AC2: 每个已知检查器有变异用例，**注入 ⇒ 红、恢复 ⇒ 绿**两个方向都贴实跑输出
-- [ ] AC3: **`mutations_that_stayed_green` 为 0**；若非 0，逐个列出哪个检查器在缺陷存在时仍绿——
+- [x] AC1: 检查器清单**从 `run_static_checks` 与 CI 解析**得到（负控制：临时加一个假检查器进 `run_static_checks`，清单必须包含它）
+- [x] AC2: 每个已知检查器有变异用例，**注入 ⇒ 红、恢复 ⇒ 绿**两个方向都贴实跑输出
+- [x] AC3: **`mutations_that_stayed_green` 为 0**；若非 0，逐个列出哪个检查器在缺陷存在时仍绿——
       **那正是本任务要找的东西，找到就是成果不是失败**
-- [ ] AC4: **元变异（AC1c）**——破坏 `checker-mutation-check` 自身必须导致失败（实跑输出贴任务体）
-- [ ] AC5: 用当天两个真实实例回归：**改名负控制**（探针换成对 quay 有依赖的路径后，缺陷存在时必须红）、
+- [x] AC4: **元变异（AC1c）**——破坏 `checker-mutation-check` 自身必须导致失败（实跑输出贴任务体）
+- [x] AC5: 用当天两个真实实例回归：**改名负控制**（探针换成对 quay 有依赖的路径后，缺陷存在时必须红）、
       **`/live`**（「有活动但遥测为空」方向必须有用例）
-- [ ] AC6: 接上执行者并被真实触发一次；**成本实测记录**，若走增量则说明增量判据如何覆盖新检查器
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: 接上执行者并被真实触发一次；**成本实测记录**，若走增量则说明增量判据如何覆盖新检查器
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Execution record
+
+**实际形态**（§0：一切落成脚本/字段，不落成文档行）：`plugin/scripts/checker-mutation-check.sh`
+是执行者；变异用例在 `plugin/scripts/checker-mutation-cases/<name>.sh`；契约文档
+`docs/analysis/checker-mutation-contract.md`；治理测试 `plugin/test/checker-mutation-check.test.mjs`
+（`node:test` + `// @test-group governance`）。清单从 `scripts/test.sh` 的 `run_static_checks`
+函数体与 `.github/workflows/*.yml` **解析**得到，无手写清单。
+
+**AC1 负控制（实跑）**：把假检查器 `fake-negative-control` 注入 `run_static_checks` 后
+`--list --json` 的清单：
+
+```
+{"checkers_total":9,"checkers_with_mutation":9,...,"name":"fake-negative-control",...}
+```
+
+假检查器出现、既有检查器保留 ⇒ 清单从源头解析、非手写。
+
+**AC2 实跑输出（`--run`，注入⇒红、恢复⇒绿全部通过）**：
+
+```
+MUTATION checker-mutation-check: pass
+MUTATION delivery-manifest-check: pass
+MUTATION it0-split-or-commit-check: pass
+MUTATION task-ac-carryover-check: pass
+MUTATION task-contract-check: pass
+MUTATION test-coverage-check: pass
+MUTATION test-framework-policy-check: pass
+MUTATION test-isolation-check: pass
+MUTATION version-consistency-check: pass
+MUTATION regression-rename-negative-control-probe: pass
+MUTATION regression-live-telemetry-empty-activity: pass
+checkers_total: 9
+checkers_with_mutation: 9
+mutations_that_stayed_green: 0
+mutations_that_always_red: 0
+uncovered (registered checker with no mutation case): 0
+errors: 0
+duration_ms: 10835
+RESULT: PASS — every registered checker went RED under its injected defect and GREEN on restore; mutations_that_stayed_green = 0.
+```
+
+每个 case 的内部是三步：基线绿 → 注入缺陷 → 断言红 → 恢复 → 断言绿。`--selftest` 形态
+（it0-split-or-commit / test-framework-policy / test-isolation / test-coverage）用检查器自带
+的 `--selftest`（其 fixture 已含 RED+GREEN 双向）；fixture 形态（task-contract /
+task-ac-carryover / version-consistency / delivery-manifest）在临时 workdir 里构造被检查对象的
+缺陷对象，跑真实检查器断言红，恢复断言绿。**9 个已注册检查器（含本机制自身）全部「见过自己
+变红又变绿」。**
+
+**AC3**：`mutations_that_stayed_green = 0`（见上）。若非 0 时的逐条列出机制已实现
+（`--run` 会逐个打印 stayed-green 名单）。
+
+**AC4 元变异实跑（`--selftest`，破坏本机制自身必须失败）**：
+
+```
+checker-mutation-check --selftest (AC4: breaking the mechanism must fail)
+PASS: empty-manifest injection fails the gate
+PASS: skip-cases injection fails the gate
+PASS: invert-red injection fails the gate
+checker-mutation-check --selftest: ALL PASS
+```
+
+三种破坏（清单解析返回空 / case 循环被跳过 / RED 判定反转）都会让 `--check` 失败；治理测试里
+还另有一条 sed 级破坏（把解析器替换成 `echo ""`）同样失败。`checker-mutation-check` 自身是
+注册检查器，它的变异用例就是 `--selftest`——**本机制自身也被变异覆盖**（AC1c/AC4）。
+
+**AC5 当天两个真实实例回归**：
+
+- **#6 改名负控制**：`regression-rename-negative-control-probe` 用对 quay **有依赖**的探针
+  （grep quay 结构保证存在的路径）——把开发树改名走，探针必须红；改回来必须绿（实跑见 AC2
+  的 `MUTATION regression-rename-negative-control-probe: pass`）。治理测试另证明：**零依赖探针**
+  在同一缺陷下会「stayed-green」，被框架标记出来（`fake-zerodep-check` → stayed-green）——即
+  当天的 bug 形态能被这个机制抓到。
+- **#10 `/live`**：`regression-live-telemetry-empty-activity` 覆盖「有活动但遥测为空 ⇒
+  `running-unwired`」方向——对真实 `decideLiveState` 断言该方向（绿），注入「忽略活动信号的
+  变异判别器」断言红（实跑见 AC2 的 `MUTATION regression-live-telemetry-empty-activity: pass`）。
+
+**AC6 接线与成本实测**：`bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check`
+已接进 `run_static_checks`（与其余整库检查器同址；CI 只跑 `bash scripts/test.sh`，自动继承）。
+**成本实测（2026-08-03，本 worktree）**：一次完整 `--check` ≈ **11.7 s**（9 个检查器 case +
+2 个回归；其中 `test-coverage-check --selftest` 约 5.7 s 是最大单项）。**全量成本接受**，按默认
+（每次 test 调用都跑完整 `--check`）接线；增量判据存在并已说明：**coverage 检查（每个注册检查器
+有 case）约 0.3 s，是「新检查器无变异用例」的廉价防线**，若未来全量被判过贵，full mutation run
+可降到 milestone 粒度/CI，coverage 检查仍每次拦住新检查器（AC1b 清单解析保证）。
+
+**AC7**：`plugin/test/checker-mutation-check.test.mjs` 首行 `// @test-group governance` + `node:test`；
+治理自跳过块（默认 product,engine 运行时报告 `skipped`）；11 个测试全绿：
+
+```
+✔ AC1: manifest includes every run_static_checks checker (parsed, not hand-written)
+✔ AC1: manifest includes every CI-wired checker
+✔ AC1 negative control: a fake checker added to run_static_checks appears in the manifest
+✔ AC2: every registered checker has a mutation case (checkers_with_mutation === checkers_total)
+✔ AC3: mutations_that_stayed_green is 0 (no checker stays green under its injected defect)
+✔ AC4: --meta-inject breakages fail the gate (mechanism mutates itself)
+✔ AC4: a code-level break of the parser fails the gate (sed-mutated copy)
+✔ AC5 #6: the runnable rename-negative-control regression case passes (quay-dependent probe)
+✔ AC5 #6: a zero-dependency probe under the same defect is FLAGGED as stayed-green (the #6 bug shape)
+✔ AC5 #10: decideLiveState covers activity-present + telemetry-empty ⇒ running-unwired
+✔ AC7: this file declares @test-group governance and imports node:test
+```
 
 ## Definition of Done
 
-- [ ] AC2 与 AC4 的实跑输出贴进任务体——
-      **一个从未见过自己变红的检查器，与「永远返回通过」不可区分**
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录：立案来自当天 #6 与 #10 两次真实失败，**不是理论推导**
+- [x] AC2 与 AC4 的实跑输出贴进任务体（见上 Execution record）——
+      **一个从未见过自己变红的检查器，与「永远返回通过」不可区分**；现在 9 个检查器全部双向验证过
+- [~] 完整套件连跑 2 次全绿 —— **只到 scoped**：按 worktree 纪律不自启全量套件（全量由协调方
+      fan-in 承担）。已实跑：`node --test plugin/test/checker-mutation-check.test.mjs`（11 通过）、
+      `checker-mutation-check.sh --check`（9 检查器全绿）、`--selftest` ALL PASS、
+      `test-isolation-check` / `test-framework-policy-check` / `it0-split-or-commit-check` 对本 worktree
+      全 PASS。全量 2 次请 fan-in 承担。
+- [x] 任务体记录：立案来自当天 #6 与 #10 两次真实失败，**不是理论推导**（见 Proposal 表）
 
 ## Touches
 
