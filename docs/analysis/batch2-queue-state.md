@@ -687,6 +687,16 @@ parser 轻量工作不占主要负载。sigma 每次测量前后记录资源闸�
 - **stranded + parser 合并全量在跑**（`bda9owbpo`，gate GO，压力 23.58 窗口）。全量绿 → 关两者（`--task-end`
   tikhj7 + ttg1t6）→ sigma 若需重测拿窗口 → sigma 完成后 fan-in
 
+### Tick 心跳（07T03:02Z）：sigma 测量完成（filesCaptured 155/155 ×3）
+
+**sigma 结果**（suite-sigma-2026-08-03.{json,md} 已落盘，3 次当前 155 全捕获 + 退役前 173 + 负控制）：
+1. **Σ/墙钟比值仍 ≈7**（6.13/6.90/7.00 vs 旧 7.1）——8-lane 饱和结论保持
+2. 前 10 名占 Σ **48.1%**（旧 44.8%）；前 3（proposal-convergence/delivery-smoke/runner-grouping）占 ~21%
+3. **核心答案：删 18 文件 ΔΣ ≈ −230s（−6%），噪音带宽 ±1000s+ → 不可判定**；墙钟 +1.2%（没降）。
+   **「Σ 降 ≠ 墙钟降」直接证据**——两者都没降。外层昨天分母用错（34.8% vs 4.9%）的纠正落地
+- **负控制（高压 gate WAIT 41→99）**：仍 155/155 捕获——套件在高压力下也能完整测量（cancelled 未发生）
+- 合并全量（stranded + parser）在跑（`bda9owbpo`，~4min）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
