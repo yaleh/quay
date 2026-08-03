@@ -387,6 +387,25 @@ reclaim 被中止（无结果）——但 2 个 68s/60s 时序失败与 cancelle
   消息它重跑
 - **inventory 全量仍在跑**（`bdqps1ujt`）。**串行套件队列**：inventory 全量 → reclaim 重跑 → testiso 全量
 
+### 外层优先级微调（2026-08-03T04:2xZ，人裁定——详见本文件末节）
+
+**一、resource-awareness P2→P1 首位**（排在 serve 崩溃与 web 观察面前）：
+- **实测推翻「并发才饥饿」**：单个套件自身 = 8 worker + 7 子进程 + 根 = **16 进程，4 核 4 倍超订，压力 87.15**；
+  两个并发只是 87→97。**饥饿是「跑一次全量」的稳态，不是并发的产物**
+- 直接打在 P0 上：每个删除算子的 DoD 连跑 2 次全绿 = 至少 2 次进饥饿态。今晚已耗：M136 三轮、批 4 崩溃一次、
+  reclaim + test-isolation 各重跑一次
+- **分类修正**：资源闸是两层共用的原语、取代重复目测判断——**支柱化，不是再加断言**（外层先前归类错了）
+
+**二、inventory 窗口差集改变 retire 前提**（**派 retire 前必须读进去**）：
+- 51 脚本 15.9h 低频 / 72h live，**31 个 unaccounted→live，真实 unaccounted ~50 不是 81**
+- `.claude/workflows/*.js`：15.9h 6 个全 unaccounted，**72h 5 个 live**——prepare-milestone 280×、
+  execute-milestone 47×。**经典循环在用，fast-mode 只是有意绕过**
+- retire 任务体的「最后 prepare-epoch 22 小时前」只覆盖 fast-mode 一侧；**派发前必须按 72h 窗口重估规模主张**，
+  否则会把还在用的东西当遗留删掉
+
+**三、P0 三个删除算子顺序不变**。**派发优先级**：P0 retire(#3)/stranded(#4) → P1 **resource-awareness(首)** →
+serve-task-list → web。testiso 已合并（scripts/test.sh 冲突解除），resource-awareness 可派
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
