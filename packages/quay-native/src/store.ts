@@ -314,13 +314,38 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     } catch {
       // stat failed (race or missing file) — omit updatedAt
     }
-    return toViewModel(frontmatter, body, updatedAt);
+    return toViewModel(frontmatter, body, updatedAt, id);
   }
 
-  function toViewModel(frontmatter: Record<string, unknown>, body: string, updatedAt?: number): Task & { updatedAt?: number } {
+  function toViewModel(
+    frontmatter: Record<string, unknown>,
+    body: string,
+    updatedAt?: number,
+    fallbackId?: string,
+  ): Task & { updatedAt?: number } {
     const children = (frontmatter.children as string[] | undefined) ?? [];
+    // gap-serve-task-list-dies-on-one-malformed-task: a task file whose
+    // frontmatter lacks `id:` must NOT surface as `id: undefined` — the
+    // filename IS the storage key (listIds() derives it from `<id>.md`), so it
+    // is the natural fallback. The fallback keeps the view-model internally
+    // consistent (CLI/Web UI never see `id: undefined`), and the `malformed`
+    // marker preserves the diagnosis — fallback is NOT a fix. Previously a
+    // missing `id:` silently produced `id: undefined`, which crashed the web
+    // task list at serve-handlers.ts:607 (`t.id.indexOf("-")`) and took down
+    // 100% of the UI for 0.5% malformed data.
+    const rawId = frontmatter.id as string | undefined;
+    const idMissing = typeof rawId !== "string" || rawId.length === 0;
+    const resolvedId = idMissing
+      ? (typeof fallbackId === "string" ? fallbackId : "")
+      : rawId;
+    const existingExtra = (frontmatter.extra as Record<string, unknown> | undefined) ?? {};
+    const extra: Record<string, unknown> = { ...existingExtra };
+    if (idMissing) {
+      const existing = Array.isArray(existingExtra.malformed) ? (existingExtra.malformed as string[]) : [];
+      extra.malformed = [...new Set([...existing, "missing-id"])];
+    }
     const vm: Task & { updatedAt?: number } = {
-      id: frontmatter.id as string,
+      id: resolvedId,
       title: frontmatter.title as string,
       status: frontmatter.status as Task['status'],
       labels: (frontmatter.labels as string[] | undefined) ?? [],
@@ -328,7 +353,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       children,
       // role is derived, never stored (design §2): children non-empty => compound
       role: (children.length > 0 ? "compound" : "primitive") as Task['role'],
-      extra: (frontmatter.extra as Record<string, unknown> | undefined) ?? {},
+      extra,
       body,
     };
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime as ms

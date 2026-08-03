@@ -29,7 +29,7 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
-import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1796,6 +1796,97 @@ async function main() {
       process.chdir(cbOrigCwd);
       fs.rmSync(cbTasksDir, { recursive: true, force: true });
       fs.rmSync(cbWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- gap-serve-task-list-dies-on-one-malformed-task ---
+  // A task file whose frontmatter lacks `id:` must not take down the whole
+  // list page (3/588 = 0.5% malformed data -> 100% of the only graphical UI
+  // unavailable). Serve must degrade: HTTP 200 + a VISIBLE placeholder row
+  // marked "缺少 id", never a 500, and never a silent drop. Fixture: MAL-1.md
+  // planted directly (bypassing store.write(), which always requires an id) so
+  // its frontmatter genuinely has no `id:` field — the exact real-world case.
+  {
+    const mTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-malformed-test-"));
+    const mWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-malformed-workspace-"));
+    fs.mkdirSync(path.join(mWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(mWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${mTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${mTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+    seedTask(mTasksDir, "GOOD-1", { title: "Good task one", status: "todo", body: VALID_SECTIONS });
+    seedTask(mTasksDir, "GOOD-2", { title: "Good task two", status: "done", body: VALID_SECTIONS });
+    // Plant a malformed task file: valid YAML frontmatter but NO `id:` field.
+    fs.writeFileSync(
+      path.join(mTasksDir, "MAL-1.md"),
+      "---\ntitle: Malformed missing-id task\nstatus: todo\n---\nbody of a task whose frontmatter lost its id\n"
+    );
+
+    // AC5 (provider layer): quay-native list() falls back to the filename for
+    // the id and marks extra.malformed=["missing-id"], while good tasks are
+    // NOT marked.
+    {
+      const listed = createStore(mTasksDir).list();
+      const mal = listed.find((t) => t.id === "MAL-1");
+      assert(mal && mal.id === "MAL-1", "AC5: provider list() falls back to the filename for a missing-id task");
+      assert(mal && Array.isArray(mal.extra.malformed) && mal.extra.malformed.includes("missing-id"),
+        "AC5: provider list() marks extra.malformed=['missing-id'] for a missing-id task");
+      const good = listed.find((t) => t.id === "GOOD-1");
+      assert(good && good.extra.malformed === undefined,
+        "AC5: a good task is NOT marked malformed (only genuinely missing-id tasks are)");
+    }
+
+    // AC5 (CLI surface): `quay task list --json` exposes the fallback id and
+    // the extra.malformed marker end-to-end through the Provider ABI.
+    {
+      const r = execFileSync("node", [QUAY_CLI, "task", "list", "--json"], {
+        cwd: mWorkspaceRoot,
+        encoding: "utf8",
+      });
+      const cliTasks = JSON.parse(r);
+      const cliMal = (cliTasks || []).find((t) => t.id === "MAL-1");
+      assert(cliMal && Array.isArray(cliMal.extra?.malformed) && cliMal.extra.malformed.includes("missing-id"),
+        "AC5: `quay task list --json` exposes extra.malformed=['missing-id'] for a missing-id task");
+    }
+
+    const mPort = port + 18;
+    const mOrigCwd = process.cwd();
+    let mServer;
+    try {
+      process.chdir(mWorkspaceRoot);
+      mServer = await startServer({ port: mPort });
+
+      const list = await get(mPort, "/");
+      assert(list.status === 200, "AC1: GET / returns 200 with a missing-id task present (not 500)");
+      assert(list.body.includes("缺少 id"), "AC2: page visibly marks the malformed task '缺少 id'");
+      assert(list.body.includes("MAL-1"), "AC2: page shows the malformed task's filename fallback");
+      assert(list.body.includes('class="malformed-row"'),
+        "AC2: the malformed task renders as a visibly distinct placeholder row");
+      // <table> header row + GOOD-1 + GOOD-2 + MAL-1 placeholder = 4 rows.
+      const trCount = (list.body.match(/<\/tr>/g) || []).length;
+      assert(trCount === 4, `AC2: the malformed task renders as a real row (expected 4 rows, got ${trCount})`);
+      assert(!/undefined/.test(list.body), "AC4: no 'undefined' string leaks into the page (prefix calc skips missing ids)");
+      assert(list.body.includes("Prefix:"), "AC4: prefix nav still renders with a missing-id task present");
+      assert(list.body.includes(">GOOD<") && list.body.includes(">MAL<"),
+        "AC4: prefix nav shows GOOD and MAL (never an 'undefined' pseudo-prefix)");
+
+      // AC3 (negative control): removing the malformed fixture removes exactly
+      // the placeholder row — proving AC2's placeholder came from it, i.e. the
+      // task was surfaced, not silently swallowed.
+      fs.rmSync(path.join(mTasksDir, "MAL-1.md"));
+      const list2 = await get(mPort, "/");
+      assert(list2.status === 200, "AC3: GET / still returns 200 after removing the malformed fixture");
+      assert(!list2.body.includes("缺少 id"), "AC3: '缺少 id' marker is gone after removing the fixture");
+      const trCount2 = (list2.body.match(/<\/tr>/g) || []).length;
+      assert(trCount2 === 3, `AC3: rendered rows drop by exactly 1 after removing the fixture (expected 3 rows, got ${trCount2})`);
+    } finally {
+      if (mServer) {
+        mServer.close();
+        if (mServer.client) await mServer.client.close();
+      }
+      process.chdir(mOrigCwd);
+      fs.rmSync(mTasksDir, { recursive: true, force: true });
+      fs.rmSync(mWorkspaceRoot, { recursive: true, force: true });
     }
   }
 
