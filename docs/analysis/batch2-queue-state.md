@@ -49,7 +49,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| **并发批次（3 在飞，AC13 首证）** | **relation-sync**（`gap-relation-sync-suite-red-isolation-green`，fm-...-1zhl5t，/tmp/quay-wt-relsync）+ **blocked-signal**（`gap-no-explicit-blocked-signal-from-inner-layer`，fm-...-tvlfl3，/tmp/quay-wt-blocked）+ **test-framework-policy**（`gap-no-test-framework-policy-for-new-tests`，fm-...-syg65l，/tmp/quay-wt-fwpolicy）。checkTouchesPair 实测两两 DISJOINT。blocked-signal 修今晚两次停摆的信号缺口；policy 是 relation-sync「手写 harness 说不出话」的棘轮 |
+| **并发批次（3 在飞，AC13 首证）** | **relation-sync**（`gap-relation-sync-suite-red-isolation-green`，fm-...-1zhl5t，/tmp/quay-wt-relsync）+ **blocked-signal**（`gap-no-explicit-blocked-signal-from-inner-layer`，fm-...-tvlfl3，/tmp/quay-wt-blocked）+ **test-framework-policy**（`gap-no-test-framework-policy-for-new-tests`，fm-...-syg65l，/tmp/quay-wt-fwpolicy）。checkTouchesPair 实测两两 DISJOINT。blocked-signal 修今晚两次停摆的信号缺口；policy 是 relation-sync「手写 harness 说不出话」的棘轮。**blocked-signal 自身缺陷已抓**：测试写了真实 `.workflow-events/` 造幽灵 orphaned（blk-...-5d8pfx，演示数据「M243 按 A 还是 B」）——已删幽灵记录（orphaned 归零），subagent 修测试传临时 root（AC9 判据干净）。**教训：观测机制自身的测试污染了被观测的存储** |
 | **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |
