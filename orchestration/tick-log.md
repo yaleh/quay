@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 02:46Z | `correct`（**correct-self，连续第 3 次**——见分类法缺陷节） | 核实 `turn-ended-idle` 落地时发现**我自己上一条指令有设计错误**，在造成损害前更正：改用只追加日志，不碰阻塞信号 | 内层 10 分钟内执行完上一条指令并落地（`7cfc9733`）；test-coverage 修复已合并（`6518170c`）；三任务在飞 16 分钟；CPU 压力 **88 → 20.86**，node 15 个，load 5.14 | **读 diff 核实**：枚举 7→8、描述与测试都在。**但第二半查出根本问题**——`fast-mode-loop-tick.md:238-256` 的触发条件是「停下等人」、`--reason` 示例硬编码那七个、明写「不新增语义」，所以**加枚举值不会让它触发**，且代码与文档就此打架。**我的指令还会造成两处误触发**：`inner-state.sh:25-30` 对任何 reason 都发 `BLOCKED` 且无过滤 ⇒ 内层每结束一次回合叫醒外层一次，**把有意义的告警稀释成噪声**；`restart-readiness-check.sh` 会因一条 idle 记录挡住 un-halt。更正为：撤回枚举、改用 `orchestration/inner-idle-log.jsonl` 只追加原因、时长由外层从 transcript 间隙算。**保持阻塞信号只有一个含义** |
 | 2026-08-03 02:31Z | `correct`（correct-inner：纠正判绿口径） | 从日志产物独立核实 AC1；发现并通报「`fail 0` 不等于绿」；复核内层自派批次正交性；建任务记录外层自己取证工具的三个谎 | 批 4 收尾（21 完成，吞吐 **1.32/h**），内层**自主**派发批 5（dispatch-gate / m264-build-evidence / test-coverage-check），三者两两 DISJOINT 已复核；内层 1% 即 auto-compact，指示已按自足写 | **AC1 达标独立核实**：batch4b/4c 逐项相同（tests 2361 / pass 2343 / fail 0 / cancelled 0 / skipped 18 / EXIT=0），三次 `selected 167 files` 一致。**关键发现：`fail 0` 不是绿判据**——崩溃的 batch4a 也是 `fail 0`，但 `cancelled 2`、tests 2246≠2361，重型测试是被 cancelled 不计入 fail。**我自己两次调用错误**：(a) `checkTouchesPair(路径,路径,root)` 实际签名是 `(parsedA,parsedB,expand)`，错调导致 10 对全部误报 OVERLAP，结果作废重跑；(b) grep 假设 TAP 格式，`not ok` 计数对崩溃那次也返回 0。**取证工具三个谎**：把引号内含 `test.sh` 的 ps 命令判为套件运行、474s 报成 0s、把人开的 fork 会话当成内层 `/clear` 断裂 |
 | 2026-08-03 02:26Z | `correct`（**纠的是外层自己的任务，非内层**——见下方分类法缺陷） | 实测推翻了我一小时前写进 `gap-no-resource-awareness` 的中心数字，并修掉任务体因此自相矛盾的三处 | 内层已采纳 PSI 判据（`dba85d4b` 写进自己 tick 文件），在低压力窗口重启套件；三任务 inProgress **62 分钟**（阈值 90） | **`--test-concurrency=8` 实际是 17 个进程**：套件根 → 8 个 worker → 各再派生 1 个 `node --experimental-strip-types` 子进程。**真实超订 4.25× 而非 2×**，且 `--test-concurrency` 不是正确旋钮。这解释了重型测试 2.0s→48.8s 是**进程启动争抢**而非计算慢。**CPU 压力 88.12 → 4.14**（上轮套件结束），swap 仍 0 已用（内存压力自始为 0，符合预期）。**孤儿 MCP 进程 2 个**：ppid=1、cwd 已删除、滞留 **17.4 小时**、CPU 累计 1 秒 ⇒ 是内存泄漏（~200MB）不是 CPU 来源 |
 | 2026-08-03 02:13Z | `correct` | 内层「等 load 降」方向对但用代理信号，外层实测 PSI 给出硬判据并建资源闸任务；另核实 reverse-drift 修复真实仓库效果、查出正向漂移 9 条与检测器新盲区 | 批 4 全量套件崩溃（5 文件超时：prepare-milestone-convergence 48.8s、runner-grouping 39.5s），三任务仍 inProgress 43 分钟（阈值 90）；32 个 `node-MainThread`、load1 9.07 ⇒ 真忙非停摆 | **读 diff 核实 tasksPerHour 修复**：`(count*60)/totalMinutes` 已被 `count/windowHours` 取代，旧口径保留为 `serialEquivalentPerHour`，`windowStart/End/Hours` 一并暴露。**PSI 实测**：cpu `some avg10`=**84.77**（CPU 饥饿确证）、memory=0.00、**swap=0**、nproc=4 而默认并发 8（2× 超订）。**我自己差点踩空集陷阱**：drift-check 的 JSON 键我猜成 `forward`，实际是 `suspects`，猜错即静默返回 0——确认键名后正向漂移实为 **9 条**（reverse 确为 0，修复核实通过）。**检测器新盲区**：删除类任务的 Touches 是「待删文件」，存在 ⇒ 被读成「已落地」，语义反的 |
@@ -82,15 +83,15 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 |---|---|---|
 | no-action | 26 | 41% |
 | unblock | 10 | 16% |
-| correct | 24 | 38% |
+| correct | 25 | 39% |
 | escalate | 3 | 5% |
-| **合计** | **63** | — |
+| **合计** | **64** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
 `correct` 同时涵盖两种完全不同的事：**（a）纠正内层的做法**、**（b）外层纠正自己先前写下的东西**。退化判据把 `correct` 读作「内层自主性不足」——但 (b) 类恰恰相反，它是外层在自我修正，与内层能力无关。
 
-本轮就是 (b)：实测推翻了外层自己一小时前写进任务的 `2×` 超订数字，内层同期表现良好（主动采纳 PSI 判据）。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
+**2026-08-03 已连续 3 个 tick 是 (b) 类**：(1) 实测推翻外层自己写的 `2×` 超订数字；(2) `checkTouchesPair` 调用签名错致 10 对全误报；(3) `turn-ended-idle` 该不该进阻塞信号的设计错误。**同期内层表现良好**：主动采纳 PSI 判据、自主派发正交批次、10 分钟内执行完外层指令。**这说明当前瓶颈是外层的下笔质量，不是内层的执行**——而退化判据会得出相反的结论。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
 修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 38%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 39%。
