@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T11:27:29.288Z",
+  "generatedAt": "2026-08-03T11:51:17.212Z",
   "since": null,
   "tasks": [
     {
@@ -40,6 +40,11 @@
     {
       "taskId": "gap-inner-forensics-verify-reports-nonruns-and-zero-durations",
       "minutes": 35.69153333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-loop-mechanism-lives-outside-the-package-and-cannot-ship",
+      "minutes": 76.5426,
       "outcome": "done"
     },
     {
@@ -194,20 +199,14 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [
-    {
-      "taskId": "gap-loop-mechanism-lives-outside-the-package-and-cannot-ship",
-      "runId": "fm-gap-loop-mechanism-lives-outside-the-package-and-cannot-ship-1785753284154-36fiim",
-      "startedAtMs": 1785753284165
-    }
-  ],
-  "meanMinutes": 53.543778947368416,
-  "medianMinutes": 53.32285833333333,
-  "tasksPerHour": 1.5223128837935227,
-  "serialEquivalentPerHour": 1.1205783599804902,
+  "inProgress": [],
+  "meanMinutes": 54.13349230769231,
+  "medianMinutes": 56.186366666666665,
+  "tasksPerHour": 1.5379360516988376,
+  "serialEquivalentPerHour": 1.108371129262504,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T11:27:29.261Z",
-  "windowHours": 24.962016944444443,
+  "windowEnd": "2026-08-03T11:51:17.182Z",
+  "windowHours": 25.358661666666666,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0

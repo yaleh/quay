@@ -66,9 +66,27 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
       归属链收敛到本会话 claude pid ✓。但这三条目前是我手工跑的——
       机械化在 [[gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right]]，未派发。**
 
-- [x] **AC5：不推送。**
-      判据：`git rev-list --count origin/master..master` 只增不减，且我没有执行过 `git push`。
-      **现状：本地领先 origin 数十个提交，我未 push ✓。授权仍在 `orchestration/escalations.md` 待人裁定。**
+- [x] **AC5：不推送、不打标签、不建 release，也不找绕过的办法。**
+      **这条已由人裁定结案（2026-08-03，管理者转达），不再是未决升级项**：推送与发布仍必须由人显式触发；
+      人说未来可能授权自动 push & release，**但现在没有**。
+      判据：我没有执行过 `git push` / `git tag` / `gh release`；`git rev-list --count origin/master..master`
+      只增不减是**已知且可接受**的状态，**不构成行动理由**。
+      **现状：未 push ✓。**
+
+      **触发面（外层独立复核 `on:` 段，非读文档推断，2026-08-03 11:5xZ）**——记下来是为了
+      **不要把这条裁定读得比它本身更严**：
+
+      | 工作流 | `on:` | 后果 |
+      |---|---|---|
+      | `ci.yml` | `push: branches:[master]` + `pull_request` | **只跑测试，不产生任何 release** |
+      | `release.yml` | `push: tags: ['v*']` **仅此一条** | 只有打 `v*` 标签才发布 |
+      | `publish-plugin-dist.yml` | `push: tags:['v*']` **+ `workflow_dispatch: {}`** | 重建 `dist-plugin` 分支；**不打标签、不建 release**（`grep -nE "gh release\|git tag\|create-release"` 零命中） |
+
+      **顺带查出一个对管理者 AC2 有用的事实**：`publish-plugin-dist.yml` 的发布步骤跑
+      `plugin/scripts/publish-dist-branch.sh`，其核心是 `rsync -a --exclude='.git' "${PLUGIN_DIR}/" "${WORK}/"`
+      ——**整个 `plugin/` 子树**，因此 `plugin/loop/*` 与 `plugin/scripts/quay-init.sh|inner-state.sh`
+      **会被一次 `workflow_dispatch` 带上**。⇒ **解阻塞路径是「人 push master + 人触发一次 dispatch」，
+      不需要打版本标签、不产生 release。** 两步都是人的动作，我不执行、也不代为触发。
 
 ### B 组：从我自己犯过的错里长出来的（本班素材，非理论）
 

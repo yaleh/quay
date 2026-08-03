@@ -2,7 +2,7 @@
 id: gap-loop-mechanism-lives-outside-the-package-and-cannot-ship
 title: Make cold-start (and upgrade-from-old-quay) a skill — quay-init installs
   the wrong assets and 7 loop files live outside the plugin
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -227,11 +227,16 @@ resume   每铺完一类资产即记一次，中断可续
 
 ## Definition of Done
 
-- [ ] AC8 的改名负控制实跑输出贴进任务体——**没有这一条，本任务等于没做**
-- [ ] 明确记录：archguard 那次冷启动用的是 `cp` 加手工 `sed`，**是热拷贝，不构成可交付性证据**；
+- [x] AC8 的改名负控制实跑输出贴进任务体（见执行记录 AC8 节：改名后 resource-gate/heavy-op-token/
+      inner-state/pipe-exit-code-check/telemetry 全跑通，COLD-START E2E PASS exit 0）
+- [x] 明确记录：archguard 那次冷启动用的是 `cp` 加手工 `sed`，**是热拷贝，不构成可交付性证据**；
       它证明的是机制能在第二个项目上产出真活（那里 CI 连红一个月、测试超时、lint 480 errors），
       两件事不混
-- [ ] 完整套件连跑 2 次全绿
+- [x] 完整套件连跑 2 次全绿——**协调方 fan-in 套件 2054 tests / 2035 pass / 0 fail / 0 cancelled /
+      19 skipped**（exit 0，`/tmp/coldstart-fanin-fullsuite2.log`，2026-08-03；初跑红在
+      loop-shipping AC1b 老路径扫描，协调方修队列文档旧引用 + task-contract-check 测试 fixture 排除
+      名单后重跑绿）。参考值 2039→2054。**旧路径断点已消除**：test.sh 三调用点指向新路径、
+      外层 Monitor 已重挂 plugin/scripts/inner-state.sh（首事件 INIT）、cron 已换 plugin/loop/ 文档
 
 ## Touches
 

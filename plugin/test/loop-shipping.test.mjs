@@ -86,9 +86,21 @@ test('AC1b — after the move, no live reference to the 6 old paths remains (com
     path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),// asserts the laid-down target layout
     path.join(pluginDir, 'loop'),                           // canonical templates: their /loop prompts and cross-refs use plugin/loop/; the only old-path strings left are in the template-params note documenting the TARGET layout
     path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), // this file's own regexes define the old paths
+    path.join(pluginDir, 'test', 'task-contract-check.test.mjs'), // fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs
     path.join(repoRoot, 'README.md'),                       // the cold-start section documents the TARGET project's laid-down layout (orchestration/ + docs/analysis/)
+    // plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET layout
+    // (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path strings are
+    // therefore only policed by AC1c's three assertions, and AC1c's liveLines filter drops
+    // `>`-blockquote lines, so old paths inside reference/blockquote blocks are NOT scanned here —
+    // intentional: blockquotes are documentation of the target layout, not live instructions.
   ];
   const hits = [];
+  // Corpus non-emptiness guard (gap-checks-that-verify-an-empty-set family): assert.deepEqual(hits, [])
+  // alone would pass silently if walk() returned early, the extension filter changed, or the excluded
+  // list grew to swallow the tree. Assert a floor on scanned-file count AND that a known-live file is
+  // in the corpus, so the scan keeps resolving power.
+  let scanned = 0;
+  let sawTestSh = false;
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
@@ -96,6 +108,8 @@ test('AC1b — after the move, no live reference to the 6 old paths remains (com
       if (e.isDirectory()) { walk(p); continue; }
       if (!/\.(md|sh|mjs|ts|json|yml|js)$/.test(e.name)) continue;
       if (excluded.some((x) => p === x || p.startsWith(x + path.sep))) continue;
+      scanned += 1;
+      if (p === path.join(repoRoot, 'scripts', 'test.sh')) sawTestSh = true;
       const src = fs.readFileSync(p, 'utf8');
       for (const re of oldPathPatterns) {
         if (re.test(src)) hits.push(`${path.relative(repoRoot, p)}: contains "${re}"`);
@@ -104,6 +118,8 @@ test('AC1b — after the move, no live reference to the 6 old paths remains (com
   };
   walk(repoRoot);
   assert.deepEqual(hits, [], 'no live reference to the moved files\' old paths may remain (update callers to plugin/loop/ + plugin/scripts/)');
+  assert.ok(scanned >= 200, `scan corpus must not be empty/starved: only ${scanned} files scanned`);
+  assert.ok(sawTestSh, 'scripts/test.sh (a known live caller) must be in the scan corpus');
 });
 
 test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-refs use plugin/loop/, not the old orchestration/ + docs/analysis/ paths', () => {

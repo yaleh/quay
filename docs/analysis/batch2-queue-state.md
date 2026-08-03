@@ -1382,9 +1382,10 @@ pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过�
 内容：task-contract-check.ts 无执行者、名单 1→12、6/7 invoke-evidence-missing 假发现；
 会放松判据 → **AC2/AC5 双向负控制硬要求**。Touches 含 scripts/test.sh。
 
-**inner-state.sh 挂载点注意**：外层 Monitor 以绝对路径 `/home/yale/work/quay/orchestration/watch/inner-state.sh`
-运行，cold-start 搬动它会使外层事件监测静默失效。已通知 cold-start agent：留转发壳在旧路径 或 写明新路径
-（plugin/scripts/inner-state.sh），fan-in 报告带新路径供外层重新挂载。
+**inner-state.sh 挂载点（已随冷启动搬到 plugin/scripts/，外层已重挂）**：外层 Monitor 现挂
+`plugin/scripts/inner-state.sh`（首条事件 INIT，非 START）。搬移前曾以外层绝对路径挂载；搬移会使
+Monitor 静默失效，已通知 cold-start agent 写明新路径、不留兼容壳（外层 fan-in 后自行重挂）。
+fan-in 报告带新路径供外层重新挂载。
 
 **在飞 2/3**：cold-start（af2e2aa...）、contract-ratchet（a22be4f...）。
 
@@ -1406,3 +1407,13 @@ flake 修复（heavy-op-token AC3 mirror，6cc0ac1c）。telemetry --task-end do
 **⚠ 参考值 2073→2039 异常待查**：ratchet 合并只 +9 测试（contract test 35→44），预期 2082，
 实际 2039（两次套件稳定）——-34 与合并对不上。三套件均选 158 文件、无文件缺失、test.sh 变更仅加
 静态检查。记为发现，恢复后查（可能是个别测试文件在 ratchet 状态被跳过/条件不满足）。
+
+### 关闭 cold-start（2026-08-03 11:5xZ）——排空完成
+
+**cold-start 产品化已关闭**：fan-in 套件绿（2054 tests / 2035 pass / 0 fail / 0 cancelled）。参考值
+2039→2054。telemetry --task-end done（39 完成），worktree 清理。
+**外层收尾更正已纳入**：AC2 前提为假（experiments/ 侧自 2026-08-02 就是 symlink，git ls-tree 证实），
+任务体已改「开工前已满足」+ 假前提存活机制（按名找文件 vs 看 mode）。
+**fan-in 期间修的三处**：①队列文档旧路径引用（AC1b 扫描抓到）；②task-contract-check.test.mjs 老路径
+fixture 加进 AC1b 排除名单（测试数据非活引用）；③AC1b 补语料非空断言 + plugin/loop 取舍注释（外层提示）。
+**外层已重挂**：Monitor→plugin/scripts/inner-state.sh（首事件 INIT）、cron→plugin/loop/orchestrator-loop-tick.md。
