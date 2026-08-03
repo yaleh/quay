@@ -1,6 +1,6 @@
 ---
-id: gap-a-token-held-by-nobody-can-starve-a-live-waiter
-title: "The heavy-op token can be held by a dead pid indefinitely while a live waiter starves — 12 suite attempts, zero acquisitions"
+id: gap-the-only-token-waiter-refuses-to-wait-at-all
+title: "The one real heavy-op token waiter passes --timeout 0, so a 30-second grace window becomes a failed suite run"
 status: todo
 labels:
   - gap
@@ -13,107 +13,117 @@ extra:
 
 ## Proposal
 
-内层 fan-in 需要一次绿套件。套件走 `scripts/test.sh` → heavy-op token。**连续 12 次尝试全部没跑成**
-（`/tmp/batch7-suite5|7|9|10|11|12.log`）。中止原文（`batch7-suite11.log`，逐字）：
+**本任务的第一版标题与规模都是错的，先记录更正，因为它改变了要做多少事。**
 
+原标题是 `a token held by nobody can starve a live waiter`（一个谁也没在用的令牌饿死了活的等待者），
+原范围是给令牌加公平性/排队。**管理者推翻了这个定性，实测支持推翻。**
+
+### 更正一：没有饥饿。外层升级时的数字是错的
+
+外层当时报「12 次套件尝试全部没跑成」「quay 永远抢不到」。**重算实测**：
+
+| 结果 | 次数 | 证据 |
+|---|---|---|
+| 因 token 退出 | **2** | `batch7-suite5.log`（mtime 25s）、`batch7-suite11.log`（mtime 8s） |
+| **真跑完** | **3** | suite7 `fail 2`、suite9 **`fail 0`**、suite12 `fail 2` |
+| 尾部不可判 | 2 | suite10 / suite13 |
+
+**⇒ 12 次里只有 2 次死在令牌上，其余跑起来了。不存在无界饥饿。**
+管理者的独立实测同向：mtime 292s 时 `--acquire` **当场回收**（`RECLAIMED reclaim #17`、`waited_ms=0`）。
+
+### 更正二：等待者存在，但它拒绝等——这才是剩下的那个真缺陷
+
+管理者查过谁真的在等：`--status` 的调用点全是测试、文档、和同名无关工具；
+**真正的等待者只有 `scripts/test.sh` 与 `prepare-admission-check.ts`，两个都走 `--acquire`。**
+
+而 `scripts/test.sh:237` 逐字是：
+
+```bash
+if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout 0; then
+  echo "scripts/test.sh: heavy-op token HELD by another project — not running the full suite"
+  exit 1
+fi
 ```
-heavy-op-token: HELD by archguard (pid 3103154 dead, mtime only 8s old) — NOT stale:
-  reclaim needs BOTH mtime timeout AND dead pid — quay did not acquire
-waited_ms=0 acquired=no
-scripts/test.sh: heavy-op token HELD by another project — not running the full suite
-```
 
-**读一遍这句话就能看出问题：`pid 3103154 dead`。持有者已经死了——此刻没有任何进程在做重活——
-而一个活着的、要做重活的等待者拿不到令牌。**
+**`--timeout 0` 是零等待。** suite11 的 `waited_ms=0 acquired=no` 不是被饿死，是**一秒都没等就退出**。
 
-### 机制：两个条件的 AND 在对面 churn 时变成无界饥饿通道
+**⇒ 缺陷的真实形状**：令牌机制没问题（懒回收 + `mtime 超时 AND pid 不活` 的 AND 是站得住的，
+它保护的是「刚写完令牌、进程尚未可见」的竞态）。问题在于**唯一的真实等待者把一个上界 30 秒的
+瞬态，直接变成一次失败的套件运行**——而失败之后，读日志的人看到的是「被另一个项目占着」，
+于是去查跨项目资源竞争，而不是去等 30 秒。**今晚内层反复重试、外层升级误判，都源于这一行。**
 
-回收判据是 `mtime 超时(30s)` **AND** `pid 不活`（脚本 44-46 行有明确注释，设计意图是
-**保护一个合法长跑的持有者不被误抢**）。但实测下来：
+**规模因此大幅缩小**：不是令牌公平性重设计，是**给唯一的等待者一个有界等待**。
 
-| 时刻 | holder | pid 状态 | mtime 时龄 | 能否回收 |
-|---|---|---|---|---|
-| 19:42Z | archguard 2898949 | 死 | 405s | 可（外层实测，随后 quay 确实抢到） |
-| 19:47Z | archguard 2917738 | 死 | 380s | 可 |
-| 20:22Z | archguard 3103154 | **死** | **8s** | **否——mtime 没长到 30s** |
+### 一条要单独记住的事：机制的价值证据长什么样
 
-**archguard 每几秒重取一次，每次重取都刷新 mtime。** pid 一直是死的，但 **mtime 永远长不到阈值**，
-于是 quay 永远等不到那个可回收的窗口。`stale_reclaims` 从 7 涨到 11 说明回收确实在发生——
-**只是每次都被下一次 churn 抢在前面。**
+`reclaim #17` 里**多数不是异常，是管理者今天为换模型杀掉的 6 个会话**——
+每次被杀的持有者都留下一个死 pid，机制每次都默默兜住了。
 
-**关键推论：一旦 pid 已确认死亡，mtime 宽限期就不再保护任何东西**——一个死进程不可能是
-「合法长跑的持有者」。宽限期真正要防的是**刚写完令牌、进程尚未可见**的竞态，那是**首次**获取后的
-一个短窗口，**不是每次重取都该重新开始计时**。
-
-### 代价（真实分母）
-
-**12 次套件尝试、约 40 分钟、三个任务（cold8 / checkers / sl2）的 fan-in 全部停摆**——
-三者代码早已合入 master（`353dfe69` / `c92f72db`），卡的只是关闭前那次绿套件。
-**内层因此先后走进两条死路**：二分「后台任务能活多久」、用 Monitor 等一个永不到来的空闲事件
-（见 `gap-token-status-reports-a-dead-holder-as-busy` 的活体事故）。
+**机制的价值证据不是它拦下了什么，是它兜住了一个没人注意到的常态。**
+一个「从没报过警」的兜底件很容易被当成没用而删掉；这条记录就是它的存在理由。
+**推论用于本任务**：不要因为「今晚只有 2 次」就认为不值得修——
+同样也不要因为「有 17 次回收」就认为它在失控。
 
 ## Contract
 
 ```
-measure starve_attempts = 连续 `--acquire <p> --timeout 0` 失败次数字段
-measure held_by_dead_ms = `--status` 中 holder pid 已死却仍持有的累计毫秒字段
-band held_by_dead_ms = <30000
-invariant 持有者进程已确认死亡时，令牌不保护任何正在进行的重活；等待者必须能在有界时间内获得它
-invoke `bash plugin/scripts/heavy-op-token.sh --acquire quay --timeout 0`
-control A 持续每 5 秒重取并立即死亡 ⇒ B 必须在有界时间内拿到（不得无限饥饿）；A 活着长跑 ⇒ B 必须拿不到
-resume 先用可复现夹具重现饥饿，再改判据
+measure token_bail_runs = `scripts/test.sh` 因令牌未获取而 exit 1 的次数字段
+measure waited_ms = `--acquire <project> --timeout <s>` 输出的 waited_ms 字段
+band token_bail_runs = 0
+invariant 有界等待优于立即失败；等待上界必须小于一次真实重活的时长，否则等于串行化
+invoke `bash scripts/test.sh`
+control 持有者为死 pid + mtime 5s ⇒ 等待后成功且 waited_ms>0；持有者活着且长跑 ⇒ 有界超时后仍失败、不误抢
+resume 先确认 `--acquire --timeout N` 是否真的循环重试，再定 test.sh 的等待上界
 ```
 
 ## Chosen mechanism
 
-**先重现，再改。** 顺序照搬本仓已生效的教训：一个从没重现过饥饿的修复，与「碰巧不再发生」不可区分。
-
-1. **夹具重现**：A 每 5 秒 `--acquire` 一次并立即退出（模拟 archguard 的 churn），
-   B 每秒 `--acquire --timeout 0`。**当前实现下 B 必须饿死**——这是修复前的必备证据。
-2. **改判据（择一并写明理由）**：
-   - **首次获取计时**：mtime 宽限期从**该持有者首次获取**起算，重取不重置——
-     churn 因此无法无限延长宽限期；
-   - 或**死亡即可回收 + 极短固定宽限**（如 2s），只覆盖「刚写完、进程尚未可见」的竞态。
-   **不做**：不移除 pid 存活检查（它是保护长跑持有者的那一半，见脚本 44-46 行注释）；
+1. **先确认 `--acquire --timeout N` 的重试语义**——它是否真的在超时窗口内循环重试，
+   还是判一次即返回。**这一步不能跳过**：若它本身不重试，则 `test.sh` 改超时值是无效改动
+   （**「改了参数但底层不重试」正是本仓反复栽的「存在≠生效」**）。
+2. **给 `test.sh` 一个有界等待**（上界待定，量级应覆盖宽限期而非覆盖一次重活）。
+3. **失败文案要改**：当前印的是「被另一个项目占着」，误导读者去查跨项目竞争。
+   死持有者时应直说**持有者已死、等了多久、还差多久到可回收**。
+4. **不做**：不给令牌加排队/公平性（无饥饿证据，见更正一）；不移除 pid 存活检查；
    不加后台清扫守护进程（本仓已裁定懒回收是对的）。
-3. **等待者要能表达意图**：`--acquire` 带 `--timeout > 0` 时应在等待期内**持续重试**，
-   而不是一次判定即返回——否则每次获取都是一场裸竞态。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **饥饿重现夹具**——A churn + B 轮询，**当前实现下 B 在 N 秒内零次获取**（实跑输出贴任务体）
-- [ ] AC2: **修复后同一夹具** ⇒ B 在**有界时间内**获得令牌，界写进任务体（实跑输出贴任务体）
-- [ ] AC3: **反向负控制（不得误抢）**——A **活着**且长跑（如 sleep 120）时，B 必须**始终拿不到**；
-      **这一条不过，AC2 不算数**（否则就是把饥饿换成误抢，而误抢会杀掉别人正在跑的重活）
-- [ ] AC4: **死持有者上界**——持有者 pid 已死时，`held_by_dead_ms` 有上界且 < 30s（实测贴出）
-- [ ] AC5: **重取不重置宽限期**（若采用方案一）——同一持有者连续重取 5 次，
-      宽限期仍从首次起算（实跑输出贴任务体）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`，扩进 `plugin/test/heavy-op-token.test.mjs`
+- [ ] AC1: **重试语义先落定**——`--acquire --timeout N` 在窗口内是否循环重试，实跑输出为证
+- [ ] AC2: **正向**——持有者为死 pid + mtime 5s ⇒ `test.sh` 等待后**成功跑起套件**，`waited_ms>0`（实跑贴出）
+- [ ] AC3: **反向负控制（不得误抢）**——持有者**活着**且长跑 ⇒ 有界超时后仍失败、**绝不回收**。
+      **这条不过，AC2 不算数**——把「拒绝等待」换成「抢走别人正在跑的重活」是更坏的交易
+- [ ] AC4: **上界不得退化为串行化**——等待上界写进文件头并说明它为何小于一次真实重活的时长
+- [ ] AC5: **失败文案**——死持有者时不得再印「被另一个项目占着」，须印持有者已死 + 等待时长 + 距可回收还差多久
+- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1 与 AC3 两个方向的实跑输出都贴进任务体——
-      **只证明「不再饥饿」而不证明「仍不误抢」，是把一个吵闹的等待换成一次静默的中断**
+- [ ] AC2 与 AC3 两个方向的实跑输出都贴进任务体
 - [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录真实分母：**12 次尝试、约 40 分钟、三个任务 fan-in 停摆**
+- [ ] 任务体保留本次**定性更正的全过程**（原标题、原规模、被什么实测推翻）——
+      **一个只留结论不留更正的任务体，下一个人会重走一遍同样的误判**
 
 ## Touches
 
+- scripts/test.sh
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-03T20:22:00Z
-changed: 外层查 AC9c 命中（套件进程消失而三个 worktree 仍干净，正是我上一 tick 预登记的恢复条件）
-时读到内层的重试循环，逐条量清了机制：**回收判据的 AND 在对面高频 churn 时变成无界饥饿通道**，
-并用三个时刻的实测（405s 可回收 / 380s 可回收 / **8s 不可回收**）证明**不是运气，是机制**。
-**最尖锐的一句写进了 Proposal**：`pid 3103154 dead`——**令牌此刻谁也没在用，而活着的等待者拿不到**；
-**一旦 pid 确认死亡，mtime 宽限期就不再保护任何东西**，因为死进程不可能是合法长跑的持有者。
-**预先堵住两条最省事的错误修法**：不许移除 pid 存活检查（那是保护长跑那一半）、
-不许加后台清扫守护进程（本仓已裁定懒回收是对的）。
-**AC3 是本任务的真判据**：把饥饿换成误抢会杀掉别人正在跑的重活——
-**一个吵闹的等待换成一次静默的中断**，后者更糟。明写「AC3 不过则 AC2 不算数」。
-**归属说明**：脚本在本仓，所以修在这里；但**触发方是 archguard 每几秒重取并立即死亡**，
-那是跨项目行为，**不在本任务范围内**，已作为独立观察上报管理者。
+at: 2026-08-03T20:55:00Z
+changed: **本任务由管理者纠正定性后重写，标题与文件名一并更改**（原
+`gap-a-token-held-by-nobody-can-starve-a-live-waiter`）。外层原判「无界饥饿 + 需要令牌公平性重设计」
+**被两组实测推翻**：管理者实测 mtime 292s 时 `--acquire` 当场回收（`reclaim #17`、`waited_ms=0`）；
+外层重算自己的日志，**12 次尝试里只有 2 次死在令牌上，3 次真跑完**（其中 suite9 `fail 0`）。
+**外层原推送里「12 次尝试」「永远抢不到」两句都是夸大，已在任务体逐条更正。**
+**但有一条顶了回去并被实测支持**：管理者说「那个等待者在已发布的代码里不存在」，
+而 `scripts/test.sh:237` 是已发布代码里的真实等待者——它走 `--acquire`，
+**只是传了 `--timeout 0`，一秒都不等就 `exit 1`**。所以剩下的缺陷不是纯观测面：
+**唯一的真实等待者把一个上界 30 秒的瞬态放大成一次失败的套件运行**，
+今晚内层的反复重试与外层的升级误判都源于这一行。
+**规模按管理者的裁定大幅缩小**：不做公平性/排队，只给唯一的等待者一个有界等待 + 改失败文案。
+**AC3 是真判据**：把「拒绝等待」换成「误抢正在跑的重活」是更坏的交易。
+**AC1 不许跳过**：若 `--acquire --timeout N` 底层根本不重试，改参数就是又一次「存在≠生效」。

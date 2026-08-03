@@ -11,6 +11,23 @@ extra:
 
 **type:** execution
 
+## 规模更正（管理者裁定，2026-08-03 20:55Z）——本任务是对的，但比原稿小得多
+
+原稿把受众写成「程序」，暗示有代码路径因 `--status` 的不诚实而卡住。**实测不成立**：
+管理者查过 `--status` 的全部调用点——**测试、文档、和一个同名无关工具 `inner-blocked-signal.ts`**；
+**已发布代码里真正的等待者只有 `scripts/test.sh` 与 `prepare-admission-check.ts`，两个都走 `--acquire`**，
+而 `--acquire` 在条件满足时会当场回收（管理者实测 mtime 292s ⇒ `RECLAIMED reclaim #17`）。
+
+**⇒ 被 `--status` 误导的从来不是程序，是读的人。** 而今晚被误导的正是管理者与外层：
+tick 扫描里那句「令牌: archguard pid 死」是唯一的真实受害者。
+
+**规模因此缩小为**：`--status` 做与 `--acquire` **同样的存活判定，但只读、绝不回收**。
+不涉及等待策略（那已拆给 [[gap-the-only-token-waiter-refuses-to-wait-at-all]]），
+不涉及令牌公平性（无饥饿证据）。
+
+**下面 AC7 的措辞据此更正**：它要防的是**人**照着 `--status` 去等一个不会来的事件，
+不是防某个程序被卡住。判据本身不变——**「轮询等不到」这句话仍必须印出来**。
+
 ## Proposal
 
 **现场（外层 2026-08-03 17:42Z tick）**：
