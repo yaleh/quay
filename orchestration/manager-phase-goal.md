@@ -32,21 +32,27 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
       记录在 `orchestration/escalations.md`，附实测的触发面（推 master 只跑 CI，不产生 release；
       只有 `v*` 标签才 release；`publish-plugin-dist.yml` 的 `workflow_dispatch` 只重建 `dist-plugin`、不 release）。
 
-- [ ] **AC2（依赖人的动作，非我可达成）**：**存在一个可安装物含有本阶段的机制**。
-      **AC1 的裁定使这条不再由我或外层达成**——它需要人执行两步：
-      `git push origin master`（只跑 CI）+ `gh workflow run publish-plugin-dist.yml`（不 release）。
-      **我这一侧能达成的是 AC2b。**
+- [ ] **AC2（2026-08-03 重新解冻）**：**存在一个可安装物含有本阶段的机制**。
+      **人裁定：基于本地 build 执行安装即可，不必直接复制源文件——那已经足够「冷」。**
+      ⇒ 这条**不再依赖推送**，回到我与外层可达成的范围。
+      判据：`bash plugin/scripts/publish-dist-branch.sh --branch <local>`（**不加 `--push`**）产出真实 bundle
+      （脚本自身在产物为空时拒绝发布），再从该产物安装，安装出来的 plugin root 中
+      `scripts/quay-init.sh` / `scripts/inner-state.sh` / `loop/orchestrator-loop-tick.md` 三者齐全。
+      **关键区分**：被测物必须是 **build 出来的产物**，不是 `cp` 过去的源文件——
+      archguard 第一次冷启动用的就是 `cp`，那不构成可交付性证据。
+      *（推送与 release 仍须人显式触发，那条裁定未变；它现在只影响「别人能不能装到」，不影响本 AC。）*
       判据（不看工作树，看可安装物）：`git cat-file -e <marketplace 指向的 ref>:plugin/scripts/quay-init.sh` 成功。
       现状：远端 `dist-plugin` 落后 master **2424 个提交**，`quay-init.sh` / `inner-state.sh` /
       `loop/orchestrator-loop-tick.md` **一个都不在**。
       附带已知事实：npm 上 `quay` 这个名字**是别人的包**（mattstyles，"Turns keypresses into event streams"），
       所以 npm 路径不能成为「通用包管理工具装到 user scope」，plugin 路径是唯一成立的形式。
 
-- [ ] **AC2b（我这一侧的可达成部分）**：**那一次人工动作是最小且已验证的**——
+- [x] **AC2b（已达成 2026-08-03）**：**那一次人工动作是最小且已验证的**——
       命令序列写在 `escalations.md` 里、每条的触发面经实测（不是读文档推断）、
-      且不含任何会意外产生 release 的步骤。**已达成，随 AC1 一并落地。**
+      且不含任何会意外产生 release 的步骤。落地于 `escalations.md`。
+      *（此 AC 关乎「让别人装得到」，与 AC2 的本地验证是两件事，都要。）*
 
-- [ ] **AC3（受 AC2 阻塞）**：archguard **用装出来的那份**重做冷启动（`quay-init --loop`，**不是 `cp`**），
+- [ ] **AC3（随 AC2 解冻）**：archguard **用 build 出来并安装的那份**重做冷启动（`quay-init --loop`，**不是 `cp`**），
       并产出一份区分「交付物缺失 / archguard 特有 / 已回填」的差异报告。
       判据：archguard 仓中存在该报告，且其 git 历史显示机制文件**来自 plugin 安装**而非从 quay 开发树复制。
 
