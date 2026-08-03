@@ -429,6 +429,20 @@ pid 4049485 跑 438s 且消耗 CPU（非卡死）、压力 86.54。**90 分钟�
 ①重型测试超时被当代码缺陷 ②两个套件并发压力 96.62 ③OVER90 在已完成任务上触发。**共同形态：阈值测的是
 墙钟，而处方假设那段墙钟花在干活上。**
 
+### Tick 更新（04T03:46Z）：inventory+testiso 关闭、reclaim merged、retire 已派
+
+- **inventory + testiso 已关闭**：合并套件绿（**2417**/2397/0/20，新参考值；tick 文档已更新）。
+  双 `--task-end`（yylhln / wo6yww）。worktree/分支清理
+- **reclaim 已 merged（3 commits 全进）**：83c7e5d3 + 892a167e + 44b40bd7（REFUTE 收尾，parts[2] 二父修正）。
+  scoped 18/18 绿。**关键发现：任务题设「21 个 fully-merged worktree」只对一半——19 个携带真实未提交工作
+  （如 M237 tasks/DIR-124-C.md +103/-82），按保守规则正确拒绝回收；只回收 M277(~51M) + M243 悬挂分支。
+  19 个脏 worktree 是待人的单独事项**（不删，保留）。验证套件在跑（`b030l13jl`）
+- **retire 已派**（P0#3，`ad39d72405f1b5004`，runId `fm-...-0b3l2x`，/tmp/quay-wt-retire）——带窗口差集
+  重估指令（prepare-milestone 280×/execute-milestone 47× 在用）+ ADR-022 方向 + 删除算子性质
+  （负净行数 = 解冻判据）。与在飞 DISJOINT 实测
+- **在飞（2 实现）**：reclaim（验证套件中）+ retire（读证据中）。**下一步**：reclaim 套件绿 → 关 reclaim
+  （`--task-end` sf5zrl）→ 派 P1 resource-awareness（首位，scripts/test.sh 冲突已随 testiso 落地解除）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
