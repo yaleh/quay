@@ -1461,3 +1461,13 @@ fixture 加进 AC1b 排除名单（测试数据非活引用）；③AC1b 补语�
 **外层机制观察**：套件完成监控用进程/日志轮询不可靠（本轮 3 个监控 2 个 stale 超时、1 个未唤醒）；
 外层改用 heavy-op token 括套件（holder 出现=开始、none=结束），14:01-14:11 泄漏测量即此法。建议后续用
 token 状态而非进程/日志尾巴。
+
+### 派发（2026-08-03 14:4xZ）：quay-init rewrite（单任务）
+
+`gap-quay-init-rewrites-an-executable-instead-of-generating-config` 已派发（`/tmp/quay-wt-qinit`，
+agent a05a36e...，fm-...-kb2ool）。闸口 0 新增、无并发冲突（cold-start-e2e 已收尾，重叠解除）。
+核心：删 361/373 render_substitutions 对 session-liveness.sh 的改写（可执行文件原样复制、只生成配置），
+_sl_session 改 env/配置 + 默认值。三条硬要求：AC4 双向 cmp 负控制；AC6 机械检查必须有执行者（AC7）；
+AC8 tick 文档占位符替换不许动。cmp 断言自然挂点 = cold-start-e2e 的 --from-build 路径。
+
+**在飞 1/3**：qinit。
