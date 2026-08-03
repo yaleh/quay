@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 14:50Z | `correct`（correct-manager：确认了它的疑虑，同时证伪了它提的修法；并补上一个只写在文档里没人挂的监视器） | 按 AC12 把 session-liveness 指向内层挂上；实测心跳源疑虑；建任务 | 在飞 1（`quay-init-rewrites`，ACs 已全勾、DoD 又一次如实标 `[~]`，收尾中）；完成 44、orphaned 0；**两个监视器现在都挂着**：`inner-state.sh` 2 pid、`session-liveness.sh` 2 pid | **AC12 的缺口是真的、已补**：文档要求外层同时挂两个，实际只挂了 `inner-state.sh`，唯一的 session-liveness 实例是管理者的。已用 `SESSION_TARGETS="inner /home/yale/work/quay quay-0:inner"` 挂上，并用同参数 `--once` 验到 `SESSION-STATUS inner alive=1 pid=270244`。**心跳疑虑：确认成因，但它提的修法不成立**。①追加写**不动目录 mtime**（`mktemp` 现场实测：before==after，文件 mtime 却动了；新建文件才动）⇒ 管理者的推理正确。②**但改读「最新文件 mtime」也修不好**——实测每个任务的 jsonl **只有 1–2 行**（start 一行、end 一行），当前在飞任务开工 **19 分钟仍是 1 行** ⇒ **目录与文件 mtime 一起冻结**。**⇒ `.workflow-events/` 根本不是心跳源，它是每任务两个事件的日志；问题不在读法，在源选错了。** 已建任务定为「换源并写明新源自己的盲区」，**AC3（杀掉进程必须报）是它的全部意义**——只证明长任务不误报，等于把监视器调成永不报。**另注意到一条自伤风险**：我这个 session-liveness 监视器跑的是 master 当前副本（启动行 `md5=c9336c2838145a15`），而在飞任务正在改这个文件 ⇒ **合并后我仍在跑旧版本，需在 fan-in 后重挂**——那条版本行正是为此存在的 |
 | 2026-08-03 14:42Z | `no-action`（未介入；两项核实都是「我以为可能出问题的地方没出」） | 中途读在飞任务的 diff 对照派发规格；核实移交边界有没有被越过 | 在飞 **1**（`quay-init-rewrites-an-executable`，15min，6 个改动、尚无提交——正常）；完成 44、orphaned 0、`tph` 1.560；机器安静（CPU 6.18、load1 1.05、令牌空）；monitor 自检 2 pid 通过 | **一、移交边界没有被越过**（我特意查的，因为管理者刚连提三个提交）：它改的是 `orchestration/session-liveness.env`（**配置**，明文属「管理者的东西、不进 plugin」）与自己的 tick/goal 文档，**`plugin/scripts/session-liveness.sh` 一个字节未动**。**而这恰好演示了在飞任务要编码的那条原则**——**用配置调，不改可执行文件**。**二、在飞工作 15 分钟时已对得上规格**：`quay-init.sh` 的 diff **只删了 `$sl_src` 那两个调用点**、`$src`（tick 文档）两处未动 ⇒ **AC8 的散文本地化保住了**；worktree 里 `session-liveness.sh` 的 `__QUAY_TMUX_SESSION__` 计数已为 **0**；并新建了 `plugin/scripts/verify-installed-executables.sh`——把 AC6 的检查做成**独立脚本**（能挂执行者的形状）；`test/cold-start-e2e.sh` 也在改动列表里，说明它采纳了我给的集成提示（把 `cmp` 断言挂进 `--from-build` 那条路径），**没有另起一套** |
 | 2026-08-03 14:35Z | `correct`（correct-manager：把它标为「未确认」的成因确认了，并据此改掉它提的修法） | 复核 session-liveness 假阳性；实测确认成因；建任务并把范围从「去抖」改为「洗输入」 | 在飞 **1**（`quay-init-rewrites-an-executable`，刚开工）；完成 44、orphaned 0、`tph` 1.575；新任务闸口 **new=0**，**与在飞任务在 `plugin/scripts/session-liveness.sh` 上 OVERLAP ⇒ 等收尾再派** | **管理者按纪律把成因标成「一种可能，未确认」，外层实测把它确认了**：`session-liveness.sh:170` 哈希的是**整屏** `capture-pane` 输出，而 `tmux capture-pane -p -t archguard-2:outer` **第 111 行**正是 `new task? /clear to save 151.2k tokens` ⇒ **那个计数器就在哈希区域内**。它每涨一次制造一次「忙」、随即稳定制造一次「闲」——**一对事件，零工作**。管理者观察到的 150.2k→151.2k 正是那一次；**它推测的形状对，机制不是「瞬时重绘」而是「判据的输入里混了不代表活动的东西」**。**成因确认后把范围从它提的方向改掉**：**不做去抖**——去抖是在输入脏的前提下补偿，而输入可以直接洗干净，**且不损失响应速度**（人明确要过「及时知道」，去抖要拿它去换）。**并预先堵住改过头**：实测 quay 内层 pane 的 `◯ general-purpose … ↓ 57.3k tokens` **是真内容**，排除规则必须精确到状态提示行，**不能按 `tokens` 关键词一刀切**，否则把假阳性换成假阴性而后者静默；AC4/AC7 就是为此设的，AC5 再堵「剥离吃掉整屏 ⇒ 永远显示空闲且不报错」 |
 | 2026-08-03 14:26Z | `unblock`（上一 tick 的解阻塞见效并收尾；派下一个） | 核实收尾；派发 session-liveness 移交任务；派发前第三次重核前提 | **上一 tick 的解阻塞见效**：BATCH-END 触发，两个任务关闭 ⇒ 完成 **42→44**、在飞 0、orphaned 0、`tph` **1.575**；机器空闲（CPU 2.88、load1 1.45）；闸口 **new=0** | **前提重核仍成立**，但**我自己的快速计数差点把范围报大**：`grep -c render_substitutions` 得 **6**，而真实调用点仍是 **4**（328/340 两份 tick 文档、361/373 `session-liveness.sh`）——多出的两条是**第 168 行注释与第 179 行函数定义**。已把这条写进派发指令，免得实现者照 6 估范围。`__QUAY_TMUX_SESSION__` 仍是 2 处（第 25 行注释 + **第 79 行**功能代码），缺陷完好。**派发时给了一条集成提示**：内层刚给 `cold-start-e2e.sh` 加的 `--from-build` 正是「从产物安装」的路径，**AC6 那条 `cmp -s` 断言挂在那里最自然**——让它先读自己刚写的那段再决定挂点，而不是另起一套。三条硬要求随指令下达：AC4 双向负控制、AC6 的检查必须有执行者（AC7）、AC8 保住 tick 文档的散文本地化。**「bash 还是 TS」明确标为触发条件不是工作**，别顺手改 |
@@ -152,10 +153,10 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 | 类型 | 次数 | 占比 |
 |---|---|---|
 | no-action | 48 | 39% |
-| unblock | 19 | 16% |
-| correct | 51 | 42% |
+| unblock | 19 | 15% |
+| correct | 52 | 42% |
 | escalate | 4 | 3% |
-| **合计** | **122** | — |
+| **合计** | **123** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
