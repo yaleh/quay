@@ -158,7 +158,7 @@ test("includeBody=false omits task bodies over the Provider ABI; the default kee
 
     // Default (no includeBody arg): bodies present — backward compatible.
     const full = await client.callTool({ name: "task_list", arguments: {} });
-    assert.equal(full.isError, false);
+    assert.ok(!full.isError, "default task_list succeeds (isError is absent/falsy on success)");
     const fullTasks = full.structuredContent.tasks;
     assert.equal(fullTasks.length, 1);
     assert.equal(fullTasks[0].id, "ABI-1");
@@ -167,7 +167,7 @@ test("includeBody=false omits task bodies over the Provider ABI; the default kee
 
     // includeBody:false: bodies stripped, frontmatter fields kept.
     const slim = await client.callTool({ name: "task_list", arguments: { includeBody: false } });
-    assert.equal(slim.isError, false);
+    assert.ok(!slim.isError, "includeBody:false task_list succeeds");
     const slimTasks = slim.structuredContent.tasks;
     assert.equal(slimTasks.length, 1);
     assert.equal(slimTasks[0].id, "ABI-1");
