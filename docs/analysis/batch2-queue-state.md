@@ -641,3 +641,51 @@ dormant 7 · never-runs-test 8 · unaccounted 81**。
 **经典循环在用它，只是 fast-mode 有意绕过。** 这不是「已死」，是「本模式不用」。
 retire 任务必须按 72h 窗口重新评估其规模主张（任务体现在写的是「最后一条 prepare-epoch 是 22 小时前」——
 那个观察本身没错，但它只覆盖 fast-mode 一侧）。
+
+## 解冻判据的盲区（外层自查，2026-08-03T04:46:46Z）
+
+**我在 03:56Z 设的解冻判据看不见刚刚真实发生的那次收缩。**
+
+判据原文：
+
+> (a) 有任务节点被删除，或 (b) 有一次落地提交的净行数为负
+
+实际发生的收缩：`reclaim` 回收了 **M277 + M243** 的分支与 worktree，
+`milestones/M277` 从约 51MB 降到 **1MB**。
+
+**判据两条都没被触发**：
+
+| 为什么 | 实测 |
+|---|---|
+| (a) 没有任务节点被删——删的是分支与 worktree 目录 | 删除的 `tasks/*.md`：**0** |
+| (b) `git log --numstat` 看不见 worktree 目录的删除 | `milestones/M*/worktrees` **在 `.gitignore` 里**（`git check-ignore` 确认），删除不产生任何 diff |
+
+**⇒ 判据的名字说「图收缩了」，实际测的是「被 git 跟踪的行数减少了」。**
+这是今晚同一个失效族的又一个成员，而这次是**我自己在 50 分钟前造的**。
+
+### 修正：加第三条
+
+```bash
+# (c) 物理收缩：worktree 条目数、milestone 分支数、或 milestones/ 占用（MB）任一下降
+git worktree list | wc -l              # 冻结时 22
+git branch --list 'milestone/*' | wc -l # 冻结时 20
+du -sm milestones | cut -f1             # 冻结时 1100 MB
+```
+
+**当前读数**：worktree 23（新增一个给 retire 用）· 分支 20 · **milestones/ 1033 MB（-67 MB）**。
+
+**⇒ 判据 (c) 已满足：milestones/ 从 1100 MB 降到 1033 MB。图第一次收缩了。**
+
+但收缩幅度很小（-6%），且**真正的 1.1G 大头仍被那 19 个含未落地工作的 worktree 占着**，
+等人对 34 项工作的裁定。
+
+**因此：解冻，但不恢复原顺序。** 按 03:56Z 写下的「解冻后重新评估」执行：
+
+| 序 | 任务 | 理由 |
+|---|---|---|
+| 1 | `gap-no-resource-awareness-heavy-ops-run-blind` | 已是 P1 首位；今晚第三次同一根因抬高不同信号（重型超时 / 两套件并发 / OVER90 假触发） |
+| 2 | `gap-retire-the-prepare-execute-pipeline-cluster` | **在飞**，且已被外层限定边界（不得动 worktree） |
+| 3 | `gap-serve-task-list-dies-on-one-malformed-task` | 人正在用该页面 |
+| 4 | `gap-web-cannot-show-what-the-loop-is-doing-now` | 异步通道 |
+
+**P2 冻结解除**，其余任务恢复正常排队，但排在上面四个之后。
