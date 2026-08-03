@@ -46,8 +46,18 @@
 #     pid-alive check is what protects it); reclaiming on pid-death alone would not distinguish a
 #     crashed holder from pid reuse (the mtime guard is the other half).
 #   - no silent wait: `--timeout 0` (the default) fails IMMEDIATELY with the holder's identity and
-#     held duration — silent waiting is indistinguishable from a hang. `--timeout N` polls at most N
-#     seconds, printing a line each second so the caller can see it is waiting.
+#     held duration — silent waiting is indistinguishable from a hang. `--timeout N` is a REAL
+#     bounded poll, NOT a single decision: do_acquire re-checks the reclaim conditions once per
+#     second, re-attempting the atomic claim each iteration, for at most N seconds — so a dead
+#     holder becomes reclaimable mid-wait and the acquire SUCCEEDS. (gap-the-only-token-waiter-
+#     refuses-to-wait-at-all AC1 pins this: a --timeout that does not loop would make changing
+#     test.sh's bound a "exists but does not take effect" no-op.)
+#   - wait bound (gap-the-only-token-waiter-refuses-to-wait-at-all, AC4): the ONLY real waiter is
+#     scripts/test.sh, which uses HEAVY_OP_ACQUIRE_TIMEOUT_S (default 40): a full stale-timeout
+#     cycle (HEAVY_OP_STALE_TIMEOUT_S, default 30) plus margin for the write→reclaim race, yet FAR
+#     below one real heavy op (full suite ~8 min at concurrency 8) — the worst-case wait absorbs
+#     the ≤30s transient grace window and can NEVER serialize two heavy ops back-to-back
+#     (40/480 ≈ 8% of a full suite).
 #   - no fair queue / FIFO: starvation is observable first (waited_ms), the policy decision waits
 #     for cost data — setting policy before the cost structure is known is the 416s mistake.
 #
@@ -61,6 +71,10 @@ HEAVY_OP_DIR="${GLOBAL_DIR}/heavy-op"
 TOKEN_FILE="${HEAVY_OP_DIR}/token"
 RECLAIM_COUNTER="${HEAVY_OP_DIR}/stale_reclaims"
 STALE_TIMEOUT_S="${HEAVY_OP_STALE_TIMEOUT_S:-30}"
+# LAST_BLOCK — the reason the most recent try_acquire failed (holder alive / holder dead-not-stale
+# + reclaim delta). Set by try_acquire on each failed claim, surfaced by do_acquire's timeout
+# branch so the FINAL failure line names the holder's real state instead of a generic "held".
+LAST_BLOCK=""
 
 now_ms() {
   # Epoch milliseconds from ONE date call. `date +%s%N` yields seconds+nanoseconds from a
@@ -201,6 +215,7 @@ try_acquire() {
     pid="$(read_holder_pid)"
     if [ -n "$pid" ] && pid_alive "$pid"; then
       held="$(held_ms_of_token)"
+      LAST_BLOCK="token held by ${holder:-unknown} (pid ${pid}, ALIVE, held ${held}ms)"
       printf 'heavy-op-token: HELD by %s (pid %s, held %sms) — %s did not acquire (no silent wait)\n' \
         "${holder:-unknown}" "$pid" "$held" "$project" >&2
       return 1
@@ -214,8 +229,12 @@ try_acquire() {
         "$(( now_s - mtime_s ))" "${pid:-?}" "$(read_reclaim_counter)" >&2
     else
       held="$(held_ms_of_token)"
-      printf 'heavy-op-token: HELD by %s (pid %s dead, mtime only %ss old) — NOT stale: reclaim needs BOTH mtime timeout AND dead pid — %s did not acquire\n' \
-        "${holder:-unknown}" "${pid:-?}" "$(( now_s - mtime_s ))" "$project" >&2
+      local age=$(( now_s - mtime_s ))
+      local reclaim_in=$(( STALE_TIMEOUT_S - age ))
+      if [ "$reclaim_in" -lt 0 ]; then reclaim_in=0; fi
+      LAST_BLOCK="token held by ${holder:-unknown} (pid ${pid:-?} DEAD, mtime only ${age}s old — reclaimable in ${reclaim_in}s)"
+      printf 'heavy-op-token: HELD by %s (pid %s dead, mtime only %ss old) — holder DEAD; reclaimable in %ss (reclaim needs BOTH mtime timeout AND dead pid) — %s did not acquire\n' \
+        "${holder:-unknown}" "${pid:-?}" "$age" "$reclaim_in" "$project" >&2
       return 1
     fi
   fi
@@ -260,6 +279,12 @@ do_acquire() {
       return 0
     fi
     if [ "$timeout" -eq 0 ] || [ "$waited" -ge "$timeout" ]; then
+      # AC5: the FINAL failure line must say what actually blocks (alive vs dead + reclaim delta),
+      # not a generic "held by another project". LAST_BLOCK carries the last try_acquire reason.
+      if [ -n "$LAST_BLOCK" ]; then
+        printf 'heavy-op-token: did not acquire within %ss wait window — %s — %s did not acquire\n' \
+          "$timeout" "$LAST_BLOCK" "$project" >&2
+      fi
       # waited_ms is a contract measure — emitted on failure too (how long THIS acquire waited).
       printf 'waited_ms=%d acquired=no\n' "$(( waited * 1000 ))"
       return 1
