@@ -137,9 +137,17 @@ resume 三个阶段各自可独立验证：检测与残留 → 冷启动 skill �
 - [ ] AC5: 冷启动 skill 一条命令挂上两个监视器，**判据是「事件送得到」不是「进程在跑」**——
       给出收到事件的实跑证据（`nohup` 起的进程不算通过）
 - [ ] AC6: **inner 零操作**——全程不向内层会话输入任何东西（实跑记录为证）
-- [ ] AC7: **改名负控制，且必须走循环的真实运行时路径**——`/home/yale/work/quay` 改名后，
-      目标项目**通过 `.quay/config.yml` 的 `mcp_entry` 实际完成一次 `task_list` 往返**（不是跑一个独立脚本）。
+- [ ] AC7: **隔离负控制，且必须走循环的真实运行时路径**——把 `/home/yale/work/quay` 变成**不可达**
+      （**不是真的 `mv` 改名**）后，目标项目**通过 `.quay/config.yml` 的 `mcp_entry` 实际完成一次
+      `task_list` 往返**（不是跑一个独立脚本）。
       **这条不过，AC1–AC6 都不算数**。
+      **⚠️ 安全约束（外层 2026-08-03 实测，必须照此执行，不要按字面 mv）**：此刻有 4 个 claude 会话的
+      cwd 在 `/home/yale/work/quay` 之下、2 个 PATH 符号链接（quay 与 quay-native）解析进它、2 个 worktree
+      以它为根——真的改名会同时断掉三个项目的会话、两个 CLI 入口和两个 worktree。
+      **等价且安全的做法**：把 PATH 里指向开发树的那两个符号链接所在目录摘掉，断言 provider 仍能经铺进去
+      的 `vendor/quay/dist/*.js` 完成 `task_list` 往返；若你有更强的隔离（容器 / mount namespace 里让该
+      路径不存在）更好。判据不变：「循环能否继续工作」，只是不用真的 mv——**下一个人照 AC 字面执行会
+      重复这个风险，所以改动写在这里而不是只在执行时绕过**。
       **⚠️ 外层 2026-08-03 实证：这里极易自欺**——我两次用「改名后 `resource-gate.sh` 仍 exit 0」当证据，
       而 `resource-gate.sh` 是独立 bash、**对 quay 零依赖，探针本身不可能失败**。
       真正的依赖在 PATH：`quay-native` 是**指向 `/home/yale/work/quay/packages/quay-native/dist/` 的符号链接**，
