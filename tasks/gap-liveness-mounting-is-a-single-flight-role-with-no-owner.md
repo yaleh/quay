@@ -36,7 +36,7 @@ extra:
 
 ```
 measure mount_count = `ps -eo ppid,args | grep -c '[s]ession-liveness.sh'` 的进程数字段
-measure takeover_ms = 持有者被 kill -9 后到下一个挂载接管的毫秒字段
+measure takeover_ms = `bash plugin/scripts/session-liveness-mount.sh` 在持有者被 kill -9 后输出的接管耗时毫秒字段
 band mount_count = 1
 invariant 挂载是有主角色，订阅不需要挂载；第二个挂载是空操作不是失败
 invoke `bash plugin/scripts/session-liveness-mount.sh`（或等价入口）
