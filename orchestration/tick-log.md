@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 04:25Z | `correct` | 实测把「饥饿是并发产物」升级为「饥饿是稳态」，据此把资源闸从 P2 提到 P1 首位；并用 inventory 的窗口差集修正 retire 的前提 | `test-isolation` 已合并（+1176 行）；inventory AC 全勾在 fan-in；reclaim 待 inventory 套件信号。压力 96.62 → **87.15**，并发套件根进程 2 → 1 | **单个套件独占 16 个进程**（8 worker + 7 子进程 + 根），4 核 ⇒ **4× 超订，压力 87.15**；两个并发只是推到 97。**⇒ 每个 P0 任务的「连跑 2 次全绿」都至少两次进入饥饿态**，今晚已因此耗掉 M136 三轮 + 批 4 崩溃 + 两次重跑。**内层正确诊断了饥饿**（`6d2d839e`：suite-run2 green confirms starvation, not defect）——防误诊指示生效。**inventory 结果**：205 脚本 · unaccounted 81，**但 72h 窗口有 31 个翻成 live ⇒ 真实约 50**；`.claude/workflows/*.js` 六个在 15.9h 全 unaccounted 而 72h 五个 live（prepare-milestone **×280**）——**经典循环在用，不是遗留** |
 | 2026-08-03 04:05Z | `correct` | 资源告警：两个全量套件并发跑，定位后指示串行 + 预防误诊；记录一条 P2 提升触发条件 | 三任务在飞（inventory 56m、reclaim 26m、test-isolation 26m）；完成 24，吞吐 1.37/h；**web server 仍 200** | **CPU 压力 96.62（avg300 90.73）、load1 31.35、47 个 node**——批 4 崩溃时只有 84.77。根因定位到具体进程：`node --test --test-concurrency=8` 两个根进程，一个在 `/tmp/quay-wt-testiso`（816s）一个在 `/tmp/quay-wt-reclaim`（562s），约 34 进程抢 4 核。**内存无风险**：mem pressure 0.00、`pswpin/pswpout` 皆 0、可用 3789MB ⇒ 纯 CPU 饥饿，不是 OOM。**最重要的一条指示是防误诊**：若这两次出现 `cancelled > 0`，几乎肯定是饥饿不是代码缺陷——M136 今晚正是这样耗掉三轮 |
 | 2026-08-03 03:46Z | `correct`（**correct-self 第 4 次**：我上一 tick 说内层绕过了机制，实证是**内层对、我错**） | 查清内层为何跑了正交性检查仍并发派发；构造实证后建任务修生产入口 | 三任务在飞（inventory 36m、reclaim 6m、test-isolation 6m）；完成 24，吞吐 **1.39/h**；CPU 7.77、swap 714MB 全在 zswap；**web server 仍 200**（人在用） | **内层用的 `expand` 是规范化声明路径、不碰文件系统；我用的是 `expandGlobs`（对真实文件展开）。派发前要比的是「打算碰哪些文件」，包括尚不存在的——所以内层的语义是对的。** 它的结论也对：`test-isolation vs no-resource-awareness => OVERLAP ["scripts/test.sh"]`，据此正确拒绝同批。**但由此查出生产入口的真缺陷**：`concurrent-batch-scheduler.ts:249` 用 `expandGlobs`，构造实证——全新 vs 既有且明显无关 ⇒ **误判串行**；两个全新且真重叠 ⇒ 拒绝得对但理由是「matched nothing, likely a typo」，**说不出是哪个文件**。我的初版说法「任何新文件任务都无法证明正交」**过宽**，实证后收窄为「全部条目都是新文件时才触发」 |
 | 2026-08-03 03:26Z | `no-action`（未介入内层；外层侧完成散文形式化的两条便宜项 + 建一个任务） | 落实散文审计的三条建议：#3 消灭双源、#1 加显式标记，均直接编辑；#2 需代码，建任务 | m264 **56 分钟**（阈值 90）但**在真推进**；inventory 16 分钟；完成 23，吞吐 **1.36/h** | **m264 非卡住**：`/tmp/repro-m264.sh`(02:38) + `/tmp/m264-run.log`(03:19, 19KB)，正执行「隔离连跑 N 次」，flaky 诊断本就需时。**swap 的真相与 `free` 不同**：`pswpin/pswpout` 皆 **0** ⇒ 磁盘换页零次；714MB 全被 zswap 吸收——`stored_pages` 180,498 页（≈705MB 原始）压成 `pool_total_size` 377MB，**压缩比 1.87×**。护栏在真实负载下生效且零 I/O。**契约检查器第 3 次抓到我**：`control` 折行 ⇒ `contract-line-unknown`。Contract 块**一行一键不可折行**，已写进 tick 文档 |
@@ -85,11 +86,11 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 27 | 40% |
+| no-action | 27 | 39% |
 | unblock | 11 | 16% |
-| correct | 27 | 40% |
+| correct | 28 | 41% |
 | escalate | 3 | 4% |
-| **合计** | **68** | — |
+| **合计** | **69** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
@@ -98,4 +99,4 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 **2026-08-03 已连续 3 个 tick 是 (b) 类**：(1) 实测推翻外层自己写的 `2×` 超订数字；(2) `checkTouchesPair` 调用签名错致 10 对全误报；(3) `turn-ended-idle` 该不该进阻塞信号的设计错误。**同期内层表现良好**：主动采纳 PSI 判据、自主派发正交批次、10 分钟内执行完外层指令。**这说明当前瓶颈是外层的下笔质量，不是内层的执行**——而退化判据会得出相反的结论。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
 修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 40%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 41%。
