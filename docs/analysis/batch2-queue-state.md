@@ -1616,3 +1616,26 @@ AC8d 三态目标布局 + README）。
 - **AC8c 多模型（opus/flash/qwen）同后果清单实跑**
 - **AC1b meta-cc 真实写入 run**（跨项目写权限，超出 worktree 授权，建议外层执行）
 - AC6 内层零操作实跑记录
+
+### 批 7 fan-in 阻塞（2026-08-03 20:3xZ，token 饥饿 + 无归属变异）
+
+**批 7 三个分支已全部 merge**（cold8 `df073f9e` / checkers `353dfe69` / live2 `c92f72db`），
+worktree 待清理、任务待关闭。**全量套件 6 次尝试全非绿**（suite5/7/9/10/11/12），全部失败归因为
+环境负载而非批 7 代码：三个失败文件（loop-shipping ENOENT / session-liveness RESUMED /
+runner-grouping 172s 挂起）**隔离验证 3/3 全绿**，确认为饥饿 flake。suite7 实测 **2140**
+（2120 + 批 7 新增）但非绿（fail 2 / cancelled 1），**参考值保持 2120**——按纪律只在全量绿时更新。
+
+**根因一（外层认定，在建任务）——token 拉取式回收的饥饿缺陷**：archguard 每几秒重取一次、
+每次都刷新 mtime，而回收要求「mtime 超时 AND pid 死」两条同时满足 ⇒ mtime 永远长不到 30s，
+quay 永远回收不了 token，全量套件（test.sh 内部 fail-closed 获取）无法启动。
+**内层已停止盲目重试**（外层指示；已重试 12 次）。恢复条件：token 机制修复（mtime 刷新粒度或
+回收判据）后重跑。
+
+**根因二（无归属共享检出写入，另一发现）——`packages/quay-github/src/github-client.ts` 变异**：
+工作树 20:21 出现 `const isCompound = false;`（HEAD 应为 `role === "compound" && (children || []).length > 0`），
+已还原（`git checkout --`，工作树现干净）。**非内层注入**：该文件唯一历史提交 78ec9631（M81），
+内层提交（quay-init-loop 测试修复 + 批 7 合并）均未触碰；外层已排除 checker-mutation-cases（5 用例
+无此文件）、无测试写 src/、无活变异进程。判定：无归属的共享检出写入，来源待查。
+
+**批 7 关闭阻塞**：需 token 修复后全量套件绿（判绿三条件）→ 关闭 cold8/checkers/live2
+（--task-end ×3 + worktree/分支清理 + Land --snapshot）。
