@@ -524,6 +524,16 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 - 在飞（1 agent）：retire（~05:17 活跃，边界解除）。retire 落地后自己一个全量
 - 全量绿 → 关 resource-awareness（`--task-end` hjkru7）+ serve-task-list（pyzd0e）
 
+### Tick 更新（05T03:30Z）：resource-awareness + serve-task-list 关闭
+
+- **合并全量绿**（**2436**/2416/0/20，exit 0，参考值 2422→2436）——**gate GO** 下真实跑通
+- **resource-awareness done**（`--task-end` hjkru7）：resource-gate.sh + 并发推导 = 支柱化落定。
+  外层 `ad1793d7`「gate 是 preflight 不是 governor」已记
+- **serve-task-list done**（`--task-end` pyzd0e）：畸形任务降级为可见占位行，页面不再 500。
+  AC7 发现：3 个缺 id 文件 **8-9 天**未被发现——「非阻断警告等于没有警告」
+- **在飞（1 agent）**：retire（提交 `8d738540` 80 文件 -24195 行删除，REFUTE round-2 PASS；05:30 活跃，
+  等其最终报告）。**压力 3.49（低窗口）**——retire 落地后立即跑它的全量验证
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
