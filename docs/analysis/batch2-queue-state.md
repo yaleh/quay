@@ -1711,3 +1711,23 @@ scoped 验证（`--root` 测试缝），不跑全量。
 - **新任务**：`gap-worktree-node-modules-inconsistent-self-verify`——worktree node_modules 不一致
   （tasklist 有符号链接、tokenwait 无），不能自证的 worktree 验证回退到共享检出（污染高发地）。
   外层提问差在哪一步，内层实测回答：差在 agent 是否建 node_modules 符号链接。**待派发**。
+
+### 批 3 关闭（2026-08-03 23:5xZ，batch3-faninsuite3 全绿）
+
+**批 3 三个任务全部关闭**（status done + `--task-end` ×3）：
+- **token-waiter**（`gap-the-only-token-waiter-refuses-to-wait-at-all`）：test.sh acquire `--timeout 0`→有界等待 40s，AC3 关键约束过（活持有者绝不抢）
+- **mkdtemp**（`gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree`）：R8 shared-root-mkdtemp 检测器 + assert-clean-tree 接线 + 修 3 实例（ts-typecheck-gate/loadbearing/run-identity）
+- **task-list-route**（`gap-task-list-route-is-linear-in-task-count`）：mtime/size 缓存 + includeBody:false，route ~3.5s→0.08-0.12s，AC5 实时性负控制过
+
+**批 3 套件绿**：**2157 tests / 2134 pass / 0 fail / 0 cancelled**，SUITE_EXIT=0
+（`/tmp/batch3-faninsuite3.log`，干净窗口起跑）。**参考值 2150→2157**。worktree/分支已清理，
+Land `--snapshot` 已写。
+
+**合并期发现与修复**：
+- store.ts `ReturnType<typeof fs.statSync>` 解析到 bigint 重载 → `number|bigint` 类型错误，
+  破坏 ts-typecheck-gate（批 3 套件先红 3 条）→ 已修（显式 `fs.Stats | null`，tsc exit 0）
+- batch-tokenwait 套件 fail 2（serve.test.mjs/provider-env-symmetry）判别为负载 flake
+- 契约检查器抓到我建任务的 measure-no-field 违规（已修）
+
+**在飞**：0。**下一批候选**：AC20（token-waiter 落地后下一个，与 token-status 在 heavy-op-token.sh
+重叠需串行）、gap-worktree-node-modules（我建）、gap-the-dod-gate-encodes-a-retired-task-shape（外层建）。

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T21:47:55.662Z",
+  "generatedAt": "2026-08-03T23:46:23.241Z",
   "since": null,
   "tasks": [
     {
@@ -75,6 +75,11 @@
     {
       "taskId": "gap-m264-build-evidence-regress-flaky",
       "minutes": 69.35986666666666,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree",
+      "minutes": 104.01958333333333,
       "outcome": "done"
     },
     {
@@ -208,6 +213,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-task-list-route-is-linear-in-task-count",
+      "minutes": 102.32943333333333,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-tasksperhour-counts-halted-time-as-slow-work",
       "minutes": 92.95245,
       "outcome": "done"
@@ -258,6 +268,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-the-only-token-waiter-refuses-to-wait-at-all",
+      "minutes": 105.94785,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call",
       "minutes": 92.96766666666667,
       "outcome": "done"
@@ -270,13 +285,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 68.20629779874214,
-  "medianMinutes": 56.32268333333333,
-  "tasksPerHour": 1.5013027932674818,
-  "serialEquivalentPerHour": 0.8796841631405262,
+  "meanMinutes": 70.12911875,
+  "medianMinutes": 59.938625,
+  "tasksPerHour": 1.5022665894271134,
+  "serialEquivalentPerHour": 0.8555647221789735,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T21:47:55.619Z",
-  "windowHours": 35.30267194444444,
+  "windowEnd": "2026-08-03T23:46:23.220Z",
+  "windowHours": 37.277005555555554,
   "haltedHours": 0,
   "halted": [],
   "blocked": [

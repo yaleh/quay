@@ -1,7 +1,7 @@
 ---
 id: gap-task-list-route-is-linear-in-task-count
 title: "The task-list route costs ~8ms per task and the store only grows — 608 tasks render in 4.2s while every other route is under 0.1s"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -83,10 +83,12 @@ resume 先量出 provider 与渲染各占多少，再定改哪一半
 
 - [x] AC5 的实时性负控制实跑输出贴进任务体——
       **用「页面显示旧数据」换来的速度，是把一个可见的慢换成一个静默的错**
-- [x] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）——
-      **按派发指令只跑 scoped 套件**（`serve.test.mjs` + 本任务新增的
-      `serve-list-realtime.test.mjs`），连跑 2 次全绿（见下方记录）；
-      **未跑 `scripts/test.sh` 全量套件**（派发指令明确禁止，DoD 按 `[~]` 标 scoped）
+- [~] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）——
+      **如实标注：仅 1 次全量绿**（协调方 fan-in，批 3 套件 **2157 tests / 2134 pass / 0 fail /
+      0 cancelled**，SUITE_EXIT=0，`/tmp/batch3-faninsuite3.log`，2026-08-03）。scoped 连跑 2 次绿
+      （`serve.test.mjs` 2x + `serve-list-realtime.test.mjs` 4/4 ×2）。**修复记录**：store.ts 的
+      `ReturnType<typeof fs.statSync>` 解析到 bigint 重载 → `number|bigint` 类型错误，破坏
+      ts-typecheck-gate（批 3 套件先红 3 条）；已修（显式 `fs.Stats | null`，`tsc --noEmit` exit 0）。
 - [x] 任务体记录成本分解的起点数字（2.0 s provider / 2.2 s 其余，608 任务），
       **以便下一个人知道这次改的是哪一半**
 
