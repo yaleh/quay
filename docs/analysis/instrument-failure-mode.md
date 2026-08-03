@@ -93,7 +93,33 @@ blocked-signal 都是边跑边造。而 blocked-signal 证明了正确形态：�
 
 四者的共同点：**它们都会大声失败**。
 
-## 6. 由此立即可做的两件（已建任务）
+## 6. 裁剪任务（人 2026-08-03 指出：分析找出了「能裁什么」，任务却只建了「该加什么」）
+
+**这是一个真实偏差**：本文档第 5 节列出了可裁对象，而首轮只为「加检查」建了任务。
+方向应当是**建立可持续高效的开发机制**，而清理是其中必要的一半。
+
+| 任务 | 规模 | 依据 |
+|---|---|---|
+| [[gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion]] | **1.1G / 21 个 worktree** | `merge-base --is-ancestor` 实测 21/22 为真、`git cherry` 0 个未合并提交 |
+| [[gap-retire-the-prepare-execute-pipeline-cluster]] | **约 14,658 行 + 25 个测试文件** | 最后一条 prepare-epoch 是 22 小时前；窗口内 18 个任务零 `## Plan` 零 epoch；失败无一是计划失败 |
+
+### 第一个裁剪任务顺带修正了本文档自己制造的一个「名不符实」实例
+
+昨夜写进 `gap-stranded-worktree-branches-have-no-alarm-channel` AC2b 的判据是
+「提交数 0 **但两点 diff 非空** ⇒ `merged-then-reverted`」。**它是错的**：两点 diff 比的是两棵树，
+master 前进后任何旧的已合并分支都非空。实测 **21 个分支全部被误报**，而真正的
+merged-then-reverted 只有 M243 一个（且已恢复）。
+
+按该判据 `--clean-stale` 会拒绝清理全部 21 个，**1.1G 永久留存**——
+**判据的名字说「被 revert 了」，实际测的是「master 有没有前进」**。
+
+这使第 2 节的清单增加一条，且这一条是**本次分析自己产生的**：
+
+| 仪器 | 名字承诺 | 实际测量 |
+|---|---|---|
+| `merged-then-reverted` 判据 | 分支被合并后又被 revert | master 自合并以来是否前进过 |
+
+## 7. 由此立即可做的两件（已建任务）
 
 1. **[[gap-checks-that-verify-an-empty-set-must-fail-closed]]** —— 形态 B 的通用修复。
    仓库里**已有正确先例**：`select-tests-for-touches` 在选中集过薄时 exit 1 并要求 `--allow-thin`。

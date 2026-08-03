@@ -47,6 +47,9 @@ M136 被定性为 flaky 而实为确定性。
 
 能安静说谎的机制，无论多便宜，要么加契约要么删掉；会大声失败的机制，即使贵也值得留。
 
+**已建裁剪任务**：[[gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion]]（1.1G / 21 worktree）、
+[[gap-retire-the-prepare-execute-pipeline-cluster]]（约 14,658 行 + 25 个测试文件）。
+
 **按此判据**：prepare 管线可裁（18 个任务零 `## Plan`、零 prepare-epoch，且失败无一是计划失败；
 审查工作转移到派发闸口，见 `gap-dispatch-gate-has-no-checklist-and-no-trace`）；
 `tasksPerHour` 可裁（`meanMinutes` 的确定性变换）。
