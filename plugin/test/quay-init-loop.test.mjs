@@ -397,15 +397,22 @@ test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is proj
 });
 
 test('AC7b — when the plugin has no built runtime bundle, --loop warns (does not fail) and still writes the config', () => {
-  const ws = makeTmp();
+  // Construct the no-bundle scenario deterministically: a temp COPY of the plugin with
+  // vendor/quay/dist/quay.js removed. The real pluginDir may have a bundle (the full suite
+  // builds dist into it), so the test must not depend on ambient build state.
+  const src = makeTmp();
   try {
-    // The real pluginDir in a raw checkout has no vendor/quay/dist/quay.js (it is a gitignored
-    // generated artifact). The install must NOT fail on its absence — it warns and proceeds.
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
-    assert.equal(r.status, 0, `init must exit 0 even without a built runtime:\n${r.stderr}`);
-    assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the runtime bundle is absent');
-    assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'config must still be written');
-  } finally { cleanup(ws); }
+    fs.cpSync(pluginDir, src, { recursive: true });
+    fs.rmSync(path.join(src, 'vendor', 'quay', 'dist', 'quay.js'), { force: true });
+    const ws = makeTmp();
+    try {
+      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
+        '--plugin-root', src]);
+      assert.equal(r.status, 0, `init must exit 0 even without a built runtime:\n${r.stderr}`);
+      assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the runtime bundle is absent');
+      assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'config must still be written');
+    } finally { cleanup(ws); }
+  } finally { cleanup(src); }
 });
 
 test('AC7b — a plugin source WITH a built runtime lays it into the target (project-local copy)', () => {
