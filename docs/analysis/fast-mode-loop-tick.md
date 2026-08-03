@@ -84,11 +84,15 @@ ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
 ```bash
-grep 'cancelled 0'   # cancelled == 0（崩溃不计入 fail，必须显式查）
+grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
 grep 'tests 2034'    # tests 数等于参考值（2026-08-03 实测 2034；套件构成每次变都要重测参考值）
 ```
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
+**判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
+（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled 可能有
+自身异步结构的触发条件（Promise 未决 + 事件循环已解决）。**判绿三条件成立的理由改为：「cancelled 是一种
+会被 fail 0 掩盖的失败」——显式查它是为了不漏掉这种失败，不是因为饥饿必然产生它。**
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）。每次合并新增/删除测试文件后，
 参考值以最近一次全量绿的 tests 数为准。**注意 starvation 是单套件稳态（4 核跑 c8 = 4 倍过订，
 压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 40 才 GO），但套件自身跑起来压力必然 >40，
