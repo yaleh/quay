@@ -31,7 +31,7 @@ archguard 已在 σ 纪律下产出过一个诚实的「无改善」结论（TAS
 ```
 measure file_wall_ms = `bash scripts/test.sh 2>&1 | grep -oE '\([0-9.]+ms\)'` 每个测试文件的墙钟毫秒字段
 measure cost_split = `bash scripts/test.sh` 一次运行中进程启动 / IO 等待 / 真实计算的占比字段
-measure delta_s = 改动前后各 5 次运行的均值差秒数字段
+measure delta_s = `for i in 1 2 3 4 5; do /usr/bin/time -f %e bash scripts/test.sh; done` 改动前后各 5 次的均值差秒数字段
 band delta_s = >297.6
 invariant 改善量必须大于 σ 才算数；单次对照一律不接受；不得放宽「连跑 2 次全绿」
 invoke `bash scripts/test.sh`
