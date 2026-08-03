@@ -32,7 +32,7 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
       记录在 `orchestration/escalations.md`，附实测的触发面（推 master 只跑 CI，不产生 release；
       只有 `v*` 标签才 release；`publish-plugin-dist.yml` 的 `workflow_dispatch` 只重建 `dist-plugin`、不 release）。
 
-- [ ] **AC2（2026-08-03 重新解冻）**：**存在一个可安装物含有本阶段的机制**。
+- [x] **AC2（已达成 2026-08-03）**：**存在一个可安装物含有本阶段的机制**。
       **人裁定：基于本地 build 执行安装即可，不必直接复制源文件——那已经足够「冷」。**
       ⇒ 这条**不再依赖推送**，回到我与外层可达成的范围。
       判据（**2026-08-03 收紧**）：`bash plugin/scripts/publish-dist-branch.sh --branch <local>`
@@ -43,6 +43,15 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
       （`gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it`）。
       我此前把它的**内容**当作证据读——而一个不被执行的 e2e，走不走得通没有意义。
       与几小时前那个「没有执行者的契约检查器」是同一族：**存在 ≠ 生效**。
+
+      **达成证据（`gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it`）**：
+      `test/cold-start-e2e.sh --from-build` 经 `publish-dist-branch.sh`（**不加 `--push`**）build
+      后**用 `git archive` 从孤儿提交提取**（不是 `cp` 工作树，有测试断言此点），
+      **连跑 2 次全绿**（各 101s，exit 0）；负控制双向——`--sabotage scripts/quay-init.sh`
+      ⇒ 失败并指名缺的是哪个文件，恢复 ⇒ exit 0。
+      **一处诚实的限度**：常设执行者是 CI 的 `cold-start-e2e` job，而 **CI 只在 push 时触发、
+      push 由人显式把关，所以那个执行者至今没有真正触发过**。检查本身被手工实跑两次并贴了输出，
+      故判达成；把限度记在这里而不是含糊过去。
       **关键区分**：被测物必须是 **build 出来的产物**，不是 `cp` 过去的源文件——
       archguard 第一次冷启动用的就是 `cp`，那不构成可交付性证据。
       *（推送与 release 仍须人显式触发，那条裁定未变；它现在只影响「别人能不能装到」，不影响本 AC。）*
