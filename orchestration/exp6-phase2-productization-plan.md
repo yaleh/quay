@@ -27,39 +27,50 @@
 
 ---
 
-## 1. 交付物的定义（不是「更多文档」）
+## 1. 交付物的定义——人 2026-08-03 09:4xZ 给出的三条硬判据
 
-**目标**：把一个**有 quay 任务板、无双层循环**的项目，变成一个能自主跑双层循环的项目。
+**这三条推翻了本文件原来的定义。** 原定义是「把内核和 tick 文档装进目标项目」，
+而那等于**从 quay 的开发目录复制文件**——我已经这么干了一次（archguard，提交 `c8f612f`），
+**它不满足第 3 条**。
 
-两个现成目标（都已有 `.quay/config.yml` 与 `tasks/`，**都没有任何循环机件**）：
-
-| | archguard | meta-cc |
+| # | 判据 | 现状 |
 |---|---|---|
-| 语言 | TypeScript/Node（与 quay 同构） | **Go**（异构） |
-| 任务数 | 25 | 99 |
-| tmux | `archguard-2`（已开，claude 未启动） | `meta-cc-4`（同） |
-| 作为目标的价值 | **第一目标**——同构，先证明机制可搬 | **第二目标**——异构，证明不依赖语言 |
+| 1 | 用**尽可能常见的方式**从安装包或通用包管理工具装到 **user scope** | 包名 `quay`，`bin: {quay: ./dist/quay.js}`——**可全局装** |
+| 2 | 在一个**从未用过 quay（或用过旧版）**的项目上，用**几条 README 里列得出的命令**配好、跑起来，**真正开始**和本仓过去十几小时一样的持续开发 | **不满足**——README 没有这条路径 |
+| 3 | **运行时不得依赖本项目开发环境目录下的文件** | **部分满足**（见下） |
 
-### 已实测的启动配方（内层）
+### 第 3 条的实测：配置面已经是冷的，方法论面完全不在包里
 
-```bash
-ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-ANTHROPIC_AUTH_TOKEN=<key>
-ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro
-ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro
-ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
-CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000
-CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80
-CLAUDE_CODE_MAX_CONTEXT_TOKENS=<6 位数>
-CLAUDE_CODE_DISABLE_MOUSE=1
-CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1
+archguard 的 `.quay/config.yml` **完全自足**——路径全相对，
+`mcp_entry: ["quay-native","mcp"]` 走 PATH，不引用 `/home/yale/work/quay` 的任何东西。
+它甚至已经有 `loop:` 段（`board`/`gates`/`stop: until(.halt)`/`concurrency: 4`）。**这一面是冷的。**
 
-claude --model deepseek-v4-flash --permission-mode bypassPermissions
+**不冷的是方法论面。** `packages/quay/package.json` 的 `files`：
+
+```
+["README.md","CHANGELOG.md","LICENSE.md","bin","src","dist"]
 ```
 
-外层无任何 `ANTHROPIC_*` 覆盖（走默认端点）。**这个配方是从运行中的进程实测出来的，不是从文档抄的。**
+⇒ **两份 tick 文档、`scripts/heavy-op-token.sh`、`scripts/resource-gate.sh`、
+`scripts/test.sh` 的判绿约定——一个都不在包里。**
 
----
+一个照 README 走的人拿不到它们。我给 archguard 装上它们，用的是 `cp`。
+**那不是冷启动，是热拷贝**，而热拷贝证明不了任何可交付性。
+
+### 因此真正的交付物是三件，不是「更多文档」
+
+1. **把机制打进包**——tick 文档 + 那几个脚本进 `files`，
+   并有一条命令能把它们**释放到目标项目**（`quay loop init` 之类）
+2. **README 的冷启动小节**——从 `npm i -g quay` 到「循环跑起来了」的**完整命令序列**，
+   条数少到能列在 README 里
+3. **一次真实的冷启动验证**——在一个**没有 quay 开发树可复制**的环境里照 README 走通。
+   **这条是唯一能证明前两条成立的**；archguard 那次不算，因为我用了 `cp`
+
+### 已知的诚实限度
+
+archguard 那次冷启动**仍然有价值**——它验证的是**机制能不能在第二个项目上产出真活**
+（那里 CI 连红一个月、`npm test` 300s 超时、lint 480 errors，都是真的）。
+它**不验证**可交付性。两件事不要混。
 
 ## 2. 硬约束：这台机器跑不下第二套循环
 

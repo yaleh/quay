@@ -1,0 +1,12 @@
+quay 循环暂停：为 archguard 冷启动腾出资源（4 核跑不下两套双层循环）
+
+解除条件：archguard 双层循环跑满 2 小时并至少端到端完成 1 个任务，
+          或人明确指示恢复本仓（本仓优先级高于 archguard/meta-cc）。
+
+解除方式：rm <repo-root>/.halt —— 解除前跑
+          experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
+
+排空状态：在飞 0、工作树干净、fan-in 套件 2073 全绿 (4a926542)、残留 worktree 已清。
+          此刻停是干净边界，不是打断。
+
+外层 2026-08-03T09:33:12Z
