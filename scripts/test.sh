@@ -189,6 +189,33 @@ resource_gate_check() {
   fi
 }
 
+# heavy_op_acquire — the cross-project heavy-op token (gap-no-cross-project-heavy-op-token).
+# Called ONLY on the FULL-SUITE default path, BEFORE resource_gate_check (串联不合并: 先取令牌、
+# 再过闸 — a gate WAIT must release the token, or one WAIT would hold the whole cross-project mutex).
+# The token script itself FAILS OPEN (exit 0 + a loud marker) when $QUAY_GLOBAL_DIR is
+# unwritable/unreachable — this is a scheduling token, not a safety check; a non-zero exit HERE
+# means another project legitimately holds it, and the full suite must NOT run on top of it.
+# On success it arms an EXIT trap that releases the token on EVERY exit path (gate WAIT, build
+# failure, static-check failure, node test completion). Skips when QUAY_TEST_SKIP_RESOURCE_GATE=1 —
+# a nested runner inside an outer suite: the outer suite already holds the token (the exemption
+# boundary is identical to resource-gate.sh's).
+heavy_op_acquire() {
+  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping heavy-op token (nested runner; outer suite holds it)"
+    return 0
+  fi
+  echo "== heavy-op token (gap-no-cross-project-heavy-op-token) =="
+  if ! bash "${repo_root}/scripts/heavy-op-token.sh" --acquire quay --timeout 0; then
+    echo "scripts/test.sh: heavy-op token HELD by another project (holder printed above) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free." >&2
+    exit 1
+  fi
+  HEAVY_OP_ACQUIRED=1
+  # EXIT trap: release on every exit path. The default-set branch below runs node as a CHILD (not
+  # exec) precisely so this trap fires when node finishes — an exec'd node would replace this shell
+  # and silently skip the release.
+  trap 'if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then bash "${repo_root}/scripts/heavy-op-token.sh" --release quay >/dev/null 2>&1 || true; HEAVY_OP_ACQUIRED=0; fi' EXIT
+}
+
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
@@ -331,10 +358,12 @@ build_dist_once() {
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
 run_selected() {
   local groups="$1"; shift
-  # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
-  # subset run (e.g. --group governance) — scoped, skip the gate. QUAY_TEST_SKIP_RESOURCE_GATE=1
-  # is honored inside resource_gate_check for nested runners.
+  # The resource gate + heavy-op token guard the FULL-SUITE default (product,engine). A
+  # non-default --group is a subset run (e.g. --group governance) — scoped, skip both (the token's
+  # exemption boundary is identical to resource-gate.sh's). QUAY_TEST_SKIP_RESOURCE_GATE=1 is
+  # honored inside resource_gate_check / heavy_op_acquire for nested runners.
   if is_default_set "$groups"; then
+    heavy_op_acquire
     resource_gate_check
   fi
   build_dist_once
@@ -353,6 +382,21 @@ run_selected() {
   # explicitly, so their selection is already visible. N here is exactly what `--list-files` prints
   # (the same select_files output), so AC4's "N == --list-files count" holds by construction.
   echo "selected ${#files[@]} files (groups=${groups})"
+  # gap-no-cross-project-heavy-op-token: while the token is held, run node as a CHILD (not exec) so
+  # the EXIT trap armed by heavy_op_acquire fires when node finishes — an exec'd node would replace
+  # this shell and silently skip the release. The concurrency flag is bound to a variable here
+  # because the literal `--test-concurrency="$(default_test_concurrency)"` spelling is pinned by
+  # plugin/test/resource-gate.test.mjs AC5 (exactly 4 sites) and select-tests-for-touches.test.mjs
+  # AC11 — the token-held branch must not add a fifth literal site.
+  if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then
+    local cc
+    cc="$(default_test_concurrency)"
+    set +e
+    node --test --test-concurrency="$cc" "$@" "${files[@]}"
+    local code=$?
+    set -e
+    exit "$code"
+  fi
   exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
 }
 
