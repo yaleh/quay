@@ -475,8 +475,25 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 
 **三、reclaim 记录一字不改**——净回收如实、拒绝理由如实、34 项升级给人，正是该有的样子。
 
-**在飞（2 agent）**：retire（约束下）+ resource-awareness（新派，runId `fm-...-hjkru7`）。reclaim 验证套件
-在跑（`b030l13jl`）。reclaim 套件绿后：关 reclaim → 视槽位派 serve-task-list（#3）
+### 34 项裁定 + 19 个 worktree 回收执行（04T03:56Z）
+
+**外层裁定**（人已答复「坚决应用新模式」）：
+- **作废（32 项）**：DIR-124-F2（PlanCheck typed findings）、F6（依赖 F2）、gap-build-evidence-path（修复已
+  提交 2b1d67c2）、全部 14 份 docs/plans/M2xx-*.md，以及其余 worktree 内 DIR-124 家族文件（F3a/b、F4a-e、
+  B2a、B3、C 等）
+- **实质保留（2 项）**：DIR-124-F1 模板卫生 + F5 种子完整性——**合并为一个根因，已建新任务
+  `gap-task-body-has-n-parsers-and-no-authority`**（活缺陷：`touches-orthogonality-check.parseTouches` 对
+  `` - `foo.ts` (new) `` 解析出带残留反引号的错路径，`task-status-drift-check.parseTouchEntries` 解析正确——
+  两个解析器对同一行结论不同，出错的那个正是快速模式判并发资格用的）
+- **reclaim 限制解除**：19 个 worktree 按三闸回收（内容作废/承载后丢弃）。**回收前不需要归档 32 项**
+- **retire 边界解除**：milestone-worktree.ts 在 reclaim 用完后可随管线退役
+
+**执行（reclaim 完成，milestones/ 896MB → ~50MB）**：用回收机制逐个 `--clean-stale` 回收 19 个
+（M211/M237/M255-M275，各先丢弃作废内容使三闸通过）。**只剩 M239**（人裁定保留，has-commits ahead=2）。
+无悬挂。retire agent 已获知边界解除
+
+**在飞（2 agent）**：retire（约束解除）+ resource-awareness。reclaim 已关闭（`--task-end` sf5zrl）。
+**下一步**：视槽位派 serve-task-list（#3，人在用那个页面）；resource-awareness/retire 返回后 fan-in
 
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
@@ -709,3 +726,29 @@ du -sm milestones | cut -f1             # 冻结时 1100 MB
 | 4 | `gap-web-cannot-show-what-the-loop-is-doing-now` | 异步通道 |
 
 **P2 冻结解除**，其余任务恢复正常排队，但排在上面四个之后。
+
+## 图第一次收缩（2026-08-03T04:57:13Z）——1.1G 已回收
+
+**人裁定「坚决应用新模式」后，reclaim 完成了今晚第一次真实的收缩。**
+
+| | 冻结时 (03:56Z) | 现在 | 变化 |
+|---|---|---|---|
+| `milestones/` 占用 | 1100 MB | **60 MB** | **−1040 MB（−95%）** |
+| `git worktree` 条目 | 22 | **4** | −18 |
+| `milestone/*` 分支 | 20 | **1** | −19 |
+
+**M239 按人的裁定被保住**：分支 `milestone/M239/iteration-0` 与其 worktree 均完好。
+
+那 5 个只存在于 worktree 的任务随之消失，符合裁定；其中两项的**实质**已由
+[[gap-task-body-has-n-parsers-and-no-authority]] 承载（且那个任务里的活缺陷是从它们里读出来的）。
+
+### 外层的一次误判，记录在案
+
+外层在 04:55Z 测得 `milestones/` 仍是 1033 MB、5 个任务文件仍在，据此判定
+「回收没有发生，我的解除指令有洞——没有人被指派去删那 34 个文件」。
+
+**这个判断是错的。** 回收当时正在执行中（04:54–04:56 之间完成）。
+
+**教训**：一个**正在进行的多步操作**，中途快照与「没有发生」不可区分。
+这与今晚 OVER90 在一个已完成任务上假触发是同一形态——**测的是瞬时状态，
+而结论假设了那个状态是终态**。核实一个进行中的操作，要么等它自报完成，要么连测两次看是否在变。
