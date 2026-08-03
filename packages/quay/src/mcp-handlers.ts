@@ -89,6 +89,9 @@ export function registerTaskHandlers(
         "Supports pagination via `page` (1-based, default 1) and `pageSize` (default 50, max 200). " +
         "Response includes `tasks` array plus pagination metadata: `total` (filtered count before paging), " +
         "`page`, `pageSize`, `totalPages`. " +
+        "On partial success (a task file whose frontmatter fails to parse), the response also includes " +
+        "`malformed`: an array of { file, error } naming each unparseable file and its parser error " +
+        "(these entries are unfiltered/unpaginated and never counted in `total`). " +
         "Filter order: status → label → prefix → search → pagination. " +
         "The `label` parameter accepts an array of label strings for AND-join filtering (all specified labels must be present on the task). " +
         "A single string is also accepted for backward compatibility (treated as a one-element array). " +
@@ -111,7 +114,12 @@ export function registerTaskHandlers(
       const { client } = await getClient(provider);
       // QX-032: normalize label to an array (backward-compatible — single string still works).
       const labelFilters: string[] = Array.isArray(label) ? label : (label ? [label] : []);
-      let tasks = await client.taskList({ status });
+      // gap-one-unparseable-task-takes-down-the-whole-board: taskList() now
+      // returns partial success — { tasks, malformed }. `malformed` (files
+      // whose frontmatter failed to parse) is forwarded verbatim below: it has
+      // no id/title/status/labels to filter by, so it is passed through
+      // unfiltered and unpaginated, and it is never counted in `total`.
+      let { tasks, malformed } = await client.taskList({ status });
       // QX-032: client-side AND-join label filter — matches CLI (--label A --label B) and
       // Web UI (?label=A&label=B) semantics. Empty labelFilters = no filter applied.
       if (labelFilters.length > 0) {
@@ -139,7 +147,9 @@ export function registerTaskHandlers(
       const totalPages = Math.ceil(total / size);
       // QX-035 (experiment 4, iteration 10): Mitigation A — _version field lets
       // AI agents detect MCP server staleness by comparing against expected version.
-      const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages, _version: QUAY_VERSION };
+      // gap-one-unparseable-task-takes-down-the-whole-board: forward the
+      // provider's malformed list verbatim (partial success — see above).
+      const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages, _version: QUAY_VERSION, malformed };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         structuredContent: result,

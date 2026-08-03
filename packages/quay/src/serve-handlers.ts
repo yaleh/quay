@@ -467,7 +467,13 @@ export async function handleTaskList(
   client: ProviderClient,
   manifest: Manifest,
 ): Promise<void> {
-  const allTasks = await client.taskList({});
+  // gap-one-unparseable-task-takes-down-the-whole-board: the Provider's
+  // task_list now returns PARTIAL success — the parseable tasks plus a
+  // machine-readable `malformed` list ({file, error}) for the files whose
+  // frontmatter failed to parse. A bad task must poison exactly its own row,
+  // not the whole board: the malformed entries are rendered as visible
+  // `.malformed-row` placeholder rows below, and the good tasks list normally.
+  const { tasks: allTasks, malformed } = await client.taskList({});
   // QX-004 (experiment 4, iteration 1): filter by ?prefix=<value> query param.
   // Closes CB-002: "show only QX-* tasks" affordance in Web UI.
   // Applied FIRST, before status/label filters — prefix scopes the whole view.
@@ -642,6 +648,18 @@ export async function handleTaskList(
       </tr>`;
       }
     )
+    .join("\n");
+  // gap-one-unparseable-task-takes-down-the-whole-board: render the Provider's
+  // machine-readable parse-failure list as VISIBLE placeholder rows, reusing
+  // the same `.malformed-row` style and colspan shape as the existing
+  // missing-id placeholder (no second bespoke style). These rows are always
+  // shown regardless of filter/pagination — an unparseable file has no id,
+  // title, status or labels to filter by, and hiding it would recreate the
+  // "0 tasks and no error" failure this whole mechanism exists to prevent.
+  const malformedRows = malformed
+    .map((m) => html`<tr class="malformed-row">
+      <td colspan="7">⚠ <code>${escapeHtml(m.file)}</code> — 解析失败: ${escapeHtml(m.error)}</td>
+    </tr>`)
     .join("\n");
   // QW-003: filter navigation links — All, todo, ready, done, needs-human.
   // Active filter is shown as plain text; others as links.
@@ -859,6 +877,7 @@ export async function handleTaskList(
       ${pageNav}
       <table>
         <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>
+        ${malformedRows}
         ${rows}
       </table>
       ${totalPages > 1 ? pageNav : ""}

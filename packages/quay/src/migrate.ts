@@ -64,7 +64,10 @@ export async function migrateTasks({ source, target, onTask }: {
   target: Pick<ProviderClient, "taskWrite">;
   onTask?: (task: Task) => void;
 }): Promise<{ total: number; migrated: Task[]; errors: Array<{ id: string; error: string }> }> {
-  const tasks = await source.taskList({});
+  // gap-one-unparseable-task-takes-down-the-whole-board: taskList() now
+  // returns partial success { tasks, malformed }; migration operates on the
+  // parseable tasks (an unparseable file has no view-model to migrate).
+  const { tasks } = await source.taskList({});
   const migrated: Task[] = [];
   const errors: Array<{ id: string; error: string }> = [];
   for (const task of tasks) {

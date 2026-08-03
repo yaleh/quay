@@ -85,21 +85,23 @@ resume 先让 provider 层返回「能解析的 + 解析失败清单」，再让
 
 ## Acceptance Criteria
 
-- [ ] AC1: `task_list` 在有 1 个不可解析任务时**返回其余全部任务** + 解析失败清单（含文件名与解析器报错）
-- [ ] AC2: **主判据**——注入 1 个坏 frontmatter 任务后 `/` 返回 **200**（实跑输出贴任务体）
-- [ ] AC3: 坏任务在页面上**显式成行**（复用 `.malformed-row`），能看出是哪个文件、为什么坏
-- [ ] AC4: **双向负控制**——注入 ⇒ 200 且列出 N−1 正常行 + 1 坏行；删除 ⇒ 恢复 N 行、无坏行。两个方向都贴
-- [ ] AC5: **防回退负控制**——真正的 `task_list` 调用失败（如 provider 不可达）**仍然抛**、
+- [x] AC1: `task_list` 在有 1 个不可解析任务时**返回其余全部任务** + 解析失败清单（含文件名与解析器报错）
+- [x] AC2: **主判据**——注入 1 个坏 frontmatter 任务后 `/` 返回 **200**（实跑输出贴任务体）
+- [x] AC3: 坏任务在页面上**显式成行**（复用 `.malformed-row`），能看出是哪个文件、为什么坏
+- [x] AC4: **双向负控制**——注入 ⇒ 200 且列出 N−1 正常行 + 1 坏行；删除 ⇒ 恢复 N 行、无坏行。两个方向都贴
+- [x] AC5: **防回退负控制**——真正的 `task_list` 调用失败（如 provider 不可达）**仍然抛**、
       **不得**退化成静默空列表（这是更早那次修复的意图，必须保住）
-- [ ] AC6: 全库真解析扫描仍为 0 失败；**扫描用 `yaml.parse`，不得用形状启发式**（管理者踩过）
-- [ ] AC7: 测试用 `node:test`、带 `// @test-group product`（这是用户可见的 web 契约）
+- [x] AC6: 全库真解析扫描仍为 0 失败；**扫描用 `yaml.parse`，不得用形状启发式**（管理者踩过）
+- [x] AC7: 测试用 `node:test`、带 `// @test-group product`（这是用户可见的 web 契约）
 
 ## Definition of Done
 
-- [ ] AC4 与 AC5 的实跑输出都贴进任务体——
+- [x] AC4 与 AC5 的实跑输出都贴进任务体——
       **只证明「坏任务不再 500」而不证明「真失败仍然响亮」，是把一个静默换成另一个静默**
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录：这次的触发者是**外层写的一个任务标题**（`## Contract` 出现在 title 里），
+- [~] 完整套件连跑 2 次全绿——**本执行未自启全量套件**（隔离契约：全量由协调方 fan-in 承担）；
+      scoped `node --test` 覆盖了所有受本改动影响的文件（见下方「本执行验证」），全绿。
+      全量 fan-in 连跑 2 次由协调方执行
+- [x] 任务体记录：这次的触发者是**外层写的一个任务标题**（`## Contract` 出现在 title 里），
       **写这种标题是自然的，缺陷在于系统允许它在写入时通过、在渲染时炸**
 
 ## Touches
@@ -124,3 +126,62 @@ changed: 管理者已止血并把两层缺陷交给外层。**外层核实了「
 危害不罕见、罕见的只是那一次没加。
 **方法论一并写进 AC6**：判断数据合法性用真解析器；管理者先用形状粗查得出 0，是错的。
 **写入侧不在本任务**：拆给姊妹任务，两者不同包、可并发。
+
+## 本执行（worktree `task/gap-one-unparseable-task-takes-down-the-whole-board`）
+
+### 改动位置（层对了：provider 的 task_list 返回部分成功，throw 未删）
+
+- `packages/quay-native/src/store.ts`：新增 `listWithMalformed()` —— 逐文件 walk，解析失败被**收集**
+  成 `{file, error}` 清单而不是让整次 `list()` 抛掉；`list()` 本身**仍抛**（CLI 表面保持响亮错误，
+  DIR-001 安全降级），容错只加在 ABI 表面。
+- `packages/quay-native/src/mcp-server.ts`：`task_list` 工具返回 `structuredContent: { tasks, malformed }`。
+- `packages/quay/src/provider-client.ts`：`taskList()` 返回 `{ tasks, malformed }`；`isError` **仍然抛**（AC5）。
+- `packages/quay/src/serve-handlers.ts`：把 `malformed` 清单画成可见的 `.malformed-row` 行
+  （复用既有样式与 colspan=7 占位行，未另造一套）。
+- `packages/quay/src/mcp-handlers.ts` / `bin/quay.ts` / `gate/driver.ts` / `migrate.ts`：
+  消费新返回形状；CLI 把不可解析文件报在 stderr（--json 保持可解析）。
+
+### AC4 实跑输出（双向负控制，真实 HTTP）
+
+```
+AC4 inject:  GET / -> 200 | </tr> rows: 4 | malformed-row: 1 | GOOD-1: true | GOOD-2: true | UNPARSE-1.md: true | 解析失败: true
+AC4 remove:  GET / -> 200 | </tr> rows: 3 | malformed-row: 0 | GOOD-1: true | GOOD-2: true
+```
+
+注入方向：1 个坏 frontmatter（`title: The ## Contract` + 续行，`yaml.parse` 报
+`All mapping items must start at the same column`）→ `/` **200**，N−1（2 个）正常任务照常列出 +
+1 个 `.malformed-row` 坏行（行内可见文件名 `UNPARSE-1.md` 与「解析失败」）。删除方向：删掉坏文件 →
+`/` 仍 **200**，3 行、无坏行、2 个好任务原样。
+
+### AC5 实跑输出（防回退负控制：真失败仍然响亮）
+
+```
+AC5 genuine: GET / -> 500 | body starts: "internal server error"
+```
+
+运行中把 tasks 目录从 provider 脚下删掉（store 本身不可用 = 真正的调用级失败）→
+provider `task_list` isError → Core `taskList()` **抛** → `/` **500**，**不是**静默的「200 + 0 个任务」。
+Core 级同一场景：`client.taskList({})` **rejects**（`MCP error -32000: Connection closed`），不是 resolve 成 `[]`。
+
+### AC6 实跑输出（真 yaml.parse 全库扫描）
+
+```
+[AC6] scanned 607 task files: 0 parse failures; 269 titles contain '#' or ': '
+```
+
+（外层止血时量得 605/0/265；本执行在 worktree 上扫得 607/0/269 —— 数字随新增任务漂移，
+**0 失败**这一判据稳定。判断合法性用的是真 `yaml.parse`，不是「只看顶格行形状」的启发式——
+管理者先粗查得 0 是错的，真解析器才查出那 1 个。）
+
+### 本执行验证（scoped，未自启全量套件）
+
+`node --test` 覆盖全部受影响文件，全绿：
+- `packages/quay/test/unparseable-frontmatter.test.mjs`（本任务新测试，node:test + `@test-group product`，
+  AC1-AC7）：6/6 pass
+- `packages/quay/test/serve.test.mjs`、`serve-adversarial-eval.test.mjs`（M26-F4 / ADV-001/002 断言从
+  「坏 frontmatter ⇒ 500」改为「⇒ 200 + 可见坏行」）、`mcp-server.test.mjs`、`cli.test.mjs`、
+  `cli-migrate.test.mjs`、`core-three-way-symmetry.test.mjs`、`driver.test.mjs`、`migrate.test.mjs`、
+  `task-check/gate/lifecycle/migrate-single-source`：全绿
+- `packages/quay-native/test/`（store 层）：`yaml-frontmatter-colon`、`adversarial-eval`、`relation-sync`、
+  `create-validation`、`cas-write`、`edit-validation`：全绿
+- `tsc --noEmit`：exit 0

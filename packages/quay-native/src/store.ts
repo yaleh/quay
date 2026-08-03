@@ -415,6 +415,34 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     });
   }
 
+  // gap-one-unparseable-task-takes-down-the-whole-board: the per-task walk
+  // shared by list() and listWithMalformed(). One file whose frontmatter fails
+  // to parse must poison exactly its own entry, never the whole store —
+  // `onError(id, err)` is invoked for that one file so the caller decides how
+  // to surface it (list() re-throws — the historical all-or-nothing behavior
+  // is a CLEAR error, safe degradation per DIR-001; listWithMalformed()
+  // collects it into a machine-readable failure list).
+  function walkTasks(
+    filter: { status?: string; label?: string },
+    onError: (id: string, err: unknown) => void,
+  ): (Task & { updatedAt?: number })[] {
+    const tasks: (Task & { updatedAt?: number })[] = [];
+    for (const id of listIds()) {
+      let t: (Task & { updatedAt?: number }) | null;
+      try {
+        t = get(id);
+      } catch (err) {
+        onError(id, err);
+        continue;
+      }
+      if (t === null) continue;
+      if (filter.status && t.status !== filter.status) continue;
+      if (filter.label && !(t.labels || []).includes(filter.label)) continue;
+      tasks.push(t);
+    }
+    return tasks;
+  }
+
   function list(filter: { status?: string; label?: string } = {}): (Task & { updatedAt?: number })[] {
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime in ms)
     // on each task in list results. This lets CLI (--sort updated) and Web UI
@@ -426,17 +454,33 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     // view-model. The prior additional statSync block here was a redundant second
     // stat on the same file — removed. Closes UQ-023 (minor: redundant statSync
     // in list() noted by G3 audit, iteration 4).
-    return listIds()
-      .map((id) => {
-        const t = get(id);
-        if (t === null) return null;
-        return t;
-      })
-      .filter((t) => t !== null)
-      .filter((t) => (filter.status ? t.status === filter.status : true))
-      .filter((t) =>
-        filter.label ? (t.labels || []).includes(filter.label) : true
-      );
+    //
+    // NOTE (gap-one-unparseable-task-takes-down-the-whole-board): list()
+    // deliberately KEEPS throwing on a parse failure (onError re-throws). It
+    // is the provider's task_list ABI surface — via listWithMalformed() — that
+    // becomes tolerant; the CLI's plain `task list` keeps the loud, clear
+    // error (DIR-001 safe degradation) rather than silently dropping a file.
+    return walkTasks(filter, (_id, err) => { throw err; });
+  }
+
+  /**
+   * gap-one-unparseable-task-takes-down-the-whole-board: the tolerant list.
+   * One task file whose frontmatter fails to parse must NOT take down the
+   * whole store — it poisons exactly its own row. Returns the parseable tasks
+   * PLUS a machine-readable failure list ({ file, error }, where `error` is
+   * the YAML parser's own raw message) so callers — the provider's task_list
+   * MCP tool, and through it the web board — can surface the bad file visibly
+   * instead of 500ing the entire board. `isError` is NOT involved: this is
+   * partial success, not a call-level failure.
+   */
+  function listWithMalformed(
+    filter: { status?: string; label?: string } = {},
+  ): { tasks: (Task & { updatedAt?: number })[]; malformed: Array<{ file: string; error: string }> } {
+    const malformed: Array<{ file: string; error: string }> = [];
+    const tasks = walkTasks(filter, (id, err) => {
+      malformed.push({ file: `${id}.md`, error: (err as Error).message });
+    });
+    return { tasks, malformed };
   }
 
   /**
@@ -867,5 +911,5 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     return "";
   }
 
-  return { list, get, write, appendNote, check, artifactSections, childrenStatus };
+  return { list, listWithMalformed, get, write, appendNote, check, artifactSections, childrenStatus };
 }

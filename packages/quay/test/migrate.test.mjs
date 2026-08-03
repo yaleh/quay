@@ -15,7 +15,7 @@ import { migrateTasks, writeOneTask } from "../src/migrate.ts";
 function makeFakeSource(tasks) {
   return {
     async taskList() {
-      return tasks;
+      return { tasks, malformed: [] };
     },
   };
 }

@@ -99,10 +99,13 @@ function writeConfig(workspaceRoot, tasksDir) {
 }
 
 // --- ADV-001 + ADV-002: a single malformed task file must not crash the
-// server or silently mask as an empty list -- it must degrade to a clean
-// 500 for the affected request, while the server stays up and healthy for
-// every other request (including a later request AFTER the bad file is
-// removed, with no restart).
+// server or silently mask as an empty list. gap-one-unparseable-task-takes-
+// down-the-whole-board CHANGED the degradation from a clean 500 to a 200 with
+// a visible .malformed-row (the provider's task_list now returns partial
+// success for one bad frontmatter instead of isError); the server stays up
+// and healthy for every other request (including a later request AFTER the
+// bad file is removed, with no restart). ADV-001's core invariant — taskList()
+// throws on isError, never a silent empty list — is preserved (AC5).
 async function testMalformedTaskFileDegradesSafely() {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-serve-"));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-serve-ws-"));
@@ -125,18 +128,27 @@ async function testMalformedTaskFileDegradesSafely() {
     process.chdir(workspaceRoot);
     server = await startServer({ port });
 
-    // GET / with the malformed file present: must NOT crash the process
-    // (this call itself succeeding at all, rather than the whole test
-    // process dying, is part of the proof) and must NOT silently return an
-    // empty/misleading task list -- it must return a clear 500.
+    // gap-one-unparseable-task-takes-down-the-whole-board: the malformed-file
+    // behavior CHANGED from ADV-001/002's original "clean 500". The provider's
+    // task_list now returns PARTIAL SUCCESS for one bad frontmatter (parseable
+    // tasks + a machine-readable malformed list) instead of isError, so GET /
+    // renders 200 with a VISIBLE .malformed-row naming the bad file, and the
+    // good task lists normally. The 500 path (AC5) is still exercised for a
+    // genuine call-level failure — see serve.test.mjs's unparseable block.
+    // ADV-001's core assertion (taskList() throws on isError, never a silent
+    // empty list) is preserved at the provider-client level.
     const withBadFile = await get(port, "/");
     assert(
-      withBadFile.status === 500,
-      `GET / with a malformed task file present returns 500, not a silently-empty 200 (ADV-001) or a hung/crashed connection (ADV-002) (got ${withBadFile.status})`
+      withBadFile.status === 200,
+      `GET / with an unparseable task file present returns 200, not a 500 — one bad task must poison only its own row (gap-one-unparseable-task-takes-down-the-whole-board, superseding ADV-001/002) (got ${withBadFile.status})`
     );
     assert(
-      withBadFile.body.toLowerCase().includes("internal server error"),
-      `GET / 500 response body is a clear error message, not an empty page (got: ${withBadFile.body.slice(0, 200)})`
+      withBadFile.body.includes('class="malformed-row"') && withBadFile.body.includes("BAD-1.md"),
+      `GET / renders a visible .malformed-row naming the unparseable file BAD-1.md (gap-one-unparseable-task-takes-down-the-whole-board)`
+    );
+    assert(
+      withBadFile.body.includes("ADV-1"),
+      `GET / still lists the good task ADV-1 alongside the malformed row (gap-one-unparseable-task-takes-down-the-whole-board)`
     );
 
     // The server process must still be alive and healthy for a DIFFERENT
@@ -145,7 +157,7 @@ async function testMalformedTaskFileDegradesSafely() {
     const detailStillWorks = await get(port, "/task/ADV-1");
     assert(
       detailStillWorks.status === 200,
-      `GET /task/ADV-1 (a DIFFERENT, unaffected task) still returns 200 right after the malformed-file 500 -- server survived (got ${detailStillWorks.status})`
+      `GET /task/ADV-1 (a DIFFERENT, unaffected task) still returns 200 right after the malformed-file request -- server survived (got ${detailStillWorks.status})`
     );
 
     // Remove the bad file and confirm the list route self-heals with NO

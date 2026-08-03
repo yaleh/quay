@@ -1710,14 +1710,25 @@ async function main() {
       process.chdir(badWorkspaceRoot);
       badServer = await startServer({ port: badPort });
 
+      // gap-one-unparseable-task-takes-down-the-whole-board: the behavior
+      // CHANGED from M26-F4's original "clean 500" — the provider's task_list
+      // now returns PARTIAL SUCCESS for a bad file (parseable tasks + a
+      // machine-readable malformed list) instead of isError, so the list page
+      // renders 200 with a VISIBLE `.malformed-row` for the bad file and the
+      // good tasks listed normally. 500 is reserved for genuine call failures
+      // (AC5 — see unparseable-frontmatter.test.mjs's AC5 web test).
       const badResp = await get(badPort, "/");
       assert(
-        badResp.status === 500,
-        `GET / with one malformed task file among the store degrades to a clean 500, not a hang/crash (M26-F4) (got ${badResp.status})`
+        badResp.status === 200,
+        `GET / with one unparseable task file returns 200, not a 500 — the bad task must poison only its own row (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board) (got ${badResp.status})`
       );
       assert(
-        /internal server error/i.test(badResp.body),
-        `GET / 500 response body is a clean, non-empty error response, not a hang/crash (M26-F4). Body deliberately omits the raw error message (ADV-002 reconciliation: avoid leaking internal error detail to the client; see console.error server-side log instead). body: ${badResp.body.slice(0, 200)}`
+        badResp.body.includes('class="malformed-row"') && badResp.body.includes("BADFM-BAD.md"),
+        `GET / renders a visible .malformed-row naming the unparseable file (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board)`
+      );
+      assert(
+        badResp.body.includes("BADFM-GOOD"),
+        `GET / still lists the good task BADFM-GOOD alongside the malformed row (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board)`
       );
 
       // The server process itself must survive — a second, unrelated request
@@ -1729,8 +1740,8 @@ async function main() {
       fs.rmSync(path.join(badTasksDir, "BADFM-BAD.md"));
       const recovered = await get(badPort, "/");
       assert(
-        recovered.status === 200 && recovered.body.includes("BADFM-GOOD"),
-        `GET / recovers to 200 once the malformed file is removed — good task's on-disk content was never corrupted by the earlier crash, and the server process survived (M26-F4) (got status ${recovered.status})`
+        recovered.status === 200 && recovered.body.includes("BADFM-GOOD") && !recovered.body.includes('class="malformed-row"'),
+        `GET / recovers to a clean 200 with no malformed row once the bad file is removed — good task's on-disk content was never corrupted, and the server process survived (M26-F4 / gap-one-unparseable-task-takes-down-the-whole-board) (got status ${recovered.status})`
       );
     } finally {
       if (badServer) {
