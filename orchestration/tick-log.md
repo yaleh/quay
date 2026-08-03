@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 08:24Z | `correct`（correct-self：sigma 的受控测量推翻了外层一个头条结论） | 读 sigma 落地结果，更正「Σ 降 ≠ 墙钟降」与「拆 cli.test.mjs」两条；核实 tmpdirs 搭车 | 在飞 sigma(145m，测量已合并 `cf04858c`) + tmpdirs(14m，**未建 worktree、未起套件，搭车照做** ✓)；完成 33，吞吐 1.507/h；`/tmp` 16,177 | **更正一**：我说「删 402 个测试没让套件变快（+1.2%）」——**错**。受控 back-to-back：A3 墙钟 498.8 vs C2 535.1，**墙钟降 36.3s（−6.8%）**，与 ΔΣ −308.6s（−8.2%）成比例，正是 lane 饱和模型的预测。**我错在拿两次非受控运行相减**——sigma 实测同套件同 commit 的 run-to-run 极差是 **297.6s**（402.9–700.5），我那 6.8s 的「差异」毫无分辨力。**更正二**：`cli.test.mjs` **已从 #1（201.5s）掉到 #5（110.7s）**，榜首是 `proposal-convergence` 180.0s——我给人的「拆 cli.test.mjs」建议基于过时数字。**重算 12 核**：CPU 占比 58%、下界 166s；不拆 180s（2.77×）、拆前 3 名 166s（3.00×），**拆分收益仅 14s** |
 | 2026-08-03 08:04Z | `no-action`（未介入） | 核实 sigma 非停摆（在做受控重测）；CI 修复已提交但未推送，待人裁定 | 在飞仅 sigma(125m)；完成 33，吞吐 1.531/h；CPU **5.32**、无套件在跑；观察面全 200 | **sigma 非停摆**：subagent **2 秒前**活动、产物在增长（JSON 5,217→**8,295** 字节），agent 标签「Controlled back-to-back result: A3」——**它在做审计建议的受控重测，比 AC 要求的多做了一步**。**CI 修复已提交未推送**：`7d876253 fix(test): make prepare-admission-check known-good tests hermetic`，远端仍显示 `de20b2b1 failure`。**一次推送指令不构成对后续推送的长期授权，已列给人裁定。** **`/tmp` 泄漏持续**：15,052 条目（清理后 8,866），泄漏任务仍未派——队列此刻近空，是排它的窗口 |
 | 2026-08-03 07:45Z | `unblock` | 推送后 CI 红，定位根因为测试不 hermetic（浅克隆），非今晚回归；并发修复已提交并同步进 worktree | 在飞仅 sigma(105m，串行 run 已中止重跑)；完成 33，吞吐 1.555/h；CPU 压力 **3.88**、无套件在跑 | **CI 失败根因**：`prepare-admission-check.ts:343` 用 `git cat-file -e <sha>^{commit}` 直接问 git，而 `ci.yml` 的 `actions/checkout@v4` **无 `fetch-depth` ⇒ 默认 depth 1**，旧提交不在克隆里 ⇒ 判 `missing-precedent`。**证据**：`335317d` 本地存在、同样两个用例**本地 12/12 全绿**，差别只在克隆深度。**建议修测试而非加 `fetch-depth: 0`**——后者能变绿但掩盖真问题，且每次要克隆 894+ 提交。**顺带一条未被写下的产品事实**：该检查器在**任何浅克隆**下都会把真实 precedent 判成缺失；因两个 code 已是 `CALIBRATED: false`（非阻断），影响是日志噪声，但**降级行为应写进文件头** |
 | 2026-08-03 07:29Z | `correct` | 判定 sigma 的 OVER90 为良性；发现并发修复未传播进在飞 worktree，指示同步 | 在飞仅 sigma(90m)；完成 33，吞吐 1.576/h；主检出套件已用 `concurrency=8` | **OVER90 良性**：sigma 产物已在 worktree 落盘（json 5,217B / md 7,419B），agent 在等 run-2 汇总，属「主体已完成、卡在 DoD 连跑 2 次」，**不按阈值放弃**。**但发现并发修复未传播**：主检出 pid 589461 已用 `=8`，而 **sigma 的 worktree 有自己的 `scripts/test.sh` 副本，pid 586138 仍是 `=1`**，才跑 173s、按串行还要约 52 分钟。已建议同步后重跑（丢 3 分钟、省 45 分钟）。**机制观察**：worktree 隔离让主检出的修复**不会自动传播**到在飞任务的 worktree——这次是隔离在正确工作，但也意味着**紧急修复必须显式同步进每个在飞 worktree**，否则它们会用旧行为跑完 |
@@ -103,10 +104,10 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 | 类型 | 次数 | 占比 |
 |---|---|---|
 | no-action | 31 | 36% |
-| unblock | 15 | 18% |
-| correct | 36 | 42% |
-| escalate | 3 | 4% |
-| **合计** | **85** | — |
+| unblock | 15 | 17% |
+| correct | 37 | 43% |
+| escalate | 3 | 3% |
+| **合计** | **86** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
@@ -115,4 +116,4 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 **2026-08-03 已连续 3 个 tick 是 (b) 类**：(1) 实测推翻外层自己写的 `2×` 超订数字；(2) `checkTouchesPair` 调用签名错致 10 对全误报；(3) `turn-ended-idle` 该不该进阻塞信号的设计错误。**同期内层表现良好**：主动采纳 PSI 判据、自主派发正交批次、10 分钟内执行完外层指令。**这说明当前瓶颈是外层的下笔质量，不是内层的执行**——而退化判据会得出相反的结论。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
 修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 42%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 43%。
