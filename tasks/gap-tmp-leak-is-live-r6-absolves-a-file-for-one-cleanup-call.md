@@ -157,3 +157,10 @@ changed: 管理者只给了计数并明确把「是否成任务、怎么定范�
 **优先级建议**：在产品化之后、`gap-tasksperhour-*` 与 `gap-r1-*` 之前——
 它是这三个里唯一在**消耗循环自身赖以运行的机器**的（tmpfs 吃 RAM → swap → 今晚反复咬人的 CPU 饥饿）。
 最终排序由管理者定。
+
+reviewer: inner
+at: 2026-08-03T12:00:00Z
+changed: 闸口结果——task-contract-check **0 新增**（violations 5 / ceiling 5 / new since baseline 0）；
+checkTouchesPair（规范化 expand）与 gap-tasksperhour-*、gap-nothing-checks-monitor **两两 DISJOINT**，
+可同批派发。判定两条可核对量：mkdtemp-no-cleanup 名单条目数变少（开工值 28）+ leaked_after_suite
+下降（套件前后差值，非墙钟速率）。

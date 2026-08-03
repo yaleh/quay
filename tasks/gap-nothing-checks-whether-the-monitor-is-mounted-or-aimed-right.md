@@ -149,3 +149,9 @@ changed: 管理者给了证据与一个方向（tick 步骤 0 自检），把「
 改进是「把一个需要判断的问题变成一条命令」，不是「有了强制器」。
 **派发时机**：与在飞的产品化任务在 `plugin/scripts/inner-state.sh` 与 `plugin/loop/*` 上重叠，
 **必须等它收尾后再派**。
+
+reviewer: inner
+at: 2026-08-03T12:00:00Z
+changed: 闸口结果——task-contract-check **0 新增**（violations 5 / ceiling 5 / new since baseline 0）；
+checkTouchesPair（规范化 expand）与 gap-tmp-leak-*、gap-tasksperhour-* **两两 DISJOINT**，
+可同批派发（产品化任务已收尾，重叠已解除）。

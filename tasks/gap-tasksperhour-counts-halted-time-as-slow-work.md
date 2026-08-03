@@ -132,3 +132,9 @@ changed: 按管理者 2026-08-03 的交代建立，证据用外层本次实测�
 `.halt` 虽被 git 跟踪，但这次文件自述 09:33:12Z 而提交 09:55:08Z（差 22 分钟）、
 解除时尚未提交 ⇒ 按 git 历史取区间会偏短且可能缺解除时刻，因此 AC1 要求先判数据源再改口径。
 优先级：**排在 `gap-loop-mechanism-lives-outside-the-package-and-cannot-ship` 之后**（人已定产品化优先）。
+
+reviewer: inner
+at: 2026-08-03T12:00:00Z
+changed: 闸口结果——task-contract-check **0 新增**（violations 5 / ceiling 5 / new since baseline 0）；
+checkTouchesPair（规范化 expand）与 gap-tmp-leak-*、gap-nothing-checks-monitor **两两 DISJOINT**，
+可同批派发。
