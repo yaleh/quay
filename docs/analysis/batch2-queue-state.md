@@ -1536,3 +1536,13 @@ OVER90 报在闲置任务上。**阶段二作为新派发重新注册计量**，
 hashes-the-token-counter，同改 pane-hash/IDLE-RESUMED 块必须串行，AC10 语义标志大部分吸收其修复面）。
 
 **在飞 1/3**：cold8 阶段一。
+
+### 外层补 AC（2026-08-03 18:0xZ）：cold8 阶段二加「循环起来的证明 = 真实遥测记录」
+
+触发：archguard 第 11 次「存在≠生效」（新形态）：fast-mode-telemetry.ts 在但 .workflow-events/ 不存在——
+循环用提交+tick-log 记录，从没调 --task-start/--task-end ⇒ /live 永远无数据。
+**补 AC**：冷启动 skill 派出第一个任务后，必须能在目标项目 `.workflow-events/` 读到 --task-start 写出的
+jsonl；不能用「有提交/有 tick 日志」代替（archguard 两者都有而遥测空）。
+判别法：有活动信号但遥测空 = 没接上；全部信号没有才是没跑。已转达 cold8 agent（阶段二并入）。
+
+**待外层裁断**：①cold8 继续阶段二？②liveness 阶段二排序（vs hashes-the-token-counter 姊妹任务）。
