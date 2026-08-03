@@ -1,8 +1,8 @@
 ---
 id: gap-relation-sync-suite-red-isolation-green
-title: "relation-sync passes alone and fails in the suite — and its hand-rolled
-  harness gives no detail to diagnose it"
-status: todo
+title: relation-sync passes alone and fails in the suite — and its hand-rolled
+  harness gives no detail to diagnose it
+status: done
 labels:
   - gap
   - defect
