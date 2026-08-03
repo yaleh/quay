@@ -1604,3 +1604,15 @@ session-liveness 上诊断过同形态）。阶段二立即开始；阶段三不
 **内层行为规则**：真停下等外层裁定（阶段门、合并冲突等）时，写 `.quay/inner-blocked.json`（
 `inner-blocked-signal.ts --assert-blocked --taskId <id> --reason ruling-required --question <q>`），
 比写 tick 文本快也更可靠；恢复时 `--clear`。tick 文档「阻塞信号」节已要求，本记录是实例。
+
+### cold8 三阶段完成（2026-08-03 20:0xZ）
+
+**cold8 三阶段全部落地**（959a2b96 P1 + 583c9531 P2 + bcd787a3 P3，scoped 39/39 绿）：
+阶段一（检测阶梯/失败关闭/残留清理）、阶段二（冷启动 skill：Monitor 挂载 + cron + 显式驱动内层 + 遥测
+记录证明 + AC8c 六键可证伪清单）、阶段三（e2e 3 命令 + AC7b vendor dist 铺入 + AC7 隔离负控制摘 PATH +
+AC8d 三态目标布局 + README）。
+**待协调方/外层执行**（非 worktree 可闭环）：
+- AC7 完整 task_list 往返（需 node_modules + 构建 dist——批 fan-in 套件会跑）
+- **AC8c 多模型（opus/flash/qwen）同后果清单实跑**
+- **AC1b meta-cc 真实写入 run**（跨项目写权限，超出 worktree 授权，建议外层执行）
+- AC6 内层零操作实跑记录
