@@ -186,9 +186,11 @@ subagent transcript：
    测试断言改回 7。理由是上面第 2 段：留着一个文档禁止使用的值，比没有它更容易让人写错。
 2. **改用只追加的日志**，与告警信号完全分开：
    ```bash
-   # 每次以「无待办」结束回合前，追加一行（不需要 --clear，不需要状态）：
-   printf '%s\n' "$(node -e 'console.log(JSON.stringify({at:new Date().toISOString(),reason:process.argv[1],note:process.argv[2]}))' <reason> "<一句话>")" \
-     >> orchestration/inner-idle-log.jsonl
+   # 每次以「无待办」结束回合前，追加一行（无状态、无需 --clear）
+   # REASON 与 NOTE 是占位符，替换成实际值；注意不要写成 <reason> 那种形式，shell 会当重定向
+   node -e 'require("fs").appendFileSync("orchestration/inner-idle-log.jsonl",
+     JSON.stringify({at:new Date().toISOString(),reason:process.argv[1],note:process.argv[2]})+"\n")' \
+     REASON '一句话说明在等什么'
    ```
    `reason` 用这五个之一：`awaiting-subagent`（在等自己派的 subagent）、
    `queue-empty`（无可派任务）、`awaiting-ruling`（真的在等外层裁定）、
