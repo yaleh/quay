@@ -57,8 +57,9 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 ```bash
 for t in quay-0:outer archguard-2:outer meta-cc-4:outer; do
   ppid=$(tmux list-panes -t $t -F '#{pane_pid}' 2>/dev/null | head -1)
-  cpid=$(pgrep -P ${ppid:-0} 2>/dev/null | head -1)
-  printf "%-18s %s\n" "$t" "${cpid:+活着 pid=$cpid}${cpid:-未启动}"
+  if [ -z "$ppid" ]; then printf "%-18s %s\n" "$t" "窗口不存在"; continue; fi   # 见下方「两个仪器缺陷」
+  cpid=$(pgrep -P "$ppid" 2>/dev/null | head -1)
+  if [ -n "$cpid" ]; then printf "%-18s 活着 pid=%s\n" "$t" "$cpid"; else printf "%-18s %s\n" "$t" "窗口在但无子进程"; fi
 done
 ```
 
@@ -192,3 +193,23 @@ RESUMED 和 IDLE 描述的是状态**切换**，两个方向都正常；
 **这条要机械执行，不靠临场判断**——因为临场判断已经连续失败 4 次，
 且每次单看都是合理的。这正是「侵蚀按机会计数、不按小时计数」的又一个实例：
 4 条通知 = 4 次机会 = 4 次全败。
+
+## §1.4b 两个仪器缺陷（2026-08-03 实测，都是我自己的 tick 报错）
+
+**一、`pgrep -P ${ppid:-0}` 把不存在的窗口报成「活着 pid=1」。**
+`meta-cc-4:outer` **根本不存在**（该会话只有 `meta-cc-4:0 bash`），
+`tmux list-panes` 失败 ⇒ `ppid` 空 ⇒ `${ppid:-0}` 变成 `pgrep -P 0` ⇒ 返回 **init 的子进程 pid 1**。
+另有 `${cpid:+活着 pid=$cpid}${cpid:-未启动}` 的写法错误——**两个展开在 cpid 有值时都会展开**，
+所以打出 `pid=11`、`pid=966759966759`。**⇒ 我连着几轮向人报「七会话全活」，其中一个从未启动。**
+判据修正：窗口不存在与「窗口在但没有子进程」是两种情况，必须分开报，都不许报成「活着」。
+
+**二、§1.4 的 `break` 只看第一个实例，而实例是会累积的。**
+实测同时有 **8 个** `session-liveness` 进程，**5 个是旧版**；`break` 抓到最老的那个，
+「须重挂」的结论碰巧对，**推理是错的**——真实问题不是版本旧，是**没人清理旧实例**。
+且亲缘显示 **三层各挂各的**：quay 外层（ppid 966759）、archguard 外层（ppid 2388387）、
+我（ppid 120373），外加一个孤儿（ppid 1）。**谁也不知道别人挂了。**
+
+**⇒ 我被自己制造的重复事件轰炸。** 外层批评我「被噪声牵着走」是对的，
+但那批噪声里有一部分**是我自己复制出来的**——同一次状态切换被多个实例各报一遍。
+判据修正：**枚举全部实例，不 break**；发现旧版实例要**杀掉**而不只是重挂；
+且必须**看 ppid 判归属**——不是我的实例，杀之前/后要通知属主。
