@@ -12,7 +12,22 @@
 set -uo pipefail
 INTERVAL=${INTERVAL:-60}
 STALL_MIN=${STALL_MIN:-45}          # 未暂停的项目超过这么久没有新提交 = 停滞
-declare -A PREV_ALIVE PREV_STALL
+declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE
+
+# 各项目外层 tick 日志的路径与其 loop 周期（分钟）。
+# 心跳信号是【tick 有没有按期跑】，不是【有没有新提交】——
+# 2026-08-03 实测：外层空闲等输入时，进程活着且刚提交过，前三个事件全部静默，
+# 而「空闲等下一个 tick」与「循环已死、永远不会再跑」在那个事件集里完全同形。
+# fan-in 带来的提交还会把基于提交的计时器重置，让死循环更难被发现。
+tick_log_for() {
+  case "$1" in
+    quay)      echo "/home/yale/work/quay/orchestration/tick-log.md" ;;
+    archguard) echo "/home/yale/work/archguard/orchestration/tick-log.md" ;;
+    meta-cc)   echo "/home/yale/work/meta-cc/orchestration/tick-log.md" ;;
+  esac
+}
+LOOP_MIN=${LOOP_MIN:-20}                 # 外层 loop 周期
+OVERDUE_MIN=${OVERDUE_MIN:-45}           # 超过它就认为 loop 没在跑（>2× 周期，容忍跑重活的长 tick）
 
 targets() {
   echo "quay      /home/yale/work/quay      quay-0:outer"
@@ -62,6 +77,23 @@ while true; do
       fi
     else
       PREV_STALL[$name]=0
+    fi
+
+    # 事件 4：loop 逾期——外层活着、项目未暂停，但 tick 日志超过 OVERDUE_MIN 未被写过。
+    # 用文件 mtime 而不是解析表内时刻：本仓的 tick 时刻本身就写成 "12:0xZ" 这类模糊值，解析不可靠。
+    tl=$(tick_log_for "$name")
+    if [ "$alive" = "1" ] && [ ! -f "$root/.halt" ] && [ -f "${tl:-/nonexistent}" ]; then
+      tmod=$(stat -c %Y "$tl" 2>/dev/null || echo 0)
+      if [ "$tmod" != "0" ]; then
+        omin=$(( ( $(date +%s) - tmod ) / 60 ))
+        overdue=$([ "$omin" -ge "$OVERDUE_MIN" ] && echo 1 || echo 0)
+        if [ "$overdue" = "1" ] && [ "${PREV_OVERDUE[$name]:-0}" = "0" ]; then
+          echo "OUTER-LOOP-OVERDUE $name 的外层活着，但 tick 日志 ${omin} 分钟未更新（loop 周期 ${LOOP_MIN} 分钟）——loop 可能已死，它会静默地永远空闲"
+        fi
+        PREV_OVERDUE[$name]=$overdue
+      fi
+    else
+      PREV_OVERDUE[$name]=0
     fi
   done < <(targets)
   sleep "$INTERVAL"
