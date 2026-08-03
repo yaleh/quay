@@ -202,7 +202,13 @@ tick 第 3 节把「就绪队列为空」列为停止条件。无人值守 12 �
 - [ ] AC3: `select-preflight --json --workspace-root .` 耗时 ≤30s（当前 111s，超时上限 120s，余量仅 8%）
 - [ ] AC4: `restart-readiness-check.sh` 包含 suite-green 检查，套件红时报 NOT READY
 - [ ] AC5: tick 有队列补充步骤，队列空时按就绪度从任务库取下一批，复用已有就绪判定机制
-- [ ] AC6: `.halt` 解除且 `/loop` 已设，指向 `docs/analysis/fast-mode-loop-tick.md`
+- [x] AC6: `.halt` 解除且 `/loop` 已设，指向 `docs/analysis/fast-mode-loop-tick.md`
+      **达成（2026-08-03 00:4xZ）**：`.halt` 于 17:43:24Z 由外层解除；内层 `/loop 25m` 已启动，
+      外层从内层 transcript 取到实际 `CronList` 输出（非提交说明）：
+      `Every 25 minutes (recurring) [session-only]: 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令`。
+      **必须用固定间隔形式**：不带间隔的 `/loop` 走 `ScheduleWakeup` 动态模式，**无任何列出工具**
+      （`CronList` 只覆盖 `CronCreate`，`TaskList` 是待办列表）⇒ 无法查验它是否还活着。
+      对一个专门在 `/clear`/`/compact` 后兜底的机制，不可查验等于不可信。
 - [ ] AC7: **连续无人值守运行 ≥12 小时**，期间人不介入（观察不算介入）
 - [ ] AC8: 每次停摆记录时刻与触发的停止条件；零停摆也是有效结果，同样记录
 - [ ] AC9: 计量覆盖该 12 小时的全部任务——每个都有 `--task-start`/`--task-end`，无 orphaned
