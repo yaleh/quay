@@ -233,7 +233,7 @@ tick 第 3 节把「就绪队列为空」列为停止条件。无人值守 12 �
       代码修正已落地（2026-08-03，[[gap-tasksperhour-measures-mean-duration-not-throughput]]）：`tasksPerHour`
       已改为 `收尾任务数 / 墙钟窗口小时`（窗口 = `--since` 或最早 startedAtMs → `now`/最晚 endedAtMs），
       旧量 `60/均耗时` 更名为 `serialEquivalentPerHour` 并注明与并发无关；报告带 `windowStart/End/Hours`。
-      注意此更正**不利于**当前数据（原口径 1.33 比真实的 1.05 好看），采用它不是为了让结果更好看
+      注意此更正**不利于**当前数据（原口径 1.33 比真实的 0.90 好看），采用它不是为了让结果更好看
 - [ ] AC19: 结束报告点明产品面待办数量与阶段 2 的第一步建议
 
 ## Definition of Done

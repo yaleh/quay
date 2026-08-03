@@ -380,9 +380,12 @@ test("AC4 — --snapshot --json stdout is byte-identical to the aggregate file; 
     assert.equal(snap.stdout, fileContent, "--snapshot --json stdout must equal the file it wrote (byte-identical, no divergence)");
 
     // Same-moment --report must carry the same DATA-bearing fields (the two paths cannot fork).
-    // tasksPerHour/windowStart/windowEnd/windowHours are deliberately EXCLUDED here: they depend on
-    // each invocation's nowMs = Date.now(), which differs by a few ms between the two calls — that
-    // is the live-window semantics, not a fork.
+    // tasksPerHour/windowStart/windowEnd/windowHours are deliberately EXCLUDED here: the CLI always
+    // passes nowMs = Date.now(), so EVERY report is a LIVE window whose end tracks the invocation
+    // instant (windowEnd = max(latest endedAtMs, nowMs)); two calls a few ms apart therefore differ
+    // in these fields by design — that is the live-window semantics, not a fork. The invariant
+    // across the two paths is the event-derived data above; the window fields are checked for sanity
+    // below rather than exact equality.
     const rep = runCli(tmp, "--report", "--json");
     assert.equal(rep.status, 0, rep.stderr);
     const repObj = JSON.parse(rep.stdout);
@@ -632,7 +635,10 @@ test("AC4 — real-data regression: unattended window ≈0.90 and full period �
   assert.ok(Math.abs(r1.tasksPerHour - 0.90) < 0.02, `unattended-window throughput ≈0.90, got ${r1.tasksPerHour.toFixed(3)}`);
 
   // Full period as it stood at 00:25Z: 13 real completions (excluding the 2 test artifacts), a CLOSED
-  // window ending at the latest endedAtMs → 13/11.40h ≈ 1.14.
+  // window ending at the latest endedAtMs → 13/11.40h ≈ 1.14. This is a HISTORICAL computation:
+  // aggregate() is called with nowMs omitted (windowEnd = latest endedAtMs). The live CLI never
+  // produces this exact value — it passes nowMs = Date.now() so its window extends to the current
+  // instant; the historical 1.14 is what the outer loop recorded at the 00:25Z measurement moment.
   const fullPairs = REAL_PAIRS.filter((p) => p.end <= MEASURE_0025 && !TEST_ARTIFACTS.has(p.taskId));
   assert.equal(fullPairs.length, 13, "fixture sanity: 13 real full-period completions by 00:25Z");
   const r2 = cli.aggregate(buildFixtureEvents(cli, fullPairs), {});
@@ -671,6 +677,11 @@ test("AC6 — concurrency regression: the 01:03:28Z parallel completions RAISE t
   ];
   const batchInProgress = batch.map(({ taskId, start }) => ({ taskId, start, outcome: "done" }));
 
+  // Population note (REFUTE round-1 NIT): the THROUGHPUT half uses the artifact-EXCLUDED set
+  // (6→9 in-window completions) — matching the outer loop's documented "排除 gap-test-* 测试产物"
+  // throughput column (0.95→1.22); the SERIAL-EQUIVALENT half uses the artifact-INCLUDED set
+  // (15→18 completions) — matching the old CLI's raw output (1.33→1.29). The direction is robust
+  // under either population (serial over the no-artifact set also falls: 1.281→1.247).
   // BEFORE: 15 completed (all tasks incl. artifacts) + the 3 batch tasks still in-progress.
   const beforeTph = cli.aggregate(buildFixtureEvents(cli, [...completedBeforeNoArt, ...batchInProgress]), { sinceMs: REAL_SINCE, nowMs: beforeBatch });
   const beforeSerial = cli.aggregate(buildFixtureEvents(cli, [...completedBeforeAll, ...batchInProgress]), { nowMs: beforeBatch });
