@@ -138,18 +138,37 @@ run_static_checks() {
 # the measured steady state of a SINGLE full suite, not a product of concurrency. The default is
 # now derived:
 #   default = max(1, floor(nproc / AMPLIFICATION))
-# which on this box gives floor(4 / 2.1) = 1 (~3 processes, under 4 cores). The tradeoff (lower
-# concurrency → longer wall clock) is deliberate and data-backed — see the task body's AC5 record.
+# which on this box gives floor(4 / 2.1) = 1 (~3 processes, under 4 cores).
+#
+# TEMPORARILY OVERRIDDEN BACK TO 8 (2026-08-03, outer urgent correction): the derived default of 1
+# turned every full suite from ~8 min to ~55 min (Σ ≈ 3300s at concurrency 1 vs 460-570s wall at 8).
+# The AC5 tradeoff experiment was never run: the task body measured the amplification side (17/8 =
+# 2.125) but NOT the cost side — AC5 required running concurrency ∈ {2,4,6,8} once each in the same
+# low-pressure window with cancelled == 0 as the criterion. Meanwhile sigma measured Σ/wall ≈ 7.1 at
+# 8 lanes (8-lane is saturated, not overloaded), and its high-pressure negative control (41→99)
+# still captured 155/155 with no cancelled — "lower concurrency to avoid cancel" is unproven, while
+# the cost of lowering is a definite ~7×. REVERT this override to the derived formula once AC5's
+# tradeoff experiment is run and the choice is data-backed on BOTH sides. (stranded's OVER90 was a
+# direct casualty of the 55-min suites.)
 # An EXPLICIT --test-concurrency=N on the command line ALWAYS overrides (node --test is
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
 # Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
 # RESOURCE_GATE_AMPLIFICATION override the derivation inputs deterministically.
-default_test_concurrency() {
+default_concurrency_formula() {
   local ncpu amp
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
   amp="${RESOURCE_GATE_AMPLIFICATION:-2.1}"
   awk -v n="$ncpu" -v a="$amp" 'BEGIN { c = int(n / a); if (c < 1) c = 1; print c }'
+}
+
+default_test_concurrency() {
+  # TEMPORARY (2026-08-03): fixed at 8 pending AC5's tradeoff experiment — see comment above.
+  # The derived formula (max(1, floor(nproc/2.1))) is preserved in default_concurrency_formula
+  # for when the experiment lands.
+  echo "8"
+  return 0
+  default_concurrency_formula
 }
 
 # resource_gate_check — consult the shared resource gate BEFORE a FULL-SUITE (glob-based default)

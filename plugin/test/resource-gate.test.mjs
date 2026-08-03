@@ -49,14 +49,27 @@ function runGate(envOverrides = {}, args = []) {
   return { status: res.status, stdout: `${res.stdout}\n${res.stderr}` };
 }
 
-/** Extract the REAL default_test_concurrency function from scripts/test.sh and run it with seams. */
+/** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams. */
 function derivedConcurrency(nproc, amplification) {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  // The formula lives in default_concurrency_formula; default_test_concurrency is TEMPORARILY
+  // overridden to 8 (outer correction 2026-08-03) pending AC5's tradeoff experiment.
+  const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
+  assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
+  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nprintf '%s' "$(default_concurrency_formula)"\n`;
+  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+  assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
+  return Number(res.stdout.trim());
+}
+
+/** Assert the TEMPORARY concurrency override is active (default_test_concurrency returns 8). */
+function currentDefaultConcurrency() {
   const src = fs.readFileSync(TEST_SH, "utf8");
   const fnMatch = src.match(/default_test_concurrency\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define default_test_concurrency()");
-  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nprintf '%s' "$(default_test_concurrency)"\n`;
+  const script = `${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-  assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
+  assert.equal(res.status, 0, `currentDefaultConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
 }
 
@@ -155,13 +168,17 @@ test("AC10 — orphaned node procs (ppid=1, cwd deleted) are listed on their own
 });
 
 // ── AC5: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────────────
-test("AC5 — default concurrency derives from nproc / amplification, not a hardcoded 8", () => {
-  // The REAL function from scripts/test.sh, run with test seams.
+test("AC5 — formula derives max(1, floor(nproc/amp)); default is TEMPORARILY overridden to 8", () => {
+  // The REAL formula from scripts/test.sh (default_concurrency_formula), run with test seams. This
+  // tests the derivation the override will restore once AC5's tradeoff experiment lands.
   assert.equal(derivedConcurrency(4, 2.1), 1, "4 cores / 2.1 → 1 (the oversubscription fix)");
   assert.equal(derivedConcurrency(16, 2.1), 7, "16 cores / 2.1 → 7");
   assert.equal(derivedConcurrency(4, 1), 4, "amplification 1 → nproc (no subprocess amplification)");
   assert.equal(derivedConcurrency(1, 2.1), 1, "floor(nproc/amp) must clamp at 1 (max(1, ...))");
   assert.equal(derivedConcurrency(8, 2.1), 3, "8 cores / 2.1 → 3");
+  // TEMPORARY override (outer correction 2026-08-03): the derived default of 1 made every full suite
+  // ~55 min (stranded's OVER90 came from this); reverted to 8 until AC5's cost-side experiment runs.
+  assert.equal(currentDefaultConcurrency(), 8, "default_test_concurrency is temporarily pinned to 8");
 });
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
