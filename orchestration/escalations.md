@@ -272,3 +272,40 @@ tasks/DIR-124-F6.md   tasks/gap-build-evidence-path.md
 
 **外层建议选项 3**——它是唯一同时满足「不丢工作」「不污染任务队列」「释放 1.1G」的。
 但这是范围决定，不是解阻塞，外层不自行执行。
+
+## #N+1 已裁定并执行（2026-08-03T04:52:28Z）：坚决应用新模式
+
+**人的裁定**：「坚决应用新模式。基于这一方向处理。」
+
+**外层在执行不可逆删除前，逐个读了那 5 个只存在于 worktree 的任务。** 分类结果：
+
+| 任务 | 判定 | 依据 |
+|---|---|---|
+| `DIR-124-F2` PlanCheck typed findings | **随模式作废** | PlanCheck 是经典循环的 ProposalReview/PlanCheck |
+| `DIR-124-F6` learning-loop 分类信任 | **随模式作废** | 依赖 F2 |
+| `gap-build-evidence-path` | **随模式作废** | 修复已提交（`2b1d67c2`），任务只是补形式 |
+| `DIR-124-F1` 模板卫生闸 | **实质被保留** | `task-schema.ts` 快速模式也在用；今晚 3 个缺 `id` 文件 + 8 天非阻断警告是更强证据 |
+| `DIR-124-F5` 种子完整性 | **实质被保留，但两边都不对** | 见下 |
+
+14 份 `docs/plans/M2xx-*.md` 全部**随模式作废**（经典循环的里程碑产物）。
+
+### 那五分钟阅读换回了一个活缺陷
+
+`DIR-124-F5` 声称 `repo-ground-truth.md` §3 第一条是假的。**实测表明它和原文档都不对**：
+
+| 解析器 | ``- `foo.ts` (new)`` 的结果 |
+|---|---|
+| `touches-orthogonality-check.parseTouches` | ``"plugin/scripts/foo.ts`"`` ← **残留反引号，路径错** |
+| `task-status-drift-check.parseTouchEntries` | `"plugin/scripts/foo.ts"` ✓ |
+
+**§3 第一条既不真也不假——取决于哪个解析器。**
+而**出错的那个正是快速模式每批用来判并发资格的**。
+
+已建 [[gap-task-body-has-n-parsers-and-no-authority]] 承载它。
+
+### 结论
+
+**方向覆盖的是「被放弃模式的产物」，不是「碰巧被那个模式记录下来的、关于现行机制的事实」。**
+不可逆操作之前的那五分钟阅读，应当是默认动作而不是例外。
+
+**其余 32 项可以随 worktree 回收。** 外层已解除对 reclaim 的限制。
