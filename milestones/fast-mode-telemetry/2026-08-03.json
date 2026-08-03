@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T02:25:56.949Z",
+  "generatedAt": "2026-08-03T05:44:12.242Z",
   "since": null,
   "tasks": [
     {
@@ -23,8 +23,18 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-dispatch-gate-has-no-checklist-and-no-trace",
+      "minutes": 50.45935,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
       "minutes": 40.256233333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-m264-build-evidence-regress-flaky",
+      "minutes": 69.35986666666666,
       "outcome": "done"
     },
     {
@@ -33,13 +43,33 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-no-inventory-of-what-the-two-layer-mode-actually-runs",
+      "minutes": 92.78618333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-resource-awareness-heavy-ops-run-blind",
+      "minutes": 42.3167,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-no-test-framework-policy-for-new-tests",
       "minutes": 56.31883333333333,
       "outcome": "done"
     },
     {
+      "taskId": "gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion",
+      "minutes": 76.67895,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-relation-sync-suite-red-isolation-green",
       "minutes": 48.78273333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-retire-the-prepare-execute-pipeline-cluster",
+      "minutes": 61.73993333333333,
       "outcome": "done"
     },
     {
@@ -50,6 +80,11 @@
     {
       "taskId": "gap-select-preflight-json-real-store-too-slow",
       "minutes": 40.25695,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-serve-task-list-dies-on-one-malformed-task",
+      "minutes": 31.915566666666667,
       "outcome": "done"
     },
     {
@@ -88,6 +123,16 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-test-coverage-check-parses-stale-files-variable",
+      "minutes": 33.755066666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-test-isolation-contract-is-unwritten",
+      "minutes": 62.339133333333336,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-test-sh-flags-only-form-silently-runs-a-different-suite",
       "minutes": 42.83965,
       "outcome": "done"
@@ -110,13 +155,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 48.74819920634919,
-  "medianMinutes": 56.31883333333333,
-  "tasksPerHour": 1.3177406499895201,
-  "serialEquivalentPerHour": 1.230814696272623,
+  "meanMinutes": 51.50209777777778,
+  "medianMinutes": 56.32075833333333,
+  "tasksPerHour": 1.5592016973931664,
+  "serialEquivalentPerHour": 1.1650010890602773,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T02:25:56.925Z",
-  "windowHours": 15.936368055555555,
+  "windowEnd": "2026-08-03T05:44:12.215Z",
+  "windowHours": 19.240615277777778,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0
