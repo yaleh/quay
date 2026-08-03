@@ -407,23 +407,34 @@ async function waitForPaneStable(env, session, timeoutMs) {
 
 // ── AC1: plugin source is clean ────────────────────────────────────────────────────────────────────
 
-test("AC1 — plugin/scripts/session-liveness.sh has no absolute paths or specific session names", () => {
+test("AC1 — plugin/scripts/session-liveness.sh has no absolute paths, specific session names, or install placeholder", () => {
   const src = fs.readFileSync(SCRIPT, "utf8");
   assert.ok(!/(\/home\/yale|quay-0:|archguard-2:|meta-cc-4:)/.test(src),
     "source must not reference /home/yale or the three projects' specific tmux sessions");
+  assert.ok(!src.includes("__QUAY_TMUX_SESSION__"),
+    "source must not carry the install-time placeholder (AC1 — the session is resolved from env/config/default)");
 });
 
-// ── AC2: quay-init lays it down with the target substituted ─────────────────────────────────────────
+// ── AC2: quay-init lays it down VERBATIM; the session is generated config ───────────────────────────
+// gap-quay-init-rewrites-an-executable-instead-of-generating-config: 可执行文件一律原样复制，只生成配置。
+// quay-init no longer rewrites session-liveness.sh (no __QUAY_TMUX_SESSION__ placeholder); the
+// installed copy is byte-identical to the source. The per-project --tmux-session value is CONFIG,
+// written to orchestration/session-liveness.env, which the (unmodified) script sources at startup.
 
-test("AC2 — quay-init --loop lays down session-liveness.sh with the target session substituted and no quay literals", () => {
+test("AC2 — quay-init --loop lays down session-liveness.sh VERBATIM; the session value lives in orchestration/session-liveness.env", () => {
   const ws = makeTmp();
   try {
     const r = runInit(ws, ["--loop", "--root", ws, "--project", "myproj",
       "--test-command", "npm test", "--tmux-session", "myproj-0:0.0", "--repo-root", "/srv/target"]);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const src = fs.readFileSync(SCRIPT, "utf8");
     const laid = fs.readFileSync(path.join(ws, "plugin", "scripts", "session-liveness.sh"), "utf8");
-    assert.ok(!laid.includes("__QUAY_TMUX_SESSION__"), "the session placeholder must be substituted");
-    assert.ok(laid.includes("myproj-0"), "the target session must appear (default target <session>:outer)");
+    assert.equal(laid, src, "installed session-liveness.sh must be byte-identical to its source (cp, not render)");
+    assert.ok(!laid.includes("__QUAY_TMUX_SESSION__"), "no placeholder may remain in the source (AC1)");
+    // The session is config, not a script rewrite: quay-init writes it to the per-project env file.
+    const envFile = fs.readFileSync(path.join(ws, "orchestration", "session-liveness.env"), "utf8");
+    assert.match(envFile, /SESSION_TMUX_SESSION=myproj-0:0\.0/, "the --tmux-session value must be written to the generated config");
+    assert.ok(!laid.includes("myproj-0"), "the script itself must NOT carry the target session (config, not code)");
     assert.ok(!laid.includes("/home/yale/work/quay"), "no quay dev-root leak");
     assert.ok(!laid.includes("scripts/test.sh"), "no quay test-command leak");
   } finally { cleanup(ws); }

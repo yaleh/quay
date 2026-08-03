@@ -154,3 +154,80 @@ test('AC5 — re-run is idempotent (skips identical), and a locally-edited tick 
     assert.equal(after, firstContent + '\n<!-- local customisation -->\n', 'the local edit must be byte-preserved');
   } finally { cleanup(ws); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-quay-init-rewrites-an-executable-instead-of-generating-config
+// 可执行文件一律原样复制，只生成配置；散文可以本地化，代码不行。
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+// AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
+// per-project session is CONFIG, generated into orchestration/session-liveness.env.
+test('AC1/AC2 — session-liveness.sh is copied verbatim; the session is generated config, not a script rewrite', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
+      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const src = fs.readFileSync(path.join(pluginDir, 'scripts', 'session-liveness.sh'), 'utf8');
+    const installed = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh'), 'utf8');
+    assert.equal(installed, src, 'installed session-liveness.sh must be byte-identical to its source (cp, not render)');
+    assert.ok(!installed.includes('__QUAY_TMUX_SESSION__'), 'the placeholder must not exist (AC1)');
+    const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
+    assert.match(envFile, /SESSION_TMUX_SESSION=proj-0:0\.0/, 'the --tmux-session value must be written to the generated config');
+    assert.ok(!installed.includes('proj-0'), 'the script itself must NOT carry the target session (config, not code)');
+  } finally { cleanup(ws); }
+});
+
+// AC2 — no render_substitutions call in quay-init.sh acts on an executable: grep shows the script
+// is only ever passed to copy_one. (The two remaining render_substitutions calls are tick docs.)
+test('AC2 — quay-init.sh has no render_substitutions call targeting session-liveness.sh', () => {
+  const initSrc = fs.readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');
+  // The render_substitutions call sites must not reference the executable.
+  assert.ok(!initSrc.includes('render_substitutions "$sl_src"'),
+    'quay-init.sh must not render the session-liveness.sh executable');
+  // The executable path is only ever copied verbatim.
+  assert.ok(initSrc.includes('copy_one "$sl_src" "$sl_dst"'),
+    'quay-init.sh must copy session-liveness.sh via copy_one (cp)');
+});
+
+// AC6 — the mechanical check runs as part of quay-init --loop and passes on a clean install.
+test('AC6 — verify-installed-executables.sh runs inside quay-init --loop and passes (byte-identical executables)', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
+      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /verify-installed-executables: OK/, 'quay-init must run the AC6 check and report OK');
+    // Standalone re-run, matching what cold-start-e2e does.
+    const v = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
+      { encoding: 'utf8' });
+    assert.equal(v.status, 0, `verify must exit 0:\n${v.stderr}`);
+    assert.match(v.stdout, /byte-identical/, 'verify must report the byte-identical invariant');
+  } finally { cleanup(ws); }
+});
+
+// AC4 — bidirectional negative control: flip one byte in an installed executable ⇒ the check FAILS
+// naming it; restore ⇒ the check PASSES again. A check that only ever reports "same" is the bug.
+test('AC4 — the check fails when an installed executable drifts by one byte, and passes after restore', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
+      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const installed = path.join(ws, 'plugin', 'scripts', 'session-liveness.sh');
+    // fail direction: simulate a future render path rewriting the installed executable by one byte.
+    const buf = fs.readFileSync(installed);
+    buf[0] ^= 0x01;
+    fs.writeFileSync(installed, buf);
+    const v = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
+      { encoding: 'utf8' });
+    assert.notEqual(v.status, 0, 'verify must FAIL when an installed executable drifts by one byte');
+    assert.match(v.stderr, /session-liveness\.sh/, 'the failure must name the drifted file');
+    // restore direction.
+    buf[0] ^= 0x01;
+    fs.writeFileSync(installed, buf);
+    const v2 = spawnSync('bash', [path.join(pluginDir, 'scripts', 'verify-installed-executables.sh'), pluginDir, ws],
+      { encoding: 'utf8' });
+    assert.equal(v2.status, 0, 'verify must PASS after restore (AC4 restore direction)');
+  } finally { cleanup(ws); }
+});
