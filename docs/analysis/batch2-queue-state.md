@@ -1122,3 +1122,16 @@ sigma 需要独占低负载窗口，这既不是它的 `## Touches`，也不是�
 已指示内层：**sigma 的两次测量放在另两个任务不跑套件的窗口里**，
 或干脆等它们收尾后再测。每次测量前后都记录 `resource-gate` 输出（AC2 已要求），
 若某次 `filesCaptured < 155` 就作废重测而不是将就使用。
+
+### 外层通报（07T03:5xZ）：CI 红 —— 测试不 hermetic，已修
+
+**根因**：`prepare-admission-check.test.mjs` 两个 known-good 用例引用本仓真实提交 335317d + REPO_ROOT 作
+workspace；CI `actions/checkout@v4` 默认 depth-1 浅克隆没有旧提交 → `git cat-file -e <sha>^{commit}` 判缺失 →
+真实 precedent 被误判缺失。本地 12/12 绿、CI 红，差别只在克隆深度。
+
+**修法（外层选后者）**：①不加 `fetch-depth: 0`（掩盖真问题 + 每次克隆全历史）；②**测试改 hermetic**——
+`makeGitWorkspaceWithCommit()` 构造临时 git 仓库 + 已知 commit，两个 known-good 用例改用它。83/83 绿。
+
+**另两条已落地**：①浅克隆行为说明写进 prepare-admission-check.ts 文件头（missing-precedent 在浅克隆下
+≠ precedent 真缺失；PREFLIGHT_CALIBRATED false 非阻断，生产影响是日志噪声）；②test-isolation 契约补
+**第五条 R5**（测试不得依赖运行环境仓库的 git 历史，浅克隆必须绿）。
