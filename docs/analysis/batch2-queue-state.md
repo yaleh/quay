@@ -946,3 +946,34 @@ packages/quay/test/cli.test.mjs   198.1 s   =  套件墙钟的 34.8%
 套件成本问题**不是删测试能解决的**，它是一个文件的问题。
 [[gap-suite-cost-model-is-wrong-optimizations-buy-nothing]] 现在有了具体目标：
 `packages/quay/test/cli.test.mjs`，198.1 s，占 34.8%。
+
+## 文件正交 ≠ 可并发：sigma 任务暴露的一个机制缺口（2026-08-03T05:59:19Z）
+
+三路在飞（stranded-worktree / suite-sigma / web-observation）经 `checkTouchesPair` 复核
+**两两 DISJOINT**，派发形式上合规。
+
+**但 `gap-suite-sigma-distribution-stale-after-retirement` 的正确性取决于「别的任务在不在跑套件」**：
+
+- 它的 AC2 要求 `resource-gate.sh` 报 GO（`some avg10 < 40`）
+- 它的 AC1 要求 `filesCaptured == filesTotal`（155/155）
+- 而同批另两个任务的 DoD 都含「`scripts/test.sh` 连跑 2 次全绿」
+
+**若它们同期跑套件，压力必然 >40，sigma 的测量结果会被系统性低估**
+（今晚已实证：饥饿杀掉测试 ⇒ 被 cancelled 的文件不产生 `duration_ms` ⇒ Σ 偏低而墙钟几乎不变）。
+
+### 这是 `checkTouchesPair` 表达不了的一类冲突
+
+它判的是**文件集合是否相交**。而这里的冲突是**机器状态互斥**——
+sigma 需要独占低负载窗口，这既不是它的 `## Touches`，也不是任何文件。
+
+**这不是 `checkTouchesPair` 的缺陷**（它做的正是它声称的事），
+**是派发资格模型缺一个维度**：任务可以声明「碰哪些文件」，但不能声明「需要什么机器状态」。
+
+归入 [[gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet]] 的后续
+（同一个 `concurrent-batch-scheduler`），不单开任务。**随测量类任务变多，这会反复出现。**
+
+### 本轮的处置（不改机制，只排时序）
+
+已指示内层：**sigma 的两次测量放在另两个任务不跑套件的窗口里**，
+或干脆等它们收尾后再测。每次测量前后都记录 `resource-gate` 输出（AC2 已要求），
+若某次 `filesCaptured < 155` 就作废重测而不是将就使用。
