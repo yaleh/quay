@@ -89,19 +89,68 @@ resume 先确认 `--acquire --timeout N` 是否真的循环重试，再定 test.
 
 ## Acceptance Criteria
 
-- [ ] AC1: **重试语义先落定**——`--acquire --timeout N` 在窗口内是否循环重试，实跑输出为证
-- [ ] AC2: **正向**——持有者为死 pid + mtime 5s ⇒ `test.sh` 等待后**成功跑起套件**，`waited_ms>0`（实跑贴出）
-- [ ] AC3: **反向负控制（不得误抢）**——持有者**活着**且长跑 ⇒ 有界超时后仍失败、**绝不回收**。
-      **这条不过，AC2 不算数**——把「拒绝等待」换成「抢走别人正在跑的重活」是更坏的交易
-- [ ] AC4: **上界不得退化为串行化**——等待上界写进文件头并说明它为何小于一次真实重活的时长
-- [ ] AC5: **失败文案**——死持有者时不得再印「被另一个项目占着」，须印持有者已死 + 等待时长 + 距可回收还差多久
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC1: **重试语义先落定**——`--acquire --timeout N` 在窗口内是否循环重试，实跑输出为证。
+      **已确认并钉死**：`do_acquire` 的 `while :` 循环逐秒重新 `try_acquire`（重新检查回收条件、
+      重试原子 claim），窗口内真的重试，不是判一次即返回。实跑（AC2/AC3 输出）里每行
+      `token held — waited Ns (bounded wait, not silent)...` 即逐秒重试的可见证据。
+      新测试 `heavy-op-token-wait.test.mjs` AC1 用 node:test 钉死该语义（live 持有者 + `--timeout 2`
+      ⇒ 逐秒重试 2 次、`waited_ms=2000 acquired=no`、令牌原样保留）。
+- [x] AC2: **正向**——持有者为死 pid + mtime 5s ⇒ `test.sh` 等待后**成功跑起套件**，`waited_ms>0`（实跑贴出）。
+      **实跑（默认 STALE_TIMEOUT_S=30、`--timeout ${HEAVY_OP_ACQUIRE_TIMEOUT_S:-40}`，即 test.sh 的
+      逐字 acquire 行 + `--root` 测试缝，下同）**：
+      ```
+      fixture: dead pid 3530518, mtime 5s old, STALE_TIMEOUT_S=30 (default)
+      heavy-op-token: HELD by deadproj (pid 3530518 dead, mtime only 5s old) — holder DEAD; reclaimable in 25s ...
+      heavy-op-token: token held — waited 1s (bounded wait, not silent)...
+      ...（每秒一行，reclaimable in 从 25s 倒数到 1s）...
+      heavy-op-token: token held — waited 23s (bounded wait, not silent)...
+      heavy-op-token: RECLAIMED stale token (mtime 30s old, pid 3530518 not alive) — reclaim #1
+      waited_ms=23000 holder=quay acquired=yes
+      exit=0 elapsed_s=25
+      ```
+      改前 `--timeout 0` 是零等待直接 `exit 1`；改后同一个死持有者场景被**等待吸收了**：25 秒内
+      逐秒倒数、在第 30 秒回收、`waited_ms=23000 > 0`、acquire 成功。
+- [x] AC3: **反向负控制（不得误抢）**——持有者**活着**且长跑 ⇒ 有界超时后仍失败、**绝不回收**。
+      **实跑**（live 持有者 archguard 长跑，STALE_TIMEOUT_S=30，bound 缩短为 3s 演示）：
+      ```
+      fixture: LIVE holder archguard, long-running
+      heavy-op-token: HELD by archguard (pid 3531953, held 551ms) — quay did not acquire (no silent wait)
+      heavy-op-token: token held — waited 1s ...
+      heavy-op-token: token held — waited 2s ...
+      heavy-op-token: token held — waited 3s ...
+      heavy-op-token: did not acquire within 3s wait window — token held by archguard (pid 3531953, ALIVE, held 3748ms) — quay did not acquire
+      waited_ms=3000 acquired=no
+      exit=1 elapsed_s=4
+      token survives: holder=archguard pid=3531953 ...
+      reclaim counter: 0
+      ```
+      有界超时后**仍失败**（`exit 1`）、令牌**原样保留**、`stale_reclaims` 仍为 0——**绝不误抢在跑的
+      重活**。此条先于 AC2 通过：AC2 只在死持有者方向把等待变成成功，live 方向依旧失败。
+- [x] AC4: **上界不得退化为串行化**——等待上界写进文件头并说明它为何小于一次真实重活的时长。
+      `scripts/test.sh` 头注释 + `heavy-op-token.sh` 头注释均写明：`HEAVY_OP_ACQUIRE_TIMEOUT_S`
+      （默认 40s）覆盖一个完整 stale-timeout 周期（默认 30s）+ 写入→回收竞态余量，但**远小于一次
+      真实重活**（concurrency 8 下完整套件约 8 分钟）——最坏 40s 等待只吸收 ≤30s 瞬态宽限期，
+      **不可能把两次重活背靠背串行化**（40/480 ≈ 8%）。
+- [x] AC5: **失败文案**——死持有者时不得再印「被另一个项目占着」，须印持有者已死 + 等待时长 + 距可回收还差多久。
+      `try_acquire` 死持有者分支现在打印 `holder DEAD; reclaimable in Ns`（距可回收还差多久），
+      `do_acquire` 超时分支的最终行打印 `did not acquire within Ns wait window — token held by <holder>
+      (pid <p> DEAD, mtime only <n>s old — reclaimable in <m>s) — <proj> did not acquire`（持有者已死 +
+      等待时长），并保留契约行 `waited_ms=N acquired=no`。`scripts/test.sh` 的失败横幅改为中性的
+      `could not acquire the heavy-op token within Ns (holder state printed above — dead vs alive)`，
+      不再无条件断言「被另一个项目占着」。live 持有者方向同理印 `ALIVE`。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`。
+      新测试文件 `plugin/test/heavy-op-token-wait.test.mjs`：`import { test } from "node:test"` +
+      `// @test-group governance`（含 governance 自跳模块，`--group governance` 或显式文件名运行）。
 
 ## Definition of Done
 
-- [ ] AC2 与 AC3 两个方向的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体保留本次**定性更正的全过程**（原标题、原规模、被什么实测推翻）——
+- [x] AC2 与 AC3 两个方向的实跑输出都贴进任务体（见上 AC2/AC3 的两段实跑）
+- [ ] 完整套件连跑 2 次全绿——**本执行者未跑完整套件**（执行指令明确要求只跑 scoped 测试、
+      完整套件由协调者在 fan-in 负责；跨项目 token 环境是争用的）。scoped 实测：
+      `scripts/test.sh plugin/test/heavy-op-token.test.mjs plugin/test/heavy-op-token-wait.test.mjs`
+      ⇒ **17/17 通过**（6 governance + 11 engine），静态检查（split-or-commit / test-framework-policy /
+      test-isolation / contract-check / AC-carryover / checker-mutation）全部 PASS。
+- [x] 任务体保留本次**定性更正的全过程**（原标题、原规模、被什么实测推翻）——
       **一个只留结论不留更正的任务体，下一个人会重走一遍同样的误判**
 
 ## Touches

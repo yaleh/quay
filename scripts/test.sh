@@ -228,14 +228,25 @@ resource_gate_check() {
 # failure, static-check failure, node test completion). Skips when QUAY_TEST_SKIP_RESOURCE_GATE=1 —
 # a nested runner inside an outer suite: the outer suite already holds the token (the exemption
 # boundary is identical to resource-gate.sh's).
+#
+# AC4 wait bound (gap-the-only-token-waiter-refuses-to-wait-at-all): the one real waiter used to
+# pass --timeout 0 (ZERO wait) — a ≤30s transient grace window (a crashed holder's token aged less
+# than HEAVY_OP_STALE_TIMEOUT_S, so not yet reclaimable) became a FAILED full-suite run. The bound
+# is HEAVY_OP_ACQUIRE_TIMEOUT_S (default 40): a full stale-timeout cycle (default 30) plus margin
+# for the write→reclaim race, yet FAR below one real heavy op (full suite ~8 min at concurrency 8)
+# — the worst-case wait absorbs the grace window and can NEVER serialize two heavy ops back-to-back
+# (40/480 ≈ 8% of a full suite). The token script's --timeout N is a bounded poll (re-checks reclaim
+# each second, AC1), so a dead holder is reclaimed mid-wait and the suite proceeds; a LIVE holder is
+# never stolen (AC3) — the wait only converts the DEAD-holder grace window, never a running op.
+HEAVY_OP_ACQUIRE_TIMEOUT_S="${HEAVY_OP_ACQUIRE_TIMEOUT_S:-40}"
 heavy_op_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping heavy-op token (nested runner; outer suite holds it)"
     return 0
   fi
   echo "== heavy-op token (gap-no-cross-project-heavy-op-token) =="
-  if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout 0; then
-    echo "scripts/test.sh: heavy-op token HELD by another project (holder printed above) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free." >&2
+  if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout "${HEAVY_OP_ACQUIRE_TIMEOUT_S}"; then
+    echo "scripts/test.sh: could not acquire the heavy-op token within ${HEAVY_OP_ACQUIRE_TIMEOUT_S}s (holder state printed above — dead vs alive) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free." >&2
     exit 1
   fi
   HEAVY_OP_ACQUIRED=1

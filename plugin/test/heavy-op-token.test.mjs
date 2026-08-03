@@ -249,7 +249,11 @@ test("AC6 — test.sh acquires on the full-suite default path ONLY, before the g
   // function — proof that no scoped branch carries a token call.
   // gap-loop-mechanism-lives-outside-the-package-and-cannot-ship: the token moved to
   // plugin/scripts/, so test.sh's wiring references the new canonical path.
-  assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --acquire quay --timeout 0/), "default path must acquire the token");
+  // gap-the-only-token-waiter-refuses-to-wait-at-all: the acquire passes the BOUNDED wait
+  // (HEAVY_OP_ACQUIRE_TIMEOUT_S, default 40), NOT --timeout 0 — a zero wait turns a ≤30s grace
+  // window into a failed suite run (AC2/AC4).
+  assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --acquire quay --timeout "\$\{HEAVY_OP_ACQUIRE_TIMEOUT_S\}"/), "default path must acquire the token with the bounded wait bound");
+  assert.ok(src.match(/HEAVY_OP_ACQUIRE_TIMEOUT_S="\$\{HEAVY_OP_ACQUIRE_TIMEOUT_S:-40\}"/), "the bounded wait default (40s) must be declared + documented");
   assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --release quay/), "release must be wired (EXIT trap)");
   // Release is armed as an EXIT trap, so a gate WAIT / build failure / static-check failure /
   // node completion ALL release the token — one WAIT must never hold the cross-project mutex.
