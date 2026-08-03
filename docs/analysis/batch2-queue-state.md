@@ -277,6 +277,18 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
 - 无停止条件（needs-human 窗口内新增 0）。**本 tick 不派发**——fan-in 全量先于派发（2× c8 崩溃纪律）；
   全量绿后关 m264，再评估补派 reclaim-worktrees / test-isolation-contract
 
+### Tick 更新（03T03:38Z）：m264 关闭 + 并发补满 3
+
+- **m264 done**：批全量绿（**2408**/2389/0/19，exit 0；参考值 2407→**2408** = +1 fail-closed 回归测试）。
+  worktree/分支清理、任务 done、`--task-end`（`fm-...-mxjpbk`）。**参考值更新：2408**
+- **补派 2 个**（并发满 3）：reclaim-worktrees（`afa6d17c167863fa1`，runId `fm-...-sf5zrl`，/tmp/quay-wt-reclaim）
+  + test-isolation（`a5e61c452d700bdf6`，runId `fm-...-wo6yww`，/tmp/quay-wt-testiso）。三者两两 DISJOINT
+  （checkTouchesPair 机械验证）
+- **resource-awareness 阻塞解除但互斥**：dispatch-gate 已落地（tick 文档不再被占用），但 resource-awareness
+  与 test-isolation 在 `scripts/test.sh` OVERLAP（实测）——**等 test-isolation 落地后再派**。dispatch-gate 的
+  AC6 基线违规（`resource-awareness: dispatch-review-missing`）待其派发时补 `## Dispatch review` 自清
+- **在飞（3，满）**：inventory + reclaim + test-isolation
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
