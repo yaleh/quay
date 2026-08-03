@@ -85,6 +85,7 @@ export const VALID_BLOCKED_REASONS = Object.freeze([
   "needs-human-backlog",
   "ruling-required",
   "queue-empty",
+  "turn-ended-idle",
 ]);
 
 /** Human-readable `reason` → tick-file condition mapping (for --schema / error messages). */
@@ -96,6 +97,7 @@ export const REASON_DESCRIPTIONS = Object.freeze({
   "needs-human-backlog": "needs-human 积压 ≥ 3 — stop dispatching",
   "ruling-required": "a question the outer must rule on (e.g. queue/git contradiction)",
   "queue-empty": "就绪队列为空 — step-3 stop condition",
+  "turn-ended-idle": "回合结束、无待办工具调用、等待被重新唤起 — turn done, nothing pending, awaiting re-invocation",
 });
 
 /**
