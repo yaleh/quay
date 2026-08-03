@@ -123,3 +123,11 @@ Note: .quay/config.yml not found. This may not be a quay workspace.
 Run `quay init` (CLI) to create one, or configure manually.
 ```
 This is a WARNING, not a block — the copy proceeds regardless.
+
+### 6. Next step: cold start
+
+After `--loop` lays down the mechanism, the workspace is READY for the cold-start skill
+(`/quay:cold-start`): one command that mounts the two loop monitors (inner-state.sh +
+session-liveness.sh) via the Monitor tool, re-creates the 20-minute outer cron, drives the inner
+session to start fast mode, and asserts a real `--task-start` telemetry record in `.workflow-events/`.
+The inner start is DRIVEN there, never assumed as a side effect.
