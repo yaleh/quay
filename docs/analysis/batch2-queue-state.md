@@ -1343,3 +1343,10 @@ pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过�
 `process.cwd()/tasks/M-FAKE-FRONTMATTER-SCOPE-M124.md` 写 fixture（finally 删）——R1 违规
 （固定路径写入，非 mkdtemp 唯一），R1 扫描器只认 dot-tmp 形态未捕获。本次 `git add -A` 把
 该 mid-life fixture 误提交（b505d3aa），已 revert。处置：建任务或修（待办，不打断 cold-start 派发）。
+
+### 派发（2026-08-03 10:1xZ）：cold-start 产品化（人指定最高优先级）
+
+`gap-loop-mechanism-lives-outside-the-package-and-cannot-ship` 已派发：worktree
+`/tmp/quay-wt-coldstart`（分支 task/gap-...-cannot-ship），telemetry fm-...-36fiim。
+范围裁定已写任务体（test.sh 不搬、不进 Touches）；AC8 改名负控制实跑输出必须贴任务体（DoD 硬要求）。
+闸口外层已过（task-contract-check 0 违规、Touches 补齐 18 条）。
