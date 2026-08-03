@@ -17,6 +17,17 @@
 #
 # Run: bash test/cold-start-e2e.sh
 #   exit 0 = PASS (printed), non-zero = FAIL.
+#
+# AC7 (SPEC-outer-liveness-productization.md): asserts outer-liveness.sh is laid down AND usable —
+# a one-shot `--once` real run (the script's cold-start seam), matching inner-state.sh's seam in 7c.
+# In an environment with no tmux session for the project's outer, --once honestly reports
+# OUTER-STATUS <project> alive=0; what matters is that it RUNS, self-contained, after the rename.
+#
+# EXECUTOR CAVEAT (gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it, status todo):
+# this script currently has NO executor — nothing in scripts/test.sh or CI runs it, so the AC7
+# assertion below is NOT currently in effect. It becomes in effect when that task lands its
+# executor (its AC9: measure --from-build wall-clock cost, then choose CI job vs milestone-cadence
+# trigger — do NOT pre-wire into scripts/test.sh before the cost is known, per its dispatch note).
 
 set -euo pipefail
 
@@ -63,7 +74,7 @@ for s in \
   fast-mode-telemetry.ts inner-blocked-signal.ts inner-forensics.mjs inner-idle-log.ts \
   inner-state.sh resource-gate.sh heavy-op-token.sh task-contract-check.ts \
   task-status-drift-check.ts touches-orthogonality-check.ts concurrent-batch-scheduler.ts \
-  it0-split-or-commit-check.ts pipe-exit-code-check.sh; do
+  it0-split-or-commit-check.ts pipe-exit-code-check.sh outer-liveness.sh; do
   assert_file "$PROJECT/plugin/scripts/$s"
 done
 # --all categories
@@ -132,6 +143,18 @@ if printf '%s' "$TEL_OUT" | grep -qi 'Cannot find\|MODULE_NOT_FOUND\|No such fil
   fail "fast-mode-telemetry.ts failed to resolve after the rename: $TEL_OUT"
 fi
 echo "  fast-mode-telemetry.ts resolves and runs after the rename"
+
+# 7f. outer-liveness.sh --once one-shot seam (AC7). It must RUN self-contained after the rename
+#     and emit an OUTER-STATUS line for THIS project (basename of the project root). No tmux
+#     session exists for the project in this environment, so alive=0 is the honest reading; the
+#     point is that it lays down, self-locates, computes its default target and reports — no
+#     quay-dev-tree dependency. SEE EXECUTOR CAVEAT in the header: this assertion is not yet in
+#     effect (no executor runs this script) until gap-cold-start-...-nothing-runs-it lands one.
+OL_OUT="$(bash "$PROJECT/plugin/scripts/outer-liveness.sh" --once 2>&1 || true)"
+if ! printf '%s' "$OL_OUT" | grep -q 'OUTER-STATUS empty-project alive='; then
+  fail "outer-liveness.sh --once did not emit OUTER-STATUS for this project after the rename: $OL_OUT"
+fi
+echo "  outer-liveness.sh --once emits OUTER-STATUS empty-project alive=... (exit 0)"
 
 echo ""
 echo "COLD-START E2E PASS: laid-down mechanism present, no quay dev-tree absolute path, and it still runs after the quay dev tree is renamed."
