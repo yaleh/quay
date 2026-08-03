@@ -106,8 +106,17 @@ resume 三个阶段各自可独立验证：检测与残留 → 冷启动 skill �
 - [ ] AC5: 冷启动 skill 一条命令挂上两个监视器，**判据是「事件送得到」不是「进程在跑」**——
       给出收到事件的实跑证据（`nohup` 起的进程不算通过）
 - [ ] AC6: **inner 零操作**——全程不向内层会话输入任何东西（实跑记录为证）
-- [ ] AC7: **改名负控制**——`/home/yale/work/quay` 改名后那 ≤4 条命令仍走通（实跑输出贴任务体）。
-      **这条不过，AC1–AC6 都不算数**
+- [ ] AC7: **改名负控制，且必须走循环的真实运行时路径**——`/home/yale/work/quay` 改名后，
+      目标项目**通过 `.quay/config.yml` 的 `mcp_entry` 实际完成一次 `task_list` 往返**（不是跑一个独立脚本）。
+      **这条不过，AC1–AC6 都不算数**。
+      **⚠️ 外层 2026-08-03 实证：这里极易自欺**——我两次用「改名后 `resource-gate.sh` 仍 exit 0」当证据，
+      而 `resource-gate.sh` 是独立 bash、**对 quay 零依赖，探针本身不可能失败**。
+      真正的依赖在 PATH：`quay-native` 是**指向 `/home/yale/work/quay/packages/quay-native/dist/` 的符号链接**，
+      而 `quay-init` **没把产物里的 `vendor/quay/dist/quay.js` 铺进目标项目**（tarball 有、archguard 没有）。
+      **⇒ 判据必须是「循环能否继续工作」，不是「某个脚本能否运行」。**
+- [ ] AC7b: **铺设时带上运行时**——`quay-init` 把产物的 `vendor/quay/dist/*.js` 铺进目标项目，
+      并让 `mcp_entry` 指向铺进去的那份（而不是 PATH 上的开发树符号链接）；
+      负控制：`readlink -f $(which quay-native)` 指向开发树时，目标项目**不得**依赖它
 - [ ] AC8: README 的命令序列与实跑逐字一致（负控制：照 README 抄一遍能跑通）
 - [ ] AC9: 测试用 `node:test` 且带 `// @test-group governance`
 

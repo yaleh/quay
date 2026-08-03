@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 15:44Z | `correct`（correct-self：**我的改名负控制测了一个不可能失败的东西，而且我据它报过两次通过**） | 核实管理者的三条；把 AC13 降级；重写冷启动任务的 AC7 并加 AC7b | 在飞 3（全部健康）；完成 45、orphaned 0 | **第三条推翻了我自己的结论，三项实测全部属实**：①`readlink -f $(which quay-native)` = **`/home/yale/work/quay/packages/quay-native/dist/quay-native.js`**——PATH 上的是**指向开发树的符号链接**；②产物 tarball **含** `vendor/quay/dist/quay.js`；③archguard 的 `plugin/vendor/` 里**没有**它；④archguard 的 `mcp_entry: ["quay-native","mcp"]` 走 PATH ⇒ **它的循环运行时确实依赖 quay 开发树，改名即断**。**我错在探针**：12:0x 与 15:2x 我两次用「改名后铺设项目的 `resource-gate.sh` 仍 exit 0」当证据，而**那是独立 bash、对 quay 零依赖——开发树在不在它都跑得通，探针本身不可能失败**。**我把两个不同的断言合成了一个**：「铺设文本 0 个 quay 绝对路径」为真，「运行时不依赖开发树」为假。**已降级 AC13 为 `[~]` 并把教训写进 AC7**：**负控制必须走被测系统的真实执行路径，探针要能在缺陷存在时失败，否则它与「永远通过」同形**。冷启动任务的 AC7 改为「改名后经 `mcp_entry` 实际完成一次 `task_list` 往返」，并新增 **AC7b：铺设时把 `vendor/quay/dist/*.js` 一并铺进目标项目、`mcp_entry` 指向铺进去的那份** |
 | 2026-08-03 15:42Z | `no-action`（未介入内层；跨项目令牌第一次遇到真实外部持有者，实测出它的真实状态） | 观察三个在飞任务；核实跨项目重活令牌在 archguard 持有时的行为 | 在飞 **3** 全部健康：`empty-set` 18min（1 commit、树干净）、`session-liveness` 18min（1 commit、树干净，**两者 2 分钟前刚提交**）、`board-500` 11min（12 个改动、实现中）；完成 45、orphaned 0、`tph` 1.541；**archguard 已解除停机**（`.halt` 不在，刚提交「start AC3 loop — mount monitors」） | **跨项目令牌第一次有真实外部持有者**：`--status` 显示 `holder=archguard pid=1953624 held_ms=449421`。外层试着以 quay 身份获取（约定：若意外拿到就立刻释放）——**结果是拿到了，因为它已陈旧**：`RECLAIMED stale token (mtime 450s old, pid 1953624 not alive) — reclaim #2`。**这不是缺陷，是机制按设计工作**：`kill -0 1953624` 确认该 pid **确已死亡**，两条回收条件同时成立，**且消息把两条的值都打了出来**（450 秒 + pid not alive），正是 09:13Z 我复核那条安全属性时要求的形状。**已确认我没把令牌留在手里**：探测后 `--status` 为 `holder=none`。**一条值得记的副产物**：`stale_reclaims` 今天已到 **2** ⇒ **持有者不总能走到释放路径**（崩溃/被杀），陈旧回收在真实环境里确实在干活——而不是一条从未触发的分支 |
 | 2026-08-03 15:45Z | `correct`（correct-manager：规格里两处最容易做错的地方，实测钉住了） | 读冷启动一行化规格（7 AC）；实测 AC4 的判据陷阱与 AC2 的检测可行性；建任务 | 在飞满 **3**（session-liveness / empty-set / board-500）；完成 45、orphaned 0；新任务闸口 new=0，等槽位 | **AC4 的判据必须改**：`ps` **分不出「进程在跑」与「事件送得到人」**。外层此刻两个监视器的 ppid 是 Monitor 工具的包装进程（1277252 / 1802895），stdout 每行变成会话通知；而 `nohup` 起同一条命令，**argv 完全相同、输出进文件、没有任何人被通知**。⇒ **冷启动 skill 必须是 agent 执行的 skill，不能是纯 shell 脚本**，否则交付的是一个「看起来装好了、事件送不到」的冷启动——**比没装更糟**，且正是今天反复抓的「从外面看同形」那一族。已写成 AC5 并明确 `nohup` 不算通过。**AC2 的检测阶梯实测可行，且三个真实项目各走一条不同的路**：quay 无 test 脚本但**有 `scripts/test.sh`**、archguard 的 `package.json` test = **`vitest run`**、meta-cc 无 `package.json` 但**有 `go.mod`** ⇒ 三条鳞次栉比的检测路径全部命中，**它不是设想**；同时把「检测不到 ⇒ 失败关闭、不猜默认值」写成 AC3 的负控制。**范围判断**：9 条 AC 本该按 >2 机制拆，**判不拆**——AC1（输入条数）与 AC7（改名负控制）**按构造是端到端的，分不给任何子任务**，拆开会让最决定性的那条无处安放；改为**分三阶段、阶段间可停可报**，与 session-liveness 同样处理 |
 | 2026-08-03 15:29Z | `correct`（correct-self 的一个新形态：**我写的一个任务标题打掉了线上页面**） | 核实故障与两层缺陷；用真解析器量危害面；拆两个任务；补派第三个 | 在飞 **2→3**（session-liveness / empty-set / board-500，两两 DISJOINT、闸口 new=0）；完成 45、orphaned 0 | **触发者是我**：我给 `gap-contract-ratchet-…` 写的 title 里含 `## Contract`，YAML 中**空格后的 `#` 是注释起始** ⇒ title 截断成 `The`、续行失去可续对象 ⇒ 该文件不可解析 ⇒ **`/` 返回 500 而 `/live` `/journal` `/adr` 全 200**。管理者已止血。**但两层缺陷都不在标题上**。**第一层我核实并定位到层**：`gap-serve-task-list-dies-on-one-malformed-task` 的逐任务容错在 `store.ts`/`serve-handlers.ts`，而 `provider-client.ts` 的 `taskList()` 对 `isError` **有意抛出** ⇒ **provider 一抛，下游容错没机会跑**。那个 throw **不能简单撤销**——注释写明更早的静默空数组把真实失败与全部合法任务一起藏了；**所以改动位置是 provider 返回「部分成功 + 失败清单」，并用 AC5 的负控制防止把静默请回来**。**第二层是写入侧**：`task_write` 原样落盘、不加引号，**写入成功、几小时后渲染时炸**。**危害面我用真解析器量了**：605 个 frontmatter **0 失败**（确认止血），但 **265 个标题（44%）含 `#` 或 `: `——它们今天没炸只是因为当时加了引号**。⇒ 缺陷不是「有人错了一次」，是**正确性依赖每次都记得**。**方法论已写进 AC**：判断数据合法性**用真解析器，不用形状启发式**——管理者先用形状粗查得出 0，是错的，这条与我今天早些时候「排除项吃掉真阳性」是同一族 |
@@ -161,11 +162,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 51 | 39% |
+| no-action | 51 | 38% |
 | unblock | 20 | 15% |
-| correct | 57 | 43% |
+| correct | 58 | 44% |
 | escalate | 4 | 3% |
-| **合计** | **132** | — |
+| **合计** | **133** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
