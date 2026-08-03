@@ -109,3 +109,54 @@ B2-0..B2-3、B3-1 合并 + 全量绿；B3-2 三步处置后 done。细节见 `gi
 **随着裁剪成为工作的一大块，这会反复出现。** 修法有两种，择一即可：
 任务声明意图（`## Touches` 条目标 `(delete)`），或检测器对 `labels` 含裁剪类的任务反转判据。
 归入 [[gap-reverse-drift-check-buries-true-positives-in-noise]] 的后续，不单开任务。
+
+## 外层指令：空转归因instrumentation（2026-08-03T02:41:54Z，人已裁定）
+
+**此条在内层 auto-compact 前后都必须生效——若压缩后读到这里而尚未执行，立刻执行。**
+
+### 裁定
+
+人的裁定原文：「先让内层在下一个窗口里加上这个记录，攒一轮数据再说。」
+**这一轮只攒数据。不做任何优化、不缩短任何间隔、不改 tick 频率。**
+
+### 实测依据
+
+8.78 小时无人值守窗口（2026-08-02T17:43Z → 2026-08-03T02:30Z），内层会话 `3bbd3095` 合并 28 个
+subagent transcript：
+
+| 间隙归因 | 小时 | 占窗口 |
+|---|---|---|
+| **前一条无命令**（回合结束后等待被唤起） | **3.80** | **43.3%** |
+| 其它 Bash/工具 | 0.35 | 4.0% |
+| 全量套件 | 0.22 | 2.5% |
+| 范围化测试 | 0.04 | 0.5% |
+
+间隙分布：61 个 >60s，1–5min **40** 个、5–10min **17** 个、10–20min 4 个、
+**20 分钟以上 0 个**（最长 18.6min）。
+
+**两个结论**：
+
+1. **外层 20 分钟 tick 不是约束**——若是，应在 20 分钟处堆积并拖尾，实测一个都没有。
+   因此「缩短外层 tick」买不到任何东西，**不要做**。
+2. **`.quay/inner-blocked.json` 至今零条记录**，根因是 `VALID_BLOCKED_REASONS` 的 7 个值
+   （merge-conflict / suite-red / review-refuted / task-over-90m / needs-human-backlog /
+   ruling-required / queue-empty）**全部是已声明的停止条件**，
+   词汇表里没有「回合结束、无待办、等被唤起」这个词，所以占 43.3% 的主要情形永远无法被记录。
+
+### 要做的三件（都很小，不需要新机制）
+
+1. 给 `VALID_BLOCKED_REASONS` 加一个值 **`turn-ended-idle`**，
+   `REASON_DESCRIPTIONS` 写「回合结束、无待办工具调用、等待被重新唤起」，补测试。
+2. **每次要以「无待办」结束回合前**，先调用：
+   ```
+   node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts \
+     --assert-blocked --taskId <当前或 none> --reason <枚举值> --question "<在等什么，一句话>"
+   ```
+   被唤起后**立刻** `--clear`——`--clear` 会把等待时长写进遥测，**那正是我们要攒的数据**。
+3. **不做优化。** 攒满一个窗口后由外层做归因，再决定优化什么。
+   在 3.80 小时没有归因之前定任何阈值，是 416s 那个错误的重演。
+
+### 文件占用提醒
+
+`docs/analysis/fast-mode-loop-tick.md` 正被在飞的 `gap-dispatch-gate-has-no-checklist-and-no-trace`
+占用。该文档的改动**并进那个任务或等它落地后再改**，不要并行改同一文件。
