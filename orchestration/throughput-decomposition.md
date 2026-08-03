@@ -26,7 +26,7 @@
 >
 > **同一份分析错了三次**：窗口错（算进了外层存在之前）、归因方向错（把条目之后的间隔当该条目
 > 的耗时）、范围错（漏掉 subagent）。三次的共同点是**每次都得出了一个听起来很干脆的结论**。
-> 已把 subagent 合并写进 `orchestration/watch/inner-forensics.mjs`，此后不必重犯。
+> 已把 subagent 合并写进 `plugin/scripts/inner-forensics.mjs`，此后不必重犯。
 
 
 > ## ⚠ 修正（人指出）：分析窗口错了
@@ -89,7 +89,7 @@
 
 三条路，效果依次递增：
 
-- **已做**：`orchestration/watch/inner-state.sh` 挂成 persistent Monitor，检测延迟从 ≤20 分钟降到
+- **已做**：`plugin/scripts/inner-state.sh` 挂成 persistent Monitor，检测延迟从 ≤20 分钟降到
   ~1 分钟。**但它的 `IDLE` 是代理信号**（遥测 `inProgress` 为空），37 次停摆里只覆盖一部分
 - **待做**：[[gap-no-explicit-blocked-signal-from-inner-layer]] —— 内层主动写
   `.quay/inner-blocked.json`，存在性信号，覆盖全部停摆，且**顺带把空转时长变成可计量的数**

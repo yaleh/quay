@@ -1,5 +1,17 @@
 # 快速模式 loop tick 指令
 
+> **模板参数（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）**：本文件是随 quay
+> 插件包分发的内层 tick 文档（`plugin/loop/`），本仓自身的循环直接读这份模板。`quay-init --loop`
+> 铺到目标项目时对**副本**做机械替换，正文本体保持 quay 实值：
+> - `/home/yale/work/quay` → 目标项目根（`--repo-root`）
+> - `scripts/test.sh` → 目标项目测试命令（`--test-command`，必填）
+> - `quay-0:0.0` → 目标项目 tmux 会话（`--tmux-session`）
+> - `plugin/loop/fast-mode-loop-tick.md` / `plugin/loop/orchestrator-loop-tick.md`（本文件的
+>   自引用/互引用）→ 目标项目的 `docs/analysis/fast-mode-loop-tick.md` /
+>   `orchestration/orchestrator-loop-tick.md`
+> 替换只作用于铺出的副本，不修改本模板。铺完后负控制：副本里 grep 不到 `scripts/test.sh` 这类
+> quay 专属字面。
+
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 
 <!--
@@ -15,7 +27,7 @@
 **调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
 
 ```
-/loop 25m 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令
+/loop 25m 执行 plugin/loop/fast-mode-loop-tick.md 中的 tick 指令
 ```
 
 **可查验性 / 为什么用固定间隔（2026-08-03，外层更正理由）**：`/loop` **不是驱动器**——主推进信号
@@ -72,7 +84,7 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 两者满足 → 没有任何东西在跑，通知不会来了，**去核对产出/续跑**。每跑完一步就落盘（任务体/队列文件），不要攒到最后——即使 agent 静默停止，已落盘数据不丢，可从缺口续跑。
 
 **跑全量前调用资源闸（机制，不是散文——`gap-no-resource-awareness-heavy-ops-run-blind`）**：
-`scripts/test.sh` 已在默认全量路径接入 `bash scripts/resource-gate.sh --for full-suite`——WAIT 时
+`scripts/test.sh` 已在默认全量路径接入 `bash plugin/scripts/resource-gate.sh --for full-suite`——WAIT 时
 打印数字后退出非 0，**不静默等待**。手动跑全量同样先调 gate：退出码 0=GO 才跑，非 0=WAIT 不跑。
 gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 CPU 的比例；load 是代理，
 claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
@@ -181,7 +193,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 - `.halt` 存在
 - **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
   它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
-  不是仓库里 needs-human 的总数。分诊规则见 `orchestration/orchestrator-loop-tick.md` 步骤 3）
+  不是仓库里 needs-human 的总数。分诊规则见 `plugin/loop/orchestrator-loop-tick.md` 步骤 3）
 - 上一步全量 suite 非绿
 - 有未解决的合并冲突
 - 就绪队列为空
@@ -285,7 +297,7 @@ node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/script
 规则：
 
 - **文件存在 == 内层在等。** `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复的那一刻。这是
-  存在性信号，不是从缺席推断。`orchestration/watch/inner-state.sh` 用 inotifywait 监视该路径（延迟秒级，
+  存在性信号，不是从缺席推断。`plugin/scripts/inner-state.sh` 用 inotifywait 监视该路径（延迟秒级，
   不再是最多 20 分钟），事件直接带 `reason` + `question`，外层不必读屏就能开始判断。
 - **不手写 JSON。** 只调 CLI（AC4）——`reason` 合法值就是「判断边界」表 + 停止条件里已有的七种，不新增
   语义（AC2，见 CLI `--schema`）。手写 JSON 会造成格式漂移，正是本机制要消灭的。

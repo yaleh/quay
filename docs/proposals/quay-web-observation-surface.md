@@ -113,7 +113,7 @@ CLAUDE.md 的约束是明确的：**Core 只针对任务视图模型编写，从
 - **transcript 不是稳定接口**。它是 Claude Code 的内部格式。2026-08-02 逆向时撞到两个坑：
   subagent 的工具调用**不在主 transcript 里**（在 `<会话 UUID>/subagents/`），
   以及 `/clear` 会新建会话文件导致历史**静默截断**。两者都已在
-  `orchestration/watch/inner-forensics.mjs` 里处理，但那是逆向出来的，不是契约
+  `plugin/scripts/inner-forensics.mjs` 里处理，但那是逆向出来的，不是契约
 - **「当前在执行」这个概念本身需要定义**。遥测的 `inProgress` 在 2026-08-02 误导过三次：
   任务已合并但 `--task-end` 未调、修复类工作跑在任务括号之外、测试污染造出幽灵记录
 - **展示 transcript 尾部有泄露面**：agent 打印过的任何东西都会进那个文件

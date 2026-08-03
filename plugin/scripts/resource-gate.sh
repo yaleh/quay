@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# scripts/resource-gate.sh — the shared resource gate for heavy operations
+# plugin/scripts/resource-gate.sh — the shared resource gate for heavy operations
+# (gap-loop-mechanism-lives-outside-the-package-and-cannot-ship: moved here from scripts/; all
+#  callers now use this canonical path — no old-path shim left behind)
 # (gap-no-resource-awareness-heavy-ops-run-blind).
 #
 # Both layers (inner loop's test.sh, outer loop's orchestrator-loop-tick) call this BEFORE a heavy
@@ -13,8 +15,8 @@
 # Same proxy→structural arc as orchestrator-loop-tick.md step 0b's table.
 #
 # Usage:
-#   scripts/resource-gate.sh                       # report mode: print numbers + verdict, exit 0
-#   scripts/resource-gate.sh --for full-suite      # gate mode:   WAIT → exit non-0 (fail-closed)
+#   plugin/scripts/resource-gate.sh                    # report mode: print numbers + verdict, exit 0
+#   plugin/scripts/resource-gate.sh --for full-suite     # gate mode:   WAIT → exit non-0 (fail-closed)
 #
 # Contract (from the task's ## Contract block):
 #   measure   cpu_stall   = /proc/pressure/cpu 的 some avg10 字段
@@ -22,7 +24,7 @@
 #   measure   heavy_procs = pgrep -xc node-MainThread 的计数
 #   band      cpu_ok      = some avg10 < 40
 #   invariant nproc 在判定前后一致
-#   invoke    `scripts/resource-gate.sh --for full-suite`
+#   invoke    `plugin/scripts/resource-gate.sh --for full-suite`
 #   control   人为把 cpu some avg10 压高（起 N 个 busy loop）⇒ gate 必须返回 WAIT
 #
 # AC4 — the node-process count uses `pgrep -xc node-MainThread` (exact `comm` match). NOT `pgrep -f`
@@ -53,7 +55,7 @@ case "${1:-}" in
     if [ "${2:-}" = "full-suite" ]; then
       MODE="full-suite"
     else
-      echo "usage: scripts/resource-gate.sh [--for full-suite]" >&2
+      echo "usage: plugin/scripts/resource-gate.sh [--for full-suite]" >&2
       exit 2
     fi
     ;;
@@ -65,7 +67,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: scripts/resource-gate.sh [--for full-suite]" >&2
+    echo "usage: plugin/scripts/resource-gate.sh [--for full-suite]" >&2
     exit 2
     ;;
 esac

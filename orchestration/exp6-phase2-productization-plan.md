@@ -51,7 +51,7 @@ archguard 的 `.quay/config.yml` **完全自足**——路径全相对，
 ["README.md","CHANGELOG.md","LICENSE.md","bin","src","dist"]
 ```
 
-⇒ **两份 tick 文档、`scripts/heavy-op-token.sh`、`scripts/resource-gate.sh`、
+⇒ **两份 tick 文档、`plugin/scripts/heavy-op-token.sh`、`plugin/scripts/resource-gate.sh`、
 `scripts/test.sh` 的判绿约定——一个都不在包里。**
 
 一个照 README 走的人拿不到它们。我给 archguard 装上它们，用的是 `cp`。

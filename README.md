@@ -184,6 +184,45 @@ installed package:
 quay-native init --dry-run
 ```
 
+## Cold start: two-layer loop (the methodology, not just the task board)
+
+quay is also a Claude Code **plugin** that lays down the two-layer autonomous
+loop (an outer orchestrator watching an inner developer) into a project that has
+never used quay before. The command sequence is short enough to fit here:
+
+```
+# 1. install the plugin (Claude Code):
+/plugin marketplace add yaleh/quay
+/plugin install quay
+
+# 2. in the target project, lay down the two-layer loop mechanism:
+#    (the /quay:init skill copies workflows + agents + gate scripts + the loop,
+#    substituting YOUR project's test command / tmux session / repo root)
+/quay:init --all --loop --test-command "npm test"
+
+# 3. start the outer orchestrator (see the laid-down tick doc):
+#    orchestration/orchestrator-loop-tick.md  →  /loop 20m 执行 ... 中的 tick 指令
+#    docs/analysis/fast-mode-loop-tick.md     →  /loop 25m 执行 ... 中的 tick 指令
+```
+
+What `--loop` lays into the target project (from the plugin bundle — nothing is
+copied out of the quay development tree):
+
+- `orchestration/orchestrator-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`
+  — the outer and inner tick documents, with `scripts/test.sh` / the quay repo
+  root / `quay-0:0.0` mechanically replaced by the target's own test command,
+  repo root, and tmux session (no hand `sed`).
+- `plugin/scripts/` — the checkers (`fast-mode-telemetry.ts`,
+  `task-contract-check.ts`, `task-status-drift-check.ts`,
+  `touches-orthogonality-check.ts`, `concurrent-batch-scheduler.ts`,
+  `inner-blocked-signal.ts`, …), the resource gate, the heavy-op token, and the
+  observation mechanism (`inner-state.sh` Monitor + `inner-forensics.mjs`), plus
+  their transitive dependencies.
+
+Upgrading an already-initialized project is the same command: `quay-init` is
+idempotent, only fills the diff, and never overwrites local edits to laid-down
+files (conflicts are listed for you to adjudicate).
+
 ## Usage
 
 All commands below are real, live-run invocations against this

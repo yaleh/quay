@@ -1,7 +1,7 @@
 # 内层 tick 文档的规范性散文逐条审计
 
 **日期**：2026-08-03
-**对象**：`docs/analysis/fast-mode-loop-tick.md`（266 非空行）
+**对象**：`plugin/loop/fast-mode-loop-tick.md`（266 非空行）
 **方法**：grep 规范性标记（`必须|不得|应当|禁止|MUST|NEVER|一律|只能|停止|则`）得 49 条，逐条判定
 **用途**：决定是否值得建「决策性散文无执行者」的检查
 

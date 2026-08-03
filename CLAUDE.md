@@ -22,7 +22,7 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     from `max(1, floor(nproc / 2.1))` (gap-no-resource-awareness-heavy-ops-run-blind AC5; the old
     hardcoded 8 was a 4.25× oversubscription on 4 cores — 8 workers + spawned subprocesses = 17
     processes). An explicit `--test-concurrency=N` always overrides. The full-suite default path
-    also consults the shared resource gate (`scripts/resource-gate.sh --for full-suite`) and exits
+    also consults the shared resource gate (`plugin/scripts/resource-gate.sh --for full-suite`) and exits
     non-0 on WAIT. Do not hand-write a new copy of the glob or an exclusion list elsewhere — edit the script.
   - Full safe-by-default suite: `scripts/test.sh` (no args)
   - Single file: `scripts/test.sh packages/quay/test/gate.test.mjs`

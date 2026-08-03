@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# scripts/heavy-op-token.sh — ONE cross-project token for heavy operations
+# plugin/scripts/heavy-op-token.sh — ONE cross-project token for heavy operations
+# (gap-loop-mechanism-lives-outside-the-package-and-cannot-ship: moved here from scripts/; all
+#  callers now use this canonical path — no old-path shim left behind)
 # (gap-no-cross-project-heavy-op-token).
 #
 # WHY (the failure mode this closes): three projects share four cores — quay's `scripts/test.sh`
@@ -15,24 +17,24 @@
 # THIS IS A SCHEDULING TOKEN, NOT A SAFETY CHECK. It deliberately FAILS OPEN (exit 0 + a loud
 # marker) when the state dir is unwritable/unreachable: a fail-closed token would stop all three
 # projects and cannot self-recover; a fail-open one costs one re-acquirable contention. (Contrast
-# scripts/resource-gate.sh, which FAILS CLOSED on an unmeasurable signal — that IS a safety check.)
+# plugin/scripts/resource-gate.sh, which FAILS CLOSED on an unmeasurable signal — that IS a safety check.)
 # AC5 pins BOTH paths: fail-open when unwritable, and normal mutual exclusion after recovery.
 #
 # STATE LIVES OUTSIDE EVERY REPO: ${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/heavy-op/ — shared by all
 # three projects; deleting any one repo cannot delete the others' tokens.
 #
 # Usage:
-#   bash scripts/heavy-op-token.sh --status
-#   bash scripts/heavy-op-token.sh --acquire <project> [--timeout <s>]
-#   bash scripts/heavy-op-token.sh --release <project>
-#   bash scripts/heavy-op-token.sh --root <dir> ...   # test seam: override the state-dir root
+#   bash plugin/scripts/heavy-op-token.sh --status
+#   bash plugin/scripts/heavy-op-token.sh --acquire <project> [--timeout <s>]
+#   bash plugin/scripts/heavy-op-token.sh --release <project>
+#   bash plugin/scripts/heavy-op-token.sh --root <dir> ...   # test seam: override the state-dir root
 #
 # Contract (from the task's ## Contract block):
 #   measure  holder   = `--status` 的 holder 字段
 #   measure  wait_ms  = `--acquire <project>` 输出的 waited_ms 字段
 #   measure  reclaims = `--status` 的 stale_reclaims 字段
 #   band     concurrent_holders = 1
-#   invoke   `bash scripts/heavy-op-token.sh --acquire quay --timeout 0`
+#   invoke   `bash plugin/scripts/heavy-op-token.sh --acquire quay --timeout 0`
 #   control  A 持有时 B --acquire ⇒ B 失败且打印 A 的身份与已持有时长；A --release 后 B 成功
 #
 # MECHANISM:

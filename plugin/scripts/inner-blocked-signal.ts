@@ -19,7 +19,7 @@
 // below — never a second event format).
 //
 // REASON VOCABULARY (AC2): `reason` legal values ARE the inner layer's EXISTING stop-and-wait
-// conditions from docs/analysis/fast-mode-loop-tick.md ("判断边界" table + step-3 stop conditions).
+// conditions from plugin/loop/fast-mode-loop-tick.md ("判断边界" table + step-3 stop conditions).
 // No new semantics introduced — this module only gives those conditions a voice. Mapping:
 //   merge-conflict       ← 合并冲突 (abort, needs-human, stop dispatch)
 //   suite-red            ← 全量 suite 非绿 (stop, no more merges)

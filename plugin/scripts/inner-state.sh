@@ -10,7 +10,13 @@
 # INNER_STATE_WORK_ROOT overrides the monitored checkout (test seam for inner-state.test.mjs's
 # behavioral BLOCKED test, which must resolve plugin/scripts/inner-blocked-signal.ts pre-merge).
 # Production callers never set it → default (the main checkout), behavior unchanged.
-cd "${INNER_STATE_WORK_ROOT:-/home/yale/work/quay}" || exit 1
+# 默认根自定位（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）：本文件已迁入
+# plugin/scripts/（旧路径 orchestration/watch/ 已删，调用方全部改用本路径）。按 BASH_SOURCE
+# 推导工作根，不再硬编码任何绝对仓库路径 —— 既经得起「quay 开发树改名」负控制，也随
+# quay-init --loop 铺到目标项目后直接可用。
+_INNER_STATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_INNER_STATE_DEFAULT_ROOT="$(cd "${_INNER_STATE_SCRIPT_DIR}/../.." && pwd)"
+cd "${INNER_STATE_WORK_ROOT:-$_INNER_STATE_DEFAULT_ROOT}" || exit 1
 prev_tasks=""; prev_head=""; alerted=""; first=1
 
 # ── 内层存在性阻塞信号（gap-no-explicit-blocked-signal-from-inner-layer, AC6）──────────────

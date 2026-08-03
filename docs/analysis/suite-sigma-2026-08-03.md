@@ -15,7 +15,7 @@ Task: `gap-suite-sigma-distribution-stale-after-retirement`
   ——两 commit 之间套件文件差异**恰为退役删掉的 18 个文件**（`comm` 验证：0 新增、18 删除）
 - 预构建 dist：两 worktree 的 `dist/quay.js` + `dist/quay-native.js`，均比所有 `.ts` 源新
   （每 run 前 `find -newer` 0 命中）——cli-entry 走 dist，避免 913ms/调用
-- 每 run 前 `bash scripts/resource-gate.sh --for full-suite` 必须 GO（cpu_stall < 40）
+- 每 run 前 `bash plugin/scripts/resource-gate.sh --for full-suite` 必须 GO（cpu_stall < 40）
 - 工具：`plugin/scripts/measure-suite.mjs --json`（现成，未改）
 - node: v26.5.0, `--test-concurrency=8`；nproc=4
 

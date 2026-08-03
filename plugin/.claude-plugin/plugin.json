@@ -1,7 +1,7 @@
 {
 	"name": "quay",
 	"version": "0.3.13",
-	"description": "quay: a provider-agnostic task board. Bundles the quay MCP server, skills (author, execute, quay-directive, loop-driver, init, quay-task-to-plan, routines, quay-native-methodology, quay-webui-bootstrap-methodology), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
+	"description": "quay: a provider-agnostic task board. Bundles the quay MCP server, skills (author, execute, quay-directive, loop-driver, init, quay-task-operator, quay-task-to-plan, routines, quay-native-methodology, quay-webui-bootstrap-methodology), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
 	"author": {
 		"name": "Yale Huang",
 		"url": "https://github.com/yaleh"
@@ -15,6 +15,7 @@
 		"./skills/quay-directive/SKILL.md",
 		"./skills/loop-driver/SKILL.md",
 		"./skills/init/SKILL.md",
+		"./skills/quay-task-operator/SKILL.md",
 		"./skills/quay-task-to-plan/SKILL.md",
 		"./skills/routines/SKILL.md",
 		"./skills/quay-native-methodology/SKILL.md",
