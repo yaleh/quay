@@ -142,15 +142,18 @@ export function mergeWorktree({ workspace, milestone }) {
 }
 
 // removeWorktree — real `git worktree remove` + `git branch -d` of the now-merged branch. `--force`
-// is deliberately NOT used on the worktree remove beyond what is needed; `-d` (not `-D`) on the branch
-// refuses to delete an UNMERGED branch (a mechanical backstop: if the merge step was skipped, branch
-// cleanup fails loudly rather than destroying unmerged work). Returns typed outcomes for each step.
+// is NEVER used on the worktree remove (gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion,
+// 2026-08-03): git's own "contains modified or untracked files" refusal is the LAST gate, so a worktree
+// that somehow carries uncommitted/untracked work at Land fails closed (git-worktree-remove-failed) and
+// a human reconciles — never an explicit bypass that destroys it. `-d` (not `-D`) on the branch refuses
+// to delete an UNMERGED branch (a mechanical backstop: if the merge step was skipped, branch cleanup
+// fails loudly rather than destroying unmerged work). Returns typed outcomes for each step.
 export function removeWorktree({ workspace, milestone }) {
   const num = parseMilestoneNum(milestone);
   const rel = worktreeRelPath(num);
   const branch = worktreeBranch(num);
   if (!rel || !branch) return { outcome: "error", code: "no-numeric-milestone", detail: `cannot derive worktree path from milestone=${milestone}` };
-  const rm = _gitOk(workspace, ["worktree", "remove", rel, "--force"]);
+  const rm = _gitOk(workspace, ["worktree", "remove", rel]);
   const del = _gitOk(workspace, ["branch", "-d", branch]);
   if (!rm.ok) return { outcome: "error", code: "git-worktree-remove-failed", detail: rm.out };
   if (!del.ok) return { outcome: "error", code: "git-branch-delete-failed", detail: del.out };
@@ -163,12 +166,28 @@ export function removeWorktree({ workspace, milestone }) {
 // milestone would then fail closed at --add (worktree-path-exists) FOREVER, because nothing auto-cleans
 // (worktree-branch-hygiene-check.sh detects but does not remove). This is SAFE to clean automatically
 // because the path/branch are milestone-scoped, so a stranded same-milestone worktree can only ever be
-// the prior crashed attempt of THIS milestone — and we only clean it when its branch has ZERO commits
-// ahead of master (it never built anything real). A branch WITH commits ahead is real work → we FAIL
-// CLOSED (`has-commits`) and never silently discard it; a human must reconcile. Returns:
-//   {outcome:"cleaned"}        — a stranded 0-ahead worktree/branch was removed; caller may retry --add
+// the prior crashed attempt of THIS milestone.
+//
+// THREE gates, ALL must be safe before anything is deleted (gap-reclaim-21-merged-worktrees-and-fix-my-
+// bad-criterion, 2026-08-03):
+//   1. MERGED: `git merge-base --is-ancestor <branch> master` — are ALL branch commits already in
+//      master? (Directly answers the question; the OLD "0 commits ahead + two-dot diff" criterion
+//      false-flagged every merged branch as `merged-then-reverted` once master advanced past it.)
+//   2. NOT REVERTED: do the files the branch created still exist on master? `git revert <merge>` keeps
+//      the merge commit in master history (so gate 1 still passes) while deleting the branch's files
+//      from master's tree — detect it via `git diff --name-only --diff-filter=A master..<branch>`
+//      (two-dot: files the branch has that master's tree lacks). Non-empty → `merged-then-reverted`.
+//   3. CLEAN WORKTREE: `git status --porcelain` INSIDE the worktree must be empty. A clean branch does
+//      NOT imply a clean worktree — 0-ahead/merged only proves no committed work is lost, not that the
+//      working tree holds nothing. Non-empty → `has-uncommitted`, never deleted.
+//
+// Branch WITH commits ahead of master is real work → FAIL CLOSED (`has-commits`) and never silently
+// discarded; a human must reconcile. Returns:
+//   {outcome:"cleaned"}          — a safe worktree/branch was removed; caller may retry --add
 //   {outcome:"nothing-to-clean"} — no stranded worktree/branch existed
-//   {outcome:"has-commits", aheadCount} — real work present; refuse (caller → needs-human)
+//   {outcome:"has-commits", aheadCount}            — real committed work ahead; refuse (caller → needs-human)
+//   {outcome:"merged-then-reverted"}               — branch content reverted away from master; refuse
+//   {outcome:"has-uncommitted"}                    — worktree has uncommitted/untracked changes; refuse
 export function cleanStaleWorktree({ workspace, milestone }) {
   const num = parseMilestoneNum(milestone);
   const rel = worktreeRelPath(num);
@@ -179,36 +198,48 @@ export function cleanStaleWorktree({ workspace, milestone }) {
   const branchExists = _gitOk(workspace, ["rev-parse", "--verify", "--quiet", branch]).ok;
   if (!pathExists && !branchExists) return { outcome: "nothing-to-clean" };
   if (branchExists) {
-    // Commits reachable from the branch but NOT from master = commits ahead = real build work. A crashed
-    // attempt that never committed is at master (or an ancestor) → 0 ahead → unambiguously safe to clean.
-    const ahead = _gitOk(workspace, ["rev-list", "--count", branch, "--not", "master"]);
-    const aheadCount = ahead.ok ? Number(ahead.out) : NaN;
-    if (!Number.isFinite(aheadCount)) return { outcome: "error", code: "cannot-count-ahead", detail: ahead.out };
-    if (aheadCount > 0) return { outcome: "has-commits", aheadCount, branch };
-    // 0 ahead is NOT sufficient after a revert-of-merge (gap-stranded-worktree-branches-have-no-alarm-channel,
-    // 2026-08-02): `git revert <merge>` leaves the merge commit in master history so rev-list --count
-    // reports 0 while the branch's CONTENT (two-dot diff) is still 8k+ lines off master. Treat
-    // "0 commits ahead BUT non-empty two-dot diff" as `merged-then-reverted`: real work that neither
-    // master nor any routine check will see — refuse to clean, escalate to needs-human.
-    const twodot = _gitOk(workspace, ["diff", "--quiet", "master", branch]);
-    if (twodot.ok) {
-      // diff --quiet exits 0 → no content difference → genuinely merged, safe to clean.
-    } else {
-      const diffStat = _gitOk(workspace, ["diff", "--shortstat", "master", branch]);
-      return { outcome: "merged-then-reverted", branch, detail: diffStat.ok ? diffStat.out : "two-dot diff non-empty", worktreeRel: rel };
+    // Gate 1 — merged? `merge-base --is-ancestor` exits 0 iff every commit on the branch is reachable
+    // from master. A branch with commits NOT in master is real build work → has-commits (never clean).
+    const ancestor = _gitOk(workspace, ["merge-base", "--is-ancestor", branch, "master"]);
+    if (!ancestor.ok) {
+      const ahead = _gitOk(workspace, ["rev-list", "--count", branch, "--not", "master"]);
+      const aheadCount = ahead.ok ? Number(ahead.out) : NaN;
+      return { outcome: "has-commits", aheadCount: Number.isFinite(aheadCount) ? aheadCount : null, branch, worktreeRel: rel };
+    }
+    // Gate 2 — reverted? Branch is merged, but a revert-of-merge can still have removed the branch's
+    // CONTENT from master's tree (M243's signal was workflow-replay.ts disappearing; 83 files at
+    // 88e17bf2). Two-dot A-filter lists branch-present/master-absent files = branch-created files that
+    // no longer exist on master. Non-empty → the content was reverted away → refuse, escalate.
+    const branchFiles = _gitOk(workspace, ["diff", "--name-only", "--diff-filter=A", `master..${branch}`]);
+    if (!branchFiles.ok) return { outcome: "error", code: "cannot-diff-branch", detail: branchFiles.out, worktreeRel: rel };
+    const missing = branchFiles.out.split("\n").filter(Boolean);
+    if (missing.length > 0) {
+      const shown = missing.slice(0, 5).join(", ");
+      const extra = missing.length > 5 ? ` (+${missing.length - 5} more)` : "";
+      return { outcome: "merged-then-reverted", branch, worktreeRel: rel, detail: `${missing.length} branch-created file(s) missing from master: ${shown}${extra}` };
     }
   }
-  // 0 commits ahead AND empty two-dot diff (or branch already gone but path/metadata lingering) → clean.
+  // Gate 3 — worktree clean? git status --porcelain INSIDE the worktree (not the primary checkout):
+  // non-empty means the worktree holds uncommitted/untracked work that deleting would destroy.
   if (pathExists) {
-    const rm = _gitOk(workspace, ["worktree", "remove", rel, "--force"]);
+    const status = _gitOk(abs, ["status", "--porcelain"]);
+    if (!status.ok) return { outcome: "error", code: "cannot-status-worktree", detail: status.out, worktreeRel: rel };
+    if (status.out !== "") {
+      return { outcome: "has-uncommitted", branch, worktreeRel: rel, detail: `worktree has uncommitted/untracked changes:\n${status.out}` };
+    }
+  }
+  // All three gates safe (or branch already gone but path/metadata lingering) → clean. `git worktree
+  // remove` WITHOUT --force: git's own "contains modified or untracked files" refusal is the LAST gate.
+  if (pathExists) {
+    const rm = _gitOk(workspace, ["worktree", "remove", rel]);
     if (!rm.ok) _gitOk(workspace, ["worktree", "prune"]); // corrupt metadata → prune the registration
   } else {
     _gitOk(workspace, ["worktree", "prune"]);
   }
   if (branchExists) {
-    // 0-ahead branch: -D is safe (we just PROVED no real work is lost); -d could refuse a non-ancestor
-    // of HEAD even at 0-ahead, so -D is the correct tool for a proven-empty branch.
-    const del = _gitOk(workspace, ["branch", "-D", branch]);
+    // Branch proven merged into master (ancestor) → `-d` (NOT -D) succeeds and is git's own
+    // "is this merged into HEAD" double-check — the last gate, not our assertion.
+    const del = _gitOk(workspace, ["branch", "-d", branch]);
     if (!del.ok) return { outcome: "error", code: "git-branch-delete-failed", detail: del.out };
   }
   return { outcome: "cleaned", worktreeRel: rel, branch };

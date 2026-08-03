@@ -223,6 +223,104 @@ test("cleanStaleWorktree: cleans a stranded 0-ahead worktree (crash recovery) bu
   }
 });
 
+// ── gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion (2026-08-03) ───────────────────────────
+// The OLD `merged-then-reverted` criterion compared a two-dot tree diff `master..<branch>`. For a
+// branch merged days ago, master has advanced hundreds of commits, so the two-dot diff is ALWAYS
+// non-empty — the criterion false-flagged every genuinely-merged branch (all 21, once master moved on).
+// The FIX: ask directly "are all branch commits in master" (`merge-base --is-ancestor`) and "do the
+// files the branch created still exist on master" (two-dot `--diff-filter=A`). These tests pin the
+// false-positive fix (AC1) AND that the true positive (revert-of-merge, the M243 shape) is still caught
+// (AC2), plus the worktree-cleanliness gate (AC3) and the removal of `--force` (AC4).
+
+test("cleanStaleWorktree: a merged branch whose master has since advanced is CLEANED, not false-flagged merged-then-reverted (AC1)", () => {
+  const { dir, g } = makeRepo();
+  try {
+    // Full milestone lifecycle: add → commit work in the worktree → merge back (branch now an ancestor).
+    assert.equal(addWorktree({ workspace: dir, milestone: "M200" }).outcome, "added");
+    const wt = path.join(dir, worktreeRelPath(200));
+    fs.writeFileSync(path.join(wt, "feature.txt"), "x\n");
+    execFileSync("git", ["-C", wt, "add", "-A"]); execFileSync("git", ["-C", wt, "commit", "-qm", "feat"]);
+    assert.equal(mergeWorktree({ workspace: dir, milestone: "M200" }).outcome, "merged");
+    // Master ADVANCES with an unrelated commit. Under the OLD two-dot-diff criterion this made
+    // `git diff master..branch` non-empty → the merged branch was locked as merged-then-reverted
+    // forever (the exact 21-worktree/1.1G failure). The branch's own content is still on master.
+    fs.writeFileSync(path.join(dir, "unrelated.txt"), "master moved on\n");
+    g(["add", "-A"]); g(["commit", "-qm", "master advance"]);
+    const cleaned = cleanStaleWorktree({ workspace: dir, milestone: "M200" });
+    assert.equal(cleaned.outcome, "cleaned", JSON.stringify(cleaned));
+    assert.equal(g(["branch", "--list", "milestone/M200/iteration-0"]), "", "merged branch removed");
+    assert.ok(!fs.existsSync(path.join(dir, worktreeRelPath(200))), "clean merged worktree removed");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cleanStaleWorktree: a revert-of-merge IS still reported merged-then-reverted — branch-created files missing from master (AC2, M243 shape)", () => {
+  const { dir, g } = makeRepo();
+  try {
+    assert.equal(addWorktree({ workspace: dir, milestone: "M200" }).outcome, "added");
+    const wt = path.join(dir, worktreeRelPath(200));
+    fs.writeFileSync(path.join(wt, "replay-fixture.json"), '{"k":"v"}\n');
+    execFileSync("git", ["-C", wt, "add", "-A"]); execFileSync("git", ["-C", wt, "commit", "-qm", "add fixture"]);
+    assert.equal(mergeWorktree({ workspace: dir, milestone: "M200" }).outcome, "merged");
+    // Revert the merge ON master: the merge commit stays in history (branch remains an ancestor) but
+    // the branch-created file disappears from master's tree — the exact M243 revert-of-merge shape
+    // (83 workflow-replay files missing at 88e17bf2). `-m 1` is required to revert a merge commit.
+    g(["revert", "--no-edit", "-m", "1", "HEAD"]);
+    assert.equal(fs.existsSync(path.join(dir, "replay-fixture.json")), false, "revert removed the file from master");
+    assert.ok(fs.existsSync(path.join(wt, "replay-fixture.json")), "the file still exists in the branch worktree");
+    const res = cleanStaleWorktree({ workspace: dir, milestone: "M200" });
+    assert.equal(res.outcome, "merged-then-reverted", JSON.stringify(res));
+    assert.match(res.detail, /replay-fixture\.json/);
+    // Real work is NOT discarded: branch and worktree survive the refusal.
+    assert.match(g(["branch", "--list", "milestone/M200/iteration-0"]), /iteration-0/);
+    assert.ok(fs.existsSync(path.join(wt, "replay-fixture.json")), "worktree file must survive");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cleanStaleWorktree: a MERGED branch whose WORKTREE is dirty is refused (has-uncommitted) and the worktree survives (AC3)", () => {
+  const { dir, g } = makeRepo();
+  try {
+    assert.equal(addWorktree({ workspace: dir, milestone: "M200" }).outcome, "added");
+    const wt = path.join(dir, worktreeRelPath(200));
+    fs.writeFileSync(path.join(wt, "feature.txt"), "x\n");
+    execFileSync("git", ["-C", wt, "add", "-A"]); execFileSync("git", ["-C", wt, "commit", "-qm", "feat"]);
+    assert.equal(mergeWorktree({ workspace: dir, milestone: "M200" }).outcome, "merged");
+    // Dirty the WORKTREE with an uncommitted edit — a clean branch does NOT imply a clean worktree.
+    fs.writeFileSync(path.join(wt, "feature.txt"), "x\nuncommitted\n");
+    const res = cleanStaleWorktree({ workspace: dir, milestone: "M200" });
+    assert.equal(res.outcome, "has-uncommitted", JSON.stringify(res));
+    assert.match(res.detail, /feature\.txt/);
+    // The dirty worktree is PRESERVED (git-status gate, never --force past it).
+    assert.ok(fs.existsSync(path.join(wt, "feature.txt")));
+    assert.ok(fs.existsSync(path.join(dir, worktreeRelPath(200))), "worktree dir must survive");
+    assert.match(g(["branch", "--list", "milestone/M200/iteration-0"]), /iteration-0/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("removeWorktree no longer uses --force: git's own dirty-worktree refusal is the last gate (AC4)", () => {
+  const { dir, g } = makeRepo();
+  try {
+    assert.equal(addWorktree({ workspace: dir, milestone: "M200" }).outcome, "added");
+    const wt = path.join(dir, worktreeRelPath(200));
+    // Untracked non-ignored file in the worktree, nothing committed. `git worktree remove` WITHOUT
+    // --force refuses with git's built-in "contains modified or untracked files" gate — the protection
+    // the old code explicitly bypassed with --force.
+    fs.writeFileSync(path.join(wt, "dirty.txt"), "uncommitted\n");
+    const res = removeWorktree({ workspace: dir, milestone: "M200" });
+    assert.equal(res.outcome, "error");
+    assert.equal(res.code, "git-worktree-remove-failed");
+    assert.match(g(["worktree", "list"]), /iteration-0/, "worktree must survive git's refusal");
+    assert.ok(fs.existsSync(path.join(wt, "dirty.txt")), "uncommitted file must survive");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── Obstacle 4: the Land lock's mutual exclusion is REAL — deterministic env-gated overlap test ─────
 // Mirrors proposal-convergence.ts's QUAY_EPOCH_LOCK_TEST_HOLD_MS regression test (a broken lock
 // surfaced only ~57% of the time relying on scheduling luck). QUAY_LAND_LOCK_TEST_HOLD_MS widens the
