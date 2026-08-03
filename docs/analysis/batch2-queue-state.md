@@ -589,6 +589,15 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 外层两天后偶然发现的，非机制报出）。
 **web-cannot-show 按原样执行**（前提未变）。
 
+### 外层派发（05T03:58Z）：sigma 测量任务已派
+
+`gap-suite-sigma-distribution-stale-after-retirement`（`a1a012410aba6d9d3`，runId `fm-...-e7g0qj`）——
+优先级在 web 之后，用现成 `measure-suite.mjs` 不写新工具。**两个前置（AC 非建议）**：①dist 必须预构建且
+比 .ts 新（陈旧 dist → cli 路由 TS 源，cli.test.mjs 虚高 ~41s）；②低压力窗口过资源闸 GO（CPU 饥饿杀测试
+非拖慢，cancelled 文件无 duration_ms，Σ 偏低）。**只测量不优化**（AC7 不得改 *.test.mjs）。核心数：删 18 文件
+后 Σ 降多少 vs 墙钟 +1.2%——「Σ 降 ≠ 墙钟降」直接证据（外层昨天分母用错 34.8% vs 正确 4.9%，收益高估 7x）。
+在飞满 3（stranded + web + sigma）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
