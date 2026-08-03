@@ -1,18 +1,24 @@
-// @test-group engine
+// @test-group governance
 // task-contract-check.test.mjs — the consumer-side checker for the `## Contract` block + `## Dispatch
 // review` section (tasks/gap-dispatch-gate-has-no-checklist-and-no-trace). The dispatch gate's five
 // verbal questions become a machine-readable Contract; this test pins the parser (shared with
 // task-schema.ts), the A9/A10 syntax checks, the FIVE consumer judgments (AC↔measure ref, measure
-// command+field, invoke verbatim evidence, defect→control, blank-value), the fence-aware section
+// command+field, invoke ENTRY-PATH evidence, defect→control, blank-value), the fence-aware section
 // extraction, and the AC6 ratchet data-file invariant.
+//
+// gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: the invoke-evidence criterion was
+// changed from VERBATIM string to the command's EXECUTABLE ENTRY PATH (placeholders like <ISO> make
+// verbatim matching impossible by construction; 6 of the 7 prior findings were false positives). The
+// checker itself is now wired into scripts/test.sh's run_static_checks (AC4) so the ratchet CANNOT
+// grow unnoticed. AC8: this file declares `// @test-group governance`.
 //
 // AC1 six-key syntax (task-schema) · AC2 five consumer judgments read content · AC3 Dispatch review
 // format + missing-section report · AC5 synthetic violation demo (AC-threshold-no-measure-ref,
-// measure-no-command) · AC6 ratchet data file · AC8 @test-group engine.
+// measure-no-command) · AC6 ratchet data file · AC8 @test-group governance.
 //
 // Run: scripts/test.sh plugin/test/task-contract-check.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,6 +39,7 @@ import {
   findWorkspaceRoot,
   readRatchet,
   writeRatchet,
+  invokeEntryPath,
   DATA_FILE_REL,
 } from "../scripts/task-contract-check.ts";
 
@@ -52,6 +59,15 @@ function taskBody({ labels = [], status = "todo", contract, dispatchReview, ac, 
   if (extraBody) parts.push(extraBody);
   return fm({ list: labels, status }, `extra:\n  schema: "v1"`) + parts.join("");
 }
+
+// ── Governance self-skip (AC8 @test-group governance) ─────────────────────────────────────────────
+// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
+// precedent) — the checker itself is enforced unconditionally via scripts/test.sh's
+// run_static_checks, and the file runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or
+// with `--group governance`.
+if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
+  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
+} else {
 
 // ── parseContract ───────────────────────────────────────────────────────────────────────────────────
 
@@ -336,6 +352,95 @@ test("todo task: invoke evidence not required yet", () => {
   assert.ok(!violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(violations));
 });
 
+// ── invokeEntryPath (gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed) ────────────────
+
+test("invokeEntryPath: first slash-bearing token, skipping interpreter + flags", () => {
+  assert.equal(invokeEntryPath("node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <ISO>"), "orchestration/watch/inner-forensics.mjs");
+  assert.equal(invokeEntryPath("bash scripts/heavy-op-token.sh --acquire quay --timeout 0"), "scripts/heavy-op-token.sh");
+  assert.equal(invokeEntryPath("node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173"), "packages/quay/bin/quay.ts");
+  assert.equal(invokeEntryPath("node --experimental-strip-types plugin/scripts/task-schema-check.ts <file>"), "plugin/scripts/task-schema-check.ts");
+  assert.equal(invokeEntryPath("bash scripts/test.sh"), "scripts/test.sh");
+  assert.equal(invokeEntryPath("node plugin/scripts/runtime-usage-inventory.ts --since <ISO> --json"), "plugin/scripts/runtime-usage-inventory.ts");
+});
+
+test("invokeEntryPath: no path token → fall back to the full command string", () => {
+  assert.equal(invokeEntryPath("git status"), "git status");
+  assert.equal(invokeEntryPath("quay gate --gate dod X-001"), "quay gate --gate dod X-001");
+});
+
+// Entry-path invoke evidence (AC1/AC3): the criterion is the EXECUTABLE ENTRY PATH outside the
+// Contract block, not the verbatim string. The 6 previously-false findings had the path elsewhere.
+
+test("done task: invoke entry path present outside Contract (different flags) → no finding", () => {
+  // gap-web-cannot-show: invoke says `--port 4173`, evidence ran `--port 4174` on a scratch worktree.
+  const text = taskBody({
+    status: "done",
+    contract: `invoke \`node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173\``,
+    ac: `- [x] AC1: 服务`,
+    extraBody: `## Execution record\n\n服务：node packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4174（scratch worktree）\n`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(!violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(violations));
+});
+
+test("done task: invoke entry path present outside Contract (interpreter dropped) → no finding", () => {
+  // gap-tests-never-clean: invoke says `bash scripts/test.sh`, evidence wrote `scripts/test.sh` 全绿.
+  const text = taskBody({
+    status: "done",
+    contract: `invoke \`bash scripts/test.sh\` 前后各跑一次 \`ls -1 /tmp | wc -l\``,
+    ac: `- [x] AC1: 跑`,
+    extraBody: `## Acceptance Criteria\n\n- [x] \`scripts/test.sh\` 全绿：fan-in 套件 2054 tests / 2035 pass\n`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(!violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(violations));
+});
+
+test("AC1: invoke with placeholder (<ISO>/<file>) is judged by entry path, not the full string", () => {
+  // Placeholder present + entry path present outside Contract → no finding.
+  const present = taskBody({
+    status: "done",
+    contract: `invoke \`node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <ISO>\``,
+    ac: `- [x] AC1: 跑`,
+    extraBody: `## Execution record\n\n$ node orchestration/watch/inner-forensics.mjs verify 全量套件 --since 2026-08-03T01:59:40Z\n`,
+  });
+  assert.ok(!scanTaskText(present, "tasks/x.md").violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(scanTaskText(present, "tasks/x.md").violations));
+  // Placeholder present + entry path absent outside Contract → still a finding.
+  const absent = taskBody({
+    status: "done",
+    contract: `invoke \`node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <ISO>\``,
+    ac: `- [x] AC1: 跑`,
+    extraBody: `## Execution record\n\n跑了别的命令。\n`,
+  });
+  assert.ok(scanTaskText(absent, "tasks/x.md").violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(scanTaskText(absent, "tasks/x.md").violations));
+});
+
+test("AC2 negative control: entry path appears ONLY in the Contract → still reported", () => {
+  // gap-serve-task-list-dies-on-one-malformed-task: the ONLY `packages/quay/bin/quay.ts` occurrence
+  // is the invoke line inside ## Contract itself. A done task must show the path outside the block.
+  const text = taskBody({
+    status: "done",
+    contract: `invoke \`node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173\``,
+    ac: `- [x] AC1: 服务`,
+    extraBody: `## Execution record\n\n跑了别的命令。\n`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(violations));
+  assert.match(violations.find((v) => v.code === "invoke-evidence-missing").what, /packages\/quay\/bin\/quay\.ts/);
+});
+
+test("AC2 negative control: entry path inside a Contract MEASURE line does NOT satisfy the evidence", () => {
+  // The path appears in the `measure` line of the Contract, but the Contract block is excluded —
+  // a measure mention is not "the command was run".
+  const text = taskBody({
+    status: "done",
+    contract: `measure exit_code = \`node packages/quay/bin/quay.ts serve --port 4173\` 输出的 exit_code 字段\ninvoke \`node packages/quay/bin/quay.ts serve --port 4173\``,
+    ac: `- [x] AC1: 服务`,
+    extraBody: `## Execution record\n\n跑了别的命令。\n`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(violations));
+});
+
 test("defect task without control → defect-no-control", () => {
   const text = taskBody({
     labels: ["gap", "defect"],
@@ -387,13 +492,22 @@ test("hasThresholdMarker: noise/band keywords and number-with-unit", () => {
 
 // ── CLI + AC6 ratchet data file ─────────────────────────────────────────────────────────────────────
 
+// R6 (gap-tests-never-clean-up-their-tmpdirs): every mkdtemp dir is tracked and removed at the end
+// of the run — a test that leaves a /tmp dir behind is the exact defect that task names.
+const tempDirs = [];
 function makeGitRoot(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `cc-cli-${tag}-`));
+  tempDirs.push(dir);
   fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
   fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
   fs.mkdirSync(path.join(dir, "docs", "analysis"), { recursive: true });
   return dir;
 }
+after(() => {
+  for (const d of tempDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+  }
+});
 
 const CLEAN_TASK = `---
 id: t-clean
@@ -541,6 +655,32 @@ test("writeRatchet refuses to grow past the ceiling or add new entries", () => {
   assert.match(tooBig.reason, /only get SHORTER/);
 });
 
+test("AC6 reset: --write-ratchet --reset-baseline re-anchors the ceiling to the current set", () => {
+  const root = makeGitRoot("resetbase");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(fs.readFileSync(path.join(root, DATA_FILE_REL), "utf8"), /# baseline-count: 0/);
+
+  // A violation NOT in the baseline → the plain --write-ratchet is skipped (refused, exit 1).
+  fs.writeFileSync(path.join(root, "tasks", "t-bad.md"), VIOLATING_TASK);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet"], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, DATA_FILE_REL), "utf8"), /# baseline-count: 7/);
+
+  // --reset-baseline performs the deliberate one-shot re-anchor.
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet", "--reset-baseline"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  const after = fs.readFileSync(path.join(root, DATA_FILE_REL), "utf8");
+  assert.match(after, /# baseline-count: 7/);
+  assert.match(after, /tasks\/t-bad\.md: measure-no-command/);
+
+  // The ratchet is shrink-only again from the new baseline: the listed set → exit 0.
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /new since baseline: 0/);
+});
+
 test("findWorkspaceRoot walks up to .git", () => {
   const root = makeGitRoot("rootwalk");
   const sub = path.join(root, "a", "b");
@@ -568,3 +708,5 @@ test("AC6 real-store: backfilled case tasks + this task are violation-free", { s
     assert.deepEqual(violations, [], `expected ${f} to have zero violations, got: ${JSON.stringify(violations)}`);
   }
 });
+
+} // end governance group

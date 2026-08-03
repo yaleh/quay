@@ -113,23 +113,141 @@ resume 逐个 code 处置，每处置完一类跑一次检查器记数
 
 ## Acceptance Criteria
 
-- [ ] AC1: `invoke-evidence-missing` 改为按入口路径判定，含占位符的 invoke 命令有专门用例
-- [ ] AC2: **负控制**——`gap-serve-task-list-dies-on-one-malformed-task` 这条真缺口在修完判据后
-      **仍然被报出**（否则就是把判据放松到失去分辨力），实跑输出贴任务体
-- [ ] AC3: 7 条 `invoke-evidence-missing` 中，6 条在修完判据后消失、1 条保留，逐条列出
-- [ ] AC4: 检查器接上执行者，写明选了哪个位置与理由；执行者被一次真实调用触发（贴输出）
-- [ ] AC5: **双向负控制**——人为造一条新违规 ⇒ 执行者 exit 1 且打印该任务文件名；
-      删掉它 ⇒ exit 0。两个方向都贴实跑输出
-- [ ] AC6: 名单与 `# baseline-count` 重设，重设前后的 `violations` 数量都贴出来
-- [ ] AC7: 扫描 586 个任务的耗时实测记录（若接进 `run_static_checks` 则它进入每次全量的关键路径）
-- [ ] AC8: 测试带 `// @test-group governance` 声明，且用 `node:test`
+- [x] AC1: `invoke-evidence-missing` 改为按入口路径判定，含占位符的 invoke 命令有专门用例
+      （`invokeEntryPath` 提取首个含 `/` 的 token、跳过解释器与 flag；占位符 `<ISO>`/`<file>`
+      按入口路径判——测试 `invokeEntryPath: ...` 与 `AC1: invoke with placeholder ...`）
+- [x] AC2: **负控制**——`gap-serve-task-list-dies-on-one-malformed-task` 这条真缺口在修完判据后
+      **仍然被报出**（否则就是把判据放松到失去分辨力），实跑输出贴任务体（见下）
+- [x] AC3: 7 条 `invoke-evidence-missing` 中，6 条在修完判据后消失、1 条保留，逐条列出（见下）
+- [x] AC4: 检查器接上执行者，写明选了哪个位置与理由；执行者被一次真实调用触发（贴输出，见下）
+- [x] AC5: **双向负控制**——人为造一条新违规 ⇒ 执行者 exit 1 且打印该任务文件名；
+      删掉它 ⇒ exit 0。两个方向都贴实跑输出（见下）
+- [x] AC6: 名单与 `# baseline-count` 重设，重设前后的 `violations` 数量都贴出来（见下）
+- [x] AC7: 扫描 586 个任务的耗时实测记录（若接进 `run_static_checks` 则它进入每次全量的关键路径）
+      ——实测 ~0.64s（见下）
+- [x] AC8: 测试带 `// @test-group governance` 声明，且用 `node:test`（见下）
 
 ## Definition of Done
 
-- [ ] AC2 与 AC5 的实跑输出贴进任务体——**判据变松而没有负控制，等于把检查器关掉**
-- [ ] 完整套件连跑 2 次全绿
-- [ ] 任务体记录一句：**本缺陷是外层在派发前评审时跑检查器发现的**，
+- [x] AC2 与 AC5 的实跑输出贴进任务体——**判据变松而没有负控制，等于把检查器关掉**
+- [ ] 完整套件连跑 2 次全绿（fan-in 承担；本次未启动全量套件——执行者已接进 `run_static_checks`，
+      任何 scoped 跑都会经过它）
+- [x] 任务体记录一句：**本缺陷是外层在派发前评审时跑检查器发现的**，
       不是任何自动信号报出的——这正是要接执行者的理由
+
+## Execution evidence
+
+### AC1/AC3 — 判据改为入口路径后，7 条 `invoke-evidence-missing` 的处置
+
+修判据前 `node ... task-contract-check.ts --root . --json` 报 12 条 violations（ratchet `baselineCount 1 / currentCount 11 / growth true`）。
+修判据后（入口路径判定）剩 5 条唯一 violations。逐条对照（外层建任务时的核对表 + 实测）：
+
+| 任务 | invoke 入口路径 | Contract 之外出现？ | 修后 |
+|---|---|---|---|
+| `gap-inner-forensics-verify-reports-nonruns-and-zero-durations` | `orchestration/watch/inner-forensics.mjs` | 是（Proposal/执行记录/Touches） | 消失 |
+| `gap-no-cross-project-heavy-op-token` | `scripts/heavy-op-token.sh` | 是（正文/一/Touches） | 消失 |
+| `gap-no-inventory-of-what-the-two-layer-mode-actually-runs` | `plugin/scripts/runtime-usage-inventory.ts` | 是（AC/机制/Touches） | 消失 |
+| `gap-serve-task-list-dies-on-one-malformed-task` | `packages/quay/bin/quay.ts` | **否（仅 Contract 内 invoke 一处）** | **保留** |
+| `gap-task-body-has-n-parsers-and-no-authority` | `plugin/scripts/task-schema-check.ts` | 是（Touches） | 消失 |
+| `gap-tests-never-clean-up-their-tmpdirs` | `scripts/test.sh` | 是（AC 证据，无 `bash ` 前缀） | 消失 |
+| `gap-web-cannot-show-what-the-loop-is-doing-now` | `packages/quay/bin/quay.ts` | 是（正文 `--port 4174`） | 消失 |
+
+### AC2 — 负控制：真缺口修后仍被报出
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/task-contract-check.ts --root .
+VIOLATION: tasks/gap-serve-task-list-dies-on-one-malformed-task.md — invoke-evidence-missing: invoke command's entry path `packages/quay/bin/quay.ts` does not appear in the task body (outside ## Contract) — a done task must show the executable entry path it ran
+
+violations: 5 unique across 2 task(s); ...
+ratchet ceiling: 5; new since baseline: 0; resolved: 0
+```
+
+### AC4 — 执行者选择与理由
+
+**位置：`scripts/test.sh` 的 `run_static_checks()`**（与另外三个检查器同址），理由：
+1. CI 的唯一测试 step 就是 `bash scripts/test.sh`（ADR-019/DIR-109），接进 `run_static_checks` 等于 CI 免费继承——
+   与 `it0-split-or-commit` 同理由（gap-split-or-commit-not-continuously-checked），不需要单独 CI job。
+2. 该函数跑在**每一次测试型调用**上（默认/--group/--for-task/flags-only/显式文件），报红对象是提交而非派发——
+   与 §0c「报出而不阻断」一致。元数据模式（--list-files/--list-groups）跳过，与其余检查器一致。
+3. 实测全量扫描成本 ~0.64s（AC7），与 split-or-commit 全量扫描同级（<1s），可接受进入每次全量的关键路径。
+
+真实调用触发（scoped 跑经过改后的静态检查）：
+
+```
+$ bash scripts/test.sh plugin/test/task-contract-check.test.mjs
+== split-or-commit whole-store check ...
+== test-framework-policy check ... PASS
+== test-isolation contract check ...
+== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) ==
+violations: 5 unique across 2 task(s); info findings (non-ratchet, pre-opt-in baseline): 1158 — see --json for details
+ratchet ceiling: 5; new since baseline: 0; resolved: 0
+```
+exit 0。
+
+### AC5 — 双向负控制（经执行者 test.sh 实跑）
+
+方向一（注入新违规 ⇒ exit 1 且打印文件名）——临时造 `tasks/t-neg-control.md`（`invoke` 入口路径
+`plugin/scripts/never-ran-in-this-task.ts` 在 Contract 之外不存在）：
+
+```
+$ bash scripts/test.sh plugin/test/task-contract-check.test.mjs
+VIOLATION: tasks/t-neg-control.md — invoke-evidence-missing: invoke command's entry path `plugin/scripts/never-ran-in-this-task.ts` does not appear in the task body (outside ## Contract) — ...
+VIOLATION: tasks/t-neg-control.md — dispatch-review-missing: no '## Dispatch review' section
+ratchet ceiling: 5; new since baseline: 2 (tasks/t-neg-control.md: dispatch-review-missing, tasks/t-neg-control.md: invoke-evidence-missing); resolved: 0
+TEST_SH_EXIT=1
+```
+
+方向二（删掉违规 ⇒ exit 0）——`rm tasks/t-neg-control.md` 后重跑：
+
+```
+$ bash scripts/test.sh plugin/test/task-contract-check.test.mjs
+== ## Contract consumer check ... ==
+violations: 5 unique across 2 task(s); ...
+ratchet ceiling: 5; new since baseline: 0; resolved: 0
+TEST_SH_EXIT=0
+```
+
+### AC6 — 名单与 baseline 重设
+
+修判据后、重设前（`# baseline-count: 1`，旧名单只有一条已 resolved 的 `dispatch-review-missing`）：
+
+```
+ratchet ceiling: 1; new since baseline: 5 (...5 条...); resolved: 1 (...);   → exit 1
+```
+
+重设（`--write-ratchet --reset-baseline`，一次性的显式 re-anchor，非增长）：
+
+```
+write: ratchet baseline RESET to 5 entry/entries (ceiling re-anchored to 5)   → exit 0
+```
+
+重设后实跑：
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/task-contract-check.ts --root .
+ratchet ceiling: 5; new since baseline: 0; resolved: 0                          → exit 0
+```
+
+`docs/analysis/contract-violations.md` 现在列 5 条真实违规、`# baseline-count: 5`：
+`gap-no-inventory...: contract-line-unknown / dispatch-review-missing / measure-no-command / measure-no-field`
+与 `gap-serve-task-list...: invoke-evidence-missing`。此后名单恢复只减不增。
+（重设前的完整 violations 输出与重设后输出均在本提交内；`--reset-baseline` 仅在 `--write-ratchet`
+下可用且绕过一次 shrink-only 守卫，随后恢复只减不增——有专门测试 `AC6 reset: ...`。）
+
+### AC7 — 扫描耗时实测
+
+```
+$ time node --no-warnings --experimental-strip-types plugin/scripts/task-contract-check.ts --root . > /dev/null
+real 0m0.643s   user 0m0.670s   sys 0m0.142s    (586 tasks)
+```
+~0.64s/次全量扫描，进入 `run_static_checks` 关键路径后成本与 split-or-commit 全量扫描同级。
+
+### AC8 — 测试组声明
+
+`plugin/test/task-contract-check.test.mjs` 已改 `// @test-group governance` + `node:test`（import `{ test, after }`），
+带 governance self-skip 块（默认 product,engine 跑时报告 `skipped`；显式文件调用 QUAY_TEST_GROUPS 未设 ⇒ 全量跑）。
+scoped 实测：43 tests / 42 pass / 0 fail / 1 skipped（real-store opt-in）。同文件顺手补 R6：`makeGitRoot` 的
+mkdtemp 目录由 `after()` 统一删除（`plugin/test-isolation-violations.txt` 里该文件的 `mkdtemp-no-cleanup` 条目已随之移除）。
 
 ## Touches
 
@@ -137,6 +255,7 @@ resume 逐个 code 处置，每处置完一类跑一次检查器记数
 - plugin/test/task-contract-check.test.mjs
 - docs/analysis/contract-violations.md
 - scripts/test.sh
+- plugin/test-isolation-violations.txt（随 R6 修复移除本文件 stale 条目）
 
 ## Dispatch review
 
