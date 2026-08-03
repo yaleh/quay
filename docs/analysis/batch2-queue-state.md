@@ -300,6 +300,49 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
   quantified-stop-conditions、web-can't-show-loop-state 等），**不碰在飞 Touches，无 fan-in 冲突**，排队后续
 - 本 tick 不派发（并发满 3）
 
+### Tick 心跳（04T03:59Z）
+
+- 无 `.halt`；无停止条件；3 在飞全活跃（04:01/03:56/04:02）
+- **reclaim**：新增第 2 commit `892a167e`（merged-then-reverted 判据修正：须有 merge commit 而非 tree
+  diff）——正确性迭代中。已 2 commits
+- **inventory / testiso**：~55min 无 commit，但 transcript 活跃（实现/审查中），未到 90min 阈值
+
+## 外层重排队列优先级（2026-08-03T04:0xZ，人裁定——压缩后读本节 + 本文件末节）
+
+**诊断**：近 18h 扩张:收敛 = 3:21、图新增:删除节点 = 22:0、脚本 live:unaccounted = 35:81、
+tick 文档决策语句:真执行者 = 36:7。收敛 = 用更低描述长度的机制替换更高——我们只产断言没产支柱、
+没删过任何东西，L(X) 在上升。**图从未收缩过一次。**
+
+### P0 删除算子（裁减）
+1. **no-inventory**（在飞，裁剪 + 冷启动产品化双关键路径）
+2. **reclaim-21-merged-worktrees**（在飞，第一次真实删除）
+3. **retire-the-prepare-execute-pipeline-cluster**（依赖 #1 的 class 列；**#1 落地后立刻派**）
+4. **stranded-worktree-branches**（#2 落地后再排）
+
+### P1 异步通道
+5. serve-task-list-dies-on-one-malformed-task（人正用那个页面，再畸形一次就再 500 一次）
+6. web-cannot-show-what-the-loop-is-doing-now（/live + /journal）
+7. web-board-needs-an-inconsistency-verdict
+
+### P2 暂缓一切再加检查类任务
+quantified-stop-conditions、test-isolation-contract（在飞，**让它跑完，不中断**）、
+checks-that-verify-an-empty-set、no-resource-awareness、workflow-metadata-warn、plancheck-*、
+prepare-milestone-no-size-aware-routing-* 等。理由：删除算子跑通前每加一个检查都让 L(X) 继续上升。
+
+**例外填充**（仅当 P0/P1 因 Touches 冲突派不出时）：dispatch-eligibility-blind-to-files、
+inner-forensics-verify——生产机制正在给错答案，不是新增检查。
+
+**解冻判据（可测不靠判断）**：任务图**首次收缩** = 有任务节点被删除，或有一次落地提交净行数为负。
+冻结时刻 = 本条指令时间（2026-08-03T04:0xZ）。
+
+**纪律**：这是排序不是取消——**不改任何任务 status、不删任何任务**。
+
+### 对派发计划的修正
+- test-isolation 落地后：**不派 resource-awareness（P2）**，改派 P1 #5/#6/#7（serve-task-list 500 优先——
+  人在用那个页面）
+- inventory 落地 → 立即派 P0 #3 retire-pipeline；reclaim 落地 → 排 P0 #4 stranded-worktree
+- 跟踪解冻判据：首次图收缩（负净行数落地或节点删除）时报告
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
