@@ -18,14 +18,18 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
 - **Tests** (Node's built-in runner, `.mjs` under each package's `test/`):
   - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
     file and `.github/workflows/ci.yml` invoke; it owns the test-file glob
-    (`packages/*/test/*.test.mjs plugin/test/*.test.mjs`) and defaults to `--test-concurrency=8`.
-    Do not hand-write a new copy of the glob or an exclusion list elsewhere — edit the script.
+    (`packages/*/test/*.test.mjs plugin/test/*.test.mjs`) and derives its default concurrency
+    from `max(1, floor(nproc / 2.1))` (gap-no-resource-awareness-heavy-ops-run-blind AC5; the old
+    hardcoded 8 was a 4.25× oversubscription on 4 cores — 8 workers + spawned subprocesses = 17
+    processes). An explicit `--test-concurrency=N` always overrides. The full-suite default path
+    also consults the shared resource gate (`scripts/resource-gate.sh --for full-suite`) and exits
+    non-0 on WAIT. Do not hand-write a new copy of the glob or an exclusion list elsewhere — edit the script.
   - Full safe-by-default suite: `scripts/test.sh` (no args)
   - Single file: `scripts/test.sh packages/quay/test/gate.test.mjs`
   - Single test by name: `scripts/test.sh --test-name-pattern="flag before id" packages/quay/test/gate.test.mjs`
   - Coverage: `scripts/test.sh --experimental-test-coverage` (flags-only form KEEPS the default
     glob — extra node `--test` flags alone run the same selected set, `--test-concurrency=N` and
-    friends still last-flag-win over the default 8; every glob-selected run self-reports
+    friends still last-flag-win over the derived default; every glob-selected run self-reports
     `selected N files (groups=…)`). Flags-only value flags MUST use the `=` spelling
     (`--test-concurrency=4`); a space-separated value (`--test-concurrency 4`) is treated as a file
     path and silently auto-discovers (see scripts/test.sh header).

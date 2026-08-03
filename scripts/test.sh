@@ -65,9 +65,13 @@
 #   Non-default-group files self-skip BEFORE their heavy imports (AC8), so `--group product`
 #   does not pay the governance load cost. Default (no --group) = product,engine (AC4).
 #
-# --test-concurrency=8 is the default (ADR-019: measured 10.3% faster than the runtime default
-# with zero correctness regression across repeated runs, 514/514 pass at concurrency 4/8/16).
-# A later --test-concurrency=N on the command line overrides this (node --test is last-flag-wins).
+# --test-concurrency default is now DERIVED (gap-no-resource-awareness-heavy-ops-run-blind, AC5):
+#   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION ≈ 2.1 (measured, see
+#   default_test_concurrency below). The old hardcoded 8 was measured 10.3% faster than the runtime
+#   default by ADR-019 — but that was measured WITHOUT a second layer running concurrently; on a
+#   4-core box, 8 workers + spawned subprocesses = 17 processes = a 4.25× oversubscription, the
+#   measured steady state of a single full suite. A later --test-concurrency=N on the command line
+#   overrides the derived default (node --test is last-flag-wins).
 #
 # gap-test-sh-flags-only-form-silently-runs-a-different-suite: the flags-only form
 # (scripts/test.sh --test-concurrency=4, --experimental-test-coverage, ...) MUST keep the default
@@ -114,6 +118,46 @@ run_static_checks() {
   bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
   echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
   bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
+}
+
+# ── derived default concurrency (gap-no-resource-awareness-heavy-ops-run-blind, AC5) ──────────────
+# node --test with concurrency N actually runs ~N × AMPLIFICATION node processes: each worker
+# spawns its own subprocesses. Measured 2026-08-03: a full suite at concurrency 8 peaked at
+# 17 node processes ⇒ ratio ≈ 2.125; a scoped concurrency-2 run of subprocess-heavy plugin tests
+# re-measured 3.0 per worker. The old hardcoded 8 on a 4-core box was a 4.25× oversubscription —
+# the measured steady state of a SINGLE full suite, not a product of concurrency. The default is
+# now derived:
+#   default = max(1, floor(nproc / AMPLIFICATION))
+# which on this box gives floor(4 / 2.1) = 1 (~3 processes, under 4 cores). The tradeoff (lower
+# concurrency → longer wall clock) is deliberate and data-backed — see the task body's AC5 record.
+# An EXPLICIT --test-concurrency=N on the command line ALWAYS overrides (node --test is
+# last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
+#
+# Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
+# RESOURCE_GATE_AMPLIFICATION override the derivation inputs deterministically.
+default_test_concurrency() {
+  local ncpu amp
+  ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
+  amp="${RESOURCE_GATE_AMPLIFICATION:-2.1}"
+  awk -v n="$ncpu" -v a="$amp" 'BEGIN { c = int(n / a); if (c < 1) c = 1; print c }'
+}
+
+# resource_gate_check — consult the shared resource gate BEFORE a FULL-SUITE (glob-based default)
+# run (gap-no-resource-awareness-heavy-ops-run-blind, AC7). WAIT → the gate printed the numbers,
+# this exits non-zero — NEVER silently wait (silent wait is indistinguishable from a hang).
+# Scoped paths (explicit files, --for-task, non-default --group) skip the gate — they are the
+# verification path that must stay usable under load. QUAY_TEST_SKIP_RESOURCE_GATE=1 is the
+# test-only escape for a nested runner invoked inside an outer suite.
+resource_gate_check() {
+  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping resource gate (nested runner)"
+    return 0
+  fi
+  echo "== resource gate (gap-no-resource-awareness-heavy-ops-run-blind) =="
+  if ! bash "${repo_root}/scripts/resource-gate.sh" --for full-suite; then
+    echo "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO." >&2
+    exit 1
+  fi
 }
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
@@ -255,9 +299,15 @@ build_dist_once() {
 # run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
-# last-flag-wins, so a user --test-concurrency=N still overrides the default 8.
+# last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
 run_selected() {
   local groups="$1"; shift
+  # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
+  # subset run (e.g. --group governance) — scoped, skip the gate. QUAY_TEST_SKIP_RESOURCE_GATE=1
+  # is honored inside resource_gate_check for nested runners.
+  if is_default_set "$groups"; then
+    resource_gate_check
+  fi
   build_dist_once
   run_static_checks
   export QUAY_TEST_GROUPS="$groups"
@@ -274,7 +324,7 @@ run_selected() {
   # explicitly, so their selection is already visible. N here is exactly what `--list-files` prints
   # (the same select_files output), so AC4's "N == --list-files count" holds by construction.
   echo "selected ${#files[@]} files (groups=${groups})"
-  exec node --test --test-concurrency=8 "$@" "${files[@]}"
+  exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
 }
 
 # ── argument dispatch ────────────────────────────────────────────────────────────────────────────
@@ -333,7 +383,7 @@ elif [ -n "${groups}" ]; then
     run_static_checks
     export QUAY_TEST_GROUPS="$groups"
     build_dist_once
-    exec node --test --test-concurrency=8 "$@"
+    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
   fi
 fi
 
@@ -405,7 +455,7 @@ elif [ "${1:-}" = "--for-task" ]; then
   # Pass-through flags (e.g. --test-name-pattern=X) must precede the file list: node --test only
   # honors --test-name-pattern when it appears BEFORE the named files (after them it is ignored,
   # which would run the whole file — and for this self-referential test, recurse).
-  node --test --test-concurrency=8 "${rest_args[@]}" "${files[@]}"
+  node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
   test_code=$?
   set -e
   if [ "${sel_code}" -ne 0 ]; then
@@ -425,5 +475,5 @@ else
   run_static_checks
   # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
   # trigger and the named files run in full.
-  exec node --test --test-concurrency=8 "$@"
+  exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
 fi
