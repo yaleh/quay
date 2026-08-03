@@ -1,8 +1,8 @@
 ---
 id: gap-dispatch-gate-has-no-checklist-and-no-trace
-title: "Give the task body a machine-readable contract between goal and code —
-  the pre-dispatch review is a habit with no checklist and no trace"
-status: todo
+title: Give the task body a machine-readable contract between goal and code —
+  the pre-dispatch review is a habit with no checklist and no trace
+status: done
 labels:
   - gap
   - milestone-candidate
