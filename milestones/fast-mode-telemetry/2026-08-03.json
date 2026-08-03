@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T09:27:33.190Z",
+  "generatedAt": "2026-08-03T11:27:29.288Z",
   "since": null,
   "tasks": [
     {
@@ -20,6 +20,11 @@
     {
       "taskId": "gap-ac11-spawns-the-runner-inside-the-runner",
       "minutes": 61.879616666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed",
+      "minutes": 48.89938333333333,
       "outcome": "done"
     },
     {
@@ -189,14 +194,20 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [],
-  "meanMinutes": 53.669303153153145,
-  "medianMinutes": 56.186366666666665,
-  "tasksPerHour": 1.6112805119613989,
-  "serialEquivalentPerHour": 1.1179575003756113,
+  "inProgress": [
+    {
+      "taskId": "gap-loop-mechanism-lives-outside-the-package-and-cannot-ship",
+      "runId": "fm-gap-loop-mechanism-lives-outside-the-package-and-cannot-ship-1785753284154-36fiim",
+      "startedAtMs": 1785753284165
+    }
+  ],
+  "meanMinutes": 53.543778947368416,
+  "medianMinutes": 53.32285833333333,
+  "tasksPerHour": 1.5223128837935227,
+  "serialEquivalentPerHour": 1.1205783599804902,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T09:27:33.170Z",
-  "windowHours": 22.963102777777777,
+  "windowEnd": "2026-08-03T11:27:29.261Z",
+  "windowHours": 24.962016944444443,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0

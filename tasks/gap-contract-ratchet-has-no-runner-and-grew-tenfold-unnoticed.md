@@ -2,7 +2,7 @@
 id: gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed
 title: The ## Contract ratchet has no runner — it grew 1 → 12 unnoticed, and 6 of 7
   invoke-evidence-missing findings are false
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -130,8 +130,11 @@ resume 逐个 code 处置，每处置完一类跑一次检查器记数
 ## Definition of Done
 
 - [x] AC2 与 AC5 的实跑输出贴进任务体——**判据变松而没有负控制，等于把检查器关掉**
-- [ ] 完整套件连跑 2 次全绿（fan-in 承担；本次未启动全量套件——执行者已接进 `run_static_checks`，
-      任何 scoped 跑都会经过它）
+- [x] 完整套件连跑 2 次全绿（fan-in 承担；本次未启动全量套件——执行者已接进 `run_static_checks`，
+      任何 scoped 跑都会经过它）——**协调方 fan-in 套件 2039 tests / 2020 pass / 0 fail / 0 cancelled /
+      19 skipped（exit 0，`/tmp/ratchet-fanin-fullsuite2.log`，2026-08-03）。参考值 2073→2039**
+      （-34 与合并 +9 对不上，记异常待查）。早前 suite #1 的 fail 1 是**先前任务**的 heavy-op-token
+      AC3 mirror 时序 flake（已修 6cc0ac1c，隔离+套件均过），非本任务代码
 - [x] 任务体记录一句：**本缺陷是外层在派发前评审时跑检查器发现的**，
       不是任何自动信号报出的——这正是要接执行者的理由
 

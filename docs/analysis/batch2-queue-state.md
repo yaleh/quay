@@ -1396,3 +1396,13 @@ heavy-op-token.test.mjs:35 仍按老路径调用。失败形态坏：`if ! bash 
 分支。已通知 cold-start agent：补 scripts/test.sh + heavy-op-token.test.mjs 进 Touches、**同提交改路径**、
 扫全部 6 个老路径的约 20 处引用（CLAUDE.md/QUAY-OUTER-HANDOFF/exp6/docs/analysis/cold-start 说明本身）、
 任务体加 AC「搬完无老路径活引用」。**不留兼容壳**——外层 Monitor/cron 两处 fan-in 后自行重挂。
+
+### 关闭 ratchet + 发现（2026-08-03 11:0xZ）
+
+**contract-ratchet 已关闭**：fan-in 套件绿（2039 tests / 2020 pass / 0 fail / 0 cancelled）。
+invoke-evidence 判据改入口路径、执行者接进 run_static_checks、baseline 1→5（重设前后输出同提交）。
+flake 修复（heavy-op-token AC3 mirror，6cc0ac1c）。telemetry --task-end done（38 完成）。
+
+**⚠ 参考值 2073→2039 异常待查**：ratchet 合并只 +9 测试（contract test 35→44），预期 2082，
+实际 2039（两次套件稳定）——-34 与合并对不上。三套件均选 158 文件、无文件缺失、test.sh 变更仅加
+静态检查。记为发现，恢复后查（可能是个别测试文件在 ratchet 状态被跳过/条件不满足）。
