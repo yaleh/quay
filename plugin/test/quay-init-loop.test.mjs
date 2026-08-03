@@ -1,5 +1,6 @@
 // @test-group governance
-// quay-init-loop.test.mjs — gap-loop-mechanism-lives-outside-the-package-and-cannot-ship.
+// quay-init-loop.test.mjs — gap-loop-mechanism-lives-outside-the-package-and-cannot-ship +
+// gap-cold-start-needs-a-human-to-dictate-eight-steps (phase 1: AC2/AC3/AC4).
 // Tests the `--loop` category of plugin/scripts/quay-init.sh: lays down the two-layer loop
 // mechanism into a target workspace with mechanized placeholder substitution (AC3/AC4), and
 // the upgrade path that must not overwrite local changes (AC5).
@@ -9,6 +10,14 @@
 //       grep finds NO quay-specific literals (scripts/test.sh, /home/yale/work/quay).
 // AC5 — on a workspace where a laid-down tick doc was locally edited, a re-run does NOT overwrite
 //       the local change and lists the conflict.
+// AC2 — the test command detection ladder (scripts/test.sh → package.json scripts.test → go.mod →
+//       Cargo.toml) detects each real project's convention and PRINTS it for human confirmation;
+//       an explicit --test-command takes priority. (gap-cold-start-...-eight-steps AC2)
+// AC3 — with no detection source, --loop FAILS CLOSED naming every location searched, never a
+//       guessed default. (AC3 negative control)
+// AC4 — a stale same-name mechanism file is residue: backed up + replaced + reported without
+//       --force; localizable prose (tick docs) is NOT residue-cleaned (upgrade path preserved).
+//       (AC4)
 //
 // Run:
 //   scripts/test.sh plugin/test/quay-init-loop.test.mjs
@@ -117,12 +126,143 @@ test('AC4 — laid-down tick docs carry the target values and NO quay-specific l
   } finally { cleanup(ws); }
 });
 
-test('AC4 — --loop without --test-command fails closed (no universal default)', () => {
-  const ws = makeTmp();
+test('AC3 — no detection source: --loop fails closed, naming every location it searched, without guessing a default', () => {
+  const ws = makeTmp(); // empty — no scripts/test.sh, package.json, go.mod, or Cargo.toml
   try {
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
-    assert.equal(r.status, 2, '--loop without --test-command must fail closed (exit 2)');
-    assert.match(r.stderr, /--test-command/, 'failure must name the missing required arg');
+    assert.equal(r.status, 2, '--loop with no detectable test command must fail closed (exit 2)');
+    assert.match(r.stderr, /--test-command/, 'failure must tell the human to pass --test-command explicitly');
+    // AC3: the failure must say WHICH locations it searched (not just "no command found").
+    for (const src of ['scripts/test.sh', 'package.json', 'go.mod', 'Cargo.toml']) {
+      assert.ok(r.stderr.includes(src), `failure must name the searched detection source: ${src}`);
+    }
+    assert.match(r.stderr, /no universal default/, 'failure must state that no default is guessed');
+  } finally { cleanup(ws); }
+});
+
+// ── AC2: the detection ladder (gap-cold-start-...-eight-steps) ──────────────────────────────────────
+// Measured on three real projects, each on a different rung:
+//   quay ⇒ scripts/test.sh → "bash scripts/test.sh"; archguard ⇒ package.json scripts.test → "npm test";
+//   meta-cc ⇒ go.mod → "go test ./..."; Cargo.toml → "cargo test".
+test('AC2 — detection ladder: scripts/test.sh is detected as bash scripts/test.sh (quay convention)', () => {
+  const ws = makeTmp();
+  try {
+    fs.mkdirSync(path.join(ws, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'scripts', 'test.sh'), '#!/bin/bash\necho test\n');
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    assert.equal(r.status, 0, `init with a detected test command must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /detected test command: bash scripts\/test\.sh/,
+      'must print the detected command for the human to confirm (AC2: 显示给人确认)');
+  } finally { cleanup(ws); }
+});
+
+test('AC2 — detection ladder: package.json scripts.test is detected as npm test (archguard convention)', () => {
+  const ws = makeTmp();
+  try {
+    fs.writeFileSync(path.join(ws, 'package.json'),
+      JSON.stringify({ name: 'proj', scripts: { test: 'vitest run' } }, null, 2));
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /detected test command: npm test/,
+      'must detect npm test from a package.json scripts.test entry');
+    // The laid-down tick docs must carry the DETECTED command, not the quay-specific default.
+    const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
+    assert.ok(outer.includes('npm test'), 'tick docs must carry the detected test command');
+    assert.ok(!outer.includes('scripts/test.sh'), 'tick docs must NOT carry the quay default (AC3/AC4 negative control)');
+  } finally { cleanup(ws); }
+});
+
+test('AC2 — detection ladder: go.mod is detected as go test ./... (meta-cc convention)', () => {
+  const ws = makeTmp();
+  try {
+    fs.writeFileSync(path.join(ws, 'go.mod'), 'module example.com/proj\n\ngo 1.22\n');
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /detected test command: go test \.\/\.\.\./,
+      'must detect go test ./... from a go.mod file');
+  } finally { cleanup(ws); }
+});
+
+test('AC2 — detection ladder: Cargo.toml is detected as cargo test', () => {
+  const ws = makeTmp();
+  try {
+    fs.writeFileSync(path.join(ws, 'Cargo.toml'), '[package]\nname = "proj"\nversion = "0.1.0"\n');
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /detected test command: cargo test/,
+      'must detect cargo test from a Cargo.toml file');
+  } finally { cleanup(ws); }
+});
+
+test('AC2 — an explicit --test-command takes priority over detection', () => {
+  const ws = makeTmp();
+  try {
+    // The workspace WOULD detect npm test; the explicit flag must win.
+    fs.writeFileSync(path.join(ws, 'package.json'),
+      JSON.stringify({ name: 'proj', scripts: { test: 'vitest run' } }, null, 2));
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /using explicit --test-command: node --test/,
+      'must report the explicit command');
+    assert.ok(!/detected test command/.test(r.stdout),
+      'an explicit --test-command must suppress the detection ladder');
+    const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
+    assert.ok(outer.includes('node --test'), 'tick docs must carry the explicit command');
+    assert.ok(!outer.includes('npm test'), 'tick docs must NOT carry a detected command when explicit wins');
+  } finally { cleanup(ws); }
+});
+
+// ── AC4: residue cleanup merged into the install (gap-cold-start-...-eight-steps) ───────────────────
+// A same-name-different-content PRODUCT file is a stale hot-copy leftover (residue). The install
+// must dispose of it VISIBLY — back it up, replace it with the product content, report both — and
+// must NOT require a separate `git rm` step nor a --force flag. Localizable prose (tick docs) stays
+// preserve-mode: a local edit is a conflict, listed and left untouched (upgrade path, AC5).
+test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, and reported (no --force needed)', () => {
+  const ws = makeTmp();
+  try {
+    // Pre-place a stale copy of a product mechanism file (a hot-copy leftover) with different content.
+    fs.mkdirSync(path.join(ws, 'plugin', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), '#!/bin/bash\necho stale-residue\n');
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must succeed after disposing of the residue:\n${r.stderr}`);
+    assert.match(r.stdout, /cleaned-residue/, 'must report the residue cleanup visibly');
+    assert.match(r.stdout, /backup:/, 'must report where the backup went');
+    // The stale file is replaced with the product content (byte-identical to the plugin source).
+    const installed = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), 'utf8');
+    const source = fs.readFileSync(path.join(pluginDir, 'scripts', 'resource-gate.sh'), 'utf8');
+    assert.equal(installed, source, 'residue must be replaced with the product content');
+    // The backup exists and preserves the stale content.
+    const backupsDir = path.join(ws, '.quay', 'quay-init-backups');
+    assert.ok(fs.existsSync(backupsDir), 'a backup directory must exist');
+    const backupFiles = fs.readdirSync(backupsDir, { recursive: true })
+      .filter((p) => typeof p === 'string' && p.endsWith('resource-gate.sh'));
+    assert.ok(backupFiles.length > 0, 'a backup of the stale file must exist');
+    const backupPath = path.join(backupsDir, backupFiles[0]);
+    assert.equal(fs.readFileSync(backupPath, 'utf8'), '#!/bin/bash\necho stale-residue\n',
+      'the backup must preserve the stale content (nothing silently lost)');
+    // The AC6 verify check still passes (installed executables byte-identical to the product).
+    assert.match(r.stdout, /verify-installed-executables: OK/, 'the byte-identical check must pass after residue cleanup');
+  } finally { cleanup(ws); }
+});
+
+test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edit survives without --force', () => {
+  const ws = makeTmp();
+  try {
+    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test'];
+    const r1 = runInit(ws, args);
+    assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
+    const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
+    const firstContent = fs.readFileSync(outerPath, 'utf8');
+    // A project's own customization of a laid-down tick doc.
+    fs.writeFileSync(outerPath, firstContent + '\n<!-- local customisation -->\n', 'utf8');
+    const r2 = runInit(ws, args);
+    assert.equal(r2.status, 0, `re-run must exit 0:\n${r2.stderr}`);
+    assert.match(r2.stdout, /CONFLICT/, 'the local tick-doc edit is reported as a conflict');
+    assert.ok(!r2.stdout.includes('cleaned-residue'),
+      'tick docs (prose, localizable) must NOT be residue-cleaned');
+    const after = fs.readFileSync(outerPath, 'utf8');
+    assert.ok(after.includes('local customisation'), 'the local edit must survive (upgrade path)');
+    assert.equal(after, firstContent + '\n<!-- local customisation -->\n', 'the local edit must be byte-preserved');
   } finally { cleanup(ws); }
 });
 

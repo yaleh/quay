@@ -31,12 +31,22 @@ this repo keeps removing. Run the script; do not hand-reimplement its behavior.
 `--loop` extra parameters (see the script for the full list):
 
 ```
---test-command <cmd>   the target project's test command (REQUIRED for --loop; there is no
-                       universal default — quay uses scripts/test.sh, archguard uses npm test)
+--test-command <cmd>   the target project's test command (OPTIONAL — when omitted, quay-init
+                       DETECTS it via the ladder scripts/test.sh → package.json scripts.test →
+                       go.mod → Cargo.toml, prints the detection for the human to confirm, and
+                       fails closed with the searched locations if nothing is detected; an
+                       explicit value always takes priority over detection. Never a guessed default.)
 --repo-root <path>     the target repo root (default: the workspace being initialized)
 --project <name>       project name (default: basename of the workspace)
 --tmux-session <sess>  tmux session name (default: <project>-0:0.0)
 ```
+
+Residue cleanup (AC4): the install DISPOSES of stale same-name product files — a file with the
+same name as a loop mechanism executable but different content is a hot-copy leftover (residue),
+so quay-init backs it up under `<workspace>/.quay/quay-init-backups/<ts>/` and replaces it with
+the product content, reporting both. This is visible, never a silent overwrite, and needs no
+`--force`. Localizable files (the tick docs) are NOT residue-cleaned: a local edit there is a
+conflict, listed and left untouched (upgrade path).
 
 ## Mapping
 
@@ -74,8 +84,11 @@ conflicts listed for a human, never silently overwritten).
 
 ### 1. Parse arguments
 
-Read the user's argument string. Default to `--all` if no category flag given. For `--loop`, require
-`--test-command` (fail-closed — there is no universal default).
+Read the user's argument string. Default to `--all` if no category flag given. For `--loop`,
+`--test-command` is optional: an explicit value is used as-is, otherwise the script DETECTS the
+target project's test command (scripts/test.sh → package.json scripts.test → go.mod → Cargo.toml),
+prints the detection for the human to confirm, and FAILS CLOSED naming the searched locations when
+nothing is detected — never a guessed default. (AC2/AC3, gap-cold-start-…-eight-steps)
 
 ### 2. Verify plugin root
 
