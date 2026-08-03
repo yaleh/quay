@@ -62,6 +62,20 @@ for t in quay-0:outer archguard-2:outer meta-cc-4:outer; do
 done
 ```
 
+**必读：各外层最新的那一行 tick 日志**（2026-08-03 补，代价已付过一次）。
+
+只看 tick 日志的 **mtime** 只能知道「它跑了」，知不到「它跑出了什么」。
+2026-08-03 管理者连着几轮向人报「健康、不介入」，而同期 quay 外层的 tick 行写的是
+**「我把 fan-in 套件搞红了，且差点用一份陈旧日志报成绿」**——
+**监视器推的是状态转换，转换不携带仓库是否被弄红。**
+
+```bash
+grep -m1 '^| 2026' <项目>/orchestration/tick-log.md      # 最新一行，看动作类与它自报的问题
+```
+
+**同时记下当时的 `cpu some avg10`**——AC4 的判据是「连续两次 tick 超 80」，
+而先前几行 tick 没记这个数，导致「算不算连续」变成了可争论的事而不是可判定的事。
+
 **推进的判据不是 TUI，是文件系统**（`CLAUDE.md:151`：never parse the TUI）：
 每个项目的 `git log --since='<上次 tick>'` 与其 `orchestration/tick-log.md` 行数增长。
 **capture-pane 只用于确认 send-keys 送达、判忙闲（两次 md5sum 相同 = 空闲）。**
