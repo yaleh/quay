@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 12:23Z | `no-action`（未介入内层；按管理者交办判定一条并把范围从一条扩到两条） | 核实 e2e 的安装源；查它有没有执行者；建任务并把已跑通的正确路径整段写进去 | 在飞 **3**（monitor / tasksPerHour / tmp-leak，各 ~28min，阈值 90）；完成 39、orphaned 0；新任务闸口 **new=0**，与四个队列任务**全部 DISJOINT** | **管理者给的三行证据逐字核对无误**（`test/cold-start-e2e.sh` 第 24 行 `PLUGIN_SRC="$REPO_ROOT/plugin"`、37 行 `cp -r`、46 行 `CLAUDE_PLUGIN_ROOT="$QUAY_DEV/plugin"`）。**但外层把范围扩了一条**：`grep -rn "cold-start-e2e"` 实测**没有任何执行者**——无 CI job、无测试调用、无脚本调用；唯一的「引用」是 `loop-shipping.test.mjs` 的**排除名单**，以及它自己的文件头。**缺口二比缺口一严重**：一个正确但没人跑的 e2e，与没有 e2e 不可区分；这与今天刚修的 `task-contract-check.ts` 是同一形态（那次的代价是「只能变短」的名单反向长了 12 倍）。**把外层 12:0xZ 已跑通的正确路径整段抄进任务体**（build 不加 `--push` → **`git archive` 取产物**（不是 `cp -r` 工作树）→ 从产物装 → 四条断言 → 改名负控制），免得实现者重摸。**并把自己一条不成立的观察标注出来**：`inner-state.sh` 4 秒无输出**不算证据**（它轮询 60 秒），AC7 要求 ≥90 秒窗口重测 |
 | 2026-08-03 12:02Z | `no-action`（未介入内层；核实新心跳信号能不能分辨它想分辨的东西） | 观察三个在飞任务；对自己跑 monitor 三判据；核实管理者刚落地的 loop 逾期检测 | 在飞 **3**（monitor / tasksPerHour / tmp-leak，各 7min，均活跃、无套件在跑）；完成 39、orphaned 0、`tph` 1.527；CPU some avg10 11.95、load1 3.42；三项目：quay 运行中 / archguard 暂停 / meta-cc 运行中 | **先证实了一件好事：我的 cron 确实在自己触发。** 从本会话 transcript 取 6 条 tick 提示的时刻，其中 **10:26:49 / 10:46:49 / 11:06:49 三条间隔精确 20 分钟且秒数完全相同**——这是调度器的签名，不是人打字。**但同一份数据也暴露了新心跳的限度**：另外三条（11:31:19 / 11:43:08 / 12:02:09）间隔不规则，而**它们与 cron 触发的那三条在内容上逐字相同**（管理者手打的提示词与 cron 提示词是同一串）。⇒ **`outer-liveness.sh` 用 tick-log mtime 当心跳，能抓住「45 分钟内什么都没跑」，抓不住「cron 已死但人还在手动催」**——后者正是 archguard 外层那次的形态（从未挂 monitor，全靠人推）。**提交时刻本身也是同族证据**：`71222bea` 的提交说明写「基于提交的计时器会被 fan-in 重置」——换成 mtime 是对的一步，但 mtime 同样是代理信号，**要变成结构信号，tick 行需要记下自己是被什么触发的**（cron / 人），或让只有 cron 触发的 tick 写一个独立心跳 |
 | 2026-08-03 11:58Z | `no-action`（未介入内层；派下一批并当场跑完人交回来的那条验证） | 派发 3 个任务的批次；按人的新裁定跑通「从 build 产物冷启动」；更新目标文件 | 在飞 **3**（monitor / tasksPerHour / tmp-leak，均已注册计量，Monitor 报 START）；产品化已收尾（status done、DoD 三条全勾、遥测 76.5min）；完成 **39**、orphaned 0、`tph` 1.537；派发前闸口：contract-check **new=0**、三者两两 **DISJOINT** | **AC13 从「被阻塞」变「已达成」并当场兑现**：本地 `publish-dist-branch.sh`（**不给 `--push`**）exit 0、bundle 1,327,236 字节、orphan commit `8cc675f9`、**未推送**；产物含 6 个机制文件 + bundle + plugin.json 全部 PRESENT；**用 `git archive` 解出产物（不是 `cp` 工作树）**装进空项目 exit 0（loop copied=20/skipped=0/conflicted=0）；铺设结果 `/home/yale/work/quay` **0 命中**；占位符 `scripts/test.sh` 残留 **0**、`quay-0:0.0` 残留 **0**；**改名负控制**下铺设项目的 `resource-gate.sh` 仍跑通。**一项如实不算通过**：`inner-state.sh` 4 秒无输出而它轮询 60 秒——不足以判定，需更长窗口。**并查出一条后续**：`test/cold-start-e2e.sh` 的安装源是 `$REPO_ROOT/plugin`，**即工作树的 `cp`**，按人这次的区分不构成可交付性证据；要让本次手工验证可重复，它需要一个 plugin 源参数。**全程私有 worktree，跑完已清理（worktree 删除、验证分支 `-D`、临时目录删除），共享工作树干净** |
 | 2026-08-03 11:47Z | `correct`（correct-inner：一个会在将来静默失去分辨力的检查） | 用新路径的 tick 文档跑本 tick；核实搬移的守门测试 AC1b/AC1c；对内层自己的 monitor 自检；通报空集隐患 | 在飞 **1**（产品化 **69min**，阈值 90，fan-in 全量在跑：pid 1305405、压力 87.43、load1 20.06）；完成 38、orphaned 0、`tph` 1.506；工作树有内层未提交改动（`batch2-queue-state.md`、`loop-shipping.test.mjs`） | **先对自己做了新任务里那条 monitor 自检**：按 argv 前两 token 精确匹配，命中 2 个 pid、都是本仓副本、归属链收敛到本会话 claude pid ⇒ **判据在真实环境下可用**（不是纸面设计）。**AC1b 的守门做得很硬**：老路径 `scripts/resource-gate.sh` 是新路径 `plugin/scripts/resource-gate.sh` 的子串，它用**负向后顾** `(?<!plugin\/)` 精确区分——本仓反复踩的子串坑这次被正面处理了；`excluded` 名单每条都写了理由。**但它只有一条断言 `assert.deepEqual(hits, [])`，没有任何东西断言扫描语料非空**——walk 提前返回、扩展名正则被改、或 excluded 继续变长把树吞掉，测试都会静默通过。它今天仍有分辨力（`scripts/` 未被排除），问题是**将来会悄悄失去而没人知道**，属 `gap-checks-that-verify-an-empty-set` 一族。已通报并给出两行修法。**外层自己又差点踩「零命中当没发生」**：发完 3 秒 grep 内层 transcript 得 0，差点判为未送达——transcript 还没落盘，隔一会儿再查是 1。**发完立刻查等于没查** |
@@ -134,11 +135,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 38 | 36% |
+| no-action | 39 | 37% |
 | unblock | 16 | 15% |
-| correct | 47 | 45% |
+| correct | 47 | 44% |
 | escalate | 4 | 4% |
-| **合计** | **105** | — |
+| **合计** | **106** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
