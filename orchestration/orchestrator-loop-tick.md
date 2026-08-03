@@ -52,6 +52,19 @@ tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{p
 CronCreate(cron="*/20 * * * *", prompt="执行 orchestration/orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
 ```
 
+**4a. `/loop` 是跨 `/clear`/`/compact` 的行为稳定层，不是驱动器**
+
+两层都一样。主推进信号是后台 agent 的完成通知；`/loop` 的作用是**上下文被清空后，仍有东西把
+tick 指令重新调起来**——tick 文件的「冷启动」一节正是为这一刻写的。
+
+**今天有现成的证据**：2026-08-02 16:14Z 内层被 `/clear`，新会话只有 5 行上下文，而它当时**没有
+运行中的 `/loop`**，于是恢复全靠外层手工简报。若有固定间隔的 loop，它会自行触发并读到冷启动一节，
+按设计自恢复——这正是这个机制存在的理由，而它当时不在。
+
+**必须用固定间隔形式**（`/loop 25m <prompt>`）：不带间隔的动态模式走 `ScheduleWakeup`，
+**没有任何列出工具**，即「这个循环是否还活着」无法查询。对一个专门用来在上下文丢失后兜底的机制，
+不可查验等于不可信——你无法在需要它之前知道它还在不在。
+
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
 `Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询：
