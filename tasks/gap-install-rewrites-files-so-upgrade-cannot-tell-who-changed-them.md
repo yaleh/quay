@@ -1,6 +1,6 @@
 ---
 id: gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them
-title: "Install rewrites 60+ files, so upgrade cannot tell a substitution from a user edit — it skips, and 'installed' silently means 'still running the old mechanism'"
+title: "Install rewrites exactly the two tick docs — the fastest-churning files — so upgrade skips them and the target silently keeps an obsolete methodology"
 status: todo
 labels:
   - gap
@@ -16,22 +16,50 @@ extra:
 来源：`orchestration/SPEC-no-text-substitution-at-install.md`（**人 2026-08-03 的设计裁定**）。
 人的原话：**「这些替换机制是错的，太脏了，当 quay 升级时这些在本地被修改过的文件是无法维护的。」**
 
-### 波及面（管理者实测，外层复核并对账了口径）
+### 波及面：**2 个文件**（更正过两次，两次都是口径错误）
 
-`quay-init.sh` 落地时替换三个 token。**出厂子树 `plugin/` 内**的字面量分布：
+**这个数字被数错了两次，两次都不是算术错，是口径错——记录全过程，因为它决定优先级。**
 
-| 字面量 | 出厂子树内文件数 |
-|---|---|
-| `scripts/test.sh` | **63** |
-| `/home/yale/work/quay` | **20** |
-| `quay-0:0.0` | **5** |
+| 口径 | 数字 | 谁 | 错在哪 |
+|---|---|---|---|
+| 全仓含 token 的文件 | 346 / 320 / 15 | 外层 | 扫了整个仓库，而真正落地的只有出厂子树 |
+| 出厂子树含 token 的文件 | 63 / 20 / 5 | 管理者 + 外层 | **含有 token ≠ 落地时被改写** |
+| **落地时真被改写的文件** | **2** | **管理者实测（meta-cc 冷启动）** | **这才是本任务的规模** |
 
-⇒ **每次落地改写 60 多个文件。**
+**meta-cc 冷启动实测**：已落地并可比对 **23** 个文件，**字节相同 21，不同只有 2 个**：
 
-**口径对账（必读，否则会「复核」出错误结论）**：外层第一次按**全仓**口径扫得
-346 / 320 / 15，与管理者报的 62 / 20 / 5 相差极大——**因为真正会被落地的只有出厂子树**。
-按 `plugin/` 重量后得 63 / 20 / 5，与管理者一致（差 1 应为 SPEC 文件自身）。
-**扫描口径不写清，规模数字就不可比**。
+```
+orchestration/orchestrator-loop-tick.md    差 38 行
+docs/analysis/fast-mode-loop-tick.md       差 32 行
+```
+
+**脚本一个都没被改写。**
+
+**外层结构性复核（比实测更强，因为它不依赖某一次安装）**：
+代换循环的 CONFLICT 文案自己写着 **`local tick doc differs from the substituted plugin template`**
+（`quay-init.sh:480` 一带），而 session-liveness 那段注释明写
+**「可执行文件一律原样复制，只生成配置」**（引用已完成的
+`gap-quay-init-rewrites-an-executable-instead-of-generating-config`）。
+**⇒ 代换面结构上就只有 tick 文档**，2 不是巧合，是这个循环的作用域。
+
+### 规模变小 30 倍，但裁定更锋利，不是更弱
+
+**被改写的那 2 个恰恰是 tick 文档——方法论本身，churn 最快的文件。**
+管理者今天一天就改了它们六次。
+
+**⇒ 升级时被 CONFLICT skip 的正是它们 ⇒ 目标项目会永远留着一份旧方法论，而且是静默的。**
+
+**这比「60 个文件不好维护」更值得修**：60 个静态脚本不同步是麻烦；
+**一份被冻结的方法论意味着目标项目按一套已经被推翻的规则运行，而没有任何信号**。
+本仓今晚记录的形态在这里第 N 次出现：**看起来装好了，比没装更糟。**
+
+### 一条正面实测（同一次冷启动，管理者）
+
+`vendor/quay/dist/quay.js` **确实铺进了 meta-cc**，**1331977 字节，与产物字节相同**
+⇒ **运行时在目标一侧是冷的**。
+**先前「运行时指向开发树」的担心只剩全局 PATH 上的软链，那是开发环境自己的便利，不是交付物缺陷。**
+（这条关闭了外层 2026-08-03 早些时候关于冷启动运行时路径的疑虑——
+那次外层的改名负控制探针本身是无效的，已由管理者当场推翻。）
 
 ### 为什么这是设计错误，不是实现瑕疵
 
@@ -121,8 +149,9 @@ resume 先做配置读取与文档去字面量，再删 render_substitutions
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
 - [ ] 任务体记录：**升级时「跳过」是唯一安全动作，因为替换改的和人改的在文件系统上同形**；
       修好之后 **`CONFLICT` 才第一次只有一个含义**
-- [ ] 任务体保留**口径对账**（全仓 346/320/15 vs 出厂子树 63/20/5）——
-      **扫描口径不写清，规模数字就不可比**
+- [ ] 任务体保留**三次口径对账**（全仓 346/320/15 → 出厂子树 63/20/5 → **落地时真被改写 2**）——
+      **同一个数字被数错两次，两次都是口径错而非算术错**；
+      **扫描口径不写清，规模数字就不可比，而规模决定优先级**
 
 ## Touches
 
