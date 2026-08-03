@@ -1,4 +1,5 @@
 ---
+id: gap-handleTaskAction-null-crash
 title: "serve: handleTaskAction crashes on nonexistent task (null dereference)"
 status: done
 labels:

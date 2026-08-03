@@ -1,4 +1,5 @@
 ---
+id: gap-gate-event-store-concurrency
 title: "gate-event-store: appendGateEvent is not concurrency-safe"
 status: done
 labels:

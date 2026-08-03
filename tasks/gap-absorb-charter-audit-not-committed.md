@@ -1,4 +1,5 @@
 ---
+id: gap-absorb-charter-audit-not-committed
 title: ABSORB pipeline never commits charter or Audit-phase evidence files —
   accumulates as untracked cruft
 status: done
