@@ -566,6 +566,16 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 - **下一批候选**：P0#4 stranded-worktree（reclaim 落地后可派）+ P1#4 web-cannot-show + 新 parser 任务
   （gap-task-body-has-n-parsers-and-no-authority，排 P1 后）。在飞 0，可补派
 
+### Tick 更新（05T03:52Z）：下一批已派（stranded + web）
+
+- **已派 2**：P0#4 stranded-worktree（`a04359b9f0b14a9ac`，runId `fm-...-tikhj7`）+ P1#4 web-cannot-show
+  （`a59802dfcb6d4836c`，runId `fm-...-lrq9xl`）。两两 DISJOINT 实测。压力 1.01（极佳窗口）
+- **parser 任务与 stranded 在 `task-status-drift-check.ts` OVERLAP**（实测）→ 等 stranded 落地后再派
+- **drift 假阳性已识别**：`gap-reclaim` 被标 reverse-drift suspect（touchesAllExist=false）——retire 删除了
+  milestone-worktree.ts（reclaim 用完后），检测器把「代码被有意移除」误当「代码没落地」（删除类盲区另一面）。
+  记录不动作；stranded 任务可能会处理这个类（按任务体 AC）
+- 在飞（2）：stranded + web
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
