@@ -734,8 +734,11 @@ async function main(argv) {
       return 0; // fail-soft
     }
 
+    // WORKFLOW_EVENTS_DIR env override: point --emit-event at a per-run-unique location instead of
+    // the live .workflow-events/ store (gap-r1-cannot-see-tests-writing-into-the-live-task-store —
+    // R7 live-data-dir-write). The default stays repoRoot/.workflow-events for the CLI.
     const repoRoot = findRepoRoot();
-    const eventsDir = path.join(repoRoot, ".workflow-events");
+    const eventsDir = process.env.WORKFLOW_EVENTS_DIR || path.join(repoRoot, ".workflow-events");
     try {
       if (!fs.existsSync(eventsDir)) {
         fs.mkdirSync(eventsDir, { recursive: true });

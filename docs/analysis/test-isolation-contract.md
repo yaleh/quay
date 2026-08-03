@@ -111,6 +111,52 @@
 把 `mkdtemp` 与删除注册成一对（文件级 `after()` 钩子，每个测试文件一个进程、各自实例），测试文件不再
 各自写 `finally { rmSync }`——上一轮各写各的、只覆盖到当时改的点的教训。
 
+### R7 · 不得写入仓库的 LIVE 产品数据目录（`tasks/`、`.quay/`、`.workflow-events/`、`adr/`）（2026-08-03 补）
+
+> 来源：`tasks/gap-r1-cannot-see-tests-writing-into-the-live-task-store.md`——一个测试 fixture
+> 被误提交进真实任务库（`tasks/M-FAKE-FRONTMATTER-SCOPE-M124.md`，提交 `b505d3aa`，随即 revert）。
+> R1 的判据要求 **`__dirname` 与 `.tmp` 字面同时成立**，而这次是
+> `path.join(process.cwd(), "tasks", "M-FAKE-…md")` —— `process.cwd()` 不在 R1 的正则里、路径里
+> 也没有 `.tmp`，两条都不沾，R1 看不见它。它被 `git add -A` 偶然扫进提交才被发现，**不是任何检查
+> 报出来的**——这正是本任务存在的理由。
+
+**规则**：测试的写操作（`writeFileSync`/`mkdirSync`/`appendFileSync`/`rmSync`/`unlinkSync`/`cpSync`/
+`createWriteStream`…）目标路径不得解析进仓库的 **LIVE 产品数据目录**，且根必须是**非每运行唯一**的
+（`process.cwd()`/`__dirname`/`import.meta` —— 共享 checkout）。写进这些目录比写进共享 `.tmp` 路径
+严重：污染的是产品数据（`task list`、web UI、`task-status-drift-check`、任务计数都会看见），不只是
+测试环境。**安全形态**：根是每运行唯一的（`os.tmpdir()`/`mkdtemp`/`makeTmpDir` 派生的变量）。
+
+**扫描信号**（R7 `live-data-dir-write`，与 R1 并列、严重度更高的单独一类）：
+- `path.join(process.cwd(), "tasks", …)` / `path.join(REPO_ROOT, ".quay", …)` 这类**共享根 + LIVE 目录段**的
+  join（`process.cwd()`/`__dirname`/`import.meta` 或引用它们的变量作根），且不是 mkdtemp/os.tmpdir 根；
+- 字面量相对路径写入 `writeFileSync("tasks/x.md", …)`（仅当文件没有 `process.chdir` 时——chdir 过的
+  相对路径基座不可判定）；
+- 写操作首参是**变量**、其初始化器是上述 join（`const taskPath = path.join(process.cwd(), "tasks", …)`
+  然后 `writeFileSync(taskPath, …)`）——变量溯源一层。
+
+**`process.cwd()` 本身不判违规**：`originalCwd = process.cwd()` 这类保存/恢复用法（14 处，全部无害）
+不触发——只有「写 + LIVE 目录段 + 共享根」的组合才报。
+
+**AC2 活标本**：`experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs` 原状
+（`path.join(process.cwd(), "tasks", \`${taskId}.md\`)` 写真实任务库）在探测器上线后立即被报出。
+
+**类的规模（实测）**：外层用「写操作 + 真实数据目录路径参数」扫过 `packages/*/test`、`plugin/test`、
+`experiments/*/test`，估为 1；**探测器上线后报出第 2 个**——`plugin/test/workflow-event-schema.test.mjs`
+的 `path.join(REPO_ROOT, ".workflow-events", \`${event.runId}.jsonl\`)` + `unlinkSync`（固定名 `M248` 的
+写+删，`--emit-event` CLI 默认写 LIVE `.workflow-events/`，并发下互相踩）。外层扫描以创建类写操作为主，
+漏掉了 `unlinkSync` 删除类写操作——探测器是 unlink/rm 感知的，故发现它。两个实例都已修。
+
+**修复的两个实例**：
+- `it0-dod-check.test.mjs`：`runDodCheck` 增加可选 `tasksDir` 参数（纯函数 API，CLI 不传则行为不变），
+  测试用 `mkdtemp` 工作区 + `tasks/` 子目录 + `tasksDir` 传入——**真实 frontmatter 文件仍在磁盘上、走同一
+  条解析路径**（断言 `milestone:M5` 出现在 pass 消息里证明读的是真文件），只是不再写 LIVE `tasks/`。
+- `workflow-event-schema.test.mjs`：CLI `--emit-event` 增加 `WORKFLOW_EVENTS_DIR` 环境变量覆盖
+  （默认仍是 `repoRoot/.workflow-events`），测试把输出重定向到 `mkdtemp` 目录——CLI 创建→读→校验的
+  端到端覆盖保留。
+
+**棘轮**：名单 44 → 45 → 44。44→45 是 AC2 活标本验证期间为 `it0-dod-check` 基线化一条；45→44 是两个
+实例都修完后删掉。`# baseline-count` 封顶永久不变（51）。
+
 ## 扫描与棘轮（AC2–AC6）
 
 `plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做六条判定，
@@ -189,6 +235,9 @@ R6 新增 28 条 `mkdtemp-no-cleanup`（gap-tests-never-clean-up-their-tmpdirs�
 
 - **R1 只识别 dot-tmp 形态**：固定路径契约的机械信号是 `__dirname/.tmp-*` dot-tmp 目录（从实例归纳，
   按任务要求「不预先扩充」）。非 `.tmp` 的固定路径写入（如 `path.join(__dirname, "out.json")`）不被报。
+  **R7 部分补上了「写进 LIVE 产品数据目录」的那一块**（`tasks/`/`.quay/`/`.workflow-events/`/`adr/`）；
+  其它非 `.tmp`、非 LIVE 目录的固定路径（如 `path.join(__dirname, "out.json")`）仍是 R1 已知盲区，
+  无当前实例，不预先扩充。
 - **R2 直接写共享产物只认首参字面量**：`writeFileSync("packages/quay/dist/x.js", …)` 会被报，但
   `writeFileSync(path.join(REPO_ROOT, "packages","quay","dist","x.js"), …)` 这种**拼接出来的共享路径**
   不被报（无当前实例；要报需要 join 起点溯源，超出静态扫描的当前范围）。

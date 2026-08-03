@@ -34,6 +34,7 @@ import {
   detectSpawnsTestSh,
   detectProcessExit1,
   detectMkdtempNoCleanup,
+  detectLiveDataDirWrites,
   runIsolationChecks,
 } from "../scripts/test-isolation-check.ts";
 
@@ -206,6 +207,62 @@ test("AC6: claude-* and quay-wt-* mkdtemp prefixes never report; a normal fixtur
   );
 });
 
+// ── R7 / AC1/AC2/AC4: writes into LIVE product-data dirs via a shared root ──────────────────────────
+test("R7/AC2: a fixed-name write into tasks/ via process.cwd() reports; per-run-unique roots do not", () => {
+  // the gap-r1 specimen: `path.join(process.cwd(), "tasks", <fixed id>)` + writeFileSync
+  assert.ok(
+    detectLiveDataDirWrites(
+      'const taskPath = path.join(process.cwd(), "tasks", "M-FAKE.md");\nfs.writeFileSync(taskPath, taskText);\n',
+      "x.test.mjs"
+    ).some((v) => v.rule === "live-data-dir-write")
+  );
+  // the SAFE shape: a mkdtemp workspace root → no report
+  assert.equal(
+    detectLiveDataDirWrites(
+      'const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dod-check-"));\nfs.mkdirSync(path.join(workspaceRoot, "tasks"));\nconst taskPath = path.join(workspaceRoot, "tasks", "M-FAKE.md");\nfs.writeFileSync(taskPath, taskText);\n',
+      "x.test.mjs"
+    ).length,
+    0
+  );
+  // a bare-assigned makeTmpDir root (serve-adr/mcp-adr: `workspaceRoot = makeTmpDir(...)`) → safe
+  assert.equal(
+    detectLiveDataDirWrites(
+      'let workspaceRoot;\nworkspaceRoot = makeTmpDir("x-ws-");\nfs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"), "x");\n',
+      "x.test.mjs"
+    ).length,
+    0
+  );
+  // originalCwd = process.cwd() save/restore (14 harmless uses) → never a report
+  assert.equal(
+    detectLiveDataDirWrites(
+      'const originalCwd = process.cwd();\nprocess.chdir(workspaceRoot);\ntry { fs.writeFileSync("config.yml", "x"); } finally { process.chdir(originalCwd); }\n',
+      "x.test.mjs"
+    ).length,
+    0
+  );
+  // a literal relative tasks/ write (no chdir in the file) → reports
+  assert.ok(
+    detectLiveDataDirWrites('fs.writeFileSync("tasks/M-FAKE.md", taskText);\n', "x.test.mjs")
+      .some((v) => v.rule === "live-data-dir-write")
+  );
+  // a comment mentioning the pattern is not a violation (code-position matching, AC2)
+  assert.equal(
+    detectLiveDataDirWrites(
+      '// const taskPath = path.join(process.cwd(), "tasks", "M-FAKE.md")\nconst x = 1;\n',
+      "x.test.mjs"
+    ).length,
+    0
+  );
+  // a READ from REPO_ROOT/tasks (write ops only) → never a report
+  assert.equal(
+    detectLiveDataDirWrites(
+      'const realTasksDir = path.join(REPO_ROOT, "tasks");\nconst raw = fs.readFileSync(path.join(realTasksDir, "x.md"), "utf8");\n',
+      "x.test.mjs"
+    ).length,
+    0
+  );
+});
+
 // ── the ratchet (runIsolationChecks, AC5) ───────────────────────────────────────────────────────────
 test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries fail", () => {
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];
@@ -252,6 +309,10 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 rem
   assert.ok(lines.includes("plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh"), `missing AC11 instance:\n${res.stdout}`);
   // AC3: relation-sync was FIXED — it must NOT appear under any rule
   assert.ok(!lines.some((l) => l.startsWith("packages/quay-native/test/relation-sync.test.mjs")), `relation-sync must not report:\n${res.stdout}`);
+  // AC3 (gap-r1-cannot-see-tests-writing-into-the-live-task-store): the two R7 live-data-dir-write
+  // instances were FIXED — neither may report live-data-dir-write
+  assert.ok(!lines.some((l) => l.startsWith("experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs:live-data-dir-write")), `it0-dod-check R7 must not report:\n${res.stdout}`);
+  assert.ok(!lines.some((l) => l.startsWith("plugin/test/workflow-event-schema.test.mjs:live-data-dir-write")), `workflow-event-schema R7 must not report:\n${res.stdout}`);
   // AC4: the 7 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync)
   for (const f of [
     "packages/quay-native/test/adversarial-eval.test.mjs",

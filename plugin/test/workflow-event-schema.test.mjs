@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
@@ -432,31 +433,39 @@ test("AC5 — REQUIRED_FIELDS has exactly 20 elements", async () => {
 
 // ── AC5: CLI --emit-event mode follows established patterns ──────────────────────────────────────────
 
-test("AC5 — CLI --emit-event writes to .workflow-events/<runId>.jsonl", async () => {
+test("AC5 — CLI --emit-event writes to a per-run-unique events dir (WORKFLOW_EVENTS_DIR)", async () => {
   const modPath = path.join(SCRIPTS, "workflow-event-schema.mjs");
   const event = makeValidEvent();
   const eventJson = JSON.stringify(event);
   // Use single-quote escaping for shell
   const escaped = eventJson.replace(/'/g, "'\\''");
-  const { exitCode, stderr } = runModuleJs(modPath, "--emit-event", `'${escaped}'`);
-  assert.equal(exitCode, 0, `--emit-event should exit 0, got ${exitCode}\nstderr: ${stderr}`);
+  // gap-r1-cannot-see-tests-writing-into-the-live-task-store (R7 live-data-dir-write): the CLI's
+  // default output dir is the LIVE .workflow-events/ store — a fixed-name write raced under
+  // concurrency. WORKFLOW_EVENTS_DIR redirects --emit-event to a per-run-unique temp dir so the CLI
+  // path (create → read → validate) is still exercised end-to-end against a test-owned location.
+  const eventsDir = fs.mkdtempSync(path.join(os.tmpdir(), "wfe-schema-events-"));
+  const prevEnv = process.env.WORKFLOW_EVENTS_DIR;
+  try {
+    process.env.WORKFLOW_EVENTS_DIR = eventsDir;
+    const { exitCode, stderr } = runModuleJs(modPath, "--emit-event", `'${escaped}'`);
+    assert.equal(exitCode, 0, `--emit-event should exit 0, got ${exitCode}\nstderr: ${stderr}`);
 
-  // Check that the log file was created
-  const logPath = path.join(REPO_ROOT, ".workflow-events", `${event.runId}.jsonl`);
-  assert.ok(fs.existsSync(logPath), `log file should exist at ${logPath}`);
+    // Check that the log file was created in the temp events dir
+    const logPath = path.join(eventsDir, `${event.runId}.jsonl`);
+    assert.ok(fs.existsSync(logPath), `log file should exist at ${logPath}`);
 
-  // Read and validate the last line
-  const content = fs.readFileSync(logPath, "utf8");
-  const lines = content.trim().split("\n");
-  const lastLine = lines[lines.length - 1];
-  const parsed = JSON.parse(lastLine);
-  assert.equal(parsed.runId, event.runId);
-  assert.equal(parsed.stage, event.stage);
-
-  // Clean up
-  fs.unlinkSync(logPath);
-  // Remove .workflow-events/ if empty
-  try { fs.rmdirSync(path.join(REPO_ROOT, ".workflow-events")); } catch (_) { /* not empty, ok */ }
+    // Read and validate the last line
+    const content = fs.readFileSync(logPath, "utf8");
+    const lines = content.trim().split("\n");
+    const lastLine = lines[lines.length - 1];
+    const parsed = JSON.parse(lastLine);
+    assert.equal(parsed.runId, event.runId);
+    assert.equal(parsed.stage, event.stage);
+  } finally {
+    if (prevEnv === undefined) delete process.env.WORKFLOW_EVENTS_DIR;
+    else process.env.WORKFLOW_EVENTS_DIR = prevEnv;
+    fs.rmSync(eventsDir, { recursive: true, force: true });
+  }
 });
 
 test("AC5 — CLI --emit-event with invalid JSON exits 0 (fail-soft)", async () => {

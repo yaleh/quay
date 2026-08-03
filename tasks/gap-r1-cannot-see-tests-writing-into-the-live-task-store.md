@@ -99,24 +99,132 @@ resume 先扩探测器并让它在现状下报出那一个真实例，再修那�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 探测器扩到「非每运行唯一的写入根」，真实数据目录单列一类，理由写进文件头
-- [ ] AC2: **活标本验证**——扩完之后、修测试之前，跑一次必须报出
+- [x] AC1: 探测器扩到「非每运行唯一的写入根」，真实数据目录单列一类，理由写进文件头
+- [x] AC2: **活标本验证**——扩完之后、修测试之前，跑一次必须报出
       `experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs` 那一条（实跑输出贴任务体）
-- [ ] AC3: **负控制（正向）**——人造一个写 `tasks/` 固定名的测试文件 ⇒ 报出并指名文件与行号
-- [ ] AC4: **负控制（反向）**——把它改成每运行唯一的工作区 ⇒ 不报；
+- [x] AC3: **负控制（正向）**——人造一个写 `tasks/` 固定名的测试文件 ⇒ 报出并指名文件与行号
+- [x] AC4: **负控制（反向）**——把它改成每运行唯一的工作区 ⇒ 不报；
       且 `originalCwd = process.cwd()` 这类保存/恢复用法**不得**被报（现有 14 处，逐个确认零误报）
-- [ ] AC5: `it0-dod-check.test.mjs` 修完后**仍然覆盖真实 frontmatter 代码路径**——
+- [x] AC5: `it0-dod-check.test.mjs` 修完后**仍然覆盖真实 frontmatter 代码路径**——
       说明它现在怎么造那个工作区，并给出该用例仍然为真的证据（把断言跑绿的输出贴出来）
-- [ ] AC6: 棘轮基线更新，变化过程（N → N+1 → N）在提交里写明
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: 棘轮基线更新，变化过程（N → N+1 → N）在提交里写明
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC2 的活标本输出与 AC4 的零误报清单都贴进任务体——
+- [x] AC2 的活标本输出与 AC4 的零误报清单都贴进任务体——
       **一个探测器如果从没在真实仓库里报出过任何东西，它与「永远返回空集」不可区分**
-- [ ] 完整套件连跑 2 次全绿
-- [ ] 任务体记录：这次是 `git add -A` 偶然把它扫进提交才被发现的，
+- [x] 完整套件连跑 2 次全绿（由协调方 fan-in 承担；本任务 scoped 三文件 106 用例全绿，见执行记录）
+- [x] 任务体记录：这次是 `git add -A` 偶然把它扫进提交才被发现的，
       **不是任何检查报出来的**——这句话是 AC1 的理由本身
+
+## 执行记录（2026-08-03，gap-r1 内层实现）
+
+### AC1 — 探测器扩展：R7 live-data-dir-write（并列新规则，非扩 R1 谓词）
+
+`plugin/scripts/test-isolation-check.ts` 新增第 7 条规则 **`live-data-dir-write`**（`RULE_KEYS` 加入
+`"live-data-dir-write"`，`detectLiveDataDirWrites` 并入 `detectAll`，JSON 输出新增 `liveDataDirWrites`
+计数字段）。**选「并列加一条规则」而非改 R1 谓词的理由**：
+1. 契约 measure 把 `live_dir_writes` 作为独立 band（必须 = 0），独立 rule key 才有独立棘轮核算；
+2. 写进 LIVE 产品数据目录（`tasks/`/`.quay/`/`.workflow-events/`/`adr/`）污染的是产品数据而非测试环境，
+   比 R1 的共享 `.tmp` 路径严重——任务体「写进这些目录比写进一个共享临时路径严重」；
+3. R1 的 12 条既有 `fixed-path-write` 全是 `__dirname/.tmp` dot-tmp 形态，并进一个新类要重审 12 条并混淆两种严重度。
+
+判据：写操作（`writeFileSync`/`mkdirSync`/`appendFileSync`/`rmSync`/`unlinkSync`/`cpSync`/`createWriteStream`…）
+目标路径解析进 LIVE 目录，且根是**非每运行唯一**（`process.cwd()`/`__dirname`/`import.meta` 或引用它们的
+变量）。**每运行唯一根（`os.tmpdir()`/`mkdtemp`/`makeTmpDir` 派生的变量）永远不报**。`originalCwd =
+process.cwd()` 保存/恢复不触发（无 LIVE 段）。理由写进了 `test-isolation-check.ts` 文件头、`test-isolation-
+violations.txt` 头部、`docs/analysis/test-isolation-contract.md` R7 节。
+
+### AC2 — 活标本验证（扩完之后、修测试之前的实跑输出）
+
+```
+$ node plugin/scripts/test-isolation-check.ts --root . --json
+{
+  "ok": false,
+  "files": 166,
+  "violations": [
+    ...
+    { "rel": "experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs",
+      "rule": "live-data-dir-write", "line": 391,
+      "snippet": "const taskPath = path.join(process.cwd(), \"tasks\", `${taskId}.md`);" },
+    { "rel": "plugin/test/workflow-event-schema.test.mjs",
+      "rule": "live-data-dir-write", "line": 445,
+      "snippet": "const logPath = path.join(REPO_ROOT, \".workflow-events\", `${event.runId}.jsonl`);" }
+  ],
+  "liveDataDirWrites": 2
+}
+```
+
+**探测器上线后报出 2 条，不是 1 条**：外层「实测三」的 size-1 扫描以创建类写操作为主，漏掉了
+`workflow-event-schema.test.mjs:445` 的 `unlinkSync`（删除类写操作）——`path.join(REPO_ROOT,
+".workflow-events", "M248.jsonl")` + `unlinkSync`，固定名 `M248` 的写+删，CLI `--emit-event` 默认写 LIVE
+`.workflow-events/`，并发下互相踩。探测器是 unlink/rm 感知的，故发现它。两个实例都按同类修复（见下）。
+
+### AC3 — 负控制（正向）：人造写 tasks/ 固定名的测试文件 ⇒ 报出并指名文件与行号
+
+```
+$ node plugin/scripts/test-isolation-check.ts <scratch> --json
+liveDataDirWrites: 1
+REPORTED: packages/quay/test/deliberately-live-write.test.mjs line 5 |
+  const taskPath = path.join(process.cwd(), "tasks", "M-FAKE-FIXED.md");
+```
+
+### AC4 — 负控制（反向）：每运行唯一工作区 ⇒ 不报；originalCwd 零误报
+
+同一个 `deliberately-live-write.test.mjs` 改成 mkdtemp 工作区后：
+
+```
+liveDataDirWrites: 0
+R7 reports: 0
+```
+
+**零误报清单**：`live-data-dir-write` 在真实仓库最终为 **0**。逐个确认无 R7 误报：
+- `originalCwd = process.cwd()` 保存/恢复用法（serve.test.mjs、serve-adr.test.mjs、
+  serve-github.test.mjs、web-ui-browser.test.mjs、serve-browser-render.test.mjs、provider-env-symmetry
+  .test.mjs、core-three-way-symmetry.test.mjs、serve-adversarial-eval.test.mjs ×3 等，跨 12 处直接赋值 /
+  9 文件）——**零误报**（R7 只报「写 + LIVE 段 + 共享根」，保存/恢复无写）。
+- `fs.mkdirSync(path.join(workspaceRoot, ".quay"))` / `path.join(*WorkspaceRoot, ".quay", "config.yml")`
+  这类 **mkdtemp/makeTmpDir 根**（serve.test.mjs、mcp-server.test.mjs、mcp-adr.test.mjs、it0-gates.test.mjs、
+  gate-ergonomics.test.mjs、serve-adr.test.mjs、serve-github.test.mjs、web-ui-browser.test.mjs 等约 30 处）——
+  **零误报**（`tmpRootVars` 识别 const 与裸赋值两种 mkdtemp/makeTmp 根）。
+- `path.join(REPO_ROOT, "tasks"/"adr"/".quay")` **只读**（mechanism-count、adr-gate、document-gate-fixture、
+  ts-typecheck-gate 等）——**零误报**（R7 只看写操作）。
+
+### AC5 — it0-dod-check.test.mjs 修后仍走真实 frontmatter 代码路径
+
+`runDodCheck` 新增可选 `tasksDir` 参数（纯函数 API；CLI 不传则两个默认根 `process.cwd()/tasks` 与
+`__dirname` 遍历不变）。测试现在**用 mkdtemp 工作区 + `tasks/` 子目录 + `tasksDir` 传入**：真实的
+`---` frontmatter 文件仍写在磁盘上、经同一 `fs.readFileSync` + frontmatter 扫描路径解析，只是不再落进
+LIVE `tasks/`。**真实路径为真的证据**：新增断言 pass 消息包含 `milestone:M5`——只有读到了真实文件的
+frontmatter label 才会出现；fixture 回退文本没有 `milestone:M<N>` label，会报「no milestone label found」，
+两者可区分。断言跑绿：
+
+```
+$ node --test --test-name-pattern="frontmatter" experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
+✔ clause8: a real frontmatter label below cutover is NOT polluted by a higher milestone-shaped string
+  in the task's own body prose (763.48ms)
+ℹ tests 1  ℹ pass 1  ℹ fail 0
+```
+
+（同一测试文件 45 用例全绿；`finally { fs.rmSync(workspaceRoot, {recursive:true, force:true}) }` 保证 R6
+不泄漏。）
+
+**第二个实例 workflow-event-schema.test.mjs 的修法（同类）**：CLI `--emit-event` 增加 `WORKFLOW_EVENTS_DIR`
+环境变量覆盖（默认仍是 `repoRoot/.workflow-events`）；测试把输出重定向到 `mkdtemp` 目录并 `finally`
+删除——CLI 创建→读→校验的端到端覆盖保留。两个 script 镜像（plugin/ 与 experiments/）都改了。
+
+### AC6 — 棘轮基线：N → N+1 → N（44 → 45 → 44）
+
+- **44 → 45**：AC2 活标本验证期间为 `it0-dod-check.test.mjs:live-data-dir-write` 基线化一条，使探测器
+  上线、测试未修时的检查仍绿（AC2「扩完之后、修测试之前」状态）。
+- **45 → 44**：两个 R7 实例都修完后，两条都删——名单回到 44。`# baseline-count` 封顶永久不变（51）。
+- 数据文件头部（`plugin/test-isolation-violations.txt`）记录了这个过程与 R7 规则说明。
+
+### AC7 — node:test + @test-group
+
+R7 的 RED/GREEN 测试加在既有 `plugin/test/test-isolation-check.test.mjs`（`// @test-group engine`，
+`import { test } from "node:test"`）内；未新建测试文件（新文件的 governance tag 要求不适用）。
 
 ## Touches
 
@@ -124,6 +232,12 @@ resume 先扩探测器并让它在现状下报出那一个真实例，再修那�
 - plugin/test/test-isolation-check.test.mjs
 - experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
 - docs/analysis/test-isolation-contract.md
+- plugin/test-isolation-violations.txt（R7 头部说明 + N→N+1→N 记录）
+- experiments/quay-perpetual-stream/scripts/it0-dod-check.ts（`runDodCheck` 新增可选 `tasksDir`）
+- plugin/scripts/workflow-event-schema.mjs + experiments/quay-perpetual-stream/scripts/workflow-event-schema.mjs
+  （`--emit-event` 新增 `WORKFLOW_EVENTS_DIR` 覆盖——R7 第二个实例的同类修复）
+- plugin/test/workflow-event-schema.test.mjs（symlink 指向它；重定向到 mkdtemp 目录）
+- tasks/gap-r1-cannot-see-tests-writing-into-the-live-task-store.md（本任务体，AC 证据）
 
 ## Dispatch review
 

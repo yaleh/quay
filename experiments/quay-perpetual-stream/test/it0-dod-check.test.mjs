@@ -16,6 +16,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { runDodCheck } from "../scripts/it0-dod-check.ts";
 
 // ── Reusable in-memory fixture builders (mirror fixtures/dod/*.md section shapes) ────────────────
@@ -94,6 +95,10 @@ function run(opts) {
     charterFile: THIS_FILE,
     charterFileText: text,
     absorbFileText: text,
+    // tasksDir (optional): the clause-8 frontmatter-scoping test passes a per-run-unique tasks dir
+    // (mkdtemp) so the real-frontmatter code path is exercised against a test-owned location, never
+    // the live tasks/ store (gap-r1-cannot-see-tests-writing-into-the-live-task-store).
+    tasksDir: opts.tasksDir,
   });
 }
 
@@ -387,9 +392,19 @@ test("clause8: multi-label, ALL below cutover → N/A grandfathered pass (max st
 // this task by its REAL frontmatter label only and N/A-pass it — a REFUTED-by-the-old-whole-text-scan
 // case, now fixed by scoping the scan to the frontmatter block.
 test("clause8: a real frontmatter label below cutover is NOT polluted by a higher milestone-shaped string in the task's own body prose", () => {
-  const taskId = "M-FAKE-FRONTMATTER-SCOPE-M124";
-  const taskPath = path.join(process.cwd(), "tasks", `${taskId}.md`);
-  const taskText = `---
+  // gap-r1-cannot-see-tests-writing-into-the-live-task-store: this test NEEDS a real `---`-delimited
+  // task file on disk (the fixture fallback has no frontmatter at all) to exercise the REAL
+  // frontmatter code path — so it builds a per-run-unique workspace (mkdtemp) with a tasks/ subdir
+  // and passes it via runDodCheck's tasksDir hook. That keeps the real frontmatter file on disk
+  // (same parsing path) while isolating it from the LIVE tasks/ store, which the old
+  // `path.join(process.cwd(), "tasks", ...)` write raced under concurrency and was swept into a
+  // commit by a windowed `git add -A`. The workspace is removed in finally (R6-clean).
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dod-check-frontmatter-"));
+  try {
+    fs.mkdirSync(path.join(workspaceRoot, "tasks"), { recursive: true });
+    const taskId = "M-FAKE-FRONTMATTER-SCOPE-M124";
+    const taskPath = path.join(workspaceRoot, "tasks", `${taskId}.md`);
+    const taskText = `---
 id: ${taskId}
 title: "fixture — frontmatter-scoping regression test"
 status: todo
@@ -406,13 +421,18 @@ must NOT be read as THIS task's own milestone label.
 
 N/A — fixture only, no real plan needed.
 `;
-  fs.writeFileSync(taskPath, taskText);
-  try {
-    const r = run({ milestoneId: taskId });
+    fs.writeFileSync(taskPath, taskText);
+    const r = run({ milestoneId: taskId, tasksDir: path.join(workspaceRoot, "tasks") });
     assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record: N/A"), JSON.stringify(r.passes));
+    // AC5 (gap-r1-cannot-see-tests-writing-into-the-live-task-store): prove the REAL frontmatter
+    // code path is still exercised — the N/A reason must cite the REAL on-disk label `milestone:M5`
+    // (parsed from the `---` block of the temp task file). The fixture-text fallback has NO
+    // milestone:M<N> label at all and would instead say "no 'milestone:M<N>' label found" — so this
+    // assertion distinguishes the real-file path from the fallback.
+    assert.ok(hasPass(r, "milestone:M5"), `real frontmatter label must be parsed from the on-disk file:\n${JSON.stringify(r.passes)}`);
     assert.ok(!hasFail(r, "clause8"), JSON.stringify(r.failures));
   } finally {
-    fs.rmSync(taskPath, { force: true });
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
 
