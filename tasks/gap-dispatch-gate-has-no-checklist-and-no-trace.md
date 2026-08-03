@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-gate-has-no-checklist-and-no-trace
-title: "The pre-dispatch mechanism review is a habit, not a mechanism — no
-  trigger, no checklist, no record that it happened"
+title: "Give the task body a machine-readable contract between goal and code —
+  the pre-dispatch review is a habit with no checklist and no trace"
 status: todo
 labels:
   - gap
@@ -40,36 +40,116 @@ PlanCheck 占 55% 成本）。这个取舍是对的——今天完成 15 个任�
 
 ## Chosen mechanism
 
-**两样东西，都要求便宜到不会被跳过。**
+**把闸口那五个问题从「口头问」变成「任务创建时写下的、机器能消费的声明」。两者不并存。**
 
-### 一、机制选择清单（`## Chosen mechanism` 必须回答的问题）
+### 为什么必须是机器能消费的（实测依据）
 
-初稿直接从今天四次介入归纳，**不预先扩充**——ADR-021 原则：证据不足时不要把策略机械化。
+任务体各段落被脚本引用的实际情况（2026-08-03 实测）：
 
-| 问题 | 来自 | 不回答会怎样 |
-|---|---|---|
-| **口径**：要测的量怎么定义？用哪个字段？ | `duration_ms` 被当成 Σ 每文件耗时 | 六次跑带着同一个错误，结论由计算方式而非被测对象决定 |
-| **不变量**：什么必须跨运行保持一致才能归因？ | `selected N files` | 变量不止一个，差异归因不了 |
-| **失败长什么样**：这个方案失败时会看到什么？ | 「`--check` 前先 `--sync-dist`」 | 修法可能让检查永远不失败＝掩盖 |
-| **中断保全**：中途停了，已得的数据留下吗？ | 增量写盘 | 触到 90 分钟阈值即整批作废 |
-| **调用形态**：命令的确切写法有歧义吗？ | `=` vs 空格拼写 | 静默走进另一条代码路径 |
+| 段落 | 引用脚本数 | **内容**被消费吗 | 今晚漂移过吗 |
+|---|---|---|---|
+| `## Touches` | 24 | **是**——解析成路径，驱动并发资格与测试选择 | **否** |
+| `## Acceptance Criteria
 
-清单**写进任务模板**，`## Chosen mechanism` 段落之后。不回答的项要显式写「不适用」及理由——
-留白与「没想过」不可区分。
+- [ ] AC1: `## Contract` 六个键的语法定义写进任务模板与 `task-schema`；`n/a: <理由>` 是合法值，
+      留白不是
+- [ ] AC2: 检查脚本实现「二、消费者」表中的五条判定，**读内容不只验存在**；
+      按代码/字段位置匹配，剥离注释与字符串字面量
+- [ ] AC3: `## Dispatch review` 段落格式定义，`reviewer: none` 是合法值；缺段则报出（不阻断）
+- [ ] AC4: 用今天四个真实案例**回填**：`4vs8`、`M243` 语料修复、`M136` 第三轮、`blocked-signal`。
+      每个都要写出完整的 `## Contract` 块，并**逐个说明**当时那次介入对应哪个键。
+      **有任何一次介入无法用这六个键表达 ⇒ 记为清单缺项，写进任务体，不许硬塞**
+- [ ] AC5: 用一个人为构造的违规任务演示检查器确实会报（不能只在存量上验证）——
+      至少覆盖「AC 有阈值但无 measure」与「measure 缺命令」两种
+- [ ] AC6: 在当前 `tasks/` 全量实跑，输出违规清单；违规名单是数据文件，**只能变短**
+- [ ] AC7: 明确记录**不做**的事：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线
+- [ ] AC8: 测试带 `// @test-group engine` 声明
 
-### 二、过闸留痕
+## Definition of Done
 
-派发时把闸口结果写进任务体一个固定段落 `## Dispatch review`：
+- [ ] AC4 的四个回填 `## Contract` 块与 AC5 的演示输出贴进任务体
+- [ ] `scripts/test.sh` 连跑 2 次全绿
+- [ ] 明确记录：**唯一内容被消费的字段 `## Touches` 是唯一没漂移的字段**——
+      新增的每个键若没有真读它的消费者，三天后它就是第五段散文
+- [ ] 明确记录：**闸口现在拦住的东西里有一半靠外层碰巧知道**——
+      把「碰巧」变成「写下来时就被问到」，是这个中间层唯一的目的
+
+## Touches` | 24 | **是**——解析成路径，驱动并发资格与测试选择 | **否** |
+| `## Acceptance Criteria` | 14 | 否，只数勾选框 | 是 |
+| `## Proposal` | 14 | 否，只验存在与长度 | 是 |
+| `## Chosen mechanism` | 4 | 否，只验存在 | 是 |
+
+**唯一内容真正驱动决策的字段，也是唯一没漂移的字段。** 结论直接可用：
+
+> **一个没有读者的字段，就是带标题的散文。**
+
+因此本任务不新增散文段落。新增的每一个键都必须指名它的消费者，且消费者读的是**内容**。
+
+### 这在双层机制下是核心而非润色
+
+quay 交付的是双层机制，**内层没有人可以澄清歧义**——任务体就是全部的规格交接。
+在人驱动单会话模式下，含糊的一句话由人在对话里当场补齐；这里没有那个人。
+散文的不确定性在这个模式下是直接成本，今晚四次闸口介入就是这笔成本的账单。
+
+### 一、`## Contract`——目标与代码之间的中间层
+
+六个键，**每个都能指回今天一次真实介入**，不预先扩充（ADR-021：证据不足不要把策略机械化）：
 
 ```
+## Contract
+
+measure   suite_wall  = `scripts/test.sh` stdout 的 duration_ms 字段   # 单次墙钟，非 Σ 每文件
+band      noise       = 20000..63000 ms                                # 实测基线
+invariant selected_files = 2296                                        # 变了则差异不可归因
+invoke    `scripts/test.sh --test-concurrency=4`                       # 必须 `=`；空格形式走另一分支
+control   把并发改回 8 ⇒ AC2 必须不成立
+resume    每跑完一次即写盘                                              # 中断保全
+```
+
+| 键 | 来自今天哪次介入 | 不写会怎样 |
+|---|---|---|
+| `measure` | `duration_ms` 被当成 Σ 每文件耗时 | 六次跑带着同一个错误口径 |
+| `band` | 20–63s 噪声带 | 阈值声明没有分母，差异无法判显著 |
+| `invariant` | `selected N files` 必须一致 | 变量不止一个，归因不了 |
+| `invoke` | `=` vs 空格拼写 | 静默走进另一条代码路径 |
+| `control` | 否掉「`--check` 前先 `--sync-dist`」 | 修法让检查永不失败＝掩盖 |
+| `resume` | 增量写盘 | 触到 90 分钟阈值即整批作废 |
+
+**`n/a: <理由>` 是每个键的合法值；留白不是。** 留白与「没想过」不可区分——
+这和 `reviewer: none` 是同一条原则。
+
+### 二、消费者（这是本任务的实质，不是格式）
+
+一个检查脚本，读**内容**：
+
+| 检查 | 拦住的是 |
+|---|---|
+| AC 里出现阈值/数字 ⇒ 必须引用一个已声明的 `measure` 或 `band` 名 | 「对照噪声带宽判定」不说是哪个字段 |
+| 每条 `measure` 必须同时含**命令**（反引号）与**字段名** | 「用 duration_ms」不说哪个命令产出 |
+| 每条 `invoke` 必须是反引号命令；任务完成时贴回的证据里必须**逐字**出现该串 | 拼写漂移 |
+| `labels: defect` 的任务必须有 `control` | 「在检查前修好被检对象」这一类 |
+| 键存在但值为空 ⇒ 报出（`n/a: 理由` 不报） | 留白与「没想过」不可区分 |
+
+**报出而不阻断**（初期）——与 [[gap-test-isolation-contract-is-unwritten]] 同款棘轮：违规名单只能变短。
+**匹配必须按代码/字段位置，不按文本**：今晚有 7 次「匹配到提到它的注释而非它本身」的教训。
+
+### 三、过闸留痕
+
+`## Contract` 承载「审查问了什么」，留痕只需承载「谁审的、改了什么」：
+
+```
+## Dispatch review
 reviewer: outer | none
 at: <ISO>
-checklist: 口径 ✓ / 不变量 ✓ / 失败形态 ✓ / 中断保全 ✓ / 调用形态 n/a（无外部命令）
 changed: <外层要求的改动，逐条；无则写「无」>
 ```
 
-**`reviewer: none` 是合法值**——不是每个任务都需要过闸，但「没过闸」必须是一个**被记录的选择**，
-而不是一个无法区分于「忘了」的空白。
+清单项**不再在这里重复**——它们在 `## Contract` 里，且有消费者。
+`reviewer: none` 仍是合法值：不是每个任务都需要过闸，但「没过闸」必须是被记录的选择。
+
+**不做**：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线。
+这是一个可机器消费的声明块加一条记录——**如果它变成第五段散文，它就失败了**，
+AC4 的回填验证正是为了在早期发现这一点。
 
 ## Acceptance Criteria
 
@@ -93,7 +173,7 @@ changed: <外层要求的改动，逐条；无则写「无」>
 ## Touches
 
 - plugin/scripts/task-schema.ts
-- plugin/scripts/dispatch-review-check.ts
-- plugin/test/dispatch-review-check.test.mjs
+- plugin/scripts/task-contract-check.ts
+- plugin/test/task-contract-check.test.mjs
 - docs/analysis/fast-mode-loop-tick.md
 - orchestration/orchestrator-loop-tick.md
