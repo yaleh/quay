@@ -138,7 +138,12 @@ held_ms_of_token() {
   acq="$(read_field acquired_ms)"
   now="$(now_ms)"
   if [ -n "$acq" ] && [ "$acq" -ge 0 ] 2>/dev/null; then
-    printf '%s' "$(( now - acq ))"
+    local diff=$(( now - acq ))
+    # A negative held duration is a timing artifact (the reader's epoch-ms momentarily
+    # behind the writer's — observed -559ms under full-suite load), never a real value.
+    # Clamp at 0 so the HELD message / --status never report a nonsensical negative.
+    if [ "$diff" -lt 0 ]; then diff=0; fi
+    printf '%s' "$diff"
   else
     printf '0'
   fi
