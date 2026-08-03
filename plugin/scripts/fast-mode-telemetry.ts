@@ -49,6 +49,31 @@
 // `serialEquivalentPerHour` with an explicit "unrelated to concurrency" annotation (AC5); it is a
 // deterministic transform of meanMinutes.
 //
+// HALT-TIME DENOMINATOR FIX (gap-tasksperhour-counts-halted-time-as-slow-work, AC1-AC8): the
+// throughput denominator is wall-clock window hours, so a `.halt` pause freezes the numerator while
+// the denominator keeps growing — a deliberate stop reads identically to working slowly, and the
+// pause §0d uses for cross-project resource arbitration becomes a throughput penalty that rewards
+// picking light tasks. The fix subtracts RECORDED halt intervals from the denominator. The numerator
+// (completed-task count) is UNCHANGED and never weighted by task size (AC6) — "修的是仪器，不是去挑任务".
+//
+// DATA SOURCE (AC1): the authoritative source is an append-only halt event log at
+// <root>/.workflow-events/halt-events.jsonl, written by this CLI's `--halt-start` / `--halt-end`
+// subcommands (the actor that places/removes the `.halt` sentinel calls them). The `.halt` GIT
+// HISTORY was measured and rejected: this task's own halt shows the file content self-reporting
+// placement at 09:33:12Z while the commit landed at 09:55:08Z (22 min late), and the removal at
+// 10:32Z was not yet committed at measurement time — git-history intervals are systematically SHORT
+// and may miss the removal entirely. Do NOT default to git history as authoritative.
+//
+// CONSERVATIVE MISSED-RECORD SEMANTICS: only CLOSED intervals (a `start` followed by an `end`)
+// subtract anything. A `start` with no matching `end` (halt still active OR its end line lost) and an
+// `end` with no preceding `start` subtract NOTHING — the window keeps that halt time, degrading to
+// the pre-fix behavior. This can only UNDERSTATE throughput, never overstate it ("漏写 ⇒ 偏保守").
+//
+// REPORT SURFACE (AC2): both windowHours (already reduced) and haltedHours (the subtracted amount)
+// appear in the report, plus the halted[] intervals. windowStart/windowEnd are already there, so a
+// reader can recompute elapsed = windowEnd - windowStart and verify elapsed - windowHours ==
+// haltedHours independently.
+//
 // Storage: raw events append to <root>/.workflow-events/<runId>.jsonl (gitignored). The committed
 // roll-up under <root>/milestones/fast-mode-telemetry/<YYYY-MM-DD>.json is written ONLY by the
 // explicit --snapshot subcommand (task end / Land / day-end moments). --report is PURE READ — it
@@ -237,16 +262,79 @@ export function writeEvent(event, root) {
   return logPath;
 }
 
+// ── Halt event log (gap-tasksperhour-counts-halted-time-as-slow-work, AC1) ─────────────────────────
+// The append-only halt log is the authoritative source of halt intervals. It is a SEPARATE file from
+// the runId event stream: its lines are {type:"halt", event:"start"|"end", atMs, reason?}, NOT A1a
+// StageEvents. `--halt-start`/`--halt-end` append to it; the telemetry reads it and subtracts the
+// closed intervals from the throughput window denominator. The `.halt` git history was measured and
+// REJECTED as the source (placement commit landed 22 min after the file's self-reported time; the
+// removal commit may not exist at measurement time) — see the header DATA SOURCE note.
+
+/** Fixed filename of the append-only halt event log (sibling of the runId event files, same gitignored dir). */
+export const HALT_LOG_FILENAME = "halt-events.jsonl";
+
+/**
+ * Append one halt log line to `<root>/.workflow-events/halt-events.jsonl`.
+ * Fail-closed (like writeEvent): a structurally invalid halt event throws and writes nothing.
+ * @param {{type:"halt", event:"start"|"end", atMs:number, reason?:string|null}} event
+ * @param {string} root
+ * @returns {string} — the log path written
+ */
+export function writeHaltEvent(event, root) {
+  if (!event || event.type !== "halt" || (event.event !== "start" && event.event !== "end")) {
+    throw new Error(`refusing to write halt event: expected {type:"halt", event:"start"|"end"}, got ${JSON.stringify(event)}`);
+  }
+  if (typeof event.atMs !== "number" || !Number.isFinite(event.atMs)) {
+    throw new Error(`refusing to write halt event: atMs must be a finite number, got ${event.atMs}`);
+  }
+  const eventsDir = path.join(root, ".workflow-events");
+  fs.mkdirSync(eventsDir, { recursive: true });
+  const logPath = path.join(eventsDir, HALT_LOG_FILENAME);
+  const line = JSON.stringify({ type: "halt", event: event.event, atMs: event.atMs, reason: event.reason ?? null });
+  fs.appendFileSync(logPath, line + "\n", "utf8");
+  return logPath;
+}
+
+/**
+ * Read every halt log line from `<root>/.workflow-events/halt-events.jsonl`, in append order.
+ * Malformed lines are skipped silently (never crash the report). Missing file → [].
+ * @param {string} root
+ * @returns {Array<{type:"halt", event:"start"|"end", atMs:number, reason?:string|null}>}
+ */
+export function readHaltEvents(root) {
+  const logPath = path.join(root, ".workflow-events", HALT_LOG_FILENAME);
+  if (!fs.existsSync(logPath)) return [];
+  const out = [];
+  for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (e && e.type === "halt" && (e.event === "start" || e.event === "end") && typeof e.atMs === "number" && Number.isFinite(e.atMs)) {
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 /**
  * Async-generate every schema-valid event across all `.workflow-events/*.jsonl` files.
- * Malformed lines are skipped by parseEventStream (never crash the report).
+ * Malformed lines are skipped by parseEventStream (never crash the report). The halt event log
+ * (`halt-events.jsonl`) is explicitly EXCLUDED — its lines are not A1a StageEvents and must never
+ * pollute the task pairing (orphaned/inProgress/tasks).
  * @param {string} root
  * @returns {AsyncGenerator<object>}
  */
 export async function* readAllEvents(root) {
   const eventsDir = path.join(root, ".workflow-events");
   if (!fs.existsSync(eventsDir)) return;
-  const files = fs.readdirSync(eventsDir).filter((f) => f.endsWith(".jsonl")).sort();
+  const files = fs
+    .readdirSync(eventsDir)
+    .filter((f) => f.endsWith(".jsonl") && f !== HALT_LOG_FILENAME)
+    .sort();
   for (const file of files) {
     for await (const result of parseEventStream(path.join(eventsDir, file))) {
       if (result.ok) yield result.event;
@@ -285,6 +373,46 @@ function isEndLike(e) {
 }
 
 /**
+ * Compute the halt time to subtract from a throughput window (AC2/AC4).
+ *
+ * Pairing is a LIFO stack over the append-only halt log: each `start` is closed by the NEXT `end`
+ * in log order; a `start` with no following `end` (halt still active OR its end line lost) and an
+ * `end` with no unmatched `start` subtract NOTHING — conservative, can only understate throughput,
+ * never overstate it ("漏写 ⇒ 偏保守", AC1). Each closed interval is intersected with the window
+ * before summing, so a halt that straddles the window boundary only subtracts its overlapping part.
+ *
+ * @param {Array<{event:"start"|"end", atMs:number}>} haltEvents — in append order
+ * @param {number|null} windowStartMs
+ * @param {number|null} windowEndMs
+ * @returns {{haltedMs:number, halted:Array<{startMs:number,endMs:number}>}} — halted[] sorted by startMs
+ */
+export function computeHaltedMs(haltEvents, windowStartMs, windowEndMs) {
+  if (windowStartMs == null || windowEndMs == null) return { haltedMs: 0, halted: [] };
+  const starts = [];
+  const closed = [];
+  for (const e of haltEvents ?? []) {
+    if (e.event === "start") {
+      starts.push(e.atMs);
+    } else if (e.event === "end" && starts.length > 0) {
+      closed.push({ startMs: starts.pop(), endMs: e.atMs });
+    }
+    // An `end` with no unmatched `start` is an orphan — ignored (conservative).
+  }
+  let haltedMs = 0;
+  const halted = [];
+  for (const iv of closed) {
+    const s = Math.max(iv.startMs, windowStartMs);
+    const en = Math.min(iv.endMs, windowEndMs);
+    if (en > s) {
+      haltedMs += en - s;
+      halted.push({ startMs: s, endMs: en });
+    }
+  }
+  halted.sort((a, b) => a.startMs - b.startMs);
+  return { haltedMs, halted };
+}
+
+/**
  * Aggregate `Fast` stage events into the report shape AC5 requires.
  *
  * Pairing key is runId (one fast-mode execution instance). A start+end pair → a completed task
@@ -308,15 +436,18 @@ function isEndLike(e) {
  * end time).
  *
  * @param {object[]} events — schema-valid StageEvents (any stage; only "Fast" is consumed)
- * @param {{sinceMs?: number|null, nowMs?: number|null}} [opts]
- *   sinceMs — window start when given (AC2); else the earliest startedAtMs in the data.
- *   nowMs   — the observation instant. windowEnd = max(latest endedAtMs, nowMs). A live report
- *             passes nowMs = Date.now() (window extends to now); a historical analysis passes
- *             null or a past instant (window ends at the latest endedAtMs) — "活报告用 now，
- *             历史窗口用最晚 end".
- * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
+ * @param {{sinceMs?: number|null, nowMs?: number|null, haltEvents?: Array<{event:"start"|"end", atMs:number}>|null}} [opts]
+ *   sinceMs     — window start when given (AC2); else the earliest startedAtMs in the data.
+ *   nowMs       — the observation instant. windowEnd = max(latest endedAtMs, nowMs). A live report
+ *                 passes nowMs = Date.now() (window extends to now); a historical analysis passes
+ *                 null or a past instant (window ends at the latest endedAtMs) — "活报告用 now，
+ *                 历史窗口用最晚 end".
+ *   haltEvents  — the append-only halt log lines (AC1/AC2). Closed halt intervals overlapping the
+ *                 window are subtracted from windowHours; open/orphan lines subtract nothing
+ *                 (conservative). Absent/null ⇒ haltedHours = 0 (byte-identical to pre-fix).
+ * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
-export function aggregate(events, { sinceMs = null, nowMs = null } = {}) {
+export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
   // Blocked-wait events are NOT task start/end pairs — separate them before the byRun pairing.
   const blockedEvents = fastEvents.filter((e) => e.eventKind === "blocked");
@@ -390,14 +521,19 @@ export function aggregate(events, { sinceMs = null, nowMs = null } = {}) {
   // both the true throughput and the serial-equivalent baseline.
   const serialEquivalentPerHour = totalMinutes > 0 ? (count * 60) / totalMinutes : 0;
 
-  // THROUGHPUT (AC1): completedCount / wall-clock window hours. The window is:
+  // THROUGHPUT (AC1): completedCount / window hours. The window is:
   //   windowStart = --since (AC2), else the earliest startedAtMs in the data.
   //   windowEnd   = max(latest endedAtMs, nowMs) — a LIVE report passes nowMs = Date.now() so the
   //                 window extends to the present; a HISTORICAL analysis passes nowMs = null (or a
   //                 past instant) so the window ends at the latest endedAtMs ("活报告用 now，历史窗口
   //                 用最晚 end").
-  // Unlike 60/mean, this is time-axis aware: concurrency that completes more tasks per wall-clock
-  // hour RAISES it, and idle gaps LOWER it. windowHours is clamped >= 0 (DEFECT-3 clock skew).
+  // HALT-TIME FIX (gap-tasksperhour-counts-halted-time-as-slow-work): windowHours =
+  // elapsed − haltedHours, where haltedHours is the overlap of CLOSED halt-log intervals with the
+  // window. Both windowHours (already reduced) and haltedHours (the subtracted amount) are exposed,
+  // plus the halted[] intervals, so the subtraction is independently verifiable (AC2). The numerator
+  // (count) is untouched — never weighted by task size (AC6). A zero-halt window is byte-identical
+  // to the pre-fix value (haltedHours = 0). windowHours is clamped >= 0 (DEFECT-3 clock skew; an
+  // over-subtracted window clamps to 0 rather than going negative).
   const windowStartMs = sinceMs != null ? sinceMs : earliestStartMs;
   let windowEndMs = null;
   if (windowStartMs != null) {
@@ -406,9 +542,12 @@ export function aggregate(events, { sinceMs = null, nowMs = null } = {}) {
   if (windowEndMs != null && windowEndMs < windowStartMs) {
     windowEndMs = windowStartMs;
   }
+  const elapsedMs = windowStartMs != null && windowEndMs != null ? windowEndMs - windowStartMs : 0;
+  const haltRes = computeHaltedMs(haltEvents, windowStartMs, windowEndMs);
+  const haltedHours = haltRes.haltedMs / 3_600_000;
   let windowHours = 0;
   if (windowStartMs != null && windowEndMs != null) {
-    windowHours = (windowEndMs - windowStartMs) / 3_600_000;
+    windowHours = Math.max(0, elapsedMs / 3_600_000 - haltedHours);
   }
   const tasksPerHour = windowHours > 0 ? count / windowHours : 0;
 
@@ -439,7 +578,8 @@ export function aggregate(events, { sinceMs = null, nowMs = null } = {}) {
     tasksPerHour, serialEquivalentPerHour,
     windowStart: windowStartMs != null ? new Date(windowStartMs).toISOString() : null,
     windowEnd: windowEndMs != null ? new Date(windowEndMs).toISOString() : null,
-    windowHours,
+    windowHours, haltedHours,
+    halted: haltRes.halted,
     blocked, totalBlockedMs, longestBlockedMs,
   };
 }
@@ -479,6 +619,7 @@ function printHumanReport(report, aggFile) {
   console.log(`tasks per hour (throughput, count/window-hours): ${report.tasksPerHour.toFixed(2)}`);
   console.log(`serial-equivalent per hour (60/mean; NOT throughput, unrelated to concurrency): ${report.serialEquivalentPerHour.toFixed(2)}`);
   console.log(`window: ${report.windowStart ?? "null"} → ${report.windowEnd ?? "null"} (${report.windowHours.toFixed(2)}h)`);
+  console.log(`halted time (subtracted from window, AC2): ${(report.haltedHours ?? 0).toFixed(2)}h`);
   if (report.orphaned.length) {
     console.log(`orphaned (end without start): ${report.orphaned.length}`);
     for (const o of report.orphaned) console.log(`  ${o.taskId} (runId ${o.runId}, outcome ${o.outcome})`);
@@ -506,6 +647,8 @@ const usage = `fast-mode-telemetry.ts — fast-mode (direct) execution metering 
 Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --task-start --taskId <id> [--root <dir>]
   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
+  node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
+  node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)`;
 
@@ -532,8 +675,9 @@ async function loadAndAggregate(root, sinceArg) {
   }
   const events = [];
   for await (const e of readAllEvents(root)) events.push(e);
+  const haltEvents = readHaltEvents(root);
   // nowMs = Date.now(): a live report's window extends to the current instant (AC1's window end).
-  const report = aggregate(events, { sinceMs, nowMs: Date.now() });
+  const report = aggregate(events, { sinceMs, nowMs: Date.now(), haltEvents });
   return { report: { generatedAt: new Date().toISOString(), since: sinceArg ?? null, ...report } };
 }
 
@@ -599,6 +743,52 @@ export async function main(argv) {
       return 1;
     }
     console.log(`fast-mode-telemetry: end event written for ${taskId} (runId ${runId}, outcome ${outcome})`);
+    return 0;
+  }
+
+  // --halt-start / --halt-end (gap-tasksperhour-counts-halted-time-as-slow-work, AC1): the append-
+  // only halt event log. The actor that places/removes the `.halt` sentinel calls these at the same
+  // moment, recording the actual halt placement/removal instants (default now; `--atMs` allows a
+  // precise backfill). These are the ONLY writers of the halt log. A forgotten call means no halt
+  // interval is recorded → haltedHours stays 0 → the window keeps that halt time (the pre-fix,
+  // conservative behavior; never an overestimate).
+  if (args.includes("--halt-start")) {
+    const atMsArg = getArgValue(args, "--atMs");
+    const reason = getArgValue(args, "--reason");
+    let atMs = Date.now();
+    if (atMsArg !== undefined) {
+      atMs = Date.parse(atMsArg);
+      if (Number.isNaN(atMs)) {
+        console.error(`fast-mode-telemetry: invalid --atMs "${atMsArg}" (expected an ISO timestamp)`);
+        return 1;
+      }
+    }
+    try {
+      writeHaltEvent({ type: "halt", event: "start", atMs, reason: reason ?? null }, root);
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    console.log(`fast-mode-telemetry: halt start recorded at ${new Date(atMs).toISOString()}`);
+    return 0;
+  }
+  if (args.includes("--halt-end")) {
+    const atMsArg = getArgValue(args, "--atMs");
+    let atMs = Date.now();
+    if (atMsArg !== undefined) {
+      atMs = Date.parse(atMsArg);
+      if (Number.isNaN(atMs)) {
+        console.error(`fast-mode-telemetry: invalid --atMs "${atMsArg}" (expected an ISO timestamp)`);
+        return 1;
+      }
+    }
+    try {
+      writeHaltEvent({ type: "halt", event: "end", atMs }, root);
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    console.log(`fast-mode-telemetry: halt end recorded at ${new Date(atMs).toISOString()}`);
     return 0;
   }
 

@@ -5,6 +5,11 @@
 // AC1 --report is pure-read, AC2 --snapshot is the explicit persist, AC3 20x --report leaves
 // git status clean, AC4 --snapshot stdout is byte-identical to the file it wrote.
 //
+// HALT-DENOMINATOR TESTS live in the governance sibling
+// fast-mode-telemetry-halt.test.mjs (gap-tasksperhour-counts-halted-time-as-slow-work, AC1–AC8);
+// this engine file only pins the report SHAPE (haltedHours/halted present, 0 without a halt log)
+// so the default suite keeps covering the new fields.
+//
 // Run:
 //   scripts/test.sh plugin/test/fast-mode-telemetry.test.mjs
 //   node --test plugin/test/fast-mode-telemetry.test.mjs
@@ -195,6 +200,12 @@ test("AC5 — --report --json emits {tasks, meanMinutes, medianMinutes, tasksPer
     assert.ok("tasksPerHour" in out, "report must carry tasksPerHour");
     assert.ok("serialEquivalentPerHour" in out, "report must carry the renamed serial-equivalent field");
     assert.ok("windowStart" in out && "windowEnd" in out && "windowHours" in out, "report must carry the window fields (AC3)");
+    // HALT-DENOMINATOR FIX (gap-tasksperhour-counts-halted-time-as-slow-work, AC2): the report must
+    // always carry the halt fields; with no halt log they are 0 / [] (byte-identical pre-fix values).
+    assert.ok("haltedHours" in out, "report must carry haltedHours");
+    assert.ok("halted" in out, "report must carry halted[]");
+    assert.equal(out.haltedHours, 0, "no halt log ⇒ haltedHours = 0");
+    assert.deepEqual(out.halted, [], "no halt log ⇒ halted[] = []");
 
     assert.equal(out.tasks.length, 1, `expected 1 completed task, got ${JSON.stringify(out.tasks)}`);
     const t = out.tasks[0];

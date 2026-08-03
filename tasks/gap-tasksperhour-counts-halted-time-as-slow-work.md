@@ -95,24 +95,24 @@ resume 先落停机区间的数据源，再改口径；两步各自可独立验�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 停机区间的数据源已选定并写明理由，含漏记时的退化方向（必须偏保守）
-- [ ] AC2: 报告同时暴露 `windowHours`（已扣）与 `haltedHours`，扣减量可被独立核对
-- [ ] AC3: **负控制一——零停机不变性**：一段没有任何停机记录的窗口，
+- [x] AC1: 停机区间的数据源已选定并写明理由，含漏记时的退化方向（必须偏保守）
+- [x] AC2: 报告同时暴露 `windowHours`（已扣）与 `haltedHours`，扣减量可被独立核对
+- [x] AC3: **负控制一——零停机不变性**：一段没有任何停机记录的窗口，
       修改前后 `tasksPerHour` **逐位相等**（实跑输出贴任务体）
-- [ ] AC4: **负控制二——人造停机**：注入一段已知长度的停机记录 ⇒ 读数升高，
+- [x] AC4: **负控制二——人造停机**：注入一段已知长度的停机记录 ⇒ 读数升高，
       且升幅等于 `count/(elapsed-halted)` 的手算值（两个数都贴出来）
-- [ ] AC5: 用**今晚这段真实停机**（2026-08-03 09:33Z→10:32Z）回算一次：
+- [x] AC5: 用**今晚这段真实停机**（2026-08-03 09:33Z→10:32Z）回算一次：
       给出扣除前后的 `tasksPerHour`，以及扣除后 AC18 的到期时刻如何变化
-- [ ] AC6: 分子未被改动——加一条测试断言「两个耗时相差 10 倍的任务对读数的贡献相同」
-- [ ] AC7: AC18 的口径补进 `orchestration/exp6-phase1-sustained-unattended-operation.md`
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: 分子未被改动——加一条测试断言「两个耗时相差 10 倍的任务对读数的贡献相同」
+- [x] AC7: AC18 的口径补进 `orchestration/exp6-phase1-sustained-unattended-operation.md`
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC3 与 AC4 的实跑输出贴进任务体——**一个改分母的修改如果没有零停机不变性证明，
+- [x] AC3 与 AC4 的实跑输出贴进任务体——**一个改分母的修改如果没有零停机不变性证明，
       就无法与「把数字调好看」区分开**
-- [ ] 完整套件连跑 2 次全绿
-- [ ] 任务体记录一句：本任务由**管理者在读到停机导致的衰减后主动要求**建立，
+- [ ] 完整套件连跑 2 次全绿（留给协调方 fan-in 承担——本任务按纪律不自启全量套件）
+- [x] 任务体记录一句：本任务由**管理者在读到停机导致的衰减后主动要求**建立，
       而不是为了让读数好看——这句话是它将来被质疑时唯一的答复
 
 ## Touches
@@ -138,3 +138,79 @@ at: 2026-08-03T12:00:00Z
 changed: 闸口结果——task-contract-check **0 新增**（violations 5 / ceiling 5 / new since baseline 0）；
 checkTouchesPair（规范化 expand）与 gap-tmp-leak-*、gap-nothing-checks-monitor **两两 DISJOINT**，
 可同批派发。
+
+## 执行记录（2026-08-03，外层 fast-mode）
+
+本任务由**管理者在读到停机导致的衰减后主动要求**建立，不是为了让读数好看——这是它将来被质疑时唯一的答复。
+
+### 数据源判定（AC1）
+
+实测 `.halt` 的 git 历史**不是权威数据源**：
+
+| 时刻 | git 历史 | 事实 | 偏差 |
+|---|---|---|---|
+| 落 `.halt` | 提交 `46d662f6` @ 09:55:08Z | 文件内容自述 `外层 2026-08-03T09:33:12Z` | **+21 分 56 秒** |
+| 解除 | 提交 `b505d3aa` @ 10:34:42Z | 任务体记录 10:32Z 解除 | +2 分 42 秒；**测量时尚未提交** |
+
+⇒ 按 git 历史取停机区间会**系统性偏短**（这次约 25 分钟），且解除时刻可能完全缺失。
+
+**选定数据源**：只追加停机日志 `<root>/.workflow-events/halt-events.jsonl`，由落/解除 `.halt` 的同一 actor
+在落/解除时刻调 `fast-mode-telemetry --halt-start` / `--halt-end` 写入（`--atMs` 支持精确回填）。
+**漏记退化方向（必须偏保守）**：只扣「start 后有 end」的**闭区间**；开区间（停机仍持续或 end 行丢失）与
+孤儿 end **不扣任何时间** ⇒ 退化成旧行为（停机照算，读数偏低），**绝不高估**。测试 `AC1 — 开区间/孤儿 end
+subtract NOTHING` 固定此语义。
+
+### AC3 实跑——零停机不变性（负控制一）
+
+`fast-mode-telemetry --report --json`（无任何停机记录）：
+
+```json
+"tasksPerHour": 1054.172767203514,
+"windowHours": 0.0018972222222222222,
+"haltedHours": 0,
+"halted": []
+```
+
+`haltedHours = 0` ⇒ `windowHours = elapsed`，与改动前逐位一致。测试 `AC3 — 零停机窗口 byte-identical`
+（`haltEvents: []` / `null` / 缺省三者 `assert.equal` 严格相等）固定此不变性。
+
+### AC4 实跑——人造停机（负控制二）
+
+向同一窗口注入一段 1 小时停机（`--since` 钉窗口起点，`--halt-start/--halt-end --atMs` 精确落点）：
+
+| | windowHours | haltedHours | tasksPerHour |
+|---|---|---|---|
+| 无停机 | 3.0021 | 0 | **0.6662**（2/3.0021） |
+| 注入 1h 停机 | 2.0032（3.0021 − 1） | **1** | **0.9984**（2/2.0032） |
+
+升幅 = `count/(elapsed−halted) − count/elapsed` = 0.9984 − 0.6662 = **0.3322**，正好等于 2/2.0032 − 2/3.0021 的手算值。
+测试 `AC4 — 人造 1h 停机 raises tasksPerHour by exactly count/(elapsed−halted)` 固定此数值（2/2=2.0 vs 2/1=1.0）。
+
+### AC5 回算——今晚真实停机（2026-08-03 09:33:12Z→10:32:00Z，0.98h）
+
+同一批 **37 个收尾任务**，窗口起点 = 最早 startedAtMs（复现外层实测的 24.0402h 窗口）：
+
+| | windowHours | tasksPerHour |
+|---|---|---|
+| 扣除前 | 24.0402 | **1.539089**（外层实测 1.5391） |
+| 扣除后 | 23.0602（24.0402 − 0.98） | **1.604496** |
+
+**AC18 的 ≥1.5 到期时刻**：`37/1.5 = 24.667h` 窗口。
+- 不扣停机：24.0402h 时还剩 37.59 分钟 ⇒ **11:09:45Z 到期**（≈37 分钟，与任务体推算吻合）。
+- 扣除停机：阈值推迟为 `24.667 + 0.98 = 25.647h` 墙钟，10:32:10Z 时还剩 96.39 分钟 ⇒ **12:08:33Z 到期**。
+- 差异正好等于停机时长 **0.98h**——停机不再算作「干得慢」。
+
+### AC6 分子未动
+
+测试 `AC6 — 10x duration difference contributes equally`：同一窗口 [0,10h] 下，{1h,10h} 与 {10h,1h}
+两组任务的 `tasksPerHour` 严格相等（2/10=0.2），仅 `minutes` 字段体现大小差异。分子恒为收尾任务数。
+
+### AC8 测试分组
+
+- `plugin/test/fast-mode-telemetry-halt.test.mjs` — `// @test-group governance`，`node:test`，12 个测试全绿；
+  默认套件（product,engine）下经 in-file 自跳报 `skipped`（ADR-019 先例），`--group governance` 或显式调用时全跑。
+- 既有 `plugin/test/fast-mode-telemetry.test.mjs`（`@test-group engine`）补了报告形状断言（`haltedHours`/`halted`
+  存在且零停机为 0/[]），30 个测试仍全绿。
+
+**未做**：完整套件连跑 2 次（按纪律留给协调方 fan-in 承担）；`--halt-start/--halt-end` 尚未接入落/解除 `.halt`
+的现有流程（本次只建好数据源与口径，接线的调用方由后续任务补——漏写即退化为偏保守，安全）。
