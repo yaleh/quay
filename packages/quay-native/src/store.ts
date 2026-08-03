@@ -295,6 +295,24 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     return `---\n${fm}\n---\n${body}`;
   }
 
+  // gap-task-list-route-is-linear-in-task-count: mtime-keyed parse cache.
+  // The task-list route calls get() once per task on EVERY request — on the
+  // host measured 2026-08-03, 619 task files cost ~640ms of readFileSync +
+  // YAML.parse (YAML.parse dominates: ~650ms of ~730ms in isolation; pure
+  // readFileSync of all 5.7MB is only ~85ms). Caching the parsed
+  // frontmatter/body keyed by (mtimeMs, size) turns repeated requests into
+  // O(stats) — a few ms — instead of O(read+parse). The live-read contract
+  // in CLAUDE.md is preserved because every get() re-stats the file and
+  // re-reads/re-parses the moment mtime OR size changes: a NEW task file is
+  // not in the cache at all, and an EDITED task's mtime/size differs from the
+  // cached key → cache miss → fresh read. The cache is deliberately NEVER
+  // warmed in the background (the task forbids background preheating — that
+  // would turn "what's on the board right now" into a new question), and it
+  // is unbounded (a per-process cache of small frontmatter strings is a few
+  // hundred KB at this store's scale; G5 — no eviction machinery until the
+  // store actually needs it).
+  const parsedCache = new Map<string, { mtimeMs: number; size: number; frontmatter: Record<string, unknown>; body: string }>();
+
   // QX-018 (experiment 4, iteration 4): get() now includes updatedAt (file mtime
   // in ms) to close UQ-015 (task_get MCP response missing updatedAt field) and
   // enable the detail-page "last updated" display. The stat() call is cheap
@@ -303,18 +321,30 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // already ignore unknown fields so no behavioral regression results.
   /** @returns the task view-model, or null if not found */
   function get(id: string): (Task & { updatedAt?: number }) | null {
+    const taskFile = path.join(tasksDir, `${id}.md`);
+    let stat: ReturnType<typeof fs.statSync> | null = null;
+    try {
+      stat = fs.statSync(taskFile);
+    } catch {
+      // stat failed (file absent or a transient race) — fall through; readRaw
+      // below re-asserts absence and returns the same null contract.
+    }
+    const cached = stat ? parsedCache.get(id) : undefined;
+    if (cached && cached.mtimeMs === stat!.mtimeMs && cached.size === stat!.size) {
+      // Cache hit: rebuild the view-model from the cached parse (no
+      // readFileSync, no YAML.parse). Clone the mutable array fields so a
+      // caller mutating the returned task can never poison the shared cache.
+      return toViewModel({
+        ...cached.frontmatter,
+        labels: (cached.frontmatter.labels as string[] | undefined)?.slice() ?? [],
+        children: (cached.frontmatter.children as string[] | undefined)?.slice() ?? [],
+      }, cached.body, stat!.mtimeMs, id);
+    }
     const raw = readRaw(id);
     if (raw === null) return null;
     const { frontmatter, body } = parse(raw);
-    let updatedAt;
-    try {
-      const taskFile = path.join(tasksDir, `${id}.md`);
-      const stat = fs.statSync(taskFile);
-      updatedAt = stat.mtimeMs;
-    } catch {
-      // stat failed (race or missing file) — omit updatedAt
-    }
-    return toViewModel(frontmatter, body, updatedAt, id);
+    if (stat) parsedCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, frontmatter, body });
+    return toViewModel(frontmatter, body, stat ? stat.mtimeMs : undefined, id);
   }
 
   function toViewModel(
