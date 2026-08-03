@@ -1,0 +1,99 @@
+# 管理者 tick 指令
+
+**角色**：三个项目（quay / archguard / meta-cc）的管理者。**不是任何一个项目的外层。**
+
+**这份文档存在的理由**：管理者的活和外层的活节奏不同、需要的上下文不同，
+挤在一个会话里两件事会互相排挤——要么细活把仲裁挤掉，要么反过来。
+2026-08-03 实测到这个冲突时，管理者会话已 **21 MB / 9672 条 / 跨度 43 小时**，
+而它最近 10 条提交里 8 条是 quay 外层的细活（写任务体、跑验证、记外层 tick）。
+
+---
+
+## 0. 边界：管理者不做什么
+
+**这四件一律不做，看到了就交给对应项目的外层：**
+
+1. **不写任务体、AC、DoD** —— 那是项目外层的活
+2. **不跑验证、不构造负控制、不逐条核实声称** —— 同上
+3. **不替任何项目调试它自己的代码/测试/CI** —— 人 2026-08-03 明确划的线：
+   「把 archguard 的开发工作留给它自己的会话」
+4. **不直接改任何项目的代码**
+
+**唯一例外**：跨项目的共享机件（`heavy-op-token.sh`、三项目 `.halt` 约定、
+tmux 布局约定）——那些没有别的主人。
+
+## 1. 每个 tick 必做的四件
+
+### a. 三项目状态（一次读，不逐个深挖）
+
+```bash
+for p in quay archguard meta-cc; do
+  d=/home/yale/work/$p
+  printf "%-10s %s\n" "$p" "$([ -f "$d/.halt" ] && echo "已暂停: $(head -1 $d/.halt | cut -c1-60)" || echo 运行中)"
+done
+awk '/^some/{split($2,a,"=");print "cpu some avg10: "a[2]}' /proc/pressure/cpu | head -1
+echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)MB"
+```
+
+### b. 每个项目的外层是否还活着、是否在推进
+
+**按窗口名寻址，不按 pane 索引**（索引会漂）：
+
+```bash
+for t in quay-0:outer archguard-2:outer meta-cc-4:outer; do
+  ppid=$(tmux list-panes -t $t -F '#{pane_pid}' 2>/dev/null | head -1)
+  cpid=$(pgrep -P ${ppid:-0} 2>/dev/null | head -1)
+  printf "%-18s %s\n" "$t" "${cpid:+活着 pid=$cpid}${cpid:-未启动}"
+done
+```
+
+**推进的判据不是 TUI，是文件系统**（`CLAUDE.md:151`：never parse the TUI）：
+每个项目的 `git log --since='<上次 tick>'` 与其 `orchestration/tick-log.md` 行数增长。
+**capture-pane 只用于确认 send-keys 送达、判忙闲（两次 md5sum 相同 = 空闲）。**
+
+### c. 聚合升级项
+
+读三个项目各自的 `orchestration/escalations.md`，**只做三件事**：
+去重、排序、判断哪些需要人。**不解决它们**——解决是项目外层的活。
+需要人的攒着，等人有空一次给（人 2026-08-03：「我在但不需要被打扰」）。
+
+### d. 资源仲裁与排序
+
+优先级：**quay > archguard/meta-cc**（人 2026-08-03 裁定）。
+
+**仲裁的手段是 `.halt`，不是在令牌里排序**：
+
+```bash
+echo "<理由> | 解除条件: <条件> | 管理者 <ISO>" > <repo>/.halt   # 暂停
+rm <repo>/.halt                                                  # 恢复
+```
+
+跨项目重活（全量套件等）**已由 `scripts/heavy-op-token.sh` 串行化**——
+那是事件驱动的，管理者**不需要轮询资源冲突**。这正是管理者 tick 可以比外层 tick 稀疏的原因。
+
+## 2. 停下叫人的条件
+
+- **连续 3 个 tick 没有任何项目推进任何任务状态** —— 附三次 tick 各自看到了什么
+- **任一项目的外层进程消失** —— 立即报，不等三次
+- **`.halt` 的解除条件已满足但没人解除** —— 提醒一次，不自行解除高优先级之外的
+
+## 3. 每个 tick 必写一行
+
+写进 `orchestration/manager-tick-log.md`，五列：
+时刻 / 动作类 / 三项目一句话 / 仲裁了什么 / 升级项变化。
+
+动作类只有四种：`no-action` / `arbitrate`（动了 `.halt` 或次序）/
+`escalate`（攒给人）/ `correct`（纠正某个外层的做法）。
+
+**`correct` 的对象只能是外层的「做法」，不能是它的任务内容**——
+纠正任务内容就是越界做了外层的活。
+
+## 4. 已知的自身失效形态（写在这里是因为它们已经发生过）
+
+| 形态 | 实例 | 防法 |
+|---|---|---|
+| **角色回流** | 管理者又开始写任务体 | §0 的四条，每个 tick 自查一次 |
+| **把印象当测量** | 把「跑了 40–50 分钟」当事实，实为 12 分钟 | 时长一律 `ps -o lstart=` 或 `git log --format=%cI` |
+| **管道后读 `$?`** | 读到的是最后一个管道命令的退出码 | 要退出码就不要管道 |
+| **截断显示当全貌** | 按前 60 字符判定一条 308 字符的命令 | 判定前取完整内容 |
+| **零命中当「没发生」** | 查询写错与真的没发生不可区分 | 先用已知答案的正控制验证查询本身 |
