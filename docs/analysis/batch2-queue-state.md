@@ -443,6 +443,21 @@ pid 4049485 跑 438s 且消耗 CPU（非卡死）、压力 86.54。**90 分钟�
 - **在飞（2 实现）**：reclaim（验证套件中）+ retire（读证据中）。**下一步**：reclaim 套件绿 → 关 reclaim
   （`--task-end` sf5zrl）→ 派 P1 resource-awareness（首位，scripts/test.sh 冲突已随 testiso 落地解除）
 
+### 外层紧急通报（04T03:5xZ，人裁定——34 项未落地工作）
+
+**实测**：19 个 milestone worktree 含 **34 项从未落地的工作**——5 个任务文件只存在于 worktree、master 没有且
+未跟踪（`tasks/DIR-124-F1/F2/F5/F6.md`、`gap-build-evidence-path.md`）+ 14 份 `docs/plans/M2xx-*.md`。
+对 task list / web UI / 漂移检查器**全部不可见**。三闸实测：Gate 1 过 19（M239 正确拦下）、**Gate 2 全拦 19**
+（每个都有未提交内容）⇒ **净可回收 0，1.1G 不释放**。
+
+**两条裁定**：
+1. **reclaim 现状执行没有错**——Gate 2 拒绝删脏 worktree 正是该做的；**不放松不加 --force**（会销毁 34 项工作）。
+   已如实记录：净回收 = M277(~51M) + M243 悬挂分支，其余 19 个因含未落地工作正确拒绝。**34 项已升级给人**
+2. **retire 硬边界**（已消息在飞 agent）：不得移除 `milestone-worktree.ts`、不得删除 `milestones/M*/worktrees`、
+   不得改动那 19 个 worktree。其余部分（composite-*、prepare/execute workflow 本体、文档同步）可继续
+- **不可见任务发现**：worktree-only 的任务文件对工具链不可见——漂移检查器盲区（与删除类 Touches 语义反
+  同类），已升级给人，暂不建任务
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
