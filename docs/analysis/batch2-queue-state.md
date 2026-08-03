@@ -679,6 +679,14 @@ parser 轻量工作不占主要负载。sigma 每次测量前后记录资源闸�
 - 压力 98.77（sigma 167 进程套件的单套件稳态 + parser 微量负载）
 - stranded + webobs 全量仍等 sigma 测完
 
+### Tick 更新（06T03:59Z）：sigma 测完、parser merged、stranded+parser 合并全量在跑
+
+- **sigma 测量套件完成**（进程消失，压力 23.58）；sigma agent 处理结果中（filesCaptured < 155 则作废重测）
+- **parser merged**（`f4c890f2`，干净）：共享 touches-parser.ts + 全部解析器委托 + parity 测试 +
+  AC6 棘轮（17）+ repo-ground-truth §3。scoped 59/58/0 绿
+- **stranded + parser 合并全量在跑**（`bda9owbpo`，gate GO，压力 23.58 窗口）。全量绿 → 关两者（`--task-end`
+  tikhj7 + ttg1t6）→ sigma 若需重测拿窗口 → sigma 完成后 fan-in
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
