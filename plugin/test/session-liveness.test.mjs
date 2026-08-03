@@ -1,51 +1,55 @@
 // @test-group governance
-// outer-liveness.test.mjs — automated positive controls for the cross-project outer-liveness
-// monitor (plugin/scripts/outer-liveness.sh). The manager (quay-0:manager) built and verified it
-// MANUALLY; this file turns those manual controls into tests, per rule 2 of
-// orchestration/TOOLS-SESSION-HANDOFF.md: "干跑没有输出不是证据" — every criterion needs a
-// known-triggering setup that demonstrably fires, because "no output" is indistinguishable from
-// "it never reports".
+// session-liveness.test.mjs — automated positive controls for the cross-project session-liveness
+// monitor (plugin/scripts/session-liveness.sh; generalized + renamed from outer-liveness.sh per
+// SPEC-outer-liveness-productization.md AC10-13 — the process/pane/heartbeat logic holds for ANY
+// Claude Code session, not just the outer). The manager built and verified the original manually;
+// this file turns those manual controls into tests, per rule 2 of orchestration/TOOLS-SESSION-
+// HANDOFF.md: "干跑没有输出不是证据" — every criterion needs a known-triggering setup that
+// demonstrably fires, because "no output" is indistinguishable from "it never reports".
 //
-// The monitor reports five event families:
-//   OUTER-GONE/OUTER-BACK   the outer process vanished / returned
-//   OUTER-STALL             alive but ≥STALL_MIN min with no new commit (not halted)
-//   OUTER-LOOP-OVERDUE      tick-log mtime ≥OVERDUE_MIN (not halted) — loop may be dead
-//   OUTER-IDLE/OUTER-RESUMED  adjacent rounds' pane hash equal = idle; reported within one
+// The monitor reports five event families (SESSION-* since AC10):
+//   SESSION-GONE/SESSION-BACK   the session process vanished / returned
+//   SESSION-STALL               alive but ≥STALL_MIN min with no new commit (not halted)
+//   SESSION-OVERDUE             heartbeat mtime ≥OVERDUE_MIN (not halted) — session may be dead
+//   SESSION-IDLE/SESSION-RESUMED  adjacent rounds' pane hash equal = idle; reported within one
 //                             polling interval of the transition
 //
 // How each criterion gets a POSITIVE control, and why that shape:
-//   A. OUTER-IDLE/OUTER-RESUMED — the busy criterion is REDRAW-based: a busy Claude Code TUI
+//   A. SESSION-IDLE/SESSION-RESUMED — the busy criterion is REDRAW-based: a busy Claude Code TUI
 //      repaints a second-level elapsed timer, so the pane hash changes between rounds; an idle
-//      pane is byte-stable. A fake probe whose cmdline merely contains "claude" passes outer_pid's
-//      cmdline check but CANNOT redraw, so it can never produce the changing hash that IS the busy
-//      signal. The manager's first positive control fell for exactly this (a /tmp/claude-probe bash
-//      script); the fix is to drive a REAL Claude Code session — quay-0:probe (deepseek-v4-flash,
-//      cwd /tmp, dedicated to this test, see TOOLS-SESSION-HANDOFF.md). Test A drives it: idle
-//      baseline → a task that runs tens of seconds (`sleep 20` — flash answers light questions in
-//      ~5s, so a short window would be missed by sparse sampling) → OUTER-RESUMED → back to idle →
-//      OUTER-IDLE. Skips when the probe session is absent (CI / other machines).
-//   B. OUTER-GONE/OUTER-BACK — pure process detection (outer_pid: first child of the pane shell
-//      whose /proc/<pid>/cmdline contains "claude"). NOT redraw-dependent, so it runs hermetically
-//      on an ISOLATED tmux socket with a real `sleep` whose argv[0] is "claude-probe" as the
-//      claude-cmdline stand-in — no fake TUI involved, and it never touches the real projects.
-//   C. OUTER-STALL — alive + a git repo whose HEAD committer date is ≥STALL_MIN minutes old, not
+//      pane is byte-stable. A fake probe whose cmdline merely contains "claude" passes
+//      session_pid's cmdline check but CANNOT redraw, so it can never produce the changing hash
+//      that IS the busy signal. The manager's first positive control fell for exactly this (a
+//      /tmp/claude-probe bash script); the fix is to drive a REAL Claude Code session —
+//      quay-0:probe (deepseek-v4-flash, cwd /tmp, dedicated to this test, see TOOLS-SESSION-
+//      HANDOFF.md). Test A drives it: idle baseline → a task that runs tens of seconds (`sleep 20`
+//      — flash answers light questions in ~5s, so a short window would be missed by sparse
+//      sampling) → SESSION-RESUMED → back to idle → SESSION-IDLE. Skips when the probe session is
+//      absent (CI / other machines).
+//   B. SESSION-GONE/SESSION-BACK — pure process detection (session_pid: first child of the pane
+//      shell whose /proc/<pid>/cmdline contains "claude"). NOT redraw-dependent, so it runs
+//      hermetically on an ISOLATED tmux socket with a real `sleep` whose argv[0] is "claude-probe"
+//      as the claude-cmdline stand-in — no fake TUI involved, and it never touches the real
+//      projects.
+//   C. SESSION-STALL — alive + a git repo whose HEAD committer date is ≥STALL_MIN minutes old, not
 //      halted. Hermetic: isolated-socket stand-in + a temp repo with a backdated commit.
-//   D. OUTER-LOOP-OVERDUE — alive + tick-log mtime ≥OVERDUE_MIN, not halted. Hermetic: isolated
-//      stand-in + a temp tick file with an old mtime, via the OUTER_TICK_LOGS override (the
-//      script's tick_log_for is hardcoded to the three real project paths, so it is not testable
-//      without this override — the same reason OUTER_TARGETS exists).
+//   D. SESSION-OVERDUE — alive + heartbeat mtime ≥OVERDUE_MIN, not halted. Hermetic: isolated
+//      stand-in + a temp heartbeat file with an old mtime, via the SESSION_HEARTBEATS override
+//      (heartbeats are per-name paths; without it the default is the project tick log). AC11 adds
+//      a directory heartbeat (inner-style .workflow-events/) proving the same script parameterizes
+//      for both outer and inner.
 //   E. halt-gating — STALL/OVERDUE are suppressed when <root>/.halt exists (a halted project not
 //      advancing is expected); GONE is NOT suppressed. Hermetic.
 //
 // Process hygiene (handoff rules 2b/3): no pipelines feeding `$?`; no `pgrep -f` anywhere — the
-// probe is found via /proc/<pid>/cmdline argv position exactly as outer_pid() does it. Every
+// probe is found via /proc/<pid>/cmdline argv position exactly as session_pid() does it. Every
 // mkdtemp tmpdir is removed in a finally (test-isolation R6). Every hermetic tmux server lives on
 // its own socket (TMUX_TMPDIR) so the real quay-0/archguard-2/meta-cc-4 sessions are untouchable.
 //
 // Run:
-//   scripts/test.sh plugin/test/outer-liveness.test.mjs
-//   node --test plugin/test/outer-liveness.test.mjs
-//   scripts/test.sh --group governance plugin/test/outer-liveness.test.mjs
+//   scripts/test.sh plugin/test/session-liveness.test.mjs
+//   node --test plugin/test/session-liveness.test.mjs
+//   scripts/test.sh --group governance plugin/test/session-liveness.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -58,7 +62,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.resolve(__dirname, "..", "scripts", "outer-liveness.sh");
+const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
 const PROBE_TARGET = "quay-0:probe"; // the manager's real, dedicated probe session
 
 // ── helpers ────────────────────────────────────────────────────────────────────────────────────────
@@ -80,7 +84,7 @@ function isolateTmuxEnv(sockDir) {
   return env;
 }
 
-// paneHasClaudeChild — replicate outer_pid(): the first child of the pane shell whose
+// paneHasClaudeChild — replicate session_pid(): the first child of the pane shell whose
 // /proc/<pid>/cmdline contains "claude". NOT `pgrep -f` (handoff rule 3: it would match this
 // very command).
 function paneHasClaudeChild(env, session) {
@@ -114,7 +118,7 @@ async function waitForAlive(env, session, timeoutMs = 5000) {
 // depend on TUI redraw, so a real TUI is not needed for them (only the busy criterion in test A is
 // redraw-based and uses the real session).
 function makeHermeticProbe(session) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "outer-liveness-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-"));
   const sockDir = path.join(tmp, "sock");
   fs.mkdirSync(sockDir, { recursive: true });
   const env = isolateTmuxEnv(sockDir);
@@ -133,16 +137,16 @@ function makeHermeticProbe(session) {
   };
 }
 
-// spawnMonitor — run the REAL outer-liveness.sh with a fast test interval and overridable targets.
+// spawnMonitor — run the REAL session-liveness.sh with a fast test interval and overridable targets.
 function spawnMonitor(env, targets, { tickLogs, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
   const monEnv = {
     ...env,
-    OUTER_TARGETS: targets,
+    SESSION_TARGETS: targets,
     INTERVAL: String(interval),
     STALL_MIN: String(stallMin),
     OVERDUE_MIN: String(overdueMin),
   };
-  if (tickLogs) monEnv.OUTER_TICK_LOGS = tickLogs;
+  if (tickLogs) monEnv.SESSION_HEARTBEATS = tickLogs;
   if (loopMin !== undefined) monEnv.LOOP_MIN = String(loopMin);
   const child = spawn("bash", [SCRIPT], { env: monEnv });
   let out = "";
@@ -182,14 +186,14 @@ const tmuxAvailable = (() => {
   try { return spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0; } catch { return false; }
 })();
 
-// ── Test A: OUTER-IDLE / OUTER-RESUMED on the REAL probe session ──────────────────────────────────
+// ── Test A: SESSION-IDLE / SESSION-RESUMED on the REAL probe session ──────────────────────────────────
 
 const realProbeAvailable = (() => {
   if (!tmuxAvailable) return false;
   return paneHasClaudeChild(process.env, PROBE_TARGET);
 })();
 
-test("OUTER-RESUMED then OUTER-IDLE fire when the real probe session goes busy then idle", {
+test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes busy then idle", {
   skip: realProbeAvailable
     ? false
     : `real probe session ${PROBE_TARGET} is not present/alive — run this on the manager box (orchestration/TOOLS-SESSION-HANDOFF.md)`,
@@ -216,7 +220,7 @@ test("OUTER-RESUMED then OUTER-IDLE fire when the real probe session goes busy t
   assert.ok(baseline !== null, `probe must reach a stable idle baseline before driving (never settled in 30s)`);
 
   // tickLogs pins the tick path to a nonexistent file so tmin="?" under the noise gate
-  // (OUTER-IDLE reports when tmin is unknown) — otherwise tmin reads the REAL quay tick-log mtime
+  // (SESSION-IDLE reports when tmin is unknown) — otherwise tmin reads the REAL quay tick-log mtime
   // and the IDLE event could be gated silent if the manager's loop happened to tick recently.
   const mon = spawnMonitor(env, `probe /tmp ${PROBE_TARGET}`, { tickLogs: `probe /nonexistent` });
   try {
@@ -229,23 +233,23 @@ test("OUTER-RESUMED then OUTER-IDLE fire when the real probe session goes busy t
     tmux(["send-keys", "-t", PROBE_TARGET, "运行 sleep 20 这条命令，等它结束后说 done"], env);
     tmux(["send-keys", "-t", PROBE_TARGET, "Enter"], env);
 
-    // 3. the idle→busy transition must surface as OUTER-RESUMED within a few rounds.
-    const resumed = await waitForOutput(mon, /OUTER-RESUMED probe/, 20000);
-    assert.ok(resumed, `OUTER-RESUMED must fire when the probe goes busy:\n${mon.output()}`);
+    // 3. the idle→busy transition must surface as SESSION-RESUMED within a few rounds.
+    const resumed = await waitForOutput(mon, /SESSION-RESUMED probe/, 20000);
+    assert.ok(resumed, `SESSION-RESUMED must fire when the probe goes busy:\n${mon.output()}`);
 
     // 4. wait for the probe to come back idle (busy task done, answer rendered, prompt stable).
     const settled = await waitStableHash(50000);
     assert.ok(settled !== null, `probe must return to a stable idle state after the busy task`);
 
-    // 5. the busy→idle transition must surface as OUTER-IDLE within a few rounds of settling.
-    const idle = await waitForOutput(mon, /OUTER-IDLE probe/, 15000);
-    assert.ok(idle, `OUTER-IDLE must fire when the probe returns idle:\n${mon.output()}`);
+    // 5. the busy→idle transition must surface as SESSION-IDLE within a few rounds of settling.
+    const idle = await waitForOutput(mon, /SESSION-IDLE probe/, 15000);
+    assert.ok(idle, `SESSION-IDLE must fire when the probe returns idle:\n${mon.output()}`);
 
     // 6. ordering: the busy transition precedes the idle transition.
     const out = mon.output();
-    const rIdx = out.indexOf("OUTER-RESUMED");
-    const iIdx = out.indexOf("OUTER-IDLE");
-    assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `OUTER-RESUMED must precede OUTER-IDLE:\n${out}`);
+    const rIdx = out.indexOf("SESSION-RESUMED");
+    const iIdx = out.indexOf("SESSION-IDLE");
+    assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `SESSION-RESUMED must precede SESSION-IDLE:\n${out}`);
   } finally {
     mon.child.kill("SIGKILL");
     tmux(["send-keys", "-t", PROBE_TARGET, "C-u"], env); // leave the probe at a clean prompt
@@ -253,9 +257,9 @@ test("OUTER-RESUMED then OUTER-IDLE fire when the real probe session goes busy t
   }
 });
 
-// ── Test B: OUTER-GONE / OUTER-BACK (hermetic) ─────────────────────────────────────────────────────
+// ── Test B: SESSION-GONE / SESSION-BACK (hermetic) ─────────────────────────────────────────────────────
 
-test("OUTER-GONE then OUTER-BACK fire when the probe's claude process vanishes and returns", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("SESSION-GONE then SESSION-BACK fire when the probe's claude process vanishes and returns", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-gone");
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe claude child must be alive before the monitor starts");
@@ -264,10 +268,10 @@ test("OUTER-GONE then OUTER-BACK fire when the probe's claude process vanishes a
       await sleep(2500); // ≥2 rounds: PREV_ALIVE=1 baseline
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env); // make it disappear
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-      assert.ok(await waitForOutput(mon, /OUTER-GONE gone/, 6000), `OUTER-GONE must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-GONE gone/, 6000), `SESSION-GONE must fire:\n${mon.output()}`);
       tmux(["send-keys", "-t", p.session, "exec -a claude-probe sleep 10000 &"], p.env); // bring it back
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-      assert.ok(await waitForOutput(mon, /OUTER-BACK gone/, 6000), `OUTER-BACK must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-BACK gone/, 6000), `SESSION-BACK must fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -276,9 +280,9 @@ test("OUTER-GONE then OUTER-BACK fire when the probe's claude process vanishes a
   }
 });
 
-// ── Test C: OUTER-STALL (hermetic) ─────────────────────────────────────────────────────────────────
+// ── Test C: SESSION-STALL (hermetic) ─────────────────────────────────────────────────────────────────
 
-test("OUTER-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old (not halted)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("SESSION-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old (not halted)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-stall");
   const gitRoot = path.join(p.tmp, "repo");
   try {
@@ -287,7 +291,7 @@ test("OUTER-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old 
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
     const mon = spawnMonitor(p.env, `stall ${gitRoot} ${p.session}`, { stallMin: 1 });
     try {
-      assert.ok(await waitForOutput(mon, /OUTER-STALL stall/, 6000), `OUTER-STALL must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-STALL stall/, 6000), `SESSION-STALL must fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -296,9 +300,9 @@ test("OUTER-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old 
   }
 });
 
-// ── Test D: OUTER-LOOP-OVERDUE (hermetic) ──────────────────────────────────────────────────────────
+// ── Test D: SESSION-OVERDUE (hermetic) ──────────────────────────────────────────────────────────
 
-test("OUTER-LOOP-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (not halted)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("SESSION-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (not halted)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-overdue");
   const tick = path.join(p.tmp, "tick.md");
   try {
@@ -308,7 +312,7 @@ test("OUTER-LOOP-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (no
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
     const mon = spawnMonitor(p.env, `overdue ${p.tmp} ${p.session}`, { tickLogs: `overdue ${tick}`, overdueMin: 1 });
     try {
-      assert.ok(await waitForOutput(mon, /OUTER-LOOP-OVERDUE overdue/, 6000), `OUTER-LOOP-OVERDUE must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE overdue/, 6000), `SESSION-OVERDUE must fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -319,7 +323,7 @@ test("OUTER-LOOP-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (no
 
 // ── Test E: .halt gating (hermetic) ────────────────────────────────────────────────────────────────
 
-test(".halt suppresses OUTER-STALL and OUTER-LOOP-OVERDUE, but NOT OUTER-GONE", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test(".halt suppresses SESSION-STALL and SESSION-OVERDUE, but NOT SESSION-GONE", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-halt");
   const gitRoot = path.join(p.tmp, "repo");
   const tick = path.join(p.tmp, "tick.md");
@@ -335,12 +339,12 @@ test(".halt suppresses OUTER-STALL and OUTER-LOOP-OVERDUE, but NOT OUTER-GONE", 
     try {
       await sleep(4000); // ≥3 rounds — STALL/OVERDUE would have fired by now if not gated
       const out = mon.output();
-      assert.ok(!/OUTER-STALL/.test(out), `STALL must be suppressed for a halted project:\n${out}`);
-      assert.ok(!/OUTER-LOOP-OVERDUE/.test(out), `OVERDUE must be suppressed for a halted project:\n${out}`);
+      assert.ok(!/SESSION-STALL/.test(out), `STALL must be suppressed for a halted project:\n${out}`);
+      assert.ok(!/SESSION-OVERDUE/.test(out), `OVERDUE must be suppressed for a halted project:\n${out}`);
       // the monitor is not globally silent: GONE still fires despite the halt.
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-      assert.ok(await waitForOutput(mon, /OUTER-GONE halted/, 6000), `GONE must still fire when halted:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-GONE halted/, 6000), `GONE must still fire when halted:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -359,9 +363,9 @@ test(".halt suppresses OUTER-STALL and OUTER-LOOP-OVERDUE, but NOT OUTER-GONE", 
 // AC5  四个阈值写进随包外层 tick 文档（不只活在脚本注释里）。
 // AC6  目标项目没有 tick 日志时不崩（新项目第一次跑必然没有）——OVERDUE 静默、其余事件正常。
 // AC7  冷启动 e2e 是实跑断言（--once 接缝），不只断言文件存在。
-// AC9  管理者的三项目配置在 orchestration/outer-liveness.env，不进 plugin；脚本启动时 source 它。
-// 噪声  OUTER-IDLE 在 tick 时距 < LOOP_MIN（刚记完 tick 的正常收尾）时静默；≥ LOOP_MIN 或未知才报。
-//       OUTER-RESUMED 保留不静默（唯一正向信号）。两个正控制：旧 tick→报、新 tick→静默。
+// AC9  管理者的三项目配置在 orchestration/session-liveness.env，不进 plugin；脚本启动时 source 它。
+// 噪声  SESSION-IDLE 在 tick 时距 < LOOP_MIN（刚记完 tick 的正常收尾）时静默；≥ LOOP_MIN 或未知才报。
+//       SESSION-RESUMED 保留不静默（唯一正向信号）。两个正控制：旧 tick→报、新 tick→静默。
 
 function makeTmp(prefix = "ol-prod-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -403,7 +407,7 @@ async function waitForPaneStable(env, session, timeoutMs) {
 
 // ── AC1: plugin source is clean ────────────────────────────────────────────────────────────────────
 
-test("AC1 — plugin/scripts/outer-liveness.sh has no absolute paths or specific session names", () => {
+test("AC1 — plugin/scripts/session-liveness.sh has no absolute paths or specific session names", () => {
   const src = fs.readFileSync(SCRIPT, "utf8");
   assert.ok(!/(\/home\/yale|quay-0:|archguard-2:|meta-cc-4:)/.test(src),
     "source must not reference /home/yale or the three projects' specific tmux sessions");
@@ -411,13 +415,13 @@ test("AC1 — plugin/scripts/outer-liveness.sh has no absolute paths or specific
 
 // ── AC2: quay-init lays it down with the target substituted ─────────────────────────────────────────
 
-test("AC2 — quay-init --loop lays down outer-liveness.sh with the target session substituted and no quay literals", () => {
+test("AC2 — quay-init --loop lays down session-liveness.sh with the target session substituted and no quay literals", () => {
   const ws = makeTmp();
   try {
     const r = runInit(ws, ["--loop", "--root", ws, "--project", "myproj",
       "--test-command", "npm test", "--tmux-session", "myproj-0:0.0", "--repo-root", "/srv/target"]);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    const laid = fs.readFileSync(path.join(ws, "plugin", "scripts", "outer-liveness.sh"), "utf8");
+    const laid = fs.readFileSync(path.join(ws, "plugin", "scripts", "session-liveness.sh"), "utf8");
     assert.ok(!laid.includes("__QUAY_TMUX_SESSION__"), "the session placeholder must be substituted");
     assert.ok(laid.includes("myproj-0"), "the target session must appear (default target <session>:outer)");
     assert.ok(!laid.includes("/home/yale/work/quay"), "no quay dev-root leak");
@@ -441,11 +445,11 @@ test("AC3/AC7 — the laid-down script, run --once, identifies THIS project's ow
     tmux(["send-keys", "-t", "ol-cold:outer", "exec -a claude-probe sleep 10000 &"], env);
     tmux(["send-keys", "-t", "ol-cold:outer", "Enter"], env);
     assert.ok(await waitForAlive(env, "ol-cold", 5000), "this project's outer must be alive before the cold-start run");
-    const once = spawnSync("bash", [path.join(ws, "plugin", "scripts", "outer-liveness.sh"), "--once"], {
-      encoding: "utf8", env: { ...env, OUTER_ROOT: ws },
+    const once = spawnSync("bash", [path.join(ws, "plugin", "scripts", "session-liveness.sh"), "--once"], {
+      encoding: "utf8", env: { ...env, SESSION_ROOT: ws },
     });
     assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
-    assert.ok(once.stdout.includes("OUTER-STATUS") && once.stdout.includes("alive=1"),
+    assert.ok(once.stdout.includes("SESSION-STATUS") && once.stdout.includes("alive=1"),
       `must identify this project's own outer as alive:\n${once.stdout}`);
   } finally {
     tmux(["kill-session", "-t", "ol-cold"], env);
@@ -455,17 +459,17 @@ test("AC3/AC7 — the laid-down script, run --once, identifies THIS project's ow
 
 // ── AC6: no tick log must not crash, OVERDUE silent, other events fine ─────────────────────────────
 
-test("AC6 — no tick log: OUTER-LOOP-OVERDUE stays silent, other events work, no crash", async () => {
+test("AC6 — no tick log: SESSION-OVERDUE stays silent, other events work, no crash", async () => {
   const p = makeHermeticProbe("ol-notick");
   try {
     const mon = spawnMonitor(p.env, `notick ${p.tmp} ${p.session}`,
       { tickLogs: `notick ${path.join(p.tmp, "nope.md")}`, overdueMin: 1 });
     try {
       await sleep(4000);
-      assert.ok(!/OUTER-LOOP-OVERDUE/.test(mon.output()), `OVERDUE must be silent without a tick log:\n${mon.output()}`);
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()), `OVERDUE must be silent without a tick log:\n${mon.output()}`);
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-      assert.ok(await waitForOutput(mon, /OUTER-GONE notick/, 6000), `GONE must still fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-GONE notick/, 6000), `GONE must still fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -474,11 +478,11 @@ test("AC6 — no tick log: OUTER-LOOP-OVERDUE stays silent, other events work, n
   }
 });
 
-// ── AC9: manager config lives in orchestration/outer-liveness.env, sourced at startup ───────────────
+// ── AC9: manager config lives in orchestration/session-liveness.env, sourced at startup ───────────────
 
-test("AC9 — manager's 3-project config lives in orchestration/outer-liveness.env, not the script; it is sourced when OUTER_TARGETS is unset", async () => {
-  const realEnv = fs.readFileSync(path.resolve(__dirname, "..", "..", "orchestration", "outer-liveness.env"), "utf8");
-  assert.ok(realEnv.includes("OUTER_TARGETS="), "orchestration/outer-liveness.env must carry OUTER_TARGETS");
+test("AC9 — manager's 3-project config lives in orchestration/session-liveness.env, not the script; it is sourced when SESSION_TARGETS is unset", async () => {
+  const realEnv = fs.readFileSync(path.resolve(__dirname, "..", "..", "orchestration", "session-liveness.env"), "utf8");
+  assert.ok(realEnv.includes("SESSION_TARGETS="), "orchestration/session-liveness.env must carry SESSION_TARGETS");
   assert.ok(realEnv.includes("quay-0:outer") && realEnv.includes("archguard-2:outer") && realEnv.includes("meta-cc-4:outer"),
     "the env file must carry the three-project topology");
   assert.ok(!fs.readFileSync(SCRIPT, "utf8").includes("quay-0:"), "the script must NOT carry the topology (moved out to orchestration/)");
@@ -493,11 +497,11 @@ test("AC9 — manager's 3-project config lives in orchestration/outer-liveness.e
     tmux(["send-keys", "-t", "ol-env:outer", "exec -a claude-probe sleep 10000 &"], env);
     tmux(["send-keys", "-t", "ol-env:outer", "Enter"], env);
     assert.ok(await waitForAlive(env, "ol-env", 5000), "the env-file target outer must be alive before the run");
-    fs.writeFileSync(path.join(ws, "orchestration", "outer-liveness.env"),
-      `OUTER_TARGETS="envproj ${ws} ol-env:outer"\n`, "utf8");
-    const once = spawnSync("bash", [SCRIPT, "--once"], { encoding: "utf8", env: { ...env, OUTER_ROOT: ws } });
+    fs.writeFileSync(path.join(ws, "orchestration", "session-liveness.env"),
+      `SESSION_TARGETS="envproj ${ws} ol-env:outer"\n`, "utf8");
+    const once = spawnSync("bash", [SCRIPT, "--once"], { encoding: "utf8", env: { ...env, SESSION_ROOT: ws } });
     assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
-    assert.match(once.stdout, /OUTER-STATUS envproj alive=1/, `must source the env-file targets:\n${once.stdout}`);
+    assert.match(once.stdout, /SESSION-STATUS envproj alive=1/, `must source the env-file targets:\n${once.stdout}`);
   } finally {
     tmux(["kill-session", "-t", "ol-env"], env);
     cleanup(ws);
@@ -513,7 +517,7 @@ test("AC5 — the shipped outer tick doc documents the four thresholds", () => {
   }
 });
 
-// ── 噪声标定（管理者 3 周期数据）：OUTER-IDLE 静默/报出的两个正控制 ─────────────────────────────────
+// ── 噪声标定（管理者 3 周期数据）：SESSION-IDLE 静默/报出的两个正控制 ─────────────────────────────────
 
 test("noise gate — an idle transition with an OLD tick log IS reported (idle but no tick = anomaly)", async () => {
   const p = makeHermeticProbe("ol-gate-old");
@@ -526,11 +530,11 @@ test("noise gate — an idle transition with an OLD tick log IS reported (idle b
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
       startBusyLoop(p.env, p.session);
-      assert.ok(await waitForOutput(mon, /OUTER-RESUMED gate/, 8000), `RESUMED must fire on busy:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 8000), `RESUMED must fire on busy:\n${mon.output()}`);
       stopBusyLoop(p.env, p.session);
       const stable = await waitForPaneStable(p.env, p.session, 15000);
       assert.ok(stable !== null, "pane must return to a stable idle state");
-      assert.ok(await waitForOutput(mon, /OUTER-IDLE gate/, 10000),
+      assert.ok(await waitForOutput(mon, /SESSION-IDLE gate/, 10000),
         `IDLE must fire when the tick is stale (idle but no tick):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
@@ -550,12 +554,12 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
       startBusyLoop(p.env, p.session);
-      assert.ok(await waitForOutput(mon, /OUTER-RESUMED gate/, 8000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 8000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
       stopBusyLoop(p.env, p.session);
       const stable = await waitForPaneStable(p.env, p.session, 15000);
       assert.ok(stable !== null, "pane must return to a stable idle state");
       await sleep(3500); // ≥3 rounds after stability — IDLE would have fired by now if not gated
-      assert.ok(!/OUTER-IDLE/.test(mon.output()),
+      assert.ok(!/SESSION-IDLE/.test(mon.output()),
         `IDLE must be SILENT when the tick is fresh (healthy cycle end, noise gate):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
@@ -563,4 +567,42 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
   } finally {
     p.cleanup();
   }
+});
+
+// ── AC11: heartbeat parameterized for the INNER use case (a directory, not a file) ────────────────
+
+test("AC11 — a DIRECTORY heartbeat (inner-style .workflow-events/) triggers the same overdue criterion — the same script parameterizes for outer and inner", async () => {
+  const p = makeHermeticProbe("ol-hbdir");
+  const hbDir = path.join(p.tmp, "workflow-events");
+  try {
+    fs.mkdirSync(hbDir, { recursive: true });
+    fs.writeFileSync(path.join(hbDir, "seed.jsonl"), "# seed\n");
+    const old = spawnSync("touch", ["-d", "3 hours ago", hbDir], { encoding: "utf8" }); // dir mtime backdated
+    assert.equal(old.status, 0, `touch -d failed: ${old.stderr}`);
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `inner ${p.tmp} ${p.session}`, { tickLogs: `inner ${hbDir}`, overdueMin: 1 });
+    try {
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 6000),
+        `a directory heartbeat (inner work-output) must trigger the same overdue criterion:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC12/AC13: both shipped tick docs state what to mount ──────────────────────────────────────────
+
+test("AC12/AC13 — both shipped tick docs state what to mount; the outer doc names the two monitors and what each answers", () => {
+  const outer = fs.readFileSync(path.resolve(__dirname, "..", "loop", "orchestrator-loop-tick.md"), "utf8");
+  const inner = fs.readFileSync(path.resolve(__dirname, "..", "loop", "fast-mode-loop-tick.md"), "utf8");
+  // AC12: the outer mounts TWO monitors (work-state + session-state), not merged.
+  assert.ok(outer.includes("inner-state.sh") && outer.includes("session-liveness.sh"),
+    "the outer tick doc must name both monitors (AC12: they are not merged — one failure mode must not mask another)");
+  assert.ok(/它还在不在/.test(outer) && /它在做什么/.test(outer),
+    "the outer tick doc must state what each monitor answers (AC12)");
+  // AC13: the inner tick doc also states that the inner mounts session-liveness.sh.
+  assert.ok(inner.includes("session-liveness.sh"),
+    "the inner tick doc must state that the inner mounts session-liveness.sh (AC13)");
 });

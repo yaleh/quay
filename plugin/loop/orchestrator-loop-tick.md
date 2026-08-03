@@ -286,33 +286,43 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 跑在 `--task-start`/`--task-end` 之外，遥测看不见，此时内层在忙而信号显示 IDLE。真正的信号要内层
 主动写——见 [[gap-no-explicit-blocked-signal-from-inner-layer]]。
 
-### 0b2. 外层存活监视（`outer-liveness.sh`）——看外层自己，不是内层
+### 0b2. 会话存活监视（`session-liveness.sh`）——看会话本身还在不在
 
-**看的是【外层】进程**（不是内层）：外层消失 / 恢复 / 活着但不推进 / 转入空闲。产品化后
-（SPEC-outer-liveness-productization.md）**默认零配置看本项目自己的外层**，多目标经
-`OUTER_TARGETS` / `OUTER_TICK_LOGS` 或 `orchestration/outer-liveness.env` 启用。随
-`quay-init --loop` 铺下，会话名在安装时被替换。
+**看的是【会话】本身**（进程消失 / 恢复 / 活着但不推进 / 转入空闲），对**任何 Claude Code 会话**
+成立，外层与内层通用（原 `outer-liveness.sh`，AC10 泛化改名——名字取窄了，这套逻辑与「外层」
+无关）。随 `quay-init --loop` 铺下，会话名在安装时被替换；默认零配置看本项目自己的会话。
 
 | 事件 | 触发 |
 |---|---|
-| `OUTER-GONE` / `OUTER-BACK` | 外层进程消失 / 恢复 |
-| `OUTER-STALL` | 活着但 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） |
-| `OUTER-LOOP-OVERDUE` | tick 日志 mtime ≥`OVERDUE_MIN`（未暂停的项目）——loop 可能已死 |
-| `OUTER-IDLE` / `OUTER-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** |
+| `SESSION-GONE` / `SESSION-BACK` | 会话进程消失 / 恢复 |
+| `SESSION-STALL` | 活着但 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） |
+| `SESSION-OVERDUE` | 心跳文件 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 |
+| `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** |
+
+**外层该挂哪两个、各自答什么问题（AC12——不合并，合并会让一种失效掩盖另一种）：**
+
+| 挂什么 | 答什么问题 |
+|---|---|
+| `inner-state.sh`（工作状态） | **它在做什么**——批次起止 / 阻塞 / 危险变更 |
+| `session-liveness.sh`（会话状态） | **它还在不在**——进程活/死、忙/闲、心跳逾期没有 |
+
+`inner-state.sh` 只看工作产出：内层死了它只会看到「没有新遥测」，与「在思考难题」同形。
+`session-liveness.sh` 补的正是这个洞。内层的心跳是它的工作产出（建议 `.workflow-events/`，
+gitignored 不脏工作树）——经 `SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。
 
 **四个阈值（AC5，含义与默认值在这里，不只活在脚本注释里）：**
 
 | 阈值 | 默认 | 含义 |
 |---|---|---|
 | `INTERVAL` | `60` | 轮询周期（秒）。每轮抓一次每个目标的状态；「转换后一个轮询周期内报出」的「及时」颗粒 |
-| `STALL_MIN` | `45` | 未暂停的项目超过这么久（分钟）无新提交 = 停滞（`OUTER-STALL`） |
-| `LOOP_MIN` | `20` | 外层 loop 周期（分钟）。**也是 `OUTER-IDLE` 静默判据的边界**：空闲时 tick 时距 `< LOOP_MIN` = 刚记完 tick 的正常收尾（静默）；`≥ LOOP_MIN` 或未知 = 「空闲了但没记 tick」，报 |
-| `OVERDUE_MIN` | `45` | tick 日志 mtime 超过这么久（分钟）未更新 = loop 逾期（`OUTER-LOOP-OVERDUE`）。`>2×` 周期，容忍跑重活的长 tick |
+| `STALL_MIN` | `45` | 未暂停的项目超过这么久（分钟）无新提交 = 停滞（`SESSION-STALL`） |
+| `LOOP_MIN` | `20` | 会话的预期活动/心跳周期（分钟）。**也是 `SESSION-IDLE` 静默判据的边界**：空闲时心跳时距 `< LOOP_MIN` = 刚动过的正常收尾（静默）；`≥ LOOP_MIN` 或未知 = 「空闲了但没动」，报 |
+| `OVERDUE_MIN` | `45` | 心跳文件 mtime 超过这么久（分钟）未更新 = 会话逾期（`SESSION-OVERDUE`）。`>2×` 周期，容忍跑重活的长时段 |
 
-**噪声标定（2026-08-03，管理者 3 个完整周期实测）**：健康循环 = `OUTER-RESUMED`（loop 按期触发）
-→ 干活 → `OUTER-IDLE`（tick 日志 1 分钟前写过），每 20 分钟一对事件、三项目满载 18 次/小时。
-`OUTER-IDLE` 在 tick 时距小于 `LOOP_MIN` 时静默——那是循环走完一圈的正常收尾；`OUTER-RESUMED`
-**保留不静默**（它便宜，且是唯一能确认 loop 还在按期触发的正向信号）。
+**噪声标定（2026-08-03，管理者 3 个完整周期实测）**：健康循环 = `SESSION-RESUMED`（按周期活动）
+→ 干活 → `SESSION-IDLE`（心跳 1 分钟前更新），每 20 分钟一对事件、三项目满载 18 次/小时。
+`SESSION-IDLE` 在心跳时距小于 `LOOP_MIN` 时静默——那是正常收尾；`SESSION-RESUMED`
+**保留不静默**（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
 
 ### 0c. 派发闸口的清单与留痕：`## Contract` + `## Dispatch review`（外层，gap-dispatch-gate-has-no-checklist-and-no-trace）
 

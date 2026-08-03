@@ -185,8 +185,8 @@ s = open(src, encoding="utf-8").read()
 s = s.replace("/home/yale/work/quay", os.environ["REPO_ROOT_ESC"])
 s = s.replace("scripts/test.sh", os.environ["TEST_ESC"])
 s = s.replace("quay-0:0.0", os.environ["TMUX_ESC"])
-# outer-liveness.sh 的默认外层会话占位符（产品化 AC2）：安装时替换为 --tmux-session。
-# 监视器的默认目标是 <会话>:outer（外层窗口），不是 tick 文档里的内层 pane 引用。
+# session-liveness.sh 的默认会话占位符（产品化 AC2 / AC10 泛化改名）：安装时替换为 --tmux-session。
+# 监视器的默认目标是 <会话>:outer（会话窗口），不是 tick 文档里的内层 pane 引用。
 s = s.replace("__QUAY_TMUX_SESSION__", os.environ["TMUX_ESC"])
 s = s.replace("plugin/loop/orchestrator-loop-tick.md", "orchestration/orchestrator-loop-tick.md")
 s = s.replace("plugin/loop/fast-mode-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md")
@@ -343,34 +343,35 @@ if [ "$DO_LOOP" = true ]; then
     fi
   done
 
-  # Outer-liveness monitor (productization AC2/AC7): laid down WITH placeholder substitution
-  # (the default outer-session placeholder __QUAY_TMUX_SESSION__ → --tmux-session), so a target
-  # project gets a zero-config copy that watches ITS OWN outer. Same render mechanism as the tick
-  # docs; the other LOOP_SCRIPTS are copied verbatim because they self-locate their root.
-  outer_src="$PLUGIN_ROOT/scripts/outer-liveness.sh"
-  outer_dst="$WORKSPACE_ROOT/plugin/scripts/outer-liveness.sh"
-  if [ ! -f "$outer_src" ]; then
-    echo "  WARN: outer-liveness.sh missing from plugin: $outer_src" >&2
+  # Session-liveness monitor (productization AC2/AC7; renamed+generalized from outer-liveness.sh,
+  # AC10): laid down WITH placeholder substitution (the default session placeholder
+  # __QUAY_TMUX_SESSION__ → --tmux-session), so a target project gets a zero-config copy that
+  # watches ITS OWN session (outer or inner — mount config decides). Same render mechanism as the
+  # tick docs; the other LOOP_SCRIPTS are copied verbatim because they self-locate their root.
+  sl_src="$PLUGIN_ROOT/scripts/session-liveness.sh"
+  sl_dst="$WORKSPACE_ROOT/plugin/scripts/session-liveness.sh"
+  if [ ! -f "$sl_src" ]; then
+    echo "  WARN: session-liveness.sh missing from plugin: $sl_src" >&2
   elif [ "$DRY_RUN" = true ]; then
-    if [ ! -f "$outer_dst" ]; then
-      echo "  would-copy: $outer_dst (with placeholder substitution)"
+    if [ ! -f "$sl_dst" ]; then
+      echo "  would-copy: $sl_dst (with placeholder substitution)"
       COPIED=$((COPIED + 1))
     else
       render_tmp="$(mktemp)"
-      render_substitutions "$outer_src" "$render_tmp"
-      if cmp -s "$render_tmp" "$outer_dst"; then
-        echo "  would-skip (identical after substitution): $outer_dst"
+      render_substitutions "$sl_src" "$render_tmp"
+      if cmp -s "$render_tmp" "$sl_dst"; then
+        echo "  would-skip (identical after substitution): $sl_dst"
         SKIPPED=$((SKIPPED + 1))
       else
         CONFLICTED=$((CONFLICTED + 1))
-        echo "  would-conflict: $outer_dst (differs from the substituted plugin template — list for human)"
+        echo "  would-conflict: $sl_dst (differs from the substituted plugin template — list for human)"
       fi
       rm -f "$render_tmp"
     fi
   else
     render_tmp="$(mktemp)"
-    render_substitutions "$outer_src" "$render_tmp"
-    copy_one "$outer_src" "$outer_dst" "$render_tmp"
+    render_substitutions "$sl_src" "$render_tmp"
+    copy_one "$sl_src" "$sl_dst" "$render_tmp"
     rm -f "$render_tmp"
   fi
 
