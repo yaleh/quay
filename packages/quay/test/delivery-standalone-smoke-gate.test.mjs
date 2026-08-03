@@ -30,6 +30,12 @@ const SMOKE_SCRIPT = path.join(REPO_ROOT, "packages", "quay", "test", "delivery-
 
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
+// delivery-standalone-smoke.sh simulates a real npm delivery (pack + fresh-workspace install),
+// which under full-suite load (4 cores, concurrency 8) exceeds the gate runner's 60s default —
+// flaked 4x (qinit suite #1 ×3, batch5). The gate genuinely PASSES when given time; give it
+// headroom. (The runner reads QUAY_ACCEPTANCE_TIMEOUT_MS; see gate/config/utils.ts.)
+process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = "120000";
+
 function runQuay(args, cwd, extraEnv = {}) {
   try {
     const out = execFileSync("node", [quayBin, ...args], {
@@ -102,7 +108,7 @@ test("M52 A1: delivery-standalone-smoke gate requires NO task.extra args (zero-a
 test("M52 A2: delivery-standalone-smoke gate PASSes for real (0 RED, real script, real process I/O)", async () => {
   const r = await gate("delivery-standalone-smoke")({ id: "T", extra: {} });
   assert.equal(r.ok, true, `expected pass (0 RED); got reason=${r.reason}`);
-}, { timeout: 60000 });
+}, { timeout: 150000 });
 
 test("M52 A2: a fixed gate pointed at a non-existent script fails closed (ok:false)", async () => {
   const { resolveGate: rg } = await import("../src/gate/registry.ts");
@@ -148,7 +154,7 @@ test("M52 C1 [AC2/AC3]: `quay gate <task> --gate delivery-standalone-smoke` PASS
   assert.equal(events[0].gate, "delivery-standalone-smoke");
   assert.equal(events[0].verdict, "pass");
   assert.equal(events[0].pipeline_id, "T-SMOKE");
-}, { timeout: 60000 });
+}, { timeout: 150000 });
 
 // ===========================================================================
 // D1 — real-world demonstration against THIS repo's own real workspace gates
@@ -167,4 +173,4 @@ test("M52 D1: delivery-standalone-smoke gate PASSes against THIS repo's own real
   assert.match(content, /delivery-standalone-smoke/, "real config.yml's gates: section must declare the fixed gate");
   const r = await gate("delivery-standalone-smoke")({ id: "DIR-035-D" });
   assert.equal(r.ok, true, `expected pass against this repo's real workspace; got reason=${r.reason}`);
-}, { timeout: 60000 });
+}, { timeout: 150000 });
