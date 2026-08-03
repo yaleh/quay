@@ -46,6 +46,16 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
   );
 
   // task_list — data.read (required)
+  // gap-task-list-route-is-linear-in-task-count: the list route (web board,
+  // CLI `--summary`-style consumers) only needs frontmatter fields
+  // (id/title/status/labels/role/children/updatedAt) — NOT the full body
+  // markdown. This tool accepts an OPTIONAL `includeBody` (default true =
+  // full tasks, byte-for-byte backward compatible with every existing
+  // caller). Passing `includeBody: false` strips `body` from each returned
+  // task, shrinking the MCP round-trip payload from ~5.7MB (all task bodies)
+  // to ~0.3MB (frontmatter only) — the dominant cost in the
+  // "MCP round-trip + rendering" half of the task-list route. The param is
+  // additive and opt-in: providers/callers that never pass it are unaffected.
   server.registerTool(
     "task_list",
     {
@@ -53,9 +63,10 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
       inputSchema: {
         status: z.string().optional(),
         label: z.string().optional(),
+        includeBody: z.boolean().optional(),
       },
     },
-    async ({ status, label }) => {
+    async ({ status, label, includeBody }) => {
       // gap-one-unparseable-task-takes-down-the-whole-board: partial success.
       // One task file whose frontmatter fails to parse must not take down the
       // whole task_list call (that was the "all-or-nothing" defect) — return
@@ -64,9 +75,12 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
       // the board. isError stays reserved for genuine call-level failures
       // (store itself unreachable, etc.), which still throw.
       const { tasks, malformed } = store.listWithMalformed({ status, label });
+      const outTasks = includeBody === false
+        ? tasks.map((t) => { const { body: _omit, ...rest } = t; return rest; })
+        : tasks;
       return {
-        content: [{ type: "text", text: JSON.stringify({ tasks, malformed }, null, 2) }],
-        structuredContent: { tasks, malformed },
+        content: [{ type: "text", text: JSON.stringify({ tasks: outTasks, malformed }, null, 2) }],
+        structuredContent: { tasks: outTasks, malformed },
       };
     }
   );

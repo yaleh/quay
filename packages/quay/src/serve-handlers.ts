@@ -478,7 +478,18 @@ export async function handleTaskList(
   // frontmatter failed to parse. A bad task must poison exactly its own row,
   // not the whole board: the malformed entries are rendered as visible
   // `.malformed-row` placeholder rows below, and the good tasks list normally.
-  const { tasks: allTasks, malformed } = await client.taskList({});
+  // gap-task-list-route-is-linear-in-task-count: the list page renders only
+  // frontmatter fields (id/title/status/labels/role/children/updatedAt) — it
+  // does NOT render task bodies. The Provider ABI task_list accepts an
+  // optional `includeBody` (default true = full tasks, backward compatible).
+  // Passing false when no ?q= search is active shrinks the MCP round-trip
+  // payload from ~5.7MB (all 619 task bodies) to ~0.3MB (frontmatter only) —
+  // the dominant cost of the "MCP round-trip + rendering" half of this route.
+  // When ?q= IS active, body search needs the bodies, so we request them.
+  // (The qFilter read is duplicated below where it drives filtering; reading
+  // the URLSearchParams twice is cheap and keeps the two uses independent.)
+  const qFilter = url.searchParams.get("q") || null;
+  const { tasks: allTasks, malformed } = await client.taskList({ includeBody: qFilter ? true : false });
   // QX-004 (experiment 4, iteration 1): filter by ?prefix=<value> query param.
   // Closes CB-002: "show only QX-* tasks" affordance in Web UI.
   // Applied FIRST, before status/label filters — prefix scopes the whole view.
@@ -516,7 +527,8 @@ export async function handleTaskList(
   // by a space) are excluded from the search index. This prevents template section
   // headers ("## Proposal", "## Plan", "## AC", "## DoD") from causing false
   // positives when searching for those terms. Closes CB-017 (significant).
-  const qFilter = url.searchParams.get("q") || null;
+  // NOTE: qFilter is read above (before the taskList call) so the route can
+  // request bodies only when body search needs them — this read drives filtering.
   const filtered = qFilter
     ? filteredByLabel.filter((t) =>
         (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(qFilter.toLowerCase())
