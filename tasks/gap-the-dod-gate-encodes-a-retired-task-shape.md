@@ -51,6 +51,38 @@ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task che
 **⇒ 若照 ADR 原文直接实现（只给 finding 型开口子），meta-cc 会通，
 而 quay 自己那 40 个 Contract 格式的任务仍然全红。**
 
+### 阻塞升级（2026-08-03 23:35Z，管理者转 meta-cc 外层独立核实）——本条现在是 meta-cc 循环的真实阻塞
+
+```
+task_check(DIR-082) → proposal:false  plan:true  ac:true  dod:true
+```
+
+**`## Finding` 不计入 `proposal`** ⇒ **41 个 Finding 模板任务过不了 author→ready 闸，
+14 个 todo 全部堵死，ready 队列为 0。**
+
+**人已裁定：不许改任务内容去迁就闸。** ⇒ **修复只能在本仓这边，且它现在挡着 meta-cc 的循环。**
+
+**外层结构性复核，找到了确切的不对称**：
+
+```
+proposal: has("Proposal"),                              ← 无备选
+plan:     has("Plan"),                                  ← 无备选
+ac:       has("AC") || has("Acceptance Criteria"),      ← 有备选
+dod:      has("DoD") || has("Definition of Done"),      ← 有备选
+```
+
+`grep -c 'Finding' packages/quay-native/src/store.ts` ⇒ **0**。
+
+**⇒ 四个必需段里，两个允许别名、两个写死。** 这不是「meta-cc 用了别的模板」，
+**是闸把一套模板的段名当成了通用词汇**——而恰好写死的那两个，正是两个项目各自撞上的那两个：
+
+| 项目 | 撞上的段 | 现实里叫什么 |
+|---|---|---|
+| **quay 自己** | `plan` | `## Contract`（ADR-022 取代了 Plan） |
+| **meta-cc** | `proposal` | `## Finding`（DIR 模板） |
+
+**⇒ 同一个不对称，两个项目各踩一半。**
+
 ### 代价（meta-cc 侧，管理者实测）
 
 `taskCheck` 对每个任务要求 `allArtifactsPresent`，而 meta-cc 用 DIR 模板 ⇒
@@ -100,7 +132,11 @@ resume 先把形状集合与各自的必需段定死并注册，再改 check
 - [ ] AC5: **负控制二（未知形状必红）**——`type: 不存在的形状` ⇒ **红**，
       **不得落入任何宽松分支**（实跑贴出）。**这条不过，AC2 不算数**
 - [ ] AC6: **meta-cc 方向验证**——用 DIR 模板的任务 `task check` ⇒ PASS，
-      且**不是靠绕过**（实跑贴出，并记录改动前后的 dod 失败/通过计数对照 20:3）
+      且**不是靠绕过**（实跑贴出，并记录改动前后的 dod 失败/通过计数对照 20:3）。
+      **具体判据（管理者实测给定）**：`task_check(DIR-082)` 的 `proposal` 必须为 `true`；
+      **41 个 Finding 模板任务全部可过闸，ready 队列不再为 0**（数字贴出）
+- [ ] AC6b: **不许靠改任务内容达标**——人已裁定不许改任务去迁就闸。
+      负控制：**meta-cc 的任务文件在本次修复前后 `git diff` 为空**（实跑贴出）
 - [ ] AC7: **绕过计数归零**——改动后不再需要绕过闸即可达到 `ready`（实测数字贴出）
 - [ ] AC8: 测试用 `node:test` 且带 `// @test-group product`（`task check` 是用户可见契约）
 
