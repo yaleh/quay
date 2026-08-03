@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T16:59:08.718Z",
+  "generatedAt": "2026-08-03T17:04:57.490Z",
   "since": null,
   "tasks": [
     {
@@ -138,6 +138,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-session-liveness-heartbeat-freezes-for-the-whole-task",
+      "minutes": 100.82288333333334,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-stranded-worktree-branches-have-no-alarm-channel",
       "minutes": 91.67928333333333,
       "outcome": "done"
@@ -241,18 +246,18 @@
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-session-liveness-heartbeat-freezes-for-the-whole-task",
-      "runId": "fm-gap-session-liveness-heartbeat-freezes-for-the-whole-task-1785770647528-tg6r7g",
-      "startedAtMs": 1785770647539
+      "taskId": "gap-cold-start-needs-a-human-to-dictate-eight-steps",
+      "runId": "fm-gap-cold-start-needs-a-human-to-dictate-eight-steps-1785776615141-d05ioq",
+      "startedAtMs": 1785776615159
     }
   ],
-  "meanMinutes": 58.13344787234042,
-  "medianMinutes": 56.31883333333333,
-  "tasksPerHour": 1.5415073119057925,
-  "serialEquivalentPerHour": 1.0321080582001343,
+  "meanMinutes": 59.0228111111111,
+  "medianMinutes": 56.32075833333333,
+  "tasksPerHour": 1.5693189855802199,
+  "serialEquivalentPerHour": 1.0165561224633868,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T16:59:08.697Z",
-  "windowHours": 30.489638055555556,
+  "windowEnd": "2026-08-03T17:04:57.457Z",
+  "windowHours": 30.586515833333333,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],

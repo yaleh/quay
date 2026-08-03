@@ -1527,3 +1527,12 @@ ratchet 恢复 new since baseline: 0。
 验证两目标分开报：临时空目录（全新）+ meta-cc（升级/Go/不依赖开发树）。
 
 **在飞 2/3**：liveness 阶段一（待外层阶段二裁断）+ cold8 阶段一。
+
+### liveness 阶段一关闭（2026-08-03 17:4xZ，外层方案 B）
+
+**session-liveness 按外层处置方案 (B) 关闭**：阶段一 AC 如实勾、阶段二（AC9-AC14）标未做；
+--task-end done（48 完成）。原因：遥测分不出「做阶段二」与「阶段一在等」，在飞 98 分钟、后 67 分钟闲置，
+OVER90 报在闲置任务上。**阶段二作为新派发重新注册计量**，重派前需外层裁断排序（vs 姊妹任务
+hashes-the-token-counter，同改 pane-hash/IDLE-RESUMED 块必须串行，AC10 语义标志大部分吸收其修复面）。
+
+**在飞 1/3**：cold8 阶段一。

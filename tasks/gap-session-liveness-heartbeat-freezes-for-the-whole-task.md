@@ -2,7 +2,7 @@
 id: gap-session-liveness-heartbeat-freezes-for-the-whole-task
 title: Two of the four session events do not observe a session — STALL reads commits and
   OVERDUE reads work output, so aliveness is inferred from productivity (SPEC AC14-AC17)
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -311,3 +311,15 @@ changed: 管理者按纪律把它报成「我不能证明、由你判」。**外
 环境变量里没有 session id、启动时刻匹配 **3 个样本错 2 个**且失败是结构性的（`/clear`/`--resume` 解耦）。
 **据此建议绕开映射：把会话 id 做成每目标配置**——与「生成配置、不去推断」同一条原则。
 **派发时机**：在飞任务正占用 `session-liveness.sh`，等它收尾；本任务与 token-counter 任务再排先后。
+
+## 阶段一关闭记录（2026-08-03 17:4xZ）
+
+**阶段一（信号源 + 基线）完成并合并**（fbf64fe9）：AC1-AC8 如实勾选；transcript 心跳、REPO-STALL 改名、
+停机基线重置、RESUMED/OVERDUE 同轮断言、LOOP_MIN 拆分。
+
+**阶段二（AC9-AC14：屏幕语义标志 + 交叉正控制 + payload + 阈值）未做，按外层处置方案 (B) 关闭本次派发**：
+- 遥测分不出「正在做阶段二」与「阶段一做完了在等」，本任务在飞 98 分钟、后 67 分钟无工作——OVER90 报在
+  一个实际闲置的任务上。
+- 阶段二作为**新的一次派发重新注册计量**，其耗时可单独测量。
+- **阶段二重派前需外层裁断排序**：与姊妹任务 `gap-session-liveness-hashes-the-token-counter-as-if-it-were-work`
+  同改 pane-hash/IDLE-RESUMED 块（必须串行），且 AC10（语义标志）大部分吸收姊妹任务的修复面。
