@@ -1,8 +1,8 @@
 ---
 id: gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion
-title: "21 fully-merged worktrees hold 1.1G, and the criterion I wrote last
-  night would lock them there forever"
-status: todo
+title: 21 fully-merged worktrees hold 1.1G, and the criterion I wrote last night
+  would lock them there forever
+status: done
 labels:
   - gap
   - defect
