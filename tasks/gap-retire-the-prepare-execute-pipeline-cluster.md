@@ -49,6 +49,25 @@ prepare/execute 管线的问题不是说谎，是**它已经不在跑，而重�
 `touches-orthogonality-check.ts` 的 `checkTouchesPair`。这些**不在裁剪范围内**，
 它们今晚每一次并发组批都在用。
 
+### 裁定已升级为 ADR-022（人 2026-08-03 04:3xZ）
+
+**[[ADR-022]]：经典里程碑循环应当被放弃，双层快速模式是唯一模式，全面应用。**
+
+这解决了本任务此前悬着的一个反向证据。inventory 的 72h 窗口显示
+`.claude/workflows/*.js` 五个是 `live`（`prepare-milestone` **×280**、`execute-milestone` ×47），
+外层据此建议「经典循环在用它，要重估规模主张」。**人把这个证据反过来读了**：
+那 280 次调用不是价值证据，**是正在被放弃的那个模式的成本**。
+
+**因此本任务按退役执行，不再因 72h 窗口的 live 计数而收缩范围。**
+
+ADR-022 已把闸缩小到 3 个（10 个「读者」里 7 个是排除/举例引用）：
+
+| 闸 | 处置 |
+|---|---|
+| `build-evidence-manifest.ts` | **真闸**——近期 transcript 提及 1040 次，`gap-m264` 正在改。退役前单独裁定 |
+| `workflow-baseline-metrics.ts` | **真闸**——解析 `milestones/` 路径 |
+| `milestone-worktree.ts` | 经典专属（快速模式用 `git worktree add /tmp/quay-wt-*`），但 **[[gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion]] 要先用它清完 1.1G 残留**，再随管线退役。**顺序不能反** |
+
 ### 它当初为什么是对的，以及为什么现在不是（人 2026-08-03）
 
 管线的价值 ≈ **早期发现问题 × 人等待的成本**。
@@ -101,8 +120,14 @@ exp6 §0 已裁定它们**封存待阶段 2**，那是有意保留，不是遗�
 
 ## Acceptance Criteria
 
+- [ ] AC0: **先读 [[gap-no-inventory-of-what-the-two-layer-mode-actually-runs]] 的 `class` 列
+      与 72h 窗口差集**（51 个低频≠死、31 个 unaccounted→live）。按 ADR-022，
+      72h 窗口里 `.claude/workflows/*.js` 的 live 计数**不构成保留理由**——那是被放弃模式的成本
 - [ ] AC1: 依赖边界表完成——上表每个文件都有「活调用者 / 可否移除 / 依据」三列，**依据是 grep 或
       实跑输出，不是判断**
+- [ ] AC1b: 三个真闸（`build-evidence-manifest.ts`、`workflow-baseline-metrics.ts`、
+      `milestone-worktree.ts`）各自单独裁定并写明理由；`milestone-worktree.ts` **必须在
+      reclaim 落地之后**才处置
 - [ ] AC2: 明确列出**仍被快速模式复用的导出**（至少已知 `checkSplitRecommendation`、
       `planCheckNextAction`、`checkTouchesPair`），并确认它们的宿主文件的处置方式
 - [ ] AC3: 实际删除第一类文件（含双侧镜像与专属测试），记录删除的行数与文件数
