@@ -49,7 +49,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| **并发批次（3 完成，fan-in 进行中）** | **relation-sync**（已 merge `6dbb96bc`，全量 #1 绿 2298/2280/0，#2 验证中）+ **blocked-signal**（分支 `77417e06`，round-2 REFUTE APPROVE，等 fan-in）+ **test-framework-policy**（分支 5 提交含 round-2 修复 `b3244b45`/`c3ded940`，REVISE 已修，等 fan-in）。checkTouchesPair 两两 DISJOINT。**blocked-signal 自身缺陷已根治**：测试改传 --root tmpRoot，真实 .workflow-events 零 blk-\*、orphaned 空。**policy 额外发现**：`scripts/test-coverage-check.ts` 解析 `files=(...)` 但 test.sh 已改 `glob=(...)`，master 上 selftest 红（孤儿脚本，未接线），建议另立 gap |
+| **并发批次（3 在飞，AC13）** | **tasksperhour**（fm-...-4ij0d7，/tmp/quay-wt-tph）+ **ac11-nested-runner**（fm-...-o3ewzl，/tmp/quay-wt-ac11）+ **reverse-drift**（fm-...-vbtmva，/tmp/quay-wt-revdrift）。checkTouchesPair 六对全 DISJOINT（实测）。dispatch-gate（fm 待派）下一批。**AC1 未达成（外层验证）**：第一次 0 fail，第二次 fail 1 = AC11 嵌套 runner（隔离 3 次绿）——「可重现」标准的价值兑现。已建 gap-ac11 + gap-test-coverage-check-parses-stale-files（非孤儿，CI 接线 + 正则 vs glob= 漂移）。M264 flaky 已建任务（AC16 证据：run1 绿/run2 红实测） |
 | **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |
