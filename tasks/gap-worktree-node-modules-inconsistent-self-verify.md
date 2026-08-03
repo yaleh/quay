@@ -33,8 +33,8 @@ extra:
 ## Contract
 
 ```
-measure self_verifiable_worktrees = `for w in /tmp/quay-wt-*; do [ -e "$w/node_modules" ] && echo yes; done | wc -l` 的可自证 worktree 数
-measure dispatched_worktrees = `/tmp/quay-wt-*` 的总数
+measure self_verifiable_worktrees = `for w in /tmp/quay-wt-*; do [ -e "$w/node_modules" ] && echo yes; done | wc -l` 的 wc -l 计数字段（可自证 worktree 数）
+measure dispatched_worktrees = `ls -d /tmp/quay-wt-* 2>/dev/null | wc -l` 的 wc -l 计数字段（worktree 总数）
 band   self_verifiable_worktrees = dispatched_worktrees（全等）
 invariant 派发的 worktree 必须能自证；不能自证时不静默回退到共享检出
 invoke `bash plugin/scripts/dispatch-worktree-setup.sh <wt> && bash scripts/test.sh <scoped>`（机制示例）
