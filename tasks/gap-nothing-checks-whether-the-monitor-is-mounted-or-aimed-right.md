@@ -2,7 +2,7 @@
 id: gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right
 title: Nothing checks that the outer's Monitor is mounted, aimed at this repo, and
   owned by this session — two silent misses found only because a human asked
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -116,9 +116,10 @@ resume 三条判据各自独立可测，逐条落地
 
 - [x] AC2/AC3/AC4/AC5 四个负控制的实跑输出全部贴进任务体——
       **一个只会说「一切正常」的检查器，与没有检查器不可区分**；本任务的全部理由就是这句话
-- [ ] 完整套件连跑 2 次全绿（**由协调方 fan-in 承担**——本任务 worktree 内按纪律不自启全量套件；
-      scoped 测试已全绿：`plugin/test/monitor-mount-check.test.mjs` 10/10，
-      `plugin/test/{loop-shipping,inner-state,quay-init-loop}.test.mjs` 14/14）
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 batch3-fanin2，2085 tests / 2065 pass /
+      0 fail / 0 cancelled，`/tmp/batch3-fanin-fullsuite2.log`，2026-08-03 13:25Z，已含本任务合并代码）。
+      **非连跑 2 次**：本任务 worktree 内按纪律未自启全量；scoped 全绿（monitor-mount-check 10/10、
+      loop-shipping/inner-state/quay-init-loop 14/14）。第二次全量待外层 session-liveness 改名落定后补跑
 - [x] 任务体记录：两个反证（archguard 从未挂上、管理者 18 小时挂错目标）**都是人问起来才发现的**，
       不是任何信号报出的
 

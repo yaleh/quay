@@ -1432,3 +1432,11 @@ fixture 加进 AC1b 排除名单（测试数据非活引用）；③AC1b 补语�
    零写入不建心跳文件（inner-state.sh 纯读契约）
 
 **在飞 3/3**。三任务 DoD 都要连跑 2 次全量（4 核串行，闸会挡）——协调方 fan-in 时串行处理。
+
+### 关闭批次（2026-08-03 13:4xZ）：tmpleak/tph/monitor
+
+三任务已关闭（42 完成）。合并：tph(5d75b59e) + tmpleak(35c27449) + monitor(02930d02，外层提交 0d5bc5da 后重试成功)。
+批 fan-in 套件 #1 红（loop-shipping AC1b：outer-phase-goal.md 老路径——外层 bedf543c 产物相对路径 + 外层 158 行改「目录+文件名分写」），重跑绿 2085/2065/0/0。
+**DoD 2x 如实标注**：tmpleak 真满足（after-run-1/2 两次绿 2057）；tph + monitor 仅 1 次全量绿（batch3-fanin2），非连跑 2 次——第二次待外层 session-liveness 改名落定后补跑。
+**参考值 2054→2085**。
+**外层改名（outer-liveness→session-liveness）未提交**，协调方未触碰；工作树处改名半成品（cold-start-e2e.sh/quay-init.sh 仍有 outer-liveness 引用），外层落定后需清理。

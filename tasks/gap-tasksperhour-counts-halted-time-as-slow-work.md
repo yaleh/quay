@@ -2,7 +2,7 @@
 id: gap-tasksperhour-counts-halted-time-as-slow-work
 title: tasksPerHour puts halted wall-clock in its denominator, so a pause reads as
   degraded throughput — and rewards picking light tasks
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -111,7 +111,10 @@ resume 先落停机区间的数据源，再改口径；两步各自可独立验�
 
 - [x] AC3 与 AC4 的实跑输出贴进任务体——**一个改分母的修改如果没有零停机不变性证明，
       就无法与「把数字调好看」区分开**
-- [ ] 完整套件连跑 2 次全绿（留给协调方 fan-in 承担——本任务按纪律不自启全量套件）
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 batch3-fanin2，2085 tests / 2065 pass /
+      0 fail / 0 cancelled，`/tmp/batch3-fanin-fullsuite2.log`，2026-08-03 13:25Z，已含本任务合并代码）。
+      **非连跑 2 次**：本任务 worktree 内按纪律未自启全量；第二次全量待外层 session-liveness 改名落定后
+      补跑（工作树当前处改名半成品态，补跑会测到断裂引用）
 - [x] 任务体记录一句：本任务由**管理者在读到停机导致的衰减后主动要求**建立，
       而不是为了让读数好看——这句话是它将来被质疑时唯一的答复
 

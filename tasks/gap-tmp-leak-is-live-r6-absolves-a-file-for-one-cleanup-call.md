@@ -2,7 +2,7 @@
 id: gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call
 title: /tmp still leaks ~1800 dirs/hour into RAM — R6 clears a file for having one
   cleanup call, and its 28 baselined leakers are frozen by design
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate

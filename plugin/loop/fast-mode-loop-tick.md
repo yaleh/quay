@@ -98,7 +98,7 @@ ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=
 ```bash
 grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
-grep 'tests 2054'    # tests 数等于参考值（2026-08-03 实测 2054；套件构成每次变都要重测参考值）
+grep 'tests 2085'    # tests 数等于参考值（2026-08-03 实测 2085；套件构成每次变都要重测参考值）
 ```
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
@@ -111,6 +111,19 @@ grep 'tests 2054'    # tests 数等于参考值（2026-08-03 实测 2054；套�
 压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 40 才 GO），但套件自身跑起来压力必然 >40，
 那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/2.1))=1（4 核）；全量验证需显式
 --test-concurrency=8，否则小时级**。
+
+## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
+
+**内层同样要挂 `session-liveness.sh`**（泛化后的会话存活监视，原 `outer-liveness.sh`）。
+理由（2026-08-03 实测）：`inner-state.sh` 只看**工作产出**——内层进程死了它只会看到「没有新
+遥测」，与「内层在思考一个难题」完全同形。这是本仓当天两次栽过的那一族失效换了个位置。内层跑
+重活，会话死掉代价更大，**更需要**进程存活这一层。
+
+挂法与心跳（AC11）：内层的心跳不是外层那种 tick 日志，而是它的**工作产出**——建议
+`.workflow-events/`（gitignored、不脏工作树；`stat -c %Y` 对目录成立）。经
+`SESSION_HEARTBEATS="<名字> <项目根>/.workflow-events/"` 配置。事件 `SESSION-GONE/BACK/
+STALL/IDLE/RESUMED/OVERDUE` 报的是「会话本身还在不在、忙不忙」；`inner-state.sh` 报的是
+「在做什么」。两者**不合并**（AC12）——一个失效不能掩盖另一个。
 
 ## 状态单一来源
 
