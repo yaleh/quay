@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
@@ -27,9 +28,9 @@ function get(port, urlPath) {
 let server, port, originalCwd, workspaceRoot;
 
 before(async () => {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-serve-tasks-"));
-  const adrDir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-serve-adr-"));
-  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "adr-serve-ws-"));
+  const tasksDir = makeTmpDir("adr-serve-tasks-");
+  const adrDir = makeTmpDir("adr-serve-adr-");
+  workspaceRoot = makeTmpDir("adr-serve-ws-");
   fs.writeFileSync(path.join(adrDir, "ADR-001-tdd-scope.md"),
     "---\nid: ADR-001\ntitle: TDD scope\nstatus: accepted\ndate: 2026-07-19\n---\n## Context\nc\n## Decision\nThe invariant we adopt.\n## Consequences\ne\n");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });

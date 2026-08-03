@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -17,9 +18,9 @@ const nativeProviderDir = path.dirname(nativeBin);
 
 let core, workspaceRoot;
 before(async () => {
-  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "adr-mcp-ws-"));
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-mcp-tasks-"));
-  const adrDir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-mcp-adr-"));
+  workspaceRoot = makeTmpDir("adr-mcp-ws-");
+  const tasksDir = makeTmpDir("adr-mcp-tasks-");
+  const adrDir = makeTmpDir("adr-mcp-adr-");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"), [
     "providers:", "  native:", "    enabled: true",

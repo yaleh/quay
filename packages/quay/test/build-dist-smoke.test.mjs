@@ -38,6 +38,7 @@ import os from "node:os";
 import http from "node:http";
 
 import { buildDist } from "../scripts/build-dist.mjs";
+import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
@@ -45,7 +46,7 @@ const nativeBin = path.join(pkgDir, "..", "quay-native", "bin", "quay-native.ts"
 const nativeProviderDir = path.dirname(nativeBin);
 
 // Build the bundle into a depth-matched temp tree (see header comment).
-const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m120-smoke-bundle-"));
+const bundleRoot = makeTmpDir("quay-m120-smoke-bundle-");
 const bundlePkg = path.join(bundleRoot, "l1", "l2", "pkg");
 fs.mkdirSync(path.join(bundlePkg, "dist"), { recursive: true });
 fs.copyFileSync(path.join(pkgDir, "package.json"), path.join(bundlePkg, "package.json"));
@@ -56,24 +57,7 @@ const strayDocsManaged = path.join(bundleRoot, "docs-managed");
 let ws; // { workspaceRoot, tasksDir }
 
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m120-smoke-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m120-smoke-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-m120-smoke-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runBundle(args, cwd, extraEnv = {}) {

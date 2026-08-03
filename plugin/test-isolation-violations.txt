@@ -17,11 +17,14 @@
 #                                   POSIX pipe — relation-sync's silent suite-red).
 #   R5 (doc-only)                   never depend on the running repo's git history (shallow clone
 #                                   must stay green) — documented in the contract, no scanner rule.
-#   R6 mkdtemp-no-cleanup           a file that mkdtemp()s but has NO cleanup construct (rm/rmSync/
-#                                   t.after/after/finally) leaks a tmpdir per run — /tmp (tmpfs)
-#                                   accumulated 166,923 entries / 6.3 GB over 9 days (2026-08-03).
-#                                   NEVER matches /tmp/claude-* (session data) / /tmp/quay-wt-*
-#                                   (in-use worktrees) prefixes (AC6).
+#   R6 mkdtemp-no-cleanup           a file that mkdtemp()s leaks a tmpdir per run when the created
+#                                   dir is not removed. Partial-cleanup-aware since
+#                                   gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call
+#                                   (2026-08-03): every variable-assigned mkdtemp result must be
+#                                   covered by a cleanup path (direct rmSync/rm/after/finally, a
+#                                   carrier-array + after-loop, or a helper-return captured into a
+#                                   cleaned variable). NEVER matches /tmp/claude-* (session data) /
+#                                   /tmp/quay-wt-* (in-use worktrees) prefixes (AC6).
 #
 # The scanner (plugin/scripts/test-isolation-check.ts) REPORTS every current violation on every
 # scripts/test.sh run but does NOT block on the ones listed here (AC6, "报出而不阻断"). This list
@@ -35,9 +38,11 @@
 #
 # baseline-count: 51
 # Baseline: 51 entries — 23 from gap-test-isolation-contract-is-unwritten (R1-R4) + 28 from
-# gap-tests-never-clean-up-their-tmpdirs (R6). `# baseline-count: <n>` is the MACHINE-READABLE
-# RATCHET CEILING parsed by the check — the list can NEVER exceed this many entries, even at a clean
-# commit. It is permanent: it stays 51 even as entries are removed (the list only shrinks below it).
+# gap-tests-never-clean-up-their-tmpdirs (R6). gap-tmp-leak-is-live-r6-absolves-a-file-for-one-
+# cleanup-call (2026-08-03) removed 6 entries (driver/gate/lifecycle/gap002-create-ergonomics/
+# gate-config-loader/init) — the list only shrinks below the ceiling. `# baseline-count: <n>` is the
+# MACHINE-READABLE RATCHET CEILING parsed by the check — the list can NEVER exceed this many entries,
+# even at a clean commit. It is permanent: it stays 51 even as entries are removed.
 # Format: <repo-root-relative-test-file>:<rule-key>  ('#' comments and blanks ignored). Sorted.
 experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup
 experiments/quay-perpetual-stream/test/drain-dispose-corruption-check.test.mjs:mkdtemp-no-cleanup
@@ -70,18 +75,12 @@ packages/quay/test/dir022-remaining-gates.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/dir032-audit-independence.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/document-gate.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/dod-gate-set.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/driver.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/frontmatter-store-base.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap-cli-gate-enforcement.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:process-exit-1
-packages/quay/test/gap002-create-ergonomics.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gate-config-loader.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gate-list-verbose.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/init.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/it0-gates.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/lifecycle.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/mcp-config-validate.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write

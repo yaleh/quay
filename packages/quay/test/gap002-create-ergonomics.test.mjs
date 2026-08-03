@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -31,32 +32,7 @@ const nativeProviderDir = path.dirname(nativeBin);
 // Builds a fresh, disposable workspace with a .quay/config.yml pointing its
 // native provider at a throwaway tasks dir. Returns { workspaceRoot, tasksDir }.
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m29-it1-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m29-it1-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  // NOTE (self-caught during iteration-1's own verification, see report's
-  // skepticism section): `provider.tasks_dir` alone is NOT read by
-  // resolveProviderEnv() (packages/quay/src/provider-env.js) — only
-  // `provider.env` entries are turned into the child MCP process's env.
-  // The real, working pattern (confirmed against cli.test.mjs) is to set
-  // env.QUAY_NATIVE_TASKS_DIR explicitly. Keeping `tasks_dir` too for
-  // documentation parity with cli.test.mjs's own fixture shape, but it is
-  // env.QUAY_NATIVE_TASKS_DIR that actually takes effect.
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-m29-it1-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runQuay(args, cwd) {

@@ -341,44 +341,263 @@ export function detectProcessExit1(src: string, rel: string): Violation[] {
 }
 
 /**
- * R6 mkdtemp-no-cleanup: a file with a CODE-position mkdtemp/mkdtempSync call but NO code-position
- * cleanup construct anywhere in the file (rmSync/rm/t.after/after/finally) leaks a tmpdir per run.
- * gap-tests-never-clean-up-their-tmpdirs: /tmp (tmpfs) accumulated 166,923 test-fixture dirs / 6.3 GB
- * over 9 days because R1 (per-run-unique mkdtemp) had no counterpart requiring deletion.
+ * R6 mkdtemp-no-cleanup: a file that mkdtemp()s at a CODE position leaks a tmpdir per run when the
+ * created directory is not removed. gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call:
+ * /tmp (tmpfs) accumulated 20k+ entries / 3.9 GB; the two biggest producers were a file judged
+ * "clean" by the old file-level existence rule (gate-diagnostics, 7 mkdtemp / 2 unrelated cleanup
+ * constructs) and the two baselined no-cleanup leakers (driver/gate).
+ *
+ * The old rule was FILE-LEVEL EXISTENCE: any cleanup construct anywhere in the file (rm/rmSync/
+ * t.after/after/finally) cleared the WHOLE file — a 7-build/2-clean file was indistinguishable from
+ * a 7-build/7-clean file. The rule now detects PARTIAL cleanup: every variable-assigned mkdtemp
+ * result must be COVERED by a cleanup path:
+ *   - its variable is referenced inside a cleanup construct (rm/rmSync/unlinkSync call region,
+ *     after/afterEach hook region, finally block body), or
+ *   - its variable is pushed into a carrier array that is referenced inside a cleanup construct
+ *     (document-store/adr-store's `_createdDirs` + `after(() => for ... rmSync)` pattern), or
+ *   - it is RETURNED from a helper function and at least one call site captures the return value
+ *     into a variable that is cleaned (makeFakeGhBin → `const fakeBinDir = ...` → `rmSync(fakeBinDir)`
+ *     is NOT a leak; makeWorkspace with no caller cleanup IS).
+ * The FIRST uncovered mkdtemp result is the per-file report.
+ *
+ * Two leniencies keep the rule low-false-positive (the original design intent, not abandoned):
+ *   - a file with NO cleanup construct at all still reports (the old "no-cleanup" shape — it0-gates,
+ *     gate, driver), so the shrink-only ratchet's existing entries stay meaningful.
+ *   - an INLINE mkdtemp (no assigned variable, e.g. `return fs.mkdtempSync(...)`) is only tracked
+ *     when it is the direct value of a `return` and no call site captures+cleans it; a non-returned
+ *     inline mkdtemp cannot be associated with a cleanup statically and is skipped (lenient).
+ *
  * AC6 EXEMPTION: /tmp/claude-* (session data) and /tmp/quay-wt-* (in-use worktrees) prefixes are
  * NEVER matched — when EVERY mkdtemp prefix in the file is one of those, the file is exempt.
- * Per-file granularity (one report per file per rule, like R4): the sharpest low-false-positive
- * static signal for "has mkdtemp but no corresponding rm/rmSync/after".
+ * Per-file granularity (one report per file per rule, like R4).
  */
 export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
   const mask = buildNonCodeMask(src);
   const mkdtempRe = /\bmkdtemp(?:Sync)?\s*\(/g;
-  // Any CODE-position mkdtemp call at all?
-  let firstIdx = -1;
+  const mkdtempCalls: { index: number; varName: string | null }[] = [];
   for (const m of src.matchAll(mkdtempRe)) {
     if (mask[m.index] !== 0) continue;
-    if (firstIdx === -1) firstIdx = m.index;
+    mkdtempCalls.push({ index: m.index, varName: mkdtempResultVar(src, mask, m.index) });
   }
-  if (firstIdx === -1) return [];
+  if (mkdtempCalls.length === 0) return [];
+
   // AC6: collect the first string-literal prefix arg of every mkdtemp call.
-  const prefixes: string[] = [];
-  for (const m of src.matchAll(mkdtempRe)) {
-    if (mask[m.index] !== 0) continue;
-    const openIdx = m.index + m[0].length - 1;
-    const region = callRegion(src, mask, openIdx);
-    const args = codeStrings(src, mask, openIdx, openIdx + region.length);
-    prefixes.push(args[0] ?? "");
-  }
+  const prefixes = mkdtempCalls.map((c) => mkdtempPrefix(src, mask, c.index));
   // When EVERY mkdtemp prefix is a session-data / in-use-worktree prefix, exempt the whole file.
   const exemptPrefix = /^(?:claude|quay-wt)-/;
   if (prefixes.length > 0 && prefixes.every((p) => exemptPrefix.test(p))) return [];
-  // Any CODE-position cleanup construct anywhere in the file → not a leak.
-  const cleanupRe = /\b(?:rmSync|rm)\s*\(|\b(?:t\.)?after\s*\(|\bfinally\s*\{/g;
-  for (const m of src.matchAll(cleanupRe)) {
-    if (mask[m.index] !== 0) continue;
-    return [];
+
+  // Cleanup constructs: rm/rmSync/unlinkSync calls, after/afterEach hooks, finally blocks.
+  const regions = cleanupRegions(src, mask);
+  if (regions.length === 0) {
+    // No cleanup construct at all — the original no-cleanup leak shape.
+    return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, mkdtempCalls[0].index), snippet: snippetAt(src, mkdtempCalls[0].index) }];
   }
-  return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, firstIdx), snippet: snippetAt(src, firstIdx) }];
+
+  const defs = functionDefs(src, mask);
+  const rets = returnsReferencingMkdtemp(src, mask, defs);
+
+  for (const c of mkdtempCalls) {
+    if (!c.varName) {
+      // Inline mkdtemp (no assigned variable). Only tracked when it is the direct value of a
+      // `return` and no call site captures+cleans the helper's return — otherwise lenient-skip.
+      const fname = nearestFuncName(defs, c.index);
+      if (fname && rets.inline.has(fname)) {
+        if (callerCleansReturn(src, mask, fname, (v) => isCoveredVar(src, mask, v, regions))) continue;
+        return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, c.index), snippet: snippetAt(src, c.index) }];
+      }
+      continue;
+    }
+    if (isCoveredVar(src, mask, c.varName, regions)) continue;
+    const rec = rets.byVar.get(c.varName);
+    if (rec && rec.funcName && callerCleansReturn(src, mask, rec.funcName, (v) => isCoveredVar(src, mask, v, regions))) continue;
+    return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, c.index), snippet: snippetAt(src, c.index) }];
+  }
+  return [];
+}
+
+/** First string-literal argument of a mkdtemp/mkdtempSync call (the /tmp prefix). The call is
+ * usually `fs.mkdtempSync(path.join(os.tmpdir(), "prefix-"))`, so the prefix is the first string
+ * literal anywhere in the argument region. */
+function mkdtempPrefix(src: string, mask: Uint8Array, callIdx: number): string {
+  const openIdx = src.indexOf("(", callIdx);
+  const region = callRegion(src, mask, openIdx);
+  const args = codeStrings(src, mask, openIdx, openIdx + region.length);
+  return args[0] ?? "";
+}
+
+/**
+ * The variable a mkdtemp result is assigned to, or null for an inline call
+ * (`return fs.mkdtempSync(...)`, `path.join(fs.mkdtempSync(...), "x")`).
+ * Handles `const X = mkdtempSync(...)`, `X = mkdtempSync(...)`, and the module-level
+ * `workspaceRoot = fs.mkdtempSync(...)` form (bare assignment in a `let` decl).
+ */
+function mkdtempResultVar(src: string, mask: Uint8Array, callIdx: number): string | null {
+  const lineStart = src.lastIndexOf("\n", callIdx) + 1;
+  const before = src.slice(lineStart, callIdx);
+  let eq = -1;
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (mask[lineStart + i] !== 0) continue;
+    if (before[i] === "=") { eq = i; break; }
+  }
+  if (eq === -1) return null;
+  const lhs = before.slice(0, eq).trim();
+  const m = lhs.match(/(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*$/);
+  if (m) return m[1];
+  const m2 = lhs.match(/([A-Za-z_$][A-Za-z0-9_$]*)\s*$/);
+  return m2 ? m2[1] : null;
+}
+
+/** All cleanup-construct regions: rm/rmSync/unlinkSync calls, after/afterEach hooks, finally blocks. */
+function cleanupRegions(src: string, mask: Uint8Array): { start: number; end: number }[] {
+  const regions: { start: number; end: number }[] = [];
+  const rmRe = /\b(?:rmSync|rm|unlinkSync)\s*\(/g;
+  for (const m of src.matchAll(rmRe)) {
+    if (mask[m.index] !== 0) continue;
+    const openIdx = m.index + m[0].indexOf("(");
+    const region = callRegion(src, mask, openIdx);
+    regions.push({ start: openIdx, end: openIdx + region.length });
+  }
+  const afterRe = /\b(?:t\.)?(?:after|afterEach)\s*\(/g;
+  for (const m of src.matchAll(afterRe)) {
+    if (mask[m.index] !== 0) continue;
+    const openIdx = m.index + m[0].indexOf("(");
+    const region = callRegion(src, mask, openIdx);
+    regions.push({ start: openIdx, end: openIdx + region.length });
+  }
+  const finRe = /\bfinally\s*\{/g;
+  for (const m of src.matchAll(finRe)) {
+    if (mask[m.index] !== 0) continue;
+    let depth = 0;
+    let i = m.index + m[0].length - 1; // the `{`
+    for (; i < src.length; i++) {
+      if (mask[i] !== 0) continue;
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") { depth--; if (depth === 0) break; }
+    }
+    regions.push({ start: m.index, end: i + 1 });
+  }
+  return regions;
+}
+
+/** True when a variable appears at a CODE position inside one of the cleanup regions, or is pushed
+ * into a carrier array that does. (the document-store `_createdDirs.push(dir)` + after-loop shape) */
+function isCoveredVar(src: string, mask: Uint8Array, name: string, regions: { start: number; end: number }[]): boolean {
+  for (const r of regions) if (varInRegion(src, mask, name, r)) return true;
+  const arrs = arraysReceivingVar(src, mask, name);
+  for (const a of arrs) for (const r of regions) if (varInRegion(src, mask, a, r)) return true;
+  return false;
+}
+
+function varInRegion(src: string, mask: Uint8Array, name: string, region: { start: number; end: number }): boolean {
+  const re = new RegExp(`\\b${name}\\b`, "g");
+  for (const m of src.slice(region.start, region.end).matchAll(re)) {
+    const abs = region.start + m.index;
+    if (mask[abs] === 0) return true;
+  }
+  return false;
+}
+
+/** Array names whose `.push(<name>)` appears at a CODE position. */
+function arraysReceivingVar(src: string, mask: Uint8Array, name: string): Set<string> {
+  const arrs = new Set<string>();
+  const pushRe = new RegExp(`([A-Za-z_$][A-Za-z0-9_$]*)\\.push\\s*\\(\\s*${name}\\s*\\)`, "g");
+  for (const m of src.matchAll(pushRe)) {
+    if (mask[m.index] !== 0) continue;
+    arrs.add(m[1]);
+  }
+  return arrs;
+}
+
+/** Function-definition signatures: {name, index, matchLen} for `function NAME(`, `NAME = function`,
+ * `NAME = (...) =>`, and bare `NAME = ... =>` assignments. Used only to associate a mkdtemp/return
+ * with its nearest enclosing function name (backward scan), never to parse bodies. */
+function functionDefs(src: string, mask: Uint8Array): { name: string; index: number; matchLen: number }[] {
+  const defs: { name: string; index: number; matchLen: number }[] = [];
+  const patterns = [
+    /\b(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
+    /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?function\s*\(/g,
+    /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g,
+    /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/g,
+  ];
+  for (const re of patterns) {
+    for (const m of src.matchAll(re)) {
+      if (mask[m.index] !== 0) continue;
+      defs.push({ name: m[1], index: m.index, matchLen: m[0].length });
+    }
+  }
+  return defs.sort((a, b) => a.index - b.index);
+}
+
+/** Nearest function definition whose signature starts before `idx`; null when none. */
+function nearestFuncName(defs: { name: string; index: number }[], idx: number): string | null {
+  let best: string | null = null;
+  for (const d of defs) {
+    if (d.index < idx) best = d.name;
+    else break;
+  }
+  return best;
+}
+
+interface ReturnRecord { returned: boolean; funcName: string | null; }
+
+/** Map mkdtemp result variables to whether they are returned (and from which function), plus the set
+ * of function names that `return` an INLINE mkdtemp. */
+function returnsReferencingMkdtemp(
+  src: string, mask: Uint8Array, defs: { name: string; index: number }[]
+): { byVar: Map<string, ReturnRecord>; inline: Set<string> } {
+  const byVar = new Map<string, ReturnRecord>();
+  const inline = new Set<string>();
+  const retRe = /\breturn\s+([^\n;]+)/g;
+  for (const m of src.matchAll(retRe)) {
+    if (mask[m.index] !== 0) continue;
+    const expr = m[1].trim();
+    const fname = nearestFuncName(defs, m.index);
+    if (/mkdtemp/.test(expr)) {
+      if (fname) inline.add(fname);
+      continue;
+    }
+    const varM = expr.match(/^([A-Za-z_$][A-Za-z0-9_$]*)$/);
+    if (varM) {
+      if (!byVar.has(varM[1])) byVar.set(varM[1], { returned: false, funcName: null });
+      const rec = byVar.get(varM[1])!;
+      rec.returned = true;
+      if (fname) rec.funcName = fname;
+    }
+  }
+  return { byVar, inline };
+}
+
+/** True when at least one call site of `funcName` captures the return value into a variable that is
+ * covered (cleaned). A helper whose returned mkdtemp is captured-and-cleaned by a caller (the
+ * makeFakeGhBin → fakeBinDir → rmSync shape) is NOT a leak. */
+function callerCleansReturn(
+  src: string, mask: Uint8Array, funcName: string, isCovered: (v: string) => boolean
+): boolean {
+  const re = new RegExp(`\\b${funcName}\\s*\\(`, "g");
+  const def = functionDefs(src, mask).find((d) => d.name === funcName);
+  for (const m of src.matchAll(re)) {
+    if (mask[m.index] !== 0) continue;
+    if (def && m.index >= def.index && m.index < def.index + def.matchLen) continue; // the definition itself
+    const lineStart = src.lastIndexOf("\n", m.index) + 1;
+    const before = src.slice(lineStart, m.index);
+    // destructuring capture: `const { workspaceRoot, tasksDir } = makeWorkspace(`
+    const destr = before.match(
+      /(?:const|let|var)\s*\{\s*([A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*)?(?:\s*,\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*)?)*)\s*\}\s*=\s*$/
+    );
+    if (destr) {
+      const caps = destr[1].split(",").map((s) => s.trim().split(":")[0].trim());
+      if (caps.some((v) => isCovered(v))) return true;
+      continue;
+    }
+    // direct capture: `const fakeBinDir = makeFakeGhBin(`, `fakeBinDir = ...`, `fakeBinDir ??= ...`
+    const stripped = before.replace(/\s*[A-Za-z_$][A-Za-z0-9_$]*\s*$/, "");
+    const direct = stripped.match(/(?:const|let|var)?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\?\?=|\|\|=|=)\s*$/);
+    if (direct && !/\b(?:return|if|else|while|for|throw)\b/.test(before)) {
+      if (isCovered(direct[1])) return true;
+    }
+  }
+  return false;
 }
 
 /** Run all six detectors over one file. */
@@ -722,7 +941,23 @@ export function runSelftest(): boolean {
   const cleanedRm = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\nfs.rmSync(dir, { recursive: true, force: true });\n';
   check("R6 GREEN: rmSync cleanup does NOT report", detectMkdtempNoCleanup(cleanedRm, "x.test.mjs").length === 0);
   const cleanedFinally = '// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally {}\n';
-  check("R6 GREEN: try/finally does NOT report", detectMkdtempNoCleanup(cleanedFinally, "x.test.mjs").length === 0);
+  check("R6 RED: an EMPTY finally (no rmSync of the mkdtemp dir) is a leak — reports", detectMkdtempNoCleanup(cleanedFinally, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
+  const finallyRm = '// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally { fs.rmSync(dir, { recursive: true, force: true }); }\n';
+  check("R6 GREEN: try/finally that rmSyncs the mkdtemp dir does NOT report", detectMkdtempNoCleanup(finallyRm, "x.test.mjs").length === 0);
+  // AC5 positive control: 3 mkdtemp, only 1 cleaned → PARTIAL cleanup reports.
+  const partialClean = '// @test-group product\nconst a = fs.mkdtempSync(path.join(os.tmpdir(), "adr-a-"));\nconst b = fs.mkdtempSync(path.join(os.tmpdir(), "adr-b-"));\nconst c = fs.mkdtempSync(path.join(os.tmpdir(), "adr-c-"));\nt.after(() => fs.rmSync(a, { recursive: true, force: true }));\n';
+  check("R6 RED: 3 mkdtemp / 1 cleaned reports (partial cleanup)", detectMkdtempNoCleanup(partialClean, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
+  const allClean = '// @test-group product\nconst a = fs.mkdtempSync(path.join(os.tmpdir(), "adr-a-"));\nconst b = fs.mkdtempSync(path.join(os.tmpdir(), "adr-b-"));\nconst c = fs.mkdtempSync(path.join(os.tmpdir(), "adr-c-"));\nt.after(() => { fs.rmSync(a, { recursive: true, force: true }); fs.rmSync(b, { recursive: true, force: true }); fs.rmSync(c, { recursive: true, force: true }); });\n';
+  check("R6 GREEN: 3 mkdtemp / 3 cleaned does NOT report", detectMkdtempNoCleanup(allClean, "x.test.mjs").length === 0);
+  // carrier-array pattern (document-store): every mkdtemp pushed to _createdDirs, after() removes all.
+  const carrierArray = '// @test-group product\nconst _createdDirs = [];\nconst a = fs.mkdtempSync(path.join(os.tmpdir(), "adr-a-")); _createdDirs.push(a);\nconst b = fs.mkdtempSync(path.join(os.tmpdir(), "adr-b-")); _createdDirs.push(b);\nafter(() => { for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true }); });\n';
+  check("R6 GREEN: _createdDirs.push + after-loop removes all — does NOT report", detectMkdtempNoCleanup(carrierArray, "x.test.mjs").length === 0);
+  // helper-return covered by caller cleanup: makeFakeGhBin → const fakeBinDir → rmSync(fakeBinDir)
+  const callerCleaned = '// @test-group product\nfunction makeFakeGhBin() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gh-fake-")); return dir; }\nconst fakeBinDir = makeFakeGhBin();\nt.after(() => fs.rmSync(fakeBinDir, { recursive: true, force: true }));\n';
+  check("R6 GREEN: helper-return captured into a cleaned var does NOT report", detectMkdtempNoCleanup(callerCleaned, "x.test.mjs").length === 0);
+  // helper-return NOT cleaned by any caller → report (the gate-diagnostics shape).
+  const callerLeaks = '// @test-group product\nfunction makeWs() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gw-leak-")); return dir; }\nconst ws = makeWs();\n';
+  check("R6 RED: helper-return never cleaned reports", detectMkdtempNoCleanup(callerLeaks, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
   const claudePrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-abc123"));\n';
   check("R6 GREEN: /tmp/claude-* prefix NEVER reports (AC6)", detectMkdtempNoCleanup(claudePrefix, "x.test.mjs").length === 0);
   const quayWtPrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n';

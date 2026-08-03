@@ -32,6 +32,7 @@ import {
   runRetreat,
 } from "../src/gate/lifecycle.ts";
 import { queryGateEvents } from "../src/gate/gate-event-store.ts";
+import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -62,7 +63,7 @@ function stubClient(task) {
 }
 
 function tmpLog(tag) {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng3-${tag}-`)), "gate-events.jsonl");
+  return path.join(makeTmpDir(`quay-qeng3-${tag}-`), "gate-events.jsonl");
 }
 
 // process.exitCode is a shared global; each run* fn sets it. Reset around each
@@ -389,24 +390,7 @@ test("A4 [AC6]: runRetreat ready→todo still works (no regression on existing r
 // ===========================================================================
 
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng3-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng3-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-qeng3-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runQuay(args, cwd) {

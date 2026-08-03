@@ -24,6 +24,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { resolveGate, listGates } from "../src/gate/registry.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { createAdrStore } from "../src/adr-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,7 @@ const LOADBEARING_GATE_SCRIPT = path.join(
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
 function tmpDir(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-e3-${tag}-`));
+  return makeTmpDir(`quay-e3-${tag}-`);
 }
 
 function runQuay(args, cwd, extraEnv = {}) {
@@ -72,8 +73,8 @@ function runNative(args, tasksDir, extraEnv = {}) {
 // sibling would be silently ignored (branch A never falls through once config.yml
 // exists), not a real branch-B fixture.
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-e3-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-e3-${tag}-ws-`));
+  const tasksDir = makeTmpDir(`quay-e3-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-e3-${tag}-ws-`);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),
@@ -260,7 +261,7 @@ test("E3 A1/A3: 'quay gate <task> --gate adr-001' end-to-end PASSes against the 
   const fixtureId = "T-ADR001-e2e-fixture";
   const realTasksDir = path.join(REPO_ROOT, "tasks");
   const fixturePath = path.join(realTasksDir, `${fixtureId}.md`);
-  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-e3-cli-adr001-log-"));
+  const logDir = makeTmpDir("quay-e3-cli-adr001-log-");
   const logFile = path.join(logDir, "gate-events.jsonl");
   writeTaskFixture(realTasksDir, fixtureId);
   try {

@@ -26,6 +26,7 @@ import os from "node:os";
 
 import { runAcceptance } from "../src/gate/acceptance-runner.ts";
 import { loadWorkspaceGates } from "../src/gate/registry.ts";
+import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -34,24 +35,7 @@ const nativeProviderDir = path.dirname(nativeBin);
 
 // mirrors gate.test.mjs makeWorkspace()
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-dir046-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-dir046-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-dir046-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runQuay(args, cwd, env) {
@@ -85,7 +69,7 @@ const validSections =
 test("A [RED->GREEN]: `quay gate --cwd <dir>` runs the acceptance command IN <dir>, not workspaceRoot", () => {
   const { workspaceRoot, tasksDir } = makeWorkspace("cwd-flag");
   // A distinct "worktree" directory, deliberately NOT workspaceRoot.
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dir046-cwd-flag-worktree-"));
+  const worktree = makeTmpDir("quay-dir046-cwd-flag-worktree-");
   const logFile = path.join(workspaceRoot, "g.jsonl");
 
   runNative(["task", "create", "CWD-T1", "--title", "cwd override fixture",
@@ -108,7 +92,7 @@ test("A [RED->GREEN]: `quay gate --cwd <dir>` runs the acceptance command IN <di
 
 test("A: a pre-set QUAY_ACCEPTANCE_CWD env var is honored, not clobbered by the workspaceRoot pin", () => {
   const { workspaceRoot, tasksDir } = makeWorkspace("cwd-env");
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dir046-cwd-env-worktree-"));
+  const worktree = makeTmpDir("quay-dir046-cwd-env-worktree-");
   const logFile = path.join(workspaceRoot, "g.jsonl");
 
   runNative(["task", "create", "CWD-T2", "--title", "cwd env fixture",
@@ -140,7 +124,7 @@ test("A: no override given -> default behavior unchanged (runs in workspaceRoot)
 // ===========================================================================
 
 test("B [unit]: loadWorkspaceGates wires a testPass gate's own timeoutMs (slow-but-passing PASSes where default would time out)", async () => {
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dir046-timeoutms-"));
+  const workspaceRoot = makeTmpDir("quay-dir046-timeoutms-");
   fs.writeFileSync(
     path.join(workspaceRoot, "gates.yml.fixture"),
     "" // unused, just to keep the dir non-empty; loadWorkspaceGates reads .quay/gates.yml
@@ -164,7 +148,7 @@ test("B [unit]: loadWorkspaceGates wires a testPass gate's own timeoutMs (slow-b
 });
 
 test("B [RED]: without a per-gate timeoutMs, a slow command exceeds the (lower) default and times out", async () => {
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dir046-timeoutms-red-"));
+  const workspaceRoot = makeTmpDir("quay-dir046-timeoutms-red-");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "gates.yml"),
@@ -189,8 +173,8 @@ test("B [RED]: without a per-gate timeoutMs, a slow command exceeds the (lower) 
 });
 
 test("B: a per-gate cwd in gates.yml is honored by a testPass gate", async () => {
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dir046-gatecwd-"));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "quay-dir046-gatecwd-worktree-"));
+  const workspaceRoot = makeTmpDir("quay-dir046-gatecwd-");
+  const worktree = makeTmpDir("quay-dir046-gatecwd-worktree-");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "gates.yml"),

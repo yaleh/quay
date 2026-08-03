@@ -18,9 +18,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { readGatesConfig } from "../src/gate/config/loader.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 function tmpWs(tag) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `quay-gate-config-loader-${tag}-`));
+  const ws = makeTmpDir(`quay-gate-config-loader-${tag}-`);
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   return ws;
 }
