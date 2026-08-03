@@ -173,3 +173,46 @@ Claude Code 内部按别名派生的 **subagent** 走的是上面这三条映射
 要确认得看一次真实 subagent 调用落在哪个模型上。
 若要彻底走 flash，需把 `ANTHROPIC_DEFAULT_{SONNET,OPUS}_MODEL` 也指向 flash——
 但那会让「需要更强模型的 subagent」也降级，**是取舍不是纯优化**。
+
+
+## 模型分配（2026-08-03 第二次变更）
+
+| 角色 | 模型 | 启动器 |
+|---|---|---|
+| quay 管理者 + quay 外层 | **opus** | `claude`（不带任何 `ANTHROPIC_*`） |
+| quay 内层 | `deepseek-v4-flash` | `claude-deepseek` |
+| **archguard 内外层** | **`qwen3.8-max-preview`** | **`claude-aliyun`** |
+| **meta-cc 内外层（冷启动时）** | **`qwen3.8-max-preview`** | **`claude-aliyun`** |
+
+**人 2026-08-03 裁定**：改用阿里云是因为**现在是优惠时段**；该模型**可能慢些**，这是已知取舍。
+
+```bash
+CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 \
+CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000 \
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 \
+CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 \
+CLAUDE_CODE_DISABLE_MOUSE=1 \
+claude-aliyun --model qwen3.8-max-preview --permission-mode bypassPermissions
+```
+
+### 换之前实测过（不要跳过这一步）
+
+**先探端点再杀会话**——否则杀完发现模型不存在，就白丢一个正在干活的会话：
+
+```
+POST https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages
+{"model":"qwen3.8-max-preview","max_tokens":16,...}
+⇒ ✓ 返回 "ok"，model=qwen3.8-max-preview，53 输入 / 23 输出 token
+```
+
+### `claude-aliyun` 与 `claude-deepseek` 的差别
+
+`claude-aliyun` **不设任何 `ANTHROPIC_DEFAULT_*` 别名**——
+所以不存在「主会话用便宜模型、subagent 却落到贵模型」那个隐患
+（`claude-deepseek` 原本有，已于 2026-08-03 按人的指示删除三行）。
+
+### 一个命名教训
+
+交接文档原名 `handover-for-flash.md`——**绑死在模型名上，第二次换模型就过时了**。
+已改为 `handover-for-successor.md`。
+**给继任者的东西不要用当时那个继任者的名字命名。**
