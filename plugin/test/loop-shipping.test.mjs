@@ -218,3 +218,84 @@ test('AC7 — npm pack --dry-run (the Contract `packed` measure) excludes the fo
   const hits = files.filter((f) => FORBIDDEN_SUBSTRINGS.some((x) => f.includes(x)));
   assert.deepEqual(hits, [], `npm pack must not ship forbidden names (files list: ${files.join(', ')})`);
 });
+
+// ── gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it ─────────────────────────────────────
+// Pins the cold-start e2e's deliverability path so a future regression back to "cp of the working
+// tree", or a lost executor, fails loudly instead of silently re-introducing the two gaps:
+//
+//   AC2 — the --from-build path extracts the built plugin via `git archive` (never cp of the
+//         working tree); the FROM_BUILD branch must contain no `cp -r`.
+//   AC3 — the install-source completeness assertion covers the three build-required files,
+//         fail-named.
+//   AC8 — the exit path cleans up the temp orphan branch publish-dist-branch.sh creates.
+//   AC9 — a real executor is registered in ci.yml (a cold-start-e2e job) — prose alone would
+//         re-create "a rule nobody runs".
+//   AC10 — neither the e2e source nor ci.yml ever passes --push to publish-dist-branch.sh.
+const COLD_START_E2E = path.join(repoRoot, 'test', 'cold-start-e2e.sh');
+const CI_YML = path.join(repoRoot, '.github', 'workflows', 'ci.yml');
+
+test('AC2 — cold-start-e2e.sh --from-build extracts via git archive, never a cp of the working tree', () => {
+  const src = fs.readFileSync(COLD_START_E2E, 'utf8');
+  assert.match(src, /git archive/,
+    'cold-start-e2e.sh must extract the built plugin via `git archive` (AC2 deliverability path)');
+  const lines = src.split('\n');
+  const fbIdx = lines.findIndex((l) => l.includes('FROM_BUILD') && l.trim().startsWith('if ['));
+  assert.ok(fbIdx >= 0, 'cold-start-e2e.sh must branch on FROM_BUILD');
+  const body = [];
+  for (let i = fbIdx + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === 'else' || t === 'fi') break;
+    body.push(lines[i]);
+  }
+  assert.ok(body.length > 0, 'the FROM_BUILD branch must not be empty');
+  assert.ok(body.some((l) => /git archive/.test(l)),
+    'the --from-build branch must contain the `git archive` extraction');
+  assert.ok(!body.some((l) => /\bcp -r\b/.test(l)),
+    'the --from-build branch must NOT cp -r the working tree to the install source (use git archive)');
+});
+
+test('AC3 — cold-start-e2e.sh asserts the three build-required files, fail-named', () => {
+  const src = fs.readFileSync(COLD_START_E2E, 'utf8');
+  for (const f of ['scripts/quay-init.sh', 'scripts/inner-state.sh', 'loop/orchestrator-loop-tick.md']) {
+    assert.ok(src.includes(f), `cold-start-e2e.sh must assert the presence of ${f} (AC3)`);
+  }
+  // The completeness assertion must fail naming the missing file (not a bare "something failed").
+  assert.match(src, /fail "missing file: \$1"/,
+    'the AC3 completeness assertion must fail naming the file');
+});
+
+test('AC8 — cold-start-e2e.sh cleans up the temp orphan branch on exit (no residue accumulation)', () => {
+  const src = fs.readFileSync(COLD_START_E2E, 'utf8');
+  assert.match(src, /E2E_BRANCH=/, 'the script must track the temp orphan branch name (AC8)');
+  assert.match(src, /branch -D/, 'the exit path must delete the temp orphan branch (AC8)');
+  assert.match(src, /trap cleanup EXIT/, 'the cleanup must be wired to the EXIT trap');
+});
+
+test('AC9 — the cold-start e2e has a real executor registered in ci.yml, not prose', () => {
+  const ci = fs.readFileSync(CI_YML, 'utf8');
+  assert.match(ci, /cold-start-e2e/, 'ci.yml must register a cold-start-e2e executor job (AC9/DoD)');
+  assert.match(ci, /test\/cold-start-e2e\.sh/, 'the executor job must actually run the e2e script');
+  // milestone-cadence, not per-push: the job must be gated to workflow_dispatch, so it does not
+  // add a multi-minute build + a >=90s sleep to every push/PR.
+  assert.match(ci, /workflow_dispatch/, 'ci.yml must allow workflow_dispatch (milestone-cadence trigger)');
+  assert.match(ci, /github\.event_name == 'workflow_dispatch'/, 'the cold-start-e2e job must be gated to workflow_dispatch');
+});
+
+test('AC10 — no publish-dist-branch.sh --push call in the e2e source or ci.yml', () => {
+  // Only flag ACTUAL invocations (`bash .../publish-dist-branch.sh ...`) — documentation text like
+  // "(NO --push)" describes the prohibition and must not trip the negative control.
+  const e2eLines = fs.readFileSync(COLD_START_E2E, 'utf8').split('\n');
+  const e2eInvocations = e2eLines.filter((l) => /\bbash\b[^\n]*publish-dist-branch\.sh/.test(l));
+  assert.ok(e2eInvocations.length >= 1, 'the --from-build path must invoke publish-dist-branch.sh');
+  for (const l of e2eInvocations) {
+    assert.ok(!/\s--push\b/.test(l),
+      `cold-start-e2e.sh must never invoke publish-dist-branch.sh with --push: ${l.trim()}`);
+  }
+  const ciLines = fs.readFileSync(CI_YML, 'utf8').split('\n');
+  for (const l of ciLines) {
+    if (/\bbash\b[^\n]*publish-dist-branch\.sh/.test(l)) {
+      assert.ok(!/\s--push\b/.test(l),
+        `ci.yml must never invoke publish-dist-branch.sh with --push: ${l.trim()}`);
+    }
+  }
+});
