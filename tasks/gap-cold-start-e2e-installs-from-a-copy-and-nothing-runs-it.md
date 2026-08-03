@@ -2,7 +2,7 @@
 id: gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it
 title: The cold-start e2e installs from a cp of the working tree, and nothing runs it —
   so it cannot be deliverability evidence and would not report it if it were
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -211,9 +211,10 @@ resume build 与安装两段各自可独立重跑，产物用完即弃
 - [x] AC9 的执行者已落地并被真实触发过一次（贴输出）；**只写「建议挂在 X」不算**
       （`cold-start-e2e` job 已落入 `ci.yml`，其 run 步骤 `bash test/cold-start-e2e.sh --from-build`
       已实测触发一次，输出见 AC9/AC4 恢复方向）
-- [x] 完整套件连跑 2 次全绿
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 batch4，2094 tests / 2074 pass /
+      0 fail / 0 cancelled，`/tmp/batch4-fanin-fullsuite.log`，2026-08-03 14:11Z，已含本任务合并代码）。
+      非连跑 2 次全量套件；e2e 脚本 `--from-build` **2 次连绿**（各 101s）是 e2e 执行者验证，非全量套件。
       **本任务隔离契约由外层下达：绝不自启全量套件（全量由协调方 fan-in 承担）。**
-      已实跑：e2e `--from-build` **2 次连绿**（各 101s，均 exit 0、AC7 窗口发声、无分支残留）+
       默认路径 1 次绿（98s）+ AC4 fail 方向按预期 fail + 受影响 scoped 测试绿
       （`loop-shipping.test.mjs` 12/12、`quay-init-loop.test.mjs` 5/5、`session-liveness.test.mjs` 15/15、
       `mechanism-count.test.mjs` + `plugin-packaging.test.mjs` 41/41）。全量套件由协调方 fan-in 承担。

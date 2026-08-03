@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T13:28:21.471Z",
+  "generatedAt": "2026-08-03T14:25:11.087Z",
   "since": null,
   "tasks": [
     {
@@ -20,6 +20,11 @@
     {
       "taskId": "gap-ac11-spawns-the-runner-inside-the-runner",
       "minutes": 61.879616666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it",
+      "minutes": 54.22391666666667,
       "outcome": "done"
     },
     {
@@ -80,6 +85,11 @@
     {
       "taskId": "gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right",
       "minutes": 92.95223333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-r1-cannot-see-tests-writing-into-the-live-task-store",
+      "minutes": 54.223533333333336,
       "outcome": "done"
     },
     {
@@ -215,13 +225,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 56.90663214285715,
-  "medianMinutes": 56.32075833333333,
-  "tasksPerHour": 1.556909826841045,
-  "serialEquivalentPerHour": 1.0543586527731483,
+  "meanMinutes": 56.78468181818182,
+  "medianMinutes": 56.2526,
+  "tasksPerHour": 1.5757264904890382,
+  "serialEquivalentPerHour": 1.0566229849119042,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T13:28:21.451Z",
-  "windowHours": 26.976514166666668,
+  "windowEnd": "2026-08-03T14:25:11.060Z",
+  "windowHours": 27.923627777777778,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],

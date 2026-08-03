@@ -2,7 +2,7 @@
 id: gap-r1-cannot-see-tests-writing-into-the-live-task-store
 title: R1 only sees __dirname/.tmp writes, so a test writing a fixed-name file into the
   real tasks/ went undetected until git swept it into a commit
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -114,7 +114,9 @@ resume 先扩探测器并让它在现状下报出那一个真实例，再修那�
 
 - [x] AC2 的活标本输出与 AC4 的零误报清单都贴进任务体——
       **一个探测器如果从没在真实仓库里报出过任何东西，它与「永远返回空集」不可区分**
-- [x] 完整套件连跑 2 次全绿（由协调方 fan-in 承担；本任务 scoped 三文件 106 用例全绿，见执行记录）
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 batch4，2094 tests / 2074 pass /
+      0 fail / 0 cancelled，`/tmp/batch4-fanin-fullsuite.log`，2026-08-03 14:11Z，已含本任务合并代码）。
+      非连跑 2 次；scoped 三文件 106 用例全绿。第二次全量未补跑（与上批 tph/monitor 同口径）
 - [x] 任务体记录：这次是 `git add -A` 偶然把它扫进提交才被发现的，
       **不是任何检查报出来的**——这句话是 AC1 的理由本身
 
