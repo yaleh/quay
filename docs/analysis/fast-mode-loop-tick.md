@@ -8,8 +8,17 @@
 **调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
 
 ```
-/loop 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令
+/loop 25m 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令
 ```
+
+**可查验性（2026-08-03，外层查清）**：`/loop` 有两种模式，底层机制不同。
+- **带间隔**（`/loop 25m <prompt>`）走 **CronCreate**，可用 `CronList` 列出（返回
+  `2312da21 — Every 25 minutes (recurring) [session-only]`）——**可查验**。
+- **不带间隔**（`/loop <prompt>`）是动态模式，走 **ScheduleWakeup**，**没有任何列出工具**——
+  即使启动了也没有可观测指示，无人值守场景无法确认它是否真的在排。
+- **规则**：无人值守场景选**可查验的固定间隔**形式（25 分钟落在本文件第 6 步的 1200–1800 秒区间）。
+  这也对阶段 2 产品化有意义——「动态排程连是否存在都无法查询」是「排程不能靠会话内 cron」之外的
+  第二个产品化缺口。
 
 ---
 
