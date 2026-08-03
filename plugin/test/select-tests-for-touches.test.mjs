@@ -67,9 +67,19 @@ async function importMod() {
 // it refuses to run files ("run() is being called recursively… skipping running files") as a
 // recursion guard. test.sh's inner node --test must NOT inherit it, or the AC10/AC11 end-to-end
 // assertions silently no-op. Deleting (not emptying) the var defeats the guard.
+//
+// gap-ac11-spawns-the-runner-inside-the-runner: this spawn runs INSIDE an outer test.sh that
+// already built the dist bundle at its start. Without the skip, the inner run pays the FULL runner
+// cost again (2 esbuilds + vendor mirror + 2 static scans), making its 60s budget a hostage of the
+// outer suite's CPU load — isolation-green, suite-red (run 1 pass / run 2 fail, 2026-08-02). We
+// set QUAY_TEST_SKIP_DIST_BUILD so test.sh skips the redundant rebuild. Safe for every caller:
+// AC10/AC11-smoke pin --test-name-pattern to pure-selector or 0-match tests, and the 2 REGRESSION
+// spawns exit in the --for-task branch before build_dist_once — none consume the dist bundle, so a
+// fresh bundle is never required (skipping cannot test stale code; these runs never read dist).
 function spawnTestSh(args) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  env.QUAY_TEST_SKIP_DIST_BUILD = "1";
   return spawnSync("bash", [TEST_SH, ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",

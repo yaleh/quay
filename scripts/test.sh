@@ -188,7 +188,26 @@ list_groups() {
 # back to the slow .ts path — or, worse, silently passing tests over old code — is
 # the failure mode AC5 exists to make impossible. Build failure is FATAL: never
 # run tests against a bundle whose freshness we cannot guarantee.
+#
+# NESTED-RUN ESCAPE HATCH (gap-ac11-spawns-the-runner-inside-the-runner): a test
+# that spawns scripts/test.sh INSIDE the suite (select-tests-for-touches AC10/AC11)
+# must not rebuild the dist bundle — a rebuild is pure redundant cost (2 esbuilds +
+# a vendor mirror) that makes the inner run's success depend on the outer's CPU load
+# (measured 2026-08-03: 3.7s isolated → 9-16s under an 8-way suite + sibling batches).
+# QUAY_TEST_SKIP_DIST_BUILD=1 is set ONLY by nested invocations whose tests never
+# consume the bundle (0-match or pure-selector runs); skipping can never test stale
+# code because those runs never read dist at all, and the freshness gate (cli-entry.mjs
+# mtime check / sync-vendor --check) still guards every real bundle consumer. A
+# standalone test.sh that sets this is explicitly vouching for bundle freshness, so it
+# skips the gate (never set it in CI or the outer loop). NOTE: runner-grouping.test.mjs
+# deliberately does NOT set it — its nested runs have 120s/300s budgets, run --group
+# subsets, and keep a second live in-suite exercise of this build; that is a documented,
+# lower-severity instance of the same structural exposure, not a regression.
 build_dist_once() {
+  if [ "${QUAY_TEST_SKIP_DIST_BUILD:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_DIST_BUILD=1 — skipping dist rebuild (outer runner built it)"
+    return 0
+  fi
   # Core bundle first (the critical path — cli.test.mjs routes through QUAY_CLI).
   echo "== build dist/quay.js (packages/quay/scripts/build-dist.mjs) =="
   if ! node "${repo_root}/packages/quay/scripts/build-dist.mjs"; then
