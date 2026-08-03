@@ -60,11 +60,11 @@ const allPrefixes = [...new Set(allTasks.map((t) => {
 ## Contract
 
 ```
-measure  http_status = `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:<port>/` 输出的状态码
-measure  rendered_rows = `curl -s http://127.0.0.1:<port>/` 输出中 `href="/task/` 的去重计数
-band     http_status 必须是 200，即使存在畸形任务
+measure  http_status = `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4173/` 输出的 http_code 字段
+measure  rendered_rows = `curl -s http://127.0.0.1:4173/` 输出中 href="/task/ 匹配数字段（去重）
+band     ok_status = 200                                            # 即使存在畸形任务也必须是 200
 invariant 畸形任务数在改前后一致（fixture 里固定 1 个），否则计数不可比
-invoke   `node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port <port>`
+invoke   `node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173`
 control  移除畸形任务 fixture ⇒ 渲染行数应增加 1，证明它确实被跳过而非被静默吞掉
 resume   n/a: 单次请求，无中途产物
 ```
@@ -98,8 +98,12 @@ resume   n/a: 单次请求，无中途产物
 - [ ] AC5: provider 层对缺 `id` 的任务用文件名兜底并标 `extra.malformed`，CLI `task list --json` 可查
 - [ ] AC6: 检查 `handleTaskList` 之外**同文件其它 handler** 是否有同类无防御的字段访问，
       逐个列出并说明处置（这是「修一个函数不等于修一个类」的落实）
-- [ ] AC7: 任务体记录那 3 个缺 `id` 的文件**存在了多久**（git log 首次提交时刻），
-      作为 `task-schema-check` 非阻断警告无效的证据
+- [x] AC7: 那 3 个文件缺 `id` **已 8–9 天**（外层实测 git 首次提交时刻）：
+      `gap-handleTaskAction-null-crash` **2026-07-25 19:39**、
+      `gap-gate-event-store-concurrency` **2026-07-25 19:55**、
+      `gap-absorb-charter-audit-not-committed` **2026-07-26 11:57**。
+      期间 `task-schema-check.ts` 一直在，只发 **INFO 非阻断**警告 ⇒
+      **8 天无人处理。非阻断警告等于没有警告。**
 - [ ] AC8: 测试带 `// @test-group product` 声明——这是产品面（web UI）缺陷
 
 ## Definition of Done
