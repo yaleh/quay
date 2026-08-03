@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 00:55Z | `no-action` | `relation-sync` 收尾（48.8 分钟 `done`），套件最后一个已知失败的修复已落 master；两任务仍并发在飞 47 分钟 | `done 16` / `inProgress 2` / `orphaned 0`；`load1=4.43` | 核实修复实质在 master：`mkdtemp` 已用、失败路径改 `fs.writeSync(2,…)`+`process.exitCode`。**第六次同一坑（镜像形态）**：grep `process.exit(1)` 得 4 处命中，**全是注释**——内容正是「为什么它是错的、已改掉」。**修复的说明里必然写着缺陷的名字**，所以查「缺陷还在不在」和查「修复到位没有」，grep 关键词都会给反向答案。已补进步骤 0。**AC1 待验**：套件最后一次实测（00:03Z）为 fail 1（relation-sync），修复已合并但未复跑——两任务在飞期间不跑，避免争抢 |
 | 2026-08-03 00:44Z | `no-action` | **AC6 达成**（最后一个前置项），内层三任务并发正常推进，无需介入 | 三任务在飞 36/36/38 分钟（阈值 90）；`orphaned 0`；`load1=12.93` | **AC6 用实际输出核实而非采信提交说明**：从内层 transcript 取到 `CronList` 原文 `Every 25 minutes (recurring) [session-only]: 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令`。**幽灵记录归零且未复发**——内层按外层判据先修成因未清症状，验证后再清。`relation-sync` 修复已合并（`6dbb96bc`），其执行记录给出类的规模：**另有 7 个手写 harness 用危险的 `process.exit(1)`**（其余用安全的 `process.exitCode`），静默退出风险同款。**真实吞吐 0.86/hr**（窗口 7.00h / 6 个收尾），距目标 1.5 仍远 |
 | 2026-08-03 00:20Z | `correct` | Monitor 首次报 `ORPHAN`（今日 orphaned 一直为 0，AC9 要求无 orphaned）。查证为**在研工具自身污染生产遥测**，已要求合并前修 | 三任务并发中（12/12/14 分钟）；`done 15` / `inProgress 3` / `orphaned 1` | **幽灵记录的来源**：runId 前缀 `blk-` 来自 `/tmp/quay-wt-blocked/plugin/scripts/inner-blocked-signal.ts:293`，事件文件落在**真实** `.workflow-events/`（非 worktree），内容是演示数据（`blockedQuestion` 为今晚 M243 那个问题的回放）。**即：正在开发的「让阻塞可观测」的工具污染了用来观测它的遥测存储**。与「测试写进真实 `tasks/`」「M136 跨测试干扰」同族。要求：工具支持 `--root`、测试传临时 root（判据：跑完测试后真实事件目录不新增文件）；清掉幽灵记录并在任务体注明是测试产物 |
 | 2026-08-03 00:26Z | `correct` | 人确认关心的是「每墙钟小时完成的任务数」⇒ **`tasksPerHour` 的算法有误，不只是 AC 措辞**。已建代码修复任务并更正目标文件里的实测值 | 三 subagent 并行中 | **今日所有吞吐报告系统性高估**：真实（墙钟口径）全期 13/11.40h=**1.14**、无人值守窗口 6/6.69h=**0.90**（基线 2.1 的 **43%**），而代码全程报 1.33。**逐小时收尾 `2 1 0 1 0 1 1`**——第 3、5 小时为零，正是外层两次解阻塞的时段；这种空洞被「均耗时倒数」完全抹平，因为它不看时间轴。**额外发现**：`meanMinutes` 已在同一输出里，故 `60/均耗时` 不提供任何新信息，却占着一个承诺了吞吐含义的名字 |
@@ -71,10 +72,10 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 22 | 41% |
-| unblock | 10 | 19% |
+| no-action | 23 | 42% |
+| unblock | 10 | 18% |
 | correct | 19 | 35% |
-| escalate | 3 | 6% |
-| **合计** | **54** | — |
+| escalate | 3 | 5% |
+| **合计** | **55** | — |
 
 退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 35%。
