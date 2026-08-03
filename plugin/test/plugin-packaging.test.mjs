@@ -47,7 +47,7 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
-test('plugin.json is valid JSON and declares the 9 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology)', () => {
+test('plugin.json is valid JSON and declares the 10 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -62,6 +62,7 @@ test('plugin.json is valid JSON and declares the 9 bundled skills (M179/DIR-070-
     './skills/quay-directive/SKILL.md',
     './skills/loop-driver/SKILL.md',
     './skills/init/SKILL.md',
+    './skills/quay-task-operator/SKILL.md',
     './skills/quay-task-to-plan/SKILL.md',
     './skills/routines/SKILL.md',
     './skills/quay-native-methodology/SKILL.md',
@@ -70,6 +71,16 @@ test('plugin.json is valid JSON and declares the 9 bundled skills (M179/DIR-070-
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
   }
+  // The full commands[] must equal the on-disk skill directories (AC6 consistency — this was
+  // found by hand once; it must be pinned, not re-found).
+  const diskSkills = fs.readdirSync(path.join(pluginDir, 'skills'))
+    .filter((d) => fs.statSync(path.join(pluginDir, 'skills', d)).isDirectory())
+    .sort();
+  const listedSkills = manifest.commands
+    .filter((c) => c.startsWith('./skills/'))
+    .map((c) => c.replace(/^\.\/skills\//, '').replace(/\/SKILL\.md$/, ''))
+    .sort();
+  assert.deepEqual(listedSkills, diskSkills, `plugin.json commands[] must list exactly the on-disk skill directories. Missing: ${diskSkills.filter((d) => !listedSkills.includes(d))}. Extra: ${listedSkills.filter((d) => !diskSkills.includes(d))}`);
 });
 
 test('M143: plugin.json declares agents[] with baime-iteration-executor', () => {

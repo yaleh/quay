@@ -68,7 +68,7 @@ echo "<理由> | 解除条件: <条件> | 管理者 <ISO>" > <repo>/.halt   # �
 rm <repo>/.halt                                                  # 恢复
 ```
 
-跨项目重活（全量套件等）**已由 `scripts/heavy-op-token.sh` 串行化**——
+跨项目重活（全量套件等）**已由 `plugin/scripts/heavy-op-token.sh` 串行化**——
 那是事件驱动的，管理者**不需要轮询资源冲突**。这正是管理者 tick 可以比外层 tick 稀疏的原因。
 
 ## 2. 停下叫人的条件

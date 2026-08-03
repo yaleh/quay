@@ -16,7 +16,7 @@
 
 ## 你的驱动文档
 
-`orchestration/orchestrator-loop-tick.md`（472 行）。**先完整读再动手。**
+`plugin/loop/orchestrator-loop-tick.md`（472 行）。**先完整读再动手。**
 你的 tick 记进 `orchestration/tick-log.md`（**已有 94 行历史，接着写**）。
 管理者写的是另一份 `orchestration/manager-tick-log.md`，别混。
 
@@ -62,5 +62,5 @@
 
 ## 起你自己的循环
 
-读完驱动文档后，用 `/loop 20m 执行 orchestration/orchestrator-loop-tick.md 中的 tick 指令`
+读完驱动文档后，用 `/loop 20m 执行 plugin/loop/orchestrator-loop-tick.md 中的 tick 指令`
 起你自己的 20 分钟 tick。

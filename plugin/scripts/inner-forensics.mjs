@@ -35,7 +35,13 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 // 可注入：测试把 PROJ 指到临时目录（INNER_FORENSICS_PROJ 或 _setProj）。
-let PROJ = process.env.INNER_FORENSICS_PROJ || path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay");
+// 默认会话目录自定位（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）：本文件已迁入
+// plugin/scripts/（旧路径 orchestration/watch/ 已删，调用方全部改用本路径）。Claude Code 的会话
+// 目录名是把项目根的 / 换成 -（如 /home/yale/work/<project> 这类根 → -home-yale-work-<project>
+// 这类目录名）。从本文件位置推导根，不再硬编码任何绝对仓库路径 —— 经得起「quay 开发树改名」
+// 负控制，也随 quay-init --loop 铺到目标项目后直接可用。
+const _IF_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+let PROJ = process.env.INNER_FORENSICS_PROJ || path.join(os.homedir(), ".claude", "projects", _IF_ROOT.replace(/[\\/]+/g, "-"));
 export function _setProj(p) { PROJ = p; }
 
 const SELF = process.env.OUTER_SESSION || "b8dc91a6-64e8-4d70-a715-9ec8e16a4f11";
@@ -336,7 +342,11 @@ function verify(file, sinceMs, pattern) {
 }
 
 // CLI（直接执行时才跑；被 import 时不跑，供 plugin/test/inner-forensics.test.mjs 复用）
-const isDirect = process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
+// 用 realpath 比较两侧（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）：Node 下
+// import.meta.url 解析到真实文件，而 process.argv[1] 保持命令行传入的路径（若经符号链接调用则
+// 是链接路径）。不用 realpath 会在「node <symlink> verify …」下误判 isDirect=false，静默不跑 CLI。
+const isDirect = process.argv[1] &&
+  fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(path.resolve(process.argv[1]));
 if (isDirect) {
   const argv = process.argv.slice(2);
   const cmd = argv[0];

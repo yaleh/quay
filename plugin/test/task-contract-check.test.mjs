@@ -78,7 +78,7 @@ test("parseContract: fenced showcase format → structured entries", () => {
 measure   cpu_stall   = \`cat /proc/pressure/cpu\` 的 some avg10 字段      # comment
 band      cpu_ok      = some avg10 < 40
 invariant nproc 在判定前后一致
-invoke    \`scripts/resource-gate.sh --for full-suite\`
+invoke    \`plugin/scripts/resource-gate.sh --for full-suite\`
 control   人为压高 ⇒ gate 必须返回 WAIT
 resume    n/a: gate 是无状态判定，无中途产物
 \`\`\`

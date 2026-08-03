@@ -105,7 +105,7 @@
 
 ## 当前基线（2026-08-03，51 条）
 
-`--list` 实测（与 `docs/analysis/fast-mode-loop-tick.md` 判绿无关；本清单是报告，不是门禁）：
+`--list` 实测（与 `plugin/loop/fast-mode-loop-tick.md` 判绿无关；本清单是报告，不是门禁）：
 
 ```
 experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup

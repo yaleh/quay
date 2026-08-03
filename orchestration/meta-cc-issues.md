@@ -71,7 +71,7 @@ output_format: tsv
 ### 交叉验证
 
 同一问题——「内层会话自 2026-08-02T12:29:10Z 起跑了几次全量套件」——meta-cc 与外层自写的
-`orchestration/watch/inner-forensics.mjs` 给出 **7 条、时刻逐条一致**：
+`plugin/scripts/inner-forensics.mjs` 给出 **7 条、时刻逐条一致**：
 
 ```
 13:01:35  14:19:40  14:38:51  14:50:58  15:11:03  15:18:59  15:29:25

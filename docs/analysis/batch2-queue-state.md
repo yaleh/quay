@@ -158,7 +158,7 @@ subagent transcript：
 
 ### 文件占用提醒
 
-`docs/analysis/fast-mode-loop-tick.md` 正被在飞的 `gap-dispatch-gate-has-no-checklist-and-no-trace`
+`plugin/loop/fast-mode-loop-tick.md` 正被在飞的 `gap-dispatch-gate-has-no-checklist-and-no-trace`
 占用。该文档的改动**并进那个任务或等它落地后再改**，不要并行改同一文件。
 
 ## 外层更正上一条指令（2026-08-03T02:45:03Z）—— 不该进阻塞信号
@@ -170,13 +170,13 @@ subagent transcript：
 `turn-ended-idle` **不是「停下等裁定」**——回合结束、无待办不是在等外层，是在等自己的 loop 唤起。
 把它写进 `.quay/inner-blocked.json` 会造成两处误触发：
 
-1. `orchestration/watch/inner-state.sh:25-30` 对**任何** reason 都发 `BLOCKED reason=… question=…`，
+1. `plugin/scripts/inner-state.sh:25-30` 对**任何** reason 都发 `BLOCKED reason=… question=…`，
    **没有过滤**。⇒ 内层每结束一次回合就叫醒外层一次，而这些事件不需要任何动作。
    **一个有意义的告警信号会被稀释成噪声**——这比没有信号更糟，因为它会训练出忽略。
 2. `restart-readiness-check.sh` 在 un-halt 前打印阻塞记录（「内层在等裁定 ≠ 可以解除 `.halt`」）。
    一条 `turn-ended-idle` 会挡住 un-halt。
 
-而且 `docs/analysis/fast-mode-loop-tick.md:238-256` 的触发条件写的是「**停下等人**」，
+而且 `plugin/loop/fast-mode-loop-tick.md:238-256` 的触发条件写的是「**停下等人**」，
 `--reason` 示例硬编码那七个值，并明写「**不新增语义（AC2）**」。
 **加了枚举值但文档禁止使用它 ⇒ 代码与文档两个源头打架**，正是本仓库反复要消灭的漂移。
 
@@ -497,7 +497,7 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 
 ### Tick 更新（05T03:0xZ）：resource-awareness merged + serve-task-list 已派
 
-- **resource-awareness（P1#1）merged**（`99b608d6`，11 文件 +678）：`scripts/resource-gate.sh`（压力/内存/
+- **resource-awareness（P1#1）merged**（`99b608d6`，11 文件 +678）：`plugin/scripts/resource-gate.sh`（压力/内存/
   node 数/swap，`--for full-suite` GO/WAIT，无 PSI fail-closed）+ test.sh 接入（默认全量 gate，WAIT 打印后
   exit 1 不静默等）+ **并发推导 `max(1,floor(nproc/2.1))`=1**（4 核），显式 `--test-concurrency=N` 优先。
   AC1-11 全勾，DoD「2x 全绿」未勾（CPU 纪律 + 推导并发 1 下全量小时级）。AC3 双向负控制实测

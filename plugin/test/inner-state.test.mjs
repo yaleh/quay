@@ -1,6 +1,6 @@
 // @test-group engine
 // inner-state.test.mjs — gap-no-explicit-blocked-signal-from-inner-layer (AC6): the OUTER Monitor
-// (orchestration/watch/inner-state.sh) must watch .quay/inner-blocked.json with inotifywait and
+// (plugin/scripts/inner-state.sh) must watch .quay/inner-blocked.json with inotifywait and
 // emit events carrying `reason` + `question` — so the outer starts adjudicating in seconds, not
 // after a 20-minute tick. Two layers of verification:
 //   (a) source contract — inotifywait + the event format; and
@@ -33,7 +33,7 @@ function _findRepoRoot(startDir) {
   throw new Error("Cannot find repo root: no .quay/config.yml found upward from " + startDir);
 }
 const REPO_ROOT = _findRepoRoot(__dirname);
-const MONITOR = path.join(REPO_ROOT, "orchestration", "watch", "inner-state.sh");
+const MONITOR = path.join(REPO_ROOT, "plugin", "scripts", "inner-state.sh");
 
 function makeTmpWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "inner-state-"));

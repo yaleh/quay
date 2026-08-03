@@ -1,9 +1,21 @@
 # 外层编排 loop tick 指令
 
+> **模板参数（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）**：本文件是随 quay
+> 插件包分发的外层 tick 文档（`plugin/loop/`），本仓自身的循环直接读这份模板。`quay-init --loop`
+> 铺到目标项目时对**副本**做机械替换，正文本体保持 quay 实值：
+> - `/home/yale/work/quay` → 目标项目根（`--repo-root`）
+> - `scripts/test.sh` → 目标项目测试命令（`--test-command`，必填）
+> - `quay-0:0.0` → 目标项目 tmux 会话（`--tmux-session`）
+> - `plugin/loop/orchestrator-loop-tick.md` / `plugin/loop/fast-mode-loop-tick.md`（本文件的
+>   自引用/互引用）→ 目标项目的 `orchestration/orchestrator-loop-tick.md` /
+>   `docs/analysis/fast-mode-loop-tick.md`（目标项目按 quay 布局铺到这两个位置）
+> 替换只作用于铺出的副本，不修改本模板。铺完后负控制：副本里 grep 不到 `scripts/test.sh` 这类
+> quay 专属字面。
+
 **启动方式**（在编排会话，即本会话或 `/clear` 后的新会话）：
 
 ```
-/loop 20m 执行 orchestration/orchestrator-loop-tick.md 中的 tick 指令
+/loop 20m 执行 plugin/loop/orchestrator-loop-tick.md 中的 tick 指令
 ```
 
 ---
@@ -49,7 +61,7 @@ tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{p
 `CronCreate` 的任务是**会话内的**，会话一结束就没了。新会话必须重建，否则外层再也不会自动触发：
 
 ```
-CronCreate(cron="*/20 * * * *", prompt="执行 orchestration/orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
+CronCreate(cron="*/20 * * * *", prompt="执行 plugin/loop/orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
 ```
 
 **4a. `/loop` 是跨 `/clear`/`/compact` 的行为稳定层，不是驱动器**
@@ -70,7 +82,7 @@ tick 指令重新调起来**——tick 文件的「冷启动」一节正是为�
 `Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询：
 
 ```
-Monitor({command: "/home/yale/work/quay/orchestration/watch/inner-state.sh",
+Monitor({command: "/home/yale/work/quay/plugin/scripts/inner-state.sh",
          description: "内层状态转变", persistent: true, timeout_ms: 3600000})
 ```
 
@@ -145,7 +157,7 @@ tmux capture-pane -p -t quay-0:0.0 | md5sum      # 两次相同 = 空闲
 **c) 外层的独立核实会和内层抢 CPU——这是机制不是散文。** 步骤 1 写着「只读」，但跑一次全量套件是
 **数分钟的满载**，足以把内层 `select-preflight` 那种 timeout 余量只有 8% 的测试压成 flaky。
 规则改为**机械执行**：跑全量套件前调用资源闸
-`bash scripts/resource-gate.sh --for full-suite`（`gap-no-resource-awareness-heavy-ops-run-blind`）——
+`bash plugin/scripts/resource-gate.sh --for full-suite`（`gap-no-resource-awareness-heavy-ops-run-blind`）——
 退出码非 0 = WAIT，**此时不要跑全量**，改为核实便宜的声称（文件存在、grep 计数、单文件测试）。
 gate 读 `/proc/pressure/cpu` `some avg10`（结构信号，不是 load 代理）并输出数字与限值，把
 「现在能不能跑」变成一个可核对的数字。内层在飞时只核实便宜的声称；**全量只串行跑、跑完再叫醒内层**。
@@ -155,7 +167,7 @@ gate 读 `/proc/pressure/cpu` `some avg10`（结构信号，不是 load 代理�
 
 ### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
 
-20 分钟 tick 的盲区是**内层停摆后的等待时间**。`orchestration/watch/inner-state.sh` 只在**状态
+20 分钟 tick 的盲区是**内层停摆后的等待时间**。`plugin/scripts/inner-state.sh` 只在**状态
 转变**时发声，挂成 `persistent` Monitor：
 
 | 事件 | 含义 |
@@ -329,8 +341,8 @@ done 而 DoD 未勾。每个 tick 都要独立核实至少一项它声称完成�
 timeout 余量压成 flaky（步骤 0c）。查 transcript 是秒级、零干扰：
 
 ```bash
-node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <上次 tick 的 ISO 时刻>
-node orchestration/watch/inner-forensics.mjs timecost --since <外层 loop 起点或本班次起点>
+node plugin/scripts/inner-forensics.mjs verify 全量套件 --since <上次 tick 的 ISO 时刻>
+node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或本班次起点>
 ```
 
 `verify` 接**类别**（`全量套件` / `范围化测试` / `其它 Bash`，与 `timecost` 同源，不会分歧）
@@ -420,7 +432,7 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 若是，更新对应文件并提交：
 
 - `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD 的修正
-- `docs/analysis/fast-mode-loop-tick.md` —— 内层机制的修正
+- `plugin/loop/fast-mode-loop-tick.md` —— 内层机制的修正
 - 本文件 —— 外层机制的修正
 
 **这是机制的一部分，不是可选项。** 本会话已多次出现「前提错了才发现」（`extractMechanismClaims`
@@ -473,7 +485,7 @@ tick 或 `/clear` 后的会话会重犯。
 | 文件 | 作用 |
 |---|---|
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、AC、DoD |
-| `docs/analysis/fast-mode-loop-tick.md` | 内层 tick 指令 |
+| `plugin/loop/fast-mode-loop-tick.md` | 内层 tick 指令 |
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |

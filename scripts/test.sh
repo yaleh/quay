@@ -191,7 +191,7 @@ resource_gate_check() {
     return 0
   fi
   echo "== resource gate (gap-no-resource-awareness-heavy-ops-run-blind) =="
-  if ! bash "${repo_root}/scripts/resource-gate.sh" --for full-suite; then
+  if ! bash "${repo_root}/plugin/scripts/resource-gate.sh" --for full-suite; then
     echo "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO." >&2
     exit 1
   fi
@@ -213,7 +213,7 @@ heavy_op_acquire() {
     return 0
   fi
   echo "== heavy-op token (gap-no-cross-project-heavy-op-token) =="
-  if ! bash "${repo_root}/scripts/heavy-op-token.sh" --acquire quay --timeout 0; then
+  if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout 0; then
     echo "scripts/test.sh: heavy-op token HELD by another project (holder printed above) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free." >&2
     exit 1
   fi
@@ -221,7 +221,7 @@ heavy_op_acquire() {
   # EXIT trap: release on every exit path. The default-set branch below runs node as a CHILD (not
   # exec) precisely so this trap fires when node finishes — an exec'd node would replace this shell
   # and silently skip the release.
-  trap 'if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then bash "${repo_root}/scripts/heavy-op-token.sh" --release quay >/dev/null 2>&1 || true; HEAVY_OP_ACQUIRED=0; fi' EXIT
+  trap 'if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --release quay >/dev/null 2>&1 || true; HEAVY_OP_ACQUIRED=0; fi' EXIT
 }
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────

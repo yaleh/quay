@@ -278,7 +278,7 @@ test("AC7 — empty report: blocked metrics default to 0, never undefined", asyn
 // ── AC3: tick file wiring ────────────────────────────────────────────────────────────────────────────
 
 test("AC3 — the tick file requires assert-before-stop and clear-after-recovery", () => {
-  const tick = fs.readFileSync(path.join(REPO_ROOT, "docs", "analysis", "fast-mode-loop-tick.md"), "utf8");
+  const tick = fs.readFileSync(path.join(REPO_ROOT, "plugin", "loop", "fast-mode-loop-tick.md"), "utf8");
   assert.match(tick, /inner-blocked-signal\.ts/, "tick must reference the CLI");
   assert.match(tick, /--assert-blocked/, "tick must require writing the block before stopping");
   assert.match(tick, /--clear/, "tick must require clearing after recovery");

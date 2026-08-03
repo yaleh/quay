@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MODULE = path.resolve(__dirname, "..", "..", "orchestration", "watch", "inner-forensics.mjs");
+const MODULE = path.resolve(__dirname, "..", "scripts", "inner-forensics.mjs");
 
 let fn;
 try {

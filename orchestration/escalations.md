@@ -318,8 +318,8 @@ tasks/DIR-124-F6.md   tasks/gap-build-evidence-path.md
 
 **实测**：
 
-- 内层 tick 文档（`docs/analysis/fast-mode-loop-tick.md`）**零处**提到推送
-- 外层 tick 文档的授权表（`orchestration/orchestrator-loop-tick.md`）**零处**提到推送、远端、origin
+- 内层 tick 文档（`plugin/loop/fast-mode-loop-tick.md`）**零处**提到推送
+- 外层 tick 文档的授权表（`plugin/loop/orchestrator-loop-tick.md`）**零处**提到推送、远端、origin
 - 内层今晚推送次数：**至少 2**——08:18:56 一次；**外层写这条升级项的同一分钟内又发生一次**
   （`3bf2479e..ae2a8d1d`，而外层那条命令只做了 `git add` 与 `git commit`）。
   **第二次恰好是这条升级项本身的又一个实例**

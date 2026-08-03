@@ -1,6 +1,6 @@
 // @test-group engine
 // heavy-op-token.test.mjs — gap-no-cross-project-heavy-op-token. Pins the cross-project heavy-op
-// token (scripts/heavy-op-token.sh) as a MECHANICAL mechanism, not prose:
+// token (plugin/scripts/heavy-op-token.sh) as a MECHANICAL mechanism, not prose:
 //
 //   AC1 — --acquire / --release / --status; --status prints holder, held_ms, stale_reclaims
 //   AC2 — bidirectional negative control: A holds ⇒ B --acquire fails printing A's identity +
@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const TOKEN = path.join(REPO_ROOT, "scripts", "heavy-op-token.sh");
+const TOKEN = path.join(REPO_ROOT, "plugin", "scripts", "heavy-op-token.sh");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -247,8 +247,10 @@ test("AC6 — test.sh acquires on the full-suite default path ONLY, before the g
   );
   // The acquire + release reference the token script exactly once each, both inside the guard's
   // function — proof that no scoped branch carries a token call.
-  assert.ok(src.match(/bash "\$\{repo_root\}\/scripts\/heavy-op-token\.sh" --acquire quay --timeout 0/), "default path must acquire the token");
-  assert.ok(src.match(/bash "\$\{repo_root\}\/scripts\/heavy-op-token\.sh" --release quay/), "release must be wired (EXIT trap)");
+  // gap-loop-mechanism-lives-outside-the-package-and-cannot-ship: the token moved to
+  // plugin/scripts/, so test.sh's wiring references the new canonical path.
+  assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --acquire quay --timeout 0/), "default path must acquire the token");
+  assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --release quay/), "release must be wired (EXIT trap)");
   // Release is armed as an EXIT trap, so a gate WAIT / build failure / static-check failure /
   // node completion ALL release the token — one WAIT must never hold the cross-project mutex.
   assert.match(src, /trap 'if \[\ "\$\{HEAVY_OP_ACQUIRED:-0\}" = "1" \]; then/, "release must be an EXIT trap keyed on HEAVY_OP_ACQUIRED");

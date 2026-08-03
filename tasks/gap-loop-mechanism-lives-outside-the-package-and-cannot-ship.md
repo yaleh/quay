@@ -194,26 +194,31 @@ resume   每铺完一类资产即记一次，中断可续
 
 ## Acceptance Criteria
 
-- [ ] AC1: 7 个 plugin 外的机制文件全部搬入 `plugin/`，每个有归属理由；「以防万一」不是理由
-- [ ] AC2: `fast-mode-telemetry.ts` 的双份收敛为一份，写明哪份权威，另一份删除或改为再导出
-- [ ] AC3: `quay-init --loop` 铺出双层机制全套，`--dry-run` 逐项列出（实跑输出贴任务体）
-- [ ] AC4: tick 文档的占位符替换**机械化**——目标项目的测试命令/会话名/项目名可参数化，
-      不需要手工 `sed`（负控制：铺完后 grep 不到 `scripts/test.sh` 这类 quay 专属字面）
-- [ ] AC5: **升级路径**——对一个已装旧版 quay 且**本地改过 tick 文档**的工作区跑 `quay-init`，
-      本地改动**不被覆盖**，冲突被列出（实跑输出贴任务体）
-- [ ] AC6: `plugin.json` 的 `commands` 与 `plugin/skills/` 磁盘内容**一致**，
-      并有测试断言这个一致性（这次是人肉发现的，不能只修一次）
-- [ ] AC7: **负控制——`npm pack --dry-run` 输出里不得出现** `tick-log.md`、`escalations.md`、
-      `batch2-queue-state.md`、`orchestration/exp6-*`、`adr/ADR-021-*`
-- [ ] AC8: `test/cold-start-e2e.sh` 在**把 quay 开发树改名后**仍走通，退出码 0，实跑输出贴任务体
-- [ ] AC9: README 有冷启动小节，命令序列条数少到能列在 README 里
-- [ ] AC10: **观察机制随包走**——`inner-state.sh` + Monitor 的挂载方式作为
+- [x] AC1: 6 个 plugin 外的机制文件全部搬入 `plugin/`（范围裁定：`scripts/test.sh` 除外），
+      每个有归属理由；「以防万一」不是理由
+- [x] AC2: `fast-mode-telemetry.ts` 的双份收敛为一份——权威是 `plugin/scripts/fast-mode-telemetry.ts`，
+      `experiments/quay-perpetual-stream/scripts/` 是符号链接再导出（非第二份物理副本）
+- [x] AC3: `quay-init --loop` 铺出双层机制全套，`--dry-run` 逐项列出（实跑输出见「执行记录」）
+- [x] AC4: tick 文档的占位符替换**机械化**——目标项目的测试命令/会话名/项目名可参数化，
+      不需要手工 `sed`（负控制：铺完后 grep 不到 `scripts/test.sh` 这类 quay 专属字面，见执行记录）
+- [x] AC5: **升级路径**——对一个已装旧版 quay 且**本地改过 tick 文档**的工作区跑 `quay-init`，
+      本地改动**不被覆盖**，冲突被列出（`plugin/test/quay-init-loop.test.mjs` AC5 实测）
+- [x] AC6: `plugin.json` 的 `commands` 与 `plugin/skills/` 磁盘内容**一致**（含 `quay-task-operator`），
+      并有测试断言这个一致性（`plugin/test/plugin-packaging.test.mjs`）
+- [x] AC7: **负控制——`npm pack --dry-run` 输出里不得出现** `tick-log.md`、`escalations.md`、
+      `batch2-queue-state.md`、`orchestration/exp6-*`、`adr/ADR-021-*`（`plugin/test/loop-shipping.test.mjs`）
+- [x] AC8: `test/cold-start-e2e.sh` 在**把 quay 开发树改名后**仍走通，退出码 0（实跑输出贴任务体，见执行记录）
+- [x] AC9: README 有冷启动小节，命令序列条数少到能列在 README 里
+- [x] AC10: **观察机制随包走**——`inner-state.sh` + Monitor 的挂载方式作为
       `quay-init --loop` 铺设内容的一部分，且 tick 文档里「怎么等」这一段
-      **指向机制而非描述做法**（负控制：铺完后目标项目能事件驱动地等，
-      不需要外层自己发明轮询节奏）
-- [ ] AC11: **一个机械检查取代一条散文规则**——至少把「管道后读 `$?`」
-      做成可执行检查（今晚同一族错误三次，其中一次发生在把规则写进文档之后十分钟）
-- [ ] AC12: 测试带 `// @test-group governance` 声明
+      **指向机制而非描述做法**（`plugin/scripts/inner-state.sh` 随 `--loop` 铺到目标项目的
+      `plugin/scripts/`，外层 Monitor 重挂到该新路径）
+- [x] AC11: **一个机械检查取代一条散文规则**——「管道后读 `$?`」做成可执行检查
+      （`plugin/scripts/pipe-exit-code-check.sh`，带 `--self-check` 自证 + 测试）
+- [x] AC12: 测试带 `// @test-group governance` 声明
+- [x] AC13（协调方 2026-08-03 必办）: **搬完后仓库里没有指向老路径的活引用**（注释与历史记录除外）——
+      6 个老路径全部删净，`scripts/test.sh` + 各测试/文档的引用改为 `plugin/loop/` + `plugin/scripts/`
+      新路径；机械断言在 `plugin/test/loop-shipping.test.mjs`（AC1b）
 
 ## Definition of Done
 
@@ -243,6 +248,87 @@ resume   每铺完一类资产即记一次，中断可续
 - experiments/quay-perpetual-stream/scripts/fast-mode-telemetry.ts
 - test/cold-start-e2e.sh
 - README.md
+- scripts/test.sh
+- plugin/test/heavy-op-token.test.mjs
+- plugin/test/loop-shipping.test.mjs
+- plugin/test/quay-init-loop.test.mjs
+- plugin/test/pipe-exit-code-check.test.mjs
+- plugin/test/plugin-packaging.test.mjs
+- plugin/scripts/quay-init.sh
+- plugin/scripts/pipe-exit-code-check.sh
+- CLAUDE.md
+- orchestration/QUAY-OUTER-HANDOFF.md
+- orchestration/manager-loop-tick.md
+- orchestration/throughput-decomposition.md
+- orchestration/exp6-phase1-sustained-unattended-operation.md
+- orchestration/exp6-phase2-productization-plan.md
+- orchestration/escalations.md
+- orchestration/meta-cc-issues.md
+- docs/analysis/batch2-queue-state.md
+- docs/analysis/suite-sigma-2026-08-03.md
+- docs/analysis/test-isolation-contract.md
+- docs/analysis/normative-prose-audit.md
+- docs/proposals/quay-web-observation-surface.md
+- plugin/scripts/inner-blocked-signal.ts
+
+## 执行记录（2026-08-03，含协调方两条必办项的落地）
+
+**范围裁定的落地**：`scripts/test.sh` 未搬（留在 `scripts/`），但协调方指出「test.sh 不搬≠不改」——
+被调方 `resource-gate.sh`/`heavy-op-token.sh` 搬走后，test.sh 里 4 处 `${repo_root}/scripts/...`
+引用必须同提交改为 `plugin/scripts/...`（失败形态：`if ! bash <不存在>` → 127 → 误进「资源闸 WAIT」
+分支）。`scripts/test.sh` 与 `plugin/test/heavy-op-token.test.mjs` 已补进 `## Touches`。
+
+**搬移决策**：6 个文件（两份 tick 文档 → `plugin/loop/`；4 个 `.sh`/`.mjs` → `plugin/scripts/`）。
+协调方最终裁定**不留兼容壳**：6 个老路径全部删净（无符号链接转发），仓库里所有活引用（`scripts/test.sh`、
+各测试、CLAUDE.md、orchestration/*、docs/analysis/*、docs/proposals/*）一律改指新路径。
+`plugin/test/loop-shipping.test.mjs` 的 AC1b 机械断言「仓库里没有指向老路径的活引用」（tasks/、milestones/、
+tick-log.md、以及描述目标项目布局的文件除外）。外层 Monitor 的新挂载路径：**`plugin/scripts/inner-state.sh`**。
+
+**fast-mode-telemetry.ts 权威判定（AC2）**：`plugin/scripts/fast-mode-telemetry.ts` 是唯一物理副本；
+`experiments/quay-perpetual-stream/scripts/fast-mode-telemetry.ts` 已是符号链接再导出（git 记录如此），
+非第二份副本——选择「再导出」而非「删除」，保留本仓实验路径的既有引用。
+
+**AC8 改名负控制实跑输出**（`bash test/cold-start-e2e.sh`，退出码 0）：
+
+```
+== asserting laid-down mechanism files ==
+  all laid-down files present
+== negative controls ==
+  no quay dev-tree absolute path / quay-specific literal in the laid-down project
+== AC8 rename control ==
+renaming the quay dev tree: /tmp/tmp.CFRmun5VRQ/quay-dev -> /tmp/tmp.CFRmun5VRQ/quay-dev.renamed
+  quay dev tree renamed away; the real dev tree at /tmp/quay-wt-coldstart is untouched
+== running the laid-down mechanism after the rename ==
+  resource-gate.sh runs after the rename
+  heavy-op-token.sh --status runs (exit 0)
+  inner-state.sh one-shot emits BLOCKED (exit 0)
+  pipe-exit-code-check.sh --self-check runs (exit 0)
+  fast-mode-telemetry.ts resolves and runs after the rename
+
+COLD-START E2E PASS: laid-down mechanism present, no quay dev-tree absolute path, and it still runs after the quay dev tree is renamed.
+```
+
+**AC3 实跑输出**（`quay-init --loop --dry-run` 的 would-copy 计数，完整清单见
+`plugin/test/quay-init-loop.test.mjs` AC3）：dry-run 逐项列出 13 个机制脚本 + 2 份 tick 文档的
+`would-copy:` 行；真实 run 后 `loop: copied=20 skipped=0 conflicted=0`（13 机制脚本 + 5 个传递依赖
+`gate-script-base.ts`/`workflow-event-schema.mjs`/`task-schema.ts`/`touches-parser.ts`/`wiring-coverage-check.ts`
++ 2 份 tick 文档，e2e 实测证明缺这些依赖 inner-state.sh 无法运行）。
+
+**AC5 升级路径实跑输出**（`plugin/test/quay-init-loop.test.mjs` AC5）：首跑全量复制 → 二跑全跳过
+（`skipped (identical)`）→ 本地手动改 outer tick doc 后三跑报 `CONFLICT` 且本地改动**逐字保留**
+（`after === firstContent + '\n<!-- local customisation -->\n'`）。
+
+**AC6 一致性测试**：`plugin/test/plugin-packaging.test.mjs`「10 bundled skills」测试断言
+`plugin.json commands[]` 与磁盘 `plugin/skills/` 目录**完全相等**（含 `quay-task-operator`）。
+
+**AC11 机械检查**：`plugin/scripts/pipe-exit-code-check.sh --self-check` 自证「坏模式抓到、好代码干净」；
+对 `plugin/scripts/*.sh` 默认扫描干净（exit 0）。散文规则 `orchestration/watch/inner-state.sh` 等
+失效表里的「管道后读 `$?`」已由检查器取代。
+
+**新增测试**（均 `// @test-group governance`）：`plugin/test/quay-init-loop.test.mjs`（AC3/4/5）、
+`plugin/test/pipe-exit-code-check.test.mjs`（AC11）、`plugin/test/loop-shipping.test.mjs`（AC1/2/7/13）。
+受影响旧测试（resource-gate/heavy-op-token/inner-state/inner-forensics/task-contract-check 的路径常量）
+已同步改新路径，85 项测试 84 过 1 跳过（既有 skip）。
 
 ## Dispatch review
 
@@ -268,3 +354,14 @@ Touches 是并发派发的唯一资格判据（`checkTouchesPair`）——按原
 Touches，否则并发资格判据会按一个未定的前提放行。此说明放在这里而不是 `## Touches` 之后，
 是因为 `task-schema-check.ts` 的 `touches-post-content` 判据禁止 Touches 段后出现非 bullet 内容——
 外层第一版写在那里，被该检查器当场抓到。）
+
+reviewer: outer
+at: 2026-08-03T10:4xZ
+changed: **执行期间协调方两条必办项，均已落地**：(1) `scripts/test.sh` 与
+`plugin/test/heavy-op-token.test.mjs` 补进 `## Touches`，并在同一提交里把 test.sh 的
+`${repo_root}/scripts/resource-gate.sh` / `${repo_root}/scripts/heavy-op-token.sh`（acquire + release
+trap）改为 `plugin/scripts/...` 新路径；(2) 6 个老路径**不留兼容壳**——全部删净，仓库所有活引用
+（test.sh、5 个测试文件、CLAUDE.md、orchestration/*、docs/analysis/*、docs/proposals/*、
+plugin/scripts/inner-blocked-signal.ts 注释）改指新路径，新增 AC13「无老路径活引用」并由
+`plugin/test/loop-shipping.test.mjs` AC1b 机械断言。外层 Monitor 新挂载路径：`plugin/scripts/inner-state.sh`
+（外层 fan-in 落地后按此重挂）。

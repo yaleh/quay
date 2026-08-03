@@ -32,7 +32,7 @@ extra:
 
 ### 真正的约束：四个会让循环停摆的条件
 
-tick 的保守停止条件（`docs/analysis/fast-mode-loop-tick.md`）本身是对的，但现在**每一条都处在或
+tick 的保守停止条件（`plugin/loop/fast-mode-loop-tick.md`）本身是对的，但现在**每一条都处在或
 接近触发状态**：
 
 | 停止条件 | 当前状态 |
@@ -112,8 +112,8 @@ exp6 §0 确认交付分两阶段。阶段 1 的引擎稳定后转向产品。�
 
 | 组成 | 现状 | 产品化缺口 |
 |---|---|---|
-| 外层 tick 指令 | `orchestration/orchestrator-loop-tick.md`，散文，硬编码 `quay-0:0.0`、本仓库路径、本仓库的 AC 编号 | 需要分离「通用 tick 骨架」与「本项目配置」 |
-| 内层 tick 指令 | `docs/analysis/fast-mode-loop-tick.md`，同上 | 同上 |
+| 外层 tick 指令 | `plugin/loop/orchestrator-loop-tick.md`，散文，硬编码 `quay-0:0.0`、本仓库路径、本仓库的 AC 编号 | 需要分离「通用 tick 骨架」与「本项目配置」 |
+| 内层 tick 指令 | `plugin/loop/fast-mode-loop-tick.md`，同上 | 同上 |
 | 排程 | `CronCreate`（**会话内，会话一结束就没**）+ `/loop` | 产品不能依赖某个 Claude Code 会话活着。**第二个缺口（2026-08-03 实测）**：`/loop` 不带间隔时走 `ScheduleWakeup` 动态模式，**没有任何列出工具**——`CronList` 只覆盖固定间隔的 `CronCreate`，`TaskList` 是待办列表。即「这个循环是否还活着」无法查询，只能等它下次触发。外层因此两小时无法确认内层 `/loop` 是否启动。规避办法是一律用固定间隔形式 |
 | 层间通信 | `tmux send-keys` + `capture-pane` 读屏 | 读屏是本仓库 ADR-016 明确认定的**权宜手段**（「never parse the TUI」），不能作为产品接口 |
 | 队列 / 并发资格 / 计量 | `task_list`、`touches-orthogonality-check.ts`、`fast-mode-telemetry.ts` | **这三个已经是可复用机制**，是最接近产品的部分 |
@@ -202,10 +202,10 @@ tick 第 3 节把「就绪队列为空」列为停止条件。无人值守 12 �
 - [ ] AC3: `select-preflight --json --workspace-root .` 耗时 ≤30s（当前 111s，超时上限 120s，余量仅 8%）
 - [ ] AC4: `restart-readiness-check.sh` 包含 suite-green 检查，套件红时报 NOT READY
 - [ ] AC5: tick 有队列补充步骤，队列空时按就绪度从任务库取下一批，复用已有就绪判定机制
-- [x] AC6: `.halt` 解除且 `/loop` 已设，指向 `docs/analysis/fast-mode-loop-tick.md`
+- [x] AC6: `.halt` 解除且 `/loop` 已设，指向 `plugin/loop/fast-mode-loop-tick.md`
       **达成（2026-08-03 00:4xZ）**：`.halt` 于 17:43:24Z 由外层解除；内层 `/loop 25m` 已启动，
       外层从内层 transcript 取到实际 `CronList` 输出（非提交说明）：
-      `Every 25 minutes (recurring) [session-only]: 执行 docs/analysis/fast-mode-loop-tick.md 中的 tick 指令`。
+      `Every 25 minutes (recurring) [session-only]: 执行 plugin/loop/fast-mode-loop-tick.md 中的 tick 指令`。
       **必须用固定间隔形式**：不带间隔的 `/loop` 走 `ScheduleWakeup` 动态模式，**无任何列出工具**
       （`CronList` 只覆盖 `CronCreate`，`TaskList` 是待办列表）⇒ 无法查验它是否还活着。
       对一个专门在 `/clear`/`/compact` 后兜底的机制，不可查验等于不可信。
@@ -249,6 +249,6 @@ tick 第 3 节把「就绪队列为空」列为停止条件。无人值守 12 �
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
-- docs/analysis/fast-mode-loop-tick.md
+- plugin/loop/fast-mode-loop-tick.md
 - docs/analysis/batch2-queue-state.md
 - milestones/fast-mode-telemetry/

@@ -1,6 +1,6 @@
 // @test-group engine
 // resource-gate.test.mjs — gap-no-resource-awareness-heavy-ops-run-blind. Pins the shared resource
-// gate (scripts/resource-gate.sh) + the derived concurrency default (scripts/test.sh
+// gate (plugin/scripts/resource-gate.sh) + the derived concurrency default (scripts/test.sh
 // default_test_concurrency) as a MECHANICAL mechanism, not prose:
 //
 //   AC2 — the gate reads /proc/pressure/cpu `some avg10` (structural), never load average (proxy)
@@ -39,7 +39,7 @@ function _findRepoRoot(startDir) {
   throw new Error("Cannot find repo root: no .quay/config.yml found upward from " + startDir);
 }
 const REPO_ROOT = _findRepoRoot(__dirname);
-const GATE = path.join(REPO_ROOT, "scripts", "resource-gate.sh");
+const GATE = path.join(REPO_ROOT, "plugin", "scripts", "resource-gate.sh");
 const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
 
 /** Run the REAL gate with env-seam overrides. Returns { status, stdout } (stderr merged). */
