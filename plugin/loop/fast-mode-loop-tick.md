@@ -119,11 +119,14 @@ grep 'tests 2098'    # tests 数等于参考值（2026-08-03 实测 2098；套�
 遥测」，与「内层在思考一个难题」完全同形。这是本仓当天两次栽过的那一族失效换了个位置。内层跑
 重活，会话死掉代价更大，**更需要**进程存活这一层。
 
-挂法与心跳（AC11）：内层的心跳不是外层那种 tick 日志，而是它的**工作产出**——建议
-`.workflow-events/`（gitignored、不脏工作树；`stat -c %Y` 对目录成立）。经
-`SESSION_HEARTBEATS="<名字> <项目根>/.workflow-events/"` 配置。事件 `SESSION-GONE/BACK/
-STALL/IDLE/RESUMED/OVERDUE` 报的是「会话本身还在不在、忙不忙」；`inner-state.sh` 报的是
-「在做什么」。两者**不合并**（AC12）——一个失效不能掩盖另一个。
+挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
+（AC1/AC16，2026-08-03 实测选定：`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，
+不是有效心跳源；transcript 每次工具调用都写，含 subagents 目录）。经
+`SESSION_TRANSCRIPTS="<名字> <会话id|绝对路径>"`（推荐，会话 id 是配置不去推断）或
+`SESSION_HEARTBEATS="<名字> <路径>"` 配置。事件 `SESSION-GONE/BACK/OVERDUE/IDLE/RESUMED` 报的是
+「会话本身还在不在、忙不忙」，`REPO-STALL` 报的是仓库信号（AC8，原 `SESSION-STALL`）；
+`inner-state.sh` 报的是「在做什么」。两者**不合并**（AC12）——一个失效不能掩盖另一个。
+**解除停机（删 `.halt`）那一刻重置陈旧度基线**，停泊期间的陈旧不计入解除停机后的 OVERDUE/REPO-STALL。
 
 ## 状态单一来源
 

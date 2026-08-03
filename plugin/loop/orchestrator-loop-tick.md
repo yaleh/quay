@@ -292,12 +292,12 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 成立，外层与内层通用（原 `outer-liveness.sh`，AC10 泛化改名——名字取窄了，这套逻辑与「外层」
 无关）。随 `quay-init --loop` 铺下，会话名在安装时被替换；默认零配置看本项目自己的会话。
 
-| 事件 | 触发 |
-|---|---|
-| `SESSION-GONE` / `SESSION-BACK` | 会话进程消失 / 恢复 |
-| `SESSION-STALL` | 活着但 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） |
-| `SESSION-OVERDUE` | 心跳文件 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 |
-| `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** |
+| 事件 | 触发 | 信号源 |
+|---|---|---|
+| `SESSION-GONE` / `SESSION-BACK` | 会话进程消失 / 恢复 | 会话面 |
+| `REPO-STALL` | 活着但仓库 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） | **仓库信号，不是会话面**（AC8，原 `SESSION-STALL`） |
+| `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 | 会话面（心跳源=transcript） |
+| `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** | 会话面 |
 
 **外层该挂哪两个、各自答什么问题（AC12——不合并，合并会让一种失效掩盖另一种）：**
 
@@ -307,17 +307,20 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 | `session-liveness.sh`（会话状态） | **它还在不在**——进程活/死、忙/闲、心跳逾期没有 |
 
 `inner-state.sh` 只看工作产出：内层死了它只会看到「没有新遥测」，与「在思考难题」同形。
-`session-liveness.sh` 补的正是这个洞。内层的心跳是它的工作产出（建议 `.workflow-events/`，
-gitignored 不脏工作树）——经 `SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。
+`session-liveness.sh` 补的正是这个洞。**内层的心跳是它的会话 transcript**（AC1/AC16，2026-08-03
+实测选定）——`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，不是有效心跳源；
+transcript 每次工具调用都写（含 subagents 目录）。经 `SESSION_TRANSCRIPTS`（会话 id 或绝对路径）
+或 `SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。**解除停机（删 `.halt`）那一刻重置陈旧度基线**，
+停泊期间的陈旧不计入解除停机后的 OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
 
 **四个阈值（AC5，含义与默认值在这里，不只活在脚本注释里）：**
 
 | 阈值 | 默认 | 含义 |
 |---|---|---|
 | `INTERVAL` | `60` | 轮询周期（秒）。每轮抓一次每个目标的状态；「转换后一个轮询周期内报出」的「及时」颗粒 |
-| `STALL_MIN` | `45` | 未暂停的项目超过这么久（分钟）无新提交 = 停滞（`SESSION-STALL`） |
-| `LOOP_MIN` | `20` | 会话的预期活动/心跳周期（分钟）。**也是 `SESSION-IDLE` 静默判据的边界**：空闲时心跳时距 `< LOOP_MIN` = 刚动过的正常收尾（静默）；`≥ LOOP_MIN` 或未知 = 「空闲了但没动」，报 |
-| `OVERDUE_MIN` | `45` | 心跳文件 mtime 超过这么久（分钟）未更新 = 会话逾期（`SESSION-OVERDUE`）。`>2×` 周期，容忍跑重活的长时段 |
+| `STALL_MIN` | `45` | 未暂停的项目超过这么久（分钟）无新提交 = 停滞（`REPO-STALL`，仓库信号） |
+| `LOOP_MIN` | `20` | **`SESSION-IDLE` 静默判据的边界**（抑制阈值）：空闲时心跳时距 `< LOOP_MIN` = 刚动过的正常收尾（静默）；`≥ LOOP_MIN` 或未知 = 「空闲了但没动」，报。OVERDUE 文案里的「预期周期」是固定常数 `EXPECTED_CYCLE_MIN`，与它拆开（LOOP_MIN 可设 0，文案不应打「预期周期 0 分钟」） |
+| `OVERDUE_MIN` | `45` | 心跳源 mtime 超过这么久（分钟）未更新 = 会话逾期（`SESSION-OVERDUE`）。`>2×` 周期，容忍跑重活的长时段 |
 
 **噪声标定（2026-08-03，管理者 3 个完整周期实测）**：健康循环 = `SESSION-RESUMED`（按周期活动）
 → 干活 → `SESSION-IDLE`（心跳 1 分钟前更新），每 20 分钟一对事件、三项目满载 18 次/小时。
