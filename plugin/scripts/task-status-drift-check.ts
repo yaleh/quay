@@ -30,6 +30,39 @@ const CODE_ROOTS = [
   "packages/quay-github/src",
 ];
 
+// Reverse-drift symbol bar: a done task is reverse-drift only when FEWER than half of its declared
+// distinctive AC symbols resolve in code (the "mostly unresolved" bar, AC5). This comment and the
+// constant are the single statement of the threshold — the OLD comment said "NONE resolve" while the
+// code used 1/2; the implementation is kept and the comment aligned. Pinned by the 1/4-resolved
+// fixture: 1/4 < 1/2 → still flagged; 2/4 = 1/2 → not.
+export const REVERSE_SYMBOL_RATIO_MAX = 0.5;
+
+// Roots that hold PIPELINE BOOKKEEPING, not implementation. The prepare/execute-milestone pipeline
+// produces these (preparation receipts, plan docs, milestone journals, gate-event logs, the task's
+// own file); a fast-mode (direct-dispatch) task NEVER produces them, so their absence proves
+// nothing about whether the task's implementation landed. AC3: the code-root/bookkeeping partition
+// is this named constant + the two predicate functions, not scattered boolean logic in the judgment.
+export const BOOKKEEPING_ROOTS = [
+  "milestones/",
+  "docs/plans/",
+  ".quay/",
+  "receipts/",
+  "tasks/",
+];
+
+// A Touches entry under a bookkeeping root is pipeline accounting, not implementation evidence.
+// Everything else (packages/**, plugin/scripts|test|workflows|fixtures, experiments/.../scripts|
+// test|fixtures, .claude/workflows, scripts/, orchestration/, docs/ outside docs/plans/) is
+// implementation evidence: a code task touches code, and a fast-mode doc/metric task records its
+// work in orchestration/ or docs/ — both prove the implementation landed when the file exists.
+export function isBookkeepingTouchEntry(entry) {
+  return BOOKKEEPING_ROOTS.some((root) => entry.startsWith(root));
+}
+
+export function isCodeTouchEntry(entry) {
+  return !isBookkeepingTouchEntry(entry);
+}
+
 export function findRepoRoot(startDir) {
   let dir = startDir;
   for (;;) {
@@ -111,19 +144,76 @@ function entryExists(entry, repoRoot) {
   return fs.existsSync(path.join(repoRoot, entry));
 }
 
+// Touches entries commonly carry trailing parenthetical annotations — `(new)`, `(extract from)`,
+// `(update imports)`, `(refactor Verify phase)` — that are NOT part of the path. Strip a trailing
+// "(…)" suffix so an existing file resolves; without this a landed task's entry is treated as
+// missing (a false reverse-drift / a missed forward-drift signal).
+function stripTouchAnnotation(entry) {
+  return entry.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+// Parse a task's ## Touches bullet list into bare path/glob strings (backticks/quotes removed,
+// trailing "(…)" annotations stripped). Returns [] for a missing section.
+//
+// The annotation can sit EITHER outside the backticks (`` `path/foo.ts` (extract from) ``) or inside
+// them (`` `path/foo.ts (new)` ``), so quotes are stripped before AND after the annotation strip —
+// stripping only before leaves the annotation masked by the trailing backtick in the first form;
+// stripping only after misses the inside-the-backticks form.
+export function parseTouchEntries(touchesSection) {
+  if (!touchesSection) return [];
+  return touchesSection
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^[-*]\s+/.test(l))
+    .map((l) => l.replace(/^[-*]\s+/, "").trim())
+    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim()) // surrounding quotes/backticks first
+    .map(stripTouchAnnotation)                                  // then trailing "(…)"
+    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim()) // then any backtick the annotation masked
+    .filter(Boolean);
+}
+
 // Parse a task's ## Touches bullet list and check every entry exists on disk (glob entries match at
 // least one file). A Touches section that parses to zero entries is treated as not-all-exist
 // (conservative — the section claims nothing and therefore proves nothing).
 export function touchesAllExist(touchesSection, repoRoot) {
-  if (!touchesSection) return true; // no Touches section → vacuous
-  const entries = touchesSection
-    .split(/\r?\n/)
+  if (!touchesSection) return true; // no Touches section → vacuous (unchanged, forward direction)
+  const entries = parseTouchEntries(touchesSection);
+  if (entries.length === 0) return false;
+  return entries.every((e) => entryExists(e, repoRoot));
+}
+
+// Reverse-drift CODE-LANDING evidence (AC4): does ANY non-bookkeeping (implementation) Touches entry
+// exist on disk? The reverse-drift judgment uses THIS, not `touchesAllExist`:
+//   - no ## Touches section → no code-landing evidence (the section is absent, so nothing to weigh).
+//   - section parses to zero entries, or only bookkeeping entries → false (fail-closed: the task
+//     provides ZERO implementation evidence — AC6).
+//   - at least one code-root entry exists → true (implementation landed → NOT reverse-drift).
+//   - all code-root entries absent → false (implementation never landed → reverse-drift candidate).
+export function hasAnyCodeRootTouch(touchesSection, repoRoot) {
+  if (!touchesSection) return false;
+  const codeEntries = parseTouchEntries(touchesSection).filter((e) => isCodeTouchEntry(e));
+  return codeEntries.some((e) => entryExists(e, repoRoot));
+}
+
+// A done task whose `children:` are ALL `done` is a parent whose implementation IS the children's
+// work (DIR-126 delegates its Touches to `[[DIR-126-A]]`…`[[DIR-126-E]]`). Reverse-drift asks "did
+// the implementation land?" — for such a parent the answer is "in its children", so it is not a
+// reverse-drift case even when its own Touches are bookkeeping-only. A parent with an un-done child
+// is NOT skipped: that is a prematurely-closed parent, which reverse-drift should still surface.
+export function hasDoneChildren(rawTask, tasksDir) {
+  const m = rawTask.match(/^children:\s*\n((?:\s+- .+\n?)*)/m);
+  if (!m) return false;
+  const ids = m[1].split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => /^[-*]\s+/.test(l))
-    .map((l) => l.replace(/^[-*]\s+/, "").trim().replace(/^[`"'']|[`"'']$/g, ""));
-  const nonEmpty = entries.filter(Boolean);
-  if (nonEmpty.length === 0) return false;
-  return nonEmpty.every((e) => entryExists(e, repoRoot));
+    .filter((l) => l.startsWith("-"))
+    .map((l) => l.slice(1).trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
+  if (ids.length === 0) return false;
+  return ids.every((id) => {
+    const file = path.join(tasksDir, `${id}.md`);
+    if (!fs.existsSync(file)) return false;
+    return /^status:\s*done/m.test(fs.readFileSync(file, "utf8"));
+  });
 }
 
 // Scan the task store for status-drift suspects. ratioFloor is the fraction of AC symbols that must
@@ -132,9 +222,11 @@ export function touchesAllExist(touchesSection, repoRoot) {
 //
 // Two drift directions:
 //   status-drift-suspect:  todo/ready but code is in the tree (task should be closed).
-//   reverse-drift-suspect: done but the code never landed — AC symbols do NOT resolve AND NO Touches
-//     file exists. The mirror image of the leak above (the RED test for no-size-aware-routing-A was
-//     silenced without restoring its status — the exact class this catches).
+//   reverse-drift-suspect: done but the code never landed — AC symbols are mostly UNRESOLVED AND no
+//     code-root Touches file exists. The mirror image of the leak above (the RED test for
+//     no-size-aware-routing-A was silenced without restoring its status — the exact class this
+//     catches). Bookkeeping paths (milestones/**, docs/plans/**, .quay/**, receipts/**, tasks/**)
+//     are pipeline artifacts a fast-mode task never produces — their absence is ignored (AC4).
 export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), ratioFloor = 0.6, roots = CODE_ROOTS }) {
   const suspects = [];
   const reverse = [];
@@ -148,27 +240,32 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
     const touchesSection = extractSection(raw, "Touches");
     const candidates = extractSymbolCandidates(ac);
     if (status === "done") {
-      // Reverse drift: a done task whose implementation never landed. Require BOTH signals:
-      //   - the task DECLARES distinctive AC symbols and NONE of them resolve in code, AND
-      //   - the ## Touches files are absent (the code that should have created them is not in tree).
-      // A task with no backticked AC symbols (prose-only ACs) or no Touches is not judgeable by
-      // either signal alone — skip it (false positives on un-judgeable tasks are worse than missing
-      // a borderline one; the report is for human review).
+      // Reverse drift: a done task whose implementation never landed. Signal = distinctive AC
+      // symbols are mostly UNRESOLVED (fewer than half resolve — REVERSE_SYMBOL_RATIO_MAX, AC5) AND
+      // no code-root Touches entry exists (AC4). The Touches judgment counts only CODE-ROOT entries:
+      // a fast-mode task's bookkeeping paths (milestones/**, docs/plans/**, .quay/**, receipts/**)
+      // never exist in direct dispatch, so their absence proves nothing about the implementation.
+      //
+      // Not judgeable → skip (the OLD detector's deliberate rule, preserved): a done task with NO
+      // ## Touches section cannot be cross-checked by the symbol signal alone, and pre-convention
+      // done tasks predate Touches entirely — flagging them is noise (measured: DIR-044, DIR-073,
+      // exp5-DEFECT-*, … all have landed code but no Touches). A Touches section that parses to
+      // ZERO entries, or to only bookkeeping entries, IS judged fail-closed (proves nothing — AC6).
       const tAll = touchesAllExist(touchesSection, repoRoot);
       const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots }));
-      // A done task whose implementation never landed shows BOTH: Touches files absent AND most of
-      // its declared AC symbols unresolved (a task that legitimately extends existing infra still
-      // names NEW functions; those do not resolve). `reverseRatioFloor` (0.5) is the "mostly
-      // unresolved" bar — a task whose Touches is merely STALE (one missing entry) but whose code
-      // is mostly landed (DIR-117: 10/17) must NOT be flagged; a never-landed task (DIR-073: 0/4)
-      // is.
-      const noCode = !tAll && candidates.length > 0 && (matched.length / candidates.length) < 0.5;
+      const codeTouchExists = hasAnyCodeRootTouch(touchesSection, repoRoot);
+      const noCode = touchesSection != null
+        && !codeTouchExists
+        && !hasDoneChildren(raw, tasksDir)
+        && candidates.length > 0
+        && (matched.length / candidates.length) < REVERSE_SYMBOL_RATIO_MAX;
       if (noCode) {
         reverse.push({
           taskId: f.replace(/\.md$/, ""),
           status,
           matchedSymbols: matched,
           totalSymbols: candidates.length,
+          codeTouchExists,
           touchesAllExist: tAll,
         });
       }
@@ -196,7 +293,7 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
 export function formatJsonReport(suspects, reverse, scanned) {
   return JSON.stringify({
     suspects: suspects.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, touchesAllExist: s.touchesAllExist })),
-    reverse: reverse.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, touchesAllExist: s.touchesAllExist })),
+    reverse: reverse.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, codeTouchExists: s.codeTouchExists, touchesAllExist: s.touchesAllExist })),
     scanned,
   }, null, 2) + "\n";
 }
@@ -225,9 +322,9 @@ export function main(argv) {
         process.stdout.write("  → human review: set status to done (all ACs test-proven) or ready (an AC requires a real dispatch)\n");
       }
       if (reverse.length > 0) {
-        process.stdout.write(`task-status-drift: ${reverse.length} REVERSE-drift suspect(s) — status done but the implementation never landed (Touches files absent, AC symbols unresolved)\n`);
+        process.stdout.write(`task-status-drift: ${reverse.length} REVERSE-drift suspect(s) — status done but the implementation never landed (no code-root Touches file exists, AC symbols mostly unresolved)\n`);
         for (const s of reverse) {
-          process.stdout.write(`  reverse-drift-suspect: ${s.taskId} (status ${s.status}, ${s.matchedSymbols.length}/${s.totalSymbols} symbols resolved, touchesAllExist=${s.touchesAllExist})\n`);
+          process.stdout.write(`  reverse-drift-suspect: ${s.taskId} (status ${s.status}, ${s.matchedSymbols.length}/${s.totalSymbols} symbols resolved, codeTouchExists=${s.codeTouchExists}, touchesAllExist=${s.touchesAllExist})\n`);
         }
         process.stdout.write("  → human review: set status back to todo (code never landed) or finish the implementation\n");
       }
