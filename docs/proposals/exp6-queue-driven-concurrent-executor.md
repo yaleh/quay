@@ -25,6 +25,8 @@ Exp6 交付**两样东西，分两个阶段**：
 （读 TUI，ADR-016 已判定为权宜）与排程（会话内 `CronCreate`）不可产品化**，是阶段 2 的真实设计题。
 缺口清单见 `orchestration/exp6-phase1-sustained-unattended-operation.md` §D。
 
+**层间通信缺口已有解法提案**（2026-08-03）：[`quay-web-observation-surface.md`](./quay-web-observation-surface.md) —— 在现有 `serve` 上增量做一个三源 join（任务库/遥测/git）的只读观察面，零推理成本，同时供人、外层、以及未来的产品用户使用。它替代当前的 TUI 读屏（ADR-016 判定的权宜手段）。
+
 ### 判据为什么重要：三组实测数字（2026-08-02）
 
 | 维度 | 产品层 | 方法论层 | 比值 |
