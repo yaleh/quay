@@ -406,6 +406,18 @@ reclaim 被中止（无结果）——但 2 个 68s/60s 时序失败与 cancelle
 **三、P0 三个删除算子顺序不变**。**派发优先级**：P0 retire(#3)/stranded(#4) → P1 **resource-awareness(首)** →
 serve-task-list → web。testiso 已合并（scripts/test.sh 冲突解除），resource-awareness 可派
 
+### Tick 更新（04T03:30Z）：inventory 全量非绿→修 runner-grouping→合并套件重跑
+
+- **inventory 全量 fail 1**：`--group governance --list-files` 断言 governance 文件全在
+  `/experiments\/quay-perpetual-stream\/test\//` 下——inventory 测试（AC10 governance）在 `plugin/test/`
+  打破了该硬编码路径假设（「硬编码全局计数」类又一次）。**修复**（`runner-grouping.test.mjs`）：governance
+  根放宽到 experiments/ + plugin/test/（路径是活的成员关系非契约；计数关系不变）。runner-grouping 9/9 绿
+- **inventory 套件还漏了 testiso**（套件在 testiso merge 前起跑）——**合并套件重跑**（`bfldr7co2`，
+  含 inventory fix + testiso 8 测试一起验证）
+- 外层新建 **ADR-022**（retire classic milestone loop）——retire-pipeline 派发时引用
+- 下一步：合并套件绿 → 关 inventory + testiso → 派 P0 #3 retire（带窗口差集 + ADR-022）→ 信号 reclaim 重跑
+  → 派 P1 resource-awareness
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
