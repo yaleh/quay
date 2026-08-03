@@ -106,6 +106,22 @@ resume   n/a: 单次测量，无中途产物
 而本仓库已知有 8 个手写 harness 用 `process.exit(1)`——那正是它会漏掉的路径）；
 不改 tmpfs 大小；不把 `/tmp` 换成磁盘路径（那只是把内存问题换成 I/O 问题）。
 
+### 派发时的时序约定（外层 2026-08-03T08:07:33Z）
+
+**AC1 的归因不需要自己跑一次全量套件——搭车即可。**
+
+它需要的只是在**任何一次**全量套件运行的前后各数一次 `ls -1 /tmp | wc -l`，
+并记下新增条目的前缀分布。派发时 `gap-suite-sigma-distribution-stale-after-retirement`
+正在做受控 back-to-back 重测，**直接搭那两次运行的车**。
+
+**理由**：两者文件正交（`checkTouchesPair` 已复核 DISJOINT），但**资源上互斥**——
+都要求干净的低负载窗口。搭车既拿到归因数据，又不打扰 sigma 的窗口。
+这是 [[gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet]] 记的那类冲突的一个**廉价规避**，
+不是它的修复。
+
+**派发时的实测规模**：`/tmp` 15,052 条目（外层清理后 8,866）、近 30 分钟新增 1,836 个、
+占用 3899/7994 MB。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 归因表完成——「前缀 → 创建它的测试文件 → 每次全量套件泄漏几个」，
