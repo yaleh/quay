@@ -107,6 +107,7 @@ test("--group product runs a product fixture; product has no skip block", () => 
 
 test("AC7: an undeclared file defaults to engine in --list-groups", () => {
   const tempFile = join(repoRoot, "plugin", "test", "zz-runner-grouping-undeclared.test.mjs");
+  rmSync(tempFile, { force: true }); // a stale copy leaked by a file-level cancel (finally is skipped) must not skew the +1 baseline or trip the policy checker
   const before = parseGroups(runTestSh("--list-groups"));
   try {
     writeFileSync(tempFile, 'import { test } from "node:test";\ntest("und", () => {});\n');
