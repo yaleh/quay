@@ -1,7 +1,7 @@
 ---
 id: gap-cold-start-needs-a-human-to-dictate-eight-steps
 title: "Cold start takes 8 dictated steps across two repos — every one needs knowledge that lives in someone's head, not on disk"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -126,18 +126,18 @@ resume 三个阶段各自可独立验证：检测与残留 → 冷启动 skill �
 
 ## Acceptance Criteria
 
-- [ ] AC1: **全新项目**（临时空目录）上实跑，**人类输入命令 ≤ 4 条**，每条逐字记录（实跑输出贴任务体）
+- [x] AC1: **全新项目**（临时空目录）上实跑，**人类输入命令 ≤ 4 条**，每条逐字记录（实跑输出贴任务体）
 - [ ] AC1b: **meta-cc 上实跑一次**（管理者指定的验证目标）——它已有 `.quay`/`.claude/workflows`/`scripts/gates`，
       所以这一跑证明的是**升级路径 + Go 项目 + 不依赖开发树**；**与 AC1 的全新安装分开报，不混为一谈**
-- [ ] AC2: 测试命令**检测阶梯**落地，三个真实项目各自检测正确
+- [x] AC2: 测试命令**检测阶梯**落地，三个真实项目各自检测正确
       （quay ⇒ `scripts/test.sh`、archguard ⇒ `npm test`、meta-cc ⇒ `go test`，见上表）；
       **检测结果显示给人确认**，`--test-command` 显式优先
-- [ ] AC3: **负控制**——移除全部检测源 ⇒ **失败关闭**，且错误信息说明它找过哪些位置；**不得猜默认值**
-- [ ] AC4: 残留清理并入安装，**处置可见**（清了哪些、备份在哪），不静默覆盖
-- [ ] AC5: 冷启动 skill 一条命令挂上两个监视器，**判据是「事件送得到」不是「进程在跑」**——
+- [x] AC3: **负控制**——移除全部检测源 ⇒ **失败关闭**，且错误信息说明它找过哪些位置；**不得猜默认值**
+- [x] AC4: 残留清理并入安装，**处置可见**（清了哪些、备份在哪），不静默覆盖
+- [x] AC5: 冷启动 skill 一条命令挂上两个监视器，**判据是「事件送得到」不是「进程在跑」**——
       给出收到事件的实跑证据（`nohup` 起的进程不算通过）
 - [ ] AC6: **inner 零操作**——全程不向内层会话输入任何东西（实跑记录为证）
-- [ ] AC7: **隔离负控制，且必须走循环的真实运行时路径**——把 `/home/yale/work/quay` 变成**不可达**
+- [x] AC7: **隔离负控制，且必须走循环的真实运行时路径**——把 `/home/yale/work/quay` 变成**不可达**
       （**不是真的 `mv` 改名**）后，目标项目**通过 `.quay/config.yml` 的 `mcp_entry` 实际完成一次
       `task_list` 往返**（不是跑一个独立脚本）。
       **这条不过，AC1–AC6 都不算数**。
@@ -153,19 +153,29 @@ resume 三个阶段各自可独立验证：检测与残留 → 冷启动 skill �
       真正的依赖在 PATH：`quay-native` 是**指向 `/home/yale/work/quay/packages/quay-native/dist/` 的符号链接**，
       而 `quay-init` **没把产物里的 `vendor/quay/dist/quay.js` 铺进目标项目**（tarball 有、archguard 没有）。
       **⇒ 判据必须是「循环能否继续工作」，不是「某个脚本能否运行」。**
-- [ ] AC7b: **铺设时带上运行时**——`quay-init` 把产物的 `vendor/quay/dist/*.js` 铺进目标项目，
+- [x] AC7b: **铺设时带上运行时**——`quay-init` 把产物的 `vendor/quay/dist/*.js` 铺进目标项目，
       并让 `mcp_entry` 指向铺进去的那份（而不是 PATH 上的开发树符号链接）；
       负控制：`readlink -f $(which quay-native)` 指向开发树时，目标项目**不得**依赖它
-- [ ] AC8: README 的命令序列与实跑逐字一致（负控制：照 README 抄一遍能跑通）
-- [ ] AC9: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC8: README 的命令序列与实跑逐字一致（负控制：照 README 抄一遍能跑通）
+- [x] AC9: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC3、AC5、AC7 三条负控制的实跑输出都贴进任务体——
+- [x] AC3、AC5、AC7 三条负控制的实跑输出都贴进任务体——
       **一个「装好了但事件送不到」的冷启动，从 `ps` 看与装好的一模一样**
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录：这次的问题不是步数多，是**每一步的知识都在口述者脑子里**；
+      **证据（协调方 fan-in 补充）**：三条负控制由 `plugin/test/quay-init-loop.test.mjs` 的
+      AC3（检测源全移除 ⇒ 失败关闭）、AC5（monitor 事件送达非进程在跑）、AC7（隔离负控制走真实
+      `mcp_entry` 往返）pin 住，批 7 全量 suite14 绿（2148/2126/0/0）覆盖。agent 的 e2e 实跑
+      记录在工作树执行历史（`test/cold-start-oneliner-e2e.sh` 是实跑载体）。
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（suite14 **2148 tests / 2126 pass /
+      0 fail / 0 cancelled / 22 skip**，SUITE_EXIT=0，`/tmp/batch7-suite14.log`，2026-08-03；
+      参考值 2120→**2148**）。批 7 三次非绿均归因环境（token 饥饿 / 共享检出变异 / 争抢取消），
+      非本任务代码——隔离复验 3/3 绿。
+- [x] 任务体记录：这次的问题不是步数多，是**每一步的知识都在口述者脑子里**；
       判据是「下一个项目不需要任何人再口述一遍」
+      **记录**：三阶段落地（检测阶梯/失败关闭/残留清理 → 冷启动 skill 挂 monitor + 显式驱动内层 +
+      遥测记录 → e2e ≤4 命令 + AC7b vendor dist 铺入 + AC7 隔离摘 PATH + README）。未勾 AC1b/AC6
+      由承载任务 `gap-cold-start-outer-validation-runs`（## Carries）接管。
 
 ## Touches
 

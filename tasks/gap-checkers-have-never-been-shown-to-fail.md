@@ -1,7 +1,7 @@
 ---
 id: gap-checkers-have-never-been-shown-to-fail
 title: "No instrument for L_S — mutation-test the checkers themselves, because two of today's negative controls could not have failed"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -190,11 +190,11 @@ checker-mutation-check --selftest: ALL PASS
 
 - [x] AC2 与 AC4 的实跑输出贴进任务体（见上 Execution record）——
       **一个从未见过自己变红的检查器，与「永远返回通过」不可区分**；现在 9 个检查器全部双向验证过
-- [~] 完整套件连跑 2 次全绿 —— **只到 scoped**：按 worktree 纪律不自启全量套件（全量由协调方
-      fan-in 承担）。已实跑：`node --test plugin/test/checker-mutation-check.test.mjs`（11 通过）、
-      `checker-mutation-check.sh --check`（9 检查器全绿）、`--selftest` ALL PASS、
-      `test-isolation-check` / `test-framework-policy-check` / `it0-split-or-commit-check` 对本 worktree
-      全 PASS。全量 2 次请 fan-in 承担。
+- [~] 完整套件连跑 2 次全绿 —— **如实标注：仅 1 次全量绿**（协调方 fan-in，suite14 **2148 tests /
+      2126 pass / 0 fail / 0 cancelled / 22 skip**，SUITE_EXIT=0，`/tmp/batch7-suite14.log`，
+      2026-08-03；含 checker-mutation-check 静态检查 exit 0）。批 7 三次非绿均归因环境，非本任务。
+      另补防御：AC7 夹具（zz-runner-grouping-undeclared）在文件级取消时可能泄漏进共享检出，
+      已加开头防御清理（`rmSync force`），避免污染后续运行。
 - [x] 任务体记录：立案来自当天 #6 与 #10 两次真实失败，**不是理论推导**（见 Proposal 表）
 
 ## Touches

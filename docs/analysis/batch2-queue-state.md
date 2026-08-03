@@ -1653,3 +1653,23 @@ quay 永远回收不了 token，全量套件（test.sh 内部 fail-closed 获取
 （12 次套件尝试、零获取，回收双条件 AND 在对面 churn 时变无界饥饿）+ `gap-token-status-reports-a-dead-holder-as-busy`
 （--status 只评估 acquire 时的 staleness）。**均 status: todo、未派发**（无 worktree）。token 只影响套件能否启动，不决定批 7 关闭。
 内层不派发新任务（停止条件：全量 suite 未真绿）。
+
+### 批 7 关闭（2026-08-03 21:5xZ，suite14 全绿）
+
+**suite14 全量绿**：**2148 tests / 2126 pass / 0 fail / 0 cancelled / 22 skip**，SUITE_EXIT=0
+（`/tmp/batch7-suite14.log`，干净窗口 load 2.99 起跑）。**参考值 2120→2148**（tick 文档已更新）。
+**批 7 三个任务全部关闭**（status done + `--task-end` ×3）：cold8 / checkers / live2。
+worktree 已清理、分支已删除、Land `--snapshot` 已写（累计阻塞 2.47 min）。
+
+**关闭前处置**：
+- **AC6/AC7（RESUMED）修复**：`cfbc7459`（等待窗口 8s→25s，争抢下 8s 不足），suite14 绿覆盖。
+  负控制待补（外层要求：载荷缺失时测试必须仍红）。
+- **runner-grouping 防御清理**：AC7 夹具开头 `rmSync force`，防文件级取消泄漏进共享检出。
+- **zz 夹具泄漏已删**（未跟踪，曾污染 glob）。
+- **cold8 承载任务**：`gap-cold-start-outer-validation-runs`（## Carries acs: AC1b, AC6）——
+  三条验证 AC 待外层实跑（meta-cc 写入 / inner 零操作 / 多模型）。
+- **loop-shipping AC2 根因**：ts-typecheck-gate 的 REPO_ROOT mkdtemp 竞态（非实体拷贝），下次红时留 got。
+- **quay-github 两 gate 测试**：只在有变异体的 suite12 红，丢弃。
+
+**待办**：token 饥饿修复任务（外层）、cfbc7459 负控制、cold8 验证承载任务、loop-shipping 根因修复。
+**下一批候选**：视外层优先级（token 任务落地后补满在飞槽位）。

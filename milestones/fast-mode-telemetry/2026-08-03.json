@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T18:15:44.332Z",
+  "generatedAt": "2026-08-03T21:47:55.662Z",
   "since": null,
   "tasks": [
     {
@@ -23,6 +23,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-checkers-have-never-been-shown-to-fail",
+      "minutes": 203.85698333333335,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-checks-that-verify-an-empty-set-must-fail-closed",
       "minutes": 95.00131666666667,
       "outcome": "done"
@@ -30,6 +35,11 @@
     {
       "taskId": "gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it",
       "minutes": 54.22391666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-cold-start-needs-a-human-to-dictate-eight-steps",
+      "minutes": 284.1206833333333,
       "outcome": "done"
     },
     {
@@ -153,6 +163,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-session-liveness-stage-2-screen-signal-and-payload",
+      "minutes": 203.85615,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-stranded-worktree-branches-have-no-alarm-channel",
       "minutes": 91.67928333333333,
       "outcome": "done"
@@ -254,23 +269,25 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [
-    {
-      "taskId": "gap-cold-start-needs-a-human-to-dictate-eight-steps",
-      "runId": "fm-gap-cold-start-needs-a-human-to-dictate-eight-steps-1785776615141-d05ioq",
-      "startedAtMs": 1785776615159
-    }
-  ],
-  "meanMinutes": 58.46199933333333,
-  "medianMinutes": 56.2526,
-  "tasksPerHour": 1.5740002717598913,
-  "serialEquivalentPerHour": 1.0263076987479924,
+  "inProgress": [],
+  "meanMinutes": 68.20629779874214,
+  "medianMinutes": 56.32268333333333,
+  "tasksPerHour": 1.5013027932674818,
+  "serialEquivalentPerHour": 0.8796841631405262,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T18:15:44.303Z",
-  "windowHours": 31.76619527777778,
+  "windowEnd": "2026-08-03T21:47:55.619Z",
+  "windowHours": 35.30267194444444,
   "haltedHours": 0,
   "halted": [],
-  "blocked": [],
-  "totalBlockedMs": 0,
-  "longestBlockedMs": 0
+  "blocked": [
+    {
+      "taskId": "batch7-fanin-closure",
+      "reason": "suite-red",
+      "sinceMs": 1785789347537,
+      "clearedAtMs": 1785789495843,
+      "durationMs": 148306
+    }
+  ],
+  "totalBlockedMs": 148306,
+  "longestBlockedMs": 148306
 }

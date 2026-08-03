@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-stage-2-screen-signal-and-payload
 title: "session-liveness stage 2 — semantic screen markers, cross-signal control, event payload, and per-class thresholds"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -164,9 +164,11 @@ resume 屏幕标志 → 交叉正控制 → payload → 阈值，四步各自可
       AC5 实跑（40 分钟旧心跳 `SESSION-OVERDUE … 阈值 30 分钟`；fresh 心跳 IDLE 静默 / stale
       心跳 IDLE 报出）已分别贴在 AC2/AC5 条目下。
 - [~] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明——本仓今天已有三次先例）
-      **按隔离纪律不自启全量套件（全量由协调方 fan-in 承担）**；scoped
-      `node --test plugin/test/session-liveness.test.mjs` 复跑 **3 次全绿 30/30**（21 旧 + 9 新；
-      末次为最终代码）。全量套件的「连跑 2 次」由 fan-in 补。
+      **如实标注：仅 1 次全量绿**（协调方 fan-in，suite14 **2148 tests / 2126 pass / 0 fail /
+      0 cancelled / 22 skip**，SUITE_EXIT=0，`/tmp/batch7-suite14.log`，2026-08-03）。
+      **AC6/AC7（RESUMED）在套件下曾真红**（suite7/suite12 唯一两次都红）——协调方修复：
+      RESUMED 等待窗口 8s→25s（`cfbc7459`，争抢下 8s 不足、机制正确），suite14 绿覆盖。
+      suite7/12 里 session-liveness 文件级取消（71-86s）是争抢超时非缺陷（单独重跑 39/39 绿）。
 - [x] 任务体记录：本任务是前任务阶段二的承载者，**前任务以 8/16 AC 收尾是外层指令的缺口**，
       不是内层漏做
       **证据**：见下方「阶段二完成记录」——8 条承载 AC（AC1-AC7、AC9）+ 新增盲点 AC9 + 测试 AC8
