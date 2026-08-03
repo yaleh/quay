@@ -81,20 +81,36 @@ exec claude "$@"
 
 ---
 
-## 3. tmux 里怎么起
+## 3. tmux 里怎么起：**一个会话一个具名 window，不用 pane**
 
-三个会话已存在，`claude` 未在后两个里启动：
+| tmux | window | 角色 | 模型（按 `/proc/<pid>/cmdline` 实测，不看会滚走的横幅） |
+|---|---|---|---|
+| `quay-0` | `0 inner` | 内层 | `deepseek-v4-flash` |
+| | `1 outer` | 外层（管理者） | 默认（opus）——**不走 deepseek 端点**，已实测 |
+| `archguard-2` | `0 inner` | 内层 | `deepseek-v4-flash` |
+| | `1 outer` | 外层 | `deepseek-v4-pro` |
+| `meta-cc-4` | `0` | 未启动 | — |
 
-| tmux | cwd | 状态 |
-|---|---|---|
-| `quay-0` | `/home/yale/work/quay` | 内层 + 外层运行中 |
-| `archguard-2` | `/home/yale/work/archguard` | **bash，未启动** |
-| `meta-cc-4` | `/home/yale/work/meta-cc` | **bash，未启动** |
+### 为什么是 window 不是 pane（实测，不是偏好）
 
-发送方式按 `CLAUDE.md` 的 tmux 纪律：**`C-u` → 文本 → `Enter` 三次分开调用**
-（合并会丢 Enter），发完 `capture-pane` 确认出现新的 `⏺` 输出——**未确认送达的指令等于没发**。
+上下分屏后每个 pane 只有 **93×57**，独立 window 是 **93×116**。代价对外层很具体：
 
----
+1. **一次 `capture-pane` 只剩一半上下文**——57 行装不下 TUI 加一段工具输出，
+   长输出很快滚出可视区（`capture-pane -S -N` 能取回滚，那是补救不是默认）
+2. **pane 索引会漂**——加/删/交换 pane 会重编号，`archguard-2:0.1` 这个目标不稳定；
+   window 名不会漂。**所以一律按名字寻址**：`tmux capture-pane -t archguard-2:outer`
+3. 93 列边界上的多字节截断两者一样，不构成差别
+
+要同屏观察，另开一个专门的监视 window 拆 pane，**不要拆运行会话的 window**。
+
+`allow-rename` / `automatic-rename` 都已关闭——否则窗口名会被程序改掉，寻址又漂回去。
+
+### 一个真踩到的坑：`break-pane` 的 `-s` 和 `-t`
+
+`tmux break-pane -d -s archguard-2:0.1 -n outer` 把新 window 建到了 **quay-0**，
+因为 **`-s` 是源、`-t` 是目的地**，我只给了 `-s`，目的地就默认成了当前会话。
+用 `tmux move-window -s quay-0:2 -t archguard-2:1` 移回。
+**跨会话操作一律显式给 `-t`。**
 
 ## 4. 这份配方此前不可复现——这本身是冷启动的缩影
 
