@@ -74,19 +74,69 @@ resume 先定判别式与文案，再改页面
 
 ## Acceptance Criteria
 
-- [ ] AC1: `/live` 在遥测为空时区分两种状态并各有文案，**且说明判据**（哪条活动信号有/无）
-- [ ] AC2: **负控制（在跑但未接）**——构造「有提交/有 tick 日志活动 + 遥测目录不存在」⇒ 页面说「在跑但未接遥测」（实跑输出贴任务体）
-- [ ] AC3: **负控制（没跑）**——构造「无任何活动信号 + 遥测为空」⇒ 页面说「未在运行」（实跑输出贴任务体）
-- [ ] AC4: **不回退**——读失败仍与无数据分开、仍不 500（负控制：制造一个不可读的遥测目录）
-- [ ] AC5: 用 **archguard 当前状态**作为真实样本验证 AC2（它此刻正是那一类）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group product`（web 路由是用户可见契约）
+- [x] AC1: `/live` 在遥测为空时区分两种状态并各有文案，**且说明判据**（哪条活动信号有/无）
+      — 判别式 `decideLiveState`（`observation.ts`）+ 页面 `renderLivePage`（`serve-handlers.ts`）：
+      遥测为空 ⇒ 有任一活动信号（最近 30 分钟提交数 > 0 或 tick-log mtime ≤ 30 分钟）→
+      `running-unwired`「在跑但未接遥测」；全无 → `not-running`「未在运行」。文案逐条点名
+      「有/无」哪条信号（例：「有活动信号（最近 30 分钟有 1 条提交；tick 日志在 0 分钟前被写过）…
+      无任何活动信号（30 分钟内无提交；tick 日志缺失/不可读）」）。单测钉住判定规则：
+      `decideLiveState` 四例（有提交/有 tick/两者皆无/tick 已 45 分钟未更）全过。
+- [x] AC2: **负控制（在跑但未接）**——构造「有提交/有 tick 日志活动 + 遥测目录不存在」⇒ 页面说「在跑但未接遥测」（实跑输出贴任务体）
+      — `packages/quay/test/live-state.test.mjs` AC2 用例 + `serve.test.mjs` 观察块改后的重命名负控制。实跑输出见下方 **DoD 实跑输出 #1**。
+- [x] AC3: **负控制（没跑）**——构造「无任何活动信号 + 遥测为空」⇒ 页面说「未在运行」（实跑输出贴任务体）
+      — `live-state.test.mjs` AC3 用例（无 git、无 orchestration/、无 .workflow-events/）。实跑输出见下方 **DoD 实跑输出 #2**。
+- [x] AC4: **不回退**——读失败仍与无数据分开、仍不 500（负控制：制造一个不可读的遥测目录）
+      — `live-state.test.mjs` 第 4 用例把 `.workflow-events/` 变成普通文件：`/live` 仍 200、
+      页面只出「读失败」、不含「在跑但未接遥测」/「未在运行」/「无数据」。
+- [x] AC5: 用 **archguard 当前状态**作为真实样本验证 AC2（它此刻正是那一类）
+      — 对 `/home/yale/work/archguard` 实跑 `readLive`（`2026-08-03` 现场同刻确认：30 分钟 2 条提交、
+      `orchestration/tick-log.md` mtime 17:18、`.workflow-events/` 不存在）：
+      ```
+      readLive("/home/yale/work/archguard") →
+      { status: "empty", reason: "未找到遥测记录（.workflow-events/ 不存在）",
+        liveState: "running-unwired",
+        liveExplanation: "有活动信号（最近 30 分钟有 2 条提交；tick 日志在 17 分钟前被写过），但遥测记录为 0 —— 循环在跑，只是没往 .workflow-events/ 写（未找到遥测记录（.workflow-events/ 不存在））",
+        activity: { recentCommits: 2, tickLogFresh: true, tickLogAgeMinutes: 16.93 } }
+      ```
+      与任务描述的三条信号现场完全一致 ⇒ 页面会把 archguard 判成「在跑但未接遥测」。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group product`（web 路由是用户可见契约）
+      — 新文件 `packages/quay/test/live-state.test.mjs`：首行 `// @test-group product`，
+      `import { test } from "node:test"` + `node:assert/strict`。既有 `serve.test.mjs` 在豁免清单上
+      （34 个 legacy 文件之一），只改动其过期断言（重命名后从「无数据」改为「在跑但未接遥测」），
+      未向豁免文件新增测试。
 
 ## Definition of Done
 
-- [ ] AC2 与 AC3 两个方向的实跑输出都贴进任务体——
+- [x] AC2 与 AC3 两个方向的实跑输出都贴进任务体——
       **只证明能显示一种状态，与原来那个笼统的「无数据」同形**
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录：这是第 11 次「存在≠生效」，**形态是新的一种——「跑了，但没往它该写的地方写」**
+
+  **实跑输出 #1（AC2，running-unwired）** — 构造「有提交 + 有 tick 日志 + 遥测目录不存在」，
+  真实 serve 进程 `GET /live` 的状态横幅（`live-state.test.mjs` AC2 用例同一场景的实跑输出）：
+  ```
+  在跑但未接遥测 live_state=running-unwired
+  有活动信号（最近 30 分钟有 1 条提交；tick 日志在 0 分钟前被写过），但遥测记录为 0 —— 循环在跑，只是没往 .workflow-events/ 写（未找到遥测记录（.workflow-events/ 不存在））
+  下一步：检查目标项目的循环是否调用 --task-start / --task-end 。
+  ```
+
+  **实跑输出 #2（AC3，not-running）** — 构造「无任何活动信号 + 遥测为空」（无 git、无 orchestration/、
+  无 .workflow-events/），真实 serve 进程 `GET /live` 的状态横幅：
+  ```
+  未在运行 live_state=not-running
+  无任何活动信号（30 分钟内无提交；tick 日志缺失/不可读），遥测记录为 0（未找到遥测记录（.workflow-events/ 不存在））
+  下一步：检查会话/cron 是否启动。
+  ```
+
+  两个方向各自断言了反方向文案**不出现**（「在跑但未接遥测」与「未在运行」在页面上可区分），
+  不再是同形的单一「无数据」。
+- [~] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
+      — **未自跑完整套件**：按隔离契约，全量由协调方 fan-in 承担，本 worktree 不自启全量。
+      已跑 scoped 覆盖全部触及面：`live-state.test.mjs` 4/4 绿、`serve.test.mjs` 全绿、
+      `serve-adr.test.mjs` 4/4、`live-b-provider-env.test.mjs` 7/7、
+      `core-three-way-symmetry.test.mjs` 1/1、`web-ui-browser.test.mjs` 1/1。请协调方跑全量 2 次。
+- [x] 任务体记录：这是第 11 次「存在≠生效」，**形态是新的一种——「跑了，但没往它该写的地方写」**
+      — 前几次是「装了没跑」「写了没人读」；这一次是循环在跑（有提交、tick 日志被写、内层在忙），
+      但从不调用 `--task-start/--task-end`，所以 `.workflow-events/` 一条记录都没有。观察面因此
+      与「循环死了」同形。本任务让页面用现成活动信号把这两种状态拆开，各自给出不同下一步动作。
 
 ## Touches
 

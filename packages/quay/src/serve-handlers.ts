@@ -7,6 +7,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
 import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection } from "./observation.ts";
+// live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
+// two telemetry-empty states must have DIFFERENT copy AND a next-step action, and never collapse
+// back to the generic 「无数据」.
+export const LIVE_STATE_RUNNING_UNWIRED_LABEL = "在跑但未接遥测";
+export const LIVE_STATE_NOT_RUNNING_LABEL = "未在运行";
 
 // ── Rendering helpers (moved from serve.ts) ──────────────────────────────────
 
@@ -1131,14 +1136,31 @@ function renderLivePage(live: LiveResult): string {
     </tr>`).join("\n")}
   </table>` : "";
 
-  const statusNote = live.status === "empty"
-    ? html`<p class="meta"><strong>无数据</strong> — ${escapeHtml(live.reason || "")}</p>`
-    : live.status === "error"
-      ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(live.reason || "")}</p>`
-      : "";
+  // gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: telemetry-empty no longer renders one
+  // generic 「无数据」 — it renders one of TWO states decided by activity signals, each with the
+  // judgment evidence (which signal present/absent) and a next-step action. The machine key
+  // (`live_state=…`) is emitted in-band so `curl /live | grep live_state` is the contract measure.
+  // A telemetry READ FAILURE still renders 「读失败」 and nothing else (AC4: no regression — the
+  // two empty-state texts must never mask an unreadable store).
+  let statusNote = "";
+  if (live.status === "error") {
+    statusNote = html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(live.reason || "")}</p>`;
+  } else if (live.liveState === "running-unwired") {
+    statusNote = html`<div class="info-banner" role="status">
+      <p><strong>${LIVE_STATE_RUNNING_UNWIRED_LABEL}</strong> <code>live_state=running-unwired</code></p>
+      <p>${escapeHtml(live.liveExplanation || "")}</p>
+      <p>下一步：检查目标项目的循环是否调用 <code>--task-start</code>/<code>--task-end</code>。</p>
+    </div>`;
+  } else if (live.liveState === "not-running") {
+    statusNote = html`<div class="error-banner" role="alert">
+      <p><strong>${LIVE_STATE_NOT_RUNNING_LABEL}</strong> <code>live_state=not-running</code></p>
+      <p>${escapeHtml(live.liveExplanation || "")}</p>
+      <p>下一步：检查会话/cron 是否启动。</p>
+    </div>`;
+  }
 
   const summary = live.status === "ok"
-    ? html`<p class="meta">并发数: ${live.concurrency} · 在飞: ${live.inFlight.length}${live.cpuPressure != null
+    ? html`<p class="meta"><code>live_state=running</code> · 并发数: ${live.concurrency} · 在飞: ${live.inFlight.length}${live.cpuPressure != null
         ? html` · CPU 压力 (some avg10): ${escapeHtml(live.cpuPressure.toFixed(2))}`
         : ""}</p>`
     : "";
@@ -1181,6 +1203,9 @@ export async function handleLive(
       inFlight: [],
       concurrency: 0,
       cpuPressure: null,
+      liveState: null,
+      liveExplanation: null,
+      activity: null,
     };
   }
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
