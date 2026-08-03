@@ -161,18 +161,23 @@ export function removeWorktree({ workspace, milestone }) {
 }
 
 // _mergeAddedFiles — for a branch that entered master via a --no-ff MERGE (its tip is NOT on master's
-// first-parent chain), find that merge commit (the most recent commit on master whose parent set
-// includes the tip) and compute the files IT added relative to its first parent — the branch's own
-// contribution, exactly the set a `git revert` of the merge removes. Returns {missing:[...]}: the
-// subset of those merge-added files that are ABSENT from master's CURRENT tree, i.e. the revert is
-// still active (a later restore — M243's 3dfba2c6 — re-adds them, so missing becomes empty).
+// first-parent chain), find that merge commit and compute the files IT added relative to its first
+// parent — the branch's own contribution, exactly the set a `git revert` of the merge removes.
+// Returns {missing:[...]}: the subset of those merge-added files that are ABSENT from master's CURRENT
+// tree, i.e. the revert is still active (a later restore — M243's 3dfba2c6 — re-adds them, so missing
+// becomes empty).
 function _mergeAddedFiles(workspace, tip) {
   const revs = _gitOk(workspace, ["rev-list", "--parents", "master"]);
   if (!revs.ok) return { error: revs.out };
   let merge = null;
   for (const line of revs.out.split("\n")) {
     const parts = line.trim().split(/\s+/);
-    if (parts.length >= 3 && (parts[1] === tip || parts[2] === tip)) { merge = parts[0]; break; }
+    // The milestone flow's Land merge is `git merge --no-ff <branch>` from master, which ALWAYS puts the
+    // branch tip as the SECOND parent of the merge commit. A merge whose FIRST parent is the tip would be
+    // a reverse-merge the flow never produces — matching only parts[2] makes the selection provably the
+    // branch's own Land merge (adversarial review, 2026-08-03: parts[1] was the one theoretical wrong-
+    // merge path; unreachable in practice, removed for provable correctness).
+    if (parts.length >= 3 && parts[2] === tip) { merge = parts[0]; break; }
   }
   if (!merge) return { error: `no merge commit on master has branch tip ${tip} as a parent` };
   const added = _gitOk(workspace, ["diff", "--name-only", "--diff-filter=A", `${merge}^1..${merge}`]);
