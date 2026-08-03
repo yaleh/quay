@@ -142,9 +142,13 @@ tmux capture-pane -p -t quay-0:0.0 | md5sum; sleep 25
 tmux capture-pane -p -t quay-0:0.0 | md5sum      # 两次相同 = 空闲
 ```
 
-**c) 外层的独立核实会和内层抢 CPU。** 步骤 1 写着「只读」，但跑一次全量套件是 **9 分钟的 8 路满载**，
-足以把内层 `select-preflight` 那种 timeout 余量只有 8% 的测试压成 flaky。规则：**全量套件只在内层
-确认空闲时跑，且跑完再叫醒内层**；内层在飞时只核实便宜的声称（文件存在、grep 计数、单文件测试）。
+**c) 外层的独立核实会和内层抢 CPU——这是机制不是散文。** 步骤 1 写着「只读」，但跑一次全量套件是
+**数分钟的满载**，足以把内层 `select-preflight` 那种 timeout 余量只有 8% 的测试压成 flaky。
+规则改为**机械执行**：跑全量套件前调用资源闸
+`bash scripts/resource-gate.sh --for full-suite`（`gap-no-resource-awareness-heavy-ops-run-blind`）——
+退出码非 0 = WAIT，**此时不要跑全量**，改为核实便宜的声称（文件存在、grep 计数、单文件测试）。
+gate 读 `/proc/pressure/cpu` `some avg10`（结构信号，不是 load 代理）并输出数字与限值，把
+「现在能不能跑」变成一个可核对的数字。内层在飞时只核实便宜的声称；**全量只串行跑、跑完再叫醒内层**。
 
 **d) cron 只在本会话空闲时触发。** 外层正在和人对话时，`*/20` 的 tick 不会 fire。人机对话期间外层
 事实上是停的——所以**每次对话结束前手动补一次 tick**，不要假设 cron 会接上。

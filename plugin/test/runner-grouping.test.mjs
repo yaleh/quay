@@ -187,7 +187,7 @@ test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes ext
   const src = readFileSync(testSh, "utf8");
   assert.match(src, /elif all_flags "\$@"; then/, "default dispatch must have a flags-only branch");
   assert.match(src, /run_selected "\$\(effective_groups\)" "\$@"/, "flags-only must route to the default glob");
-  assert.match(src, /exec node --test --test-concurrency=8 "\$@" "\$\{files\[@\]\}"/, "user flags must precede the file list (last-flag-wins)");
+  assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/, "user flags must precede the file list (last-flag-wins); default concurrency is derived (gap-no-resource-awareness-heavy-ops-run-blind AC5)");
   // The --group dispatch has the same flags-only branch, routing to the group's glob.
   assert.match(src, /run_selected "\$groups" "\$@"/, "group flags-only must route to the group glob");
 });

@@ -261,6 +261,15 @@ extra:
   159/159 文件采集，node --test 退出码 1（既有失败）。run4 提供总 CPU 的第二个采样（与 run3 的
   3266 s 相差 168 s ≈ ±5%）。
 
+### Addendum（2026-08-03，`gap-no-resource-awareness-heavy-ops-run-blind` AC9）
+
+**同一提交两次结果不同，可能是 CPU 饥饿而非测试缺陷。** 本任务的 4 次墙钟测量里有 2 次
+（run2 及 run 间差异）都能用「4 核跑 c8 = 17 进程、4.25× 超订」解释，而 AC1b 的断言计时实测
+（35 个 ≥1000ms 间隔全部是进程边界）进一步说明：套件内大量耗时来自进程 spawn 的争抢，不是逻辑。
+因此「连跑 2 次全绿」在一台 4.25× 超订的机器上**不是一个关于代码的判据**——run1 零失败、run2
+一个失败更可能是负载抖动。判据必须先过资源闸（`scripts/resource-gate.sh --for full-suite` 报 GO）
+再谈代码。这也是本任务 run-to-run 噪声（17–63s 极差）里未被分解的一部分。
+
 ## Touches
 
 - scripts/test.sh

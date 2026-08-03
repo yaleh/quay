@@ -71,11 +71,14 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 ```
 两者满足 → 没有任何东西在跑，通知不会来了，**去核对产出/续跑**。每跑完一步就落盘（任务体/队列文件），不要攒到最后——即使 agent 静默停止，已落盘数据不丢，可从缺口续跑。
 
-**跑全量前用 CPU pressure 判据（2026-08-03，外层更正：load 是代理信号，pressure 才是直接证据）**：
-重型测试超时是「任务在等 CPU」的直接结果，load 会骗人（claude 会话常驻使 load 永不降）。用
-`/proc/pressure/cpu` 的 **`some avg10 < 40`** 才跑全量；memory `some avg10` 也应接近 0（本机 swap=0、
-MemAvailable ~5G，OOM 无降级段）。参考：nproc=4 而 test.sh 默认 `--test-concurrency=8`（设计性 2 倍超订），
-两层绝不同时跑全量套件（资源感知任务 `gap-no-resource-awareness-heavy-ops-run-blind` 已建，排队中）。
+**跑全量前调用资源闸（机制，不是散文——`gap-no-resource-awareness-heavy-ops-run-blind`）**：
+`scripts/test.sh` 已在默认全量路径接入 `bash scripts/resource-gate.sh --for full-suite`——WAIT 时
+打印数字后退出非 0，**不静默等待**。手动跑全量同样先调 gate：退出码 0=GO 才跑，非 0=WAIT 不跑。
+gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 CPU 的比例；load 是代理，
+claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
+ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，test.sh 默认并发已改为
+**推导值 `max(1, floor(nproc / 2.1)) = 1`**（不再写死 8——8 worker + 子进程 = 17 进程、4.25× 超订，
+是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先。两层绝不同时跑全量套件。
 
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled

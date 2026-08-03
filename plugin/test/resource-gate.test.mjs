@@ -1,0 +1,193 @@
+// @test-group engine
+// resource-gate.test.mjs — gap-no-resource-awareness-heavy-ops-run-blind. Pins the shared resource
+// gate (scripts/resource-gate.sh) + the derived concurrency default (scripts/test.sh
+// default_test_concurrency) as a MECHANICAL mechanism, not prose:
+//
+//   AC2 — the gate reads /proc/pressure/cpu `some avg10` (structural), never load average (proxy)
+//   AC4 — it counts `pgrep -xc node-MainThread` (exact comm), never `pgrep -f` / `grep -x node`
+//   AC3 — GO ↔ WAIT both directions, deterministically via the env test seams (no busy-loop flake)
+//   AC6 — mem_avail < 2048MB → WAIT + prints RSS top-5
+//   AC10 — orphaned node procs printed on their own line, excluded from the GO/WAIT verdict
+//   AC7 — test.sh consults the gate on the full-suite default path; skips it for scoped runs
+//   AC5 — default concurrency = max(1, floor(nproc / amplification)); explicit --test-concurrency=N wins
+//
+// The gate's own AC3 (raise cpu pressure with real busy loops, watch WAIT, stop, watch GO) is a
+// live-system control — recorded in the task body, not here (a unit test cannot hold /proc/pressure
+// hostage). The env seams below pin the SAME verdict logic deterministically.
+//
+// Run:
+//   scripts/test.sh plugin/test/resource-gate.test.mjs
+//   node --test plugin/test/resource-gate.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function _findRepoRoot(startDir) {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, ".quay", "config.yml"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error("Cannot find repo root: no .quay/config.yml found upward from " + startDir);
+}
+const REPO_ROOT = _findRepoRoot(__dirname);
+const GATE = path.join(REPO_ROOT, "scripts", "resource-gate.sh");
+const TEST_SH = path.join(REPO_ROOT, "scripts", "test.sh");
+
+/** Run the REAL gate with env-seam overrides. Returns { status, stdout } (stderr merged). */
+function runGate(envOverrides = {}, args = []) {
+  const env = { ...process.env, ...envOverrides };
+  const res = spawnSync("bash", [GATE, ...args], { cwd: REPO_ROOT, encoding: "utf8", env });
+  return { status: res.status, stdout: `${res.stdout}\n${res.stderr}` };
+}
+
+/** Extract the REAL default_test_concurrency function from scripts/test.sh and run it with seams. */
+function derivedConcurrency(nproc, amplification) {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  const fnMatch = src.match(/default_test_concurrency\(\) \{[^]*?\n\}/);
+  assert.ok(fnMatch, "scripts/test.sh must define default_test_concurrency()");
+  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nprintf '%s' "$(default_test_concurrency)"\n`;
+  const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+  assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
+  return Number(res.stdout.trim());
+}
+
+// ── AC2: the gate reads /proc/pressure/cpu some avg10, not load average ────────────────────────────
+test("AC2 — gate reads /proc/pressure/cpu `some avg10` (structural), not load average (proxy)", () => {
+  const src = fs.readFileSync(GATE, "utf8");
+  // The header comment EXPLAINS why load average is rejected (proxy) — the CODE must not use it.
+  const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+  assert.match(src, /\/proc\/pressure\/cpu/, "gate must read /proc/pressure/cpu");
+  assert.match(src, /avg10=/, "gate must parse the some avg10 field");
+  assert.match(src, /some avg10 < 40|CPU_LIMIT/, "gate must carry the some avg10 < 40 band");
+  assert.doesNotMatch(code, /load average/, "gate must NOT use load average as the verdict basis");
+  assert.doesNotMatch(code, /\/proc\/loadavg/, "gate must NOT read /proc/loadavg");
+});
+
+// ── AC4: pgrep -xc node-MainThread (exact comm), never pgrep -f / grep -x node ─────────────────────
+test("AC4 — gate counts `pgrep -xc node-MainThread` (exact comm), never `pgrep -f` / `grep -x node`", () => {
+  const src = fs.readFileSync(GATE, "utf8");
+  // The header comment may MENTION the forbidden spellings (as warnings) — the CODE must not.
+  const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+  assert.match(src, /pgrep -xc node-MainThread/, "gate must use `pgrep -xc node-MainThread`");
+  assert.match(src, /node-MainThread/, "the comm name must be node-MainThread (Node's actual comm)");
+  assert.doesNotMatch(code, /pgrep -f/, "gate must NOT use `pgrep -f` (matches any cmdline containing node)");
+  // NB: `pgrep -x node-MainThread` legitimately CONTAINS the substring "grep -x node" — the check
+  // is for `grep` as a standalone command (a preceding letter, as in "pgrep", means it is not).
+  assert.doesNotMatch(code, /(^|[^a-zA-Z])grep -x node\b/m, "gate must NOT use `grep -x node` (comm is node-MainThread → always 0)");
+});
+
+// ── AC3: GO ↔ WAIT both directions via deterministic seams ─────────────────────────────────────────
+test("AC3 — gate returns GO (exit 0) when cpu some avg10 < 40 and mem ok", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
+  assert.equal(r.status, 0, `expected GO (exit 0), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /=> GO/);
+  assert.match(r.stdout, /cpu_stall\(some avg10\)=10\.00  \[limit 40\]   ok/);
+  assert.match(r.stdout, /mem_avail=4000MB             \[limit 2048\] ok/);
+});
+
+test("AC3 — gate returns WAIT (exit 1) when cpu some avg10 >= 40 (busy-loop control is the live form)", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "84.77", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
+  assert.equal(r.status, 1, `expected WAIT (exit 1), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /=> WAIT: CPU 饥饿/);
+  assert.match(r.stdout, /cpu_stall\(some avg10\)=84\.77  \[limit 40\]   WAIT/);
+});
+
+test("AC3 — report mode always exits 0 even under a WAIT verdict (scoped operator can always read)", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "84.77" }, []);
+  assert.equal(r.status, 0, `report mode must exit 0, got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /=> WAIT: CPU 饥饿/);
+});
+
+// ── fail-closed on an unmeasurable signal (no quiet lying) ────────────────────────────────────────
+test("gate FAILS CLOSED when /proc/pressure/cpu is unreadable (kernel without PSI)", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "unmeasurable", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
+  assert.equal(r.status, 1, `unmeasurable CPU must be WAIT (fail-closed), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /UNMEASURABLE/, "the output must say UNMEASURABLE, not a fake number");
+  assert.match(r.stdout, /fail-closed/, "the verdict must explain the fail-closed decision");
+});
+
+test("gate FAILS CLOSED when free -m is unreadable", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "unmeasurable" }, ["--for", "full-suite"]);
+  assert.equal(r.status, 1, `unmeasurable mem must be WAIT (fail-closed), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /mem_avail=UNMEASURABLE/, "the output must say UNMEASURABLE");
+});
+
+// ── AC6: mem_avail < 2048MB → WAIT + RSS top-5 ─────────────────────────────────────────────────────
+test("AC6 — mem_avail < 2048MB refuses the full suite and prints the RSS top-5", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "1000" }, ["--for", "full-suite"]);
+  assert.equal(r.status, 1, `expected WAIT (exit 1), got ${r.status}\n${r.stdout}`);
+  assert.match(r.stdout, /mem_avail=1000MB             \[limit 2048\] WAIT/);
+  assert.match(r.stdout, /=> WAIT: 内存不足/);
+  assert.match(r.stdout, /RSS top-5/, "AC6 must print the RSS top-5 when refusing on memory");
+  assert.match(r.stdout, /PID\s+PPID\s+RSS\s+COMMAND/, "RSS listing must actually run ps (header row)");
+});
+
+test("AC6 — RSS top-5 is NOT printed when memory is fine (only on the refuse path)", () => {
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
+  assert.equal(r.status, 0);
+  assert.doesNotMatch(r.stdout, /RSS top-5/);
+});
+
+// ── AC10: orphaned node procs on their own line, excluded from the verdict ─────────────────────────
+test("AC10 — orphaned node procs (ppid=1, cwd deleted) are listed on their own line and do NOT flip the verdict", () => {
+  const r = runGate(
+    {
+      RESOURCE_GATE_TEST_CPU_AVG10: "10",
+      RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+      RESOURCE_GATE_TEST_ORPHANS: "111:/tmp/quay-wt-a (deleted);222:/tmp/quay-wt-b (deleted)",
+    },
+    ["--for", "full-suite"]
+  );
+  assert.equal(r.status, 0, `orphans are informational — must NOT flip GO, got ${r.status}\n${r.stdout}`);
+  const orphanLines = r.stdout.split("\n").filter((l) => l.startsWith("orphan_node:"));
+  assert.equal(orphanLines.length, 2, `expected 2 orphan lines, got:\n${r.stdout}`);
+  assert.match(orphanLines[0], /111:\/tmp\/quay-wt-a \(deleted\)/);
+  assert.match(orphanLines[1], /222:\/tmp\/quay-wt-b \(deleted\)/);
+});
+
+// ── AC5: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────────────
+test("AC5 — default concurrency derives from nproc / amplification, not a hardcoded 8", () => {
+  // The REAL function from scripts/test.sh, run with test seams.
+  assert.equal(derivedConcurrency(4, 2.1), 1, "4 cores / 2.1 → 1 (the oversubscription fix)");
+  assert.equal(derivedConcurrency(16, 2.1), 7, "16 cores / 2.1 → 7");
+  assert.equal(derivedConcurrency(4, 1), 4, "amplification 1 → nproc (no subprocess amplification)");
+  assert.equal(derivedConcurrency(1, 2.1), 1, "floor(nproc/amp) must clamp at 1 (max(1, ...))");
+  assert.equal(derivedConcurrency(8, 2.1), 3, "8 cores / 2.1 → 3");
+});
+
+test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  // All FOUR invocation sites must use the derived default: 3 `exec node --test ...` lines
+  // (run_selected, --group-explicit, explicit-file) + 1 `node --test ...` line (--for-task, no exec).
+  const allSites = src.match(/node --test --test-concurrency="\$\(default_test_concurrency\)"/g);
+  assert.equal(allSites.length, 4, `expected 4 derived-concurrency invocation sites, got ${allSites.length}`);
+  assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
+});
+
+// ── AC7: test.sh integration — gate on the full-suite default, skip on scoped runs ─────────────────
+test("AC7 — test.sh consults the gate on the full-suite default path and skips it for scoped runs", () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  assert.match(src, /resource-gate\.sh" --for full-suite/, "test.sh must invoke the gate in gate mode");
+  assert.match(src, /resource_gate_check/, "run_selected must call resource_gate_check");
+  assert.match(src, /is_default_set "\$groups"/, "the gate must guard the default full-suite set only");
+  assert.match(src, /QUAY_TEST_SKIP_RESOURCE_GATE/, "nested-runner escape hatch must exist");
+  // Scoped paths must NOT consult the gate: the --for-task and explicit-file branches never call it.
+  const gateCallSites = src.split("\n").filter((l) => l.includes("resource_gate_check"));
+  assert.ok(gateCallSites.length >= 1, "resource_gate_check must be called somewhere");
+});
+
+// ── --for full-suite arg validation ────────────────────────────────────────────────────────────────
+test("gate rejects an unknown --for target with exit 2 (usage)", () => {
+  const r = runGate({}, ["--for", "bogus"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stdout, /usage:/);
+});

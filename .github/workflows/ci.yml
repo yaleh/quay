@@ -35,15 +35,20 @@ jobs:
           node --experimental-strip-types scripts/test-coverage-check.ts
       - name: Run tests
         # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
-        # and the concurrency default; this step no longer hand-writes its own copy of either.
-        # The 3 live/conformance files (serve-github.test.mjs, provider-abi-conformance.test.mjs,
+        # and the (now DERIVED, gap-no-resource-awareness-heavy-ops-run-blind AC5) concurrency
+        # default. This job passes --test-concurrency=8 EXPLICITLY because the derived default
+        # (max(1, floor(nproc/2.1)) = 1 on a 4-core runner) would push the full suite past this
+        # job's 10-minute budget — the explicit override is the documented escape hatch the
+        # resource task preserves ("显式传入永远优先"). The resource gate still applies here
+        # (scripts/test.sh full-suite path), which is fine: a fresh runner's /proc/pressure/cpu
+        # reads ~0. The 3 live/conformance files (serve-github.test.mjs, provider-abi-conformance.test.mjs,
         # cli-edit-parity-conformance.test.mjs) now declare their own in-file skip condition
         # (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here) instead of being excluded by a
         # hand-written grep/glob pattern — this job reports them `skipped`, not silently absent.
         # gap-split-or-commit-not-continuously-checked: scripts/test.sh itself now also runs the
         # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
         # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
-        run: bash scripts/test.sh
+        run: bash scripts/test.sh --test-concurrency=8
         env:
           GH_TOKEN: ${{ github.token }}
 

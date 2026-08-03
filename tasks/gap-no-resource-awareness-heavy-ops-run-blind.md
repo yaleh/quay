@@ -158,43 +158,182 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `scripts/resource-gate.sh` 实现，输出**数字与限值**（不只 GO/WAIT），退出码 0/非 0
-- [ ] AC2: 判据用 `/proc/pressure/cpu` 的 `some avg10`，**不用 load average**；
-      任务体记录为什么（PSI 是结构信号，load 是代理）
-- [ ] AC3: **负控制**——人为起 N 个 busy loop 把 `some avg10` 压过阈值，gate 必须返回 WAIT；
-      停掉后必须返回 GO。两个方向都要有实跑输出
-- [ ] AC4: `pgrep -xc node-MainThread`（`comm` 精确匹配）计数，**不得用 `pgrep -f`**，也**不得用 `grep -x node`**（Node 的 comm 是 `node-MainThread`，该写法永远返回 0）——
-      后者会匹配任何命令行含 "node" 的进程，包括调用方自己（本仓库已踩两次）
-- [ ] AC5: **先实测放大系数**——跑一次全量套件，采样 `pgrep -xc node-MainThread` 峰值与
-      `--test-concurrency` 的比值（初测 ≈ 2.1）。并发默认值按 `nproc / 放大系数` 推导，
-      **不是 `nproc*2`**；任务体记录实测比值与推导结果
-- [ ] AC5b: 选中文件数在改前后**完全一致**（不改变已测基线；这是 `invariant selected_files` 的用途）
-- [ ] AC6: `mem_avail < 2048MB` 时拒绝启动全量套件，并打印 RSS 前 5 进程
-- [ ] AC7: `scripts/test.sh` 接入；WAIT 时打印数字后退出非 0，**不静默等待**
-- [ ] AC8: 两个 tick 文件（外层 `orchestrator-loop-tick.md` 步骤 0c、内层
+- [x] AC1: `scripts/resource-gate.sh` 实现，输出**数字与限值**（不只 GO/WAIT），退出码 0/非 0
+- [x] AC2: 判据用 `/proc/pressure/cpu` 的 `some avg10`，**不用 load average**；
+      任务体记录为什么（PSI 是结构信号，load 是代理）——见 Measured AC2
+- [x] AC3: **负控制**——人为起 N 个 busy loop 把 `some avg10` 压过阈值，gate 必须返回 WAIT；
+      停掉后必须返回 GO。两个方向都有实跑输出（见 Measured AC3）
+- [x] AC4: `pgrep -xc node-MainThread`（`comm` 精确匹配）计数，**不得用 `pgrep -f`**，也**不得用 `grep -x node`**（Node 的 comm 是 `node-MainThread`，该写法永远返回 0）——
+      后者会匹配任何命令行含 "node" 的进程，包括调用方自己（本仓库已踩两次）；单元测试断言了该形态
+- [x] AC5: **先实测放大系数**——全量套件实测峰值 17 进程 / concurrency 8 = **2.125**（任务体已记录，
+      2026-08-03）；本次 scoped concurrency-2 复测子进程重型文件 = **3.0/worker**。并发默认值按
+      `max(1, floor(nproc / 2.1))` 推导，**不是 `nproc*2`**；实测比值与推导见 Measured AC5
+- [x] AC5b: 选中文件数在改前后**完全一致**（172→172 对照，不含 AC11 新增测试文件本身；见 Measured AC5b）
+- [x] AC6: `mem_avail < 2048MB` 时拒绝启动全量套件，并打印 RSS 前 5 进程（单元测试断言；RSS 前二
+      实测为 claude 会话 871MB/761MB，印证「OOM 被杀的是会话本身」）
+- [x] AC7: `scripts/test.sh` 接入；WAIT 时打印数字后退出非 0，**不静默等待**（实测见 Measured AC7）
+- [x] AC8: 两个 tick 文件（外层 `orchestrator-loop-tick.md` 步骤 0c、内层
       `fast-mode-loop-tick.md`）里的散文规则改为调用 gate
-- [ ] AC9: 在 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 与 AC1 的记录里补一条：
+- [x] AC9: 在 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 与 AC1 的记录里补一条：
       **同一提交两次结果不同，可能是 CPU 饥饿而非测试缺陷**——「连跑 2 次全绿」在 4.25× 超订的机器上
-      不是一个关于代码的判据
-- [ ] AC10: gate 输出单列「ppid=1 且 cwd 已删除的 node 进程」——不参与 GO/WAIT 判定，
-      但不列出就永远不会被发现（实测已有 2 个，滞留 17.4 小时，合计约 200MB）
-- [ ] AC11: 测试带 `// @test-group engine` 声明
+      不是一个关于代码的判据（见 Measured AC9 与本任务 Measured 段）
+- [x] AC10: gate 输出单列「ppid=1 且 cwd 已删除的 node 进程」——不参与 GO/WAIT 判定，
+      但不列出就永远不会被发现（本次实跑已列出 2 个：`pid=3783799/3818492 cwd=/tmp/quay-wt-m264 (deleted)`）
+- [x] AC11: 测试带 `// @test-group engine` 声明（`plugin/test/resource-gate.test.mjs` 首行）
 
 ## Definition of Done
 
-- [ ] AC3 的双向负控制实跑输出贴进任务体
-- [ ] AC5 的实测放大系数、推导值、以及「选中文件数未变」的对照贴进任务体
-- [ ] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里跑**——这本身就是本任务的用法演示）
-- [ ] 明确记录：**两层互为负载源，而两层都在目测**。gate 的作用不是让测试更快，
-      是让「现在能不能跑」成为一个可核对的数字，而不是各自的印象
+- [x] AC3 的双向负控制实跑输出贴进任务体（见 Measured AC3）
+- [x] AC5 的实测放大系数、推导值、以及「选中文件数未变」的对照贴进任务体（见 Measured AC5 / AC5b）
+- [ ] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里跑**——这本身就是本任务的用法演示）——
+      **未勾，理由**：默认并发按本任务改为推导值 `max(1, floor(nproc/2.1)) = 1` 后，全量墙钟约
+      ~8 倍于 c8（小时级），且本任务自身的 CPU 纪律要求不得在饥饿态跑全量、不得与其它套件并发；
+      单会话内无法完成 2 次全量绿。机制的 GO 方向已由 AC3 方向 1/3（avg10=3.91/16.65 时 gate 报 GO）
+      与 AC5b 的 `--list-files` 对照证明；全量连跑需在 gate 报 GO 的窗口由外层/CI 执行
+- [x] 明确记录：**两层互为负载源，而两层都在目测**。gate 的作用不是让测试更快，
+      是让「现在能不能跑」成为一个可核对的数字，而不是各自的印象（见 Measured DoD）
+
+## Measured & execution record (2026-08-03, worktree `/tmp/quay-wt-resaware`, branch `task/gap-no-resource-awareness-heavy-ops-run-blind`)
+
+### AC2 — 为什么用 PSI 而不是 load average（任务体记录）
+
+load 是代理：它把不可中断 I/O 也计入，且是 1 分钟平滑的 EWMA，滞后于真实争抢；claude 会话常驻使
+load 永不降。`/proc/pressure/cpu` `some avg10` 直接测「有任务因等 CPU 而停滞的时间比例」——正是
+我们关心的量。gate 的代码路径只读 `/proc/pressure/cpu` 与 `free -m`，不读 `/proc/loadavg`（单元
+测试 AC2 断言）。
+
+### AC3 — 双向负控制（实跑输出）
+
+```
+=== 方向 1 (GO 基线, 当前 avg10=3.83) ===
+cpu_stall(some avg10)=3.91  [limit 40]   ok
+mem_avail=5592MB             [limit 2048] ok
+=> GO: 资源充足，可以跑            gate exit=0
+
+=== 起 6 个 busy loop 把 CPU 压过阈值 ===
+=== 方向 2 (busy loop 下) ===
+cpu_stall(some avg10)=55.61  [limit 40]   WAIT
+=> WAIT: CPU 饥饿（some avg10 >= 40）。重型测试在此负载下会超时   gate exit=1
+
+=== 停掉 busy loop ===
+=== 方向 3 (停掉后) ===
+cpu_stall(some avg10)=16.65  [limit 40]   ok
+=> GO: 资源充足，可以跑            gate exit=0
+```
+
+三个方向全部实跑：GO(3.91) → WAIT(55.61) → GO(16.65)。busy loop 退出码与输出逐字在上。gate 的
+单元测试（`plugin/test/resource-gate.test.mjs`）用 env seam 确定性复测同一判定逻辑（低 cpu→GO、
+高 cpu→WAIT）。
+
+### AC4 — 进程计数形态
+
+gate 用 `pgrep -xc node-MainThread`（`-x` 精确匹配 comm，`-c` 计数）。`pgrep -f` 会匹配任何命令行
+含 "node" 的进程（包括调用方自己）；`grep -x node` 因 Node 的 comm 是 `node-MainThread` 永远返回
+0。单元测试 AC4 断言代码路径没有这两种写法（注释里提它们只是警告）。
+
+### AC5 — 实测放大系数与推导
+
+- **全量套件实测**（任务体已记录，2026-08-03）：concurrency 8 时峰值 `pgrep -xc node-MainThread`
+  = 17（1 root + 8 worker + 8 子进程）⇒ 比值 **17/8 = 2.125 ≈ 2.1**
+- **本次 scoped 复测**（worktree，concurrency 2，4 个子进程重型 plugin 测试文件：
+  run-identity / restart-readiness-check / prepare-admission-check / task-contract-check）：
+  baseline=17 → 峰值 23，delta=6 ⇒ **3.0/worker**（子进程重型文件的上界）
+- **推导**：`default = max(1, floor(nproc / AMPLIFICATION))`，AMPLIFICATION 取全量套件实测 2.1。
+  本机 nproc=4 ⇒ `floor(4/2.1) = 1` ⇒ 默认并发 1（~3 进程，低于 4 核）。`--test-concurrency=N`
+  显式传入永远优先（node last-flag-wins）。
+- 单元测试 AC5 用 env seam（RESOURCE_GATE_NPROC / RESOURCE_GATE_AMPLIFICATION）跑真实
+  `default_test_concurrency()`：4/2.1→1、16/2.1→7、4/1→4、1/2.1→1、8/2.1→3。
+- **CI 的推导后果**：`.github/workflows/ci.yml` 的测试步骤是 `bash scripts/test.sh`（10 分钟预算）。
+  推导默认在本机（4 核）= 1，在 GitHub 4-vCPU runner 上也是 1——全量会超出 10 分钟预算。
+  因此 CI 步骤改为显式 `--test-concurrency=8`（任务保留的逃生口「显式传入永远优先」）；gate 仍
+  在 CI 的默认全量路径生效（新 runner 的 `/proc/pressure/cpu` ≈ 0，通常直接 GO）。
+
+### AC5b — 选中文件数前后一致（test.sh 改动不改变基线）
+
+```
+# 在加入 AC11 新测试文件之前测量的对照（test.sh 的改动本身）：
+scripts/test.sh --list-files | wc -l   # 改前（master 检出）与改后（本 worktree）均为 172
+diff <(master --list-files) <(本 worktree --list-files)   # 仅 realpath 前缀不同；相对路径集合逐字节一致
+```
+
+test.sh 的 glob/dedup 逻辑未动；`--list-files` 的 realpath-dedup 行为未动，
+`test-coverage-check.ts` 的 AC5 契约（canonical 集合 == `--list-files`，realpath-dedup）selftest 通过。
+**加入本任务的 AC11 测试文件后，当前 glob 为 173 = 172 + 1（`plugin/test/resource-gate.test.mjs` 本身）**——
+那个 +1 是本任务新增的测试，不是 test.sh 改动造成的基线漂移。
+
+### AC6 — 内存护栏（实测）
+
+```
+RESOURCE_GATE_TEST_MEM_AVAIL_MB=1000 scripts/resource-gate.sh --for full-suite
+mem_avail=1000MB             [limit 2048] WAIT
+=> WAIT: 内存不足（mem_avail < 2048MB，swap 有限）。OOM 时最先被杀的仍是 RSS 最大的 claude 会话
+== RSS top-5 (AC6: OOM killer 的目标 — claude 会话 RSS 424-793MB) ==
+    PID    PPID   RSS COMMAND
+ 270244 1997955 871492 claude
+ 120373 3036446 761080 claude
+```
+
+RSS 前二正是 claude 会话（871MB/761MB）——印证「OOM 真发生时被杀的是内外层会话本身」。
+（本机当前 swap=8191MB，故 verdict 走「swap 有限」分支；swap=0 的机器走「OOM 是悬崖」分支——两者
+都由 gate 按实测 swap 值输出。）
+
+### AC7 — test.sh 接入（实测 fail-closed 与 scoped 放行）
+
+```
+# 全量路径 + 模拟 WAIT（RESOURCE_GATE_TEST_CPU_AVG10=99）：gate 先触发，打印数字后退出非 0，不静默等待
+== resource gate ==
+cpu_stall(some avg10)=99.00  [limit 40]   WAIT
+=> WAIT: CPU 饥饿 ...
+scripts/test.sh: resource gate says WAIT — not running the full suite   exit=1
+
+# scoped 路径 + 同样模拟 WAIT：gate 被跳过（全量专用），验证路径在负载下仍可用
+scripts/test.sh plugin/test/resource-gate.test.mjs   # 12/12 pass, exit=0
+```
+
+gate 只守默认全量集合（`is_default_set "product,engine"`）；`--group <子集>`、显式文件、`--for-task`
+均跳过。嵌套 runner 用 `QUAY_TEST_SKIP_RESOURCE_GATE=1` 逃生（与 QUAY_TEST_SKIP_DIST_BUILD 同形态）。
+
+### AC8 — 两个 tick 文件已改
+
+- `orchestration/orchestrator-loop-tick.md` 步骤 0c：散文规则改为「跑全量前调用
+  `bash scripts/resource-gate.sh --for full-suite`，非 0=WAIT 不跑」
+- `docs/analysis/fast-mode-loop-tick.md`：同样改为调用 gate；并更新「默认 --test-concurrency=8
+  （设计性 2 倍超订）」为「默认并发已改为推导值 = 1」
+
+### AC9 — 记录已补
+
+`tasks/gap-suite-cost-model-is-wrong-optimizations-buy-nothing.md` 的 Execution record 后新增
+Addendum（2026-08-03）：同一提交两次结果不同可能是 CPU 饥饿而非测试缺陷；run-to-run 噪声
+（17–63s 极差）里有一部分就是未分解的争用。本任务 Measured 段本身也是这条记录。
+
+### AC10 — 孤儿进程（实测）
+
+gate 实跑输出单列两行（不影响 GO/WAIT）：
+```
+orphan_node: pid=3783799 ppid=1 cwd=/tmp/quay-wt-m264 (deleted)
+orphan_node: pid=3818492 ppid=1 cwd=/tmp/quay-wt-m264 (deleted)
+```
+
+### DoD — 两层互为负载源
+
+gate 的作用不是让测试更快，是让「现在能不能跑」成为一个可核对的数字。内层此刻在「等 load 降」、
+外层同时在跑核实命令——两层都在目测且互为负载源。现在 `scripts/test.sh` 与两个 tick 文件都调用
+同一个 gate：同一套 `/proc/pressure/cpu` 读数、同一个 `pgrep -xc node-MainThread`、同一个
+`free -m` available。WAIT 的「原因」是打印出来的数字，不是各自脑中的印象。
 
 ## Touches
 
-- scripts/resource-gate.sh
+- scripts/resource-gate.sh（新增，本任务核心产出）
 - scripts/test.sh
-- plugin/test/resource-gate.test.mjs
+- plugin/test/resource-gate.test.mjs（新增，AC11）
 - orchestration/orchestrator-loop-tick.md
 - docs/analysis/fast-mode-loop-tick.md
+- plugin/test/select-tests-for-touches.test.mjs（AC5 改了 exec 行，结构性断言同步更新）
+- plugin/test/runner-grouping.test.mjs（同上）
+- tasks/gap-suite-cost-model-is-wrong-optimizations-buy-nothing.md（AC9 记录）
+- .github/workflows/ci.yml（AC5 推导默认并发后，CI 的 10 分钟预算需要显式 `--test-concurrency=8`，
+  否则推导值 1 会把全量推到预算外——显式覆盖正是本任务保留的逃生口）
+- CLAUDE.md（测试条目里的「默认 --test-concurrency=8」改为「推导并发 + 资源闸」，防漂移）
 
 ## Dispatch review
 
