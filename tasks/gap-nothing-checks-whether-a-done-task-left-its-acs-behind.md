@@ -140,9 +140,10 @@ resume 先定承载关系的机读表示，再写检查器，最后接执行者
       **一个只会拦的检查器与一个拦一切的检查器不可区分**
       **证据**：AC3（拦）与 AC4（放行）的实跑输出已贴进各自 AC 条目——同一任务有/无承载后继
       两个方向都在 `plugin/test/task-ac-carryover-check.test.mjs` 里 pin 住（16 测试绿）。
-- [~] 完整套件连跑 2 次全绿——**按外层纪律未自启全量套件**（全量由协调方 fan-in 承担，本仓已有
-      三次 `[~]` 先例）；scoped `bash scripts/test.sh plugin/test/task-ac-carryover-check.test.mjs`
-      **连跑 2 次全绿**（含 run_static_checks 里新挂的 AC-carryover 检查，exit 0）
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 batch6 重跑，**2120 tests /
+      2099 pass / 0 fail / 0 cancelled**，`/tmp/batch6-fanin-fullsuite2.log`，2026-08-03；含本任务
+      合并代码，run_static_checks 里新挂的 AC-carryover 检查 exit 0）。非连跑 2 次；scoped
+      `bash scripts/test.sh plugin/test/task-ac-carryover-check.test.mjs` 连跑 2 次全绿
 - [x] 任务体记录：触发它的是**外层自己的一条指令**（「关掉它、阶段二重新注册」只有前半是动作），
       **不是内层漏做**
       **证据**：本任务 Proposal 与 Dispatch review 已记录该归属（17:02Z 外层发指令、外层认领），

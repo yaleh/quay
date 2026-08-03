@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T17:04:57.490Z",
+  "generatedAt": "2026-08-03T18:15:44.332Z",
   "since": null,
   "tasks": [
     {
@@ -53,6 +53,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-live-cannot-tell-a-dead-loop-from-an-unwired-one",
+      "minutes": 45.00216666666667,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-loop-mechanism-lives-outside-the-package-and-cannot-ship",
       "minutes": 76.5426,
       "outcome": "done"
@@ -85,6 +90,11 @@
     {
       "taskId": "gap-no-test-framework-policy-for-new-tests",
       "minutes": 56.31883333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-nothing-checks-whether-a-done-task-left-its-acs-behind",
+      "minutes": 45.00286666666667,
       "outcome": "done"
     },
     {
@@ -251,13 +261,13 @@
       "startedAtMs": 1785776615159
     }
   ],
-  "meanMinutes": 59.0228111111111,
-  "medianMinutes": 56.32075833333333,
-  "tasksPerHour": 1.5693189855802199,
-  "serialEquivalentPerHour": 1.0165561224633868,
+  "meanMinutes": 58.46199933333333,
+  "medianMinutes": 56.2526,
+  "tasksPerHour": 1.5740002717598913,
+  "serialEquivalentPerHour": 1.0263076987479924,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T17:04:57.457Z",
-  "windowHours": 30.586515833333333,
+  "windowEnd": "2026-08-03T18:15:44.303Z",
+  "windowHours": 31.76619527777778,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],

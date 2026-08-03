@@ -1,7 +1,7 @@
 ---
 id: gap-live-cannot-tell-a-dead-loop-from-an-unwired-one
 title: "/live says no data whether the loop is dead or merely not wired to telemetry — two states, one page"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -128,9 +128,10 @@ resume 先定判别式与文案，再改页面
 
   两个方向各自断言了反方向文案**不出现**（「在跑但未接遥测」与「未在运行」在页面上可区分），
   不再是同形的单一「无数据」。
-- [~] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-      — **未自跑完整套件**：按隔离契约，全量由协调方 fan-in 承担，本 worktree 不自启全量。
-      已跑 scoped 覆盖全部触及面：`live-state.test.mjs` 4/4 绿、`serve.test.mjs` 全绿、
+- [~] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）——**如实标注：仅 1 次全量绿**
+      （协调方 batch6 重跑，**2120 tests / 2099 pass / 0 fail / 0 cancelled**，
+      `/tmp/batch6-fanin-fullsuite2.log`，2026-08-03；含本任务合并代码）。
+      非连跑 2 次；scoped 覆盖全部触及面：`live-state.test.mjs` 4/4 绿、`serve.test.mjs` 全绿、
       `serve-adr.test.mjs` 4/4、`live-b-provider-env.test.mjs` 7/7、
       `core-three-way-symmetry.test.mjs` 1/1、`web-ui-browser.test.mjs` 1/1。请协调方跑全量 2 次。
 - [x] 任务体记录：这是第 11 次「存在≠生效」，**形态是新的一种——「跑了，但没往它该写的地方写」**

@@ -1,6 +1,13 @@
 // task-ac-carryover-check.ts — the AC-carryover gate
 // (tasks/gap-nothing-checks-whether-a-done-task-left-its-acs-behind).
 //
+// SCOPE BOUNDARY (2026-08-03): this checker reads TASK FILES, not `.workflow-events/`.
+// AC carryover (which unchecked ACs a successor carries) is this checker's job; telemetry
+// closure (a closed task's --task-end) is `fast-mode-telemetry.ts --task-end`'s job.
+// Neither covers the other — the ac-carryover task itself closed its body (status done +
+// ACs checked) while its own --task-end was still pending, exactly this boundary. Do not
+// extend this checker to read telemetry; that is a different surface with its own meter.
+//
 // THE JUDGMENT IS NOT "all ACs checked → done" — that invites checkbox fraud (the task body records
 // a real instance where an AC's prose claims 达成 while its box is unchecked). The judgment is:
 //

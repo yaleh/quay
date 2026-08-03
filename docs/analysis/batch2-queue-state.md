@@ -1568,3 +1568,13 @@ jsonl；不能用「有提交/有 tick 日志」代替（archguard 两者都有�
 ③ 判别式三态（文件在+活动+遥测=正常 / 活动+遥测空=跑了没接 / 活动无+遥测空=装了没引导），同组信号。
 **AC8c**：可观测后果先定义成具体清单（worktree 建了、--task-start 写了一条、首任务分支出现）。
 已转达 cold8 agent。
+
+### 关闭批次（2026-08-03 19:0xZ）：acs-behind + live-unwired
+
+已关闭（50 完成）。合并 live(6f5bf233) + acs(eec99e90)；batch6 重跑绿 2120/2099/0/0（参考值 2115→2120，
+含新 task-ac-carryover 静态检查 exit 0）。**--task-end 已补调**（acs fm-...-334tt3、live fm-...-r72g6s，
+回应外层遥测闭合提醒——acs 任务体 done 但 --task-end 未调曾导致 inProgress 残留）。DoD 2x 均如实 [~]。
+**边界注释已加进 task-ac-carryover-check.ts 文件头**：AC 承载由该检查器管、计量闭合由 --task-end 管，
+两者不互相覆盖（本任务自己就是实例）。
+
+**在飞 1/3**：cold8 阶段一（停报待外层批准阶段二）。无其它。
