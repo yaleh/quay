@@ -2,6 +2,13 @@
 
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 
+<!--
+标记约定（gap-dispatch-gate 的 Contract 机制之外，针对本文档自身的规范性语句）：
+  unmechanized:   有意暂不机械化，附理由。是已声明的取舍，不是欠账，不要为它建检查
+  unmechanizable: 本质不可机械化（思维纪律/判断题），只能靠每 tick 复读
+未标记的规范性语句，默认应当有执行者——逐条审计见 docs/analysis/normative-prose-audit.md
+-->
+
 **这份文件必须能在 `/clear` 后的空上下文里独立启动。** 若你刚被清空上下文，按「冷启动」一节先建立
 状态，再进入 tick 步骤。
 
@@ -56,6 +63,7 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 
 **后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号。这个 tick 是**兜底心跳**，处理「会话 turn 结束了但队列还有活」的情况。因此间隔应长（20–30 分钟），不是快轮询。
 
+<!-- unmechanizable: 判断题，无代码可强制。形态是启发式，靠每 tick 复读 -->
 **不要把「没收到通知」当作「还在跑」（2026-08-02 两次停摆教训）**：后台 agent 会静默停止（transcript 静止、无 notify），尤其长测量任务。空闲时**先查进程再决定等不等**，别只依赖通知：
 ```bash
 ps -e -o comm= | grep -cx node   # 0 = 没有 node 在跑
@@ -235,6 +243,8 @@ console.log(m.checkTouchesPair(A,B,expand));
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |
 | 队列文件与 git 状态矛盾且无法判定 | 停，报告两边的实际内容 |
 
+<!-- unmechanized: ADR-021 证据不足；覆盖上方「判断边界」表全部行。这不是欠账，是已声明的取舍——不要为它建检查 -->
+
 这是**保守默认**。ADR-021 原则：不要在证据不足时把策略机械化。这些判断目前由人做，等积累了足够多的真实案例再考虑规则化。
 
 ## 阻塞信号：停下前写、恢复后删（强制，gap-no-explicit-blocked-signal-from-inner-layer）
@@ -248,7 +258,7 @@ console.log(m.checkTouchesPair(A,B,expand));
 # 停下前（任一停止/等裁定条件触发时）：
 node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/inner-blocked-signal.ts \
   --assert-blocked --taskId <当前任务/阶段> \
-  --reason <merge-conflict|suite-red|review-refuted|task-over-90m|needs-human-backlog|ruling-required|queue-empty> \
+  --reason <合法值见 `--schema`；不要照抄到这里，代码是唯一真源> \
   --question <要外层裁定的问题> [--options '<json>'] [--evidence '<json>']
 
 # 恢复后（裁定下达、继续推进的那一刻）：
@@ -277,6 +287,9 @@ node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/script
 
 **建任务时**（内层）：fast-mode 执行型任务应写一个 `## Contract` 块（`## Chosen mechanism` 之后），
 六个键，每个都能指回一次真实介入，不预先扩充：
+
+**格式硬约束：一行一个键，不可折行。** 折行的续行会被判 `contract-line-unknown`——
+外层 2026-08-03 连踩两次（`gap-no-inventory`、`gap-quantified-stop-conditions`）。
 
 ```bash
 ## Contract
@@ -330,6 +343,7 @@ engine 组 + governance 组 == 去重后 realpath 总数」这类**关系**，�
 | 「批量升格 expectations 到新约定即可」 | 看负控制是否也在失败 | `*-tampered (GREEN)` 也失败 ⇒ **是 runner 单点故障，不是 14 个陈旧 fixture** |
 | 「AC9 满足」 | 实跑全量套件 | **627s，超限** |
 
+<!-- unmechanizable: 思维纪律，无代码可强制。今晚由它挡住过一次掩盖式修复 -->
 **规则**：在把一个处置方案写进队列状态文件或提交说明之前，先问「**如果我错了，哪一条命令会告诉
 我？**」然后跑它，把输出贴出来。跑不出来的，方案里要写明这一条没被验证。
 
