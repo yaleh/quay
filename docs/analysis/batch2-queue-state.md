@@ -1673,3 +1673,20 @@ worktree 已清理、分支已删除、Land `--snapshot` 已写（累计阻塞 2
 
 **待办**：token 饥饿修复任务（外层）、cfbc7459 负控制、cold8 验证承载任务、loop-shipping 根因修复。
 **下一批候选**：视外层优先级（token 任务落地后补满在飞槽位）。
+
+### Tick 更新（2026-08-03 22:0xZ）：widened-wait-window 关闭 + token-waiter 派发
+
+**`gap-a-widened-wait-window-was-closed-on-evidence-that-cannot-discriminate` 全部 AC 完成并关闭**
+（`5df62c7d`）：为 cfbc7459（窗口 8s→25s）补齐区分证据——**双向负控制**（AC1 空 transcript ⇒
+last-input 取不到 ⇒ AC7 拒绝；AC3 脚本变异强制空 cause ⇒ 强化 AC6 `成因：[^；）]` 拒绝），
+**并发现原 AC6 断言是 no-op**（`! /成因：\)/` 用 ASCII 括号，在全角输出中永不出现，空 cause 也过）
+——已强化。AC4/AC5 窗口依据 + 纪律写进测试文件头；AC6 回填 sl2 任务体。隔离 32/32 绿。
+参考值 2149→**2150**（+2 负控制测试）。
+
+**token-waiter 任务已派发**（`gap-the-only-token-waiter-refuses-to-wait-at-all`，runId `...c1pul1`，
+`/tmp/quay-wt-tokenwait`）：修复 test.sh:237 的 `--timeout 0` 零等待 → 有界等待。
+**AC3 关键约束**：绝不抢活持有者的令牌（把「拒绝等待」换成「抢走别人在跑的重活」是更坏的交易）。
+与 token-status 任务在 `heavy-op-token.sh` 冲突，后者待前者落地后派。
+scoped 验证（`--root` 测试缝），不跑全量。
+
+**在飞（1）**：token-waiter。**停止条件**：无（.halt 无、窗口内无新 needs-human、批 7 套件已绿）。
