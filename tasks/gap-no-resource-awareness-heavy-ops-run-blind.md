@@ -28,14 +28,60 @@ AC11 的显式文件形式 **2089ms 绿**。内层的判断是「负载过高，
 | `/proc/pressure/memory` `some avg10` | **0.00** | 内存压力当前为零 |
 | **Swap** | **0** | **没有缓冲**——内存一旦不够就是 OOM，没有降级段 |
 | `nproc` / load1 | 4 / 9.07 | 2.3× 超订 |
-| `scripts/test.sh` 默认并发 | **8（常量）** | **4 核上设计性 2× 超订** |
+| `scripts/test.sh` 默认并发 | **8（常量）** | **实测真实进程 17 个 ⇒ 4.25× 超订**（见下方修正） |
 | `MemAvailable` | 5.0 GB / 16 GB | 单个 `node --test` RSS 106–255 MB |
 | 4 个 `claude` 进程 | 合计 ~2.4 GB | **OOM 真发生时被杀的就是内外层会话本身** |
+
+### 修正（2026-08-03 02:23Z 实测）：`--test-concurrency=8` 实际是 17 个进程
+
+本任务初稿写「4 核跑 8 = 2× 超订」。**实测推翻了这个数字**：
+
+```
+套件根 pid 3599012（node --test --test-concurrency=8），已运行 403s
+  直接子进程（test worker）: 8
+  这些 worker 各自派生的子进程: 8
+  ⇒ 实际 node 进程 ≈ 17，不是 8
+```
+
+**测试自己会派生 node 子进程**，且每个都是完整的 `node --experimental-strip-types`
+（启动时做 TypeScript 剥离，CPU 开销显著）。抽样到的子进程：
+
+```
+node packages/quay/bin/quay.ts retreat DONE-RET --reason rework needed
+node --experimental-strip-types plugin/scripts/prepare-admission-check.ts --release
+node --experimental-strip-types .../run-identity.ts --create
+bash scripts/test.sh --group product,engine --list-files
+node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts
+```
+
+**⇒ 真实超订是 4.25×（17/4），不是 2×。** 这直接改掉了本任务的机制设计：
+
+- **`--test-concurrency` 不是正确的控制旋钮**——它控制 worker 数，而真实进程数 ≈ 2.1× worker 数
+- **AC5 原写「默认从 nproc 推导 ⇒ 本机 = 8」，那仍然是 4.25× 超订**。推导必须除以放大系数，
+  或者直接以**实测进程数**为准
+- **gate 必须数真实进程**（`pgrep -xc node-MainThread`），不能相信 `--test-concurrency` 的字面值
+
+**这也解释了为什么重型测试从隔离下 2.0s 变成 48.8s**：它们不是计算慢，是**进程启动争抢**——
+`prepare-milestone-convergence` 这类测试正是派生子进程最多的。
+
+### 顺带发现：孤儿 MCP 进程（内存泄漏，非 CPU）
+
+```
+pid 683651  ppid=1  已运行 62594s (17.4h)  cwd=/tmp/quay-prof-ws-gp4rms      CPU 累计 00:00:01
+pid 683658  ppid=683651  已运行 62593s     cwd=/tmp/quay-wt-speedup/... (deleted)
+```
+
+父进程已死（ppid=1），**工作目录已被删除但进程仍持有句柄**，17.4 小时。
+CPU 累计仅 1 秒 ⇒ **它们是内存占用（合计约 200MB），不是 CPU 来源**。
+与滞留 worktree 同一形态：**做完的工作留下的东西没人回收，且没有告警通道**。
+gate 的输出里应当把「ppid=1 且 cwd 已删除的 node 进程」单列一行——它们不影响 GO/WAIT 判定，
+但**不列出来就永远不会被发现**。
 
 ### 两个独立的结论
 
 **1. 超时的根因是 CPU 饥饿，且这是设计出来的。** `--test-concurrency=8` 是写死的常量，
-而这台机器 `nproc=4`。两层同时跑全量套件 ⇒ 16 个 node 进程抢 4 个核。
+而这台机器 `nproc=4`，且实测每个 worker 再派生约 1 个 node 子进程 ⇒ **单层就是 17 个进程抢 4 个核**。
+两层同时跑 ⇒ 约 34 个。
 ADR-019 当初测得 8 比运行时默认快 10.3%，但那是**在没有第二层并发跑的前提下**测的。
 
 **2. OOM 是悬崖不是斜坡。** `swap=0` 意味着没有渐进降级：`MemAvailable` 掉到阈值以下时
@@ -57,7 +103,7 @@ OOM killer 直接动手，**而 RSS 最大的进程正是 `claude` 本身**（79
 ```
 measure   cpu_stall   = `cat /proc/pressure/cpu` 的 some avg10 字段      # 直接测「有任务在等 CPU」
 measure   mem_avail   = `free -m` 的 available 列（MB）                  # 非 free 列
-measure   heavy_procs = `pgrep -xc node` 的计数                          # comm 精确匹配，非 pgrep -f
+measure   heavy_procs = `pgrep -xc node-MainThread` 的计数                # 真实进程数；--test-concurrency 的字面值低估 2.1×
 band      cpu_ok      = some avg10 < 40                                  # 实测：84.77 时重型测试超时
 invariant nproc 在判定前后一致                                            # 判据必须相对核数，不是绝对数
 invoke    `scripts/resource-gate.sh --for full-suite`                    # 退出码 0=GO 非 0=WAIT
@@ -117,8 +163,10 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
       停掉后必须返回 GO。两个方向都要有实跑输出
 - [ ] AC4: `pgrep -xc node`（或 `comm` 精确匹配）计数，**不得用 `pgrep -f`**——
       后者会匹配任何命令行含 "node" 的进程，包括调用方自己（本仓库已踩两次）
-- [ ] AC5: `--test-concurrency` 默认改为从 `nproc` 推导；当前机器上推导值 = 8，
-      **实跑证明与改前选中文件数、并发数完全一致**（不改变已测基线）
+- [ ] AC5: **先实测放大系数**——跑一次全量套件，采样 `pgrep -xc node-MainThread` 峰值与
+      `--test-concurrency` 的比值（初测 ≈ 2.1）。并发默认值按 `nproc / 放大系数` 推导，
+      **不是 `nproc*2`**；任务体记录实测比值与推导结果
+- [ ] AC5b: 选中文件数在改前后**完全一致**（不改变已测基线；这是 `invariant selected_files` 的用途）
 - [ ] AC6: `mem_avail < 2048MB` 时拒绝启动全量套件，并打印 RSS 前 5 进程
 - [ ] AC7: `scripts/test.sh` 接入；WAIT 时打印数字后退出非 0，**不静默等待**
 - [ ] AC8: 两个 tick 文件（外层 `orchestrator-loop-tick.md` 步骤 0c、内层
@@ -126,7 +174,9 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
 - [ ] AC9: 在 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 与 AC1 的记录里补一条：
       **同一提交两次结果不同，可能是 CPU 饥饿而非测试缺陷**——「连跑 2 次全绿」在 2× 超订的机器上
       不是一个关于代码的判据
-- [ ] AC10: 测试带 `// @test-group engine` 声明
+- [ ] AC10: gate 输出单列「ppid=1 且 cwd 已删除的 node 进程」——不参与 GO/WAIT 判定，
+      但不列出就永远不会被发现（实测已有 2 个，滞留 17.4 小时，合计约 200MB）
+- [ ] AC11: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
 
