@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 03:26Z | `no-action`（未介入内层；外层侧完成散文形式化的两条便宜项 + 建一个任务） | 落实散文审计的三条建议：#3 消灭双源、#1 加显式标记，均直接编辑；#2 需代码，建任务 | m264 **56 分钟**（阈值 90）但**在真推进**；inventory 16 分钟；完成 23，吞吐 **1.36/h** | **m264 非卡住**：`/tmp/repro-m264.sh`(02:38) + `/tmp/m264-run.log`(03:19, 19KB)，正执行「隔离连跑 N 次」，flaky 诊断本就需时。**swap 的真相与 `free` 不同**：`pswpin/pswpout` 皆 **0** ⇒ 磁盘换页零次；714MB 全被 zswap 吸收——`stored_pages` 180,498 页（≈705MB 原始）压成 `pool_total_size` 377MB，**压缩比 1.87×**。护栏在真实负载下生效且零 I/O。**契约检查器第 3 次抓到我**：`control` 折行 ⇒ `contract-line-unknown`。Contract 块**一行一键不可折行**，已写进 tick 文档 |
 | 2026-08-03 03:06Z | `unblock` | 分诊内层的 `needs-human=7 halts dispatch`，裁定解除并恢复派发；7 个 DIR 任务的去留升级给人 | 在飞 2 个（dispatch-gate / m264，36 分钟，阈值 90）；`test-coverage` 已收尾（完成 22，吞吐 **1.33/h**）；CPU 压力 10.72（avg300 53.78），**swap 首次被用到 13MB** | **idle-log 已落地并在记录**（2 行，均 `awaiting-subagent`）——上条指令的实际验收点通过，撤回枚举只是让路。**needs-human=7 全部是历史遗留**：DIR-109 最后改动 07-29、其余 08-01~08-02 05:54，**全部早于窗口起点 ≥12 小时**；窗口内新增 needs-human 逐文件核对为 **0**；遥测那条 needs-human 结局的任务现已 `done`。**停止条件是纯散文无代码实现**（`fast-mode-loop-tick.md:156`，grep 两个 scripts 目录零命中）——意图是「产出速度超过消解速度」，被读成「有史以来的总数」，**后者会永久卡死派发** |
 | 2026-08-03 02:46Z | `correct`（**correct-self，连续第 3 次**——见分类法缺陷节） | 核实 `turn-ended-idle` 落地时发现**我自己上一条指令有设计错误**，在造成损害前更正：改用只追加日志，不碰阻塞信号 | 内层 10 分钟内执行完上一条指令并落地（`7cfc9733`）；test-coverage 修复已合并（`6518170c`）；三任务在飞 16 分钟；CPU 压力 **88 → 20.86**，node 15 个，load 5.14 | **读 diff 核实**：枚举 7→8、描述与测试都在。**但第二半查出根本问题**——`fast-mode-loop-tick.md:238-256` 的触发条件是「停下等人」、`--reason` 示例硬编码那七个、明写「不新增语义」，所以**加枚举值不会让它触发**，且代码与文档就此打架。**我的指令还会造成两处误触发**：`inner-state.sh:25-30` 对任何 reason 都发 `BLOCKED` 且无过滤 ⇒ 内层每结束一次回合叫醒外层一次，**把有意义的告警稀释成噪声**；`restart-readiness-check.sh` 会因一条 idle 记录挡住 un-halt。更正为：撤回枚举、改用 `orchestration/inner-idle-log.jsonl` 只追加原因、时长由外层从 transcript 间隙算。**保持阻塞信号只有一个含义** |
 | 2026-08-03 02:31Z | `correct`（correct-inner：纠正判绿口径） | 从日志产物独立核实 AC1；发现并通报「`fail 0` 不等于绿」；复核内层自派批次正交性；建任务记录外层自己取证工具的三个谎 | 批 4 收尾（21 完成，吞吐 **1.32/h**），内层**自主**派发批 5（dispatch-gate / m264-build-evidence / test-coverage-check），三者两两 DISJOINT 已复核；内层 1% 即 auto-compact，指示已按自足写 | **AC1 达标独立核实**：batch4b/4c 逐项相同（tests 2361 / pass 2343 / fail 0 / cancelled 0 / skipped 18 / EXIT=0），三次 `selected 167 files` 一致。**关键发现：`fail 0` 不是绿判据**——崩溃的 batch4a 也是 `fail 0`，但 `cancelled 2`、tests 2246≠2361，重型测试是被 cancelled 不计入 fail。**我自己两次调用错误**：(a) `checkTouchesPair(路径,路径,root)` 实际签名是 `(parsedA,parsedB,expand)`，错调导致 10 对全部误报 OVERLAP，结果作废重跑；(b) grep 假设 TAP 格式，`not ok` 计数对崩溃那次也返回 0。**取证工具三个谎**：把引号内含 `test.sh` 的 ps 命令判为套件运行、474s 报成 0s、把人开的 fork 会话当成内层 `/clear` 断裂 |
@@ -82,11 +83,11 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 26 | 40% |
+| no-action | 27 | 41% |
 | unblock | 11 | 17% |
 | correct | 25 | 38% |
 | escalate | 3 | 5% |
-| **合计** | **65** | — |
+| **合计** | **66** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
