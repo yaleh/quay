@@ -617,6 +617,16 @@ stranded/web 的 DoD 都含 2 次全绿——若同期跑套件，Σ 系统性�
   **资源闸实现了「机器状态互斥」**（外层刚观察到的缺失维度，机制已在运转）
 - sigma 若 filesCaptured < 155 会作废重测（AC1）
 
+### Tick 更新（06T03:05Z）：stranded merged，全量等 sigma
+
+- **stranded-worktree merged**（`3069aa7a`，7 文件 +919）：`--stranded` 快速路径 + 滞留分支检查（**复用 reclaim
+  三闸**）、readiness check 8（info）、双向负控制测试（人造领先分支→报、删→不报）、旧 AC2b-f/AC3 标吸收/过时。
+  scoped 34/33/0 绿。**已知后续**：reclaim 仍被 reverse-drift 误标（milestone-worktree.ts 被 retire 有意删除）——
+  需独立「intentionally-removed」分类（另一缺陷，未处理）
+- **sigma 仍在测量**（进程 334483，压力 78）——**stranded 全量等 sigma 测完再跑**（污染其 Σ）。闸会自保护
+- **parser 任务**（gap-task-body-has-n-parsers）在 stranded 合并后与 task-status-drift-check.ts 的重叠已解除，
+  可派（等槽位）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
