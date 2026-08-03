@@ -262,6 +262,15 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
 - **在飞（2）**：m264（~51min，未到 90min 阈值）+ inventory（~11min）。均活跃未提交
 - 停止条件：无（needs-human 判据已按外层裁定改为窗口内新增，7 历史不构成；`.halt` 无）
 
+### Tick 更新（03T03:28Z）：m264 已合并，批全量在跑
+
+- **m264 done 流程**：根因 = 共享 `<repo>/tmp/` 并发干扰 → collector fail-open 写空清单 → 测试 TypeError。
+  修复：14 处 scratch 移 `os.tmpdir()` + 长度保护 + collector fail-closed（admission-decision-unreadable）+
+  `.gitignore tmp/`。**「隔离绿/套件红」类第 3 号成员**（M136→relation-sync→本任务，偶发红非稳定红）。
+  merge `b1a…`，scoped 24/24 绿。**批全量在跑**（`ba7zgcgbo`）。遗留 `tmp/be-explicit-rw-h2oiJI/` 已清理
+- **inventory**（~20min）：已产出未提交文件（runtime-usage-inventory.{json,md,ts}），实现中
+- 在飞（1 活跃实现）：inventory
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
