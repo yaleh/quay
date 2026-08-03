@@ -220,6 +220,24 @@ opt-in 了 `## Contract`，但尚无 `## Dispatch review` 段；待其正式派�
 基线写入 `docs/analysis/contract-violations.md`（`# baseline-count: 1`）。检查器对**新增**违规退出 1
 （名单只减不增）；`--write-ratchet` 在名单收缩后刷新文件、拒绝膨胀。
 
+## 对抗审查记录（REFUTE，2026-08-03）
+
+轮 1（独立审查 agent）找到 **2 must-fix + 4 minor**，全部已修复并加测试；轮 2 同步复验通过：
+
+- **R1（must-fix）**：`n/a:` 空理由在 `invoke`/`control`/`resume` 上被静默接受（`n/a: <理由>` 合法、留白不是 的
+  不变量被破坏）。修法：`parseContract` 的 NA 分支改为 `n/a\s*[:：]?\s*(.*)`，空理由 → `contract-empty-value`。
+- **R2（must-fix）**：注释剥离 `\s+#.*$` 不认反引号跨度，`measure x = \`echo a # b\` 的 y 字段` 的值被截断。
+  修法：`stripCommentOutsideBackticks()` 只在非反引号段剥离 `#` 注释。
+- **MINOR1**：`checkDispatchReview` 现在校验 `reviewer ∈ {outer,none,human,inner}`、`at:` 形如 `YYYY-MM-DD`。
+- **MINOR2**：显式 `<task-file>` 子集扫描跳过 ratchet 比较（否则把基线外条目误报成 `resolved`）。
+- **MINOR3**：随 R1 修复——裸 `measure n/a:` 现在报 `contract-empty-value` 而非错位的 `measure-no-name`。
+- **MINOR4**：从 `measureRefTokens` 移除过泛的 CJK 词「值」（避免幸运命中）。
+
+轮 2 复验：`node --test plugin/test/task-contract-check.test.mjs` → 35 tests / 34 pass / 0 fail（1 opt-in skip）；
+`node --test experiments/quay-perpetual-stream/test/task-schema.test.mjs` → 22/22 pass；全量 store 扫描仍恰 1 条
+基线违规（`gap-no-resource-awareness-heavy-ops-run-blind.md: dispatch-review-missing`），exit 0、`new since baseline: 0`。
+R1/R2/MINOR1 逐一复验输出见上（`n/a:` 空理由 → `contract-empty-value`；`# b` 保留；`reviewer: me` → malformed）。
+
 ## AC7 不做清单
 
 - **不引入审查 agent**——这是一个可机器消费的声明块加一条记录，不是把人换成另一个模型
