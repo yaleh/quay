@@ -1226,3 +1226,14 @@ sync-vendor --check 判持久漂移 → M136 红。非合并引入、非竞态�
 - 每个项目**等令牌的时长**（某项目长期饿死 ⇒ 策略错了）
 - 各项目**实际吞吐**（对照 quay 独占时的 1.5/h）
 - **令牌有没有死锁过**（陈旧回收是否真生效）
+
+### 内层 tick 补充 2（2026-08-03 08:4xZ）
+
+**外层派发任务 A（人裁定三项目拓扑 A→B→C）**：`gap-no-cross-project-heavy-op-token`——跨项目重型操作令牌，
+优先级高于队列其它 gap。B（archguard 冷启动）与 C（meta-cc）都被 A 阻塞。telemetry
+fm-...-1785746441367-r1x9cn，agent 已派（worktree 隔离）。
+设计三要点：①令牌与 runner 无关（node --test/vitest/go test 统一闸「重型操作」）；②失败即放行但大声
+（调度令牌非安全检查，fail-closed 会三项目同时停摆）；③不做公平队列，饥饿先靠 waited_ms 可观测。
+接线约束：scoped 不取令牌；令牌与资源闸串联、闸失败必须释放令牌。本任务只交付令牌本体，不接线 archguard/meta-cc。
+
+**在飞**：token A（agent abae2f...）；tmpdirs fan-in 套件（pid 828768）→ 关闭后即可腾出。

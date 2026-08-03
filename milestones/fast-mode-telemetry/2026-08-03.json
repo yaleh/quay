@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T08:28:50.397Z",
+  "generatedAt": "2026-08-03T08:46:58.153Z",
   "since": null,
   "tasks": [
     {
@@ -158,6 +158,11 @@
       "outcome": "needs-human"
     },
     {
+      "taskId": "gap-tests-never-clean-up-their-tmpdirs",
+      "minutes": 37.87741666666667,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-tests-spawn-cli-from-ts-source",
       "minutes": 22.43315,
       "outcome": "done"
@@ -176,18 +181,18 @@
   "orphaned": [],
   "inProgress": [
     {
-      "taskId": "gap-tests-never-clean-up-their-tmpdirs",
-      "runId": "fm-gap-tests-never-clean-up-their-tmpdirs-1785744545014-tlg485",
-      "startedAtMs": 1785744545064
+      "taskId": "gap-no-cross-project-heavy-op-token",
+      "runId": "fm-gap-no-cross-project-heavy-op-token-1785746441367-r1x9cn",
+      "startedAtMs": 1785746441382
     }
   ],
-  "meanMinutes": 55.32565147058823,
-  "medianMinutes": 56.32075833333333,
-  "tasksPerHour": 1.5465407560112865,
-  "serialEquivalentPerHour": 1.0844879076009926,
+  "meanMinutes": 54.82713047619047,
+  "medianMinutes": 56.31883333333333,
+  "tasksPerHour": 1.5704432215788071,
+  "serialEquivalentPerHour": 1.0943487189440988,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T08:28:50.374Z",
-  "windowHours": 21.984548333333333,
+  "windowEnd": "2026-08-03T08:46:58.127Z",
+  "windowHours": 22.286701944444445,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0
