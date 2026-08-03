@@ -81,9 +81,21 @@ master 历史里，所以 merge-base 前移，但内容被 revert 撤掉了。�
 「0 ahead → unambiguously safe to clean」。**对这个分支它现在是错的**——一次 `--clean-stale`
 就会删掉承载那 8,220 行的唯一具名引用。
 
-**因此检测器不能只看提交数。** 判「已合并」必须同时满足：提交数为 0 **且**两点 diff 为空。
-两者不一致本身就是一个要报的状态（`merged-then-reverted`），因为它意味着有人 revert 了一次 merge，
-而那份工作既不在 master 也不再被任何常规检查看见。
+**因此检测器不能只看提交数。** 判「已合并」必须同时满足：提交数为 0 **且**分支内容仍在 master 上。
+
+**判据修正（2026-08-03，`gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion`）：** 上面
+「两点 diff 为空」的提法不够准——两点 tree diff `git diff master..<branch>` 测的是「master 有没有前进」，
+不是「分支是否已合并」。一个几天前合并的分支，master 之后前进几百个提交，两点 diff 必然非空，
+于是 21 个**已合并**分支全部被误报成 `merged-then-reverted`，1.1G 永久留存。正确的测法是：
+
+1. 分支的提交是否都在 master 里：`git merge-base --is-ancestor <branch> master`（直接回答，与 master 前进无关）
+2. 分支引入的内容是否被 revert 撤掉：**分支创建的文件在 master 上是否仍存在**——
+   `git diff --name-only --diff-filter=A master..<branch>`（两点）非空 = 分支内容被 revert 撤掉。
+   M243 的信号正是 `workflow-replay.ts` 从 master 消失（`88e17bf2` revert 后 83 个文件缺失；
+   `3dfba2c6` 恢复后为 0）。两点/三点 diff 都做不到这个区分。
+3. worktree 里有没有未提交的活：该 worktree 内 `git status --porcelain`（见「追加二」）。
+
+三条都为「安全」才可回收。
 
 ### 追加二：`--clean-stale` 会 `--force` 删掉未提交的工作（2026-08-02 实测，有活实例）
 
@@ -126,10 +138,15 @@ fatal: '/tmp/wt-probe-XXXX' contains modified or untracked files, use --force to
 
 - [ ] AC1: 检查能列出全部带提交的滞留分支，输出分支名 / 领先提交数 / 插入行数 / 最后提交日期
 - [ ] AC2: 零领先**且**两点 diff 为空的分支不出现在告警里
-- [ ] AC2b: **提交数为 0 但两点 diff 非空**的分支报为 `merged-then-reverted` —— 用
-      `milestone/M243/iteration-0` 的真实状态 pin 住（8,220 行差异，0 提交领先）
-- [ ] AC2c: `milestone-worktree.ts --clean-stale` 拒绝清理 `merged-then-reverted` 分支；
-      当前它的 `rev-list --count <branch> --not master` 判据会把它当作可安全删除
+- [ ] AC2b: 报 `merged-then-reverted` 的判据是「分支创建的文件在 master 上是否仍存在」——
+      `git diff --name-only --diff-filter=A master..<branch>`（两点）非空 = 分支内容被 revert 撤掉。
+      用 `milestone/M243/iteration-0` 的 revert 状态（`88e17bf2` revert 后、`3dfba2c6` 恢复前）pin 住：
+      83 个 workflow-replay 文件从 master 消失时仍必须报出
+      （**判据修正**：早期草稿写「两点 diff 非空 = merged-then-reverted」，那是错的——已合并分支的
+      master 一旦前进，两点 tree diff 必然非空，21 个已合并分支全被误报。修正见
+      `gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion`。）
+- [ ] AC2c: `milestone-worktree.ts --clean-stale` 拒绝清理 `merged-then-reverted` 分支；判据从
+      「两点 tree diff」改为 `merge-base --is-ancestor` + 分支创建文件缺失检查，误报与漏报同时封死
 - [ ] AC2d: `cleanStale` 在删除前检查该 **worktree 内**的 `git status --porcelain`；非空返回
       `has-uncommitted`，不删
 - [ ] AC2e: `worktree remove` 去掉 `--force`，让 git 的「contains modified or untracked files」
