@@ -70,7 +70,7 @@ $ f=<当前在飞任务的 jsonl>
 ```
 measure heartbeat_age = `bash plugin/scripts/session-liveness.sh --once` 输出中内层心跳的分钟数字段
 measure frozen_minutes = `stat -c %Y <心跳源>` 在一个 ≥45 分钟任务全程的最大不变时长字段
-band frozen_minutes < 45
+band frozen_minutes = <45  # 心跳源在任务进行中不得冻结超过 OVERDUE_MIN
 invariant 心跳源必须在任务进行中前进；选定源的盲区必须写进文件头
 invoke `bash plugin/scripts/session-liveness.sh --once`
 control 内层正在长任务中 ⇒ 不报 OVERDUE；内层进程被杀 ⇒ 在一个 OVERDUE_MIN 窗口内报出
@@ -95,7 +95,7 @@ resume 先定心跳源并验证它在长任务中前进，再改判据
 - [ ] AC1: 选定心跳源并写进文件头，**含它自己的盲区**（什么情况下它也会冻结）
 - [ ] AC2: **长任务不误报**——用一个 ≥45 分钟的真实或模拟长任务，全程不报 OVERDUE（贴实跑输出）
 - [ ] AC3: **死亡必须报**——内层/探针会话进程消失 ⇒ 在一个 `OVERDUE_MIN` 窗口内报出（贴实跑输出）
-- [ ] AC4: `frozen_minutes` 实测记录：新源在一个真实长任务中的最大不变时长
+- [ ] AC4: `frozen_minutes` 实测记录：新源在一个真实长任务中的最大不变时长，**必须低于 `OVERDUE_MIN`（45）**
 - [ ] AC5: 不改 `OVERDUE_MIN` 默认值（负控制：`grep` 确认默认仍是 45）
 - [ ] AC6: 测试用 `node:test`、带 `// @test-group governance`，扩进 `plugin/test/session-liveness.test.mjs`
 
