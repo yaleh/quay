@@ -90,7 +90,7 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 
 ### B 组：从我自己犯过的错里长出来的（本班素材，非理论）
 
-- [ ] **AC6：tick 报告里的每一个数字都来自本 tick 跑过的命令，不来自记忆或估计。**
+- [ ] **AC6：tick 报告里的每一个数字都来自本 tick 跑过的命令、且来自**这一次运行**的产物（选日志按 mtime，不按通配符顺序），不来自记忆或估计。**
       判据：抽查 tick 记录里的任一数字，重跑其命名命令应能复现（遥测数取
       `plugin/scripts/fast-mode-telemetry.ts --report --json` 的 `tasks[].length` / `tasksPerHour`）。
       **现状：本班失败过 1 次——我写「完成 44」是估的，实测 `tasks[].length` 是 37，已更正（`875735e2`）。
@@ -155,7 +155,7 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
       | 步骤 | 结果 |
       |---|---|
       | build（`--branch dist-plugin-ac13verify`，**不给 `--push`**） | exit 0，bundle **1,327,236 字节**，orphan commit `8cc675f9`，**未推送任何东西** |
-      | 产物含机制 | `plugin/loop/orchestrator-loop-tick.md`、`plugin/loop/fast-mode-loop-tick.md`、`plugin/scripts/quay-init.sh`、`plugin/scripts/inner-state.sh`、`plugin/scripts/resource-gate.sh`、`plugin/scripts/heavy-op-token.sh`、`plugin/vendor/quay/dist/quay.js`、`.claude-plugin/plugin.json` **全部 PRESENT** |
+      | 产物含机制 | 产物根下的 `loop/` 有 orchestrator-loop-tick.md 与 fast-mode-loop-tick.md；`scripts/` 有 quay-init.sh、inner-state.sh、resource-gate.sh、heavy-op-token.sh；另有 `vendor/quay/dist/quay.js` 与 `.claude-plugin/plugin.json`——**全部 PRESENT**。（**产物内没有 `plugin/` 前缀**：`publish-dist-branch.sh` 把 `plugin/` 子树 rsync 到分支根。内层 `dd9f6323` 为消除 AC1b 误报把这一格改成了带前缀的写法，那对**仓库**是对的、对**产物**是错的；此处改用「目录 + 文件名」分开写，既不触发那条正则，也不把事实写反。） |
       | 从产物安装（`git archive` 解出 ⇒ **不是 `cp` 工作树**） | `quay-init --all --loop` **exit 0**，loop 类 copied=20 / skipped=0 / conflicted=0 |
       | 铺设结果无开发树路径 | `grep -rl "/home/yale/work/quay"` **0 命中** |
       | 占位符替换 | `npm test` 命中 3+9；**`scripts/test.sh` 残留 0**；`ac13-0:inner` 命中 6；**`quay-0:0.0` 残留 0** |
@@ -197,6 +197,7 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 
 | 时刻 | 复核结论 |
 |---|---|
+| 2026-08-03 13:20Z | **AC6 的一次真实失败，形态是新的**：我不是把数字估错，而是**从一份陈旧日志里读判决**——`grep /tmp/*.log \| tail -5` 命中早先任务的 `token-fanin-fullsuite.log`（fail 0），而真正的 `batch3-fanin-fullsuite.log`（fail 2）要按 mtime 才找得到。**AC6 的措辞据此扩一句：数字不仅要来自本 tick 跑过的命令，还要来自**这一次运行**的产物；选日志按 mtime，不按通配符顺序。** 另：**我的文档提交把 fan-in 套件搞红了**（AC1b），内层发现并修了我的文件——机制按设计工作，被它抓住的是我。 |
 | 2026-08-03 12:42Z | **AC8 第一次主动生效**：`grep -c` 报两个套件在跑，精确 argv 匹配只有 1 个，重活令牌的 `holder pid` 与那唯一真进程一致 ⇒ 一次「资源饥饿」误报被挡在报告之前。**这条从「记录我犯过的错」升级为「阻止了一次同类错」**，但仍保持未勾——一次生效不等于习惯。AC1/AC4/AC12 保持达成。 |
 | 2026-08-03 12:24Z | 复核无改判。**AC11 出现第一条反向证据**：本 tick 是 `no-action`，理由是读完两个在飞分支的 diff 后**确认无需纠偏**——我派发时坚持的负控制逐条在场，且内层多做了一条（漏记停机时偏保守的三个测试）。**这说明当派发规格写得够硬时，`correct` 是不必要的**，越线的那些 self 类更像是「规格是我边做边补的」而不是「内层不行」。AC1（本 tick 第 5 列非空）、AC12（未触发）保持。 |
 | 2026-08-03 12:02Z | 逐条复核，无需改判：AC1（本班 9 行、第 5 列空 0 行）、AC2（本批 3 个任务的闸口结果已逐条写进各自 `## Dispatch review`，内层已回填）、**AC4 当场自检通过**（精确 argv 匹配命中 2 个 pid、本仓副本、归属本会话）、AC12（未触发，本 tick 有派发+落地）。**AC13 已勾但留了一条未确立项**（`inner-state.sh` 4 秒无输出，需 60 秒以上窗口重测）——**本 tick 顺带补上了同族证据**：cron 确在自触发（三条间隔精确 20 分、秒数相同）。**AC11 维持已越线的标注**：本班 `correct` 仍是多数且多为 self 类，判据分不开两类这一点没有变化。 |

@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 13:20Z | `correct`（correct-self：**我把 fan-in 套件搞红了**，且差点用一份陈旧日志报成绿） | 查 fan-in 判决；定位两个失败的真因；修好自己造成的那个；把另一个的诊断送达内层 | 三个任务全部 merged（tph `5d75b59e` / tmpleak `35c27449` / monitor `02930d02`）；**fan-in 全量 fail 2**（tests 2085 / pass 2063 / fail 2 / cancelled 0 / selected 166，665.9s）；`/tmp` 跨该套件尾段 21,922→22,007（**+85**，非完整窗口，只作下界） | **两个错误都值得记，一个是判据的、一个是我的。** ①**差点把陈旧日志当判决**：后台命令里 `grep /tmp/*.log \| tail -5` 取到的是 `token-fanin-fullsuite.log`（早先任务的日志，fail 0），**按 mtime 找到真正的那份是 `batch3-fanin-fullsuite.log`（13:13Z，fail 2）**——一份写着 `fail 0` 的日志和正确答案从外面看一模一样。②**AC1b 的两条命中都指向 `orchestration/outer-phase-goal.md`——我自己的文件**：我在 `bedf543c` 写 AC13 证据表时用了**产物内相对路径** `scripts/resource-gate.sh` / `heavy-op-token.sh`，被那条负向后顾正则判为旧路径引用。**内层在 fan-in 里发现并改了我的文件（`dd9f6323`），处置正确**。**但加 `plugin/` 前缀对仓库是对的、对产物是错的**——产物内确实没有该前缀（`publish-dist-branch.sh` 把 `plugin/` 子树 rsync 到分支根）。已改成目录与文件名分写，两者都真，scoped `loop-shipping` **7/7 绿**。③**AC7（monitor 零写入）不是代码缺陷**：断言的 expected 含 `?? .quay-tmp-test-Oo3SEg/` 而 actual 不含 ⇒ 测试自己的临时目录在两次 `git status` 快照之间被别的东西删了——**在并发全量下对整仓 `git status` 做逐字相等断言本就不安全**。三条诊断均已送达内层（transcript 命中确认） |
 | 2026-08-03 13:02Z | `no-action`（未介入；三个任务全部合并，核实的是「主判据有没有真的动」） | 核实三个合并的成果：tmp-leak 的名单与活标本、tph 的数字、monitor 的落地；挂后台等 fan-in 套件判决 | **三个全部 merged**（`5d75b59e` tph / `35c27449` tmpleak / `02930d02` monitor），三个 worktree 均已 0 commit ahead、树干净；**fan-in 全量正在主检出跑**（pid 1560077，持有重活令牌）；遥测仍显示 3 在飞 67min（等套件绿后收尾）；完成 39、orphaned 0 | **tmp-leak 的两条主判据我都独立复核了，不是读它的自述**：①`grep -c mkdtemp-no-cleanup plugin/test-isolation-violations.txt` = **22**（开工值 28，我写的 band 是 `<28`）；②**我点名的活标本 `gate-diagnostics.test.mjs`（7 建 2 清、每小时 136 个、旧 R6 看不见它）现在 `mkdtempSync` 调用数 **0**、用共享助手 **8 处**——它不在违规名单上是因为**真修好了**，不是因为**仍然隐形**，这正是 AC7 存在的理由。它自报的 `leaked_after_suite` **464 → 159/160（−65.7%）**，用的是套件前后差值不是墙钟速率（我在任务体里钉死的测法）。**残留仍有约 160/套件，没有清零**——如实记，别读成解决了。**tph 的 AC5 数字我上一 tick 已手算逐位复核**（1.5391→1.6045）。**已挂后台等 fan-in 套件退出**并同时记 `/tmp` 前后数，用它做一次独立的泄漏复测 |
 | 2026-08-03 12:42Z | `no-action`（未介入；本 tick 我自己的一条 AC 当场挡下了一次误报） | 核实「两个套件并跑」是真是假；读 tmp-leak 的实现形状是否符合派发规格 | 在飞 **3**，各 47min（阈值 90）：monitor / tasksPerHour 各 1 commit、树干净、**4 分钟前仍在提交**；tmp-leak 0 commit、**25 个改动、正在跑套件**（它的 AC3 测量窗口）。完成 39、orphaned 0、`tph` 1.488；CPU some avg10 46.46、load1 8.75 | **差点报出一次并不存在的「两个全量套件并跑」**：`ps -eo args= \| grep -c '[s]cripts/test.sh'` 返回 **2**，而**按 argv 第二个 token 精确匹配只有 1 个真进程**（pid 1496925，cwd `/tmp/quay-wt-tmpleak`），另一个是命令行里含该字符串的包装。**重活令牌独立佐证**：`heavy-op-token.sh --status` 显示 `holder=quay pid=1496925`——与那个唯一的真进程同一个 pid。**这是我写进目标文件 AC8 的那条第一次主动挡下错误**，而不是事后记录错误；同族此前已咬过三次。**并核实 tmp-leak 的做法符合规格而非改一遍前缀**：它建了共享助手 `plugin/test/helpers/tmp-workspace.mjs`（`makeTmpDir` + 文件级 `after()` 钩子、`_created` 集合、递归删除、注释写明 R1 合规），23 个测试文件从各自的 `mkdtempSync` 改为调它——**正是任务体「不做：N 处各写各的 finally」那一条** |
 | 2026-08-03 12:24Z | `no-action`（未介入——本 tick 的结论是「不需要介入」，且这条结论本身是证据） | 读两个在飞分支的 diff 与测试名，核对我派发时坚持的负控制是否真的落地；手算复核其中一个数 | 在飞 **3**，各 29min（阈值 90）：monitor 与 tasksPerHour 各已 1 commit、工作树干净；tmp-leak 0 commit、17 个改动（实现中）。完成 39、orphaned 0、`tph` 1.505；CPU some avg10 13.40、**无套件在跑** | **我坚持的负控制全部真的存在，不是勾了框**。tasksPerHour 分支：AC3「零停机窗口逐位相等」有模块级与 CLI 级**两条**；AC4「人造 1 小时停机、升幅等于 count/(elapsed−halted)」有单测与 CLI 往返**两条**；**AC6「两个耗时相差 10 倍的任务对读数贡献相同」在场**——那是管理者点名担心「挑轻任务」时我写进任务体的那条。**并且它多做了我只写在 AC1 里的「漏记必须偏保守」**：有始无终的停机记录不扣、有终无始不扣、停机日志不污染任务事件流，三条各自成测试。monitor 分支：AC2 正是我踩过的自匹配坑（命令行里**含**脚本名不得算作已挂载）、AC4 挂错仓库、AC5 上个会话遗留进程、AC6 N>1 个 pid 不误报、AC7 零写入、AC8 分源码级与行为级两条。**手算独立复核了一个数**：它声称今晚真实停机扣除后 `tph` 1.5391→**1.6045**——用我自己记录的 37 个任务、窗口 24.0402h、停机 09:33:12Z→10:32:00Z（**0.98h**）手算得 **1.6045**，逐位相同 |
@@ -138,11 +139,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 42 | 39% |
+| no-action | 42 | 38% |
 | unblock | 16 | 15% |
-| correct | 47 | 43% |
+| correct | 48 | 44% |
 | escalate | 4 | 4% |
-| **合计** | **109** | — |
+| **合计** | **110** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
