@@ -217,6 +217,39 @@ console.log(m.checkTouchesPair(A,B,expand));
 
 这是**保守默认**。ADR-021 原则：不要在证据不足时把策略机械化。这些判断目前由人做，等积累了足够多的真实案例再考虑规则化。
 
+## 阻塞信号：停下前写、恢复后删（强制，gap-no-explicit-blocked-signal-from-inner-layer）
+
+2026-08-02 两次静默停摆（22:05、22:24）的根因是**内层停下时没有任何方式说出「我停下了、在等什么」**——
+外层只能从缺席（TUI md5 / inProgress 空集）猜，而缺席信号会错。现在内层**主动写**一个存在性阻塞信号。
+
+上面「判断边界」表里**每一个「停下等人」的动作，都必须先写阻塞信号再停，恢复后再清**：
+
+```bash
+# 停下前（任一停止/等裁定条件触发时）：
+node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/inner-blocked-signal.ts \
+  --assert-blocked --taskId <当前任务/阶段> \
+  --reason <merge-conflict|suite-red|review-refuted|task-over-90m|needs-human-backlog|ruling-required|queue-empty> \
+  --question <要外层裁定的问题> [--options '<json>'] [--evidence '<json>']
+
+# 恢复后（裁定下达、继续推进的那一刻）：
+node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/inner-blocked-signal.ts --clear
+```
+
+规则：
+
+- **文件存在 == 内层在等。** `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复的那一刻。这是
+  存在性信号，不是从缺席推断。`orchestration/watch/inner-state.sh` 用 inotifywait 监视该路径（延迟秒级，
+  不再是最多 20 分钟），事件直接带 `reason` + `question`，外层不必读屏就能开始判断。
+- **不手写 JSON。** 只调 CLI（AC4）——`reason` 合法值就是「判断边界」表 + 停止条件里已有的七种，不新增
+  语义（AC2，见 CLI `--schema`）。手写 JSON 会造成格式漂移，正是本机制要消灭的。
+- **从 worktree 里也写主 checkout。** CLI 自动解析共享根（主 checkout）为落点——外层 Monitor 监视的是
+  主 checkout 的 `.quay/`，且阻塞记录必须活得比产生它的 worktree 长。
+- **等待时长由此可测。** `since` → 删除的时间差由 `--clear` 记进遥测；`fast-mode-telemetry --report`
+  输出**累计死时间**与**单次最长**——「内层实际等了多久」这个数此前完全没有，现在有了基线。
+- **un-halt 前** `restart-readiness-check.sh` 会打印阻塞记录（AC5）：内层在等裁定 ≠ 可以解除 `.halt`。
+
+**本机制不让内层自动恢复**——内层仍然停、仍然等裁定，只是现在能说出自己停了（任务 DoD 明记）。
+
 ## 测试不得硬编码全局计数
 
 `EXPECTED_ENGINE = 58` 这类断言在任何人新增一个测试文件时都会红。B3-2 的三个失败里有一个正是
@@ -273,5 +306,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 在飞任务及其已运行时长
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
+- 阻塞信号状态（`.quay/inner-blocked.json` 存在与否；存在则报 `reason` + `question`，以及
+  `fast-mode-telemetry --report` 的累计死时间/单次最长——2026-08-03 起该数有基线）
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。

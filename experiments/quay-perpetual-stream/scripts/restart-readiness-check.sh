@@ -25,7 +25,10 @@
 
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../../.." && pwd)"   # scripts/ -> quay-perpetual-stream/ -> experiments/ -> repo root
+# QUAY_RR_ROOT overrides the repo root — a test seam for restart-readiness-check.test.mjs to run the
+# inner-blocked check against a temp workspace without touching the real repo or paying the ~560s
+# full suite. Production callers never set it → default (real repo root), behavior unchanged.
+ROOT="${QUAY_RR_ROOT:-$(cd "$HERE/../../.." && pwd)}"   # scripts/ -> quay-perpetual-stream/ -> experiments/ -> repo root
 cd "$ROOT" || { echo "ERROR: cannot cd to repo root ($ROOT)" >&2; exit 1; }
 HALT=".halt"   # repo-root-relative — matches select-preflight.ts's checkHalt() and
                # plugin/skills/loop-driver/SKILL.md's documented convention (gap-halt-sentinel-path-mismatch, M187).
@@ -34,6 +37,43 @@ ok()   { echo "  [ok]   $1"; }
 bad()  { echo "  [FAIL] $1"; fail=1; }
 
 echo "restart-readiness-check — repo: $ROOT"
+
+# ── 7. Inner-layer block signal (gap-no-explicit-blocked-signal-from-inner-layer, AC5) ─────────────
+# A present .quay/inner-blocked.json means the inner layer STOPPED and is waiting for a ruling — it
+# has NOT recovered. The record is PRINTED so the human knows exactly what to rule on. This is a
+# HARD FAIL, not informational: un-halting while a block is asserted hands the loop a self-stopping
+# state (the resumed tick re-hits the same stop-and-wait), and the task's own AC5 parenthetical says
+# it plainly — "内层在等裁定 ≠ 可以解除 .halt". The file is gitignored, so it does not disturb
+# check 1's working-tree-clean assertion. Kept as a named function so the RR_ONLY_BLOCK_CHECK test
+# seam can run JUST this check behaviorally.
+check_inner_blocked() {
+  if [ -f "$ROOT/.quay/inner-blocked.json" ]; then
+    blockinfo="$(node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/inner-blocked-signal.ts" --read --root "$ROOT" 2>/dev/null)"
+    if [ -n "$blockinfo" ]; then
+      br="$(printf '%s' "$blockinfo" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log((j.reason||'?')+' — '+j.question)}catch(e){console.log('unparsable record')}})" 2>/dev/null)"
+      bad "inner layer is BLOCKED (waiting for a ruling): $br"
+    else
+      bad "inner layer is BLOCKED (.quay/inner-blocked.json present but unreadable by inner-blocked-signal.ts --read)"
+    fi
+  else
+    ok "no inner-layer block signal (.quay/inner-blocked.json absent)"
+  fi
+}
+
+# Test seam (restart-readiness-check.test.mjs): run ONLY check 7 against the (possibly overridden)
+# ROOT, then print the same summary and exit. Skips checks 1-6 including the ~560s full suite.
+# Production callers never set it → normal full run, behavior unchanged.
+if [ "${RR_ONLY_BLOCK_CHECK:-0}" = "1" ]; then
+  check_inner_blocked
+  echo ""
+  if [ "$fail" = 0 ]; then
+    echo "READY ✓ — mechanical preconditions met. (Un-halt is still a human decision; recommend SUPERVISED restart.)"
+    exit 0
+  else
+    echo "NOT READY ✗ — at least one hard check failed; do NOT remove .halt until resolved."
+    exit 1
+  fi
+fi
 
 # 1. Working tree clean (ignoring the .halt sentinel itself, which is expected to be present).
 dirty="$(git status --short 2>/dev/null | grep -vE "(^\?\? )?${HALT//./\\.}\$")"
@@ -78,6 +118,9 @@ else
   # exp5 (no fast-mode): scripts/test.sh may not exist; the loop's own checks above are the gate.
   ok "full-test-suite skipped (no scripts/test.sh — exp5-only repo, selfchecks are the gate)"
 fi
+
+# 7. Inner-layer block signal — see the check_inner_blocked function defined above.
+check_inner_blocked
 
 # INFORMATIONAL: pending directives the loop's first DRAIN will process (not a hard blocker).
 pend="$(node packages/quay/bin/quay.ts task list --label directive --json 2>/dev/null \
