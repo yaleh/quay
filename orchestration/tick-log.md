@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 05:33Z | `correct` | 合并前核实 retire 分支的 25k 行删除；排除一次自己的假警；提醒 rebase | 在飞仅 retire(48m)；resource-awareness 与 serve 已 done（合并套件 **2436/2416/0 fail/0 cancelled** 绿）；**完成 29，吞吐 1.53/h** | **AC18 达标**：`tasksPerHour` = **1.525** ≥ 目标 1.5（窗口 19.01h、完成 29）——用的是 00:22Z 更正后的墙钟口径，当时明写「此更正不利于当前数据」。**retire 分支 −25,057 净行、51 个文件删除**，全部是管线；三个真闸处置正确、exp5 封存机器误删 **0**、快速模式三个导出都在。**外层一次假警已排除**：`git diff --diff-filter=D master..branch` 把 `resource-gate.sh` 等三个列为删除，实为分支 merge-base(04:42Z) 早于它们落地(04:52/05:08) ⇒ **该判据同时包含「删了」与「从没有过」**，正确判据是 `git show <commit> --diff-filter=D`。已提醒 rebase（分支落后 24 个提交） |
 | 2026-08-03 05:24Z | `no-action`（未介入；核实两个 P1 的落地质量） | 独立核实资源闸与 serve 修复；记录闸的一处诚实限度 | 三路并发（resource-awareness 36m / retire 41m / serve 25m）；完成 27，吞吐 1.43/h；压力 93.06 有一个套件在跑；**仓库 532 MB、`milestones/` 60 MB 收缩保持**；web 200 | **资源闸是真闸**：实测退出码 **1**（我第一次测成 0 是 `$?` 取到管道末端 `sed`——第 10 次同类错误），`scripts/test.sh:157` 已接入 `if ! bash resource-gate.sh`。**AC10 孤儿进程单列当场抓到 2 个**（`/tmp/quay-wt-m264 (deleted)`，ppid=1）。**serve 修复**：`.malformed-row` 样式 + provider 用文件名兜底 ⇒ 畸形任务可见地渲染而非静默消失。**闸的诚实限度**：它是预检不是调节器——`dcaddad9` 记录它先报 GO、随后压力升到 93，**它能阻止「在饥饿中启动」，不能阻止「启动后变饥饿」**，这是任务体「不做：不自动重试、不自动排队、不后台守护」的直接后果，是设计不是缺陷 |
 | 2026-08-03 05:05Z | `correct`（correct-self：纠正外层自己对 needs-human 代价的夸大） | 读 idle instrumentation 的 24 条样本，据此证伪 fork 的空转归因并确认资源闸的排序 | 三路并发（resource-awareness 16m / retire 21m / serve 5m），两两 DISJOINT 已复核；完成 27，吞吐 1.45/h；**仓库 532 MB**、`milestones/` **60 MB**，收缩保持 | **idle 日志 24/24 全是 `awaiting-subagent`**，`awaiting-ruling`/`queue-empty`/`no-reason` **皆 0**，覆盖 2h11m、中位间隔 5.2min。**⇒ fork 把 42.6% 空转归因于外层 20 分钟 tick 被直接证伪**——内层的空转全部是等自己的 subagent，与更早的间隙分布（最长 18.6min、20min 以上零个）同向。**缩短外层 tick 买不到任何东西。** 杠杆是并发吞吐而它 CPU 受限 ⇒ **资源闸排 P1 首位的第三条独立证据**。**并纠正外层自己**：02:56:48 那条显示 needs-human 阻塞期内层手上有 3 个任务、已在并发上限，`needs-human=7` 只阻止新派发 ⇒ **那个窗口的实际代价是零**，先前说「卡死派发」是夸大 |
 | 2026-08-03 04:47Z | `correct`（correct-self：解冻判据是我自己造的、也是我自己发现盲区的） | 核实拦截生效；发现并修正解冻判据的盲区；据修正后的判据解冻并重排 | 在飞 reclaim(68m) + retire(3m)；完成 26，吞吐 **1.42/h**；压力 89.37；**web server 仍 200** | **拦截生效**：5/5 只存在于 worktree 的任务文件完好，19 个脏 worktree 未被触碰，内层任务体如实记录 `Gate 2 correct refusal`。**内层回收了 M277+M243**（分支与 worktree 均已删，`milestones/M277` 51MB→1MB）。**但我的解冻判据两条都没触发**：(a) 删的是分支与目录不是任务节点；(b) `git log --numstat` 看不见——`milestones/M*/worktrees` 在 `.gitignore` 里，删除不产生 diff。**判据名字说「图收缩了」，实测的是「被跟踪行数减少了」**——同一失效族，我 50 分钟前自己造的。已加判据 (c) 物理收缩，实测 milestones/ **1100→1033 MB** ⇒ 满足，冻结解除、按原约定重排不恢复原序 |
@@ -89,11 +90,11 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 28 | 39% |
+| no-action | 28 | 38% |
 | unblock | 11 | 15% |
-| correct | 30 | 42% |
+| correct | 31 | 42% |
 | escalate | 3 | 4% |
-| **合计** | **72** | — |
+| **合计** | **73** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
