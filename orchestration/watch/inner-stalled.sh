@@ -4,11 +4,17 @@
 # 签名：最后一条是 assistant 且其中没有 tool_use（有 tool_use = 在等命令返回，不是停摆）
 #      + transcript 已静止。
 #
-# 为什么分两级（2026-08-02 实测）：外部观察无法区分「等自己派的 subagent」与「任务在飞时提问」
-# —— 两者 transcript 完全相同，遥测也都是 inProgress 非空，且 subagent 不写独立 transcript。
-# 所以 inProgress 非空时只能报 MAYBE 并抬高阈值。真正的解法是内层主动写
-# .quay/inner-blocked.json（见 gap-no-explicit-blocked-signal-from-inner-layer）——
-# 本脚本的歧义正是那个任务的实测依据。
+# 两级判据的原始理由（2026-08-02）写的是「subagent 不写独立 transcript」，因此外部无法区分
+# 「等自己派的 subagent」与「任务在飞时提问」，只能报 MAYBE。
+#
+# **该前提已于 2026-08-03 被证伪**：subagent 确实写 `<session>/subagents/*.jsonl`，
+# 外层整夜都在读它做取证。因此「在等活着的 subagent」现在是**可判定的**：
+# 取 subagents/*.jsonl 的最新 mtime，新鲜即说明有活在跑，不是停摆。
+# 实测（03:49:56Z）：三个 subagent 分别在 4/16/46 秒前活动，而主会话已静止 624s ——
+# 旧判据只能报 STALLED-MAYBE，新判据可直接判 WAITING-SUBAGENT。
+#
+# 保留 .quay/inner-blocked.json 作为内层主动信号（reason + question 是 transcript 给不出的），
+# 两者互补：本脚本判「有没有活在跑」，阻塞信号判「在等什么」。
 DIR=/home/yale/.claude/projects/-home-yale-work-quay
 SELF=b8dc91a6-64e8-4d70-a715-9ec8e16a4f11
 CONFIRM_S=${CONFIRM_S:-90}     # inProgress 为空：内层确实停了
