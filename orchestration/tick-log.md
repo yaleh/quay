@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 16:02Z | `no-action`（未介入；三个合并的关键声称逐条核实，另在工作树里撞到一个新实例） | 核实三个 merge 的主张；追共享树里的未跟踪目录到源头；建任务 | **三个全部 merged**：`fbf64fe9` session-liveness **PHASE 1**、`aa647b87` board、`2387e328` empty-set；三个 worktree 均 0 commit ahead、树干净；**fan-in 套件在跑**（令牌 holder=quay、CPU 87.53）；完成 45、orphaned 0 | **三条声称逐条核实，全部兑现**：①**board 保住了 throw**——`provider-client.ts` 注释与代码显示 `isError` **仍然抛**、新增的是 `malformed: MalformedTask[]` 的部分成功路径 ⇒ **AC5 的防回退负控制被真正执行了**，不是把静默请回来；②**session-liveness 按我要求分阶段落地并停在 PHASE 1**（transcript 心跳 + REPO-STALL 改名 + **解除停机基线**），**且我那条纠正管理者两个方向的修法进了文件头**：「陈旧度 = now − max(心跳 mtime, 解除停机时刻)」；③empty-set 给 4 个静默通过的检查器加了空集守卫。**并在共享工作树里撞到 `.quay-tmp-test-o30sII/`**，追到 `ts-typecheck-gate.test.mjs:69` 的 `mkdtempSync(path.join(REPO_ROOT, …))`——**根是仓库根不是 `os.tmpdir()`**；真扫描得 3 命中 = **2 真实例 + 1 个探测器自己测试里的字符串**，**并写明该 grep 会漏折行与变量间接写法 ⇒ 2 是下界**（这正是我今天把「规模是 1」说错后加进 AC7 的纪律）。**R1 与 R7 都看不见它**（实测零命中）：R1 要 `.tmp` 字面而这里是 `.quay-tmp`、R7 只覆盖 LIVE 数据目录 ⇒ **它落在两条规则之间，是同一形态的第四次** |
 | 2026-08-03 15:55Z | `correct`（correct-self 的延伸：查出**同一个探针缺陷的第三处，而且在已交付的代码里**） | 回答管理者「是不是同一个洞」；复测性能并拆成本；建任务 | 在飞 3（全部健康）；完成 45、orphaned 0；新任务闸口 new=0，等槽位 | **管理者问我的自纠与它的 AC3b 是不是同一处——答案要分两层**：**缺陷是同一个**（PATH 上的 `quay-native` 是指向开发树的符号链接 + `quay-init` 没铺 `vendor/quay/dist/*.js`），它从 archguard 侧撞到、我从 AC7b 侧写下；**但我的自纠说的是另一件事**——我错在**探针**（用对 quay 零依赖的 `resource-gate.sh` 当改名负控制），那是方法失败不是系统缺陷。**并且我查到了第三处，它不是我的、在已交付的代码里**：`test/cold-start-e2e.sh` 的改名负控制之后只跑 `heavy-op-token.sh --status`、`pipe-exit-code-check.sh --self-check`、`fast-mode-telemetry.ts`——**全是独立脚本**，而 `grep -cE "quay-native\|task_list\|mcp_entry" test/cold-start-e2e.sh` = **0** ⇒ **那条 e2e 从不走 provider 路径，在一台循环彻底坏掉的机器上它照样 PASS**。已写进冷启动任务的 AC7。**性能复测确认并拆半**：`/` **4.245 s**、`/adr` 0.082、`/live` 0.012；**`quay-native task list --json` 单独 1,977 ms** ⇒ **provider ~47%、其余 ~53%、每任务读+解析 3.25 ms**——**没有这一步，实现者可能只优化渲染而最多砍掉一半** |
 | 2026-08-03 15:44Z | `correct`（correct-self：**我的改名负控制测了一个不可能失败的东西，而且我据它报过两次通过**） | 核实管理者的三条；把 AC13 降级；重写冷启动任务的 AC7 并加 AC7b | 在飞 3（全部健康）；完成 45、orphaned 0 | **第三条推翻了我自己的结论，三项实测全部属实**：①`readlink -f $(which quay-native)` = **`/home/yale/work/quay/packages/quay-native/dist/quay-native.js`**——PATH 上的是**指向开发树的符号链接**；②产物 tarball **含** `vendor/quay/dist/quay.js`；③archguard 的 `plugin/vendor/` 里**没有**它；④archguard 的 `mcp_entry: ["quay-native","mcp"]` 走 PATH ⇒ **它的循环运行时确实依赖 quay 开发树，改名即断**。**我错在探针**：12:0x 与 15:2x 我两次用「改名后铺设项目的 `resource-gate.sh` 仍 exit 0」当证据，而**那是独立 bash、对 quay 零依赖——开发树在不在它都跑得通，探针本身不可能失败**。**我把两个不同的断言合成了一个**：「铺设文本 0 个 quay 绝对路径」为真，「运行时不依赖开发树」为假。**已降级 AC13 为 `[~]` 并把教训写进 AC7**：**负控制必须走被测系统的真实执行路径，探针要能在缺陷存在时失败，否则它与「永远通过」同形**。冷启动任务的 AC7 改为「改名后经 `mcp_entry` 实际完成一次 `task_list` 往返」，并新增 **AC7b：铺设时把 `vendor/quay/dist/*.js` 一并铺进目标项目、`mcp_entry` 指向铺进去的那份** |
 | 2026-08-03 15:42Z | `no-action`（未介入内层；跨项目令牌第一次遇到真实外部持有者，实测出它的真实状态） | 观察三个在飞任务；核实跨项目重活令牌在 archguard 持有时的行为 | 在飞 **3** 全部健康：`empty-set` 18min（1 commit、树干净）、`session-liveness` 18min（1 commit、树干净，**两者 2 分钟前刚提交**）、`board-500` 11min（12 个改动、实现中）；完成 45、orphaned 0、`tph` 1.541；**archguard 已解除停机**（`.halt` 不在，刚提交「start AC3 loop — mount monitors」） | **跨项目令牌第一次有真实外部持有者**：`--status` 显示 `holder=archguard pid=1953624 held_ms=449421`。外层试着以 quay 身份获取（约定：若意外拿到就立刻释放）——**结果是拿到了，因为它已陈旧**：`RECLAIMED stale token (mtime 450s old, pid 1953624 not alive) — reclaim #2`。**这不是缺陷，是机制按设计工作**：`kill -0 1953624` 确认该 pid **确已死亡**，两条回收条件同时成立，**且消息把两条的值都打了出来**（450 秒 + pid not alive），正是 09:13Z 我复核那条安全属性时要求的形状。**已确认我没把令牌留在手里**：探测后 `--status` 为 `holder=none`。**一条值得记的副产物**：`stale_reclaims` 今天已到 **2** ⇒ **持有者不总能走到释放路径**（崩溃/被杀），陈旧回收在真实环境里确实在干活——而不是一条从未触发的分支 |
@@ -163,11 +164,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 51 | 38% |
+| no-action | 52 | 39% |
 | unblock | 20 | 15% |
 | correct | 59 | 44% |
 | escalate | 4 | 3% |
-| **合计** | **134** | — |
+| **合计** | **135** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
