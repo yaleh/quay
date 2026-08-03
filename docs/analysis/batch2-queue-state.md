@@ -371,6 +371,13 @@ reclaim 被中止（无结果）——但 2 个 68s/60s 时序失败与 cancelle
 - **串行队列**：suite-run2 → inventory 全量 → reclaim 重跑 → （testiso 若再失败则再跑）。全部一次一个
 - 在飞：testiso（suite-run2 中）、reclaim（等重跑）；inventory 合并 pending 全量
 
+### Tick 更新（04T03:15Z）：suite-run2 全绿 = 坐实饥饿；inventory 全量在跑
+
+- **suite-run2（testiso 重跑）全绿**：2416/2397/0/0，EXIT 0——delivery-standalone-smoke 通过。
+  **坐实 suite-run1 的 2 个失败（68s/60s）是 CPU 饥饿非缺陷**。testiso 的 test.sh 改动验证通过
+- **inventory 批全量在跑**（`bdqps1ujt`，压力 10.21 <40 起跑）。已消息 reclaim：等 inventory 全量结束再重跑
+- 串行队列：inventory 全量 → reclaim 重跑 → testiso fan-in 全量（testiso agent 提交后）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
