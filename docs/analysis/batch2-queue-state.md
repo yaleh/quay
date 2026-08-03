@@ -1578,3 +1578,17 @@ jsonl；不能用「有提交/有 tick 日志」代替（archguard 两者都有�
 两者不互相覆盖（本任务自己就是实例）。
 
 **在飞 1/3**：cold8 阶段一（停报待外层批准阶段二）。无其它。
+
+### 派发（2026-08-03 19:2xZ）：checkers-mutation + liveness-stage-2 + cold8 阶段二批准
+
+**live 契约 new=1 已修**（invoke URL 补实跑证据，ratchet new=0）。
+**cold8 阶段二批准**（外层承认 68 分钟延迟是它失误——把「1 commit 0 dirty」读成正常推进；80 分钟前它刚在
+session-liveness 上诊断过同形态）。阶段二立即开始；阶段三不必再等批准直接做完报。三条判据再钉（事件送得到
+非进程在跑 / AC7 摘 PATH 非真 mv / 循环起来的证明 = 真实遥测记录）。
+**补派 2 个**（在飞 1→3，全 DISJOINT、闸口 new=0）：
+1. **checkers-mutation**（`/tmp/quay-wt-checkers`，agent a1d3824c...，fm-...-qfwki4）：对检查器变异测试。
+   清单从 run_static_checks+CI 解析不手写；机制自身有变异用例；AC5 用当天两个真实失败回归；stayed-green 逐个列。
+2. **liveness-stage-2**（`/tmp/quay-wt-live2`，agent a51be606...，fm-...-fs57qr）：承载 heartbeat 8 条未完成 AC
+   （## Carries）+ AC9 空闲判别（isApiErrorMessage 结构字段，非 429 文案——换端点失效）。
+
+**在飞 3/3**：cold8 阶段二、checkers-mutation、liveness-stage-2。
