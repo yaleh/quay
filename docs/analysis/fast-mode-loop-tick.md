@@ -69,6 +69,17 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 MemAvailable ~5G，OOM 无降级段）。参考：nproc=4 而 test.sh 默认 `--test-concurrency=8`（设计性 2 倍超订），
 两层绝不同时跑全量套件（资源感知任务 `gap-no-resource-awareness-heavy-ops-run-blind` 已建，排队中）。
 
+**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
+`fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
+（'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
+```bash
+grep 'cancelled 0'   # cancelled == 0（崩溃不计入 fail，必须显式查）
+grep 'FULL-SUITE-EXIT=0'
+grep 'tests 2361'    # tests 数等于参考值（batch4b/4c 稳定为 2361；若套件构成变了先重测参考值）
+```
+只查 fail 会把崩溃读成绿。reference `tests` 数来自 batch4b/4c 的稳定 2361（pass 2343 / cancelled 0 / skipped 18，
+且三次 `selected 167 files` 一致）。
+
 ## 状态单一来源
 
 `docs/analysis/batch2-queue-state.md`
