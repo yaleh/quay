@@ -37,7 +37,7 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 
 ### b. 每个项目的外层是否还活着、是否在推进
 
-**已由常设监视器覆盖**（2026-08-03 补上）：`orchestration/watch/outer-liveness.sh`，
+**已由常设监视器覆盖**（2026-08-03 补上）：`plugin/scripts/outer-liveness.sh`，
 60 秒一轮，报三类事件——**消失 / 恢复 / 活着但超 45 分钟不推进**（未暂停的项目才判后者）。
 
 这条补的是一个真实缺口：2026-08-03 实测发现管理者挂着**两个看【内层】的监视器**

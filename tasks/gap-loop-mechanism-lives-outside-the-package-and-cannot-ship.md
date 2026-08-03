@@ -176,8 +176,12 @@ resume   每铺完一类资产即记一次，中断可续
 重造一个会立刻产生两套铺设逻辑——**那正是本仓反复在修的漂移**。
 
 1. **把 7 个 plugin 外的机制文件搬进 `plugin/`**（tick 文档进 `plugin/loop/`，
-   `.sh`/`.mjs` 进 `plugin/scripts/`），并解决 `fast-mode-telemetry.ts` 在
-   `plugin/scripts/` 与 `experiments/` 各有一份的问题——**先判权威再删，不要两份都打包**。
+   `.sh`/`.mjs` 进 `plugin/scripts/`）。（**前提更正 2026-08-03：`fast-mode-telemetry.ts` 的
+   「双份」是假前提**——`experiments/quay-perpetual-stream/scripts/fast-mode-telemetry.ts` 自
+   2026-08-02 起就是符号链接（mode 120000，blob 6a1523e8，单提交 40ad4a24 创建时即链接），
+   AC2 开工前已满足，本任务未改动。假前提来自 archguard 冷启动差异清单，外层两轮核实都用
+   按名字找文件（`find -name`/`ls` 路径存在），回答不了「是不是链接」——要看 mode 需
+   `ls -la`/`git ls-tree`。）
 2. **`quay-init` 加 `--loop` 类别**：铺双层机制（两份 tick 文档 + 检查器 + 闸 + 令牌），
    并**在铺 tick 文档时做占位符替换**（测试命令、tmux 会话名、项目名）——
    archguard 那次是我手工 `sed` 的，那一步必须机械化。
@@ -196,8 +200,9 @@ resume   每铺完一类资产即记一次，中断可续
 
 - [x] AC1: 6 个 plugin 外的机制文件全部搬入 `plugin/`（范围裁定：`scripts/test.sh` 除外），
       每个有归属理由；「以防万一」不是理由
-- [x] AC2: `fast-mode-telemetry.ts` 的双份收敛为一份——权威是 `plugin/scripts/fast-mode-telemetry.ts`，
-      `experiments/quay-perpetual-stream/scripts/` 是符号链接再导出（非第二份物理副本）
+- [x] AC2: `fast-mode-telemetry.ts` 的「双份」**开工前已满足**（前提为假）——`experiments/` 侧自
+      2026-08-02 起就是符号链接（mode 120000，blob 6a1523e8），唯一物理副本是
+      `plugin/scripts/fast-mode-telemetry.ts`；本任务未改动（git ls-tree 合并前后同 blob）
 - [x] AC3: `quay-init --loop` 铺出双层机制全套，`--dry-run` 逐项列出（实跑输出见「执行记录」）
 - [x] AC4: tick 文档的占位符替换**机械化**——目标项目的测试命令/会话名/项目名可参数化，
       不需要手工 `sed`（负控制：铺完后 grep 不到 `scripts/test.sh` 这类 quay 专属字面，见执行记录）
