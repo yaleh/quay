@@ -31,6 +31,13 @@
 //   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ)
 //   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (explicit persist)
 //
+// BLOCKED-WAIT METRICS (gap-no-explicit-blocked-signal-from-inner-layer, AC7): --report/--snapshot
+// also aggregate blocked-wait periods. The inner layer's inner-blocked-signal.ts --clear emits a
+// `Fast`-stage event with eventKind "blocked" (timing.startedAtMs = block since, endedAtMs = clear
+// time); aggregate() pulls those out before task pairing and reports `blocked[]` plus
+// totalBlockedMs (cumulative dead time) and longestBlockedMs (single longest wait) — the dead-time
+// number that "does not exist today". SCHEMA_VERSION stays "1".
+//
 // Storage: raw events append to <root>/.workflow-events/<runId>.jsonl (gitignored). The committed
 // roll-up under <root>/milestones/fast-mode-telemetry/<YYYY-MM-DD>.json is written ONLY by the
 // explicit --snapshot subcommand (task end / Land / day-end moments). --report is PURE READ — it
@@ -279,15 +286,27 @@ function isEndLike(e) {
  * mislabelled as orphaned. Negative wall-clock (clock skew / mispaired runId) is clamped to 0
  * (DEFECT-3 fix) so a corrupt record cannot drag mean/median negative.
  *
+ * BLOCKED-WAIT EVENTS (gap-no-explicit-blocked-signal-from-inner-layer, AC7): a `Fast` stage event
+ * with `eventKind: "blocked"` is a blocked-wait period emitted by inner-blocked-signal.ts --clear,
+ * NOT a task start/end pair. It is pulled out BEFORE pairing so it can never pollute `orphaned` or
+ * `inProgress`, and aggregated into a `blocked` section: one entry per wait with durationMs =
+ * endedAtMs − startedAtMs (clamped to 0), plus totalBlockedMs (cumulative dead time) and
+ * longestBlockedMs (single longest wait) — the number the task body says "does not exist today".
+ * `--since` windows blocked events on their CLEAR time (consistent with task pairing windowing on
+ * end time).
+ *
  * @param {object[]} events — schema-valid StageEvents (any stage; only "Fast" is consumed)
  * @param {{sinceMs?: number|null}} [opts]
- * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number}}
+ * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
 export function aggregate(events, { sinceMs = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
+  // Blocked-wait events are NOT task start/end pairs — separate them before the byRun pairing.
+  const blockedEvents = fastEvents.filter((e) => e.eventKind === "blocked");
+  const taskEvents = fastEvents.filter((e) => e.eventKind !== "blocked");
 
   const byRun = new Map();
-  for (const e of fastEvents) {
+  for (const e of taskEvents) {
     if (!byRun.has(e.runId)) {
       byRun.set(e.runId, { runId: e.runId, taskId: e.taskId, start: null, ends: [] });
     }
@@ -337,7 +356,29 @@ export function aggregate(events, { sinceMs = null } = {}) {
   // tasks per hour = completedCount / totalHours; guard divide-by-zero (all-zero-duration run).
   const tasksPerHour = totalMinutes > 0 ? (count * 60) / totalMinutes : 0;
 
-  return { tasks, orphaned, inProgress, meanMinutes, medianMinutes, tasksPerHour };
+  // Blocked-wait aggregation (gap-no-explicit-blocked-signal-from-inner-layer, AC7). One entry per
+  // blocked period; duration = endedAtMs − startedAtMs (clamped to 0 for skew). Windowed on the
+  // CLEAR time (end), consistent with task pairing windowing on end time.
+  const blocked = [];
+  for (const e of blockedEvents) {
+    const sinceMsE = e.timing?.startedAtMs ?? null;
+    const clearedAtMs = e.timing?.endedAtMs ?? e.recordedAtMs ?? null;
+    const durationMs =
+      sinceMsE != null && clearedAtMs != null ? Math.max(0, clearedAtMs - sinceMsE) : 0;
+    if (sinceMs != null && (clearedAtMs ?? sinceMsE) < sinceMs) continue;
+    blocked.push({
+      taskId: e.taskId,
+      reason: e.blockedReason ?? null,
+      sinceMs: sinceMsE,
+      clearedAtMs,
+      durationMs,
+    });
+  }
+  blocked.sort((a, b) => a.taskId.localeCompare(b.taskId) || (a.sinceMs ?? 0) - (b.sinceMs ?? 0));
+  const totalBlockedMs = blocked.reduce((s, b) => s + b.durationMs, 0);
+  const longestBlockedMs = blocked.length ? Math.max(...blocked.map((b) => b.durationMs)) : 0;
+
+  return { tasks, orphaned, inProgress, meanMinutes, medianMinutes, tasksPerHour, blocked, totalBlockedMs, longestBlockedMs };
 }
 
 // ── Committed aggregate ──────────────────────────────────────────────────────────────────────────────
@@ -381,6 +422,15 @@ function printHumanReport(report, aggFile) {
     console.log(`in-progress (start without end): ${report.inProgress.length}`);
     for (const p of report.inProgress) console.log(`  ${p.taskId} (runId ${p.runId})`);
   }
+  // Blocked-wait (dead-time) metrics — gap-no-explicit-blocked-signal-from-inner-layer (AC7).
+  if ((report.blocked ?? []).length) {
+    console.log(`blocked-wait periods: ${report.blocked.length}`);
+    for (const b of report.blocked) {
+      console.log(`  ${String(b.taskId).padEnd(40)} ${b.reason ?? "null"} ${(b.durationMs / 60_000).toFixed(1).padStart(8)}m`);
+    }
+  }
+  console.log(`cumulative blocked (dead) time: ${((report.totalBlockedMs ?? 0) / 60_000).toFixed(2)} min`);
+  console.log(`longest single blocked wait: ${((report.longestBlockedMs ?? 0) / 60_000).toFixed(2)} min`);
   if (aggFile) console.log(`aggregate snapshot written: ${aggFile}`);
 }
 
