@@ -1740,3 +1740,19 @@ mount_count=1、二次挂载空操作非失败、kill -9 后必须接管。契�
 **与 token-status 冲突**（都动 heavy-op-token.sh），token-status 待 AC20 落地后派。
 **在飞（1/3）**：AC20。**下一批候选**：token-status（等 AC20）、worktree-node-modules（待 review）、
 dod-gate（外层建）。
+
+### 补派两条（2026-08-03 23:5xZ，外层裁定填满槽位）
+
+- **dod-gate**（`gap-the-dod-gate-encodes-a-retired-task-shape`，runId `...9wwkva`，`/tmp/quay-wt-dodgate`）
+  ——**最高优先**：管理者裁定不许改 meta-cc 任务内容迁就闸，41 个 Finding 模板任务过不了 author→ready、
+  ready 队列为 0，挡着 meta-cc 整个循环。修复只能在我们这边。不对称：ac/dod 允许别名、proposal/plan 写死，
+  写死的恰是两项目各自撞的（quay: plan→Contract；meta-cc: proposal→Finding）。AC5 未知形状 fail-closed、
+  AC6b 不许改任务内容达标，AC5 不过则 AC2 不算数。
+- **tick-doc**（`gap-the-tick-doc-ships-three-contradictory-loop-drivers`，runId `...l4x18s`，`/tmp/quay-wt-tickdoc`）
+  ——同一份外层 tick 文档三套矛盾循环驱动（CronCreate/ScheduleWakeup//loop 25m），照字面走 2/3 概率双触发或不触发。
+
+**押后两条（外层裁定）**：`gap-session-liveness-hashes-the-token-counter`（动 session-liveness.sh，与在飞 AC20
+同文件须串行）；`gap-suite-speed-under-a-297-second-sigma`（改 scripts/test.sh——其它每条任务用来自证的仪器，
+并发改它=绿是在移动的尺子上量的；正交性检查看不出，等槽位空单独跑）。
+
+**在飞（3/3）**：AC20 + dod-gate + tick-doc。
