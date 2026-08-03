@@ -36,6 +36,18 @@
 #                                   the REAL tasks/ (swept into a commit by a windowed git add -A).
 #                                   Writing under a per-run-unique root (mkdtemp/os.tmpdir/makeTmp)
 #                                   is the SAFE pattern and never reports.
+#   R8 shared-root-mkdtemp          never mkdtemp() with a root that resolves INTO THE SHARED
+#                                   CHECKOUT (REPO_ROOT/repoRoot/__dirname/import.meta/process.cwd()
+#                                   or a variable derived from one) — os.tmpdir() only.
+#                                   gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree
+#                                   (2026-08-03): ts-typecheck-gate.test.mjs mkdtemp'd at
+#                                   path.join(REPO_ROOT, ".quay-tmp-test-") every run, dirtying the
+#                                   working tree (readiness clean-tree false-fail) and swept into
+#                                   git add -A. Invisible to R1 (`.quay-tmp` is dot-quay-tmp, not
+#                                   dot-tmp) and R7 (repo root is not a LIVE dir) — fell exactly
+#                                   BETWEEN them. INVARIANT: per-run-unique is NECESSARY, not
+#                                   SUFFICIENT — the mkdtemp root must ALSO not be the shared
+#                                   checkout. os.tmpdir()/makeTmp-derived roots never report.
 #
 # R7 baseline (2026-08-03, gap-r1-cannot-see-tests-writing-into-the-live-task-store): the list went
 # 44 -> 45 -> 44. 44 -> 45: the detector was extended (AC2) and the live specimen
@@ -45,6 +57,14 @@
 # the CLI's WORKFLOW_EVENTS_DIR override — the detector's unlinkSync-aware scan found this second
 # instance that the outer's writeFileSync-centric size-1 scan missed), so no R7 entry remains. The
 # `# baseline-count` ceiling is permanent and unchanged at 51.
+#
+# R8 baseline (2026-08-03, gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): the list
+# went 44 -> 47 -> 44. 44 -> 47: the detector was extended (AC2) and the THREE live specimens were
+# baselined so the check stayed green while it was verified against them — the 2 the outer's grep
+# found (ts-typecheck-gate REPO_ROOT root, loadbearing-test-gate __dirname root) PLUS a 3rd the
+# grep's same-line/path.join restriction missed (run-identity.test.mjs mkdtemping under
+# REPO_ROOT/tmp, relying on the gitignored tmp/ dir). 47 -> 44: ALL THREE were FIXED to os.tmpdir()
+# roots, so no R8 entry remains. The `# baseline-count` ceiling is permanent and unchanged at 51.
 #
 # The scanner (plugin/scripts/test-isolation-check.ts) REPORTS every current violation on every
 # scripts/test.sh run but does NOT block on the ones listed here (AC6, "报出而不阻断"). This list

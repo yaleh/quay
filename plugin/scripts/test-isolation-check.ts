@@ -41,6 +41,26 @@
 //                                 test `.tmp` path. A write under a per-run-unique root
 //                                 (os.tmpdir()/mkdtemp/makeTmp-derived variable) is the SAFE
 //                                 pattern and never reports.
+//   R8 shared-root-mkdtemp        a test mkdtemp()s with a root that RESOLVES INTO THE SHARED
+//                                 CHECKOUT (REPO_ROOT/repoRoot/__dirname/import.meta/process.cwd()
+//                                 or a variable derived from one of them), not os.tmpdir().
+//                                 gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree
+//                                 (2026-08-03): ts-typecheck-gate.test.mjs:69 mkdtemp'd at
+//                                 `path.join(REPO_ROOT, ".quay-tmp-test-")` — every run created a
+//                                 unique-named dir IN THE REPO ROOT, dirtying the working tree
+//                                 (restart-readiness-check.sh's clean-tree check false-fails
+//                                 mid-suite), swept into `git add -A` commits, invisible to R1
+//                                 (`\.tmp` needs dot-immediately-tmp; `.quay-tmp` is dot-quay-tmp)
+//                                 AND to R7 (repo root is not one of the LIVE dirs) — it fell
+//                                 exactly BETWEEN R1 and R7. INVARIANT (the task's Contract):
+//                                 per-run-unique is NECESSARY, not SUFFICIENT — the mkdtemp root
+//                                 must ALSO not be the shared checkout. os.tmpdir()-derived roots
+//                                 (and makeTmp/mkdtemp-derived variables) NEVER report; an
+//                                 unknown root (function param) is lenient-skipped (R6's
+//                                 leniency precedent). This is the FOURTH instance of the
+//                                 "rule name covers the class, implementation covers one
+//                                 specimen" shape (R1 can't see process.cwd() → R6 file-level
+//                                 existence → R7 excludes repo root → this).
 //
 // Every check matches CODE POSITIONS only — comments, string/template literals and regex
 // literals are masked (reusing buildNonCodeMask from test-framework-policy-check.ts), so a
@@ -90,6 +110,7 @@ export const RULE_KEYS = [
   "process-exit-1",
   "mkdtemp-no-cleanup",
   "live-data-dir-write",
+  "shared-root-mkdtemp",
 ] as const;
 export type RuleKey = (typeof RULE_KEYS)[number];
 
@@ -470,11 +491,19 @@ function tmpRootVars(src: string, mask: Uint8Array): Set<string> {
   return names;
 }
 
+/** Shared-checkout root tokens (R8): the repo-root variable identifiers (REPO_ROOT/repoRoot) or
+ * the standard shared-checkout roots (process.cwd()/__dirname/import.meta/fileURLToPath). A
+ * mkdtemp/join whose base is one of these resolves under the shared checkout. */
+const SHARED_ROOT_TOKEN_RE = /\b(?:REPO_ROOT|repoRoot|__dirname)\b|process\.cwd\s*\(|import\.meta|\bfileURLToPath\b/;
+
 /** Variables whose initializer references the SHARED CHECKOUT root (process.cwd()/__dirname/
- * import.meta/fileURLToPath) — e.g. `REPO_ROOT = path.resolve(__dirname, "..", "..")` or
- * `const cwd = process.cwd()`. A join whose base is such a variable resolves under the shared
- * checkout → a NON-per-run-unique root (the R7 violation class). */
-function sharedRootVars(src: string, mask: Uint8Array): Set<string> {
+ * import.meta/fileURLToPath — and for R8 also the REPO_ROOT/repoRoot identifiers) — e.g.
+ * `REPO_ROOT = path.resolve(__dirname, "..", "..")` or `const cwd = process.cwd()`. A join/mkdtemp
+ * whose base is such a variable resolves under the shared checkout → a NON-per-run-unique root
+ * (the R7/R8 violation class). `initRe` lets R8 follow the literal REPO_ROOT/repoRoot identifiers
+ * too (ts-typecheck-gate's `path.join(REPO_ROOT, …)`), which R7's default (__dirname-derived
+ * roots only) does not need. */
+function sharedRootVars(src: string, mask: Uint8Array, initRe: RegExp = /process\.cwd|__dirname|import\.meta|fileURLToPath/): Set<string> {
   const names = new Set<string>();
   const declRe = /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)/g;
   for (const m of src.matchAll(declRe)) {
@@ -490,7 +519,7 @@ function sharedRootVars(src: string, mask: Uint8Array): Set<string> {
       else if (c === "}") depth--;
       else if (c === ";" && depth <= 0) { end = i; break; }
     }
-    if (/process\.cwd|__dirname|import\.meta|fileURLToPath/.test(src.slice(m.index, end))) names.add(m[1]);
+    if (initRe.test(src.slice(m.index, end))) names.add(m[1]);
   }
   return names;
 }
@@ -619,6 +648,56 @@ export function detectLiveDataDirWrites(src: string, rel: string): Violation[] {
     if (hit !== null) {
       out.push({ rel, rule: "live-data-dir-write", line: lineAt(src, hit), snippet: snippetAt(src, hit) });
     }
+  }
+  return out;
+}
+
+/**
+ * R8 shared-root-mkdtemp: a mkdtemp/mkdtempSync call whose ROOT resolves INTO THE SHARED CHECKOUT
+ * (REPO_ROOT/repoRoot/__dirname/import.meta/process.cwd() — or a variable derived from one of
+ * them) instead of os.tmpdir().
+ * gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree: the specimen is
+ * `fs.mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-"))` in ts-typecheck-gate.test.mjs — every
+ * run created a unique-named dir in the repo root (R1's `\.tmp` needs dot-immediately-tmp, so
+ * `.quay-tmp` is invisible to it; the repo root is not one of R7's LIVE dirs, so R7 misses it
+ * too). Per-run-unique is NECESSARY, not SUFFICIENT: the mkdtemp root must ALSO not be the shared
+ * checkout. The SAFE shapes never report: an os.tmpdir() root, or a per-run-unique tmp-root
+ * variable (mkdtemp/os.tmpdir/makeTmp-derived — the R7 tmpRootVars set). An unknown root (e.g. a
+ * function-param tmp dir) is lenient-skipped, matching R6's leniency precedent. Per-file
+ * granularity is achieved by the caller's rel:rule dedup; every hit is reported here.
+ */
+export function detectSharedRootMkdtemp(src: string, rel: string): Violation[] {
+  const mask = buildNonCodeMask(src);
+  const out: Violation[] = [];
+  const mkdtempRe = /\bmkdtemp(?:Sync)?\s*\(/g;
+  const tmpVars = tmpRootVars(src, mask);
+  // R8 follows the literal REPO_ROOT/repoRoot identifiers too, not just __dirname-derived vars.
+  const sharedVars = sharedRootVars(src, mask, /\b(?:REPO_ROOT|repoRoot)\b|process\.cwd|__dirname|import\.meta|fileURLToPath/);
+  for (const m of src.matchAll(mkdtempRe)) {
+    if (mask[m.index] !== 0) continue;
+    const openIdx = m.index + m[0].length - 1;
+    const region = callRegion(src, mask, openIdx);
+    // SAFE: the root resolves under os.tmpdir() (or a makeTmp/os.tmpdir/mkdtemp-derived var).
+    if (codeRegionHas(src, mask, openIdx, region, /os\.tmpdir\s*\(/)) continue;
+    let safeTmp = false;
+    for (const v of tmpVars) {
+      if (codeRegionHas(src, mask, openIdx, region, new RegExp(`\\b${v}\\b`))) { safeTmp = true; break; }
+    }
+    if (safeTmp) continue;
+    // VIOLATION: the root resolves into the shared checkout — a direct token ...
+    if (codeRegionHas(src, mask, openIdx, region, SHARED_ROOT_TOKEN_RE)) {
+      out.push({ rel, rule: "shared-root-mkdtemp", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+      continue;
+    }
+    // ... or a variable whose initializer references a shared-checkout root.
+    let shared = false;
+    for (const v of sharedVars) {
+      if (codeRegionHas(src, mask, openIdx, region, new RegExp(`\\b${v}\\b`))) { shared = true; break; }
+    }
+    if (shared) {
+      out.push({ rel, rule: "shared-root-mkdtemp", line: lineAt(src, m.index), snippet: snippetAt(src, m.index) });
+    }
+    // unknown root — lenient-skip (a function-param tmp root is not statically distinguishable).
   }
   return out;
 }
@@ -807,7 +886,7 @@ function callerCleansReturn(
   return false;
 }
 
-/** Run all seven detectors over one file. */
+/** Run all eight detectors over one file. */
 export function detectAll(src: string, rel: string): Violation[] {
   return [
     ...detectFixedPathWrites(src, rel),
@@ -816,6 +895,7 @@ export function detectAll(src: string, rel: string): Violation[] {
     ...detectProcessExit1(src, rel),
     ...detectMkdtempNoCleanup(src, rel),
     ...detectLiveDataDirWrites(src, rel),
+    ...detectSharedRootMkdtemp(src, rel),
   ];
 }
 
@@ -1193,6 +1273,30 @@ export function runSelftest(): boolean {
   check("R7 GREEN: a comment mentioning the pattern does NOT report (code-position matching)", detectLiveDataDirWrites(r7Comment, "x.test.mjs").length === 0);
   const r7ReadOnly = 'const realTasksDir = path.join(REPO_ROOT, "tasks");\nconst raw = fs.readFileSync(path.join(realTasksDir, "x.md"), "utf8");\n';
   check("R7 GREEN: a READ from REPO_ROOT/tasks does NOT report (write ops only)", detectLiveDataDirWrites(r7ReadOnly, "x.test.mjs").length === 0);
+
+  // R8: mkdtemp rooted in the shared checkout reports; os.tmpdir()/makeTmp roots never report.
+  // The two LIVE specimens (AC2): ts-typecheck-gate's REPO_ROOT root and loadbearing's __dirname
+  // root. R1 deliberately does NOT see them (mkdtemp prefix = per-run-unique); R8 is the rule
+  // whose invariant is "per-run-unique is NECESSARY, not SUFFICIENT — the root must not be the
+  // shared checkout".
+  const r8RepoRoot = 'const logFile = path.join(fs.mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-")), "g.jsonl");\n';
+  check("R8 RED: mkdtempSync(path.join(REPO_ROOT, ...)) reports", detectSharedRootMkdtemp(r8RepoRoot, "x.test.mjs").some((v) => v.rule === "shared-root-mkdtemp"));
+  const r8Dirname = 'const tmp = fs.mkdtempSync(path.join(__dirname, "..", "fixtures", "loadbearing", ".tmp-tree-"));\n';
+  check("R8 RED: mkdtempSync(path.join(__dirname, ...)) reports", detectSharedRootMkdtemp(r8Dirname, "x.test.mjs").some((v) => v.rule === "shared-root-mkdtemp"));
+  const r8Tmpdir = 'const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-ts-typecheck-gate-"));\n';
+  check("R8 GREEN: mkdtempSync(path.join(os.tmpdir(), ...)) does NOT report", detectSharedRootMkdtemp(r8Tmpdir, "x.test.mjs").length === 0);
+  const r8MakeTmpVar = 'const ws = makeTmpDir("x-ws-");\nconst d = fs.mkdtempSync(path.join(ws, "sub-"));\n';
+  check("R8 GREEN: mkdtemp under a makeTmp-derived variable does NOT report", detectSharedRootMkdtemp(r8MakeTmpVar, "x.test.mjs").length === 0);
+  const r8CwdVar = 'const cwd = process.cwd();\nconst dir = fs.mkdtempSync(path.join(cwd, "leak-"));\n';
+  check("R8 RED: mkdtemp under a process.cwd()-derived variable reports", detectSharedRootMkdtemp(r8CwdVar, "x.test.mjs").some((v) => v.rule === "shared-root-mkdtemp"));
+  const r8Indirect = 'const ROOT = path.join(REPO_ROOT, "fixtures");\nconst dir = fs.mkdtempSync(path.join(ROOT, "leak-"));\n';
+  check("R8 RED: mkdtemp under a REPO_ROOT-derived variable reports (variable indirection)", detectSharedRootMkdtemp(r8Indirect, "x.test.mjs").some((v) => v.rule === "shared-root-mkdtemp"));
+  const r8Unknown = 'const dir = fs.mkdtempSync(path.join(rootParam, "x-"));\n';
+  check("R8 GREEN: mkdtemp under an unknown (function-param) root is lenient-skipped", detectSharedRootMkdtemp(r8Unknown, "x.test.mjs").length === 0);
+  const r8Comment = '// fs.mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-")) mention\nconst x = 1;\n';
+  check("R8 GREEN: a comment mentioning the pattern does NOT report (code-position matching)", detectSharedRootMkdtemp(r8Comment, "x.test.mjs").length === 0);
+  const r8String = 'const s = \'const dir = fs.mkdtempSync(path.join(__dirname, "..", "fixtures", ".tmp-tree-"));\';\n';
+  check("R8 GREEN: the pattern inside a STRING LITERAL does NOT report (AC3 — the detector's own test fixture)", detectSharedRootMkdtemp(r8String, "x.test.mjs").length === 0);
 
   // ── the ratchet (runIsolationChecks) ────────────────────────────────────────────────────────────
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];

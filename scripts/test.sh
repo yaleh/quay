@@ -435,6 +435,16 @@ run_selected() {
     node --test --test-concurrency="$cc" "$@" "${files[@]}"
     local code=$?
     set -e
+    # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
+    # SUITE must leave the shared checkout clean (`git status --porcelain` empty). Harder than any
+    # static rule — it does not depend on a detector recognizing a particular spelling, so ANY
+    # test that dirties the tree (mkdtemp under REPO_ROOT, a leaked scratch dir, a stray file) is
+    # caught here. Only on the full-suite default path (this token-held branch); scoped runs
+    # legitimately execute inside uncommitted worktrees and skip it. A failing test's own exit
+    # code is the primary signal, so a dirty tree only flips a PASSING run (never masks a fail).
+    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" "${repo_root}"; then
+      code=1
+    fi
     exit "$code"
   fi
   exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"

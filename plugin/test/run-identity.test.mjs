@@ -40,8 +40,7 @@ function _findRepoRoot(startDir) {
 const REPO_ROOT = _findRepoRoot(__dirname);
 const SCRIPTS = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts");
 const PLUGIN_SCRIPTS = path.join(REPO_ROOT, "plugin", "scripts");
-const TMP = path.join(REPO_ROOT, "tmp");
-if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true });
+const TMP = os.tmpdir();
 
 const RUN_IDENTITY_TS = path.join(SCRIPTS, "run-identity.ts");
 const PLUGIN_RUN_IDENTITY_TS = path.join(PLUGIN_SCRIPTS, "run-identity.ts");

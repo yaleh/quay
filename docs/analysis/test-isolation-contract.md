@@ -157,9 +157,43 @@
 **棘轮**：名单 44 → 45 → 44。44→45 是 AC2 活标本验证期间为 `it0-dod-check` 基线化一条；45→44 是两个
 实例都修完后删掉。`# baseline-count` 封顶永久不变（51）。
 
+### R8 · `mkdtemp` 的根不得解析进共享检出（`REPO_ROOT`/`repoRoot`/`__dirname`/`process.cwd()`）（2026-08-03 补）
+
+> 来源：`tasks/gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree.md`——外层 tick 时在共享工作树里
+> 看到未跟踪目录 `.quay-tmp-test-o30sII/`，追到 `ts-typecheck-gate.test.mjs:69` 的
+> `mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-"))`。名字是每运行唯一的（R1 的一半满足了），
+> 但**它落在共享检出里**（R1 意图的另一半「不要弄脏共享树」没被满足）。三个后果：
+> ① 弄脏工作树 ⇒ `restart-readiness-check.sh` 的「工作树干净」硬检查在套件运行期间假失败；
+> ② `git add -A` 会把它扫进提交（与今早 `M-FAKE-FRONTMATTER-SCOPE-M124.md` 被扫进 master 同机制）；
+> ③ **两条规则都看不见它**——R1 要求 `.tmp` 字面而这里是 `.quay-tmp`（点后不紧跟 tmp）、
+> R7 只覆盖 LIVE 数据目录不含仓库根 ⇒ 它正好落在 R1 与 R7 之间。
+
+**规则**：`mkdtemp`/`mkdtempSync` 的**根**（传给它的路径基座）不得解析进共享检出——`REPO_ROOT`/`repoRoot`/
+`__dirname`/`import.meta`/`process.cwd()` 及**引用它们的变量**都算。**不变式：每运行唯一 ≠ 可以落在共享检出里**
+（per-run-unique is NECESSARY, not SUFFICIENT）。`os.tmpdir()` 派生的根（或 `makeTmp`/`mkdtemp` 派生的变量）
+**永不报**；未知根（函数参数等）宽松跳过（R6 的宽松先例）。
+
+**扫描信号**（R8 `shared-root-mkdtemp`，与 R1/R7 并列的新一类）：
+- `fs.mkdtempSync(path.join(REPO_ROOT, …))` / `path.join(__dirname, …)` / `path.join(process.cwd(), …)`；
+- 变量间接（外层 grep 会漏的写法）：`const ROOT = path.join(REPO_ROOT, "fixtures")` 然后
+  `mkdtempSync(path.join(ROOT, …))`——R8 的 `sharedRootVars` 沿声明初始化器追一层。
+
+**AC2 活标本**：探测器上线后报出 **3 个**（外层 grep 的 2 是下界，不是确数——探测器是真正的兜底）：
+- `ts-typecheck-gate.test.mjs`（`REPO_ROOT` 根，本次现场目录的来源）；
+- `loadbearing-test-gate.test.mjs`（`__dirname` 根，建到 fixtures 子树里）；
+- `run-identity.test.mjs`（`TMP = path.join(REPO_ROOT, "tmp")` 根——**grep 没找到的第三个**，靠 gitignore 的
+  `tmp/` 掩盖；与任务「不许用 .gitignore 掩盖」的立场冲突，一并修掉）。
+
+**修复的三个实例**：全部改为 `os.tmpdir()` 根（`mkdtempSync(path.join(os.tmpdir(), "<tag>-"))`），
+`run-identity` 的 `TMP` 直接改 `os.tmpdir()`。每个 mkdtemp 目录仍在同一测试内删除（R6 不变式保持）。
+
+**棘轮**：名单 44 → 47 → 44。44→47 是 AC2 活标本验证期间为 3 个实例各基线化一条；47→44 是三个实例都修完
+后删掉。`# baseline-count` 封顶永久不变（51）。这是**同一形态的第四次**（R1 看不见 `process.cwd()` → R6 文件级
+存在性 → R7 不含仓库根 → 本条）：**规则名覆盖类、实现覆盖标本**。
+
 ## 扫描与棘轮（AC2–AC6）
 
-`plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做六条判定，
+`plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做七条判定，
 **按代码位置匹配**（剥离注释与字符串/正则字面量 —— 复用 `test-framework-policy-check.ts` 的
 `buildNonCodeMask`）。「匹配到提到它的注释而非它本身」正是 relation-sync 数 `process.exit(1)` 数到
 4 处全是解释性注释的教训。
