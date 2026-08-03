@@ -1702,3 +1702,12 @@ scoped 验证（`--root` 测试缝），不跑全量。
 **记账缺口（外层 22:0xZ）**：`gap-a-widened-wait-window` 关闭时未调 `--task-start/--task-end`，
 `.workflow-events/` 无其事件 → 对 orphan 检测/在飞判定不可见。**不回填历史**；此后每条任务
 （含本批 3 条）都走同一条记账路径（派发 `--task-start`、关闭 `--task-end`）。
+
+### 判别与记账（2026-08-03 22:5xZ）
+
+- **batch-tokenwait 套件 fail 2 判别**：serve.test.mjs + provider-env-symmetry 在当前窗口共享检出重跑
+  2/2 绿 + 时序（套件 22:36 早于 tasklist 合入 22:38）→ **负载竞争 flake，非 tasklist 回归**
+  （外层实测 load 4.65 单跑 serve.test.mjs 也绿）。cancelled 0（此前取消的两文件本次过了）。
+- **新任务**：`gap-worktree-node-modules-inconsistent-self-verify`——worktree node_modules 不一致
+  （tasklist 有符号链接、tokenwait 无），不能自证的 worktree 验证回退到共享检出（污染高发地）。
+  外层提问差在哪一步，内层实测回答：差在 agent 是否建 node_modules 符号链接。**待派发**。
