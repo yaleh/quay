@@ -378,6 +378,15 @@ reclaim 被中止（无结果）——但 2 个 68s/60s 时序失败与 cancelle
 - **inventory 批全量在跑**（`bdqps1ujt`，压力 10.21 <40 起跑）。已消息 reclaim：等 inventory 全量结束再重跑
 - 串行队列：inventory 全量 → reclaim 重跑 → testiso fan-in 全量（testiso agent 提交后）
 
+### Tick 更新（04T03:19Z）：testiso merged；reclaim 停车等信号
+
+- **testiso merged**（`7dce49f5`/`8633ed4a`，7 文件）：test-isolation-check 扫描 + 棘轮（baseline 23）+
+  test(8) + 契约文档 + test.sh `run_static_checks` +2 行。scoped 8/8 绿。**suite-run2 全绿**（2416/2397/0/19）
+  证实 M52 run1 失败是既有 60s 门禁 flake 非其改动。无 `## Contract` → `contract-absent`（info 非失败）
+- **reclaim agent 停车**：声称「等 inventory 套件完成通知」——停摆形态，等编排信号。inventory 全量结束后
+  消息它重跑
+- **inventory 全量仍在跑**（`bdqps1ujt`）。**串行套件队列**：inventory 全量 → reclaim 重跑 → testiso 全量
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
