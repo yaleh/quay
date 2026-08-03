@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 01:44Z | `no-action` | 三任务并发正常推进（各约 19 分钟，阈值 90），无需介入 | `done 18` / `inProgress 3` / `orphaned 0`；窗口 **8.00/12 小时（67%）**，真实吞吐 1.12/hr | **主动核查了一个可预见风险**：`load1=18.99`、38 个 node 进程，而今晚 AC11 的失败与 M243 的崩溃成因都是「多套件并跑争抢」。精确统计后确认**只有 1 个真实 `test.sh`**（在 `/tmp/quay-wt-ac11`），38 进程是它自己并发 8 的 worker + 派生 CLI —— **三个 subagent 没有同时跑全量，并发纪律守住了**。`/tmp/quay-wt-ac11` 下 188 个进程符合预期：该任务研究的正是「runner 内起 runner」，需复现嵌套场景 |
 | 2026-08-03 01:25Z | `no-action` | 三任务并发已派发（ac11 / reverse-drift / tasksperhour，均刚起步），内层自建任务证据充分，无需介入 | `done 18` / `inProgress 3` / `orphaned 0`；窗口 7.68/12 小时（64%），真实吞吐 **1.17/hr** | **核实内层自建任务 `gap-test-coverage-check-parses-stale-files-variable` 的证据 —— 它是对的，两次否定它的是我自己的 grep**：`test.sh:125` 是 `local glob=(…)`（真正的 canonical glob），`:234` 是 `local files=() f`（空数组声明，无关）；检查脚本的 `/files=\(([^)]*)\)/` **匹配到第 234 行并捕获空串** ⇒ `parseCanonicalGlobs` 返回 `[]`，exit 0，**静默降级而非报错**。我第一次 grep 锚了行首漏掉 `local ` 前缀，第二次据此怀疑内层判断有误——**今天第七次同一个坑，这次差点否掉一个正确的发现**。AC16 由此满足且是高质量满足：任务体给出文件行号、正则原文、改名位置、CI 接线（`ci.yml:34-35`）|
 | 2026-08-03 01:23Z | `correct` | **AC1 未达成**——外层自己的两次全量在同一 commit 上结果不同。建任务并派发调整 | 内层空闲候机（它主动不派发、不跑测试以免与外层争抢——纪律正确） | **「可重现」这条今晚第一次兑现价值，且用在外层自己身上**：第 1 次 2344/0 fail/443s/exit 0；第 2 次 2344/**fail 1**/472s/exit 1。**若按第一次宣布达成即为错误。**失败项 `AC11 — scripts/test.sh explicit-file form`（`select-tests-for-touches.test.mjs:384`），隔离下 3/3 绿 ⇒ **今晚第三个「隔离绿/套件红」实例**（M136、relation-sync、本项）。机制比前两个清楚：该测试**在套件内 spawn 完整的 `scripts/test.sh`**（第 73 行，timeout 60s），而 `test.sh` 自 B5-1 起先跑致命的 `build_dist_once`；外层并发 8 跑在 4 核（已 2 倍过订）⇒ 嵌套运行要在争抢中完成 esbuild + 一轮测试，60s 预算下失败可预期。**在 runner 内起 runner，把外层负载变成了内层的成败条件** |
 | 2026-08-03 01:04Z | `no-action` | 内层在做两个已合并任务的 fan-in 收尾（删 worktree 与分支），未重做任何任务，无需介入 | 两任务在飞 56 分钟（阈值 90，代码已合并、遥测待收尾）；`orphaned 0` | **排除了「重做 relation-sync」的疑虑**：面板那行是清单旧标签，实际输出是 `Deleted branch task/inner-blocked-signal` 等 fan-in 清理；`load 8.15` 来自 claude 会话本身，无套件在跑。**窗口 7.33/12 小时（61%），真实吞吐 0.95/hr**（目标 1.5）。两任务收尾时该数会跳升——**那将是「并发提升真实吞吐、压低旧口径」的第一次直接演示**，值得下一 tick 对照记录 |
@@ -76,10 +77,10 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 25 | 42% |
+| no-action | 26 | 43% |
 | unblock | 10 | 17% |
-| correct | 21 | 36% |
+| correct | 21 | 35% |
 | escalate | 3 | 5% |
-| **合计** | **59** | — |
+| **合计** | **60** | — |
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 36%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 35%。
