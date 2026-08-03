@@ -86,7 +86,6 @@
 # Format: <repo-root-relative-test-file>:<rule-key>  ('#' comments and blanks ignored). Sorted.
 experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup
 experiments/quay-perpetual-stream/test/drain-dispose-corruption-check.test.mjs:mkdtemp-no-cleanup
-experiments/quay-perpetual-stream/test/loadbearing-test-gate.test.mjs:shared-root-mkdtemp
 experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs:fixed-path-write
 packages/quay-backlog/test/backlog-client.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/adversarial-eval.test.mjs:fixed-path-write
@@ -124,9 +123,7 @@ packages/quay/test/gate-list-verbose.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/it0-gates.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/mcp-config-validate.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/ts-typecheck-gate.test.mjs:shared-root-mkdtemp
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
-plugin/test/run-identity.test.mjs:shared-root-mkdtemp
 plugin/test/runner-grouping.test.mjs:spawns-test-sh
 plugin/test/runtime-usage-inventory.test.mjs:mkdtemp-no-cleanup
 plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh

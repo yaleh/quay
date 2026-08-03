@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 import { resolveGate, listGates } from "../src/gate/registry.ts";
 
@@ -66,7 +67,7 @@ test("M63 C1: `quay gate --list` includes 'ts-typecheck'", () => {
 });
 
 test("M63 C1: `quay gate <task> --gate ts-typecheck` PASSes for real against this repo and appends a real GateEvent", () => {
-  const logFile = path.join(fs.mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-")), "g.jsonl");
+  const logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "quay-ts-typecheck-gate-")), "g.jsonl");
   try {
     const r = runQuay(
       ["gate", "exp5-M-TS-MIGRATION-P0", "--gate", "ts-typecheck", "--file", logFile],

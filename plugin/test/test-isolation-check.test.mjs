@@ -463,7 +463,7 @@ test("AC7: a manually constructed violating test file is reported by the CLI (no
     fs.mkdirSync(testDir, { recursive: true });
     fs.writeFileSync(
       path.join(testDir, "deliberately-violating.test.mjs"),
-      '// @test-group product\nconst tasksDir = path.join(__dirname, ".tmp-constructed-bad");\nfunction fail() { process.exit(1); }\nconst d = fs.mkdtempSync(path.join(REPO_ROOT, "constructed-"));\n'
+      '// @test-group product\nconst tasksDir = path.join(__dirname, ".tmp-constructed-bad");\nfunction fail() { process.exit(1); }\nconst d = fs.mkdtempSync(path.join(REPO_ROOT, "constructed-"));\nt.after(() => fs.rmSync(d, { recursive: true, force: true }));\n'
     );
     const dataFile = path.join(scratch, "plugin", "test-isolation-violations.txt");
     fs.mkdirSync(path.dirname(dataFile), { recursive: true });

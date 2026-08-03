@@ -172,7 +172,7 @@ test("CLI: fixture tree → exit 1 (a load-bearing script lacks a test), prints 
 });
 test("CLI: passing subtree (point tests dir at a tree that covers the load-bearing script) → exit 0", () => {
   // Build an all-PASS scratch tree: only fixture-imported.mjs (load-bearing + tested).
-  const tmp = fs.mkdtempSync(path.join(__dirname, "..", "fixtures", "loadbearing", ".tmp-tree-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loadbearing-test-gate-"));
   try {
     fs.mkdirSync(path.join(tmp, "scripts"));
     fs.mkdirSync(path.join(tmp, "test"));
