@@ -1325,3 +1325,14 @@ fork 会话归属修正、已知答案窗口 02:00-02:30 恰 3 次真实套件�
 外层 8f7f7238 更正：三个「错误」里 AC1 前提是外层自己误读（截断显示）；另两个真错误已修。
 **排空完成——无在飞任务、无未合并分支、工作树干净。** 按外层指令，下一次行动是外层落 .halt
 （写明理由与解除条件）后启动 archguard 双层会话；本仓届时暂停。
+
+### 恢复派发（2026-08-03 10:0xZ）：.halt 已由管理者解除
+
+**套件绿记录**：管理者跑的全量套件 `/tmp/suite.log`（selected 158 files，498s）：tests 2073 /
+pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过、与参考值 2073 一致。
+**如实记录：退出码未被捕获**（管理者的命令只重定向了 stdout，没留下 exit code）。
+
+**首个派发（人指定优先于其它一切）**：`gap-loop-mechanism-lives-outside-the-package-and-cannot-ship`
+（产品化冷启动）。闸口外层已过（task-contract-check 0 违规；Touches 外层补齐 3→18）。
+范围裁定已写进任务体：**scripts/test.sh 不搬**（quay 本仓测试入口非可移植机制；判绿约定随 tick 文档
+走、测试命令占位符替换；Touches 不列 test.sh）。

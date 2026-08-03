@@ -54,6 +54,27 @@ quay **已经是一个 Claude Code plugin**：`plugin/.claude-plugin/plugin.json
 | `plugin/scripts/touches-orthogonality-check.ts` | **并发派发的正交性判据**（在 plugin 内，但 `quay-init` 不铺） |
 | `plugin/scripts/concurrent-batch-scheduler.ts` | **并发批次组装**（同上） |
 
+### 范围裁定（执行前，2026-08-03）：`scripts/test.sh` **不搬进 `plugin/`**
+
+外层要求执行前先答：缺口二的表把 `scripts/test.sh` 列为「机制文件」，而 Chosen mechanism 只说
+`.sh`/`.mjs` 进 `plugin/scripts/`，两处打架。
+
+**裁定：不搬。** `scripts/test.sh` 留在本仓根。理由：
+
+1. **它是 quay 本仓的测试入口，不是可移植机制**——`node --test` 专用、本仓 CI 入口
+   （`.github/workflows/ci.yml`）+ 15 处文档引用。搬它是大范围重构，且对 archguard
+   （vitest）/meta-cc（`go test`）没有可移植收益——它们用不了这份 test.sh。
+2. **判绿约定的载体是 tick 文档，不是 test.sh 的字面路径**——AC4 负控制明写「铺完后 grep 不到
+   `scripts/test.sh` 这类 quay 专属字面」：铺到目标项目的 tick 文档用**占位符替换目标项目的测试命令**。
+   判绿概念随 tick 文档走（`cancelled 0` / `FULL-SUITE-EXIT=0` / `tests=reference` 的 grep 约定），
+   具体载体随项目。
+3. **搬移的「机制」应项目无关**：resource-gate、heavy-op-token、tick 文档、检查器、inner-state、
+   inner-forensics、telemetry——这些搬；test.sh 是 quay 自己的实例。
+
+**影响**：缺口二的「7 个 plugin 外文件」→ 实际搬 **6 个**（test.sh 除外）。`quay-init --loop` 的
+占位符替换把「目标项目的测试命令」参数化（AC4），冷启动的空项目由此获得自己的测试入口约定，
+不依赖 quay 开发树。**test.sh 不列进 `## Touches`**（未定为搬移对象）。
+
 **缺口三——`quay-task-operator` skill 在磁盘上但 `plugin.json` 的 `commands` 没列**（10 个 skill 只列了 9 个），
 装了也不暴露。
 
