@@ -86,6 +86,36 @@ resume 单点改动，无阶段
 - [ ] AC5: 死持有者时，输出还要说明「按 acquire 判据是否已可回收」，并给出下一步文案
 - [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`，扩进 `plugin/test/heavy-op-token.test.mjs`
 
+## 活体事故（2026-08-03 19:42Z）——本任务此前只有推理，现在有真实代价
+
+内层的 fan-in 需要绿套件，套件需要 heavy-op token。`--status` 报：
+
+```
+holder=archguard
+pid=2898949
+held_ms=368859
+stale_reclaims=7
+```
+
+外层实测三个量：
+
+| 量 | 实测 | 回收判据 |
+|---|---|---|
+| `/home/yale/.quay-global/heavy-op/token` mtime 时龄 | **405s** | `> HEAVY_OP_STALE_TIMEOUT_S=30` ✔ |
+| `/proc/2898949` | **不存在**（持有者已死） | pid 不活 ✔ |
+
+**⇒ 脚本自己的两个回收条件此刻都已满足，任何一次前台 `--acquire` 都会立刻收回。**
+而 `--status` 只印 `holder=archguard`，**对「pid 已死、此刻可回收」只字不提。**
+
+**代价（这是本任务的真实分母）**：内层读 `--status` 得出「忙，得等」，把等待包成后台任务；
+后台任务被 kill，于是它**转去二分「后台任务能活多久」**（T0/T90/T150/T210/T270 分段报时）——
+**约 20 分钟的偏离路径取证，fan-in 三个任务同时停摆**，直到外层量出 mtime 与 pid 才解开。
+
+**这条事故把 AC5 从「锦上添花」提为主判据**：光报 alive/dead 还不够，
+**必须直接说「按 acquire 判据现在是否已可回收」并给出下一步命令**——
+本次内层缺的正是这一句，而它就在脚本自己的判据里，只是没被印出来。
+**又一次「存在≠生效」：存活知识在 acquire 路径里是对的，只是没出现在人会去读的那个出口。**
+
 ## Definition of Done
 
 - [ ] AC3 与 AC4 的实跑输出贴进任务体——**一个会顺手回收的 `--status`，把读操作变成了写操作**
