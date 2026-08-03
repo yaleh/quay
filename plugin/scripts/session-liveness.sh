@@ -42,6 +42,13 @@ LOOP_MIN=${LOOP_MIN:-20}            # 会话的预期活动/心跳周期
 OVERDUE_MIN=${OVERDUE_MIN:-45}      # 超过它就认为会话没在动（>2× 周期，容忍跑重活的长时段）
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE
 
+# ── 版本可见性（2026-08-03 管理者建议，非规格）──
+# 启动时打一行指纹到 stderr——「跑的是哪个版本」可从外部查：对比这行的 md5 与当前文件的 md5，
+# 不同即此实例载入的是旧代码（进程握着旧 inode，从外部看不出）。同一族失效今天第四次：
+# 进程握旧文件、pgrep 写死旧路径、盯错层的监视器、旧日志报绿。比再加一个事件更有价值。
+printf 'session-liveness: starting pid=%s file=%s md5=%s\n' \
+  "$$" "$(basename "${BASH_SOURCE[0]}")" "$(md5sum "${BASH_SOURCE[0]}" 2>/dev/null | cut -c1-16)" >&2
+
 ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;

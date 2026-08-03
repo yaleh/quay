@@ -606,3 +606,14 @@ test("AC12/AC13 — both shipped tick docs state what to mount; the outer doc na
   assert.ok(inner.includes("session-liveness.sh"),
     "the inner tick doc must state that the inner mounts session-liveness.sh (AC13)");
 });
+
+// ── 版本可见性（管理者建议，2026-08-03）：启动指纹让「跑的是哪个版本」可从外部查 ─────────────────
+
+test("startup stamp makes the running version visible (file + md5 to stderr, matching the on-disk file)", () => {
+  const r = spawnSync("bash", [SCRIPT, "--once"], { encoding: "utf8", env: { ...process.env, SESSION_ROOT: "/tmp" } });
+  assert.match(r.stderr, /session-liveness: starting pid=\d+ file=session-liveness\.sh md5=[0-9a-f]{16}/,
+    `startup stamp must carry pid/file/md5 on stderr:\n${r.stderr}`);
+  const diskMd5 = md5(fs.readFileSync(SCRIPT, "utf8"));
+  assert.ok(r.stderr.includes(diskMd5),
+    `stamp md5 must equal the loaded file's md5 (${diskMd5}), so a stale instance is detectable by comparison:\n${r.stderr}`);
+});
