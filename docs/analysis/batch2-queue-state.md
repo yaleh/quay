@@ -358,3 +358,69 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
 
 1. **恢复派发。** 下一批第一个是 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`（人裁定优先）。
 2. 那 7 个 DIR 任务**不在本轮处理**——它们的去留是范围决定，已升级给人（见 `orchestration/escalations.md`）。
+
+## 外层重排队列优先级（2026-08-03T04:01:53Z，人裁定按几何诊断调整）
+
+### 诊断（依据 `docs/references` 的框架 + 实测）
+
+| 量 | 值 |
+|---|---|
+| 近 18 小时 扩张 : 收敛 | **3 : 21** |
+| 任务图今日 新增 : 删除节点 | **22 : 0** |
+| 脚本 live : unaccounted | **35 : 81**（共 205） |
+| 内层 tick 文档 决策性语句 : 有真执行者 | **36 : 7（硬形变 19%）** |
+
+框架对收敛的定义是「用更低描述长度的机制替换更高描述长度的机制」，且**支柱化与断言加固
+是收敛的内在两半**。我们只产出了断言：**L(X) 在上升**。
+
+**⇒ 我们自以为在收敛，几何上仍在元层扩张。删除算子一个都没跑完过，这张图从未收缩过一次。**
+
+### 优先级
+
+**P0 — 删除算子（让图第一次收缩）**
+
+| 序 | 任务 | 状态 | 说明 |
+|---|---|---|---|
+| 1 | `gap-no-inventory-of-what-the-two-layer-mode-actually-runs` | **在飞** | 同时在**裁剪**与**冷启动产品化**两条关键路径上——不知道哪 35 个脚本活着，就答不出「新项目要装什么」 |
+| 2 | `gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion` | **在飞** | 第一次真实删除；1.1G / 21 worktree |
+| 3 | `gap-retire-the-prepare-execute-pipeline-cluster` | 待 | **依赖 #1**，直接读它的 `class` 列 |
+| 4 | `gap-stranded-worktree-branches-have-no-alarm-channel` | 待 | 与 #2 同域，#2 落地后再排 |
+
+**P1 — 异步通道（消解「必须提问才能知道现在在跑什么」）**
+
+| 序 | 任务 | 说明 |
+|---|---|---|
+| 5 | `gap-serve-task-list-dies-on-one-malformed-task` | **人正在使用该页面**；再来一个畸形任务就再 500 一次。活面上的缺陷优先 |
+| 6 | `gap-web-cannot-show-what-the-loop-is-doing-now` | `/live` + `/journal`——人不该为了知道现状而提问 |
+| 7 | `gap-web-board-needs-an-inconsistency-verdict-it-does-not-have` | 需先回答复用/重实现的架构问题 |
+
+**P2 — 暂缓：一切「再加检查」类任务**
+
+`quantified-stop-conditions`、`test-isolation-contract`、`checks-that-verify-an-empty-set`、
+`no-resource-awareness`、`workflow-metadata-warn-omissions`、`plancheck-*`、
+`prepare-milestone-no-size-aware-routing-*` 等。
+
+**理由不是它们不重要，是在删除算子跑通之前，每加一个检查都让 L(X) 继续上升。**
+
+**例外（可作填充，排在 P0/P1 之后）**：**生产机制正在给错答案**的既有缺陷，不是新增检查——
+`gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet`（`assembleBatch` 对新文件任务
+误判串行且理由说错）、`gap-inner-forensics-verify-reports-nonruns-and-zero-durations`
+（外层唯一的廉价核实手段在说谎）。**仅当 P0/P1 因 Touches 冲突派不出时才取这两个。**
+
+### 解冻判据（可测，不靠判断）
+
+**冻结在「任务图第一次收缩」时解除。** 判据二选一，任一成立即可：
+
+```bash
+# (a) 有任务节点被删除
+git log --diff-filter=D --since='<冻结时刻>' --name-only --format= -- 'tasks/*.md' | sort -u | grep -c .
+# (b) 有一次落地提交的净行数为负（删多于增）
+git log --since='<冻结时刻>' --numstat --format='%H' | awk '...'  # 净 delta < 0
+```
+
+冻结时刻 = 2026-08-03T04:01:53Z。**解冻后重新评估，不自动恢复原顺序。**
+
+### 不做
+
+不撤销任何已建任务、不改任何任务的 `status`、不删任务。**这是排序，不是取消。**
+被暂缓的任务全部保留在队列里，等图收缩后重新评估。
