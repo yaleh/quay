@@ -1237,3 +1237,17 @@ fm-...-1785746441367-r1x9cn，agent 已派（worktree 隔离）。
 接线约束：scoped 不取令牌；令牌与资源闸串联、闸失败必须释放令牌。本任务只交付令牌本体，不接线 archguard/meta-cc。
 
 **在飞**：token A（agent abae2f...）；tmpdirs fan-in 套件（pid 828768）→ 关闭后即可腾出。
+
+### 内层 tick 补充 3（2026-08-03 08:45Z）
+
+**tmpdirs 已关闭**：fan-in 套件绿（2054 tests / 2035 pass / 0 fail / 0 cancelled，exit 0）。
+**AC3 主判据满足**：修复后套件 4 个修复前缀（prepare-admission-/quay-loop-params-/adr-store-/document-store-）
+**0 个新目录**（mtime<10min = 0；最新泄漏目录停在修复合并前的 08:24）→ 从修复前静态 ~112/套件
+**100% 下降**。原始 /tmp 净增 +470 是范围外 quay-qeng + token agent 并发 scoped 测试，非修复信号
+（外层方法提醒：leaked_after_suite 必须围绕单次全量套件测，不能拿墙钟速率做分母）。
+telemetry --task-end done（35 完成），worktree/branches 清理，349940cf。
+
+**参考值 2052 → 2054**（tmpdirs 合并 +2 测试），tick 文档已更新。
+
+**在飞（1/3 槽）**：token A（agent abae2f...，08:40 派发）。B（archguard 冷启动）、C（meta-cc）被 A 阻塞。
+**未再派发**：AC5 并发实验（2/4/6/8）待低压力窗口；外层正在积极 steer，保守只保持 A 在飞。
