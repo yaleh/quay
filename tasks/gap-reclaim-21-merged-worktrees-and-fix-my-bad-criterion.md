@@ -173,6 +173,24 @@ master 上没有且未 git 跟踪（`tasks/DIR-124-F1.md`、`F2.md`、`F5.md`、
 **不放松 Gate 2、不加 `--force`**——那会销毁这 34 项工作。如实记录：**净回收 = M277(~51M) + M243 悬挂
 分支；其余 19 个因含未落地工作被正确拒绝**。34 项工作已升级给人裁定去留。
 
+## 跟进：34 项裁定后的 19 个 worktree 回收（2026-08-03T04:56Z）
+
+外层裁定 34 项未落地工作：**32 项作废**（DIR-124-F2/F6、gap-build-evidence-path、14 份 plans、其余
+DIR-124 家族文件）+ **2 项实质保留**（F1 模板卫生 + F5 种子完整性，合并进新任务
+`gap-task-body-has-n-parsers-and-no-authority`）。**reclaim 限制解除**：19 个 worktree 可回收，
+回收前不归档 32 项作废内容。
+
+执行（机制 `--clean-stale` 逐个）：各 worktree 先丢弃作废内容（`reset --hard` + `clean -fd`，使三闸通过），
+再回收：
+
+```
+M211 M237 M255 M257 M258 M261 M262 M263 M264 M265 M266 M267 M268 M270 M271 M272 M273 M274 M275
+→ 全部 cleaned（worktree + branch 移除）
+```
+
+**结果**：milestones/ 从 896MB → **49,978,147 bytes（~50MB）**；只剩 M239（人裁定保留，has-commits
+ahead=2）；`git worktree prune --dry-run` 空。**图收缩第三判据（worktree 数 / 分支数 / MB）大幅满足。**
+
 ## Touches
 
 - plugin/scripts/milestone-worktree.ts
