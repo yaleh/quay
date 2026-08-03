@@ -44,6 +44,50 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     involved; and **browser/agent-driven e2e** — a milestone-cadence, MCP-tool-driven manual/agent
     process (Playwright/chrome-devtools), `status: proposed` in `adr/ADR-010-scheduled-milestone-
     e2e-incl-browser-tests.md`. A green `scripts/test.sh` run is evidence for neither category.
+  - **Test-framework policy (gap-no-test-framework-policy-for-new-tests, AC1):** NEW test files
+    MUST use `node:test` (`import { test } from "node:test"`). Enforced mechanically by
+    `plugin/scripts/test-framework-policy-check.ts` (wired into `scripts/test.sh` via
+    `run_static_checks`, alongside the split-or-commit scan): every file in the canonical glob must
+    either import `node:test` or be on the legacy exemption list
+    (`plugin/test-framework-policy-exemptions.txt`, **currently 34 files** — the pre-existing
+    hand-rolled `makeAssert()`/`failures`-counter tests, 12,204 lines, measured 2026-08-02 in
+    `orchestration/test-shape-analysis.md`). That list is a **shrink-only ratchet (AC4)**, enforced
+    three ways: a **count ceiling** — the list can never exceed the data file header's own
+    `# baseline-count: 34` at any state (a clean commit, a fresh clone, a smuggled addition), so a
+    new hand-rolled test can never be exempted; a **shrink-only ceiling** — raising
+    `# baseline-count` itself in the working tree fails, because the header is the control surface
+    guarded pre-commit by the git strict-subset; and a **git-HEAD strict-subset** — a working-tree
+    addition that isn't in the committed list fails before it can land (catches same-count swaps).
+    Scope note: the ceiling is read from the working-tree data file, so raising it *and* adding
+    files *in the same commit* moves the baseline past both (a code-review-grade edit) — the
+    durable backstop is the pre-commit Audit window plus the shrink-only ceiling check. A listed
+    file that converts to `node:test` must be REMOVED from the list. Existing legacy files are NOT
+    migrated by this policy; each converts one at a time, when someone is already editing it (first
+    intended application: relation-sync's harness). New files must also declare
+    `// @test-group <product|engine|governance>` (AC5); existing files may omit it and default to
+    `engine`. The import detection is a code-position fast heuristic (comments, strings, and regex
+    literals that merely mention `node:test` do not count; a method call like
+    `loader.import("node:test")` does not count). The `@test-group` requirement is enforced at the
+    point a file is introduced (Audit-before-commit); a committed new file without it is treated as
+    existing (`存量缺省 engine`) by design.
+  - **Test-layer selection (AC7 — not coverage):** test at the boundary you are willing to keep
+    stable, in three layers: (1) user-facing **contracts** (CLI commands, MCP tools, Provider ABI,
+    web routes) → **≥1 real end-to-end check** against the shipped artifact (`dist/quay.js`, the
+    `npm pack` output); (2) **branch-dense pure functions** (`checkSplitRecommendation`,
+    `planCheckNextAction`, `checkTouchesPair`, …) → direct `import` unit tests — a failed CLI
+    assertion only says "output lacks X", not which branch is wrong; (3) **internal implementation
+    details** → **do not test** (testing them prepays refactor cost: behavior unchanged, test goes
+    red). No numeric thresholds — that waits for `gap-suite-cost-model-is-wrong-optimizations-
+    buy-nothing`'s cost data (setting a threshold before the cost structure is known is the AC9/416s
+    mistake; do not repeat it).
+  - **Coverage is NOT a goal (AC7b):** three reasons. (1) It has never been measured — 
+    `scripts/test.sh --experimental-test-coverage` exists and CLAUDE.md documents it, but there is
+    no CI job and no recorded number, and setting a target for an unmeasured quantity is the 416s
+    mistake. (2) It is gameable — this repo ships `gate-gameability.test.mjs`; a coverage
+    percentage invites "executes lines but asserts nothing" tests. (3) The places that matter are
+    already covered — the five branch-dense decision functions all have direct `import` unit
+    tests; the 2.1:1 process/module ratio does NOT mean decision logic is untested. If coverage is
+    ever looked at, it is a reference, not a target.
   - **`ToolSearch` is a mandatory pre-fetch step for deferred MCP tools** (exp5-ADR-TOOLSEARCH-
     DEFERRED-SCHEMA-PATTERN, M148 precedent style): the harness defers most MCP tool schemas —
     they are NOT loaded at session start, and calling a deferred tool before fetching its schema

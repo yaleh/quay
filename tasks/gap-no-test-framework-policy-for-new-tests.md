@@ -92,23 +92,77 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 政策写进 `scripts/test.sh` 头注释与 `CLAUDE.md` 的测试段：新测试用 `node:test`
-- [ ] AC2: 豁免名单是一个**数据文件**（不是散在代码里的条件），当前 34 个文件逐个列出
-- [ ] AC3: 检查断言 glob 内每个文件要么 `import node:test`，要么在名单里
-- [ ] AC4: **名单只能变短** —— 有文件被加入名单时检查失败；用一个临时新文件真实演练这条
-- [ ] AC5: 新文件必须带 `// @test-group` 声明；缺声明的**新**文件失败（存量缺省仍为 `engine`）
-- [ ] AC6: 检查接进 `scripts/test.sh`，与其它 engine 组检查同样运行
-- [ ] AC7: 三层选择原则（契约→端到端 / 分支密集纯函数→import 单元测试 / 内部细节→不测）写成文字规则，
+- [x] AC1: 政策写进 `scripts/test.sh` 头注释与 `CLAUDE.md` 的测试段：新测试用 `node:test`
+- [x] AC2: 豁免名单是一个**数据文件**（不是散在代码里的条件），当前 34 个文件逐个列出
+- [x] AC3: 检查断言 glob 内每个文件要么 `import node:test`，要么在名单里
+- [x] AC4: **名单只能变短** —— 有文件被加入名单时检查失败；用一个临时新文件真实演练这条
+- [x] AC5: 新文件必须带 `// @test-group` 声明；缺声明的**新**文件失败（存量缺省仍为 `engine`）
+- [x] AC6: 检查接进 `scripts/test.sh`，与其它 engine 组检查同样运行
+- [x] AC7: 三层选择原则（契约→端到端 / 分支密集纯函数→import 单元测试 / 内部细节→不测）写成文字规则，
       **不设数值阈值**，并注明阈值待 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 的数据
-- [ ] AC7b: 明确记录**不以覆盖率为目标**及其三条理由；若将来要看覆盖率，它是参考不是目标
-- [ ] AC8: 测试带 `// @test-group engine` 声明
+- [x] AC7b: 明确记录**不以覆盖率为目标**及其三条理由；若将来要看覆盖率，它是参考不是目标
+- [x] AC8: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
 
-- [ ] 名单当前长度记在任务体（34），作为棘轮的起点
-- [ ] AC4 的真实演练有记录：加一个文件到名单 → 检查失败 → 移除 → 通过
-- [ ] `scripts/test.sh` 绿
-- [ ] 任务体明写：**本任务不迁移任何存量文件，也不提速**
+- [x] 名单当前长度记在任务体（34），作为棘轮的起点
+- [x] AC4 的真实演练有记录：加一个文件到名单 → 检查失败 → 移除 → 通过
+- [x] `scripts/test.sh` 绿（`scripts/test.sh --for-task gap-no-test-framework-policy-for-new-tests` 绿，
+      静态检查 + 13 个策略测试全过）
+- [x] 任务体明写：**本任务不迁移任何存量文件，也不提速**
+
+## AC4 真实演练记录（2026-08-03，worktree `task/test-framework-policy`，数据文件已提交为基线）
+
+棘轮是两层：git-HEAD 严格子集（数据文件的**已提交形态**是基线，工作树是当前）+ **持久计数上限**
+（数据文件头 `# baseline-count: 34`，任何状态下都不能超过 34 项，含干净提交/新 clone）。演练如下：
+
+1. 提交基线：`plugin/test-framework-policy-exemptions.txt` 含 34 项 → `git commit`（HEAD 即基线）。
+2. 加文件到名单：新建临时手写 harness 文件 `packages/quay/test/zz-ac4-rehearsal.test.mjs`，
+   并把该路径 `>>` 到名单（35 项）。
+3. 检查失败：`test-framework-policy-check` 退出码 **1**，
+   报 `AC4: packages/quay/test/zz-ac4-rehearsal.test.mjs was ADDED to the exemption list —
+   the list can only get SHORTER`（棘轮生效；同一文件已在名单里，AC3 静默，只有 AC4 响）。
+4. 移除：`grep -v` 删掉该行，`rm` 临时文件（恢复 34 项）。
+5. 通过：再次运行退出码 **0**，`PASS ... 34 exemption(s)`。
+
+同一场景还有一个**自动化**演练被固化成测试（`plugin/test/test-framework-policy-check.test.mjs`
+的 "CLI AC4 rehearsal" 用例）：在 scratch fixture 里用 `--baseline-file`/`--baseline-files`
+跑 CLI，加文件到名单 → exit 1（AC4）→ 移除 → exit 0。两者都证明：**名单只能变短，加入即失败**。
+
+## 内部对抗审查（REFUTE，2026-08-03）
+
+**Round 1**（独立审查 agent）——2 MAJOR + 3 MINOR + 2 NIT，全部处理：
+
+- **MAJOR-1 AC3 检测被注释/字符串绕过**：`// TODO: migrate to import { test } from "node:test"`
+  之类注释会让手写文件「通过」检测。**修复**：改为 code-position 状态机检测（`buildNonCodeMask`
+  跳过注释与字符串），真实 `import`/`require` 只在 code 位置计数；注释提及不再算导入。
+  附带修掉一个更隐蔽的问题：naive 的 `/*...*/` 正则会被注释里的 glob（如 `packages/*/test/*.test.mjs`）
+  骗到、把后续真实 import 吞掉。
+- **MAJOR-2 棘轮对「已提交」改动失效**：git-HEAD 子集在干净提交时看不见「同一 commit 里加了文件又
+  加了名单」。**修复**：新增**持久计数上限**（C0，`# baseline-count: 34`）——任何状态下名单超过
+  34 即失败；`git commit` 后在新 clone 里跑也会红。固化为 scratch-git 测试。
+- **MINOR-3** `--group <name> <file...>` 分支没跑静态检查 → 补上 `run_static_checks`。
+- **MINOR-4** git 不可用时静默降级为 bootstrap（fail-open）→ 改为 **fail-closed**（exit 2），
+  除非给了 `--baseline-file/--baseline-files` 或数据文件确实不在 HEAD（真 bootstrap）。
+- **NIT**：`experiments/.../workflow-baseline-metrics.test.mjs` 是真实重复文件非符号链接——记录，
+  不在本任务改；glob 单层覆盖——政策语言已限定为 canonical glob。
+- **Round 1 后**：21/21 测试绿（含全部回归用例），`--for-task` 全绿。
+
+**Round 2**（同一审查 agent 复验）——REVISE (minor)，2 项，全部处理：
+
+- **R2-1 AC3 仍可被 regex 字面量绕过**：`/import { test } from "node:test"/` 写成 regex 字面量可
+  通过（`buildNonCodeMask` 不认 regex）。**修复**：给 mask 加 regex 字面量识别（标准 lexer 启发式：
+  `/` 前是空白/`=`/`(`/`,`/`{`/`return` 类关键字→regex；前是操作数/`)`/`]`/`++`→除法），regex 内容
+  整体标为非代码。同时修 `loader.import("node:test")`（方法调用）被误判为动态 import——`import`/
+  `require` 关键字现在要求 statement-start（前一个 code 字符是空白/`;(){}[]`，`.` 排除）。
+  固化为测试：regex 字面量、`return /re/`、除法不吞 import、方法调用不算。全 164 个文件检测一致
+  （非豁免全检出、豁免全不检出）。
+- **R2-2 CLAUDE.md「NEVER/永久」声明夸大**：ceiling 从 working-tree 文件自读，同一 commit 里把
+  `# baseline-count: 34` 改成 40 可绕过。**修复**：软化措辞（ceiling 是 header 控制面，pre-commit
+  由 git strict-subset 守护；同 commit 里改 header+加文件是可被 code review 看见的编辑）；
+  并把 ceiling 本身改成 **shrink-only**（C0b：working-tree count > HEAD count 即失败，能抓
+  pre-commit ceiling bump），固化测试。
+- **Round 2 后**：22/22 selftest + 25/25 node:test 绿，`--for-task` 全绿。
 
 ## Touches
 

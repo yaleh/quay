@@ -13,6 +13,16 @@
 # to include them unconditionally: a credential-less run reports them `skipped`, not silently
 # excluded, and setting the env var proves the opt-in path actually runs them live.
 #
+# TEST-FRAMEWORK POLICY (gap-no-test-framework-policy-for-new-tests, AC1): NEW test files MUST
+# use `node:test` — `import { test } from "node:test"`. This script enforces that mechanically via
+# the test-framework-policy static check below (AC6): every file in the glob must either import
+# node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
+# currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
+# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
+# existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
+# hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
+# (e.g. relation-sync's harness) into the ratchet.
+#
 # Usage:
 #   scripts/test.sh                                  # default groups product,engine; runs the full
 #                                                    # deduped glob (governance files self-skip)
@@ -84,6 +94,16 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+
+# run_static_checks — the repo-wide invariants that run on EVERY test-running invocation,
+# independent of which test files were requested (fast; the metadata modes --list-groups/
+# --list-files skip them). CI inherits them because its only test step is `bash scripts/test.sh`.
+run_static_checks() {
+  echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
+  bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
+  bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
+}
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
@@ -209,8 +229,7 @@ build_dist_once() {
 run_selected() {
   local groups="$1"; shift
   build_dist_once
-  echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
-  bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  run_static_checks
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
   while IFS= read -r f; do files+=("$f"); done < <(select_files "$groups")
@@ -279,7 +298,9 @@ elif [ -n "${groups}" ]; then
     # with an EMPTY file list → node --test auto-discovered a 3.7x-larger, different suite.
     run_selected "$groups" "$@"
   else
-    # Explicit files with the group env set (in-file skips apply).
+    # Explicit files with the group env set (in-file skips apply). Static checks still run —
+    # "every test-running invocation" is the documented invariant (REFUTE round-1 MINOR).
+    run_static_checks
     export QUAY_TEST_GROUPS="$groups"
     build_dist_once
     exec node --test --test-concurrency=8 "$@"
@@ -292,8 +313,7 @@ if [ "$#" -eq 0 ]; then
   # the split-or-commit whole-store scan.
   run_selected "$(effective_groups)"
 elif [ "${1:-}" = "--for-task" ]; then
-  echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
-  bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  run_static_checks
   # gap-test-selection-not-scoped-to-touches: mechanical per-task test selection. `scripts/test.sh
   # --for-task <id>` delegates to select-tests-for-touches.ts (which resolves the task's ## Touches
   # to a test set) and runs EXACTLY that set. Additive: the full-suite default and the explicit-file
@@ -372,8 +392,7 @@ elif all_flags "$@"; then
   run_selected "$(effective_groups)" "$@"
 else
   build_dist_once
-  echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
-  bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  run_static_checks
   # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
   # trigger and the named files run in full.
   exec node --test --test-concurrency=8 "$@"
