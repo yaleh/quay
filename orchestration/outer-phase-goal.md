@@ -222,28 +222,39 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 | 2026-08-03 12:0xZ | 收到人对推送/发布的结案裁定。**AC5 重写**：从「授权待裁定」改为「已裁定、且不找绕过办法」，并附外层独立复核的三条 `on:` 段触发面——**目的是防止把裁定读得过严**（`git push origin master` 只触发 CI，不产生 release）。**「明确不是我的 AC」表里可安装物一行改标为「阻塞，不是未开始」并写明阻塞源**。**本裁定不阻塞我的任何一条 AC**——被阻塞的是管理者的 AC2/AC3；我如实标注但不把它写成自己的待办。顺带查出解阻塞比预想便宜：`publish-dist-branch.sh` 用 `rsync` 整个 `plugin/` 子树，一次 `workflow_dispatch` 就能带上新机制，不需要版本标签。 |
 | 2026-08-03 11:5xZ | 建立。AC1/AC2/AC3/AC5/AC12 当前达成；AC4 达成但靠手工（机械化任务已建未派）；AC6–AC9 各有 1 次真实失败或险失败，保持未勾以维持观察；**AC11 本班已越 50% 线，但越线的是 `correct-self`，且判据本身分不开两类——这是当前最该盯的一条**；AC10 部分达成（查出并修好 1 个，其余检查器未逐个查）。 |
 
-## G0–G5 → 任务映射与顺序（外层，2026-08-04 00:00Z）
+## A1–A4 → 任务映射（外层，2026-08-04 00:15Z——**取代同日 00:00Z 那份 G0–G5 映射**）
 
-来源：`orchestration/GOAL-when-to-reinstall.md`（管理者写，人 2026-08-04 提问）。
-**这份映射是外层对「该按什么顺序修」的回答**，每条都写了它挡住哪道门。
+**上一版作废**：G0（一次性预演目标）与 G3（两个专门构造的项目）已被人推翻——
+「这台机器的环境就是为 quay 开发准备的，archguard 和 meta-cc 本来就是验证目标，不要再另外搞两个项目」。
+**外层上一版提的「把 G0 当仪器用、现在就跑」随之作废，不再适用。**
+以 `orchestration/GOAL-when-to-reinstall.md` 现行版为准：**门槛是 quay 套件里的一个 e2e，四条断言。**
 
-| 门 | 挡住它的任务 | 状态 |
+| 断言 | 由谁变绿 | 状态 |
 |---|---|---|
-| **G0** 一次性目标零人工补丁 | 下面全部——G0 是**它们的合取**，不是独立工作项 | — |
-| **G1** 文档路径零补丁 | `gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`（4 组活标本）、`gap-init-guesses-the-tmux-session-…`、`gap-the-tick-doc-ships-three-contradictory-loop-drivers` | 后者**在飞** |
-| **G2** 升级是整体替换 | `gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them`（基线 2 → 要求 0）、`gap-the-runtime-is-a-1-3mb-single-file-…` | 排队 |
-| **G3** 两目标字节相同 | 同 G2 第一条——**G3 是它的最强负控制，不是另一件工作** | 排队 |
-| **G4** 循环真的干成活 | `gap-the-dod-gate-encodes-a-retired-task-shape` | **在飞** |
-| **G5** 升级不孤立既有状态 | **无专任务**——仅被 Gap A 的 AC8（本地状态类不铺而是声明自建）**部分覆盖** | **缺口** |
+| **A1** 两工作区落地文件互相字节相同 | `gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them`（清单 #1） | 排队 |
+| **A2** 与产物字节相同 + 再装无变化 | 同上 | 排队 |
+| **A3** 旧版工作区升级 + 既有遥测/tick-log/gate 事件仍可读 | 同上；**旧 G5 现已并入本条**——外层上一版报的「G5 无专任务」缺口**因此关闭** | 排队 |
+| **A4** `## Finding` 无 `## Plan` 能过闸，含 `## Plan` 仍走严格契约 | `gap-the-dod-gate-encodes-a-retired-task-shape`（清单 #9） | **在飞** |
 
-### 外层的三条判断
+### 10 条缺陷的归属：全覆盖，无遗漏
 
-1. **G0 现在就该跑，尽管它一定不过。**
-   它的产出是**人工补丁清单**，而那份清单**就是按真实遇到顺序排好的缺陷表**。
-   外层现在的排序是**读代码猜的**——读代码分不出「在第 2 步就卡住」和「在第 9 步才卡住」，
-   而这两者的优先级完全不同。**把门当成仪器用，比等它变绿更早产生价值。**
-2. **第 10 条（1.3MB 运行时）同时挡 G0 与 G2**，见该任务的 Dispatch review——
-   不提交运行时则 G2 挂，改钩子再提交则 G0 挂。**它不是可以推后的小事。**
-3. **G5 是本映射里唯一没有专任务的门，这是我自己的缺口。**
-   在补上之前，**不要宣称「G1–G4 都有归属」等于「全部有归属」**——
-   本仓今晚已记录过多次「覆盖一个类，实现覆盖一个标本」。
+| # | 任务 | 何时验 |
+|---|---|---|
+| 1 | `gap-install-rewrites-files-…` | **A1/A2/A3** |
+| 2 / 4 / 6 / 7 | `gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`（AC2/AC7/AC8/AC6） | 重装 |
+| 3 | `gap-init-guesses-the-tmux-session-…` | 重装 |
+| 5 | `gap-the-tick-doc-ships-three-contradictory-loop-drivers` | 重装（**在飞**） |
+| 8 | `gap-liveness-mounting-is-a-single-flight-role-with-no-owner` 的 AC9 | 重装（**在飞**） |
+| 9 | `gap-the-dod-gate-encodes-a-retired-task-shape` | **A4**（**在飞**） |
+| 10 | `gap-the-runtime-is-a-1-3mb-single-file-…` | 重装 |
+
+**「归重装验」不等于「可以不修」**：重装要求**人工补丁数 = 0**，
+所以那 8 条**仍然全部必须关掉**，只是它们不挡 e2e 变绿。**这个区别不写清就会被读成降级。**
+
+### 外层的一条顺序判断：e2e 先红着落地
+
+**先写 e2e 并让它红，再让 #1 与 #9 把它变绿**——不要等修完再补测试。
+理由是本仓反复付过学费的那一条：**一个从没红过的检查，与「永远返回空集」不可区分**
+（先例：`gap-checks-that-verify-an-empty-set-must-fail-closed`、
+`gap-checkers-have-never-been-shown-to-fail`）。
+**e2e 是 #1 与 #9 的验收仪器，仪器必须先于被测物存在，否则它证明不了自己在看。**
