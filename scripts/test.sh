@@ -23,6 +23,15 @@
 # hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
 # (e.g. relation-sync's harness) into the ratchet.
 #
+# TEST-ISOLATION CONTRACT (gap-test-isolation-contract-is-unwritten, AC1-AC6): a test must never
+# touch something it does not exclusively own (fixed __dirname/.tmp-* paths, the SHARED build
+# artifacts packages/<pkg>/dist/ + plugin/vendor/, the whole scripts/test.sh runner, and a
+# hand-rolled harness's silent `process.exit(1)` failure path). The test-isolation static check
+# below REPORTS every current violation on every run but does NOT block on the known/baselined
+# ones ("报出而不阻断", AC6); its data file (`plugin/test-isolation-violations.txt`) is a
+# SHRINK-ONLY ratchet (AC5) — a NEW violation fails the run, so the fourth instance of this class
+# is stopped when it is WRITTEN, not after the suite goes red.
+#
 # Usage:
 #   scripts/test.sh                                  # default groups product,engine; runs the full
 #                                                    # deduped glob (governance files self-skip)
@@ -103,6 +112,8 @@ run_static_checks() {
   bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
   echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
   bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
+  echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
+  bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
 }
 
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
