@@ -271,6 +271,12 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
 - **inventory**（~20min）：已产出未提交文件（runtime-usage-inventory.{json,md,ts}），实现中
 - 在飞（1 活跃实现）：inventory
 
+### Tick 心跳（03T03:29Z）
+
+- 无 `.halt`；m264 批全量在跑（`ba7zgcgbo`，selected 170，pressure 0）；inventory 活跃（~20min）
+- 无停止条件（needs-human 窗口内新增 0）。**本 tick 不派发**——fan-in 全量先于派发（2× c8 崩溃纪律）；
+  全量绿后关 m264，再评估补派 reclaim-worktrees / test-isolation-contract
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
