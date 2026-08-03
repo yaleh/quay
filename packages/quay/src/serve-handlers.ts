@@ -90,6 +90,8 @@ td {
 }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: #f1f3f5; }
+.malformed-row td { background: #fff8e6; color: #8a6d3b; font-weight: 600; }
+.malformed-row a { color: #8a6d3b; }
 button {
   background: #0066cc;
   color: #fff;
@@ -444,6 +446,19 @@ export function buildHref(
 
 type Manifest = Awaited<ReturnType<ProviderClient["manifest"]>>;
 
+// gap-serve-task-list-dies-on-one-malformed-task: a task is "missing-id" when
+// the provider surfaced no usable id (id absent or not a non-empty string) OR
+// explicitly marked it malformed. quay-native falls back to the filename for
+// the id and sets extra.malformed=["missing-id"] — fallback is NOT a fix, and
+// the list page must surface it VISIBLY rather than crash (a single malformed
+// task must never 500 the whole board — 3/588 = 0.5% malformed data took down
+// 100% of the only graphical UI) and rather than silently dropping it (a
+// silent drop would make "3 bad tasks" indistinguishable from "585 good tasks").
+export function isMissingIdTask(t: { id?: unknown; title?: unknown; extra?: Record<string, unknown> }): boolean {
+  return typeof t.id !== "string" || t.id.length === 0 ||
+    (Array.isArray(t.extra?.malformed) && (t.extra!.malformed as string[]).includes("missing-id"));
+}
+
 export async function handleTaskList(
   req: IncomingMessage,
   res: ServerResponse,
@@ -457,8 +472,11 @@ export async function handleTaskList(
   // Applied FIRST, before status/label filters — prefix scopes the whole view.
   // No param → all tasks; unknown prefix → empty list (not an error).
   const prefixFilter = url.searchParams.get("prefix");
+  // gap-serve-task-list-dies-on-one-malformed-task: guard the prefix filter
+  // against a task with no usable id (`t.id.toUpperCase()` was a second
+  // same-class crash vector alongside the allPrefixes `indexOf` below).
   const filteredByPrefix = prefixFilter
-    ? allTasks.filter((t) => t.id.toUpperCase().startsWith(prefixFilter.toUpperCase()))
+    ? allTasks.filter((t) => typeof t.id === "string" && t.id.toUpperCase().startsWith(prefixFilter.toUpperCase()))
     : allTasks;
   // QW-003 (experiment 3, iteration 2): filter by ?status=<value> query param.
   // No param → all tasks; unknown value → empty list (not an error).
@@ -500,13 +518,25 @@ export async function handleTaskList(
   // resolves the Web UI's analog of CB-012.
   const sortKey = url.searchParams.get("sort");
   let tasks;
+  // gap-serve-task-list-dies-on-one-malformed-task: normalize possibly-missing
+  // id/status to "" in the sort comparators so a malformed task sorts
+  // deterministically (undefined < comparisons never threw, but made ordering
+  // non-deterministic for missing-id tasks).
   if (sortKey === "id") {
-    tasks = filtered.slice().sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    tasks = filtered.slice().sort((a, b) => {
+      const ia = String(a.id ?? "");
+      const ib = String(b.id ?? "");
+      return ia < ib ? -1 : ia > ib ? 1 : 0;
+    });
   } else if (sortKey === "status") {
-    tasks = filtered.slice().sort((a, b) =>
-      a.status < b.status ? -1 : a.status > b.status ? 1 :
-      a.id < b.id ? -1 : a.id > b.id ? 1 : 0
-    );
+    tasks = filtered.slice().sort((a, b) => {
+      const sa = String(a.status ?? "");
+      const sb = String(b.status ?? "");
+      if (sa !== sb) return sa < sb ? -1 : sa > sb ? 1 : 0;
+      const ia = String(a.id ?? "");
+      const ib = String(b.id ?? "");
+      return ia < ib ? -1 : ia > ib ? 1 : 0;
+    });
   } else if (sortKey === "updated") {
     tasks = filtered.slice().sort((a, b) => {
       const ta = typeof (a as unknown as Record<string, unknown>).updatedAt === "number" ? (a as unknown as Record<string, unknown>).updatedAt as number : -Infinity;
@@ -559,6 +589,22 @@ export async function handleTaskList(
   const rows = pageTasks
     .map(
       (t) => {
+        // gap-serve-task-list-dies-on-one-malformed-task: a task with no usable
+        // id (or explicitly flagged missing-id by the provider) renders as a
+        // VISIBLE placeholder row — never a 500 (a single malformed task must
+        // not take down the whole board) and never a silent drop (a silent drop
+        // would make "3 bad tasks" indistinguishable from "585 good tasks").
+        if (isMissingIdTask(t)) {
+          const display = (typeof t.id === "string" && t.id.length > 0)
+            ? t.id
+            : (typeof t.title === "string" && t.title.length > 0 ? t.title : "unknown task");
+          const idCell = (typeof t.id === "string" && t.id.length > 0)
+            ? html`<a href="/task/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a>`
+            : escapeHtml(display);
+          return html`<tr class="malformed-row">
+            <td colspan="7">⚠ ${idCell} — 缺少 id 字段</td>
+          </tr>`;
+        }
         const applicableButtons = ((manifest.action_buttons ?? []) as Array<{ id: string; label: string; whenStatus?: string[] }>).filter(
           (b) => !b.whenStatus || b.whenStatus.includes(t.status)
         );
@@ -603,10 +649,17 @@ export async function handleTaskList(
   // A "prefix" is the part of a task id before the first `-` (e.g. "QX" from "QX-001").
   // Only rendered when 2+ distinct prefixes exist across ALL tasks (single-experiment
   // workspaces need no clutter). Placed FIRST in the nav, before status/sort/label.
-  const allPrefixes = [...new Set(allTasks.map((t) => {
-    const dash = t.id.indexOf("-");
-    return dash > 0 ? t.id.slice(0, dash) : t.id;
-  }))].sort();
+  // gap-serve-task-list-dies-on-one-malformed-task: skip tasks with no usable
+  // id when computing prefixes — `t.id.indexOf("-")` was THE 500 crash site
+  // (undefined.indexOf → TypeError). A missing-id task is still rendered as a
+  // placeholder row above; it just must not contribute a prefix (and never an
+  // "undefined" pseudo-prefix) to the nav.
+  const allPrefixes = [...new Set(allTasks
+    .filter((t) => typeof t.id === "string" && t.id.length > 0)
+    .map((t) => {
+      const dash = t.id.indexOf("-");
+      return dash > 0 ? t.id.slice(0, dash) : t.id;
+    }))].sort();
   const prefixNav = allPrefixes.length >= 2 ? [
     prefixFilter
       ? html`<a href="${bh(statusFilter, sortKey, labelFilters, null, null, qFilter)}">All</a>`
