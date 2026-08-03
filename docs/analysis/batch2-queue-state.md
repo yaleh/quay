@@ -1689,4 +1689,7 @@ last-input 取不到 ⇒ AC7 拒绝；AC3 脚本变异强制空 cause ⇒ 强化
 与 token-status 任务在 `heavy-op-token.sh` 冲突，后者待前者落地后派。
 scoped 验证（`--root` 测试缝），不跑全量。
 
-**在飞（1）**：token-waiter。**停止条件**：无（.halt 无、窗口内无新 needs-human、批 7 套件已绿）。
+**在飞（2）**：token-waiter + **mkdtemp**（`gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree`，
+runId `...fmpf0r`，`/tmp/quay-wt-mkdtemp`，外层已 review、与 token-waiter DISJOINT 实测）——修
+`ts-typecheck-gate.test.mjs:69` 的 REPO_ROOT mkdtemp（R1 弄脏共享检出）+ 扩展 `test-isolation-check`
+检测。**停止条件**：无（.halt 无、窗口内无新 needs-human、批 7 套件已绿）。
