@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 02:26Z | `correct`（**纠的是外层自己的任务，非内层**——见下方分类法缺陷） | 实测推翻了我一小时前写进 `gap-no-resource-awareness` 的中心数字，并修掉任务体因此自相矛盾的三处 | 内层已采纳 PSI 判据（`dba85d4b` 写进自己 tick 文件），在低压力窗口重启套件；三任务 inProgress **62 分钟**（阈值 90） | **`--test-concurrency=8` 实际是 17 个进程**：套件根 → 8 个 worker → 各再派生 1 个 `node --experimental-strip-types` 子进程。**真实超订 4.25× 而非 2×**，且 `--test-concurrency` 不是正确旋钮。这解释了重型测试 2.0s→48.8s 是**进程启动争抢**而非计算慢。**CPU 压力 88.12 → 4.14**（上轮套件结束），swap 仍 0 已用（内存压力自始为 0，符合预期）。**孤儿 MCP 进程 2 个**：ppid=1、cwd 已删除、滞留 **17.4 小时**、CPU 累计 1 秒 ⇒ 是内存泄漏（~200MB）不是 CPU 来源 |
 | 2026-08-03 02:13Z | `correct` | 内层「等 load 降」方向对但用代理信号，外层实测 PSI 给出硬判据并建资源闸任务；另核实 reverse-drift 修复真实仓库效果、查出正向漂移 9 条与检测器新盲区 | 批 4 全量套件崩溃（5 文件超时：prepare-milestone-convergence 48.8s、runner-grouping 39.5s），三任务仍 inProgress 43 分钟（阈值 90）；32 个 `node-MainThread`、load1 9.07 ⇒ 真忙非停摆 | **读 diff 核实 tasksPerHour 修复**：`(count*60)/totalMinutes` 已被 `count/windowHours` 取代，旧口径保留为 `serialEquivalentPerHour`，`windowStart/End/Hours` 一并暴露。**PSI 实测**：cpu `some avg10`=**84.77**（CPU 饥饿确证）、memory=0.00、**swap=0**、nproc=4 而默认并发 8（2× 超订）。**我自己差点踩空集陷阱**：drift-check 的 JSON 键我猜成 `forward`，实际是 `suspects`，猜错即静默返回 0——确认键名后正向漂移实为 **9 条**（reverse 确为 0，修复核实通过）。**检测器新盲区**：删除类任务的 Touches 是「待删文件」，存在 ⇒ 被读成「已落地」，语义反的 |
 | 2026-08-03 01:44Z | `no-action` | 三任务并发正常推进（各约 19 分钟，阈值 90），无需介入 | `done 18` / `inProgress 3` / `orphaned 0`；窗口 **8.00/12 小时（67%）**，真实吞吐 1.12/hr | **主动核查了一个可预见风险**：`load1=18.99`、38 个 node 进程，而今晚 AC11 的失败与 M243 的崩溃成因都是「多套件并跑争抢」。精确统计后确认**只有 1 个真实 `test.sh`**（在 `/tmp/quay-wt-ac11`），38 进程是它自己并发 8 的 worker + 派生 CLI —— **三个 subagent 没有同时跑全量，并发纪律守住了**。`/tmp/quay-wt-ac11` 下 188 个进程符合预期：该任务研究的正是「runner 内起 runner」，需复现嵌套场景 |
 | 2026-08-03 01:25Z | `no-action` | 三任务并发已派发（ac11 / reverse-drift / tasksperhour，均刚起步），内层自建任务证据充分，无需介入 | `done 18` / `inProgress 3` / `orphaned 0`；窗口 7.68/12 小时（64%），真实吞吐 **1.17/hr** | **核实内层自建任务 `gap-test-coverage-check-parses-stale-files-variable` 的证据 —— 它是对的，两次否定它的是我自己的 grep**：`test.sh:125` 是 `local glob=(…)`（真正的 canonical glob），`:234` 是 `local files=() f`（空数组声明，无关）；检查脚本的 `/files=\(([^)]*)\)/` **匹配到第 234 行并捕获空串** ⇒ `parseCanonicalGlobs` 返回 `[]`，exit 0，**静默降级而非报错**。我第一次 grep 锚了行首漏掉 `local ` 前缀，第二次据此怀疑内层判断有误——**今天第七次同一个坑，这次差点否掉一个正确的发现**。AC16 由此满足且是高质量满足：任务体给出文件行号、正则原文、改名位置、CI 接线（`ci.yml:34-35`）|
@@ -78,10 +79,17 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 26 | 43% |
+| no-action | 26 | 42% |
 | unblock | 10 | 16% |
-| correct | 22 | 36% |
+| correct | 23 | 37% |
 | escalate | 3 | 5% |
-| **合计** | **61** | — |
+| **合计** | **62** | — |
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 36%。
+### 分类法缺陷（2026-08-03 发现，尚未修）
+
+`correct` 同时涵盖两种完全不同的事：**（a）纠正内层的做法**、**（b）外层纠正自己先前写下的东西**。退化判据把 `correct` 读作「内层自主性不足」——但 (b) 类恰恰相反，它是外层在自我修正，与内层能力无关。
+
+本轮就是 (b)：实测推翻了外层自己一小时前写进任务的 `2×` 超订数字，内层同期表现良好（主动采纳 PSI 判据）。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
+修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
+
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 37%。
