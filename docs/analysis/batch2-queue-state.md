@@ -650,6 +650,14 @@ stranded 全量仍等 sigma 测完。新增 `/tmp/quay-wt-preretire`（外层 de
 - **全量串行队列**：sigma 测完 → stranded+webobs 合并全量 → sigma 自己验证（如需要）
 - **parser 任务**可派（stranded 已合并，task-status-drift-check.ts 重叠解除）；等槽位
 
+### Tick 更新（06T03:28Z）：parser 已派；sigma 仍在测量
+
+- **parser 任务已派**（`afe4388cc639fc1d7`，runId `fm-...-ttg1t6`）——两个解析器收敛（touches-orthogonality
+  vs task-status-drift 对同一行结论不同，出错那个是判并发资格用的）。与 sigma DISJOINT 实测
+- **sigma 仍在测量**（进程 334483，~6.5min，压力 92 其稳态）——stranded+webobs 全量仍等它
+- 外层 `57bfad09`：重启 web server 让 /live + /journal 真正服务
+- 在飞（2 活跃）：sigma（测量中）+ parser（实现中）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
