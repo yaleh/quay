@@ -153,7 +153,9 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 任一满足 → 不派发新任务，报告后重新排程：
 
 - `.halt` 存在
-- needs-human 积压 ≥ 3
+- **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
+  它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
+  不是仓库里 needs-human 的总数。分诊规则见 `orchestration/orchestrator-loop-tick.md` 步骤 3）
 - 上一步全量 suite 非绿
 - 有未解决的合并冲突
 - 就绪队列为空
@@ -229,7 +231,7 @@ console.log(m.checkTouchesPair(A,B,expand));
 | 全量 suite 非绿 | 立即停，不再合并 |
 | 对抗审查 2 轮后仍 REFUTED | 标 needs-human，停止该任务 |
 | 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
-| needs-human 积压 ≥3 | 停止派发新任务 |
+| **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |
 | 队列文件与 git 状态矛盾且无法判定 | 停，报告两边的实际内容 |
 
 这是**保守默认**。ADR-021 原则：不要在证据不足时把策略机械化。这些判断目前由人做，等积累了足够多的真实案例再考虑规则化。
