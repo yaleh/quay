@@ -188,22 +188,32 @@ quay-native init --dry-run
 
 quay is also a Claude Code **plugin** that lays down the two-layer autonomous
 loop (an outer orchestrator watching an inner developer) into a project that has
-never used quay before. The command sequence is short enough to fit here:
+never used quay before. The whole cold start is **three human inputs**, each
+recorded verbatim by `test/cold-start-oneliner-e2e.sh` (`--count-inputs`):
 
 ```
-# 1. install the plugin (Claude Code):
-/plugin marketplace add yaleh/quay
-/plugin install quay
+# 1. install / build the plugin artifact:
+bash plugin/scripts/publish-dist-branch.sh --branch cold8-dist
 
-# 2. in the target project, lay down the two-layer loop mechanism:
-#    (the /quay:init skill copies workflows + agents + gate scripts + the loop,
-#    substituting YOUR project's test command / tmux session / repo root)
-/quay:init --all --loop --test-command "npm test"
+# 2. in the target project, lay down the mechanism:
+#    (the /quay:init skill copies workflows + agents + gate scripts + the loop;
+#    YOUR test command is auto-DETECTED from scripts/test.sh / package.json /
+#    go.mod / Cargo.toml — no need to know it in advance)
+/quay:init --all --loop
 
-# 3. start the outer orchestrator (see the laid-down tick doc):
-#    orchestration/orchestrator-loop-tick.md  →  /loop 20m 执行 ... 中的 tick 指令
-#    docs/analysis/fast-mode-loop-tick.md     →  /loop 25m 执行 ... 中的 tick 指令
+# 3. cold-start skill — one command mounts both monitors (inner-state +
+#    session-liveness) via the Monitor tool, re-creates the 20-minute cron,
+#    DRIVES the inner session to start fast mode, and asserts a real
+#    --task-start telemetry record in .workflow-events/:
+/quay:cold-start
 ```
+
+The **inner start is inside `/quay:cold-start`** — it is never a separate human
+step (that was the original spec's gap: the inner loop silently never started
+because it was treated as a side effect of outer guidance). The cold-start skill
+is **agent-executed** (Monitor tool, events delivered to the session); a script
+that backgrounds the monitors with `nohup` looks identical in `ps` but notifies
+nobody, so it does not pass.
 
 What `--loop` lays into the target project (from the plugin bundle — nothing is
 copied out of the quay development tree):
@@ -218,6 +228,10 @@ copied out of the quay development tree):
   `inner-blocked-signal.ts`, …), the resource gate, the heavy-op token, and the
   observation mechanism (`inner-state.sh` Monitor + `inner-forensics.mjs`), plus
   their transitive dependencies.
+- `vendor/quay/dist/quay.js` — the built runtime, laid into the target so its
+  `.quay/config.yml` `mcp_entry` points at a **project-local copy**, never at a
+  `quay-native` PATH symlink into the quay dev tree (the loop must keep working
+  even when that dev tree is gone).
 
 Upgrading an already-initialized project is the same command: `quay-init` is
 idempotent, only fills the diff, and never overwrites local edits to laid-down

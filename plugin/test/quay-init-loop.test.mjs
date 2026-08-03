@@ -371,3 +371,61 @@ test('AC4 — the check fails when an installed executable drifts by one byte, a
     assert.equal(v2.status, 0, 'verify must PASS after restore (AC4 restore direction)');
   } finally { cleanup(ws); }
 });
+
+// ── AC7b: lay the runtime into the target + PATH-independent provider config ─────────────────────────
+// gap-cold-start-...-eight-steps: the cold-started loop must NOT depend on the quay dev tree via
+// PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
+test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is project-local absolute (never a PATH-resolved quay-native)', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const cfg = path.join(ws, '.quay', 'config.yml');
+    assert.ok(fs.existsSync(cfg), '--loop must write a .quay/config.yml for a config-less target (AC7b)');
+    const src = fs.readFileSync(cfg, 'utf8');
+    // The provider's mcp_entry must be an absolute project-local path, not a bare `quay-native`.
+    assert.ok(src.includes('mcp_entry'), 'config must declare the provider mcp_entry');
+    assert.ok(src.includes(ws), 'config must reference the target project by absolute path');
+    // Negative control: the COMMAND element must never be the bare `quay-native` (which PATH-resolves
+    // to the dev-tree symlink). It must be an absolute path into the target.
+    assert.ok(!/mcp_entry: \["node", "quay-native", "mcp"\]/.test(src),
+      'config must not PATH-resolve a bare quay-native command — that is the dev-tree symlink dependency (AC7b negative control)');
+    assert.match(src, /mcp_entry: \["node", "\/[^"]*\/packages\/quay-native\/bin\/quay-native\.ts", "mcp"\]/,
+      'the mcp_entry command must be an absolute project-local path into the laid-down runtime');
+    assert.ok(src.includes('QUAY_NATIVE_TASKS_DIR'), 'config must set the native tasks dir');
+  } finally { cleanup(ws); }
+});
+
+test('AC7b — when the plugin has no built runtime bundle, --loop warns (does not fail) and still writes the config', () => {
+  const ws = makeTmp();
+  try {
+    // The real pluginDir in a raw checkout has no vendor/quay/dist/quay.js (it is a gitignored
+    // generated artifact). The install must NOT fail on its absence — it warns and proceeds.
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0 even without a built runtime:\n${r.stderr}`);
+    assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the runtime bundle is absent');
+    assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'config must still be written');
+  } finally { cleanup(ws); }
+});
+
+test('AC7b — a plugin source WITH a built runtime lays it into the target (project-local copy)', () => {
+  // Use a temp COPY of the plugin + a fake built bundle, so the real worktree is never polluted.
+  const src = makeTmp();
+  try {
+    fs.cpSync(pluginDir, src, { recursive: true });
+    const fakeDist = path.join(src, 'vendor', 'quay', 'dist', 'quay.js');
+    fs.mkdirSync(path.dirname(fakeDist), { recursive: true });
+    fs.writeFileSync(fakeDist, '// fake built quay.js bundle\n', 'utf8');
+    const ws = makeTmp();
+    try {
+      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
+        '--plugin-root', src]);
+      assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+      assert.match(r.stdout, /vendor\/quay\/dist\/quay\.js/, 'must report the runtime lay-down');
+      const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
+      assert.ok(fs.existsSync(laid), 'the runtime must be laid into the target project');
+      assert.equal(fs.readFileSync(laid, 'utf8'), '// fake built quay.js bundle\n',
+        'the laid-down runtime must be byte-identical to the plugin source');
+    } finally { cleanup(ws); }
+  } finally { cleanup(src); }
+});
