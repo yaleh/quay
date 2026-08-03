@@ -49,10 +49,11 @@
 
 | 任务 | 说明 |
 |---|---|
-| **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，**done（第三轮，60 min）**。三轮修复：①错标 + ②并发重建免疫 + ③**消除干扰源**（build-dist/npm-pack 改为构建到测试临时目录，不再写共享 `packages/quay/dist/quay.js`）。**全量 c4 绿 2298/2280/0**（M136 ✔）；负控制（改脏 vendored skill → --check DRIFT exit 1）通过；`--check` 保持只读（无 --sync-dist 前置）。done |
-| **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done。裸标志分支 + selected N 自报，全量验证 2298/2279/1（仅 M136） |
-| **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。**外层决定：不改默认，保持 8**（34s 差值在噪声带内、稳定性相同、ADR-019 未推翻）。「系统性全量崩溃」线索**关闭**：6 次干净单套件零 Promise-pending，与双套件并跑诊断一致 |
-| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样） |
+| **relation-sync（在飞）** | `gap-relation-sync-suite-red-isolation-green`，派发 00:0xZ，runId fm-gap-relation-sync-suite-red-isolation-green-1785715527286-1zhl5t，worktree /tmp/quay-wt-relsync。隔离绿/套件红类的**第 2 个实例**（第 1 个 M136 已修）。机制：先加断言级失败输出让它能说话，再配对跑定位。**不 skip/不标 flaky/不降 advisory** |
+| **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
+| **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
+| **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |
+| 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样）。**34 个手写 harness 的「隔离绿/套件红」类是后续重点**（relation-sync 是第 2 个，AC7 要判断还剩多少成员） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
 | AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
 
