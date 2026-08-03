@@ -19,12 +19,25 @@
 //      而错的会话同样能跑出一份看起来很干脆的结论。
 //   2. 工具耗时必须由 tool_use / tool_result 按 id 配对得出 —— 那天第一版把
 //      「某类条目之后的间隔」当成该类条目的耗时，归因方向是反的。
+//
+// 2026-08-03 gap-inner-forensics-verify-reports-nonruns-and-zero-durations 的三个修复：
+//   1. 分类按代码位置：剥离单引号/双引号/反引号内的内容后再匹配 test.sh —— 照抄
+//      plugin/scripts/test-framework-policy-check.ts 的 import 检测做法（字符串不参与匹配）。
+//   2. 耗时取真实值：后台命令（run_in_background）的即时 tool_result 只回「running in
+//      background」，真实完成时刻在 <task-notification> 里 —— 用它配对；取不到时报「未知」
+//      而不是 0（0s 与「没测到」不可区分）。
+//   3. 会话归属：`--session` 未指定时只把与目标 pane 同源的会话计入「更早会话」；
+//      归属不同的会话（如外层人开的 fork）列出但不计入，并说明「可能属于其它会话」。
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
-const PROJ = path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay");
+// 可注入：测试把 PROJ 指到临时目录（INNER_FORENSICS_PROJ 或 _setProj）。
+let PROJ = process.env.INNER_FORENSICS_PROJ || path.join(os.homedir(), ".claude", "projects", "-home-yale-work-quay");
+export function _setProj(p) { PROJ = p; }
+
 const SELF = process.env.OUTER_SESSION || "b8dc91a6-64e8-4d70-a715-9ec8e16a4f11";
 
 function pickInner() {
@@ -53,6 +66,17 @@ function load(file, sinceMs) {
   return transcriptSet(file).flatMap((f) => loadOne(f, sinceMs)).sort((a, b) => a.t - b.t);
 }
 
+// 从一条记录里解析 <task-notification> 的完成信号（后台命令的真实完成时刻）。
+// queue-operation 记录的 content 是字符串；user 类型把同样的通知放在 message.content 字符串里。
+function parseNotifs(text) {
+  const out = [];
+  if (typeof text !== "string" || !text.includes("<task-notification>")) return out;
+  const ids = [...text.matchAll(/<tool-use-id>(.*?)<\/tool-use-id>/g)].map((m) => m[1]);
+  const statuses = [...text.matchAll(/<status>(.*?)<\/status>/g)].map((m) => m[1]);
+  for (let i = 0; i < ids.length; i++) out.push({ id: ids[i], status: statuses[i] });
+  return out;
+}
+
 function loadOne(file, sinceMs) {
   const out = [];
   let text; try { text = fs.readFileSync(file, "utf8"); } catch { return out; }
@@ -63,10 +87,13 @@ function loadOne(file, sinceMs) {
     const t = Date.parse(o.timestamp);
     if (sinceMs && t < sinceMs) continue;
     const c = Array.isArray(o.message?.content) ? o.message.content : [];
+    const notifText = (typeof o.content === "string" ? o.content : "")
+      + (typeof o.message?.content === "string" ? o.message.content : "");
     out.push({
-      t, type: o.type,
+      t, type: o.type, sid: o.session_id || null,
       uses: c.filter((x) => x?.type === "tool_use").map((x) => ({ id: x.id, name: x.name, input: x.input })),
-      results: c.filter((x) => x?.type === "tool_result").map((x) => x.tool_use_id),
+      results: c.filter((x) => x?.type === "tool_result").map((x) => ({ id: x.tool_use_id, content: x.content, is_error: x.is_error })),
+      bgDone: parseNotifs(notifText),
       text: c.filter((x) => x?.type === "text").map((x) => x.text).join(""),
     });
   }
@@ -79,8 +106,9 @@ function loadOne(file, sinceMs) {
 // 提到 scripts/test.sh 的文件（耗时 1s），一条 `echo "…(scoped, faster)…"` 里带了字样。
 // 这与同日 RISKY 检测器「匹配提交消息里的 revert 一词」是同一个病：**匹配了提到它的文本，
 // 而不是执行了它的命令**。所以要求 test.sh 出现在命令位置——行首，或 `&&`/`;`/`|`/`(`/`time` 之后。
+// 2026-08-03：把反引号也加进剥离集（修复前只剥单/双引号，命令替换里的字样仍能骗过分类器）。
 function stripQuoted(cmd) {
-  return cmd.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');   // echo/sed 里的字样不算
+  return cmd.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""').replace(/`[^`]*`/g, "``");   // echo/sed/命令替换 里的字样不算
 }
 function classify(name, input) {
   if (name !== "Bash") return name;
@@ -93,17 +121,53 @@ function classify(name, input) {
   return "其它 Bash";
 }
 
+// ── 会话归属（AC4）：pane 源 = 会话记录里的 session_id ──────────────────────────────────────
+// /clear 会新建会话文件，但新文件的记录仍带原 pane 的 session_id；外层人开的 fork 会话则带
+// 外层 session（=SELF）的 id。所以「同源」= 候选文件自己的 id 是 pane 源，或候选记录里的
+// session_id 是 pane 源。
+function readFirstSid(file, maxLines = 100) {
+  let text = "";
+  try {
+    const fd = fs.openSync(file, "r");
+    const buf = Buffer.alloc(1 << 20); // 1MB 前缀足够（session_id 出现在开头几条消息里）
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    text = buf.toString("utf8", 0, n);
+  } catch { return null; }
+  let count = 0;
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("{")) continue;
+    try { const o = JSON.parse(line); if (o.session_id) return o.session_id; } catch {}
+    if (++count >= maxLines) break;
+  }
+  return null;
+}
+function paneSource(file) {
+  const sid = readFirstSid(file);
+  return sid || path.basename(file).replace(/\.jsonl$/, "");
+}
+function samePaneAs(candidate, source) {
+  const own = path.basename(candidate).replace(/\.jsonl$/, "");
+  if (own === source) return true; // 该文件本身就是 pane 的根
+  return readFirstSid(candidate) === source;
+}
+
 // /clear 会新建会话文件，auto-pick 只拿到最新那个。若请求窗口早于它的首条记录，
 // 更早的历史就被**静默截断**了 —— 2026-08-02 实测：clear 后自动选中 0.4MB 的新会话，
 // 而同一天 11MB 的旧会话不再可见，输出看起来完整。必须报出来。
+// 2026-08-03：只把与目标 pane 同源的计入「更早会话」；归属不同的单独列出，不计入。
 function earlierSessions(file, sinceMs, firstMs) {
-  if (!sinceMs || sinceMs >= firstMs) return [];
-  const out = [];
+  if (!sinceMs || sinceMs >= firstMs) return { samePane: [], other: [] };
+  const source = paneSource(file);
+  const out = { samePane: [], other: [] };
   for (const f of fs.readdirSync(PROJ)) {
     if (!f.endsWith(".jsonl") || f.includes(SELF) || path.join(PROJ, f) === file) continue;
     const p2 = path.join(PROJ, f);
     let st; try { st = fs.statSync(p2); } catch { continue; }
-    if (st.mtimeMs >= sinceMs) out.push({ f, mb: (st.size / 1e6).toFixed(1) });
+    if (st.mtimeMs >= sinceMs) {
+      const entry = { f, mb: (st.size / 1e6).toFixed(1) };
+      (samePaneAs(p2, source) ? out.samePane : out.other).push(entry);
+    }
   }
   return out;
 }
@@ -116,10 +180,14 @@ function banner(file, rows, sinceMs) {
   console.log(`窗口 ${sinceMs ? new Date(sinceMs).toISOString() : "(全部)"} → ${new Date(rows.at(-1).t).toISOString()}`);
   console.log(`指纹：首条 ${new Date(rows[0].t).toISOString()}  —— 若这不是你想分析的会话，用 --session 指定`);
   const earlier = earlierSessions(file, sinceMs, rows[0].t);
-  if (earlier.length) {
-    console.log(`\n  ⚠ 请求窗口早于本会话首条记录，${earlier.length} 个更早的会话未被包含（很可能是 /clear 造成的断裂）：`);
-    for (const e of earlier) console.log(`      ${e.f.slice(0, 8)}  ${e.mb}MB   —— 用 --session ${e.f.replace(/\.jsonl$/, "")} 单独分析`);
+  if (earlier.samePane.length) {
+    console.log(`\n  ⚠ 请求窗口早于本会话首条记录，${earlier.samePane.length} 个更早的会话未被包含（很可能是 /clear 造成的断裂）：`);
+    for (const e of earlier.samePane) console.log(`      ${e.f.slice(0, 8)}  ${e.mb}MB   —— 用 --session ${e.f.replace(/\.jsonl$/, "")} 单独分析`);
     console.log(`     本次输出只覆盖 ${new Date(rows[0].t).toISOString()} 之后，不是完整窗口。`);
+  }
+  if (earlier.other.length) {
+    console.log(`\n  ⚠ ${earlier.other.length} 个会话归属不同（可能属于其它会话/外层 pane），未计入：`);
+    for (const e of earlier.other) console.log(`      ${e.f.slice(0, 8)}  ${e.mb}MB   —— 用 --session ${e.f.replace(/\.jsonl$/, "")} 单独分析`);
   }
   console.log("");
 }
@@ -129,11 +197,21 @@ function timecost(file, sinceMs) {
   if (rows.length < 5) return console.log("窗口内数据不足");
   banner(file, rows, sinceMs);
   const span = rows.at(-1).t - rows[0].t;
-  const pending = new Map(), tool = {}, cnt = {};
+  const pending = new Map(), bgPending = new Map(), tool = {}, cnt = {};
+  const add = (p, dt) => { if (dt < 3.6e6) { tool[p.k] = (tool[p.k] || 0) + dt; cnt[p.k] = (cnt[p.k] || 0) + 1; } };
   for (const r of rows) {
-    for (const id of r.results) {
-      const p = pending.get(id);
-      if (p) { pending.delete(id); const dt = r.t - p.t; if (dt < 3.6e6) { tool[p.k] = (tool[p.k] || 0) + dt; cnt[p.k] = (cnt[p.k] || 0) + 1; } }
+    for (const res of r.results) {
+      const p = pending.get(res.id);
+      if (!p) continue;
+      if (typeof res.content === "string" && res.content.includes("running in background")) {
+        pending.delete(res.id); bgPending.set(res.id, p); // 移到后台待完成
+      } else {
+        pending.delete(res.id); add(p, r.t - p.t);
+      }
+    }
+    for (const n of r.bgDone) {
+      const p = bgPending.get(n.id);
+      if (p) { bgPending.delete(n.id); add(p, r.t - p.t); }
     }
     for (const u of r.uses) pending.set(u.id, { k: classify(u.name, u.input), t: r.t });
   }
@@ -162,6 +240,63 @@ function timecost(file, sinceMs) {
 // 而同一份数据 timecost 报 8 次全量套件。两处各自判断「什么算全量套件」必然分歧，改为单一来源。
 const KINDS = new Set(["全量套件", "范围化测试", "其它 Bash"]);
 
+// 命令把 suite 放到 shell 级后台（nohup … & 或 `… test.sh > log 2>&1 &`）时，tool_use 会立即返回，
+// 真实耗时不在 transcript 里 —— 与 run_in_background 一样归为「后台待完成」，取不到完成信号就报未知。
+function looksShellBg(cmd) {
+  const c = stripQuoted(cmd);
+  if (/\bnohup\b/.test(c)) return true; // nohup 必然脱离 shell 存活
+  const m = c.match(/(scripts\/test\.sh|node\s+--test)\b[^;\n]*/);
+  if (!m) return false;
+  const seg = m[0];
+  if (/\bwait\b/.test(seg)) return false; // `… & wait` 阻塞到完成，tool_result 就是真实耗时
+  // 去掉重定向（> file、2>&1）与 && 后，是否还剩独立的 ` &`（后台操作符）
+  const cleaned = seg.replace(/\d*>\s*&?\d*/g, "").replace(/>\s*\S+/g, "").split("&&").join("");
+  return /(^|[\s;|(])&(?![&])/.test(cleaned);
+}
+
+// tool_use/tool_result 按 id 配对。后台命令（run_in_background 或 shell 级 &）的即时 tool_result 只是
+// 「running in background」/「launched」通知，**不是**真实完成时刻 —— 以 <task-notification> 的
+// 完成时刻为准；窗口内取不到完成信号 → dur: null（显示「未知」，与「0s」不可区分的问题就此消除）。
+export function pairCalls(rows, pattern) {
+  const byKind = KINDS.has(pattern);
+  const re = byKind ? null : new RegExp(pattern, "i");
+  const pending = new Map(), bgPending = new Map(), hits = [];
+  for (const r of rows) {
+    for (const res of r.results) {
+      const p = pending.get(res.id);
+      if (!p) continue;
+      if (typeof res.content === "string" && res.content.includes("running in background")) {
+        pending.delete(res.id); bgPending.set(res.id, p);
+      } else {
+        pending.delete(res.id); hits.push({ ...p, dur: r.t - p.t });
+      }
+    }
+    for (const n of r.bgDone) {
+      const p = bgPending.get(n.id);
+      if (p) { bgPending.delete(n.id); hits.push({ ...p, dur: r.t - p.t, bgStatus: n.status }); }
+    }
+    for (const u of r.uses) {
+      const s = u.name === "Bash" ? (u.input?.command || "") : JSON.stringify(u.input || {});
+      const hit = byKind ? classify(u.name, u.input) === pattern : re.test(s);
+      if (hit) {
+        const bg = !!u.input?.run_in_background || looksShellBg(u.input?.command || "");
+        const entry = { t: r.t, name: u.name, cmd: s.replace(/\s+/g, " ").slice(0, 100), bg };
+        (bg ? bgPending : pending).set(u.id, entry);
+      }
+    }
+  }
+  for (const [, p] of bgPending) hits.push({ ...p, dur: null, bgStatus: "unknown" });
+  return { hits: hits.sort((a, b) => a.t - b.t), byKind };
+}
+
+export function fmtDur(h) {
+  if (typeof h.dur !== "number") return "未知";
+  return `${(h.dur / 1000).toFixed(0).padStart(4)}s`;
+}
+
+// 测试与 CLI 共用：分类、加载、会话归属（plugin/test/inner-forensics.test.mjs 直接 import）。
+export { stripQuoted, classify, load, loadOne, parseNotifs, earlierSessions, paneSource, samePaneAs, pickInner, KINDS };
+
 function verify(file, sinceMs, pattern) {
   const rows = load(file, sinceMs);
   const byKind = KINDS.has(pattern);
@@ -177,21 +312,11 @@ function verify(file, sinceMs, pattern) {
     return;
   }
   banner(file, rows, sinceMs);
-  const pending = new Map(), hits = [];
-  for (const r of rows) {
-    for (const id of r.results) {
-      const p = pending.get(id);
-      if (p) { pending.delete(id); hits.push({ ...p, dur: r.t - p.t }); }
-    }
-    for (const u of r.uses) {
-      const s = u.name === "Bash" ? (u.input?.command || "") : JSON.stringify(u.input || {});
-      const hit = byKind ? classify(u.name, u.input) === pattern : re.test(s);
-      if (hit) pending.set(u.id, { t: r.t, name: u.name, cmd: s.replace(/\s+/g, " ").slice(0, 100) });
-    }
-  }
+  const { hits } = pairCalls(rows, pattern);
   console.log(`${byKind ? `类别「${pattern}」` : `匹配 /${pattern}/`} 的调用：${hits.length} 次\n`);
   for (const h of hits) {
-    console.log(`  ${new Date(h.t).toISOString().slice(11, 19)}  ${(h.dur / 1000).toFixed(0).padStart(4)}s  ${h.cmd}`);
+    const st = h.bgStatus && h.bgStatus !== "unknown" ? ` [${h.bgStatus}]` : "";
+    console.log(`  ${new Date(h.t).toISOString().slice(11, 19)}  ${fmtDur(h).padStart(7)}  ${h.cmd}${st}`);
   }
   if (!hits.length) {
     console.log("  —— 零命中。");
@@ -199,21 +324,32 @@ function verify(file, sinceMs, pattern) {
     if (!byKind) console.log("     先用类别形式复核：verify 全量套件 / 范围化测试 / 其它 Bash（与 timecost 同源，不会分歧）。");
     console.log("     确认查询正确后，零命中才是「该声称未被 transcript 证实」。");
   }
-  const total = hits.reduce((a, h) => a + h.dur, 0);
-  if (hits.length) console.log(`\n  合计 ${(total / 6e4).toFixed(1)} 分钟，均 ${(total / hits.length / 1000).toFixed(0)}s`);
+  const withDur = hits.filter((h) => typeof h.dur === "number");
+  const total = withDur.reduce((a, h) => a + h.dur, 0);
+  if (hits.length) {
+    let line = `\n  合计 ${(total / 6e4).toFixed(1)} 分钟`;
+    if (withDur.length) line += `，均 ${(total / withDur.length / 1000).toFixed(0)}s`;
+    const unknown = hits.length - withDur.length;
+    if (unknown) line += `，${unknown} 次耗时未知`;
+    console.log(line);
+  }
 }
 
-const argv = process.argv.slice(2);
-const cmd = argv[0];
-const sinceArg = argv.includes("--since") ? argv[argv.indexOf("--since") + 1] : null;
-const sessArg = argv.includes("--session") ? argv[argv.indexOf("--session") + 1] : null;
-const sinceMs = sinceArg ? Date.parse(sinceArg) : null;
-const file = sessArg ? (sessArg.includes("/") ? sessArg : path.join(PROJ, sessArg + ".jsonl")) : pickInner();
+// CLI（直接执行时才跑；被 import 时不跑，供 plugin/test/inner-forensics.test.mjs 复用）
+const isDirect = process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
+if (isDirect) {
+  const argv = process.argv.slice(2);
+  const cmd = argv[0];
+  const sinceArg = argv.includes("--since") ? argv[argv.indexOf("--since") + 1] : null;
+  const sessArg = argv.includes("--session") ? argv[argv.indexOf("--session") + 1] : null;
+  const sinceMs = sinceArg ? Date.parse(sinceArg) : null;
+  const file = sessArg ? (sessArg.includes("/") ? sessArg : path.join(PROJ, sessArg + ".jsonl")) : pickInner();
 
-if (cmd === "timecost") timecost(file, sinceMs);
-else if (cmd === "verify") verify(file, sinceMs, argv[1] || ".");
-else {
-  console.log("用法:\n  inner-forensics.mjs timecost [--since <ISO>] [--session <id|path>]");
-  console.log("  inner-forensics.mjs verify <正则> [--since <ISO>] [--session <id|path>]");
-  process.exit(2);
+  if (cmd === "timecost") timecost(file, sinceMs);
+  else if (cmd === "verify") verify(file, sinceMs, argv[1] || ".");
+  else {
+    console.log("用法:\n  inner-forensics.mjs timecost [--since <ISO>] [--session <id|path>]");
+    console.log("  inner-forensics.mjs verify <正则> [--since <ISO>] [--session <id|path>]");
+    process.exit(2);
+  }
 }
