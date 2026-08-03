@@ -658,6 +658,19 @@ stranded 全量仍等 sigma 测完。新增 `/tmp/quay-wt-preretire`（外层 de
 - 外层 `57bfad09`：重启 web server 让 /live + /journal 真正服务
 - 在飞（2 活跃）：sigma（测量中）+ parser（实现中）
 
+### 外层解阻塞（06T03:30Z）：webobs 收尾（已落地未收尾类）
+
+**外层发现**：webobs AC 全勾、代码已合并（e8ef92e3 + 5c927972）、外层重启 server 后 /live 与 /journal 实测
+均 200 且逐条一致，但 status 仍 todo、遥测 start=1 end=0 从未闭合（在飞 36 分钟）。**它本身就是 /board 要
+标记的那一类：已落地但未收尾。**
+
+**后果**：①在飞计数因此是 4 不是 3（超上限）；②sigma 已飞 30 分钟，其 AC2 要资源闸 GO、AC1 要
+filesCaptured==155/155，此刻 cpu avg10=91.03、load1=16.02、1 套件在跑——前置在 4 路并发下无法满足。
+
+**已处置**：webobs 收尾（task done + `--task-end` lrq9xl），**在飞计数回到 3**。stranded 全量已延迟（等 sigma）。
+parser 轻量工作不占主要负载。sigma 每次测量前后记录资源闸输出、filesCaptured < 155 作废重测
+（那个分布决定下一步优化方向，测歪了会把工作引到错的地方）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
