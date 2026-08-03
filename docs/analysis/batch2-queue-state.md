@@ -495,6 +495,18 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 **在飞（2 agent）**：retire（约束解除）+ resource-awareness。reclaim 已关闭（`--task-end` sf5zrl）。
 **下一步**：视槽位派 serve-task-list（#3，人在用那个页面）；resource-awareness/retire 返回后 fan-in
 
+### Tick 更新（05T03:0xZ）：resource-awareness merged + serve-task-list 已派
+
+- **resource-awareness（P1#1）merged**（`99b608d6`，11 文件 +678）：`scripts/resource-gate.sh`（压力/内存/
+  node 数/swap，`--for full-suite` GO/WAIT，无 PSI fail-closed）+ test.sh 接入（默认全量 gate，WAIT 打印后
+  exit 1 不静默等）+ **并发推导 `max(1,floor(nproc/2.1))`=1**（4 核），显式 `--test-concurrency=N` 优先。
+  AC1-11 全勾，DoD「2x 全绿」未勾（CPU 纪律 + 推导并发 1 下全量小时级）。AC3 双向负控制实测
+- **serve-task-list 已派**（#3，`a99be54b1c3d9316c`，runId `fm-...-pyzd0e`）
+- **在飞（3）**：retire + serve-task-list + （resource-awareness scoped 测试中）
+- **gate 现实约束**：基线压力 68.85（>40）——**resource-awareness 的全量验证此刻会被 gate WAIT 挡住**
+  （这正是 gate 在起作用）。需等低压力窗口（在飞 agent 测试结束后）再跑；跑时显式 `--test-concurrency=8`
+  （推导 1 会小时级）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
