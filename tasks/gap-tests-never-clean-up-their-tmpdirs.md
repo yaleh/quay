@@ -86,6 +86,7 @@ sigma 已合并**。实际执行搭的是**协调方的 fan-in 全量套件**（
 | 派发基线（套件运行中） | 15,297 | 套件已开跑几分钟，基线含在飞条目 |
 | 套件 #1 完成（后计数） | 15,649 | 净 **+352**（部分窗口——基线在套件中途采，非全量窗口） |
 | M136 重跑前快照 | 15,673 | `/tmp/snapshot-pre-rerun.txt`（全量列表，供前缀级归因） |
+| M136 重跑后计数 | 16,244 | 净 +571（快照采在重跑中途，尾部含协调方/外层活动；新增前缀多为 `quay-dir`/`quay-gap`/`rui-*`/`quay-qeng4-*`，非泄漏测试前缀） |
 | 修复后套件（AC3 后计数） | （待协调方通知） | 与样本 #1 构成修复前/后对照 |
 
 ## AC7 记录：外层 2026-08-03 一次性清理
@@ -172,8 +173,27 @@ resume   n/a: 单次测量，无中途产物
 - **AC4（负控制，fixture 级）**：`plugin/test/test-isolation-check.test.mjs` 里「去掉清理 ⇒ 报出
   >0；恢复 `t.after` ⇒ 回到 0」双向断言通过。**套件级**负控制（`leaked_after_suite > 0`）待 AC3
   的修复后全量套件运行时一并验证。
-- **未做（留待关闭时）**：AC1 归因表（前缀→测试→每次泄漏数）、AC3 修复前/后对照（样本 #1 + 关闭
-  sigma 时的修复后套件）——两个都需要全量套件实测，套件完成后再补。
+- **未做（留待关闭时）**：AC3 修复前/后对照（样本 #1 + 关闭 sigma 时的修复后套件）——需全量套件
+  实测；本次套件窗口互相重叠（派发基线在套件中途采、重跑快照也在中途采），没有干净的修复前全量窗口，
+  故归因表用**静态调用计数**（确定性的每次泄漏数）+ 外层实测速率交叉验证。
+
+## AC1 归因表（前缀 → 创建它的测试文件 → 每次全量套件泄漏几个）
+
+**每次全量套件泄漏数** = 创建文件里 `mkdtemp` 助手的**调用次数**（每个调用一次运行建一个目录、从不删；
+`function` 定义本身不算，故为实测调用数）。**修复前**。修复后（AC2 已加 `after()` 钩子）这些变为 0。
+
+| 前缀 | 创建它的测试文件 | mkdtemp 助手调用/套件 | 外层 30 分钟实测速率（2026-08-03 06:43Z） |
+|---|---|---|---|
+| `prepare-admission-` | `plugin/test/prepare-admission-check.test.mjs`（`makeWorkspace()`） | **42** | 164 |
+| `quay-loop-params-*`（含 `trig-fuzz`） | `packages/quay/test/loop-params.test.mjs`（`tmpWs(tag)`） | **46** | 32（`trig-fuzz` leg） |
+| `adr-store-` | `packages/quay/test/adr-store.test.mjs`（`tmpDir()`） | **13** | 36 |
+| `document-store-` | `packages/quay/test/document-store.test.mjs`（`tmpDir()`） | **11** | 20 |
+| `prep-check-` | **现行源码里找不到创建者**（目录含 `charter.md/plan.md/r.json/task.md`，像是外层/退役 prepare 流程的 preflight 工作区） | ？ | 69 |
+
+实测差值（样本）：套件 #1 净 +352（部分窗口）、M136 重跑净 +571（部分窗口，新增多为协调方/外层
+`quay-dir`/`quay-gap`/`rui-*`/`quay-qeng4-*` 活动）。两个窗口都因基线中途采样而不干净；干净的修复前
+全量窗口缺失，故以静态调用计数为准。`prep-check-` 的创建者不在套件内，**本任务无法修复**（留待外层确认
+来源）。
 
 ## Acceptance Criteria
 
