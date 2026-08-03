@@ -343,6 +343,24 @@ inner-forensics-verify——生产机制正在给错答案，不是新增检查�
 - inventory 落地 → 立即派 P0 #3 retire-pipeline；reclaim 落地 → 排 P0 #4 stranded-worktree
 - 跟踪解冻判据：首次图收缩（负净行数落地或节点删除）时报告
 
+### 资源事件（2026-08-03T04:1xZ，外层实测 + 内层处置）
+
+**事件**：两个 agent 在各自 worktree 里**并发跑全量套件**（testiso + reclaim，各 --test-concurrency=8，170 文件），
+4 核 34+ 进程 → CPU pressure some avg10 **96.62**（batch-4 崩溃阈值 84.77 之上）、load1 31.35、43 node 进程。
+内存无风险（mem 0、swap 0、可用 3789MB）——纯 CPU 饥饿。
+
+**处置**：
+1. **中止 reclaim 套件**（更年轻 11min；P0 但验证可重跑）——SIGKILL 主 runner + 孤儿进程（node 43→22）
+2. **让 testiso 套件自然完成**（外层「不要中断 test-isolation」）——结果：**fail 2 / cancelled 0**，两个失败都是
+   `delivery-standalone-smoke` gate 测试（68s/60s，正常 ~1-5s）——并发饥饿下的时序失败，非代码缺陷
+3. testiso agent 已自行重跑第二轮（/tmp/suite-run2.log，当前唯一在跑的套件）
+4. 已消息 reclaim agent：被杀 = CPU 饥饿非缺陷，等 testiso 跑完再重跑，重跑前确认无其它套件 + pressure < 40
+5. **外层 #1**：此后全量套件一次只跑一个，跑前看 `/proc/pressure/cpu` some avg10 < 40
+
+**resource-awareness 触发条件**（外层）：这是今晚第二次同一条件咬人。**若再发生一次、或这两次套件出现
+cancelled > 0，它从 P2 提升到 P1**（资源闸更接近支柱而非再加断言）。本次 testiso cancelled=0（未触发）、
+reclaim 被中止（无结果）——但 2 个 68s/60s 时序失败与 cancelled 功能等价，已向上报告。
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
