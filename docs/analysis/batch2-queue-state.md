@@ -217,3 +217,17 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
 
 **纪律：每次要以「无待办」结束回合前调用一次 `--append`；无 `--clear`（零状态、只追加）。
 `at` 是 ISO 字符串；时长不记（外层从 transcript 间隙算，按 `at` join）。**
+
+## Tick 记录（2026-08-03T02:55Z，内层）
+
+- **哨兵**：无 `.halt`（运行中）
+- **本 tick 做了**：执行外层更正三件（撤回 turn-ended-idle `18d27d18`、落地 idle-log `aa047baa`、
+  discovery git-index 修复 `63afe8f8`——AC4 主检出红的根因）；test-coverage 已 merge `6518170c`，
+  **全量套件正在跑**（`ba0jsaicx`，后台，压力 some avg10=0）
+- **在飞（2）**：dispatch-gate（`ac1f5685fa1c94943`，/tmp/quay-wt-dispatchgate）+ m264
+  （`af375c8a06b0efe0d`，/tmp/quay-wt-m264）——均有近期活动（02:50/02:47）
+- **停止条件**：**needs-human 积压 = 7（≥3，触发停止派发）**——DIR-100/DIR-100-A/DIR-101/DIR-103/
+  DIR-103-B/DIR-105/DIR-109，**全部历史**（07-29→08-02 05:53，近 2h 无新增），非本批产生。
+  **本 tick 不派发新任务**（纪律：停下等人）；fan-in 照常（全量绿 → 关 test-coverage → 在飞返回后逐个收尾）
+- **阻塞信号**：无记录（非停止状态）
+- **计量**：test-coverage runId `fm-...-4w3tpe`（fan-in 完成后 `--task-end`）
