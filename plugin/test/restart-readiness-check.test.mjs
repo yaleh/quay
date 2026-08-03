@@ -18,7 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +64,74 @@ function runBlockCheck(tmpRoot) {
     env: { ...process.env, QUAY_RR_ROOT: tmpRoot, RR_ONLY_BLOCK_CHECK: "1" },
   });
 }
+
+// ── AC4 (gap-stranded-worktree-branches-have-no-alarm-channel): stranded branches are PRINTED but ──
+// ── are NOT a hard blocker (an un-halt can proceed with stranded work waiting to merge/adjudicate). ─
+
+/** Turn tmpRoot into a real git repo with one stranded `milestone/*` branch ahead of master. */
+function seedStrandedBranch(tmpRoot) {
+  const g = (...args) => execFileSync("git", args, { cwd: tmpRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  g("init", "-b", "master", "-q", ".");
+  g("config", "user.email", "test@example.com");
+  g("config", "user.name", "Test");
+  fs.writeFileSync(path.join(tmpRoot, "base.txt"), "base\n");
+  g("add", ".");
+  g("commit", "-q", "-m", "init");
+  g("checkout", "-qb", "milestone/M9/iteration-0");
+  fs.writeFileSync(path.join(tmpRoot, "work.ts"), "work\n");
+  g("add", ".");
+  g("commit", "-q", "-m", "stranded work");
+  g("checkout", "-q", "master");
+  fs.mkdirSync(path.join(tmpRoot, "plugin"), { recursive: true });
+  fs.symlinkSync(path.join(REPO_ROOT, "plugin", "scripts"), path.join(tmpRoot, "plugin", "scripts"), "dir");
+}
+
+/** Run the real readiness script in RR_ONLY_STRANDED_CHECK mode against a temp ROOT. */
+function runStrandedCheck(tmpRoot) {
+  return spawnSync("bash", [SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, QUAY_RR_ROOT: tmpRoot, RR_ONLY_STRANDED_CHECK: "1" },
+  });
+}
+
+test("AC4 — restart-readiness-check.sh delegates to task-status-drift-check.ts --stranded and never hard-fails on it", () => {
+  const script = fs.readFileSync(SCRIPT, "utf8");
+  assert.match(script, /task-status-drift-check\.ts --stranded/, "readiness check must invoke the named stranded-branch check");
+  assert.match(script, /check_stranded_branches/, "the check must be a named function");
+  // The stranded alarm is INFORMATIONAL — it must print, never trip the hard-fail (bad) path.
+  assert.match(script, /\[info\] STRANDED worktree branches/, "stranded branches must be PRINTED");
+  assert.doesNotMatch(script, /bad ".*stranded/i, "a stranded branch must NOT hard-fail the readiness gate");
+  assert.match(script, /RR_ONLY_STRANDED_CHECK/, "behavioral test seam present");
+});
+
+test("AC4 (behavioral) — a stranded branch is printed but does NOT block (exit 0)", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    seedStrandedBranch(tmp);
+    const res = runStrandedCheck(tmp);
+    assert.equal(res.status, 0, `stranded branch must NOT block, got ${res.status}\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
+    assert.match(res.stdout, /milestone\/M9\/iteration-0/, "must print the stranded branch");
+    assert.match(res.stdout, /has-commits/, "must classify it");
+    assert.match(res.stdout, /READY ✓/, "summary must still say READY (informational, not a hard fail)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC4 (behavioral) — a clean repo reports no stranded branches and exits 0", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    seedStrandedBranch(tmp);
+    // Remove the stranded branch → negative control.
+    execFileSync("git", ["branch", "-D", "milestone/M9/iteration-0"], { cwd: tmp, stdio: ["ignore", "pipe", "pipe"] });
+    const res = runStrandedCheck(tmp);
+    assert.equal(res.status, 0, `clean repo → exit 0, got ${res.status}`);
+    assert.match(res.stdout, /no stranded worktree branches/, "must report the clean state");
+    assert.match(res.stdout, /READY ✓/, "summary must say READY");
+  } finally {
+    cleanup(tmp);
+  }
+});
 
 // ── Source contract (AC5) ────────────────────────────────────────────────────────────────────────────
 

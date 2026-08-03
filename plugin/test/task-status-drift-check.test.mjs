@@ -37,6 +37,11 @@ import {
   hasDoneChildren,
   REVERSE_SYMBOL_RATIO_MAX,
   BOOKKEEPING_ROOTS,
+  listWorkBranches,
+  classifyBranch,
+  strandedBranches,
+  entriesInBranchDiff,
+  formatStrandedText,
 } from "../../experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +115,218 @@ const REVERSE_UNLANDED_TASK = makeTask(
   "- code/ghost.ts",
   "done"
 );
+
+// ── stranded-branch check helpers (REAL git repos — two-way negative control) ────────────────────
+function git(repoDir, ...args) {
+  return execFileSync("git", args, { cwd: repoDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function makeRealGitRepo(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `drift-git-${tag}-`));
+  git(dir, "init", "-b", "master", "-q", ".");
+  git(dir, "config", "user.email", "test@example.com");
+  git(dir, "config", "user.name", "Test");
+  fs.writeFileSync(path.join(dir, "base.txt"), "base\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  return dir;
+}
+
+/** Create branch <branch> at current HEAD, commit <file> onto it, return to master. */
+function commitFile(repoDir, branch, file, content, msg) {
+  git(repoDir, "checkout", "-q", "-b", branch);
+  fs.writeFileSync(path.join(repoDir, file), content);
+  git(repoDir, "add", ".");
+  git(repoDir, "commit", "-q", "-m", msg);
+  git(repoDir, "checkout", "-q", "master");
+}
+
+// ── stranded-branch check (gap-stranded-worktree-branches-have-no-alarm-channel) ────────────────
+// The acceptance is a TWO-WAY NEGATIVE CONTROL (outer re-scope 2026-08-03): a fabricated branch ahead
+// of master MUST be reported; deleting it MUST un-report. The current real repo is NOT the expected
+// value (only the human-retained M239 exception remains there). Criterion = the three-gate logic from
+// gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion, reused verbatim.
+
+test("stranded: a fabricated branch ahead of master is REPORTED; deleting it un-reports (two-way negative control)", () => {
+  const repo = makeRealGitRepo("neg");
+  try {
+    assert.deepEqual(strandedBranches(repo), [], "no milestone/task branches → nothing stranded");
+    commitFile(repo, "milestone/M222/iteration-0", "work.ts", "work\n", "stranded work");
+    const stranded = strandedBranches(repo);
+    assert.equal(stranded.length, 1, "fabricated ahead branch must be reported");
+    assert.equal(stranded[0].branch, "milestone/M222/iteration-0");
+    assert.equal(stranded[0].classification, "has-commits");
+    assert.equal(stranded[0].aheadCount, 1);
+    assert.equal(stranded[0].insertions, 1, "three-dot shortstat insertions");
+    assert.ok(stranded[0].lastCommitDate, "last commit date present");
+    // Negative control: delete the branch → nothing reported.
+    git(repo, "branch", "-D", "milestone/M222/iteration-0");
+    assert.deepEqual(strandedBranches(repo), [], "deleting the branch un-reports it");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("stranded: merged-clean is NOT reported; merged-then-reverted IS (Gate 2 — merge-added files missing from master)", () => {
+  const repo = makeRealGitRepo("gate2");
+  try {
+    // Merged cleanly with --no-ff → the branch is an ancestor AND its merge-added file still exists.
+    commitFile(repo, "milestone/M10/iteration-0", "m10.ts", "m10\n", "m10 work");
+    git(repo, "merge", "--no-ff", "milestone/M10/iteration-0", "-m", "merge M10", "-q");
+    // Merged then reverted → still an ancestor, but the merge-added file is gone from master.
+    commitFile(repo, "milestone/M11/iteration-0", "m11.ts", "m11\n", "m11 work");
+    git(repo, "merge", "--no-ff", "milestone/M11/iteration-0", "-m", "merge M11", "-q");
+    git(repo, "revert", "-m", "1", "--no-edit", "HEAD");
+    const stranded = strandedBranches(repo);
+    assert.deepEqual(stranded.map((s) => s.branch), ["milestone/M11/iteration-0"],
+      "merged-clean M10 absent; merged-then-reverted M11 present");
+    assert.equal(stranded[0].classification, "merged-then-reverted");
+    assert.ok(stranded[0].detail.includes("m11.ts"), "detail names the missing merge-added file");
+    // The revert signal must survive master ADVANCING past the branch (the old two-dot-diff bug):
+    // advance master with an unrelated commit, then re-check — M11 is still merged-then-reverted.
+    fs.writeFileSync(path.join(repo, "later.txt"), "later\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "master advances past the branch");
+    const after = strandedBranches(repo);
+    assert.equal(after.length, 1, "master advancing must not hide merged-then-reverted");
+    assert.equal(after[0].classification, "merged-then-reverted");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("stranded: a worktree with uncommitted changes is reported (Gate 3), still exit-friendly", () => {
+  const repo = makeRealGitRepo("gate3");
+  const wt = path.join(os.tmpdir(), `drift-git-wt-${Date.now()}`);
+  fs.rmSync(wt, { recursive: true, force: true });
+  try {
+    git(repo, "checkout", "-qb", "task/foo");
+    git(repo, "checkout", "-q", "master");
+    git(repo, "worktree", "add", "-q", wt, "task/foo");
+    fs.writeFileSync(path.join(wt, "dirty.ts"), "uncommitted\n");
+    const stranded = strandedBranches(repo);
+    assert.equal(stranded.length, 1);
+    assert.equal(stranded[0].branch, "task/foo");
+    assert.equal(stranded[0].classification, "has-uncommitted");
+    assert.equal(stranded[0].aheadCount, 0, "a dirty worktree branch is still zero-ahead");
+    assert.ok(stranded[0].detail.includes("dirty.ts"), "detail names the uncommitted file");
+    // Once committed inside the worktree, the branch has commits ahead → has-commits, not uncommitted.
+    git(repo, "-C", wt, "add", "dirty.ts");
+    git(repo, "-C", wt, "commit", "-q", "-m", "commit the dirty work");
+    const stranded2 = strandedBranches(repo);
+    assert.equal(stranded2[0].classification, "has-commits", "committed work ahead → has-commits");
+  } finally {
+    try { git(repo, "worktree", "remove", wt, "--force"); } catch (_) { /* best-effort */ }
+    fs.rmSync(wt, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("stranded: listWorkBranches scopes to milestone/* and task/* (no legacy experiment-* noise)", () => {
+  const repo = makeRealGitRepo("scope");
+  try {
+    commitFile(repo, "milestone/M9/iteration-0", "a.ts", "a\n", "milestone work");
+    commitFile(repo, "task/gap-something", "b.ts", "b\n", "task work");
+    // A legacy branch name that is NOT a live worktree namespace must NOT be reported.
+    commitFile(repo, "experiment-4-iteration-13", "c.ts", "c\n", "legacy");
+    const names = listWorkBranches(repo).sort();
+    assert.deepEqual(names, ["milestone/M9/iteration-0", "task/gap-something"]);
+    const stranded = strandedBranches(repo);
+    assert.deepEqual(stranded.map((s) => s.branch).sort(), ["milestone/M9/iteration-0", "task/gap-something"]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("formatStrandedText: clean → one-line; stranded → per-branch lines with classification", () => {
+  assert.match(formatStrandedText([]), /no stranded worktree branches/);
+  const out = formatStrandedText([
+    { branch: "milestone/M239/iteration-0", classification: "has-commits", aheadCount: 2, insertions: 6901, lastCommitDate: "2026-08-01T00:00:00Z" },
+  ]);
+  assert.match(out, /milestone\/M239\/iteration-0/);
+  assert.match(out, /has-commits/);
+  assert.match(out, /2 commit\(s\) ahead/);
+  assert.match(out, /\+6901 lines/);
+});
+
+test("AC6 (stranded): done task whose Touches file exists only on a stranded branch → stranded-not-merged, NOT reverse-drift", () => {
+  const repo = makeRealGitRepo("ac6");
+  try {
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    // The stranded branch holds the task's code; master does not.
+    commitFile(repo, "milestone/M243/iteration-0", "code/impl.ts", "export function strandedMarkerXYZ() {}\n", "DIR-124-A2 work");
+    const task = makeTask(
+      "fixture-stranded",
+      "- [ ] AC1: call `strandedMarkerXYZ` in the implementation",
+      "- code/impl.ts",
+      "done"
+    );
+    fs.writeFileSync(path.join(repo, "tasks", "fixture-stranded.md"), task);
+    const stranded = strandedBranches(repo);
+    const { reverse, strandedTasks } = scanTasks({
+      repoRoot: repo, roots: [path.join(repo, "code")], strandedBranches: stranded,
+    });
+    assert.equal(reverse.length, 0, "code on a stranded branch is NOT reverse-drift (never landed)");
+    assert.equal(strandedTasks.length, 1, "it IS stranded-not-merged");
+    assert.equal(strandedTasks[0].taskId, "fixture-stranded");
+    assert.equal(strandedTasks[0].branch, "milestone/M243/iteration-0");
+    // Negative control: merge the branch → code now on master → NOT flagged at all.
+    git(repo, "merge", "--no-ff", "milestone/M243/iteration-0", "-m", "merge M243", "-q");
+    const { reverse: r2, strandedTasks: s2 } = scanTasks({
+      repoRoot: repo, roots: [path.join(repo, "code")], strandedBranches: strandedBranches(repo),
+    });
+    assert.equal(r2.length, 0, "merged → no reverse-drift");
+    assert.equal(s2.length, 0, "merged → no stranded-not-merged");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("AC6 (stranded): entriesInBranchDiff matches the branch's DIVERGENT files, not inherited ones (no cat-file false positive)", () => {
+  const repo = makeRealGitRepo("diff");
+  try {
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // code/committed.ts is committed ON the branch (ahead of master) → in the divergent diff.
+    commitFile(repo, "milestone/M9/iteration-0", "code/committed.ts", "x\n", "committed");
+    assert.ok(entriesInBranchDiff(repo, ["code/committed.ts"], "milestone/M9/iteration-0"),
+      "branch-committed file is in the divergent diff");
+    assert.equal(entriesInBranchDiff(repo, ["base.txt"], "milestone/M9/iteration-0"), false,
+      "a file inherited from the base (in the branch tree but NOT divergent) must NOT match — the cat-file false-positive class");
+    assert.equal(entriesInBranchDiff(repo, ["code/ghost.ts"], "milestone/M9/iteration-0"), false,
+      "absent file does not match");
+    assert.equal(entriesInBranchDiff(repo, ["code/*.ts"], "milestone/M9/iteration-0"), false,
+      "globs are skipped (exact-path signal only)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("CLI --stranded: prints stranded branches and exits 0 (report-only, never a gate)", () => {
+  const cli = path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts");
+  const repo = makeRealGitRepo("cli");
+  try {
+    let out = execFileSync("node", ["--experimental-strip-types", cli, "--stranded"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(out, /no stranded worktree branches/, "clean repo → no-stranded line");
+    commitFile(repo, "milestone/M9/iteration-0", "work.ts", "w\n", "stranded");
+    out = execFileSync("node", ["--experimental-strip-types", cli, "--stranded"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(out, /milestone\/M9\/iteration-0/, "stranded branch appears in output");
+    assert.match(out, /has-commits/, "classification appears");
+    const jsonOut = execFileSync("node", ["--experimental-strip-types", cli, "--stranded", "--json"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    const parsed = JSON.parse(jsonOut);
+    assert.deepEqual(Object.keys(parsed), ["stranded"]);
+    assert.equal(parsed.stranded.length, 1);
+    assert.equal(parsed.stranded[0].classification, "has-commits");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
 
 // ── AC1: both mirrors byte-identical ─────────────────────────────────────────────────────────────
 
@@ -532,16 +749,20 @@ test("AC5: CLI exits 0 in all cases (report-only, never a gate)", () => {
 
 // ── AC7: --json shape ───────────────────────────────────────────────────────────────────────────
 
-test("AC7: --json mode emits { suspects: [...], reverse: [...], scanned }", () => {
+test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scanned }", () => {
   const report = formatJsonReport(
     [{ taskId: "X-1", matchedSymbols: ["planCheckNextAction"], touchesAllExist: true }],
     [{ taskId: "X-2", matchedSymbols: [], codeTouchExists: false, touchesAllExist: false }],
-    10
+    10,
+    [{ taskId: "X-3", matchedSymbols: [], branch: "milestone/M243/iteration-0", branchClassification: "has-commits" }],
+    [{ branch: "milestone/M239/iteration-0", classification: "has-commits", aheadCount: 2, insertions: 6901, lastCommitDate: "2026-08-01T00:00:00Z" }]
   );
   const parsed = JSON.parse(report);
-  assert.deepEqual(Object.keys(parsed).sort(), ["reverse", "scanned", "suspects"]);
+  assert.deepEqual(Object.keys(parsed).sort(), ["reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
   assert.equal(parsed.suspects.length, 1);
   assert.equal(parsed.reverse.length, 1);
+  assert.equal(parsed.strandedTasks.length, 1);
+  assert.equal(parsed.stranded.length, 1);
   assert.deepEqual(
     Object.keys(parsed.suspects[0]).sort(),
     ["matchedSymbols", "taskId", "touchesAllExist"]
@@ -550,6 +771,14 @@ test("AC7: --json mode emits { suspects: [...], reverse: [...], scanned }", () =
     Object.keys(parsed.reverse[0]).sort(),
     ["codeTouchExists", "matchedSymbols", "taskId", "touchesAllExist"],
     "reverse entries carry codeTouchExists (the code-root landing signal)"
+  );
+  assert.deepEqual(
+    Object.keys(parsed.stranded[0]).sort(),
+    ["aheadCount", "branch", "classification", "detail", "insertions", "lastCommitDate"]
+  );
+  assert.deepEqual(
+    Object.keys(parsed.strandedTasks[0]).sort(),
+    ["branch", "branchClassification", "matchedSymbols", "taskId"]
   );
 
   // The CLI itself emits the same shape (synthetic workspace — fast, no real store).
@@ -560,9 +789,11 @@ test("AC7: --json mode emits { suspects: [...], reverse: [...], scanned }", () =
       cwd: ws, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
     });
     const fromCli = JSON.parse(out);
-    assert.deepEqual(Object.keys(fromCli).sort(), ["reverse", "scanned", "suspects"]);
+    assert.deepEqual(Object.keys(fromCli).sort(), ["reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
     assert.ok(Array.isArray(fromCli.suspects), "suspects must be an array");
     assert.ok(Array.isArray(fromCli.reverse), "reverse must be an array");
+    assert.ok(Array.isArray(fromCli.stranded), "stranded must be an array");
+    assert.ok(Array.isArray(fromCli.strandedTasks), "strandedTasks must be an array");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
   }
