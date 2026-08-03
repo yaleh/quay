@@ -75,10 +75,11 @@ MemAvailable ~5G，OOM 无降级段）。参考：nproc=4 而 test.sh 默认 `--
 ```bash
 grep 'cancelled 0'   # cancelled == 0（崩溃不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
-grep 'tests 2361'    # tests 数等于参考值（batch4b/4c 稳定为 2361；若套件构成变了先重测参考值）
+grep 'tests 2407'    # tests 数等于参考值（2026-08-03 实测 2407；套件构成每次变都要重测参考值）
 ```
-只查 fail 会把崩溃读成绿。reference `tests` 数来自 batch4b/4c 的稳定 2361（pass 2343 / cancelled 0 / skipped 18，
-且三次 `selected 167 files` 一致）。
+只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → +5 test-coverage-check
++6 inner-idle-log = 2372（2026-08-03 03:00）→ +35 task-contract-check = **2407**（03:18）。
+每次合并新增测试文件后，参考值以最近一次全量绿的 tests 数为准。
 
 ## 状态单一来源
 

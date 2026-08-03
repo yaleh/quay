@@ -255,6 +255,13 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
   外层裁定下一批第一，与在飞 DISJOINT 实测。全量绿后关 dispatch-gate
 - **在飞（2）**：m264（诊断中）+ inventory（实现中）
 
+### Tick 更新（03T03:18Z）：dispatch-gate 已关闭
+
+- **dispatch-gate done**：批全量绿（**2407**/2388/0/19，exit 0；参考值 2372→**2407** = +35 contract-check 测试；
+  selected 170）。worktree/分支清理、任务 done、`--task-end`（`fm-...-y7tt6x`）。**参考值更新：2407**
+- **在飞（2）**：m264（~51min，未到 90min 阈值）+ inventory（~11min）。均活跃未提交
+- 停止条件：无（needs-human 判据已按外层裁定改为窗口内新增，7 历史不构成；`.halt` 无）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
