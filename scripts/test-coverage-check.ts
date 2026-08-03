@@ -164,6 +164,42 @@ function canonicalTestFiles(repoRoot: string): Set<string> {
  * (`packages/*\/test/`, `plugin/test/`) share, generalized to "any future test/ directory" per
  * ADR-019 Decision #4's own wording, without hardcoding package names. */
 function discoverProductTierTestFiles(repoRoot: string): Set<string> {
+  // Index-driven discovery (primary): "real" test files are the ones git TRACKS. Walking the
+  // filesystem instead picks up gitignored artifact checkouts (`**/worktrees/` — thousands of
+  // stale test files on this repo) and reports them as orphans, going red for the wrong reason.
+  // The index is identical in a linked worktree and the main checkout, which also kills the
+  // "isolation-green / main-checkout-red" class for this check (the fs walk saw different files
+  // on disk depending on which checkout it ran from).
+  const res = spawnSync("git", ["ls-files", "-z", "--", "*.test.mjs"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (res.status === 0) {
+    const out = new Set<string>();
+    for (const rel of res.stdout.split("\0")) {
+      if (!rel.endsWith(".test.mjs")) continue;
+      const parts = rel.split("/");
+      // Only files directly inside a directory named `test` — the shape the walk collected.
+      if (parts.length < 2 || parts[parts.length - 2] !== "test") continue;
+      // Replicate the walk's EXCLUDE_DIR_NAMES skip (applies at any level).
+      if (parts.slice(0, -1).some((seg) => EXCLUDE_DIR_NAMES.has(seg))) continue;
+      out.add(rel);
+    }
+    return out;
+  }
+  // Fallback (selftest / unit-test scratch fixtures, which are not git checkouts): a non-git
+  // directory has no gitignore artifacts by construction, so the fs walk cannot pick up stale
+  // `**/worktrees/` checkouts here. Any OTHER git failure is a real error — fail loud.
+  if (!(res.stderr ?? "").toLowerCase().includes("not a git repository")) {
+    throw new Error(
+      `git ls-files failed (exit ${res.status}): ${res.stderr ?? ""}${res.stdout ?? ""}`
+    );
+  }
+  return discoverProductTierTestFilesByWalk(repoRoot);
+}
+
+/** fs-walk fallback used only for non-git contexts (see discoverProductTierTestFiles). */
+function discoverProductTierTestFilesByWalk(repoRoot: string): Set<string> {
   const out = new Set<string>();
   function walk(dir: string): void {
     let entries: fs.Dirent[] = [];
