@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 11:58Z | `no-action`（未介入内层；派下一批并当场跑完人交回来的那条验证） | 派发 3 个任务的批次；按人的新裁定跑通「从 build 产物冷启动」；更新目标文件 | 在飞 **3**（monitor / tasksPerHour / tmp-leak，均已注册计量，Monitor 报 START）；产品化已收尾（status done、DoD 三条全勾、遥测 76.5min）；完成 **39**、orphaned 0、`tph` 1.537；派发前闸口：contract-check **new=0**、三者两两 **DISJOINT** | **AC13 从「被阻塞」变「已达成」并当场兑现**：本地 `publish-dist-branch.sh`（**不给 `--push`**）exit 0、bundle 1,327,236 字节、orphan commit `8cc675f9`、**未推送**；产物含 6 个机制文件 + bundle + plugin.json 全部 PRESENT；**用 `git archive` 解出产物（不是 `cp` 工作树）**装进空项目 exit 0（loop copied=20/skipped=0/conflicted=0）；铺设结果 `/home/yale/work/quay` **0 命中**；占位符 `scripts/test.sh` 残留 **0**、`quay-0:0.0` 残留 **0**；**改名负控制**下铺设项目的 `resource-gate.sh` 仍跑通。**一项如实不算通过**：`inner-state.sh` 4 秒无输出而它轮询 60 秒——不足以判定，需更长窗口。**并查出一条后续**：`test/cold-start-e2e.sh` 的安装源是 `$REPO_ROOT/plugin`，**即工作树的 `cp`**，按人这次的区分不构成可交付性证据；要让本次手工验证可重复，它需要一个 plugin 源参数。**全程私有 worktree，跑完已清理（worktree 删除、验证分支 `-D`、临时目录删除），共享工作树干净** |
 | 2026-08-03 11:47Z | `correct`（correct-inner：一个会在将来静默失去分辨力的检查） | 用新路径的 tick 文档跑本 tick；核实搬移的守门测试 AC1b/AC1c；对内层自己的 monitor 自检；通报空集隐患 | 在飞 **1**（产品化 **69min**，阈值 90，fan-in 全量在跑：pid 1305405、压力 87.43、load1 20.06）；完成 38、orphaned 0、`tph` 1.506；工作树有内层未提交改动（`batch2-queue-state.md`、`loop-shipping.test.mjs`） | **先对自己做了新任务里那条 monitor 自检**：按 argv 前两 token 精确匹配，命中 2 个 pid、都是本仓副本、归属链收敛到本会话 claude pid ⇒ **判据在真实环境下可用**（不是纸面设计）。**AC1b 的守门做得很硬**：老路径 `scripts/resource-gate.sh` 是新路径 `plugin/scripts/resource-gate.sh` 的子串，它用**负向后顾** `(?<!plugin\/)` 精确区分——本仓反复踩的子串坑这次被正面处理了；`excluded` 名单每条都写了理由。**但它只有一条断言 `assert.deepEqual(hits, [])`，没有任何东西断言扫描语料非空**——walk 提前返回、扩展名正则被改、或 excluded 继续变长把树吞掉，测试都会静默通过。它今天仍有分辨力（`scripts/` 未被排除），问题是**将来会悄悄失去而没人知道**，属 `gap-checks-that-verify-an-empty-set` 一族。已通报并给出两行修法。**外层自己又差点踩「零命中当没发生」**：发完 3 秒 grep 内层 transcript 得 0，差点判为未送达——transcript 还没落盘，隔一会儿再查是 1。**发完立刻查等于没查** |
 | 2026-08-03 11:42Z | `no-action`（未介入内层；按管理者交办判定一条观察是否成任务并定范围） | 实测「monitor 挂没挂、挂对没有」是否可机械判定；据实测把判据从一条改成三条；建任务；算出四个待派任务的并发矩阵 | 在飞 **1**（产品化，fan-in 中）；完成 38、orphaned 0；四个待派任务的两两资格已算 | **把「可不可判」从设想变成实测**：(1) monitor 是**真进程**，argv 即绝对路径 ⇒ 挂没挂、挂的哪个仓库副本可直接读（实测 2 个 pid，同一逻辑 monitor 每轮起子 shell，判据须容忍 N>1）；(2) 目标可解——`inner-state.sh` 按 `BASH_SOURCE` 自定位根，`INNER_STATE_WORK_ROOT` 可覆盖且在 `/proc/<pid>/environ` 可读；(3) **归属可判**——monitor 的 ppid 链 `1277284 → 1277252 → claude 966759` 与本会话自身的链一致 ⇒ 「是不是本会话的」可比对，**这条必需**：上个会话遗留的进程会显示活着但事件送不到。**⇒ 判据从一条变三条**：只查「挂没挂」会漏掉管理者那次（进程活着、目标错），只查前两条会漏掉遗留进程。**验证时当场踩了自匹配坑**：第一版用子串找 `inner-state.sh`，**匹配到发起查询的命令自己两次**；改为 argv 前两 token 精确等于 `bash <绝对路径>` 后，真进程 2、自匹配 **0**。已写成 AC2。**范围砍掉两样**：不自动重挂（会掩盖「会话正在死」）、不建心跳文件（`inner-state.sh` 有明文纯读契约，写文件会重演 readiness 死锁）；**不与 `outer-liveness.sh` 合并**——那个管三个项目的外层进程存活，本任务管外层挂的 monitor 本身 |
 | 2026-08-03 11:38Z | `correct`（correct-self：一个假前提在外层两轮核实下活了下来） | 产品化落地后重挂外层自己的两样东西；核实搬移是否真干净；查 AC8 负控制是否真跑；发现并通报 AC2 的前提为假 | 在飞 **1**（产品化 57min，**已 merge `e58c13b6`**，fan-in 全量在跑，压力 86.78/load1 16.39）；完成 38、orphaned 0、`tasksPerHour` 1.518；三项目：quay 运行中 / archguard 暂停 / meta-cc 运行中 | **搬移是干净的，我上一 tick 的拦截被采纳**：`scripts/test.sh` 的三个调用点（194/216/224）现在都指向 `plugin/scripts/`，`heavy-op-token.test.mjs` 也改了；tick 文档模板**保留 quay 实值**、只对铺出的副本做替换——这一点很重要，否则我自己的驱动文档会被占位符化。**AC8 的改名负控制确实跑了**（不是勾了框）：输出在任务体第 291-308 行，重命名的是 `/tmp/tmp.*/quay-dev` 那份拷贝、退出码 0，并显式写明真实开发树未被触碰。**外层自己的两处已重挂**：Monitor → `plugin/scripts/inner-state.sh`（首条事件正确标 `INIT` 而非 `START`），cron → `plugin/loop/orchestrator-loop-tick.md`。**并查出一个假前提**：任务体（外层写的）说 `fast-mode-telemetry.ts` 在两处「各有一份」，实测 `git ls-tree` 合并前后**都是 mode 120000 符号链接**、blob 同为 `6a1523e8`、该路径历史上只有 2026-08-02 一个提交 ⇒ **AC2 在开工前就已满足，本次零改动**。**它是怎么活下来的**：前提来自 archguard 差异清单，外层两轮核实**都用按名字找文件**（`find -name`/路径存在），而按名字只能回答「路径在不在」，回答不了「它是不是链接」——要 `ls -la` 或 `git ls-tree` 看 mode。我扩 Touches 时把两个路径都列了，同样没查 mode，**这条算我的** |
@@ -132,11 +133,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 36 | 35% |
-| unblock | 16 | 16% |
-| correct | 47 | 46% |
+| no-action | 37 | 36% |
+| unblock | 16 | 15% |
+| correct | 47 | 45% |
 | escalate | 4 | 4% |
-| **合计** | **103** | — |
+| **合计** | **104** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 

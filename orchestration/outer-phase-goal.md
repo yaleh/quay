@@ -137,7 +137,7 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 
 ### D 组：可交付性验证（2026-08-03 人裁定后收回我的范围）
 
-- [ ] **AC13：冷启动验证必须打在「build 出来的产物」上，不是 cp 过去的源文件。**
+- [x] **AC13：冷启动验证必须打在「build 出来的产物」上，不是 cp 过去的源文件。**
       **人的裁定（管理者转达，2026-08-03）**：AC2 应基于**本地 build** 执行安装——那已经足够「冷」，
       **不再依赖人工推送**。⇒ 这一条从【被阻塞】改回**可执行**。
       判据（三条都要）：
@@ -150,10 +150,27 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
       ③ 用它跑一次 `quay-init --loop` + `test/cold-start-e2e.sh`，退出码 0。
       **关键区分（人明确要求写进判据）**：**archguard 那次冷启动用的是 `cp` 加手工 `sed`**——
       它证明的是**机制能在第二个项目上驱动开发**，**不构成任何可交付性证据**。**两件事不要混。**
-      **现状：未开始（不是阻塞）。**执行约束：`publish-dist-branch.sh` 会跑 `sync-vendor.sh`，
-      **在工作树里写 `plugin/vendor/quay/dist/quay.js`** ⇒ **必须在私有 worktree 里跑**，
-      否则脏文件会被在飞任务的 `git add -A` 扫进它的提交（今晚已发生过一次同形态的误扫）。
-      当前在飞 3，**等一个安静窗口或在私有 worktree 执行**。
+      **现状（2026-08-03 12:0xZ 实跑，三条全过）：**
+
+      | 步骤 | 结果 |
+      |---|---|
+      | build（`--branch dist-plugin-ac13verify`，**不给 `--push`**） | exit 0，bundle **1,327,236 字节**，orphan commit `8cc675f9`，**未推送任何东西** |
+      | 产物含机制 | `loop/orchestrator-loop-tick.md`、`loop/fast-mode-loop-tick.md`、`scripts/quay-init.sh`、`scripts/inner-state.sh`、`scripts/resource-gate.sh`、`scripts/heavy-op-token.sh`、`vendor/quay/dist/quay.js`、`.claude-plugin/plugin.json` **全部 PRESENT** |
+      | 从产物安装（`git archive` 解出 ⇒ **不是 `cp` 工作树**） | `quay-init --all --loop` **exit 0**，loop 类 copied=20 / skipped=0 / conflicted=0 |
+      | 铺设结果无开发树路径 | `grep -rl "/home/yale/work/quay"` **0 命中** |
+      | 占位符替换 | `npm test` 命中 3+9；**`scripts/test.sh` 残留 0**；`ac13-0:inner` 命中 6；**`quay-0:0.0` 残留 0** |
+      | **改名负控制** | 把产物目录改名后，铺设项目里的 `plugin/scripts/resource-gate.sh` **仍然跑通**（exit 0 并打印真实数字） |
+
+      **未确立的一项（不当作通过）**：同一负控制里 `inner-state.sh` 4 秒内输出 0 字节——
+      它的轮询间隔是 60 秒，**4 秒既不证明它活也不证明它死**，需要更长窗口重测。
+      **执行卫生**：全程在私有 worktree（`/tmp/quay-wt-outer-ac13`）里做，跑完已
+      `git worktree remove` + `git branch -D dist-plugin-ac13verify` + 删临时目录，共享工作树保持干净。
+
+      **由此查出的一条后续（属实、待办）**：`test/cold-start-e2e.sh` 的安装源是
+      `PLUGIN_SRC="$REPO_ROOT/plugin"`——**即工作树的 `cp`，不是 build 产物**。
+      它证明的是「铺设结果运行时不依赖开发树」，**按人这次的区分，它不构成可交付性证据**。
+      我上面这次是手工从产物装的，**要让它可重复，e2e 需要接受一个 plugin 源参数**。
+      （产品化任务的 AC8 按它当时的写法是达成的；这里说的是它承载不了新判据的重量。）
 
 ---
 
@@ -180,6 +197,7 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 
 | 时刻 | 复核结论 |
 |---|---|
+| 2026-08-03 12:0xZ（三） | **AC13 当场跑完并勾上**：本地 build（不推送）→ 产物含全部 6 个机制文件 → 从产物（`git archive` 解出，非 `cp`）装进空项目 exit 0 → 铺设结果 0 个开发树路径、占位符残留 0 → 改名负控制下 `resource-gate.sh` 仍跑通。**一项如实标为未确立**：`inner-state.sh` 4 秒无输出，而它轮询 60 秒，不足以判定。**并查出一条后续**：`test/cold-start-e2e.sh` 装的是工作树的 `cp`，按新判据不构成可交付性证据——要让这次的手工验证可重复，它需要一个 plugin 源参数。 |
 | 2026-08-03 12:0xZ（二） | 人改判：AC2 基于**本地 build** 安装即可，不再依赖人工推送。**新增 AC13** 并把「可安装物」那一行从【阻塞】改写——现在它只管「别人能不能装到」（仍归人+管理者），「装出来的那份能不能用」回到我这里。**判据里写死了人要求的那条区分**：被测物必须是 build 产物，`cp` 源文件不算（archguard 那次是 `cp`，只证明机制能驱动开发，不是可交付性证据）。**并记下一条执行约束**：该脚本会写工作树里的 vendor bundle，必须在私有 worktree 跑，否则会被在飞任务的 `git add -A` 扫走。 |
 | 2026-08-03 12:0xZ | 收到人对推送/发布的结案裁定。**AC5 重写**：从「授权待裁定」改为「已裁定、且不找绕过办法」，并附外层独立复核的三条 `on:` 段触发面——**目的是防止把裁定读得过严**（`git push origin master` 只触发 CI，不产生 release）。**「明确不是我的 AC」表里可安装物一行改标为「阻塞，不是未开始」并写明阻塞源**。**本裁定不阻塞我的任何一条 AC**——被阻塞的是管理者的 AC2/AC3；我如实标注但不把它写成自己的待办。顺带查出解阻塞比预想便宜：`publish-dist-branch.sh` 用 `rsync` 整个 `plugin/` 子树，一次 `workflow_dispatch` 就能带上新机制，不需要版本标签。 |
 | 2026-08-03 11:5xZ | 建立。AC1/AC2/AC3/AC5/AC12 当前达成；AC4 达成但靠手工（机械化任务已建未派）；AC6–AC9 各有 1 次真实失败或险失败，保持未勾以维持观察；**AC11 本班已越 50% 线，但越线的是 `correct-self`，且判据本身分不开两类——这是当前最该盯的一条**；AC10 部分达成（查出并修好 1 个，其余检查器未逐个查）。 |
