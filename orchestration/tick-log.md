@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 11:09Z | `correct`（correct-inner：在飞任务落地前拦下一个会炸掉套件入口的搬移） | 独立核实 contract-ratchet 的执行者与判据；读 flake 修复判断是真修还是变绿；扫在飞搬移的引用面并把发现送达内层 | 在飞 **2**：contract-ratchet 28min（已 merge `8f688448`，fan-in 中）/ 产品化 32min（worktree 已在搬 6 个文件）；orphaned 0、完成 37、`tasksPerHour` 1.503；**一个全量在跑**（pid 1167421，压力 90.23、load1 16.63）——单套件稳态，非并发 | **执行者是真的**：`scripts/test.sh:138` 已在 `run_static_checks()` 内调用检查器，`set -euo pipefail` 下 exit 1 会中止套件 ⇒ 报红对象是提交不是派发。**独立跑**：5 violations、ceiling 5、new since baseline 0、**exit 0**；**负控制成立**——唯一那条真缺口 `gap-serve-task-list` 修完判据后**仍被报出**并指名入口路径，说明判据放松后没有失去分辨力。**flake 修复是真修不是变绿**：断言一个字没动（`status==1`、`mtime only \d+s old`、token 仍在），改的是测试自己制造的时序（acquire 前 `utimesSync` 刷新 mtime）+ 把 seam 1s→5s；**诚实限度：后者是加宽余量不是消除竞态**。**但棘轮基线 1→5 是「只能变短的名单按裁定长了」**——那 4 条是 `gap-no-inventory` 任务体的真实缺陷，被写进基线**祝福**而不是修掉（AC6 授权了，但值得记：下一次它只会更长）。**本 tick 的主要产出是一个落地前的拦截**：worktree 已把 `resource-gate.sh`/`heavy-op-token.sh` 搬进 `plugin/scripts/`，而 `scripts/test.sh` 在 **194/216/224** 三个代码位置按老路径调用它们、`plugin/test/heavy-op-token.test.mjs:35` 也组老路径，两者**都不在该任务的 `## Touches` 里**。**失败形态特别坏**：194 行是 `if ! bash <老路径>`，文件不存在 ⇒ bash 127 ⇒ `! 127` 为真 ⇒ 打印「资源不足」并 exit 1——**文件没了会被报成「资源闸说等一等」**，又一次「信号测的与它声称的不是一回事」。另有 **20 个文件**引用这六个老路径（含 `CLAUDE.md` 与 `QUAY-OUTER-HANDOFF.md`，即冷启动说明自身）。已送达内层并要求补 Touches + 加一条「无活引用指向老路径」的 AC；**送达用 transcript 核实**（内层会话 `3bbd3095` 命中该消息），不看 TUI。**外层自己的两处会被搬没的东西**（Monitor 挂载点、cron 里的 tick 文档路径）由我在 fan-in 后自行重挂，已明确告知不要为我留兼容壳 |
 | 2026-08-03 10:50Z | `no-action`（未介入内层；核实其发现并把它变成任务，另修外层自己的文档） | 复核内层「R1 违规导致误提交」的发现；量出该类真实规模；建任务；把外层三次踩同一个 Contract 坑写进 tick 文档 | 在飞 **2**：contract-ratchet 8min / 产品化 12min（阈值 90，均正常）；orphaned 0、完成 37、`tasksPerHour` 1.523（窗口 24.29h）；**CPU some avg10 5.03、load1 1.90、无套件在跑**——两个任务都还在实现相，尚未进 DoD 的全量 | **内层的发现是对的，外层把它定位到了具体谓词**：`detectFixedPathWrites`（`test-isolation-check.ts:238-256`）要求 `__dirname\|import.meta\|fileURLToPath` **与** `.tmp` 字面**同时**成立，而这次是 `path.join(process.cwd(),"tasks",...)`——**两条都不沾**，所以 R1 结构上看不见它。**规则说明写的是「per-run-unique paths」这个类，实现覆盖的是 relation-sync 那一个标本。** **并把规模量出来了：真实例只有 1 个**（写操作+真实数据目录路径参数扫过三处 test 目录，其余命中全是 `path.join(tmp,…)`；`originalCwd = process.cwd()` 那 14 处是保存/恢复，无害且**不得**被报，否则规则会被训练成噪声）——**写进任务体以防按「批量修 N 个」估工作量**。**修复陷阱也已单列**：那个测试是**故意**写真实 `tasks/` 的（要走真实 frontmatter 代码路径，注释写明），无脑换 mkdtemp 等于删覆盖 |
 | 2026-08-03 10:35Z | `unblock`（停机解除后的首次派发） | 核实套件判决；派发产品化任务给内层；按管理者交代建 tasksPerHour 停机口径任务；对三个队列任务两两跑并发资格 | **`.halt` 已解除**（管理者仲裁，quay 运行中 / archguard 暂停 / meta-cc 运行中）；**在飞 1**：`gap-loop-mechanism-...-cannot-ship`（`fm-...-36fiim`，10:34:44Z 起）；`tasksPerHour` 1.535（窗口 24.10h） | **套件判决实测（不是估计）**：`tests 2073 / pass 2054 / fail 0 / cancelled 0 / skipped 19`、`duration_ms 498,184`——**tests 与上次绿的参考值 2073 逐位相同**，`cancelled 0` 排除了「被杀的测试不计入 fail」那个已知假绿形态。**诚实限度：退出码未被捕获**（管理者的命令只重定向 stdout），三条判绿条件里直接观测到两条，第三条事后不可恢复。**派发送达也用结构信号核实**：不是看 TUI，而是遥测 `inProgress` 出现该 runId + Monitor 报 `START`。**并发资格机械核对**（`checkTouchesPair`，用规范化 expand 不用 `expandGlobs`）：新建的 tasksPerHour 任务与在飞的产品化任务 **OVERLAP `plugin/scripts/fast-mode-telemetry.ts`** ⇒ 不同批；contract-ratchet 与产品化 DISJOINT ⇒ **本可补派，但我按住不派**——产品化任务的 `scripts/test.sh` 搬不搬尚未回答，答案若是「搬」，这个 DISJOINT 立刻失效。**判据成立于一个未回答的问题之上时，它不是判据** |
 | 2026-08-03 10:29Z | `correct`（correct-manager：仲裁的前提被它自己的输出文件否掉了） | 核实新的解除条件「套件绿」；查出最近一次 readiness 实际报 READY；挂后台等在跑的套件出结果；不派发、不解除 | quay 停机（在飞 0、树干净、领先 origin 32）；archguard **也已停机**（管理者 10:23 仲裁）；meta-cc 运行中；CPU some avg10 **89.01**、load1 16.47、24 node——**全部来自管理者正在跑的那一次全量**（`npm install` 是 `quay-m120-e2e-pkg` 打包测试的 fixture，不是外部竞争者） | **仲裁写的「readiness 报 NOT READY 因为全量套件在挂」与 `/tmp/rr.log` 相反**：该文件 mtime **10:22:45**，内容是 `[ok] full-test-suite (scripts/test.sh) green` + **`READY ✓`**，而仲裁提交时刻是 **10:23:41**——晚 56 秒。进程链复原：管理者 10:12:28 起一条复合命令，先跑 readiness（约 10 分钟，10:22:45 收尾报 READY），紧接着 10:22:44 又起了一次独立全量（`/tmp/suite.log`，起跑时资源闸 GO、压力 12.52、selected 158 files）。**最可能的读法：仲裁写于更早一次 NOT READY，写下时这次重跑还没出结果。** 另一条独立判据：**`git diff 4a926542..HEAD -- packages/ plugin/ scripts/ test/ .github/` 为空**——自上次 2073 全绿以来零行代码变更，所以「套件挂」若为真也不可能是本仓新引入的回归 |
@@ -127,11 +128,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 35 | 36% |
+| no-action | 35 | 35% |
 | unblock | 16 | 16% |
-| correct | 43 | 44% |
+| correct | 44 | 44% |
 | escalate | 4 | 4% |
-| **合计** | **98** | — |
+| **合计** | **99** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
