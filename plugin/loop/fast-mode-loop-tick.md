@@ -138,6 +138,16 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
 
+**Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
+`plugin/scripts/inner-state.sh` 的 Monitor 消费本层停止条件——它没挂上/挂错目标/属于上个会话，本层
+停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
+
+```bash
+bash plugin/scripts/monitor-mount-check.sh --json
+```
+
+三判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根、`ownedByThisSession=true`。
+
 ### 1. 读状态
 
 读队列文件。若与 `git log` / `git worktree list` 不一致，**以 git 为准**并修正文件——文件可能是 compact 前的旧快照。
@@ -411,5 +421,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
   ——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发无关）
 - 阻塞信号状态（`.quay/inner-blocked.json` 存在与否；存在则报 `reason` + `question`，以及
   `fast-mode-telemetry --report` 的累计死时间/单次最长——2026-08-03 起该数有基线）
+- Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+  `targetRoot` 是否等于本仓根 / `ownedByThisSession`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/是不是本会话
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。

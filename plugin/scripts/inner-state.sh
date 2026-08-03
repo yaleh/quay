@@ -83,7 +83,9 @@ for t in d.get("orphaned",[]):
           echo "BATCH-END 在飞任务清空（上一批: ${prev_tasks:-none}）"
         elif [ "$first" = 1 ]; then
           # 重挂时的基线读数，不是状态转变。每次冷启动都会出现——标对而不是隐藏。
-          echo "INIT 挂载时的在飞任务: $tasks"
+          # 带上解析出的工作根（$PWD，cd 已落到 INNER_STATE_WORK_ROOT 或 BASH_SOURCE 推导根）：
+          # 「挂错目标」在挂载当时就看得见，而不是 18 小时后（gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right, AC8）。
+          echo "INIT 挂载时的在飞任务: $tasks | work_root=$PWD"
         else
           echo "START 在飞任务变为: $tasks"
         fi

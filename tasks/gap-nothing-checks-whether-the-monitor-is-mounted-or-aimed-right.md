@@ -99,26 +99,131 @@ resume 三条判据各自独立可测，逐条落地
 
 ## Acceptance Criteria
 
-- [ ] AC1: `monitor-mount-check.sh` 落地，`--json` 输出 `mounted` / `targetRoot` / `ownedByThisSession` 三字段
-- [ ] AC2: **自匹配负控制**——在检查器自己的命令行里写上脚本名再跑，`mounted` 不得因此变 true
+- [x] AC1: `monitor-mount-check.sh` 落地，`--json` 输出 `mounted` / `targetRoot` / `ownedByThisSession` 三字段
+- [x] AC2: **自匹配负控制**——在检查器自己的命令行里写上脚本名再跑，`mounted` 不得因此变 true
       （实跑输出贴任务体；这是外层验证可行性时当场踩到的坑）
-- [ ] AC3: **未挂载负控制**——停掉 monitor ⇒ `mounted=false`；重新挂上 ⇒ `mounted=true`。两个方向都贴
-- [ ] AC4: **挂错目标负控制**——挂一个指向另一个仓库副本的 monitor ⇒ `targetRoot` 不等于本仓根且被报出
-- [ ] AC5: **归属负控制**——构造一个不属于本会话的进程（或模拟其 ppid 链）⇒ `ownedByThisSession=false`
-- [ ] AC6: 一个逻辑 monitor 有多个 pid 时（实测 2 个）不误报为「多个 monitor」
-- [ ] AC7: 检查器零写入——跑完后 `git status --short` 无变化，且 `strace`/审计不必要时至少给出
+- [x] AC3: **未挂载负控制**——停掉 monitor ⇒ `mounted=false`；重新挂上 ⇒ `mounted=true`。两个方向都贴
+- [x] AC4: **挂错目标负控制**——挂一个指向另一个仓库副本的 monitor ⇒ `targetRoot` 不等于本仓根且被报出
+- [x] AC5: **归属负控制**——构造一个不属于本会话的进程（或模拟其 ppid 链）⇒ `ownedByThisSession=false`
+- [x] AC6: 一个逻辑 monitor 有多个 pid 时（实测 2 个）不误报为「多个 monitor」
+- [x] AC7: 检查器零写入——跑完后 `git status --short` 无变化，且 `strace`/审计不必要时至少给出
       「本脚本只读 /proc 与 git」的显式说明与一条测试
-- [ ] AC8: `inner-state.sh` 的 `INIT` 事件带上解析出的工作根（实跑输出贴任务体）
-- [ ] AC9: 两份 tick 文档的步骤 0 与「每个 tick 必报」都加上这一条
-- [ ] AC10: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC8: `inner-state.sh` 的 `INIT` 事件带上解析出的工作根（实跑输出贴任务体）
+- [x] AC9: 两份 tick 文档的步骤 0 与「每个 tick 必报」都加上这一条
+- [x] AC10: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC2/AC3/AC4/AC5 四个负控制的实跑输出全部贴进任务体——
+- [x] AC2/AC3/AC4/AC5 四个负控制的实跑输出全部贴进任务体——
       **一个只会说「一切正常」的检查器，与没有检查器不可区分**；本任务的全部理由就是这句话
-- [ ] 完整套件连跑 2 次全绿
-- [ ] 任务体记录：两个反证（archguard 从未挂上、管理者 18 小时挂错目标）**都是人问起来才发现的**，
+- [ ] 完整套件连跑 2 次全绿（**由协调方 fan-in 承担**——本任务 worktree 内按纪律不自启全量套件；
+      scoped 测试已全绿：`plugin/test/monitor-mount-check.test.mjs` 10/10，
+      `plugin/test/{loop-shipping,inner-state,quay-init-loop}.test.mjs` 14/14）
+- [x] 任务体记录：两个反证（archguard 从未挂上、管理者 18 小时挂错目标）**都是人问起来才发现的**，
       不是任何信号报出的
+
+## Evidence（实跑输出，2026-08-03）
+
+### AC2 自匹配负控制 — 检查器自己的命令行里写上脚本名
+
+命令：`MONITOR_CHECK_INNER_STATE=<tmp>/plugin/scripts/inner-state.sh bash plugin/scripts/monitor-mount-check.sh --json <tmp>/plugin/scripts/inner-state.sh`
+（`<tmp>` 为 `mktemp -d` 临时工作根；检查器 argv[2] 携带完整脚本名，`mounted` 仍为 false）：
+
+```json
+{
+  "mounted": false,
+  "targetRoot": "",
+  "targetOk": false,
+  "ownedByThisSession": false,
+  "pids": [],
+  "targets": []
+}
+```
+
+### AC3a 未挂载负控制 — 没有任何 monitor
+
+```json
+{
+  "mounted": false,
+  "targetRoot": "",
+  "targetOk": false,
+  "ownedByThisSession": false,
+  "pids": [],
+  "targets": []
+}
+```
+
+### AC3b 重新挂上 — 挂一个真的进程，argv == `bash <inner-state>`
+
+```json
+{
+  "mounted": true,
+  "targetRoot": "/tmp/tmp.…mz",
+  "targetOk": true,
+  "ownedByThisSession": true,
+  "pids": [ 1422867 ],
+  "targets": [ { "pid": 1422867, "targetRoot": "/tmp/tmp.…mz", "owned": true } ]
+}
+```
+
+### AC4 挂错目标负控制 — monitor 的 `INNER_STATE_WORK_ROOT` 指向另一个仓库副本
+
+```json
+{
+  "mounted": true,
+  "targetRoot": "/tmp/tmp.ixSsYhlwvm",
+  "targetOk": false,
+  "ownedByThisSession": true,
+  "pids": [ 1423070 ],
+  "targets": [ { "pid": 1423070, "targetRoot": "/tmp/tmp.ixSsYhlwvm", "owned": true } ]
+}
+```
+
+`targetRoot` 被报出且不等于本仓根（`/tmp/tmp.…mz`），`targetOk=false`。
+
+### AC5 归属负控制 — 上一个会话遗留的进程（孤儿，ppid 链不经过本会话 claude）
+
+孤儿进程 `ppid` 实测回到 1；`mounted=true`（它确实活着）但 `ownedByThisSession=false`：
+
+```json
+{
+  "mounted": true,
+  "targetRoot": "/tmp/tmp.…mz",
+  "targetOk": true,
+  "ownedByThisSession": false,
+  "pids": [ 1423214 ],
+  "targets": [ { "pid": 1423214, "targetRoot": "/tmp/tmp.…mz", "owned": false } ]
+}
+```
+
+### AC8 — `inner-state.sh` 的 INIT 事件带解析出的工作根
+
+用临时工作根 + 一个报告在飞任务的假 `fast-mode-telemetry.ts` 实跑
+`INNER_STATE_WORK_ROOT=<tmp> timeout 3 bash plugin/scripts/inner-state.sh`：
+
+```
+INIT 挂载时的在飞任务: AC8-demo | work_root=/tmp/tmp.urdbd4o88n
+```
+
+### 真实环境（非 fixture）— 检查本仓真实 monitor
+
+对 `/home/yale/work/quay`（真实 monitor 所在，pids 1277284 + 子 shell 每轮新起）跑
+`MONITOR_CHECK_INNER_STATE=/home/yale/work/quay/plugin/scripts/inner-state.sh bash plugin/scripts/monitor-mount-check.sh --json`：
+
+```json
+{
+  "mounted": true,
+  "targetRoot": "/home/yale/work/quay",
+  "targetOk": true,
+  "ownedByThisSession": false,
+  "pids": [ 1277284, 1423415 ],
+  "targets": [ { "pid": 1277284, "targetRoot": "/home/yale/work/quay", "owned": false },
+               { "pid": 1423415, "targetRoot": "/home/yale/work/quay", "owned": false } ]
+}
+```
+
+两个 pid 是同一个逻辑 monitor（AC6 真实现行）；`ownedByThisSession=false` 因为本检查是在
+本任务 worktree 会话里跑的，不是挂 monitor 的那个外层会话——第三条判据的分辨力正在这里。
 
 ## Touches
 
