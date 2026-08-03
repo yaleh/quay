@@ -125,7 +125,12 @@ test("--group governance --list-files lists exactly the governance files", () =>
   const g = parseGroups(runTestSh("--list-groups"));
   // Relationship: --group governance's file list has exactly governance's count.
   assert.equal(out.length, g.governance);
-  for (const f of out) assert.match(f, /experiments\/quay-perpetual-stream\/test\//);
+  // Every governance file is a test file under one of the governance roots. The path is a live
+  // membership, not a contract: inventory (2026-08-03) added the first governance test outside
+  // experiments/ (plugin/test/runtime-usage-inventory.test.mjs). Allowed roots:
+  //   experiments/quay-perpetual-stream/test/  (historic home of governance)
+  //   plugin/test/                             (governance tests may live next to plugin tests)
+  for (const f of out) assert.match(f, /(experiments\/quay-perpetual-stream\/test\/|plugin\/test\/)/);
 });
 
 // ── AC1/AC2/AC4/AC6: flags-only keeps the selected set (gap-test-sh-flags-only-...) ───────────────
