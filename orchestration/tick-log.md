@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 04:47Z | `correct`（correct-self：解冻判据是我自己造的、也是我自己发现盲区的） | 核实拦截生效；发现并修正解冻判据的盲区；据修正后的判据解冻并重排 | 在飞 reclaim(68m) + retire(3m)；完成 26，吞吐 **1.42/h**；压力 89.37；**web server 仍 200** | **拦截生效**：5/5 只存在于 worktree 的任务文件完好，19 个脏 worktree 未被触碰，内层任务体如实记录 `Gate 2 correct refusal`。**内层回收了 M277+M243**（分支与 worktree 均已删，`milestones/M277` 51MB→1MB）。**但我的解冻判据两条都没触发**：(a) 删的是分支与目录不是任务节点；(b) `git log --numstat` 看不见——`milestones/M*/worktrees` 在 `.gitignore` 里，删除不产生 diff。**判据名字说「图收缩了」，实测的是「被跟踪行数减少了」**——同一失效族，我 50 分钟前自己造的。已加判据 (c) 物理收缩，实测 milestones/ **1100→1033 MB** ⇒ 满足，冻结解除、按原约定重排不恢复原序 |
 | 2026-08-03 04:25Z | `correct` | 实测把「饥饿是并发产物」升级为「饥饿是稳态」，据此把资源闸从 P2 提到 P1 首位；并用 inventory 的窗口差集修正 retire 的前提 | `test-isolation` 已合并（+1176 行）；inventory AC 全勾在 fan-in；reclaim 待 inventory 套件信号。压力 96.62 → **87.15**，并发套件根进程 2 → 1 | **单个套件独占 16 个进程**（8 worker + 7 子进程 + 根），4 核 ⇒ **4× 超订，压力 87.15**；两个并发只是推到 97。**⇒ 每个 P0 任务的「连跑 2 次全绿」都至少两次进入饥饿态**，今晚已因此耗掉 M136 三轮 + 批 4 崩溃 + 两次重跑。**内层正确诊断了饥饿**（`6d2d839e`：suite-run2 green confirms starvation, not defect）——防误诊指示生效。**inventory 结果**：205 脚本 · unaccounted 81，**但 72h 窗口有 31 个翻成 live ⇒ 真实约 50**；`.claude/workflows/*.js` 六个在 15.9h 全 unaccounted 而 72h 五个 live（prepare-milestone **×280**）——**经典循环在用，不是遗留** |
 | 2026-08-03 04:05Z | `correct` | 资源告警：两个全量套件并发跑，定位后指示串行 + 预防误诊；记录一条 P2 提升触发条件 | 三任务在飞（inventory 56m、reclaim 26m、test-isolation 26m）；完成 24，吞吐 1.37/h；**web server 仍 200** | **CPU 压力 96.62（avg300 90.73）、load1 31.35、47 个 node**——批 4 崩溃时只有 84.77。根因定位到具体进程：`node --test --test-concurrency=8` 两个根进程，一个在 `/tmp/quay-wt-testiso`（816s）一个在 `/tmp/quay-wt-reclaim`（562s），约 34 进程抢 4 核。**内存无风险**：mem pressure 0.00、`pswpin/pswpout` 皆 0、可用 3789MB ⇒ 纯 CPU 饥饿，不是 OOM。**最重要的一条指示是防误诊**：若这两次出现 `cancelled > 0`，几乎肯定是饥饿不是代码缺陷——M136 今晚正是这样耗掉三轮 |
 | 2026-08-03 03:46Z | `correct`（**correct-self 第 4 次**：我上一 tick 说内层绕过了机制，实证是**内层对、我错**） | 查清内层为何跑了正交性检查仍并发派发；构造实证后建任务修生产入口 | 三任务在飞（inventory 36m、reclaim 6m、test-isolation 6m）；完成 24，吞吐 **1.39/h**；CPU 7.77、swap 714MB 全在 zswap；**web server 仍 200**（人在用） | **内层用的 `expand` 是规范化声明路径、不碰文件系统；我用的是 `expandGlobs`（对真实文件展开）。派发前要比的是「打算碰哪些文件」，包括尚不存在的——所以内层的语义是对的。** 它的结论也对：`test-isolation vs no-resource-awareness => OVERLAP ["scripts/test.sh"]`，据此正确拒绝同批。**但由此查出生产入口的真缺陷**：`concurrent-batch-scheduler.ts:249` 用 `expandGlobs`，构造实证——全新 vs 既有且明显无关 ⇒ **误判串行**；两个全新且真重叠 ⇒ 拒绝得对但理由是「matched nothing, likely a typo」，**说不出是哪个文件**。我的初版说法「任何新文件任务都无法证明正交」**过宽**，实证后收窄为「全部条目都是新文件时才触发」 |
@@ -88,9 +89,9 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 |---|---|---|
 | no-action | 27 | 39% |
 | unblock | 11 | 16% |
-| correct | 28 | 41% |
+| correct | 29 | 41% |
 | escalate | 3 | 4% |
-| **合计** | **69** | — |
+| **合计** | **70** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
