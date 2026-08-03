@@ -86,6 +86,20 @@ Monitor({command: "/home/yale/work/quay/plugin/scripts/inner-state.sh",
          description: "内层状态转变", persistent: true, timeout_ms: 3600000})
 ```
 
+**4c. 重挂后立即验证挂上了 —— 三判据自检**
+
+重挂 Monitor 后立刻跑一次检查器，不靠「看起来挂上了」：
+
+```bash
+bash plugin/scripts/monitor-mount-check.sh --json
+```
+
+三判据缺一不可：`mounted=true`（挂上了）、`targetRoot` 等于本仓根（挂对了，`targetOk=true`）、
+`ownedByThisSession=true`（是本会话的——上个会话遗留的进程「活着」但事件送不到本会话）。
+任何一条不满足都按冷启动失败处理，不要直接进 tick。
+`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`：挂没挂/挂哪个仓库/是不是本会话
+三条判据是**一条不是一条**——只查第一条会漏掉「进程活着、目标错」那次（管理者 18 小时挂错目标）。
+
 **5. 核对前置条件**
 
 `.halt` 是否还在、套件是否绿、内层 loop 是否已启动。见目标任务的 AC1–AC6。
@@ -164,6 +178,22 @@ gate 读 `/proc/pressure/cpu` `some avg10`（结构信号，不是 load 代理�
 
 **d) cron 只在本会话空闲时触发。** 外层正在和人对话时，`*/20` 的 tick 不会 fire。人机对话期间外层
 事实上是停的——所以**每次对话结束前手动补一次 tick**，不要假设 cron 会接上。
+
+**e) 外层挂的 Monitor 可能没挂上、挂错目标、或属于上一个会话。** 2026-08-03 两个反证都是
+「不报错的降级」，而且都不是被信号发现的，是人问起来才发现的：archguard 外层**从来没挂上**
+（照着 tick 文档做，Monitor 那一步没发生，没有任何东西报错）；管理者自己**挂了 18 小时挂在错的
+目标上**（两个监视器都在看内层，而该看的是三个外层）。**一个盯错东西的 monitor 和一个正确的
+monitor，从外面看一模一样。**
+
+所以每个 tick 用一条命令自检，不靠人判断：
+
+```bash
+bash plugin/scripts/monitor-mount-check.sh --json
+```
+
+三判据：`mounted`（挂没挂）/ `targetRoot` 是否等于本仓根（挂的哪个仓库副本）/
+`ownedByThisSession`（是不是本会话的）。判据是 argv 前两 token 精确等于 `bash <绝对路径>`，
+**不是子串**——`pgrep -f` 会匹配到发起查询的命令自己（本节上文记的就是这个坑，检查器已绕开）。
 
 ### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
 
@@ -477,6 +507,8 @@ tick 或 `/clear` 后的会话会重犯。
 - 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
 - 累计动作类型分布（退化判据）
+- Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+  `targetRoot` 是否等于本仓根 / `ownedByThisSession`）——挂没挂、挂的哪个仓库、是不是本会话，三条一条都不能少
 
 不要只说「内层在跑」——没有这些，分层是否有效无法判定。
 
