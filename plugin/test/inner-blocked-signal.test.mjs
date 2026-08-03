@@ -95,8 +95,7 @@ test("AC2 — VALID_BLOCKED_REASONS is exactly the inner layer's existing stop c
     "ruling-required",
     "suite-red",
     "task-over-90m",
-    "turn-ended-idle",
-  ].sort(), "the 8 stop-and-wait conditions (7 declared + turn-ended-idle for 'round ended, no pending work, awaiting re-invocation')");
+  ].sort(), "the 7 documented stop-and-wait conditions, no added semantics");
 });
 
 test("AC2 — --assert-blocked rejects a reason outside the vocabulary (fail-closed)", () => {
