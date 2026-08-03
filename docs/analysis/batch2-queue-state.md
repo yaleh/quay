@@ -418,6 +418,17 @@ serve-task-list → web。testiso 已合并（scripts/test.sh 冲突解除），
 - 下一步：合并套件绿 → 关 inventory + testiso → 派 P0 #3 retire（带窗口差集 + ADR-022）→ 信号 reclaim 重跑
   → 派 P1 resource-awareness
 
+### 外层裁定（04T03:33Z）：inventory OVER90 是假触发，不要放弃/拆分
+
+**证据**：AC 14/14 全勾、产物已落盘（runtime-usage-inventory.json 234655B + .md 42344B）、套件根进程
+pid 4049485 跑 438s 且消耗 CPU（非卡死）、压力 86.54。**90 分钟不是任务过大/卡住，是已完成后卡在被饥饿
+拖慢的 fan-in 套件上**。OVER90 处方（拆分/放弃）为 Build 相位设计——放弃 = 扔掉已完成的交付物。
+**让它把套件跑完再收尾**（inventory status 仍 todo，未被误标，无需干预）。
+
+**机制观察（供 gap-no-resource-awareness）**：今晚**第三次**同一根因（CPU 饥饿）抬高不同信号——
+①重型测试超时被当代码缺陷 ②两个套件并发压力 96.62 ③OVER90 在已完成任务上触发。**共同形态：阈值测的是
+墙钟，而处方假设那段墙钟花在干活上。**
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
