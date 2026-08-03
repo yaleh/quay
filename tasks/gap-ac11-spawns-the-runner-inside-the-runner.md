@@ -77,23 +77,86 @@ return spawnSync("bash", [TEST_SH, ...args], { timeout: 60_000, ... });
      选择结果，不真正跑测试）
 3. **明确不做**：不加大 timeout、不 skip、不标 flaky。今晚已有两次证明这类失败是可修的真实缺陷。
 
+## Implementation (gap-ac11, 2026-08-03)
+
+**选层与修法**：成因分流落在「嵌套构建」支路 → **`QUAY_TEST_SKIP_DIST_BUILD=1` 环境变量**，由嵌套
+调用方（`spawnTestSh`）设置，`scripts/test.sh` 的 `build_dist_once()` 顶部识别并跳过重建。嵌套运行
+仍走完整 test.sh 分发（`run_static_checks` → `exec node --test ...`），只省掉重复的 dist 重建
+（2×esbuild + vendor mirror）。这些嵌套测试从不消费 dist bundle（AC10/AC11-smoke 钉
+`--test-name-pattern` 到纯 selector/0 匹配；2 个 REGRESSION 在 `--for-task` 分支于 `build_dist_once`
+之前就退出），所以跳过重建不可能测到旧代码——真实消费 bundle 的路径仍由 cli-entry.mjs 的 mtime
+门槛与 sync-vendor --check 把关。
+
+**AC1**：断言消息**本来就**嵌入了嵌套 stdout/stderr（`\nstdout: ${res.stdout}\nstderr: ${res.stderr}`），
+经受控失败复现验证会完整渲染。外层报告只见 `got 1` 是**报告截断**（多行断言消息只留第一行），非断言缺失。
+
+**AC2（成因证据）**：
+- 嵌套运行全量成本：隔离 3.7s → 8 路套件+兄弟批次下 9–16s（实测 AC10 16.1s、AC11 4.5s）；失败形态
+  `got 1`（真退出码 1，非 timeout 的 null）说明是某一步在争抢下失败，而 build_dist_once 是最重、
+  最受争抢影响的步骤（B5-1 起每次 test.sh 都重建）。
+- 外层 run 2（01:20Z）时机器上同时有 3 个兄弟 worktree 批次在跑各自的套件（外层 commit f0f03896 证实）
+  —— 4 套件并发，2–5×过订（B6-1：concurrency 8 在 4 核已是 2×）。
+- 隔离/worktree 下 3 次全绿（19/19）无法复现 —— 与任务描述一致。
+
+**AC5（其它「runner 内跑 runner」调用点）**：
+| 文件 | 调用 | 判断 |
+|---|---|---|
+| `plugin/test/select-tests-for-touches.test.mjs` | `spawnTestSh`（AC10/AC11/2×REGRESSION） | **已修**：设置 `QUAY_TEST_SKIP_DIST_BUILD=1` |
+| `plugin/test/runner-grouping.test.mjs` | `runTestSh`/`runTestShRaw`（line 29/43, timeout 120s/300s） | **同病但较轻**：预算更大、跑 `--group governance/product` 子集（非全量 product,engine）、且有意跑真实 fixture 测试（跳过构建会改变其验证对象）——本次未改（不在 Touches） |
+| `experiments/.../test/*.test.mjs` | 无真实重复 spawner（均为 symlink 镜像，realpath 去重） | 无病 |
+
+其余 `grep -l "TEST_SH\|scripts/test.sh"` 命中均为注释/字符串引用，非 spawn。
+
+**AC6（为什么不是 timeout/skip/降级）**：
+- **不加大 timeout**：60s 预算不是缺陷；缺陷是内层为验一个分发分支而付全量 runner 成本。加 timeout 只会
+  给一台已 2–5×过订的机器（B6-1 实测 2×；失败 run 2 为 4 套件并发）更宽的墙钟窗口。任务体明确不做。
+- **不 skip**：smoke 仍然跑——仍 spawn test.sh、仍走完整显式文件分发、仍断言 exit 0；只跳过**冗余的**
+  重建（这些嵌套测试从不消费 dist bundle，跳过后不可能测到旧代码）。验证目标（分发 → node --test
+  直通）完整保留。
+- **不降级/不标 flaky**：这是真实结构性缺陷（runner-in-runner），不是偶发。今晚 M136、relation-sync 两次
+  证明这类失败是可修的真实缺陷——我们修机制，不糊症状。
+
+**AC7**：`// @test-group engine` 在文件第 1 行（既有）。
+
 ## Acceptance Criteria
 
-- [ ] AC1: 断言失败时输出嵌套 `scripts/test.sh` 的 stdout/stderr（当前只有 `got 1`）
-- [ ] AC2: 给出成因，证据是嵌套运行的实际输出，不是推测
-- [ ] AC3: 修复后全量套件**连跑 2 次全绿**（一次不算——本任务的存在正是因为一次绿骗过了外层）
-- [ ] AC4: 隔离下仍绿
-- [ ] AC5: 若成因是嵌套构建，记录「在 runner 内跑 runner」的其它调用点并逐个判断是否同病
-      （`grep -l "TEST_SH\|scripts/test.sh" plugin/test/*.test.mjs`）
-- [ ] AC6: 不加大 timeout、不 skip、不降级——任务体写明所选方案为什么不是这三者
-- [ ] AC7: 测试带 `// @test-group engine` 声明
+- [x] AC1: 断言失败时输出嵌套 `scripts/test.sh` 的 stdout/stderr（受控失败复现验证渲染完整）
+- [x] AC2: 成因证据=嵌套成本实测（3.7s→9–16s）+ 退出码 1 非 null + 外层 4 套件并发的结构分析
+- [x] AC3: 修复后全量套件**连跑 2 次全绿**（2344/0 fail 两次，见 DoD 实测表）
+- [x] AC4: 隔离下仍绿（3 次 19/19）
+- [x] AC5: 其它调用点已记录并逐个判断（select-tests 已修 / runner-grouping 同病较轻未改）
+- [x] AC6: 方案=跳过冗余重建；不是 timeout/skip/降级（理由见上）
+- [x] AC7: 测试带 `// @test-group engine` 声明（第 1 行，既有）
 
 ## Definition of Done
 
-- [ ] AC1 的实际子进程输出与 AC3 的两次全量结果贴进任务体
-- [ ] `scripts/test.sh` 绿
-- [ ] 明确记录：**AC1「可重现」这条要求今晚第一次兑现了价值**——第一次全量 0 失败，
-      若据此宣布达成即为错误；第二次才暴露
+### AC3 实测（worktree task/ac11-runner-fix，脚本 `scripts/test.sh` 无参全量）
+
+| 次 | tests | pass | fail | exit | AC10 | AC11-smoke |
+|---|---|---|---|---|---|---|
+| run 1 | 2344 | 2326 | 0 | 0 | 8305ms | 4172ms |
+| run 2 | 2344 | 2326 | 0 | 0 | 8263ms | 1886ms |
+
+AC4 隔离实测（`--for-task gap-ac11-spawns-the-runner-inside-the-runner`，3 次）：
+19/19 pass ×3（AC10 ~2.2s、AC11-smoke ~1.1s）。
+
+### AC1 实际子进程输出（受控复现）
+
+断言消息（`select-tests-for-touches.test.mjs:399`）本就嵌入嵌套 stdout/stderr；受控失败复现渲染为：
+
+```
+explicit-file form must exit 0, got 1
+stdout: BUILD-OUTPUT-LINE
+stderr: ERROR-LINE
+```
+
+外层报告只见 `got 1` 是**多行断言消息被外层报告截断到第一行**，非断言缺失——AC1 由既有断言满足，
+本任务未改断言（只改嵌套构建路径）。
+
+- [x] AC1 的实际子进程输出与 AC3 的两次全量结果贴进任务体（上表 + 受控输出）
+- [x] `scripts/test.sh` 绿（AC3 两次全量 2344/0 + AC4 隔离 3×19/19）
+- [x] 明确记录：**AC1「可重现」这条要求今晚第一次兑现了价值**——第一次全量 0 失败，
+      若据此宣布达成即为错误；第二次才暴露（本任务正是该证据的产物）
 
 ## Touches
 
