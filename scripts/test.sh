@@ -112,6 +112,16 @@ cd "$repo_root"
 # independent of which test files were requested (fast; the metadata modes --list-groups/
 # --list-files skip them). CI inherits them because its only test step is `bash scripts/test.sh`.
 run_static_checks() {
+  # QUAY_TEST_SKIP_STATIC_CHECKS=1 — set by 0-match / pure-selector NESTED invocations (same shape as
+  # QUAY_TEST_SKIP_DIST_BUILD): the outer suite already ran these whole-store checks at its start, and
+  # a nested smoke run that matches 0 tests does not re-verify them. Skipping avoids a real race: a
+  # sibling test's transient untracked fixture (runner-grouping AC7's zz-*-undeclared.test.mjs) can
+  # appear as a spurious "NEW file without @test-group" to test-framework-policy-check if it exists
+  # during this window (surfaced 2026-08-03 in the stranded+parser combined suite).
+  if [ "${QUAY_TEST_SKIP_STATIC_CHECKS:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_STATIC_CHECKS=1 — skipping static checks (nested 0-match/smoke run; outer suite ran them)"
+    return 0
+  fi
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
   echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="

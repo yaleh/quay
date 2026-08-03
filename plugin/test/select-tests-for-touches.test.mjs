@@ -80,6 +80,11 @@ function spawnTestSh(args) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   env.QUAY_TEST_SKIP_DIST_BUILD = "1";
+  // 0-match / pure-selector nested runs also skip the whole-store static checks — the outer suite
+  // already ran them, and re-running test-framework-policy-check here races a sibling test's
+  // transient untracked fixture (runner-grouping AC7's zz-*-undeclared.test.mjs) → spurious
+  // "NEW file without @test-group" → exit 1 (surfaced 2026-08-03, stranded+parser combined suite).
+  env.QUAY_TEST_SKIP_STATIC_CHECKS = "1";
   return spawnSync("bash", [TEST_SH, ...args], {
     cwd: REPO_ROOT,
     encoding: "utf8",
