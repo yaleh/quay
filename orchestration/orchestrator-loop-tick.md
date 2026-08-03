@@ -266,6 +266,15 @@ node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <re
 **不做**：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线。把「碰巧」变成
 「写下来时就被问到」——如果 `## Contract` 没有真读它的消费者，三天后它就是第五段散文。
 
+**外层自己写 `## Contract` 时最常犯的一条（2026-08-03 一小时内踩了三次）**：
+第二个 `measure` 写成「**同上命令**输出的 X 字段」——人读得懂，检查器读不懂，
+判据是「该行有没有自己的反引号命令」，于是每次都报 `measure-no-command`。
+**每个 `measure` 行都要自带完整的反引号命令，哪怕与上一行逐字相同。**
+同族的另外两条也一并记住：`control` 折行 ⇒ `contract-line-unknown`（一行一键不可折行）；
+`invoke` 命令若含 `<ISO>`/`<file>` 占位符，`invoke-evidence-missing` **在构造上无法满足**
+（见 [[gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed]]）——
+写 invoke 时用一条能原样跑、也能原样贴回证据的命令。
+
 ### 0d. 跨项目暂停/恢复（人 2026-08-03 裁定：用 `.halt`，粗糙可接受）
 
 三个项目（quay / archguard / meta-cc）各自的**唯一开关**就是仓库根的 `.halt`：

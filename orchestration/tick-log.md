@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 10:50Z | `no-action`（未介入内层；核实其发现并把它变成任务，另修外层自己的文档） | 复核内层「R1 违规导致误提交」的发现；量出该类真实规模；建任务；把外层三次踩同一个 Contract 坑写进 tick 文档 | 在飞 **2**：contract-ratchet 8min / 产品化 12min（阈值 90，均正常）；orphaned 0、完成 37、`tasksPerHour` 1.523（窗口 24.29h）；**CPU some avg10 5.03、load1 1.90、无套件在跑**——两个任务都还在实现相，尚未进 DoD 的全量 | **内层的发现是对的，外层把它定位到了具体谓词**：`detectFixedPathWrites`（`test-isolation-check.ts:238-256`）要求 `__dirname\|import.meta\|fileURLToPath` **与** `.tmp` 字面**同时**成立，而这次是 `path.join(process.cwd(),"tasks",...)`——**两条都不沾**，所以 R1 结构上看不见它。**规则说明写的是「per-run-unique paths」这个类，实现覆盖的是 relation-sync 那一个标本。** **并把规模量出来了：真实例只有 1 个**（写操作+真实数据目录路径参数扫过三处 test 目录，其余命中全是 `path.join(tmp,…)`；`originalCwd = process.cwd()` 那 14 处是保存/恢复，无害且**不得**被报，否则规则会被训练成噪声）——**写进任务体以防按「批量修 N 个」估工作量**。**修复陷阱也已单列**：那个测试是**故意**写真实 `tasks/` 的（要走真实 frontmatter 代码路径，注释写明），无脑换 mkdtemp 等于删覆盖 |
 | 2026-08-03 10:35Z | `unblock`（停机解除后的首次派发） | 核实套件判决；派发产品化任务给内层；按管理者交代建 tasksPerHour 停机口径任务；对三个队列任务两两跑并发资格 | **`.halt` 已解除**（管理者仲裁，quay 运行中 / archguard 暂停 / meta-cc 运行中）；**在飞 1**：`gap-loop-mechanism-...-cannot-ship`（`fm-...-36fiim`，10:34:44Z 起）；`tasksPerHour` 1.535（窗口 24.10h） | **套件判决实测（不是估计）**：`tests 2073 / pass 2054 / fail 0 / cancelled 0 / skipped 19`、`duration_ms 498,184`——**tests 与上次绿的参考值 2073 逐位相同**，`cancelled 0` 排除了「被杀的测试不计入 fail」那个已知假绿形态。**诚实限度：退出码未被捕获**（管理者的命令只重定向 stdout），三条判绿条件里直接观测到两条，第三条事后不可恢复。**派发送达也用结构信号核实**：不是看 TUI，而是遥测 `inProgress` 出现该 runId + Monitor 报 `START`。**并发资格机械核对**（`checkTouchesPair`，用规范化 expand 不用 `expandGlobs`）：新建的 tasksPerHour 任务与在飞的产品化任务 **OVERLAP `plugin/scripts/fast-mode-telemetry.ts`** ⇒ 不同批；contract-ratchet 与产品化 DISJOINT ⇒ **本可补派，但我按住不派**——产品化任务的 `scripts/test.sh` 搬不搬尚未回答，答案若是「搬」，这个 DISJOINT 立刻失效。**判据成立于一个未回答的问题之上时，它不是判据** |
 | 2026-08-03 10:29Z | `correct`（correct-manager：仲裁的前提被它自己的输出文件否掉了） | 核实新的解除条件「套件绿」；查出最近一次 readiness 实际报 READY；挂后台等在跑的套件出结果；不派发、不解除 | quay 停机（在飞 0、树干净、领先 origin 32）；archguard **也已停机**（管理者 10:23 仲裁）；meta-cc 运行中；CPU some avg10 **89.01**、load1 16.47、24 node——**全部来自管理者正在跑的那一次全量**（`npm install` 是 `quay-m120-e2e-pkg` 打包测试的 fixture，不是外部竞争者） | **仲裁写的「readiness 报 NOT READY 因为全量套件在挂」与 `/tmp/rr.log` 相反**：该文件 mtime **10:22:45**，内容是 `[ok] full-test-suite (scripts/test.sh) green` + **`READY ✓`**，而仲裁提交时刻是 **10:23:41**——晚 56 秒。进程链复原：管理者 10:12:28 起一条复合命令，先跑 readiness（约 10 分钟，10:22:45 收尾报 READY），紧接着 10:22:44 又起了一次独立全量（`/tmp/suite.log`，起跑时资源闸 GO、压力 12.52、selected 158 files）。**最可能的读法：仲裁写于更早一次 NOT READY，写下时这次重跑还没出结果。** 另一条独立判据：**`git diff 4a926542..HEAD -- packages/ plugin/ scripts/ test/ .github/` 为空**——自上次 2073 全绿以来零行代码变更，所以「套件挂」若为真也不可能是本仓新引入的回归 |
 | 2026-08-03 10:17Z | `correct`（correct-self：纠正外层前一班写进任务体的 Touches；**冷启动恢复**——本会话是 quay 专属外层的第一个 tick） | 冷启动 7 步；重挂 Monitor；跑派发闸口检查器并据其发现建 1 个任务；补齐新任务的 Touches 与 `## Dispatch review`；修 tick-log 自己的重算命令 | **quay 停机中**（`.halt` 在，解除条件写明）；在飞 **0**、orphaned 0、树干净；完成 **37**（我第一版写 44，是没读就估的，已按 `tasks[].length` 更正）、`tasksPerHour` **1.553**（窗口 23.83h）——**停机期间这个数按构造持续下降**：分子冻结、分母是 `now`，按 37/1.5 算窗口上限 24.67h，**距 AC18 的 1.5 只剩约 50 分钟**；CPU some avg10 **40.29**、load1 5.73、`node-MainThread` 8；archguard/meta-cc 均运行中 | **派发闸口的检查器没有执行者，名单反向增长了 12 倍**：`grep -rn task-contract-check scripts/ .github/workflows/` 只命中 `task-schema.ts` 的两条注释，`run_static_checks()` 跑的是另外三个检查器；实跑 `--json` 得 **violations 12 / baselineCount 1 / growth true / exit 1**，11 条新增**全部落在 `status: done` 的任务上**。逐条核对后 **6/7 的 `invoke-evidence-missing` 是假发现**——证据在，只是没按同一串字面写（`bash scripts/test.sh` vs 任务体的 ``` `scripts/test.sh` 全绿：2054 tests ``` ；`--port 4173` vs 实跑的 4174）；**其中 2 条的 invoke 命令内含 `<ISO>`/`<file>` 占位符，逐字命中在构造上不可能发生**。已建 [[gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed]]。**并核实 AC6 前提为真**：`plugin.json` 的 `commands` 列 9 项、`plugin/skills/` 磁盘 10 个目录，缺 `quay-task-operator` |
@@ -126,11 +127,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 34 | 35% |
+| no-action | 35 | 36% |
 | unblock | 16 | 16% |
 | correct | 43 | 44% |
 | escalate | 4 | 4% |
-| **合计** | **97** | — |
+| **合计** | **98** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
