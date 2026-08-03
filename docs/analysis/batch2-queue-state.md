@@ -260,3 +260,43 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts -
   `:62` mkdir）。主检出全量后残留 `tmp/be-explicit-rw-*/`（只有 admission + iter-report、**无 manifest.json**）
   ⇒ 某次运行在 collector 产出前失败（assert 957 throw → rmSync 961 未跑），但全量报 fail 0。
   **已发给 m264 agent**（一手证据，可能与其 flaky 诊断相关）。`tmp/` 未 gitignore 是独立卫生缺陷
+
+## 外层裁定：needs-human=7 不构成停止派发的理由（2026-08-03T03:05:15Z）
+
+**内层报 `needs-human=7 halts dispatch`。外层分诊结论：解除，继续派发。**
+（授权来源：`orchestrator-loop-tick.md` 步骤 3「needs-human 积压 ≥3 → 分诊：真阻塞的攒给人，
+可继续的指示内层继续」。）
+
+### 证据
+
+7 个全部是**历史遗留**，最后改动时间：
+
+| 任务 | 未勾 AC | 最后提交 |
+|---|---|---|
+| `DIR-109` | 2 | **07-29 15:52** |
+| `DIR-100-A` `DIR-101` `DIR-103-B` `DIR-105` | 10 / 15 / 9 / 15 | **08-01 09:39** |
+| `DIR-100` `DIR-103` | 6 / 6 | **08-02 05:54** |
+
+**全部早于无人值守窗口起点（2026-08-02T17:43Z）至少 12 小时。**
+
+**窗口内产生的新 needs-human 任务：0 个**（逐文件按 git 提交时刻核对）。
+遥测里唯一那条 `needs-human` 结局（`gap-test-suite-has-no-layer-grouping`）
+现在的 status 是 **done**——已消解。
+
+### 停止条件本身的缺陷
+
+`fast-mode-loop-tick.md:156` 的「needs-human 积压 ≥ 3」是**纯散文，无任何代码实现**
+（已 grep `plugin/scripts` 与 `experiments/**/scripts`，零命中）。
+
+**它的意图**是「内层产出 needs-human 的速度超过消解速度，该停」；
+**它被读成**「仓库里 needs-human 的总数，有史以来」。
+按后者，**7 个历史任务会永久卡死派发**——没有任何新工作能解开它，因为解开它需要派发。
+
+**修法**：判据改为**窗口内新增**的 needs-human 数，而不是总数。
+`fast-mode-loop-tick.md` 正被在飞的 `gap-dispatch-gate` 占用，
+**把这条改动并进那个任务，或等它落地后再改**。
+
+### 立即行动
+
+1. **恢复派发。** 下一批第一个是 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`（人裁定优先）。
+2. 那 7 个 DIR 任务**不在本轮处理**——它们的去留是范围决定，已升级给人（见 `orchestration/escalations.md`）。
