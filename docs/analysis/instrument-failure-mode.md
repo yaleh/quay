@@ -103,6 +103,11 @@ blocked-signal 都是边跑边造。而 blocked-signal 证明了正确形态：�
 | [[gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion]] | **1.1G / 21 个 worktree** | `merge-base --is-ancestor` 实测 21/22 为真、`git cherry` 0 个未合并提交 |
 | [[gap-retire-the-prepare-execute-pipeline-cluster]] | **约 14,658 行 + 25 个测试文件** | 最后一条 prepare-epoch 是 22 小时前；窗口内 18 个任务零 `## Plan` 零 epoch；失败无一是计划失败 |
 
+**关于第二个的一次方向修正（人 2026-08-03）**：我一度提出「它的价值依赖于模式，人驱动单会话模式下
+仍是对的，所以降为可选而非删除」。**这个推论是错的**——quay 交付的就是双层机制，它存在的目的正是
+**改变**人驱动单会话那种工作模式，不是适配它。模式依赖性解释的是**它当初为什么被造出来**，
+不是保留它的理由。已改回退役。
+
 ### 第一个裁剪任务顺带修正了本文档自己制造的一个「名不符实」实例
 
 昨夜写进 `gap-stranded-worktree-branches-have-no-alarm-channel` AC2b 的判据是
