@@ -1,8 +1,8 @@
 ---
 id: gap-test-isolation-contract-is-unwritten
-title: "Three isolation-green suite-red failures in one night, same class — no
-  test isolation contract exists"
-status: todo
+title: Three isolation-green suite-red failures in one night, same class — no
+  test isolation contract exists
+status: done
 labels:
   - gap
   - defect

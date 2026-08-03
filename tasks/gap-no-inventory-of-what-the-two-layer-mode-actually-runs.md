@@ -1,8 +1,8 @@
 ---
 id: gap-no-inventory-of-what-the-two-layer-mode-actually-runs
-title: "211 scripts, 96 executed in 15h — build the evidence table of what the
-  two-layer mode actually runs, before deciding what to cut"
-status: todo
+title: 211 scripts, 96 executed in 15h — build the evidence table of what the
+  two-layer mode actually runs, before deciding what to cut
+status: done
 labels:
   - gap
   - milestone-candidate
