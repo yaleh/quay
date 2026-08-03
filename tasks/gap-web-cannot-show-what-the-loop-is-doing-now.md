@@ -1,8 +1,8 @@
 ---
 id: gap-web-cannot-show-what-the-loop-is-doing-now
-title: "The web UI shows the task store and nothing else — the human cannot see
-  what is running right now without asking in chat"
-status: todo
+title: The web UI shows the task store and nothing else — the human cannot see
+  what is running right now without asking in chat
+status: done
 labels:
   - gap
   - milestone-candidate
