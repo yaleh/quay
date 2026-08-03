@@ -458,6 +458,26 @@ pid 4049485 跑 438s 且消耗 CPU（非卡死）、压力 86.54。**90 分钟�
 - **不可见任务发现**：worktree-only 的任务文件对工具链不可见——漂移检查器盲区（与删除类 Touches 语义反
   同类），已升级给人，暂不建任务
 
+### 外层解冻通知（04T03:5xZ，人裁定——P2 冻结解除）
+
+**一、解冻判据修正**：03:56Z 的判据有盲区，看不见刚发生的真实收缩——reclaim 回收了 M277+M243 分支/worktree
+（M277 51MB→1MB），但两条判据都没触发：(a) 删的是分支/目录非任务节点；(b) `git log --numstat` 看不见
+worktree 删除（milestones/M*/worktrees 在 .gitignore）。判据名说「图收缩了」实际测「跟踪行数减少」——今晚
+同一失效族的成员，且是外层自己 50 分钟前造的。**已加第三条：worktree 条目数 / milestone 分支数 /
+milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判据满足，已解冻**。
+
+**二、新顺序（解冻后重新评估，不自动恢复原序）**：
+1. **gap-no-resource-awareness-heavy-ops-run-blind**（今晚第三次同一根因抬高信号）——**已派**
+2. **gap-retire-the-prepare-execute-pipeline-cluster**（在飞，边界不变：不得动 19 个 worktree + milestone-worktree.ts 删除）
+3. **gap-serve-task-list-dies-on-one-malformed-task**（人在用那个页面）
+4. **gap-web-cannot-show-what-the-loop-is-doing-now**
+其余任务正常排队但排在这四个之后。
+
+**三、reclaim 记录一字不改**——净回收如实、拒绝理由如实、34 项升级给人，正是该有的样子。
+
+**在飞（2 agent）**：retire（约束下）+ resource-awareness（新派，runId `fm-...-hjkru7`）。reclaim 验证套件
+在跑（`b030l13jl`）。reclaim 套件绿后：关 reclaim → 视槽位派 serve-task-list（#3）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
