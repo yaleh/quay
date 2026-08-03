@@ -181,6 +181,7 @@ gate 读 `/proc/pressure/cpu` `some avg10`（结构信号，不是 load 代理�
 | `STALLED` | 遥测 `inProgress` 是否为空 | **正在运行的 `node --test` 进程数** |
 | 全量套件分类 | 命令文本里提到 `test.sh` | `test.sh` 出现在命令位置（剥离引号内容后） |
 | `--clean-stale` 安全性 | 提交数为 0 | 提交数 0 **且**两点 diff 为空 **且** worktree 无未提交改动 |
+| 滞留分支告警（步骤 1 的 `--stranded`） | 没有任何检查 → 靠人偶然 `git worktree list` | 三闸（reclaim 已验证）：`merge-base --is-ancestor` → merge-added 文件是否仍在 master → 分支领先计数；`has-commits`/`merged-then-reverted` 报出，`merged-clean` 不报 |
 | `START` | 首次轮询就当作转变 | 首次标 `INIT`，只有真转变才 `START` |
 
 `STALLED` 那条的具体教训：**合并与验证跑不在任务括号内**，遥测 `inProgress` 为空，于是两级判据
@@ -268,6 +269,7 @@ git -C /home/yale/work/quay log --oneline -10       # 落地了什么
 git -C /home/yale/work/quay status --short          # 树是否干净
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
+node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
 ```
 

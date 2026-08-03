@@ -60,11 +60,47 @@ check_inner_blocked() {
   fi
 }
 
+# ── 8. Stranded worktree branches (INFORMATIONAL — gap-stranded-worktree-branches-have-no-alarm-channel) ──
+# A silent fail-closed preserves a branch's work (Land fails closed rather than discarding) but NOTHING
+# reports it — 2026-08-01: 4 branches / 24,989 lines sat stranded for a day, found only because a human
+# ran `git worktree list` by accident. The un-halt go/no-go checks the clean tree and mid-flight merge
+# but MISSED exactly this class; it must SHOW stranded branches even though they are NOT a hard blocker
+# (some are legitimately waiting to merge/adjudicate, e.g. the human-retained M239). Delegates to
+# task-status-drift-check.ts --stranded (the named check; the three-gate criterion lives THERE, reused
+# from gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion, not re-implemented here). NEVER sets
+# fail — informational only.
+check_stranded_branches() {
+  stranded_out="$(node --no-warnings --experimental-strip-types "$ROOT/plugin/scripts/task-status-drift-check.ts" --stranded 2>/dev/null)"
+  if [ -z "$stranded_out" ] || printf '%s' "$stranded_out" | grep -q "^ERROR"; then
+    ok "stranded-branch check unavailable (task-status-drift-check.ts --stranded silent or errored)"
+  elif printf '%s' "$stranded_out" | grep -q "no stranded worktree branches"; then
+    ok "no stranded worktree branches (milestone/* and task/* cleanly merged)"
+  else
+    echo "  [info] STRANDED worktree branches — work is preserved on a branch NOT on master (NOT a hard blocker, but merge/adjudicate before assuming all work is on master):"
+    printf '%s' "$stranded_out" | sed 's/^/         /'
+  fi
+}
+
 # Test seam (restart-readiness-check.test.mjs): run ONLY check 7 against the (possibly overridden)
 # ROOT, then print the same summary and exit. Skips checks 1-6 including the ~560s full suite.
 # Production callers never set it → normal full run, behavior unchanged.
 if [ "${RR_ONLY_BLOCK_CHECK:-0}" = "1" ]; then
   check_inner_blocked
+  echo ""
+  if [ "$fail" = 0 ]; then
+    echo "READY ✓ — mechanical preconditions met. (Un-halt is still a human decision; recommend SUPERVISED restart.)"
+    exit 0
+  else
+    echo "NOT READY ✗ — at least one hard check failed; do NOT remove .halt until resolved."
+    exit 1
+  fi
+fi
+
+# Test seam (restart-readiness-check.test.mjs): run ONLY check 8 (stranded branches) against the
+# (possibly overridden) ROOT — a real temp git repo with a fabricated stranded branch. Skips checks
+# 1-7 including the ~560s full suite. Production callers never set it → normal full run, unchanged.
+if [ "${RR_ONLY_STRANDED_CHECK:-0}" = "1" ]; then
+  check_stranded_branches
   echo ""
   if [ "$fail" = 0 ]; then
     echo "READY ✓ — mechanical preconditions met. (Un-halt is still a human decision; recommend SUPERVISED restart.)"
@@ -121,6 +157,9 @@ fi
 
 # 7. Inner-layer block signal — see the check_inner_blocked function defined above.
 check_inner_blocked
+
+# 8. Stranded worktree branches — informational (never a hard blocker), see check_stranded_branches.
+check_stranded_branches
 
 # INFORMATIONAL: pending directives the loop's first DRAIN will process (not a hard blocker).
 pend="$(node packages/quay/bin/quay.ts task list --label directive --json 2>/dev/null \

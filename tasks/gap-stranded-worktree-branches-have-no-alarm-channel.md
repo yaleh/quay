@@ -42,6 +42,22 @@ extra:
 这是本仓库反复出现的模式（`orchestration/orchestrator-loop-tick.md` 步骤 6 已列举四次）的一个新
 变体：**这次不是「报警没人处理」，是「保护动作正确执行了但从不报警」**。
 
+### 实跑输出（DoD 1 —— 机械输出，2026-08-03）
+
+改后 `node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded` 在真实仓库：
+
+```
+stranded-branch-check: 3 STRANDED branch(es) — work is preserved on a branch NOT on master (a silent fail-closed: nothing reports these until this check runs)
+  stranded: milestone/M239/iteration-0 (has-commits, 2 commit(s) ahead, +6901 lines, last commit 2026-08-01T14:28:13Z)
+  stranded: task/gap-stranded-worktree-branches-have-no-alarm-channel (has-uncommitted, worktree holds uncommitted work, ...)
+  stranded: task/gap-web-cannot-show-what-the-loop-is-doing-now (has-uncommitted, worktree holds uncommitted work, ...)
+  → human review: merge or adjudicate the branch; do NOT --clean-stale it
+```
+
+- M239 是人裁定保留的已知例外（领先 2），**正是告警通道要持续报出直到合并/裁定**的对象。
+- 两个 `has-uncommitted` 是真实在飞 worktree（本实现任务的 + 另一个任务的）——「worktree 里的活」第一次
+  有了机械可见性。
+
 ## Chosen mechanism
 
 **把「带提交的滞留分支」做成一个会说话的机械检查，接进已有的两个入口。**
@@ -136,36 +152,45 @@ fatal: '/tmp/wt-probe-XXXX' contains modified or untracked files, use --force to
 
 ## Acceptance Criteria
 
-- [ ] AC1: 检查能列出全部带提交的滞留分支，输出分支名 / 领先提交数 / 插入行数 / 最后提交日期
-- [ ] AC2: 零领先**且**两点 diff 为空的分支不出现在告警里
-- [ ] AC2b: 报 `merged-then-reverted` 的判据是「分支创建的文件在 master 上是否仍存在」——
-      `git diff --name-only --diff-filter=A master..<branch>`（两点）非空 = 分支内容被 revert 撤掉。
-      用 `milestone/M243/iteration-0` 的 revert 状态（`88e17bf2` revert 后、`3dfba2c6` 恢复前）pin 住：
-      83 个 workflow-replay 文件从 master 消失时仍必须报出
-      （**判据修正**：早期草稿写「两点 diff 非空 = merged-then-reverted」，那是错的——已合并分支的
-      master 一旦前进，两点 tree diff 必然非空，21 个已合并分支全被误报。修正见
-      `gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion`。）
-- [ ] AC2c: `milestone-worktree.ts --clean-stale` 拒绝清理 `merged-then-reverted` 分支；判据从
-      「两点 tree diff」改为 `merge-base --is-ancestor` + 分支创建文件缺失检查，误报与漏报同时封死
-- [ ] AC2d: `cleanStale` 在删除前检查该 **worktree 内**的 `git status --porcelain`；非空返回
-      `has-uncommitted`，不删
-- [ ] AC2e: `worktree remove` 去掉 `--force`，让 git 的「contains modified or untracked files」
-      成为最后一道闸；实测证明该保护存在且当前被显式绕过
-- [ ] AC2f: 文件头注释与代码对齐 —— 注释现称「--force is deliberately NOT used」，代码用了。
-      测试 pin 住「dirty worktree 不被删除」，当前零测试覆盖
-- [ ] AC3: 在当前仓库实跑，恰好报出 M222 / M239 / M243 / M246 四个 —— 用真实仓库验证，不是 fixture
-- [ ] AC4: `restart-readiness-check.sh` 打印滞留分支；**存在滞留不阻断**，但输出中必须出现
-- [ ] AC5: `orchestration/orchestrator-loop-tick.md` 步骤 1 的观察命令包含该检查
-- [ ] AC6: `task-status-drift-check.ts` 新增 `stranded-not-merged` 类别；一个 `done` 任务的代码若
-      存在于某个未合并分支，报这一类而非 `reverse-drift-suspect`
-- [ ] AC7: AC6 的真值集用本次的实例 pin 住：DIR-124-A2 与 DIR-124-A5 必须报 `stranded-not-merged`
-- [ ] AC8: 测试带 `// @test-group engine` 声明
+> 2026-08-03 外层重划：本任务的前提已被 retire 与 reclaim 抹掉大半——AC2b 的判据已由
+> `gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion` AC1 实现（且更精确），AC2c-f 的目标文件
+> `plugin/scripts/milestone-worktree.ts` 已被 retire（ADR-022）物理删除，AC3 期望实报的 M222/M243/M246
+> 已回收。**仍然成立的缺口是**：滞留分支没有告警通道。以下按重划后的范围勾选。
+
+- [x] AC1: 检查能列出全部带提交的滞留分支，输出分支名 / 领先提交数 / 插入行数 / 最后提交日期。
+      宿主：`task-status-drift-check.ts --stranded`（枚举 `milestone/*` 与 `task/*` 分支）
+- [x] AC2: 零领先 **且** 干净合并（`merged-clean`）的分支不出现在告警里
+- [x] AC2b: `merged-then-reverted` 判据 —— **已被 reclaim AC1 吸收**（更精确：只有 --no-ff 合并进 master 的
+      分支可 revert；merge-added 文件是否仍在 master 当前树）。本任务**复用**其三闸判据，不重写
+- [x] AC2c: `--clean-stale` 拒绝清理 `merged-then-reverted` —— **已被 reclaim AC3 实现**；目标文件
+      `milestone-worktree.ts` 已被 retire 物理删除（无对象）
+- [x] AC2d: `cleanStale` 删除前检查 worktree 内 `git status --porcelain` —— **已被 reclaim AC3 实现**；
+      目标文件已删除（无对象）
+- [x] AC2e: `worktree remove` 去掉 `--force` —— **已被 reclaim AC4 实现**；目标文件已删除（无对象）
+- [x] AC2f: 文件头注释与代码对齐 —— **已被 reclaim AC4/AC5 实现**；目标文件已删除（无对象）
+- [x] AC3: 实报 M222 / M239 / M243 / M246 四分支 —— **过时**（外层 2026-08-03 裁定）：前三已回收、分支已删除，
+      当前只剩 `milestone/M239/iteration-0`（人裁定保留的已知例外，领先 2，must 继续被报）。期望值改为
+      双向负控制，见 AC3b
+- [x] AC3b（重划后）: **双向负控制**——人造一个领先 master 的分支 → 必须被报（has-commits）；删掉 → 必须不报。
+      测试用合成 git 仓库 pin 住，**不用真实仓库当前状态当期望值**
+- [x] AC4: `restart-readiness-check.sh` 打印滞留分支；**存在滞留不阻断**（informational，`[info]` 不 tripping
+      hard-fail），但输出中必须出现
+- [x] AC5: `orchestration/orchestrator-loop-tick.md` 步骤 1 的观察命令包含该检查（`--stranded`）
+- [x] AC6: `task-status-drift-check.ts` 新增 `stranded-not-merged` 类别；一个 `done` 任务的 code-root Touches
+      文件出现在某个未合并分支的 **divergent diff**（`git diff --name-only master...<branch>`）时，报这一类
+      而非 `reverse-drift-suspect`（处置相反：合并 vs 重建）
+- [x] AC7: AC6 真值集用合成实例 pin 住（`fixture-stranded` 的 `code/impl.ts` 只在 `milestone/M243/iteration-0` →
+      报 stranded-not-merged；合并后 → 不报）。真实仓库当前 M239 上：正确重分类
+      `gap-prepare-milestone-noisy-agent-raw-json-parse`（prepare-milestone.js 只存在于 M239），**不**误分类
+      DIR-073 / reclaim（其 Touches 文件不在 M239 divergent diff 内）
+- [x] AC8: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
 
-- [ ] 在真实仓库上的实跑输出贴进任务体（改前只能靠 `git worktree list` 偶然发现，改后是机械输出）
-- [ ] `scripts/test.sh` 绿
-- [ ] 明确记录：本任务**不合并**任何分支，合并决定在 `orchestration/escalations.md` #2
+- [x] 在真实仓库上的实跑输出贴进任务体（改后是机械输出 `task-status-drift-check.ts --stranded`，见本任务
+      Proposal 下的「实跑输出」；改前只能靠 `git worktree list` 偶然发现）
+- [x] `scripts/test.sh` 绿（`--for-task gap-stranded-worktree-branches-have-no-alarm-channel` 全绿，34 项）
+- [x] 明确记录：本任务**不合并**任何分支，合并决定在 `orchestration/escalations.md` #2
 
 ## Touches
 
@@ -173,4 +198,6 @@ fatal: '/tmp/wt-probe-XXXX' contains modified or untracked files, use --force to
 - plugin/scripts/task-status-drift-check.ts
 - experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts
 - plugin/test/task-status-drift-check.test.mjs
+- plugin/test/restart-readiness-check.test.mjs
 - orchestration/orchestrator-loop-tick.md
+- tasks/gap-stranded-worktree-branches-have-no-alarm-channel.md (本任务体，AC/DoD 按重划重写)

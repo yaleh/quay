@@ -8,9 +8,16 @@
 // depends on whether an AC needs a real dispatch, which a script cannot judge), so this reports
 // SUSPECT tasks for human review, exits 0 ALWAYS, and never writes to tasks/**.
 //
+// ALSO the stranded-branch alarm channel (gap-stranded-worktree-branches-have-no-alarm-channel):
+// `--stranded` enumerates `milestone/*` and `task/*` branches and reports any holding work that is
+// NOT cleanly merged into master (commits ahead, or merged-then-reverted). A silent fail-closed
+// (Land fails closed and preserves the branch, but nothing ever reports it — 24,989 lines stranded
+// 2026-08-01) is exactly the class this closes. restart-readiness-check.sh and the outer tick both
+// invoke `--stranded` so a stranded branch shows up mechanically, not by accident.
+//
 // Run:
-//   node --experimental-strip-types experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts [--json]
-//   node --experimental-strip-types plugin/scripts/task-status-drift-check.ts [--json]
+//   node --experimental-strip-types experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts [--json] [--stranded]
+//   node --experimental-strip-types plugin/scripts/task-status-drift-check.ts [--json] [--stranded]
 
 import fs from "node:fs";
 import path from "node:path";
@@ -216,22 +223,191 @@ export function hasDoneChildren(rawTask, tasksDir) {
   });
 }
 
+// ── Stranded-branch check (gap-stranded-worktree-branches-have-no-alarm-channel) ────────────────
+// A worktree branch holds STRANDED WORK when it is not cleanly merged into master. This classification
+// REUSES the three-gate criterion validated by gap-reclaim-21-merged-worktrees-and-fix-my-bad-criterion
+// VERBATIM (deliberately NOT rewritten here — the reclaim task's AC1/AC2 already settled the criterion):
+//   Gate 1 (merged?)  `git merge-base --is-ancestor <b> master` — every branch commit in master?
+//   Gate 2 (reverted?) Only a --no-ff MERGE can be reverted (`git revert <merge>` keeps the merge
+//     commit in master history while deleting its files, so Gate 1 still passes). A branch
+//     fast-forwarded onto master's FIRST-PARENT chain has no separate merge commit and cannot be
+//     merged-then-reverted — later deletions of its files are ordinary evolution. A merge-entered
+//     branch (tip NOT on first-parent) IS merged-then-reverted iff the files ITS merge added
+//     (`git diff --name-only --diff-filter=A <merge>^1..<merge>`) are missing from master's CURRENT
+//     tree (`git cat-file -e master:<f>`).
+//   Gate 3 (clean?)    `git status --porcelain` INSIDE the branch's worktree must be empty.
+// Classifications:
+//   has-commits          — commits ahead of master (Gate 1 false) → STRANDED (real work preserved)
+//   merged-then-reverted — Gate 2 missing files → STRANDED (content reverted away from master)
+//   has-uncommitted      — Gate 3 non-empty → worktree holds live work (reported; never deleted)
+//   merged-clean         — Gates 1+2+3 safe → NOT reported (a normal --clean-stale target)
+function gitTry(repoRoot, args, cwd) {
+  try {
+    const out = execFileSync("git", args, {
+      cwd: cwd || repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return { ok: true, out: out.trim() };
+  } catch (e) {
+    return { ok: false, out: String(e.stderr ?? e.message ?? "").trim() };
+  }
+}
+
+// Branch names that carry live milestone/task work — the ONLY namespaces the stranded alarm scopes
+// to. Legacy experiment-*/worktree-wf_*/salvage/* branches are historical, not live worktrees.
+export function listWorkBranches(repoRoot) {
+  const r = gitTry(repoRoot, ["branch", "--list", "milestone/*", "task/*"]);
+  if (!r.ok) return [];
+  return r.out.split("\n").map((l) => l.trim().replace(/^[*+]\s*/, "")).filter(Boolean);
+}
+
+// Find the merge commit on master whose SECOND parent is branchTip (the worktree Land flow's
+// `git merge --no-ff <branch>` always puts the branch tip as the second parent — matching only
+// parts[2] provably selects the branch's own Land merge), then return the merge-added files that are
+// missing from master's CURRENT tree (a `git revert` of the merge removes exactly those files).
+function _mergeAddedMissing(repoRoot, tipSha) {
+  const merges = gitTry(repoRoot, ["log", "--merges", "--format=%H %P", "master"]);
+  if (!merges.ok) return { error: merges.out };
+  let merge = null;
+  for (const line of merges.out.split("\n")) {
+    const parts = line.split(/\s+/);
+    if (parts.length >= 3 && parts[2] === tipSha) { merge = parts[0]; break; }
+  }
+  if (!merge) return { error: `no merge commit on master has branch tip ${tipSha} as a parent` };
+  const added = gitTry(repoRoot, ["diff", "--name-only", "--diff-filter=A", `${merge}^1..${merge}`]);
+  if (!added.ok) return { error: added.out };
+  const missing = [];
+  for (const f of added.out.split("\n").filter(Boolean)) {
+    if (!gitTry(repoRoot, ["cat-file", "-e", `master:${f}`]).ok) missing.push(f);
+  }
+  return { missing };
+}
+
+// Map a branch name → its worktree's absolute path (if any), via `git worktree list --porcelain`.
+function _worktreeForBranch(repoRoot, branch) {
+  const r = gitTry(repoRoot, ["worktree", "list", "--porcelain"]);
+  if (!r.ok) return null;
+  let cur = null;
+  for (const line of r.out.split("\n")) {
+    if (line.startsWith("worktree ")) { cur = line.slice("worktree ".length).trim(); continue; }
+    if (line.startsWith("branch ") && line.slice("branch ".length).trim() === `refs/heads/${branch}`) return cur;
+  }
+  return null;
+}
+
+function _shortstatInsertions(repoRoot, branch) {
+  const r = gitTry(repoRoot, ["diff", `master...${branch}`, "--shortstat"]);
+  if (!r.ok) return null;
+  const m = r.out.match(/(\d+)\s+insertions?\(\+\)/);
+  return m ? Number(m[1]) : null;
+}
+
+function _lastCommitDate(repoRoot, branch) {
+  const r = gitTry(repoRoot, ["log", "-1", "--format=%cI", branch]);
+  return r.ok ? r.out : null;
+}
+
+// Classify one `milestone/*`|`task/*` branch against master using the three-gate criterion. Returns
+// { branch, classification, aheadCount, insertions, lastCommitDate, worktreeRel, detail }.
+export function classifyBranch(repoRoot, branch) {
+  const wt = _worktreeForBranch(repoRoot, branch);
+  const base = { branch, worktreeRel: wt };
+  const ancestor = gitTry(repoRoot, ["merge-base", "--is-ancestor", branch, "master"]);
+  if (!ancestor.ok) {
+    const cnt = gitTry(repoRoot, ["rev-list", "--count", branch, "--not", "master"]);
+    const aheadCount = cnt.ok ? Number(cnt.out) : NaN;
+    return {
+      ...base, classification: "has-commits",
+      aheadCount: Number.isFinite(aheadCount) ? aheadCount : null,
+      insertions: _shortstatInsertions(repoRoot, branch),
+      lastCommitDate: _lastCommitDate(repoRoot, branch),
+    };
+  }
+  // Gate 2 — merged; check revert only for merge-entered branches (tip NOT on master's first-parent).
+  const tip = gitTry(repoRoot, ["rev-parse", branch]);
+  const firstParent = gitTry(repoRoot, ["rev-list", "--first-parent", "master"]);
+  let onFirstParent = false;
+  if (tip.ok && firstParent.ok) onFirstParent = firstParent.out.split("\n").includes(tip.out);
+  if (!onFirstParent) {
+    const m = _mergeAddedMissing(repoRoot, tip.out);
+    if (m.error) return { ...base, classification: "error", detail: m.error };
+    if (m.missing.length > 0) {
+      const shown = m.missing.slice(0, 5).join(", ");
+      return {
+        ...base, classification: "merged-then-reverted", aheadCount: 0,
+        insertions: _shortstatInsertions(repoRoot, branch),
+        lastCommitDate: _lastCommitDate(repoRoot, branch),
+        detail: `${m.missing.length} merge-added file(s) missing from master: ${shown}${m.missing.length > 5 ? ` (+${m.missing.length - 5} more)` : ""}`,
+      };
+    }
+  }
+  // Gate 3 — worktree clean? (inside the worktree, not the primary checkout)
+  if (wt) {
+    const st = gitTry(repoRoot, ["status", "--porcelain"], wt);
+    if (st.ok && st.out !== "") {
+      return {
+        ...base, classification: "has-uncommitted", aheadCount: 0,
+        insertions: _shortstatInsertions(repoRoot, branch),
+        lastCommitDate: _lastCommitDate(repoRoot, branch),
+        detail: `worktree has uncommitted/untracked changes:\n${st.out}`,
+      };
+    }
+  }
+  return { ...base, classification: "merged-clean", aheadCount: 0 };
+}
+
+// The stranded-branch report: every live worktree branch whose work is NOT cleanly on master
+// (has-commits, merged-then-reverted, has-uncommitted). merged-clean branches are excluded.
+export function strandedBranches(repoRoot) {
+  return listWorkBranches(repoRoot)
+    .map((b) => classifyBranch(repoRoot, b))
+    .filter((c) => c.classification !== "merged-clean");
+}
+
+// For AC6: does ANY code-root Touches entry of a done task appear in the branch's DIVERGENT diff —
+// `git diff --name-only master...<branch>` (the set of files that differ between master and the
+// branch)? A Touches file that is in that set (absent from master but present on the branch, or
+// modified by the branch) means the task's code is preserved on the stranded branch — the task is
+// STRANDED-not-merged, NOT reverse-drift (the work exists; it needs a MERGE, not a rebuild).
+//
+// Deliberately NOT `git cat-file -e <branch>:<path>` ("does the path exist in the branch's tree"):
+// that false-positives on files the branch merely INHERITED from its base — every file that ever
+// existed when the branch forked is in the branch tree, and files deleted from master after the fork
+// are still there. Only the divergent-diff set is the branch's OWN work (measured false-positive on
+// the real repo: DIR-073's execute-milestone.js is inherited by M239 but NOT in its diff, so DIR-073
+// correctly stays reverse-drift while noisy-agent's prepare-milestone.js — absent from master, on
+// M239 — correctly reclassifies to stranded-not-merged). Globs are skipped (the exact-path signal is
+// the common case).
+export function entriesInBranchDiff(repoRoot, entries, branch) {
+  if (entries.length === 0) return false;
+  const r = gitTry(repoRoot, ["diff", "--name-only", `master...${branch}`]);
+  if (!r.ok) return false;
+  const diverged = new Set(r.out.split("\n").filter(Boolean));
+  return entries.some((e) => !(e.includes("*") || e.includes("?")) && diverged.has(e));
+}
+
 // Scan the task store for status-drift suspects. ratioFloor is the fraction of AC symbols that must
 // resolve before a task is even considered (a lone coincidental match must not flag). `roots`
 // overrides the symbol-search roots (repo-root-relative OR absolute) — tests pass synthetic roots.
 //
-// Two drift directions:
+// Two drift directions plus a stranded third class (gap-stranded-worktree-branches-have-no-alarm-channel):
 //   status-drift-suspect:  todo/ready but code is in the tree (task should be closed).
 //   reverse-drift-suspect: done but the code never landed — AC symbols are mostly UNRESOLVED AND no
 //     code-root Touches file exists. The mirror image of the leak above (the RED test for
 //     no-size-aware-routing-A was silenced without restoring its status — the exact class this
 //     catches). Bookkeeping paths (milestones/**, docs/plans/**, .quay/**, receipts/**, tasks/**)
 //     are pipeline artifacts a fast-mode task never produces — their absence is ignored (AC4).
-export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), ratioFloor = 0.6, roots = CODE_ROOTS }) {
+//   stranded-not-merged:  done but its code-root Touches entries exist on a STRANDED branch (a branch
+//     with commits ahead of master, or merged-then-reverted) rather than on master. NOT reverse-drift
+//     — the work exists and is preserved on the branch; it needs a MERGE, not a rebuild. The two are
+//     the mirror-image false classification (2026-08-02: A2/A5 were reported "done but never landed"
+//     when their code sat on unmerged branches — the wrong disposition would have rebuilt landed work).
+// `strandedBranches` is the branch-level report list (from strandedBranches()) used to reclassify.
+export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), ratioFloor = 0.6, roots = CODE_ROOTS, strandedBranches: strandedList = [] }) {
   const suspects = [];
   const reverse = [];
+  const strandedTasks = [];
   let taskFiles;
-  try { taskFiles = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")); } catch { return { suspects, reverse, scanned: 0 }; }
+  try { taskFiles = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")); } catch { return { suspects, reverse, strandedTasks, scanned: 0 }; }
   for (const f of taskFiles) {
     const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
     const statusMatch = raw.match(/^status:\s*(\S+)/m);
@@ -260,6 +436,24 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
         && candidates.length > 0
         && (matched.length / candidates.length) < REVERSE_SYMBOL_RATIO_MAX;
       if (noCode) {
+        // AC6: before calling a done task reverse-drift (never landed), ask whether any of its
+        // code-root Touches entries appear in a STRANDED branch's divergent diff (the branch's own
+        // work — see entriesInBranchDiff). If so the work IS landed — just not on master — and the
+        // correct disposition is to MERGE the branch, never to rebuild. (has-uncommitted branches
+        // never match: uncommitted files are not in any diff.)
+        const codeEntries = parseTouchEntries(touchesSection).filter((e) => isCodeTouchEntry(e));
+        const strandedHit = strandedList.find((sb) => entriesInBranchDiff(repoRoot, codeEntries, sb.branch));
+        if (strandedHit) {
+          strandedTasks.push({
+            taskId: f.replace(/\.md$/, ""),
+            status,
+            matchedSymbols: matched,
+            totalSymbols: candidates.length,
+            branch: strandedHit.branch,
+            branchClassification: strandedHit.classification,
+          });
+          continue;
+        }
         reverse.push({
           taskId: f.replace(/\.md$/, ""),
           status,
@@ -286,33 +480,78 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
       });
     }
   }
-  return { suspects, reverse, scanned: taskFiles.length };
+  return { suspects, reverse, strandedTasks, scanned: taskFiles.length };
 }
 
 // ── Report formatting (pure — unit-tested) ────────────────────────────────────────────────────────
-export function formatJsonReport(suspects, reverse, scanned) {
+function _jsonStranded(s) {
+  return {
+    branch: s.branch, classification: s.classification,
+    aheadCount: s.aheadCount, insertions: s.insertions, lastCommitDate: s.lastCommitDate,
+    detail: s.detail ?? null,
+  };
+}
+export function formatJsonReport(suspects, reverse, scanned, strandedTasks = [], stranded = []) {
   return JSON.stringify({
     suspects: suspects.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, touchesAllExist: s.touchesAllExist })),
     reverse: reverse.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, codeTouchExists: s.codeTouchExists, touchesAllExist: s.touchesAllExist })),
+    strandedTasks: strandedTasks.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, branch: s.branch, branchClassification: s.branchClassification })),
+    stranded: stranded.map(_jsonStranded),
     scanned,
   }, null, 2) + "\n";
+}
+
+// Human-readable stranded-branch report. Pure — unit-tested. Used both by --stranded (branch-only
+// fast path) and the full report.
+export function formatStrandedText(stranded, opts = {}) {
+  const prefix = opts.prefix ?? "stranded-branch-check";
+  if (stranded.length === 0) {
+    return `${prefix}: no stranded worktree branches (all milestone/* and task/* branches are cleanly merged into master)\n`;
+  }
+  let out = `${prefix}: ${stranded.length} STRANDED branch(es) — work is preserved on a branch NOT on master (a silent fail-closed: nothing reports these until this check runs)\n`;
+  for (const s of stranded) {
+    const label = s.classification === "has-commits"
+      ? `${s.aheadCount ?? "?"} commit(s) ahead`
+      : s.classification === "merged-then-reverted"
+        ? "merge reverted away from master"
+        : s.classification === "has-uncommitted"
+          ? "worktree holds uncommitted work"
+          : s.classification === "error"
+            ? "classification errored — investigate"
+            : s.classification;
+    const lines = s.insertions != null ? `+${s.insertions} lines` : "? lines";
+    out += `  stranded: ${s.branch} (${s.classification}, ${label}, ${lines}, last commit ${s.lastCommitDate ?? "?"})\n`;
+    if (s.detail) out += `    ${s.detail}\n`;
+  }
+  out += `  → human review: merge or adjudicate the branch; do NOT --clean-stale it (merge decision lives in orchestration/escalations.md)\n`;
+  return out;
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function main(argv) {
   const args = argv.slice(2);
   const json = args.includes("--json");
+  const strandedOnly = args.includes("--stranded");
   let repoRoot;
   try { repoRoot = findRepoRoot(process.cwd()); } catch (e) {
     process.stderr.write(`ERROR: ${e.message}\n`);
     return 0;
   }
-  const { suspects, reverse, scanned } = scanTasks({ repoRoot });
+  const stranded = strandedBranches(repoRoot);
+  if (strandedOnly) {
+    // Fast branch-only path (restart-readiness-check.sh and the outer tick consume this): no task
+    // store scan, just the stranded-branch report. Still exits 0 — report-only, never a gate.
+    process.stdout.write(json
+      ? JSON.stringify({ stranded: stranded.map(_jsonStranded) }, null, 2) + "\n"
+      : formatStrandedText(stranded));
+    return 0;
+  }
+  const { suspects, reverse, strandedTasks, scanned } = scanTasks({ repoRoot, strandedBranches: stranded });
   if (json) {
-    process.stdout.write(formatJsonReport(suspects, reverse, scanned));
+    process.stdout.write(formatJsonReport(suspects, reverse, scanned, strandedTasks, stranded));
   } else {
-    if (suspects.length === 0 && reverse.length === 0) {
-      process.stdout.write(`task-status-drift: no suspects among ${scanned} tasks (todo/ready drift + done-reverse-drift both clean)\n`);
+    if (suspects.length === 0 && reverse.length === 0 && strandedTasks.length === 0 && stranded.length === 0) {
+      process.stdout.write(`task-status-drift: no suspects among ${scanned} tasks (todo/ready drift + done-reverse-drift + stranded-branch all clean)\n`);
     } else {
       if (suspects.length > 0) {
         process.stdout.write(`task-status-drift: ${suspects.length} SUSPECT task(s) with code already in the tree but status not closed (${scanned} todo/ready scanned)\n`);
@@ -327,6 +566,16 @@ export function main(argv) {
           process.stdout.write(`  reverse-drift-suspect: ${s.taskId} (status ${s.status}, ${s.matchedSymbols.length}/${s.totalSymbols} symbols resolved, codeTouchExists=${s.codeTouchExists}, touchesAllExist=${s.touchesAllExist})\n`);
         }
         process.stdout.write("  → human review: set status back to todo (code never landed) or finish the implementation\n");
+      }
+      if (strandedTasks.length > 0) {
+        process.stdout.write(`task-status-drift: ${strandedTasks.length} STRANDED-not-merged task(s) — status done but the implementation is on a stranded branch, NOT master (this is NOT reverse-drift: the work exists and is preserved)\n`);
+        for (const s of strandedTasks) {
+          process.stdout.write(`  stranded-not-merged: ${s.taskId} (code on ${s.branch}, ${s.branchClassification})\n`);
+        }
+        process.stdout.write("  → human review: MERGE the branch (do NOT rebuild)\n");
+      }
+      if (stranded.length > 0) {
+        process.stdout.write(formatStrandedText(stranded, { prefix: "task-status-drift" }));
       }
     }
   }
