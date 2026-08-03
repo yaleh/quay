@@ -63,14 +63,20 @@ RECLAIM_COUNTER="${HEAVY_OP_DIR}/stale_reclaims"
 STALE_TIMEOUT_S="${HEAVY_OP_STALE_TIMEOUT_S:-30}"
 
 now_ms() {
-  # Epoch milliseconds. NOT `date +%s%3N`: some date builds do not truncate %N (this box emits
-  # full nanoseconds, and %N is not zero-padded), which makes held_ms garbage. Build it from
-  # seconds + the first 3 nanosecond digits, left-padded to 3.
-  local s n
-  s="$(date +%s 2>/dev/null || echo 0)"
-  n="$(date +%N 2>/dev/null || echo 000000000)"
+  # Epoch milliseconds from ONE date call. `date +%s%N` yields seconds+nanoseconds from a
+  # single clock read. Two separate `date +%s` / `date +%N` calls could straddle a second
+  # boundary (seconds from second X, nanos from X+1), synthesizing a timestamp up to ~999ms
+  # EARLY — a later reader could then compute an earlier time than an earlier writer, making
+  # held_ms negative (observed -559ms under load; constructive defect, not a load artifact).
+  # NOTE: `date +%s%3N` is avoided (some builds don't truncate %N and emit full nanoseconds);
+  # parsing the first 3 nanosecond digits here is equivalent and keeps that guarantee.
+  local out s n
+  out="$(date +%s%N 2>/dev/null || echo 0000000000000000000)"
+  case "$out" in ''|*[!0-9]*) out="0000000000000000000" ;; esac
+  s="${out:0:10}"
+  n="${out:10:9}"
   case "$n" in ''|*[!0-9]*) n="000000000" ;; esac
-  printf '%s%03d' "$s" "$(( 10#${n:0:3} ))"
+  printf '%s%03d' "${s:-0}" "$(( 10#${n:0:3} ))"
 }
 
 # ── argument parsing ─────────────────────────────────────────────────────────────────────────────────
@@ -139,10 +145,13 @@ held_ms_of_token() {
   now="$(now_ms)"
   if [ -n "$acq" ] && [ "$acq" -ge 0 ] 2>/dev/null; then
     local diff=$(( now - acq ))
-    # A negative held duration is a timing artifact (the reader's epoch-ms momentarily
-    # behind the writer's — observed -559ms under full-suite load), never a real value.
-    # Clamp at 0 so the HELD message / --status never report a nonsensical negative.
-    if [ "$diff" -lt 0 ]; then diff=0; fi
+    if [ "$diff" -lt 0 ]; then
+      # Defensive clamp only. With the single-call now_ms() fix this should never fire; if it
+      # does, the clock is actually broken. Say so loudly on stderr instead of silently
+      # flattening — a silent clamp would make "held 0ms" a detector with no voice.
+      printf 'heavy-op-token: WARNING held_ms computed negative (%sms) — clock went backwards; clamped to 0\n' "$diff" >&2
+      diff=0
+    fi
     printf '%s' "$diff"
   else
     printf '0'
