@@ -1013,6 +1013,38 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
   }
 });
 
+test("AC7 negative control — an EMPTY transcript yields last-input 取不到, which the AC7 assertion still rejects (the 25s window is not the check)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // Mutation (checker-mutation method): the AC6/AC7 test asserts last-input "N 分钟前" when a
+  // user record exists. Here we REMOVE the user record (empty transcript) → last_user_input_epoch
+  // returns nothing → lastin="取不到". If the original AC7 assertion (`li && li[1] !== "取不到"`)
+  // still rejects this corrupted payload, the 25s window only delays the RESUMED wait — it does not
+  // mask a broken payload. If it did NOT reject it, the window bump would be diluting the assertion.
+  const p = makeHermeticProbe("ol-nc");
+  const x = path.join(p.tmp, "session.jsonl");
+  fs.writeFileSync(x, "", "utf8");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
+    try {
+      await sleep(3000); // idle baseline
+      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
+      const out = mon.output();
+      const li = out.match(/上次收到输入：([^）]*)/);
+      assert.ok(li && li[1] === "取不到",
+        `negative control: empty transcript must yield last-input 取不到 (the corruption is real, so AC7 is what rejects it):\n${out}`);
+      const ac7Satisfied = Boolean(li && li[1] !== "取不到");
+      assert.equal(ac7Satisfied, false,
+        `AC7 must reject the corrupted payload (last-input 取不到); the 25s window is not the check:\n${out}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
 // ── AC5：OVERDUE_MIN 默认 45→30（不可自愈类宁可误报）；文档同步 ───────────────────────────────
 
 test("AC5 — OVERDUE_MIN default is 30 (non-self-healing, prefer false-positive: earlier than 45); the shipped outer tick doc carries the value", () => {
