@@ -1,8 +1,8 @@
 ---
 id: gap-no-resource-awareness-heavy-ops-run-blind
-title: "Heavy operations run blind to CPU/memory — measured 4.25x
-  oversubscription and swap is 0, so OOM is a cliff"
-status: todo
+title: Heavy operations run blind to CPU/memory — measured 4.25x
+  oversubscription and swap is 0, so OOM is a cliff
+status: done
 labels:
   - gap
   - defect

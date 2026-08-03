@@ -1,8 +1,8 @@
 ---
 id: gap-serve-task-list-dies-on-one-malformed-task
-title: "One task file without an id took down the entire web task list — serve
-  must degrade, not 500"
-status: todo
+title: One task file without an id took down the entire web task list — serve
+  must degrade, not 500
+status: done
 labels:
   - gap
   - defect
