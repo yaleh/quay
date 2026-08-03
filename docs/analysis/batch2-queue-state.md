@@ -1637,10 +1637,19 @@ quay 永远回收不了 token，全量套件（test.sh 内部 fail-closed 获取
 内层提交（quay-init-loop 测试修复 + 批 7 合并）均未触碰；外层已排除 checker-mutation-cases（5 用例
 无此文件）、无测试写 src/、无活变异进程。判定：无归属的共享检出写入，来源待查。
 
-**批 7 关闭阻塞**：需 token 修复后全量套件绿（判绿三条件）→ 关闭 cold8/checkers/live2
+**批 7 关闭阻塞**：需全量套件**真绿**（**fail 0 AND cancelled 0**——suite13 的 fail 0 是假绿：cancelled 2 的文件贡献 0 失败，与全过同形）→ 关闭 cold8/checkers/live2
 （--task-end ×3 + worktree/分支清理 + Land --snapshot）。
+**外层裁定（20:4xZ，纠正内层依赖倒置）**：关闭批 7 **不**挂在 token 修复落地之后——三个已完成任务去等一个未开工任务是依赖倒置。token 那条外层已建任务并上报管理者；批 7 的阻塞是 sl2 的 AC 与共享检出污染类。
+
+**批 7 阻塞拆分（外层三次运行交叉比对）**：
+- **(1) sl2 AC6/AC7 真红（两次套件唯一都红）**：`session-liveness.test.mjs` RESUMED carries cause+last-input。**已修**（`cfbc7459`：RESUMED 等待窗口 8s→25s，争抢下 8s 不足——机制正确、隔离 5.2s、兄弟测试负载下 7.7s，是窗口问题非机制缺陷；隔离 30/30 绿）。需全量套件复验。
+- **(2) loop-shipping AC2 只 suite7 红**（瞬时污染）：**根因已查实**——`packages/quay/test/ts-typecheck-gate.test.mjs:69` 在 REPO_ROOT 建 `.quay-tmp-test-*`（finally 删除），并发下与 loop-shipping 的 walk 竞态 → ENOENT。**非**外层假设的「铺实体 fast-mode-telemetry.ts 拷贝」（已排除）。与排队任务 `gap-mkdtemp-rooted-in-the-shared-checkout` 同族。下次红时留 got 清单。
+- **(3) runner-grouping / session-liveness 文件级取消**（71-86s，load 曾 13.32）：争抢超时非缺陷；单独重跑判别中。
+- **quay-github 两个 gate 测试**只在有变异体的 suite12 红——丢弃，树已干净。
+
+**共享检出夹具泄漏（21:0xZ）**：`plugin/test/zz-runner-grouping-undeclared.test.mjs`（runner-grouping AC7 固定路径夹具，故意无 @test-group）从取消的 runner-grouping 运行泄漏（文件级取消绕过 finally）→ 已被测试 glob 选中、策略检查器报 NEW file。**已删除**（未跟踪）；AC7 加开头防御清理待办。
+
 **token 修复任务已建（外层，20:3xZ）**：`gap-a-token-held-by-nobody-can-starve-a-live-waiter`
 （12 次套件尝试、零获取，回收双条件 AND 在对面 churn 时变无界饥饿）+ `gap-token-status-reports-a-dead-holder-as-busy`
-（--status 只评估 acquire 时的 staleness）。**均 status: todo、未派发**（无 worktree）。恢复条件：
-其中任一派发落地修复后，重跑批 7 全量。内层阻塞信号 `.quay/inner-blocked.json`（suite-red）保持在场。
-内层不派发新任务（停止条件：全量 suite 非绿）。
+（--status 只评估 acquire 时的 staleness）。**均 status: todo、未派发**（无 worktree）。token 只影响套件能否启动，不决定批 7 关闭。
+内层不派发新任务（停止条件：全量 suite 未真绿）。
