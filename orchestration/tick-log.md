@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 06:28Z | `unblock` | 查出 webobs 卡在半完成态并指示收尾；提示 sigma 的低压力前置在 4 路并发下不可满足 | 在飞 **4**（stranded 36m / sigma 30m / n-parsers 1m / webobs 36m）；完成 30；CPU 压力 **91.03** | **`webobs` 是「已落地但未收尾」**：AC 全勾、代码已合并（`e8ef92e3`）、`/live` 与 `/journal` 实测 200 且与遥测逐条一致，但 `status` 仍是 `todo`、遥测 `start=1 end=0` 从未闭合。**它自己正是 `/board` 被设计来标记的那一类。** **所以「4 路在飞」是 3 真 + 1 僵**，不是派发越界。**核实过没有重复派发**：全部 `.workflow-events` 扫描，只有 `sync-vendor` 有 start=2/end=2（正常重跑），四个在飞全是 start=1 end=0。**sigma 的前置此刻不可满足**（AC2 要闸 GO，实测 91.03） |
 | 2026-08-03 06:25Z | `unblock` | 重启 web server 让新落地的 `/live` `/journal` 生效（人正在用该页面）；踩中并记录 `pgrep -f` 自匹配 | 三路在飞（stranded 32m / sigma 25m / webobs 已 done 并合并）；完成 30，吞吐 1.508/h；**/tmp 清理后保持 50%、8,866 条目**；mem avail 6,933 MB | **`/live` `/journal` 曾返回 404**——不是代码问题，是**我 03:35 起的 server 跑的是旧代码**，路由 06:1x 才合并。重启后 `/` `/live` `/journal` `/adr` **全部 200**。**踩中 `pgrep -f` 自匹配（第 13 次，前两次都只是差点）**：`pgrep -f 'quay.ts serve --host 100.87.141.82'` 匹配到我自己这条命令行，`kill` 杀了自己的 shell（exit 144），而目标 server 毫发无伤。**正确做法是按端口定位**：`ss -ltnp | grep 4173` 取 pid——它不可能匹配到发起查询的进程 |
 | 2026-08-03 06:22Z | `unblock` | 查明并清理磁盘配额根因（三个 subagent 正在排查它）；建泄漏任务 | 三路在飞（stranded 12m / sigma 6m / webobs 已 done）；完成 30，吞吐 **1.533/h**（AC18 保持） | **根因：`/tmp` 是 tmpfs（内存盘），积了 166,923 个测试 fixture 目录、6.3 GB，自 2026-07-25 起 9 天**。前缀 `prepare-admission-` 14,220、`prep-check-` 9,128、`quay-loop-params-*` 4,337…**测试用 `mkdtemp` 建每运行唯一目录（隔离契约这条满足）但从不清理**。外层清理 >2h 且匹配 fixture 前缀、显式排除 `quay-wt-*` 与 `claude-*`：**删 158,757 条目、释放 2,454 MB**。`/tmp` 80%→**50%**、tmpfs 占内存 4,623→**2,823 MB**、MemAvailable 5,291→**7,370 MB**、swap 1,779→**1,142 MB**。**今晚 swap 从 0 涨到 1.78 GB 的主因是这个泄漏，不是负载。** **外层两次误判已记录**：(a) tick 命令连续两次整体失败无输出，我推断「node 进程为 0」——错，实为 36，真因是 `du -sm /tmp/*` 的通配展开超参数上限（E2BIG）静默失败；(b) `df -h / /tmp` 失败，分开跑却都正常 |
 | 2026-08-03 05:45Z | `correct` | 回答「套件耗时缩短了吗」——实测否定，并定位到真正的关键路径；核实 retire 落地 | **retire 已 done、AC 全勾、落地 master：51 文件删除、净 −23,560 行**；在飞清空；仓库 **496 MB**；完成 29，吞吐 1.508/h（AC18 达标保持） | **套件没有变快**：562.3s → **569.1s（+1.2%，噪声内）**，而测试数 2436 → **2034（−16.5%）**、文件 173 → 155。**我预期 >10% 降幅，错了。** 原因实测到：**`packages/quay/test/cli.test.mjs` 单文件 198.1s = 套件墙钟的 34.8%**——套件被这一个文件锁死，删掉散在另外 18 个文件里的 402 个测试碰不到关键路径。**顺带纠正今晚的叙述**：墙钟表显示崩溃的 batch4a 反而**最快**（397.7s），因为 2 个文件被 cancelled ⇒ **饥饿的表现是「杀掉测试」不是「拖慢套件」**。**又一次 grep 模式错误（第 12 次）**：`computeTouchesExpansion` 我按 `export function` 找报 0，实为 `concurrent-batch-scheduler.ts:31` 的模块私有函数，抽取正确；套件 fail 0 才是决定性判据 |
@@ -93,11 +94,11 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 28 | 37% |
-| unblock | 13 | 17% |
+| no-action | 28 | 36% |
+| unblock | 14 | 18% |
 | correct | 32 | 42% |
 | escalate | 3 | 4% |
-| **合计** | **76** | — |
+| **合计** | **77** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
