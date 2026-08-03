@@ -256,6 +256,34 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 跑在 `--task-start`/`--task-end` 之外，遥测看不见，此时内层在忙而信号显示 IDLE。真正的信号要内层
 主动写——见 [[gap-no-explicit-blocked-signal-from-inner-layer]]。
 
+### 0b2. 外层存活监视（`outer-liveness.sh`）——看外层自己，不是内层
+
+**看的是【外层】进程**（不是内层）：外层消失 / 恢复 / 活着但不推进 / 转入空闲。产品化后
+（SPEC-outer-liveness-productization.md）**默认零配置看本项目自己的外层**，多目标经
+`OUTER_TARGETS` / `OUTER_TICK_LOGS` 或 `orchestration/outer-liveness.env` 启用。随
+`quay-init --loop` 铺下，会话名在安装时被替换。
+
+| 事件 | 触发 |
+|---|---|
+| `OUTER-GONE` / `OUTER-BACK` | 外层进程消失 / 恢复 |
+| `OUTER-STALL` | 活着但 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） |
+| `OUTER-LOOP-OVERDUE` | tick 日志 mtime ≥`OVERDUE_MIN`（未暂停的项目）——loop 可能已死 |
+| `OUTER-IDLE` / `OUTER-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** |
+
+**四个阈值（AC5，含义与默认值在这里，不只活在脚本注释里）：**
+
+| 阈值 | 默认 | 含义 |
+|---|---|---|
+| `INTERVAL` | `60` | 轮询周期（秒）。每轮抓一次每个目标的状态；「转换后一个轮询周期内报出」的「及时」颗粒 |
+| `STALL_MIN` | `45` | 未暂停的项目超过这么久（分钟）无新提交 = 停滞（`OUTER-STALL`） |
+| `LOOP_MIN` | `20` | 外层 loop 周期（分钟）。**也是 `OUTER-IDLE` 静默判据的边界**：空闲时 tick 时距 `< LOOP_MIN` = 刚记完 tick 的正常收尾（静默）；`≥ LOOP_MIN` 或未知 = 「空闲了但没记 tick」，报 |
+| `OVERDUE_MIN` | `45` | tick 日志 mtime 超过这么久（分钟）未更新 = loop 逾期（`OUTER-LOOP-OVERDUE`）。`>2×` 周期，容忍跑重活的长 tick |
+
+**噪声标定（2026-08-03，管理者 3 个完整周期实测）**：健康循环 = `OUTER-RESUMED`（loop 按期触发）
+→ 干活 → `OUTER-IDLE`（tick 日志 1 分钟前写过），每 20 分钟一对事件、三项目满载 18 次/小时。
+`OUTER-IDLE` 在 tick 时距小于 `LOOP_MIN` 时静默——那是循环走完一圈的正常收尾；`OUTER-RESUMED`
+**保留不静默**（它便宜，且是唯一能确认 loop 还在按期触发的正向信号）。
+
 ### 0c. 派发闸口的清单与留痕：`## Contract` + `## Dispatch review`（外层，gap-dispatch-gate-has-no-checklist-and-no-trace）
 
 外层对派发任务的审查此前是**惯例**——四次介入里两次靠外层碰巧拥有的上下文（`=` 拼写、`duration_ms`

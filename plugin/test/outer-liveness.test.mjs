@@ -134,7 +134,7 @@ function makeHermeticProbe(session) {
 }
 
 // spawnMonitor — run the REAL outer-liveness.sh with a fast test interval and overridable targets.
-function spawnMonitor(env, targets, { tickLogs, stallMin = 1, overdueMin = 1, interval = 1 } = {}) {
+function spawnMonitor(env, targets, { tickLogs, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
   const monEnv = {
     ...env,
     OUTER_TARGETS: targets,
@@ -143,6 +143,7 @@ function spawnMonitor(env, targets, { tickLogs, stallMin = 1, overdueMin = 1, in
     OVERDUE_MIN: String(overdueMin),
   };
   if (tickLogs) monEnv.OUTER_TICK_LOGS = tickLogs;
+  if (loopMin !== undefined) monEnv.LOOP_MIN = String(loopMin);
   const child = spawn("bash", [SCRIPT], { env: monEnv });
   let out = "";
   child.stdout.on("data", (d) => { out += d; });
@@ -214,7 +215,10 @@ test("OUTER-RESUMED then OUTER-IDLE fire when the real probe session goes busy t
   const baseline = await waitStableHash(30000);
   assert.ok(baseline !== null, `probe must reach a stable idle baseline before driving (never settled in 30s)`);
 
-  const mon = spawnMonitor(env, `probe /tmp ${PROBE_TARGET}`, {});
+  // tickLogs pins the tick path to a nonexistent file so tmin="?" under the noise gate
+  // (OUTER-IDLE reports when tmin is unknown) — otherwise tmin reads the REAL quay tick-log mtime
+  // and the IDLE event could be gated silent if the manager's loop happened to tick recently.
+  const mon = spawnMonitor(env, `probe /tmp ${PROBE_TARGET}`, { tickLogs: `probe /nonexistent` });
   try {
     // 1. let the monitor establish its own idle baseline (≥2 rounds: PREV_HASH + PREV_IDLE=1).
     await sleep(3500);
@@ -337,6 +341,222 @@ test(".halt suppresses OUTER-STALL and OUTER-LOOP-OVERDUE, but NOT OUTER-GONE", 
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       assert.ok(await waitForOutput(mon, /OUTER-GONE halted/, 6000), `GONE must still fire when halted:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// 产品化（SPEC-outer-liveness-productization.md，AC1-AC9）与噪声标定（管理者 3 周期数据）
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// AC1  plugin 源副本无绝对路径/具体会话名（grep /home/yale|quay-0:|archguard-2:|meta-cc-4: 无命中）。
+// AC2  quay-init --loop 用已有参数（--tmux-session）把会话占位符替换进铺出的副本；全文无 quay 字面。
+// AC3  零配置可用：铺出的脚本不带参数直接跑，识别本项目自己的外层。
+// AC5  四个阈值写进随包外层 tick 文档（不只活在脚本注释里）。
+// AC6  目标项目没有 tick 日志时不崩（新项目第一次跑必然没有）——OVERDUE 静默、其余事件正常。
+// AC7  冷启动 e2e 是实跑断言（--once 接缝），不只断言文件存在。
+// AC9  管理者的三项目配置在 orchestration/outer-liveness.env，不进 plugin；脚本启动时 source 它。
+// 噪声  OUTER-IDLE 在 tick 时距 < LOOP_MIN（刚记完 tick 的正常收尾）时静默；≥ LOOP_MIN 或未知才报。
+//       OUTER-RESUMED 保留不静默（唯一正向信号）。两个正控制：旧 tick→报、新 tick→静默。
+
+function makeTmp(prefix = "ol-prod-") {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+function cleanup(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
+function runInit(workspace, args, pluginRoot = path.resolve(__dirname, "..")) {
+  return spawnSync("bash", [path.join(pluginRoot, "scripts", "quay-init.sh"), ...args], {
+    cwd: workspace,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
+  });
+}
+
+// busy-loop controls for a hermetic probe (claude child is job %1; the busy loop is job %2).
+function startBusyLoop(env, session) {
+  tmux(["send-keys", "-t", session, "while true; do date +%s.%N; sleep 0.2; done &"], env);
+  tmux(["send-keys", "-t", session, "Enter"], env);
+}
+function stopBusyLoop(env, session) {
+  tmux(["send-keys", "-t", session, "kill %2"], env);
+  tmux(["send-keys", "-t", session, "Enter"], env);
+}
+
+async function waitForPaneStable(env, session, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const last3 = [];
+  while (Date.now() < deadline) {
+    const h = md5(tmux(["capture-pane", "-p", "-t", session], env).stdout);
+    last3.push(h);
+    if (last3.length > 3) last3.shift();
+    if (last3.length === 3 && last3.every((x) => x === last3[0])) return h;
+    await sleep(1000);
+  }
+  return null;
+}
+
+// ── AC1: plugin source is clean ────────────────────────────────────────────────────────────────────
+
+test("AC1 — plugin/scripts/outer-liveness.sh has no absolute paths or specific session names", () => {
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  assert.ok(!/(\/home\/yale|quay-0:|archguard-2:|meta-cc-4:)/.test(src),
+    "source must not reference /home/yale or the three projects' specific tmux sessions");
+});
+
+// ── AC2: quay-init lays it down with the target substituted ─────────────────────────────────────────
+
+test("AC2 — quay-init --loop lays down outer-liveness.sh with the target session substituted and no quay literals", () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ["--loop", "--root", ws, "--project", "myproj",
+      "--test-command", "npm test", "--tmux-session", "myproj-0:0.0", "--repo-root", "/srv/target"]);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const laid = fs.readFileSync(path.join(ws, "plugin", "scripts", "outer-liveness.sh"), "utf8");
+    assert.ok(!laid.includes("__QUAY_TMUX_SESSION__"), "the session placeholder must be substituted");
+    assert.ok(laid.includes("myproj-0"), "the target session must appear (default target <session>:outer)");
+    assert.ok(!laid.includes("/home/yale/work/quay"), "no quay dev-root leak");
+    assert.ok(!laid.includes("scripts/test.sh"), "no quay test-command leak");
+  } finally { cleanup(ws); }
+});
+
+// ── AC3/AC7: cold-start real run via the --once seam ───────────────────────────────────────────────
+
+test("AC3/AC7 — the laid-down script, run --once, identifies THIS project's own outer (real run, not file-exists)", async () => {
+  const ws = makeTmp();
+  const sockDir = path.join(ws, "sock"); fs.mkdirSync(sockDir, { recursive: true });
+  const env = { ...process.env, TMUX_TMPDIR: sockDir }; delete env.TMUX;
+  try {
+    const r = runInit(ws, ["--loop", "--root", ws, "--project", "proj",
+      "--test-command", "node --test", "--tmux-session", "ol-cold:0.0"]);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    // this project's own outer = <session>:outer window (the default-target convention).
+    const ns = tmux(["new-session", "-d", "-s", "ol-cold", "-n", "outer", "bash"], env);
+    assert.equal(ns.status, 0, `new-session failed: ${ns.stderr}`);
+    tmux(["send-keys", "-t", "ol-cold:outer", "exec -a claude-probe sleep 10000 &"], env);
+    tmux(["send-keys", "-t", "ol-cold:outer", "Enter"], env);
+    assert.ok(await waitForAlive(env, "ol-cold", 5000), "this project's outer must be alive before the cold-start run");
+    const once = spawnSync("bash", [path.join(ws, "plugin", "scripts", "outer-liveness.sh"), "--once"], {
+      encoding: "utf8", env: { ...env, OUTER_ROOT: ws },
+    });
+    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
+    assert.ok(once.stdout.includes("OUTER-STATUS") && once.stdout.includes("alive=1"),
+      `must identify this project's own outer as alive:\n${once.stdout}`);
+  } finally {
+    tmux(["kill-session", "-t", "ol-cold"], env);
+    cleanup(ws);
+  }
+});
+
+// ── AC6: no tick log must not crash, OVERDUE silent, other events fine ─────────────────────────────
+
+test("AC6 — no tick log: OUTER-LOOP-OVERDUE stays silent, other events work, no crash", async () => {
+  const p = makeHermeticProbe("ol-notick");
+  try {
+    const mon = spawnMonitor(p.env, `notick ${p.tmp} ${p.session}`,
+      { tickLogs: `notick ${path.join(p.tmp, "nope.md")}`, overdueMin: 1 });
+    try {
+      await sleep(4000);
+      assert.ok(!/OUTER-LOOP-OVERDUE/.test(mon.output()), `OVERDUE must be silent without a tick log:\n${mon.output()}`);
+      tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /OUTER-GONE notick/, 6000), `GONE must still fire:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC9: manager config lives in orchestration/outer-liveness.env, sourced at startup ───────────────
+
+test("AC9 — manager's 3-project config lives in orchestration/outer-liveness.env, not the script; it is sourced when OUTER_TARGETS is unset", async () => {
+  const realEnv = fs.readFileSync(path.resolve(__dirname, "..", "..", "orchestration", "outer-liveness.env"), "utf8");
+  assert.ok(realEnv.includes("OUTER_TARGETS="), "orchestration/outer-liveness.env must carry OUTER_TARGETS");
+  assert.ok(realEnv.includes("quay-0:outer") && realEnv.includes("archguard-2:outer") && realEnv.includes("meta-cc-4:outer"),
+    "the env file must carry the three-project topology");
+  assert.ok(!fs.readFileSync(SCRIPT, "utf8").includes("quay-0:"), "the script must NOT carry the topology (moved out to orchestration/)");
+
+  const ws = makeTmp();
+  const sockDir = path.join(ws, "sock"); fs.mkdirSync(sockDir, { recursive: true });
+  const env = { ...process.env, TMUX_TMPDIR: sockDir }; delete env.TMUX;
+  try {
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    const ns = tmux(["new-session", "-d", "-s", "ol-env", "-n", "outer", "bash"], env);
+    assert.equal(ns.status, 0, `new-session failed: ${ns.stderr}`);
+    tmux(["send-keys", "-t", "ol-env:outer", "exec -a claude-probe sleep 10000 &"], env);
+    tmux(["send-keys", "-t", "ol-env:outer", "Enter"], env);
+    assert.ok(await waitForAlive(env, "ol-env", 5000), "the env-file target outer must be alive before the run");
+    fs.writeFileSync(path.join(ws, "orchestration", "outer-liveness.env"),
+      `OUTER_TARGETS="envproj ${ws} ol-env:outer"\n`, "utf8");
+    const once = spawnSync("bash", [SCRIPT, "--once"], { encoding: "utf8", env: { ...env, OUTER_ROOT: ws } });
+    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
+    assert.match(once.stdout, /OUTER-STATUS envproj alive=1/, `must source the env-file targets:\n${once.stdout}`);
+  } finally {
+    tmux(["kill-session", "-t", "ol-env"], env);
+    cleanup(ws);
+  }
+});
+
+// ── AC5: thresholds documented in the shipped outer tick doc ────────────────────────────────────────
+
+test("AC5 — the shipped outer tick doc documents the four thresholds", () => {
+  const doc = fs.readFileSync(path.resolve(__dirname, "..", "loop", "orchestrator-loop-tick.md"), "utf8");
+  for (const t of ["INTERVAL", "STALL_MIN", "LOOP_MIN", "OVERDUE_MIN"]) {
+    assert.ok(doc.includes(t), `the outer tick doc must document ${t} (AC5: a parameter only its author can tune is not a parameter)`);
+  }
+});
+
+// ── 噪声标定（管理者 3 周期数据）：OUTER-IDLE 静默/报出的两个正控制 ─────────────────────────────────
+
+test("noise gate — an idle transition with an OLD tick log IS reported (idle but no tick = anomaly)", async () => {
+  const p = makeHermeticProbe("ol-gate-old");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.writeFileSync(tick, "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", tick], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `gate ${p.tmp} ${p.session}`, { tickLogs: `gate ${tick}`, interval: 1, loopMin: 5 });
+    try {
+      await sleep(2500); // idle baseline: PREV_IDLE=1
+      startBusyLoop(p.env, p.session);
+      assert.ok(await waitForOutput(mon, /OUTER-RESUMED gate/, 8000), `RESUMED must fire on busy:\n${mon.output()}`);
+      stopBusyLoop(p.env, p.session);
+      const stable = await waitForPaneStable(p.env, p.session, 15000);
+      assert.ok(stable !== null, "pane must return to a stable idle state");
+      assert.ok(await waitForOutput(mon, /OUTER-IDLE gate/, 10000),
+        `IDLE must fire when the tick is stale (idle but no tick):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy cycle end)", async () => {
+  const p = makeHermeticProbe("ol-gate-fresh");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.writeFileSync(tick, "# tick\n"); // mtime = now → tmin ≈ 0, well under LOOP_MIN=5
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `gate ${p.tmp} ${p.session}`, { tickLogs: `gate ${tick}`, interval: 1, loopMin: 5 });
+    try {
+      await sleep(2500); // idle baseline: PREV_IDLE=1
+      startBusyLoop(p.env, p.session);
+      assert.ok(await waitForOutput(mon, /OUTER-RESUMED gate/, 8000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
+      stopBusyLoop(p.env, p.session);
+      const stable = await waitForPaneStable(p.env, p.session, 15000);
+      assert.ok(stable !== null, "pane must return to a stable idle state");
+      await sleep(3500); // ≥3 rounds after stability — IDLE would have fired by now if not gated
+      assert.ok(!/OUTER-IDLE/.test(mon.output()),
+        `IDLE must be SILENT when the tick is fresh (healthy cycle end, noise gate):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
