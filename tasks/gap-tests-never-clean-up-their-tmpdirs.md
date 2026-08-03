@@ -204,8 +204,8 @@ resume   n/a: 单次测量，无中途产物
       两次测量的原始数字都贴进任务体
 - [ ] AC4: **负控制**——故意在一个 fixture 里去掉清理，断言 `leaked_after_suite > 0`；
       恢复后回到 0。两个方向都要有
-- [ ] AC5: 契约补第五条「`mkdtemp` 建的必须删」，并接进 `test-isolation-check.ts` 的静态扫描；
-      违规名单是 shrink-only 棘轮
+- [ ] AC5: 契约补第六条 R6「`mkdtemp` 建的必须删」（契约已含 R1–R5，R5 为 2026-08-03 浅克隆规则），
+      并接进 `test-isolation-check.ts` 的静态扫描；违规名单是 shrink-only 棘轮
 - [ ] AC6: 扫描器**永不匹配** `/tmp/claude-*` 与 `/tmp/quay-wt-*`——用 fixture 断言这两个前缀被排除
 - [ ] AC7: 任务体记录外层 2026-08-03 那次一次性清理的命令与结果（158,757 条目 / 2,454 MB），
       **并注明清理脚本不是修复**
@@ -224,7 +224,7 @@ resume   n/a: 单次测量，无中途产物
 
 - plugin/scripts/test-isolation-check.ts
 - plugin/test/test-isolation-check.test.mjs
-- docs/analysis/test-shape-analysis.md
+- docs/analysis/test-isolation-contract.md
 
 ## Dispatch review
 
