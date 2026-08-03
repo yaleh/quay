@@ -2,7 +2,7 @@
 id: gap-quay-init-rewrites-an-executable-instead-of-generating-config
 title: quay-init --loop rewrites session-liveness.sh's body, so the installed copy can
   never be diffed against the source — generate config, copy executables verbatim
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -125,8 +125,11 @@ resume 先去掉改写路径并让 `cmp` 通过，再补机械检查防回归
 
 - [x] AC3 与 AC4 的实跑输出贴进任务体（见下「Execution evidence」）——`cmp` 的「不同」方向被真实触发过，
       不是只报「相同」
-- [~] 完整套件连跑 2 次全绿——**只跑到 1 次？标 `[~]` 写明**：本任务在隔离 worktree 执行，纪律禁止
-      自启全量套件（全量由协调方 fan-in 承担）。本轮 scoped 证据：`node --test` 两个测试文件 25 用例全绿、
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 qinit fan-in 重跑，**2098 tests /
+      2078 pass / 0 fail / 0 cancelled**，`/tmp/qinit-fanin-fullsuite2.log`，2026-08-03；含本任务合并代码）。
+      非连跑 2 次。早前 suite #1 红在 3× M52 acceptance 60s 超时 + heavy-op-token AC2（均负载 flake、
+      隔离通过）+ loop-shipping AC1b（qinit 引入的 verify-installed-executables.sh 旧 tick 文档路径，
+      已修）。scoped 证据：`node --test` 两个测试文件 25 用例全绿、
       `bash scripts/test.sh plugin/test/{quay-init-loop,session-liveness}.test.mjs` 全绿（含静态检查）、
       `bash test/cold-start-e2e.sh` 全绿、`bash test/cold-start-e2e.sh --from-build` 全绿、
       `bash test/cold-start-e2e.sh --sabotage-byte scripts/session-liveness.sh` 全绿（AC4 双向在一条 e2e 里演示）。

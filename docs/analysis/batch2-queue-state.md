@@ -1471,3 +1471,13 @@ _sl_session 改 env/配置 + 默认值。三条硬要求：AC4 双向 cmp 负控
 AC8 tick 文档占位符替换不许动。cmp 断言自然挂点 = cold-start-e2e 的 --from-build 路径。
 
 **在飞 1/3**：qinit。
+
+### 关闭 qinit（2026-08-03 15:2xZ）
+
+`gap-quay-init-rewrites-an-executable-instead-of-generating-config` 已关闭（45 完成）。合并 bb17a476。
+fan-in suite #1 红（5 fail：3× M52 负载超时 + heavy-op-token AC2 负载 flake——均隔离通过；loop-shipping
+AC1b = qinit 引入的 verify-installed-executables.sh 旧 tick 文档路径，已修）。重跑绿 2098/2078/0/0。
+参考值 2094→2098。DoD 2x 如实 [~]（仅 1 次全量绿）。**套件监控改用令牌括法**（外层建议）——本次准确触发
+（此前进程/日志轮询 3 次中 2 stale 超时 1 未唤醒）。闸 WAIT 下误启动一次（套件自我中止），教训：查闸退出码。
+
+**在飞 0**。等待外层下一批。

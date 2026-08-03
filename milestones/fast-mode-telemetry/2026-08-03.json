@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T14:25:11.087Z",
+  "generatedAt": "2026-08-03T15:17:41.939Z",
   "since": null,
   "tasks": [
     {
@@ -85,6 +85,11 @@
     {
       "taskId": "gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right",
       "minutes": 92.95223333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-quay-init-rewrites-an-executable-instead-of-generating-config",
+      "minutes": 50.5096,
       "outcome": "done"
     },
     {
@@ -225,13 +230,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 56.78468181818182,
-  "medianMinutes": 56.2526,
-  "tasksPerHour": 1.5757264904890382,
-  "serialEquivalentPerHour": 1.0566229849119042,
+  "meanMinutes": 56.64523555555554,
+  "medianMinutes": 56.186366666666665,
+  "tasksPerHour": 1.5625616554758155,
+  "serialEquivalentPerHour": 1.0592241238215743,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T14:25:11.060Z",
-  "windowHours": 27.923627777777778,
+  "windowEnd": "2026-08-03T15:17:41.909Z",
+  "windowHours": 28.798863611111113,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],
