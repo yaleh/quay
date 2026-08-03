@@ -24,6 +24,9 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTask, extractSection } from "./task-schema.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
+import { stripTouchAnnotation, parseTouchEntries } from "./touches-parser.ts";
+export { stripTouchAnnotation, parseTouchEntries };
 
 // Directories searched for AC-declared symbols (repo-root-relative) — the code surface a landed
 // implementation would touch. Broad on purpose: a detector should over-match, the human decides.
@@ -151,33 +154,10 @@ function entryExists(entry, repoRoot) {
   return fs.existsSync(path.join(repoRoot, entry));
 }
 
-// Touches entries commonly carry trailing parenthetical annotations — `(new)`, `(extract from)`,
-// `(update imports)`, `(refactor Verify phase)` — that are NOT part of the path. Strip a trailing
-// "(…)" suffix so an existing file resolves; without this a landed task's entry is treated as
-// missing (a false reverse-drift / a missed forward-drift signal).
-function stripTouchAnnotation(entry) {
-  return entry.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
-
-// Parse a task's ## Touches bullet list into bare path/glob strings (backticks/quotes removed,
-// trailing "(…)" annotations stripped). Returns [] for a missing section.
-//
-// The annotation can sit EITHER outside the backticks (`` `path/foo.ts` (extract from) ``) or inside
-// them (`` `path/foo.ts (new)` ``), so quotes are stripped before AND after the annotation strip —
-// stripping only before leaves the annotation masked by the trailing backtick in the first form;
-// stripping only after misses the inside-the-backticks form.
-export function parseTouchEntries(touchesSection) {
-  if (!touchesSection) return [];
-  return touchesSection
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => /^[-*]\s+/.test(l))
-    .map((l) => l.replace(/^[-*]\s+/, "").trim())
-    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim()) // surrounding quotes/backticks first
-    .map(stripTouchAnnotation)                                  // then trailing "(…)"
-    .map((l) => l.replace(/^[`"'']+|[`"'']+$/g, "").trim()) // then any backtick the annotation masked
-    .filter(Boolean);
-}
+// ── Touches bullet parsing — SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority) ──────────
+// The ONE implementation lives in touches-parser.ts (stripTouchAnnotation + parseTouchEntries),
+// imported and re-exported above. The reverse-drift check's parser was the "already-correct" one,
+// so it became the canonical shared module; every other parser now delegates to it.
 
 // Parse a task's ## Touches bullet list and check every entry exists on disk (glob entries match at
 // least one file). A Touches section that parses to zero entries is treated as not-all-exist

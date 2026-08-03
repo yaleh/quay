@@ -27,13 +27,23 @@ reference data.
 
 ## 3. Touches matching (preflight `preflightTouchesMismatch`)
 
-- Parenthetical comments after a backticked path (e.g. `.quay/config.yml (this repo's
-  own...)`) break the exact-path match — the whole line is treated as the path. Touches
-  entries must be clean paths.
+- Parenthetical annotations after a backticked path (`` `foo.ts` (new) ``, `.quay/config.yml
+  (this repo's own…)`) are stripped by the ONE shared Touches parser
+  (`plugin/scripts/touches-parser.ts` `parseTouchEntries`) — quotes/backticks are removed
+  BEFORE and AFTER the trailing `(…)` strip, so BOTH `` `path/x.ts` (new) `` and
+  `` `path/x.ts (new)` `` resolve to `path/x.ts`. Measured before 2026-08-03
+  (gap-task-body-has-n-parsers-and-no-authority): this was NOT always true — two parsers
+  disagreed on the same line, with `touches-orthogonality-check.ts`'s `parseTouches`
+  producing a residual-backtick wrong path (`foo.ts``) while `task-status-drift-check.ts`'s
+  `parseTouchEntries` produced the clean path; the wrong one was the fast-mode concurrency
+  eligibility parser, so an annotated task was judged "matched nothing (likely a typo)".
+  After the fix all parsers delegate to the single implementation and agree.
 - Directory entries (e.g. `packages/quay/src/gate/config/`) do NOT satisfy exact-file
   matching — list the concrete files.
 - Content appended AFTER `## Touches` is parsed as Touches entries and can trip
   `touches-overbroad` — grounded facts must live in `## Finding`, never after `## Touches`.
+  `task-schema.ts` reports such content (A11, report-only this window; shrink-only violator
+  list at `plugin/touches-post-content-violators.txt`).
 
 ## 4. Provider runtime defaults (validate vs runtime parity)
 

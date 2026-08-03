@@ -16,6 +16,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
+// SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
+import { parseTouchEntries, extractTouchesSection } from "./touches-parser.ts";
 
 // Kept for reference / callers; the authoritative test is isOverbroadDeclaration (semantic, below).
 export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
@@ -57,39 +59,27 @@ export function isOverbroadDeclaration(glob) {
 }
 
 // ── parseTouches ─────────────────────────────────────────────────────────────────────────────────
-// Extract the `## Touches` section's path globs. Accepts `- ` and `* ` bullets; strips a leading `./`.
+// Extract the `## Touches` section's path globs. Accepts `- ` and `* ` bullets.
 // Returns { hasSection, globs }. hasSection distinguishes "no declaration" (→ conservative) from
 // "declared empty".
+//
+// SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the bullet→path parsing (backtick/
+// quote stripping, trailing "(…)" annotation stripping — both outside-backticks and
+// inside-backticks forms — and leading `./` removal) is DELEGATED to the ONE shared implementation,
+// parseTouchEntries in ./touches-parser.ts. This module no longer has its own copy — the residual
+// trailing backtick on `` - `foo.ts` (new) `` (DIR-106 Fix 1 stripped the annotation but left the
+// closing backtick the annotation had masked) is what made the FAST-MODE eligibility path judge an
+// annotated task as "matched nothing (likely a typo)". Only the glob-formation step is local:
+// trailing-slash directory globs get `**` appended (DIR-106 Fix 3).
 export function parseTouches(text) {
-  const lines = String(text).split(/\r?\n/);
-  let inSection = false;
-  let hasSection = false;
-  const globs = [];
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const heading = line.match(/^#{1,6}\s+(.*)$/);
-    if (heading) {
-      inSection = /^touches\b/i.test(heading[1].trim());
-      if (inSection) hasSection = true;
-      continue;
-    }
-    if (!inSection) continue;
-    const bullet = line.match(/^\s*[-*]\s+(.+?)\s*$/);
-    if (!bullet) continue;
-    let g = bullet[1].trim();
-    // allow inline code backticks around the path
-    g = g.replace(/^`+|`+$/g, "").trim();
-    g = g.replace(/^\.\//, "");
-    // DIR-106 Fix 1: strip trailing parenthetical annotations — charter authors naturally
-    // write "file.ts (new)" or "file.js (rewrite ...)" but the annotation is not part of the
-    // file path and breaks glob expansion.
-    g = g.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const { hasSection, section } = extractTouchesSection(text);
+  const globs = parseTouchEntries(section).map((g) => {
     // DIR-106 Fix 3: normalize trailing-slash directory globs — "milestones/M155/" matches
     // the literal directory string, not files within it. Append ** so the glob expands to
     // all files under that directory. Guard: only when no wildcard is already present.
     if (g && g.endsWith("/") && !/[*?]/.test(g)) g += "**";
-    if (g) globs.push(g);
-  }
+    return g;
+  });
   return { hasSection, globs };
 }
 

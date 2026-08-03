@@ -47,6 +47,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
+import { parseTouchEntries } from "./touches-parser.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -191,21 +193,16 @@ export function indexTestFiles(root) {
  * Parse the bullet lines of a markdown section body (`## Touches` / `## Test-Files`). Accepts `- `
  * and `* ` bullets; strips inline-code backticks, a leading `./`, and trailing `(… )` annotations
  * (e.g. `packages/x.js (rewrite)` → `packages/x.js` — the annotation is not part of the path).
+ *
+ * SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): this is a pure delegate to the ONE
+ * shared Touches bullet parser (parseTouchEntries in touches-parser.ts). The naive inline copy
+ * stripped backticks only at the line's start/end, so `` `x.ts` (new) `` kept a residual trailing
+ * backtick after the annotation strip (the exact bug this task kills). No second copy lives here.
  * @param {string} sectionText
  * @returns {string[]}
  */
 export function parseBulletList(sectionText) {
-  const entries = [];
-  for (const raw of String(sectionText).split(/\r?\n/)) {
-    const m = raw.match(/^\s*[-*]\s+(.+?)\s*$/);
-    if (!m) continue;
-    let e = m[1].trim();
-    e = e.replace(/^`+|`+$/g, "").trim();
-    e = e.replace(/^\.\//, "");
-    e = e.replace(/\s*\([^)]*\)\s*$/, "").trim();
-    if (e) entries.push(e);
-  }
-  return entries;
+  return parseTouchEntries(sectionText);
 }
 
 // ── Single-entry resolution ──────────────────────────────────────────────────────────────────────────

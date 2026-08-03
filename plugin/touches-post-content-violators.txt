@@ -1,0 +1,38 @@
+# touches-post-content-violators.txt — shrink-only ratchet for the ## Touches post-content check
+# (gap-task-body-has-n-parsers-and-no-authority, AC6).
+#
+# CHECK: task-schema.ts `checkTouchesPostContent` (A11) reports (INFO, never a FAIL) any non-bullet
+# content inside a task's `## Touches` section — prose, grounded facts, an illustrative fenced
+# block, a stray horizontal rule. repo-ground-truth.md §3 grounds the harm: "Content appended AFTER
+# `## Touches` is parsed as Touches entries and can trip touches-overbroad — grounded facts must
+# live in `## Finding`, never after `## Touches`."
+#
+# RATCHET: this list can ONLY get SHORTER. It records the tasks that currently carry non-bullet
+# content inside `## Touches` (measured 2026-08-03). Removing an entry means FIXING that task (move
+# the grounded facts to `## Finding` / clean the section), then deleting its line. The `#
+# baseline-count: <n>` line below is the MACHINE-READABLE CEILING (like test-framework-policy-
+# exemptions.txt): the list can never exceed this many entries, even at a clean commit.
+#
+# Blocking is DEFERRED to the next window (AC6: "本任务不改为阻断，阻断是下一个窗口的事"). When the
+# check becomes blocking, a NEW violation — a task not on this list — will fail the schema check
+# exactly as a grown ratchet; the path forward is to shrink this list, never to grow it.
+#
+# baseline-count: 17
+
+DIR-075.md
+DIR-099-C.md
+DIR-103-B.md
+DIR-103-C.md
+DIR-106.md
+DIR-117.md
+DIR-120.md
+DIR-124-A1b.md
+DIR-125.md
+DIR-126.md
+gap-fast-mode-no-telemetry.md
+gap-m264-build-evidence-regress-flaky.md
+gap-no-resource-awareness-heavy-ops-run-blind.md
+gap-select-preflight-json-real-store-too-slow.md
+gap-suite-concurrency-4-vs-8-measurement.md
+gap-test-isolation-contract-is-unwritten.md
+gap-tests-use-cli-where-module-import-suffices.md

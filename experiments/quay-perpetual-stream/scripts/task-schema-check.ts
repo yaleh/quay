@@ -54,6 +54,13 @@ for (const file of files) {
   for (const w of (report.warnings || [])) {
     console.log(`INFO: ${file} — ${w.code}: ${w.message}`);
   }
+  // Emit REPORT-ONLY findings (never a FAIL — they join INFO, not the exit code): Contract syntax
+  // (A9), Dispatch review format (A10), and the ## Touches post-content check (A11,
+  // gap-task-body-has-n-parsers-and-no-authority). Blocking is deferred to the next window; these
+  // are the ratchet baseline for the shrink-only violator lists.
+  for (const f of (report.findings || [])) {
+    console.log(`INFO: ${file} — ${f.code}: ${f.what}`);
+  }
 }
 
 console.log("");
