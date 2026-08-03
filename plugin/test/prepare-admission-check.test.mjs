@@ -7,7 +7,7 @@
 // single-flight race simulation, renewal-vs-stall distinction, Admission-phase-error CLI shape),
 // M201 Stages 1/3/6 (five preflight detectors RED/GREEN/ambiguous, runPreflightChecks content/plan
 // modes, --preflight/--preflight-plan CLI, calibration).
-import { test, describe } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -52,9 +52,20 @@ function _findRepoRoot(startDir) {
 const REPO_ROOT = _findRepoRoot(__dirname);
 const FIXTURES = path.join(__dirname, "fixtures", "preflight");
 
+// gap-tests-never-clean-up-their-tmpdirs: makeWorkspace() created a per-run-unique
+// `prepare-admission-*` dir that callers never removed — /tmp (tmpfs) accumulated 14,220 of them
+// (~9% of the 158,757 leaked entries). The node:test file-level after() hook removes every created
+// workspace after the file's tests complete (runs even on failure; unlike a process.on('exit') hook
+// which does not run on process.exit(1) in hand-rolled harnesses).
+const _createdWorkspaces = [];
 function makeWorkspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "prepare-admission-"));
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "prepare-admission-"));
+  _createdWorkspaces.push(ws);
+  return ws;
 }
+after(() => {
+  for (const ws of _createdWorkspaces) fs.rmSync(ws, { recursive: true, force: true });
+});
 
 /** Hermetic git workspace: a temp repo with one real commit. Shallow-clone-safe — the cited commit
  *  exists in THIS repo, not the (possibly depth-1) real checkout. (CI red 2026-08-03: the good.md

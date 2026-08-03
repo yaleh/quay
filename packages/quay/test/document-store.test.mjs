@@ -4,16 +4,26 @@
 // (skill/methodology-doc/etc.), NOT a decision (no accept/reject lifecycle)
 // and NOT a task (no todo/done lifecycle) — its own draft/active/retired
 // lifecycle. RED-first per ADR-001 (TDD).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createDocumentStore, VALID_DOCUMENT_STATUSES } from "../src/document-store.ts";
 
+// gap-tests-never-clean-up-their-tmpdirs: every tmpDir() created a per-run-unique dir that was never
+// removed — /tmp (tmpfs) accumulated 2,868 `document-store-*` dirs. The node:test file-level after()
+// hook removes every created dir after the file's tests complete (runs even on failure; unlike a
+// process.on('exit') hook which does not run on process.exit(1) in hand-rolled harnesses).
+const _createdDirs = [];
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "document-store-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "document-store-"));
+  _createdDirs.push(dir);
+  return dir;
 }
+after(() => {
+  for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test("VALID_DOCUMENT_STATUSES is the managed-artifact lifecycle (no decision or todo/done)", () => {
   assert.deepEqual(VALID_DOCUMENT_STATUSES, ["draft", "active", "retired"]);

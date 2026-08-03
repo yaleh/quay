@@ -74,6 +74,38 @@ tmpfs 占的是 RAM。清理前后的实测：
 `quay-loop-params-trig-fuzz-` 32、`document-store-` 20 / 30 分钟），说明**漏点稳定**，
 AC1 的归因表会很快收敛。
 
+## 派发时序与实测（2026-08-03，实际执行）
+
+**AC1 归因搭的车**：初稿的时序约定是「搭 sigma 两次受控 back-to-back 运行」——那两次**已完成，
+sigma 已合并**。实际执行搭的是**协调方的 fan-in 全量套件**（跑在主工作树，pid 752812，日志
+`/tmp/sigma-fanin-fullsuite.log`）。AC3 的修复前/后对照 = 本次样本 #1（修复前）+ 关闭 sigma 时
+协调方跑的套件（修复后）。
+
+| 时点 | `/tmp` 顶层条目 | 说明 |
+|---|---|---|
+| 派发基线（套件运行中） | 15,297 | 套件已开跑几分钟，基线含在飞条目 |
+| 套件 #1 完成（后计数） | 15,649 | 净 **+352**（部分窗口——基线在套件中途采，非全量窗口） |
+| M136 重跑前快照 | 15,673 | `/tmp/snapshot-pre-rerun.txt`（全量列表，供前缀级归因） |
+| 修复后套件（AC3 后计数） | （待协调方通知） | 与样本 #1 构成修复前/后对照 |
+
+## AC7 记录：外层 2026-08-03 一次性清理
+
+**命令**（外层 `unblock` tick 执行，>2h）：按 fixture 前缀匹配 `/tmp` 顶层目录并删除，
+**显式排除 `quay-wt-*`（在用 worktree）与 `claude-*`（会话数据）**：
+```bash
+# 代表性形态（外层实际执行）
+find /tmp -maxdepth 1 -type d \( -name 'prepare-admission-*' -o -name 'prep-check-*' \
+  -o -name 'quay-loop-params-*' -o -name 'adr-store-*' -o -name 'document-store-*' \
+  -o -name 'quay-qeng2-*' -o -name 'quay-doc-cli-*' \) ! -name 'quay-wt-*' \
+  ! -name 'claude-*' -exec rm -rf {} +
+```
+**结果**：**删 158,757 条目、释放 2,454 MB**。`/tmp` 80%→50%、tmpfs 占内存 4,623→2,823 MB、
+MemAvailable 5,291→7,370 MB、swap 1,779→1,142 MB。
+
+**⚠ 清理脚本不是修复（AC7）**：判据是 **`leaked_after_suite = 0`**，不是 `/tmp` 当下有多空。
+外层清理只清存量；只要测试还在 `mkdtemp` 而从不删，回填速率（活跃期约 3,200/小时）会重新填满。
+修复 = AC2（给泄漏测试加 `try/finally` / `t.after()` 删除）+ 本任务 R6 契约规则。
+
 ## Contract
 
 ```
@@ -121,6 +153,27 @@ resume   n/a: 单次测量，无中途产物
 
 **派发时的实测规模**：`/tmp` 15,052 条目（外层清理后 8,866）、近 30 分钟新增 1,836 个、
 占用 3899/7994 MB。
+
+## 执行记录（2026-08-03，worktree agent-ae4194bd3188feacd）
+
+- **AC2（修前 4）**：给泄漏量前 5 里的 4 个可归因测试加删除——`packages/quay/test/adr-store.test.mjs`
+  （`adr-store-` 3,590）、`packages/quay/test/document-store.test.mjs`（`document-store-` 2,868）、
+  `packages/quay/test/loop-params.test.mjs`（`quay-loop-params-*` 4,337，含 `trig-fuzz` leg）、
+  `plugin/test/prepare-admission-check.test.mjs`（`prepare-admission-` 14,220 ≈9%）。
+  **每个用 node:test 文件级 `after()` 钩子**（等效 `t.after()` 于文件作用域；失败路径也执行，与
+  `process.on('exit')` 不同——后者在 `process.exit(1)` 下不跑）。单文件实测泄漏为 0
+  （`before==after`，前缀计数不变）。**`prep-check-`（9,128）在现行源码里找不到创建者**
+  ——该前缀目录含 `charter.md/plan.md/r.json/task.md`，像是外层/退役 prepare 流程的 preflight 工作区，
+  非当前测试文件产物；留作未归因。
+- **AC5（R6）**：`docs/analysis/test-isolation-contract.md` 加 **R6**（R1–R5 已存在，R5 为 2026-08-03
+  浅克隆规则）；`plugin/scripts/test-isolation-check.ts` 加 `mkdtemp-no-cleanup` 判定并接进 `detectAll`；
+  违规名单（shrink-only 棘轮）从 23 → **51** 条（28 条为 R6 现行违规，一次性 re-baseline）。
+- **AC6**：R6 判定**永不匹配** `/tmp/claude-*` 与 `/tmp/quay-wt-*` 前缀（fixture 断言两个方向）。
+- **AC4（负控制，fixture 级）**：`plugin/test/test-isolation-check.test.mjs` 里「去掉清理 ⇒ 报出
+  >0；恢复 `t.after` ⇒ 回到 0」双向断言通过。**套件级**负控制（`leaked_after_suite > 0`）待 AC3
+  的修复后全量套件运行时一并验证。
+- **未做（留待关闭时）**：AC1 归因表（前缀→测试→每次泄漏数）、AC3 修复前/后对照（样本 #1 + 关闭
+  sigma 时的修复后套件）——两个都需要全量套件实测，套件完成后再补。
 
 ## Acceptance Criteria
 
