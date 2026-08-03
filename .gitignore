@@ -57,6 +57,12 @@ orchestration/inner-idle-log.jsonl
 *.rej
 .mutation-backup/
 
+# gap-m264-build-evidence-regress-flaky (2026-08-03): repo-root tmp/ is RUNTIME residue, not
+# source — build-evidence-manifest.test.mjs used to mkdir it for scratch, and a leaked scratch
+# there polluted `git status` (`?? tmp/`). The test no longer creates it (scratch moved to
+# os.tmpdir()); ignore the dir so any future residue can never dirty the tree again.
+tmp/
+
 # Claude Code personal/local overrides — never shared config, never commit
 .claude/settings.local.json
 
