@@ -49,7 +49,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| **并发批次（3 在飞，AC13 首证）** | **relation-sync**（fm-...-1zhl5t，/tmp/quay-wt-relsync）+ **blocked-signal**（fm-...-tvlfl3，/tmp/quay-wt-blocked）+ **test-framework-policy**（fm-...-syg65l，/tmp/quay-wt-fwpolicy）。checkTouchesPair 两两 DISJOINT。00:26 tick：3 个都 ~20min 在飞（各 worktree 开发中，未提交）。**blocked-signal 自身缺陷**：测试写真实 .workflow-events 造幽灵 orphaned——`5d8pfx`（已清，立即再污染成 `8t8v9i`，00:22:24，修复前残留）。**subagent 已修测试传 --root tmpRoot**（判据：跑完测试真实 .workflow-events 不新增）。**教训：成因活着时清理症状会一分钟内再污染——先修成因再清理；观测机制自身的测试污染了被观测的存储** |
+| **并发批次（3 完成，fan-in 进行中）** | **relation-sync**（已 merge `6dbb96bc`，全量 #1 绿 2298/2280/0，#2 验证中）+ **blocked-signal**（分支 `77417e06`，round-2 REFUTE APPROVE，等 fan-in）+ **test-framework-policy**（分支 5 提交含 round-2 修复 `b3244b45`/`c3ded940`，REVISE 已修，等 fan-in）。checkTouchesPair 两两 DISJOINT。**blocked-signal 自身缺陷已根治**：测试改传 --root tmpRoot，真实 .workflow-events 零 blk-\*、orphaned 空。**policy 额外发现**：`scripts/test-coverage-check.ts` 解析 `files=(...)` 但 test.sh 已改 `glob=(...)`，master 上 selftest 红（孤儿脚本，未接线），建议另立 gap |
 | **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |
