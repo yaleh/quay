@@ -1,8 +1,8 @@
 ---
 id: gap-retire-the-prepare-execute-pipeline-cluster
-title: "The prepare/execute pipeline is ~14,600 lines that have not run in 22h —
-  it belongs to a mode quay exists to replace, so retire it"
-status: todo
+title: The prepare/execute pipeline is ~14,600 lines that have not run in 22h —
+  it belongs to a mode quay exists to replace, so retire it
+status: done
 labels:
   - gap
   - milestone-candidate
