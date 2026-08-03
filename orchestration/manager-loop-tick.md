@@ -21,17 +21,6 @@
 
 **唯一例外**：跨项目的共享机件（`heavy-op-token.sh`、三项目 `.halt` 约定、
 
-**令牌状态在哪看**（2026-08-03 补：管理者查压力尖峰时在 `.quay/` 和 `/tmp` 里翻了半天，
-因为这条从没写下来）：
-
-```bash
-T="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/heavy-op"
-cat "$T/token"        # holder / pid / acquired_ms / host；文件不存在 = 无人持有
-```
-
-**判「是不是绕过令牌」不能只数 `node --test` 进程**——一个并发套件本来就有多个 worker，
-测试内部还可能再跑嵌套套件。**要看进程血统**：这些 `node --test` 的祖先是不是同一个
-持有令牌的 pid。同一个 = 一个套件，合法；不同的 = 真有人绕过。
 tmux 布局约定）——那些没有别的主人。
 
 ## 0.5 每个 tick 先看一眼自己的目标
@@ -97,6 +86,18 @@ rm <repo>/.halt                                                  # 恢复
 
 跨项目重活（全量套件等）**已由 `plugin/scripts/heavy-op-token.sh` 串行化**——
 那是事件驱动的，管理者**不需要轮询资源冲突**。这正是管理者 tick 可以比外层 tick 稀疏的原因。
+
+**令牌状态在哪看**（2026-08-03 补：管理者查压力尖峰时在 `.quay/` 和 `/tmp` 里翻了半天，
+因为这条从没写下来）：
+
+```bash
+T="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/heavy-op"
+cat "$T/token"        # holder / pid / acquired_ms / host；文件不存在 = 无人持有
+```
+
+**判「是不是绕过令牌」不能只数 `node --test` 进程**——一个并发套件本来就有多个 worker，
+测试内部还可能再跑嵌套套件。**要看进程血统**：这些 `node --test` 的祖先是不是同一个
+持有令牌的 pid。同一个 = 一个套件，合法；不同的 = 真有人绕过。
 
 ## 2. 停下叫人的条件
 
