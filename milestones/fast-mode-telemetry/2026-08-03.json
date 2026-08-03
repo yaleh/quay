@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T01:03:28.895Z",
+  "generatedAt": "2026-08-03T02:25:56.949Z",
   "since": null,
   "tasks": [
     {
@@ -15,6 +15,11 @@
     {
       "taskId": "DIR-124-A5",
       "minutes": 0.09751666666666667,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ac11-spawns-the-runner-inside-the-runner",
+      "minutes": 61.879616666666664,
       "outcome": "done"
     },
     {
@@ -35,6 +40,11 @@
     {
       "taskId": "gap-relation-sync-suite-red-isolation-green",
       "minutes": 48.78273333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-reverse-drift-check-buries-true-positives-in-noise",
+      "minutes": 61.88041666666667,
       "outcome": "done"
     },
     {
@@ -68,6 +78,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-tasksperhour-measures-mean-duration-not-throughput",
+      "minutes": 61.88001666666667,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-telemetry-report-writes-and-deadlocks-readiness",
       "minutes": 23.2206,
       "outcome": "done"
@@ -95,9 +110,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 46.55956296296296,
-  "medianMinutes": 45.811191666666666,
-  "tasksPerHour": 1.2886718899773306,
+  "meanMinutes": 48.74819920634919,
+  "medianMinutes": 56.31883333333333,
+  "tasksPerHour": 1.3177406499895201,
+  "serialEquivalentPerHour": 1.230814696272623,
+  "windowStart": "2026-08-02T10:29:46.000Z",
+  "windowEnd": "2026-08-03T02:25:56.925Z",
+  "windowHours": 15.936368055555555,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0

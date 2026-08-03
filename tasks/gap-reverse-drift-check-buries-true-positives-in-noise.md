@@ -1,8 +1,8 @@
 ---
 id: gap-reverse-drift-check-buries-true-positives-in-noise
-title: "reverse-drift check flags fast-mode tasks as suspects — the noise will
-  bury the one real case it found"
-status: todo
+title: reverse-drift check flags fast-mode tasks as suspects — the noise will
+  bury the one real case it found
+status: done
 labels:
   - gap
   - defect

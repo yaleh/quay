@@ -49,7 +49,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| **并发批次（3 在飞，AC13）** | **tasksperhour**（fm-...-4ij0d7，/tmp/quay-wt-tph）+ **ac11-nested-runner**（fm-...-o3ewzl，/tmp/quay-wt-ac11）+ **reverse-drift**（fm-...-vbtmva，/tmp/quay-wt-revdrift）。checkTouchesPair 六对全 DISJOINT（实测）。dispatch-gate（fm 待派）下一批。**AC1 未达成（外层验证）**：第一次 0 fail，第二次 fail 1 = AC11 嵌套 runner（隔离 3 次绿）——「可重现」标准的价值兑现。已建 gap-ac11 + gap-test-coverage-check-parses-stale-files（非孤儿，CI 接线 + 正则 vs glob= 漂移）。M264 flaky 已建任务（AC16 证据：run1 绿/run2 红实测） |
+| **批 4（已完成，AC1 达成）** | **tasksperhour**（吞吐=count/windowHours，AC4 实测 0.896≈0.90；done）+ **ac11-nested-runner**（QUAY_TEST_SKIP_DIST_BUILD 修嵌套重建；done）+ **reverse-drift**（代码根-only 判定，改后 5 假阳性全清；done）。**AC1 达成**：全量连跑 2 次全绿（2361/2343/0/18 ×2，457.9s/473.9s）——「可重现」标准兑现（外层第一次 0 fail 未宣布，第二次才暴露 AC11）。**dispatch-gate 下一批待派**（fm 待）。已建：gap-ac11、gap-test-coverage-check-parses-stale-files（非孤儿，正则 vs glob= 漂移）、gap-m264-flaky。**外层正向漂移 9 条 + 检测器盲区（删除类任务 Touches 语义反）已记入本文件下方** |
 | **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |

@@ -1,8 +1,8 @@
 ---
 id: gap-ac11-spawns-the-runner-inside-the-runner
-title: "AC11 spawns a full scripts/test.sh inside the suite — isolation-green,
-  suite-red, and it blocks AC1's reproducibility"
-status: todo
+title: AC11 spawns a full scripts/test.sh inside the suite — isolation-green,
+  suite-red, and it blocks AC1's reproducibility
+status: done
 labels:
   - gap
   - defect
