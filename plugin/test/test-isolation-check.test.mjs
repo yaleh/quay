@@ -11,6 +11,11 @@
 //               strings, and process.exitCode never report.
 //   - R6 (AC2/AC6): mkdtemp with no cleanup construct anywhere reports; rm/after/finally cleanup
 //               does not; /tmp/claude-* and /tmp/quay-wt-* prefixes are NEVER matched (AC6).
+//   - R8 (AC1/AC2/AC4): a mkdtemp whose ROOT resolves into the shared checkout
+//               (REPO_ROOT/repoRoot/__dirname/process.cwd() or a derived variable) reports —
+//               per-run-unique is NECESSARY, not SUFFICIENT; an os.tmpdir()/makeTmp root never
+//               reports, and the pattern inside a string literal (the detector's own fixture)
+//               never reports (AC3).
 //   - AC3/AC4 rehearsal (CLI): the real-repo run reports the three known instances (M136's
 //               plugin-packaging, AC11's select-tests-for-touches; relation-sync is fixed and
 //               must NOT report) and the 7 remaining process.exit(1) harnesses.
@@ -35,6 +40,7 @@ import {
   detectProcessExit1,
   detectMkdtempNoCleanup,
   detectLiveDataDirWrites,
+  detectSharedRootMkdtemp,
   runIsolationChecks,
 } from "../scripts/test-isolation-check.ts";
 
@@ -263,6 +269,114 @@ test("R7/AC2: a fixed-name write into tasks/ via process.cwd() reports; per-run-
   );
 });
 
+// ── R8 / AC1/AC2/AC4: mkdtemp rooted in the shared checkout ────────────────────────────────────────
+test("R8/AC2: a mkdtemp rooted in the shared checkout (REPO_ROOT/__dirname/cwd) reports; os.tmpdir/makeTmp roots do not", () => {
+  // the gap-mkdtemp specimen: ts-typecheck-gate.test.mjs — `mkdtempSync(path.join(REPO_ROOT, …))`.
+  assert.ok(
+    detectSharedRootMkdtemp(
+      'const logFile = path.join(fs.mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-")), "g.jsonl");\n',
+      "x.test.mjs"
+    ).some((v) => v.rule === "shared-root-mkdtemp"),
+    "REPO_ROOT-rooted mkdtemp must report (the ts-typecheck-gate specimen)"
+  );
+  // the second live specimen: loadbearing-test-gate.test.mjs — `mkdtempSync(path.join(__dirname, …))`.
+  assert.ok(
+    detectSharedRootMkdtemp(
+      'const tmp = fs.mkdtempSync(path.join(__dirname, "..", "fixtures", "loadbearing", ".tmp-tree-"));\n',
+      "x.test.mjs"
+    ).some((v) => v.rule === "shared-root-mkdtemp"),
+    "__dirname-rooted mkdtemp must report (the loadbearing specimen)"
+  );
+  // a process.cwd()-derived variable root (the R7/R8 class — process.cwd() IS the shared checkout).
+  assert.ok(
+    detectSharedRootMkdtemp(
+      'const cwd = process.cwd();\nconst dir = fs.mkdtempSync(path.join(cwd, "leak-"));\n',
+      "x.test.mjs"
+    ).some((v) => v.rule === "shared-root-mkdtemp"),
+    "process.cwd()-derived root must report"
+  );
+  // variable indirection the grep cannot see: `const ROOT = path.join(REPO_ROOT, "fixtures")` then mkdtemp(ROOT).
+  assert.ok(
+    detectSharedRootMkdtemp(
+      'const ROOT = path.join(REPO_ROOT, "fixtures");\nconst dir = fs.mkdtempSync(path.join(ROOT, "leak-"));\n',
+      "x.test.mjs"
+    ).some((v) => v.rule === "shared-root-mkdtemp"),
+    "a REPO_ROOT-derived variable root must report (the grep misses this shape)"
+  );
+  // SAFE: os.tmpdir() root — the fix shape.
+  assert.equal(
+    detectSharedRootMkdtemp('const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-ts-typecheck-gate-"));\n', "x.test.mjs").length,
+    0
+  );
+  // SAFE: a makeTmp-derived variable root.
+  assert.equal(
+    detectSharedRootMkdtemp('const ws = makeTmpDir("x-ws-");\nconst d = fs.mkdtempSync(path.join(ws, "sub-"));\n', "x.test.mjs").length,
+    0
+  );
+  // SAFE (AC4 negative control): an unknown (function-param) root is lenient-skipped.
+  assert.equal(
+    detectSharedRootMkdtemp('const dir = fs.mkdtempSync(path.join(rootParam, "x-"));\n', "x.test.mjs").length,
+    0
+  );
+  // SAFE (AC3): a comment mentioning the pattern is not a violation (code-position matching).
+  assert.equal(
+    detectSharedRootMkdtemp('// fs.mkdtempSync(path.join(REPO_ROOT, ".quay-tmp-test-")) mention\nconst x = 1;\n', "x.test.mjs").length,
+    0
+  );
+  // SAFE (AC3): the pattern inside a STRING LITERAL — the detector's OWN test fixture at line 57 —
+  // must never report (this is the scan false positive the task's table lists).
+  assert.equal(
+    detectSharedRootMkdtemp(
+      'const s = \'const dir = fs.mkdtempSync(path.join(__dirname, "..", "fixtures", ".tmp-tree-"));\';\n',
+      "x.test.mjs"
+    ).length,
+    0,
+    "the string-literal fixture in this very file must not report (AC3)"
+  );
+});
+
+// ── AC5 / suite-after: the assert-clean-tree.sh clean-tree assertion (both directions) ────────────
+test("AC5/clean-tree: the suite-after assertion fails on a dirty tree and passes on a clean one", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-isolation-clean-tree-"));
+  const CLEAN_TREE_SH = path.join(REPO_ROOT, "plugin", "scripts", "assert-clean-tree.sh");
+  try {
+    // A real git repo with one committed file — a meaningful "clean" baseline.
+    fs.writeFileSync(path.join(scratch, "seed.txt"), "x", "utf8");
+    const gitCmd = (args) => spawnSync("git", args, { cwd: scratch, encoding: "utf8" });
+    gitCmd(["init", "-q"]);
+    gitCmd(["config", "user.email", "test@example.com"]);
+    gitCmd(["config", "user.name", "test"]);
+    gitCmd(["add", "-A"]);
+    gitCmd(["commit", "-q", "-m", "seed"]);
+
+    // GREEN: clean tree → exit 0, PASS.
+    let res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `clean tree must PASS:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /PASS: git status --porcelain is empty/);
+
+    // RED: an untracked file (the transient-artifact shape the assertion exists to catch) → exit 1.
+    fs.writeFileSync(path.join(scratch, ".quay-tmp-test-abc"), "leftover", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a dirty tree must FAIL:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /DIRTY after the full suite/);
+    assert.match(res.stderr, /\.quay-tmp-test-abc/);
+
+    // GREEN (AC4 restore direction): removing the artifact restores PASS.
+    fs.rmSync(path.join(scratch, ".quay-tmp-test-abc"));
+    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `restoring a clean tree must PASS again:\n${res.stdout}\n${res.stderr}`);
+
+    // RED (fail-closed): a non-git dir → exit 1 with a clear message.
+    const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), "test-isolation-clean-tree-nongit-"));
+    fs.writeFileSync(path.join(nonGit, "x.txt"), "x", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, nonGit], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a non-git dir must fail closed:\n${res.stdout}\n${res.stderr}`);
+    fs.rmSync(nonGit, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // ── the ratchet (runIsolationChecks, AC5) ───────────────────────────────────────────────────────────
 test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries fail", () => {
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];
@@ -313,6 +427,16 @@ test("AC3/AC4 rehearsal: real repo reports the three known instances + the 7 rem
   // instances were FIXED — neither may report live-data-dir-write
   assert.ok(!lines.some((l) => l.startsWith("experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs:live-data-dir-write")), `it0-dod-check R7 must not report:\n${res.stdout}`);
   assert.ok(!lines.some((l) => l.startsWith("plugin/test/workflow-event-schema.test.mjs:live-data-dir-write")), `workflow-event-schema R7 must not report:\n${res.stdout}`);
+  // AC2/AC5 (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): the THREE R8
+  // shared-root-mkdtemp instances (the 2 the grep found + run-identity's REPO_ROOT/tmp root) were
+  // FIXED to os.tmpdir() — none may report shared-root-mkdtemp
+  for (const f of [
+    "experiments/quay-perpetual-stream/test/loadbearing-test-gate.test.mjs",
+    "packages/quay/test/ts-typecheck-gate.test.mjs",
+    "plugin/test/run-identity.test.mjs",
+  ]) {
+    assert.ok(!lines.some((l) => l.startsWith(`${f}:shared-root-mkdtemp`)), `${f} R8 must not report (fixed to os.tmpdir):\n${res.stdout}`);
+  }
   // AC4: the 7 remaining known process.exit(1) harnesses (AC7 list, minus the fixed relation-sync)
   for (const f of [
     "packages/quay-native/test/adversarial-eval.test.mjs",
@@ -339,19 +463,20 @@ test("AC7: a manually constructed violating test file is reported by the CLI (no
     fs.mkdirSync(testDir, { recursive: true });
     fs.writeFileSync(
       path.join(testDir, "deliberately-violating.test.mjs"),
-      '// @test-group product\nconst tasksDir = path.join(__dirname, ".tmp-constructed-bad");\nfunction fail() { process.exit(1); }\n'
+      '// @test-group product\nconst tasksDir = path.join(__dirname, ".tmp-constructed-bad");\nfunction fail() { process.exit(1); }\nconst d = fs.mkdtempSync(path.join(REPO_ROOT, "constructed-"));\n'
     );
     const dataFile = path.join(scratch, "plugin", "test-isolation-violations.txt");
     fs.mkdirSync(path.dirname(dataFile), { recursive: true });
-    fs.writeFileSync(dataFile, "# baseline-count: 2\npackages/quay/test/deliberately-violating.test.mjs:fixed-path-write\npackages/quay/test/deliberately-violating.test.mjs:process-exit-1\n");
+    fs.writeFileSync(dataFile, "# baseline-count: 3\npackages/quay/test/deliberately-violating.test.mjs:fixed-path-write\npackages/quay/test/deliberately-violating.test.mjs:process-exit-1\npackages/quay/test/deliberately-violating.test.mjs:shared-root-mkdtemp\n");
     const baselineFile = path.join(scratch, "baseline-violations.txt");
-    fs.writeFileSync(baselineFile, "# baseline-count: 2\npackages/quay/test/deliberately-violating.test.mjs:fixed-path-write\npackages/quay/test/deliberately-violating.test.mjs:process-exit-1\n");
+    fs.writeFileSync(baselineFile, "# baseline-count: 3\npackages/quay/test/deliberately-violating.test.mjs:fixed-path-write\npackages/quay/test/deliberately-violating.test.mjs:process-exit-1\npackages/quay/test/deliberately-violating.test.mjs:shared-root-mkdtemp\n");
 
-    // Both rules fire on the constructed file and the check passes because they are baselined.
+    // All three rules fire on the constructed file and the check passes because they are baselined.
     let res = spawnSync("node", ["--experimental-strip-types", CHECK_TS, scratch, "--data-file", dataFile, "--baseline-file", baselineFile], { encoding: "utf8", timeout: 30_000 });
     assert.equal(res.status, 0, `expected PASS (baselined) on the constructed file:\n${res.stdout}\n${res.stderr}`);
     assert.match(res.stdout, /deliberately-violating\.test\.mjs:fixed-path-write/);
     assert.match(res.stdout, /deliberately-violating\.test\.mjs:process-exit-1/);
+    assert.match(res.stdout, /deliberately-violating\.test\.mjs:shared-root-mkdtemp/);
 
     // Now demonstrate the RATCHET (AC5) on the constructed file: a NEW violation (a spawn) with no
     // data-file entry fails.
