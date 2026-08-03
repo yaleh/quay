@@ -1,0 +1,57 @@
+# test-isolation-violations.txt — known violations of the TEST-ISOLATION CONTRACT
+# (gap-test-isolation-contract-is-unwritten).
+#
+# POLICY: a test must never touch something it does not exclusively own. Four rules
+# (details in docs/analysis/test-isolation-contract.md, sourced from the three
+# isolation-green/suite-red failures of 2026-08-02/03):
+#   R1 fixed-path-write             write only to per-run-unique paths (mkdtemp / os.tmpdir()),
+#                                   never a fixed __dirname/.tmp-* path under the shared checkout
+#                                   (relation-sync's 8-copy 7/8 crash is the type specimen).
+#   R2 shared-build-artifact-write  never rebuild/overwrite the SHARED build artifacts
+#                                   (packages/<pkg>/dist/, plugin/vendor/) — build to a temp tree
+#                                   (M136, three rounds).
+#   R3 spawns-test-sh               never spawn the whole scripts/test.sh runner inside the suite
+#                                   (AC11's 60s-budget nested run).
+#   R4 process-exit-1               a hand-rolled harness's failure path must use process.exitCode,
+#                                   never process.exit(1) (can drop async stderr writes under a
+#                                   POSIX pipe — relation-sync's silent suite-red).
+#
+# The scanner (plugin/scripts/test-isolation-check.ts) REPORTS every current violation on every
+# scripts/test.sh run but does NOT block on the ones listed here (AC6, "报出而不阻断"). This list
+# is the SHRINK-ONLY known-violation baseline (AC5): the check FAILS if
+#   - a CURRENT violation has no entry here (a new violation was introduced — fix the test),
+#   - an entry is ADDED vs git HEAD (the list can only get SHORTER),
+#   - an entry is STALE (the code was fixed but the entry kept — remove it),
+#   - the entry count exceeds `# baseline-count` (commit-surviving backstop).
+# To remove an entry: fix the test FIRST, then delete its line here — the check then fails on the
+# stale entry until it is removed, which is the nudge that makes the list actually shrink.
+#
+# baseline-count: 23
+# Baseline: 23 entries (recorded in tasks/gap-test-isolation-contract-is-unwritten.md DoD).
+# `# baseline-count: <n>` is the MACHINE-READABLE RATCHET CEILING parsed by the check — the list
+# can NEVER exceed this many entries, even at a clean commit. It is permanent: it stays 23 even as
+# entries are removed (the list only shrinks below it).
+# Format: <repo-root-relative-test-file>:<rule-key>  ('#' comments and blanks ignored). Sorted.
+experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs:fixed-path-write
+packages/quay-native/test/adversarial-eval.test.mjs:fixed-path-write
+packages/quay-native/test/adversarial-eval.test.mjs:process-exit-1
+packages/quay-native/test/cas-write.test.mjs:fixed-path-write
+packages/quay-native/test/cas-write.test.mjs:process-exit-1
+packages/quay-native/test/compound-gate-recursive.test.mjs:fixed-path-write
+packages/quay-native/test/compound-gate.test.mjs:fixed-path-write
+packages/quay-native/test/create-validation.test.mjs:fixed-path-write
+packages/quay-native/test/create-validation.test.mjs:process-exit-1
+packages/quay-native/test/edit-validation.test.mjs:fixed-path-write
+packages/quay-native/test/edit-validation.test.mjs:process-exit-1
+packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write
+packages/quay-native/test/gate-correctness.test.mjs:fixed-path-write
+packages/quay-native/test/gate-gameability.test.mjs:fixed-path-write
+packages/quay-native/test/lock.test.mjs:fixed-path-write
+packages/quay-native/test/lock.test.mjs:process-exit-1
+packages/quay-native/test/yaml-frontmatter-colon.test.mjs:fixed-path-write
+packages/quay-native/test/yaml-frontmatter-colon.test.mjs:process-exit-1
+packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:process-exit-1
+plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
+plugin/test/runner-grouping.test.mjs:spawns-test-sh
+plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh
+plugin/test/test-coverage-check.test.mjs:spawns-test-sh
