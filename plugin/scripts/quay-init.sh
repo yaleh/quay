@@ -422,6 +422,7 @@ if [ "$DO_LOOP" = true ]; then
     inner-forensics.mjs
     inner-idle-log.ts
     inner-state.sh
+    loop-driver-check.sh
     resource-gate.sh
     heavy-op-token.sh
     task-contract-check.ts
