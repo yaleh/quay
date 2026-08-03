@@ -83,3 +83,29 @@ B2-0..B2-3、B3-1 合并 + 全量绿；B3-2 三步处置后 done。细节见 `gi
 - 发现问题必须处置：修或建任务（有证据才建），不静音
 - 计量强制：派发前 `--task-start`、fan-in 关闭 `--task-end`，两步不可跳过
 - 停止条件：`.halt`/suite 非绿/needs-human≥3/合并冲突/就绪队列空 —— 一律停下等人
+
+## 外层 tick 发现（2026-08-03T02:12:10Z）
+
+### 正向漂移 9 条（reverse 已归零，reverse-drift 修复在真实仓库核实通过）
+
+`task-status-drift-check.ts --json` 实测：`reverse: 0`、`suspects: 9`、`scanned: 583`。
+
+| 任务 | status | 判定 |
+|---|---|---|
+| `gap-prepare-milestone-no-worktree-isolation` | ready | **真阳性**——CLAUDE.md 已记为 M252 已实现，`prepare-milestone.js` 里 `isolationMode` 实际存在于 6 处（行 92/101/116/119/120/311），但 **8 个 AC 全部未勾**。是「代码落地但 AC 未回填」，不是「代码未落地」 |
+| `gap-retire-the-prepare-execute-pipeline-cluster` | todo | **假阳性，且是检测器的新盲区**——见下 |
+| `gap-reverse-drift-check-buries-true-positives-in-noise` | todo | 真阳性但会自解：合并已落地（`48845281`），内层正在批 4 全量验证后才会 `--task-end` |
+| `DIR-100-B` `DIR-100-C` `DIR-103-C` `DIR-119-D2/D3/D4` | todo/ready | 待分诊 |
+
+### 检测器新盲区：删除类任务的 Touches 语义是反的
+
+`gap-retire-the-prepare-execute-pipeline-cluster` 的 `## Touches` 列的是
+`prepare-milestone.js` 等**待删除**的文件。它们存在 ⇒ `touchesAllExist=true` ⇒ 被判为「代码已落地」。
+
+**但对删除类任务，这些文件存在恰恰说明工作没做。** 检测器的名字说「代码已落地」，
+实际测的是「Touches 里点名的文件存在」——又一个「名不符实」实例
+（`docs/analysis/instrument-failure-mode.md`）。
+
+**随着裁剪成为工作的一大块，这会反复出现。** 修法有两种，择一即可：
+任务声明意图（`## Touches` 条目标 `(delete)`），或检测器对 `labels` 含裁剪类的任务反转判据。
+归入 [[gap-reverse-drift-check-buries-true-positives-in-noise]] 的后续，不单开任务。
