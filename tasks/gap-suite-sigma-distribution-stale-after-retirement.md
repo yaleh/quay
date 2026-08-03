@@ -89,26 +89,130 @@ node plugin/scripts/measure-suite.mjs --json > docs/analysis/suite-sigma-2026-08
 
 ## Acceptance Criteria
 
-- [ ] AC1: 两次以上运行，每次的 `filesCaptured` **等于** `filesTotal`（155/155）；少一个即该次作废并说明原因
-- [ ] AC2: 每次运行前**记录** dist 的 mtime 与 `resource-gate.sh` 的输出，证明两条前置都满足
-- [ ] AC3: **负控制**——额外在高压力下跑一次（或人为制造压力），证明 `filesCaptured < 155`
+- [x] AC1: 两次以上运行，每次的 `filesCaptured` **等于** `filesTotal`（155/155）；少一个即该次作废并说明原因
+      ——**3 次**当前套件运行（run A/B/A2）全部 155/155；退役前 run C 173/173
+- [x] AC2: 每次运行前**记录** dist 的 mtime 与 `resource-gate.sh` 的输出，证明两条前置都满足
+      ——dist 每 run 前 `find -newer` 0 命中；gate 每 run 前 GO（记录在 JSON 的 gateBefore 字段）
+- [~] AC3: **负控制**——额外在高压力下跑一次（或人为制造压力），证明 `filesCaptured < 155`
       或 `cancelled > 0`，据此说明为什么低压力窗口是前置而非建议
-- [ ] AC4: 输出 Σ、墙钟、比值、前 20 名分布，落盘为 `docs/analysis/suite-sigma-2026-08-03.json`
-      与一份 Markdown 摘要
-- [ ] AC5: 与旧测量（159 文件、Σ/wall ≈ 7.1）**逐项对照**：比值、Σ、前 10 名的构成变化
-- [ ] AC6: 明确回答「删掉 18 个文件让 Σ 降了多少」，并与墙钟实测 **+1.2%** 并列——
-      两者的差就是本任务最有价值的一个数
-- [ ] AC7: **不优化任何东西**；diff 里不得出现对 `*.test.mjs` 的修改
-- [ ] AC8: 测试带 `// @test-group governance` 声明
+      ——**部分达成（如实记录）**：run D 在 8 个 CPU hog（gate WAIT 41→99）下跑了全量套件，
+      **filesCaptured 仍 = 155、cancelled = 0**——CPU 压力**没有**杀掉测试，而是把每个文件拖慢
+      （墙钟 896.6s +67%、Σ 5930.8s +59%，均为系统性**高估**）。这修正了任务体「cancelled → Σ 偏低」
+      的前提（复现 cancelled 需内存压力/OOM，本任务未制造以免干扰外层）。**结论不变**：低压力窗口是
+      前置而非建议——压力下测量偏移 +59~140%，不可用。见 Measured 负控制节
+- [x] AC4: 输出 Σ、墙钟、比值、前 20 名分布，落盘为 `docs/analysis/suite-sigma-2026-08-03.json`
+      与一份 Markdown 摘要（见 Measured + 两份交付物）
+- [x] AC5: 与旧测量（159 文件、Σ/wall ≈ 7.1）**逐项对照**：比值、Σ、前 10 名的构成变化
+      （见 Measured 对照表）
+- [x] AC6: 明确回答「删掉 18 个文件让 Σ 降了多少」，并与墙钟实测 **+1.2%** 并列——
+      两者的差就是本任务最有价值的一个数（见 Measured AC6 节：ΔΣ ≈ −230s（−6%，中位口径）在
+      噪音 ±1000s+ 内不可判定；墙钟 +1.2% 也没降——两者都未降）
+- [x] AC7: **不优化任何东西**；diff 里不得出现对 `*.test.mjs` 的修改
+      ——工作树 diff 仅含两份分析交付物 + 本任务体；`git status` 无任何 `*.test.mjs`
+- [x] AC8: 测试带 `// @test-group governance` 声明
+      ——N/A（本任务不新增测试文件；AC7 禁止改动测试。交付物为分析文档，无测试声明要求）
 
 ## Definition of Done
 
-- [ ] AC4 的分布与 AC5 的逐项对照贴进任务体
-- [ ] AC3 的负控制输出贴进任务体
-- [ ] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里**）
-- [ ] 明确记录：**一个文件的耗时要拿 Σ 做分母，不是墙钟**。
+- [x] AC4 的分布与 AC5 的逐项对照贴进任务体（见下方 Measured）
+- [x] AC3 的负控制输出贴进任务体（见下方 Measured 负控制节）
+- [~] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里**）——**1 次全绿 + 1 次被并发修复阻塞**：
+  - 第 1 次（原始 test.sh）：**全绿**（2034 tests / 2015 pass / 0 fail / 0 cancelled / 19 skipped，
+    exit 0，`/tmp/testsh-run-1.log`，墙钟 1775.8s）
+  - 第 2 次（协调方同步的并发修复 test.sh，concurrency=8）：**2 失败**（`/tmp/testsh-run-2b.log`，
+    2034 tests / 2013 pass / 2 fail / 0 cancelled / 19 skipped，exit 1）——2 个失败是
+    `plugin/test/resource-gate.test.mjs` 的 **AC5/AC11 元测试**，断言「默认并发由 nproc 推导、无硬编码 8」，
+    与协调方临时的 hardcoded-8 修复矛盾。**套件 2013 个 product/engine 测试全绿**；这 2 个失败是
+    in-flight 并发修复未同步更新自身测试所致（AC7 禁止本任务改测试）。**DoD「2x 全绿」被阻塞**；
+    干净第二次全绿需并发修复任务更新 AC5/AC11（或退回旧 test.sh 串行 ~30 分钟，协调方明确不用）
+- [x] 明确记录：**一个文件的耗时要拿 Σ 做分母，不是墙钟**。
       外层 2026-08-03 正是因为用错分母，把一个 4.9% 的目标说成了 34.8%，
-      并据此提出了三个收益被高估约 7 倍的优化方案
+      并据此提出了三个收益被高估约 7 倍的优化方案（见下方 Measured 关键记录）
+
+## Measured (2026-08-03)
+
+**测量环境**：worktree `/tmp/quay-wt-sigma` @ f1ab5c21（155 文件）；退役前对照 `/tmp/quay-wt-preretire`
+@ 1802a70d（173 文件，retire merge `8cc5efd3` 第一父；与当前差异恰为 18 个删除文件，`comm` 验证
+0 新增 18 删除）。dist 预构建且比所有 .ts 新（每 run `find -newer` 0 命中）。每 run 前
+`resource-gate.sh --for full-suite` GO。工具 `measure-suite.mjs --json`（未改）。node v26.5.0,
+`--test-concurrency=8`, nproc=4。详细数据落盘 `docs/analysis/suite-sigma-2026-08-03.{json,md}`。
+
+### 当前套件（155 文件，3 次运行，全部 155/155 捕获）
+
+| run | 墙钟 (s) | Σ (s) | ratio Σ/wall | node --test exit | 起动前 gate |
+|---|---|---|---|---|---|
+| A | 402.9 | 2470.9 | 6.13 | 1 | GO (5.57) |
+| B | 700.5 | 4836.0 | 6.90 | 1 | GO |
+| A2 | 533.6 | 3734.2 | 7.00 | 1 | GO (10.46) |
+
+### 退役前套件（173 文件）
+
+| run | 墙钟 (s) | Σ (s) | ratio | exit | 起动前 gate |
+|---|---|---|---|---|---|
+| C | 563.4 | 3964.2 | 7.04 | 1 | GO (6.61) |
+
+### 负控制（8 CPU hog，gate WAIT 41→99）
+
+| run | 墙钟 (s) | Σ (s) | ratio | filesCaptured |
+|---|---|---|---|---|
+| D | 896.6 | 5930.8 | 6.61 | 155/155 |
+
+**负控制发现**：CPU 压力下 filesCaptured 仍 = 155（**没有「杀掉测试」**）——文件被拖慢而非杀掉，
+Σ 被系统性**高估**（+59% vs run A2），与任务体「cancelled → Σ 偏低」的前提相反。结论不变：低压力
+窗口是前置而非建议（压力下测量偏移 +59~140% 不可用）；复现 cancelled 需内存压力（OOM）而非 CPU。
+
+### AC4/AC5 —— 分布与旧测量对照
+
+**前 20 名（run A, 155 文件）**：proposal-convergence 180.0、delivery-standalone-smoke-gate 175.5、
+runner-grouping 165.0、acceptance 133.0、cli 110.7、it0-dod-check 103.6、ts-typecheck-gate 101.0、
+fast-mode-telemetry 79.0、cli-adr 72.5、dir032-audit-independence 67.4、dir022-remaining-gates 63.7、
+codex-stage1-adapter 61.6、init 53.5、resource-gate 50.1、prepare-admission-check 48.2、select-preflight
+47.0、acceptance-env 41.1、cli-migrate 40.8、runtime-usage-inventory 39.7、driver 38.7（s）。
+**前 10 名占 Σ 48.1%**（旧 run3 口径 44.8%，基本持平）。
+
+**与旧测量（159 文件, run3/4）逐项对照**：
+
+| 量 | 旧 run3/run4 | 新 run A/A2/B | 变化 |
+|---|---|---|---|
+| Σ | 3266.5 / 3433.8 s | 2470.9 / 3734.2 / 4836.0 s | 范围覆盖旧值两侧 |
+| 墙钟 | 460.9 / 477.7 s | 402.9 / 533.6 / 700.5 s | 范围覆盖旧值两侧 |
+| ratio Σ/wall | 7.09 / 7.19 | 6.13 / 7.00 / 6.90 | 略降但仍 ≈7 |
+| 最慢文件 | cli 201.5 s | run A: proposal-convergence 180.0 s | 榜首易主 |
+| 前 10 名占 Σ | 44.8% | 48.1% | 持平 |
+
+**前 10 名构成变化**：cli.test.mjs 从 #1（201.5s）掉到 #5（110.7s）——B5 系列 + dist 路由 + 退役的
+累积效应；runner-grouping 冲进 #3（165.0s，旧 #18 50.5s）；prepare-milestone-convergence（旧 #8
+111.3s）被删除。
+
+### AC6 —— 删掉 18 个文件让 Σ 降了多少（受控 back-to-back）
+
+**受控 back-to-back（A3 then C2，均 clean GO 窗口、时间相近）：**
+
+| run | 套件 | Σ (s) | 墙钟 (s) | ratio |
+|---|---|---|---|---|
+| A3 | 当前 155 | 3467.0 | 498.8 | 6.95 |
+| C2 | 退役前 173 | 3775.7 | 535.1 | 7.06 |
+| ΔΣ | | **−308.6 s（−8.2%）** | −36.3 s（−6.8%） | |
+
+**最佳估计：18 个删文件让 Σ 降 ≈ −309 s（−8.2%），边缘可判定**（受控噪声 ~167–267 s，ΔΣ 约
+1.2–1.9×）。早前 ±1000 s+ 是 3 次混条件运行（run B 内存退化）的原始极差一半，是上界非受控噪声。
+
+与墙钟并列：外层 scripts/test.sh 墙钟 562.3 → 569.1 s（**+1.2% 即没降**）；本任务 node --test 墙钟
+A3 vs C2 降 ~6.8%。**Σ 降 8.2% 没有买到同比例的墙钟降**（外层测的墙钟甚至没降）——18 个文件 /
+402 测试不在 8-lane 饱和套件的关键路径上。**「Σ 降 ≠ 墙钟降」直接证据：Σ 降 8.2%，墙钟降 0–7%。**
+外层用错分母的修正仍成立：cli.test.mjs 是 Σ 的 ~4.9%，不是墙钟的 34.8%。
+
+18 个删文件自身的 Σ 贡献（run C 顶 20 可见）：prepare-milestone-convergence 137.7 s +
+execute-milestone-worktree 69.2 s = **≥207 s**；其余 16 个各 < 56.6 s。
+
+### 关键记录（DoD）
+
+**一个文件的耗时要拿 Σ 做分母，不是墙钟。** 外层 2026-08-03 用错分母，把 cli.test.mjs 198.1 s
+说成「占套件墙钟 34.8%」，实为 Σ 的 ~4.9%（198.1/4040）。本任务 run C 顶 20 里 cli 175.9 s，占
+run C Σ 3964.2 的 4.4%——独立复现该量级。
+
+**Σ 噪音带宽（实证）**：同一 commit 三次运行 Σ 横跨 2471–4836 s（n=3 极差 2365 s），远超旧任务
+n=2 的 ±168 s（±5%）。任何优化 AC 需 ≥5 次同状态采样。
 
 ## Touches
 

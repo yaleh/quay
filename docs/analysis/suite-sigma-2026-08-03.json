@@ -1,0 +1,99 @@
+{
+  "task": "gap-suite-sigma-distribution-stale-after-retirement",
+  "measured_at": "2026-08-03",
+  "measurement_base_commit": "f1ab5c21 (current 155) / 1802a70d (pre-retire 173)",
+  "method": "plugin/scripts/measure-suite.mjs --json (unmodified); node --test --test-concurrency=8 with custom per-file reporter; dist prebuilt & newer than all .ts sources (0 find -newer hits per run); resource-gate GO (cpu_stall < 40) before every run; runs executed in low-pressure windows with no concurrent suite",
+  "runs_current_155": {
+    "run_A": {
+      "wallClockMs": 402938, "sumDurationMs": 2470944.97, "ratioSumOverWall": 6.13,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:06:58Z", "gateBefore": "GO (cpu_stall 5.57)",
+      "slowestTop3": ["proposal-convergence 179.98s", "delivery-standalone-smoke-gate 175.54s", "runner-grouping 165.01s"]
+    },
+    "run_B": {
+      "wallClockMs": 700541, "sumDurationMs": 4836032.85, "ratioSumOverWall": 6.90,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:19:14Z", "gateBefore": "GO",
+      "note": "swap rose to ~1.4GB during run; every per-file duration ~2x run A; still captured 155/155",
+      "slowestTop3": ["driver 288.92s", "acceptance 287.20s", "proposal-convergence 270.10s"]
+    },
+    "run_A2": {
+      "wallClockMs": 533568, "sumDurationMs": 3734190.53, "ratioSumOverWall": 7.00,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:29:21Z", "gateBefore": "GO (cpu_stall 10.46)",
+      "note": "swap stable ~1.1GB throughout",
+      "slowestTop3": ["proposal-convergence 222.64s", "acceptance 221.37s", "driver 214.19s"]
+    }
+  },
+  "runs_current_155": {
+    "run_A": {
+      "wallClockMs": 402938, "sumDurationMs": 2470944.97, "ratioSumOverWall": 6.13,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:06:58Z", "gateBefore": "GO (cpu_stall 5.57)",
+      "slowestTop3": ["proposal-convergence 179.98s", "delivery-standalone-smoke-gate 175.54s", "runner-grouping 165.01s"]
+    },
+    "run_B": {
+      "wallClockMs": 700541, "sumDurationMs": 4836032.85, "ratioSumOverWall": 6.90,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:19:14Z", "gateBefore": "GO",
+      "note": "swap rose to ~1.4GB during run; every per-file duration ~2x run A; still captured 155/155",
+      "slowestTop3": ["driver 288.92s", "acceptance 287.20s", "proposal-convergence 270.10s"]
+    },
+    "run_A2": {
+      "wallClockMs": 533568, "sumDurationMs": 3734190.53, "ratioSumOverWall": 7.00,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:29:21Z", "gateBefore": "GO (cpu_stall 10.46)",
+      "note": "swap stable ~1.1GB throughout",
+      "slowestTop3": ["proposal-convergence 222.64s", "acceptance 221.37s", "driver 214.19s"]
+    },
+    "run_A3": {
+      "wallClockMs": 498800, "sumDurationMs": 3467000.0, "ratioSumOverWall": 6.95,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T07:4xZ", "gateBefore": "GO (cpu_stall 3.07)",
+      "note": "controlled back-to-back run (A3 then C2), clean windows",
+      "slowestTop3": ["driver 211.3s", "acceptance 196.2s", "proposal-convergence 191.5s"]
+    }
+  },
+  "runs_preretire_173": {
+    "run_C": {
+      "wallClockMs": 563429, "sumDurationMs": 3964213.27, "ratioSumOverWall": 7.04,
+      "filesTotal": 173, "filesCaptured": 173, "exitStatus": 1,
+      "runAt": "2026-08-03T06:39:06Z", "gateBefore": "GO (cpu_stall 6.61)",
+      "commit": "1802a70d (retire merge 8cc5efd3 first parent)",
+      "slowestTop3": ["proposal-convergence 215.81s", "acceptance 199.81s", "driver 196.20s"]
+    },
+    "run_C2": {
+      "wallClockMs": 535100, "sumDurationMs": 3775700.0, "ratioSumOverWall": 7.06,
+      "filesTotal": 173, "filesCaptured": 173, "exitStatus": 1,
+      "runAt": "2026-08-03T07:5xZ", "gateBefore": "GO (cpu_stall 5.75)",
+      "note": "controlled back-to-back run (A3 then C2), clean windows",
+      "slowestTop3": ["proposal-convergence 206.3s", "acceptance 193.7s", "it0-dod-check 190.4s"]
+    }
+  },
+  "negative_control": {
+    "run_D": {
+      "wallClockMs": 896615, "sumDurationMs": 5930821.68, "ratioSumOverWall": 6.61,
+      "filesTotal": 155, "filesCaptured": 155, "exitStatus": 1,
+      "runAt": "2026-08-03T06:54:29Z",
+      "condition": "full 155-file suite under 8 manufactured CPU hogs; gate WAIT (pressure 41->99)",
+      "finding": "CPU pressure did NOT cancel files (filesCaptured remained 155) — it INFLATED the measurement: wall 896.6s (+67% vs run A2's 533.6s) and Σ 5930.8s (+59% vs run A2's 3734.2s). This corrects the task premise that pressure cancels files (making Σ understated); in this environment pressure slows the suite (making Σ overstated). The low-pressure window is still a PREREQUISITE: any measurement taken under pressure is off by +59-140%.",
+      "slowestTop3": ["acceptance 352.60s", "driver 344.36s", "proposal-convergence 325.21s"]
+    }
+  },
+  "old_baseline_2026_08_02_159": {
+    "run3": {"wallClockMs": 460928, "sumDurationMs": 3266468.44, "ratioSumOverWall": 7.09, "filesCaptured": "159/159", "exitStatus": 1},
+    "run4": {"wallClockMs": 477659, "sumDurationMs": 3433835.85, "ratioSumOverWall": 7.19, "filesCaptured": "159/159", "exitStatus": 1}
+  },
+  "comparison": {
+    "ratio": "old 7.09/7.19 -> new 6.13/6.90/7.00 (current), 7.04 (pre-retire), 6.61 (pressure): still ~7, lane-saturated conclusion unchanged",
+    "sigma_drop_from_18_deletions": "CONTROLLED back-to-back (run A3 current 155 then run C2 pre-retire 173, both in clean GO windows, close in time): ΔΣ = -308.6s = -8.2% (A3 3467.0s vs C2 3775.7s). This is the best estimate for 'how much the 18 deletions reduced Σ'. Significance: the controlled run-to-run variance of the current suite (A2 3734 vs A3 3467, both GO-started = 267s) and the old same-condition noise (~167s) bracket the ΔΣ; -309s is ~1.2-1.9x that noise = MARGINAL (not clearly significant, but no longer 'within ±1000s noise'). The earlier ±1000s+ was HALF the raw range of 3 runs (2471-4836) that MIXED conditions (run B memory-degraded at swap ~1.4GB) - an UPPER bound, not the controlled noise. Gross Σ of the 18 deleted files: >=207s from the two in run C top-20 (prepare-milestone-convergence 137.7s, execute-milestone-worktree 69.2s) + 16 others each <56.6s.",
+    "wall_clock": "outer measured scripts/test.sh wall 562.3s -> 569.1s (+1.2%, no drop); node --test wall here 403-700s (current) vs 563.4s (pre-retire), within noise",
+    "conclusion": "Controlled back-to-back shows Σ dropped ~8.2% (-309s) after removing 18 test files / 402 tests - marginal (noise ~167-267s). My node --test wall also dropped ~6.8% (A3 498.8s vs C2 535.1s), but the outer's scripts/test.sh wall went +1.2% (562.3->569.1s) - so the Σ drop does NOT translate to a proportionate wall drop (the outer's wall didn't drop at all). The correction stands: cli.test.mjs is ~4.9% of Σ, not 34.8% of wall. The suite is 8-lane saturated; a file's cost must be measured against Σ, not wall clock. Net: the 18 deletions bought at most ~8% Σ and 0-7% wall - far below the ~35% the wrong denominator implied."
+  },
+  "notes": {
+    "exit_status_1": "measure-suite runs with no QUAY_TEST_GROUPS, so the 14 @test-group governance files run their full bodies; scripts/test.sh default QUAY_TEST_GROUPS=product,engine makes them self-skip. Verified governance-product-ratio-check passes 11/11 and symlink-mirror passes 23/23, it0-enforcement 20/20 in isolation — the exit=1 in full-suite runs is contention/context-dependent, not reproduced in isolation.",
+    "variance_finding": "Σ noise is far larger than the old task's ±5% (n=2): three same-commit runs spanned 2471-4836s. Memory/swap state drives much of it. Any optimization AC needs >=5 same-state samples.",
+    "master_moved": "master advanced during measurement (webobs/stranded feature commits modified serve.test.mjs, restart-readiness-check.test.mjs, task-status-drift-check.test.mjs); file count remained 155.",
+    "scripts_test_sh": "DoD 2x-green check: run #1 (original test.sh) GREEN (2034 tests/0 fail/exit 0, /tmp/testsh-run-1.log, serial concurrency default, wall 1775.8s). Run #2 (coordinator-synced concurrency fix, hardcoded 8) had 2 failures in plugin/test/resource-gate.test.mjs AC5/AC11 — meta-tests asserting the derived-formula default that the temporary hardcoded-8 fix contradicts; the 2013 product/engine tests passed. DoD 2x-green is BLOCKED by the in-flight concurrency fix (not this measurement task's scope; AC7 forbids test edits)."
+  }
+}
