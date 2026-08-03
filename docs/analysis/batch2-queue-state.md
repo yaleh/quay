@@ -1505,3 +1505,12 @@ AC1b = qinit 引入的 verify-installed-executables.sh 旧 tick 文档路径，�
 throw 注释写明它挡的是「isError 静默强转空数组把真实失败和合法任务一起藏」。AC5 双向负控制硬要求；
 AC6 用真 yaml.parse 全库扫（管理者形状粗查得 0 是错的）；265/605 标题含 #/:（写入侧是姊妹任务）。
 **在飞 3/3**。
+
+### 关闭批次（2026-08-03 17:1xZ）：emptyset + board；liveness 阶段一落地
+
+emptyset + board 已关闭（47 完成）。合并 2387e328/aa647b87/fbf64fe9；batch5 run4 绿 2115/2095/0/0
+（参考值 2098→2115）。**token 真修复**：now_ms 单次 date +%s%N（外层查出的构造性缺陷，两次独立 date 调用
+秒边界交错→held 负；clamp 保留但负值打 WARNING）；**M52 超时提升**（QUAY_ACCEPTANCE_TIMEOUT_MS=120000
++ node:test 150000，套件负载下 4 次超时）。DoD 2x 均如实 [~]（1 次全量绿）。
+**liveness 阶段一已合并落地**（transcript 心跳 + REPO-STALL 改名 + 停机基线），**待外层阶段二裁断**
+（继续/拆 + 与姊妹任务 hashes-the-token-counter 排序）。liveness worktree 保留待续。

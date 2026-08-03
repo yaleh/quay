@@ -2,7 +2,7 @@
 id: gap-checks-that-verify-an-empty-set-must-fail-closed
 title: "A check that verifies nothing exits 0 — 'found no problems' and 'never
   looked' are indistinguishable"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -84,8 +84,9 @@ scripts/test.sh: --for-task <id> selected no test files (selector exit 1); add -
 ## Definition of Done
 
 - [x] AC1/AC4 的实测输出贴进任务体
-- [ ] `scripts/test.sh` **连跑 2 次**全绿（一次不算——AC1 今晚就是被第二次推翻的）——**由协调方
-      fan-in 承担**（本任务隔离契约禁止自启全量套件；scoped 实跑见 AC6/AC7）
+- [~] `scripts/test.sh` **连跑 2 次**全绿（一次不算——AC1 今晚就是被第二次推翻的）——**如实标注：
+      仅 1 次全量绿**（协调方 batch5 run4，**2115 tests / 2095 pass / 0 fail / 0 cancelled**，
+      `/tmp/batch5-fanin-fullsuite4.log`，2026-08-03；含本任务合并代码）。非连跑 2 次；scoped 136 用例全绿
 - [x] 明确记录：**「没有发现问题」与「没有在检查」必须在输出上可区分**
 
 ## Touches

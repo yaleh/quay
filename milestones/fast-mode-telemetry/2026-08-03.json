@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T15:17:41.939Z",
+  "generatedAt": "2026-08-03T16:59:08.718Z",
   "since": null,
   "tasks": [
     {
@@ -20,6 +20,11 @@
     {
       "taskId": "gap-ac11-spawns-the-runner-inside-the-runner",
       "minutes": 61.879616666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-checks-that-verify-an-empty-set-must-fail-closed",
+      "minutes": 95.00131666666667,
       "outcome": "done"
     },
     {
@@ -85,6 +90,11 @@
     {
       "taskId": "gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right",
       "minutes": 92.95223333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-one-unparseable-task-takes-down-the-whole-board",
+      "minutes": 88.23513333333334,
       "outcome": "done"
     },
     {
@@ -229,14 +239,20 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [],
-  "meanMinutes": 56.64523555555554,
-  "medianMinutes": 56.186366666666665,
-  "tasksPerHour": 1.5625616554758155,
-  "serialEquivalentPerHour": 1.0592241238215743,
+  "inProgress": [
+    {
+      "taskId": "gap-session-liveness-heartbeat-freezes-for-the-whole-task",
+      "runId": "fm-gap-session-liveness-heartbeat-freezes-for-the-whole-task-1785770647528-tg6r7g",
+      "startedAtMs": 1785770647539
+    }
+  ],
+  "meanMinutes": 58.13344787234042,
+  "medianMinutes": 56.31883333333333,
+  "tasksPerHour": 1.5415073119057925,
+  "serialEquivalentPerHour": 1.0321080582001343,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T15:17:41.909Z",
-  "windowHours": 28.798863611111113,
+  "windowEnd": "2026-08-03T16:59:08.697Z",
+  "windowHours": 30.489638055555556,
   "haltedHours": 0,
   "halted": [],
   "blocked": [],

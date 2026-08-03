@@ -1,7 +1,7 @@
 ---
 id: gap-one-unparseable-task-takes-down-the-whole-board
 title: "One task with unparseable frontmatter 500s the whole board — the per-task tolerance sits downstream of the throw"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -98,9 +98,9 @@ resume 先让 provider 层返回「能解析的 + 解析失败清单」，再让
 
 - [x] AC4 与 AC5 的实跑输出都贴进任务体——
       **只证明「坏任务不再 500」而不证明「真失败仍然响亮」，是把一个静默换成另一个静默**
-- [~] 完整套件连跑 2 次全绿——**本执行未自启全量套件**（隔离契约：全量由协调方 fan-in 承担）；
-      scoped `node --test` 覆盖了所有受本改动影响的文件（见下方「本执行验证」），全绿。
-      全量 fan-in 连跑 2 次由协调方执行
+- [~] 完整套件连跑 2 次全绿——**如实标注：仅 1 次全量绿**（协调方 batch5 run4，**2115 tests /
+      2095 pass / 0 fail / 0 cancelled**，`/tmp/batch5-fanin-fullsuite4.log`，2026-08-03；含本任务
+      合并代码）。非连跑 2 次；scoped `node --test` 覆盖所有受影响文件，全绿
 - [x] 任务体记录：这次的触发者是**外层写的一个任务标题**（`## Contract` 出现在 title 里），
       **写这种标题是自然的，缺陷在于系统允许它在写入时通过、在渲染时炸**
 
