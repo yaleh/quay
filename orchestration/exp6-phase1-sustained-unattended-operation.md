@@ -114,7 +114,7 @@ exp6 §0 确认交付分两阶段。阶段 1 的引擎稳定后转向产品。�
 |---|---|---|
 | 外层 tick 指令 | `orchestration/orchestrator-loop-tick.md`，散文，硬编码 `quay-0:0.0`、本仓库路径、本仓库的 AC 编号 | 需要分离「通用 tick 骨架」与「本项目配置」 |
 | 内层 tick 指令 | `docs/analysis/fast-mode-loop-tick.md`，同上 | 同上 |
-| 排程 | `CronCreate`（**会话内，会话一结束就没**）+ `/loop` | 产品不能依赖某个 Claude Code 会话活着 |
+| 排程 | `CronCreate`（**会话内，会话一结束就没**）+ `/loop` | 产品不能依赖某个 Claude Code 会话活着。**第二个缺口（2026-08-03 实测）**：`/loop` 不带间隔时走 `ScheduleWakeup` 动态模式，**没有任何列出工具**——`CronList` 只覆盖固定间隔的 `CronCreate`，`TaskList` 是待办列表。即「这个循环是否还活着」无法查询，只能等它下次触发。外层因此两小时无法确认内层 `/loop` 是否启动。规避办法是一律用固定间隔形式 |
 | 层间通信 | `tmux send-keys` + `capture-pane` 读屏 | 读屏是本仓库 ADR-016 明确认定的**权宜手段**（「never parse the TUI」），不能作为产品接口 |
 | 队列 / 并发资格 / 计量 | `task_list`、`touches-orthogonality-check.ts`、`fast-mode-telemetry.ts` | **这三个已经是可复用机制**，是最接近产品的部分 |
 | 暂停 | `.halt` 哨兵 | 通用，可直接产品化 |
