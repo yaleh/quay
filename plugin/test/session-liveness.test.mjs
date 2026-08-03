@@ -789,3 +789,243 @@ test("startup stamp makes the running version visible (file + md5 to stderr, mat
   assert.ok(r.stderr.includes(diskMd5),
     `stamp md5 must equal the loaded file's md5 (${diskMd5}), so a stale instance is detectable by comparison:\n${r.stderr}`);
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 阶段二（gap-session-liveness-stage-2-screen-signal-and-payload，2026-08-03）：
+// 屏幕语义标志 + 屏蔽易变区 + 交叉正控制 + payload + 每类阈值 + 发不出请求判别
+//（AC1-AC9，承接前任务阶段二）。新增 AC 的正控制与防过滤断言都在这下面。
+// ═════════════════════════════════════════════════════════════════════════════
+
+// 合成 transcript 帮助函数（阶段二：AC6/AC7/AC9 需要可控的 JSONL 内容）。
+function userRecord(ts, content = "hello") {
+  return JSON.stringify({ type: "user", message: { role: "user", content }, timestamp: ts });
+}
+function assistantRecord(ts, text = "ok") {
+  return JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] }, timestamp: ts });
+}
+function apiErrorRecord(ts) {
+  return JSON.stringify({ type: "assistant", isApiErrorMessage: true, apiErrorStatus: 429,
+    message: { role: "assistant", content: [{ type: "text", text: "API Error: Request rejected (429)" }] },
+    timestamp: ts });
+}
+const isoAgo = (min) => new Date(Date.now() - min * 60000).toISOString();
+
+// ── AC1：--mask 接缝——屏蔽 token 计数/转圈/✻ 残留，保留真内容行 ───────────────────────────
+
+test("AC1 mask — --mask strips /clear to save chrome, spinner timing, and ✻ residue, but KEEPS the agent task line (tokens ≠ chrome)", () => {
+  const raw = [
+    "new task? /clear to save 151.2k tokens",
+    "✽ …（41s · ↓1.2k tokens）",
+    "✻ Baked for 8m54s",
+    "◯ general-purpose Reading session-liveness.test.mjs 1m 35s · ↓ 57.3k tokens",
+    "a real content line",
+  ].join("\n");
+  const r = spawnSync("bash", [SCRIPT, "--mask"], { input: raw, encoding: "utf8" });
+  assert.equal(r.status, 0, `--mask must exit 0:\n${r.stderr}`);
+  assert.ok(!r.stdout.includes("/clear to save"), "token counter chrome must be stripped");
+  assert.ok(!r.stdout.includes("✽"), "spinner timing line must be stripped");
+  assert.ok(!r.stdout.includes("✻"), "baked residue must be stripped");
+  assert.ok(r.stdout.includes("◯ general-purpose Reading"),
+    "agent task line is REAL content and must be kept — mask must be precise to the chrome lines, not a blanket `tokens` filter (滤掉它=把假阳性换成假阴性)");
+  assert.ok(r.stdout.includes("a real content line"), "plain content must be kept");
+});
+
+// ── AC1/AC3/AC6/AC7：语义标志驱动忙闲；RESUMED 带成因 + 上次收到输入 ─────────────────────────
+
+test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED carries cause + last-input; IDLE fires when the flag disappears", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-esc");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // tickLogs pins the heartbeat to /nonexistent so hmin="?" under the noise gate: the IDLE
+    // transition is always reported, and the REAL worktree tick-log cannot gate it silent
+    // (same isolation test A uses).
+    const mon = spawnMonitor(p.env, `esc ${p.tmp} ${p.session}`, { tickLogs: `esc /nonexistent` });
+    try {
+      await sleep(3000); // idle baseline: bash prompt, no esc flag
+      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 8000);
+      assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
+      const out = mon.output();
+      assert.ok(/成因：esc to interrupt 标志出现/.test(out),
+        `RESUMED must name the semantic flag as the cause (AC3/AC6 — 可解释、无需再采样):\n${out}`);
+      assert.ok(/上次收到输入：取不到/.test(out),
+        `RESUMED must say 取不到 when no transcript is configured (AC7 — 不得省略该字段):\n${out}`);
+      tmux(["send-keys", "-t", p.session, "C-u"], p.env);
+      tmux(["send-keys", "-t", p.session, "clear"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-IDLE esc/, 8000),
+        `IDLE must fire once the semantic flag disappears:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC1（吸收姊妹任务的修复面）：只有 token 计数 chrome 在变 ⇒ 判空闲、零事件 ─────────────────
+
+test("AC1 — a pane whose ONLY change is the /clear to save token counter stays idle (zero events); masked chrome must not read as work", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-tok");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // Start the chrome loop BEFORE the monitor and let it settle: it overwrites one line in place
+    // (\r), so nothing scrolls — the only thing that changes between rounds is the token number,
+    // which lives in a /clear to save line that mask_pane strips. The baseline is therefore
+    // established with the chrome already on screen (no one-time transition when the job starts).
+    tmux(["send-keys", "-t", p.session, "for i in $(seq 1 40); do printf \"/clear to save %s.%sk tokens\\r\" $i $i; sleep 0.4; done &"], p.env);
+    tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+    await sleep(2500); // let the job notice land and the loop start
+    // tickLogs /nonexistent isolates the heartbeat so OVERDUE (from the real worktree tick-log)
+    // can't fire and pollute the event stream; we assert zero RESUMED/IDLE.
+    const mon = spawnMonitor(p.env, `tok ${p.tmp} ${p.session}`, { tickLogs: `tok /nonexistent` });
+    try {
+      await sleep(5000); // several rounds while the token number keeps changing
+      const out = mon.output();
+      assert.ok(!/SESSION-RESUMED tok/.test(out), `token-counter-only change must NOT read as busy:\n${out}`);
+      assert.ok(!/SESSION-IDLE tok/.test(out), `token-counter-only change must NOT produce an IDLE pair:\n${out}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC2：交叉正控制——transcript 刚写过而屏幕判空闲 ⇒ 报标志可能失效 ─────────────────────────
+
+test("AC2 — transcript fresh + screen idle ⇒ SESSION-MARKER-STALE (cross positive control); a stale transcript stays silent", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-stale");
+  const x = path.join(p.tmp, "session.jsonl");
+  let toucher = null;
+  try {
+    fs.writeFileSync(x, "{}\n");
+    spawnSync("touch", ["-d", "3 hours ago", x], { encoding: "utf8" }); // stale → no cross-control signal
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `ms ${p.tmp} ${p.session}`, { transcripts: `ms ${x}` });
+    try {
+      await sleep(4000); // ≥3 rounds with a STALE transcript: no marker-stale
+      assert.ok(!/SESSION-MARKER-STALE/.test(mon.output()),
+        `stale transcript must not fire marker-stale:\n${mon.output()}`);
+      // now the transcript advances (session definitely writing) while the pane stays idle
+      toucher = startTouchLoop(x);
+      assert.ok(await waitForOutput(mon, /SESSION-MARKER-STALE ms/, 8000),
+        `fresh transcript + idle pane must fire marker-stale (the cross positive control):\n${mon.output()}`);
+      toucher.kill("SIGKILL"); toucher = null;
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    if (toucher) toucher.kill("SIGKILL");
+    p.cleanup();
+  }
+});
+
+test("AC2 — a fresh TICK LOG (not a transcript) + idle pane does NOT fire marker-stale (tick log is not session-activity evidence)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-tickstale");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.writeFileSync(tick, "# tick\n"); // fresh mtime
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `ts ${p.tmp} ${p.session}`, { tickLogs: `ts ${tick}` });
+    try {
+      await sleep(4000);
+      assert.ok(!/SESSION-MARKER-STALE/.test(mon.output()),
+        `fresh tick log is NOT session evidence; must NOT fire marker-stale:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC9（盲点13）：空闲 + isApiErrorMessage 结构字段 ⇒ 发不出请求；健康/陈旧 ⇒ 常规 ─────────────
+
+test("AC9 — idle + transcript with isApiErrorMessage structural field ⇒ SESSION-IDLE-CANT-SEND; a healthy transcript stays regular (the three-state discriminator)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-api");
+  const healthy = path.join(p.tmp, "healthy.jsonl");
+  const blocked = path.join(p.tmp, "blocked.jsonl");
+  fs.writeFileSync(healthy, [userRecord(isoAgo(10)), assistantRecord(isoAgo(5))].join("\n") + "\n");
+  spawnSync("touch", ["-d", "3 hours ago", healthy], { encoding: "utf8" }); // healthy idle session: transcript STALE
+  fs.writeFileSync(blocked, [userRecord(isoAgo(10)), assistantRecord(isoAgo(5)),
+    apiErrorRecord(isoAgo(1)), apiErrorRecord(isoAgo(0.5))].join("\n") + "\n");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // healthy/stale target: idle + no API errors in the window → no CANT-SEND
+    const monH = spawnMonitor(p.env, `h ${p.tmp} ${p.session}`, { transcripts: `h ${healthy}` });
+    try {
+      await sleep(4000); // several rounds of steady idle
+      assert.ok(!/SESSION-IDLE-CANT-SEND/.test(monH.output()),
+        `healthy/stale idle must NOT report CANT-SEND:\n${monH.output()}`);
+    } finally {
+      monH.child.kill("SIGKILL");
+    }
+    // blocked target: idle + API errors in the recent window → CANT-SEND fires (per-round edge, once)
+    const monB = spawnMonitor(p.env, `b ${p.tmp} ${p.session}`, { transcripts: `b ${blocked}` });
+    try {
+      assert.ok(await waitForOutput(monB, /SESSION-IDLE-CANT-SEND b/, 8000),
+        `blocked idle must report CANT-SEND:\n${monB.output()}`);
+      assert.ok(/isApiErrorMessage 结构字段/.test(monB.output()),
+        `CANT-SEND must cite the structural field (not the 429 文案 — 换端点即失效):\n${monB.output()}`);
+      const once = (monB.output().match(/SESSION-IDLE-CANT-SEND/g) || []).length;
+      assert.equal(once, 1, `CANT-SEND must be edge-triggered (once per blocking episode), got ${once}:\n${monB.output()}`);
+    } finally {
+      monB.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC6/AC7：RESUMED 的成因 + 上次收到输入（有 transcript 时不取不到）──────────────────────────
+
+test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the transcript (not 取不到 when a transcript exists)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-payload");
+  const x = path.join(p.tmp, "session.jsonl");
+  // last type=user record is 5 minutes ago; the last record is an assistant one (not a user input)
+  fs.writeFileSync(x, [userRecord(isoAgo(5)), assistantRecord(isoAgo(0.05))].join("\n") + "\n");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
+    try {
+      await sleep(3000); // idle baseline
+      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 8000), `RESUMED must fire:\n${mon.output()}`);
+      const out = mon.output();
+      assert.ok(/成因：/.test(out) && !/成因：\)/.test(out),
+        `RESUMED must carry a non-empty cause (AC6):\n${out}`);
+      const li = out.match(/上次收到输入：([^）]*)/);
+      assert.ok(li && li[1] !== "取不到",
+        `RESUMED must report last-input minutes (not 取不到) when a transcript exists (AC7):\n${out}`);
+      assert.match(li[1], /^\d+ 分钟前$/, `last-input must read N 分钟前:\n${out}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC5：OVERDUE_MIN 默认 45→30（不可自愈类宁可误报）；文档同步 ───────────────────────────────
+
+test("AC5 — OVERDUE_MIN default is 30 (non-self-healing, prefer false-positive: earlier than 45); the shipped outer tick doc carries the value", () => {
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  assert.match(src, /OVERDUE_MIN=\$\{OVERDUE_MIN:-30\}/,
+    "OVERDUE_MIN default must be 30 after the AC5 reverse-tuning (45 → 30)");
+  const doc = fs.readFileSync(path.resolve(__dirname, "..", "loop", "orchestrator-loop-tick.md"), "utf8");
+  const row = doc.match(/\| `OVERDUE_MIN` \| `(\d+)` \|/);
+  assert.ok(row && row[1] === "30", `the outer tick doc must document OVERDUE_MIN=30, got ${row && row[1]}:\n${doc.slice(0, 2000)}`);
+});
+
+// ── AC4：两种信号的取舍写进文件头，并写明同时用时以谁为准 ─────────────────────────────────────
+
+test("AC4 — the script header documents the screen-vs-transcript tradeoff, each signal's blind spot, and which wins when both are used", () => {
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  assert.ok(src.includes("两种信号"), "header must carry the AC4 两种信号 section");
+  assert.ok(src.includes("同时用时以谁为准"), "header must state which signal wins when both are used");
+  assert.ok(src.includes("盲区"), "header must name each signal's blind spot");
+  assert.ok(src.includes("SESSION-MARKER-STALE"), "header must name the cross positive control event (AC2)");
+});
