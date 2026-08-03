@@ -266,6 +266,41 @@ node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <re
 **不做**：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线。把「碰巧」变成
 「写下来时就被问到」——如果 `## Contract` 没有真读它的消费者，三天后它就是第五段散文。
 
+### 0d. 跨项目暂停/恢复（人 2026-08-03 裁定：用 `.halt`，粗糙可接受）
+
+三个项目（quay / archguard / meta-cc）各自的**唯一开关**就是仓库根的 `.halt`：
+
+```bash
+# 暂停
+echo "<理由> | 解除条件: <条件> | 外层 <ISO>" > <repo>/.halt
+# 恢复
+rm <repo>/.halt
+```
+
+**为什么够用**（实测 `select-preflight.ts:113`）：
+
+- 文件**内容会被当作暂停理由读出**——开关自带说明，不需要另一个地方记
+- **除 ENOENT 外的任何读取失败都 fail-closed**（权限/是目录/I/O 错误 → 判为已暂停）——
+  这个形状是从 `gap-halt-sentinel-path-mismatch` 那次真实事故学来的
+- 空文件也算暂停
+
+**已知且接受的粗糙之处**：`.halt` 使整个 tick 空转，**fan-in（步骤 2）也停**。
+所以在飞任务会算完但不落地，直到解除。**人已裁定接受这一点。**
+缓解只有一条纪律：**暂停不是终点，解除条件必须写在 `.halt` 内容里**。
+
+**外层每个 tick 必须报三个项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线：
+
+```bash
+for d in /home/yale/work/{quay,archguard,meta-cc}; do
+  printf "%-12s %s\n" "$(basename $d)" \
+    "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 运行中)"
+done
+```
+
+**优先级（人已裁定）**：**quay 高于 archguard / meta-cc**。
+必要时暂停后两者以保本仓推进。**优先级由暂停哪个项目执行，不进跨项目令牌**——
+令牌只回答「现在谁能跑重型操作」，不回答「谁更重要」。
+
 ### 1. 观察（只读，不动手）
 
 ```bash
