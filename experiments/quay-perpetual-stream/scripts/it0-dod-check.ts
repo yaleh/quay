@@ -120,7 +120,7 @@ class DodCheckEnvError extends Error {
 // charter path through to the line-budget shell-out exactly as before. Environment errors (missing
 // sibling script, malformed backlog section) throw DodCheckEnvError (exit-2) instead of calling
 // process.exit(2) — the ONLY structural change; every clause's logic is relocated unchanged.
-export function runDodCheck({ milestoneId, charterFile, charterFileText, absorbFileText }) {
+export function runDodCheck({ milestoneId, charterFile, charterFileText, absorbFileText, tasksDir }) {
 // Support two input shapes:
 //   (a) real milestone: charter-file is a real charter (charters/M-NN.md), absorb-entry-file is a
 //       real dashboard.md/ABSORB-log excerpt — used as-is, whole-file text.
@@ -171,10 +171,16 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
 // if found (real run), else the charter/fixture file text (fixture run, which embeds the two
 // sections at top level so a synthetic milestone can be exercised without a real task file).
 {
-  const taskCandidates = [
-    path.join(process.cwd(), "tasks", `${milestoneId}.md`),
-    path.join(__dirname, "..", "..", "..", "tasks", `${milestoneId}.md`),
-  ];
+  // tasksDir (optional) overrides the task-file lookup root with a per-run-unique directory — the
+  // unit-test hook that lets a fixture task file exercise the REAL frontmatter code path without
+  // writing into the live tasks/ store (gap-r1-cannot-see-tests-writing-into-the-live-task-store).
+  // When omitted the two default roots below (process.cwd()/tasks and __dirname-traversal) apply.
+  const taskCandidates = tasksDir
+    ? [path.join(tasksDir, `${milestoneId}.md`)]
+    : [
+        path.join(process.cwd(), "tasks", `${milestoneId}.md`),
+        path.join(__dirname, "..", "..", "..", "tasks", `${milestoneId}.md`),
+      ];
   const taskPath = taskCandidates.find((p) => fs.existsSync(p));
   const taskText = taskPath ? fs.readFileSync(taskPath, "utf8") : charterFileText;
   const acSection = extractSection(taskText, "Acceptance Criteria");
@@ -605,10 +611,14 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
 // require the section). A task with NO `milestone:M<N>` label, or one whose label's N < 40, is
 // legacy/pre-cutover and N/A-passes (grandfathered), stated explicitly, not silently skipped.
 {
-  const taskCandidates = [
-    path.join(process.cwd(), "tasks", `${milestoneId}.md`),
-    path.join(__dirname, "..", "..", "..", "tasks", `${milestoneId}.md`),
-  ];
+  // Same tasksDir override as clause 0 — the clause-8 frontmatter-scoping test drives the REAL
+  // frontmatter code path against a per-run-unique tasks dir (see clause 0's note above).
+  const taskCandidates = tasksDir
+    ? [path.join(tasksDir, `${milestoneId}.md`)]
+    : [
+        path.join(process.cwd(), "tasks", `${milestoneId}.md`),
+        path.join(__dirname, "..", "..", "..", "tasks", `${milestoneId}.md`),
+      ];
   const taskPath = taskCandidates.find((p) => fs.existsSync(p));
   const taskText = taskPath ? fs.readFileSync(taskPath, "utf8") : charterFileText;
   const srcLabel = taskPath ? `[${path.relative(process.cwd(), taskPath)}]` : "[fixture text — no real task file]";

@@ -24,6 +24,23 @@
 //   R4 process-exit-1             a hand-rolled (non-node:test) harness's failure path must use
 //                                 process.exitCode, never process.exit(1) (which can drop async
 //                                 stderr writes under a POSIX pipe).
+//   R7 live-data-dir-write         a test WRITES into one of the repo's LIVE PRODUCT-DATA
+//                                 directories (tasks/, .quay/, .workflow-events/, adr/) via a
+//                                 NON-per-run-unique root (process.cwd()/__dirname/import.meta —
+//                                 the shared checkout), not a mkdtemp/os.tmpdir root.
+//                                 gap-r1-cannot-see-tests-writing-into-the-live-task-store
+//                                 (2026-08-03): R1's predicate demanded `__dirname` AND a `.tmp`
+//                                 literal together, so `path.join(process.cwd(), "tasks",
+//                                 "M-FAKE-....md")` (a fixed-name write into the REAL tasks/, the
+//                                 it0-dod-check.test.mjs specimen) satisfied NEITHER — a test
+//                                 wrote a fixture into the live task store and git swept it into a
+//                                 commit before any check saw it. R7 is the same CLASS as R1
+//                                 (non-per-run-unique write roots) but a SEPARATE, WORSE severity:
+//                                 polluting live product data (visible to `task list` / the web UI
+//                                 / task-status-drift-check) is not the same as polluting a shared
+//                                 test `.tmp` path. A write under a per-run-unique root
+//                                 (os.tmpdir()/mkdtemp/makeTmp-derived variable) is the SAFE
+//                                 pattern and never reports.
 //
 // Every check matches CODE POSITIONS only — comments, string/template literals and regex
 // literals are masked (reusing buildNonCodeMask from test-framework-policy-check.ts), so a
@@ -64,13 +81,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Repo-root-relative location of the shrink-only known-violation data file (AC5). */
 export const DATA_FILE_REL = "plugin/test-isolation-violations.txt";
 
-/** The six contract rules (R1..R6) and their data-file keys. */
+/** The contract rules (R1..R7) and their data-file keys. R5 is doc-only (shallow-clone git-history
+ * dependence) and has no scanner rule. */
 export const RULE_KEYS = [
   "fixed-path-write",
   "shared-build-artifact-write",
   "spawns-test-sh",
   "process-exit-1",
   "mkdtemp-no-cleanup",
+  "live-data-dir-write",
 ] as const;
 export type RuleKey = (typeof RULE_KEYS)[number];
 
@@ -416,6 +435,194 @@ export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
   return [];
 }
 
+// ── R7 live-data-dir-write: writes into the repo's LIVE product-data dirs via a shared root ───────────
+
+/** Repo-root-relative live product-data directories (R7): a test write landing here pollutes real
+ * product data — the task store (`task list` / web UI / task-status-drift-check all see it) — not
+ * just the test environment. Writing under a per-run-unique root (mkdtemp/os.tmpdir/makeTmp-derived
+ * variable) is the SAFE pattern and never reports. */
+const LIVE_DIR_SEGMENT_RE = /^(?:tasks|\.quay|\.workflow-events|adr)$/;
+const LIVE_DIR_PATH_RE = /^(?:tasks|\.quay|\.workflow-events|adr)(?:[/\\]|$)/;
+
+/** Variables whose declaration/reassignment initializer references a per-run-unique tmp-root
+ * constructor (mkdtemp/os.tmpdir/makeTmpDir/makeTmpWorkspace). A join whose base is such a variable
+ * resolves under a per-run-unique root → the SAFE pattern. Handles BOTH `const X = …` and the bare
+ * `X = …` reassignment form (serve-adr/mcp-adr: `workspaceRoot = makeTmpDir(...)` after a `let`
+ * declaration) — `varsReferencing` alone misses the bare form. */
+function tmpRootVars(src: string, mask: Uint8Array): Set<string> {
+  const names = new Set<string>();
+  const declRe = /\b(?:const|let|var)?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)/g;
+  for (const m of src.matchAll(declRe)) {
+    if (mask[m.index] !== 0) continue;
+    let depth = 0;
+    let end = m.index + m[0].length;
+    for (let i = end; i < src.length; i++) {
+      if (mask[i] !== 0) continue;
+      const c = src[i];
+      if (c === "(" || c === "[") depth++;
+      else if (c === ")" || c === "]") depth--;
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ";" && depth <= 0) { end = i; break; }
+    }
+    if (/mkdtemp|os\.tmpdir|makeTmp/.test(src.slice(m.index, end))) names.add(m[1]);
+  }
+  return names;
+}
+
+/** Variables whose initializer references the SHARED CHECKOUT root (process.cwd()/__dirname/
+ * import.meta/fileURLToPath) — e.g. `REPO_ROOT = path.resolve(__dirname, "..", "..")` or
+ * `const cwd = process.cwd()`. A join whose base is such a variable resolves under the shared
+ * checkout → a NON-per-run-unique root (the R7 violation class). */
+function sharedRootVars(src: string, mask: Uint8Array): Set<string> {
+  const names = new Set<string>();
+  const declRe = /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)/g;
+  for (const m of src.matchAll(declRe)) {
+    if (mask[m.index] !== 0) continue;
+    let depth = 0;
+    let end = m.index + m[0].length;
+    for (let i = end; i < src.length; i++) {
+      if (mask[i] !== 0) continue;
+      const c = src[i];
+      if (c === "(" || c === "[") depth++;
+      else if (c === ")" || c === "]") depth--;
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ";" && depth <= 0) { end = i; break; }
+    }
+    if (/process\.cwd|__dirname|import\.meta|fileURLToPath/.test(src.slice(m.index, end))) names.add(m[1]);
+  }
+  return names;
+}
+
+/** Region [start,end) of the FIRST argument of a call whose `(` is at `openIdx` (region = the
+ * balanced-paren span returned by callRegion). Handles nested parens/brackets/braces and returns
+ * the slice up to the first top-level comma (or the closing paren for a single-arg call). */
+function firstArgRegion(src: string, mask: Uint8Array, openIdx: number, region: string): [number, number] {
+  const endBound = openIdx + region.length;
+  let depth = 0;
+  for (let i = openIdx + 1; i < endBound; i++) {
+    if (mask[i] !== 0) continue;
+    const c = src[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (depth === 0) return [openIdx + 1, i];
+      depth--;
+    } else if (c === "," && depth === 0) return [openIdx + 1, i];
+  }
+  return [openIdx + 1, endBound - 1];
+}
+
+/** Region [start,end) of the initializer of the LAST declaration of `name` before `beforeIdx`
+ * (`const X = <expr>;` / `let X = …`). null when none. */
+function initializerRegionOf(src: string, mask: Uint8Array, name: string, beforeIdx: number): [number, number] | null {
+  const declRe = new RegExp(`\\b(?:const|let|var)\\s+${name}\\s*=(?!=)`, "g");
+  let best: [number, number] | null = null;
+  for (const m of src.matchAll(declRe)) {
+    if (m.index >= beforeIdx) break;
+    if (mask[m.index] !== 0) continue;
+    const start = m.index + m[0].length;
+    let depth = 0;
+    let end = start;
+    for (let i = start; i < src.length; i++) {
+      if (mask[i] !== 0) continue;
+      const c = src[i];
+      if (c === "(" || c === "[") depth++;
+      else if (c === ")" || c === "]") depth--;
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ";" && depth <= 0) { end = i; break; }
+    }
+    if (end > start) best = [start, end];
+  }
+  return best;
+}
+
+/** Does a join call inside [from,to) carry a live-data-dir segment AND resolve it via a
+ * NON-per-run-unique root? Returns the absolute index of the offending join's `(`-call start, or
+ * null. Base resolution: per-run-unique (os.tmpdir()/inside-mkdtemp/tmp-root variable) → SAFE
+ * (null); shared checkout (process.cwd()/__dirname/import.meta/fileURLToPath at a code position, or
+ * a shared-root variable) → VIOLATION; any other base → lenient-skip (null). */
+function findLiveDirJoin(src: string, mask: Uint8Array, from: number, to: number, tmpVars: Set<string>, sharedVars: Set<string>): number | null {
+  const slice = src.slice(from, to);
+  const joinRe = /\b(?:path\.join|path\.resolve|join|resolve)\s*\(/g;
+  for (const m of slice.matchAll(joinRe)) {
+    const absIdx = from + m.index;
+    if (mask[absIdx] !== 0) continue;
+    const jOpen = absIdx + m[0].length - 1;
+    const jRegion = callRegion(src, mask, jOpen);
+    const jEnd = jOpen + jRegion.length;
+    const jLits = codeStrings(src, mask, jOpen, jEnd);
+    if (!jLits.some((s) => LIVE_DIR_SEGMENT_RE.test(s) || LIVE_DIR_PATH_RE.test(s))) continue;
+    // per-run-unique root → SAFE
+    if (codeRegionHas(src, mask, jOpen, jRegion, /os\.tmpdir\s*\(/)) return null;
+    if (insideMkdtempCall(src, mask, jOpen)) return null;
+    for (const v of tmpVars) if (codeRegionHas(src, mask, jOpen, jRegion, new RegExp(`\\b${v}\\b`))) return null;
+    // shared-checkout root → VIOLATION
+    if (codeRegionHas(src, mask, jOpen, jRegion, /process\.cwd\s*\(\s*\)|__dirname|import\.meta|fileURLToPath/)) return absIdx;
+    for (const v of sharedVars) if (codeRegionHas(src, mask, jOpen, jRegion, new RegExp(`\\b${v}\\b`))) return absIdx;
+    // unknown base — lenient-skip (a function-param tmp root is not statically distinguishable)
+    return null;
+  }
+  return null;
+}
+
+/**
+ * R7 live-data-dir-write: a WRITE operation (writeFileSync/mkdirSync/appendFileSync/rmSync/cpSync/
+ * createWriteStream …) whose target path resolves into one of the repo's LIVE product-data
+ * directories (tasks/, .quay/, .workflow-events/, adr/) via a NON-per-run-unique root.
+ * gap-r1-cannot-see-tests-writing-into-the-live-task-store: the specimen is
+ * `const taskPath = path.join(process.cwd(), "tasks", …); fs.writeFileSync(taskPath, …)` in
+ * it0-dod-check.test.mjs — `process.cwd()` is the shared checkout when tests run, so the write lands
+ * in the REAL tasks/ with a FIXED filename (M-FAKE-FRONTMATTER-SCOPE-M124.md), raced under
+ * concurrency and was swept into a commit by a windowed `git add -A`. R1 missed it because R1's
+ * predicate required `__dirname` AND a `.tmp` literal together; this rule is the same class
+ * (non-per-run-unique write roots) separated out because polluting live product data is worse than
+ * a shared `.tmp` path. The SAFE shape — `path.join(workspaceRoot, "tasks", …)` where workspaceRoot
+ * is a mkdtemp/os.tmpdir/makeTmp-derived root — never reports. Per-file granularity (one report per
+ * file per rule).
+ */
+export function detectLiveDataDirWrites(src: string, rel: string): Violation[] {
+  const mask = buildNonCodeMask(src);
+  const out: Violation[] = [];
+  const writeRe = /\b(?:writeFileSync|writeFile|appendFileSync|mkdirSync|mkdir|rmSync|rm|unlinkSync|cpSync|copyFileSync|createWriteStream)\s*\(/g;
+  const tmpVars = tmpRootVars(src, mask);
+  const sharedVars = sharedRootVars(src, mask);
+  const fileChdirs = codePositions(src, mask, /process\.chdir\s*\(/g).length > 0;
+  for (const m of src.matchAll(writeRe)) {
+    if (mask[m.index] !== 0) continue;
+    const openIdx = m.index + m[0].length - 1;
+    const region = callRegion(src, mask, openIdx);
+    const end = openIdx + region.length;
+    const [argStart, argEnd] = firstArgRegion(src, mask, openIdx, region);
+    const argText = src.slice(argStart, argEnd).trim();
+    let hit: number | null = null;
+    // (1) a LITERAL relative path into a live data dir — only when the first argument IS a bare
+    //     string literal (writeFileSync("tasks/x.md", …)), never a path.join expression (whose live
+    //     segment is judged by its base in findLiveDirJoin), and only when the file never chdirs
+    //     (process.chdir(tmpWorkspace) makes "tasks/x.md" tmp-relative and thus SAFE).
+    if (!fileChdirs && /^["'`]/.test(argText) &&
+        codeStrings(src, mask, argStart, argEnd).some((s) => LIVE_DIR_PATH_RE.test(s))) {
+      hit = m.index;
+    } else {
+      // (2) the first argument is a variable whose initializer is a live-dir join (the specimen:
+      //     `const taskPath = path.join(process.cwd(), "tasks", …)` then `writeFileSync(taskPath, …)`).
+      const idm = argText.match(/^([A-Za-z_$][A-Za-z0-9_$]*)$/);
+      if (idm) {
+        const init = initializerRegionOf(src, mask, idm[1], m.index);
+        if (init) hit = findLiveDirJoin(src, mask, init[0], init[1], tmpVars, sharedVars);
+      } else {
+        // (3) an inline join expression as the first argument.
+        hit = findLiveDirJoin(src, mask, argStart, argEnd, tmpVars, sharedVars);
+      }
+    }
+    if (hit !== null) {
+      out.push({ rel, rule: "live-data-dir-write", line: lineAt(src, hit), snippet: snippetAt(src, hit) });
+    }
+  }
+  return out;
+}
+
 /** First string-literal argument of a mkdtemp/mkdtempSync call (the /tmp prefix). The call is
  * usually `fs.mkdtempSync(path.join(os.tmpdir(), "prefix-"))`, so the prefix is the first string
  * literal anywhere in the argument region. */
@@ -600,7 +807,7 @@ function callerCleansReturn(
   return false;
 }
 
-/** Run all six detectors over one file. */
+/** Run all seven detectors over one file. */
 export function detectAll(src: string, rel: string): Violation[] {
   return [
     ...detectFixedPathWrites(src, rel),
@@ -608,6 +815,7 @@ export function detectAll(src: string, rel: string): Violation[] {
     ...detectSpawnsTestSh(src, rel),
     ...detectProcessExit1(src, rel),
     ...detectMkdtempNoCleanup(src, rel),
+    ...detectLiveDataDirWrites(src, rel),
   ];
 }
 
@@ -840,6 +1048,7 @@ export function main(argv: string[]): number {
   const ruleCounts: Record<string, number> = {};
   for (const v of deduped) ruleCounts[v.rule] = (ruleCounts[v.rule] ?? 0) + 1;
   const breakdown = RULE_KEYS.map((k) => `${k}=${ruleCounts[k] ?? 0}`).join(" ");
+  const liveDataDirWrites = ruleCounts["live-data-dir-write"] ?? 0;
 
   const summary = `test-isolation-check — ${files.length} glob file(s), ${deduped.length} current violation(s) [${breakdown}]`;
   if (asJson) {
@@ -847,6 +1056,7 @@ export function main(argv: string[]): number {
       ok: failures.length === 0,
       files: files.length,
       violations: deduped.map((v) => ({ rel: v.rel, rule: v.rule, line: v.line, snippet: v.snippet })),
+      liveDataDirWrites,
       ratchetFailures: failures,
     }, null, 2));
   } else {
@@ -966,6 +1176,23 @@ export function runSelftest(): boolean {
   check("R6 RED: a non-exempt prefix alongside claude-*/quay-wt-* still reports (AC6)", detectMkdtempNoCleanup(mixedPrefix, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
   const mkdtempCommentOnly = '// @test-group product\n// fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")) mention\nconst x = 1;\n';
   check("R6 GREEN: a comment mentioning mkdtemp does NOT report (code-position matching)", detectMkdtempNoCleanup(mkdtempCommentOnly, "x.test.mjs").length === 0);
+
+  // R7: the live-data-dir-write class. The specimen is a write via process.cwd() into tasks/ with a
+  // FIXED name (it0-dod-check.test.mjs). Per-run-unique roots (mkdtemp/os.tmpdir/makeTmp) are SAFE.
+  const r7Specimen = 'const taskPath = path.join(process.cwd(), "tasks", "M-FAKE.md");\nfs.writeFileSync(taskPath, taskText);\n';
+  check("R7 RED: path.join(process.cwd(), \"tasks\", …) write reports", detectLiveDataDirWrites(r7Specimen, "x.test.mjs").some((v) => v.rule === "live-data-dir-write"));
+  const r7Workspace = 'const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dod-check-"));\nfs.mkdirSync(path.join(workspaceRoot, "tasks"));\nconst taskPath = path.join(workspaceRoot, "tasks", "M-FAKE.md");\nfs.writeFileSync(taskPath, taskText);\n';
+  check("R7 GREEN: a write under a mkdtemp workspace root does NOT report", detectLiveDataDirWrites(r7Workspace, "x.test.mjs").length === 0);
+  const r7BareTmp = 'let workspaceRoot;\nworkspaceRoot = makeTmpDir("x-ws-");\nfs.writeFileSync(path.join(workspaceRoot, ".quay", "config.yml"), "x");\n';
+  check("R7 GREEN: a bare-assigned makeTmpDir root (no const) does NOT report", detectLiveDataDirWrites(r7BareTmp, "x.test.mjs").length === 0);
+  const r7SaveRestore = 'const originalCwd = process.cwd();\nprocess.chdir(workspaceRoot);\ntry { fs.writeFileSync("config.yml", "x"); } finally { process.chdir(originalCwd); }\n';
+  check("R7 GREEN: originalCwd = process.cwd() save/restore does NOT report", detectLiveDataDirWrites(r7SaveRestore, "x.test.mjs").length === 0);
+  const r7Literal = 'fs.writeFileSync("tasks/M-FAKE.md", taskText);\n';
+  check("R7 RED: a literal relative tasks/ write reports (no chdir in file)", detectLiveDataDirWrites(r7Literal, "x.test.mjs").some((v) => v.rule === "live-data-dir-write"));
+  const r7Comment = '// const taskPath = path.join(process.cwd(), "tasks", "M-FAKE.md")\nconst x = 1;\n';
+  check("R7 GREEN: a comment mentioning the pattern does NOT report (code-position matching)", detectLiveDataDirWrites(r7Comment, "x.test.mjs").length === 0);
+  const r7ReadOnly = 'const realTasksDir = path.join(REPO_ROOT, "tasks");\nconst raw = fs.readFileSync(path.join(realTasksDir, "x.md"), "utf8");\n';
+  check("R7 GREEN: a READ from REPO_ROOT/tasks does NOT report (write ops only)", detectLiveDataDirWrites(r7ReadOnly, "x.test.mjs").length === 0);
 
   // ── the ratchet (runIsolationChecks) ────────────────────────────────────────────────────────────
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];

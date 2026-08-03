@@ -1,7 +1,8 @@
 # test-isolation-violations.txt — known violations of the TEST-ISOLATION CONTRACT
-# (gap-test-isolation-contract-is-unwritten + gap-tests-never-clean-up-their-tmpdirs).
+# (gap-test-isolation-contract-is-unwritten + gap-tests-never-clean-up-their-tmpdirs +
+# gap-r1-cannot-see-tests-writing-into-the-live-task-store).
 #
-# POLICY: a test must never touch something it does not exclusively own. Six rules
+# POLICY: a test must never touch something it does not exclusively own. Seven rules
 # (details in docs/analysis/test-isolation-contract.md, sourced from the three
 # isolation-green/suite-red failures of 2026-08-02/03 + the 2026-08-03 /tmp leak):
 #   R1 fixed-path-write             write only to per-run-unique paths (mkdtemp / os.tmpdir()),
@@ -25,6 +26,25 @@
 #                                   carrier-array + after-loop, or a helper-return captured into a
 #                                   cleaned variable). NEVER matches /tmp/claude-* (session data) /
 #                                   /tmp/quay-wt-* (in-use worktrees) prefixes (AC6).
+#   R7 live-data-dir-write          never WRITE into the repo's LIVE product-data directories
+#                                   (tasks/, .quay/, .workflow-events/, adr/) via a NON-per-run-
+#                                   unique root (process.cwd()/__dirname/import.meta — the shared
+#                                   checkout). gap-r1-cannot-see-tests-writing-into-the-live-task-
+#                                   store (2026-08-03): R1 required `__dirname` AND a `.tmp`
+#                                   literal together, so `path.join(process.cwd(), "tasks",
+#                                   "M-FAKE-…md")` satisfied NEITHER and a test wrote a fixture into
+#                                   the REAL tasks/ (swept into a commit by a windowed git add -A).
+#                                   Writing under a per-run-unique root (mkdtemp/os.tmpdir/makeTmp)
+#                                   is the SAFE pattern and never reports.
+#
+# R7 baseline (2026-08-03, gap-r1-cannot-see-tests-writing-into-the-live-task-store): the list went
+# 44 -> 45 -> 44. 44 -> 45: the detector was extended (AC2) and the live specimen
+# (it0-dod-check.test.mjs, path.join(process.cwd(),"tasks",…) write) was baselined so the check
+# stayed green while the detector was verified against it. 45 -> 44: BOTH real R7 instances were
+# FIXED (it0-dod-check.test.mjs via runDodCheck's tasksDir hook; workflow-event-schema.test.mjs via
+# the CLI's WORKFLOW_EVENTS_DIR override — the detector's unlinkSync-aware scan found this second
+# instance that the outer's writeFileSync-centric size-1 scan missed), so no R7 entry remains. The
+# `# baseline-count` ceiling is permanent and unchanged at 51.
 #
 # The scanner (plugin/scripts/test-isolation-check.ts) REPORTS every current violation on every
 # scripts/test.sh run but does NOT block on the ones listed here (AC6, "报出而不阻断"). This list
