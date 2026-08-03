@@ -35,9 +35,14 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
 - [ ] **AC2（2026-08-03 重新解冻）**：**存在一个可安装物含有本阶段的机制**。
       **人裁定：基于本地 build 执行安装即可，不必直接复制源文件——那已经足够「冷」。**
       ⇒ 这条**不再依赖推送**，回到我与外层可达成的范围。
-      判据：`bash plugin/scripts/publish-dist-branch.sh --branch <local>`（**不加 `--push`**）产出真实 bundle
-      （脚本自身在产物为空时拒绝发布），再从该产物安装，安装出来的 plugin root 中
-      `scripts/quay-init.sh` / `scripts/inner-state.sh` / `loop/orchestrator-loop-tick.md` 三者齐全。
+      判据（**2026-08-03 收紧**）：`bash plugin/scripts/publish-dist-branch.sh --branch <local>`
+      （**不加 `--push`**）产出真实 bundle（脚本自身在产物为空时拒绝发布），再从该产物安装，
+      安装出来的 plugin root 中 `scripts/quay-init.sh` / `scripts/inner-state.sh` /
+      `loop/orchestrator-loop-tick.md` 三者齐全，**且这条检查被套件真正执行**。
+      **加最后一句的原因**：quay 外层查出 `test/cold-start-e2e.sh` **没有任何东西在跑它**
+      （`gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it`）。
+      我此前把它的**内容**当作证据读——而一个不被执行的 e2e，走不走得通没有意义。
+      与几小时前那个「没有执行者的契约检查器」是同一族：**存在 ≠ 生效**。
       **关键区分**：被测物必须是 **build 出来的产物**，不是 `cp` 过去的源文件——
       archguard 第一次冷启动用的就是 `cp`，那不构成可交付性证据。
       *（推送与 release 仍须人显式触发，那条裁定未变；它现在只影响「别人能不能装到」，不影响本 AC。）*
