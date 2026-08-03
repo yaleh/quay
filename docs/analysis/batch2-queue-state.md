@@ -1373,3 +1373,17 @@ pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过�
 `tasksPerHour` 把停机墙钟算进分母（实测：21 分 16 秒纯停机、同一批 37 个收尾任务，
 读数 1.5621 → 1.5391；分子固定 37 ⇒ 37/1.5 把窗口上限锁在 24.67h）。
 **建它是为了修仪器，不是为了挑轻任务把数拉回来**——AC6 专门断言分子不按任务大小加权。
+
+### 派发（2026-08-03 10:2xZ）：contract-ratchet（第二任务）
+
+`gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed` 已派发：worktree
+`/tmp/quay-wt-ratchet`，telemetry fm-...-7gehxb。**与 cold-start checkTouchesPair DISJOINT 实测通过**
+（cold-start 无 test.sh——范围裁定使其成立；裁定若反复需停下告知外层）。
+内容：task-contract-check.ts 无执行者、名单 1→12、6/7 invoke-evidence-missing 假发现；
+会放松判据 → **AC2/AC5 双向负控制硬要求**。Touches 含 scripts/test.sh。
+
+**inner-state.sh 挂载点注意**：外层 Monitor 以绝对路径 `/home/yale/work/quay/orchestration/watch/inner-state.sh`
+运行，cold-start 搬动它会使外层事件监测静默失效。已通知 cold-start agent：留转发壳在旧路径 或 写明新路径
+（plugin/scripts/inner-state.sh），fan-in 报告带新路径供外层重新挂载。
+
+**在飞 2/3**：cold-start（af2e2aa...）、contract-ratchet（a22be4f...）。
