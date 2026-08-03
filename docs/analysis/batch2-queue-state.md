@@ -1557,3 +1557,14 @@ jsonl；不能用「有提交/有 tick 日志」代替（archguard 两者都有�
    「在跑没接遥测」——有活动信号+遥测空=没接上；全部信号无=没跑。两态两文案+判别说明。不用散文提醒。
 
 **在飞 3/3**：cold8 阶段一（停报待外层批准阶段二）+ acs-behind + live-unwired。
+
+### 外层补规格（2026-08-03 18:4xZ）：cold8 加 AC8 四条 8a-8d + AC1 修正
+
+背景：散文引导依赖读者推理，读者会换（今天 3 模型 × 3 次重写）——改一行斜杠 skill 命令启动确定行为。
+**AC1 修正**：原清单漏内层启动，不能当外层引导副作用（今天证明副作用不会发生）。
+**AC8 8a-8d 三条实测**（2 条是外层自己的错）：
+① 检查必须按目标布局路径（orchestration/*.md + docs/analysis/fast-mode-loop-tick.md），不能按 quay 的 plugin/loop；
+② worktree/分支不得把宿主或目标项目自有约定（.claude/worktrees/agent-*、/tmp/wt-archguard-TASK-*）当 fast mode 证据；
+③ 判别式三态（文件在+活动+遥测=正常 / 活动+遥测空=跑了没接 / 活动无+遥测空=装了没引导），同组信号。
+**AC8c**：可观测后果先定义成具体清单（worktree 建了、--task-start 写了一条、首任务分支出现）。
+已转达 cold8 agent。
