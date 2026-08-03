@@ -202,3 +202,18 @@ subagent transcript：
 
 不改 `inner-state.sh`、不改 `restart-readiness-check.sh`、不给阻塞信号加过滤——
 **保持阻塞信号只有一个含义：内层在等外层裁定。** 一个信号一个含义，比一个信号加一层过滤更难用错。
+
+### 内层实现（2026-08-03T02:50Z）
+
+机制已落地为 `plugin/scripts/inner-idle-log.ts`（reason 五值 fail-closed，`--root` 可测）+
+`plugin/test/inner-idle-log.test.mjs`（6/6）+ gitignore。用法：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts \
+  --append --reason <awaiting-subagent|queue-empty|awaiting-ruling|rate-limited|no-reason> \
+  --note "<一句话在等什么>"
+node --no-warnings --experimental-strip-types plugin/scripts/inner-idle-log.ts --counts
+```
+
+**纪律：每次要以「无待办」结束回合前调用一次 `--append`；无 `--clear`（零状态、只追加）。
+`at` 是 ISO 字符串；时长不记（外层从 transcript 间隙算，按 `at` join）。**

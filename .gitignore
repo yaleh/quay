@@ -33,6 +33,11 @@ experiment/timing/*.log
 # inner-blocked-signal.ts (AC4), never by hand. It must stay untracked: it is a live control-plane
 # signal that appears/disappears every time the inner layer stops and resumes.
 **/.quay/inner-blocked.json
+# outer correction 2026-08-03T02:45:03Z (idle instrumentation): the inner layer's append-only
+# idle-reason log — a separate, non-signal channel from inner-blocked.json. One line per
+# "round ended, no pending work" turn; no duration (the outer computes it from transcript gaps).
+# Append-only raw data like .workflow-events/ — never committed.
+orchestration/inner-idle-log.jsonl
 # gap-prepare-milestone-cross-generation-review-state-reset: cross-generation ProposalReview
 # checkpoint — same per-workspace gitignored runtime-state family as prepare-leases/, never
 # committed (the task's own '## Proposal'/AC/Plan stay the single authoritative content source).
