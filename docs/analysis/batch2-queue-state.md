@@ -527,3 +527,46 @@ CPU 压力 **96.62**（批 4 崩溃时只有 84.77）。
 > 则 `gap-no-resource-awareness-heavy-ops-run-blind` 提升到 **P1**，排在 web 观察面之前。
 
 在此之前它仍在 P2。**触发条件是可观察的，不靠印象。**
+
+## 触发条件已满足，`gap-no-resource-awareness-heavy-ops-run-blind` 提升到 P1（2026-08-03T04:24:46Z）
+
+**不是推翻上一条排序，是实测把结论从「偶发」升级为「结构性」。**
+
+上一条写的触发条件是「同一条件再发生一次」，隐含假设是**两个套件并发**才导致饥饿。
+2026-08-03T04:24:46Z 实测推翻了这个假设：
+
+```
+套件根 pid 3995110（唯一一个在跑）
+  worker 8 · worker 的子进程 7 · 根 1  ⇒  该套件独占 16 个进程
+  nproc = 4  ⇒  单个套件自己就是 4× 超订
+  cpu some avg10 = 87.15（两个套件并发时是 96.62）
+```
+
+**⇒ 饥饿不是并发的产物，是「跑一次全量套件」的稳态。** 两个并发只是把 87 推到 97。
+
+**这直接打在 P0 上**：删除算子的每个任务 DoD 都要求「`scripts/test.sh` 连跑 2 次全绿」，
+即每个 P0 任务都要**至少两次**进入饥饿态。今晚已经因此耗掉：M136 三轮、
+批 4 崩溃一次、reclaim/test-isolation 各一次重跑。
+
+**分类修正**：我把它归为「再加检查」是错的。资源闸是**两层共用的原语，取代重复的目测判断**，
+按框架属于**支柱化**——收敛的内在一半，不是又一个断言。
+
+**新顺序**：P0 三个删除算子不变；**P1 首位改为 `gap-no-resource-awareness-heavy-ops-run-blind`**，
+其后才是 serve 崩溃修复与 web 观察面。理由是它**降低 P0 自身的执行成本**，
+而 web 观察面不改变 P0 的成本。
+
+### 同时：inventory 的结果改变了 retire 的判断
+
+inventory 已完成（AC 全勾，在 fan-in）：**205 脚本 · live 36 · library 72 · ci-only 1 ·
+dormant 7 · never-runs-test 8 · unaccounted 81**。
+
+**但 AC7 的窗口差集是关键**：51 个脚本在 15.9h 窗口是低频、在 72h 窗口是 live，
+**其中 31 个从 unaccounted 变成 live** ⇒ **真实的 unaccounted 约 50，不是 81**。
+
+**对 [[gap-retire-the-prepare-execute-pipeline-cluster]] 的直接后果**：
+`.claude/workflows/*.js` 6 个在 15.9h 窗口全部 unaccounted，
+**但 72h 窗口 5 个 live——`prepare-milestone` 被调用 280 次、`execute-milestone` 47 次**。
+
+**经典循环在用它，只是 fast-mode 有意绕过。** 这不是「已死」，是「本模式不用」。
+retire 任务必须按 72h 窗口重新评估其规模主张（任务体现在写的是「最后一条 prepare-epoch 是 22 小时前」——
+那个观察本身没错，但它只覆盖 fast-mode 一侧）。
