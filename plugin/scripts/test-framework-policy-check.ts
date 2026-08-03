@@ -10,11 +10,19 @@
 // the 35th from appearing, and turns each existing file's eventual conversion into the ratchet.
 //
 // CHECKS (mapped to ACs):
+//   C0 (AC4)  COMMIT-SURVIVING RATCHET CEILING — the list can never exceed the `# baseline-count`
+//             ceiling (34) parsed from the data file header. Unlike the git strict-subset below,
+//             this fires at ANY state, including a clean commit or fresh clone where a smuggled
+//             hand-rolled test AND its exemption line landed together in one commit (REFUTE
+//             round-1 MAJOR). The ceiling is permanent — it stays 34 as entries are removed.
 //   C1 (AC3)  every file in scripts/test.sh's canonical glob must `import` node:test OR be on
-//             the legacy exemption list (plugin/test-framework-policy-exemptions.txt).
+//             the legacy exemption list (plugin/test-framework-policy-exemptions.txt). Detection
+//             walks CODE positions only (mask skips comments and strings) so a comment or string
+//             that merely mentions the import can never satisfy AC3 (REFUTE round-1 MAJOR).
 //   C2 (AC4)  the exemption list can only get SHORTER:
-//     C2a     an entry present in the current list but NOT in the baseline (the list's committed
-//             form at git HEAD) was ADDED → fail. This is the ratchet: no file may be added.
+//     C2a     an entry present in the working-tree list but NOT in the baseline (the list's
+//             committed form at git HEAD) was ADDED → fail. Catches same-count swaps and header
+//             edits before they land; the ceiling (C0) is the backstop after they land.
 //     C2b     an entry whose file no longer exists on disk is stale → fail (remove it).
 //     C2c     an entry whose file now imports node:test is stale — the file was converted but the
 //             list was not shortened → fail (remove it). This is the "converts when touched"
@@ -24,12 +32,17 @@
 //             file set at git HEAD) MUST carry a `// @test-group <product|engine|governance>`
 //             declaration. Existing files (in the list, or already at HEAD) may omit it and
 //             default to `engine` (存量缺省 engine — a missed declaration on a legacy/existing
-//             file never silently vanishes from the default run).
+//             file never silently vanishes from the default run). Scope note: "new" is classified
+//             against git HEAD, so C3 is enforced at the point of introduction (the loop's
+//             Audit-before-commit window), not retroactively on master — consistent with
+//             存量缺省 engine (REFUTE round-1).
 //
 // The exemption list is a DATA FILE (AC2) — there is no per-file condition in code. The ratchet
 // baseline is the list's own committed form at git HEAD; the check compares the working tree
-// against that. On bootstrap (the list does not exist at HEAD yet — e.g. the first commit of this
-// task), the current list becomes the baseline and the ratchet is not yet enforceable.
+// against that, PLUS the permanent count ceiling (C0). On bootstrap (the list does not exist at
+// HEAD yet — e.g. the first commit of this task), the current list becomes the baseline and the
+// git strict-subset is not yet enforceable; the ceiling still is, once the token exists. A broken
+// git baseline FAILS CLOSED (exit 2) rather than silently degrading (REFUTE round-1 MINOR).
 //
 // SINGLE-SOURCE (ADR-004): the canonical glob patterns are PARSED from scripts/test.sh's own
 // `glob=(...)` line, never re-typed here — if that glob changes, this check's notion of
@@ -61,11 +74,98 @@ export function readFileSafe(p: string): string {
   }
 }
 
-/** Regex that detects an actual `node:test` import (ESM `from "node:test"` / bare `import
- * "node:test"`, plus a CJS `require("node:test")` hedge). Not a bare `node:test` substring, so a
- * comment mentioning the policy cannot satisfy it. */
+/** Regex that matches a candidate `node:test` import (ESM `import ... from "node:test"` / bare
+ * `import "node:test"`, plus a CJS `require("node:test")`). A match alone is NOT proof — the
+ * caller must also confirm the keyword sits in CODE (not a comment/string) via the mask. */
 export function nodeTestImportRE(): RegExp {
-  return /(?:from\s*["']node:test["']|import\s*["']node:test["']|require\(\s*["']node:test["']\s*\))/;
+  return /(?:import[\s\S]{0,500}?from\s*["']node:test["']|import\s*["']node:test["']|require\(\s*["']node:test["']\s*\))/g;
+}
+
+/** Build a mask marking every position that is NOT code: inside a `//` or a slash-star block
+ * comment, or inside a string/template literal. A linear state machine — unlike a regex, it
+ * cannot be fooled by a glob pattern inside a comment whose slash-star sequence would make a
+ * naive block-comment regex scan forward past the imports and eat them (REFUTE round-1
+ * regression, confirmed on cli-entry.test.mjs whose header comments spell the test glob). */
+export function buildNonCodeMask(src: string): Uint8Array {
+  const mask = new Uint8Array(src.length);
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === "/" && d === "/") {
+      mask[i] = 1; mask[i + 1] = 1; i += 2;
+      while (i < n && src[i] !== "\n") { mask[i] = 1; i++; }
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      mask[i] = 1; mask[i + 1] = 1; i += 2;
+      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) { mask[i] = 1; i++; }
+      if (i < n) { mask[i] = 1; mask[i + 1] = 1; i += 2; }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      const q = c;
+      mask[i] = 1; i++;
+      while (i < n) {
+        mask[i] = 1;
+        if (src[i] === "\\") { if (i + 1 < n) { mask[i + 1] = 1; i += 2; } else { i++; } continue; }
+        if (src[i] === q) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return mask;
+}
+
+/** True iff `source` contains a REAL node:test import. Walks CODE positions only (skipping
+ * comments and strings via the mask) and checks each `import`/`require` keyword in turn — so a
+ * comment that merely mentions the import (REFUTE round-1 MAJOR) or a string literal that spells
+ * it out is never an import, and a comment match can never SWALLOW a real import that follows it
+ * (the earlier regex-spans-500-chars approach did exactly that — a comment mentioning
+ * `from "node:test"` would consume a real import statement that appeared later in its span). */
+export function hasNodeTestImport(source: string): boolean {
+  const mask = buildNonCodeMask(source);
+  const n = source.length;
+  const isIdent = (c: string | undefined): boolean => !!c && /[A-Za-z0-9_$]/.test(c);
+  let i = 0;
+  while (i < n) {
+    if (mask[i] === 1) { i++; continue; }
+    const c = source[i];
+    // `import` keyword at a code position, word-bounded (not "imports", not inside an ident).
+    if (c === "i" && source.startsWith("import", i) && !isIdent(source[i - 1]) && !isIdent(source[i + 6])) {
+      const rest = source.slice(i);
+      // bare: import "node:test"; dynamic: import("node:test")
+      if (/^import\s*["']node:test["']/.test(rest)) return true;
+      if (/^import\(\s*["']node:test["']\s*\)/.test(rest)) return true;
+      // named/default: import ... from "node:test" — scan CODE positions forward for `from`
+      // at brace depth 0 (a comment between the clauses is skipped because it is masked).
+      let j = i + 6;
+      let depth = 0;
+      while (j < n) {
+        if (mask[j] === 0) {
+          const cc = source[j];
+          if (cc === ";" && depth === 0) break; // end of the import statement
+          if (cc === "{") depth++;
+          if (cc === "}") depth--;
+          if (depth === 0 && cc === "f" && source.startsWith("from", j) && !isIdent(source[j - 1]) && !isIdent(source[j + 4])) {
+            const spec = source.slice(j + 4).match(/^\s*["']([^"']+)["']/);
+            if (spec && spec[1] === "node:test") return true;
+            break; // this import's module specifier is not node:test
+          }
+        }
+        j++;
+      }
+    }
+    // `require` call at a code position, word-bounded.
+    if (c === "r" && source.startsWith("require", i) && !isIdent(source[i - 1]) && !isIdent(source[i + 7])) {
+      if (/^require\(\s*["']node:test["']\s*\)/.test(source.slice(i))) return true;
+    }
+    i++;
+  }
+  return false;
 }
 
 /** Regex that matches a valid `// @test-group <product|engine|governance>` declaration. */
@@ -80,6 +180,15 @@ export function parseExemptionList(text: string): string[] {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith("#"));
+}
+
+/** Parse the RATCHET CEILING from the data file header: a `# baseline-count: <n>` line.
+ * This is the commit-surviving AC4 backstop — the list can never exceed this many entries, even
+ * at a clean commit where the git-HEAD baseline already moved past a smuggled addition (REFUTE
+ * round-1 MAJOR). Returns null when the token is absent (no ceiling enforced). */
+export function parseBaselineCount(text: string): number | null {
+  const m = text.match(/^#\s*baseline-count:\s*(\d+)\s*$/m);
+  return m ? Number(m[1]) : null;
 }
 
 // ── glob parsing (single-source: read scripts/test.sh's own glob line) ─────────────────────────────
@@ -174,6 +283,11 @@ export interface PolicyCheckInput {
   /** Test-file paths (repo-relative) present in the baseline file set (git HEAD). Empty on
    * bootstrap → every existing file is treated as "existing", none as "new". */
   baselineTestFiles: Set<string>;
+  /** RATCHET CEILING: the maximum number of exemption entries ever allowed (parsed from the
+   * data file's own `# baseline-count: <n>` header). Commit-surviving backstop — it fires even
+   * at a clean commit where the git-HEAD baseline already moved past a smuggled addition.
+   * null = no ceiling enforced (token absent). */
+  baselineCount: number | null;
   /** Predicate: does a repo-relative path exist on disk right now? */
   fileExists: (rel: string) => boolean;
 }
@@ -187,9 +301,20 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
   const bootstrap = i.baselineExemptionList.length === 0;
   const globSet = new Set(i.files.map((f) => f.rel));
 
+  // C0 (AC4, commit-surviving ceiling): the list can never exceed the ratchet ceiling. Unlike
+  // C2a (git-HEAD strict-subset, which only sees UNCOMMITTED additions), this fires at ANY
+  // state — including a clean commit or a fresh clone where a smuggled hand-rolled test and its
+  // exemption line landed together (REFUTE round-1 MAJOR). The ceiling is the task's 34,
+  // parsed from the data file header.
+  if (i.baselineCount !== null && i.exemptionList.length > i.baselineCount) {
+    failures.push(
+      `AC4: the exemption list has ${i.exemptionList.length} entries, over the ratchet ceiling of ${i.baselineCount} (${DATA_FILE_REL} header "# baseline-count"). The list can only get SHORTER — a new hand-rolled test can never be exempted.`
+    );
+  }
+
   // C1 (AC3): every glob file must import node:test OR be on the exemption list.
   for (const f of i.files) {
-    if (nodeTestImportRE().test(f.source)) continue;
+    if (hasNodeTestImport(f.source)) continue;
     if (exemptionSet.has(f.rel)) continue;
     failures.push(
       `AC3: ${f.rel} uses the hand-rolled harness (no "node:test" import) and is NOT on the legacy exemption list (${DATA_FILE_REL}). New test files MUST import node:test.`
@@ -197,7 +322,9 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
   }
 
   if (!bootstrap) {
-    // C2a (AC4 ratchet): the list can only get SHORTER — an entry not in the baseline was ADDED.
+    // C2a (AC4 ratchet, working-tree): the list can only get SHORTER — an entry not in the
+    // committed baseline was ADDED in the working tree (catches same-count swaps and header
+    // edits before they land).
     for (const rel of i.exemptionList) {
       if (!baselineExemptionSet.has(rel)) {
         failures.push(
@@ -222,7 +349,7 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
       continue;
     }
     const f = i.files.find((x) => x.rel === rel);
-    if (f && nodeTestImportRE().test(f.source)) {
+    if (f && hasNodeTestImport(f.source)) {
       failures.push(
         `AC4: exemption entry ${rel} now imports node:test — the file was converted but the list was not shortened. Remove it from ${DATA_FILE_REL} (the list only shrinks).`
       );
@@ -246,6 +373,18 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
 }
 
 // ── git baseline resolution ─────────────────────────────────────────────────────────────────────────
+
+/** True iff `git -C <root>` resolves a HEAD commit (usable git worktree). */
+function gitHeadExists(root: string): boolean {
+  try {
+    execFileSync("git", ["-C", root, "rev-parse", "--verify", "HEAD"], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function gitShowFile(root: string, ref: string, rel: string): string | null {
   try {
@@ -314,24 +453,47 @@ export function main(argv: string[]): number {
   const files = canonicalTestFiles(root).map((rel) => ({ rel, source: readFileSafe(path.join(root, rel)) }));
   const currentList = parseExemptionList(readFileSafe(dataFileAbs));
 
-  // Baseline: explicit --baseline-file / --baseline-files win; otherwise git HEAD.
+  // RATCHET CEILING (commit-surviving AC4): parsed from the data file's own header. If the token
+  // is absent there is no ceiling — but the committed data file always carries it.
+  const baselineCount = parseBaselineCount(readFileSafe(dataFileAbs));
+
+  // Baseline: explicit --baseline-file / --baseline-files win; otherwise git HEAD. A broken git
+  // baseline FAILS CLOSED (exit 2) — silently degrading to bootstrap would disable AC4/AC5 with a
+  // green exit (REFUTE round-1 MINOR). The only legitimate "no baseline" is a TRUE bootstrap: the
+  // data file genuinely does not exist at HEAD (the mechanism's own first commit).
   let baselineList = currentList;
   let baselineFiles = new Set(files.map((f) => f.rel)); // bootstrap default: nothing is "new"
   const baselineFileArg = getArgValue(args, "--baseline-file");
+  const baselineFilesArg = getArgValue(args, "--baseline-files");
   if (baselineFileArg) {
     baselineList = parseExemptionList(readFileSafe(path.resolve(root, baselineFileArg)));
+  } else if (baselineFilesArg) {
+    // baseline-files override alone: keep baselineList = currentList (no list ratchet), but pin
+    // the file set so AC5's "new" classification has a baseline.
   } else {
+    // No overrides — the git baseline is REQUIRED. Fail closed unless it is a true bootstrap.
+    const gitOk = gitHeadExists(root);
+    if (!gitOk) {
+      console.error(
+        "ERROR: test-framework-policy-check needs a git baseline (git HEAD) to enforce the AC4 ratchet and AC5 @test-group rule, but this is not a usable git worktree. " +
+          "Pass --baseline-file/--baseline-files for a non-git fixture, or run in the real checkout."
+      );
+      process.exit(2);
+    }
     const committed = gitShowFile(root, "HEAD", dataFileRel);
-    if (committed !== null) {
+    if (committed === null) {
+      // TRUE bootstrap: the data file is not yet committed (the mechanism's first commit). The
+      // current list becomes the baseline; the ratchet starts being enforceable after this commit.
+      baselineList = currentList;
+      baselineFiles = new Set(files.map((f) => f.rel));
+    } else {
       baselineList = parseExemptionList(committed);
-    } // null → bootstrap: baseline = current list (ratchet not yet enforceable)
+      const atHead = gitTestFilesAtRef(root, "HEAD");
+      if (atHead.size > 0) baselineFiles = atHead;
+    }
   }
-  const baselineFilesArg = getArgValue(args, "--baseline-files");
   if (baselineFilesArg) {
     baselineFiles = new Set(readFileSafe(path.resolve(root, baselineFilesArg)).split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
-  } else {
-    const atHead = gitTestFilesAtRef(root, "HEAD");
-    if (atHead.size > 0) baselineFiles = atHead;
   }
 
   const failures = runPolicyChecks({
@@ -339,6 +501,7 @@ export function main(argv: string[]): number {
     exemptionList: currentList,
     baselineExemptionList: baselineList,
     baselineTestFiles: baselineFiles,
+    baselineCount,
     fileExists: (rel) => fs.existsSync(path.join(root, rel)),
   });
 
@@ -347,7 +510,7 @@ export function main(argv: string[]): number {
   } else {
     console.log(`test-framework-policy-check — ${files.length} glob file(s), ${currentList.length} exemption(s)`);
     if (failures.length === 0) {
-      console.log("PASS: every test file uses node:test or is a listed legacy exemption; exemption list did not grow; new files declare @test-group.");
+      console.log("PASS: every test file uses node:test or is a listed legacy exemption; exemption list is at/below the ratchet ceiling and did not grow; new files declare @test-group.");
     } else {
       console.log(`FAIL: ${failures.length} violation(s):`);
       for (const f of failures) console.log(`  - ${f}`);
@@ -382,6 +545,10 @@ export function runSelftest(): boolean {
   const newNoGroup = '// plain\nimport { test } from "node:test";\n';
   const newBadGroup = '// @test-group nope\nimport { test } from "node:test";\n';
 
+  // Helper: pure check with NO ratchet ceiling (the ceiling is exercised by dedicated cases).
+  const pc = (o: Partial<PolicyCheckInput> & Pick<PolicyCheckInput, "files" | "exemptionList" | "baselineExemptionList" | "baselineTestFiles">) =>
+    runPolicyChecks({ baselineCount: null, fileExists: () => true, ...o });
+
   // Glob-covered files: modern (at HEAD) + legacy (in the list AND at HEAD). NOT included:
   // the "new" files, which each RED case adds explicitly (they are not in `baselineFiles`,
   // so they are classified as NEW by C3 — the whole point of the AC5 cases).
@@ -394,52 +561,91 @@ export function runSelftest(): boolean {
   const baselineFiles = new Set(["packages/quay/test/modern.test.mjs", "packages/quay/test/legacy-handrolled.test.mjs"]);
 
   // GREEN baseline: legacy in list, modern at HEAD, both existing. Everything passes.
-  let failures = runPolicyChecks({ files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  let failures = pc({ files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("GREEN: compliant set passes", failures.length === 0, JSON.stringify(failures));
 
   // C1 (AC3) RED: a hand-rolled file NOT on the list (and not at baseline) — the "35th file".
   const c1Files = [...files, { rel: "packages/quay/test/other-handrolled.test.mjs", source: legacySource }];
-  failures = runPolicyChecks({ files: c1Files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files: c1Files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C1 RED: unlisted hand-rolled file fails", failures.some((f) => f.includes("other-handrolled") && f.includes("AC3")), JSON.stringify(failures));
 
   // C2a (AC4) RED: an entry ADDED to the list (not in baseline).
   const grownList = [...exemptionList, "packages/quay/test/other-handrolled.test.mjs"];
-  failures = runPolicyChecks({ files: c1Files, exemptionList: grownList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files: c1Files, exemptionList: grownList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C2a RED: added list entry fails", failures.some((f) => f.includes("ADDED to the exemption list")), JSON.stringify(failures));
   // ... and C1 is quiet for that same file once listed (exempt), so only the ratchet fires.
   check("C2a RED: listed file is exempt from C1", !failures.some((f) => f.includes("other-handrolled") && f.includes("AC3")), JSON.stringify(failures));
 
   // C2c RED: a listed entry whose file now imports node:test (converted but not removed).
   const c2cFiles = files.map((f) => (f.rel === "packages/quay/test/legacy-handrolled.test.mjs" ? { ...f, source: legacyConverted } : f));
-  failures = runPolicyChecks({ files: c2cFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files: c2cFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C2c RED: converted-but-not-removed entry fails", failures.some((f) => f.includes("now imports node:test")), JSON.stringify(failures));
 
   // C2b RED: a listed entry whose file no longer exists.
-  failures = runPolicyChecks({ files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: (rel) => rel !== "packages/quay/test/legacy-handrolled.test.mjs" });
+  failures = pc({ files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: (rel) => rel !== "packages/quay/test/legacy-handrolled.test.mjs" });
   check("C2b RED: missing-file entry fails", failures.some((f) => f.includes("no longer exists")), JSON.stringify(failures));
 
   // C2d RED: a listed entry outside the glob (exists on disk but is NOT a glob-covered file).
-  failures = runPolicyChecks({ files, exemptionList: [...exemptionList, "plugin/scripts/not-a-test.mjs"], baselineExemptionList: [...baselineExemption, "plugin/scripts/not-a-test.mjs"], baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files, exemptionList: [...exemptionList, "plugin/scripts/not-a-test.mjs"], baselineExemptionList: [...baselineExemption, "plugin/scripts/not-a-test.mjs"], baselineTestFiles: baselineFiles });
   check("C2d RED: non-glob entry fails", failures.some((f) => f.includes("OUTSIDE the canonical test glob")), JSON.stringify(failures));
 
   // C3 (AC5) RED: a NEW file (not at baseline) with no @test-group declaration.
   const c3Files = [...files, { rel: "packages/quay/test/brand-new.test.mjs", source: newNoGroup }];
-  failures = runPolicyChecks({ files: c3Files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files: c3Files, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C3 RED: new file without @test-group fails", failures.some((f) => f.includes("brand-new") && f.includes("AC5")), JSON.stringify(failures));
 
   // C3 RED: new file with an INVALID group also fails (must be product|engine|governance).
   const c3bFiles = [...files, { rel: "packages/quay/test/brand-new-bad.test.mjs", source: newBadGroup }];
-  failures = runPolicyChecks({ files: c3bFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files: c3bFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C3 RED: new file with invalid @test-group fails", failures.some((f) => f.includes("brand-new-bad") && f.includes("AC5")), JSON.stringify(failures));
 
   // C3 GREEN: the same new file WITH a valid declaration passes (and legacy + modern still pass).
   const c3gFiles = [...files, { rel: "packages/quay/test/brand-new-ok.test.mjs", source: nodeTestSource }];
-  failures = runPolicyChecks({ files: c3gFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles, fileExists: () => true });
+  failures = pc({ files: c3gFiles, exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
   check("C3 GREEN: new file with valid @test-group passes", failures.length === 0, JSON.stringify(failures));
 
   // bootstrap: empty baseline exemption → ratchet not enforceable (C2a silent), nothing is "new".
-  failures = runPolicyChecks({ files: c1Files, exemptionList: grownList, baselineExemptionList: [], baselineTestFiles: new Set(c1Files.map((f) => f.rel)), fileExists: () => true });
+  failures = pc({ files: c1Files, exemptionList: grownList, baselineExemptionList: [], baselineTestFiles: new Set(c1Files.map((f) => f.rel)) });
   check("bootstrap: empty baseline passes (no C2a, no new-file requirement)", failures.length === 0, JSON.stringify(failures));
+
+  // ── REFUTE round-1 regressions ──────────────────────────────────────────────────────────────────
+  // Comment bypass (MAJOR): a comment mentioning a node:test import must NOT satisfy AC3, and
+  // must NOT trigger C2c on a listed legacy file.
+  const commentSneak = '// @test-group engine\n// TODO: migrate this to import { test } from "node:test"\nfunction makeAssert(){}\nmakeAssert();\n';
+  check("comment-bypass: hand-rolled file with a node:test-comment is NOT node:test (AC3 fires)",
+    hasNodeTestImport(commentSneak) === false, "comment must not count as an import");
+  failures = pc({ files: [...files, { rel: "packages/quay/test/sneak.test.mjs", source: commentSneak }], exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
+  check("comment-bypass: sneaky hand-rolled file FAILS AC3", failures.some((f) => f.includes("sneak") && f.includes("AC3")), JSON.stringify(failures));
+  // The same comment on a LISTED legacy file must NOT fire C2c (it did not convert).
+  failures = pc({ files: files.map((f) => (f.rel === "packages/quay/test/legacy-handrolled.test.mjs" ? { ...f, source: commentSneak } : f)), exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
+  check("comment-bypass: listed legacy file with a node:test-comment is NOT reported converted", !failures.some((f) => f.includes("now imports node:test")), JSON.stringify(failures));
+
+  // String-literal bypass: `require("node:test")` inside a string is not an import.
+  const stringSneak = '// @test-group engine\nconst s = "require(\\\"node:test\\\")";\nfunction makeAssert(){}\nmakeAssert();\n';
+  check("string-literal-bypass: require() inside a string is NOT an import", hasNodeTestImport(stringSneak) === false);
+
+  // Count ceiling (MAJOR, commit-surviving AC4): a list over the ceiling fails even with a
+  // baseline that already contains the extra entry (a clean commit / fresh clone).
+  failures = runPolicyChecks({
+    files: c1Files,
+    exemptionList: grownList,
+    baselineExemptionList: grownList, // HEAD already moved past the addition — the git subset is blind
+    baselineTestFiles: new Set(c1Files.map((f) => f.rel)),
+    baselineCount: 1, // ceiling of 1, list has 2
+    fileExists: () => true,
+  });
+  check("count-ceiling RED: list over the ceiling fails at a clean commit", failures.some((f) => f.includes("over the ratchet ceiling")), JSON.stringify(failures));
+
+  // Count ceiling GREEN: list at/below the ceiling passes.
+  failures = runPolicyChecks({
+    files: c1Files,
+    exemptionList: grownList,
+    baselineExemptionList: grownList,
+    baselineTestFiles: new Set(c1Files.map((f) => f.rel)),
+    baselineCount: 2,
+    fileExists: () => true,
+  });
+  check("count-ceiling GREEN: list at the ceiling passes", failures.length === 0, JSON.stringify(failures));
 
   console.log(`\ntest-framework-policy-check --selftest: ${pass} passed, ${fail} failed`);
   return fail === 0;

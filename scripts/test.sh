@@ -298,7 +298,9 @@ elif [ -n "${groups}" ]; then
     # with an EMPTY file list → node --test auto-discovered a 3.7x-larger, different suite.
     run_selected "$groups" "$@"
   else
-    # Explicit files with the group env set (in-file skips apply).
+    # Explicit files with the group env set (in-file skips apply). Static checks still run —
+    # "every test-running invocation" is the documented invariant (REFUTE round-1 MINOR).
+    run_static_checks
     export QUAY_TEST_GROUPS="$groups"
     build_dist_once
     exec node --test --test-concurrency=8 "$@"

@@ -25,6 +25,8 @@ import {
   runPolicyChecks,
   canonicalTestFiles,
   parseExemptionList,
+  parseBaselineCount,
+  hasNodeTestImport,
   nodeTestImportRE,
   groupDeclRE,
   DATA_FILE_REL,
@@ -48,12 +50,13 @@ const EXEMPTION = ["packages/quay/test/legacy-handrolled.test.mjs"];
 const BASELINE_EXEMPTION = ["packages/quay/test/legacy-handrolled.test.mjs"];
 const BASELINE_FILES = new Set(["packages/quay/test/modern.test.mjs", "packages/quay/test/legacy-handrolled.test.mjs"]);
 
-function runPolicy(files, exemptionList, baselineExemption, baselineFiles, fileExists = () => true) {
+function runPolicy(files, exemptionList, baselineExemption, baselineFiles, fileExists = () => true, baselineCount = null) {
   return runPolicyChecks({
     files,
     exemptionList,
     baselineExemptionList: baselineExemption,
     baselineTestFiles: baselineFiles,
+    baselineCount,
     fileExists,
   });
 }
@@ -130,6 +133,51 @@ test("C3/AC5: an existing (baseline) file without @test-group defaults to engine
   assert.deepEqual(failures, []);
 });
 
+// ── REFUTE round-1 regression: a comment/string mentioning node:test must NOT satisfy AC3 ───────────
+test("REFUTE: a comment mentioning a node:test import does NOT make a file compliant", () => {
+  const commentSneak = '// @test-group engine\n// TODO: migrate this to import { test } from "node:test"\nfunction makeAssert(){}\nmakeAssert();\n';
+  assert.equal(hasNodeTestImport(commentSneak), false, "a comment must not count as an import");
+  const files = [...FILES, { rel: "packages/quay/test/sneak.test.mjs", source: commentSneak }];
+  const failures = runPolicy(files, EXEMPTION, BASELINE_EXEMPTION, BASELINE_FILES);
+  assert.ok(failures.some((f) => f.includes("sneak") && f.includes("AC3")), JSON.stringify(failures));
+});
+
+test("REFUTE: a comment mentioning node:test on a LISTED legacy file does NOT fire the converted check", () => {
+  const commentSneak = '// TODO: migrate this to import { test } from "node:test"\nfunction makeAssert(){}\nmakeAssert();\n';
+  const files = FILES.map((f) =>
+    f.rel === "packages/quay/test/legacy-handrolled.test.mjs" ? { ...f, source: commentSneak } : f
+  );
+  const failures = runPolicy(files, EXEMPTION, BASELINE_EXEMPTION, BASELINE_FILES);
+  assert.ok(!failures.some((f) => f.includes("now imports node:test")), JSON.stringify(failures));
+});
+
+test("REFUTE: a require('node:test') inside a string literal is NOT an import", () => {
+  const stringSneak = '// @test-group engine\nconst s = "require(\\\"node:test\\\")";\nfunction makeAssert(){}\nmakeAssert();\n';
+  assert.equal(hasNodeTestImport(stringSneak), false);
+});
+
+// ── REFUTE round-1 regression: the commit-surviving count-ceiling ratchet ──────────────────────────
+test("REFUTE: a list over the ratchet ceiling fails even at a clean commit (git subset is blind)", () => {
+  const files = [...FILES, { rel: "packages/quay/test/other-handrolled.test.mjs", source: legacySource }];
+  const grown = [...EXEMPTION, "packages/quay/test/other-handrolled.test.mjs"];
+  // baseline == current (HEAD already moved past the addition): only the ceiling can catch it.
+  const failures = runPolicy(files, grown, grown, new Set(files.map((f) => f.rel)), () => true, 1);
+  assert.ok(failures.some((f) => f.includes("over the ratchet ceiling")), JSON.stringify(failures));
+});
+
+test("REFUTE: a list at or below the ratchet ceiling passes", () => {
+  const files = [...FILES, { rel: "packages/quay/test/other-handrolled.test.mjs", source: legacySource }];
+  const grown = [...EXEMPTION, "packages/quay/test/other-handrolled.test.mjs"];
+  const failures = runPolicy(files, grown, grown, new Set(files.map((f) => f.rel)), () => true, 2);
+  assert.deepEqual(failures, []);
+});
+
+test("REFUTE: the data file header carries a parseable baseline-count: 34 ceiling", () => {
+  const dataAbs = path.join(REPO_ROOT, DATA_FILE_REL);
+  const baselineCount = parseBaselineCount(fs.readFileSync(dataAbs, "utf8"));
+  assert.equal(baselineCount, 34, "data file must carry '# baseline-count: 34'");
+});
+
 // ── Real repo invariant: the current tree is green and the list is exactly 34 ──────────────────────
 test("real repo: every glob file imports node:test or is on the exemption list; list is 34", () => {
   const files = canonicalTestFiles(REPO_ROOT);
@@ -143,7 +191,7 @@ test("real repo: every glob file imports node:test or is on the exemption list; 
   for (const rel of files) {
     const src = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
     assert.ok(
-      nodeTestImportRE().test(src) || list.includes(rel),
+      hasNodeTestImport(src) || list.includes(rel),
       `${rel} is neither node:test nor on the exemption list`
     );
   }
@@ -225,6 +273,63 @@ test("CLI AC4 rehearsal: adding a file to the exemption list fails; removing res
     res = runCheck();
     assert.equal(res.status, 0, `expected PASS after removing zz-new:\n${res.stdout}`);
     assert.match(res.stdout, /PASS/);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// ── REFUTE round-1 regression: a broken git baseline FAILS CLOSED (no silent degrade) ──────────────
+test("REFUTE: without a git baseline and without overrides the check fails closed (exit 2)", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "fw-policy-nogit-"));
+  try {
+    fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "scripts", "test.sh"), 'glob=(packages/*/test/*.test.mjs)\n');
+    fs.mkdirSync(path.join(scratch, "packages", "quay", "test"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "packages", "quay", "test", "modern.test.mjs"), nodeTestSource);
+    fs.mkdirSync(path.join(scratch, "plugin"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "plugin", "test-framework-policy-exemptions.txt"), "# baseline-count: 1\npackages/quay/test/modern.test.mjs\n");
+    const res = spawnSync("node", ["--experimental-strip-types", CHECK_TS, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 2, `expected exit 2 (fail closed) without git:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /git baseline/i);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// ── REFUTE round-1 regression: the count-ceiling ratchet is commit-surviving ───────────────────────
+test("REFUTE: committing a hand-rolled test + its exemption in one commit is caught by the ceiling", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "fw-policy-git-"));
+  try {
+    const run = (args) => spawnSync("git", ["-C", scratch, ...args], { encoding: "utf8", timeout: 30_000 });
+    run(["init", "-q"]);
+    run(["config", "user.email", "test@example.com"]);
+    run(["config", "user.name", "Test"]);
+    run(["config", "commit.gpgsign", "false"]);
+
+    fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "scripts", "test.sh"), 'glob=(packages/*/test/*.test.mjs)\nexec node --test "${files[@]}"\n');
+    const testDir = path.join(scratch, "packages", "quay", "test");
+    fs.mkdirSync(testDir, { recursive: true });
+    fs.writeFileSync(path.join(testDir, "modern.test.mjs"), nodeTestSource);
+    fs.mkdirSync(path.join(scratch, "plugin"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "plugin", "test-framework-policy-exemptions.txt"), "# baseline-count: 1\npackages/quay/test/modern.test.mjs\n");
+    run(["add", "-A"]);
+    run(["commit", "-q", "-m", "baseline"]);
+
+    // SMUGGLE in one commit: a hand-rolled test AND its exemption line (ceiling stays 1).
+    fs.writeFileSync(path.join(testDir, "smuggled.test.mjs"), legacySource);
+    fs.writeFileSync(
+      path.join(scratch, "plugin", "test-framework-policy-exemptions.txt"),
+      "# baseline-count: 1\npackages/quay/test/modern.test.mjs\npackages/quay/test/smuggled.test.mjs\n"
+    );
+    run(["add", "-A"]);
+    run(["commit", "-q", "-m", "smuggle a hand-rolled test + exemption"]);
+
+    // At this clean commit, working tree == HEAD, so the git strict-subset is blind — the
+    // count ceiling (2 > 1) is the backstop and MUST fire.
+    const res = spawnSync("node", ["--experimental-strip-types", CHECK_TS, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `expected ceiling FAIL at the smuggling commit:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /over the ratchet ceiling/);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }

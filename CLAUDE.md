@@ -51,13 +51,19 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     either import `node:test` or be on the legacy exemption list
     (`plugin/test-framework-policy-exemptions.txt`, **currently 34 files** — the pre-existing
     hand-rolled `makeAssert()`/`failures`-counter tests, 12,204 lines, measured 2026-08-02 in
-    `orchestration/test-shape-analysis.md`). That list is a **shrink-only ratchet (AC4)**: it can
-    only get shorter — a file ADDED to it fails the check, a listed file that converts to
-    `node:test` must be REMOVED from it, and there is no way to exempt a new hand-rolled test.
-    Existing legacy files are NOT migrated by this policy; each converts one at a time, when
-    someone is already editing it (first intended application: relation-sync's harness). New files
-    must also declare `// @test-group <product|engine|governance>` (AC5); existing files may omit
-    it and default to `engine`.
+    `orchestration/test-shape-analysis.md`). That list is a **shrink-only ratchet (AC4)**, enforced
+    two ways: a **commit-surviving count ceiling** — the data file header's `# baseline-count: 34`
+    means the list can NEVER exceed 34 entries, at any state (a clean commit, a fresh clone, a
+    smuggled addition), so a new hand-rolled test can never be exempted; and a **git-HEAD
+    strict-subset** — a working-tree addition that isn't in the committed list fails before it can
+    land (catches same-count swaps). A listed file that converts to `node:test` must be REMOVED
+    from it. Existing legacy files are NOT migrated by this policy; each converts one at a time,
+    when someone is already editing it (first intended application: relation-sync's harness). New
+    files must also declare `// @test-group <product|engine|governance>` (AC5); existing files may
+    omit it and default to `engine`. The import detection is code-position based (comments and
+    strings that merely mention `node:test` do not count). The `@test-group` requirement is
+    enforced at the point a file is introduced (Audit-before-commit); a committed new file without
+    it is treated as existing (`存量缺省 engine`) by design.
   - **Test-layer selection (AC7 — not coverage):** test at the boundary you are willing to keep
     stable, in three layers: (1) user-facing **contracts** (CLI commands, MCP tools, Provider ABI,
     web routes) → **≥1 real end-to-end check** against the shipped artifact (`dist/quay.js`, the

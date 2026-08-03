@@ -113,7 +113,8 @@ extra:
 
 ## AC4 真实演练记录（2026-08-03，worktree `task/test-framework-policy`，数据文件已提交为基线）
 
-棘轮是 git-HEAD 基线比较：数据文件的**已提交形态**是基线，工作树是当前。演练如下：
+棘轮是两层：git-HEAD 严格子集（数据文件的**已提交形态**是基线，工作树是当前）+ **持久计数上限**
+（数据文件头 `# baseline-count: 34`，任何状态下都不能超过 34 项，含干净提交/新 clone）。演练如下：
 
 1. 提交基线：`plugin/test-framework-policy-exemptions.txt` 含 34 项 → `git commit`（HEAD 即基线）。
 2. 加文件到名单：新建临时手写 harness 文件 `packages/quay/test/zz-ac4-rehearsal.test.mjs`，
@@ -127,6 +128,25 @@ extra:
 同一场景还有一个**自动化**演练被固化成测试（`plugin/test/test-framework-policy-check.test.mjs`
 的 "CLI AC4 rehearsal" 用例）：在 scratch fixture 里用 `--baseline-file`/`--baseline-files`
 跑 CLI，加文件到名单 → exit 1（AC4）→ 移除 → exit 0。两者都证明：**名单只能变短，加入即失败**。
+
+## 内部对抗审查（REFUTE，2026-08-03）
+
+**Round 1**（独立审查 agent）——2 MAJOR + 3 MINOR + 2 NIT，全部处理：
+
+- **MAJOR-1 AC3 检测被注释/字符串绕过**：`// TODO: migrate to import { test } from "node:test"`
+  之类注释会让手写文件「通过」检测。**修复**：改为 code-position 状态机检测（`buildNonCodeMask`
+  跳过注释与字符串），真实 `import`/`require` 只在 code 位置计数；注释提及不再算导入。
+  附带修掉一个更隐蔽的问题：naive 的 `/*...*/` 正则会被注释里的 glob（如 `packages/*/test/*.test.mjs`）
+  骗到、把后续真实 import 吞掉。
+- **MAJOR-2 棘轮对「已提交」改动失效**：git-HEAD 子集在干净提交时看不见「同一 commit 里加了文件又
+  加了名单」。**修复**：新增**持久计数上限**（C0，`# baseline-count: 34`）——任何状态下名单超过
+  34 即失败；`git commit` 后在新 clone 里跑也会红。固化为 scratch-git 测试。
+- **MINOR-3** `--group <name> <file...>` 分支没跑静态检查 → 补上 `run_static_checks`。
+- **MINOR-4** git 不可用时静默降级为 bootstrap（fail-open）→ 改为 **fail-closed**（exit 2），
+  除非给了 `--baseline-file/--baseline-files` 或数据文件确实不在 HEAD（真 bootstrap）。
+- **NIT**：`experiments/.../workflow-baseline-metrics.test.mjs` 是真实重复文件非符号链接——记录，
+  不在本任务改；glob 单层覆盖——政策语言已限定为 canonical glob。
+- **Round 1 后**：21/21 测试绿（含全部回归用例），`--for-task` 全绿。
 
 ## Touches
 

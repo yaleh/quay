@@ -13,7 +13,11 @@
 # which is the nudge that makes "each legacy file converts when someone already touches it" the
 # default path (first application: relation-sync's harness).
 #
+# baseline-count: 34
 # Baseline: 34 entries (recorded in tasks/gap-no-test-framework-policy-for-new-tests.md DoD).
+# `# baseline-count: <n>` is the MACHINE-READABLE RATCHET CEILING parsed by the policy check —
+# the list can NEVER exceed this many entries, even at a clean commit (commit-surviving AC4). It
+# is permanent: it stays 34 even as entries are removed (the list only shrinks below it).
 # Format: one repo-root-relative path per line; '#' starts a comment. Sorted by path.
 packages/quay-github/test/cli.test.mjs
 packages/quay-github/test/compound-gate.test.mjs
