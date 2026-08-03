@@ -1387,3 +1387,12 @@ pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过�
 （plugin/scripts/inner-state.sh），fan-in 报告带新路径供外层重新挂载。
 
 **在飞 2/3**：cold-start（af2e2aa...）、contract-ratchet（a22be4f...）。
+
+### 外层必办项（2026-08-03 10:4xZ）：cold-start 搬移的路径断点
+
+外层实测：cold-start worktree 已搬 resource-gate.sh/heavy-op-token.sh 进 plugin/scripts/，但
+scripts/test.sh 4 处（186 if ! bash resource-gate / 208 acquire / trap release / 注释）+ 
+heavy-op-token.test.mjs:35 仍按老路径调用。失败形态坏：`if ! bash <不存在>` → 127 → 误进「资源闸 WAIT」
+分支。已通知 cold-start agent：补 scripts/test.sh + heavy-op-token.test.mjs 进 Touches、**同提交改路径**、
+扫全部 6 个老路径的约 20 处引用（CLAUDE.md/QUAY-OUTER-HANDOFF/exp6/docs/analysis/cold-start 说明本身）、
+任务体加 AC「搬完无老路径活引用」。**不留兼容壳**——外层 Monitor/cron 两处 fan-in 后自行重挂。
