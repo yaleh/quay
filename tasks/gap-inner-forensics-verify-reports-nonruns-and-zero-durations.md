@@ -47,8 +47,8 @@ tick 文件步骤 1 明写「核实优先查 transcript，不要靠重跑」，�
 ## Contract
 
 ```
-measure  call_class  = `inner-forensics.mjs verify <类别>` 输出的分类结果
-measure  call_dur    = 同上输出的耗时列                      # 与日志 duration_ms 对照
+measure  call_class = `node orchestration/watch/inner-forensics.mjs verify 全量套件` 输出中每条调用行的**类别**字段
+measure  call_dur   = `node orchestration/watch/inner-forensics.mjs verify 全量套件` 输出中每条调用行的**耗时**字段（秒）
 invariant 已知答案集：02:17:17 那次真实耗时 ~474s、02:09:14 那次不是套件运行
 invoke   `node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <ISO>`
 control  构造一条只在引号内含 `scripts/test.sh` 的命令 ⇒ 必须不被归类为全量套件
@@ -97,3 +97,9 @@ resume   n/a: 单次查询，无中途产物
 
 - orchestration/watch/inner-forensics.mjs
 - plugin/test/inner-forensics.test.mjs
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-03T03:19:46Z
+changed: 无——本任务由外层在核实 AC1 时直接建立，证据（三个错误信号的原始输出）已在 Proposal 中逐条引用

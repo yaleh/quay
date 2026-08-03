@@ -195,3 +195,11 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
 - plugin/test/resource-gate.test.mjs
 - orchestration/orchestrator-loop-tick.md
 - docs/analysis/fast-mode-loop-tick.md
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-03T03:19:46Z
+changed: 初稿写「4 核跑 8 = 2× 超订」，外层实测在跑套件的真实进程数后改为 **17 个进程、4.25×**；
+  据此改掉机制设计（`--test-concurrency` 不是正确旋钮）与 AC5（先实测放大系数，不许照 `nproc*2` 推导）；
+  并加 AC10（gate 输出单列 ppid=1 且 cwd 已删除的孤儿进程）

@@ -89,11 +89,36 @@
 | **决策性** | **36** |
 | ├ 有执行者（已核实） | **2**（#11 `.halt`、#31 阻塞记录落点） |
 | ├ 部分（非阻断/非自动/双源） | **3**（#16、#30、#46） |
-| ├ 待建（`gap-dispatch-gate` 在飞） | **5**（#35–#39） |
+| ├ **有执行者**（`gap-dispatch-gate` 已 done，`task-contract-check.ts` 实跑会失败） | **5**（#35–#39） |
 | ├ **有意不机械化**（ADR-021 明示） | **1**（#25，覆盖判断边界表整块） |
 | └ **无执行者** | **25** |
 
-> **36 条决策性散文，2 条有真执行者。**
+> **36 条决策性散文，初测 2 条有真执行者；`gap-dispatch-gate` 落地后为 7 条。**
+
+### 更新（2026-08-03 03:2xZ）：#35–#39 已从「待建」变为「有执行者」
+
+`gap-dispatch-gate-has-no-checklist-and-no-trace` 已 `done`（AC 全勾，全量套件 2407/2388/0/19 exit 0），
+`plugin/scripts/task-contract-check.ts`（18,685 字节）实跑会失败，违规名单是
+`docs/analysis/contract-violations.md`（shrink-only 棘轮）。
+
+**它落地一小时内抓到的第一批违规，全部是外层自己手写的 `## Contract` 块**：
+
+| 任务 | 违规 |
+|---|---|
+| `gap-inner-forensics-…` | `measure-no-field`（`call_class` 有命令无字段）、`measure-no-command`（`call_dur` 无反引号命令）、`dispatch-review-missing` |
+| `gap-no-resource-awareness-…` | `dispatch-review-missing` |
+| `gap-no-inventory-…` | `contract-line-unknown`、`measure-no-command` ×2、`measure-no-field`、`dispatch-review-missing` |
+
+**其中最有意义的一条**：我写的是
+`measure executed = 内层 transcript 中命令位置出现该脚本的次数`——
+**用散文描述了度量，却没点名哪条命令产出它**。这正是 `duration_ms` 那个失效模式本身
+（`docs/analysis/instrument-failure-mode.md` 形态 A），而我是在**设计这个检查一小时后**又犯的。
+
+**这是这个机制值得留下的最强证据**：它抓到的不是别人的疏忽，是设计者本人在知道该规则的情况下
+仍然犯的同一个错。散文允许你"描述"一个度量而不"定义"它，**而只有机器会追问「哪条命令、哪个字段」**。
+
+已修 `gap-inner-forensics-…` 与 `gap-no-resource-awareness-…`（`resolved: 1`）；
+`gap-no-inventory-…` 在飞，待它落地后修。
 
 ---
 
