@@ -534,6 +534,18 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 - **在飞（1 agent）**：retire（提交 `8d738540` 80 文件 -24195 行删除，REFUTE round-2 PASS；05:30 活跃，
   等其最终报告）。**压力 3.49（低窗口）**——retire 落地后立即跑它的全量验证
 
+### Tick 更新（05T03:35Z）：retire rebase + 全量在跑
+
+- **外层已核实 retire 分支（合并前）**：删除内容正确（51 个管线文件：.claude/workflows 三、composite-* 两侧、
+  milestone-preparation-check 两侧、milestone-worktree 两侧 + 测试）；三闸处置正确（milestone-worktree.ts 删除
+  符合 ADR-022 次序、build-evidence-manifest.ts 改保留、workflow-baseline-metrics.ts 未动）；exp5 封存机器
+  **误删 0**；快速模式需的 checkSplitRecommendation / planCheckNextAction / checkTouchesPair 导出仍在
+- **外层排查教训已记**：`git diff --diff-filter=D master..branch` 曾把 resource-gate.sh 等列为「删除」——实为
+  分支 merge-base 早于这三个文件落地 master。**判据用 `git show <commit> --diff-filter=D`（显式删除），
+  不用 `diff master..branch`**（混淆「删了」和「从没有过」）
+- **retire 已 rebase**（2 commits 到 master 顶，干净）；**全量在跑**（`binlxixpl`，worktree 内，gate GO）
+- 全量绿 → merge retire → 关 retire（`--task-end` 0b3l2x）→ **首次负净行数落地，图真正收缩**
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
