@@ -155,7 +155,7 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
       | 步骤 | 结果 |
       |---|---|
       | build（`--branch dist-plugin-ac13verify`，**不给 `--push`**） | exit 0，bundle **1,327,236 字节**，orphan commit `8cc675f9`，**未推送任何东西** |
-      | 产物含机制 | `loop/orchestrator-loop-tick.md`、`loop/fast-mode-loop-tick.md`、`scripts/quay-init.sh`、`scripts/inner-state.sh`、`scripts/resource-gate.sh`、`scripts/heavy-op-token.sh`、`vendor/quay/dist/quay.js`、`.claude-plugin/plugin.json` **全部 PRESENT** |
+      | 产物含机制 | `plugin/loop/orchestrator-loop-tick.md`、`plugin/loop/fast-mode-loop-tick.md`、`plugin/scripts/quay-init.sh`、`plugin/scripts/inner-state.sh`、`plugin/scripts/resource-gate.sh`、`plugin/scripts/heavy-op-token.sh`、`plugin/vendor/quay/dist/quay.js`、`.claude-plugin/plugin.json` **全部 PRESENT** |
       | 从产物安装（`git archive` 解出 ⇒ **不是 `cp` 工作树**） | `quay-init --all --loop` **exit 0**，loop 类 copied=20 / skipped=0 / conflicted=0 |
       | 铺设结果无开发树路径 | `grep -rl "/home/yale/work/quay"` **0 命中** |
       | 占位符替换 | `npm test` 命中 3+9；**`scripts/test.sh` 残留 0**；`ac13-0:inner` 命中 6；**`quay-0:0.0` 残留 0** |
