@@ -8,6 +8,7 @@
 //
 // Run: node test/relation-sync.test.mjs
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -16,16 +17,44 @@ import { createStore } from "../src/store.ts";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const tasksDir = path.join(__dirname, ".tmp-relation-sync-test");
+// AC6 (gap-relation-sync-suite-red-isolation-green): per-run-unique temp dir,
+// NOT a fixed `.tmp-relation-sync-test` under the shared test directory. A
+// fixed path in a shared checkout is the "isolated green / suite red"
+// interference class M136's round 3 removed (tests rebuilding a shared dist
+// bundle). No OTHER test references this path today, so this is hardening
+// against the class, not a confirmed collision -- but a fixed path leaves the
+// test exposed to stale state from a prior crashed/killed run and to any
+// future traversal of the shared test dir, and costs nothing to avoid.
+const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "relation-sync-test-"));
 
 let failures = 0;
-function assert(cond, msg) {
-  if (!cond) {
-    failures++;
-    console.error(`FAIL: ${msg}`);
-  } else {
-    console.log(`PASS: ${msg}`);
+function writeErr(line) {
+  // Synchronous stderr: node --test captures a test file's stderr through an
+  // async pipe, and process.exit(1) can drop still-buffered async writes --
+  // this hand-rolled harness's FAIL lines could vanish wholesale, leaving the
+  // runner with ONLY the file-level "✖ ... (Nms)" line and no idea which
+  // assertion failed (the exact diagnostic blocker this file hit in the
+  // suite). fs.writeSync(2, ...) bypasses the async stream, so a failure can
+  // never be silently dropped again.
+  try {
+    fs.writeSync(2, line + "\n");
+  } catch {
+    console.error(line);
   }
+}
+function assert(cond, msg, expected, actual) {
+  if (cond) {
+    console.log(`PASS: ${msg}`);
+    return;
+  }
+  failures++;
+  const caller = (new Error().stack.split("\n")[2] || "").trim() || "(unknown caller)";
+  let detail = `FAIL: ${msg}\n  ${caller}`;
+  if (arguments.length > 2) {
+    detail += `\n  expected: ${JSON.stringify(expected)}`;
+    detail += `\n  actual:   ${JSON.stringify(actual)}`;
+  }
+  writeErr(detail);
 }
 
 function resetStore() {
@@ -49,7 +78,7 @@ function testReparentUpdatesBothParents() {
   store.write("RS-PARENT-A", { children: ["RS-CHILD-1"] });
 
   const before = store.get("RS-PARENT-A");
-  assert(before.children.includes("RS-CHILD-1"), "setup: ParentA lists CHILD-1 as a child before reparenting");
+  assert(before.children.includes("RS-CHILD-1"), "setup: ParentA lists CHILD-1 as a child before reparenting", true, before.children);
 
   // The actual M28 action: edit the child's parent field.
   store.write("RS-CHILD-1", { parent: "RS-PARENT-B" });
@@ -58,9 +87,9 @@ function testReparentUpdatesBothParents() {
   const parentAAfter = store.get("RS-PARENT-A");
   const parentBAfter = store.get("RS-PARENT-B");
 
-  assert(childAfter.parent === "RS-PARENT-B", "child's own parent field updated to the new parent");
-  assert(!parentAAfter.children.includes("RS-CHILD-1"), "OLD parent (A) no longer lists CHILD-1 in its children array");
-  assert(parentBAfter.children.includes("RS-CHILD-1"), "NEW parent (B) now lists CHILD-1 in its children array");
+  assert(childAfter.parent === "RS-PARENT-B", "child's own parent field updated to the new parent", "RS-PARENT-B", childAfter.parent);
+  assert(!parentAAfter.children.includes("RS-CHILD-1"), "OLD parent (A) no longer lists CHILD-1 in its children array", false, parentAAfter.children);
+  assert(parentBAfter.children.includes("RS-CHILD-1"), "NEW parent (B) now lists CHILD-1 in its children array", true, parentBAfter.children);
 }
 
 // --- Case 2: reparenting is idempotent / no-duplicate on the new parent ---
@@ -78,8 +107,8 @@ function testReparentNoDuplicateOnNewParent() {
 
   const parentC = store.get("RS-PARENT-C");
   const count = parentC.children.filter((c) => c === "RS-CHILD-2").length;
-  assert(count === 1, `no duplicate child entry created when reparenting to an already-listing parent (count=${count})`);
-  assert(parentC.children.includes("RS-OTHER"), "unrelated sibling child entry (RS-OTHER) is left untouched");
+  assert(count === 1, `no duplicate child entry created when reparenting to an already-listing parent (count=${count})`, 1, count);
+  assert(parentC.children.includes("RS-OTHER"), "unrelated sibling child entry (RS-OTHER) is left untouched", true, parentC.children);
 }
 
 // --- Case 3: unsetting parent (parent: null) removes from old parent, adds nowhere ---
@@ -93,13 +122,13 @@ function testUnsetParentRemovesWithoutAddingElsewhere() {
 
   const child = store.get("RS-CHILD-3");
   const parentD = store.get("RS-PARENT-D");
-  assert(child.parent === null, "child's own parent field is now null");
-  assert(!parentD.children.includes("RS-CHILD-3"), "former parent no longer lists CHILD-3 as a child");
+  assert(child.parent === null, "child's own parent field is now null", null, child.parent);
+  assert(!parentD.children.includes("RS-CHILD-3"), "former parent no longer lists CHILD-3 as a child", false, parentD.children);
   // "adds it nowhere": no other task in the store should have gained
   // CHILD-3 as a child as a side effect of unsetting.
   const all = store.list();
   const anyoneElseHasIt = all.some((t) => t.id !== "RS-PARENT-D" && (t.children || []).includes("RS-CHILD-3"));
-  assert(!anyoneElseHasIt, "unsetting parent does not add the child to any other task's children array");
+  assert(!anyoneElseHasIt, "unsetting parent does not add the child to any other task's children array", false, anyoneElseHasIt);
 }
 
 // --- Case 4: writing an unrelated field (no `parent` key at all) does not
@@ -114,7 +143,7 @@ function testUnrelatedWriteDoesNotTriggerSync() {
   store.write("RS-CHILD-4", { title: "Child 4 renamed" }); // no `parent` key
 
   const parentE = store.get("RS-PARENT-E");
-  assert(parentE.children.includes("RS-CHILD-4"), "editing an unrelated field (title) leaves the parent's children array untouched");
+  assert(parentE.children.includes("RS-CHILD-4"), "editing an unrelated field (title) leaves the parent's children array untouched", true, parentE.children);
 }
 
 // --- Case 5: THE MULTI-FILE CONCURRENT WRITE PROOF ---
@@ -145,7 +174,7 @@ async function testConcurrentCrossReparentNoDeadlockNoCorruption() {
 
   const results = await Promise.allSettled([p1, p2]);
   const bothSucceeded = results.every((r) => r.status === "fulfilled");
-  assert(bothSucceeded, `both concurrent cross-reparent processes completed without hanging/erroring (no deadlock) -- ${JSON.stringify(results.map((r) => r.status))}`);
+  assert(bothSucceeded, `both concurrent cross-reparent processes completed without hanging/erroring (no deadlock) -- ${JSON.stringify(results.map((r) => r.status))}`, true, results.map((r) => r.status));
 
   // No corruption: every file in the store must still parse.
   let parseError = null;
@@ -155,24 +184,24 @@ async function testConcurrentCrossReparentNoDeadlockNoCorruption() {
   } catch (err) {
     parseError = err;
   }
-  assert(parseError === null, "store.list() still parses every file after the concurrent cross-reparent (no corruption)");
+  assert(parseError === null, "store.list() still parses every file after the concurrent cross-reparent (no corruption)", null, parseError);
 
   const childX1 = store.get("RS-CHILD-X1");
   const childY1 = store.get("RS-CHILD-Y1");
   const parentX = store.get("RS-PARENT-X");
   const parentY = store.get("RS-PARENT-Y");
 
-  assert(childX1.parent === "RS-PARENT-Y", "CHILD-X1's own parent field reflects its move to PARENT-Y");
-  assert(childY1.parent === "RS-PARENT-X", "CHILD-Y1's own parent field reflects its move to PARENT-X");
-  assert(!parentX.children.includes("RS-CHILD-X1"), "PARENT-X no longer lists CHILD-X1 (it moved away)");
-  assert(parentX.children.includes("RS-CHILD-Y1"), "PARENT-X now lists CHILD-Y1 (it moved in)");
-  assert(!parentY.children.includes("RS-CHILD-Y1"), "PARENT-Y no longer lists CHILD-Y1 (it moved away)");
-  assert(parentY.children.includes("RS-CHILD-X1"), "PARENT-Y now lists CHILD-X1 (it moved in)");
+  assert(childX1.parent === "RS-PARENT-Y", "CHILD-X1's own parent field reflects its move to PARENT-Y", "RS-PARENT-Y", childX1.parent);
+  assert(childY1.parent === "RS-PARENT-X", "CHILD-Y1's own parent field reflects its move to PARENT-X", "RS-PARENT-X", childY1.parent);
+  assert(!parentX.children.includes("RS-CHILD-X1"), "PARENT-X no longer lists CHILD-X1 (it moved away)", false, parentX.children);
+  assert(parentX.children.includes("RS-CHILD-Y1"), "PARENT-X now lists CHILD-Y1 (it moved in)", true, parentX.children);
+  assert(!parentY.children.includes("RS-CHILD-Y1"), "PARENT-Y no longer lists CHILD-Y1 (it moved away)", false, parentY.children);
+  assert(parentY.children.includes("RS-CHILD-X1"), "PARENT-Y now lists CHILD-X1 (it moved in)", true, parentY.children);
 
   // No leftover lock files after both writers finish.
   for (const id of ["RS-CHILD-X1", "RS-CHILD-Y1", "RS-PARENT-X", "RS-PARENT-Y"]) {
     const lockPath = path.join(tasksDir, `${id}.md.lock`);
-    assert(!fs.existsSync(lockPath), `no leftover lock file for ${id} after concurrent writers finish`);
+    assert(!fs.existsSync(lockPath), `no leftover lock file for ${id} after concurrent writers finish`, false, fs.existsSync(lockPath));
   }
 }
 
@@ -185,8 +214,15 @@ await testConcurrentCrossReparentNoDeadlockNoCorruption();
 fs.rmSync(tasksDir, { recursive: true, force: true });
 
 if (failures > 0) {
-  console.error(`\n${failures} failure(s).`);
-  process.exit(1);
+  writeErr(`\n${failures} failure(s).`);
+  // process.exitCode (NOT process.exit(1)): the harness must let the event
+  // loop drain before exiting. process.exit(1) terminates immediately and can
+  // drop still-buffered async stderr writes when stderr is a pipe (as node
+  // --test captures it) -- the exact "one file-level line, no assertion
+  // detail" failure this file hit in the suite. Every other hand-rolled
+  // harness in this repo (test-shape-analysis.md: 34 files) uses the
+  // process.exitCode pattern; this one used process.exit(1) and paid for it.
+  process.exitCode = 1;
 } else {
   console.log("\nAll M35-native-relation-sync tests passed.");
 }
