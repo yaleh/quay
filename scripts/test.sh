@@ -136,6 +136,16 @@ run_static_checks() {
   # single `bash scripts/test.sh` step — the ratchet enforcement for free. exit 1 on ratchet growth
   # aborts the suite (set -euo pipefail), so a NEW violation red-lights the commit, not the dispatch.
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
+  echo "== AC-carryover check (gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC6) =="
+  # A done task may leave ACs unchecked ONLY if a successor `## Carries` section names them — the
+  # gate on the gates: nothing previously noticed a done task closing with half its ACs unchecked and
+  # no carrier (measured 2026-08-03: session-liveness closed done with 8/16 unchecked, stage-2
+  # existed only because the outer happened to look). Wired here (same site as task-contract-check)
+  # so CI — whose only test step is `bash scripts/test.sh` — inherits it for free. The legacy
+  # baseline (docs/analysis/task-ac-carryover-baseline.md) is shrink-only: exit 1 on a NEW unowned
+  # AC aborts the suite (set -euo pipefail), red-lighting a done task that just closed with
+  # uncarried ACs instead of letting it merge silently.
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}"
 }
 
 # ── derived default concurrency (gap-no-resource-awareness-heavy-ops-run-blind, AC5) ──────────────

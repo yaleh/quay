@@ -49,6 +49,11 @@ DIR-124-A2「标记 done 但机制从未落地」那次的形态。**外层不�
       **取不到时必须明说取不到，不得省略该字段**（省略与「不是外部唤醒」同形）
 - [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`，扩进 `plugin/test/session-liveness.test.mjs`
 
+## Carries
+
+from: gap-session-liveness-heartbeat-freezes-for-the-whole-task
+acs: AC9, AC10, AC11, AC12, AC13, AC14, AC14b
+
 ## Contract
 
 ```
