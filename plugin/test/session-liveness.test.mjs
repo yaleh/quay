@@ -7,6 +7,18 @@
 // HANDOFF.md: "干跑没有输出不是证据" — every criterion needs a known-triggering setup that
 // demonstrably fires, because "no output" is indistinguishable from "it never reports".
 //
+// Wait-window discipline (AC4/AC5, gap-a-widened-wait-window-...): a widened wait window must be
+// justified by measured arrival latency AND accompanied by a "missing-payload-still-red" negative
+// control — otherwise "widened until it passes" is indistinguishable from "fixed". 2026-08-03:
+// RESUMED waits were raised 8s→25s (cfbc7459) because under the full suite's ~4× oversubscription
+// the monitor's per-round tmux capture-pane + transcript reads stretch several-fold (>11s with no
+// event observed in suite7/suite12); 25s ≈ 2-3× the slowest observed (isolation ~5.2s, sibling
+// under load ~7.7s). Two negative controls pin that the widening does NOT mask a broken payload:
+// (1) AC7 NC — empty transcript ⇒ last-input 取不到 ⇒ the AC7 assertion rejects it;
+// (2) AC6 NC — script mutation forces an empty cause ⇒ the strengthened AC6 (`成因：[^；）]`)
+// rejects it. The old AC6 `! /成因：\)/` was a no-op (ASCII paren never appears in the full-width
+// output, so an empty cause passed); the strengthened form requires a real cause.
+//
 // The monitor reports five event families (SESSION-* since AC10):
 //   SESSION-GONE/SESSION-BACK   the session process vanished / returned
 //   REPO-STALL                  alive but ≥STALL_MIN min with no new commit (not halted) — a REPO
@@ -146,7 +158,7 @@ function makeHermeticProbe(session) {
 }
 
 // spawnMonitor — run the REAL session-liveness.sh with a fast test interval and overridable targets.
-function spawnMonitor(env, targets, { tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
+function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
   const monEnv = {
     ...env,
     SESSION_TARGETS: targets,
@@ -157,7 +169,7 @@ function spawnMonitor(env, targets, { tickLogs, transcripts, stallMin = 1, overd
   if (tickLogs) monEnv.SESSION_HEARTBEATS = tickLogs;
   if (transcripts) monEnv.SESSION_TRANSCRIPTS = transcripts;
   if (loopMin !== undefined) monEnv.LOOP_MIN = String(loopMin);
-  const child = spawn("bash", [SCRIPT], { env: monEnv });
+  const child = spawn("bash", [script], { env: monEnv });
   let out = "";
   child.stdout.on("data", (d) => { out += d; });
   child.stderr.on("data", (d) => { out += d; });
@@ -999,7 +1011,10 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
       // isolation and ~7.7s under load for the sibling test. The 8s window was contention-marginal.
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
-      assert.ok(/成因：/.test(out) && !/成因：\)/.test(out),
+      // Strengthened AC6 (2026-08-03): the old `! /成因：\)/` used an ASCII paren that never appears
+      // in the full-width output, so an EMPTY cause still passed — a no-op assertion. Require at
+      // least one char between 成因： and the next ；or）(the real cause is always ≥ "状态变化").
+      assert.ok(/成因：[^；）]/.test(out),
         `RESUMED must carry a non-empty cause (AC6):\n${out}`);
       const li = out.match(/上次收到输入：([^）]*)/);
       assert.ok(li && li[1] !== "取不到",
@@ -1037,6 +1052,39 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
       const ac7Satisfied = Boolean(li && li[1] !== "取不到");
       assert.equal(ac7Satisfied, false,
         `AC7 must reject the corrupted payload (last-input 取不到); the 25s window is not the check:\n${out}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC6 negative control — a script mutation that neutralizes the cause yields an empty cause, which the strengthened AC6 assertion rejects", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // Mutation (checker-mutation method): force cause="" right before the SESSION-RESUMED echo. The
+  // strengthened AC6 assertion (`/成因：[^；）]/`) must reject the empty cause — proving the 25s
+  // window is not the check and the cause path is actually asserted (the old `! /成因：\)/` was a
+  // no-op: ASCII paren never appears in the full-width output, so an empty cause passed).
+  const p = makeHermeticProbe("ol-nc-cause");
+  const x = path.join(p.tmp, "session.jsonl");
+  fs.writeFileSync(x, [userRecord(isoAgo(5)), assistantRecord(isoAgo(0.05))].join("\n") + "\n");
+  const mutated = path.join(p.tmp, "session-liveness-mutated.sh");
+  fs.writeFileSync(mutated, fs.readFileSync(SCRIPT, "utf8").replace(/echo "SESSION-RESUMED/,
+    'cause=""\n            echo "SESSION-RESUMED'));
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
+    try {
+      await sleep(3000); // idle baseline
+      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
+      const out = mon.output();
+      assert.ok(/成因：；/.test(out),
+        `negative control: the mutation must yield an empty cause (成因：；), so the strengthened AC6 is what rejects it:\n${out}`);
+      const ac6Satisfied = /成因：[^；）]/.test(out);
+      assert.equal(ac6Satisfied, false,
+        `AC6 must reject the empty-cause mutation (the 25s window is not the check):\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
     }

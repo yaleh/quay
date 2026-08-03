@@ -167,8 +167,13 @@ resume 屏幕标志 → 交叉正控制 → payload → 阈值，四步各自可
       **如实标注：仅 1 次全量绿**（协调方 fan-in，suite14 **2148 tests / 2126 pass / 0 fail /
       0 cancelled / 22 skip**，SUITE_EXIT=0，`/tmp/batch7-suite14.log`，2026-08-03）。
       **AC6/AC7（RESUMED）在套件下曾真红**（suite7/suite12 唯一两次都红）——协调方修复：
-      RESUMED 等待窗口 8s→25s（`cfbc7459`，争抢下 8s 不足、机制正确），suite14 绿覆盖。
-      suite7/12 里 session-liveness 文件级取消（71-86s）是争抢超时非缺陷（单独重跑 39/39 绿）。
+      RESUMED 等待窗口 8s→25s（`cfbc7459`，争抢下 8s 不足）。**窗口放宽的区分力证据**
+      （`gap-a-widened-wait-window-...` AC1/AC2/AC3，`4c6a7e66` + 后续）：
+      **正向**（正常载荷 AC6/AC7 隔离绿 + suite14 绿）与**两个负控制**（① 空 transcript ⇒
+      last-input 取不到 ⇒ AC7 断言拒绝；② 脚本变异强制空 cause ⇒ 强化 AC6 `成因：[^；）]`
+      拒绝）——**「缺失仍红」双向成立，25s 没掩盖载荷损坏**。原 AC6 的 `! /成因：\)/` 是 no-op
+      （ASCII 括号在全角输出里永不出现），已强化。suite7/12 里 session-liveness 文件级取消
+      （71-86s）是争抢超时非缺陷（单独重跑 39/39 绿）。
 - [x] 任务体记录：本任务是前任务阶段二的承载者，**前任务以 8/16 AC 收尾是外层指令的缺口**，
       不是内层漏做
       **证据**：见下方「阶段二完成记录」——8 条承载 AC（AC1-AC7、AC9）+ 新增盲点 AC9 + 测试 AC8

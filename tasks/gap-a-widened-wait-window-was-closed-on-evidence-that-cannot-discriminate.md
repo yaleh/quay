@@ -1,7 +1,7 @@
 ---
 id: gap-a-widened-wait-window-was-closed-on-evidence-that-cannot-discriminate
 title: "A RESUMED wait window was widened 8s→25s and closed on 'the suite went green' — the one evidence that cannot tell a fix from a dilution"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -68,23 +68,40 @@ resume 先在 25s 窗口下做载荷缺失控制，再决定窗口值是否需�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **载荷缺失负控制**——25s 窗口 + transcript 读空 ⇒ 测试**红**（实跑输出贴任务体）
-- [ ] AC2: **正向对照**——同一窗口 + 载荷正常 ⇒ 测试**绿**（实跑输出贴任务体）。
+- [x] AC1: **载荷缺失负控制**——25s 窗口 + transcript 读空 ⇒ 测试**红**（实跑输出贴任务体）
+- [x] AC2: **正向对照**——同一窗口 + 载荷正常 ⇒ 测试**绿**（实跑输出贴任务体）。
       **两个方向都贴，缺一不可**——只有 AC1 说明它会红，只有 AC2 说明它会绿，
       **只有两条同时成立才说明它在看载荷**
-- [ ] AC3: `cause` 字段缺失（与 transcript 读空是两条不同路径）单独做一次 ⇒ 必须红
-- [ ] AC4: **窗口值有据**——记录 25s 是怎么定出来的（实测竞争下的真实到达时延），
+- [x] AC3: `cause` 字段缺失（与 transcript 读空是两条不同路径）单独做一次 ⇒ 必须红
+- [x] AC4: **窗口值有据**——记录 25s 是怎么定出来的（实测竞争下的真实到达时延），
       而不是「调到过为止」；若无实测依据，如实写明它是经验值
-- [ ] AC5: **通用纪律落到文件里**——放宽等待窗口须附「缺失仍红」证据，写进测试文件头
-- [ ] AC6: 结果回填 sl2 任务体，替换掉「suite14 绿覆盖」这个不能区分的理由
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC5: **通用纪律落到文件里**——放宽等待窗口须附「缺失仍红」证据，写进测试文件头
+- [x] AC6: 结果回填 sl2 任务体，替换掉「suite14 绿覆盖」这个不能区分的理由
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1 与 AC2 两个方向的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**——
+- [x] AC1 与 AC2 两个方向的实跑输出都贴进任务体
+      **实跑（2026-08-03，`bash scripts/test.sh plugin/test/session-liveness.test.mjs` → 32/32 绿）**：
+      - **AC1 红方向**（载荷缺失 ⇒ 断言拒绝）：`AC7 negative control — an EMPTY transcript
+        yields last-input 取不到, which the AC7 assertion still rejects`（5095ms）+ `AC6 negative
+        control — a script mutation that neutralizes the cause yields an empty cause, which the
+        strengthened AC6 assertion rejects`（4796ms）——**空 transcript ⇒ last-input=取不到 ⇒ AC7
+        拒绝；空 cause ⇒ 强化 AC6 `成因：[^；）]` 拒绝**。两个负控制都通过（=「缺失仍红」成立）。
+      - **AC2 绿方向**（正常载荷 ⇒ 绿）：`AC6/AC7 — RESUMED carries the cause AND the last-input`
+        隔离绿（~5.2s），且 suite14 全量绿（2148/0/0）覆盖同一测试。
+      **⇒ 双向成立：它确实在看载荷，25s 没稀释断言。**
+- [~] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**——
       本仓 2026-08-03 已发生一次 `fail 0 / cancelled 2` 的假绿）
-- [ ] 任务体记录：**关闭一个任务时，「套件绿了」对「放宽窗口 vs 稀释断言」的区分力是零**
+      **如实标注：基础套件 suite14 绿（2148/0/0，含 30 个 session-liveness 测试）；新增 2 个负控制
+      scoped 32/32 绿；含 32 测试的全量复验待 token 修复后的干净窗口**（参考值已更新 2149）。
+- [x] 任务体记录：**关闭一个任务时，「套件绿了」对「放宽窗口 vs 稀释断言」的区分力是零**
+      **记录**：`cfbc7459` 把 RESUMED 窗口 8s→25s，以「suite14 绿」结案。本条补充了区分证据：
+      ①窗口值有据（隔离 ~5.2s、负载下兄弟测试 ~7.7s、套件下 >11s 无事件 → 25s≈2-3×最慢实测）；
+      ②「缺失仍红」双向负控制（AC1/AC3：空 transcript 与空 cause 各自 ⇒ 断言拒绝）；
+      ③AC5 纪律写进测试文件头（任何放宽窗口须附缺失仍红证据）；④原 AC6 断言 `! /成因：\)/`
+      是 no-op（ASCII 括号在全角输出中永不出现），已强化为 `成因：[^；）]`。
+      不回退 `cfbc7459`（无证据说它错），不调回 8s（真实竞争会重新致红）。
 
 ## Touches
 
