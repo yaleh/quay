@@ -1440,3 +1440,15 @@ fixture 加进 AC1b 排除名单（测试数据非活引用）；③AC1b 补语�
 **DoD 2x 如实标注**：tmpleak 真满足（after-run-1/2 两次绿 2057）；tph + monitor 仅 1 次全量绿（batch3-fanin2），非连跑 2 次——第二次待外层 session-liveness 改名落定后补跑。
 **参考值 2054→2085**。
 **外层改名（outer-liveness→session-liveness）未提交**，协调方未触碰；工作树处改名半成品（cold-start-e2e.sh/quay-init.sh 仍有 outer-liveness 引用），外层落定后需清理。
+
+### 派发批次（2026-08-03 14:0xZ）：r1-task-store + cold-start-e2e
+
+外层派发 2 个（闸口 0 新增、checkTouchesPair DISJOINT 实测通过）：
+1. **r1-task-store**（`/tmp/quay-wt-r1`，agent a3d8dd1...，fm-...-9hlwy4）：R1 只认 __dirname/.tmp 固定写入，
+   it0-dod-check.test.mjs:391 用 process.cwd()+tasks/ 写真实任务库不报。外层已复核前提完好。
+   顺序硬要求：先扩探测器报出活标本（AC2）再修测试；修时保留真实 frontmatter 覆盖，无脑换 mkdtemp 删覆盖。
+2. **cold-start-e2e**（`/tmp/quay-wt-e2e`，agent a769a77...，fm-...-q5rdmm）：e2e 从工作树 cp + 无执行者。
+   两半都要：--from-build（git archive 从 orphan commit 取，非 cp）+ 执行者（更严重）。绝不 --push。
+   AC7 用 90 秒以上窗口重测 inner-state.sh（外层 4 秒观察不成立，轮询 60 秒）。
+
+**在飞 2/3**。DoD 都需全量绿（协调方 fan-in 承担，参考值 2085）。
