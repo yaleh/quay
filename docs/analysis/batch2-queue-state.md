@@ -1417,3 +1417,18 @@ flake 修复（heavy-op-token AC3 mirror，6cc0ac1c）。telemetry --task-end do
 **fan-in 期间修的三处**：①队列文档旧路径引用（AC1b 扫描抓到）；②task-contract-check.test.mjs 老路径
 fixture 加进 AC1b 排除名单（测试数据非活引用）；③AC1b 补语料非空断言 + plugin/loop 取舍注释（外层提示）。
 **外层已重挂**：Monitor→plugin/scripts/inner-state.sh（首事件 INIT）、cron→plugin/loop/orchestrator-loop-tick.md。
+
+### 派发批次（2026-08-03 12:0xZ）：三任务同批
+
+外层派发三个（闸口 0 新增、checkTouchesPair 两两 DISJOINT，可同批）：
+1. **tmpleak**（`/tmp/quay-wt-tmpleak`，agent a22678c...，fm-...-hkdtnb）：R6 文件级判定赦免整文件 +
+   名单只减不增无强制。判据：mkdtemp-no-cleanup 条目变少（开工 28）+ leaked_after_suite 下降。
+   **不按前缀修**；AC6 零误报清单硬要求
+2. **tph**（`/tmp/quay-wt-tph`，agent ab863aa...，fm-...-3w5muw）：tasksPerHour 把 halt 时间算进分母。
+   分子不改（AC6 断言 10 倍耗时差任务贡献相同）；.halt 数据源先判权威（文件自述 09:33 vs 提交 09:55，
+   git 区间会偏短）
+3. **monitor**（`/tmp/quay-wt-monitor`，agent a4fd41e...，fm-...-srq4rs）：Monitor 挂载/瞄准检查。
+   判据三条（挂没挂/哪个副本/本会话）；argv 前两 token 精确等于 bash 绝对路径（子串会匹配自身）；
+   零写入不建心跳文件（inner-state.sh 纯读契约）
+
+**在飞 3/3**。三任务 DoD 都要连跑 2 次全量（4 核串行，闸会挡）——协调方 fan-in 时串行处理。
