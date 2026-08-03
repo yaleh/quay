@@ -1,6 +1,6 @@
 ---
 id: gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down
-title: "The installer's file list is hand-maintained, so the shipped cold-start skill calls two scripts the installer never lays down"
+title: "The installer's file list is hand-maintained, so shipped skills and tick docs reference files the installer never lays down — four groups of live specimens"
 status: todo
 labels:
   - gap
@@ -27,6 +27,29 @@ plugin/skills/cold-start/SKILL.md:99   bash <root>/plugin/scripts/send-keys-veri
 
 **⇒ 交付物内部自相矛盾：后一个 skill 依赖前一个 skill 不铺的文件。
 任何人照 README 走都会在这里 missing-file。**
+
+### 同一根因的另外两个实例（管理者 2026-08-03 23:35Z 再转，外层并入本条而非新建）
+
+**实例二**：init **不铺** `orchestration/tick-log.md` 与 `escalations.md`，
+而**外层 tick 文档的步骤 5 和步骤 8 假设它们存在** ⇒ 冷启动的第一个 tick 必须自建。
+
+**实例三**：外层 tick 文档**冷启动小节引用的 6 个编排文件，在目标项目里全缺**。
+
+**⇒ 连同原本的两个脚本，这是同一个根因的第三、第四组实例**：
+**出厂物引用的东西，落地集合里没有。**
+**并入本条而不是新建三条任务**——它们共用同一个机械约束
+（「引用集合 ⊆ 落地集合」），拆开会变成三次修同一个标本，
+**正是本条自己反对的「修标本不修类」**。
+
+**范围因此从「脚本」扩到「出厂物引用的任何文件」**：`plugin/scripts/*`、
+`orchestration/*`、`docs/analysis/*`——凡是出厂 skill 或 tick 文档以路径形式引用的，
+都必须在落地集合中，或**由文档自己声明「首次运行时自建」并给出自建命令**。
+
+**注意第二类的正确解不一定是「铺一个空文件」**：`tick-log.md` 与 `escalations.md` 是
+**本地状态**，铺一份出厂副本反而会与
+[[gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them]] 的字节相同判据冲突
+（本地状态一写就与产物不同 ⇒ 升级永远 CONFLICT）。
+**所以这一类的正解是让文档显式声明并自建，而不是铺**——AC8 是它的判据。
 
 ### 修法不是往清单里再加两行
 
@@ -88,7 +111,13 @@ resume 先建立「调用集合 ⊆ 落地集合」的机械检查，再决定�
       **不出现 missing-file**（实跑输出贴任务体）
 - [ ] AC6: **`--plugin-root` 条**——宿主不注入 `CLAUDE_PLUGIN_ROOT` 的情形下，
       文档化的调用方式可用；**fail-closed 行为保留**（两种情形都贴）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
+- [ ] AC7: **引用面扩到全部出厂物**——检查覆盖 `plugin/scripts/*`、`orchestration/*`、
+      `docs/analysis/*`，**上线时必须报出今天这四组活标本**（两个脚本、
+      `tick-log.md`/`escalations.md`、冷启动小节的 6 个编排文件）。实跑输出贴任务体
+- [ ] AC8: **本地状态类不铺而是声明自建**——`tick-log.md` 与 `escalations.md` 属本地状态，
+      **铺出厂副本会与「落地文件字节相同」判据冲突**（本地状态一写就与产物不同 ⇒ 升级永远 CONFLICT）。
+      判据：文档**显式声明它们首次运行时自建并给出自建命令**，且检查**不把它们算作缺失**（实跑贴出）
+- [ ] AC9: 测试用 `node:test` 且带 `// @test-group product`
 
 ## Definition of Done
 
