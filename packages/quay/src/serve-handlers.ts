@@ -6,6 +6,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
+import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection } from "./observation.ts";
 
 // ── Rendering helpers (moved from serve.ts) ──────────────────────────────────
 
@@ -845,7 +846,7 @@ export async function handleTaskList(
       <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
            needs-human placement + disproportionate layout cost. -->
       <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
-      <p class="meta"><a href="/adr">ADRs →</a></p>
+      <p class="meta"><a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
       ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
       ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
       ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
@@ -882,7 +883,7 @@ export async function handleAdrList(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>ADRs</title></head>
     <body><main>
-      <p class="meta"><a href="/">← tasks</a></p>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
       <h1>ADRs (${adrs.length})</h1>
       ${adrs.length === 0 ? html`<p class="meta">No ADRs.</p>` : html`<table>
         <tr><th>id</th><th>status</th><th>date</th><th>title</th></tr>
@@ -913,7 +914,7 @@ export async function handleAdrDetail(
   res.end(html`<!doctype html>
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(a.id)}: ${escapeHtml(a.title)}">${pageStyles()}<title>${escapeHtml(a.id)}</title></head>
     <body><main>
-      <p class="meta"><a href="/adr">← ADRs</a></p>
+      <p class="meta"><a href="/adr">← ADRs</a> · <a href="/live">live</a> · <a href="/journal">journal</a></p>
       <h1>${escapeHtml(a.id)}: ${escapeHtml(a.title)}</h1>
       <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${adrExt.date ? ` · ${escapeHtml(adrExt.date as string)}` : ""}</p>
       ${supersedesMeta}${supersededByMeta}
@@ -976,7 +977,7 @@ export async function handleTaskDetail(
     <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
     <body><main>
       <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009) -->
-      <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a></nav>
+      <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a> · <a href="/live">live</a> · <a href="/journal">journal</a></nav>
       <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
       ${detailErrorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(detailErrorParam)}</div>` : ""}
       ${detailSuccessParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(detailSuccessParam)}</div>` : ""}
@@ -1079,6 +1080,114 @@ export async function handleTaskAction(
   console.log(`[quay serve] action ${actionId} on ${decodedId}:`, result);
 }
 
+// ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
+// /live + /journal render the loop's live state from workspace observation files. The data
+// access is quarantined in observation.ts; these handlers only render what it returns. Each
+// handler is wrapped defensively so ANY unexpected throw degrades to a 200 page with an error
+// note (never a 500) — the hard degradation contract of this task.
+
+function renderSectionBlock(s: JournalSection, title: string): string {
+  if (s.status === "ok") {
+    if (s.markdown && s.markdown.trim()) {
+      return html`<h2>${title}</h2><div class="body">${renderMarkdown(s.markdown)}</div>`;
+    }
+    // Source exists and is readable, but has no recent content — distinct from both 无数据
+    // (source absent) and 读失败 (source unreadable).
+    return html`<h2>${title}</h2><p class="meta">暂无内容。</p>`;
+  }
+  if (s.status === "empty") {
+    return html`<h2>${title}</h2><p class="meta"><strong>无数据</strong> — ${escapeHtml(s.reason || "")}</p>`;
+  }
+  return html`<h2>${title}</h2><p class="meta"><strong>读失败</strong> — ${escapeHtml(s.reason || "")}</p>`;
+}
+
+function renderLivePage(live: LiveResult): string {
+  const rows = live.inFlight.length > 0 ? html`<table>
+    <tr><th>task id</th><th>run id</th><th>started</th><th>elapsed</th></tr>
+    ${live.inFlight.map((t) => html`<tr>
+      <td><a href="/task/${encodeURIComponent(t.taskId)}">${escapeHtml(t.taskId)}</a></td>
+      <td>${escapeHtml(t.runId)}</td>
+      <td>${escapeHtml(relativeTime(t.startedAtMs))}</td>
+      <td>${escapeHtml(t.minutes.toFixed(1))} 分钟</td>
+    </tr>`).join("\n")}
+  </table>` : "";
+
+  const statusNote = live.status === "empty"
+    ? html`<p class="meta"><strong>无数据</strong> — ${escapeHtml(live.reason || "")}</p>`
+    : live.status === "error"
+      ? html`<p class="meta"><strong>读失败</strong> — ${escapeHtml(live.reason || "")}</p>`
+      : "";
+
+  const summary = live.status === "ok"
+    ? html`<p class="meta">并发数: ${live.concurrency} · 在飞: ${live.inFlight.length}${live.cpuPressure != null
+        ? html` · CPU 压力 (some avg10): ${escapeHtml(live.cpuPressure.toFixed(2))}`
+        : ""}</p>`
+    : "";
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay live — what the loop is doing right now">${pageStyles()}<title>Live — loop activity</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <h1>Live — 循环此刻在做什么</h1>
+      ${statusNote}
+      ${summary}
+      ${live.status === "ok" && live.inFlight.length === 0 ? html`<p class="meta">当前无在飞任务。</p>` : rows}
+    </main></body></html>`;
+}
+
+function renderJournalPage(journal: JournalResult): string {
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay journal — recent loop record">${pageStyles()}<title>Journal — recent loop record</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <h1>Journal — 循环最近记录</h1>
+      ${renderSectionBlock(journal.escalations, "升级项 (escalations.md)")}
+      ${renderSectionBlock(journal.tickLog, "Tick 记录 (tick-log.md)")}
+      ${renderSectionBlock(journal.commits, "最近提交 (git log)")}
+    </main></body></html>`;
+}
+
+export async function handleLive(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let live: LiveResult;
+  try {
+    live = readLive(cfg.workspaceRoot);
+  } catch (err) {
+    live = {
+      status: "error",
+      reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
+      inFlight: [],
+      concurrency: 0,
+      cpuPressure: null,
+    };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderLivePage(live));
+}
+
+export async function handleJournal(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let journal: JournalResult;
+  try {
+    journal = readJournal(cfg.workspaceRoot);
+  } catch (err) {
+    const degraded: JournalSection = {
+      status: "error",
+      reason: `internal: ${err instanceof Error ? err.message : String(err)}`,
+      markdown: null,
+    };
+    journal = { escalations: degraded, tickLog: degraded, commits: degraded };
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderJournalPage(journal));
+}
+
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
 export async function handleAllRoutes(
@@ -1092,6 +1201,19 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/") {
     await handleTaskList(req, res, url, client, manifest);
+    return;
+  }
+
+  // gap-web-cannot-show-what-the-loop-is-doing-now: /live + /journal are the loop-observation
+  // surface. They read workspace observation files through the observation.ts facade (the ONLY
+  // module allowed to know `.workflow-events/`, `orchestration/`, `git`), never directly.
+  if (url.pathname === "/live") {
+    await handleLive(req, res, cfg);
+    return;
+  }
+
+  if (url.pathname === "/journal") {
+    await handleJournal(req, res, cfg);
     return;
   }
 

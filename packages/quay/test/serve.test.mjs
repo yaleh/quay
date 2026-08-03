@@ -29,8 +29,15 @@ import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
+import { readLive, readJournal } from "../src/observation.ts";
 import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import { createStore } from "../../quay-native/src/store.ts";
+// gap-web-cannot-show-what-the-loop-is-doing-now (AC2): /live's in-flight list must match
+// `fast-mode-telemetry.ts --report --json`'s inProgress ENTRY BY ENTRY. The strongest pin is to
+// compare observation.ts's pairing against the REAL aggregate()/readAllEvents the CLI itself
+// runs (fast-mode-telemetry.ts --report calls these same functions). Importing them here is the
+// no-spawn equivalent of running `--report --json` against the same fixtures.
+import { readAllEvents, aggregate } from "../../../plugin/scripts/fast-mode-telemetry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // gap-tests-spawn-cli-from-ts-source (AC9): route native CLI fixture-seeding
@@ -1887,6 +1894,170 @@ async function main() {
       process.chdir(mOrigCwd);
       fs.rmSync(mTasksDir, { recursive: true, force: true });
       fs.rmSync(mWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- gap-web-cannot-show-what-the-loop-is-doing-now ---
+  // /live + /journal render what the loop is doing right now. The data access is quarantined
+  // in observation.ts (the ONLY serve-path module that knows `.workflow-events/`,
+  // `orchestration/`, `git`); serve-handlers only renders. Every data source must degrade:
+  // absent → 200 「无数据」; present-but-unreadable → 200 「读失败」(never a 500). AC2 pins
+  // /live's in-flight list against fast-mode-telemetry.ts --report --json's inProgress — the
+  // test below compares observation.ts's pairing against the real aggregate()/readAllEvents.
+  {
+    const obsTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-test-"));
+    const obsWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-obs-workspace-"));
+    fs.mkdirSync(path.join(obsWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(obsWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${obsTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${obsTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+    seedTask(obsTasksDir, "OBS-1", { title: "Obs task one", status: "todo", body: VALID_SECTIONS });
+
+    // git-init the workspace + one commit so /journal's commits section has real data and
+    // AC6's git-status-zero-side-effect check is meaningful. The observation fixtures below are
+    // created AFTER the commit, so they are untracked — git status --porcelain is stable across
+    // the GETs (AC6 compares the snapshot before vs after, not "clean").
+    execFileSync("git", ["init", "-q"], { cwd: obsWorkspaceRoot });
+    fs.writeFileSync(path.join(obsWorkspaceRoot, "README.md"), "observation test workspace\n");
+    execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "add", "."], { cwd: obsWorkspaceRoot });
+    execFileSync("git", ["-c", "user.email=test@test", "-c", "user.name=test", "commit", "-q", "-m", "fixture commit"], { cwd: obsWorkspaceRoot });
+    const obsCommitHash = execFileSync("git", ["rev-parse", "HEAD"], { cwd: obsWorkspaceRoot, encoding: "utf8" }).trim().slice(0, 7);
+
+    // ── Telemetry fixtures (.workflow-events/) ──
+    // Schema-valid Fast events (must pass workflow-event-schema.mjs validateEvent so the
+    // aggregate()/readAllEvents comparison is against REAL parsed events, not my own parser).
+    // OBS-A: start, no end → in-flight. OBS-B: start+end → completed, NOT in-flight.
+    // OBS-BLK: blocked-wait event → NOT a task pair. One malformed line → must be skipped.
+    const nowMs = Date.now();
+    const fastEvent = (overrides) => ({
+      schemaVersion: "1", agentLabel: "fast-mode", attempt: 0, baseCommit: "deadbeef",
+      candidateCommit: null, commandIdentity: "fast-mode-telemetry:task-start",
+      executionCwd: obsWorkspaceRoot, isolationMode: null, observedWrites: [],
+      outcome: null, recordedAtMs: nowMs, resourceClaim: null, stage: "Fast",
+      waitReason: null, worktreePath: null, dispatchMode: "serial",
+      timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: null },
+      ...overrides,
+    });
+    const eventsDir = path.join(obsWorkspaceRoot, ".workflow-events");
+    fs.mkdirSync(eventsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(eventsDir, "fm-OBS-A.jsonl"),
+      JSON.stringify(fastEvent({ runId: "fm-OBS-A-1", candidateId: "OBS-A", taskId: "OBS-A", eventKind: "start", timing: { queuedAtMs: null, startedAtMs: nowMs - 120_000, endedAtMs: null } })) + "\n"
+    );
+    fs.writeFileSync(
+      path.join(eventsDir, "fm-OBS-B.jsonl"),
+      JSON.stringify(fastEvent({ runId: "fm-OBS-B-1", candidateId: "OBS-B", taskId: "OBS-B", eventKind: "start", timing: { queuedAtMs: null, startedAtMs: nowMs - 300_000, endedAtMs: null } })) + "\n" +
+      JSON.stringify(fastEvent({ runId: "fm-OBS-B-1", candidateId: "OBS-B", taskId: "OBS-B", eventKind: "end", commandIdentity: "fast-mode-telemetry:task-end", outcome: "done", timing: { queuedAtMs: null, startedAtMs: null, endedAtMs: nowMs - 240_000 } })) + "\n"
+    );
+    fs.writeFileSync(
+      path.join(eventsDir, "fm-OBS-BLK.jsonl"),
+      JSON.stringify(fastEvent({ runId: "fm-OBS-BLK-1", candidateId: "OBS-BLK", taskId: "OBS-BLK", eventKind: "blocked", commandIdentity: "inner-blocked-signal:clear", timing: { queuedAtMs: null, startedAtMs: nowMs - 10_000, endedAtMs: nowMs - 5_000 } })) + "\n" +
+      "{ this is not valid json }\n"
+    );
+
+    // ── Journal fixtures (orchestration/) ──
+    const orchDir = path.join(obsWorkspaceRoot, "orchestration");
+    fs.mkdirSync(orchDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(orchDir, "escalations.md"),
+      "# 升级项\n\n## 9. 测试升级项\n\n**发现时刻**：2026-08-03T00:00:00Z\n\n这是一条测试升级项。\n\n## 10. 更新一条\n\n另一条测试条目。\n"
+    );
+    fs.writeFileSync(
+      path.join(orchDir, "tick-log.md"),
+      "# 外层 tick 记录\n\n| 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |\n|---|---|---|---|---|\n| 2026-08-03 05:45Z | `correct` | 测试 tick 行 | 在飞 OBS-A | 核实 X |\n| 2026-08-03 05:33Z | `no-action` | 更早 tick | - | - |\n"
+    );
+
+    const obsPort = port + 22;
+    const obsOrigCwd = process.cwd();
+    let obsServer;
+    try {
+      process.chdir(obsWorkspaceRoot);
+      obsServer = await startServer({ port: obsPort });
+
+      // AC6 baseline: snapshot the working tree before any render.
+      const gitBefore = execFileSync("git", ["status", "--porcelain"], { cwd: obsWorkspaceRoot, encoding: "utf8" });
+
+      // --- /live ---
+      const live = await get(obsPort, "/live");
+      assert(live.status === 200, "AC4: GET /live returns 200 with the telemetry store present (got " + live.status + ")");
+      assert(live.body.includes("OBS-A"), "AC2: /live page shows the in-flight task id (OBS-A)");
+      assert(!live.body.includes("OBS-B"), "AC2: /live does NOT list the completed task (OBS-B)");
+      assert(!live.body.includes("OBS-BLK"), "AC2: /live does NOT list the blocked-wait event (OBS-BLK)");
+      assert(live.body.includes("并发数"), "AC2: /live shows the concurrency summary");
+      assert(live.body.includes("分钟"), "AC2: /live shows the elapsed-minutes column");
+      if (fs.existsSync("/proc/pressure/cpu")) {
+        assert(live.body.includes("CPU 压力"), "AC2: /live shows the CPU-pressure row when /proc/pressure/cpu is readable");
+      }
+      // Nav links present on the task list page (the observation surface is reachable).
+      const obsList = await get(obsPort, "/");
+      assert(obsList.status === 200 && obsList.body.includes('href="/live"') && obsList.body.includes('href="/journal"'),
+        "nav: task list page links to /live and /journal");
+
+      // AC2 (entry-by-entry): readLive().inFlight must match the REAL --report inProgress.
+      const allEvents = [];
+      for await (const ev of readAllEvents(obsWorkspaceRoot)) allEvents.push(ev);
+      const expected = aggregate(allEvents);
+      const liveData = readLive(obsWorkspaceRoot, { nowMs });
+      const expIds = expected.inProgress.map((p) => p.taskId).sort();
+      const liveIds = liveData.inFlight.map((t) => t.taskId).sort();
+      assert(JSON.stringify(expIds) === JSON.stringify(liveIds),
+        `AC2: readLive inFlight ids match --report inProgress ids (${JSON.stringify(expIds)} vs ${JSON.stringify(liveIds)})`);
+      assert(expected.inProgress.length === 1 && expected.inProgress[0].taskId === "OBS-A",
+        "AC2: --report inProgress contains exactly the one in-flight task (OBS-A)");
+      const matched = expected.inProgress.every((p) => {
+        const l = liveData.inFlight.find((t) => t.runId === p.runId);
+        return l && l.startedAtMs === p.startedAtMs;
+      });
+      assert(matched, "AC2: readLive inFlight startedAtMs matches --report inProgress per runId");
+      assert(liveData.inFlight[0].minutes > 1.5, "AC2: elapsed minutes for the in-flight task is ~2m (got " + (liveData.inFlight[0].minutes || 0) + ")");
+
+      // --- /journal ---
+      const journal = await get(obsPort, "/journal");
+      assert(journal.status === 200, "AC3: GET /journal returns 200 (got " + journal.status + ")");
+      assert(journal.body.includes("升级项") && journal.body.includes("测试升级项"),
+        "AC3: /journal renders the recent escalations.md entry");
+      assert(journal.body.includes("tick-log.md") && journal.body.includes("2026-08-03 05:45Z"),
+        "AC3: /journal renders the recent tick-log.md row");
+      assert(journal.body.includes("fixture commit") && journal.body.includes(obsCommitHash),
+        "AC3: /journal renders the recent git commits (fixture commit)");
+      const jData = readJournal(obsWorkspaceRoot);
+      assert(jData.escalations.status === "ok" && jData.tickLog.status === "ok" && jData.commits.status === "ok",
+        "AC3: readJournal returns ok status for all three sources");
+
+      // AC6: the read path wrote nothing — working tree unchanged across the PURE renders above
+      // (this snapshot must happen BEFORE the AC4/AC5 mutations below, which legitimately change
+      // the untracked-file listing: they rename the store and turn it into a file).
+      const gitAfter = execFileSync("git", ["status", "--porcelain"], { cwd: obsWorkspaceRoot, encoding: "utf8" });
+      assert(gitBefore === gitAfter, "AC6: git status --porcelain is unchanged by /live + /journal renders (zero side effects)");
+
+      // AC4 (negative control — data source absent ⇒ 200 + 无数据, never 500): rename the
+      // telemetry store away and confirm /live degrades, then restore and confirm recovery.
+      fs.renameSync(eventsDir, eventsDir + ".bak");
+      const liveEmpty = await get(obsPort, "/live");
+      assert(liveEmpty.status === 200, "AC4: GET /live still returns 200 when the telemetry store is renamed (got " + liveEmpty.status + ")");
+      assert(liveEmpty.body.includes("无数据"), "AC4: /live shows 「无数据」 when the telemetry store is renamed");
+      fs.renameSync(eventsDir + ".bak", eventsDir);
+      const liveRestored = await get(obsPort, "/live");
+      assert(liveRestored.status === 200 && liveRestored.body.includes("OBS-A"),
+        "AC4: /live recovers (shows OBS-A) after the telemetry store is restored");
+
+      // AC5 (无数据 vs 读失败 distinguishable): make the store a plain FILE so readdirSync
+      // fails ⇒ /live must show 「读失败」, NOT 「无数据」, and still 200.
+      fs.rmSync(eventsDir, { recursive: true, force: true });
+      fs.writeFileSync(eventsDir, "i am a file, not a directory\n");
+      const liveErr = await get(obsPort, "/live");
+      assert(liveErr.status === 200, "AC5: /live returns 200 even when the telemetry store is unreadable (got " + liveErr.status + ")");
+      assert(liveErr.body.includes("读失败"), "AC5: /live shows 「读失败」 for a present-but-unreadable store");
+      assert(!liveErr.body.includes("无数据"), "AC5: 「读失败」 and 「无数据」 are distinguishable on the page");
+    } finally {
+      if (obsServer) {
+        obsServer.close();
+        if (obsServer.client) await obsServer.client.close();
+      }
+      process.chdir(obsOrigCwd);
+      fs.rmSync(obsTasksDir, { recursive: true, force: true });
+      fs.rmSync(obsWorkspaceRoot, { recursive: true, force: true });
     }
   }
 
