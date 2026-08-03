@@ -2,7 +2,7 @@
 id: gap-tasksperhour-measures-mean-duration-not-throughput
 title: "tasksPerHour is 60/mean — it measures per-task speed, not throughput,
   and it penalizes concurrency"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -94,24 +94,30 @@ AC13 的并发正在按预期起作用。只有 `60/均耗时` 这个实现给�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `tasksPerHour = count / windowHours`（墙钟），不再等于 `60/均耗时`
-- [ ] AC2: `--since` 给定时以它为窗口起点；未给定时以最早 `startedAtMs` 为起点
-- [ ] AC3: 输出包含 `windowStart` / `windowEnd` / `windowHours`
-- [ ] AC4: 用今日真实数据回归：无人值守窗口（`--since 2026-08-02T17:43:24Z`）应报 **≈0.90**，
+- [x] AC1: `tasksPerHour = count / windowHours`（墙钟），不再等于 `60/均耗时`
+- [x] AC2: `--since` 给定时以它为窗口起点；未给定时以最早 `startedAtMs` 为起点
+- [x] AC3: 输出包含 `windowStart` / `windowEnd` / `windowHours`
+- [x] AC4: 用今日真实数据回归：无人值守窗口（`--since 2026-08-02T17:43:24Z`）应报 **≈0.90**，
       全期应报 **≈1.14**（当前均报 1.33）
-- [ ] AC5: 原量或删除、或更名为 `serialEquivalentPerHour` 并注明与并发无关；不得保留歧义命名
-- [ ] AC6: 并发场景回归测试：两个各耗时 60 分钟、在同一小时内并行完成的任务，
+      **实测（2026-08-03，fixture 回归，`plugin/test/fast-mode-telemetry.test.mjs`）**：
+      无人值守窗口（00:25Z 观测、窗口仍活）**0.896** ≈ 0.90；全期（13 个真实任务、
+      闭窗止于最晚 end）**1.141** ≈ 1.14。
+- [x] AC5: 原量或删除、或更名为 `serialEquivalentPerHour` 并注明与并发无关；不得保留歧义命名
+      **处置：更名为 `serialEquivalentPerHour`**（字段说明与模块头均注明「与并发无关」），保留在输出里。
+- [x] AC6: 并发场景回归测试：两个各耗时 60 分钟、在同一小时内并行完成的任务，
       `tasksPerHour` 必须约等于 **2**（当前算法会报 1）
-- [ ] AC7: 引用该字段的地方同步——`orchestration/exp6-phase1-sustained-unattended-operation.md` 的
+      **实测：** 合成用例 2 个并行 60 分钟任务 → `tasksPerHour = 2.00`、`serialEquivalentPerHour = 1.00`；
+      真实 01:03:28Z 双任务收尾用例 → 吞吐 **0.95 → 1.22（↑）** 而 `serialEquivalentPerHour` **1.33 → 1.29（↓）**。
+- [x] AC7: 引用该字段的地方同步——`orchestration/exp6-phase1-sustained-unattended-operation.md` 的
       AC18、`docs/analysis/fast-mode-loop-tick.md` 的「每个 tick 必报」、
       `orchestration/orchestrator-loop-tick.md`
-- [ ] AC8: 测试带 `// @test-group engine` 声明
+- [x] AC8: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
 
-- [ ] AC4 的回归数字与 AC6 的并发用例输出贴进任务体
-- [ ] `scripts/test.sh` 绿
-- [ ] 明确记录：**一个名字承诺 A、实际算 B 的指标，会让所有基于它的判定悄悄失效**——
+- [x] AC4 的回归数字与 AC6 的并发用例输出贴进任务体（见上）
+- [x] `scripts/test.sh` 绿 — 迭代期按指令跑 `--for-task gap-tasksperhour-measures-mean-duration-not-throughput`
+- [x] 明确记录：**一个名字承诺 A、实际算 B 的指标，会让所有基于它的判定悄悄失效**——
       本次代价是 exp6 的 AC13 与 AC18 互相打架，且整天的吞吐报告系统性高估
 
 ## Touches

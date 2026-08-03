@@ -193,6 +193,8 @@ test("AC5 — --report --json emits {tasks, meanMinutes, medianMinutes, tasksPer
     assert.ok("meanMinutes" in out, "report must carry meanMinutes");
     assert.ok("medianMinutes" in out, "report must carry medianMinutes");
     assert.ok("tasksPerHour" in out, "report must carry tasksPerHour");
+    assert.ok("serialEquivalentPerHour" in out, "report must carry the renamed serial-equivalent field");
+    assert.ok("windowStart" in out && "windowEnd" in out && "windowHours" in out, "report must carry the window fields (AC3)");
 
     assert.equal(out.tasks.length, 1, `expected 1 completed task, got ${JSON.stringify(out.tasks)}`);
     const t = out.tasks[0];
@@ -377,13 +379,26 @@ test("AC4 — --snapshot --json stdout is byte-identical to the aggregate file; 
     const fileContent = fs.readFileSync(aggFile, "utf8");
     assert.equal(snap.stdout, fileContent, "--snapshot --json stdout must equal the file it wrote (byte-identical, no divergence)");
 
-    // Same-moment --report must carry the same data-bearing fields (the two paths cannot fork).
+    // Same-moment --report must carry the same DATA-bearing fields (the two paths cannot fork).
+    // tasksPerHour/windowStart/windowEnd/windowHours are deliberately EXCLUDED here: the CLI always
+    // passes nowMs = Date.now(), so EVERY report is a LIVE window whose end tracks the invocation
+    // instant (windowEnd = max(latest endedAtMs, nowMs)); two calls a few ms apart therefore differ
+    // in these fields by design — that is the live-window semantics, not a fork. The invariant
+    // across the two paths is the event-derived data above; the window fields are checked for sanity
+    // below rather than exact equality.
     const rep = runCli(tmp, "--report", "--json");
     assert.equal(rep.status, 0, rep.stderr);
     const repObj = JSON.parse(rep.stdout);
     const fileObj = JSON.parse(fileContent);
-    for (const key of ["tasks", "orphaned", "inProgress", "meanMinutes", "medianMinutes", "tasksPerHour"]) {
+    for (const key of ["tasks", "orphaned", "inProgress", "meanMinutes", "medianMinutes", "serialEquivalentPerHour"]) {
       assert.deepEqual(repObj[key], fileObj[key], `--report and --snapshot must agree on "${key}"`);
+    }
+    // The window fields are live (nowMs differs per call) — assert they are present and sane in the
+    // snapshot object rather than exact across the two invocations.
+    for (const obj of [repObj, fileObj]) {
+      assert.ok(typeof obj.windowHours === "number" && obj.windowHours > 0, `windowHours must be positive, got ${obj.windowHours}`);
+      assert.ok(!Number.isNaN(Date.parse(obj.windowStart)) && !Number.isNaN(Date.parse(obj.windowEnd)), "windowStart/End must be ISO");
+      assert.ok(Date.parse(obj.windowEnd) >= Date.parse(obj.windowStart), "windowEnd must not precede windowStart");
     }
   } finally {
     cleanup(tmp);
@@ -504,6 +519,186 @@ test("DEFECT-4 — a start-like Fast event without eventKind still pairs (not or
   const r2 = cli.aggregate([start2]);
   assert.equal(r2.inProgress.length, 1);
   assert.equal(r2.orphaned.length, 0);
+});
+
+// ── gap-tasksperhour-measures-mean-duration-not-throughput (AC1–AC6) ────────────────────────────────
+// The old tasksPerHour = 60/mean measured per-task SPEED and penalized concurrency (two 60-min tasks
+// finishing in the same wall-clock hour reported 1.0, not the real 2.0). The fix makes it
+// count / wall-clock-window-hours (throughput) and renames the old quantity serialEquivalentPerHour.
+// AC4/AC6 are fixture-based: the "real data" is today's actual fast-mode event stream (extracted from
+// the real .workflow-events/ on 2026-08-03), pinned deterministically instead of depending on the
+// ephemeral gitignored store.
+
+/** Real task pairs from 2026-08-03's event stream (taskId, startMs, endMs, outcome). */
+const REAL_PAIRS = [
+  { taskId: "gap-test-suite-has-no-layer-grouping", start: 1785666586000, end: 1785670656957, outcome: "needs-human" },
+  { taskId: "gap-select-preflight-json-real-store-too-slow", start: 1785673841100, end: 1785676256517, outcome: "done" },
+  { taskId: "gap-symlink-mirror-invocation-test-contract-mismatch", start: 1785673841406, end: 1785676256790, outcome: "done" },
+  { taskId: "gap-dod-clause13-14-enforced-but-undocumented", start: 1785673841720, end: 1785676257094, outcome: "done" },
+  { taskId: "gap-tests-spawn-cli-from-ts-source", start: 1785676937141, end: 1785678283130, outcome: "done" },
+  { taskId: "gap-tests-use-cli-where-module-import-suffices", start: 1785678301022, end: 1785680368443, outcome: "done" },
+  { taskId: "gap-suite-cost-model-is-wrong-optimizations-buy-nothing", start: 1785685475176, end: 1785689806550, outcome: "done" },
+  { taskId: "gap-telemetry-report-writes-and-deadlocks-readiness", start: 1785690646988, end: 1785692040224, outcome: "done" },
+  { taskId: "DIR-112", start: 1785692650198, end: 1785693276313, outcome: "done" },
+  { taskId: "DIR-124-A5", start: 1785693852294, end: 1785693858145, outcome: "done" },
+  { taskId: "DIR-124-A2", start: 1785693890544, end: 1785697483048, outcome: "done" },
+  { taskId: "gap-sync-vendor-drift-mislabelled-as-task-schema", start: 1785698309188, end: 1785703480220, outcome: "needs-human" },
+  { taskId: "gap-test-sh-flags-only-form-silently-runs-a-different-suite", start: 1785703705899, end: 1785706276278, outcome: "done" },
+  { taskId: "gap-suite-concurrency-4-vs-8-measurement", start: 1785706293561, end: 1785710871270, outcome: "done" },
+  { taskId: "gap-sync-vendor-drift-mislabelled-as-task-schema", start: 1785711272123, end: 1785714872254, outcome: "done" },
+  { taskId: "gap-relation-sync-suite-red-isolation-green", start: 1785715527301, end: 1785718454265, outcome: "done" },
+  { taskId: "gap-no-explicit-blocked-signal-from-inner-layer", start: 1785715628932, end: 1785719008293, outcome: "done" },
+  { taskId: "gap-no-test-framework-policy-for-new-tests", start: 1785715629445, end: 1785719008575, outcome: "done" },
+];
+
+/** Point-in-time artifacts the outer loop's "排除 gap-test-* 测试产物" rule excluded from throughput. */
+const TEST_ARTIFACTS = new Set(["gap-test-suite-has-no-layer-grouping", "DIR-124-A5"]);
+
+const REAL_SINCE = Date.parse("2026-08-02T17:43:24Z"); // the unattended-operation window start (AC4/AC6)
+const MEASURE_0025 = Date.parse("2026-08-03T00:25:00Z"); // when AC4's 0.90/1.14 regression was recorded
+const BATCH_END = Date.parse("2026-08-03T01:03:28.575Z"); // the 01:03:28Z concurrent-pair completion
+
+/**
+ * Build start+end events for a list of {taskId, start, end?, outcome?} entries. Unique runIds per
+ * entry (index-based) so duplicate taskIds (e.g. gap-sync-vendor-drift appearing twice) pair apart.
+ * An entry with no `end` is an in-progress start event.
+ */
+function buildFixtureEvents(cli, entries) {
+  return entries.flatMap((t, i) => {
+    const runId = `fixture-${i}-${String(t.taskId).replace(/[^A-Za-z0-9._-]/g, "-")}`;
+    const startEv = cli.buildStartEvent({ taskId: t.taskId, runId, recordedAtMs: t.start });
+    if (t.end == null) return [startEv];
+    return [startEv, cli.buildEndEvent({ taskId: t.taskId, runId, outcome: t.outcome ?? "done", recordedAtMs: t.end })];
+  });
+}
+
+test("AC1 — tasksPerHour = count/windowHours (throughput), not 60/mean — two parallel 60-min tasks → 2.0", async () => {
+  const cli = await importCli();
+  const events = buildFixtureEvents(cli, [
+    { taskId: "p1", start: 0, end: 3_600_000, outcome: "done" },
+    { taskId: "p2", start: 0, end: 3_600_000, outcome: "done" },
+  ]);
+  const r = cli.aggregate(events, { nowMs: 3_600_000 });
+  assert.equal(r.tasks.length, 2);
+  assert.equal(r.windowHours, 1, "two tasks completing inside the same 1-hour window");
+  assert.ok(Math.abs(r.tasksPerHour - 2) < 0.001, `throughput must be 2 tasks/hour, got ${r.tasksPerHour}`);
+  assert.equal(r.serialEquivalentPerHour, 1, "the old 60/mean (serial-equivalent) still reports 1 for two parallel 60-min tasks");
+  assert.notEqual(r.tasksPerHour, r.serialEquivalentPerHour, "throughput and serial-equivalent diverge under concurrency");
+});
+
+test("AC2 — windowStart = --since when given, else the earliest startedAtMs", async () => {
+  const cli = await importCli();
+  const events = buildFixtureEvents(cli, [
+    { taskId: "a", start: 5_000, end: 6_000 },
+    { taskId: "b", start: 10_000, end: 11_000 },
+  ]);
+  const withSince = cli.aggregate(events, { sinceMs: 7_000, nowMs: 12_000 });
+  assert.equal(withSince.windowStart, new Date(7_000).toISOString(), "--since must be the window start");
+  assert.equal(withSince.tasks.length, 1, "the pre-since pair must be excluded");
+  const noSince = cli.aggregate(events, { nowMs: 12_000 });
+  assert.equal(noSince.windowStart, new Date(5_000).toISOString(), "earliest startedAtMs must be the window start when no --since");
+});
+
+test("AC3 — --report --json carries windowStart/windowEnd/windowHours", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const s = runCli(tmp, "--task-start", "--taskId", "gap-test-w");
+    assert.equal(s.status, 0, s.stderr);
+    const runId = s.stdout.trim();
+    runCli(tmp, "--task-end", "--taskId", "gap-test-w", "--runId", runId, "--outcome", "done");
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const out = JSON.parse(rep.stdout);
+    assert.ok("windowStart" in out && "windowEnd" in out && "windowHours" in out, "report must carry window fields");
+    assert.equal(typeof out.windowHours, "number");
+    assert.ok(!Number.isNaN(Date.parse(out.windowStart)), `windowStart must be ISO, got ${out.windowStart}`);
+    assert.ok(!Number.isNaN(Date.parse(out.windowEnd)), `windowEnd must be ISO, got ${out.windowEnd}`);
+    assert.ok(out.windowHours >= 0, `windowHours must be non-negative, got ${out.windowHours}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC4 — real-data regression: unattended window ≈0.90 and full period ≈1.14 (old code reported 1.33 for both)", async () => {
+  const cli = await importCli();
+  // Unattended window (--since 17:43:24Z) as it stood at 00:25Z: 6 real completions, the window
+  // still LIVE (the 01:03:28Z concurrent batch is in-progress), measured at 00:25Z → 6/6.69h ≈ 0.90.
+  const unattendedPairs = REAL_PAIRS.filter((p) => p.end >= REAL_SINCE && p.end <= MEASURE_0025 && !TEST_ARTIFACTS.has(p.taskId));
+  assert.equal(unattendedPairs.length, 6, "fixture sanity: 6 real unattended-window completions by 00:25Z");
+  const unattendedLive = [
+    ...unattendedPairs,
+    { taskId: "gap-relation-sync-suite-red-isolation-green", start: 1785715527301, outcome: "done" },
+    { taskId: "gap-no-explicit-blocked-signal-from-inner-layer", start: 1785715628932, outcome: "done" },
+    { taskId: "gap-no-test-framework-policy-for-new-tests", start: 1785715629445, outcome: "done" },
+  ];
+  const r1 = cli.aggregate(buildFixtureEvents(cli, unattendedLive), { sinceMs: REAL_SINCE, nowMs: MEASURE_0025 });
+  assert.ok(Math.abs(r1.tasksPerHour - 0.90) < 0.02, `unattended-window throughput ≈0.90, got ${r1.tasksPerHour.toFixed(3)}`);
+
+  // Full period as it stood at 00:25Z: 13 real completions (excluding the 2 test artifacts), a CLOSED
+  // window ending at the latest endedAtMs → 13/11.40h ≈ 1.14. This is a HISTORICAL computation:
+  // aggregate() is called with nowMs omitted (windowEnd = latest endedAtMs). The live CLI never
+  // produces this exact value — it passes nowMs = Date.now() so its window extends to the current
+  // instant; the historical 1.14 is what the outer loop recorded at the 00:25Z measurement moment.
+  const fullPairs = REAL_PAIRS.filter((p) => p.end <= MEASURE_0025 && !TEST_ARTIFACTS.has(p.taskId));
+  assert.equal(fullPairs.length, 13, "fixture sanity: 13 real full-period completions by 00:25Z");
+  const r2 = cli.aggregate(buildFixtureEvents(cli, fullPairs), {});
+  assert.ok(Math.abs(r2.tasksPerHour - 1.14) < 0.02, `full-period throughput ≈1.14, got ${r2.tasksPerHour.toFixed(3)}`);
+  // The full-period window start is the earliest startedAtMs; the window end is the latest endedAtMs.
+  assert.equal(r2.windowStart, new Date(1785673841100).toISOString());
+  assert.equal(r2.windowEnd, new Date(1785714872254).toISOString());
+});
+
+test("AC5 — the old metric is renamed serialEquivalentPerHour, annotated unrelated to concurrency, never the ambiguous name", async () => {
+  const cli = await importCli();
+  const src = fs.readFileSync(CLI, "utf8");
+  assert.match(src, /serialEquivalentPerHour/, "module must emit the renamed serial-equivalent field");
+  assert.match(src, /unrelated to concurrency/i, "annotation must state the serial-equivalent is unrelated to concurrency");
+  assert.doesNotMatch(src, /const tasksPerHour = totalMinutes > 0 \? \(count \* 60\) \/ totalMinutes/, "tasksPerHour must no longer be 60/mean");
+  // Two parallel 60-min tasks: throughput 2.0 vs serial-equivalent 1.0 — they must diverge.
+  const events = buildFixtureEvents(cli, [
+    { taskId: "p1", start: 0, end: 3_600_000 },
+    { taskId: "p2", start: 0, end: 3_600_000 },
+  ]);
+  const r = cli.aggregate(events, { nowMs: 3_600_000 });
+  assert.equal("serialEquivalentPerHour" in r, true, "report must carry serialEquivalentPerHour");
+  assert.equal(r.serialEquivalentPerHour, 1, "60/mean for two 60-min tasks = 1");
+  assert.ok(r.tasksPerHour !== r.serialEquivalentPerHour, "throughput and serial-equivalent must not be conflated");
+});
+
+test("AC6 — concurrency regression: the 01:03:28Z parallel completions RAISE throughput while the OLD serial-equivalent FALLS", async () => {
+  const cli = await importCli();
+  const beforeBatch = BATCH_END - 3_600_000; // 00:03:28.575Z — before the concurrent pair completed
+  const completedBeforeAll = REAL_PAIRS.filter((p) => p.end <= beforeBatch);
+  const completedBeforeNoArt = completedBeforeAll.filter((p) => !TEST_ARTIFACTS.has(p.taskId));
+  const batch = [
+    { taskId: "gap-relation-sync-suite-red-isolation-green", start: 1785715527301, end: 1785718454265, outcome: "done" },
+    { taskId: "gap-no-explicit-blocked-signal-from-inner-layer", start: 1785715628932, end: 1785719008293, outcome: "done" },
+    { taskId: "gap-no-test-framework-policy-for-new-tests", start: 1785715629445, end: 1785719008575, outcome: "done" },
+  ];
+  const batchInProgress = batch.map(({ taskId, start }) => ({ taskId, start, outcome: "done" }));
+
+  // Population note (REFUTE round-1 NIT): the THROUGHPUT half uses the artifact-EXCLUDED set
+  // (6→9 in-window completions) — matching the outer loop's documented "排除 gap-test-* 测试产物"
+  // throughput column (0.95→1.22); the SERIAL-EQUIVALENT half uses the artifact-INCLUDED set
+  // (15→18 completions) — matching the old CLI's raw output (1.33→1.29). The direction is robust
+  // under either population (serial over the no-artifact set also falls: 1.281→1.247).
+  // BEFORE: 15 completed (all tasks incl. artifacts) + the 3 batch tasks still in-progress.
+  const beforeTph = cli.aggregate(buildFixtureEvents(cli, [...completedBeforeNoArt, ...batchInProgress]), { sinceMs: REAL_SINCE, nowMs: beforeBatch });
+  const beforeSerial = cli.aggregate(buildFixtureEvents(cli, [...completedBeforeAll, ...batchInProgress]), { nowMs: beforeBatch });
+
+  // AFTER: all 18 completed (the pair finished at the same 01:03:28Z instant).
+  const afterTph = cli.aggregate(buildFixtureEvents(cli, [...completedBeforeNoArt, ...batch]), { sinceMs: REAL_SINCE, nowMs: BATCH_END });
+  const afterSerial = cli.aggregate(buildFixtureEvents(cli, [...completedBeforeAll, ...batch]), { nowMs: BATCH_END });
+
+  // Real throughput over the unattended window RISES 0.95 → 1.22 — concurrency is not penalized.
+  assert.ok(Math.abs(beforeTph.tasksPerHour - 0.95) < 0.03, `before-batch throughput ≈0.95, got ${beforeTph.tasksPerHour.toFixed(3)}`);
+  assert.ok(Math.abs(afterTph.tasksPerHour - 1.22) < 0.03, `after-batch throughput ≈1.22, got ${afterTph.tasksPerHour.toFixed(3)}`);
+  assert.ok(afterTph.tasksPerHour > beforeTph.tasksPerHour, "the same concurrent completions must RAISE throughput");
+
+  // The OLD serial-equivalent metric FALLS 1.33 → 1.29 — the reverse signal (the defect this fixes).
+  assert.ok(Math.abs(beforeSerial.serialEquivalentPerHour - 1.33) < 0.02, `before serial-equivalent ≈1.33, got ${beforeSerial.serialEquivalentPerHour.toFixed(3)}`);
+  assert.ok(Math.abs(afterSerial.serialEquivalentPerHour - 1.29) < 0.02, `after serial-equivalent ≈1.29, got ${afterSerial.serialEquivalentPerHour.toFixed(3)}`);
+  assert.ok(afterSerial.serialEquivalentPerHour < beforeSerial.serialEquivalentPerHour, "the old metric must FALL when concurrency rises");
 });
 
 // ── Byte-identity ────────────────────────────────────────────────────────────────────────────────────
