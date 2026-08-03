@@ -361,6 +361,16 @@ inner-forensics-verify——生产机制正在给错答案，不是新增检查�
 cancelled > 0，它从 P2 提升到 P1**（资源闸更接近支柱而非再加断言）。本次 testiso cancelled=0（未触发）、
 reclaim 被中止（无结果）——但 2 个 68s/60s 时序失败与 cancelled 功能等价，已向上报告。
 
+### Tick 更新（04T03:13Z）：inventory P0#1 合并 + 全量排队
+
+- **inventory merged**（`ce23e6ce` + merge）：runtime-usage-inventory CLI + test(18, @test-group governance) +
+  table{json,md}。205 脚本分类：**live 36 · library 72 · ci-only 1 · dormant-by-decision 7 ·
+  never-runs-test 8 · unaccounted 81**。scoped 18/18 绿。AC9 无删除。REFUTE 1 轮 10 MINOR 全闭（0 阻塞）
+- **全量排队**：suite-run2（testiso 重跑）仍在跑（压力 ~94，单套件重负载阶段）；**inventory 全量等
+  suite-run2 结束 + 压力 <40 再跑**（外层 #1 纪律）。跑完即关 inventory → 派 P0 #3 retire-pipeline
+- **串行队列**：suite-run2 → inventory 全量 → reclaim 重跑 → （testiso 若再失败则再跑）。全部一次一个
+- 在飞：testiso（suite-run2 中）、reclaim（等重跑）；inventory 合并 pending 全量
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
