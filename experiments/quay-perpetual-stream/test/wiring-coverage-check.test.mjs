@@ -5,7 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractMechanismClaims, extractMechanismSubsections, bulletsOf, checkWiringCoverage, splitSentences } from "../scripts/wiring-coverage-check.ts";
@@ -208,6 +209,42 @@ test("checkWiringCoverage: no claims at all -> PASS vacuously", () => {
   const result = checkWiringCoverage("plain prose with no wiring verbs or identifiers", "- [ ] anything");
   assert.equal(result.ok, true);
   assert.equal(result.code, "wiring-coverage-none-claimed");
+});
+
+// ── EMPTY-SET fail-closed (gap-checks-that-verify-an-empty-set-must-fail-closed) ────────────────
+test("checkWiringCoverage: EMPTY source section FAILS CLOSED — nothing to wire-check", () => {
+  // An empty/absent source section must NOT be a vacuous pass ("no claims -> covered" is
+  // indistinguishable from "never looked"). The `none-claimed` PASS above requires a NON-empty
+  // source; empty source is a distinct fail-closed code.
+  const result = checkWiringCoverage("", "- [ ] anything");
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "wiring-coverage-empty-source");
+  assert.match(result.message, /empty|never looked/i);
+  // Whitespace-only source is equally empty.
+  const ws = checkWiringCoverage("   \n\t ", "- [ ] anything");
+  assert.equal(ws.ok, false);
+  assert.equal(ws.code, "wiring-coverage-empty-source");
+});
+
+test("CLI: task with NO Proposal section -> exit 1 (empty-set fail-closed); --allow-empty -> exit 0", () => {
+  const scratch = mkdtempSync(path.join(os.tmpdir(), "wiring-empty-source-"));
+  const taskPath = path.join(scratch, "no-proposal.md");
+  writeFileSync(taskPath, "---\nid: no-proposal\nstatus: todo\n---\n\n## Acceptance Criteria\n\n- [ ] something\n");
+  try {
+    const hard = runCli(taskPath);
+    assert.equal(hard.status, 1, "empty source section must fail-closed at the CLI (exit non-zero)");
+    const cmd = `node --experimental-strip-types ${JSON.stringify(CLI)} --task ${JSON.stringify(taskPath)} --allow-empty`;
+    let waived;
+    try {
+      waived = { status: 0, stdout: execSync(cmd, { encoding: "utf8" }) };
+    } catch (e) {
+      waived = { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+    }
+    assert.equal(waived.status, 0, "--allow-empty waives the empty-source guard");
+    assert.match(waived.stdout, /empty-source-allow-empty/, "waived verdict is explicit that verification did NOT run");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("checkWiringCoverage: identifiers matched but no evidence keyword in the bullet -> still uncovered", () => {

@@ -211,8 +211,9 @@ export function checkTree(cfg: ScriptCfg): TreeResult {
 }
 
 // ── CLI arg parse. --scripts (required), --tests, --import-root (repeatable), --registry, --outer-loop. ─
-function parseArgs(argv: string[]): { cfg?: ScriptCfg; error?: string } {
+function parseArgs(argv: string[]): { cfg?: ScriptCfg; allowEmpty?: boolean; error?: string } {
   const cfg: ScriptCfg = { scriptsDir: null as any, testDir: null, importSearchRoots: [], registryFile: null, outerLoopFile: null };
+  let allowEmpty = false;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -221,18 +222,19 @@ function parseArgs(argv: string[]): { cfg?: ScriptCfg; error?: string } {
     else if (a === "--import-root") cfg.importSearchRoots.push(args[++i]);
     else if (a === "--registry") cfg.registryFile = args[++i];
     else if (a === "--outer-loop") cfg.outerLoopFile = args[++i];
+    else if (a === "--allow-empty") allowEmpty = true;
     else return { error: `unknown argument: ${a}` };
   }
-  return { cfg };
+  return { cfg, allowEmpty };
 }
 
 // ── CLI main (only when run directly). Prints a per-script report + summary; exits 0/1/2. ─────────
 function main(argv: string[]): number {
-  const { cfg, error } = parseArgs(argv);
+  const { cfg, allowEmpty, error } = parseArgs(argv);
   if (error) { console.error(`ERROR: ${error}`); return 2; }
   if (!cfg!.scriptsDir) {
     console.error("usage: node loadbearing-test-gate.ts --scripts <dir> [--tests <dir>] " +
-      "[--import-root <dir> ...] [--registry <file>] [--outer-loop <file>]");
+      "[--import-root <dir> ...] [--registry <file>] [--outer-loop <file>] [--allow-empty]");
     return 2;
   }
   // Sensible defaults: tests dir sibling of scripts dir; import search = the scripts dir itself.
@@ -240,6 +242,13 @@ function main(argv: string[]): number {
   if (cfg!.importSearchRoots.length === 0) cfg!.importSearchRoots = [cfg!.scriptsDir];
 
   const rep = checkTree(cfg!);
+  // EMPTY-SET guard (gap-checks-that-verify-an-empty-set-must-fail-closed): an empty scripts dir
+  // means the gate verified ZERO scripts — "PASS: every load-bearing script has a sibling test" is
+  // indistinguishable from "never looked". Fail-closed by default; --allow-empty waives it.
+  if (rep.results.length === 0 && !allowEmpty) {
+    console.log(`FAIL: 0 scripts to gate — the scripts directory ${cfg!.scriptsDir} has no *.ts/*.mjs, so this gate verified nothing (fail-closed: 'no problems' must not be indistinguishable from 'never looked'; pass --allow-empty to waive)`);
+    return 1;
+  }
   console.log(`load-bearing test-gate — scripts=${cfg!.scriptsDir}`);
   for (const r of rep.results) {
     const name = basenameOf(r.file);

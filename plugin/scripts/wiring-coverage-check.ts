@@ -411,6 +411,21 @@ export function bulletsOf(sectionText) {
 //   (`## Requested action`) scan the whole section (backward compat).
 // acSectionText: the task's `## Acceptance Criteria` section raw text.
 export function checkWiringCoverage(sourceSectionText, acSectionText) {
+  // EMPTY-SET guard (gap-checks-that-verify-an-empty-set-must-fail-closed): an empty/absent source
+  // section means there is NOTHING to wire-check — reporting "covered" on it would be a vacuous
+  // pass, indistinguishable from "never looked". Fail-closed (ok:false, code
+  // wiring-coverage-empty-source); the CLI provides an explicit --allow-empty escape hatch (default
+  // deny). A NON-empty source with genuinely no claims still reports wiring-coverage-none-claimed —
+  // that is an explicit declaration ("nothing to claim"), not a silent pass.
+  if (!sourceSectionText || !sourceSectionText.trim()) {
+    return {
+      ok: false,
+      code: "wiring-coverage-empty-source",
+      message: "source section is empty/absent — nothing to wire-check (fail-closed: an empty source section is indistinguishable from 'never looked'; pass --allow-empty to waive)",
+      claims: [],
+      uncovered: [],
+    };
+  }
   const claims = extractMechanismClaims(sourceForWiringCoverage(sourceSectionText));
   if (claims.length === 0) {
     return {
@@ -464,7 +479,11 @@ export function checkWiringCoverage(sourceSectionText, acSectionText) {
 // count increments by `findings.length` from THIS function's real return value, not an LLM's
 // independent judgment. Exit codes: 0 = verdict produced (even when uncovered findings exist — the
 // verdict IS the signal); 2 = usage/IO error (no --task, unreadable file) — the workflow fails the
-// ProposalReview phase CLOSED on a non-parseable result rather than silently skipping coverage.
+// ProposalReview phase CLOSED on a non-parseable result rather than silently skipping coverage;
+// 1 = EMPTY-SET fail-closed (gap-checks-that-verify-an-empty-set-must-fail-closed): the source
+// section is empty/absent so nothing could be wire-checked — "no problems" must not be
+// indistinguishable from "never looked", so this exits non-zero unless --allow-empty is passed
+// (default deny).
 
 // Extract the raw text of one `## <heading>` section (everything up to the next `## ` heading or
 // EOF), mirroring the section semantics task-schema.ts's extractSection relies on — kept local and
@@ -516,10 +535,11 @@ const _runAsCli = (() => {
 
 if (_runAsCli) {
   const argv = process.argv.slice(2);
+  const allowEmpty = argv.includes("--allow-empty");
   const taskIdx = argv.indexOf("--task");
   const taskPath = taskIdx >= 0 ? argv[taskIdx + 1] : undefined;
   if (!taskPath) {
-    console.error("usage: wiring-coverage-check.ts --task <path/to/task.md>");
+    console.error("usage: wiring-coverage-check.ts --task <path/to/task.md> [--allow-empty]");
     process.exit(2);
   }
   let body;
@@ -531,7 +551,23 @@ if (_runAsCli) {
   }
   const proposalText = extractSectionForCli(body, "Proposal");
   const acText = extractSectionForCli(body, "Acceptance Criteria");
-  const verdict = checkWiringCoverage(proposalText, acText);
+  let verdict = checkWiringCoverage(proposalText, acText);
+  // EMPTY-SET fail-closed (gap-checks-that-verify-an-empty-set-must-fail-closed): an empty/absent
+  // source section means the check could not verify anything. The verdict's ok:false is the signal;
+  // the CLI ALSO exits non-zero so a shell consumer cannot mistake "no section to check" for "checked
+  // and passed". --allow-empty waives it, producing an explicit "waived, did NOT run" verdict.
+  if (verdict.code === "wiring-coverage-empty-source") {
+    if (!allowEmpty) {
+      console.error(`wiring-coverage-check: ${verdict.message}`);
+      process.exit(1);
+    }
+    verdict = {
+      ...verdict,
+      ok: true,
+      code: "wiring-coverage-empty-source-allow-empty",
+      message: "source section is empty/absent but --allow-empty was passed — the empty-source guard is waived (verification did NOT run; the 'empty' report is explicit)",
+    };
+  }
   const findings = wiringFindingsFromUncovered(verdict.uncovered);
   console.log(
     JSON.stringify(

@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -194,4 +195,20 @@ test("CLI: passing subtree (point tests dir at a tree that covers the load-beari
 test("CLI: no --scripts arg → usage error exit 2", () => {
   const r = runCli([]);
   assert.equal(r.status, 2);
+});
+
+// ── EMPTY-SET fail-closed (gap-checks-that-verify-an-empty-set-must-fail-closed) ────────────────
+test("CLI: EMPTY scripts dir → exit 1 (empty-set fail-closed); --allow-empty → exit 0", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loadbearing-empty-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "scripts"));
+    fs.mkdirSync(path.join(tmp, "test"));
+    const hard = runCli(["--scripts", path.join(tmp, "scripts"), "--tests", path.join(tmp, "test")]);
+    assert.equal(hard.status, 1, "an empty scripts dir must fail-closed ('0 scripts to gate' is indistinguishable from 'never looked')");
+    assert.match(hard.stdout, /0 scripts|empty|fail-closed/i);
+    const waived = runCli(["--scripts", path.join(tmp, "scripts"), "--tests", path.join(tmp, "test"), "--allow-empty"]);
+    assert.equal(waived.status, 0, "--allow-empty waives the empty-set guard (default deny)");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
