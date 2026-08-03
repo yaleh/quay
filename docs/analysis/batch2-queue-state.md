@@ -724,6 +724,25 @@ batch4a 的 cancelled 2 可能有自身异步结构触发条件（Promise 未决
   （外层套件已跑过 whole-store 检查）。已提交
 - **合并全量重跑**（`be4k8hogt`）
 
+### 外层紧急纠偏（07T03:2xZ）：并发默认推导回 8
+
+**问题**：scripts/test.sh 并发默认推导为 1（nproc=4/2.1→1），全量套件 ~8 分钟变 ~55 分钟（stranded 的
+OVER90 即此来源）。**代价量化**：并发 8 墙钟 460-570s vs 并发 1 Σ~3300s（~55 分钟），每任务 DoD 连跑 2 次
+→ 每任务多 94 分钟。
+
+**根因**：AC5 前半（放大系数 17/8=2.125）扎实，但**代价侧取舍实验没跑**（AC5 原文要求 concurrency 2/4/6/8
+各一次 + cancelled==0 判据）；test.sh 注释写「tradeoff deliberate and data-backed」但数据只覆盖放大系数一侧。
+
+**新证据支持回 8**：sigma Σ/wall≈7.1 @ 8 lane（饱和非过载）；高压负控制 41→99 仍 155/155 无 cancelled
+（高压不必然 cancel）。「降并发避 cancel」前提未证实，代价却是确定的 7×。
+
+**处置**：`default_test_concurrency` 临时固定 8（公式保留在 `default_concurrency_formula`，AC5 实验后恢复）；
+AC5 单测更新（override 断言 + 公式测试）。**已同步进 sigma worktree**（cp test.sh），中止其串行 run-2（省 ~45 分钟）。
+sigma OVER90 外层判良性（产物已落盘，卡 DoD 连跑 2 次，不放弃）。
+
+**机制观察（已记入 tick 文档 worktree 节）**：worktree 隔离让主检出修复不自动传播到在飞 worktree——紧急修复
+需显式 `cp` 进每个在飞 worktree，否则旧行为跑完。
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
