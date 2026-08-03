@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 02:13Z | `correct` | 内层「等 load 降」方向对但用代理信号，外层实测 PSI 给出硬判据并建资源闸任务；另核实 reverse-drift 修复真实仓库效果、查出正向漂移 9 条与检测器新盲区 | 批 4 全量套件崩溃（5 文件超时：prepare-milestone-convergence 48.8s、runner-grouping 39.5s），三任务仍 inProgress 43 分钟（阈值 90）；32 个 `node-MainThread`、load1 9.07 ⇒ 真忙非停摆 | **读 diff 核实 tasksPerHour 修复**：`(count*60)/totalMinutes` 已被 `count/windowHours` 取代，旧口径保留为 `serialEquivalentPerHour`，`windowStart/End/Hours` 一并暴露。**PSI 实测**：cpu `some avg10`=**84.77**（CPU 饥饿确证）、memory=0.00、**swap=0**、nproc=4 而默认并发 8（2× 超订）。**我自己差点踩空集陷阱**：drift-check 的 JSON 键我猜成 `forward`，实际是 `suspects`，猜错即静默返回 0——确认键名后正向漂移实为 **9 条**（reverse 确为 0，修复核实通过）。**检测器新盲区**：删除类任务的 Touches 是「待删文件」，存在 ⇒ 被读成「已落地」，语义反的 |
 | 2026-08-03 01:44Z | `no-action` | 三任务并发正常推进（各约 19 分钟，阈值 90），无需介入 | `done 18` / `inProgress 3` / `orphaned 0`；窗口 **8.00/12 小时（67%）**，真实吞吐 1.12/hr | **主动核查了一个可预见风险**：`load1=18.99`、38 个 node 进程，而今晚 AC11 的失败与 M243 的崩溃成因都是「多套件并跑争抢」。精确统计后确认**只有 1 个真实 `test.sh`**（在 `/tmp/quay-wt-ac11`），38 进程是它自己并发 8 的 worker + 派生 CLI —— **三个 subagent 没有同时跑全量，并发纪律守住了**。`/tmp/quay-wt-ac11` 下 188 个进程符合预期：该任务研究的正是「runner 内起 runner」，需复现嵌套场景 |
 | 2026-08-03 01:25Z | `no-action` | 三任务并发已派发（ac11 / reverse-drift / tasksperhour，均刚起步），内层自建任务证据充分，无需介入 | `done 18` / `inProgress 3` / `orphaned 0`；窗口 7.68/12 小时（64%），真实吞吐 **1.17/hr** | **核实内层自建任务 `gap-test-coverage-check-parses-stale-files-variable` 的证据 —— 它是对的，两次否定它的是我自己的 grep**：`test.sh:125` 是 `local glob=(…)`（真正的 canonical glob），`:234` 是 `local files=() f`（空数组声明，无关）；检查脚本的 `/files=\(([^)]*)\)/` **匹配到第 234 行并捕获空串** ⇒ `parseCanonicalGlobs` 返回 `[]`，exit 0，**静默降级而非报错**。我第一次 grep 锚了行首漏掉 `local ` 前缀，第二次据此怀疑内层判断有误——**今天第七次同一个坑，这次差点否掉一个正确的发现**。AC16 由此满足且是高质量满足：任务体给出文件行号、正则原文、改名位置、CI 接线（`ci.yml:34-35`）|
 | 2026-08-03 01:23Z | `correct` | **AC1 未达成**——外层自己的两次全量在同一 commit 上结果不同。建任务并派发调整 | 内层空闲候机（它主动不派发、不跑测试以免与外层争抢——纪律正确） | **「可重现」这条今晚第一次兑现价值，且用在外层自己身上**：第 1 次 2344/0 fail/443s/exit 0；第 2 次 2344/**fail 1**/472s/exit 1。**若按第一次宣布达成即为错误。**失败项 `AC11 — scripts/test.sh explicit-file form`（`select-tests-for-touches.test.mjs:384`），隔离下 3/3 绿 ⇒ **今晚第三个「隔离绿/套件红」实例**（M136、relation-sync、本项）。机制比前两个清楚：该测试**在套件内 spawn 完整的 `scripts/test.sh`**（第 73 行，timeout 60s），而 `test.sh` 自 B5-1 起先跑致命的 `build_dist_once`；外层并发 8 跑在 4 核（已 2 倍过订）⇒ 嵌套运行要在争抢中完成 esbuild + 一轮测试，60s 预算下失败可预期。**在 runner 内起 runner，把外层负载变成了内层的成败条件** |
@@ -78,9 +79,9 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 | 类型 | 次数 | 占比 |
 |---|---|---|
 | no-action | 26 | 43% |
-| unblock | 10 | 17% |
-| correct | 21 | 35% |
+| unblock | 10 | 16% |
+| correct | 22 | 36% |
 | escalate | 3 | 5% |
-| **合计** | **60** | — |
+| **合计** | **61** | — |
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 35%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 36%。
