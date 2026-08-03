@@ -627,6 +627,20 @@ stranded/web 的 DoD 都含 2 次全绿——若同期跑套件，Σ 系统性�
 - **parser 任务**（gap-task-body-has-n-parsers）在 stranded 合并后与 task-status-drift-check.ts 的重叠已解除，
   可派（等槽位）
 
+### 外层解阻塞（06T03:2xZ）：/tmp 泄漏已清理
+
+**根因**：/tmp 是 tmpfs（内存盘 7.9G），积 166,923 个测试 fixture 目录（9 天，6.3GB 占内存）。前缀：
+prepare-admission- 14220、prep-check- 9128、quay-loop-params-trig-fuzz- 4337、adr-store- 3590 等。
+**外层清理** >2h 且匹配 fixture 前缀的目录（排除 quay-wt-*/claude-*）：删 158,757 条目、释放 2,454MB。
+/ tmp 3936/7994（50%）；MemAvailable 5291→7370MB；swap 1779→1142MB。claude-1000 会话 + 4 个 quay-wt-* worktree
+完好（含 sigma/stranded/webobs）。
+
+**两条后续**：①泄漏 ~17k/天，不修 ~9 天重现——外层建任务；②test-isolation-contract 有「mkdtemp 每运行唯一」
+但缺「**必须清理**」——补进契约比新建机制便宜。
+
+**sigma 条件改善**：/tmp 4GB 空间 + 压力降（sigma 仍在测量，若 filesCaptured < 155 会重测）。
+stranded 全量仍等 sigma 测完。新增 `/tmp/quay-wt-preretire`（外层 detached worktree，不碰）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
