@@ -467,6 +467,21 @@ export function collectBuildEvidence(opts: CollectorOpts): CollectorResult {
   // Read admission decision
   const { decision, decisionFile, decisionHash } = readAdmissionDecision(admissionDecisionFile);
 
+  // FAIL-CLOSED (gap-m264-build-evidence-regress-flaky, 2026-08-03): if an admission decision FILE
+  // was explicitly provided but could not be read/parsed, that is an ERROR, not "no admission" —
+  // silently proceeding would emit an EMPTY acEvidence manifest (buildAdmissionRef: null, no planned
+  // rows) that the gate vacuously passes in advisory mode, silently dropping every evidence
+  // requirement for a real milestone run. Missing admission is only legitimate when the caller did
+  // NOT pass a path (width-1 / no-admission flows keep buildAdmissionRef null on purpose).
+  if (admissionDecisionFile && !decision) {
+    return {
+      ok: false,
+      manifestPath: output,
+      reason: "admission-decision-unreadable",
+      gitFailureDetail: `admission decision file provided but unreadable: ${admissionDecisionFile}`,
+    };
+  }
+
   // Build planned evidence rows from admission decision
   let plannedAcEvidence = decision?.requiredEvidence
     ? decision.requiredEvidence.map((req) => ({

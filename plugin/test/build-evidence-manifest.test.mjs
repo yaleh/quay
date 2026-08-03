@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
@@ -58,9 +59,16 @@ async function importManifestModule() {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────────────────────────
-// Ensure tmp/ exists for scratch file tests
-const TMP = path.join(REPO_ROOT, "tmp");
-if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true });
+// Scratch dirs live in the OS temp dir (os.tmpdir()), NOT the shared <repo>/tmp/ directory.
+// gap-m264-build-evidence-regress-flaky (2026-08-03): the M264 regress test was flaky in the
+// full suite — one run green, next red, same commit. Root cause (reproduced): the scratch dirs
+// were created under <repo>/tmp/, and a concurrent sweep of that shared directory between the
+// test's file writes and the collector's read made admission.json disappear, so the collector
+// produced an EMPTY acEvidence manifest and the test died on `manifest.acEvidence[0]` with an
+// opaque TypeError. Every other suite test uses os.tmpdir() for scratch; only this file used the
+// shared repo-local tmp/, which is what a sweep can reach. Moving scratch to os.tmpdir() makes
+// the tests immune to any repo-local tmp sweep (the collector/gate read the scratch by absolute
+// path, so the location change is behavior-neutral for what is under test).
 
 // AC1: Singleton and composite Build produce the same versioned manifest schema
 test("AC1 — manifest schema is versioned and shared across paths", async (t) => {
@@ -214,7 +222,7 @@ test("AC6 — BuildEvidenceGate reason codes cover all blocking conditions", asy
   // The gate returns distinct reason codes for each condition.
   // We test the gate through its CLI mode with fixture manifests.
 
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "build-evidence-gate-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "build-evidence-gate-"));
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
 
   // Missing manifest → manifest-missing
@@ -406,7 +414,7 @@ test("AC6 — BuildEvidenceGate reason codes cover all blocking conditions", asy
 
 // AC7: Deferral authorization — authorized deferral passes, unauthorized fails
 test("AC7 — authorized deferral passes gate", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "build-evidence-gate-ac7-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "build-evidence-gate-ac7-"));
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
 
   // Authorized deferral with real policy key passes
@@ -463,7 +471,7 @@ test("AC7 — authorized deferral passes gate", async (t) => {
 
 // AC8: Artifact reference validation
 test("AC8 — artifact hash and out-of-root checks", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "build-evidence-gate-ac8-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "build-evidence-gate-ac8-"));
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
 
   // Out-of-root path traversal → artifact-out-of-root
@@ -647,7 +655,7 @@ test("selftest — build-evidence-manifest.ts --selftest passes", async (t) => {
 
 // Collector dry-run smoke test — CLI argument parsing + fail-closed git behavior (M265)
 test("collector — dry-run CLI argument parsing + git-failure fail-closed", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "collector-smoke-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "collector-smoke-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = execSync("git rev-parse HEAD", { cwd: REPO_ROOT, encoding: "utf8" }).trim();
   const output = path.join(scratch, "manifest.json");
@@ -696,6 +704,36 @@ test("collector — dry-run CLI argument parsing + git-failure fail-closed", asy
   fs.rmSync(scratch, { recursive: true, force: true });
 });
 
+// Collector admission-decision FAIL-CLOSED (gap-m264-build-evidence-regress-flaky, 2026-08-03):
+// a provided-but-unreadable --admission-decision path is an ERROR, not "no admission". Previously
+// the collector silently emitted an EMPTY acEvidence manifest (buildAdmissionRef null, no planned
+// rows) that the gate vacuously passed in advisory mode. Regression test for the fail-closed branch.
+test("collector — provided-but-missing admission decision FAILS CLOSED with admission-decision-unreadable", async (t) => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-adm-unreadable-"));
+  const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
+  const realCommit = realCommitOf();
+
+  // The admission decision path is DECLARED but the file does NOT exist (e.g. swept by a concurrent
+  // process, or a caller pointing at a path that was never written).
+  const missingAdmission = path.join(scratch, "admission.json");
+  const output = path.join(scratch, "manifest.json");
+
+  const r = runModule(
+    collectorPath,
+    "--build-result", JSON.stringify({ outcome: "done", taskId: "T1", mergeCommit: realCommit }),
+    "--milestone-root", scratch, "--workspace", REPO_ROOT,
+    "--milestone-id", "M100", "--task-ids", JSON.stringify(["T1"]), "--composite", "false",
+    "--admission-decision", missingAdmission,
+    "--output", output,
+  );
+
+  assert.equal(r.exitCode, 1, `collector must FAIL CLOSED on a provided-but-missing admission decision, got exit=${r.exitCode}: stdout="${r.stdout}" stderr="${r.stderr}"`);
+  assert.ok(r.stdout.includes("admission-decision-unreadable"), `expected admission-decision-unreadable reason, got: ${r.stdout}`);
+  assert.ok(!fs.existsSync(output), "no manifest may be written when the admission decision is unreadable (no vacuous empty manifest)");
+
+  fs.rmSync(scratch, { recursive: true, force: true });
+});
+
 // ── M264 mechanism 2: per-phase evidence consumption ────────────────────────────────────────────────
 
 function realCommitOf() {
@@ -703,7 +741,7 @@ function realCommitOf() {
 }
 
 test("M264 — collector consumes composite per-phase evidence into acEvidence rows with producer provenance", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-per-phase-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-per-phase-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = realCommitOf();
 
@@ -751,7 +789,7 @@ test("M264 — collector consumes composite per-phase evidence into acEvidence r
 });
 
 test("M264 — collector consumes width-1 iteration report into acEvidence rows (no planned-ac-unmatched false positive)", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-iter-report-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-iter-report-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = realCommitOf();
 
@@ -792,7 +830,7 @@ test("M264 — collector consumes width-1 iteration report into acEvidence rows 
 });
 
 test("M264 — per-phase evidence and iteration report are NOT consumed when absent (planned rows stay unmet, no false satisfied)", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-no-evidence-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-no-evidence-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = realCommitOf();
 
@@ -822,7 +860,7 @@ test("M264 — per-phase evidence and iteration report are NOT consumed when abs
 // ── M265 mechanism 3: fail-closed on git failure ────────────────────────────────────────────────────
 
 test("M265 — gate blocks empty baseCommit with git-failure (drift check never silently skipped)", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-git-gate-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-git-gate-"));
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
 
   const m = {
@@ -838,7 +876,7 @@ test("M265 — gate blocks empty baseCommit with git-failure (drift check never 
 });
 
 test("M265 — gate blocks git diff failure with git-failure (bad baseCommit)", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-git-gate-badbase-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-git-gate-badbase-"));
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
   const realCommit = realCommitOf();
 
@@ -855,7 +893,7 @@ test("M265 — gate blocks git diff failure with git-failure (bad baseCommit)", 
 });
 
 test("M265 — legitimate empty diff (baseCommit === candidateCommit) is NOT blocked", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-git-gate-legit-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-git-gate-legit-"));
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
   const realCommit = realCommitOf();
 
@@ -876,7 +914,7 @@ test("M265 — legitimate empty diff (baseCommit === candidateCommit) is NOT blo
 // Bug 1 (fail-open): incidental prose ("journal", "live run", "workflow run") must NOT upgrade the
 // evidence class to real-workflow. Only an explicit structured declaration may.
 test("M264 regress — incidental prose does NOT upgrade evidence class to real-workflow (no fail-open)", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-no-failopen-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-no-failopen-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const gateScript = path.join(SCRIPTS, "build-evidence-gate.ts");
   const realCommit = realCommitOf();
@@ -912,6 +950,11 @@ test("M264 regress — incidental prose does NOT upgrade evidence class to real-
   );
   assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
   const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  assert.equal(
+    manifest.acEvidence.length,
+    1,
+    `expected 1 acEvidence row (real-workflow required, unit inferred), got ${manifest.acEvidence.length}: ${JSON.stringify(manifest.acEvidence)}`
+  );
   const row = manifest.acEvidence[0];
   assert.equal(row.evidenceClass, "unit", `incidental prose must not upgrade to real-workflow; got ${row.evidenceClass}`);
   assert.notEqual(row.evidenceClass, "real-workflow", "no fail-open real-workflow credit from prose");
@@ -926,7 +969,7 @@ test("M264 regress — incidental prose does NOT upgrade evidence class to real-
 
 // Bug 1 (positive): an EXPLICIT structured declaration DOES credit real-workflow (attributed claim).
 test("M264 regress — explicit structured real-workflow declaration is credited (attributed)", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-explicit-rw-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-explicit-rw-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = realCommitOf();
 
@@ -956,6 +999,11 @@ test("M264 regress — explicit structured real-workflow declaration is credited
   );
   assert.equal(r.exitCode, 0, `collector must succeed: stdout="${r.stdout}" stderr="${r.stderr}"`);
   const manifest = JSON.parse(fs.readFileSync(output, "utf8"));
+  assert.equal(
+    manifest.acEvidence.length,
+    1,
+    `expected 1 acEvidence row (explicit real-workflow declaration), got ${manifest.acEvidence.length}: ${JSON.stringify(manifest.acEvidence)}`
+  );
   const row = manifest.acEvidence[0];
   assert.equal(row.evidenceClass, "real-workflow", `explicit declaration must credit real-workflow; got ${row.evidenceClass}`);
   fs.rmSync(scratch, { recursive: true, force: true });
@@ -964,7 +1012,7 @@ test("M264 regress — explicit structured real-workflow declaration is credited
 // Bug 2 (fail-open): a COMPOSITE milestone must NOT fall back to the width-1 iteration report when
 // per-phase evidence is absent — per-phase attribution would be silently bypassed.
 test("M264 regress — composite with no per-phase evidence does NOT fall back to iteration report", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-composite-nofb-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-composite-nofb-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = realCommitOf();
 
@@ -1007,7 +1055,7 @@ test("M264 regress — composite with no per-phase evidence does NOT fall back t
 // Bug 3 (mis-attribution): per-phase evidence WITHOUT a task→phase map (empty composite-manifest
 // envelope) must NOT be mis-credited to taskIds[0] — all planned rows stay unmatched (fail-closed).
 test("M264 regress — per-phase evidence without phases is NOT mis-credited to taskIds[0]", async (t) => {
-  const scratch = fs.mkdtempSync(path.join(REPO_ROOT, "tmp", "be-nophases-"));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "be-nophases-"));
   const collectorPath = path.join(SCRIPTS, "build-evidence-collector.ts");
   const realCommit = realCommitOf();
 
