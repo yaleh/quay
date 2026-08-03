@@ -468,7 +468,7 @@ test("G — removing .halt resets the staleness baseline: no OVERDUE/REPO-STALL 
       // reproduce the coordinator's incident: the pane redraws (→ RESUMED) at the same moment .halt is removed.
       startBusyLoop(p.env, p.session);
       fs.rmSync(path.join(gitRoot, ".halt")); // un-halt
-      const resumed = await waitForOutput(mon, /SESSION-RESUMED gate/, 8000);
+      const resumed = await waitForOutput(mon, /SESSION-RESUMED gate/, 25000);
       assert.ok(resumed, `RESUMED must fire on the busy transition:\n${mon.output()}`);
       // baseline reset ⇒ stale = now - max(hb, unhalt_ts) ≈ 0, so OVERDUE cannot fire for OVERDUE_MIN after un-halt.
       assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
@@ -702,7 +702,7 @@ test("noise gate — an idle transition with an OLD tick log IS reported (idle b
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
       startBusyLoop(p.env, p.session);
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 8000), `RESUMED must fire on busy:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 25000), `RESUMED must fire on busy:\n${mon.output()}`);
       stopBusyLoop(p.env, p.session);
       const stable = await waitForPaneStable(p.env, p.session, 15000);
       assert.ok(stable !== null, "pane must return to a stable idle state");
@@ -726,7 +726,7 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
       startBusyLoop(p.env, p.session);
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 8000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 25000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
       stopBusyLoop(p.env, p.session);
       const stable = await waitForPaneStable(p.env, p.session, 15000);
       assert.ok(stable !== null, "pane must return to a stable idle state");
@@ -844,7 +844,7 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
       await sleep(3000); // idle baseline: bash prompt, no esc flag
       tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-      const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 8000);
+      const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 25000);
       assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
       const out = mon.output();
       assert.ok(/成因：esc to interrupt 标志出现/.test(out),
@@ -993,7 +993,11 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
       await sleep(3000); // idle baseline
       tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 8000), `RESUMED must fire:\n${mon.output()}`);
+      // Window is generous (25000ms, not 8000ms): under the full suite's ~4× oversubscription the
+      // monitor's per-round tmux capture-pane + transcript reads stretch several-fold (observed
+      // >11s with no event in suite7/suite12), and the mechanism is correct — it fires at ~5s in
+      // isolation and ~7.7s under load for the sibling test. The 8s window was contention-marginal.
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
       assert.ok(/成因：/.test(out) && !/成因：\)/.test(out),
         `RESUMED must carry a non-empty cause (AC6):\n${out}`);
