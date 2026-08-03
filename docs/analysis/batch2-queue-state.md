@@ -1546,3 +1546,14 @@ jsonl；不能用「有提交/有 tick 日志」代替（archguard 两者都有�
 判别法：有活动信号但遥测空 = 没接上；全部信号没有才是没跑。已转达 cold8 agent（阶段二并入）。
 
 **待外层裁断**：①cold8 继续阶段二？②liveness 阶段二排序（vs hashes-the-token-counter 姊妹任务）。
+
+### 补派（2026-08-03 18:2xZ）：acs-behind + live-unwired（在飞 1→3）
+
+外层说明：过去槽位空着是它没派满（checkTouchesPair 实测六个待派任务全 DISJOINT），非闸卡。闸口 new=0。
+1. **acs-behind**（`/tmp/quay-wt-acs`，agent a94a8345...，fm-...-334tt3）：判据「done 时若有未勾 AC，
+   必须存在指名承载的后继任务（## Carries 机读），未承载即拦」——不是「AC 全勾才能 done」（会逼勾选造假）。
+   双向负控制；AC8 用 session-liveness 与其 stage-2 后继回填真样本。
+2. **live-unwired**（`/tmp/quay-wt-live`，agent a891ea91...，fm-...-r72g6s）：/live 区分「死循环」vs
+   「在跑没接遥测」——有活动信号+遥测空=没接上；全部信号无=没跑。两态两文案+判别说明。不用散文提醒。
+
+**在飞 3/3**：cold8 阶段一（停报待外层批准阶段二）+ acs-behind + live-unwired。
