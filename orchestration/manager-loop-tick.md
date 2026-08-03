@@ -183,7 +183,7 @@ git log -1 --format=%ct -- plugin/scripts/session-liveness.sh     # 该文件最
 | 事件 | 处置 |
 |---|---|
 | `SESSION-RESUMED` | **不查。** 会话恢复活动是它在正常工作，不是异常 |
-| `SESSION-IDLE` | **不查**，除非同一会话的 `IDLE` 连续出现且**心跳同时停更** |
+| `SESSION-IDLE` | **不查**，除非同一会话的 `IDLE` 连续出现、心跳停更、**且 `git log --since` 也为空**（见下方「心跳的定义有偏差」） |
 | `SESSION-GONE` / `HEARTBEAT-OVERDUE` / `NO-COMMIT` | **查。** 这三类才是「本该动而没动」 |
 
 **判据不是事件本身，是「有没有出现本该动而没动的东西」。**
