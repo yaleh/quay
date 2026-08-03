@@ -27,8 +27,8 @@ import {
   mapEvidenceToTasks,
   type PhaseEvidence,
   type TaskEvidenceReport,
-} from "./composite-build.ts";
-import type { CompositePhase } from "./composite-contracts.ts";
+  type CompositePhase,
+} from "./build-evidence-manifest.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 

@@ -750,10 +750,14 @@ export function main(argv) {
   } else {
     const repoRoot = args.workspaceRoot ? path.resolve(args.workspaceRoot) : resolveRepoRoot();
     filePaths = [
-      path.join(repoRoot, ".claude/workflows/execute-milestone.js"),
-      path.join(repoRoot, "plugin/workflows/execute-milestone.js"),
-      path.join(repoRoot, ".claude/workflows/prepare-milestone.js"),
-      path.join(repoRoot, "plugin/workflows/prepare-milestone.js"),
+      // gap-retire-the-prepare-execute-pipeline-cluster: prepare-milestone.js / execute-milestone.js
+      // were retired with the classic milestone loop (ADR-022). The surviving checked-in workflows
+      // are drain-directives, run-routines (with plugin mirrors) and select-preflight (.claude-only).
+      path.join(repoRoot, ".claude/workflows/drain-directives.js"),
+      path.join(repoRoot, "plugin/workflows/drain-directives.js"),
+      path.join(repoRoot, ".claude/workflows/run-routines.js"),
+      path.join(repoRoot, "plugin/workflows/run-routines.js"),
+      path.join(repoRoot, ".claude/workflows/select-preflight.js"),
     ];
   }
 

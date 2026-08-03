@@ -800,9 +800,14 @@ describe("preflightInvalidPlanCommand", () => {
     assert.equal(verdict.disposition, "reviewer-required");
   });
 
-  test("preflightInvalidPlanCommand reuses milestone-preparation-check.ts's parsePlanStages/validatePlanStructure verbatim (WIRING-CLAIM 7, grep-checkable)", () => {
+  test("preflightInvalidPlanCommand parses stages via the inlined parsePlanStages/validatePlanStructure (retired from milestone-preparation-check.ts at gap-retire-the-prepare-execute-pipeline-cluster)", () => {
+    // milestone-preparation-check.ts was retired with the prepare/execute pipeline (ADR-022);
+    // parsePlanStages/validatePlanStructure are now single-sourced HERE in prepare-admission-check.ts
+    // (this file's --preflight-plan detector is their only surviving consumer). The grep checks they
+    // are locally defined rather than silently dropped.
     const src = fs.readFileSync(CLI, "utf8");
-    assert.match(src, /import\s*\{[^}]*parsePlanStages[^}]*validatePlanStructure[^}]*\}\s*from\s*"\.\/milestone-preparation-check\.ts"/);
+    assert.match(src, /export\s+function\s+parsePlanStages\s*\(/);
+    assert.match(src, /export\s+function\s+validatePlanStructure\s*\(/);
   });
 });
 

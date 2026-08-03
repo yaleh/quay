@@ -40,10 +40,14 @@ const FIX = path.resolve(REPO_ROOT, "experiments", "quay-perpetual-stream", "tes
 const STALE_FIX = path.join(FIX, "workflow-metadata-conformance-stale.js");
 const CLEAN_FIX = path.join(FIX, "workflow-metadata-conformance-clean.js");
 
-const REAL_EXECUTE = path.resolve(REPO_ROOT, ".claude", "workflows", "execute-milestone.js");
-const REAL_PREPARE = path.resolve(REPO_ROOT, ".claude", "workflows", "prepare-milestone.js");
-const REAL_EXECUTE_MIRROR = path.resolve(REPO_ROOT, "plugin", "workflows", "execute-milestone.js");
-const REAL_PREPARE_MIRROR = path.resolve(REPO_ROOT, "plugin", "workflows", "prepare-milestone.js");
+// Surviving workflows after the prepare/execute pipeline retirement (ADR-022 /
+// gap-retire-the-prepare-execute-pipeline-cluster): drain-directives + run-routines have plugin
+// mirrors, select-preflight is .claude-only. prepare-milestone.js / execute-milestone.js are gone.
+const REAL_DRAIN = path.resolve(REPO_ROOT, ".claude", "workflows", "drain-directives.js");
+const REAL_DRAIN_MIRROR = path.resolve(REPO_ROOT, "plugin", "workflows", "drain-directives.js");
+const REAL_ROUTINES = path.resolve(REPO_ROOT, ".claude", "workflows", "run-routines.js");
+const REAL_ROUTINES_MIRROR = path.resolve(REPO_ROOT, "plugin", "workflows", "run-routines.js");
+const REAL_SELECT = path.resolve(REPO_ROOT, ".claude", "workflows", "select-preflight.js");
 
 function runScript(args) {
   const result = spawnSync("node", [SCRIPT, ...args], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
@@ -111,98 +115,39 @@ test("C3: --json output carries failures[]/warnings[] and only failures drive ex
   assert.equal(json.ok, json.failures.length === 0);
 
   // WARN-only findings must NOT drive exit 1: a source with warnings but zero failures exits 0.
-  const warnOnly = runScript(["--json", "--files", REAL_PREPARE]);
-  // prepare-milestone.js currently produces WARN-level findings but no FAIL-level findings.
+  // drain-directives.js is the surviving WARN-only workflow (amber return-outcomes, zero FAILs).
+  const warnOnly = runScript(["--json", "--files", REAL_DRAIN]);
   const warnJson = parseJsonResult(warnOnly);
-  assert.ok(warnJson.warnings.length >= 1, `expected prepare-milestone.js to carry warnings: ${JSON.stringify(warnJson.warnings)}`);
-  assert.equal(warnJson.failures.length, 0, `prepare-milestone.js must have zero FAILs (WARN-only): ${JSON.stringify(warnJson.failures)}`);
+  assert.ok(warnJson.warnings.length >= 1, `expected drain-directives.js to carry warnings: ${JSON.stringify(warnJson.warnings)}`);
+  assert.equal(warnJson.failures.length, 0, `drain-directives.js must have zero FAILs (WARN-only): ${JSON.stringify(warnJson.failures)}`);
   assert.equal(warnOnly.status, 0, `WARN-only run must exit 0, got ${warnOnly.status}`);
 });
 
-// ── AC4/AC5/AC9/AC6/AC7/AC8: real-files GREEN baseline + parseability regression ─────────────────
-// The RED baseline (Build-Evidence body-only phase, stale 'building' claim, unclaimed
-// 'revision-needed') was CLOSED on 2026-08-02 (dev-session-handoff-2026-08-02b item 1): Build-Evidence
-// added to meta.phases, 'building' removed from the description, 'revision-needed' claimed. These
-// assertions pin the GREEN baseline — a FAIL here means the drift REGRESSED, which is a real bug.
-test("AC4/AC5: real execute-milestone.js is parseable and produces ZERO phase-set/return-outcome FAILs (GREEN baseline)", async () => {
+// ── AC4/AC5/AC9: surviving real workflows GREEN baseline + parseability regression ────────────────
+// prepare-milestone.js / execute-milestone.js were retired (ADR-022); the surviving checked-in
+// workflows are drain-directives.js + run-routines.js (with plugin mirrors) and select-preflight.js
+// (.claude-only). These assertions pin the GREEN baseline for what the DoD clause now actually checks.
+test("AC4/AC5: the surviving real workflows are parseable and produce ZERO FAILs (GREEN baseline)", async () => {
   const m = await loadModule();
-  const src = fs.readFileSync(REAL_EXECUTE, "utf8");
+  for (const file of [REAL_DRAIN, REAL_ROUTINES, REAL_SELECT]) {
+    const src = fs.readFileSync(file, "utf8");
+    const meta = m.extractMeta(src);
+    assert.equal(meta.ok, true, `extractMeta failed on ${file}: ${meta.error}`);
+    assert.equal(m.extractPhases(src).uniqueLabels.length >= 1, true, `extractPhases empty on ${file}`);
+    assert.equal(typeof m.extractGateDispatch(src).count, "number", `extractGateDispatch failed on ${file}`);
 
-  const meta = m.extractMeta(src);
-  assert.equal(meta.ok, true, `extractMeta failed on real execute-milestone.js: ${meta.error}`);
-  assert.equal(meta.name, "execute-milestone");
-  assert.equal(meta.phases.length, 8, `execute-milestone meta.phases must declare 8 phases (incl. Build-Evidence), got ${meta.phases.length}`);
-
-  const phases = m.extractPhases(src);
-  assert.deepEqual(phases.uniqueLabels, ["Verify", "Prepared", "Build", "Build-Evidence", "Audit", "Gate", "Reconcile", "Land"],
-    "extractPhases must find all 8 body phase() call sites including Build-Evidence");
-  assert.ok(phases.uniqueLabels.includes("Build-Evidence"), "body must call Build-Evidence");
-
-  const outcomes = m.extractReturnOutcomes(src);
-  assert.ok(outcomes.outcomeValues.includes("done"), "body returns 'done'");
-  assert.ok(outcomes.outcomeValues.includes("needs-human"), "body returns 'needs-human'");
-  assert.ok(outcomes.outcomeValues.includes("revision-needed"), "body returns 'revision-needed'");
-  assert.ok(!outcomes.outcomeValues.includes("building"), "body NEVER returns 'building'");
-
-  const res = m.checkFile(REAL_EXECUTE, src);
-  // GREEN baseline: the three drift classes are closed. A FAIL here is a regression.
-  assert.equal(res.failures.filter((f) => f.check === "phase-set").length, 0,
-    `no phase-set FAIL expected (Build-Evidence now in meta.phases): ${JSON.stringify(res.failures)}`);
-  assert.equal(res.failures.filter((f) => f.check === "return-outcomes").length, 0,
-    `no return-outcomes FAIL expected ('building' removed, 'revision-needed' claimed): ${JSON.stringify(res.failures)}`);
-  // WARN-level metadata omissions (worktree not mentioned) remain — out of A4's scope, advisory.
-  assert.ok(res.warnings.some((w) => w.check === "worktree"),
-    "unmentioned worktree mechanism is a WARN (metadata omission, not a false claim)");
+    const res = m.checkFile(file, src);
+    assert.equal(res.failures.length, 0, `${file} must have zero FAILs (GREEN baseline): ${JSON.stringify(res.failures)}`);
+  }
 });
 
-test("AC4: real prepare-milestone.js is parseable; re-entrant phases reported as WARN (drift class #3/#9)", async () => {
+test("AC9: mirror byte-identity on the surviving mirrored workflows (both pairs identical → no mirror FAIL)", async () => {
   const m = await loadModule();
-  const src = fs.readFileSync(REAL_PREPARE, "utf8");
-
-  const meta = m.extractMeta(src);
-  assert.equal(meta.ok, true, `extractMeta failed on real prepare-milestone.js: ${meta.error}`);
-  assert.equal(meta.name, "prepare-milestone");
-  assert.equal(meta.phases.length, 8, `prepare-milestone meta.phases must declare 8 phases, got ${meta.phases.length}`);
-
-  const phases = m.extractPhases(src);
-  assert.deepEqual(
-    [...phases.uniqueLabels].sort(),
-    ["Admission", "Adjudicate", "PlanAuthor", "PlanCheck", "Preflight", "ProposalAuthors", "ProposalReview", "Receipt"].sort(),
-    "prepare-milestone body must have exactly the 8 unique phase labels meta.phases declares"
-  );
-  assert.equal(phases.callCounts.get("Preflight"), 2, "Preflight must be re-entrant (2 call sites)");
-  assert.equal(phases.callCounts.get("ProposalAuthors"), 2, "ProposalAuthors must be re-entrant (resume-skip + cold)");
-  assert.equal(phases.callCounts.get("Adjudicate"), 2, "Adjudicate must be re-entrant (resume-skip + cold)");
-
-  const res = m.checkFile(REAL_PREPARE, src);
-  assert.equal(res.failures.length, 0, `prepare-milestone.js must have zero FAILs currently: ${JSON.stringify(res.failures)}`);
-  const reentrant = res.warnings.filter((w) => w.check === "reentrant-phase");
-  assert.ok(reentrant.some((w) => /'Preflight'/.test(w.detail)), "re-entrant Preflight must be a WARN");
-  assert.ok(reentrant.some((w) => /'ProposalAuthors'/.test(w.detail)), "re-entrant ProposalAuthors must be a WARN");
-});
-
-test("AC9: mirror byte-identity check on the 4 real files (both pairs identical → no mirror FAIL)", async () => {
-  const m = await loadModule();
-  const result = m.checkAll([REAL_EXECUTE, REAL_EXECUTE_MIRROR, REAL_PREPARE, REAL_PREPARE_MIRROR]);
+  const result = m.checkAll([REAL_DRAIN, REAL_DRAIN_MIRROR, REAL_ROUTINES, REAL_ROUTINES_MIRROR]);
   assert.equal(result.mirrored.length, 2, "two mirror pairs expected");
   assert.ok(result.mirrored.every((mm) => mm.identical), `mirror pairs must be identical: ${JSON.stringify(result.mirrored)}`);
   assert.ok(!result.failures.some((f) => f.check === "mirror-identity"), "no mirror-identity FAIL expected on the live tree");
-  // GREEN baseline (RED drift closed 2026-08-02): checkAll is fully ok.
   assert.equal(result.ok, true, `checkAll must be ok (GREEN baseline): ${JSON.stringify(result.failures)}`);
-});
-
-test("real-sourcefiles-were-parseable regression: both real files parse across every extraction function", async () => {
-  const m = await loadModule();
-  for (const file of [REAL_EXECUTE, REAL_PREPARE]) {
-    const src = fs.readFileSync(file, "utf8");
-    assert.equal(m.extractMeta(src).ok, true, `extractMeta failed on ${file}`);
-    assert.ok(m.extractPhases(src).uniqueLabels.length >= 1, `extractPhases empty on ${file}`);
-    assert.ok(m.extractAgents(src).callCount >= 1, `extractAgents empty on ${file}`);
-    assert.ok(m.extractNodeInvocations(src).totalCount >= 1, `extractNodeInvocations empty on ${file}`);
-    assert.ok(Array.isArray(m.extractReturnOutcomes(src).outcomeValues), `extractReturnOutcomes failed on ${file}`);
-    assert.ok(m.extractWorktreeRefs(src).present, `extractWorktreeRefs failed on ${file}`);
-    assert.equal(typeof m.extractGateDispatch(src).count, "number", `extractGateDispatch failed on ${file}`);
-  }
 });
 
 // ── AC15: extraction-function API (pure functions, independently exercised) ──────────────────────
@@ -356,13 +301,14 @@ test("C4: stale/clean fixture filenames never appear in .claude/workflows/", () 
 });
 
 // ── AC3/C6: DoD-gate shell-out contract (the clause runs the script with --json from repo root) ──
-test("C6: the script's default invocation (no --files) resolves the 4 real workflow files from the workspace root", () => {
-  // The DoD clause shells out with no --files and cwd = repo root; the checker must find the 4
-  // real files and report the GREEN baseline (exit 0) — proving the clause's child process is not
-  // vacuously green (it actually reads and checks the files).
+test("C6: the script's default invocation (no --files) resolves the 5 surviving workflow files from the workspace root", () => {
+  // The DoD clause shells out with no --files and cwd = repo root; the checker must find the 5
+  // surviving workflow files (drain-directives + run-routines pairs + select-preflight) and report
+  // the GREEN baseline (exit 0) — proving the clause's child process is not vacuously green (it
+  // actually reads and checks the files).
   const r = spawnSync("node", [SCRIPT, "--json"], { cwd: REPO_ROOT, encoding: "utf8" });
   assert.equal(r.status, 0, `default invocation must exit 0 on the GREEN baseline, got ${r.status}`);
   const json = JSON.parse(r.stdout);
-  assert.equal(json.files.length, 4, `default invocation must check exactly 4 files, got ${json.files.length}`);
+  assert.equal(json.files.length, 5, `default invocation must check exactly 5 files, got ${json.files.length}`);
   assert.equal(json.failures.length, 0, `default invocation must surface ZERO FAILs (GREEN baseline), got ${json.failures.length}`);
 });

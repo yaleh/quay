@@ -67,8 +67,9 @@ Behavior: idempotent (skips identical files), conflict-aware (reports but does n
 ### Workflows (`plugin/workflows/`)
 
 - `drain-directives.js` — drains pending directives (Schedule → Dispose → Verify)
-- `execute-milestone.js` — full milestone pipeline (Verify → Build → Audit → Gate → Land)
 - `run-routines.js` — standing routine discovery track
+  (execute-milestone.js and prepare-milestone.js were retired with the classic milestone loop — ADR-022 /
+  gap-retire-the-prepare-execute-pipeline-cluster)
 
 ### Gate scripts (`plugin/gate-scripts/`)
 

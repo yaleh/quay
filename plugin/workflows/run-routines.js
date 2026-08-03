@@ -2,7 +2,7 @@ export const meta = {
   name: 'run-routines',
   description: 'Evaluate the standing routine track from .quay/config.yml loop: section — delegates to the quay:run-routines skill (plugin/skills/routines/SKILL.md). Backward-compat thin wrapper (M140, 2026-07-25).',
   phases: [
-    { title: 'Skill', detail: 'Invoke quay:run-routines plugin skill (Schedule → Dispatch → Gate → Verify)' },
+    { title: 'Routines', detail: 'Invoke quay:run-routines plugin skill (Schedule → Dispatch → Gate → Verify)' },
   ],
 }
 

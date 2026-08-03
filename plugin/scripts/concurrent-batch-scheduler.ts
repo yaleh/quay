@@ -22,10 +22,19 @@ import {
   checkTouchesPair,
   findRepoRoot,
 } from "./touches-orthogonality-check.ts";
-// DIR-117 iteration-2 item 4: reuse (never reinvent) the SAME touch-set-expansion arithmetic
-// milestone-preparation-check.ts's own `Prepared` gate uses to detect a checked Plan outgrowing
-// its declared '## Touches' — single-sourced per this repo's own discipline.
-import { computeTouchesExpansion } from "./milestone-preparation-check.ts";
+// DIR-117 iteration-2 item 4: the SAME touch-set-expansion arithmetic that
+// milestone-preparation-check.ts's `Prepared` gate used to detect a checked Plan outgrowing its
+// declared '## Touches'. milestone-preparation-check.ts is retired with the prepare/execute
+// pipeline (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster); this function is the one
+// piece the batch scheduler still needs, so it is single-sourced HERE (was: imported from
+// ./milestone-preparation-check.ts).
+function computeTouchesExpansion(receiptTouches, declaredTouches) {
+  if (!Array.isArray(declaredTouches) || !Array.isArray(receiptTouches) || receiptTouches.length === 0) {
+    return { expanded: [] };
+  }
+  const expanded = receiptTouches.filter((t) => !declaredTouches.includes(t));
+  return { expanded };
+}
 
 // Shared exp5 state — concurrent writes here would conflict, so any candidate declaring it CANNOT be
 // batched (its writes must be serialized at fan-in ABSORB). Repo-relative concrete paths.

@@ -1,1 +1,0 @@
-../../../plugin/test/composite-manifest-synthesis.test.mjs

@@ -445,6 +445,63 @@ export function selftest(): boolean {
   return allPassed;
 }
 
+// ── Composite evidence mapping (extracted from the retired composite-build.ts / composite-contracts.ts
+// at gap-retire-the-prepare-execute-pipeline-cluster) — build-evidence-collector.ts's ONLY surviving
+// consumer of the composite phase model. The composite pipeline is retired (ADR-022); these three
+// types + the pure mapping function are the single piece of it the build-evidence machinery still needs.
+// Single-sourced HERE so build-evidence-collector.ts can keep mapping per-phase evidence back to tasks
+// without importing the retired composite modules. ────────────────────────────────────────────────
+
+export interface CompositePhase {
+  id: string;
+  /** Tasks whose work this phase covers. length > 1 = a shared/overlapping phase. */
+  taskIds: string[];
+  /** Phase ids that must complete before this phase may start. */
+  requires: string[];
+  /** Audit shard ids that cover this phase. */
+  auditShardIds: string[];
+  /** REQUIRED when taskIds.length > 1 — the integration invariant this shared phase upholds. */
+  integrationInvariant?: string;
+}
+
+export interface PhaseEvidence {
+  phaseId: string;
+  files: string[];
+  commits: string[];
+  tests: string[];
+}
+
+export interface TaskEvidenceReport {
+  taskId: string;
+  files: string[];
+  commits: string[];
+  tests: string[];
+  phaseIds: string[];
+}
+
+export function mapEvidenceToTasks(phases: CompositePhase[], evidence: PhaseEvidence[]): TaskEvidenceReport[] {
+  const byTask = new Map<string, TaskEvidenceReport>();
+  const evidenceByPhase = new Map(evidence.map((e) => [e.phaseId, e]));
+  for (const p of phases) {
+    const ev = evidenceByPhase.get(p.id);
+    if (!ev) continue;
+    for (const taskId of p.taskIds) {
+      if (!byTask.has(taskId)) byTask.set(taskId, { taskId, files: [], commits: [], tests: [], phaseIds: [] });
+      const rec = byTask.get(taskId)!;
+      rec.files.push(...ev.files);
+      rec.commits.push(...ev.commits);
+      rec.tests.push(...ev.tests);
+      rec.phaseIds.push(p.id);
+    }
+  }
+  for (const rec of byTask.values()) {
+    rec.files = [...new Set(rec.files)];
+    rec.commits = [...new Set(rec.commits)];
+    rec.tests = [...new Set(rec.tests)];
+  }
+  return [...byTask.values()];
+}
+
 // ── CLI entry ───────────────────────────────────────────────────────────────────────────────────────
 
 if (process.argv[1] != null && process.argv[1].endsWith("build-evidence-manifest.ts")) {
