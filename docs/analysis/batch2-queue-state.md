@@ -546,6 +546,16 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 - **retire 已 rebase**（2 commits 到 master 顶，干净）；**全量在跑**（`binlxixpl`，worktree 内，gate GO）
 - 全量绿 → merge retire → 关 retire（`--task-end` 0b3l2x）→ **首次负净行数落地，图真正收缩**
 
+### Tick 更新（05T03:43Z）：retire agent 完成最终报告；worktree 全量在跑
+
+- **retire agent 最终报告**：80 文件 +523/-24195（净 -23700）。导出保留字节级（computeTouchesExpansion →
+  concurrent-batch-scheduler、parsePlanStages/validatePlanStructure → prepare-admission-check、
+  mapEvidenceToTasks → build-evidence-manifest）。**保留项**：workflow-metadata-conformance.mjs（it0-dod-check
+  clause-14 存活调用——72h 重估偏离，任务体已记录）、build-evidence-manifest.ts（M264 机制）。
+  milestone-worktree.ts 在 reclaim 完成后删除（协调者边界解除）。AC0-3/5-8 done，AC4 由 fan-in 裁定
+- **worktree 全量在跑**（`binlxixpl`，155 files selected = 173-18 删除的测试，~7min）
+- 全量绿 → merge retire → 关 retire（`--task-end` 0b3l2x）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
