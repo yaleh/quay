@@ -92,23 +92,41 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 政策写进 `scripts/test.sh` 头注释与 `CLAUDE.md` 的测试段：新测试用 `node:test`
-- [ ] AC2: 豁免名单是一个**数据文件**（不是散在代码里的条件），当前 34 个文件逐个列出
-- [ ] AC3: 检查断言 glob 内每个文件要么 `import node:test`，要么在名单里
-- [ ] AC4: **名单只能变短** —— 有文件被加入名单时检查失败；用一个临时新文件真实演练这条
-- [ ] AC5: 新文件必须带 `// @test-group` 声明；缺声明的**新**文件失败（存量缺省仍为 `engine`）
-- [ ] AC6: 检查接进 `scripts/test.sh`，与其它 engine 组检查同样运行
-- [ ] AC7: 三层选择原则（契约→端到端 / 分支密集纯函数→import 单元测试 / 内部细节→不测）写成文字规则，
+- [x] AC1: 政策写进 `scripts/test.sh` 头注释与 `CLAUDE.md` 的测试段：新测试用 `node:test`
+- [x] AC2: 豁免名单是一个**数据文件**（不是散在代码里的条件），当前 34 个文件逐个列出
+- [x] AC3: 检查断言 glob 内每个文件要么 `import node:test`，要么在名单里
+- [x] AC4: **名单只能变短** —— 有文件被加入名单时检查失败；用一个临时新文件真实演练这条
+- [x] AC5: 新文件必须带 `// @test-group` 声明；缺声明的**新**文件失败（存量缺省仍为 `engine`）
+- [x] AC6: 检查接进 `scripts/test.sh`，与其它 engine 组检查同样运行
+- [x] AC7: 三层选择原则（契约→端到端 / 分支密集纯函数→import 单元测试 / 内部细节→不测）写成文字规则，
       **不设数值阈值**，并注明阈值待 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 的数据
-- [ ] AC7b: 明确记录**不以覆盖率为目标**及其三条理由；若将来要看覆盖率，它是参考不是目标
-- [ ] AC8: 测试带 `// @test-group engine` 声明
+- [x] AC7b: 明确记录**不以覆盖率为目标**及其三条理由；若将来要看覆盖率，它是参考不是目标
+- [x] AC8: 测试带 `// @test-group engine` 声明
 
 ## Definition of Done
 
-- [ ] 名单当前长度记在任务体（34），作为棘轮的起点
-- [ ] AC4 的真实演练有记录：加一个文件到名单 → 检查失败 → 移除 → 通过
-- [ ] `scripts/test.sh` 绿
-- [ ] 任务体明写：**本任务不迁移任何存量文件，也不提速**
+- [x] 名单当前长度记在任务体（34），作为棘轮的起点
+- [x] AC4 的真实演练有记录：加一个文件到名单 → 检查失败 → 移除 → 通过
+- [x] `scripts/test.sh` 绿（`scripts/test.sh --for-task gap-no-test-framework-policy-for-new-tests` 绿，
+      静态检查 + 13 个策略测试全过）
+- [x] 任务体明写：**本任务不迁移任何存量文件，也不提速**
+
+## AC4 真实演练记录（2026-08-03，worktree `task/test-framework-policy`，数据文件已提交为基线）
+
+棘轮是 git-HEAD 基线比较：数据文件的**已提交形态**是基线，工作树是当前。演练如下：
+
+1. 提交基线：`plugin/test-framework-policy-exemptions.txt` 含 34 项 → `git commit`（HEAD 即基线）。
+2. 加文件到名单：新建临时手写 harness 文件 `packages/quay/test/zz-ac4-rehearsal.test.mjs`，
+   并把该路径 `>>` 到名单（35 项）。
+3. 检查失败：`test-framework-policy-check` 退出码 **1**，
+   报 `AC4: packages/quay/test/zz-ac4-rehearsal.test.mjs was ADDED to the exemption list —
+   the list can only get SHORTER`（棘轮生效；同一文件已在名单里，AC3 静默，只有 AC4 响）。
+4. 移除：`grep -v` 删掉该行，`rm` 临时文件（恢复 34 项）。
+5. 通过：再次运行退出码 **0**，`PASS ... 34 exemption(s)`。
+
+同一场景还有一个**自动化**演练被固化成测试（`plugin/test/test-framework-policy-check.test.mjs`
+的 "CLI AC4 rehearsal" 用例）：在 scratch fixture 里用 `--baseline-file`/`--baseline-files`
+跑 CLI，加文件到名单 → exit 1（AC4）→ 移除 → exit 0。两者都证明：**名单只能变短，加入即失败**。
 
 ## Touches
 
