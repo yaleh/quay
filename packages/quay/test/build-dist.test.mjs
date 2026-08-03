@@ -38,6 +38,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { buildDist } from "../scripts/build-dist.mjs";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
@@ -46,7 +47,7 @@ const scriptSh = path.join(pkgDir, "scripts", "build-dist.sh");
 // Build target inside a temp tree whose depth mirrors packages/quay/dist so the
 // bundle's own relative reads (version.ts, registry.ts REPO_ROOT) stay in temp.
 function tempTree(tag) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m120-builddist-${tag}-`));
+  const root = makeTmpDir(`quay-m120-builddist-${tag}-`);
   const pkg = path.join(root, "l1", "l2", "pkg");
   fs.mkdirSync(path.join(pkg, "dist"), { recursive: true });
   fs.copyFileSync(path.join(pkgDir, "package.json"), path.join(pkg, "package.json"));
@@ -103,7 +104,7 @@ test("(d) shell wrapper: `bash scripts/build-dist.sh` exits 0 and writes the con
   // packages/quay/dist/quay.js that M136's sync-vendor --check reads concurrently
   // in the same full-suite run (gap-sync-vendor-drift-mislabelled-as-task-schema,
   // round 3: eliminate the interference source).
-  const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m120-builddist-sh-"));
+  const outRoot = makeTmpDir("quay-m120-builddist-sh-");
   try {
     const out = path.join(outRoot, "dist", "quay.js");
     fs.mkdirSync(path.join(outRoot, "dist"), { recursive: true });

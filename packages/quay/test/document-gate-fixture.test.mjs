@@ -17,6 +17,7 @@ import os from "node:os";
 
 import { gateRegistry, registerDocumentGate } from "../src/gate/registry.ts";
 import { createDocumentStore } from "../src/document-store.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -28,7 +29,7 @@ const VIOLATING_FIXTURE = path.join(
 );
 
 function loadFixtureIntoTmpDocsDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-doc-gate-fixture-"));
+  const dir = makeTmpDir("quay-doc-gate-fixture-");
   fs.copyFileSync(VIOLATING_FIXTURE, path.join(dir, "DOC-999-violating.md"));
   return dir;
 }
@@ -66,7 +67,7 @@ test("D1 A(Stage5): 'quay gate <fixture-task> --gate doc-quay-directive-skill' e
   const fixtureId = "T-doc-gate-e2e-fixture";
   const realTasksDir = path.join(REPO_ROOT, "tasks");
   const fixturePath = path.join(realTasksDir, `${fixtureId}.md`);
-  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-doc-cli-e2e-log-"));
+  const logDir = makeTmpDir("quay-doc-cli-e2e-log-");
   const logFile = path.join(logDir, "gate-events.jsonl");
   fs.writeFileSync(
     fixturePath,

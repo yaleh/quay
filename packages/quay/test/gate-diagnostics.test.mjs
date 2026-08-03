@@ -21,13 +21,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadWorkspaceGates } from "../src/gate/config/loader.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function tmpWs(tag) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), `quay-gate-diag-${tag}-`));
+  const ws = makeTmpDir(`quay-gate-diag-${tag}-`);
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   return ws;
 }
@@ -306,8 +307,8 @@ const nativeBin = path.join(__diagDirname, "..", "..", "quay-native", "bin", "qu
 const nativeProviderDir = path.dirname(nativeBin);
 
 function makeCliWorkspace(tag, gatesBlock) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-diagc-" + tag + "-tasks-"));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-diagc-" + tag + "-ws-"));
+  const tasksDir = makeTmpDir("quay-diagc-" + tag + "-tasks-");
+  const workspaceRoot = makeTmpDir("quay-diagc-" + tag + "-ws-");
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   const lines = [
     "providers:",
@@ -488,8 +489,8 @@ test("C-T1f [AC1]: gate --list stdout byte-identical whether or not diagnostics 
 
 // Null gates
 test("C-T4h: null gates: value emits zero diagnostics", function() {
-  var tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-diagc-t4h-tasks-"));
-  var ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-diagc-t4h-ws-"));
+  var tasksDir = makeTmpDir("quay-diagc-t4h-tasks-");
+  var ws = makeTmpDir("quay-diagc-t4h-ws-");
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\ngates: null\n");
   var r = runCliQuay(["gate", "--list"], ws);
@@ -499,8 +500,8 @@ test("C-T4h: null gates: value emits zero diagnostics", function() {
 
 // Array gates — silent (F2)
 test("C-T4i: array gates: value emits zero false diagnostics (F2)", function() {
-  var tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-diagc-t4i-tasks-"));
-  var ws = fs.mkdtempSync(path.join(os.tmpdir(), "quay-diagc-t4i-ws-"));
+  var tasksDir = makeTmpDir("quay-diagc-t4i-tasks-");
+  var ws = makeTmpDir("quay-diagc-t4i-ws-");
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\ngates:\n  - name: inline-array\n");
   var r = runCliQuay(["gate", "--list"], ws);

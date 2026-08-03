@@ -19,12 +19,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bin = path.join(__dirname, "..", "bin", "quay-backlog.ts");
 
 function makeFixtureBoard() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-backlog-mcp-fixture-"));
+  const dir = makeTmpDir("quay-backlog-mcp-fixture-");
   fs.writeFileSync(
     path.join(dir, "task-1.md"),
     ["---", "id: TASK-1", "title: MCP fixture task", "status: Done", "labels:", "  - x", "---", "", "## Description", "Fixture body."].join("\n"),

@@ -28,6 +28,7 @@ import os from "node:os";
 
 import { isActionable, scanActionable, runOnce, runLoop } from "../src/gate/driver.ts";
 import { queryGateEvents } from "../src/gate/gate-event-store.ts";
+import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -70,13 +71,15 @@ function stubClient(tasks) {
 }
 
 function tmpLog(tag) {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng4-${tag}-`)), "gate-events.jsonl");
+  const dir = makeTmpDir(`quay-qeng4-${tag}-`);
+  return path.join(dir, "gate-events.jsonl");
 }
 
 // A disposable cfg.workspaceRoot for runLoop's sentinel path. `stop` pre-creates
-// the .quay/.stop sentinel so the loop test is bounded (cannot hang).
+// the .quay/.stop sentinel so the loop test is bounded (cannot hang). The shared
+// helper registers cleanup so the /tmp dir is removed at the end of the file.
 function tmpWorkspace(tag, { stop = false } = {}) {
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng4-${tag}-ws-`));
+  const workspaceRoot = makeTmpDir(`quay-qeng4-${tag}-ws-`);
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   if (stop) fs.writeFileSync(path.join(workspaceRoot, ".quay", ".stop"), "");
   return { workspaceRoot };
@@ -282,24 +285,7 @@ test("A3: runLoop empty-board — stopped=fixpoint, zero iterations", async () =
 // ===========================================================================
 
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng4-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng4-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-qeng4-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runQuay(args, cwd) {

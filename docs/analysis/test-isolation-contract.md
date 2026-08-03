@@ -85,10 +85,32 @@
 > 修复：**同一测试内删除**——`try/finally`，或 `t.after(() => fs.rmSync(dir, {recursive:true, force:true}))`。
 > 静态可判（AC5）：**有 `mkdtemp` 而无对应的 `rm`/`rmSync`/`after` 即报出**。
 
-**扫描信号**（`mkdtemp-no-cleanup`，per-file 粒度）：文件里出现 CODE 位置的 `mkdtemp`/`mkdtempSync` 调用，
-且文件里**没有**任何 CODE 位置的清理构造（`rmSync(`、`rm(`、`t.after(`、`after(`、`finally {`）。
+**收紧（2026-08-03，`tasks/gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call.md`）**：旧判据是
+**文件级存在性**——文件里**任何**清理构造（`rmSync(`/`rm(`/`t.after(`/`after(`/`finally {`）就放行整个文件。
+一个「7 个 `mkdtemp`、2 个无关清理（比如 finally 只恢复 env）」的文件因此与全清文件不可区分；本小时的
+冠亚军 `driver`/`gate` 已被基线化、第三名 `gate-diagnostics`（7 建 2 清）根本没上名单——再按前缀修一轮
+修不住。**收紧后判据能识别部分清理**：每个变量赋值的 `mkdtemp` 结果都必须被一条清理路径覆盖：
+
+- **直接覆盖**：该变量出现在某个清理构造（`rmSync`/`rm`/`unlinkSync` 调用区、`after`/`afterEach` 钩子区、
+  `finally` 块体）内；或
+- **载体数组覆盖**：该变量被 `push` 进一个数组，而该数组出现在清理构造内（`document-store`/`adr-store`
+  的 `_createdDirs` + `after(() => for … rmSync)` 形态）；或
+- **helper 返回覆盖**：该变量被从某函数 `return` 出去，且**至少一个调用点**把返回值捕获进一个被清理的变量
+  （`makeFakeGhBin` → `const fakeBinDir = …` → `rmSync(fakeBinDir)` **不是泄漏**；无人清理返回值的
+  `makeWorkspace` **是泄漏**）。
+
+首处未被覆盖的 `mkdtemp` 结果即为 per-file 报告。两条刻意保留的低误报宽限：**整文件没有任何清理构造**
+仍报（旧「no-cleanup」形态，`it0-gates`/`gate`/`driver` 之类，名单条目保持有意义）；**内联 `mkdtemp`**
+（无赋值变量，如 `return fs.mkdtempSync(...)`）只在它是 `return` 直接值且无调用点捕获+清理时才报，
+非 return 的内联 `mkdtemp` 无法静态关联到清理、跳过（宽松）。
+
 **永不匹配** `/tmp/claude-*`（会话数据）与 `/tmp/quay-wt-*`（在用 worktree）前缀（AC6）——这两个前缀的
 `mkdtemp` 不是测试 fixture，跳过。
+
+**共享修复助手**（`plugin/test/helpers/tmp-workspace.mjs`）：`makeTmpDir(tag)` / `makeTmpWorkspace(tag, …)`
+把 `mkdtemp` 与删除注册成一对（文件级 `after()` 钩子，每个测试文件一个进程、各自实例），测试文件不再
+各自写 `finally { rmSync }`——上一轮各写各的、只覆盖到当时改的点的教训。
+
 ## 扫描与棘轮（AC2–AC6）
 
 `plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做六条判定，
@@ -103,9 +125,12 @@
   - 名单条目**失效**（违规已修但条目未删）→ 失败（删掉它）；
   - 条目数超过 `# baseline-count` 头（提交后仍存活的封顶）→ 失败。
 
-## 当前基线（2026-08-03，51 条）
+## 当前基线（2026-08-03，44 条）
 
-`--list` 实测（与 `plugin/loop/fast-mode-loop-tick.md` 判绿无关；本清单是报告，不是门禁）：
+`--list` 实测（与 `plugin/loop/fast-mode-loop-tick.md` 判绿无关；本清单是报告，不是门禁）。
+2026-08-03 `gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call` 修掉 12 个被 R6 放行的
+部分清理文件 + 6 个基线化 no-cleanup 文件（`driver`/`gate`/`lifecycle`/`gap002-create-ergonomics`/
+`gate-config-loader`/`init`），名单从 50 条缩到 44 条、`mkdtemp-no-cleanup` 从 28 条缩到 22 条：
 
 ```
 experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup
@@ -139,18 +164,12 @@ packages/quay/test/dir022-remaining-gates.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/dir032-audit-independence.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/document-gate.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/dod-gate-set.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/driver.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/frontmatter-store-base.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap-cli-gate-enforcement.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:process-exit-1
-packages/quay/test/gap002-create-ergonomics.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gate-config-loader.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gate-list-verbose.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/gate.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/init.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/it0-gates.test.mjs:mkdtemp-no-cleanup
-packages/quay/test/lifecycle.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/mcp-config-validate.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
@@ -176,8 +195,9 @@ R6 新增 28 条 `mkdtemp-no-cleanup`（gap-tests-never-clean-up-their-tmpdirs�
 - **棘轮引导期**：数据文件尚未提交到 git HEAD 前（bootstrap），`C2a`（相对 HEAD 变长）与 `C0b`
   （封顶被抬高）不可执行；提交后自动生效。**同一 commit 里同时加长名单并抬高 `# baseline-count`**
   可绕过——这与 test-framework-policy 棘轮已接受的一类代码评审级后门相同（CLAUDE.md 已记录）。
-- **R6 是 per-file 粒度**：判据是「文件有 `mkdtemp` 且**整文件**没有任何 `rm`/`rmSync`/`after`/`finally`」。
-  一个**只给部分** mkdtemp 加了清理的文件会被放行——`prepare-admission-check.test.mjs` 是 #1 泄漏者
-  （14,220 个 `prepare-admission-*`），但因为它**其他**测试用了 `after`，R6 静态扫不到它；它的修复
-  靠的是 AC2（手动加 `after` 钩子），不是扫描器。这是 per-file 静态判定的固有盲区，接受。
+- **R6 仍以 per-file 粒度报告**：报出粒度是一个文件一条（首处未被覆盖的 `mkdtemp` 结果），不逐行报。
+  静态判定对「**内联** `mkdtemp`（无赋值变量）且非 `return` 直接值」是盲的（宽松跳过）——这类目录
+  无法从文件内关联到清理路径；若有真实泄漏者落在这一形态，需要按 AC2 手动修（加 `after` 钩子），
+  不指望扫描器。变量赋值的 `mkdtemp` 结果则已被 `gap-tmp-leak-is-live-r6-absolves-a-file-for-one-cleanup-call`
+  收紧后的部分清理判据覆盖（直接/载体数组/helper 返回三种覆盖路径）。
 

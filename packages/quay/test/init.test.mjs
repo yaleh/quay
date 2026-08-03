@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -21,7 +22,7 @@ const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-n
 // ---------------------------------------------------------------------------
 
 function tmpDir(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-init-${tag}-`));
+  return makeTmpDir(`quay-init-${tag}-`);
 }
 
 function runQuay(args, cwd) {

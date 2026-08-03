@@ -18,6 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { runAcceptance } from "../src/gate/acceptance-runner.ts";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -29,7 +30,7 @@ const nativeProviderDir = path.dirname(nativeBin);
 // ---------------------------------------------------------------------------
 
 function tmpCwd(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-acceptance-env-${tag}-`));
+  return makeTmpDir(`quay-acceptance-env-${tag}-`);
 }
 
 function runQuay(args, cwd, extraEnv = {}) {
@@ -131,8 +132,8 @@ test("T2: missing envFile reason names the specific path", () => {
 
 test("T3: two providers with different acceptance_env — enabled provider honors its own (AC #3, #5)", () => {
   const tag = "t3-2prov";
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-acceptance-env-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-acceptance-env-${tag}-ws-`));
+  const tasksDir = makeTmpDir(`quay-acceptance-env-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-acceptance-env-${tag}-ws-`);
 
   const envA = path.join(workspaceRoot, "envA.env");
   const envB = path.join(workspaceRoot, "envB.env");
@@ -196,8 +197,8 @@ test("T3: two providers with different acceptance_env — enabled provider honor
 
 test("T4: MCP gate_run surface sees acceptance_env exports (AC #4)", async () => {
   const tag = "t4-mcp";
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-acceptance-env-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-acceptance-env-${tag}-ws-`));
+  const tasksDir = makeTmpDir(`quay-acceptance-env-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-acceptance-env-${tag}-ws-`);
 
   const envFile = path.join(workspaceRoot, "mcp-test.env");
   fs.writeFileSync(envFile, "export MCP_ENV_TEST_VAR=hello_from_mcp_env\n");

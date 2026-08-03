@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync, spawn } from "node:child_process";
+import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 import crypto from "node:crypto";
 
 import {
@@ -730,7 +731,7 @@ describe("CLI: --decide-resume / --record-generation", () => {
   const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
   const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
   const ADMISSION_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "prepare-admission-check.ts");
-  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dir126c-fixtures-"));
+  const FIXTURES_DIR = makeTmpDir("dir126c-fixtures-");
 
   function fixtureTaskBody(proposalText) {
     return `---
@@ -757,7 +758,7 @@ ${proposalText}
   }
 
   function makeCliScratch(taskId, proposalText = "fixture proposal v1") {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    const dir = makeTmpDir("cli-scratch-");
     fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody(proposalText));
     const charterFile = path.join(dir, "charter.md");
@@ -908,7 +909,7 @@ ${proposalText}
   });
 
   test("AC14/R8: importing proposal-convergence.ts (the same way milestone-preparation-check.ts does) fires zero fs/argv side effects — no CLI executes on import", () => {
-    const scratch = fs.mkdtempSync(path.join(FIXTURES_DIR, "import-"));
+    const scratch = makeTmpDir("import-");
     const harness = path.join(scratch, "harness.mjs");
     const modUrl = JSON.stringify(`file://${CONVERGENCE_SCRIPT}`);
     fs.writeFileSync(harness, `
@@ -1055,13 +1056,13 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
   const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
   const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
   const ADMISSION_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "prepare-admission-check.ts");
-  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dir126d-fixtures-"));
+  const FIXTURES_DIR = makeTmpDir("dir126d-fixtures-");
 
   function fixtureTaskBody(proposalText) {
     return `---\nid: DIR-126-D-CLI-FIXTURE\ntitle: fixture task for telemetry CLI fixtures\nstatus: todo\n---\n## Proposal\n\n${proposalText}\n\n## Acceptance Criteria\n\n- [ ] fixture AC item\n\n## Definition of Done\n\n- [ ] fixture DoD item\n\n## Touches\n\n- fixture.ts\n`;
   }
   function makeCliScratch(taskId, proposalText = "fixture proposal v1") {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    const dir = makeTmpDir("cli-scratch-");
     fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody(proposalText));
     const charterFile = path.join(dir, "charter.md");
@@ -1253,7 +1254,7 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
   });
 
   test("AC17: --record-attempt for the three pre-lease sites each produce a real committed record with generationId:null, decision.kind:not-evaluated", () => {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "attempt-"));
+    const dir = makeTmpDir("attempt-");
     try {
       for (const site of ["admission-check-failed", "prepare-already-running"]) {
         const res = runNode([CONVERGENCE_SCRIPT, "--record-attempt", "--taskId", "DIR-ATTEMPT-1", "--workspace", dir, "--site", site, "--detail", JSON.stringify({ note: site })]);
@@ -1274,7 +1275,7 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
   });
 
   test("AC17: --record-attempt for missing-required-args (taskId itself absent) routes to _missing-taskId/ with explicit taskId:null", () => {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "attempt-missing-"));
+    const dir = makeTmpDir("attempt-missing-");
     try {
       const res = runNode([CONVERGENCE_SCRIPT, "--record-attempt", "--taskId", "", "--workspace", dir, "--site", "missing-required-args", "--detail", JSON.stringify({})]);
       assert.equal(res.status, 0, res.stdout);
@@ -1388,14 +1389,14 @@ describe("telemetry: Stage 8 — generationId non-collision + migration-shape st
 describe("M207: phase timing + finding-recurrence receiver extensions", () => {
   const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
   const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
-  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "m207-fixtures-"));
+  const FIXTURES_DIR = makeTmpDir("m207-fixtures-");
   const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 
   function fixtureTaskBody() {
     return `---\nid: M207-CLI-FIXTURE\ntitle: fixture task for M207 receiver fixtures\nstatus: todo\n---\n## Proposal\n\nfixture proposal v1\n\n## Acceptance Criteria\n\n- [ ] fixture AC item\n\n## Definition of Done\n\n- [ ] fixture DoD item\n\n## Touches\n\n- fixture.ts\n`;
   }
   function makeCliScratch(taskId) {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    const dir = makeTmpDir("cli-scratch-");
     fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody());
     const charterFile = path.join(dir, "charter.md");
@@ -1499,7 +1500,7 @@ describe("M207: phase timing + finding-recurrence receiver extensions", () => {
 
   test("AC3 sub-case (CLAIM C7): --record-attempt recurrence keys on attemptId, scanning ONLY sibling attempt records (generationId: null)", () => {
     const taskId = "M207-ATTEMPT-FIXTURE";
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "attempt-scratch-"));
+    const dir = makeTmpDir("attempt-scratch-");
     const runAttempt = (detailObj) => runNode([CONVERGENCE_SCRIPT, "--record-attempt", "--taskId", taskId, "--workspace", dir,
       "--site", "prepare-already-running", "--detail", JSON.stringify(JSON.stringify(detailObj)),
       "--phaseTimings", "[]", "--findingCodes", JSON.stringify(["prepare-already-running"])]);
@@ -1858,7 +1859,7 @@ describe("noveltyScan / classifyProposalDiff — mechanical diff classification 
 describe("CLI: --resolve-checkpoint / --write-checkpoint", () => {
   const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
   const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
-  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "checkpoint-cli-fixtures-"));
+  const FIXTURES_DIR = makeTmpDir("checkpoint-cli-fixtures-");
 
   function fixtureTaskBody(proposalText) {
     return `---
@@ -1885,7 +1886,7 @@ ${proposalText}
   }
 
   function makeCliScratch(taskId, proposalText = "fixture proposal v1") {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    const dir = makeTmpDir("cli-scratch-");
     fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody(proposalText));
     const charterFile = path.join(dir, "charter.md");
@@ -2108,7 +2109,7 @@ ${proposalText}
   });
 
   test("AC14/R8-style: importing proposal-convergence.ts fires zero fs/argv side effects from the checkpoint additions either — no CLI executes on import", () => {
-    const scratch = fs.mkdtempSync(path.join(FIXTURES_DIR, "import-"));
+    const scratch = makeTmpDir("import-");
     const harness = path.join(scratch, "harness.mjs");
     const modUrl = JSON.stringify(`file://${CONVERGENCE_SCRIPT}`);
     fs.writeFileSync(harness, `
@@ -2307,7 +2308,7 @@ describe("buildEpochRecord — no-fabrication field materialization", () => {
 describe("CLI: --epoch-status / --record-epoch-dispatch / --new-epoch / --override-budget", () => {
   const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
   const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
-  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "epoch-cli-fixtures-"));
+  const FIXTURES_DIR = makeTmpDir("epoch-cli-fixtures-");
 
   function fixtureTaskBody() {
     return `---
@@ -2334,7 +2335,7 @@ fixture proposal text v1
   }
 
   function makeCliScratch(taskId) {
-    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    const dir = makeTmpDir("cli-scratch-");
     fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
     fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody());
     const charterFile = path.join(dir, "charter.md");

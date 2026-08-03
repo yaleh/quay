@@ -22,6 +22,7 @@ import os from "node:os";
 
 import { runAcceptance } from "../src/gate/acceptance-runner.ts";
 import { gateRegistry, listGates } from "../src/gate/registry.ts";
+import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -33,29 +34,13 @@ const nativeProviderDir = path.dirname(nativeBin);
 // ---------------------------------------------------------------------------
 
 function tmpCwd(tag) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-`));
+  return makeTmpDir(`quay-qeng2-${tag}-`);
 }
 
-// mirrors gate.test.mjs / gap-cli-gate-enforcement.test.mjs makeWorkspace()
+// mirrors gate.test.mjs / gap-cli-gate-enforcement.test.mjs makeWorkspace(); the shared helper
+// registers cleanup so the /tmp dirs are removed at the end of the file.
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-qeng2-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runQuay(args, cwd, extraEnv = {}) {
@@ -501,8 +486,8 @@ test("A2 [T2]: missing envFile reason names the specific path", () => {
 
 test("C1 [T3]: two providers with different acceptance_env — enabled provider honors its own (AC #3, #5)", () => {
   const tag = "t3-2prov";
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-ws-`));
+  const tasksDir = makeTmpDir(`quay-qeng2-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-qeng2-${tag}-ws-`);
 
   const envA = path.join(workspaceRoot, "envA.env");
   const envB = path.join(workspaceRoot, "envB.env");
@@ -566,8 +551,8 @@ test("C1 [T3]: two providers with different acceptance_env — enabled provider 
 
 test("C1 [T4]: MCP gate_run surface sees acceptance_env exports (AC #4)", async () => {
   const tag = "t4-mcp";
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-ws-`));
+  const tasksDir = makeTmpDir(`quay-qeng2-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-qeng2-${tag}-ws-`);
 
   const envFile = path.join(workspaceRoot, "mcp-test.env");
   fs.writeFileSync(envFile, "export MCP_ENV_TEST_VAR=hello_from_mcp_env\n");

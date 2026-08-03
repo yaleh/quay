@@ -25,6 +25,7 @@ import { appendGateEvent, queryGateEvents } from "../src/gate/gate-event-store.t
 import { gateRegistry, listGates } from "../src/gate/registry.ts";
 import { runGate } from "../src/gate/engine.ts";
 import { resolveGateLogPath, runGateLogQuery, DEFAULT_GATE_LOG_RELATIVE_PATH } from "../src/gate/gate-log.ts";
+import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -36,7 +37,7 @@ const nativeProviderDir = path.dirname(nativeBin);
 // ---------------------------------------------------------------------------
 
 function tmpLog(tag) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng1-${tag}-`));
+  const dir = makeTmpDir(`quay-qeng1-${tag}-`);
   return path.join(dir, "sub", "gate-events.jsonl"); // nested to exercise mkdirSync
 }
 
@@ -54,26 +55,10 @@ function mkEvent(over = {}) {
   };
 }
 
-// mirrors gap-cli-gate-enforcement.test.mjs makeWorkspace()
+// mirrors gap-cli-gate-enforcement.test.mjs makeWorkspace(); the shared helper also registers
+// cleanup so the /tmp dirs are removed at the end of the file (gap-tmp-leak-is-live-r6-...).
 function makeWorkspace(tag) {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng1-${tag}-tasks-`));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng1-${tag}-ws-`));
-  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "config.yml"),
-    [
-      "providers:",
-      "  native:",
-      "    enabled: true",
-      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-      "    env:",
-      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
-      "",
-    ].join("\n")
-  );
-  return { workspaceRoot, tasksDir };
+  return makeTmpWorkspace(`quay-qeng1-${tag}`, { nativeBin, nativeProviderDir });
 }
 
 function runQuay(args, cwd) {

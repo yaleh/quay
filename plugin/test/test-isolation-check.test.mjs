@@ -155,9 +155,15 @@ test("R6/AC2: mkdtemp with no cleanup reports; rm/after/finally cleanup does not
     detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\nfs.rmSync(dir, { recursive: true, force: true });\n', "x.test.mjs").length,
     0
   );
-  // try/finally → GREEN
+  // an EMPTY finally that does NOT rmSync the mkdtemp dir → the dir still leaks → reports
+  assert.ok(
+    detectMkdtempNoCleanup('// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally {}\n', "x.test.mjs")
+      .some((v) => v.rule === "mkdtemp-no-cleanup"),
+    "an empty finally does not clean the mkdtemp dir — partial cleanup reports"
+  );
+  // a finally that DOES rmSync the dir → GREEN
   assert.equal(
-    detectMkdtempNoCleanup('// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally {}\n', "x.test.mjs").length,
+    detectMkdtempNoCleanup('// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally { fs.rmSync(dir, { recursive: true, force: true }); }\n', "x.test.mjs").length,
     0
   );
   // a comment merely mentioning mkdtemp is not a violation (code-position matching)
