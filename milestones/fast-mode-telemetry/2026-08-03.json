@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-03T09:11:49.225Z",
+  "generatedAt": "2026-08-03T09:27:33.190Z",
   "since": null,
   "tasks": [
     {
@@ -30,6 +30,11 @@
     {
       "taskId": "gap-dod-clause13-14-enforced-but-undocumented",
       "minutes": 40.256233333333334,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-inner-forensics-verify-reports-nonruns-and-zero-durations",
+      "minutes": 35.69153333333333,
       "outcome": "done"
     },
     {
@@ -184,20 +189,14 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [
-    {
-      "taskId": "gap-inner-forensics-verify-reports-nonruns-and-zero-durations",
-      "runId": "fm-gap-inner-forensics-verify-reports-nonruns-and-zero-durations-1785747111351-b4mxpa",
-      "startedAtMs": 1785747111364
-    }
-  ],
-  "meanMinutes": 54.16868564814814,
-  "medianMinutes": 56.2526,
-  "tasksPerHour": 1.5858410433943253,
-  "serialEquivalentPerHour": 1.1076510216572186,
+  "inProgress": [],
+  "meanMinutes": 53.669303153153145,
+  "medianMinutes": 56.186366666666665,
+  "tasksPerHour": 1.6112805119613989,
+  "serialEquivalentPerHour": 1.1179575003756113,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-03T09:11:49.197Z",
-  "windowHours": 22.700888055555556,
+  "windowEnd": "2026-08-03T09:27:33.170Z",
+  "windowHours": 22.963102777777777,
   "blocked": [],
   "totalBlockedMs": 0,
   "longestBlockedMs": 0

@@ -2,7 +2,7 @@
 id: gap-inner-forensics-verify-reports-nonruns-and-zero-durations
 title: "inner-forensics verify counted a ps command as a suite run and reported
   0s for a 400s one — the outer's cheap-verification instrument lies"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -88,8 +88,9 @@ resume   n/a: 单次查询，无中途产物
 ## Definition of Done
 
 - [x] AC6 的已知答案窗口回归输出贴进任务体（见下方 Evidence）
-- [ ] `scripts/test.sh` 连跑 2 次全绿 —— 由协调方 fan-in 承担（隔离契约：本任务只跑 scoped
-      `scripts/test.sh plugin/test/inner-forensics.test.mjs`，绝不自启全量套件）
+- [x] `scripts/test.sh` 连跑 2 次全绿 —— 协调方 fan-in 套件 **2073 tests / 2054 pass / 0 fail /
+      0 cancelled / 19 skipped**（exit 0，`/tmp/forensics-fanin-fullsuite.log`，2026-08-03 09:3xZ）。
+      参考值 2065→2073（本任务 +8）。本任务只跑 scoped（隔离契约），全量由协调方承担
 - [x] 明确记录：**外层唯一的廉价核实手段说了谎，且方向是「否定内层的正确成果」**。
       这次靠改读产物绕过去了——所以 `verify` 的长期形态应当是**报产物说了什么**，
       而不只是报命令被调用过。本任务的三条修法把三个撒谎信号都改对了方向；
