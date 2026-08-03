@@ -255,6 +255,29 @@ test("cleanStaleWorktree: a merged branch whose master has since advanced is CLE
   }
 });
 
+test("cleanStaleWorktree: a FAST-FORWARDED branch (tip on master's first-parent chain) is CLEANED even after master later deletes some of its files — the 20-branch real-repo shape (AC1)", () => {
+  const { dir, g } = makeRepo();
+  try {
+    // Branch created and committed in the worktree, then FAST-FORWARDED into master (no --no-ff merge
+    // commit) — the actual shape of the 20 non-reverted milestone branches in the real repo.
+    assert.equal(addWorktree({ workspace: dir, milestone: "M201" }).outcome, "added");
+    const wt = path.join(dir, worktreeRelPath(201));
+    fs.writeFileSync(path.join(wt, "feature.txt"), "x\n");
+    execFileSync("git", ["-C", wt, "add", "-A"]); execFileSync("git", ["-C", wt, "commit", "-qm", "feat"]);
+    g(["merge", "--ff-only", "milestone/M201/iteration-0"]);
+    // Master later LEGITIMATELY deletes the branch's file (a cleanup/reclassification by a later
+    // milestone). A plain tree-diff would flag this as merged-then-reverted; the first-parent test
+    // must NOT — a fast-forwarded branch has no merge commit to revert.
+    g(["rm", "-q", "feature.txt"]); g(["commit", "-qm", "later cleanup deletes the file"]);
+    assert.equal(fs.existsSync(path.join(dir, "feature.txt")), false, "master no longer has the file");
+    const cleaned = cleanStaleWorktree({ workspace: dir, milestone: "M201" });
+    assert.equal(cleaned.outcome, "cleaned", JSON.stringify(cleaned));
+    assert.equal(g(["branch", "--list", "milestone/M201/iteration-0"]), "");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("cleanStaleWorktree: a revert-of-merge IS still reported merged-then-reverted — branch-created files missing from master (AC2, M243 shape)", () => {
   const { dir, g } = makeRepo();
   try {
