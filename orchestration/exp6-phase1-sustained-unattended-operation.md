@@ -209,7 +209,7 @@ tick 第 3 节把「就绪队列为空」列为停止条件。无人值守 12 �
 - [ ] AC10: 实际吞吐记录：完成任务数、均耗时、tasksPerHour，与批次 2 的 2.1/hr 对比
 - [ ] AC11: needs-human 策略（A 保守 / B 放宽）基于 C4 的实际停摆数据做出选择并记录理由，不是预先决定
 - [ ] AC12: 12 小时内合并的每个任务，fan-in 前都做了 `git rebase master`（tick 常设规则，B3-2 的教训）
-- [ ] AC13: 内层并发实际发生——12 小时内至少有一段时间 ≥2 个 subagent 同时在飞，有遥测或面板证据
+- [x] AC13: 内层并发实际发生（**2026-08-03 00:07Z 达成**：遥测 `inProgress 3` = blocked-signal + test-framework-policy + relation-sync；组批经 `checkTouchesPair` 实测两两正交）——原文：内层并发实际发生——12 小时内至少有一段时间 ≥2 个 subagent 同时在飞，有遥测或面板证据
 - [ ] AC14: 外层每个 tick 记录动作类型（`no-action`/`unblock`/`correct`/`escalate`），12 小时后给出分布
 - [ ] AC15: **分层未退化**——`correct` 类 tick 占比 <50%。超过则说明内层自主性不足，结论是修内层而非加密外层
 - [ ] AC16: 内层在 12 小时内**至少建了 1 个有证据的新任务**，证明「自动发现问题」这条路通
