@@ -104,36 +104,142 @@ resume 先去掉改写路径并让 `cmp` 通过，再补机械检查防回归
 
 ## Acceptance Criteria
 
-- [ ] AC1: `session-liveness.sh` 不再含 `__QUAY_TMUX_SESSION__`；`_sl_session` 改为 env/配置 + 默认值，
-      优先级顺序写进文件头
-- [ ] AC2: `quay-init --loop` 对该脚本改走 `cp`（源码里 grep 不到作用于它的 `render_substitutions`）
-- [ ] AC3: **主判据**——铺设后 `cmp -s <源> <装出来的副本>` **退出码 0**（实跑输出贴任务体）
-- [ ] AC4: **双向负控制**——人为改源脚本一个字节 ⇒ `cmp` 报不同并被检查报出；改回 ⇒ 恢复相同。两个方向都贴
-- [ ] AC5: 会话名仍然装得对——铺设到一个指定 `--tmux-session` 的项目后，
-      **不改脚本**也能解析出正确的默认目标（实跑输出贴任务体）
-- [ ] AC6: **机械检查防回归**：断言每个安装的可执行文件与源逐字节相同；
-      配置类文件显式列为例外并写明理由
-- [ ] AC7: AC6 那条检查**有执行者**（写明挂在哪、被真实触发过一次并贴输出）——
-      只写「建议挂在 X」不算
-- [ ] AC8: tick 文档的占位符替换**未被改动**（负控制：`quay-init --loop` 后铺出的 tick 文档里
-      仍然 grep 不到 quay 专属字面）
-- [ ] AC9: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC1: `session-liveness.sh` 不再含 `__QUAY_TMUX_SESSION__`；`_sl_session` 改为 env/配置 + 默认值，
+      优先级顺序写进文件头（头注释 + 第 75-92 行实现）
+- [x] AC2: `quay-init --loop` 对该脚本改走 `cp`（`grep render_substitutions plugin/scripts/quay-init.sh`
+      只剩 2 个调用点，都是 tick 文档；`render_substitutions "$sl_src"` 已不存在，脚本走 `copy_one "$sl_src" "$sl_dst"`）
+- [x] AC3: **主判据**——铺设后 `cmp -s <源> <装出来的副本>` **退出码 0**（实跑输出见下）
+- [x] AC4: **双向负控制**——人为改源脚本一个字节 ⇒ `cmp` 报不同并被检查报出；改回 ⇒ 恢复相同。两个方向都贴（见下）
+- [x] AC5: 会话名仍然装得对——铺设到一个指定 `--tmux-session` 的项目后，
+      **不改脚本**也能解析出正确的默认目标（实跑输出见下）
+- [x] AC6: **机械检查防回归**：新增 `plugin/scripts/verify-installed-executables.sh`，断言每个安装的
+      可执行文件与源逐字节相同；配置类文件显式列为例外并写明理由
+- [x] AC7: AC6 那条检查**有执行者**——挂在 (a) `quay-init --loop` 末尾（每次安装都跑，fail-closed）
+      与 (b) `test/cold-start-e2e.sh`（CI `cold-start-e2e` job，`--from-build` 路径）；被真实触发过
+      一次（`--sabotage-byte` 翻转源脚本一个字节，检查报 FAIL 点名文件），输出见下
+- [x] AC8: tick 文档的占位符替换**未被改动**（`render_substitutions` 对 tick 文档的 2 个调用点保留；
+      负控制输出见下）
+- [x] AC9: 测试用 `node:test` 且带 `// @test-group governance`（两个测试文件本就有；新增用例都在其内）
 
 ## Definition of Done
 
-- [ ] AC3 与 AC4 的实跑输出贴进任务体——**`cmp` 只报「相同」而从未报过「不同」，
-      与没有这条检查不可区分**
-- [ ] 完整套件连跑 2 次全绿（**若只跑到 1 次，如实标 `[~]` 并写明**——今天刚立的先例）
-- [ ] 任务体记录：`session-liveness.sh` 自 2026-08-03 起走本项目正常流程维护，
-      不再由旁路会话直接改；以及「可执行文件原样复制、只生成配置」这条原则的出处
+- [x] AC3 与 AC4 的实跑输出贴进任务体（见下「Execution evidence」）——`cmp` 的「不同」方向被真实触发过，
+      不是只报「相同」
+- [~] 完整套件连跑 2 次全绿——**只跑到 1 次？标 `[~]` 写明**：本任务在隔离 worktree 执行，纪律禁止
+      自启全量套件（全量由协调方 fan-in 承担）。本轮 scoped 证据：`node --test` 两个测试文件 25 用例全绿、
+      `bash scripts/test.sh plugin/test/{quay-init-loop,session-liveness}.test.mjs` 全绿（含静态检查）、
+      `bash test/cold-start-e2e.sh` 全绿、`bash test/cold-start-e2e.sh --from-build` 全绿、
+      `bash test/cold-start-e2e.sh --sabotage-byte scripts/session-liveness.sh` 全绿（AC4 双向在一条 e2e 里演示）。
+      2 次全绿请协调方 fan-in 在 master 上补跑。
+- [x] 任务体记录：`session-liveness.sh` 自 2026-08-03 起走本项目正常流程维护，不再由旁路会话直接改
+      （见下「Provenance」）；「可执行文件原样复制、只生成配置」原则的出处也见下
+
+## Execution evidence (2026-08-03)
+
+全部在隔离 worktree `/tmp/quay-wt-qinit` 实跑。
+
+**AC3 — 铺设后 `cmp -s` 退出码 0：**
+
+```
+$ CLAUDE_PLUGIN_ROOT=<worktree>/plugin bash <worktree>/plugin/scripts/quay-init.sh \
+    --all --loop --root <tmp>/myproj --project myproj --test-command 'node --test' \
+    --tmux-session 'myproj-0:0.0' --repo-root <tmp>/myproj
+  ...
+  copied: <tmp>/myproj/plugin/scripts/session-liveness.sh
+  wrote: orchestration/session-liveness.env (SESSION_TMUX_SESSION=myproj-0:0.0)
+verify-installed-executables: OK — every installed executable is byte-identical to its source (checked 19)
+quay-init complete.
+
+$ cmp -s plugin/scripts/session-liveness.sh <tmp>/myproj/plugin/scripts/session-liveness.sh; echo $?
+0
+```
+
+**AC4 — 双向负控制（改一个字节 ⇒ 报不同并被抓；改回 ⇒ 相同）：**
+
+```
+=== flip a byte in the SOURCE (session-liveness.sh) after install ===
+$ cmp plugin/scripts/session-liveness.sh <tmp>/myproj/plugin/scripts/session-liveness.sh
+... differ: byte 1, line 1
+DIFFER (GOOD)
+$ bash plugin/scripts/verify-installed-executables.sh plugin <tmp>/myproj
+FAIL: installed executable <tmp>/myproj/plugin/scripts/session-liveness.sh differs from its source plugin/scripts/session-liveness.sh — 可执行文件必须逐字节与源相同
+verify-installed-executables: FAIL — an installed executable drifted from its plugin source (checked 19)
+verify exit: 1
+
+=== restore the byte ===
+$ cmp -s plugin/scripts/session-liveness.sh <tmp>/myproj/plugin/scripts/session-liveness.sh; echo $?
+0
+IDENTICAL (GOOD)
+$ bash plugin/scripts/verify-installed-executables.sh plugin <tmp>/myproj
+verify-installed-executables: OK — every installed executable is byte-identical to its source (checked 19)
+verify exit: 0
+```
+
+同一条 e2e 里两方向（`--sabotage-byte scripts/session-liveness.sh`）：
+```
+== AC6: installed executables byte-identical to source (verify-installed-executables.sh) ==
+  [AC4 sabotage-byte] flipped a byte in scripts/session-liveness.sh (install source) — the AC6 check must now FAIL naming it
+FAIL: installed executable .../session-liveness.sh differs from its source .../session-liveness.sh — 可执行文件必须逐字节与源相同
+  AC6 correctly FAILED after the one-byte drift
+  [AC4 sabotage-byte] restored the byte — the AC6 check must now PASS again
+verify-installed-executables: OK — every installed executable is byte-identical to its source (checked 19)
+  AC6: every installed executable is byte-identical to its source
+```
+
+**AC5 — 不改脚本，`--tmux-session ac5:0.0` 铺出的副本解析出正确默认目标（`ac5:outer`，探针 alive=1）：**
+
+```
+$ cat <tmp>/proj/orchestration/session-liveness.env | grep SESSION_TMUX
+SESSION_TMUX_SESSION=ac5:0.0
+$ TMUX_TMPDIR=<sock> SESSION_ROOT=<tmp>/proj bash <tmp>/proj/plugin/scripts/session-liveness.sh --once
+session-liveness: starting pid=1780635 file=session-liveness.sh md5=5a060ac3280b94f7
+SESSION-STATUS proj alive=1 pid=1780630
+```
+
+（session 值在生成配置里，脚本逐字节与源相同、未被改写；`DEFAULT_TARGET` 由
+`SESSION_TMUX_SESSION` → `ac5:outer` 推出。`plugin/test/session-liveness.test.mjs` 的
+AC3/AC7 用例「laid-down script identifies THIS project's own outer as alive」同路径复证。）
+
+**AC7 — 执行者真实触发（`--from-build` 路径 + `--sabotage-byte` 路径都实跑）：**
+
+```
+$ bash test/cold-start-e2e.sh --from-build        # CI cold-start-e2e job 的命令
+  ...
+verify-installed-executables: OK — every installed executable is byte-identical to its source (checked 19)
+  AC6: every installed executable is byte-identical to its source
+COLD-START E2E PASS: ... wall-clock: 102s (from-build=true)
+```
+fail 方向由 `--sabotage-byte` 触发（见上 AC4），检查在两条路径都真实报出「不同」——不是只报「相同」。
+
+**AC8 — tick 文档散文本地化未动（负控制）：**
+
+```
+$ grep -c render_substitutions plugin/scripts/quay-init.sh
+2     # 351/363 两处，都是 tick 文档（orchestrator-loop-tick.md / fast-mode-loop-tick.md）
+$ grep -rn 'scripts/test.sh\|quay-0:0.0' <tmp>/empty-project/orchestration <tmp>/empty-project/docs
+# （无输出——铺出的 tick 文档里 grep 不到 quay 专属字面，quay-init-loop.test.mjs AC4 用例 + e2e 负控制复证）
+```
+
+## Provenance
+
+- `session-liveness.sh` 自 2026-08-03 起走本项目正常流程维护（任务体 / `## Contract` / 派发评审 /
+  fan-in / 契约棘轮），不再由旁路会话直接改——本任务即该移交的落地：脚本不再被 `quay-init` 改写，
+  由本项目流程维护。
+- 「可执行文件一律原样复制，只生成配置；散文可以本地化，代码不行」——出处：本任务 Proposal「一条更
+  一般的原则」（管理者提议、外层实测适用面、派发评审确认），落地为 AC6 机械检查
+  `plugin/scripts/verify-installed-executables.sh`。
+- 触发条件（记录，不是工作）：`session-liveness.sh` 保持 bash，当它需要解析结构化配置或维护非平凡
+  状态时再改 TypeScript。
 
 ## Touches
 
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/quay-init.sh
+- plugin/scripts/verify-installed-executables.sh  (新增——AC6 机械检查)
 - plugin/test/session-liveness.test.mjs
 - plugin/test/quay-init-loop.test.mjs
 - test/cold-start-e2e.sh
+- tasks/gap-quay-init-rewrites-an-executable-instead-of-generating-config.md  (AC 证据)
 
 ## Dispatch review
 

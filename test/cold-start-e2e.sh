@@ -33,6 +33,12 @@
 # AC4 (negative control): --sabotage <relpath> deletes <relpath> from the install source so the
 #      AC3 assertion fails naming it; re-run without --sabotage → exit 0.
 # AC6: the target project gets NO npm install — the laid-down mechanism is self-contained.
+# AC6b/AC4 (gap-quay-init-rewrites-an-executable-instead-of-generating-config): after install, EVERY
+# installed executable under plugin/scripts/ is asserted byte-identical to its install source
+# (verify-installed-executables.sh — 可执行文件一律原样复制，只生成配置). Config files (tick docs,
+# orchestration/session-liveness.env) are explicit exceptions. --sabotage-byte flips ONE byte in the
+# INSTALL SOURCE after install so the AC6 assertion must fail naming the file, then restores it so
+# the assertion passes again — the bidirectional negative control that proves the check can fail.
 # AC7: inner-state.sh gets a ≥90s window (it polls on a 55-60s cadence) with a real in-flight
 #      task to observe, and must emit its INIT baseline — the outer's earlier 4s/0-byte
 #      observation was INCONCLUSIVE (a 4s window proves neither alive nor dead).
@@ -56,17 +62,22 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_SRC="$REPO_ROOT/plugin"
 FROM_BUILD=false
 SABOTAGE=""
+SABOTAGE_BYTE=""
 E2E_BRANCH=""
 
 usage() {
   cat <<'EOF'
-Usage: bash test/cold-start-e2e.sh [--plugin-src <dir>] [--from-build] [--sabotage <relpath>]
+Usage: bash test/cold-start-e2e.sh [--plugin-src <dir>] [--from-build] [--sabotage <relpath>] [--sabotage-byte <relpath>]
   --plugin-src <dir>   plugin source for the default (copy) path (default: $REPO_ROOT/plugin)
   --from-build         build via plugin/scripts/publish-dist-branch.sh (NO --push) and extract
                        the built plugin from the orphan commit via `git archive` (AC2/AC10)
   --sabotage <relpath> negative-control hook (AC4): delete <relpath> from the install source so
                        the AC3 completeness assertion fails naming it; restore by re-running
                        without --sabotage
+  --sabotage-byte <relpath>  bidirectional negative control (AC4, gap-quay-init-rewrites-an-executable-...):
+                       flip ONE byte in <relpath> of the INSTALL SOURCE after install, so the AC6
+                       byte-identical assertion must FAIL naming it; then restore the byte so the
+                       assertion PASSES again. Proves the AC6 check can fail (not always "same").
   --help, -h           show this help
 EOF
 }
@@ -76,6 +87,7 @@ while [ $# -gt 0 ]; do
     --plugin-src) PLUGIN_SRC="$2"; shift 2 ;;
     --from-build) FROM_BUILD=true; shift ;;
     --sabotage) SABOTAGE="$2"; shift 2 ;;
+    --sabotage-byte) SABOTAGE_BYTE="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -176,6 +188,55 @@ assert_file "$PROJECT/.claude/workflows/drain-directives.js"
 assert_file "$PROJECT/.claude/agents/baime-iteration-executor.md"
 if ! ls "$PROJECT"/scripts/gates/*.sh >/dev/null 2>&1; then fail "no gate scripts laid down"; fi
 echo "  all laid-down files present"
+
+# ── AC6/AC4 (gap-quay-init-rewrites-an-executable-instead-of-generating-config): byte-identical ─────
+# Principle: 可执行文件一律原样复制，只生成配置。After install, EVERY installed executable under
+# plugin/scripts/ must be byte-identical to its install source. Config-class files are explicit
+# exceptions: the tick docs (散文本地化, substitution is correct) and orchestration/session-liveness.env
+# (quay-init 生成的每项目配置). This section is the EXECUTOR-visible mount point of the check — it
+# also demonstrates the AC4 bidirectional negative control via --sabotage-byte.
+echo "== AC6: installed executables byte-identical to source (verify-installed-executables.sh) =="
+VERIFY_SCRIPT="$QUAY_DEV/plugin/scripts/verify-installed-executables.sh"
+assert_file "$VERIFY_SCRIPT"
+
+if [ -n "$SABOTAGE_BYTE" ]; then
+  sb_target="$QUAY_DEV/plugin/$SABOTAGE_BYTE"
+  assert_file "$sb_target"
+  # fail direction: flip one byte in the INSTALL SOURCE after install → the AC6 check must fail.
+  python3 - "$sb_target" <<'PY'
+import sys
+p = sys.argv[1]
+b = bytearray(open(p, "rb").read())
+b[0] ^= 0x01
+open(p, "wb").write(bytes(b))
+PY
+  echo "  [AC4 sabotage-byte] flipped a byte in $SABOTAGE_BYTE (install source) — the AC6 check must now FAIL naming it"
+  if bash "$VERIFY_SCRIPT" "$QUAY_DEV/plugin" "$PROJECT"; then
+    fail "AC6 verify must FAIL after a one-byte drift in the source (AC4 fail direction)"
+  fi
+  echo "  AC6 correctly FAILED after the one-byte drift"
+  # restore direction: flip it back → the AC6 check must pass again.
+  python3 - "$sb_target" <<'PY'
+import sys
+p = sys.argv[1]
+b = bytearray(open(p, "rb").read())
+b[0] ^= 0x01
+open(p, "wb").write(bytes(b))
+PY
+  echo "  [AC4 sabotage-byte] restored the byte — the AC6 check must now PASS again"
+fi
+
+bash "$VERIFY_SCRIPT" "$QUAY_DEV/plugin" "$PROJECT" || fail "AC6: an installed executable differs from its source (byte-identical invariant broken)"
+echo "  AC6: every installed executable is byte-identical to its source"
+# Negative control for the config exception: the session value must live in the generated env file,
+# NOT baked into the installed script (AC1/AC2 — config, not code).
+if grep -q '__QUAY_TMUX_SESSION__' "$PROJECT/plugin/scripts/session-liveness.sh"; then
+  fail "installed session-liveness.sh still carries the install placeholder (AC1)"
+fi
+if ! grep -q '^SESSION_TMUX_SESSION=' "$PROJECT/orchestration/session-liveness.env"; then
+  fail "orchestration/session-liveness.env lacks the generated SESSION_TMUX_SESSION (AC1/AC2)"
+fi
+echo "  session value is config (env file), not code (no placeholder in the installed script)"
 
 # ── AC6: the target project got NO npm install (self-containment) ───────────────────────────────────
 # sync-vendor.sh claims the vendored dist/quay.js is "fully self-contained (no npm install

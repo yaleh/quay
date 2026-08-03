@@ -22,9 +22,14 @@
 # 产品化要点（AC1/AC2/AC3/AC9）：
 #   - 本项目根自定位（同 inner-state.sh 的 BASH_SOURCE 惯例），不硬编码任何绝对仓库路径；
 #     SESSION_ROOT 是测试接缝（同 INNER_STATE_WORK_ROOT），生产调用方不设它。
-#   - 默认目标的目标会话名经占位符 __QUAY_TMUX_SESSION__ 在 quay-init --loop 安装时被替换
-#     （--tmux-session）；未替换（直接在 plugin 里跑源码）时按 <项目名>-0:outer 惯例回退。
-#     运行时不做任何配置解析——不碰 YAML。
+#   - 默认目标的目标会话名优先级（gap-quay-init-rewrites-an-executable-instead-of-generating-config
+#     AC1）：
+#       1. 环境变量 SESSION_TMUX_SESSION（显式设置，最高）
+#       2. orchestration/session-liveness.env（quay-init --loop 安装时生成/更新的每项目配置）
+#       3. 默认值：项目根 basename + "-0"（未配置时的回退）
+#     原则：可执行文件一律原样复制，只生成配置——quay-init --loop 已不再改写本脚本
+#     （安装期占位符机制已移除），会话名经上面的 env/配置/默认值解析；运行时不做
+#     任何配置解析——不碰 YAML。
 #   - 管理者的多目标配置落在 orchestration/session-liveness.env（管理者的东西，不进 plugin）。
 #     显式设置的环境变量 SESSION_TARGETS 优先于该文件；generic 项目没有该文件 → 零配置默认。
 #   - 阈值（INTERVAL/STALL_MIN/LOOP_MIN/OVERDUE_MIN）含义与默认值见随包的两份 tick 文档（AC5）。
@@ -72,12 +77,25 @@ if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liven
   set +a
 fi
 
-# ── 默认目标（零配置）：本项目自己的会话。目标会话名安装时被替换；未替换按 <项目名>-0 回退。 ──
-# 注意（两个已踩过的坑）：占位符必须作为【裸赋值】出现，不能嵌在 ${} 里——否则替换后的会话值
-# （含 :/.）会变成参数展开语法（${ol-cold:0.0:-}）静默产出垃圾目标；「是否已替换」的判据也不能
-# 用完整占位符做字面比较——替换会同时改写比较的右值，让比较自洽、永远走回退分支。
-_sl_session=__QUAY_TMUX_SESSION__
-if [ -z "$_sl_session" ] || [[ "$_sl_session" == __QUAY_* ]]; then
+# ── 默认目标（零配置）：本项目自己的会话。会话名优先级见文件头（env → 配置 → 默认值）。 ──
+# 注意（两个已踩过的坑，历史）：占位符曾经必须作为【裸赋值】出现、不能嵌在 ${} 里——替换后的
+# 会话值（含 :/.）会变成参数展开语法静默产出垃圾目标；「是否已替换」的判据也不能用完整占位符做
+# 字面比较。2026-08-03 起脚本不再被 quay-init 改写（可执行文件原样复制、只生成配置），这两个坑
+# 随之失去存在前提——会话名一律经 env / orchestration/session-liveness.env / 默认值解析。
+# 环境变量显式设置优先（先钉住，避免被配置文件 source 覆盖）：env > 配置 > 默认值。
+_sl_session_env="${SESSION_TMUX_SESSION:-}"
+if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$REPO_ROOT/orchestration/session-liveness.env" \
+    || echo "session-liveness: WARN 无法解析 $REPO_ROOT/orchestration/session-liveness.env，回落到默认" >&2
+  set +a
+fi
+if [ -n "$_sl_session_env" ]; then
+  SESSION_TMUX_SESSION="$_sl_session_env"
+fi
+_sl_session="${SESSION_TMUX_SESSION:-}"
+if [ -z "$_sl_session" ]; then
   _sl_session_base="$(basename "$REPO_ROOT")-0"
 else
   _sl_session_base="${_sl_session%%:*}"
