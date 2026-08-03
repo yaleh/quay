@@ -1301,3 +1301,12 @@ frontmatter-store-base 仅 7；R6 棘轮按设计行为。
 
 **现在不做的理由**：ADR-021——**证据不足时不要把策略机械化**。
 先用次序解决一次，看等待到底多贵。
+
+### 内层 tick 补充 5（2026-08-03 09:1xZ）
+
+**token A 已关闭**：fan-in 套件绿（2065 tests / 2046 pass / 0 fail / 0 cancelled）。**AC6 全路径实跑成立**——
+套件运行时 `holder=quay`，结束 EXIT trap 自动释放 → `holder=none`；scoped 不取令牌。AC7 闸失败释放实测。
+参考值 **2054 → 2065**（token 测试 +11）。telemetry --task-end done（36 完成），worktree 清理。
+
+**inner-forensics 已返回**（9aa3dd3e，AC1-AC7 全绿：引号内 test.sh 不再误归类、真实耗时、未知非 0s、
+fork 会话归属修正、已知答案窗口 02:00-02:30 恰 3 次真实套件）——**待 fan-in**（token 套件跑完才能安全合并）。

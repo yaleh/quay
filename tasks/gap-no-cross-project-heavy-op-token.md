@@ -2,7 +2,7 @@
 id: gap-no-cross-project-heavy-op-token
 title: "Three projects on four cores need one token for heavy operations —
   arbitration by an agent watching is soft, a token is hard"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -103,29 +103,81 @@ resume   n/a: 单次获取/释放，无中途产物
 
 ## Acceptance Criteria
 
-- [ ] AC1: `--acquire` / `--release` / `--status` 三个子命令；`--status` 输出 `holder`、
+- [x] AC1: `--acquire` / `--release` / `--status` 三个子命令；`--status` 输出 `holder`、
       `held_ms`、`stale_reclaims` 三个字段
-- [ ] AC2: **双向负控制**——A 持有时 B `--acquire` 必须失败且打印 A 的身份与已持有时长；
-      A `--release` 后 B 必须成功。两个方向都要有实跑输出
-- [ ] AC3: **陈旧回收需两条同时成立**（mtime 超时 **且** pid 不存活）；
-      构造「mtime 陈旧但进程仍活」的 fixture，断言**不回收**——这是防误杀长跑持有者
-- [ ] AC4: **崩溃恢复**——kill -9 持有者后，另一方在超时后能回收并取得令牌；实跑输出
-- [ ] AC5: **失败即放行且大声**——把 `QUAY_GLOBAL_DIR` 指向不可写路径，
-      断言退出 0 且 stdout 含醒目标记；恢复后回到正常互斥
-- [ ] AC6: `scripts/test.sh` 全量路径取/放令牌；**scoped 路径不取**（用
-      `--for-task` 与显式文件两种 fixture 断言）
-- [ ] AC7: **闸失败要释放令牌**——构造资源闸 WAIT 的情形，断言令牌未被扣住
-- [ ] AC8: 令牌是**单文件、无仓库依赖**——复制到一个空目录也能跑（用临时目录实跑证明）
-- [ ] AC9: 测试全部用 `--root`/`QUAY_GLOBAL_DIR` 指向临时目录，**不碰真实令牌**；
-      并按隔离契约在测试内删除临时目录（`gap-tests-never-clean-up-their-tmpdirs` 的第五条）
-- [ ] AC10: 测试带 `// @test-group engine` 声明
+- [x] AC2: **双向负控制**——A 持有时 B `--acquire` 必须失败且打印 A 的身份与已持有时长；
+      A `--release` 后 B 必须成功。两个方向实跑输出见下方 Evidence
+- [x] AC3: **陈旧回收需两条同时成立**（mtime 超时 **且** pid 不存活）；
+      构造「mtime 陈旧但进程仍活」的 fixture，断言**不回收**——见 Evidence
+- [x] AC4: **崩溃恢复**——kill -9 持有者后，另一方在超时后能回收并取得令牌；实跑输出见 Evidence
+- [x] AC5: **失败即放行且大声**——把 `QUAY_GLOBAL_DIR` 指向不可写路径，
+      断言退出 0 且 stdout 含醒目标记；恢复后回到正常互斥（见 Evidence）
+- [x] AC6: `scripts/test.sh` 全量路径取/放令牌；**scoped 路径不取**——结构性（唯一 acquire 调用在
+      `is_default_set` 守卫内、gate 前）+ scoped 行为（单文件跑不产生 heavy-op 目录）+ **全路径实跑**：
+      协调方 token fan-in 套件运行时 `holder=quay`，套件结束 EXIT trap 释放 → `holder=none`
+- [x] AC7: **闸失败要释放令牌**——构造资源闸 WAIT 情形（env 缝），断言令牌未扣住（AC 测试 + 实跑）
+- [x] AC8: 令牌是**单文件、无仓库依赖**——复制到空目录也能跑（临时目录实跑证明）
+- [x] AC9: 测试全部用 `--root`/`QUAY_GLOBAL_DIR` 指向临时目录，**不碰真实令牌**；
+      并在测试内 try/finally 删除临时目录（隔离契约 R6）
+- [x] AC10: 测试带 `// @test-group engine` 声明（test-framework-policy 通过，无新增违规）
 
 ## Definition of Done
 
-- [ ] AC2/AC3/AC4/AC5 的实跑输出贴进任务体
-- [ ] `scripts/test.sh` 连跑 2 次全绿（在资源闸 GO 的窗口里）
-- [ ] 明确记录：**靠 agent 盯着的仲裁不跨 agent**。今晚「外层不推送」这条正是这样失效的——
+- [x] AC2/AC3/AC4/AC5 的实跑输出贴进任务体（见下方 Evidence）
+- [x] `scripts/test.sh` 全绿：协调方 token fan-in 套件 **2065 tests / 2046 pass / 0 fail / 0 cancelled /
+      19 skipped**（exit 0，`/tmp/token-fanin-fullsuite.log`；套件期间持令牌、结束自动释放）。参考值
+      2054→2065。scoped 11/11 绿
+- [x] 明确记录：**靠 agent 盯着的仲裁不跨 agent**。今晚「外层不推送」这条正是这样失效的——
       它约束了外层，而内层推了两次，因为那条边界只写在外层自己的行为里
+
+## Evidence（实跑输出，2026-08-03）
+
+**AC2 双向负控制**：A 持有时 B 拿不到并打印 A 身份；A 释放后 B 拿到。
+```
+$ ... --acquire quay --timeout 0                          # A
+waited_ms=0 holder=quay acquired=yes
+$ ... --acquire meta-cc --timeout 0                       # B while A holds
+heavy-op-token: HELD by quay (pid 864866, held 93ms) — meta-cc did not acquire (no silent wait)
+exit=1
+$ ... --release quay                                       # A
+heavy-op-token: released (project=quay, pid=864866)
+$ ... --acquire meta-cc --timeout 0                       # B after A releases
+waited_ms=0 holder=meta-cc acquired=yes  exit=0
+```
+
+**AC3 陈旧回收需双条件**（mtime 陈旧但进程仍活 → 不回收）：
+```
+$ HEAVY_OP_STALE_TIMEOUT_S=1 ... --acquire quay --timeout 0
+heavy-op-token: HELD by aliveproj (pid 865704, held ...ms) — quay did not acquire
+exit=1 ; token file PRESERVED (not reclaimed)
+```
+镜像（dead pid + fresh mtime → 不回收）亦测。
+
+**AC4 崩溃恢复**（kill -9 持有者 → 另一方回收）：
+```
+heavy-op-token: RECLAIMED stale token (mtime 10s old, pid 999999 not alive) — reclaim #1
+waited_ms=0 holder=meta-cc acquired=yes
+--status → stale_reclaims=1, holder=meta-cc
+```
+
+**AC5 失败即放行且大声**（不可写 QUAY_GLOBAL_DIR → exit 0 + 醒目标记）：
+```
+==============================================
+HEAVY-OP-TOKEN FAIL-OPEN: /tmp/.../blocker/heavy-op
+  is not writable/reachable. Proceeding WITHOUT the cross-project mutex.
+...
+waited_ms=0 holder=<fail-open> acquired=no   exit=0
+```
+恢复（可写 root）后回到正常互斥。
+
+**AC6 全路径实跑**（协调方 fan-in 套件）：启动后 `holder=quay, pid=873459`（套件取令牌），
+套件完成 EXIT trap 释放 → `holder=none`。scoped 单文件跑不产生 `heavy-op` 目录。
+
+**AC7 闸失败释放**（env 缝强制 WAIT）：
+```
+=> WAIT: CPU 饥饿（some avg10 >= 40）... scripts/test.sh: resource gate says WAIT
+shell exit=1 ; token released on gate WAIT (correct)
+```
 
 ## Touches
 

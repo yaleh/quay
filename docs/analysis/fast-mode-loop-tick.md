@@ -86,7 +86,7 @@ ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=
 ```bash
 grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
-grep 'tests 2054'    # tests 数等于参考值（2026-08-03 实测 2054；套件构成每次变都要重测参考值）
+grep 'tests 2065'    # tests 数等于参考值（2026-08-03 实测 2065；套件构成每次变都要重测参考值）
 ```
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
@@ -94,7 +94,7 @@ grep 'tests 2054'    # tests 数等于参考值（2026-08-03 实测 2054；套�
 自身异步结构的触发条件（Promise 未决 + 事件循环已解决）。**判绿三条件成立的理由改为：「cancelled 是一种
 会被 fail 0 掩盖的失败」——显式查它是为了不漏掉这种失败，不是因为饥饿必然产生它。**
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）→ **+stranded +parser = 2052**
-（07:15，156 files）→ **+tmpdirs 测试隔离 R6 = 2054**（08:40，tmpdirs fan-in 套件实测）。每次合并新增/删除测试文件后，
+（07:15，156 files）→ **+tmpdirs 测试隔离 R6 = 2054（08:40）→ **+token 重操令牌 = 2065**（09:05，token fan-in 套件实测）
 参考值以最近一次全量绿的 tests 数为准。**注意 starvation 是单套件稳态（4 核跑 c8 = 4 倍过订，
 压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 40 才 GO），但套件自身跑起来压力必然 >40，
 那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/2.1))=1（4 核）；全量验证需显式
