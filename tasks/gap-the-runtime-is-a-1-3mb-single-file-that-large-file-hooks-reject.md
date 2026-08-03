@@ -1,0 +1,116 @@
+---
+id: gap-the-runtime-is-a-1-3mb-single-file-that-large-file-hooks-reject
+title: "The shipped runtime is a 1.3MB single file, so any target with a common large-file pre-commit hook cannot commit it — blocking both G0 and G2"
+status: todo
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+---
+
+**type:** execution
+
+## Proposal
+
+meta-cc 冷启动实测（管理者 2026-08-04 转达）。**产品侧缺陷**，
+`orchestration/GOAL-when-to-reinstall.md` 已知缺陷清单第 10 条。
+
+`vendor/quay/dist/quay.js` 是**单文件 1.3MB**，撞上 meta-cc 的 **pre-commit 大文件检查钩子**。
+
+外层实测：`packages/quay/dist/quay.js` = **1,329,851 字节**；
+出厂副本在 `plugin/vendor/quay/dist/quay.js`。
+
+**大文件钩子是很常见的配置，不是 meta-cc 的怪癖**——
+`pre-commit` 生态里 `check-added-large-files` 默认阈值 500KB，是最常被启用的钩子之一。
+**⇒ 任何装了它的目标项目，在提交运行时的时候都会撞。**
+
+### 外层判断：这不止是「烦人」，它同时挡住两道门
+
+| 目标方按哪条路走 | 后果 | 撞哪道门 |
+|---|---|---|
+| **不提交运行时** | 目标的落地集合与产物不同 | **G2 失败**（落地文件必须全部与产物字节相同） |
+| **改钩子/加豁免再提交** | 那是一次人工补丁 | **G0 失败**（人工补丁数必须为 0） |
+
+**⇒ 两条路都通不过，它不是可以绕过去的小事。**
+**任何「让使用者自己处理」的方案都等价于要求他打一个补丁**，而 G0 明令补丁数为 0。
+
+## Contract
+
+```
+measure runtime_bytes = `stat -c %s plugin/vendor/quay/dist/quay.js` 的字节数字段
+measure hook_rejects = `pre-commit run check-added-large-files --all-files` 在装有默认阈值钩子的目标上的失败数字段
+band hook_rejects = 0
+invariant 目标提交运行时不得需要任何人工补丁（改钩子、加豁免、加 .gitignore 例外都算补丁）
+invoke `bash plugin/scripts/quay-init.sh --loop --root <target> && git -C <target> commit -am 'add runtime'`
+control 目标装有默认阈值(500KB)大文件钩子 ⇒ 提交必须成功；人为把阈值降到 1KB ⇒ 必须失败（证明钩子真在跑）
+resume 先量出真实阈值分布与可选方案的代价，再选方案
+```
+
+## Chosen mechanism
+
+**先量再选，不要直接挑一个方案。** 候选路线各有真实代价，**必须写明取舍理由**：
+
+1. **不提交运行时，改为安装时获取**（npm 依赖 / postinstall 下载）——
+   **代价**：目标需要网络与包管理器；离线冷启动会断。
+2. **拆分产物**（多文件、每个都在阈值下）——
+   **代价**：加载复杂度；**且这只是躲开阈值，钩子阈值更低的项目仍会撞**。
+3. **运行时不进目标的 git**（放在 gitignore 的运行目录，由 init 生成）——
+   **代价**：与 G2「落地文件全部与产物字节相同」的关系要重新定义
+   （不进 git 的文件还算不算落地集合的一部分？**这一点必须先答**）。
+4. **目标声明豁免**——**已排除**：那是人工补丁，G0 明令为 0。
+
+**外层倾向 3，但不替实现者决定**：它最贴近「运行时是产物不是源码」这个事实；
+**但它要求先把 G2 的「落地集合」定义讲清楚**，否则会变成用一个定义漏洞换一次通过。
+
+**不做**：不要求目标改自己的钩子配置（**那是把交付物的问题推给使用者**）；
+不用 `.gitignore` 例外或 `--no-verify` 绕过（**同上，且 `--no-verify` 会连带跳过目标自己的其它检查**）。
+
+## Acceptance Criteria
+
+- [ ] AC1: **真实阈值调查**——常见大文件钩子的默认阈值（至少 `pre-commit` 的
+      `check-added-large-files`）与本产物大小的对照，写进任务体
+- [ ] AC2: **方案选择有理由**——从上面四条里择一（或提出第五条），
+      **写明代价与被放弃的原因**；若选方案 3，**必须先回答「不进 git 的文件算不算落地集合」**
+- [ ] AC3: **正向**——在装有默认阈值钩子的一次性目标上，
+      照文档跑完 ⇒ **提交成功、零人工补丁**（实跑输出贴任务体）
+- [ ] AC4: **钩子真在跑的负控制**——把阈值人为降到 1KB ⇒ **必须失败**。
+      **这条不过，AC3 不算数**——**一个没被证明会拒绝的钩子，与没装钩子不可区分**
+- [ ] AC5: **离线负控制**——若选方案 1，必须证明离线目标仍能冷启动，或**明确声明不支持离线**并写进 README
+- [ ] AC6: **与 G2 的关系明确**——本方案落地后，
+      G2 的「落地文件全部与产物字节相同」判据**怎么算**，写进任务体与 SPEC
+- [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
+
+## Definition of Done
+
+- [ ] AC3 与 AC4 两个方向的实跑输出都贴进任务体
+- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+- [ ] 任务体记录：**「让使用者自己处理」等价于要求他打一个补丁，而 G0 明令补丁数为 0**
+
+## Touches
+
+- plugin/scripts/quay-init.sh
+- packages/quay/scripts/build-dist.mjs
+- plugin/test/quay-init-loop.test.mjs
+- orchestration/GOAL-when-to-reinstall.md
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-04T00:00:00Z
+changed: 管理者转 meta-cc 冷启动新出的第 10 条交付缺陷。
+**外层实测证实规模**：`packages/quay/dist/quay.js` = **1,329,851 字节**，出厂副本在
+`plugin/vendor/quay/dist/quay.js`。
+**外层的主要判断是把它从「烦人」提到「同时挡住两道门」**：
+目标若**不提交运行时** ⇒ 落地集合与产物不同 ⇒ **G2 失败**；
+若**改钩子或加豁免再提交** ⇒ 那是一次人工补丁 ⇒ **G0 失败**。
+**⇒ 两条路都通不过，它不是可以绕过去的小事**，
+且**任何「让使用者自己处理」的方案都等价于要求他打补丁**，而 G0 明令为 0。
+**机制段列了四条候选并各写代价，明确排除了「目标声明豁免」**（那正是人工补丁）。
+**外层倾向方案 3（运行时不进目标 git）但不替实现者决定**，
+**并把它的前置问题写死**：「不进 git 的文件还算不算落地集合的一部分」必须先答——
+**否则会变成用一个定义漏洞换一次 G2 通过**，那与本仓今晚反复记录的
+「换个名字继续绕」是同一族。
+**AC4 是真判据**：把阈值降到 1KB 必须失败——
+**一个没被证明会拒绝的钩子，与没装钩子不可区分**，
+不先证明这一点，AC3 的「提交成功」可能只是钩子根本没跑。
