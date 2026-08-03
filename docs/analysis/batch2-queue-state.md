@@ -556,6 +556,16 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 - **worktree 全量在跑**（`binlxixpl`，155 files selected = 173-18 删除的测试，~7min）
 - 全量绿 → merge retire → 关 retire（`--task-end` 0b3l2x）
 
+### Tick 更新（05T03:48Z）：retire 关闭 —— 首次真实收缩完成
+
+- **retire merged**（`8cc5efd3`）：**80 文件 +547/-24195（净 -23648 行）**——首次大规模负净行数，
+  **解冻判据「任务图首次收缩」达成**。worktree 全量绿（2034/2015/0/20，155 files）。`--task-end` 0b3l2x
+- **参考值 2436 → 2034**（删除 18 个测试文件）。Land `--snapshot` 已写
+- **P0 删除算子全部完成**：inventory（表）→ reclaim（19 worktree 回收 + M277/M243）→ retire（-23648 行）
+- **P1 全部完成**：resource-awareness（资源闸）+ serve-task-list（页面不再 500）
+- **下一批候选**：P0#4 stranded-worktree（reclaim 落地后可派）+ P1#4 web-cannot-show + 新 parser 任务
+  （gap-task-body-has-n-parsers-and-no-authority，排 P1 后）。在飞 0，可补派
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
