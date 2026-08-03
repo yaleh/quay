@@ -44,8 +44,8 @@ extra:
 ## Contract
 
 ```
-measure payload_absent_result = 载荷被人为移除后该测试的结果字段（red/green）
-measure window_ms = 该断言的等待窗口毫秒字段
+measure payload_absent_result = `scripts/test.sh plugin/test/session-liveness.test.mjs` 在载荷被移除后输出的 fail 计数字段
+measure window_ms = `grep -nE 'RESUMED.*(2500|25000|25s)' plugin/test/session-liveness.test.mjs` 命中的等待窗口毫秒字段
 band payload_absent_result = red
 invariant 放宽等待窗口只能改变「等多久」，不得改变「不满足时会不会红」
 invoke `scripts/test.sh plugin/test/session-liveness.test.mjs`
