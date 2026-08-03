@@ -74,13 +74,6 @@ export function readFileSafe(p: string): string {
   }
 }
 
-/** Regex that matches a candidate `node:test` import (ESM `import ... from "node:test"` / bare
- * `import "node:test"`, plus a CJS `require("node:test")`). A match alone is NOT proof — the
- * caller must also confirm the keyword sits in CODE (not a comment/string) via the mask. */
-export function nodeTestImportRE(): RegExp {
-  return /(?:import[\s\S]{0,500}?from\s*["']node:test["']|import\s*["']node:test["']|require\(\s*["']node:test["']\s*\))/g;
-}
-
 /** Keywords after which a `/` unambiguously starts a regex literal (the standard lexer heuristic;
  * `return /re/` must not be read as division). */
 const REGEX_PRECURSOR_KEYWORDS = new Set([
