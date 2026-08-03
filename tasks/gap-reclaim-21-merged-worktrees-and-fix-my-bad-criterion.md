@@ -160,6 +160,19 @@ git diff --name-only --diff-filter=A 2c980b53^1..2c980b53  →  83 files（workf
 - `git worktree list` 只剩主检出 + 20 个保留的 milestone worktree + 3 个 /tmp 任务 worktree，全部正常注册
 - `git branch --list 'milestone/*'` 只剩 20 个保留分支（M243、M277 已删，M239 在列）
 
+## 外层确认（2026-08-03T04:5xZ，人裁定——这是正确结果，不是失败）
+
+**19 个保留的 milestone worktree 含 34 项从未落地的工作**（外层实测）：5 个任务文件只存在于 worktree、
+master 上没有且未 git 跟踪（`tasks/DIR-124-F1.md`、`F2.md`、`F5.md`、`F6.md`、`gap-build-evidence-path.md`）+
+14 份 `docs/plans/M2xx-*.md`——对 task list / web UI / 漂移检查器全部不可见。
+
+**三闸实测（外层）**：Gate 1 通过 19 个（M239 被正确拦下，领先 2 commits）；**Gate 2 全部拦下 19 个**
+（每个 worktree 都有未提交内容）⇒ **净可回收是 0，1.1G 不会被释放**。
+
+**裁定**：reclaim 按现状执行**没有错**——Gate 2 拒绝删除有未提交内容的 worktree 正是它该做的。
+**不放松 Gate 2、不加 `--force`**——那会销毁这 34 项工作。如实记录：**净回收 = M277(~51M) + M243 悬挂
+分支；其余 19 个因含未落地工作被正确拒绝**。34 项工作已升级给人裁定去留。
+
 ## Touches
 
 - plugin/scripts/milestone-worktree.ts
