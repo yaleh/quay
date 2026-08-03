@@ -108,6 +108,34 @@ quay 的外层在同样情形下会**并行派发文件不相交的任务**（`.
 **⇒ 目标项目会拿到一个声明了并发、却没有并发判据的配置。** 这比没有并发更糟：配置说 4，实际是 1，
 而没有任何东西报错。
 
+
+### 第三个实测危害：没有「怎么等」的机制，外层退化成忙等
+
+人 2026-08-03 观察到 archguard 外层在**高频紧循环**执行
+`tmux capture-pane -p -t archguard-2:0.0 | md5sum`——三次调用之间只隔几秒。
+
+**成因是管理者给了方法却没给节奏**：上一 tick 纠正它「capture-pane 只用于判忙闲
+（两次 md5sum 相同 = 空闲）」，它照做，于是变成了轮询。
+
+quay 的外层**不轮询**：`orchestration/watch/inner-state.sh` + Monitor 是**事件驱动**的，
+状态变化才唤醒。archguard 两样都没有（`inner-state.sh` 在缺失清单第 2 条）。
+
+**⇒ 「外层怎么观察内层」本身是一个必须随包走的机制，不是 tick 文档里的一句散文。**
+人明确要求：「这也应该有 skill 解决。」
+
+## 一条关于本任务自身的证据：散文阻止不了复发
+
+管理者在 `orchestration/manager-loop-tick.md` 的失效表里写下
+「**管道后读 `$?`** —— 要退出码就不要管道」，**十分钟后又犯了第三次**
+（`bash restart-readiness-check.sh | tail | sed` 之后 `echo $?`，读到的是 `sed` 的 0，
+而检查本身报的是 `NOT READY`）。
+
+今晚这一族共三次：archguard 的 lint（读成 exit 0，实为 1）、
+restart-readiness-check（读成 0，实为失败）、以及最初的那次。
+
+**这正是 ADR-004「硬检查优于散文」的自证**：把规则写进文档不能阻止它复发。
+所以本任务铺设的机制里**必须包含机械检查**，而不是只铺文档。
+
 ## Contract
 
 ```
@@ -158,7 +186,13 @@ resume   每铺完一类资产即记一次，中断可续
       `batch2-queue-state.md`、`orchestration/exp6-*`、`adr/ADR-021-*`
 - [ ] AC8: `test/cold-start-e2e.sh` 在**把 quay 开发树改名后**仍走通，退出码 0，实跑输出贴任务体
 - [ ] AC9: README 有冷启动小节，命令序列条数少到能列在 README 里
-- [ ] AC10: 测试带 `// @test-group governance` 声明
+- [ ] AC10: **观察机制随包走**——`inner-state.sh` + Monitor 的挂载方式作为
+      `quay-init --loop` 铺设内容的一部分，且 tick 文档里「怎么等」这一段
+      **指向机制而非描述做法**（负控制：铺完后目标项目能事件驱动地等，
+      不需要外层自己发明轮询节奏）
+- [ ] AC11: **一个机械检查取代一条散文规则**——至少把「管道后读 `$?`」
+      做成可执行检查（今晚同一族错误三次，其中一次发生在把规则写进文档之后十分钟）
+- [ ] AC12: 测试带 `// @test-group governance` 声明
 
 ## Definition of Done
 
