@@ -1496,3 +1496,12 @@ AC1b = qinit 引入的 verify-installed-executables.sh 旧 tick 文档路径，�
    fail-closed（语料非空下限/显式报没匹配），通用形态不只 loop-shipping（已有守卫）。
 
 **在飞 2/3**。等待 agent 完成（session-liveness 阶段一先报）。
+
+### 补派（2026-08-03 16:0xZ）：unparseable-task board（在飞 2→3）
+
+`gap-one-unparseable-task-takes-down-the-whole-board`（`/tmp/quay-wt-board`，agent aafe3b11...，fm-...-oz4y5q）。
+闸口 0 新增；与 liveness、emptyset 均 DISJOINT。线上故障（/ 500 而 /live /journal /adr 200，title 未引号含
+## Contract 截断）。改动位置 = provider task_list（返回可解析任务 + 机器可读失败清单，**不删 throw**——
+throw 注释写明它挡的是「isError 静默强转空数组把真实失败和合法任务一起藏」。AC5 双向负控制硬要求；
+AC6 用真 yaml.parse 全库扫（管理者形状粗查得 0 是错的）；265/605 标题含 #/:（写入侧是姊妹任务）。
+**在飞 3/3**。
