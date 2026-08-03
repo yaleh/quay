@@ -65,6 +65,30 @@ extra:
 
 **明确不做**：不基于本次结果**立即**改 test.sh 默认（那是另一个决策，需要本任务的数据 + 外层裁定）。
 
+## Contract
+
+```
+# 回填（gap-dispatch-gate-has-no-checklist-and-no-trace AC4）：2026-08-02 外层在闸口/执行中对本任务的
+# 四次介入，用六个键逐条表达。当时没有这个块——这四句是「口头问」的机器可消费回填。
+measure   suite_wall    = `scripts/test.sh` stdout 的 duration_ms 字段      # duration_ms 就是墙钟本身，非 Σ 每文件（外层口径定死 22:06）
+band      noise         = 20–63s（20000..63000 ms）                        # 实测噪声带宽，阈值判显著的分母
+invariant selected_files = 163（6 次运行必须完全一致）                       # 只改并发不改选择集；N 变则差异不可归因
+invoke    `scripts/test.sh --test-concurrency=4`                          # 必须 `=`；空格形式走 explicit-file 分支，静默换选择集
+control   把并发改回 8 ⇒ 判定结论必须不成立                                   # 负控制：并发度是唯一变量，其余钉死
+resume    每跑完一次即增量写盘                                              # 中断保全；触到 90 分钟阈值即整批作废
+```
+
+## Dispatch review
+
+> 回填：这是当时那次介入的留痕。清单项在 ## Contract 里，这里只记「谁审的、改了什么」。
+
+reviewer: outer
+at: 2026-08-02T22:06:00Z
+changed: 1. 要求 6 次运行 selected N files 完全一致（`invariant selected_files`）
+         2. 只用 `=` 拼写，空格形式走 explicit-file 分支（`invoke`）
+         3. duration_ms 就是墙钟本身，不是 Σ 每文件；墙钟判定只用 marker-to-marker（`measure suite_wall` / `band noise`）
+         4. 每跑完一次即增量写盘（`resume`）
+
 ## Acceptance Criteria
 
 - [x] AC1: 同一 commit 上 `--test-concurrency=4` 与 `=8` 各至少 3 次全量跑，墙钟全部记录（6 次，见 Measurement log）

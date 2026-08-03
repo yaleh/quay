@@ -267,6 +267,44 @@ node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/script
 
 **本机制不让内层自动恢复**——内层仍然停、仍然等裁定，只是现在能说出自己停了（任务 DoD 明记）。
 
+## 派发闸口的清单与留痕：`## Contract` + `## Dispatch review`（强制，gap-dispatch-gate-has-no-checklist-and-no-trace）
+
+2026-08-02 的外层闸口介入是**惯例不是机制**——没有清单、没有留痕、没有触发条件。现在它变成
+**任务创建时写下的、机器能消费的声明**。内层（本文件）与外层（orchestrator-loop-tick.md）都要执行：
+
+**建任务时**（内层）：fast-mode 执行型任务应写一个 `## Contract` 块（`## Chosen mechanism` 之后），
+六个键，每个都能指回一次真实介入，不预先扩充：
+
+```bash
+## Contract
+
+measure   suite_wall  = `scripts/test.sh` stdout 的 duration_ms 字段   # 单次墙钟，非 Σ 每文件
+band      noise       = 20–63s（20000..63000 ms）                       # 实测基线
+invariant selected_files = 163                                          # 变了则差异不可归因
+invoke    `scripts/test.sh --test-concurrency=4`                        # 必须 `=`；空格形式走另一分支
+control   把并发改回 8 ⇒ 判定必须不成立                                    # 负控制
+resume    每跑完一次即写盘                                               # 中断保全
+```
+
+`n/a: <理由>` 是每个键的合法值；**留白不是**（留白与「没想过」不可区分，与 `reviewer: none` 同一条原则）。
+`## Dispatch review` 段记录「谁审的、改了什么」（`reviewer: outer|none` / `at: <ISO>` / `changed: <逐条|无>`）；
+`reviewer: none` 合法——不是每个任务都需要过闸，但「没过闸」必须是被记录的选择。
+
+**派发前/关任务前**（外层）：跑消费者检查器，读**内容**不只验存在：
+
+```bash
+node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <repo> [--json]
+```
+
+- 五条消费者判定：AC 阈值必须引用已声明的 measure/band 名；measure 必须同时含命令与字段名；
+  invoke 必须反引号命令、done 任务证据逐字出现；defect 任务必须有 control；键空值报出
+- **报出而不阻断**；违规名单是数据文件 `docs/analysis/contract-violations.md`，**只能变短**
+  （检查器对新增违规退出 1，对既有违规只报不挡）
+- 匹配按代码/字段位置（declared name / field token），不按文本——今晚 7 次「匹配到注释而非它本身」
+  的教训
+
+**不做**：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线。
+
 ## 测试不得硬编码全局计数
 
 `EXPECTED_ENGINE = 58` 这类断言在任何人新增一个测试文件时都会红。B3-2 的三个失败里有一个正是

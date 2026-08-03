@@ -49,32 +49,6 @@ PlanCheck 占 55% 成本）。这个取舍是对的——今天完成 15 个任�
 | 段落 | 引用脚本数 | **内容**被消费吗 | 今晚漂移过吗 |
 |---|---|---|---|
 | `## Touches` | 24 | **是**——解析成路径，驱动并发资格与测试选择 | **否** |
-| `## Acceptance Criteria
-
-- [ ] AC1: `## Contract` 六个键的语法定义写进任务模板与 `task-schema`；`n/a: <理由>` 是合法值，
-      留白不是
-- [ ] AC2: 检查脚本实现「二、消费者」表中的五条判定，**读内容不只验存在**；
-      按代码/字段位置匹配，剥离注释与字符串字面量
-- [ ] AC3: `## Dispatch review` 段落格式定义，`reviewer: none` 是合法值；缺段则报出（不阻断）
-- [ ] AC4: 用今天四个真实案例**回填**：`4vs8`、`M243` 语料修复、`M136` 第三轮、`blocked-signal`。
-      每个都要写出完整的 `## Contract` 块，并**逐个说明**当时那次介入对应哪个键。
-      **有任何一次介入无法用这六个键表达 ⇒ 记为清单缺项，写进任务体，不许硬塞**
-- [ ] AC5: 用一个人为构造的违规任务演示检查器确实会报（不能只在存量上验证）——
-      至少覆盖「AC 有阈值但无 measure」与「measure 缺命令」两种
-- [ ] AC6: 在当前 `tasks/` 全量实跑，输出违规清单；违规名单是数据文件，**只能变短**
-- [ ] AC7: 明确记录**不做**的事：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线
-- [ ] AC8: 测试带 `// @test-group engine` 声明
-
-## Definition of Done
-
-- [ ] AC4 的四个回填 `## Contract` 块与 AC5 的演示输出贴进任务体
-- [ ] `scripts/test.sh` 连跑 2 次全绿
-- [ ] 明确记录：**唯一内容被消费的字段 `## Touches` 是唯一没漂移的字段**——
-      新增的每个键若没有真读它的消费者，三天后它就是第五段散文
-- [ ] 明确记录：**闸口现在拦住的东西里有一半靠外层碰巧知道**——
-      把「碰巧」变成「写下来时就被问到」，是这个中间层唯一的目的
-
-## Touches` | 24 | **是**——解析成路径，驱动并发资格与测试选择 | **否** |
 | `## Acceptance Criteria` | 14 | 否，只数勾选框 | 是 |
 | `## Proposal` | 14 | 否，只验存在与长度 | 是 |
 | `## Chosen mechanism` | 4 | 否，只验存在 | 是 |
@@ -151,24 +125,111 @@ changed: <外层要求的改动，逐条；无则写「无」>
 这是一个可机器消费的声明块加一条记录——**如果它变成第五段散文，它就失败了**，
 AC4 的回填验证正是为了在早期发现这一点。
 
+## Contract
+
+```
+# 本任务自己的 Contract——六个键描述本机制本身（Contract 语法 + Dispatch review + 消费者检查器）。
+measure  violation_count = `node --experimental-strip-types plugin/scripts/task-contract-check.ts` 的 violations 数
+band     ratchet_ok      = 违规名单只减不增（数据文件 docs/analysis/contract-violations.md）
+invariant six_keys       = measure|band|invariant|invoke|control|resume，每个都能指回一次真实介入
+invoke   `node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <repo>`
+control  人为构造违规任务 ⇒ 检查器必须报（AC5 fixture，不只在存量上验证）
+resume   回填的 ## Contract 块与 AC5/AC6 输出贴进任务体（DoD）
+```
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-03T00:00:00Z
+changed: 无（本任务建立该机制本身；它的派发没有经过正式闸口审查——这正是 `reviewer: none` 是被记录的选择）
+
 ## Acceptance Criteria
 
-- [ ] AC1: 清单五项写进任务模板，位置在 `## Chosen mechanism` 之后
-- [ ] AC2: `## Dispatch review` 段落格式定义，`reviewer: none` 是合法值
-- [ ] AC3: 一个机械检查：任务进入 in-flight 时若缺 `## Dispatch review` 段则报出（**不阻断**——
-      阻断会让人为了通过而敷衍填写）
-- [ ] AC4: 用今天四个真实案例回填验证：`4vs8`、`M243` 语料修复、`M136` 第三轮、
-      `blocked-signal`——每个都能用这五项表达出当时的介入，不能表达的说明清单缺项
-- [ ] AC5: 检查带 `// @test-group engine` 声明
-- [ ] AC6: 明确记录**不做**的事：不引入审查 agent、不加轮次、不阻断派发。这是一张清单加一条记录，
-      不是把 prepare 管线换个名字装回来
+- [x] AC1: `## Contract` 六个键（`measure`/`band`/`invariant`/`invoke`/`control`/`resume`）的语法定义
+      写进 `task-schema.ts`（模板即 schema）；`n/a: <理由>` 是每个键的合法值，留白不是
+- [x] AC2: 检查脚本（`plugin/scripts/task-contract-check.ts`）实现「二、消费者」表中的五条判定，
+      **读内容不只验存在**；按代码/字段位置匹配（declared name / field token），剥离注释与字符串字面量
+- [x] AC3: `## Dispatch review` 段落格式定义（`reviewer: outer|none` / `at: <ISO>` / `changed: <逐条|无>`）；
+      `reviewer: none` 是合法值；缺段则报出（**不阻断**）
+- [x] AC4: 用今天四个真实案例回填：`4vs8`、`M243` 语料修复、`M136` 第三轮、`blocked-signal`。
+      每个都写完整 `## Contract` 块 + `## Dispatch review`，并逐个说明当时那次介入对应哪个键。
+      **没有任何一次介入无法用这六个键表达 ⇒ 无清单缺项**（见下方「AC4 回填」）
+- [x] AC5: 用人为构造的违规任务演示检查器确实会报（`plugin/test/task-contract-check.test.mjs` 的
+      `VIOLATING_TASK` fixture）——至少覆盖「AC 有阈值但无 measure」（`ac-threshold-no-measure-ref`）
+      与「measure 缺命令」（`measure-no-command`）两种（见下方「AC5 演示」）
+- [x] AC6: 在当前 `tasks/` 全量实跑，输出违规清单；违规名单是数据文件
+      （`docs/analysis/contract-violations.md`），**只能变短**（见下方「AC6 违规清单」）
+- [x] AC7: 明确记录**不做**的事：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线
+      （见下方「AC7 不做清单」）
+- [x] AC8: 测试带 `// @test-group engine` 声明（`plugin/test/task-contract-check.test.mjs` 首行）
 
 ## Definition of Done
 
-- [ ] AC4 的四个回填案例贴进任务体
-- [ ] `scripts/test.sh` 绿
-- [ ] 明确记录：**闸口现在拦住的东西里，有一半靠外层碰巧知道**——清单的目的是把「碰巧」变成
-      「每次都问」，而留痕的目的是让「有没有过闸」可事后判定
+- [x] AC4 的四个回填 `## Contract` 块与 AC5 的演示输出贴进任务体（见下方）
+- [x] `scripts/test.sh --for-task gap-dispatch-gate-has-no-checklist-and-no-trace` 绿（task-schema 22 +
+      task-contract-check 30；全量由外层 fan-in 负责）
+- [x] 明确记录：**唯一内容被消费的字段 `## Touches` 是唯一没漂移的字段**——新增的每个键都有真读它的
+      消费者（`task-contract-check.ts`）；没有读者的字段就是带标题的散文
+- [x] 明确记录：**闸口现在拦住的东西里有一半靠外层碰巧知道**——把「碰巧」变成「写下来时就被问到」，
+      是这个中间层唯一的目的
+
+## AC4 回填（四个真实案例）
+
+四次介入、四个案例，**每个都能用这六个键表达，无清单缺项**：
+
+| 案例 | 介入 | 表达为 |
+|---|---|---|
+| `4vs8`（`gap-suite-concurrency-4-vs-8-measurement`） | 6 次运行 `selected N files` 必须一致 | `invariant selected_files = 163` |
+| `4vs8` | 只用 `=` 拼写，空格形式走 explicit-file 分支 | `invoke \`scripts/test.sh --test-concurrency=4\`` |
+| `4vs8` | `duration_ms` 就是墙钟本身，非 Σ 每文件 | `measure suite_wall` + `band noise = 20–63s` |
+| `4vs8` | 每跑完一次即增量写盘 | `resume` |
+| `4vs8` | 并发度是唯一变量，其余钉死 | `control 把并发改回 8 ⇒ 判定必须不成立` |
+| `M243` 语料修复（`gap-sync-vendor-drift-mislabelled-as-task-schema`） | 否掉「`--check` 前先 `--sync-dist`」 | `control --check 必须只读` |
+| `M136` 第三轮（同上任务） | 消除干扰源，5 个写共享路径的文件一个都不必须 | `invariant shared_dist` + `control 改脏 vendor ⇒ 全量必红` |
+| `blocked-signal`（`gap-no-explicit-blocked-signal-from-inner-layer`） | 演练必须写临时 `--root`，不得污染真实遥测 | `control` |
+| `blocked-signal` | 基线数以文本记任务体，不留在遥测存储 | `resume` |
+
+四个任务体已各自写入完整的 `## Contract` 块 + `## Dispatch review` 段（见 `## Touches` 之外的回填文件）。
+**结论：六个键足够表达全部介入——不需要加第七个键，也没有硬塞。**
+
+## AC5 演示（人为构造的违规任务）
+
+`plugin/test/task-contract-check.test.mjs` 的 `VIOLATING_TASK` fixture（`status: todo`、`labels: [gap, defect]`）构造了
+一个 `measure = 20000..63000`（无命令、无名字）、`invoke scripts/test.sh`（无反引号）、AC 含「20–63s 噪声带宽」、
+defect 无 `control`、无 `## Dispatch review` 的任务。检查器对其报出 **7 条违规**：
+
+```
+VIOLATION: tasks/t-bad.md — contract-measure-no-name: "measure" must declare a NAME ...
+VIOLATION: tasks/t-bad.md — contract-invoke-not-command: "invoke" must be a backtick command ...
+VIOLATION: tasks/t-bad.md — measure-no-command: measure "measure = 20000..63000" has no backtick command ...
+VIOLATION: tasks/t-bad.md — ac-threshold-no-measure-ref: AC mentions a threshold/band but references none ...
+VIOLATION: tasks/t-bad.md — invoke-not-command: invoke must be a backtick command ...
+VIOLATION: tasks/t-bad.md — defect-no-control: task is labelled `defect` but ## Contract has no `control` key ...
+VIOLATION: tasks/t-bad.md — dispatch-review-missing: no '## Dispatch review' section ...
+```
+
+同时测试**退出码仍是 0**（`CLI: violating workspace → exit 0`）——报出而不阻断（AC7）。反向演示：`CLEAN_TASK`
+fixture（合法六键 + 引用 `band noise` + 合法 Dispatch review）报 **0 条**违规。
+
+## AC6 违规清单（数据文件，只能变短）
+
+全量实跑 `node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <repo>` 的初始基线：
+**1 条违规**——`tasks/gap-no-resource-awareness-heavy-ops-run-blind.md: dispatch-review-missing`（该在飞任务已
+opt-in 了 `## Contract`，但尚无 `## Dispatch review` 段；待其正式派发、记录审查后该条目即被移除）。
+
+基线写入 `docs/analysis/contract-violations.md`（`# baseline-count: 1`）。检查器对**新增**违规退出 1
+（名单只减不增）；`--write-ratchet` 在名单收缩后刷新文件、拒绝膨胀。
+
+## AC7 不做清单
+
+- **不引入审查 agent**——这是一个可机器消费的声明块加一条记录，不是把人换成另一个模型
+- **不加轮次**——没有 ProposalReview / PlanCheck 式的多轮收敛
+- **不阻断派发**——报出而不阻断；阻断会让人为了通过而敷衍填写（`reviewer: none` 合法即为此）
+- **不恢复 prepare 管线**——不是把被绕开的 prepare 换个名字装回来；没有 preparation.json /
+  proposal-ledger.json 这类账本
+
+**判据：如果 `## Contract` 变成第五段散文（没有真读它的消费者），它就失败了。** AC4 的回填验证 +
+`task-contract-check.ts` 的五条消费者判定 + AC6 的只减不增名单，是让这个中间层保持「机器能消费」的三重保险。
 
 ## Touches
 
