@@ -371,6 +371,9 @@ export function checkGapWiringCoverage(task) {
 // ── Assertion A8: Touches declaration — must be present & well-formed on execution-type tasks. ──────
 // Import isOverbroadDeclaration from the single-source module (ADR-004).
 import { isOverbroadDeclaration } from "./touches-orthogonality-check.ts";
+// SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
+// The validator's glob extraction delegates here too — there is no separate inline parse.
+import { parseTouchEntries } from "./touches-parser.ts";
 
 // TYPE_EXEC_RE matches a `type: execution` line in the charter body (same regex as
 // concurrent-batch-scheduler.ts's parseCandidate, for determinism).
@@ -404,29 +407,63 @@ export function checkTouches(task, kind) {
     return { ok: true, code: "touches-absent-info", message: "INFO: type:execution but no '## Touches' section — task can run serial but CANNOT be batched concurrently" };
   }
   // Parse glob lines from the ## Touches section (bullet list: `- <glob>` or `* <glob>`).
-  const globs = [];
-  for (const line of sec.split(/\r?\n/)) {
-    const m = line.match(/^\s*[-*]\s+(.+?)\s*$/);
-    if (!m) continue;
-    let g = m[1].trim();
-    if (g.startsWith("`") && g.endsWith("`")) g = g.slice(1, -1);
-    g = g.trim();
-    if (g) globs.push(g);
-  }
+  // SINGLE-SOURCE: parseTouchEntries is the ONE shared Touches bullet parser — the validator does
+  // NOT carry its own copy. The old inline parse only stripped backticks when BOTH ends were
+  // backticked, so `` - `foo.ts` (new) `` stayed a single weird glob `"`foo.ts` (new)"`; the shared
+  // parser strips quotes/backticks before AND after the trailing "(…)" annotation strip.
+  const globs = parseTouchEntries(sec);
   if (globs.length === 0) {
-    return { ok: false, code: "touches-empty", message: "## Touches section is present but has zero non-empty glob lines — ill-formed (add concrete paths or remove the section)" };
+    return { ok: false, code: "touches-empty", message: "## Touches section is present but has zero non-empty glob lines — ill-formed (add concrete paths or remove the section)", globs };
   }
   // Validate each glob: no overbroad declarations.
   const overbroad = globs.filter((g) => isOverbroadDeclaration(g));
   if (overbroad.length > 0) {
-    return { ok: false, code: "touches-overbroad", message: `## Touches has overbroad glob(s): ${overbroad.map((g) => `"${g}"`).join(", ")} — need >=2 concrete leading path segments before any wildcard, or an exact path` };
+    return { ok: false, code: "touches-overbroad", message: `## Touches has overbroad glob(s): ${overbroad.map((g) => `"${g}"`).join(", ")} — need >=2 concrete leading path segments before any wildcard, or an exact path`, globs };
   }
   // Validate no empty-expansion globs (globs ending in `/` with no wildcard resolve to nothing).
   const dubious = globs.filter((g) => g.endsWith("/") && !/[?*]/.test(g));
   if (dubious.length > 0) {
-    return { ok: false, code: "touches-dubious", message: `## Touches has dubious glob(s): ${dubious.map((g) => `"${g}"`).join(", ")} — trailing-slash without wildcard may expand to nothing (likely a typo)` };
+    return { ok: false, code: "touches-dubious", message: `## Touches has dubious glob(s): ${dubious.map((g) => `"${g}"`).join(", ")} — trailing-slash without wildcard may expand to nothing (likely a typo)`, globs };
   }
-  return { ok: true, code: "touches-wellformed", message: `## Touches well-formed with ${globs.length} glob(s)` };
+  return { ok: true, code: "touches-wellformed", message: `## Touches well-formed with ${globs.length} glob(s)`, globs };
+}
+
+// ── Assertion A11 (REPORT-ONLY): no non-bullet content inside `## Touches` ──────────────────────────
+// DIR-124-F1's claim, softened to report-only this window (AC6, gap-task-body-has-n-parsers-and-
+// no-authority): content inside the `## Touches` section that is NOT a bullet entry (prose,
+// grounded facts, an illustrative fenced block, a stray horizontal rule) sits where a Touches
+// parser will either ignore it or — worse — misread it as a Touches entry. repo-ground-truth.md
+// §3 already grounds the fact: "Content appended AFTER `## Touches` is parsed as Touches entries
+// and can trip touches-overbroad — grounded facts must live in `## Finding`, never after
+// `## Touches`." This check REPORTS such content (a finding, never a FAIL); blocking is deferred
+// to the next window, with the shrink-only violator list (plugin/touches-post-content-violators.txt)
+// as the ratchet baseline.
+export function checkTouchesPostContent(task) {
+  const sec = extractSection(task.body, "Touches");
+  const findings = [];
+  if (sec === null) {
+    return { ok: true, code: "touches-post-content-na", message: "no '## Touches' section — post-content check not applicable", findings };
+  }
+  const bad = [];
+  for (const raw of sec.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^[-*]\s+/.test(line)) continue;   // a Touches bullet
+    if (/^#{1,6}\s/.test(line)) continue;  // a (nested) heading
+    bad.push(line);
+  }
+  if (bad.length > 0) {
+    findings.push({
+      code: "touches-post-content",
+      what: `non-bullet content inside '## Touches': ${bad.map((l) => JSON.stringify(l.length > 60 ? `${l.slice(0, 60)}…` : l)).join(", ")} — grounded facts/prose belong in '## Finding', never after '## Touches'`,
+    });
+  }
+  return {
+    ok: true,
+    code: bad.length > 0 ? "touches-post-content-report" : "touches-post-content-clean",
+    message: bad.length > 0 ? `INFO: '## Touches' has ${bad.length} non-bullet content line(s) — see findings (report-only this window)` : "no non-bullet content inside '## Touches'",
+    findings,
+  };
 }
 
 // ── extractSectionFenceAware — like extractSection, but ignores headings INSIDE fenced code blocks. ──
@@ -621,6 +658,7 @@ export function checkTask(fullText) {
   // block; the violation list can only shrink).
   const contract = checkContractSyntax(task);
   const dispatchReview = checkDispatchReview(task);
+  const touchesPostContent = checkTouchesPostContent(task);
   const results = kind === "gap"
     ? [
         checkGapFinding(task),
@@ -632,6 +670,7 @@ export function checkTask(fullText) {
         checkGapRequestedAction(task),
         checkGapWiringCoverage(task),
         checkTouches(task, kind),
+        touchesPostContent,
         contract,
         dispatchReview,
       ]
@@ -644,12 +683,13 @@ export function checkTask(fullText) {
         checkNoScaffolding(task),
         checkDirectiveSections(task, kind),
         checkTouches(task, kind),
+        touchesPostContent,
         contract,
         dispatchReview,
       ];
   const failures = results.filter((r) => !r.ok);
   const warnings = results.filter((r) => r.code === "touches-absent-info" || r.code === "touches-absent-milestone-candidate");
-  const findings = [...contract.findings, ...dispatchReview.findings];
+  const findings = [...contract.findings, ...dispatchReview.findings, ...touchesPostContent.findings];
   return {
     marker: true,
     kind,

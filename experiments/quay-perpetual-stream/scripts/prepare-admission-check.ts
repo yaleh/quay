@@ -41,6 +41,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseArgs, isDirectEntry } from "./gate-script-base.ts";
 import { extractSection, checkTouches, countBoxes } from "./task-schema.ts";
+// SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
+import { parseTouchEntries } from "./touches-parser.ts";
 import { splitSentences } from "./wiring-coverage-check.ts";
 // parsePlanStages / validatePlanStructure are inlined below (retired from
 // ./milestone-preparation-check.ts at gap-retire-the-prepare-execute-pipeline-cluster).
@@ -411,7 +413,7 @@ function _scanStaleReferences(text, workspace, touchesGlobs) {
       // annotation INSIDE the same backtick span ("`foo.ts (new)`", "`bar.ts (or sibling path)`" —
       // confirmed real via direct read of tasks/DIR-099.md, DIR-100.md, DIR-101.md, DIR-104.md,
       // DIR-121.md), which the actual AC/Finding citation never repeats — strip it before matching,
-      // local to this membership check only (never mutates the shared `_extractGlobsFromSection`
+      // local to this membership check only (never mutates the shared `extractTouchesGlobs`
       // output `preflightTouchesMismatch` also consumes, to avoid widening that detector's own,
       // separately-calibrated boundary).
       if (globs.some((g) => _globCoversPath(g.replace(/\s*\([^)]*\)\s*$/, "").trim(), tok))) continue;
@@ -586,7 +588,7 @@ export function preflightStaleAcRefs({ taskBody, workspace }) {
   const code = "preflight-stale-ac-refs";
   const ac = extractSection(taskBody, "Acceptance Criteria") || "";
   const dod = extractSection(taskBody, "Definition of Done") || "";
-  const touchesGlobs = _extractGlobsFromSection(extractSection(taskBody, "Touches"));
+  const touchesGlobs = extractTouchesGlobs(extractSection(taskBody, "Touches"));
   const { stale, ambiguous } = _scanStaleReferences(`${ac}\n${dod}`, workspace, touchesGlobs);
   if (stale.length > 0) {
     return _mkFinding(code, true,
@@ -605,7 +607,7 @@ export function preflightStaleAcRefs({ taskBody, workspace }) {
 export function preflightMissingPrecedent({ taskBody, workspace }) {
   const code = "preflight-missing-precedent";
   const sections = ["Finding", "Requested action", "Proposal"].map((h) => extractSection(taskBody, h) || "").join("\n");
-  const touchesGlobs = _extractGlobsFromSection(extractSection(taskBody, "Touches"));
+  const touchesGlobs = extractTouchesGlobs(extractSection(taskBody, "Touches"));
   const { stale, ambiguous } = _scanStaleReferences(sections, workspace, touchesGlobs);
   if (stale.length > 0) {
     return _mkFinding(code, true,
@@ -673,15 +675,13 @@ function _splitTopLevelCommas(s) {
   parts.push(cur);
   return parts.map((p) => p.trim()).filter(Boolean);
 }
-function _extractGlobsFromSection(sectionText) {
-  const globs = [];
-  for (const line of (sectionText || "").split(/\r?\n/)) {
-    const m = line.match(/^\s*[-*]\s+(.+?)\s*$/);
-    if (!m) continue;
-    const g = _stripWrappingBacktick(m[1]);
-    if (g) globs.push(g);
-  }
-  return globs;
+export function extractTouchesGlobs(sectionText) {
+  // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): delegate to the ONE shared
+  // Touches bullet parser. The old inline loop (bullet match + _stripWrappingBacktick) had the
+  // residual-backtick bug — `` - `x.ts` (new) `` lost its leading backtick, kept the annotation,
+  // then the annotation strip left a trailing backtick → a wrong glob. parseTouchEntries strips
+  // quotes/backticks before AND after the annotation strip (both annotation forms).
+  return parseTouchEntries(sectionText);
 }
 function _globCoversPath(glob, filePath) {
   if (glob === filePath) return true;
@@ -700,7 +700,7 @@ export function preflightTouchesMismatch({ taskBody, secondaryBody, secondaryLab
       `task's own '## Touches' is ill-formed (${touchesCheck.code}): ${touchesCheck.message}`,
       touchesCheck.code, "unresolved");
   }
-  const taskGlobs = new Set(_extractGlobsFromSection(extractSection(taskBody, "Touches")));
+  const taskGlobs = new Set(extractTouchesGlobs(extractSection(taskBody, "Touches")));
   if (taskGlobs.size === 0) return null; // touches-absent-* / touches-na — nothing to cross-check
 
   let secondaryGlobs;
@@ -715,7 +715,7 @@ export function preflightTouchesMismatch({ taskBody, secondaryBody, secondaryLab
     }
     const charterTouchesSection = extractSection(secondaryBody || "", "Touches");
     if (charterTouchesSection === null) return null; // charter names no Touches of its own
-    secondaryGlobs = new Set(_extractGlobsFromSection(charterTouchesSection));
+    secondaryGlobs = new Set(extractTouchesGlobs(charterTouchesSection));
   } else {
     // 'plan-files': aggregate every Stage's '- Files:' line (comma-separated real paths) — reuses
     // milestone-preparation-check.ts's own stage-block parser, never a second Markdown parser.

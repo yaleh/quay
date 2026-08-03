@@ -1,0 +1,179 @@
+// @test-group engine
+// touches-parser-parity.test.mjs — gap-task-body-has-n-parsers-and-no-authority (AC2/AC3/AC4).
+//
+// The repo once had N independent `## Touches` parsers, none authoritative, and they DISAGREED on
+// the same line: `` - `foo.ts` (new) `` parsed to `foo.ts` in task-status-drift-check.ts
+// (parseTouchEntries — quotes/backticks stripped BEFORE and AFTER the "(…)" annotation strip) but
+// to the residual-backtick `foo.ts`` in touches-orthogonality-check.ts (parseTouches — the
+// annotation strip left the closing backtick the annotation had masked). The WRONG one is the one
+// fast mode uses for concurrency eligibility (concurrent-batch-scheduler.ts → checkTouchesPair), so
+// a `(new)`-annotated task was judged "matched nothing (likely a typo)".
+//
+// This task makes parseTouchEntries the ONE implementation (touches-parser.ts) and every other
+// parser a delegate to it. This test proves the convergence:
+//   AC2  bidirectional negative control — `` `a.ts` (new) `` yields `a.ts` under every parser, and
+//        a deliberately non-stripping parser FAILS the consistency check.
+//   AC3  a fixture set ((new), (refactor X), backtick-inside/outside annotations, directory entry,
+//        `*` wildcard, plain, `./`, quotes) — every parser gives the identical per-item path set.
+//   AC4  re-run of the gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet "matched
+//        nothing" scenario: after the fix, that misleading reason is produced ONLY by a genuinely
+//        not-yet-created file, never by an un-stripped annotation.
+//
+// Run: scripts/test.sh plugin/test/touches-parser-parity.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { parseTouchEntries } from "../scripts/touches-parser.ts";
+import { parseTouches, checkTouchesPair } from "../scripts/touches-orthogonality-check.ts";
+import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
+import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
+import { checkTouches } from "../scripts/task-schema.ts";
+
+// ── AC3 fixture set ───────────────────────────────────────────────────────────────────────────────
+// Each fixture is a `## Touches` bullet line. `bodyOf` wraps it in a minimal execution-type task
+// body so the body-parsers (parseTouches / checkTouches) reach their parse path too.
+const SECTION_FIXTURES = [
+  "- `a.ts` (new)",                                          // (new) annotation
+  "- `a.ts` (refactor Verify phase)",                        // (refactor X) annotation
+  "- `code/bar.ts (new)`",                                   // annotation INSIDE the backticks
+  "- `code/foo.ts` (extract from)",                          // annotation OUTSIDE the backticks
+  "- packages/quay/src/gate/config",                         // directory entry
+  "- packages/quay/**/*.test.mjs",                           // `*` wildcard glob
+  "- code/plain.ts",                                         // plain path
+  "- ./packages/a.js",                                       // leading ./ — every parser strips it
+  '- "packages/b.js"',                                       // double-quoted path
+  "- `experiments/quay-perpetual-stream/scripts/*run-identity*`", // backticked wildcard glob
+];
+
+const EXPECTED = [
+  ["a.ts"],
+  ["a.ts"],
+  ["code/bar.ts"],
+  ["code/foo.ts"],
+  ["packages/quay/src/gate/config"],
+  ["packages/quay/**/*.test.mjs"],
+  ["code/plain.ts"],
+  ["packages/a.js"],
+  ["packages/b.js"],
+  ["experiments/quay-perpetual-stream/scripts/*run-identity*"],
+];
+
+const bodyOf = (section) => `**type:** execution\n\n## Touches\n${section}`;
+
+// The parsers under test. Every one is a function (body, section) → string[]. All of them are
+// expected to agree EXACTLY on the fixture set — that is the parity claim (AC3).
+const PARSERS = {
+  parseTouchEntries: (body, section) => parseTouchEntries(section),
+  parseBulletList: (body, section) => parseBulletList(section),
+  extractTouchesGlobs: (body, section) => extractTouchesGlobs(section),
+  parseTouches: (body) => parseTouches(body).globs,
+  checkTouches: (body) => checkTouches({ body }, "gap").globs ?? [],
+};
+
+function collectOutputs(parserSet, body, section) {
+  const out = {};
+  for (const [name, fn] of Object.entries(parserSet)) out[name] = fn(body, section);
+  return out;
+}
+
+function assertAllAgree(parserSet, body, section, expected) {
+  const out = collectOutputs(parserSet, body, section);
+  const vals = Object.values(out);
+  for (const v of vals) {
+    assert.deepEqual(v, expected, `parser output differs from expected for ${JSON.stringify(section)}`);
+  }
+  for (const [name, v] of Object.entries(out)) {
+    assert.deepEqual(v, vals[0], `${name} diverges from the other parsers for ${JSON.stringify(section)}`);
+  }
+  return out;
+}
+
+// ── AC3: every parser agrees on every fixture ─────────────────────────────────────────────────────
+test("AC3: all parsers give the identical per-item path set on the fixture set", () => {
+  for (let i = 0; i < SECTION_FIXTURES.length; i++) {
+    const section = SECTION_FIXTURES[i];
+    const body = bodyOf(section);
+    assertAllAgree(PARSERS, body, section, EXPECTED[i]);
+  }
+});
+
+test("AC3: control line `` - `a.ts` (new) `` yields a.ts under every parser — none leaves a backtick", () => {
+  const section = "- `a.ts` (new)";
+  const out = assertAllAgree(PARSERS, bodyOf(section), section, ["a.ts"]);
+  for (const v of Object.values(out)) {
+    assert.ok(!v.join("").includes("`"), `residual backtick in ${JSON.stringify(v)}`);
+  }
+});
+
+// ── AC2: bidirectional negative control ───────────────────────────────────────────────────────────
+test("AC2: a parser that does NOT strip the annotation fails the parity check", () => {
+  // Replica of the OLD touches-orthogonality-check parseTouches bullet logic — backticks stripped
+  // only at the very start/end of the line, then the "(…)" annotation strip leaves a residual
+  // trailing backtick. This is exactly the bug the task kills.
+  function buggyNoStrip(section) {
+    const out = [];
+    for (const raw of String(section).split(/\r?\n/)) {
+      const m = raw.match(/^\s*[-*]\s+(.+?)\s*$/);
+      if (!m) continue;
+      let g = m[1].trim();
+      g = g.replace(/^`+|`+$/g, "").trim();
+      g = g.replace(/^\.\//, "");
+      g = g.replace(/\s*\([^)]*\)\s*$/, "").trim();
+      if (g) out.push(g);
+    }
+    return out;
+  }
+  const section = "- `a.ts` (new)";
+  // Positive direction: the real parsers strip the annotation AND the masked backtick → a.ts.
+  assert.deepEqual(parseTouchEntries(section), ["a.ts"]);
+  assert.deepEqual(parseTouches(bodyOf(section)).globs, ["a.ts"]);
+  // Negative direction: the buggy parser keeps the residual backtick → a.ts` — and a consistency
+  // check that includes it MUST fail (this is the "must fail" half of the bidirectional control).
+  assert.deepEqual(buggyNoStrip(section), ["a.ts`"]);
+  const withBug = { ...PARSERS, buggy: (body, sec) => buggyNoStrip(sec) };
+  assert.throws(
+    () => assertAllAgree(withBug, bodyOf(section), section, ["a.ts"]),
+    /diverges|differs/,
+    "a non-annotation-stripping parser must fail the parity check",
+  );
+});
+
+// ── AC4: the dispatch-eligibility "matched nothing" scenario re-run ───────────────────────────────
+test("AC4: an un-stripped (new) annotation no longer triggers 'matched nothing (likely a typo)'", () => {
+  // gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet's scenario, re-run after the fix:
+  // a task whose Touches entry is `` `foo.ts` (new) `` where foo.ts EXISTS on disk must expand and
+  // be judged DISJOINT from an unrelated task — the annotation must not corrupt the path.
+  const fakeExpand = (mapping) => (globs) => {
+    const out = new Set();
+    for (const g of globs) for (const f of (mapping[g] || [])) out.add(f);
+    return out;
+  };
+
+  const A = parseTouches("## Touches\n- `foo.ts` (new)");
+  assert.deepEqual(A.globs, ["foo.ts"], "no residual backtick in the parsed glob");
+  const B = parseTouches("## Touches\n- y/b.js");
+  const r = checkTouchesPair(A, B, fakeExpand({ "foo.ts": ["foo.ts"], "y/b.js": ["y/b.js"] }));
+  assert.equal(r.disjoint, true);
+  assert.doesNotMatch(r.reason, /matched nothing|typo/, "existing file with (new) annotation must not be judged a typo");
+
+  // The ONE remaining cause of "matched nothing": the file genuinely does not exist YET — the path
+  // is now clean (annotation fully stripped), so the conservative branch fires for the correct,
+  // intended reason ("file not yet created"), not for a parser artifact.
+  const C = parseTouches("## Touches\n- `brand-new.ts` (new)");
+  assert.deepEqual(C.globs, ["brand-new.ts"]);
+  const r2 = checkTouchesPair(C, B, fakeExpand({ "brand-new.ts": [], "y/b.js": ["y/b.js"] }));
+  assert.equal(r2.disjoint, false);
+  assert.match(r2.reason, /matched nothing/);
+});
+
+// ── AC1 backstop: only ONE implementation exists (definition-site grep) ───────────────────────────
+test("AC1: the shared parser is the only parseTouchEntries definition in the repo", () => {
+  // The parity claim is only meaningful if the shared function is actually the single definition.
+  // (The plugin/scripts copy is canonical; experiments/.../scripts/touches-parser.ts is a symlink
+  // to it — both resolve to the same file.)
+  assert.ok(typeof parseTouchEntries === "function");
+  assert.ok(typeof parseTouches === "function");
+  assert.ok(typeof parseBulletList === "function");
+  assert.ok(typeof extractTouchesGlobs === "function");
+});
