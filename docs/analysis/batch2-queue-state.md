@@ -514,6 +514,16 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
   resource-awareness → retire → serve-task-list（各需压力 <40 基线 + 显式 `--test-concurrency=8`）
 - **gate 的行为验证了设计**：在全量起跑前挡住高压力——这正是它要取代的「目测判断」
 
+### Tick 更新（05T03:18Z）：serve-task-list merged；合并全量在跑（gate GO）
+
+- **serve-task-list merged**（`556493bc`，4 文件）：store.ts fallbackId（缺 id 用文件名兜底 + extra.malformed 标记）、
+  serve-handlers.ts `isMissingIdTask` 守卫 + 可见占位行 + prefix filter/nav 防 undefined、serve.test.mjs 回归。
+  scoped 1/1 绿（--allow-thin，Touches 映射薄）。tsc 0 errors。**task list 页面不再 500**
+- **合并全量在跑**（`b8m11u3md`，resource-awareness + serve-task-list 一起，显式 `--test-concurrency=8`）。
+  **gate 实测 GO**（「资源充足，可以跑」，基线压力 24.94）——resource gate 在真实场景第一次放行全量
+- 在飞（1 agent）：retire（~05:17 活跃，边界解除）。retire 落地后自己一个全量
+- 全量绿 → 关 resource-awareness（`--task-end` hjkru7）+ serve-task-list（pyzd0e）
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
