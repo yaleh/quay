@@ -576,6 +576,19 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
   记录不动作；stranded 任务可能会处理这个类（按任务体 AC）
 - 在飞（2）：stranded + web
 
+### 外层拦截（05T03:55Z）：stranded 任务重划范围
+
+外层核实 stranded-worktree 前提已被 retire+reclaim 抹掉大半：
+- **AC2b** 已由 reclaim AC1 实现且更精确（--no-ff 合并才可 revert）
+- **AC2c-f** 目标 milestone-worktree.ts 已被 retire 物理删除——无对象
+- **AC3** 期望值过时（只剩 M239 一个刻意保留例外）
+
+**重划已送达在飞 agent**：①告警宿主移到存活的 task-status-drift-check.ts / restart-readiness-check.sh；
+②判据**复用 reclaim 三闸**不重写；③验收用**人造领先分支双向负控制**（造→报、删→不报），不用真实仓库
+当前状态当期望值；④任务体 AC 重写。**核心交付不变：让滞留分支有告警通道**（今晚 24989 行滞留工作是
+外层两天后偶然发现的，非机制报出）。
+**web-cannot-show 按原样执行**（前提未变）。
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
