@@ -63,6 +63,19 @@
 **扫描信号**：**非 `node:test`** 文件里，代码位置上的 `process.exit(1)`。`process.exitCode = 1` 永不报；
 `node:test` 文件里的 `process.exit(1)`（例如写进模板字符串的 child 脚本）不在规则范围内。
 
+### R5 · 不得依赖运行环境仓库的 git 历史（浅克隆必须绿）（2026-08-03 补）
+
+**来自**：CI 红（2026-08-03）——`prepare-admission-check.test.mjs` 两个已知-good 用例引用本仓真实提交
+`335317d` + `REPO_ROOT` 作 workspace；`actions/checkout@v4` 默认 depth-1 浅克隆没有旧提交，
+`git cat-file -e <sha>^{commit}` 判它缺失 → 一个真实 precedent 在 CI 被误判为缺失。
+
+**规则**：测试断言「某个 commit 存在」时，必须用一个**临时 git 仓库**构造已知 commit（或用一个
+任何克隆里都存在的 commit），**不得引用本仓当前历史**。一个依赖运行环境仓库历史的测试，对任何浅克隆的
+人都会红，且结果取决于在哪里跑。机械判据：测试代码里出现 `<REPO_ROOT 作 workspace 传给 git>` + 引用
+非 HEAD 的提交哈希 → 潜在违规。
+
+**实例修复**：`prepare-admission-check.test.mjs` 的 `makeGitWorkspaceWithCommit()`（临时 repo + 已知 commit）。
+
 ## 扫描与棘轮（AC2–AC6）
 
 `plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做四条判定，

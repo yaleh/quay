@@ -56,6 +56,24 @@ function makeWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "prepare-admission-"));
 }
 
+/** Hermetic git workspace: a temp repo with one real commit. Shallow-clone-safe — the cited commit
+ *  exists in THIS repo, not the (possibly depth-1) real checkout. (CI red 2026-08-03: the good.md
+ *  fixtures cited the real repo's 335317d, which actions/checkout's default shallow clone lacks →
+ *  the detectors judged a real precedent as missing. The hermetic form removes that dependence.) */
+function makeGitWorkspaceWithCommit() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "prepare-admission-git-"));
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "config", "user.email", "test@example.com"]);
+  execFileSync("git", ["-C", dir, "config", "user.name", "Test"]);
+  const filePath = "src/impl.ts";
+  fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+  fs.writeFileSync(path.join(dir, filePath), "export const v = 1;\n");
+  execFileSync("git", ["-C", dir, "add", filePath]);
+  execFileSync("git", ["-C", dir, "commit", "-q", "-m", "fixture commit"]);
+  const sha = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  return { dir, sha, filePath };
+}
+
 function readFixture(...segments) {
   return fs.readFileSync(path.join(FIXTURES, ...segments), "utf8");
 }
@@ -565,8 +583,18 @@ describe("preflightStaleAcRefs", () => {
   });
 
   test("known-good: AC cites a real, resolvable commit -> zero findings", () => {
-    const taskBody = readFixture("stale-ac-refs", "good.md");
-    assert.equal(preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT }), null);
+    const { dir, sha, filePath } = makeGitWorkspaceWithCommit();
+    try {
+      const taskBody = [
+        "## Acceptance Criteria",
+        "",
+        `- [ ] Commit \`${sha}\` resolved this (see \`${filePath}\`).`,
+        "",
+      ].join("\n");
+      assert.equal(preflightStaleAcRefs({ taskBody, workspace: dir }), null);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("ambiguous-valid: a commit-hash-shaped AC citation against a NON-git workspace cannot be mechanically verified -> reviewer-required, never a false pass/fail", () => {
@@ -654,8 +682,18 @@ describe("preflightMissingPrecedent", () => {
   });
 
   test("known-good: Finding cites a real commit and a real file path -> zero findings", () => {
-    const taskBody = readFixture("missing-precedent", "good.md");
-    assert.equal(preflightMissingPrecedent({ taskBody, workspace: REPO_ROOT }), null);
+    const { dir, sha, filePath } = makeGitWorkspaceWithCommit();
+    try {
+      const taskBody = [
+        "## Finding",
+        "",
+        `1. Commit \`${sha}\` fixed this, per \`${filePath}\` — both resolve against this repository.`,
+        "",
+      ].join("\n");
+      assert.equal(preflightMissingPrecedent({ taskBody, workspace: dir }), null);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("ambiguous-valid: commit-hash-shaped citation against a NON-git workspace -> reviewer-required", () => {
