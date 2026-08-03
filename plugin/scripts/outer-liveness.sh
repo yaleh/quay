@@ -19,7 +19,17 @@ declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE
 # 2026-08-03 实测：外层空闲等输入时，进程活着且刚提交过，前三个事件全部静默，
 # 而「空闲等下一个 tick」与「循环已死、永远不会再跑」在那个事件集里完全同形。
 # fan-in 带来的提交还会把基于提交的计时器重置，让死循环更难被发现。
+# 可被 OUTER_TICK_LOGS 覆盖（每行 "<名字> <tick日志路径>"）——与 OUTER_TARGETS 同理，
+# 存在的理由是【可测】：OVERDUE 判据需要一个 mtime 可控的 tick 日志，而三个项目的真实
+# 路径不可由测试触碰。设置了 OUTER_TICK_LOGS 即完全接管映射；无匹配时返回空（判据不触发）。
 tick_log_for() {
+  if [ -n "${OUTER_TICK_LOGS:-}" ]; then
+    while read -r n p; do
+      [ -n "${n:-}" ] || continue
+      if [ "$n" = "$1" ]; then printf '%s\n' "$p"; return 0; fi
+    done <<< "$OUTER_TICK_LOGS"
+    return 1
+  fi
   case "$1" in
     quay)      echo "/home/yale/work/quay/orchestration/tick-log.md" ;;
     archguard) echo "/home/yale/work/archguard/orchestration/tick-log.md" ;;
