@@ -244,19 +244,13 @@ SYNC_SCRIPTS=(
   candidate-synthesis
   portfolio-choice
   preparation-feedback
-  composite-args
-  composite-contracts
-  composite-build
-  composite-audit
-  composite-reconcile
-  composite-land
-  composite-preflight
-  composite-manifest-synthesis
   gate-script-base
   wiring-coverage-check
-  milestone-preparation-check
   proposal-convergence
   prepare-admission-check
+  # NOTE (gap-retire-the-prepare-execute-pipeline-cluster): composite-{args,contracts,build,audit,
+  # reconcile,land,preflight,manifest-synthesis} and milestone-preparation-check were retired with
+  # the prepare/execute pipeline (ADR-022) and removed from this vendored set.
 )
 
 if $CHECK_MODE; then

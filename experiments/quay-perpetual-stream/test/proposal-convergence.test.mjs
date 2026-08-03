@@ -562,66 +562,6 @@ test("computeConvergenceMetrics: exposes all six named metrics", () => {
   assert.equal(m.prepareWallTimeMs, 20 * 60 * 1000);
 });
 
-// ── Cross-check: prepare-milestone.js's inline caps must match capsFor() (DIR-125 — the workflow
-// file has no import statements by established convention and therefore inlines the SAME numbers;
-// this test fails loudly if the two ever drift). ──────────────────────────────────────────────
-test("prepare-milestone.js mirrors inline the SAME caps as capsFor()", () => {
-  const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
-  for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
-    const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
-    assert.match(src, /maxDeltaRounds:\s*_highRisk\s*\?\s*3\s*:\s*2/, `${rel}: ordinary/highRisk maxDeltaRounds must be 2/3`);
-    assert.match(src, /_highRisk\s*\?\s*75\s*:\s*45/, `${rel}: ordinary/highRisk budget must be 45/75 minutes`);
-  }
-});
-
-// ── Cross-check: prepare-milestone.js's `_checkEpochCapsInline`/`_epochPolicy` default literals
-// must match DEFAULT_EPOCH_POLICY (90/150/1/2/3/3 — maxOverrideCount added round 2 post-REFUTATION,
-// maxNewEpochResetCount added round 3 post-SECOND-REFUTATION) exactly — SAME "workflow has no
-// import statements, fails loudly on drift" precedent as the capsFor() cross-check immediately above.
-test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFAULT_EPOCH_POLICY", () => {
-  assert.deepEqual(DEFAULT_EPOCH_POLICY, { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3, maxNewEpochResetCount: 3 });
-  const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
-  for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
-    const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
-    assert.match(src, /_highRisk\s*\?\s*\(Number\.isFinite\(p\.highRiskCapMinutes\)\s*\?\s*p\.highRiskCapMinutes\s*:\s*150\)/, `${rel}: highRisk time cap default must be 150 minutes`);
-    assert.match(src, /Number\.isFinite\(p\.ordinaryCapMinutes\)\s*\?\s*p\.ordinaryCapMinutes\s*:\s*90/, `${rel}: ordinary time cap default must be 90 minutes`);
-    assert.match(src, /Number\.isFinite\(p\.maxFullReviewsPerEpoch\)\s*\?\s*p\.maxFullReviewsPerEpoch\s*:\s*1/, `${rel}: maxFullReviewsPerEpoch default must be 1`);
-    assert.match(src, /Number\.isFinite\(p\.maxRepeatedFingerprint\)\s*\?\s*p\.maxRepeatedFingerprint\s*:\s*2/, `${rel}: maxRepeatedFingerprint default must be 2`);
-    assert.match(src, /maxOverrideCount:\s*3/, `${rel}: _epochPolicy fallback literal must carry maxOverrideCount:3 (the real enforcement lives in _overrideBudgetCli, but the inline default must stay in sync so this cross-check keeps catching drift)`);
-    assert.match(src, /maxNewEpochResetCount:\s*3/, `${rel}: _epochPolicy fallback literal must carry maxNewEpochResetCount:3 (the real enforcement lives in _newEpochCli, but the inline default must stay in sync so this cross-check keeps catching drift)`);
-  }
-});
-
-// M233 CLAIM-10: cross-check — prepare-milestone.js's _checkEpochCapsInline and related inline
-// logic must carry bodyScopeHash scope-change grant behavior in BOTH workflow mirrors identically.
-test("M233 CLAIM-10: prepare-milestone.js mirrors inline the SAME bodyScopeHash scope-change grant logic as proposal-convergence.ts's checkEpochCaps()", () => {
-  const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
-  for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
-    const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
-
-    // CLAIM-10a: _checkEpochCapsInline accepts currentBodyScopeHash parameter
-    assert.match(src, /function _checkEpochCapsInline\(checkFullReviewCap,\s*currentBodyScopeHash\)/, `${rel}: _checkEpochCapsInline must accept currentBodyScopeHash as second parameter`);
-
-    // CLAIM-10b: bodyScopeHash comparison logic for scope-change grant
-    assert.match(src, /_epochBase\.bodyScopeHash\s*!=\s*null\s*&&\s*currentBodyScopeHash\s*!=\s*null\s*&&\s*_epochBase\.bodyScopeHash\s*!==\s*currentBodyScopeHash/, `${rel}: must contain the bodyScopeHash comparision logic returning {breached:false,scopeChanged:true}`);
-
-    // CLAIM-10c: _epochBase.bodyScopeHash loaded from recordBodyScopeHash
-    assert.match(src, /_epochBase\.bodyScopeHash\s*=\s*_epochStatusVerdict\.recordBodyScopeHash/, `${rel}: must load bodyScopeHash from epoch status verdict's recordBodyScopeHash`);
-
-    // CLAIM-10d: --compute-body-scope-hash true on the admission --epoch-status call
-    assert.match(src, /--compute-body-scope-hash\s+true/, `${rel}: admission --epoch-status call must include --compute-body-scope-hash true`);
-
-    // CLAIM-10e: --bodyScopeHash flag on _recordEpochDispatch
-    assert.match(src, /--bodyScopeHash\s+\$\{_currentBodyScopeHash\}/, `${rel}: _recordEpochDispatch must pass --bodyScopeHash \${_currentBodyScopeHash}`);
-
-    // CLAIM-10f: _currentBodyScopeHash loaded from _epochStatusVerdict.bodyScopeHash (may use ?. for null safety)
-    assert.match(src, /_currentBodyScopeHash\s*=\s*_epochStatusVerdict\?*\.\s*bodyScopeHash/, `${rel}: _currentBodyScopeHash must be loaded from _epochStatusVerdict.bodyScopeHash`);
-
-    // CLAIM-10g: full-review gate passes _currentBodyScopeHash to _checkEpochCapsInline
-    assert.match(src, /_checkEpochCapsInline\(true,\s*_currentBodyScopeHash\)/, `${rel}: full-review gate must pass _currentBodyScopeHash to _checkEpochCapsInline(true, ...)`);
-  }
-});
-
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // ── decideResumeGeneration — DIR-126-C/M202: generation-aware resume, third child of DIR-126's
 // split. One it() per evaluation-order step of the task's own Proposal. ─────────────────────────
@@ -1424,12 +1364,10 @@ describe("telemetry: Stage 8 — generationId non-collision + migration-shape st
     assert.equal(recA.admission.ownerExecutionId, recB.admission.ownerExecutionId, "same parent session, by construction of this fixture");
   });
 
-  test("AC8: no reverse/dual-write dependency — zero references to RunIdentity/StageReceiptEnvelope anywhere in proposal-convergence.ts or milestone-preparation-check.ts", () => {
+  test("AC8: no reverse/dual-write dependency — zero references to RunIdentity/StageReceiptEnvelope in proposal-convergence.ts (milestone-preparation-check.ts was retired at gap-retire-the-prepare-execute-pipeline-cluster)", () => {
     const convergenceSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "proposal-convergence.ts"), "utf8");
-    const prepCheckSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "milestone-preparation-check.ts"), "utf8");
     for (const name of ["RunIdentity", "StageReceiptEnvelope"]) {
       assert.ok(!convergenceSrc.includes(name), `proposal-convergence.ts must not reference ${name} (no reverse dependency on a DIR-124-B-shaped file)`);
-      assert.ok(!prepCheckSrc.includes(name), `milestone-preparation-check.ts must not reference ${name} (no reverse dependency on a DIR-124-B-shaped file)`);
     }
   });
 

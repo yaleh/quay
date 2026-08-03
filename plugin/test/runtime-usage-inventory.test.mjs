@@ -157,7 +157,10 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
   // ── AC1: full-set coverage ──────────────────────────────────────────────────────────────────
   test("AC1: enumeration covers every script and the total is self-consistent", () => {
     const { scripts, rawEntries } = enumerateScripts(REPO_ROOT);
-    assert.ok(scripts.length >= 200, `expected >=200 scripts, got ${scripts.length}`);
+    // Floor was 200 before the prepare/execute pipeline retirement (ADR-022 /
+    // gap-retire-the-prepare-execute-pipeline-cluster) deleted ~22 scripts from the tree; the floor
+    // is a sanity bound, not a hard target, so it is lowered with generous headroom (~183 live).
+    assert.ok(scripts.length >= 170, `expected >=170 scripts, got ${scripts.length}`);
     assert.ok(scripts.length <= rawEntries, "raw entries must be >= distinct scripts");
     // every entry has the fields classification needs
     for (const s of scripts) {

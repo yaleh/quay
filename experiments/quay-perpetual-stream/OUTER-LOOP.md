@@ -1,8 +1,20 @@
 ---
 name: outer-loop
-description: quay-perpetual-stream (Experiment 5) autonomous outer driver — generates per-milestone charters
+description: RETIRED (ADR-022) — the classic milestone-loop outer driver. The two-layer fast mode is the sole mode.
 provenance: docs/proposals/quay-perpetual-stream-experiment-v5.md
 ---
+
+> **RETIRED (ADR-022, 2026-08-03).** This document is the operational driver of the **classic
+> milestone loop** — `prepare-milestone.js` / `execute-milestone.js` / the `composite-*` phases /
+> `milestone-worktree.ts` — which was retired and physically deleted at
+> `gap-retire-the-prepare-execute-pipeline-cluster`. The **two-layer fast mode is the sole
+> development mode**: gap tasks are dispatched directly to agents in isolated worktrees
+> (`git worktree add /tmp/quay-wt-*`), with `## Contract` six-key + `task-contract-check.ts`
+> replacing ProposalReview/PlanCheck, subagent REFUTE rounds replacing the Audit phase, and
+> `.quay/fast-mode-telemetry.jsonl` replacing milestone journals. This document is retained as
+> historical record of why the two-layer mode exists (the classic loop's 6.9% success rate vs the
+> fast mode's 92%, ADR-022). Do not treat its steps as live instructions.
+
 
 λ(workspaceRoot: Path) → Milestone*
 

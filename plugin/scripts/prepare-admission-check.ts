@@ -42,7 +42,8 @@ import { execFileSync } from "node:child_process";
 import { parseArgs, isDirectEntry } from "./gate-script-base.ts";
 import { extractSection, checkTouches, countBoxes } from "./task-schema.ts";
 import { splitSentences } from "./wiring-coverage-check.ts";
-import { parsePlanStages, validatePlanStructure } from "./milestone-preparation-check.ts";
+// parsePlanStages / validatePlanStructure are inlined below (retired from
+// ./milestone-preparation-check.ts at gap-retire-the-prepare-execute-pipeline-cluster).
 
 // ── Staleness window — derived (Proposal's "Staleness-window default" table), not asserted. ───────
 // ProposalReview soft budget (45m/75m) + PlanAuthor allowance (~20m) + up to 3 safety-margined
@@ -740,13 +741,72 @@ export function preflightTouchesMismatch({ taskBody, secondaryBody, secondaryLab
     trulyUnmatched.join(", "), "unresolved");
 }
 
+// ── plan-structure parsing (inlined from the retired ./milestone-preparation-check.ts) ─────────────
+// The same mechanical '### Stage N'/'- AC:'/'- Files:'/'- Command:' block shape that
+// milestone-preparation-check.ts parsed at Receipt time — never a third Markdown parser. These were
+// imported from that module until the prepare/execute pipeline was retired (ADR-022 /
+// gap-retire-the-prepare-execute-pipeline-cluster); they now live here, single-sourced, because this
+// file's `--preflight-plan` detector is their only surviving consumer.
+
+const STAGE_HEADER_RE = /^###\s+Stage\s+(\d+)\s*:\s*(.*)$/gm;
+
+export function parsePlanStages(planText) {
+  const text = String(planText ?? "");
+  const headers = [...text.matchAll(STAGE_HEADER_RE)];
+  const stages = [];
+  for (let i = 0; i < headers.length; i++) {
+    const start = headers[i].index + headers[i][0].length;
+    const end = i + 1 < headers.length ? headers[i + 1].index : text.length;
+    const block = text.slice(start, end);
+    const acMatch = block.match(/^-\s*AC:\s*(.+)$/im);
+    const filesMatch = block.match(/^-\s*Files:\s*(.+)$/im);
+    const checkMatch = block.match(/^-\s*(?:Command|Check):\s*(.+)$/im);
+    const ac = acMatch
+      ? acMatch[1].split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n))
+      : [];
+    stages.push({
+      number: Number(headers[i][1]),
+      title: headers[i][2].trim(),
+      ac,
+      files: filesMatch ? filesMatch[1].trim() : "",
+      check: checkMatch ? checkMatch[1].trim() : "",
+    });
+  }
+  return stages;
+}
+
+export function validatePlanStructure(planText, acCount) {
+  const stages = parsePlanStages(planText);
+  if (stages.length === 0) {
+    return { ok: false, code: "plan-no-stages", message: "checked Plan has no '### Stage <N>: ...' blocks — cannot verify AC-to-stage mapping mechanically" };
+  }
+  for (const s of stages) {
+    if (s.ac.length === 0) {
+      return { ok: false, code: "plan-stage-missing-ac", message: `Stage ${s.number} ("${s.title}") has no '- AC: ...' mapping` };
+    }
+    if (!s.files) {
+      return { ok: false, code: "plan-stage-missing-files", message: `Stage ${s.number} ("${s.title}") has no '- Files: ...' entry` };
+    }
+    if (!s.check) {
+      return { ok: false, code: "plan-stage-missing-command", message: `Stage ${s.number} ("${s.title}") has no '- Command:'/'- Check:' entry` };
+    }
+  }
+  if (Number.isFinite(acCount) && acCount > 0) {
+    const covered = new Set(stages.flatMap((s) => s.ac));
+    const missing = [];
+    for (let i = 1; i <= acCount; i++) if (!covered.has(i)) missing.push(i);
+    if (missing.length > 0) {
+      return { ok: false, code: "plan-ac-not-mapped", message: `task Acceptance Criteria item(s) #${missing.join(", #")} are not mapped to any Plan stage (task declares ${acCount} AC item(s))` };
+    }
+  }
+  return { ok: true, code: "plan-structure-ok", message: `Plan has ${stages.length} stage(s), all ${acCount} task AC item(s) mapped` };
+}
+
 // ── preflight-invalid-plan-command ──────────────────────────────────────────────────────────────
-// Reuses milestone-preparation-check.ts's existing parsePlanStages/validatePlanStructure — the same
-// mechanical '### Stage N'/'- AC:'/'- Files:'/'- Command:' block shape that module already parses at
-// Receipt time — never a third Markdown parser (task's own Chosen-mechanism table).
-// Exported so the PlanAuthor prompt contract (`_planShapeContract` in prepare-milestone.js) can be
+// Exported so the PlanAuthor prompt contract (prepare-milestone.js's `_planShapeContract`) could be
 // anti-drift-tested against the REAL acceptance rule rather than a prose restatement of it
-// (gap-planauthor-shape-rules-not-injected, 2026-08-02).
+// (gap-planauthor-shape-rules-not-injected, 2026-08-02). prepare-milestone.js is retired, but the
+// detector and its tests remain.
 export const _RUNNABLE_COMMAND_RE = /^(?:node|npm|npx|bash|sh|git|scripts\/|`)/i;
 export function preflightInvalidPlanCommand({ planBody, acCount }) {
   const code = "preflight-invalid-plan-command";

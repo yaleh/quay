@@ -34,68 +34,17 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 
 ---
 
-## Invariant: args-normalize-execute-args
-- **Rule:** normalizeExecuteArgs is the single canonical argument normalization for execute-milestone.js (task-id arrays, legacy+new conflict rejection, duplicate detection).
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-args.ts` `[authoritative]`
-- **Other occurrences:**
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline mirror (_normalizeExecuteArgsInline, lines 29-46); workflow DSL has no import capability
-
-## Invariant: milestone-candidate-contract-shape
-- **Rule:** The MilestoneCandidate contract shape (taskIds, compositeManifestFile, isolation fields) is defined in composite-contracts.ts.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-contracts.ts` `[authoritative]`
-
-## Invariant: preparation-receipt-schema
-- **Rule:** The preparation receipt schema (preparation.json shape) is defined by milestone-preparation-check.ts.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` `[authoritative]`
-
----
-
 ## Invariant: gate-resolve-milestone-root
 - **Rule:** gate_resolve_milestone_root (gate-script-lib.sh:152) is the canonical >=130 boundary function; all path resolution goes through it.
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/gate-script-lib.sh` `[authoritative]`
 - **Other occurrences:**
   - `plugin/scripts/gate-script-lib.sh` `[compatibility-adapter]` -- distribution copy
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline copy of the >=130 boundary value (line 102); workflow DSL has no import capability
 
 ---
-
-## Invariant: build-class-routing
-- **Rule:** The Build phase class routing decision (single-agent vs composite phase-DAG) is made in exactly one place: execute-milestone.js Build prompt.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
-- **Other occurrences:**
-  - `plugin/workflows/execute-milestone.js` `[compatibility-adapter]` -- distribution copy
-
-## Invariant: composite-phase-dag
-- **Rule:** The composite Build phase DAG (requires-edges, per-shard ordering) is defined by composite-build.ts + composite-contracts.ts.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-build.ts` `[authoritative]`
-
-## Invariant: sole-commit-creator
-- **Rule:** The Build phase is the sole creator of commits; no other phase creates commits in the working tree.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-build.ts` `[authoritative]`
-
-## Invariant: per-phase-touches-isolation
-- **Rule:** Per-phase Touches isolation is defined by composite-build.ts + composite-contracts.ts requires-edges.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-build.ts` `[authoritative]`
 
 ## Invariant: build-evidence-collection
-- **Rule:** Build evidence (test results, file manifests) is collected by build-evidence-collector.ts per the composite-contracts.ts evidence schema.
+- **Rule:** Build evidence (test results, file manifests) is collected by build-evidence-collector.ts per the build-evidence-manifest.ts evidence schema (composite-contracts.ts was retired at gap-retire-the-prepare-execute-pipeline-cluster).
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/build-evidence-collector.ts` `[authoritative]`
-
----
-
-## Invariant: audit-read-only-snapshot-diff
-- **Rule:** Audit phase enforces read-only access via diffGitSnapshots (composite-audit.ts:128), comparing before/after git snapshots to detect write violations.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-audit.ts` `[authoritative]`
-- **Other occurrences:**
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline mirror (_diffAuditSnapshotLines, lines 592-605); workflow DSL has no import capability
-
-## Invariant: audit-per-shard-scoping
-- **Rule:** Per-shard audit scoping is defined by composite-audit.ts + composite-contracts.ts.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-audit.ts` `[authoritative]`
-
-## Invariant: audit-refute-first-stance
-- **Rule:** The adversarial audit prompt's refute-first stance lives in exactly one place: execute-milestone.js Audit prompt.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
 
 ---
 
@@ -147,27 +96,9 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 
 ---
 
-## Invariant: land-lock-single-flight
-- **Rule:** The Land lock uses single-flight wx-create (atomic create-exclusive) for serialization — never a plain overwrite.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/milestone-worktree.ts` `[authoritative]`
-
-## Invariant: land-capture-mechanical
-- **Rule:** CAPTURE (post-Land evidence collection) is mechanical and unconditional — runs on every Land.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
-
-## Invariant: post-land-split-or-commit-rescan
-- **Rule:** Post-Land split-or-commit re-scan runs after every Land to catch PARENT-DONE-IFF-CHILDREN violations introduced by the merge.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
-
 ## Invariant: dashboard-backlog-regeneration
 - **Rule:** Dashboard and backlog regeneration after Land is performed by it0-backlog-regen.ts.
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts` `[authoritative]`
-
-## Invariant: milestone-counter-increment
-- **Rule:** Milestone counter increment is serialized under the Land lock in execute-milestone.js Land prompt.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
-
----
 
 ## Invariant: task-schema-v1-marker
 - **Rule:** Task schema v1 marker (extra.schema: "v1") is the single canonical task schema definition, validated by task-schema-check.sh + task-schema.ts.
@@ -178,12 +109,6 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/task-schema-check.sh` `[authoritative]`
 
 ---
-
-## Invariant: worktree-isolation-compute-plan
-- **Rule:** Worktree isolation plan computation (milestone number, path-prefix rule, branch name) is defined by computeIsolationPlan in milestone-worktree.ts.
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/milestone-worktree.ts` `[authoritative]`
-- **Other occurrences:**
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline mirror (_isolationPlan, lines 96-104); workflow DSL has no import capability
 
 ## Invariant: concurrent-touches-orthogonality
 - **Rule:** Concurrent batch touches-orthogonality is checked by touches-orthogonality-check.ts before dispatch.
@@ -287,48 +212,6 @@ This manifest is self-hosting: its own entries are validated by the enforcement 
 ## Invariant: out13-sentinel-removal-idempotent
 - **Rule:** I16 (sentinel-removal-idempotent): Sentinel removal must be idempotent; enforced by restart-readiness-check.sh.
 - **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` `[authoritative]`
-
----
-
-## Invariant: execute-milestone-phase-sequence
-- **Rule:** The 8-phase sequence (Verify -> Prepared -> Build -> Build-Evidence -> Audit -> Gate -> [Reconcile] -> Land) is the single authoritative executable definition in execute-milestone.js.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
-- **Other occurrences:**
-  - `experiments/quay-perpetual-stream/OUTER-LOOP.md` `[generated-view]` -- prose description of steps 4-7; the workflow source is authoritative
-
----
-
-## Invariant: dsl-mirror-normalize-execute-args
-- **Rule:** The inline mirror _normalizeExecuteArgsInline (execute-milestone.js lines 29-46) must stay in sync with normalizeExecuteArgs (composite-args.ts:63).
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-args.ts` `[authoritative]`
-- **Other occurrences:**
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline mirror; workflow DSL has no import capability
-
-## Invariant: dsl-mirror-isolation-plan
-- **Rule:** The inline mirror _isolationPlan (execute-milestone.js lines 96-104) must stay in sync with computeIsolationPlan (milestone-worktree.ts:74).
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/milestone-worktree.ts` `[authoritative]`
-- **Other occurrences:**
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline mirror; workflow DSL has no import capability
-
-## Invariant: dsl-mirror-diff-audit-snapshots
-- **Rule:** The inline mirror _diffAuditSnapshotLines (execute-milestone.js lines 592-605) must stay in sync with diffGitSnapshots (composite-audit.ts:128).
-- **Authoritative owner:** `experiments/quay-perpetual-stream/scripts/composite-audit.ts` `[authoritative]`
-- **Other occurrences:**
-  - `execute-milestone.js` `[dsl-necessity-mirror]` -- inline mirror; workflow DSL has no import capability
-
----
-
-## Invariant: plugin-workflow-mirrors
-- **Rule:** plugin/workflows/ mirrors of .claude/workflows/ scripts must be byte-identical to their experiment counterparts.
-- **Authoritative owner:** `.claude/workflows/execute-milestone.js` `[authoritative]`
-- **Other occurrences:**
-  - `plugin/workflows/execute-milestone.js` `[compatibility-adapter]` -- distribution copy for plugin installs
-
-## Invariant: plugin-prepare-workflow-mirror
-- **Rule:** The plugin/workflows/prepare-milestone.js mirror must be byte-identical to the .claude/workflows/ authoritative copy.
-- **Authoritative owner:** `.claude/workflows/prepare-milestone.js` `[authoritative]`
-- **Other occurrences:**
-  - `plugin/workflows/prepare-milestone.js` `[compatibility-adapter]` -- distribution copy for plugin installs
 
 ---
 

@@ -240,8 +240,9 @@ test("main: no --root falls back to findRepoRoot", async () => {
   assert.equal(await main(["node", "s", sfx("exec-a.md"), sfx("exec-b.md")]), 0);
 });
 
-// ── DIR-117 iteration-2 item 4: touches-expansion re-evaluation (single-sourced via
-// milestone-preparation-check.ts's computeTouchesExpansion, never reinvented) ──────────────────────
+// ── DIR-117 iteration-2 item 4: touches-expansion re-evaluation (single-sourced; computeTouchesExpansion
+// was inlined from the retired milestone-preparation-check.ts into concurrent-batch-scheduler.ts at
+// gap-retire-the-prepare-execute-pipeline-cluster) ────────────────────────────────────────────────
 test("loadReceiptTouches: null for a missing/absent receipt file", () => {
   assert.equal(loadReceiptTouches(null), null);
   assert.equal(loadReceiptTouches(path.join(SFX, "no-such-receipt.json")), null);

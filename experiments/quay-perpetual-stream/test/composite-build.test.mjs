@@ -1,1 +1,0 @@
-../../../plugin/test/composite-build.test.mjs

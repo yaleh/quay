@@ -15,10 +15,10 @@ REPO_ROOT="$(cd "$PLUGIN_DIR/.." && pwd)"
 
 echo "=== Syncing workflows ==="
 cp "$REPO_ROOT/.claude/workflows/drain-directives.js"   "$PLUGIN_DIR/workflows/"
-cp "$REPO_ROOT/.claude/workflows/execute-milestone.js"  "$PLUGIN_DIR/workflows/"
 cp "$REPO_ROOT/.claude/workflows/run-routines.js"       "$PLUGIN_DIR/workflows/"
-cp "$REPO_ROOT/.claude/workflows/prepare-milestone.js"  "$PLUGIN_DIR/workflows/"
-echo "  workflows: 4 synced"
+# NOTE (gap-retire-the-prepare-execute-pipeline-cluster): execute-milestone.js and
+# prepare-milestone.js were retired with the classic milestone loop (ADR-022).
+echo "  workflows: 2 synced"
 
 echo "=== Syncing gate scripts ==="
 GATE_DIR="$REPO_ROOT/experiments/quay-perpetual-stream/scripts"

@@ -475,11 +475,12 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 // file is present.
 // ---------------------------------------------------------------------------
 
-test('M143: plugin/workflows/ exists with 4 JS workflow files', () => {
-  // M191/DIR-117: +prepare-milestone.js.
+test('M143: plugin/workflows/ exists with the 2 surviving JS workflow files', () => {
+  // gap-retire-the-prepare-execute-pipeline-cluster (ADR-022): execute-milestone.js and
+  // prepare-milestone.js were retired with the classic milestone loop.
   const workflowsDir = path.join(pluginDir, 'workflows');
   assert.ok(existsSync(workflowsDir), 'plugin/workflows/ must exist');
-  const wanted = ['drain-directives.js', 'execute-milestone.js', 'run-routines.js', 'prepare-milestone.js'];
+  const wanted = ['drain-directives.js', 'run-routines.js'];
   for (const f of wanted) {
     const fp = path.join(workflowsDir, f);
     assert.ok(existsSync(fp), `plugin/workflows/${f} must exist`);
@@ -515,7 +516,6 @@ test('M143: plugin/sync.sh exists and is executable', () => {
   assert.ok(existsSync(syncPath), 'plugin/sync.sh must exist');
   const src = readFileSync(syncPath, 'utf8');
   assert.match(src, /drain-directives\.js/, 'sync.sh must sync drain-directives.js');
-  assert.match(src, /execute-milestone\.js/, 'sync.sh must sync execute-milestone.js');
   assert.match(src, /run-routines\.js/, 'sync.sh must sync run-routines.js');
   assert.match(src, /drain-scheduler\.ts/, 'sync.sh must sync drain-scheduler.ts');
   assert.match(src, /vmeta-lag-check\.sh/, 'sync.sh must sync vmeta-lag-check.sh');
@@ -531,8 +531,9 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
 });
 
 test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
-  // Only test git-tracked source files (drain-directives.js may not be tracked).
-  const trackedWorkflows = ['execute-milestone.js', 'run-routines.js', 'prepare-milestone.js'];
+  // Only test git-tracked source files that still exist after the prepare/execute retirement
+  // (ADR-022 / gap-retire-the-prepare-execute-pipeline-cluster).
+  const trackedWorkflows = ['drain-directives.js', 'run-routines.js'];
   for (const name of trackedWorkflows) {
     const canonical = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);

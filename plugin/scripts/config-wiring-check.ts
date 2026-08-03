@@ -137,7 +137,6 @@ function collectBespokeDriverFiles(repoRoot: string): string[] {
   const files: string[] = [
     path.join(repoRoot, "experiments/quay-perpetual-stream/OUTER-LOOP.md"),
     path.join(repoRoot, ".claude/workflows/select-preflight.js"),
-    path.join(repoRoot, ".claude/workflows/execute-milestone.js"),
     path.join(repoRoot, ".claude/workflows/run-routines.js"),
     path.join(repoRoot, ".claude/workflows/drain-directives.js"),
   ];

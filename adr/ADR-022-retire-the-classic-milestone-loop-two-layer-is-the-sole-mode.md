@@ -99,3 +99,15 @@ applies-to:
 当时仓库状态、任务难度、模型都不同。这个对比**足以支持裁定方向**，
 但不应被引用为「快速模式使成功率提高了 13 倍」的因果主张——
 两个模式从未在同一批任务上并行跑过，也不打算补做那个实验。
+
+## 执行状态（2026-08-03，`gap-retire-the-prepare-execute-pipeline-cluster`）
+
+本 ADR 的**删除已执行**：`prepare-milestone.js` / `execute-milestone.js`（`.claude/workflows/` +
+`plugin/workflows/`）、`composite-{args,audit,preflight,reconcile,land,manifest-synthesis}.ts`、
+`composite-build.ts` / `composite-contracts.ts`（被复用导出抽至 `build-evidence-manifest.ts` 后删除）、
+`milestone-preparation-check.ts`（`computeTouchesExpansion` 抽至 `concurrent-batch-scheduler.ts`、
+`parsePlanStages`/`validatePlanStructure` 抽至 `prepare-admission-check.ts`）、`diagnose-verify-failure.ts`
+及其薄包装 workflow、`milestone-worktree.ts`（reclaim 完成后删除）已全部物理删除。保留：
+`workflow-metadata-conformance.mjs`（`it0-dod-check.ts` clause 14 仍在 shell-out 调用它）、
+`build-evidence-manifest.ts`（M264 修复所在地 + 抽入的 composite 证据映射）。`CLAUDE.md` /
+`OUTER-LOOP.md` / `quay-task-to-plan` skill 已加退役横幅并同步。
