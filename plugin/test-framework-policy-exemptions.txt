@@ -1,0 +1,51 @@
+# test-framework-policy-exemptions.txt — legacy exemption list for the node:test policy
+# (gap-no-test-framework-policy-for-new-tests, AC2).
+#
+# POLICY: every test file covered by scripts/test.sh's canonical glob must `import` node:test
+# (AC1). The files listed below are the pre-existing hand-rolled-harness tests (makeAssert() +
+# failures counter + process.exitCode, NO node:test import) — 34 files / 1,235 assertions /
+# 12,204 lines, measured 2026-08-02 in orchestration/test-shape-analysis.md.
+#
+# RATCHET (AC4): this list can ONLY get SHORTER — the policy check fails if a file is ADDED to
+# it. There is no mechanical way to exempt a new hand-rolled test; a new file that does not use
+# node:test fails the check outright (AC3). To remove an entry, convert that file to node:test
+# FIRST, then delete its line here — the check then fails on the stale entry until it is removed,
+# which is the nudge that makes "each legacy file converts when someone already touches it" the
+# default path (first application: relation-sync's harness).
+#
+# Baseline: 34 entries (recorded in tasks/gap-no-test-framework-policy-for-new-tests.md DoD).
+# Format: one repo-root-relative path per line; '#' starts a comment. Sorted by path.
+packages/quay-github/test/cli.test.mjs
+packages/quay-github/test/compound-gate.test.mjs
+packages/quay-github/test/gate-gameability.test.mjs
+packages/quay-github/test/gate.test.mjs
+packages/quay-github/test/mcp-server.test.mjs
+packages/quay-github/test/pagination.test.mjs
+packages/quay-github/test/task-check-passthrough.test.mjs
+packages/quay-github/test/view-model.test.mjs
+packages/quay-github/test/write.test.mjs
+packages/quay-native/test/adversarial-eval.test.mjs
+packages/quay-native/test/cas-write.test.mjs
+packages/quay-native/test/compound-gate-recursive.test.mjs
+packages/quay-native/test/compound-gate.test.mjs
+packages/quay-native/test/create-validation.test.mjs
+packages/quay-native/test/edit-validation.test.mjs
+packages/quay-native/test/gate-checked-state.test.mjs
+packages/quay-native/test/gate-correctness.test.mjs
+packages/quay-native/test/gate-gameability.test.mjs
+packages/quay-native/test/lock.test.mjs
+packages/quay-native/test/relation-sync.test.mjs
+packages/quay-native/test/yaml-frontmatter-colon.test.mjs
+packages/quay/test/action-mock-delivery.test.mjs
+packages/quay/test/cli.test.mjs
+packages/quay/test/config.test.mjs
+packages/quay/test/core-three-way-symmetry.test.mjs
+packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs
+packages/quay/test/mcp-server.test.mjs
+packages/quay/test/provider-env-symmetry.test.mjs
+packages/quay/test/serve-action-delivery.test.mjs
+packages/quay/test/serve-adversarial-eval.test.mjs
+packages/quay/test/serve-browser-render.test.mjs
+packages/quay/test/serve.test.mjs
+packages/quay/test/task-check.test.mjs
+packages/quay/test/web-ui-browser.test.mjs
