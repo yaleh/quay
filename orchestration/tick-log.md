@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 10:17Z | `correct`（correct-self：纠正外层前一班写进任务体的 Touches；**冷启动恢复**——本会话是 quay 专属外层的第一个 tick） | 冷启动 7 步；重挂 Monitor；跑派发闸口检查器并据其发现建 1 个任务；补齐新任务的 Touches 与 `## Dispatch review`；修 tick-log 自己的重算命令 | **quay 停机中**（`.halt` 在，解除条件写明）；在飞 **0**、orphaned 0、树干净；完成 44，`tasksPerHour` **1.562**（窗口 23.69h）；CPU some avg10 **40.29**、load1 5.73、`node-MainThread` 8；archguard/meta-cc 均运行中 | **派发闸口的检查器没有执行者，名单反向增长了 12 倍**：`grep -rn task-contract-check scripts/ .github/workflows/` 只命中 `task-schema.ts` 的两条注释，`run_static_checks()` 跑的是另外三个检查器；实跑 `--json` 得 **violations 12 / baselineCount 1 / growth true / exit 1**，11 条新增**全部落在 `status: done` 的任务上**。逐条核对后 **6/7 的 `invoke-evidence-missing` 是假发现**——证据在，只是没按同一串字面写（`bash scripts/test.sh` vs 任务体的 ``` `scripts/test.sh` 全绿：2054 tests ``` ；`--port 4173` vs 实跑的 4174）；**其中 2 条的 invoke 命令内含 `<ISO>`/`<file>` 占位符，逐字命中在构造上不可能发生**。已建 [[gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed]]。**并核实 AC6 前提为真**：`plugin.json` 的 `commands` 列 9 项、`plugin/skills/` 磁盘 10 个目录，缺 `quay-task-operator` |
 | 2026-08-03 10:0xZ | `no-action`（机制在驱动，无需干预） | 按人的重新框定：只判 **quay 在 archguard 里驱不驱得动**，不替它调试测试 | quay 停机（在飞 0、树干净、领先 origin 27）；CPU 9.84、load 3.38；archguard 双层**已运行 12 分钟**：外层→内层派发 **9 次**、内层在跑全量 vitest（日志 1545 行、0 分钟前仍在写）、`cold-start-gaps` 73 行、`tick-log` 28 行、落地提交 0、新任务 0 | **我差点把 0 落地判成停摆**——先按印象当成「跑了 40–50 分钟」，核 `ps -o lstart` 后实为 **12 分钟**。按 quay 自己的吞吐 1.57/h ≈ **38 分钟/任务**，12 分钟 0 落地是**第一个重活未完**，不是机制失效。**机制判定：在驱动**（派发→执行→产出证据链完整）。**已见的结构性限制：无并发**——`touches-orthogonality-check.ts` 与 `concurrent-batch-scheduler.ts` 都没跟着移植过去，外层只能串行等一个重活跑完。这条记进打包任务的铺设清单 |
 | 2026-08-03 10:1xZ | `correct`（correct-inner：纠正 archguard 外层的取状态方式） | quay 停机观察；核 archguard 冷启动差异清单；建打包任务；人指出冷启动应做成 skill | **quay 已停**（在飞 0、树干净、领先 origin 26）；archguard 外层已产出 `cold-start-gaps.md`（55 行、13 个缺失文件）；CPU 压力 11.02、load 2.82 —— 停 quay 后资源确实腾出来了 | **载体已存在**：quay 本就是 Claude Code plugin，`quay-init` 已有幂等+dry-run+冲突不覆盖 ⇒ **扩展而非新造**。**诊断被实测改了两次**：先「`files` 忘了列」（错，够不到包外路径）、再「机制全在包外」（错，4 个检查器在 plugin 内）；第三版才对得上——`quay-init` 不铺 `plugin/scripts/`、7 个文件在 plugin 外、`quay-task-operator` 未列进 commands。**人观察到 archguard 外层频繁 `capture-pane`**：实测四个取状态手段那边一个都没有，于是静默降级到 `CLAUDE.md:151` 明令禁止的读 TUI（quay 1:6.8 vs archguard ≈1:1）——**缺文件不报错，只让方法退化**，这是那个任务优先级的真实依据 |
 | 2026-08-03 09:4xZ | `correct`（correct-self，一小时内第二次坏测量造假发现） | 排空完成→落 .halt→冷启动 archguard 双层会话；人给出交付物三条硬判据 | 在飞 0、树干净、`4a926542` 套件 2073 全绿；残留 worktree 清掉（剩主树 + 人裁定保留的 M239）；`.halt` 已落（解除条件写明）；archguard 两个会话在 tmux 起好（pane0 flash / pane1 pro，模型已确认） | **假发现**：我报「archguard 的 lint 报 480 error 还判绿」，实为**在管道后读 `$?`**——读到的是 `sed` 的退出码；直接跑 `lint` 退出码是 **1**，闸是好的。**同一族第二次**（上次是截断显示）。**真活确认**：CI 自 2026-07-12 连红、`npm test` 被 `timeout 300` 杀（exit **124** 掩盖真实退出码）、lint 480 errors。**人的三条硬判据推翻了交付物定义**：user scope 安装 / 几条 README 命令 / 运行时不依赖开发目录。实测 `.quay/config.yml` **已是冷的**，但包的 `files` 不含 tick 文档与脚本——我给 archguard 装机制用的是 `cp`，**那是热拷贝不是冷启动** |
@@ -106,16 +107,28 @@
 重算命令：
 
 ```bash
-python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(no-action|unblock|correct|escalate)\` \|',open('orchestration/tick-log.md').read()));print(c, sum(c.values()))"
+python3 -c "
+import re,collections
+rows=[l for l in open('orchestration/tick-log.md') if re.match(r'^\| 2026-',l)]
+c=collections.Counter(m.group(1) for l in rows
+  for m in [re.search(r'\`(no-action|unblock|correct|escalate)\`', l.split('|')[2])] if m)
+print(c, sum(c.values()), 'rows:', len(rows))"
 ```
+
+**这条命令 2026-08-03 10:17Z 修过**（外层第一次真跑它时发现的）：原版写
+`` \| `(no-action|…)` \| `` ——要求动作类型单元格里**只有**那个反引号词，
+于是所有带括号注释的行（`` `no-action`（未介入） ``）一条都不匹配，**94 行只数出 74**。
+表里的 34/15/41/4 是对的，所以那张「由命令算出」的表其实从来不是这条命令算出来的。
+新版按**单元格位置**取值再在单元格内找反引号词，并打印行数供对账（两数不等 = 有行没被分类）。
+**同一族**：判据的名字说「按行数重算」，实际测的是「一个更窄的字面形状」。
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
 | no-action | 34 | 36% |
 | unblock | 15 | 16% |
-| correct | 41 | 44% |
+| correct | 42 | 44% |
 | escalate | 4 | 4% |
-| **合计** | **94** | — |
+| **合计** | **95** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 

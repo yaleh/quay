@@ -172,10 +172,44 @@ resume   每铺完一类资产即记一次，中断可续
 
 - plugin/skills/init/SKILL.md
 - plugin/.claude-plugin/plugin.json
+- plugin/scripts/fast-mode-telemetry.ts
+- plugin/loop/orchestrator-loop-tick.md
+- plugin/loop/fast-mode-loop-tick.md
+- plugin/scripts/inner-forensics.mjs
+- plugin/scripts/inner-state.sh
+- plugin/scripts/resource-gate.sh
+- plugin/scripts/heavy-op-token.sh
+- orchestration/orchestrator-loop-tick.md
+- orchestration/watch/inner-forensics.mjs
+- orchestration/watch/inner-state.sh
+- docs/analysis/fast-mode-loop-tick.md
+- scripts/resource-gate.sh
+- scripts/heavy-op-token.sh
+- experiments/quay-perpetual-stream/scripts/fast-mode-telemetry.ts
 - test/cold-start-e2e.sh
+- README.md
 
 ## Dispatch review
 
 reviewer: outer
 at: 2026-08-03T10:05:00Z
 changed: 人指出冷启动/升级应当是一个 skill；外层查出载体已存在（quay 已是 Claude Code plugin，`quay-init` 已有幂等+dry-run+冲突不覆盖），故改为**扩展 quay-init 而非新造 skill**——新造会立刻产生两套铺设逻辑。诊断在实测下改过两次（先「files 忘了列」、再「机制全在包外」），第三版才对得上文件系统，改动史留在任务体里。并加 AC6：`plugin.json` 的 commands 与磁盘 skill 目录不一致（`quay-task-operator` 未列）是人肉发现的，必须有测试断言，否则只修一次就会再漂
+
+reviewer: outer
+at: 2026-08-03T10:23:00Z
+changed: **`## Touches` 原先只列 3 个文件，而 Chosen mechanism 第 1 条要搬 7 个 plugin 外的文件、
+第 2 条要收敛 `fast-mode-telemetry.ts` 的双份、第 5 条要新建 e2e 脚本、AC9 要改 README。**
+Touches 是并发派发的唯一资格判据（`checkTouchesPair`）——按原来的 3 个条目，这个任务会被判为与
+「改 orchestration/ 或 scripts/ 的任务」正交并同批派发，而它实际会搬走那些文件。已按机制补齐到 18 条
+（搬移类同时列源路径与目标路径：判据要的是「会碰哪些文件」，搬移碰两端）。条目一律写裸路径、
+不加反引号与 `(new)` 后缀——`touches-orthogonality-check.parseTouches` 对
+`` - `foo.ts` (new) `` 会解析出带残留反引号的错路径（[[gap-task-body-has-n-parsers-and-no-authority]]）。
+第二条：**`scripts/test.sh` 搬不搬，任务体自相矛盾**——缺口二的表把它列为「机制文件」，
+而 Chosen mechanism 只说「`.sh`/`.mjs` 进 `plugin/scripts/`」。它是本仓 CI 与 15 处文档的入口，
+搬它是范围决定不是实现细节。**执行前先答这一条并写进任务体**；未答之前不列进 Touches。
+第三条（核实，非改动）：AC6 的前提外层已独立复核为真——`plugin/.claude-plugin/plugin.json` 的
+`commands` 列 **9** 项，`plugin/skills/` 磁盘 **10** 个目录，缺的正是 `quay-task-operator`。
+（Touches 里**不含** `scripts/test.sh`：见上面第二条——它搬不搬未定，未定之前不写进
+Touches，否则并发资格判据会按一个未定的前提放行。此说明放在这里而不是 `## Touches` 之后，
+是因为 `task-schema-check.ts` 的 `touches-post-content` 判据禁止 Touches 段后出现非 bullet 内容——
+外层第一版写在那里，被该检查器当场抓到。）
