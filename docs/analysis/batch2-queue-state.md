@@ -160,3 +160,43 @@ subagent transcript：
 
 `docs/analysis/fast-mode-loop-tick.md` 正被在飞的 `gap-dispatch-gate-has-no-checklist-and-no-trace`
 占用。该文档的改动**并进那个任务或等它落地后再改**，不要并行改同一文件。
+
+## 外层更正上一条指令（2026-08-03T02:45:03Z）—— 不该进阻塞信号
+
+**上一条指令（2026-08-03T02:45:03Z 前约 15 分钟）有设计错误，外层自己发现的。以本条为准。**
+
+### 错在哪
+
+`turn-ended-idle` **不是「停下等裁定」**——回合结束、无待办不是在等外层，是在等自己的 loop 唤起。
+把它写进 `.quay/inner-blocked.json` 会造成两处误触发：
+
+1. `orchestration/watch/inner-state.sh:25-30` 对**任何** reason 都发 `BLOCKED reason=… question=…`，
+   **没有过滤**。⇒ 内层每结束一次回合就叫醒外层一次，而这些事件不需要任何动作。
+   **一个有意义的告警信号会被稀释成噪声**——这比没有信号更糟，因为它会训练出忽略。
+2. `restart-readiness-check.sh` 在 un-halt 前打印阻塞记录（「内层在等裁定 ≠ 可以解除 `.halt`」）。
+   一条 `turn-ended-idle` 会挡住 un-halt。
+
+而且 `docs/analysis/fast-mode-loop-tick.md:238-256` 的触发条件写的是「**停下等人**」，
+`--reason` 示例硬编码那七个值，并明写「**不新增语义（AC2）**」。
+**加了枚举值但文档禁止使用它 ⇒ 代码与文档两个源头打架**，正是本仓库反复要消灭的漂移。
+
+### 改为（三件，都更小）
+
+1. **撤回 `7cfc9733`**——从 `VALID_BLOCKED_REASONS` / `REASON_DESCRIPTIONS` 移除 `turn-ended-idle`，
+   测试断言改回 7。理由是上面第 2 段：留着一个文档禁止使用的值，比没有它更容易让人写错。
+2. **改用只追加的日志**，与告警信号完全分开：
+   ```bash
+   # 每次以「无待办」结束回合前，追加一行（不需要 --clear，不需要状态）：
+   printf '%s\n' "$(node -e 'console.log(JSON.stringify({at:new Date().toISOString(),reason:process.argv[1],note:process.argv[2]}))' <reason> "<一句话>")" \
+     >> orchestration/inner-idle-log.jsonl
+   ```
+   `reason` 用这五个之一：`awaiting-subagent`（在等自己派的 subagent）、
+   `queue-empty`（无可派任务）、`awaiting-ruling`（真的在等外层裁定）、
+   `rate-limited`、`no-reason`（说不出为什么——**这一项的计数本身就是下一轮要修的东西**）。
+3. **时长不用内层记**——外层从 transcript 的时间戳间隙算（已验证可行：8.78h 窗口 61 个间隙、
+   3.80h 无命令）。内层只提供**原因**，两边 join 即可。这样内层零状态、零清理、零误触发。
+
+### 不做
+
+不改 `inner-state.sh`、不改 `restart-readiness-check.sh`、不给阻塞信号加过滤——
+**保持阻塞信号只有一个含义：内层在等外层裁定。** 一个信号一个含义，比一个信号加一层过滤更难用错。
