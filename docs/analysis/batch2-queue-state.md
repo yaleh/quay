@@ -49,13 +49,13 @@
 
 | 任务 | 说明 |
 |---|---|
-| **并发批次（3 在飞，AC13 首证）** | **relation-sync**（`gap-relation-sync-suite-red-isolation-green`，fm-...-1zhl5t，/tmp/quay-wt-relsync）+ **blocked-signal**（`gap-no-explicit-blocked-signal-from-inner-layer`，fm-...-tvlfl3，/tmp/quay-wt-blocked）+ **test-framework-policy**（`gap-no-test-framework-policy-for-new-tests`，fm-...-syg65l，/tmp/quay-wt-fwpolicy）。checkTouchesPair 实测两两 DISJOINT。blocked-signal 修今晚两次停摆的信号缺口；policy 是 relation-sync「手写 harness 说不出话」的棘轮。**blocked-signal 自身缺陷已抓**：测试写了真实 `.workflow-events/` 造幽灵 orphaned（blk-...-5d8pfx，演示数据「M243 按 A 还是 B」）——已删幽灵记录（orphaned 归零），subagent 修测试传临时 root（AC9 判据干净）。**教训：观测机制自身的测试污染了被观测的存储** |
+| **并发批次（3 在飞，AC13 首证）** | **relation-sync**（fm-...-1zhl5t，/tmp/quay-wt-relsync）+ **blocked-signal**（fm-...-tvlfl3，/tmp/quay-wt-blocked）+ **test-framework-policy**（fm-...-syg65l，/tmp/quay-wt-fwpolicy）。checkTouchesPair 两两 DISJOINT。00:26 tick：3 个都 ~20min 在飞（各 worktree 开发中，未提交）。**blocked-signal 自身缺陷**：测试写真实 .workflow-events 造幽灵 orphaned——`5d8pfx`（已清，立即再污染成 `8t8v9i`，00:22:24，修复前残留）。**subagent 已修测试传 --root tmpRoot**（判据：跑完测试真实 .workflow-events 不新增）。**教训：成因活着时清理症状会一分钟内再污染——先修成因再清理；观测机制自身的测试污染了被观测的存储** |
 | **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |
 | 下一批 gap 任务 | **先 checkTouchesPair 组可并发批次**。测试是最大可优化项（36%），新成本模型已给出可测阈值（≥20s 墙钟 / Σ 需 ≥5 采样）。**34 个手写 harness 的「隔离绿/套件红」类是后续重点**（relation-sync 是第 2 个，AC7 要判断还剩多少成员） |
 | AC5：tick 队列补充步骤 | 复用 select-preflight/assembleBatch，不新建 |
-| AC6（已部分达成） | `.halt` 已解除（17:43Z，readiness READY）。/loop 自排程已补 |
+| AC6（已达成） | `.halt` 已解除（17:43Z，readiness READY）。**/loop 25m 已启动且可查验**（CronList 返回 `2312da21 — Every 25 minutes (recurring) [session-only]`）。理由：/loop 是跨 /clear//compact 兜底（非驱动器），对一个专门在上下文丢失后兜底的机制，不可查验即不可信 |
 
 **数据有效性精确边界（2026-08-02 21:05，inner-forensics 取证）**：flags-only 缺陷只在「裸标志 + 无文件列表」时触发。我的 8 次全量调用中 **7 次无标志（有效）**、**1 次裸标志 18:35:44 `--test-concurrency=4 > full-suite-m243-c4.log`（被污染，8037 失败作废）**。20:16 那次 `--test-concurrency=4` + 4 显式文件（重型子集 332/332 绿）**有效**（有文件列表，node 跑指定文件）。外层那组 `--test-concurrency=4`（8573）同样作废。**结论：M243 后崩溃、M136 全量红/隔离绿、干净窗口 load1=0.39 仍 fail 1 均为有效观察**，继续作证据。污染的范围要查（inner-forensics 秒级），不要凭印象估。
 
