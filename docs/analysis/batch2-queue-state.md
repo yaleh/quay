@@ -1592,3 +1592,15 @@ session-liveness 上诊断过同形态）。阶段二立即开始；阶段三不
    （## Carries）+ AC9 空闲判别（isApiErrorMessage 结构字段，非 429 文案——换端点失效）。
 
 **在飞 3/3**：cold8 阶段二、checkers-mutation、liveness-stage-2。
+
+### 机制观察记录（2026-08-03 19:5xZ，外层）——第 14 次「存在≠生效」
+
+68 分钟等待本可 1 分钟信号：`inner-blocked-signal.ts` 的 VALID_BLOCKED_REASONS 有 `ruling-required`（注释
+「a question the outer must rule on」），外层 inner-state.sh 监视器盯 `.quay/inner-blocked.json`，文件一出现
+就发 BLOCKED reason=… question=… 唤醒外层。**实测该文件从未被写过**。
+形态：机制在 + 判据枚举有 + 监视器接着 + **没被调用**——内层把阻塞写进 tick 文本、外层读 worktree 时间戳、
+最后靠人搭桥。第 14 次、最靠上游（三样都在场只差一次调用）。
+外层已加不依赖内层的判定式（在飞任务最后提交时龄 >20 分钟且树干净 ⇒ 读内层最后一段输出）。
+**内层行为规则**：真停下等外层裁定（阶段门、合并冲突等）时，写 `.quay/inner-blocked.json`（
+`inner-blocked-signal.ts --assert-blocked --taskId <id> --reason ruling-required --question <q>`），
+比写 tick 文本快也更可靠；恢复时 `--clear`。tick 文档「阻塞信号」节已要求，本记录是实例。
