@@ -1514,3 +1514,16 @@ emptyset + board 已关闭（47 完成）。合并 2387e328/aa647b87/fbf64fe9；
 + node:test 150000，套件负载下 4 次超时）。DoD 2x 均如实 [~]（1 次全量绿）。
 **liveness 阶段一已合并落地**（transcript 心跳 + REPO-STALL 改名 + 停机基线），**待外层阶段二裁断**
 （继续/拆 + 与姊妹任务 hashes-the-token-counter 排序）。liveness worktree 保留待续。
+
+### 派发（2026-08-03 17:3xZ）：cold-start-8（队首主线）+ board 契约修复
+
+**board 契约 new=1 已修**：invoke 入口路径 `packages/quay/bin/quay.ts` 补实跑证据进任务体（Contract 外），
+ratchet 恢复 new since baseline: 0。
+
+**cold-start-eight-steps 已派发**（`/tmp/quay-wt-cold8`，agent a8f87932...，fm-...-d05ioq，队首主线）：
+机制随包走 + 有可安装物 + archguard 已用产物冷启动，只剩「别人能否不靠口述装上」。
+三阶段（检测阶梯/冷启动 skill/端到端+隔离负控制），阶段一停报。**AC7 已改安全隔离**（PATH 符号链接摘除
+或容器，非字面 mv——4 claude 会话 cwd + 2 PATH 链接 + 2 worktree 在开发树下）。AC4 判据事件送得到非进程在跑。
+验证两目标分开报：临时空目录（全新）+ meta-cc（升级/Go/不依赖开发树）。
+
+**在飞 2/3**：liveness 阶段一（待外层阶段二裁断）+ cold8 阶段一。
