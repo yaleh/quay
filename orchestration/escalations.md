@@ -344,3 +344,31 @@ tasks/DIR-124-F6.md   tasks/gap-build-evidence-path.md
 其余推送作为内层常规动作写明。理由：今晚全部教训都指向
 **写下来但没有执行者的规则等于没有规则**——而「外层不推」这条今晚正是这样失效的，
 只不过失效的方式是「另一个 agent 做了这件事」。
+
+## 已裁定 2026-08-03：推送与 release 仍须人显式触发
+
+**人的裁定原文**：「`推送到 GitHub` 和 `在 GitHub 发布新 release` 现在还必须由人显式触发。
+未来我可能会授权自动 push & release。」
+
+**⇒ 这条升级项结案。** 外层与管理者都不 push、不打标签、不建 release。
+
+### 实测出的触发面（供人决定时参考，避免误以为推送=发布）
+
+| 动作 | 触发的工作流 | 是否产生 release |
+|---|---|---|
+| `git push origin master` | 仅 `ci.yml` | **否** |
+| 打 `v*` 标签 | `release.yml` + `publish-plugin-dist.yml` | **是**（`softprops/action-gh-release`） |
+| `publish-plugin-dist.yml` 的 `workflow_dispatch` | 仅重建 `dist-plugin` 孤儿分支 | **否**（工作流注释明写这条路径用于「在 release 之外重新播种该分支」） |
+
+### 当前被这条裁定阻塞的东西
+
+`/plugin install quay` 装到的是远端 `dist-plugin`，它**落后 master 2424 个提交**，
+今晚的机制（`quay-init.sh` / `inner-state.sh` / `loop/*.md`）**一个都不在**。
+在人执行下面两步之前，产品化交付**无法被任何人装到**，管理者 AC2 与 AC3 均无法推进：
+
+```
+git push origin master                    # 只跑 CI，不发布
+gh workflow run publish-plugin-dist.yml   # 从 master 重建 dist-plugin，不打标签、不建 release
+```
+
+**这不是催促**——是把「那一次动作具体是什么、代价多大」测清楚放在这里，等人决定。
