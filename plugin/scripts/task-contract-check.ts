@@ -10,7 +10,8 @@
 //   2. measure-no-command / measure-no-field — each `measure` must carry BOTH a backtick command and
 //      a field name (the thing it reads off that command's output).
 //   3. invoke-not-command / invoke-evidence-missing — each `invoke` must be a backtick command; on a
-//      DONE task, that command string must appear VERBATIM in the body OUTSIDE the Contract block.
+//      DONE task, the command's EXECUTABLE ENTRY PATH must appear in the body OUTSIDE the Contract
+//      block (not the verbatim string — placeholders like <ISO> make verbatim matching impossible).
 //   4. defect-no-control — a task labelled `defect` must declare a `control` (the negative control
 //      that would expose a masking fix — "sync before check" class).
 //   5. contract-empty-value — a key present with a blank value (n/a: <reason> is fine).
@@ -28,7 +29,7 @@
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/task-contract-check.ts [--root <dir>] [--json]
-//       [--write-ratchet] [--allow-growth] [<task-file.md> ...]
+//       [--write-ratchet] [--allow-growth] [--reset-baseline] [<task-file.md> ...]
 //   scripts/test.sh plugin/test/task-contract-check.test.mjs
 
 import fs from "node:fs";
@@ -118,8 +119,25 @@ function checkMeasureCommandField(entries) {
   return findings;
 }
 
-// Check 3: invoke must be a backtick command; on a done task the command string must appear verbatim
-// OUTSIDE the Contract block (the evidence must show the exact command run — spelling drift catcher).
+// Check 3: invoke must be a backtick command; on a done task the command's EXECUTABLE ENTRY PATH
+// must appear OUTSIDE the Contract block (the evidence must show the script actually run — spelling
+// drift catcher). Commands with placeholders (`<ISO>`, `<file>`, ...) are judged by entry path too:
+// a verbatim match is impossible by construction once the placeholder is substituted.
+// (gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: 6 of 7 prior findings were false —
+// the evidence existed, just not as the same literal string.)
+/** Extract the executable entry path from a backtick command: the first slash-bearing token, skipping
+ * leading interpreter tokens (`node`, `bash`, ...) and flag tokens (`--flag`). A command with no
+ * path token at all (e.g. `git status`) falls back to the full command string, preserving verbatim
+ * matching for those. */
+export function invokeEntryPath(cmd) {
+  const tokens = cmd.trim().split(/\s+/).filter(Boolean);
+  for (const tok of tokens) {
+    if (tok.startsWith("-")) continue;
+    if (tok.includes("/")) return tok;
+  }
+  return cmd;
+}
+
 function checkInvoke(entries, body, contractSectionText, status) {
   const findings = [];
   const bodyOutside = contractSectionText ? body.replace(contractSectionText, "") : body;
@@ -130,8 +148,10 @@ function checkInvoke(entries, body, contractSectionText, status) {
       continue;
     }
     const cmd = (e.value.match(/`([^`]*)`/) || [])[1] || "";
-    if (status === "done" && cmd && !bodyOutside.includes(cmd)) {
-      findings.push({ code: "invoke-evidence-missing", what: `invoke command \`${cmd}\` does not appear verbatim in the task body (outside ## Contract) — a done task must show the exact command it ran` });
+    if (status !== "done" || !cmd) continue;
+    const entryPath = invokeEntryPath(cmd);
+    if (!bodyOutside.includes(entryPath)) {
+      findings.push({ code: "invoke-evidence-missing", what: `invoke command's entry path \`${entryPath}\` does not appear in the task body (outside ## Contract) — a done task must show the executable entry path it ran` });
     }
   }
   return findings;
@@ -210,14 +230,18 @@ export function readRatchet(root) {
   return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
 }
 
-export function writeRatchet(root, currentEntries) {
+export function writeRatchet(root, currentEntries, { reset = false } = {}) {
   const p = path.join(root, DATA_FILE_REL);
   const { baseline, baselineCount } = readRatchet(root);
-  const ceiling = baselineCount ?? currentEntries.length;
-  if (currentEntries.length > ceiling) {
+  // reset=true is the DELIBERATE one-shot re-baseline (gap-contract-ratchet-has-no-runner-and-grew-
+  // tenfold-unnoticed): after a criterion fix drops false positives, the ceiling is re-anchored to the
+  // current violation set. It bypasses the shrink-only guard ONCE, so the caller must record the
+  // before/after run output. Any subsequent write is shrink-only again (ceiling never grows).
+  const ceiling = reset ? currentEntries.length : (baselineCount ?? currentEntries.length);
+  if (!reset && currentEntries.length > ceiling) {
     return { ok: false, reason: `current violations (${currentEntries.length}) exceed the ratchet ceiling (${ceiling}) — the list can only get SHORTER; fix violations, do not add them` };
   }
-  if (baseline.size > 0) {
+  if (!reset && baseline.size > 0) {
     const newOnes = currentEntries.filter((e) => !baseline.has(e));
     if (newOnes.length > 0) {
       return { ok: false, reason: `refusing to write: ${newOnes.length} NEW violation(s) not in the baseline — the list can only get SHORTER: ${newOnes.slice(0, 5).join(", ")}${newOnes.length > 5 ? "…" : ""}` };
@@ -231,7 +255,8 @@ export function writeRatchet(root, currentEntries) {
     "# RATCHET: the list can ONLY get SHORTER. task-contract-check.ts exits 1 if a NEW violation",
     "# appears that is not already listed, or if the list would exceed the baseline-count ceiling.",
     "# Remove an entry only after the underlying violation is fixed (then run --write-ratchet to",
-    "# persist the shrunken list).",
+    "# persist the shrunken list). `--write-ratchet --reset-baseline` is the deliberate one-shot",
+    "# re-baseline after a criterion fix; it re-anchors the ceiling to the current violation set.",
     "#",
     "# Format: one `<task-file>: <violation-code>` per line (repo-root-relative, sorted).",
     "# baseline-count: " + ceiling,
@@ -240,7 +265,9 @@ export function writeRatchet(root, currentEntries) {
     "",
   ];
   fs.writeFileSync(p, lines.join("\n"));
-  return { ok: true, reason: `ratchet list written (${currentEntries.length} entry/entries; ceiling ${ceiling})` };
+  return { ok: true, reason: reset
+    ? `ratchet baseline RESET to ${currentEntries.length} entry/entries (ceiling re-anchored to ${ceiling})`
+    : `ratchet list written (${currentEntries.length} entry/entries; ceiling ${ceiling})` };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -250,6 +277,7 @@ export function runCli(argv) {
   let json = false;
   let writeRatchetFlag = false;
   let allowGrowth = false;
+  let resetBaseline = false;
   const files = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -257,8 +285,13 @@ export function runCli(argv) {
     else if (a === "--json") { json = true; }
     else if (a === "--write-ratchet") { writeRatchetFlag = true; }
     else if (a === "--allow-growth") { allowGrowth = true; }
+    else if (a === "--reset-baseline") { resetBaseline = true; }
     else if (a.startsWith("-")) { console.error(`task-contract-check: unknown flag: ${a}`); process.exit(2); }
     else { files.push(a); }
+  }
+  if (resetBaseline && !writeRatchetFlag) {
+    console.error("task-contract-check: --reset-baseline requires --write-ratchet (it is the write that re-anchors the ceiling)");
+    process.exit(2);
   }
   const wsRoot = root ? path.resolve(root) : findWorkspaceRoot();
   const tasksDir = path.join(wsRoot, "tasks");
@@ -296,11 +329,12 @@ export function runCli(argv) {
   const firstBaseline = baselineCount === null;
   const newOnes = currentEntries.filter((e) => !baseline.has(e));
   const resolved = !subset && baseline.size > 0 ? [...baseline].filter((e) => !currentEntries.includes(e)).sort() : [];
-  const growth = !subset && !firstBaseline && newOnes.length > 0 && !allowGrowth;
+  // --reset-baseline is a deliberate re-baseline: it must NOT be reported as growth.
+  const growth = !subset && !firstBaseline && newOnes.length > 0 && !allowGrowth && !resetBaseline;
 
   let writeOutcome = null;
   if (writeRatchetFlag && !growth && !subset) {
-    writeOutcome = writeRatchet(wsRoot, currentEntries);
+    writeOutcome = writeRatchet(wsRoot, currentEntries, { reset: resetBaseline });
     if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset });
   }
 

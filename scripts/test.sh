@@ -128,6 +128,14 @@ run_static_checks() {
   bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
   echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
   bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
+  echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
+  # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
+  # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because
+  # the only consumer was an ad-hoc pre-dispatch run. Wiring it here (same place as the other three
+  # whole-store checkers) gives every test-running invocation — and CI, which inherits it via its
+  # single `bash scripts/test.sh` step — the ratchet enforcement for free. exit 1 on ratchet growth
+  # aborts the suite (set -euo pipefail), so a NEW violation red-lights the commit, not the dispatch.
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
 }
 
 # ── derived default concurrency (gap-no-resource-awareness-heavy-ops-run-blind, AC5) ──────────────

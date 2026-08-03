@@ -88,5 +88,4 @@ plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
 plugin/test/runner-grouping.test.mjs:spawns-test-sh
 plugin/test/runtime-usage-inventory.test.mjs:mkdtemp-no-cleanup
 plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh
-plugin/test/task-contract-check.test.mjs:mkdtemp-no-cleanup
 plugin/test/test-coverage-check.test.mjs:spawns-test-sh
