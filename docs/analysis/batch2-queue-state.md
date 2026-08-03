@@ -641,6 +641,15 @@ prepare-admission- 14220、prep-check- 9128、quay-loop-params-trig-fuzz- 4337�
 **sigma 条件改善**：/tmp 4GB 空间 + 压力降（sigma 仍在测量，若 filesCaptured < 155 会重测）。
 stranded 全量仍等 sigma 测完。新增 `/tmp/quay-wt-preretire`（外层 detached worktree，不碰）
 
+### Tick 更新（06T03:26Z）：webobs merged；全量队列等 sigma
+
+- **webobs merged**（`e8ef92e3`，4 文件 +659）：observation.ts（独立降级永不 500）+ /live + /journal 路由 +
+  24 断言。scoped 1/1 绿（--allow-thin）。偏离：遥测路径用 .workflow-events/（任务体写的 .quay/... 不存在）
+- **stranded + webobs 都已 merge，scoped 绿**——**全量等 sigma 测完**（污染其 Σ）。sigma 仍测量中
+  （进程 334483，压力 87.83 其单套件稳态）
+- **全量串行队列**：sigma 测完 → stranded+webobs 合并全量 → sigma 自己验证（如需要）
+- **parser 任务**可派（stranded 已合并，task-status-drift-check.ts 重叠解除）；等槽位
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
