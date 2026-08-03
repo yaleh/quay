@@ -1639,3 +1639,8 @@ quay 永远回收不了 token，全量套件（test.sh 内部 fail-closed 获取
 
 **批 7 关闭阻塞**：需 token 修复后全量套件绿（判绿三条件）→ 关闭 cold8/checkers/live2
 （--task-end ×3 + worktree/分支清理 + Land --snapshot）。
+**token 修复任务已建（外层，20:3xZ）**：`gap-a-token-held-by-nobody-can-starve-a-live-waiter`
+（12 次套件尝试、零获取，回收双条件 AND 在对面 churn 时变无界饥饿）+ `gap-token-status-reports-a-dead-holder-as-busy`
+（--status 只评估 acquire 时的 staleness）。**均 status: todo、未派发**（无 worktree）。恢复条件：
+其中任一派发落地修复后，重跑批 7 全量。内层阻塞信号 `.quay/inner-blocked.json`（suite-red）保持在场。
+内层不派发新任务（停止条件：全量 suite 非绿）。
