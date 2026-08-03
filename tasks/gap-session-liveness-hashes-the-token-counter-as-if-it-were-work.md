@@ -69,6 +69,17 @@ $ tmux capture-pane -p -t archguard-2:outer | grep -n "to save"
 **排除规则必须精确到「状态提示行」，不能按关键词 `tokens` 一刀切**，否则会把真活动一起滤掉，
 把假阳性换成假阴性——**后者更糟，因为它静默**。
 
+### 外层追加实测（2026-08-03 14:51Z）：这条 chrome 只出现在停泊会话
+
+新挂的 session-liveness 监视器首次发声 `SESSION-RESUMED inner`，按纪律先证伪：
+内层 transcript mtime 距检查仅 6 秒、屏幕 12 秒内变化 ⇒ **真阳性**，
+而且 **`tmux capture-pane -p -t quay-0:inner | grep -c "to save [0-9.]+k tokens"` = 0**。
+
+**⇒ `/clear to save NNN.Nk tokens` 只在会话停泊时出现**（archguard 停泊 pane 有，忙碌的内层没有）。
+**这把假阳性的形态收窄了**：它专挑**停泊会话**发生——
+**而那正是最误导的场合**，因为停泊会话「看起来在工作」比忙碌会话多一对事件危险得多。
+AC3 的负控制样本因此应当取**停泊态** pane 快照，不要用忙碌态构造。
+
 ## Contract
 
 ```
