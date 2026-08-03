@@ -9,6 +9,8 @@
 //               or an unrelated spawn does not.
 //   - R4 (AC2): process.exit(1) reports only in a hand-rolled (non-node:test) file; comments,
 //               strings, and process.exitCode never report.
+//   - R6 (AC2/AC6): mkdtemp with no cleanup construct anywhere reports; rm/after/finally cleanup
+//               does not; /tmp/claude-* and /tmp/quay-wt-* prefixes are NEVER matched (AC6).
 //   - AC3/AC4 rehearsal (CLI): the real-repo run reports the three known instances (M136's
 //               plugin-packaging, AC11's select-tests-for-touches; relation-sync is fixed and
 //               must NOT report) and the 7 remaining process.exit(1) harnesses.
@@ -31,6 +33,7 @@ import {
   detectSharedBuildArtifactWrites,
   detectSpawnsTestSh,
   detectProcessExit1,
+  detectMkdtempNoCleanup,
   runIsolationChecks,
 } from "../scripts/test-isolation-check.ts";
 
@@ -130,6 +133,71 @@ test("R4/AC2: process.exit(1) reports in a hand-rolled file; never in comments/s
   assert.equal(detectProcessExit1('// @test-group product\nprocess.exitCode = 1;\n', "x.test.mjs").length, 0);
   assert.equal(detectProcessExit1('// @test-group product\n// uses process.exit(1)\nconst x = 1;\n', "x.test.mjs").length, 0);
   assert.equal(detectProcessExit1('// @test-group product\nconst s = "process.exit(1)";\n', "x.test.mjs").length, 0);
+});
+
+// ── R6 / AC2 / AC6: mkdtemp without cleanup ────────────────────────────────────────────────────────
+test("R6/AC2: mkdtemp with no cleanup reports; rm/after/finally cleanup does not", () => {
+  // a bare mkdtemp with no cleanup construct anywhere → reports (the leak shape of adr-store/
+  // document-store before the gap-tests-never-clean-up-their-tmpdirs fix)
+  assert.ok(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\n', "x.test.mjs")
+      .some((v) => v.rule === "mkdtemp-no-cleanup")
+  );
+  // no mkdtemp → never reports
+  assert.equal(detectMkdtempNoCleanup('// @test-group product\nconst x = 1;\n', "x.test.mjs").length, 0);
+  // t.after cleanup → GREEN
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\nt.after(() => fs.rmSync(dir, { recursive: true, force: true }));\n', "x.test.mjs").length,
+    0
+  );
+  // rmSync cleanup → GREEN
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\nfs.rmSync(dir, { recursive: true, force: true });\n', "x.test.mjs").length,
+    0
+  );
+  // try/finally → GREEN
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally {}\n', "x.test.mjs").length,
+    0
+  );
+  // a comment merely mentioning mkdtemp is not a violation (code-position matching)
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\n// fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")) mention\nconst x = 1;\n', "x.test.mjs").length,
+    0
+  );
+});
+
+// ── AC6 / AC4: /tmp/claude-* and /tmp/quay-wt-* are NEVER matched; negative control ─────────────────
+test("AC6: claude-* and quay-wt-* mkdtemp prefixes never report; a normal fixture prefix still does (AC4 negative control, both directions)", () => {
+  // session data / in-use worktree prefixes are exempt (AC6)
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-abc123"));\n', "x.test.mjs").length,
+    0,
+    "claude-* prefix must be excluded"
+  );
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n', "x.test.mjs").length,
+    0,
+    "quay-wt-* prefix must be excluded"
+  );
+  // AC4 NEGATIVE direction: a NORMAL fixture prefix (the leak shape) reports
+  assert.ok(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "fixture-leak-"));\n', "x.test.mjs")
+      .some((v) => v.rule === "mkdtemp-no-cleanup"),
+    "fixture prefix with no cleanup must report (AC4 negative)"
+  );
+  // AC4 RESTORE direction: adding the cleanup makes it stop reporting (back to 0)
+  assert.equal(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "fixture-leak-"));\nt.after(() => fs.rmSync(dir, { recursive: true, force: true }));\n', "x.test.mjs").length,
+    0,
+    "restoring cleanup must return to 0 (AC4 restore)"
+  );
+  // a file mixing a claude-* prefix with a normal leak prefix is NOT fully exempt — the leak reports
+  assert.ok(
+    detectMkdtempNoCleanup('// @test-group product\nconst s = fs.mkdtempSync(path.join(os.tmpdir(), "claude-session"));\nconst l = fs.mkdtempSync(path.join(os.tmpdir(), "fixture-leak-"));\n', "x.test.mjs")
+      .some((v) => v.rule === "mkdtemp-no-cleanup"),
+    "a non-exempt prefix alongside claude-* still reports (AC6 is prefix-scoped)"
+  );
 });
 
 // ── the ratchet (runIsolationChecks, AC5) ───────────────────────────────────────────────────────────

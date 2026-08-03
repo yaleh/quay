@@ -2,16 +2,26 @@
 // Stage 1 — native ADR store. ADRs are a SEPARATE kind from tasks: a decision
 // lifecycle (proposed/accepted/superseded/deprecated/rejected), NOT todo→done;
 // no parent/children/role; global ADR-NNN id. RED-first per ADR-001 (TDD).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAdrStore, VALID_ADR_STATUSES } from "../src/adr-store.ts";
 
+// gap-tests-never-clean-up-their-tmpdirs: every tmpDir() created a per-run-unique dir that was never
+// removed — /tmp (tmpfs) accumulated 3,590 `adr-store-*` dirs. The node:test file-level after() hook
+// removes every created dir after the file's tests complete (it runs even on test failure, unlike a
+// process.on('exit') hook which does not run on process.exit(1) in hand-rolled harnesses).
+const _createdDirs = [];
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));
+  _createdDirs.push(dir);
+  return dir;
 }
+after(() => {
+  for (const dir of _createdDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test("VALID_ADR_STATUSES is the decision lifecycle (no 'done')", () => {
   assert.deepEqual(VALID_ADR_STATUSES, ["proposed", "accepted", "superseded", "deprecated", "rejected"]);

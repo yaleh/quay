@@ -64,12 +64,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Repo-root-relative location of the shrink-only known-violation data file (AC5). */
 export const DATA_FILE_REL = "plugin/test-isolation-violations.txt";
 
-/** The four contract rules (R1..R4) and their data-file keys. */
+/** The six contract rules (R1..R6) and their data-file keys. */
 export const RULE_KEYS = [
   "fixed-path-write",
   "shared-build-artifact-write",
   "spawns-test-sh",
   "process-exit-1",
+  "mkdtemp-no-cleanup",
 ] as const;
 export type RuleKey = (typeof RULE_KEYS)[number];
 
@@ -339,13 +340,55 @@ export function detectProcessExit1(src: string, rel: string): Violation[] {
   return out;
 }
 
-/** Run all four detectors over one file. */
+/**
+ * R6 mkdtemp-no-cleanup: a file with a CODE-position mkdtemp/mkdtempSync call but NO code-position
+ * cleanup construct anywhere in the file (rmSync/rm/t.after/after/finally) leaks a tmpdir per run.
+ * gap-tests-never-clean-up-their-tmpdirs: /tmp (tmpfs) accumulated 166,923 test-fixture dirs / 6.3 GB
+ * over 9 days because R1 (per-run-unique mkdtemp) had no counterpart requiring deletion.
+ * AC6 EXEMPTION: /tmp/claude-* (session data) and /tmp/quay-wt-* (in-use worktrees) prefixes are
+ * NEVER matched — when EVERY mkdtemp prefix in the file is one of those, the file is exempt.
+ * Per-file granularity (one report per file per rule, like R4): the sharpest low-false-positive
+ * static signal for "has mkdtemp but no corresponding rm/rmSync/after".
+ */
+export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
+  const mask = buildNonCodeMask(src);
+  const mkdtempRe = /\bmkdtemp(?:Sync)?\s*\(/g;
+  // Any CODE-position mkdtemp call at all?
+  let firstIdx = -1;
+  for (const m of src.matchAll(mkdtempRe)) {
+    if (mask[m.index] !== 0) continue;
+    if (firstIdx === -1) firstIdx = m.index;
+  }
+  if (firstIdx === -1) return [];
+  // AC6: collect the first string-literal prefix arg of every mkdtemp call.
+  const prefixes: string[] = [];
+  for (const m of src.matchAll(mkdtempRe)) {
+    if (mask[m.index] !== 0) continue;
+    const openIdx = m.index + m[0].length - 1;
+    const region = callRegion(src, mask, openIdx);
+    const args = codeStrings(src, mask, openIdx, openIdx + region.length);
+    prefixes.push(args[0] ?? "");
+  }
+  // When EVERY mkdtemp prefix is a session-data / in-use-worktree prefix, exempt the whole file.
+  const exemptPrefix = /^(?:claude|quay-wt)-/;
+  if (prefixes.length > 0 && prefixes.every((p) => exemptPrefix.test(p))) return [];
+  // Any CODE-position cleanup construct anywhere in the file → not a leak.
+  const cleanupRe = /\b(?:rmSync|rm)\s*\(|\b(?:t\.)?after\s*\(|\bfinally\s*\{/g;
+  for (const m of src.matchAll(cleanupRe)) {
+    if (mask[m.index] !== 0) continue;
+    return [];
+  }
+  return [{ rel, rule: "mkdtemp-no-cleanup", line: lineAt(src, firstIdx), snippet: snippetAt(src, firstIdx) }];
+}
+
+/** Run all six detectors over one file. */
 export function detectAll(src: string, rel: string): Violation[] {
   return [
     ...detectFixedPathWrites(src, rel),
     ...detectSharedBuildArtifactWrites(src, rel),
     ...detectSpawnsTestSh(src, rel),
     ...detectProcessExit1(src, rel),
+    ...detectMkdtempNoCleanup(src, rel),
   ];
 }
 
@@ -668,6 +711,26 @@ export function runSelftest(): boolean {
   check("R4 GREEN: a comment spelling process.exit(1) does NOT report", detectProcessExit1(pe1Comment, "x.test.mjs").length === 0);
   const pe1String = '// @test-group product\nconst s = "process.exit(1)";\n';
   check("R4 GREEN: process.exit(1) inside a string literal does NOT report", detectProcessExit1(pe1String, "x.test.mjs").length === 0);
+
+  // R6: mkdtemp without cleanup reports; with cleanup does not; claude-*/quay-wt-* prefixes never.
+  const leakBare = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\n';
+  check("R6 RED: mkdtemp with no cleanup reports", detectMkdtempNoCleanup(leakBare, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
+  const leakNoMkdtemp = '// @test-group product\nconst x = 1;\n';
+  check("R6 GREEN: no mkdtemp never reports", detectMkdtempNoCleanup(leakNoMkdtemp, "x.test.mjs").length === 0);
+  const cleanedAfter = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\nt.after(() => fs.rmSync(dir, { recursive: true, force: true }));\n';
+  check("R6 GREEN: t.after cleanup does NOT report", detectMkdtempNoCleanup(cleanedAfter, "x.test.mjs").length === 0);
+  const cleanedRm = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));\nfs.rmSync(dir, { recursive: true, force: true });\n';
+  check("R6 GREEN: rmSync cleanup does NOT report", detectMkdtempNoCleanup(cleanedRm, "x.test.mjs").length === 0);
+  const cleanedFinally = '// @test-group product\ntry { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")); } finally {}\n';
+  check("R6 GREEN: try/finally does NOT report", detectMkdtempNoCleanup(cleanedFinally, "x.test.mjs").length === 0);
+  const claudePrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-abc123"));\n';
+  check("R6 GREEN: /tmp/claude-* prefix NEVER reports (AC6)", detectMkdtempNoCleanup(claudePrefix, "x.test.mjs").length === 0);
+  const quayWtPrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n';
+  check("R6 GREEN: /tmp/quay-wt-* prefix NEVER reports (AC6)", detectMkdtempNoCleanup(quayWtPrefix, "x.test.mjs").length === 0);
+  const mixedPrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-inuse"));\nconst leak = fs.mkdtempSync(path.join(os.tmpdir(), "fixture-ok-leak"));\n';
+  check("R6 RED: a non-exempt prefix alongside claude-*/quay-wt-* still reports (AC6)", detectMkdtempNoCleanup(mixedPrefix, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
+  const mkdtempCommentOnly = '// @test-group product\n// fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")) mention\nconst x = 1;\n';
+  check("R6 GREEN: a comment mentioning mkdtemp does NOT report (code-position matching)", detectMkdtempNoCleanup(mkdtempCommentOnly, "x.test.mjs").length === 0);
 
   // ── the ratchet (runIsolationChecks) ────────────────────────────────────────────────────────────
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];

@@ -19,7 +19,7 @@
 //
 // Run: node --test packages/quay/test/loop-params.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -30,11 +30,21 @@ import { readLoopParams } from "../src/loop-params.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// gap-tests-never-clean-up-their-tmpdirs: every tmpWs() created a per-run-unique `quay-loop-params-*`
+// workspace that was never removed — /tmp (tmpfs) accumulated 4,337 `quay-loop-params-trig-fuzz-*`
+// dirs (the DIR-051 fuzz leg) plus the other tags. The node:test file-level after() hook removes every
+// created workspace after the file's tests complete (runs even on failure; unlike a process.on('exit')
+// hook which does not run on process.exit(1) in hand-rolled harnesses).
+const _createdDirs = [];
 function tmpWs(tag) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), `quay-loop-params-${tag}-`));
+  _createdDirs.push(ws);
   fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
   return ws;
 }
+after(() => {
+  for (const ws of _createdDirs) fs.rmSync(ws, { recursive: true, force: true });
+});
 
 function writeLoopYml(ws, content) {
   fs.writeFileSync(path.join(ws, ".quay", "loop.yml"), content);

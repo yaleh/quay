@@ -20,7 +20,7 @@
 
 本契约的作用：让第四次在**写下时就被拦住**，而不是在套件红了之后花三轮去找。
 
-## 四条规则（直接从三个实例归纳，不预先扩充）
+## 六条规则（直接从三个实例归纳，后补 R5/R6，不预先扩充）
 
 ### R1 · 写入路径必须每运行唯一（`mkdtemp`），不得是固定路径
 
@@ -76,9 +76,22 @@
 
 **实例修复**：`prepare-admission-check.test.mjs` 的 `makeGitWorkspaceWithCommit()`（临时 repo + 已知 commit）。
 
+### R6 · `mkdtemp` 建的目录必须在同一测试内删除（用 try/finally 或 `t.after()`）（2026-08-03 补）
+
+> 来源：`tasks/gap-tests-never-clean-up-their-tmpdirs.md`——2026-08-03 发现 `/tmp`（tmpfs，内存盘）积了
+> **166,923 个顶层条目、6.3 GB**（占内存，不是磁盘），最早时间戳 2026-07-25，积了 9 天。根因：
+> 测试用 `mkdtemp` 建**每运行唯一**目录（R1 满足——名字带随机后缀，每次新建一个），但**没有任何规则
+> 要求删掉它**。R1 只写了契约的一半。
+> 修复：**同一测试内删除**——`try/finally`，或 `t.after(() => fs.rmSync(dir, {recursive:true, force:true}))`。
+> 静态可判（AC5）：**有 `mkdtemp` 而无对应的 `rm`/`rmSync`/`after` 即报出**。
+
+**扫描信号**（`mkdtemp-no-cleanup`，per-file 粒度）：文件里出现 CODE 位置的 `mkdtemp`/`mkdtempSync` 调用，
+且文件里**没有**任何 CODE 位置的清理构造（`rmSync(`、`rm(`、`t.after(`、`after(`、`finally {`）。
+**永不匹配** `/tmp/claude-*`（会话数据）与 `/tmp/quay-wt-*`（在用 worktree）前缀（AC6）——这两个前缀的
+`mkdtemp` 不是测试 fixture，跳过。
 ## 扫描与棘轮（AC2–AC6）
 
-`plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做四条判定，
+`plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做六条判定，
 **按代码位置匹配**（剥离注释与字符串/正则字面量 —— 复用 `test-framework-policy-check.ts` 的
 `buildNonCodeMask`）。「匹配到提到它的注释而非它本身」正是 relation-sync 数 `process.exit(1)` 数到
 4 处全是解释性注释的教训。
@@ -90,12 +103,15 @@
   - 名单条目**失效**（违规已修但条目未删）→ 失败（删掉它）；
   - 条目数超过 `# baseline-count` 头（提交后仍存活的封顶）→ 失败。
 
-## 当前基线（2026-08-03，23 条）
+## 当前基线（2026-08-03，51 条）
 
 `--list` 实测（与 `docs/analysis/fast-mode-loop-tick.md` 判绿无关；本清单是报告，不是门禁）：
 
 ```
+experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs:mkdtemp-no-cleanup
+experiments/quay-perpetual-stream/test/drain-dispose-corruption-check.test.mjs:mkdtemp-no-cleanup
 experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs:fixed-path-write
+packages/quay-backlog/test/backlog-client.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/adversarial-eval.test.mjs:fixed-path-write
 packages/quay-native/test/adversarial-eval.test.mjs:process-exit-1
 packages/quay-native/test/cas-write.test.mjs:fixed-path-write
@@ -104,6 +120,7 @@ packages/quay-native/test/compound-gate-recursive.test.mjs:fixed-path-write
 packages/quay-native/test/compound-gate.test.mjs:fixed-path-write
 packages/quay-native/test/create-validation.test.mjs:fixed-path-write
 packages/quay-native/test/create-validation.test.mjs:process-exit-1
+packages/quay-native/test/document-cli.test.mjs:mkdtemp-no-cleanup
 packages/quay-native/test/edit-validation.test.mjs:fixed-path-write
 packages/quay-native/test/edit-validation.test.mjs:process-exit-1
 packages/quay-native/test/gate-checked-state.test.mjs:fixed-path-write
@@ -113,15 +130,41 @@ packages/quay-native/test/lock.test.mjs:fixed-path-write
 packages/quay-native/test/lock.test.mjs:process-exit-1
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:fixed-path-write
 packages/quay-native/test/yaml-frontmatter-colon.test.mjs:process-exit-1
+packages/quay/test/cli-adr.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/cli-edit-parity-conformance.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/cli-entry.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/cli-migrate.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/delivery-standalone-smoke-gate.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/dir022-remaining-gates.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/dir032-audit-independence.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/document-gate.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/dod-gate-set.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/driver.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/frontmatter-store-base.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/gap-cli-gate-enforcement.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:mkdtemp-no-cleanup
 packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs:process-exit-1
+packages/quay/test/gap002-create-ergonomics.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/gate-config-loader.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/gate-list-verbose.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/gate.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/init.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/it0-gates.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/lifecycle.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/mcp-config-validate.test.mjs:mkdtemp-no-cleanup
+packages/quay/test/provider-abi-conformance.test.mjs:mkdtemp-no-cleanup
 plugin/test/plugin-packaging.test.mjs:shared-build-artifact-write
 plugin/test/runner-grouping.test.mjs:spawns-test-sh
+plugin/test/runtime-usage-inventory.test.mjs:mkdtemp-no-cleanup
 plugin/test/select-tests-for-touches.test.mjs:spawns-test-sh
+plugin/test/task-contract-check.test.mjs:mkdtemp-no-cleanup
 plugin/test/test-coverage-check.test.mjs:spawns-test-sh
 ```
 
 用已知答案验证（AC3/AC4）：M136 相关（`plugin-packaging`）与 AC11 相关（`select-tests-for-touches`）
 在清单里；relation-sync 已修故**不再报**；7 个剩余 `process.exit(1)` 手写 harness 全部在列。
+R6 新增 28 条 `mkdtemp-no-cleanup`（gap-tests-never-clean-up-their-tmpdirs，2026-08-03 引入）——
+`adr-store`/`document-store`/`loop-params` 已修故**不在列**。
 
 ## 已知局限（对抗评审记录，2026-08-03）
 
@@ -133,4 +176,8 @@ plugin/test/test-coverage-check.test.mjs:spawns-test-sh
 - **棘轮引导期**：数据文件尚未提交到 git HEAD 前（bootstrap），`C2a`（相对 HEAD 变长）与 `C0b`
   （封顶被抬高）不可执行；提交后自动生效。**同一 commit 里同时加长名单并抬高 `# baseline-count`**
   可绕过——这与 test-framework-policy 棘轮已接受的一类代码评审级后门相同（CLAUDE.md 已记录）。
+- **R6 是 per-file 粒度**：判据是「文件有 `mkdtemp` 且**整文件**没有任何 `rm`/`rmSync`/`after`/`finally`」。
+  一个**只给部分** mkdtemp 加了清理的文件会被放行——`prepare-admission-check.test.mjs` 是 #1 泄漏者
+  （14,220 个 `prepare-admission-*`），但因为它**其他**测试用了 `after`，R6 静态扫不到它；它的修复
+  靠的是 AC2（手动加 `after` 钩子），不是扫描器。这是 per-file 静态判定的固有盲区，接受。
 
