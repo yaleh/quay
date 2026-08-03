@@ -1689,7 +1689,16 @@ last-input 取不到 ⇒ AC7 拒绝；AC3 脚本变异强制空 cause ⇒ 强化
 与 token-status 任务在 `heavy-op-token.sh` 冲突，后者待前者落地后派。
 scoped 验证（`--root` 测试缝），不跑全量。
 
-**在飞（2）**：token-waiter + **mkdtemp**（`gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree`，
-runId `...fmpf0r`，`/tmp/quay-wt-mkdtemp`，外层已 review、与 token-waiter DISJOINT 实测）——修
-`ts-typecheck-gate.test.mjs:69` 的 REPO_ROOT mkdtemp（R1 弄脏共享检出）+ 扩展 `test-isolation-check`
-检测。**停止条件**：无（.halt 无、窗口内无新 needs-human、批 7 套件已绿）。
+**在飞（3，满）**：
+- **token-waiter**（`gap-the-only-token-waiter-refuses-to-wait-at-all`，`...c1pul1`，`/tmp/quay-wt-tokenwait`）
+- **mkdtemp**（`gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree`，`...fmpf0r`，`/tmp/quay-wt-mkdtemp`）
+  ——修 `ts-typecheck-gate.test.mjs:69` 的 REPO_ROOT mkdtemp + 扩展 `test-isolation-check` 检测
+- **task-list-route**（`gap-task-list-route-is-linear-in-task-count`，`...nvomw3`，`/tmp/quay-wt-tasklist`，
+  外层指定第 3 槽，DISJOINT 实测）——先拆 provider(~47%)/渲染成本再动手，AC5 实时性负控制
+**停止条件**：无（.halt 无、窗口内无新 needs-human、批 7 套件已绿）。
+**AC20**（`gap-liveness-mounting-is-a-single-flight-role-with-no-owner`）：**非未排上，被文件重叠挡住**
+——与 token-waiter 都动 `plugin/scripts/heavy-op-token.sh`。token-waiter 落地后下一个，管理者点名走
+正常流程，不插队不绕正交性。
+**记账缺口（外层 22:0xZ）**：`gap-a-widened-wait-window` 关闭时未调 `--task-start/--task-end`，
+`.workflow-events/` 无其事件 → 对 orphan 检测/在飞判定不可见。**不回填历史**；此后每条任务
+（含本批 3 条）都走同一条记账路径（派发 `--task-start`、关闭 `--task-end`）。
