@@ -1,7 +1,7 @@
 ---
 id: gap-no-resource-awareness-heavy-ops-run-blind
-title: "Heavy operations run blind to CPU/memory — the box is 2x oversubscribed
-  by design and swap is 0, so OOM is a cliff"
+title: "Heavy operations run blind to CPU/memory — measured 4.25x
+  oversubscription and swap is 0, so OOM is a cliff"
 status: todo
 labels:
   - gap
@@ -95,7 +95,7 @@ OOM killer 直接动手，**而 RSS 最大的进程正是 `claude` 本身**（79
 没有任何东西执行它。今晚重型测试超时至少 3 次，每次都靠人或外层事后诊断。
 
 **这还解释了 AC1 的不可重现**：同一提交 run1 零失败、run2 一个失败。
-若失败源是 CPU 饥饿而非测试缺陷，那么「连跑 2 次全绿」在一台 2× 超订的机器上
+若失败源是 CPU 饥饿而非测试缺陷，那么「连跑 2 次全绿」在一台 4.25× 超订的机器上
 **本来就不是一个关于代码的判据**。这条要写进 AC1 的解释里。
 
 ## Contract
@@ -117,7 +117,7 @@ resume    n/a: gate 是无状态判定，无中途产物
 
 ### 一、`scripts/resource-gate.sh`
 
-读 `/proc/pressure/cpu`、`/proc/pressure/memory`、`MemAvailable`、`nproc`、`pgrep -xc node`，
+读 `/proc/pressure/cpu`、`/proc/pressure/memory`、`MemAvailable`、`nproc`、`pgrep -xc node-MainThread`，
 输出**数字与判定**，退出码 0=GO / 非 0=WAIT：
 
 ```
@@ -134,8 +134,10 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
 
 ### 二、`--test-concurrency` 从 `nproc` 推导，不再是常量 8
 
-默认改为 `min(8, nproc*2)`（当前机器 ⇒ 8，**与现状一致，不改变已测基线**），
-但当 gate 报 CPU 饥饿时降为 `max(1, nproc/2)`。
+**不能用 `nproc*2`**——那在本机仍得 8，即实测 17 个进程、4.25× 超订。
+默认按 `max(1, floor(nproc / 放大系数))` 推导，**放大系数由 AC5 实测得出**（初测 ≈ 2.1）。
+本机 ⇒ `floor(4/2.1) = 1`，这与现状（8）差距很大，**所以 AC5 要求先测再定，不许照初测值直接改**：
+真实峰值可能低于抽样瞬时值，且更低的并发会拉长墙钟——这是一个需要数据的取舍，不是一个可以推理出的常数。
 **显式传入的 `--test-concurrency=N` 永远优先**——不夺走人的控制权。
 
 ### 三、OOM 护栏（swap=0 才使这条必要）
@@ -161,7 +163,7 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
       任务体记录为什么（PSI 是结构信号，load 是代理）
 - [ ] AC3: **负控制**——人为起 N 个 busy loop 把 `some avg10` 压过阈值，gate 必须返回 WAIT；
       停掉后必须返回 GO。两个方向都要有实跑输出
-- [ ] AC4: `pgrep -xc node`（或 `comm` 精确匹配）计数，**不得用 `pgrep -f`**——
+- [ ] AC4: `pgrep -xc node-MainThread`（`comm` 精确匹配）计数，**不得用 `pgrep -f`**，也**不得用 `grep -x node`**（Node 的 comm 是 `node-MainThread`，该写法永远返回 0）——
       后者会匹配任何命令行含 "node" 的进程，包括调用方自己（本仓库已踩两次）
 - [ ] AC5: **先实测放大系数**——跑一次全量套件，采样 `pgrep -xc node-MainThread` 峰值与
       `--test-concurrency` 的比值（初测 ≈ 2.1）。并发默认值按 `nproc / 放大系数` 推导，
@@ -172,7 +174,7 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
 - [ ] AC8: 两个 tick 文件（外层 `orchestrator-loop-tick.md` 步骤 0c、内层
       `fast-mode-loop-tick.md`）里的散文规则改为调用 gate
 - [ ] AC9: 在 `gap-suite-cost-model-is-wrong-optimizations-buy-nothing` 与 AC1 的记录里补一条：
-      **同一提交两次结果不同，可能是 CPU 饥饿而非测试缺陷**——「连跑 2 次全绿」在 2× 超订的机器上
+      **同一提交两次结果不同，可能是 CPU 饥饿而非测试缺陷**——「连跑 2 次全绿」在 4.25× 超订的机器上
       不是一个关于代码的判据
 - [ ] AC10: gate 输出单列「ppid=1 且 cwd 已删除的 node 进程」——不参与 GO/WAIT 判定，
       但不列出就永远不会被发现（实测已有 2 个，滞留 17.4 小时，合计约 200MB）
@@ -181,7 +183,7 @@ EWMA，滞后于真实争抢。`/proc/pressure/cpu` 的 `some avg10` 直接测�
 ## Definition of Done
 
 - [ ] AC3 的双向负控制实跑输出贴进任务体
-- [ ] AC5 的「推导值 = 8、基线未变」实跑对照贴进任务体
+- [ ] AC5 的实测放大系数、推导值、以及「选中文件数未变」的对照贴进任务体
 - [ ] `scripts/test.sh` 连跑 2 次全绿（**在 gate 报 GO 的窗口里跑**——这本身就是本任务的用法演示）
 - [ ] 明确记录：**两层互为负载源，而两层都在目测**。gate 的作用不是让测试更快，
       是让「现在能不能跑」成为一个可核对的数字，而不是各自的印象
