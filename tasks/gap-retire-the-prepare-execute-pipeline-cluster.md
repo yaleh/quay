@@ -253,6 +253,9 @@ composite-args（94）、composite-preflight（79）、composite-land（57）。
   orchestration, retained stopping rule」。
 - `docs/proposals/*`：保留为历史设计记录（它们是管线被建造时的提案，不是「当前机制」声明；
   当前机制声明已由 CLAUDE.md/ADR/OUTER-LOOP 统一退役标注）。
+- `adr/ADR-020` / `adr/ADR-021`：均为 `status: proposed` 的历史设计记录（未接受），其 applies-to
+  含已退役 workflow，但核心机制（proposal-convergence.ts 的 checkSplitRecommendation）retained；
+  同 docs/proposals 处理，保留为历史，不逐段改写（ADR-022 已声明退役并执行）。
 - `invariant-ownership.md`（×2）：移除 21 个 owner 为已删文件的 invariant 块；修正
   build-evidence-collection 的 prose（composite-contracts→build-evidence-manifest）与
   gate-resolve-milestone-root 的 stale dsl-necessity-mirror 引用。
@@ -268,6 +271,27 @@ composite-args（94）、composite-preflight（79）、composite-land（57）。
 6. 修复了 `runtime-usage-inventory.test.mjs` 脚本数下限（200→180）——删除使计数降到 183 的必然结果。
 7. `--for-task` 选择集变薄（1/14，coverage 0.07 < 0.5，`test-selection-thin`）——被删文件的专属测试
    已随删除消失，如实报告。
+8. 修复 `plugin/sync.sh` 与 `plugin-packaging.test.mjs` 的 M143 断言（4 个 workflow → 2 个存活），
+   否则 sync.sh 在 `set -euo pipefail` 下会因 cp 不存在的文件而失败——这是 REFUTE round-1 MAJOR。
+9. 顺带修 `plugin/README.md` workflow 清单、`config-wiring-check.ts` 的 stale 路径、
+   `concurrent-batch-scheduler.test.mjs` 的 stale 注释、inventory 下限加宽（REFUTE MINOR）。
+
+## 对抗审查记录（REFUTE，hard cap 2 轮）
+
+**Round 1（独立 agent，读工作树）：** 2 MAJOR / 4 MINOR / 0 INFO；实质工作（三处抽取 byte-faithful、
+workflow-metadata-conformance 保留理由、invariant-ownership 清理、sync-vendor 移除）**全部验证通过**。
+
+- MAJOR-1：`plugin/sync.sh` 在分支 HEAD 仍 cp 已删的 execute/prepare-milestone.js，`set -euo pipefail`
+  下会失败。→ **修复**：仅同步 drain-directives + run-routines（「2 synced」）。
+- MAJOR-2：`plugin-packaging.test.mjs` M143 断言已删的 4 个 workflow 存在。→ **修复**：改测 2 个存活
+  workflow，sync.sh 断言去掉 execute-milestone。
+- MINOR-3：`plugin/README.md` workflow 清单仍列 execute-milestone.js。→ **修复**。
+- MINOR-4：`config-wiring-check.ts:140` 仍列已删 execute-milestone.js 路径（被 existsSync 过滤，无害）。
+  → **修复**（移除 stale 条目）。
+- MINOR-5：inventory 下限 180 仅 3 行余量。→ **修复**（加宽至 170）。
+- MINOR-6：`concurrent-batch-scheduler.test.mjs:244` stale 注释。→ **修复**。
+
+**Round 2（独立 agent，复查已提交状态）：** 见「对抗审查记录」追加段（提交 8d738540 后由 agent 确认）。
 
 ## Touches
 
