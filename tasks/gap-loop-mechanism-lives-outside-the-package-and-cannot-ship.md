@@ -51,6 +51,8 @@ quay **已经是一个 Claude Code plugin**：`plugin/.claude-plugin/plugin.json
 | `scripts/resource-gate.sh` | 资源闸 |
 | `scripts/heavy-op-token.sh` | 跨项目重活令牌（**本来就是跨项目设计的**） |
 | `scripts/test.sh` | 判绿约定的载体 |
+| `plugin/scripts/touches-orthogonality-check.ts` | **并发派发的正交性判据**（在 plugin 内，但 `quay-init` 不铺） |
+| `plugin/scripts/concurrent-batch-scheduler.ts` | **并发批次组装**（同上） |
 
 **缺口三——`quay-task-operator` skill 在磁盘上但 `plugin.json` 的 `commands` 没列**（10 个 skill 只列了 9 个），
 装了也不暴露。
@@ -94,6 +96,17 @@ archguard   capture-pane  34 次  |  遥测/状态脚本   36 次   ≈ 1:1
 
 **⇒ 缺这批文件不会报错，它让外层静默退化成一个顶层约定明令禁止的方法。**
 这是本任务优先级的真实依据：一个不报错的降级，比一个崩溃危险得多。
+
+
+### 第二个实测危害：无并发
+
+archguard 冷启动 12 分钟时，外层**只能串行等一个全量 vitest 跑完**——
+`touches-orthogonality-check.ts` 与 `concurrent-batch-scheduler.ts` 都没跟过去。
+quay 的外层在同样情形下会**并行派发文件不相交的任务**（`.quay/config.yml` 的 `concurrency: 4` 声明了意图，
+但没有判据脚本就无法执行）。
+
+**⇒ 目标项目会拿到一个声明了并发、却没有并发判据的配置。** 这比没有并发更糟：配置说 4，实际是 1，
+而没有任何东西报错。
 
 ## Contract
 
