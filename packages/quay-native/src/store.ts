@@ -322,7 +322,10 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   /** @returns the task view-model, or null if not found */
   function get(id: string): (Task & { updatedAt?: number }) | null {
     const taskFile = path.join(tasksDir, `${id}.md`);
-    let stat: ReturnType<typeof fs.statSync> | null = null;
+    // fs.statSync(taskFile) has no options, so it returns fs.Stats (numbers), not BigIntStats.
+    // `ReturnType<typeof fs.statSync>` resolves to the bigint overload's union (number|bigint
+    // fields), which breaks the parsedCache/toViewModel number types (ts-typecheck-gate M63 red).
+    let stat: fs.Stats | null = null;
     try {
       stat = fs.statSync(taskFile);
     } catch {
