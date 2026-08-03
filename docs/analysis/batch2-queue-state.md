@@ -49,7 +49,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| **relation-sync（在飞）** | `gap-relation-sync-suite-red-isolation-green`，派发 00:0xZ，runId fm-gap-relation-sync-suite-red-isolation-green-1785715527286-1zhl5t，worktree /tmp/quay-wt-relsync。隔离绿/套件红类的**第 2 个实例**（第 1 个 M136 已修）。机制：先加断言级失败输出让它能说话，再配对跑定位。**不 skip/不标 flaky/不降 advisory** |
+| **并发批次（3 在飞，AC13 首证）** | **relation-sync**（`gap-relation-sync-suite-red-isolation-green`，fm-...-1zhl5t，/tmp/quay-wt-relsync）+ **blocked-signal**（`gap-no-explicit-blocked-signal-from-inner-layer`，fm-...-tvlfl3，/tmp/quay-wt-blocked）+ **test-framework-policy**（`gap-no-test-framework-policy-for-new-tests`，fm-...-syg65l，/tmp/quay-wt-fwpolicy）。checkTouchesPair 实测两两 DISJOINT。blocked-signal 修今晚两次停摆的信号缺口；policy 是 relation-sync「手写 harness 说不出话」的棘轮 |
 | **M136（已完成）** | `gap-sync-vendor-drift-mislabelled-as-task-schema`，done（第三轮 60 min）。三轮：错标 → 并发重建免疫 → **消除干扰源**。负控制通过、--check 只读。**注意**：M136 修好了但**没修好这个类**——外层独立全量（00:03Z）仍 fail 1 = relation-sync（同类手写 harness，隔离绿/套件红） |
 | **flags-only 缺陷（已完成）** | `gap-test-sh-flags-only-form-silently-runs-a-different-suite`，done |
 | **`--test-concurrency=4 vs 8` 实测（已完成）** | `gap-suite-concurrency-4-vs-8-measurement`，done。外层决定：不改默认，保持 8。「系统性全量崩溃」线索关闭 |
