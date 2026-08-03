@@ -507,6 +507,13 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
   （这正是 gate 在起作用）。需等低压力窗口（在飞 agent 测试结束后）再跑；跑时显式 `--test-concurrency=8`
   （推导 1 会小时级）
 
+### Tick 更新（05T03:13Z）：resource-awareness scoped 42/42 绿；全量 gate 等待中
+
+- scoped `--for-task` 42/42 绿（resource-gate 14 + 相关 28）。**gate 实测 exit 1（WAIT）**——压力 93.61
+- 压力高因在飞 agent（retire + serve-task-list）正在跑验证测试（36 node 进程）。**全量串行队列**：
+  resource-awareness → retire → serve-task-list（各需压力 <40 基线 + 显式 `--test-concurrency=8`）
+- **gate 的行为验证了设计**：在全量起跑前挡住高压力——这正是它要取代的「目测判断」
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
