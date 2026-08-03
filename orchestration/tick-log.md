@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 04:05Z | `correct` | 资源告警：两个全量套件并发跑，定位后指示串行 + 预防误诊；记录一条 P2 提升触发条件 | 三任务在飞（inventory 56m、reclaim 26m、test-isolation 26m）；完成 24，吞吐 1.37/h；**web server 仍 200** | **CPU 压力 96.62（avg300 90.73）、load1 31.35、47 个 node**——批 4 崩溃时只有 84.77。根因定位到具体进程：`node --test --test-concurrency=8` 两个根进程，一个在 `/tmp/quay-wt-testiso`（816s）一个在 `/tmp/quay-wt-reclaim`（562s），约 34 进程抢 4 核。**内存无风险**：mem pressure 0.00、`pswpin/pswpout` 皆 0、可用 3789MB ⇒ 纯 CPU 饥饿，不是 OOM。**最重要的一条指示是防误诊**：若这两次出现 `cancelled > 0`，几乎肯定是饥饿不是代码缺陷——M136 今晚正是这样耗掉三轮 |
 | 2026-08-03 03:46Z | `correct`（**correct-self 第 4 次**：我上一 tick 说内层绕过了机制，实证是**内层对、我错**） | 查清内层为何跑了正交性检查仍并发派发；构造实证后建任务修生产入口 | 三任务在飞（inventory 36m、reclaim 6m、test-isolation 6m）；完成 24，吞吐 **1.39/h**；CPU 7.77、swap 714MB 全在 zswap；**web server 仍 200**（人在用） | **内层用的 `expand` 是规范化声明路径、不碰文件系统；我用的是 `expandGlobs`（对真实文件展开）。派发前要比的是「打算碰哪些文件」，包括尚不存在的——所以内层的语义是对的。** 它的结论也对：`test-isolation vs no-resource-awareness => OVERLAP ["scripts/test.sh"]`，据此正确拒绝同批。**但由此查出生产入口的真缺陷**：`concurrent-batch-scheduler.ts:249` 用 `expandGlobs`，构造实证——全新 vs 既有且明显无关 ⇒ **误判串行**；两个全新且真重叠 ⇒ 拒绝得对但理由是「matched nothing, likely a typo」，**说不出是哪个文件**。我的初版说法「任何新文件任务都无法证明正交」**过宽**，实证后收窄为「全部条目都是新文件时才触发」 |
 | 2026-08-03 03:26Z | `no-action`（未介入内层；外层侧完成散文形式化的两条便宜项 + 建一个任务） | 落实散文审计的三条建议：#3 消灭双源、#1 加显式标记，均直接编辑；#2 需代码，建任务 | m264 **56 分钟**（阈值 90）但**在真推进**；inventory 16 分钟；完成 23，吞吐 **1.36/h** | **m264 非卡住**：`/tmp/repro-m264.sh`(02:38) + `/tmp/m264-run.log`(03:19, 19KB)，正执行「隔离连跑 N 次」，flaky 诊断本就需时。**swap 的真相与 `free` 不同**：`pswpin/pswpout` 皆 **0** ⇒ 磁盘换页零次；714MB 全被 zswap 吸收——`stored_pages` 180,498 页（≈705MB 原始）压成 `pool_total_size` 377MB，**压缩比 1.87×**。护栏在真实负载下生效且零 I/O。**契约检查器第 3 次抓到我**：`control` 折行 ⇒ `contract-line-unknown`。Contract 块**一行一键不可折行**，已写进 tick 文档 |
 | 2026-08-03 03:06Z | `unblock` | 分诊内层的 `needs-human=7 halts dispatch`，裁定解除并恢复派发；7 个 DIR 任务的去留升级给人 | 在飞 2 个（dispatch-gate / m264，36 分钟，阈值 90）；`test-coverage` 已收尾（完成 22，吞吐 **1.33/h**）；CPU 压力 10.72（avg300 53.78），**swap 首次被用到 13MB** | **idle-log 已落地并在记录**（2 行，均 `awaiting-subagent`）——上条指令的实际验收点通过，撤回枚举只是让路。**needs-human=7 全部是历史遗留**：DIR-109 最后改动 07-29、其余 08-01~08-02 05:54，**全部早于窗口起点 ≥12 小时**；窗口内新增 needs-human 逐文件核对为 **0**；遥测那条 needs-human 结局的任务现已 `done`。**停止条件是纯散文无代码实现**（`fast-mode-loop-tick.md:156`，grep 两个 scripts 目录零命中）——意图是「产出速度超过消解速度」，被读成「有史以来的总数」，**后者会永久卡死派发** |
@@ -86,9 +87,9 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 |---|---|---|
 | no-action | 27 | 40% |
 | unblock | 11 | 16% |
-| correct | 26 | 39% |
+| correct | 27 | 40% |
 | escalate | 3 | 4% |
-| **合计** | **67** | — |
+| **合计** | **68** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
@@ -97,4 +98,4 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 **2026-08-03 已连续 3 个 tick 是 (b) 类**：(1) 实测推翻外层自己写的 `2×` 超订数字；(2) `checkTouchesPair` 调用签名错致 10 对全误报；(3) `turn-ended-idle` 该不该进阻塞信号的设计错误。**同期内层表现良好**：主动采纳 PSI 判据、自主派发正交批次、10 分钟内执行完外层指令。**这说明当前瓶颈是外层的下笔质量，不是内层的执行**——而退化判据会得出相反的结论。**若 (b) 类累积，退化判据会误判「该修内层」而实际该修的是外层的下笔质量。**
 修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
 
-退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 39%。
+退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 40%。
