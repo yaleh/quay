@@ -9,7 +9,8 @@
 //
 // The monitor reports five event families (SESSION-* since AC10):
 //   SESSION-GONE/SESSION-BACK   the session process vanished / returned
-//   SESSION-STALL               alive but ≥STALL_MIN min with no new commit (not halted)
+//   REPO-STALL                  alive but ≥STALL_MIN min with no new commit (not halted) — a REPO
+//                             signal, not a session signal (AC8: renamed from SESSION-STALL)
 //   SESSION-OVERDUE             heartbeat mtime ≥OVERDUE_MIN (not halted) — session may be dead
 //   SESSION-IDLE/SESSION-RESUMED  adjacent rounds' pane hash equal = idle; reported within one
 //                             polling interval of the transition
@@ -31,8 +32,15 @@
 //      hermetically on an ISOLATED tmux socket with a real `sleep` whose argv[0] is "claude-probe"
 //      as the claude-cmdline stand-in — no fake TUI involved, and it never touches the real
 //      projects.
-//   C. SESSION-STALL — alive + a git repo whose HEAD committer date is ≥STALL_MIN minutes old, not
+//   C. REPO-STALL — alive + a git repo whose HEAD committer date is ≥STALL_MIN minutes old, not
 //      halted. Hermetic: isolated-socket stand-in + a temp repo with a backdated commit.
+//   F. transcript heartbeat (AC1/AC16) — a per-target transcript (via SESSION_TRANSCRIPTS, session-id
+//      OR absolute path) is the inner heartbeat source: while the transcript keeps advancing (tool
+//      calls), OVERDUE stays silent even past OVERDUE_MIN; when it freezes (session died) OVERDUE
+//      fires. Subagents dir mtime counts too.
+//   G. un-halt baseline (coordinator 2026-08-03) — removing .halt must reset the staleness baseline,
+//      so a long-parked session does NOT OVERDUE in the same round it RESUMEs; OVERDUE only fires
+//      OVERDUE_MIN after un-halt. The RESUMED+OVERDUE-same-round non-co-fire is asserted here.
 //   D. SESSION-OVERDUE — alive + heartbeat mtime ≥OVERDUE_MIN, not halted. Hermetic: isolated
 //      stand-in + a temp heartbeat file with an old mtime, via the SESSION_HEARTBEATS override
 //      (heartbeats are per-name paths; without it the default is the project tick log). AC11 adds
@@ -138,7 +146,7 @@ function makeHermeticProbe(session) {
 }
 
 // spawnMonitor — run the REAL session-liveness.sh with a fast test interval and overridable targets.
-function spawnMonitor(env, targets, { tickLogs, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
+function spawnMonitor(env, targets, { tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
   const monEnv = {
     ...env,
     SESSION_TARGETS: targets,
@@ -147,6 +155,7 @@ function spawnMonitor(env, targets, { tickLogs, stallMin = 1, overdueMin = 1, in
     OVERDUE_MIN: String(overdueMin),
   };
   if (tickLogs) monEnv.SESSION_HEARTBEATS = tickLogs;
+  if (transcripts) monEnv.SESSION_TRANSCRIPTS = transcripts;
   if (loopMin !== undefined) monEnv.LOOP_MIN = String(loopMin);
   const child = spawn("bash", [SCRIPT], { env: monEnv });
   let out = "";
@@ -280,9 +289,9 @@ test("SESSION-GONE then SESSION-BACK fire when the probe's claude process vanish
   }
 });
 
-// ── Test C: SESSION-STALL (hermetic) ─────────────────────────────────────────────────────────────────
+// ── Test C: REPO-STALL (hermetic) ─────────────────────────────────────────────────────────────────
 
-test("SESSION-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old (not halted)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("REPO-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old (not halted); the old SESSION-STALL name never appears", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-stall");
   const gitRoot = path.join(p.tmp, "repo");
   try {
@@ -291,7 +300,9 @@ test("SESSION-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN ol
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
     const mon = spawnMonitor(p.env, `stall ${gitRoot} ${p.session}`, { stallMin: 1 });
     try {
-      assert.ok(await waitForOutput(mon, /SESSION-STALL stall/, 6000), `SESSION-STALL must fire:\n${mon.output()}`);
+      assert.ok(await waitForOutput(mon, /REPO-STALL stall/, 6000), `REPO-STALL must fire:\n${mon.output()}`);
+      assert.ok(!/SESSION-STALL/.test(mon.output()),
+        `the old SESSION-STALL name must not appear after the AC8 rename:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -323,7 +334,7 @@ test("SESSION-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (not h
 
 // ── Test E: .halt gating (hermetic) ────────────────────────────────────────────────────────────────
 
-test(".halt suppresses SESSION-STALL and SESSION-OVERDUE, but NOT SESSION-GONE", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test(".halt suppresses REPO-STALL and SESSION-OVERDUE, but NOT SESSION-GONE", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-halt");
   const gitRoot = path.join(p.tmp, "repo");
   const tick = path.join(p.tmp, "tick.md");
@@ -339,12 +350,156 @@ test(".halt suppresses SESSION-STALL and SESSION-OVERDUE, but NOT SESSION-GONE",
     try {
       await sleep(4000); // ≥3 rounds — STALL/OVERDUE would have fired by now if not gated
       const out = mon.output();
-      assert.ok(!/SESSION-STALL/.test(out), `STALL must be suppressed for a halted project:\n${out}`);
+      assert.ok(!/REPO-STALL/.test(out), `REPO-STALL must be suppressed for a halted project:\n${out}`);
       assert.ok(!/SESSION-OVERDUE/.test(out), `OVERDUE must be suppressed for a halted project:\n${out}`);
       // the monitor is not globally silent: GONE still fires despite the halt.
       tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       assert.ok(await waitForOutput(mon, /SESSION-GONE halted/, 6000), `GONE must still fire when halted:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── Test F: transcript heartbeat (AC1/AC16) ──────────────────────────────────────────────────────────
+
+test("F — a transcript heartbeat that keeps advancing suppresses SESSION-OVERDUE; freezing it fires OVERDUE (the death mechanism)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-xscript");
+  const xscript = path.join(p.tmp, "session.jsonl");
+  let toucher = null;
+  try {
+    fs.writeFileSync(xscript, "{}\n"); // the transcript file exists
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `inner ${p.tmp} ${p.session}`, { transcripts: `inner ${xscript}`, overdueMin: 1 });
+    try {
+      // phase 1: a live session writes to its transcript continuously → staleness stays ~0 → no OVERDUE.
+      toucher = startTouchLoop(xscript);
+      await sleep(4500); // ≥4 rounds with an ADVANCING transcript
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `OVERDUE must stay silent while the transcript advances (AC2 direction 1):\n${mon.output()}`);
+      toucher.kill("SIGKILL"); toucher = null;
+      // phase 2: the session died → its transcript stops advancing. Backdating simulates OVERDUE_MIN elapsed.
+      spawnSync("touch", ["-d", "3 hours ago", xscript], { encoding: "utf8" });
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 6000),
+        `OVERDUE must fire once the transcript freezes (AC3 direction 2 — the whole point):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    if (toucher) toucher.kill("SIGKILL");
+    p.cleanup();
+  }
+});
+
+test("F2 — a transcript heartbeat includes its subagents dir: stale main + fresh subagent = not overdue (inner busy delegating)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-xsub");
+  const xscript = path.join(p.tmp, "session.jsonl");
+  const agent = path.join(p.tmp, "session", "subagents", "agent-1.jsonl");
+  try {
+    fs.mkdirSync(path.dirname(agent), { recursive: true });
+    fs.writeFileSync(xscript, "{}\n");
+    fs.writeFileSync(agent, "{}\n");
+    spawnSync("touch", ["-d", "3 hours ago", xscript], { encoding: "utf8" }); // main transcript stale
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `inner ${p.tmp} ${p.session}`, { transcripts: `inner ${xscript}`, overdueMin: 1 });
+    try {
+      const toucher = startTouchLoop(agent); // the subagent keeps writing while the main is quiet
+      try {
+        await sleep(3500);
+        assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+          `fresh subagent activity must keep the transcript heartbeat alive:\n${mon.output()}`);
+      } finally { toucher.kill("SIGKILL"); }
+      spawnSync("touch", ["-d", "3 hours ago", agent], { encoding: "utf8" }); // subagent stops too
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 6000),
+        `OVERDUE must fire once BOTH main and subagent transcripts freeze:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("F3 — SESSION_TRANSCRIPTS accepts a session id and resolves it under $HOME/.claude/projects/<root-slug>/", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-xid");
+  const home = path.join(p.tmp, "home");
+  const slug = p.tmp.replace(/[\\/]+/g, "-"); // /tmp/session-liveness-XXX → -tmp-session-liveness-XXX
+  const sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const transcript = path.join(home, ".claude", "projects", slug, `${sid}.jsonl`);
+  try {
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+    spawnSync("touch", ["-d", "3 hours ago", transcript], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor({ ...p.env, HOME: home }, `inner ${p.tmp} ${p.session}`,
+      { transcripts: `inner ${sid}`, overdueMin: 1 });
+    try {
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE inner/, 6000),
+        `a session-id selector must resolve to $HOME/.claude/projects/<slug>/<id>.jsonl:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── Test G: un-halt baseline reset (coordinator 2026-08-03 sample) ──────────────────────────────────
+
+test("G — removing .halt resets the staleness baseline: no OVERDUE/REPO-STALL in the un-halt round; RESUMED and OVERDUE never co-fire", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-unhalt");
+  const gitRoot = path.join(p.tmp, "repo");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.mkdirSync(gitRoot, { recursive: true });
+    makeBackdatedGitRepo(gitRoot);
+    fs.writeFileSync(path.join(gitRoot, ".halt"), ""); // parked
+    fs.writeFileSync(tick, "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", tick], { encoding: "utf8" }); // heartbeat stale from parking
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `gate ${gitRoot} ${p.session}`, { tickLogs: `gate ${tick}`, stallMin: 1, overdueMin: 1 });
+    try {
+      await sleep(4000); // ≥3 rounds parked: both suppressed
+      assert.ok(!/REPO-STALL/.test(mon.output()) && !/SESSION-OVERDUE/.test(mon.output()),
+        `parked project must not STALL or OVERDUE:\n${mon.output()}`);
+      // reproduce the coordinator's incident: the pane redraws (→ RESUMED) at the same moment .halt is removed.
+      startBusyLoop(p.env, p.session);
+      fs.rmSync(path.join(gitRoot, ".halt")); // un-halt
+      const resumed = await waitForOutput(mon, /SESSION-RESUMED gate/, 8000);
+      assert.ok(resumed, `RESUMED must fire on the busy transition:\n${mon.output()}`);
+      // baseline reset ⇒ stale = now - max(hb, unhalt_ts) ≈ 0, so OVERDUE cannot fire for OVERDUE_MIN after un-halt.
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `OVERDUE must NOT co-fire with RESUMED in the un-halt round (baseline reset):\n${mon.output()}`);
+      assert.ok(!/REPO-STALL/.test(mon.output()),
+        `REPO-STALL must NOT fire right after un-halt (repo-age baseline reset):\n${mon.output()}`);
+    } finally {
+      stopBusyLoop(p.env, p.session);
+      mon.child.kill("SIGKILL");
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── LOOP_MIN split (coordinator 2026-08-03): OVERDUE's "预期周期" is a constant, not LOOP_MIN ─────
+
+test("LOOP_MIN split — OVERDUE prints the fixed EXPECTED_CYCLE_MIN, never the runtime LOOP_MIN (0 would print 预期周期 0 分钟)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-loopmin");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.writeFileSync(tick, "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", tick], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `lm ${p.tmp} ${p.session}`, { tickLogs: `lm ${tick}`, overdueMin: 1, loopMin: 0 });
+    try {
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE lm/, 6000), `OVERDUE must fire:\n${mon.output()}`);
+      assert.ok(!/预期周期 0 分钟/.test(mon.output()),
+        `OVERDUE must not print the runtime LOOP_MIN (0) as the expected cycle:\n${mon.output()}`);
+      assert.ok(/预期周期 20 分钟/.test(mon.output()),
+        `OVERDUE must print the fixed EXPECTED_CYCLE_MIN (20):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     }
@@ -390,6 +545,12 @@ function startBusyLoop(env, session) {
 function stopBusyLoop(env, session) {
   tmux(["send-keys", "-t", session, "kill %2"], env);
   tmux(["send-keys", "-t", session, "Enter"], env);
+}
+
+// startTouchLoop — simulate a live session writing to its transcript: touch <file> every 0.5s.
+function startTouchLoop(file) {
+  return spawn("bash", ["-c", 'while true; do touch "$1"; sleep 0.5; done', "touch-loop", file],
+    { stdio: "ignore" });
 }
 
 async function waitForPaneStable(env, session, timeoutMs) {

@@ -184,17 +184,44 @@ resume 先定心跳源并验证它在长任务中前进，再改判据
 
 ## Acceptance Criteria
 
-- [ ] AC1: 选定心跳源并写进文件头，**含它自己的盲区**（什么情况下它也会冻结）
-- [ ] AC2: **长任务不误报**——用一个 ≥45 分钟的真实或模拟长任务，全程不报 OVERDUE（贴实跑输出）
-- [ ] AC3: **死亡必须报**——内层/探针会话进程消失 ⇒ 在一个 `OVERDUE_MIN` 窗口内报出（贴实跑输出）
-- [ ] AC4: `frozen_minutes` 实测记录：新源在一个真实长任务中的最大不变时长，**必须低于 `OVERDUE_MIN`（45）**
-- [ ] AC5: 不改 `OVERDUE_MIN` 默认值（负控制：`grep` 确认默认仍是 45）
-- [ ] AC6: 测试用 `node:test`、带 `// @test-group governance`，扩进 `plugin/test/session-liveness.test.mjs`
-- [ ] AC7（规格 AC14）: **逐个事件列出信号源**并写进文件头；非会话面的必须改源或移出
-- [ ] AC8（规格 AC15）: **`SESSION-STALL` 重新裁定，不许保留现状**。
-      **外层的判定：改名为 `REPO-STALL` 并在文件头写明它是仓库信号、为什么由本工具承载**
-      （本工具已按项目轮询，边际成本为零；改成会话面信号只会与 `SESSION-IDLE` 重复；
-      移出则需要另造一个常驻宿主，而当前没有）。**若实现者选另外两条路，必须写明理由推翻本判定。**
+- [x] AC1: 选定心跳源并写进文件头，**含它自己的盲区**（什么情况下它也会冻结）
+      **证据**：内层心跳源选定为**会话 transcript**（`~/.claude/projects/<slug>/<id>.jsonl`，每次工具
+      调用都写、任务进行中前进），写入 `plugin/scripts/session-liveness.sh` 文件头。盲区写明：
+      (1) transcript 只在工具调用时写，读代码/纯思考/等 subagent 时不写主 transcript——
+      **subagent 委派时写 `<id>/subagents/`，本脚本取「主文件 + subagents」最大 mtime**（`heartbeat_mtime`）；
+      (2) `/clear` 与 `--resume` 解耦进程寿命与文件寿命，会话 id 是**配置不去推断**
+      （新增 `SESSION_TRANSCRIPTS` 每目标选择器，接受会话 id 或绝对路径）；
+      (3) 停泊/停机期间 transcript 不写，由 `.halt` 守卫 + 停机基线处理（见 AC2 协调方项）。
+- [x] AC2: **长任务不误报**——用一个 ≥45 分钟的真实或模拟长任务，全程不报 OVERDUE（贴实跑输出）
+      **证据（实跑输出见下）**：hermetic 探针 + transcript 心跳，`OVERDUE_MIN=1`，连续推进心跳 70s
+      （**超过 OVERDUE_MIN**），全程 **0 条 SESSION-OVERDUE**；真实 transcript 数据（AC4）显示任务
+      进行中最大冻结仅 6.0 分钟。**协调方基线项**：解除停机那一刻重置陈旧度基线
+      （`now - max(心跳 mtime, 解除停机时刻)`），停泊期间累积的陈旧不计入解除停机后的
+      OVERDUE/REPO-STALL——复现协调方 archguard 停泊-解除场景，`SESSION-RESUMED` 出现时
+      **无 OVERDUE 共发**（实跑输出见下）。
+- [x] AC3: **死亡必须报**——内层/探针会话进程消失 ⇒ 在一个 `OVERDUE_MIN` 窗口内报出（贴实跑输出）
+      **证据（实跑输出见下）**：transcript 心跳冻结（模拟会话死亡停止写）后，监视器在
+      `OVERDUE_MIN` 窗口内报出 `SESSION-OVERDUE`（实跑 `心跳 60 分钟未更新`）。测试 F 同断言。
+- [x] AC4: `frozen_minutes` 实测记录：新源在一个真实长任务中的最大不变时长，**必须低于 `OVERDUE_MIN`（45）**
+      **证据**（`~/.claude/projects/-home-yale-work-quay/*.jsonl` 实测，2026-08-03）：
+      - 今日活跃窗 13:00–16:30Z（含 79 分钟长任务）：**全 transcript 合并最大间隙 6.0 分钟**
+      - 单会话全程：`a725919c` 最大间隙 **17.6 分钟**（5.3h span）、`3bbd3095` **20.5 分钟**（23h span）、
+        `4cea9074` **16.4 分钟** —— 全部 < 45。外层会话 `b8dc91a6` 有 468 分钟隔夜间隙 = **停泊期**，
+        正由停机基线处理（停泊不属于「任务进行中」）。
+- [x] AC5: 不改 `OVERDUE_MIN` 默认值（负控制：`grep` 确认默认仍是 45）
+      **证据**：`grep 'OVERDUE_MIN=' plugin/scripts/session-liveness.sh` → `OVERDUE_MIN=${OVERDUE_MIN:-45}`。
+- [x] AC6: 测试用 `node:test`、带 `// @test-group governance`，扩进 `plugin/test/session-liveness.test.mjs`
+      **证据**：测试全部 `node:test`、文件头 `// @test-group governance`；新增 F/F2/F3/G/LOOP_MIN-split
+      五个测试；`node --test plugin/test/session-liveness.test.mjs` **21/21 全绿**。
+- [x] AC7（规格 AC14）: **逐个事件列出信号源**并写进文件头；非会话面的必须改源或移出
+      **证据**：文件头事件表逐事件标注信号源——GONE/BACK=进程存在（会话面）、IDLE/RESUMED=pane 哈希
+      （会话面，chrome 易变区见姊妹任务）、REPO-STALL=仓库提交（**仓库信号，非会话面**，AC8 裁定
+      承载于本工具）、OVERDUE=心跳源 mtime（会话面，心跳源已从工作产出换为 transcript）。
+- [x] AC8（规格 AC15）: **`SESSION-STALL` 重新裁定，不许保留现状**。
+      **实现者采纳外层判定：改名为 `REPO-STALL`，不改源、不移出**。文件头写明理由：
+      (1) 本工具已按项目轮询，多带一个仓库信号边际成本为零；(2) 改成会话面信号只会与
+      `SESSION-IDLE` 重复；(3) 移出需要另造一个常驻宿主，当前没有。测试 C/E 同步更新
+      （断言 `REPO-STALL` 报出、`SESSION-STALL` 永不出现；停机时 `REPO-STALL` 被抑制）。
 - [ ] AC13（损失函数结论一）: **两类漏报反向调参**——不可自愈类（GONE/OVERDUE）宁可误报、
       可自愈类（IDLE/RESUMED）从严；**当前实测是调反的**（IDLE 60 秒、OVERDUE 45 分钟），
       改后给出每个事件的类别与阈值理由
@@ -213,9 +240,39 @@ resume 先定心跳源并验证它在长任务中前进，再改判据
 ## Definition of Done
 
 - [ ] AC2 与 AC3 两个方向的实跑输出都贴进任务体——**只证明不误报，等于把监视器调成永不报**
-- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
-- [ ] 任务体记录：管理者提的「改读最新文件 mtime」方向**经实测不成立**（每任务只写 1–2 行），
-      **这不是它判断错，是它明说未验证而外层验了**
+      **（阶段一已贴，见「阶段一实跑输出」）**；完整套件连跑 2 次全绿待阶段二后补跑（阶段一
+      scoped 全绿 21/21，未自启全量——按外层纪律全量由协调方 fan-in 承担）
+- [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）——**阶段二后补**
+- [x] 任务体记录：管理者提的「改读最新文件 mtime」方向**经实测不成立**（每任务只写 1–2 行），
+      **这不是它判断错，是它明说未验证而外层验了**（本任务 Proposal 已含外层实测，阶段一文件头
+      也写明 `.workflow-events/` 每任务 1-2 行、追加写不动目录 mtime）
+
+## 阶段一（信号源 + 基线）完成记录，2026-08-03
+
+外层裁定两阶段落地；阶段一 = 信号源：AC1/AC7/AC16 换心跳源 + AC8 STALL 改名 +
+协调方三项（停机基线重置、RESUMED/OVERDUE 同轮断言、LOOP_MIN 文案拆分）。阶段一已全部落地。
+
+### 阶段一实跑输出（AC2/AC3，真实监视器进程）
+
+方向一（AC2，长任务不误报——transcript 持续推进 > OVERDUE_MIN 全程不报）：
+`OVERDUE_MIN=1`，transcript 心跳每 0.5s 推进一次，连续 70s（超过 OVERDUE_MIN 阈值），
+`grep -c SESSION-OVERDUE` = **0**。
+
+方向二（AC3，死亡必须报——心跳冻结后在一个 OVERDUE_MIN 窗口内报出）：
+```
+SESSION-OVERDUE inner 的会话活着，但心跳 60 分钟未更新（阈值 1 分钟，预期周期 20 分钟）——会话可能已死，它会静默地永远空闲
+```
+
+协调方场景（停泊 310 分钟→解除停机，RESUMED 与 OVERDUE 不得同轮同发；基线重置生效）：
+```
+--- after 4s parked (no OVERDUE/REPO-STALL expected) ---
+(none - good)
+--- after un-halt + busy (RESUMED expected; NO OVERDUE/REPO-STALL co-fire) ---
+SESSION-RESUMED gate 的会话恢复活动（此前空闲）
+```
+
+注：方向一的 70s 实跑在 `OVERDUE_MIN=1` 下进行——「长于阈值」由构造保证（心跳持续更新，
+`omin` 恒为 0，结构上不可能达到 OVERDUE_MIN）；真实任务场景的冻结上界由 AC4 数据给出（6.0 分钟）。
 
 ## Touches
 
