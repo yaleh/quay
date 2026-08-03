@@ -34,8 +34,34 @@ export const GIT_LOG_LIMIT = 20;
 /** Recent-entry bounds for the /journal page. */
 export const JOURNAL_ESCALATION_SECTIONS = 10;
 export const JOURNAL_TICK_ROWS = 15;
+/**
+ * gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: the activity window used to tell
+ * 「循环在跑但没接遥测」 apart from 「循环根本没跑」. A signal is "active" if it falls inside the
+ * window. Mirrors the manager's现场 measurements (archguard: 3 commits/30 min, tick-log mtime
+ * minutes old) and the contract's `--since='30 minutes ago'` measure.
+ */
+export const ACTIVITY_WINDOW_MS = 30 * 60 * 1000;
 
 export type ObservationStatus = "ok" | "empty" | "error";
+
+/**
+ * Loop-state discriminator (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one):
+ * - `running` — telemetry has records (the loop IS wired to telemetry);
+ * - `running-unwired` — telemetry empty BUT activity signals present (loop is alive, just not
+ *   writing `.workflow-events/` — the manager's archguard现场);
+ * - `not-running` — telemetry empty AND no activity signal (loop really is dead).
+ */
+export type LiveState = "running" | "running-unwired" | "not-running";
+
+/** Filesystem-observable activity signals that separate the two telemetry-empty states. */
+export interface ActivitySignals {
+  /** `git -C <root> log --since='30 minutes ago' --oneline | wc -l` — commits in the window. */
+  recentCommits: number;
+  /** True when `orchestration/tick-log.md` exists and its mtime is within the activity window. */
+  tickLogFresh: boolean;
+  /** tick-log.md age in minutes at the observation instant, or null when missing/unreadable. */
+  tickLogAgeMinutes: number | null;
+}
 
 export interface InFlightTask {
   taskId: string;
@@ -52,6 +78,17 @@ export interface LiveResult {
   concurrency: number;
   /** `/proc/pressure/cpu` `some avg10` — null when unavailable (non-Linux / unreadable). */
   cpuPressure: number | null;
+  /**
+   * Loop-state discriminator. `running` when telemetry has records; `running-unwired` /
+   * `not-running` when telemetry is empty (decided by activity signals). `null` ONLY when the
+   * telemetry read failed (`status === "error"` — the 「读失败」 degradation, which stays
+   * distinct from both empty-state texts).
+   */
+  liveState: LiveState | null;
+  /** Human-readable explanation of how liveState was decided (the explainability hard requirement). */
+  liveExplanation: string | null;
+  /** Per-signal activity detail; null when status === "error". */
+  activity: ActivitySignals | null;
 }
 
 export interface JournalSection {
@@ -138,10 +175,10 @@ export function pairInFlight(events: RawEvent[], nowMs: number): InFlightTask[] 
 }
 
 /** Read every JSON object across all `<eventsDir>/*.jsonl`. Malformed lines are skipped (never crash). */
-function readEventsFromDir(eventsDir: string): RawEvent[] {
-  const files = fs.readdirSync(eventsDir).filter((f) => f.endsWith(".jsonl")).sort();
+function readEventsFromDir(eventsDir: string, files?: string[]): RawEvent[] {
+  const list = files ?? fs.readdirSync(eventsDir).filter((f) => f.endsWith(".jsonl")).sort();
   const events: RawEvent[] = [];
-  for (const file of files) {
+  for (const file of list) {
     let text: string;
     try {
       text = fs.readFileSync(path.join(eventsDir, file), "utf8");
@@ -162,24 +199,111 @@ function readEventsFromDir(eventsDir: string): RawEvent[] {
 }
 
 /**
- * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure.
- * Degrades per the header contract; never throws.
+ * Activity signals that separate 「循环在跑但没接遥测」 from 「循环根本没跑」 (only consulted when
+ * telemetry is empty). Signal 1: commits in the activity window (`git log --since=30 minutes
+ * ago`). Signal 2: `orchestration/tick-log.md` mtime freshness. Each is read in its own
+ * try/catch — a non-git workspace or unreadable tick log degrades to "no signal", never throws.
+ */
+export function readActivitySignals(root: string, { nowMs = Date.now() }: { nowMs?: number } = {}): ActivitySignals {
+  let recentCommits = 0;
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--since=30 minutes ago", "--oneline"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    recentCommits = out.split(/\r?\n/).filter(Boolean).length;
+  } catch {
+    recentCommits = 0; // non-git workspace or git failure → no commit-activity signal
+  }
+
+  let tickLogAgeMinutes: number | null = null;
+  try {
+    const tickPath = path.join(root, ORCHESTRATION_DIR, TICK_LOG_FILE);
+    if (fs.existsSync(tickPath)) {
+      const stat = fs.statSync(tickPath);
+      tickLogAgeMinutes = Math.max(0, (nowMs - stat.mtimeMs) / 60_000);
+    }
+  } catch {
+    tickLogAgeMinutes = null;
+  }
+  const tickLogFresh = tickLogAgeMinutes != null && tickLogAgeMinutes <= ACTIVITY_WINDOW_MS / 60_000;
+
+  return { recentCommits, tickLogFresh, tickLogAgeMinutes };
+}
+
+/**
+ * Decide the telemetry-empty discriminator from activity signals. Pure function — the decision
+ * rule the task pins (contract `control`): ANY activity signal ⇒ `running-unwired`; NONE ⇒
+ * `not-running`. The explanation names exactly which signals were present/absent (the hard
+ * explainability requirement — a bare "running-unwired" would just replace one vague state
+ * with another).
+ */
+export function decideLiveState(activity: ActivitySignals): { state: "running-unwired" | "not-running"; explanation: string } {
+  const present: string[] = [];
+  if (activity.recentCommits > 0) present.push(`最近 30 分钟有 ${activity.recentCommits} 条提交`);
+  if (activity.tickLogFresh) {
+    present.push(`tick 日志在 ${Math.round(activity.tickLogAgeMinutes as number)} 分钟前被写过`);
+  }
+  if (present.length > 0) {
+    return {
+      state: "running-unwired",
+      explanation: `有活动信号（${present.join("；")}），但遥测记录为 0 —— 循环在跑，只是没往 ${FAST_MODE_EVENTS_DIR}/ 写`,
+    };
+  }
+  const tickAgeDesc = activity.tickLogAgeMinutes == null
+    ? "tick 日志缺失/不可读"
+    : `tick 日志已 ${Math.round(activity.tickLogAgeMinutes)} 分钟未更新`;
+  return {
+    state: "not-running",
+    explanation: `无任何活动信号（30 分钟内无提交；${tickAgeDesc}），遥测记录为 0`,
+  };
+}
+
+/**
+ * Live loop view: in-flight fast-mode tasks + elapsed minutes + concurrency + CPU pressure +
+ * the loop-state discriminator. Degrades per the header contract; never throws.
  */
 export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number } = {}): LiveResult {
   const eventsDir = path.join(root, FAST_MODE_EVENTS_DIR);
   let inFlight: InFlightTask[] = [];
   let status: ObservationStatus = "ok";
   let reason: string | null = null;
+  let telemetryEmpty = false;
   try {
     if (!fs.existsSync(eventsDir)) {
+      telemetryEmpty = true;
       status = "empty";
       reason = `未找到遥测记录（${FAST_MODE_EVENTS_DIR}/ 不存在）`;
     } else {
-      inFlight = pairInFlight(readEventsFromDir(eventsDir), nowMs);
+      // Count records by `.jsonl` file (contract measure: `ls <root>/.workflow-events/*.jsonl | wc -l`).
+      const files = fs.readdirSync(eventsDir).filter((f) => f.endsWith(".jsonl")).sort();
+      if (files.length === 0) {
+        telemetryEmpty = true;
+        status = "empty";
+        reason = `未找到遥测记录（${FAST_MODE_EVENTS_DIR}/ 存在但为空，0 条 .jsonl）`;
+      } else {
+        inFlight = pairInFlight(readEventsFromDir(eventsDir, files), nowMs);
+      }
     }
   } catch (err) {
     status = "error";
     reason = `读取遥测失败：${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  // Discriminator (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one): only when telemetry
+  // is EMPTY do we consult activity signals. A telemetry READ FAILURE stays a bare 「读失败」
+  // (liveState === null) — the empty-state texts must never mask an unreadable store (AC4).
+  let liveState: LiveState | null = null;
+  let liveExplanation: string | null = null;
+  let activity: ActivitySignals | null = null;
+  if (telemetryEmpty) {
+    activity = readActivitySignals(root, { nowMs });
+    const decided = decideLiveState(activity);
+    liveState = decided.state;
+    liveExplanation = `${decided.explanation}（${reason}）`;
+  } else if (status === "ok") {
+    liveState = "running";
   }
 
   let cpuPressure: number | null = null;
@@ -191,7 +315,7 @@ export function readLive(root: string, { nowMs = Date.now() }: { nowMs?: number 
     cpuPressure = null; // non-Linux or unreadable — the row is simply omitted
   }
 
-  return { status, reason, inFlight, concurrency: inFlight.length, cpuPressure };
+  return { status, reason, inFlight, concurrency: inFlight.length, cpuPressure, liveState, liveExplanation, activity };
 }
 
 /** Read a file, splitting it into `## `-headed sections and keeping the most recent `max` sections. */

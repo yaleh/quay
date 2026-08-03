@@ -2042,12 +2042,16 @@ async function main() {
       const gitAfter = execFileSync("git", ["status", "--porcelain"], { cwd: obsWorkspaceRoot, encoding: "utf8" });
       assert(gitBefore === gitAfter, "AC6: git status --porcelain is unchanged by /live + /journal renders (zero side effects)");
 
-      // AC4 (negative control — data source absent ⇒ 200 + 无数据, never 500): rename the
-      // telemetry store away and confirm /live degrades, then restore and confirm recovery.
+      // gap-live-cannot-tell-a-dead-loop-from-an-unwired-one: telemetry absent no longer shows
+      // the generic 「无数据」. This workspace HAS activity signals (the fixture commit above +
+      // a freshly-written tick-log.md) ⇒ /live must say 「在跑但未接遥测」 (running-unwired), the
+      // AC2 negative control. Then restore and confirm recovery.
       fs.renameSync(eventsDir, eventsDir + ".bak");
       const liveEmpty = await get(obsPort, "/live");
       assert(liveEmpty.status === 200, "AC4: GET /live still returns 200 when the telemetry store is renamed (got " + liveEmpty.status + ")");
-      assert(liveEmpty.body.includes("无数据"), "AC4: /live shows 「无数据」 when the telemetry store is renamed");
+      assert(liveEmpty.body.includes("在跑但未接遥测") && liveEmpty.body.includes("live_state=running-unwired"),
+        "AC2/AC4: telemetry absent + activity signals present ⇒ /live says 「在跑但未接遥测」(running-unwired)");
+      assert(!liveEmpty.body.includes("未在运行"), "AC2/AC4: running-unwired and not-running are distinguishable on the page");
       fs.renameSync(eventsDir + ".bak", eventsDir);
       const liveRestored = await get(obsPort, "/live");
       assert(liveRestored.status === 200 && liveRestored.body.includes("OBS-A"),
