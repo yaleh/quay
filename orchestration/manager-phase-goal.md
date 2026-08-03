@@ -92,6 +92,34 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
       而正确冷启动后它们**本来就该在**（新装的）。该检查区分不了「没清」与「清了又装」，
       **必须用父提交查**。制。
 
+- [ ] **AC3b（2026-08-03 新增，因为 AC2/AC3 的验收漏掉了它）**：
+      **目标项目的运行时不依赖 quay 开发树**。
+
+      **现状：不满足。** 人要求把 archguard 的 web server 也起起来做更全面验证，
+      这个请求直接证伪了它：
+
+      ```
+      quay        → /home/yale/work/quay/packages/quay/dist/quay.js       ← 符号链接进开发树
+      quay-native → /home/yale/work/quay/packages/quay-native/dist/quay-native.js
+      ```
+
+      archguard 的 `mcp_entry: ["quay-native","mcp"]` 走 PATH ⇒
+      **把 quay 开发树改名，archguard 的循环就断**。
+      而 `quay-init` **没有**把 `vendor/quay/dist/quay.js` 铺到目标项目
+      （产物分支里有那个文件，装出来的没有）。
+
+      **我的验收为什么漏掉**：AC2 的不变量写的是「运行时不读取开发树下的绝对路径」，
+      而 e2e 查的是**文件内容里有没有那个路径字符串**——
+      查不到「PATH 上的命令是一个指向开发树的软链」。
+      **文本检查与解析检查是两件事**，我把前者当成了后者。
+
+      判据：`readlink -f $(which quay)` 与 `readlink -f $(which quay-native)`
+      **都不得落在 quay 开发树内**；且把开发树改名后目标项目的循环仍能跑。
+
+      *（**「机制装得干净」与「运行时不依赖开发树」是两件事**——
+      我在报 AC2/AC3 达成时验的是前者，说的却像是后者。当天第 9 次「看起来达成、实际不成立」，
+      而这次是我自己的验收。）*
+
 - [ ] **AC4**：**没有项目饿死另一个**。
       判据：本阶段内不出现两个项目同时跑重活而未经 `heavy-op-token.sh` 串行化的情形；
       每个管理者 tick 记录当时的 `cpu some avg10`，全程无连续两次 tick 超过 80。
