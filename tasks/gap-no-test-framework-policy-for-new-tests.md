@@ -148,6 +148,22 @@ extra:
   不在本任务改；glob 单层覆盖——政策语言已限定为 canonical glob。
 - **Round 1 后**：21/21 测试绿（含全部回归用例），`--for-task` 全绿。
 
+**Round 2**（同一审查 agent 复验）——REVISE (minor)，2 项，全部处理：
+
+- **R2-1 AC3 仍可被 regex 字面量绕过**：`/import { test } from "node:test"/` 写成 regex 字面量可
+  通过（`buildNonCodeMask` 不认 regex）。**修复**：给 mask 加 regex 字面量识别（标准 lexer 启发式：
+  `/` 前是空白/`=`/`(`/`,`/`{`/`return` 类关键字→regex；前是操作数/`)`/`]`/`++`→除法），regex 内容
+  整体标为非代码。同时修 `loader.import("node:test")`（方法调用）被误判为动态 import——`import`/
+  `require` 关键字现在要求 statement-start（前一个 code 字符是空白/`;(){}[]`，`.` 排除）。
+  固化为测试：regex 字面量、`return /re/`、除法不吞 import、方法调用不算。全 164 个文件检测一致
+  （非豁免全检出、豁免全不检出）。
+- **R2-2 CLAUDE.md「NEVER/永久」声明夸大**：ceiling 从 working-tree 文件自读，同一 commit 里把
+  `# baseline-count: 34` 改成 40 可绕过。**修复**：软化措辞（ceiling 是 header 控制面，pre-commit
+  由 git strict-subset 守护；同 commit 里改 header+加文件是可被 code review 看见的编辑）；
+  并把 ceiling 本身改成 **shrink-only**（C0b：working-tree count > HEAD count 即失败，能抓
+  pre-commit ceiling bump），固化测试。
+- **Round 2 后**：22/22 selftest + 25/25 node:test 绿，`--for-task` 全绿。
+
 ## Touches
 
 - scripts/test.sh

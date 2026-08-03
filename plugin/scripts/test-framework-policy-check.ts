@@ -81,15 +81,42 @@ export function nodeTestImportRE(): RegExp {
   return /(?:import[\s\S]{0,500}?from\s*["']node:test["']|import\s*["']node:test["']|require\(\s*["']node:test["']\s*\))/g;
 }
 
+/** Keywords after which a `/` unambiguously starts a regex literal (the standard lexer heuristic;
+ * `return /re/` must not be read as division). */
+const REGEX_PRECURSOR_KEYWORDS = new Set([
+  "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await",
+]);
+
+/** Should a `/` at position `i` (with `prevCode` the previous non-comment, non-string char) be
+ * read as the start of a regex literal? Implements the usual disambiguation: a `/` at a statement
+ * start (after whitespace), after `=`/`(`/`,`/`{`/etc., or after `return`-class keywords is a
+ * regex; a `/` immediately after an operand (`a / b`, `) / b`, `5 / 2`, `x++ / 2`) is division. */
+function isRegexStart(prevCode: string, src: string, i: number): boolean {
+  if (prevCode === "") return true; // start of file
+  if (/\s/.test(prevCode)) return true; // statement start — division never directly follows space
+  // postfix ++ / -- : `x++ / 2` and `x-- / 2` are division, not a regex
+  if ((prevCode === "+" || prevCode === "-") && src[i - 2] === prevCode) return false;
+  if (/[A-Za-z0-9_$]/.test(prevCode)) {
+    // an operand — unless the token just before was a regex-precursor keyword
+    const m = src.slice(0, i).match(/([A-Za-z_$][A-Za-z0-9_$]*)\s*$/);
+    return m ? REGEX_PRECURSOR_KEYWORDS.has(m[1]) : false;
+  }
+  if (prevCode === ")" || prevCode === "]" || prevCode === '"' || prevCode === "'" || prevCode === "`") return false; // division
+  return true; // `( , = [ ! & | ? { } ; : ^ ~` and other punctuation → regex
+}
+
 /** Build a mask marking every position that is NOT code: inside a `//` or a slash-star block
- * comment, or inside a string/template literal. A linear state machine — unlike a regex, it
- * cannot be fooled by a glob pattern inside a comment whose slash-star sequence would make a
- * naive block-comment regex scan forward past the imports and eat them (REFUTE round-1
- * regression, confirmed on cli-entry.test.mjs whose header comments spell the test glob). */
+ * comment, inside a string/template literal, or inside a REGEX literal. A linear state machine —
+ * unlike a regex, it cannot be fooled by a glob pattern inside a comment whose slash-star sequence
+ * would make a naive block-comment regex scan forward past the imports and eat them (REFUTE
+ * round-1 regression, confirmed on cli-entry.test.mjs whose header comments spell the test glob);
+ * and it masks regex literals so `/import { test } from "node:test"/` written as a regex cannot
+ * satisfy the policy (REFUTE round-2). */
 export function buildNonCodeMask(src: string): Uint8Array {
   const mask = new Uint8Array(src.length);
   let i = 0;
   const n = src.length;
+  let prevCode = ""; // last CODE character emitted (for regex-literal disambiguation)
   while (i < n) {
     const c = src[i];
     const d = src[i + 1];
@@ -113,19 +140,46 @@ export function buildNonCodeMask(src: string): Uint8Array {
         if (src[i] === q) { i++; break; }
         i++;
       }
+      prevCode = q; // the closing quote is what a following `/` sees (division)
       continue;
     }
+    if (c === "/" && isRegexStart(prevCode, src, i)) {
+      mask[i] = 1; i++;
+      let inClass = false;
+      while (i < n) {
+        mask[i] = 1;
+        const cc = src[i];
+        if (cc === "\\") { if (i + 1 < n) { mask[i + 1] = 1; i += 2; } else { i++; } continue; }
+        if (cc === "[") inClass = true;
+        else if (cc === "]") inClass = false;
+        else if (cc === "/" && !inClass) { i++; break; }
+        else if (cc === "\n") { i++; break; } // unterminated regex — bail out of the literal
+        i++;
+      }
+      continue;
+    }
+    prevCode = c;
     i++;
   }
   return mask;
 }
 
+/** True iff the nearest preceding CODE character (skipping comments/strings, which the mask marks
+ * non-code) is a statement start — start of file, whitespace, or `;(){}[]`. Excludes `.`, so
+ * `loader.import("node:test")` and `loader.require("node:test")` (method calls) are NOT read as
+ * module imports (REFUTE round-2 MINOR). */
+function atStatementStart(source: string, mask: Uint8Array, i: number): boolean {
+  let j = i - 1;
+  while (j >= 0 && mask[j] === 1) j--;
+  if (j < 0) return true;
+  return /[\s;(){}\[\],]/.test(source[j]);
+}
+
 /** True iff `source` contains a REAL node:test import. Walks CODE positions only (skipping
- * comments and strings via the mask) and checks each `import`/`require` keyword in turn — so a
- * comment that merely mentions the import (REFUTE round-1 MAJOR) or a string literal that spells
- * it out is never an import, and a comment match can never SWALLOW a real import that follows it
- * (the earlier regex-spans-500-chars approach did exactly that — a comment mentioning
- * `from "node:test"` would consume a real import statement that appeared later in its span). */
+ * comments, strings and regex literals via the mask) and checks each `import`/`require` keyword
+ * in turn — so a comment that merely mentions the import (REFUTE round-1 MAJOR), a string literal
+ * that spells it out, or a REGEX literal `/import { test } from "node:test"/` (REFUTE round-2
+ * MINOR) is never an import, and a comment match can never SWALLOW a real import that follows it. */
 export function hasNodeTestImport(source: string): boolean {
   const mask = buildNonCodeMask(source);
   const n = source.length;
@@ -134,8 +188,9 @@ export function hasNodeTestImport(source: string): boolean {
   while (i < n) {
     if (mask[i] === 1) { i++; continue; }
     const c = source[i];
-    // `import` keyword at a code position, word-bounded (not "imports", not inside an ident).
-    if (c === "i" && source.startsWith("import", i) && !isIdent(source[i - 1]) && !isIdent(source[i + 6])) {
+    // `import` keyword at a code position, word-bounded AND at a statement start (a method call
+    // like `loader.import(...)` must not count).
+    if (c === "i" && source.startsWith("import", i) && !isIdent(source[i - 1]) && !isIdent(source[i + 6]) && atStatementStart(source, mask, i)) {
       const rest = source.slice(i);
       // bare: import "node:test"; dynamic: import("node:test")
       if (/^import\s*["']node:test["']/.test(rest)) return true;
@@ -159,8 +214,8 @@ export function hasNodeTestImport(source: string): boolean {
         j++;
       }
     }
-    // `require` call at a code position, word-bounded.
-    if (c === "r" && source.startsWith("require", i) && !isIdent(source[i - 1]) && !isIdent(source[i + 7])) {
+    // `require` call at a code position, word-bounded, NOT a `.require` method call.
+    if (c === "r" && source.startsWith("require", i) && !isIdent(source[i - 1]) && !isIdent(source[i + 7]) && atStatementStart(source, mask, i)) {
       if (/^require\(\s*["']node:test["']\s*\)/.test(source.slice(i))) return true;
     }
     i++;
@@ -288,6 +343,11 @@ export interface PolicyCheckInput {
    * at a clean commit where the git-HEAD baseline already moved past a smuggled addition.
    * null = no ceiling enforced (token absent). */
   baselineCount: number | null;
+  /** The ceiling value parsed from the BASELINE (git HEAD / --baseline-file) copy of the data
+   * file. When both this and baselineCount are set and baselineCount > baselineCountHead, the
+   * ceiling was RAISED in the working tree — a shrink-only ratchet on the ceiling itself
+   * (REFUTE round-2 MINOR). null on bootstrap. */
+  baselineCountHead: number | null;
   /** Predicate: does a repo-relative path exist on disk right now? */
   fileExists: (rel: string) => boolean;
 }
@@ -301,7 +361,7 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
   const bootstrap = i.baselineExemptionList.length === 0;
   const globSet = new Set(i.files.map((f) => f.rel));
 
-  // C0 (AC4, commit-surviving ceiling): the list can never exceed the ratchet ceiling. Unlike
+  // C0a (AC4, commit-surviving ceiling): the list can never exceed the ratchet ceiling. Unlike
   // C2a (git-HEAD strict-subset, which only sees UNCOMMITTED additions), this fires at ANY
   // state — including a clean commit or a fresh clone where a smuggled hand-rolled test and its
   // exemption line landed together (REFUTE round-1 MAJOR). The ceiling is the task's 34,
@@ -309,6 +369,16 @@ export function runPolicyChecks(i: PolicyCheckInput): string[] {
   if (i.baselineCount !== null && i.exemptionList.length > i.baselineCount) {
     failures.push(
       `AC4: the exemption list has ${i.exemptionList.length} entries, over the ratchet ceiling of ${i.baselineCount} (${DATA_FILE_REL} header "# baseline-count"). The list can only get SHORTER — a new hand-rolled test can never be exempted.`
+    );
+  }
+
+  // C0b (AC4, shrink-only ceiling): the ceiling itself can only get LOWER. Raising
+  // `# baseline-count` in the working tree (34 → 40) to smuggle entries is caught here before it
+  // can land; once committed, the git strict-subset can no longer see it, which is why the data
+  // file header is the control surface and raising it in a commit is a code-review-grade edit.
+  if (!bootstrap && i.baselineCountHead !== null && i.baselineCount !== null && i.baselineCount > i.baselineCountHead) {
+    failures.push(
+      `AC4: the ratchet ceiling was RAISED from ${i.baselineCountHead} to ${i.baselineCount} in ${DATA_FILE_REL} — the ceiling is shrink-only (it can only get LOWER). Do not raise it to admit more legacy files.`
     );
   }
 
@@ -463,10 +533,13 @@ export function main(argv: string[]): number {
   // data file genuinely does not exist at HEAD (the mechanism's own first commit).
   let baselineList = currentList;
   let baselineFiles = new Set(files.map((f) => f.rel)); // bootstrap default: nothing is "new"
+  let baselineCountHead: number | null = null; // ceiling parsed from the HEAD/baseline copy
   const baselineFileArg = getArgValue(args, "--baseline-file");
   const baselineFilesArg = getArgValue(args, "--baseline-files");
   if (baselineFileArg) {
-    baselineList = parseExemptionList(readFileSafe(path.resolve(root, baselineFileArg)));
+    const baselineText = readFileSafe(path.resolve(root, baselineFileArg));
+    baselineList = parseExemptionList(baselineText);
+    baselineCountHead = parseBaselineCount(baselineText);
   } else if (baselineFilesArg) {
     // baseline-files override alone: keep baselineList = currentList (no list ratchet), but pin
     // the file set so AC5's "new" classification has a baseline.
@@ -488,6 +561,7 @@ export function main(argv: string[]): number {
       baselineFiles = new Set(files.map((f) => f.rel));
     } else {
       baselineList = parseExemptionList(committed);
+      baselineCountHead = parseBaselineCount(committed);
       const atHead = gitTestFilesAtRef(root, "HEAD");
       if (atHead.size > 0) baselineFiles = atHead;
     }
@@ -501,6 +575,7 @@ export function main(argv: string[]): number {
     exemptionList: currentList,
     baselineExemptionList: baselineList,
     baselineTestFiles: baselineFiles,
+    baselineCountHead,
     baselineCount,
     fileExists: (rel) => fs.existsSync(path.join(root, rel)),
   });
@@ -547,7 +622,7 @@ export function runSelftest(): boolean {
 
   // Helper: pure check with NO ratchet ceiling (the ceiling is exercised by dedicated cases).
   const pc = (o: Partial<PolicyCheckInput> & Pick<PolicyCheckInput, "files" | "exemptionList" | "baselineExemptionList" | "baselineTestFiles">) =>
-    runPolicyChecks({ baselineCount: null, fileExists: () => true, ...o });
+    runPolicyChecks({ baselineCount: null, baselineCountHead: null, fileExists: () => true, ...o });
 
   // Glob-covered files: modern (at HEAD) + legacy (in the list AND at HEAD). NOT included:
   // the "new" files, which each RED case adds explicitly (they are not in `baselineFiles`,
@@ -632,6 +707,7 @@ export function runSelftest(): boolean {
     baselineExemptionList: grownList, // HEAD already moved past the addition — the git subset is blind
     baselineTestFiles: new Set(c1Files.map((f) => f.rel)),
     baselineCount: 1, // ceiling of 1, list has 2
+    baselineCountHead: 1,
     fileExists: () => true,
   });
   check("count-ceiling RED: list over the ceiling fails at a clean commit", failures.some((f) => f.includes("over the ratchet ceiling")), JSON.stringify(failures));
@@ -643,9 +719,36 @@ export function runSelftest(): boolean {
     baselineExemptionList: grownList,
     baselineTestFiles: new Set(c1Files.map((f) => f.rel)),
     baselineCount: 2,
+    baselineCountHead: 2,
     fileExists: () => true,
   });
   check("count-ceiling GREEN: list at the ceiling passes", failures.length === 0, JSON.stringify(failures));
+
+  // Shrink-only ceiling (REFUTE round-2 MINOR): RAISING the ceiling in the working tree fails.
+  failures = runPolicyChecks({
+    files: c1Files,
+    exemptionList: grownList, // 2 entries, ceiling raised to 2
+    baselineExemptionList: grownList,
+    baselineTestFiles: new Set(c1Files.map((f) => f.rel)),
+    baselineCount: 2, // raised from 1
+    baselineCountHead: 1,
+    fileExists: () => true,
+  });
+  check("ceiling-bump RED: raising the ratchet ceiling fails", failures.some((f) => f.includes("ceiling was RAISED")), JSON.stringify(failures));
+
+  // REFUTE round-2: a REGEX literal `/import { test } from "node:test"/` is NOT an import.
+  const regexSneak = '// @test-group engine\nconst re = /import { test } from "node:test"/;\nfunction makeAssert(){}\nmakeAssert();\n';
+  check("regex-literal: a regex spelling the import is NOT an import", hasNodeTestImport(regexSneak) === false, "regex literal must be masked");
+  failures = pc({ files: [...files, { rel: "packages/quay/test/regex-sneak.test.mjs", source: regexSneak }], exemptionList, baselineExemptionList: baselineExemption, baselineTestFiles: baselineFiles });
+  check("regex-literal: regex-spelling file FAILS AC3", failures.some((f) => f.includes("regex-sneak") && f.includes("AC3")), JSON.stringify(failures));
+
+  // REFUTE round-2: `loader.import("node:test")` (a method call) is NOT a dynamic import.
+  const methodCall = '// @test-group engine\nloader.import("node:test");\nimport { test } from "node:test";\n';
+  check("method-call: loader.import(...) is not a dynamic import", hasNodeTestImport(methodCall) === true, "the REAL import still counts");
+
+  // REFUTE round-2: a `//` division with ++ / -- must NOT be read as a regex that hides imports.
+  const divisionOk = 'const x = 5;\nlet a = 10;\nconst r = a / 2; // division\nx++ / 2;\nimport { test } from "node:test";\ntest("x", () => {});\n';
+  check("division: x++ / 2 and a / 2 must not hide the real import", hasNodeTestImport(divisionOk) === true, "import after divisions must still be detected");
 
   console.log(`\ntest-framework-policy-check --selftest: ${pass} passed, ${fail} failed`);
   return fail === 0;

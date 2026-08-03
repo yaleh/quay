@@ -27,7 +27,6 @@ import {
   parseExemptionList,
   parseBaselineCount,
   hasNodeTestImport,
-  nodeTestImportRE,
   groupDeclRE,
   DATA_FILE_REL,
 } from "../scripts/test-framework-policy-check.ts";
@@ -50,13 +49,14 @@ const EXEMPTION = ["packages/quay/test/legacy-handrolled.test.mjs"];
 const BASELINE_EXEMPTION = ["packages/quay/test/legacy-handrolled.test.mjs"];
 const BASELINE_FILES = new Set(["packages/quay/test/modern.test.mjs", "packages/quay/test/legacy-handrolled.test.mjs"]);
 
-function runPolicy(files, exemptionList, baselineExemption, baselineFiles, fileExists = () => true, baselineCount = null) {
+function runPolicy(files, exemptionList, baselineExemption, baselineFiles, fileExists = () => true, baselineCount = null, baselineCountHead = null) {
   return runPolicyChecks({
     files,
     exemptionList,
     baselineExemptionList: baselineExemption,
     baselineTestFiles: baselineFiles,
     baselineCount,
+    baselineCountHead,
     fileExists,
   });
 }
@@ -176,6 +176,38 @@ test("REFUTE: the data file header carries a parseable baseline-count: 34 ceilin
   const dataAbs = path.join(REPO_ROOT, DATA_FILE_REL);
   const baselineCount = parseBaselineCount(fs.readFileSync(dataAbs, "utf8"));
   assert.equal(baselineCount, 34, "data file must carry '# baseline-count: 34'");
+});
+
+// ── REFUTE round-2 regressions: regex literals, method-call imports, shrink-only ceiling ───────────
+test("REFUTE R2: a regex literal spelling the import is NOT an import", () => {
+  const regexSneak = '// @test-group engine\nconst re = /import { test } from "node:test"/;\nfunction makeAssert(){}\nmakeAssert();\n';
+  assert.equal(hasNodeTestImport(regexSneak), false, "a regex literal must not count as an import");
+  const files = [...FILES, { rel: "packages/quay/test/regex-sneak.test.mjs", source: regexSneak }];
+  const failures = runPolicy(files, EXEMPTION, BASELINE_EXEMPTION, BASELINE_FILES);
+  assert.ok(failures.some((f) => f.includes("regex-sneak") && f.includes("AC3")), JSON.stringify(failures));
+});
+
+test("REFUTE R2: a method-call import(...) is not a dynamic import; the real import still counts", () => {
+  const methodCall = '// @test-group engine\nloader.import("node:test");\nimport { test } from "node:test";\n';
+  assert.equal(hasNodeTestImport(methodCall), true, "the real import must still be detected");
+  const methodOnly = '// @test-group engine\nloader.import("node:test");\nfunction makeAssert(){}\nmakeAssert();\n';
+  assert.equal(hasNodeTestImport(methodOnly), false, "loader.import(...) alone must not count");
+  const files = [...FILES, { rel: "packages/quay/test/method-only.test.mjs", source: methodOnly }];
+  const failures = runPolicy(files, EXEMPTION, BASELINE_EXEMPTION, BASELINE_FILES);
+  assert.ok(failures.some((f) => f.includes("method-only") && f.includes("AC3")), JSON.stringify(failures));
+});
+
+test("REFUTE R2: division (a / b, x++ / 2) must not be misread as a regex that hides a real import", () => {
+  const divThenImport = 'const x = 5;\nlet a = 10;\nconst r = a / 2; // division\nx++ / 2;\nimport { test } from "node:test";\ntest("x", () => {});\n';
+  assert.equal(hasNodeTestImport(divThenImport), true, "the import after divisions must still be detected");
+});
+
+test("REFUTE R2: raising the ratchet ceiling in the working tree fails (shrink-only ceiling)", () => {
+  const files = [...FILES, { rel: "packages/quay/test/other-handrolled.test.mjs", source: legacySource }];
+  const grown = [...EXEMPTION, "packages/quay/test/other-handrolled.test.mjs"];
+  // ceiling raised 1 → 2 in the working tree; the git strict-subset is blind (baseline == current).
+  const failures = runPolicy(files, grown, grown, new Set(files.map((f) => f.rel)), () => true, 2, 1);
+  assert.ok(failures.some((f) => f.includes("ceiling was RAISED")), JSON.stringify(failures));
 });
 
 // ── Real repo invariant: the current tree is green and the list is exactly 34 ──────────────────────
