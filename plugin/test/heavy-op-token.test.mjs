@@ -155,8 +155,13 @@ test("AC3 mirror — a DEAD-pid FRESH-mtime token is also NOT reclaimed (both ha
     fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
     fs.writeFileSync(tokenPath, `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now()}\nhost=test\n`);
     // mtime is fresh (just written) — pid is dead, but the timeout half has not elapsed.
+    // Robustness: refresh the mtime explicitly right before acquire and give the timeout margin.
+    // Under full-suite load the write→acquire gap can exceed the old 1s seam, aging a "fresh"
+    // mtime into stale and spuriously reclaiming (flake: ratchet fan-in suite 2026-08-03).
+    const now = new Date();
+    fs.utimesSync(tokenPath, now, now);
 
-    const r = runToken(["--acquire", "quay", "--timeout", "0"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    const r = runToken(["--acquire", "quay", "--timeout", "0"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "5" } });
     assert.equal(r.status, 1, `dead pid + fresh mtime must NOT be reclaimed:\n${r.all}`);
     assert.match(r.stderr, /mtime only \d+s old/);
     assert.ok(fs.existsSync(tokenPath));
