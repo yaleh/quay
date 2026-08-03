@@ -524,6 +524,14 @@ milestones/ MB 任一下降**。按第三条 milestones/ 1100MB→1033MB，**判
 - 在飞（1 agent）：retire（~05:17 活跃，边界解除）。retire 落地后自己一个全量
 - 全量绿 → 关 resource-awareness（`--task-end` hjkru7）+ serve-task-list（pyzd0e）
 
+### Tick 心跳（05T03:27Z）：retire 提交大规模删除
+
+- **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
+  P0#3 删除落地（fan-in 时需仔细复核：外层约束——不得删 milestone-worktree.ts 除非 reclaim 用完（已用完，
+  我消息了 retire 边界解除）、不得动那 19 个 worktree（已回收））。retire agent 仍在飞（05:26 活跃）
+- 合并全量（resource-awareness + serve-task-list）在跑（`b8m11u3md`，3820 行，压力 91.73）
+- 外层 `ad1793d7`：「gate 是 preflight 不是 governor」——资源闸的角色观察
+
 ### Tick 更新（03T03:0xZ）：外层新任务 + dispatch-gate REFUTE PASS + tmp/ 发现
 
 - **外层派发（人裁定 03T03:0xZ）**：新任务 `gap-no-inventory-of-what-the-two-layer-mode-actually-runs`
