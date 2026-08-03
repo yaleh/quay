@@ -715,6 +715,15 @@ batch4a 的 cancelled 2 可能有自身异步结构触发条件（Promise 未决
 某次运行在 collector 产出前 throw 而清理没跑，但全量报 fail 0——**「绿套件掩盖一次真实失败」**，比泄漏本身
 更值得单独记一笔（已并入本文件的发现记录，候选后续任务）
 
+### Tick 更新（07T03:12Z）：合并套件 fail 1 → 修复 flaky 竞态 → 重跑
+
+- **合并全量（stranded + parser）fail 1**：AC11（explicit-file smoke）嵌套 test.sh 的 test-framework-policy-check
+  撞见 runner-grouping AC7 的**临时未跟踪 fixture**（zz-runner-grouping-undeclared.test.mjs，故意无 @test-group）→
+  报「NEW file」→ 嵌套 exit 1。**预存在的 flaky 竞态**（并发窗口），套件负载让它现形（非闸、非 stranded/parser 回归）
+- **修复**：镜像 QUAY_TEST_SKIP_DIST_BUILD 先例——0-match/纯 selector 嵌套运行设 `QUAY_TEST_SKIP_STATIC_CHECKS=1`
+  （外层套件已跑过 whole-store 检查）。已提交
+- **合并全量重跑**（`be4k8hogt`）
+
 ### Tick 心跳（05T03:27Z）：retire 提交大规模删除
 
 - **retire 已提交 `8d738540`**：**80 文件 +523/-24195（净 -23672 行）**——首次大规模负净行数，
