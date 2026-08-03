@@ -48,9 +48,12 @@ function stubClient(tasks) {
   const state = new Map(tasks.map((t) => [t.id, { ...t }]));
   return {
     async taskList({ status } = {}) {
-      return [...state.values()]
-        .filter((t) => !status || t.status === status)
-        .map((t) => ({ ...t }));
+      return {
+        tasks: [...state.values()]
+          .filter((t) => !status || t.status === status)
+          .map((t) => ({ ...t })),
+        malformed: [],
+      };
     },
     async taskGet(id) {
       const t = state.get(id);
@@ -253,7 +256,7 @@ test("A3: runLoop cap — maxIterations bounds a spin, stopped=cap", async () =>
   let n = 0;
   const client = {
     async taskList() {
-      return [{ id: `SPIN-${n++}`, status: "ready", extra: { acceptance: "true" } }];
+      return { tasks: [{ id: `SPIN-${n++}`, status: "ready", extra: { acceptance: "true" } }], malformed: [] };
     },
     async taskGet(id) { return { id, status: "ready", extra: { acceptance: "true" } }; },
     async taskCheck() { return { ok: true, reason: "ok" }; },

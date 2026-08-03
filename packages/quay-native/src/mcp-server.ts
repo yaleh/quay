@@ -56,10 +56,17 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { task
       },
     },
     async ({ status, label }) => {
-      const tasks = store.list({ status, label });
+      // gap-one-unparseable-task-takes-down-the-whole-board: partial success.
+      // One task file whose frontmatter fails to parse must not take down the
+      // whole task_list call (that was the "all-or-nothing" defect) — return
+      // the parseable tasks PLUS a machine-readable malformed list ({file,
+      // error}) so the Core can surface the bad file visibly instead of 500ing
+      // the board. isError stays reserved for genuine call-level failures
+      // (store itself unreachable, etc.), which still throw.
+      const { tasks, malformed } = store.listWithMalformed({ status, label });
       return {
-        content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
-        structuredContent: { tasks },
+        content: [{ type: "text", text: JSON.stringify({ tasks, malformed }, null, 2) }],
+        structuredContent: { tasks, malformed },
       };
     }
   );

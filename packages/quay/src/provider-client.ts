@@ -13,8 +13,28 @@ export interface ConnectProviderOptions {
   cwd?: string;
 }
 
+// gap-one-unparseable-task-takes-down-the-whole-board: the Provider's
+// task_list may return PARTIAL success — the tasks whose frontmatter parsed,
+// plus a machine-readable list of the files that did NOT (file name + the
+// parser's raw error). This is NOT a call-level failure: `isError` is still
+// reserved for genuine failures (provider unreachable, store itself unusable),
+// which taskList() still throws on. The malformed list is what lets one bad
+// task poison exactly its own row on the board instead of 500ing the whole
+// list.
+export interface MalformedTask {
+  /** filename of the unparseable task file, e.g. "BAD-1.md" */
+  file: string;
+  /** the YAML parser's own raw error message */
+  error: string;
+}
+
+export interface TaskListResult {
+  tasks: Task[];
+  malformed: MalformedTask[];
+}
+
 export interface ProviderClient {
-  taskList(filter?: Record<string, unknown>): Promise<Task[]>;
+  taskList(filter?: Record<string, unknown>): Promise<TaskListResult>;
   taskGet(id: string): Promise<Task>;
   taskWrite(patch: Record<string, unknown>): Promise<Task>;
   taskCheck(id: string): Promise<unknown>;          // gate result — keep unknown
@@ -48,10 +68,18 @@ export async function connectProvider({ command, args, env, cwd }: ConnectProvid
   // legitimate task in the store. Now: an isError result throws, matching
   // the other three methods' existing behavior, so callers can catch it and
   // surface a real error instead of a silently-empty list.
-  async function taskList(filter: Record<string, unknown> = {}): Promise<Task[]> {
+  async function taskList(filter: Record<string, unknown> = {}): Promise<TaskListResult> {
     const r = await client.callTool({ name: "task_list", arguments: filter });
+    // AC5 (gap-one-unparseable-task-takes-down-the-whole-board): a genuine
+    // call failure (isError:true) STILL throws — the earlier "silent coercion
+    // to empty array" behavior hid the real failure AND every legitimate task,
+    // and this throw is what keeps that from coming back. What changes is that
+    // a per-task frontmatter parse failure is now PARTIAL SUCCESS (isError:false
+    // with a `malformed` array), so it never reaches this throw in the first
+    // place.
     if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_list failed");
-    return (r.structuredContent as {tasks?: Task[]})?.tasks ?? [];
+    const sc = (r.structuredContent ?? {}) as { tasks?: Task[]; malformed?: MalformedTask[] };
+    return { tasks: sc.tasks ?? [], malformed: sc.malformed ?? [] };
   }
 
   async function taskGet(id: string): Promise<Task> {

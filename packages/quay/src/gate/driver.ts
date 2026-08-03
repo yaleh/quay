@@ -19,7 +19,7 @@ import { runComplete } from "./lifecycle.ts";
 import type { Task } from "../abi.ts";
 
 interface DriverClient {
-  taskList: (filter: { status: string }) => Promise<Task[]>;
+  taskList: (filter: { status: string }) => Promise<{ tasks: Task[]; malformed: Array<{ file: string; error: string }> }>;
   taskGet: (id: string) => Promise<Task | null>;
   taskWrite: (args: { id: string; status: string; expectedStatus: string }) => Promise<unknown>;
   taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
@@ -84,7 +84,7 @@ export function isActionable(task: Task): boolean {
  * most once per run and the scan drains to `[]` → clean fixpoint.
  */
 export async function scanActionable(client: DriverClient, seen: Set<string> = new Set()): Promise<string[]> {
-  const tasks = await client.taskList({ status: "ready" });
+  const { tasks } = await client.taskList({ status: "ready" });
   return tasks
     .filter(isActionable)
     .map((t) => t.id)

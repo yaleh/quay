@@ -712,7 +712,10 @@ async function main() {
     await withProvider(async (client) => {
       // QX-016 (iteration 4): pass only status to taskList; label filtering handled
       // client-side below so we can apply AND-logic for multiple --label values.
-      const tasks = await client.taskList({ status: flags.status });
+      // gap-one-unparseable-task-takes-down-the-whole-board: taskList() returns
+      // partial success { tasks, malformed }. The unparseable files are reported
+      // on stderr — never silently dropped, and never treated as "0 tasks".
+      const { tasks, malformed } = await client.taskList({ status: flags.status });
       // QX-002 (experiment 4, iteration 1): --prefix filter for experiment scoping.
       // Closes CB-001: `quay task list --prefix QX` returns only QX-* tasks.
       // Client-side filter after provider fetch — no provider-side changes needed.
@@ -795,6 +798,13 @@ async function main() {
       // regardless of --page-size).
       const totalCount = sorted.length;
       const paged = pageSize != null ? sorted.slice(0, pageSize) : sorted;
+      // gap-one-unparseable-task-takes-down-the-whole-board: report unparseable
+      // task files on stderr (so --json stays parseable) instead of silently
+      // dropping them or letting them 500 the whole list.
+      if (malformed.length > 0) {
+        console.error(`Warning: ${malformed.length} task file(s) could not be parsed and were excluded from the list:`);
+        for (const m of malformed) console.error(`  ${m.file}: ${m.error}`);
+      }
       if (wantsJson) {
         printJson(paged);
       } else {
