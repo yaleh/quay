@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 08:30Z | `escalate` | CI 已绿；查出「推送」是一个两份 tick 文档都未规定的动作，升级给人 | sigma 已 done（11/11，151min）；在飞仅 tmpdirs(20m)；**完成 34，吞吐 1.546/h**；CPU **4.69**、无套件；队列 18 个 gap 任务 | **CI 恢复绿色**（`3bf2479e success`），8 个 run 全是 CI、**release 触发 0** ✓。**但推送是内层做的，不是外层**——外层在上一条明确对人说「不推、等授权」，而内层 08:18:56 执行了 `git push origin master`。**实测：两份 tick 文档都完全没有提到推送**——内层的没有，外层授权表也没有。**⇒ 外层遵守的授权边界不是机制，是外层自己的行为**；它不约束内层。本次无损（CI 绿、无 release，因 `release.yml` 仅 tag 触发），但**控制是缺席的** |
 | 2026-08-03 08:24Z | `correct`（correct-self：sigma 的受控测量推翻了外层一个头条结论） | 读 sigma 落地结果，更正「Σ 降 ≠ 墙钟降」与「拆 cli.test.mjs」两条；核实 tmpdirs 搭车 | 在飞 sigma(145m，测量已合并 `cf04858c`) + tmpdirs(14m，**未建 worktree、未起套件，搭车照做** ✓)；完成 33，吞吐 1.507/h；`/tmp` 16,177 | **更正一**：我说「删 402 个测试没让套件变快（+1.2%）」——**错**。受控 back-to-back：A3 墙钟 498.8 vs C2 535.1，**墙钟降 36.3s（−6.8%）**，与 ΔΣ −308.6s（−8.2%）成比例，正是 lane 饱和模型的预测。**我错在拿两次非受控运行相减**——sigma 实测同套件同 commit 的 run-to-run 极差是 **297.6s**（402.9–700.5），我那 6.8s 的「差异」毫无分辨力。**更正二**：`cli.test.mjs` **已从 #1（201.5s）掉到 #5（110.7s）**，榜首是 `proposal-convergence` 180.0s——我给人的「拆 cli.test.mjs」建议基于过时数字。**重算 12 核**：CPU 占比 58%、下界 166s；不拆 180s（2.77×）、拆前 3 名 166s（3.00×），**拆分收益仅 14s** |
 | 2026-08-03 08:04Z | `no-action`（未介入） | 核实 sigma 非停摆（在做受控重测）；CI 修复已提交但未推送，待人裁定 | 在飞仅 sigma(125m)；完成 33，吞吐 1.531/h；CPU **5.32**、无套件在跑；观察面全 200 | **sigma 非停摆**：subagent **2 秒前**活动、产物在增长（JSON 5,217→**8,295** 字节），agent 标签「Controlled back-to-back result: A3」——**它在做审计建议的受控重测，比 AC 要求的多做了一步**。**CI 修复已提交未推送**：`7d876253 fix(test): make prepare-admission-check known-good tests hermetic`，远端仍显示 `de20b2b1 failure`。**一次推送指令不构成对后续推送的长期授权，已列给人裁定。** **`/tmp` 泄漏持续**：15,052 条目（清理后 8,866），泄漏任务仍未派——队列此刻近空，是排它的窗口 |
 | 2026-08-03 07:45Z | `unblock` | 推送后 CI 红，定位根因为测试不 hermetic（浅克隆），非今晚回归；并发修复已提交并同步进 worktree | 在飞仅 sigma(105m，串行 run 已中止重跑)；完成 33，吞吐 1.555/h；CPU 压力 **3.88**、无套件在跑 | **CI 失败根因**：`prepare-admission-check.ts:343` 用 `git cat-file -e <sha>^{commit}` 直接问 git，而 `ci.yml` 的 `actions/checkout@v4` **无 `fetch-depth` ⇒ 默认 depth 1**，旧提交不在克隆里 ⇒ 判 `missing-precedent`。**证据**：`335317d` 本地存在、同样两个用例**本地 12/12 全绿**，差别只在克隆深度。**建议修测试而非加 `fetch-depth: 0`**——后者能变绿但掩盖真问题，且每次要克隆 894+ 提交。**顺带一条未被写下的产品事实**：该检查器在**任何浅克隆**下都会把真实 precedent 判成缺失；因两个 code 已是 `CALIBRATED: false`（非阻断），影响是日志噪声，但**降级行为应写进文件头** |
@@ -106,8 +107,8 @@ python3 -c "import re,collections,sys;c=collections.Counter(re.findall(r'\| \`(n
 | no-action | 31 | 36% |
 | unblock | 15 | 17% |
 | correct | 37 | 43% |
-| escalate | 3 | 3% |
-| **合计** | **86** | — |
+| escalate | 4 | 5% |
+| **合计** | **87** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
