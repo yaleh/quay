@@ -306,6 +306,8 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 在飞任务及其已运行时长
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
+- 遥测吞吐：`tasksPerHour`（= 收尾任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/`windowHours`
+  ——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发无关）
 - 阻塞信号状态（`.quay/inner-blocked.json` 存在与否；存在则报 `reason` + `question`，以及
   `fast-mode-telemetry --report` 的累计死时间/单次最长——2026-08-03 起该数有基线）
 

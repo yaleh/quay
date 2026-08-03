@@ -385,7 +385,8 @@ tick 或 `/clear` 后的会话会重犯。
 - 动作类型（`no-action` / `unblock` / `correct` / `escalate`）
 - 独立核实了内层的哪一项声称，结果如何
 - 内层在飞任务数与各自已运行时长
-- 遥测当前：任务数、均耗时、tasksPerHour
+- 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；
+  `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
 - 累计动作类型分布（退化判据）
 
 不要只说「内层在跑」——没有这些，分层是否有效无法判定。

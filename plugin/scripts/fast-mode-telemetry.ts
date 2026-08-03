@@ -38,6 +38,17 @@
 // totalBlockedMs (cumulative dead time) and longestBlockedMs (single longest wait) — the dead-time
 // number that "does not exist today". SCHEMA_VERSION stays "1".
 //
+// THROUGHPUT SEMANTICS (gap-tasksperhour-measures-mean-duration-not-throughput, AC1-AC5):
+// `tasksPerHour` used to be `count*60/totalMinutes` ≡ `60/mean` — a per-task SPEED metric that
+// penalizes concurrency (two 60-min tasks finishing in the same wall-clock hour reported 1.0, not
+// the real 2.0). It is now `count / windowHours` where windowHours is wall-clock: windowStart =
+// `--since` (AC2) or the earliest startedAtMs; windowEnd = max(latest endedAtMs, now) — the live
+// CLI report passes now = Date.now() (window extends to the present), a historical analysis omits
+// it (window ends at the latest endedAtMs). The report also carries windowStart/windowEnd/windowHours
+// (AC3) so any consumer can see which span a rate covers. The OLD definition is kept RENAMED as
+// `serialEquivalentPerHour` with an explicit "unrelated to concurrency" annotation (AC5); it is a
+// deterministic transform of meanMinutes.
+//
 // Storage: raw events append to <root>/.workflow-events/<runId>.jsonl (gitignored). The committed
 // roll-up under <root>/milestones/fast-mode-telemetry/<YYYY-MM-DD>.json is written ONLY by the
 // explicit --snapshot subcommand (task end / Land / day-end moments). --report is PURE READ — it
@@ -279,7 +290,8 @@ function isEndLike(e) {
  * Pairing key is runId (one fast-mode execution instance). A start+end pair → a completed task
  * (wall-clock = end.timing.endedAtMs − start.timing.startedAtMs). An end with NO matching start
  * → `orphaned` (AC10: never silently dropped). A start with no end → `inProgress` (the
- * abandoned-mid-flight signal). Mean/median/tasksPerHour are computed over completed tasks only.
+ * abandoned-mid-flight signal). Mean/median/serialEquivalentPerHour are computed over completed
+ * tasks only; tasksPerHour is count / wall-clock window hours (AC1) — see header for the fix.
  *
  * `--since` is applied at PAIR level, never per-event (DEFECT-2 fix): a completed task is
  * included when its END falls at/after sinceMs, so a task straddling the window boundary is not
@@ -296,10 +308,15 @@ function isEndLike(e) {
  * end time).
  *
  * @param {object[]} events — schema-valid StageEvents (any stage; only "Fast" is consumed)
- * @param {{sinceMs?: number|null}} [opts]
- * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
+ * @param {{sinceMs?: number|null, nowMs?: number|null}} [opts]
+ *   sinceMs — window start when given (AC2); else the earliest startedAtMs in the data.
+ *   nowMs   — the observation instant. windowEnd = max(latest endedAtMs, nowMs). A live report
+ *             passes nowMs = Date.now() (window extends to now); a historical analysis passes
+ *             null or a past instant (window ends at the latest endedAtMs) — "活报告用 now，
+ *             历史窗口用最晚 end".
+ * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
-export function aggregate(events, { sinceMs = null } = {}) {
+export function aggregate(events, { sinceMs = null, nowMs = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
   // Blocked-wait events are NOT task start/end pairs — separate them before the byRun pairing.
   const blockedEvents = fastEvents.filter((e) => e.eventKind === "blocked");
@@ -326,14 +343,25 @@ export function aggregate(events, { sinceMs = null } = {}) {
   const orphaned = [];
   /** @type {Array<{taskId:string,runId:string,startedAtMs:number}>} */
   const inProgress = [];
+  // Wall-clock window bounds (AC2/AC3): earliest start across all task events; latest end across
+  // completed pairs. These feed tasksPerHour = count / windowHours below.
+  let earliestStartMs = null;
+  let latestEndMs = null;
 
   for (const rec of byRun.values()) {
     const end = rec.ends.length ? rec.ends[rec.ends.length - 1] : null; // last end wins
+    if (rec.start && rec.start.timing?.startedAtMs != null) {
+      const s = rec.start.timing.startedAtMs;
+      earliestStartMs = earliestStartMs == null ? s : Math.min(earliestStartMs, s);
+    }
     if (rec.start && end) {
       // Completed pair — window filter on the END time (pair level).
       if (sinceMs != null && end.timing.endedAtMs < sinceMs) continue;
       const raw = (end.timing.endedAtMs - rec.start.timing.startedAtMs) / 60_000;
       const minutes = raw > 0 ? raw : 0;
+      if (end.timing.endedAtMs != null) {
+        latestEndMs = latestEndMs == null ? end.timing.endedAtMs : Math.max(latestEndMs, end.timing.endedAtMs);
+      }
       tasks.push({ taskId: rec.taskId, minutes, outcome: end.outcome });
     } else if (end && !rec.start) {
       if (sinceMs != null && end.recordedAtMs < sinceMs) continue;
@@ -353,8 +381,36 @@ export function aggregate(events, { sinceMs = null } = {}) {
   const count = minutes.length;
   const meanMinutes = count ? totalMinutes / count : 0;
   const medianMinutes = count ? median(minutes) : 0;
-  // tasks per hour = completedCount / totalHours; guard divide-by-zero (all-zero-duration run).
-  const tasksPerHour = totalMinutes > 0 ? (count * 60) / totalMinutes : 0;
+
+  // Serial-equivalent rate — the OLD tasksPerHour definition (60 / mean). How fast tasks would
+  // complete if they ran back-to-back with zero concurrency. It is a deterministic transform of
+  // meanMinutes and is EXPLICITLY unrelated to concurrency (gap-tasksperhour-measures-mean-duration-
+  // not-throughput, AC5): two 60-min tasks finishing in the same wall-clock hour report serial-
+  // equivalent 1.0 while real throughput is 2.0. Kept renamed (not deleted) so reports can carry
+  // both the true throughput and the serial-equivalent baseline.
+  const serialEquivalentPerHour = totalMinutes > 0 ? (count * 60) / totalMinutes : 0;
+
+  // THROUGHPUT (AC1): completedCount / wall-clock window hours. The window is:
+  //   windowStart = --since (AC2), else the earliest startedAtMs in the data.
+  //   windowEnd   = max(latest endedAtMs, nowMs) — a LIVE report passes nowMs = Date.now() so the
+  //                 window extends to the present; a HISTORICAL analysis passes nowMs = null (or a
+  //                 past instant) so the window ends at the latest endedAtMs ("活报告用 now，历史窗口
+  //                 用最晚 end").
+  // Unlike 60/mean, this is time-axis aware: concurrency that completes more tasks per wall-clock
+  // hour RAISES it, and idle gaps LOWER it. windowHours is clamped >= 0 (DEFECT-3 clock skew).
+  const windowStartMs = sinceMs != null ? sinceMs : earliestStartMs;
+  let windowEndMs = null;
+  if (windowStartMs != null) {
+    windowEndMs = latestEndMs != null ? Math.max(latestEndMs, nowMs ?? 0) : (nowMs ?? null);
+  }
+  if (windowEndMs != null && windowEndMs < windowStartMs) {
+    windowEndMs = windowStartMs;
+  }
+  let windowHours = 0;
+  if (windowStartMs != null && windowEndMs != null) {
+    windowHours = (windowEndMs - windowStartMs) / 3_600_000;
+  }
+  const tasksPerHour = windowHours > 0 ? count / windowHours : 0;
 
   // Blocked-wait aggregation (gap-no-explicit-blocked-signal-from-inner-layer, AC7). One entry per
   // blocked period; duration = endedAtMs − startedAtMs (clamped to 0 for skew). Windowed on the
@@ -378,7 +434,14 @@ export function aggregate(events, { sinceMs = null } = {}) {
   const totalBlockedMs = blocked.reduce((s, b) => s + b.durationMs, 0);
   const longestBlockedMs = blocked.length ? Math.max(...blocked.map((b) => b.durationMs)) : 0;
 
-  return { tasks, orphaned, inProgress, meanMinutes, medianMinutes, tasksPerHour, blocked, totalBlockedMs, longestBlockedMs };
+  return {
+    tasks, orphaned, inProgress, meanMinutes, medianMinutes,
+    tasksPerHour, serialEquivalentPerHour,
+    windowStart: windowStartMs != null ? new Date(windowStartMs).toISOString() : null,
+    windowEnd: windowEndMs != null ? new Date(windowEndMs).toISOString() : null,
+    windowHours,
+    blocked, totalBlockedMs, longestBlockedMs,
+  };
 }
 
 // ── Committed aggregate ──────────────────────────────────────────────────────────────────────────────
@@ -413,7 +476,9 @@ function printHumanReport(report, aggFile) {
   }
   console.log(`mean minutes/task: ${report.meanMinutes.toFixed(2)}`);
   console.log(`median minutes/task: ${report.medianMinutes.toFixed(2)}`);
-  console.log(`tasks per hour: ${report.tasksPerHour.toFixed(2)}`);
+  console.log(`tasks per hour (throughput, count/window-hours): ${report.tasksPerHour.toFixed(2)}`);
+  console.log(`serial-equivalent per hour (60/mean; NOT throughput, unrelated to concurrency): ${report.serialEquivalentPerHour.toFixed(2)}`);
+  console.log(`window: ${report.windowStart ?? "null"} → ${report.windowEnd ?? "null"} (${report.windowHours.toFixed(2)}h)`);
   if (report.orphaned.length) {
     console.log(`orphaned (end without start): ${report.orphaned.length}`);
     for (const o of report.orphaned) console.log(`  ${o.taskId} (runId ${o.runId}, outcome ${o.outcome})`);
@@ -467,7 +532,8 @@ async function loadAndAggregate(root, sinceArg) {
   }
   const events = [];
   for await (const e of readAllEvents(root)) events.push(e);
-  const report = aggregate(events, { sinceMs });
+  // nowMs = Date.now(): a live report's window extends to the current instant (AC1's window end).
+  const report = aggregate(events, { sinceMs, nowMs: Date.now() });
   return { report: { generatedAt: new Date().toISOString(), since: sinceArg ?? null, ...report } };
 }
 

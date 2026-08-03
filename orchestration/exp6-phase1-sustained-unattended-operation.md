@@ -230,7 +230,9 @@ tick 第 3 节把「就绪队列为空」列为停止条件。无人值守 12 �
       **判定改为与基线同口径**：窗口内 `收尾任务数 / 窗口经过小时` ≥1.5。
       实测（17:43:24Z 起 6.69 小时，**6 个收尾**，排除 `gap-test-*` 测试产物）：**0.90/hr = 基线的 43%**，未达标。
       逐小时收尾分布 `2 1 0 1 0 1 1`——第 3、5 小时为零，正是外层两次解阻塞的时段。
-      代码修正见 [[gap-tasksperhour-measures-mean-duration-not-throughput]]（`tasksPerHour` 当前 ≡ `60/均耗时`，系统性高估）。
+      代码修正已落地（2026-08-03，[[gap-tasksperhour-measures-mean-duration-not-throughput]]）：`tasksPerHour`
+      已改为 `收尾任务数 / 墙钟窗口小时`（窗口 = `--since` 或最早 startedAtMs → `now`/最晚 endedAtMs），
+      旧量 `60/均耗时` 更名为 `serialEquivalentPerHour` 并注明与并发无关；报告带 `windowStart/End/Hours`。
       注意此更正**不利于**当前数据（原口径 1.33 比真实的 1.05 好看），采用它不是为了让结果更好看
 - [ ] AC19: 结束报告点明产品面待办数量与阶段 2 的第一步建议
 
