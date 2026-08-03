@@ -1336,3 +1336,10 @@ pass 2054 / fail 0 / cancelled 0 / skipped 19——判绿三条件 grep 全过�
 （产品化冷启动）。闸口外层已过（task-contract-check 0 违规；Touches 外层补齐 3→18）。
 范围裁定已写进任务体：**scripts/test.sh 不搬**（quay 本仓测试入口非可移植机制；判绿约定随 tick 文档
 走、测试命令占位符替换；Touches 不列 test.sh）。
+
+### 发现（证据）：it0-dod-check R1 违规导致误提交
+
+`experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs:409` 用固定路径
+`process.cwd()/tasks/M-FAKE-FRONTMATTER-SCOPE-M124.md` 写 fixture（finally 删）——R1 违规
+（固定路径写入，非 mkdtemp 唯一），R1 扫描器只认 dot-tmp 形态未捕获。本次 `git add -A` 把
+该 mid-life fixture 误提交（b505d3aa），已 revert。处置：建任务或修（待办，不打断 cold-start 派发）。
