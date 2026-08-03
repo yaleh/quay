@@ -1251,3 +1251,15 @@ telemetry --task-end done（35 完成），worktree/branches 清理，349940cf�
 
 **在飞（1/3 槽）**：token A（agent abae2f...，08:40 派发）。B（archguard 冷启动）、C（meta-cc）被 A 阻塞。
 **未再派发**：AC5 并发实验（2/4/6/8）待低压力窗口；外层正在积极 steer，保守只保持 A 在飞。
+
+### 内层 tick 补充 4（2026-08-03 08:5xZ）
+
+**在飞 2/3**：
+- token A（abae2f...，08:40，heavy-op-token.sh 已建未提交）
+- inner-forensics（ac615c4d...，08:51，telemetry fm-...-b4mxpa）——Contract+outer 03:19 复核；
+  checkTouchesPair 确认与 token A **DISJOINT**（quantified-stop 与 A 重叠 scripts/test.sh，未并发派发）
+
+**外层独立复核（9b07529c）**：tmpdirs AC3 结论成立——四前缀 20 分钟 0 新目录，最大剩余泄漏
+frontmatter-store-base 仅 7；R6 棘轮按设计行为。
+
+**未派发**：quantified-stop（与 A 重叠 test.sh）；web-board（待查）；AC5 并发实验待低压力窗口。
