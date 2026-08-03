@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-03 13:26Z | `correct`（correct-inner：三条 DoD 里我只核得到一条的证据，收尾前提出） | 消化 OVER90（按预登记裁定判良性）；核实 fan-in run2 判决；把最近 90 分钟所有套件运行按 mtime 排出来对账 | 三个任务仍 `inProgress`（收尾中）、均已是 master 祖先；**fan-in run2 绿**：tests 2085 / pass 2065 / **fail 0 / cancelled 0** / skipped 20 / selected 166；完成 39、orphaned 0 | **OVER90 按预先登记的裁定判良性**——三个都已合并、只剩套件，此处放弃等于扔掉已完成的交付物；**裁定是上一 tick 写下的，不是事后合理化**。**run1 vs run2 的对照很干净**：`selected 166 / tests 2085` **两次完全相同**，唯一差别是 `pass 2063→2065`、`fail 2→0`——正是那两条被修掉的。**但对账查出一条 DoD 缺口**：把最近 90 分钟所有带汇总的日志按 mtime 列出（`measure-baseline` 12:13 fail 6 / `after-run-1` 12:42 fail 0 / `after-run-2` 12:52 fail 0，两者 tests 2057、selected 162 / `batch3-fanin` 13:13 fail 2 / `batch3-fanin2` 13:25 fail 0），**只有 tmp-leak 的「连跑 2 次全绿」有两次连续绿撑着**（12:42 与 12:52）；**tasksPerHour 与 monitor 的同一条 DoD，我在这个窗口里找不到对应的两次运行**。已在收尾前要求它补日志名/时刻，或如实标注「只有一次绿」。**盯这条的理由是今天自己给的**：run1 那 2 个失败一个是我的文档触发、一个是并发时序产物，**都不是产品缺陷——而这正是「连跑 2 次」要防的东西** |
 | 2026-08-03 13:22Z | `no-action`（未介入；两次判定都靠精确判据挡住误报，并预先登记 OVER90 的裁定） | 判断「两个套件在跑」是真是假；核实 tph 机制是否真在生产报告里；预判即将触发的 OVER90 | 三个任务 **87 分钟**（阈值 90，均已 merged，剩 fan-in run2）；完成 39、orphaned 0、`tph` 1.451；**fan-in run2 仍在跑**（`batch3-fanin-fullsuite2.log`，567s）；CPU some avg10 54.14、load1 14.96 | **又一次「两个套件在跑」的表象，这次连精确 argv 判据都先报了 2**（pid 1613777 与 1648297，同在主检出）。**追一步就散了**：1648297 在下一次读取时 `/proc` 已无该项（短命的嵌套调用），而 **1613777 elapsed 567s、ppid=1，重活令牌 `holder pid` 正是它、`held_ms` 与 elapsed 逐位吻合** ⇒ **真并发套件只有 1 个**。**判据的教训比结论重要**：精确 argv 匹配解决了「命令行里含字符串」的假阳性，**解决不了「进程存在但瞬时」**——令牌的单一持有者才是那条结构信号，进程计数始终是代理。**并核实 tph 合并的是活代码不是声称**：主检出 `--report --json` 现在带 `haltedHours: 0`，**0 正是其 AC1 要求的保守退化**（无停机记录则一分不扣）。**预先登记 OVER90 裁定**：三个任务马上跨 90 分钟，但均已合并、只剩 fan-in——按 04:33Z 的先例，该阈值的处方（拆分/放弃）为 Build 相位设计，**放弃等于扔掉已完成的交付物**，届时判良性、让套件跑完再收尾。**另记一次自伤**：我上一条后台等待写成 `( … ) > /dev/null 2>&1 &` 套在 `run_in_background` 里，**双重后台化把结果丢进了 /dev/null**，通知回来只有 `armed` 两个字——已改为直接查进程与按 mtime 取日志 |
 | 2026-08-03 13:20Z | `correct`（correct-self：**我把 fan-in 套件搞红了**，且差点用一份陈旧日志报成绿） | 查 fan-in 判决；定位两个失败的真因；修好自己造成的那个；把另一个的诊断送达内层 | 三个任务全部 merged（tph `5d75b59e` / tmpleak `35c27449` / monitor `02930d02`）；**fan-in 全量 fail 2**（tests 2085 / pass 2063 / fail 2 / cancelled 0 / selected 166，665.9s）；`/tmp` 跨该套件尾段 21,922→22,007（**+85**，非完整窗口，只作下界） | **两个错误都值得记，一个是判据的、一个是我的。** ①**差点把陈旧日志当判决**：后台命令里 `grep /tmp/*.log \| tail -5` 取到的是 `token-fanin-fullsuite.log`（早先任务的日志，fail 0），**按 mtime 找到真正的那份是 `batch3-fanin-fullsuite.log`（13:13Z，fail 2）**——一份写着 `fail 0` 的日志和正确答案从外面看一模一样。②**AC1b 的两条命中都指向 `orchestration/outer-phase-goal.md`——我自己的文件**：我在 `bedf543c` 写 AC13 证据表时用了**产物内相对路径** `scripts/resource-gate.sh` / `heavy-op-token.sh`，被那条负向后顾正则判为旧路径引用。**内层在 fan-in 里发现并改了我的文件（`dd9f6323`），处置正确**。**但加 `plugin/` 前缀对仓库是对的、对产物是错的**——产物内确实没有该前缀（`publish-dist-branch.sh` 把 `plugin/` 子树 rsync 到分支根）。已改成目录与文件名分写，两者都真，scoped `loop-shipping` **7/7 绿**。③**AC7（monitor 零写入）不是代码缺陷**：断言的 expected 含 `?? .quay-tmp-test-Oo3SEg/` 而 actual 不含 ⇒ 测试自己的临时目录在两次 `git status` 快照之间被别的东西删了——**在并发全量下对整仓 `git status` 做逐字相等断言本就不安全**。三条诊断均已送达内层（transcript 命中确认） |
 | 2026-08-03 13:02Z | `no-action`（未介入；三个任务全部合并，核实的是「主判据有没有真的动」） | 核实三个合并的成果：tmp-leak 的名单与活标本、tph 的数字、monitor 的落地；挂后台等 fan-in 套件判决 | **三个全部 merged**（`5d75b59e` tph / `35c27449` tmpleak / `02930d02` monitor），三个 worktree 均已 0 commit ahead、树干净；**fan-in 全量正在主检出跑**（pid 1560077，持有重活令牌）；遥测仍显示 3 在飞 67min（等套件绿后收尾）；完成 39、orphaned 0 | **tmp-leak 的两条主判据我都独立复核了，不是读它的自述**：①`grep -c mkdtemp-no-cleanup plugin/test-isolation-violations.txt` = **22**（开工值 28，我写的 band 是 `<28`）；②**我点名的活标本 `gate-diagnostics.test.mjs`（7 建 2 清、每小时 136 个、旧 R6 看不见它）现在 `mkdtempSync` 调用数 **0**、用共享助手 **8 处**——它不在违规名单上是因为**真修好了**，不是因为**仍然隐形**，这正是 AC7 存在的理由。它自报的 `leaked_after_suite` **464 → 159/160（−65.7%）**，用的是套件前后差值不是墙钟速率（我在任务体里钉死的测法）。**残留仍有约 160/套件，没有清零**——如实记，别读成解决了。**tph 的 AC5 数字我上一 tick 已手算逐位复核**（1.5391→1.6045）。**已挂后台等 fan-in 套件退出**并同时记 `/tmp` 前后数，用它做一次独立的泄漏复测 |
@@ -140,11 +141,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 43 | 39% |
+| no-action | 43 | 38% |
 | unblock | 16 | 14% |
-| correct | 48 | 43% |
+| correct | 49 | 44% |
 | escalate | 4 | 4% |
-| **合计** | **111** | — |
+| **合计** | **112** | — |
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 
