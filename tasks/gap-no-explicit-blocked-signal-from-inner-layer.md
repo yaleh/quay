@@ -59,6 +59,29 @@ extra:
 **不做**：不改排程（会话内 `CronCreate`/`Monitor` 的会话生命周期问题是另一件事）。
 不让内层自动恢复——它仍然停，只是**能说出自己停了**。
 
+## Contract
+
+```
+# 回填（gap-dispatch-gate-has-no-checklist-and-no-trace AC4）：外层对 AC8 演练的纠偏——写临时 root、
+# 基线以文本记（resume）、真实 CLI 不手写 JSON（invoke）。
+measure  wait         = `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --assert-blocked` 的 blocked 死时间（since→删除）
+band     latency_ok   = < 60 s
+band     baseline_wait = 8.2s（0.14 min）
+invoke   `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --assert-blocked`
+control  演练必须写临时 `--root`，不得污染真实 `.workflow-events/`（test-writes-shared-state 同类纠偏）
+resume   基线数（8.2s / 0.14 min）以文本记任务体，不留在遥测存储里
+```
+
+## Dispatch review
+
+> 回填：外层对演练产物的纠偏留痕。
+
+reviewer: outer
+at: 2026-08-03T00:21:00Z
+changed: 1. 演练向真实 `.workflow-events/` 写入了 `blk-` 记录，被 master 旧聚合报成 false ORPHAN ——
+         要求演练写临时 `--root`（`control`），清掉幽灵记录，单元测试一律传临时 root
+         2. 基线数（8.2s / 0.14 min）以文本记任务体，不留在遥测存储（`resume`）
+
 ## Acceptance Criteria
 
 - [x] AC1: `.quay/inner-blocked.json` 的 schema 定义并进 `.gitignore`
@@ -93,6 +116,14 @@ checkout 的 `.quay/`；裁定后内层清除；死时间记进遥测。全程�
 | T2 | `00:18:51` (1785716331) | 外层 `--read` 拿到完整记录（reason + question + options + evidence），裁定：**按 A** |
 | T3 | `00:18:53` (1785716333) | **内层 `--clear`**（wait 8.2s），事件落 `.workflow-events/blk-…jsonl`，`DELETE inner-blocked.json` |
 | — | 此后 | `fast-mode-telemetry --report` 输出：`blocked-wait periods: 1`、`cumulative blocked (dead) time: 0.14 min`、`longest single blocked wait: 0.14 min` |
+
+命令原文（AC8 演练实际执行的 CLI；回填 `## Contract` 的 `invoke` 键）：
+
+```
+node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --assert-blocked
+node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --read
+node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --clear
+```
 
 **演练结论**
 - 检测延迟：**< 1s**（`--assert-blocked` 写入的同一秒内 inotifywait 就发出 CREATE/CLOSE_WRITE 事件），

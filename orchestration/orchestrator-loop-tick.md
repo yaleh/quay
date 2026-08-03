@@ -234,6 +234,28 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 跑在 `--task-start`/`--task-end` 之外，遥测看不见，此时内层在忙而信号显示 IDLE。真正的信号要内层
 主动写——见 [[gap-no-explicit-blocked-signal-from-inner-layer]]。
 
+### 0c. 派发闸口的清单与留痕：`## Contract` + `## Dispatch review`（外层，gap-dispatch-gate-has-no-checklist-and-no-trace）
+
+外层对派发任务的审查此前是**惯例**——四次介入里两次靠外层碰巧拥有的上下文（`=` 拼写、`duration_ms`
+口径），没有清单、没有留痕。现在变成任务创建时写下的、机器能消费的声明，外层在**派发前**消费它：
+
+**派发前对每个候选**，读它的 `## Contract` 块（六个键：`measure`/`band`/`invariant`/`invoke`/`control`/
+`resume`；`n/a: <理由>` 合法、留白不是），并跑消费者检查器：
+
+```bash
+node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <repo> --json
+```
+
+- 五条消费者判定（AC 阈值→measure/band 引用、measure 命令+字段、invoke 反引号命令+done 证据逐字、
+  defect→control、键空值）；**读内容不只验存在**，按代码/字段位置匹配
+- **报出而不阻断**；违规名单 `docs/analysis/contract-violations.md` 只能变短（新增违规检查器退出 1）
+- 这里就是「审查问了什么」的机器承载——**留痕**由任务体的 `## Dispatch review` 段承载
+  （`reviewer: outer|none` / `at: <ISO>` / `changed: <逐条|无>`），外层介入后把改了什么写进去；
+  `reviewer: none` 合法，但「没过闸」必须是被记录的选择
+
+**不做**：不引入审查 agent、不加轮次、不阻断派发、不恢复 prepare 管线。把「碰巧」变成
+「写下来时就被问到」——如果 `## Contract` 没有真读它的消费者，三天后它就是第五段散文。
+
 ### 1. 观察（只读，不动手）
 
 ```bash

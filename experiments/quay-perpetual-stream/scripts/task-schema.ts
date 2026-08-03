@@ -47,6 +47,17 @@
 //   A7 checkDirectiveSections — directive-kind ONLY: `## Finding` AND `## Requested action` MUST
 //                               both be present (required by the /quay-directive authoring template).
 //                               milestone-candidate/other: assertion is skipped (PASS vacuously).
+//   A9 checkContractSyntax     — REPORT-ONLY (never a FAIL). If a `## Contract` section is present,
+//                               its six keys (measure|band|invariant|invoke|control|resume) must be
+//                               well-formed: `n/a: <reason>` is a legal value for every key, a blank
+//                               value is not; measure/band must declare a NAME; invoke must be a
+//                               backtick command. Absent section = INFO (the pre-ratchet baseline).
+//                               The five consumer judgments (AC↔measure ref, measure command+field,
+//                               invoke verbatim evidence, defect→control, blank-value) live in
+//                               task-contract-check.ts — the syntax is defined HERE, shared there.
+//   A10 checkDispatchReview    — REPORT-ONLY. `## Dispatch review` format: `reviewer:` (outer|none),
+//                               `at:` (ISO), `changed:` (逐条；无则「无」). `reviewer: none` is legal.
+//                               Missing section → finding (not a FAIL); malformed → finding.
 //
 //   NON-GOAL — semantic emptiness: A structural gate cannot detect a syntactically valid but
 //   meaningless checklist item (a `- [ ]` box with ≥40 chars of boilerplate passes A3/A4). Closing
@@ -418,17 +429,198 @@ export function checkTouches(task, kind) {
   return { ok: true, code: "touches-wellformed", message: `## Touches well-formed with ${globs.length} glob(s)` };
 }
 
+// ── extractSectionFenceAware — like extractSection, but ignores headings INSIDE fenced code blocks. ──
+// Needed for ## Contract / ## Dispatch review: a task body may illustrate the format inside a ``` fence
+// (the gap-dispatch-gate task's own Chosen mechanism does) and that MUST NOT be read as a real section.
+// A real section's heading sits at column 0 outside any fence; the resource-awareness task's real
+// ## Contract has its ENTRIES fenced but its heading outside — both cases are handled here.
+export function extractSectionFenceAware(fullText, heading) {
+  const headingLineRe = new RegExp(`^(##+)\\s*${heading}\\s*$`, "im");
+  const lines = fullText.split(/\r?\n/);
+  let inFence = false;
+  let startIdx = -1;
+  let depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
+    if (!inFence) {
+      const m = lines[i].match(headingLineRe);
+      if (m) { startIdx = i; depth = m[1].length; break; }
+    }
+  }
+  if (startIdx === -1) return null;
+  const out = [];
+  inFence = false;
+  const stopRe = new RegExp(`^#{1,${depth}}\\s`);
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; out.push(lines[i]); continue; }
+    if (!inFence && stopRe.test(lines[i])) break;
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
+// ── Assertions A9/A10: ## Contract + ## Dispatch review (gap-dispatch-gate-has-no-checklist-and-no-trace) ──
+// The dispatch gate's five verbal questions become a machine-readable `## Contract` block written at
+// task-creation time. Six keys, each traceable to a real dispatch intervention (2026-08-02/03); the
+// key set is NOT extended beyond that evidence (ADR-021: don't mechanize strategy without evidence).
+// `n/a: <reason>` is a legal value for EVERY key; a blank value is not (blank is indistinguishable
+// from "never thought about it" — same principle as `reviewer: none`). The syntax is DEFINED here
+// (the schema), but ENFORCEMENT is REPORT-ONLY in the initial ratchet — a malformed contract is a
+// finding, never a schema FAIL (the dispatch gate must not block; the violation list can only shrink;
+// see task-contract-check.ts for the consumer-side judgments).
+export const CONTRACT_KEYS = ["measure", "band", "invariant", "invoke", "control", "resume"];
+
+// Strip a trailing `# comment` only outside backtick spans (a `#` inside `…` is part of the command).
+export function stripCommentOutsideBackticks(raw) {
+  const parts = raw.split("`");
+  const out = parts.map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\s+#.*$/, "")));
+  return out.join("`").trim();
+}
+
+// Parse the `## Contract` section into structured entries. The showcase format wraps the entries in a
+// fenced code block (gap-no-resource-awareness-heavy-ops-run-blind.md); both fenced and bare lines are
+// accepted. A trailing `# comment` is stripped. Each entry: { key, name, value, na, naReason, raw }.
+//   - measure/band/invariant: `KEY <name> = <value>` (invariant MAY be a bare statement without `=`).
+//   - invoke/control/resume: `KEY <value>` (invoke MUST be a backtick command).
+//   - every key: `KEY n/a: <reason>` is legal.
+export function parseContract(body) {
+  const sec = extractSectionFenceAware(body, "Contract");
+  if (sec === null) return { present: false, entries: [] };
+  let text = sec.trim();
+  const fenceMatch = text.match(/^```[A-Za-z0-9_-]*\r?\n([\s\S]*?)\r?\n```\s*$/);
+  if (fenceMatch) text = fenceMatch[1];
+  const entries = [];
+  for (const line of text.split(/\r?\n/)) {
+    const raw = line.trim();
+    if (!raw) continue;
+    if (/^#/.test(raw)) continue; // comment-only line
+    // Strip a trailing `# comment` ONLY when the `#` is outside a backtick span — a `#` inside a
+    // backtick command (e.g. `echo a # b`, `grep '#pragma'`) is part of the command, not a comment.
+    const noComment = stripCommentOutsideBackticks(raw);
+    const m = noComment.match(/^(measure|band|invariant|invoke|control|resume)\s+(.+)$/);
+    if (!m) {
+      entries.push({ key: null, name: null, value: null, na: false, naReason: null, raw });
+      continue;
+    }
+    const key = m[1];
+    const rest = m[2].trim();
+    // `n/a: <reason>` (or `n/a：<reason>`) is the legal empty-form. A colon-less bare `n/a` is treated
+    // the same. The reason may be EMPTY — an `n/a` with no reason is indistinguishable from
+    // "never thought about it", so na:true + empty naReason lets checkContractSyntax report it.
+    const naMatch = rest.match(/^n\/a\s*[:：]?\s*(.*)$/i);
+    if (naMatch) {
+      entries.push({ key, name: null, value: null, na: true, naReason: naMatch[1].trim(), raw });
+      continue;
+    }
+    if (key === "measure" || key === "band" || key === "invariant") {
+      const eq = rest.indexOf("=");
+      if (eq >= 0) {
+        entries.push({ key, name: rest.slice(0, eq).trim(), value: rest.slice(eq + 1).trim(), na: false, naReason: null, raw });
+      } else {
+        entries.push({ key, name: null, value: rest, na: false, naReason: null, raw });
+      }
+    } else {
+      entries.push({ key, name: null, value: rest, na: false, naReason: null, raw });
+    }
+  }
+  return { present: true, entries };
+}
+
+// Syntax check for the `## Contract` section (A9). REPORT-ONLY: `ok` is always true; every problem is
+// a finding. A missing section is an INFO finding (the pre-ratchet baseline — most of the store has
+// none yet). Present-but-malformed is reported, never a FAIL.
+export function checkContractSyntax(task) {
+  const { present, entries } = parseContract(task.body);
+  const findings = [];
+  if (!present) {
+    return {
+      ok: true,
+      code: "contract-absent-info",
+      message: "INFO: no '## Contract' section — add one for a machine-readable goal↔code contract (measure/band/invariant/invoke/control/resume; `n/a: <reason>` legal, blank not)",
+      findings: [],
+    };
+  }
+  for (const e of entries) {
+    if (e.key === null) {
+      findings.push({ code: "contract-line-unknown", what: `line does not start with a known key (${CONTRACT_KEYS.join("|")}): "${e.raw}"` });
+      continue;
+    }
+    if (e.na) {
+      if (!e.naReason) {
+        findings.push({ code: "contract-empty-value", what: `"${e.key}" present but empty — write a value or "n/a: <reason>" (blank is indistinguishable from never thought about it)` });
+      }
+      continue;
+    }
+    if (e.value === null || e.value === "") {
+      findings.push({ code: "contract-empty-value", what: `"${e.key}" present but empty — write a value or "n/a: <reason>"` });
+      continue;
+    }
+    if ((e.key === "measure" || e.key === "band") && !e.name) {
+      findings.push({ code: "contract-measure-no-name", what: `"${e.key}" must declare a NAME (referenced by AC items): "${e.raw}"` });
+    }
+    if (e.key === "invoke" && !/`/.test(e.value)) {
+      findings.push({ code: "contract-invoke-not-command", what: `"invoke" must be a backtick command: "${e.raw}"` });
+    }
+  }
+  return { ok: true, code: "contract-syntax", message: `'## Contract' present (${entries.length} entry/entries)`, findings };
+}
+
+// Format check for the `## Dispatch review` section (A10). REPORT-ONLY. `reviewer: none` is legal —
+// not every task needs a gate, but "no gate" must be a recorded choice. Missing section → finding.
+// Format:
+//   ## Dispatch review
+//   reviewer: outer | none
+//   at: <ISO>
+//   changed: <逐条改动，无则「无」>
+export function checkDispatchReview(task) {
+  const sec = extractSectionFenceAware(task.body, "Dispatch review");
+  const findings = [];
+  if (sec === null) {
+    return {
+      ok: true,
+      code: "dispatch-review-absent-info",
+      message: "INFO: no '## Dispatch review' section — record who reviewed the dispatch and what changed (reviewer: outer|none; at: <ISO>; changed: <list> or 无)",
+      findings: [{ code: "dispatch-review-missing", what: "no '## Dispatch review' section" }],
+    };
+  }
+  const lines = sec.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^#/.test(l));
+  const valOf = (line, re) => (line && line.match(re) ? line.replace(re, "").trim() : "");
+  const reviewer = valOf(lines.find((l) => /^reviewer\s*[:：]/.test(l)), /^reviewer\s*[:：]\s*/);
+  const at = valOf(lines.find((l) => /^at\s*[:：]/.test(l)), /^at\s*[:：]\s*/);
+  const changed = valOf(lines.find((l) => /^changed\s*[:：]/.test(l)), /^changed\s*[:：]\s*/);
+  if (!reviewer) {
+    findings.push({ code: "dispatch-review-malformed", what: "'## Dispatch review' is missing a non-empty `reviewer:` line (reviewer: outer | none)" });
+  } else if (!/^(outer|none|human|inner)$/.test(reviewer)) {
+    // AC3 defines the reviewer as outer|none; other actor values are not part of the gate format.
+    findings.push({ code: "dispatch-review-malformed", what: `'## Dispatch review' reviewer must be one of outer|none|human|inner, got "${reviewer}"` });
+  }
+  if (!at) {
+    findings.push({ code: "dispatch-review-malformed", what: "'## Dispatch review' is missing a non-empty `at:` line (ISO timestamp)" });
+  } else if (!/^\d{4}-\d{2}-\d{2}/.test(at)) {
+    findings.push({ code: "dispatch-review-malformed", what: `'## Dispatch review' at: must be an ISO-like date (YYYY-MM-DD…), got "${at}"` });
+  }
+  if (!changed) {
+    findings.push({ code: "dispatch-review-malformed", what: "'## Dispatch review' is missing a non-empty `changed:` line (逐条改动；无则写「无」)" });
+  }
+  return { ok: true, code: "dispatch-review-present", message: "'## Dispatch review' present", findings };
+}
+
 // ── checkTask — the SINGLE entry point both callers use. ──────────────────────────────────────────
 export function checkTask(fullText) {
   const task = parseTask(fullText);
   const marker = hasSchemaMarker(task);
   const kind = classifyKind(task);
   if (!marker) {
-    return { marker: false, kind, applicable: false, results: [], verdict: "N/A-legacy", failures: [], warnings: [] };
+    return { marker: false, kind, applicable: false, results: [], verdict: "N/A-legacy", failures: [], warnings: [], findings: [] };
   }
   // DIR-122: kind=gap runs the lightweight tier (checkGapFinding/checkGapRequestedAction/
   // checkGapWiringCoverage in place of checkProposal/checkDirectiveSections) — a proportionately
   // smaller assertion set than directive/milestone-candidate/other, not the SAME set relaxed.
+  // A9/A10 (Contract syntax + Dispatch review format) are REPORT-ONLY — they join the results but are
+  // ok:true by construction and only contribute `findings`, never a FAIL (the dispatch gate must not
+  // block; the violation list can only shrink).
+  const contract = checkContractSyntax(task);
+  const dispatchReview = checkDispatchReview(task);
   const results = kind === "gap"
     ? [
         checkGapFinding(task),
@@ -440,6 +632,8 @@ export function checkTask(fullText) {
         checkGapRequestedAction(task),
         checkGapWiringCoverage(task),
         checkTouches(task, kind),
+        contract,
+        dispatchReview,
       ]
     : [
         checkProposal(task),
@@ -450,9 +644,12 @@ export function checkTask(fullText) {
         checkNoScaffolding(task),
         checkDirectiveSections(task, kind),
         checkTouches(task, kind),
+        contract,
+        dispatchReview,
       ];
   const failures = results.filter((r) => !r.ok);
   const warnings = results.filter((r) => r.code === "touches-absent-info" || r.code === "touches-absent-milestone-candidate");
+  const findings = [...contract.findings, ...dispatchReview.findings];
   return {
     marker: true,
     kind,
@@ -460,6 +657,7 @@ export function checkTask(fullText) {
     results,
     failures,
     warnings,
+    findings,
     verdict: failures.length === 0 ? "PASS" : "FAIL",
   };
 }

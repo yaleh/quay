@@ -82,6 +82,30 @@ plugin/vendor/quay/dist/quay.js   1,315,188 字节   19:04:25
 警报无人处理」的先例（RED 测试被改 skip、golden replay 被当预存失败、clause-14 降为 advisory、
 既有失败记在已 done 的任务体里）。**这次它报的是真事**：vendored 镜像确实陈旧。
 
+## Contract
+
+```
+# 回填（gap-dispatch-gate-has-no-checklist-and-no-trace AC4）：外层两次介入——「M243 语料修复」的
+# 否掉 sync-first（control），「M136 第三轮」的消除干扰源（invariant）+ 负控制（control）。
+measure  drift        = `bash plugin/scripts/sync-vendor.sh --check` 的 DRIFT 行数   # 确定性 1 行，非 flaky；DRIFT 消息指向真实文件
+band     clean_ok     = 0 DRIFT 行数                                                # 连跑 3 次一致才算确定性消除
+invariant shared_dist = 无测试中途改写共享 packages/quay/dist/quay.js               # 第三轮：消除干扰源，非让 --check 追同步
+invoke   `sync-vendor.sh --check`                                                  # 改后干净树应 CLEAN
+control  `--check` 前先 `--sync-dist` ⇒ 永不失败 = 掩盖；--check 必须只读              # 否掉 sync-first（外层裁定 23:0x）
+control  改脏 vendor 副本 ⇒ 全量套件必须红                                          # 负控制：修法不是掩盖
+resume   n/a: 单次检查无中途产物
+```
+
+## Dispatch review
+
+> 回填：外层两次介入的留痕。
+
+reviewer: outer
+at: 2026-08-02T23:05:00Z
+changed: 1. 否掉「--check 前先 --sync-dist」——检查前先修好被检对象的检查永不失败＝掩盖（`control`）
+         2. 第三轮定向：5 个写 dist/vendor 的文件里哪些必须写共享路径——一个都不必须；修法是消除干扰源（`invariant shared_dist`）
+         3. 负控制：改脏 vendor → 全量套件必须红（`control`）
+
 ## Acceptance Criteria
 
 - [x] AC1: `sync-vendor.sh:82` 的标签与实参一致；对照第 103/123/129 行的写法
