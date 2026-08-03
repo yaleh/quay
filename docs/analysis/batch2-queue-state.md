@@ -1731,3 +1731,12 @@ Land `--snapshot` 已写。
 
 **在飞**：0。**下一批候选**：AC20（token-waiter 落地后下一个，与 token-status 在 heavy-op-token.sh
 重叠需串行）、gap-worktree-node-modules（我建）、gap-the-dod-gate-encodes-a-retired-task-shape（外层建）。
+
+### 派发（2026-08-03 23:5xZ）：AC20 单飞挂载
+
+**AC20**（`gap-liveness-mounting-is-a-single-flight-role-with-no-owner`，runId `...h2nhm9`，
+`/tmp/quay-wt-ac20`）——外层指定 token-waiter 落地后下一个（已落地）。单飞挂载：
+mount_count=1、二次挂载空操作非失败、kill -9 后必须接管。契约逐字照搬管理者 AC20a-d。
+**与 token-status 冲突**（都动 heavy-op-token.sh），token-status 待 AC20 落地后派。
+**在飞（1/3）**：AC20。**下一批候选**：token-status（等 AC20）、worktree-node-modules（待 review）、
+dod-gate（外层建）。
