@@ -1481,3 +1481,18 @@ AC1b = qinit 引入的 verify-installed-executables.sh 旧 tick 文档路径，�
 （此前进程/日志轮询 3 次中 2 stale 超时 1 未唤醒）。闸 WAIT 下误启动一次（套件自我中止），教训：查闸退出码。
 
 **在飞 0**。等待外层下一批。
+
+### 派发批次（2026-08-03 15:4xZ）：session-liveness + empty-set
+
+外层派发 2 个（闸口 0 新增、DISJOINT 实测通过）：
+1. **session-liveness**（`/tmp/quay-wt-liveness`，agent a525349...，fm-...-tg6r7g）：15 AC，**两阶段**——
+   阶段一信号源（AC7/8/16 + STALL 改名 REPO-STALL）、阶段二语义标志+交叉正控制+payload+阈值。
+   **阶段一结束必须报告**（外层决定继续或拆）。STALL 改名不改源；绕开 pid→transcript 映射（会话 id
+   做每目标配置）；阈值按类反向调。
+   **补充判定**（RESUMED+OVERDUE 同报样本）：根因是解除停机没重置心跳基线——修法 `now - max(心跳 mtime,
+   解除停机时刻)`（监视器 60s 轮询自观察 .halt 转变，无需额外状态源）。加「RESUMED 与 OVERDUE 不得同轮
+   同目标同发」断言 + 拆 LOOP_MIN 两个含义。
+2. **empty-set**（`/tmp/quay-wt-emptyset`，agent a665ce9...，fm-...-im2uh5）：8 AC，「空集=通过」必须
+   fail-closed（语料非空下限/显式报没匹配），通用形态不只 loop-shipping（已有守卫）。
+
+**在飞 2/3**。等待 agent 完成（session-liveness 阶段一先报）。
