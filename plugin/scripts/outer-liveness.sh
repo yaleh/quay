@@ -12,7 +12,7 @@
 set -uo pipefail
 INTERVAL=${INTERVAL:-60}
 STALL_MIN=${STALL_MIN:-45}          # 未暂停的项目超过这么久没有新提交 = 停滞
-declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE
+declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE
 
 # 各项目外层 tick 日志的路径与其 loop 周期（分钟）。
 # 心跳信号是【tick 有没有按期跑】，不是【有没有新提交】——
@@ -29,7 +29,11 @@ tick_log_for() {
 LOOP_MIN=${LOOP_MIN:-20}                 # 外层 loop 周期
 OVERDUE_MIN=${OVERDUE_MIN:-45}           # 超过它就认为 loop 没在跑（>2× 周期，容忍跑重活的长 tick）
 
+# 可被 OUTER_TARGETS 覆盖（每行 "<名字> <仓根> <tmux目标>"）——存在的理由是【可测】：
+# 不能靠「干跑没有输出」证明监视器会报，那与「它永远不报」同形。
+# 用一个由测试控制忙闲的探针 pane 做正控制，才是证据。
 targets() {
+  if [ -n "${OUTER_TARGETS:-}" ]; then printf '%s\n' "$OUTER_TARGETS"; return; fi
   echo "quay      /home/yale/work/quay      quay-0:outer"
   echo "archguard /home/yale/work/archguard archguard-2:outer"
   echo "meta-cc   /home/yale/work/meta-cc   meta-cc-4:outer"
@@ -77,6 +81,35 @@ while true; do
       fi
     else
       PREV_STALL[$name]=0
+    fi
+
+    # 事件 5：转入空闲 / 恢复忙碌 —— 这是【及时】信号，事件 4 是 45 分钟后的兜底。
+    #
+    # 人 2026-08-03 指出：「我可以接受让 outer 等待，但应当是你及时知道发生了什么并决定让它等待。」
+    # 原来的事件集只有滞后指标：外层跑完一次操作转入空闲时，进程活着、刚提交过，全部静默。
+    #
+    # 判据是相邻两轮（相隔一个 INTERVAL）的 pane 哈希是否相同。这不是忙等——一轮只抓一次。
+    # 双向验过：忙的 pane 因为 TUI 有秒级递增计时器，哈希必变；空闲的必不变。
+    # 不用 /proc CPU 增量：空闲的 Claude Code TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
+    if [ "$alive" = "1" ]; then
+      h=$(tmux capture-pane -p -t "$target" 2>/dev/null | md5sum | cut -c1-16)
+      if [ -n "${PREV_HASH[$name]:-}" ]; then
+        idle=$([ "$h" = "${PREV_HASH[$name]}" ] && echo 1 || echo 0)
+        if [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
+          if [ "$idle" = "1" ]; then
+            tl=$(tick_log_for "$name"); tmin="?"
+            [ -f "${tl:-/nonexistent}" ] && tmin=$(( ( $(date +%s) - $(stat -c %Y "$tl") ) / 60 ))
+            halted=$([ -f "$root/.halt" ] && echo "（该项目已暂停，空闲是预期状态）" || echo "")
+            echo "OUTER-IDLE $name 的外层转入空闲等输入；tick 日志 ${tmin} 分钟前写过${halted}"
+          else
+            echo "OUTER-RESUMED $name 的外层恢复活动（此前空闲）"
+          fi
+        fi
+        PREV_IDLE[$name]=$idle
+      fi
+      PREV_HASH[$name]=$h
+    else
+      PREV_HASH[$name]=""; PREV_IDLE[$name]="unset"
     fi
 
     # 事件 4：loop 逾期——外层活着、项目未暂停，但 tick 日志超过 OVERDUE_MIN 未被写过。
