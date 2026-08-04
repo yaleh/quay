@@ -24,7 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseTouchEntries } from "../scripts/touches-parser.ts";
+import { parseTouchEntries, parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
 import { parseTouches, checkTouchesPair } from "../scripts/touches-orthogonality-check.ts";
 import { parseBulletList } from "../scripts/select-tests-for-touches.ts";
 import { extractTouchesGlobs } from "../scripts/prepare-admission-check.ts";
@@ -165,6 +165,50 @@ test("AC4: an un-stripped (new) annotation no longer triggers 'matched nothing (
   const r2 = checkTouchesPair(C, B, fakeExpand({ "brand-new.ts": [], "y/b.js": ["y/b.js"] }));
   assert.equal(r2.disjoint, false);
   assert.match(r2.reason, /matched nothing/);
+});
+
+// ── parseTouchEntriesWithTags (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files) ──
+// The resolve check needs to KNOW a touch is `(new)` (file will be created — need not exist yet) vs
+// `(delete)` (file must exist to be deleted) vs plain. parseTouchEntriesWithTags captures the tag
+// while extracting the SAME paths as the single-source parseTouchEntries. Two invariants:
+//   (a) paths are byte-identical to parseTouchEntries on the parity fixture set;
+//   (b) the tag is `new`/`delete`/null exactly for `(new)`/`(delete)`/everything-else annotations.
+test("parseTouchEntriesWithTags: paths byte-identical to parseTouchEntries on the parity fixture set", () => {
+  for (let i = 0; i < SECTION_FIXTURES.length; i++) {
+    const section = SECTION_FIXTURES[i];
+    const tagged = parseTouchEntriesWithTags(section);
+    assert.deepEqual(
+      tagged.map((e) => e.path),
+      EXPECTED[i],
+      `tagged paths diverge from parseTouchEntries for ${JSON.stringify(section)}`,
+    );
+  }
+});
+
+test("parseTouchEntriesWithTags: (new)/(delete) tags captured, everything else null", () => {
+  const section = [
+    "- `a.ts` (new)",
+    "- `code/bar.ts (new)`",                          // annotation INSIDE the backticks
+    "- b.ts (delete)",
+    "- c.ts (deleted)",                               // tolerated alias
+    "- d.ts (refactor Verify phase)",                 // non-structural annotation → null
+    "- plain.ts",
+  ].join("\n");
+  const tagged = parseTouchEntriesWithTags(section);
+  assert.deepEqual(tagged, [
+    { path: "a.ts", tag: "new" },
+    { path: "code/bar.ts", tag: "new" },
+    { path: "b.ts", tag: "delete" },
+    { path: "c.ts", tag: "delete" },
+    { path: "d.ts", tag: null },
+    { path: "plain.ts", tag: null },
+  ]);
+});
+
+test("parseTouchEntriesWithTags: empty/missing section → []", () => {
+  assert.deepEqual(parseTouchEntriesWithTags(""), []);
+  assert.deepEqual(parseTouchEntriesWithTags(null), []);
+  assert.deepEqual(parseTouchEntriesWithTags("## Next\nnot a bullet list"), []);
 });
 
 // ── AC1 backstop: only ONE implementation exists (definition-site grep) ───────────────────────────

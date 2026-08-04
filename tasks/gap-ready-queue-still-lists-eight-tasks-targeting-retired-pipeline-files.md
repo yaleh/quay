@@ -1,7 +1,7 @@
 ---
 id: gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files
 title: "8 of 9 status:ready tasks Touch files physically deleted by ADR-022's pipeline retirement — dispatching any of them wastes an agent recreating retired infrastructure"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -77,21 +77,115 @@ would erase whatever thinking already went into them.
 
 ## Acceptance Criteria
 
-- [ ] AC1: each of the 8 tasks is re-triaged: either `status: needs-human` with an explicit
+- [x] AC1: each of the 8 tasks is re-triaged: either `status: needs-human` with an explicit
       "ADR-022 made this target obsolete" note, or `## Touches`/`## Proposal` rewritten against
       real, currently-existing files (real-run `ls`/`grep` evidence pasted per task)
-- [ ] AC2: a mechanical check (new or extended) that a `status:ready` task's `## Touches` file
+- [x] AC2: a mechanical check (new or extended) that a `status:ready` task's `## Touches` file
       list resolves against the real tree is wired into the dispatch-eligibility path used by
       `plugin/loop/fast-mode-loop-tick.md` step 4, so this class can't recur silently
-- [ ] AC3: negative control — a genuinely ready task with real, existing Touches (e.g. DIR-103-C)
+- [x] AC3: negative control — a genuinely ready task with real, existing Touches (e.g. DIR-103-C)
       is NOT flagged by the new check
 
 ## Definition of Done
 
-- [ ] `mcp__quay__task_list({status:'ready'})` no longer contains any task whose `## Touches`
+- [x] `mcp__quay__task_list({status:'ready'})` no longer contains any task whose `## Touches`
       majority-resolve to nonexistent files, OR each surviving one carries a documented reason
       the check doesn't apply
-- [ ] AC1-AC3 real-run evidence pasted into this task body
+- [x] AC1-AC3 real-run evidence pasted into this task body
+
+## Execution record (2026-08-04, worktree `task/gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files`)
+
+### AC1 — re-triage of the 8 tasks
+
+Each task body now carries a `## ADR-022 RE-TRIAGE` note with its own `--resolve` evidence. Summary:
+
+| Task | New status | Disposition |
+|---|---|---|
+| DIR-119-D2 | needs-human | 6/7 Touches missing; composite-Build mechanism landed, remaining ACs demand real-dispatch evidence against the deleted `execute-milestone.js` composite pipeline |
+| DIR-119-D3 | needs-human | 6/7 missing; composite-Audit landed, remaining ACs target deleted pipeline |
+| DIR-119-D4 | needs-human | 6/7 missing; Reconcile landed, remaining ACs target deleted pipeline |
+| gap-plancheck-blocking-only-convergence | needs-human | `planCheckNextAction` landed + tested (proposal-convergence.ts, retained); only remaining AC wires into deleted `prepare-milestone.js` PlanCheck loop |
+| gap-plancheck-no-diminishing-returns-exit | needs-human | `priorBlocking` exit landed + tested; only remaining AC wires into deleted `prepare-milestone.js` |
+| gap-prepare-milestone-no-worktree-isolation | needs-human | 2/3 missing; CLAUDE.md explicitly documents this mechanism as RETIRED under ADR-022 |
+| gap-recursive-guard-only-covers-multi-mechanism | needs-human | hoisted `wbsLevel>=2` guard landed + tested in retained `checkSplitRecommendation`; only remaining AC wires into deleted `prepare-milestone.js` `_splitCheck()` |
+| gap-split-decision-finality-not-enforced | ready (kept) | NOT an ADR-022 casualty — split-decision flow lives in retained `proposal-convergence.ts`; `splitScopeHash` landed; dead `plugin/test/proposal-convergence.test.mjs` touch removed |
+
+No task body was deleted. Real-run evidence per task is pasted in each task's own `## ADR-022 RE-TRIAGE` section.
+
+### AC2 — mechanical dispatch-eligibility resolve check
+
+Extended `plugin/scripts/touches-orthogonality-check.ts` (the same single-source module that owns
+`checkTouchesPair`) with:
+
+- `parseTouchEntriesWithTags(section)` in `plugin/scripts/touches-parser.ts` — the tag-aware read
+  (path byte-identical to `parseTouchEntries`; `(new)`/`(delete)` captured).
+- `touchExists(p, root)` — exact path via `fs.existsSync`, glob / trailing-slash dir via
+  `expandGlobs`.
+- `checkTouchesResolve(entries, root)` / `checkTaskTouchesResolve(taskBody, root)` — per-entry
+  resolution + `majorityMissing` verdict (`(new)` entries exempt; flagged iff > half of non-`(new)`
+  entries are missing).
+- CLI `--resolve <task.md>` mode (exit 1 = MAJORITY-MISSING → not dispatchable).
+- Wired into `plugin/loop/fast-mode-loop-tick.md` step 4 as the new eligibility gate **1. 触摸可解析性**
+  (before dependency-readiness and `checkTouchesPair` concurrency), so a ready task whose Touches
+  majority-resolve to nonexistent files is flagged and not silently dispatched.
+- Tests: `experiments/quay-perpetual-stream/test/touches-orthogonality-check.test.mjs` (11 new tests:
+  `touchExists`, `checkTouchesResolve`, `checkTaskTouchesResolve`, `main --resolve`) +
+  `plugin/test/touches-parser-parity.test.mjs` (3 new tests: tag capture, byte-identity, empty).
+  Scoped run: 42/42 (orthogonality + parity), plus concurrent-batch-scheduler / workflow-baseline /
+  symlink-mirror / select-preflight / config-wiring / quay-init-loop all green.
+
+### AC3 — negative control
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/DIR-103-C.md --root "$(pwd)"
+  ok: packages/quay/src/gate/acceptance-runner.ts
+  ok: packages/quay/src/gate/registry.ts
+  ok: packages/quay/src/gate/config/utils.ts
+  ok: packages/quay/src/gate/config/types.ts
+  ok: packages/quay/bin/quay.ts
+  ok: packages/quay/src/mcp-handlers.ts
+  ok: packages/quay/src/mcp-server.ts
+  ok: packages/quay/test/acceptance.test.mjs
+  ok: README.md
+  ok: packages/quay-native/examples/sample-workspace/.quay/config.yml
+  ok: docs/plans/M225-dir-103-c.md
+RESOLVE tasks/DIR-103-C.md: 0/11 non-(new) touches missing — resolves (dispatchable)
+exit=0
+```
+DIR-103-C is NOT flagged (0/11 missing), even though in the worktree snapshot it is `status: ready`
+(main checkout moved it to `done` at commit `5cba0cae` — status is irrelevant to the check, which
+is existence-based).
+
+### DoD — ready queue after re-triage
+
+Run with the native provider in the worktree (the MCP provider resolves against the main checkout,
+not the worktree, so the native CLI is the reliable surface here):
+
+```
+$ node --no-warnings --experimental-strip-types packages/quay-native/bin/quay-native.ts task list --status ready --json
+ready count: 4
+ids: DIR-103-C, QENG-5-DEMO-FAIL, QENG-5-DEMO-PASS, gap-split-decision-finality-not-enforced
+```
+
+Every ready task's Touches resolve: DIR-103-C 0/11 missing; QENG-5-DEMO-* have no `## Touches`
+section (nothing to verify); gap-split-decision-finality-not-enforced 0/3 missing (dead
+`plugin/test/proposal-convergence.test.mjs` entry removed). No ready task's Touches
+majority-resolve to nonexistent files.
+
+### REFUTE record (internal adversarial review, 2 rounds, both resolved)
+
+- **Round 1 (found + fixed):** `checkTouchesResolve` originally required `(delete)`-tagged entries to
+  exist, but the task's AC2 wording ("verify every entry ... that is NOT tagged `(new)`/`(delete)`")
+  exempts BOTH tags — a delete of an already-gone file is a no-op and cannot make a task
+  undispatchable. Fixed: `(delete)` now skips existence like `(new)`; CLI prints `skip (delete)`;
+  two new tests cover the exemption. Also found the majority-missing CLI branch lacked a trailing
+  newline (the `exit=$?` ran onto the RESOLVE line) — fixed; and two stale comments (parser said
+  `(delete)` "MUST exist", tick doc mentioned only `(new)`) — corrected.
+- **Round 2 (no real findings):** confirmed the fast-mode dispatch path uses the tick doc's
+  `checkTouchesPair` inline eligibility (NOT the retired `concurrent-batch-scheduler.ts`
+  `assembleBatch`, whose only live caller is a golden-replay script), so the tick-doc wiring is the
+  correct hook; updated this task's `## Touches` to include all 4 additionally-modified files;
+  `task-status-drift-check.ts` and `test-framework-policy-check.ts` both pass.
 
 ## Touches
 
@@ -104,6 +198,10 @@ would erase whatever thinking already went into them.
 - tasks/gap-recursive-guard-only-covers-multi-mechanism.md
 - tasks/gap-split-decision-finality-not-enforced.md
 - plugin/scripts/touches-orthogonality-check.ts
+- plugin/scripts/touches-parser.ts
+- plugin/test/touches-parser-parity.test.mjs
+- experiments/quay-perpetual-stream/test/touches-orthogonality-check.test.mjs
+- plugin/loop/fast-mode-loop-tick.md
 
 ## Dispatch review
 

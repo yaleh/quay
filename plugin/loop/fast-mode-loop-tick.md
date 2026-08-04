@@ -282,9 +282,23 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
 
 派发前对每个候选：
 
-1. **依赖就绪**：父任务 done、无未满足前置。用 `it0-split-or-commit-check.ts` 的
+1. **触摸可解析性**（gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files，
+   AC2）：`checkTouchesResolve`（`plugin/scripts/touches-orthogonality-check.ts` 的 `--resolve`
+   模式）对每个 `status: ready` 候选检查其 `## Touches` 是否能在真实树中解析。ADR-022 删除了
+   经典管线文件后，8/9 个 ready 任务的 Touches 整体指向不存在的文件，而 `checkTouchesPair`
+   只查两两重叠、**不查文件存在性**——这就是这批任务漏过资格闸的原因。`(new)`/`(delete)`
+   标记豁免（前者是任务将创建的文件、后者是任务将删除的文件，都不必已存在）。
+   **多数未标记条目缺失 ⇒ 该候选不具备派发资格**：标 needs-human、记录理由，不派发
+   （exit 1 即不派发）：
+
+```bash
+node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/<id>.md --root "$(pwd)"
+# 输出每条目 ok/MISSING；末行 RESOLVE ... MAJORITY-MISSING (NOT dispatchable) + exit 1 ⇒ 不派发
+```
+
+2. **依赖就绪**：父任务 done、无未满足前置。用 `it0-split-or-commit-check.ts` 的
    PARENT-DONE-IFF-CHILDREN 语义，不自己重新发明
-2. **并发资格**：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞
+3. **并发资格**：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞
    任务和彼此**两两检查
 
 ```bash

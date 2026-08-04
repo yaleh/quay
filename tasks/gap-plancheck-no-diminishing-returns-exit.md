@@ -2,7 +2,7 @@
 id: gap-plancheck-no-diminishing-returns-exit
 title: "No diminishing-returns exit: a round that fails to reduce blocking
   findings still burns the remaining round budget"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -14,6 +14,31 @@ extra:
 ---
 
 **type:** execution
+
+**ADR-022 RE-TRIAGE (2026-08-04, gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files):**
+status `ready` → `needs-human`. The CORE mechanism of this task LANDED and is unit-tested: the
+`priorBlocking` diminishing-returns exit was implemented 2026-08-02 inside `planCheckNextAction`
+in the retained `proposal-convergence.ts` (both mirrors) and is exercised by
+`proposal-convergence.test.mjs` (`planCheckNextAction: diminishing-returns exit`, AC2-AC6 pass).
+What remains — AC7 "`prepare-milestone.js` tracks the prior round's blocking count and passes it" —
+targets the classic `prepare-milestone.js` PlanCheck loop that ADR-022 retired and physically
+deleted at `gap-retire-the-prepare-execute-pipeline-cluster` (2026-08-03); the two-layer fast mode
+replaced PlanCheck with `task-contract-check.ts` + subagent REFUTE rounds, so there is no PlanCheck
+loop left to track a prior blocking count in. Real-run resolve evidence (worktree branch,
+2026-08-04):
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/gap-plancheck-no-diminishing-returns-exit.md --root "$(pwd)"
+  ok: experiments/quay-perpetual-stream/scripts/proposal-convergence.ts
+  ok: plugin/scripts/proposal-convergence.ts
+  ok: experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
+  MISSING: plugin/test/proposal-convergence.test.mjs
+  MISSING: .claude/workflows/prepare-milestone.js
+  MISSING: plugin/workflows/prepare-milestone.js
+RESOLVE tasks/gap-plancheck-no-diminishing-returns-exit.md: 3/6 non-(new) touches missing — resolves (dispatchable)
+```
+(The resolve check does not flag this body — proposal-convergence.ts is majority-present — but the
+two missing `prepare-milestone.js` entries are the ONLY remaining AC's wiring target, which is
+deleted. Disposition is by Proposal/AC re-scope, not by the majority-missing threshold.)
 
 ## Proposal
 
