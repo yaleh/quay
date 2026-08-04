@@ -1,9 +1,9 @@
 ---
 id: gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable
 title: every screen observer in this repo hashes the pane instead of classifying
-  its shape, so "the session is waiting for its user" — the one state that matters
-  — is indistinguishable from "the screen happened not to redraw"
-status: ready
+  its shape, so "the session is waiting for its user" — the one state that
+  matters — is indistinguishable from "the screen happened not to redraw"
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -141,9 +141,9 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
 
 ## Definition of Done
 
-- [ ] AC1–AC10 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
+- [x] AC1–AC10 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
       **（AC3/AC4 已由外层裁定修订 band(4..30) + 接受 unavailable 处置后勾上，见上）**
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（fan-in 后勾）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——fan-in 后实测：tests 2276 / fail 0 / cancelled 0 / skipped 25
 - [x] **本任务不修改 `session-liveness.sh`**——接线由姊妹任务承载；改了即视为越界
 
 ### R3 约束下的夹具清单（全部真实录制，2026-08-04）
