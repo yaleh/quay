@@ -233,7 +233,10 @@ test("AC5 — a monitor orphaned to a PREVIOUS session with NO fresh events ⇒ 
     }
     // The shared events file is ABSENT (no mount is delivering) ⇒ delivered=false, regardless of the
     // alive-but-orphaned process being a real inner-state monitor.
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
+    // Hermetic: point MONITOR_CHECK_EVENTS_FILE at a temp path that does not exist, so the checker
+    // must NOT see the REAL shared events file (the outer's live monitors write HEARTBEAT there —
+    // fresh mtime ⇒ delivered=true would be correct for them, and wrong for this no-events scenario).
+    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath, MONITOR_CHECK_EVENTS_FILE: path.join(tmp, "absent-events.jsonl") });
     assert.equal(data.mounted, true, "the orphaned monitor IS alive — the miss would be silent");
     assert.equal(data.delivered, false,
       "with no fresh shared events, delivery must FAIL (AC9: 无人挂载 ⇒ 必须判 FAIL)");
