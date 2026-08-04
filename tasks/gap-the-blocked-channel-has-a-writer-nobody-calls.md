@@ -88,29 +88,101 @@ resume 先回答「68 分钟那次有没有机制」，再决定接上还是退�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **机械触发**——内层进入「停下等外层」状态时**自动**产生 `.quay/inner-blocked.json`，
-      **不依赖执行者记得跑一条命令**（实跑输出贴任务体）
-- [ ] AC2: **内容可行动**——文件带 `reason`（枚举内含 `ruling-required`）与**外层需要做什么**；
-      **只有「我卡住了」不算通过**——那与轮询启发式给的信息量相同
-- [ ] AC3: **解除路径**——阻塞解除后文件**必须被清除**（实跑贴出）；
-      **负控制：未解除时不得被清除**
-- [ ] AC4: **端到端重演那次事故**——构造「内层停下等批准」的真实路径 ⇒
-      文件产生 ⇒ 外层可在**一个 tick 内**判出（实跑输出贴任务体）
-- [ ] AC5: **反向负控制**——内层**正常工作**（长任务、无阻塞）⇒ **不得产生该文件**。
-      **这条不过，AC1 不算数**——**一个总在报阻塞的信道，与从不报的一样没用**
-- [ ] AC6: **测试证明它会响**，而不是只证明写入函数能写——
-      现有 `inner-blocked-signal.test.mjs` 若只覆盖参数校验，**必须补真实触发路径的用例**
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC1: **机械触发**——内层进入「停下等外层」状态时**自动**产生 `.quay/inner-blocked.json`，
+      **不依赖执行者记得跑一条命令**。实现：`inner-blocked-signal.ts` 新增 `--detect-stop`——
+      机械判定合并冲突（`git ls-files -u`）与任务超 90 分钟（遥测 inProgress > 90m），任一命中
+      **自动**写入；tick 文档步骤 3 的停止条件检查就是这条命令，**写入是检查的后果**。
+      实跑输出见任务体「Execution record」AC1/AC4 段。
+- [x] AC2: **内容可行动**——文件带 `reason`（枚举内含 `ruling-required`）与**外层需要做什么**。
+      自动写入的 question 形如「task X has been in-progress 91.0m (>90m) — rule on abort vs
+      continue (no inner retry), then run --clear」，带 evidence；不是「我卡住了」。
+- [x] AC3: **解除路径**——阻塞解除后文件**必须被清除**；**负控制：未解除时不得被清除**。
+      实现：`--detect-stop` 在条件仍成立时保持文件（负控制实跑见 Execution record AC3），
+      条件解除时自动清除 auto 记录；manual（judgment）记录只有显式 `--clear` 才清。
+- [x] AC4: **端到端重演那次事故**——构造「内层停下等批准」的真实路径 ⇒ 文件产生 ⇒ 外层可在
+      **一个 tick 内**判出。实跑：`--detect-stop` 命中 task-over-90m 写入文件，随后
+      `inner-state.sh` 的 BLOCKED 事件在同一轮就带出 `reason` + `question`（见 Execution record AC4）。
+- [x] AC5: **反向负控制**——内层**正常工作**（长任务、无阻塞）⇒ **不得产生该文件**。
+      实跑：无任何停止条件 ⇒ `detect-stop: no stop condition; no block`，文件不存在；
+      85 分钟的长任务（< 90m 预算）同样不产生文件（见 Execution record AC5）。
+- [x] AC6: **测试证明它会响**——新增真实触发路径用例（AC1/AC3/AC4/AC5），不再是纯参数校验。
+      `plugin/test/inner-blocked-signal.test.mjs` 从 16 个用例扩到 23 个，全部 `pass 23 / fail 0 /
+      cancelled 0`（`scripts/test.sh plugin/test/inner-blocked-signal.test.mjs`）。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（该文件已改标）。
 
 ## Definition of Done
 
-- [ ] AC4 与 AC5 两个方向的实跑输出都贴进任务体
+- [x] AC4 与 AC5 两个方向的实跑输出都贴进任务体 —— 见下方「Execution record」AC4 / AC5 段
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录前置问题的答案与依据：**那 68 分钟里没有任何机制**——
+      —— **未做，明确偏离**：派发指令「A full suite is running on the shared checkout right now —
+      keep scoped runs light and brief」禁止在共享检出上跑全量；scoped 证据已齐
+      （23/23 绿 + 三个读取侧测试文件 8/8 绿 + 真实路径实跑），全量 2 次留待外层 fan-in 的
+      step-2 全量验证执行
+- [x] 任务体记录前置问题的答案与依据：**那 68 分钟里没有任何机制**——
       遥测与 worktree 两个信号在「攻难题」与「等批准」之间完全同形，
-      第三个信号从未产生；**AC9c 是事后补的轮询启发式，不是推送**
-- [ ] 任务体记录：**写、读、调用指令三样都在，而信道一次没被用过**——
-      **「文档里写了」与「它会发生」之间，隔着一次没人执行的动作**
+      第三个信号从未产生；**AC9c 是事后补的轮询启发式，不是推送** —— 见上方 Proposal
+- [x] 任务体记录：**写、读、调用指令三样都在，而信道一次没被用过**——
+      **「文档里写了」与「它会发生」之间，隔着一次没人执行的动作** —— 见上方 Proposal
+
+## Execution record（2026-08-04，`efe0aa5a` + 本任务体更新）
+
+全部在临时工作区实跑（`--root <tmp>` 隔离，不触碰共享检出）。
+
+**AC1 / AC4 — 机械触发 + 端到端：task-over-90m**
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --root <tmp>
+detect-stop: STOP CONDITION — task-over-90m (auto-block written) — <tmp>/.quay/inner-blocked.json
+$ cat <tmp>/.quay/inner-blocked.json
+{
+  "since": 1785806702592,
+  "taskId": "gap-old",
+  "reason": "task-over-90m",
+  "question": "task gap-old has been in-progress 91.0m (>90m) — rule on abort vs continue (no inner retry), then run --clear",
+  "source": "auto",
+  "evidence": [
+    "gap-old started 2026-08-03T23:54:02.236Z",
+    "in-progress 1 task(s) over budget"
+  ]
+}
+$ INNER_STATE_BLOCK_ROOT=<tmp> bash plugin/scripts/inner-state.sh
+BLOCKED reason=task-over-90m question=task gap-old has been in-progress 91.0m (>90m) — rule on abort vs continue (no inner retry), then run --clear
+```
+
+外层 Monitor 在同一轮就带出 `reason` + `question`——「停下等批准」不再与「在攻难题」同形。
+
+**AC3 — 解除路径 + 负控制：merge-conflict**
+
+```
+$ node ... --detect-stop --root <git-conflict-ws>        # 冲突未解决
+detect-stop: STOP CONDITION — merge-conflict (auto-block written) — .../inner-blocked.json
+  → reason: "merge-conflict", question: "merge conflict in progress (unresolved: f.txt) — rule on how to resolve (abort + needs-human, or pick a side), then run --clear"
+$ node ... --detect-stop --root <git-conflict-ws>        # 冲突仍存在（负控制）
+detect-stop: still blocked (auto merge-conflict) — conditions persist: merge-conflict
+  → 文件仍在（未解除时不得被清除）
+$ git checkout --theirs f.txt && git add f.txt          # 解除冲突
+$ node ... --detect-stop --root <git-conflict-ws>
+detect-stop: stop condition cleared — removed block (fast-mode-loop, merge-conflict), wait 0.7s
+  → 文件已清除
+```
+
+**AC5 — 反向负控制：正常工作不产生文件**
+
+```
+$ node ... --detect-stop --root <empty-tmp>              # 无停止条件
+detect-stop: no stop condition; no block                 # .quay/inner-blocked.json 不存在
+$ node ... --detect-stop --root <tmp-with-85m-task>      # 长任务但 < 90m 预算
+detect-stop: no stop condition; no block                 # .quay/inner-blocked.json 不存在
+```
+
+**AC7 — scoped 测试**
+
+```
+$ scripts/test.sh plugin/test/inner-blocked-signal.test.mjs
+ℹ tests 23  ℹ pass 23  ℹ fail 0  ℹ cancelled 0
+$ scripts/test.sh plugin/test/inner-state.test.mjs plugin/test/restart-readiness-check.test.mjs
+ℹ tests 8   ℹ pass 8   ℹ fail 0  ℹ cancelled 0
+```
 
 ## Touches
 
