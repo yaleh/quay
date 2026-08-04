@@ -108,3 +108,5 @@ would erase whatever thinking already went into them.
 ## Dispatch review
 
 reviewer: none
+at: 2026-08-04T09:12:00Z
+changed: 无（外层建任务，未经正式闸口审查——这正是 `reviewer: none` 是被记录的选择）
