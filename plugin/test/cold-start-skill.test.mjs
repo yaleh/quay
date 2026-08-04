@@ -64,8 +64,8 @@ test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and i
 test('AC5 — the skill mounts BOTH monitors via the Monitor tool (inner-state + session-liveness)', () => {
   assert.match(skillSrc, /Monitor\(\{command:.*inner-state\.sh/s,
     'the skill must instruct a Monitor for inner-state.sh');
-  assert.match(skillSrc, /Monitor\(\{command:.*session-liveness\.sh/s,
-    'the skill must instruct a Monitor for session-liveness.sh');
+  assert.match(skillSrc, /Monitor\(\{command:.*session-liveness-mount\.sh/s,
+    'the skill must instruct a Monitor for the single-flight mount entry session-liveness-mount.sh (AC20)');
   assert.match(skillSrc, /persistent:\s*true/s,
     'both monitors must be persistent (outlive the current turn)');
   // The judgment is "events delivered to THIS session", not "process running".

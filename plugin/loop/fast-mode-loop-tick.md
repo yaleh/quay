@@ -162,7 +162,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 bash plugin/scripts/monitor-mount-check.sh --json
 ```
 
-三判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根、`ownedByThisSession=true`。
+三判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根、`delivered=true`（AC9 起取代
+`ownedByThisSession`——判据是「事件是否真的送达」共享事件文件，不是「是不是本会话挂的」）。
 
 ### 1. 读状态
 
@@ -438,6 +439,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 阻塞信号状态（`.quay/inner-blocked.json` 存在与否；存在则报 `reason` + `question`，以及
   `fast-mode-telemetry --report` 的累计死时间/单次最长——2026-08-03 起该数有基线）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
-  `targetRoot` 是否等于本仓根 / `ownedByThisSession`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/是不是本会话
+  `targetRoot` 是否等于本仓根 / `delivered`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/事件有没有送达
+  （AC9 起 `delivered` 取代 `ownedByThisSession`：判据是共享事件文件有没有新事件，不是「是不是本会话挂的」）
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。

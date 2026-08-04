@@ -42,7 +42,7 @@ start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | Two Monitor-tool invocations exist, one for `<root>/plugin/scripts/inner-state.sh`, one for `<root>/plugin/scripts/session-liveness.sh`; `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `ownedByThisSession=true` | the `--json` output (three criteria) |
+| 1 | `MONITORS-MOUNTED` | Two Monitor-tool invocations exist, one for `<root>/plugin/scripts/inner-state.sh`, one for `<root>/plugin/scripts/session-liveness-mount.sh`; `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
 | 2 | `MONITORS-DELIVERING` | **At least one event line from a mounted monitor was delivered to THIS session** (an `INIT` baseline, a `SESSION-STATUS` line, a `BLOCKED`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-verified.sh <session> "<fast-mode tick instruction>"` exited 0 (pane hash changed = delivered). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-verified output (hash before → after) |
@@ -63,7 +63,7 @@ start did NOT complete.
 Monitor({command: "<root>/plugin/scripts/inner-state.sh",
          description: "inner state transitions (INIT/START/OVER90/ORPHAN/RISKY/BLOCKED)",
          persistent: true, timeout_ms: 3600000})
-Monitor({command: "<root>/plugin/scripts/session-liveness.sh",
+Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
          description: "session alive/active (SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE)",
          persistent: true, timeout_ms: 3600000})
 ```
@@ -77,9 +77,12 @@ laid-down paths in the target project (they self-locate, so they work from the l
 bash <root>/plugin/scripts/monitor-mount-check.sh --json
 ```
 
-Require `mounted=true` AND `targetOk=true` AND `ownedByThisSession=true` — the three criteria are
-three different ways to be wrong (not mounted / mounted on the wrong project / mounted by a previous
-session that will never notify this one). Then **wait for at least one delivered event line**
+Require `mounted=true` AND `targetOk=true` AND `delivered=true` — the three criteria are three
+different ways to be wrong (not mounted / mounted on the wrong project / no events actually reaching
+the shared session-liveness events file). AC9 (gap-liveness-mounting-is-a-single-flight-role-with-no-
+owner): the ownership criterion is ABOLISHED — the criterion is "事件是否真的送达", not "是不是本会话
+挂的"; a mount from another session that is delivering normally must still PASS. Then **wait for at
+least one delivered event line**
 (first `inner-state.sh` snap is up to ~55–60s; `session-liveness.sh --once` in the skill's own run is
 faster). If no event arrives within ~90s, the monitors are not delivering — **STOP and report**
 `MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
