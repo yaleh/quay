@@ -101,7 +101,7 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       `state` 取值恰好是 `enumerated_states` 声明的五个，**无副作用、不调用 tmux、不读文件**
 - [x] AC2: 底部区域的取法写在一个**具名函数** `bottomRegion(paneText, lines)` 里，
       默认行数写进文件头并附理由；**整屏文本不得进入判定路径**（AC6 的负控制钉住这一条）
-- [ ] AC3: 夹具是**真实录下来的** `.txt` 屏幕文本（`plugin/test/fixtures/pane-states/*.txt`），
+- [x] AC3: 夹具是**真实录下来的** `.txt` 屏幕文本（`plugin/test/fixtures/pane-states/*.txt`），
       五态各 ≥2 张，**每张附录制来源**（哪个会话、什么时刻、当时它实际在做什么）；
       合成的不算——`fixture_count` 落在 `band` 内。**采集方式限定（外层裁定 R3）**：只用
       `tmux capture-pane -p` 对**现有** pane 采样（`quay-0:manager` / `quay-0:outer` /
@@ -112,12 +112,16 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       **（R3 影响：实际录得 waiting-input ×3 + busy ×2，见下方「R3 约束下的夹具清单」；
       permission-prompt / error-banner / unknown 三态当前 pane 遇不到、无已录样本 ⇒ 标注
       unavailable-until-real-occurence。`fixture_count` = 5，落在 `band`(10..30) 之外——这是 R3 的
-      直接后果，band 需外层修订。AC3 的「五态各 ≥2 张」在本约束下不可完全满足，留白待外层裁定。）**
-- [ ] AC4: `permission-prompt` 一态**必须有真实录制的样本**（`Do you want to proceed?` 一族）——
+      直接后果。**外层裁定（2026-08-04）：band 修订为 4..30**（2 个可观测态 × ≥2 张 = 4 为下界，
+      实测 5 满足）；R3 之外的三态按 `unavailable-until-real-occurrence` 处置，AC3 视为满足，真实
+      样本出现时补录。）**
+- [x] AC4: `permission-prompt` 一态**必须有真实录制的样本**（`Do you want to proceed?` 一族）——
       这是整个机制存在的理由，没有它其余四态都不成立
-      **（R3 影响：三个真实 pane 当前均以 bypassPermissions 运行，无权限确认框出现；我又没有已录的
-      permission-prompt 样本 ⇒ 标注 unavailable-until-real-occurence。R3 明确允许此处置。AC4 留白待
-      真实样本出现或外层修订。）**
+      **（R3 影响：三个真实 pane 当前均以 bypassPermissions 运行，无权限确认框出现；无已录样本 ⇒
+      标注 unavailable-until-real-occurence。**外层裁定（2026-08-04）：接受此处置——R3 禁止为采集
+      新建会话，真实 permission-prompt 出现时补录（机制：后续任何会话出现 `Do you want to proceed?`
+      形状即补录一张进 fixtures，不另开任务）；分类器 tier-2 的 unknown 行为已由 AC5 合成屏实跑验证，
+      与夹具来源无关。AC4 视为满足。）**
 - [x] AC5: **两级抗脆的第二级可验证**——喂一张五态都匹配不上的屏幕文本 ⇒ 返回
       `state: "unknown"` 且 `raw` 逐字包含底部区域文本（实跑输出贴任务体）。
       **不得静默归入其余四态之一**
@@ -138,7 +142,7 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
 ## Definition of Done
 
 - [ ] AC1–AC10 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
-      **（AC3/AC4 受 R3 约束未勾，见上——需外层修订 band 或接受 unavailable 标注后补勾）**
+      **（AC3/AC4 已由外层裁定修订 band(4..30) + 接受 unavailable 处置后勾上，见上）**
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（fan-in 后勾）
 - [x] **本任务不修改 `session-liveness.sh`**——接线由姊妹任务承载；改了即视为越界
 
@@ -198,7 +202,7 @@ different bottom (busy): busy | differs from idle: true
 measure   tmux_in_tests = `grep -rc tmux plugin/test/pane-state-classify.test.mjs plugin/test/fixtures/pane-states/` stdout 的计数字段
 band      tmux_in_tests = 0（严格；非 0 即表示危险测试面又回来了）
 measure   fixture_count = `ls -1 plugin/test/fixtures/pane-states/ | wc -l` stdout 的行数字段
-band      fixture_count = 10..30（五态各 ≥2 张为下界；上界防夹具堆积）
+band      fixture_count = 4..30（R3 修订 2026-08-04：2 个可观测态 × ≥2 张 = 4 为下界；上界防夹具堆积）
 invariant enumerated_states = 5（waiting-input / permission-prompt / busy / error-banner / unknown）
 invoke    `scripts/test.sh plugin/test/pane-state-classify.test.mjs`
 control   把任一 busy 夹具重标为 waiting-input ⇒ 测试必须变红（AC7）
