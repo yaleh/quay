@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   parseTouches,
   expandGlobs,
+  normalizePath,
   matchGlob,
   checkTouchesPair,
   findRepoRoot,
@@ -93,6 +94,38 @@ export function touchesSharedState(globs) {
   return false;
 }
 
+// ── expandDeclaredTouches ────────────────────────────────────────────────────────────────────────
+// The pre-dispatch expander for assembleBatch's injected `expand`. It answers "which files do these
+// tasks INTEND to touch?", NOT "which files exist right now?" — the dispatch-eligibility question is
+// about declared intent, and a task's `## Touches` routinely lists files it will CREATE.
+//
+// gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet: the previous expander was
+// expandGlobs against the live tree, so a task whose `## Touches` pointed ONLY at not-yet-created
+// files expanded to an EMPTY set and checkTouchesPair's conservative "matched nothing (likely a
+// typo)" branch fired — a false negative that silently serialized a perfectly disjoint pair, and —
+// worse — could not NAME the overlapping file when two tasks genuinely collided on a new file it
+// reported "your glob is probably a typo" (an instrument that says "matched nothing" while what
+// actually happened was "overlap"). The inner loop had already been hand-rolling a workaround
+// (normalize the declared path, never touch the filesystem); this function IS that workaround,
+// single-sourced in the production entry so the bypass disappears (AC5/AC6).
+//
+//   - a declared CONCRETE path resolves to itself (normalized) whether or not it exists on disk;
+//   - a declared WILDCARD (`*`/`?`) still needs the filesystem to find the concrete set it covers —
+//     expandGlobs stays for exactly that; a wildcard that matches nothing is genuinely "likely a
+//     typo" and the conservative branch below still fires (AC4 keeps wildcard support).
+// expandGlobs itself is UNTOUCHED (it is correct for its own callers, e.g. test selection).
+export function expandDeclaredTouches(globs, root) {
+  const set = new Set();
+  for (const g of globs) {
+    if (/[*?]/.test(g)) {
+      for (const f of expandGlobs([g], root)) set.add(f);
+    } else {
+      set.add(normalizePath(g));
+    }
+  }
+  return set;
+}
+
 // ── assembleBatch ────────────────────────────────────────────────────────────────────────────────
 // Greedy maximal disjoint batch over rank-ordered candidates. A candidate JOINS iff:
 //   - type is a batchable execution type (NOT learning — learning is always serial), AND
@@ -128,10 +161,15 @@ export function assembleBatch(candidates, { expand }) {
     let blocked = null;
     for (const inBatch of batch) {
       const r = checkTouchesPair(c.touches, inBatch.touches, expand);
-      if (!r.disjoint) { blocked = { peer: inBatch.id, reason: r.reason }; break; }
+      if (!r.disjoint) { blocked = { peer: inBatch.id, reason: r.reason, overlaps: r.overlaps }; break; }
     }
     if (blocked) {
-      deferred.push({ id: c.id, reason: `not disjoint from ${blocked.peer}: ${blocked.reason}` });
+      // gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet AC2: NAME the overlapping
+      // file(s). The old reason stopped at "overlapping file-sets"; with declared-path expansion an
+      // overlap is often on a not-yet-created file (both tasks will create the same path) — a
+      // verdict that only says "not disjoint" makes a reader hunt for a typo that isn't there.
+      const overlapTail = blocked.overlaps?.length ? ` (overlap: ${blocked.overlaps.join(", ")})` : "";
+      deferred.push({ id: c.id, reason: `not disjoint from ${blocked.peer}: ${blocked.reason}${overlapTail}` });
       continue;
     }
     // A lone anchor still must have a well-declared touches (else it is unsafe to reason about even
@@ -233,6 +271,11 @@ function usage() {
 export async function main(argv) {
   const args = argv.slice(2);
   let root = null;
+  // --json: emit { batch, deferred } as JSON instead of the human-readable lines. The batch /
+  // deferred fields are what the task contract's measures read (gap-dispatch-eligibility-blind-to-
+  // files-that-do-not-exist-yet: `node --experimental-strip-types plugin/scripts/concurrent-batch-
+  // scheduler.ts --json`).
+  let json = false;
   // DIR-117 iteration-2 item 4: `--receipts id1=file1.json,id2=file2.json` — optional, maps a
   // candidate id (charter basename, no .md) to a real milestone-preparation-check.ts receipt file.
   // Omitted entirely → byte-for-behavior unchanged (golden replay for every pre-existing call).
@@ -240,6 +283,7 @@ export async function main(argv) {
   const files = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") { root = args[++i]; continue; }
+    if (args[i] === "--json") { json = true; continue; }
     if (args[i] === "--receipts") {
       receiptsById = {};
       for (const pair of args[++i].split(",")) {
@@ -255,15 +299,23 @@ export async function main(argv) {
     if (!fs.existsSync(f)) { process.stderr.write(`ERROR: charter not found: ${f}\n`); return 2; }
   }
   const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
-  const expand = (globs) => expandGlobs(globs, expandRoot);
+  // gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet: eligibility compares DECLARED
+  // paths, not the filesystem — a task creating only NEW files must not be judged "matched nothing
+  // (likely a typo)". Concrete declared paths resolve to themselves (whether or not they exist yet);
+  // only wildcards are expanded against the tree (expandDeclaredTouches).
+  const expand = (globs) => expandDeclaredTouches(globs, expandRoot);
   const parsedCandidates = files.map((f) => parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8")));
   const { candidates, expansions } = applyPreparationExpansion(parsedCandidates, receiptsById);
   for (const e of expansions) {
     process.stdout.write(`  re-evaluated (checked Plan expanded '## Touches'): ${e.id} — +${e.addedGlobs.length} path(s): ${e.addedGlobs.join(", ")}\n`);
   }
   const r = assembleBatch(candidates, { expand });
-  process.stdout.write(`BATCH (${r.batch.length}-wide, concurrent): ${r.batch.join(", ") || "(none)"}\n`);
-  for (const d of r.deferred) process.stdout.write(`  deferred: ${d.id} — ${d.reason}\n`);
+  if (json) {
+    process.stdout.write(JSON.stringify({ batch: r.batch, deferred: r.deferred }, null, 2) + "\n");
+  } else {
+    process.stdout.write(`BATCH (${r.batch.length}-wide, concurrent): ${r.batch.join(", ") || "(none)"}\n`);
+    for (const d of r.deferred) process.stdout.write(`  deferred: ${d.id} — ${d.reason}\n`);
+  }
   // Exit 0 always (assembly succeeded); a caller inspects the batch. A 1-wide-or-empty batch is a
   // valid outcome (fully serial), not an error.
   return 0;
