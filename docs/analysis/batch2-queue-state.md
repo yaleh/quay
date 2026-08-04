@@ -2016,6 +2016,9 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
 - **park**：`gap-retire-inner-state-...` 保持 ready + PARKED 注记（裁定 D 造的观察者是它要退役信号的
   替代品，清理跟在架构后面；298+/233- 提交保全到分支 `61a92a41`、worktree 已移除）
 - **改范围**：`gap-session-liveness-hashes-the-token-counter-...` 不再加剥离规则，改为消费 D 的分类器
+- **立案 G/L0（第七条）**：`gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX`
+  （todo）——`env -u TMUX` 按人指示走正常流程（判据+测试+负控制）落地，**不是既成事实**；
+  隔离由「显式 `-S` + `env -u TMUX` 的助手」承载，不依赖调用方记得 unset
 - **遥测**：两条崩溃残留的在飞括号已关（`--task-end ... --outcome abandoned`），`--detect-stop` 的
   `task-over-90m` auto-block **已清除**（等待 1365.2s 计入死时间基线）
 - **在飞（0/3）——内层实现中**：已用 tmux send-keys 驱动内层按 A→D→B 顺序实现三任务（不是外层
