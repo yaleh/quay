@@ -1792,3 +1792,13 @@ dod-gate（外层建）。
   （避免红 e2e 挡本批关闭）。
 - **批套件**（AC20 + dod-gate + tick-doc）：起跑时 gate WAIT（avg10 52.52）自停，等干净窗口（Monitor bf9peatoh）。
 - **在飞（1/3）**：e2e（red-first 已落地，AC2-AC5 待修复后绿）
+
+### 批套件进展（2026-08-04 00:5xZ）
+
+- **batch4-faninsuite1**：gate WAIT（avg10 52.52）自停，未跑
+- **batch4-faninsuite2**（干净窗口起跑，中途 archguard churn）：2164/2138/**fail 1**/**cancelled 2**
+  - fail 1 = `monitor-mount-check` AC5（delivered 应为 false 实为 true）——**已修**：测试不 hermetic，
+    没设 `MONITOR_CHECK_EVENTS_FILE` → 读到真实共享事件文件（外层监视器在写 HEARTBEAT，delivered=true
+    正确）；改为指向不存在的临时路径。11/11 绿
+  - cancelled 2 = runner-grouping + session-liveness（负载，单独跑能完成但慢）
+- **批套件待更严格干净窗口**（Monitor b4r1kznz9：gate GO + 无 archguard + load1<4）
