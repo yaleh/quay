@@ -1,6 +1,6 @@
 ---
-id: gap-the-runtime-is-a-1-3mb-single-file-that-large-file-hooks-reject
-title: "The shipped runtime is a 1.3MB single file, so any target with a common large-file pre-commit hook cannot commit it — blocking both G0 and G2"
+id: gap-the-runtime-has-nowhere-safe-to-land
+title: "The runtime lands in the target's vendor/ — a reserved dir in Go — and is 1.3MB against common large-file hooks; both are the same decision about where it may live"
 status: todo
 labels:
   - gap
@@ -34,6 +34,53 @@ meta-cc 冷启动实测（管理者 2026-08-04 转达）。**产品侧缺陷**�
 
 **⇒ 两条路都通不过，它不是可以绕过去的小事。**
 **任何「让使用者自己处理」的方案都等价于要求他打一个补丁**，而 G0 明令补丁数为 0。
+
+### 第 11 条缺陷（管理者转 meta-cc，2026-08-04 02:05Z）——同一个决定的另一面
+
+meta-cc 的 `DIR-103` 提交：*fix build: make Go robust to non-Go vendor dir from quay-init*。
+
+**根因在 quay 这边**：`quay-init.sh:517` 把运行时铺成
+`$WORKSPACE_ROOT/vendor/quay/dist/quay.js`——而 **`vendor` 在 Go 里是保留目录名**，
+Go module vendoring 会去解析它 ⇒ **一个非 Go 的 `vendor` 目录打断 Go 项目的构建**。
+
+**meta-cc 在自己那边让构建容错了，但那是目标项目替交付物打补丁，不是修复**——
+**按门槛判据，那正好是一条人工补丁，应当计入而不是被吸收掉。**
+
+**管理者把问题问对了，原样保留**：
+
+> **正确的问法不是 `vendor` 该改叫什么，而是运行时该铺在哪里才不与任何目标语言的约定冲突。**
+> `vendor` 只是我们撞上的第一个——`node_modules`、`target`、`build`、`dist` 各有语义。
+
+### 外层复核：两条缺陷是同一个决定，因此合并本任务
+
+**⇒ 本任务从「1.3MB 撞大文件钩子」扩为「运行时该铺在哪里」**，
+因为**两条问的是同一件事的两面：铺在哪里、进不进目标的 git。**
+
+**一处需要更正管理者的候选**：管理者提议铺到 `.quay/`，理由是「那已是 quay 的命名空间，
+目标工具链不会去解析它」——**前半对，后半不完整**。实测本仓 `.gitignore`：
+
+```
+**/.quay/gate-events.jsonl
+**/.quay/prepare-leases/
+**/.quay/inner-blocked.json
+```
+
+**是选择性忽略，不是整个目录**；`.quay/config.yml` 是**被跟踪的**。
+且 **`quay-init` 根本不往目标写 gitignore**（`grep -nE 'gitignore' quay-init.sh` **零命中**）。
+
+**⇒ 铺到 `.quay/` 解决语言冲突，但不自动解决提交问题**——
+**⇒ 这也正是第 10 条的根**：今天 `quay-init` 铺下的任何东西，**默认成为目标的被跟踪内容**。
+
+### 三个必须同时满足的约束
+
+| # | 约束 | 来源 |
+|---|---|---|
+| 1 | **不与任何目标语言的保留目录冲突**（非 `vendor`/`node_modules`/`target`/`build`/`dist`） | 第 11 条 |
+| 2 | **不触发常见大文件钩子**（不提交，或拆分） | 第 10 条 |
+| 3 | **「落地集合」的定义必须讲清**：运行时算不算其中一员（算 ⇒ 字节相同；不算 ⇒ 写明理由） | A2/G2 |
+
+**`.quay/runtime/` + `quay-init` 主动管理一条 gitignore 条目**能同时满足 1 与 2，
+**但 3 必须先答**——否则是用一个定义漏洞换一次通过。
 
 ## Contract
 
@@ -79,6 +126,14 @@ resume 先量出真实阈值分布与可选方案的代价，再选方案
 - [ ] AC5: **离线负控制**——若选方案 1，必须证明离线目标仍能冷启动，或**明确声明不支持离线**并写进 README
 - [ ] AC6: **与 G2 的关系明确**——本方案落地后，
       G2 的「落地文件全部与产物字节相同」判据**怎么算**，写进任务体与 SPEC
+- [ ] AC8（**第 11 条**）: **异构目标构建负控制**——同一产物装进一个 **Node 目标**与一个 **Go 目标**，
+      **落地后两边各自的构建仍然通过**（`npm test` / `go build ./...` 实跑输出都贴出）。
+      **字节相同救不了这一条**：若运行时铺在 Go 会特殊解析的目录里，两边字节相同、Go 那边照样构建失败
+- [ ] AC9（**第 11 条**）: **保留目录负控制**——落地路径**不得**位于
+      `vendor` / `node_modules` / `target` / `build` / `dist` 任一之下；
+      检查按**路径字面量**判定并列出被排除的名字（**可扩充，不是穷举即完**）
+- [ ] AC10: **gitignore 处置**——`quay-init` 若依赖「运行时不进 git」，**必须自己写入那条 gitignore**；
+      **负控制：目标已有同名条目时不得重复写入或覆盖使用者的 gitignore**
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
 
 ## Definition of Done
