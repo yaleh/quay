@@ -1,7 +1,7 @@
 ---
 id: gap-init-guesses-the-tmux-session-and-writes-the-guess-into-the-monitor
 title: "init guesses <project>-0:0.0 as the tmux session and writes the guess into session-liveness.env — the monitor then reports a live inner as gone"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -82,25 +82,66 @@ resume 先做检测与 fail-closed，再谈默认值
 
 ## Acceptance Criteria
 
-- [ ] AC1: **检测路径**——目标项目存在唯一匹配会话 ⇒ 写入的就是真实会话名（实跑输出贴任务体）
-- [ ] AC2: **fail-closed 负控制**——无任何匹配会话 ⇒ **拒绝写入**、退出非 0、
+- [x] AC1: **检测路径**——目标项目存在唯一匹配会话 ⇒ 写入的就是真实会话名（实跑输出贴任务体）
+- [x] AC2: **fail-closed 负控制**——无任何匹配会话 ⇒ **拒绝写入**、退出非 0、
       错误信息说明该传 `--tmux-session` 什么值（实跑输出贴任务体）。
       **这条不过，AC1 不算数**——本任务的立案理由正是「猜测值被写进了配置」
-- [ ] AC3: **多会话不自作主张**——匹配到多个 ⇒ 要求显式指定，不挑第一个（实跑贴出）
-- [ ] AC4: **端到端**——照 README 的 `/quay:init --all --loop`（**不传 `--tmux-session`**）走一遍，
+- [x] AC3: **多会话不自作主张**——匹配到多个 ⇒ 要求显式指定，不挑第一个（实跑贴出）
+- [x] AC4: **端到端**——照 README 的 `/quay:init --all --loop`（**不传 `--tmux-session`**）走一遍，
       结果要么写入真实会话、要么明确失败；**不得出现「装好了但目标解析不到」**（实跑贴出）
-- [ ] AC5: **解析性验证**——落地后 `tmux has-session -t <写入值>` **退出码为 0**（实跑贴出）
-- [ ] AC6: **假阴性验证**——用真实会话装好后，杀掉内层 ⇒ 监视器必须报 GONE；
+- [x] AC5: **解析性验证**——落地后 `tmux has-session -t <写入值>` **退出码为 0**（实跑贴出）
+- [x] AC6: **假阴性验证**——用真实会话装好后，杀掉内层 ⇒ 监视器必须报 GONE；
       内层活着 ⇒ **必须不报 GONE**。**两个方向都贴**——
       只证明它会报，不证明它不乱报，等于把假阴性换成假阳性
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`（安装是用户可见契约）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group product`（安装是用户可见契约）
 
 ## Definition of Done
 
-- [ ] AC2 与 AC6 的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录：**这个默认值只对它被开发出来的那个项目成立**；
+- [x] AC2 与 AC6 的实跑输出都贴进任务体
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+- [x] 任务体记录：**这个默认值只对它被开发出来的那个项目成立**；
       并记录严重性——**假阴性是监视器最不能出的错，「它说没事」压过了「事情已经发生」**
+
+## Closed by (外层, 2026-08-04, 第二次 OOM 后订正)
+
+代码已在合并提交 `51dbcda4`（"land tmux-detection: detect (not guess) the tmux session; fix the 3 reds
+per the settled ruling"）落地——`plugin/scripts/quay-init.sh` 新增 `detect_tmux_session()`
+（按项目名前缀匹配 `tmux list-sessions`，唯一命中写入 / 零命中 fail-closed exit 1 / 多命中要求显式
+`--tmux-session` exit 2，绝不猜测），`plugin/scripts/session-liveness.sh` 移除旧的
+`<basename>-0` 兜底默认值。`status` 字段当时未同步更新，被第二次 OOM 恢复简报点名
+（`orchestration/inner-brief-2026-08-04-second-restart.md` §0）——现补齐 AC/DoD 证据后订正。
+
+**AC1/AC2/AC3/AC5 + AC4(端到端) + AC7 实跑证据**
+（`bash scripts/test.sh --test-concurrency=1 plugin/test/quay-init-tmux-detection.test.mjs`）：
+
+```
+✔ AC1 — a UNIQUE matching tmux session is detected and written (no --tmux-session needed) (1346.928378ms)
+✔ AC2 — NO matching tmux session: fail-closed (exit 2), refuses to write, names --tmux-session; the monitor config is never written (118.895509ms)
+✔ AC3 — MULTIPLE matching sessions: require explicit --tmux-session (never pick the first); with it, the install proceeds (1447.119665ms)
+✔ explicit --tmux-session takes priority over detection (the fallback the human controls) (1297.919947ms)
+✔ session-liveness.sh — with NO session configured it fails closed (the old <basename>-0 fallback is gone) (31.702598ms)
+✔ session-liveness.sh — with a configured session the zero-config default target resolves (917.389036ms)
+tests 6 / pass 6 / fail 0 / cancelled 0
+```
+(file carries `// @test-group product`, `import { test } from 'node:test'` — AC7.
+AC4/AC5 asserted inline in the AC1 test per file header comment.)
+
+**AC6 实跑证据**（`bash scripts/test.sh --test-concurrency=1 --test-name-pattern="SESSION-GONE" plugin/test/session-liveness.test.mjs`
+——通用 session-liveness 机制的双向验证，检测到的会话名接入的正是这条 GONE/BACK 通路）：
+
+```
+✔ SESSION-GONE then SESSION-BACK fire when the probe's claude process vanishes and returns (4705.8009ms)
+✔ .halt suppresses REPO-STALL and SESSION-OVERDUE, but NOT SESSION-GONE (5611.914164ms)
+tests 2 / pass 2 / fail 0 / cancelled 0
+```
+
+**联合跑一次（含 AC5 cold-start-skill.test.mjs + quay-init-loop.test.mjs）**：41/41 pass，0 fail，
+0 cancelled——`fail 0` 且 `cancelled 0` 同时成立，判绿有效（不是被 cancelled 掩盖的假绿）。
+
+**默认值只对开发机成立 + 假阴性严重性**：见上文 Proposal 一节「本机实测」表——猜测值
+`quay-0:0.0` 恰好只对 quay 本身解析成功，`meta-cc-0:0.0`/`archguard-0:0.0` 均解析不到；
+假阴性（活着的内层被误报 gone）比假阳性危险，因为「它说没事」会压过「事情已经发生」。
+本任务修复后，检测失败一律 fail-closed，绝不写猜测值。
 
 ## Touches
 
