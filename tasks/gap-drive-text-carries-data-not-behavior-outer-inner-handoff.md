@@ -3,7 +3,7 @@ id: gap-drive-text-carries-data-not-behavior-outer-inner-handoff
 title: outer drive text re-narrated the dispatch contract in prose and overrode
   the shipped tick doc — the standing concurrent-dispatch directive dropped a
   second time, because behavior was restated instead of supplied by the doc
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

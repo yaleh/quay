@@ -2,7 +2,7 @@
 id: gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point
 title: 81 instruments reachable only by remembering a path, 17 MCP tools that
   are all task-board — shrink, then expose, then add, in that order
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

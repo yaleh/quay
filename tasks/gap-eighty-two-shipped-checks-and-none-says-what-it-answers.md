@@ -1,7 +1,8 @@
 ---
 id: gap-eighty-two-shipped-checks-and-none-says-what-it-answers
-title: "82 scripts ship and not one declares what question it makes askable — capability is not missing, visibility is"
-status: todo
+title: 82 scripts ship and not one declares what question it makes askable —
+  capability is not missing, visibility is
+status: ready
 labels:
   - gap
   - milestone-candidate

@@ -1,7 +1,9 @@
 ---
 id: gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down
-title: "The installer's file list is hand-maintained, so shipped skills and tick docs reference files the installer never lays down — four groups of live specimens"
-status: todo
+title: The installer's file list is hand-maintained, so shipped skills and tick
+  docs reference files the installer never lays down — four groups of live
+  specimens
+status: ready
 labels:
   - gap
   - milestone-candidate

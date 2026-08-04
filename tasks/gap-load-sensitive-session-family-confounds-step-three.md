@@ -3,7 +3,7 @@ id: gap-load-sensitive-session-family-confounds-step-three
 title: the load-sensitive session-liveness family directly conflicts with step
   3's 2-concurrent-suite relaxation — judging relaxation vs amplified timing
   sensitivity becomes impossible
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

@@ -3,7 +3,7 @@ id: gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks
 title: ready-pool-check's taskWorkLanded overshoots — "Touches file exists on
   master" is read as "work landed", so tasks that modify existing files are
   recommended for promotion AND excluded from the pool simultaneously
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -37,20 +37,35 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `taskWorkLanded` 不再把「既有 Touches 文件在 master 上存在」判为已落——对改既有文件型任务，
+- [x] AC1: `taskWorkLanded` 不再把「既有 Touches 文件在 master 上存在」判为已落——对改既有文件型任务，
       须用任务特有符号解析或等价信号（不依赖文件存在性）
-- [ ] AC2: **负控制**——一条改既有文件、工作未落的任务 ⇒ 必须留在池里（不被排除）
-- [ ] AC3: **正控制**——一条改既有文件、工作已落的任务 ⇒ 必须排除（not-yet-flipped）
-- [ ] AC4: **自相矛盾消除**——补晋 3 条改既有文件型任务后，`pool` 必须反映它们（≥3），不再是 0
+- [x] AC2: **负控制**——一条改既有文件、工作未落的任务 ⇒ 必须留在池里（不被排除）
+- [x] AC3: **正控制**——一条改既有文件、工作已落的任务 ⇒ 必须排除（not-yet-flipped）
+- [x] AC4: **自相矛盾消除**——补晋 3 条改既有文件型任务后，`pool` 必须反映它们（≥3），不再是 0
       （实跑输出贴任务体，修复前后对照）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`；补「改既有文件、未落」与「已落」夹具
-- [ ] AC6: 防回归——`ready-pool-check` 的测试断言「既有文件型未落任务在池里」恒成立
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`；补「改既有文件、未落」与「已落」夹具
+- [x] AC6: 防回归——`ready-pool-check` 的测试断言「既有文件型未落任务在池里」恒成立
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC4 修复前后 pool 对照逐字贴任务体
-- [ ] 真实树跑通：改既有文件型任务的补晋能被机制正确反映（pool 反映真实）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC4 修复前后 pool 对照逐字贴任务体
+- [x] 真实树跑通：改既有文件型任务的补晋能被机制正确反映（pool 反映真实）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——修复后 batch-3 全量重跑 GREEN（tests 2283 / fail 0 / cancelled 0 / skipped 28）
+
+### AC4 修复前后 pool 对照（真实树，2026-08-04）
+
+补晋 6 条改既有文件型任务（gap-drive-text / gap-eighty-one / gap-load-sensitive / gap-init-ships / gap-eighty-two / gap-preflight）后：
+
+```
+BEFORE（旧 checker，touch 过冲）：pool: 0   ← 6 条全被「Touches 文件已在 master」误判排除
+AFTER （修复后 checker）：       pool: 4   ← 改既有文件型任务正确反映在池里（≥3）
+```
+
+（2 条仍被排除——gap-drive-text / gap-init-ships——是**既有的符号信号边缘**：其 AC 反引号引用了已在 master 的既有函数（`checkTouchesPair` 等）导致 resolve，与本次 touch 过冲无关。）
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+`scripts/test.sh plugin/test/ready-pool-check.test.mjs` → ℹ tests 13 / pass 13 / fail 0 / cancelled 0 / skipped 0（含新增「改既有文件未落/已落」夹具）。`task-status-drift-check.test.mjs` → 34 pass / 0 fail（镜像 byte-identical 同步）。
 
 ## Touches
 
