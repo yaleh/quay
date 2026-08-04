@@ -1955,3 +1955,17 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
   （runId `fm-...-gzxg3x`，worktree `/home/yale/work/quay-worktrees/readyqueue`，分支同名，09:56Z 派发）——
   re-triage 8 个陈旧 ready 任务 + 把「Touches 文件存在性」接进派发资格路径（AC2），DIR-103-C 负控制。
   其余 8 个 ready 任务暂不派（ADR-022 退役目标）。ready 队列清理后外层可重新评估 backlog 优先级。
+
+### 外层纠正：派发契约违约 + 已改（2026-08-04T10:0xZ）
+
+**外层 meta-cc 核实（非猜测）**：09:56:13 派发 readyqueue 的 `Agent` 调用 **input 无
+`run_in_background` 字段**，且推进文字是「等 readyqueue 返回后继续 tick」——阻塞语义，非后台派发。
+恢复简报指向的 `fast-mode-loop-tick.md:303` 明写「后台 `Agent(run_in_background)`」——
+**指令正确，没照做**（恢复 AC1 违约；这不是信息缺失）。
+
+**已核实**：本次派发实际在跑（`TaskOutput` status=running，正在实现 touches-resolve 检查 + re-triage
+8 任务），**不需重派**。
+
+**从下次派发起（已改，强制）**：
+1. 每次 `Agent` 调用**显式带 `run_in_background: true`**，不假设默认行为；
+2. 同一 tick 内可**并发派发多个**（上限 3），**绝不边派边等返回再继续 tick**。
