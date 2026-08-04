@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-04T09:54:47.829Z",
+  "generatedAt": "2026-08-04T10:27:14.129Z",
   "since": null,
   "tasks": [
     {
@@ -160,6 +160,11 @@
     {
       "taskId": "gap-r1-cannot-see-tests-writing-into-the-live-task-store",
       "minutes": 54.223533333333336,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files",
+      "minutes": 31.227016666666668,
       "outcome": "done"
     },
     {
@@ -335,13 +340,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 64.35992095959597,
-  "medianMinutes": 55.20514166666666,
-  "tasksPerHour": 1.3919009559834696,
-  "serialEquivalentPerHour": 0.9322572045678389,
+  "meanMinutes": 63.86540000000001,
+  "medianMinutes": 54.22391666666667,
+  "tasksPerHour": 1.3970613971935735,
+  "serialEquivalentPerHour": 0.9394758351157276,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-04T09:54:47.801Z",
-  "windowHours": 47.417166944444446,
+  "windowEnd": "2026-08-04T10:27:14.103Z",
+  "windowHours": 47.95780638888889,
   "haltedHours": 0,
   "halted": [],
   "blocked": [

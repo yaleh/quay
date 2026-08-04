@@ -1,7 +1,9 @@
 ---
 id: gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files
-title: "8 of 9 status:ready tasks Touch files physically deleted by ADR-022's pipeline retirement — dispatching any of them wastes an agent recreating retired infrastructure"
-status: ready
+title: 8 of 9 status:ready tasks Touch files physically deleted by ADR-022's
+  pipeline retirement — dispatching any of them wastes an agent recreating
+  retired infrastructure
+status: done
 labels:
   - gap
   - milestone-candidate

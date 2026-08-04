@@ -1969,3 +1969,18 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
 **从下次派发起（已改，强制）**：
 1. 每次 `Agent` 调用**显式带 `run_in_background: true`**，不假设默认行为；
 2. 同一 tick 内可**并发派发多个**（上限 3），**绝不边派边等返回再继续 tick**。
+
+### readyqueue fan-in 关闭（2026-08-04T10:2xZ，内层 tick）
+
+- **merge** `ab144ae0`（rebase 干净、无冲突）：touches-resolve 派发资格检查 + 8 个 ADR-022 退役目标
+  ready 任务 re-triage（7 → needs-human 各带证据，gap-split-decision 保留 ready——split-decision 流程
+  活在保留的 `proposal-convergence.ts`，前提修正有据）。
+- **scoped** `--for-task` 43/43 绿（touches-orthogonality + touches-parser-parity；`test-selection-thin`
+  因 Touches 多为任务 markdown，非缺陷）。
+- **批全量套件绿**：**tests 2239 / pass 2215 / fail 0 / cancelled 0 / skipped 24**，`FULL-SUITE-EXIT=0`，
+  **clean-tree PASS**（外层 10:1xZ 提交 cold-start 任务 `899c83a6`/`3620f504`，树在套件结束前转净）。
+  **参考值 2227 → 2239**（+12 = readyqueue 新增测试）。
+- **关闭**：`gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files` done +
+  `--task-end`（`fm-...-gzxg3x`）+ worktree/branch 清理。ready 队列现只剩 QENG demo +
+  gap-split-decision（Touches 全部可解析，机械 resolve 检查已接进派发路径）。
+- **在飞（0/3）**。

@@ -104,7 +104,7 @@ ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=
 ```bash
 grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
-grep 'tests 2227'    # tests 数等于参考值（2026-08-04 实测 2227＝2157+DIR-103-C acceptance 5 新 + one-condition 8 新 + 期间多任务合并，恢复 fan-in 批套件全绿；套件构成每次变都要重测参考值）
+grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，批套件全绿；套件构成每次变都要重测参考值）
 ```
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
