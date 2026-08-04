@@ -1,6 +1,6 @@
 ---
 name: quay-cold-start
-description: "Cold-start the two-layer loop in a project quay-init has already prepared: mount the two loop monitors (inner-state.sh + session-liveness.sh) via the Monitor tool, re-create the 20-minute outer cron, EXPLICITLY drive the inner session to start fast mode and dispatch the first task, then PROVE the loop is live by reading a real --task-start telemetry record in .workflow-events/. One slash command; the inner start is DRIVEN here, never assumed as a side effect. Events must be DELIVERED to this session (Monitor tool), never via nohup."
+description: "Cold-start the two-layer loop in a project quay-init has already prepared: mount the loop monitor (session-liveness.sh) via the Monitor tool, re-create the 20-minute outer cron, EXPLICITLY drive the inner session to start fast mode and dispatch the first task, then PROVE the loop is live by reading a real --task-start telemetry record in .workflow-events/. One slash command; the inner start is DRIVEN here, never assumed as a side effect. Events must be DELIVERED to this session (Monitor tool), never via nohup."
 allowed-tools: Bash, Read, Monitor, CronCreate, CronList
 ---
 
@@ -11,14 +11,15 @@ The user's whole cold start is this command; after it returns, the loop must be 
 
 ## Why agent-executed, and why nohup does NOT pass
 
-A `nohup bash …inner-state.sh > log &` process and a Monitor-tool process look **identical in `ps`**
-(same argv). The difference is where stdout goes: the nohup process writes to a file and **nobody is
-notified**; a Monitor-tool process has every stdout line turned into a **session notification**.
+A `nohup bash …session-liveness.sh > log &` process and a Monitor-tool process look **identical in
+`ps`** (same argv). The difference is where stdout goes: the nohup process writes to a file and
+**nobody is notified**; a Monitor-tool process has every stdout line turned into a **session
+notification**.
 The criterion for "the loop is up" is therefore **"an event was delivered to this session"**, not
-"a process is running". A cold start whose monitors are nohup'd looks installed but is silently
+"a process is running". A cold start whose monitor is nohup'd looks installed but is silently
 dead — worse than not installed, because it looks installed.
 
-**⇒ This skill mounts both monitors via the Monitor tool. Never use nohup. If you find yourself
+**⇒ This skill mounts the monitor via the Monitor tool. Never use nohup. If you find yourself
 writing `nohup` or `&` to background a monitor, STOP — that is the anti-pattern this skill exists
 to prevent.**
 
@@ -29,7 +30,7 @@ All must hold before starting; if any fails, STOP and report which precondition 
 
 | Precondition | Path (root = the current working directory) |
 |---|---|
-| loop mechanism laid down | `<root>/plugin/scripts/inner-state.sh`, `session-liveness.sh`, `fast-mode-telemetry.ts` exist |
+| loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `fast-mode-telemetry.ts` exist |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 
@@ -42,8 +43,8 @@ start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | Two Monitor-tool invocations exist, one for `<root>/plugin/scripts/inner-state.sh`, one for `<root>/plugin/scripts/session-liveness-mount.sh`; `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
-| 2 | `MONITORS-DELIVERING` | **At least one event line from a mounted monitor was delivered to THIS session** (an `INIT` baseline, a `SESSION-STATUS` line, a `BLOCKED`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer — `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
+| 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `HEARTBEAT`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-verified.sh <session> "<fast-mode tick instruction>"` exited 0 (pane hash changed = delivered). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-verified output (hash before → after) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
@@ -57,19 +58,21 @@ start did NOT complete.
 - `project = basename "$root"`.
 - `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-liveness.env`, else `${project}-0:0.0`.
 
-### 2. Mount the two monitors via the Monitor tool (AC5 — events to THIS session)
+### 2. Mount the monitor via the Monitor tool (AC5 — events to THIS session)
+
+Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md).
+`inner-state.sh` is retired — it never observed the session (tmux hits 0) and its signature signal
+(`.quay/inner-blocked.json`) never fired in any project. Mount `session-liveness-mount.sh` (the
+single-flight mount entry, which execs `session-liveness.sh`):
 
 ```
-Monitor({command: "<root>/plugin/scripts/inner-state.sh",
-         description: "inner state transitions (INIT/START/OVER90/ORPHAN/RISKY/BLOCKED)",
-         persistent: true, timeout_ms: 3600000})
 Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
-         description: "session alive/active (SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE)",
+         description: "session alive/active (SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT)",
          persistent: true, timeout_ms: 3600000})
 ```
 
-Both `persistent: true` — they must outlive the current turn. The commands are the ABSOLUTE
-laid-down paths in the target project (they self-locate, so they work from the laid-down copy).
+`persistent: true` — it must outlive the current turn. The command is the ABSOLUTE laid-down path in
+the target project (it self-locates, so it works from the laid-down copy).
 
 ### 3. Verify mount AND delivery — do not assume "looks mounted"
 
@@ -83,8 +86,8 @@ the shared session-liveness events file). AC9 (gap-liveness-mounting-is-a-single
 owner): the ownership criterion is ABOLISHED — the criterion is "事件是否真的送达", not "是不是本会话
 挂的"; a mount from another session that is delivering normally must still PASS. Then **wait for at
 least one delivered event line**
-(first `inner-state.sh` snap is up to ~55–60s; `session-liveness.sh --once` in the skill's own run is
-faster). If no event arrives within ~90s, the monitors are not delivering — **STOP and report**
+(`session-liveness.sh --once` in the skill's own run is faster; a resident mount emits a `HEARTBEAT`
+each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
 `MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
 
 ### 4. Re-create the 20-minute cron — THE single loop driver (session-scoped, dies with the session)
@@ -168,5 +171,5 @@ model) know it actually took.
 
 - **Not a one-keypress button.** The command count is install (1–2) + init (1) + this skill (1);
   the inner start is INSIDE this skill, not a separate human step.
-- **Not a shell script.** The monitors are mounted through the Monitor tool so their events reach a
+- **Not a shell script.** The monitor is mounted through the Monitor tool so its events reach a
   session; a script that backgrounds processes delivers to nobody.

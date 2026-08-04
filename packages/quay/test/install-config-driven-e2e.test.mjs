@@ -389,12 +389,18 @@ test("AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0;
     "docs/analysis/fast-mode-loop-tick.md",
     "plugin/scripts/session-liveness.sh",
     "plugin/scripts/fast-mode-telemetry.ts",
-    "plugin/scripts/inner-state.sh",
     "plugin/scripts/resource-gate.sh",
     "plugin/scripts/heavy-op-token.sh",
     "plugin/scripts/task-contract-check.ts",
     "plugin/scripts/loop-driver-check.sh",
   ];
+  // inner-state.sh is retired (gap-retire-inner-state-one-observer-targets-by-parameter AC3): it
+  // must NOT be in the laid-down product set.
+  for (const ws of [ws1, ws2]) {
+    const laid = new Set(loopLaidDownFiles(ws));
+    assert.ok(!laid.has("plugin/scripts/inner-state.sh"),
+      "inner-state.sh must NOT be laid down into target projects (retired, AC3)");
+  }
   for (const ws of [ws1, ws2]) {
     const laid = new Set(loopLaidDownFiles(ws));
     for (const f of REQUIRED_PRODUCT_FILES) {

@@ -112,7 +112,9 @@ jobs:
 
   # gap-cold-start-e2e-installs-from-a-copy-and-nothing-runs-it (2026-08-03): the EXECUTOR for the
   # cold-start e2e. Measured cost of `bash test/cold-start-e2e.sh --from-build` is ~102s wall-clock
-  # (build ~3s + install + asserts + the AC7 >=90s inner-state.sh window), so this is NOT a per-push
+  # (build ~3s + install + asserts + the then-required AC7 >=90s inner-state.sh window; the window
+  # and the retired monitor were removed at gap-retire-inner-state-one-observer-targets-by-parameter,
+  # so the job is cheaper now), so this is NOT a per-push
   # job — it is gated to workflow_dispatch (milestone-cadence: a human or milestone agent triggers
   # it at milestone/release boundaries, matching ADR-010's milestone e2e and CLAUDE.md's "packaging
   # e2e is not covered by scripts/test.sh" stance). Never passes --push to publish-dist-branch.sh

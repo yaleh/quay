@@ -3,7 +3,7 @@
 // merged telemetry AC + AC8c observable-consequences checklist).
 //
 // Pins the cold-start skill's agent-executed contract:
-//   AC5  — plugin/skills/cold-start/SKILL.md instructs mounting BOTH monitors (inner-state.sh +
+//   AC5  — plugin/skills/cold-start/SKILL.md instructs mounting THE ONE monitor (session-liveness-mount.sh; inner-state.sh retired,
 //          session-liveness.sh) via the Monitor tool, and explicitly forbids nohup (a nohup'd
 //          process is identical in `ps` but its output goes to a file — nobody is notified).
 //          "事件送得到" not "进程在跑".
@@ -76,13 +76,13 @@ test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and i
     'plugin.json commands[] must register the cold-start skill');
 });
 
-test('AC5 — the skill mounts BOTH monitors via the Monitor tool (inner-state + session-liveness)', () => {
-  assert.match(skillSrc, /Monitor\(\{command:.*inner-state\.sh/s,
-    'the skill must instruct a Monitor for inner-state.sh');
+test('AC5 — the skill mounts THE ONE monitor via the Monitor tool (session-liveness-mount.sh; inner-state.sh retired)', () => {
   assert.match(skillSrc, /Monitor\(\{command:.*session-liveness-mount\.sh/s,
     'the skill must instruct a Monitor for the single-flight mount entry session-liveness-mount.sh (AC20)');
+  assert.ok(!/Monitor\(\{command:.*inner-state\.sh/.test(skillSrc),
+    'the skill must NOT instruct a Monitor for inner-state.sh (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC2)');
   assert.match(skillSrc, /persistent:\s*true/s,
-    'both monitors must be persistent (outlive the current turn)');
+    'the monitor must be persistent (outlive the current turn)');
   // The judgment is "events delivered to THIS session", not "process running".
   assert.match(skillSrc, /DELIVERED to this session/s,
     'the skill must state the delivered-event criterion');

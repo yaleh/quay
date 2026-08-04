@@ -106,11 +106,14 @@ bash plugin/scripts/loop-driver-check.sh
 
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
-`Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询：
+`Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询。
+观测只有一个工具（SPEC-one-observer-two-surfaces.md）：`session-liveness.sh`（经
+`session-liveness-mount.sh` 单飞挂载入口挂上）：
 
 ```
-Monitor({command: "$REPO_ROOT/plugin/scripts/inner-state.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
-         description: "内层状态转变", persistent: true, timeout_ms: 3600000})
+Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+         description: "会话存活/活跃（SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT）",
+         persistent: true, timeout_ms: 3600000})
 ```
 
 **4c. 重挂后立即验证挂上了 —— 三判据自检**
@@ -226,16 +229,18 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 ### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
 
-20 分钟 tick 的盲区是**内层停摆后的等待时间**。`plugin/scripts/inner-state.sh` 只在**状态
-转变**时发声，挂成 `persistent` Monitor：
+20 分钟 tick 的盲区是**内层停摆后的等待时间**。观测只有一个工具：`session-liveness.sh`
+（SPEC-one-observer-two-surfaces.md，gap-retire-inner-state-one-observer-targets-by-parameter）。
+`inner-state.sh` 已退役——它不观测会话（`tmux` 命中 0），它的招牌信号 `.quay/inner-blocked.json`
+在三个项目里从未产生，包括我们撞上过的唯一一次真实事故（那 68 分钟也没有它）。挂成
+`persistent` Monitor，事件经共享事件文件送达（详细事件表见 0b2）：
 
 | 事件 | 含义 |
 |---|---|
-| `IDLE` | 在飞任务清空 —— 内层可能在等裁定 |
-| `START` | 在飞集合变化 —— 新一批开工 |
-| `OVER90` | 单任务超 90 分钟 —— 内层自己的停摆阈值 |
-| `ORPHAN` | 有 `--task-start` 无 `--task-end` |
-| `RISKY` | master 出现 revert / `--ours` / `--theirs` / force 类提交 |
+| `SESSION-GONE` / `SESSION-BACK` | 会话进程消失 / 恢复 |
+| `REPO-STALL` | 仓库 ≥`STALL_MIN` 分钟无新提交（未暂停的项目）——仓库信号，不是会话面 |
+| `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 |
+| `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；在转换后一个轮询周期内报出 |
 
 **它买什么、不买什么**（2026-08-02 实测得出，别搞混）：
 
@@ -330,19 +335,14 @@ trigger-is-dead-code-never-wired-into-any-tick）：步骤 1 的 `--detect-stop 
 | `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 | 会话面（心跳源=transcript） |
 | `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** | 会话面 |
 
-**外层该挂哪两个、各自答什么问题（AC12——不合并，合并会让一种失效掩盖另一种）：**
+**外层挂一个监视器（AC12 已随 inner-state.sh 退役而收口）——它答「会话还在不在」：**
 
-| 挂什么 | 答什么问题 |
-|---|---|
-| `inner-state.sh`（工作状态） | **它在做什么**——批次起止 / 阻塞 / 危险变更 |
-| `session-liveness.sh`（会话状态） | **它还在不在**——进程活/死、忙/闲、心跳逾期没有 |
-
-`inner-state.sh` 只看工作产出：内层死了它只会看到「没有新遥测」，与「在思考难题」同形。
-`session-liveness.sh` 补的正是这个洞。**内层的心跳是它的会话 transcript**（AC1/AC16，2026-08-03
-实测选定）——`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，不是有效心跳源；
-transcript 每次工具调用都写（含 subagents 目录）。经 `SESSION_TRANSCRIPTS`（会话 id 或绝对路径）
-或 `SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。**解除停机（删 `.halt`）那一刻重置陈旧度基线**，
-停泊期间的陈旧不计入解除停机后的 OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
+`session-liveness.sh` 看【会话】本身：进程活/死、忙/闲、心跳逾期没有。**内层的心跳是它的会话
+transcript**（AC1/AC16，2026-08-03 实测选定）——`.workflow-events/` 每任务只写 1-2 行、任务
+进行中完全冻结，不是有效心跳源；transcript 每次工具调用都写（含 subagents 目录）。经
+`SESSION_TRANSCRIPTS`（会话 id 或绝对路径）或 `SESSION_HEARTBEATS` 配置；外层心跳是 tick 日志。
+**解除停机（删 `.halt`）那一刻重置陈旧度基线**，停泊期间的陈旧不计入解除停机后的
+OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
 
 **四个阈值（AC5，含义与默认值在这里，不只活在脚本注释里）：**
 
