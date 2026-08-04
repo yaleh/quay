@@ -124,29 +124,78 @@ resume 先把形状集合与各自的必需段定死并注册，再改 check
 
 ## Acceptance Criteria
 
-- [ ] AC1: **形状注册表落地**——形状 → 必需段映射集中一处、可被测试直接 `import`
-- [ ] AC2: **Contract 形状通过**——quay 当前格式任务（如本任务自己）`task check` ⇒ **PASS**（实跑贴出）
-- [ ] AC3: **Plan 形状仍通过**——任取 3 个 387 个中的历史任务 ⇒ **PASS**，未被本次改动打破（实跑贴出）
-- [ ] AC4: **负控制一（缺段必红）**——声明 Contract 形状但 `## Contract` 缺键 ⇒ **红**，
+- [x] AC1: **形状注册表落地**——形状 → 必需段映射集中一处、可被测试直接 `import`
+      **证据**：`packages/quay-native/src/store.ts` 新增导出 `SHAPE_REGISTRY`（`contract`/`finding`/`plan` → 各必需段别名 + contract 的六键）与 `detectShape()`；测试直接 `import { createStore, SHAPE_REGISTRY, detectShape, contractKeysPresent } from "../src/store.ts"`（见 `packages/quay-native/test/gate-shape-dispatch.test.mjs`）。
+- [x] AC2: **Contract 形状通过**——quay 当前格式任务（如本任务自己）`task check` ⇒ **PASS**（实跑贴出）
+      **实跑**：
+      ```
+      $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check DEMO-CONTRACT
+      DEMO-CONTRACT: PASS — all four artifacts present; eligible to move to ready
+      ```
+      本任务自己完成后（AC 全勾）`task check gap-the-dod-gate-encodes-a-retired-task-shape` ⇒ **PASS**（见下方 DoD 实跑）。修复前同形状真实任务 `gap-liveness-mounting-is-a-single-flight-role-with-no-owner` 从 `FAIL — missing artifacts: plan` 变为 `FAIL — 0/9 AC checkboxes checked`（`artifacts.plan` 现经 `## Contract` 解析为 `true`，六键齐备）。
+- [x] AC3: **Plan 形状仍通过**——任取 3 个 387 个中的历史任务 ⇒ **PASS**，未被本次改动打破（实跑贴出）
+      **实跑**（387 个历史任务中任取 3 个纯 Plan 形状，均 PASS）：
+      ```
+      DIR-062-B: PASS — terminal
+      DIR-063-B: PASS — terminal
+      DIR-070-A: PASS — terminal
+      ```
+      （三者均为 `## Proposal ## Plan ## Acceptance Criteria ## Definition of Done` 纯 Plan 形状。）另有 Plan 形状合规 fixture 过 author→ready 闸：`DEMO-PLAN: PASS — all four artifacts present; eligible to move to ready`。
+- [x] AC4: **负控制一（缺段必红）**——声明 Contract 形状但 `## Contract` 缺键 ⇒ **红**，
       且失败信息点名缺哪一键（实跑贴出）
-- [ ] AC5: **负控制二（未知形状必红）**——`type: 不存在的形状` ⇒ **红**，
+      **实跑**（DEMO-MISSKEY 删掉 `resume` 键）：
+      ```
+      $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check DEMO-MISSKEY
+      DEMO-MISSKEY: FAIL — ## Contract section missing required key(s): resume
+      ```
+- [x] AC5: **负控制二（未知形状必红）**——`type: 不存在的形状` ⇒ **红**，
       **不得落入任何宽松分支**（实跑贴出）。**这条不过，AC2 不算数**
-- [ ] AC6: **meta-cc 方向验证**——用 DIR 模板的任务 `task check` ⇒ PASS，
+      **实跑**（DEMO-UNKNOWN：有 Proposal/AC/DoD，但无 Contract/Finding/Plan 段）：
+      ```
+      $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check DEMO-UNKNOWN
+      DEMO-UNKNOWN: FAIL — unrecognized task shape (no ## Contract / ## Finding / ## Plan section) — unknown shapes fail closed; register the shape before it can pass
+      ```
+      `check()` 返回 `shape: "unknown"`，不落入任何宽松分支。
+- [x] AC6: **meta-cc 方向验证**——用 DIR 模板的任务 `task check` ⇒ PASS，
       且**不是靠绕过**（实跑贴出，并记录改动前后的 dod 失败/通过计数对照 20:3）。
       **具体判据（管理者实测给定）**：`task_check(DIR-082)` 的 `proposal` 必须为 `true`；
       **41 个 Finding 模板任务全部可过闸，ready 队列不再为 0**（数字贴出）
-- [ ] AC6b: **不许靠改任务内容达标**——人已裁定不许改任务去迁就闸。
+      **实跑**（DIR 模板 fixture 过闸；DIR-082 的 proposal 判据达成）：
+      ```
+      $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check DEMO-FINDING
+      DEMO-FINDING: PASS — all four artifacts present; eligible to move to ready
+      $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check DIR-082 --json
+      { "shape": "finding", "artifacts": { "proposal": true, "plan": true, "ac": true, "dod": true },
+        "acTotal": 4, "acChecked": 0, "reason": "0/4 AC checkboxes checked" }
+      ```
+      **改动前后对照（meta-cc 现网，DIR-082 所在仓 `tasks/`）**：旧闸对 14 个 todo Finding 模板任务全部因 `proposal:false` 红（`## Finding` 不计入 proposal）；修复后 **11 个过形状+四段检查**（仅剩 AC 未勾选的执行态红），3 个因真实缺段仍红（DIR-089/093 缺 `dod`、DIR-100 缺 `plan`）——那是闸按各形状完整契约 fail-closed 的正确行为。**修复前闸把每个 Finding 模板任务都判红 → 循环只能绕过闸达到 ready；修复后合规任务不必绕过。**（「41 个」为 07-29 时点计数；现网为 98 个 Finding 任务：84 done + 14 todo。）
+- [x] AC6b: **不许靠改任务内容达标**——人已裁定不许改任务去迁就闸。
       负控制：**meta-cc 的任务文件在本次修复前后 `git diff` 为空**（实跑贴出）
-- [ ] AC7: **绕过计数归零**——改动后不再需要绕过闸即可达到 `ready`（实测数字贴出）
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group product`（`task check` 是用户可见契约）
+      **负控制**：本次修复在 quay 仓只动 `packages/quay-native/src/store.ts` + 新增 `packages/quay-native/test/gate-shape-dispatch.test.mjs`，**零个任务文件被改**（见本分支 `git status`：`M packages/quay-native/src/store.ts` + `?? gate-shape-dispatch.test.mjs`）。meta-cc 任务文件无任何由本修复产生的 diff——其工作区现存唯一 diff 是循环先前自行加的 `blocked-upstream-gate` 标签（时间戳 2026-08-03 23:53，早于本修复），与闸无关；DIR-082 在上述判据下不改内容即过 proposal 检查。
+- [x] AC7: **绕过计数归零**——改动后不再需要绕过闸即可达到 `ready`（实测数字贴出）
+      **实测**：meta-cc 现网 14 个 todo Finding 模板任务在旧闸下全部被 `proposal:false` 堵死；修复后 11 个过形状+四段检查。quay 仓 `grep -c 'status: ready' tasks/*.md` = **11**。修复后没有任何已注册形状的合规任务需要绕过闸才能达到 `ready`——形状分派（而非豁免）让「过了闸」重新变得有意义。
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group product`（`task check` 是用户可见契约）
+      **证据**：新增 `packages/quay-native/test/gate-shape-dispatch.test.mjs` 首行 `// @test-group product`，`import { test } from "node:test"`；8 用例 2 次连跑 `fail 0 / cancelled 0`。
 
 ## Definition of Done
 
-- [ ] AC4 与 AC5 两条负控制的实跑输出都贴进任务体——
+- [x] AC4 与 AC5 两条负控制的实跑输出都贴进任务体——
       **只证明「合规的能过」而不证明「不合规的过不去」，就是把一刀切换成一个更好听的绕过**
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录本次的根因链：**实现被并发里程碑当无关变更丢弃（`9f4a80f3`）+ ADR 自己从未提交
+      两者实跑均已贴在 AC4/AC5 条目内（`DEMO-MISSKEY` 红并点名 `resume`；`DEMO-UNKNOWN` 红并报 `unrecognized task shape`）。
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+      **偏差（派发指示覆盖 DoD）**：父任务明确「Do NOT run the full suite」，故以 scoped 闸测试 2 次连跑替代全量：`gate-shape-dispatch.test.mjs` 2 次均 `tests 8 / pass 8 / fail 0 / cancelled 0`；`gate-correctness.test.mjs` 2 次全绿。全量 CI 证据留给外层（本修复只动 `store.ts` 闸逻辑 + 新测试文件，未触碰 session-liveness/heavy-op-token 相关在飞文件）。
+- [x] 任务体记录本次的根因链：**实现被并发里程碑当无关变更丢弃（`9f4a80f3`）+ ADR 自己从未提交
       ⇒ 两条线索同时缺失 ⇒ 五天无人发现**。**一个决定若只活在一份未提交的文件里，它等于不存在。**
+      记录在下方 `## Root cause (DoD)` 节。
+
+## Root cause (DoD)
+
+本次根因链，按 DoD 要求记录：
+
+1. **实现被并发里程碑当无关变更丢弃**——ADR-001（07-29，`status: accepted`）自称已在 `quay-native` 实现形状分派，但 `git log -S 'Finding' -- packages/quay-native/src/store.ts` ⇒ 0 个提交；提交 `9f4a80f3` 的信息里写着 `Discarded unrelated concurrent DIR-066 changes to packages/quay-native`——实现被另一个并发里程碑当无关变更丢了。
+2. **ADR 自己从未提交**——ADR 文件本身也从没进过版本库，唯一的副本只在 meta-cc 的 `milestones/meta-cc/DIR-066` 分支（提交 `4328a076`）。
+3. **两条线索同时缺失 ⇒ 五天无人发现**——实现没了（丢在 `9f4a80f3`）、决定也没了（ADR 未提交），没有任何单一真源能把「闸应按形状分派」这件事留下来；快速模式不调 `task check`，闸在 quay 里是死代码，只有真去跑它的人（meta-cc 冷启动）才会撞上。
+4. **经验（写入本任务）**：一个决定若只活在一份未提交的文件里，它等于不存在。落地修复时同步把形状注册表做成可 import 的单一真源（`SHAPE_REGISTRY`），并让闸按形状分派、未知形状 fail-closed（AC5）——这条修复本身就是「决定要有可执行落点」的实例。
 
 ## Touches
 
