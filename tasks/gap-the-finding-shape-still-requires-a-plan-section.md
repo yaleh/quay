@@ -78,6 +78,15 @@ resume 先看 SHAPE_REGISTRY 里 finding 的必需段集合，再改
 - [ ] 任务体记录：**现场那批任务恰好都带 `## Plan`，所以掩盖了这个残留**——
       **只看现场会宣布完成，而测试测的是判据本身**
 
+## Carries
+
+from: gap-no-e2e-proves-install-is-configuration-driven
+acs: AC5
+
+本任务承载红 e2e 的 A4 绿（finding 无 Plan 过闸）：drop finding 形状的 Plan 要求后，
+`packages/quay/test/install-config-driven-e2e.test.mjs` 的 A4 断言必须变绿——**谁修谁证明**。
+（原 stub 承载任务 `gap-finding-shape-still-requires-plan` 已并入本条，避免重复承载。）
+
 ## Touches
 
 - packages/quay-native/src/store.ts
