@@ -565,6 +565,20 @@ Flags:
                     gate run, print stdout/stderr + exit code, but do NOT append a GateEvent
                     or mutate task status. Short form: -n. Only valid with the default
                     'acceptance' gate.
+
+Environment contract — when the default 'acceptance' gate spawns a command:
+  The runner spawns 'sh -c' (a clean shell — no .bashrc/.profile is sourced).
+  PATH is inherited from the invoking process, not a fixed system default.
+  Override the environment with a per-provider 'acceptance_env' file:
+    acceptance_env  DIR-103-C: per-provider config key in .quay/config.yml's provider
+                    block — a path to an env file that is dot-sourced before every
+                    acceptance command dispatched through that provider. Relative paths
+                    resolve against the workspace root. If the configured file does not
+                    exist, the runner fails closed BEFORE executing the acceptance
+                    command. The QUAY_ACCEPTANCE_ENV env var overrides the config key
+                    when pre-set (mirrors the QUAY_ACCEPTANCE_CWD / QUAY_ACCEPTANCE_
+                    TIMEOUT_MS explicit-override-wins precedence — a pre-set env var is
+                    never clobbered).
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
