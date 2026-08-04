@@ -2270,6 +2270,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   全是文档+新脚本任务，scoped 测试便宜）；否则等基准完成（可能再 1 小时+）。
 - 就绪池 = 3 ✓（等槽位）；无停止条件、无阻塞；监视器 mounted:true（session-liveness）。
 
+### 管理者裁定：派 2 条小任务，不等基准（2026-08-04T17:07Z）
+
+- **裁定**（不升级给人，可推导的技术权衡）：派 2 条小任务，不等 suite-speed 基准跑完。三条理由：
+  ① scoped 文档/脚本任务不跑全量 ⇒ run-to-run 方差污染风险最小；② suite-speed 的 σ 纪律该等的是
+  它自己（1h+），不是拿它当理由让就绪池空转；③ 滚动派发是今晚默认，槽位空着没有强理由就该填——
+  「可能轻微污染不相关任务的测量」不构成强理由。
+- **已驱动内层**：从就绪池派 2 条（am2 / promotion-cadence / reliable-send 任选 2，全 disjoint 核实），
+  后台 Agent(run_in_background:true)，实现期 scoped --for-task 不跑全量，全量留 fan-in。
+- **送达确认**（transcript，结晶文档唯一可信信号）：指令 17:06:50 落进内层会话（uuid 9e786e8a）。
+  派发 worktree 待内层处理（当前 suite-speed agent 仍独立跑其多轮 σ 测量，不受影响）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
