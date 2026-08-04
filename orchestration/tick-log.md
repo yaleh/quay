@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 14:36Z | `unblock`（第三次重启冷启动 + 执行 A–F 裁定） | 订正交接文档模型（deepseek-v4-flash，人裁定）；核实 A–F 草案关键引用并定稿 outer-rulings（附核实记录表）；立案 A/D/B（commit 45c0f91）；F superseded send-keys-verified（分支 6a51f964 保全、worktree 移除）；park retirestate（61a92a41 保全）；token-counter 改范围；关两条崩溃残留遥测括号、清 task-over-90m auto-block（wait 1365.2s）；tmux send-keys 驱动内层 A→D→B 实现；重挂 inner-state Monitor + 建 cron（LIVE）；写回队列 | 内层刚 boot（deepseek-v4-flash 欢迎屏）即收到 A/D/B 指令开始思考；在飞 0/3（内层实现中，非外层 Agent）；Monitor 三判据 true；loop-driver LIVE(1)；`--detect-stop` 无命中 | ①ADR-016 clause1 原文（adr/ADR-016...md:36）；②session-liveness.sh:612 整屏哈希；③inner-blocked-signal.ts:634 `omitted ⇒ no-op`；④fast-mode tick:233 裸 `--detect-stop` 无 `--transcript`；⑤简报 §2 订正后与 TMUX 实况一致 |
 | 2026-08-04 06:20Z | `correct`（**correct-self 两次**：我报了一个被负载放大的数，又先怀疑了一个更坏且不成立的成因） | **核实内层「30/30 绿」的声称并查到跨任务回归**；把根因与同族先例修法直接给内层，省它一个诊断轮次；把管理者的 `run_in_background` 实测折为 AC1b，把「`--task-start` 可靠」的确证写进任务体 | 内层：**两条任务已实质关闭**（tmpfs `done` AC 9/9 DoD 4/4；token `done` AC 8/8 DoD 4/4），worktree 只剩 3b 一条（1 分钟前提交）。**3b 已于 06:19 合并进 master**（`b76c3d51`），**06:26 起跑合并后的全量套件 #12**。棘轮 `new 0`。遥测：完成仍 **64**、tph **1.459**、`inProgress 4`（含 `gap-init-guesses` **重复两条**：幽灵 + 新 start）。**门槛红断言数：0**（`tests 6 / pass 6`）。Monitor 三判据全 true；驱动 LIVE(1) | **①核实内层写在已 `done` 任务里的「Contract invoke 实跑 → 30/30 绿」**。第一次实测 `fail 12`，**重跑 `fail 2`** ⇒ **我第一次是在内层同时跑套件时测的，被负载放大，报 2 不报 12**（此即上一 tick 那族负载敏感的又一次现身）。**②我先怀疑的是更坏的情况——「done 任务带着一个跑不了的 `invoke`（测试文件从未创建）」——查了，不成立**：`worktree-root-fs-check.test.mjs` 04:27 就已建好。**③真因是跨任务回归，而且内层没有虚报**：3b 的 tmux 检测 **06:19 随 `b76c3d51` 合并进 master**，其 fail-closed 让那两条**不传 `--tmux-session`** 的测试变红（报 `none could be detected ... matching 'quay-wt-ws-xxxx'`）。**内层写「30/30 绿」时是真的**——它跑在钉住的 `verify` 上，**红是之后由另一条任务带来的**。⇒ **一条已关闭任务的 `invoke` 现在在 master 上跑不通，而它的 DoD 两次全绿发生在破坏性合并之前。** **④已把根因与先例直接给内层**：它自己 04:48 的 `6e5d16d1` 为**同一类原因**适配过两条，`cold-start-skill.test.mjs:137` 现成写法可照抄；**当时漏掉第三条不是疏忽——那时 tmux 检测还没在 master 上，它是绿的**。**机制在按设计工作**：内层已在跑合并后的全量套件，它会抓到这 2 条 |
 | 2026-08-04 06:00Z | `no-action`（**内层正常推进；外层核实两项，均未介入**） | 只读核实。**未派发、未纠偏、未提指令** | 内层**在飞 1**（套件 #11，DoD 连两绿之 2）+ 排队 7（任务列表 10 项：1 done / 2 in progress / 7 open）。两条已落地任务仍 `status: todo`、**AC 0/9 与 0/8**——**落地不等于完成，连续第四个 tick 守住**。棘轮 `new 0`。遥测：完成 **64**、tph **1.471**、`inProgress 3`（幽灵，已知不可用）。**门槛红断言数：0**（`tests 6 / pass 6 / fail 0 / cancelled 0`）；**门槛六条已编码五条，剩 A5 待 `gap-the-runtime-has-nowhere-safe-to-land` 的 AC11**。Monitor 三判据全 true；驱动 LIVE(1) | **①核实上一 tick 我提的「追最新 master 会让 DoD 计数反复归零」是否成立——不成立了，内层已把 `verify` 钉在自己的实现提交 `baaa0f80` 上**，不再追 master ⇒ 外层此后的提交不再作废它的套件。**实测三次结果**：`#9` 绿 2211、`#10` 绿 2212（多的一条正是新加的 `A6`）、`#11` 在跑。**关键区分**：`#9` 与 `#10` 虽都绿但**不在同一棵树**（`#10` 起于 A6 落地后），所以 **`#10` 才是当前树上的第一次绿、`#11` 是第二次**——**这是合法的 DoD 配对，不是重复劳动**。⇒ **无需介入，它离落地只差这一次。** **②核实管理者提交 `7a63801a` 是否指向外层自己的仪器——不是**：它改的是 `orchestration/manager-loop-tick.md`，说的是**管理者自己**的健康检查只问「监视器是否陈旧」、从不问「是否存在」，导致它 OOM 后 **3 小时 44 分**无会话面观测且由人发现。**外层顺手自查了同一个洞并有实证反驳**：`monitor-mount-check.sh` 的三判据里**第一条 `mounted` 就是「存不存在」**，而且**外层 02:37Z 挂载前的实际输出正是 `{"mounted": false, "targetRoot": ""}`**——**它确实会报出「一个都没有」，不是假设它会** |
 | 2026-08-04 05:42Z | `correct`（**correct-self：我连报几轮的「A5 无主」是错的**） | 核实内层把门槛 A6 编码进 e2e（`baaa0f80`）；**查清 A5 的归属并纠正自己此前的报告**；上一轮把规格追加节折进任务（`95863f74`） | 内层**在飞 1**（等套件 #9，DoD 连续两绿之 2）+ 排队 6。它本轮另立了两条：`...load-sensitive-session-family-confounds-step-three`（**采纳了外层 05:2xZ 交回的第三步冲突观察**）与一条 import/spawn 的说明提交。两条已落地任务仍 `status: todo`。棘轮 `new 0`。遥测：完成 **64**、tph **1.481**、`inProgress 3`（幽灵，已知不可用）。Monitor 三判据全 true；驱动 LIVE(1) | **①核实 A6 编码（这是外层 04:2xZ 补的 AC8，也是门槛两条缺口之一）**：断言名为 **`A6`** 而非 `AC6`；`:424-427` 的注释**逐字**写着「两者只差一个字母；一个绿的 `AC6` 对这个 `A6` 什么也没说」——**外层特意提的命名撞车被原样处理**；断言查的是落地配置的 `worktree_root` 及其文件系统类型不是 tmpfs。**实跑 `tests 6 / pass 6 / fail 0 / cancelled 0`。** ⇒ **门槛六条现已编码五条（A1–A4 + A6）**。**②纠正外层自己**：外层此前**连续几轮报告「A5 的 Go 半边仍无任务承载」——这是错的**。实测 `gap-the-runtime-has-nowhere-safe-to-land` 的 **AC11** 明确承载它，任务体里连缺口都已实测记好（e2e 断言关键词覆盖 `byte-identical`/`idempot`/`upgrade`/`finding`/`npm test`、**无 `go build`**），并写明「A5 的 Go 半边由本任务补入 e2e 并证明其变绿」。**它是 `todo` 未做，但有主。** **⇒ 准确表述从「A5 无主」改为「A5 待该任务的 AC11」。** **这条错误的形态值得记**：外层查过 `GOAL` 里 A5 的定义、查过 e2e 里没有它，**唯独没查任务库里谁认领了它**——**「门槛里没有」与「没有人负责」是两个问题，我把前者的答案当成了后者的答案** |
@@ -230,11 +231,15 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 58 | 37% |
-| unblock | 22 | 14% |
-| correct | 72 | 46% |
-| escalate | 4 | 3% |
-| **合计** | **156** | — |
+| no-action | 71 | 35% |
+| unblock | 36 | 18% |
+| correct | 88 | 44% |
+| escalate | 7 | 3% |
+| **合计** | **202** | — |
+
+> **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
+> **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
+> 全行数重算并加入本次 tick 一行（unblock），得 202。
 
 ### 分类法缺陷（2026-08-03 发现，尚未修）
 

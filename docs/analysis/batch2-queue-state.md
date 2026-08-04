@@ -1998,3 +1998,25 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
   调用链，唯一调用者 `prepare-milestone.js --decide-split` 被 ADR-022 物理删除，15 次重复派发场景
   不可再现），任务体含完整证据 + 人原话。
 - **在飞（2/3）**：sendkeys + retirestate。二者是 cold-start self-hosting 规格链的真实前置依赖。
+
+### 第三次重启 + A–F 裁定（2026-08-04T14:36Z，外层 tick）
+
+**背景**：第二次 OOM 整机崩溃后第三次重启。vhs/transformer 两台机器都死在 `gap-send-keys-verified-...`
+的夹具造假（子代理裸调 `tmux kill-server` 误杀真实服务端）。人给出 A–F 六条架构裁定，外层执行：
+
+- **裁定 A/D/B 立案并提交 master（`45c0f91`）**：
+  - `gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid`（**ready**）——就地修订
+    ADR-016 写死三条边界 + 按代码位置的机械检查器
+  - `gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable`（**ready**）——纯函数分类器
+    `classifyPaneState` + 真实录制夹具，`tmux_in_tests = 0`
+  - `gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`（**todo**，等 D）——把
+    `ruling-required` 触发源接到 D 的分类器
+- **F 处置**：`gap-send-keys-verified-...` **superseded**（status done + extra 标记；worktree 251 行
+  提交保全到分支 `6a51f964`、worktree 已移除、分支不合并）
+- **park**：`gap-retire-inner-state-...` 保持 ready + PARKED 注记（裁定 D 造的观察者是它要退役信号的
+  替代品，清理跟在架构后面；298+/233- 提交保全到分支 `61a92a41`、worktree 已移除）
+- **改范围**：`gap-session-liveness-hashes-the-token-counter-...` 不再加剥离规则，改为消费 D 的分类器
+- **遥测**：两条崩溃残留的在飞括号已关（`--task-end ... --outcome abandoned`），`--detect-stop` 的
+  `task-over-90m` auto-block **已清除**（等待 1365.2s 计入死时间基线）
+- **在飞（0/3）——内层实现中**：已用 tmux send-keys 驱动内层按 A→D→B 顺序实现三任务（不是外层
+  直接 Agent 派发）。内层刚 boot（deepseek-v4-flash 欢迎屏）即收到指令开始思考。
