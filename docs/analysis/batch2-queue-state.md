@@ -44,7 +44,15 @@
 - ✅ `gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second`：已 merge（`b51b650e`，遥测同步闭），emit 路径拆分——全量记录进共享 events.jsonl、持有者阈值只 gate stdout；adr016 哈希带保持 1。scoped 38/0/1 + 重跑 EXIT 0
 - ✅ `gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet`：已 merge（`7478d979`，遥测同步闭），`expandDeclaredTouches`（声明式 (new) touch 不查盘，通配符才查）；镜像实为 symlink 天然一致。scoped 43/0 两次
 - ✅ `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards`：已 merge（`d13ce490`，遥测同步闭），`--reconcile` 机制（按可观察判据关掉崩溃残留的 phantom inProgress；fail-closed 向 keep）+ ORPHAN 方向文档更正（code 里 ORPHAN=end-without-start，与旧文档相反）；scoped 40/40
-- **批 3 全量（3 条 merged）**：首跑 1 fail——dispatch-eligibility 的 scheduler replay fixtures（`experiments/.../fixtures/scheduler/replay-*.md`）把旧路径正则作为输出数据嵌入，被 loop-shipping AC1b 全仓扫描误判为 live 引用。**已修**（loop-shipping AC1b 排除 fixtures 目录，`ef587d22`，12/12 绿）。**重跑全绿 — tests 2283 / fail 0 / cancelled 0 / skipped 28**（新参考值 2283）。3 条任务 body 关闭由 closure agent 执行中（AC/DoD 勾 + invoke 证据 + status done）
+- **批 3 全量（3 条 merged）**：首跑 1 fail——dispatch-eligibility 的 scheduler replay fixtures（`experiments/.../fixtures/scheduler/replay-*.md`）把旧路径正则作为输出数据嵌入，被 loop-shipping AC1b 全仓扫描误判为 live 引用。**已修**（loop-shipping AC1b 排除 fixtures 目录，`ef587d22`，12/12 绿）。**重跑全绿 — tests 2283 / fail 0 / cancelled 0 / skipped 28**（新参考值 2283）。**批 3 关闭完成**（closure `f7b32ccf`）：3 条全 done，invoke 证据齐全（task-contract 0 新违规），遥测全配对，worktree 全清。
+
+## 累计（2026-08-04 三个批）
+
+- **批 1**：A/D/B/L0 四任务 done，全量 2276。
+- **批 2**：8 任务 done（node-cache/retire-inner-state/task-write/am2/reliable-send/promotion-cadence/ready-pool-defect/suite-speed），全量 2298。
+- **批 3**：3 任务 done（phantom-in-flight/log-filtered/dispatch-eligibility），全量 2283。
+- 全量参考值演变：2276 → 2298 → 2283（phantom-in-flight 测试重标 governance 后默认 product,engine 下 skip，故略降）。
+- **就绪池（ready-pool-check 诚实口径）**：0（taskWorkLanded 过冲缺陷待修——见上「⚠ 发现的机制缺陷」）。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
