@@ -1,6 +1,6 @@
 ---
-id: gap-author-to-ready-requires-every-ac-checked-so-ready-means-done
-title: "author→ready requires every AC checkbox checked, so a task can only become ready after it is finished — meta-cc's queue is still 0 behind the shape fix"
+id: gap-both-gates-read-one-signal-so-done-costs-nothing
+title: "Both gates read the same AC checkboxes, so execute→done is vacuous — a 30-minute-old task with zero work is certified closeable"
 status: todo
 labels:
   - gap
@@ -94,6 +94,64 @@ AC1 就是这条的判据。
 **这条是 G4 的最后一道**：meta-cc 的循环活着、cron 在跳、tick 已 5 行，
 但**完成任务数仍是 0**——**只证明装得上，不证明装上的是方法论。**
 
+### 结构性升级（管理者 2026-08-04 00:55Z 实测）——**两道闸读同一份证据，第二道是空的**
+
+**这条把本任务从「author→ready 太严」升级为「两道闸的证据源必须分开」，两者是同一件事的两半。**
+
+**实测（meta-cc `DIR-102`，plan 形状）**：
+
+| 时刻 | 事件 |
+|---|---|
+| 00:24Z | 建立，4 个 AC **全未勾** |
+| 00:29Z | 一次提交把 **4 个勾全打上**并升格 `ready` |
+| 现在 | `task check DIR-102` ⇒ gate `execute-done`、**`ok: true`**、`all AC checkboxes checked - eligible to move to done` |
+
+**⇒ 一个建立三十分钟、零工作量的任务，已经被认证为可以关闭。**
+
+**根因很干净**：`author→ready` 要求 AC 全勾，`execute→done` **也**要求 AC 全勾
+⇒ **两道闸读同一份证据** ⇒ **过了第一道就自动满足第二道**
+⇒ **`execute→done` 对任何合法到达 `ready` 的任务都是空的。**
+
+**替 meta-cc 外层说一句（管理者原话）**：**它没有作弊**，它是照 ADR-001 原文做的——
+那份 ADR 明写 plan 形状的任务 *pre-checked ACs encode planning complete*。
+**但那个说法在这里站不住**：`DIR-102` 的 AC 内容是**结果断言不是规划**——
+*After one real dispatch-close cycle report json shows the task*、
+*During that cycle task-start fired*、*A check exists that reports…*
+⇒ **勾上它们等于宣称尚未发生的事已经发生。**
+
+**而真正该被 done 闸读的证据就在同一个文件里**：**DoD 三条全未勾**，内容是
+*One real task went through dispatch-close with its telemetry records attached*、
+*make commit passes*、*Changes landed on main*——**那才是完成的证据。**
+
+### 这条不与已记录的「permanent」判定冲突——它是另一件事
+
+`store.ts:877-883` 与 `gate-gameability.test.mjs` 头部明写一条
+**「expected, structural, permanent」**的边界，并警告后来者不要当缺陷去修。**外层读全后确认它说的不是这件事**：
+
+| | 已记录且确实不可修 | 本条，可修 |
+|---|---|---|
+| 内容 | 闸只验复选框的**存在与勾选状态**，**永不验勾选的声称是否为真** | **两道闸读同一份证据**，第二道对任何合法到达 ready 的任务是空的 |
+| 为什么 | 通用机械解析器无法判断声称真假——**那是独立评审的事** | 结构冗余，**把证据源分开即可** |
+
+注释里那句 *a checked-but-false AC claim passes both gates* 讲的是
+**假声称能穿过两道闸**，**不是两道闸互为冗余**。**后者从未被处理过。**
+
+**⇒ 修本条不违反那条 permanent 判定；但改动时必须保留它**——
+`gate-gameability.test.mjs` 里那些 PASS 断言仍应成立（AC8）。
+
+### 为什么它到今天才被发现（值得记住的形态）
+
+**单看任何一道闸，判据都是合理的**：
+「AC 全勾才能开工」看着严谨，「AC 全勾才能关闭」也看着严谨。
+**只有把两道放在一起看，才暴露第二道是空的。**
+
+**⇒ 一道闸的价值不由它自己的判据决定，而由它与上游闸的证据差决定。**
+
+### 对 G4 的直接影响
+
+G4 是「**通过闸端到端完成至少一个任务**」。
+**在本条修好之前，任何 `done` 都不构成 G4 的证据**——因为 **`done` 可以零工作量取得**。
+
 ## Contract
 
 ```
@@ -143,6 +201,15 @@ resume 先确认 acAllChecked 出现在 author→ready 是不是本意，再改
       **`ready→done` 必须仍然红**。**这条不过，AC3 不算数**——
       把「ready 太严」修成「done 太松」是更坏的交易
 - [ ] AC6: **`## Plan` 形状不受影响**——历史任务的判定行为不变（实跑贴出）
+- [ ] AC7b: **两道闸的证据源必须不同**——`author→ready` 读**计划与 AC 的存在与形状**；
+      `execute→done` 读 **DoD 的勾选**。
+      **判据：造一个 AC 全勾但 DoD 全未勾的任务 ⇒ `execute→done` 必须红**（实跑贴出）。
+      **这是本任务的主判据**——`DIR-102` 正是这个形状
+- [ ] AC7c: **零工作量任务不得可关闭**——重演 `DIR-102`（建立、全勾 AC、升 ready）
+      ⇒ `execute→done` **必须红**（实跑输出贴任务体）
+- [ ] AC8: **不得破坏已记录的 permanent 边界**——`gate-gameability.test.mjs` 里
+      「勾了但声称为假仍能过闸」的 PASS 断言**必须仍然成立**。
+      **这条不过，AC7b 不算数**——**把「两闸冗余」修成「试图判断声称真假」是走进一个证明不可行的方向**
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
 
 ## Definition of Done
