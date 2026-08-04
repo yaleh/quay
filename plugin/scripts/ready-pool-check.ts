@@ -9,8 +9,10 @@
 //
 // WHAT IT DOES (a DETECTOR/RECOMMENDER, not a gate — always exits 0, never writes tasks/**):
 //   1. Compute the REAL ready pool = `status: ready` tasks MINUS the three non-dispatchable classes:
-//        (a) not-yet-flipped — all AC checkboxes checked but status still `ready` (this batch's work
-//            is done, waiting fan-in to flip to `done`); mechanically: checked>0 && unchecked==0
+//        (a) not-yet-flipped — the declared work has LANDED on master (task-status-drift-check's
+//            symbol-resolution / touch-file evidence) but status is still `ready` (this batch's work
+//            is done, waiting fan-in to flip to `done`); mechanically: taskWorkLanded(body) — does
+//            NOT depend on AC checkbox state (the fan-in merges without ticking ACs)
 //        (b) fixture         — `labels: fixture` (gate demo fixtures, never real work)
 //        (c) PARKED          — a body `**PARKED` marker (task-level suspension; plain-text mentions
 //            of the WORD "PARKED" in AC prose are NOT markers)
@@ -30,9 +32,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { parseTask, extractSection, countBoxes } from "./task-schema.ts";
+import { parseTask, extractSection } from "./task-schema.ts";
 import { checkTaskTouchesResolve, findRepoRoot } from "./touches-orthogonality-check.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
+// Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
+// symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
+import { taskWorkLanded } from "./task-status-drift-check.ts";
 
 /** The healthy ready-pool floor: pool must be ≥ this before promotion pressure releases. */
 export const POOL_FLOOR = 3;
@@ -115,15 +120,14 @@ export function kindOrder(kind) {
   return kind === "gap" ? 0 : kind === "dir" ? 1 : 2;
 }
 
-/** True when the task is in the "this batch done, not yet flipped to done" state — all AC
- *  checkboxes checked but `status` still `ready` (fan-in has not flipped it). */
-export function notYetFlipped(task) {
-  const ac =
-    extractSection(task.body, "Acceptance Criteria") ??
-    extractSection(task.body, "AC") ??
-    "";
-  const { total, checked, unchecked } = countBoxes(ac);
-  return total > 0 && checked > 0 && unchecked === 0;
+/** True when the task is in the "this batch done, not yet flipped to done" state — the declared
+ *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file evidence)
+ *  but `status` is still `ready` (fan-in has not flipped it). Deliberately does NOT depend on AC
+ *  checkbox state: the inner's fan-in merges WITHOUT ticking AC boxes, so all-checked is not the
+ *  closeout signal (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). */
+export function notYetFlipped(task, repoRoot) {
+  if (task.status !== "ready") return false;
+  return taskWorkLanded(task.body, repoRoot);
 }
 
 export function isFixture(task) {
@@ -187,7 +191,7 @@ export function analyzeTasks({ tasksDir, root }) {
     const reasons = [];
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
-    if (notYetFlipped(t)) reasons.push("not-yet-flipped");
+    if (notYetFlipped(t, root)) reasons.push("not-yet-flipped");
     if (reasons.length > 0) excluded.push({ id, reasons });
     else ready.push(id);
   }

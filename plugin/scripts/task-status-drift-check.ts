@@ -205,6 +205,30 @@ export function hasAnyCodeRootTouch(touchesSection, repoRoot) {
   return codeEntries.some((e) => entryExists(e, repoRoot));
 }
 
+// Reusable "the task's declared work has landed on master" predicate — exported for reuse by
+// ready-pool-check.ts's notYetFlipped (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool,
+// AC6: reuse the drift-check signal, never a parallel copy). A task's work is judged landed when
+// EITHER of the drift-check's two landing-evidence signals fires:
+//   - symbol: its distinctive backticked AC identifiers resolve in the code roots (the forward
+//     status-drift signal — a landed implementation backticks its own identifiers in its ACs); or
+//   - touch: at least one non-bookkeeping `## Touches` entry exists on disk (the reverse-drift
+//     CODE-LANDING evidence, hasAnyCodeRootTouch).
+// OR-composed deliberately: a merged-not-flipped task commonly shows only ONE of the two (its AC
+// backticks no distinctive symbols, or its Touches entries carry non-path annotations that make
+// touchesAllExist fail), and missing one signal must not hide a landed task from the pool. It does
+// NOT depend on AC checkbox state — the fan-in merges without ticking boxes, so checkbox state is
+// not the closeout signal.
+export function taskWorkLanded(rawTaskText, repoRoot, opts = {}) {
+  const ac = extractSection(rawTaskText, "Acceptance Criteria");
+  const candidates = extractSymbolCandidates(ac);
+  const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots: opts.roots }));
+  const ratio = candidates.length === 0 ? 0 : matched.length / candidates.length;
+  const symbolResolved = candidates.length > 0 && ratio >= (opts.ratioFloor ?? 0.6);
+  const touchesSection = extractSection(rawTaskText, "Touches");
+  const touchLanded = hasAnyCodeRootTouch(touchesSection, repoRoot);
+  return symbolResolved || touchLanded;
+}
+
 // A done task whose `children:` are ALL `done` is a parent whose implementation IS the children's
 // work (DIR-126 delegates its Touches to `[[DIR-126-A]]`…`[[DIR-126-E]]`). Reverse-drift asks "did
 // the implementation land?" — for such a parent the answer is "in its children", so it is not a
