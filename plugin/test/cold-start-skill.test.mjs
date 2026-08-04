@@ -42,6 +42,21 @@ function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+// A worktree root quay-init's validation ACCEPTS: a real disk path, not tmpfs. /tmp is tmpfs on
+// dev boxes and the sibling-of-repo default for a /tmp workspace would be rejected fail-closed
+// (gap-the-shipped-tick-doc-... AC3). /var/tmp is the disk-backed tmp on Linux; prefer it.
+function diskWorktreeRoot() {
+  for (const base of ['/var/tmp', os.tmpdir()]) {
+    try {
+      const t = spawnSync('stat', ['-f', '-c', '%T', base], { encoding: 'utf8' });
+      if (t.status === 0 && t.stdout.trim() !== 'tmpfs') {
+        return path.join(base, `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+      }
+    } catch { /* try next base */ }
+  }
+  return path.join(os.tmpdir(), `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+}
+
 const skillPath = path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md');
 const skillSrc = fs.readFileSync(skillPath, 'utf8');
 
@@ -118,7 +133,8 @@ test('rehearsal — a real --task-start against a quay-init --loop project write
   const ws = makeTmp();
   try {
     const init = spawnSync('bash', [path.join(pluginDir, 'scripts', 'quay-init.sh'),
-      '--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test'],
+      '--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
+      '--worktree-root', diskWorktreeRoot()],
       { cwd: ws, encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir } });
     assert.equal(init.status, 0, `quay-init --loop must succeed:\n${init.stderr}`);
     const ts = spawnSync('node', ['--experimental-strip-types',

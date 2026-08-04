@@ -562,6 +562,21 @@ function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+// A worktree root quay-init's validation ACCEPTS: a real disk path, not tmpfs. /tmp is tmpfs on
+// dev boxes and the sibling-of-repo default for a /tmp workspace would be rejected fail-closed
+// (gap-the-shipped-tick-doc-... AC3). /var/tmp is the disk-backed tmp on Linux; prefer it.
+function diskWorktreeRoot() {
+  for (const base of ["/var/tmp", os.tmpdir()]) {
+    try {
+      const t = spawnSync("stat", ["-f", "-c", "%T", base], { encoding: "utf8" });
+      if (t.status === 0 && t.stdout.trim() !== "tmpfs") {
+        return path.join(base, `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+      }
+    } catch { /* try next base */ }
+  }
+  return path.join(os.tmpdir(), `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+}
+
 function runInit(workspace, args, pluginRoot = path.resolve(__dirname, "..")) {
   return spawnSync("bash", [path.join(pluginRoot, "scripts", "quay-init.sh"), ...args], {
     cwd: workspace,
@@ -642,7 +657,7 @@ test("AC3/AC7 — the laid-down script, run --once, identifies THIS project's ow
   const env = { ...process.env, TMUX_TMPDIR: sockDir }; delete env.TMUX;
   try {
     const r = runInit(ws, ["--loop", "--root", ws, "--project", "proj",
-      "--test-command", "node --test", "--tmux-session", "ol-cold:0.0"]);
+      "--test-command", "node --test", "--tmux-session", "ol-cold:0.0", "--worktree-root", diskWorktreeRoot()]);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     // this project's own outer = <session>:outer window (the default-target convention).
     const ns = tmux(["new-session", "-d", "-s", "ol-cold", "-n", "outer", "bash"], env);
