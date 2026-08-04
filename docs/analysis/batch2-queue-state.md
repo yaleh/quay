@@ -2313,6 +2313,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   跑批量全量套件」。
 - 无停止条件、无阻塞；监视器 mounted:true；tph 1.385（窗口含 suite-speed 长测量，正常回落）。
 
+### 监视器事件 17:3xZ — suite-speed task-over-90m：too-big-not-stuck 裁定
+
+- 监视器报 suite-speed `task-over-90m` auto-block（90.4m）。**核实非卡死**：基准从 before/3 推进到
+  before/4（agent 活跃，1h31m）。σ 协议（before + after 各 ≥5 次全量）是**固有小时级**——管理者
+  已裁定「继续独立跑，不受影响」。
+- **裁定：too-big-not-stuck，继续**（与 retire-inner-state 90m 先例同族：任务过大非卡住，不中止）。
+- **后果**：auto-block 将持续到 suite-speed 括号关闭（机械条件未消），机械停止条件期间
+  promotion-cadence（唯一剩 ready）派发被推迟——**是否覆盖由管理者定**（吞吐 vs 机械停止条件）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
