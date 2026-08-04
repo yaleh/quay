@@ -2081,3 +2081,17 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
 - L0 的 general-purpose 子代理跑完后，内层会处理我的纠正消息（后续 Agent 必须带
   `run_in_background:true`）；到点时重查一次原始字段确认已落地。
 - 输入框用完即空（`C-u`）；下一步备忘一律记本文件，不再写进自己输入框。
+
+### tick 2026-08-04T15:02Z（外层，`no-action`：内层正常推进，无介入）
+
+- **常驻指令终于被满足**（原始字段核实，非 UI）：内层 15:01:41 的 Agent 调用
+  `Implement B ruling-required wiring` `input.run_in_background: true` ✓。L0 的原始调用
+  （14:49，rib ABSENT）仍在跑、按「让它跑完」处置未重派。
+- **进度**：A 已提交（`40ec564e`，checker `adr016-screen-use-check.ts` 在 worktree）；D 已提交
+  （`acec8b5d`，分类器 `pane-state-classify.ts` 在 worktree，任务体在写 AC5 实跑输出）；B worktree
+  建（`ruling-required-wiring`，基于 acec8b5d=D 的提交，依赖就绪）；L0 worktree 建（`tmux-isolated`）。
+- **subagent 在飞（2）**：L0（general-purpose，session-liveness env，12m+）+ B（general-purpose，
+  run_in_background:true，25s）——真正并发。**遥测括号在飞（2）**：B + L0（A/D 已开已闭或待闭）。
+- 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
+- **不 fan-in**：A/D 已提交未合并，等 B/L0 落地后按批（rebase→merge→选中集→全量）一次性收尾。
+- A/D 的最终验证（检查器负控制、分类器夹具）留给 fan-in 的 `--for-task` + 全量套件。
