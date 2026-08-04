@@ -1,7 +1,7 @@
 ---
 id: gap-suite-speed-under-a-297-second-sigma
 title: "Make the suite itself faster — under a σ of 297.6s, any single-run comparison is indistinguishable from noise"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

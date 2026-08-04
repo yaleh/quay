@@ -58,6 +58,18 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
       **现状：产品化搬移前扫出 20 个引用老路径的文件 + `scripts/test.sh` 三个调用点，
       落地前送达内层并被采纳 ✓（`bdada61b`）。**
 
+- [x] **AC-queue：ready 队列常态维持 ≥3 条真实可派发任务（2026-08-04 管理者交办，吞吐两条的第一修复位）。**
+      判据：对每个 tick，`tasks/*.md` 中 `status: ready` 且「真实、可派发」的条数 ≥ 3。
+      **「真实可派发」排除三类**：(a) 本批已做完、等 fan-in 关闭翻 done 的（A/D/B/L0 这类）；
+      (b) `labels: fixture` 的闸口演示夹具（QENG-5-DEMO-*）；(c) 已 PARKED 的（retirestate）。
+      排除后计数 = 就绪池。**晋级速率必须跟上派发速率**——就绪池 < 3 时，本 tick 内从 todo
+      积压里补晋（gap-* 缺陷优先、有 Contract、touches resolve 可派发、无在飞触摸重叠、
+      非 fixture、非 PARKED）。**注意**：ready 池「假满」（6 条里 0 条真可派发）正是批栅栏之外
+      的吞吐杀手——单改滚动派发无效（管理者 2026-08-04 裁定）。
+      **现状（15:4xZ）：排除前 6（A/D/B/L0 未翻 + QENG×2 + retirestate parked）；已晋级 3 条
+      （task-write-title / suite-speed / node-compile-cache，均 Contract、resolve 可派发）
+      ⇒ 排除后 3 ✓。**
+
 - [ ] **AC4：外层自己的观测面是活的且瞄准正确。**
       判据（三条缺一不可，**不用子串匹配**）：扫 `/proc/*/cmdline`，argv 前两 token 精确等于
       `bash <本仓>/plugin/scripts/inner-state.sh` ⇒ ①命中 ≥1；②路径的 `../..` 等于本仓根；

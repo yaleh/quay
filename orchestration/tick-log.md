@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 15:37Z | `correct`（**correct-self**：我的「本批」措辞引导批思维，覆盖了 tick §4 的滚动派发语义；就绪池假满是我该维护的） | 吞吐两条：①核实批门控非出厂要求（§4=上限非栅栏），驱动内层改滚动派发（槽位空即派、不等 fan-in）；②就绪池假满（6 条里 0 真可派发：本批未翻+fixture+PARKED），晋级 3 条真实任务（task-write-title/suite-speed/node-compile-cache）；立外层 AC-queue（ready≥3 真实可派发，排除三类） | 内层：批全量套件运行中（fan-in 收尾），在飞 1（B）；滚动派发纠正已送达 | ①tick §4 原文核实（cap 非栅栏、330 行=触摸重叠分批）；②ready 池逐条分类（fixture/PARKED/本批）；③三候选 resolve dispatchable + 两两 touch 核对（suite/node 重叠） |
 | 2026-08-04 15:22Z | `no-action` | 独立核实 A 合并（检查器 PASS 1/band 0..1，send-keys retired 正确；ADR-016 Amendment+CLAUDE.md 落位）；B/D/L0 均已提交待合并；内层跑 fan-in 验证；写回 | 内层：fan-in 中（已合并 A，D/B/L0 待合并），24 node 进程跑测试；A 完成，B 子代理完成 | ①`adr016-screen-use-check.ts` 实跑 PASS + retired 正确分类；②grep ADR-016 Amendment/CLAUDE.md 引用；③B worktree 3 commit 含假阳性修正（git log） |
 | 2026-08-04 15:02Z | `no-action` | 原始字段核实常驻指令已满足（B 15:01:41 rib:true）；A/D 已提交未合并（checker/classifier 均落 worktree）；B/L0 worktree 建；subagent 并发 2（L0+B）；不 fan-in 等批；写回 | 内层：D 任务体写 AC5 实跑输出；两个 general-purpose 子代理并发（L0 session-liveness 12m+、B 25s）；无停止条件 | ①meta-cc 查 B 的 Agent 调用 rib:true（原始字段）；②A/D 交付物落 worktree（ls 实测）；③`--detect-stop` 无命中 |
 | 2026-08-04 14:54Z | `correct`（**correct-self**：我上一轮把遥测 START 事件当 subagent 并发，用错仪器导致静默满足，被管理者推翻） | 原始字段核实（meta-cc）：内层唯一 Agent 调用 run_in_background 缺失=同步阻塞；「A\|D 双在飞」=遥测括号并发≠subagent 并发；常驻指令第三次未满足；已驱动内层纠正（后续 Agent 必须 run_in_background:true + 自核原始字段）；R2 加 AC7（在飞词汇拆分+原始字段核实）；清空自己输入框的未提交文本；commit 待落 | 内层：L0 general-purpose 子代理在跑（4m47s，阻塞于同步 Agent 调用），纠正消息排队；A 已提交待 fan-in；subagent 在飞 1（L0）/ 遥测括号在飞 2（D+L0）；scratch-c1（quay-0:3）确认存在不动 | ①meta-cc 查内层 Agent 调用原始字段（run_in_background ABSENT，14:49:44）；②我的 pane 输入框确有未提交文本并已清空；③L0 子代理 pane 状态（general-purpose analyzing session-liveness.sh） |
@@ -238,9 +239,9 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 |---|---|---|
 | no-action | 74 | 36% |
 | unblock | 36 | 17% |
-| correct | 90 | 43% |
+| correct | 91 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **207** | — |
+| **合计** | **208** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`

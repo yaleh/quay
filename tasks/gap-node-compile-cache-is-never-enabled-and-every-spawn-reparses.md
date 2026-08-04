@@ -3,7 +3,7 @@ id: gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses
 title: NODE_COMPILE_CACHE is set nowhere in the repo, so all 422 CLI spawns
   re-compile from scratch — 2.6x per spawn, and the default cache location is
   tmpfs
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

@@ -1,7 +1,7 @@
 ---
 id: gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter
 title: "task_write accepts a title containing ## or : and writes frontmatter that will not parse — it fails hours later, at render time"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

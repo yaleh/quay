@@ -2128,3 +2128,21 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
 - **fan-in 核查点（更新）**：D/B/L0 合并时逐一 `--for-task`，批全量跑绿后关任务；B 的 DoD 证据
   必须含假阳性负例。
+
+### tick 2026-08-04T15:37Z（外层，`correct-self`：吞吐两条——批思维 + 就绪池假满）
+
+管理者交办两条吞吐问题，外层核实并处置（commit 待落）：
+
+- **#1 批门控不是出厂要求**：tick §4 是「并发上限 3」（cap 非栅栏）；第 330 行「重叠 → 不同批」只指
+  触摸集重叠。**我的「本批实现三个任务」措辞引导了批思维**（第四次散文覆盖产品的变体）。
+  **纠正**：已驱动内层——槽位空出来就派，不等 fan-in；内层当前在飞 1（B），按上限还能派 2。
+- **#2 就绪池假满是绑定约束**：ready 6 条里 4 条本批未翻（A/D/L0 + retirestate parked）+ 2 条 fixture
+  （QENG-5-DEMO-*）⇒ 真实可派发 0，todo 积压 66。**已晋级 3 条**（皆 gap-* 缺陷、有 Contract、
+  resolve 可派发、非 fixture、非 PARKED）：
+  - `gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`
+  - `gap-suite-speed-under-a-297-second-sigma`
+  - `gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`
+  （suite-speed 与 node-compile-cache 触摸重叠——都碰 scripts/test.sh，同刻只派其一。）
+- **外层 AC 已立**（outer-phase-goal AC-queue）：ready 池常态 ≥3 真实可派发，判据排除本批未翻 /
+  fixture / PARKED；晋级速率跟上派发速率。排除后现 = 3 ✓。
+- 内层当前：全量套件运行中（批 fan-in 收尾），完成后关任务、清 worktree、按上限滚动派发。
