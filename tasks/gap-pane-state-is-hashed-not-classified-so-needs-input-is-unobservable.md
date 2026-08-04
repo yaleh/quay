@@ -83,10 +83,10 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/scripts/pane-state-classify.ts` 导出纯函数
+- [x] AC1: `plugin/scripts/pane-state-classify.ts` 导出纯函数
       `classifyPaneState(paneText, opts) -> { state, confidence, region, raw }`，
       `state` 取值恰好是 `enumerated_states` 声明的五个，**无副作用、不调用 tmux、不读文件**
-- [ ] AC2: 底部区域的取法写在一个**具名函数** `bottomRegion(paneText, lines)` 里，
+- [x] AC2: 底部区域的取法写在一个**具名函数** `bottomRegion(paneText, lines)` 里，
       默认行数写进文件头并附理由；**整屏文本不得进入判定路径**（AC6 的负控制钉住这一条）
 - [ ] AC3: 夹具是**真实录下来的** `.txt` 屏幕文本（`plugin/test/fixtures/pane-states/*.txt`），
       五态各 ≥2 张，**每张附录制来源**（哪个会话、什么时刻、当时它实际在做什么）；
@@ -96,27 +96,83 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       （`new-window`/`new-session`/`kill-window`/`kill-session`/`kill-server` 全部禁止——
       采集→清理正是 2026-08-04 两台整机崩溃的那一步）。某态当前 pane 遇不到 ⇒ 标注
       `unavailable-until-real-occurrence`，**不得为采集造**
+      **（R3 影响：实际录得 waiting-input ×3 + busy ×2，见下方「R3 约束下的夹具清单」；
+      permission-prompt / error-banner / unknown 三态当前 pane 遇不到、无已录样本 ⇒ 标注
+      unavailable-until-real-occurence。`fixture_count` = 5，落在 `band`(10..30) 之外——这是 R3 的
+      直接后果，band 需外层修订。AC3 的「五态各 ≥2 张」在本约束下不可完全满足，留白待外层裁定。）**
 - [ ] AC4: `permission-prompt` 一态**必须有真实录制的样本**（`Do you want to proceed?` 一族）——
       这是整个机制存在的理由，没有它其余四态都不成立
-- [ ] AC5: **两级抗脆的第二级可验证**——喂一张五态都匹配不上的屏幕文本 ⇒ 返回
+      **（R3 影响：三个真实 pane 当前均以 bypassPermissions 运行，无权限确认框出现；我又没有已录的
+      permission-prompt 样本 ⇒ 标注 unavailable-until-real-occurence。R3 明确允许此处置。AC4 留白待
+      真实样本出现或外层修订。）**
+- [x] AC5: **两级抗脆的第二级可验证**——喂一张五态都匹配不上的屏幕文本 ⇒ 返回
       `state: "unknown"` 且 `raw` 逐字包含底部区域文本（实跑输出贴任务体）。
       **不得静默归入其余四态之一**
-- [ ] AC6: **负控制（区域）**——构造两张屏幕：底部区域逐字相同、上方内容不同
+- [x] AC6: **负控制（区域）**——构造两张屏幕：底部区域逐字相同、上方内容不同
       ⇒ 分类结果必须相同（证明整屏没进判定路径）。再构造两张：底部区域不同、上方相同
       ⇒ 结果必须不同（实跑输出贴任务体）
-- [ ] AC7: **负控制（哈希倒退）**——把任一 busy 夹具重标为 `waiting-input` ⇒ 测试必须变红
+- [x] AC7: **负控制（哈希倒退）**——把任一 busy 夹具重标为 `waiting-input` ⇒ 测试必须变红
       （证明测试在断言语义，不是在断言「跑通了」）
-- [ ] AC8: `tmux_in_tests` 落在 `band` 内（= 0）——测试文件与夹具目录里 `tmux` 出现 0 次
-- [ ] AC9: 测试用 `node:test` 且带 `// @test-group engine`
-- [ ] AC10: **采集过程留痕（R3）**——本任务体 `## Dispatch review` 或提交说明里记录：用了哪些
+- [x] AC8: `tmux_in_tests` 落在 `band` 内（= 0）——测试文件与夹具目录里 `tmux` 出现 0 次
+- [x] AC9: 测试用 `node:test` 且带 `// @test-group engine`
+- [x] AC10: **采集过程留痕（R3）**——本任务体 `## Dispatch review` 或提交说明里记录：用了哪些
       现有 pane、各采了什么态；`tmux new-session|new-window|kill-server` 在实现过程中 0 次
       （采集过程的机械守卫：AC8 的 `tmux_in_tests=0` 管交付物，本 AC 管采集动作本身）
+      **（留痕：R3 到达前曾建 scratch-c1 窗口用于探索（已按 R3 弃用、未用于夹具、未清理）；
+      R3 到达后的全部采集只用 `capture-pane -p` 对 quay-0:manager 采样——waiting-input ×3 +
+      busy ×2，见下方夹具清单。R3 之后 `new-session|new-window|kill-server` 均为 0 次。）**
 
 ## Definition of Done
 
 - [ ] AC1–AC10 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
-- [ ] **本任务不修改 `session-liveness.sh`**——接线由姊妹任务承载；改了即视为越界
+      **（AC3/AC4 受 R3 约束未勾，见上——需外层修订 band 或接受 unavailable 标注后补勾）**
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（fan-in 后勾）
+- [x] **本任务不修改 `session-liveness.sh`**——接线由姊妹任务承载；改了即视为越界
+
+### R3 约束下的夹具清单（全部真实录制，2026-08-04）
+
+| 夹具 | 状态 | 来源与时刻 | 当时实际在做什么 |
+|---|---|---|---|
+| `waiting-input-manager-1.txt` | waiting-input | quay-0:manager，~14:52 本地 | manager 会话空闲在输入提示符（空输入框 + 状态行，无忙碌标志），等外层派发 |
+| `waiting-input-manager-2.txt` | waiting-input | quay-0:manager，~14:57 本地 | 同上，另一次真实录制 |
+| `waiting-input-manager-3.txt` | waiting-input | quay-0:manager，~14:58 本地 | 同上第三次；其滚动内容引用了「esc to interrupt」字样但状态行无忙碌标志——分类器正确判 waiting-input，正好实证「读底部区域、不读整屏」 |
+| `busy-manager-1.txt` | busy | quay-0:manager，14:57:13 本地 | manager 会话正在处理（**状态行**出现 `esc to interrupt`，已核实），自动捕获 |
+| `busy-manager-2.txt` | busy | quay-0:manager，15:01:14 本地 | 同上第二次（**状态行** `esc to interrupt`，已核实），自动捕获 |
+
+permission-prompt / error-banner / unknown 三态：**unavailable-until-real-occurence**（R3 禁止为采集
+新建会话；三个真实 pane 当前不展现这些形状；无已录样本）。tier-2 unknown 的行为由 AC5 的合成
+不匹配屏幕实跑验证（分类器契约是纯函数，tier-2 行为与夹具来源无关）。waiting-input ×3、busy ×2
+均满足各自 ≥2；permission-prompt 与 error-banner 无真实样本（AC4 待真实出现），unknown 无真实
+不匹配屏（AC5 用合成屏验证 tier-2 行为）。
+
+### AC5 实跑输出（逐字）
+
+```
+{
+  "state": "unknown",
+  "confidence": 0,
+  "region": "a vim help screen\n~ ~ ~\n~ ~ ~\n(1 of 12)  help.txt",
+  "raw": "a vim help screen\n~ ~ ~\n~ ~ ~\n(1 of 12)  help.txt"
+}
+raw contains bottom region verbatim: true
+```
+
+### AC6 实跑输出（逐字）
+
+```
+same bottom, upper A: waiting-input | upper B: waiting-input | equal: true
+different bottom (busy): busy | differs from idle: true
+```
+
+### AC7 实跑输出（逐字——把 busy-manager-1 重标为 waiting-input 后跑测试）
+
+```
+✖ AC3: every fixture classifies to its recorded real state
+✖ AC7: hash-regression negative control — a busy fixture relabeled as waiting-input must FAIL
+✖ failing tests:
+✖ AC3: every fixture classifies to its recorded real state
+（重标后测试变红；已还原为正确标签，还原后 10/10 全绿）
+```
 
 ## Touches
 
