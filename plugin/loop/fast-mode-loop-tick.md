@@ -219,17 +219,33 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 （实例：并发默认推导改为 1 后，主检出已修复回 8，但 sigma worktree 仍在串行跑 ~52 分钟）。派发/协调时要检查
 在飞 worktree 是否有需要同步的主检出修复。
 
-### 3. 检查停止条件
+### 3. 检查停止条件（机械——`--detect-stop` 本身就是落盘）
 
-任一满足 → 不派发新任务，报告后重新排程：
+跑这条命令作为停止条件的**机械检查**（取代纯散文清单）：
 
-- `.halt` 存在
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop
+```
+
+它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
+
+- **机械检测**可判定条件：**合并冲突**（git 有未解决路径）、**任务超 90 分钟**（遥测
+  in-progress > 90m）。任一成立 ⇒ **自动**写入 `.quay/inner-blocked.json`（带 `reason` + 可行动
+  `question` + `evidence`，`source:"auto"`）——**写入是检测本身的后果**，你跑的这条命令就是停止
+  条件检查，不存在「忘了写阻塞信号」这回事。
+- 全部不成立 ⇒ **自动清除**先前由本命令写入的 auto 阻塞记录；**绝不**清除手动
+  （`--assert-blocked`，judgment 条件）的阻塞——那需要显式 `--clear`（AC3 负控制）。
+- 输出列出命中的条件；**命中任一 ⇒ 不派发新任务，报告后重新排程**。
+
+**无法从仓库状态机械判定的条件**（本 tick 判断后同样要落盘，见「阻塞信号」节）：
+- `.halt` 存在 —— **不写阻塞信号**（外层主动暂停，不是「等裁定」；写了一个小时后
+  `restart-readiness-check.sh` 检查 7 会因「内层在等裁定」拒绝解除停机，死锁）
 - **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
   它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
   不是仓库里 needs-human 的总数。分诊规则见 `plugin/loop/orchestrator-loop-tick.md` 步骤 3）
 - 上一步全量 suite 非绿
-- 有未解决的合并冲突
 - 就绪队列为空
+- 对抗审查 2 轮后仍 REFUTED、队列文件与 git 状态矛盾且无法判定（判断边界表）
 
 ### 3.5 计量（强制，不可跳过）
 
@@ -309,15 +325,25 @@ console.log(m.checkTouchesPair(A,B,expand));
 
 这是**保守默认**。ADR-021 原则：不要在证据不足时把策略机械化。这些判断目前由人做，等积累了足够多的真实案例再考虑规则化。
 
-## 阻塞信号：停下前写、恢复后删（强制，gap-no-explicit-blocked-signal-from-inner-layer）
+## 阻塞信号：机械触发、停下即写、恢复后清（强制，gap-the-blocked-channel-has-a-writer-nobody-calls）
 
-2026-08-02 两次静默停摆（22:05、22:24）的根因是**内层停下时没有任何方式说出「我停下了、在等什么」**——
-外层只能从缺席（TUI md5 / inProgress 空集）猜，而缺席信号会错。现在内层**主动写**一个存在性阻塞信号。
+2026-08-02 两次静默停摆（22:05、22:24）与那次 68 分钟块的根因是**内层停下时没有任何方式说出
+「我停下了、在等什么」**——外层只能从缺席（TUI md5 / inProgress 空集）猜，而缺席信号会错。
 
-上面「判断边界」表里**每一个「停下等人」的动作，都必须先写阻塞信号再停，恢复后再清**：
+**教训（gap-the-blocked-channel-has-a-writer-nobody-calls）**：写、读、以及本文件早先「记得调
+`--assert-blocked`」的指令**都在**，而 `.quay/inner-blocked.json` **全历史 0 次写入**——一条写在文档
+里的指令从未被执行。**再加一条文档指令不会有用。** 因此触发改成**机械的**：
+
+- **机械条件自动落盘（步骤 3 的 `--detect-stop`）**：合并冲突、任务超 90 分钟由 CLI 从仓库状态
+  机械判定，命中即写——**写入是停止条件检查的后果**，你不需要「记得」另跑一条命令，因为你跑的那条
+  检查命令本身就落盘。
+- **判断条件手动落盘**：`ruling-required` / `review-refuted`（无法从仓库状态判定）等 judgment 条件，
+  在停下等裁定的那一刻调一次 `--assert-blocked`（见下）。判断边界表里除 `.halt` 外的每一行都属于这一类。
+
+手动 assert / 清除（judgment 条件专用；机械条件不要手写——`--detect-stop` 已自动处理）：
 
 ```bash
-# 停下前（任一停止/等裁定条件触发时）：
+# 停下前（judgment 条件触发时——ruling-required / review-refuted / suite-red / queue-empty / needs-human 窗口）：
 node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/inner-blocked-signal.ts \
   --assert-blocked --taskId <当前任务/阶段> \
   --reason <合法值见 `--schema`；不要照抄到这里，代码是唯一真源> \
@@ -329,9 +355,11 @@ node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/script
 
 规则：
 
-- **文件存在 == 内层在等。** `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复的那一刻。这是
-  存在性信号，不是从缺席推断。`plugin/scripts/inner-state.sh` 用 inotifywait 监视该路径（延迟秒级，
-  不再是最多 20 分钟），事件直接带 `reason` + `question`，外层不必读屏就能开始判断。
+- **文件存在 == 内层在等。** `--detect-stop` / `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复
+  的那一刻。这是存在性信号，不是从缺席推断。`plugin/scripts/inner-state.sh` 用 inotifywait 监视该路径
+  （延迟秒级，不再是最多 20 分钟），事件直接带 `reason` + `question`，外层不必读屏就能开始判断。
+- **`--detect-stop` 只清自己写的 auto 记录。** 手动（`--assert-blocked`，judgment）的阻塞只有显式
+  `--clear` 才清——裁定没下达前文件必须留着（AC3 负控制）。
 - **不手写 JSON。** 只调 CLI（AC4）——`reason` 合法值就是「判断边界」表 + 停止条件里已有的七种，不新增
   语义（AC2，见 CLI `--schema`）。手写 JSON 会造成格式漂移，正是本机制要消灭的。
 - **从 worktree 里也写主 checkout。** CLI 自动解析共享根（主 checkout）为落点——外层 Monitor 监视的是
@@ -442,8 +470,9 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 计量表当前行数与均值
 - 遥测吞吐：`tasksPerHour`（= 收尾任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/`windowHours`
   ——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发无关）
-- 阻塞信号状态（`.quay/inner-blocked.json` 存在与否；存在则报 `reason` + `question`，以及
-  `fast-mode-telemetry --report` 的累计死时间/单次最长——2026-08-03 起该数有基线）
+- 阻塞信号状态（步骤 3 `--detect-stop` 的输出：命中了哪些停止条件、`.quay/inner-blocked.json`
+  存在与否；存在则报 `reason` + `question`，以及 `fast-mode-telemetry --report` 的累计死时间/单次最长
+  ——2026-08-03 起该数有基线）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `delivered`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/事件有没有送达
   （AC9 起 `delivered` 取代 `ownedByThisSession`：判据是共享事件文件有没有新事件，不是「是不是本会话挂的」）

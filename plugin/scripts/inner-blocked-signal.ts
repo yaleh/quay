@@ -45,11 +45,19 @@
 // for a start/end pair (no orphaned pollution). SCHEMA_VERSION stays "1".
 //
 // Run:
+//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>]   (MECHANICAL trigger — see below)
 //   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
 //   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
 //   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]     (prints the record, exit 1 if absent)
 //   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>]  ("blocked <reason>" | "clear")
 //   node --experimental-strip-types inner-blocked-signal.ts --schema                  (schema + valid reasons)
+//
+// --detect-stop is the "fire as a consequence of a stop condition" trigger (AC1): it evaluates the
+// mechanically-detectable stop-and-wait conditions (merge-conflict from git state, task-over-90m
+// from telemetry) and WRITES the block record automatically when any holds — the write is a side
+// effect of the stop-condition check the tick already runs, not a separately-remembered command.
+// It clears a prior "auto" block when no condition holds, and never touches a "manual" block
+// (judgment asserts like ruling-required need an explicit --clear).
 //
 // Storage: `.quay/inner-blocked.json` (gitignored, same family as gate-events.jsonl).
 
@@ -64,6 +72,8 @@ import {
   FAST_MODE_AGENT_LABEL,
   findRepoRoot,
   getBaseCommit,
+  readAllEvents,
+  aggregate,
 } from "./fast-mode-telemetry.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
@@ -106,10 +116,15 @@ export const REASON_DESCRIPTIONS = Object.freeze({
  *   question (string)           — what the outer must rule on; REQUIRED
  *   options  (string[])         — proposed choices (optional)
  *   evidence (string[])         — supporting observations (optional)
+ *   source   ("manual"|"auto")  — who asserted this block (optional). "manual" = an explicit
+ *             --assert-blocked (a judgment condition such as ruling-required — never auto-cleared);
+ *             "auto" = written by --detect-stop as a mechanical consequence of a detected stop
+ *             condition (auto-cleared when the condition clears). Absent == "manual" (legacy
+ *             records were always manually asserted).
  */
 export const BLOCKED_RECORD_SCHEMA = Object.freeze({
   required: ["since", "taskId", "reason", "question"],
-  optional: ["options", "evidence"],
+  optional: ["options", "evidence", "source"],
   reasonValues: VALID_BLOCKED_REASONS,
 });
 
@@ -205,6 +220,9 @@ export function validateBlockedRecord(rec) {
   if (typeof rec.question !== "string" || rec.question.length === 0) {
     return { ok: false, error: "question must be a non-empty string" };
   }
+  if (rec.source !== undefined && rec.source !== "manual" && rec.source !== "auto") {
+    return { ok: false, error: `source must be "manual" or "auto", got ${JSON.stringify(rec.source)}` };
+  }
   for (const opt of ["options", "evidence"]) {
     if (rec[opt] === undefined) continue;
     if (!Array.isArray(rec[opt]) || rec[opt].some((x) => typeof x !== "string")) {
@@ -224,14 +242,18 @@ export function validateBlockedRecord(rec) {
  * @param {string[]} [opts.options]
  * @param {string[]} [opts.evidence]
  * @param {number} [opts.sinceMs]
+ * @param {"manual"|"auto"} [opts.source] — "manual" (default) for --assert-blocked, "auto" for
+ *   --detect-stop. "auto" records may be cleared by a later --detect-stop when the condition
+ *   clears; "manual" records require an explicit --clear (AC3 negative control).
  * @returns {object}
  */
-export function buildBlockedRecord({ taskId, reason, question, options, evidence, sinceMs = Date.now() }) {
+export function buildBlockedRecord({ taskId, reason, question, options, evidence, sinceMs = Date.now(), source = "manual" }) {
   const rec = {
     since: sinceMs,
     taskId: String(taskId),
     reason,
     question: String(question),
+    source,
   };
   if (options !== undefined) rec.options = options;
   if (evidence !== undefined) rec.evidence = evidence;
@@ -385,18 +407,101 @@ export function clearBlockedRecord(root) {
   return { cleared: true, record: rec, durationMs, telemetryPath };
 }
 
+// ── Mechanical stop-condition detection (gap-the-blocked-channel-has-a-writer-nobody-calls, AC1) ───────
+
+/**
+ * Task budget in ms — 90 minutes, matching the tick file's 判断边界 table ("任务超 90 分钟").
+ * A task in-progress longer than this is a mechanically-detectable stop-and-wait condition: the
+ * tick MUST abort the subagent and wait for a ruling (no inner retry).
+ */
+export const TASK_OVER_90M_MS = 90 * 60 * 1000;
+
+/**
+ * Detect a merge conflict with unresolved paths (reason "merge-conflict").
+ *
+ * Mechanical: `git ls-files -u` lists unmerged index paths — the canonical "conflict unresolved"
+ * signal. Only UNRESOLVED paths count as blocked: a merge mid-flight with all paths staged
+ * (MERGE_HEAD present but no unmerged entries) is the tick's normal fan-in, not a stop-and-wait —
+ * the tick commits it and moves on. The outer must rule only when paths are still unmerged.
+ * A non-git root (or a git command failure) is "no conflict", never a throw: `--detect-stop` is a
+ * detector, not a gate, and a root without git state must not crash the tick.
+ *
+ * @param {string} root
+ * @returns {{reason: "merge-conflict", question: string, evidence: string[]} | null}
+ */
+export function detectMergeConflict(root) {
+  let unmerged = "";
+  try {
+    unmerged = execFileSync("git", ["-C", root, "ls-files", "-u"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch (_) { /* not a git repo, or git unavailable → no conflict to detect */ }
+  if (!unmerged) return null;
+  const paths = [...new Set(unmerged.split("\n").map((l) => l.split("\t").pop()).filter(Boolean))];
+  const question = `merge conflict in progress (unresolved: ${paths.slice(0, 3).join(", ")}${paths.length > 3 ? `, +${paths.length - 3} more` : ""}) — rule on how to resolve (abort + needs-human, or pick a side), then run --clear`;
+  return { reason: "merge-conflict", question, evidence: paths.slice(0, 5) };
+}
+
+/**
+ * Detect a task in-progress over the 90-minute budget (reason "task-over-90m").
+ *
+ * Mechanical: reads the SAME `.workflow-events/` store the tick's own `--task-start`/`--task-end`
+ * writes, and asks the telemetry aggregate for inProgress tasks older than TASK_OVER_90M_MS. This
+ * is the inner-state.sh OVER90 signal (a task the outer already flags) made into a block: the
+ * tick MUST abort the subagent and wait (no inner retry).
+ *
+ * @param {string} root
+ * @returns {Promise<{reason: "task-over-90m", question: string, evidence: string[]} | null>}
+ */
+export async function detectTaskOver90m(root) {
+  const events = [];
+  for await (const e of readAllEvents(root)) events.push(e);
+  const nowMs = Date.now();
+  const rep = aggregate(events, { nowMs });
+  const over = rep.inProgress.filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS);
+  if (over.length === 0) return null;
+  const p = over[0];
+  const mins = ((nowMs - p.startedAtMs) / 60_000).toFixed(1);
+  return {
+    reason: "task-over-90m",
+    question: `task ${p.taskId} has been in-progress ${mins}m (>90m) — rule on abort vs continue (no inner retry), then run --clear`,
+    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `in-progress ${over.length} task(s) over budget`],
+  };
+}
+
+/**
+ * Evaluate every mechanically-detectable stop-and-wait condition, in a deterministic order.
+ * @param {string} root
+ * @returns {Promise<Array<{reason: string, question: string, evidence?: string[]}>>}
+ */
+export async function detectStopConditions(root) {
+  const found = [];
+  const conflict = detectMergeConflict(root);
+  if (conflict) found.push(conflict);
+  const over = await detectTaskOver90m(root);
+  if (over) found.push(over);
+  return found;
+}
+
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────────
 
 const usage = `inner-blocked-signal.ts — explicit "inner is stopped and waiting" signal (gap-no-explicit-blocked-signal-from-inner-layer)
 
 Usage:
+  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --schema
 
---assert-blocked writes .quay/inner-blocked.json (the ONLY writer — never hand-write the JSON).
+--detect-stop is the MECHANICAL trigger (AC1): it evaluates the mechanically-detectable stop
+conditions (merge-conflict, task-over-90m) and writes the block automatically when any holds, as a
+consequence of the stop-condition check the tick already runs. It clears a prior "auto" block when
+no condition holds; a "manual" block (judgment assert) is never auto-cleared.
+--assert-blocked writes .quay/inner-blocked.json manually (for judgment conditions like
+ruling-required that cannot be detected from repo state). The CLI is the ONLY writer — never
+hand-write the JSON.
 --clear records the wait duration into telemetry, then deletes the file. --root defaults to the
 SHARED checkout root (a worktree invocation resolves to the main checkout so the outer can see it).`;
 
@@ -465,6 +570,61 @@ export async function main(argv) {
       const rec = buildBlockedRecord({ taskId, reason, question, options, evidence });
       const f = writeBlockedRecord(root, rec);
       console.log(`inner-blocked-signal: blocked asserted (${reason}) — ${f}`);
+      return 0;
+    } catch (e) {
+      console.error(`inner-blocked-signal: ${e.message}`);
+      return 1;
+    }
+  }
+
+  // --detect-stop — THE MECHANICAL TRIGGER (AC1). Evaluates the mechanically-detectable stop
+  // conditions (merge-conflict, task-over-90m). Any condition holds ⇒ WRITE `.quay/inner-blocked.json`
+  // as a consequence (auto reason/question/evidence, source "auto"). None holds ⇒ clear a prior
+  // "auto" block. A "manual" block (judgment assert like ruling-required) is NEVER auto-cleared —
+  // only an explicit --clear does that (AC3 negative control). The tick file's step-3 stop-condition
+  // check IS this command, so the write happens on an action the inner already takes every tick —
+  // not because someone remembered to call --assert-blocked.
+  if (args.includes("--detect-stop")) {
+    try {
+      const found = await detectStopConditions(root);
+      const reasons = found.map((c) => c.reason);
+      const existing = readBlockedRecord(root);
+      if (existing) {
+        if (existing.source === "manual") {
+          console.log(
+            `detect-stop: already blocked (manual ${existing.reason}) — ${existing.question}\n` +
+              `detect-stop: auto conditions now: ${reasons.length ? reasons.join(", ") : "none"} (manual block left in place; --clear when the ruling lands)`,
+          );
+          return 0;
+        }
+        if (reasons.length) {
+          console.log(`detect-stop: still blocked (auto ${existing.reason}) — conditions persist: ${reasons.join(", ")}`);
+          return 0;
+        }
+        const res = clearBlockedRecord(root);
+        console.log(
+          `detect-stop: stop condition cleared — removed block (${res.record.taskId}, ${res.record.reason}), wait ${(res.durationMs / 1000).toFixed(1)}s`,
+        );
+        return 0;
+      }
+      if (reasons.length) {
+        const cond = found[0];
+        const rec = buildBlockedRecord({
+          taskId: "fast-mode-loop",
+          reason: cond.reason,
+          question: cond.question,
+          options: cond.options,
+          evidence: cond.evidence,
+          source: "auto",
+        });
+        const f = writeBlockedRecord(root, rec);
+        console.log(`detect-stop: STOP CONDITION — ${cond.reason} (auto-block written) — ${f}`);
+        for (const extra of found.slice(1)) {
+          console.log(`detect-stop: also: ${extra.reason} — ${extra.question}`);
+        }
+        return 0;
+      }
+      console.log("detect-stop: no stop condition; no block");
       return 0;
     } catch (e) {
       console.error(`inner-blocked-signal: ${e.message}`);

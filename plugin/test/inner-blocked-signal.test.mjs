@@ -1,14 +1,18 @@
-// @test-group engine
-// inner-blocked-signal.test.mjs — gap-no-explicit-blocked-signal-from-inner-layer: RED/GREEN tests
-// for the inner layer's explicit "I am stopped and waiting" signal. The inner layer writes
-// .quay/inner-blocked.json ONLY through this CLI (AC4 — never hand-written JSON); the outer
-// Monitor (inner-state.sh) watches the path with inotifywait (AC6); the readiness check prints it
-// (AC5); the wait duration becomes telemetry (AC7).
+// @test-group governance
+// inner-blocked-signal.test.mjs — gap-no-explicit-blocked-signal-from-inner-layer +
+// gap-the-blocked-channel-has-a-writer-nobody-calls: RED/GREEN tests for the inner layer's explicit
+// "I am stopped and waiting" signal. The inner layer writes .quay/inner-blocked.json ONLY through
+// this CLI (AC4 — never hand-written JSON); the outer Monitor (inner-state.sh) watches the path
+// with inotifywait (AC6); the readiness check prints it (AC5); the wait duration becomes telemetry
+// (AC7).
 //
 // Covers: AC1 schema + gitignore, AC2 reason vocabulary (no new semantics), AC3 tick-file wiring,
 // AC4 CLI (--assert-blocked/--clear/--read), AC5 readiness print, AC6 inotifywait monitor, AC7
-// telemetry aggregation, AC9 @test-group engine. AC8 (real drill) is a live end-to-end run
-// recorded in the task body, not a unit test.
+// telemetry aggregation, AC9 @test-group governance, and — for the blocked-channel task — the REAL
+// trigger path (AC1/AC6): `--detect-stop` writes the block as a MECHANICAL CONSEQUENCE of a
+// detected stop condition (merge-conflict, task-over-90m), not because someone remembered to call
+// --assert-blocked. AC4 (end-to-end replay) is both a behavioral test here (outer's inner-state.sh
+// emits BLOCKED within one tick) and a live drill recorded in the task body.
 //
 // Run:
 //   scripts/test.sh plugin/test/inner-blocked-signal.test.mjs
@@ -74,7 +78,7 @@ test("AC1 — the module defines the .quay/inner-blocked.json schema (BLOCKED_RE
   const cli = await importCli();
   assert.ok(cli.BLOCKED_RECORD_SCHEMA, "must export BLOCKED_RECORD_SCHEMA");
   assert.deepEqual(cli.BLOCKED_RECORD_SCHEMA.required, ["since", "taskId", "reason", "question"]);
-  assert.deepEqual(cli.BLOCKED_RECORD_SCHEMA.optional, ["options", "evidence"]);
+  assert.deepEqual(cli.BLOCKED_RECORD_SCHEMA.optional, ["options", "evidence", "source"]);
   assert.equal(cli.BLOCKED_FILE_NAME, "inner-blocked.json");
 });
 
@@ -332,4 +336,196 @@ test("AC4 — findSharedRoot resolves the SHARED (main) checkout even from insid
   const mainCheckout = path.dirname(common.stdout.trim());
   assert.equal(fs.realpathSync(resolved), fs.realpathSync(mainCheckout),
     "shared root must equal the main checkout root (parent of --git-common-dir)");
+});
+
+// ── gap-the-blocked-channel-has-a-writer-nobody-calls: --detect-stop (MECHANICAL trigger) ─────────────
+
+/**
+ * Create a temp git workspace with an in-progress merge conflict (3 unmerged entries for f.txt).
+ * @returns {{tmp: string}}
+ */
+function makeGitConflictWorkspace() {
+  const tmp = makeTmpWorkspace();
+  const git = (args) => spawnSync("git", ["-C", tmp, ...args], { encoding: "utf8" });
+  const ok = (r, what) => { assert.equal(r.status, 0, `${what} failed: ${r.stderr}`); };
+  ok(git(["init", "-q"]), "git init");
+  ok(git(["config", "user.email", "test@test"]), "config email");
+  ok(git(["config", "user.name", "test"]), "config name");
+  fs.writeFileSync(path.join(tmp, "f.txt"), "base\n");
+  ok(git(["add", "f.txt"]), "add base");
+  ok(git(["commit", "-qm", "base"]), "commit base");
+  ok(git(["checkout", "-qb", "side"]), "branch side");
+  fs.writeFileSync(path.join(tmp, "f.txt"), "side\n");
+  ok(git(["commit", "-qam", "side"]), "commit side");
+  ok(git(["checkout", "-q", "master"]), "checkout master");
+  fs.writeFileSync(path.join(tmp, "f.txt"), "master\n");
+  ok(git(["commit", "-qam", "master"]), "commit master");
+  const merge = git(["merge", "side"]);
+  assert.notEqual(merge.status, 0, "the test fixture requires a real merge conflict");
+  const unmerged = git(["ls-files", "-u"]).stdout.trim();
+  assert.ok(unmerged.length > 0, "fixture must have unmerged paths");
+  return { tmp };
+}
+
+/**
+ * Write a synthetic telemetry start event backdated `msAgo` ms, so --detect-stop can observe it.
+ * @param {string} tmp
+ * @param {string} taskId
+ * @param {number} msAgo
+ */
+async function writeBackdatedStartEvent(tmp, taskId, msAgo) {
+  const telemetry = await import(TELEMETRY);
+  const ev = telemetry.buildStartEvent({
+    taskId,
+    runId: telemetry.generateRunId(taskId),
+    executionCwd: tmp,
+    baseCommit: null,
+    recordedAtMs: Date.now() - msAgo,
+  });
+  telemetry.writeEvent(ev, tmp);
+}
+
+// AC5 — the reverse negative control: normal work (no stop condition) must NOT produce the file.
+
+test("AC5 — --detect-stop with no stop condition produces no block file", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "no stop condition ⇒ no block file");
+    assert.match(res.stdout, /no stop condition/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC5 — a long in-progress task under the 90m budget does NOT produce a block", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-long", 85 * 60 * 1000);
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "85m task is long but under budget ⇒ no block");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// AC1/AC2/AC6 — the real trigger path: a stop condition ⇒ the block is WRITTEN as a consequence.
+
+test("AC1/AC2/AC6 — --detect-stop writes the block for a task-over-90m (real trigger path)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-over", 91 * 60 * 1000);
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    const f = BLOCKED_PATH(tmp);
+    assert.ok(fs.existsSync(f), "block file must be auto-written on a stop condition");
+    const rec = JSON.parse(fs.readFileSync(f, "utf8"));
+    assert.equal(rec.reason, "task-over-90m");
+    assert.equal(rec.source, "auto", "an auto-detected block must be marked source:auto");
+    assert.match(rec.question, /gap-over/, "question must name the stalled task");
+    assert.match(rec.question, /90m/, "question must carry the budget fact");
+    assert.match(rec.question, /rule on abort vs continue/, "AC2: actionable — what the outer must decide");
+    assert.ok(rec.evidence.length > 0, "evidence carries the supporting observation");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC1/AC6 — --detect-stop writes the block for a merge conflict (real trigger path)", () => {
+  const { tmp } = makeGitConflictWorkspace();
+  try {
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    const f = BLOCKED_PATH(tmp);
+    assert.ok(fs.existsSync(f), "a merge conflict must auto-write the block");
+    const rec = JSON.parse(fs.readFileSync(f, "utf8"));
+    assert.equal(rec.reason, "merge-conflict");
+    assert.equal(rec.source, "auto");
+    assert.match(rec.question, /merge conflict in progress/);
+    assert.match(rec.question, /rule on how to resolve/, "AC2: actionable");
+    assert.deepEqual(rec.evidence, ["f.txt"], "evidence dedupes the 3-stage unmerged entries");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// AC3 — release path: kept while the condition persists (negative control), cleared once resolved.
+
+test("AC3 — --detect-stop keeps the block while the conflict persists and clears it once resolved", () => {
+  const { tmp } = makeGitConflictWorkspace();
+  try {
+    const first = runCli(tmp, "--detect-stop");
+    assert.equal(first.status, 0, first.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "conflict ⇒ block written");
+
+    // Negative control: the conflict is NOT yet resolved — detect-stop must NOT clear it.
+    const second = runCli(tmp, "--detect-stop");
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /still blocked/, "unresolved conflict ⇒ block stays");
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "unresolved ⇒ block must NOT be cleared");
+
+    // Resolve the conflict (stage the file), then detect-stop clears the auto block.
+    const resolve = spawnSync("git", ["-C", tmp, "checkout", "-q", "--theirs", "f.txt"], { encoding: "utf8" });
+    assert.equal(resolve.status, 0, resolve.stderr);
+    const add = spawnSync("git", ["-C", tmp, "add", "f.txt"], { encoding: "utf8" });
+    assert.equal(add.status, 0, add.stderr);
+
+    const third = runCli(tmp, "--detect-stop");
+    assert.equal(third.status, 0, third.stderr);
+    assert.match(third.stdout, /cleared/, "resolved conflict ⇒ block cleared");
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "resolved ⇒ block removed");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC3 — --detect-stop never auto-clears a manual (judgment) block; only --clear does", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    runCli(tmp, "--assert-blocked", "--taskId", "gap-r", "--reason", "ruling-required", "--question", "M243: A or B?");
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /manual/, "detect-stop reports the manual block is left in place");
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "a manual block must survive --detect-stop with no conditions");
+    const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
+    assert.equal(rec.reason, "ruling-required");
+    assert.equal(rec.source, "manual");
+
+    runCli(tmp, "--clear");
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "--clear removes a manual block");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// AC4 — end-to-end replay: a stop condition ⇒ block ⇒ the outer's monitor emits BLOCKED in one tick.
+
+test("AC4 — end-to-end: a stop condition produces the block and the outer's inner-state.sh emits BLOCKED", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-e2e", 91 * 60 * 1000);
+    const det = runCli(tmp, "--detect-stop");
+    assert.equal(det.status, 0, det.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "stop condition ⇒ block written");
+
+    // The outer's monitor (inner-state.sh) reads the block via its INNER_STATE_BLOCK_ROOT seam
+    // (which runs check_blocked_state once and exits). The outer can judge within one tick.
+    const monitor = spawnSync("bash", [path.join(REPO_ROOT, "plugin", "scripts", "inner-state.sh")], {
+      encoding: "utf8",
+      env: { ...process.env, INNER_STATE_BLOCK_ROOT: tmp },
+    });
+    assert.equal(monitor.status, 0, monitor.stderr);
+    assert.match(monitor.stdout, /BLOCKED reason=task-over-90m/, `outer must see reason+question: ${monitor.stdout}`);
+    assert.match(monitor.stdout, /question=/, "the outer gets the question, not just 'stuck'");
+
+    // The wait duration becomes telemetry on --clear (AC7), so the 68-minute class of dead time is
+    // measurable, not inferred.
+    const clear = runCli(tmp, "--clear");
+    assert.equal(clear.status, 0, clear.stderr);
+    assert.match(clear.stdout, /wait \d+\.\ds/);
+  } finally {
+    cleanup(tmp);
+  }
 });
