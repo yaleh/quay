@@ -161,3 +161,14 @@ changed: **管理者提出、外层立案并补齐引用面。** 管理者给了
 **排期约束**：与 `gap-init-guesses-the-tmux-session-...` 及
 `gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down` **同动 `plugin/scripts/quay-init.sh`，三者须串行**。
 `plugin/loop/fast-mode-loop-tick.md` 与在飞的两条分支不相交。
+
+## 遥测记录（2026-08-04，与真实区间不符，**不可用作基线**）
+
+- **真实起止**：实现开始于 04:0x 前后（本任务在 3a 落地后立即开工），实现提交 04:25:39
+  （`776ff12f`），落地 04:27:03（`2b2e06cc`）。
+- **遥测记录**：**无有效记录**。曾补记 `--task-start`（05:06:33），但那是崩溃后重启会话的
+  补记——结束它会产生「几分钟 vs 真实约 1 小时」的合理外观错数，已**删除该补记**（见
+  `gap-a-crash-leaves-phantom-in-flight-tasks` 新增 AC：崩溃后重启的会话补记 `--task-start`
+  产生的是失真而非缺失）。
+- **为何不符**：OOM 后重启简报未含遥测括号指令，空上下文内层无记忆可依；补记的起止与真实
+  区间不符。本批遥测读数不可用于第三步的前后对比基线。
