@@ -97,3 +97,44 @@ until-loop 承载这个等待，不要用短 sleep 硬编码猜测延迟。
 - **步骤 3 的"稳定判断"复用 D 的形状/持续性概念**，不是重新发明一套。
 - **这条不是紧急阻塞项**——今晚的手工修法（分步验证+补发+轮询）已经把每一次失败都救回来了，
   只是每次都要管理者/外层现场诊断。结晶的价值是**让这个诊断过程不必再重复**。
+
+---
+
+## 实现状态（2026-08-04 — gap-reliable-send-crystallize-the-five-failure-modes-into-a-script）
+
+本文档的算法已结晶为可执行件（任务 `gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`）：
+
+- **`plugin/scripts/transcript-delivery-check.ts`** — 故障 5 的送达判据，**纯函数**
+  `checkTranscriptDelivered(transcriptFragment, sentText) -> {delivered, matchedLine}`：
+  无副作用、不调 tmux、不读文件以外的源（文件读取只在 CLI 包装层发生）。判据只认
+  **真实 user message**（`type:"user"` 且 `message.role:"user"`）且其内容**包含**发送文本；
+  tool_result 注入上下文、assistant 消息、整行/整屏哈希一律不认（ADR-016 Amendment boundary (c)，
+  F 判死的哈希不借尸还魂）。
+  CLI：`node --experimental-strip-types plugin/scripts/transcript-delivery-check.ts
+  --check <jsonl> [--start <bytes>] --text <text>`；exit 0=已送达 · 1=未送达 · 2=用法或 IO 错误（fail loud）。
+  `--start <bytes>` 实现故障 4 的「只看新增」基线——轮询只扫 baseline 之后追加的内容，
+  旧的一模一样的历史消息不会被误判为本次送达。
+
+- **`plugin/scripts/send-keys-reliable.sh`** — 五步算法本体（步骤 1–5 一一对应本文档 §算法）：
+  1. 循环 C-u + capture-pane 查空（上限 N=50，超限 fail loud）——故障 1；
+  2. `send-keys -l` 原样发送文本；
+  3. 轮询 capture-pane 连续两次一致（渲染稳定，有界 10s）——故障 2；
+  4. 发 Enter；
+  5. 有界轮询目标 transcript jsonl（60s；首窗 15s 超时补发一次独立 Enter，故障 3；二次超时
+     fail loud，不假装成功）——故障 3/4/5。
+
+- **`plugin/test/send-keys-reliable.test.mjs`** — 纯函数夹具测试（outer ruling R3：不建/不杀任何
+  tmux 会话、不调 tmux；无 tmux server、无 pty、无假 TUI）。`@test-group governance`，node:test，
+  覆盖 AC4/AC5/AC7/AC8 与 ## Contract 的 measure CLI 路径。
+
+实跑证据（2026-08-04，任务 AC5/AC6/AC7）：
+- **AC6 真实对象**：真实 transcript
+  `~/.claude/projects/-home-yale-work-quay/74cfbc0e-9db3-4d06-b799-8597370ba773.jsonl`，
+  取其真实 user message「执行 /home/yale/work/quay/plugin/loop/fast-mode-loop-tick.md 中的 tick 指令」为发送文本
+  ⇒ CLI `delivered: true`，exit 0；负控 `--text "AC6-REAL-OBJECT-NEVER-SENT-42"` ⇒ `delivered: false`，exit 1。
+  （全量「跨会话真实发送」未在本环境执行——所有现存 tmux 会话均属运行中的 loop，R3 禁止建会话；
+  送达判据这一侧已由真实 transcript + 真实 CLI 证明。）
+- **作用域测试**：`scripts/test.sh plugin/test/send-keys-reliable.test.mjs` ⇒ 20 pass / 0 fail /
+  0 cancelled，EXIT=0，全部静态检查（split-or-commit / test-framework-policy / test-isolation /
+  contract / ac-carryover / ADR-016 screen-use / checker-mutation）通过。
+- **AC7 零哈希**：脚本与测试文件里 `md5sum|sha1sum|cksum` 出现 0 次（grep -c 0/0）。
