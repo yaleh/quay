@@ -14,6 +14,120 @@ import type { Task } from '../../quay/src/abi.ts';
 export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
 
 /**
+ * SHAPE_REGISTRY (AC1, single source of truth): the one place the task-shape →
+ * required-artifact mapping lives, shared by the `check()` gate and the tests.
+ * This replaces the old one-size-fits-all literal checks (`has("Proposal")`,
+ * `has("Plan")`, ...) that encoded a retired task shape:
+ *
+ *   - ADR-022 (2026-08-03) replaced `## Plan` with `## Contract` for quay's
+ *     fast-mode tasks → the `contract` shape fills the plan-slot with
+ *     `## Contract` and additionally requires all six Contract keys
+ *     (measure/band/invariant/invoke/control/resume) — STRICTER than a prose
+ *     Plan section, not looser (the task's Chosen-mechanism constraint 2).
+ *   - meta-cc's DIR template uses `## Finding` in place of `## Proposal` →
+ *     the `finding` shape fills the proposal-slot with `## Finding`.
+ *   - The classic milestone template is the `plan` shape (unchanged).
+ *
+ * Every shape's contract is complete on its own dimension; the gate dispatches
+ * by shape rather than waiving checks (invariant 分派 ≠ 豁免).
+ */
+export const SHAPE_REGISTRY = {
+  contract: {
+    planKeys: ["measure", "band", "invariant", "invoke", "control", "resume"],
+    sections: {
+      proposal: ["Proposal"],
+      plan: ["Contract"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+  finding: {
+    planKeys: [],
+    sections: {
+      proposal: ["Finding"],
+      plan: ["Plan"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+  plan: {
+    planKeys: [],
+    sections: {
+      proposal: ["Proposal"],
+      plan: ["Plan"],
+      ac: ["AC", "Acceptance Criteria"],
+      dod: ["DoD", "Definition of Done"],
+    },
+  },
+} as const;
+
+export type TaskShape = keyof typeof SHAPE_REGISTRY | "unknown";
+
+/** Does `body` contain a `## <heading>` line that is EXACTLY that heading
+ *  (trailing whitespace allowed)? Exact match prevents false positives from
+ *  subheadings like `## Finding (measured ...)` or `## Plan execution record`.
+ *  Detection uses exact match; section content extraction uses the looser
+ *  `\b` match (existing behavior) once the shape is known. */
+function hasExactHeading(body: string, heading: string): boolean {
+  return new RegExp(`^##\\s+${heading}\\s*$`, "im").test(body);
+}
+
+/**
+ * Detect a task's shape from its body, per the registered registry.
+ * Precedence: contract → finding → plan. `## Finding` is checked BEFORE
+ * `## Plan` because meta-cc's DIR template carries BOTH headings (Finding
+ * replaces Proposal, Plan stays); classifying it as `plan` would demand a
+ * `## Proposal` section the template does not have.
+ *
+ * A body matching none of the registered shapes is "unknown" — the gate must
+ * FAIL CLOSED on it (AC5), never fall into a lenient branch.
+ */
+export function detectShape(body: string): TaskShape {
+  if (hasExactHeading(body, "Contract")) return "contract";
+  if (hasExactHeading(body, "Finding")) return "finding";
+  if (hasExactHeading(body, "Plan")) return "plan";
+  return "unknown";
+}
+
+/**
+ * Extract a body section: the content after the first `## <heading>` (first
+ * alias that matches) up to the next `## ` heading or the end of the body.
+ * Moved to module scope (was `extractSection` inside createStore) so the
+ * shape helpers below can share one implementation (single source of truth).
+ */
+export function sectionAfterHeading(body: string, headings: string[]): string {
+  for (const h of headings) {
+    // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
+    // end-of-string anchor (JS has no \Z metacharacter) — the engine took
+    // it as a literal capital "Z", and with the `i` (case-insensitive)
+    // flag this also matched a bare lowercase "z" anywhere in the
+    // section's prose, truncating capture early (found and root-caused
+    // by the iteration-1 G3 audit against QN-005's own AC text, which
+    // contains the word "zero"). Correct JS end-of-string lookahead is
+    // `(?![\s\S])` (no characters remain).
+    const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
+    const m = re.exec(body);
+    if (m) return m[1];
+  }
+  return "";
+}
+
+/**
+ * Contract shape (AC4): verify the `## Contract` section carries ALL six
+ * mandatory keys (measure/band/invariant/invoke/control/resume) — the format
+ * `plugin/scripts/task-contract-check.ts` consumes. Returns a per-key boolean
+ * map. Only meaningful when `detectShape(body) === "contract"`.
+ */
+export function contractKeysPresent(body: string): Record<string, boolean> {
+  const section = sectionAfterHeading(body, ["Contract"]);
+  const present: Record<string, boolean> = {};
+  for (const k of SHAPE_REGISTRY.contract.planKeys) {
+    present[k] = new RegExp(`^[ \\t]*${k}\\b`, "m").test(section);
+  }
+  return present;
+}
+
+/**
  * DIR-047: validate a `default_task_status` value from config.
  * Returns the value unchanged when valid; throws a clear error when illegal.
  * This is the single-source validator for the config key — call it at config
@@ -770,18 +884,33 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
    */
   const MIN_SECTION_CHARS = 40;
 
-  function artifactSections(body) {
-    const has = (heading) => {
-      if (!new RegExp(`^##\\s+${heading}\\b`, "im").test(body)) return false;
-      const content = extractSection(body, [heading]);
-      const nonWhitespaceLen = content.replace(/\s/g, "").length;
-      return nonWhitespaceLen >= MIN_SECTION_CHARS;
+  /**
+   * Presence of the four gate artifacts for a given shape, per SHAPE_REGISTRY.
+   * `shape` is the detected shape (see detectShape); the sections each shape
+   * requires come from the registry, so the aliases each project actually uses
+   * (quay: `## Contract` for Plan; meta-cc: `## Finding` for Proposal) are
+   * honored WITHOUT loosening any shape's own contract. An unknown shape yields
+   * all-false (the check() caller fails it closed).
+   */
+  function artifactSections(body, shape = detectShape(body)) {
+    const spec = SHAPE_REGISTRY[shape];
+    if (!spec) {
+      return { proposal: false, plan: false, ac: false, dod: false };
+    }
+    const has = (headings) => {
+      for (const h of headings) {
+        if (!new RegExp(`^##\\s+${h}\\b`, "im").test(body)) continue;
+        const content = sectionAfterHeading(body, [h]);
+        const nonWhitespaceLen = content.replace(/\s/g, "").length;
+        if (nonWhitespaceLen >= MIN_SECTION_CHARS) return true;
+      }
+      return false;
     };
     return {
-      proposal: has("Proposal"),
-      plan: has("Plan"),
-      ac: has("AC") || has("Acceptance Criteria"),
-      dod: has("DoD") || has("Definition of Done"),
+      proposal: has(spec.sections.proposal),
+      plan: has(spec.sections.plan),
+      ac: has(spec.sections.ac),
+      dod: has(spec.sections.dod),
     };
   }
 
@@ -793,11 +922,56 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   function check(id: string): Record<string, unknown> {
     const t = get(id);
     if (!t) return { id, ok: false, reason: "not found" };
-    const artifacts = artifactSections(t.body);
-    const allArtifactsPresent = Object.values(artifacts).every(Boolean);
 
     if (t.status === "todo") {
       const gate = "author->ready";
+      // Shape dispatch (ADR-001 re-landed; gap-the-dod-gate-encodes-a-retired-
+      // task-shape): the required sections depend on the task's registered
+      // shape. Contract (quay fast mode, `## Contract` for Plan) and finding
+      // (meta-cc DIR, `## Finding` for Proposal) each have their own COMPLETE
+      // contract — dispatch is not a waiver.
+      const shape = detectShape(t.body);
+      const artifacts = artifactSections(t.body, shape);
+      const allArtifactsPresent = Object.values(artifacts).every(Boolean);
+
+      // AC5 (fail-closed): an unknown shape must never fall into a lenient
+      // branch — otherwise "pick a template" becomes a new way to bypass the
+      // gate. Every registered shape has a complete contract; a body that
+      // matches none is refused.
+      if (shape === "unknown") {
+        return {
+          id,
+          gate,
+          ok: false,
+          shape,
+          artifacts,
+          reason:
+            "unrecognized task shape (no ## Contract / ## Finding / ## Plan section) — unknown shapes fail closed; register the shape before it can pass",
+        };
+      }
+
+      // Contract shape (AC4): the `## Contract` section must carry ALL six
+      // keys (measure/band/invariant/invoke/control/resume) — stricter than a
+      // prose Plan section, never looser. Failure names the missing key(s).
+      const contractKeys =
+        shape === "contract" ? contractKeysPresent(t.body) : undefined;
+      if (shape === "contract" && allArtifactsPresent && contractKeys) {
+        const missing = SHAPE_REGISTRY.contract.planKeys.filter(
+          (k) => !contractKeys[k]
+        );
+        if (missing.length > 0) {
+          return {
+            id,
+            gate,
+            ok: false,
+            shape,
+            artifacts,
+            contractKeys,
+            reason: `## Contract section missing required key(s): ${missing.join(", ")}`,
+          };
+        }
+      }
+
       // QN-005 phase 2: AC must be machine-checkable — require at least one
       // checkbox line in the AC section, even if all four headings +
       // minimum content are present. Distinct, specific failure reason so
@@ -811,7 +985,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // execute->done, which already required full-checked state. This
       // reuses the same checkboxes/checked regex-count logic, applied one
       // gate earlier.
-      const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
+      const acSection = sectionAfterHeading(t.body, ["AC", "Acceptance Criteria"]);
       const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
       const acChecked = acSection.match(/- \[[xX]\]/g) || [];
       const acHasCheckbox = acCheckboxes.length > 0;
@@ -820,7 +994,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
           id,
           gate,
           ok: false,
+          shape,
           artifacts,
+          ...(contractKeys ? { contractKeys } : {}),
           reason: "AC section has no checkboxes",
         };
       }
@@ -831,18 +1007,24 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
           id,
           gate,
           ok: false,
+          shape,
           artifacts,
+          ...(contractKeys ? { contractKeys } : {}),
           acTotal: acCheckboxes.length,
           acChecked: acChecked.length,
           reason: `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`,
         };
       }
-      const ok = allArtifactsPresent && acAllChecked;
+      const contractKeysOk =
+        !contractKeys || Object.values(contractKeys).every(Boolean);
+      const ok = allArtifactsPresent && acAllChecked && contractKeysOk;
       return {
         id,
         gate,
         ok,
+        shape,
         artifacts,
+        ...(contractKeys ? { contractKeys } : {}),
         reason: ok
           ? "all four artifacts present; eligible to move to ready"
           : "missing artifacts: " +
@@ -856,7 +1038,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // execute->done gate: v0 checks AC checkboxes are all ticked, as a thin
       // machine-checkable proxy for "AC satisfied" (design §3). This is a
       // deliberately thin v0 gate — see iteration-0 gap analysis.
-      const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
+      const acSection = sectionAfterHeading(t.body, ["AC", "Acceptance Criteria"]);
       const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
       const checked = acSection.match(/- \[[xX]\]/g) || [];
       const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
@@ -927,22 +1109,16 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     return { id, gate: "unknown", ok: false, reason: `unrecognized status ${t.status}` };
   }
 
-  function extractSection(body, headings) {
-    for (const h of headings) {
-      // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
-      // end-of-string anchor (JS has no \Z metacharacter) — the engine took
-      // it as a literal capital "Z", and with the `i` (case-insensitive)
-      // flag this also matched a bare lowercase "z" anywhere in the
-      // section's prose, truncating capture early (found and root-caused
-      // by the iteration-1 G3 audit against QN-005's own AC text, which
-      // contains the word "zero"). Correct JS end-of-string lookahead is
-      // `(?![\s\S])` (no characters remain).
-      const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
-      const m = re.exec(body);
-      if (m) return m[1];
-    }
-    return "";
-  }
-
-  return { list, listWithMalformed, get, write, appendNote, check, artifactSections, childrenStatus };
+  return {
+    list,
+    listWithMalformed,
+    get,
+    write,
+    appendNote,
+    check,
+    artifactSections,
+    childrenStatus,
+    detectShape,
+    contractKeysPresent,
+  };
 }
