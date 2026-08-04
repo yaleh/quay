@@ -36,12 +36,21 @@
 
 ## AC（每条都能用一条命令或一次实测回答）
 
-- [ ] **AC1：`done` 不可零成本取得。**
+- [x] **AC1：`done` 不可零成本取得。**
       判据：造一个 **AC 全勾、DoD 全未勾**的任务 ⇒
       `node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check <id> --json`
       的 `execute-done` **必须 `ok:false`**。
-      **当前状态：不满足**（`DIR-102` 现场）。对应任务
-      `gap-both-gates-read-one-signal-so-done-costs-nothing`（**在飞**）。
+      **已满足（外层 2026-08-04 01:55Z 自造夹具实测，不是读勾选）**：
+      临时任务库中造一个 `status: ready`、**AC 2/2 全勾、DoD 0/2 未勾**的任务 ⇒
+      ```
+      { "gate": "execute->done", "ok": false,
+        "acTotal": 2, "acChecked": 2, "dodTotal": 2, "dodChecked": 0,
+        "reason": "0/2 DoD checkboxes checked" }
+      ```
+      **⇒ 两道闸的证据源已分开，`done` 不再零成本可得。**
+      **控制同时成立**：`gate-gameability.test.mjs` 仍 `pass 1 / fail 0`——
+      **那条「闸永不验声称真假」的 permanent 边界没有被这次改动破坏**
+      （这是外层给该任务加的 AC8：**把「两闸冗余」修成「试图判断声称真假」是走进一个已被证明不可行的方向**）。
 
 - [ ] **AC2：绕闸写入的状态必须可被列出。**
       判据：`bash plugin/scripts/task-status-drift-check.ts`（或等价入口）
