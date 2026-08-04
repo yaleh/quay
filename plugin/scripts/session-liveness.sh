@@ -707,7 +707,8 @@ while true; do
   done < <(targets)
   # AC7 心跳：每轮追加一条 HEARTBEAT（只进共享 events.jsonl）。订阅方据此判定「看门的不在了」，
   # 不依赖任何人恰好去尝试挂载。持有者一死，心跳线停止增长 → 订阅方看最后一条 ts 即知。
-  sl_heartbeat
+  # --once 不是持有者（不取锁），不写心跳——诊断接缝不冒充长跑持有者。
   [ "$ONE_SHOT" = true ] && break
+  sl_heartbeat
   sleep "$INTERVAL"
 done
