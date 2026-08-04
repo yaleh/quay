@@ -172,6 +172,21 @@ section (nothing to verify); gap-split-decision-finality-not-enforced 0/3 missin
 `plugin/test/proposal-convergence.test.mjs` entry removed). No ready task's Touches
 majority-resolve to nonexistent files.
 
+### REFUTE record (internal adversarial review, 2 rounds, both resolved)
+
+- **Round 1 (found + fixed):** `checkTouchesResolve` originally required `(delete)`-tagged entries to
+  exist, but the task's AC2 wording ("verify every entry ... that is NOT tagged `(new)`/`(delete)`")
+  exempts BOTH tags — a delete of an already-gone file is a no-op and cannot make a task
+  undispatchable. Fixed: `(delete)` now skips existence like `(new)`; CLI prints `skip (delete)`;
+  two new tests cover the exemption. Also found the majority-missing CLI branch lacked a trailing
+  newline (the `exit=$?` ran onto the RESOLVE line) — fixed; and two stale comments (parser said
+  `(delete)` "MUST exist", tick doc mentioned only `(new)`) — corrected.
+- **Round 2 (no real findings):** confirmed the fast-mode dispatch path uses the tick doc's
+  `checkTouchesPair` inline eligibility (NOT the retired `concurrent-batch-scheduler.ts`
+  `assembleBatch`, whose only live caller is a golden-replay script), so the tick-doc wiring is the
+  correct hook; updated this task's `## Touches` to include all 4 additionally-modified files;
+  `task-status-drift-check.ts` and `test-framework-policy-check.ts` both pass.
+
 ## Touches
 
 - tasks/DIR-119-D2.md
