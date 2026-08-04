@@ -3,7 +3,7 @@ id: gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX
 title: the L0 defense (env -u TMUX) is launch-side and can't be remembered by
   every caller — make tmux isolation structural so a forgetful sub-agent shell
   cannot touch the default server
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -74,8 +74,11 @@ PreToolUse hook（人已否决，裁定 E）。本任务只让「repo 与测试�
 
 - plugin/scripts/tmux-isolated.sh (new)
 - plugin/test/tmux-isolated.test.mjs (new)
-- plugin/scripts/session-liveness.sh（若 A/D 尚未改它；否则按顺序）
+- plugin/scripts/session-liveness.sh
 - orchestration/session-launch-recipes.md
+
+（顺序注记：`session-liveness.sh` 的迁移若与 A/D/B 的在飞改动撞车，按顺序 rebase 不并行——
+本任务与 A/D/B 的 `checkTouchesPair` 实测全部 `disjoint:true`，理论无撞，仅作兜底。）
 
 ## Contract
 
@@ -97,4 +100,7 @@ changed: 外层裁定 G（L0）立案。相对简报 §2 的收紧：
 必须存活，这是 L0 存在的全部理由；
 (4) **不 scope 拦子代理临时 shell、不做 hook**——人已否决 hook（裁定 E），临时命令 lint 不可见，
 本任务只在可见面（repo 脚本 + 测试 + 启动配方）让危险调用结构性不可能。
-status: todo——排在 A/D/B 之后（与 A/D 的 session-liveness 触摸面顺序处理）。
+status: todo→**ready**（2026-08-04T14:5xZ 外层裁定 R3/L0 优先级：两次事故来源都是临时探索路径，
+L0 结构性关闭它 ⇒ 升入 A/D 并发批次，不再排在 A/D/B 之后）。touches 的 `session-liveness.sh` 行
+格式修正（备注移出路径，resolve 不再 MISSING）。与 A/D/B 的 `checkTouchesPair` 实测全部
+`disjoint:true`。

@@ -90,7 +90,12 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       默认行数写进文件头并附理由；**整屏文本不得进入判定路径**（AC6 的负控制钉住这一条）
 - [ ] AC3: 夹具是**真实录下来的** `.txt` 屏幕文本（`plugin/test/fixtures/pane-states/*.txt`），
       五态各 ≥2 张，**每张附录制来源**（哪个会话、什么时刻、当时它实际在做什么）；
-      合成的不算——`fixture_count` 落在 `band` 内
+      合成的不算——`fixture_count` 落在 `band` 内。**采集方式限定（外层裁定 R3）**：只用
+      `tmux capture-pane -p` 对**现有** pane 采样（`quay-0:manager` / `quay-0:outer` /
+      `quay-0:inner`），**禁止为采集新建或清理 tmux 会话/窗口**
+      （`new-window`/`new-session`/`kill-window`/`kill-session`/`kill-server` 全部禁止——
+      采集→清理正是 2026-08-04 两台整机崩溃的那一步）。某态当前 pane 遇不到 ⇒ 标注
+      `unavailable-until-real-occurrence`，**不得为采集造**
 - [ ] AC4: `permission-prompt` 一态**必须有真实录制的样本**（`Do you want to proceed?` 一族）——
       这是整个机制存在的理由，没有它其余四态都不成立
 - [ ] AC5: **两级抗脆的第二级可验证**——喂一张五态都匹配不上的屏幕文本 ⇒ 返回
@@ -103,10 +108,13 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       （证明测试在断言语义，不是在断言「跑通了」）
 - [ ] AC8: `tmux_in_tests` 落在 `band` 内（= 0）——测试文件与夹具目录里 `tmux` 出现 0 次
 - [ ] AC9: 测试用 `node:test` 且带 `// @test-group engine`
+- [ ] AC10: **采集过程留痕（R3）**——本任务体 `## Dispatch review` 或提交说明里记录：用了哪些
+      现有 pane、各采了什么态；`tmux new-session|new-window|kill-server` 在实现过程中 0 次
+      （采集过程的机械守卫：AC8 的 `tmux_in_tests=0` 管交付物，本 AC 管采集动作本身）
 
 ## Definition of Done
 
-- [ ] AC1–AC9 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
+- [ ] AC1–AC10 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 - [ ] **本任务不修改 `session-liveness.sh`**——接线由姊妹任务承载；改了即视为越界
 

@@ -175,3 +175,51 @@ E 的纯函数分类器消掉测试里的危险面；L0 兜住临时探索那条
 清理应当跟在架构后面，不是前面。它的 worktree 已改 `session-liveness.test.mjs` 与两份 tick 文档，
 与 D 的观察者任务**触摸重叠**，并发或任一顺序都要 rebase；那就按正确的顺序 rebase。
 **531 行的沉没成本不构成理由**——外层的价值恰恰来自没有那份沉没成本。
+
+---
+
+## 增补裁定（2026-08-04T14:5xZ，管理者观察三条 — R1/R2/R3）
+
+### R1 — A→D 串行是**遗漏，不是技术判断**（机械证据，非自然语言断言）
+
+管理者质疑：A→D 串行是技术判断还是遗漏？本 tick 实跑 `checkTouchesPair`：
+
+```
+A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}
+A-L0: 同  D-L0: 同  A-B: 同  D-B: 同  B-L0: 同   —— 六对全部 disjoint
+A/D resolve 均 dispatchable（A 0/3 missing，D 0/0 missing）
+```
+
+A 与 D 共享的只有「五态枚举」这一个**名字**；D 自己的 Contract `invariant enumerated_states = 5
+（waiting-input / permission-prompt / busy / error-banner / unknown）` **已自带该枚举**，A 的
+Amendment 不是 D 实现的硬前置。B 依赖 D 是真的（消费 `classifyPaneState`）。
+
+**裁定：A→D 串行是遗漏，不是技术判断——驱动文本断言了顺序却未附任何依赖证据。** 纠正为
+A 与 D 并发（内层上下文继续 D，L0 作后台 Agent），B 待 D。纠正措施并入 R2 机制（要定顺序必附
+checkTouchesPair 输出）。
+
+### R2 — 驱动文本只携带数据，不复述行为（立案 `gap-drive-text-carries-data-not-behavior-outer-inner-handoff`）
+
+管理者观察第二条，最硬。证据：驱动文本首句「按 A→D→B 顺序」+ 纪律清单唯独没有并发后台派发；
+内层 `Agent` 调用 0 次、串行做 A（6m11s/58.2k tokens）——内层忠实执行，是外层把该由出厂文档
+供给的行为当数据复述了。出厂 `fast-mode-loop-tick.md` §4（line 280/317）明确要求并发
+`Agent(run_in_background)` 上限 3，内层读过却仍串行，因为散文覆盖了产品。这是「并发派发」常驻
+指令的**第二次静默丢弃**（简报 §3 点名过一次）。
+
+**裁定（设计判据）**：驱动文本只携带数据（任务 id、裁定结论、依赖事实）；行为一律由出厂
+`fast-mode-loop-tick.md` 供给，外层不复述；确需定顺序必须附 `checkTouchesPair` 实际输出；内层
+fail-safe——收到与出厂派发契约矛盾的驱动文本时以出厂文档为准并向外层标注，不静默服从散文。
+**与 `SPEC-quay-self-hosts-its-own-cold-start.md` 的关系**：SH 管**启动**那一跳的交接（挂监视器、
+建 cron、驱动内层进 fast mode 派发首任务）；R2 管**启动之后每一跳**的交接（外层每次驱动内层时
+什么随文本过去、什么不该）。SH=boot 实例，R2=per-tick 实例，同一「交接通道不失真」目标。
+
+### R3 — D 的夹具采集方式收紧 + L0 优先级
+
+- **D 的 AC3 已修订**：只用 `tmux capture-pane -p` 对**现有**三个真实 pane（`quay-0:manager` /
+  `quay-0:outer` / `quay-0:inner`）采样；**禁止为采集新建或清理 tmux 会话/窗口**
+  （`new-window`/`new-session`/`kill-window`/`kill-session`/`kill-server` 全禁——采集→清理正是
+  2026-08-04 两台整机崩溃的那一步）；某态遇不到标 `unavailable-until-real-occurrence`，不为采集造。
+  新增 AC10（采集过程留痕）。`tmux_in_tests=0` 只约束交付物文本，管不住采集过程——AC10 补这一层。
+- **L0 优先级：升入本批并发（`status: todo → ready`）**。理由：两次事故的实际来源都是**临时探索**
+  路径（不在被检查的文件里，任何仓库级 lint 都看不见），L0（`tmux-isolated.sh` 助手，显式 `-S` +
+  `env -u TMUX`）结构性关闭它；与 A/D/B 的 `checkTouchesPair` 全部 `disjoint:true`，可并发。
