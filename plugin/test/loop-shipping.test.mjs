@@ -264,8 +264,15 @@ test('AC3 — cold-start-e2e.sh asserts the build-required files, fail-named (in
   for (const f of ['scripts/quay-init.sh', 'loop/orchestrator-loop-tick.md']) {
     assert.ok(src.includes(f), `cold-start-e2e.sh must assert the presence of ${f} (AC3)`);
   }
-  assert.ok(!src.includes('scripts/inner-state.sh'),
-    'cold-start-e2e.sh must NOT require inner-state.sh (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC3)');
+  // inner-state.sh is RETIRED — cold-start-e2e.sh must treat it as not-required, not list it as a
+  // required presence file. It legitimately REFERENCES the name in its absence-check ("must NOT be
+  // laid down", gap-retire-inner-state-one-observer-targets-by-parameter AC3), so the assertion is
+  // the positive retirement marker, not a substring absence (a substring grep would false-positive
+  // on the `plugin/scripts/inner-state.sh` path in that check).
+  assert.match(src, /inner-state\.sh is retired/i,
+    'cold-start-e2e.sh must document inner-state.sh as retired (not required)');
+  assert.ok(!src.includes('assert_file "$PROJECT/plugin/scripts/inner-state.sh"'),
+    'cold-start-e2e.sh must NOT require inner-state.sh\'s presence (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC3)');
   // The completeness assertion must fail naming the missing file (not a bare "something failed").
   assert.match(src, /fail "missing file: \$1"/,
     'the AC3 completeness assertion must fail naming the file');

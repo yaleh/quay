@@ -2,8 +2,10 @@
 // inner-blocked-signal.test.mjs — gap-no-explicit-blocked-signal-from-inner-layer +
 // gap-the-blocked-channel-has-a-writer-nobody-calls: RED/GREEN tests for the inner layer's explicit
 // "I am stopped and waiting" signal. The inner layer writes .quay/inner-blocked.json ONLY through
-// this CLI (AC4 — never hand-written JSON); the outer Monitor (inner-state.sh) watches the path
-// with inotifywait (AC6); the readiness check prints it (AC5); the wait duration becomes telemetry
+// this CLI (AC4 — never hand-written JSON); the outer reads the path back via `--read` (the
+// inner-state.sh inotifywait monitor is RETIRED — gap-retire-inner-state-one-observer-targets-by-
+// parameter; the block file's presence + `--read` is the signal); the readiness check prints it
+// (AC5); the wait duration becomes telemetry
 // (AC7).
 //
 // Covers: AC1 schema + gitignore, AC2 reason vocabulary (no new semantics), AC3 tick-file wiring,
@@ -11,8 +13,8 @@
 // telemetry aggregation, AC9 @test-group governance, and — for the blocked-channel task — the REAL
 // trigger path (AC1/AC6): `--detect-stop` writes the block as a MECHANICAL CONSEQUENCE of a
 // detected stop condition (merge-conflict, task-over-90m), not because someone remembered to call
-// --assert-blocked. AC4 (end-to-end replay) is both a behavioral test here (outer's inner-state.sh
-// emits BLOCKED within one tick) and a live drill recorded in the task body.
+// --assert-blocked. AC4 (end-to-end replay) is both a behavioral test here (the outer reads the
+// block record via `--read` within one tick) and a live drill recorded in the task body.
 //
 // Run:
 //   scripts/test.sh plugin/test/inner-blocked-signal.test.mjs
@@ -748,7 +750,7 @@ test("AC3 — --detect-stop never auto-clears a manual (judgment) block; only --
 
 // AC4 — end-to-end replay: a stop condition ⇒ block ⇒ the outer's monitor emits BLOCKED in one tick.
 
-test("AC4 — end-to-end: a stop condition produces the block and the outer's inner-state.sh emits BLOCKED", async () => {
+test("AC4 — end-to-end: a stop condition produces the block and the outer reads the record (inner-state.sh retired)", async () => {
   const tmp = makeTmpWorkspace();
   try {
     await writeBackdatedStartEvent(tmp, "gap-e2e", 91 * 60 * 1000);
@@ -756,15 +758,14 @@ test("AC4 — end-to-end: a stop condition produces the block and the outer's in
     assert.equal(det.status, 0, det.stderr);
     assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "stop condition ⇒ block written");
 
-    // The outer's monitor (inner-state.sh) reads the block via its INNER_STATE_BLOCK_ROOT seam
-    // (which runs check_blocked_state once and exits). The outer can judge within one tick.
-    const monitor = spawnSync("bash", [path.join(REPO_ROOT, "plugin", "scripts", "inner-state.sh")], {
-      encoding: "utf8",
-      env: { ...process.env, INNER_STATE_BLOCK_ROOT: tmp },
-    });
-    assert.equal(monitor.status, 0, monitor.stderr);
-    assert.match(monitor.stdout, /BLOCKED reason=task-over-90m/, `outer must see reason+question: ${monitor.stdout}`);
-    assert.match(monitor.stdout, /question=/, "the outer gets the question, not just 'stuck'");
+    // The outer reads the block via `--read` (inner-state.sh is RETIRED —
+    // gap-retire-inner-state-one-observer-targets-by-parameter; the block file's presence +
+    // the --read record is the signal the outer consumes). The outer can judge within one tick.
+    const read = runCli(tmp, "--read");
+    assert.equal(read.status, 0, read.stderr);
+    const rec = JSON.parse(read.stdout);
+    assert.equal(rec.reason, "task-over-90m", "outer must see reason+question");
+    assert.ok(rec.question, "the outer gets the question, not just 'stuck'");
 
     // The wait duration becomes telemetry on --clear (AC7), so the 68-minute class of dead time is
     // measurable, not inferred.
