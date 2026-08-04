@@ -335,18 +335,16 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 
 2. **依赖就绪**：父任务 done、无未满足前置。用 `it0-split-or-commit-check.ts` 的
    PARENT-DONE-IFF-CHILDREN 语义，不自己重新发明
-3. **并发资格**：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞
-   任务和彼此**两两检查
+3. **并发资格**：用生产入口 `concurrent-batch-scheduler.ts` 对**所有在飞任务和彼此**两两检查。
+   生产入口自 `gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet` 起已按**声明路径**
+   判定（`expandDeclaredTouches`）：具体路径不论是否已存在都直接参与比较（任务将创建的
+   `(new)` 文件不会被误判成「matched nothing / likely a typo」），只有通配符才落到文件系统展开。
+   此前手写的 `expand`（`normalizePath` + 剥注解）已删除——直接用生产入口即可：
 
 ```bash
-node --experimental-strip-types -e "
-const R='$(pwd)'; const fs=await import('node:fs');
-const m=await import(R+'/plugin/scripts/touches-orthogonality-check.ts');
-const A=m.parseTouches(fs.readFileSync(R+'/tasks/<A>.md','utf8'));
-const B=m.parseTouches(fs.readFileSync(R+'/tasks/<B>.md','utf8'));
-const expand=(g)=>new Set(g.map(x=>m.normalizePath(x.replace(/ \(.*\)\$/,'').trim())));
-console.log(m.checkTouchesPair(A,B,expand));
-"
+node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --root "$(pwd)" tasks/<A>.md tasks/<B>.md --json
+# 输出 { batch, deferred }。两者都在 batch ⇒ disjoint，可同批；
+# deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
 ```
 
 重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
