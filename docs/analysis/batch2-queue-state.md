@@ -2357,6 +2357,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **suite-speed 唯一在飞**（control/run-2，2h26m，σ 协议推进中）；auto-block 持续（预期）。
 - 无其它停止条件；监视器 mounted:true；master 停在 2079d153。
 
+### tick 2026-08-04T18:42Z（外层，`no-action`：ready-pool-check 缺陷已修复并独立核实）
+
+- **缺陷修复已合并**（`84ab1dcc` fan-in + `965b37be`，12/12，**pool honest 0**）——notYetFlipped 改用
+  landed-on-master 信号（`6f22f162`）+ 补「merged 但 AC 全未勾」夹具（`b7fbecd0`）。
+- **独立核实**：`ready-pool-check.ts --json` 现报 `pool: 0`（诚实）、deficit 3、10 条全排除
+  （8 条 not-yet-flipped / 1 条 parked / 2 条 fixture）。**假满已从机制内消灭**——它会从 todo 正确补晋。
+- **次要观察（记不立案）**：landed-on-master 信号会把「触摸文件是既有文件」的在飞任务也标成
+  not-yet-flipped（suite-speed 被标了，虽仍在跑）——对当前无碍（在飞≠可派发），但候选选择时若
+  误排未开始的既有文件型任务需细化（留待真实误排发生再立）。
+- **suite-speed 唯一在飞**（control/4，2h45m，σ 协议推进中）；auto-block 持续（预期）。
+  内层备忘「wait for suite-speed to finish, then close the batch」。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
