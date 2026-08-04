@@ -2499,6 +2499,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 这是批完成后「无 agent 通知 → 内层停」的已知形态（双层模型主推进信号是 agent 完成通知）——
   外层 tick 就是兜底驱动。inProgress 0、无停止条件。
 
+### tick 2026-08-04T23:02Z（外层，`no-action`：batch-3 在飞 + taskWorkLanded 过冲缺陷立案）
+
+- **Batch-3 已在飞**：内层按驱动补晋 3 条 + 派发（`a4c4a129`，rib:true）；log-filtered（`b51b650e`）
+  与 dispatch-eligibility（`7478d979`）已合并验证；phantom-in-flight 在飞（agent「Fixing
+  firstKnownCommitMs branch history reference」，17m+）。新参考值 2276→2298→（batch-3 后）。
+- **ready-pool-check taskWorkLanded 过冲缺陷已立案**（`gap-ready-pool-check-taskworklanded-overshoot-
+  excludes-existing-file-tasks`）：既有 Touches 文件存在被误判「已落」——补晋改既有文件型任务后 pool
+  仍 0，机制既推荐又排除（自相矛盾）。信号需改任务特有符号解析。内层 flag + 外层确认 + 立案。
+- inProgress 1（phantom-in-flight）；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
