@@ -52,6 +52,9 @@ const FIXTURE_EXPECTATIONS = {
   // quay-0:manager — the same pane while the manager session was ACTIVELY processing: the
   // STATUS LINE carries "esc to interrupt" (verified), captured automatically, 14:57:13 local.
   "busy-manager-1.txt": "busy",
+  // quay-0:manager — the same pane actively processing again (status line carries "esc to
+  // interrupt", verified), captured automatically, 15:01:14 local. Second real busy recording.
+  "busy-manager-2.txt": "busy",
 };
 
 function readFixture(name) {

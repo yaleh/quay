@@ -98,7 +98,7 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       `unavailable-until-real-occurrence`，**不得为采集造**
       **（R3 影响：实际录得 waiting-input ×3 + busy ×2，见下方「R3 约束下的夹具清单」；
       permission-prompt / error-banner / unknown 三态当前 pane 遇不到、无已录样本 ⇒ 标注
-      unavailable-until-real-occurence。`fixture_count` = 5，落在 `band`(10..30) 之外——R3 的
+      unavailable-until-real-occurence。`fixture_count` = 5，落在 `band`(10..30) 之外——这是 R3 的
       直接后果，band 需外层修订。AC3 的「五态各 ≥2 张」在本约束下不可完全满足，留白待外层裁定。）**
 - [ ] AC4: `permission-prompt` 一态**必须有真实录制的样本**（`Do you want to proceed?` 一族）——
       这是整个机制存在的理由，没有它其余四态都不成立
@@ -137,11 +137,13 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
 | `waiting-input-manager-2.txt` | waiting-input | quay-0:manager，~14:57 本地 | 同上，另一次真实录制 |
 | `waiting-input-manager-3.txt` | waiting-input | quay-0:manager，~14:58 本地 | 同上第三次；其滚动内容引用了「esc to interrupt」字样但状态行无忙碌标志——分类器正确判 waiting-input，正好实证「读底部区域、不读整屏」 |
 | `busy-manager-1.txt` | busy | quay-0:manager，14:57:13 本地 | manager 会话正在处理（**状态行**出现 `esc to interrupt`，已核实），自动捕获 |
+| `busy-manager-2.txt` | busy | quay-0:manager，15:01:14 本地 | 同上第二次（**状态行** `esc to interrupt`，已核实），自动捕获 |
 
 permission-prompt / error-banner / unknown 三态：**unavailable-until-real-occurence**（R3 禁止为采集
 新建会话；三个真实 pane 当前不展现这些形状；无已录样本）。tier-2 unknown 的行为由 AC5 的合成
-不匹配屏幕实跑验证（分类器契约是纯函数，tier-2 行为与夹具来源无关）。busy 已录 1 张（≥2 欠 1，
-R3 下等待 manager 下一个真实 busy 窗口，见 DoD 注记）。
+不匹配屏幕实跑验证（分类器契约是纯函数，tier-2 行为与夹具来源无关）。waiting-input ×3、busy ×2
+均满足各自 ≥2；permission-prompt 与 error-banner 无真实样本（AC4 待真实出现），unknown 无真实
+不匹配屏（AC5 用合成屏验证 tier-2 行为）。
 
 ### AC5 实跑输出（逐字）
 
@@ -171,7 +173,6 @@ different bottom (busy): busy | differs from idle: true
 ✖ AC3: every fixture classifies to its recorded real state
 （重标后测试变红；已还原为正确标签，还原后 10/10 全绿）
 ```
->>>>>>> acec8b5d (D: pane-state-classify.ts — pure pane-state classifier (5 enumerated states, bottom-region only, two-tier anti-brittleness with unknown+raw tier-2); real recorded fixtures from the manager pane (waiting-input x3, busy x1) + node:test suite (@test-group engine, tmux word = 0))
 
 ## Touches
 
