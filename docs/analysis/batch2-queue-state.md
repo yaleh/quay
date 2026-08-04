@@ -1935,3 +1935,23 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
 **同一条消息内并发发起**（非串行等待），`--task-start` 均已打（runId 见上）——AC1/AC2 的验证点。
 
 **在飞（2/3，槽位未满，等首批返回后视情补第 3 个）**：DIR-103-C + one-condition。
+
+### 第二次 OOM 恢复 fan-in 关闭（2026-08-04T09:5xZ，内层 tick）
+
+- **批全量套件结果**：**tests 2227 / pass 2203 / fail 0 / cancelled 0 / skipped 24**（`/tmp/batch-fanin-full.log`，
+  显式 `--test-concurrency=8`，~15min）。**参考值 2157 → 2227**（DIR-103-C acceptance T1-T4/T4-control +
+  one-condition 8 条新测试，加期间多任务合并）。
+- **clean-tree 假阳性（有证据，根因已修）**：suite-after `assert-clean-tree.sh` 报
+  `?? .quay/loop-driver.jsonl` FAIL——该文件是 **loop-driver 注册表**（cold-start 02:40:46Z 写入，
+  cron LIVE 在写），**先于本套件存在**，非测试产物，但漏在 .gitignore 之外。根因修复已落地：
+  外层提交 `f263f12f`（`.gitignore` 加 `**/.quay/loop-driver.jsonl`）。batch 本身无回归
+  （fail 0 / cancelled 0）。
+- **关闭 DIR-103-C + one-condition**：均 `status: done` + `--task-end`（runId 见上）+ worktree 移除
+  （`quay-worktrees/dir103c`、`quay-worktrees/onecond`）+ 分支删除。DIR-103-C 三条 DoD 落地勾选
+  （merge `56eda459` + 批套件绿 = 独立审计）；one-condition DoD 全勾（批套件 = fan-in 核验，
+  判据 fail 0 且 cancelled 0 成立）。M239 worktree 保留（人裁定）。
+- **telemetry**：`--snapshot` 已写（`milestones/fast-mode-telemetry/2026-08-04.json`）。
+- **在飞（1/3）**：`gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files`
+  （runId `fm-...-gzxg3x`，worktree `/home/yale/work/quay-worktrees/readyqueue`，分支同名，09:56Z 派发）——
+  re-triage 8 个陈旧 ready 任务 + 把「Touches 文件存在性」接进派发资格路径（AC2），DIR-103-C 负控制。
+  其余 8 个 ready 任务暂不派（ADR-022 退役目标）。ready 队列清理后外层可重新评估 backlog 优先级。

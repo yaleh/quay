@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-08-04T01:39:56.821Z",
+  "generatedAt": "2026-08-04T09:54:47.829Z",
   "since": null,
   "tasks": [
+    {
+      "taskId": "DIR-103-C",
+      "minutes": 41.19263333333333,
+      "outcome": "done"
+    },
     {
       "taskId": "DIR-112",
       "minutes": 10.43525,
@@ -63,8 +68,18 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-drift-check-only-looks-at-the-harmless-direction",
+      "minutes": 17.956766666666667,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-inner-forensics-verify-reports-nonruns-and-zero-durations",
       "minutes": 35.69153333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them",
+      "minutes": 25.780216666666668,
       "outcome": "done"
     },
     {
@@ -293,6 +308,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger",
+      "minutes": 41.19125,
+      "outcome": "done"
+    },
+    {
       "taskId": "gap-the-only-token-waiter-refuses-to-wait-at-all",
       "minutes": 105.94785,
       "outcome": "done"
@@ -315,13 +335,13 @@
   ],
   "orphaned": [],
   "inProgress": [],
-  "meanMinutes": 66.47796639784947,
-  "medianMinutes": 56.32075833333333,
-  "tasksPerHour": 1.5828577414334792,
-  "serialEquivalentPerHour": 0.9025546846743038,
+  "meanMinutes": 64.35992095959597,
+  "medianMinutes": 55.20514166666666,
+  "tasksPerHour": 1.3919009559834696,
+  "serialEquivalentPerHour": 0.9322572045678389,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-04T01:39:56.777Z",
-  "windowHours": 39.16966027777778,
+  "windowEnd": "2026-08-04T09:54:47.801Z",
+  "windowHours": 47.417166944444446,
   "haltedHours": 0,
   "halted": [],
   "blocked": [

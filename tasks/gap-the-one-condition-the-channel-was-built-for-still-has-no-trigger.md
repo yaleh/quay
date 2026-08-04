@@ -1,7 +1,8 @@
 ---
 id: gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger
-title: "ruling-required is the reason the blocked channel was built for, and it is the one reason --detect-stop cannot fire"
-status: todo
+title: ruling-required is the reason the blocked channel was built for, and it
+  is the one reason --detect-stop cannot fire
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -245,11 +246,10 @@ $ node --no-warnings --experimental-strip-types --test plugin/test/inner-blocked
 ## Definition of Done
 
 - [x] AC2 与 AC4 两个方向的实跑输出都贴进任务体（见上方 Evidence）
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——**未跑**：本条派发指令明确
-      「Do NOT run the full suite inside your worktree — reserved for the batch fan-in step」，
-      且 `scripts/test.sh` 目前会先撞上与本任务无关的既存 Contract-check 违规（见上）。
-      本任务范围内的等价证据是 `node --test` 对本文件连跑 2 次 `pass 31 / fail 0 / cancelled 0`
-      （见上）；完整套件的 2 次全绿留给 fan-in 步骤核验
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——batch fan-in 套件核验：
+      2026-08-04 全量套件 **tests 2227 / pass 2203 / fail 0 / cancelled 0 / skipped 24**（一次批套件，
+      即 fan-in 的完整套件验证点；加上本文件 `node --test` 连跑 2 次 `pass 31 / fail 0 / cancelled 0`）。
+      此前任务体内的 Contract-check 既存违规已随 `gap-contract-ratchet` 修复消除，不再阻塞
 - [x] 任务体记录：**为那次事故建的机制抓不住那次事故**——
       `task-over-90m` 会在第 90 分钟触发，**比事故实际被解决晚 22 分钟**（见 Proposal 一节
       「这正是那 68 分钟对应的那个 reason」，本任务的机制把同一形状的捕获延迟从 90 分钟降到

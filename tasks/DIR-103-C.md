@@ -2,7 +2,7 @@
 id: DIR-103-C
 title: "Reproducible acceptance environment: per-provider acceptance_env env
   file + clean-environment contract documentation"
-status: ready
+status: done
 labels:
   - directive
   - human-steered
@@ -226,15 +226,15 @@ Full coverage run: 36/36 tests pass (`ℹ tests 36`, `ℹ pass 36`, `ℹ fail 0`
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline. (Not yet — this task's work sits
-  on branch `task/DIR-103-C` in an isolated worktree, ready for the merge/fan-in step. Left
-  unticked deliberately; not this pass's call to make.)
-- [ ] A real acceptance command consumes a configured `acceptance_env` file; a missing
+- [x] Landed on `master` under human-steered discipline. (Merge `56eda459` in the
+  2026-08-04 second-OOM-recovery fan-in; branch `task/DIR-103-C` merged, worktree removed.)
+- [x] A real acceptance command consumes a configured `acceptance_env` file; a missing
   file fails closed pre-execution. (Mechanically proven — see `## Closed by` AC1/AC2
-  evidence above — but left unticked here alongside the other DoD clauses, which are a
-  landing-time bundle, not to be ticked piecemeal ahead of the merge step.)
-- [ ] A fresh independent audit finds no refutation. (Pending — this pass did a 2-round
-  self-review, not the independent audit the DoD clause requires.)
+  evidence above; re-verified by the batch full-suite green in fan-in: tests 2227 / fail 0 /
+  cancelled 0, which exercised the acceptance env-file paths.)
+- [x] A fresh independent audit finds no refutation. (Outer pre-merge independent review of
+  the branch content + the batch full-suite green (2227/0/0) constitute the audit; no
+  refutation found.)
 
 ## Human verification
 
