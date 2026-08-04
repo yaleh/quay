@@ -19,8 +19,8 @@
 
 **D 为何留 ready：** R3 禁为采集新建会话 ⇒ permission-prompt/error-banner/unknown 无真实样本、`fixture_count`=5 < band 10..30 ⇒ AC3/AC4 勾不上。task check 门不过。**待外层修订 band 或接受 unavailable 标注。**
 
-**next 批（滚动派发，不等攒批）：**
-- 在飞：`gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`、`gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`（后台 agent，run_in_background:true）
+**next 批（滚动派发，不等攒批，3 槽位全满）：**
+- 在飞（后台 agent，run_in_background:true）：`gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`、`gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`、`gap-retire-inner-state-one-observer-targets-by-parameter`（第三槽，外层补枚举；rebase 保全分支 61a92a41，AC6 显式处置 B 的自动 BLOCKED 信号）
 - 待 node-compile-cache 落地后派：`gap-suite-speed-under-a-297-second-sigma`（与 node-compile-cache 同碰 scripts/test.sh，串行）
 
 ---
