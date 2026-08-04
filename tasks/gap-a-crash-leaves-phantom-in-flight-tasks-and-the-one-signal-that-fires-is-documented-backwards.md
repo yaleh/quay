@@ -2,7 +2,7 @@
 id: gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards
 title: a crash leaves phantom in-flight tasks forever, and the shipped tick doc
   defines ORPHAN as the exact opposite of what the code detects
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

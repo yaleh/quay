@@ -31,6 +31,14 @@
 - **批量全量（batch-2 收口）**：✅ **GREEN — tests 2298 / fail 0 / cancelled 0 / skipped 27**（新参考值 2298）。修掉 retire-inner-state merge 的 2 处残留测试（inner-blocked AC4 改用 --read；loop-shipping AC3 断言退役标记）后重跑全绿。suite-speed 按外层裁定 honest no-improvement 关闭（delta 83.8s < σ 297.6s，接受结论）。**batch-2 全部关闭完成**：8 条任务全部 done（closure agent `3ab119df`），invoke 证据齐全（task-contract ratchet new since baseline 0），telemetry 全配对，worktree 全清（仅 M239 存档），全量参考值 **2298**。
 
 **遥测纪律（外层 2026-08-04 纠正，系统性 gap）：** 合并必须同一步 `--task-end outcome=done`——本轮 5 次合并（node-cache/retire-state/task-write/am2/reliable-send）漏闭遥测括号，全部由外层代补。**规则：fan-in merge → 同一动作内跑 `--task-end --taskId <id> --runId <bracket> --outcome done`**，不等外层发现。suite-speed 落地时同理。
+
+## 批 3（2026-08-04 夜，ready-pool-check 补晋 + 滚动派发）
+
+**补晋 3 条**（ready-pool-check `candidates` 按机制顺序推荐，eligible:true）：`gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards`、`gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second`、`gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet`（todo→ready，touch 两两 disjoint 已核）。
+
+**派发**：3 后台 agent（run_in_background:true），scoped 不跑全量，telemetry 已开。
+
+**⚠ 发现的机制缺陷（ready-pool-defect 的 taskWorkLanded 过冲）**：补晋后 `pool` 字段仍为 0——因为 3 条新任务的 Touches 文件已在 master 上存在（它们在改既有文件，非新建），`taskWorkLanded` 把「Touches 文件存在」误判为「工作已落 master」。**信号过冲**：candidates 推荐它们补晋、pool 却排除它们，自相矛盾。需后续修复：taskWorkLanded 应区分「任务自己的改动已落」与「Touches 文件只是存在」（例如按任务特有符号解析，而非任一 Touches 条目存在）。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 

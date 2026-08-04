@@ -3,7 +3,7 @@ id: gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second
 title: the shared liveness log is filtered at the emit side by whoever holds the
   mount, so the holder's noise threshold silently becomes every subscriber's
   blindness
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

@@ -1,8 +1,8 @@
 ---
 id: gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet
-title: "assembleBatch expands Touches against the filesystem, so a task creating
-  only new files can never be judged disjoint"
-status: todo
+title: assembleBatch expands Touches against the filesystem, so a task creating
+  only new files can never be judged disjoint
+status: ready
 labels:
   - gap
   - defect
