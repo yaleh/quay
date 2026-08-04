@@ -1,7 +1,9 @@
 ---
 id: gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
-title: "send-keys-verified.sh reports delivered on pane-hash change alone — that changes the instant text is typed, before Enter is confirmed processed, so a lost/delayed Enter is misreported as delivered"
-status: todo
+title: send-keys-verified.sh reports delivered on pane-hash change alone — that
+  changes the instant text is typed, before Enter is confirmed processed, so a
+  lost/delayed Enter is misreported as delivered
+status: ready
 labels:
   - gap
   - milestone-candidate

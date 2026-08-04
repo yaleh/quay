@@ -2,7 +2,7 @@
 id: gap-split-decision-finality-not-enforced
 title: "Split decisions are not final: 15 redundant dispatches re-ran
   prepare-milestone on tasks already ruled SPLIT"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -36,6 +36,48 @@ $ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogona
 RESOLVE tasks/gap-split-decision-finality-not-enforced.md: 1/4 non-(new) touches missing — resolves (dispatchable)
 ```
 Remaining work for a dispatch: verify AC1-AC7 against the landed code and close.
+
+**OUTER CORRECTION (2026-08-04, human ruling — supersedes the RE-TRIAGE note above):** status
+moved to `needs-human`. The 2026-08-04 re-triage above checked only that this task's `## Touches`
+*files* resolve (they do — `proposal-convergence.ts` was retained) but never checked whether
+this task's actual TARGET — `decideSplitAdjudication`'s redundant-dispatch block, reached via
+`prepare-milestone.js`'s `--decide-split` CLI invocation (confirmed the sole caller:
+`milestones/M206/audits/iteration-0-acceptance-audit.md`'s AC7/AC-Admission audit traces the only
+call site to that workflow file's Admission phase) — has any live caller left. It doesn't:
+
+```
+$ grep -rln "decideSplitAdjudication\|decide-split\b" --include="*.ts" --include="*.sh" --include="*.md" plugin/ .quay/
+plugin/scripts/proposal-convergence.ts   # only the definition itself
+
+$ grep -rln "proposal-convergence" plugin/scripts/*.ts plugin/loop/*.md plugin/skills/**/*.md
+plugin/scripts/proposal-convergence.ts
+plugin/skills/quay-task-to-plan/SKILL.md   # uses validateConvergenceCounters/capsFor only —
+                                            # zero mention of checkSplitRecommendation,
+                                            # decideSplitAdjudication, or --record-split-decision
+
+$ grep -rn "prepare-decisions\|splitScopeHash\|decideSplitAdjudication" plugin/loop/*.md \
+    plugin/scripts/it0-split-or-commit-check.ts plugin/scripts/touches-orthogonality-check.ts \
+    plugin/scripts/concurrent-batch-scheduler.ts
+(no output)
+```
+
+`.claude/workflows/prepare-milestone.js` — the ONLY thing that ever called
+`decideSplitAdjudication()` to block redundant dispatch — was physically deleted by ADR-022
+(`gap-retire-the-prepare-execute-pipeline-cluster`, 2026-08-03; confirmed `ls` returns "No such
+file or directory"). `proposal-convergence.ts` surviving is necessary but not sufficient — the
+FUNCTION exists, but nothing in the fast-mode-era codebase calls it. **The 15-redundant-dispatch
+waste this task exists to prevent cannot recur today**, because nothing re-dispatches through
+that dead path anymore. `checkSplitRecommendation` (the DIFFERENT, genuinely-live split
+*classifier* CLAUDE.md's routing table documents) is unaffected by this ruling — this closure is
+specific to `decideSplitAdjudication`/`_recordSplitDecisionCli`/`splitScopeHash`'s
+redundant-dispatch-blocking mechanism, not the classifier.
+
+**Human ruling (2026-08-04, relayed verbatim):** "它的判据针对已退役的 prepare-milestone split
+流程，内层的识别是对的" — closing per the same convention used for the other 7 ADR-022 casualties
+in [[gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files]]: `needs-human`,
+not `done` (the mechanism isn't proven correct or incorrect, it's simply unreachable — a future
+fast-mode redundant-dispatch guard, if ever needed, would be a NEW task deciding where to hook in,
+not a resumption of this one).
 
 ## Proposal
 

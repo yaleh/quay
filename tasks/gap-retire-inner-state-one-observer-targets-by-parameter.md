@@ -1,7 +1,8 @@
 ---
 id: gap-retire-inner-state-one-observer-targets-by-parameter
-title: "Retire inner-state.sh — its one irreplaceable signal never fired in three projects, including the night we hit exactly what it was for"
-status: todo
+title: Retire inner-state.sh — its one irreplaceable signal never fired in three
+  projects, including the night we hit exactly what it was for
+status: ready
 labels:
   - gap
   - milestone-candidate
