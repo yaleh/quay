@@ -216,3 +216,21 @@ POST https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages
 交接文档原名 `handover-for-flash.md`——**绑死在模型名上，第二次换模型就过时了**。
 已改为 `handover-for-successor.md`。
 **给继任者的东西不要用当时那个继任者的名字命名。**
+
+---
+
+## 6. L0：tmux 隔离不依赖启动命令（2026-08-04）
+
+`gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX`（L0）落地后：
+
+- **L0 落地前**：会话启动命令**不带** `env -u TMUX`（`restart-plan-2026-08-04-third.md` AC4 已定——
+  重启不是引入未验证变量的地方；当前 outer/inner 的 `TMUX` 是设着的）。
+- **L0 落地后**：启动命令**可以**加 `env -u TMUX`，但**隔离不再依赖它**——
+  主防线是 `plugin/scripts/tmux-isolated.sh` 的**显式 `-S`**（`env -u TMUX tmux -S <私有 socket> "$@"`），
+  结构性压过「调用方是否记得 unset TMUX」。
+
+**给临时探索路径的安全模板**：任何子代理/临时的 tmux 操作，一律经
+`plugin/scripts/tmux-isolated.sh <子命令>`——即使误发 `kill-server`，也只能杀掉该私有 socket，
+**真实默认服务端（quay-0）不受影响**。需要访问真实默认服务端的仓库脚本
+（`session-liveness.sh` 的只读 pane 探针、`quay-init.sh` 的会话探测）走等价显式形态
+`env -u TMUX tmux -S "${TMPDIR:-/tmp}/tmux-$(id -u)/default" ...`，并在各自头部明示。
