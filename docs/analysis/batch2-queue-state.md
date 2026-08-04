@@ -2450,6 +2450,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   机制 + ready-pool-check 缺陷修复 + suite-speed，~12 任务）。
 - 内层正在跑**批全量套件**（24 node 进程）——通过后关批（翻 done、清 worktree、补晋下一批）。
 
+### tick 2026-08-04T21:43Z（外层，`no-action`：suite-speed band 裁定）
+
+- **suite-speed 的 band pending outer 已裁定**：Contract `delta_s > 297.6` 未被满足（delta 83.8s < σ）——
+  **诚实的正确结论**（band 目的=区分真改善与噪声；诚实 no-improvement 满足意图即使数字未过）。
+  已记入任务体 + 驱动内层按 no-improvement 关闭 suite-speed。
+- 内层 batch-end 最终验证中（pane「awaiting batch-end final verification」）；批全量已跑。
+- inProgress 0、detect-stop 无命中、就绪池 0（deficit 3，等关批后补晋）。
+- 残留 retire-inner-state worktree 待批关闭时清理（已驱动内层）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
