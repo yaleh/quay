@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import YAML from "yaml";
 
 const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
 const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
@@ -108,6 +109,43 @@ async function main() {
     const ok = r.status === 0 && JSON.parse(r.stdout).title === t0.title;
     record("native", "title-two-provider", ok,
       `quay task edit CEP-1 --title "<same title>" -> exit=${r.status}, title matches=${ok}`);
+  }
+
+  // gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter: hazardous
+  // titles must be YAML-safe-serialized by the write side through the REAL Core
+  // CLI → native provider → store path. A title containing a space+`#` (YAML
+  // comment start) or `: ` (nested-mapping start) written UNQUOTED would
+  // truncate / fail to parse; the fix must quote it so the file still parses
+  // and the read-back title is byte-identical (AC1/AC2 conformance probe).
+  {
+    const hazardous = "The ## Contract";
+    const r = run(["task", "edit", "CEP-1", "--title", hazardous, "--json"], spawnOpts);
+    const t = JSON.parse(r.stdout || "null");
+    const filePath = path.join(envTasksDir, "CEP-1.md");
+    const raw = fs.readFileSync(filePath, "utf8");
+    const m = /^---\n([\s\S]*?)\n---/.exec(raw);
+    let parsed = null;
+    let parseErr = null;
+    try { parsed = YAML.parse(m[1]); } catch (e) { parseErr = e; }
+    const ok = r.status === 0 && t?.title === hazardous && !parseErr && parsed?.title === hazardous;
+    record("native", "hazardous-title-space-hash", ok,
+      `quay task edit CEP-1 --title "${hazardous}" -> exit=${r.status}, ` +
+      `read-back title matches=${t?.title === hazardous}, file parses=${!parseErr}, parsed=${JSON.stringify(parsed?.title)}`);
+  }
+  {
+    const hazardous = "god-package: gate/ has fanOut=62";
+    const r = run(["task", "edit", "CEP-1", "--title", hazardous, "--json"], spawnOpts);
+    const t = JSON.parse(r.stdout || "null");
+    const filePath = path.join(envTasksDir, "CEP-1.md");
+    const raw = fs.readFileSync(filePath, "utf8");
+    const m = /^---\n([\s\S]*?)\n---/.exec(raw);
+    let parsed = null;
+    let parseErr = null;
+    try { parsed = YAML.parse(m[1]); } catch (e) { parseErr = e; }
+    const ok = r.status === 0 && t?.title === hazardous && !parseErr && parsed?.title === hazardous;
+    record("native", "hazardous-title-colon-space", ok,
+      `quay task edit CEP-1 --title "${hazardous}" -> exit=${r.status}, ` +
+      `read-back title matches=${t?.title === hazardous}, file parses=${!parseErr}, parsed=${JSON.stringify(parsed?.title)}`);
   }
 
   // §5.2 --extra, native round-trip.

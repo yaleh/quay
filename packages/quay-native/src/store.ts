@@ -184,7 +184,19 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
  * error so the caller knows immediately — before the corrupted file can crash
  * task_list for every other task in the store.
  *
- * Root cause of the defect: a task file manually (or otherwise) written with
+ * gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter: when the
+ * intended frontmatter is supplied, ALSO verify every STRING scalar round-trips
+ * byte-identically (`parsed[key] === intended[key]`). This is the fail-closed
+ * "reject" path the task mandates for any value that genuinely cannot be
+ * safely serialized: the write side auto-quotes via `YAML.stringify` (see
+ * serialize()); if a value ever slips through that still does NOT read back
+ * byte-identical (or silently truncates — the 2026-08-03 defect), the write is
+ * rejected and rolled back HERE, at write time, rather than surfacing hours
+ * later at render time. Non-string values (labels/children arrays, extra
+ * objects, null parent) are structural and not subject to scalar quoting, so
+ * they are not compared here.
+ *
+ * Root cause of the original defect: a task file manually (or otherwise) written with
  * an unquoted YAML value containing `: ` (colon-space) — e.g.
  *   dirStatus: mechanism-landed; routines: run (...)
  * — causes YAML.parse() to throw "Nested mappings are not allowed", which
@@ -198,9 +210,13 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
  *
  * @param {string} filePath - the path of the file just written
  * @param {string} id - the task id (for the error message)
- * @throws {Error} if the written file's YAML frontmatter fails to parse
+ * @param {Record<string, unknown>} [frontmatter] - the intended frontmatter the
+ *   caller asked to serialize; when provided, every string scalar it declares
+ *   must round-trip byte-identically or the write is rejected.
+ * @throws {Error} if the written file's YAML frontmatter fails to parse, or a
+ *   string scalar does not round-trip byte-identically
  */
-function validateWrittenYaml(filePath: string, id: string): void {
+function validateWrittenYaml(filePath: string, id: string, frontmatter?: Record<string, unknown>): void {
   let written: string;
   try {
     written = fs.readFileSync(filePath, "utf8");
@@ -217,8 +233,9 @@ function validateWrittenYaml(filePath: string, id: string): void {
         `written file has no valid YAML frontmatter block`
     );
   }
+  let parsed: Record<string, unknown>;
   try {
-    YAML.parse(m[1]);
+    parsed = (YAML.parse(m[1]) ?? {}) as Record<string, unknown>;
   } catch (yamlErr) {
     throw new Error(
       `post-write YAML validation failed for task "${id}": ` +
@@ -226,6 +243,20 @@ function validateWrittenYaml(filePath: string, id: string): void {
         `Hint: string values containing ": " must be quoted. ` +
         `The file has NOT been left in a corrupted state — this write was rejected.`
     );
+  }
+  if (frontmatter) {
+    for (const [key, intended] of Object.entries(frontmatter)) {
+      if (typeof intended !== "string") continue; // non-string scalars are not subject to scalar quoting
+      const actual = parsed[key];
+      if (actual !== intended) {
+        throw new Error(
+          `post-write YAML validation failed for task "${id}": ` +
+            `string scalar "${key}" did not round-trip byte-identically — ` +
+            `wrote ${JSON.stringify(intended)} but read back ${JSON.stringify(actual)}. ` +
+            `The value could not be safely serialized; the write was rejected and rolled back.`
+        );
+      }
+    }
   }
 }
 
@@ -407,6 +438,29 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     return { frontmatter, body };
   }
 
+  /**
+   * Serialize a task's frontmatter + body to the on-disk `.md` format.
+   *
+   * gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter: the WRITE
+   * side is responsible for serialization correctness — never the content
+   * author. The entire frontmatter object (title and every other string
+   * scalar: status, parent, ...) is routed through the YAML library's own
+   * `YAML.stringify`, which quotes/escapes any value that would otherwise be
+   * misparsed — a space+`#` starts a comment (title truncates), `: ` starts a
+   * nested mapping (parse throws), and values that would coerce to a number /
+   * boolean / null are quoted to stay strings. We deliberately do NOT hand-roll
+   * quoting rules: a hand-written rule table is exactly the class of defect
+   * that produced the 2026-08-03 board outage (a title written unquoted
+   * truncated at the first ` #`, the file stopped parsing, and the board 500'd
+   * hours later at render time).
+   *
+   * Byte-compat is preserved where safe: a string value that needs NO quoting
+   * is emitted exactly as before (`title: plain title` stays plain); the
+   * serializer only adds quotes/escapes when the value would otherwise be
+   * unsafe. `validateWrittenYaml` below is the belt-and-suspenders backstop:
+   * after every write it re-parses the file and fails closed (rollback) on any
+   * string scalar that does not round-trip byte-identically.
+   */
   function serialize(frontmatter, body) {
     const fm = YAML.stringify(frontmatter).trimEnd();
     return `---\n${fm}\n---\n${body}`;
@@ -801,7 +855,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // that would crash task_list for all other tasks.
       fs.writeFileSync(taskFilePath, raw, "utf8");
       try {
-        validateWrittenYaml(taskFilePath, id);
+        validateWrittenYaml(taskFilePath, id, frontmatter);
       } catch (validationErr) {
         // Rollback: restore prior content if it existed, or remove the new file.
         if (existingRaw !== null) {
@@ -856,7 +910,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       fs.writeFileSync(noteFilePath, finalRaw, "utf8");
       // M89: post-write YAML validation (same discipline as write() above).
       try {
-        validateWrittenYaml(noteFilePath, id);
+        validateWrittenYaml(noteFilePath, id, updated);
       } catch (validationErr) {
         // Rollback: restore prior content (appendNote() always modifies an
         // existing file — existingRaw is never null here).
