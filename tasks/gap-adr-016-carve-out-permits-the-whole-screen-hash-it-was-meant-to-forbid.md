@@ -44,28 +44,67 @@ $ grep -n 'capture-pane' plugin/scripts/session-liveness.sh
 
 ## Acceptance Criteria
 
-- [ ] AC1: ADR-016 追加 `## Amendment 2026-08-04` 一节，明写三条边界：
+- [x] AC1: ADR-016 追加 `## Amendment 2026-08-04` 一节，明写三条边界：
       (a) 允许用屏幕判定的状态是**枚举**的（waiting-input / permission-prompt / busy / error-banner
       / unknown），不是开放集；(b) 允许取屏幕的**底部区域**（输入框 + 状态行），不是整屏；
       (c) **禁止整屏等值/哈希比较**（`md5(capture-pane)` 一族），无论是否先做 mask
-- [ ] AC2: `enforcement:` frontmatter 字段改为指向 AC3 的检查器路径（不再是 `N/A`）
-- [ ] AC3: 机械检查器 `plugin/scripts/adr016-screen-use-check.ts` 存在并被 `scripts/test.sh` 的
+- [x] AC2: `enforcement:` frontmatter 字段改为指向 AC3 的检查器路径（不再是 `N/A`）
+- [x] AC3: 机械检查器 `plugin/scripts/adr016-screen-use-check.ts` 存在并被 `scripts/test.sh` 的
       `run_static_checks` 调用；判据按**代码位置**（同一条命令里 `capture-pane` 与
       `md5sum`/`sha1sum`/`cksum` 同时出现），**不按关键词**——ADR 修订文本本身必然写着
       `md5(capture-pane)` 这几个字，关键词匹配会命中修订说明而不是缺陷（本仓已记 6 次同形）
-- [ ] AC4: `adr016_violations` 落在 `band` 内（当前树上剩余违规数；`send-keys-verified.sh` 已随
+- [x] AC4: `adr016_violations` 落在 `band` 内（当前树上剩余违规数；`send-keys-verified.sh` 已随
       裁定 F superseded，`session-liveness.sh` 由 `gap-pane-state-is-hashed-not-classified-...` 承载）
-- [ ] AC5: **负控制**——在一个临时文件里写 `tmux capture-pane -p -t x | md5sum` ⇒ 检查器必须报出；
+- [x] AC5: **负控制**——在一个临时文件里写 `tmux capture-pane -p -t x | md5sum` ⇒ 检查器必须报出；
       删掉该行 ⇒ 必须不报（两次实跑输出贴进任务体）
-- [ ] AC6: `CLAUDE.md` 的 tmux remote-drive 条目同步（现文「never parse the TUI」下面补一句
+- [x] AC6: `CLAUDE.md` 的 tmux remote-drive 条目同步（现文「never parse the TUI」下面补一句
       指向 ADR-016 Amendment 的边界），否则 CLAUDE.md 与 ADR 漂移
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上，AC5 两个方向的实跑输出逐字贴进本任务体
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
-- [ ] `node --experimental-strip-types plugin/scripts/adr016-screen-use-check.ts` 在干净树上退出 0
+- [x] AC1–AC7 全部勾上，AC5 两个方向的实跑输出逐字贴进本任务体
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（fan-in 后勾）
+- [x] `node --experimental-strip-types plugin/scripts/adr016-screen-use-check.ts` 在干净树上退出 0
+
+### AC5 实跑输出（2026-08-04，两个方向逐字）
+
+方向 1 —— 临时文件存在（`plugin/scripts/zz-adr016-negcontrol.tmp.sh`，内容 `hash=$(tmux capture-pane -p -t x | md5sum)`）：
+
+```
+adr016-screen-use-check — 98 shell script(s) scanned
+violations: 2
+  plugin/scripts/session-liveness.sh:617  h=$(printf '%s' "$masked" | md5sum | cut -c1-16)  [taint-flow ← $masked]
+  plugin/scripts/zz-adr016-negcontrol.tmp.sh:1  hash=$(tmux capture-pane -p -t x | md5sum)  [same-command]
+retired (reported, not counted): 2
+  plugin/scripts/send-keys-verified.sh:37  hash_before=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null | md5sum | cut -c1-16)  [same-command]
+  plugin/scripts/send-keys-verified.sh:46  hash_after=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null | md5sum | cut -c1-16)  [same-command]
+FAIL: 2 active whole-screen-hash violations — band is 0..1 (new active violation detected)
+exit=1
+```
+
+方向 2 —— 临时文件删除：
+
+```
+adr016-screen-use-check — 97 shell script(s) scanned
+violations: 1
+  plugin/scripts/session-liveness.sh:617  h=$(printf '%s' "$masked" | md5sum | cut -c1-16)  [taint-flow ← $masked]
+retired (reported, not counted): 2
+  plugin/scripts/send-keys-verified.sh:37  hash_before=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null | md5sum | cut -c1-16)  [same-command]
+  plugin/scripts/send-keys-verified.sh:46  hash_after=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null | md5sum | cut -c1-16)  [same-command]
+PASS: active whole-screen-hash violations (1) within band (0..1)
+exit=0
+```
+
+## Carries
+
+from: gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
+acs: AC1, AC2, AC3, AC4
+
+外层裁定 F 以 superseded 关闭 send-keys-verified（不修）。本任务的 ADR-016 Amendment
+2026-08-04 第 3 条（禁整屏等值/哈希）就是那项裁定的形式化归宿——send-keys-verified 的
+整屏 md5 判据被修订后的 ADR 在机制层面禁止，其四条 AC（重现夹具 / 负控制 / 测试覆盖 /
+实跑输出）由本 amendment 取代为「不再允许」的边界，不再以原机制形式交付。
 
 ## Touches
 
