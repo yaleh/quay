@@ -2095,3 +2095,20 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
 - 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
 - **不 fan-in**：A/D 已提交未合并，等 B/L0 落地后按批（rebase→merge→选中集→全量）一次性收尾。
 - A/D 的最终验证（检查器负控制、分类器夹具）留给 fan-in 的 `--for-task` + 全量套件。
+
+### 监视器事件 15:0xZ — B 接线的第一次真实触发暴露假阳性类（已驱动内层）
+
+监视器报 `BLOCKED reason=ruling-required` → `UNBLOCKED`。解读：B 子代理在跑 DoD「真实端到端接线
+证明」（pane 显示 `Proving real-live ruling-required wiring end-to-end`），触发写/清 block 的是它。
+
+**发现（假阳性类）**：触发时刻内层主上下文是「等后台 agent 完成」（pane 明示 `Waiting for 1
+background agent to finish`）——良性空闲，**不是**等用户/裁定。观察者把「主 prompt 空闲」一律判
+waiting-input，无法区分「等自己的后台 agent」与「等人」。若 B 把这次触发记为 DoD 成功证明，会
+固化此缺陷。
+
+**已驱动内层**（排队待 B 子代理跑完处理）：加判据——有在飞后台 subagent 时（遥测 in-progress 或
+pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任务体记录此负例；DoD「真实接线」
+用真阳性实况证明（权限确认 / .halt 类问询 / 问外层裁定），或在负例外补说明。
+
+**fan-in 核查点**：检查 B 的 DoD 证据里是否含「等 agent 空闲 → 写 block」的负例，以及它如何排除
+假阳性类。
