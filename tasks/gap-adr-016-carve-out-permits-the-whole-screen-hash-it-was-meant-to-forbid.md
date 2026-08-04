@@ -1,9 +1,9 @@
 ---
 id: gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid
 title: ADR-016 says NEVER parse the TUI but its "coarse capture-pane check"
-  carve-out has no boundary, so both live implementations read it as whole-screen
-  md5 — the exact judgment it was meant to forbid
-status: ready
+  carve-out has no boundary, so both live implementations read it as
+  whole-screen md5 — the exact judgment it was meant to forbid
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -64,7 +64,7 @@ $ grep -n 'capture-pane' plugin/scripts/session-liveness.sh
 ## Definition of Done
 
 - [x] AC1–AC7 全部勾上，AC5 两个方向的实跑输出逐字贴进本任务体
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）（fan-in 后勾）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——fan-in 后实测：tests 2276 / fail 0 / cancelled 0 / skipped 25（凭证缺失的 live-GitHub 测试）
 - [x] `node --experimental-strip-types plugin/scripts/adr016-screen-use-check.ts` 在干净树上退出 0
 
 ### AC5 实跑输出（2026-08-04，两个方向逐字）

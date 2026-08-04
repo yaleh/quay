@@ -1,9 +1,9 @@
 ---
 id: gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick
 title: ruling-required's trigger exists in inner-blocked-signal.ts but no tick
-  ever passes --transcript, so "a question the outer must rule on" is unobservable
-  to the outer and the channel silently never fires
-status: todo
+  ever passes --transcript, so "a question the outer must rule on" is
+  unobservable to the outer and the channel silently never fires
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -115,6 +115,7 @@ detect-stop: no stop condition; no block
 有在飞 agent 指示（`← N agent` N>0 / general-purpose）或遥测有在飞任务 bracket** 时，是良性空闲，
 不计数、不写块；`permission-prompt` 恒为人类等待形状，不被抑制。`statusAreaShowsInFlightAgent` +
 `telemetryHasInProgressTask` 两条判据落地（见 `inner-blocked-signal.ts`）。
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——fan-in 后实测：tests 2276 / fail 0 / cancelled 0 / skipped 25
 
 ## Touches
 

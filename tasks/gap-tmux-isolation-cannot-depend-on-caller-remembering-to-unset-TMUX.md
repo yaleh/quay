@@ -3,7 +3,7 @@ id: gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX
 title: the L0 defense (env -u TMUX) is launch-side and can't be remembered by
   every caller — make tmux isolation structural so a forgetful sub-agent shell
   cannot touch the default server
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -50,25 +50,45 @@ PreToolUse hook（人已否决，裁定 E）。本任务只让「repo 与测试�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/scripts/tmux-isolated.sh` 存在且可执行：`env -u TMUX tmux -S "<私有 socket>" "$@"`，
+- [x] AC1: `plugin/scripts/tmux-isolated.sh` 存在且可执行：`env -u TMUX tmux -S "<私有 socket>" "$@"`，
       socket 路径含 uid 且落在 `TMPDIR`/`${XDG_RUNTIME_DIR:-/tmp}` 下；缺 `-S` 或 `$TMUX` 未被 unset 时
       fail-closed（报错退出非 0，不静默回退默认服务端）
-- [ ] AC2: **负控制（单向杀伤）**——`tmux-isolated.sh kill-server` 后，**默认服务端必须完好**
+- [x] AC2: **负控制（单向杀伤）**——`tmux-isolated.sh kill-server` 后，**默认服务端必须完好**
       （实跑 `tmux ls` 退出 0）；再证 `tmux-isolated.sh ls` 报「无服务器」（该 socket 已死）。
       两个方向的实跑输出逐字贴任务体
-- [ ] AC3: 仓库内触碰 tmux 的**既有**脚本迁移或明示（grep 出全部 `tmux ` 调用点，逐个改为经助手
+- [x] AC3: 仓库内触碰 tmux 的**既有**脚本迁移或明示（grep 出全部 `tmux ` 调用点，逐个改为经助手
       或补 `env -u TMUX`+显式 `-S`；`session-liveness.sh` 是 A/D 任务的既有触摸面，若撞车按
       顺序 rebase 不并行）
-- [ ] AC4: `session-launch-recipes.md` / 交接文档补一条：L0 落地前会话启动**不带** `env -u TMUX`
+- [x] AC4: `session-launch-recipes.md` / 交接文档补一条：L0 落地前会话启动**不带** `env -u TMUX`
       （AC4 已定）；L0 落地后启动命令可加，但隔离不再依赖它——助手的显式 `-S` 是主防线
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`；测试**自己**不裸调 `tmux kill-server`
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`；测试**自己**不裸调 `tmux kill-server`
       （用隔离 socket 验证，测试目录 `tmux` 出现次数为 0 或仅经助手）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC2 两个方向的实跑输出逐字贴进本任务体
-- [ ] 一次真实演示：经助手建的隔离会话被杀，外层真实 quay 会话（`tmux ls`）完好
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC2 两个方向的实跑输出逐字贴进本任务体
+- [x] 一次真实演示：经助手建的隔离会话被杀，外层真实 quay 会话（`tmux ls`）完好
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——fan-in 后实测：tests 2276 / fail 0 / cancelled 0 / skipped 25
+
+### AC2 实跑输出（2026-08-04，逐字）
+
+```
+--- 1. BEFORE: default server alive? (env -u TMUX tmux ls) ---
+quay-0: 4 windows (created Tue Aug  4 11:02:44 2026) (group quay) (attached)
+default-tmux-ls exit=0
+--- 2. create a session on the ISOLATED socket via the helper ---
+isolated new-session exit=0
+iso-proof: 1 windows (created Tue Aug  4 15:06:20 2026)
+isolated ls exit=0
+--- 3. THE KILL: tmux-isolated.sh kill-server (isolated socket only) ---
+isolated kill-server exit=0
+--- 4. AFTER: helper socket reports no server ---
+no server running on /run/user/1000/tmux-1000.sock
+isolated ls-after exit=1
+--- 5. AC2 DIRECTION 1: DEFAULT server must be INTACT (tmux ls exit 0) ---
+quay-0: 4 windows (created Tue Aug  4 11:02:44 2026) (group quay) (attached)
+default-tmux-ls exit=0
+```
 
 ## Touches
 

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-04T10:27:14.129Z",
+  "generatedAt": "2026-08-04T15:44:25.598Z",
   "since": null,
   "tasks": [
     {
@@ -178,6 +178,11 @@
       "outcome": "done"
     },
     {
+      "taskId": "gap-retire-inner-state-one-observer-targets-by-parameter",
+      "minutes": 226.96416666666667,
+      "outcome": "abandoned"
+    },
+    {
       "taskId": "gap-retire-the-prepare-execute-pipeline-cluster",
       "minutes": 61.73993333333333,
       "outcome": "done"
@@ -191,6 +196,11 @@
       "taskId": "gap-select-preflight-json-real-store-too-slow",
       "minutes": 40.25695,
       "outcome": "done"
+    },
+    {
+      "taskId": "gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted",
+      "minutes": 227.39668333333333,
+      "outcome": "abandoned"
     },
     {
       "taskId": "gap-serve-task-list-dies-on-one-malformed-task",
@@ -339,14 +349,35 @@
     }
   ],
   "orphaned": [],
-  "inProgress": [],
-  "meanMinutes": 63.86540000000001,
-  "medianMinutes": 54.22391666666667,
-  "tasksPerHour": 1.3970613971935735,
-  "serialEquivalentPerHour": 0.9394758351157276,
+  "inProgress": [
+    {
+      "taskId": "gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid",
+      "runId": "fm-gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid-1785854452091-70xccj",
+      "startedAtMs": 1785854452112
+    },
+    {
+      "taskId": "gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable",
+      "runId": "fm-gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable-1785854782241-tnf4qs",
+      "startedAtMs": 1785854782257
+    },
+    {
+      "taskId": "gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick",
+      "runId": "fm-gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick-1785856431482-8uwrrh",
+      "startedAtMs": 1785856431494
+    },
+    {
+      "taskId": "gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX",
+      "runId": "fm-gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX-1785856431215-0b3gdc",
+      "startedAtMs": 1785856431227
+    }
+  ],
+  "meanMinutes": 68.5991688405797,
+  "medianMinutes": 56.186366666666665,
+  "tasksPerHour": 1.295912810986077,
+  "serialEquivalentPerHour": 0.8746461657492726,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-04T10:27:14.103Z",
-  "windowHours": 47.95780638888889,
+  "windowEnd": "2026-08-04T15:44:25.562Z",
+  "windowHours": 53.244322777777775,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -356,8 +387,15 @@
       "sinceMs": 1785789347537,
       "clearedAtMs": 1785789495843,
       "durationMs": 148306
+    },
+    {
+      "taskId": "gap-retire-inner-state-one-observer-targets-by-parameter",
+      "reason": "task-over-90m",
+      "sinceMs": 1785852752777,
+      "clearedAtMs": 1785854117991,
+      "durationMs": 1365214
     }
   ],
-  "totalBlockedMs": 148306,
-  "longestBlockedMs": 148306
+  "totalBlockedMs": 1513520,
+  "longestBlockedMs": 1365214
 }
