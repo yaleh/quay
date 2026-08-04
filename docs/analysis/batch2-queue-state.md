@@ -2394,6 +2394,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   todo 补晋。auto-block 持续（预期，等套件完成）。
 - 无其它停止条件；监视器 mounted:true。
 
+### tick 2026-08-04T20:02Z（外层，`no-action`：suite-speed 在 after/5，收尾在即）
+
+- **suite-speed 在 after/5**（4h3m+）——after 组第 5 次（σ 协议每组 ≥5，最后一组最后一轮）；
+  worktree 干净（纯测量）。after/5 完成后 = before/control/after 三组 σ 证据齐备，agent 写结果 +
+  commit，批即可关。
+- 批内其余全部合并；无新提交（master 停在 4371fc7c）。
+- 完成后：关批（--task-end 同步，纪律已采纳）+ 批全量 + ready-pool-check 从 todo 补晋。
+  auto-block 持续（预期）。
+- 无其它停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
