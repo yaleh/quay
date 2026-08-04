@@ -2422,6 +2422,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - suite-speed 仍唯一在飞（token 185.5k→222.7k，重新生成=在干活）；批内其余全合并；无新提交。
 - auto-block 持续（预期）；监视器 mounted:true。
 
+### tick 2026-08-04T21:02Z（外层，`no-action` + 时长升级提示）
+
+- **suite-speed 已 5h5m，远超管理者裁定「可能再 1 小时+」约 3 倍**。AC9c 确认非卡死：正跑新的 baseline
+  基准轮（`launch_one.sh /tmp/quay-wt-baseline-flake baseline 1` → `scripts/test.sh`，24 node 进程，
+  load 2.37）。σ 协议（多组 × 每组 ≥5 全量）在满负载下跑成小时级。
+- **flag 给管理者**：任务仍按协议推进、非卡死，但耗时远超预期——管理者可裁定「接受当前 σ 证据提前
+  关闭」或继续等。批全部等它一个。
+- 批内其余全部合并；无新提交。auto-block 持续（预期）；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
