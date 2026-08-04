@@ -57,7 +57,7 @@ task-status-drift: 6 SUSPECT task(s) with code already in the tree but status no
 
 ```
 measure closed_without_work = `node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --closed-direction --json | jq length` 报出的「已关而无实」任务数字段
-measure specimen_reported = 上述输出中是否含已知活标本的布尔字段
+measure specimen_reported = `node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --json | grep -c '<fixture-id>'` 已知活标本是否被报出的计数字段
 band specimen_reported = true
 invariant 漂移检查必须双向；危险方向是「已关而无实」，不是「该关未关」
 invoke `node --experimental-strip-types plugin/scripts/task-status-drift-check.ts`
