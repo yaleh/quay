@@ -96,7 +96,8 @@
 #       宁可误报、可自愈类（IDLE/RESUMED）从严。当前默认曾调反（IDLE 60s 即报、
 #       OVERDUE 等 45min）；改后 OVERDUE_MIN 默认 45→30（不可自愈，早报 15min；阶段一
 #       实测 transcript 长任务最大间隙 20.5min，30min 仍留 ≥9min 余量）；IDLE 从严 =
-#       默认 LOOP_MIN=20 的噪声闸门（刚动过=正常收尾→静默；心跳陈旧/未知才报）。
+#       默认 LOOP_MIN=20 的噪声闸门（刚动过=正常收尾→持有者 stdout 静默；心跳陈旧/未知才报）。
+#       AC21：静默只发生在持有者自己的 stdout，共享 events.jsonl 仍记全量（含 hmin）。
 #       逐事件类别与阈值理由见下节。
 #   AC6（原AC14/损失函数结论二）SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）：
 #       判据是「收到事件后无需再采样即可判真假」——原来外层每次 3-4 次调用，改后 1 次。
@@ -128,7 +129,10 @@
 #   SESSION-GONE              不可自愈（无界）→ 无阈值，立即报（宁可误报）
 #   SESSION-IDLE              可自愈（上界=外层 20min tick）→ 从严：默认 LOOP_MIN=20
 #                             噪声闸门，心跳陈旧/未知才报；LOOP_MIN=0（管理者显式配置）
-#                             = 知悉全部（其明确选择，见 orchestration/session-liveness.env）
+#                             = 知悉全部（其明确选择，见 orchestration/session-liveness.env）。
+#                             AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-
+#                             serve-a-second）：噪声闸门只作用于持有者自己的 stdout——共享
+#                             events.jsonl 无条件记全量（含 hmin 原始量），订阅方自己决定报不报。
 #   SESSION-RESUMED           可自愈但唯一正向信号 → 立即报、保留（便宜，且是唯一能确认
 #                             会话还在按期活动的正向信号）
 #   SESSION-OVERDUE           不可自愈（无界）→ 宁可误报：默认 OVERDUE_MIN=30（原 45），
@@ -263,13 +267,22 @@ sl_json_append() {
     >> "${SL_EVENTS_FILE:-/dev/null}" 2>/dev/null || true
 }
 
-# sl_emit —— 事件同时走 stdout（Monitor 事件流）与共享 events.jsonl（订阅方读取）。写共享文件失败
-# （目录不可写）只回落到 stdout，绝不 crash（与令牌 fail-open 同源：调度角色不是安全检查）。
-sl_emit() {
-  echo "$*"
+# sl_emit_shared —— 只写共享 events.jsonl（订阅方读取），不走 stdout。AC21（gap-a-log-already-
+# filtered-by-one-consumers-threshold-cannot-serve-a-second）：共享文件记全量，阈值只作用于持有者
+# 自己的 stdout——被持有者阈值静默的事件（如 hmin < LOOP_MIN 的健康空闲）仍须进入共享文件，让订阅方
+# 自己决定报不报。写共享文件失败（目录不可写）只回落到无操作，绝不 crash（与令牌 fail-open 同源：
+# 调度角色不是安全检查）。
+sl_emit_shared() {
   [ -n "${SL_EVENTS_FILE:-}" ] || return 0
   [ -d "${SL_GLOBAL_DIR:-}" ] && [ -w "$SL_GLOBAL_DIR" ] || return 0
   sl_json_append "$*"
+}
+
+# sl_emit —— 事件同时走 stdout（Monitor 事件流）与共享 events.jsonl（订阅方读取）。stdout 是持有者
+# 自己的通知流，受持有者阈值门控；共享文件由 sl_emit_shared 无条件记全量（AC21：记录与判断分开）。
+sl_emit() {
+  echo "$*"
+  sl_emit_shared "$*"
 }
 
 # sl_heartbeat —— 持有者每轮追加一条 HEARTBEAT（只进共享文件，不污染 stdout/Monitor 事件流）。
@@ -658,10 +671,16 @@ while true; do
             elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
               # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
               # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
-              # hmin < LOOP_MIN 的空闲 = 正常收尾 → 静默；hmin ≥ LOOP_MIN 或未知（无心跳文件）=
-              # 「空闲了但没动」，会话可能跑一半就停 / 已死 → 报。SESSION-RESUMED 保留不静默
-              # （它便宜，且是唯一能确认会话还在按期活动的正向信号）。
+              # hmin < LOOP_MIN 的空闲 = 正常收尾 → 持有者 stdout 静默；hmin ≥ LOOP_MIN 或未知
+              # （无心跳文件）=「空闲了但没动」，会话可能跑一半就停 / 已死 → 持有者 stdout 报。
+              # SESSION-RESUMED 保留不静默（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
               sl_emit "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
+            else
+              # AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）：
+              # hmin < LOOP_MIN（正常收尾）——持有者自己的 stdout 静默（噪声闸门），但共享 events.jsonl
+              # 照记全量（含 hmin 原始量），让订阅方（管理者）自己决定报不报。这就是 AC21c 的负控制：
+              # 持有者 LOOP_MIN=20 时，共享文件里仍须出现 hmin < 20 的 IDLE 记录——出现即通过。
+              sl_emit_shared "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
             fi
           else
             resumed=1

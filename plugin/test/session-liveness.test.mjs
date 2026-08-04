@@ -793,6 +793,59 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
   }
 });
 
+// ── AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）──────────────
+// 缺陷形状：单飞挂载 + 共享文件，而过滤发生在【发出端】⇒ 持有者的阈值被强加给所有订阅方。外层持有者
+// LOOP_MIN=20 时，「空闲但心跳新鲜」（hmin < 20，健康循环收尾）在发出端被静默，根本没进共享文件，
+// 管理者（订阅方）需要知道「外层空闲等输入 = 该派活了」，却看不到。
+// AC21 机制：共享 events.jsonl 记全量（含 hmin 原始量），LOOP_MIN 只作用于持有者自己的 stdout。
+// 两个方向一起验（最省事的"修法"是把抑制整个删掉——那会把噪声原样搬到持有者身上，必须同时守住）：
+//   AC21c（负控制）：持有者 LOOP_MIN=20 时，共享 events.jsonl 里仍须出现 hmin < 20 的 IDLE 记录。
+//   AC21d（外层加）：同一场景持有者自己的 stdout 里 SESSION-IDLE 通知数仍为 0。
+
+function readEvents(globalDir) {
+  const f = path.join(globalDir, "events.jsonl");
+  if (!fs.existsSync(f)) return [];
+  return fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((e) => e && typeof e.event === "string");
+}
+
+test("AC21 — with LOOP_MIN=20 and a fresh heartbeat (hmin<20), the shared events.jsonl records the IDLE while the holder's stdout stays silent (record full, judge at read time)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-ac21");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.writeFileSync(tick, "# tick\n"); // mtime = now → hmin ≈ 0, well under LOOP_MIN=20
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `ac21 ${p.tmp} ${p.session}`, { tickLogs: `ac21 ${tick}`, interval: 1, loopMin: 20 });
+    try {
+      await sleep(2500); // idle baseline: PREV_IDLE=1
+      startBusyLoop(p.env, p.session);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac21/, 25000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
+      stopBusyLoop(p.env, p.session);
+      const stable = await waitForPaneStable(p.env, p.session, 15000);
+      assert.ok(stable !== null, "pane must return to a stable idle state");
+      await sleep(3500); // ≥3 rounds after stability — IDLE would have fired by now if not gated
+
+      // AC21d: the holder's stdout must stay silent on a fresh-heartbeat idle (LOOP_MIN gate).
+      assert.ok(!/SESSION-IDLE ac21/.test(mon.output()),
+        `holder stdout must stay silent on a fresh-heartbeat idle (AC21d — the gate is on stdout only):\n${mon.output()}`);
+
+      // AC21c: the shared events.jsonl MUST carry the IDLE record with the raw hmin (< 20).
+      const events = readEvents(mon.globalDir);
+      const idle = events.find((e) => e.event === "SESSION-IDLE" && e.name === "ac21");
+      assert.ok(idle, `shared events.jsonl must record the IDLE transition (AC21c — record full, judge at read time):\n${JSON.stringify(events, null, 2)}`);
+      const hminMatch = idle.msg.match(/心跳 (\d+) 分钟前更新/);
+      assert.ok(hminMatch && Number(hminMatch[1]) < 20,
+        `the shared IDLE record must carry hmin < 20 (the raw quantity, AC21b), got msg=${idle.msg}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+    mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
 // ── AC11: heartbeat parameterized for the INNER use case (a directory, not a file) ────────────────
 
 test("AC11 — a DIRECTORY heartbeat (inner-style .workflow-events/) triggers the same overdue criterion — the same script parameterizes for outer and inner", async () => {
