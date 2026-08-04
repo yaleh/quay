@@ -25,7 +25,11 @@ export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
  *     (measure/band/invariant/invoke/control/resume) — STRICTER than a prose
  *     Plan section, not looser (the task's Chosen-mechanism constraint 2).
  *   - meta-cc's DIR template uses `## Finding` in place of `## Proposal` →
- *     the `finding` shape fills the proposal-slot with `## Finding`.
+ *     the `finding` shape fills the proposal-slot with `## Finding`. A
+ *     Finding task has NO `## Plan` by construction (ADR-001), so the
+ *     finding shape's required-section set OMITS `plan` entirely — it is not
+ *     a Plan-less shape that lazily skips the check, but a shape whose own
+ *     complete contract (Finding / AC / DoD) simply has no plan dimension.
  *   - The classic milestone template is the `plan` shape (unchanged).
  *
  * Every shape's contract is complete on its own dimension; the gate dispatches
@@ -45,7 +49,6 @@ export const SHAPE_REGISTRY = {
     planKeys: [],
     sections: {
       proposal: ["Finding"],
-      plan: ["Plan"],
       ac: ["AC", "Acceptance Criteria"],
       dod: ["DoD", "Definition of Done"],
     },
@@ -885,12 +888,19 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   const MIN_SECTION_CHARS = 40;
 
   /**
-   * Presence of the four gate artifacts for a given shape, per SHAPE_REGISTRY.
-   * `shape` is the detected shape (see detectShape); the sections each shape
-   * requires come from the registry, so the aliases each project actually uses
-   * (quay: `## Contract` for Plan; meta-cc: `## Finding` for Proposal) are
-   * honored WITHOUT loosening any shape's own contract. An unknown shape yields
-   * all-false (the check() caller fails it closed).
+   * Presence of the registered gate artifacts for a given shape, per
+   * SHAPE_REGISTRY. `shape` is the detected shape (see detectShape); the
+   * sections each shape requires come from the registry, so the aliases each
+   * project actually uses (quay: `## Contract` for Plan; meta-cc: `## Finding`
+   * for Proposal) are honored WITHOUT loosening any shape's own contract. An
+   * unknown shape yields all-false (the check() caller fails it closed).
+   *
+   * The artifact map is built from THE SHAPE'S OWN registered sections only —
+   * dispatch is not a waiver (each shape has a complete contract on its own
+   * dimension). The `finding` shape deliberately has no `plan` section
+   * (ADR-001: a Finding task has no `## Plan`), so `plan` is ABSENT from its
+   * map rather than present-and-false. The plan shape still carries a real
+   * `plan` artifact, so a Plan-shape task missing `## Plan` stays red.
    */
   function artifactSections(body, shape = detectShape(body)) {
     const spec = SHAPE_REGISTRY[shape];
@@ -906,12 +916,11 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
       return false;
     };
-    return {
-      proposal: has(spec.sections.proposal),
-      plan: has(spec.sections.plan),
-      ac: has(spec.sections.ac),
-      dod: has(spec.sections.dod),
-    };
+    const artifacts = {};
+    for (const [artifact, headings] of Object.entries(spec.sections)) {
+      artifacts[artifact] = has(headings);
+    }
+    return artifacts;
   }
 
   /**
@@ -1020,7 +1029,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
         acChecked: acChecked.length,
         ...(contractKeys ? { contractKeys } : {}),
         reason: ok
-          ? "all four artifacts present; eligible to move to ready"
+          ? "all required artifacts present; eligible to move to ready"
           : "missing artifacts: " +
             Object.entries(artifacts)
               .filter(([, v]) => !v)

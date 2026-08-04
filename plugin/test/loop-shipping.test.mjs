@@ -86,6 +86,7 @@ test('AC1b — after the move, no live reference to the 6 old paths remains (com
     path.join(pluginDir, 'skills', 'init', 'SKILL.md'),     // mapping table's target column
     path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md'), // cold-start skill operates on the TARGET project's laid-down layout (orchestration/ + docs/analysis/) — the AC8d target-layout paths, not the quay plugin/loop paths
     path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),// asserts the laid-down target layout
+    path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e.test.mjs'), // asserts the laid-down target layout: REQUIRED_PRODUCT_FILES lists the cold-started project's orchestration/ + docs/analysis/ tick-doc paths (the reinstall-gate e2e, landed RED-first; its target-layout references were never added here)
     path.join(pluginDir, 'loop'),                           // canonical templates: their /loop prompts and cross-refs use plugin/loop/; the only old-path strings left are in the template-params note documenting the TARGET layout
     path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), // this file's own regexes define the old paths
     path.join(pluginDir, 'test', 'task-contract-check.test.mjs'), // fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs

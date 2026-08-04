@@ -151,6 +151,67 @@ test("AC6: a DIR-template (Finding) task passes author->ready — Finding satisf
   }
 });
 
+test("AC (gap-the-finding-shape-still-requires-a-plan-section): a ## Finding task WITHOUT ## Plan passes author->ready — plan is not a required artifact for the finding shape", () => {
+  const { store, dir } = freshStore();
+  try {
+    // The exact class ADR-001 says to allow: a Finding task with NO ## Plan.
+    // This was the last red assertion in the reinstall-threshold e2e
+    // (shape=finding ok=false artifacts={"proposal":true,"plan":false,...}).
+    const body =
+      `## Finding\n${substantive("Finding")}\n` +
+      `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
+      `## Definition of Done\n${substantive("Definition of Done")}\n`;
+    store.write("F-NOPLAN", { title: "finding-no-plan", status: "todo", body });
+    const r = store.check("F-NOPLAN");
+    assert.equal(r.shape, "finding");
+    assert.equal(
+      "plan" in r.artifacts,
+      false,
+      `the finding shape's artifact map must NOT carry a plan key (dispatch is not a waiver); got ${JSON.stringify(r.artifacts)}`
+    );
+    assert.equal(
+      r.ok,
+      true,
+      `a ## Finding task WITHOUT ## Plan must pass author->ready; got ${JSON.stringify(r)}`
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 reverse negative (gap-the-finding-shape-still-requires-a-plan-section): a ## Plan shape task with an EMPTY ## Plan section stays red — fixing finding-too-strict must not waive the plan check", () => {
+  const { store, dir } = freshStore();
+  try {
+    // Plan-shape task where ONLY the ## Plan section is content-empty. The
+    // shape is detected as `plan` (the heading is present), but the plan
+    // artifact reads absent (< MIN_SECTION_CHARS) → the gate MUST stay red.
+    // If the finding fix had been "skip the plan check for ALL shapes", this
+    // would pass — it is the negative control that says that trade is worse.
+    const body =
+      `## Proposal\n${substantive("Proposal")}\n` +
+      `## Plan\n` + // heading present, but no substantive content below it
+      `## Acceptance Criteria\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
+      `## Definition of Done\n${substantive("Definition of Done")}\n`;
+    store.write("P-NOPLAN", { title: "plan-missing-plan", status: "todo", body });
+    const r = store.check("P-NOPLAN");
+    assert.equal(r.shape, "plan");
+    assert.equal(
+      r.artifacts.plan,
+      false,
+      `the plan shape must still report plan:false when its Plan section is empty; got ${JSON.stringify(r.artifacts)}`
+    );
+    assert.equal(
+      r.ok,
+      false,
+      `a ## Plan shape task missing ## Plan must stay red; got ${JSON.stringify(r)}`
+    );
+    assert.match(r.reason, /missing artifacts/);
+    assert.match(r.reason, /plan/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC3-per-shape: a compliant task with UNCHECKED AC boxes passes author->ready for every registered shape (gap-both-gates...)", () => {
   // gap-both-gates-read-one-signal-so-done-costs-nothing: checked-state is
   // NOT required at todo->ready (ADR-001 restored) — only AC presence/shape
