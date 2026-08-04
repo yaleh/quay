@@ -2404,6 +2404,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   auto-block 持续（预期）。
 - 无其它停止条件；监视器 mounted:true。
 
+### tick 2026-08-04T20:22Z（外层，`no-action`：suite-speed 确认在跑全量套件，非卡死）
+
+- **AC9c 核实**：worktree 40 分钟未变 + token 平 → 按纪律查实际活动：**agent 正在跑全量套件**
+  （`scripts/test.sh` pid 1273318 ~11min + `node --test --test-concurrency=8` 全部测试文件，
+  load 2.99）——after/5 测量或后续验证进行中，**非卡死**。token 平是因为等测试进程（重 CPU），
+  worktree 未变是因为测量不写文件。
+- 批内其余全部合并；无新提交（master 停在 93e95021）。
+- auto-block 持续（预期）；监视器 mounted:true。资源闸遵守（外层只做廉价核实）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
