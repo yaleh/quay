@@ -101,3 +101,80 @@ changed: 人裁定方向 **C（套件本身变快）**，**明确不选 A（降�
 ⇒ **环境噪声足以改变结论本身，不只是改变秒数**。
 **并写明一个容易被忽略的结论**：σ 这么大意味着**「诚实的无改善」是合法且有价值的产出**
 （archguard TASK-57 已有先例），**报一个小于 σ 的改善等于报噪声**。
+
+## 实测记录（2026-08-04，执行后）
+
+### 测法
+`bash scripts/test.sh`（默认 group product,engine，concurrency 8，与裁定一致），每次记录 wall 秒数。
+before=基线 commit，control=仅加一行注释（AC5 负控制），after=lever commit。
+每次运行前过重型令牌（full-suite resource-gate 串行化），全程无并发全量套件。
+本机无 `/usr/bin/time`，用 `date +%s.%N`（测同一个量：真实流逝秒）。
+
+| 阶段 | 5 次 wall (s) | 均值 | 极差 |
+|---|---|---|---|
+| before | 759.768, 788.262, 804.660, 761.832, 781.120 | **779.128** | 44.892 |
+| control（仅注释） | 782.676, 757.583, 779.252, 806.423, 745.651 | **774.317** | 60.772 |
+| after（lever） | 689.684, 688.435, 705.533, 696.806, 696.374 | **695.366** | 17.098 |
+
+**AC5 负控制（两种结果都贴）**：control 5 次全绿（fail 0 / cancelled 0），均值 774.317s，比 before
+快 **4.8s**（极差 44.9–60.8s 内噪声）。**未出现 >σ 的"变快"→ 测法诚实，AC5 通过。**
+
+**AC4 σ 纪律（硬要求）**：before−after 均值差 = **83.762s**，**小于 σ = 297.6s ⇒ 未达"变快"标准**。
+按 DoD：报一个小于 σ 的改善等于报噪声；**「诚实的无改善」是合法且有价值的结论**（archguard TASK-57 先例）。
+
+**AC7 报真数**：779.128 → 695.366 绝对秒（均值），非百分比。
+
+### AC1 实跑输出：每测试文件墙钟分布（最慢的单个文件）
+```
+140.9s  packages/quay/test/cli.test.mjs             ← spec reporter 最慢单文件
+ 39.9s  packages/quay/test/mcp-server.test.mjs
+ 34.0s  packages/quay/test/serve.test.mjs
+ 31.2s  packages/quay/test/web-ui-browser.test.mjs
+ 27.3s  packages/quay/test/core-three-way-symmetry.test.mjs
+ 24.8s  packages/quay/test/gap002-create-ergonomics.iteration-0.test.mjs
+ 24.0s  packages/quay-github/test/task-check-passthrough.test.mjs
+ 14.7s  packages/quay/test/task-check.test.mjs
+ ...（其余 26 个文件 ≤ 9.7s）
+```
+**真正的 wall 下界是 `plugin/test/runner-grouping.test.mjs`**（耗时按 test 计，不显示为文件行）：
+其 6 个测试合计 ~477s 串行，其中 "AC1/AC2/AC6: flags-only forms run the same test count" = **427.6s**
+（内部 3 次完整 governance 子套件）。AC1 结论：在这条串行链之上做并发优化买不到东西。
+
+### AC2 实跑输出：成本分解
+wall=781.1s，node --test duration_ms=767.7s，34 文件耗时和=396.8s。
+- **进程启动/setup ≈ 13.4s ≈ 1.7%**（外层 build_dist_once + run_static_checks）。
+- **真实测试执行 ≈ 750s ≈ 96%+**：runner-grouping 3 次 governance 子套件 ~427s；
+  governance 组（35 文件 529 测试）隔离跳过 setup 后 c8=133.9s / c2=198.5s —— 真实等待主导
+  （session-liveness 33 处 sleep、tmux `sleep 20`、heavy-op-token-wait），IO 等待不是计算。
+- **嵌套调用冗余 setup（lever 目标）**：6 次嵌套 `scripts/test.sh` 各自重复静态检查+构建，
+  负载下每次 ~10-20s；after 实测总省 ~84s。
+
+### AC6 差异比对（canonical glob 未缩小）
+```
+before/after 的 glob 都来自 scripts/test.sh 同一行：
+  packages/*/test/*.test.mjs plugin/test/*.test.mjs experiments/quay-perpetual-stream/test/*.test.mjs
+选文件数 184 → 185 是 AC8 新增 1 个 governance 测试文件，是加不是缩。
+「连跑 2 次全绿」闸未动（fail 0 且 cancelled 0 判据不变）。
+```
+
+### lever（本次改动）
+`scripts/test.sh` 增加 `mark_nested()`（在 5 个 node --test 执行点前标记 QUAY_TEST_NESTED +
+QUAY_TEST_NESTED_ROOT），嵌套调用继承后跳过重复的 dist 构建+全库静态检查（同根守护，不同 worktree 不跳过）。
+AC8 测试 `plugin/test/suite-speed-nested-skip.test.mjs`（governance，node:test，结构式断言，不 spawn——
+spawn 会触发 test-isolation shrink-only 闸的 spawns-test-sh 新增违约）。
+
+### 连跑全绿证据（DoD）
+- verify/1：RED（fail=2，session-liveness M3+M6，见下）
+- verify/2：GREEN（fail 0 / cancelled 0）
+- verify/3：GREEN（fail 0 / cancelled 0）
+⇒ **连跑 2 次全绿满足（verify/2 + verify/3）**。
+
+### 一次真实时序抖动（pre-existing，非 lever）
+after/5 与 verify/1 各出现一次 `plugin/test/session-liveness.test.mjs` 的时序抖动：
+M3（takeover 后 countMountProcesses==1 得 2）、M6（读取共享文件不得二次挂载，得 3）。
+**判定 pre-existing（诚实的不确定）**：(1) M1-M7 单飞挂载测试是 2026-08-04 00:13 新加的时序敏感测试
+（真实 tmux+heartbeat）；(2) lever 与它无任何代码路径（该文件不读 QUAY_TEST_NESTED，进程按
+SESSION_LIVENESS_GLOBAL_DIR 计数）；(3) 但 lever 改变套件调度（嵌套调用更快），可能间接影响该
+时序敏感测试的运行窗口。**实测频率：lever 套件 2/8 抖动（after/5、verify/1），基线套件 0/11 抖动
+（5 before + 5 control + baseline/1）。样本小，不能定罪也不能完全免责 lever；按 σ 纪律诚实报告，
+不掩盖。**（基线对照：baseline/1 = GREEN 无抖动；baseline/2 进行中）
