@@ -1,6 +1,6 @@
 ---
-id: gap-observers-are-split-by-layer-not-by-surface
-title: "The two observers are split by inner/outer in their names but by session/workspace in their code — the missing target parameter is what forces 3 mounts instead of 1"
+id: gap-retire-inner-state-one-observer-targets-by-parameter
+title: "Retire inner-state.sh — its one irreplaceable signal never fired in three projects, including the night we hit exactly what it was for"
 status: todo
 labels:
   - gap
@@ -13,151 +13,116 @@ extra:
 
 ## Proposal
 
-来源：`orchestration/SPEC-one-observer-two-surfaces.md`（**人 2026-08-04 的裁定**）。
-人的原话：**观测应当用统一的工具，仅用参数调整行为。**
+人问 `inner-state.sh` 还有没有用，管理者查完的结论是**没有**。**三条证据，第一条最硬。**
 
-### 实测：命名说的是「内层/外层」，代码做的是「会话面/工作区面」
+### 一、它的招牌信号从来没响过
 
-外层独立复核（`git grep` 对文件，**不扫进程**——避开本仓今日已栽四次的自匹配）：
+`.quay/inner-blocked.json` 在 **quay、archguard、meta-cc 三个项目里全部从未产生**——
+而那是它**唯一不可替代**的东西：**内层主动声明「我卡住了」的显式信道**。
 
-| | `session-liveness.sh` | `inner-state.sh` |
-|---|---|---|
-| 行数 | **714** | **136** |
-| `capture-pane` | 2 | **0** |
-| `transcript` | 51 | **0** |
-| `tmux` | 5 | **0** |
-| `git` | **1**（:565 `git -C "$root" log -1`） | 5 |
+**更要命的是**：管理者今晚查到过一次**内层等外层批准卡了 68 分钟**的真实事故，
+**那次也没有写这个文件**。
 
-**`inner-state.sh` 里 `tmux` 出现 0 次。**
-`inner` 这个词在它里面只出现在**命名与注释**（外层按「含该词的行数」量得 11 行；
-管理者按「出现次数」量得 17 次——**单位不同，不是分歧**）。
+**⇒ 机制存在、从未生效，而且我们已经撞上过它本该拦下的那一次。**
 
-**脚本内没有任何机制要求被观测对象是内层**：
-`INNER_STATE_WORK_ROOT`（:10）注释逐字写着 **「test seam for inner-state.test.mjs's」**，
-:19 是 `cd "${INNER_STATE_WORK_ROOT:-$_INNER_STATE_DEFAULT_ROOT}"`
-⇒ **生产调用从不设它，目标写死为主 checkout**。
+（外层补一句第一人称的记录：**那 68 分钟里的外层就是我**。
+我在 17:42 与 18:16 两次读到「1 个提交、0 脏、50 分钟前」，两次判为正常推进——
+**而 80 分钟前我刚诊断过同样的形状**。）
 
-**⇒ 它监测的是「一个正在跑快速模式的 checkout」——而外层的 checkout 也是。
-真实划分是会话面 vs 工作区面，不是内层 vs 外层。**
+### 二、它不观测会话
 
-### 后果：3 个挂载是参数缺失逼出来的，不是设计需要
+`tmux` 命中数 **0**。人已裁定：**观测只有一个工具，就是 `session-liveness.sh`**——
+管理者看三个 outer、每个 outer 看自己的 inner，**四个挂载全靠参数，已经在跑**。
 
-| 工具 | 目标怎么给 | 三个项目要几个挂载 |
-|---|---|---|
-| 会话面 | `SESSION_TARGETS` **多目标参数** | **1** |
-| 工作区面 | **写死主 checkout** | **3** |
+### 三、其余信号本来就看得见
 
-**同一件事，一个工具做一次、另一个做三次，差别只在有没有参数。**
+`TASKS` / `MAJOR` / `MINOR` / `REVERT` / `MASSDELETE` **全来自 `git log`**，
+而**外层的工作目录就是那个仓库，它自己就能看**。
 
-### 边界渗漏
+### 不要直接删：它缠进 27 个文件，四处要害
 
-`REPO-STALL`（**9 处**）与 `tick-log`（**3 处**）都长在 `session-liveness.sh` 里，
-而 `inner-state.sh` 里两者均为 **0**。
-`SESSION_HEARTBEATS` 读的 `tick-log.md` 同样是仓库信号。
-**⇒ 两个工具都在读仓库 ⇒ 可能对同一件事给出不一致判断，而没人会发现。**
-
-### 本任务推翻一条既有的「外层判定」——理由不是它错了，是它的前提到期了
-
-`session-liveness.sh:20-25` 有一条明确的旧判定：**「改名为 REPO-STALL、不改源、不移出」**，
-三条理由逐字如下，**逐条说明为什么现在不再成立**：
-
-| 旧理由 | 现在的状态 |
+| 要害 | 现状 |
 |---|---|
-| 1. 本工具已按项目轮询，多带一个仓库信号**边际成本为零** | **失效**：AC2 给工作区工具加了多目标参数后，仓库信号有了自己的常驻宿主；继续留在会话工具里**不再是零成本，而是两个工具都读仓库**——正是上面那处渗漏 |
-| 2. 改成**会话面**信号只会与 `SESSION-IDLE` 重复 | **不适用**：新裁定不是把它变成会话面信号，是把它归到**工作区面** |
-| 3. **移出需要另造一个常驻宿主，当前没有** | **前提被移除**：AC2/AC3 造出来的正是这个宿主 |
-
-**⇒ 旧判定在当时是对的。本任务不是纠正一个错误，是它的第 3 条理由到期了。**
-**这一段必须留在任务体里**——否则下一个人读到文件头那三条理由，会把它改回去。
+| `monitor-mount-check.sh` | 把「它挂没挂」当成**冷启动六键之一** |
+| `quay-init.sh` 的 `LOOP_SCRIPTS` | 把它**铺进每个目标项目** |
+| cold-start `SKILL.md` | 明写**挂两个监视器** |
+| `session-liveness.test.mjs:811` | 断言 **tick 文档同时提到两者** |
 
 ## Contract
 
 ```
-measure mount_total = `ps -eo args | grep -cE '[s]ession-liveness.sh|[w]orkspace-state.sh'` 的挂载进程数字段
-measure git_in_session_tool = `grep -cE 'git ' plugin/scripts/session-liveness.sh` 的命中数字段
-measure surfaces_self_sufficient = `bash plugin/scripts/workspace-state.sh --once && bash plugin/scripts/session-liveness.sh --once` 各自单独跑时本面结论是否完整的布尔字段
-band mount_total = 2
-invariant 同一件事只有一个工具，目标靠参数给；两个面各自自足，谁都不必读另一面的数据
-invoke `bash plugin/scripts/workspace-state.sh --once`
-control 只跑工作区工具 ⇒ 仍能给出完整的仓库面结论；只跑会话工具 ⇒ 仍能给出完整的会话面结论
-resume 先加多目标参数并改名，再移仓库信号，最后验挂载数
+measure observer_mounts = `ps -eo args | grep -c '[s]ession-liveness.sh'` 的挂载进程数字段
+measure inner_state_mounts = `ps -eo args | grep -c '[i]nner-state.sh'` 的挂载进程数字段
+measure residual_refs = `git grep -l inner-state -- . | wc -l` 的残留引用文件数字段
+band inner_state_mounts = 0
+invariant 观测只有一个工具，目标靠参数给；退役不得让任何一类信号静默消失
+invoke `bash plugin/scripts/monitor-mount-check.sh --json`
+control 退役后六键仍能判定冷启动是否完成；每一类原有信号要么有新路径要么被明确记录为不再报
+resume 先改判据与文档，再摘 LOOP_SCRIPTS，最后删脚本并停挂载
 ```
 
 ## Chosen mechanism
 
-**逐条落地 SPEC 的 AC1–AC5，顺序不可颠倒**（先给宿主，再搬东西）：
+**按管理者建议的次序，不可颠倒**（先让依赖它的东西不再依赖，再删）：
 
-1. **AC1** `inner-state.sh` 更名为反映实际观测对象的名字（如 `workspace-state.sh`）。
-2. **AC2** 工作区工具接受**多目标参数**（如 `WORKSPACE_ROOTS`，**与 `SESSION_TARGETS` 同形**：
-   每行 `<名字> <路径>`）。**同形是关键**——两个工具的参数写法不同，就等于没统一。
-3. **AC3（可判的收口）** AC2 之后，三个项目由 **1 个**工作区挂载覆盖，
-   **总挂载数从 7 降到 2**。**这个数字就是判据。**
-4. **AC4** 仓库面信号全部归工作区工具——`REPO-STALL` 与 `tick-log` 心跳从 `session-liveness` 移出；
-   移出后 **`session-liveness.sh` 里 `git` 的命中数为 0**（**当前基线是 1**，:565）。
-5. **AC5（负控制）** 两个工具**各自单独跑**都能给出完整的本面结论，
-   **谁都不需要读另一面的数据**；**做不到就说明面没切干净**。
+1. **先改判据与文档**：六键从「两个监视器」收成**一个**；
+   `SKILL.md` 与 tick 文档同步；`session-liveness.test.mjs:811` 的断言跟着改。
+2. **再从 `LOOP_SCRIPTS` 摘掉**（不再铺进新目标项目）。
+3. **最后删脚本本身**，并**停掉三个现存挂载**。
 
-**明确不做（人的原话）**：**不要把两个脚本合并成一个。**
-会话面要解析 tmux 与 transcript、工作区面要跑 git，**代码本来就该不同**。
-**「统一工具」指的是「同一件事只有一个工具、目标靠参数给」，不是「所有观测塞进一个文件」。**
+**收口判据（规格 AC3）**：观测挂载数 = 观察者数 = **4**；`inner-state` 挂载数 = **0**。
 
-**另外不做**：不趁改名顺手扩大工作区工具的信号集（本任务只搬既有的两个仓库信号）；
-不保留 `inner-state.sh` 作为兼容别名而不加说明（**留一个不说明的别名，就是留一个会被继续用的旧名字**）。
+**不做**：**不与 `inner-blocked-signal.ts` 的处置混在一起**——
+那是[[gap-the-blocked-channel-has-a-writer-nobody-calls]]，**两者处置相反**
+（本条是清理一个从没生效的**观测工具**；那条是一个**真实需求配了没人调用的实现**）；
+不把它的 git 信号打包搬进 `session-liveness.sh`（**观测工具不背仓库告警**）；
+不因为「留着也不碍事」而保留——**一个没有观察者的挂载仍然消耗轮询、仍被六键计数**。
 
 ## Acceptance Criteria
 
-- [ ] AC1: `inner-state.sh` 更名，新名字反映**实际观测对象**（工作区/checkout），
-      **旧名字的处置写明**（删除，或保留为别名并标注「已更名，理由 X」）
-- [ ] AC2: 工作区工具接受多目标参数，**格式与 `SESSION_TARGETS` 同形**（每行 `<名字> <路径>`），
-      **不同形即判不通过**
-- [ ] AC3: **可判的收口**——三个项目由 **1 个**工作区挂载覆盖，
-      **`mount_total` 从 7 降到 2**（改动前后两个数字都实测贴出）
-- [ ] AC4: `REPO-STALL` 与 `tick-log` 心跳移入工作区工具；
-      **`session-liveness.sh` 的 `git` 命中数从 1 变为 0**（实跑输出贴任务体）
-- [ ] AC5: **负控制（面是否切干净）**——**只跑工作区工具**⇒ 给出完整仓库面结论；
-      **只跑会话工具**⇒ 给出完整会话面结论；**两者都不读另一面的数据**（两个方向都贴）
-- [ ] AC6: **反向负控制（信号不得丢失）**——移动前后，
-      `REPO-STALL` 在**同一个真实场景**下仍然会被报出（实跑输出贴任务体）。
-      **这条不过，AC4 不算数**——**把边界渗漏修成信号丢失是更坏的交易**
-- [ ] AC7: **旧判定的处置**——`session-liveness.sh` 文件头那三条「不移出」的理由
-      **必须一并更新或删除**，不得留在原地与新行为矛盾
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
+- [ ] AC1: **六键收成一个监视器**——`monitor-mount-check` 不再把 `inner-state` 挂载当成通过条件；
+      **负控制：六键仍能判出「冷启动未完成」**（人为不挂 `session-liveness` ⇒ 必须判不通过）
+- [ ] AC2: `SKILL.md` 与 tick 文档同步为**一个监视器**；`session-liveness.test.mjs:811` 断言跟着改
+- [ ] AC3: 从 `LOOP_SCRIPTS` 摘掉，**新目标项目不再收到它**（实跑输出贴任务体）
+- [ ] AC4: 删除脚本并**停掉三个现存挂载**；`residual_refs` 归零或逐个说明为何保留（**27 个文件逐个处置**）
+- [ ] AC5: **可判的收口**——`observer_mounts == 4` 且 `inner_state_mounts == 0`（改动前后都实测贴出）
+- [ ] AC6: **反向负控制（信号不得静默消失）**——原有每一类信号
+      （`BLOCKED`/`UNBLOCKED`/`TASKS`/`MAJOR`/`MINOR`/`REVERT`/`MASSDELETE`）
+      **逐类给出去向**：有新路径、或**明确记录为「已决定不再报」及理由**。
+      **这条不过，AC4 不算数**——**退役一个工具最容易的失败方式，是它的信号一起消失而没人注意**
+- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC5 与 AC6 两个方向的实跑输出都贴进任务体
+- [ ] AC1 的负控制与 AC5 的前后数字都贴进任务体
+- [ ] AC6 的信号去向清单**逐类**贴出（**不得只写「已迁移」**）
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体保留**旧判定为什么到期**那张表——
-      **只写「现在要移出」而不写「当初为什么不移」，下一个人会照文件头的理由改回去**
+- [ ] 任务体记录：**它的招牌信号在三个项目里从未产生，且我们已经撞上过它本该拦下的那一次**——
+      **「机制存在」与「机制生效」之间隔着一次真实事故，而那次事故已经发生过了**
 
 ## Touches
 
 - plugin/scripts/inner-state.sh
-- plugin/scripts/session-liveness.sh
-- plugin/test/session-liveness.test.mjs
+- plugin/scripts/monitor-mount-check.sh
 - plugin/scripts/quay-init.sh
+- plugin/test/session-liveness.test.mjs
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-04T00:25:00Z
-changed: 人的裁定经管理者转达。**外层逐项复核，用 `git grep` 对文件而非扫进程**——
-避开本仓今日已栽四次的自匹配（管理者两次、外层两次）。
-**核对结果与管理者一致，两处需要写明的差异**：
-其一，**`git` 在 `session-liveness.sh` 里是 1 处不是 0**（:565 `git -C "$root" log -1`）——
-外层第一次用窄模式漏了它；**AC4 的基线因此是 1→0，不是 0→0**，
-**基线写错的判据等于没有判据**。
-其二，`inner` 的计数差异是**单位不同**（外层量「含该词的行数」11、管理者量「出现次数」17），
-**不是分歧**。
-**外层发现并处理了一件管理者未提的事**：`session-liveness.sh:20-25` 有一条**既有的外层判定**
-明确写着「改名为 REPO-STALL、**不改源、不移出**」，并给了三条理由。
-**本任务推翻它，但理由不是它错了**——逐条查过：理由 2（会与 SESSION-IDLE 重复）**不适用**
-（新裁定归的是工作区面不是会话面）；理由 1（边际成本为零）**失效**
-（有了多目标宿主后，留在会话工具里就是两个工具都读仓库）；
-**理由 3（移出需要另造常驻宿主，当前没有）的前提被 AC2/AC3 直接移除**。
-**⇒ 旧判定在当时是对的，到期的是它的第 3 条理由。**
-**这一段与 AC7 一起写进任务**——**只写「现在要移出」而不写「当初为什么不移」，
-下一个人读到文件头那三条理由会把它改回去**。
-**AC6 是外层新增的真判据**：把边界渗漏修成信号丢失是更坏的交易。
-**人的「不做」原样保留并加了解释**：不合并两个脚本——
-统一指的是「同一件事只有一个工具、目标靠参数给」，不是「所有观测塞进一个文件」。
+at: 2026-08-04T00:40:00Z
+changed: **本文件是重写**——上一版 `gap-observers-are-split-by-layer-not-by-surface`
+（外层 00:25Z 写的「会话面 vs 工作区面，两个面都正当」）**被人推翻**，
+文件名与 id 一并更改，**因为旧 id 本身在固化那个错误框架**。
+**外层的自陈不打折**：外层当时**逐项复核了全部数字并全部对上**
+（714/136 行、`tmux` 0 次、`INNER_STATE_WORK_ROOT` 是测试接缝），**然后照单采纳了推论**。
+**⇒ 核的是测量，没核推论。一个被验证过的测量，不会让长在它上面的结论也变得被验证过。**
+**管理者给的一般形态原样保留**：**同一份测量既能推出「退役它」，也能推出「它是另一类」——
+后者听起来更周全，而且不用动任何东西，这正是它危险的地方。**
+**次序照管理者的建议落地**（先改判据与文档、再摘 `LOOP_SCRIPTS`、最后删脚本与停挂载），
+理由是它缠进 **27 个文件、四处要害**，直接删会让六键与冷启动文档同时失真。
+**AC6 是外层新增的真判据**：退役最容易的失败方式是信号一起消失而没人注意，
+**要求逐类给出去向，不得只写「已迁移」**。
+**AC1 的负控制同样是外层加的**：六键少一个条件之后，**必须仍能判出「冷启动未完成」**——
+否则这次退役就把一个判据改成了一句永远为真的话。
+**明确与 [[gap-the-blocked-channel-has-a-writer-nobody-calls]] 分开**：两者处置相反。
