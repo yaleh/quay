@@ -194,7 +194,7 @@ test('AC2 — detection ladder: scripts/test.sh is detected as bash scripts/test
   try {
     fs.mkdirSync(path.join(ws, 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'scripts', 'test.sh'), '#!/bin/bash\necho test\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init with a detected test command must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: bash scripts\/test\.sh/,
       'must print the detected command for the human to confirm (AC2: 显示给人确认)');
@@ -206,7 +206,7 @@ test('AC2 — detection ladder: package.json scripts.test is detected as npm tes
   try {
     fs.writeFileSync(path.join(ws, 'package.json'),
       JSON.stringify({ name: 'proj', scripts: { test: 'vitest run' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: npm test/,
       'must detect npm test from a package.json scripts.test entry');
@@ -225,7 +225,7 @@ test('AC2 — detection ladder: go.mod is detected as go test ./... (meta-cc con
   const ws = makeTmp();
   try {
     fs.writeFileSync(path.join(ws, 'go.mod'), 'module example.com/proj\n\ngo 1.22\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: go test \.\/\.\.\./,
       'must detect go test ./... from a go.mod file');
@@ -236,7 +236,7 @@ test('AC2 — detection ladder: Cargo.toml is detected as cargo test', () => {
   const ws = makeTmp();
   try {
     fs.writeFileSync(path.join(ws, 'Cargo.toml'), '[package]\nname = "proj"\nversion = "0.1.0"\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: cargo test/,
       'must detect cargo test from a Cargo.toml file');
@@ -249,7 +249,7 @@ test('AC2 — an explicit --test-command takes priority over detection', () => {
     // The workspace WOULD detect npm test; the explicit flag must win.
     fs.writeFileSync(path.join(ws, 'package.json'),
       JSON.stringify({ name: 'proj', scripts: { test: 'vitest run' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /using explicit --test-command: node --test/,
       'must report the explicit command');
@@ -275,7 +275,7 @@ test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, 
     // Pre-place a stale copy of a product mechanism file (a hot-copy leftover) with different content.
     fs.mkdirSync(path.join(ws, 'plugin', 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), '#!/bin/bash\necho stale-residue\n');
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must succeed after disposing of the residue:\n${r.stderr}`);
     assert.match(r.stdout, /cleaned-residue/, 'must report the residue cleanup visibly');
     assert.match(r.stdout, /backup:/, 'must report where the backup went');
@@ -300,7 +300,7 @@ test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, 
 test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edit survives without --force', () => {
   const ws = makeTmp();
   try {
-    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test'];
+    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
     const r1 = runInit(ws, args);
     assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
     const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
@@ -322,7 +322,7 @@ test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edi
 test('AC5 — re-run is idempotent (skips identical), and a locally-edited tick doc is NOT overwritten; the conflict is listed', () => {
   const ws = makeTmp();
   try {
-    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test'];
+    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
     const r1 = runInit(ws, args);
     assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
     const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
@@ -430,7 +430,7 @@ test('AC4 — the check fails when an installed executable drifts by one byte, a
 test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is project-local absolute (never a PATH-resolved quay-native)', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const cfg = path.join(ws, '.quay', 'config.yml');
     assert.ok(fs.existsSync(cfg), '--loop must write a .quay/config.yml for a config-less target (AC7b)');
@@ -459,7 +459,7 @@ test('AC7b — when the plugin has no built runtime bundle, --loop warns (does n
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-        '--plugin-root', src]);
+        '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
       assert.equal(r.status, 0, `init must exit 0 even without a built runtime:\n${r.stderr}`);
       assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the runtime bundle is absent');
       assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'config must still be written');
@@ -478,7 +478,7 @@ test('AC7b — a plugin source WITH a built runtime lays it into the target (pro
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-        '--plugin-root', src]);
+        '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
       assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
       assert.match(r.stdout, /vendor\/quay\/dist\/quay\.js/, 'must report the runtime lay-down');
       const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
@@ -515,7 +515,7 @@ test('AC1 — the outer tick doc declares exactly ONE loop-driving mechanism (Cr
 test('AC1 (laid-down) — the rendered outer tick doc also declares exactly one driver after substitution', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
     assert.deepEqual([...distinctDriverMechanisms(outer)].sort(), ['CronCreate'],
@@ -548,7 +548,7 @@ function runDriverCheck(ws) {
 test('AC4 — loop-driver-check.sh is laid down by quay-init --loop', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', 'loop-driver-check.sh')),
       'loop-driver-check.sh must be laid down with the loop mechanism');
@@ -558,7 +558,7 @@ test('AC4 — loop-driver-check.sh is laid down by quay-init --loop', () => {
 test('AC6 — zero drivers = STALLED (the loop will never tick), exit 3', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const c = runDriverCheck(ws);
     assert.equal(c.status, 3, `no driver must be STALLED (exit 3), got ${c.status}: ${c.stdout}`);
@@ -569,7 +569,7 @@ test('AC6 — zero drivers = STALLED (the loop will never tick), exit 3', () => 
 test('AC4 — exactly one cron driver = LIVE, exit 0 (end-to-end: one trigger source)', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'cron');
     const c = runDriverCheck(ws);
@@ -582,7 +582,7 @@ test('AC4 — exactly one cron driver = LIVE, exit 0 (end-to-end: one trigger so
 test('AC5 — a second driver = DOUBLE-TRIGGER, exit 4 (double-trigger negative control)', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'cron');          // step 4: CronCreate
     writeDriver(ws, 'loop');          // §4a relapse: a second /loop driver
@@ -595,7 +595,7 @@ test('AC5 — a second driver = DOUBLE-TRIGGER, exit 4 (double-trigger negative 
 test('AC6 (remove direction) — removing the only driver is detected as STALLED, not "all normal"', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'cron');
     assert.equal(runDriverCheck(ws).status, 0, 'precondition: one driver is LIVE');
@@ -609,7 +609,7 @@ test('AC6 (remove direction) — removing the only driver is detected as STALLED
 test('AC3 — a disposed mechanism cannot become the sole driver (BANNED-MECHANISM, exit 5)', () => {
   const ws = makeTmp();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'wakeup');        // the disposed self-paced wakeup as the only driver
     const c = runDriverCheck(ws);

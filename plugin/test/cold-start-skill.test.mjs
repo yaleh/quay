@@ -134,7 +134,7 @@ test('rehearsal — a real --task-start against a quay-init --loop project write
   try {
     const init = spawnSync('bash', [path.join(pluginDir, 'scripts', 'quay-init.sh'),
       '--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-      '--worktree-root', diskWorktreeRoot()],
+      '--worktree-root', diskWorktreeRoot(), '--tmux-session', 'proj-0:0.0'],
       { cwd: ws, encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir } });
     assert.equal(init.status, 0, `quay-init --loop must succeed:\n${init.stderr}`);
     const ts = spawnSync('node', ['--experimental-strip-types',
