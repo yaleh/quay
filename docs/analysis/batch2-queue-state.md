@@ -2249,3 +2249,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （agent 等各自全量套件，内层 4 shells 重活）。
 - **就绪池 = 3** ✓（am2 / promotion-cadence / reliable-send，尚未派发，等槽位）。
 - 无停止条件、无阻塞；loop-driver LIVE。
+
+### tick 2026-08-04T16:42Z（外层，`no-action`）
+
+- **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
+  A/D/B/L0/node-cache/retire-state/task-write 全部合并。**suite-speed 唯一在飞**（基准测试 agent
+  45m+，等其全量结果）。
+- **5 个失败疑似负载抖动**：suite-speed 的重基准跑与 retire-inner-state 的噪声门同窗（`d514910e` 已
+  记录），内层在确认是否负载诱发——真因待其全量结果。若确为负载抖动，是 suite-speed 任务的固有
+  测量噪声，不是新缺陷；若为真失败，需分开处置。
+- **2 槽位空、就绪池 3**：内层尚未派新批（正等 suite-speed 结果）——按滚动派发语义槽位空即派，
+  若下一 tick 仍未派，驱动内层。监视器 check 新语义 mounted:true（session-liveness，管理者挂载）；
+  我的 --detect-stop --pane 轮询（bep2jmw1g）运行中。
+- 无停止条件、无阻塞；loop-driver LIVE。

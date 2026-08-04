@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 16:42Z | `no-action` | 核实 task-write 合并（YAML-safe 标题）、suite-speed 唯一在飞（基准测试 45m）；5 失败疑似负载抖动（噪声门同窗）；2 槽位空 + 就绪池 3 未派（下 tick 未派则驱动）；监视器新语义 mounted:true | 内层：suite-speed 基准 agent 等全量结果（确认 5 失败是否负载抖动）；本批 7/8 已合并 | ①git log 核 task-write 合并 + 噪声门抖动记录；②就绪池 3；③监视器 check mounted:true（session-liveness 语义）；④`--detect-stop` 无命中 |
 | 2026-08-04 16:23Z | `no-action` | 核实 retire-inner-state 合并 + AC6 B-signal 去向（无信号类静默消失）；我的 inner-state Monitor 运行已删代码 ⇒ 停止 + 替换为 --detect-stop --pane 轮询（60s 转变发声，保留 ≤5min BLOCKED 预算）；残留进程核实清零；就绪池=3 | 内层：task-write + suite-speed 在飞（等各自全量套件）；node-cache + retire-state 已合并；4 shells 重活 | ①--detect-stop --pane 对真实 pane 文本实跑（pane_decision=waiting-input reset）；②ps 核 inner-state 进程清零；③就绪池 3；④AC6 去向表读核 |
 | 2026-08-04 16:02Z | `no-action` | 核实 node-compile-cache 已合并绿、3 subagent 在飞（达上限）；AC-queue 补晋 3 条（promotion-cadence/reliable-send/adr-016-am2，9 对全 disjoint 核实）；就绪池 0→3；写回 | 内层：suite-speed（全量测速）/retire-inner-state（ps 数挂载）/task-write 三 agent 在飞；node-cache 合并 | ①git log 核 node-cache 合并 + D/L0 invoke-evidence 关闭；②checkTouchesPair 9 对全 disjoint；③就绪池实况（0→3）；④`--detect-stop` 无命中 |
 | 2026-08-04 15:48Z | `no-action` | 批关闭核实（A/B/L0 done、套件 2276/0/0、D 留 ready→已驱动补关并确认 done，A-F 六批全部完成）；新批滚动派发核实（task-write+node-compile-cache rib:true，避开 suite-speed 重叠）；clean-tree FAIL 核实=假阳性（两文件 mtime 早于套件数小时，assert-clean-tree 无 before 基线，mkdtemp-rooted 不涉事不追） | 内层：新批 2 后台 agent 在跑（task-write git-history + node-compile-cache 冷启动计时）；D 已补关 done | ①meta-cc 原始字段 rib:true（15:46:50/15:46:56）；②两文件 mtime vs 套件启动（假阳性实证）；③assert-clean-tree.sh 读其逻辑（无 before 基线）；④D task status=done |
@@ -241,11 +242,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 78 | 36% |
+| no-action | 79 | 36% |
 | unblock | 36 | 17% |
 | correct | 91 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **212** | — |
+| **合计** | **213** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
