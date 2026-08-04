@@ -1,0 +1,141 @@
+---
+id: gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable
+title: every screen observer in this repo hashes the pane instead of classifying
+  its shape, so "the session is waiting for its user" — the one state that matters
+  — is indistinguishable from "the screen happened not to redraw"
+status: ready
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+---
+
+**type:** execution
+
+## Proposal
+
+外层裁定 D + E（`orchestration/outer-rulings-2026-08-04-A-F.md`）。
+
+### 证据一：现有两个屏幕观察者用的是同一个错函数
+
+```
+$ grep -n 'capture-pane' plugin/scripts/session-liveness.sh
+612:      raw=$(tmux capture-pane -p -t "$target" 2>/dev/null)
+# → mask_pane（剥离 token 计数行 / ✽ spinner 行 / ✻ 残留行）→ md5sum
+# 判据 = 「mask 之后的整屏哈希是否与上一轮相等」
+```
+
+`plugin/scripts/send-keys-verified.sh` 同形。**两者判的都是「屏幕变没变」，不是「屏幕在说什么」。**
+
+### 证据二：「加剥离规则」这条路已经走过一轮，且它本身就是信号
+
+`mask_pane` 已经落地了三条剥离规则，每条都附了「为什么它不代表活动」的说明——
+而姊妹任务 `gap-session-liveness-hashes-the-token-counter-as-if-it-were-work`（`status: todo`）
+还准备再加。**「加一条规则就能对一次」正是「输入脏是因为取了整屏」的定义**。
+
+同一探测器实测的两个方向都错（该任务体记录，外层 2026-08-03 19:25Z）：
+
+```
+grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
+  → 23 SESSION-RESUMED
+  →  0 SESSION-IDLE
+```
+同窗口内层实际在跑一个 2m11s 的活跃回合 ⇒ **23 次都是误判**。
+
+### 证据三：最要紧的那一类状态，哈希在原理上判不出
+
+哈希只能回答「变了/没变」。它**无法**区分：
+
+| 屏幕实际在说 | 哈希看到 |
+|---|---|
+| `Do you want to proceed?` 权限确认框在等人点 | 没变 |
+| 会话干完了正常空闲 | 没变 |
+| 输入框里躺着一条没提交的指令 | 没变 |
+| 会话死了 | 没变 |
+
+**而「弹框等批准」整个落在这一列里**——transcript jsonl 同样看不到它（transcript 记的是已发生的
+工具调用，不是待批准的那一个）。今晚复现过：内层说「等套件 #12 通知」然后坐着不动，外层没察觉。
+
+### 选定机制（裁定 D/E）
+
+**纯函数分类器**：`classifyPaneState(paneText) -> { state, confidence, region }`。
+
+- **只读底部区域**（输入框 + 状态行），不读整屏——人也不看整屏；
+- **形状分类**，不是等值比较：枚举五态
+  `waiting-input` / `permission-prompt` / `busy` / `error-banner` / `unknown`；
+- **两级抗脆**：第一级确定性匹配常见形状（本任务范围）；
+  **第二级——匹配不上或形状异常 ⇒ 返回 `unknown` 并原样带出那段文本**，
+  交给外层自己读（外层是 LLM，读屏幕天然跨 TUI 版本）。
+  第二级**不是装饰**：没有它，分类器一遇到新版 TUI 就静默变瞎，而静默变瞎正是本族失效的形状。
+- **多次采样一致**由消费者（`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）
+  负责，**不在本任务**——本任务交付的是无状态纯函数。
+
+**本任务只交付分类器本体与夹具，不接线**。接线是姊妹任务，两者触摸集不相交，可并发。
+
+### 为什么这个形状顺手消掉危险测试面（裁定 E）
+
+契约是「给定 pane 文本 → 判定状态」，一个**纯函数** ⇒ 夹具是**录下来的 `.txt` 屏幕文本**
+⇒ **不需要 tmux server、不需要 pty、不需要手搓假 TUI**。
+今天两台机器（vhs / transformer）的整机崩溃都来自「为造假 TUI 夹具而裸调 `tmux kill-server`」。
+**这一整类危险测试在设计上不存在，不是靠拦截**——所以 `tmux_in_tests = 0` 是本任务的 `invariant`，
+是可机械验证的规格，不是意图声明。
+
+## Acceptance Criteria
+
+- [ ] AC1: `plugin/scripts/pane-state-classify.ts` 导出纯函数
+      `classifyPaneState(paneText, opts) -> { state, confidence, region, raw }`，
+      `state` 取值恰好是 `enumerated_states` 声明的五个，**无副作用、不调用 tmux、不读文件**
+- [ ] AC2: 底部区域的取法写在一个**具名函数** `bottomRegion(paneText, lines)` 里，
+      默认行数写进文件头并附理由；**整屏文本不得进入判定路径**（AC6 的负控制钉住这一条）
+- [ ] AC3: 夹具是**真实录下来的** `.txt` 屏幕文本（`plugin/test/fixtures/pane-states/*.txt`），
+      五态各 ≥2 张，**每张附录制来源**（哪个会话、什么时刻、当时它实际在做什么）；
+      合成的不算——`fixture_count` 落在 `band` 内
+- [ ] AC4: `permission-prompt` 一态**必须有真实录制的样本**（`Do you want to proceed?` 一族）——
+      这是整个机制存在的理由，没有它其余四态都不成立
+- [ ] AC5: **两级抗脆的第二级可验证**——喂一张五态都匹配不上的屏幕文本 ⇒ 返回
+      `state: "unknown"` 且 `raw` 逐字包含底部区域文本（实跑输出贴任务体）。
+      **不得静默归入其余四态之一**
+- [ ] AC6: **负控制（区域）**——构造两张屏幕：底部区域逐字相同、上方内容不同
+      ⇒ 分类结果必须相同（证明整屏没进判定路径）。再构造两张：底部区域不同、上方相同
+      ⇒ 结果必须不同（实跑输出贴任务体）
+- [ ] AC7: **负控制（哈希倒退）**——把任一 busy 夹具重标为 `waiting-input` ⇒ 测试必须变红
+      （证明测试在断言语义，不是在断言「跑通了」）
+- [ ] AC8: `tmux_in_tests` 落在 `band` 内（= 0）——测试文件与夹具目录里 `tmux` 出现 0 次
+- [ ] AC9: 测试用 `node:test` 且带 `// @test-group engine`
+
+## Definition of Done
+
+- [ ] AC1–AC9 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [ ] **本任务不修改 `session-liveness.sh`**——接线由姊妹任务承载；改了即视为越界
+
+## Touches
+
+- plugin/scripts/pane-state-classify.ts (new)
+- plugin/test/pane-state-classify.test.mjs (new)
+- plugin/test/fixtures/pane-states/ (new)
+
+## Contract
+
+measure   tmux_in_tests = `grep -rc tmux plugin/test/pane-state-classify.test.mjs plugin/test/fixtures/pane-states/` stdout 的计数字段
+band      tmux_in_tests = 0（严格；非 0 即表示危险测试面又回来了）
+measure   fixture_count = `ls -1 plugin/test/fixtures/pane-states/ | wc -l` stdout 的行数字段
+band      fixture_count = 10..30（五态各 ≥2 张为下界；上界防夹具堆积）
+invariant enumerated_states = 5（waiting-input / permission-prompt / busy / error-banner / unknown）
+invoke    `scripts/test.sh plugin/test/pane-state-classify.test.mjs`
+control   把任一 busy 夹具重标为 waiting-input ⇒ 测试必须变红（AC7）
+resume    每录一张夹具即写盘提交，中断后从缺口续录
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-04T14:20:00Z
+changed: 外层裁定 D/E 立案。相对简报的三处收紧：
+(1) **AC4 单独把 `permission-prompt` 拎出来要真实样本**——简报把五态并列，但只有这一态是
+整个能力存在的理由，其余四态达标而它用合成样本充数是最可能的走样方式；
+(2) **AC6 是「区域」的负控制，不是「分类」的**——它钉的是「整屏没进判定路径」这条结构性质，
+比逐态断言更难绕过；
+(3) **DoD 显式禁止本任务改 `session-liveness.sh`**——分类器与接线拆成两个任务的全部意义就是
+触摸集不相交可并发，一旦本任务顺手改了那个文件，两个任务就串行了。
+`## Touches` 三条全是 `(new)`，与在飞/待派发任务零重叠（`checkTouchesResolve` 豁免 `(new)`）。

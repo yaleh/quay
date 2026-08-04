@@ -1,0 +1,104 @@
+# 第三次重启计划 —— 管理者的目标与 AC
+
+**日期**：2026-08-04（管理者）
+**触发**：人指出「你使用了错误的命令启动 outer 和 inner」。本文件先如实记错，再给出证据支撑的正确命令与判据。
+
+---
+
+## 0. 我错在哪（先记，再改）
+
+我自拟了启动命令，没有先查历史。实际错了三处：
+
+| 项 | 我起的 | 历史证据里的正确值 | 证据 |
+|---|---|---|---|
+| **inner 的服务商** | Anthropic `claude`（默认 = **Opus 5 · Claude Max**，pane 实证） | **`claude-deepseek`**（deepseek 官方 API，独立 key） | 崩溃前 inner 会话 `74cfbc0e` 的 `message.model` 全部是 `deepseek-v4-flash`；另有 3 个 inner 会话同值 |
+| **inner 的上下文环境** | 无 | `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000` `CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000` `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80` | `~/.bash_history`：这三个变量**只**和 `claude-deepseek --model deepseek-v4-flash` 同行出现 |
+| **outer 的模型** | 默认（Opus） | 上次实跑是 `--model sonnet`；`QUAY-OUTER-HANDOFF.md:3` 写的是 Opus ⇒ **有冲突，需人裁定** | outer 会话 `0e28a885` = `claude-sonnet-5`；更早的 `dc6a47bd` = `claude-opus-5` |
+
+**教训（与今天已记的那条同型）**：我把「我知道该怎么起一个 claude 会话」当成了「我知道该怎么起**这个**会话」。
+拓扑/模型/服务商是**本机与本项目的事实**，只能查，不能推。
+
+---
+
+## 1. 正确的启动命令（逐字来自 `~/.bash_history` + 会话 model 字段实证）
+
+三个窗口的约定（`outer-phase-goal.md:3`、`QUAY-OUTER-HANDOFF.md:3`）：
+`quay-0:manager` / `quay-0:outer` / `quay-0:inner`。
+
+**outer 与 inner 用同一条命令**（人 2026-08-04 裁定：outer 也走 deepseek，不用 Anthropic）：
+```
+CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 CLAUDE_CODE_DISABLE_MOUSE=1 claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions
+```
+
+⇒ `QUAY-OUTER-HANDOFF.md:3` 的「Opus」与最近一次实跑的 `claude-sonnet-5` **都已过时**，该顺带订正
+（这条留给外层改自己的交接文档，不由管理者代笔）。
+
+`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` + `CLAUDE_CODE_DISABLE_MOUSE=1` + `bypassPermissions`
+是 ADR-016 明列的「可被远程驱动的会话」前置条件，不是可选项。
+
+**不加 `env -u TMUX`**（见 AC4）。
+
+---
+
+## 2. 我这次重启的目标
+
+> 让 quay 双层在**正确的服务商/模型/环境**下重新跑起来，并让人指定的 A–F 六条架构裁定
+> **真正进入任务板**——而不是只把两块屏幕点亮、把结论停在简报里。
+
+---
+
+## 3. AC（判据先写，证据后填）
+
+- [~] **AC1 — 启动命令与裁定一致，用 model 字段实证，不看 pane 上的字**
+      判据：outer 与 inner 两个会话 transcript 的 `message.model` **都** == `deepseek-v4-flash`。
+      **负控制**：任一侧若是 `claude-*` 值，AC1 判定不成立（这正是本次犯的错）。
+      **2026-08-04 14:0xZ 证据**：新 outer 会话 `e8e80f27` → `deepseek-v4-flash` ✅。
+      inner 尚无 assistant 消息（外层还没驱动它）⇒ **本条只勾一半，不整条勾**。
+      **负控制确实响了**：错启动留下的旧 outer 会话 `27c03bf0` → `claude-opus-5`，
+      与判据预言的失败形态逐字吻合。**这是本次 AC 里唯一一条被真实反例验证过的判据。**
+
+- [x] **AC2 — 三个窗口命名符合寻址约定**
+      判据：`tmux list-windows -t quay-0` 得到 `manager` / `outer` / `inner`。
+      **证据**：实测输出 `0 manager` / `1 outer` / `2 inner`（我自己的窗口原叫 `claude`，已改名）。
+
+- [x] **AC3 — 监视器一次挂载覆盖 outer + inner 两个目标，且确实在投递**
+      判据：收到过带这两个目标名的真实事件。
+      **证据**：`SESSION-BACK quay-outer (pid 2600919)` 与 `SESSION-BACK quay-inner (pid 2600928)`
+      两条均由同一次挂载投递到管理者会话。
+      理由：单飞设计下只覆盖一半，会让别人的挂载变成静默 no-op，把另一半永久晾着（上次的自伤）。
+
+- [x] **AC4 — 不把未经验证的改动捆进重启**
+      具体：`env -u TMUX`（L0）**不进**启动命令。它作为一条独立改动交给外层走正常流程（判据+测试）落地。
+      理由：重启不是引入新变量的地方；且 F 条关掉那条杀手任务后，即时危险面已经变小。
+      **证据**：本次实发命令与 `bash_history` 中那条逐字一致，未含 `env -u TMUX`。
+
+- [x] **AC5 — 驱动送达只用非哈希证据核实**
+      判据：pane 内容或 transcript 新增条目；**不采信** `send-keys-verified.sh` 的 exit 0。
+      **证据**：`capture-pane` 显示外层已读文件并在跑 `monitor-mount-check.sh` / `inner-blocked-signal.ts`；
+      且新 outer transcript `e8e80f27` 的首条 user 消息即本次驱动文本。
+      理由：该判据正是 A–F 里判定不可信的那个，用它自证是循环论证。
+
+- [ ] **AC6 — 六条裁定真的落到任务板，不是停在简报里**
+      判据：A–F 每条对应一个 task 文件或一条明确的关闭裁定；ADR-016 的 carve-out 有实际文本修改。
+      理由：防「简报写了 = 事情做了」——这正是前两次恢复里反复出现的失效形态。
+
+- [ ] **AC7 — 我不越界**
+      判据：本次重启我不写任务体/AC/DoD、不直接改代码、不直接派 `Agent` 做实现。
+      那些是外层与内层的活（`manager-loop-tick.md` §0）。
+
+- [ ] **AC8 — 如实记录本次自伤**
+      判据：本文件第 0 节存在，且被后续 tick 引用过一次。
+      理由：第 0 节是这次唯一新增的方法论产出；不被引用就等于没记。
+
+---
+
+## 4. 已裁定（2026-08-04，人）
+
+**outer 用 sonnet 还是 opus？** —— **都不是：outer 也走 `claude-deepseek` + `deepseek-v4-flash` + 917k。**
+证据当时是冲突的（最近实跑 `claude-sonnet-5`，交接文档写 Opus），我无法自行裁定 ⇒ 按 §1.5 问了，没猜。
+**结果证明两个候选都不对**——这条记下来：证据冲突时，「在两个已见过的值里挑一个」本身就是一种越界推断。
+
+## 5. 一条未结的事实
+
+两个窗口在我启动后不久整体消失（连 pane shell 一起）。我没有证据判定是人手动关闭，
+还是我那条命令导致的。**未查清前不作结论**——但 AC4 已经把这条不确定性隔离在启动路径之外。

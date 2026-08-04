@@ -41,7 +41,24 @@ RESOLVE tasks/gap-recursive-guard-only-covers-multi-mechanism.md: 3/6 non-(new) 
 two missing `prepare-milestone.js` entries are the ONLY remaining AC's wiring target, which is
 deleted. Disposition is by Proposal/AC re-scope, not by the majority-missing threshold.)
 
-## Proposal
+**OUTER RULING (2026-08-04, judgment delegated by the human):** **Stay `needs-human` AS WRITTEN.
+Do not reopen this narrow body — but the zero-caller fact this task's own re-triage note already
+surfaced is a real, bigger, separate gap; filed as its own task
+[[gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode]] rather than
+folded into this one.**
+
+This task's own AC7 assumes `checkSplitRecommendation` is being called somewhere in fast-mode's
+dispatch path and just has a narrow bug (guard only covers one split code). That assumption is
+false: **nothing calls it at all**, in either fast-mode or anywhere else — confirmed independently
+tonight (`grep -rn "checkSplitRecommendation" --include="*.ts" --include="*.md" .` outside
+`proposal-convergence.ts` itself, its own tests, and prose docs: zero production call sites).
+ADR-022 explicitly preserved this function "because fast-mode reuses it"
+(`adr/ADR-022-...md:83`, "仍被快速模式复用的判定函数"), and `CLAUDE.md`'s split-decision routing
+table (line ~159) documents its codes as current active policy — but the actual wiring from any
+real dispatch/task-authoring path was apparently never done. **Fixing this task's narrow
+recursion-depth bug would be fixing a bug in a function nobody calls** — premature until the
+prerequisite wiring gap is addressed. That prerequisite is the more consequential, more general
+finding, so it gets its own task rather than expanding this one's scope.
 
 `checkSplitRecommendation`'s `wbsLevel >= 2` guard (landed 2026-08-02) fires ONLY inside the
 `split-multi-mechanism` branch. A depth-2+ leaf that triggers `split-subsystem-blocking-cluster`

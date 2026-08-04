@@ -40,6 +40,21 @@ RESOLVE tasks/gap-plancheck-no-diminishing-returns-exit.md: 3/6 non-(new) touche
 two missing `prepare-milestone.js` entries are the ONLY remaining AC's wiring target, which is
 deleted. Disposition is by Proposal/AC re-scope, not by the majority-missing threshold.)
 
+**OUTER RULING (2026-08-04, judgment delegated by the human — see
+[[gap-plancheck-blocking-only-convergence]]'s ruling for the shared REFUTE-round evidence):**
+**Stay `needs-human`. Not wiring in at this time.**
+
+Fast-mode's actual round-budget safety net today is blunter than this task's mechanism but does
+exist and is structural, not absent: `fast-mode-loop-tick.md` step 4 dispatches REFUTE rounds
+under a **hard cap of 2**, and the judgment-boundary table routes "2 轮后仍 REFUTED" straight to
+`needs-human` — a fixed-cap-then-escalate policy, not `priorBlocking`'s more surgical
+diminishing-returns early exit. That's real risk-class coverage (unbounded rounds can't burn
+unlimited budget), just cruder. No evidence tonight or in the queue history shows fast-mode
+actually wasting a round that made zero progress before hitting the cap — the specific waste this
+task's mechanism would recover. Not reopening speculatively; if measured waste appears under the
+2-round cap, that's the trigger for a task against `fast-mode-loop-tick.md`'s own REFUTE dispatch,
+not necessarily a resurrection of this one's `prepare-milestone.js`-shaped design.
+
 ## Proposal
 
 Neither PlanCheck nor ProposalReview detects "this round did not improve on the last one." The

@@ -40,6 +40,22 @@ RESOLVE tasks/gap-plancheck-blocking-only-convergence.md: 3/6 non-(new) touches 
 two missing `prepare-milestone.js` entries are the ONLY remaining AC's wiring target, which is
 deleted. Disposition is by Proposal/AC re-scope, not by the majority-missing threshold.)
 
+**OUTER RULING (2026-08-04, judgment delegated by the human):** **Stay `needs-human`. Not wiring
+into fast-mode's convergence mechanism at this time.**
+
+Checked fast-mode's actual REFUTE-round behavior against this task's specific concern (PlanCheck
+requiring ALL findings — including non-blocking ones — to reach zero before converging, causing
+93%/79% round-budget exhaustion under the classic loop) rather than assuming it transfers. Real
+evidence from tonight's own queue history: the `inventory` task's fan-in explicitly recorded
+**"REFUTE 1 轮 10 MINOR 全闭（0 阻塞）"** — fast-mode's REFUTE rounds already distinguish
+blocking from non-blocking (MINOR) findings and converge on zero-BLOCKING, not zero-total, via a
+mechanism independently evolved for the subagent-REFUTE shape rather than by calling
+`planCheckNextAction`. Wiring the old typed function in now would mean maintaining two parallel
+implementations of the same policy, which cuts against this repo's own single-source-of-truth
+principle. **Not reopening without fresh evidence that fast-mode's REFUTE rounds actually hit the
+unreachable-convergence pathology this task was built to prevent** — the one concrete data point
+available points the other way.
+
 ## Proposal
 
 PlanCheck's success condition is `F_i = 0` — zero findings of any severity. A grounded reviewer

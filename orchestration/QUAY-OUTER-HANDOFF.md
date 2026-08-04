@@ -1,6 +1,8 @@
 # quay 外层交接
 
-**你是 quay 的外层**（Opus，tmux `quay-0:outer`）。内层是 `quay-0:inner`（deepseek-v4-flash，pid 270244）。
+**你是 quay 的外层**（deepseek-v4-flash，tmux `quay-0:outer`）。内层是 `quay-0:inner`（deepseek-v4-flash）。
+模型裁定（2026-08-04，`restart-plan-2026-08-04-third.md` §4）：outer 也走 `claude-deepseek`，不用 Anthropic Opus/Sonnet。
+pid 不钉死——会随重启漂移，寻址用窗口名。
 `quay-0:manager` 是三项目管理者——**它不再做 quay 外层的活**，那是你的了。
 
 ## 为什么分开（读一遍，这决定你和管理者的边界）
