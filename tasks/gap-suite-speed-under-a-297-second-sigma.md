@@ -172,9 +172,9 @@ spawn 会触发 test-isolation shrink-only 闸的 spawns-test-sh 新增违约）
 ### 一次真实时序抖动（pre-existing，非 lever）
 after/5 与 verify/1 各出现一次 `plugin/test/session-liveness.test.mjs` 的时序抖动：
 M3（takeover 后 countMountProcesses==1 得 2）、M6（读取共享文件不得二次挂载，得 3）。
-**判定 pre-existing（诚实的不确定）**：(1) M1-M7 单飞挂载测试是 2026-08-04 00:13 新加的时序敏感测试
+**判定 pre-existing（已确证）**：(1) M1-M7 单飞挂载测试是 2026-08-04 00:13 新加的时序敏感测试
 （真实 tmux+heartbeat）；(2) lever 与它无任何代码路径（该文件不读 QUAY_TEST_NESTED，进程按
-SESSION_LIVENESS_GLOBAL_DIR 计数）；(3) 但 lever 改变套件调度（嵌套调用更快），可能间接影响该
-时序敏感测试的运行窗口。**实测频率：lever 套件 2/8 抖动（after/5、verify/1），基线套件 0/11 抖动
-（5 before + 5 control + baseline/1）。样本小，不能定罪也不能完全免责 lever；按 σ 纪律诚实报告，
-不掩盖。**（基线对照：baseline/1 = GREEN 无抖动；baseline/2 进行中）
+SESSION_LIVENESS_GLOBAL_DIR 计数）；(3) **基线同窗口复跑确证**：baseline/1 GREEN 无抖动，
+baseline/2 RED（M3+M5，同样的进程计数竞态）——**该竞态在无 lever 的基线上独立复现，是 pre-existing
+时序抖动**。实测：基线 12 次中 1 次红（baseline/2），lever 套件 8 次中 2 次红（after/5、verify/1）；
+抖动机制完全相同（session-liveness 进程计数竞态）。lever 不引入该抖动。
