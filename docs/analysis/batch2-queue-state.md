@@ -2260,6 +2260,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   ready）。retire-state 的旧 run（崩溃会话）保持 abandoned=正确。
 - **结果**：open brackets = **0**；`--report` 三任务均 done（D/node-cache/new-run-retire-state）。
 
+### tick 2026-08-04T17:03Z（外层，`no-action`：suite-speed 硬测量让位，吞吐有意让行）
+
+- **suite-speed 唯一在飞（1h5m+）**：基准 agent 在 run-2.log 的 before/2。协议是 **AC4 σ 纪律硬要求**
+  ——「变快了」需 ≥5 次运行均值+极差；before 基线 + after 各自 ≥5 次，**还要多轮**。
+- **2 槽位空、就绪池 3 条未派**——核实为**刻意让位，非批门控复发**：派发会污染 run-to-run 方差
+  （`d514910e` 已证：噪声门测试被基准负载搞 flaky）。这是吞吐 vs 测量完整性的**真实权衡**，不是遗忘。
+- **上报管理者**：若吞吐优先于测量完整性，可指示内层派 2 条小任务（am2/promotion-cadence/reliable-send
+  全是文档+新脚本任务，scoped 测试便宜）；否则等基准完成（可能再 1 小时+）。
+- 就绪池 = 3 ✓（等槽位）；无停止条件、无阻塞；监视器 mounted:true（session-liveness）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
