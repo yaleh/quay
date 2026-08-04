@@ -81,7 +81,7 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
     // mechanism scripts
     const expectedScripts = [
       'fast-mode-telemetry.ts', 'inner-blocked-signal.ts', 'inner-forensics.mjs', 'inner-idle-log.ts',
-      'inner-state.sh', 'resource-gate.sh', 'heavy-op-token.sh', 'task-contract-check.ts',
+      'inner-state.sh', 'loop-driver-check.sh', 'resource-gate.sh', 'heavy-op-token.sh', 'task-contract-check.ts',
       'task-status-drift-check.ts', 'touches-orthogonality-check.ts', 'concurrent-batch-scheduler.ts',
       'it0-split-or-commit-check.ts', 'pipe-exit-code-check.sh',
       // transitive deps of the checkers (the laid-down mechanism must be functional)
@@ -435,4 +435,133 @@ test('AC7b — a plugin source WITH a built runtime lays it into the target (pro
         'the laid-down runtime must be byte-identical to the plugin source');
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-the-tick-doc-ships-three-contradictory-loop-drivers
+// 外层 tick 文档只声明一个循环驱动（CronCreate）；另外两个（ScheduleWakeup / /loop Nm）被显式处置。
+// 双触发/不触发用 loop-driver-check.sh 机械检出（AC4/AC5/AC6）。
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+const TICK_DOC = path.join(pluginDir, 'loop', 'orchestrator-loop-tick.md');
+const DRIVER_TOKENS = ['CronCreate', 'ScheduleWakeup'];
+const LOOP_NM_RE = /\/loop\s+[0-9]+m/;
+
+function distinctDriverMechanisms(text) {
+  const mechs = new Set(DRIVER_TOKENS.filter((t) => text.includes(t)));
+  if (LOOP_NM_RE.test(text)) mechs.add('loop-interval');
+  return mechs;
+}
+
+// ── AC1: the doc declares exactly ONE loop-driving mechanism ────────────────────────────────────────
+test('AC1 — the outer tick doc declares exactly ONE loop-driving mechanism (CronCreate)', () => {
+  const src = fs.readFileSync(TICK_DOC, 'utf8');
+  assert.deepEqual([...distinctDriverMechanisms(src)].sort(), ['CronCreate'],
+    'the outer tick doc must declare exactly one driver mechanism: CronCreate. ScheduleWakeup and /loop Nm are banned (AC1 band=1)');
+});
+
+test('AC1 (laid-down) — the rendered outer tick doc also declares exactly one driver after substitution', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
+    assert.deepEqual([...distinctDriverMechanisms(outer)].sort(), ['CronCreate'],
+      'the laid-down outer tick doc must also declare exactly one driver (the negative control survives shipping)');
+    assert.ok(outer.includes('loop-driver-check.sh'), 'the laid-down doc must reference the single-driver check');
+  } finally { cleanup(ws); }
+});
+
+test('AC1 (skill) — the cold-start skill\'s only driver is CronCreate and it enforces the single-driver check', () => {
+  const skill = fs.readFileSync(path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md'), 'utf8');
+  assert.ok(skill.includes('CronCreate'), 'the skill re-creates the cron via CronCreate');
+  assert.ok(!skill.includes('ScheduleWakeup'), 'the skill must NOT instruct ScheduleWakeup (AC3 dispose)');
+  assert.ok(!LOOP_NM_RE.test(skill), 'the skill must NOT instruct a /loop Nm invocation (AC3 dispose)');
+  assert.match(skill, /loop-driver-check\.sh/, 'the skill must run the single-driver check');
+  assert.match(skill, /LIVE/, 'the skill must require the check to report LIVE');
+  assert.match(skill, /double-trigger/i, 'the skill must name the double-trigger it prevents');
+});
+
+// ── AC4/AC5/AC6: loop-driver-check.sh — LIVE / DOUBLE-TRIGGER / STALLED ──────────────────────────────
+const driverReg = (ws) => path.join(ws, '.quay', 'loop-driver.jsonl');
+function writeDriver(ws, mech = 'cron', interval = '*/20 * * * *') {
+  fs.mkdirSync(path.join(ws, '.quay'), { recursive: true });
+  fs.appendFileSync(driverReg(ws), JSON.stringify({ mechanism: mech, interval, source: 'cold-start' }) + '\n', 'utf8');
+}
+function runDriverCheck(ws) {
+  return spawnSync('bash', [path.join(ws, 'plugin', 'scripts', 'loop-driver-check.sh'), ws],
+    { cwd: ws, encoding: 'utf8' });
+}
+
+test('AC4 — loop-driver-check.sh is laid down by quay-init --loop', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', 'loop-driver-check.sh')),
+      'loop-driver-check.sh must be laid down with the loop mechanism');
+  } finally { cleanup(ws); }
+});
+
+test('AC6 — zero drivers = STALLED (the loop will never tick), exit 3', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const c = runDriverCheck(ws);
+    assert.equal(c.status, 3, `no driver must be STALLED (exit 3), got ${c.status}: ${c.stdout}`);
+    assert.match(c.stdout, /STALLED/, 'must report STALLED, not "all normal"');
+  } finally { cleanup(ws); }
+});
+
+test('AC4 — exactly one cron driver = LIVE, exit 0 (end-to-end: one trigger source)', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    writeDriver(ws, 'cron');
+    const c = runDriverCheck(ws);
+    assert.equal(c.status, 0, `one cron driver must be LIVE (exit 0), got ${c.status}: ${c.stdout}`);
+    assert.match(c.stdout, /LIVE/, 'must report LIVE');
+    assert.match(c.stdout, /\(1\)/, 'must report count 1');
+  } finally { cleanup(ws); }
+});
+
+test('AC5 — a second driver = DOUBLE-TRIGGER, exit 4 (double-trigger negative control)', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    writeDriver(ws, 'cron');          // step 4: CronCreate
+    writeDriver(ws, 'loop');          // §4a relapse: a second /loop driver
+    const c = runDriverCheck(ws);
+    assert.equal(c.status, 4, `two drivers must be DOUBLE-TRIGGER (exit 4), got ${c.status}: ${c.stdout}`);
+    assert.match(c.stdout, /DOUBLE-TRIGGER/, 'must report DOUBLE-TRIGGER');
+  } finally { cleanup(ws); }
+});
+
+test('AC6 (remove direction) — removing the only driver is detected as STALLED, not "all normal"', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    writeDriver(ws, 'cron');
+    assert.equal(runDriverCheck(ws).status, 0, 'precondition: one driver is LIVE');
+    fs.rmSync(driverReg(ws), { force: true });
+    const c = runDriverCheck(ws);
+    assert.equal(c.status, 3, `removing the only driver must be STALLED (exit 3), got ${c.status}: ${c.stdout}`);
+    assert.match(c.stdout, /STALLED/, 'must report STALLED — silence is exactly what the non-trigger control forbids');
+  } finally { cleanup(ws); }
+});
+
+test('AC3 — a disposed mechanism cannot become the sole driver (BANNED-MECHANISM, exit 5)', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    writeDriver(ws, 'wakeup');        // the disposed self-paced wakeup as the only driver
+    const c = runDriverCheck(ws);
+    assert.equal(c.status, 5, `a non-cron sole driver must be BANNED-MECHANISM (exit 5), got ${c.status}: ${c.stdout}`);
+    assert.match(c.stdout, /BANNED-MECHANISM/, 'must report BANNED-MECHANISM');
+  } finally { cleanup(ws); }
 });

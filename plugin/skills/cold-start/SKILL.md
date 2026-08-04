@@ -44,7 +44,7 @@ start did NOT complete.
 |---|---|---|---|
 | 1 | `MONITORS-MOUNTED` | Two Monitor-tool invocations exist, one for `<root>/plugin/scripts/inner-state.sh`, one for `<root>/plugin/scripts/session-liveness.sh`; `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `ownedByThisSession=true` | the `--json` output (three criteria) |
 | 2 | `MONITORS-DELIVERING` | **At least one event line from a mounted monitor was delivered to THIS session** (an `INIT` baseline, a `SESSION-STATUS` line, a `BLOCKED`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
-| 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded and `CronList` lists it | the `CronList` output |
+| 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-verified.sh <session> "<fast-mode tick instruction>"` exited 0 (pane hash changed = delivered). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-verified output (hash before → after) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
@@ -84,14 +84,41 @@ session that will never notify this one). Then **wait for at least one delivered
 faster). If no event arrives within ~90s, the monitors are not delivering — **STOP and report**
 `MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
 
-### 4. Re-create the 20-minute cron (session-scoped — it dies with the session)
+### 4. Re-create the 20-minute cron — THE single loop driver (session-scoped, dies with the session)
+
+**`CronCreate` is the ONE loop-driving mechanism.** Do NOT also start a `/loop` (a fixed-interval
+`/loop` is the same cron mechanism — a second one is a double-trigger) and do NOT use the self-paced
+wakeup (`/loop` with no interval: it has no listing tool and must be re-chained every tick — the most
+likely to silently stall unattended). The single-driver invariant is enforced mechanically by
+`plugin/scripts/loop-driver-check.sh`.
+
+**Before creating the cron, run the driver check** — creating a second driver when one already exists is
+exactly the double-trigger this skill exists to prevent:
+
+```bash
+bash <root>/plugin/scripts/loop-driver-check.sh <root>
+# exit 0 (LIVE) → a driver is already registered — STOP; creating another would double-trigger.
+# exit 4 (DOUBLE-TRIGGER) → already 2+ drivers — STOP and report.
+# exit 3 (STALLED) → no driver — proceed to create the cron below.
+```
+
+Then create the cron, confirm it is listed, and **record it in the driver registry** (the registry is
+what the check counts — a cron that is never recorded is invisible to the check):
 
 ```
 CronCreate(cron="*/20 * * * *",
            prompt="执行 <root>/orchestration/orchestrator-loop-tick.md 中的 tick 指令",
            recurring=true)
 CronList   # confirm it is listed — an unlisted cron is not an alarm, it is a silent no-op
+mkdir -p <root>/.quay
+printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> <root>/.quay/loop-driver.jsonl
+bash <root>/plugin/scripts/loop-driver-check.sh <root>   # MUST now report LIVE (exit 0)
 ```
+
+A check that does NOT report `LIVE` means the cold start did NOT reach exactly-one-driver — do not
+proceed as if it did. If this is a fresh cold-start after a previous session and the pre-check reported
+LIVE from a stale registration (the previous session's cron is dead), clear the stale registry with
+`rm -f <root>/.quay/loop-driver.jsonl` and re-run the pre-check before creating the cron.
 
 ### 5. Drive inner to start fast mode — EXPLICIT, never a side effect (AC1 correction)
 
