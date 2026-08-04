@@ -2202,3 +2202,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **--test-concurrency=8 记录**：本机 4 核上 8 是 CLAUDE.md 警告过的 4.25× 超订（推导默认 1）；
   内层为批全量用 8 符合 tick 文档「全量验证需显式 --test-concurrency=8 否则小时级」——记录，
   不判断意图。
+
+### 候选枚举遗漏（2026-08-04T15:5xZ，管理者第二轮实锤——与批门控不同的失效点）
+
+- **实例**：retirestate（`gap-retire-inner-state-...`）D 落地后 ready、解 PARKED、与全部在飞/待派
+  `checkTouchesPair` **全 disjoint**（ret-tw/ret-nc/ret-ss 实测），第三槽位本可派——但本轮候选集
+  只核了新晋级的 3 条，**没把刚解阻塞的 retirestate 拉进来** ⇒ 被遗漏。
+- **根因已记 AC-queue**：候选集构造必须**每轮全量重扫 ready 队列**（含刚解阻塞/刚解 PARKED 的），
+  不允许只看新晋级子集；「某任务未出现在候选集」本身就是要核的东西。
+- **已补派**：驱动内层第三槽位派 retirestate（后台 Agent rib:true），保全工作分支
+  `task/gap-retire-inner-state-...` @ `61a92a41` 需 rebase 到当前 master 后继续；并注明前提变化——
+  B 的接线现在自动写 `inner-blocked.json`（B 是写者、inner-state.sh 是读者），AC6（每类信号去向）
+  必须显式处置这个新增的自动 BLOCKED 信号，别让 B 的信号随 inner-state.sh 静默消失。
