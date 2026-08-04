@@ -83,21 +83,177 @@ resume 先找出「停下等裁定」有没有可机械观测的痕迹，再决�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **痕迹先落定**——「停下等裁定」在哪一处可机械观测，给出证据；
+- [x] AC1: **痕迹先落定**——「停下等裁定」在哪一处可机械观测，给出证据；
       **若找不到，如实写明并说明为什么**，本条转为「已知不可机械检测」而非硬凑一个代理
-- [ ] AC2: **自动触发**——夹具中内层停下等裁定 ⇒ **自动**写出 `reason=ruling-required`（实跑贴出）
-- [ ] AC3: **延迟可判**——记录 `detection_latency_min`，**必须远小于 90 分钟**（数字贴出）
-- [ ] AC4: **反向负控制**——内层**正常长跑**（如 78 分钟的真实任务）⇒ **不得写出**（实跑贴出）。
+- [x] AC2: **自动触发**——夹具中内层停下等裁定 ⇒ **自动**写出 `reason=ruling-required`（实跑贴出）
+- [x] AC3: **延迟可判**——记录 `detection_latency_min`，**必须远小于 90 分钟**（数字贴出）
+- [x] AC4: **反向负控制**——内层**正常长跑**（如 78 分钟的真实任务）⇒ **不得写出**（实跑贴出）。
       **这条不过，AC2 不算数**——**把「抓不到」修成「总在报」是更坏的交易**
-- [ ] AC5: **不破坏既有两条**——`merge-conflict` 与 `task-over-90m` 的既有行为不变（实跑对照）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC5: **不破坏既有两条**——`merge-conflict` 与 `task-over-90m` 的既有行为不变（实跑对照）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Evidence
+
+### AC1 — 痕迹核实（三个候选逐个查证，非直接采信「找到了」）
+
+**候选 1（内层发问这个动作本身）——查证结果：不可用，重演同一失败模式。**
+`docs/analysis/batch2-queue-state.md:1601` 记录那次 68 分钟事故的实际形态：
+「内层把阻塞写进了 tick 文本、外层读 worktree 时间戳、最后靠人搭桥」——那是**自由散文**，没有稳定
+schema，不能被机械解析。仓库里唯一现成的「结构化」候选是 `plugin/scripts/inner-idle-log.ts` 的
+`awaiting-ruling` reason（`--append --reason awaiting-ruling`）——但它与 `--assert-blocked` **同形**：
+都要求内层「记得」调用一条命令。`plugin/loop/fast-mode-loop-tick.md:340-342` 已经明写这条失败模式的
+判决：「写、读、以及本文件早先『记得调 `--assert-blocked`』的指令都在，而 `.quay/inner-blocked.json`
+全历史 0 次写入……**再加一条文档指令不会有用**」——`inner-idle-log.ts` 会重演一模一样的结果。
+
+**候选 2（transcript 停止前进 + 任务仍 inProgress + 工作树干净）——查证结果：真实存在，且三个子信号
+都已是生产环境在用的机械观测，不需要内层新增任何配合：**
+- transcript mtime：`plugin/scripts/session-liveness.sh` 的 `heartbeat_mtime()`（含 `<id>/subagents/`
+  子目录取 max mtime，因为内层派 subagent 时主 transcript 会静默）已经在四个真实项目上跑；
+  `plugin/scripts/inner-forensics.mjs` 的 `transcriptSet()` 是同一手法的第二个独立实现。
+- 任务 inProgress：`plugin/scripts/fast-mode-telemetry.ts` 的 `aggregate()` 读同一份
+  `.workflow-events/`——`task-over-90m` 检测器已经在用它，本任务原样复用，没有引入第二份遥测源。
+- 工作树干净：`git status --porcelain`，`plugin/scripts/task-status-drift-check.ts:348` 已有先例。
+
+**已知局限（如实写明，不是回避）：**
+1. **这是形状代理，不是内容读取**——检测的是「停下」这个**形状**（transcript 静默 + 任务挂起 +
+   无待提交改动），**不读问题文本本身**。这与 `task-over-90m` 的年龄代理性质相同，现在对
+   `ruling-required` 也显式承认，不再含糊。
+2. `--transcript <path>` 是**显式配置，绝不猜测**（与 `session-liveness.sh` 的 `SESSION_TRANSCRIPTS`
+   同一原则——pid/会话 → 文件的映射不可靠地推断）。本任务 Touches 只覆盖
+   `inner-blocked-signal.ts` 本体；把它接进 `fast-mode-loop-tick.md` 的生产调用（内层在自己的 tick
+   里把自己的 transcript 路径传给 `--detect-stop`）是**范围外的后续接线工作**，本任务未做、未声称做。
+3. 30 分钟阈值（`RULING_REQUIRED_STALL_MS`）**复用** `session-liveness.sh` 的 `OVERDUE_MIN=30`
+   校准，不是新发明的数字——该文件记录的唯一一次实测真实长任务最大静默间隙是 **20.5 分钟**，30
+   分钟留 ~9.5 分钟余量，与该文件自己的权衡完全一致（AC4 的证据见下）。
+
+**候选 3（停止推进时必然发生的某个状态写入）——查证结果：未找到独立于候选 2 的第三类痕迹**；
+候选 2 的「transcript 停写」本身已经是这一类信号里能拿到的最直接形式。
+
+**⇒ AC1 结论：找到了机械可观测的痕迹（候选 2），已实现为 `detectRulingRequiredStall()`
+（`plugin/scripts/inner-blocked-signal.ts`），不是「找不到」。**
+
+### AC2/AC3 — 自动触发 + 延迟（实跑）
+
+夹具：干净 git 工作区（含 `.gitignore` 忽略 `.workflow-events/`）+ 一条遥测 start 事件回填 35 分钟前
+（`gap-ruling-demo`）+ 一份 transcript 文件 mtime 也回填 35 分钟前，工作树无未提交改动：
+
+```
+$ node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts \
+    --root <fixture> --detect-stop --transcript <fixture>/transcript.jsonl
+detect-stop: STOP CONDITION — ruling-required (auto-block written) — <fixture>/.quay/inner-blocked.json
+
+$ cat <fixture>/.quay/inner-blocked.json
+{
+  "since": 1785835809300,
+  "taskId": "gap-ruling-demo",
+  "reason": "ruling-required",
+  "question": "transcript has not advanced in 35.0m while task gap-ruling-demo is in-progress and the working tree is clean — likely stopped waiting on a ruling; rule on it, then run --clear",
+  "source": "auto",
+  "evidence": [
+    "transcript heartbeat stale 35.0m (threshold 30m)",
+    "gap-ruling-demo in-progress since 2026-08-04T08:55:08.819Z",
+    "working tree clean (git status --porcelain empty)"
+  ]
+}
+```
+
+`ruling_required_auto_fires` = 1（次），`reason=ruling-required` 确认自动写出，`source: "auto"`
+（不是手动 assert）。
+
+**AC3 — detection_latency_min（实测数字）：**
+```
+latency_min = (record.since − transcript_mtime) / 60000 = 35.01
+```
+**35.01 分钟，远小于 90 分钟**——比 `task-over-90m` 早 ~55 分钟捕获同一形状的停止（生产环境的
+端到端延迟还叠加 tick 调用间隔，`fast-mode-loop-tick.md` 记录的固定间隔是 25 分钟，最坏情形
+`30+25=55` 分钟，仍远小于 90 分钟；本任务 Touches 不包含把 `--transcript` 接进该 tick 调用，见
+AC1 局限 2）。
+
+### AC4 — 反向负控制（两个独立实跑，均不得写出）
+
+**负控制 1（复原生产环境真实假阳性的形状）**：任务 inProgress **78 分钟**（与
+`docs/analysis/batch2-queue-state.md` 2026-08-04 01:22Z 记录的真实数字一致——那次正是纯「提交
+年龄 + 干净树」判据 `AC9c` 命中、需要人读 pane 才排除的假阳性），工作树干净，但 transcript
+**2 分钟前**才写过（对应那次事故里 pane 读到的「agent 仍在活跃回合」）：
+
+```
+$ node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts \
+    --root <fixture2> --detect-stop --transcript <fixture2>/transcript.jsonl
+detect-stop: no stop condition; no block
+```
+`.quay/inner-blocked.json` 未产生。**这正是 `AC9c` 命中过的假阳性形状，transcript 新鲜这一维把它
+正确排除——不需要人读 pane。**
+
+**负控制 2（真实时间因果，非回填时间戳）**：其余测试都用回填 mtime 证明逻辑（与既有
+`task-over-90m` 测试同一手法——没人会真等 90 分钟）；这一条额外用**压缩但真实**的阈值
+（`INNER_BLOCKED_RULING_STALL_MS=1200`，1.2 秒）证明时间因果是真的，不是单个伪造时刻：
+
+```
+=== 阶段一：真实活跃（每 300ms 真实 touch 一次 transcript，持续 ~2 真实秒） ===
+detect-stop: no stop condition; no block
+detect-stop: no stop condition; no block
+detect-stop: no stop condition; no block
+block after active phase? no-correct
+
+=== 阶段二：活动真正停止；真实 sleep 越过（压缩后的）阈值 ===
+detect-stop: STOP CONDITION — ruling-required (auto-block written) — <fixture3>/.quay/inner-blocked.json
+```
+持续的真实活动**从未**触发；活动真正停止、真实时间越过阈值后**立即**触发。
+
+### AC5 — 既有两条不受影响（实跑对照）
+
+不传 `--transcript` 时，`merge-conflict` 路径与之前逐字节相同：
+```
+$ node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --root <conflict-fixture> --detect-stop
+detect-stop: STOP CONDITION — merge-conflict (auto-block written) — <conflict-fixture>/.quay/inner-blocked.json
+```
+`task-over-90m` 路径未改动一行（`detectStopConditions` 里该检测器的调用与产出不变，见
+`plugin/scripts/inner-blocked-signal.ts` 里 23 条既有测试全部保持绿——见下方测试运行记录）。
+另有专门测试 `AC5 — --detect-stop without --transcript is byte-for-behavior unchanged`
+锁定「不传 `--transcript` 时新检测器绝不参与判定」这一不变量。
+
+### AC6 — 测试框架
+
+`plugin/test/inner-blocked-signal.test.mjs` 文件头已声明 `// @test-group governance`
+（第 1 行）且全篇 `import { test } from "node:test"`（不在 legacy 豁免名单里，本来就不需要）；
+本任务新增的 8 个测试写在同一文件，继承同一声明，未新建文件。
+
+### 测试运行记录（`scripts/test.sh` 的 canonical glob 阻塞于一个与本任务无关的既存问题——见下）
+
+`bash scripts/test.sh plugin/test/inner-blocked-signal.test.mjs` 在本 worktree 里先跑仓库级静态
+检查（`## Contract consumer check`），该检查在**未被本任务触碰的另外三个任务文件**
+（`gap-no-inventory-of-what-the-two-layer-mode-actually-runs.md` /
+`gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files.md` /
+`gap-serve-task-list-dies-on-one-malformed-task.md`）上报出 6 条既存 violation（ratchet ceiling 5,
+new 1）——这在一个刚从 `master` 分出、未改动这些文件的干净 worktree 上同样复现，确认是**派发前
+已存在、与本任务无关**的仓库状态（`orchestration/tick-log.md` 里也已经记录这条正在被跟进）。
+不在本任务 Touches 范围内，未修。因此本任务的直接验证证据是 `node --test`（同一文件，同样是
+`scripts/test.sh` 最终会跑的那批测试）：
+
+```
+$ node --no-warnings --experimental-strip-types --test plugin/test/inner-blocked-signal.test.mjs
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+```
+连跑两次，均 `pass 31 / fail 0 / cancelled 0`（23 条既有测试字节不变地保留 + 8 条新测试）。
 
 ## Definition of Done
 
-- [ ] AC2 与 AC4 两个方向的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录：**为那次事故建的机制抓不住那次事故**——
-      `task-over-90m` 会在第 90 分钟触发，**比事故实际被解决晚 22 分钟**
+- [x] AC2 与 AC4 两个方向的实跑输出都贴进任务体（见上方 Evidence）
+- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——**未跑**：本条派发指令明确
+      「Do NOT run the full suite inside your worktree — reserved for the batch fan-in step」，
+      且 `scripts/test.sh` 目前会先撞上与本任务无关的既存 Contract-check 违规（见上）。
+      本任务范围内的等价证据是 `node --test` 对本文件连跑 2 次 `pass 31 / fail 0 / cancelled 0`
+      （见上）；完整套件的 2 次全绿留给 fan-in 步骤核验
+- [x] 任务体记录：**为那次事故建的机制抓不住那次事故**——
+      `task-over-90m` 会在第 90 分钟触发，**比事故实际被解决晚 22 分钟**（见 Proposal 一节
+      「这正是那 68 分钟对应的那个 reason」，本任务的机制把同一形状的捕获延迟从 90 分钟降到
+      ~35-55 分钟，见 AC3）
 
 ## Touches
 
