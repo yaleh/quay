@@ -2413,6 +2413,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 批内其余全部合并；无新提交（master 停在 93e95021）。
 - auto-block 持续（预期）；监视器 mounted:true。资源闸遵守（外层只做廉价核实）。
 
+### tick 2026-08-04T20:42Z（外层，`no-action`：suite-speed 基线 worktree 违反 /tmp 纪律）
+
+- **suite-speed agent 建了 `/tmp/quay-wt-baseline-flake`**（detached HEAD，57M、node_modules 未 link，
+  正在 link）——违反 tick 文档「worktree 一律在 $WORKTREE_ROOT 磁盘，/tmp=tmpfs=内存，整机 OOM 教训」。
+  **当前不构成即时风险**（内存可用 10.5GB、压力 0、57M 小），但**纪律偏离已记**——agent 4h42m 近
+  完成、测量不能打断，故不中断；向内层 flag：后续 worktree 一律磁盘。
+- suite-speed 仍唯一在飞（token 185.5k→222.7k，重新生成=在干活）；批内其余全合并；无新提交。
+- auto-block 持续（预期）；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

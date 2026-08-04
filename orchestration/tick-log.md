@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 20:42Z | `no-action` | 记 suite-speed agent 在 /tmp 建 baseline worktree（纪律偏离：/tmp=tmpfs=内存，今晚两次 OOM 教训；当前无即时风险：可用 10.5GB、57M、压力 0）；token 重新生成=在干活；批内其余全合并 | 内层：suite-speed link baseline node_modules（4h42m）；备忘「完成后关批跑全量」 | ①du/free/pressure 核 /tmp worktree 大小与内存；②pane 核 agent 状态；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 20:22Z | `no-action` | AC9c 核实 suite-speed 非卡死——agent 在跑全量套件（scripts/test.sh + node --test --test-concurrency=8，load 2.99，~11min）；worktree 未变+token 平是因为等测试进程非生成；批内其余全合并 | 内层：等 suite-speed 全量套件，备忘「完成后关批跑全量」 | ①ps 核 scripts/test.sh + node --test 全量进程（非卡死实证）；②worktree 干净；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 20:02Z | `no-action` | suite-speed 在 after/5（4h3m，σ 三组最后一组最后一轮；worktree 干净）；批内其余全合并；无新提交 | 内层：等 suite-speed after/5，备忘「完成后关批跑全量」 | ①pane 核 after/4→after/5；②worktree 干净（纯测量）；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 19:42Z | `no-action` | suite-speed 进入 after 组（after/2，3h40m，最后一组 σ 测量；worktree 新提交=优化已应用）；批内其余全合并；无新提交 | 内层：等 suite-speed after/2，备忘「完成后关批跑全量」 | ①pane 核 after/2 + worktree 新提交 cae30d19；②git 无新提交；③`--detect-stop` 仍 task-over-90m（预期） |
@@ -253,11 +254,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 89 | 36% |
+| no-action | 90 | 36% |
 | unblock | 36 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **224** | — |
+| **合计** | **225** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
