@@ -4,7 +4,11 @@
 //   (1) mounted             — a real process whose argv[0..1] == `bash <abs inner-state.sh>` exists;
 //   (2) targetRoot          — the resolved work root (argv's ../.. or INNER_STATE_WORK_ROOT override)
 //                             compared to this repo's root;
-//   (3) ownedByThisSession  — the monitor's nearest claude ancestor equals the checker's own.
+//   (3) delivered           — the SHARED session-liveness events file has fresh events (AC9,
+//                             gap-liveness-mounting-is-a-single-flight-role-with-no-owner:
+//                             ownedByThisSession is ABOLISHED — the criterion is "事件是否真的送达",
+//                             not "是不是本会话挂的". AC20c is one-mount-many-subscribe: another
+//                             session's mount + normal delivery must PASS; no mount ⇒ FAIL.)
 // Plus the AC2 self-match negative control (substring in the checker's own argv must NOT count),
 // AC6 (N>1 pids is ONE logical monitor), AC7 (zero writes), AC8 (INIT carries work_root), and
 // AC10 (node:test + @test-group governance).
@@ -116,7 +120,7 @@ function runChecker(extraEnv = {}) {
 
 // ── AC1: the three contract fields ──────────────────────────────────────────────────────────────────
 
-test("AC1 — --json emits mounted / targetRoot / ownedByThisSession (all boolean where promised)", () => {
+test("AC1 — --json emits mounted / targetRoot / delivered (all boolean where promised; ownedByThisSession is GONE)", () => {
   const tmp = makeTmpWorkspace();
   try {
     const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
@@ -124,9 +128,11 @@ test("AC1 — --json emits mounted / targetRoot / ownedByThisSession (all boolea
     const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
     assert.ok("mounted" in data, "mounted field missing");
     assert.ok("targetRoot" in data, "targetRoot field missing");
-    assert.ok("ownedByThisSession" in data, "ownedByThisSession field missing");
+    assert.ok("delivered" in data, "delivered field missing (AC9: replaces ownedByThisSession)");
     assert.equal(typeof data.mounted, "boolean");
-    assert.equal(typeof data.ownedByThisSession, "boolean");
+    assert.equal(typeof data.delivered, "boolean");
+    assert.ok(!("ownedByThisSession" in data),
+      "ownedByThisSession must be ABOLISHED (AC9 — the criterion is delivery, not ownership)");
   } finally { cleanup(tmp); }
 });
 
@@ -200,9 +206,14 @@ test("AC4 — monitor aimed at ANOTHER repo ⇒ targetRoot differs and targetOk=
   }
 });
 
-// ── AC5: ownership negative control ────────────────────────────────────────────────────────────────
+// ── AC5/AC9: delivery criterion replaces ownership ───────────────────────────────────────────────────
+// AC9 (gap-liveness-mounting-is-a-single-flight-role-with-no-owner): ownedByThisSession is ABOLISHED.
+// The criterion is "事件是否真的送达" (shared events file has new events / REPO-STALL visible), NOT
+// "是不是本会话挂的". Negative control: a monitor from another session with NO fresh events ⇒ FAIL
+// (delivered=false). Positive control: a monitor from another session WITH normal delivery ⇒ PASS
+// (delivered=true) — the whole point of AC20c's one-mount-many-subscribe design.
 
-test("AC5 — a monitor orphaned to a PREVIOUS session ⇒ ownedByThisSession=false (it is alive, but not ours)", async () => {
+test("AC5 — a monitor orphaned to a PREVIOUS session with NO fresh events ⇒ delivered=false (无人挂载 ⇒ FAIL)", async () => {
   const tmp = makeTmpWorkspace();
   const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
   writeStubInnerState(innerPath);
@@ -220,14 +231,33 @@ test("AC5 — a monitor orphaned to a PREVIOUS session ⇒ ownedByThisSession=fa
       if (ppid !== null && ppid !== wrapperPid && ppid !== process.pid) break;
       await sleep(25);
     }
+    // The shared events file is ABSENT (no mount is delivering) ⇒ delivered=false, regardless of the
+    // alive-but-orphaned process being a real inner-state monitor.
     const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
     assert.equal(data.mounted, true, "the orphaned monitor IS alive — the miss would be silent");
-    assert.equal(data.ownedByThisSession, false,
-      "a monitor from a previous session must NOT be owned by this session");
+    assert.equal(data.delivered, false,
+      "with no fresh shared events, delivery must FAIL (AC9: 无人挂载 ⇒ 必须判 FAIL)");
   } finally {
     if (fakePid) { try { process.kill(fakePid, "SIGKILL"); } catch { /* already gone */ } }
     cleanup(tmp);
   }
+});
+
+test("AC9 — a monitor from ANOTHER session with NORMAL delivery ⇒ delivered=true (别的会话挂的、投递正常 ⇒ PASS)", () => {
+  const tmp = makeTmpWorkspace();
+  const eventsFile = path.join(tmp, "events.jsonl");
+  try {
+    // The events file exists and is FRESH (just written) — someone (any session) is delivering.
+    fs.writeFileSync(eventsFile, '{"ts":123,"event":"HEARTBEAT","name":"other","msg":"holder alive"}\n');
+    const data = runChecker({
+      MONITOR_CHECK_EVENTS_FILE: eventsFile,
+      MONITOR_DELIVERY_FRESH_S: "300",
+    });
+    assert.equal(data.delivered, true,
+      "fresh shared events must mean delivered=true even though NO process in this session mounted it (AC9 PASS direction)");
+    assert.equal(data.eventsFresh, true);
+    assert.equal(data.lastEvent, "HEARTBEAT");
+  } finally { cleanup(tmp); }
 });
 
 // ── AC6: N>1 pids = one logical monitor ────────────────────────────────────────────────────────────
@@ -264,6 +294,7 @@ test("AC7 — checker is zero-write (git status unchanged) and declares the read
   const src = fs.readFileSync(CHECKER, "utf8");
   assert.match(src, /只读 \/proc/, "the script must explicitly declare it only reads /proc");
   assert.match(src, /不写任何文件/, "the script must explicitly declare it writes nothing");
+  assert.match(src, /只读 \/proc 与共享事件文件/, "the read contract must extend to the shared events file (AC9 delivery check reads it)");
 });
 
 // ── AC8: inner-state.sh INIT event carries the resolved work root ─────────────────────────────────

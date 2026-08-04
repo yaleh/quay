@@ -119,6 +119,12 @@ grep 'tests 2157'    # tests 数等于参考值（2026-08-03 实测 2157＝2150+
 遥测」，与「内层在思考一个难题」完全同形。这是本仓当天两次栽过的那一族失效换了个位置。内层跑
 重活，会话死掉代价更大，**更需要**进程存活这一层。
 
+**挂载是单飞（AC20，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）**：挂载是一个
+**有主的、可接管的角色**——取单飞锁（复用 `heavy-op-token.sh` 的锁），已有活持有者时再挂 ⇒
+退出 0（空操作，不是失败）、不新增进程；持有者 kill -9 后下一次挂载自动接管。所以**任何项目
+（quay/archguard/meta-cc）都挂同一把锁、同一批共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
+先挂上者成为唯一持有者，其余挂载一律空操作。要看事件的人**订阅共享文件即可，不必自己挂**。
+
 挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
 （AC1/AC16，2026-08-03 实测选定：`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，
 不是有效心跳源；transcript 每次工具调用都写，含 subagents 目录）。经
@@ -162,7 +168,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 bash plugin/scripts/monitor-mount-check.sh --json
 ```
 
-三判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根、`ownedByThisSession=true`。
+三判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根、`delivered=true`（AC9 起取代
+`ownedByThisSession`——判据是「事件是否真的送达」共享事件文件，不是「是不是本会话挂的」）。
 
 ### 1. 读状态
 
@@ -438,6 +445,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 阻塞信号状态（`.quay/inner-blocked.json` 存在与否；存在则报 `reason` + `question`，以及
   `fast-mode-telemetry --report` 的累计死时间/单次最长——2026-08-03 起该数有基线）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
-  `targetRoot` 是否等于本仓根 / `ownedByThisSession`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/是不是本会话
+  `targetRoot` 是否等于本仓根 / `delivered`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/事件有没有送达
+  （AC9 起 `delivered` 取代 `ownedByThisSession`：判据是共享事件文件有没有新事件，不是「是不是本会话挂的」）
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。

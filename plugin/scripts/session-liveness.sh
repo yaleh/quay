@@ -212,6 +212,54 @@ last_user_input_epoch() {
   date -d "$ts" +%s 2>/dev/null || return 1
 }
 
+# ── 共享事件文件与心跳（AC20c/AC7，2026-08-03）──────────────────────────────────────────────
+# AC20c：事件写进共享文件（$QUAY_GLOBAL_DIR/session-liveness/events.jsonl），订阅与挂载分离——
+# 要看事件的人不必自己挂一个。AC7：共享事件文件带心跳/时间戳，订阅方能据此判定「看门的已经不在了」，
+# 且该判定不依赖任何人恰好去尝试挂载。持有者每轮往 events.jsonl 追加一条 HEARTBEAT 事件，订阅方
+# 取最后一条的 ts（或文件 mtime）与当前时间比对，超过阈值即判定持有者已死——即使没有任何人去试挂。
+# 状态目录（含锁、事件、心跳）在 $QUAY_GLOBAL_DIR 之外每个仓库共享，删任何仓库都不能删掉别的状态。
+sl_now_ms() {
+  local out s n
+  out="$(date +%s%N 2>/dev/null || echo 0000000000000000000)"
+  case "$out" in ''|*[!0-9]*) out="0000000000000000000" ;; esac
+  s="${out:0:10}"
+  n="${out:10:9}"
+  case "$n" in ''|*[!0-9]*) n="000000000" ;; esac
+  printf '%s%03d' "${s:-0}" "$(( 10#${n:0:3} ))"
+}
+
+# sl_json_append —— 把一行事件追加进共享 events.jsonl（JSON 行；事件行不换行，python3 负责转义）。
+sl_json_append() {
+  local line="$1" event name ts line_json
+  event="${line%% *}"
+  name="${line#* }"; name="${name%% *}"
+  ts=$(sl_now_ms)
+  line_json=$(printf '%s' "$line" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null \
+    || { printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g'; })
+  printf '{"ts":%s,"event":%s,"name":%s,"msg":%s}\n' \
+    "$ts" "$(printf '"%s"' "$event")" "$(printf '"%s"' "$name")" "$line_json" \
+    >> "${SL_EVENTS_FILE:-/dev/null}" 2>/dev/null || true
+}
+
+# sl_emit —— 事件同时走 stdout（Monitor 事件流）与共享 events.jsonl（订阅方读取）。写共享文件失败
+# （目录不可写）只回落到 stdout，绝不 crash（与令牌 fail-open 同源：调度角色不是安全检查）。
+sl_emit() {
+  echo "$*"
+  [ -n "${SL_EVENTS_FILE:-}" ] || return 0
+  [ -d "${SL_GLOBAL_DIR:-}" ] && [ -w "$SL_GLOBAL_DIR" ] || return 0
+  sl_json_append "$*"
+}
+
+# sl_heartbeat —— 持有者每轮追加一条 HEARTBEAT（只进共享文件，不污染 stdout/Monitor 事件流）。
+# 订阅方取最后一条 ts 判「看门的不在了」——这是 AC7 的判据，不依赖任何人去试挂。
+sl_heartbeat() {
+  [ -n "${SL_EVENTS_FILE:-}" ] || return 0
+  [ -d "${SL_GLOBAL_DIR:-}" ] && [ -w "$SL_GLOBAL_DIR" ] || return 0
+  printf '{"ts":%s,"event":"HEARTBEAT","name":%s,"msg":"holder alive"}\n' \
+    "$(sl_now_ms)" "$(printf '"%s"' "${SL_OWNER:-unknown}")" \
+    >> "$SL_EVENTS_FILE" 2>/dev/null || true
+}
+
 ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;
@@ -353,6 +401,122 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane shell 的�
   fi
 }
 
+# ── 单飞挂载门（AC20a/b/d/AC5/AC6，管理者 AC20 判据逐字照搬，不改写）──────────────────────────
+# 「谁需要谁自己起一个」对单飞资源是错的默认；正确的默认是「谁需要谁去订阅」，挂载是一个有主的、
+# 可接管的角色。这与令牌同理，区别只在于令牌天然排他、监视器看起来不排他——看起来不是，所以
+# 没人给它加锁。这里补上那把锁：
+#   AC20a 单飞锁：挂载前取锁，**复用 heavy-op-token.sh 已验证的那套**（wx 原子创建 + mtime 陈旧
+#         AND pid 不存活才回收，绝不裸覆盖、绝不永久锁死）。不新写一套——那套锁今天已在真实死
+#         持有者上回收了 17 次，是本仓唯一被实战验证过的锁。复用点：对同一把锁文件调用
+#         `heavy-op-token.sh --acquire <owner> --root <dir> [--timeout N]`。
+#   AC20b 第二个挂载是空操作：检测到活持有者 ⇒ 打印属主与 pid，**退出 0**。报错会让人去 kill，
+#         而 kill 正是这一整摊事的来源。
+#   AC20d 接管负控制：持有者被 kill -9 后，下一次挂载必须接管（陈旧回收），否则单飞就变单点故障。
+#   AC5  反向负控制：持有者活着时再挂 ⇒ 绝不接管、不 kill 任何进程。把「重复挂载」换成「互相抢夺」
+#        是更坏的交易。
+# 状态目录：${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/session-liveness/（测试接缝 SESSION_LIVENESS_GLOBAL_DIR）。
+SL_GLOBAL_DIR="${SESSION_LIVENESS_GLOBAL_DIR:-${QUAY_GLOBAL_DIR:-${HOME:-/tmp}/.quay-global}/session-liveness}"
+SL_EVENTS_FILE="${SL_GLOBAL_DIR}/events.jsonl"
+# 属主 = 挂载这个监视器的会话身份（管理者的多目标配置里 SESSION_LIVENESS_OWNER 可显式给出）。
+SL_OWNER="${SESSION_LIVENESS_OWNER:-$(basename "$REPO_ROOT")}"
+SL_MOUNT_STALE_S="${SESSION_LIVENESS_MOUNT_STALE_S:-3}"   # 死持有者多久可回收（pid 活着永不回收，只影响接管速度）
+SL_MOUNT_WAIT_S=$(( SL_MOUNT_STALE_S + 3 ))               # 接管的有界等待上限（覆盖陈旧窗口 + 余量）
+_sl_lock_holder=0
+
+_sl_release_mount_lock() {
+  [ "$_sl_lock_holder" = "1" ] || return 0
+  local hot="$REPO_ROOT/plugin/scripts/heavy-op-token.sh"
+  if [ -x "$hot" ]; then
+    HEAVY_OP_STALE_TIMEOUT_S="$SL_MOUNT_STALE_S" bash "$hot" --release "$SL_OWNER" --root "$SL_GLOBAL_DIR" >/dev/null 2>&1 || true
+  fi
+  _sl_lock_holder=0
+}
+
+# _sl_acquire_or_noop —— 单飞门的一次性判定。返回：
+#   0 = 已取得锁（本进程成为持有者，继续跑监视器）；1 = 有活持有者（空操作，调用方退出 0）；
+#   2 = fail-open（状态目录不可写，无锁继续——调度角色不是安全检查，与令牌同源）。
+_sl_acquire_or_noop() {
+  local hot="$REPO_ROOT/plugin/scripts/heavy-op-token.sh"
+  local lock_token="$SL_GLOBAL_DIR/heavy-op/token"
+  local start_ms holder_pid acq_out err_file rc took out_file howner
+  if [ ! -x "$hot" ]; then
+    echo "session-liveness: WARN 找不到 $hot，跳过单飞锁（fail-open）" >&2
+    return 2
+  fi
+  local preexisting=0; [ -e "$lock_token" ] && preexisting=1
+  start_ms=$(sl_now_ms)
+  # 关键：必须把 heavy-op-token 的 stdout 重定向到文件再读，不能用命令替换 `$(...)`——命令替换会
+  # 引入一个瞬态子 shell 作为 heavy-op-token 的父进程，而 heavy-op-token 记录的是 $PPID，于是锁会
+  # 记下子 shell 的 pid（随即退出）而非监视器自身的 pid；下一个挂载看到「死 pid」就会误回收活持有者
+  # （实测踩中：锁 pid 是命令替换子 shell，不是监视器进程）。
+  out_file=$(mktemp 2>/dev/null) || out_file="/tmp/sl-mount-out-$$"
+  err_file=$(mktemp 2>/dev/null) || err_file="/tmp/sl-mount-err-$$"
+  HEAVY_OP_STALE_TIMEOUT_S="$SL_MOUNT_STALE_S" bash "$hot" \
+    --acquire "$SL_OWNER" --root "$SL_GLOBAL_DIR" --timeout 0 >"$out_file" 2>"$err_file"
+  rc=$?
+  acq_out=$(cat "$out_file")
+  if [ "$rc" = "0" ]; then
+    case "$acq_out" in
+      *acquired=yes*)
+        rm -f "$out_file" "$err_file"
+        if [ "$preexisting" = "1" ]; then
+          took=$(( $(sl_now_ms) - start_ms ))
+          echo "session-liveness-mount: 接管成功 takeover_ms=${took}（陈旧锁被回收，前一持有者已死）"
+        else
+          echo "session-liveness-mount: 成为挂载持有者（属主 ${SL_OWNER}，pid $$）"
+        fi
+        _sl_lock_holder=1
+        trap _sl_release_mount_lock EXIT
+        return 0 ;;
+      *acquired=no*)   # fail-open：状态目录不可写/不可达，无锁继续
+        echo "session-liveness: WARN 单飞锁 fail-open（$(cat "$err_file" 2>/dev/null || true)），无锁继续运行监视器" >&2
+        rm -f "$out_file" "$err_file"
+        return 2 ;;
+      *) echo "session-liveness: WARN 单飞锁返回异常（$acq_out），无锁继续" >&2
+        rm -f "$out_file" "$err_file"
+        return 2 ;;
+    esac
+  fi
+  # 未取得：区分「活持有者」与「死持有者待接管」。
+  holder_pid=$(awk -F= '$1=="pid"{print $2; exit}' "$lock_token" 2>/dev/null || true)
+  if [ -n "$holder_pid" ] && kill -0 "$holder_pid" 2>/dev/null; then
+    # AC20b：第二个挂载是空操作，退出 0——报错会让人去 kill，而 kill 正是这一整摊事的来源。
+    howner=$(awk -F= '$1=="holder"{print $2; exit}' "$lock_token" 2>/dev/null || echo unknown)
+    echo "session-liveness-mount: 已有活持有者（属主 ${howner}，pid ${holder_pid}）——第二个挂载是空操作（exit 0），不新增进程"
+    rm -f "$out_file" "$err_file"
+    return 1
+  fi
+  # 死持有者（kill -9 后）→ 有界等待接管（AC20d 负控制）。`--timeout N` 会每秒重查回收条件，
+  # 一旦 mtime 越过陈旧阈值就回收并取得——这本身就是接管，takeover_ms 从第一次尝试起算。
+  HEAVY_OP_STALE_TIMEOUT_S="$SL_MOUNT_STALE_S" bash "$hot" \
+    --acquire "$SL_OWNER" --root "$SL_GLOBAL_DIR" --timeout "$SL_MOUNT_WAIT_S" >"$out_file" 2>"$err_file"
+  rc=$?
+  acq_out=$(cat "$out_file")
+  rm -f "$out_file" "$err_file"
+  if [ "$rc" = "0" ] && [[ "$acq_out" == *acquired=yes* ]]; then
+    took=$(( $(sl_now_ms) - start_ms ))
+    echo "session-liveness-mount: 接管成功 takeover_ms=${took}（前一持有者已死，锁被回收）"
+    _sl_lock_holder=1
+    trap _sl_release_mount_lock EXIT
+    return 0
+  fi
+  echo "session-liveness-mount: 无法接管单飞锁（$acq_out）——空操作（exit 0）" >&2
+  return 1
+}
+
+# 单飞门只在长跑模式生效（--once / --mask / --api-errors / --last-input 是诊断接缝，不取锁）。
+# 关键：必须【直接调用】_sl_acquire_or_noop，不能用 `case "$( _sl_acquire_or_noop )" in` 的命令替换——
+# 命令替换会把函数放进一个瞬态子 shell，heavy-op-token 记录的 $PPID 就变成子 shell 的 pid（随即退出），
+# 且子 shell 的 EXIT trap 会在函数返回时立刻释放锁——锁被取到后瞬间释放，单飞直接失效（实测踩中）。
+if [ "$ONE_SHOT" != true ]; then
+  _sl_acquire_or_noop
+  _sl_gate_rc=$?
+  if [ "$_sl_gate_rc" = "1" ]; then
+    exit 0   # 有活持有者：空操作（exit 0，不是失败）
+  fi
+  # 0=持有 / 2=fail-open：继续跑监视器。
+fi
+
 while true; do
   while read -r name root target; do
     [ -n "${name:-}" ] || continue
@@ -387,9 +551,9 @@ while true; do
     # 事件 1/2：消失与恢复
     if [ "${PREV_ALIVE[$name]:-unset}" != "unset" ] && [ "${PREV_ALIVE[$name]}" != "$alive" ]; then
       if [ "$alive" = "0" ]; then
-        echo "SESSION-GONE $name 的会话进程消失（目标 $target）——立即报"
+        sl_emit "SESSION-GONE $name 的会话进程消失（目标 $target）——立即报"
       else
-        echo "SESSION-BACK $name 的会话已恢复（pid $pid）"
+        sl_emit "SESSION-BACK $name 的会话已恢复（pid $pid）"
       fi
     fi
     PREV_ALIVE[$name]=$alive
@@ -404,7 +568,7 @@ while true; do
         mins=$(( ( $(date +%s) - eff ) / 60 ))
         stalled=$([ "$mins" -ge "$STALL_MIN" ] && echo 1 || echo 0)
         if [ "$stalled" = "1" ] && [ "${PREV_STALL[$name]:-0}" = "0" ]; then
-          echo "REPO-STALL $name 的会话活着但仓库 ${mins} 分钟无新提交（未暂停）——仓库信号：不是会话面"
+          sl_emit "REPO-STALL $name 的会话活着但仓库 ${mins} 分钟无新提交（未暂停）——仓库信号：不是会话面"
         fi
         PREV_STALL[$name]=$stalled
       fi
@@ -450,14 +614,14 @@ while true; do
             fi
             PREV_API_BLOCKED[$name]=$api_blocked
             if [ "$api_blocked" = "1" ]; then
-              echo "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+              sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
             elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
               # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
               # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
               # hmin < LOOP_MIN 的空闲 = 正常收尾 → 静默；hmin ≥ LOOP_MIN 或未知（无心跳文件）=
               # 「空闲了但没动」，会话可能跑一半就停 / 已死 → 报。SESSION-RESUMED 保留不静默
               # （它便宜，且是唯一能确认会话还在按期活动的正向信号）。
-              echo "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
+              sl_emit "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
             fi
           else
             resumed=1
@@ -480,7 +644,7 @@ while true; do
                 lastin="${lmin} 分钟前"
               fi
             fi
-            echo "SESSION-RESUMED $name 的会话恢复活动（此前空闲；成因：${cause}；上次收到输入：${lastin}）"
+            sl_emit "SESSION-RESUMED $name 的会话恢复活动（此前空闲；成因：${cause}；上次收到输入：${lastin}）"
           fi
         fi
         PREV_IDLE[$name]=$idle
@@ -493,7 +657,7 @@ while true; do
             age=$(( $(date +%s) - hmod2 ))
             fresh=$([ "$age" -le "$FRESH_SECS" ] 2>/dev/null && echo 1 || echo 0)
             if [ "$fresh" = "1" ] && [ "${PREV_MARKER_STALE[$name]:-0}" = "0" ]; then
-              echo "SESSION-MARKER-STALE $name 的屏幕标志可能失效：transcript ${age}s 前刚写过（会话确定在动）但屏幕判空闲——检查 esc to interrupt 是否还在渲染"
+              sl_emit "SESSION-MARKER-STALE $name 的屏幕标志可能失效：transcript ${age}s 前刚写过（会话确定在动）但屏幕判空闲——检查 esc to interrupt 是否还在渲染"
             fi
             PREV_MARKER_STALE[$name]=$fresh
           fi
@@ -506,7 +670,7 @@ while true; do
           api_n2=$(transcript_api_error_count "$tr_path")
           api_blocked2=$([ "$api_n2" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
           if [ "$api_blocked2" = "1" ] && [ "${PREV_API_BLOCKED[$name]:-0}" = "0" ]; then
-            echo "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n2} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+            sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n2} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
           fi
           PREV_API_BLOCKED[$name]=$api_blocked2
         else
@@ -533,7 +697,7 @@ while true; do
         # 同一轮已报 RESUMED ⇒ 会话可证明在动（pane 哈希变了），OVERDUE 是自相矛盾
         # （协调方样本：RESUMED 与 OVERDUE 不得同轮同目标同发）。直接证据优先，压制 OVERDUE。
         if [ "$overdue" = "1" ] && [ "${PREV_OVERDUE[$name]:-0}" = "0" ] && [ "$resumed" = "0" ]; then
-          echo "SESSION-OVERDUE $name 的会话活着，但心跳 ${omin} 分钟未更新（阈值 ${OVERDUE_MIN} 分钟，预期周期 ${EXPECTED_CYCLE_MIN} 分钟）——会话可能已死，它会静默地永远空闲"
+          sl_emit "SESSION-OVERDUE $name 的会话活着，但心跳 ${omin} 分钟未更新（阈值 ${OVERDUE_MIN} 分钟，预期周期 ${EXPECTED_CYCLE_MIN} 分钟）——会话可能已死，它会静默地永远空闲"
         fi
         PREV_OVERDUE[$name]=$overdue
       fi
@@ -541,6 +705,10 @@ while true; do
       PREV_OVERDUE[$name]=0
     fi
   done < <(targets)
+  # AC7 心跳：每轮追加一条 HEARTBEAT（只进共享 events.jsonl）。订阅方据此判定「看门的不在了」，
+  # 不依赖任何人恰好去尝试挂载。持有者一死，心跳线停止增长 → 订阅方看最后一条 ts 即知。
+  # --once 不是持有者（不取锁），不写心跳——诊断接缝不冒充长跑持有者。
   [ "$ONE_SHOT" = true ] && break
+  sl_heartbeat
   sleep "$INTERVAL"
 done

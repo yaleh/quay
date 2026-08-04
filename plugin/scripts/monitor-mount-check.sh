@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# monitor-mount-check.sh — 外层挂的 Monitor 是否真的挂上、挂对目标、属于本会话。
+# monitor-mount-check.sh — 监视器是否真的挂上、挂对目标、事件是否真的送达。
 #
-# 三条判据（gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right）：
+# 三条判据（gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right + AC9 改写）：
 #   1. mounted             — /proc 里有 argv 前两 token 精确等于 `bash <本仓>/plugin/scripts/inner-state.sh`
 #                            的进程。容忍 N>1：一个逻辑 monitor 每轮起子 shell（实测 2 个 pid）。
 #   2. targetRoot          — 有效根 = argv 脚本路径的 ../..，除非 /proc/<pid>/environ 有
 #                            INNER_STATE_WORK_ROOT 覆盖（后者同样可读）。「挂在别的项目上」在 argv 里就看得见。
-#   3. ownedByThisSession  — 沿每个匹配 pid 的 ppid 链找最近的 claude 进程，与本进程（$$）的链比对。
-#                            同一个 claude pid ⇒ 属于本会话。上一个会话遗留的进程显示「活着」，但事件
-#                            送不到现在这个会话——这条判据就是为了区分。
+#   3. delivered（AC9，2026-08-03 取代 ownedByThisSession）— 【事件是否真的送达】：共享事件文件
+#      $QUAY_GLOBAL_DIR/session-liveness/events.jsonl 有新事件（mtime 新鲜 / REPO-STALL 可见）。
+#      判据不是「是不是本会话挂的」——AC20c 的设计正是一方挂载、多方订阅：别的会话挂的、投递正常
+#      也必须判 PASS；无人挂载 ⇒ 必须判 FAIL（两个方向都是硬判据）。
+#      真实投递已由 REPO-STALL 事件证明过；旧判据沿 ppid 链比对 claude 进程，把别的会话挂的成功
+#      挂载一律判 false——判据比现实严，与「事件送得到」不符。
 #
-# 纯读契约（AC7，与 inner-state.sh 的纯读契约同源）：本脚本只读 /proc（及 git——当前实现只用 /proc），
+# 纯读契约（AC7，与 inner-state.sh 的纯读契约同源）：本脚本只读 /proc 与共享事件文件，
 # 不写任何文件。观测命令不得改变被观测对象。全部 /proc 扫描在单个 python3 进程内完成，
 # 不为每个 pid 起子进程。
 #
 # 不自匹配（AC2）：谓词是 argv 前两 token 精确等于 `bash <绝对路径>`，不是子串——子串会匹配到发起
 # 查询的命令自己（外层验证可行性时当场踩过；tick 文档步骤 0 记的 pgrep -f 自匹配是同一个坑）。
 #
-# 测试接缝：MONITOR_CHECK_INNER_STATE 覆盖要匹配的 inner-state 脚本路径（默认本仓
-# plugin/scripts/inner-state.sh）；MONITOR_CHECK_SELF_PID 覆盖「本会话」起点 pid（默认 $$）。
-# 生产调用不设这两个变量 → 行为不变。
+# 测试接缝：MONITOR_CHECK_INNER_STATE 覆盖要匹配的脚本路径（默认本仓 plugin/scripts/inner-state.sh）；
+# MONITOR_CHECK_EVENTS_FILE 覆盖共享事件文件（默认 $QUAY_GLOBAL_DIR/session-liveness/events.jsonl）；
+# MONITOR_DELIVERY_FRESH_S 覆盖「多久没新事件判 FAIL」的窗口（默认 300）。生产调用不设 → 行为不变。
 #
 # 用法: bash plugin/scripts/monitor-mount-check.sh [--json]
 set -uo pipefail
@@ -29,18 +32,23 @@ INNER_STATE="${MONITOR_CHECK_INNER_STATE:-$SCRIPT_DIR/inner-state.sh}"
 # 本仓根 = inner-state 脚本所在目录的 ../..（与 inner-state.sh 的 BASH_SOURCE 自定位同构）。
 INNER_STATE_DIR="$(cd "$(dirname "$INNER_STATE")" && pwd)"
 REPO_ROOT="$(cd "$INNER_STATE_DIR/../.." && pwd)"
-SELF_PID="${MONITOR_CHECK_SELF_PID:-$$}"
+# 共享事件文件（AC20c/AC9）：事件写进这里，订阅与挂载分离——交付判据看它，不看「是不是我挂的」。
+SL_GLOBAL_DIR="${SESSION_LIVENESS_GLOBAL_DIR:-${QUAY_GLOBAL_DIR:-${HOME:-/tmp}/.quay-global}/session-liveness}"
+EVENTS_FILE="${MONITOR_CHECK_EVENTS_FILE:-$SL_GLOBAL_DIR/events.jsonl}"
+DELIVERY_FRESH_S="${MONITOR_DELIVERY_FRESH_S:-300}"
 
 FORMAT=human
 for a in "$@"; do [ "$a" = "--json" ] && FORMAT=json; done
 
-MMC_INNER_STATE="$INNER_STATE" MMC_REPO_ROOT="$REPO_ROOT" MMC_SELF_PID="$SELF_PID" MMC_FORMAT="$FORMAT" python3 - <<'PY'
-import json, os, glob
+MMC_INNER_STATE="$INNER_STATE" MMC_REPO_ROOT="$REPO_ROOT" MMC_FORMAT="$FORMAT" \
+MMC_EVENTS_FILE="$EVENTS_FILE" MMC_DELIVERY_FRESH_S="$DELIVERY_FRESH_S" python3 - <<'PY'
+import json, os, glob, time
 
 INNER_STATE = os.environ["MMC_INNER_STATE"]
 REPO_ROOT = os.environ["MMC_REPO_ROOT"]
-SELF_PID = int(os.environ["MMC_SELF_PID"])
 FMT = os.environ["MMC_FORMAT"]
+EVENTS_FILE = os.environ["MMC_EVENTS_FILE"]
+DELIVERY_FRESH_S = int(os.environ["MMC_DELIVERY_FRESH_S"])
 
 
 def read_cmdline(pid):
@@ -49,37 +57,6 @@ def read_cmdline(pid):
             return f.read().split(b"\0")
     except OSError:
         return []
-
-
-def read_ppid(pid):
-    try:
-        with open(f"/proc/{pid}/stat", "rb") as f:
-            stat = f.read()
-    except OSError:
-        return None
-    # comm 字段可能含空格/括号——从最后一个 ')' 之后解析；fields[0]=state, fields[1]=ppid。
-    fields = stat[stat.rfind(b")") + 2:].split()
-    if len(fields) < 2:
-        return None
-    try:
-        return int(fields[1])
-    except ValueError:
-        return None
-
-
-def nearest_claude(pid):
-    cur = pid
-    for _ in range(64):
-        cmd = read_cmdline(cur)
-        if not cmd:
-            break
-        if b"claude" in b" ".join(cmd):
-            return str(cur)
-        pp = read_ppid(cur)
-        if pp is None or pp == cur or pp == 0:
-            break
-        cur = pp
-    return ""
 
 
 def work_root(pid):
@@ -95,7 +72,18 @@ def work_root(pid):
     return default_root
 
 
-my_claude = nearest_claude(SELF_PID)
+def last_event_of(path):
+    """返回共享事件文件最后一条的 event 字段（如 SESSION-OVERDUE / HEARTBEAT）与 ts，读不到返回空。"""
+    try:
+        with open(path, "rb") as f:
+            line = f.readlines()[-1]
+        for tok in line.split(b","):
+            if tok.startswith(b'"event":'):
+                return tok.split(b":", 1)[1].strip().strip(b'"').decode("utf-8", "replace")
+    except (OSError, IndexError):
+        pass
+    return ""
+
 
 targets = []
 for d in glob.glob("/proc/[0-9]*"):
@@ -103,29 +91,42 @@ for d in glob.glob("/proc/[0-9]*"):
     argv = read_cmdline(pid)
     if len(argv) >= 2 and argv[0] == b"bash" and argv[1].decode("utf-8", "replace") == INNER_STATE:
         root = work_root(pid)
-        mc = nearest_claude(pid)
         targets.append({
             "pid": pid,
             "targetRoot": root,
-            "owned": bool(my_claude and mc and mc == my_claude),
         })
 
 targets.sort(key=lambda t: t["pid"])
 mounted = bool(targets)
 target_root = targets[0]["targetRoot"] if targets else ""
 target_ok = bool(targets) and all(t["targetRoot"] == REPO_ROOT for t in targets)
-owned = bool(targets) and all(t["owned"] for t in targets)
-session_claude = my_claude or None
+
+# AC9 交付判据：共享事件文件有新事件（mtime 新鲜）。文件 mtime 随每轮 HEARTBEAT 更新，
+# 所以「新鲜」= 持有者活着且在投递；「陈旧/不存在」= 无人挂载或看门的已死 ⇒ FAIL。
+events_mtime = 0
+events_fresh = False
+last_event = ""
+if os.path.exists(EVENTS_FILE):
+    try:
+        events_mtime = int(os.path.getmtime(EVENTS_FILE))
+        events_fresh = (time.time() - events_mtime) <= DELIVERY_FRESH_S
+        last_event = last_event_of(EVENTS_FILE)
+    except OSError:
+        pass
+delivered = events_fresh
 
 if FMT == "json":
     print(json.dumps({
         "mounted": mounted,
         "targetRoot": target_root,
         "targetOk": target_ok,
-        "ownedByThisSession": owned,
+        "delivered": delivered,
+        "eventsFresh": events_fresh,
+        "eventsMtime": events_mtime,
+        "lastEvent": last_event,
         "repoRoot": REPO_ROOT,
         "innerState": INNER_STATE,
-        "sessionClaudePid": session_claude,
+        "eventsFile": EVENTS_FILE,
         "pids": [t["pid"] for t in targets],
         "targets": targets,
     }, ensure_ascii=False, indent=2))
@@ -133,9 +134,10 @@ else:
     print(f"mounted={str(mounted).lower()}")
     print(f"targetRoot={target_root}")
     print(f"targetOk={str(target_ok).lower()}")
-    print(f"ownedByThisSession={str(owned).lower()}")
+    print(f"delivered={str(delivered).lower()}")
+    print(f"eventsFresh={str(events_fresh).lower()}")
+    print(f"lastEvent={last_event}")
+    print(f"eventsFile={EVENTS_FILE}")
     for t in targets:
-        print(f"  pid {t['pid']}: targetRoot={t['targetRoot']} owned={str(t['owned']).lower()}")
-    if session_claude:
-        print(f"sessionClaudePid={session_claude}")
+        print(f"  pid {t['pid']}: targetRoot={t['targetRoot']}")
 PY
