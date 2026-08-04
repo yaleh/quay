@@ -1,16 +1,21 @@
-// @test-group engine
+// @test-group governance
 // task-status-drift-check.test.mjs — the closeout detector for direct (fast-mode) execution
 // (tasks/gap-task-status-closeout-not-mechanized). The detector reports tasks whose AC-declared
 // symbols already resolve in the codebase while status is still todo/ready — the "board lies"
 // drift where landed code + stale status re-dispatches already-done work. It ALSO reports
 // reverse-drift (status done but the implementation never landed), with the code-root Touches
-// partition that keeps fast-mode bookkeeping noise out (tasks/gap-reverse-drift-check-buries-true-positives-in-noise).
+// partition that keeps fast-mode bookkeeping noise out (tasks/gap-reverse-drift-check-buries-true-positives-in-noise),
+// and closed-without-work (status done but 0 ACs checked — the DANGEROUS drift direction where
+// status is written directly, bypassing the gate; tasks/gap-drift-check-only-looks-at-the-harmless-direction).
 //
 // AC1 mirror byte-identity · AC2 zero false positives on genuinely-unlanded tasks (real store)
 // AC3 synthetic all-symbols-exist → suspect · AC4 synthetic no-symbols → nothing
 // AC5 exits 0 always · AC6 never writes tasks/** · AC7 --json shape.
 // Reverse-drift ACs: AC3 code/bookkeeping partition named · AC4 code-root .some() judgment
 // AC5 threshold 1/2 pinned by 1/4 fixture · AC6 fail-closed zero/bookkeeping-only Touches.
+// Closed-without-work ACs: AC2 live-specimen fixture (done + 0 AC checked + Touches not in tree)
+// → reported · AC3 reverse negative (done + complete evidence) → not reported · AC5 each record
+// names the missing evidence.
 //
 // Run: scripts/test.sh plugin/test/task-status-drift-check.test.mjs
 
@@ -35,6 +40,8 @@ import {
   isCodeTouchEntry,
   hasAnyCodeRootTouch,
   hasDoneChildren,
+  countAcCheckboxes,
+  formatClosedText,
   REVERSE_SYMBOL_RATIO_MAX,
   BOOKKEEPING_ROOTS,
   listWorkBranches,
@@ -113,6 +120,27 @@ const REVERSE_UNLANDED_TASK = makeTask(
   "fixture-reverse-unlanded",
   "- [ ] AC1: `revGhostOneXYZ` and `_revGhostTwo` never landed\n- [ ] AC2: `_revGhostThree` also absent",
   "- code/ghost.ts",
+  "done"
+);
+
+// ── closed-without-work fixtures (gap-drift-check-only-looks-at-the-harmless-direction) ───────────
+// AC2 LIVE-SPECIMEN reproduction: `gap-no-e2e-proves-install-is-configuration-driven` was once
+// `status: done` with 8 ACs ALL unchecked and its Touches files only on an unmerged branch — the
+// shape the old scan (todo/ready only) reported nothing for. This fixture reproduces that historical
+// state: done + 0 AC checked + Touches files NOT in the tree. Must be reported as closed-without-work.
+const SPECIMEN_TASK = makeTask(
+  "fixture-specimen",
+  "- [ ] AC1: `installConfigDrivenE2E` lands and is RED first\n- [ ] AC2: `antiPassThroughCheck` requires laid-down count > 0\n- [ ] AC3: `renderSubstitutionFree` byte-identical across workspaces\n- [ ] AC4: `upgradePreservesState` keeps tick-log readable\n- [ ] AC5: `findingWithoutPlan` passes author→ready\n- [ ] AC6: `bothInstallsFailNegativeControl` stays red\n- [ ] AC7: `derivedTestCommand` differs (npm test vs go test)\n- [ ] AC8: `nodeTestGovernance` test-group",
+  "- packages/quay/test/install-config-driven-e2e.test.mjs\n- plugin/scripts/quay-init.sh\n- orchestration/GOAL-when-to-reinstall.md",
+  "done"
+);
+
+// AC3 REVERSE NEGATIVE: done + COMPLETE evidence (every AC checked + Touches file in the tree).
+// Must NOT be reported by ANY drift direction (not closed-without-work, not reverse-drift).
+const COMPLETE_DONE_TASK = makeTask(
+  "fixture-complete",
+  "- [x] AC1: `distinctiveLandedMarker` in the landed implementation\n- [x] AC2: `_internalLandedHelper` handles the boundary",
+  "- code/landed-symbol.ts",
   "done"
 );
 
@@ -643,6 +671,160 @@ test("AC6 (reverse): done parent whose children are all done is NOT reverse-flag
   }
 });
 
+// ── closed-without-work — the DANGEROUS direction (gap-drift-check-only-looks-at-the-harmless-direction)
+// AC2 (live specimen): done + 0 AC checked + Touches files not in the tree ⇒ MUST be reported.
+// AC3 (reverse negative): done + complete evidence ⇒ MUST NOT be reported. The two-way control is
+// the task's true criterion — "turning 'invisible' into 'report everything' is another way of being
+// invisible".
+
+test("countAcCheckboxes: counts GFM boxes; only [x]/[X] counts as checked ([~] partial = unchecked)", () => {
+  const ac = "- [ ] AC1: a\n- [x] AC2: b\n- [X] AC3: c\n- [~] AC4: d\n- [ ] AC5: e";
+  const r = countAcCheckboxes(ac);
+  assert.equal(r.total, 5);
+  assert.equal(r.checked, 2);
+  assert.equal(r.unchecked, 3);
+  assert.deepEqual(countAcCheckboxes(null), { total: 0, checked: 0, unchecked: 0 });
+  assert.deepEqual(countAcCheckboxes("no boxes here"), { total: 0, checked: 0, unchecked: 0 });
+});
+
+test("AC2 (closed): LIVE-SPECIMEN reproduction — done + 0 AC checked + Touches files NOT in tree ⇒ reported as closed-without-work", () => {
+  const ws = makeWorkspace("c2");
+  try {
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-specimen.md"), SPECIMEN_TASK);
+    // The Touches files are NOT created — this reproduces the specimen's historical state where the
+    // work existed only on an unmerged branch and the task was marked done directly.
+    const { closedWithoutWork, reverse } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    const hit = closedWithoutWork.find((c) => c.taskId === "fixture-specimen");
+    assert.ok(hit, "the specimen shape MUST be reported (done + 0 AC checked)");
+    assert.equal(hit.acChecked, 0, "reports 0 checked");
+    assert.equal(hit.acTotal, 8, "reports the total AC count");
+    assert.equal(hit.touchesAllExist, false, "Touches files not in tree is reported");
+    assert.equal(hit.codeTouchExists, false, "no code-root Touches entry exists");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3 (closed): REVERSE NEGATIVE — done + complete evidence (ACs all checked + Touches in tree) ⇒ NOT reported by any direction", () => {
+  const ws = makeWorkspace("c3");
+  try {
+    fs.writeFileSync(path.join(ws, "code", "landed-symbol.ts"), "export function distinctiveLandedMarker() {}\nexport function _internalLandedHelper() {}\n");
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-complete.md"), COMPLETE_DONE_TASK);
+    const { closedWithoutWork, suspects, reverse } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    assert.equal(closedWithoutWork.length, 0, "complete evidence → must NOT be closed-without-work");
+    assert.equal(suspects.length, 0, "done status → not a forward-drift suspect");
+    assert.equal(reverse.length, 0, "code landed → not reverse-drift");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC3b (closed): the 0-checked boundary — a done task with ≥1 AC checked is NOT closed-without-work", () => {
+  const ws = makeWorkspace("c3b");
+  try {
+    const partial = makeTask(
+      "fixture-partial",
+      "- [x] AC1: `distinctiveLandedMarker` done\n- [ ] AC2: `revGhostTwoXYZ` not yet\n- [ ] AC3: `revGhostThreeXYZ` not yet",
+      "- code/ghost.ts",
+      "done"
+    );
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-partial.md"), partial);
+    const { closedWithoutWork } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    assert.equal(closedWithoutWork.length, 0, "1+ checked AC → the acceptance gate could have partially passed; not the 0-checked bypass shape");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC5 (closed): each reported record names the missing evidence (AC unchecked / file not in tree / branch unmerged)", () => {
+  const ws = makeWorkspace("c5");
+  try {
+    // A real git repo with a stranded branch so branchUnmerged can be demonstrated end-to-end.
+    const repo = makeRealGitRepo("c5");
+    try {
+      fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+      fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+      // The specimen's Touches live on a stranded branch, NOT master. Order matters: commit the code
+      // files on the branch FIRST (before the task file exists, so `git add .` can't sweep it onto
+      // the branch), THEN write the task file on master — the task file must be in master's tree for
+      // the scan to see it, while its Touches files exist only on the branch.
+      fs.mkdirSync(path.join(repo, "packages", "quay", "test"), { recursive: true });
+      fs.mkdirSync(path.join(repo, "plugin", "scripts"), { recursive: true });
+      git(repo, "checkout", "-q", "-b", "milestone/M250/iteration-0");
+      fs.writeFileSync(path.join(repo, "packages/quay/test/install-config-driven-e2e.test.mjs"), "// e2e\n");
+      fs.writeFileSync(path.join(repo, "plugin/scripts/quay-init.sh"), "#!/bin/sh\n");
+      git(repo, "add", ".");
+      git(repo, "commit", "-q", "-m", "specimen work");
+      git(repo, "checkout", "-q", "master");
+      fs.writeFileSync(path.join(repo, "tasks", "fixture-specimen.md"), SPECIMEN_TASK);
+      const stranded = strandedBranches(repo);
+      const { closedWithoutWork } = scanTasks({ repoRoot: repo, roots: [path.join(repo, "code")], strandedBranches: stranded });
+      const hit = closedWithoutWork.find((c) => c.taskId === "fixture-specimen");
+      assert.ok(hit, "specimen on a stranded branch is reported");
+      assert.equal(hit.acUnchecked, 8, "AC unchecked dimension");
+      assert.equal(hit.touchesAllExist, false, "Touches file not in tree dimension");
+      assert.equal(hit.branchUnmerged, true, "branch unmerged dimension");
+      assert.equal(hit.branch, "milestone/M250/iteration-0");
+      // The human-readable report names each missing dimension.
+      const text = formatClosedText(closedWithoutWork);
+      assert.match(text, /AC unchecked \(0\/8 checked\)/);
+      assert.match(text, /Touches file\(s\) not in tree/);
+      assert.match(text, /branch not merged \(milestone\/M250\/iteration-0\)/);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("AC2/AC3 (closed): done-parent whose children are all done is NOT closed-without-work (delegation pattern, matches reverse-drift)", () => {
+  const ws = makeWorkspace("c2p");
+  try {
+    const parent = makeTask(
+      "fixture-closed-parent",
+      "- [ ] AC1: `ProposalReviewGhostXYZ` absent\n- [ ] AC2: `_ProposalAuthorsGhost` absent",
+      "- tasks/fixture-closed-parent.md",
+      "done",
+      ["fixture-closed-child"]
+    );
+    const child = makeTask("fixture-closed-child", "- [x] AC1: real work", "- code/child.ts", "done");
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-closed-parent.md"), parent);
+    fs.writeFileSync(path.join(ws, "tasks", "fixture-closed-child.md"), child);
+    fs.writeFileSync(path.join(ws, "code", "child.ts"), "// child landed");
+    const { closedWithoutWork } = scanTasks({ repoRoot: ws, roots: [path.join(ws, "code")] });
+    assert.equal(closedWithoutWork.length, 0, "done parent whose implementation IS the children's work → not closed-without-work");
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("--closed-direction: json emits a bare array (jq length counts it); text names the missing evidence", () => {
+  const cli = path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts");
+  const repo = makeRealGitRepo("cdir");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "tasks", "fixture-specimen.md"), SPECIMEN_TASK);
+    const jsonOut = execFileSync("node", ["--no-warnings", "--experimental-strip-types", cli, "--closed-direction", "--json"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    const arr = JSON.parse(jsonOut);
+    assert.ok(Array.isArray(arr), "--closed-direction --json emits a bare ARRAY (so `| jq length` counts it)");
+    assert.equal(arr.length, 1, "exactly the specimen is reported");
+    assert.equal(arr[0].taskId, "fixture-specimen");
+    assert.equal(arr[0].acChecked, 0);
+    assert.equal(arr[0].acTotal, 8);
+    const textOut = execFileSync("node", ["--no-warnings", "--experimental-strip-types", cli, "--closed-direction"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(textOut, /CLOSED-without-work/);
+    assert.match(textOut, /fixture-specimen/);
+    assert.match(textOut, /AC unchecked \(0\/8 checked\)/, "text report names the missing evidence (AC5)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // ── AC2: real store — genuinely-unlanded tasks are not flagged, landed-but-stale are ─────────────
 // OPT-IN (QUAY_TEST_REAL_STORE=1): scans 553 real tasks, grepping the codebase per task (~47s).
 // The default CI run exercises the same scanTasks logic on synthetic fixtures (AC3/AC4 + the
@@ -749,18 +931,20 @@ test("AC5: CLI exits 0 in all cases (report-only, never a gate)", () => {
 
 // ── AC7: --json shape ───────────────────────────────────────────────────────────────────────────
 
-test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scanned }", () => {
+test("AC7: --json mode emits { suspects, reverse, closedWithoutWork, strandedTasks, stranded, scanned }", () => {
   const report = formatJsonReport(
     [{ taskId: "X-1", matchedSymbols: ["planCheckNextAction"], touchesAllExist: true }],
     [{ taskId: "X-2", matchedSymbols: [], codeTouchExists: false, touchesAllExist: false }],
     10,
     [{ taskId: "X-3", matchedSymbols: [], branch: "milestone/M243/iteration-0", branchClassification: "has-commits" }],
-    [{ branch: "milestone/M239/iteration-0", classification: "has-commits", aheadCount: 2, insertions: 6901, lastCommitDate: "2026-08-01T00:00:00Z" }]
+    [{ branch: "milestone/M239/iteration-0", classification: "has-commits", aheadCount: 2, insertions: 6901, lastCommitDate: "2026-08-01T00:00:00Z" }],
+    [{ taskId: "X-4", acChecked: 0, acTotal: 3, acUnchecked: 3, touchesAllExist: false, codeTouchExists: false, branch: null, branchUnmerged: false }]
   );
   const parsed = JSON.parse(report);
-  assert.deepEqual(Object.keys(parsed).sort(), ["reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
+  assert.deepEqual(Object.keys(parsed).sort(), ["closedWithoutWork", "reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
   assert.equal(parsed.suspects.length, 1);
   assert.equal(parsed.reverse.length, 1);
+  assert.equal(parsed.closedWithoutWork.length, 1);
   assert.equal(parsed.strandedTasks.length, 1);
   assert.equal(parsed.stranded.length, 1);
   assert.deepEqual(
@@ -771,6 +955,11 @@ test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scann
     Object.keys(parsed.reverse[0]).sort(),
     ["codeTouchExists", "matchedSymbols", "taskId", "touchesAllExist"],
     "reverse entries carry codeTouchExists (the code-root landing signal)"
+  );
+  assert.deepEqual(
+    Object.keys(parsed.closedWithoutWork[0]).sort(),
+    ["acChecked", "acTotal", "acUnchecked", "branch", "branchUnmerged", "codeTouchExists", "taskId", "touchesAllExist"],
+    "closed-without-work entries carry the actionable missing-evidence fields (AC5)"
   );
   assert.deepEqual(
     Object.keys(parsed.stranded[0]).sort(),
@@ -789,9 +978,10 @@ test("AC7: --json mode emits { suspects, reverse, strandedTasks, stranded, scann
       cwd: ws, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
     });
     const fromCli = JSON.parse(out);
-    assert.deepEqual(Object.keys(fromCli).sort(), ["reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
+    assert.deepEqual(Object.keys(fromCli).sort(), ["closedWithoutWork", "reverse", "scanned", "stranded", "strandedTasks", "suspects"]);
     assert.ok(Array.isArray(fromCli.suspects), "suspects must be an array");
     assert.ok(Array.isArray(fromCli.reverse), "reverse must be an array");
+    assert.ok(Array.isArray(fromCli.closedWithoutWork), "closedWithoutWork must be an array");
     assert.ok(Array.isArray(fromCli.stranded), "stranded must be an array");
     assert.ok(Array.isArray(fromCli.strandedTasks), "strandedTasks must be an array");
   } finally {

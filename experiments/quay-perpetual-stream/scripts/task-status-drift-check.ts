@@ -1,8 +1,17 @@
-// task-status-drift-check.ts — reports tasks whose ## Acceptance Criteria symbols already resolve in
-// the codebase while the task still carries status todo/ready. The closeout gap in direct execution
-// (fast mode): execute-milestone's Land phase writes task status back; direct dispatch has no
-// equivalent step, so landed code + stale `todo` status misreports the board — 7 real cases measured
-// 2026-08-02 (gap-recursive-guard-only-covers-multi-mechanism … gap-prepare-milestone-no-worktree-isolation).
+// task-status-drift-check.ts — the status-drift detector for the task store. It scans the FULL set of
+// tasks (todo/ready AND done) for BOTH drift directions:
+//   status-drift-suspect (todo/ready): ## Acceptance Criteria symbols resolve in the codebase while
+//     the task still carries status todo/ready — the BENIGN direction ("should've been closed but
+//     wasn't"; at worst a bookkeeping lag). The closeout gap in direct execution (fast mode):
+//     execute-milestone's Land phase writes task status back; direct dispatch has no equivalent step,
+//     so landed code + stale `todo` status misreports the board — 7 real cases measured 2026-08-02
+//     (gap-recursive-guard-only-covers-multi-mechanism … gap-prepare-milestone-no-worktree-isolation).
+//   closed-without-work (done): status `done` but 0 AC checkboxes checked — the DANGEROUS direction
+//     ("closed without the work"; status written DIRECTLY, bypassing the gate). The scan surface used
+//     to be only todo/ready (the count line claimed so), so a done task could never be verified as
+//     having passed the gate. See tasks/gap-drift-check-only-looks-at-the-harmless-direction.
+//   reverse-drift-suspect (done): code never landed — AC symbols mostly unresolved AND no code-root
+//     Touches file exists (mirror image of the leak; see gap-reverse-drift-check-buries-true-positives-in-noise).
 //
 // A DETECTOR, not an enforcer: "is this task done?" is not mechanically decidable (done vs ready
 // depends on whether an AC needs a real dispatch, which a script cannot judge), so this reports
@@ -105,6 +114,20 @@ export function isDistinctiveName(id) {
   return /[a-z][A-Z]/.test(id) // camelCase / PascalCase internal boundary
     || /_/.test(id)            // underscore internals (`_splitCheck`, `task_write`)
     || /[A-Z]{2,}/.test(id);   // SCREAMING_SNAKE constants
+}
+
+// Count GFM checkbox boxes in an AC section (`- [ ]`, `- [x]`, `- [X]`, `- [~]`). The acceptance gate
+// reads `- [x]` boxes (only a checked box passes), so a `done` task with boxes but ZERO checked could
+// NOT have passed the gate as written — status was written directly (the DANGEROUS drift direction,
+// gap-drift-check-only-looks-at-the-harmless-direction). `[~]` (partial) counts as unchecked, matching
+// the gate semantics. This is the decisive closed-without-work signal: it uses the gate's own language
+// (checkboxes), not fragile symbol resolution.
+export function countAcCheckboxes(acSection) {
+  if (!acSection) return { total: 0, checked: 0, unchecked: 0 };
+  const boxes = acSection.match(/^\s*-\s+\[(.)\]/gm) ?? [];
+  let checked = 0;
+  for (const b of boxes) if (/\[[xX]\]/.test(b)) checked++;
+  return { total: boxes.length, checked, unchecked: boxes.length - checked };
 }
 
 // Word-boundary symbol search across the code roots (grep -w; vendored/milestone/build trees are
@@ -385,9 +408,10 @@ export function entriesInBranchDiff(repoRoot, entries, branch) {
 export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), ratioFloor = 0.6, roots = CODE_ROOTS, strandedBranches: strandedList = [] }) {
   const suspects = [];
   const reverse = [];
+  const closedWithoutWork = [];
   const strandedTasks = [];
   let taskFiles;
-  try { taskFiles = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")); } catch { return { suspects, reverse, strandedTasks, scanned: 0 }; }
+  try { taskFiles = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")); } catch { return { suspects, reverse, closedWithoutWork, strandedTasks, scanned: 0 }; }
   for (const f of taskFiles) {
     const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
     const statusMatch = raw.match(/^status:\s*(\S+)/m);
@@ -410,6 +434,34 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
       const tAll = touchesAllExist(touchesSection, repoRoot);
       const matched = candidates.filter((c) => resolveSymbol(c, repoRoot, { roots }));
       const codeTouchExists = hasAnyCodeRootTouch(touchesSection, repoRoot);
+      // ── Closed-without-work — the DANGEROUS direction (gap-drift-check-only-looks-at-the-harmless-
+      // direction). The forward scan (todo/ready) only sees "code in the tree but status not closed" —
+      // the BENIGN half: at worst a bookkeeping lag. It can NEVER see a task marked `done` WITHOUT the
+      // work, because status is written DIRECTLY, bypassing the gate. The decisive signal is the AC
+      // checkbox count: a done task with AC boxes but 0 checked could NOT have passed the acceptance
+      // gate as written (the gate reads `- [x]` boxes), so `done` was bypassed — the "closed without
+      // work" shape. Live specimen: gap-no-e2e-proves-install-is-configuration-driven was once done
+      // with 8 ACs all unchecked and its Touches files only on an unmerged branch — the old scan (and
+      // the symbol-based reverse-drift bar) reported nothing for it. The evidence state (Touches in
+      // tree / branch merged) is reported for actionability (AC5), not required to flag: the unchecked-
+      // AC shape alone IS the bypass signal. Done-parents whose implementation IS the children's work
+      // (all children done) are skipped, matching reverse-drift.
+      const acBoxes = countAcCheckboxes(ac);
+      if (acBoxes.total > 0 && acBoxes.checked === 0 && !hasDoneChildren(raw, tasksDir)) {
+        const codeEntries = parseTouchEntries(touchesSection).filter((e) => isCodeTouchEntry(e));
+        const strandedHit = strandedList.find((sb) => entriesInBranchDiff(repoRoot, codeEntries, sb.branch));
+        closedWithoutWork.push({
+          taskId: f.replace(/\.md$/, ""),
+          status,
+          acChecked: acBoxes.checked,
+          acTotal: acBoxes.total,
+          acUnchecked: acBoxes.unchecked,
+          touchesAllExist: tAll,
+          codeTouchExists,
+          branch: strandedHit ? strandedHit.branch : null,
+          branchUnmerged: strandedHit != null,
+        });
+      }
       const noCode = touchesSection != null
         && !codeTouchExists
         && !hasDoneChildren(raw, tasksDir)
@@ -460,7 +512,7 @@ export function scanTasks({ repoRoot, tasksDir = path.join(repoRoot, "tasks"), r
       });
     }
   }
-  return { suspects, reverse, strandedTasks, scanned: taskFiles.length };
+  return { suspects, reverse, closedWithoutWork, strandedTasks, scanned: taskFiles.length };
 }
 
 // ── Report formatting (pure — unit-tested) ────────────────────────────────────────────────────────
@@ -471,14 +523,47 @@ function _jsonStranded(s) {
     detail: s.detail ?? null,
   };
 }
-export function formatJsonReport(suspects, reverse, scanned, strandedTasks = [], stranded = []) {
+function _jsonClosed(s) {
+  return {
+    taskId: s.taskId,
+    acChecked: s.acChecked,
+    acTotal: s.acTotal,
+    acUnchecked: s.acUnchecked,
+    touchesAllExist: s.touchesAllExist,
+    codeTouchExists: s.codeTouchExists,
+    branch: s.branch,
+    branchUnmerged: s.branchUnmerged,
+  };
+}
+export function formatJsonReport(suspects, reverse, scanned, strandedTasks = [], stranded = [], closedWithoutWork = []) {
   return JSON.stringify({
     suspects: suspects.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, touchesAllExist: s.touchesAllExist })),
     reverse: reverse.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, codeTouchExists: s.codeTouchExists, touchesAllExist: s.touchesAllExist })),
+    closedWithoutWork: closedWithoutWork.map(_jsonClosed),
     strandedTasks: strandedTasks.map((s) => ({ taskId: s.taskId, matchedSymbols: s.matchedSymbols, branch: s.branch, branchClassification: s.branchClassification })),
     stranded: stranded.map(_jsonStranded),
     scanned,
   }, null, 2) + "\n";
+}
+
+// Human-readable closed-without-work report (the DANGEROUS direction). Pure — unit-tested. Each line
+// names the missing evidence (AC unchecked / Touches file not in tree / branch unmerged) so the human
+// knows what to act on, not just which task (AC5).
+export function formatClosedText(closed, opts = {}) {
+  const prefix = opts.prefix ?? "task-status-drift";
+  if (closed.length === 0) {
+    return `${prefix}: no CLOSED-without-work suspect(s) — every done task with ACs has ≥1 AC checked (the acceptance gate is the source of done)\n`;
+  }
+  let out = `${prefix}: ${closed.length} CLOSED-without-work suspect(s) — status done but 0 ACs checked (the acceptance gate could NOT have passed as written; status was written directly, bypassing the gate)\n`;
+  for (const s of closed) {
+    const missing = [];
+    if (s.acUnchecked > 0) missing.push(`AC unchecked (${s.acChecked}/${s.acTotal} checked)`);
+    if (!s.touchesAllExist) missing.push("Touches file(s) not in tree");
+    if (s.branchUnmerged) missing.push(`branch not merged (${s.branch})`);
+    out += `  closed-without-work: ${s.taskId} (status ${s.status}, missing: ${missing.join(", ") || "none"})\n`;
+  }
+  out += "  → human review: re-open the task and finish+verify the ACs, or confirm the work landed and check the boxes\n";
+  return out;
 }
 
 // Human-readable stranded-branch report. Pure — unit-tested. Used both by --stranded (branch-only
@@ -512,6 +597,7 @@ export function main(argv) {
   const args = argv.slice(2);
   const json = args.includes("--json");
   const strandedOnly = args.includes("--stranded");
+  const closedOnly = args.includes("--closed-direction");
   let repoRoot;
   try { repoRoot = findRepoRoot(process.cwd()); } catch (e) {
     process.stderr.write(`ERROR: ${e.message}\n`);
@@ -526,19 +612,40 @@ export function main(argv) {
       : formatStrandedText(stranded));
     return 0;
   }
-  const { suspects, reverse, strandedTasks, scanned } = scanTasks({ repoRoot, strandedBranches: stranded });
+  const { suspects, reverse, closedWithoutWork, strandedTasks, scanned } = scanTasks({ repoRoot, strandedBranches: stranded });
   if (json) {
-    process.stdout.write(formatJsonReport(suspects, reverse, scanned, strandedTasks, stranded));
+    if (closedOnly) {
+      // `--closed-direction --json` emits a bare ARRAY of closed-without-work entries so
+      // `| jq length` counts them directly (Contract's closed_without_work measure).
+      process.stdout.write(JSON.stringify(closedWithoutWork.map(_jsonClosed), null, 2) + "\n");
+      return 0;
+    }
+    process.stdout.write(formatJsonReport(suspects, reverse, scanned, strandedTasks, stranded, closedWithoutWork));
   } else {
-    if (suspects.length === 0 && reverse.length === 0 && strandedTasks.length === 0 && stranded.length === 0) {
-      process.stdout.write(`task-status-drift: no suspects among ${scanned} tasks (todo/ready drift + done-reverse-drift + stranded-branch all clean)\n`);
+    if (closedOnly) {
+      process.stdout.write(formatClosedText(closedWithoutWork));
+      return 0;
+    }
+    if (suspects.length === 0 && reverse.length === 0 && closedWithoutWork.length === 0 && strandedTasks.length === 0 && stranded.length === 0) {
+      process.stdout.write(`task-status-drift: no suspects among ${scanned} tasks (todo/ready drift + done closed-without-work + done-reverse-drift + stranded-branch all clean)\n`);
     } else {
       if (suspects.length > 0) {
-        process.stdout.write(`task-status-drift: ${suspects.length} SUSPECT task(s) with code already in the tree but status not closed (${scanned} todo/ready scanned)\n`);
+        process.stdout.write(`task-status-drift: ${suspects.length} SUSPECT task(s) with code already in the tree but status not closed (${scanned} tasks scanned, incl. done)\n`);
         for (const s of suspects) {
           process.stdout.write(`  status-drift-suspect: ${s.taskId} (status ${s.status}, ${s.matchedSymbols.length}/${s.totalSymbols} symbols resolved, touchesAllExist=${s.touchesAllExist})\n`);
         }
         process.stdout.write("  → human review: set status to done (all ACs test-proven) or ready (an AC requires a real dispatch)\n");
+      }
+      if (closedWithoutWork.length > 0) {
+        process.stdout.write(`task-status-drift: ${closedWithoutWork.length} CLOSED-without-work suspect(s) — status done but 0 ACs checked (the acceptance gate could NOT have passed as written; status was written directly, bypassing the gate)\n`);
+        for (const s of closedWithoutWork) {
+          const missing = [];
+          if (s.acUnchecked > 0) missing.push(`AC unchecked (${s.acChecked}/${s.acTotal} checked)`);
+          if (!s.touchesAllExist) missing.push("Touches file(s) not in tree");
+          if (s.branchUnmerged) missing.push(`branch not merged (${s.branch})`);
+          process.stdout.write(`  closed-without-work: ${s.taskId} (status ${s.status}, missing: ${missing.join(", ") || "none"})\n`);
+        }
+        process.stdout.write("  → human review: re-open the task and finish+verify the ACs, or confirm the work landed and check the boxes\n");
       }
       if (reverse.length > 0) {
         process.stdout.write(`task-status-drift: ${reverse.length} REVERSE-drift suspect(s) — status done but the implementation never landed (no code-root Touches file exists, AC symbols mostly unresolved)\n`);
