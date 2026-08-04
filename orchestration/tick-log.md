@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 19:22Z | `no-action` | 稳态：suite-speed 唯一在飞（3h25m，转入 test-isolation baseline 新阶段，token 骤降=压缩非卡死）；批内其余全合并；无新提交 | 内层：等 suite-speed，备忘「完成后关批」 | ①pane 核 suite-speed 新阶段（test-isolation baseline）；②git 无新提交；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 19:02Z | `no-action` | 稳态：suite-speed 唯一在飞（control/5，3h5m，control/4→5 确认推进）；批内其余全合并；无新提交；ready-pool-check 诚实待 suite-speed 后补晋 | 内层：等 suite-speed control/5，备忘「完成后关批」 | ①pane 核 suite-speed control/4→5 推进；②git 无新提交；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 18:42Z | `no-action` | 核实 ready-pool-check 缺陷已修复合并（12/12，pool honest 0）；独立重跑确认 pool:0、10 条全排除、deficit 3；记 landed-on-master 信号对既有文件型任务的过排除（次要，未立）；suite-speed 唯一在飞（control/4，2h45m） | 内层：等 suite-speed control/4，备忘「完成后关批」；ready-pool 缺陷任务已合并 | ①ready-pool-check 重跑 pool:0 + excluded 明细；②git log 核修复合并（notYetFlipped 信号改动 + 夹具补样）；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 18:22Z | `no-action` | 假满真实后果出现（机制 pool 6 虚高 ⇒ 不补晋，缺陷任务永远 todo）；手工晋级缺陷修复任务 + 驱动派发；suite-speed 唯一在飞（control/run-2，2h26m） | 内层：等 suite-speed control/run-2；缺陷任务派发指令排队 | ①机制 pool 6 与缺陷任务 todo 的因果（不补晋）；②晋级 + 驱动已发；③`--detect-stop` 仍 task-over-90m（预期） |
@@ -249,11 +250,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 85 | 36% |
+| no-action | 86 | 36% |
 | unblock | 36 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **220** | — |
+| **合计** | **221** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`

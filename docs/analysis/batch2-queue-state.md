@@ -2377,6 +2377,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **核实（AC1）**：suite-speed 从 control/4 → control/5（pane 文本），确认测量推进非卡死。
 - 无其它停止条件；监视器 mounted:true。
 
+### tick 2026-08-04T19:22Z（外层，`no-action`：稳态持续）
+
+- **suite-speed 唯一在飞**（3h25m）——agent 从 control/5 测量转入「Checking test-isolation violations
+  baseline」新阶段（token 骤降 708k→151k = 上下文压缩或新阶段，非卡死）；auto-block 持续（预期）。
+- 批内其余全部合并；无新提交（master 停在 93a3d749）。
+- 连续第 3 个稳态 tick——批在等 suite-speed 的多小时 σ 测量（管理者已裁定「不受影响」，符合预期）。
+- 无其它停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
