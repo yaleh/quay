@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 17:22Z | `no-action` | 核实 reliable-send + am2 已合并（20/20 + 2nd Amendment）；补闭两括号（漏闭第 5/6 次）；驱动内层把 --task-end 并入批关闭流程（系统性 gap）；suite-speed 唯一在飞（before/3）；写回 | 内层：等 suite-speed 基准（1h26m），备忘「完成后跑批全量」；am2/reliable-send 已合并 | ①git log 核两合并；②inProgress 字段核（1：suite-speed）；③括号漏闭第 5/6 次统计；④`--detect-stop` 无命中 |
 | 2026-08-04 17:03Z | `no-action` | 核实 suite-speed 唯一在飞（1h5m，基准 AC4 σ 纪律 ≥5 次，before/2）；2 槽位空+就绪池 3 未派 = 刻意让位（派发污染 run-to-run 方差，噪声门已证负载敏感）；吞吐 vs 测量完整性权衡上报管理者；写回 | 内层：等 suite-speed 基准 agent（before/2 in run-2.log），7 任务 6 done 1 在飞 | ①suite-speed AC4 协议读核（≥5 次硬要求）；②内层 pane 确认 agent 活跃非卡死；③git log 无新派发（d514910e 噪声门抖动记录）；④`--detect-stop` 无命中 |
 | 2026-08-04 16:42Z | `no-action` | 核实 task-write 合并（YAML-safe 标题）、suite-speed 唯一在飞（基准测试 45m）；5 失败疑似负载抖动（噪声门同窗）；2 槽位空 + 就绪池 3 未派（下 tick 未派则驱动）；监视器新语义 mounted:true | 内层：suite-speed 基准 agent 等全量结果（确认 5 失败是否负载抖动）；本批 7/8 已合并 | ①git log 核 task-write 合并 + 噪声门抖动记录；②就绪池 3；③监视器 check mounted:true（session-liveness 语义）；④`--detect-stop` 无命中 |
 | 2026-08-04 16:23Z | `no-action` | 核实 retire-inner-state 合并 + AC6 B-signal 去向（无信号类静默消失）；我的 inner-state Monitor 运行已删代码 ⇒ 停止 + 替换为 --detect-stop --pane 轮询（60s 转变发声，保留 ≤5min BLOCKED 预算）；残留进程核实清零；就绪池=3 | 内层：task-write + suite-speed 在飞（等各自全量套件）；node-cache + retire-state 已合并；4 shells 重活 | ①--detect-stop --pane 对真实 pane 文本实跑（pane_decision=waiting-input reset）；②ps 核 inner-state 进程清零；③就绪池 3；④AC6 去向表读核 |
@@ -243,11 +244,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 80 | 36% |
+| no-action | 81 | 36% |
 | unblock | 36 | 17% |
 | correct | 91 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **214** | — |
+| **合计** | **215** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
