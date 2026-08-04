@@ -2510,6 +2510,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   仍 0，机制既推荐又排除（自相矛盾）。信号需改任务特有符号解析。内层 flag + 外层确认 + 立案。
 - inProgress 1（phantom-in-flight）；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-04T23:22Z（外层，`no-action`：batch-3 收尾，全量首轮 1 失败已修重跑）
+
+- **batch-3 全 3 任务合并验证**（`fca52754`）；phantom-in-flight 的 `--reconcile`（修崩溃残留 phantom
+  inProgress + ORPHAN 文档方向）已合并（`d13ce490`/`288d625b`）。
+- **批全量首轮 1 失败已修**（`ef587d22`）：loop-shipping AC1b 误扫 scheduler 重放夹具（其 eligibility
+  输出把旧路径正则当数据嵌入，非活调用者）——已排除，重跑中。**全量又捕获一个合并期边界。**
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。batch-3 重跑绿后关批。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
