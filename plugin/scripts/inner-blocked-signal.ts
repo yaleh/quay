@@ -60,6 +60,27 @@
 // It clears a prior "auto" block when no condition holds, and never touches a "manual" block
 // (judgment asserts like ruling-required need an explicit --clear).
 //
+// gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger (2026-08-04): the third
+// condition — `ruling-required`, "any question the outer must rule on", the exact reason behind the
+// 68-minute incident this whole channel was built for — had NO mechanical trigger: only a manual
+// `--assert-blocked`, and production evidence (`orchestration/tick-log.md` 18:26Z/19:5xZ,
+// `docs/analysis/batch2-queue-state.md:1596`) shows that manual call was NEVER made across the
+// mechanism's entire history, despite the tick doc instructing it in prose ("再加一条文档指令不会
+// 有用"). AC1 finding (see the task body for the full write-up): the only OTHER candidate trace —
+// the inner writing its question into its own tick narration — is free prose with no stable schema
+// (same "remember to write it in a parseable way" failure, just generalized; confirmed via
+// `inner-idle-log.ts`'s `awaiting-ruling` reason, which has the identical manual-append shape and
+// the same non-adoption). The trace that DOES exist without requiring the inner to remember
+// anything is a COMPOSITE of three already-mechanical signals: the session transcript has stopped
+// advancing (`detectRulingRequiredStall` below), a task is still `inProgress` per telemetry, and the
+// working tree is clean. This is a PROXY for the SHAPE of "stopped, waiting" — same caveat
+// `task-over-90m` already carries as an age proxy, now explicit for this condition too: it does not
+// read the actual question (no mechanical trace for the question's CONTENT exists), it recognizes
+// the STOPPED shape. `--transcript <path>` is required, explicit, never inferred (same principle as
+// `session-liveness.sh`'s `SESSION_TRANSCRIPTS` — a pid/session→file mapping is not safe to guess);
+// omitting it leaves this detector a no-op, so the pre-existing two conditions are byte-for-behavior
+// unchanged (AC5).
+//
 // Storage: `.quay/inner-blocked.json` (gitignored, same family as gate-events.jsonl).
 
 import fs from "node:fs";
@@ -445,6 +466,108 @@ export function detectMergeConflict(root) {
 }
 
 /**
+ * Ruling-required stall threshold (ms). Reuses `session-liveness.sh`'s OVERDUE_MIN=30 calibration
+ * verbatim rather than inventing a new number: that file's own comment records the ONE empirically
+ * measured real-work quiet spell during a genuinely long, non-blocked task as 20.5 minutes ("阶段一
+ * 实测 transcript 长任务最大间隙 20.5min"), and picked 30 minutes to keep ~9.5min margin above it.
+ * The same false-positive risk applies here (AC4: a normal long-running task must not be flagged),
+ * so the same vetted threshold is reused rather than re-derived.
+ */
+export const RULING_REQUIRED_STALL_MS = 30 * 60 * 1000;
+
+/**
+ * mtime (ms epoch) of a transcript heartbeat source: the transcript file itself, OR — if fresher —
+ * any file under its sibling `<id>/subagents/` directory. Same technique as `session-liveness.sh`'s
+ * `heartbeat_mtime` / `inner-forensics.mjs`'s `transcriptSet`: the inner's own transcript goes quiet
+ * while it has delegated work to a subagent, whose activity lands in that directory, not the main
+ * transcript file — reading only the main file would misread "busy delegating" as "frozen".
+ * @param {string} transcriptPath
+ * @returns {number} 0 when the path does not exist.
+ */
+export function transcriptHeartbeatMtimeMs(transcriptPath) {
+  let max = 0;
+  try {
+    max = fs.statSync(transcriptPath).mtimeMs;
+  } catch (_) {
+    return 0;
+  }
+  const subDir = transcriptPath.replace(/\.jsonl$/, "") + "/subagents";
+  try {
+    for (const f of fs.readdirSync(subDir)) {
+      if (!f.endsWith(".jsonl")) continue;
+      const m = fs.statSync(path.join(subDir, f)).mtimeMs;
+      if (m > max) max = m;
+    }
+  } catch (_) { /* no subagents dir — fine, main file mtime stands */ }
+  return max;
+}
+
+/**
+ * Whether `root`'s git working tree has zero staged/unstaged changes (`git status --porcelain`
+ * empty). Returns `null` when it cannot be determined (non-git root, git failure) — the caller MUST
+ * treat `null` the same as "dirty" (do not fire): a false "can't tell" must not become a false
+ * positive (AC4 priority — "把「抓不到」修成「总在报」是更坏的交易" applies here too).
+ * @param {string} root
+ * @returns {boolean | null}
+ */
+export function isWorkingTreeClean(root) {
+  try {
+    const out = execFileSync("git", ["-C", root, "status", "--porcelain"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length === 0;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Detect the composite "stopped waiting for a ruling" trace (reason "ruling-required", AC1/AC2):
+ * transcript heartbeat stale ≥ stallMs, AND a task is in-progress per telemetry, AND the working
+ * tree is clean. All three conjuncts must hold — this is deliberately narrower than any one signal
+ * alone (a dirty tree or an absent in-progress task means "actively producing work", and a stale
+ * transcript alone is exactly `SESSION-OVERDUE`'s job, not this one — see the file-header note for
+ * why the earlier commit-age-only heuristic, `AC9c`, had a real false positive during legitimate
+ * fan-in and needed a human to disambiguate by reading the pane).
+ *
+ * `transcriptPath` is EXPLICIT CONFIG (never inferred — see file header). No transcript path, or a
+ * configured path that does not exist, ⇒ this detector is a no-op (`null`), so callers that never
+ * pass `--transcript` see byte-for-behavior the same two conditions as before (AC5).
+ *
+ * @param {string} root
+ * @param {{transcriptPath?: string, nowMs?: number, stallMs?: number}} [opts]
+ * @returns {Promise<{taskId: string, reason: "ruling-required", question: string, evidence: string[]} | null>}
+ */
+export async function detectRulingRequiredStall(root, { transcriptPath, nowMs = Date.now(), stallMs = RULING_REQUIRED_STALL_MS } = {}) {
+  if (!transcriptPath) return null;
+  const hbMs = transcriptHeartbeatMtimeMs(transcriptPath);
+  if (hbMs === 0) return null; // configured path does not exist ⇒ cannot detect
+  const staleMs = nowMs - hbMs;
+  if (staleMs < stallMs) return null;
+
+  const events = [];
+  for await (const e of readAllEvents(root)) events.push(e);
+  const rep = aggregate(events, { nowMs });
+  if (rep.inProgress.length === 0) return null; // nothing in-progress ⇒ nothing to be stuck on
+
+  const clean = isWorkingTreeClean(root);
+  if (clean !== true) return null; // dirty, or undeterminable ⇒ fail-closed toward NOT flagging
+
+  const p = rep.inProgress[0];
+  const staleMin = (staleMs / 60_000).toFixed(1);
+  return {
+    taskId: p.taskId,
+    reason: "ruling-required",
+    question: `transcript has not advanced in ${staleMin}m while task ${p.taskId} is in-progress and the working tree is clean — likely stopped waiting on a ruling; rule on it, then run --clear`,
+    evidence: [
+      `transcript heartbeat stale ${staleMin}m (threshold ${(stallMs / 60_000).toFixed(0)}m)`,
+      `${p.taskId} in-progress since ${new Date(p.startedAtMs).toISOString()}`,
+      "working tree clean (git status --porcelain empty)",
+    ],
+  };
+}
+
+/**
  * Detect a task in-progress over the 90-minute budget (reason "task-over-90m").
  *
  * Mechanical: reads the SAME `.workflow-events/` store the tick's own `--task-start`/`--task-end`
@@ -474,13 +597,19 @@ export async function detectTaskOver90m(root) {
 
 /**
  * Evaluate every mechanically-detectable stop-and-wait condition, in a deterministic order.
+ * `ruling-required` is checked BEFORE `task-over-90m` on purpose: it exists to catch the same class
+ * of stall earlier (AC3), so when both would apply near the 90-minute boundary, the earlier-firing
+ * reason is the one reported.
  * @param {string} root
+ * @param {{transcriptPath?: string, nowMs?: number, stallMs?: number}} [opts]
  * @returns {Promise<Array<{reason: string, question: string, evidence?: string[]}>>}
  */
-export async function detectStopConditions(root) {
+export async function detectStopConditions(root, opts = {}) {
   const found = [];
   const conflict = detectMergeConflict(root);
   if (conflict) found.push(conflict);
+  const stall = await detectRulingRequiredStall(root, opts);
+  if (stall) found.push(stall);
   const over = await detectTaskOver90m(root);
   if (over) found.push(over);
   return found;
@@ -491,7 +620,7 @@ export async function detectStopConditions(root) {
 const usage = `inner-blocked-signal.ts — explicit "inner is stopped and waiting" signal (gap-no-explicit-blocked-signal-from-inner-layer)
 
 Usage:
-  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>]
+  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--transcript <path>]
   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]
@@ -502,8 +631,12 @@ Usage:
 conditions (merge-conflict, task-over-90m) and writes the block automatically when any holds, as a
 consequence of the stop-condition check the tick already runs. It clears a prior "auto" block when
 no condition holds; a "manual" block (judgment assert) is never auto-cleared.
---assert-blocked writes .quay/inner-blocked.json manually (for judgment conditions like
-ruling-required that cannot be detected from repo state). The CLI is the ONLY writer — never
+--transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) additionally enables the "ruling-required"
+composite trace (gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger): transcript
+heartbeat stale ≥30m AND a task in-progress AND a clean working tree. Explicit config, never
+inferred; omitted ⇒ no-op, the other two conditions are unaffected.
+--assert-blocked writes .quay/inner-blocked.json manually (for judgment conditions that cannot be
+detected from repo state, or when no --transcript is configured). The CLI is the ONLY writer — never
 hand-write the JSON.
 --clear records the wait duration into telemetry, then deletes the file. --root defaults to the
 SHARED checkout root (a worktree invocation resolves to the main checkout so the outer can see it).`;
@@ -581,15 +714,33 @@ export async function main(argv) {
   }
 
   // --detect-stop — THE MECHANICAL TRIGGER (AC1). Evaluates the mechanically-detectable stop
-  // conditions (merge-conflict, task-over-90m). Any condition holds ⇒ WRITE `.quay/inner-blocked.json`
-  // as a consequence (auto reason/question/evidence, source "auto"). None holds ⇒ clear a prior
-  // "auto" block. A "manual" block (judgment assert like ruling-required) is NEVER auto-cleared —
-  // only an explicit --clear does that (AC3 negative control). The tick file's step-3 stop-condition
-  // check IS this command, so the write happens on an action the inner already takes every tick —
-  // not because someone remembered to call --assert-blocked.
+  // conditions (merge-conflict, ruling-required stall, task-over-90m). Any condition holds ⇒ WRITE
+  // `.quay/inner-blocked.json` as a consequence (auto reason/question/evidence, source "auto"). None
+  // holds ⇒ clear a prior "auto" block. A "manual" block (an --assert-blocked with no matching
+  // mechanical condition) is NEVER auto-cleared — only an explicit --clear does that (AC3 negative
+  // control). The tick file's step-3 stop-condition check IS this command, so the write happens on
+  // an action the inner already takes every tick — not because someone remembered to call
+  // --assert-blocked.
+  //
+  // --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) is EXPLICIT config for the ruling-required
+  // composite trace — never inferred. INNER_BLOCKED_RULING_STALL_MS is a test-only override of the
+  // 30-minute threshold (RULING_REQUIRED_STALL_MS), so tests can prove the real temporal logic at a
+  // compressed, real wall-clock scale instead of only backdating timestamps.
   if (args.includes("--detect-stop")) {
     try {
-      const found = await detectStopConditions(root);
+      const transcriptArg = getArgValue(args, "--transcript");
+      const transcriptPath = transcriptArg
+        ? path.resolve(transcriptArg)
+        : process.env.INNER_BLOCKED_TRANSCRIPT
+          ? path.resolve(process.env.INNER_BLOCKED_TRANSCRIPT)
+          : undefined;
+      const stallMsOverride = process.env.INNER_BLOCKED_RULING_STALL_MS
+        ? Number(process.env.INNER_BLOCKED_RULING_STALL_MS)
+        : undefined;
+      const found = await detectStopConditions(root, {
+        transcriptPath,
+        ...(Number.isFinite(stallMsOverride) ? { stallMs: stallMsOverride } : {}),
+      });
       const reasons = found.map((c) => c.reason);
       const existing = readBlockedRecord(root);
       if (existing) {

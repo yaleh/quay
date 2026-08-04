@@ -385,6 +385,252 @@ async function writeBackdatedStartEvent(tmp, taskId, msAgo) {
   telemetry.writeEvent(ev, tmp);
 }
 
+// ── gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger: the composite
+// "ruling-required" trace (transcript stale + task in-progress + clean working tree) ───────────────
+//
+// AC1 finding recap (full write-up in the task body): the only OTHER candidate — the inner writing
+// its question into its own tick narration — has NO stable schema (confirmed: `inner-idle-log.ts`'s
+// `awaiting-ruling` reason has the identical "remember to append" shape and the identical
+// non-adoption). The trace that exists WITHOUT requiring the inner to remember anything is this
+// composite of three already-mechanical signals. `AC9c` (production heuristic, commit-age + clean
+// tree only, see `docs/analysis/batch2-queue-state.md`) already proved that pair alone false-
+// positives during legitimate fan-in (worktree committed+clean while still actively working) and
+// needs a human to disambiguate by reading the pane — the tests below specifically exercise that
+// exact false-positive shape and confirm the transcript-freshness conjunct resolves it mechanically.
+
+/**
+ * Create a temp git workspace with ONE commit and a clean tree (no conflict, no dirty changes) —
+ * the "everything committed, nothing pending" shape a stalled task and a just-finished task share.
+ * Ships a `.gitignore` for `.workflow-events/` and `.quay/`, MATCHING the real repo's own
+ * `.gitignore` (`:30`/`:26-45`) — without it, `writeBackdatedStartEvent`'s own telemetry write
+ * would show up as an untracked file and falsely poison the clean-tree check; a bare `git init`
+ * fixture with no `.gitignore` is not representative of the real workspace this detector runs in.
+ * @returns {{tmp: string}}
+ */
+function makeCleanGitWorkspace() {
+  const tmp = makeTmpWorkspace();
+  const git = (args) => spawnSync("git", ["-C", tmp, ...args], { encoding: "utf8" });
+  const ok = (r, what) => { assert.equal(r.status, 0, `${what} failed: ${r.stderr}`); };
+  ok(git(["init", "-q"]), "git init");
+  ok(git(["config", "user.email", "test@test"]), "config email");
+  ok(git(["config", "user.name", "test"]), "config name");
+  fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n.quay/\n", "utf8");
+  fs.writeFileSync(path.join(tmp, "f.txt"), "base\n");
+  ok(git(["add", "f.txt", ".gitignore"]), "add base");
+  ok(git(["commit", "-qm", "base"]), "commit base");
+  return { tmp };
+}
+
+/**
+ * Write a fake transcript `.jsonl` file (in its OWN temp dir, never inside the git workspace —
+ * real transcripts live under `~/.claude/projects/…`, never inside the repo; writing one inside
+ * the workspace would itself be an untracked file and poison the clean-tree check) and set its
+ * mtime `msAgo` ms in the past (or now if `msAgo` is 0/undefined).
+ * @param {number} [msAgo]
+ * @returns {string} the transcript path — caller should `cleanup(path.dirname(...))` when done
+ */
+function writeTranscriptAt(msAgo = 0) {
+  const dir = makeTmpWorkspace();
+  const p = path.join(dir, "transcript.jsonl");
+  fs.writeFileSync(p, JSON.stringify({ type: "assistant", timestamp: new Date().toISOString() }) + "\n", "utf8");
+  const t = new Date(Date.now() - msAgo);
+  fs.utimesSync(p, t, t);
+  return p;
+}
+
+test("AC1 — detectRulingRequiredStall is a no-op with no transcript config (never inferred)", async () => {
+  const cli = await importCli();
+  const { tmp } = makeCleanGitWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-x", 35 * 60 * 1000);
+    const r = await cli.detectRulingRequiredStall(tmp, {});
+    assert.equal(r, null, "no --transcript ⇒ cannot detect, must not guess a path");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC2/AC3 — --detect-stop --transcript writes ruling-required (real trigger: stale transcript + in-progress + clean tree)", async () => {
+  const { tmp } = makeCleanGitWorkspace();
+  let transcript;
+  try {
+    const staleMinutes = 35; // > 30m threshold, < 90m task-over-90m proxy — this is the whole point
+    await writeBackdatedStartEvent(tmp, "gap-ruling-e2e", staleMinutes * 60 * 1000);
+    transcript = writeTranscriptAt(staleMinutes * 60 * 1000);
+
+    const before = Date.now();
+    const res = runCli(tmp, "--detect-stop", "--transcript", transcript);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /STOP CONDITION — ruling-required/, `must report the real trigger: ${res.stdout}`);
+
+    const f = BLOCKED_PATH(tmp);
+    assert.ok(fs.existsSync(f), "block file must be auto-written on the composite stall condition");
+    const rec = JSON.parse(fs.readFileSync(f, "utf8"));
+    assert.equal(rec.reason, "ruling-required");
+    assert.equal(rec.source, "auto", "mechanically detected — not a manual assert");
+    assert.equal(rec.taskId, "gap-ruling-e2e");
+    assert.match(rec.question, /transcript has not advanced/);
+    assert.match(rec.question, /clean/);
+    assert.ok(rec.evidence.some((e) => /working tree clean/.test(e)));
+
+    // AC3 — detection_latency_min: how long the transcript had already been stale when the block
+    // was written. Bounded by the CLI's own threshold (~35m fixture, well under 90m) — end-to-end
+    // production latency additionally depends on tick cadence (~25m, see fast-mode-loop-tick.md),
+    // which this fixture does not simulate (out of this task's Touches).
+    const transcriptMtimeMs = fs.statSync(transcript).mtimeMs;
+    const latencyMin = (rec.since - transcriptMtimeMs) / 60_000;
+    assert.ok(latencyMin >= staleMinutes - 0.1 && latencyMin < 90, `detection_latency_min=${latencyMin} must be in [~35, 90)`);
+    assert.ok(rec.since >= before, "since must be recorded at write time, not backdated");
+  } finally {
+    cleanup(tmp);
+    cleanup(path.dirname(transcript));
+  }
+});
+
+test("AC5 — a dirty working tree does NOT fire ruling-required even with a stale transcript + in-progress task", async () => {
+  const { tmp } = makeCleanGitWorkspace();
+  let transcript;
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-dirty", 35 * 60 * 1000);
+    transcript = writeTranscriptAt(35 * 60 * 1000);
+    fs.writeFileSync(path.join(tmp, "f.txt"), "uncommitted change\n"); // dirty tree = actively producing work
+
+    const res = runCli(tmp, "--detect-stop", "--transcript", transcript);
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "dirty tree must suppress the composite trigger");
+  } finally {
+    cleanup(tmp);
+    if (transcript) cleanup(path.dirname(transcript));
+  }
+});
+
+test("AC4 — reverse negative control (real shape): a task in-progress 78 real minutes with a FRESH transcript must NOT be flagged", async () => {
+  // This reconstructs the EXACT production false positive `AC9c` hit (docs/analysis/batch2-queue-
+  // state.md, 2026-08-04 01:22Z): a task in-progress ~78 minutes, working tree clean (everything
+  // committed) — under the commit-age-only heuristic this required a human pane-read to confirm the
+  // agent was still genuinely working. Here the transcript stays FRESH throughout (as it did in
+  // reality — the pane read found active tool calls), which is exactly the discriminator AC9c
+  // lacked. If this test fires, the mechanism repeats the false positive; it must not.
+  const { tmp } = makeCleanGitWorkspace();
+  let transcript;
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-e2e-78m", 78 * 60 * 1000);
+    transcript = writeTranscriptAt(2 * 60 * 1000); // last activity 2m ago — well under 30m threshold
+
+    const res = runCli(tmp, "--detect-stop", "--transcript", transcript);
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)),
+      "78-minute in-progress task with a fresh transcript must NOT be flagged — this is the AC9c false-positive shape and the whole reason for the transcript conjunct");
+    assert.match(res.stdout, /no stop condition/);
+  } finally {
+    cleanup(tmp);
+    if (transcript) cleanup(path.dirname(transcript));
+  }
+});
+
+test("AC4 — reverse negative control (genuinely real-time, not backdated): continuous transcript activity suppresses the block; activity stopping triggers it", { timeout: 20_000 }, async () => {
+  // Everything else in this file proves the LOGIC with backdated mtimes (same technique the
+  // pre-existing task-over-90m tests already use — nobody waits 90 real minutes). This test proves
+  // the TEMPORAL CAUSALITY is real: a short-but-real stall threshold (INNER_BLOCKED_RULING_STALL_MS
+  // test-only override), a real background "still working" loop touching the transcript on a real
+  // timer, real repeated --detect-stop invocations, and real elapsed wall-clock time — not a single
+  // fabricated instant.
+  const { tmp } = makeCleanGitWorkspace();
+  const stallMs = 1200;
+  const env = { ...process.env, INNER_BLOCKED_RULING_STALL_MS: String(stallMs) };
+  let transcript;
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-realtime", 5 * 60 * 1000); // in-progress, well under 90m
+    transcript = writeTranscriptAt(0);
+
+    // Phase 1 — genuinely active: touch the transcript every 300ms (real timer) for 1.5 real
+    // seconds while polling --detect-stop three times. The condition must never hold: staleness
+    // never crosses stallMs because real activity keeps resetting the mtime.
+    const activeUntil = Date.now() + 1500;
+    let sawBlockDuringActivity = false;
+    while (Date.now() < activeUntil) {
+      const t = new Date();
+      fs.utimesSync(transcript, t, t);
+      const r = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CLI, "--root", tmp, "--detect-stop", "--transcript", transcript], { encoding: "utf8", env });
+      assert.equal(r.status, 0, r.stderr);
+      if (fs.existsSync(BLOCKED_PATH(tmp))) sawBlockDuringActivity = true;
+      await new Promise((res) => setTimeout(res, 300));
+    }
+    assert.equal(sawBlockDuringActivity, false, "continuous real activity must never trigger the block");
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "no block after the active phase");
+
+    // Phase 2 — activity genuinely stops: wait (real sleep) past stallMs, then check once more.
+    await new Promise((res) => setTimeout(res, stallMs + 600));
+    const r2 = spawnSync("node", ["--no-warnings", "--experimental-strip-types", CLI, "--root", tmp, "--detect-stop", "--transcript", transcript], { encoding: "utf8", env });
+    assert.equal(r2.status, 0, r2.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "activity genuinely stopping past the threshold must trigger the block");
+    const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
+    assert.equal(rec.reason, "ruling-required");
+  } finally {
+    cleanup(tmp);
+    if (transcript) cleanup(path.dirname(transcript));
+  }
+});
+
+test("AC1 — a fresh subagents/ file counts as activity even when the main transcript file is stale (busy delegating, not frozen)", async () => {
+  const cli = await importCli();
+  const { tmp } = makeCleanGitWorkspace();
+  let transcript;
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-delegating", 35 * 60 * 1000);
+    transcript = writeTranscriptAt(35 * 60 * 1000); // main file stale
+    const subDir = transcript.replace(/\.jsonl$/, "") + "/subagents"; // same sibling-dir convention transcriptHeartbeatMtimeMs reads
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(path.join(subDir, "agent-1.jsonl"), "{}\n", "utf8"); // fresh (just written)
+
+    const r = await cli.detectRulingRequiredStall(tmp, { transcriptPath: transcript });
+    assert.equal(r, null, "a fresh subagent transcript must count as activity — not frozen, delegating");
+  } finally {
+    cleanup(tmp);
+    if (transcript) cleanup(path.dirname(transcript));
+  }
+});
+
+test("AC5 — --detect-stop without --transcript is byte-for-behavior unchanged (composite trigger never engages)", async () => {
+  const { tmp } = makeCleanGitWorkspace();
+  try {
+    // Same shape that DOES fire when --transcript is given (see AC2/AC3 test above) — but no
+    // --transcript here, so the pre-existing two conditions (merge-conflict, task-over-90m) are the
+    // only ones evaluated, exactly as before this task.
+    await writeBackdatedStartEvent(tmp, "gap-no-transcript-arg", 35 * 60 * 1000);
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "no --transcript ⇒ no composite detection, no false trigger");
+    assert.match(res.stdout, /no stop condition/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC6 — an auto ruling-required-stall block auto-clears once the transcript resumes (mirrors the existing auto-clear path)", async () => {
+  const { tmp } = makeCleanGitWorkspace();
+  let transcript;
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-resume", 35 * 60 * 1000);
+    transcript = writeTranscriptAt(35 * 60 * 1000);
+
+    const first = runCli(tmp, "--detect-stop", "--transcript", transcript);
+    assert.equal(first.status, 0, first.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "stall ⇒ block written");
+
+    // Resume: touch the transcript fresh (the inner is active again).
+    const now = new Date();
+    fs.utimesSync(transcript, now, now);
+    const second = runCli(tmp, "--detect-stop", "--transcript", transcript);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /cleared/, "fresh transcript ⇒ condition resolved ⇒ auto block cleared");
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "resumed ⇒ block removed");
+  } finally {
+    cleanup(tmp);
+    if (transcript) cleanup(path.dirname(transcript));
+  }
+});
+
 // AC5 — the reverse negative control: normal work (no stop condition) must NOT produce the file.
 
 test("AC5 — --detect-stop with no stop condition produces no block file", () => {
