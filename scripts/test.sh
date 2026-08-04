@@ -146,6 +146,12 @@ run_static_checks() {
   # AC aborts the suite (set -euo pipefail), red-lighting a done task that just closed with
   # uncarried ACs instead of letting it merge silently.
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}"
+  echo "== ADR-016 screen-use check (gap-adr-016-carve-out-permits-the-whole-screen-hash, AC3) =="
+  # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
+  # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
+  # a shell script), band 0..1 (the ONE active legacy observer — session-liveness.sh — is carried
+  # by the sibling task; a NEW active violation red-lights the commit).
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
