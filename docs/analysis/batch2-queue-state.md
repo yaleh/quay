@@ -1836,3 +1836,18 @@ dod-gate（外层建）。
   或等 #1/#9 修复后绿
 
 **在飞（2/3）**：both-gates（最高优先）+ blocked-channel。**下一槽候选**：#1 install-rewrites / #9 finding-without-plan（green 红 e2e）。
+
+### 关闭 both-gates + blocked-channel（2026-08-04 02:1xZ）
+
+- **both-gates**（`gap-both-gates-read-one-signal-so-done-costs-nothing`，`...oewucx`，**最高优先**）：
+  两闸读不同证据——author→ready 读计划+AC 形状（去掉 acAllChecked，ADR-001 恢复）、execute→done 读
+  DoD 勾选+AC+children。**AC7b 主判据过**（AC 4/4 勾 + DoD 3/3 未勾 ⇒ execute→done 红，DIR-102 形状）。
+  AC8 gate-gameability PASS 保持。meta-cc 0/14→11/14。scoped 36/36 绿。--task-end done。
+  **后续**：GitHub provider 的 checkGate 同结构（两闸读同一证据），不在本任务 Touches——已标后续。
+- **blocked-channel**（`gap-the-blocked-channel-has-a-writer-nobody-calls`，`...msadpj`）：
+  `--detect-stop` 机械触发（merge-conflict + task-over-90m 自动写/清 .quay/inner-blocked.json），
+  tick 文档 step 3 变单条机械命令。AC1-AC7，23/23 scoped 绿。--task-end done。**披露**：agent 的
+  AC-demo 脚本 bug 产生 stray 分支已恢复。**留空**：DoD 全量 2x（agent 未跑全量）。
+- **红 e2e 已入 master**（`install-config-driven-e2e.test.mjs` 23870B）——AC1/AC6/AC7/AC8 勾、
+  AC2-AC5 留空待 #1/#9（承载已建：install-rewrites ## Carries AC2/AC3/AC4、finding-shape ## Carries AC5）。
+- **在飞**：0。**下一批候选**：#1 install-rewrites / finding-shape（green 红 e2e）、batch 任务 DoD 裁定。

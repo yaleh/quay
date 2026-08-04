@@ -1,7 +1,7 @@
 ---
 id: gap-the-blocked-channel-has-a-writer-nobody-calls
 title: "The blocked channel is fully built — writer, reader, and an instruction in the inner's own tick doc — and has never once been used, including during a real 68-minute block"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate

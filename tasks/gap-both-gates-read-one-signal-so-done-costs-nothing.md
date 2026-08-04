@@ -1,7 +1,7 @@
 ---
 id: gap-both-gates-read-one-signal-so-done-costs-nothing
 title: "Both gates read the same AC checkboxes, so execute→done is vacuous — a 30-minute-old task with zero work is certified closeable"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
