@@ -1,7 +1,8 @@
 ---
 id: gap-suite-speed-under-a-297-second-sigma
-title: "Make the suite itself faster — under a σ of 297.6s, any single-run comparison is indistinguishable from noise"
-status: ready
+title: Make the suite itself faster — under a σ of 297.6s, any single-run
+  comparison is indistinguishable from noise
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -57,25 +58,45 @@ resume 先出 AC1/AC2 的分布与成本分解数据，再谈任何目标值
 
 ## Acceptance Criteria
 
-- [ ] AC1: **先测分布**——每个测试文件的墙钟分布，**点名最慢的单个文件**（实跑输出贴任务体）
-- [ ] AC2: **成本分解**——进程启动 / IO 等待 / 真实计算三部分占比（实跑输出贴任务体）
-- [ ] AC3: **不许先定阈值**——AC1/AC2 数据落地之前任务体中**不得出现任何速度目标**
-- [ ] AC4: **σ 纪律（硬要求）**——任何「变快了」的主张附**同一改动 ≥5 次**运行的均值与极差，
+- [x] AC1: **先测分布**——每个测试文件的墙钟分布，**点名最慢的单个文件**（实跑输出贴任务体）
+- [x] AC2: **成本分解**——进程启动 / IO 等待 / 真实计算三部分占比（实跑输出贴任务体）
+- [x] AC3: **不许先定阈值**——AC1/AC2 数据落地之前任务体中**不得出现任何速度目标**
+- [x] AC4: **σ 纪律（硬要求）**——任何「变快了」的主张附**同一改动 ≥5 次**运行的均值与极差，
       **改善量 > 297.6s 才算数**；**单次对照一律不接受**
-- [ ] AC5: **负控制**——改一行注释，**同样测法跑 5 次**；
+- [x] AC5: **负控制**——改一行注释，**同样测法跑 5 次**；
       **若它也「变快」超过 σ，判定为测法失效，先修测法**（实跑输出贴任务体，两种结果都要贴）
-- [ ] AC6: **闸不动**——全程不放宽「连跑 2 次全绿」、不缩小 canonical glob（差异比对贴出）
-- [ ] AC7: **报真数**——最终报告同时给出改善前后的**绝对秒数**，不许只报百分比
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: **闸不动**——全程不放宽「连跑 2 次全绿」、不缩小 canonical glob（差异比对贴出）
+- [x] AC7: **报真数**——最终报告同时给出改善前后的**绝对秒数**，不许只报百分比
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC5 的实跑输出贴进任务体——
+- [x] AC5 的实跑输出贴进任务体——
       **一个没有被负控制验过的测法，与「每次改动都显示变快了」不可区分**
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**——
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**——
       本仓 2026-08-03 已发生一次 `fail 0 / cancelled 2` 的假绿）
-- [ ] 任务体记录：**σ = 297.6s 意味着「诚实的无改善」是一个合法且有价值的结论**，
+- [x] 任务体记录：**σ = 297.6s 意味着「诚实的无改善」是一个合法且有价值的结论**，
       照 archguard TASK-57 的做法；**报一个小于 σ 的改善，等于报噪声**
+
+### 基准（5 次×前后，全量 `bash scripts/test.sh`，c8，heavy-op 串行）
+
+| 阶段 | 5× 墙钟 (s) | 均值 | 极差 |
+|---|---|---|---|
+| before | 759.8 / 788.3 / 804.7 / 761.8 / 781.1 | **779.1** | 44.9 |
+| control（AC5 注释改动） | 782.7 / 757.6 / 779.3 / 806.4 / 745.7 | **774.3** | 60.8 |
+| after（杠杆） | 689.7 / 688.4 / 705.5 / 696.8 / 696.4 | **695.4** | 17.1 |
+
+**delta = 83.8s（779.1 → 695.4），< σ = 297.6s。** AC5 负控制通过：control 仅 −4.8s，落在其 44.9–60.8s 极差内 ⇒ 测法诚实。
+
+**杠杆**：`mark_nested()`（`scripts/test.sh`）在 5 处 `node --test` exec 边界导出 `QUAY_TEST_NESTED`；嵌套调用跳过外层已跑的 dist rebuild + whole-store 静态检查（same-root 守卫）。AC8 测试 `plugin/test/suite-speed-nested-skip.test.mjs`（`@test-group governance`）结构性钉住。twice-green verify/2+verify/3 连续绿；`session-liveness` 的 M3/M6 flake 在 pre-lever 基线复现（pre-existing，非杠杆回归）；glob 未缩小（184→185 为 AC8 新测试，是增不是缩）。
+
+### 外层裁定（2026-08-04）—— honest no-improvement 接受
+
+**Contract band（delta_s > 297.6）未被满足（实测 83.8s）——这是诚实的正确结论，不是缺陷。** band 的目的是区分真改善与噪声；实测证明改善在噪声内，诚实报告 no-improvement 满足 band 的意图（无虚假改善主张），即使数字未过。**接受该结论，本任务按 honest no-improvement 关闭。**
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+`scripts/test.sh plugin/test/suite-speed-nested-skip.test.mjs` → ℹ tests 4 / pass 4 / fail 0 / cancelled 0。批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27（修完 retire-inner-state 两处残留后重跑）。
       **（外层裁定 2026-08-04T21:4xZ：Contract band `delta_s > 297.6` 未被满足——实测 delta 83.8s < σ。
       这是诚实的正确结论，不是缺陷：band 的目的是区分真改善与噪声，实测证明改善在噪声内，诚实报告
       no-improvement 满足 band 的意图（无虚假改善主张）即使数字未过。接受该结论，按 honest

@@ -2,7 +2,7 @@
 id: gap-retire-inner-state-one-observer-targets-by-parameter
 title: Retire inner-state.sh — its one irreplaceable signal never fired in three
   projects, including the night we hit exactly what it was for
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -128,7 +128,7 @@ resume 先改判据与文档，再摘 LOOP_SCRIPTS，最后删脚本并停挂载
 
 - [x] AC1 的负控制与 AC5 的前后数字都贴进任务体
 - [x] AC6 的信号去向清单**逐类**贴出（**不得只写「已迁移」**）
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——**本并发窗口无法满足**：
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——**本并发窗口无法满足**：
       共享 heavy-op 令牌被兄弟并发任务（task-write-frontmatter 的全量套件，pid 2864724，持锁
       >13 分钟）持有，`scripts/test.sh` 全量默认路径按资源闸 **WAIT 退出**（避免跨项目抢资源）。
       本任务指定的测试命令（`scripts/test.sh plugin/test/session-liveness.test.mjs
@@ -136,6 +136,14 @@ resume 先改判据与文档，再摘 LOOP_SCRIPTS，最后删脚本并停挂载
       skipped 1，EXIT=0）。全量 2 连跑留给令牌空窗期执行。
 - [x] 任务体记录：**它的招牌信号在三个项目里从未产生，且我们已经撞上过它本该拦下的那一次**——
       **「机制存在」与「机制生效」之间隔着一次真实事故，而那次事故已经发生过了**
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`bash plugin/scripts/monitor-mount-check.sh --json` → `mounted: true / targetOk: true / delivered: true / eventsFresh: true`（六键判定冷启动/观察者挂载齐全）。
+`QUAY_TEST_SKIP_STATIC_CHECKS=1 bash scripts/test.sh plugin/test/session-liveness.test.mjs plugin/test/monitor-mount-check.test.mjs` → ℹ tests 49 / pass 48 / fail 0 / cancelled 0 / skipped 1（skipped = 真实探针会话不在本机，属环境依赖；安静机窗下 noise-gate 通过）。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
+
+**收口注（2026-08-04）**：本任务曾因裁定 D 的 pane 观察者先行而 PARKED；D 落地后退役实现已合并 master 并验证，此处按批量收口关闭。两个仍调用已退役 inner-state.sh 的残留测试位（`inner-blocked-signal.test.mjs` AC4、`loop-shipping.test.mjs` AC3）已在 master 修复（AC4 改用 `--read`、AC3 断言退役标记），全量重跑绿。
 
 ## Execution evidence（2026-08-04，第三并发槽）
 

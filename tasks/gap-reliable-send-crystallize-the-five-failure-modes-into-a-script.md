@@ -1,9 +1,9 @@
 ---
 id: gap-reliable-send-crystallize-the-five-failure-modes-into-a-script
-title: F closed send-keys-verified but D only covers the classify/wait half — the
-  SENDING half (5 measured delivery-failure modes) has no owner; crystallize
+title: F closed send-keys-verified but D only covers the classify/wait half —
+  the SENDING half (5 measured delivery-failure modes) has no owner; crystallize
   the reliable-send algorithm into a script
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -48,28 +48,33 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/scripts/send-keys-reliable.sh` 实现步骤 1——循环 `C-u` + capture-pane 查空，
+- [x] AC1: `plugin/scripts/send-keys-reliable.sh` 实现步骤 1——循环 `C-u` + capture-pane 查空，
       上限 N=50，**超限 fail loud**（报失败退出非 0，不静默继续）
-- [ ] AC2: 实现步骤 3——发送文本后轮询 capture-pane 连续两次一致（渲染稳定），有界超时（如 10s）
-- [ ] AC3: 实现步骤 5——**有界轮询**目标 transcript jsonl 直到出现内容匹配的真实 user message
+- [x] AC2: 实现步骤 3——发送文本后轮询 capture-pane 连续两次一致（渲染稳定），有界超时（如 10s）
+- [x] AC3: 实现步骤 5——**有界轮询**目标 transcript jsonl 直到出现内容匹配的真实 user message
       （60s 超时）；单次超时 → 补发一次独立 Enter 重新计时；二次超时 → **fail loud**（needs-human，
       不假装成功）
-- [ ] AC4: **送达判据是纯函数**——`checkTranscriptDelivered` 无副作用、不调 tmux、不读文件以外
+- [x] AC4: **送达判据是纯函数**——`checkTranscriptDelivered` 无副作用、不调 tmux、不读文件以外
       的源；测试直接 import（不需要 tmux server / pty / 假 TUI）
-- [ ] AC5: **负控制**——给一份不含该消息的 transcript 片段 + 发送文本 ⇒ `checkTranscriptDelivered`
+- [x] AC5: **负控制**——给一份不含该消息的 transcript 片段 + 发送文本 ⇒ `checkTranscriptDelivered`
       必须报未送达；含但内容不匹配 ⇒ 报未送达（两次实跑贴任务体）
-- [ ] AC6: **正控制（真实对象）**——脚本对**真实 tmux 会话**完成一次发送，验证通过真实 transcript
+- [x] AC6: **正控制（真实对象）**——脚本对**真实 tmux 会话**完成一次发送，验证通过真实 transcript
       判定送达（非构造夹具）；实跑输出贴任务体
-- [ ] AC7: **零哈希**——脚本与测试文件里 `md5sum|sha1sum|cksum` 出现 0 次（F 判死的哈希判据不得
+- [x] AC7: **零哈希**——脚本与测试文件里 `md5sum|sha1sum|cksum` 出现 0 次（F 判死的哈希判据不得
       借尸还魂）；`grep -c` 输出贴任务体
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
-- [ ] 一次真实跨会话发送被真实 transcript 判定送达（AC6 的对象，DIR-026 real-object）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
-- [ ] `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 已跟踪（提交时）
+- [x] AC1–AC8 全部勾上；AC5/AC6/AC7 的实跑输出逐字贴进本任务体
+- [x] 一次真实跨会话发送被真实 transcript 判定送达（AC6 的对象，DIR-026 real-object）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 已跟踪（提交时）
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`scripts/test.sh plugin/test/send-keys-reliable.test.mjs` → ℹ tests 20 / pass 20 / fail 0 / cancelled 0 / skipped 0。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
 
 ## Touches
 

@@ -3,7 +3,7 @@ id: gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses
 title: NODE_COMPILE_CACHE is set nowhere in the repo, so all 422 CLI spawns
   re-compile from scratch — 2.6x per spawn, and the default cache location is
   tmpfs
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -83,23 +83,28 @@ resume 先设变量与磁盘路径，再谈是否给 plugin/scripts 打包
 
 ## Acceptance Criteria
 
-- [ ] AC1: **每次 spawn 耗时下降**——对同一脚本，未设 vs 已设各测 ≥3 次，**贴出每次的毫秒数**
+- [x] AC1: **每次 spawn 耗时下降**——对同一脚本，未设 vs 已设各测 ≥3 次，**贴出每次的毫秒数**
       （不是均值一个数）。**判据是每次 spawn 耗时，不是套件墙钟**——理由见下
-- [ ] AC2: **缓存目录在磁盘上**——`stat -f -c '%T'` 的输出**不是 `tmpfs`**（实跑贴出）
-- [ ] AC3: **负控制（不过则 AC1 不算数）**——删掉缓存目录并设为**不可写**，
+- [x] AC2: **缓存目录在磁盘上**——`stat -f -c '%T'` 的输出**不是 `tmpfs`**（实跑贴出）
+- [x] AC3: **负控制（不过则 AC1 不算数）**——删掉缓存目录并设为**不可写**，
       `scripts/test.sh` **必须照常全绿**，只是慢。**缓存绝不能成为新的单点故障**（实跑贴出）
-- [ ] AC4: **plugin 脚本确实继承到了**——证明 `plugin/test/` 里 spawn 出去的子进程
+- [x] AC4: **plugin 脚本确实继承到了**——证明 `plugin/test/` 里 spawn 出去的子进程
       **确实带着这个环境变量**（不是只在 `test.sh` 的 shell 里设了而没传下去；实跑贴出）
-- [ ] AC5: **每套件 fork/解析次数或每次 spawn 耗时下降**，**并写明测量条件**
+- [x] AC5: **每套件 fork/解析次数或每次 spawn 耗时下降**，**并写明测量条件**
       （并发数、是否有第二层在跑、nproc）
-- [ ] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
+- [x] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
 
 ## Definition of Done
 
-- [ ] AC1 与 AC3 的实跑输出都贴进任务体（提速一份、缓存不可用仍全绿一份）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体明写：**本条不得用墙钟 A/B 验证**，理由与 σ 的关系逐字记下（见 `## Dispatch review`）
-- [ ] `.gitignore` 覆盖缓存目录（与 `gate-events.jsonl` 同形）
+- [x] AC1 与 AC3 的实跑输出都贴进任务体（提速一份、缓存不可用仍全绿一份）
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] 任务体明写：**本条不得用墙钟 A/B 验证**，理由与 σ 的关系逐字记下（见 `## Dispatch review`）
+- [x] `.gitignore` 覆盖缓存目录（与 `gate-events.jsonl` 同形）
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`scripts/test.sh plugin/test/compile-cache.test.mjs` → ℹ tests 5 / pass 5 / fail 0 / cancelled 0 / skipped 0。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
 
 ## Touches
 

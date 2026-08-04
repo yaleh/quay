@@ -3,7 +3,7 @@ id: gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool
 title: ready-pool-check's notYetFlipped requires all-ACs-checked, but the inner
   merges without ticking ACs — so done-work tasks pollute the pool and the
   fake-full problem reproduces inside the mechanism
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -37,22 +37,28 @@ ready」——但它不匹配内层实际的关闭方式（合并时不勾 AC，
 
 ## Acceptance Criteria
 
-- [ ] AC1: `ready-pool-check.ts` 的 `notYetFlipped`（或等价排除）改判「工作已落 master + status ready」，
+- [x] AC1: `ready-pool-check.ts` 的 `notYetFlipped`（或等价排除）改判「工作已落 master + status ready」，
       不依赖 AC 勾选状态——用 `task-status-drift-check` 的符号解析/触摸文件信号（grep 它的导出复用）
-- [ ] AC2: **负控制**——构造/实取一条「merged 但 AC 全未勾 + status ready」的任务 ⇒ 必须从池里排除
+- [x] AC2: **负控制**——构造/实取一条「merged 但 AC 全未勾 + status ready」的任务 ⇒ 必须从池里排除
       （当前 5 条 merged 任务就是活样本：跑 checker，pool 必须反映真实可派发 ≈ 0）
-- [ ] AC3: **正控制**——一条真正未开始的 ready 任务（AC 未勾 + 工作未落 master）⇒ 留在池里
-- [ ] AC4: 实跑当前真实树——`pool` 字段反映真实可派发（排除 merged 后），输出贴任务体
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`；加「merged 但 AC 全未勾」夹具样本
+- [x] AC3: **正控制**——一条真正未开始的 ready 任务（AC 未勾 + 工作未落 master）⇒ 留在池里
+- [x] AC4: 实跑当前真实树——`pool` 字段反映真实可派发（排除 merged 后），输出贴任务体
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`；加「merged 但 AC 全未勾」夹具样本
       （正是 11/11 没覆盖的那个形态）
-- [ ] AC6: 防回归——`ready-pool-check.ts` 的测试断言「pool 不会把 merged 任务数进去」，且
+- [x] AC6: 防回归——`ready-pool-check.ts` 的测试断言「pool 不会把 merged 任务数进去」，且
       `task-status-drift-check` 的信号被复用（不各自发明一套）
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC2/AC4 实跑输出逐字贴任务体（pool 修正前后对照）
-- [ ] 真实树跑通：pool 反映真实可派发（本 tick 时 ≈ 0，因 5 条 merged 全排除）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC2/AC4 实跑输出逐字贴任务体（pool 修正前后对照）
+- [x] 真实树跑通：pool 反映真实可派发（本 tick 时 ≈ 0，因 5 条 merged 全排除）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root . --json`（Contract invoke）→ 修复后当前真实树 `pool = 0`（5 条 merged-not-flipped 任务全排除，不再污染池）。
+`scripts/test.sh plugin/test/ready-pool-check.test.mjs` → ℹ tests 12 / pass 12 / fail 0 / cancelled 0 / skipped 0（含「merged 但 AC 全未勾」夹具样本）。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
 
 ## Touches
 

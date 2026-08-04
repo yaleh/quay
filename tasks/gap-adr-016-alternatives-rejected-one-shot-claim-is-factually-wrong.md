@@ -3,7 +3,7 @@ id: gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong
 title: ADR-016's Alternatives-rejected section calls claude -p "one-shot" — a
   factually wrong reason on an accidentally-right conclusion, which the next
   person will overturn with the same wrong reasoning
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -42,23 +42,28 @@ ADR-016「Alternatives rejected」段原文：
 
 ## Acceptance Criteria
 
-- [ ] AC1: ADR-016 追加 `## Amendment 2026-08-04 (second)`，落在「Alternatives rejected」段或其
+- [x] AC1: ADR-016 追加 `## Amendment 2026-08-04 (second)`，落在「Alternatives rejected」段或其
       紧邻处：`claude -p` 条目的理由改为**三条真实硬约束**（Monitor 不可用 / cron 会话作用域 /
       后台进程 final result + stdin 关闭后被杀），**结论句原样保留**（「Does not fit a *perpetual*
       loop…」）
-- [ ] AC2: Amendment 同时写明**替代形态存在**——长驻驱动进程握 stdin = 持久会话，自任调度与观测；
+- [x] AC2: Amendment 同时写明**替代形态存在**——长驻驱动进程握 stdin = 持久会话，自任调度与观测；
       引用 `orchestration/RESEARCH-claude-p-streaming-2026-08-04.md` §2/§6 为出处
-- [ ] AC3: **可核验性**——Amendment 后，原文的「one-shot」作为**理由**不再出现（除非在引用原文的
+- [x] AC3: **可核验性**——Amendment 后，原文的「one-shot」作为**理由**不再出现（除非在引用原文的
       引号内，且紧接「此理由已被 2026-08-04 Amendment 推翻」的标注）；结论句保持逐字
-- [ ] AC4: 不引入新违例——`adr016-screen-use-check.ts` 实跑仍 PASS（本任务只动文本，不引入
+- [x] AC4: 不引入新违例——`adr016-screen-use-check.ts` 实跑仍 PASS（本任务只动文本，不引入
       `capture-pane`+`md5` 同现）
-- [ ] AC5: 一致性——若仓库内其它文档（CLAUDE.md / tick 文档）有 `claude -p` = one-shot 的同型
+- [x] AC5: 一致性——若仓库内其它文档（CLAUDE.md / tick 文档）有 `claude -p` = one-shot 的同型
       描述，同步该句（grep 全仓核对；无则记「无其它实例」）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC3 的 grep 输出贴任务体（one-shot 作为理由已消除）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC3 的 grep 输出贴任务体（one-shot 作为理由已消除）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`node --experimental-strip-types plugin/scripts/adr016-screen-use-check.ts` → **PASS**：scanned 98 shell scripts，active whole-screen-hash violations 1（`session-liveness.sh:636`，已在带内 0..1），retired 2（send-keys-verified 旧哈希）。本任务只动文本、不引入 `capture-pane`+`md5` 同现，checker 实跑通过（AC4）。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
 
 ## Touches
 

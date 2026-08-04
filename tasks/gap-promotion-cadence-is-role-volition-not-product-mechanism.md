@@ -3,7 +3,7 @@ id: gap-promotion-cadence-is-role-volition-not-product-mechanism
 title: todo→ready promotion cadence/priority lives in an outer's voluntary AC —
   the tick doc has zero author/promote/晋级 hits, so no cold-start session
   inherits the behavior that keeps the ready pool healthy
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -44,28 +44,34 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/scripts/ready-pool-check.ts` 存在——计算真实就绪池（排除本批未翻 / fixture /
+- [x] AC1: `plugin/scripts/ready-pool-check.ts` 存在——计算真实就绪池（排除本批未翻 / fixture /
       PARKED）；`pool < 3` 时按定义顺序（gap-* > DIR-*；依赖就绪；touches resolve；四件套；非
       fixture）输出推荐晋级候选列表（含理由）
-- [ ] AC2: `fast-mode-loop-tick.md` 新增「就绪池维护」步骤（fan-in 后、派发前调 checker；pool<3
+- [x] AC2: `fast-mode-loop-tick.md` 新增「就绪池维护」步骤（fan-in 后、派发前调 checker；pool<3
       按推荐补晋）。`grep -c 'author\|promote\|晋级' fast-mode-loop-tick.md` ≥ 1（原文 0 的缺口被
       消除——检查器与文档都出现「晋级」语义）
-- [ ] AC3: `orchestrator-loop-tick.md`（外层）同步——外层不再靠自愿 AC 维护就绪池，引用 tick 文档
+- [x] AC3: `orchestrator-loop-tick.md`（外层）同步——外层不再靠自愿 AC 维护就绪池，引用 tick 文档
       的子机制
-- [ ] AC4: **负控制（双向）**——构造 `pool < 3` 且 todo 积压有合格候选 ⇒ checker 必须推荐；
+- [x] AC4: **负控制（双向）**——构造 `pool < 3` 且 todo 积压有合格候选 ⇒ checker 必须推荐；
       `pool ≥ 3` 或无合格候选 ⇒ 必须不推荐（不误晋级）。两次实跑输出贴任务体
-- [ ] AC5: **候选顺序可判**——把一条 `gap-*` 与一条 `DIR-*` 同时放入候选 ⇒ `gap-*` 排前；把一条
+- [x] AC5: **候选顺序可判**——把一条 `gap-*` 与一条 `DIR-*` 同时放入候选 ⇒ `gap-*` 排前；把一条
       touches 不可 resolve 的与一条可 resolve 的放入 ⇒ 可 resolve 排前（实跑输出贴任务体）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC7: `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` 增加「持续健康」维度（AC8c 之外）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: `orchestration/SPEC-quay-self-hosts-its-own-cold-start.md` 增加「持续健康」维度（AC8c 之外）
       ——见 SPEC 同步任务，本任务引用
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC4/AC5 实跑输出逐字贴进本任务体
-- [ ] **一次真实继承证明**：在冷启动铺出的文档路径下跑 `ready-pool-check.ts` 对当前真实队列输出
+- [x] AC1–AC7 全部勾上；AC4/AC5 实跑输出逐字贴进本任务体
+- [x] **一次真实继承证明**：在冷启动铺出的文档路径下跑 `ready-pool-check.ts` 对当前真实队列输出
       推荐（非构造夹具）——证明任何未来会话调用它即得同一行为
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`node --experimental-strip-types plugin/scripts/ready-pool-check.ts`（Contract invoke：对当前真实队列计算真实就绪池与推荐晋级候选）→ 验证时真实池 `pool = 6 ≥ 3`（无需补晋；排除 fixture/PARKED）。后续 `gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool` 将 notYetFlipped 判据从「AC 全勾」改为「工作已落 master」，merged 未翻任务从池中排除，真实池随后按该修正计数。
+`scripts/test.sh plugin/test/ready-pool-check.test.mjs` → ℹ tests 11 / pass 11 / fail 0 / cancelled 0 / skipped 0。
+批量 fan-in 全量：tests 2298 / fail 0 / cancelled 0 / skipped 27。
 
 ## Touches
 
