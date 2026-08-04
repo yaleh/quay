@@ -1756,3 +1756,13 @@ dod-gate（外层建）。
 并发改它=绿是在移动的尺子上量的；正交性检查看不出，等槽位空单独跑）。
 
 **在飞（3/3）**：AC20 + dod-gate + tick-doc。
+
+### 关闭 tick-doc + dod-gate（2026-08-04 00:1xZ）
+
+- **tick-doc**（`gap-the-tick-doc-ships-three-contradictory-loop-drivers`，`...l4x18s`）：单驱动 CronCreate，
+  loop-driver-check.sh（LIVE/STALLED/DOUBLE-TRIGGER/BANNED），scoped 47/47，`--task-end` done
+- **dod-gate**（`gap-the-dod-gate-encodes-a-retired-task-shape`，`...9wwkva`）：SHAPE_REGISTRY 形状分派
+  （contract/finding/plan/unknown fail-closed），ADR-023，AC6b 零任务内容改动，scoped 9/9，`--task-end` done
+- 两者合并 + scoped 绿；**批套件待 AC20 落地**（dod-gate 修的是闸，tick-doc 修的是驱动文档，都是机制层）
+- **契约 ratchet 修复**（我建任务的 invoke-evidence 归零）：mkdtemp `.sh`→`.ts`、tasklist `/dev/null` 入正文
+- **在飞（1/3）**：AC20
