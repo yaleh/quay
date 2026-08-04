@@ -24,6 +24,7 @@ experiment/timing/*.log
 **/worktrees/
 **/dist-sea/
 **/.quay/gate-events.jsonl
+**/.quay/heavy-op-token-events.jsonl
 **/.quay/prepare-leases/
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 .workflow-events/
