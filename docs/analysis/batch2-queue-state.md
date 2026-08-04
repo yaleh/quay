@@ -1864,3 +1864,17 @@ dod-gate（外层建）。
   AC3 反向负控制。
 
 **在飞（2/3）**：install-rewrites + drift-check。**批任务 DoD 裁定**仍待外层（套件红在 e2e 仪器+flake）。
+
+### 补派 one-condition（2026-08-04 03:0xZ，外层裁定）
+
+- **one-condition**（`gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger`，runId `...2ypatk`，
+  `/tmp/quay-wt-onecond`）——`--detect-stop` 只自动查 merge-conflict + task-over-90m，ruling-required 手动。
+  68 分钟等待只在 90 分钟被抓到（晚于解决 22 分钟）。**AC1 关键：先找痕迹不是加条件，「找不到」是合法结论；
+  禁止调小 90 分钟阈值充数**（e2e 正常跑 78 分钟是反例）。与 install-rewrites 零重叠。
+- **派非门槛任务的理由**：6 条队列任务共用 quay-init.sh（管理者门槛清单全在里面），install-rewrites 落地前
+  门槛相关工作一条都派不出去；这条缩短串行路径风险（68 分钟那次只有 3 条在飞）。
+
+**落地顺序（外层已定）**：install-rewrites → LOOP_SCRIPTS 条 + tmux 检测条（紧接着，先于一切）——
+重装判据是人工补丁数 0，那两条各在第一分钟产生一条补丁。
+
+**在飞（2/3）**：install-rewrites + one-condition。
