@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 18:03Z | `correct`（correct-inner：独立核实刚合并的 ready-pool-check 机制发现真缺陷——notYetFlipped 判据不匹配内层合并方式） | 核实 promotion-cadence 合并（11/11，括号同步关闭）；实跑 ready-pool-check 得 pool:6 但真实可派发 0（5 条 merged 未翻，AC 0 勾）——假满在机制内复现；立案修复任务（复用 drift-check 信号）；suite-speed 唯一在飞（控制组/1） | 内层：等 suite-speed（2h5m），备忘「完成后跑批全量并关任务」；promotion-cadence 已合并 | ①ready-pool-check 实跑 pool:6 + excluded 明细；②5 条 merged 任务 status/AC 状态抽查（全 ready + AC 0 勾）；③notYetFlipped 源码判据读核；④`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 17:42Z | `no-action` | 内层采纳括号纪律（c7408ef3）；授权 promotion-cadence 派发（too-big-not-stuck 裁定覆盖机械停止条件，管理者吞吐优先）；suite-speed 唯一在飞（before/4，1h45m）；写回 | 内层：等 suite-speed before/4；备忘「派 promotion-cadence」已获外层确认 | ①git log 核括号纪律采纳；②inProgress=1（suite-speed）；③`--detect-stop` 仍 task-over-90m（预期，已裁定 too-big-not-stuck） |
 | 2026-08-04 17:22Z | `no-action` | 核实 reliable-send + am2 已合并（20/20 + 2nd Amendment）；补闭两括号（漏闭第 5/6 次）；驱动内层把 --task-end 并入批关闭流程（系统性 gap）；suite-speed 唯一在飞（before/3）；写回 | 内层：等 suite-speed 基准（1h26m），备忘「完成后跑批全量」；am2/reliable-send 已合并 | ①git log 核两合并；②inProgress 字段核（1：suite-speed）；③括号漏闭第 5/6 次统计；④`--detect-stop` 无命中 |
 | 2026-08-04 17:03Z | `no-action` | 核实 suite-speed 唯一在飞（1h5m，基准 AC4 σ 纪律 ≥5 次，before/2）；2 槽位空+就绪池 3 未派 = 刻意让位（派发污染 run-to-run 方差，噪声门已证负载敏感）；吞吐 vs 测量完整性权衡上报管理者；写回 | 内层：等 suite-speed 基准 agent（before/2 in run-2.log），7 任务 6 done 1 在飞 | ①suite-speed AC4 协议读核（≥5 次硬要求）；②内层 pane 确认 agent 活跃非卡死；③git log 无新派发（d514910e 噪声门抖动记录）；④`--detect-stop` 无命中 |
@@ -247,9 +248,9 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 |---|---|---|
 | no-action | 82 | 36% |
 | unblock | 36 | 17% |
-| correct | 91 | 43% |
+| correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **216** | — |
+| **合计** | **217** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`

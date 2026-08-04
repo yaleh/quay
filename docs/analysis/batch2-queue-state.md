@@ -2333,6 +2333,19 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **suite-speed 唯一在飞持续**（before/4，1h45m，σ 协议推进中）；auto-block 持续（预期）。
 - 无其它停止条件；监视器 mounted:true；无新合并（master 停在 a0a3ca63）。
 
+### tick 2026-08-04T18:03Z（外层，`correct`：独立核实发现刚合并机制的真缺陷）
+
+- **promotion-cadence 已合并**（`5037ee55` fan-in + `a4d8e03b`，11/11，**遥测同一步关闭**——括号纪律
+  被采纳）。ready-pool-check.ts + tick 步骤 3.6 + 外层 AC-queue 降级引用 + SPEC AC-SH5 更新全部落地。
+- **独立核实发现真缺陷**：实跑 `ready-pool-check.ts` 得 `pool: 6`——但 6 条里 5 条（am2/node-cache/
+  promotion-cadence/reliable-send/task-write）是**已合并未翻 done**（status ready 且 **AC 0 勾**，
+  内层合并时不勾 AC）。⇒ 机制报 6、真实可派发 = **0**——**「假满」在机制内部复现**。
+- **根因**：`notYetFlipped` 判据是「AC 全勾 + status ready」，不匹配内层实际关闭方式。
+- **已立案** `gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool`（todo）：判据改为复用
+  `task-status-drift-check` 的「工作已落 master」信号（不依赖 AC 勾选）；AC2/AC4 用真实树负控制
+  （pool 必须从 6 降到真实值）。
+- **suite-speed 唯一在飞**（控制组/1，2h5m，σ 协议推进中）；auto-block 持续（预期）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
