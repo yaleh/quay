@@ -1,7 +1,7 @@
 ---
 id: gap-drift-check-only-looks-at-the-harmless-direction
 title: "The status-drift check scans todo/ready only — it can see a task that should be closed, never one that was closed without the work"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
