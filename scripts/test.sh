@@ -133,6 +133,14 @@ fi
 # independent of which test files were requested (fast; the metadata modes --list-groups/
 # --list-files skip them). CI inherits them because its only test step is `bash scripts/test.sh`.
 run_static_checks() {
+  # QUAY_TEST_NESTED — set by mark_nested() right before the outer suite's node --test. A nested
+  # invocation (a test that spawns scripts/test.sh) inherits it and skips the whole-store checks
+  # the OUTER suite already ran at its start (gap-suite-speed-under-a-297-second-sigma). Same-root
+  # guard: a nested run in a DIFFERENT worktree keeps its own checks.
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping static checks (nested invocation; outer suite ran them)"
+    return 0
+  fi
   # QUAY_TEST_SKIP_STATIC_CHECKS=1 — set by 0-match / pure-selector NESTED invocations (same shape as
   # QUAY_TEST_SKIP_DIST_BUILD): the outer suite already ran these whole-store checks at its start, and
   # a nested smoke run that matches 0 tests does not re-verify them. Skipping avoids a real race: a
@@ -378,10 +386,21 @@ list_groups() {
 # mtime check / sync-vendor --check) still guards every real bundle consumer. A
 # standalone test.sh that sets this is explicitly vouching for bundle freshness, so it
 # skips the gate (never set it in CI or the outer loop). NOTE: runner-grouping.test.mjs
-# deliberately does NOT set it — its nested runs have 120s/300s budgets, run --group
-# subsets, and keep a second live in-suite exercise of this build; that is a documented,
-# lower-severity instance of the same structural exposure, not a regression.
+# does not set it either, but its nested runs now inherit QUAY_TEST_NESTED from the outer
+# suite's mark_nested() and skip the rebuild automatically (gap-suite-speed-under-a-297-
+# second-sigma). The build is still exercised ONCE per real suite (the outer invocation),
+# so the freshness gate keeps its guard; the runner-grouping nested runs only ever run
+# --group subsets / fixtures and re-running 2 esbuilds + vendor mirror inside each was the
+# measured redundant cost this skip removes.
 build_dist_once() {
+  # QUAY_TEST_NESTED — see run_static_checks(): a nested invocation (a test spawning scripts/test.sh)
+  # inherits the marker and skips the rebuild the OUTER suite already did at its start
+  # (gap-suite-speed-under-a-297-second-sigma). Same-root guard keeps a different-worktree nested
+  # run building its own bundle.
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping dist rebuild (nested invocation; outer suite built it)"
+    return 0
+  fi
   if [ "${QUAY_TEST_SKIP_DIST_BUILD:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_DIST_BUILD=1 — skipping dist rebuild (outer runner built it)"
     return 0
@@ -417,6 +436,20 @@ build_dist_once() {
     echo "scripts/test.sh: vendored dist mirror FAILED — refusing to run tests against a possibly-stale plugin bundle" >&2
     exit 1
   fi
+}
+
+# mark_nested — mark THIS invocation as the outer runner so any scripts/test.sh that a TEST spawns
+# (a nested invocation) can detect it is nested and skip the redundant dist rebuild + whole-store
+# static checks that the OUTER suite already ran at its start (gap-suite-speed-under-a-297-second-sigma).
+# The marker is set ONLY at the exec-to-node boundary (right before each `node --test` below), never
+# at the top of this script: the OUTER invocation must NOT skip its own setup. A nested invocation
+# inherits QUAY_TEST_NESTED/QUAY_TEST_NESTED_ROOT through its env, and the QUAY_TEST_NESTED check at
+# the top of build_dist_once()/run_static_checks() skips the redundant work. QUAY_TEST_NESTED_ROOT
+# carries the OUTER's repo_root so a nested run in a DIFFERENT worktree (a genuinely different repo
+# state) does not skip the checks it needs.
+mark_nested() {
+  export QUAY_TEST_NESTED=1
+  export QUAY_TEST_NESTED_ROOT="$repo_root"
 }
 
 # run_selected <groups-csv> [extra-node-flags...] — build the selected file list and exec node
@@ -458,6 +491,7 @@ run_selected() {
   if [ "${HEAVY_OP_ACQUIRED:-0}" = "1" ]; then
     local cc
     cc="$(default_test_concurrency)"
+    mark_nested
     set +e
     node --test --test-concurrency="$cc" "$@" "${files[@]}"
     local code=$?
@@ -474,6 +508,7 @@ run_selected() {
     fi
     exit "$code"
   fi
+  mark_nested
   exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
 }
 
@@ -533,6 +568,7 @@ elif [ -n "${groups}" ]; then
     run_static_checks
     export QUAY_TEST_GROUPS="$groups"
     build_dist_once
+    mark_nested
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
   fi
 fi
@@ -601,6 +637,7 @@ elif [ "${1:-}" = "--for-task" ]; then
   # Run the selected set. A thin selector (sel_code != 0) still runs what was selected but the overall
   # exit is non-zero — fail-loud under-selection must never be masked by a green test run.
   build_dist_once
+  mark_nested
   set +e
   # Pass-through flags (e.g. --test-name-pattern=X) must precede the file list: node --test only
   # honors --test-name-pattern when it appears BEFORE the named files (after them it is ignored,
@@ -625,5 +662,6 @@ else
   run_static_checks
   # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
   # trigger and the named files run in full.
+  mark_nested
   exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
 fi

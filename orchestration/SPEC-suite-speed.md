@@ -40,3 +40,45 @@ archguard 已经在 σ 纪律下产出过一个诚实的「无改善」结论(TA
 - 不动令牌粒度(方向 B,人已排除)
 - 不降低任何 DoD 判据(方向 A,人已排除)
 - 不在拿到 AC1/AC2 数据前动任何实现
+
+## 实测结果(2026-08-04,gap-suite-speed-under-a-297-second-sigma)
+
+**测法**:`bash scripts/test.sh`(默认 group product,engine,concurrency 8,与裁定一致),每次记录 wall 秒数。
+before 用基线 commit,control 用仅加一行注释的 commit(AC5 负控制),after 用 lever commit(嵌套调用跳过冗余 setup)。
+每次运行前过重型令牌(resource-gate full-suite),全程无并发全量套件。本机无 `/usr/bin/time`,用 `date +%s.%N`
+(测的是同一个量:真实流逝秒)。
+
+| 阶段 | 5 次 wall (s) | 均值 | 极差 |
+|---|---|---|---|
+| before | 759.768, 788.262, 804.660, 761.832, 781.120 | **779.128** | 44.892 |
+| control(仅注释) | 782.676, 757.583, 779.252, 806.423, 745.651 | **774.317** | 60.772 |
+| after(lever) | 689.684, 688.435, 705.533, 696.806, 696.374 | **695.366** | 17.098 |
+
+- **AC5 负控制通过**:control 均值比 before 快 **4.8s**(极差 44.9-60.8s 内噪声),未出现 >σ 的"变快" → 测法诚实。
+- **AC4 结论**:before−after 均值差 = **83.762s**,远小于 σ = 297.6s ⇒ **诚实判定:未达 σ 纪律的"变快";
+  报一个小于 σ 的改善等于报噪声**。按任务 DoD(archguard TASK-57 先例),"诚实的无改善"是合法且有价值的结论。
+- **AC7 报真数**:改善前后绝对秒数为 779.128 → 695.366(均值),非百分比。
+
+### AC1:最慢的单个文件
+spec reporter 给出最慢单文件:**`packages/quay/test/cli.test.mjs` = 140.9s**。
+但真正的 wall 下界是 **`plugin/test/runner-grouping.test.mjs`**(其耗时按 test 计,不显示为文件行):
+它的 6 个测试合计 ~477s 串行,其中单个测试 "AC1/AC2/AC6: flags-only forms run the same test count as
+the group default" = **427.6s**(内部 3 次完整 governance 子套件)。AC1 的"在它之上做并发优化买不到东西"
+正是指这条串行链。
+
+### AC2:成本分解(进程启动 / IO 等待 / 真实计算)
+wall=781.1s,node --test duration_ms=767.7s,34 个文件耗时和=396.8s。
+- **setup(构建+全库静态检查)= ~13.4s = 1.7%**(外层调用自己的 build_dist_once + run_static_checks)。
+- **真实测试执行 ≈ 750s = 96%+**:runner-grouping 的 3 次 governance 子套件 ~427s(cli.test.mjs 141s 之外
+  的最大单项);governance 组(35 文件 529 测试)在跳过 setup 的隔离运行下 c8=133.9s / c2=198.5s——
+  被真实等待主导(session-liveness 33 处 sleep、tmux `sleep 20`、heavy-op-token-wait),是 IO 等待不是计算。
+- **嵌套调用冗余 setup(lever 目标)**:runner-grouping 内 6 次嵌套 `scripts/test.sh` 各自重复静态检查+构建,
+  负载下每次 ~10-20s;after 实测总省 ~84s。
+- Σ/wall 高 + c8/c2=1.48 ⇒ 套件是"启动/等待"为主(本规格 §0 已断言),不是 CPU 瓶颈。
+
+### lever(本次改动)
+`scripts/test.sh` 增加 `mark_nested()`(在 5 个 node --test 执行点前标记 QUAY_TEST_NESTED +
+QUAY_TEST_NESTED_ROOT),嵌套调用继承后跳过重复的 dist 构建+全库静态检查(同根守护,不同 worktree 不跳过)。
+AC8 测试 `plugin/test/suite-speed-nested-skip.test.mjs`(governance,node:test,结构式断言,不 spawn)。
+Touches 内唯一可减成本;AC6 闸未动(glob 184→185 是 AC8 加测试,不是缩小;全程 fail 0 / cancelled 0,
+除 session-liveness M6 一次真实时序抖动,见任务体)。
