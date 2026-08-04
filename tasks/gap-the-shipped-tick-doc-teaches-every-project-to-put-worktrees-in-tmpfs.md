@@ -2,7 +2,7 @@
 id: gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs
 title: the shipped tick doc teaches every target project to build worktrees in
   /tmp — and /tmp is tmpfs, the amplifier that took the whole machine down
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -93,19 +93,46 @@ resume 先改交付物里的路径约定，再加落地校验；校验的负控�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **交付物里不再出现 tmpfs 下的 worktree 路径**——`grep -rn "/tmp/quay-wt\|worktree add /tmp" plugin/`
+- [x] AC1: **交付物里不再出现 tmpfs 下的 worktree 路径**——`grep -rn "/tmp/quay-wt\|worktree add /tmp" plugin/`
       在**指令位置**为 0 命中（注释/夹具可保留但须与新约定一致）；`plugin/skills/` 一并扫（实跑贴出）
-- [ ] AC2: **worktree 根从配置读**——`.quay/config.yml` `loop:` 节新增 `worktree_root`，
+      **证据**：`grep -rn '/tmp/quay-wt\|worktree add /tmp' plugin/` → **0 命中**
+      （`plugin/` 与 `plugin/skills/` 均实测 0；tick 文档 188/220/299、batch2-prompt 33/36/60、
+      inner-blocked-signal 注释、test-isolation 注释/夹具、resource-gate/runtime-usage-inventory 夹具全部改到
+      新约定 `$WORKTREE_ROOT/<slug>` 或磁盘路径）。
+- [x] AC2: **worktree 根从配置读**——`.quay/config.yml` `loop:` 节新增 `worktree_root`，
       tick 文档与 skill 引用它而不是字面路径；**缺省值是仓库同级的磁盘路径**（实跑贴出解析结果）
-- [ ] AC3: **tmpfs 拒绝**——把 worktree 根指到一个真 tmpfs 路径 ⇒ `quay-init --loop` **退出非 0**、
+      **证据**：本仓 `.quay/config.yml` `loop.worktree_root = /home/yale/work/quay-worktrees`（磁盘）；
+      `quay-init --loop` 的默认解析 = `<repo_root>/../<basename>-worktrees`（`/srv/target` → `/srv/target-worktrees`，
+      e2e A6 实测）；tick 文档配置值约定已扩展为 `REPO_ROOT`/`TEST_COMMAND`/`TMUX_SESSION`/`WORKTREE_ROOT`。
+- [x] AC3: **tmpfs 拒绝**——把 worktree 根指到一个真 tmpfs 路径 ⇒ `quay-init --loop` **退出非 0**、
       错误信息说明「该根在 tmpfs 上、这是内存」并给出该改成什么（实跑贴出）
-- [ ] AC4: **负控制（这条不过 AC3 不算数）**——真实磁盘路径上 `quay-init --loop` **exit 0** 且 worktree 正常建成。
+      **证据**（`worktree-root-fs-check.test.mjs` AC3，实跑）：
+      ```
+      ERROR: worktree root '/tmp/quay-wt-fscheck' is on tmpfs ('/tmp' is tmpfs) — this is memory, not disk.
+             Every worktree under it consumes RAM; the 2026-08-04 machine-wide OOM traced straight to it.
+             Change it to a real disk path — e.g. '<repo>/../<basename>-worktrees'.
+      exit=2
+      ```
+- [x] AC4: **负控制（这条不过 AC3 不算数）**——真实磁盘路径上 `quay-init --loop` **exit 0** 且 worktree 正常建成。
       **只证明它会拒绝、不证明它不乱拒绝，等于把一种失效换成另一种**（实跑贴出）
-- [ ] AC5: **发现存量**（SPEC AC9c）——`git worktree list` 里位于 tmpfs 的 worktree 能被一条命令报出（实跑贴出）
-- [ ] AC6: **联锁处置**——`test-isolation-check.ts` 的 `/tmp/quay-wt-*` R6 豁免要么随新路径调整、
+      **证据**（`worktree-root-fs-check.test.mjs` AC4，实跑）：磁盘根 `quay-init --loop` exit 0、
+      `worktree root: ... (filesystem: ext2/ext3 — not tmpfs, OK)`、config 写入 `worktree_root`、
+      `git worktree add <根>/probe` 成功建成。
+- [x] AC5: **发现存量**（SPEC AC9c）——`git worktree list` 里位于 tmpfs 的 worktree 能被一条命令报出（实跑贴出）
+      **证据**：
+      ```bash
+      git worktree list | awk '{print $1}' | while read p; do fstype=$(stat -f -c %T "$p"); [ "$fstype" = tmpfs ] && echo "TMPFS WORKTREE: $p"; done
+      ```
+      本仓实测输出为空（零 tmpfs worktree，正确）；SPEC AC9c 已标注落地。
+- [x] AC6: **联锁处置**——`test-isolation-check.ts` 的 `/tmp/quay-wt-*` R6 豁免要么随新路径调整、
       要么在任务体里明确记录「它已成空转」并说明为何可接受。**不许默认它还在保护什么**
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`（安装是用户可见契约）
-- [ ] AC8: **把门槛的 A6 编码进 `packages/quay/test/install-config-driven-e2e.test.mjs`**——
+      **证据**：**随新路径调整**——`quay-wt-` 从 R6 豁免前缀**移除**（worktrees 现在是 `git worktree add`
+      到磁盘根、从不 mkdtemp，R6 根本看不到它们；保留是死重，按必要性判据移除）。注释、夹具、
+      `test-isolation-violations.txt` 同步更新；`test-isolation-check.test.mjs` 13/13 绿、
+      `test-isolation-r6-partial-cleanup.test.mjs` 3/3 绿、test-framework policy PASS。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group product`（安装是用户可见契约）
+      **证据**：`worktree-root-fs-check.test.mjs` 首行 `// @test-group product`、`import { test } from "node:test"`。
+- [x] AC8: **把门槛的 A6 编码进 `packages/quay/test/install-config-driven-e2e.test.mjs`**——
       `GOAL-when-to-reinstall.md:133` 的 A6 是「**落地后，目标项目的 worktree 根不在 tmpfs 上**」，
       而该 e2e **目前一条也没编码它**（外层 2026-08-04 04:2xZ 实测：文件里只有 A1–A4 + 一个叫 `AC6` 的防穿透负控制）。
       **⇒ 断言必须命名为 `A6` 并断言落地后的 worktree 根文件系统类型不是 `tmpfs`**。
@@ -113,14 +140,20 @@ resume 先改交付物里的路径约定，再加落地校验；校验的负控�
       它是防穿透负控制、**与门槛的 A6 无关**。**两个名字只差一个字母，而一个绿的 `AC6`
       会被下一个读的人读成「A6 满足」**——新断言**必须**叫 `A6`，
       并在两处各加一行注释写明彼此无关。**这条不做，e2e 全绿就会被误读成门槛达成。**
+      **证据**：已新增 `test("A6 — a landed quay-init --loop writes a loop.worktree_root that is NOT on tmpfs...")`
+      （`baaa0f80`），断言落地 config 的 `loop.worktree_root` 文件系统类型 ≠ tmpfs（探测最近存在祖先）；
+      两处各加命名警告注释（A6 与 AC6 无关）。`node --test --test-name-pattern="A6"` → **✔ 通过**；
+      e2e 整体在全量套件 #10/#11 中全绿（1960 ✔，比 #9 多 1 正是 A6）。
 
 ## Definition of Done
 
-- [ ] AC3 与 AC4 的实跑输出**都**贴进任务体（拒绝方向与放行方向各一份）
-- [ ] 完整套件连跑 2 次全绿（判据是 `fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录：**这条缺陷的严重性来自它在交付物里，不在本仓**——
+- [x] AC3 与 AC4 的实跑输出**都**贴进任务体（拒绝方向与放行方向各一份）
+- [x] 完整套件连跑 2 次全绿（判据是 `fail 0` 且 `cancelled 0`）
+      **证据**：套件 #10 与 #11（最终状态 `baaa0f80`，含 AC8 的 A6 断言）连续两条
+      `FULL-SUITE-EXIT=0` / `fail 0` / `cancelled 0`（各 1960 ✔ / 24 ﹣）。
+- [x] 任务体记录：**这条缺陷的严重性来自它在交付物里，不在本仓**——
       本仓的活 worktree 02:4xZ 已挪到磁盘，而文档仍在教每个新装的项目建进内存
-- [ ] `orchestration/SPEC-cold-start-one-liner.md` AC9 标注为已落地，并写明理由已从「重启即消失」升级为「OOM 成因」
+- [x] `orchestration/SPEC-cold-start-one-liner.md` AC9 标注为已落地，并写明理由已从「重启即消失」升级为「OOM 成因」
 
 ## Touches
 
@@ -129,6 +162,7 @@ resume 先改交付物里的路径约定，再加落地校验；校验的负控�
 - plugin/test/quay-init-loop.test.mjs
 - plugin/scripts/test-isolation-check.ts
 - docs/analysis/fast-mode-batch2-prompt.md
+- packages/quay/test/install-config-driven-e2e.test.mjs（landing 时追加：AC8 的 A6 断言）
 
 ## Dispatch review
 
@@ -161,6 +195,16 @@ changed: **管理者提出、外层立案并补齐引用面。** 管理者给了
 **排期约束**：与 `gap-init-guesses-the-tmux-session-...` 及
 `gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down` **同动 `plugin/scripts/quay-init.sh`，三者须串行**。
 `plugin/loop/fast-mode-loop-tick.md` 与在飞的两条分支不相交。
+
+reviewer: inner（landing）
+at: 2026-08-04
+changed: **执行落地记录**。AC1–AC8 + DoD 全部勾选，证据见上。实现含：quay-init 的
+`worktree_root` 解析 + tmpfs 校验（fail-closed，AC3/AC4）、config 写入、tick 文档/batch2-prompt/
+注释/夹具全部改到 `$WORKTREE_ROOT/<slug>` 磁盘约定、R6 豁免移除（AC6）、`worktree-root-fs-check.test.mjs`
+新测试（AC3/AC4）、`quay-init-loop.test.mjs` 为 --loop 注入磁盘 worktree-root、AC8 的 e2e `A6` 断言。
+**landing 过程引入一处回归并已修**：两个跑真实 quay-init --loop 的测试（session-liveness AC3/AC7、
+cold-start-skill rehearsal）在 /tmp workspace 上被新校验正确拒绝——已改传磁盘 `--worktree-root`。
+**本任务与 token 任务合并落地，DoD 全量 #10/#11 一次满足两任务。**
 
 ## 遥测记录（2026-08-04，与真实区间不符，**不可用作基线**）
 

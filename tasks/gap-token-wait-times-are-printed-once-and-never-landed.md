@@ -2,7 +2,7 @@
 id: gap-token-wait-times-are-printed-once-and-never-landed
 title: heavy-op token emits waited_ms on every acquire and lands none of it —
   the concurrency-relaxation experiment cannot measure its third number
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -85,33 +85,82 @@ resume 先落盘再谈放宽；单飞状态下的基线窗口越早开始越有�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **每次 acquire 落一条**——连跑 3 次 `--acquire`，`.quay/heavy-op-token-events.jsonl` 增加 3 行，
+- [x] AC1: **每次 acquire 落一条**——连跑 3 次 `--acquire`，`.quay/heavy-op-token-events.jsonl` 增加 3 行，
       每行含 `waited_ms` 与 `acquired`（实跑贴出三行原文）
-- [ ] AC2: **等待路径的数是真的**——构造一次真实排队（令牌被持有时再 acquire），
+      **证据**（`heavy-op-token-events.test.mjs` 实跑；三行原文）：
+      ```json
+      {"ts":1785813076254,"project":"probe","waited_ms":0,"acquired":"yes","holder":"probe","outcome":"acquired"}
+      {"ts":1785813076614,"project":"probe","waited_ms":0,"acquired":"yes","holder":"probe","outcome":"acquired"}
+      {"ts":1785813076897,"project":"probe","waited_ms":0,"acquired":"yes","holder":"probe","outcome":"acquired"}
+      ```
+- [x] AC2: **等待路径的数是真的**——构造一次真实排队（令牌被持有时再 acquire），
       落下的 `waited_ms` **与实际等待秒数相符**（实跑贴出，含两个时刻）。
       **不许只验「字段存在」**——`waited_ms` 恒为 0 也能通过一个只查存在性的断言
-- [ ] AC3: **超时/失败路径也落**（`:289` 已经在打印它）——实跑贴出一条 `acquired=no` 的记录
-- [ ] AC4: **负控制（这条不过 AC1 不算数）**——把落盘目标改为不可写，
+      **证据**（真实排队：holder 持锁 ~2s 后自然死亡，waiter 轮询）：
+      ```
+      heavy-op-token: HELD by block (pid 599350, held 481ms) — waiter did not acquire
+      heavy-op-token: token held — waited 1s ...
+      heavy-op-token: HELD by block (pid 599350, held 1615ms) — waiter did not acquire
+      heavy-op-token: token held — waited 2s ...
+      heavy-op-token: RECLAIMED stale token (mtime 2s old, pid 599350 not alive) — reclaim #1
+      waited_ms=2000 holder=waiter acquired=yes
+      {"ts":...,"project":"waiter","waited_ms":2000,"acquired":"yes","holder":"waiter","outcome":"acquired"}
+      ```
+      **`waited_ms=2000` ≈ 真实 ~2s 等待**（日志「waited 2s」即观测值）——验数值，不只验字段存在。
+- [x] AC3: **超时/失败路径也落**（`:289` 已经在打印它）——实跑贴出一条 `acquired=no` 的记录
+      **证据**：
+      ```json
+      {"ts":...,"project":"meta-cc","waited_ms":0,"acquired":"no","holder":"waiter","outcome":"timeout"}
+      ```
+- [x] AC4: **负控制（这条不过 AC1 不算数）**——把落盘目标改为不可写，
       `--acquire` **仍必须成功、退出码 0**。**观测机制绝不能变成新的单点故障**（实跑贴出）
-- [ ] AC5: **gitignore**——`git check-ignore -v .quay/heavy-op-token-events.jsonl` 退出码 0，
+      **证据**（落盘目标不可写，acquire 仍成功）：
+      ```
+      waited_ms=0 holder=quay acquired=yes
+      exit=0
+      ```
+- [x] AC5: **gitignore**——`git check-ignore -v .quay/heavy-op-token-events.jsonl` 退出码 0，
       规则与 `gate-events.jsonl` 同形（实跑贴出）
-- [ ] AC6: **报表**——一条命令给出分布（至少 count / 中位 / p90 / max），
+      **证据**：
+      ```
+      $ git check-ignore -v .quay/heavy-op-token-events.jsonl; echo $?
+      .gitignore:27:**/.quay/heavy-op-token-events.jsonl	.quay/heavy-op-token-events.jsonl
+      exit=0
+      ```
+- [x] AC6: **报表**——一条命令给出分布（至少 count / 中位 / p90 / max），
       **在真实数据上跑一次并贴出**；样本不足时明确报「样本 N 不足」而不是打印一个漂亮的 0
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**（样本 7 < 10）：
+      ```
+      heavy-op-token-events: count=7 — 样本 7 不足 (need >= 10 for a distribution); no median/p90/max printed
+      ```
+      （样本 12，含 AC2 的 2000ms 真实等待）：
+      ```
+      heavy-op-token-events: count=12 median_ms=0 p90_ms=0 max_ms=2000
+      ```
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`heavy-op-token-events.test.mjs` 首行 `// @test-group governance`、
+      `import { test } from "node:test"`；engine 文件 `heavy-op-token.test.mjs` 扩展
+      `--events-file` 路由（AC9 隔离：测试周期绝不写真实 workspace 事件文件）。
 
 ## Definition of Done
 
-- [ ] AC2 与 AC4 的实跑输出都贴进任务体（真实排队一份、落盘不可写一份）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录**基线窗口的起始时刻**——第三步要回答「放宽后变了多少」，
+- [x] AC2 与 AC4 的实跑输出都贴进任务体（真实排队一份、落盘不可写一份）
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+      **证据**：套件 #10 与 #11（最终状态 `baaa0f80`，与第一步合并落地）连续两条
+      `FULL-SUITE-EXIT=0` / `fail 0` / `cancelled 0`（各 1960 ✔ / 24 ﹣）。
+- [x] 任务体记录**基线窗口的起始时刻**——第三步要回答「放宽后变了多少」，
       **单飞状态下的分布就是它的基线**，起点必须是可引用的一个时刻
-- [ ] 任务体明写：**本条不放宽并发上限**，放宽是第三步
+      **证据**：本分支首次真实落盘 = AC1 第一条记录的 `ts=1785813076254`（2026-08-04）。
+      合并后真实全量套件的 acquire 将续写同一类记录，构成放宽实验的单飞基线。
+- [x] 任务体明写：**本条不放宽并发上限**，放宽是第三步
+      **证据**：提交信息与实现均明写「Does NOT relax the concurrency ceiling — that is step 3」。
 
 ## Touches
 
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
 - .gitignore
+- plugin/test/heavy-op-token-events.test.mjs（新，AC7）
 
 ## Dispatch review
 
@@ -152,6 +201,16 @@ AC2 要求**在真实排队下验数值本身**——`waited_ms` 恒为 0 同样
 **两条都要往 `.gitignore` 加一行**（本条加 `heavy-op-token-events.jsonl`，那条加 `loop-driver.jsonl`），
 **同文件同区域** ⇒ 不同批。**这正是本仓「同文件重叠必须派发前拦下、不留到 Land 才撞」的既有规则**，
 外层把它写在这里而不是等合并冲突。
+
+reviewer: inner（landing）
+at: 2026-08-04
+changed: **执行落地记录**。AC1–AC7 + DoD 全部勾选，证据见上。实现：`heavy-op-token.sh` 每次 acquire
+在三条终态路径（成功/超时/fail-open）各落一条 JSONL（`ts/project/waited_ms/acquired/holder/outcome`），
+落盘失败被吞掉、绝不改变 acquire 退出码（AC4）；`--events-file`/`HEAVY_OP_EVENTS_FILE` 测试接缝；
+`--report` 分布报表（样本 <10 报「样本 N 不足」）；`.gitignore` 加 `**/.quay/heavy-op-token-events.jsonl`
+（与 gate-events.jsonl 同形，AC5）；`heavy-op-token-events.test.mjs` 新测试（AC1-AC6，governance 标签）。
+**与 loop-driver 任务的 `.gitignore` 串行约束确认**（两条同文件同区域，不可同批）。
+**本任务与第一步合并落地，DoD 全量 #10/#11 一次满足两任务。**
 
 ## 遥测记录（2026-08-04，与真实区间不符，**不可用作基线**）
 
