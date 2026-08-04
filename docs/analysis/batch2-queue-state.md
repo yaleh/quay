@@ -2369,6 +2369,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **suite-speed 唯一在飞**（control/4，2h45m，σ 协议推进中）；auto-block 持续（预期）。
   内层备忘「wait for suite-speed to finish, then close the batch」。
 
+### tick 2026-08-04T19:02Z（外层，`no-action`：稳态）
+
+- **suite-speed 唯一在飞**（control/5，3h5m——从 control/4 推进，σ 协议确认仍在跑）；auto-block
+  持续（预期，等其括号关闭自清）。批内其余全部合并；无新提交（master 停在 df42cb21）。
+- ready-pool-check 已诚实（pool 0，deficit 3）——suite-speed 完成后内层关批时会从 todo 补晋。
+- **核实（AC1）**：suite-speed 从 control/4 → control/5（pane 文本），确认测量推进非卡死。
+- 无其它停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
