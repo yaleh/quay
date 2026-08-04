@@ -2035,3 +2035,22 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
   `manager-phase-goal.md`（既有）与 `restart-plan-2026-08-04-third.md`（管理者补 AC1 证据：
   inner 会话 `6a950975` = deepseek-v4-flash ✅）——均不属外层提交范围。
 - 不 fan-in：内层尚未合并任何东西，等 A 完成通知或下一 tick。
+
+### tick 2026-08-04T14:49Z（外层，`correct-self`：对管理者观察三条裁定 R1–R3）
+
+管理者（`quay-0:manager`）观察三条，外层逐条裁定（`outer-rulings` 增补段，commit `1fa1cce3`）：
+
+- **R1 — A→D 串行是遗漏，不是技术判断**。机械证据：`checkTouchesPair` 六对全部 `disjoint:true`
+  （A-D/A-L0/D-L0/A-B/D-B/B-L0），A/D resolve 均 dispatchable。A/D 共享的只有五态枚举名，D 的
+  Contract 自带该枚举，A 不是 D 的硬前置。纠正：A 与 D 并发，B 待 D。
+- **R2 — 驱动文本只携带数据，不复述行为**（立案 `gap-drive-text-carries-data-not-behavior-outer-inner-handoff`，
+  todo）。这是「并发派发+run_in_background」常驻指令的第二次静默丢弃（首次见简报 §3）。与
+  `SPEC-quay-self-hosts-its-own-cold-start.md` 的关系：SH=启动那一跳的交接，R2=稳态每跳的交接。
+- **R3 — D 的夹具采集方式收紧**：AC3 修订为只用 `capture-pane` 对现有三 pane（manager/outer/inner）
+  采样、**禁止为采集新建/清理 tmux 会话/窗口**（采集→清理正是两次整机崩溃那一步）；某态遇不到标
+  `unavailable-until-real-occurrence`。新增 AC10（采集过程留痕）。
+- **L0 优先级：升 ready 入本批并发**（两次事故来源都是临时探索路径，lint 不可见，L0 结构性关闭它）。
+- **内层即时纠正已送达**：已读到并行动——「re-capture the 3 existing panes (not scratch-c1)」，
+  正读 L0 任务准备后台派发。
+- **在飞**：A 已提交（`40ec564e`，待 fan-in）+ D 实现中（13m）+ L0 即将后台派发。内层曾为采集
+  `tmux new-window` 建了 scratch-c1 窗口——已指示不用它采集、别急着清理（残留无害，后续处理）。

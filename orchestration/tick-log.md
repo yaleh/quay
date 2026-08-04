@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 14:49Z | `correct`（**correct-self**：我上一条驱动文本用散文覆盖了出厂 tick 文档的并发契约，把该由文档供给的行为当数据复述了） | 对管理者观察三条裁定 R1–R3 并落盘：R1 A→D 串行=遗漏（checkTouchesPair 六对全 disjoint）；R2 立案「驱动文本只带数据」（并发派发常驻指令第二次静默丢弃）；R3 收紧 D 夹具采集（只用现有三 pane，禁新建/清理 tmux）；L0 升 ready 入并发批次；驱动内层纠正已送达；提交 1fa1cce3 | 内层已吸收纠正（re-capture 3 existing panes not scratch-c1、读 L0 准备后台派发）；A 提交 40ec564e 待 fan-in；D 实现中 13m；scratch-c1 残留窗口待处理 | ①checkTouchesPair 六对全 disjoint（实跑输出）；②A/D resolve dispatchable；③内层 pane 文本确认读到纠正并计划改用现有 pane 采集；④L0 resolve 的 MISSING=我的 touches 把备注写进了路径，已修 |
 | 2026-08-04 14:42Z | `no-action` | 内层实现 A 中（worktree 磁盘、checker+夹具已建未提交），D/B 顺序待排；核实无停止条件、无阻塞；Monitor 三判据 true、loop-driver LIVE；不 fan-in；写回队列 | 内层 `◼ A ◻ D ◻ B`，Implementing ADR-016 amendment + checker（6m13s）；在飞 0/3（内层实现，非外层 Agent） | ①内层 worktree 建在 `quay-worktrees/` 非 /tmp（git worktree list）；②`--detect-stop` 无命中；③restart-plan 改动=管理者补 AC1 证据（非外层管辖） |
 | 2026-08-04 14:36Z | `unblock`（第三次重启冷启动 + 执行 A–F 裁定） | 订正交接文档模型（deepseek-v4-flash，人裁定）；核实 A–F 草案关键引用并定稿 outer-rulings（附核实记录表）；立案 A/D/B（commit 45c0f91）；F superseded send-keys-verified（分支 6a51f964 保全、worktree 移除）；park retirestate（61a92a41 保全）；token-counter 改范围；关两条崩溃残留遥测括号、清 task-over-90m auto-block（wait 1365.2s）；tmux send-keys 驱动内层 A→D→B 实现；重挂 inner-state Monitor + 建 cron（LIVE）；写回队列 | 内层刚 boot（deepseek-v4-flash 欢迎屏）即收到 A/D/B 指令开始思考；在飞 0/3（内层实现中，非外层 Agent）；Monitor 三判据 true；loop-driver LIVE(1)；`--detect-stop` 无命中 | ①ADR-016 clause1 原文（adr/ADR-016...md:36）；②session-liveness.sh:612 整屏哈希；③inner-blocked-signal.ts:634 `omitted ⇒ no-op`；④fast-mode tick:233 裸 `--detect-stop` 无 `--transcript`；⑤简报 §2 订正后与 TMUX 实况一致 |
 | 2026-08-04 06:20Z | `correct`（**correct-self 两次**：我报了一个被负载放大的数，又先怀疑了一个更坏且不成立的成因） | **核实内层「30/30 绿」的声称并查到跨任务回归**；把根因与同族先例修法直接给内层，省它一个诊断轮次；把管理者的 `run_in_background` 实测折为 AC1b，把「`--task-start` 可靠」的确证写进任务体 | 内层：**两条任务已实质关闭**（tmpfs `done` AC 9/9 DoD 4/4；token `done` AC 8/8 DoD 4/4），worktree 只剩 3b 一条（1 分钟前提交）。**3b 已于 06:19 合并进 master**（`b76c3d51`），**06:26 起跑合并后的全量套件 #12**。棘轮 `new 0`。遥测：完成仍 **64**、tph **1.459**、`inProgress 4`（含 `gap-init-guesses` **重复两条**：幽灵 + 新 start）。**门槛红断言数：0**（`tests 6 / pass 6`）。Monitor 三判据全 true；驱动 LIVE(1) | **①核实内层写在已 `done` 任务里的「Contract invoke 实跑 → 30/30 绿」**。第一次实测 `fail 12`，**重跑 `fail 2`** ⇒ **我第一次是在内层同时跑套件时测的，被负载放大，报 2 不报 12**（此即上一 tick 那族负载敏感的又一次现身）。**②我先怀疑的是更坏的情况——「done 任务带着一个跑不了的 `invoke`（测试文件从未创建）」——查了，不成立**：`worktree-root-fs-check.test.mjs` 04:27 就已建好。**③真因是跨任务回归，而且内层没有虚报**：3b 的 tmux 检测 **06:19 随 `b76c3d51` 合并进 master**，其 fail-closed 让那两条**不传 `--tmux-session`** 的测试变红（报 `none could be detected ... matching 'quay-wt-ws-xxxx'`）。**内层写「30/30 绿」时是真的**——它跑在钉住的 `verify` 上，**红是之后由另一条任务带来的**。⇒ **一条已关闭任务的 `invoke` 现在在 master 上跑不通，而它的 DoD 两次全绿发生在破坏性合并之前。** **④已把根因与先例直接给内层**：它自己 04:48 的 `6e5d16d1` 为**同一类原因**适配过两条，`cold-start-skill.test.mjs:137` 现成写法可照抄；**当时漏掉第三条不是疏忽——那时 tmux 检测还没在 master 上，它是绿的**。**机制在按设计工作**：内层已在跑合并后的全量套件，它会抓到这 2 条 |
@@ -232,11 +233,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 72 | 36% |
+| no-action | 72 | 35% |
 | unblock | 36 | 18% |
-| correct | 88 | 43% |
+| correct | 89 | 44% |
 | escalate | 7 | 3% |
-| **合计** | **203** | — |
+| **合计** | **204** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
