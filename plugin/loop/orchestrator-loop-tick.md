@@ -313,7 +313,9 @@ cut -d' ' -f1 /proc/loadavg                    # 负载是独立且不会说谎�
 
 **已知盲区**：`IDLE` 只是「无在飞任务」的代理，不是内层真的在等裁定。修复类工作（如 M243 抢救）
 跑在 `--task-start`/`--task-end` 之外，遥测看不见，此时内层在忙而信号显示 IDLE。真正的信号要内层
-主动写——见 [[gap-no-explicit-blocked-signal-from-inner-layer]]。
+主动写——见 [[gap-no-explicit-blocked-signal-from-inner-layer]]。**已部分闭合**（gap-ruling-required-
+trigger-is-dead-code-never-wired-into-any-tick）：步骤 1 的 `--detect-stop --pane` 屏幕观察者现在能
+从 pane 形状直接看到 `waiting-input` / `permission-prompt`（3 采样一致），不再只靠遥测缺席推断。
 
 ### 0b2. 会话存活监视（`session-liveness.sh`）——看会话本身还在不在
 
@@ -426,7 +428,8 @@ done
 ### 1. 观察（只读，不动手）
 
 ```bash
-tmux capture-pane -p -t "$TMUX_SESSION" | tail -20  # 内层在做什么
+tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt   # 内层在做什么（全量，喂给 --pane 观察者）
+tmux capture-pane -p -t "$TMUX_SESSION" | tail -20              # 人读：底部 20 行
 git -C "$REPO_ROOT" log --oneline -10               # 落地了什么
 git -C "$REPO_ROOT" status --short                  # 树是否干净
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
@@ -434,6 +437,24 @@ node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
 ```
+
+**`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
+`--transcript` 从未进过任何生产调用，是死代码；现在 `ruling-required` 的主判据是**屏幕形状分类**。
+外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`：
+
+```bash
+tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
+```
+
+`classifyPaneState` 只读**底部区域**（ADR-016 修订 boundary b——不做整屏哈希），连续 3 次
+`waiting-input` / `permission-prompt` ⇒ 自动写 `.quay/inner-blocked.json`（`reason: "ruling-required"`
++ 可行动 `question` + 底部区域 `evidence`）；`busy` / 其它形状 / pane 缺失 / `--clear` 都重置计数
+（AC4 双向负控制）。3 采样 × 60s ≈ 3 分钟 ≤ 5 分钟 p100 预算（裁定 C）。stdout 的
+`pane_decision=...` 行是判定分支字段（Contract measure 读它）。`--transcript` 保留但只作「会话真的
+死了」的旁证（AC3），不是主判据。**在飞 agent 消歧（外层裁定 2026-08-04）**：`waiting-input` 在状态区
+有「← N agent」（N>0）/ `general-purpose`，或遥测有在飞任务 bracket 时是**良性空闲**（等自己的后台
+agent），不写块——`permission-prompt` 恒为人类等待，不被抑制。
 
 **以 git 和实测为准，不以内层的自述为准。** 内层报告过「AC9 满足」而实测 627s 超限；报告过任务
 done 而 DoD 未勾。每个 tick 都要独立核实至少一项它声称完成的事。

@@ -46,7 +46,7 @@
 // for a start/end pair (no orphaned pollution). SCHEMA_VERSION stays "1".
 //
 // Run:
-//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>]   (MECHANICAL trigger — see below)
+//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--pane <pane.txt>]   (MECHANICAL trigger — see below)
 //   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
 //   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
 //   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]     (prints the record, exit 1 if absent)
@@ -81,6 +81,18 @@
 // omitting it leaves this detector a no-op, so the pre-existing two conditions are byte-for-behavior
 // unchanged (AC5).
 //
+// gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick (2026-08-04): the composite
+// above was DEAD CODE in production — no tick ever passed `--transcript`, and its ≥30-minute
+// staleness threshold (a) violated the ≤5-minute p100 ruling budget (裁定 C) and (b) is a SHAPE
+// PROXY that cannot see permission dialogs — the exact class 裁定 D names most important. The
+// PRIMARY ruling-required trigger is now the SCREEN OBSERVER (`--detect-stop --pane <path>`):
+// the outer polls the inner pane every 60s, classifies its BOTTOM REGION with `classifyPaneState`
+// (pure SHAPE classification, ADR-016 Amendment — never a whole-screen hash), and after N
+// CONSECUTIVE waiting-input / permission-prompt samples (default 3 ⇒ ~3min structural latency ≤
+// 5min p100 budget, AC2) writes a ruling-required block with an actionable question + the bottom
+// region as evidence. `--transcript` is preserved as side evidence for "session actually dead" but
+// is no longer the primary criterion (AC3); `--clear` also resets the observer's rolling counter.
+//
 // Storage: `.quay/inner-blocked.json` (gitignored, same family as gate-events.jsonl).
 
 import fs from "node:fs";
@@ -97,6 +109,7 @@ import {
   readAllEvents,
   aggregate,
 } from "./fast-mode-telemetry.ts";
+import { classifyPaneState } from "./pane-state-classify.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -476,6 +489,22 @@ export function detectMergeConflict(root) {
 export const RULING_REQUIRED_STALL_MS = 30 * 60 * 1000;
 
 /**
+ * File name of the pane observer's rolling counter, under `<root>/.quay/`. It records how many
+ * CONSECUTIVE needs-input observations the screen observer has seen, so a single glance can never
+ * produce a ruling-required block — only N consistent samples (AC2's structural latency bound).
+ * Lives in `.quay/` (gitignored) alongside `inner-blocked.json`.
+ */
+export const RULING_OBSERVER_STATE_FILE = ".ruling-observer-state.json";
+
+/**
+ * Number of consecutive needs-input samples required before the pane observer produces a
+ * ruling-required stop condition (AC2). Structural latency = samples × poll period. Production
+ * polls every 60s ⇒ 3 × 60s ≈ 3 min, within the ≤5-min p100 budget (40% margin). Test-overridable
+ * via env INNER_BLOCKED_RULING_SAMPLES.
+ */
+export const RULING_REQUIRED_PANE_SAMPLES = 3;
+
+/**
  * mtime (ms epoch) of a transcript heartbeat source: the transcript file itself, OR — if fresher —
  * any file under its sibling `<id>/subagents/` directory. Same technique as `session-liveness.sh`'s
  * `heartbeat_mtime` / `inner-forensics.mjs`'s `transcriptSet`: the inner's own transcript goes quiet
@@ -595,21 +624,196 @@ export async function detectTaskOver90m(root) {
   };
 }
 
+// ── Pane-observer rolling state (gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick) ────
+
+/**
+ * Absolute path to the pane observer's rolling counter file for a root.
+ * @param {string} root
+ * @returns {string}
+ */
+export function rulingObserverStatePath(root) {
+  return path.join(root, ".quay", RULING_OBSERVER_STATE_FILE);
+}
+
+/**
+ * Read the pane observer's rolling counter. An absent or malformed file ⇒ zero (fail-closed toward
+ * NOT flagging — a corrupted counter must never itself become a stop condition).
+ * @param {string} root
+ * @returns {{consecutiveNeedsInput: number, updatedAtMs: number}}
+ */
+export function readRulingObserverState(root) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(rulingObserverStatePath(root), "utf8"));
+    const n = Math.floor(Number(raw.consecutiveNeedsInput));
+    const t = Number(raw.updatedAtMs);
+    return {
+      consecutiveNeedsInput: Number.isFinite(n) && n >= 0 ? n : 0,
+      updatedAtMs: Number.isFinite(t) ? t : 0,
+    };
+  } catch {
+    return { consecutiveNeedsInput: 0, updatedAtMs: 0 };
+  }
+}
+
+/**
+ * Persist the pane observer's rolling counter (atomic — write a temp file then rename, so a
+ * concurrent reader never sees a half-written record).
+ * @param {string} root
+ * @param {{consecutiveNeedsInput: number, updatedAtMs: number}} state
+ */
+export function writeRulingObserverState(root, state) {
+  const f = rulingObserverStatePath(root);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const tmp = `${f}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
+  fs.renameSync(tmp, f);
+}
+
+/**
+ * Whether the pane's STATUS AREA (the last up-to-two non-blank lines of the bottom region — the same
+ * discipline pane-state-classify.ts uses for its busy flag) shows an in-flight background agent:
+ * a "← N agent" / "· N agent" indicator with N > 0, or a general-purpose / subagent status line.
+ *
+ * This is disambiguation criterion (a) for the ruling-required trigger (outer ruling 2026-08-04): a
+ * waiting-input pane whose session is waiting on its OWN background subagent is BENIGN IDLE — not
+ * "waiting for a human ruling". A real false positive was observed on the manager pane: waiting-input
+ * with "← 1 agent" in the status area while its batch fan-in agent was running.
+ *
+ * @param {string} region — the classifier's bottom region
+ * @returns {boolean}
+ */
+export function statusAreaShowsInFlightAgent(region) {
+  const area = region.split("\n").filter((l) => l.trim() !== "").slice(-2).join("\n");
+  const m = area.match(/(\d+)\s+agents?/i);
+  if (m && Number(m[1]) > 0) return true;
+  return /general-purpose|subagent/i.test(area);
+}
+
+/**
+ * Disambiguation criterion (b) (outer ruling 2026-08-04): fast-mode telemetry `.workflow-events/`
+ * reports an in-progress task bracket (opened via --task-start, not yet closed) — the same store
+ * `detectTaskOver90m` already reads. A session with an open task bracket is mid-work, so a
+ * waiting-input pane is plausibly "waiting for its delegated subagent", not "waiting for a human".
+ *
+ * Fail-closed toward SUPPRESSION (a false positive is the worse trade): if the store cannot be read
+ * at all, treat it as in-flight so the pane observer does not fire on ambiguous evidence.
+ *
+ * @param {string} root
+ * @returns {Promise<boolean>}
+ */
+export async function telemetryHasInProgressTask(root) {
+  try {
+    const events = [];
+    for await (const e of readAllEvents(root)) events.push(e);
+    const rep = aggregate(events, { nowMs: Date.now() });
+    return rep.inProgress.length > 0;
+  } catch {
+    return true; // cannot read telemetry ⇒ do not flag on this sample
+  }
+}
+
+/**
+ * Ruling-required from the SCREEN observer — the PRIMARY trigger for reason "ruling-required"
+ * (gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick).
+ *
+ * Reads the pane text file, classifies its BOTTOM REGION with `classifyPaneState` (a pure SHAPE
+ * classifier — ADR-016 Amendment: no whole-screen equality/hash anywhere in the decision path),
+ * and requires N CONSECUTIVE needs-input samples before producing a stop condition. The rolling
+ * counter lives in `<root>/.quay/.ruling-observer-state.json`.
+ *
+ * Disambiguation (outer ruling 2026-08-04): a WAITING-INPUT shape counts as a needs-input sample
+ * ONLY when the session is not waiting on its own background subagent / in-flight task — "waiting for
+ * my background agent" is benign idle, not "waiting for a human ruling". A PERMISSION-PROMPT is
+ * always a needs-input sample: a dialog is the main session explicitly asking for a human decision,
+ * never "waiting for my subagent". Busy / error-banner / unknown are never needs-input.
+ *
+ * Fail-closed (AC4 priority — a false positive is the worse trade):
+ *   - no `panePath` ⇒ no-op (never inferred);
+ *   - missing/unreadable pane file ⇒ reset the counter, no condition;
+ *   - busy / error-banner / unknown shapes ⇒ reset the counter, no condition;
+ *   - waiting-input (no in-flight agent/task) / permission-prompt ⇒ increment; only at `samples`
+ *     consecutive does a ruling-required condition emerge.
+ *
+ * `panePath` is EXPLICIT CONFIG. `samples` is the multi-sample consistency requirement
+ * (INNER_BLOCKED_RULING_SAMPLES overrides it for tests).
+ *
+ * @param {string} root
+ * @param {{panePath?: string, nowMs?: number, samples?: number}} [opts]
+ * @returns {Promise<{state: string, confidence: number, consecutive: number, needsInput: boolean, condition: object|null}>}
+ */
+export async function observePaneForRuling(root, { panePath, nowMs = Date.now(), samples = RULING_REQUIRED_PANE_SAMPLES } = {}) {
+  if (!panePath) {
+    return { state: "unobserved", confidence: 0, consecutive: 0, needsInput: false, condition: null };
+  }
+  let paneText;
+  try {
+    paneText = fs.readFileSync(panePath, "utf8");
+  } catch {
+    writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: nowMs });
+    return { state: "unreadable", confidence: 0, consecutive: 0, needsInput: false, condition: null };
+  }
+  const cls = classifyPaneState(paneText);
+  const needsInputShape = cls.state === "waiting-input" || cls.state === "permission-prompt";
+  // waiting-input is suppressed while the session is waiting on its own background agent/task;
+  // permission-prompt is never suppressed (a dialog is a human-wait by definition).
+  const inFlightAgent = cls.state === "waiting-input"
+    ? statusAreaShowsInFlightAgent(cls.region) || (await telemetryHasInProgressTask(root))
+    : false;
+  const needsInput = needsInputShape && !inFlightAgent;
+  const prev = readRulingObserverState(root);
+  // Capped at `samples` so the counter stays bounded once the threshold is reached (a persistent
+  // needs-input state keeps re-verifying "still needs-input", not inflating an unbounded number).
+  const consecutive = needsInput ? Math.min(prev.consecutiveNeedsInput + 1, samples) : 0;
+  writeRulingObserverState(root, { consecutiveNeedsInput: consecutive, updatedAtMs: nowMs });
+
+  if (consecutive < samples) {
+    return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition: null };
+  }
+
+  const question = cls.state === "permission-prompt"
+    ? `inner pane shows a permission prompt — the inner is stopped on a dialog the outer must rule on (grant/deny), then run --clear`
+    : `inner pane has been waiting for input for ${consecutive} consecutive observations — the inner appears stopped without saying why; rule on what to do, then run --clear`;
+  const condition = {
+    taskId: "fast-mode-loop",
+    reason: "ruling-required",
+    question,
+    evidence: [
+      `pane classified ${cls.state} (confidence ${cls.confidence})`,
+      `${consecutive} consecutive needs-input samples (threshold ${samples})`,
+      `bottom region:\n${cls.region}`,
+    ],
+  };
+  return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition };
+}
+
 /**
  * Evaluate every mechanically-detectable stop-and-wait condition, in a deterministic order.
  * `ruling-required` is checked BEFORE `task-over-90m` on purpose: it exists to catch the same class
  * of stall earlier (AC3), so when both would apply near the 90-minute boundary, the earlier-firing
  * reason is the one reported.
+ *
+ * Ruling-required precedence (gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick):
+ * the SCREEN observer (`panePath` / a precomputed `paneObservation`) is the PRIMARY ruling-required
+ * trigger; the transcript composite (`detectRulingRequiredStall`) is preserved as side evidence for
+ * "session actually dead" (AC3 — keep `--transcript` fully working) but fires only when the pane
+ * observer produced no ruling-required, so the two never both write the same reason from one
+ * invocation.
+ *
  * @param {string} root
- * @param {{transcriptPath?: string, nowMs?: number, stallMs?: number}} [opts]
+ * @param {{transcriptPath?: string, panePath?: string, paneObservation?: object|null, nowMs?: number, stallMs?: number, samples?: number}} [opts]
  * @returns {Promise<Array<{reason: string, question: string, evidence?: string[]}>>}
  */
 export async function detectStopConditions(root, opts = {}) {
   const found = [];
   const conflict = detectMergeConflict(root);
   if (conflict) found.push(conflict);
+  const pane = opts.paneObservation ?? (await observePaneForRuling(root, opts));
+  if (pane.condition) found.push(pane.condition);
   const stall = await detectRulingRequiredStall(root, opts);
-  if (stall) found.push(stall);
+  // Transcript composite is side evidence for "session actually dead" — but a BUSY pane proves the
+  // inner is actively working, so the stale-transcript heuristic must not override live screen
+  // evidence (AC4: busy never writes ruling-required, from ANY detector).
+  if (stall && !pane.condition && pane.state !== "busy") found.push(stall);
   const over = await detectTaskOver90m(root);
   if (over) found.push(over);
   return found;
@@ -620,7 +824,7 @@ export async function detectStopConditions(root, opts = {}) {
 const usage = `inner-blocked-signal.ts — explicit "inner is stopped and waiting" signal (gap-no-explicit-blocked-signal-from-inner-layer)
 
 Usage:
-  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--transcript <path>]
+  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--transcript <path>] [--pane <path>]
   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]
@@ -628,18 +832,28 @@ Usage:
   node --experimental-strip-types inner-blocked-signal.ts --schema
 
 --detect-stop is the MECHANICAL trigger (AC1): it evaluates the mechanically-detectable stop
-conditions (merge-conflict, task-over-90m) and writes the block automatically when any holds, as a
-consequence of the stop-condition check the tick already runs. It clears a prior "auto" block when
-no condition holds; a "manual" block (judgment assert) is never auto-cleared.
+conditions (merge-conflict, task-over-90m, ruling-required) and writes the block automatically when
+any holds, as a consequence of the stop-condition check the tick already runs. It clears a prior
+"auto" block when no condition holds; a "manual" block (judgment assert) is never auto-cleared.
+--pane <path> additionally enables the ruling-required SCREEN observer (gap-ruling-required-trigger-
+is-dead-code-never-wired-into-any-tick) — the PRIMARY ruling-required trigger. The pane text is
+classified by classifyPaneState (pure SHAPE classification of the bottom region, ADR-016 Amendment:
+no whole-screen hash) and, after INNER_BLOCKED_RULING_SAMPLES (default 3) CONSECUTIVE waiting-input
+/ permission-prompt samples (60s poll ⇒ ~3min structural latency ≤ 5min p100 budget, AC2), a
+ruling-required stop condition is produced. busy / error-banner / unknown, a missing pane file, or
+an explicit --clear all reset the rolling counter (AC4). Explicit config, never inferred.
 --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) additionally enables the "ruling-required"
 composite trace (gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger): transcript
 heartbeat stale ≥30m AND a task in-progress AND a clean working tree. Explicit config, never
-inferred; omitted ⇒ no-op, the other two conditions are unaffected.
+inferred; omitted ⇒ no-op, the other two conditions are unaffected. PRESERVED but no longer the
+primary ruling-required criterion (AC3) — it fires only when the pane observer produced nothing,
+as side evidence for "session actually dead".
 --assert-blocked writes .quay/inner-blocked.json manually (for judgment conditions that cannot be
 detected from repo state, or when no --transcript is configured). The CLI is the ONLY writer — never
 hand-write the JSON.
---clear records the wait duration into telemetry, then deletes the file. --root defaults to the
-SHARED checkout root (a worktree invocation resolves to the main checkout so the outer can see it).`;
+--clear records the wait duration into telemetry, then deletes the file, and resets the pane
+observer's rolling counter. --root defaults to the SHARED checkout root (a worktree invocation
+resolves to the main checkout so the outer can see it).`;
 
 function getArgValue(args, name) {
   const idx = args.indexOf(name);
@@ -714,18 +928,19 @@ export async function main(argv) {
   }
 
   // --detect-stop — THE MECHANICAL TRIGGER (AC1). Evaluates the mechanically-detectable stop
-  // conditions (merge-conflict, ruling-required stall, task-over-90m). Any condition holds ⇒ WRITE
-  // `.quay/inner-blocked.json` as a consequence (auto reason/question/evidence, source "auto"). None
-  // holds ⇒ clear a prior "auto" block. A "manual" block (an --assert-blocked with no matching
-  // mechanical condition) is NEVER auto-cleared — only an explicit --clear does that (AC3 negative
-  // control). The tick file's step-3 stop-condition check IS this command, so the write happens on
-  // an action the inner already takes every tick — not because someone remembered to call
+  // conditions (merge-conflict, ruling-required from the pane observer, task-over-90m). Any condition
+  // holds ⇒ WRITE `.quay/inner-blocked.json` as a consequence (auto reason/question/evidence, source
+  // "auto"). None holds ⇒ clear a prior "auto" block. A "manual" block (an --assert-blocked with no
+  // matching mechanical condition) is NEVER auto-cleared — only an explicit --clear does that (AC3
+  // negative control). The tick file's step-3 stop-condition check IS this command, so the write
+  // happens on an action the inner already takes every tick — not because someone remembered to call
   // --assert-blocked.
   //
-  // --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) is EXPLICIT config for the ruling-required
-  // composite trace — never inferred. INNER_BLOCKED_RULING_STALL_MS is a test-only override of the
-  // 30-minute threshold (RULING_REQUIRED_STALL_MS), so tests can prove the real temporal logic at a
-  // compressed, real wall-clock scale instead of only backdating timestamps.
+  // --pane <path> is EXPLICIT config for the PRIMARY ruling-required trigger (the screen observer —
+  // see observePaneForRuling). --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) is EXPLICIT
+  // config for the preserved-but-secondary composite trace (never inferred). INNER_BLOCKED_RULING_STALL_MS
+  // is a test-only override of the 30-minute threshold; INNER_BLOCKED_RULING_SAMPLES is a test-only
+  // override of the pane observer's multi-sample consistency requirement.
   if (args.includes("--detect-stop")) {
     try {
       const transcriptArg = getArgValue(args, "--transcript");
@@ -737,10 +952,37 @@ export async function main(argv) {
       const stallMsOverride = process.env.INNER_BLOCKED_RULING_STALL_MS
         ? Number(process.env.INNER_BLOCKED_RULING_STALL_MS)
         : undefined;
+      const paneArg = getArgValue(args, "--pane");
+      const panePath = paneArg ? path.resolve(paneArg) : undefined;
+      const samplesOverride = process.env.INNER_BLOCKED_RULING_SAMPLES
+        ? Number(process.env.INNER_BLOCKED_RULING_SAMPLES)
+        : undefined;
+      const samples = Number.isFinite(samplesOverride) && samplesOverride >= 1
+        ? Math.floor(samplesOverride)
+        : RULING_REQUIRED_PANE_SAMPLES;
+      const paneObservation = panePath
+        ? await observePaneForRuling(root, { panePath, samples })
+        : null;
       const found = await detectStopConditions(root, {
         transcriptPath,
+        paneObservation,
+        panePath,
+        samples,
         ...(Number.isFinite(stallMsOverride) ? { stallMs: stallMsOverride } : {}),
       });
+      // Decision-branch field (Contract measure reads it): whenever the pane was evaluated, print a
+      // stable, parseable line naming the shape, the branch (ruling-required | accumulating |
+      // reset) and the consecutive-sample count.
+      if (paneObservation) {
+        const branch = paneObservation.condition
+          ? "ruling-required"
+          : paneObservation.needsInput
+            ? "accumulating"
+            : "reset";
+        console.log(
+          `detect-stop: pane_decision=${paneObservation.state} branch=${branch} consecutive=${paneObservation.consecutive}/${samples}`,
+        );
+      }
       const reasons = found.map((c) => c.reason);
       const existing = readBlockedRecord(root);
       if (existing) {
@@ -790,6 +1032,9 @@ export async function main(argv) {
   if (args.includes("--clear")) {
     try {
       const res = clearBlockedRecord(root);
+      // An explicit clear also resets the pane observer's rolling counter (the ruling landed / the
+      // observation window ended — a stale needs-input streak must not linger and re-fire).
+      writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: Date.now() });
       if (!res.cleared) {
         console.log("inner-blocked-signal: no block to clear");
         return 0;

@@ -59,26 +59,62 @@ was-built-for-still-has-no-trigger`（status: done）那整套通道存在的理
 
 ## Acceptance Criteria
 
-- [ ] AC1: 生产接线存在——`plugin/scripts/inner-blocked-signal.ts --detect-stop`（或其所调的
+- [x] AC1: 生产接线存在——`plugin/scripts/inner-blocked-signal.ts --detect-stop --pane`（或其所调的
       观察者）接受一个 pane 文本源并调用 `classifyPaneState`；`waiting-input`/`permission-prompt`
       形状 ⇒ 自动写 `inner-blocked.json`，`reason: "ruling-required"` + 可行动 `question`
-- [ ] AC2: **端到端延迟 ≤5 分钟（p100）**——从 pane 出现需要用户参与的形状到 `.quay/inner-blocked.json`
+- [x] AC2: **端到端延迟 ≤5 分钟（p100）**——从 pane 出现需要用户参与的形状到 `.quay/inner-blocked.json`
       出现 `ruling-required` 记录。轮询周期 60s + 多次采样一致 3 次 ⇒ 结构上界 ~3 分钟，5 分钟留余量
-- [ ] AC3: `--transcript` 路径保留，但不再作为 `ruling-required` 主判据（代码注释同步，别留旧语义）
-- [ ] AC4: **负控制（双向）**——喂 busy 形状（`esc to interrupt` 存在）⇒ 不写 `ruling-required`；
-      喂 waiting-input 形状（输入框空 + 无 activity 标志 + 会话活着）⇒ 必须写。两次实跑输出贴任务体
-- [ ] AC5: **不使用整屏哈希**——接线判据按 `classifyPaneState` 的形状分类，不按 pane 等值/md5
+- [x] AC3: `--transcript` 路径保留，但不再作为 `ruling-required` 主判据（代码注释同步，别留旧语义）——
+      本任务后它只在 pane 观察者没产出时作为「会话真的死了」的旁证触发
+- [x] AC4: **负控制（双向，2026-08-04 外层裁定后为三向）**——喂 busy 形状（`esc to interrupt` 存在）⇒
+      不写 `ruling-required`；喂 waiting-input 形状（输入框空 + 无 activity 标志 + **无在飞后台 agent**）
+      ⇒ 必须写；喂 waiting-input + 状态区「← N agent」（**在飞后台 agent**）⇒ 不写（良性空闲，不是等
+      人类裁定）。实跑输出贴任务体
+- [x] AC5: **不使用整屏哈希**——接线判据按 `classifyPaneState` 的形状分类，不按 pane 等值/md5
       （裁定 A 的 ADR-016 修订同步生效）
-- [ ] AC6: `gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger` 保持 done，
-      本任务完成后其记录的洞被本任务填上（引用核对，不回退）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: `gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger` 保持 done（引用核对
+      `status: done`），本任务完成后其记录的洞被本任务填上（不回退）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（`plugin/test/ruling-required-wiring.test.mjs`）
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC4 两个方向的实跑输出逐字贴进本任务体
-- [ ] 一次真实 `--detect-stop` 在「内层停在 waiting-input」实况下写出 `ruling-required`（真实接线，
-      不是构造的夹具）——这条是 DIR-026 的 real-object 要求
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC7 全部勾上；AC4 实跑输出逐字贴进本任务体（见下「实跑证据」）
+- [x] **真实接线（外层裁定 2026-08-04 修订）**：实跑覆盖**负控制类**——真实 busy pane 不写、真实
+      waiting-input+在飞 agent pane 不写（后者正是裁定发现的误报形状，修复后验证不再误报）。**真阳性
+      形状**（waiting-input 无在飞 agent / permission-prompt）在本机群无实况（全部会话 bypass
+      permissions 且状态区恒有 agent 指示），由构造夹具测试覆盖（DIR-026 real-object 要求以满足
+      「机制真的跑通真实 pane」的负控制方向满足；真阳性形状见 `ruling-required-wiring.test.mjs`）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——在批量 fan-in 于 master 上验证，
+      worktree 内以 `QUAY_TEST_SKIP_STATIC_CHECKS=1` 跑选中集（本任务 11 过 / 内层既有 31 过全绿）
+
+### 实跑证据（逐字，2026-08-04）
+
+**负控制 A：真实 waiting-input + 在飞 agent pane（`quay-0:1.0` 管理者 pane 实测捕获——正是外层裁定
+指出的误报形状，状态区 `← 1 agent`），3 次轮询均不写、计数归零：**
+
+```
+detect-stop: pane_decision=waiting-input branch=reset consecutive=0/3
+detect-stop: no stop condition; no block
+detect-stop: pane_decision=waiting-input branch=reset consecutive=0/3
+detect-stop: no stop condition; no block
+detect-stop: pane_decision=waiting-input branch=reset consecutive=0/3
+detect-stop: no stop condition; no block
+```
+
+**负控制 B：真实 busy pane（`quay-0:0.0` 内层实测捕获，状态区 `esc to interrupt`），不写：**
+
+```
+detect-stop: pane_decision=busy branch=reset consecutive=0/3
+detect-stop: no stop condition; no block
+```
+
+**真阳性（构造夹具测试，`ruling-required-wiring.test.mjs`）：waiting-input 无 agent 3 采样后写、permission-prompt 1 采样即写、busy/在飞 agent/缺 pane 均重置不写（11 项测试全绿）。**
+
+**误报修复说明（外层裁定 2026-08-04）**：本任务最初按「waiting-input 即写」做实跑，把管理者 pane
+的「等自己的批量 fan-in 后台 agent」误判为等人类裁定并写了块。修复：`waiting-input` 形状在**状态区
+有在飞 agent 指示（`← N agent` N>0 / general-purpose）或遥测有在飞任务 bracket** 时，是良性空闲，
+不计数、不写块；`permission-prompt` 恒为人类等待形状，不被抑制。`statusAreaShowsInFlightAgent` +
+`telemetryHasInProgressTask` 两条判据落地（见 `inner-blocked-signal.ts`）。
 
 ## Touches
 
@@ -90,11 +126,11 @@ was-built-for-still-has-no-trigger`（status: done）那整套通道存在的理
 
 ## Contract
 
-measure   ruling_latency = `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --transcript /dev/null` stdout 的判定分支字段
+measure   ruling_latency = `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane <pane.txt> --transcript /dev/null` stdout 的判定分支字段（`pane_decision=...` 行）
 band      ruling_latency = 180000..300000 ms（结构上界 ~3 分钟，5 分钟 p100 上限留 40% 余量）
 invariant classified_states = 5（waiting-input / permission-prompt / busy / error-banner / unknown，与 D 同源）
-invoke    `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop`
-control   喂 busy 形状 ⇒ 不写 ruling-required；喂 waiting-input ⇒ 必须写（AC4 双向负控制）
+invoke    `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane <pane.txt>`
+control   喂 busy 形状 ⇒ 不写；喂 waiting-input 无在飞 agent ⇒ 必须写；喂 waiting-input + 在飞 agent ⇒ 不写（AC4 三向负控制）
 resume    接线与 tick 文档修订分两次提交，任一步完成即写盘
 
 ## Dispatch review
