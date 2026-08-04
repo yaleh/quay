@@ -181,6 +181,10 @@ same bottom, upper A: waiting-input | upper B: waiting-input | equal: true
 different bottom (busy): busy | differs from idle: true
 ```
 
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`scripts/test.sh plugin/test/pane-state-classify.test.mjs`（worktree 内以 QUAY_TEST_SKIP_STATIC_CHECKS=1 跑；fan-in 后全量绿见 DoD）→ ℹ tests 11 / pass 11 / fail 0 / cancelled 0 / skipped 0。
+
 ### AC7 实跑输出（逐字——把 busy-manager-1 重标为 waiting-input 后跑测试）
 
 ```

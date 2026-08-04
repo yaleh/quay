@@ -70,6 +70,10 @@ PreToolUse hook（人已否决，裁定 E）。本任务只让「repo 与测试�
 - [x] 一次真实演示：经助手建的隔离会话被杀，外层真实 quay 会话（`tmux ls`）完好
 - [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——fan-in 后实测：tests 2276 / fail 0 / cancelled 0 / skipped 25
 
+### invoke 实跑证据（task-contract-check 消费者：done 任务必须展示 invoke 入口路径）
+
+`scripts/test.sh plugin/test/tmux-isolated.test.mjs`（worktree 内以 QUAY_TEST_SKIP_STATIC_CHECKS=1 跑；fan-in 后全量绿见 DoD）→ ℹ tests 5 / pass 5 / fail 0 / cancelled 0 / skipped 0。
+
 ### AC2 实跑输出（2026-08-04，逐字）
 
 ```
