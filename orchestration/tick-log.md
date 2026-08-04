@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 15:42Z | `no-action` | 核实 L0 已 fan-in（f6ad4d09）、A 已合并、D/B 待合并（各 +1 commit）；内层跑批全量套件且已内化滚动派发；就绪池=3（AC-queue 成立）；提交 RESEARCH 文档（2 条立案的引用基）；写回 | 内层：批全量套件运行中（1 shell），完成后关本批+清 worktree+滚动派发；D/B 待合并 | ①git log 核 L0 fan-in + D/B 新 commit；②pane 文本确认滚动派发已内化、3 晋级任务 resolve 可派发；③`--detect-stop` 无命中 |
 | 2026-08-04 15:37Z | `correct`（**correct-self**：我的「本批」措辞引导批思维，覆盖了 tick §4 的滚动派发语义；就绪池假满是我该维护的） | 吞吐两条：①核实批门控非出厂要求（§4=上限非栅栏），驱动内层改滚动派发（槽位空即派、不等 fan-in）；②就绪池假满（6 条里 0 真可派发：本批未翻+fixture+PARKED），晋级 3 条真实任务（task-write-title/suite-speed/node-compile-cache）；立外层 AC-queue（ready≥3 真实可派发，排除三类） | 内层：批全量套件运行中（fan-in 收尾），在飞 1（B）；滚动派发纠正已送达 | ①tick §4 原文核实（cap 非栅栏、330 行=触摸重叠分批）；②ready 池逐条分类（fixture/PARKED/本批）；③三候选 resolve dispatchable + 两两 touch 核对（suite/node 重叠） |
 | 2026-08-04 15:22Z | `no-action` | 独立核实 A 合并（检查器 PASS 1/band 0..1，send-keys retired 正确；ADR-016 Amendment+CLAUDE.md 落位）；B/D/L0 均已提交待合并；内层跑 fan-in 验证；写回 | 内层：fan-in 中（已合并 A，D/B/L0 待合并），24 node 进程跑测试；A 完成，B 子代理完成 | ①`adr016-screen-use-check.ts` 实跑 PASS + retired 正确分类；②grep ADR-016 Amendment/CLAUDE.md 引用；③B worktree 3 commit 含假阳性修正（git log） |
 | 2026-08-04 15:02Z | `no-action` | 原始字段核实常驻指令已满足（B 15:01:41 rib:true）；A/D 已提交未合并（checker/classifier 均落 worktree）；B/L0 worktree 建；subagent 并发 2（L0+B）；不 fan-in 等批；写回 | 内层：D 任务体写 AC5 实跑输出；两个 general-purpose 子代理并发（L0 session-liveness 12m+、B 25s）；无停止条件 | ①meta-cc 查 B 的 Agent 调用 rib:true（原始字段）；②A/D 交付物落 worktree（ls 实测）；③`--detect-stop` 无命中 |
@@ -237,11 +238,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 74 | 36% |
+| no-action | 75 | 36% |
 | unblock | 36 | 17% |
-| correct | 91 | 43% |
+| correct | 91 | 44% |
 | escalate | 7 | 3% |
-| **合计** | **208** | — |
+| **合计** | **209** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`

@@ -2146,3 +2146,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **外层 AC 已立**（outer-phase-goal AC-queue）：ready 池常态 ≥3 真实可派发，判据排除本批未翻 /
   fixture / PARKED；晋级速率跟上派发速率。排除后现 = 3 ✓。
 - 内层当前：全量套件运行中（批 fan-in 收尾），完成后关任务、清 worktree、按上限滚动派发。
+
+### tick 2026-08-04T15:42Z（外层，`no-action`：内层批 fan-in 收尾中）
+
+- **L0 已 fan-in**（`f6ad4d09`，tmux-isolated.sh + session-liveness 迁移落 master）。A 已合并
+  （`d3104bbc`）。**D/B 各新增一个 commit**（pane-state-classify `f6d67fa0`、ruling-required-wiring
+  `18ed59b2`）待合并。
+- **内层**：正在跑批全量套件（fan-in 验证，1 shell）；完成后关本批（A/D/B/L0 翻 done）、清 worktree、
+  **滚动派发下一批**——已内化我上轮的滚动派发纠正（pane 备忘原文即此）。且已核实 3 条晋级任务的
+  resolve dispatchable（pane 明示 "All 3 new tasks resolve as dispatchable"）。
+- **就绪池（AC-queue）**：排除本批/fixture/PARKED 后 = 3（task-write-title / suite-speed /
+  node-compile-cache）✓。
+- **新立案 2 条**（`aeef3ae2`）：ADR-016 Amendment-2（改 one-shot 理由不改结论）+ claude -p 窄实测
+  （gating + 退出语义，实钱红线）。`RESEARCH-claude-p-streaming-2026-08-04.md` 已提交跟踪（`15:42Z`）。
+- 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
+- 资源闸：内层跑套件期间外层只做廉价核实。
