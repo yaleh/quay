@@ -54,7 +54,10 @@ test('AC3 — a worktree root on tmpfs makes quay-init --loop fail closed with a
   }
   const ws = diskTemp('quay-wt-ws-');
   const tmpfsRoot = path.join(tmpfsBase, `quay-wt-ac3-${process.pid}`);
-  const r = runInit(ws, ['--loop', '--dry-run', '--test-command', 'scripts/test.sh', '--worktree-root', tmpfsRoot]);
+  // Explicit --tmux-session: this test does not care about tmux, but quay-init --loop now
+  // fail-closes on an undetectable session (gap-init-guesses-the-tmux-session) — pass one so the
+  // tmpfs worktree-root validation is what runs (same precedent as cold-start-skill.test.mjs:137).
+  const r = runInit(ws, ['--loop', '--dry-run', '--test-command', 'scripts/test.sh', '--worktree-root', tmpfsRoot, '--tmux-session', 'proj-0:0.0']);
   assert.notEqual(r.status, 0, `tmpfs worktree root must fail closed, got status ${r.status}\n${r.stdout}${r.stderr}`);
   assert.match(r.stderr, /on tmpfs.*memory|memory.*not disk|this is memory/i,
     `the error must say the root is on tmpfs / memory, got:\n${r.stderr}`);
@@ -78,7 +81,9 @@ test('AC4 — a real disk worktree root proceeds: exit 0, config records it, and
     spawnSync('git', ['-C', ws, 'add', '.']);
     spawnSync('git', ['-C', ws, 'commit', '-q', '-m', 'init']);
 
-    const r = runInit(ws, ['--loop', '--test-command', 'scripts/test.sh', '--worktree-root', wtRoot]);
+    // Same --tmux-session rationale as AC3 above: this test verifies the worktree-root validation
+    // only; an explicit session keeps quay-init --loop's tmux fail-closed from firing.
+    const r = runInit(ws, ['--loop', '--test-command', 'scripts/test.sh', '--worktree-root', wtRoot, '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `disk worktree root must NOT be rejected, got status ${r.status}\n${r.stdout}${r.stderr}`);
     assert.match(r.stdout + r.stderr, /not tmpfs, OK|not tmpfs/i, 'validation must print that the root is accepted');
 
