@@ -55,7 +55,7 @@ extra:
 
 ```
 measure ruling_required_auto_fires = `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --root <fixture>` 在「内层停下等裁定」夹具下自动写出 reason=ruling-required 的次数字段
-measure detection_latency_min = 从「内层停止推进」到文件产生的分钟数字段
+measure detection_latency_min = `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --root <fixture>` 从内层停止推进到文件产生的分钟数字段
 band ruling_required_auto_fires = >0
 invariant 停下等裁定必须由内层已在做的动作触发，不依赖它额外记得
 invoke `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop`
