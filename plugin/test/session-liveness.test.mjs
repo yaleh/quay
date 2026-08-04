@@ -158,9 +158,15 @@ function makeHermeticProbe(session) {
 }
 
 // spawnMonitor — run the REAL session-liveness.sh with a fast test interval and overridable targets.
-function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin } = {}) {
+// Isolation (single-flight mount, 2026-08-03): the monitor now acquires the mount lock + writes
+// heartbeat/events to its global dir, so EVERY spawned monitor gets its OWN SESSION_LIVENESS_GLOBAL_DIR
+// temp dir — otherwise a test monitor would collide with a real production mount (or with a SIGKILLed
+// sibling's stale lock in a shared test dir) and exit 0 as a no-op. cleanup() removes the temp dir.
+function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin, globalDir } = {}) {
+  const gd = globalDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "sl-global-"));
   const monEnv = {
     ...env,
+    SESSION_LIVENESS_GLOBAL_DIR: gd,
     SESSION_TARGETS: targets,
     INTERVAL: String(interval),
     STALL_MIN: String(stallMin),
@@ -173,7 +179,12 @@ function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, st
   let out = "";
   child.stdout.on("data", (d) => { out += d; });
   child.stderr.on("data", (d) => { out += d; });
-  return { child, output: () => out };
+  return {
+    child,
+    output: () => out,
+    globalDir: gd,
+    cleanup() { try { fs.rmSync(gd, { recursive: true, force: true }); } catch { /* best-effort */ } },
+  };
 }
 
 async function waitForOutput(mon, pattern, timeoutMs) {
@@ -273,6 +284,7 @@ test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes bu
     assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `SESSION-RESUMED must precede SESSION-IDLE:\n${out}`);
   } finally {
     mon.child.kill("SIGKILL");
+    mon.cleanup();
     tmux(["send-keys", "-t", PROBE_TARGET, "C-u"], env); // leave the probe at a clean prompt
     await sleep(500);
   }
@@ -295,6 +307,7 @@ test("SESSION-GONE then SESSION-BACK fire when the probe's claude process vanish
       assert.ok(await waitForOutput(mon, /SESSION-BACK gone/, 6000), `SESSION-BACK must fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -317,6 +330,7 @@ test("REPO-STALL fires when alive but the repo HEAD commit is ≥STALL_MIN old (
         `the old SESSION-STALL name must not appear after the AC8 rename:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -338,6 +352,7 @@ test("SESSION-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (not h
       assert.ok(await waitForOutput(mon, /SESSION-OVERDUE overdue/, 6000), `SESSION-OVERDUE must fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -370,6 +385,7 @@ test(".halt suppresses REPO-STALL and SESSION-OVERDUE, but NOT SESSION-GONE", { 
       assert.ok(await waitForOutput(mon, /SESSION-GONE halted/, 6000), `GONE must still fire when halted:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -399,6 +415,7 @@ test("F — a transcript heartbeat that keeps advancing suppresses SESSION-OVERD
         `OVERDUE must fire once the transcript freezes (AC3 direction 2 — the whole point):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     if (toucher) toucher.kill("SIGKILL");
@@ -429,6 +446,7 @@ test("F2 — a transcript heartbeat includes its subagents dir: stale main + fre
         `OVERDUE must fire once BOTH main and subagent transcripts freeze:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -453,6 +471,7 @@ test("F3 — SESSION_TRANSCRIPTS accepts a session id and resolves it under $HOM
         `a session-id selector must resolve to $HOME/.claude/projects/<slug>/<id>.jsonl:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -490,6 +509,7 @@ test("G — removing .halt resets the staleness baseline: no OVERDUE/REPO-STALL 
     } finally {
       stopBusyLoop(p.env, p.session);
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -514,6 +534,7 @@ test("LOOP_MIN split — OVERDUE prints the fixed EXPECTED_CYCLE_MIN, never the 
         `OVERDUE must print the fixed EXPECTED_CYCLE_MIN (20):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -656,6 +677,7 @@ test("AC6 — no tick log: SESSION-OVERDUE stays silent, other events work, no c
       assert.ok(await waitForOutput(mon, /SESSION-GONE notick/, 6000), `GONE must still fire:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -722,6 +744,7 @@ test("noise gate — an idle transition with an OLD tick log IS reported (idle b
         `IDLE must fire when the tick is stale (idle but no tick):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -747,6 +770,7 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
         `IDLE must be SILENT when the tick is fresh (healthy cycle end, noise gate):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -770,6 +794,7 @@ test("AC11 — a DIRECTORY heartbeat (inner-style .workflow-events/) triggers th
         `a directory heartbeat (inner work-output) must trigger the same overdue criterion:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -870,6 +895,7 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
         `IDLE must fire once the semantic flag disappears:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -899,6 +925,7 @@ test("AC1 — a pane whose ONLY change is the /clear to save token counter stays
       assert.ok(!/SESSION-IDLE tok/.test(out), `token-counter-only change must NOT produce an IDLE pair:\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -927,6 +954,7 @@ test("AC2 — transcript fresh + screen idle ⇒ SESSION-MARKER-STALE (cross pos
       toucher.kill("SIGKILL"); toucher = null;
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     if (toucher) toucher.kill("SIGKILL");
@@ -947,6 +975,7 @@ test("AC2 — a fresh TICK LOG (not a transcript) + idle pane does NOT fire mark
         `fresh tick log is NOT session evidence; must NOT fire marker-stale:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -973,6 +1002,7 @@ test("AC9 — idle + transcript with isApiErrorMessage structural field ⇒ SESS
         `healthy/stale idle must NOT report CANT-SEND:\n${monH.output()}`);
     } finally {
       monH.child.kill("SIGKILL");
+    monH.cleanup();
     }
     // blocked target: idle + API errors in the recent window → CANT-SEND fires (per-round edge, once)
     const monB = spawnMonitor(p.env, `b ${p.tmp} ${p.session}`, { transcripts: `b ${blocked}` });
@@ -985,6 +1015,7 @@ test("AC9 — idle + transcript with isApiErrorMessage structural field ⇒ SESS
       assert.equal(once, 1, `CANT-SEND must be edge-triggered (once per blocking episode), got ${once}:\n${monB.output()}`);
     } finally {
       monB.child.kill("SIGKILL");
+    monB.cleanup();
     }
   } finally {
     p.cleanup();
@@ -1022,6 +1053,7 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
       assert.match(li[1], /^\d+ 分钟前$/, `last-input must read N 分钟前:\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -1054,6 +1086,7 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
         `AC7 must reject the corrupted payload (last-input 取不到); the 25s window is not the check:\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -1069,8 +1102,9 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
   const x = path.join(p.tmp, "session.jsonl");
   fs.writeFileSync(x, [userRecord(isoAgo(5)), assistantRecord(isoAgo(0.05))].join("\n") + "\n");
   const mutated = path.join(p.tmp, "session-liveness-mutated.sh");
-  fs.writeFileSync(mutated, fs.readFileSync(SCRIPT, "utf8").replace(/echo "SESSION-RESUMED/,
-    'cause=""\n            echo "SESSION-RESUMED'));
+  // The event emitter is sl_emit (writes stdout + shared file); the mutation must target THAT call.
+  fs.writeFileSync(mutated, fs.readFileSync(SCRIPT, "utf8").replace(/sl_emit "SESSION-RESUMED/,
+    'cause=""\n            sl_emit "SESSION-RESUMED'));
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
@@ -1087,6 +1121,7 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
         `AC6 must reject the empty-cause mutation (the 25s window is not the check):\n${out}`);
     } finally {
       mon.child.kill("SIGKILL");
+    mon.cleanup();
     }
   } finally {
     p.cleanup();
@@ -1112,4 +1147,215 @@ test("AC4 — the script header documents the screen-vs-transcript tradeoff, eac
   assert.ok(src.includes("同时用时以谁为准"), "header must state which signal wins when both are used");
   assert.ok(src.includes("盲区"), "header must name each signal's blind spot");
   assert.ok(src.includes("SESSION-MARKER-STALE"), "header must name the cross positive control event (AC2)");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 单飞挂载（AC20a/b/d/AC5/AC6/AC7，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// 「谁需要谁自己起一个」对单飞资源是错的默认；正确的默认是「谁需要谁去订阅」，挂载是一个有主的、
+// 可接管的角色。这些测试把 AC20a–d / AC5 / AC6 / AC7 变成机械断言：
+//   M1  AC20a 第一个挂载取单飞锁（复用 heavy-op-token 的锁），锁记录的 pid 就是监视器进程自己。
+//   M2  AC20b 有活持有者时再挂 ⇒ 退出 0、打印属主与 pid、不新增进程（空操作不是失败）。
+//   M3  AC20d kill -9 持有者后下一次挂载必须接管，输出 takeover_ms。
+//   M4  AC5   持有者活着时绝不接管、绝不 kill——锁字节不变、持有者进程不灭。
+//   M5  AC6   三次挂载（一次持有 + 两次空操作）后 mount_count == 1。
+//   M6  AC20c/AC7 事件 + HEARTBEAT 写进共享 events.jsonl；第二方不挂载即可读到同一批事件；
+//                 持有者死后心跳停止增长（订阅方据此判定「看门的不在了」）。
+//   M7  AC1   复用点：session-liveness.sh 调用 heavy-op-token.sh 的锁；mount 入口 exec 监视器。
+//
+// 隔离：每个测试用独立的 SESSION_LIVENESS_GLOBAL_DIR 临时目录，绝不触碰真实 $HOME/.quay-global；
+// mount_count 按「/proc/<pid>/environ 带本测试全局目录 + cmdline 含 session-liveness.sh」统计，
+// 与契约的 `ps -eo ppid,args | grep -c '[s]ession-liveness.sh'` 同构但限定在本测试的锁域内
+// （真实生产监视器不会漏进来）。所有挂载测试都跳过 --once 诊断接缝（不取锁）。
+
+const MOUNT = path.join(__dirname, "..", "scripts", "session-liveness-mount.sh");
+
+function mountEnv(globalDir, { owner = "test-owner", staleS = 2, targets, env = process.env } = {}) {
+  return {
+    ...env,
+    SESSION_LIVENESS_GLOBAL_DIR: globalDir,
+    SESSION_LIVENESS_OWNER: owner,
+    SESSION_LIVENESS_MOUNT_STALE_S: String(staleS),
+    SESSION_TARGETS: targets ?? `mt ${globalDir} mt-nonexistent`,
+    INTERVAL: "1",
+    STALL_MIN: "999",
+    OVERDUE_MIN: "999",
+  };
+}
+
+// countMountProcesses — mount_count scoped to THIS test's lock domain: session-liveness.sh processes
+// (NOT session-liveness-mount.sh) whose /proc/<pid>/environ carries our SESSION_LIVENESS_GLOBAL_DIR.
+function countMountProcesses(globalDir) {
+  let n = 0;
+  for (const d of fs.readdirSync("/proc", { withFileTypes: true })) {
+    if (!/^\d+$/.test(d.name)) continue;
+    let env, cmd;
+    try { env = fs.readFileSync(`/proc/${d.name}/environ`, "utf8"); } catch { continue; }
+    try { cmd = fs.readFileSync(`/proc/${d.name}/cmdline`, "utf8"); } catch { continue; }
+    if (env.includes(`SESSION_LIVENESS_GLOBAL_DIR=${globalDir}`) && cmd.includes("session-liveness.sh")) n++;
+  }
+  return n;
+}
+
+async function waitForToken(globalDir, timeoutMs = 8000) {
+  const tokenPath = path.join(globalDir, "heavy-op", "token");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !fs.existsSync(tokenPath)) await sleep(50);
+  return fs.existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8") : null;
+}
+
+test("M1 (AC20a) — the first mount acquires the single-flight lock; the recorded pid IS the monitor process", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
+  let m;
+  try {
+    m = spawn("bash", [MOUNT], { env: mountEnv(globalDir) });
+    const token = await waitForToken(globalDir);
+    assert.ok(token, "the first mount must acquire the lock");
+    assert.match(token, /holder=test-owner/, `lock must record the owner:\n${token}`);
+    const pid = parseInt(token.match(/pid=(\d+)/)[1], 10);
+    assert.equal(pid, m.pid, `the lock's recorded pid must be the monitor's own pid (got ${pid}, monitor ${m.pid})`);
+    const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+    assert.ok(cmd.includes("session-liveness.sh"), `recorded pid must be the running monitor:\n${cmd}`);
+  } finally {
+    if (m) m.kill("SIGKILL");
+    fs.rmSync(globalDir, { recursive: true, force: true });
+  }
+});
+
+test("M2 (AC20b) + M4 (AC5) — a second mount with a live holder is a NO-OP: exit 0, prints owner+pid, no new process, never steals", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
+  const tokenPath = path.join(globalDir, "heavy-op", "token");
+  let holder;
+  try {
+    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir) });
+    assert.ok(await waitForToken(globalDir), "holder must have the lock");
+    const before = countMountProcesses(globalDir);
+    assert.equal(before, 1, `exactly one mount process before the second mount, got ${before}`);
+    const tokenBefore = fs.readFileSync(tokenPath, "utf8");
+    const holderPid = holder.pid;
+
+    const t0 = Date.now();
+    const second = spawnSync("bash", [MOUNT], { encoding: "utf8", env: mountEnv(globalDir, { owner: "test-owner2" }) });
+    const elapsed = Date.now() - t0;
+
+    assert.equal(second.status, 0, `second mount must exit 0 (no-op, not a failure):\n${second.stdout}\n${second.stderr}`);
+    assert.ok(elapsed < 10000, `second mount must be quick (a no-op does not wait for the holder to die), took ${elapsed}ms`);
+    assert.match(second.stdout, /已有活持有者/, `second mount must say a live holder exists:\n${second.stdout}`);
+    assert.match(second.stdout, /test-owner/, `second mount must print the holder's owner:\n${second.stdout}`);
+    assert.match(second.stdout, /pid \d+/, `second mount must print the holder's pid:\n${second.stdout}`);
+
+    const after = countMountProcesses(globalDir);
+    assert.equal(after, 1, `second mount must NOT add a process (mount_count stays 1), got ${after}`);
+    assert.equal(fs.readFileSync(tokenPath, "utf8"), tokenBefore,
+      "AC5: the lock must be byte-identical after a no-op — the second mount never steals/kills");
+    assert.ok(fs.existsSync(`/proc/${holderPid}`), "AC5: the original holder must still be alive (never killed)");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(globalDir, { recursive: true, force: true });
+  }
+});
+
+test("M3 (AC20d) — after kill -9 of the holder, the next mount TAKES OVER and reports takeover_ms", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
+  const tokenPath = path.join(globalDir, "heavy-op", "token");
+  let holder;
+  try {
+    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir, { staleS: 1 }) });
+    assert.ok(await waitForToken(globalDir), "holder must have the lock");
+    const holderPid = holder.pid;
+    holder.kill("SIGKILL"); holder = null;
+    await sleep(100);
+    assert.ok(!fs.existsSync(`/proc/${holderPid}`), "holder must be dead after kill -9");
+
+    const m3 = spawn("bash", [MOUNT], { env: mountEnv(globalDir, { staleS: 1 }) });
+    let out3 = "";
+    m3.stdout.on("data", (d) => { out3 += d; });
+    m3.stderr.on("data", (d) => { out3 += d; });
+    try {
+      const dl2 = Date.now() + 15000;
+      while (Date.now() < dl2 && !/接管成功 takeover_ms=\d+/.test(out3)) await sleep(100);
+      assert.match(out3, /接管成功 takeover_ms=\d+/,
+        `the next mount must take over and measure takeover_ms:\n${out3}`);
+      const token2 = fs.readFileSync(tokenPath, "utf8");
+      const newPid = parseInt(token2.match(/pid=(\d+)/)[1], 10);
+      assert.equal(newPid, m3.pid, `after takeover the new holder must be the new mount:\n${token2}`);
+      assert.ok(fs.existsSync(`/proc/${newPid}`), "the new holder must be running");
+      assert.equal(countMountProcesses(globalDir), 1, "takeover must not create a second monitor process");
+    } finally {
+      m3.kill("SIGKILL");
+    }
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(globalDir, { recursive: true, force: true });
+  }
+});
+
+test("M5 (AC6) — three mounts in one lock domain ⇒ exactly ONE surviving session-liveness.sh process (mount_count=1)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
+  let holder;
+  try {
+    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir) });
+    assert.ok(await waitForToken(globalDir), "the first mount must hold the lock");
+    for (let i = 0; i < 2; i++) {
+      const r = spawnSync("bash", [MOUNT], { encoding: "utf8", env: mountEnv(globalDir) });
+      assert.equal(r.status, 0, `mount ${i + 2} must exit 0 (no-op):\n${r.stdout}\n${r.stderr}`);
+    }
+    await sleep(200);
+    assert.equal(countMountProcesses(globalDir), 1,
+      `after three mounts, mount_count must be 1 (one holder, two no-ops), got ${countMountProcesses(globalDir)}`);
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(globalDir, { recursive: true, force: true });
+  }
+});
+
+test("M6 (AC20c/AC7) — a SESSION-* event + HEARTBEAT land in the shared events.jsonl; a second party reads them WITHOUT mounting; heartbeat stops after holder death", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-shared");
+  const globalDir = path.join(p.tmp, "sl-global");
+  const eventsFile = path.join(globalDir, "events.jsonl");
+  let holder;
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir, { targets: `sh ${p.tmp} ${p.session}`, env: p.env }) });
+    // wait for the first HEARTBEAT in the shared file
+    const dl1 = Date.now() + 10000;
+    while (Date.now() < dl1 && !(fs.existsSync(eventsFile) && /HEARTBEAT/.test(fs.readFileSync(eventsFile, "utf8")))) await sleep(100);
+    let content = fs.readFileSync(eventsFile, "utf8");
+    assert.match(content, /"event":"HEARTBEAT"/, `shared events file must carry HEARTBEAT lines:\n${content}`);
+    assert.match(content, /"ts":\d+/, `events must carry timestamps (AC7):\n${content}`);
+
+    // trigger a real SESSION-GONE (kill the probe's claude child) — it must land in the shared file
+    tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
+    tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+    const dl2 = Date.now() + 10000;
+    while (Date.now() < dl2 && !(fs.existsSync(eventsFile) && /SESSION-GONE sh/.test(fs.readFileSync(eventsFile, "utf8")))) await sleep(100);
+    content = fs.readFileSync(eventsFile, "utf8");
+    assert.match(content, /SESSION-GONE sh/, `SESSION-GONE must land in the shared file (AC20c: 第二方不挂载即可读到同一批事件):\n${content}`);
+    assert.match(content, /"event":"SESSION-GONE"/, `the event must be JSON-structured:\n${content}`);
+    assert.equal(countMountProcesses(globalDir), 1, "reading the shared file must not require a second mount");
+
+    // kill the holder → the heartbeat stops growing → a subscriber sees staleness (AC7, no one re-mounts)
+    const lastTsBefore = Number([...fs.readFileSync(eventsFile, "utf8").matchAll(/"ts":(\d+)/g)].at(-1)[1]);
+    holder.kill("SIGKILL"); holder = null;
+    await sleep(1500);
+    const lastTsAfter = Number([...fs.readFileSync(eventsFile, "utf8").matchAll(/"ts":(\d+)/g)].at(-1)[1]);
+    assert.equal(lastTsAfter, lastTsBefore,
+      "after the holder dies, no new heartbeat events are appended — the subscriber can detect the holder is gone (AC7)");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    p.cleanup();
+  }
+});
+
+test("M7 (AC1) — the reuse point: session-liveness.sh calls heavy-op-token.sh's lock; session-liveness-mount.sh execs the monitor", () => {
+  const sl = fs.readFileSync(SCRIPT, "utf8");
+  // AC1 复用点：不新写一套锁——直接调用 heavy-op-token.sh 的 --acquire（wx 原子创建 + mtime 陈旧 AND
+  // pid 不存活才回收，那套锁已在真实死持有者上回收 17 次）。
+  assert.ok(sl.includes("heavy-op-token.sh") && sl.includes("--acquire"),
+    "session-liveness.sh must call heavy-op-token.sh --acquire (the reuse point, AC1)");
+  assert.ok(sl.includes("mtime 陈旧") && sl.includes("pid 不存活"),
+    "the header must cite the lock's stale-reclaim rule (mtime stale AND dead pid)");
+  const mount = fs.readFileSync(MOUNT, "utf8");
+  assert.match(mount, /exec bash .*session-liveness\.sh/, "the mount entry must exec session-liveness.sh (holder pid survives exec)");
 });

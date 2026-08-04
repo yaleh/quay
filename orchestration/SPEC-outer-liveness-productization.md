@@ -302,3 +302,23 @@
 **一般形态**：**「谁需要谁自己起一个」对单飞资源是错的默认。**
 正确的默认是「谁需要谁去订阅」，而挂载是一个有主的、可接管的角色。
 这与令牌是同一条原理，区别只在于令牌天然是排他的、监视器看起来不是——**看起来不是，所以没人给它加锁。**
+
+### 落地（2026-08-03/04，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）
+
+- **挂载入口**：`plugin/scripts/session-liveness-mount.sh`（`exec` 进 `session-liveness.sh`，同一 pid）。
+  `session-liveness.sh` 自身也在长跑模式取单飞锁——**任何入口都单飞**，`--once` 等诊断接缝不取锁。
+- **AC20a**：取锁 = 直接调用 `heavy-op-token.sh --acquire <owner> --root $QUAY_GLOBAL_DIR/session-liveness`
+  （**不新写锁**；wx 原子创建 + mtime 陈旧 AND pid 不存活才回收，那套已在真实死持有者上回收 17 次）。
+  锁状态在 `$QUAY_GLOBAL_DIR/session-liveness/heavy-op/token`。
+- **AC20b**：`_sl_acquire_or_noop` 先 `--timeout 0` 快查；有活持有者 ⇒ 打印属主与 pid、退出 0。
+  两个实现陷阱（均已修并测试钉住）：① 取锁不能用命令替换 `$(...)`——它会引入瞬态子 shell 当
+  heavy-op-token 的父进程，锁记下子 shell 的 pid（随即退出），下一个挂载会误回收活持有者；
+  ② 单飞门必须直接调用、不能 `case "$( _sl_acquire_or_noop )" in`——命令替换的子 shell 会在函数
+  返回时触发 EXIT trap 立刻释放锁。
+- **AC20d**：持有者 kill -9 后，下一次挂载 `--timeout N` 有界等待回收并取得，输出
+  `takeover_ms=<毫秒>`（`SESSION_LIVENESS_MOUNT_STALE_S` 默认 3 只影响接管速度，活持有者永不回收）。
+- **AC20c / AC7**：事件与心跳写 `$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`
+  （每行 `{"ts":…,"event":…,"name":…,"msg":…}`）；持有者每轮追加一条 `HEARTBEAT`。
+  订阅方读最后一条 ts / 文件 mtime 判「看门的不在了」，**不需要任何人去试挂**。
+- **AC9（本任务的判据）**：`monitor-mount-check.sh` 的 `ownedByThisSession` 已废除，
+  判据改为 `delivered`（共享事件文件有新事件）——别的会话挂的、投递正常 ⇒ PASS；无人挂载 ⇒ FAIL。
