@@ -10,6 +10,12 @@ extra:
   schema: v1
 ---
 
+> **SCOPE CHANGE (outer ruling D, 2026-08-04) — `orchestration/outer-rulings-2026-08-04-A-F.md`.**
+> Do NOT implement as "add more strip rules" to `mask_pane` — accumulating strip rules for each
+> new volatile row is the symptom of reading the wrong function (whole-pane hash). Re-implement
+> to consume `classifyPaneState` from `gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable`
+> (bottom-region + shape classification, not whole-pane equality). Touches change accordingly.
+
 **type:** execution
 
 ## Proposal

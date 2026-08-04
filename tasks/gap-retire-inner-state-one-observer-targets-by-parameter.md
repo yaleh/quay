@@ -10,6 +10,13 @@ extra:
   schema: v1
 ---
 
+> **PARKED (outer ruling, 2026-08-04) — execution suspended.** The retirement rationale
+> ("inner-state.sh's one irreplaceable signal never fired") is superseded by ruling D's pane
+> observer (`gap-pane-state-is-hashed-not-classified-...`), which provides exactly the signal
+> this task would have retired the old observer for. Cleanup follows architecture, not the other
+> way round. Work preserved on branch `task/gap-retire-inner-state-one-observer-targets-by-parameter`
+> @ `61a92a41`, unmerged. Reassess for dispatch after D lands.
+
 **type:** execution
 
 ## Proposal

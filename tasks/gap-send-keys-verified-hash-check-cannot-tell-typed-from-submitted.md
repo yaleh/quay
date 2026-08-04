@@ -3,13 +3,23 @@ id: gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted
 title: send-keys-verified.sh reports delivered on pane-hash change alone — that
   changes the instant text is typed, before Enter is confirmed processed, so a
   lost/delayed Enter is misreported as delivered
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
 extra:
   schema: v1
+  superseded: true
+  superseded_by: gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable
+  superseded_at: 2026-08-04
 ---
+
+> **SUPERSEDED by outer ruling F (2026-08-04) — `orchestration/outer-rulings-2026-08-04-A-F.md`.**
+> The hash-heuristic approach is dead per human ruling: input-confirmation is lower priority
+> (a mis-sent message is still observable), and the state this task guarded ("message sitting
+> unsubmitted in the input box") is exactly the pane-visible shape that ruling D's classifier
+> covers. **ACs intentionally not satisfied — closed by supersession, not by the gate.**
+> Worktree work (251 lines) preserved on branch `task/gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted` @ `6a51f964`, unmerged.
 
 **type:** execution
 
