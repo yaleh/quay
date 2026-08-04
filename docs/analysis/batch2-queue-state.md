@@ -1984,3 +1984,17 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
   `--task-end`（`fm-...-gzxg3x`）+ worktree/branch 清理。ready 队列现只剩 QENG demo +
   gap-split-decision（Touches 全部可解析，机械 resolve 检查已接进派发路径）。
 - **在飞（0/3）**。
+
+### 并发派发 2（2026-08-04T10:4xZ，外层指定 cold-start self-hosting 前置）
+
+- **派发（并发，同一消息内两个 `Agent`，均显式 `run_in_background: true`）**：
+  - `gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted`
+    （runId `fm-...-w6m5x8`，worktree `/home/yale/work/quay-worktrees/sendkeys`，分支同名）
+  - `gap-retire-inner-state-one-observer-targets-by-parameter`
+    （runId `fm-...-bxqip0`，worktree `/home/yale/work/quay-worktrees/retirestate`，分支同名）
+- 两者 `checkTouchesPair` 机械核实 **`disjoint: true`**（send-keys 只碰 `send-keys-verified.sh` + 测试；
+  retire-inner 只碰 `inner-state.sh`/`monitor-mount-check.sh`/`quay-init.sh`/`session-liveness.test.mjs`）。
+- **`gap-split-decision-finality-not-enforced` 不派**：人已裁定 needs-human（追 `decideSplitAdjudication`
+  调用链，唯一调用者 `prepare-milestone.js --decide-split` 被 ADR-022 物理删除，15 次重复派发场景
+  不可再现），任务体含完整证据 + 人原话。
+- **在飞（2/3）**：sendkeys + retirestate。二者是 cold-start self-hosting 规格链的真实前置依赖。
