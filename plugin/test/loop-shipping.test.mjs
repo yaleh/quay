@@ -93,6 +93,7 @@ test('AC1b — after the move, no live reference to the 6 old paths remains (com
     path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), // this file's own regexes define the old paths
     path.join(pluginDir, 'test', 'task-contract-check.test.mjs'), // fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs
     path.join(repoRoot, 'README.md'),                       // the cold-start section documents the TARGET project's laid-down layout (orchestration/ + docs/analysis/)
+    path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'fixtures', 'scheduler'), // replay fixtures (gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet): the eligibility check's OUTPUT embeds the old-path regex patterns as DATA (the replay pins what the scheduler names), not live callers
     // plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET layout
     // (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path strings are
     // therefore only policed by AC1c's three assertions, and AC1c's liveLines filter drops
