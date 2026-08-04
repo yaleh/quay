@@ -50,3 +50,10 @@ acs: AC5
 - packages/quay-native/src/store.ts
 - packages/quay-native/test/gate-shape-dispatch.test.mjs
 - packages/quay/test/install-config-driven-e2e.test.mjs
+
+## Dispatch review
+
+reviewer: inner
+at: 2026-08-04T01:5xZ
+changed: 协调方（内层）自建——承载红 e2e 的 AC5（finding 无 Plan 过闸，dod-gate 的后续）。
+无外层 review（内层建任务先例，红 e2e 的 AC 承载需要）。
