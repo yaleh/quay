@@ -2476,6 +2476,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   流水线，不再靠角色自觉（spec 继承性要求兑现）。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true；无停止条件。
 
+### tick 2026-08-04T22:43Z（外层，`unblock`：内层批后停摆，外层驱动补晋）
+
+- **内层停摆检测**：meta-cc 显示 22:25 后无任何工具调用（20 分钟空闲）——批关闭后无 agent 通知它，
+  回合已结束、停在备忘「按 ready-pool-check 补晋并派下一批」未执行。
+- **外层驱动**：提示执行补晋 + 派发（ready-pool-check 已列 4 候选：phantom-in-flight / log-filtered /
+  checksplit / cold-start-recovery；补晋 3 条满足 pool≥3 再派，rib:true、scoped）。
+- **送达确认（transcript）**：22:43:08 落进内层（uuid 7fdd7df3）。候选仍 todo，待内层处理。
+- 这是批完成后「无 agent 通知 → 内层停」的已知形态（双层模型主推进信号是 agent 完成通知）——
+  外层 tick 就是兜底驱动。inProgress 0、无停止条件。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

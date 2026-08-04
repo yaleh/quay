@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 22:43Z | `unblock` | 内层批后停摆（meta-cc 22:25 后 20 分钟无工具调用，回合结束停在补晋备忘）；外层驱动执行补晋+派发（4 候选，补 3 满足 pool≥3）；transcript 确认送达 | 内层：收到补晋+派发指令待执行；候选仍 todo | ①meta-cc 核内层无活动（停摆实证）；②候选 status 仍 todo；③transcript 核驱动送达（uuid 7fdd7df3）；④`--detect-stop` 无命中 |
 | 2026-08-04 22:22Z | `no-action` | 机制闭环：批正式全关（8 done、worktree 干净）；内层按 ready-pool-check 推荐补晋并派下一批（产品机制驱动流水线，角色自觉退役）；inProgress 0、无停止条件 | 内层：按 ready-pool-check 补晋+派发下一批（候选已列） | ①git log 核批全关 6fa34a94 + worktree 干净；②ready-pool-check candidates 输出（4 条）；③inProgress 0 + detect-stop 无命中 |
 | 2026-08-04 22:02Z | `no-action` | 大批正式关闭：批全量 GREEN（2298/0/0），且抓到真实回归（2 测试仍调已退役 inner-state.sh，已修 9a3beb7f）；suite-speed 关闭（honest no-improvement）；7 关闭进行中；就绪池 0 待补晋 | 内层：7 个任务关闭中，等关闭完成 + 补晋 | ①git log 核批全量绿 + 回归修复；②suite-speed done + band 裁定并入；③inProgress 0 + detect-stop 无命中 |
 | 2026-08-04 21:43Z | `no-action` | 裁定 suite-speed band（delta_s>297.6 未满足 = 诚实 no-improvement 正确结论，非缺陷，已记任务体+驱动内层关闭）；内层 batch-end 验证中；inProgress 0、就绪池 0 待补晋 | 内层：batch-end final verification（批全量已跑），套件后关批+清 worktree | ①suite-speed DoD/band 读核；②inProgress 0 + detect-stop 无命中；③就绪池 0（诚实，等关批补晋） |
@@ -261,10 +262,10 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 | 类型 | 次数 | 占比 |
 |---|---|---|
 | no-action | 96 | 36% |
-| unblock | 36 | 17% |
+| unblock | 37 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **231** | — |
+| **合计** | **232** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
