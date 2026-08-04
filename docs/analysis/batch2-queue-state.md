@@ -27,7 +27,8 @@
 - ✅ `gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`：已 merge（`0c0daf6b`），20/20 绿；`send-keys-reliable.sh`（5 步可靠发送）+ `transcript-delivery-check.ts`（纯函数，无哈希/无假 TUI）；AC6 用真实 transcript 判 delivered:true / never-sent:false；**完整跨会话 SEND 留安全窗**（R3 禁建会话，现有会话都在跑）
 - ✅ `gap-promotion-cadence-is-role-volition-not-product-mechanism`：已 merge（`5037ee55`，**遥测同一步关闭**——纪律修复首例），11/11 绿；`ready-pool-check.ts` 实跑 pool=6≥3 无需补晋；tick 文档新增步骤 3.6（就绪池维护）
 - ✅ `gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool`：已 merge（`84ab1dcc`，遥测同步关闭），12/12 绿；`notYetFlipped` 改判「工作落 master」（复用 task-status-drift 的 `taskWorkLanded`，非另造一套）；实树 pool 7→0（5 条 merged 任务全排除），真实可派发
-- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）
+- ✅ `gap-suite-speed-under-a-297-second-sigma`：已 merge（`ec237c3e`，遥测已闭 needs-human），**诚实无改善结论**——delta 83.8s（779.1→695.4）< σ 297.6s，band 未达；AC5 负控制通过（comment-only −4.8s）；twice-green verify/2+3 连续绿；session-liveness flake 在基线复现（pre-existing，非杠杆回归）。lever：嵌套调用 setup-skip（mark_nested），省 ~84s。**band 判定待外层**（同 D 先例）
+- **批量全量（batch-2 收口）**：8 条 merged 任务的全量 DoD 在 token 空闲窗一次跑（后台，running）
 
 **遥测纪律（外层 2026-08-04 纠正，系统性 gap）：** 合并必须同一步 `--task-end outcome=done`——本轮 5 次合并（node-cache/retire-state/task-write/am2/reliable-send）漏闭遥测括号，全部由外层代补。**规则：fan-in merge → 同一动作内跑 `--task-end --taskId <id> --runId <bracket> --outcome done`**，不等外层发现。suite-speed 落地时同理。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
