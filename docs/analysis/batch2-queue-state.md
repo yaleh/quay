@@ -6,6 +6,25 @@
 
 ---
 
+## 2026-08-04 批（外层裁定 A–F + R1/R3；内层 A/D/B + L0 并发，全部 fan-in 全量绿）
+
+**全量绿（fan-in 后）：** tests **2276** / fail 0 / cancelled 0 / skipped 25（凭证缺失 live-GitHub）。参考值 2239→2276（+37，本批新测试）。
+
+| 任务 | 状态 | merge | 关键 |
+|---|---|---|---|
+| `gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid`（A） | done | `d3104bbc` | ADR-016 Amendment 2026-08-04（枚举五态/底部区域/禁整屏哈希）；`adr016-screen-use-check.ts` 按代码位置判 capture-pane→哈希，band 0..1，接 run_static_checks + mutation case；`## Carries` 承载 send-keys-verified AC1-4（顺解 F 造成的 carryover 红） |
+| `gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable`（D） | **ready**（AC3/4 R3 留白） | `5a26e5a5` | `pane-state-classify.ts` 纯分类器（五态/底部区域/两级抗脆 unknown+raw）；夹具 waiting-input ×3 + busy ×2（R3 只采现有 pane）；permission/error/unknown 标 unavailable-until-real-occurence；`fixture_count`=5 在 band(10..30) 之外 ⇒ **需外层修订 band** |
+| `gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`（B） | done | `e1b4983f` | `--detect-stop --pane` 接 classifyPaneState；**在飞 subagent 去歧义**（状态区 `← N agent` + 遥测在飞，waiting-input 不写；permission-prompt 恒写）；`--transcript` 降为旁证；真实负控制实跑（busy 不写 / waiting+agent 不写） |
+| `gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX`（L0） | done | `f6ad4d09` | `tmux-isolated.sh`（env -u TMUX + 显式 -S）；session-liveness.sh 迁显式 socket 形态（哈希带保持 1）；AC2 负控制证明默认服务端完好 |
+
+**D 为何留 ready：** R3 禁为采集新建会话 ⇒ permission-prompt/error-banner/unknown 无真实样本、`fixture_count`=5 < band 10..30 ⇒ AC3/AC4 勾不上。task check 门不过。**待外层修订 band 或接受 unavailable 标注。**
+
+**next 批（滚动派发，不等攒批）：**
+- 在飞：`gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`、`gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`（后台 agent，run_in_background:true）
+- 待 node-compile-cache 落地后派：`gap-suite-speed-under-a-297-second-sigma`（与 node-compile-cache 同碰 scripts/test.sh，串行）
+
+---
+
 ## 前置（exp6 阶段 A/B，满足后才启动 12 小时）
 
 | AC | 内容 | 状态 |
