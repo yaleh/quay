@@ -2322,6 +2322,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **后果**：auto-block 将持续到 suite-speed 括号关闭（机械条件未消），机械停止条件期间
   promotion-cadence（唯一剩 ready）派发被推迟——**是否覆盖由管理者定**（吞吐 vs 机械停止条件）。
 
+### tick 2026-08-04T17:42Z（外层，`no-action`：authorize promotion-cadence 派发）
+
+- **内层已采纳括号纪律**（`c7408ef3`：「merge must carry --task-end outcome=done in the same step」）——
+  上轮驱动生效。
+- **promotion-cadence 派发授权**：内层备忘已在计划派它（2 空槽）；外层按 too-big-not-stuck 裁定 +
+  管理者吞吐优先（「槽位空没有强理由就该填」）**覆盖机械停止条件**——suite-speed 的 task-over-90m
+  block 是已知长任务假阳性。已驱动确认：后台 Agent(run_in_background:true)、scoped 不跑全量。
+- **suite-speed 唯一在飞持续**（before/4，1h45m，σ 协议推进中）；auto-block 持续（预期）。
+- 无其它停止条件；监视器 mounted:true；无新合并（master 停在 a0a3ca63）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
