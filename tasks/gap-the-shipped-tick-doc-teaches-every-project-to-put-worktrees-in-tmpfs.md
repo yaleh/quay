@@ -216,3 +216,36 @@ cold-start-skill rehearsal）在 /tmp workspace 上被新校验正确拒绝—�
   产生的是失真而非缺失）。
 - **为何不符**：OOM 后重启简报未含遥测括号指令，空上下文内层无记忆可依；补记的起止与真实
   区间不符。本批遥测读数不可用于第三步的前后对比基线。
+
+## 运行证据（外层独立实测，2026-08-04 06:1xZ）
+
+**署明来源**：以下不是执行者的自报，是**外层自己跑/读出来的**，用于补齐
+`invoke-evidence-missing` 要求的「一条 done 任务必须展示它真正跑过的可执行入口路径」。
+
+**入口路径**：`scripts/test.sh`（`## Contract` 的 `invoke` 行即以它起头）。
+
+**DoD 的连跑两次全绿（同一棵树，外层读日志实测）**：
+
+```
+full-suite-10.log  05:54:16Z   tests 2212  pass 2188  fail 0  cancelled 0
+full-suite-11.log  06:09:16Z   tests 2212  pass 2188  fail 0  cancelled 0
+```
+
+**两次为何可比**：`tests` 数相同（2212），且均跑在 `verify` worktree 钉住的同一提交上——
+**上一轮 `#9`（2211）与 `#10`（2212）虽都绿但不在同一棵树**（`#10` 起于 A6 断言落地之后），
+所以合法的 DoD 配对是 `#10` + `#11`，不是 `#9` + `#10`。
+
+**AC3/AC4 两个方向的外层独立实跑**（`quay-init.sh --loop`，设 `CLAUDE_PLUGIN_ROOT` 后）：
+
+```
+worktree 根在 tmpfs (/tmp/...)             ⇒ exit 2
+  ERROR: worktree root '...' is on tmpfs — this is memory, not disk.
+  Every worktree under it consumes RAM; the 2026-08-04 machine-wide OOM traced straight to it.
+worktree 根在磁盘 (ext2/ext3)             ⇒ exit 0
+  loop: copied=23 skipped=0 conflicted=0
+  verify-installed-executables: OK (checked 20)
+  落地配置: worktree_root: /home/yale/work/quay-worktrees/.outer-a6-wtroot
+```
+
+**外层的第一次探针无效并已重做**：首次两个方向都得 exit 2，**但原因是 `CLAUDE_PLUGIN_ROOT` 未设，
+与 tmpfs 无关** ⇒ 那个探针分不开两种情况，与「永远失败」同形。设好后重跑才得到上面两个可分辨的结果。
