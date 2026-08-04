@@ -87,9 +87,13 @@ test("check() author->ready recognizes the long-form '## Acceptance Criteria' an
 test("check() still counts AC checkboxes correctly when AC uses the long-form '## Acceptance Criteria' heading", () => {
   const { store, dir } = freshStore();
   try {
-    // Long-form AC heading, but with an UNCHECKED box — the checkbox counting
-    // in check() reads the AC section via extractSection's alias fallback, so
-    // it must both find the section AND report the partial-checked count.
+    // Long-form AC heading, with one UNCHECKED box — the checkbox counting in
+    // check() reads the AC section via extractSection's alias fallback, so it
+    // must both find the section AND report the partial-checked count even
+    // though checked-state is no longer required at author->ready
+    // (gap-both-gates-read-one-signal-so-done-costs-nothing: ADR-001 restored;
+    // acTotal/acChecked are surfaced for the contract's ac_checked_ratio
+    // measure, but unchecked boxes do NOT block todo->ready).
     // NB: the AC section content must exceed MIN_SECTION_CHARS (40 non-ws
     // chars) or artifactSections() reports ac:false ("missing artifacts") and
     // short-circuits before the checkbox count is ever reached — a real
@@ -106,14 +110,16 @@ test("check() still counts AC checkboxes correctly when AC uses the long-form '#
 
     const r = store.check("LF-2");
 
-    // Assertion 1: the gate FAILS specifically on unchecked AC boxes — proving
-    // extractSection located the long-form AC section (else the reason would be
-    // "missing artifacts", not a checkbox count).
-    assert.equal(r.ok, false, "a task with an unchecked AC box must not pass author->ready");
+    // Assertion 1: the gate PASSES author->ready (checked-state not required
+    // at todo->ready) while still reporting the 1-of-2 count — proving both
+    // that extractSection located the long-form AC section (else the reason
+    // would be "missing artifacts", not an eligible-to-ready pass) and that
+    // the checkbox count is surfaced even on the pass path.
+    assert.equal(r.ok, true, "a task with an unchecked AC box passes author->ready (ADR-001 restored)");
     assert.match(
       r.reason,
-      /1\/2 AC checkboxes checked/,
-      `reason should report the 1-of-2 checked count from the long-form AC section; got "${r.reason}"`
+      /eligible to move to ready/,
+      `reason should be the eligible-to-ready reason from the long-form AC section; got "${r.reason}"`
     );
 
     // Assertion 2: the parser found exactly two checkboxes in the long-form

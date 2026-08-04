@@ -85,8 +85,13 @@ const validSections =
 const acDodChecked =
   "## AC\n- [x] a sufficiently long acceptance criterion line for the minimum-content check\n" +
   "## DoD\n- [x] a sufficiently long definition-of-done line for the minimum-content check\n";
-const acDodUnchecked =
-  "## AC\n- [ ] a sufficiently long acceptance criterion line for the minimum-content check\n" +
+// gap-both-gates-read-one-signal-so-done-costs-nothing: an UNCHECKED AC box no
+// longer fails author->ready (checked-state belongs to ready->done), so the
+// old "violating" fixture (unchecked AC) is no longer violating. A genuine
+// author->ready failure is now an AC section with NO machine-checkable
+// checkboxes at all ("AC section has no checkboxes").
+const acNoCheckbox =
+  "## AC\nThis acceptance criteria section is written in prose only, with no machine-checkable checkbox lines at all, comfortably past forty non-whitespace characters.\n" +
   "## DoD\n- [x] a sufficiently long definition-of-done line for the minimum-content check\n";
 
 // ===========================================================================
@@ -259,7 +264,7 @@ test("C1 [AC2]: `quay gate <compliant> --gate dod` exits 0; `<violating>` exits 
   runNative(["task", "create", "COMPLIANT", "--title", "Compliant fixture",
     "--status", "todo", "--body", validSections + acDodChecked], tasksDir);
   runNative(["task", "create", "VIOLATING", "--title", "Violating fixture",
-    "--status", "todo", "--body", validSections + acDodUnchecked], tasksDir);
+    "--status", "todo", "--body", validSections + acNoCheckbox], tasksDir);
 
   const pass = runQuay(["gate", "COMPLIANT", "--gate", "dod", "--file", logFile], workspaceRoot);
   assert.equal(pass.status, 0, `expected compliant PASS (exit 0); got ${pass.status}, stdout=${pass.stdout}, stderr=${pass.stderr}`);

@@ -165,6 +165,13 @@ const AC_DOD_CHECKED =
 const AC_DOD_UNCHECKED =
   "## AC\n- [ ] a sufficiently long acceptance criterion line for the minimum-content check\n" +
   "## DoD\n- [ ] a sufficiently long definition-of-done line for the minimum-content check\n";
+// gap-both-gates-read-one-signal-so-done-costs-nothing: an UNCHECKED AC box no
+// longer fails author->ready (checked-state belongs to ready->done), so
+// AC_DOD_UNCHECKED is no longer a gate-FAILING fixture. A genuine author->ready
+// failure is an AC section with NO machine-checkable checkboxes at all.
+const AC_NO_CHECKBOX =
+  "## AC\nThis acceptance criteria section is written in prose only, with no machine-checkable checkbox lines at all, comfortably past forty non-whitespace characters.\n" +
+  "## DoD\n- [x] a sufficiently long definition-of-done line for the minimum-content check\n";
 
 function run(args, opts = {}) {
   return new Promise((resolve) => {
@@ -236,7 +243,7 @@ async function main() {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envTasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "CLI-2", "--title", "CLI test task two (fails gate)",
-    "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_UNCHECKED], {
+    "--status", "todo", "--body", VALID_SECTIONS + AC_NO_CHECKBOX], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envTasksDir },
   });
 
@@ -325,11 +332,14 @@ async function main() {
   }
 
   // 4b. M31-cli-gate-enforcement: `task edit <id> --status <x> --enforce-gate`.
-  //     CLI-2 (status todo, AC section present but UNCHECKED) is a real
+  //     CLI-2 (status todo, AC section with NO checkboxes) is a real
   //     gate-failing fixture against the native provider's own author->ready
   //     gate (store.js#check()) — `task check CLI-2` already asserts
   //     ok:false above (test 4), so `--enforce-gate` must refuse the SAME
   //     write for the SAME reason, by calling that exact same check.
+  //     (gap-both-gates-read-one-signal-so-done-costs-nothing: an unchecked
+  //     AC box no longer fails author->ready, so CLI-2 now fails via "AC
+  //     section has no checkboxes" instead.)
   //
   //     Decision (charter M31-cli-gate-enforcement, "Decision" section):
   //     default `task edit --status` remains UNGUARDED (git commit
@@ -344,7 +354,7 @@ async function main() {
     const rRefuse = await run(["task", "edit", "CLI-2", "--status", "ready", "--enforce-gate", "--json"], spawnOpts);
     assert(rRefuse.status === 1, "quay task edit CLI-2 --status ready --enforce-gate exits 1 (gate fails)");
     assert(
-      rRefuse.stderr.includes("AC checkboxes checked") || rRefuse.stderr.includes("checked"),
+      rRefuse.stderr.includes("checkboxes"),
       `quay task edit --enforce-gate refusal surfaces the gate's result.reason in the error message (got stderr: ${rRefuse.stderr.slice(0, 300)})`
     );
     const viewAfterRefuse = await run(["task", "view", "CLI-2", "--json"], spawnOpts);
