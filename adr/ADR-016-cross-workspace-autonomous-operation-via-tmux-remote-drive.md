@@ -13,7 +13,7 @@ applies-to:
   - "tasks/DIR-043.md"
   - "plugin/skills/loop-driver/SKILL.md"
   - "experiments/quay-perpetual-stream/OUTER-LOOP.md"
-enforcement: "N/A — an operational discipline (a reliable-send + poll-for-result contract), not a mechanically-gated invariant. Proven end-to-end driving the DIR-051 real routine-fire on archguard (2026-07-22); the pinned 3-step send + poll-filesystem pattern is the canonical procedure any consumer references."
+enforcement: "Mechanically gated by plugin/scripts/adr016-screen-use-check.ts (wired into scripts/test.sh's run_static_checks; AC3 of gap-adr-016-carve-out-permits-the-whole-screen-hash-it-was-meant-to-forbid). Permitted screen use is bounded by the ## Amendment 2026-08-04 section: enumerated states (waiting-input / permission-prompt / busy / error-banner / unknown) × bottom region × no whole-screen equality/hash of capture-pane."
 ---
 ## Context
 
@@ -71,3 +71,29 @@ This is legitimate — unlike hand-simulating a routine (which would not count a
 - Result-reading stays filesystem/meta-cc-based, so the drive loop is robust to TUI changes.
 - Proven, not theoretical: it drove the DIR-051 real routine-fire (`send-keys` re-fire → archguard
   self-validation fired → filed `PROBE-NEW.md` → verified from board + meta-cc).
+
+## Amendment 2026-08-04 — pinned boundaries for the capture-pane carve-out (ruling A)
+
+Clause 1 said `capture-pane` is only a coarse "idle / ready-for-input" check + a settle, but did
+not bound what "coarse" permits. Two live implementations — `session-liveness.sh` and
+`send-keys-verified.sh` — each read it as whole-screen equality / md5 of the pane, the exact
+judgment this ADR's title forbids, without violating the letter. The decision is unchanged; the
+boundaries are now fixed:
+
+1. **Allowed states are ENUMERATED, not an open set.** A screen observer may classify the pane into
+   exactly five states — `waiting-input`, `permission-prompt`, `busy`, `error-banner`, `unknown` —
+   and no others. Any other reading of the screen is outside the carve-out.
+2. **The permitted region is the BOTTOM region** (the input box + status line) — the part a human
+   actually watches — not the whole screen.
+3. **Whole-screen equality/hash comparison is FORBIDDEN**, with or without prior masking. The
+   `md5(capture-pane)` family — any `capture-pane` result flowing into `md5sum` / `sha1sum` /
+   `cksum` — is a violation of this ADR regardless of `mask_pane`-style pre-processing. The
+   mechanical checker `plugin/scripts/adr016-screen-use-check.ts` (wired into `scripts/test.sh`'s
+   `run_static_checks`) detects this by code position in shell scripts, and exits non-zero when an
+   ACTIVE file exceeds the tolerated legacy count of one (`session-liveness.sh`, carried by the
+   sibling task `gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable`).
+   `send-keys-verified.sh` is excluded as retired (its task was superseded under outer ruling F,
+   2026-08-04).
+
+The carve-out's spirit is unchanged: `capture-pane` may be used as a coarse state signal, but the
+signal must be a **shape classification of the bottom region** — never a whole-screen equality test.
