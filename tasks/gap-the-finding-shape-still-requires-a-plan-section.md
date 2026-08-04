@@ -1,14 +1,15 @@
 ---
 id: gap-the-finding-shape-still-requires-a-plan-section
-title: "The finding shape still lists plan as required, so a ## Finding task without ## Plan fails the gate — the last red assertion in the reinstall threshold"
-status: todo
+title: "The finding shape still lists plan as required, so a ## Finding task
+  without ## Plan fails the gate — the last red assertion in the reinstall
+  threshold"
+status: done
 labels:
   - gap
   - milestone-candidate
 extra:
   schema: v1
 ---
-
 **type:** execution
 
 ## Proposal
@@ -37,6 +38,19 @@ shape=finding  ok=false  artifacts={"proposal":true,"plan":false,"ac":true,"dod"
 **⇒ 现场那批任务恰好都带 `## Plan`，所以掩盖了这个残留。**
 **⇒ 只看现场会宣布 A4 完成；测试测的是判据本身，所以它红。**
 
+### 落地记录（2026-08-04，内层执行）
+
+**A4 已绿，且顺带发现并处置了 master 既有的第二条红 AC1b**：
+`install-config-driven-e2e.test.mjs` 断言冷启动目标布局（`orchestration/orchestrator-loop-tick.md` /
+`docs/analysis/fast-mode-loop-tick.md`），但 `loop-shipping.test.mjs` 的 AC1b 排除表没把它列入，
+导致全量套件一直有这条与 A4 无关的红。已加一行豁免（与 `quay-init-loop.test.mjs`/`cold-start-e2e.sh`
+同类）。**该豁免是文件级无条件排除：让 e2e 文件对六条旧路径全部失明，而它只合理提到两条**——
+这是被接受的代价，已记录（见 Dispatch review 的 AC1b 发现条目）。
+
+**排除表本身没有必要性检查**（只增不减，无机制能发现已不必要的条目）——本任务的 landing 过程
+就是实证（一个会话加了两条排除项，一条必要一条不必要，从外面看一模一样）。已另立任务
+`gap-exclusion-lists-have-no-necessity-check` 承载惰性检测。
+
 ## Contract
 
 ```
@@ -62,21 +76,65 @@ resume 先看 SHAPE_REGISTRY 里 finding 的必需段集合，再改
 
 ## Acceptance Criteria
 
-- [ ] AC1: **A4 变绿**——`a4_red = 0`（实跑输出贴任务体）
-- [ ] AC2: **正向**——`## Finding` 无 `## Plan` 的任务 ⇒ `artifacts.plan` 不再参与 finding 形状的判定，
+- [x] AC1: **A4 变绿**——`a4_red = 0`（实跑输出贴任务体）
+      **证据**：全量套件 run3/run4/run5（`full-suite-{3,4,5}.log`）均 `FULL-SUITE-EXIT=0`、
+      `fail 0`、`cancelled 0`（每轮 1951 ✔ / 24 ﹣）；其中
+      `✔ A4 — a ## Finding task WITHOUT ## Plan passes the author→ready gate; a ## Plan task still goes through the strict contract`
+- [x] AC2: **正向**——`## Finding` 无 `## Plan` 的任务 ⇒ `artifacts.plan` 不再参与 finding 形状的判定，
       `ok=true`（实跑贴出）
-- [ ] AC3: **反向负控制**——`## Plan` 形状的任务**缺 `## Plan`** ⇒ **仍必须红**（实跑贴出）。
+      **证据**（`QUAY_NATIVE_TASKS_DIR=<临时 workspace> quay-native task check A4-FINDING --json`）：
+      ```json
+      {"id":"A4-FINDING","gate":"author->ready","ok":true,"shape":"finding",
+       "artifacts":{"proposal":true,"ac":true,"dod":true},"acTotal":1,"acChecked":1,
+       "reason":"all required artifacts present; eligible to move to ready"}
+      ```
+      **artifacts 中无 `plan` 键**（不是 present-and-false，是 finding 形状根本不注册 plan）。
+- [x] AC3: **反向负控制**——`## Plan` 形状的任务**缺 `## Plan`** ⇒ **仍必须红**（实跑贴出）。
       **这条不过，AC2 不算数**——**把「finding 太严」修成「所有形状都不查 plan」是更坏的交易**
-- [ ] AC4: **meta-cc 方向不退化**——带 `## Plan` 的 DIR 模板任务**仍然过闸**（实跑贴出）
-- [ ] AC5: **门槛全绿**——`install-config-driven-e2e` **五条断言全绿**（`fail 0` 且 `cancelled 0`，实跑贴出）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group product`
+      **证据**（两个方向）：
+      - 无 Plan 体（Proposal+AC+DoD，无 Plan 无 Finding）⇒ `shape=unknown` fail-closed：
+        ```json
+        {"id":"A4-PLAN-MISSING-PLAN","gate":"author->ready","ok":false,"shape":"unknown",
+         "reason":"unrecognized task shape (no ## Contract / ## Finding / ## Plan section) — unknown shapes fail closed"}
+        ```
+      - `## Plan` 形状缺 AC ⇒ 仍红：
+        ```json
+        {"id":"A4-PLAN-MISSING-AC","gate":"author->ready","ok":false,"shape":"plan",
+         "artifacts":{"proposal":true,"plan":true,"ac":false,"dod":true},
+         "reason":"missing artifacts: ac"}
+        ```
+- [x] AC4: **meta-cc 方向不退化**——带 `## Plan` 的 DIR 模板任务**仍然过闸**（实跑贴出）
+      **证据**：
+      - DIR 模板（`## Finding` + `## Plan` 都带）⇒ `shape=finding`（Finding 优先于 Plan），`ok=true`：
+        ```json
+        {"id":"A4-DIR-TEMPLATE","gate":"author->ready","ok":true,"shape":"finding",
+         "artifacts":{"proposal":true,"ac":true,"dod":true},"reason":"all required artifacts present; eligible to move to ready"}
+        ```
+      - 纯 plan 形状合规（Proposal+Plan+AC+DoD）⇒ `shape=plan`，`ok=true`：
+        ```json
+        {"id":"A4-PLAN-OK","gate":"author->ready","ok":true,"shape":"plan",
+         "artifacts":{"proposal":true,"plan":true,"ac":true,"dod":true},"reason":"all required artifacts present; eligible to move to ready"}
+        ```
+- [x] AC5: **门槛全绿**——`install-config-driven-e2e` **五条断言全绿**（`fail 0` 且 `cancelled 0`，实跑贴出）
+      **证据**：run3/run4/run5 全量套件日志中该文件五条断言全 `✔`（含 A4），套件整体
+      `FULL-SUITE-EXIT=0` / `fail 0` / `cancelled 0`（1951 ✔ / 0 ✖ / 24 ﹣）。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group product`
+      **证据**：`packages/quay-native/test/gate-shape-dispatch.test.mjs` 首行 `// @test-group product`、
+      `import { test } from "node:test"`。
 
 ## Definition of Done
 
-- [ ] AC2 与 AC3 两个方向的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录：**现场那批任务恰好都带 `## Plan`，所以掩盖了这个残留**——
-      **只看现场会宣布完成，而测试测的是判据本身**
+- [x] AC2 与 AC3 两个方向的实跑输出都贴进任务体
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+      **判据链（外层 03:4xZ 裁定 run5 绿即落地）**：run3 + run4 连续两条全绿
+      （各 `fail 0` / `cancelled 0` / 2203 tests）满足「连跑 2 次全绿」的字面判据；
+      run4→run5 的树差只有一行（按必要性判据撤掉 inner-brief 死重排除项），其影响半径
+      完全落在 `loop-shipping` 自己的 AC1b 内，run5（最终树 `fail 0` / `cancelled 0`）覆盖该 delta。
+      **第 6 次套件被明确跳过并记账**：它在关键路径上约 15–25 分钟、买不到可测量的信息——
+      这笔成本是算过的，不是没人算过的节省。**另外**：03:54:42 因撤排除项而起的 run5 重跑
+      成本（~15 分钟）由外层记在自己账上（外层的判断变更导致），不是本任务的返工。
+- [x] 任务体记录：**现场那批任务恰好都带 `## Plan`，所以掩盖了这个残留**——
+      **只看现场会宣布完成，而测试测的是判据本身**（见 Proposal 的落地记录）
 
 ## Carries
 
@@ -91,6 +149,7 @@ acs: AC5
 
 - packages/quay-native/src/store.ts
 - packages/quay-native/test/gate-shape-dispatch.test.mjs
+- plugin/test/loop-shipping.test.mjs  （landing 时追加：AC1b 排除项，见 Dispatch review）
 
 ## Dispatch review
 
@@ -108,3 +167,20 @@ changed: **重装门槛 e2e 的最后一条红断言**，外层实测定位：
 沿用 `dispatch is not a waiver` 那条已确立的原则。
 **排序**：**它是门槛内唯一剩下的红断言** ⇒ 与 LOOP_SCRIPTS / tmux 同级最高，
 且**不动 `quay-init.sh`**，可与它们并行。
+
+reviewer: inner（landing）
+at: 2026-08-04T04:1xZ
+changed: **执行落地记录**。判据（AC1–AC6 + DoD）全部勾选，证据见上。
+**landing 过程中新增的处置，逐条说明**：
+
+1. **AC1b 发现（Touches 追加 `plugin/test/loop-shipping.test.mjs`）**：
+   全量套件在 finding 分支上 `fail 1`，根因是 **master 既有红**（与 A4、与本任务无关）——
+   `install-config-driven-e2e` 断言冷启动目标布局（orchestration/ + docs/analysis/ 的 tick 文档
+   路径），没进 `loop-shipping.test.mjs` AC1b 的排除表。加一行豁免（与 `quay-init-loop.test.mjs`/
+   `cold-start-e2e.sh`/`README.md` 同类：目标布局引用）。
+2. **e2e 豁免的失明代价（外层负控制实测）**：文件级无条件排除让该文件对六条旧路径全部失明，
+   而它只合理提到两条。选择保持文件级（与既有排除项一致），**代价已记录在本 Proposal 的落地记录**。
+3. **inner-brief 豁免按必要性判据撤除**：曾追加 `orchestration/inner-brief-2026-08-04-restart.md`
+   的豁免，外层 03:40Z 用「去掉它还绿不绿」实测证伪其必要性（源已在 6e01329e 把旧路径拆写），
+   **已撤**——保留它会不换任何绿、只让该文件对六条旧路径失明。
+4. **排除表无必要性检查 → 已另立任务** `gap-exclusion-lists-have-no-necessity-check`。
