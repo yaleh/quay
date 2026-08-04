@@ -2385,6 +2385,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 连续第 3 个稳态 tick——批在等 suite-speed 的多小时 σ 测量（管理者已裁定「不受影响」，符合预期）。
 - 无其它停止条件；监视器 mounted:true。
 
+### tick 2026-08-04T19:42Z（外层，`no-action`：suite-speed 进入最后阶段）
+
+- **suite-speed 进入 after 组**（after/2，3h40m）——before(≥5) → control(≥5) → **after(≥5)** 最后一组
+  测量；worktree 有新提交（`cae30d19`，优化已应用）。σ 证据收集接近完成。
+- 批内其余全部合并；无新提交（master 停在 4cb25770）。
+- 完成后：内层关批 + 跑批全量（备忘「suite-speed 完成后关批量并跑全量」）+ ready-pool-check 从
+  todo 补晋。auto-block 持续（预期，等套件完成）。
+- 无其它停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
