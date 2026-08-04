@@ -2180,3 +2180,25 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （gating + 退出语义，实钱红线）。`RESEARCH-claude-p-streaming-2026-08-04.md` 已提交跟踪（`15:42Z`）。
 - 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
 - 资源闸：内层跑套件期间外层只做廉价核实。
+
+### 批关闭 + 新批滚动派发 + clean-tree 假阳性核实（2026-08-04T15:48Z，外层）
+
+- **批关闭**（内层 `aefc6ffd`）：A/B/L0 done（全量套件 **tests 2276 / fail 0 / cancelled 0 / skipped 25**，
+  新参考值 2276）、遥测 snapshot。**D 留 ready**（内层 close 时以为 AC3/AC4 待外层裁定）。
+- **D 补关（已确认）**：外层 AC3/AC4 裁定已落 master（`d9f5073a`：band 4..30 + unavailable 处置，
+  AC3/AC4 已勾）；内层补关完成——D `status: done`，AC/DoD 全勾（含全量套件 2276/0/0 证据）。
+  **A–F 六批全部完成**：A（ADR-016 Amendment+checker）、D（分类器）、B（ruling-required 接线+假阳性
+  修正）、L0（tmux 隔离）。
+- **新批滚动派发已生效**（原始字段核实）：`task-write frontmatter fix`（15:46:50 rib:true）+
+  `node compile-cache task`（15:46:56 rib:true）——内层正确避开 suite-speed 与 node-compile-cache
+  的 scripts/test.sh 触摸重叠（选了 node-compile-cache）。subagent 在飞 2。就绪池剩 suite-speed。
+- **clean-tree FAIL 核实 = 假阳性**（管理者质疑成立）：`assert-clean-tree.sh` 要求套件后
+  `git status --porcelain` 为空、**不建 before 基线**——它假设套件跑在干净树（脚本注释自承
+  "the full suite which the coordinator runs on a clean tree"）。两文件 `manager-phase-goal.md`
+  （mtime 10:54）与 `restart-plan-2026-08-04-third.md`（mtime 14:37）都**早于套件启动（15:26）
+  数小时**，是管理者的在飞编辑 ⇒ 被误判为套件残留。**gap-mkdtemp-rooted 那条不涉事**——已按
+  管理者指示不派内层去追不存在的 bug。`assert-clean-tree` 的「无 before 基线」限制记录于此
+  （真缺口但低危，不新开任务）。
+- **--test-concurrency=8 记录**：本机 4 核上 8 是 CLAUDE.md 警告过的 4.25× 超订（推导默认 1）；
+  内层为批全量用 8 符合 tick 文档「全量验证需显式 --test-concurrency=8 否则小时级」——记录，
+  不判断意图。
