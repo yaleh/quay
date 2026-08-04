@@ -58,8 +58,27 @@ function tmux(args, env) {
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
+// A worktree root quay-init's validation ACCEPTS: a real disk path, not tmpfs. /tmp is tmpfs on
+// dev boxes and the sibling-of-repo default for a /tmp test workspace would be rejected
+// fail-closed (gap-the-shipped-tick-doc-... AC3). /var/tmp is the disk-backed tmp on Linux.
+function diskWorktreeRoot() {
+  for (const base of ['/var/tmp', os.tmpdir()]) {
+    try {
+      const t = spawnSync('stat', ['-f', '-c', '%T', base], { encoding: 'utf8' });
+      if (t.status === 0 && t.stdout.trim() !== 'tmpfs') {
+        return path.join(base, `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+      }
+    } catch { /* try next base */ }
+  }
+  return path.join(os.tmpdir(), `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+}
+
 function runInit(workspace, args = [], env = process.env) {
-  return spawnSync('bash', [path.join(pluginDir, 'scripts', 'quay-init.sh'), ...args],
+  // --loop tests need an explicit disk worktree root (the sibling default of a /tmp workspace is
+  // tmpfs and is correctly rejected). Inject BEFORE the caller's args so an explicit one wins.
+  const loop = args.includes('--loop');
+  const extra = loop && !args.some((a) => a === '--worktree-root') ? ['--worktree-root', diskWorktreeRoot()] : [];
+  return spawnSync('bash', [path.join(pluginDir, 'scripts', 'quay-init.sh'), ...extra, ...args],
     { cwd: workspace, encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir } });
 }
 
@@ -241,8 +260,14 @@ test('session-liveness.sh — with a configured session the zero-config default 
     const r = spawnSync('bash', [path.join(pluginDir, 'scripts', 'session-liveness.sh'), '--once'],
       { encoding: 'utf8', env: { ...env, SESSION_ROOT: ws } });
     assert.equal(r.status, 0, `--once must exit 0:\n${r.stderr}`);
-    assert.match(r.stdout, /SESSION-STATUS confproj alive=1/,
-      `must identify the configured session as alive:\n${r.stdout}`);
+    // The FIRST field is the TARGET label = the zero-config default target, which is the project
+    // root basename — NOT the session name (session-liveness consumer evidence: cold-start-e2e.sh:317
+    // asserts `SESSION-STATUS empty-project alive=` where empty-project is the project root basename;
+    // session-liveness.test.mjs:723 names its target explicitly via SESSION_TARGETS). The session
+    // `confproj` is the configured SESSION_TMUX_SESSION; the target it resolves under is ws's basename.
+    const base = path.basename(ws);
+    assert.match(r.stdout, new RegExp(`SESSION-STATUS ${base} alive=1`),
+      `must identify the configured session as alive under the zero-config default target (project root basename ${base}, NOT the session name confproj):\n${r.stdout}`);
   } finally {
     tmux(['kill-server'], env);
     cleanup(ws);
