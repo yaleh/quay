@@ -2467,6 +2467,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - inProgress 0、detect-stop 无命中；就绪池 0（deficit 3，等关闭完成 + ready-pool-check 从 todo 补晋）。
 - 残留 retire-inner-state worktree 待关闭时清理。新参考值 tests 2298。
 
+### tick 2026-08-04T22:22Z（外层，`no-action`：机制闭环完成，下一批由 ready-pool-check 驱动）
+
+- **批正式全关**（`6fa34a94`：8 任务 done、closure `3ab119df`、遥测成对、**worktrees 干净**——
+  retire-inner-state 残留 worktree 已清）。
+- **产品机制接管**：内层正在**按 ready-pool-check 推荐补晋并派下一批**（候选：phantom-in-flight /
+  log-filtered / checksplit / cold-start-recovery 等，按机制定义的顺序）——人方向的晋级机制正式驱动
+  流水线，不再靠角色自觉（spec 继承性要求兑现）。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true；无停止条件。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
