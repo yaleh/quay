@@ -110,7 +110,7 @@ test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t)
   writeTask(root, "gap-merged-not-flipped", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ touches: ["- code/landed.ts"] }),
+    body: fourArtifactBody({ touches: ["- code/landed.ts (new)"] }),
   });
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
@@ -134,7 +134,7 @@ test("pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unst
   writeTask(root, "gap-merged", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ touches: ["- code/landed.ts"] }), // 0/4 AC checked
+    body: fourArtifactBody({ touches: ["- code/landed.ts (new)"] }), // 0/4 AC checked
   });
   // A genuinely-unstarted ready task: Touches file does not exist, no resolving symbols → stays.
   writeTask(root, "gap-unstarted", {
@@ -150,6 +150,41 @@ test("pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unst
   const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
   assert.ok(reasonsById["gap-merged"].includes("not-yet-flipped"), "merged-but-unchecked ready task excluded");
   assert.ok(!reasonsById["gap-unstarted"], "truly-unstarted ready task stays in the pool");
+});
+
+// ── AC2/AC3/AC4 (gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks) ──────
+// The taskWorkLanded touch signal overshot: "Touches file exists on master" fired for tasks that
+// merely MODIFY an existing file, excluding them from the pool. Fix: only a task-CREATED file
+// (`(new)` touch now existing) is landing evidence; an existing-file task is judged by its own
+// symbols. AC2 (not-landed existing-file task stays in pool) + AC3 (landed one is excluded).
+
+test("existing-file-modifying tasks: not-landed stays in the pool, landed is excluded (AC2/AC3)", (t) => {
+  const root = makeWorkspace("existing-file");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The file exists on master regardless — the touch is NOT marked (new), so file existence must
+  // NOT count as landing evidence for THIS task.
+  fs.writeFileSync(path.join(root, "code", "existing.ts"), "export const preexisting = 1;\n");
+  // NOT landed: an existing-file task whose work has not landed → must stay in the pool.
+  writeTask(root, "gap-mod-not-landed", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/existing.ts"] }), // 0/4 AC, no (new), no resolving symbols
+  });
+  // LANDED: an existing-file task whose work HAS landed via a task-created file ((new) exists).
+  fs.writeFileSync(path.join(root, "code", "created.ts"), "export const created = 1;\n");
+  writeTask(root, "gap-mod-landed", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/existing.ts", "- code/created.ts (new)"] }),
+  });
+  writeTask(root, "gap-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.pool, 2, "pool must keep the not-landed existing-file task");
+  assert.deepEqual(r.ready.sort(), ["gap-mod-not-landed", "gap-real"]);
+  const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.ok(!reasonsById["gap-mod-not-landed"], "not-landed existing-file task stays in the pool (AC2)");
+  assert.ok(reasonsById["gap-mod-landed"].includes("not-yet-flipped"), "landed existing-file task excluded (AC3)");
 });
 
 test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
@@ -173,7 +208,7 @@ test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
   fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
   const merged = {
     status: "ready",
-    body: "## Acceptance Criteria\n- [ ] unchecked\n- [ ] still unchecked\n## Touches\n- code/landed.ts\n## Definition of Done\nstandard",
+    body: "## Acceptance Criteria\n- [ ] unchecked\n- [ ] still unchecked\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
   };
   assert.equal(notYetFlipped(merged, root), true, "merged-but-AC-unchecked ready task must be excluded");
 
