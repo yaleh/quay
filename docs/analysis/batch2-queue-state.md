@@ -2346,6 +2346,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （pool 必须从 6 降到真实值）。
 - **suite-speed 唯一在飞**（控制组/1，2h5m，σ 协议推进中）；auto-block 持续（预期）。
 
+### tick 2026-08-04T18:22Z（外层，`no-action`：假满真实后果出现，手工晋级缺陷任务）
+
+- **假满的真实后果出现**：机制报 pool 6（虚高）⇒ **不会从 todo 补晋**——缺陷修复任务（todo）因此
+  永远不被晋级/派发，正是假满要防的病因机制缺陷而实际发生。
+- **手工晋级 + 驱动派发**：`gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool`
+  todo→ready（机制坏，等它自己修自己），已驱动内层派发（后台 rib:true，scoped 不跑全量，触摸集
+  与 suite-speed disjoint）。
+- **suite-speed 唯一在飞**（control/run-2，2h26m，σ 协议推进中）；auto-block 持续（预期）。
+- 无其它停止条件；监视器 mounted:true；master 停在 2079d153。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

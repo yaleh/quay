@@ -3,7 +3,7 @@ id: gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool
 title: ready-pool-check's notYetFlipped requires all-ACs-checked, but the inner
   merges without ticking ACs — so done-work tasks pollute the pool and the
   fake-full problem reproduces inside the mechanism
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
