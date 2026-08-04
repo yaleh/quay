@@ -39,6 +39,11 @@
 **派发**：3 后台 agent（run_in_background:true），scoped 不跑全量，telemetry 已开。
 
 **⚠ 发现的机制缺陷（ready-pool-defect 的 taskWorkLanded 过冲）**：补晋后 `pool` 字段仍为 0——因为 3 条新任务的 Touches 文件已在 master 上存在（它们在改既有文件，非新建），`taskWorkLanded` 把「Touches 文件存在」误判为「工作已落 master」。**信号过冲**：candidates 推荐它们补晋、pool 却排除它们，自相矛盾。需后续修复：taskWorkLanded 应区分「任务自己的改动已落」与「Touches 文件只是存在」（例如按任务特有符号解析，而非任一 Touches 条目存在）。
+
+**派发 3 中已完成 2：**
+- ✅ `gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second`：已 merge（`b51b650e`，遥测同步闭），emit 路径拆分——全量记录进共享 events.jsonl、持有者阈值只 gate stdout；adr016 哈希带保持 1。scoped 38/0/1 + 重跑 EXIT 0
+- ✅ `gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet`：已 merge（`7478d979`，遥测同步闭），`expandDeclaredTouches`（声明式 (new) touch 不查盘，通配符才查）；镜像实为 symlink 天然一致。scoped 43/0 两次
+- 在飞：`gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards`（telemetry + orchestrator doc）
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
