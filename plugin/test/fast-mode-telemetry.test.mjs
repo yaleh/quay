@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group governance
 // fast-mode-telemetry.test.mjs — gap-fast-mode-no-telemetry: RED/GREEN tests for the fast-mode
 // metering CLI (fast-mode-telemetry.ts, byte-identical mirrors). Covers AC2–AC5 and AC10 (DoD),
 // plus the --report write-split regression (gap-telemetry-report-writes-and-deadlocks-readiness):
@@ -87,6 +87,15 @@ async function importCli() {
 async function importSchema() {
   return import(SCHEMA);
 }
+
+// ── Governance self-skip (AC6 @test-group governance) ─────────────────────────────────────────────
+// In a DEFAULT (product,engine) run this file reports `skipped`, not absent (ADR-019 decision #1
+// precedent). It runs in full when invoked explicitly (QUAY_TEST_GROUPS unset) or with
+// `--group governance`. The fast-mode telemetry is the metering/measurement layer — governance,
+// not engine.
+if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").includes("governance")) {
+  test("governance group skipped", { skip: "set QUAY_TEST_GROUPS=governance to run" }, () => {});
+} else {
 
 // ── AC2: --task-start ────────────────────────────────────────────────────────────────────────────────
 
@@ -725,3 +734,251 @@ test("Byte-identity — workflow-event-schema mirrors still byte-identical", () 
   const exp = fs.readFileSync(path.join(EXP_SCRIPTS, "workflow-event-schema.mjs"), "utf8");
   assert.equal(exp, plug, "workflow-event-schema.mjs mirrors must stay byte-identical");
 });
+
+// ── Reconcile (gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards) ──
+// A crash kills the executor and `--task-end` never comes — the record sits in `inProgress` forever
+// (phantom), and the only signal that eventually fires about it (OVER90) is indistinguishable from a
+// genuinely slow task. `--reconcile` closes an in-flight record ONLY when the executor is OBSERVABLY
+// gone (branch merged / worktree gone / process gone — never wall-clock age), and never closes a
+// record whose executor is still present (AC3 negative control). The ACs are pinned below.
+
+test("AC6 — this file declares // @test-group governance (metering/measurement layer)", () => {
+  const src = fs.readFileSync(new URL(import.meta.url), "utf8");
+  assert.match(src, /\/\/ @test-group governance/, "must declare @test-group governance");
+});
+
+test("RECONCILE — a branch-merged phantom is closed with an observable reason; a live executor is kept (AC2/AC3/AC4)", async () => {
+  const cli = await importCli();
+  const old = Date.now() - 91 * 60_000; // 91 min — OVER90 territory, but age alone must never decide
+  const inProgress = [
+    { taskId: "phantom-merged", runId: "fm-phantom-1", startedAtMs: old },
+    { taskId: "phantom-worktree-gone", runId: "fm-phantom-2", startedAtMs: Date.now() - 5 * 60_000 },
+    { taskId: "live", runId: "fm-live-1", startedAtMs: old }, // AC4: old but executor alive → kept
+  ];
+  const { closed, kept } = cli.reconcileInFlight(inProgress, {
+    executorGone: (rec) => {
+      if (rec.taskId === "phantom-merged") return { gone: true, reason: "branch-merged" };
+      if (rec.taskId === "phantom-worktree-gone") return { gone: true, reason: "worktree-gone-and-no-process" };
+      return { gone: false, reason: "process-alive" };
+    },
+    firstKnownCommitMs: () => null,
+  });
+  const closedMerged = closed.find((c) => c.taskId === "phantom-merged");
+  const closedWt = closed.find((c) => c.taskId === "phantom-worktree-gone");
+  assert.ok(closedMerged, `branch-merged phantom must be closed: ${JSON.stringify(closed)}`);
+  assert.equal(closedMerged.reconcileReason, "branch-merged");
+  assert.equal(closedMerged.outcome, "abandoned");
+  assert.ok(closedWt, "worktree-gone phantom must be closed");
+  assert.equal(closedWt.reconcileReason, "worktree-gone-and-no-process");
+  // AC4: the 91-minute-old record whose executor is alive is NOT closed.
+  assert.equal(closed.some((c) => c.taskId === "live"), false, "a live executor must never be closed, regardless of age");
+  const keptLive = kept.find((k) => k.taskId === "live");
+  assert.ok(keptLive, "live record must be kept");
+  assert.equal(keptLive.keepReason, "process-alive");
+});
+
+test("RECONCILE — without an executor probe, records are kept (fail-closed; never close without evidence)", async () => {
+  const cli = await importCli();
+  const { closed, kept } = cli.reconcileInFlight([{ taskId: "x", runId: "fm-x-1", startedAtMs: 1 }], {});
+  assert.equal(closed.length, 0, "no evidence ⇒ nothing closed");
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].keepReason, "no-executor-probe");
+});
+
+test("RECONCILE — a backfilled start (later than the task's first known commit) is marked startedAtMs-unreliable (AC7)", async () => {
+  const cli = await importCli();
+  const firstCommit = Date.parse("2026-08-04T04:00:00Z");
+  const { closed, kept } = cli.reconcileInFlight(
+    [
+      { taskId: "backfilled", runId: "fm-b1", startedAtMs: firstCommit + 3_600_000 }, // after → unreliable
+      { taskId: "honest", runId: "fm-h1", startedAtMs: firstCommit - 3_600_000 }, // before → reliable
+    ],
+    { executorGone: () => ({ gone: true, reason: "branch-merged" }), firstKnownCommitMs: () => firstCommit },
+  );
+  const b = closed.find((c) => c.taskId === "backfilled");
+  const h = closed.find((c) => c.taskId === "honest");
+  assert.ok(b && h, "both must be closed in this fixture");
+  assert.equal(b.startedAtMsUnreliable, true, "start after first known commit ⇒ unreliable");
+  assert.equal(h.startedAtMsUnreliable, false, "start before first known commit ⇒ reliable");
+  assert.equal(kept.length, 0);
+});
+
+test("RECONCILE — a reconcile-closed pair routes to reconciled[], never tasks[] (throughput stays clean)", async () => {
+  const cli = await importCli();
+  const runId = cli.generateRunId("phantom");
+  const start = cli.buildStartEvent({ taskId: "phantom", runId, recordedAtMs: 1_000_000 });
+  const end = cli.buildEndEvent({
+    taskId: "phantom", runId, outcome: "abandoned", reconcileReason: "branch-merged", recordedAtMs: 1_100_000,
+  });
+  const r = cli.aggregate([start, end], { nowMs: 1_100_000 });
+  assert.equal(r.reconciled.length, 1, "reconcile-closed pair must surface in reconciled[]");
+  assert.equal(r.reconciled[0].reconcileReason, "branch-merged");
+  assert.equal(r.tasks.length, 0, "a reconcile-closed phantom must never count as a completed task");
+  assert.equal(r.inProgress.length, 0, "a reconcile-closed record leaves inProgress (OVER90 no longer fires)");
+  assert.equal(r.tasksPerHour, 0, "phantom must not contribute to throughput");
+});
+
+test("RECONCILE — a startedAtMs-unreliable completed pair is excluded from the throughput numerator AND denominator (AC7)", async () => {
+  const cli = await importCli();
+  const firstCommit = 1_000_000;
+  const uRunId = cli.generateRunId("backfilled");
+  const uStart = cli.buildStartEvent({ taskId: "backfilled", runId: uRunId, recordedAtMs: firstCommit + 60_000 });
+  const uEnd = cli.buildEndEvent({ taskId: "backfilled", runId: uRunId, outcome: "done", recordedAtMs: firstCommit + 120_000 });
+  const hRunId = cli.generateRunId("honest");
+  const hStart = cli.buildStartEvent({ taskId: "honest", runId: hRunId, recordedAtMs: firstCommit - 60_000 });
+  const hEnd = cli.buildEndEvent({ taskId: "honest", runId: hRunId, outcome: "done", recordedAtMs: firstCommit + 60_000 });
+  const r = cli.aggregate([uStart, uEnd, hStart, hEnd], {
+    nowMs: firstCommit + 120_000,
+    firstKnownCommitMsByTask: () => firstCommit,
+  });
+  assert.equal(r.tasks.length, 1, "only the reliable pair counts as a completed task (numerator exclusion)");
+  assert.equal(r.tasks[0].taskId, "honest");
+  assert.equal(r.unreliable.length, 1, "the backfilled pair surfaces in unreliable[]");
+  assert.equal(r.unreliable[0].taskId, "backfilled");
+  assert.equal(r.unreliable[0].startedAtMsUnreliable, true);
+  // Denominator exclusion: the unreliable start must not pull windowStart earlier.
+  assert.equal(r.windowStart, new Date(firstCommit - 60_000).toISOString(), "unreliable start must not pull the window earlier");
+});
+
+test("AC5 — OVER90 no longer fires for a reconcile-closed record; still fires for a genuine slow task", async () => {
+  const cli = await importCli();
+  const { detectTaskOver90m } = await import(path.join(PLUGIN_SCRIPTS, "inner-blocked-signal.ts"));
+  const tmp = makeTmpWorkspace();
+  try {
+    const old = Date.now() - 91 * 60_000;
+    // Phantom only, closed by reconcile: OVER90 must be silent.
+    const pRun = cli.generateRunId("phantom-slow");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "phantom-slow", runId: pRun, recordedAtMs: old }), tmp);
+    cli.writeEvent(cli.buildEndEvent({
+      taskId: "phantom-slow", runId: pRun, outcome: "abandoned", reconcileReason: "branch-merged", recordedAtMs: Date.now(),
+    }), tmp);
+    const afterClose = await detectTaskOver90m(tmp);
+    assert.equal(afterClose, null, `OVER90 must NOT fire for a reconcile-closed record: ${JSON.stringify(afterClose)}`);
+
+    // A genuine slow task (same 91-min age, executor still present → no reconcile end): OVER90 fires.
+    const gRun = cli.generateRunId("genuine-slow");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "genuine-slow", runId: gRun, recordedAtMs: old }), tmp);
+    const withGenuine = await detectTaskOver90m(tmp);
+    assert.ok(withGenuine && withGenuine.taskId === "genuine-slow", `OVER90 must fire for a genuine slow task: ${JSON.stringify(withGenuine)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE CLI — real git: a merged-branch phantom closes, an open-worktree task stays (AC2/AC3)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "phantom-task.md"), "---\nid: phantom-task\n---\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "tasks", "live-task.md"), "---\nid: live-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed tasks").status, 0);
+    // phantom-task: branch created and MERGED into master (its work landed ⇒ executor done).
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/phantom-task").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "phantom-task.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "phantom work landed").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/phantom-task", "-m", "Merge branch 'task/phantom-task'").status, 0);
+    // live-task: branch checked out in an OPEN worktree (executor mid-flight ⇒ keep).
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/live-task", path.join(tmp, "wt-live")).status, 0);
+
+    const ps = runCli(tmp, "--task-start", "--taskId", "phantom-task");
+    assert.equal(ps.status, 0, ps.stderr);
+    const ls = runCli(tmp, "--task-start", "--taskId", "live-task");
+    assert.equal(ls.status, 0, ls.stderr);
+
+    const rec = runCli(tmp, "--reconcile", "--json");
+    assert.equal(rec.status, 0, rec.stderr);
+    const out = JSON.parse(rec.stdout);
+    const closedP = (out.closed ?? []).find((c) => c.taskId === "phantom-task");
+    const keptL = (out.kept ?? []).find((k) => k.taskId === "live-task");
+    assert.ok(closedP, `phantom must be closed by observable branch-merged: ${JSON.stringify(out.closed)}`);
+    assert.equal(closedP.reconcileReason, "branch-merged");
+    assert.ok(keptL, `live must be kept by observable open-worktree: ${JSON.stringify(out.kept)}`);
+    assert.equal(keptL.keepReason, "worktree-present");
+    // AC7 annotation on real git: phantom-task's --task-start was written AFTER its work merged
+    // (a backfill in this fixture) → unreliable; live-task is freshly dispatched with no work
+    // commits yet → NOT unreliable (a fresh dispatch must never be over-flagged).
+    assert.equal(closedP.startedAtMsUnreliable, true, "a start written after the work merged is unreliable");
+    assert.equal(keptL.startedAtMsUnreliable, false, "a freshly-dispatched task with no work commits is NOT unreliable");
+
+    // After reconcile: phantom left inProgress (into reconciled[], not tasks[]), live still in.
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    assert.equal(repObj.inProgress.length, 1, `only live stays in-progress: ${JSON.stringify(repObj.inProgress)}`);
+    assert.equal(repObj.inProgress[0].taskId, "live-task");
+    assert.equal(repObj.reconciled.length, 1, "phantom surfaces in reconciled[], not tasks[]");
+    assert.equal(repObj.reconciled[0].reconcileReason, "branch-merged");
+    assert.equal(repObj.reconciled[0].startedAtMsUnreliable, true, "the report marks the reconciled phantom's start unreliable");
+    assert.equal(repObj.tasks.length, 0, "no phantom in the completed-tasks roll-up");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE — firstKnownCommitMs resolves to the task's WORK start (branch or merge), never its creation (AC7 reference)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  const commit = (args, env = {}) => spawnSync("git", ["-C", tmp, ...args], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  });
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "wk.md"), "---\nid: wk\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    // Pin the creation commit date so a fallback-to-creation would be detectable.
+    assert.equal(commit(["commit", "-m", "create wk.md"], { GIT_AUTHOR_DATE: "2026-08-01T00:00:00Z", GIT_COMMITTER_DATE: "2026-08-01T00:00:00Z" }).status, 0);
+
+    // Freshly dispatched: branch at HEAD with no own commits → no work reference → null.
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-fresh").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(cli.firstKnownCommitMs(tmp, "wk-fresh"), null, "fresh branch with no work commits ⇒ no reference (not unreliable)");
+
+    // In-flight with work: one task-specific commit at a pinned date → that commit is the reference.
+    const workDate = "2026-08-02T12:00:00Z";
+    const workMs = Date.parse(workDate);
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/wk-work").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "wk.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(commit(["commit", "-m", "wk work"], { GIT_AUTHOR_DATE: workDate, GIT_COMMITTER_DATE: workDate }).status, 0);
+    assert.equal(cli.firstKnownCommitMs(tmp, "wk-work"), workMs, "reference = the task's first work commit");
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+
+    // Merged: branch merged into master → reference = the merge commit time (work already known done).
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/wk-work", "-m", `Merge branch 'task/wk-work'`).status, 0);
+    const mergeMs = cli.firstKnownCommitMs(tmp, "wk-work");
+    assert.ok(mergeMs != null && mergeMs >= workMs, `merged reference should be the merge time (>= work start), got ${mergeMs}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("RECONCILE — processAlive detects a live process by runId (AC3 real-process criterion)", async () => {
+  const cli = await importCli();
+  const runId = `fm-proc-${Date.now()}`;
+  const { spawn } = await import("node:child_process");
+  const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)", runId], { detached: true, stdio: "ignore" });
+  child.unref();
+  try {
+    let alive = false;
+    for (let i = 0; i < 50 && !alive; i++) {
+      alive = cli.processAlive(runId);
+      if (!alive) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(alive, true, `processAlive must find the runId in /proc: ${runId}`);
+  } finally {
+    try { process.kill(child.pid, "SIGKILL"); } catch (_) { /* already gone */ }
+  }
+});
+
+} // ── end governance self-skip (AC6) ──
