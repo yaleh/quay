@@ -227,10 +227,13 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 
 ### 3. 检查停止条件（机械——`--detect-stop` 本身就是落盘）
 
-跑这条命令作为停止条件的**机械检查**（取代纯散文清单）：
+跑这条命令作为停止条件的**机械检查**（取代纯散文清单）。**先抓自己的 pane 再传给 `--pane`**
+（`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`——`ruling-required` 的主判据
+是屏幕观察者，不是 `--transcript`）：
 
 ```bash
-node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop
+tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
 ```
 
 它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
@@ -239,9 +242,21 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
   in-progress > 90m）。任一成立 ⇒ **自动**写入 `.quay/inner-blocked.json`（带 `reason` + 可行动
   `question` + `evidence`，`source:"auto"`）——**写入是检测本身的后果**，你跑的这条命令就是停止
   条件检查，不存在「忘了写阻塞信号」这回事。
+- **`ruling-required` 的屏幕观察者（`--pane`）**：`classifyPaneState` 只读 pane 的**底部区域**
+  （输入框 + 状态行，ADR-016 修订 boundary b——**不做整屏哈希**），分类成五态之一。连续
+  `INNER_BLOCKED_RULING_SAMPLES`（默认 3）次 `waiting-input` / `permission-prompt` ⇒ 写
+  `ruling-required`（可行动 `question` + 底部区域 `evidence`）。60s 轮询 × 3 采样 ≈ 3 分钟
+  结构上界 ≤ 5 分钟 p100 预算（裁定 C，AC2）。`busy` / `error-banner` / `unknown`、pane 文件缺失、
+  或显式 `--clear` 都**重置**滚动计数（AC4 双向负控制）。`--transcript` 保留但**不再是主判据**
+  （AC3）——它只在 pane 观察者没产出时作为「会话真的死了」的旁证触发。
+- **在飞 agent 消歧（外层裁定 2026-08-04）**：`waiting-input` 只在**没有在飞后台 agent** 时算
+  needs-input 采样。状态区出现「← N agent」（N>0）/ `general-purpose` / `subagent`，或遥测有在飞
+  任务 bracket（`--task-start` 未闭合）⇒ 是**良性空闲**（等自己的后台 agent），不是等人类裁定——
+  不计数、不写块（实况误报修复）。`permission-prompt` 恒为人类等待形状，不被抑制。
 - 全部不成立 ⇒ **自动清除**先前由本命令写入的 auto 阻塞记录；**绝不**清除手动
   （`--assert-blocked`，judgment 条件）的阻塞——那需要显式 `--clear`（AC3 负控制）。
-- 输出列出命中的条件；**命中任一 ⇒ 不派发新任务，报告后重新排程**。
+- 输出列出命中的条件（`--pane` 给到时，`pane_decision=...` 行是判定分支字段）；**命中任一 ⇒
+  不派发新任务，报告后重新排程**。
 
 **无法从仓库状态机械判定的条件**（本 tick 判断后同样要落盘，见「阻塞信号」节）：
 - `.halt` 存在 —— **不写阻塞信号**（外层主动暂停，不是「等裁定」；写了一个小时后
@@ -357,9 +372,11 @@ console.log(m.checkTouchesPair(A,B,expand));
 
 - **机械条件自动落盘（步骤 3 的 `--detect-stop`）**：合并冲突、任务超 90 分钟由 CLI 从仓库状态
   机械判定，命中即写——**写入是停止条件检查的后果**，你不需要「记得」另跑一条命令，因为你跑的那条
-  检查命令本身就落盘。
-- **判断条件手动落盘**：`ruling-required` / `review-refuted`（无法从仓库状态判定）等 judgment 条件，
-  在停下等裁定的那一刻调一次 `--assert-blocked`（见下）。判断边界表里除 `.halt` 外的每一行都属于这一类。
+  检查命令本身就落盘。**`ruling-required` 现在也有机械路径**（`gap-ruling-required-trigger-is-dead-
+  code-never-wired-into-any-tick`）：步骤 3 带 `--pane` 时，屏幕观察者按形状分类（连续 3 次
+  `waiting-input` / `permission-prompt`）自动写 `ruling-required`——不再需要「记得」手动 assert。
+- **判断条件手动落盘**：`review-refuted`（无法从仓库状态判定）等 judgment 条件，在停下等裁定的
+  那一刻调一次 `--assert-blocked`（见下）。判断边界表里除 `.halt` 外的每一行都属于这一类。
 
 手动 assert / 清除（judgment 条件专用；机械条件不要手写——`--detect-stop` 已自动处理）：
 
