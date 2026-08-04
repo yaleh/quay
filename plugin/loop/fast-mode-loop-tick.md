@@ -292,6 +292,26 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
 
 没有计量，「1 任务/小时」无法判定，也无法知道任何优化是否真的有效。
 
+### 3.6 就绪池维护（晋级节奏是机制，不是角色自觉——强制）
+
+**就绪池 < 3 时，本 tick 内从 todo 补晋到 ready。** 晋级节奏与优先级曾只活在外层的**自愿 AC-queue**
+（`orchestration/outer-phase-goal.md` 的旧 AC-queue）——角色自觉，换会话/模型就丢。**现在是 tick 调用的
+子机制**（`gap-promotion-cadence-is-role-volition-not-product-mechanism`），任何未来冷启动本项目的会话
+都会继承它。**顺序由脚本承载，不是散文。**
+
+```bash
+node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"
+```
+
+- stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
+  （① 本批已做完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
+  标记的）。`pool ≥ 3` ⇒ 无需补晋，直接进步骤 4 派发。
+- **`pool < 3` ⇒ 按 `promotions` 数组补晋**（数组顺序就是定义好的顺序：`gap-*` 缺陷 > `DIR-*` 新能力；
+  同类里 touches resolve 的排前）。对每个候选：**缺四件套的先补齐**（`missingArtifacts` 字段点名缺哪个），
+  再 `status: todo → ready`。`touchesResolve: false` 的候选不派发。
+- 补晋落盘后，步骤 4 就用这份就绪池派发——不再重复判定 promotion 顺序，只需做步骤 4 自己的并发资格
+  （`checkTouchesPair`）与触摸可解析性复核。
+
 ### 4. 派发就绪任务（并发）
 
 **并发上限 3 个在飞 subagent。** 并发是打破「外层变瓶颈」的手段——串行时外层的 20 分钟 tick 频率

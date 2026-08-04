@@ -58,19 +58,16 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
       **现状：产品化搬移前扫出 20 个引用老路径的文件 + `scripts/test.sh` 三个调用点，
       落地前送达内层并被采纳 ✓（`bdada61b`）。**
 
-- [x] **AC-queue：ready 队列常态维持 ≥3 条真实可派发任务（2026-08-04 管理者交办，吞吐两条的第一修复位）。**
-      判据：对每个 tick，`tasks/*.md` 中 `status: ready` 且「真实、可派发」的条数 ≥ 3。
-      **「真实可派发」排除三类**：(a) 本批已做完、等 fan-in 关闭翻 done 的（A/D/B/L0 这类）；
-      (b) `labels: fixture` 的闸口演示夹具（QENG-5-DEMO-*）；(c) 已 PARKED 的（如有——retirestate
-      已在 D 落地后解 PARKED 重新纳入候选，2026-08-04）。
-      排除后计数 = 就绪池。**晋级速率必须跟上派发速率**——就绪池 < 3 时，本 tick 内从 todo
-      积压里补晋（gap-* 缺陷优先、有 Contract、touches resolve 可派发、无在飞触摸重叠、
-      非 fixture、非 PARKED）。**注意**：ready 池「假满」（6 条里 0 条真可派发）正是批栅栏之外
-      的吞吐杀手——单改滚动派发无效（管理者 2026-08-04 裁定）。
-      **候选集构造（管理者 2026-08-04 第二轮实锤，与批门控不同的失效点）**：每轮派发核冲突时，
-      **候选集必须全量重扫 ready 队列**——含刚解阻塞/刚解 PARKED 的任务（retirestate 就是实例：
-      D 落地后 ready 且与全部在飞 disjoint，却因「只核了新晋级那批」被遗漏出候选集）。
-      不允许只看新晋级的子集；「某任务未出现在候选集」本身就是本轮要核的东西。
+- [x] **AC-queue：ready 队列常态维持 ≥3 条真实可派发任务——机制在 `fast-mode-loop-tick.md` 步骤 3.6，本 AC 只引用它。**
+      2026-08-04 人方向裁定（`gap-promotion-cadence-is-role-volition-not-product-mechanism`）：
+      todo→ready 的晋级节奏与优先级是**产品机制**，不该靠外层自愿 AC（角色自觉，换会话/模型就丢）。
+      机制 = 内层 tick 步骤 3.6「就绪池维护」跑 `plugin/scripts/ready-pool-check.ts`（读 stdout `pool`
+      字段 = 真实就绪池，排除本批未翻 / fixture / PARKED；`pool < 3` 按脚本推荐的顺序补晋）。
+      **本 AC 不再独立维护候选集构造规则**——下面保留的是该机制立项前的历史证据，不是现行机制。
+      **判据**：内层每 tick 跑一次 checker，`pool ≥ 3` 成立。
+      **历史证据（2026-08-04，为何立案）**：「真实可派发」排除三类——本批已做完等翻 done / fixture /
+      PARKED；ready 池「假满」（6 条里 0 条真可派发）是批栅栏之外的吞吐杀手；候选集必须全量重扫
+      ready 队列（含刚解阻塞/刚解 PARKED 的任务，retirestate 即实例）。
       **现状（15:5xZ）：排除前 6（A/D/B/L0 已翻 done + QENG×2 + retirestate 解 PARKED）；
       在飞 2（task-write/node-compile-cache，rib:true）+ 待派 2（suite-speed、retirestate）
       ⇒ 就绪池 3+，AC 成立。**

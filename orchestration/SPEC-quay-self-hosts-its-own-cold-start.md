@@ -63,10 +63,13 @@ AC8c 六键只证明循环**启动**（到 FIRST-TASK 为止），**不覆盖「
 - **继承性要求**：todo→ready 的节奏与优先级是**冷启动后就该稳定具备的产品行为**，必须由任何未来
   冷启动本项目的会话继承（不管是谁、哪个模型），**不靠角色自觉**——本规格 AC-SH1–AC-SH4 是
   「把循环拉起来」的形式化，AC-SH5 是「拉起来之后的行为」的形式化。
-- **机制**：由 `gap-promotion-cadence-is-role-volition-not-product-mechanism` 承载——`plugin/scripts/ready-pool-check.ts`
-  机械计算真实就绪池 + `fast-mode-loop-tick.md` 新增「就绪池维护」步骤（fan-in 后、派发前调用）。
+- **机制**：由 `gap-promotion-cadence-is-role-volition-not-product-mechanism` 承载（本任务落地，2026-08-04）——
+  `plugin/scripts/ready-pool-check.ts` 机械计算真实就绪池 + `fast-mode-loop-tick.md` **步骤 3.6「就绪池维护」**
+  （fan-in 后、派发前调用）。外层 `orchestrator-loop-tick.md` 步骤 4 与 `outer-phase-goal.md` 的
+  AC-queue 均已降级为**引用**该子机制，不再独立维护候选集构造规则。
 - **判据**：任何一次冷启动后，就绪池常态 ≥3 真实可派发（排除本批未翻 / fixture / PARKED）；
   `pool < 3` 时按定义顺序（gap-* > DIR-*，依赖就绪，resolve 可派发）从 todo 补晋。
+  实跑：`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"`，读 `pool` 字段。
 - **与 AC8c 的关系**：AC8c 是启动维度（六键），AC-SH5 是持续维度（就绪池健康）；两者独立，
   AC8c 全绿不蕴含就绪池健康，就绪池健康不蕴含冷启动成功——分开记录，不合并。
 
