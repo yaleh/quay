@@ -82,7 +82,8 @@ resume 先看 SHAPE_REGISTRY 里 finding 的必需段集合，再改
       `✔ A4 — a ## Finding task WITHOUT ## Plan passes the author→ready gate; a ## Plan task still goes through the strict contract`
 - [x] AC2: **正向**——`## Finding` 无 `## Plan` 的任务 ⇒ `artifacts.plan` 不再参与 finding 形状的判定，
       `ok=true`（实跑贴出）
-      **证据**（`QUAY_NATIVE_TASKS_DIR=<临时 workspace> quay-native task check A4-FINDING --json`）：
+      **证据**（实跑命令：
+      `QUAY_NATIVE_TASKS_DIR=<临时 workspace> node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check A4-FINDING --json`）：
       ```json
       {"id":"A4-FINDING","gate":"author->ready","ok":true,"shape":"finding",
        "artifacts":{"proposal":true,"ac":true,"dod":true},"acTotal":1,"acChecked":1,
@@ -91,7 +92,8 @@ resume 先看 SHAPE_REGISTRY 里 finding 的必需段集合，再改
       **artifacts 中无 `plan` 键**（不是 present-and-false，是 finding 形状根本不注册 plan）。
 - [x] AC3: **反向负控制**——`## Plan` 形状的任务**缺 `## Plan`** ⇒ **仍必须红**（实跑贴出）。
       **这条不过，AC2 不算数**——**把「finding 太严」修成「所有形状都不查 plan」是更坏的交易**
-      **证据**（两个方向）：
+      **证据**（两个方向；均以 AC2 同款完整命令实跑：
+      `node --experimental-strip-types packages/quay-native/bin/quay-native.ts task check <id> --json`）：
       - 无 Plan 体（Proposal+AC+DoD，无 Plan 无 Finding）⇒ `shape=unknown` fail-closed：
         ```json
         {"id":"A4-PLAN-MISSING-PLAN","gate":"author->ready","ok":false,"shape":"unknown",
