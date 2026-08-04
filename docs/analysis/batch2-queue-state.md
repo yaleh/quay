@@ -23,7 +23,8 @@
 - ✅ `gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`：已 merge（`d3c5c09e`），scoped 5/5 绿，NODE_COMPILE_CACHE 落磁盘（ext2/ext3，非 tmpfs），~2.7×/spawn；**任务关闭延到批量 fan-in**（全量 DoD；此时 suite-speed 在跑全量基准，两层不同时跑全量）。closure 需补 task body 证据（agent 未改 task body）
 - ✅ `gap-retire-inner-state-one-observer-targets-by-parameter`：已 merge（`059c2437`，删除 inner-state.sh + 测试），rebase 4 次全净；AC6 处置表完整（BLOCKED auto-ruling-required ⇒ 「不再作 live Monitor 事件」+ 理由：外层 `--detect-stop --pane` 同时写+读）；**残余 1 个 live inner-state 挂载未杀**（R3 禁会话清理，留外层停）；AC5 代码层收敛（inner_state_mounts code=0）；adr016 检查器 1-in-band 绿。**noise-gate 测试（~29s×2）在 suite-speed 基准满载下 flaky**——agent 静窗实测 48/0/1；不是 merge 回归。全量 DoD + noise-gate 复核延到批量 fan-in（token 空闲窗）
 - ✅ `gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`：已 merge（`b1c96299`），scoped 5/5 绿 + 全 quay-native 58/58 + live-GitHub conformance 全过（含 2 新 hazardous-title probe）；Contract 实测：`The ## Contract` 与 `god-package: gate/ has fanOut=62` 均 round-trip。写入侧 YAML.stringify 显式化 + fail-closed validateWrittenYaml。closure 需补 task body 证据（agent 未改 task body）
-- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）
+- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）、`gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong`（doc，只跑 scoped）、`gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`（脚本+纯函数，只跑 scoped）
+- 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
 ---
