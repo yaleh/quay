@@ -1,7 +1,7 @@
 ---
 id: gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them
 title: "Install rewrites exactly the two tick docs — the fastest-churning files — so upgrade skips them and the target silently keeps an obsolete methodology"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
