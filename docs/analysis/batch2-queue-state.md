@@ -1802,3 +1802,20 @@ dod-gate（外层建）。
     正确）；改为指向不存在的临时路径。11/11 绿
   - cancelled 2 = runner-grouping + session-liveness（负载，单独跑能完成但慢）
 - **批套件待更严格干净窗口**（Monitor b4r1kznz9：gate GO + 无 archguard + load1<4）
+
+### 补派两条（2026-08-04 01:0xZ，外层裁定填满槽位）
+
+- **both-gates**（`gap-both-gates-read-one-signal-so-done-costs-nothing`，runId `...oewucx`，
+  `/tmp/quay-wt-bothgates`）——**最高优先（管理者明说优先于所有交付面条目）**：author→ready 与
+  execute→done 都读「AC 全勾」同一份证据，过第一道自动满足第二道（DIR-102 活标本）。方向：两道闸读
+  不同证据（author→ready 读计划+AC 形状、execute→done 读 DoD 勾选）。AC7b 主判据（AC 全勾但 DoD
+  全未勾 ⇒ execute-done 必须红）。**AC8**：gate-gameability 的 PASS 断言必须仍成立——不走进「闸验勾选
+  声称真假」的已证不可行方向。meta-cc 外层没作弊，是照 ADR-001 原文做。
+- **blocked-channel**（`gap-the-blocked-channel-has-a-writer-nobody-calls`，runId `...msadpj`，
+  `/tmp/quay-wt-blocked`）——**不是没接线**：写入侧+读取侧+tick 文档 321/327 行调用指令全在，但
+  `.quay/inner-blocked.json` 全历史零次提交（三项目均无）。文档指令从未被执行 → 加文档指令没用，
+  要让触发变**机械的**（停止条件触发即写），不是自觉的。
+
+**押后**：`gap-retire-inner-state`（动 quay-init.sh，与在飞 e2e 同文件，串行）。
+
+**在飞（3/3）**：e2e（红先落地）+ both-gates + blocked-channel。批套件 bh3nbv4c2 后台跑（AC20/dod-gate/tick-doc 验证）。
