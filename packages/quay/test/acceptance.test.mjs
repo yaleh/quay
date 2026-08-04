@@ -601,3 +601,52 @@ test("C1 [T4]: MCP gate_run surface sees acceptance_env exports (AC #4)", async 
     await client.close();
   }
 });
+
+test("C1 [T4-control]: MCP gate_run with NO acceptance_env configured does not invent env exports", async () => {
+  const tag = "t4-mcp-ctrl";
+  const tasksDir = makeTmpDir(`quay-qeng2-${tag}-tasks-`);
+  const workspaceRoot = makeTmpDir(`quay-qeng2-${tag}-ws-`);
+
+  // deliberately NO acceptance_env key on this provider block
+  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  runNative(["task", "create", "T4MCPCTRL", "--title", "mcp env control", "--status", "todo"], tasksDir);
+  runNative(["task", "edit", "T4MCPCTRL", "--extra", JSON.stringify({ acceptance: 'test -z "$MCP_ENV_TEST_VAR"' })], tasksDir);
+
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
+
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [coreBin, "mcp"],
+    cwd: workspaceRoot,
+    env: process.env,
+  });
+  const client = new Client({ name: "test-agent", version: "0.0.1" });
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({ name: "gate_run", arguments: { id: "T4MCPCTRL" } });
+    const sc = result.structuredContent;
+    assert.ok(sc, `structuredContent missing: ${JSON.stringify(result)}`);
+    assert.equal(sc.ok, true, `expected ok:true (var correctly absent, no phantom env file); got ${JSON.stringify(sc)}`);
+    assert.match(sc.reason, /passed/);
+  } finally {
+    await client.close();
+  }
+});
