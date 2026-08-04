@@ -195,7 +195,7 @@ resume 先把形状集合与各自的必需段定死并注册，再改 check
 1. **实现被并发里程碑当无关变更丢弃**——ADR-001（07-29，`status: accepted`）自称已在 `quay-native` 实现形状分派，但 `git log -S 'Finding' -- packages/quay-native/src/store.ts` ⇒ 0 个提交；提交 `9f4a80f3` 的信息里写着 `Discarded unrelated concurrent DIR-066 changes to packages/quay-native`——实现被另一个并发里程碑当无关变更丢了。
 2. **ADR 自己从未提交**——ADR 文件本身也从没进过版本库，唯一的副本只在 meta-cc 的 `milestones/meta-cc/DIR-066` 分支（提交 `4328a076`）。
 3. **两条线索同时缺失 ⇒ 五天无人发现**——实现没了（丢在 `9f4a80f3`）、决定也没了（ADR 未提交），没有任何单一真源能把「闸应按形状分派」这件事留下来；快速模式不调 `task check`，闸在 quay 里是死代码，只有真去跑它的人（meta-cc 冷启动）才会撞上。
-4. **经验（写入本任务）**：一个决定若只活在一份未提交的文件里，它等于不存在。落地修复时同步把形状注册表做成可 import 的单一真源（`SHAPE_REGISTRY`），并让闸按形状分派、未知形状 fail-closed（AC5）——这条修复本身就是「决定要有可执行落点」的实例。
+4. **经验（写入本任务）**：一个决定若只活在一份未提交的文件里，它等于不存在。落地修复时同步把形状注册表做成可 import 的单一真源（`SHAPE_REGISTRY`），并让闸按形状分派、未知形状 fail-closed（AC5）——这条修复本身就是「决定要有可执行落点」的实例。本任务同时把该决定作为 **ADR-023**（`adr/ADR-023-dod-gate-dispatches-by-task-shape.md`）提交进版本库，确保它不再只是任务体里的一句话。
 
 ## Touches
 
