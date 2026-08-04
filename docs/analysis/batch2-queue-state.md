@@ -1819,3 +1819,20 @@ dod-gate（外层建）。
 **押后**：`gap-retire-inner-state`（动 quay-init.sh，与在飞 e2e 同文件，串行）。
 
 **在飞（3/3）**：e2e（红先落地）+ both-gates + blocked-channel。批套件 bh3nbv4c2 后台跑（AC20/dod-gate/tick-doc 验证）。
+
+### e2e merge 修正 + 批套件现状（2026-08-04 01:3xZ）
+
+**e2e 任务修正（外层抓到，内层承认）**：e2e 标记 done 但工作只存在孤立分支（worktree 还被删了），
+任务体 done 但 AC 全未勾——正是「done 零工作量」缺陷的现场。**已按外层顺序处置**：
+①merge 分支进 master（`packages/quay/test/install-config-driven-e2e.test.mjs` 23870B 在 master）+
+②回填 AC（AC1 红先落地/AC6 防空过/AC7 命令不同/AC8 node:test 勾；AC2/AC3/AC4/AC5 留空待 #1/#9，
+写明理由）+ ③四红实跑输出贴进任务体。契约 ratchet 归零（new since baseline 0）。
+
+**批套件现状**：AC20/dod-gate/tick-doc 已 done + merge，但全量套件非绿——
+- batch4-faninsuite3：2164/2138/**fail 3**（session-liveness RESUMED ×2 + monitor-mount AC7），cancelled 0
+- 三失败全为套件 c8 并发/负载 flake（隔离全绿：monitor-mount 11/11、session-liveness 38/38）
+- master 现含**红 e2e**（4 断言 fail，待 #1/#9 修复）→ 下一套件会更红直到修复落地
+- **批任务 DoD「2x 全绿」无法在本轮达成**——建议外层裁定：标 [~]（代码 scoped 绿、套件红在仪器+flake）
+  或等 #1/#9 修复后绿
+
+**在飞（2/3）**：both-gates（最高优先）+ blocked-channel。**下一槽候选**：#1 install-rewrites / #9 finding-without-plan（green 红 e2e）。
