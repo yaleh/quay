@@ -686,12 +686,13 @@ test("AC6 — no tick log: SESSION-OVERDUE stays silent, other events work, no c
 
 // ── AC9: manager config lives in orchestration/session-liveness.env, sourced at startup ───────────────
 
-test("AC9 — manager's 3-project config lives in orchestration/session-liveness.env, not the script; it is sourced when SESSION_TARGETS is unset", async () => {
+test("AC9 — orchestration/session-liveness.env is the ZERO-CONFIG default (manager config moved out 2026-08-04 c1489b6a); an env file IS sourced when SESSION_TARGETS is unset", async () => {
   const realEnv = fs.readFileSync(path.resolve(__dirname, "..", "..", "orchestration", "session-liveness.env"), "utf8");
-  assert.ok(realEnv.includes("SESSION_TARGETS="), "orchestration/session-liveness.env must carry SESSION_TARGETS");
-  assert.ok(realEnv.includes("quay-0:outer") && realEnv.includes("archguard-2:outer") && realEnv.includes("meta-cc-4:outer"),
-    "the env file must carry the three-project topology");
-  assert.ok(!fs.readFileSync(SCRIPT, "utf8").includes("quay-0:"), "the script must NOT carry the topology (moved out to orchestration/)");
+  assert.ok(!realEnv.includes("SESSION_TARGETS="),
+    "orchestration/session-liveness.env must be the zero-config default — the manager's 3-project config was moved out to ~/.quay-global/manager-session-liveness.env (c1489b6a: it was being read by a session it was not meant for)");
+  assert.ok(!realEnv.includes("quay-0:outer"),
+    "the env file must NOT carry the three-project topology anymore");
+  assert.ok(!fs.readFileSync(SCRIPT, "utf8").includes("quay-0:"), "the script must NOT carry the topology (moved out)");
 
   const ws = makeTmp();
   const sockDir = path.join(ws, "sock"); fs.mkdirSync(sockDir, { recursive: true });

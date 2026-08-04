@@ -1,7 +1,7 @@
 ---
 id: gap-liveness-mounting-is-a-single-flight-role-with-no-owner
 title: "Liveness mounting is a single-flight role that nobody owns — 1 mount became 5 in thirty minutes because 'mount your own' is a correct decision five times over"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
