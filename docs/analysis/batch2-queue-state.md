@@ -1851,3 +1851,16 @@ dod-gate（外层建）。
 - **红 e2e 已入 master**（`install-config-driven-e2e.test.mjs` 23870B）——AC1/AC6/AC7/AC8 勾、
   AC2-AC5 留空待 #1/#9（承载已建：install-rewrites ## Carries AC2/AC3/AC4、finding-shape ## Carries AC5）。
 - **在飞**：0。**下一批候选**：#1 install-rewrites / finding-shape（green 红 e2e）、batch 任务 DoD 裁定。
+
+### 补派两条（2026-08-04 02:2xZ，外层裁定）
+
+- **install-rewrites**（`gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them`，runId `...09efle`，
+  `/tmp/quay-wt-installrew`）——管理者排序第 3，承载 e2e 的 A1/A2/A3 绿。**规模：落地真被改写的只有
+  2 个文件（都是 tick 文档），不是先前报的 60+**（任务体三次口径对账，meta-cc 实测 23 文件 21 字节相同
+  2 不同）。按 2 排优先级。
+- **drift-check**（`gap-drift-check-only-looks-at-the-harmless-direction`，runId `...ybp1wy`，
+  `/tmp/quay-wt-drift`）——漂移检查只扫 todo/ready（636），**done 从不被扫** → 无东西验证 done 真过了闸
+  （状态可直接写不经闸）。与 both-gates 是同一件事两半（一修闸太松、一修闸可被绕过）。AC2 活标本 +
+  AC3 反向负控制。
+
+**在飞（2/3）**：install-rewrites + drift-check。**批任务 DoD 裁定**仍待外层（套件红在 e2e 仪器+flake）。
