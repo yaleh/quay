@@ -1898,3 +1898,40 @@ dod-gate（外层建）。
   不放宽通用判定——dispatch is not a waiver）。**AC5**：整个 e2e 五条断言全绿 = 重装门槛过。
   承接 e2e AC5（## Carries；原 stub 承载任务已并入删除）。与 tmux/one-condition 无冲突。
 - **在飞（3/3）**：one-condition + tmux + finding-shape。
+
+## 第二次 OOM 恢复 tick（2026-08-04T09:1xZ，外层）
+
+**上下文**：两次全机 OOM 后重启（约 02:39Z 第一次、约 08:5xZ 第二次），本文件本身已是 08-02/08-03
+的旧快照，**以下以 git/遥测实测为准，不信本文件之前几节的「在飞」列表**（那三个早已各自收尾/丢失，
+见下）。
+
+**恢复过的三条**：tmux（`51dbcda4`，已合并，任务体 status 漂移已订正 `db5a04bb`）、
+finding-shape（`fce8f73f`/`12f0f651`，已合并且已 done）、one-condition（worktree/分支已丢失，
+任务体 AC 全未勾，**真未完成**，非漂移——已重新派发，见下）。
+
+**Fan-in 卫生**：清理 2 个已合并的孤儿 worktree（`quay-worktrees/tmux`、`quay-worktrees/verify`，
+均已确认 `git merge-base --is-ancestor` 为真）+ 8 个已合并的孤儿 `task/*` 分支（含 one-condition
+那条——它的分支尖 `c36809da` 本身就是 master 的祖先，说明那不是它自己的交付，只是分支停在了某个
+后来被吸收的旧 master 点上，任务实际未做）。
+
+**哨兵/停止条件**：`.halt` 不存在；`--detect-stop` 空（无阻塞）；遥测 `inProgress: []`、无 orphaned；
+`resource-gate.sh --for full-suite` GO（压力 1.01）。
+
+**新发现（有证据，已建任务）**：`gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files`
+——`status:ready` 的 9 条里 8 条 Touches 指向 ADR-022 已物理删除的经典管线文件
+（`.claude/workflows/{execute,prepare}-milestone.js`、`composite-{build,audit,reconcile}.ts`），
+只有 DIR-103-C 的 Touches 落在真实存在的文件上。派发前逐条 `ls` 核实，未误派。
+
+**本 tick 派发（并发，AC1/AC2 验证用）**：
+- **DIR-103-C**（`fm-DIR-103-C-1785834807691-12x3q8`，`/home/yale/work/quay-worktrees/dir103c`，
+  分支 `task/DIR-103-C`）——status:ready 里唯一目标真实存在的任务
+- **one-condition**（`gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger`，
+  `fm-gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger-1785834808086-p68cig`，
+  `/home/yale/work/quay-worktrees/onecond`，分支同任务 id）——worktree/分支丢失后重新派发，
+  任务体 Contract/AC 齐全，直接可派不需重新 author
+
+两者 `checkTouchesPair` 实测 `disjoint: true`（DIR-103-C 只碰 `packages/quay/*`+README+docs/plans；
+one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。两个 `Agent(...)` 调用在
+**同一条消息内并发发起**（非串行等待），`--task-start` 均已打（runId 见上）——AC1/AC2 的验证点。
+
+**在飞（2/3，槽位未满，等首批返回后视情补第 3 个）**：DIR-103-C + one-condition。
