@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-worktree-isolation
 title: prepare-milestone has no per-milestone worktree isolation
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -10,6 +10,24 @@ extra:
   schema: v1
 ---
 **type:** execution
+
+**ADR-022 RE-TRIAGE (2026-08-04, gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files):**
+status `ready` → `needs-human`. This task is about `prepare-milestone.js`'s per-milestone worktree
+isolation, which ADR-022 explicitly RETIRED: CLAUDE.md's retirement notice states "`prepare-milestone.js`
+also supported the SAME opt-in `isolationMode: 'worktree'` (gap-prepare-milestone-no-worktree-isolation,
+M252) — RETIRED under ADR-022 (the file is deleted; kept as historical record)". Its `## Touches` are
+2/3 files that no longer exist (`.claude/workflows/prepare-milestone.js` +
+`plugin/workflows/prepare-milestone.js`; only `CLAUDE.md` remains). The mechanism it describes
+(milestone-worktree.ts isolation) was superseded by the two-layer fast mode's direct `git worktree add`
+per task. Real-run resolve evidence (worktree branch, 2026-08-04):
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/gap-prepare-milestone-no-worktree-isolation.md --root "$(pwd)"
+  MISSING: .claude/workflows/prepare-milestone.js
+  MISSING: plugin/workflows/prepare-milestone.js
+  ok: CLAUDE.md
+RESOLVE tasks/gap-prepare-milestone-no-worktree-isolation.md: 2/3 non-(new) touches missing — MAJORITY-MISSING (NOT dispatchable)
+```
+Disposition: needs-human — the target pipeline is retired, scope no longer applies.
 
 **CLOSEOUT STATUS (2026-08-02, dev-session-handoff-2026-08-02b item 3):** the mechanism IS landed —
 `prepare-milestone.js` accepts `isolationMode: 'worktree'`, creates a real worktree via

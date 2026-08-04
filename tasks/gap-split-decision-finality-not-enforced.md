@@ -15,6 +15,28 @@ extra:
 
 **type:** execution
 
+**ADR-022 RE-TRIAGE NOTE (2026-08-04, gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files):**
+status stays `ready` — this task is NOT an ADR-022 casualty. The split-decision recording flow it
+targets (`--record-split-decision` / `decideSplitAdjudication` / `_recordSplitDecisionCli`) lives in
+`proposal-convergence.ts`, which ADR-022 RETAINED and CLAUDE.md's split-decision routing policy
+documents as the LIVE mechanism; it was never part of the deleted `prepare-milestone.js`. The core
+mechanism (AC1-AC4) landed 2026-08-02: `splitScopeHash` is exported (`proposal-convergence.ts` L1174),
+`_recordSplitDecisionCli` writes it (L1318), and `decideSplitAdjudication` compares it for SPLIT
+records with legacy fallback to `scopeHash` (L1215-1218). Its `## Touches` all resolve except
+`plugin/test/proposal-convergence.test.mjs`, a plugin-side test mirror that ADR-022's retirement
+deleted — that entry is removed from `## Touches` below (the experiments-side
+`proposal-convergence.test.mjs` is canonical and covers AC5-AC7). Real-run resolve evidence
+(worktree branch, 2026-08-04):
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/gap-split-decision-finality-not-enforced.md --root "$(pwd)"
+  ok: experiments/quay-perpetual-stream/scripts/proposal-convergence.ts
+  ok: plugin/scripts/proposal-convergence.ts
+  ok: experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
+  MISSING: plugin/test/proposal-convergence.test.mjs   ← entry removed below
+RESOLVE tasks/gap-split-decision-finality-not-enforced.md: 1/4 non-(new) touches missing — resolves (dispatchable)
+```
+Remaining work for a dispatch: verify AC1-AC7 against the landed code and close.
+
 ## Proposal
 
 `decideSplitAdjudication` (M206) already returns `content-dispatch-blocked` /
@@ -82,4 +104,3 @@ Two changes, both narrow:
 - experiments/quay-perpetual-stream/scripts/proposal-convergence.ts
 - plugin/scripts/proposal-convergence.ts
 - experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
-- plugin/test/proposal-convergence.test.mjs

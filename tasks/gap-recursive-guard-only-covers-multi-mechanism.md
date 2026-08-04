@@ -2,7 +2,7 @@
 id: gap-recursive-guard-only-covers-multi-mechanism
 title: "split-recursive-guard only fires for split-multi-mechanism — a depth-2+
   leaf triggering any other split code still auto-splits"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -14,6 +14,32 @@ extra:
 ---
 
 **type:** execution
+
+**ADR-022 RE-TRIAGE (2026-08-04, gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files):**
+status `ready` → `needs-human`. The CORE mechanism of this task LANDED and is unit-tested: the
+`wbsLevel >= 2` recursive guard was HOISTED above all three split triggers in the retained
+`checkSplitRecommendation` (`proposal-convergence.ts` L226-234, 2026-08-02) and is exercised by
+`proposal-convergence.test.mjs` (AC1-AC6 pass, e.g. "WBS level >= 2 ... returns split-recursive-guard,
+not split-multi-mechanism"). What remains — AC7 "`_splitCheck()` in `prepare-milestone.js` matches" —
+targets the classic `prepare-milestone.js` `_splitCheck()` that ADR-022 retired and physically
+deleted at `gap-retire-the-prepare-execute-pipeline-cluster` (2026-08-03). The split-decision
+routing policy in CLAUDE.md is retained and documents `split-recursive-guard` as a live routing
+code, but no fast-mode orchestrator code calls `checkSplitRecommendation` (grep confirms zero
+non-test callers outside `proposal-convergence.ts`). Real-run resolve evidence (worktree branch,
+2026-08-04):
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/gap-recursive-guard-only-covers-multi-mechanism.md --root "$(pwd)"
+  ok: experiments/quay-perpetual-stream/scripts/proposal-convergence.ts
+  ok: plugin/scripts/proposal-convergence.ts
+  ok: experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
+  MISSING: plugin/test/proposal-convergence.test.mjs
+  MISSING: .claude/workflows/prepare-milestone.js
+  MISSING: plugin/workflows/prepare-milestone.js
+RESOLVE tasks/gap-recursive-guard-only-covers-multi-mechanism.md: 3/6 non-(new) touches missing — resolves (dispatchable)
+```
+(The resolve check does not flag this body — proposal-convergence.ts is majority-present — but the
+two missing `prepare-milestone.js` entries are the ONLY remaining AC's wiring target, which is
+deleted. Disposition is by Proposal/AC re-scope, not by the majority-missing threshold.)
 
 ## Proposal
 
