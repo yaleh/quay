@@ -2023,3 +2023,15 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
   `task-over-90m` auto-block **已清除**（等待 1365.2s 计入死时间基线）
 - **在飞（0/3）——内层实现中**：已用 tmux send-keys 驱动内层按 A→D→B 顺序实现三任务（不是外层
   直接 Agent 派发）。内层刚 boot（deepseek-v4-flash 欢迎屏）即收到指令开始思考。
+
+### tick 2026-08-04T14:42Z（外层，`no-action`）
+
+- 内层实现 **A** 中（6m+）：worktree `quay-worktrees/adr016-screen-use-check`（磁盘，非 /tmp），
+  `plugin/scripts/adr016-screen-use-check.ts` + `checker-mutation-cases/` 夹具已建、尚未提交；
+  任务清单 `◼ A ◻ D ◻ B` 顺序正确。D/B 的 worktree 待 A 后建。
+- **无停止条件、无阻塞记录**（`--detect-stop` 干净）；Monitor 三判据 **true/true/true**；
+  loop-driver **LIVE(1)**。
+- master 停在 `5e24e1d3`（外层工件已全部落板）。工作树仅剩两处非外层文件改动：
+  `manager-phase-goal.md`（既有）与 `restart-plan-2026-08-04-third.md`（管理者补 AC1 证据：
+  inner 会话 `6a950975` = deepseek-v4-flash ✅）——均不属外层提交范围。
+- 不 fan-in：内层尚未合并任何东西，等 A 完成通知或下一 tick。
