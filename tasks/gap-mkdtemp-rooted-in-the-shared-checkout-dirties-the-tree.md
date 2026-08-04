@@ -63,7 +63,7 @@ measure shared_root_mkdtemp = `bash plugin/scripts/test-isolation-check.sh .` �
 measure tree_dirty_after_suite = `git status --porcelain` 在一次完整套件后输出的行数字段
 band tree_dirty_after_suite = 0
 invariant 每运行唯一 ≠ 可以落在共享检出里；探测器覆盖「根在哪」这个类，不是某个字面前缀
-invoke `bash plugin/scripts/test-isolation-check.sh .`
+invoke `bash plugin/scripts/test-isolation-check.ts .`   # 真实脚本是 .ts（原 .sh 是笔误，AC2 实跑证据即 .ts 路径）
 control 造一个 mkdtemp 根在仓库根的测试文件 ⇒ 必须报出；改成 os.tmpdir() ⇒ 必须不报
 resume 先扩探测器并让它报出那 2 个活标本，再修它们
 ```

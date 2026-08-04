@@ -126,6 +126,9 @@ body 占序列化负载的 5,447 KB / 5,657 KB = **96%** —— 列表页根本�
 
 ### AC3 — 主判据：route_ms < 1.0 s（619 任务）
 
+**invoke 实跑**（Contract 的 `invoke` 命令，对真实 serve 进程执行，输出以 `-o /dev/null` 丢弃 body）：
+`curl -s -o /dev/null -w '%{time_total}' --max-time 30 http://127.0.0.1:4173/`（多次，见下表秒数）。
+
 改动后对真实 store（619 任务）的实跑：
 
 ```
