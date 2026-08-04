@@ -2073,3 +2073,11 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
 - **我的输入框**曾躺着一条未提交的核实消息（管理者发现的投递失败原型）——已 `C-u` 清空。
 - **subagent 在飞（1）**：L0（general-purpose，阻塞）；**遥测括号在飞（2）**：D + L0。
   scratch-c1 窗口（quay-0:3）确认存在，按裁定不动。
+
+### 下一步备忘（2026-08-04T14:5xZ，记文件不记输入框——R2 AC8）
+
+- **B 派发后核 `input.run_in_background` 原始字段（必须为 true）**——用 meta-cc 查内层会话
+  `6a950975-…` 的 Agent 工具调用，不看 START 事件或 UI 文字。
+- L0 的 general-purpose 子代理跑完后，内层会处理我的纠正消息（后续 Agent 必须带
+  `run_in_background:true`）；到点时重查一次原始字段确认已落地。
+- 输入框用完即空（`C-u`）；下一步备忘一律记本文件，不再写进自己输入框。
