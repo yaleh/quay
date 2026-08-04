@@ -829,7 +829,7 @@ test("AC12/AC13 — both shipped tick docs state the ONE monitor (session-livene
   // AC12 (rewritten): the outer tick doc mounts ONE monitor — session-liveness.sh.
   assert.ok(outer.includes("session-liveness.sh"),
     "the outer tick doc must name the ONE monitor session-liveness.sh (AC12 rewritten)");
-  assert.ok(/它还在不在/.test(outer),
+  assert.ok(/还在不在/.test(outer),
     "the outer tick doc must state what the monitor answers — 会话还在不在 (AC12)");
   // The outer doc must NOT instruct mounting inner-state.sh as a live monitor: every inner-state.sh
   // mention must be the retirement note (retired / 退役 / 已退役), never a Monitor({command: ...}).

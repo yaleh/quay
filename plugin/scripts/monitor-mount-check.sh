@@ -71,22 +71,36 @@ def read_cmdline(pid):
         return []
 
 
-def is_liveness_process(argv):
-    """argv[0]=bash 且 argv[1] 的 basename 是 session-liveness.sh（绝对/相对路径都命中）。"""
-    if len(argv) < 2 or argv[0] != b"bash":
-        return False
-    return os.path.basename(argv[1].decode("utf-8", "replace")) == LIVENESS_BASENAME
-
-
-def work_root(pid, argv_script):
-    """进程实际工作根：argv[1] 是绝对路径 → 从脚本目录 ../.. 推导；是相对路径 → 先按进程 cwd 解析
-    再推导（挂载常以 `bash plugin/scripts/session-liveness.sh` 形式启动，cwd = 项目根）。"""
+def resolve_script_path(pid, argv_script):
+    """把 argv[1] 解析为绝对脚本路径：已是绝对路径 → 原样 normpath；相对路径 → 先按进程 cwd 解析
+    再 normpath（挂载常以 `bash plugin/scripts/session-liveness.sh` 形式启动，cwd = 项目根）。"""
     if not os.path.isabs(argv_script):
         try:
             cwd = os.readlink(f"/proc/{pid}/cwd")
             argv_script = os.path.join(cwd, argv_script)
         except OSError:
             pass
+    return os.path.normpath(argv_script)
+
+
+def is_liveness_process(pid, argv):
+    """argv[0]=bash 且 argv[1] 解析后的脚本路径 == 配置的 SESSION_LIVENESS。
+
+    basename 相等是预滤（兼容绝对/相对两种挂载方式——Monitor 挂 session-liveness-mount.sh →
+    exec 同一脚本；直接挂 session-liveness.sh 同样成立）；解析后路径必须等于配置路径才计入——
+    这是测试接缝（MONITOR_CHECK_SESSION_LIVENESS）的密封性：真正的挂载（如主检出那个）
+    argv[1] 是别的路径，不得让负控制误判 mounted=true。"""
+    if len(argv) < 2 or argv[0] != b"bash":
+        return False
+    if os.path.basename(argv[1].decode("utf-8", "replace")) != LIVENESS_BASENAME:
+        return False
+    return resolve_script_path(pid, argv[1].decode("utf-8", "replace")) == os.path.normpath(SESSION_LIVENESS)
+
+
+def work_root(pid, argv_script):
+    """进程实际工作根：argv[1] 是绝对路径 → 从脚本目录 ../.. 推导；是相对路径 → 先按进程 cwd 解析
+    再推导（挂载常以 `bash plugin/scripts/session-liveness.sh` 形式启动，cwd = 项目根）。"""
+    argv_script = resolve_script_path(pid, argv_script)
     default_root = os.path.normpath(os.path.join(os.path.dirname(argv_script), "..", ".."))
     try:
         with open(f"/proc/{pid}/environ", "rb") as f:
@@ -116,7 +130,7 @@ targets = []
 for d in glob.glob("/proc/[0-9]*"):
     pid = int(os.path.basename(d))
     argv = read_cmdline(pid)
-    if is_liveness_process(argv):
+    if is_liveness_process(pid, argv):
         root = work_root(pid, argv[1].decode("utf-8", "replace"))
         targets.append({
             "pid": pid,
