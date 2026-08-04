@@ -427,7 +427,7 @@ export const TASK_OVER_90M_MS = 90 * 60 * 1000;
  * detector, not a gate, and a root without git state must not crash the tick.
  *
  * @param {string} root
- * @returns {{reason: "merge-conflict", question: string, evidence: string[]} | null}
+ * @returns {{taskId: string, reason: "merge-conflict", question: string, evidence: string[]} | null}
  */
 export function detectMergeConflict(root) {
   let unmerged = "";
@@ -439,7 +439,7 @@ export function detectMergeConflict(root) {
   if (!unmerged) return null;
   const paths = [...new Set(unmerged.split("\n").map((l) => l.split("\t").pop()).filter(Boolean))];
   const question = `merge conflict in progress (unresolved: ${paths.slice(0, 3).join(", ")}${paths.length > 3 ? `, +${paths.length - 3} more` : ""}) — rule on how to resolve (abort + needs-human, or pick a side), then run --clear`;
-  return { reason: "merge-conflict", question, evidence: paths.slice(0, 5) };
+  return { taskId: "fast-mode-loop", reason: "merge-conflict", question, evidence: paths.slice(0, 5) };
 }
 
 /**
@@ -451,7 +451,7 @@ export function detectMergeConflict(root) {
  * tick MUST abort the subagent and wait (no inner retry).
  *
  * @param {string} root
- * @returns {Promise<{reason: "task-over-90m", question: string, evidence: string[]} | null>}
+ * @returns {Promise<{taskId: string, reason: "task-over-90m", question: string, evidence: string[]} | null>}
  */
 export async function detectTaskOver90m(root) {
   const events = [];
@@ -463,6 +463,7 @@ export async function detectTaskOver90m(root) {
   const p = over[0];
   const mins = ((nowMs - p.startedAtMs) / 60_000).toFixed(1);
   return {
+    taskId: p.taskId,
     reason: "task-over-90m",
     question: `task ${p.taskId} has been in-progress ${mins}m (>90m) — rule on abort vs continue (no inner retry), then run --clear`,
     evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `in-progress ${over.length} task(s) over budget`],
@@ -610,7 +611,7 @@ export async function main(argv) {
       if (reasons.length) {
         const cond = found[0];
         const rec = buildBlockedRecord({
-          taskId: "fast-mode-loop",
+          taskId: cond.taskId ?? "fast-mode-loop",
           reason: cond.reason,
           question: cond.question,
           options: cond.options,

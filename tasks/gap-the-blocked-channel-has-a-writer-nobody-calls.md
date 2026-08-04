@@ -136,7 +136,7 @@ detect-stop: STOP CONDITION — task-over-90m (auto-block written) — <tmp>/.qu
 $ cat <tmp>/.quay/inner-blocked.json
 {
   "since": 1785806702592,
-  "taskId": "fast-mode-loop",
+  "taskId": "gap-old",
   "reason": "task-over-90m",
   "question": "task gap-old has been in-progress 91.0m (>90m) — rule on abort vs continue (no inner retry), then run --clear",
   "source": "auto",
