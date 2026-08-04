@@ -25,7 +25,8 @@
 - ✅ `gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`：已 merge（`b1c96299`），scoped 5/5 绿 + 全 quay-native 58/58 + live-GitHub conformance 全过（含 2 新 hazardous-title probe）；Contract 实测：`The ## Contract` 与 `god-package: gate/ has fanOut=62` 均 round-trip。写入侧 YAML.stringify 显式化 + fail-closed validateWrittenYaml。closure 需补 task body 证据（agent 未改 task body）
 - ✅ `gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong`：已 merge（`1fcdb545`），第二个 Amendment 2026-08-04（claude -p 理由改为三条真实硬约束，结论逐字保留）；CLAUDE.md 无同型实例未改；adr016 检查器 1-in-band 绿
 - ✅ `gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`：已 merge（`0c0daf6b`），20/20 绿；`send-keys-reliable.sh`（5 步可靠发送）+ `transcript-delivery-check.ts`（纯函数，无哈希/无假 TUI）；AC6 用真实 transcript 判 delivered:true / never-sent:false；**完整跨会话 SEND 留安全窗**（R3 禁建会话，现有会话都在跑）
-- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）、`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready-pool-check.ts + tick 文档维护步骤；外层确认派发：too-big-not-stuck 裁定覆盖 suite-speed 的 task-over-90m 假阳性；scoped 只跑）
+- ✅ `gap-promotion-cadence-is-role-volition-not-product-mechanism`：已 merge（`5037ee55`，**遥测同一步关闭**——纪律修复首例），11/11 绿；`ready-pool-check.ts` 实跑 pool=6≥3 无需补晋；tick 文档新增步骤 3.6（就绪池维护）
+- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）
 
 **遥测纪律（外层 2026-08-04 纠正，系统性 gap）：** 合并必须同一步 `--task-end outcome=done`——本轮 5 次合并（node-cache/retire-state/task-write/am2/reliable-send）漏闭遥测括号，全部由外层代补。**规则：fan-in merge → 同一动作内跑 `--task-end --taskId <id> --runId <bracket> --outcome done`**，不等外层发现。suite-speed 落地时同理。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
