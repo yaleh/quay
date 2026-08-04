@@ -128,7 +128,12 @@ resume 先改判据与文档，再摘 LOOP_SCRIPTS，最后删脚本并停挂载
 
 - [x] AC1 的负控制与 AC5 的前后数字都贴进任务体
 - [x] AC6 的信号去向清单**逐类**贴出（**不得只写「已迁移」**）
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——**本并发窗口无法满足**：
+      共享 heavy-op 令牌被兄弟并发任务（task-write-frontmatter 的全量套件，pid 2864724，持锁
+      >13 分钟）持有，`scripts/test.sh` 全量默认路径按资源闸 **WAIT 退出**（避免跨项目抢资源）。
+      本任务指定的测试命令（`scripts/test.sh plugin/test/session-liveness.test.mjs
+      plugin/test/monitor-mount-check.test.mjs`）**已绿**（pass 48 / fail 0 / cancelled 0 /
+      skipped 1，EXIT=0）。全量 2 连跑留给令牌空窗期执行。
 - [x] 任务体记录：**它的招牌信号在三个项目里从未产生，且我们已经撞上过它本该拦下的那一次**——
       **「机制存在」与「机制生效」之间隔着一次真实事故，而那次事故已经发生过了**
 
@@ -272,6 +277,13 @@ pass 48 / fail 0 / cancelled 0 / skipped 1    # EXIT=0
 （skipped 1 = 真实探针会话 `quay-0:probe` 不在本机，属已知环境依赖；静态检查因
 `gap-pane-state-is-hashed-...` / `gap-tmux-isolation-...` 等其它任务的既有违规跳过。
 noise-gate / AC6-7 / AC7-negative 在完整跑里会因 tmux 时序偶发抖动——单跑与复跑均绿，非本任务引入。）
+
+**全量套件**（`scripts/test.sh` 无参）在本并发窗口**未跑成**：共享 heavy-op 令牌被兄弟并发任务
+（task-write-frontmatter 的全量套件）持有，资源闸按设计 WAIT 退出：
+```
+scripts/test.sh: could not acquire the heavy-op token within 40s (holder state printed above — dead vs alive) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free.
+```
+不绕过资源闸——并发下抢跑全量正是该闸存在的理由。留给令牌空窗期补跑 2 次。
 
 ## Touches
 
