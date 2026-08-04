@@ -1766,3 +1766,14 @@ dod-gate（外层建）。
 - 两者合并 + scoped 绿；**批套件待 AC20 落地**（dod-gate 修的是闸，tick-doc 修的是驱动文档，都是机制层）
 - **契约 ratchet 修复**（我建任务的 invoke-evidence 归零）：mkdtemp `.sh`→`.ts`、tasklist `/dev/null` 入正文
 - **在飞（1/3）**：AC20
+
+### 补派 e2e + 更正（2026-08-04 00:2xZ）
+
+- **e2e 已派发**（`gap-no-e2e-proves-install-is-configuration-driven`，runId `...v8uvdb`，
+  `/tmp/quay-wt-e2e`）——**先红落地**（AC1 四条断言此刻全红：A1/A2/A3 文本替换未完成、A4 闸拒绝
+  Finding 模板；红输出贴任务体 = 仪器自证）。AC6 防空过控制与断言同时落地（不许延后）；AC7 逐字贴
+  两工作区推导测试命令不同（package.json vs go.mod）。
+- **更正**：tick-doc 任务体里 `QUAY_TEST_SKIP_STATIC_CHECKS=1` 的说明已过时——契约 ratchet 两处
+  invoke-evidence 已修（exit 0、new since baseline 0），不再需要跳。该接缝声明用途是嵌套 0 匹配运行，
+  不是范围化绕开既有违规（用途漂移 = 窄豁免变通用跳过开关）。
+- **在飞（2/3）**：AC20 + e2e。

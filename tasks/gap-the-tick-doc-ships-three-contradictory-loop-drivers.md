@@ -137,8 +137,12 @@ loop-driver: BANNED-MECHANISM (1) — the only registered driver is 'wakeup', no
 exit=5
 ```
 
-**AC7 实跑**（`node:test` + `// @test-group governance`）——`scripts/test.sh`（静态检查用
-`QUAY_TEST_SKIP_STATIC_CHECKS=1` 跳过——HEAD 上既有静态检查违规与本任务无关）：
+**AC7 实跑**（`node:test` + `// @test-group governance`）——`scripts/test.sh` 静态检查直跑：
+**2026-08-04 更正**——执行时 HEAD 上 `task-contract-check` 的两处基线外违规
+（mkdtemp `.sh`、tasklist `/dev/null` 的 invoke-evidence）已由协调方修掉，`contract-check` exit=0、
+new since baseline=0，**不再需要 `QUAY_TEST_SKIP_STATIC_CHECKS=1`**。该接缝在 scripts/test.sh:115 的
+声明用途是**嵌套 0 匹配运行**，不是范围化运行绕开既有违规——用途漂移会把窄豁免变成通用跳过开关
+（本仓反复栽的形态），本任务不沿用：
 
 ```
 quay-init-loop.test.mjs（含 8 条新测试）第 1 次：  tests 28, pass 28, fail 0, cancelled 0
