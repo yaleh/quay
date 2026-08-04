@@ -108,6 +108,27 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# ── Node compile cache (gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses) ──────────
+# Every `node --experimental-strip-types` spawn in the suite re-parses .ts from source because
+# NODE_COMPILE_CACHE was set nowhere in the repo (measured 2026-08-04: ~450ms cold vs ~150ms warm
+# per spawn of plugin/scripts/task-schema.ts — ~2.6-3x per spawn, NOT suite wall-clock; see the
+# task body for why wall-clock A/B is the wrong axis). Node's DEFAULT cache location is
+# $TMPDIR/node-compile-cache — which on this machine is tmpfs (RAM); enabling the cache without
+# pinning a DISK path would grow a compile cache in memory (the OOM family of
+# gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs). So we pin it to a
+# DISK, gitignored, repo-root-relative directory (`.quay/node-compile-cache`, covered by
+# `**/.quay/node-compile-cache/` in .gitignore) and export it so EVERY spawn in the suite (incl.
+# plugin/test subprocesses, AC4) inherits it.
+# FAIL-OPEN (AC3): if the dir cannot be created we warn and leave the var unset — node then runs
+# uncached (slow but correct). The cache is a PURE SPEEDUP, never a single point of failure. A
+# user-supplied NODE_COMPILE_CACHE is honored verbatim (explicit opt-out from the disk default).
+node_compile_cache_dir="${NODE_COMPILE_CACHE:-${repo_root}/.quay/node-compile-cache}"
+if mkdir -p "${node_compile_cache_dir}" 2>/dev/null; then
+  export NODE_COMPILE_CACHE="${node_compile_cache_dir}"
+else
+  echo "scripts/test.sh: WARNING — could not create NODE_COMPILE_CACHE dir '${node_compile_cache_dir}'; running uncached (slow but correct, AC3 fail-open)" >&2
+fi
+
 # run_static_checks — the repo-wide invariants that run on EVERY test-running invocation,
 # independent of which test files were requested (fast; the metadata modes --list-groups/
 # --list-files skip them). CI inherits them because its only test step is `bash scripts/test.sh`.

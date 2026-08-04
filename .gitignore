@@ -24,6 +24,12 @@ experiment/timing/*.log
 **/worktrees/
 **/dist-sea/
 **/.quay/gate-events.jsonl
+# gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
+# cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
+# "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to
+# .quay/node-compile-cache (never $TMPDIR/tmpfs — the OOM family). A pure speedup: if absent, node
+# just runs uncached. Must stay untracked or the suite-after dirty check fails.
+**/.quay/node-compile-cache/
 **/.quay/heavy-op-token-events.jsonl
 **/.quay/prepare-leases/
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
