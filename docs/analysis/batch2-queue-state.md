@@ -1878,3 +1878,13 @@ dod-gate（外层建）。
 重装判据是人工补丁数 0，那两条各在第一分钟产生一条补丁。
 
 **在飞（2/3）**：install-rewrites + one-condition。
+
+### 派发 tmux 检测（2026-08-04 03:1xZ，外层落地顺序）
+
+- **install-rewrites 已关闭**（`...09efle`，--task-end done）：render_substitutions 删除、配置驱动、
+  tick 文档逐字落地、**e2e A1/A2/A3 绿**（AC2/3/4 承载满足）。
+- **tmux 检测**（`gap-init-guesses-the-tmux-session-and-writes-the-guess-into-the-monitor`，runId `...v1d8yr`，
+  `/tmp/quay-wt-tmux`）——外层落地顺序：install-rewrites 后的下一条。fail-closed 检测、绝不写猜测值。
+  与 one-condition（inner-blocked-signal）无冲突；**与 LOOP_SCRIPTS 条冲突**（都动 quay-init.sh + 测试）→
+  LOOP_SCRIPTS 待 tmux 落地后派。第 3 槽按外层顺序留空。
+- **在飞（2/3）**：one-condition + tmux。
