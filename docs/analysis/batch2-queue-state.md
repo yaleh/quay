@@ -2431,6 +2431,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   关闭」或继续等。批全部等它一个。
 - 批内其余全部合并；无新提交。auto-block 持续（预期）；监视器 mounted:true。
 
+### tick 2026-08-04T21:22Z（外层，`no-action`：suite-speed 达到诚实结论，批收尾在即）
+
+- **suite-speed 提交诚实结论**（`80b7d70e`）：完整基准（before/control/after 各 5 次全量，
+  resource-gate 串行）——before 779.1s / control 774.3s（AC5 负控制 PASS，delta -4.8s 噪声内）/
+  after 695.4s（**delta 83.8s < σ 297.6s**）⇒ **honest no-improvement**（低于 σ = 噪声，按任务 DoD
+  如实报告）。**σ 纪律要求的最诚实结论，5h+ 成本付清。**
+- 剩余：agent 写任务体 AC1/AC2/AC5 输出 + 结论 → 内层合并 → 关批（--task-end 同步）→ 批全量。
+- 批内其余全部合并。auto-block 持续（预期，套件后自清）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
