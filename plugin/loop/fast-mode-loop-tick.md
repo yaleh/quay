@@ -119,6 +119,12 @@ grep 'tests 2157'    # tests 数等于参考值（2026-08-03 实测 2157＝2150+
 遥测」，与「内层在思考一个难题」完全同形。这是本仓当天两次栽过的那一族失效换了个位置。内层跑
 重活，会话死掉代价更大，**更需要**进程存活这一层。
 
+**挂载是单飞（AC20，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）**：挂载是一个
+**有主的、可接管的角色**——取单飞锁（复用 `heavy-op-token.sh` 的锁），已有活持有者时再挂 ⇒
+退出 0（空操作，不是失败）、不新增进程；持有者 kill -9 后下一次挂载自动接管。所以**任何项目
+（quay/archguard/meta-cc）都挂同一把锁、同一批共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
+先挂上者成为唯一持有者，其余挂载一律空操作。要看事件的人**订阅共享文件即可，不必自己挂**。
+
 挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
 （AC1/AC16，2026-08-03 实测选定：`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，
 不是有效心跳源；transcript 每次工具调用都写，含 subagents 目录）。经
