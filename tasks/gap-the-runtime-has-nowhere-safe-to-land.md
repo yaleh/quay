@@ -134,6 +134,12 @@ resume 先量出真实阈值分布与可选方案的代价，再选方案
       检查按**路径字面量**判定并列出被排除的名字（**可扩充，不是穷举即完**）
 - [ ] AC10: **gitignore 处置**——`quay-init` 若依赖「运行时不进 git」，**必须自己写入那条 gitignore**；
       **负控制：目标已有同名条目时不得重复写入或覆盖使用者的 gitignore**
+- [ ] AC11（**管理者 2026-08-04 02:10Z 实测缺口**）: **把 Go 那半边补进重装门槛 e2e**——
+      实测 `install-config-driven-e2e.test.mjs` 的断言关键词覆盖
+      `byte-identical` / `idempot` / `upgrade` / `finding` / `npm test`，**但没有 `go build`**。
+      **而 `vendor` 撞 Go 保留目录这条恰恰只有 Go 目标能暴露** ⇒
+      **本任务是它的所有者**（谁修谁证明自己让它变绿）：
+      A5 的 Go 半边由本任务补入 e2e 并证明其变绿
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
 
 ## Definition of Done
