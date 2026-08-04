@@ -2526,6 +2526,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   输出把旧路径正则当数据嵌入，非活调用者）——已排除，重跑中。**全量又捕获一个合并期边界。**
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。batch-3 重跑绿后关批。
 
+### tick 2026-08-04T23:42Z（外层，`no-action`：batch-3 已关，内层自主修 overshoot）
+
+- **batch-3 正式关闭**（`6f2620f5`：3 done、全量 2283/0/0、closure `f7b32ccf`；累计 15 任务跨 3 批；
+  遥测全配对、worktree 全清）。
+- **内层自主转入修复 ready-pool-check taskWorkLanded 过冲缺陷**（备忘「修 ready-pool-check 的
+  taskWorkLanded 过冲缺陷」，1 agent 在跑）——缺陷立案后内层主动接手，无需外层驱动。
+  **产品机制的自我修正闭环运转。**
+- ready-pool 诚实口径 0（过冲缺陷未修前改既有文件型任务补晋无效）；缺陷修复后 pool 可恢复 ≥3。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
