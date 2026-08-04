@@ -158,6 +158,25 @@ EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE
 
+# ── L0（gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX，AC3）──
+# 本监视器必须读【真实默认服务端】上的会话，所以不走 tmux-isolated.sh（那会指向一个没有真实
+# 会话的私有 socket，读不到任何 pane）。改用 AC3 的「等价显式形态」：`env -u TMUX tmux -S <socket>`。
+#   - 显式 `-S` 钉死 socket（压过任何继承的 $TMUX）；`env -u TMUX` 剥掉 $TMUX，使其无法经
+#     TMUX_TMPDIR 混淆重新注入 socket（L0 证据：$TMUX 压过 TMUX_TMPDIR，仅设 TMUX_TMPDIR 不隔离）。
+#   - 生产：socket = ${TMPDIR:-/tmp}/tmux-$(id -u)/default（真实默认服务端，承载 quay-0 等会话）。
+#   - 测试：SESSION_TMUX_SOCKET 显式覆盖（hermetic 测试把探针指向隔离 socket，不碰真实服务端）；
+#     向后兼容既有测试的 TMUX_TMPDIR 机制（TMUX_TMPDIR 已设 → socket = $TMUX_TMPDIR/tmux-$(id -u)/default）。
+SL_TMUX_SOCKET="${SESSION_TMUX_SOCKET:-}"
+if [ -z "$SL_TMUX_SOCKET" ] && [ -n "${TMUX_TMPDIR:-}" ]; then
+  # 既有测试的 hermetic 机制：TMUX_TMPDIR 设了、无显式 -S 时，tmux 把 socket 放在
+  # $TMUX_TMPDIR/tmux-$(id -u)/default（实测 2026-08-04，不是 $TMUX_TMPDIR/default）。
+  SL_TMUX_SOCKET="${TMUX_TMPDIR}/tmux-$(id -u)/default"
+fi
+if [ -z "$SL_TMUX_SOCKET" ]; then
+  SL_TMUX_SOCKET="${TMPDIR:-/tmp}/tmux-$(id -u)/default"
+fi
+_sl_tmux=(env -u TMUX tmux -S "$SL_TMUX_SOCKET")
+
 # ── 版本可见性（2026-08-03 管理者建议，非规格）──
 # 启动时打一行指纹到 stderr——「跑的是哪个版本」可从外部查：对比这行的 md5 与当前文件的 md5，
 # 不同即此实例载入的是旧代码（进程握着旧 inode，从外部看不出）。同一族失效今天第四次：
@@ -411,7 +430,7 @@ heartbeat_mtime() {
 
 session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane shell 的第一个 claude 子进程。
   local t=$1 ppid cpid
-  ppid=$(tmux list-panes -t "$t" -F '#{pane_pid}' 2>/dev/null | head -1) || true
+  ppid=$("${_sl_tmux[@]}" list-panes -t "$t" -F '#{pane_pid}' 2>/dev/null | head -1) || true
   [ -n "${ppid:-}" ] || { echo ""; return; }
   cpid=$(pgrep -P "$ppid" 2>/dev/null | head -1) || true
   # 只认 claude 进程，避免把 shell 当成会话本体
@@ -609,7 +628,7 @@ while true; do
     #   剥离，所以「停泊会话只有 token 计数器在变」不会判忙（姊妹任务的假阳性源在此吸收）。
     # 不用 /proc CPU 增量：空闲的 Claude Code TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
     if [ "$alive" = "1" ]; then
-      raw=$(tmux capture-pane -p -t "$target" 2>/dev/null)
+      raw=$("${_sl_tmux[@]}" capture-pane -p -t "$target" 2>/dev/null)
       busy_esc=$(printf '%s\n' "$raw" | grep -c 'esc to interrupt' 2>/dev/null || true)
       [ -z "$busy_esc" ] && busy_esc=0
       busy_sem=$([ "$busy_esc" -ge 1 ] 2>/dev/null && echo 1 || echo 0)
