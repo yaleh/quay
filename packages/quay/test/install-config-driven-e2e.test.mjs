@@ -419,3 +419,33 @@ test("AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0;
   const neg = antiPassThroughCheck(f1, f2);
   assert.ok(!neg.ok, `AC6 negative control: both-installs-empty must be detected as red (not 'identical'); ${neg.reason}`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// A6 — the reinstall gate's A6 (GOAL-when-to-reinstall.md): after landing, the target project's
+// worktree root is NOT on tmpfs. NAMING WARNING (gap-the-shipped-tick-doc-... AC8): this is the
+// GATE's A6 — do NOT confuse it with the anti-pass-through test named "AC6" above. They differ by
+// one letter; a green "AC6" says nothing about this "A6".
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+test("A6 — a landed quay-init --loop writes a loop.worktree_root that is NOT on tmpfs (a tmpfs root is rejected)", () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
+  const r = runInit(ws);
+  assert.equal(r.status, 0, `install must succeed (precondition):\n${r.stderr}`);
+
+  // The landed config must carry loop.worktree_root, and that root's filesystem type must NOT be
+  // tmpfs — /tmp is tmpfs, every MB is RAM, and the 2026-08-04 machine-wide OOM traced straight
+  // to in-flight worktrees living in it (GOAL-when-to-reinstall.md A6).
+  const cfg = path.join(ws, ".quay", "config.yml");
+  assert.ok(fs.existsSync(cfg), "landed .quay/config.yml must exist");
+  const cfgText = fs.readFileSync(cfg, "utf8");
+  const m = /worktree_root:\s*(\S+)/.exec(cfgText);
+  assert.ok(m, `landed config must carry loop.worktree_root:\n${cfgText}`);
+  const wtRoot = m[1];
+  // The root may not exist yet (quay-init validates the nearest existing ancestor) — probe it.
+  let probe = wtRoot;
+  while (probe !== "/" && !fs.existsSync(probe)) probe = path.dirname(probe);
+  const t = spawnSync("stat", ["-f", "-c", "%T", probe], { encoding: "utf8" });
+  assert.equal(t.status, 0, `stat of worktree root's fs must work: ${wtRoot}`);
+  assert.notEqual(t.stdout.trim(), "tmpfs",
+    `A6: the landed worktree root must NOT be on tmpfs (it is memory, not disk); got "${t.stdout.trim()}" for ${wtRoot}`);
+});
