@@ -52,7 +52,8 @@
 - **批 2**：8 任务 done（node-cache/retire-inner-state/task-write/am2/reliable-send/promotion-cadence/ready-pool-defect/suite-speed），全量 2298。
 - **批 3**：3 任务 done（phantom-in-flight/log-filtered/dispatch-eligibility），全量 2283。
 - 全量参考值演变：2276 → 2298 → 2283（phantom-in-flight 测试重标 governance 后默认 product,engine 下 skip，故略降）。
-- **就绪池（ready-pool-check 诚实口径）**：0（taskWorkLanded 过冲缺陷待修——见上「⚠ 发现的机制缺陷」）。
+- **就绪池（ready-pool-check 诚实口径）**：**已修 taskWorkLanded 过冲**（`gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks`，done，merge `191f179a`）——touch 信号只认任务自建（(new)）文件，既有文件型改判任务特有符号。**AC4 实测：补晋 6 条改既有文件型任务后 pool 0→4**。6 条已补晋 ready：gap-eighty-one / gap-eighty-two / gap-load-sensitive / gap-preflight（池内）+ gap-drive-text / gap-init-ships（被**既有符号信号边缘**排除——AC 反引号引用既有函数导致 resolve，非本次缺陷）。**晋级速率解除阻塞（57 条 todo 可滚动补晋派发）。**
+- 遗留：符号信号边缘（引用既有函数的 AC 会被误判已落）——可作后续 refinement 任务；非本次 touch 过冲缺陷。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
