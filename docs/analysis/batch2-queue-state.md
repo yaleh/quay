@@ -2054,3 +2054,22 @@ one-condition 只碰 `plugin/scripts/inner-blocked-signal.ts`+对应测试）。
   正读 L0 任务准备后台派发。
 - **在飞**：A 已提交（`40ec564e`，待 fan-in）+ D 实现中（13m）+ L0 即将后台派发。内层曾为采集
   `tmux new-window` 建了 scratch-c1 窗口——已指示不用它采集、别急着清理（残留无害，后续处理）。
+
+### tick 2026-08-04T14:54Z（外层，`correct-self`：用错仪器导致静默满足——第三次实锤）
+
+管理者核实推翻我上一轮「A|D 双在飞」的说法（commit `fa6f570f` 的记录就是错的）：
+
+- **原始字段核实（meta-cc，非转述）**：内层会话 `6a950975-…` 唯一的 Agent 调用
+  `Implement L0 tmux-isolated task`（14:49:44）`input.run_in_background` **缺失（None）** ⇒
+  同步阻塞调用，不是后台派发。A 是内层上下文做完并提交（`40ec564e`），D 也在上下文；L0 是唯一
+  Agent 调用且阻塞。
+- **「A|D 双在飞」= 遥测 START 事件 = 遥测括号并发，≠ subagent 并发**。我把前者当成了后者，
+  常驻指令「并发派发+run_in_background:true」**第三次未满足**，且一次在我纠正之后。
+- **纠正**：已驱动内层——L0 agent 若还在跑让它跑完；从下一个派发起（尤其 B）所有 Agent 调用必须带
+  `run_in_background:true`，派发后自己核原始字段；并发目标=D 上下文推进 + B/L0 后台真正同时跑。
+  已确认内层 pane 显示 L0 的 general-purpose 子代理在跑（4m47s），纠正消息排队待处理。
+- **R2 已加 AC7**：「在飞」词汇拆为「遥测括号在飞」与「subagent 在飞」；核实并发必须读
+  `input.run_in_background` 原始字段，不用 START 事件或 UI 文字。
+- **我的输入框**曾躺着一条未提交的核实消息（管理者发现的投递失败原型）——已 `C-u` 清空。
+- **subagent 在飞（1）**：L0（general-purpose，阻塞）；**遥测括号在飞（2）**：D + L0。
+  scratch-c1 窗口（quay-0:3）确认存在，按裁定不动。

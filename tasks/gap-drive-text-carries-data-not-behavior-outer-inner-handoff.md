@@ -66,10 +66,16 @@ extra:
 - [ ] AC5: 关系说明落地：`orchestration/QUAY-OUTER-HANDOFF.md` 或本任务体明写与
       `SPEC-quay-self-hosts-its-own-cold-start.md` 的分工（SH=启动交接，本条=稳态每跳交接）
 - [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [ ] AC7: **「在飞」词汇拆分 + 原始字段核实**（2026-08-04 第三次实锤后加）——外层核实并发必须读
+      原始 Agent 工具调用的 `input.run_in_background` 字段（meta-cc transcript 查询），
+      **不得用**遥测 START 事件或 pane UI 文字：START 只证「遥测括号在飞」，不证「subagent 在飞」。
+      「在飞」一词在 tick 词汇里拆为两种含义，报告/队列状态里分别标注，混用会让并发指令看起来已满足。
+      实例（本 tick）：内层唯一 Agent 调用 `run_in_background` 缺失，而 START 事件显示 A|D 双在飞——
+      用错仪器导致静默满足，是本条要消灭的形态
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC4 两个方向的实跑输出逐字贴进本任务体
+- [ ] AC1–AC7 全部勾上；AC4 两个方向的实跑输出逐字贴进本任务体
 - [ ] 一次真实驱动验证：外层此后一条驱动文本若断言顺序，必带 `checkTouchesPair` 输出
       （任务体记录至少一次实际发生的遵守实例）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
