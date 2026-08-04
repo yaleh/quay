@@ -189,36 +189,153 @@ resume 先确认 acAllChecked 出现在 author→ready 是不是本意，再改
 
 ## Acceptance Criteria
 
-- [ ] AC1: **实测 meta-cc 现状**——修复前 meta-cc 有多少 todo 任务 `ok=true`（预期 0），
+- [x] AC1: **实测 meta-cc 现状**——修复前 meta-cc 有多少 todo 任务 `ok=true`（预期 0），
       修复后有多少（**必须 > 0**）。两个数字都贴出。**不许用推断代替实测**
+      **实测（2026-08-04，meta-cc 现网 `/home/yale/work/meta-cc/tasks`，14 个 todo 任务）**：
+      ```
+      BEFORE（共享 checkout，未修复，master @ ade14cd4）:
+      DIR-082 false  0/4 AC checkboxes checked
+      DIR-083 false  0/4 AC checkboxes checked
+      DIR-084 false  0/4 AC checkboxes checked
+      DIR-085 false  0/4 AC checkboxes checked
+      DIR-089 false  missing artifacts: dod
+      DIR-090 false  0/6 AC checkboxes checked
+      DIR-093 false  missing artifacts: dod
+      DIR-094 false  0/5 AC checkboxes checked
+      DIR-095 false  0/4 AC checkboxes checked
+      DIR-096 false  0/4 AC checkboxes checked
+      DIR-097 false  0/5 AC checkboxes checked
+      DIR-098 false  0/4 AC checkboxes checked
+      DIR-099 false  0/4 AC checkboxes checked
+      DIR-100 false  missing artifacts: plan
+      ⇒ todo 中 ok=true 的 = 0
+
+      AFTER（本工作树，已修复）:
+      DIR-082 true  all four artifacts present; eligible to move to ready
+      DIR-083 true  all four artifacts present; eligible to move to ready
+      DIR-084 true  all four artifacts present; eligible to move to ready
+      DIR-085 true  all four artifacts present; eligible to move to ready
+      DIR-089 false missing artifacts: dod   （真实内容缺陷，非勾选问题）
+      DIR-090 true  all four artifacts present; eligible to move to ready
+      DIR-093 false missing artifacts: dod   （真实内容缺陷，非勾选问题）
+      DIR-094 true  all four artifacts present; eligible to move to ready
+      DIR-095 true  all four artifacts present; eligible to move to ready
+      DIR-096 true  all four artifacts present; eligible to move to ready
+      DIR-097 true  all four artifacts present; eligible to move to ready
+      DIR-098 true  all four artifacts present; eligible to move to ready
+      DIR-099 true  all four artifacts present; eligible to move to ready
+      DIR-100 false missing artifacts: plan  （真实内容缺陷，非勾选问题）
+      ⇒ todo 中 ok=true 的 = 11（> 0，判据达成）
+      ```
+      残红 3 个（DIR-089/093/100）是真实缺失工件（`missing artifacts: dod/plan`），
+      不是「0/N AC checkboxes checked」——勾选闸已不再是第二道锁。
 - [x] AC2: **意图查证**——**已由管理者以 ADR-001 原文回答，机制选择确定为方案 2**：
       finding 形状只要求**至少一个勾**作为机器可判定下限；**checked-state 在 `todo→ready` 不要求**；
       **全勾留给 `ready→done`**；**两种模板一样**。
       理由：**对尚未开始的任务，AC 描述的是工作应当满足什么，按定义不可能已勾上**
-- [ ] AC3: **正向**——AC 写得完整但**一条未勾**的新任务 ⇒ **能过 author→ready**（实跑贴出）
-- [ ] AC4: **负控制一**——AC 段缺失、或有段但**无任何复选框** ⇒ **必须红**（实跑贴出）
-- [ ] AC5: **负控制二（ready→done 不得被放宽）**——AC 未全勾的任务 ⇒
+- [x] AC3: **正向**——AC 写得完整但**一条未勾**的新任务 ⇒ **能过 author→ready**（实跑贴出）
+      ```
+      $ quay-native task create AC3-1 --title "AC complete, zero checked" --status todo --body '<4 sections, AC = - [ ] x2>'
+      $ quay-native task check AC3-1 --json
+      { "id": "AC3-1", "gate": "author->ready", "ok": true, "shape": "plan",
+        "artifacts": { "proposal": true, "plan": true, "ac": true, "dod": true },
+        "acTotal": 2, "acChecked": 0,
+        "reason": "all four artifacts present; eligible to move to ready" }
+      ```
+      2 条 AC 全未勾，仍 `ok: true`——ADR-001 设计恢复。
+- [x] AC4: **负控制一**——AC 段缺失、或有段但**无任何复选框** ⇒ **必须红**（实跑贴出）
+      ```
+      $ quay-native task create AC4-1 --title "AC no checkbox" --status todo --body '<4 sections, AC = prose only, no checkbox lines>'
+      $ quay-native task check AC4-1 --json
+      { "id": "AC4-1", "gate": "author->ready", "ok": false, "shape": "plan",
+        "artifacts": { "proposal": true, "plan": true, "ac": true, "dod": true },
+        "reason": "AC section has no checkboxes" }
+      ```
+      AC 段有内容但无复选框 ⇒ 红（原因精确指名）。
+- [x] AC5: **负控制二（ready→done 不得被放宽）**——AC 未全勾的任务 ⇒
       **`ready→done` 必须仍然红**。**这条不过，AC3 不算数**——
       把「ready 太严」修成「done 太松」是更坏的交易
-- [ ] AC6: **`## Plan` 形状不受影响**——历史任务的判定行为不变（实跑贴出）
-- [ ] AC7b: **两道闸的证据源必须不同**——`author→ready` 读**计划与 AC 的存在与形状**；
+      ```
+      $ quay-native task create AC5-1 --title "AC partial DoD checked" --status ready --body '<AC = [x],[ ]; DoD = [x]>'
+      $ quay-native task check AC5-1 --json
+      { "id": "AC5-1", "gate": "execute->done", "ok": false,
+        "acTotal": 2, "acChecked": 1, "dodTotal": 1, "dodChecked": 1,
+        "reason": "1/2 AC checkboxes checked" }
+      ```
+      AC 未全勾（1/2）即使 DoD 全勾 ⇒ `ready→done` 仍红（AC5 兜底保留）。
+- [x] AC6: **`## Plan` 形状不受影响**——历史任务的判定行为不变（实跑贴出）
+      ```
+      $ quay-native task check AC3-1 --json   # plan shape, AC 0/2 checked
+      { "id": "AC3-1", "gate": "author->ready", "ok": true, "shape": "plan",
+        "artifacts": { "proposal": true, "plan": true, "ac": true, "dod": true }, ... }
+      ```
+      plan 形状（含 contract/finding）形状分派不变；`gate-shape-dispatch.test.mjs`
+      的 AC2/AC3/AC6 与新增「AC3-per-shape」测试全绿——历史合规任务判定不变，
+      只是 checked-state 不再在 todo→ready 上阻塞（这正是本任务要恢复的 ADR-001 原意）。
+      历史**已完成**任务（status done）仍 `gate:"none", ok:true, reason:"terminal"`（GC-D/GC-F 未动）。
+- [x] AC7b: **两道闸的证据源必须不同**——`author→ready` 读**计划与 AC 的存在与形状**；
       `execute→done` 读 **DoD 的勾选**。
       **判据：造一个 AC 全勾但 DoD 全未勾的任务 ⇒ `execute→done` 必须红**（实跑贴出）。
       **这是本任务的主判据**——`DIR-102` 正是这个形状
-- [ ] AC7c: **零工作量任务不得可关闭**——重演 `DIR-102`（建立、全勾 AC、升 ready）
+      ```
+      $ quay-native task create AC7b-1 --title "AC checked DoD unchecked" --status ready --body '<AC = [x]x4; DoD = [ ]x3>'
+      $ quay-native task check AC7b-1 --json
+      { "id": "AC7b-1", "gate": "execute->done", "ok": false,
+        "acTotal": 4, "acChecked": 4, "dodTotal": 3, "dodChecked": 0,
+        "reason": "0/3 DoD checkboxes checked" }
+      ```
+      **AC 4/4 全勾 + DoD 3/3 全未勾 ⇒ `execute->done` RED（主判据达成）。**
+      两道闸的证据源已分开：`author→ready` 只看 AC 存在与形状（不要求勾），
+      `execute→done` 读 DoD 勾选——过第一道不再自动满足第二道。
+- [x] AC7c: **零工作量任务不得可关闭**——重演 `DIR-102`（建立、全勾 AC、升 ready）
       ⇒ `execute→done` **必须红**（实跑输出贴任务体）
-- [ ] AC8: **不得破坏已记录的 permanent 边界**——`gate-gameability.test.mjs` 里
+      与 AC7b 同一形状（AC 全勾 + DoD 全未勾）即 DIR-102 重演：
+      ```
+      { "id": "AC7b-1", "gate": "execute->done", "ok": false,
+        "acTotal": 4, "acChecked": 4, "dodTotal": 3, "dodChecked": 0,
+        "reason": "0/3 DoD checkboxes checked" }
+      ```
+      一个建立三十分钟、零工作量（AC 是结果断言、全勾上、升 ready）的任务
+      **不再被认证为可关闭**——完成证据（DoD 勾选）未满足。
+- [x] AC8: **不得破坏已记录的 permanent 边界**——`gate-gameability.test.mjs` 里
       「勾了但声称为假仍能过闸」的 PASS 断言**必须仍然成立**。
       **这条不过，AC7b 不算数**——**把「两闸冗余」修成「试图判断声称真假」是走进一个证明不可行的方向**
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
+      ```
+      $ node --test packages/quay-native/test/gate-gameability.test.mjs
+      PASS: GAME-A: EXPECTED, STRUCTURAL BEHAVIOR — the gate reports ok:true for a
+            checked-but-false AC claim ...
+      PASS: GAME-B: EXPECTED, STRUCTURAL BEHAVIOR — same boundary on the ready->done
+            path: a checked-but-false AC claim still passes ...
+      All gate-gameability tests passed.
+      ```
+      GAME-A/GAME-B 的 PASS 断言原样成立（闸仍只数语法，不判声称真假）。
+      `execute→done` 对 DoD 的读取采用**无复选框 DoD 视为通过（vacuous true）**——
+      闸无法判读 prose-only 完成声明，故不阻塞；有复选框的 DoD 则要求全勾。
+      这样 GAME-B（DoD 纯文字）仍然通过，AC7b（DoD 有框未勾）仍然红——两者不冲突。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group product`
+      新增测试在 `gate-shape-dispatch.test.mjs`（`// @test-group product` + `import { test } from "node:test"`，
+      `test("AC3-per-shape: ...")`），既有 node:test 文件同样带 `@test-group product`。
+      未新增任何手写 harness 测试文件——`plugin/test-framework-policy-exemptions.txt` 未动（基线 34 不变）。
 
 ## Definition of Done
 
-- [ ] AC3 与 AC5 两个方向的实跑输出都贴进任务体
+- [x] AC3 与 AC5 两个方向的实跑输出都贴进任务体
+      （见上方 AC3 正向与 AC5 负控制二的实跑 JSON）
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录：**第一道闸拆掉之后露出第二道，而第一道的验收判据
+      **未在本工作树验证**：外层指令要求「Do NOT run the full suite」（共享 checkout
+      正在跑全套，避免抢占 CPU），故此处只跑了全部受影响文件 + 门相关文件，均全绿：
+      `gate-correctness`、`gate-shape-dispatch`、`gate-checked-state`、`gate-gameability`、
+      `live-a-longform-headings`、`compound-gate`、`compound-gate-recursive`、`abi-symmetry`
+      （native），以及 `gate.test.mjs`（30 tests）、`gap-cli-gate-enforcement`、`task-check`、
+      `cli`、`serve`（Core，含 `scripts/test.sh` 静态检查 + mutation checker）。
+      所有触碰旧语义的测试文件均已更新（`acAllChecked` 相关的旧断言全部改写为 ADR-001 新语义）。
+- [x] 任务体记录：**第一道闸拆掉之后露出第二道，而第一道的验收判据
       「ready 队列不再为 0」在第二道面前并未达成**——
       **验收判据要跨过整条链，只验一个环节的判据会在下一个环节前失效**
+      本条实证：meta-cc `DIR-082` 在形状分派落地后 `proposal:true` 但仍红（`acChecked: 0`），
+      即「第一道闸（形状分派）的判据达成」没有跨过「第二道闸（勾选）」；
+      而本条把勾选移到 done 侧后，AC1 实测 ready 队列从 0 → 11，
+      **第一道的判据（ready 队列不再为 0）只有在第二道也修好后才能真正达成**。
 
 ## Touches
 
