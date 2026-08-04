@@ -2229,3 +2229,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   就绪池 = 3 ✓（AC-queue 成立）。measure-claude-p 仍 todo（依赖 am2）。
 - 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
 - 资源闸：内层在飞期间外层只做廉价核实。
+
+### tick 2026-08-04T16:23Z（外层，`no-action`：retire-inner-state 合并 + 外层监视器重配置）
+
+- **retire-inner-state 已合并**（`059c2437` fan-in + `2e0ccf72` tick 注记），AC6 B-signal 处置完成：
+  信号去向表逐类明确——BLOCKED（auto ruling-required）由外层自身写+读承载（`--detect-stop --pane` +
+  `--read`），遥测/git 信号外层直接读 `--report`/`git log`，会话面信号全在 session-liveness.sh，
+  **没有信号类静默消失**。
+- **外层监视器重配置（本次 tick 动作）**：
+  - 我的 `inner-state.sh` Monitor（bskbku0l7）在 merge 后运行的是**已删除代码**（旧 inode）——已
+    **TaskStop 停止**，残留进程随之消失（`ps` 核实 0 个）。
+  - **替换监视器**：`--detect-stop --pane` 轮询（bep2jmw1g，60s，捕获内层 pane → 跑 --detect-stop，
+    仅 BLOCKED/UNBLOCKED 转变时发声）——保留 ≤5 分钟 BLOCKED 观察预算（裁定 C）。
+  - **观察延迟 watch-item**：retire 的设计「外层主动读不需要常驻轮询工具」依赖外层**确实在跑**
+    `--detect-stop --pane` 轮询——若该轮询丢失，BLOCKED 观察退化为 tick 节奏（20min），违反裁定 C
+    的 ≤5 分钟。当前由 bep2jmw1g 承载；它若停止，重挂是外层职责。
+- **批状态**：node-compile-cache + retire-inner-state 已合并；task-write + suite-speed 在飞
+  （agent 等各自全量套件，内层 4 shells 重活）。
+- **就绪池 = 3** ✓（am2 / promotion-cadence / reliable-send，尚未派发，等槽位）。
+- 无停止条件、无阻塞；loop-driver LIVE。
