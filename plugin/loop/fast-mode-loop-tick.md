@@ -1,16 +1,17 @@
 # 快速模式 loop tick 指令
 
-> **模板参数（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）**：本文件是随 quay
-> 插件包分发的内层 tick 文档（`plugin/loop/`），本仓自身的循环直接读这份模板。`quay-init --loop`
-> 铺到目标项目时对**副本**做机械替换，正文本体保持 quay 实值：
-> - `/home/yale/work/quay` → 目标项目根（`--repo-root`）
-> - `scripts/test.sh` → 目标项目测试命令（`--test-command`，必填）
-> - `quay-0:0.0` → 目标项目 tmux 会话（`--tmux-session`）
-> - `plugin/loop/fast-mode-loop-tick.md` / `plugin/loop/orchestrator-loop-tick.md`（本文件的
->   自引用/互引用）→ 目标项目的 `docs/analysis/fast-mode-loop-tick.md` /
->   `orchestration/orchestrator-loop-tick.md`
-> 替换只作用于铺出的副本，不修改本模板。铺完后负控制：副本里 grep 不到 `scripts/test.sh` 这类
-> quay 专属字面。
+> **模板参数（gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them）**：本文件是随
+> quay 插件包分发的内层 tick 文档（模板在 `plugin/loop/fast-mode-loop-tick.md`，外层模板是
+> `plugin/loop/orchestrator-loop-tick.md`）。
+> `quay-init --loop` **原样铺出**（字节相同，不做文本替换）——目标项目的值（`repo_root` /
+> `test_command` / `tmux_session`）集中在一个配置文件 `.quay/config.yml` 的 `loop:` 节里，
+> 脚本与本 tick 在**运行时读取**它们，不在落地时烘焙。铺到目标项目时的位置：
+> `docs/analysis/fast-mode-loop-tick.md`（内层）/ `orchestration/orchestrator-loop-tick.md`（外层）。
+> 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
+>
+> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` 三个名字在本文件中
+> 指 `.quay/config.yml` `loop:` 节的对应值（`repo_root` / `test_command` / `tmux_session`）。
+> 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
 
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 
@@ -27,7 +28,7 @@
 **调用方式**（`.claude/loop.md` 已删除——exp5 退役；`/loop` 带显式 prompt 时不读该文件）：
 
 ```
-/loop 25m 执行 plugin/loop/fast-mode-loop-tick.md 中的 tick 指令
+/loop 25m 执行 fast-mode-loop-tick.md 中的 tick 指令
 ```
 
 **可查验性 / 为什么用固定间隔（2026-08-03，外层更正理由）**：`/loop` **不是驱动器**——主推进信号
@@ -84,11 +85,12 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 两者满足 → 没有任何东西在跑，通知不会来了，**去核对产出/续跑**。每跑完一步就落盘（任务体/队列文件），不要攒到最后——即使 agent 静默停止，已落盘数据不丢，可从缺口续跑。
 
 **跑全量前调用资源闸（机制，不是散文——`gap-no-resource-awareness-heavy-ops-run-blind`）**：
-`scripts/test.sh` 已在默认全量路径接入 `bash plugin/scripts/resource-gate.sh --for full-suite`——WAIT 时
-打印数字后退出非 0，**不静默等待**。手动跑全量同样先调 gate：退出码 0=GO 才跑，非 0=WAIT 不跑。
+目标项目的全量测试命令（`.quay/config.yml` `loop.test_command`，下称 `TEST_COMMAND`）已在默认
+全量路径接入 `bash plugin/scripts/resource-gate.sh --for full-suite`——WAIT 时打印数字后退出非 0，
+**不静默等待**。手动跑全量同样先调 gate：退出码 0=GO 才跑，非 0=WAIT 不跑。
 gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 CPU 的比例；load 是代理，
 claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
-ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，test.sh 默认并发已改为
+ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，测试命令的默认并发已改为
 **推导值 `max(1, floor(nproc / 2.1)) = 1`**（不再写死 8——8 worker + 子进程 = 17 进程、4.25× 超订，
 是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先。两层绝不同时跑全量套件。
 
@@ -191,10 +193,10 @@ bash plugin/scripts/monitor-mount-check.sh --json
    rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
 1. `git merge --no-ff task/<taskId>`
 2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
-3. 跑 `scripts/test.sh --for-task <taskId>`（该任务自己的选中集，秒级）
+3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
 
-全部合并完成后，**跑一次**全量 `scripts/test.sh`：
+全部合并完成后，**跑一次**全量 `$TEST_COMMAND`：
 
 5. 非绿 → **立即停止**，不再合并任何东西；逐个回退或 `git bisect` 定位是哪个 merge 导致，报告
 6. 绿 → 对每个已合并任务：`git worktree remove` + `git branch -d`，关闭任务状态（AC 和 DoD 都勾；勾不上写理由或留 `ready`），记录耗时
@@ -214,8 +216,8 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 **合并本身必须串行。** 并发合并会在共享工作树上撞车。
 
 **worktree 隔离的传播代价（2026-08-03 观察）**：主检出的紧急修复**不会自动传播**到在飞任务的 worktree——
-每个 worktree 有自己的 `scripts/test.sh` 等副本。这次是好事（隔离生效），但也意味着一个紧急修复要**显式同步
-进每个在飞 worktree**（`cp scripts/test.sh /tmp/quay-wt-<slug>/scripts/test.sh`），否则在飞任务会继续用旧行为跑完
+每个 worktree 有自己的测试 runner 等副本。这次是好事（隔离生效），但也意味着一个紧急修复要**显式同步
+进每个在飞 worktree**（把 `$TEST_COMMAND` 对应的 runner 脚本复制进 `/tmp/quay-wt-<slug>/` 对应位置），否则在飞任务会继续用旧行为跑完
 （实例：并发默认推导改为 1 后，主检出已修复回 8，但 sigma worktree 仍在串行跑 ~52 分钟）。派发/协调时要检查
 在飞 worktree 是否有需要同步的主检出修复。
 
@@ -242,7 +244,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
   `restart-readiness-check.sh` 检查 7 会因「内层在等裁定」拒绝解除停机，死锁）
 - **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
   它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
-  不是仓库里 needs-human 的总数。分诊规则见 `plugin/loop/orchestrator-loop-tick.md` 步骤 3）
+  不是仓库里 needs-human 的总数。分诊规则见 `orchestrator-loop-tick.md` 步骤 3）
 - 上一步全量 suite 非绿
 - 就绪队列为空
 - 对抗审查 2 轮后仍 REFUTED、队列文件与 git 状态矛盾且无法判定（判断边界表）
@@ -344,13 +346,13 @@ console.log(m.checkTouchesPair(A,B,expand));
 
 ```bash
 # 停下前（judgment 条件触发时——ruling-required / review-refuted / suite-red / queue-empty / needs-human 窗口）：
-node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/inner-blocked-signal.ts \
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts \
   --assert-blocked --taskId <当前任务/阶段> \
   --reason <合法值见 `--schema`；不要照抄到这里，代码是唯一真源> \
   --question <要外层裁定的问题> [--options '<json>'] [--evidence '<json>']
 
 # 恢复后（裁定下达、继续推进的那一刻）：
-node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/inner-blocked-signal.ts --clear
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --clear
 ```
 
 规则：
@@ -384,10 +386,10 @@ node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/script
 ```bash
 ## Contract
 
-measure   suite_wall  = `scripts/test.sh` stdout 的 duration_ms 字段   # 单次墙钟，非 Σ 每文件
+measure   suite_wall  = `$TEST_COMMAND` stdout 的 duration_ms 字段   # 单次墙钟，非 Σ 每文件；TEST_COMMAND 见 .quay/config.yml loop.test_command
 band      noise       = 20–63s（20000..63000 ms）                       # 实测基线
 invariant selected_files = 163                                          # 变了则差异不可归因
-invoke    `scripts/test.sh --test-concurrency=4`                        # 必须 `=`；空格形式走另一分支
+invoke    `$TEST_COMMAND --test-concurrency=4`                          # 必须 `=`；空格形式走另一分支
 control   把并发改回 8 ⇒ 判定必须不成立                                    # 负控制
 resume    每跑完一次即写盘                                               # 中断保全
 ```
