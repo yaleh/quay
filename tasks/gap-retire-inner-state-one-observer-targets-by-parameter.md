@@ -51,8 +51,8 @@ extra:
 ## Contract
 
 ```
-measure observer_mounts = `ps -eo args | grep -c '[s]ession-liveness.sh'` 的挂载进程数字段
-measure inner_state_mounts = `ps -eo args | grep -c '[i]nner-state.sh'` 的挂载进程数字段
+measure observer_mounts = `ps -eo pid,args | awk '/bash .*session-liveness\.sh/ && !/bash -c/ && !/轮询子进程/' | wc -l` 的**常驻**挂载数字段
+measure inner_state_mounts = `ps -eo pid,ppid,etimes,args | awk '/inner-state\.sh/ && !/bash -c/ && $3>300'` 的**常驻**挂载数字段
 measure residual_refs = `git grep -l inner-state -- . | wc -l` 的残留引用文件数字段
 band inner_state_mounts = 0
 invariant 观测只有一个工具，目标靠参数给；退役不得让任何一类信号静默消失
@@ -85,7 +85,13 @@ resume 先改判据与文档，再摘 LOOP_SCRIPTS，最后删脚本并停挂载
 - [ ] AC2: `SKILL.md` 与 tick 文档同步为**一个监视器**；`session-liveness.test.mjs:811` 断言跟着改
 - [ ] AC3: 从 `LOOP_SCRIPTS` 摘掉，**新目标项目不再收到它**（实跑输出贴任务体）
 - [ ] AC4: 删除脚本并**停掉三个现存挂载**；`residual_refs` 归零或逐个说明为何保留（**27 个文件逐个处置**）
-- [ ] AC5: **可判的收口**——`observer_mounts == 4` 且 `inner_state_mounts == 0`（改动前后都实测贴出）
+- [ ] AC5: **可判的收口**——`observer_mounts == 4` 且 `inner_state_mounts == 0`（改动前后都实测贴出）。
+      **计数口径必须先定死（外层 2026-08-04 00:42Z 实测发现）**：
+      **只数常驻挂载，不数它们每轮派生的短命子进程**。
+      实测：某一瞬 `inner-state` 有 **6** 个进程，其中 **3 个是常驻**（父进程存活 13h/7h/1.5h），
+      另 3 个是轮询子进程（存活 23s/21s/16s）。
+      **⇒ 用 `grep -c` 在某一瞬数进程，收口数字会随采样时刻漂移，永远无法稳定满足。**
+      **一个会随采样时刻变化的收口判据，等于没有判据**
 - [ ] AC6: **反向负控制（信号不得静默消失）**——原有每一类信号
       （`BLOCKED`/`UNBLOCKED`/`TASKS`/`MAJOR`/`MINOR`/`REVERT`/`MASSDELETE`）
       **逐类给出去向**：有新路径、或**明确记录为「已决定不再报」及理由**。
