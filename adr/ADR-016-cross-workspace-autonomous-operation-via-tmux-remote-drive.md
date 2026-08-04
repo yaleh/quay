@@ -54,13 +54,46 @@ This is legitimate — unlike hand-simulating a routine (which would not count a
 
 ## Alternatives rejected
 
-- **`claude -p` (headless/print mode):** one-shot — runs a prompt, returns, exits. Does not fit a
+- **`claude -p` (headless/print mode):** rejected for three hard constraints (## Amendment
+  2026-08-04 (second) below): `Monitor` is unavailable; `CronCreate`/`CronList`/`CronDelete` are
+  session-scoped (vanish when the session exits); background processes are killed ~5 s after the
+  final result returns AND stdin closes (v2.1.163+). Does not fit a
   *perpetual* loop with background agents + scheduled wakeups. Good for discrete "run once, get
   structured output" tasks, not the persistent interactive loop.
 - **Claude Agent SDK:** the "proper" programmatic session control, but a real build effort — overkill
   for injecting a kickoff into an already-running session.
 - **manda (nested dispatch):** BANNED for real dispatch (reliability envelope; "routines never
   dispatch manda"). Not a candidate.
+
+## Amendment 2026-08-04 (second) — the `claude -p` rejection reason is corrected; the conclusion stands
+
+The "Alternatives rejected" entry for `claude -p` originally justified rejection as:
+
+> **`claude -p` (headless/print mode):** one-shot — runs a prompt, returns, exits.
+
+**此理由已被 2026-08-04 Amendment 推翻。** Streaming input via `--input-format stream-json` (one user
+message per line — `headless.md` / `cli-reference.md`) exists, and the session lives **as long as
+stdin stays open** (`headless.md`) — `claude -p` is not a run-and-exit mode. The entry above now
+states the real reason — three hard constraints (source:
+`orchestration/RESEARCH-claude-p-streaming-2026-08-04.md` §1):
+
+1. **`Monitor` is entirely unavailable** in `-p` mode (`tools-reference.md`).
+2. **`CronCreate`/`CronList`/`CronDelete` are session-scoped** — they vanish when the session exits
+   (`scheduled-tasks.md`).
+3. **Background processes are killed ~5 s after the final result returns AND stdin closes**
+   (`headless.md`, since v2.1.163).
+
+The **conclusion of the entry is unchanged and preserved verbatim** — this Amendment corrects the
+reason, not the verdict.
+
+**An alternative shape exists (RESEARCH §2/§6):** a long-lived **driver process** holding stdin *is*
+a persistent session — the driver itself is the scheduler (writes to stdin on schedule, so
+`CronCreate` is not needed) and the observer (watches liveness/events itself, so `Monitor` is not
+needed). Scheduling and observation move out of session-internal state ("this session remembers the
+cron it created") into a deliverable, checkable, testable script. Whether `-p` streaming can carry
+the two-layer loop still depends on two unmeasured unknowns (RESEARCH §3): third-party endpoint
+roundtrip in `-p` mode, and exit semantics while stdin stays open — tracked by
+`tasks/gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics.md`.
 
 ## Consequences
 
