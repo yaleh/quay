@@ -978,13 +978,20 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // the gate stays actionable (matches the existing missing-artifact
       // pattern).
       //
-      // QN-019 (iteration 8): tightened from presence-only to checked-state,
-      // matching the execute->done gate's own semantics below. Iteration
-      // 7's QN-017 found live that a task could reach `ready` with AC
-      // checkboxes present but zero of them checked — an asymmetry with
-      // execute->done, which already required full-checked state. This
-      // reuses the same checkboxes/checked regex-count logic, applied one
-      // gate earlier.
+      // gap-both-gates-read-one-signal-so-done-costs-nothing (AC2, ADR-001
+      // restored): CHECKED-STATE is deliberately NOT required here. ADR-001's
+      // original design says checked-state belongs to `ready->done`, not
+      // `todo->ready`: for a not-yet-started task the AC describes "what the
+      // work must satisfy", which by definition cannot be checked yet.
+      // Requiring all boxes checked at author->ready made `ready` mean
+      // "already done" and — worse — made execute->done vacuous (both gates
+      // read the same evidence, so passing the first auto-satisfied the
+      // second; `done` cost nothing). The two gates now read DIFFERENT
+      // evidence: author->ready reads the plan + AC presence/shape (>=1
+      // checkbox); execute->done reads the DoD checked-state (plus AC
+      // checked-state as the AC5 backstop). This REVERSES QN-019
+      // (iteration 8) — see test/gate-checked-state.test.mjs, which was
+      // updated to the new semantics.
       const acSection = sectionAfterHeading(t.body, ["AC", "Acceptance Criteria"]);
       const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
       const acChecked = acSection.match(/- \[[xX]\]/g) || [];
@@ -1000,30 +1007,17 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
           reason: "AC section has no checkboxes",
         };
       }
-      const acAllChecked =
-        acHasCheckbox && acChecked.length === acCheckboxes.length;
-      if (allArtifactsPresent && acHasCheckbox && !acAllChecked) {
-        return {
-          id,
-          gate,
-          ok: false,
-          shape,
-          artifacts,
-          ...(contractKeys ? { contractKeys } : {}),
-          acTotal: acCheckboxes.length,
-          acChecked: acChecked.length,
-          reason: `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`,
-        };
-      }
       const contractKeysOk =
         !contractKeys || Object.values(contractKeys).every(Boolean);
-      const ok = allArtifactsPresent && acAllChecked && contractKeysOk;
+      const ok = allArtifactsPresent && acHasCheckbox && contractKeysOk;
       return {
         id,
         gate,
         ok,
         shape,
         artifacts,
+        acTotal: acCheckboxes.length,
+        acChecked: acChecked.length,
         ...(contractKeys ? { contractKeys } : {}),
         reason: ok
           ? "all four artifacts present; eligible to move to ready"
@@ -1035,13 +1029,33 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       };
     }
     if (t.status === "ready") {
-      // execute->done gate: v0 checks AC checkboxes are all ticked, as a thin
-      // machine-checkable proxy for "AC satisfied" (design §3). This is a
-      // deliberately thin v0 gate — see iteration-0 gap analysis.
+      // execute->done gate (gap-both-gates-read-one-signal-so-done-costs-
+      // nothing, AC7b): reads the DoD CHECKED-STATE as the completion
+      // evidence. The two gates now read DIFFERENT evidence — author->ready
+      // reads the plan + AC presence/shape (checked-state NOT required), and
+      // execute->done reads the DoD checkboxes. Previously BOTH gates read
+      // the AC checkboxes, so any task legally reaching `ready` (AC all
+      // checked) auto-satisfied execute->done and `done` cost nothing.
+      //
+      // AC checked-state is STILL required here (AC5 backstop: "ready too
+      // strict" must not be traded for "done too loose"). So execute->done =
+      // AC all checked AND DoD all checked AND (compound) all children done.
+      //
+      // A DoD section with NO machine-checkable checkboxes is treated as
+      // satisfied (vacuously true): the gate is a syntax counter, not a
+      // semantic verifier (QN-030 permanent boundary, AC8) — it cannot
+      // evaluate prose-only completion claims, so it does not block on them.
+      // A DoD WITH checkboxes requires every box checked.
       const acSection = sectionAfterHeading(t.body, ["AC", "Acceptance Criteria"]);
-      const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
-      const checked = acSection.match(/- \[[xX]\]/g) || [];
-      const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
+      const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
+      const acChecked = acSection.match(/- \[[xX]\]/g) || [];
+      const acOk = acCheckboxes.length > 0 && acChecked.length === acCheckboxes.length;
+
+      const dodSection = sectionAfterHeading(t.body, ["DoD", "Definition of Done"]);
+      const dodCheckboxes = dodSection.match(/- \[[ xX]\]/g) || [];
+      const dodChecked = dodSection.match(/- \[[xX]\]/g) || [];
+      const dodOk =
+        dodCheckboxes.length === 0 || dodChecked.length === dodCheckboxes.length;
 
       // QN-012: for a compound (epic) task, the execute->done gate must ALSO
       // require every child to already be `done` — a compound task's own
@@ -1052,24 +1066,28 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // `.every(...)` over an empty array is vacuously true.
       const kids = childrenStatus(t);
       const childrenOk = kids.every((c) => c.status === "done");
-      const ok = acOk && childrenOk;
+      const ok = acOk && dodOk && childrenOk;
       const badChildren = kids.filter((c) => c.status !== "done");
       let reason;
       if (!acOk) {
-        reason = `${checked.length}/${checkboxes.length} AC checkboxes checked`;
+        reason = `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`;
+      } else if (!dodOk) {
+        reason = `${dodChecked.length}/${dodCheckboxes.length} DoD checkboxes checked`;
       } else if (!childrenOk) {
         reason =
-          "AC checkboxes complete, but not all children are done: " +
+          "AC and DoD checkboxes complete, but not all children are done: " +
           badChildren.map((c) => `${c.id} (${c.status})`).join(", ");
       } else {
-        reason = "all AC checkboxes checked; eligible to move to done";
+        reason = "all AC and DoD checkboxes checked; eligible to move to done";
       }
       const result: Record<string, unknown> = {
         id,
         gate: "execute->done",
         ok,
-        acTotal: checkboxes.length,
-        acChecked: checked.length,
+        acTotal: acCheckboxes.length,
+        acChecked: acChecked.length,
+        dodTotal: dodCheckboxes.length,
+        dodChecked: dodChecked.length,
         reason,
       };
       if (t.role === "compound") result.childrenStatus = kids;

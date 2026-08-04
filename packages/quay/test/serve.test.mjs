@@ -450,8 +450,9 @@ async function main() {
 
   // --- QX-011..QX-015 (experiment 4, iteration 3): back-link context, mobile columns,
   //     gate-fail feedback, button tooltips, orientation banner ---
-  // Uses a fresh isolated server with one todo task (unchecked ACs for gate-fail testing)
-  // and one todo task with all ACs checked (for gate-pass testing and back-link testing).
+  // Uses a fresh isolated server with one todo task (AC section with no
+  // checkboxes, for gate-fail testing) and one todo task with all ACs checked
+  // (for gate-pass testing and back-link testing).
   {
     const ux3TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-ux3-test-"));
     const ux3WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-ux3-workspace-"));
@@ -462,16 +463,20 @@ async function main() {
     );
 
     // UX3-1: todo with all ACs checked (gate passes) — tests back-link, tooltip, success redirect
-    // UX3-2: todo with unchecked ACs — tests gate-fail redirect and error banner
+    // UX3-2: todo with an AC section that has NO checkboxes — tests gate-fail
+    //        redirect and error banner
     // Pure-data fixtures (the gate-pass/fail distinction lives in the BODY text,
     // not in any write semantic) → store write.
     seedTask(ux3TasksDir, "UX3-1", { title: "Gate-pass task (todo, all ACs checked)", status: "todo", body: VALID_SECTIONS });
+    // gap-both-gates-read-one-signal-so-done-costs-nothing: an unchecked AC box
+    // no longer fails author->ready (checked-state belongs to ready->done), so
+    // the gate-block fixture must instead be an AC section with NO checkboxes.
     const UNCHECKED_SECTIONS =
       "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
       "## Plan\nThis is a sufficiently long plan section so the gate's minimum-content check passes cleanly.\n" +
-      "## AC\n- [ ] a sufficiently long acceptance criterion line — NOT YET CHECKED\n" +
+      "## AC\nThis acceptance criteria section is prose only, with no machine-checkable checkbox lines at all, comfortably past forty non-whitespace characters.\n" +
       "## DoD\n- [ ] a sufficiently long definition-of-done line — NOT YET CHECKED\n";
-    seedTask(ux3TasksDir, "UX3-2", { title: "Gate-blocked task (todo, ACs unchecked)", status: "todo", body: UNCHECKED_SECTIONS });
+    seedTask(ux3TasksDir, "UX3-2", { title: "Gate-blocked task (todo, AC has no checkboxes)", status: "todo", body: UNCHECKED_SECTIONS });
 
     const ux3Port = port + 4;
     const ux3OrigCwd = process.cwd();
@@ -594,7 +599,7 @@ async function main() {
         'GET /task/UX3-1 (todo status) detail page Advance button has title="Advance to ready" (QX-014)'
       );
 
-      // --- QX-013 (UQ-013): gate-fail feedback — POST on UX3-2 (unchecked ACs) ---
+      // --- QX-013 (UQ-013): gate-fail feedback — POST on UX3-2 (AC no checkboxes) ---
       // Gate should block and redirect with ?error= instead of silently delivering
       const gateFailPost = await post(ux3Port, `/task/UX3-2/action/advance`);
       assert(gateFailPost.status === 302, `POST /task/UX3-2/action/advance (blocked gate) returns 302 (got ${gateFailPost.status})`);

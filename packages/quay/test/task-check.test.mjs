@@ -58,12 +58,20 @@ async function main() {
   const acDodUnchecked =
     "## AC\n- [ ] a sufficiently long acceptance criterion line for the minimum-content check\n" +
     "## DoD\n- [ ] a sufficiently long definition-of-done line for the minimum-content check\n";
+  // gap-both-gates-read-one-signal-so-done-costs-nothing: an UNCHECKED AC box
+  // no longer fails author->ready (checked-state belongs to ready->done), so
+  // the old FAIL-1 fixture (acDodUnchecked) would now PASS. A genuine
+  // author->ready failure is an AC section with NO machine-checkable
+  // checkboxes at all.
+  const acNoCheckbox =
+    "## AC\nThis acceptance criteria section is written in prose only, with no machine-checkable checkbox lines at all, comfortably past forty non-whitespace characters.\n" +
+    "## DoD\n- [x] a sufficiently long definition-of-done line for the minimum-content check\n";
   execFileSync("node", [nativeBin, "task", "create", "PASS-1", "--title", "Passing task",
     "--body", validSections + acDodChecked], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "FAIL-1", "--title", "Failing task",
-    "--body", validSections + acDodUnchecked], {
+    "--body", validSections + acNoCheckbox], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 
@@ -84,7 +92,7 @@ async function main() {
     assert(typeof pass.reason === "string" && pass.reason.length > 0, "result includes a non-empty reason string");
 
     const fail = await client.taskCheck("FAIL-1");
-    assert(fail.ok === false, `unchecked-AC task gates ok:false (got ok:${fail.ok})`);
+    assert(fail.ok === false, `AC-no-checkbox task gates ok:false (got ok:${fail.ok}, reason:${fail.reason})`);
     assert(typeof fail.reason === "string" && fail.reason.length > 0, "failing result still includes a reason string");
 
     // Confirm the passthrough round-trips the whole structuredContent object

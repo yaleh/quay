@@ -151,6 +151,62 @@ test("AC6: a DIR-template (Finding) task passes author->ready — Finding satisf
   }
 });
 
+test("AC3-per-shape: a compliant task with UNCHECKED AC boxes passes author->ready for every registered shape (gap-both-gates...)", () => {
+  // gap-both-gates-read-one-signal-so-done-costs-nothing: checked-state is
+  // NOT required at todo->ready (ADR-001 restored) — only AC presence/shape
+  // (>=1 checkbox). This must hold for EVERY registered shape, so shape
+  // dispatch is unaffected by the checked-state reversal.
+  const { store, dir } = freshStore();
+  try {
+    const uncheckedAc = (heading) =>
+      `## ${heading}\n- [ ] a real, checkable criterion that is deliberately NOT checked yet\n- [ ] another real, checkable criterion that is also NOT checked yet\n`;
+    // Contract shape: all six keys + unchecked AC.
+    const contractBodyUnchecked =
+      `## Proposal\n${substantive("Proposal")}\n` +
+      `## Contract\n` +
+      "```\n" +
+      `measure gate_fail_by_shape = \`task check <id>\` failures per shape\n` +
+      `band gate_fail_by_shape = 0 for every compliant registered shape\n` +
+      `invariant dispatch is not a waiver; every shape has a complete contract\n` +
+      `invoke \`task check <id>\`\n` +
+      `control declared shape missing its own required section must be red\n` +
+      `resume register the shape set and required sections before changing check\n` +
+      "```\n" +
+      `## Acceptance Criteria\n- [ ] a real, checkable criterion, not checked yet\n- [ ] another real, checkable criterion, not checked yet\n` +
+      `## Definition of Done\n${substantive("Definition of Done")}\n`;
+    store.write("AC3-UNK-C", { title: "contract-unchecked-ac", status: "todo", body: contractBodyUnchecked });
+    const c = store.check("AC3-UNK-C");
+    assert.equal(c.shape, "contract");
+    assert.equal(c.ok, true, `contract shape with unchecked AC passes; got ${JSON.stringify(c)}`);
+
+    store.write("AC3-UNK-P", {
+      title: "plan-unchecked-ac", status: "todo",
+      body:
+        `## Proposal\n${substantive("Proposal")}\n` +
+        `## Plan\n${substantive("Plan")}\n` +
+        uncheckedAc("AC") +
+        `## DoD\n${substantive("DoD")}\n`,
+    });
+    const p = store.check("AC3-UNK-P");
+    assert.equal(p.shape, "plan");
+    assert.equal(p.ok, true, `plan shape with unchecked AC passes; got ${JSON.stringify(p)}`);
+
+    store.write("AC3-UNK-F", {
+      title: "finding-unchecked-ac", status: "todo",
+      body:
+        `## Finding\n${substantive("Finding")}\n` +
+        `## Plan\n${substantive("Plan")}\n` +
+        uncheckedAc("Acceptance Criteria") +
+        `## Definition of Done\n${substantive("Definition of Done")}\n`,
+    });
+    const f = store.check("AC3-UNK-F");
+    assert.equal(f.shape, "finding");
+    assert.equal(f.ok, true, `finding shape with unchecked AC passes; got ${JSON.stringify(f)}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC4: Contract shape missing a required key fails closed, naming the key", () => {
   const { store, dir } = freshStore();
   try {
