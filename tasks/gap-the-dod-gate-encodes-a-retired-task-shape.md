@@ -1,7 +1,7 @@
 ---
 id: gap-the-dod-gate-encodes-a-retired-task-shape
 title: "The DoD gate requires a ## Plan section that ADR-022 replaced with ## Contract — it fails quay's own current tasks and blocks meta-cc's cold start"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate

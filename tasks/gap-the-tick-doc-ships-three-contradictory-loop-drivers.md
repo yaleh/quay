@@ -1,7 +1,7 @@
 ---
 id: gap-the-tick-doc-ships-three-contradictory-loop-drivers
 title: "The outer tick doc ships three contradictory loop drivers — following it literally gives you a double-triggering or non-triggering loop two times out of three"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -83,11 +83,12 @@ resume 先定选哪一个及理由，再删或降级另外两个
 
 - [x] AC5 与 AC6 两个方向的实跑输出都贴进任务体——
       **双触发和不触发是同一枚硬币，只修一面等于把吵闹换成静默**
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——
-      **本次执行只跑了范围化套件（见下方证据），完整套件留给外层验证**（执行指令禁止跑全量；
-      另注意 HEAD 上 `task-contract-check` 静态检查因**既有的**两处基线外违规而退出非 0，
-      与本任务改动无关——`gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree.md`、
-      `gap-task-list-route-is-linear-in-task-count.md` 在 HEAD 上存在而基线未收录）
+- [~] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——
+      **如实标注：scoped 连跑 2 次绿**（quay-init-loop 28/28 + cold-start-skill + loop-shipping，共
+      47/47；协调方 merge 后 scoped 复验 47/47）。全量套件待 AC20 落地后批跑。
+      **协调方已修 HEAD 上 `task-contract-check` 的基线外违规**（mkdtemp invoke `.sh`→`.ts`、
+      task-list-route `/dev/null` 证据入正文，new since baseline 归零）——那两处是本任务执行时
+      既有的，与本任务改动无关，已随批 3 关闭后的契约修复解决。
 - [x] 任务体记录：**meta-cc 外层替文档做了文档自己该做的决定，且做对了**——
       **但下一个读者未必这么判，而且他不会知道自己在做一个决定**
 
