@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 22:02Z | `no-action` | 大批正式关闭：批全量 GREEN（2298/0/0），且抓到真实回归（2 测试仍调已退役 inner-state.sh，已修 9a3beb7f）；suite-speed 关闭（honest no-improvement）；7 关闭进行中；就绪池 0 待补晋 | 内层：7 个任务关闭中，等关闭完成 + 补晋 | ①git log 核批全量绿 + 回归修复；②suite-speed done + band 裁定并入；③inProgress 0 + detect-stop 无命中 |
 | 2026-08-04 21:43Z | `no-action` | 裁定 suite-speed band（delta_s>297.6 未满足 = 诚实 no-improvement 正确结论，非缺陷，已记任务体+驱动内层关闭）；内层 batch-end 验证中；inProgress 0、就绪池 0 待补晋 | 内层：batch-end final verification（批全量已跑），套件后关批+清 worktree | ①suite-speed DoD/band 读核；②inProgress 0 + detect-stop 无命中；③就绪池 0（诚实，等关批补晋） |
 | 2026-08-04 21:30Z | `no-action` | 里程碑：suite-speed 合并（honest no-improvement + 5 失败=session-liveness 既有 flake）；inProgress 0、auto-block 清；整个大批（~12 任务）全部合并；内层跑批全量套件 | 内层：批全量套件运行中（24 node 进程），通过后关批+补晋 | ①git log 核 suite-speed 合并 + flake 确认；②inProgress 0 + detect-stop 无命中；③ps 核批全量运行 |
 | 2026-08-04 21:22Z | `no-action` | suite-speed 提交诚实结论（80b7d70e：before 779.1/control 774.3/after 695.4s，delta 83.8 < σ 297.6 = honest no-improvement，AC5 负控制 PASS）；σ 纪律结论落地，批收尾在即 | 内层：suite-speed 写任务体结论，备忘「落地后关批跑全量关遥测清 worktree」 | ①git show 核 80b7d70e 基准数据 + 诚实结论；②`--detect-stop` 仍 task-over-90m（预期） |
@@ -258,11 +259,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 94 | 36% |
+| no-action | 95 | 36% |
 | unblock | 36 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **229** | — |
+| **合计** | **230** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`

@@ -2459,6 +2459,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - inProgress 0、detect-stop 无命中、就绪池 0（deficit 3，等关批后补晋）。
 - 残留 retire-inner-state worktree 待批关闭时清理（已驱动内层）。
 
+### tick 2026-08-04T22:02Z（外层，`no-action`：大批正式关闭）
+
+- **批全量 GREEN（2298/0/0）**——且批全量抓到一个真实回归（`9a3beb7f`：2 处测试仍调用已退役的
+  inner-state.sh，retire-inner-state 合并漏改），内层修复后重跑绿。**批全量按设计捕获了合并期回归。**
+- suite-speed 已关闭（honest no-improvement，band 裁定并入）；**7 个任务关闭进行中**（翻 done）。
+- inProgress 0、detect-stop 无命中；就绪池 0（deficit 3，等关闭完成 + ready-pool-check 从 todo 补晋）。
+- 残留 retire-inner-state worktree 待关闭时清理。新参考值 tests 2298。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
