@@ -2282,6 +2282,21 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   后台 Agent(run_in_background:true)，实现期 scoped --for-task 不跑全量，全量留 fan-in。
 - **送达确认**（transcript，结晶文档唯一可信信号）：指令 17:06:50 落进内层会话（uuid 9e786e8a）。
   派发 worktree 待内层处理（当前 suite-speed agent 仍独立跑其多轮 σ 测量，不受影响）。
+- **已派发（17:07，原始字段 rib:true）**：`Fix ADR-016 alternatives claim`（am2，17:07:30）+
+  `Crystallize reliable-send script`（17:07:38）——管理者的派发裁定已执行。在飞 3 达上限
+  （am2/reliable-send/suite-speed）；promotion-cadence 留 ready。
+
+### 监视器事件 17:4xZ — task-write 假阳性 auto-block + 括号纪律第三次（外层）
+
+- 新阻塞监视器（--detect-stop --pane 轮询）检测到 task-write `task-over-90m` auto-block 并发声——但
+  task-write **已合并**（b1c96299），是**陈旧括号**导致的假阳性：task-write 的 `--task-end` 从未被
+  调用（与 node-cache/retire-state 同类，**第三次合并漏闭括号**）。
+- **已修**：task-write 括号闭（done）、auto-block 清（wait 23.9s）。新监视器 60s 内检测+发声，
+  **验证替换监视器工作正常**。
+- **括号纪律 fan-in 核查点**：内层 fan-in 合并时需同步 `--task-end`——已三次漏闭（node-cache/
+  retire-state/task-write），下一次驱动时提醒。
+- **报告字段更正**：`--report --json` 的 `tasks` 数组是已关闭任务，**在飞在独立的 `inProgress` 字段**——
+  我此前「open brackets: 0」读错了字段；括号修复本身正确（run 文件实证）。
 
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
