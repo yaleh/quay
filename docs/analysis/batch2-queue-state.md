@@ -43,7 +43,8 @@
 **派发 3 中已完成 2：**
 - ✅ `gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second`：已 merge（`b51b650e`，遥测同步闭），emit 路径拆分——全量记录进共享 events.jsonl、持有者阈值只 gate stdout；adr016 哈希带保持 1。scoped 38/0/1 + 重跑 EXIT 0
 - ✅ `gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet`：已 merge（`7478d979`，遥测同步闭），`expandDeclaredTouches`（声明式 (new) touch 不查盘，通配符才查）；镜像实为 symlink 天然一致。scoped 43/0 两次
-- 在飞：`gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards`（telemetry + orchestrator doc）
+- ✅ `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards`：已 merge（`d13ce490`，遥测同步闭），`--reconcile` 机制（按可观察判据关掉崩溃残留的 phantom inProgress；fail-closed 向 keep）+ ORPHAN 方向文档更正（code 里 ORPHAN=end-without-start，与旧文档相反）；scoped 40/40
+- **批 3 全量（3 条 merged）**：token 空闲窗跑（后台，running）。跑绿后关 3 条任务（body 关闭：AC/DoD 勾 + invoke 证据 + status done）
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
