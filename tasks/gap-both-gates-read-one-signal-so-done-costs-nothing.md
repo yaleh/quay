@@ -337,6 +337,36 @@ resume 先确认 acAllChecked 出现在 author→ready 是不是本意，再改
       而本条把勾选移到 done 侧后，AC1 实测 ready 队列从 0 → 11，
       **第一道的判据（ready 队列不再为 0）只有在第二道也修好后才能真正达成**。
 
+## 外层独立复核（2026-08-04 01:55Z，自造夹具，不是读勾选）
+
+外层在临时任务库中造一个 `status: ready`、**AC 2/2 全勾、DoD 0/2 未勾**的夹具任务
+（即 `DIR-102` 的形状），跑本任务 Contract 里那条 invoke：
+
+```
+$ QUAY_NATIVE_TASKS_DIR=<tmp> node --experimental-strip-types \
+    packages/quay-native/bin/quay-native.ts task check FIX-1 --json
+{
+  "id": "FIX-1",
+  "gate": "execute->done",
+  "ok": false,
+  "acTotal": 2, "acChecked": 2,
+  "dodTotal": 2, "dodChecked": 0,
+  "reason": "0/2 DoD checkboxes checked"
+}
+```
+
+**⇒ AC7b 成立**：AC 全勾而 DoD 未勾 ⇒ `execute-done` 红。**两道闸的证据源已分开。**
+
+**AC8 的控制同时成立**：
+
+```
+$ scripts/test.sh packages/quay-native/test/gate-gameability.test.mjs
+ℹ tests 1  ℹ pass 1  ℹ fail 0  ℹ cancelled 0
+```
+
+**⇒ 「闸永不验勾选声称的真假」那条 permanent 边界未被本次改动破坏**——
+**把「两闸冗余」修成「试图判断声称真假」是走进一个已被证明不可行的方向，这次没有走进去。**
+
 ## Touches
 
 - packages/quay-native/src/store.ts
