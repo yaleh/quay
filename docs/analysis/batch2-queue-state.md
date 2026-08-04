@@ -1777,3 +1777,18 @@ dod-gate（外层建）。
   invoke-evidence 已修（exit 0、new since baseline 0），不再需要跳。该接缝声明用途是嵌套 0 匹配运行，
   不是范围化绕开既有违规（用途漂移 = 窄豁免变通用跳过开关）。
 - **在飞（2/3）**：AC20 + e2e。
+
+### 关闭 AC20 + 批套件等待窗口（2026-08-04 00:4xZ）
+
+- **AC20 已关闭**（`gap-liveness-mounting-is-a-single-flight-role-with-no-owner`，`...h2nhm9`）：
+  单飞挂载（session-liveness-mount.sh + session-liveness.sh 自锁复用 token 锁）、AC9 monitor-mount
+  `delivered` 取代 `ownedByThisSession`、共享事件文件 events.jsonl。**AC9 测试已更新**（外层把 manager
+  配置移出 orchestration/session-liveness.env → 零配置默认，c1489b6a）。38/38 scoped 绿。--task-end done。
+  **披露**：agent 清理时误杀一个生产 liveness monitor（pid 3378758），已确认 quay 内层监视器仍在跑
+  （2846430/3378790），外层应核实是否已重挂。
+- **红 e2e 已落地（分支）**：`gap-no-e2e-proves-install-is-configuration-driven`（31fb6d44 红 e2e +
+  4e3a66d7 任务体），4 红逐字贴出（A1/A2/A3 文本替换、A4 Finding 无 Plan 仍被拒——dod-gate 已合但
+  finding shape 的 plan 槽仍要求 Plan，A4 修法是 dod-gate 的后续）。**留在分支，等本批套件绿后再 merge**
+  （避免红 e2e 挡本批关闭）。
+- **批套件**（AC20 + dod-gate + tick-doc）：起跑时 gate WAIT（avg10 52.52）自停，等干净窗口（Monitor bf9peatoh）。
+- **在飞（1/3）**：e2e（red-first 已落地，AC2-AC5 待修复后绿）
