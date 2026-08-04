@@ -104,10 +104,13 @@ test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t)
     labels: ["gap"],
     body: "> **PARKED (outer ruling, 2026-08-04) — execution suspended.**\n\n" + fourArtifactBody(),
   });
-  writeTask(root, "gap-done-not-flipped", {
+  // A MERGED-but-AC-all-unchecked ready task (the shape the old all-ACs-checked signal missed):
+  // 0 ACs checked, but its declared Touches file exists on disk → work landed → not dispatchable.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  writeTask(root, "gap-merged-not-flipped", {
     status: "ready",
     labels: ["gap"],
-    body: fourArtifactBody({ acBoxes: 3 }).replaceAll("- [ ]", "- [x]"),
+    body: fourArtifactBody({ touches: ["- code/landed.ts"] }),
   });
 
   const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
@@ -117,10 +120,42 @@ test("ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks", (t)
   const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
   assert.deepEqual(reasonsById["QENG-DEMO"], ["fixture"]);
   assert.deepEqual(reasonsById["gap-parked"], ["parked"]);
-  assert.ok(reasonsById["gap-done-not-flipped"].includes("not-yet-flipped"), "all-AC-checked ready task excluded");
+  assert.ok(reasonsById["gap-merged-not-flipped"].includes("not-yet-flipped"), "merged-but-AC-unchecked ready task excluded");
 });
 
-test("isFixture / isParked / notYetFlipped unit behavior", () => {
+// ── AC5/AC6: the "merged but AC all unchecked" shape the old all-ACs-checked signal missed ──────────
+// Regression pin: pool must never count a merged task, and a truly-unstarted ready task stays.
+
+test("pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unstarted ones (AC5/AC6)", (t) => {
+  const root = makeWorkspace("merged-shape");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The shape the old 11/11 missed: work LANDED (Touches file exists on disk) but ACs all unchecked.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  writeTask(root, "gap-merged", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/landed.ts"] }), // 0/4 AC checked
+  });
+  // A genuinely-unstarted ready task: Touches file does not exist, no resolving symbols → stays.
+  writeTask(root, "gap-unstarted", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/does-not-exist.ts"] }),
+  });
+  writeTask(root, "gap-real", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.equal(r.pool, 2, "pool must not count the merged-but-unchecked task");
+  assert.deepEqual(r.ready.sort(), ["gap-real", "gap-unstarted"]);
+  const reasonsById = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.ok(reasonsById["gap-merged"].includes("not-yet-flipped"), "merged-but-unchecked ready task excluded");
+  assert.ok(!reasonsById["gap-unstarted"], "truly-unstarted ready task stays in the pool");
+});
+
+test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
+  const root = makeWorkspace("n-y-f");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
   const fixture = parseTask("---\nid: x\nlabels:\n  - fixture\n---\nbody");
   assert.equal(isFixture(fixture), true);
   assert.equal(isFixture(parseTask("---\nid: x\nlabels:\n  - gap\n---\nbody")), false);
@@ -133,12 +168,26 @@ test("isFixture / isParked / notYetFlipped unit behavior", () => {
   const parked = parseTask("---\nid: x\n---\n> **PARKED (human, 2026-08-04) — execution suspended.**\nmore");
   assert.equal(isParked(parked), true);
 
-  const flipped = parseTask("---\nid: x\n---\n## Acceptance Criteria\n- [x] a\n- [x] b\n## Definition of Done\nstandard");
-  assert.equal(notYetFlipped(flipped), true);
-  const open = parseTask("---\nid: x\n---\n## Acceptance Criteria\n- [ ] a\n- [x] b\n");
-  assert.equal(notYetFlipped(open), false);
-  const none = parseTask("---\nid: x\n---\n## Proposal\nlong enough content here\n");
-  assert.equal(notYetFlipped(none), false, "no AC boxes is not the not-yet-flipped signal");
+  // notYetFlipped uses the LANDED-on-master signal, NOT AC checkbox state (the fan-in merges
+  // without ticking ACs). A merged-but-AC-all-unchecked ready task is EXCLUDED.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  const merged = {
+    status: "ready",
+    body: "## Acceptance Criteria\n- [ ] unchecked\n- [ ] still unchecked\n## Touches\n- code/landed.ts\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(merged, root), true, "merged-but-AC-unchecked ready task must be excluded");
+
+  // A truly-unstarted ready task (work not on master — Touches file absent, no resolving symbols)
+  // STAYS in the pool.
+  const unstarted = {
+    status: "ready",
+    body: "## Acceptance Criteria\n- [ ] not started\n## Touches\n- code/missing.ts\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(unstarted, root), false, "unstarted ready task must stay in the pool");
+
+  // status is part of the predicate: a `done` task is never the not-yet-flipped state.
+  const doneTask = { status: "done", body: "## Acceptance Criteria\n- [ ] whatever\n## Touches\n- code/landed.ts\n" };
+  assert.equal(notYetFlipped(doneTask, root), false, "done status is not the not-yet-flipped state");
 });
 
 test("artifactsComplete is shape-aware and content-gated", () => {
