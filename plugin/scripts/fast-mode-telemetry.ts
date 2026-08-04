@@ -30,6 +30,18 @@
 //   node --experimental-strip-types fast-mode-telemetry.ts --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned> [--root <dir>]
 //   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ)
 //   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (explicit persist)
+//   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>] (close in-flight records whose executor is observably gone)
+//
+// RECONCILE (gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-
+// documented-backwards): a crash kills the executor and `--task-end` never comes — the record sits
+// in `inProgress` forever (phantom), and the ONLY signal that eventually fires about it (OVER90,
+// 90-minute budget) is indistinguishable from a genuinely slow task. `--reconcile` closes an
+// in-flight record ONLY when the executor is OBSERVABLY gone (branch merged / worktree gone /
+// process gone — never age), writing an end event (outcome "abandoned" + reconcileReason) so it
+// leaves `inProgress`; records whose executor is still present are KEPT (fail-closed). The report
+// routes reconcile-closed pairs to `reconciled[]` (never `tasks[]`) so they cannot pollute
+// throughput, and marks backfilled starts (`startedAtMs` later than the task's first known commit)
+// `startedAtMsUnreliable`, excluded from the throughput numerator and denominator (AC7).
 //
 // BLOCKED-WAIT METRICS (gap-no-explicit-blocked-signal-from-inner-layer, AC7): --report/--snapshot
 // also aggregate blocked-wait periods. The inner layer's inner-blocked-signal.ts --clear emits a
@@ -141,6 +153,141 @@ export function getBaseCommit(root) {
   }
 }
 
+// ── Reconcile observable probes ───────────────────────────────────────────────────────────────────────
+// `--reconcile` closes an in-flight record ONLY when the executor is OBSERVABLY gone (gap-a-crash-
+// leaves-phantom-in-flight-tasks...). The criteria are structural facts — a merged branch, an absent
+// worktree, an absent process — NEVER wall-clock age (age alone is exactly the "phantom vs genuinely
+// slow" confusion this feature exists to fix). Fail-closed toward KEEP: any positive presence signal
+// (process alive, worktree checked out) keeps the record in `inProgress` (AC3 negative control).
+
+/**
+ * Best-effort check for a live process whose command line references the runId. Linux `/proc`
+ * scan; any failure → false (never a positive "alive" signal from an unavailable source).
+ *
+ * Matches only the runId's DISTINCTIVE TAIL (`<ts>-<rand>`, the last two dash-segments), NOT the
+ * full runId: a runId embeds the taskId, and the taskId can appear in any diagnostic command's
+ * cmdline (the `pgrep -f` self-match trap CLAUDE.md documents) — that would falsely keep a phantom.
+ * The random tail is unique to the run and appears only in a process that was actually passed the
+ * runId. The fast-mode executor's cmdline does NOT normally carry the runId, so this is a weak KEEP
+ * signal by design — the worktree/branch checks carry the close/keep weight.
+ * @param {string} runId
+ * @returns {boolean}
+ */
+export function processAlive(runId) {
+  if (!runId || String(runId).length < 4) return false;
+  const parts = String(runId).split("-");
+  const needle = parts.length >= 2 ? parts.slice(-2).join("-") : String(runId);
+  if (needle.length < 4) return false;
+  try {
+    const procs = fs.readdirSync("/proc").filter((d) => /^\d+$/.test(d));
+    for (const pid of procs) {
+      try {
+        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+        if (cmd.includes(needle)) return true;
+      } catch (_) { /* pid exited mid-scan; skip */ }
+    }
+  } catch (_) { /* /proc unavailable (non-Linux, sandbox) → no positive signal */ }
+  return false;
+}
+
+/**
+ * Whether the fast-mode branch `task/<taskId>` exists AND is merged into HEAD. A merged branch is
+ * the strongest "executor is done" observable: the task's work landed, so nothing is still building
+ * it. A missing branch is NOT merged (returns false) — absence of a branch is not itself evidence.
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {boolean}
+ */
+export function isBranchMerged(root, taskId) {
+  const branch = `task/${taskId}`;
+  try {
+    execFileSync("git", ["-C", root, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
+      stdio: "ignore", timeout: 5_000,
+    });
+    execFileSync("git", ["-C", root, "merge-base", "--is-ancestor", branch, "HEAD"], {
+      stdio: "ignore", timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the fast-mode branch `task/<taskId>` is checked out in an open worktree
+ * (`git worktree list --porcelain`). An open worktree is a positive "executor may be mid-flight"
+ * presence signal — the record is kept. Any git failure → false.
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {boolean}
+ */
+export function worktreeExists(root, taskId) {
+  const branch = `refs/heads/task/${taskId}`;
+  try {
+    const out = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\n").some((l) => l.trim() === `branch ${branch}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The task's earliest KNOWN WORK commit (ms epoch) — the reference a `--task-start` must PREDATE to
+ * be trustworthy (AC7). A start whose startedAtMs is LATER than this is a backfilled/distorted
+ * record: the work was already known to have begun/landed, so the start was written after the fact
+ * (a real dispatch always brackets its work — start BEFORE the first work commit). Returns null when
+ * no reliable reference exists — such a record is NOT treated as unreliable (never over-flag a
+ * normal dispatch, whose start is always later than the task file's creation).
+ *
+ * Resolution order (only commits that EVIDENCE the task's WORK count; a branch pointing at an
+ * ancestor of HEAD with no own commits is freshly dispatched, not merged):
+ *   1. Earliest commit on the task's own branch `task/<taskId>` NOT reachable from master
+ *      (`branch ^master`) — the work began at the first task-specific commit.
+ *   2. The merge commit that landed the branch into master (`Merge branch 'task/<taskId>'`) — a
+ *      start AFTER the merge is a backfill (the work was already known done); a start BEFORE it is
+ *      real. This is the reference for the crash-recovery backfill scenario (code landed, then a
+ *      restarted session backfilled `--task-start`).
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {number|null}
+ */
+export function firstKnownCommitMs(root, taskId) {
+  const branch = `task/${taskId}`;
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--reverse", "--format=%ct", branch, "^master"], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = out.trim().split("\n")[0];
+    if (line && /^\d+$/.test(line)) return Number(line) * 1000;
+  } catch (_) { /* branch absent or git failure — fall through to the merge reference */ }
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--all", "--format=%ct", "--merges", "--grep", branch], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = out.trim().split("\n")[0];
+    if (line && /^\d+$/.test(line)) return Number(line) * 1000;
+  } catch (_) { /* no merge found */ }
+  return null;
+}
+
+/**
+ * Memoized `firstKnownCommitMs` factory for the aggregate/reconcile paths: one git lookup per
+ * distinct taskId, never per record.
+ * @param {string} root
+ * @returns {(taskId: string) => number|null}
+ */
+export function makeFirstKnownCommitMsByTask(root) {
+  const cache = new Map();
+  return (taskId) => {
+    if (cache.has(taskId)) return cache.get(taskId);
+    const v = firstKnownCommitMs(root, taskId);
+    cache.set(taskId, v);
+    return v;
+  };
+}
+
 // ── runId ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -202,9 +349,13 @@ export function buildStartEvent({ taskId, runId, executionCwd, baseCommit = null
  * @param {string} [opts.executionCwd]
  * @param {string|null} [opts.baseCommit]
  * @param {number} [opts.recordedAtMs]
+ * @param {string|null} [opts.reconcileReason] — when set, marks this end event as written by
+ *   `--reconcile` closing a phantom in-flight record (executor observably gone). aggregate() routes
+ *   such pairs to `reconciled[]` (never `tasks[]`), so a reconcile-close can never pollute
+ *   throughput. An A1a extra field — forward-compat allowed, VALID_OUTCOMES unchanged.
  * @returns {object} — a plain object that A1a validateEvent accepts
  */
-export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now() }) {
+export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit = null, recordedAtMs = Date.now(), reconcileReason = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     runId,
@@ -227,6 +378,7 @@ export function buildEndEvent({ taskId, runId, outcome, executionCwd, baseCommit
     dispatchMode: "serial",
     recordedAtMs,
     eventKind: "end",
+    reconcileReason,
   };
 }
 
@@ -436,7 +588,7 @@ export function computeHaltedMs(haltEvents, windowStartMs, windowEndMs) {
  * end time).
  *
  * @param {object[]} events — schema-valid StageEvents (any stage; only "Fast" is consumed)
- * @param {{sinceMs?: number|null, nowMs?: number|null, haltEvents?: Array<{event:"start"|"end", atMs:number}>|null}} [opts]
+ * @param {{sinceMs?: number|null, nowMs?: number|null, haltEvents?: Array<{event:"start"|"end", atMs:number}>|null, firstKnownCommitMsByTask?: ((taskId:string)=>number|null)|null}} [opts]
  *   sinceMs     — window start when given (AC2); else the earliest startedAtMs in the data.
  *   nowMs       — the observation instant. windowEnd = max(latest endedAtMs, nowMs). A live report
  *                 passes nowMs = Date.now() (window extends to now); a historical analysis passes
@@ -445,9 +597,15 @@ export function computeHaltedMs(haltEvents, windowStartMs, windowEndMs) {
  *   haltEvents  — the append-only halt log lines (AC1/AC2). Closed halt intervals overlapping the
  *                 window are subtracted from windowHours; open/orphan lines subtract nothing
  *                 (conservative). Absent/null ⇒ haltedHours = 0 (byte-identical to pre-fix).
- * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
+ *   firstKnownCommitMsByTask — AC7 annotation probe (taskId → the task's earliest known WORK
+ *                 commit, ms epoch — the branch's first own commit or its merge into master). When
+ *                 given, a record whose startedAtMs is LATER than this is marked
+ *                 `startedAtMsUnreliable` (a backfilled/distorted start) and EXCLUDED from the
+ *                 throughput numerator AND denominator. Absent/null ⇒ no annotation (byte-identical
+ *                 to pre-fix behavior).
+ * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
-export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = null } = {}) {
+export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = null, firstKnownCommitMsByTask = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
   // Blocked-wait events are NOT task start/end pairs — separate them before the byRun pairing.
   const blockedEvents = fastEvents.filter((e) => e.eventKind === "blocked");
@@ -472,40 +630,64 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
   const tasks = [];
   /** @type {Array<{taskId:string,runId:string,outcome:string|null}>} */
   const orphaned = [];
-  /** @type {Array<{taskId:string,runId:string,startedAtMs:number}>} */
+  /** @type {Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>} */
   const inProgress = [];
+  /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>} */
+  const reconciled = [];
+  /** @type {Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>} */
+  const unreliable = [];
   // Wall-clock window bounds (AC2/AC3): earliest start across all task events; latest end across
   // completed pairs. These feed tasksPerHour = count / windowHours below.
+  // Reconcile-closed pairs (phantom starts) and `startedAtMsUnreliable` records (backfilled starts)
+  // are EXCLUDED from both bounds — they must never enter the throughput numerator OR denominator
+  // (AC7 / the phantom fix).
   let earliestStartMs = null;
   let latestEndMs = null;
 
   for (const rec of byRun.values()) {
     const end = rec.ends.length ? rec.ends[rec.ends.length - 1] : null; // last end wins
-    if (rec.start && rec.start.timing?.startedAtMs != null) {
-      const s = rec.start.timing.startedAtMs;
-      earliestStartMs = earliestStartMs == null ? s : Math.min(earliestStartMs, s);
+    const reconcileReason = end?.reconcileReason ?? null;
+    const startedAtMs = rec.start?.timing?.startedAtMs ?? null;
+    const firstCommitMs = firstKnownCommitMsByTask ? firstKnownCommitMsByTask(rec.taskId) : null;
+    const startedAtMsUnreliable =
+      firstCommitMs != null && startedAtMs != null && startedAtMs > firstCommitMs;
+    if (startedAtMs != null && !reconcileReason && !startedAtMsUnreliable) {
+      earliestStartMs = earliestStartMs == null ? startedAtMs : Math.min(earliestStartMs, startedAtMs);
     }
     if (rec.start && end) {
       // Completed pair — window filter on the END time (pair level).
       if (sinceMs != null && end.timing.endedAtMs < sinceMs) continue;
-      const raw = (end.timing.endedAtMs - rec.start.timing.startedAtMs) / 60_000;
+      const raw = startedAtMs != null ? (end.timing.endedAtMs - startedAtMs) / 60_000 : 0;
       const minutes = raw > 0 ? raw : 0;
-      if (end.timing.endedAtMs != null) {
+      if (end.timing.endedAtMs != null && !reconcileReason && !startedAtMsUnreliable) {
         latestEndMs = latestEndMs == null ? end.timing.endedAtMs : Math.max(latestEndMs, end.timing.endedAtMs);
       }
-      tasks.push({ taskId: rec.taskId, minutes, outcome: end.outcome });
+      if (reconcileReason != null) {
+        // `--reconcile` wrote this end event closing a phantom in-flight record. It pairs with the
+        // original start (both real events — never deleted), but it is NOT a completed task: it
+        // must never contribute to throughput. Surfaced in `reconciled[]` for the audit trail.
+        reconciled.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome, reconcileReason, startedAtMsUnreliable });
+      } else if (startedAtMsUnreliable) {
+        // A completed pair whose start is backfilled (startedAtMs later than the task's first known
+        // commit) asserts a wall-clock that did not happen — excluded from throughput (AC7).
+        unreliable.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome, startedAtMsUnreliable: true, startedAtMs });
+      } else {
+        tasks.push({ taskId: rec.taskId, minutes, outcome: end.outcome });
+      }
     } else if (end && !rec.start) {
       if (sinceMs != null && end.recordedAtMs < sinceMs) continue;
       orphaned.push({ taskId: rec.taskId, runId: rec.runId, outcome: end.outcome });
     } else if (rec.start && !end) {
       if (sinceMs != null && rec.start.recordedAtMs < sinceMs) continue;
-      inProgress.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs: rec.start.timing.startedAtMs });
+      inProgress.push({ taskId: rec.taskId, runId: rec.runId, startedAtMs, startedAtMsUnreliable });
     }
   }
 
   tasks.sort((a, b) => a.taskId.localeCompare(b.taskId));
   orphaned.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
   inProgress.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  reconciled.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  unreliable.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
 
   const minutes = tasks.map((t) => t.minutes);
   const totalMinutes = minutes.reduce((s, m) => s + m, 0);
@@ -581,6 +763,75 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
     windowHours, haltedHours,
     halted: haltRes.halted,
     blocked, totalBlockedMs, longestBlockedMs,
+    reconciled, unreliable,
+  };
+}
+
+// ── Reconcile (gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards) ──
+//
+// `--reconcile` closes in-flight records whose executor is OBSERVABLY gone — a crash left them in
+// `inProgress` forever and the only signal that fired about them (OVER90 after 90 minutes) was
+// documented backwards. The decision is a pure function over observable probes so it is testable
+// without faking processes/git state; the CLI wires real probes (processAlive / isBranchMerged /
+// worktreeExists). Fail-closed toward KEEP: no positive evidence of absence ⇒ the record stays in
+// `inProgress` (AC3 negative control — never trade the phantom problem for a blindness problem).
+
+/**
+ * Decide, for each in-flight record, whether to close it (executor observably gone) or keep it.
+ * PURE: all observable facts arrive via the `executorGone` probe — this function itself never runs
+ * git/ps, so tests inject deterministic verdicts.
+ *
+ * AC7: a record whose startedAtMs is LATER than the task's earliest known WORK commit (the branch's
+ * first own commit or its merge into master — see `firstKnownCommitMs`) is a backfilled/distorted
+ * `--task-start` — marked `startedAtMsUnreliable` in both the closed and kept outputs; such records
+ * never enter throughput stats (see aggregate's `firstKnownCommitMsByTask` handling).
+ *
+ * @param {Array<{taskId:string, runId:string, startedAtMs:number}>} inProgress — from aggregate()
+ * @param {object} [opts]
+ * @param {(rec: {taskId:string, runId:string, startedAtMs:number}) => {gone:boolean, reason?:string|null}} [opts.executorGone]
+ *   — observable-executor probe. Default: { gone:false, reason:"no-executor-probe" } — never close
+ *   without evidence.
+ * @param {(taskId:string) => number|null} [opts.firstKnownCommitMs] — AC7 annotation probe.
+ * @returns {{closed: Array<{taskId:string, runId:string, startedAtMs:number, startedAtMsUnreliable:boolean, outcome:string, reconcileReason:string}>, kept: Array<{taskId:string, runId:string, startedAtMs:number, startedAtMsUnreliable:boolean, keepReason:string|null}>}}
+ */
+export function reconcileInFlight(inProgress, { executorGone, firstKnownCommitMs = null } = {}) {
+  const closed = [];
+  const kept = [];
+  for (const rec of inProgress ?? []) {
+    const firstCommit = firstKnownCommitMs ? firstKnownCommitMs(rec.taskId) : null;
+    const startedAtMsUnreliable =
+      firstCommit != null && typeof rec.startedAtMs === "number" && rec.startedAtMs > firstCommit;
+    const verdict = executorGone ? executorGone(rec) : { gone: false, reason: "no-executor-probe" };
+    const base = { taskId: rec.taskId, runId: rec.runId, startedAtMs: rec.startedAtMs, startedAtMsUnreliable };
+    if (verdict.gone) {
+      closed.push({ ...base, outcome: "abandoned", reconcileReason: verdict.reason ?? "executor-gone" });
+    } else {
+      kept.push({ ...base, keepReason: verdict.reason ?? null });
+    }
+  }
+  closed.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  kept.sort((a, b) => a.taskId.localeCompare(b.taskId) || a.runId.localeCompare(b.runId));
+  return { closed, kept };
+}
+
+/**
+ * The production observable-executor probe wired by `--reconcile`. Checks in priority order:
+ *   1. process alive   → KEEP (strongest presence signal; never close a live executor)
+ *   2. worktree open   → KEEP (mid-flight dispatch environment still present — uncertain, and the
+ *                        branch may legitimately point at an ancestor of HEAD with no commits yet)
+ *   3. branch merged   → CLOSE (work landed; the executor that was building it is done)
+ *   4. none of the above → CLOSE (no process, no worktree, branch not merged ⇒ dispatch gone)
+ * Presence (process / open worktree) ALWAYS trumps absence — never close a record whose dispatch
+ * environment is still observable. Never consults wall-clock age — see the file-header note.
+ * @param {string} root
+ * @returns {(rec: {taskId:string, runId:string}) => {gone:boolean, reason:string}}
+ */
+export function makeDefaultExecutorGone(root) {
+  return (rec) => {
+    if (processAlive(rec.runId)) return { gone: false, reason: "process-alive" };
+    if (worktreeExists(root, rec.taskId)) return { gone: false, reason: "worktree-present" };
+    if (isBranchMerged(root, rec.taskId)) return { gone: true, reason: "branch-merged" };
+    return { gone: true, reason: "worktree-gone-and-no-process" };
   };
 }
 
@@ -626,7 +877,21 @@ function printHumanReport(report, aggFile) {
   }
   if (report.inProgress.length) {
     console.log(`in-progress (start without end): ${report.inProgress.length}`);
-    for (const p of report.inProgress) console.log(`  ${p.taskId} (runId ${p.runId})`);
+    for (const p of report.inProgress) {
+      const unrel = p.startedAtMsUnreliable ? " [startedAtMs-unreliable]" : "";
+      console.log(`  ${p.taskId} (runId ${p.runId})${unrel}`);
+    }
+  }
+  // Reconcile-closed phantom records (gap-a-crash-leaves-phantom-in-flight-tasks...): real events
+  // preserved, but never counted as completed tasks.
+  if ((report.reconciled ?? []).length) {
+    console.log(`reconciled (phantom, executor observably gone): ${report.reconciled.length}`);
+    for (const r of report.reconciled) console.log(`  ${r.taskId} (runId ${r.runId}, ${r.reconcileReason})`);
+  }
+  // Backfilled/distorted starts (AC7): excluded from throughput numerator and denominator.
+  if ((report.unreliable ?? []).length) {
+    console.log(`unreliable (startedAtMs-unreliable, excluded from throughput): ${report.unreliable.length}`);
+    for (const u of report.unreliable) console.log(`  ${u.taskId} (runId ${u.runId})`);
   }
   // Blocked-wait (dead-time) metrics — gap-no-explicit-blocked-signal-from-inner-layer (AC7).
   if ((report.blocked ?? []).length) {
@@ -650,7 +915,8 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
-  node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)`;
+  node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)
+  node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRTES an end event per close)`;
 
 function getArgValue(args, name) {
   const idx = args.indexOf(name);
@@ -676,8 +942,12 @@ async function loadAndAggregate(root, sinceArg) {
   const events = [];
   for await (const e of readAllEvents(root)) events.push(e);
   const haltEvents = readHaltEvents(root);
+  // AC7 (gap-a-crash-leaves-phantom-in-flight-tasks...): the report annotates backfilled starts
+  // (startedAtMs later than the task's first known commit) as `startedAtMsUnreliable` and excludes
+  // them from throughput — the same probe --reconcile uses. Best-effort; no git → no annotation.
+  const firstKnownCommitMsByTask = makeFirstKnownCommitMsByTask(root);
   // nowMs = Date.now(): a live report's window extends to the current instant (AC1's window end).
-  const report = aggregate(events, { sinceMs, nowMs: Date.now(), haltEvents });
+  const report = aggregate(events, { sinceMs, nowMs: Date.now(), haltEvents, firstKnownCommitMsByTask });
   return { report: { generatedAt: new Date().toISOString(), since: sinceArg ?? null, ...report } };
 }
 
@@ -837,6 +1107,64 @@ export async function main(argv) {
       console.log(JSON.stringify(reportWithMeta, null, 2));
     } else {
       printHumanReport(reportWithMeta, aggFile);
+    }
+    return 0;
+  }
+
+  // --reconcile (gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-
+  // documented-backwards): close in-flight records whose executor is OBSERVABLY gone (branch
+  // merged / worktree gone / process gone — NEVER wall-clock age). Writes one schema-valid end event
+  // per close (outcome "abandoned" + reconcileReason extra field) so the record leaves `inProgress`;
+  // raw events are never deleted. Records whose executor is still present (process alive / open
+  // worktree) are KEPT — fail-closed toward not making the phantom problem into a blindness problem
+  // (AC3). Prints { closed, kept, inProgress } as JSON (or human lines).
+  if (args.includes("--reconcile")) {
+    let reportWithMeta;
+    try {
+      ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    const firstKnownCommitMsByTask = makeFirstKnownCommitMsByTask(root);
+    const { closed, kept } = reconcileInFlight(reportWithMeta.inProgress, {
+      executorGone: makeDefaultExecutorGone(root),
+      firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
+    });
+    let writeFailed = false;
+    for (const c of closed) {
+      const ev = buildEndEvent({
+        taskId: c.taskId,
+        runId: c.runId,
+        outcome: c.outcome,
+        reconcileReason: c.reconcileReason,
+        executionCwd: process.cwd(),
+        baseCommit: getBaseCommit(root),
+        recordedAtMs: Date.now(),
+      });
+      try {
+        writeEvent(ev, root);
+      } catch (e) {
+        console.error(`fast-mode-telemetry: failed to write reconcile end for ${c.taskId} (${c.runId}): ${e.message}`);
+        writeFailed = true;
+      }
+    }
+    if (writeFailed) return 1;
+    // Re-read to reflect the written end events in the final inProgress.
+    let finalReport;
+    try {
+      ({ report: finalReport } = await loadAndAggregate(root, null));
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    const out = { closed, kept, inProgress: finalReport.inProgress };
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(out, null, 2));
+    } else {
+      console.log(`reconcile: ${closed.length} closed, ${kept.length} kept, ${finalReport.inProgress.length} still in-progress`);
+      for (const c of closed) console.log(`  closed: ${c.taskId} (runId ${c.runId}, ${c.reconcileReason}${c.startedAtMsUnreliable ? ", startedAtMs-unreliable" : ""})`);
+      for (const k of kept) console.log(`  kept:   ${k.taskId} (runId ${k.runId}, ${k.keepReason ?? "no-evidence-of-gone"}${k.startedAtMsUnreliable ? ", startedAtMs-unreliable" : ""})`);
     }
     return 0;
   }

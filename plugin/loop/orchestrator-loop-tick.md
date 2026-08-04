@@ -248,6 +248,19 @@ bash plugin/scripts/monitor-mount-check.sh --json
 - **不买纠偏质量**。同期四次 `correct` 没有一次是延迟受限的——它们受限于视角，见步骤 2 的
   「外层的价值来自视角」。**更快的监测不会让外层看得更准**
 
+**遥测信号的两个方向（`fast-mode-telemetry.ts` 实际定义，随 `--report` 铺出；别写反——本仓曾把
+`ORPHAN` 定义成「`--task-start` 已写而 `--task-end` 未写」的反方向，而代码从不这样做，靠这条文档差点判错两次）**：
+
+| 信号 | 实际定义（代码为准） | 去向 |
+|---|---|---|
+| `ORPHAN` | **end without start**（只有 `--task-end`、没有对应的 `--task-start`） | 进 `orphaned[]`，报表可见，不进吞吐 |
+| 有始无终 | **start without end** | 进 `inProgress[]`；**只在 90 分钟后以 `OVER90` 露头**，且与「一个真的很慢的任务」同形——信号上不可区分 |
+
+**崩溃遗留（幽灵）**：执行者被杀死后，`--task-end` 永远不会来，任务永久停在 `inProgress`。先用
+`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --reconcile --json` 关闭
+「执行者确实不存在」的记录（判据是可观测的：分支已合并 / worktree 不存在 / 进程不存在，**不是时龄**），
+关闭后它才离开 `inProgress`、不再触发 `OVER90`。
+
 **代理信号迟早会误报，能换成结构信号就换。** 2026-08-02 一天里五个检测信号误报，五次的根因是同一个：
 **测的东西和声称的东西不是一回事**。
 
