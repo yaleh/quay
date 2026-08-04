@@ -26,7 +26,7 @@
 - ✅ `gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong`：已 merge（`1fcdb545`），第二个 Amendment 2026-08-04（claude -p 理由改为三条真实硬约束，结论逐字保留）；CLAUDE.md 无同型实例未改；adr016 检查器 1-in-band 绿
 - ✅ `gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`：已 merge（`0c0daf6b`），20/20 绿；`send-keys-reliable.sh`（5 步可靠发送）+ `transcript-delivery-check.ts`（纯函数，无哈希/无假 TUI）；AC6 用真实 transcript 判 delivered:true / never-sent:false；**完整跨会话 SEND 留安全窗**（R3 禁建会话，现有会话都在跑）
 - ✅ `gap-promotion-cadence-is-role-volition-not-product-mechanism`：已 merge（`5037ee55`，**遥测同一步关闭**——纪律修复首例），11/11 绿；`ready-pool-check.ts` 实跑 pool=6≥3 无需补晋；tick 文档新增步骤 3.6（就绪池维护）
-- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）
+- 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）、`gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool`（外层刚晋级 ready——修 ready-pool-check 假满：notYetFlipped 改判「工作落 master」，复用 task-status-drift 信号；当前 5 条 merged 任务作活样本，pool 须从 6 降到真实值）
 
 **遥测纪律（外层 2026-08-04 纠正，系统性 gap）：** 合并必须同一步 `--task-end outcome=done`——本轮 5 次合并（node-cache/retire-state/task-write/am2/reliable-send）漏闭遥测括号，全部由外层代补。**规则：fan-in merge → 同一动作内跑 `--task-end --taskId <id> --runId <bracket> --outcome done`**，不等外层发现。suite-speed 落地时同理。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
