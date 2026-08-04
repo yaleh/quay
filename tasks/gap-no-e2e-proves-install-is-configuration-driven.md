@@ -79,18 +79,62 @@ resume 先让 e2e 红着落地，再由 #1 与 #9 把它变绿
 
 ## Acceptance Criteria
 
-- [ ] AC1: **e2e 落地并此刻为红**——四条断言的失败输出贴进任务体（**这是仪器的自证，不可省**）
+- [x] AC1: **e2e 落地并此刻为红**——四条断言的失败输出贴进任务体（**这是仪器的自证，不可省**）
+      **实跑**（`bash scripts/test.sh packages/quay/test/install-config-driven-e2e.test.mjs`，提交 `31fb6d44`）：
+      ```
+      ℹ pass 1 / ℹ fail 4 / ℹ cancelled 0 / ℹ skipped 0
+      ✖ A1 — two workspaces with genuinely different derived test commands lay down byte-identical product files (only the config differs)
+      ✖ A2 — laid-down files are byte-identical to the product artifacts, and a second install changes ZERO product files
+      ✖ A3 — an old-install workspace upgrades to all-new product files, and existing loop state stays readable & semantically unchanged
+      ✖ A4 — a ## Finding task WITHOUT ## Plan passes the author→ready gate; a ## Plan task still goes through the strict contract
+      ✔ AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0; the both-installs-fail negative control stays red
+
+      A1: AssertionError [ERR_ASSERTION]: A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=["docs/analysis/fast-mode-loop-tick.md","orchestration/orchestrator-loop-tick.md"]
+      A2: AssertionError [ERR_ASSERTION]: A2: every laid-down file must be byte-identical to the product artifact; differing=["docs/analysis/fast-mode-loop-tick.md","orchestration/orchestrator-loop-tick.md"]
+      A3: AssertionError [ERR_ASSERTION]: A3: after upgrade every laid-down file must equal the new product; still differing=["docs/analysis/fast-mode-loop-tick.md","orchestration/orchestrator-loop-tick.md"]
+      A4: AssertionError [ERR_ASSERTION]: A4: a ## Finding task WITHOUT ## Plan must pass author->ready; shape=finding ok=false artifacts={"proposal":true,"plan":false,"ac":true,"dod":true} reason="missing artifacts: plan"
+      ```
+      **判读**：A1/A2/A3 全红在同一个根因——落地仍在做文本替换（tick 文档被 `render_substitutions`
+      烘焙进测试命令/仓库根），两工作区 tick 文档因此互相不同、也与产物不同，升级时被 `CONFLICT` skip 停在旧版。
+      A4 红在闸仍拒绝纯 Finding（无 Plan）任务。**防空过控制（AC6）与断言同时落地并已通过**——
+      这就是本仪器的自证：它此刻能拦住全部四种回归，而不是「永远返回空集」。
 - [ ] AC2: **A1** 两工作区落地文件互相字节相同、仅配置文件不同（实跑贴出）
+      **当前**：红（断言已写，A1 失败输出见 AC1）。由 #1 `gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them` 变绿。
 - [ ] AC3: **A2** 与产物字节相同 + 紧接着再装一次**零文件变化**（实跑贴出）
+      **当前**：红（断言已写，A2 失败输出见 AC1）。由 #1 变绿。
 - [ ] AC4: **A3** 旧版工作区升级后全部变成新产物，**且 `.workflow-events/` / `tick-log.md` / gate 事件仍可读且语义不变**（实跑贴出）
+      **当前**：红（断言已写，A3 失败输出见 AC1；既有状态可读/语义不变的方向在当前机制下已通过）。由 #1 变绿。
 - [ ] AC5: **A4** `## Finding` 无 `## Plan` 过闸；**含 `## Plan` 的仍走严格契约**（两个方向都贴）
-- [ ] AC6: **防空过控制**——两工作区配置文件内容确实不同；
+      **当前**：红（断言已写，A4 失败输出见 AC1；`## Plan` 方向已通过）。由 #9 `gap-the-dod-gate-encodes-a-retired-task-shape` 的 follow-up 变绿。
+- [x] AC6: **防空过控制**——两工作区配置文件内容确实不同；
       落地文件数 **> 0 且等于产物应铺集合大小**。
       **负控制：人为让两边都装失败 ⇒ 测试必须红**，不得因「两边都空所以相同」而通过
-- [ ] AC7: **两个工作区的测试命令确实不同**（`package.json` vs `go.mod` 推导出的命令逐字贴出）——
+      **实跑**（同上，AC6 用例 `✔` 通过——控制本身不是红的一半，是断言的自证底座）：
+      ```
+      ✔ AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0; the both-installs-fail negative control stays red (2615.367879ms)
+      ```
+      `antiPassThroughCheck` 要求：两边落地文件数 **> 0**（只数 `quay-init --loop` 真正铺下的
+      产品+配置文件，项目的 package.json/go.mod 不计入）；`<ws>/.quay/config.yml` 都存在且**内容确实不同**；
+      另断言完整已知机制集合齐全（两个 tick 文档 + session-liveness.sh + 核心 checker，落地产品数 ≥ 20）。
+      **负控制**：两个空工作区（无 `--test-command` ⇒ 检测失败关闭、零落地）⇒
+      `antiPassThroughCheck` 必须 `ok:false`（`laid-down count must be > 0 on both sides`）——两边都空时不得因「相同」而通过。
+- [x] AC7: **两个工作区的测试命令确实不同**（`package.json` vs `go.mod` 推导出的命令逐字贴出）——
       否则 A1 只证明了「同一个替换值产生同一个结果」
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group product`，随测试销毁临时工作区
+      **实跑**（`quay-init --loop` 的检测输出，逐字）：
+      ```
+      # ws1 —— package.json 含 scripts.test 条目
+      detected test command: npm test (from the target project — confirm this is correct)
+      # ws2 —— go.mod
+      detected test command: go test ./... (from the target project — confirm this is correct)
+      ```
+      `npm test` ≠ `go test ./...`，A1 由此证明「同一产物装进两个测试命令真的不同的项目」，
+      而不是「同一个替换值产生同一个结果」。
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group product`，随测试销毁临时工作区
       （与现有 `makeWorkspace()` 同一手法，**不得在共享检出留下残留**）
+      **证据**：`packages/quay/test/install-config-driven-e2e.test.mjs` 首行 `// @test-group product`；
+      `import { test, after } from "node:test"`；`makeWorkspace()` + 文件级 `after()` 统一 `rmSync` 清理（`_tmp` 记录）；
+      `scripts/test.sh` 的 test-framework-policy 检查通过（176 glob 文件、34 豁免，本文件计入 node:test 新文件）；
+      test-isolation 检查未把本文件计入任何违规类。临时工作区随测试销毁，共享检出无残留（`git status` 仅本测试文件）。
 
 ## Definition of Done
 
@@ -101,11 +145,19 @@ resume 先让 e2e 红着落地，再由 #1 与 #9 把它变绿
       让仪器的任务等被测物落地，等于用一个槽位停放数小时。
       本条收敛为仪器自身：e2e 存在、四条断言此刻为红、红的输出已贴、防空过控制已落地。
       四条绿改由那两条修复任务各自的 AC 引用本 e2e 来验证——**谁修谁证明自己让它变绿**。）**
-- [ ] AC6 的空过负控制实跑输出贴进任务体
+      **当前进度（RED-first 落地，`31fb6d44`）**：**红的一半已贴**（见 AC1，四条红全量实跑输出）；
+      **绿的一半由 #1/#9 修复任务各自的 AC 验证**——谁修谁证明自己让它变绿。
+- [x] AC6 的空过负控制实跑输出贴进任务体
+      **已贴**：AC6 条目内（`✔ AC6` 实跑 + 负控制 `ok:false` 的判据与输出）。
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+      **当前**：本文件 scoped 实跑为 `fail 4 / pass 1 / cancelled 0`（红态，AC1）。全绿待 #1/#9 后。
 - [ ] 任务体记录：**这个 e2e 是重装决策的唯一门槛**；
       绿了之后的两次重装才是真验证，因为**有两条测试给不了**——
       **人工补丁数 = 0**，以及**通过闸完成 ≥1 个任务**
+      **记录**：本 e2e（`packages/quay/test/install-config-driven-e2e.test.mjs`）是重装 archguard/meta-cc 两个真实项目的
+      **唯一机械门槛**——它绿了，就重装。但「e2e 绿」本身给不了两条判据：**人工补丁数 = 0**、
+      **通过 author→ready 闸完成 ≥1 个任务**。因此绿了之后的两次真实重装才是最终验证，
+      而本 e2e 的职责是**先证明这个门槛真会拦住什么**（红的一半，已贴于 AC1）。
 
 ## Touches
 
