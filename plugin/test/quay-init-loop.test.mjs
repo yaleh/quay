@@ -108,10 +108,12 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
     // 2 tick docs
     assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'outer tick doc laid down');
     assert.ok(fs.existsSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md')), 'inner tick doc laid down');
-    // mechanism scripts
+    // mechanism scripts (inner-state.sh is deliberately NOT here — retired,
+    // gap-retire-inner-state-one-observer-targets-by-parameter AC3; observation ships as
+    // session-liveness.sh via the separate session-liveness section below).
     const expectedScripts = [
       'fast-mode-telemetry.ts', 'inner-blocked-signal.ts', 'inner-forensics.mjs', 'inner-idle-log.ts',
-      'inner-state.sh', 'loop-driver-check.sh', 'resource-gate.sh', 'heavy-op-token.sh', 'task-contract-check.ts',
+      'loop-driver-check.sh', 'resource-gate.sh', 'heavy-op-token.sh', 'task-contract-check.ts',
       'task-status-drift-check.ts', 'touches-orthogonality-check.ts', 'concurrent-batch-scheduler.ts',
       'it0-split-or-commit-check.ts', 'pipe-exit-code-check.sh',
       // transitive deps of the checkers (the laid-down mechanism must be functional)
@@ -121,6 +123,11 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
     for (const s of expectedScripts) {
       assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', s)), `loop script must be laid down: plugin/scripts/${s}`);
     }
+    // The retired monitor must NOT be laid down into new target projects (AC3).
+    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh')),
+      'inner-state.sh must NOT be laid down into new target projects (retired, AC3)');
+    assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh')),
+      'session-liveness.sh — the ONE observer — must be laid down');
     // state file records the plugin version (upgrade path seed)
     assert.ok(fs.existsSync(path.join(ws, '.quay', 'quay-init-state.json')), 'state file must be written');
     const state = JSON.parse(fs.readFileSync(path.join(ws, '.quay', 'quay-init-state.json'), 'utf8'));
@@ -165,9 +172,12 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     assert.match(cfg, /test_command:\s*npm test/, 'config.yml loop.test_command must carry the target test command');
     assert.match(cfg, /tmux_session:\s*myproj-0:0\.0/, 'config.yml loop.tmux_session must carry the target tmux session');
 
-    // The mechanism scripts that used to carry quay literals are now self-locating.
-    const innerState = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh'), 'utf8');
-    assert.ok(!innerState.includes('/home/yale/work/quay'), 'inner-state.sh must not carry a hardcoded quay root');
+    // The mechanism scripts that used to carry quay literals are now self-locating. The retired
+    // inner-state.sh is NOT laid down at all (AC3) — the ONE observer session-liveness.sh is.
+    const liveness = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh'), 'utf8');
+    assert.ok(!liveness.includes('/home/yale/work/quay'), 'session-liveness.sh must not carry a hardcoded quay root');
+    assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh')),
+      'inner-state.sh must not be laid down (retired, AC3)');
   } finally { cleanup(ws); }
 });
 

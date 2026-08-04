@@ -1,21 +1,26 @@
 // @test-group governance
-// monitor-mount-check.test.mjs — gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right.
-// Verifies the three criteria of the outer's Monitor mount check (plugin/scripts/monitor-mount-check.sh):
-//   (1) mounted             — a real process whose argv[0..1] == `bash <abs inner-state.sh>` exists;
-//   (2) targetRoot          — the resolved work root (argv's ../.. or INNER_STATE_WORK_ROOT override)
-//                             compared to this repo's root;
+// monitor-mount-check.test.mjs — gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right,
+// rewritten for gap-retire-inner-state-one-observer-targets-by-parameter (AC1): observation has
+// exactly ONE tool, session-liveness.sh. Verifies the three criteria of the outer's Monitor mount
+// check (plugin/scripts/monitor-mount-check.sh):
+//   (1) mounted             — a real process whose argv[0..1] == `bash <abs|rel session-liveness.sh>`
+//                             exists (basename match on argv[1], so absolute and relative launches
+//                             both count; inner-state.sh is NO LONGER a pass condition);
+//   (2) targetRoot          — the resolved work root (argv script's ../.. resolved via the process
+//                             cwd, or the SESSION_ROOT env override) compared to this repo's root;
 //   (3) delivered           — the SHARED session-liveness events file has fresh events (AC9,
 //                             gap-liveness-mounting-is-a-single-flight-role-with-no-owner:
 //                             ownedByThisSession is ABOLISHED — the criterion is "事件是否真的送达",
 //                             not "是不是本会话挂的". AC20c is one-mount-many-subscribe: another
 //                             session's mount + normal delivery must PASS; no mount ⇒ FAIL.)
 // Plus the AC2 self-match negative control (substring in the checker's own argv must NOT count),
-// AC6 (N>1 pids is ONE logical monitor), AC7 (zero writes), AC8 (INIT carries work_root), and
-// AC10 (node:test + @test-group governance).
+// AC6 (N>1 pids is ONE logical monitor), AC7 (zero writes), and the AC1 negative control
+// (session-liveness deliberately not mounted ⇒ mounted=false ⇒ the six-key check judges cold start
+// incomplete).
 //
 // Isolation: every fake monitor is spawned against a mkdtemp script path, and the checker is pointed
-// at that path via MONITOR_CHECK_INNER_STATE — so a REAL monitor mounted in the quay repo can never
-// leak into these assertions.
+// at that path via MONITOR_CHECK_SESSION_LIVENESS — so a REAL monitor mounted in the quay repo can
+// never leak into these assertions.
 //
 // Run:
 //   scripts/test.sh plugin/test/monitor-mount-check.test.mjs
@@ -44,7 +49,7 @@ function _findRepoRoot(startDir) {
 
 const REPO_ROOT = _findRepoRoot(__dirname);
 const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "monitor-mount-check.sh");
-const INNER_STATE = path.join(REPO_ROOT, "plugin", "scripts", "inner-state.sh");
+const SESSION_LIVENESS = path.join(REPO_ROOT, "plugin", "scripts", "session-liveness.sh");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -58,23 +63,23 @@ function cleanup(root) {
 
 // ── fake-monitor helpers ────────────────────────────────────────────────────────────────────────────
 
-function writeStubInnerState(innerPath) {
-  fs.mkdirSync(path.dirname(innerPath), { recursive: true });
-  fs.writeFileSync(innerPath, "#!/usr/bin/env bash\nwhile true; do sleep 1; done\n", "utf8");
+function writeStubLiveness(livenessPath) {
+  fs.mkdirSync(path.dirname(livenessPath), { recursive: true });
+  fs.writeFileSync(livenessPath, "#!/usr/bin/env bash\nwhile true; do sleep 1; done\n", "utf8");
 }
 
-// Spawn a real `bash <innerPath>` process as a child of THIS test (i.e. inside the current session's
-// process tree). Returns the ChildProcess so the caller can kill it.
-function spawnInSessionFake(innerPath, env = {}) {
-  return spawn("bash", [innerPath], { env: { ...process.env, ...env }, stdio: "ignore" });
+// Spawn a real `bash <livenessPath>` process as a child of THIS test (i.e. inside the current
+// session's process tree). Returns the ChildProcess so the caller can kill it.
+function spawnInSessionFake(livenessPath, env = {}) {
+  return spawn("bash", [livenessPath], { env: { ...process.env, ...env }, stdio: "ignore" });
 }
 
-// Spawn a `bash <innerPath>` that is orphaned to init (double-fork via a short-lived background
+// Spawn a `bash <livenessPath>` that is orphaned to init (double-fork via a short-lived background
 // wrapper), simulating a monitor left over from a PREVIOUS session. Returns { fakePid, wrapperPid }.
-function spawnOrphanedFake(innerPath, pidFile, env = {}) {
+function spawnOrphanedFake(livenessPath, pidFile, env = {}) {
   const wrapper = spawn(
     "bash",
-    ["-c", `bash '${innerPath}' < /dev/null > /dev/null 2>&1 & echo $! > '${pidFile}'`],
+    ["-c", `bash '${livenessPath}' < /dev/null > /dev/null 2>&1 & echo $! > '${pidFile}'`],
     { env: { ...process.env, ...env }, stdio: "ignore", detached: true },
   );
   const wrapperPid = wrapper.pid;
@@ -102,7 +107,7 @@ function killTmpdirMonitors() {
     let cmd;
     try { cmd = fs.readFileSync(`/proc/${d.name}/cmdline`, "utf8"); } catch { continue; } // vanished mid-scan
     const [argv0, argv1] = cmd.split("\0");
-    if (argv0 === "bash" && argv1 && argv1.startsWith(os.tmpdir()) && argv1.endsWith("inner-state.sh")) {
+    if (argv0 === "bash" && argv1 && argv1.startsWith(os.tmpdir()) && argv1.endsWith("session-liveness.sh")) {
       try { process.kill(parseInt(d.name, 10), "SIGKILL"); } catch { /* already gone */ }
     }
   }
@@ -123,9 +128,9 @@ function runChecker(extraEnv = {}) {
 test("AC1 — --json emits mounted / targetRoot / delivered (all boolean where promised; ownedByThisSession is GONE)", () => {
   const tmp = makeTmpWorkspace();
   try {
-    const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-    writeStubInnerState(innerPath);
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
+    const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+    writeStubLiveness(livenessPath);
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.ok("mounted" in data, "mounted field missing");
     assert.ok("targetRoot" in data, "targetRoot field missing");
     assert.ok("delivered" in data, "delivered field missing (AC9: replaces ownedByThisSession)");
@@ -136,18 +141,38 @@ test("AC1 — --json emits mounted / targetRoot / delivered (all boolean where p
   } finally { cleanup(tmp); }
 });
 
+// ── AC1 NEGATIVE CONTROL (gap-retire-inner-state-one-observer-targets-by-parameter AC1): ─────────────
+// with session-liveness deliberately not mounted, the six-key check must still judge cold start
+// incomplete — mounted=false. This is the whole point of collapsing to ONE monitor: a missing
+// session-liveness mount must FAIL, and an inner-state mount must NOT make it PASS.
+
+test("AC1 NEGATIVE — no session-liveness mounted ⇒ mounted=false (six-key judges cold start incomplete)", () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+    writeStubLiveness(livenessPath);
+    // No fake spawned — the ONLY liveness process would be a real one, excluded by the hermetic
+    // script path. delivered is also false (absent events file), so all three criteria fail-closed.
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath, MONITOR_CHECK_EVENTS_FILE: path.join(tmp, "absent-events.jsonl") });
+    assert.equal(data.mounted, false,
+      "session-liveness deliberately not mounted must report mounted=false (AC1 negative control)");
+    assert.equal(data.delivered, false, "no events file must report delivered=false");
+  } finally { cleanup(tmp); }
+});
+
 // ── AC2: self-match negative control ───────────────────────────────────────────────────────────────
 
 test("AC2 — a command line that merely CONTAINS the script name must NOT count as a mount", () => {
   const tmp = makeTmpWorkspace();
   try {
-    const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-    writeStubInnerState(innerPath);
-    // No fake spawned. The checker's OWN argv carries innerPath as a literal argument — a substring
-    // matcher (the outer's first version, and pgrep -f) would match the querying command itself.
-    const res = spawnSync("bash", [CHECKER, innerPath, "--json"], {
+    const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+    writeStubLiveness(livenessPath);
+    // No fake spawned. The checker's OWN argv carries livenessPath as a literal argument — a
+    // substring matcher (the outer's first version, and pgrep -f) would match the querying command
+    // itself. The basename predicate looks only at argv[1], so this must not count.
+    const res = spawnSync("bash", [CHECKER, livenessPath, "--json"], {
       encoding: "utf8",
-      env: { ...process.env, MONITOR_CHECK_INNER_STATE: innerPath },
+      env: { ...process.env, MONITOR_CHECK_SESSION_LIVENESS: livenessPath },
     });
     assert.equal(res.status, 0, res.stderr);
     const data = JSON.parse(res.stdout);
@@ -160,20 +185,20 @@ test("AC2 — a command line that merely CONTAINS the script name must NOT count
 test("AC3 (negative) — no monitor mounted ⇒ mounted=false", () => {
   const tmp = makeTmpWorkspace();
   try {
-    const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-    writeStubInnerState(innerPath);
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
+    const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+    writeStubLiveness(livenessPath);
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.equal(data.mounted, false);
   } finally { cleanup(tmp); }
 });
 
 test("AC3 (positive) — re-mount a monitor ⇒ mounted=true and the pid is reported", () => {
   const tmp = makeTmpWorkspace();
-  const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-  writeStubInnerState(innerPath);
-  const child = spawnInSessionFake(innerPath, { INNER_STATE_WORK_ROOT: tmp });
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  const child = spawnInSessionFake(livenessPath, { SESSION_ROOT: tmp });
   try {
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.equal(data.mounted, true);
     assert.ok(Array.isArray(data.pids) && data.pids.includes(child.pid),
       `fake pid ${child.pid} must be in ${JSON.stringify(data.pids)}`);
@@ -190,12 +215,12 @@ test("AC3 (positive) — re-mount a monitor ⇒ mounted=true and the pid is repo
 test("AC4 — monitor aimed at ANOTHER repo ⇒ targetRoot differs and targetOk=false (reported)", () => {
   const tmp = makeTmpWorkspace();
   const other = makeTmpWorkspace();
-  const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-  writeStubInnerState(innerPath);
-  // The monitor process itself is aimed at `other` via INNER_STATE_WORK_ROOT.
-  const child = spawnInSessionFake(innerPath, { INNER_STATE_WORK_ROOT: other });
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  // The monitor process itself is aimed at `other` via SESSION_ROOT.
+  const child = spawnInSessionFake(livenessPath, { SESSION_ROOT: other });
   try {
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.equal(data.mounted, true, "the mis-aimed monitor is still alive");
     assert.equal(data.targetRoot, other, "the effective root comes from the env override");
     assert.notEqual(data.targetRoot, tmp, "the effective root is NOT this repo's root");
@@ -215,10 +240,10 @@ test("AC4 — monitor aimed at ANOTHER repo ⇒ targetRoot differs and targetOk=
 
 test("AC5 — a monitor orphaned to a PREVIOUS session with NO fresh events ⇒ delivered=false (无人挂载 ⇒ FAIL)", async () => {
   const tmp = makeTmpWorkspace();
-  const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-  writeStubInnerState(innerPath);
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
   const pidFile = path.join(tmp, "fake.pid");
-  const { wrapperPid } = spawnOrphanedFake(innerPath, pidFile, { INNER_STATE_WORK_ROOT: tmp });
+  const { wrapperPid } = spawnOrphanedFake(livenessPath, pidFile, { SESSION_ROOT: tmp });
   let fakePid = null;
   try {
     for (let i = 0; i < 200 && !fs.existsSync(pidFile); i++) await sleep(25);
@@ -232,11 +257,11 @@ test("AC5 — a monitor orphaned to a PREVIOUS session with NO fresh events ⇒ 
       await sleep(25);
     }
     // The shared events file is ABSENT (no mount is delivering) ⇒ delivered=false, regardless of the
-    // alive-but-orphaned process being a real inner-state monitor.
+    // alive-but-orphaned process being a real liveness monitor.
     // Hermetic: point MONITOR_CHECK_EVENTS_FILE at a temp path that does not exist, so the checker
     // must NOT see the REAL shared events file (the outer's live monitors write HEARTBEAT there —
     // fresh mtime ⇒ delivered=true would be correct for them, and wrong for this no-events scenario).
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath, MONITOR_CHECK_EVENTS_FILE: path.join(tmp, "absent-events.jsonl") });
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath, MONITOR_CHECK_EVENTS_FILE: path.join(tmp, "absent-events.jsonl") });
     assert.equal(data.mounted, true, "the orphaned monitor IS alive — the miss would be silent");
     assert.equal(data.delivered, false,
       "with no fresh shared events, delivery must FAIL (AC9: 无人挂载 ⇒ 必须判 FAIL)");
@@ -267,13 +292,13 @@ test("AC9 — a monitor from ANOTHER session with NORMAL delivery ⇒ delivered=
 
 test("AC6 — a single logical monitor with N>1 pids reports mounted=true (not 'multiple monitors')", () => {
   const tmp = makeTmpWorkspace();
-  const innerPath = path.join(tmp, "plugin", "scripts", "inner-state.sh");
-  writeStubInnerState(innerPath);
-  const env = { INNER_STATE_WORK_ROOT: tmp };
-  const c1 = spawnInSessionFake(innerPath, env);
-  const c2 = spawnInSessionFake(innerPath, env);
+  const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+  writeStubLiveness(livenessPath);
+  const env = { SESSION_ROOT: tmp };
+  const c1 = spawnInSessionFake(livenessPath, env);
+  const c2 = spawnInSessionFake(livenessPath, env);
   try {
-    const data = runChecker({ MONITOR_CHECK_INNER_STATE: innerPath });
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.equal(data.mounted, true);
     assert.ok(data.pids.length >= 2, `expected >=2 pids, got ${JSON.stringify(data.pids)}`);
     assert.ok(data.pids.includes(c1.pid) && data.pids.includes(c2.pid));
@@ -300,36 +325,27 @@ test("AC7 — checker is zero-write (git status unchanged) and declares the read
   assert.match(src, /只读 \/proc 与共享事件文件/, "the read contract must extend to the shared events file (AC9 delivery check reads it)");
 });
 
-// ── AC8: inner-state.sh INIT event carries the resolved work root ─────────────────────────────────
+// ── AC1 (rewrite): inner-state.sh is NO LONGER a pass condition ─────────────────────────────────────
+// gap-retire-inner-state-one-observer-targets-by-parameter AC1: the checker must not treat an
+// inner-state mount as a pass condition. A running inner-state.sh process (here: a stub) must NOT
+// flip mounted=true — only a session-liveness.sh mount can.
 
-test("AC8 (source) — inner-state.sh's INIT event line embeds the resolved work root", () => {
-  const src = fs.readFileSync(INNER_STATE, "utf8");
-  assert.match(src, /echo "INIT .*work_root=\$PWD/, "INIT must carry the resolved work root");
-});
-
-test("AC8 (behavioral) — running inner-state.sh against a temp root emits INIT with work_root=<root>", async () => {
+test("AC1 (rewrite) — an inner-state.sh process is NOT a pass condition (mounted stays false)", () => {
   const tmp = makeTmpWorkspace();
   try {
-    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
-    // Fake telemetry: reports one in-progress task so the INIT baseline event fires on the first loop.
-    fs.writeFileSync(
-      path.join(tmp, "plugin", "scripts", "fast-mode-telemetry.ts"),
-      "const a=process.argv.slice(2);if(a.includes('--report')){process.stdout.write(JSON.stringify({inProgress:[{taskId:'AC8-demo',startedAtMs:Date.now()}],orphaned:[]}));}",
-      "utf8",
-    );
-    const child = spawn("bash", [INNER_STATE], {
-      env: { ...process.env, INNER_STATE_WORK_ROOT: tmp },
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    let out = "";
-    child.stdout.on("data", (d) => { out += d; });
+    const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+    writeStubLiveness(livenessPath);
+    // Spawn a stub named inner-state.sh — the RETIRED monitor. The checker points at the liveness
+    // path; only a session-liveness mount may satisfy mounted.
+    const innerStub = path.join(tmp, "plugin", "scripts", "inner-state.sh");
+    writeStubLiveness(innerStub);
+    const child = spawnInSessionFake(innerStub, { INNER_STATE_WORK_ROOT: tmp });
     try {
-      // Generous budget: the full-suite fan-in may be running concurrently.
-      for (let i = 0; i < 200 && !out.includes("INIT 挂载时的在飞任务"); i++) await sleep(50);
-      assert.match(out, /INIT 挂载时的在飞任务: AC8-demo/, `INIT must fire on first loop: ${out}`);
-      assert.ok(out.includes(`work_root=${tmp}`), `INIT must carry the resolved work root: ${out}`);
+      const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
+      assert.equal(data.mounted, false,
+        "an inner-state.sh process must NOT count as a mount (retired — one observer, session-liveness.sh)");
     } finally {
-      child.kill("SIGKILL");
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
     }
   } finally { cleanup(tmp); }
 });

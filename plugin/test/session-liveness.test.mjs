@@ -818,18 +818,30 @@ test("AC11 — a DIRECTORY heartbeat (inner-style .workflow-events/) triggers th
 });
 
 // ── AC12/AC13: both shipped tick docs state what to mount ──────────────────────────────────────────
+// AC12 was rewritten when inner-state.sh was retired (gap-retire-inner-state-one-observer-targets-by-
+// parameter AC2): observation has ONE tool, session-liveness.sh. The outer tick doc must name
+// session-liveness.sh as the ONE monitor (and reference inner-state.sh only as RETIRED, never as a
+// mount criterion); the inner tick doc must state that the inner mounts session-liveness.sh.
 
-test("AC12/AC13 — both shipped tick docs state what to mount; the outer doc names the two monitors and what each answers", () => {
+test("AC12/AC13 — both shipped tick docs state the ONE monitor (session-liveness.sh); inner-state.sh is named only as retired, never as a mount", () => {
   const outer = fs.readFileSync(path.resolve(__dirname, "..", "loop", "orchestrator-loop-tick.md"), "utf8");
   const inner = fs.readFileSync(path.resolve(__dirname, "..", "loop", "fast-mode-loop-tick.md"), "utf8");
-  // AC12: the outer mounts TWO monitors (work-state + session-state), not merged.
-  assert.ok(outer.includes("inner-state.sh") && outer.includes("session-liveness.sh"),
-    "the outer tick doc must name both monitors (AC12: they are not merged — one failure mode must not mask another)");
-  assert.ok(/它还在不在/.test(outer) && /它在做什么/.test(outer),
-    "the outer tick doc must state what each monitor answers (AC12)");
+  // AC12 (rewritten): the outer tick doc mounts ONE monitor — session-liveness.sh.
+  assert.ok(outer.includes("session-liveness.sh"),
+    "the outer tick doc must name the ONE monitor session-liveness.sh (AC12 rewritten)");
+  assert.ok(/它还在不在/.test(outer),
+    "the outer tick doc must state what the monitor answers — 会话还在不在 (AC12)");
+  // The outer doc must NOT instruct mounting inner-state.sh as a live monitor: every inner-state.sh
+  // mention must be the retirement note (retired / 退役 / 已退役), never a Monitor({command: ...}).
+  assert.ok(!/Monitor\(\{command:.*inner-state\.sh/.test(outer),
+    "the outer tick doc must NOT instruct mounting inner-state.sh (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC2)");
+  assert.match(outer, /inner-state\.sh.{0,80}(退役|已退役)/s,
+    "the outer tick doc must name inner-state.sh only in the retirement note (AC2)");
   // AC13: the inner tick doc also states that the inner mounts session-liveness.sh.
   assert.ok(inner.includes("session-liveness.sh"),
     "the inner tick doc must state that the inner mounts session-liveness.sh (AC13)");
+  assert.ok(!/Monitor\(\{command:.*inner-state\.sh/.test(inner),
+    "the inner tick doc must NOT instruct mounting inner-state.sh (retired)");
 });
 
 // ── 版本可见性（管理者建议，2026-08-03）：启动指纹让「跑的是哪个版本」可从外部查 ─────────────────

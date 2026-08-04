@@ -36,9 +36,11 @@ test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old p
     ['plugin/loop/orchestrator-loop-tick.md', 'outer-layer driver doc'],
     ['plugin/loop/fast-mode-loop-tick.md', 'inner-layer driver doc'],
     ['plugin/scripts/inner-forensics.mjs', 'inner-layer forensics (outer verification)'],
-    ['plugin/scripts/inner-state.sh', 'inner-layer state Monitor (AC10 observation mechanism)'],
     ['plugin/scripts/resource-gate.sh', 'shared resource gate for heavy ops'],
     ['plugin/scripts/heavy-op-token.sh', 'cross-project heavy-op token'],
+    // NOTE: plugin/scripts/inner-state.sh was removed from the shipping set when it was retired
+    // (gap-retire-inner-state-one-observer-targets-by-parameter) — observation has one tool,
+    // session-liveness.sh, which ships via the separate session-liveness section of quay-init.sh.
   ];
   const oldPaths = [
     'orchestration/orchestrator-loop-tick.md',
@@ -257,11 +259,13 @@ test('AC2 — cold-start-e2e.sh --from-build extracts via git archive, never a c
     'the --from-build branch must NOT cp -r the working tree to the install source (use git archive)');
 });
 
-test('AC3 — cold-start-e2e.sh asserts the three build-required files, fail-named', () => {
+test('AC3 — cold-start-e2e.sh asserts the build-required files, fail-named (inner-state.sh retired, not required)', () => {
   const src = fs.readFileSync(COLD_START_E2E, 'utf8');
-  for (const f of ['scripts/quay-init.sh', 'scripts/inner-state.sh', 'loop/orchestrator-loop-tick.md']) {
+  for (const f of ['scripts/quay-init.sh', 'loop/orchestrator-loop-tick.md']) {
     assert.ok(src.includes(f), `cold-start-e2e.sh must assert the presence of ${f} (AC3)`);
   }
+  assert.ok(!src.includes('scripts/inner-state.sh'),
+    'cold-start-e2e.sh must NOT require inner-state.sh (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC3)');
   // The completeness assertion must fail naming the missing file (not a bare "something failed").
   assert.match(src, /fail "missing file: \$1"/,
     'the AC3 completeness assertion must fail naming the file');

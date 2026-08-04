@@ -58,7 +58,7 @@ conflict, listed and left untouched (upgrade path).
 | `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (with placeholder substitution) |
 | `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (with placeholder substitution) |
 | `scripts/fast-mode-telemetry.ts`, `task-contract-check.ts`, `task-status-drift-check.ts`, `touches-orthogonality-check.ts`, `concurrent-batch-scheduler.ts`, `inner-blocked-signal.ts`, `inner-idle-log.ts`, `it0-split-or-commit-check.ts` | `plugin/scripts/` |
-| `scripts/resource-gate.sh`, `heavy-op-token.sh`, `inner-state.sh`, `inner-forensics.mjs`, `pipe-exit-code-check.sh` | `plugin/scripts/` |
+| `scripts/resource-gate.sh`, `heavy-op-token.sh`, `inner-forensics.mjs`, `pipe-exit-code-check.sh` | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
 
 ## Behavior
@@ -127,7 +127,8 @@ This is a WARNING, not a block — the copy proceeds regardless.
 ### 6. Next step: cold start
 
 After `--loop` lays down the mechanism, the workspace is READY for the cold-start skill
-(`/quay:cold-start`): one command that mounts the two loop monitors (inner-state.sh +
-session-liveness.sh) via the Monitor tool, re-creates the 20-minute outer cron, drives the inner
-session to start fast mode, and asserts a real `--task-start` telemetry record in `.workflow-events/`.
+(`/quay:cold-start`): one command that mounts the loop monitor (session-liveness.sh — the ONE
+observer; inner-state.sh is retired, gap-retire-inner-state-one-observer-targets-by-parameter) via
+the Monitor tool, re-creates the 20-minute outer cron, drives the inner session to start fast mode,
+and asserts a real `--task-start` telemetry record in `.workflow-events/`.
 The inner start is DRIVEN there, never assumed as a side effect.

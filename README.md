@@ -201,10 +201,10 @@ bash plugin/scripts/publish-dist-branch.sh --branch cold8-dist
 #    go.mod / Cargo.toml — no need to know it in advance)
 /quay:init --all --loop
 
-# 3. cold-start skill — one command mounts both monitors (inner-state +
-#    session-liveness) via the Monitor tool, re-creates the 20-minute cron,
-#    DRIVES the inner session to start fast mode, and asserts a real
-#    --task-start telemetry record in .workflow-events/:
+# 3. cold-start skill — one command mounts the loop monitor (session-liveness,
+#    the ONE observer; inner-state.sh is retired) via the Monitor tool,
+#    re-creates the 20-minute cron, DRIVES the inner session to start fast mode,
+#    and asserts a real --task-start telemetry record in .workflow-events/:
 /quay:cold-start
 ```
 
@@ -226,8 +226,9 @@ copied out of the quay development tree):
   `task-contract-check.ts`, `task-status-drift-check.ts`,
   `touches-orthogonality-check.ts`, `concurrent-batch-scheduler.ts`,
   `inner-blocked-signal.ts`, …), the resource gate, the heavy-op token, and the
-  observation mechanism (`inner-state.sh` Monitor + `inner-forensics.mjs`), plus
-  their transitive dependencies.
+  observation mechanism (`session-liveness.sh` — the ONE observer;
+  `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-
+  parameter), plus their transitive dependencies.
 - `vendor/quay/dist/quay.js` — the built runtime, laid into the target so its
   `.quay/config.yml` `mcp_entry` points at a **project-local copy**, never at a
   `quay-native` PATH symlink into the quay dev tree (the loop must keep working

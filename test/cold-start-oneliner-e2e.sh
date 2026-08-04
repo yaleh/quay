@@ -129,10 +129,13 @@ echo "AC2: detection ladder detected npm test from package.json (printed for hum
 echo "== asserting laid-down artifacts =="
 for f in \
   orchestration/orchestrator-loop-tick.md docs/analysis/fast-mode-loop-tick.md \
-  plugin/scripts/inner-state.sh plugin/scripts/session-liveness.sh plugin/scripts/fast-mode-telemetry.ts \
+  plugin/scripts/session-liveness.sh plugin/scripts/fast-mode-telemetry.ts \
   .quay/config.yml; do
   assert_file "$PROJECT/$f"
 done
+if [ -e "$PROJECT/plugin/scripts/inner-state.sh" ]; then
+  fail "inner-state.sh must NOT be laid down into target projects (retired, AC3)"
+fi
 if [ -f "$PROJECT/vendor/quay/dist/quay.js" ]; then
   echo "  AC7b: runtime laid down at vendor/quay/dist/quay.js"
 else

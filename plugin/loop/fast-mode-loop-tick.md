@@ -121,9 +121,9 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
 
 **内层同样要挂 `session-liveness.sh`**（泛化后的会话存活监视，原 `outer-liveness.sh`）。
-理由（2026-08-03 实测）：`inner-state.sh` 只看**工作产出**——内层进程死了它只会看到「没有新
-遥测」，与「内层在思考一个难题」完全同形。这是本仓当天两次栽过的那一族失效换了个位置。内层跑
-重活，会话死掉代价更大，**更需要**进程存活这一层。
+理由（2026-08-03 实测）：只看**工作产出**的工具（旧的 `inner-state.sh`，现已退役）在会话死后
+只会看到「没有新遥测」，与「内层在思考一个难题」完全同形——这是本仓当天两次栽过的那一族失效换了个
+位置。内层跑重活，会话死掉代价更大，**更需要**进程存活这一层。
 
 **挂载是单飞（AC20，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）**：挂载是一个
 **有主的、可接管的角色**——取单飞锁（复用 `heavy-op-token.sh` 的锁），已有活持有者时再挂 ⇒
@@ -136,9 +136,11 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 不是有效心跳源；transcript 每次工具调用都写，含 subagents 目录）。经
 `SESSION_TRANSCRIPTS="<名字> <会话id|绝对路径>"`（推荐，会话 id 是配置不去推断）或
 `SESSION_HEARTBEATS="<名字> <路径>"` 配置。事件 `SESSION-GONE/BACK/OVERDUE/IDLE/RESUMED` 报的是
-「会话本身还在不在、忙不忙」，`REPO-STALL` 报的是仓库信号（AC8，原 `SESSION-STALL`）；
-`inner-state.sh` 报的是「在做什么」。两者**不合并**（AC12）——一个失效不能掩盖另一个。
-**解除停机（删 `.halt`）那一刻重置陈旧度基线**，停泊期间的陈旧不计入解除停机后的 OVERDUE/REPO-STALL。
+「会话本身还在不在、忙不忙」，`REPO-STALL` 报的是仓库信号（AC8，原 `SESSION-STALL`）。
+**观测只有一个工具**（SPEC-one-observer-two-surfaces.md）——旧 `inner-state.sh` 的「在做什么」
+事件集随其退役而撤下；工作产出信号由外层直接读 `fast-mode-telemetry --report`（外层 cwd 就是本
+仓库），仓库告警同理直接看 `git log`。**解除停机（删 `.halt`）那一刻重置陈旧度基线**，停泊期间
+的陈旧不计入解除停机后的 OVERDUE/REPO-STALL。
 
 ## 状态单一来源
 
@@ -167,8 +169,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
 
 **Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
-`plugin/scripts/inner-state.sh` 的 Monitor 消费本层停止条件——它没挂上/挂错目标/属于上个会话，本层
-停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
+`plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh`
+已退役）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
 
 ```bash
 bash plugin/scripts/monitor-mount-check.sh --json
@@ -394,14 +396,16 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 规则：
 
 - **文件存在 == 内层在等。** `--detect-stop` / `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复
-  的那一刻。这是存在性信号，不是从缺席推断。`plugin/scripts/inner-state.sh` 用 inotifywait 监视该路径
-  （延迟秒级，不再是最多 20 分钟），事件直接带 `reason` + `question`，外层不必读屏就能开始判断。
+  的那一刻。这是存在性信号，不是从缺席推断。外层在每个 tick 直接读该路径
+  （`plugin/scripts/inner-blocked-signal.ts --read --root <root>`）拿 `reason` + `question`，不必读屏就能
+  开始判断。旧的 `inner-state.sh` 曾用 inotifywait 监视它，现随 inner-state.sh 一起退役——阻塞信道是
+  「内层主动写、外层主动读」的显式信道，不需要一个常驻轮询工具转达。
 - **`--detect-stop` 只清自己写的 auto 记录。** 手动（`--assert-blocked`，judgment）的阻塞只有显式
   `--clear` 才清——裁定没下达前文件必须留着（AC3 负控制）。
 - **不手写 JSON。** 只调 CLI（AC4）——`reason` 合法值就是「判断边界」表 + 停止条件里已有的七种，不新增
   语义（AC2，见 CLI `--schema`）。手写 JSON 会造成格式漂移，正是本机制要消灭的。
-- **从 worktree 里也写主 checkout。** CLI 自动解析共享根（主 checkout）为落点——外层 Monitor 监视的是
-  主 checkout 的 `.quay/`，且阻塞记录必须活得比产生它的 worktree 长。
+- **从 worktree 里也写主 checkout。** CLI 自动解析共享根（主 checkout）为落点——阻塞记录落在主
+  checkout 的 `.quay/`（外层 tick 直接读它），且必须活得比产生它的 worktree 长。
 - **等待时长由此可测。** `since` → 删除的时间差由 `--clear` 记进遥测；`fast-mode-telemetry --report`
   输出**累计死时间**与**单次最长**——「内层实际等了多久」这个数此前完全没有，现在有了基线。
 - **un-halt 前** `restart-readiness-check.sh` 会打印阻塞记录（AC5）：内层在等裁定 ≠ 可以解除 `.halt`。

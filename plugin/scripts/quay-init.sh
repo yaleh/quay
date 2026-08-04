@@ -641,14 +641,16 @@ PYEOF
 
   # Mechanism scripts (checkers + gate + token + observation) → <workspace>/plugin/scripts/.
   # The last 5 are TRANSITIVE DEPENDENCIES of the checkers (imported by them): the laid-down
-  # mechanism must be functional, so the dependency closure ships too (e2e proved inner-state.sh
+  # mechanism must be functional, so the dependency closure ships too (e2e proved the checkers
   # cannot run without gate-script-base.ts / workflow-event-schema.mjs).
+  # NOTE: inner-state.sh is deliberately NOT here (gap-retire-inner-state-one-observer-targets-by-
+  # parameter AC3) — it is retired; observation has exactly ONE tool, session-liveness.sh, which is
+  # laid down separately below.
   LOOP_SCRIPTS=(
     fast-mode-telemetry.ts
     inner-blocked-signal.ts
     inner-forensics.mjs
     inner-idle-log.ts
-    inner-state.sh
     loop-driver-check.sh
     resource-gate.sh
     heavy-op-token.sh
