@@ -2530,10 +2530,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **batch-3 正式关闭**（`6f2620f5`：3 done、全量 2283/0/0、closure `f7b32ccf`；累计 15 任务跨 3 批；
   遥测全配对、worktree 全清）。
-- **内层自主转入修复 ready-pool-check taskWorkLanded 过冲缺陷**（备忘「修 ready-pool-check 的
-  taskWorkLanded 过冲缺陷」，1 agent 在跑）——缺陷立案后内层主动接手，无需外层驱动。
-  **产品机制的自我修正闭环运转。**
-- ready-pool 诚实口径 0（过冲缺陷未修前改既有文件型任务补晋无效）；缺陷修复后 pool 可恢复 ≥3。
+- ~~**内层自主转入修复 overshoot 缺陷**~~ ——**错误。** 管理者核实 + 外层复证（23:5xZ）：
+  「修 ready-pool-check 的 taskWorkLanded 过冲缺陷」**从未作为 user message 提交**（transcript 0 命中），
+  是输入框残留备忘；内层 0 sub-agent、无工具活动，双方都空闲、**没人修**。
+  **产品机制自我修正闭环不成立——这是「两层都正确空闲 = 没人推进」的同型，且我未核实就写成了事实。**
+- **此缺陷是全项目晋级速率唯一阻塞点**（todo 57 条卡住根源）：ready-pool 诚实口径 0，过冲未修前
+  改既有文件型任务补晋无效。已用结晶算法重驱动内层修复（见下）。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。
 
 ### tick 2026-08-04T16:42Z（外层，`no-action`）

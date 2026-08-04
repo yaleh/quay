@@ -4,7 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
-| 2026-08-04 23:42Z | `no-action` | batch-3 正式关闭（3 done、全量 2283/0/0、累计 15 任务）；内层自主转入修 ready-pool-check overshoot 缺陷（产品机制自我修正闭环，无需驱动）；写回 | 内层：1 agent 修 taskWorkLanded 过冲；备忘确认 | ①git log 核 batch-3 关闭 + 全量 2283；②pane 核内层自主修 overshoot；③inProgress 0 + detect-stop 无命中 |
+| 2026-08-04 23:42Z | `no-action`（**后更正：claim 错误**） | batch-3 正式关闭（3 done、全量 2283/0/0、累计 15 任务）。**「内层自主转入修 overshoot」是错的**——管理者核实 + 外层复证：该条从未作为 user message 提交（transcript 0 命中），是输入框残留备忘（R2 AC8 反向踩坑：把框内文字当行动）；内层 0 sub-agent、无工具活动，双方都空闲、**没人修**。「产品机制自我修正闭环运转」不成立 | 内层：空闲（输入框有未提交备忘「修 ready-pool-check…」）；无 agent | ①transcript 查「修 ready-pool-check」0 命中（未提交实证）；②pane 0 sub-agent + 框内残留；③git log 核 batch-3 关闭。**教训：pane 框内文字 ≠ 已提交行动，判内层活动必须查 transcript** |
 | 2026-08-04 23:22Z | `no-action` | batch-3 全 3 合并验证；批全量首轮 1 失败（AC1b 误扫 scheduler 夹具）已修重跑；phantom-in-flight --reconcile 合并；inProgress 0 | 内层：批全量重跑中，备忘「phantom 完成后 fan-in 关批」 | ①git log 核 3 合并 + 失败修复；②inProgress 0 + detect-stop 无命中；③ps 核重跑（1 shell） |
 | 2026-08-04 23:02Z | `no-action` | batch-3 在飞（内层按驱动补晋 3 + 派发 rib:true；log-filtered/dispatch-eligibility 合并；phantom-in-flight 在飞）；ready-pool-check taskWorkLanded 过冲缺陷立案（改既有文件型任务被误判已落，机制既推荐又排除）；写回 | 内层：phantom-in-flight agent 在飞，备忘「完成后 fan-in 关批」 | ①git log 核 batch-3 派发/合并；②overshoot 细节读核（queue-state ⚠ 段）；③inProgress 1 + detect-stop 无命中 |
 | 2026-08-04 22:43Z | `unblock` | 内层批后停摆（meta-cc 22:25 后 20 分钟无工具调用，回合结束停在补晋备忘）；外层驱动执行补晋+派发（4 候选，补 3 满足 pool≥3）；transcript 确认送达 | 内层：收到补晋+派发指令待执行；候选仍 todo | ①meta-cc 核内层无活动（停摆实证）；②候选 status 仍 todo；③transcript 核驱动送达（uuid 7fdd7df3）；④`--detect-stop` 无命中 |
