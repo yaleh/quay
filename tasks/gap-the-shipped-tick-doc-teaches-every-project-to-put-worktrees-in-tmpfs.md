@@ -151,6 +151,8 @@ resume 先改交付物里的路径约定，再加落地校验；校验的负控�
 - [x] 完整套件连跑 2 次全绿（判据是 `fail 0` 且 `cancelled 0`）
       **证据**：套件 #10 与 #11（最终状态 `baaa0f80`，含 AC8 的 A6 断言）连续两条
       `FULL-SUITE-EXIT=0` / `fail 0` / `cancelled 0`（各 1960 ✔ / 24 ﹣）。
+      Contract invoke 实跑：`scripts/test.sh plugin/test/quay-init-loop.test.mjs plugin/test/worktree-root-fs-check.test.mjs`
+      → **30/30 绿**（`fail 0` / `cancelled 0`），静态检查（契约棘轮/隔离/框架政策）全 PASS。
 - [x] 任务体记录：**这条缺陷的严重性来自它在交付物里，不在本仓**——
       本仓的活 worktree 02:4xZ 已挪到磁盘，而文档仍在教每个新装的项目建进内存
 - [x] `orchestration/SPEC-cold-start-one-liner.md` AC9 标注为已落地，并写明理由已从「重启即消失」升级为「OOM 成因」
