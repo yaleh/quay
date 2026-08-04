@@ -34,6 +34,11 @@ experiment/timing/*.log
 # inner-blocked-signal.ts (AC4), never by hand. It must stay untracked: it is a live control-plane
 # signal that appears/disappears every time the inner layer stops and resumes.
 **/.quay/inner-blocked.json
+# gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick (2026-08-04): the pane
+# observer's rolling multi-sample counter — same gitignored runtime-state family as inner-blocked.json.
+# Must stay untracked: it is live observer state (consecutive needs-input samples) that advances and
+# resets every 60s poll; committing it would dirty the tree the transcript composite requires clean.
+**/.quay/.ruling-observer-state.json
 # outer correction 2026-08-03T02:45:03Z (idle instrumentation): the inner layer's append-only
 # idle-reason log — a separate, non-signal channel from inner-blocked.json. One line per
 # "round ended, no pending work" turn; no duration (the outer computes it from transcript gaps).

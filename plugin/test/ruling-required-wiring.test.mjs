@@ -417,3 +417,11 @@ test("AC5 — the wiring is a SHAPE classification, never a whole-screen hash (A
   const variantB = "completely different upper content\n".repeat(5) + "\n" + WAITING_INPUT_PANE;
   assert.equal(classifyPaneState(variantA).state, classifyPaneState(variantB).state, "same bottom region ⇒ same verdict regardless of upper content");
 });
+
+test("AC1 — .gitignore covers the pane observer's rolling counter (it must never dirty the clean tree)", () => {
+  // The transcript composite requires a clean working tree; the observer state advances/resets every
+  // 60s poll, so committing it would permanently dirty the tree. Same gitignored runtime-state family
+  // as inner-blocked.json.
+  const gitignore = fs.readFileSync(path.join(REPO_ROOT, ".gitignore"), "utf8");
+  assert.match(gitignore, /\.ruling-observer-state\.json/, ".gitignore must contain the observer state file");
+});
