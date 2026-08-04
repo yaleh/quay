@@ -3,7 +3,7 @@ id: gap-promotion-cadence-is-role-volition-not-product-mechanism
 title: todo→ready promotion cadence/priority lives in an outer's voluntary AC —
   the tick doc has zero author/promote/晋级 hits, so no cold-start session
   inherits the behavior that keeps the ready pool healthy
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

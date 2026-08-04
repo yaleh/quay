@@ -3,7 +3,7 @@ id: gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong
 title: ADR-016's Alternatives-rejected section calls claude -p "one-shot" — a
   factually wrong reason on an accidentally-right conclusion, which the next
   person will overturn with the same wrong reasoning
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

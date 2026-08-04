@@ -3,7 +3,7 @@ id: gap-reliable-send-crystallize-the-five-failure-modes-into-a-script
 title: F closed send-keys-verified but D only covers the classify/wait half — the
   SENDING half (5 measured delivery-failure modes) has no owner; crystallize
   the reliable-send algorithm into a script
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

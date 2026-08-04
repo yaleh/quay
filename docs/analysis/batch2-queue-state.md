@@ -2215,3 +2215,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   `task/gap-retire-inner-state-...` @ `61a92a41` 需 rebase 到当前 master 后继续；并注明前提变化——
   B 的接线现在自动写 `inner-blocked.json`（B 是写者、inner-state.sh 是读者），AC6（每类信号去向）
   必须显式处置这个新增的自动 BLOCKED 信号，别让 B 的信号随 inner-state.sh 静默消失。
+
+### tick 2026-08-04T16:02Z（外层，`no-action`：内层当前批推进中 + AC-queue 补晋）
+
+- **内层当前批**：node-compile-cache 已合并绿（`d3c5c09e` + `38e8aa57`）；suite-speed（跑全量对比测速）、
+  retire-inner-state（ps 数 observer 挂载）、task-write 三个 subagent 在飞（达上限 3）。D/L0 关闭带
+  invoke-evidence（`52c1fc39`，task-contract-check invoke-evidence-missing ratchet）。
+- **AC-queue 补晋**：排除在飞本批后真实就绪池 = 0 ⇒ 按 AC-queue 从 todo 补晋 3 条（全 disjoint 核实）：
+  - `gap-promotion-cadence-is-role-volition-not-product-mechanism`
+  - `gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`
+  - `gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong`
+  就绪池 = 3 ✓（AC-queue 成立）。measure-claude-p 仍 todo（依赖 am2）。
+- 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
+- 资源闸：内层在飞期间外层只做廉价核实。
