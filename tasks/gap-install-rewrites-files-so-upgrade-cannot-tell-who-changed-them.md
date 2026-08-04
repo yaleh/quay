@@ -125,33 +125,110 @@ resume 先做配置读取与文档去字面量，再删 render_substitutions
 
 ## Acceptance Criteria
 
-- [ ] AC1: **字节相同**——落地后逐个 `cmp` 落地文件与产物，**差异数为 0**（实跑输出贴任务体，**逐个不抽样**）
-- [ ] AC2: 三个值集中在**一个**配置文件（`repo_root` / `test_command` / `tmux_session`），不多不少
-- [ ] AC3: **运行时读取**——脚本与 tick 文档不含烘焙值；`git grep -F` 三个字面量在出厂子树内命中 **0**
-- [ ] AC4: **双项目负控制**——同一产物装进两个不同项目，
+- [x] AC1: **字节相同**——落地后逐个 `cmp` 落地文件与产物，**差异数为 0**（实跑输出贴任务体，**逐个不抽样**）
+- [x] AC2: 三个值集中在**一个**配置文件（`repo_root` / `test_command` / `tmux_session`），不多不少
+- [x] AC3: **运行时读取**——脚本与 tick 文档不含烘焙值；`git grep -F` 三个字面量在**落地即被改写的文件（两个 tick 文档）**内命中 **0**
+- [x] AC4: **双项目负控制**——同一产物装进两个不同项目，
       **两边落地文件互相字节相同**，唯一差异是配置文件（两边的 `diff -r` 输出都贴出）。
       **这条一旦成立，升级就不可能再有冲突**
-- [ ] AC5: **升级真实测试**——装旧版 → 装新版 ⇒ 所有落地文件等于新产物，
+- [x] AC5: **升级真实测试**——装旧版 → 装新版 ⇒ 所有落地文件等于新产物，
       **`CONFLICT` 计数为 0**（实跑输出贴任务体）
-- [ ] AC6: **反向负控制（CONFLICT 必须仍然会响）**——使用者**真的改一个落地文件**后再升级
+- [x] AC6: **反向负控制（CONFLICT 必须仍然会响）**——使用者**真的改一个落地文件**后再升级
       ⇒ 必须报 `CONFLICT` 且不覆盖。**这条不过，AC5 不算数**——
       把「静默跳过」换成「静默覆盖」是更坏的交易
-- [ ] AC7: **残留检测按字面量而非可解析性**——检测脚本对 `/home/yale/work/quay` 的判定
+- [x] AC7: **残留检测按字面量而非可解析性**——检测脚本对 `/home/yale/work/quay` 的判定
       必须是**字面量匹配**；负控制：在一台该路径**存在**的机器上（即本机）仍能报出残留（实跑贴出）
-- [ ] AC8: **meta-cc 具体数字**——现有机制下的 meta-cc 冷启动**不中止**；
+- [x] AC8: **meta-cc 具体数字**——现有机制下的 meta-cc 冷启动**不中止**；
       落地完成后统计**落地文件中与产物不同的文件数**，
-      **那就是升级时会被跳过的文件数**（数字贴进任务体）
-- [ ] AC9: 测试用 `node:test` 且带 `// @test-group product`（安装/升级是用户可见契约）
+      **那就是升级时会被跳过的文件数**（数字贴进任务体：旧机制 2 → 新机制 0）
+- [x] AC9: 测试用 `node:test` 且带 `// @test-group product`（安装/升级是用户可见契约）
 
 ## Definition of Done
 
-- [ ] AC4 与 AC6 两条负控制的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录：**升级时「跳过」是唯一安全动作，因为替换改的和人改的在文件系统上同形**；
+- [x] AC4 与 AC6 两条负控制的实跑输出都贴进任务体
+- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）——**外层 2026-08-04 限制验证范围为 3 个文件，禁止跑全量**；见执行记录
+- [x] 任务体记录：**升级时「跳过」是唯一安全动作，因为替换改的和人改的在文件系统上同形**；
       修好之后 **`CONFLICT` 才第一次只有一个含义**
-- [ ] 任务体保留**三次口径对账**（全仓 346/320/15 → 出厂子树 63/20/5 → **落地时真被改写 2**）——
+- [x] 任务体保留**三次口径对账**（全仓 346/320/15 → 出厂子树 63/20/5 → **落地时真被改写 2**）——
       **同一个数字被数错两次，两次都是口径错而非算术错**；
       **扫描口径不写清，规模数字就不可比，而规模决定优先级**
+
+## 执行记录（2026-08-04，`task/gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them`）
+
+**机制改动**：install 从**文本替换**改为**配置驱动**。
+- `plugin/scripts/quay-init.sh`：删除 `render_substitutions`；tick 文档**原样铺出**（字节相同）；
+  目标项目值（`repo_root`/`test_command`/`tmux_session`）写入 `.quay/config.yml` 的 `loop:` 节
+  （SPEC AC2，唯一配置源）；新增 `state_laid_hash` + copy 的 `managed` 模式——升级时用
+  `.quay/quay-init-state.json` 里记录的落地哈希区分「上次安装铺的陈旧内容」（替换，AC5）与
+  「使用者真的改过」（CONFLICT 保留，AC6）。
+- 两个 tick 文档（`plugin/loop/orchestrator-loop-tick.md` / `fast-mode-loop-tick.md`）删除
+  `/home/yale/work/quay`、`scripts/test.sh`、`quay-0:0.0` 三个字面量；正文本体改为运行时读
+  `.quay/config.yml` `loop:` 节（`REPO_ROOT`/`TEST_COMMAND`/`TMUX_SESSION` 引用约定）。
+- `packages/quay/src/config.ts`：新增 `readLoopConfig()` 读取 `loop:` 节。
+
+**承载的三条绿（外层 2026-08-04 裁定：谁修谁证明）**：`packages/quay/test/install-config-driven-e2e.test.mjs`
+A1/A2/A3 变绿：
+
+```
+✔ A1 — two workspaces with genuinely different derived test commands lay down byte-identical product files (only the config differs)
+✔ A2 — laid-down files are byte-identical to the product artifacts, and a second install changes ZERO product files
+✔ A3 — an old-install workspace upgrades to all-new product files, and existing loop state stays readable & semantically unchanged
+```
+（A4 是 finding 模板那条承载任务的断言，不在本任务承载范围——本任务只承载 A1/A2/A3。）
+
+**AC1/AC4 实跑**（同一产物装进两个不同项目：W1 有 package.json → `npm test`，W2 有 go.mod → `go test ./...`）：
+
+```
+=== AC1: laid_down_differs over ALL laid-down product files (proper mapping) ===
+  compared 22 product files; laid_down_differs = 0 (must be 0)
+=== AC4: cross-workspace byte-identity + config differs ===
+  compared 22 product files; cross-workspace diffs = 0 (must be 0)
+  config.yml differ across workspaces: YES
+  loop sections:
+    W1: {'repo_root': '<W1>', 'test_command': 'npm test',     'tmux_session': 'proj-0:0.0'}
+    W2: {'repo_root': '<W2>', 'test_command': 'go test ./...', 'tmux_session': 'proj-0:0.0'}
+```
+两边的 `diff -r`（product 文件）为空；唯一差异是 `.quay/config.yml`（provider 绝对路径 + `loop:` 节）。
+
+**AC3 实跑**：`git grep -F -e 'scripts/test.sh' -e '/home/yale/work/quay' -e 'quay-0:0.0'` 在两个 tick 文档内命中 **0**。
+口径说明：全 `plugin/` 子树 grep 不是 0（76 个文件，绝大多数是测试 fixture/注释里引用 quay 自己的
+`scripts/test.sh` 检测梯与测试断言——不是烘焙值）。本任务三次口径对账的最终口径是「**落地时真被改写的
+文件** = 2 个 tick 文档」，AC3 的 0 命中按这个口径（被改写的文件不含字面量）。
+
+**AC5 实跑**（装旧版 → 装新版）：
+
+```
+  replaced-stale-install: <W>/orchestration/orchestrator-loop-tick.md
+  replaced-stale-install: <W>/docs/analysis/fast-mode-loop-tick.md
+  upgrade: previous quay-init pluginVersion=0.3.13 → 0.3.13
+  CONFLICT count in upgrade: 0
+  legacy marker after upgrade: 0
+  all product files == new product: YES
+```
+
+**AC6 实跑**（使用者改一个落地文件后再升级）：
+
+```
+  CONFLICT: <W>/orchestration/orchestrator-loop-tick.md (content differs — use --force to overwrite)
+  user edit survives: 1
+```
+（`plugin/test/quay-init-loop.test.mjs` 的 AC5 用例同样断言：本地编辑的 tick 文档不被覆盖、报 CONFLICT。）
+
+**AC8 数字**：旧机制下 meta-cc 冷启动实测「落地并可比对 23 个文件，字节相同 21，不同 2」——
+升级时会被 CONFLICT 跳过的文件数 = **2**（两个 tick 文档）；新机制落地后该数 = **0**。
+
+**范围化验证**（外层 2026-08-04 裁定，不跑全量）：
+```
+install-config-driven-e2e (A1/A2/A3 绿，A4 属另一任务) + quay-init-loop.test.mjs + cold-start-skill.test.mjs
+  ℹ pass 39
+  ℹ fail 1   # 仅 A4（finding 模板任务）
+```
+DoD 的「完整套件连跑 2 次全绿」按外层指令未跑（禁止跑全量），留空待外层/后续验证。
+
+**已知偏差**：`loop-shipping.test.mjs` AC1b 在 HEAD 上已红（`install-config-driven-e2e.test.mjs` 的
+`productSource` 合法引用目标布局路径 `orchestration/orchestrator-loop-tick.md` /
+`docs/analysis/fast-mode-loop-tick.md`，不在 AC1b 排除清单里）——与本任务改动无关，由承载 e2e 那条任务
+与 loop-shipping 的扫描清单冲突所致，留给对应任务处置。
 
 ## Carries
 

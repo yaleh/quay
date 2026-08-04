@@ -98,27 +98,42 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
   } finally { cleanup(ws); }
 });
 
-// ── AC4: mechanized placeholder substitution + negative control ────────────────────────────────────
-test('AC4 — laid-down tick docs carry the target values and NO quay-specific literals (negative control)', () => {
+// ── AC4: config-driven install (SPEC AC1-AC4) — byte-identical landing + negative control ───────────
+// gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them: install no longer
+// text-substitutes the tick docs. Every laid-down file is byte-identical to the product
+// (AC1, cmp-checkable); the target values (repo_root/test_command/tmux_session) live in ONE
+// config file (.quay/config.yml `loop:`, AC2) and are read at runtime, never baked in (AC3).
+test('AC4 — laid-down tick docs are byte-identical to the product and carry NO target values (they live in .quay/config.yml loop:)', () => {
   const ws = makeTmp();
   try {
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'myproj',
       '--test-command', 'npm test', '--tmux-session', 'myproj-0:0.0', '--repo-root', '/srv/target']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
 
+    // Byte-identical to the product (SPEC AC1) — the laid-down copy is VERBATIM.
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
     const inner = fs.readFileSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md'), 'utf8');
+    const outerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'orchestrator-loop-tick.md'), 'utf8');
+    const innerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'fast-mode-loop-tick.md'), 'utf8');
+    assert.equal(outer, outerSrc, 'laid-down outer tick doc must be byte-identical to the product (AC1)');
+    assert.equal(inner, innerSrc, 'laid-down inner tick doc must be byte-identical to the product (AC1)');
     const all = outer + '\n' + inner;
 
-    // Substitution applied: the target's test command replaced scripts/test.sh.
+    // No target values baked in (SPEC AC3 — config-driven, not text-substitution).
+    assert.ok(!all.includes('npm test'), 'laid-down tick docs must NOT contain the target test command (AC3)');
+    assert.ok(!all.includes('/srv/target'), 'laid-down tick docs must NOT contain the target repo root (AC3)');
+    assert.ok(!all.includes('myproj-0:0.0'), 'laid-down tick docs must NOT contain the target tmux session (AC3)');
+    // No quay-specific literals either (the old substitution inputs are gone from the docs).
     assert.ok(!all.includes('scripts/test.sh'), 'laid-down tick docs must NOT contain scripts/test.sh (AC4 negative control)');
-    assert.ok(all.includes('npm test'), 'laid-down tick docs must contain the target test command');
-    // Repo root replaced.
     assert.ok(!all.includes('/home/yale/work/quay'), 'laid-down tick docs must NOT contain the quay dev-tree root (AC8 negative control)');
-    assert.ok(all.includes('/srv/target'), 'laid-down tick docs must contain the target repo root');
-    // tmux session replaced.
     assert.ok(!all.includes('quay-0:0.0'), 'laid-down tick docs must NOT contain quay tmux session');
-    assert.ok(all.includes('myproj-0:0.0'), 'laid-down tick docs must contain the target tmux session');
+
+    // The target values live in ONE config file (.quay/config.yml `loop:`) — SPEC AC2.
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /loop:/, 'config.yml must carry a loop: section (SPEC AC2)');
+    assert.match(cfg, /repo_root:\s*\/srv\/target/, 'config.yml loop.repo_root must carry the target repo root');
+    assert.match(cfg, /test_command:\s*npm test/, 'config.yml loop.test_command must carry the target test command');
+    assert.match(cfg, /tmux_session:\s*myproj-0:0\.0/, 'config.yml loop.tmux_session must carry the target tmux session');
 
     // The mechanism scripts that used to carry quay literals are now self-locating.
     const innerState = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'inner-state.sh'), 'utf8');
@@ -165,9 +180,13 @@ test('AC2 — detection ladder: package.json scripts.test is detected as npm tes
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /detected test command: npm test/,
       'must detect npm test from a package.json scripts.test entry');
-    // The laid-down tick docs must carry the DETECTED command, not the quay-specific default.
+    // Config-driven (SPEC AC2/AC3): the DETECTED command is written to .quay/config.yml
+    // loop.test_command; the tick docs are byte-identical to the product and carry neither the
+    // detected command nor the quay default.
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /test_command:\s*npm test/, 'config.yml loop.test_command must carry the detected command');
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
-    assert.ok(outer.includes('npm test'), 'tick docs must carry the detected test command');
+    assert.ok(!outer.includes('npm test'), 'tick docs must NOT carry the detected command (config-driven, AC3)');
     assert.ok(!outer.includes('scripts/test.sh'), 'tick docs must NOT carry the quay default (AC3/AC4 negative control)');
   } finally { cleanup(ws); }
 });
@@ -206,8 +225,11 @@ test('AC2 — an explicit --test-command takes priority over detection', () => {
       'must report the explicit command');
     assert.ok(!/detected test command/.test(r.stdout),
       'an explicit --test-command must suppress the detection ladder');
+    // Config-driven (SPEC AC2/AC3): the explicit command is written to config.yml loop.test_command;
+    // the tick docs are generic.
+    const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+    assert.match(cfg, /test_command:\s*node --test/, 'config.yml loop.test_command must carry the explicit command');
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
-    assert.ok(outer.includes('node --test'), 'tick docs must carry the explicit command');
     assert.ok(!outer.includes('npm test'), 'tick docs must NOT carry a detected command when explicit wins');
   } finally { cleanup(ws); }
 });

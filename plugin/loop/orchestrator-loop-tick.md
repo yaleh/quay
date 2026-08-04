@@ -1,16 +1,17 @@
 # 外层编排 loop tick 指令
 
-> **模板参数（gap-loop-mechanism-lives-outside-the-package-and-cannot-ship）**：本文件是随 quay
-> 插件包分发的外层 tick 文档（`plugin/loop/`），本仓自身的循环直接读这份模板。`quay-init --loop`
-> 铺到目标项目时对**副本**做机械替换，正文本体保持 quay 实值：
-> - `/home/yale/work/quay` → 目标项目根（`--repo-root`）
-> - `scripts/test.sh` → 目标项目测试命令（`--test-command`，必填）
-> - `quay-0:0.0` → 目标项目 tmux 会话（`--tmux-session`）
-> - `plugin/loop/orchestrator-loop-tick.md` / `plugin/loop/fast-mode-loop-tick.md`（本文件的
->   自引用/互引用）→ 目标项目的 `orchestration/orchestrator-loop-tick.md` /
->   `docs/analysis/fast-mode-loop-tick.md`（目标项目按 quay 布局铺到这两个位置）
-> 替换只作用于铺出的副本，不修改本模板。铺完后负控制：副本里 grep 不到 `scripts/test.sh` 这类
-> quay 专属字面。
+> **模板参数（gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them）**：本文件是随
+> quay 插件包分发的外层 tick 文档（模板在 `plugin/loop/orchestrator-loop-tick.md`，内层模板是
+> `plugin/loop/fast-mode-loop-tick.md`）。
+> `quay-init --loop` **原样铺出**（字节相同，不做文本替换）——目标项目的值（`repo_root` /
+> `test_command` / `tmux_session`）集中在一个配置文件 `.quay/config.yml` 的 `loop:` 节里，
+> 脚本与本 tick 在**运行时读取**它们，不在落地时烘焙。铺到目标项目时的位置：
+> `orchestration/orchestrator-loop-tick.md`（外层）/ `docs/analysis/fast-mode-loop-tick.md`（内层）。
+> 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
+>
+> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` 三个名字在本文件中
+> 指 `.quay/config.yml` `loop:` 节的对应值（`repo_root` / `test_command` / `tmux_session`）。
+> 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
 
 **启动方式**（在编排会话，即本会话或 `/clear` 后的新会话）：按下方「冷启动」步骤操作——**循环驱动
 只有一个**：步骤 4 的 `CronCreate`（20 分钟 cron）。Monitor 是事件监测，不是驱动。两个都做完再进
@@ -24,7 +25,7 @@ tick 步骤。不要在这之外再起 `/loop`（固定间隔 `/loop` 底层就�
 **按顺序做完这 7 步再进 tick 步骤。** 不要凭记忆——你没有记忆。
 
 ```bash
-cd /home/yale/work/quay
+cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev-parse --show-toplevel）
 ```
 
 **1. 读机制与目标**（顺序有意）
@@ -52,8 +53,9 @@ node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} #{pane_current_path}"
 ```
 
-内层是 `cwd` 为 `/home/yale/work/quay` 且**不是你自己**的那个 pane（历史上是 `quay-0:0.0`；用
-`tmux capture-pane -p -t <target> | tail -20` 确认它在跑开发任务而非编排）。找不到就升级给人。
+内层是 `cwd` 为 `$REPO_ROOT` 且**不是你自己**的那个 pane（tmux 会话是 `$TMUX_SESSION`，均见
+`.quay/config.yml` `loop:` 节；用 `tmux capture-pane -p -t <target> | tail -20` 确认它在跑开发任务
+而非编排）。找不到就升级给人。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
@@ -61,7 +63,7 @@ tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{p
 **会话内的**，会话一结束就没了。新会话必须重建，否则外层再也不会自动触发：
 
 ```
-CronCreate(cron="*/20 * * * *", prompt="执行 plugin/loop/orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
+CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
 CronList   # 确认它已被列出——没列出的 cron 不是报警，是静默空转
 ```
 
@@ -107,7 +109,7 @@ bash plugin/scripts/loop-driver-check.sh
 `Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询：
 
 ```
-Monitor({command: "/home/yale/work/quay/plugin/scripts/inner-state.sh",
+Monitor({command: "$REPO_ROOT/plugin/scripts/inner-state.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
          description: "内层状态转变", persistent: true, timeout_ms: 3600000})
 ```
 
@@ -139,7 +141,7 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 ## 定位
 
-双层持续开发的**外层**。内层是开发会话（tmux `quay-0:0.0`），它执行任务；外层观察它、消解它的停摆、
+双层持续开发的**外层**。内层是开发会话（tmux `$TMUX_SESSION`，见 `.quay/config.yml` `loop.tmux_session`），它执行任务；外层观察它、消解它的停摆、
 必要时纠偏，并把真正需要人的事攒起来。
 
 **外层存在的唯一理由：消费内层的停止条件。** 内层撞到「合并冲突 / 套件红 / 审查 2 轮后仍 REFUTED /
@@ -190,8 +192,8 @@ bash plugin/scripts/monitor-mount-check.sh --json
 **b) 判断内层是否停摆要看「屏幕是否在变」，不是看最后一行。**
 
 ```bash
-tmux capture-pane -p -t quay-0:0.0 | md5sum; sleep 25
-tmux capture-pane -p -t quay-0:0.0 | md5sum      # 两次相同 = 空闲
+tmux capture-pane -p -t "$TMUX_SESSION" | md5sum; sleep 25
+tmux capture-pane -p -t "$TMUX_SESSION" | md5sum      # 两次相同 = 空闲
 ```
 
 **c) 外层的独立核实会和内层抢 CPU——这是机制不是散文。** 步骤 1 写着「只读」，但跑一次全量套件是
@@ -270,7 +272,7 @@ grep 得到 **4 处命中**——**全是注释**，内容正是「为什么 `pr
 缺陷，不是修复。判据只能是**行为**（同一调用的测试数是否相等）或**读实际 diff**。
 
 **这条规则也管外层自己的临时诊断，不只管检测器。** 2026-08-02 第六次踩同一个坑，就在 tick 观察里：
-用 `pgrep -c -f 'scripts/test.sh'` 数并发套件，得到 3 且「在上涨」，几乎据此向人报告「内层没执行
+用 `pgrep -c -f "$TEST_COMMAND"` 数并发套件（`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`），得到 3 且「在上涨」，几乎据此向人报告「内层没执行
 串行指示」。实际是 **0 个真进程**——`pgrep -f` 匹配了任何命令行里含该字符串的进程，**包括外层自己
 这条 tick 命令的 bash 包装**。同一分钟的 `node --test` 计数 4 也是同样的假象（`comm=node` 实为 0）。
 
@@ -410,7 +412,8 @@ rm <repo>/.halt
 **外层每个 tick 必须报三个项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线：
 
 ```bash
-for d in /home/yale/work/{quay,archguard,meta-cc}; do
+# 每个目标项目的根见各自 .quay/config.yml loop.repo_root（quay 自己的清单：quay/archguard/meta-cc）
+for d in <目标项目根清单>; do
   printf "%-12s %s\n" "$(basename $d)" \
     "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 运行中)"
 done
@@ -423,9 +426,9 @@ done
 ### 1. 观察（只读，不动手）
 
 ```bash
-tmux capture-pane -p -t quay-0:0.0 | tail -20      # 内层在做什么
-git -C /home/yale/work/quay log --oneline -10       # 落地了什么
-git -C /home/yale/work/quay status --short          # 树是否干净
+tmux capture-pane -p -t "$TMUX_SESSION" | tail -20  # 内层在做什么
+git -C "$REPO_ROOT" log --oneline -10               # 落地了什么
+git -C "$REPO_ROOT" status --short                  # 树是否干净
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
@@ -530,7 +533,7 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 若是，更新对应文件并提交：
 
 - `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD 的修正
-- `plugin/loop/fast-mode-loop-tick.md` —— 内层机制的修正
+- `fast-mode-loop-tick.md` —— 内层机制的修正
 - 本文件 —— 外层机制的修正
 
 **这是机制的一部分，不是可选项。** 本会话已多次出现「前提错了才发现」（`extractMechanismClaims`
@@ -587,7 +590,7 @@ tick 或 `/clear` 后的会话会重犯。
 | 文件 | 作用 |
 |---|---|
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、AC、DoD |
-| `plugin/loop/fast-mode-loop-tick.md` | 内层 tick 指令 |
+| `fast-mode-loop-tick.md` | 内层 tick 指令 |
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
