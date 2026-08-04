@@ -153,6 +153,15 @@ resume 先做配置读取与文档去字面量，再删 render_substitutions
       **同一个数字被数错两次，两次都是口径错而非算术错**；
       **扫描口径不写清，规模数字就不可比，而规模决定优先级**
 
+## Carries
+
+from: gap-no-e2e-proves-install-is-configuration-driven
+acs: AC2, AC3, AC4
+
+本任务承载红 e2e 的三条绿（A1/A2/A3）：把 install 的文本替换改为「落地内容字节确定」后，
+`packages/quay/test/install-config-driven-e2e.test.mjs` 的 A1/A2/A3 断言必须变绿——**谁修谁证明
+自己让它变绿**（外层 2026-08-04 裁定：e2e 是仪器，绿由修复任务各自的 AC 验证）。
+
 ## Touches
 
 - plugin/scripts/quay-init.sh
