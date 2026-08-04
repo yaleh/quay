@@ -407,8 +407,11 @@ export function detectProcessExit1(src: string, rel: string): Violation[] {
  *     when it is the direct value of a `return` and no call site captures+cleans it; a non-returned
  *     inline mkdtemp cannot be associated with a cleanup statically and is skipped (lenient).
  *
- * AC6 EXEMPTION: /tmp/claude-* (session data) and /tmp/quay-wt-* (in-use worktrees) prefixes are
- * NEVER matched — when EVERY mkdtemp prefix in the file is one of those, the file is exempt.
+ * AC6 EXEMPTION: the /tmp/claude-* (session data) prefix is NEVER matched — when EVERY mkdtemp
+ * prefix in the file is that, the file is exempt. The quay-wt-* (in-use worktree) exemption was
+ * REMOVED (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC6): worktrees
+ * are `git worktree add` at loop.worktree_root (a disk path), never mkdtemp'd, so R6 never sees
+ * them — the quay-wt- mkdtemp exemption protected nothing real and was dead weight.
  * Per-file granularity (one report per file per rule, like R4).
  */
 export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
@@ -423,8 +426,10 @@ export function detectMkdtempNoCleanup(src: string, rel: string): Violation[] {
 
   // AC6: collect the first string-literal prefix arg of every mkdtemp call.
   const prefixes = mkdtempCalls.map((c) => mkdtempPrefix(src, mask, c.index));
-  // When EVERY mkdtemp prefix is a session-data / in-use-worktree prefix, exempt the whole file.
-  const exemptPrefix = /^(?:claude|quay-wt)-/;
+  // When EVERY mkdtemp prefix is a session-data prefix, exempt the whole file. (The quay-wt-
+  // in-use-worktree case was removed — worktrees are git worktree add at loop.worktree_root now,
+  // never mkdtemp'd, so R6 never sees them.)
+  const exemptPrefix = /^claude-/;
   if (prefixes.length > 0 && prefixes.every((p) => exemptPrefix.test(p))) return [];
 
   // Cleanup constructs: rm/rmSync/unlinkSync calls, after/afterEach hooks, finally blocks.
@@ -1251,9 +1256,9 @@ export function runSelftest(): boolean {
   const claudePrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-abc123"));\n';
   check("R6 GREEN: /tmp/claude-* prefix NEVER reports (AC6)", detectMkdtempNoCleanup(claudePrefix, "x.test.mjs").length === 0);
   const quayWtPrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n';
-  check("R6 GREEN: /tmp/quay-wt-* prefix NEVER reports (AC6)", detectMkdtempNoCleanup(quayWtPrefix, "x.test.mjs").length === 0);
+  check("R6 RED: quay-wt-* prefix NOW reports — the worktree exemption was removed (worktrees are git worktree add at loop.worktree_root, never mkdtemp'd)", detectMkdtempNoCleanup(quayWtPrefix, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
   const mixedPrefix = '// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-inuse"));\nconst leak = fs.mkdtempSync(path.join(os.tmpdir(), "fixture-ok-leak"));\n';
-  check("R6 RED: a non-exempt prefix alongside claude-*/quay-wt-* still reports (AC6)", detectMkdtempNoCleanup(mixedPrefix, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
+  check("R6 RED: a non-exempt prefix alongside another non-exempt prefix still reports (AC6)", detectMkdtempNoCleanup(mixedPrefix, "x.test.mjs").some((v) => v.rule === "mkdtemp-no-cleanup"));
   const mkdtempCommentOnly = '// @test-group product\n// fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-")) mention\nconst x = 1;\n';
   check("R6 GREEN: a comment mentioning mkdtemp does NOT report (code-position matching)", detectMkdtempNoCleanup(mkdtempCommentOnly, "x.test.mjs").length === 0);
 

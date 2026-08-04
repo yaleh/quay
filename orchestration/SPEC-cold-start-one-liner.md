@@ -160,3 +160,11 @@ AC1 说「安装 1–2 行命令 + outer init 1 行 + 冷启动 1 行」。
 
 **一般形态**:`/tmp` 在不同机器上是磁盘还是内存**不确定**,
 而 worktree 的语义假定它在磁盘上。**把一个持久性假设建在一个不确定的路径上,是静默的。**
+
+**已落地(2026-08-04,`gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs`)**:
+`quay-init --loop` 现在解析 `loop.worktree_root`(缺省 `<repo>/../<basename>-worktrees`,
+磁盘),并在落盘前校验其文件系统类型——`tmpfs` 则 fail-closed 退出非 0、说明「这是内存」并给出
+该改成什么(AC9a);真磁盘路径正常建成、exit 0(AC9b,负控制);存量由
+`git worktree list | awk '$1...'`+`stat` 一行报出(AC9c)。**理由从「重启即消失」升级为「OOM 成因」**:
+2026-08-04 整机 OOM 的分解直接把在飞 worktree 所在的 `/tmp`(tmpfs,占 4.4GB)指向内存——
+同一判据,严重性从「你会丢工作」变成「你会打死整台机器」。

@@ -131,6 +131,12 @@ loop:
   # `config-wiring-check.ts --driver bespoke`. It is real and consumed by the generic
   # `plugin/skills/loop-driver/SKILL.md` (used by sibling projects), just not by this workspace yet.
   concurrency: 4
+  # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
+  # the DISK root for per-task git worktrees. /tmp is tmpfs — every MB is memory — and the
+  # 2026-08-04 machine-wide OOM traced straight to in-flight worktrees living in it. quay-init
+  # --loop validates this root's filesystem type and fails closed on tmpfs (AC3/AC4). Default:
+  # <repo_root>/../<project>-worktrees.
+  worktree_root: /home/yale/work/quay-worktrees
   routines:
     - name: self-validation
       trigger: every(5)

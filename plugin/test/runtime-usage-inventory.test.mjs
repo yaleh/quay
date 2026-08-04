@@ -75,7 +75,7 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     const paths = [SCRIPT_FIXTURE.relPath, SCRIPT_FIXTURE.realPath];
     assert.equal(countExecutedInCommand(`node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
     assert.equal(countExecutedInCommand(`node --no-warnings --experimental-strip-types ${SCRIPT_FIXTURE.relPath} --json`, SCRIPT_FIXTURE, paths), 1);
-    assert.equal(countExecutedInCommand(`cd /tmp/quay-wt-x && node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
+    assert.equal(countExecutedInCommand(`cd /home/yale/work/quay-worktrees/x && node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
     // env-prefix assignments before the program (REFUTE finding 2)
     assert.equal(countExecutedInCommand(`FOO=1 BAR=2 node ${SCRIPT_FIXTURE.relPath}`, SCRIPT_FIXTURE, paths), 1);
     assert.equal(countExecutedInCommand(`QUAY_TEST_LIVE_GITHUB=1 bash scripts/test.sh`, { relPath: "scripts/test.sh", realPath: "scripts/test.sh", basename: "test.sh", aliases: [] }, ["scripts/test.sh"]), 1);

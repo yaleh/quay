@@ -37,6 +37,10 @@
 #                          (default: <project>-0:0.0)
 #   --test-command <cmd>   the target project's test command, recorded in .quay/config.yml
 #                          loop.test_command (REQUIRED for --loop; there is no universal default)
+#   --worktree-root <dir>  worktree root, recorded in .quay/config.yml loop.worktree_root
+#                          (default: <repo_root>/../<basename>-worktrees, a DISK path — /tmp is
+#                          tmpfs, and every worktree on tmpfs is RAM; a machine-wide OOM traced
+#                          straight to it. Fail-closed on a tmpfs root, AC3/AC4)
 #
 # Plugin root: ${CLAUDE_PLUGIN_ROOT} or --plugin-root <dir>. Fail-closed if unset/missing.
 
@@ -49,6 +53,7 @@ PROJECT_NAME=""
 REPO_ROOT=""
 TMUX_SESSION=""
 TEST_COMMAND=""
+WORKTREE_ROOT=""
 FORCE=false
 DRY_RUN=false
 DO_WORKFLOWS=false
@@ -72,6 +77,7 @@ while [ $# -gt 0 ]; do
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --tmux-session) TMUX_SESSION="$2"; shift 2 ;;
     --test-command) TEST_COMMAND="$2"; shift 2 ;;
+    --worktree-root) WORKTREE_ROOT="$2"; shift 2 ;;
     --plugin-root) PLUGIN_ROOT="$2"; shift 2 ;;
     *)
       echo "ERROR: unknown argument: $1" >&2
@@ -330,19 +336,19 @@ sys.exit(1)
 ensure_loop_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session — SPEC AC2)"
+    echo "  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root — SPEC AC2)"
     return
   fi
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" <<'PYEOF'
+  python3 - "$cfg" "$REPO_ROOT" "$TEST_COMMAND" "$TMUX_SESSION" "$WORKTREE_ROOT" <<'PYEOF'
 import sys, yaml
-cfg, repo, test, tmux = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+cfg, repo, test, tmux, wtroot = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 with open(cfg, encoding="utf-8") as f:
     data = yaml.safe_load(f) or {}
-data["loop"] = {"repo_root": repo, "test_command": test, "tmux_session": tmux}
+data["loop"] = {"repo_root": repo, "test_command": test, "tmux_session": tmux, "worktree_root": wtroot}
 with open(cfg, "w", encoding="utf-8") as f:
     yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-print(f"  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session — SPEC AC2)")
+print(f"  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root — SPEC AC2)")
 PYEOF
 }
 
@@ -371,14 +377,15 @@ providers:
     env:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
 # Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
-# SPEC AC2): the single config source for repo_root / test_command / tmux_session. Scripts and
-# tick docs read these at runtime instead of having them baked in at install (AC3).
+# SPEC AC2): the single config source for repo_root / test_command / tmux_session / worktree_root.
+# Scripts and tick docs read these at runtime instead of having them baked in at install (AC3).
 loop:
   repo_root: ${REPO_ROOT}
   test_command: ${TEST_COMMAND}
   tmux_session: ${TMUX_SESSION}
+  worktree_root: ${WORKTREE_ROOT}
 EOF
-    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session — SPEC AC2)"
+    echo "  wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; loop: repo_root/test_command/tmux_session/worktree_root — SPEC AC2)"
   fi
 }
 
@@ -451,6 +458,27 @@ write_session_env() {
   echo "  wrote: orchestration/session-liveness.env (SESSION_TMUX_SESSION=$TMUX_SESSION)"
 }
 
+# validate_worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs):
+# FAIL CLOSED when the worktree root is on tmpfs. /tmp is tmpfs — every MB is RAM — and the
+# 2026-08-04 machine-wide OOM traced straight to in-flight worktrees living in it. The root dir may
+# not exist yet, so stat the nearest existing ancestor. AC3 (tmpfs → reject non-zero, name the
+# reason and the fix) / AC4 (a real disk root proceeds — never reject what would work).
+validate_worktree_root() {
+  local root="$1"
+  local probe="$root"
+  while [ ! -e "$probe" ] && [ "$probe" != "/" ]; do probe="$(dirname "$probe")"; done
+  local fstype
+  fstype="$(stat -f -c %T "$probe" 2>/dev/null || echo unknown)"
+  if [ "$fstype" = "tmpfs" ]; then
+    echo "ERROR: worktree root '$root' is on tmpfs ('$probe' is tmpfs) — this is memory, not disk." >&2
+    echo "       Every worktree under it consumes RAM; the 2026-08-04 machine-wide OOM traced straight to it." >&2
+    echo "       Change it to a real disk path — e.g. '${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees'." >&2
+    return 1
+  fi
+  echo "  worktree root: $root (filesystem: $fstype — not tmpfs, OK)"
+  return 0
+}
+
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 
@@ -508,6 +536,28 @@ if [ "$DO_LOOP" = true ]; then
   else
     echo "  using explicit --test-command: $TEST_COMMAND"
   fi
+
+  # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
+  # resolved from an existing config loop.worktree_root first (an upgrade keeps its chosen path),
+  # else --worktree-root, else the sibling-of-repo DISK default. Fail-closed on tmpfs (AC3) — a
+  # real disk root proceeds (AC4). Written into .quay/config.yml below so tick docs + skills read
+  # it at runtime instead of spelling a literal path (AC2).
+  if [ -z "$WORKTREE_ROOT" ] && [ -f "$WORKSPACE_ROOT/.quay/config.yml" ]; then
+    WORKTREE_ROOT="$(python3 - "$WORKSPACE_ROOT/.quay/config.yml" <<'PYEOF' 2>/dev/null || true
+import sys, yaml
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        d = yaml.safe_load(f) or {}
+    print((d.get("loop") or {}).get("worktree_root") or "")
+except Exception:
+    pass
+PYEOF
+)"
+  fi
+  if [ -z "$WORKTREE_ROOT" ]; then
+    WORKTREE_ROOT="${REPO_ROOT}/../$(basename "$REPO_ROOT")-worktrees"
+  fi
+  validate_worktree_root "$WORKTREE_ROOT" || exit 2
 
   echo "  loop (two-layer mechanism):"
   mkdir -p "$WORKSPACE_ROOT/plugin/scripts"

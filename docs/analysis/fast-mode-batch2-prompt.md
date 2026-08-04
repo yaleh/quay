@@ -30,10 +30,12 @@
 Agent(run_in_background: true, description: "<taskId>", prompt: <见下>)
 ```
 
-**worktree**：subagent 自己建，`/tmp/quay-wt-<slug>`，分支 `task/<taskId>`。
+**worktree**：subagent 自己建，`$WORKTREE_ROOT/<slug>`（磁盘路径——`/tmp` 是 tmpfs、是内存，
+worktree 建进去就是在重演整机 OOM；`worktree_root` 从 `.quay/config.yml` `loop:` 节读），
+分支 `task/<taskId>`。
 
 ```bash
-git worktree add /tmp/quay-wt-<slug> -b task/<taskId>
+git worktree add $WORKTREE_ROOT/<slug> -b task/<taskId>
 ```
 
 注意 `milestone-worktree.ts` **不能用**——它要求数字 milestone 号，本批次任务都是 gap 任务没有 M 号。用上面的裸 `git worktree`，这正是批次 1 实际用的。
@@ -57,7 +59,7 @@ subagent 返回后，按完成顺序逐个：
 1. `git merge --no-ff task/<taskId>`，冲突就中止并报告，不要 `--ours`/`--theirs`
 2. 跑**全量** `scripts/test.sh`（约 7 分钟，1166 tests，期望 0 fail）
 3. 全绿才继续下一个合并；不绿就停下来定位
-4. `git worktree remove /tmp/quay-wt-<slug>` + `git branch -d task/<taskId>`
+4. `git worktree remove $WORKTREE_ROOT/<slug>` + `git branch -d task/<taskId>`
 5. 关闭任务状态（见下）
 6. 记录耗时
 

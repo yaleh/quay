@@ -30,7 +30,8 @@
 //   queue-empty          ← 就绪队列为空 (step-3 stop condition)
 //
 // SHARED-ROOT RESOLUTION (why this matters): the inner layer runs in a per-task git worktree
-// (/tmp/quay-wt-<slug>), but the OUTER Monitor watches the MAIN checkout's `.quay/`. A block
+// ($WORKTREE_ROOT/<slug> — a disk path, see loop.worktree_root), but the OUTER Monitor watches
+// the MAIN checkout's `.quay/`. A block
 // written to the worktree's local `.quay/` would be invisible to the outer and would evaporate
 // when the worktree is removed. So the CLI resolves the SHARED (main) checkout root: when the
 // detected root is a linked git worktree (its `.git` is a FILE), the CLI follows `git rev-parse
@@ -136,8 +137,9 @@ const RUN_ID_SAFE_RE = /^[A-Za-z0-9._-]+$/;
 /**
  * Resolve the SHARED (main) checkout root, not the caller's local worktree root.
  *
- * The inner layer works in a linked worktree (`/tmp/quay-wt-<slug>`), where `.git` is a FILE whose
- * content points at the main repo's `.git/worktrees/<name>`. The outer Monitor watches the MAIN
+ * The inner layer works in a linked worktree (`$WORKTREE_ROOT/<slug>` — a disk path, see
+ * loop.worktree_root), where `.git` is a FILE whose content points at the main repo's
+ * `.git/worktrees/<name>`. The outer Monitor watches the MAIN
  * checkout's `.quay/`, and the block record must outlive the worktree that produced it — so a
  * block asserted from inside a worktree MUST land in the main checkout. Follow `git rev-parse
  * --git-common-dir` (the main `.git` dir) and take its parent as the main checkout root, verifying

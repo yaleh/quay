@@ -10,7 +10,9 @@
 //   - R4 (AC2): process.exit(1) reports only in a hand-rolled (non-node:test) file; comments,
 //               strings, and process.exitCode never report.
 //   - R6 (AC2/AC6): mkdtemp with no cleanup construct anywhere reports; rm/after/finally cleanup
-//               does not; /tmp/claude-* and /tmp/quay-wt-* prefixes are NEVER matched (AC6).
+//               does not; /tmp/claude-* prefix is NEVER matched (AC6). The quay-wt-* worktree
+//               exemption was removed — worktrees are git worktree add at loop.worktree_root,
+//               never mkdtemp'd (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs).
 //   - R8 (AC1/AC2/AC4): a mkdtemp whose ROOT resolves into the shared checkout
 //               (REPO_ROOT/repoRoot/__dirname/process.cwd() or a derived variable) reports —
 //               per-run-unique is NECESSARY, not SUFFICIENT; an os.tmpdir()/makeTmp root never
@@ -180,18 +182,20 @@ test("R6/AC2: mkdtemp with no cleanup reports; rm/after/finally cleanup does not
   );
 });
 
-// ── AC6 / AC4: /tmp/claude-* and /tmp/quay-wt-* are NEVER matched; negative control ─────────────────
-test("AC6: claude-* and quay-wt-* mkdtemp prefixes never report; a normal fixture prefix still does (AC4 negative control, both directions)", () => {
-  // session data / in-use worktree prefixes are exempt (AC6)
+// ── AC6 / AC4: /tmp/claude-* is NEVER matched; quay-wt-* exemption removed; negative control ───────
+test("AC6: claude-* mkdtemp prefix never reports; quay-wt-* (worktree exemption REMOVED) now reports; a normal fixture prefix still does (AC4 negative control, both directions)", () => {
+  // session data prefix is exempt (AC6); the quay-wt-* worktree exemption was removed because
+  // worktrees are `git worktree add` at loop.worktree_root, never mkdtemp'd — R6 never sees them
+  // (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC6).
   assert.equal(
     detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-abc123"));\n', "x.test.mjs").length,
     0,
     "claude-* prefix must be excluded"
   );
-  assert.equal(
-    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n', "x.test.mjs").length,
-    0,
-    "quay-wt-* prefix must be excluded"
+  assert.ok(
+    detectMkdtempNoCleanup('// @test-group product\nconst dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-wt-some-task"));\n', "x.test.mjs")
+      .some((v) => v.rule === "mkdtemp-no-cleanup"),
+    "quay-wt-* prefix must now report — the worktree exemption is gone (negative control for the removal)"
   );
   // AC4 NEGATIVE direction: a NORMAL fixture prefix (the leak shape) reports
   assert.ok(
