@@ -75,7 +75,7 @@ extra:
 ```
 measure mount_total = `ps -eo args | grep -cE '[s]ession-liveness.sh|[w]orkspace-state.sh'` 的挂载进程数字段
 measure git_in_session_tool = `grep -cE 'git ' plugin/scripts/session-liveness.sh` 的命中数字段
-measure surfaces_self_sufficient = 每个工具单独跑时能否给出完整本面结论的布尔字段
+measure surfaces_self_sufficient = `bash plugin/scripts/workspace-state.sh --once && bash plugin/scripts/session-liveness.sh --once` 各自单独跑时本面结论是否完整的布尔字段
 band mount_total = 2
 invariant 同一件事只有一个工具，目标靠参数给；两个面各自自足，谁都不必读另一面的数据
 invoke `bash plugin/scripts/workspace-state.sh --once`
