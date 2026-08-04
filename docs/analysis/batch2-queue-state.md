@@ -26,6 +26,8 @@
 - ✅ `gap-adr-016-alternatives-rejected-one-shot-claim-is-factually-wrong`：已 merge（`1fcdb545`），第二个 Amendment 2026-08-04（claude -p 理由改为三条真实硬约束，结论逐字保留）；CLAUDE.md 无同型实例未改；adr016 检查器 1-in-band 绿
 - ✅ `gap-reliable-send-crystallize-the-five-failure-modes-into-a-script`：已 merge（`0c0daf6b`），20/20 绿；`send-keys-reliable.sh`（5 步可靠发送）+ `transcript-delivery-check.ts`（纯函数，无哈希/无假 TUI）；AC6 用真实 transcript 判 delivered:true / never-sent:false；**完整跨会话 SEND 留安全窗**（R3 禁建会话，现有会话都在跑）
 - 在飞（后台 agent，run_in_background:true）：`gap-suite-speed-under-a-297-second-sigma`（基准 5×before/5×after，band >297.6s；持 heavy-op token，全量 DoD 待其落地后跑）
+
+**遥测纪律（外层 2026-08-04 纠正，系统性 gap）：** 合并必须同一步 `--task-end outcome=done`——本轮 5 次合并（node-cache/retire-state/task-write/am2/reliable-send）漏闭遥测括号，全部由外层代补。**规则：fan-in merge → 同一动作内跑 `--task-end --taskId <id> --runId <bracket> --outcome done`**，不等外层发现。suite-speed 落地时同理。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
@@ -2298,6 +2300,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   retire-state/task-write），下一次驱动时提醒。
 - **报告字段更正**：`--report --json` 的 `tasks` 数组是已关闭任务，**在飞在独立的 `inProgress` 字段**——
   我此前「open brackets: 0」读错了字段；括号修复本身正确（run 文件实证）。
+
+### tick 2026-08-04T17:22Z（外层，`no-action`：reliable-send + am2 已合并，系统性漏闭括号再处置）
+
+- **reliable-send 已合并**（`0c0daf6b` fan-in + `5da17540` 注记，20/20 验证；`833da7a5` 纯函数 +
+  `2703fae4` 脚本+结晶文档回写）。**am2（ADR-016 二次 Amendment）已合并**（`06a46953`）。
+- **括号漏闭第 5/6 次**：reliable-send + am2 合并后括号仍开（inProgress 列 3，实际只有 suite-speed
+  在飞）——已补闭（done），inProgress 现 = **1**（suite-speed，正确在飞）。
+- **系统性 gap 已驱动内层**：5 次合并漏闭（node-cache/retire-state/task-write/am2/reliable-send）
+  都是外层代补——已在驱动文本要求内层把 `--task-end` 并入批关闭流程，别等外层发现。
+- **suite-speed 唯一在飞**（基准 before/3，1h26m，σ 纪律多轮测量）。内层备忘「等 suite-speed 完成后
+  跑批量全量套件」。
+- 无停止条件、无阻塞；监视器 mounted:true；tph 1.385（窗口含 suite-speed 长测量，正常回落）。
 
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
