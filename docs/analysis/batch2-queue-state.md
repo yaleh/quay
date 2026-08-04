@@ -2250,6 +2250,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **就绪池 = 3** ✓（am2 / promotion-cadence / reliable-send，尚未派发，等槽位）。
 - 无停止条件、无阻塞；loop-driver LIVE。
 
+### 遥测数据修正（2026-08-04T16:44Z，管理者核实）
+
+- **① D outcome 矛盾**：D（pane-state）遥测 `end outcome=needs-human`（15:46，子代理先报 band 待裁定）
+  但任务 status done（我裁定后翻）——**重调 `--task-end` outcome=done**，报告已显示 done ✓。
+- **② node-cache / retire-state 括号未闭**（都有 start 无 end，但已真实合并）——**漏了，非有意延后**。
+  补 `--task-end outcome=done`。**outcome 区别**：node-cache 全落地绿（run=done）；retire-state
+  合并 + AC 做完但 DoD 的 2× 全量套件延到令牌空窗期（run=done，任务体已注明延后，task status 仍
+  ready）。retire-state 的旧 run（崩溃会话）保持 abandoned=正确。
+- **结果**：open brackets = **0**；`--report` 三任务均 done（D/node-cache/new-run-retire-state）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
