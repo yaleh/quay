@@ -2441,6 +2441,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 剩余：agent 写任务体 AC1/AC2/AC5 输出 + 结论 → 内层合并 → 关批（--task-end 同步）→ 批全量。
 - 批内其余全部合并。auto-block 持续（预期，套件后自清）。
 
+### 批全部落地（2026-08-04T21:30Z，里程碑）
+
+- **suite-speed 已合并**（`ec237c3e`：nested-setup-skip lever + honest no-improvement 基准记录）。
+  其 `4f99abf5` 确认 **5 个失败是 session-liveness 既有 flake**（baseline/2 复现，非本批回归）。
+- **inProgress: 0**、auto-block 清、`--detect-stop` 无命中。**整个大批全部合并**（A–F 裁定实现 +
+  L0 tmux 隔离 + node-cache + task-write + retire-inner-state + am2 + reliable-send + promotion-cadence
+  机制 + ready-pool-check 缺陷修复 + suite-speed，~12 任务）。
+- 内层正在跑**批全量套件**（24 node 进程）——通过后关批（翻 done、清 worktree、补晋下一批）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

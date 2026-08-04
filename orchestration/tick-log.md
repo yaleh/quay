@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 21:30Z | `no-action` | 里程碑：suite-speed 合并（honest no-improvement + 5 失败=session-liveness 既有 flake）；inProgress 0、auto-block 清；整个大批（~12 任务）全部合并；内层跑批全量套件 | 内层：批全量套件运行中（24 node 进程），通过后关批+补晋 | ①git log 核 suite-speed 合并 + flake 确认；②inProgress 0 + detect-stop 无命中；③ps 核批全量运行 |
 | 2026-08-04 21:22Z | `no-action` | suite-speed 提交诚实结论（80b7d70e：before 779.1/control 774.3/after 695.4s，delta 83.8 < σ 297.6 = honest no-improvement，AC5 负控制 PASS）；σ 纪律结论落地，批收尾在即 | 内层：suite-speed 写任务体结论，备忘「落地后关批跑全量关遥测清 worktree」 | ①git show 核 80b7d70e 基准数据 + 诚实结论；②`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 21:02Z | `no-action`（+时长升级提示） | suite-speed 5h5m 远超裁定预期 3 倍；AC9c 核非卡死（正跑 baseline 1 基准轮 → scripts/test.sh，24 node 进程）；flag 给管理者可选提前关闭；批内其余全合并 | 内层：suite-speed 跑 baseline 基准轮（launch_one.sh），备忘「完成后关批跑全量」 | ①ps 核 launch_one.sh baseline 1 + scripts/test.sh（非卡死）；②时长 vs 裁定预期对比；③`--detect-stop` 仍 task-over-90m（预期） |
 | 2026-08-04 20:42Z | `no-action` | 记 suite-speed agent 在 /tmp 建 baseline worktree（纪律偏离：/tmp=tmpfs=内存，今晚两次 OOM 教训；当前无即时风险：可用 10.5GB、57M、压力 0）；token 重新生成=在干活；批内其余全合并 | 内层：suite-speed link baseline node_modules（4h42m）；备忘「完成后关批跑全量」 | ①du/free/pressure 核 /tmp worktree 大小与内存；②pane 核 agent 状态；③`--detect-stop` 仍 task-over-90m（预期） |
@@ -256,11 +257,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 92 | 36% |
+| no-action | 93 | 36% |
 | unblock | 36 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **227** | — |
+| **合计** | **228** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
