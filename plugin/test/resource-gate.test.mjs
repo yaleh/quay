@@ -156,15 +156,15 @@ test("AC10 — orphaned node procs (ppid=1, cwd deleted) are listed on their own
     {
       RESOURCE_GATE_TEST_CPU_AVG10: "10",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
-      RESOURCE_GATE_TEST_ORPHANS: "111:/tmp/quay-wt-a (deleted);222:/tmp/quay-wt-b (deleted)",
+      RESOURCE_GATE_TEST_ORPHANS: "111:/home/yale/work/quay-worktrees/a (deleted);222:/home/yale/work/quay-worktrees/b (deleted)",
     },
     ["--for", "full-suite"]
   );
   assert.equal(r.status, 0, `orphans are informational — must NOT flip GO, got ${r.status}\n${r.stdout}`);
   const orphanLines = r.stdout.split("\n").filter((l) => l.startsWith("orphan_node:"));
   assert.equal(orphanLines.length, 2, `expected 2 orphan lines, got:\n${r.stdout}`);
-  assert.match(orphanLines[0], /111:\/tmp\/quay-wt-a \(deleted\)/);
-  assert.match(orphanLines[1], /222:\/tmp\/quay-wt-b \(deleted\)/);
+  assert.match(orphanLines[0], /111:\/home\/yale\/work\/quay-worktrees\/a \(deleted\)/);
+  assert.match(orphanLines[1], /222:\/home\/yale\/work\/quay-worktrees\/b \(deleted\)/);
 });
 
 // ── AC5: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────────────

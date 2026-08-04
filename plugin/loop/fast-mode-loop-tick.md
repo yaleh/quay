@@ -9,9 +9,13 @@
 > `docs/analysis/fast-mode-loop-tick.md`（内层）/ `orchestration/orchestrator-loop-tick.md`（外层）。
 > 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
 >
-> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` 三个名字在本文件中
-> 指 `.quay/config.yml` `loop:` 节的对应值（`repo_root` / `test_command` / `tmux_session`）。
+> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` / `WORKTREE_ROOT` 四个名字
+> 在本文件中指 `.quay/config.yml` `loop:` 节的对应值
+> （`repo_root` / `test_command` / `tmux_session` / `worktree_root`）。
 > 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
+> **worktree 一律建在 `$WORKTREE_ROOT/<slug>`**——`worktree_root` 是 quay-init 落盘时校验过的磁盘路径
+> （tmpfs 会 fail-closed，见 gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs）；
+> `/tmp` 是 tmpfs，每个 MB 都是内存，worktree 建进去就是在重演整机 OOM。
 
 **这是一份 tick 指令，不是驱动器。** `/loop` 每次触发就执行一遍下面的步骤，然后重新排程。
 
@@ -185,7 +189,7 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 0. **先 rebase 到当前 master**：
    ```bash
-   git -C /tmp/quay-wt-<slug> rebase master
+   git -C $WORKTREE_ROOT/<slug> rebase master
    ```
    worktree 建立时对 master 取了快照，之后并发合并的其它任务它看不到。B3-2 就是这样红的——
    它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
@@ -217,7 +221,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry
 
 **worktree 隔离的传播代价（2026-08-03 观察）**：主检出的紧急修复**不会自动传播**到在飞任务的 worktree——
 每个 worktree 有自己的测试 runner 等副本。这次是好事（隔离生效），但也意味着一个紧急修复要**显式同步
-进每个在飞 worktree**（把 `$TEST_COMMAND` 对应的 runner 脚本复制进 `/tmp/quay-wt-<slug>/` 对应位置），否则在飞任务会继续用旧行为跑完
+进每个在飞 worktree**（把 `$TEST_COMMAND` 对应的 runner 脚本复制进 `$WORKTREE_ROOT/<slug>/` 对应位置），否则在飞任务会继续用旧行为跑完
 （实例：并发默认推导改为 1 后，主检出已修复回 8，但 sigma worktree 仍在串行跑 ~52 分钟）。派发/协调时要检查
 在飞 worktree 是否有需要同步的主检出修复。
 
@@ -296,8 +300,9 @@ console.log(m.checkTouchesPair(A,B,expand));
 
 重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
-派发形态：后台 `Agent(run_in_background)`，subagent 自建 `/tmp/quay-wt-<slug>` worktree 和
-`task/<id>` 分支，内部起独立对抗审查（硬上限 2 轮），只提交不合并。
+派发形态：后台 `Agent(run_in_background)`，subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，
+不在 `/tmp`——tmpfs 是内存，`worktree_root` 见上）和 `task/<id>` 分支，内部起独立对抗审查
+（硬上限 2 轮），只提交不合并。
 `milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
 
 ### 5. 写回状态

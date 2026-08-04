@@ -23,7 +23,7 @@
 //   scripts/test.sh plugin/test/quay-init-loop.test.mjs
 //   node --test plugin/test/quay-init-loop.test.mjs
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -41,8 +41,38 @@ function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+// A worktree root the validation will ACCEPT: a real disk path, not tmpfs. /tmp is tmpfs on dev
+// boxes (and the whole point of gap-the-shipped-tick-doc-... is that worktrees must NOT live
+// there), so the sibling-of-repo default would resolve to /tmp for a /tmp-backed test workspace
+// and quay-init would correctly fail closed. /var/tmp is the disk-backed tmp on Linux; prefer it.
+// The dirs land in a carrier array cleaned by an after() hook (the doc-store/adr-store pattern),
+// so R6 does not read the helper-return as an uncovered mkdtemp leak.
+const _worktreeTestRoots = [];
+after(() => {
+  for (const d of _worktreeTestRoots) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+function diskWorktreeRoot() {
+  let dir = null;
+  for (const base of ['/var/tmp', os.tmpdir()]) {
+    try {
+      const t = spawnSync('stat', ['-f', '-c', '%T', base], { encoding: 'utf8' });
+      if (t.status === 0 && t.stdout.trim() !== 'tmpfs') { dir = fs.mkdtempSync(path.join(base, 'quay-wt-test-')); break; }
+    } catch { /* try next base */ }
+  }
+  if (!dir) dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quay-wt-test-'));
+  _worktreeTestRoots.push(dir);
+  return dir;
+}
+
 function runInit(workspace, args = [], pluginRoot = pluginDir) {
-  return spawnSync('bash', [path.join(pluginRoot, 'scripts', 'quay-init.sh'), ...args],
+  // --loop tests now need an explicit disk worktree root (the default sibling-of-repo of a /tmp
+  // test workspace is tmpfs and is correctly rejected). Inject one BEFORE the caller's args so an
+  // explicit --worktree-root in args wins (last flag wins in the parser).
+  const loop = args.includes('--loop');
+  const extra = loop && !args.some((a) => a === '--worktree-root') ? ['--worktree-root', diskWorktreeRoot()] : [];
+  return spawnSync('bash', [path.join(pluginRoot, 'scripts', 'quay-init.sh'), ...extra, ...args],
     {
       cwd: workspace,
       encoding: 'utf8',

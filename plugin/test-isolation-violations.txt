@@ -24,8 +24,10 @@
 #                                   (2026-08-03): every variable-assigned mkdtemp result must be
 #                                   covered by a cleanup path (direct rmSync/rm/after/finally, a
 #                                   carrier-array + after-loop, or a helper-return captured into a
-#                                   cleaned variable). NEVER matches /tmp/claude-* (session data) /
-#                                   /tmp/quay-wt-* (in-use worktrees) prefixes (AC6).
+#                                   cleaned variable). NEVER matches /tmp/claude-* (session data)
+#                                   prefixes (AC6); the quay-wt-* worktree exemption was removed
+#                                   (worktrees are git worktree add at loop.worktree_root, never
+#                                   mkdtemp'd — gap-the-shipped-tick-doc...).
 #   R7 live-data-dir-write          never WRITE into the repo's LIVE product-data directories
 #                                   (tasks/, .quay/, .workflow-events/, adr/) via a NON-per-run-
 #                                   unique root (process.cwd()/__dirname/import.meta — the shared
