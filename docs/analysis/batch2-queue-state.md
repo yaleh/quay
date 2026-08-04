@@ -1888,3 +1888,13 @@ dod-gate（外层建）。
   与 one-condition（inner-blocked-signal）无冲突；**与 LOOP_SCRIPTS 条冲突**（都动 quay-init.sh + 测试）→
   LOOP_SCRIPTS 待 tmux 落地后派。第 3 槽按外层顺序留空。
 - **在飞（2/3）**：one-condition + tmux。
+
+### 派发 finding-shape（2026-08-04 03:2xZ，最后一条门槛）
+
+- **finding-shape**（`gap-the-finding-shape-still-requires-a-plan-section`，runId `...kbqp4u`，
+  `/tmp/quay-wt-finding`）——finding 形状必需段集合仍含 plan，而 finding 前提就是无 Plan。
+  精确失败点：`artifacts={"proposal":true,"plan":false,...}`。与 meta-cc 11/14 不矛盾（DIR 模板
+  Finding+Plan 都有）。**AC3 真判据**：Plan 形状缺 Plan 仍必须红（只改 finding 必需段集合，
+  不放宽通用判定——dispatch is not a waiver）。**AC5**：整个 e2e 五条断言全绿 = 重装门槛过。
+  承接 e2e AC5（## Carries；原 stub 承载任务已并入删除）。与 tmux/one-condition 无冲突。
+- **在飞（3/3）**：one-condition + tmux + finding-shape。
