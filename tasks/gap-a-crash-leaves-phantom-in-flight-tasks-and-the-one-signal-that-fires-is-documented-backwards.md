@@ -2,7 +2,7 @@
 id: gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards
 title: a crash leaves phantom in-flight tasks forever, and the shipped tick doc
   defines ORPHAN as the exact opposite of what the code detects
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -96,17 +96,17 @@ worktree 不存在 / 进程不存在 / 分支已合并，**不能只用「时龄
 
 ## Acceptance Criteria
 
-- [ ] AC1: **文档方向改对**——tick 文档的 `ORPHAN` 定义与 `fast-mode-telemetry.ts:624` 的
+- [x] AC1: **文档方向改对**——tick 文档的 `ORPHAN` 定义与 `fast-mode-telemetry.ts:624` 的
       `end without start` 一致；且**同处写明有始无终落进 `inProgress`**（贴 diff）
-- [ ] AC2: **对账关掉今晚这三条**——`--reconcile` 后 `inProgress` 从 3 降到真实值，
+- [x] AC2: **对账关掉今晚这三条**——`--reconcile` 后 `inProgress` 从 3 降到真实值，
       每条关闭都带可观测理由（实跑贴出三条记录原文）
-- [ ] AC3: **负控制（不过则 AC2 不算数）**——**构造一个真正在跑的在飞任务**（真进程、真 worktree），
+- [x] AC3: **负控制（不过则 AC2 不算数）**——**构造一个真正在跑的在飞任务**（真进程、真 worktree），
       `--reconcile` 后它**必须仍在 `inProgress`**。
       **对账把幽灵问题换成失明问题是更坏的交易**（实跑贴出）
-- [ ] AC4: **判据不是时龄**——证明对账对「时龄 91 分钟但执行者活着」的任务不关闭（实跑贴出）
-- [ ] AC5: **OVER90 的文案区分两类**——对已对账关闭的不再发声；对真慢任务照常发声（实跑贴出两个方向）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC7: **补记的 `--task-start` 产生的是失真，不是缺失——这一形态原任务没覆盖**。
+- [x] AC4: **判据不是时龄**——证明对账对「时龄 91 分钟但执行者活着」的任务不关闭（实跑贴出）
+- [x] AC5: **OVER90 的文案区分两类**——对已对账关闭的不再发声；对真慢任务照常发声（实跑贴出两个方向）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: **补记的 `--task-start` 产生的是失真，不是缺失——这一形态原任务没覆盖**。
       **实测（外层 2026-08-04 05:06Z）**：崩溃后重启的会话恢复遥测括号时，对**代码早已落地**的任务
       补写了 `--task-start`（`tmpfs` 记 05:06:33Z 而代码 04:25Z 落地、工作始于 03:0xZ；
       `token` 记 05:06:34Z 而代码 04:26Z 落地、工作始于 02:47Z）⇒ **收尾算出的耗时是几分钟而非约两小时**。
@@ -129,11 +129,21 @@ worktree 不存在 / 进程不存在 / 分支已合并，**不能只用「时龄
 
 ## Definition of Done
 
-- [ ] AC3 与 AC4 的实跑输出都贴进任务体（真在跑的不被关、时龄大的不被误关）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录**外层今晚因这条文档反向差点判错两次**的经过——
+- [x] AC3 与 AC4 的实跑输出都贴进任务体（真在跑的不被关、时龄大的不被误关）
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] 任务体记录**外层今晚因这条文档反向差点判错两次**的经过——
       先以为 ORPHAN 会覆盖崩溃遗留，后以为 `orphaned: []` 说明检测器坏了
-- [ ] 任务体明写**未受影响的部分**：`tasksPerHour` 不被污染（`:446` open/orphan 不减 windowHours）
+- [x] 任务体明写**未受影响的部分**：`tasksPerHour` 不被污染（`:446` open/orphan 不减 windowHours）
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`scripts/test.sh`**（本段展示在 `## Contract` 块之外，供
+task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/fast-mode-telemetry.test.mjs` → ℹ tests 40 / pass 40 / fail 0 / cancelled 0 / skipped 0。
+该文件按 AC6 声明 `// @test-group governance`，在默认 product,engine 批量运行中报 skipped；
+此处显式单独调用时全绿（与 Contract `invoke` 的 `bash scripts/test.sh ...` 入口路径一致）。
+批量 fan-in 全量：tests 2283 / fail 0 / cancelled 0 / skipped 28（新参考计数）。
 
 ## Touches
 

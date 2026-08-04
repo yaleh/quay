@@ -3,7 +3,7 @@ id: gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second
 title: the shared liveness log is filtered at the emit side by whoever holds the
   mount, so the holder's noise threshold silently becomes every subscriber's
   blindness
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -82,25 +82,34 @@ resume 先把过滤从发出端移到读取端，再谈各订阅方各自的阈�
 
 ## Acceptance Criteria
 
-- [ ] AC21a: **共享 `events.jsonl` 记录全量事件，不施加任何阈值抑制**；
+- [x] AC21a: **共享 `events.jsonl` 记录全量事件，不施加任何阈值抑制**；
       `LOOP_MIN`/`STALL_MIN`/`OVERDUE_MIN` **只作用于持有者自己的 stdout**（实跑贴出两路的对照）
-- [ ] AC21b: **每条事件带上判定所需的原始量**（如 `hmin`），**让订阅方自己决定报不报**，
+- [x] AC21b: **每条事件带上判定所需的原始量**（如 `hmin`），**让订阅方自己决定报不报**，
       而不是只给一个已经判完的结论（贴出一条真实记录的全部字段）
-- [ ] AC21c（**负控制；这条不过 AC21a 不算数**）: **持有者以 `LOOP_MIN=20` 运行时，
+- [x] AC21c（**负控制；这条不过 AC21a 不算数**）: **持有者以 `LOOP_MIN=20` 运行时，
       共享文件里仍应出现 `hmin < 20` 的 `IDLE` 记录**。**出现即通过，不出现即未修**（实跑贴出该条记录）
-- [ ] AC21d（**外层加**）: **持有者自己的 stdout 不得因此变吵**——
+- [x] AC21d（**外层加**）: **持有者自己的 stdout 不得因此变吵**——
       以 `LOOP_MIN=20` 运行时，**持有者收到的 `SESSION-IDLE` 通知数仍为 0**。
       **不验这一条，最省事的"修法"就是把抑制整个删掉**，那会把缺陷从管理者身上原样搬到持有者身上
-- [ ] AC21e（**外层加**）: **既有读者不得被字段变更打断**——
+- [x] AC21e（**外层加**）: **既有读者不得被字段变更打断**——
       `monitor-mount-check.sh` 与任何读 `events.jsonl` 的消费者在改动后仍正常工作（实跑贴出）
-- [ ] AC21f: 测试用 `node:test` 且带恰当的 `// @test-group`
+- [x] AC21f: 测试用 `node:test` 且带恰当的 `// @test-group`
 
 ## Definition of Done
 
-- [ ] AC21c 与 AC21d 的实跑输出**都**贴进任务体（共享文件有、持有者 stdout 没有——**两个方向**）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录一般形态：**已被一个消费者的阈值筛过的日志服务不了第二个消费者；
+- [x] AC21c 与 AC21d 的实跑输出**都**贴进任务体（共享文件有、持有者 stdout 没有——**两个方向**）
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] 任务体记录一般形态：**已被一个消费者的阈值筛过的日志服务不了第二个消费者；
       记录记全量，判断留给读的人**——并指明它与 `carry evidence not conclusions` 同源
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`plugin/scripts/session-liveness.sh`**（`--once` 实跑探针路径；
+本段展示在 `## Contract` 块之外，供 task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/session-liveness.test.mjs` → ℹ tests 39 / pass 38 / fail 0 / cancelled 0 / skipped 1
+（skipped 1 为真实探针，需 `quay-0:probe` 才跑）。adr016 screen-hash band 保持（1 active）。
+批量 fan-in 全量：tests 2283 / fail 0 / cancelled 0 / skipped 28（新参考计数）。
 
 ## Touches
 
