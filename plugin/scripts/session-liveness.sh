@@ -235,7 +235,7 @@ sl_json_append() {
   name="${line#* }"; name="${name%% *}"
   ts=$(sl_now_ms)
   line_json=$(printf '%s' "$line" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null \
-    || printf '"%s"' "$line")
+    || { printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g'; })
   printf '{"ts":%s,"event":%s,"name":%s,"msg":%s}\n' \
     "$ts" "$(printf '"%s"' "$event")" "$(printf '"%s"' "$name")" "$line_json" \
     >> "${SL_EVENTS_FILE:-/dev/null}" 2>/dev/null || true
