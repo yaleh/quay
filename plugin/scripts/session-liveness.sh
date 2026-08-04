@@ -53,10 +53,13 @@
 #   - 本项目根自定位（同 inner-state.sh 的 BASH_SOURCE 惯例），不硬编码任何绝对仓库路径；
 #     SESSION_ROOT 是测试接缝（同 INNER_STATE_WORK_ROOT），生产调用方不设它。
 #   - 默认目标的目标会话名优先级（gap-quay-init-rewrites-an-executable-instead-of-generating-config
-#     AC1）：
+#     AC1；gap-init-guesses-the-tmux-session 删除了第 3 级）：
 #       1. 环境变量 SESSION_TMUX_SESSION（显式设置，最高）
 #       2. orchestration/session-liveness.env（quay-init --loop 安装时生成/更新的每项目配置）
-#       3. 默认值：项目根 basename + "-0"（未配置时的回退）
+#       3. 无配置时 FAIL-CLOSED（绝不猜一个会话名）——旧的回退是「项目根 basename + "-0"」，
+#          那与 quay-init 曾写进配置的猜测值是同一形态：对「被开发出来的那个项目」恰好成立，
+#          对别处静默错误——监视器瞄向不存在的会话，会把活着的内层误报成 gone（假阴性）。
+#          宁可装不上，不要装上一个骗人的监视器：没配置会话就明确报错并退出，而不是猜。
 #     原则：可执行文件一律原样复制，只生成配置——quay-init --loop 已不再改写本脚本
 #     （安装期占位符机制已移除），会话名经上面的 env/配置/默认值解析；运行时不做
 #     任何配置解析——不碰 YAML。
@@ -310,7 +313,19 @@ if [ -n "$_sl_session_env" ]; then
 fi
 _sl_session="${SESSION_TMUX_SESSION:-}"
 if [ -z "$_sl_session" ]; then
-  _sl_session_base="$(basename "$REPO_ROOT")-0"
+  # gap-init-guesses-the-tmux-session: NO guess. The old fallback was "<basename>-0" — the same
+  # guessed value that aimed a live monitor at a nonexistent session and reported a LIVE inner as
+  # GONE (the false-negative this monitor must never emit). When no session is configured (env +
+  # env-file both absent) the zero-config default target CANNOT be formed: fail-closed rather than
+  # monitor a made-up session. SESSION_TARGETS (the manager's explicit multi-target topology) is
+  # exempt — it does not need the default target at all.
+  if [ -z "${SESSION_TARGETS:-}" ]; then
+    echo "session-liveness: ERROR 未配置任何 tmux 会话（SESSION_TMUX_SESSION 未设，且 orchestration/session-liveness.env 不存在或未含 SESSION_TMUX_SESSION）。" >&2
+    echo "       quay-init --loop 会把检测到的真实会话写进 orchestration/session-liveness.env；检测不到时安装会失败。" >&2
+    echo "       请显式设置 SESSION_TMUX_SESSION（或 SESSION_TARGETS）——监视器绝不猜一个会话名。" >&2
+    exit 2
+  fi
+  _sl_session_base=""
 else
   _sl_session_base="${_sl_session%%:*}"
 fi
@@ -321,6 +336,12 @@ DEFAULT_TARGET="${_sl_session_base}:outer"
 targets() {
   if [ -n "${SESSION_TARGETS:-}" ]; then printf '%s\n' "$SESSION_TARGETS"; return; fi
   # 零配置默认：本项目自己（名字=项目名、根=项目根、目标=<会话>:outer 窗口）。
+  # gap-init-guesses-the-tmux-session：_sl_session_base 为空 = 无会话配置，上面的 fail-closed
+  # 应在进入循环前就已退出；这里再守一道，绝不把 ":outer" 这样的残缺目标喂给监视器。
+  [ -n "$_sl_session_base" ] || {
+    echo "session-liveness: ERROR 零配置目标无会话名（$_sl_session_base）——请配置 SESSION_TMUX_SESSION 或 SESSION_TARGETS" >&2
+    return 1
+  }
   echo "$(basename "$REPO_ROOT") $REPO_ROOT $DEFAULT_TARGET"
 }
 

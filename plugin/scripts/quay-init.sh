@@ -33,8 +33,11 @@
 #   --project <name>       project name (default: basename of --root)
 #   --repo-root <path>     the target project root, recorded in .quay/config.yml loop.repo_root
 #                          (default: --root)
-#   --tmux-session <sess>  tmux session, recorded in .quay/config.yml loop.tmux_session
-#                          (default: <project>-0:0.0)
+#   --tmux-session <sess>  tmux session, recorded in .quay/config.yml loop.tmux_session and
+#                          orchestration/session-liveness.env (default: DETECTED from
+#                          `tmux list-sessions` by project name; when nothing unique is detected
+#                          the install FAILS CLOSED — never a guessed "<project>-0:0.0", see
+#                          detect_tmux_session / gap-init-guesses-the-tmux-session)
 #   --test-command <cmd>   the target project's test command, recorded in .quay/config.yml
 #                          loop.test_command (REQUIRED for --loop; there is no universal default)
 #   --worktree-root <dir>  worktree root, recorded in .quay/config.yml loop.worktree_root
@@ -101,7 +104,11 @@ WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
 # Defaults for loop params.
 if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$(basename "$WORKSPACE_ROOT")"; fi
 if [ -z "$REPO_ROOT" ]; then REPO_ROOT="$WORKSPACE_ROOT"; fi
-if [ -z "$TMUX_SESSION" ]; then TMUX_SESSION="${PROJECT_NAME}-0:0.0"; fi
+# NOTE: TMUX_SESSION is deliberately NOT defaulted here. The old default was a guessed
+# "<project>-0:0.0" (gap-init-guesses-the-tmux-session): it only worked for the project it was
+# written for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
+# false-negative this monitor must never emit). The --loop block DETECTS the real session by
+# project name and FAILS CLOSED when none is found — never a guess.
 
 # Verify plugin root.
 if [ -z "$PLUGIN_ROOT" ]; then
@@ -314,6 +321,40 @@ sys.exit(1)
   if [ -f "$root/Cargo.toml" ]; then
     echo "cargo test"
     return 0
+  fi
+  return 1
+}
+
+# detect_tmux_session <project>: detect the target project's tmux session by matching
+# `tmux list-sessions` against the project name (gap-init-guesses-the-tmux-session). The
+# session-name convention is <project> (first session) or <project>-<n> (subsequent), so a
+# project named "meta-cc" has sessions like "meta-cc-4". Detection is by NAME PREFIX — the
+# installer must NEVER guess a session: a guessed "<project>-0:0.0" only works for the project
+# it was written for, and a monitor aimed at a nonexistent session reports a LIVE inner as
+# GONE (the false-negative this task exists to kill; the same shape as the placeholder
+# /home/yale/work/quay — silently correct on the dev box, silently wrong elsewhere).
+# Prints:
+#   exactly one match  → the session name on stdout, exit 0 (caller writes it)
+#   multiple matches   → each matching session name on its own line, exit 2 (ambiguous — the
+#                        caller REQUIRES explicit --tmux-session, never picks one)
+#   zero matches       → nothing, exit 1 (caller FAILS CLOSED — never write a guess)
+detect_tmux_session() {
+  local project="$1" m
+  local -a matches=()
+  command -v tmux >/dev/null 2>&1 || return 1
+  while IFS= read -r m; do
+    [ -z "$m" ] && continue
+    case "$m" in
+      "$project"|"$project"-*) matches+=("$m") ;;
+    esac
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+  if [ "${#matches[@]}" -eq 1 ]; then
+    printf '%s\n' "${matches[0]}"
+    return 0
+  fi
+  if [ "${#matches[@]}" -gt 1 ]; then
+    printf '%s\n' "${matches[@]}"
+    return 2
   fi
   return 1
 }
@@ -535,6 +576,40 @@ if [ "$DO_LOOP" = true ]; then
     fi
   else
     echo "  using explicit --test-command: $TEST_COMMAND"
+  fi
+
+  # AC1/AC2/AC3 (gap-init-guesses-the-tmux-session): the target project's tmux session is
+  # DETECTED, not guessed. An explicit --tmux-session always wins; otherwise tmux list-sessions
+  # is matched by project name: a UNIQUE match is used (printed for the human to confirm), a
+  # MULTIPLE match requires explicit --tmux-session (never pick one), and a ZERO match FAILS
+  # CLOSED (AC2) — the old "<project>-0:0.0" default only worked for the project it was written
+  # for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
+  # false-negative this task exists to kill). Never write a guessed value into the monitor config.
+  if [ -z "$TMUX_SESSION" ]; then
+    # set -euo pipefail would terminate the script the instant detect_tmux_session returns
+    # non-zero, so a bare `DETECT_RC=$?` on the next line never ran — the exit code was
+    # hijacked into the script's own and the stderr branch was skipped. Capture it on the
+    # SAME command line, zero-initialized (gap-init-guesses-the-tmux-session AC2/AC3 fix).
+    DETECT_RC=0
+    DETECT_OUT="$(detect_tmux_session "$PROJECT_NAME")" || DETECT_RC=$?
+    if [ "$DETECT_RC" = 0 ]; then
+      TMUX_SESSION="$DETECT_OUT"
+      echo "  detected tmux session: $TMUX_SESSION (from tmux list-sessions matching project '$PROJECT_NAME' — confirm this is correct)"
+    elif [ "$DETECT_RC" = 2 ]; then
+      echo "ERROR: multiple tmux sessions match project '$PROJECT_NAME':" >&2
+      printf '%s\n' "$DETECT_OUT" | sed 's/^/         - /' >&2
+      echo "       Refusing to guess which one is the target session — a guessed value writes a lying monitor." >&2
+      echo "       Pass --tmux-session <sess> explicitly (e.g. 'tmux list-sessions' to see the real sessions)." >&2
+      exit 2
+    else
+      echo "ERROR: --loop needs the target project's tmux session but none could be detected." >&2
+      echo "       Searched: tmux list-sessions -F '#{session_name}' for sessions matching '$PROJECT_NAME'." >&2
+      echo "       There is no universal default — the old '<project>-0:0.0' only works for the project it was written for." >&2
+      echo "       Pass --tmux-session <sess> explicitly (e.g. 'tmux list-sessions' to see the real sessions)." >&2
+      exit 2
+    fi
+  else
+    echo "  using explicit --tmux-session: $TMUX_SESSION"
   fi
 
   # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
