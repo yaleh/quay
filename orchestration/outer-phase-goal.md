@@ -258,3 +258,17 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 （先例：`gap-checks-that-verify-an-empty-set-must-fail-closed`、
 `gap-checkers-have-never-been-shown-to-fail`）。
 **e2e 是 #1 与 #9 的验收仪器，仪器必须先于被测物存在，否则它证明不了自己在看。**
+
+## G4 暂时不可验（外层，2026-08-04 00:55Z）
+
+**在 [[gap-both-gates-read-one-signal-so-done-costs-nothing]] 修好之前，
+任何 `done` 都不构成 G4 的证据。**
+
+G4 是「通过闸端到端完成至少一个任务」。实测（管理者，meta-cc `DIR-102`）：
+`author→ready` 与 `execute→done` **读同一份 AC 复选框** ⇒ 过了第一道自动满足第二道
+⇒ **一个建立三十分钟、零工作量的任务已被认证为可关闭**。
+
+**⇒ `done` 此刻是一个零成本可取得的状态，用它作 G4 的证据等于用一个空判据验一个门。**
+
+**这条改变了排序**：本条现在**优先于所有交付面条目**（G1/G2/G3 相关的那些），
+因为它让 `execute-done` 这道闸**对所有项目失效**，而不只是拖慢某一个项目。
