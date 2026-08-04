@@ -2112,3 +2112,19 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 **fan-in 核查点**：检查 B 的 DoD 证据里是否含「等 agent 空闲 → 写 block」的负例，以及它如何排除
 假阳性类。
+
+### tick 2026-08-04T15:22Z（外层，`no-action`：内层推进中，A 已核实）
+
+- **A 已合并 master**（`d3104bbc`，真 `--no-ff`，双亲 1b4c31b0+f6f05175）。**独立核实通过**：
+  `adr016-screen-use-check.ts` 实跑 `PASS: active violations (1) within band (0..1)`（session-liveness
+  :617 存量计入 band；send-keys-verified 两处正确归 `retired` 不计——F 的 supersede 生效）；ADR-016
+  `## Amendment 2026-08-04` 落位（2 处）；CLAUDE.md 已钉 `adr016-screen-use-check` 引用。
+- **B 已提交**（`ruling-required-wiring` 3 commit：`96c87450` 接线 `--detect-stop --pane ->
+  classifyPaneState`；`81a20c42` tick 文档；`e7059f86` gitignore 观察者计数器）——含假阳性判据修正。
+- **D 已提交**（2 commit：分类器 + 第二张真实 busy 夹具）；**L0 已提交**（2 commit：助手 + session-liveness
+  迁移）。
+- **内层正在跑 fan-in 验证测试**（24 node 进程，load 2.19）——D/B/L0 待合并，批全量待跑。资源闸规则：
+  内层在飞期间外层只做廉价核实，不做重型操作。
+- 无停止条件、无阻塞；Monitor 三判据 true；loop-driver LIVE。
+- **fan-in 核查点（更新）**：D/B/L0 合并时逐一 `--for-task`，批全量跑绿后关任务；B 的 DoD 证据
+  必须含假阳性负例。

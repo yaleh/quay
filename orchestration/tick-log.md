@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-04 15:22Z | `no-action` | 独立核实 A 合并（检查器 PASS 1/band 0..1，send-keys retired 正确；ADR-016 Amendment+CLAUDE.md 落位）；B/D/L0 均已提交待合并；内层跑 fan-in 验证；写回 | 内层：fan-in 中（已合并 A，D/B/L0 待合并），24 node 进程跑测试；A 完成，B 子代理完成 | ①`adr016-screen-use-check.ts` 实跑 PASS + retired 正确分类；②grep ADR-016 Amendment/CLAUDE.md 引用；③B worktree 3 commit 含假阳性修正（git log） |
 | 2026-08-04 15:02Z | `no-action` | 原始字段核实常驻指令已满足（B 15:01:41 rib:true）；A/D 已提交未合并（checker/classifier 均落 worktree）；B/L0 worktree 建；subagent 并发 2（L0+B）；不 fan-in 等批；写回 | 内层：D 任务体写 AC5 实跑输出；两个 general-purpose 子代理并发（L0 session-liveness 12m+、B 25s）；无停止条件 | ①meta-cc 查 B 的 Agent 调用 rib:true（原始字段）；②A/D 交付物落 worktree（ls 实测）；③`--detect-stop` 无命中 |
 | 2026-08-04 14:54Z | `correct`（**correct-self**：我上一轮把遥测 START 事件当 subagent 并发，用错仪器导致静默满足，被管理者推翻） | 原始字段核实（meta-cc）：内层唯一 Agent 调用 run_in_background 缺失=同步阻塞；「A\|D 双在飞」=遥测括号并发≠subagent 并发；常驻指令第三次未满足；已驱动内层纠正（后续 Agent 必须 run_in_background:true + 自核原始字段）；R2 加 AC7（在飞词汇拆分+原始字段核实）；清空自己输入框的未提交文本；commit 待落 | 内层：L0 general-purpose 子代理在跑（4m47s，阻塞于同步 Agent 调用），纠正消息排队；A 已提交待 fan-in；subagent 在飞 1（L0）/ 遥测括号在飞 2（D+L0）；scratch-c1（quay-0:3）确认存在不动 | ①meta-cc 查内层 Agent 调用原始字段（run_in_background ABSENT，14:49:44）；②我的 pane 输入框确有未提交文本并已清空；③L0 子代理 pane 状态（general-purpose analyzing session-liveness.sh） |
 | 2026-08-04 14:49Z | `correct`（**correct-self**：我上一条驱动文本用散文覆盖了出厂 tick 文档的并发契约，把该由文档供给的行为当数据复述了） | 对管理者观察三条裁定 R1–R3 并落盘：R1 A→D 串行=遗漏（checkTouchesPair 六对全 disjoint）；R2 立案「驱动文本只带数据」（并发派发常驻指令第二次静默丢弃）；R3 收紧 D 夹具采集（只用现有三 pane，禁新建/清理 tmux）；L0 升 ready 入并发批次；驱动内层纠正已送达；提交 1fa1cce3 | 内层已吸收纠正（re-capture 3 existing panes not scratch-c1、读 L0 准备后台派发）；A 提交 40ec564e 待 fan-in；D 实现中 13m；scratch-c1 残留窗口待处理 | ①checkTouchesPair 六对全 disjoint（实跑输出）；②A/D resolve dispatchable；③内层 pane 文本确认读到纠正并计划改用现有 pane 采集；④L0 resolve 的 MISSING=我的 touches 把备注写进了路径，已修 |
@@ -235,11 +236,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 73 | 35% |
-| unblock | 36 | 18% |
-| correct | 90 | 44% |
+| no-action | 74 | 36% |
+| unblock | 36 | 17% |
+| correct | 90 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **206** | — |
+| **合计** | **207** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
