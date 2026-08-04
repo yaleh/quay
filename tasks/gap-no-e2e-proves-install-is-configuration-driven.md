@@ -1,7 +1,7 @@
 ---
 id: gap-no-e2e-proves-install-is-configuration-driven
 title: "Nothing in the suite proves install is configuration-driven — the reinstall gate is one e2e with four assertions, and it must land red first"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
