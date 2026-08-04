@@ -20,8 +20,9 @@
 **D 为何留 ready：** R3 禁为采集新建会话 ⇒ permission-prompt/error-banner/unknown 无真实样本、`fixture_count`=5 < band 10..30 ⇒ AC3/AC4 勾不上。task check 门不过。**待外层修订 band 或接受 unavailable 标注。**
 
 **next 批（滚动派发，不等攒批，3 槽位全满）：**
-- 在飞（后台 agent，run_in_background:true）：`gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`、`gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`、`gap-retire-inner-state-one-observer-targets-by-parameter`（第三槽，外层补枚举；rebase 保全分支 61a92a41，AC6 显式处置 B 的自动 BLOCKED 信号）
-- 待 node-compile-cache 落地后派：`gap-suite-speed-under-a-297-second-sigma`（与 node-compile-cache 同碰 scripts/test.sh，串行）
+- ✅ `gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses`：已 merge（`d3c5c09e`），scoped 5/5 绿，NODE_COMPILE_CACHE 落磁盘（ext2/ext3，非 tmpfs），~2.7×/spawn；**任务关闭延到批量 fan-in**（全量 DoD；此时 suite-speed 在跑全量基准，两层不同时跑全量）。closure 需补 task body 证据（agent 未改 task body）
+- 在飞（后台 agent，run_in_background:true）：`gap-task-write-accepts-a-title-that-breaks-its-own-frontmatter`、`gap-retire-inner-state-one-observer-targets-by-parameter`（rebase 61a92a41，AC6 处置 B 的自动 BLOCKED 信号）、`gap-suite-speed-under-a-297-second-sigma`（4 槽滚动补入，基准 5×before/5×after，band >297.6s）
+- 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
 ---
 
