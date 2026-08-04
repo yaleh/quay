@@ -23,7 +23,11 @@ import {
   findRepoRoot,
   isOverbroadDeclaration,
   main,
+  touchExists,
+  checkTouchesResolve,
+  checkTaskTouchesResolve,
 } from "../scripts/touches-orthogonality-check.ts";
+import { parseTouchEntriesWithTags } from "../scripts/touches-parser.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "touches");
@@ -215,4 +219,149 @@ test("main: missing charter file → exit 2", async () => {
 
 test("main: no --root falls back to findRepoRoot (real repo expansion)", async () => {
   assert.equal(await main(["node", "s", fx("disjoint-a.md"), fx("disjoint-b.md")]), 0);
+});
+
+// ── touchExists / checkTouchesResolve (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files) ──
+// A dispatch-eligibility resolve check COMPLEMENTING checkTouchesPair: a `status:ready` task whose
+// `## Touches` majority-resolve to nonexistent files (ADR-022 deleted them) must be flagged, not
+// silently dispatched. `(new)` touches are exempt (the task will create them).
+function makeTempTree(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "touches-resolve-"));
+  for (const f of files) {
+    const abs = path.join(root, f);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, "");
+  }
+  return root;
+}
+
+test("touchExists: exact existing path → true, missing → false", () => {
+  const root = makeTempTree(["a/b.js", "c.ts"]);
+  try {
+    assert.equal(touchExists("a/b.js", root), true);
+    assert.equal(touchExists("a/missing.js", root), false);
+    assert.equal(touchExists("c.ts", root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("touchExists: glob matches → true; glob matches nothing → false", () => {
+  const root = makeTempTree(["packages/quay/src/gate/registry.js", "packages/quay/src/gate/utils.js"]);
+  try {
+    assert.equal(touchExists("packages/quay/src/gate/*.js", root), true);
+    assert.equal(touchExists("packages/quay/src/gate/**", root), true);
+    assert.equal(touchExists("packages/quay/src/**/missing.js", root), false);
+    // trailing-slash directory glob → `**` appended (DIR-106 Fix 3 semantics)
+    assert.equal(touchExists("packages/quay/", root), true);
+    assert.equal(touchExists("packages/other/", root), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("checkTouchesResolve: majority-missing flag only when > half of must-exist entries are gone", () => {
+  const root = makeTempTree(["live/a.js", "live/b.js"]);
+  try {
+    const entries = (paths) => paths.map((p) => ({ path: p, tag: null }));
+    // 2 live of 3 → not majority → resolves
+    assert.equal(checkTouchesResolve(entries(["live/a.js", "live/b.js", "gone/x.js"]), root).majorityMissing, false);
+    // 1 live of 3 → majority missing → flagged
+    const r = checkTouchesResolve(entries(["live/a.js", "gone/x.js", "gone/y.js"]), root);
+    assert.equal(r.majorityMissing, true);
+    assert.equal(r.missing, 2);
+    assert.equal(r.mustExist, 3);
+    // tie (2 of 4) → not majority
+    assert.equal(checkTouchesResolve(entries(["live/a.js", "live/b.js", "gone/x.js", "gone/y.js"]), root).majorityMissing, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("checkTouchesResolve: (new) and (delete) touches are exempt — never counted as missing, never flagged", () => {
+  const root = makeTempTree(["real/existing.ts"]);
+  try {
+    const entries = [
+      { path: "brand/new.ts", tag: "new" },
+      { path: "brand/other.ts", tag: "delete" }, // target need not exist to be deleted
+      { path: "real/existing.ts", tag: null }, // must-exist, present
+    ];
+    const r = checkTouchesResolve(entries, root);
+    assert.equal(r.mustExist, 1); // the (new) and (delete) entries do NOT count
+    assert.equal(r.missing, 0);
+    assert.equal(r.majorityMissing, false);
+    assert.equal(r.results[0].exists, null); // (new) → skipped
+    assert.equal(r.results[1].exists, null); // (delete) → skipped
+    // Same shape but the ONE must-exist entry missing → 1/1 = majority (tags still exempt)
+    const r2 = checkTouchesResolve(
+      [{ path: "brand/new.ts", tag: "new" }, { path: "real/gone.ts", tag: null }],
+      root,
+    );
+    assert.equal(r2.majorityMissing, true);
+    assert.equal(r2.missing, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("checkTouchesResolve: a (delete) touch on an already-deleted file does not count as missing", () => {
+  const root = makeTempTree([]); // empty tree
+  try {
+    const entries = [
+      { path: "retired/a.js", tag: "delete" }, // file already gone; delete is a no-op → exempt
+      { path: "real/live.js", tag: null },     // must-exist, missing → 1/1 = majority
+    ];
+    const r = checkTouchesResolve(entries, root);
+    assert.equal(r.mustExist, 1);
+    assert.equal(r.missing, 1);
+    assert.equal(r.majorityMissing, true);
+    assert.equal(r.results[0].exists, null); // (delete) → skipped, NOT counted missing
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("checkTaskTouchesResolve: no ## Touches section → hasSection false, nothing to verify, not flagged", () => {
+  const body = "## Proposal\nnothing\n## Plan\nn/a";
+  const r = checkTaskTouchesResolve(body, ".");
+  assert.equal(r.hasSection, false);
+  assert.equal(r.mustExist, 0);
+  assert.equal(r.majorityMissing, false);
+});
+
+test("checkTaskTouchesResolve: full task body with (new) tag honored", () => {
+  const root = makeTempTree(["existing.ts"]);
+  try {
+    const body = "**type:** execution\n\n## Touches\n- existing.ts\n- brand-new.ts (new)\n- .claude/workflows/dead.js\n";
+    const r = checkTaskTouchesResolve(body, root);
+    assert.equal(r.mustExist, 2); // existing.ts + dead.js (brand-new.ts is (new))
+    assert.equal(r.missing, 1);   // only dead.js
+    assert.equal(r.majorityMissing, false); // 1 of 2 is not > 1/2
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── main --resolve (the dispatch-eligibility CLI hook) ────────────────────────────────────────────
+test("main --resolve: majority-missing task → exit 1; resolving task → exit 0", async () => {
+  const root = makeTempTree(["tasks/live.md", "live/a.js"]);
+  try {
+    fs.writeFileSync(
+      path.join(root, "tasks", "live.md"),
+      "---\nstatus: ready\n---\n## Touches\n- live/a.js\n- live/b.js (new)\n",
+    );
+    fs.writeFileSync(
+      path.join(root, "tasks", "dead.md"),
+      "---\nstatus: ready\n---\n## Touches\n- live/a.js\n- retired/a.js\n- retired/b.js\n",
+    );
+    assert.equal(await main(["node", "s", "--resolve", "--root", root, path.join(root, "tasks", "live.md")]), 0);
+    assert.equal(await main(["node", "s", "--resolve", "--root", root, path.join(root, "tasks", "dead.md")]), 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("main --resolve: missing task file → exit 2; no-arg → usage exit 2", async () => {
+  assert.equal(await main(["node", "s", "--resolve", "--root", ".", "does-not-exist.md"]), 2);
+  assert.equal(await main(["node", "s", "--resolve", "--root", "."]), 2);
 });

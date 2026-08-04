@@ -17,7 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
-import { parseTouchEntries, extractTouchesSection } from "./touches-parser.ts";
+import { parseTouchEntries, parseTouchEntriesWithTags, extractTouchesSection } from "./touches-parser.ts";
 
 // Kept for reference / callers; the authoritative test is isOverbroadDeclaration (semantic, below).
 export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
@@ -195,6 +195,62 @@ export function checkTouchesPair(parsedA, parsedB, expand) {
   return { disjoint, overlaps, reason: disjoint ? "disjoint file-sets" : "overlapping file-sets" };
 }
 
+// ── touchExists / checkTouchesResolve ────────────────────────────────────────────────────────────
+// gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files: a dispatch-eligibility
+// resolve check COMPLEMENTING checkTouchesPair. checkTouchesPair answers "do these two tasks'
+// declared file-sets overlap?"; it does NOT answer "do the declared files even exist?" — so 8 of 9
+// `status: ready` tasks pointing at files ADR-022 physically deleted sailed through eligibility.
+// touchExists answers that for ONE entry. The task's AC2 wording ("verify every entry in
+// `## Touches` that is NOT tagged `(new)`/`(delete)` actually exists") exempts BOTH structural tags
+// from the existence requirement:
+//   - `(new)`   — the task will CREATE this file; it need not exist yet → never "missing".
+//   - `(delete)`— the task will DELETE this file; if it is already gone the delete is a no-op, so a
+//                 nonexistent target cannot make the task undispatchable → never "missing" either.
+// A path with a wildcard (`*`/`?`) or a trailing `/` is resolved as a GLOB (a trailing `/` is a
+// directory glob → `**` appended, matching parseTouches's DIR-106 Fix 3). A glob that matches
+// nothing resolves to "missing". An exact path resolves via fs.existsSync.
+export function touchExists(p, root) {
+  const hasWildcard = /[*?]/.test(p);
+  const glob = p.endsWith("/") && !hasWildcard ? `${p}**` : p;
+  if (hasWildcard || glob !== p) {
+    return expandGlobs([glob], root).size > 0;
+  }
+  return fs.existsSync(path.join(root, glob));
+}
+
+// Given parsed [{path, tag}] entries and a repo root, resolve each against the real tree. Returns:
+//   results:        [{path, tag, exists}] — exists is null for `(new)`/`(delete)` (skipped), true/false otherwise
+//   mustExist:      count of entries that must resolve (no tag, i.e. not `(new)`/`(delete)`)
+//   missing:        count of those that did NOT resolve
+//   majorityMissing:true iff more than half of the must-exist entries are missing → the task's
+//                   Touches majority-resolve to nonexistent files and it must not be dispatched.
+// A task with no must-exist entries (all `(new)`/`(delete)`, or empty) is never majorityMissing.
+export function checkTouchesResolve(entries, root) {
+  const results = [];
+  let mustExist = 0;
+  let missing = 0;
+  for (const e of entries) {
+    if (e.tag === "new" || e.tag === "delete") {
+      results.push({ path: e.path, tag: e.tag, exists: null });
+      continue;
+    }
+    mustExist++;
+    const ok = touchExists(e.path, root);
+    results.push({ path: e.path, tag: e.tag, exists: ok });
+    if (!ok) missing++;
+  }
+  const majorityMissing = mustExist > 0 && missing > mustExist / 2;
+  return { results, mustExist, missing, majorityMissing };
+}
+
+// Convenience: run checkTouchesResolve over a full task/charter BODY (extracts its `## Touches`
+// section via the single-source extractTouchesSection, then tag-parses via parseTouchEntriesWithTags).
+export function checkTaskTouchesResolve(taskBody, root) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  const entries = hasSection ? parseTouchEntriesWithTags(section) : [];
+  return { hasSection, ...checkTouchesResolve(entries, root) };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function findRepoRoot(start) {
   let dir = start;
@@ -208,10 +264,45 @@ export function findRepoRoot(start) {
 
 function usage() {
   process.stderr.write("Usage: touches-orthogonality-check.mjs [--root <dir>] <charterA.md> <charterB.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --resolve [--root <dir>] <task.md>\n");
+}
+
+// --resolve mode: run the dispatch-eligibility resolve check over ONE task/charter file. Prints a
+// per-entry resolution table and exits 1 iff the task's Touches are MAJORITY-missing (not eligible
+// to dispatch). This is the mechanical hook fast-mode-loop-tick.md step 4 invokes before dispatching
+// a `status:ready` candidate (gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files).
+function mainResolve(args) {
+  let root = null;
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--resolve") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    files.push(args[i]);
+  }
+  if (files.length !== 1) { usage(); return 2; }
+  const file = files[0];
+  if (!fs.existsSync(file)) { process.stderr.write(`ERROR: task not found: ${file}\n`); return 2; }
+  const rootDir = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(file)));
+  const r = checkTaskTouchesResolve(fs.readFileSync(file, "utf8"), rootDir);
+  if (!r.hasSection) {
+    process.stdout.write(`RESOLVE ${file}: no ## Touches section — no existence claims to verify\n`);
+    return 0;
+  }
+  for (const res of r.results) {
+    if (res.exists === null) process.stdout.write(`  skip (${res.tag}): ${res.path}\n`);
+    else if (res.exists) process.stdout.write(`  ok:          ${res.path}\n`);
+    else process.stdout.write(`  MISSING:     ${res.path}\n`);
+  }
+  process.stdout.write(
+    `RESOLVE ${file}: ${r.missing}/${r.mustExist} non-tagged touches missing — ` +
+    (r.majorityMissing ? "MAJORITY-MISSING (NOT dispatchable)" : "resolves (dispatchable)") + "\n",
+  );
+  return r.majorityMissing ? 1 : 0;
 }
 
 export async function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--resolve")) return mainResolve(args);
   let root = null;
   const files = [];
   for (let i = 0; i < args.length; i++) {
