@@ -63,6 +63,20 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
 
 - [ ] AC1: **tick 文档的等待形态只有一种**——后台派发 + `<task-notification>`；
       文档与实践里不再出现 `sleep N; pgrep`、`for i in 1..N do grep 日志` 这类轮询（实跑 grep 贴出）
+- [ ] AC1b（**2026-08-04 追加：规格漏掉的另一半来源，管理者 meta-cc 实测**）:
+      **派发形态必须是 `run_in_background: true`。**
+      **实测**：今天全部 **9 次 `Agent` 派发，`run_in_background` 全部是 `false`，零例外**；
+      而 `plugin/loop/fast-mode-loop-tick.md:303` 写的派发形态是**后台 `Agent` + `run_in_background`**。
+      **并发本身是真的**（遥测区间重叠 5 对、同时在飞峰值 3，如 both-gates 与 blocked-channel
+      01:12–01:32 重叠 20 分钟、install-rewrites 与 drift-check 01:44–02:02 重叠 18 分钟），
+      **但那个并发是靠一条消息里发多个 `Agent` 调用拿到的**——harness 会并发执行，
+      **不是靠后台派发**。
+      **差别很实际**：前台派发下**内层阻塞到整批返回**，不能交错、拿不到先完成那个的早期反馈、
+      **期间什么也做不了**，而 tick 文档设计的 `<task-notification>` 唤醒流**从来没被触发过**。
+      **这是本规格先前漏掉的一半**：只看到了轮询循环，**而前台阻塞那部分连命令都不产生，
+      在会话日志里是纯空白**——所以按间隔统计时它被算进了等待，却找不到成因。
+      **判据**：meta-cc 查 `Agent` 调用的 `run_in_background` 字段**全为 `true`**。
+      **可直接查，不需要新仪器。**
 - [ ] AC2: **开发迭代用 `--for-task`**；**全量只用于 DoD 要求的最后两次**
 - [ ] AC3（可判收口）: **每任务的全量套件次数从 6 降到 ≤3**（数 `full-suite-*.log` 或遥测记录）
 - [ ] AC4（**负控制，必须显式**）: **DoD 的「最后连跑 2 次全量全绿」不许放宽**。
@@ -109,3 +123,20 @@ changed: **管理者交规格，外层核实其可机械检查的断言后原样
 
 **排期**：只动两份 tick/prompt 文档，**与在飞的 3b、与新立的编译缓存/spawn 判据均不相交**。
 **它是吞吐类里唯一不需要先改代码的**——两个机制都已就位，缺的只是用。
+
+## 一条确证：遥测的 `--task-start` 记录是可靠的（管理者，2026-08-04）
+
+遥测里**三个零时长记录**——`one-condition` / `tmux-guess` / `finding-shape`——
+**正是 OOM 当时在飞的那三个**，**也正是从 tmpfs 抢救出来的那三个 worktree**。
+
+**两条独立线索互相印证**（遥测侧 vs 抢救现场侧）⇒ **`--task-start` 记录本身是可靠的**。
+
+**外层记明这条的用处**：本班一直在说「遥测不可用」，
+**那句话必须被限定在正确的范围内，否则会把一个可靠的部件一起丢掉**：
+- **不可靠的是**：崩溃后没有 `--task-end` 的在飞集合（幽灵）、
+  以及重启会话补记的 `--task-start`（失真，见
+  [[gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards]] AC7）；
+- **可靠的是**：`--task-start` 记录本身——**它与抢救现场逐条对上**。
+
+**⇒ 对账机制可以信任 `--task-start` 的存在与时刻，去修 `--task-end` 的缺失**，
+而不必推倒重来。
