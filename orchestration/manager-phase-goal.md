@@ -137,7 +137,8 @@ user scope 安装 / 几条 README 命令就能配好并真正开始持续开发 
       而这次是我自己的验收。）*
 
 - [ ] **AC4**：**没有项目饿死另一个**。
-      **2026-08-04 二次 OOM 后**:仍无法判定,令牌等待时长遥测仍未落地。archguard/meta-cc 未恢复(人裁定暂缓),此刻没有跨项目争用场景可测。
+      **2026-08-04 人追问后核实**:仪器已落地(`waited_ms` 已进 `heavy-op-token.sh`,`gap-token-wait-times-are-printed-once-and-never-landed` `status: done`)——
+      仍不勾,因为 archguard/meta-cc 未恢复,没有真实争用场景可测,**「测不了」与「不满足」仍是两回事**。
       **2026-08-04:无法判定,不是不满足**——令牌的**等待时长一条都没被记录**
       (`$QUAY_GLOBAL_DIR/heavy-op/` 只有 `token` 与 `stale_reclaims`)。
       压力是双峰的(近 12 轮 tick:31 7 31 5 85 10 6 2 78 7 23 3),但那是间接推断不是测量。
