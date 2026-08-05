@@ -5137,3 +5137,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   单成员 batch），`dispatchable_disjoint` 结构上 2 < cap 3 ——池供不出 3 并发。机制正确自报（criterion false），
   非缺陷——glob 诚实声明 scope 的固有代价，修法=逐任务收敛 glob（渐进）。
 - 在飞 1/3（l2）。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T20:3xZ（外层，session-liveness monitor 重挂部署 outer-heartbeat 修复）
+
+- **monitor 重挂**（bqpknmos9，pid 237367 持有者）：重启 session-liveness 部署 outer-heartbeat 修复
+  （多源 max mtime 心跳）——**假 IDLE/OVERDUE 噪音应停止**（monitor 心跳源不再单一陈旧）。理由：假 OVERDUE
+  持续 2+ 小时，信号可信度受损风险（真 OVERDUE 会被误当假）。三判据绿。
+- **inner**：84416282 确认 closure round 7 + 新派 l2（dead-loop 判据）+ pool-collision 结构注（glob-heavy
+  候选 disjoint 2<cap 3——机制自报非缺陷）。
