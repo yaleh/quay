@@ -4339,3 +4339,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **实验遗留普查（管理者 §8b）**：46 测试文件默认 glob 每轮全跑，32 无人引用(70%)、15 被测实现已删。脚本 63 真·仅存 experiments。
 - **值得回收的四个**：git-lens-l-d-code-doc-ratio（L_D）、git-lens-l-g-structural-drift（L_G）、git-lens-l-s-behavior-variance（L_S）——ADR-006/007 五透镜的量化实现，补 architecture-analysis 探针；derive-touches-heuristic——解决 ## Touches 声明不准痛点。
 - **判据建议**：测试文件被测实现已不存在 ⇒ 随实现删除（15 个文件每轮空跑）。
+
+### tick 2026-08-05T14:3xZ（外层，打包态盲区立案）
+
+- **AC12b 三阻塞去二存一**：①welcome-屏（fresh 分支 17 处，ghost-drive merge）✓、③裸 ✖ 判红（结构化匹配）✓、剩②vendor package.json 铺设（命中仍 0）。
+- **使用视角提问查盲区**：scoped 选中集看不见打包态差异（select-tests-for-touches basename 配对不匹配打包态测试，src 任务 scoped 绿仍可能打包态坏）。已知边界（CLAUDE.md packaging e2e CI 独占）的代价。建任务 gap-scoped-selection-blind-to-packaging-state-diff（src 触碰任务强制含打包态测试）。
+- **archguard AC12a 157 分钟** + 完整红窗自愈闭环（真红 6 失败→归因→forward-fix→重跑绿→5019 passed→re-green→恢复派发，36 分钟零人工）。
