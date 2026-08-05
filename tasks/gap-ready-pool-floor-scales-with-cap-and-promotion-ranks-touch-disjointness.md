@@ -1,13 +1,6 @@
 ---
 id: gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness
-title: "ready pool floor=3 is ZERO BUFFER for a concurrency cap of 3 — the pool
-  must supply 3 NON-CONFLICTING tasks, and tonight 2 of 3 in-pool touched the
-  same plugin/loop doc (any conflict empties a slot); human ruling: floor should
-  be ~10x the cap (3 ⇒ ~30) because over-promotion is front-loaded not wasted
-  (4-piece sets are needed anyway, touchesResolve already kicks unresolvable)
-  while empty slots are pure waste — AND promotion ordering (gap>DIR only) must
-  rank touch-disjointness vs in-flight + pool candidates, else even floor 30 may
-  not yield 3 dispatchable; both changes together"
+title: "ready pool floor = cap x 4 (12 when cap=3; historical 08-02→08-04 pool was stable at 11 = 9 real / 3 cap = 3.0x proven, 4x leaves one notch far below 10x) AND promotion ranks touch-disjointness (else promoted candidates all collide) AND ready-pool-check reports dispatchable_disjoint (largest mutually-disjoint subset via checkTouchesPair) — floor is the means, dispatchable_disjoint >= cap is the criterion: 5 all-disjoint is enough, 30 all-colliding gets flagged; gap 2 (disjointness) lands first since a filtered pool needs a smaller raw floor"
 status: ready
 labels:
   - gap
@@ -20,89 +13,87 @@ extra:
 
 ## Proposal
 
-人裁定 + 管理者实测（2026-08-05）。**实测现状**：`ready-pool-check` 报 pool=2 / floor=3 / deficit=1——
-**就绪池比并发上限还小**（并发 3），而 todo 积压 **58 条**。
+人裁定修正（2026-08-05，修正先前 ×10 那条）+ 管理者实测。**历史实证**：用 git 历史重建各时点 ready
+池——**08-02 12:00 到 08-04 00:00 稳定在 11 条**（并发上限一直是 3，没变过），精确核对 labels 后
+**9 条真实 + 2 条夹具**（QENG-5-DEMO-*）⇒ **历史验证过的比例是 9/3 = 3.0×**（不是我先前说的 3.7×）。
+那段时间 inner 并发顺畅。08-04 12:00 崩到 4、现在实际可派发 2。
 
-**【人的裁定】就绪池应显著大于 inner 并发上限，甚至大一个数量级（并发 3 ⇒ floor 约 30）。** 理由：
-池子要提供的不是 3 条任务，是 **3 条互不冲突的任务**；今晚实测冲突率高（池里 3 条有 2 条同触
-`plugin/loop/` tick 文档），**floor=3 等于零缓冲，任一冲突就空槽**。
+**【人的裁定】floor = cap × 4**（cap=3 时 12）。三条理由：
+1. **3.0× 只证明够用、没证明是下限**——取 4× 留一档余量，但远低于 10×；
+2. **缺口 2（补晋纳入 disjointness 排序）落地后池子是被筛选过的**——同样可派发能力需要的原始池子更小
+   ⇒ **先修缺口 2 再看 floor 是否还要更高**，比一次提到 30 稳；
+3. **实操成本**——30 需要先解决批量晋级机械化才能启动；**12 意味着从现在 2 条补到 12 约 10 条，一轮
+   tick 能承受，不阻塞**。
 
-**【成本不对称支持这个方向】**：
-- **晋级的工作不会白做**——那些 todo 迟早要写四件套，提前写只是**前移不是额外开销**；
-- **空槽是纯浪费**——闲掉的 subagent 时间不回来。
-⇒ **过量晋级代价是「早做了」，欠量代价是「没做」，应偏向过量。**
+**【更本质的一条（裁定采纳）】池子大小是代理指标**，真正要的是「至少 cap 条互不冲突的候选」。
+`ready-pool-check` 除 `pool` 外再报 **`dispatchable_disjoint`**（用 `checkTouchesPair` 算池内**最大互不
+冲突子集大小**）——**floor 是手段、判据是结果**：池子 5 条但全不冲突就够了；30 条但全撞一起机制会自己
+报出来。今晚就是这情况的小型版（pool=3 但 2 条同触 tick 文档）。
 
-**【已有机制能兜住陈旧风险】**：ADR-022 那次 8 条 ready 指向已删文件的教训，`touchesResolve` 已经会
-把解析不了的候选踢出 pool——**大池子只会白晋级、不会污染可派发集**。
+### 选定机制（外层裁定）
 
-**【第二条缺口，同样无人认领】**：§3.6 补晋按 `gap-*>DIR-*` 顺序挑，**不看候选之间及与在飞任务的触摸
-相交性** ⇒ 补进来的可能全撞一起，**floor 提到 30 也可能凑不出 3 条能并发的**。建议补晋时把
-「与在飞任务及池内已有候选触摸不相交」纳入排序。
-
-**两条一起才有效，单改 floor 不够。**
-
-### 选定机制
-
-1. **floor 随并发上限缩放**：`POOL_FLOOR = 并发上限 × 10`（默认倍数 10，可配；并发上限取单一来源
-   ——出厂文档的并发常量或共享配置）。并发 3 ⇒ floor 30。**补晋压力常开**（池常 <30），机制（或
-   tick）批量补晋到 floor——补晋应用机械化，不是每 tick 手工 27 条。
-2. **补晋排序纳入触摸不相交**：候选按「与在飞任务 + 与池内已有候选 **触摸不相交**」排前（用
-   `checkTouchesPair`/`concurrent-batch-scheduler` 现有 disjointness 机制）；`gap-*>DIR-*` 作次排序
-   tiebreak 保留。
-3. **touchesResolve 守卫保留**：解析不了的候选踢出（ADR-022 教训兜底），大池只白晋级不污染。
-4. **成本不对称写进文档**：过量晋级 = 前移（非浪费）、欠量 = 空槽（纯浪费），偏向过量——loop 文档
-   或 ready-pool-check 头注。
-
-**归属**：ready-pool-check 是产品机制（人已裁定「晋级节奏是机制不是角色自觉」）；本条是它的
-**容量与多样性**修正。
+1. **floor = cap × 4**（默认 4×，可配；单一来源）。cap=3 ⇒ floor 12。补晋压力到 floor。
+2. **缺口 2 先行**：补晋排序纳入触摸不相交（与在飞任务 + 池内已有候选，`checkTouchesPair`）；
+   `gap-*>DIR-*` 作次 tiebreak。**先落地 disjointness 排序，再按需调 floor**（被筛选过的池子原始
+   容量需求更小）。
+3. **`dispatchable_disjoint` 上报**：ready-pool-check 除 `pool` 外报**池内最大互不冲突子集大小**
+   （两两 `checkTouchesPair` disjoint 的最大子集）。**判据 = `dispatchable_disjoint ≥ cap`**：
+   - `pool ≥ floor` 但 `dispatchable_disjoint < cap` ⇒ 机制**自报**「池大但全撞」（今晚小型版的机械版）；
+   - `pool < floor` 但 `dispatchable_disjoint ≥ cap` ⇒ 判据已满足（5 条全不冲突就够了）。
+4. **touchesResolve 守卫保留**：解析不了的候选踢出（ADR-022 教训兜底），大池只白晋级不污染。
+5. **成本不对称文档化**：过量晋级 = 前移非浪费、欠量 = 空槽纯浪费，偏向过量——loop 文档或
+   ready-pool-check 头注。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **floor 随并发上限缩放**——`POOL_FLOOR = 并发上限 × 10`（默认 10×，可配；单一来源）；
-      并发 3 ⇒ floor 30；不再硬编码 3
-- [ ] AC2: **补晋排序纳入触摸不相交**——候选与在飞任务 + 池内已有候选的 disjointness 排前
-      （`checkTouchesPair`）；`gap-*>DIR-*` 作次 tiebreak 保留
-- [ ] AC3: **池确实能供给 ≥并发上限 条互不冲突任务**——floor 30 下，可派发集里 ≥3 条两两 disjoint
-      （实测：今晚「3 条 2 条同触 loop 文档」场景不再空槽）
-- [ ] AC4: **touchesResolve 守卫保留**——解析不了的候选仍踢出 pool（ADR-022 8 条 ready 指向已删文件
-      的教训；大池只白晋级不污染可派发集）
-- [ ] AC5: **成本不对称文档化**——过量晋级 = 前移非浪费、欠量 = 空槽纯浪费、偏向过量（loop 文档或
+- [ ] AC1: **floor = cap × 4**（默认 4×，可配；单一来源）；cap=3 ⇒ floor 12；不再硬编码 3
+- [ ] AC2: **`dispatchable_disjoint` 上报**——ready-pool-check 用 `checkTouchesPair` 算池内最大互不
+      冲突子集大小，与 `pool` 一起报；**判据 = `dispatchable_disjoint ≥ cap`**
+- [ ] AC3: **池大但全撞自报**——`pool ≥ floor` 但 `dispatchable_disjoint < cap` ⇒ 机制报出（今晚
+      pool=3 / 2 条同触 tick 文档的小型版机械化）；`pool < floor` 但 `dispatchable_disjoint ≥ cap`
+      ⇒ 判据已满足不误报
+- [ ] AC4: **缺口 2 先行**——补晋排序纳入与在飞 + 池内候选的触摸不相交（`checkTouchesPair` 排前），
+      `gap-*>DIR-*` 次 tiebreak；先落 disjointness、再按需调 floor
+- [ ] AC5: **touchesResolve 守卫保留**——解析不了的候选仍踢出 pool（ADR-022 教训；大池只白晋级不污染）
+- [ ] AC6: **成本不对称文档化**——过量晋级 = 前移非浪费、欠量 = 空槽纯浪费、偏向过量（loop 文档或
       ready-pool-check 头注）
-- [ ] AC6: **补晋应用机械化**——机制（或 tick）批量补晋到 floor，不手工逐条（floor 30 下每 tick 应补
-      多条）；既有 `gap>DIR` 顺序保留为次 tiebreak
-- [ ] AC7: **真实使用**——floor 缩放下至少一次：池 ≥30 且可派发集 ≥3 条两两 disjoint（实测输出贴任务体）
+- [ ] AC7: **真实使用**——floor 12 下至少一次：`dispatchable_disjoint ≥ cap(3)` 且补晋到 floor 约 10 条
+      一轮 tick 承受（实测输出贴任务体）
 - [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
 - [ ] AC1–AC8 全部勾上；AC3/AC7 实测输出贴任务体
-- [ ] floor 随 cap 缩放（3 ⇒ 30）；补晋纳入 disjointness；池供给 ≥3 条互不冲突任务
+- [ ] floor = cap × 4（12）；`dispatchable_disjoint` 上报为判据；补晋纳入 disjointness；池供给 ≥cap 条
+      互不冲突任务
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
-- plugin/scripts/ready-pool-check.ts（floor 缩放 + 补晋 disjointness 排序）
-- plugin/test/ready-pool-check.test.mjs（AC2/AC3/AC4 断言 + 既有行为回归）
-- plugin/loop/fast-mode-loop-tick.md（§3.6：floor 语义 + disjointness 补晋 + 成本不对称）
+- plugin/scripts/ready-pool-check.ts（floor=cap×4 + dispatchable_disjoint + 补晋 disjointness 排序）
+- plugin/test/ready-pool-check.test.mjs（AC2/AC3/AC4/AC5 断言 + 既有行为回归）
+- plugin/loop/fast-mode-loop-tick.md（§3.6：floor 语义 + dispatchable_disjoint 判据 + disjointness 补晋
+  + 成本不对称）
 - plugin/loop/orchestrator-loop-tick.md（补晋应用批量化的接线，若适用）
 
 ## Contract
 
-measure   pool_floor = `grep -n 'POOL_FLOOR' plugin/scripts/ready-pool-check.ts` stdout 的值
-band      pool_floor = 并发上限 × 10（默认 30，可配）
-invariant pool_yields_cap_disjoint = 1（floor 30 下可派发集 ≥3 条两两 disjoint）
+measure   dispatchable_disjoint = `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --json` stdout 的 dispatchable_disjoint 字段
+band      dispatchable_disjoint >= 并发上限（cap=3 时 ≥3）
+invariant floor_is_cap_x4 = 1（`POOL_FLOOR = cap × 4`，默认 12）
 invoke    `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --json`
-control   构造 3 条同触 loop 文档的候选 ⇒ 补晋后池仍 ≥3 条 disjoint（AC3）；解析不了的候选 ⇒ 踢出（AC4）
-resume    floor 缩放与 disjointness 排序分两步提交，任一步完成即写盘
+control   3 条候选 2 条同触 loop 文档 ⇒ dispatchable_disjoint=2 <3 ⇒ 报出（AC3）；5 条全 disjoint ⇒
+          判据满足（AC3 负向）；解析不了候选 ⇒ 踢出（AC5）
+resume    disjointness 排序与 dispatchable_disjoint 分两步提交，任一步完成即写盘
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-05T03:5xZ
-changed: 外层受人裁定 + 管理者实测立案（一条任务两缺口，一起才有效）。四处收紧：
-(1) **floor 随 cap 缩放**——3 ⇒ 30（10×，可配）；池供给的是「3 条互不冲突」不是「3 条」；
-(2) **补晋纳入 disjointness**——与在飞 + 池内候选的触摸不相交排前（checkTouchesPair），否则 floor 30
-    也凑不出 3 条并发；
-(3) **成本不对称写死**——过量 = 前移非浪费、欠量 = 空槽纯浪费，偏向过量；touchesResolve 兜陈旧；
-(4) **补晋应用机械化**——floor 30 下批量补晋，不手工逐条。
-status: todo——ready-pool-check 产品机制修正；排当前链（c 块在飞 → scoped）后，高优先。
+at: 2026-08-05T04:1xZ
+changed: 外层受人裁定修正立案（×10 → ×4，+ dispatchable_disjoint 判据）。四处收紧：
+(1) **floor = cap × 4（12）**——历史 9 真/3 cap = 3.0× 只证够用非下限，4× 留一档远低于 10×；
+(2) **缺口 2 先行**——补晋 disjointness 排序先落地（筛选过的池子原始需求更小），floor 按需再调；
+(3) **dispatchable_disjoint 是判据、floor 是手段**——池 5 全不冲突就够、池 30 全撞机制自报（今晚
+    pool=3/2 同触的机械版）；
+(4) **实操**——12 一轮 tick 补 ~10 条承受；30 需先批量晋级机械化。
+status: ready——ready-pool-check 产品机制修正；排当前链（scoped 在飞）后，高优先。
