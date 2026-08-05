@@ -88,10 +88,21 @@ export function isFailureLine(line: string): boolean {
 
 export async function run(argv: string[]): Promise<number> {
   const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
-  const command = parseArg(argv, "--command") ?? "bash scripts/test.sh";
+  const explicitCommand = parseArg(argv, "--command");
+  const laneCountArg = parseArg(argv, "--lane-count");
+  const laneCount = Number(laneCountArg ?? "8");
+  // AC16 (outer 2026-08-05, ABORT #2): `--lane-count` must PROPAGATE to the spawned
+  // test.sh — before this, the command was static `bash scripts/test.sh`, so an explicit
+  // `--lane-count 1` only wrote the state field while the suite still ran the default
+  // concurrency (measured: 9 processes at --test-concurrency=8, PSI 94 — the crash).
+  // When --lane-count is explicitly given, splice `--test-concurrency=<N>` (the `=`
+  // spelling test.sh's flags-only form requires); when omitted, defer to test.sh's own
+  // derived default (currently pinned to 8 per resource-gate AC5) and record 8.
+  const command =
+    explicitCommand ??
+    (laneCountArg ? `bash scripts/test.sh --test-concurrency=${laneCount}` : "bash scripts/test.sh");
   const stateFile = path.resolve(root, parseArg(argv, "--state-file") ?? ".quay/full-suite-state.json");
   const logFile = path.resolve(root, parseArg(argv, "--log-file") ?? ".quay/full-suite.log");
-  const laneCount = Number(parseArg(argv, "--lane-count") ?? "8");
 
   const startedAt = new Date().toISOString();
   const base = { runner: "outer" as const, startedAt, laneCount };

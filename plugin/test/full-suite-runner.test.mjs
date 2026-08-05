@@ -132,6 +132,34 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
   }
 });
 
+test("AC16 — --lane-count N propagates --test-concurrency=N into the spawned test.sh command", async () => {
+  // Regression for outer 2026-08-05 ABORT #2: the command was static `bash scripts/test.sh`,
+  // so --lane-count only wrote the state field while the suite still ran the default
+  // concurrency (measured 9 processes at concurrency 8, PSI 94 — the crash). Now an explicit
+  // --lane-count MUST splice --test-concurrency=<N> into the spawned command.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac16-"));
+  const argsLog = path.join(root, "args.txt");
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "scripts", "test.sh"),
+    `#!/usr/bin/env bash\necho "$*" > '${argsLog}'\necho "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  try {
+    const child = runRunner({ root, laneCount: 2 }); // NO --command → default path with splice
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.equal(s.state, "green");
+    assert.equal(s.laneCount, 2);
+    await poll(() => fs.existsSync(argsLog));
+    const args = fs.readFileSync(argsLog, "utf8").trim();
+    assert.ok(args.includes("--test-concurrency=2"), `--lane-count must splice --test-concurrency=N, got: ${args}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("AC1 — while the suite runs, state=running with finishedAt/durationMs null", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-root-"));
   const { f, dir } = fakeSuite('echo "started"\nsleep 2\necho "# fail 0"\nexit 0');
