@@ -3,10 +3,12 @@
 // (AC2/AC3/AC7/AC8): the generic strategic-document staleness checker.
 //
 // Coverage map (task ACs):
-//   AC2  — the checker scans docs/proposals + orchestration/*ROADMAP* for references to the
+//   AC2  — the checker scans docs/proposals + orchestration/*.md for references to the
 //          classic-pipeline script files ADR-022 deleted (prepare-milestone.js, execute-milestone.js,
 //          milestone-worktree.ts), judged by PATH EXISTENCE (only the deleted basenames flag, never
 //          an existing script) + RETIRED-MECHANISM reference with an annotation exemption.
+//          (The orchestration arm was widened from the dead *ROADMAP* glob to orchestration/*.md by
+//          gap-stale-check-orchestration-arm-is-a-dead-glob, 2026-08-05 — AC1/AC2 below.)
 //   AC3  — the default doc gate is wired into scripts/test.sh run_static_checks (asserted here as a
 //          regression: the REAL repo's gate exits 0, i.e. no NEW stale doc beyond the baseline).
 //   AC7  — this file uses node:test and declares // @test-group governance.
@@ -151,6 +153,42 @@ test("default doc gate — a NEW stale strategic doc reddens the gate; restore g
   const r2 = runIn(ws, "--json");
   assert.equal(r2.status, 0, `restored tree should pass, got ${r2.status}`);
   assert.equal(JSON.parse(r2.stdout).stale_refs_found, 0);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("AC1 — orchestration arm covers orchestration/*.md: the dead *ROADMAP* glob is gone", () => {
+  const src = fs.readFileSync(CHECKER, "utf8");
+  // The dead glob must not return (gap-stale-check-orchestration-arm-is-a-dead-glob).
+  assert.ok(!src.includes('includes("ROADMAP")'), "dead orchestration *ROADMAP* glob must be gone");
+  // The orchestration arm must iterate every .md under orchestration/ (not a single filename pattern).
+  const m = src.match(/const orchDir = path\.join\(root, "orchestration"\);[\s\S]*?return files\.sort\(\);/);
+  assert.ok(m, "collectStrategicDocs orchestration arm block not found");
+  assert.ok(m[0].includes('e.endsWith(".md")'), "orchestration arm must match all .md, not a single filename pattern");
+});
+
+test("AC2 — a stale SPEC-* orchestration doc is now detected (dead glob eliminated)", () => {
+  const ws = makeWorkspace();
+  // SPEC-* is the orchestration naming convention the *ROADMAP* glob NEVER matched. A stale ref
+  // there must redden the gate now that the arm covers orchestration/*.md.
+  fs.writeFileSync(path.join(ws, "orchestration", "SPEC-foo.md"), "# SPEC\n\nUses prepare-milestone.js.\n");
+  const r = runIn(ws, "--json");
+  assert.equal(r.status, 1, `SPEC-* stale ref must redden the gate, got ${r.status}:\n${r.stdout}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.stale_refs_found, 1, `expected 1 new stale ref, got ${out.stale_refs_found}`);
+  assert.equal(out.new_stale_docs.length, 1);
+  assert.ok(
+    out.new_stale_docs[0].rel.startsWith("orchestration/"),
+    `rel must be under orchestration/, got ${out.new_stale_docs[0].rel}`,
+  );
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("AC2 — a clean orchestration/SPEC-* doc keeps the gate green (no false positive)", () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "orchestration", "SPEC-clean.md"), "# SPEC\n\nReferences only the fast mode.\n");
+  const r = runIn(ws, "--json");
+  assert.equal(r.status, 0, `clean SPEC-* doc must stay green, got ${r.status}:\n${r.stdout}`);
+  assert.equal(JSON.parse(r.stdout).stale_refs_found, 0);
   fs.rmSync(ws, { recursive: true, force: true });
 });
 
