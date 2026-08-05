@@ -2866,6 +2866,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **无在飞**：本批派发完毕，槽位全空。外层 verification-round 后按滚动语义可派下一批（若 outer
   verification-round 结果绿）。loop-driver LIVE。
 
+### tick 2026-08-05T03:4xZ（内层，`re-anchor #1`：首次固定重锚唤醒，自检四查）
+
+- **触发**：外层转达 `plugin/scripts/reanchor-prompt.txt` 固定常量（inner-anchor AC6 首次实跑）。
+  逐项核对出厂 `fast-mode-loop-tick.md` 状态自检清单：
+  - **① 在飞 + worktree 纪律**：在飞 0（≤3 ✓）；**偏差——6 条本批已合并任务的 worktree + 分支
+    未清理**（doc step 2 要求合并后 `git worktree remove` + `git branch -d`，我漏了）→ 已自我修正：
+    6 个 worktree + 6 条 task/* 分支全部删除（残留 M239 迭代 worktree 与 send-keys-verified 分支为
+    历史/非本批，未动）。
+  - **② 就绪池**：pool=3（≥3，无需按 3.6 补晋）✓。
+  - **③ 收尾**：无未提交 status:done 写入、无 --task-end、无轮次记录（新契约后 inner 未越界）✓。
+  - **④ 停止条件**：无 .halt、无 verification-round 文件（缺失不阻塞）✓。
+- **结论**：一处偏差已对齐修正，其余符合 → 本唤醒无动作（不决定任何任务动作）。重锚机制首跑成功
+  （inner-anchor AC6 证据之一）。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
@@ -2978,3 +2992,13 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > - **红窗分诊**：已定位（2 声明缺失 + 目录约定 `[basename]="问句"`）→ 驱动 inner 补声明
 >   （03:01:30Z 投递，transcript 验证）；inner 已在 catalog 实测 + 修改中。
 > - 修后我重跑套件做 gate，绿则关 4 条落地未翻（roadmap/review-cadence/closure-sync/inner-anchor）。
+
+> **03:03Z 增补（首个 live re-anchor + AC6 证据捕获）**：
+> - **首个重锚转发**（外层 1c 步，inner 真空闲：0 agent）：投递 03:03:25Z（transcript 验证），inner 确认
+>   「first live re-anchor wake (inner-anchor AC6 real-use)」。
+> - **重锚生效实证**：inner 重读出厂文档 → 核对 → 自检发现 worktree 残留（closure-async/drive-text/
+>   inner-anchor）→ **自我修正**（移除 stranded worktrees）。符合 AC6「要么报符合要么修正明确偏差」。
+> - **判据边界观察（记录，待 inner-anchor 任务补）**：1c 的空闲判据「无在飞 bracket」在**新契约下失真**——
+>   落地未翻任务的 bracket 由外层收尾才关（drive-text/inner-anchor 仍 open），但 0 agent 在飞 = 真空闲。
+>   bracket 代理需改「无在飞 agent」，否则验证轮期间永远判忙、重锚不发。属 inner-anchor 任务范围。
+> - 全量套件第 3 跑（bzt433wtm）进行中。
