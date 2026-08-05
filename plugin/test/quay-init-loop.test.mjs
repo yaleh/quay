@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group product
 // quay-init-loop.test.mjs — gap-loop-mechanism-lives-outside-the-package-and-cannot-ship +
 // gap-cold-start-needs-a-human-to-dictate-eight-steps (phase 1: AC2/AC3/AC4).
 // Tests the `--loop` category of plugin/scripts/quay-init.sh: lays down the two-layer loop
@@ -78,6 +78,43 @@ function runInit(workspace, args = [], pluginRoot = pluginDir) {
       encoding: 'utf8',
       env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
     });
+}
+
+// ── gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down helpers ────────────────────────────
+// extractRefs(pluginRoot, prefix): every `<prefix>/<file>` reference in the shipped skills + tick
+// docs — the SAME extraction quay-init.sh's verify_referenced_landed uses, so the test's landing
+// assertion and the installer's own check cannot disagree about what the referenced set is.
+function extractRefs(pluginRoot, prefix) {
+  const files = [];
+  for (const d of fs.readdirSync(path.join(pluginRoot, 'skills'), { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    const f = path.join(pluginRoot, 'skills', d.name, 'SKILL.md');
+    if (fs.existsSync(f)) files.push(f);
+  }
+  const loopDir = path.join(pluginRoot, 'loop');
+  for (const f of fs.readdirSync(loopDir)) {
+    if (f.endsWith('.md')) files.push(path.join(loopDir, f));
+  }
+  const re = new RegExp(`(?:${prefix})/[a-zA-Z0-9._-]+`, 'g');
+  const refs = new Set();
+  for (const f of files) {
+    const text = fs.readFileSync(f, 'utf8');
+    let m;
+    while ((m = re.exec(text)) !== null) refs.add(m[0]);
+  }
+  return [...refs].sort();
+}
+
+// declaredSet(pluginRoot, kind): the machine-readable `<!-- <kind>: <path> -->` declarations in
+// plugin/skills/init/SKILL.md — `self-create` (local-state files the first run creates, AC8) and
+// `reference-doc` (quay-specific template prose, not a loop-mechanism deliverable).
+function declaredSet(pluginRoot, kind) {
+  const skill = fs.readFileSync(path.join(pluginRoot, 'skills', 'init', 'SKILL.md'), 'utf8');
+  const re = new RegExp(`<!-- ${kind}: ([a-zA-Z0-9._/-]+) -->`, 'g');
+  const set = new Set();
+  let m;
+  while ((m = re.exec(skill)) !== null) set.add(m[1]);
+  return set;
 }
 
 // ── AC3: dry-run lists would-copy; real run lays down the full set ─────────────────────────────────
@@ -625,5 +662,153 @@ test('AC3 — a disposed mechanism cannot become the sole driver (BANNED-MECHANI
     const c = runDriverCheck(ws);
     assert.equal(c.status, 5, `a non-cron sole driver must be BANNED-MECHANISM (exit 5), got ${c.status}: ${c.stdout}`);
     assert.match(c.stdout, /BANNED-MECHANISM/, 'must report BANNED-MECHANISM');
+  } finally { cleanup(ws); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down
+// referenced-set ⊆ landed-set, mechanically enforced (AC1/AC2/AC3/AC4/AC6/AC7/AC8/AC9).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+const INIT_LOOP_ARGS = ['--loop', '--root', 'WS', '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
+
+// AC1/AC4 — after a real --loop install, EVERY plugin/scripts/* reference in the shipped skills +
+// tick docs exists in the target (missing_after_install = 0). The referenced set is non-empty —
+// a check that only ever sees the empty set is indistinguishable from one that sees nothing.
+test('AC1/AC4 — every plugin/scripts/* reference in the shipped skills/tick docs lands after --loop (missing_after_install = 0)', () => {
+  const ws = makeTmp();
+  try {
+    const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
+    const r = runInit(ws, args);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /verify-referenced-landed: OK/, 'quay-init must run the referenced⊆landed check and report OK');
+    const refs = extractRefs(pluginDir, 'plugin/scripts');
+    assert.ok(refs.length > 0, 'the referenced set must be non-empty (the check is not verifying the empty set)');
+    for (const ref of refs) {
+      assert.ok(fs.existsSync(path.join(ws, ref)), `referenced script must exist after install: ${ref}`);
+    }
+  } finally { cleanup(ws); }
+});
+
+// AC2 — the check must REPORT the two real live specimens (monitor-mount-check.sh,
+// send-keys-verified.sh) when they are absent from the landing set. Reproduce the pre-fix state in
+// a plugin copy by removing them from the shipped scripts dir (referenced by cold-start, unable to
+// land) — the check names both and fails the install.
+test('AC2 — the check reports the two real live specimens (monitor-mount-check.sh, send-keys-verified.sh) when they cannot land', () => {
+  const src = makeTmp();
+  try {
+    fs.cpSync(pluginDir, src, { recursive: true });
+    fs.rmSync(path.join(src, 'scripts', 'monitor-mount-check.sh'), { force: true });
+    fs.rmSync(path.join(src, 'scripts', 'send-keys-verified.sh'), { force: true });
+    const ws = makeTmp();
+    try {
+      const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
+      const r = runInit(ws, args, src);
+      assert.notEqual(r.status, 0, 'the check must FAIL when a referenced script cannot land');
+      assert.match(r.stderr, /monitor-mount-check\.sh/, 'must name monitor-mount-check.sh');
+      assert.match(r.stderr, /send-keys-verified\.sh/, 'must name send-keys-verified.sh');
+      assert.match(r.stderr, /referenced-not-landed/, 'must use the referenced-not-landed category');
+    } finally { cleanup(ws); }
+  } finally { cleanup(src); }
+});
+
+// AC3 — bidirectional negative control: a skill reference to a script that does not ship ⇒ the
+// check reports it; remove the reference ⇒ the check passes. Both directions.
+test('AC3 — bidirectional control: an unlanded script reference is reported; removing it passes', () => {
+  const src = makeTmp();
+  try {
+    fs.cpSync(pluginDir, src, { recursive: true });
+    const skillPath = path.join(src, 'skills', 'cold-start', 'SKILL.md');
+    const orig = fs.readFileSync(skillPath, 'utf8');
+    // fail direction: add a call to a script that does not exist in plugin/scripts/.
+    fs.writeFileSync(skillPath, `${orig}\nbash <root>/plugin/scripts/ghost-check.sh --does-not-exist\n`);
+    const ws = makeTmp();
+    try {
+      const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
+      const r = runInit(ws, args, src);
+      assert.notEqual(r.status, 0, 'a new unlanded script call must FAIL the check');
+      assert.match(r.stderr, /ghost-check\.sh/, 'the failure must name the missing script');
+      assert.match(r.stderr, /referenced-not-landed/, 'must use the referenced-not-landed category');
+    } finally { cleanup(ws); }
+    // pass direction: remove the call → the check passes again.
+    fs.writeFileSync(skillPath, orig);
+    const ws2 = makeTmp();
+    try {
+      const args2 = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws2 : a));
+      const r2 = runInit(ws2, args2, src);
+      assert.equal(r2.status, 0, `removing the call must pass the check:\n${r2.stderr}`);
+      assert.match(r2.stdout, /verify-referenced-landed: OK/, 'must report the check passing after removal');
+    } finally { cleanup(ws2); }
+  } finally { cleanup(src); }
+});
+
+// AC7 — the check covers orchestration/* and docs/analysis/* too. Every referenced file must be
+// either landed in the target, or declared self-create / reference-doc in init/SKILL.md. Nothing
+// may be referenced yet unaccounted-for (that would be drift the two-hand-maintained-lists check
+// exists to catch).
+test('AC7 — every orchestration/* and docs/analysis/* reference is landed or declared (complete classification)', () => {
+  const ws = makeTmp();
+  try {
+    const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
+    const r = runInit(ws, args);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const selfcreate = declaredSet(pluginDir, 'self-create');
+    const refdoc = declaredSet(pluginDir, 'reference-doc');
+    assert.ok(selfcreate.size > 0, 'init/SKILL.md must declare at least the local-state self-create files');
+    assert.ok(refdoc.size > 0, 'init/SKILL.md must declare the quay reference-doc class');
+    const refs = [...extractRefs(pluginDir, 'plugin/scripts'), ...extractRefs(pluginDir, 'orchestration'), ...extractRefs(pluginDir, 'docs/analysis')];
+    assert.ok(refs.length > 0, 'the referenced set must be non-empty');
+    for (const ref of refs) {
+      const landed = fs.existsSync(path.join(ws, ref));
+      const declared = selfcreate.has(ref) || refdoc.has(ref);
+      assert.ok(landed || declared, `referenced file must be landed OR declared: ${ref}`);
+    }
+  } finally { cleanup(ws); }
+});
+
+// AC8 — local-state files are NOT shipped as empty factory copies (which would break the
+// byte-identical upgrade check), and are declared self-create in init/SKILL.md with a command.
+test('AC8 — local-state files are not shipped empty; they are declared self-create with a command', () => {
+  const ws = makeTmp();
+  try {
+    const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
+    const r = runInit(ws, args);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    // The local-state files must NOT be laid down by --loop (no empty factory copies).
+    for (const f of ['orchestration/tick-log.md', 'orchestration/escalations.md',
+      'docs/analysis/batch2-queue-state.md', 'docs/analysis/contract-violations.md']) {
+      assert.ok(!fs.existsSync(path.join(ws, f)), `local-state file must NOT be shipped empty: ${f}`);
+    }
+    // The shipped init skill declares them self-create and gives the self-create command.
+    const selfcreate = declaredSet(pluginDir, 'self-create');
+    for (const f of ['orchestration/tick-log.md', 'orchestration/escalations.md',
+      'docs/analysis/batch2-queue-state.md', 'docs/analysis/contract-violations.md']) {
+      assert.ok(selfcreate.has(f), `must be declared self-create: ${f}`);
+    }
+    const initSkill = fs.readFileSync(path.join(pluginDir, 'skills', 'init', 'SKILL.md'), 'utf8');
+    assert.match(initSkill, /Self-create command/, 'the declaration must give the self-create command');
+    assert.match(initSkill, /touch orchestration\/tick-log\.md/, 'must give the self-create command for tick-log.md');
+    assert.match(initSkill, /byte-identical upgrade check/, 'must state why empty copies are not shipped');
+  } finally { cleanup(ws); }
+});
+
+// AC6 — quay-init.sh self-resolves its plugin root from its own path when the host does not inject
+// CLAUDE_PLUGIN_ROOT (the documented Skill call), and still fails closed on an unusable root.
+test('AC6 — quay-init self-resolves the plugin root without CLAUDE_PLUGIN_ROOT, and fails closed on a bad root', () => {
+  const ws = makeTmp();
+  try {
+    const script = path.join(pluginDir, 'scripts', 'quay-init.sh');
+    const env = { ...process.env };
+    delete env.CLAUDE_PLUGIN_ROOT;
+    const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
+      '--tmux-session', 'proj-0:0.0', '--worktree-root', diskWorktreeRoot()];
+    const r = spawnSync('bash', [script, ...args], { cwd: ws, encoding: 'utf8', env });
+    assert.equal(r.status, 0, `self-resolved init must exit 0:\n${r.stderr}`);
+    assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh')), 'the loop mechanism must still land');
+    // Fail-closed retained: a bad plugin root aborts, never a silent wrong path.
+    const bad = spawnSync('bash', [script, ...args, '--plugin-root', '/nonexistent/plugin'],
+      { cwd: ws, encoding: 'utf8', env });
+    assert.equal(bad.status, 2, 'a bad plugin root must fail closed (exit 2)');
+    assert.match(bad.stderr, /not a quay plugin/, 'must name the invalid plugin root');
   } finally { cleanup(ws); }
 });
