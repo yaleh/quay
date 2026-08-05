@@ -3079,3 +3079,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （收尾变一行）→ ③gap-scoped-runs-pay-full-static-check-overhead 最后。inner 读 3 任务建简报中。
 - **闭环证据**：重锚 #1 + 首个 verification-round + 红窗分诊（2 次 RED→修复→绿）全程在 git 历史
   （fcd8e88e/bada334d/f2e0ea8c/c86a9b25）。
+
+### tick 2026-08-05T03:30Z（外层，`unblock`：SYNTHESIS 四缺口 → 立案 manager 层产品化 + 两职能机制）
+
+- **人要求汇总读核**（`orchestration/SYNTHESIS-four-gaps-2026-08-05.md`）：四缺口共同根 = **manager 层
+  实跑三层、只交付两层**（缺口 1/2/3 恰都是 manager 层职责，该层从未产品化）。
+- **立案三条**（缺口 4 为载体）：
+  1. `gap-productize-the-manager-layer`（todo，umbrella）——出货第三层（plugin/skills/manager/SKILL.md
+     + 每日复盘节奏 + §1.5/§1.6 规则）；冷启动 AC8c 2/6 废键修复（inner-state.sh/send-keys-verified）；
+     启动配置三件套随层出货；路线图对照物。
+  2. `gap-value-prioritization-has-no-mechanism`（todo，职能①）——54 条 todo 哪条最重要无机械答案；
+     相关性信号（战略追溯/阻塞/成本）扩 ready-pool-check，不削弱 gap>DIR。
+  3. `gap-quality-criteria-are-point-in-time-no-trend-criteria`（todo，职能②）——趋势判据新品类；
+     每运行指标记录 + 趋势打标；0.251→0.464→0.321 为回归控制；入每日复盘常项。
+- 缺口 1 的复盘节奏已 done；缺口 4 先结晶层、缺口 2/3 机制归属该层（交叉标注）。
+- 在飞：下批（suite(a)→closure-grant→scoped）inner 派发中（suite(a) --task-start 已打）。
