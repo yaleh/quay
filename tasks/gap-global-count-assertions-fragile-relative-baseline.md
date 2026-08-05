@@ -55,6 +55,8 @@ develop/integration 滞后不再触发断言噪声。
 
 ## Touches
 
+- tasks/gap-global-count-assertions-fragile-relative-baseline.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/test/（B3-2 族全局计数断言 → 相对基线判据）
 - plugin/scripts/（基线快照 helper，若成脚本）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
