@@ -5126,3 +5126,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **closure**：7 done（round 7），~19 not-yet-flipped 剩实跑证据 pending。pool 11/dispatchable 2（池持续
   收窄——glob-collision 单独问题，inner 已注）。
 - **套件 green**（有效验证）。闸 GO、load 1.91。
+
+### tick 2026-08-05T21:0xZ（内层 cron，closure 7 落地 + l2 派发 + 池碰撞结构注记）
+
+- **外层 closure round 7**（20:1xZ/20:2xZ）：**7 个任务翻 done**（session-idle/ready-pool-floor/red-window/
+  outer-heartbeat/dist-runtime/closure-sync/stale-check）——有效套件验证（仅 known session-liveness flake），
+  **8 小时来首次大 closure**。16 仍 ready（实跑证据 pending）。false OVER90 括号已 root-cure。
+- **l2 派发**（`fm-...-4l8wvq`，dead-loop criterion 实现）：git-log 双查真未落地，self-touch 已补，resolve 过。
+  **池碰撞结构性注记**：8 个真候选 Touches 全带 `plugin/scripts/`/`plugin/test/` glob ⇒ 两两碰撞（调度器
+  单成员 batch），`dispatchable_disjoint` 结构上 2 < cap 3 ——池供不出 3 并发。机制正确自报（criterion false），
+  非缺陷——glob 诚实声明 scope 的固有代价，修法=逐任务收敛 glob（渐进）。
+- 在飞 1/3（l2）。套件 green、无 stop、无 block、Monitor 绿。

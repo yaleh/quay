@@ -77,6 +77,8 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 
 ## Touches
 
+- tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/（dead-loop 检测 helper：transcript user 消息 + git 提交时间窗）
 - orchestration/SPEC-complete-delivery-surface-2026-08-05.md（第 5 节 L2 实例交叉标注）
 - tasks/gap-complete-delivery-surface-spec-and-l1-verification.md（L2 补「循环在转」）
