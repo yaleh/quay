@@ -4991,3 +4991,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（outer-heartbeat 0 提交，工作中）。无 fan-in。无新派发——池 disjoint 3 全为已落地 3 条
   （red-pattern/ghost-drive/leak），真候选与 outer-heartbeat glob-碰撞（上一 tick 分析）。
 - 套件 running（外层全量 re-running）、load 7.80（外层套件资源）、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T19:1xZ（外层，1-lane 套件中止 + 2-lane 重跑）
+
+- **1-lane 套件中止（外层裁定）**：169 测试文件完成 34（~20%）@17.5min ⇒ ETA ~80min 不可实用；且卡在
+  backlog-client.test.mjs（ep_poll 5min 无输出）。**backlog-client isolation 测过（7/7, 687ms）**——非真
+  挂，是套件环境/资源争用（nested coverage 子进程 + inner 并发验证）导致的瞬时限停。
+- **重跑 laneCount=2**（19:10:54 起，state=running）：1-lane 不可实用（laneCount 校准待立案——闸已接线
+  守卫，静态 2.1 比可放松）；2-lane 是安全中间值（闸 GO 守卫，无 ABORT #5 超订风险）。
+- **观察**：backlog-client 环境限停 + 1-lane 慢速 = 套件可靠性两问题，待全量绿后立案。
+- **closure 24 条**待 2-lane 套件绿。等 bqe6vb3l2。
