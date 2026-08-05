@@ -4877,3 +4877,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 无 fan-in（defect-fix 0 提交 / session-idle 1 提交，均在飞工作中）、无派发（保守化 hold 第 3 槽）。
 - 停止条件无（pane busy=agent 工作）、套件 green、Monitor 三判据绿、load 3.97。
 - 待 defect-fix land（池自动排除 already-landed）后恢复第 3 槽派发。
+
+### tick 2026-08-05T18:0xZ（外层，closure 积压 + 全量等待链显化）
+
+- **inner 重负载**：2 agent（session-liveness scoped gate 20m51s / finding-imports 26m47s），输入框
+  「等 agent 完成通知」。**git-log 漏检率 5/5**（web-board/stale-check/axis-generator +2 = 5 次已落地
+  重派发）——taskworklanded 缺陷 fix 在飞（inner 保守 hold 第 3 槽等池清）。axis-generator fan-in
+  修真 latent CI 缺陷（fresh-clone fixture 确定性，10/10）。
+- **closure 积压 9 条**（+ruling-required/upgrade-channel）：全卡「全量套件绿」。
+- **全量再推迟**：闸 GO + load 2.65，但 inner 正跑 session-liveness scoped gate（flaky 边际测试）=
+  串行纪律最高风险场景。**等待链显化**：closure↔全量↔inner-busy——inner 测试空窗时起全量（下 tick
+  或 agent 落定）。
+- **在飞 3/3**（axis-generator / taskworklanded / session-idle）。套件 green(aborted)。Monitor 三判据绿、
+  detect-stop 无 block、.halt quay/archguard 运行中 meta-cc 暂停。
