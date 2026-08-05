@@ -2549,6 +2549,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （人裁定：验证成功后列为冷启动要求）。验证用 throwaway 会话（绝不动运行循环）+ 双向负控制。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。
 
+### tick 2026-08-05T00:03Z（外层，`no-action`：overshoot 修复全量验证中）
+
+- **内层等 overshoot 修复的全量套件**（`scripts/test.sh --test-concurrency=8` → full-suite-overshoot.log，
+  ~5min、35 node 进程、load 14.65）——回归验证进行中；绿后按 ready-pool-check 派下一批（就绪池 4）。
+- 就绪池 4（deficit 0，6 条既有文件型候选已补晋）；框内「外层驱动：按 ready-pool-check 推荐派下一批
+  3 条」是内层计划非已提交请求（可靠送达教训：框内文字≠已提交）。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。资源闸遵守（外层只廉价核实）。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

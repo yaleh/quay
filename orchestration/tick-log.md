@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 00:03Z | `no-action` | 核实 overshoot 修复全量验证在跑（scripts/test.sh c8 → full-suite-overshoot.log，load 14.65）；就绪池 4（6 候选已补晋）；内层绿后派下一批；框内备忘非已提交 | 内层：等 overshoot 全量（Baked 9m，1 shell） | ①ps 核 scripts/test.sh c8 运行 + load；②ready-pool-check pool 4；③`--detect-stop` 无命中 |
 | 2026-08-05 00:01Z | `no-action` | 核实 overshoot 修复关闭（AC4 pool 0→4，晋级解阻塞）；立案 ghost 源头消除（--prompt-suggestions false 从源头关故障 6，验证用 throwaway、人裁定列为冷启动要求）；写回 | 内层：overshoot 修复已 close + 6 候选补晋；pool 4 | ①ready-pool-check 实跑 pool 4（修复实证）；②claude --help 核 --prompt-suggestions 存在；③git log 核 overshoot 关闭 + 补晋 |
 | 2026-08-04 23:42Z | `no-action`（**后更正：claim 错误**） | batch-3 正式关闭（3 done、全量 2283/0/0、累计 15 任务）。**「内层自主转入修 overshoot」是错的**——管理者核实 + 外层复证：该条从未作为 user message 提交（transcript 0 命中），是输入框残留备忘（R2 AC8 反向踩坑：把框内文字当行动）；内层 0 sub-agent、无工具活动，双方都空闲、**没人修**。「产品机制自我修正闭环运转」不成立 | 内层：空闲（输入框有未提交备忘「修 ready-pool-check…」）；无 agent | ①transcript 查「修 ready-pool-check」0 命中（未提交实证）；②pane 0 sub-agent + 框内残留；③git log 核 batch-3 关闭。**教训：pane 框内文字 ≠ 已提交行动，判内层活动必须查 transcript** |
 | 2026-08-04 23:22Z | `no-action` | batch-3 全 3 合并验证；批全量首轮 1 失败（AC1b 误扫 scheduler 夹具）已修重跑；phantom-in-flight --reconcile 合并；inProgress 0 | 内层：批全量重跑中，备忘「phantom 完成后 fan-in 关批」 | ①git log 核 3 合并 + 失败修复；②inProgress 0 + detect-stop 无命中；③ps 核重跑（1 shell） |
@@ -265,11 +266,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 99 | 36% |
+| no-action | 100 | 36% |
 | unblock | 37 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **235** | — |
+| **合计** | **236** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
