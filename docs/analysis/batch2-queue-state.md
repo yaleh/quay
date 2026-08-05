@@ -4144,6 +4144,24 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **但 watchdog 不会主动驱动 archguard**：11:50:51 判 archguard healthy (alive=1)——claude 2284029 活着 → watchdog 不 drive（drive 只在 relaunch 事件时）。archguard outer 停在欢迎界面（Try "write a test..."）。**「claude 活着」≠「循环在工作」——watchdog alive 判据不触发 drive，同步 send-keys 后仍不自恢复**。
 - **archguard 需手动驱动**（outer 冷启动文本）。archguard 是管理者范围，不越界驱动。已提示管理者：同步文件还不够，watchdog 不会主动驱动已活着但没在工作的 claude。
 
+### tick 2026-08-05T11:5xZ（内层：4 任务落地 + runner 回退 + os-anchor 实跑）
+
+**本 tick 落地（3 fan-in + 1 恢复）**：
+- **os-anchor 恢复工作 merged**（`ae305135` → merge）：watchdog install.sh/watchdog.sh + capability-catalog 条目，scoped 63/0/1。
+- **claude-p 实测 merged**（`bcd0939a`）：gating 过（第三方端点往返）、stream-json = 移植可行、plain -p 照退；负控制字面行不失败（launcher 内部重 source key）+ >10min wait-cap 未测（诚实标注）。
+- **launch-config merged**（`cb3243c8`）：`.claude/launch.settings.json` + `quay-launch.sh`，917k deepseek-only 拆分、`--exclude-dynamic-system-prompt-sections` 跨 cwd 逐字节相同（Δ=0）；scoped 11/11。
+- **web-board merged**（`0950b0b6`）：/board 三列（意图/执行/落地）via **REUSE 子进程调用** drift checker（非 import 非重实现——单一权威构造保证一致）；scoped 4/4。
+
+**runner-gate 回退 + needs-human**（`09e4fcab` revert + `20a6f8b0`）：scoped 验证 **AC5「signal-killed→red+aborted」测试 ~30-70% 间歇失败**（隔离 10x 复测）。根因：node 测试 harness 下 SIGTERM 到 runner 子进程的投递竞态（诊断 state-after-exit=running，handler 未触发）。**核心 AC1-AC4（nproc 派生/replace splice/resource-gate）实测可用**，但 AC5 未稳 → 按 fan-in 契约不落地。**分支保留**（`task/gap-full-suite-runner...`）待 AC5 修复后 reland。ABORT #5 仍未机制修复（优先级不降）。
+
+**os-anchor 实跑（管理者指令）**：
+- **AC1 ✓**：`os-anchor-install.sh install` → `systemctl --user list-timers` 显示 timer active（5min 周期）。
+- **AC2 部分：re-spawn ✓ / drive ✗**。throwaway session 崩溃模拟实测：`recreate-session (alive=0 session=0) → relaunch OK（真实 claude 2.1.222 prompt up）`，但 **drive SKIPPED——transcript 基线在 launch 后计算（base_ts 含新会话），strictly-newer 恒失败 ⇒ 冷启动文本从不送达**。外层生产实测同证（watchdog relaunched 但 drive failed）。**AC2 不勾**。
+- **AC5 ✓ + AC7 ✓**（内层补齐：SPEC §4 第 5 类改「三层全缺，OS 级锚点为真实落点」；`os-anchor-watchdog.test.mjs` node:test 2/2）。AC3/AC4 ✓（复用源码核实 + 3 项目 config）。AC6 待核。
+- **任务未翻 done**（AC2 drive + AC6 未解）。
+
+**在飞**：0（全部落地）。**就绪池**：28/12 健康。**套件**：green（外层 aborted 止血）。
+
 ### tick 2026-08-05T11:5xZ（外层，os-anchor 诚实收尾 + web-board merge）
 
 - **os-anchor AC 勾选（05e4e0c6）**：AC1/3/4/5/7 checked；**AC2 left unchecked**（re-spawn verified but drive gap——drive 缺陷已确认）；**task stays ready NOT flipped done**。inner 诚实收尾（与我们的 watchdog 三缺陷发现一致）。
