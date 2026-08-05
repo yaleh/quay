@@ -116,6 +116,28 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
          persistent: true, timeout_ms: 3600000})
 ```
 
+**4b2. 重挂套件状态触发者（红窗自动执行者，`gap-red-window-has-no-automatic-executor`）——状态变化即触发，不等 cron**
+
+红窗规则（`gap-full-suite-belongs-to-outer-background-above-3-min` AC4）的 ROUND 2 事故证明「存在≠
+生效」：套件转红 30 分钟无人处置，因为 RED/GREEN-RUNNING 两个分支都只靠 `*/20` cron 或人驱动。本条
+给它补**执行者层**——状态变化（state=red / state=running）即转成动作（通知外层 / 驱动 inner 派发）。
+**它是事件监测（同 session-liveness），不是新调度源**——节奏仍唯一（步骤 4 的 cron）；它只把
+「cron 才检查状态」改成「状态变化即触发」：
+
+```
+Monitor({command: "$REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+         description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
+         persistent: true, timeout_ms: 3600000})
+```
+
+事件流里出现 `SUITE-RED` ⇒ **立即**进入步骤 1b「红窗分诊」（不等下一次 cron——本轮的
+「红着无人处置 30 分钟」场景即被消灭）；出现 `SUITE-RUNNING` ⇒ 按「RUNNING 乐观派发执行者」驱动
+inner 照常派发。`SUITE-GREEN` / `SUITE-STATUS` 是平静基线，无需处置。挂载遗漏的代价同
+session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——所以 4c 的验证纪律对两者同样成立：
+跑 `bash plugin/scripts/monitor-mount-check.sh --json` 之外，还要确认套件触发者的 Monitor 已挂
+（`pgrep -af 'suite-state-trigger.ts --monitor'`，有 node 活进程即可；按步骤 0 的自匹配纪律
+排除 pgrep 自己那一行——发起查询的命令行里含同样字符串）。
+
 **4c. 重挂后立即验证挂上了 —— 三判据自检**
 
 重挂 Monitor 后立刻跑一次检查器，不靠「看起来挂上了」：
@@ -561,9 +583,30 @@ tick 做一次收尾 pass。
 **每 tick 必报**补一条：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
 与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
 
+**套件状态自动触发者（红窗执行者层，`gap-red-window-has-no-automatic-executor`——把 (a) 块的
+机制从「被动响应驱动」变成「状态变化即执行」，AC1/AC2/AC4）**：
+
+`suite-state-trigger.ts`（Monitor，冷启动 4b2 挂上）在 `.quay/full-suite-state.json` 的
+`state` **变化**时立即发事件（5 秒轮询，≪ cron 的 20 分钟窗口）并记 `.quay/suite-state-events.jsonl`
+（append-only；`SUITE-RED.at` 就是 `red_to_triage_ms` 的起点）：
+
+| 状态变化 | 事件 | 本层动作（全部是既有逻辑的执行，不是新决策） |
+|---|---|---|
+| → `red` | `SUITE-RED`（`stopSignal:true`，即确认 stop-dispatch 信号在位） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red 本身，(a) 块 AC4） |
+| → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
+| → `green` | `SUITE-GREEN` | 平静基线，无处置 |
+
+**触发者是执行者，不是新调度源（AC2/AC4）**：它只做「状态变化 → 事件」的翻译与通知，不做任何分诊/
+派发决策；分诊 = 本文件下方既有「红窗分诊」，派发 = inner 出厂文档既有 §4 规则。节奏仍唯一（步骤 4
+的 `*/20` cron）；Monitor 是事件监测（同 session-liveness），不驱动任何 tick。事件日志只记事实，
+处置逻辑在文档/既有实现里——触发者不引入第二条决策链。冷启动即红（外层 `/clear` 后套件仍红）也触发
+`SUITE-RED`（第一眼即红），正是本轮「红着无人处置」形态的兜底。**触发链自检**（Contract invoke）：
+`node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
+（构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
+
 **红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 时 fan-in 一并暂缓）**：
-`.quay/full-suite-state.json` 的 `state: red` 即 **stop-dispatch 信号**（runner 一检测失败即写，AC2）。
-state 为 red 时：
+`.quay/full-suite-state.json` 的 `state: red` 即 **stop-dispatch 信号**（runner 一检测失败即写，AC2；
+套件触发者发 `SUITE-RED` 时确认它在位）。state 为 red 时：
 1. **本层独占分诊**，不把红树丢给 inner：对 red window 内新合并的 merge 二分定位（`git bisect` 或按
    merge 顺序回滚、逐个重跑 `--for-task` 选中集判断肇事者）。
 2. **回滚/修复**：定位到某次 merge 引入 → 回退该 merge（+ 回退对应翻 done）；判定为既有失败 →
@@ -790,6 +833,8 @@ tick 或 `/clear` 后的会话会重犯。
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
 - 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
   与 `durationMs`、本轮全量 suite 是否在跑/绿/红
+- 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
+  排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
@@ -807,6 +852,8 @@ tick 或 `/clear` 后的会话会重犯。
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
 | `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` 即 stop-dispatch 信号；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal`；gitignored 运行时态，`suite-state-trigger.ts` 写） |
+| `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
 | `adr/ADR-021-*.md` | 四项原则 |
 | `docs/proposals/exp6-queue-driven-concurrent-executor.md` §0 | 两阶段交付范围 |

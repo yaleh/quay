@@ -159,3 +159,11 @@ status: todo——三块之一；与 closure-async/closure-decomposition 同链�
   null）→ 终态 red」；AC4 文档/测试固化「red ⇒ inner 停派发 + 暂缓 fan-in」。**实跑待补**：外层真实
   分诊（bisect → 回滚 → 重启 → re-green → 撤信号）在首次真实 red 时发生。
 - 按 closure-sync AC5 先例：机制 + fixture 证据已勾，实跑证据待外层自然产生后由外层核对补记。
+
+**交叉标注（执行者层，`gap-red-window-has-no-automatic-executor`，2026-08-05）**：ROUND 2 事故证明
+本条的红窗机制「存在≠生效」——套件转红 30 分钟无人处置，因为 RED/GREEN-RUNNING 两分支都只靠
+`*/20` cron 或人驱动。执行者层（`suite-state-trigger.ts` + `orchestrator-loop-tick.md` 4b2/步骤 1b）
+把状态变化（state=red / state=running）自动转成动作：`SUITE-RED` ⇒ 外层立即开始本条 AC4 的红窗分诊
+（不等 cron）；`SUITE-RUNNING` ⇒ 乐观派发执行者驱动 inner 照常派发。触发者是既有处置逻辑的执行者，
+不引入新决策、不引入新调度源（节奏仍唯一外层 cron）。Contract invoke：
+`node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`。
