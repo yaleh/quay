@@ -5055,3 +5055,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   单任务 --check 0.8s（per-task 不慢）。立案 `gap-ready-pool-check-times-out-after-git-history-signal`
   （AC 要求回 <10s + 判定不破 + 负控制），**已派**（`fm-...-f3qjjw`）。
 - 套件 green（aborted-triaged）、在飞 1/3、无 block、Monitor 绿。
+
+### tick 2026-08-05T19:4xZ（外层，套件第 7 次尝试运行中 + ratchet 再修）
+
+- **套件重跑（2-lane，19:43:48 起）**：第 7 次尝试——低负载窗口（load 1.63）+ ratchet 干净。**先修了 inner 新任务
+  （pool-check perf）的 ratchet 违规**（band 缺 = + Dispatch review，new=0）——任务 filing 不合规的族问题
+  （外层今天也犯过，ratchet 反复被打）。
+- **套件 1min**：静态检查推进（SELFTEST PASS）。**闸已翻 WAIT**（套件自身负载推高 avg10）——test.sh 内部
+  闸检查若触发会 abort（外层 17:4xZ 立的 reason 轴 bug 会暴露，已预备分诊）。等 bt633dlz7。
+- **待绿后**：24 条 closure 批量收尾。
