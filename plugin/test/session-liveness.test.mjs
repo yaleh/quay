@@ -1,4 +1,8 @@
 // @test-group governance
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file uses
+// real processes + tmux timing; it passes isolated under low load but may fail under concurrent-suite
+// load (gap-load-sensitive-session-family-confounds-step-three, 2026-08-04). A full-suite failure here
+// is NOT a real regression by default: re-run this file alone (low load) before concluding anything.
 // session-liveness.test.mjs — automated positive controls for the cross-project session-liveness
 // monitor (plugin/scripts/session-liveness.sh; generalized + renamed from outer-liveness.sh per
 // SPEC-outer-liveness-productization.md AC10-13 — the process/pane/heartbeat logic holds for ANY

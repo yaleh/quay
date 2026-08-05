@@ -118,6 +118,28 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/2.1))=1（4 核）；全量验证需显式
 --test-concurrency=8，否则小时级**。
 
+## 已知负载敏感族（KNOWN-LOAD-SENSITIVE）——判绿/放宽判据必须排除，不得读成真回归
+
+**`plugin/test/session-liveness.test.mjs`、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
+`--once` 同类）是一族已知负载敏感测试**（`gap-load-sensitive-session-family-confounds-step-three`，
+2026-08-04 立案）。它们用**真实进程 + tmux 时序**验证会话存活/冷启动挂载语义，机器负载一高就红——
+隔离下全绿、并发下红，**不是逻辑错误**。2026-08-04 全量套件 #6/#7 各挂一条不同但同族的测试，
+隔离单跑全过，确认并发敏感。
+
+**判读规则（强制）**：
+1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
+   并发套件，= 负载翻倍）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
+   落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
+2. **这族永远单独跑批或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
+   全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
+3. **不要删/降级/改 skip 这族**——它们抓的是真问题（挂载单飞、laid-down 实跑、`--once` 接缝），
+   只是天生负载敏感。
+
+**机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
+跑批协议 grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
+全绿（fail 0 / cancelled 0，`scripts/test.sh plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
+人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
+
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
 
 **内层同样要挂 `session-liveness.sh`**（泛化后的会话存活监视，原 `outer-liveness.sh`）。
