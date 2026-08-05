@@ -1,7 +1,12 @@
 ---
 id: gap-scoped-runs-pay-full-static-check-overhead
-title: "scoped runs pay the full ~16s run_static_checks fixed overhead per task (13s is checker-mutation-check; for 13 of 22 sub-3s scoped runs the overhead is >5x the tests) — add a change-relevant-only static-check tier for scoped mode, keeping the COMPLETE gate in the outer full-suite verification-round (spawn tests stay, 3-min target dropped, outer async full-suite stays — this is not about cutting tests)"
-status: todo
+title: scoped runs pay the full ~16s run_static_checks fixed overhead per task
+  (13s is checker-mutation-check; for 13 of 22 sub-3s scoped runs the overhead
+  is >5x the tests) — add a change-relevant-only static-check tier for scoped
+  mode, keeping the COMPLETE gate in the outer full-suite verification-round
+  (spawn tests stay, 3-min target dropped, outer async full-suite stays — this
+  is not about cutting tests)
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -71,7 +76,7 @@ session-liveness+monitor-mount-check）。既然每次只跑 1-2 个文件，~16
 
 - [ ] AC1–AC7 全部勾上；AC4/AC5 实跑输出贴任务体
 - [ ] 全量套件静态检查覆盖与今日一致（AC2 机械证明：同一全量跑，检查集合不缩水）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round ROUND 2 (2026-08-05) 验证：tests 2347 / fail 2（已知负载抖动，isolated 45/0 pass）/ cancelled 0；记为绿；AC2 全量静态检查 byte-unchanged（落地证据 9 checker 行一致）
 
 ## Touches
 

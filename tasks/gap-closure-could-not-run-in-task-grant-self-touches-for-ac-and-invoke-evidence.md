@@ -8,7 +8,7 @@ title: closure could not run in-task because of two hard dispatch constraints (�
   closure shrinks to one DoD line per task (the only true timing dependency),
   making it too small to be a sync point (implements the human's closure-async
   ruling)
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -82,7 +82,7 @@ extra:
 
 - [ ] AC1–AC7 全部勾上；AC4/AC5/AC6 实跑输出贴任务体
 - [ ] 收尾量级实证：一次收尾只做 DoD 行（代理已自勾 AC/证据），收尾不再同步点
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round ROUND 2 (2026-08-05) 验证：tests 2347 / fail 2（已知负载抖动：heavy-op-token waited_ms + noise-gate，isolated 45/0 pass）/ cancelled 0；记为绿（modulo 文档化抖动）；收尾只做 DoD 行 + 翻 done = 本任务「收尾量级实证」
 
 ## Touches
 

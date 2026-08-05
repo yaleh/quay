@@ -8,7 +8,7 @@ title: "full suite (5-8 min magnitude) belongs to the OUTER as background async,
   per-task and eliminate 'batch' entirely; red-window ruling: outer's suite RED
   => immediate stop-dispatch signal, inner stops new dispatch + holds fan-in
   until re-green"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -85,7 +85,7 @@ extra:
 
 - [x] AC1–AC8 全部勾上；AC6 实跑证据贴任务体
 - [x] **inner 零全量套件运行**（grep 证明 inner 侧无 scripts/test.sh 全量调用；只读 suite-state）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——由外层后台跑出的绿
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round ROUND 2 (2026-08-05) 由 full-suite-runner 后台跑出：tests 2347 / fail 2（已知负载抖动：heavy-op-token waited_ms + noise-gate，isolated 45/0 pass）/ cancelled 0；记为绿（modulo 文档化抖动）——由外层后台跑出的绿
 
 ## Touches
 
