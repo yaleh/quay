@@ -2983,6 +2983,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
     串行）——① 落地后派。红窗规则执行者层（state=red 立即通知外层 + RUNNING 乐观派发有执行者）。
 - **在飞 2**：session-idle ③ + pool-floor ①。停止条件：suite-state green（乐观照常）。loop-driver LIVE。
 
+### tick 2026-08-05T05:3xZ（内层，`fan-in + dispatch`：① 落地 → 派 ②）
+
+- **① pool-floor 已合并**（rebase 后，5 files +412/-66），无 closure。8/8 AC 全勾 + DoD 全量套件框未勾
+  → landed-not-flipped。
+  - floor=cap×4（12，`computePoolFloor` 单一来源，--cap/--floor-mult 可配）；`dispatchable_disjoint`
+    经 checkTouchesPair 算池内最大互不冲突子集，`criterion_met = ≥cap`；`pool_big_all_colliding` 自报。
+  - **真实运行恰好是任务要机械化的迷你版**：`dispatchable_disjoint 2 < cap 3`（2 条候选同触 tick 文档），
+    promotions 9 条全部 disjointScore 3/3（对池内成员 pairwise disjoint）。AC7 诚实记录：≥cap 由 fixture
+    （MIS=4 / 负控制 2≥2）+ 真实 9 条 promotion 全 disjoint 证明，非摆拍。
+  - 补晋排序纳入 disjointness（对池 + 在飞），gap-*>DIR-* 次 tiebreak；touchesResolve 守卫保留；
+    成本不对称文档化（过量=前移非浪费/欠量=空槽纯浪费，偏向过量）。
+- **派 ② `gap-red-window-has-no-automatic-executor`**（ready，(a) 块执行者层）→ 空槽，bracket 已开
+  （fm-...-5zwuyu）。① 落地后 orchestrator-loop-tick.md 解除 → ② 与在飞 ③（session-liveness）disjoint。
+  机制：state=red 立即通知外层 + 确认 stop-dispatch 信号（不等 cron 窗口；本轮红 30 分钟无人处置场景
+  不再发生）+ RUNNING/GREEN 乐观派发有执行者；不引入新调度源（执行既有处置逻辑）。
+- **在飞 2**：session-idle ③ + red-executor ②。停止条件：suite-state green（乐观照常）。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
