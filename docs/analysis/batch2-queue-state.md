@@ -4719,3 +4719,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   是 A→B 自我约束；B 能主动连回 A ⇒ **B→A 需对称约束**——跨主机破坏性/批量操作两个方向都禁止
   （伤害不认方向）。B 若跑自主 outer/inner，对称约束是其安全前置。已记入 Q2 任务前提③。
 - **在飞 3/3**（ruling-required / web-board / upgrade-channel fan-in）。套件 green（stale）。
+
+### tick 2026-08-05T17:2xZ 补充2（外层 correct-self——管理者撤回 Node 版本发现，任务证据修正）
+
+- **管理者 AC11 类失误自纠**：原「B 机 Node 18.19.1 撞裸 bad option」证据为假——B 机用 nvm，管理者
+  非交互 ssh 调用绕过 nvm.sh（~/.bashrc 首行非交互即退出）落到系统裸装 18.19.1；真实交互/tmux shell 是
+  **v25.2.0** 满足 floor（tmux quay-b 新窗口两次实测对照）。`gap-no-active-node-version-check-users-cant-tell-upgrade`
+  已改：移除假证据，**保留防御性价值**（Node 20 用户按文档撞裸报错无提示 = UX 改进，非已确认缺陷）。
+- **dist 直跑 ERR_UNKNOWN_FILE_EXTENSION 待重验**：同样用非交互 ssh 测得，需交互式 shell 重验。
+- **inner 新发现**：taskWorkLanded 欠检测缺陷（web-board 工作已落地 8/8 AC 仍被重派发=3rd dispatch；
+  taskWorkLanded=false for prose-heavy AC merged-not-flipped，inner 已立案 + 负控制 scoped fix）。
+- **在飞 3/3**（ruling-required / web-board / upgrade-channel）。套件 green（stale）。资源闸 GO 但 inner
+  满负荷——全量推迟。

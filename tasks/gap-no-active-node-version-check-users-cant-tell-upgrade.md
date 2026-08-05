@@ -22,11 +22,19 @@ extra:
 
 ## Proposal
 
-**无主动 Node 版本检查——B 机（Node 18.19.1）采纳者实测，裸 bad option 报错。**
+**无主动 Node 版本检查——防御性缺口（原 B 机实证已撤回，2026-08-05 17:2xZ）。**
 
-**【实测】**：B 机按 CLAUDE.md 的调用方式 `node --experimental-strip-types packages/quay/bin/quay.ts`
-直接报 node 裸错误（bad option）。`--experimental-strip-types` 需 **Node ≥ 22.6**；`engines>=20` 是
-**被动声明**（只在 npm install 时警告，用户直接跑 CLI 时无感知）。quay 代码 grep 不到任何 node 版本检查。
+**【证据撤回（AC11 类，管理者自纠）】**：原「B 机 Node 18.19.1 撞裸 bad option」证据**为假**——B 机用
+nvm 管理 node，管理者的**非交互 ssh 调用绕过了 nvm.sh**（~/.bashrc 首行非交互即退出），落到系统裸装
+/usr/bin/node（18.19.1）；真实交互式/tmux shell 里 `node --version=v25.2.0` 满足 floor。**不要引用
+「B 机撞 18.19.1」作为证据。**
+
+**【剩余独立价值（防御性，无实证受害者的 UX 改进）】**：
+- `node --experimental-strip-types` 需 **Node ≥ 22.6**（CLAUDE.md 的文档化调用方式）；
+- Node 20（广泛 LTS）用户按文档直接跑 CLI 会撞裸 `bad option`，无升级提示；`engines>=20` 是**被动声明**
+  （npm install 才警告）；
+- quay 代码 grep 不到任何 node 版本检查 ⇒ 主动探针（清晰错误 + 升级提示）是防御性改进，非已确认缺陷。
+- **待重验**：dist 直跑 ERR_UNKNOWN_FILE_EXTENSION 那条同样用非交互 ssh 测得，需交互式 shell 重验。
 
 **【为什么是采纳者门槛缺陷】**：采纳者第一眼就撞裸报错，且无法得知「升级 Node 即可」。这正是
 「写了但不在决策时被调用」的变体——engines 声明了但没有任何运行时检查把它变成可行动的提示。
