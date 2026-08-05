@@ -3227,3 +3227,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 归 0 → 重跑（bs84jg1l3）。教训记录：我的任务 Contract 段反复踩格式坑（measure/band/control 需
 > 反引号命令 + 不折行），self-touch 约定的 --self-touch-scan 若在派发前审计可提前抓到——是后续派发词
 > 机械化的候选。
+
+### tick 2026-08-05T04:23Z（外层，`no-action`：ROUND 2 套件 running；观察 inner 仍待轮不派）
+
+- **ROUND 2 套件 running**（bs84jg1l3，04:22:29 起，state=running，~10 分钟）；收尾集 5 条待绿后关。
+- **观察（closure-sync AC5 证据面）**：inner 空闲待 ROUND 2，**池里 2 条真实可派（ready-pool-floor、
+  session-idle）在 running 态未派**——round-1 停摆模式仍在（红窗乐观规则已落地但未被动用：inner 无自
+  触发，等驱动/等轮）。**closure-sync AC5 保持未满足**；本轮不强行派发（保护 round gate 免负载抖动），
+  optimistic 行为的实跑证明留给自然窗口（下批 ready 恰逢 running 态时）。
+- 池 4（deficit 0）；无停止条件、无 BLOCKED；loop-driver LIVE。
