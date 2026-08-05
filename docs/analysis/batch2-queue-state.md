@@ -5397,3 +5397,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **管理者核实无独立窄任务 → 立案 `gap-b-machine-periodic-push-backup-to-bare-repo`**：B 机低频 cron
   （10-15min）git push 到 ~/work/quay-sync.git——纯备份防单点丢失，不涉及认领/权威/冲突（留 Q2 范围）。
   执行者：管理者在 B（具上下文）或 B 机 outer。
+
+### tick 2026-08-05T23:3xZ（内层 cron，branch-model 派发）
+
+- 外层：dispatch-tick-boundary landed + AC3 活循环重测观察开始。
+- **branch-model 派发**（`fm-...-m5cx2c`，integration 分支模型——fork-baseline 与 merge-point 角色分离）：
+  git-log 唯一命中是 global-count 的 AC4 交叉标注（非落地），self-touch 已补，resolve 过。池 6/12、disjoint 2。
+- 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。

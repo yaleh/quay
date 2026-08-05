@@ -86,6 +86,8 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 
 ## Touches
 
+- tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/loop/fast-mode-loop-tick.md（分叉/合并线：develop/integration）
 - plugin/loop/orchestrator-loop-tick.md（verification-round 批量合 integration→develop）
 - plugin/scripts/（分支模型 helper：分叉基线判定 / integration→develop 批量合，若成脚本）
