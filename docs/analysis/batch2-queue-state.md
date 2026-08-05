@@ -3002,3 +3002,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 >   落地未翻任务的 bracket 由外层收尾才关（drive-text/inner-anchor 仍 open），但 0 agent 在飞 = 真空闲。
 >   bracket 代理需改「无在飞 agent」，否则验证轮期间永远判忙、重锚不发。属 inner-anchor 任务范围。
 > - 全量套件第 3 跑（bzt433wtm）进行中。
+
+### tick 2026-08-05T03:05Z（外层，`no-action`：等 verification-round 套件第 3 跑，inner 空闲待绿）
+
+- **重锚 #1 完整闭环**（inner 自记 fcd8e88e）：四查自检 1 偏差（批次 worktree/分支未清理）→ 已修正；
+  pool/closure/停止条件符合；**「No dispatch decision made (wake contract respected)」**——重锚契约零派发
+  决策被遵守。inner 现空闲待外层 verification-round。
+- **全量套件第 3 跑进行中**（bzt433wtm，~03:02 起，ETA ~03:14）；inner 空闲 → 负载抖动面应消（noise-gate
+  那 1 fail 应转绿）。
+- **就绪池 3**（deficit 0）；nyf 探测仍含假阳（closure-decomposition/drive-text——taskWorkLanded 误判族，
+  记录）漏 roadmap/inner-anchor——以 inner 确认的落地集为准（4 条：roadmap/review-cadence/closure-sync/
+  inner-anchor）。
+- 无停止条件、0 agent 在飞；loop-driver LIVE。套件绿后执行收尾（关括号 + 翻 done + 写
+  verification-round record）。
