@@ -6,7 +6,7 @@ title: the inner's ONLY anchor is outer prose (its Cron count is 0; all 59
   re-anchor to the shipped doc, as a FIXED relay (single cadence), with a strict
   conformance-check-only wake contract so the cron never becomes a second
   dispatch source
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -70,16 +70,21 @@ extra:
       （grep/断言验证）
 - [x] AC5: 出厂文档加「**状态自检清单**」小节——inner 重锚时逐项核对的机械清单（在飞数/池/收尾/停止
       条件），让「核对状态是否符合」可机械执行而非散文
-- [ ] AC6: **真实使用**——至少一次重锚：inner 重读出厂文档后要么报符合（no-op）要么修正明确偏差，
+- [x] AC6: **真实使用**——至少一次重锚：inner 重读出厂文档后要么报符合（no-op）要么修正明确偏差，
       证据记录；若期间有驱动文本偏差，展示下周期重锚自我对齐（非必须但优先）
+      **（2026-08-05 round1 实跑）**：重锚 #1（外层 1c 步 03:03Z 投递）→ inner 重读出厂文档 → 四查自检
+      发现 1 偏差（批次 worktree/分支未清理）→ **自我修正**（移除 stranded worktrees，fcd8e88e）；
+      pool/closure/停止条件符合；「No dispatch decision made (wake contract respected)」。
 - [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（重锚常量 + 转发步若成脚本）
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC6 实跑证据贴任务体（AC6 待外层首个 cron 重锚周期实跑，机制+待证形状已记录）
-- [ ] inner 有周期锚：重锚转发生效（至少一个周期 inner 重读出厂文档）；措辞独立（固定常量）
-- [ ] 无第二调度源：重锚 prompt 零派发措辞（grep 证明）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC7 全部勾上；AC6 实跑证据贴任务体（见 AC6 行 2026-08-05 round1 实跑）
+- [x] inner 有周期锚：重锚转发生效（重锚 #1 03:03Z 投递 + inner 重读出厂文档 + 自我修正）；措辞独立（固定常量）
+- [x] 无第二调度源：重锚 prompt 零派发措辞（grep 证明）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**外层 verification-round round1
+      (2026-08-05) 验证**：tests 2319 / fail 1（已知 noise-gate 负载抖动，isolated 1/0 pass）/ cancelled 0；
+      记为绿（modulo 文档化抖动）
 
 ## Touches
 

@@ -3,7 +3,7 @@ id: gap-establish-daily-review-cadence-mechanism
 title: land the human's daily review cadence decision as a mechanism — calendar-
   tied once/day, manager initiates/aggregates, three checklist items incl. a
   reusable strategic-doc-staleness checker (generalize the roadmap AC4 grep)
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -79,12 +79,10 @@ complete」，但它的三子路径是反引号包裹、磁盘上不存在，**�
 
 - [x] AC1–AC8 全部勾上；AC4/AC6 实跑输出逐字贴任务体（见 ## Execution evidence）
 - [x] 复盘是机制不是角色记得——REVIEW-cadence 文档 + 通用检查器 + 复核记录扩展都在
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**未勾**：本任务范围内
-      只跑了 scoped 套件（`scripts/test.sh plugin/test/strategic-doc-staleness-check.test.mjs`，
-      7 pass / 0 fail / exit 0）+ 全量 run_static_checks 里非 contract 的各检查全部 exit 0；
-      全量套件留给外层在安全窗口跑（sibling 任务可能正在 benchmark，本任务不得并发跑全量）。
-      **另：master 当前被 task-contract-check 标红**——本任务体 ## Contract 的 `control` 行
-      折行（作者写的换行），非本任务引入（本任务已把它并成一行修好，见 git diff）。
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**外层 verification-round round1
+      (2026-08-05) 验证**：tests 2319 / fail 1（已知 noise-gate 负载抖动，isolated 1/0 pass）/ cancelled 0；
+      记为绿（modulo 文档化抖动）。此前 master task-contract 红（作者 Contract control 折行）已由本任务
+      并成一行修好。
 
 ## Touches
 

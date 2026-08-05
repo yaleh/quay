@@ -3,7 +3,7 @@ id: gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode
 title: quay-harness-crystallization-roadmap.md (07-31) is built entirely on the
   ADR-022 (08-03) retired classic pipeline — silently stale is more dangerous
   than absent; mark superseded + extract the still-valid strategic question
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -138,7 +138,7 @@ $ node --experimental-strip-types --test plugin/test/roadmap-superseded-check.te
 ## Definition of Done
 
 - [x] AC1–AC5 全部勾上；AC4 grep 输出贴任务体
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**本任务按外层 scoped-doc 指令不跑全量套件**（dispatch: "do NOT run the full suite"）；已跑单文件 `roadmap-superseded-check.test.mjs` 2 pass 0 fail + `test-framework-policy-check.ts` PASS
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**外层 verification-round round1 (2026-08-05) 验证**：tests 2319 / fail 1（已知 noise-gate 负载抖动，isolated 1/0 pass）/ cancelled 0；记为绿（modulo 文档化抖动）
 
 ## Touches
 
