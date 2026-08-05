@@ -3,7 +3,7 @@ id: gap-session-idle-true-idle-via-transcript-fusion-and-debounce
 title: SESSION-IDLE judged by pane-hash alone can't distinguish true idle from
   between-tool-calls gaps — fuse transcript last-message-type (pure text vs
   pending tool_use) + debounce 2 rounds, per human's accept-FP-avoid-FN risk
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -64,7 +64,7 @@ assistant 消息**类型**（纯文本 vs 挂起 tool_use）比 session-liveness
 - [x] AC1–AC7 全部勾上；AC3/AC4/AC5 的实跑输出逐字贴任务体
 - [x] 一次真实对象验证：一个真空闲轮次被报 SESSION-IDLE、一个忙轮次（挂起 tool_use）不被报
       （DIR-026，非构造夹具）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## 实跑输出（AC3/AC4/AC5，2026-08-05 逐字）
 

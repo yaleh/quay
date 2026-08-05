@@ -9,7 +9,7 @@ title: "SESSION-OVERDUE heartbeat source is orchestration/tick-log.md mtime,
   indistinguishable without manual commit-history checks; fix: outer-alive
   criterion = NEWEST mtime among ANY output (commits / queue-state / triage
   records / tick-log), same class as D's single-proxy-insufficiency"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -103,9 +103,9 @@ selfcheck: ALL PASS
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC2/AC3/AC4 实跑输出贴任务体
-- [ ] 心跳源多源化；红窗处置期间心跳不反向失效；真阳性仍被抓
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC2/AC3/AC4 实跑输出贴任务体
+- [x] 心跳源多源化；红窗处置期间心跳不反向失效；真阳性仍被抓
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 

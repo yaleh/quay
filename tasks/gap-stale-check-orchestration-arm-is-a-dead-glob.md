@@ -11,7 +11,7 @@ title: "the strategic-doc-staleness-check's orchestration arm is a DEAD GLOB —
   quantifies WHICH instances? the one filename it was written thinking about;
   fix: cover orchestration/*.md entirely (or derive by prefix), don't hardcode a
   single filename pattern"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -87,9 +87,9 @@ scoped static checks: test-framework-policy PASS; test-isolation PASS; task-cont
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC2/AC4 实跑输出贴任务体
-- [ ] orchestration 臂全量覆盖（43 个文档可被扫描）；死 glob 消除
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC2/AC4 实跑输出贴任务体
+- [x] orchestration 臂全量覆盖（43 个文档可被扫描）；死 glob 消除
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 

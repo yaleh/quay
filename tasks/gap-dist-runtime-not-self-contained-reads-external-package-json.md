@@ -6,7 +6,7 @@ title: "dist runtime 'self-contained' claim false — version.ts reads
   3-layer gap all passed by verify (package.json in neither lay-down set nor
   referenced); fix: inline version at build time (option ②) + fix sync-vendor
   claim; AC12b blocker ② extension"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -101,11 +101,11 @@ extra: {}
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上
-- [ ] version.ts 不在 __init 读外部 package.json（构建时内联版本号），node vendor/quay/dist/quay.js --version 返回 0.3.13（实跑输出贴任务体）
-- [ ] B 机端到端：fresh 安装后 task list 无 ENOENT、mcp_entry 指向存在运行时（实跑输出贴任务体）
-- [ ] sync-vendor 完成语已修正
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上
+- [x] version.ts 不在 __init 读外部 package.json（构建时内联版本号），node vendor/quay/dist/quay.js --version 返回 0.3.13（实跑输出贴任务体）
+- [x] B 机端到端：fresh 安装后 task list 无 ENOENT、mcp_entry 指向存在运行时（实跑输出贴任务体）
+- [x] sync-vendor 完成语已修正
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 

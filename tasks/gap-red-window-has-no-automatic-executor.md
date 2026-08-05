@@ -8,7 +8,7 @@ title: the red-window rules have no automatic executor — the ROUND 2 suite wen
   'exists ≠ effective' pattern; add an automatic suite-state trigger
   (runner/monitor notify → outer RED handling starts; optimistic-proceed gets an
   exerciser)
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -63,9 +63,9 @@ SESSION-OVERDUE 已触发（各 30 分钟无心跳）。**这正是「存在≠�
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC1/AC3/AC5 实跑证据贴任务体
-- [ ] 套件转红 ⇒ 外层自动处置（本轮「红着无人处置 30 分钟」场景不再发生）；乐观派发被实际动用
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC1/AC3/AC5 实跑证据贴任务体
+- [x] 套件转红 ⇒ 外层自动处置（本轮「红着无人处置 30 分钟」场景不再发生）；乐观派发被实际动用
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 

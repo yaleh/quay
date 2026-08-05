@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness
 title: "ready pool floor = cap x 4 (12 when cap=3; historical 08-02→08-04 pool was stable at 11 = 9 real / 3 cap = 3.0x proven, 4x leaves one notch far below 10x) AND promotion ranks touch-disjointness (else promoted candidates all collide) AND ready-pool-check reports dispatchable_disjoint (largest mutually-disjoint subset via checkTouchesPair) — floor is the means, dispatchable_disjoint >= cap is the criterion: 5 all-disjoint is enough, 30 all-colliding gets flagged; gap 2 (disjointness) lands first since a filtered pool needs a smaller raw floor"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -66,7 +66,7 @@ extra:
 - [x] AC1–AC8 全部勾上；AC3/AC7 实测输出贴任务体（见下方 `## Execution record`）
 - [x] floor = cap × 4（12）；`dispatchable_disjoint` 上报为判据；补晋纳入 disjointness；池供给 ≥cap 条
       互不冲突任务（机制 + 夹具证明；实时池当前 2<3 正是本任务机械化的小型版，补晋排序保证可达 ≥cap）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
