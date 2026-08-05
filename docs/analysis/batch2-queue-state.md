@@ -2889,3 +2889,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   DoD 行；checkTouchesPair 不受影响（自身文件每任务唯一，已核 filesDisjoint）。细化层，排 closure-async 后。
 - 在飞：2 agent（review-cadence + closure-sync）；roadmap 已落地；串行链 closure-sync→inner-anchor→
   drive-text 不变。
+
+### tick 2026-08-05T02:35Z（外层，`unblock`：人量化门槛裁定 → 立案套件 (a) 块）
+
+- **人量化门槛裁定**：①当前 5-8 分钟量级全量套件归 outer 后台异步跑、不堵 inner 各任务；②降到 3 分钟
+  以内才下放 inner 各任务自跑，那时批概念彻底消除。实测 inner 10 次 vs outer 3 次 + 前台阻塞
+  （scripts/test.sh > log）= 批次边界另一半（前一半是收尾记账）。耗时：8 lane 11-12 分钟；注释记载
+  原 460-570s；并发 1 → 55 分钟紧急改回 8。
+- **已立案 `gap-full-suite-belongs-to-outer-background-above-3-min`**（ready，dod 通过）——(a) 套件块。
+  机制：外层后台跑 + 写 suite-state（running/green/red + durationMs）；inner 删自跑、停止条件读状态；
+  **红窗裁定**（人问的风险）：GREEN/RUNNING 乐观合并、RED 立即停派发 + fan-in 暂缓 + 外层独占分诊
+  （二分肇事合并）；阈值规则 ≥3min outer / <3min inner；runner 一检测失败即标 RED。
+- **三块消除批次**：a) 本条套件块；b) closure-async 收尾块；c) closure-decomposition AC/证据块。三块
+  同链（都触 loop 文档，串行）。
+- 在飞：closure-sync（机制根，编辑 inner loop 停止条件中）；串行链 closure-sync→inner-anchor→drive-text。
