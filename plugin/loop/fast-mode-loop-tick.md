@@ -324,14 +324,8 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
   不是仓库里 needs-human 的总数。分诊规则见 `orchestrator-loop-tick.md` 步骤 3）
 - **外层全量 suite 状态（改读外层 suite-state，不再自己跑全量）**：读 `.quay/full-suite-state.json`
   的 `state` 字段——`running`/`green` ⇒ 照常派发与合并（**RUNNING 不等套件**——这正是消除同步点的
-  关键）；`red` 则**看 `reason` 轴**（`gap-full-suite-runner-concurrency-default-and-gate` AC5，
-  2026-08-05 ABORT #5 第二次实证：12 个互不相交任务全被 aborted-red 挡住）：
-  - `state: red` 且 `reason: failed`（或缺失——兼容旧记录，fail-closed 当失败）⇒ **停止新派发 +
-    暂缓已完成 agent 的 fan-in**（不并进红树；只停派发不停在飞合并会让红树继续累积，故 RED 失败态下
-    fan-in 一并暂缓），直到外层 re-green（state 回到 green/running）。
-  - `state: red` 且 `reason: aborted`（套件**未完成、无任何正确性结论**——被外层中止/信号杀/spawn
-    失败）⇒ **不触发 stop-dispatch**，照常派发与合并——把 aborted 当 failed 处理 = 用一个中止事件
-    挡住全线派发，且不会自解除（re-green 需一轮成功套件，套件因缺陷跑不完 ⇒ 闭环）。
+  关键）；`red` ⇒ **停止新派发 + 暂缓已完成 agent 的 fan-in**（不并进红树；只停派发不停在飞合并会让
+  红树继续累积，故 RED 异常态下 fan-in 一并暂缓），直到外层 re-green（state 回到 green/running）。
   **文件缺失 ⇒ 不阻塞**（外层还没跑到第一轮，不是套件红；等下一 tick 再读）。注意该状态有至多一个
   外层 tick 的滞后——inner 刚合并的任务可能还没被外层起的新一轮套件覆盖；这是异步设计的固有窗口，
   外层下一轮会追上（见 `orchestrator-loop-tick.md` 步骤 1b「红窗分诊」）。**inner 零全量套件自跑**

@@ -554,18 +554,15 @@ tick 做一次收尾 pass。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
-     （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
-     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。`reason` 只在 red 时出现：
-     `failed`（真实失败——stop-dispatch 信号）或 `aborted`（套件未完成、无正确性结论——**不触发
-     停派**，`gap-full-suite-runner-concurrency-default-and-gate` AC5）。**起跑条件**：本轮收尾了 ≥1
-     个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=
-     running`）且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 =
-     WAIT，下一 tick 再起）。
+     （`{state: running|green|red, runner: outer|inner, startedAt, finishedAt, durationMs,
+     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。**起跑条件**：本轮收尾了 ≥1 个任务
+     （或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state != running`）
+     且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 = WAIT，下一
+     tick 再起）。
    - **早期 RED（AC2）**：runner **一检测到失败立即把 state 标成 red**（非等全套跑完）——缩「变红到
      发现」窗口。判红模式 = `not ok` / `✖` / `# fail [1-9]` / `# cancelled [1-9]` /
-     `FULL-SUITE-EXIT` 非 0 / 退出码非 0。`state: red` + `reason: failed` 即 AC4 的 **stop-dispatch
-     信号**（inner 读它停派发 + 暂缓 fan-in，见下「红窗分诊」）；`reason: aborted`（被信号杀/spawn
-     失败）**不是** stop-dispatch 信号——inner 照常派发，本层按 aborted 语义处置（记录 + 重跑）。
+     `FULL-SUITE-EXIT` 非 0 / 退出码非 0。`state: red` 即 AC4 的 **stop-dispatch 信号**（inner 读它
+     停派发 + 暂缓 fan-in，见下「红窗分诊」）。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
@@ -595,8 +592,7 @@ tick 做一次收尾 pass。
 
 | 状态变化 | 事件 | 本层动作（全部是既有逻辑的执行，不是新决策） |
 |---|---|---|
-| → `red` + `reason: failed`（或缺失） | `SUITE-RED`（`stopSignal:true`，即确认 stop-dispatch 信号在位） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red + failed，(a) 块 AC4 / AC5） |
-| → `red` + `reason: aborted` | `SUITE-RED`（`stopSignal:false`——套件未完成、无正确性结论，**不触发停派**） | **记录 + 等重跑**：aborted-red 不是失败结论，外层按 `gap-full-suite-runner-concurrency-default-and-gate` AC5 语义处置（不挡 inner 派发；re-tick 时按起跑条件重起） |
+| → `red` | `SUITE-RED`（`stopSignal:true`，即确认 stop-dispatch 信号在位） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red 本身，(a) 块 AC4） |
 | → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
 | → `green` | `SUITE-GREEN` | 平静基线，无处置 |
 
@@ -608,10 +604,9 @@ tick 做一次收尾 pass。
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 （构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
 
-**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**：
-`.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号**
-（runner 一检测失败即写 `reason: failed`，AC2/AC5；套件触发者发 `SUITE-RED` 时确认它在位）。`reason:
-aborted`（套件未完成、无正确性结论）**不触发停派**——记录 + 按起跑条件重跑，不挡 inner。state 为 red 时：
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 时 fan-in 一并暂缓）**：
+`.quay/full-suite-state.json` 的 `state: red` 即 **stop-dispatch 信号**（runner 一检测失败即写，AC2；
+套件触发者发 `SUITE-RED` 时确认它在位）。state 为 red 时：
 1. **本层独占分诊**，不把红树丢给 inner：对 red window 内新合并的 merge 二分定位（`git bisect` 或按
    merge 顺序回滚、逐个重跑 `--for-task` 选中集判断肇事者）。
 2. **回滚/修复**：定位到某次 merge 引入 → 回退该 merge（+ 回退对应翻 done）；判定为既有失败 →
@@ -856,7 +851,7 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` 即 stop-dispatch 信号；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
 | `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal`；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |

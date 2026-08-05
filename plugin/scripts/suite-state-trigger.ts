@@ -47,7 +47,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
-export type SuiteStateReason = "failed" | "aborted";
 
 export interface SuiteState {
   state: SuiteStateValue;
@@ -56,26 +55,6 @@ export interface SuiteState {
   finishedAt?: string | null;
   durationMs?: number | null;
   laneCount?: number;
-  /**
-   * Present only on red (AC5 reason axis, gap-full-suite-runner-concurrency-default-and-gate):
-   * "failed" = a real failure was detected (the stop-dispatch signal); "aborted" = the run produced
-   * NO correctness conclusion (spawn error / signal kill / outer abort) and MUST NOT stop dispatch.
-   * A missing reason (legacy red) is treated as "failed" — fail-closed toward stopping.
-   */
-  reason?: SuiteStateReason;
-}
-
-/**
- * AC5 — the stop-dispatch decision on a suite state. state=red is the stop signal ONLY when the
- * red carries a real failure: `state: red` + `reason: failed` (or a missing reason, legacy/fail-
- * closed) ⇒ STOP dispatch; `state: red` + `reason: aborted` (no correctness conclusion) ⇒ do NOT
- * stop — the outer records the abort and re-runs. Absent state file ⇒ do NOT block (documented:
- * the outer hasn't run its first round yet).
- */
-export function shouldStopDispatch(state: SuiteState | null): boolean {
-  if (!state) return false;
-  if (state.state !== "red") return false;
-  return state.reason !== "aborted";
 }
 
 export type SuiteEventKind = "SUITE-RED" | "SUITE-GREEN" | "SUITE-RUNNING";
@@ -147,7 +126,7 @@ export function recordTransition(
     event: kind,
     at: new Date().toISOString(),
     early: nextState.state === "red" && nextState.finishedAt === null,
-    stopSignal: shouldStopDispatch(nextState),
+    stopSignal: nextState.state === "red",
     state: nextState,
   };
   try {
@@ -195,7 +174,7 @@ export function runOnce(root: string): RunOnceResult {
     // 记忆写失败不阻断本轮检测（下次轮询会重新比较——至多多记一条，不会漏掉红）。
   }
 
-  return { status, events, stopSignal: shouldStopDispatch(cur) };
+  return { status, events, stopSignal: cur?.state === "red" };
 }
 
 function formatEventLine(ev: SuiteStateEvent): string {

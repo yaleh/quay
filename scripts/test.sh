@@ -343,25 +343,6 @@ default_test_concurrency() {
   default_concurrency_formula
 }
 
-# has_explicit_concurrency <args...> — whether the args already carry a --test-concurrency flag
-# (either the `=` spelling with a numeric value, or the SPACE spelling with a numeric value). When it
-# does, the derived default MUST NOT be prepended: an explicit flag is the SINGLE concurrency source.
-# This is what makes the full-suite-runner's REPLACE splice produce EXACTLY ONE --test-concurrency on
-# the node --test process (gap-full-suite-runner-concurrency-default-and-gate AC2; the ps-level
-# Contract measure `grep -o -- '--test-concurrency=[0-9]*' | wc -l` must read 1). Without this, the
-# runner's spliced value and test.sh's own default would coexist as TWO flags — the ABORT #5 shape.
-has_explicit_concurrency() {
-  local prev="" a
-  for a in "$@"; do
-    case "$a" in
-      --test-concurrency=*|--test-concurrency) return 0 ;;
-    esac
-    if [ "$prev" = "--test-concurrency" ]; then return 0; fi
-    prev="$a"
-  done
-  return 1
-}
-
 # resource_gate_check — consult the shared resource gate BEFORE a FULL-SUITE (glob-based default)
 # run (gap-no-resource-awareness-heavy-ops-run-blind, AC7). WAIT → the gate printed the numbers,
 # this exits non-zero — NEVER silently wait (silent wait is indistinguishable from a hang).
@@ -620,13 +601,7 @@ run_selected() {
     cc="$(default_test_concurrency)"
     mark_nested
     set +e
-    # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
-    # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
-    if has_explicit_concurrency "$@"; then
-      node --test "$@" "${files[@]}"
-    else
-      node --test --test-concurrency="$cc" "$@" "${files[@]}"
-    fi
+    node --test --test-concurrency="$cc" "$@" "${files[@]}"
     local code=$?
     set -e
     # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
@@ -650,13 +625,7 @@ run_selected() {
     exit "$code"
   fi
   mark_nested
-  # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
-  # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
-  if has_explicit_concurrency "$@"; then
-    exec node --test "$@" "${files[@]}"
-  else
-    exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
-  fi
+  exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
 }
 
 # ── argument dispatch ────────────────────────────────────────────────────────────────────────────
@@ -716,12 +685,7 @@ elif [ -n "${groups}" ]; then
     export QUAY_TEST_GROUPS="$groups"
     build_dist_once
     mark_nested
-    # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
-    if has_explicit_concurrency "$@"; then
-      exec node --test "$@"
-    else
-      exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
-    fi
+    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
   fi
 fi
 
@@ -763,12 +727,7 @@ elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
     run_scoped_static_checks_touches "$(IFS=,; echo "$*")"
     build_dist_once
     mark_nested
-    # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
-    if has_explicit_concurrency "$@"; then
-      exec node --test "$@"
-    else
-      exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
-    fi
+    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
   fi
   task_id="${scoped_arg}"
   shift 2
@@ -827,12 +786,7 @@ elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
   # Pass-through flags (e.g. --test-name-pattern=X) must precede the file list: node --test only
   # honors --test-name-pattern when it appears BEFORE the named files (after them it is ignored,
   # which would run the whole file — and for this self-referential test, recurse).
-  # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
-  if has_explicit_concurrency "${rest_args[@]}"; then
-    node --test "${rest_args[@]}" "${files[@]}"
-  else
-    node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
-  fi
+  node --test --test-concurrency="$(default_test_concurrency)" "${rest_args[@]}" "${files[@]}"
   test_code=$?
   set -e
   if [ "${sel_code}" -ne 0 ]; then
@@ -853,10 +807,5 @@ else
   # Explicit file list (no --group): QUAY_TEST_GROUPS stays unset, so in-file skips do not
   # trigger and the named files run in full.
   mark_nested
-  # has_explicit_concurrency: explicit flag wins as the single concurrency source (AC2).
-  if has_explicit_concurrency "$@"; then
-    exec node --test "$@"
-  else
-    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
-  fi
+  exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
 fi
