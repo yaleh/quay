@@ -3611,3 +3611,6 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > bisect + 手动 render 证明**恰好一个 CronCreate driver**（ScheduleWakeup 0 / /loop Nm 0），4b2 是
 > Monitor 非 driver，**无代码改动**；编辑是 cosmetic ghost-chasing。判为负载敏感假阳性（同 noise-gate
 > 族）。已重启 ROUND 3 gate（bzik1is7r）；若复发则抓失败环境的实际 rendered doc 诊断。
+> **06:36Z 观测（OVER90 假阳性复现）**：--detect-stop 报 ready-pool-floor task-over-90m——同 full-suite 先例：
+> 工作已落地（在 ROUND 3 收尾集）但 bracket 待外层 closure（round mid-gate）未关 ⇒ 假阳性。**已知类**，
+> 非卡住；ROUND 3 绿后关 9 条即消。
