@@ -306,21 +306,17 @@ test("AC5 — a signal-killed run writes state=red reason=aborted, which must NO
   const { f, dir } = fakeSuite('echo "started"\nsleep 2\necho "# fail 0"\nexit 0');
   try {
     const child = runRunner({ root, command: `bash ${f}` });
-    // Flake fix (fan-in 2026-08-05): the 2000ms poll for state=running was too tight for
-    // node --experimental-strip-types startup under load (failed 2/3 in the merged fan-in run).
-    // The signal handler writes red+aborted synchronously before process.exit — the code is
-    // correct; the window just needs to accommodate cold node startup. Bumped both polls.
     await poll(() => {
       const s = readState(root);
       return s && s.state === "running" ? s : null;
-    }, { timeoutMs: 10000 });
+    }, { timeoutMs: 2000 });
     child.kill("SIGTERM");
     await waitExit(child);
     // The runner's signal handler writes red+aborted (no correctness conclusion).
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
-    }, { timeoutMs: 10000 });
+    }, { timeoutMs: 2000 });
     assert.equal(s.reason, "aborted", "a kill produces reason=aborted, not failed");
     // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
     const res = runOnce(root);
