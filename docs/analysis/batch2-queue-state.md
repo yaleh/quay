@@ -2557,6 +2557,19 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   3 条」是内层计划非已提交请求（可靠送达教训：框内文字≠已提交）。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。资源闸遵守（外层只廉价核实）。
 
+### tick 2026-08-05T00:22Z（外层，`no-action`：人裁定 + 管理者优先级）
+
+- **人裁定结晶化（item ①）**：「框里有字 vs 真的提交了」判断做成工具——`pane-state-classify.ts`
+  `--check-residue` 模式（empty / real-unsubmitted-text / ghost-suggestion-only 三态），复用 D 的底部
+  区域 + 形状；运行时 C-u 探针是判据（静态文本无样式分不了 ghost/真输入，故障 6 判据机械化）。
+  已立案 `gap-residue-check-crystallized-as-tool-mode`（todo）。
+- **管理者优先级（item ②）+ 外层裁定**：`gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`
+  **优先于 ghost 消除**——它卡 quay 自建 AC-SH 自举与 meta-cc 独立冷启动（cold-start skill 调用
+  quay-init.sh 不铺的文件 = 产品交付物自相矛盾）；ghost 是可靠性/成本锦上添花。**已驱动内层**：
+  overshoot 全量绿后派下一批时 gap-init-ships 优先（ready + resolve 可派发，虽被 pool 符号边缘排除
+  计数——口径不影响派发）。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
