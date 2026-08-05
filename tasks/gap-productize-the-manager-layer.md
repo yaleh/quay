@@ -65,6 +65,11 @@ extra:
       指针）；复盘有对照物可查
 - [ ] AC6: 11 份 `SPEC-*.md` 作为方法论来源引用（在 SKILL 中列索引，不批量结晶）
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`（三层存在 + AC8c 无废键检查）
+- [ ] AC8: **交付维度与启动维度独立**（管理者更正，人纠正）——plugin【应当】包含 manager 层（更多开发
+      者同样需要跨项目协调；不交付 = 人人重发明），但 quay:cold-start【不应】启动它（manager 不属项目
+      冷启动范围，一个 network 一个就够）。**进交付物**与**不进冷启动六键**是两条独立判据：冷启动技能
+      不得因为 plugin 里有 manager 就去启动它（机械复制 quay 三窗口到 meta-cc/archguard 已犯过——管理者
+      自陈 + 自查改回 bash/outer/inner）
 
 ## Definition of Done
 

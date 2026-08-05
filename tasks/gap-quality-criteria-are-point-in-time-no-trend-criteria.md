@@ -69,6 +69,14 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
      / diff -rq 36 处差异。**局部证据下全局结论**。
    判据形态：「断言 X 全覆盖/已执行」必须附**证据覆盖面**（比对了多少 / 总共有多少 / 未覆盖部分显式
    列出），不是单样本下全称。
+8. **知识存在 ≠ 决策时被调用（管理者 2026-08-05，第三实例，三层都有）**——知识写进了交付物/文档但
+   决策时没被调用：
+   - **inner**：读了出厂文档仍复读上下文旧措辞（batch 内化，`gap-reanchor-must-converge` 同族）；
+   - **outer/red-window**：红窗规则写好但无执行者（`gap-red-window-has-no-automatic-executor`）；
+   - **manager**：明知 manager 不属冷启动范围，仍在 meta-cc-3/archguard-4 各建了一个 manager 窗口
+     （机械复制 quay 三窗口），人问了才自查改回 bash/outer/inner。
+   判据形态：**决策时显式调用相关知识的检查**（「此动作是否调用了我知道但未引用的知识」），不只是
+   「知识存在于某处」。
 
 **不引入新调度**：趋势是**读已有记录**的被动判据（suite-state / verification-round 历史），不是新的
 运行触发；外层 cron 或复盘时跑。

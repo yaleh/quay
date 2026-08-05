@@ -3548,3 +3548,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > （两冲突先查明是 08-03 从 dist 安装的产物非本地修改才 --force）；两项目 verify-installed-executables +
 > verify-referenced-landed 均 OK。**四个会话（meta-cc-3/archguard-4 各 outer+inner）已在 deepseek-v4-flash
 > 就绪。**
+
+> **06:25Z 增补（管理者更正先前判断 + 第三实例）**：先前「manager 属 network 级、塞进 plugin 是类型错误」
+> 的后半句错了（人纠正）——**plugin 应当含 manager 层（交付维度），但 cold-start 不应启动它（启动
+> 维度）**，两维度独立。manager 进 plugin 缺口仍成立（未降级/关闭）。已给 manager 产品化任务加 **AC8**：
+> 进交付物 ≠ 进冷启动六键（冷启动不得因 plugin 有 manager 就启动它；机械复制三窗口到 meta-cc/archguard
+> 已犯过）。**第三实例已进 quality 任务**：知识存在≠决策时被调用（inner 复读旧措辞 / 红窗规则无执行者 /
+> manager 复制 manager 窗口），三层都有。
