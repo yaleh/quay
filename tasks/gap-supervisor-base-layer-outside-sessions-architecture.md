@@ -88,6 +88,37 @@ supervisor **不是第四层 agent**——无判断力、不参与决策、不�
 3. **AC10 记账**：post-friction（被今晚 12 小时事故打开），**不计分**，计数保持 7。
 4. **与 SPEC 的关系**：本任务是 SPEC 的落地载体；机件层继续走 MCP、行为层留文本、基座层 supervisor。
 
+### 追加 2026-08-05 09:0xZ —— `claude -p` 形态（管理者更正 + 人次序裁定）
+
+**管理者更正（人指出 + 实测确认）**：§4.3 那条「CC 只能 TUI 收输入、claude -p 计费风险」**错了**——
+outer/inner **早就跑在 deepseek API key 上**（两侧 `--model deepseek-v4-flash`，外层已核实），claude -p
+与现状**同一计费模型**。那条约束**只对 manager 成立**（跑 Anthropic 订阅）。**管理者如实记：把 manager
+的计费模型错误推广到三层，是今晚第七次测量/推理错误。**
+
+**更正后结论更强**：走 `-p` 后投递从「注入 TUI」变「起进程」，五个缺失原语**解掉四个**：
+- 会话间消息 → 进程参数（不可能 NBSP/ghost placeholder）
+- 投递校验 → 进程退出码 + stdout（不需要 pane 哈希）
+- 会话状态 → 进程在不在（不需要冻结 heartbeat）
+- 槽位账本 → 子进程数（**OS 就是账本**——恒真判据的根本解）
+- 抢占 → kill 进程（任意点生效——.halt 挡不住连续流程的根本解）
+
+⇒ **不是「supervisor 帮我们把 tmux 用好」，是「走 -p 之后 supervisor 要做的事少一大半」。**
+
+**可行性关键前提已满足**：`-p` 每次 tick 空上下文，但 tick 文档「## 冷启动」已规定读四文件+三命令
+建实况、以实测为准——**从空上下文重建状态不是新能力，是已在跑的路径**。
+
+**真实代价（不掩盖）**：Monitor 在 -p 下不可用（supervisor 接管）；CronCreate 会话作用域而 -p 会话
+短命（同上归 supervisor）；**人无法 attach 看/打字**（真损失，需可观测性/Web UI 补）；长会话隐性
+连续性消失（隐性状态被逼成显式文件——既是代价也是好处）。
+
+**人的次序裁定（按此排）**：**先在 archguard/meta-cc 上把产品化验证完，再开 claude -p 实验。**
+理由：-p 改运行形态、产品化验交付内容；先验交付再换形态，任何一处坏掉都能归因，同时动分不清是
+交付缺件还是形态不适配。
+
+**-p 之前 tmux 仍在时的处置**：观测路径现在就能清零——session-liveness.sh 已行动投票（transcript
+引用 85 vs capture-pane 2，去掉剩 2）；投递路径 send-keys 只在 2 文件，耦合面小，隔离成
+deliver()/observe() 两个窄接口。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **三层判据可用**——任何新机制归属判据（基座→进 CC/outlive 会话；机件→可执行；行为→
@@ -100,6 +131,10 @@ supervisor **不是第四层 agent**——无判断力、不参与决策、不�
       不新开重复任务
 - [ ] AC5: **真 TUI e2e**（投递集中化的核心）——唯一不可靠操作一处硬化 + 真 TUI 端到端测试（NBSP
       反例的结构性解）
+- [ ] AC5b: **`claude -p` 形态路径**——外层/inner 走 headless 时五原语解四个（消息→进程参数、
+      校验→退出码、状态→进程在不在、槽位→子进程数、抢占→kill）；supervisor 做的事少一大半
+- [ ] AC5c: **次序裁定**——先在 archguard/meta-cc 验证产品化，**再**开 claude -p 实验（先验交付再换
+      形态，坏处能归因）；-p 之前 tmux 仍用时清理观测路径（session-liveness 去掉剩 2 次 capture-pane）
 - [ ] AC6: **AC10 诚实记账**——post-friction（被今晚事故打开）不计分，计数保持 7
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
