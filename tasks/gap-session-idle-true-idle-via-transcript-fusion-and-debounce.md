@@ -3,7 +3,7 @@ id: gap-session-idle-true-idle-via-transcript-fusion-and-debounce
 title: SESSION-IDLE judged by pane-hash alone can't distinguish true idle from
   between-tool-calls gaps — fuse transcript last-message-type (pure text vs
   pending tool_use) + debounce 2 rounds, per human's accept-FP-avoid-FN risk
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

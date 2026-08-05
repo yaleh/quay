@@ -3094,3 +3094,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
      每运行指标记录 + 趋势打标；0.251→0.464→0.321 为回归控制；入每日复盘常项。
 - 缺口 1 的复盘节奏已 done；缺口 4 先结晶层、缺口 2/3 机制归属该层（交叉标注）。
 - 在飞：下批（suite(a)→closure-grant→scoped）inner 派发中（suite(a) --task-start 已打）。
+
+### tick 2026-08-05T03:23Z（外层，`no-action`：下批正确串行执行中；池补晋 session-idle）
+
+- **ROUND 1 + 下批确认**（inner 自记 9168fea5）：3 done（roadmap/review-cadence/inner-anchor）、2 ready
+  待补（closure-sync AC5 / drive-text DoD）；派发 suite(a)→closure-grant→scoped 串行，②门控 ①（同触
+  loop 文档）。**inner 已在 ① brief 预标 capability-catalog AC1c 门**（新脚本需声明行 = 上轮 RED 的
+  教训内化）。
+- **池补晋**：pool 1（full-suite 在飞）deficit 2；机制推荐 2 条——**gap-session-idle 已晋级**
+  （有效）；**gap-prepare-milestone 未晋**（外层 no-promote 裁定；AC8 过滤未接进 ready-pool-check，
+  机制仍推荐 = 记录在案）。
+- **在飞**：suite(a) agent（3m，读 test.sh run_static_checks 实现红窗乐观规则）；无停止条件、无 BLOCKED；
+  loop-driver LIVE。
