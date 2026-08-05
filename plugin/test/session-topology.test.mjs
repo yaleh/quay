@@ -1,0 +1,289 @@
+// @test-group governance
+// session-topology.test.mjs — gap-tmux-session-topology-no-factory-definition, AC1–AC5.
+//
+// The three-window tmux session topology (<project>-N:outer / :inner / :manager) used to be a
+// convention with no factory definition — the human hand-built meta-cc-3 / archguard-4 sessions
+// measured to have ONLY a single bash window and no claude process. This test pins the shipped
+// factory definition + the mechanisms that make cold start build the topology by definition:
+//
+//   AC1 — the definition ships in plugin/skills/session-topology/SKILL.md (invariant
+//         three_window_shipped=1; invoke `grep -rn ':outer\|:inner\|:manager' plugin/skills/`),
+//         names all three windows (Contract measure topology_windows >= 3), and documents each
+//         layer's launch command / who drives whom / what each layer mounts.
+//   AC2 — quay-init --loop lays down the factory (quay-topology.sh) + check (topology-check.sh)
+//         into a target project, byte-identical to the plugin source (config-driven install).
+//   AC3 — topology-check.sh: three windows each with a claude process ⇒ ok:true (exit 0); a
+//         single bash window (the meta-cc-3/archguard-4 failure shape) ⇒ all missing (exit
+//         non-zero); a topology window that is a bare bash ⇒ no-claude (exit non-zero).
+//   AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE key + the
+//         factory/check references) — SKILL teaches the loop start, this task teaches the session
+//         topology; together they are 装得上.
+//   AC5 — this file is node:test + // @test-group governance.
+// Plus: the factory's --dry-run emits the three-window plan; a real build creates the windows.
+//
+// All tmux work is on a HERMETIC server on a private socket (TMUX_TMPDIR + explicit -S argv),
+// never the machine's real sessions. Cleanup kills each session it started (kill-session, never
+// kill-server — gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause).
+//
+// Run:
+//   scripts/test.sh plugin/test/session-topology.test.mjs
+//   node --test plugin/test/session-topology.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pluginDir = path.resolve(__dirname, "..");
+
+const TOPOLOGY_DEF = path.join(pluginDir, "skills", "session-topology", "SKILL.md");
+const FACTORY = path.join(pluginDir, "scripts", "quay-topology.sh");
+const CHECK = path.join(pluginDir, "scripts", "topology-check.sh");
+const COLD_START = path.join(pluginDir, "skills", "cold-start", "SKILL.md");
+
+const tmuxAvailable = (() => {
+  try { return spawnSync("tmux", ["-V"], { encoding: "utf8" }).status === 0; } catch { return false; }
+})();
+
+function makeTmp(prefix = "quay-topo-") {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+function cleanup(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
+// A worktree root quay-init's validation ACCEPTS (a real disk path, not tmpfs — the sibling
+// default of a /tmp test workspace is tmpfs and is correctly rejected fail-closed).
+function diskWorktreeRoot() {
+  for (const base of ["/var/tmp", os.tmpdir()]) {
+    try {
+      const t = spawnSync("stat", ["-f", "-c", "%T", base], { encoding: "utf8" });
+      if (t.status === 0 && t.stdout.trim() !== "tmpfs") {
+        return path.join(base, `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+      }
+    } catch { /* try next base */ }
+  }
+  return path.join(os.tmpdir(), `quay-wt-${process.pid}-${Math.random().toString(36).slice(2)}`);
+}
+
+function runInit(workspace, args = []) {
+  const loop = args.includes("--loop");
+  const extra = loop && !args.some((a) => a === "--worktree-root") ? ["--worktree-root", diskWorktreeRoot()] : [];
+  return spawnSync("bash", [path.join(pluginDir, "scripts", "quay-init.sh"), ...extra, ...args],
+    { cwd: workspace, encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir } });
+}
+
+// ── hermetic tmux (private socket; kill-session per created session, never kill-server) ─────────────
+function isolateTmuxEnv(sockDir) {
+  const env = { ...process.env, TMUX_TMPDIR: sockDir };
+  delete env.TMUX;
+  return env;
+}
+function tmuxAt(sockPath, args, env) {
+  const argv = sockPath ? ["-S", sockPath, ...args] : args;
+  const r = spawnSync("tmux", argv, { encoding: "utf8", env: env ?? process.env });
+  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+function newHermetic(prefix = "quay-topo-") {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const sockDir = path.join(tmp, "sock");
+  const socketBase = path.join(sockDir, `tmux-${process.getuid()}`);
+  fs.mkdirSync(socketBase, { recursive: true, mode: 0o700 }); // tmux refuses a world-accessible socket dir
+  const sockPath = path.join(socketBase, "default");
+  const env = isolateTmuxEnv(sockDir);
+  const started = new Set();
+  return {
+    tmp, sockDir, sockPath, env, started,
+    newSession(name, cmd) {
+      const r = tmuxAt(sockPath, ["new-session", "-d", "-s", name, cmd], env);
+      if (r.status === 0) started.add(name);
+      return r;
+    },
+    newWindow(sess, name, cmd) {
+      return tmuxAt(sockPath, ["new-window", "-t", sess, "-n", name, cmd], env);
+    },
+    send(sess, text) {
+      return tmuxAt(sockPath, ["send-keys", "-t", sess, text, "Enter"], env);
+    },
+    windowNames(sess) {
+      const r = tmuxAt(sockPath, ["list-windows", "-t", sess, "-F", "#{window_name}"], env);
+      return r.stdout.trim().split("\n").filter(Boolean);
+    },
+    cleanup() {
+      for (const name of started) {
+        tmuxAt(sockPath, ["kill-session", "-t", name], env);
+      }
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    },
+  };
+}
+
+// paneHasClaude — replicate the scripts' has_claude_child: any child of the pane shell whose
+// /proc/<pid>/cmdline contains "claude" (the test plants `exec -a claude-probe sleep` children).
+function paneHasClaude(env, session) {
+  const p = spawnSync("tmux", ["list-panes", "-t", session, "-F", "#{pane_pid}"], { encoding: "utf8", env });
+  if (p.status !== 0 || !p.stdout.trim()) return false;
+  const ppid = p.stdout.trim().split("\n")[0];
+  const kids = spawnSync("pgrep", ["-P", ppid], { encoding: "utf8" });
+  for (const pid of (kids.stdout ?? "").trim().split("\n").filter(Boolean)) {
+    try {
+      const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+      if (cmd.includes("claude")) return true;
+    } catch { /* best-effort */ }
+  }
+  return false;
+}
+async function waitForClaude(env, session, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (paneHasClaude(env, session)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return paneHasClaude(env, session);
+}
+
+function runCheck(env, args = []) {
+  return spawnSync("bash", [CHECK, ...args], { encoding: "utf8", env });
+}
+
+// ── AC1 — the factory definition ships in plugin/skills/ ───────────────────────────────────────────
+
+test("AC1 — the three-window topology definition ships in plugin/skills/ (invariant three_window_shipped=1)", () => {
+  assert.ok(fs.existsSync(TOPOLOGY_DEF), "plugin/skills/session-topology/SKILL.md must exist — the shipped definition, not quay-local");
+  const src = fs.readFileSync(TOPOLOGY_DEF, "utf8");
+  // Contract measure: topology_windows = grep -c 'outer\|inner\|manager' <定义文件> ≥ 3
+  const count = (src.match(/outer|inner|manager/g) || []).length;
+  assert.ok(count >= 3, `definition must name outer/inner/manager at least 3 times (got ${count})`);
+  // Contract invoke: `grep -rn ':outer\|:inner\|:manager' plugin/skills/` must hit the definition
+  for (const w of [":outer", ":inner", ":manager"]) {
+    assert.ok(src.includes(w), `definition must use the ${w} window-addressing convention`);
+  }
+});
+
+test("AC1 — the definition documents each layer's command, who drives whom, and what each layer mounts", () => {
+  const src = fs.readFileSync(TOPOLOGY_DEF, "utf8");
+  // each layer's launch command comes from the checked-in launcher (not a hand-typed one-liner)
+  assert.match(src, /quay-launch\.sh/, "each layer's launch command must reference quay-launch.sh (settings-crystallized)");
+  assert.match(src, /launch\.settings\.json/, "the launch command source must be the checked-in settings file");
+  // who drives whom: outer drives inner via send-keys; manager observes + relays
+  assert.match(src, /send-keys/, "the definition must state that outer drives inner via send-keys");
+  assert.match(src, /observer|observes|relays/i, "the definition must state the manager observes + relays");
+  // what each layer mounts: monitor / cron / re-anchor for outer, observer for manager
+  assert.match(src, /monitor|cron|observer/i, "the definition must state what each layer mounts");
+});
+
+// ── AC2 — quay-init lays down the topology factory + check ─────────────────────────────────────────
+
+test("AC2 — quay-init --loop lays down the topology factory + check, byte-identical to the plugin", () => {
+  const ws = makeTmp();
+  try {
+    fs.mkdirSync(path.join(ws, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "scripts", "test.sh"), "#!/bin/bash\necho test\n", "utf8");
+    const r = runInit(ws, ["--loop", "--root", ws, "--project", "topoproj",
+      "--test-command", "node --test", "--tmux-session", "topoproj-0"]);
+    assert.equal(r.status, 0, `quay-init --loop must exit 0:\n${r.stderr}`);
+    for (const rel of ["plugin/scripts/quay-topology.sh", "plugin/scripts/topology-check.sh", "plugin/scripts/quay-launch.sh"]) {
+      const laid = path.join(ws, rel);
+      assert.ok(fs.existsSync(laid), `quay-init must lay down ${rel}`);
+      const src = path.join(pluginDir, "scripts", path.basename(rel));
+      assert.equal(fs.readFileSync(laid, "utf8"), fs.readFileSync(src, "utf8"),
+        `${rel} must be byte-identical to the plugin source (config-driven install)`);
+    }
+  } finally { cleanup(ws); }
+});
+
+// ── AC3 — topology-check verification (positive / negative / mixed controls) ───────────────────────
+
+test("AC3 — positive control: three windows each with a claude process ⇒ ok:true, exit 0", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const h = newHermetic();
+  try {
+    h.newSession("topo-pos", "bash");
+    for (const role of ["manager", "outer", "inner"]) {
+      h.newWindow("topo-pos", role, "bash");
+      h.send(`topo-pos:${role}`, "exec -a claude-probe sleep 10000 &");
+    }
+    for (const role of ["manager", "outer", "inner"]) {
+      assert.ok(await waitForClaude(h.env, `topo-pos:${role}`, 5000), `${role} must have a claude child before the check`);
+    }
+    const r = runCheck(h.env, ["--session", "topo-pos", "--json"]);
+    assert.equal(r.status, 0, `three-window topology in place must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.ok, true, `must report ok:true:\n${r.stdout}`);
+    assert.deepEqual(j.windows, { manager: "ok", outer: "ok", inner: "ok" });
+  } finally { h.cleanup(); }
+});
+
+test("AC3 — negative control: a single bash window (no claude) ⇒ all three missing, exit non-zero (the meta-cc-3/archguard-4 failure shape)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+  const h = newHermetic();
+  try {
+    h.newSession("topo-neg", "bash"); // only a bare bash window — no manager/outer/inner
+    const r = runCheck(h.env, ["--session", "topo-neg", "--json"]);
+    assert.notEqual(r.status, 0, "a single-bash-window session must fail the check");
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.ok, false);
+    assert.deepEqual(j.windows, { manager: "missing", outer: "missing", inner: "missing" });
+  } finally { h.cleanup(); }
+});
+
+test("AC3 — mixed: a topology window that is a bare bash (no claude) ⇒ no-claude, exit non-zero", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const h = newHermetic();
+  try {
+    h.newSession("topo-mix", "bash");
+    h.newWindow("topo-mix", "manager", "bash");
+    h.send("topo-mix:manager", "exec -a claude-probe sleep 10000 &");
+    h.newWindow("topo-mix", "outer", "bash"); // bare bash, no claude child
+    h.newWindow("topo-mix", "inner", "bash");
+    h.send("topo-mix:inner", "exec -a claude-probe sleep 10000 &");
+    assert.ok(await waitForClaude(h.env, "topo-mix:manager", 5000), "manager must be alive");
+    assert.ok(await waitForClaude(h.env, "topo-mix:inner", 5000), "inner must be alive");
+    const r = runCheck(h.env, ["--session", "topo-mix", "--json"]);
+    assert.notEqual(r.status, 0, "an incomplete topology must fail the check");
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.ok, false);
+    assert.equal(j.windows.outer, "no-claude", "a bare-bash outer must be reported no-claude (window present, no claude process)");
+    assert.equal(j.windows.manager, "ok");
+    assert.equal(j.windows.inner, "ok");
+  } finally { h.cleanup(); }
+});
+
+// ── AC4 — cold-start cross-annotation ──────────────────────────────────────────────────────────────
+
+test("AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE + factory/check refs)", () => {
+  const src = fs.readFileSync(COLD_START, "utf8");
+  assert.match(src, /TOPOLOGY-IN-PLACE/, "the cold-start checklist must add the TOPOLOGY-IN-PLACE key");
+  assert.match(src, /quay-topology\.sh/, "cold-start must drive the topology factory (build by definition)");
+  assert.match(src, /topology-check\.sh/, "cold-start must verify the topology via topology-check");
+  assert.match(src, /session-topology/, "cold-start must cross-annotate the session-topology skill");
+});
+
+// ── the factory (quay-topology.sh): dry-run plan + real build ──────────────────────────────────────
+
+test("factory — quay-topology.sh --dry-run emits the three-window plan; a real build creates the windows", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+  const h = newHermetic();
+  try {
+    const dry = spawnSync("bash", [FACTORY, "--session", "topo-factory", "--dry-run"], { encoding: "utf8", env: h.env });
+    assert.equal(dry.status, 0, `dry-run must exit 0:\n${dry.stderr}`);
+    for (const role of ["manager", "outer", "inner"]) {
+      assert.match(dry.stdout, new RegExp(role), `dry-run must plan the ${role} window`);
+    }
+    // Real build with a harmless launch-command override (no real claude launched — the override
+    // keeps the pane shell as the pane_pid so a claude-named child appears, mirroring the real
+    // quay-launch.sh launch shape).
+    const build = spawnSync("bash", [FACTORY, "--session", "topo-factory"], {
+      encoding: "utf8",
+      env: { ...h.env, TOPOLOGY_LAUNCH_CMD: "bash -c 'exec -a claude-probe sleep 10000 & wait'" },
+    });
+    assert.equal(build.status, 0, `build must exit 0:\n${build.stderr}`);
+    const names = h.windowNames("topo-factory");
+    for (const role of ["manager", "outer", "inner"]) {
+      assert.ok(names.includes(role), `the factory must create the ${role} window (got: ${names.join(", ")})`);
+    }
+    // and the topology-check passes on the factory-built session (each window has a claude child).
+    const r = runCheck(h.env, ["--session", "topo-factory", "--json"]);
+    assert.equal(r.status, 0, `factory-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
+  } finally { h.cleanup(); }
+});

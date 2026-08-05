@@ -14,16 +14,16 @@
 //          "事件送得到" not "进程在跑".
 //   telemetry AC — the skill asserts a real --task-start record in <root>/.workflow-events/ and
 //          treats a missing record as "not connected" (commits/tick-log do NOT substitute).
-//   AC8c — the skill defines "observable consequences" as a concrete six-key checklist
+//   AC8c — the skill defines "observable consequences" as a concrete seven-key checklist
 //          (MONITORS-MOUNTED / MONITORS-DELIVERING / CRON-CREATED / INNER-DRIVEN /
-//          TELEMETRY-RECORD / FIRST-TASK), so "same command, same results on any model" is
-//          falsifiable rather than prose.
+//          TELEMETRY-RECORD / FIRST-TASK / TOPOLOGY-IN-PLACE), so "same command, same results
+//          on any model" is falsifiable rather than prose.
 //   AC1 correction — the skill EXPLICITLY drives inner (send-keys-reliable.sh + the
 //          transcript-delivery-check.ts verdict), never treats the inner start as a side effect
 //          of outer guidance; the superseded whole-pane-hash criterion is NOT taught (AC2/AC3).
 //
 // Plus a mechanical rehearsal: a quay-init --loop temp project + a real `--task-start` call must
-// produce the .workflow-events/ record the skill's step 7 asserts — the wiring the skill relies
+// produce the .workflow-events/ record the skill's step 8 asserts — the wiring the skill relies
 // on, checked in a throwaway project (no live session needed).
 //
 // Run:
@@ -116,12 +116,12 @@ test('telemetry AC — the skill asserts a real --task-start record in .workflow
 test('AC8c — the skill defines the observable-consequences checklist as a concrete six-key list', () => {
   for (const key of [
     'MONITORS-MOUNTED', 'MONITORS-DELIVERING', 'CRON-CREATED',
-    'INNER-DRIVEN', 'TELEMETRY-RECORD', 'FIRST-TASK',
+    'INNER-DRIVEN', 'TELEMETRY-RECORD', 'FIRST-TASK', 'TOPOLOGY-IN-PLACE',
   ]) {
     assert.ok(skillSrc.includes(key), `the observable-consequences checklist must define ${key}`);
   }
   assert.match(skillSrc, /falsifiable/, 'the checklist must be stated as the falsifiable definition of "same results"');
-  assert.match(skillSrc, /all six/, 'the skill must require ALL six consequences, not a subset');
+  assert.match(skillSrc, /all seven/, 'the skill must require ALL seven consequences, not a subset');
 });
 
 // ── AC1 correction: the inner start is DRIVEN, never assumed as a side effect ────────────────────────
@@ -142,7 +142,7 @@ test('AC2 — the skill teaches the reliable-send delivery criterion (transcript
 });
 
 // ── Mechanical rehearsal: a real --task-start in a quay-init --loop project produces the record ───────
-// The skill's step 7 asserts `<root>/.workflow-events/*.jsonl` carries a --task-start record. That
+// The skill's step 8 asserts `<root>/.workflow-events/*.jsonl` carries a --task-start record. That
 // assertion is only meaningful if the laid-down mechanism actually produces it — checked here in a
 // throwaway project (no live session, no monitor mount needed).
 test('rehearsal — a real --task-start against a quay-init --loop project writes the .workflow-events/ record the skill asserts', () => {
@@ -158,7 +158,7 @@ test('rehearsal — a real --task-start against a quay-init --loop project write
       '--task-start', '--taskId', 'cold-start-rehearsal', '--root', ws],
       { cwd: ws, encoding: 'utf8' });
     assert.equal(ts.status, 0, `--task-start must succeed:\n${ts.stderr}`);
-    // The record the skill's step 7 greps for must actually exist in the target project.
+    // The record the skill's step 8 greps for must actually exist in the target project.
     const eventsDir = path.join(ws, '.workflow-events');
     assert.ok(fs.existsSync(eventsDir), '.workflow-events/ must be created by --task-start');
     const files = fs.readdirSync(eventsDir).filter((f) => f.endsWith('.jsonl'));

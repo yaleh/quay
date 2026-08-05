@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# quay-topology.sh — 三窗口会话拓扑工厂（gap-tmux-session-topology-no-factory-definition, AC2）。
+#
+# 把 `<project>-N:outer / :inner / :manager` 三窗口结构按出厂定义建出来
+# （定义见 plugin/skills/session-topology/SKILL.md）。冷启动不再手工拼：
+# 每个窗口的运行命令由 plugin/scripts/quay-launch.sh <role> 生成（从检查进仓库的
+# .claude/launch.settings.json 读启动参数），本脚本只负责按定义摆窗口。
+#
+# 幂等：窗口已存在且 claude 进程在位 ⇒ 不动；窗口缺失 ⇒ 建；窗口在但无 claude ⇒ 重拉。
+# 窗口按名字寻址（session-launch-recipes §3：pane 索引会漂，窗口名不会）。
+#
+# 用法：
+#   quay-topology.sh [--session <sess>] [--dry-run]
+#     --session <sess>  目标 tmux 会话（默认：TOPOLOGY_SESSION → SESSION_TMUX_SESSION →
+#                       orchestration/session-liveness.env 的 SESSION_TMUX_SESSION）
+#     --dry-run          只打印将执行的命令，不实际改动（校验用）
+#
+# 测试接缝：
+#   TOPOLOGY_LAUNCH_CMD — 覆盖每个窗口的运行命令（默认 <repo>/plugin/scripts/quay-launch.sh <role>）。
+#                         测试用它喂无害命令，避免真的起 claude。
+#
+# 依赖：tmux、jq（经 quay-launch.sh）。
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+SESSION="${TOPOLOGY_SESSION:-}"
+DRY_RUN=0
+
+usage() {
+  sed -n '1,32p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session) SESSION="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --help|-h) usage ;;
+    *)
+      echo "ERROR: unknown argument: $1 (expected --session <sess> | --dry-run)" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# 会话解析：--session / TOPOLOGY_SESSION → 环境 → session-liveness.env → fail-closed。
+# 绝不猜一个会话名（gap-init-guesses-the-tmux-session 同源）。
+if [ -z "$SESSION" ]; then
+  SESSION="${SESSION_TMUX_SESSION:-}"
+fi
+if [ -z "$SESSION" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
+  _v="$(sed -n 's/^SESSION_TMUX_SESSION=//p' "$REPO_ROOT/orchestration/session-liveness.env" 2>/dev/null | head -1)"
+  [ -n "$_v" ] && SESSION="$_v"
+fi
+if [ -z "$SESSION" ]; then
+  echo "ERROR: no tmux session given — pass --session <sess> or set SESSION_TMUX_SESSION." >&2
+  echo "       quay-topology never guesses a session name (gap-init-guesses-the-tmux-session)." >&2
+  exit 2
+fi
+
+# 拓扑窗口顺序（与 quay-0 实测布局一致：manager=窗口0, outer=1, inner=2）。
+ROLES="manager outer inner"
+LAUNCH_CMD_OVERRIDE="${TOPOLOGY_LAUNCH_CMD:-}"
+
+launch_cmd() {
+  local role="$1"
+  if [ -n "$LAUNCH_CMD_OVERRIDE" ]; then
+    printf '%s\n' "$LAUNCH_CMD_OVERRIDE"
+  else
+    printf 'bash %s/plugin/scripts/quay-launch.sh %s\n' "$REPO_ROOT" "$role"
+  fi
+}
+
+# 窗口是否存在（按名字寻址）。
+window_exists() {
+  tmux list-windows -t "$1" -F '#{window_name}' 2>/dev/null | grep -qx "$2"
+}
+
+# pane 本体或其任一子进程是 claude（与 session-liveness.sh 的 session_pid 同判据，但遍历全部
+# 子进程而非只取第一个——新起的子进程在 exec 前是瞬时 shell，只取第一个会误判 no-claude）。
+has_claude_child() {
+  local sess="$1" role="$2" ppid cpid cmd
+  ppid="$(tmux list-panes -t "$sess:$role" -F '#{pane_pid}' 2>/dev/null | head -1)"
+  [ -n "$ppid" ] || return 1
+  # pane 进程本身可能就是 claude（窗口直接 exec claude 的形态）；先查本体再查子进程。
+  cmd="$(tr '\0' ' ' < "/proc/$ppid/cmdline" 2>/dev/null || true)"
+  case "$cmd" in *claude*) return 0 ;; esac
+  for cpid in $(pgrep -P "$ppid" 2>/dev/null); do
+    cmd="$(tr '\0' ' ' < "/proc/$cpid/cmdline" 2>/dev/null || true)"
+    case "$cmd" in *claude*) return 0 ;; *) continue ;; esac
+  done
+  return 1
+}
+
+# 会话不存在 ⇒ 从零建：第一个窗口（manager）即会话首窗（窗口 0）。
+SESSION_EXISTED=1
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  SESSION_EXISTED=0
+  FIRST="manager"
+  CMD="$(launch_cmd "$FIRST")"
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "would-create-session: tmux new-session -d -s $SESSION -n $FIRST \"$CMD\""
+  else
+    echo "create-session: tmux new-session -d -s $SESSION -n $FIRST"
+    tmux new-session -d -s "$SESSION" -n "$FIRST" "$CMD"
+    echo "  launched: $SESSION:$FIRST"
+  fi
+fi
+
+# 逐个角色确保窗口在位。manager 若是刚随会话创建的首窗，跳过（刚起的 claude 未就绪，直接判
+# 会误走重拉路径）。
+for role in $ROLES; do
+  if [ "$role" = "manager" ] && [ "$SESSION_EXISTED" = 0 ]; then
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "would-create (first window): $SESSION:manager (the new session's window 0)"
+    else
+      echo "in-place: $SESSION:manager (first window of the new session)"
+    fi
+    continue
+  fi
+  if window_exists "$SESSION" "$role"; then
+    if has_claude_child "$SESSION" "$role"; then
+      echo "in-place: $SESSION:$role (claude process present)"
+    else
+      CMD="$(launch_cmd "$role")"
+      if [ "$DRY_RUN" = 1 ]; then
+        echo "would-relaunch: tmux send-keys -t $SESSION:$role \"$CMD\" Enter"
+      else
+        echo "relaunch: $SESSION:$role (window present, no claude child)"
+        tmux send-keys -t "$SESSION:$role" "$CMD" Enter
+      fi
+    fi
+  else
+    CMD="$(launch_cmd "$role")"
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "would-create-window: tmux new-window -t $SESSION -n $role \"$CMD\""
+    else
+      echo "create-window: tmux new-window -t $SESSION -n $role"
+      tmux new-window -t "$SESSION" -n "$role" "$CMD"
+    fi
+  fi
+done
+
+echo "topology done: $SESSION ($(echo "$ROLES" | tr '\n' ' '))"
