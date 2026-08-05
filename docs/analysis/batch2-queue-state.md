@@ -5265,3 +5265,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   Precondition（**明确不 etc 全量**）。真实使用：session-liveness 在派生集内（known load-sensitive flake 正确
   阻塞门）。scoped 7/7。worktree/branch 已清。在飞 0/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T22:2xZ（外层，cold-start-gate 落地 + closure round 12）
+
+- **inner cold-start-gate 落地**：`b33c8f45` gate 收窄到**派生铺设集**（laydown-set-check.sh，与 quay-init
+  DERIVED_SCRIPTS 同 grep single-source）+ cold-start/SKILL.md fail-closed Precondition「不要等全量套件」+
+  real-use（session-liveness 在集内，已知 flake 正确阻塞），7/7。**「套件不可靠」结构性主题的解法落地**——
+  冷启动不再依赖全量套件。
+- **closure round 12**：cold-start-gate 翻 done（共 12）。
+- **套件 green**、闸 GO、load 1.17、inner 0 in-flight。
