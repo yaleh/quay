@@ -57,6 +57,11 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
    （裁定③：**先清分支**）——60 个历史遗留分支（experiment-4-iteration-* / _master_check 等）先清，
    否则新旧并存让「哪条线是权威」更难看清。
 
+> **AC4 前置②交叉标注（2026-08-05，来自 `tasks/gap-global-count-assertions-fragile-relative-baseline.md`）**：
+> 本 AC4（先修全局计数断言）由 `gap-global-count-assertions-fragile-relative-baseline` 实现并已落地其 AC1–AC3
+> （基线快照 helper `plugin/scripts/test-file-snapshot.sh` + B3-2 场景 fixture `plugin/test/test-file-snapshot.test.mjs`，
+> scoped 5/5 绿）。模型轮次上线时无需再被断言噪声遮蔽。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **两线模型**——`develop`（已验证基线）+ `integration`（待验证汇入）；master 发布线角色空置
