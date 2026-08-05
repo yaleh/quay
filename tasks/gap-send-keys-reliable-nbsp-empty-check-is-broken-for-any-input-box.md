@@ -96,6 +96,8 @@ line shapes 喂 checkTranscriptDelivered）。**它从不起一个带真实 Clau
 
 ## Touches
 
+- tasks/gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/send-keys-reliable.sh（判空剥离 NBSP，line 90）
 - plugin/test/send-keys-reliable.test.mjs（AC2 真端到端：渲染 NBSP 的夹具 pane 或真会话）
 - plugin/scripts/send-keys-verified.sh（AC5 排查，若同款一并修）

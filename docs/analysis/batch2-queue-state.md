@@ -4627,6 +4627,24 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 停止条件：无（pane 良性 idle、suite state green、无 block）。就绪池 28/12、disjoint 11/3、无自动晋级。
   Monitor 三判据绿。在飞 1/3（仅 upgrade-channel）。
 
+### tick 2026-08-05T16:5xZ（内层，upgrade-channel fan-in + 两个预存 ratchet 修复 + 新派发）
+
+- **upgrade-channel fan-in 完成**：agent 完成（`5774f0ec` → rebase 后 `a6189364`，merge `24bdc6cf`）。
+  quay-init.sh dist-stale 新鲜度（AC1 src-mtime-vs-dist + auto-rebuild/fail-closed、AC2 verify byte-compare
+  mcp_entry runtime、AC4 user-scope version-consistency、AC5 cross-annotation）。scoped 45/45 绿（含 7 新测试），
+  worktree/branch 已清。**AC12b 第 4 个阻塞工作落地**——3/4+1 全部工作落地，全部待外层 closure。
+- **预存 ratchet 修复（agent 举证 + 外层全量 gate 会拦，先行修复）**：
+  ① capability-catalog unclassified 3→0（`d20673a2`：cap-from-gate.sh/ts adaptive-concurrency 进 artifact
+  未声明 + inner-session-check.sh outer-selfchecks，补 question 行）——AC1c 闸 exit 0。
+  ② loop-shipping AC1c over-broad 断言（`715b8ad0`）：drive command 是 target-layout 例外（执行时引用
+  laid-down `$REPO_ROOT/docs/analysis/fast-mode-loop-tick.md`，quay-init 只铺 docs/analysis/、目标永无
+  plugin/loop/；cold-start SKILL:169 同形）——豁免限定执行期 `$REPO_ROOT` 插值，文档交叉引用仍强制 plugin/loop/。
+- **新派发 2/3**：① **ruling-required**（外层 16:5xZ 优先级，`fm-...-7neikr`）② **web-board**
+  （`fm-...-doaxoi`，phantom 重派）。生产闸验证互不相交（batch 判定）。**send-keys-nbsp defer**——其
+  `plugin/test/send-keys-reliable.test.mjs` 撞 ruling-required 的 `plugin/test/` glob（overlap 指名）；
+  已补 self-touch（bookkeeping），ruling-required land 后下批即派。
+- 在飞 2/3。套件 green（stale）。Monitor 三判据绿、detect-stop 无 block、无 .halt。
+
 ### tick 2026-08-05T16:5xZ 补充（外层，ruling-required 通用化任务提优先级）
 
 - **管理者优先级意见 → 裁定提优先级**：`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer`
