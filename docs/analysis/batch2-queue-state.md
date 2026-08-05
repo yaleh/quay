@@ -5082,3 +5082,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   先前停摆点（backlog-client/build-evidence 区域）。
 - **inner**：perf-fix（pool-check gitHistoryLanded 聚合 >150s）在飞。
 - **待绿后**：24 条 closure 批量收尾。
+
+### tick 2026-08-05T20:4xZ（内层，perf-fix fan-in — 池检查闸恢复）
+
+- **perf-fix fan-in 完成（机制恢复）**：`buildGitHistoryIndex()`——一次 `git log master --full-history -m
+  --name-only` 建 path→commit 内存索引，gitHistoryLanded 内存匹配；ready-pool-check walk-once（共享
+  walkFiles，O(n²) 逐侧重走 → 0.46s）。**池检查 >150s/timeout → 实测 13.5s**（agent worktree 6.96s，load
+  差异；10s band 在套件运行下有波动）。scoped 68/68。判定不破（26 index==26 per-task；web-board/upgrade/
+  measure landed=true；负控制夹具全绿）。已 merge（`fc73bbe0`）。worktree/branch 已清。
+- **池 11/12、disjoint 2**（criterion false）：池从 12→11 是 outer-heartbeat 被正确排除（工作落地，batch 索引
+  检出）——AC3 排除语义正确。disjoint 2 < cap 3 是**真候选 glob-碰撞**（独立问题，非 perf 回归）：ready 11 条
+  多数带 `plugin/scripts/`/`plugin/test/` glob。red-pattern/ghost-drive/leak 3 条已落地仍未排除（信号残留）。
+- 在飞 0/3。套件 running。false OVER90 待外层闭 4 括号。
