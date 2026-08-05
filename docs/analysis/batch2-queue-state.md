@@ -2847,6 +2847,25 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   inner-anchor（均 merged + AC 全勾除实跑型 AC，DoD 全量套件框待外层 verification-round gate）。
 - **在飞 1**：drive-text（本批最后一条）。无停止条件、无阻塞；loop-driver LIVE。
 
+### tick 2026-08-05T03:2xZ（内层，`fan-in complete`：本批全部合并，等外层 verification-round）
+
+- **drive-text 已合并**（rebase 后），7/7 测试绿 + 默认扫描 PASS（三个规范文档，位置式判定无自命中）。
+  drive-contract-check.ts + mutation case + test.sh 接线同落地。AC8 输入框外部观察者纪律落文档。
+- **本批全部落地（7 条）**：preflight（done，accepted-risk）+ roadmap / review-cadence（PRIORITY）/
+  closure-sync / inner-anchor / drive-text（5 条 landed-not-flipped）+ 批内早期路线图已含。
+- **landed-not-flipped 集合（供外层收尾例程，5 条）**：
+  | 任务 | AC | 待外层的项 |
+  |---|---|---|
+  | gap-roadmap-silently-stale | 5/5 | DoD 全量套件 |
+  | gap-establish-daily-review-cadence | 8/8 | DoD 全量套件 |
+  | gap-closure-sync-is-true-batch-boundary | 8/8（AC5 待首个外层异步收尾实跑） | AC5 + DoD 全量套件 |
+  | gap-inner-has-no-periodic-anchor | 7/7（AC6 待首个重锚实跑） | AC6 + DoD 全量套件 |
+  | gap-drive-text-carries-data | 8/8 | DoD 真实驱动验证 + 全量套件 |
+- **新契约下我不再收尾**（fast-mode-loop-tick step 2：不翻 done、不写 --task-end、不写轮次记录）。
+  verification-round（全量 suite gate + 关括号 + 翻 done）是外层 20-min-cron 的活。
+- **无在飞**：本批派发完毕，槽位全空。外层 verification-round 后按滚动语义可派下一批（若 outer
+  verification-round 结果绿）。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
