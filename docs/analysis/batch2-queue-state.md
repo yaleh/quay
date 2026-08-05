@@ -4941,3 +4941,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （自身 gate-WAIT = 不启动，这是对的）；state 重置 green(triaged)。
 - **教训**：任务创建即写 ## Contract + ## Dispatch review，不攒批补。
 - **在飞**：inner 恢复派发（stop-dispatch 撤回）。~20 not-yet-flipped 待全量真绿。
+
+### tick 2026-08-05T18:4xZ（外层，AC-carryover 二连红根治 + 全量重跑）
+
+- **第二次真红**：AC-carryover ratchet breach（done 任务带未勾 AC 未承接）——discovery AC4（我的）+ os-anchor
+  AC6（inner 的）。修复：fallback-silent 任务加 `## Carries`（from discovery, acs AC4）+ os-anchor AC6 勾
+  （AC10 记账记录在 AC 文本本身）。**ratchet new=0**。
+- **静态检查全绿**：`scripts/test.sh --static-checks` PASS（12 checkers + mutation 全过）——contract-check +
+  ac-carryover + 其余 ratchet 全解决。
+- **全量重跑**（18:46:55 起，state=running, laneCount=1）——已过静态检查进入真测试，~11-12min。
+- **待全量绿后**：~20 条 not-yet-flipped 批量收尾（closure backlog）。
