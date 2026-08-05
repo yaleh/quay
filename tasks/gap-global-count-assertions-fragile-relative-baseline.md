@@ -39,13 +39,45 @@ develop/integration 滞后不再触发断言噪声。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **相对基线判据**——全局计数断言改为「worktree 建立时 fork 基线快照 + 本任务 touch 新增」
+- [x] AC1: **相对基线判据**——全局计数断言改为「worktree 建立时 fork 基线快照 + 本任务 touch 新增」
       的相对比对，非绝对全局计数（B3-2 族全部转换）
-- [ ] AC2: **基线快照**——worktree 建立时记录测试文件集快照（可机械比对：当前 = 基线 + 本任务新增）
-- [ ] AC3: **B3-2 场景不红**——worktree 建于并发合并前 13 分钟 ⇒ 断言不再过期（fixture 复现 B3-2 场景
+      落地：B3-2 族 = `runner-grouping.test.mjs`，master 上 0e26e6a6 已把 `EXPECTED_ENGINE=58` 等
+      绝对快照转为运行时关系断言（product+engine+governance == 去重 total；undeclared +1 相对）；
+      本任务新增基线快照 helper（`plugin/scripts/test-file-snapshot.sh`）把「当前 = 基线 + 新增」做成
+      可复用原语；`test-file-snapshot.test.mjs` AC1 测试验证 exact worktree check（当前 == 基线 ∪
+      --expect-added，非预期新增红）。
+- [x] AC2: **基线快照**——worktree 建立时记录测试文件集快照（可机械比对：当前 = 基线 + 本任务新增）
+      落地：`test-file-snapshot.sh snapshot` 从 `scripts/test.sh --list-files`（单一事实源，非手写 glob
+      副本）记录去重 realpath 测试文件集；`check` 机械比对（removal = 真实回归红；addition = 允许）。
+- [x] AC3: **B3-2 场景不红**——worktree 建于并发合并前 13 分钟 ⇒ 断言不再过期（fixture 复现 B3-2 场景
       ⇒ 绿）
-- [ ] AC4: 与分支模型前置②交叉标注（`gap-branch-model-integration-branch-...` AC4）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      落地：`test-file-snapshot.test.mjs`「AC3: B3-2 scenario」——快照后并发合并新增测试文件 ⇒ check 绿
+      （addition 被报告而非失败）；负控制：基线文件被删 ⇒ check 红（真实回归仍被抓）。实跑输出见任务体
+      「AC3 实跑输出」。
+- [x] AC4: 与分支模型前置②交叉标注（`gap-branch-model-integration-branch-...` AC4）
+      落地：双向 Touches 互引（本任务 Touches 指向分支模型任务；分支模型任务 Touches 已有
+      `gap-global-count-assertions-fragile-relative-baseline.md（前置②交叉标注）`）；分支模型任务
+      Proposal/AC4 指向本任务为前置②实现者；本任务 Dispatch review 记录「前置②——先修再让分支模型上线」。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      落地：`plugin/test/test-file-snapshot.test.mjs` 首行 `// @test-group governance` + `import { test }
+      from "node:test"`（test-framework-policy 通过）。
+
+## AC3 实跑输出（scoped 2026-08-05）
+
+`bash scripts/test.sh --for-task gap-global-count-assertions-fragile-relative-baseline --allow-thin` → **exit 0**：
+
+```
+✔ AC2: snapshot default mode records the canonical set — large, sorted, deduped, absolute realpaths, self-consistent (4560ms)
+✔ AC2: snapshot with explicit files records exactly those files (fixture mode) (51ms)
+✔ AC3: B3-2 scenario — a snapshot taken before a concurrent merge does NOT go red when the merge adds a test file (122ms)
+✔ AC3 negative control: a REAL regression (a baseline test file REMOVED) is still caught red (134ms)
+✔ AC1: exact worktree check — current == baseline ∪ --expect-added; an unexpected addition is red (306ms)
+ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0   ℹ duration_ms 5402
+```
+
+B3-2 族关系断言（master 0e26e6a6 的相对化）非嵌套子集单独验证：`--test-name-pattern="list-groups|realpath dedup|same files as no-args|undeclared file|governance --list-files|structural" plugin/test/runner-grouping.test.mjs`
+→ **6 pass / 0 fail / 0 cancelled**（6 个关系断言全绿）。3 个嵌套 `--group <fixture>` 测试在当前 master 红，
+原因 = 既有 task-contract 违规（done 任务缺 invoke-evidence），主仓库复现确认非本任务引入。
 
 ## Definition of Done
 
@@ -57,9 +89,14 @@ develop/integration 滞后不再触发断言噪声。
 
 - tasks/gap-global-count-assertions-fragile-relative-baseline.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
-- plugin/test/（B3-2 族全局计数断言 → 相对基线判据）
-- plugin/scripts/（基线快照 helper，若成脚本）
+- plugin/test/test-file-snapshot.test.mjs（AC3 B3-2 fixture + AC1/AC2 机械验证）
+- plugin/scripts/test-file-snapshot.sh（基线快照 helper：snapshot + check）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
+
+> B3-2 族（`plugin/test/runner-grouping.test.mjs`）的相对化在 master 上已由 0e26e6a6 落地（运行时关系断言，
+> 非绝对快照）；本任务不修改该文件。其 6 个非嵌套 `--list-groups`/关系断言经 `--test-name-pattern` 单独验证
+> 全绿；3 个嵌套 `--group <fixture>` 测试因 master 上既有 task-contract 违规（done 任务缺 invoke-evidence，
+> 主仓库复现确认非本任务引入）在当前 master 红——见报告。
 
 ## Contract
 
