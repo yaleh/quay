@@ -3,7 +3,7 @@
 // (tasks/gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8).
 //
 // WHAT IT DETECTS (by PATH EXISTENCE + RETIRED-MECHANISM REFERENCE — NOT a keyword grep):
-//   A strategic document (docs/proposals/*.md, orchestration/*ROADMAP*.md) or a ready-pool
+//   A strategic document (docs/proposals/*.md, orchestration/*.md) or a ready-pool
 //   promotion candidate (tasks/<id>.md) is STALE when it references a classic-pipeline script
 //   file that ADR-022 (2026-08-03) deleted from the LIVE tree — `prepare-milestone.js`,
 //   `execute-milestone.js`, `milestone-worktree.ts` — WITHOUT a retired/superseded annotation on
@@ -21,14 +21,18 @@
 //   retired/superseded/historical/ADR-022 or a Chinese equivalent) is not counted.
 //
 // KNOWN-STALE BASELINE (shrink-only ratchet):
-//   Six strategic docs currently carry unannotated references to deleted scripts. They are
-//   REPOrted on every run (audit trail) but NOT counted against the gate; the gate fails only on
+//   Strategic docs currently carrying unannotated references to deleted scripts. They are
+//   reported on every run (audit trail) but NOT counted against the gate; the gate fails only on
 //   a NEW stale doc (or a known-stale doc that GROWS). Each baseline entry is a live defect —
 //   the review-cadence mechanism's checklist item (a) drives the shrink. The roadmap doc is
 //   being fixed by the sibling task gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode.
+//   The three orchestration/*.md entries were ADDED by gap-stale-check-orchestration-arm-is-a-dead-glob
+//   (2026-08-05): the orchestration arm previously scanned ONLY *ROADMAP* (a dead glob that matched
+//   zero files), so these pre-existing unannotated references were never seen. Widening the arm to
+//   orchestration/*.md surfaced them; they are pre-existing, not new — baseline-not-counted.
 //
 // MODES:
-//   default           — scan strategic docs (docs/proposals/*.md + orchestration/*ROADMAP*.md);
+//   default           — scan strategic docs (docs/proposals/*.md + orchestration/*.md);
 //                       exit 0 iff no NEW stale doc beyond the KNOWN_STALE baseline.
 //   --pool-candidate <task-id>  — judge ONE ready-pool promotion candidate task; exit 1 iff it
 //                       references a deleted script without annotation (AC8 regression control:
@@ -96,6 +100,11 @@ export const KNOWN_STALE_DOCS: ReadonlySet<string> = new Set([
   "quay-harness-crystallization-roadmap.md",
   "quay-milestone-workflow-git-crystallization.md",
   "quay-workflow-agent-distribution.md",
+  // orchestration/*.md pre-existing stale refs surfaced by the dead-glob fix
+  // (gap-stale-check-orchestration-arm-is-a-dead-glob, 2026-08-05):
+  "FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md",
+  "escalations.md",
+  "tick-log.md",
 ]);
 
 /** One stale reference: an unannotated mention of a deleted script on a single line. */
@@ -143,7 +152,12 @@ export interface DocResult {
   knownStale: boolean;
 }
 
-/** Collect the strategic-doc scan targets under `root` (docs/proposals/*.md + orchestration/*ROADMAP*.md). */
+/** Collect the strategic-doc scan targets under `root` (docs/proposals/*.md + orchestration/*.md).
+ *  The orchestration arm covers ALL .md files (not just the ROADMAP glob): the naming convention
+ *  there is the SPEC/SYNTHESIS/FINDING prefix or an uppercase phrase (outer-phase-goal.md,
+ *  manager-phase-goal.md, the loop tick docs, the SPEC/SYNTHESIS/FINDING files), so a ROADMAP glob
+ *  matched ZERO files — a dead arm that never scanned the 43+ strategic orchestration docs. Fixed
+ *  by gap-stale-check-orchestration-arm-is-a-dead-glob (2026-08-05). */
 export function collectStrategicDocs(root: string): string[] {
   const files: string[] = [];
   const proposalDir = path.join(root, "docs", "proposals");
@@ -155,7 +169,7 @@ export function collectStrategicDocs(root: string): string[] {
   const orchDir = path.join(root, "orchestration");
   if (fs.existsSync(orchDir)) {
     for (const e of fs.readdirSync(orchDir)) {
-      if (e.includes("ROADMAP") && e.endsWith(".md")) files.push(path.join("orchestration", e));
+      if (e.endsWith(".md")) files.push(path.join("orchestration", e));
     }
   }
   return files.sort();
@@ -276,7 +290,7 @@ export function main(argv: string[]): number {
       ),
     );
   } else {
-    console.log(`strategic-doc-staleness-check — ${docs.length} strategic doc(s) scanned (docs/proposals + orchestration/*ROADMAP*)`);
+    console.log(`strategic-doc-staleness-check — ${docs.length} strategic doc(s) scanned (docs/proposals + orchestration/*.md)`);
     console.log(`stale_refs_found (new, beyond baseline): ${newRefs}`);
     if (knownFlagging.length) {
       console.log(`known-stale (baseline, reported not counted): ${knownFlagging.length} doc(s), ${knownRefs} ref(s)`);
