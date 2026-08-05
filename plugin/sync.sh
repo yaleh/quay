@@ -4,8 +4,12 @@
 #
 # This keeps plugin/ assets in sync with their canonical sources:
 #   .claude/workflows/                      → plugin/workflows/
-#   experiments/quay-perpetual-stream/scripts/ → plugin/gate-scripts/
 #   (agents vendoring handled separately — see Phase 3)
+#
+# NOTE (2026-08-05 retirement): plugin/gate-scripts/ is NO LONGER synced. Those classic-pipeline
+# era gates were laid into target projects but nothing called them — dead weight (layered
+# retirement; the files stay in the plugin tree as a historical artifact, not in the distribution).
+# The live fast-mode gate scripts live under plugin/scripts/ and are laid down by quay-init --loop.
 #
 # CI: sync.sh && git diff --exit-code plugin/  — fails if plugin is stale.
 
@@ -19,29 +23,5 @@ cp "$REPO_ROOT/.claude/workflows/run-routines.js"       "$PLUGIN_DIR/workflows/"
 # NOTE (gap-retire-the-prepare-execute-pipeline-cluster): execute-milestone.js and
 # prepare-milestone.js were retired with the classic milestone loop (ADR-022).
 echo "  workflows: 2 synced"
-
-echo "=== Syncing gate scripts ==="
-GATE_DIR="$REPO_ROOT/experiments/quay-perpetual-stream/scripts"
-
-# it0-*.sh gate scripts
-cp "$GATE_DIR/it0-backlog-projection-check.sh"     "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-ceiling-check.sh"                "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-ceiling-line-budget-check.sh"    "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-dashboard-line-budget-check.sh"  "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-dod-check.sh"                    "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-dogfood-evidence-gate.sh"        "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-gate-hash-check.sh"              "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/it0-impl-row-check.sh"               "$PLUGIN_DIR/gate-scripts/"
-
-# Named gate scripts
-cp "$GATE_DIR/vmeta-lag-check.sh"                  "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/tree-hygiene-check.sh"               "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/worktree-branch-hygiene-check.sh"    "$PLUGIN_DIR/gate-scripts/"
-cp "$GATE_DIR/audit-independence-check.sh"         "$PLUGIN_DIR/gate-scripts/"
-
-# drain-scheduler.ts
-cp "$GATE_DIR/drain-scheduler.ts"                  "$PLUGIN_DIR/gate-scripts/"
-
-echo "  gate-scripts: 13 synced"
 
 echo "Sync complete."

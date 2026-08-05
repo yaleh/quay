@@ -52,6 +52,13 @@ extra:
 **机制还在不在**（不检查）？缺时间轴 + 存活轴。生成器问句对判据成本：量化哪个范围？**没有量化**（完全
 空着）。生成器问句对 suite-state：量化「这一轮没成」——缺**原因轴**（为何没成：failed/aborted/infra）。
 
+> **AC5 cross-mark (2026-08-05, `gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked`)**:
+> the count-3 pre-friction "gate-scripts-dead" (generator-run, 照问句问出) is that task. It asked
+> the generator's own layer question — "量化哪个范围" for `plugin/gate-scripts/` — and got "laid
+> down but never executed" (the dead-weight layer). Disposal (layered retirement of the
+> `--gate-scripts` category from quay-init, so `dead_gates_remaining = 0`) is tracked in that task;
+> this entry is the AC10 accounting cross-reference only.
+
 **生成器**：对系统里每一条常驻判据问——**「它量化的是哪一个范围？时间 / 作用域 / 层 / 实例 / 成本？
 如果答案是『眼前这一个』，那就有一根没打开的轴。」** 检验：反推人今晚给的 5 条，**5/5 成功**。⇒ 有
 预测力，不是事后归纳。

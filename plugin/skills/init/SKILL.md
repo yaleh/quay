@@ -8,7 +8,7 @@ allowed-tools: Bash, Read
 
 Copy quay methodology assets from the plugin installation into the current workspace.
 Source: `${CLAUDE_PLUGIN_ROOT}` (the quay plugin directory).
-Target: the current workspace's `.claude/`, `scripts/`, `plugin/scripts/`, `orchestration/`, and
+Target: the current workspace's `.claude/`, `plugin/scripts/`, `orchestration/`, and
 `docs/analysis/` directories.
 
 **The copy logic lives in ONE executable** — `bash ${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh`
@@ -21,12 +21,17 @@ this repo keeps removing. Run the script; do not hand-reimplement its behavior.
 ```
 --workflows       Copy workflows only    (plugin/workflows/     → .claude/workflows/)
 --agents          Copy agents only       (plugin/agents/        → .claude/agents/)
---gate-scripts    Copy gate scripts only (plugin/gate-scripts/  → scripts/gates/)
 --loop            Copy the two-layer loop mechanism (tick docs + checkers + gate + token + observation)
 --all             Copy all of the above except --loop (default if no flag given)
 --force           Overwrite on conflict  (default: skip and report conflict)
 --dry-run         List what would happen, do not copy
 ```
+
+The former `--gate-scripts` category (plugin/gate-scripts/* → scripts/gates/) is **RETIRED**
+(2026-08-05): those classic-pipeline era gates were laid into every target project but nothing
+called them — dead weight shipped to every install. Layered retirement (send-keys-verified
+precedent): the files stay in the plugin tree but are no longer laid down or synced. The live
+fast-mode gate scripts ship with `--loop` via the `plugin/scripts/` landing.
 
 `--loop` extra parameters (see the script for the full list):
 
@@ -60,7 +65,6 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 |---|---|
 | `workflows/*.js` | `.claude/workflows/` |
 | `agents/*.md` | `.claude/agents/` |
-| `gate-scripts/*.sh`, `gate-scripts/*.ts` | `scripts/gates/` |
 | `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (byte-identical, no substitution) |
 | `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (byte-identical, no substitution) |
 | `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-verified.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
@@ -175,7 +179,7 @@ the parent of this skill's `scripts/`). Then run:
 bash "${PLUGIN_ROOT}/scripts/quay-init.sh" \
   --root "$(pwd)" \
   --plugin-root "${PLUGIN_ROOT}" \
-  [--all|--workflows|--agents|--gate-scripts|--loop] \
+  [--all|--workflows|--agents|--loop] \
   [--force] [--dry-run] \
   [--test-command <cmd> --project <name> --repo-root <path> --tmux-session <sess>]
 ```

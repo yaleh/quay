@@ -22,9 +22,14 @@
 # Categories:
 #   --workflows     plugin/workflows/     → <workspace>/.claude/workflows/
 #   --agents        plugin/agents/        → <workspace>/.claude/agents/
-#   --gate-scripts  plugin/gate-scripts/  → <workspace>/scripts/gates/
 #   --loop          two-layer loop mechanism (tick docs + checkers + gate + token + observation)
 #   --all           all of the above except --loop (matching the skill's historical default)
+# NOTE (2026-08-05 retirement): the old gate-script category that copied the plugin's
+# classic-pipeline era gates (it0-*/audit-*/drain-*/vmeta-lag) into <workspace>/scripts/gates/
+# is RETIRED. Those gates were laid into every target project but nothing called them — dead
+# weight shipped to every install. Layered retirement (send-keys-verified precedent): the files
+# stay in the plugin tree, but no category lays them down and sync.sh no longer syncs them. The
+# live fast-mode gate scripts ship via the --loop plugin/scripts/ landing.
 # Flags:
 #   --force         overwrite on conflict (backup the existing file first)
 #   --dry-run       list what would happen, copy nothing
@@ -70,7 +75,6 @@ FORCE=false
 DRY_RUN=false
 DO_WORKFLOWS=false
 DO_AGENTS=false
-DO_GATE_SCRIPTS=false
 DO_LOOP=false
 ANY_CATEGORY=false
 
@@ -79,9 +83,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --workflows) DO_WORKFLOWS=true; ANY_CATEGORY=true; shift ;;
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
-    --gate-scripts) DO_GATE_SCRIPTS=true; ANY_CATEGORY=true; shift ;;
     --loop) DO_LOOP=true; ANY_CATEGORY=true; shift ;;
-    --all) DO_WORKFLOWS=true; DO_AGENTS=true; DO_GATE_SCRIPTS=true; ANY_CATEGORY=true; shift ;;
+    --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --root) WORKSPACE_ROOT="$2"; shift 2 ;;
@@ -100,7 +103,7 @@ done
 
 # Default category: --all if no category flag given (matches the skill's historical default).
 if [ "$ANY_CATEGORY" = false ]; then
-  DO_WORKFLOWS=true; DO_AGENTS=true; DO_GATE_SCRIPTS=true
+  DO_WORKFLOWS=true; DO_AGENTS=true
 fi
 
 # Normalize workspace root (must exist).
@@ -592,13 +595,6 @@ if [ "$DO_AGENTS" = true ]; then
   echo "  agents:"
   copy_dir "$PLUGIN_ROOT/agents" "$WORKSPACE_ROOT/.claude/agents"
   record_category "agents" "$local_base_copied" "$local_base_skipped" "$local_base_conflicted"
-fi
-
-if [ "$DO_GATE_SCRIPTS" = true ]; then
-  local_base_copied="$COPIED"; local_base_skipped="$SKIPPED"; local_base_conflicted="$CONFLICTED"
-  echo "  gate-scripts:"
-  copy_dir "$PLUGIN_ROOT/gate-scripts" "$WORKSPACE_ROOT/scripts/gates"
-  record_category "gate-scripts" "$local_base_copied" "$local_base_skipped" "$local_base_conflicted"
 fi
 
 if [ "$DO_LOOP" = true ]; then
