@@ -5281,3 +5281,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **global-count 派发**（`fm-...-kfcwog`，B3-2 族全局计数断言 → 相对基线）：git-log 唯一命中是外层 filed 提交
   （非落地），self-touch 已补，resolve 过。在飞 1/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T22:3xZ（外层，人指令——dispatch-evaluated 提优先级 + 排派发）
+
+- **人方向性裁定**（管理者转达）：提高 gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release
+  优先级，排进下一批。**外层执行**：promote todo→ready（零进展自 3f78e428）+ 触摸集与在飞 global-count
+  不相交（可并发）+ 驱动 inner 排下一批（数据-only，pane 确认）。
+- 不重评优先级（已提）；决定排位 + 怎么派（并发资格已核）。
