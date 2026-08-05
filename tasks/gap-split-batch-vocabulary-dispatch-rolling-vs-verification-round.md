@@ -44,6 +44,11 @@ extra:
 **⇒ 真正该消除的是散文里暗示「门控」语义的用法**（batch 作调度单位），不是 batch 这个词本身。
 
 **范围**：措辞与文档，**不改机制本身**；覆盖 tick 文档里所有会被 inner 读到的位置，不只是 commit
+
+> **AC8 交叉标注（2026-08-05，管理者指正）**：doc 侧措辞**单独解决不了 inner 内化的词汇**——三次
+> batch-free 驱动后 inner 仍按批汇报（「Batch of 3 fully merged」），是上下文历史主导、非散文传染。
+> **必须与 `gap-reanchor-must-converge-inner-self-reported-vocabulary`（inner 侧自述向出厂语义收敛）
+> 一起排**：本任务清 doc 散文门控语义，另一条清 inner 已内化的组织方式。单独做任一条都解决不了。
 message。
 
 ### 选定机制

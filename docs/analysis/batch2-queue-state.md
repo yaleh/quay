@@ -3458,3 +3458,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > （改了断调用）；②2 处散文（含 272 行任务 id 引用不能改）。**真正该消除的是散文里暗示门控的用法，
 > 不是全仓替换 batch 这个词**。AC4 已改为白名单豁免 + 负控制（刻意写 batch 门控表述 ⇒ 检查必须报出）。
 > cold-start/SKILL.md 已 0 处，本条只剩 tick 文档。
+
+> **06:00Z 增补（管理者指正：inner 内化词汇 > 措辞区分）**：三次 batch-free 驱动后 inner 仍按批汇报
+> （「Batch of 3 fully merged」）——是上下文历史内化、非散文传染。措辞任务单独解决不了（doc 侧改不到
+> inner 已内化措辞）。**已立案 `gap-reanchor-must-converge-inner-self-reported-vocabulary`**（ready）：
+> 锚点机制有效性以**语义收敛**度量（inner 自述措辞向出厂语义收敛，连续 N 轮无 batch 式汇报），不只
+> 「重锚发生了」；与措辞任务两条一起排（交叉标注）。**管理者自陈**：manager 层此前也 Cron=0（同病），
+> 已自建 17 分钟 manager cron——三层都需周期锚。
