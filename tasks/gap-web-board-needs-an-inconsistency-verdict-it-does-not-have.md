@@ -109,6 +109,7 @@ resume   n/a: 单次请求，无中途产物
 
 ## Touches
 
+- tasks/gap-web-board-needs-an-inconsistency-verdict-it-does-not-have.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - packages/quay/src/observation.ts
 - packages/quay/src/serve-handlers.ts
 - packages/quay/test/serve-board.test.mjs
