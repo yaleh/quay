@@ -84,6 +84,9 @@ extra:
 - plugin/scripts/suite-state-trigger.ts（SUITE-RED 事件携带失败位置 → 供派发决策）
 - plugin/test/（AC2/AC5 fixture）
 - tasks/gap-red-window-has-no-automatic-executor.md（交叉标注：本条是红窗规则条件化细化）
+- tasks/gap-full-suite-runner-concurrency-default-and-gate.md（AC6 交叉标注：stop-dispatch 语义同一族——
+  本条把「RED ⇒ 停派发」条件化为共享闸门；该条把 stop-dispatch 判据机械化到 `reason` 轴
+  failed≠aborted。两条合起来 = RED 处置的完整机械化表面）
 
 ## Contract
 

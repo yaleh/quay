@@ -41,6 +41,7 @@ import {
   runOnce,
   writeSuiteState,
   readSuiteEvents,
+  shouldStopDispatch,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,7 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const TRIGGER = path.join(REPO_ROOT, "plugin/scripts/suite-state-trigger.ts");
 const RUNNER = path.join(REPO_ROOT, "plugin/scripts/full-suite-runner.ts");
 const OUTER_TICK = path.join(REPO_ROOT, "plugin/loop/orchestrator-loop-tick.md");
+const INNER_TICK = path.join(REPO_ROOT, "plugin/loop/fast-mode-loop-tick.md");
 
 function read(file) {
   return fs.readFileSync(file, "utf8");
@@ -187,6 +189,57 @@ test("AC4 — the trigger is Monitor-style event monitoring: no new scheduling s
   const outer = read(OUTER_TICK);
   assert.ok(outer.includes("不是新调度源"), "doc: cadence stays unique (outer cron), trigger is not a scheduler");
   assert.ok(outer.includes("节奏仍唯一"), "doc: the outer cron remains the only cadence");
+});
+
+// ── AC5 (gap-full-suite-runner-concurrency-default-and-gate): failed vs aborted reason axis ─────────
+
+test("AC5 — shouldStopDispatch distinguishes failed vs aborted (aborted does NOT stop; failed/missing DOES)", () => {
+  assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "red+failed stops dispatch");
+  assert.equal(shouldStopDispatch({ state: "red" }), true, "legacy red (no reason) stops dispatch — fail-closed");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "aborted" }), false, "red+aborted does NOT stop dispatch");
+  assert.equal(shouldStopDispatch({ state: "green" }), false, "green never stops");
+  assert.equal(shouldStopDispatch({ state: "running" }), false, "running never stops");
+  assert.equal(shouldStopDispatch(null), false, "absent state file never stops (outer hasn't run round 1)");
+});
+
+test("AC5 — runOnce reports stopSignal=false for red+aborted and true for red+failed", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "red", reason: "aborted", finishedAt: "2026-08-05T06:10:00.000Z" }));
+    const aborted = runOnce(root);
+    assert.equal(aborted.stopSignal, false, "aborted-red → no stop-dispatch signal (AC5 negative control)");
+    const abortedEv = aborted.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(abortedEv, "SUITE-RED still fires on aborted-red (the flip is recorded)");
+    assert.equal(abortedEv.stopSignal, false, "the aborted SUITE-RED event confirms stopSignal=false");
+
+    // A FRESH root for the failed form — the memo on `root` already advanced to red above, so a
+    // second red there is a same-state no-transition.
+    const root2 = tmpRoot();
+    try {
+      writeSuiteState(root2, state({ state: "red", reason: "failed", finishedAt: null }));
+      const failed = runOnce(root2);
+      assert.equal(failed.stopSignal, true, "failed-red → stop-dispatch signal in place (AC5)");
+      const failedEv = failed.events.find((e) => e.event === "SUITE-RED");
+      assert.ok(failedEv, "SUITE-RED fires on failed-red");
+      assert.equal(failedEv.stopSignal, true, "the failed SUITE-RED event confirms the signal");
+    } finally {
+      fs.rmSync(root2, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — both loop docs carry the failed vs aborted stop-dispatch ruling (reason axis)", () => {
+  const inner = read(INNER_TICK);
+  const outer = read(OUTER_TICK);
+  // Inner step-3 stop condition: red + reason=failed (or missing) stops; red + aborted does NOT.
+  assert.match(inner, /aborted/, "inner doc names the aborted reason");
+  assert.match(inner, /不触发/, "inner doc: aborted does not trigger stop-dispatch");
+  assert.match(inner, /failed/, "inner doc names failed as the stop reason");
+  // Outer red-window: the stop-dispatch signal is red + failed (aborted is handled as record+re-run).
+  assert.match(outer, /aborted/, "outer doc names the aborted reason");
+  assert.match(outer, /reason/, "outer doc carries the reason axis");
 });
 
 // ── Contract invoke: --fail-fast-check proves the RED chain end-to-end ──────────
