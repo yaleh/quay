@@ -5347,3 +5347,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **频率异议采纳**：低触发 ≠ 低风险（今晚 4 次全灭正是场景，当时没装）。
 - **范围裁定**（比「取消」更窄）：不取消——默认关 + 租约启用 + **只看护最顶端一个会话**（3→1 爆炸半径）；
   inner 归 outer 三态自检、outer 归 manager（有 manager 时）。已并入 lease-model 任务。
+
+### tick 2026-08-05T23:0xZ（外层，dispatch-evaluated 已派发——人优先级兑现）
+
+- **dispatch-evaluated 在飞**（人优先级任务已派发）：inner subagent「Verifying doc-assertion phrases in
+  fast-mode-loop-tick」11m8s——事件驱动派发改动进行中。2 bracket（dispatch-evaluated + global-count）。
+- **套件 green**、闸 GO、load 1.92。
