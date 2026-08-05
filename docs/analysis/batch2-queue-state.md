@@ -3032,6 +3032,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   manager-layer umbrella 交叉标注。触 SKILL.md + 2 引用文件。
 - **在飞 1**：coldstart-key4。ROUND 3 套件 running（乐观照常派发）。loop-driver LIVE。
 
+### tick 2026-08-05T06:1xZ（内层，`fan-in complete`：关键路径 key4 落地）
+
+- **coldstart-key4 已合并**（rebase 后，5 files +69/-17），无 closure。5/5 AC 全勾 + DoD 全量套件框未勾
+  → landed-not-flipped。**关键路径解除**（meta-cc/archguard 启动唯一任务周期）。
+  - AC8c 键 4 + step 5 改教可靠发送：交付判据 = 目标 transcript 出现该驱动文本 user message
+    （transcript-delivery-check.ts，Fault 5）；`send-keys-reliable.sh <session> "<驱动文本>"
+    <target-transcript.jsonl>`。哈希判据 0 命中（AC2 grep exit 1，任务体已贴）。F 交叉标注 +
+    CRYSTALLIZED-reliable-send 引用。
+  - 判断调用：init/SKILL.md 补 `<!-- reference-doc: -->` 声明（referenced ⊆ landed 不变式强制，
+    非 Touches 但机械必需）；cold-start-skill.test.mjs 断言更新（8/8）。
+  - master 复核：cold-start-skill 8/8 + AC2 grep 0 命中。
+- **ROUND 3 收尾集合（landed-not-flipped，9 条）**：closure-sync、drive-text（遗留）+ full-suite-outer、
+  closure-decomp、scoped-tier（ROUND 2 已关 3）+ pool-floor、session-idle、red-executor、
+  coldstart-key4（本轮）。
+- **无在飞**：槽位全空。ROUND 3 套件 running（外层 gate）。新契约下 inner 不跑全量、不关括号、
+  不翻 done。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
