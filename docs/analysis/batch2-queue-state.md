@@ -4606,6 +4606,27 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **在飞 2/3**（upgrade-channel agent + 收尾后新派发空间）。套件 green（stale）。Monitor 三判据绿、
   detect-stop 无 block、.halt quay/archguard 运行中 meta-cc 暂停。
 
+### tick 2026-08-05T16:4xZ（内层，AC12b 队列纠正 + ruling-required 晋级 + 串行窗口记录）
+
+- **AC12b 队列纠正（外层 16:37Z 核实）**：修正 15:0x tick 的「四阻塞全部收齐/全部落地」不准确记录
+  （lines 4341-4349）——真实 = **3/4 工作落地未收口**（welcome-screen a75dde7e / vendor-runtime 38b33c85 /
+  red-pattern 60d2521c，status 全仍 ready、AC 未全勾，实跑证据+全量绿 pending outer closure）+ **1/4 真 todo**
+  （gap-upgrade-channel-cant-sync-build-artifacts-dist-stale，git pull 新 src + stale dist 新鲜度）。**汇报前
+  须查任务 status 字段，不凭对话记忆**（证伪：上条结论就是凭记忆下的）。
+- **upgrade-channel 在飞**（telemetry `fm-...-66c872`，started 16:41Z，worktree
+  `/home/yale/work/quay-worktrees/upgrade-channel`）。**串行窗口**：其 Touches 含 `plugin/` 过度宽 glob ⇒
+  生产派发闸（concurrent-batch-scheduler）对任何新候选保守 serialize（`conservative: overbroad glob plugin/**`）
+  ——本 tick **零新派发**，web-board + send-keys-nbsp 已验证为下批合法 disjoint 对（等 upgrade-channel 落地）。
+- **ruling-required 晋级（外层 16:5xZ 优先级裁定）**：`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer`
+  todo→ready（389cd4bc，+DoD + self-touch），池 28>floor 12 无自动压力、按裁定手动补晋。self-touch/resolve
+  双闸通过。**派发 defer**——同上串行窗口，land 后第一批。
+- **outer-selfchecks 已 merge 收尾**（9277fa19 在 master；discovery fix 12936f90/560c271f 落地；
+  7/7 AC）——括号 reconcile 关，待外层 closure。
+- **resource-aware 保持 needs-human**（12:5xZ 外层裁定 fail/timeout；worktree
+  `/home/yale/work/quay-worktrees/resource-aware` 未提交 source-pin 测试保留待 reland，不并）。
+- 停止条件：无（pane 良性 idle、suite state green、无 block）。就绪池 28/12、disjoint 11/3、无自动晋级。
+  Monitor 三判据绿。在飞 1/3（仅 upgrade-channel）。
+
 ### tick 2026-08-05T16:5xZ 补充（外层，ruling-required 通用化任务提优先级）
 
 - **管理者优先级意见 → 裁定提优先级**：`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer`
