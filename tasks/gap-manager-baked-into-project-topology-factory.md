@@ -6,7 +6,7 @@ title: "manager baked into project topology factory (hereditary error — manage
   factory gets a manager window contradicting product-outline 'manager
   network-level not per-project'; fix: ROLES='outer inner', two-window, manager
   removed (human starts cross-project)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -36,6 +36,10 @@ extra: {}
 **严重性（生命视角）**：进入遗传物质的错误——不是运行时故障，是出厂定义结构性错误，随每次繁殖完整
 复制到下一项目/主机。B 机手工建 quay-b 恰好两窗口（对），交付物却是错的——「亲代环境掩盖亲代缺陷」。
 
+**优先级（管理者裁定）**：**遗传物质级先于产品主流程**——每繁殖一次复制一次，topology-check 是正在
+生效的假判据（把正确两窗口项目判不合规）。修复成本小（ROLES 一行 + 文档措辞），但放着不修每个新采用者
+都拿错的出厂定义。outer 自举（gap-outer-self-checks）随后（新增能力，不修不污染既有交付物）。
+
 **修法（管理者建议 + 外层采纳）**：
 1. ROLES 改为 "outer inner"；SKILL.md 与脚本注释所有 three-window 改 two-window
 2. manager 从拓扑定义**完全移除**——若需说明，单独写「manager 由人跨项目另行启动，不属于项目拓扑」
@@ -55,6 +59,14 @@ extra: {}
 - [ ] AC3: topology-check.sh 判据只查两窗口——对正确两窗口项目报 ok（负控制：当前会报不合规）
 - [ ] AC4: 与产品轮廓「manager 跨项目」一致 + outer-self-check 任务（只创建 inner）交叉标注
 
+## Definition of Done
+
+- [ ] AC1–AC4 全部勾上
+- [ ] quay-topology.sh 实测建出两窗口（outer+inner），无 manager 窗口（实跑输出贴任务体）
+- [ ] topology-check.sh 对两窗口项目报 ok（实跑输出贴任务体；负控制：当前会报不合规）
+- [ ] SKILL.md / 脚本注释无 three-window 残留（grep 证明）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
 ## Touches
 
 - plugin/scripts/quay-topology.sh（ROLES 改 outer inner + 删 manager 逻辑）
@@ -68,6 +80,7 @@ extra: {}
 
 measure   topology_roles = `grep -o 'ROLES="[^"]*"' plugin/scripts/quay-topology.sh plugin/scripts/topology-check.sh | tr '\n' ' '` stdout 文本段
 band      topology_roles = 'ROLES="outer inner" ROLES="outer inner"'（两脚本都是两窗口）
+invariant project_topology_has_no_manager = 1（项目拓扑定义不含 manager——manager 由人跨项目启动）
 invoke    `grep -n 'ROLES\|manager\|three-window\|two-window' plugin/scripts/quay-topology.sh plugin/scripts/topology-check.sh plugin/skills/session-topology/SKILL.md`
 control   当前形态（ROLES="manager outer inner"）⇒ 建三窗口；修后 ⇒ 两窗口（AC1）
 resume    两脚本 ROLES 与 SKILL.md 分步提交，任一步完成即写盘
