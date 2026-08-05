@@ -11,7 +11,7 @@ title: "a NEVER-RUN loop and a HEALTHY-RUNNING loop look COMPLETELY IDENTICAL
   outer/inner transcript has new user messages in last N min + project git has
   commits in last N min — both NO = dead-loop, INDEPENDENT of backlog emptiness
   (queue-empty vs nobody-driving are two states, currently indistinguishable)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -105,9 +105,9 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC4 实测输出贴任务体
-- [ ] dead-loop 判据在：未运行循环被自动判出（非靠人去看）；队列空 vs 没人驱动可区分
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC4 实测输出贴任务体
+- [x] dead-loop 判据在：未运行循环被自动判出（非靠人去看）；队列空 vs 没人驱动可区分
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
