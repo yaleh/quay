@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 07:45Z | `unblock` | **资源安全亲手中止全套件**（full-suite-runner laneCount=8 硬编码绕过 test.sh 派生 + 不调 resource-gate，load 31.74/7.7×超订/CPU 95，机器今晚崩三次；load 已回落 12.5）+ re-open no-resource-awareness（AC12 laneCount 派生/AC13 过闸）+ 套件耗时序列并入 checker-cost（加 load 维 + {round,...} 序列）+ 归因更正（pool 三点后两点相同⇒load 主导，撤三条优化）+ 立案 reason 轴（failed/aborted/infra，AC10 5→6）+ re-open reliable-send 故障 7（fresh welcome 屏 C-u 无效）——**管理者 5 条裁定全处理**；驱动内层修 laneCount+gate+reason | 内层：处理管理者资源门消息中（已形成 archguard 升级裁决：M3 修复落地未验证前不重挂 session-liveness）；4 括号在飞为红窗未闭合遗留 | ①laneCount=8 硬编码 + resource-gate NOT REFERENCED 逐条核实（runner.ts:94 + grep 0 命中）；②verification-round 2 行停 05:03 根因查（红窗让收尾没走到写步）；③ready-pool 三点实测复核（35.8/91.2/157，pool 24 恒定两点）；④send-keys-reliable C-u 清屏 50 次 fail-loud 实测复现故障 7 家族 |
 | 2026-08-05 02:05Z | `unblock` | 人裁定复盘节奏为决定（每天一次按日历/管理者发起汇总/外层参与/人保留方向裁定权；三项清单 a 通用过期检查器 b gap-* 可追溯 c 复核记录扩方向）→ 立案机制任务 `gap-establish-daily-review-cadence-mechanism`（todo 高优先，REVIEW-cadence 文档 + strategic-doc-staleness-check.ts + run_static_checks 接线 + 复核记录扩展 + 第一次复盘用今天发现） | 内层：batch-4 closure agent 在飞（general-purpose 查 quay-native task edit CLI flags，1m51s/99.4k tokens）；5 任务仍 ready 待翻转 | ①人裁定原文读核（三要素 + 三项清单）；②任务四件套写全 + Dispatch review；③closure 实况 pane+transcript 核实（1 agent 99.4k tokens，非空跑） |
 | 2026-08-05 03:30Z | `unblock` | 人要求汇总 SYNTHESIS-four-gaps 读核（共同根：manager 层实跑三层/交付两层，缺口 1/2/3 恰是 manager 层职责）→ 立案 3 条：①gap-productize-the-manager-layer（umbrella：出货第三层 + 冷启动 AC8c 废键修复 + 启动配置随层出货 + 路线图对照物）②gap-value-prioritization-has-no-mechanism（相关性信号）③gap-quality-criteria-are-point-in-time-no-trend-criteria（趋势判据新品类，0.251→0.321 回归控制） | 内层：下批派发中（suite(a)→closure-grant→scoped），suite(a) task-start 已打 | ①SYNTHESIS 全文读核（四缺口 + 共同根 + 两具体缺口）；②3 任务四件套写全（缺口 4 载体先行）；③当前批状态核对 |
 | 2026-08-05 04:02Z | `no-action` | (c) closure-grant 块落地（self-touch 约定 + dispatch gate + self-touch-scan；AC6 真实使用=本条自身自勾 AC）⇒ 三块消除批次 (a)+(b)+(c) 全落，inner 只剩执行+派发+合并；scoped (③) 在飞（最后一块）；ROUND 2 收尾集累积 ≈5 条（下轮用 full-suite-runner 后台 gate + 捕获 closure-sync AC5 / suite(a) AC6(i) 实跑）；池 4 健康 | 内层：scoped (③) agent 在飞（11m 读 test.sh --for-task）；ROUND2 集累积 | ①git log 核 (c) 块落地（3a73a1a8/9840255f）+ scoped 派发；②task 体读核（AC1-7 勾 + AC6 自勾证据）；③1 agent 无 BLOCKED；池 4 |
@@ -312,3 +313,8 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 修法：`correct` 分为 `correct-inner` / `correct-self`，只有前者进退化判据。存量行需回填，暂不追溯。
 
 退化判据：`correct` 占比 ≥50% ⇒ 该修内层而非加密外层频率。当前 42%。
+**2026-08-05 07:45Z 重算**（从表格行数，严格匹配 `| 2026-08-... | 动作类型 |`）：`no-action` 116 /
+`correct` 90 / `unblock` 46 / `escalate` 7 / `correct-self` 1，总 260 行。退化口径（re-ruling 后
+correct-self 不计入）：`correct-inner = 90 - 1(correct-self) = 89`；`correct-inner / (259 非
+correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-self 误计入会虚高到 90/260=34.6%，
+差异小但口径必须对（correct-self 是外层自我修正，与内层能力无关）。
