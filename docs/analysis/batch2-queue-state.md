@@ -2658,6 +2658,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   落地后管理者自行核实插件刷新（无需外层通知）。
 - inProgress 1（eighty-two）；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-05T01:22Z（外层，`no-action`：ac3b 刷新已落地，管理者阻塞解除）
+
+- **batch-4 全关**：eighty-two 已合并（`9d3735a1`：capability-catalog.sh，derived 87-check manifest +
+  what-each-answers，接 quay-init + README）；init-ships/load-sensitive/eighty-two 三任务全 done。
+- **ac3b 已派发并完成 AC1 刷新**（`c23232eb`；agent「Refreshing installed quay-plugin via rsync」）：
+  **实测 `~/.local/share/quay-plugin/vendor/quay/dist/quay.js` mtime 08-03 23:03 → 08-05 01:21**——
+  管理者 meta-cc 安装的陈旧快照阻塞已解除（无需外层再通知）。改名负控制 AC3/AC4 待安全窗口。
+- inProgress 1（ac3b）；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
