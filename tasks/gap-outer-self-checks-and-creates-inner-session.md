@@ -6,7 +6,7 @@ title: "outer should self-check env and create tmux windows / start inner
   session-topology factory exists + cold-start references it, but outer doesn't
   auto-call; fix: outer cold-start step 3 self-checks inner (process +
   transcript) and calls quay-topology.sh when missing, idempotent)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -74,6 +74,7 @@ checked-in 配置），cold-start 已引用。缺 outer 自己调用。
 - [ ] AC7: 与 session-topology skill + cold-start + launch-config + manager-topology 任务交叉标注（同一次改动两面）
 
 ## Touches
+- tasks/gap-outer-self-checks-and-creates-inner-session.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/loop/orchestrator-loop-tick.md（冷启动第 3 步自检 + 三态处理）
 - plugin/skills/cold-start/SKILL.md（如涉及）
