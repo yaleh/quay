@@ -90,7 +90,7 @@ extra:
 
 ## Contract
 
-measure   prefriction_dimensions = 每晚统计「立案时无触发失败/告警/矛盾的条数」
+measure   prefriction_dimensions = `bash <每晚可证伪计数脚本>` stdout 的 prefriction_dimensions 数字段
 band      prefriction_dimensions >= 0（可证伪：当前 0；>0 即机制开始主动开维度）
 invariant generator_is_question = 1（生成 = 对常驻判据问「量化哪个范围」，非关键词扫描）
 invoke    `node --experimental-strip-types <generator runner> --criteria`

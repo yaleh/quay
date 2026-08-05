@@ -81,12 +81,11 @@ extra:
 
 ## Contract
 
-measure   needs_human_stale = 超过 N 天未碰的 needs-human 条数
-band      needs_human_stale 可解析（复检清单输出；死/活分开）
+measure   needs_human_stale = `node --experimental-strip-types <needs-human 复检脚本>` stdout 的 needs_human_stale 数字段
+band      needs_human_stale = 0（超过 N 天未碰的 needs-human 全被报出；死/活分开）
 invariant same_ruler_on_needs_human = 1（存活轴复用 strategic-doc-staleness-check 路径存在性判据）
 invoke    `node --experimental-strip-types <needs-human 复检+存活轴检查>`
-control   构造 DIR-109 类活卡任务（引现行机制）⇒ 报出需复检；gap-plancheck-* 类死任务（引退休机制）⇒
-          自动 superseded（AC3 两向）
+control   构造 DIR-109 类活卡任务（引现行机制）⇒ 报出需复检；gap-plancheck-* 类死任务（引退休机制）⇒ 自动 superseded（AC3 两向）
 resume    时间轴复检与存活轴分两步提交，任一步完成即写盘
 
 ## Dispatch review
