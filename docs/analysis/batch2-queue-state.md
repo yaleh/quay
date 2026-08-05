@@ -3917,3 +3917,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **管理者 OVERDUE 假警排除**：outer/inner transcript 都活着在写（heartbeat 冻结已知缺陷复发，不重立案）。
 - **内层**：Baked 13m 等 M3 验证套件结果；1 agent（nbsp-fix 已 fan-in）。
 - 套件结果出来后收尾 ROUND 3（4 not-yet-flipped）+ 关闭多个已落地任务。
+
+### tick 2026-08-05T08:50Z（外层，`unblock`：ABORT #3 + 残留泄漏清理 + M3 重跑）
+
+- **ABORT #3（08:48Z）**：M3 验证套件（lane-1）卡在 session-liveness（KNOWN-LOAD-SENSITIVE）2 分钟+
+  （log 停 5935、CPU 0.3%），同时内层并发跑自己的 session-liveness 验证（concurrency=4，起 skv-ok
+  server）——**两个 session-liveness 实例在全局 tmux socket 撞车**（都用 skv-ok 会话名）。资源 GO
+  （PSI 4）非 CPU，是 tmux socket 冲突。外层让位内层验证。
+- **残留泄漏清理（管理者留判断的）**：9 个 session-liveness-* + 1 个 enter-repro-79bc，全无活 socket
+  确认后清理（观察者 2598198 用 SESSION_TARGETS=quay-0:outer，不依赖这些目录）。残留清零。
+- **M3 验证重跑（blfvjpxok，lane-1）**：冲突根因清除后干净启动（concurrency=1 单进程、无 8 残留）。
+- **内层**：静止（Baked 13m51s），session-liveness 验证完成；输入框「重跑 M3 验证」待外层套件。
+- 套件结果出来后收尾 ROUND 3（4 not-yet-flipped）+ 关闭已落地任务。
