@@ -2778,3 +2778,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **就绪池 2**（preflight/roadmap 已派仍计 ready——池检查不知在飞，计数偏高的已知面）。
 - 3 agent 均在飞（57s/54s/50s，token 持续上升）；内层 auto-compact 中（43%）；无停止条件、无
   BLOCKED；loop-driver LIVE。
+
+### tick 2026-08-05T02:15Z（外层，`unblock`：人设计裁定 → 立案收尾异步化机制根任务）
+
+- **人设计裁定（决定）**：收尾/记账完全异步化到外层，不暴露给 inner。实测证据——「Close batch-2/3/4
+  task bodies」三次在 inner 派发史（21:56/23:33/01:59），每次收尾后必跟 3 连发（22:44/00:24/02:08），
+  收尾期零新派发 ⇒ **记账是调度同步点 = 批次边界真源**（比 batch 措辞深一层，改名解决不了）。
+- **技术安全（人已核）**：ready-pool-check notYetFlipped 走 taskWorkLanded（ready-pool-check.ts:128-130），
+  不依赖 status:done ⇒ 收尾异步化无隐藏依赖。
+- **已立案 `gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`**（ready，
+  dod 通过）——目标形态：inner 只执行+派发+合并、不知收尾存在；外层 20-min-cron 异步收尾
+  （taskWorkLanded 探测 → --task-end → 翻 done → verification-round-N 记录 → 全量 suite 为外层 gate）；
+  AC5 要求证一次外层收尾窗口内 inner 持续派发不空转。与 batch 措辞任务分层（机制根 vs 措辞层）。
+- 在飞：3 agent（review-cadence/roadmap/preflight）继续执行中；新任务 ready 入池，等槽位空滚动派发。
