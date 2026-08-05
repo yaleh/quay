@@ -4663,3 +4663,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   后 `git pull`；已跟踪版 supersede 本地副本。注意：B 机 Node 18.19.1 即使 pull 成功也无法源码执行 quay
   （卡 ①），需升 Node ≥22.6 或用 dist。
 - **在飞**：upgrade-channel agent 继续。套件 green（stale）。
+
+### tick 2026-08-05T17:0xZ（外层，inner 采纳裁定 + 自主排程）
+
+- **inner 兑现外层全部裁定**：389cd4bc promote ruling-required→ready（外层优先级裁定，pool 28>floor 12
+  无自动压力故手动）+ 5fd3441e 纠正 AC12b 记录（3/4 merged 仍 ready + 1/4 todo，兑现 16:4xZ 纠正）。
+- **inner 自主派发计划**：等 upgrade-channel 落地后派 ruling-required + web-board + send-keys-nbsp
+  （conservative plugin/ glob 串行窗口）。
+- **upgrade-channel 换挡**：sync.sh 映射 agent 完成 → capability-catalog regression agent（23m47s，
+  222k tokens，测试运行中）。
+- **全量套件**：资源闸 GO（load 3.51 回落），但 inner 测试 agent 在飞——串行纪律下推迟（并发互相
+  false-flake 正是该规则保护的场景）。余 7 条 not-yet-flipped 仍卡全量绿。
+- **在飞 1/3**（upgrade-channel regression）。套件 green（stale）。Monitor 三判据绿、detect-stop 无 block、
+  .halt quay/archguard 运行中 meta-cc 暂停。
