@@ -6,7 +6,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ProviderClient } from "./provider-client.ts";
-import { readLive, readJournal, type LiveResult, type JournalResult, type JournalSection } from "./observation.ts";
+import { readLive, readJournal, readBoardLanding, readBoardExecution, type LiveResult, type JournalResult, type JournalSection, type BoardLanding, type BoardExecution } from "./observation.ts";
 // live-state discriminator texts (gap-live-cannot-tell-a-dead-loop-from-an-unwired-one) — the
 // two telemetry-empty states must have DIFFERENT copy AND a next-step action, and never collapse
 // back to the generic 「无数据」.
@@ -1244,6 +1244,142 @@ export async function handleJournal(
   res.end(renderJournalPage(journal));
 }
 
+// ── /board — 三源 join 看板 (gap-web-board-needs-an-inconsistency-verdict-it-does-not-have) ──
+// The board joins 意图 (task store) + 执行 (telemetry) + 落地 (git code existence). The LANDING
+// judgment is REUSED from plugin/scripts/task-status-drift-check.ts via observation.readBoardLanding
+// (AC1: reuse, not reimplement — the drift checker is the single authority). The board emits one
+// `data-flag` attribute per task matching the checker's suspects/reverse, so the Contract's band
+// (board_flags == suspects + reverse, per-task) holds BY CONSTRUCTION (AC2/AC3). Execution flags
+// (在飞超时/孤儿) use a separate `data-exec-flag` attribute so they never pollute the data-flag count.
+
+function renderBoardPage(board: {
+  landing: BoardLanding;
+  execution: BoardExecution;
+  intentStatus: "ok" | "error";
+  intentReason: string | null;
+  rows: Array<{
+    id: string;
+    title: string;
+    status: string;
+    labels: string[];
+    landingFlag: string | null;
+    execFlags: string[];
+    inFlightMinutes: number | null;
+  }>;
+}): string {
+  const landingNote = board.landing.status === "ok"
+    ? html`<span>落地: <code>task-status-drift-check.ts</code> · 扫描 ${board.landing.scanned} 任务</span>`
+    : board.landing.status === "empty"
+      ? html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>无数据</strong> — ${escapeHtml(board.landing.reason || "")}</span>`
+      : html`<span>落地: <code>task-status-drift-check.ts</code> · <strong>读失败</strong> — ${escapeHtml(board.landing.reason || "")}</span>`;
+  const execNote = board.execution.status === "ok"
+    ? html`<span>执行: <code>.workflow-events/</code> · ${board.execution.inFlight.length} 在飞</span>`
+    : board.execution.status === "empty"
+      ? html`<span>执行: <code>.workflow-events/</code> · <strong>无数据</strong> — ${escapeHtml(board.execution.reason || "")}</span>`
+      : html`<span>执行: <code>.workflow-events/</code> · <strong>读失败</strong> — ${escapeHtml(board.execution.reason || "")}</span>`;
+  const intentNote = board.intentStatus === "ok"
+    ? html`<span>意图: 任务库 (Provider ABI)</span>`
+    : html`<span>意图: 任务库 (Provider ABI) · <strong>读失败</strong> — ${escapeHtml(board.intentReason || "")}</span>`;
+
+  const rows = board.rows.map((r) => {
+    const flagAttr = r.landingFlag ? ` data-flag="${escapeHtml(r.landingFlag)}"` : "";
+    const execAttr = r.execFlags.length > 0 ? ` data-exec-flag="${escapeHtml(r.execFlags.join(","))}"` : "";
+    const execCell = r.inFlightMinutes != null
+      ? html`在飞 ${escapeHtml(r.inFlightMinutes.toFixed(1))} 分钟${r.execFlags.map((f) => html` · <strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join("")}`
+      : (r.execFlags.length > 0 ? r.execFlags.map((f) => html`<strong>${f === "in-flight-timeout" ? "在飞超时" : "孤儿"}</strong>`).join(" · ") : "—");
+    const landingCell = r.landingFlag === "done-unlanded"
+      ? html`<strong>done 但未落地</strong>`
+      : r.landingFlag === "landed-not-closed"
+        ? html`<strong>已落地但未收尾</strong>`
+        : "—";
+    return html`<tr${flagAttr}${execAttr}>
+      <td><a href="/task/${encodeURIComponent(r.id)}">${escapeHtml(r.id)}</a></td>
+      <td>${escapeHtml(r.status)}${(r.labels.length > 0 ? ` · ${escapeHtml(r.labels.join(", "))}` : "")}</td>
+      <td>${execCell}</td>
+      <td>${landingCell}</td>
+    </tr>`;
+  }).join("\n");
+
+  return html`<!doctype html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay board — 三源 join 看板">${pageStyles()}<title>Board — 三源 join 看板</title></head>
+    <body><main>
+      <p class="meta"><a href="/">← tasks</a> · <a href="/live">live</a> · <a href="/journal">journal</a> · <a href="/adr">ADRs →</a></p>
+      <h1>Board — 意图 / 执行 / 落地</h1>
+      <p class="meta">${intentNote} · ${execNote} · ${landingNote}</p>
+      <table>
+        <tr><th>id</th><th>意图</th><th>执行</th><th>落地</th></tr>
+        ${rows}
+      </table>
+    </main></body></html>`;
+}
+
+export async function handleBoard(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  client: ProviderClient,
+  manifest: Manifest,
+  cfg: { workspaceRoot: string },
+): Promise<void> {
+  let landing: BoardLanding;
+  try {
+    landing = await readBoardLanding(cfg.workspaceRoot);
+  } catch (err) {
+    landing = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, flags: new Map(), scanned: 0 };
+  }
+  let execution: BoardExecution;
+  try {
+    execution = await readBoardExecution(cfg.workspaceRoot);
+  } catch (err) {
+    execution = { status: "error", reason: `internal: ${err instanceof Error ? err.message : String(err)}`, flags: new Map(), inFlight: [] };
+  }
+
+  let tasks: Array<{ id?: unknown; title?: unknown; status?: unknown; labels?: unknown }> = [];
+  let intentStatus: "ok" | "error" = "ok";
+  let intentReason: string | null = null;
+  try {
+    const r = await client.taskList({ includeBody: false });
+    tasks = r.tasks ?? [];
+  } catch (err) {
+    intentStatus = "error";
+    intentReason = err instanceof Error ? err.message : String(err);
+  }
+
+  // Union of provider tasks + landing-flagged taskIds, so every drift-flagged task renders a row
+  // even if the provider's view diverges (the Contract's invariant: the scanned set must match).
+  const byId = new Map<string, { title: string; status: string; labels: string[] }>();
+  for (const t of tasks) {
+    if (typeof t.id === "string" && t.id.length > 0) {
+      byId.set(t.id, {
+        title: typeof t.title === "string" ? t.title : "",
+        status: typeof t.status === "string" ? t.status : "",
+        labels: Array.isArray(t.labels) ? (t.labels as unknown[]).filter((l): l is string => typeof l === "string") : [],
+      });
+    }
+  }
+  for (const taskId of landing.flags.keys()) {
+    if (!byId.has(taskId)) byId.set(taskId, { title: "", status: "", labels: [] });
+  }
+
+  const rows = [...byId.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([id, meta]) => {
+    const landingFlag = landing.flags.get(id) ?? null;
+    const execFlags = [...(execution.flags.get(id) ?? [])];
+    const inFlight = execution.inFlight.find((t) => t.taskId === id);
+    return {
+      id,
+      title: meta.title,
+      status: meta.status,
+      labels: meta.labels,
+      landingFlag,
+      execFlags,
+      inFlightMinutes: inFlight ? inFlight.minutes : null,
+    };
+  });
+
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderBoardPage({ landing, execution, intentStatus, intentReason, rows }));
+}
+
 // ── Facade dispatcher (M99 pattern: single entry point keeps startServer outDegree low) ──
 
 export async function handleAllRoutes(
@@ -1270,6 +1406,14 @@ export async function handleAllRoutes(
 
   if (url.pathname === "/journal") {
     await handleJournal(req, res, cfg);
+    return;
+  }
+
+  // gap-web-board-needs-an-inconsistency-verdict-it-does-not-have: /board joins 意图/执行/落地
+  // and renders the four inconsistency flags. The landing judgment is REUSED from the drift
+  // checker (observation.ts's readBoardLanding) so per-task agreement holds by construction.
+  if (url.pathname === "/board") {
+    await handleBoard(req, res, url, client, manifest, cfg);
     return;
   }
 
