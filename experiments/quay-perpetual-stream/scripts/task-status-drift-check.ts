@@ -34,7 +34,7 @@ import { execFileSync } from "node:child_process";
 import { parseTask, extractSection } from "./task-schema.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // SINGLE-SOURCE (gap-task-body-has-n-parsers-and-no-authority): the ONE Touches bullet parser.
-import { stripTouchAnnotation, parseTouchEntries } from "./touches-parser.ts";
+import { stripTouchAnnotation, parseTouchEntries, parseTouchEntriesWithTags } from "./touches-parser.ts";
 export { stripTouchAnnotation, parseTouchEntries };
 
 // Directories searched for AC-declared symbols (repo-root-relative) — the code surface a landed
@@ -222,17 +222,180 @@ function hasAnyLandedNewTouch(touchesSection, repoRoot) {
     });
 }
 
+// ── git-history of declared specific Touches — the THIRD landed signal ───────────────────────────
+// taskWorkLanded's first two signals depend on the AC section's SYMBOL SHAPE (backticked identifiers
+// that resolve, or `(new)`-marked Touches files now existing). A task whose AC is PROSE-HEAVY (few
+// resolvable identifiers) AND whose Touches modify EXISTING files (no `(new)`) shows neither signal —
+// yet its work may have landed on master (web-board: prose AC, 4 existing-file Touches, merged
+// 0950b0b6/fb1fd520 — taskWorkLanded=false, 3rd re-dispatch 2026-08-05;
+// gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks). This third signal closes that
+// gap: a master-reachable commit whose message references the task AND that modified one of the
+// task's SPECIFIC code-root Touches paths ⇒ the declared work landed.
+//
+// Anchoring — "the commit is about THIS task, not a coincidental touch" (AC4 negative control):
+//   - the commit message must reference the task by its FULL id, its id without a leading kind
+//     prefix (`gap-`/`DIR-`/…), or a ≥2-hyphen-segment PREFIX of either. LONG prefixes (≥4
+//     segments) are distinctive and match on ANY commit. SHORT prefixes (2-3 segments) match on
+//     MERGE commits only — the fan-in "merge <short-name>:" convention (web-board → "merge
+//     web-board:") — AND only when the prefix is UNIQUE among the store's task ids
+//     (ambiguousShortPrefixes): a shared kernel ("cold-start", "red-window") is a sibling reference,
+//     so a sibling's merge merely mentioning it must not judge THIS task landed.
+//   - the reference must be a DELIMITED word (surrounded by non-[A-Za-z0-9_-]), so "web-board" does
+//     not match inside "gap-web-board-…" and "send-keys" does not match inside "send-keys-nbsp".
+//   - the commit must have modified a specific code-root Touches path (non-glob, non-(new)/(delete),
+//     non-bookkeeping). Bookkeeping paths (tasks/**, milestones/**, docs/plans/**, .quay/**,
+//     receipts/**) are pipeline accounting — e.g. the promote-to-ready commit touches ONLY the task's
+//     own file, and must NOT count as landing evidence (AC4 negative control).
+//   - only MASTER-REACHABLE commits count (`git log master -- <paths>`), so a stranded-branch commit
+//     or an unmerged worktree commit does not fire the signal.
+//
+// The prior overshoot gap (gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks)
+// is NOT re-opened: file EXISTENCE alone never fires this signal — the file must have been MODIFIED
+// by a master-reachable commit that REFERENCES the task.
+const KIND_PREFIX_RE = /^(gap|DIR|QN|exp5|M\d+)[-_]/;
+
+/** The id forms a commit message may use to reference a task: the full id, the id with a leading
+ *  kind prefix (`gap-`/`DIR-`/…) stripped, and every ≥2-hyphen-segment prefix of both. The repo's
+ *  fan-in abbreviates in two ways: "merge <short-kernel>:" (web-board → "merge web-board:" for
+ *  gap-web-board-needs-…) and a long prefix dropping only trailing qualifier segments
+ *  (measure-claude-p's commit "task(gap-measure-claude-p-headless-third-party-roundtrip):" for
+ *  gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics). */
+export function taskIdTokens(taskId) {
+  const full = String(taskId);
+  const stripped = full.replace(KIND_PREFIX_RE, "");
+  const tokens = new Set([full, stripped]);
+  const addPrefixes = (id) => {
+    const segs = id.split("-").filter(Boolean);
+    for (let i = 2; i <= segs.length; i++) tokens.add(segs.slice(0, i).join("-"));
+  };
+  addPrefixes(full);
+  if (stripped && stripped !== full) addPrefixes(stripped);
+  return [...tokens].filter(Boolean);
+}
+
+/** Does `message` contain `token` as a delimited word (surrounded by non-[A-Za-z0-9_-])? */
+export function wordMatch(message, token) {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`).test(message);
+}
+
+/** Short (2-3 segment) id prefixes SHARED by ≥2 tasks in the store — ambiguous references that
+ *  must NOT fire the git-history signal on their own. gap-cold-start-* and gap-red-window-* all
+ *  share "cold-start" / "red-window"; a sibling's merge that merely MENTIONS the shared word (e.g.
+ *  gap-full-suite-belongs-to-outer's merge describing the red-window hold) must not judge the
+ *  sibling landed (AC4 negative control). Computed from task FILE NAMES only (id = filename). */
+function ambiguousShortPrefixes(repoRoot, tasksDir) {
+  const dir = tasksDir || path.join(repoRoot, "tasks");
+  let files;
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return new Set(); }
+  const counts = new Map();
+  const addPrefixes = (s) => {
+    const segs = s.split("-").filter(Boolean);
+    for (let i = 2; i <= 3 && i <= segs.length; i++) {
+      const p = segs.slice(0, i).join("-");
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+  };
+  for (const f of files) {
+    const id = f.replace(/\.md$/, "");
+    addPrefixes(id);
+    const stripped = id.replace(KIND_PREFIX_RE, "");
+    if (stripped !== id) addPrefixes(stripped);
+  }
+  const ambiguous = new Set();
+  for (const [p, c] of counts) if (c > 1) ambiguous.add(p);
+  return ambiguous;
+}
+
+/** Does a commit message reference `taskId`? Full id / full stripped id match on ANY commit;
+ *  LONG id prefixes (≥4 hyphen-segments) are distinctive enough to match on ANY commit; SHORT
+ *  prefixes (2-3 segments) match on MERGE commits ONLY — the fan-in "merge <name>:" convention —
+ *  AND only when the prefix is UNIQUE among the store's task ids (ambiguousShortPrefixes) — a
+ *  shared prefix ("cold-start", "red-window") is not a task-specific reference, so a sibling's
+ *  merge mentioning it must not fire (AC4 negative control: a coincidental touch by other work
+ *  must not judge an un-landed task landed). */
+export function messageReferencesTask(message, taskId, opts = {}) {
+  const isMergeCommit = opts.isMerge === true;
+  const ambiguous = opts.ambiguousShortPrefixes ?? new Set();
+  const full = String(taskId);
+  const stripped = full.replace(KIND_PREFIX_RE, "");
+  if (wordMatch(message, full) || (stripped && stripped !== full && wordMatch(message, stripped))) return true;
+  const considerPrefixes = (id) => {
+    const segs = id.split("-").filter(Boolean);
+    for (let i = 2; i <= segs.length; i++) {
+      const p = segs.slice(0, i).join("-");
+      if (!wordMatch(message, p)) continue;
+      if (i >= 4) return true;
+      if (isMergeCommit && !ambiguous.has(p)) return true;
+    }
+    return false;
+  };
+  if (considerPrefixes(full)) return true;
+  if (stripped && stripped !== full && considerPrefixes(stripped)) return true;
+  return false;
+}
+
+/** Fallback taskId source when opts.taskId is absent: the self-touch convention puts
+ *  `tasks/<id>.md` in a task's own Touches (tick 4.4), which carries the id. */
+export function taskIdFromTouches(touchesSection) {
+  for (const entry of parseTouchEntries(touchesSection ?? "")) {
+    const m = entry.match(/^tasks\/(.+)\.md$/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** The THIRD landed signal: a master-reachable commit whose message references the task AND that
+ *  modified one of the task's SPECIFIC code-root Touches paths (non-glob, non-(new)/(delete),
+ *  non-bookkeeping). Skips (does not crash on) Touches paths that do not exist — `git log -- <p>`
+ *  on a never-existing path is simply empty. Returns false on any git failure (fail-closed). */
+export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
+  const touchesSection = extractSection(rawTaskText, "Touches");
+  if (!touchesSection) return false;
+  const taskId = opts.taskId ?? taskIdFromTouches(touchesSection);
+  if (!taskId) return false;
+  const paths = parseTouchEntriesWithTags(touchesSection)
+    .filter((e) => e.tag === null)
+    .map((e) => e.path)
+    .filter((p) => p && !p.includes("*") && !p.includes("?"))
+    .filter((p) => isCodeTouchEntry(p));
+  if (paths.length === 0) return false;
+  // Ambiguous short prefixes (shared by sibling tasks) — computed once per call so a shared kernel
+  // ("cold-start", "red-window") can never fire the signal on its own.
+  const ambiguous = ambiguousShortPrefixes(repoRoot, opts.tasksDir);
+  // --full-history: git's default path-history SIMPLIFICATION elides merge commits whose file
+  // change is identical to one parent's (so the fan-in's "merge <task>: …" commit would never
+  // appear — web-board's 0950b0b6 was hidden until --full-history). The signal needs those merges
+  // (they carry the task reference), so disable simplification.
+  const r = gitTry(repoRoot, ["log", "master", "--full-history", "--format=%H%x00%P%x00%s", "--", ...paths]);
+  if (!r.ok || !r.out) return false;
+  for (const line of r.out.split("\n")) {
+    const parts = line.split("\0");
+    if (parts.length < 3) continue;
+    const parents = parts[1];
+    const msg = parts[2];
+    const isMerge = parents.split(/\s+/).filter(Boolean).length >= 2;
+    if (messageReferencesTask(msg, taskId, { isMerge, ambiguousShortPrefixes: ambiguous })) return true;
+  }
+  return false;
+}
+
 // Reusable "the task's declared work has landed on master" predicate — exported for reuse by
 // ready-pool-check.ts's notYetFlipped (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool,
 // AC6: reuse the drift-check signal, never a parallel copy). A task's work is judged landed when
-// EITHER of the drift-check's two landing-evidence signals fires:
+// ANY of the drift-check's three landing-evidence signals fires:
 //   - symbol: its distinctive backticked AC identifiers resolve in the code roots (the forward
 //     status-drift signal — a landed implementation backticks its own identifiers in its ACs); or
 //   - touch: a task-CREATED file (`(new)`-marked Touches entry) now exists on disk — the task
-//     created it ⇒ landed (hasAnyLandedNewTouch).
-// Existing-file Touches entries are DELIBERATELY NOT landing evidence: a task that modifies a file
-// which already exists on master is indistinguishable from an un-landed task by file existence —
-// the file is there regardless — so only its own symbols can prove it landed (the overshoot fix,
+//     created it ⇒ landed (hasAnyLandedNewTouch); or
+//   - git-history: a master-reachable commit whose message references the task modified one of its
+//     SPECIFIC code-root Touches paths (gitHistoryLanded — catches prose-heavy AC tasks whose
+//     implementation landed but whose AC yields no resolvable symbols and whose Touches modify
+//     existing files; gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks).
+// Existing-file Touches entries are DELIBERATELY NOT landing evidence by file existence alone: a
+// task that modifies a file which already exists on master is indistinguishable from an un-landed
+// task by file existence — the file is there regardless — so only its own symbols (or the
+// git-history of a commit that references it) can prove it landed (the overshoot fix,
 // gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks). OR-composed so a
 // merged-not-flipped task is caught by whichever signal it shows. Does NOT depend on AC checkbox
 // state — the fan-in merges without ticking boxes, so checkbox state is not the closeout signal.
@@ -244,7 +407,8 @@ export function taskWorkLanded(rawTaskText, repoRoot, opts = {}) {
   const symbolResolved = candidates.length > 0 && ratio >= (opts.ratioFloor ?? 0.6);
   const touchesSection = extractSection(rawTaskText, "Touches");
   const touchLanded = hasAnyLandedNewTouch(touchesSection, repoRoot);
-  return symbolResolved || touchLanded;
+  const gitHistory = gitHistoryLanded(rawTaskText, repoRoot, opts);
+  return symbolResolved || touchLanded || gitHistory;
 }
 
 // A done task whose `children:` are ALL `done` is a parent whose implementation IS the children's
@@ -640,9 +804,20 @@ export function main(argv) {
   const json = args.includes("--json");
   const strandedOnly = args.includes("--stranded");
   const closedOnly = args.includes("--closed-direction");
+  const checkIdx = args.indexOf("--check");
+  const checkId = checkIdx >= 0 && checkIdx + 1 < args.length ? args[checkIdx + 1] : null;
   let repoRoot;
   try { repoRoot = findRepoRoot(process.cwd()); } catch (e) {
     process.stderr.write(`ERROR: ${e.message}\n`);
+    return 0;
+  }
+  if (checkId) {
+    // `--check <task-id>`: print landed=true/false for ONE task (taskWorkLanded, all three signals).
+    // The Contract's landed_signals measure surface (task-status-drift-check.ts --check web-board).
+    const file = path.join(repoRoot, "tasks", `${checkId}.md`);
+    if (!fs.existsSync(file)) { process.stdout.write("landed=false\n"); return 0; }
+    const raw = fs.readFileSync(file, "utf8");
+    process.stdout.write(`landed=${taskWorkLanded(raw, repoRoot, { taskId: checkId })}\n`);
     return 0;
   }
   const stranded = strandedBranches(repoRoot);

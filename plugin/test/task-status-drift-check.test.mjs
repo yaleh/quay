@@ -49,6 +49,12 @@ import {
   strandedBranches,
   entriesInBranchDiff,
   formatStrandedText,
+  taskWorkLanded,
+  gitHistoryLanded,
+  messageReferencesTask,
+  taskIdTokens,
+  taskIdFromTouches,
+  wordMatch,
 } from "../../experiments/quay-perpetual-stream/scripts/task-status-drift-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -986,5 +992,256 @@ test("AC7: --json mode emits { suspects, reverse, closedWithoutWork, strandedTas
     assert.ok(Array.isArray(fromCli.strandedTasks), "strandedTasks must be an array");
   } finally {
     fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// ── git-history of declared specific Touches — the THIRD taskWorkLanded signal ────────────────────
+// (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks). The first two signals depend
+// on AC SYMBOL SHAPE (resolvable backticked identifiers, or (new)-marked Touches files now existing);
+// a PROSE-HEAVY AC + existing-file Touches task shows neither though its work may have landed
+// (web-board: merged 0950b0b6/fb1fd520, taskWorkLanded was false, 3rd re-dispatch). The git-history
+// signal fires when a MASTER-REACHABLE commit whose message references the task modified one of the
+// task's SPECIFIC code-root Touches paths. AC1 positive · AC2 regression (symbol unchanged) ·
+// AC4 negatives (unrelated commit / shared-kernel collision / glob+(new) excluded / existing-file
+// overshoot NOT re-opened).
+
+/** A real git repo with a `master` branch (git-history tests need actual commits). */
+function makeGitHistoryRepo(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `drift-gh-${tag}-`));
+  git(dir, "init", "-b", "master", "-q", ".");
+  git(dir, "config", "user.email", "test@example.com");
+  git(dir, "config", "user.name", "Test");
+  fs.writeFileSync(path.join(dir, ".gitkeep"), "base\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "init");
+  return dir;
+}
+
+/** Create <branch> off master, commit <file> onto it, merge it back with a fan-in "merge <msg>".
+ *  Mirrors the fast-mode Land flow (git merge --no-ff puts the branch tip as second parent). */
+function commitAndMerge(repo, branch, file, content, mergeMsg) {
+  git(repo, "checkout", "-q", "-b", branch);
+  fs.writeFileSync(path.join(repo, file), content);
+  git(repo, "add", ".");
+  git(repo, "commit", "-q", "-m", "impl");
+  git(repo, "checkout", "-q", "master");
+  git(repo, "merge", "--no-ff", branch, "-m", mergeMsg, "-q");
+  git(repo, "branch", "-D", branch);
+}
+
+function gitHistoryTask(id, touches) {
+  return `---
+id: ${id}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: prose-only acceptance criterion — no backticked code identifiers, so symbol resolution cannot fire
+- [ ] AC2: the work lands on master via a merge that references the task
+## Touches
+- tasks/${id}.md
+${touches}
+`;
+}
+
+test("git-history: a merge referencing the task's short kernel that modified a specific Touches path ⇒ landed (AC1)", (t) => {
+  const repo = makeGitHistoryRepo("ac1");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // web-board shape: prose AC, existing-file Touches (no (new)), self-file in Touches. The fan-in
+    // merge "merge web-board: …" modified code/board.ts → the git-history signal fires.
+    const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+    const task = gitHistoryTask(id, "- code/board.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    commitAndMerge(repo, "task/gap-web-board", "code/board.ts", "board\n", "merge web-board: /board route joins intent/execution/landing");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), true,
+      "merge referencing the short kernel + modified Touches path ⇒ landed");
+    assert.equal(taskWorkLanded(task, repo), true,
+      "taskWorkLanded ORs the git-history signal (taskId falls back to the self-file in Touches)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: AC2 regression — a symbol-resolvable merged task stays landed (existing signals unchanged)", (t) => {
+  const repo = makeGitHistoryRepo("ac2");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "code", "upgrade-symbol.ts"), "export function distinctiveUpgradeChannelSync() {}\n");
+    const id = "gap-upgrade-channel-cant-sync-build-artifacts-dist-stale";
+    const task = `---
+id: ${id}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: \`distinctiveUpgradeChannelSync\` rebuilds the stale dist
+## Touches
+- tasks/${id}.md
+- code/upgrade-symbol.ts
+`;
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    assert.equal(taskWorkLanded(task, repo, { roots: [path.join(repo, "code")] }), true,
+      "symbol resolution still fires (backward compat) even with no git-history match");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false, "no commit references the task → git-history alone is false");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: a commit about a DIFFERENT task that touched the Touches path does NOT fire (AC4 negative)", (t) => {
+  const repo = makeGitHistoryRepo("ac4");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // A never-dispatched todo task whose Touches path was coincidentally modified by ANOTHER task's
+    // merge (message does NOT reference it) → must NOT be judged landed.
+    const id = "gap-never-dispatched";
+    const task = gitHistoryTask(id, "- code/shared.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    commitAndMerge(repo, "task/gap-other-work", "code/shared.ts", "shared\n", "merge gap-other-work: unrelated feature");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
+      "a coincidental modification by OTHER work must not judge the task landed");
+    assert.equal(taskWorkLanded(task, repo), false, "unlanded todo task stays unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: a SHARED short kernel (sibling collision) does NOT fire (AC4 — cold-start/red-window class)", (t) => {
+  const repo = makeGitHistoryRepo("collide");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // Two sibling tasks share the "cold-start" 2-segment kernel and BOTH declare code/cold.ts. A
+    // THIRD task's merge mentions "cold-start" and modified code/cold.ts. The never-landed sibling
+    // must NOT be judged landed (ambiguous kernel); the landed sibling IS caught by its own fan-in
+    // merge that references its longer id prefix.
+    const gateId = "gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite";
+    const ac8cId = "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash";
+    const gate = gitHistoryTask(gateId, "- code/cold.ts");
+    const ac8c = gitHistoryTask(ac8cId, "- code/cold.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${gateId}.md`), gate);
+    fs.writeFileSync(path.join(repo, "tasks", `${ac8cId}.md`), ac8c);
+    // Third task's merge: mentions the shared word "cold-start", touches the shared file.
+    commitAndMerge(repo, "task/outer-self-checks", "code/cold.ts", "cold\n",
+      "merge outer-self-checks: cold-start step 3 three-state self-check (healthy=noop / empty-shell=drive)");
+    assert.equal(gitHistoryLanded(gate, repo, { taskId: gateId }), false,
+      "shared kernel must NOT fire for the never-landed sibling");
+    assert.equal(gitHistoryLanded(ac8c, repo, { taskId: ac8cId }), false,
+      "shared kernel must NOT fire for the landed sibling either (ambiguous)");
+    // The landed sibling's OWN fan-in merge (longer id prefix) DOES fire it.
+    commitAndMerge(repo, "task/gap-cold-start-ac8c", "code/cold.ts", "cold2\n",
+      "fan-in gap-cold-start-ac8c-key4 (critical path): AC8c key 4 + step 5 teach reliable-send");
+    assert.equal(gitHistoryLanded(ac8c, repo, { taskId: ac8cId }), true,
+      "the landed sibling IS caught via its own fan-in merge's longer id prefix");
+    assert.equal(gitHistoryLanded(gate, repo, { taskId: gateId }), false,
+      "the never-landed sibling STAYS unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: glob and (new) Touches do NOT participate (AC4)", (t) => {
+  const repo = makeGitHistoryRepo("globnew");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const id = "gap-glob-new-only";
+    const task = `---
+id: ${id}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: prose only
+## Touches
+- tasks/${id}.md
+- code/*.ts
+- code/gen.ts (new)
+`;
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // A merge references the task AND modified code/gen.ts — but (new) touches and globs do not
+    // participate in the git-history signal, and the self-file is bookkeeping → nothing fires.
+    commitAndMerge(repo, "task/gap-glob-new", "code/gen.ts", "gen\n", "merge gap-glob-new-only: generate the file");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
+      "glob/(new) touches must not participate in the git-history signal");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: an existing-file touch coincidentally modified by other work does NOT fire (prior overshoot gap NOT re-opened)", (t) => {
+  const repo = makeGitHistoryRepo("overshoot");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const id = "gap-mod-existing";
+    const task = gitHistoryTask(id, "- code/existing.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // The existing file is committed on master; an UNRELATED task's merge modified it. The task's
+    // own work has NOT landed → it must stay in the pool (the overshoot fix is not re-opened).
+    fs.writeFileSync(path.join(repo, "code", "existing.ts"), "existing\n");
+    git(repo, "add", "code/existing.ts");
+    git(repo, "commit", "-q", "-m", "add existing file");
+    commitAndMerge(repo, "task/gap-other", "code/existing.ts", "changed\n", "merge gap-other: unrelated change");
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
+      "file existence + unrelated modification is NOT landing evidence");
+    assert.equal(taskWorkLanded(task, repo), false, "existing-file task with unlanded work stays unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("taskIdTokens: full id, stripped id, and ≥2-segment prefixes of both", () => {
+  const toks = taskIdTokens("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have");
+  assert.ok(toks.includes("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), "full id");
+  assert.ok(toks.includes("web-board-needs-an-inconsistency-verdict-it-does-not-have"), "stripped id");
+  assert.ok(toks.includes("web-board"), "2-seg stripped prefix (the fan-in kernel)");
+  assert.ok(toks.includes("web-board-needs"), "3-seg stripped prefix");
+  assert.ok(toks.includes("gap-web-board"), "2-seg full prefix");
+});
+
+test("wordMatch: delimited word only — never embedded in a larger hyphenated token", () => {
+  assert.equal(wordMatch("merge web-board: /board lands", "web-board"), true);
+  assert.equal(wordMatch("gap-web-board-needs-x", "web-board"), false, "embedded in gap-web-board-needs");
+  assert.equal(wordMatch("merge send-keys-nbsp fix", "send-keys"), false, "embedded in send-keys-nbsp");
+  assert.equal(wordMatch("merge send-keys: fix", "send-keys"), true);
+  assert.equal(wordMatch("merge web-board:", "web-board"), true, "colon-delimited counts");
+});
+
+test("messageReferencesTask: full id any commit · long prefix any commit · short prefix merge+unique", () => {
+  const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+  assert.equal(messageReferencesTask("task(gap-web-board-needs-an-inconsistency-verdict-it-does-not-have): x", id, { isMerge: false }), true, "full id any commit");
+  assert.equal(messageReferencesTask("merge web-board: x", id, { isMerge: true }), true, "short kernel in a merge");
+  assert.equal(messageReferencesTask("fix web-board thing", id, { isMerge: false }), false, "short kernel in a NON-merge is ambiguous (sibling risk)");
+  assert.equal(messageReferencesTask("merge cold-start: x", "gap-cold-start-gate-a", { isMerge: true, ambiguousShortPrefixes: new Set(["cold-start"]) }), false, "ambiguous shared kernel rejected even in a merge");
+  assert.equal(messageReferencesTask("fan-in gap-cold-start-ac8c-key4 (critical path)", "gap-cold-start-ac8c-key4-teaches-x", { isMerge: true, ambiguousShortPrefixes: new Set(["cold-start"]) }), true, "long id prefix (≥4 segs) fires despite the shared short kernel");
+});
+
+test("taskIdFromTouches: the self-file tasks/<id>.md carries the id", () => {
+  assert.equal(taskIdFromTouches("- tasks/gap-x.md\n- code/a.ts"), "gap-x");
+  assert.equal(taskIdFromTouches("- code/a.ts\n- code/b.ts"), null, "no self-file → null (fallback needs opts.taskId)");
+  assert.equal(taskIdFromTouches(null), null);
+});
+
+test("CLI --check <task-id>: prints landed=true/false (Contract landed_signals measure)", (t) => {
+  const repo = makeGitHistoryRepo("cli");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), gitHistoryTask(id, "- code/board.ts"));
+    commitAndMerge(repo, "task/gap-web-board", "code/board.ts", "board\n", "merge web-board: /board lands");
+    const cli = path.join(REPO_ROOT, "plugin", "scripts", "task-status-drift-check.ts");
+    const out = execFileSync("node", ["--experimental-strip-types", cli, "--check", id], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(out, /^landed=true\s*$/m, "landed task reports landed=true");
+    const out2 = execFileSync("node", ["--experimental-strip-types", cli, "--check", "gap-never-exists"], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.match(out2, /^landed=false\s*$/m, "missing task reports landed=false (fail-closed)");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
   }
 });
