@@ -4951,3 +4951,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ac-carryover + 其余 ratchet 全解决。
 - **全量重跑**（18:46:55 起，state=running, laneCount=1）——已过静态检查进入真测试，~11-12min。
 - **待全量绿后**：~20 条 not-yet-flipped 批量收尾（closure backlog）。
+
+### tick 2026-08-05T18:5xZ（外层，B 机里程碑——授权启动 AC12b 测量）
+
+- **管理者 B 机验证全通**：config.yml 冲突 mv 备份 + git pull 成功（B=8371d741=A HEAD，gitignore+git rm
+  裁定生效，未删任何东西）；交互式 v25.2.0 端到端 quay init + task list 无报错；**AC12b 装机路径今晚首次
+  全通，无残留阻塞**。
+- **裁定：启动 B 机 outer+inner 开始 AC12b 测量**。前提已实测满足；B 独立机器不占 A 资源；AC12b 测量
+  （B 自己工作区跑自己循环）不依赖 Q2/integration-branch 的推回/权威机制（那些是两机协作的，测量不需要）。
+- **启动条件**（管理者 B 机执行）：①B 工作区 quay-init --loop 铺好 + 定义测量任务集；②B 的 os-anchor
+  watchdog（无人值守测量需要自己的锚）；③B→A 对称白名单生效（17:2xZ 裁定）；④走现有拓扑工厂 + RUNBOOK
+  启动命令（产品化 manager start/adopt 未建，过渡路径）。
+- **在飞**：全量套件重跑中（18:46:55 起，过静态进真测试）。~20 not-yet-flipped 待全量绿。
