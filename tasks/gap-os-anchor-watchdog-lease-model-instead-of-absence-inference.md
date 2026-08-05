@@ -98,3 +98,23 @@ at: 2026-08-05T22:5xZ
 changed: 人方向性问题 + 管理者实测 + 外层裁定立案。核实：Linger=no 确认、backoff 逻辑缺失、relaunch 路径
 0 次生产运行。裁定：租约模型（翻转缺席推断为显式声明，符合仓库 existence-signal 原则）+ 产品化
 （机制交付、策略默认不交付、默认禁用配置化）。
+
+## 范围裁定补充（2026-08-05 22:5xZ，外层——管理者能力边界实测 + 频率异议 + 人方向）
+
+**能力边界实测（管理者）**：session-liveness.sh 纯观测（grep new-session|send-keys claude = 0，不能动手）；
+inner-session-check.sh 能动手（2 命中：quay-topology.sh + send-keys）；manager ruling-required Monitor 只观测
+不动手。⇒ **inner 层完全不需要 watchdog**（outer 三态自检今天落地已覆盖检测+动作）。
+
+**唯一不可替代角色**：Monitor 是会话作用域的（outer 的随 outer 死、manager 的随 manager 死）——**链条最
+顶端无人可救**。交付产品是 outer+inner 无 manager ⇒ 真实用户最顶端就是 **outer**。
+
+**频率异议（管理者已告人，外层采纳）**：A 机 11.4h/137 轮 relaunch-outer 1 次（装上后第一轮）+ B 机 19min
+1 次 = 2/11.7h 都是装上时一次性捕获、**零运行中崩溃恢复**。但低触发 ≠ 低风险——这 11.7h 恰好平静，同一台机
+今晚早些时候全灭过 4 次（正是它要接的场景，当时没装）。
+
+**范围裁定（比人更窄——不取消）**：
+1. **默认关闭** + 需显式带过期意向声明启用（租约）；
+2. **范围从「看护 N 项目 outer」缩到「只看护最顶端那一个会话」**——inner 归 outer 三态自检，outer 在有
+   manager 时归 manager；
+3. 只在**没有更上层会话可依赖**时才有意义；
+4. 看护对象 **3→1**，误拉起爆炸半径同比缩小。
