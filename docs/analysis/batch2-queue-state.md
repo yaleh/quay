@@ -4849,3 +4849,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   reason-axis 缺口，外层已立案 + 重置 green）、Monitor 三判据绿、无 block。
 - master `fff295f1`（外层 17:4xZ tick：reconcile 关 7 个 stale bracket——closure 在外层侧推进）。待 defect-fix
   land 后池自动排除 already-landed。
+
+### tick 2026-08-05T17:5xZ（外层，session-liveness 假 IDLE/OVERDUE 模式确认）
+
+- **17:5xZ 连续 SESSION-IDLE/OVERDUE 事件，交叉验证全部假**：inner 主会话静默 30 分钟（subagent 重负载
+  窗口）→ session-liveness 心跳源（主 transcript/周期源）陈旧 → 假 IDLE（28/33 分钟）+ 假 OVERDUE（30 分钟）。
+  实测：进程活 + **3 subagent 活跃**（ready-pool-check/scoped gate/axis-generator）+ 最近 git 提交
+  （14ddad22）——管理者 watchdog 判据（alive = process AND (transcript OR git)）三条全绿。
+- **已知局限延伸**：tick 文档记录 IDLE=无在飞任务代理；OVERDUE 是同一局限的升级表现（subagent 工作不写
+  主 transcript）。与在飞 `gap-session-idle-true-idle-via-transcript-fusion-and-debounce` 相关（信号质量
+  修正在途），不另立案。处置纪律：OVERDUE 先交叉验证（process/git/subagent），不裸信。
