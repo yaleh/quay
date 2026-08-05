@@ -3351,3 +3351,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 7.5 分钟报首 failure）。⇒ **该监测的趋势判据 = 早期 RED 检测延迟**（首个真实失败 → state 转 red），非
 > 耗时/间隔比。当前数据：suite 15.0 分钟（2347 测试，+22% vs 12.3）、落地速率 3.00/小时。已更新
 > `gap-quality-criteria-are-point-in-time-no-trend-criteria`（Proposal 加第二实例 + AC3b）。
+
+### tick 2026-08-05T05:22Z（外层，`unblock`：pool-floor 机制落地 + 池补晋 7 条）
+
+- **pool-floor (①) 落地**（be2037d1/5ace1071/b1f8caa6）：floor = cap×4（12）、`dispatchable_disjoint`
+  判据（checkTouchesPair 最大互不冲突子集）、补晋 disjointness 排序（gap>DIR 次 tiebreak）、touchesResolve
+  守卫保留。**机制已活**：实时池 3/12、dispatchable_disjoint 2/3（2 条同触 loop 文档 = 本任务机械化的
+  小型版）。AC 19/19 测试绿；DoD 全量待外层 verification-round。
+- **池补晋 7 条**（机制推荐 disjoint 3/3 序）：launch-config / cross-project-portability / ghost /
+  measure-claude-p / productize-manager-layer / …（**跳过 prepare-milestone** no-promote 裁定，AC8 过滤
+  未接池机制仍推荐 = 记录）。
+- **观察**：池变大后 ready-pool-check 的 maxMutuallyDisjointSubset 计算超 120s（background 跑中）——
+  disjointness 计算成本随池规模增长，是 pool-floor 落地的性能面（候选机械化/性能优化方向）。
+- 在飞：session-idle ③（17m）+ red-window-executor ②（3m）；无停止条件、无 BLOCKED。
