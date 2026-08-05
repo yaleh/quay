@@ -3555,3 +3555,7 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 进交付物 ≠ 进冷启动六键（冷启动不得因 plugin 有 manager 就启动它；机械复制三窗口到 meta-cc/archguard
 > 已犯过）。**第三实例已进 quality 任务**：知识存在≠决策时被调用（inner 复读旧措辞 / 红窗规则无执行者 /
 > manager 复制 manager 窗口），三层都有。
+> **06:18Z 增补（ROUND 3 三次 RED——laid-down driver 判定）**：重启 gate early-RED——`AC1 (laid-down)`
+> rendered outer tick doc declares exactly one driver after substitution（6.7s）。疑似 red-window-executor
+> 落地引入（suite-state-trigger 接进 orchestrator-loop-tick 4b2，doc 出现多个 driver 类引用）。等套件完 →
+> bisect → inner 修。
