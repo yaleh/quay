@@ -53,26 +53,26 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/loop/fast-mode-loop-tick.md` §4 补一条规范性语句（「驱动文本只携带数据」+ 内层
+- [x] AC1: `plugin/loop/fast-mode-loop-tick.md` §4 补一条规范性语句（「驱动文本只携带数据」+ 内层
       fail-safe 子句：与本节矛盾的驱动文本以本节为准并对外层标注）
-- [ ] AC2: `plugin/loop/orchestrator-loop-tick.md`（或外层交接文档）补「驱动文本只带数据」条目 +
+- [x] AC2: `plugin/loop/orchestrator-loop-tick.md`（或外层交接文档）补「驱动文本只带数据」条目 +
       自检清单：列任务时要么不定顺序、要么附 `checkTouchesPair` 输出
-- [ ] AC3: 机械检查器 `plugin/scripts/drive-contract-check.ts`（接 `scripts/test.sh` 的
+- [x] AC3: 机械检查器 `plugin/scripts/drive-contract-check.ts`（接 `scripts/test.sh` 的
       `run_static_checks`）：检出「驱动文本断言了 `X→Y` 顺序且同文无 `checkTouchesPair` 输出」
       这一形态（按**位置**判：顺序断言与 checkTouchesPair 输出是否在同一驱动文本里；不按关键词——
       裁决文档必然写着「并发派发」等词）
-- [ ] AC4: AC3 的负控制——构造一条含 `按 A→B 顺序` 且无 checkTouchesPair 输出的驱动文本 ⇒ 检查器
+- [x] AC4: AC3 的负控制——构造一条含 `按 A→B 顺序` 且无 checkTouchesPair 输出的驱动文本 ⇒ 检查器
       必须报出；补上输出 ⇒ 必须不报（两次实跑贴任务体）
-- [ ] AC5: 关系说明落地：`orchestration/QUAY-OUTER-HANDOFF.md` 或本任务体明写与
+- [x] AC5: 关系说明落地：`orchestration/QUAY-OUTER-HANDOFF.md` 或本任务体明写与
       `SPEC-quay-self-hosts-its-own-cold-start.md` 的分工（SH=启动交接，本条=稳态每跳交接）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC7: **「在飞」词汇拆分 + 原始字段核实**（2026-08-04 第三次实锤后加）——外层核实并发必须读
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: **「在飞」词汇拆分 + 原始字段核实**（2026-08-04 第三次实锤后加）——外层核实并发必须读
       原始 Agent 工具调用的 `input.run_in_background` 字段（meta-cc transcript 查询），
       **不得用**遥测 START 事件或 pane UI 文字：START 只证「遥测括号在飞」，不证「subagent 在飞」。
       「在飞」一词在 tick 词汇里拆为两种含义，报告/队列状态里分别标注，混用会让并发指令看起来已满足。
       实例（本 tick）：内层唯一 Agent 调用 `run_in_background` 缺失，而 START 事件显示 A|D 双在飞——
       用错仪器导致静默满足，是本条要消灭的形态
-- [ ] AC8: **输入框残留污染——同一通道问题的另一端**（2026-08-04 第二次实锤后加）——外层不得把
+- [x] AC8: **输入框残留污染——同一通道问题的另一端**（2026-08-04 第二次实锤后加）——外层不得把
       下一步备忘写进自己的输入框：它是**待提交缓冲区，不是笔记本**。`*/20` cron 触发时入队的 prompt
       会与框内残留文本拼接成乱码（前一条截断、后一条接在断口上——管理者 2026-08-04 实锤；外层当晚
       两次自踩）。下一步备忘一律落队列状态文件或 tick-log；输入框用完即空（`C-u`）。本条与 AC1–AC7
@@ -90,10 +90,34 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上；AC4 两个方向的实跑输出逐字贴进本任务体
+- [x] AC1–AC8 全部勾上；AC4 两个方向的实跑输出逐字贴进本任务体（见下）
 - [ ] 一次真实驱动验证：外层此后一条驱动文本若断言顺序，必带 `checkTouchesPair` 输出
-      （任务体记录至少一次实际发生的遵守实例）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+      （任务体记录至少一次实际发生的遵守实例——**待外层后续真实驱动后补记**）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`——**由外层异步 verification-round 验证**）
+
+### AC4 负控制实跑（2026-08-05 逐字）
+
+驱动文本构造：`本批实现三个任务，按 A→B 顺序。`
+
+**方向 1 — 无 checkTouchesPair 输出 ⇒ 检查器必须报出（violations +1）**：
+
+```
+drive-contract-check --judge /tmp/drive-ac4/run1.md
+VIOLATION: 1 order assertion(s) WITHOUT a checkTouchesPair output in the same text
+  /tmp/drive-ac4/run1.md:1  [A→B]  本批实现三个任务，按 A→B 顺序。
+FAIL: an order-asserting drive text lacks its checkTouchesPair evidence
+exit=1
+```
+
+**方向 2 — 同文补上 checkTouchesPair 输出 ⇒ 检查器必须不报（violations 回落 0）**：
+
+```
+drive-contract-check --judge /tmp/drive-ac4/run2.md: clean (1 order assertion(s), pair output present)
+exit=0
+```
+
+两向实跑由 `plugin/test/drive-contract-check.test.mjs`（AC4 前两条）与
+`plugin/scripts/checker-mutation-cases/drive-contract-check.sh` 固化。
 
 ## Touches
 

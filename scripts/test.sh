@@ -190,6 +190,18 @@ run_static_checks() {
   # The AC8 pool-candidate regression (gap-prepare-milestone-no-size-aware-routing must be flagged)
   # is asserted in plugin/test/strategic-doc-staleness-check.test.mjs, not here.
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/strategic-doc-staleness-check.ts" --root "${repo_root}"
+  echo "== drive-contract check (gap-drive-text-carries-data-not-behavior-outer-inner-handoff, AC3) =="
+  # The drive-text contract checker: a drive text (the OUTER's dispatch instructions to the INNER)
+  # must carry DATA only — behavior (concurrency, worktree, discipline) comes from the shipped
+  # fast-mode-loop-tick.md, never restated in prose. If a drive text DOES assert an explicit task
+  # order ("按 A→D→B 顺序") it MUST include the checkTouchesPair output that justifies it. Judgment
+  # is POSITIONAL (order assertion + pair output coexist in the same text), never keyword-based
+  # (ruling docs necessarily contain words like 并发派发 — a keyword checker self-hits 100%).
+  # Scans the three normative drive-contract docs; a violation exits 1 and aborts the suite
+  # (set -euo pipefail), red-lighting an order-asserting drive text without its mechanical evidence.
+  # The AC4 negative control (order-without-output flags, +output clean) is exercised by the
+  # checker's own mutation case and plugin/test/drive-contract-check.test.mjs.
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI

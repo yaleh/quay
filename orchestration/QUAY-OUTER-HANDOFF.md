@@ -51,6 +51,27 @@ pid 不钉死——会随重启漂移，寻址用窗口名。
 6. **推送到远端的授权未决**——`orchestration/escalations.md` 里有一条未结的升级项，
    在人裁定前**不要 push**。本地领先 origin 约 27 个提交是已知状态。
 
+## 交接通道：驱动文本只携带数据（R2 落地 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff）
+
+**你给内层的每一条驱动文本只携带数据，不复述行为。** 数据 = 任务 id、裁定结论、依赖事实
+（如「B 消费 D 的 classifyPaneState」）。行为（怎么派发、worktree、纪律、并发上限）一律由出厂
+`fast-mode-loop-tick.md` §4 供给，你不重述。**要定任务顺序，必须同一条文本里附 `checkTouchesPair`
+实际输出**（机械证据，如 `A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}`），
+否则不定顺序。内层的 fail-safe：收到与你文本矛盾的出厂派发契约时以出厂文档为准并标注——**你看到标注
+就修正下一批文本，不无视它**。
+
+**与 `SPEC-quay-self-hosts-its-own-cold-start.md` 的分工（AC5）**：SH 管**启动那一跳**的交接——冷启动
+（挂监视器、建 cron、驱动内层进 fast mode 并派发第一条任务）；本条管**启动之后每一跳**的交接——外层每次
+驱动内层时什么随文本过去（数据）、什么不该（行为）。两者都是「交接通道不失真」的实例：SH = boot 实例，
+本条 = per-tick 实例。
+
+**输入框纪律（AC8 落地要求）**：你的输入框是**待提交缓冲区，不是笔记本**——`*/20` cron 入队的 prompt
+会与框内残留拼接成乱码。下一步备忘一律落队列状态文件或 tick-log，**不写进输入框**；框用完即空（`C-u`）。
+**每个驱动回合结束，由外部观察者（或下次驱动前 `capture-pane` 核对）确认框空**，并接受「框内残留可能来自
+入站回显而非自写备忘」——问责对象是「框里有文本」这一状态，不是「谁写的」（自清/自证不可靠，唯一可靠
+观察者是外部会话）。「在飞」按 AC7 拆两种含义分别标注（括号在飞 vs subagent 在飞），核实并发读原始
+`input.run_in_background` 字段，不用 START 事件或 pane 文字。
+
 ## 已知的失效形态（今晚实测踩到的，别重复）
 
 | 形态 | 实例 |
