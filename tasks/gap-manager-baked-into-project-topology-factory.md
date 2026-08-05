@@ -68,6 +68,7 @@ extra: {}
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-manager-baked-into-project-topology-factory.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/quay-topology.sh（ROLES 改 outer inner + 删 manager 逻辑）
 - plugin/skills/session-topology/SKILL.md（two-window + manager 移除）
