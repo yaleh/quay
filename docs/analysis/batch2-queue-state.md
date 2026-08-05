@@ -4222,3 +4222,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **quay-init 从不 commit（archguard 12:36 报告 + 外层独立验证）**：quay-init.sh git add/commit 0 次 ⇒ consumer 机制活在未提交工作树，committed 态自洽纯属运气。archguard 已自裁（d9dbd75 地基）；meta-cc 46 处未提交（22 在 plugin/scripts）同型。建任务 gap-quay-init-never-commits-broken-committed-state（自动 commit + chore(quay-init): 前缀 + 冲突检测）。
 - **交付契约合成**：铺设 → 版本标记 → 提交 → 可升级（与 delivery-surface 同根）。
 - inner resource-aware agent 在飞（31m，AC boxes 更新中）。
+
+### tick 2026-08-05T13:0xZ（外层，scoped 套件中止 + 自指死锁调查）
+
+- **管理者报告可能的自指死锁，外层核实 + 中止**：`--for-task gap-no-resource-awareness` scoped 套件跑了 11-25 分钟（远超秒级把关），主进程 CPU 0.0% + sleep 5 循环。核实：sleep 5 是 full-suite-runner.test.mjs 的 fake suite 结构（非死锁循环本身）；**真正的异常是嵌套套件**——2460796（--for-task 选中集 4 文件）内部 spawn 了 2529066（node --test --experimental-test-coverage 跑几十文件，覆盖 resource-aware worktree）。资源门测试制造 =8 负载 → PSI 80+ → 可能等 WAIT 解除。
+- **裁定：中止**（符合管理者「无论死锁还是太慢都值得中止单独查」）。已 kill scoped 套件树。inner subagent 仍在等（不知套件被杀，会超时）。
+- **方法论观察确认**：资源感知任务的测试在真机跑 =8 制造它要测的负载——「测试即扰动」，测的手段污染测的量。resource-gate.test.mjs 有 seam（RESOURCE_GATE_TEST_CPU_AVG10）但 --for-task 路径可能没走 seam。
