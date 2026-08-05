@@ -2734,3 +2734,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **内层输入框有未提交备忘**「继续关批：等 closure agent 完成后收尾批 4」——R2 AC8：非动作、不读作
   行动；本 tick 不驱动（closure 在飞 + 避免与框内残留拼接）。
 - 无停止条件、无阻塞；loop-driver LIVE。
+
+> **02:10Z 增补（02:05Z 条更新）**：
+> - **batch-4 closure 落地**（`9c71b5d8`，5 任务 done：ac3b/init-ships/eighty-one/eighty-two/load-sensitive）。
+>   init-ships 在 closure 前已执行+关闭（pane 里 3 agents 的 init-ships priority 即是）。
+> - **review-cadence 已晋级 ready**（02:05Z，dod 通过）；**roadmap 已晋级 ready**（机制推荐 + 外层应用）。
+> - **`gap-prepare-milestone-no-size-aware-routing` 未晋级**——它是 ADR-022 已退休经典管线
+>   （prepare-milestone.js/execute-milestone.js）的 parent，推荐理由「touches resolve」是反引号包裹
+>   缺失路径的解析假通过。实锤已折进 review-cadence 任务（AC6 输入 + AC8 回归控制）。
+> - **就绪池观测**：pool-check 计数 1（preflight），但真实可派发 ready 含 review-cadence/roadmap/
+>   drive-text/preflight——review-cadence 与 roadmap 被 `taskWorkLanded` 误判「not-yet-flipped」
+>   （AC 里引用了已存在文件 → symbol 解析≥60% → 假 landed）。池计数偏低、机制多推了候选。这是
+>   taskWorkLanded 误判族第三次变体，记入复盘证据。
+> - **内层**：closure 完成，等待下一批派发（preflight 仍 ready 待关或待派）；就绪池 ≥3 可派。

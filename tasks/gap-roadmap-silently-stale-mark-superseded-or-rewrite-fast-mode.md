@@ -3,7 +3,7 @@ id: gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode
 title: quay-harness-crystallization-roadmap.md (07-31) is built entirely on the
   ADR-022 (08-03) retired classic pipeline — silently stale is more dangerous
   than absent; mark superseded + extract the still-valid strategic question
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

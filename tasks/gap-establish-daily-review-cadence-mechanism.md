@@ -3,7 +3,7 @@ id: gap-establish-daily-review-cadence-mechanism
 title: land the human's daily review cadence decision as a mechanism — calendar-
   tied once/day, manager initiates/aggregates, three checklist items incl. a
   reusable strategic-doc-staleness checker (generalize the roadmap AC4 grep)
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -48,6 +48,13 @@ extra:
 **第一次复盘输入**：今天的发现（`FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`）——
 机制落地的同时跑第一次，把「路线图过期 + 临场推 meta-cc」记进复核记录。
 
+**立案时新增的实锤实例（ready-pool-check 推荐了过期任务）**：`gap-prepare-milestone-no-size-aware-
+routing` 是 ADR-022 已退休经典管线（prepare-milestone.js/execute-milestone.js，08-01 拆 3 子）的
+parent，`ready-pool-check`（产品机制）仍推荐它晋级——理由写「touches resolve · four-artifacts
+complete」，但它的三子路径是反引号包裹、磁盘上不存在，**「touches resolve」是解析假通过**。这是
+复盘 (a)+(b) 清单的活例子：池机制没有「引用了已退休机制的任务不得推荐」的判据。复盘检查器应同时
+覆盖**池晋级候选**（不只是战略文档），防池机制把过期任务推回执行队列。
+
 ## Acceptance Criteria
 
 - [ ] AC1: `orchestration/REVIEW-cadence.md`（或等价）存在——频率（日历挂钩/每天）、角色（管理者
@@ -60,12 +67,17 @@ extra:
       （记录）」，实跑输出贴任务体
 - [ ] AC5: `outer-phase-goal.md` 复核记录扩展覆盖方向（近窗口 gap-* 战略追溯 + 路线图过期检查两行）；
       `manager-phase-goal.md` 的扩展标注「管理者自己扩」（外层不代笔）
-- [ ] AC6: **第一次复盘执行**——用今天的发现当输入，跑一遍三项清单，结果写进复核记录（非空）
+- [ ] AC6: **第一次复盘执行**——用今天的发现当输入，跑一遍三项清单，结果写进复核记录（非空）——
+      输入含三实例：路线图过期（FINDING）、临场推 meta-cc（无对照）、ready-pool-check 推荐
+      `gap-prepare-milestone-no-size-aware-routing`（ADR-022 已退休管线任务，touches 假 resolve）
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [ ] AC8: **池晋级候选纳入过期检查**——`strategic-doc-staleness-check.ts`（或等价机制）对
+      ready-pool 晋级候选同样判「引用了已退休机制」并剔除；回归控制 = `gap-prepare-milestone-
+      no-size-aware-routing` 必须被标（其引用 prepare-milestone.js/execute-milestone.js 已删）
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC4/AC6 实跑输出逐字贴任务体
+- [ ] AC1–AC8 全部勾上；AC4/AC6 实跑输出逐字贴任务体
 - [ ] 复盘是机制不是角色记得——REVIEW-cadence 文档 + 通用检查器 + 复核记录扩展都在
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
@@ -85,7 +97,8 @@ measure   stale_refs_found = `node --experimental-strip-types plugin/scripts/str
 band      stale_refs_found = 0（无过期引用；或每条都有 superseded 标注不算）
 invariant reusable_not_one_off = 1（路线图任务的 AC4 判据泛化成通用脚本，非一次性 grep）
 invoke    `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts`
-control   构造含已删除路径引用的假文档 ⇒ 必须检出；删除后 ⇒ 必须不检出
+control   构造含已删除路径引用的假文档 ⇒ 必须检出；删除后 ⇒ 必须不检出；`gap-prepare-milestone-
+          no-size-aware-routing` 晋级候选 ⇒ 必须被标（AC8 回归控制）
 resume    检查器与节奏文档分两步提交，任一步完成即写盘
 
 ## Dispatch review
@@ -99,3 +112,5 @@ changed: 外层受人裁定（决定）立案。三处收紧：
 (3) **AC6 第一次复盘用今天发现当输入**——机制落地即跑第一次，把「路线图过期 + 临场推 meta-cc」
 记进复核记录，不空转。
 status: todo——不阻塞当前批；这是人对「战略分析缺口」的处置，排高优先。
+2026-08-05 02:05Z 晋级 ready（lifecycle_promote，dod 通过）；同批发现 ready-pool-check 推荐已退休
+管线任务（prepare-milestone），该实例已折进 AC6 输入 + AC8 回归控制。
