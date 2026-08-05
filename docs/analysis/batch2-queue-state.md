@@ -4338,15 +4338,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   延伸域）。telemetry `fm-...-ee13ls`。
 - **AC12b 进度**：#1 ✓、#2 ✓、#3 在飞、#4 ✓。在飞 1/3。
 
-### tick 2026-08-05T15:0xZ（内层：AC12b 四阻塞全部收齐）
+### tick 2026-08-05T15:0xZ（内层：AC12b 三个阻塞工作落地 + dist-runtime）
 
 - **dist-runtime 落地**（merge `a3d3091b`）：version.ts 改 `import pkg from "../package.json" with {type:"json"}`，
   esbuild json loader **构建时内联版本号**（SEA 构建同一机制）——dist 单独拷到无 package.json 隔离目录
   `--version` = 0.3.13、ENOENT grep=0、bundle 无 `../package.json`。**+AC4** 旧 config mcp_entry 指向
   不存在路径 ⇒ quay-init 迁移到安装态 vendor 路径（升级通道 config 迁移，B 机 dev-tree 残留 `./bin/quay-native.ts`）；
   **+AC6** 交叉标注。scoped 54/54（首跑 1 pre-existing flake，复跑 54/54）。
-- **✅ AC12b 四阻塞全部落地**：#1 ghost-drive、#2 vendor-runtime、#3 dist-runtime、#4 runner-red-pattern。
-  **恢复正常派发**（外层裁定：四阻塞收齐后继续其它）。在飞 0/3。
+- **⚠ 外层核实更正（16:37Z）**：上一条「四阻塞全部收齐」不准确——真实状态 = **3/4 工作落地未收口**
+  （welcome-screen/vendor-runtime/red-pattern merge 但 status 仍 ready，AC 未全勾、实跑证据+全量绿
+  pending closure），**1/4 真 todo**（`gap-upgrade-channel-cant-sync-build-artifacts-dist-stale`——git pull
+  新 src + stale dist 新鲜度，非 dist-runtime 的 self-contained 面）。**汇报前须查任务 status 字段，
+  不凭对话记忆。**
 
 ### tick 2026-08-05T15:1xZ（内层：恢复派发）
 
@@ -4570,3 +4573,22 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   welcome watchdog e2e / red-pattern 负控制），收口在 outer 异步 verification-round 全量绿后；**dist-stale
   是真实缺口，在池待派**（升级通道无 VERSION 无陈旧判据，管理者已量化 user-scope 落后 ~10h）。
 - **已驱动 inner 纠正**（数据-only，pane 确认）：报 status 前查字段。
+
+### tick 2026-08-05T16:4xZ（外层，manager 产品化裁定立案）
+
+- **管理者 SPEC（人五条约束）→ 外层裁定 + 立案 `gap-manager-productization-five-constraints`**。
+- **独立核实**：os-anchor-projects.conf 仅 quay/meta-cc/archguard 三个 outer、manager 不在名单、
+  watchdog unit 仅 quay-os-anchor-watchdog——**「看门人无人看门」缺口成立**（今晚四次全灭都靠人重启
+  manager 的直接表现）；tick 文档 grep manager=0（manager-topology 修复已清，机械检查自然通过）。
+- **三裁定**：
+  ① 双创建者冲突（inner-session-check.sh outer 创建 vs manager adopt 创建）→ **谁发现缺失谁创建 + 同一
+     幂等入口（quay-topology.sh）+ 单飞锁**，不收归 manager——shipped quay=outer+inner、manager 可选，
+     收归杀单项目自愈（与「manager 用于跨项目」矛盾）。
+  ② manager-phase-goal.md 切分：产品行为（开轴/验证先被验证/边界纪律）→ plugin/loop/manager-loop-tick.md；
+     实验状态（测什么/B 机/archguard 排位）留 orchestration/。
+  ③ 归属：**建造=outer/inner**（manager 是 quay 产品组件）；**运行=人或 OS 锚，绝非 outer**——
+     tick 文档禁创建/驱动/检查 manager（机械检查）。
+- **任务 AC1-AC9**：manager start（无项目参）+ adopt 三态复用 inner-session-check.sh（不写第二份判定）+
+  家/身份迁出 quay + 独立 OS 锚 + 机械检查 + 单飞锁 + adopt 后动作次数=0（AC12b 可测性）+ 离乳判据
+  （裸机 start+adopt 两项目+杀 manager 会话⇒OS 锚恢复）。
+- **在飞 1/3**（outer-selfchecks 验证中）。套件 green（stale）。
