@@ -2872,3 +2872,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **transition 状态**：roadmap `ready`（工作已落地）等 verification-round 收尾——closure-async 未落地
   前外层不抢先收尾（防双收尾冲突），等机制根落地后外层接管。
 - 无停止条件、无 BLOCKED；2 agent token 持续上升；loop-driver LIVE。
+
+### tick 2026-08-05T02:30Z（外层，`unblock`：review-cadence 机制落地 + 收尾分解任务立案）
+
+- **review-cadence 机制落地**（AC1–AC8 全勾 + 执行证据）：`orchestration/REVIEW-cadence.md` +
+  `plugin/scripts/strategic-doc-staleness-check.ts`（通用过期检查器，接 run_static_checks）+
+  outer-phase-goal 复核记录扩方向。**第一次复盘实跑**：42 战略文档扫描，新过期引用 0；6 条 known-stale
+  基线（31 refs）；AC8 回归控制 `--pool-candidate gap-prepare-milestone-no-size-aware-routing` ⇒
+  **FLAGGED（2 条指向已删经典管线脚本）**——我的立案实锤被新机制机械验证。AC7 测试 7 pass/0 fail +
+  mutation 11/11。
+- **DoD 全量套件未勾**（留外层安全窗口）；master 被 task-contract-check 标红 = 作者 Contract control
+  行折行（本任务已并成一行修好，非本任务引入）。
+- **新立案 `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`**（ready，
+  dod 通过）——管理者查清收尾根因（Touches「only these」不含自身文件 + SCOPED ONLY 禁全量而 DoD 恰要
+  全量）→ 裁定：任务 Touches 增自身文件（无 `(new)`）、代理完成时自勾 AC + 贴 invoke 证据、收尾只剩
+  DoD 行；checkTouchesPair 不受影响（自身文件每任务唯一，已核 filesDisjoint）。细化层，排 closure-async 后。
+- 在飞：2 agent（review-cadence + closure-sync）；roadmap 已落地；串行链 closure-sync→inner-anchor→
+  drive-text 不变。
