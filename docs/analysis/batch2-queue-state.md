@@ -4978,3 +4978,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **productize-manager agent 完成**（`32d36ade`）：出货第三层 `plugin/skills/manager/SKILL.md`（节奏/三职能/§1.5-§1.6 规则）+ cold-start AC8c 废键清（inner-state.sh 引用移除，key4 已由 key4 任务修复）+ 启动配置三件套入 `.claude/launch.settings.json` + `plugin/.claude-plugin/plugin.json` 注册 + init SKILL reference-doc 声明 + 新测试 `plugin/test/manager-layer-shipping.test.mjs`（governance 组，7 测试 pass）。AC1–AC8 勾 + 证据；DoD 不勾。**合并暂缓**（suite-state 仍 `red`/failed，外层重跑推迟到内层 agent 落定）。
 - **已知 caveat（非回归）**：scoped 需 `--allow-thin`（doc-heavy，Touches 0/5 按 basename 解析到测试）；worktree 环境性 2 测试红（无 `.quay/config.yml` 的 fresh worktree；session-topology `!/manager/` 断言对含 "manager" 子串的 worktree 路径假阳性）——主检出无此问题，agent 已直接验证断言通过。
 - 在飞 1/3（仅 spawn-count，worktree 仍在旧 master 快照 d8f6a51c）。停止条件 **suite-red**（暂缓全部 fan-in）。等外层 re-green 后串行并 2 个已落地分支（split-batch b67c49f3 + productize 32d36ade）。
+
+### tick 2026-08-05T23:2xZ（内层，waiting tick：spawn-count 存活确认 + suite-red 持续）
+
+- **spawn-count 存活确认（修正 ps 误判）**：`ps` 无独立进程 ⇒ 曾疑死；`TaskOutput` 实查 `status: running`，transcript 活跃（23:17:24 仍在分析 A 层转换）。**in-process subagent 不产生独立 OS 进程**——存活判据用 TaskOutput status，不用 ps（ps 只对 out-of-process agent 有效）。
+- **停止条件 suite-red 持续**：state 仍 `red`/failed（外层等 spawn-count 落定后重跑，a464eb91「waiting tick」确认）。⇒ 无新派发、fan-in 继续暂缓。两个已落地分支（split-batch b67c49f3 + productize 32d36ade）持等 re-green。
+- 在飞 1/3（spawn-count，~30min，测量任务，未超 90m）。Monitor 三判据绿、无 .halt、无 block。master `a464eb91`。
