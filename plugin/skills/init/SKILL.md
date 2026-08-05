@@ -131,6 +131,21 @@ source of truth — the same doc the human reads):
 <!-- reference-doc: orchestration/outer-rulings-2026-08-04-A-F.md -->
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
+<!-- reference-doc: orchestration/REVIEW-cadence.md -->
+<!-- reference-doc: orchestration/manager-loop-tick.md -->
+<!-- reference-doc: orchestration/manager-phase-goal.md -->
+<!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
+<!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
+<!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-methodology-as-a-deliverable.md -->
+<!-- reference-doc: orchestration/SPEC-no-text-substitution-at-install.md -->
+<!-- reference-doc: orchestration/SPEC-one-observer-two-surfaces.md -->
+<!-- reference-doc: orchestration/SPEC-outer-liveness-productization.md -->
+<!-- reference-doc: orchestration/SPEC-quay-self-hosts-its-own-cold-start.md -->
+<!-- reference-doc: orchestration/SPEC-state-crystallization-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-suite-speed.md -->
+<!-- reference-doc: orchestration/SPEC-typed-axes-and-standing-dynamics.md -->
 
 ## Behavior
 
