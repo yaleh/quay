@@ -76,8 +76,8 @@ SESSION-OVERDUE 已触发（各 30 分钟无心跳）。**这正是「存在≠�
 
 ## Contract
 
-measure   red_to_triage_ms = 从 suite-state 变 red 到外层开始分诊的延迟
-band      red_to_triage_ms < 300000（5 分钟内——远小于 cron 窗口 20 分钟；目标秒级）
+measure   red_to_triage_ms = `cat .quay/full-suite-state.json` stdout 的 finishedAt 到分诊启动的时间差字段（秒）
+band      red_to_triage_ms = <300000（5 分钟内——远小于 cron 窗口 20 分钟；目标秒级）
 invariant executor_not_new_scheduler = 1（触发者执行既有处置/派发逻辑，非独立决策）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 control   构造一次失败 suite ⇒ state=red 后外层被自动触发（非人提醒）；成功 suite ⇒ 无触发（负控制）
