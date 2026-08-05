@@ -4731,3 +4731,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   taskWorkLanded=false for prose-heavy AC merged-not-flipped，inner 已立案 + 负控制 scoped fix）。
 - **在飞 3/3**（ruling-required / web-board / upgrade-channel）。套件 green（stale）。资源闸 GO 但 inner
   满负荷——全量推迟。
+
+### tick 2026-08-05T17:3xZ（内层，/loop 25m cron 重排 + measure-claude-p 派发）
+
+- **/loop 固定间隔重排**：cron `6bb930db`（`*/25 * * * *`，session-only，7 天过期）。前一 16:52 一次性 cron
+  与 17:20 ScheduleWakeup 均已触发即清。
+- **派发 +1/3**：`gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics`
+  （`fm-...-0y228f`，纯实测不改产品代码，AC4 结果回写 orchestration/RESEARCH-claude-p-streaming）。生产闸
+  与 ruling-required 互不相交（batch 判定，deferred 空）；self-touch/resolve 双闸过。
+- **⚠ 澄清外层 17:2xZ 的「在飞 3/3」**：实际 live agent = 2/3（ruling-required + measure-claude-p）；
+  upgrade-channel/web-board 括号仍未闭（外层 closure 时 --task-end）。派发闸下，其余候选（branch-model/
+  reanchor/stale-check/l2/global-count）与 ruling-required 的 `plugin/test/` glob + orchestrator-loop-tick.md
+  均 overlap（batch 单一成员 = 冲突），串行等 ruling-required land。
+- 停止条件无、套件 green、Monitor 三判据绿、无 block。待派：send-keys-nbsp（self-touch 已补）、web-board 池
+  排除缺陷（已立案）。
