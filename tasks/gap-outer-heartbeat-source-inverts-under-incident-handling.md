@@ -52,15 +52,54 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 外层存活判据改为**多源 max mtime**——`max(HEAD commit 时间, queue-state mtime, tick-log mtime,
+- [x] AC1: 外层存活判据改为**多源 max mtime**——`max(HEAD commit 时间, queue-state mtime, tick-log mtime,
       分诊记录 mtime, verification-round.jsonl mtime)`；任一在阈值内 ⇒ alive
-- [ ] AC2: **反向失效消除（fixture）**——模拟红窗处置（写 queue-state + 提交、不写 tick-log）⇒ 心跳保持
+      → `plugin/scripts/session-liveness.sh` 新增 `outer_heartbeat_mtime()`（多源集合见函数注释）与
+      `heartbeat_mtime_for()`（transcript→显式 SESSION_HEARTBEATS→默认多源 三分派）。Contract
+      measure `grep -c 'mtime'` 现为 39（band ≥3）。
+- [x] AC2: **反向失效消除（fixture）**——模拟红窗处置（写 queue-state + 提交、不写 tick-log）⇒ 心跳保持
       新鲜、不报 SESSION-OVERDUE
-- [ ] AC3: **真阳性保留（fixture）**——30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（「红着没人碰」必须被抓）
-- [ ] AC4: 信号可区分——假阳性（有产出但 tick-log 旧）与真阳性（无产出）从信号本身可判，不需手工查
+      → 新增 fixture 测试「AC2 — 红窗处置…」，实跑 PASS（见下方实跑输出）。
+- [x] AC3: **真阳性保留（fixture）**——30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（「红着没人碰」必须被抓）
+      → 新增 fixture 测试「AC3 — 30 分钟无任何产出…」，实跑 PASS（见下方实跑输出）。
+- [x] AC4: 信号可区分——假阳性（有产出但 tick-log 旧）与真阳性（无产出）从信号本身可判，不需手工查
       提交历史（实跑输出贴任务体）
-- [ ] AC5: 与 D 同源标注——单一代理信号不足；本条是多源融合实例（任务体交叉引用 D / gap-pane-state）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      → 新增 fixture 测试「AC4 — 信号可区分…」（同一目标先有产出不报→全部源陈旧报），实跑 PASS（见下）。
+- [x] AC5: 与 D 同源标注——单一代理信号不足；本条是多源融合实例（任务体交叉引用 D / gap-pane-state）
+      → 本任务 Proposal 第 36/47 行已与 D 同源；脚本头「心跳源多源化」节注明「与 D 分类器同源：
+      单一代理信号不足以判定状态」；`orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 顶部加
+      「同源标注」交叉引用本任务。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      → `plugin/test/session-liveness.test.mjs` 已是 `node:test` + `// @test-group governance`；
+      新增的 4 个测试同为 `node:test`。
+
+## 实跑输出（scoped，worktree `gap-outer-heartbeat-source-inverts-under-incident-handling`）
+
+```
+$ bash scripts/test.sh --for-task gap-outer-heartbeat-source-inverts-under-incident-handling --allow-thin
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  test-framework-policy-check: PASS (207 glob, 34 exemptions, at/below ratchet)
+  test-isolation-check: PASS (44 baselined, none new)
+  task-contract-check --strict-subset <本任务>: no violations
+  adr016-screen-use-check: PASS (1 active within band 0..1, pre-existing pane-hash line)
+  strategic-doc-staleness-check: PASS (0 new stale refs)
+✔ SESSION-OVERDUE fires when the tick-log mtime is ≥OVERDUE_MIN old (not halted)   # 既有单源测试仍绿
+✔ F — a transcript heartbeat keeps advancing suppresses OVERDUE; freezing fires OVERDUE   # 既有 transcript 测试仍绿
+✔ AC2 — 红窗处置（写 queue-state + 提交、tick-log 不动）⇒ 心跳保持新鲜、不报 SESSION-OVERDUE（反向失效消除）  (5806ms)
+✔ AC3 — 30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（真阳性保留；多源下所有源都陈旧）  (1050ms)
+✔ AC4 — 信号可区分：同一目标先有产出（不报 OVERDUE）→ 全部源变陈旧（报 OVERDUE）…  (6002ms)
+✔ Contract — --selfcheck passes (exit 0): heartbeat_source_count ≥ 3, incident-handling heartbeat FRESH, no-output heartbeat STALE, ALL PASS  (212ms)
+ℹ tests 47  pass 46  fail 0  cancelled 0  skipped 1（real probe quay-0:probe 不在场，属既有跳过）
+exit 0
+```
+
+```
+$ bash plugin/scripts/session-liveness.sh --selfcheck
+heartbeat_source_count=39
+selfcheck: incident-handling heartbeat FRESH (max=<now>, age=0s)   # AC2 反向失效消除
+selfcheck: no-output heartbeat STALE (max=946684800, age=...s)     # AC3 真阳性保留
+selfcheck: ALL PASS
+```
 
 ## Definition of Done
 

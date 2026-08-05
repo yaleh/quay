@@ -216,6 +216,24 @@ function makeBackdatedGitRepo(dir) {
   assert.ok(ct.status === 0 && Number(ct.stdout.trim()) < 1000000000, `commit must be backdated, got ${ct.stdout}`);
 }
 
+// makeFreshGitRepo — a temp git repo whose HEAD committer date is NOW (the incident-handling scenario:
+// the outer produced commits during the red window). The multi-source heartbeat must count a fresh
+// HEAD commit as liveness even when the tick-log is stale.
+function makeFreshGitRepo(dir) {
+  const git = (args, cwd) => spawnSync("git", args, { encoding: "utf8", cwd });
+  const init = git(["-c", "user.name=t", "-c", "user.email=t@t", "init", "-q", "-b", "master", dir]);
+  assert.equal(init.status, 0, `git init failed: ${init.stderr}`);
+  fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
+  const add = git(["-c", "user.name=t", "-c", "user.email=t@t", "add", "."], dir);
+  assert.equal(add.status, 0, `git add failed: ${add.stderr}`);
+  const commit = git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "fresh"], dir);
+  assert.equal(commit.status, 0, `git commit failed: ${commit.stderr}`);
+  const ct = git(["log", "-1", "--format=%ct"], dir);
+  const now = Math.floor(Date.now() / 1000);
+  assert.ok(ct.status === 0 && Number(ct.stdout.trim()) > now - 600,
+    `commit must be fresh (within 10min), got ${ct.stdout}`);
+}
+
 // ── availability guards ───────────────────────────────────────────────────────────────────────────
 
 const tmuxAvailable = (() => {
@@ -1629,4 +1647,125 @@ test("AC5 — a pending tool_use in the transcript (round in progress) NEVER rep
   } finally {
     p.cleanup();
   }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 多源心跳（gap-outer-heartbeat-source-inverts-under-incident-handling，2026-08-05）
+// ═════════════════════════════════════════════════════════════════════════════
+// 缺陷：SESSION-OVERDUE 的默认外层心跳源是 tick-log 单源 mtime。红窗处置期间外层写 queue-state +
+// 提交 + 分诊记录，但不写 tick-log ⇒ 越认真处理事故，心跳看起来越旧（实测 71min 陈旧而 5 个提交
+// 已产出；同一信号一真阳一假阳、不可分）。
+// 修法：默认外层心跳 = 多源 max mtime = max(HEAD commit 时间, queue-state mtime, tick-log mtime,
+// docs/analysis 最新记录 mtime, verification-round.jsonl mtime)。任一在阈值内 ⇒ alive。
+// 显式覆盖（SESSION_HEARTBEATS / SESSION_TRANSCRIPTS）保持单源语义——调用方已选定特定源。
+//   AC2  反向失效消除（fixture）：红窗处置（写 queue-state + 提交、tick-log 不动）⇒ 不报 OVERDUE。
+//   AC3  真阳性保留（fixture）：30 分钟零产出（全部源陈旧）⇒ OVERDUE 仍报。
+//   AC4  信号可区分：同一目标先有产出（不报）→ 全部源陈旧（报）——从信号本身可判，不需查提交历史。
+// 注意：这些 fixture 用默认心跳（不传 SESSION_HEARTBEATS / SESSION_TRANSCRIPTS），并设
+// SESSION_ROOT=<fixture root> 使默认心跳源落在 fixture 下而不是真实仓库的 tick-log。
+
+test("AC2 — 红窗处置（写 queue-state + 提交、tick-log 不动）⇒ 心跳保持新鲜、不报 SESSION-OVERDUE（反向失效消除）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-multi-ac2");
+  const root = path.join(p.tmp, "incident");
+  try {
+    fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+    fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
+    makeFreshGitRepo(root); // 红窗处置产出的提交（新鲜）
+    fs.writeFileSync(path.join(root, "docs", "analysis", "batch2-queue-state.md"), "queue\n"); // 新鲜 queue-state
+    fs.writeFileSync(path.join(root, "orchestration", "tick-log.md"), "# tick\n"); // tick-log 存在但陈旧
+    spawnSync("touch", ["-d", "3 hours ago", path.join(root, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    // 无显式心跳覆盖 → 默认外层心跳 = 多源 max mtime；SESSION_ROOT=root 使默认心跳源落在 root 下。
+    const mon = spawnMonitor({ ...p.env, SESSION_ROOT: root }, `incident ${root} ${p.session}`, { overdueMin: 1 });
+    try {
+      await sleep(4500); // ≥4 轮——单源 tick-log（3h 旧）会在第 1-2 轮就报 OVERDUE；多源必须不报
+      assert.ok(!/SESSION-OVERDUE incident/.test(mon.output()),
+        `AC2: 红窗处置（写 queue-state + 提交、不写 tick-log）必须不报 OVERDUE（反向失效消除）:\n${mon.output()}`);
+      // 正控制：监视器没死——GONE 仍报
+      tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-GONE incident/, 6000),
+        `AC2 正控制: 监视器必须仍活着（GONE 仍报）:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC3 — 30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（真阳性保留；多源下所有源都陈旧）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-multi-ac3");
+  const root = path.join(p.tmp, "stale");
+  try {
+    fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+    fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
+    makeBackdatedGitRepo(root); // HEAD commit 2000（陈旧）
+    fs.writeFileSync(path.join(root, "docs", "analysis", "batch2-queue-state.md"), "queue\n");
+    fs.writeFileSync(path.join(root, "orchestration", "tick-log.md"), "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", path.join(root, "docs", "analysis", "batch2-queue-state.md")], { encoding: "utf8" });
+    spawnSync("touch", ["-d", "3 hours ago", path.join(root, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor({ ...p.env, SESSION_ROOT: root }, `stale ${root} ${p.session}`, { overdueMin: 1 });
+    try {
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE stale/, 8000),
+        `AC3: 30 分钟无任何产出 ⇒ OVERDUE 必须仍报（真阳性保留，红着没人碰必须被抓）:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC4 — 信号可区分：同一目标先有产出（不报 OVERDUE）→ 全部源变陈旧（报 OVERDUE）——假阳/真阳从信号本身可判，不需查提交历史", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-multi-ac4");
+  const root = path.join(p.tmp, "distinguish");
+  try {
+    fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+    fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
+    makeFreshGitRepo(root);
+    fs.writeFileSync(path.join(root, "docs", "analysis", "batch2-queue-state.md"), "queue\n");
+    fs.writeFileSync(path.join(root, "orchestration", "tick-log.md"), "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", path.join(root, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor({ ...p.env, SESSION_ROOT: root }, `dist ${root} ${p.session}`, { overdueMin: 1 });
+    try {
+      // phase 1: 有产出（queue-state + 提交新鲜、tick-log 旧）→ 假阳性必须不报 OVERDUE
+      await sleep(4500);
+      assert.ok(!/SESSION-OVERDUE dist/.test(mon.output()),
+        `AC4 phase 1: 有产出但 tick-log 旧 ⇒ 假阳性必须不报（从信号本身可判）:\n${mon.output()}`);
+      // phase 2: 30 分钟零产出——queue-state 与 HEAD 提交都变陈旧 → 真阳性必须报
+      spawnSync("touch", ["-d", "3 hours ago", path.join(root, "docs", "analysis", "batch2-queue-state.md")], { encoding: "utf8" });
+      const envB = { ...process.env, GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z" };
+      fs.writeFileSync(path.join(root, "a.txt"), "y\n");
+      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "add", "."], { encoding: "utf8", cwd: root });
+      const bd = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "backdate"], { encoding: "utf8", cwd: root, env: envB });
+      assert.equal(bd.status, 0, `backdate commit failed: ${bd.stderr}`);
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE dist/, 8000),
+        `AC4 phase 2: 30 分钟零产出 ⇒ 真阳性必须报（红着没人碰必须被抓，从信号本身可判）:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// Contract invoke：`bash plugin/scripts/session-liveness.sh --selfcheck`。断言多源逻辑本身——
+// 红窗处置 ⇒ 心跳新鲜（AC2）、零产出 ⇒ 心跳陈旧（AC3）、heartbeat_source_count ≥ 3（band）。
+test("Contract — --selfcheck passes (exit 0): heartbeat_source_count ≥ 3, incident-handling heartbeat FRESH, no-output heartbeat STALE, ALL PASS", () => {
+  const r = spawnSync("bash", [SCRIPT, "--selfcheck"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  const count = r.stdout.match(/heartbeat_source_count=(\d+)/);
+  assert.ok(count && Number(count[1]) >= 3,
+    `heartbeat_source_count must be >= 3 (多源：提交/队列状态/tick-log 至少 3 源), got ${count && count[1]}:\n${r.stdout}`);
+  assert.match(r.stdout, /incident-handling heartbeat FRESH/,
+    `selfcheck must prove incident-handling keeps the heartbeat fresh (AC2 反向失效消除):\n${r.stdout}`);
+  assert.match(r.stdout, /no-output heartbeat STALE/,
+    `selfcheck must prove zero-output staleness (AC3 真阳性保留):\n${r.stdout}`);
+  assert.match(r.stdout, /selfcheck: ALL PASS/, `selfcheck must report ALL PASS:\n${r.stdout}`);
 });
