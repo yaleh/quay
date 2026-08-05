@@ -3683,3 +3683,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   疑似资源]）——session-idle ③ 落地的接管回归定位耗时较长，inner 在调试。
 - **suite-state**：上次 ROUND 3 尝试 red（06:50 完）；gate 待 M3 修复后重启。
 - 红窗停派（正确，suite red）；inner 在工作非停摆。无 BLOCKED；loop-driver LIVE。
+
+> **07:20Z 增补（生成器跑测两条缺口 + AC10 1→3）**：管理者把生成器系统性跑在 16 静态检查器 + 14
+> gate-scripts 上，两条实测缺口（**都非被硌、照问句问出**）：
+> ①**死 glob**——strategic-doc-staleness-check 的 orchestration 臂 `*ROADMAP*` 0 匹配（orchestration 43
+>   个 .md 全是最战略文档，命名约定 SPEC-/SYNTHESIS-/FINDING- 从一开始就对不上）；已立案
+>   `gap-stale-check-orchestration-arm-is-a-dead-glob`（全量/前缀派生修复）；
+> ②**闸门层**——外层确认 gate-scripts 多数死（registry 只 dod/acceptance 活；it0-*/audit-* 是经典管线
+>   era 残留，quay-init 铺、无调用方）；变异不覆盖 = 次要，**真缺陷 = 交付传播死重**；已立案
+>   `gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked`（死闸门移除/接线 + 变异层扩展 + 归并
+>   checkers-have-never-been-shown-to-fail）。
+> **AC10 记账 1 → 3**（dead-loop + 两条生成器缺口全 pre-friction）。
