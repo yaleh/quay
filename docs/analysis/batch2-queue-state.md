@@ -5001,3 +5001,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   守卫，静态 2.1 比可放松）；2-lane 是安全中间值（闸 GO 守卫，无 ABORT #5 超订风险）。
 - **观察**：backlog-client 环境限停 + 1-lane 慢速 = 套件可靠性两问题，待全量绿后立案。
 - **closure 24 条**待 2-lane 套件绿。等 bqe6vb3l2。
+
+### tick 2026-08-05T20:1xZ（内层，outer-heartbeat fan-in — 真实现）
+
+- **outer-heartbeat fan-in 完成（真实现）**：心跳源 multi-source max mtime——`max(HEAD commit 时间, queue-state
+  mtime, tick-log mtime, docs/analysis 最新 mtime, verification-round mtime)`。SESSION-OVERDUE 不再在 incident
+  handling 下反转（tick-log 未写但 commits 在流）。反向反转消除 + 真阳保持 + 信号可区分三夹具（AC2/AC3/AC4），
+  D 同源标注（AC5）。scoped 46/46（1 skip=真实探针缺席）。worktree/branch 已清。在飞 0/3。
+- 套件 running（外层全量）、无 stop、无 block、Monitor 绿。
