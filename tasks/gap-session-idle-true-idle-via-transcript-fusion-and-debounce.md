@@ -125,6 +125,24 @@ tool_use）、`6a950975-….jsonl`（最后消息 = 纯文本）。真实会话�
 cancelled 0 / skipped 1**（跳过 = 真实探针会话 quay-0:probe 本机不在，属 KNOWN-LOAD-SENSITIVE 家族
 的既有跳过）。AC3/AC4/AC5 三个 e2e 各连跑 3 次全绿。
 
+### 再验证（inner 执行派发，2026-08-05；实现已落 master b07f67bf）
+
+本次执行派发（worktree `task/gap-session-idle-true-idle-via-transcript-fusion-and-debounce`，off
+master 2c1260a5）确认实现与证据已由先前内层落盘，执行路径为验证 + 复跑：
+
+- scoped 门禁 `scripts/test.sh --for-task gap-session-idle-true-idle-via-transcript-fusion-and-
+  debounce --allow-thin`：**EXIT=0，pass 42 / fail 0 / cancelled 0 / skipped 1**（skipped = 既有
+  探针跳过）。AC1 seam / AC3 / AC4 / AC5 四个本任务新增测试全绿。
+- KNOWN-LOAD-SENSITIVE 处理：首次并发 scoped 跑出现过一次 transient 红——既有测试
+  `AC3/AC7 — the laid-down script, run --once`（session-liveness.test.mjs:658）在并发下因
+  quay-init 的 referenced-not-landed 检查 race 而红；单测串行隔离（`--test-concurrency=1`）
+  与 scoped 全量重跑均 **42/0/0/1 绿**。与本次变更无关（该测试未涉及 transcript 融合/去抖），
+  判定为并发负载放大，非回归。
+- 真实对象复验（DIR-026，独立于任务体既有证据）：`--last-message-type` 对真实会话数据——`9957a092`
+  （挂起 tool_use，任务体引用的同一 transcript）→ `pending-tool-use`（忙，绝不报 idle）；
+  多个纯文本结尾 transcript → `pure-text`（候选闲）；`e8e80f27`/`6a950975`（结尾为 user 记录）→
+  `user-input`（忙）。忙判据零漏报路径在真实 transcript 上成立。
+
 ## Touches
 
 - tasks/gap-session-idle-true-idle-via-transcript-fusion-and-debounce.md（自身文件：勾 AC + 贴 invoke 证据授权）
