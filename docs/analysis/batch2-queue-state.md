@@ -3614,3 +3614,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > **06:36Z 观测（OVER90 假阳性复现）**：--detect-stop 报 ready-pool-floor task-over-90m——同 full-suite 先例：
 > 工作已落地（在 ROUND 3 收尾集）但 bracket 待外层 closure（round mid-gate）未关 ⇒ 假阳性。**已知类**，
 > 非卡住；ROUND 3 绿后关 9 条即消。
+
+### tick 2026-08-05T06:40Z（外层，`unblock`：分支模型立案 + 三问裁定）
+
+- **SPEC-branching-model-integration-branch 读核 + 立案**：核心 = master 同时是「分叉基线」+「汇入点」，
+  红窗停派正是双角色压一 ref 的后果，**integration 分支拆开即无冲突**（结构性 > 共享闸门启发式）。实测：
+  master 97 落地/中位 3 分钟/4 次 >20 分钟空档 = 红窗停派；新模型 integration 照常接收 → develop 吞吐
+  **高于** master（「更低频率是代价」判断错了）。基线陈旧 == 触摸不相交（同一约束）；merge 成本有上界
+  （integration→develop 恒 fast-forward；task→integration 冲突只来自触摸声明不准）。
+- **三问裁定**：①**两线**（develop+integration；master 发布线空，等真有授权再加）；②**先修断言**
+  （全局计数断言脆 [B3-2]，先修成相对基线判据再让模型上线）；③**先清分支**（60 历史遗留先清，保留有
+  未合并工作的）。
+- **已立案 2 任务**（ready）：`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`
+  （两线模型 + 分叉基线即依赖 + 批量合 integration→develop + 前置②③ + 命名 integration）+
+  `gap-global-count-assertions-fragile-relative-baseline`（前置②，B3-2 族相对化）。
