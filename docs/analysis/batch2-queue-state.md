@@ -64,7 +64,8 @@
 - **gap-eighty-two 待 gap-init-ships 落地后派**（同碰 `plugin/scripts/quay-init.sh`，串行）——已派
 - ✅ `gap-load-sensitive-session-family-confounds-step-three`：已 merge（`11b01d37`，遥测同步闭）——KNOWN-LOAD-SENSITIVE 注解（高负载负控制复现 28-29s timing 签名证明敏感为真）；scoped 46/45/0/0/1
 - ✅ `gap-eighty-two-shipped-checks-and-none-says-what-it-answers`：已 merge（`9d3735a1`，遥测同步闭）——capability-catalog.sh（派生 87-check 清单，每个 check 声明它回答什么），scoped 8/8
-- 在飞：`gap-ac3b-prove-installed-quay-runs-without-dev-tree`（**管理者优先——meta-cc 安装前唯一硬阻塞**；执行序：AC1 刷已装插件先做，改名负控制 AC3/AC4 等安全窗——在飞清空后，避免打断共享检出）
+- ✅ `gap-ac3b-prove-installed-quay-runs-without-dev-tree`：已 merge（`2b0ba79a`，遥测同步闭）——**meta-cc 安装前唯一硬阻塞已解除**；AC1 刷已装插件（quay.js 2026-08-05 01:21 新于 08-04）+ 改名负控制 AC3/AC4（安全窗实跑，AC3 真 task_list 往返 / AC4 PATH 形态失败）+ AC6 零残留；**顺带修了 quay-init 只写 mcp_entry 不铺运行时缺口**（vendor 本地 provider bundle）；scoped 68/68
+- **批 4 全量（5 条 merged）**：token 空闲窗跑（后台，running）。跑绿后关 5 条任务
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
