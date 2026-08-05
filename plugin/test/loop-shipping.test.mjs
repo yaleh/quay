@@ -116,7 +116,14 @@ test('AC1c — the tick-doc templates\' own /loop prompts and reciprocal cross-r
   // must point at the canonical plugin/loop/ location so the quay repo's own loop works.
   for (const name of ['orchestrator-loop-tick.md', 'fast-mode-loop-tick.md']) {
     const src = fs.readFileSync(path.join(pluginDir, 'loop', name), 'utf8');
-    const liveLines = src.split('\n').filter((l) => !l.trim().startsWith('>'));
+    // DRIVE COMMANDS are a target-layout EXCEPTION to the strict old-path rule: they execute
+    // against the LAID-DOWN copy in a running workspace (quay-init lays `loop/fast-mode-loop-tick.md`
+    // → `docs/analysis/fast-mode-loop-tick.md`; a target NEVER has `plugin/loop/`), and
+    // cold-start/SKILL.md:169 drives the SAME `$REPO_ROOT/docs/analysis/fast-mode-loop-tick.md`
+    // form. The strict assertion below governs the DOCUMENTATION cross-refs / /loop prompts
+    // (canonical plugin/loop/ source), not the execution-time interpolation.
+    const driveCmdRe = /\$REPO_ROOT\/docs\/analysis\/fast-mode-loop-tick\.md/;
+    const liveLines = src.split('\n').filter((l) => !l.trim().startsWith('>') && !driveCmdRe.test(l));
     for (const snippet of ['orchestration/orchestrator-loop-tick.md', 'docs/analysis/fast-mode-loop-tick.md']) {
       assert.ok(
         !liveLines.some((l) => l.includes(snippet)),
