@@ -3,7 +3,7 @@ id: gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics
 title: claude -p headless mode has two unknowns official docs cannot answer —
   third-party-endpoint round-trip (gating) and stdin-open exit semantics — that
   decide whether the two-layer loop can migrate off tmux
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -180,9 +180,9 @@ FINAL: EXITED
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上（AC1 失败则只勾 AC1/AC3/AC4，AC2 记「未做：AC1 未过」）
-- [ ] AC1 的往返 + 负控制输出、AC2 的进程存活/退出证据逐字贴进本任务体
-- [ ] 不产生任何账单——全程 `claude-deepseek`，无裸 `claude -p`
+- [x] AC1–AC4 全部勾上（AC1 失败则只勾 AC1/AC3/AC4，AC2 记「未做：AC1 未过」）
+- [x] AC1 的往返 + 负控制输出、AC2 的进程存活/退出证据逐字贴进本任务体
+- [x] 不产生任何账单——全程 `claude-deepseek`，无裸 `claude -p`
 
 ## Touches
 
