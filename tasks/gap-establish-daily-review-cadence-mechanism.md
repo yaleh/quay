@@ -86,10 +86,10 @@ complete」，但它的三子路径是反引号包裹、磁盘上不存在，**�
 - orchestration/REVIEW-cadence.md (new)
 - plugin/scripts/strategic-doc-staleness-check.ts (new)
 - plugin/test/strategic-doc-staleness-check.test.mjs (new)
-- scripts/test.sh（run_static_checks 接线）
-- orchestration/outer-phase-goal.md（复核记录扩方向）
-- orchestration/manager-phase-goal.md（标注管理者自扩）
-- orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md（第一次复盘输入）
+- scripts/test.sh
+- orchestration/outer-phase-goal.md
+- orchestration/manager-phase-goal.md
+- orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md
 
 ## Contract
 
