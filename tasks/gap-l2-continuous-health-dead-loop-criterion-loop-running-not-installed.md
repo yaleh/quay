@@ -58,16 +58,50 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 
 ## Acceptance Criteria
 
-- [ ] AC1: **dead-loop 判据**——目标项目 outer/inner transcript 最近 N 分钟无新 user 消息 + git 最近
+- [x] AC1: **dead-loop 判据**——目标项目 outer/inner transcript 最近 N 分钟无新 user 消息 + git 最近
       N 分钟无提交 ⇒ dead-loop（与 backlog 空无关）
-- [ ] AC2: **队列空 vs 没人驱动可区分**——两种状态从此分开（queue-empty = 健康空闲；dead-loop = 没在转）
-- [ ] AC3: **归入 L2 持续健康**——SPEC-complete-delivery-surface 第 5 节层次二（循环在转）；判据补
+      **证据**：`plugin/scripts/dead-loop-check.sh`（`bash plugin/scripts/dead-loop-check.sh`）——最近
+      N 分钟（默认 30，`--window` 可调）transcript user 消息或 git 提交任一存在 ⇒ `loop_alive=alive`；
+      都无 ⇒ `loop_alive=dead`。fixture 断言（`plugin/test/dead-loop-check.test.mjs`）：旧 transcript
+      + 旧提交 ⇒ dead；新鲜提交单独 ⇒ alive；新鲜 user 消息单独 ⇒ alive；`--window` 参数化（20 分钟前
+      的消息 @30 alive / @10 dead）。
+- [x] AC2: **队列空 vs 没人驱动可区分**——两种状态从此分开（queue-empty = 健康空闲；dead-loop = 没在转）
+      **证据**：判据【不碰 backlog】——invariant `liveness_independent_of_backlog=1` 落盘在
+      `dead-loop-check.sh` 输出字段。fixture 双向：**无 tasks 目录（队列空）+ 新鲜提交 ⇒ alive**（健康
+      空闲，负向：队列空不等于 dead）；**有 tasks 目录（队列满）+ 无驱动/提交 ⇒ dead**（没人驱动，不是
+      队列空）。两个从前同形的状态从此分开。
+- [x] AC3: **归入 L2 持续健康**——SPEC-complete-delivery-surface 第 5 节层次二（循环在转）；判据补
       「铺了 + 在转」两层
-- [ ] AC4: **真实使用**——meta-cc/archguard 现在会被判 dead-loop（29 小时零进展），处置后（2a9aaef3 /
+      **证据**：`orchestration/SPEC-complete-delivery-surface-2026-08-05.md` 第 5 节层次二已加活实例
+      交叉标注块（2026-08-05，本任务）——dead-loop 判据是「层次二 = 动态、运转期间周期性跑」的第一个
+      落盘实例；层次一查交付完整性、层次二查持续健康。
+- [x] AC4: **真实使用**——meta-cc/archguard 现在会被判 dead-loop（29 小时零进展），处置后（2a9aaef3 /
       4aaf2f29 驱动）转健康；判据未来自动抓同类
-- [ ] AC5: **AC10 诚实记账**——本条 pre-friction（管理者去看才发现，非被硌），AC10 +1（0→1）；机器
+      **证据**（2026-08-05 实跑 `bash plugin/scripts/dead-loop-check.sh --root <项目> --json`）：
+      **meta-cc ⇒ `loop_alive=dead`**（`has_transcript_user_msg=0` + `has_git_commit=0`——29 小时零进展
+      正是本条立案的实例，机械自动抓出，不再靠人去看）；**archguard ⇒ `loop_alive=alive`**
+      （`has_transcript_user_msg=1` + `has_git_commit=1`——处置后健康）。fixture 复现 29h 状态：
+      旧 transcript + 旧提交 ⇒ dead。
+- [x] AC5: **AC10 诚实记账**——本条 pre-friction（管理者去看才发现，非被硌），AC10 +1（0→1）；机器
       pre-friction 计数仍 0（生成器 AC2）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：本任务 Proposal「AC10 记账：+1，本阶段第一个」已落账（管理者 pre-friction 发现，非被硌；
+      与机器 7 根轴全 post-friction 形态不同）；机器 pre-friction 计数仍 0（`gap-axis-generator-…`
+      AC2 的 `prefriction-count.sh` 滚动窗口实跑 `prefriction_dimensions=0`，2026-08-05 复验）。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/dead-loop-check.test.mjs` 首行 `// @test-group governance`，8 条全部
+      `node:test`（`node --test plugin/test/dead-loop-check.test.mjs` → pass 8 / fail 0）。
+
+## Verification（scoped，2026-08-05 内层实跑）
+
+`bash scripts/test.sh --for-task gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed --allow-thin`
+→ **exit 0**，`plugin/test/dead-loop-check.test.mjs` **pass 8 / fail 0 / cancelled 0**。实跑 invoke：
+`bash plugin/scripts/dead-loop-check.sh --root /home/yale/work/meta-cc --json` ⇒ **`loop_alive=dead`**
+（29 小时零进展的立案实例被机械自动抓出）；`--root /home/yale/work/archguard --json` ⇒
+**`loop_alive=alive`**（处置后健康，无误报）；本仓库 ⇒ `loop_alive=alive`（外层活跃提交）。
+
+## Test-Files
+
+- plugin/test/dead-loop-check.test.mjs
 
 ## Definition of Done
 
