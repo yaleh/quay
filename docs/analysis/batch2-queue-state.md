@@ -3642,3 +3642,7 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 让它变慢** = 「判据成本压垮判据」类（同 scoped 静态检查族），池水位判据正在失效（慢到被 skip）。
 > **修法裁定**：③主（拆开：pool 计数 O(n) 每 tick、disjoint O(n²) 仅派发前）②补（touches 按 mtime 缓存）
 > ①次（增量仅晋级适用）。已进 trend-criteria 第五实例。本轮 pool=19/floor=12/disjoint=9 仍健康。
+> **06:50Z 增补（ROUND 3 套件完：fail 2 = M3 takeover + noise-gate；AC1 未复发）**：套件完（2368/fail 2/
+> cancelled 0）。**AC1 laid-down 未复发**（inner 判假阳性正确）。2 失败：①M3 (AC20d) monitor takeover
+> （kill -9 后接管，1.9s）；②noise-gate OLD（已知抖动）。session-liveness isolated 跑中（bwwvpoh82）
+> 判 M3 真/负载。
