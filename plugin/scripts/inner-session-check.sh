@@ -99,6 +99,22 @@ has_claude_child() {
   return 1
 }
 
+# inner_claude_pid — the inner window's claude process PID (the process↔session 1:1 anchor
+# for discovery: its environ's CLAUDE_CODE_SESSION_ID IS the transcript filename). Echoes the
+# PID or returns 1. Same traversal as has_claude_child but returns the actual PID.
+inner_claude_pid() {
+  local sess="$1" role="$2" ppid cpid cmd
+  ppid="$(tmux list-panes -t "$sess:$role" -F '#{pane_pid}' 2>/dev/null | head -1)"
+  [ -n "$ppid" ] || return 1
+  cmd="$(tr '\0' ' ' < "/proc/$ppid/cmdline" 2>/dev/null || true)"
+  case "$cmd" in *"$CLAUDE_PATTERN"*) echo "$ppid"; return 0 ;; esac
+  for cpid in $(pgrep -P "$ppid" 2>/dev/null); do
+    cmd="$(tr '\0' ' ' < "/proc/$cpid/cmdline" 2>/dev/null || true)"
+    case "$cmd" in *"$CLAUDE_PATTERN"*) echo "$cpid"; return 0 ;; *) continue ;; esac
+  done
+  return 1
+}
+
 # transcript 解析。返回值经全局 TR_PATH/TR_SOURCE 传递。
 # 优先级：--transcript > SESSION_TRANSCRIPTS env > session-liveness.env > 发现（启发式）> none。
 TR_PATH=""
@@ -133,11 +149,34 @@ resolve_transcript() {
       fi
     done <<< "$(sed -n 's/^SESSION_TRANSCRIPTS=//p' "$REPO_ROOT/orchestration/session-liveness.env" 2>/dev/null)"
   fi
-  # 发现（启发式）：$HOME/.claude/projects/<root-slug>/ 里最晚修改、且不是外层自己的 *.jsonl。
-  # 排除外层自己的会话（CLAUDE_CODE_SESSION_ID）——外层自己的 transcript 必含 user 消息，不排除
-  # 会把「空壳 inner」误判成「健康」（把外层的消息数到 inner 头上）。
-  local slug my_id candidate
+  # 发现（结构性）：inner 窗口 claude 进程 PID → environ 的 CLAUDE_CODE_SESSION_ID → transcript
+  # 文件名（进程↔会话 1:1，唯一不会认错的映射）。旧启发式「最晚 jsonl 排除 CLAUDE_CODE_SESSION_ID」
+  # 在 3 会话拓扑下前提错（外层/管理者都含真实 user 消息），退化成「最新 jsonl 不是自己」——
+  # 外层独立验证实测读 96380845/b8dc91a6 而非 inner c7b58e09，空壳反例会判 healthy（11:40 watchdog
+  # 形态重演）。gap-inner-session-check-discovery-reads-wrong-transcript。
+  local slug claude_pid sid cpid
   slug="$(printf '%s' "$REPO_ROOT" | tr '/' '-')"
+  claude_pid="$(inner_claude_pid "$SESSION" "inner")" || claude_pid=""
+  if [ -n "$claude_pid" ]; then
+    # 顶层 claude 的 environ；顶层通常不带 session id（启动时未赋），其 worker/MCP 直接子进程带
+    # （实测 2005103/2005117 等携带 CLAUDE_CODE_SESSION_ID=c7b58e09）。
+    sid="$(tr '\0' '\n' < "/proc/$claude_pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)"
+    if [ -z "$sid" ]; then
+      for cpid in $(pgrep -P "$claude_pid" 2>/dev/null); do
+        sid="$(tr '\0' '\n' < "/proc/$cpid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)"
+        [ -n "$sid" ] && break
+      done
+    fi
+    if [ -n "$sid" ]; then
+      local p="$HOME/.claude/projects/$slug/$sid.jsonl"
+      if [ -f "$p" ]; then
+        TR_PATH="$p"; TR_SOURCE="discovery-pid"
+        return 0
+      fi
+    fi
+  fi
+  # 无 PID / 无 session id → 退回旧启发式（best-effort；TR_SOURCE=discovery 区分于 discovery-pid）。
+  local my_id candidate
   my_id="${CLAUDE_CODE_SESSION_ID:-}"
   if [ -n "$my_id" ]; then
     candidate="$(ls -t "$HOME/.claude/projects/$slug"/*.jsonl 2>/dev/null | grep -v "/$my_id\.jsonl$" | head -1 || true)"
