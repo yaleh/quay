@@ -51,6 +51,15 @@ set -euo pipefail
 
 # ── resolve plugin root ─────────────────────────────────────────────────────────────────────────────
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+# gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down AC6: the host does NOT inject
+# CLAUDE_PLUGIN_ROOT when a Skill invokes quay-init.sh, so the documented call (init/SKILL.md
+# step 3) must work without it. Fall back to self-resolving from $0 — this file lives at
+# <plugin-root>/scripts/quay-init.sh. The plugin.json validation below still FAILS CLOSED when
+# neither yields a valid plugin root: never a silent wrong path.
+if [ -z "$PLUGIN_ROOT" ]; then
+  SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  PLUGIN_ROOT="$(cd "$(dirname "$(dirname "$SELF")")" 2>/dev/null && pwd || true)"
+fi
 WORKSPACE_ROOT="$(pwd)"
 PROJECT_NAME=""
 REPO_ROOT=""
@@ -520,6 +529,44 @@ validate_worktree_root() {
   return 0
 }
 
+# verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
+# lay-down. The mechanical constraint "referenced set ⊆ landed set": every file the shipped skills
+# and tick docs reference by path (plugin/scripts/*, orchestration/*, docs/analysis/*) must exist
+# in the target workspace after the --loop lay-down, UNLESS it is explicitly declared in
+# plugin/skills/init/SKILL.md as self-create (local state the first run creates — AC8) or
+# reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
+# hand-maintained lists (call sites vs landing set) with no mechanical bond must drift; this is
+# the bond. A referenced file that is neither landed nor declared = drift → FAIL CLOSED.
+verify_referenced_landed() {
+  local ws="$1" missing=0 r
+  local refs selfcreate refdoc
+  refs="$(grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true)"
+  # Machine-readable declarations live in the shipped init skill (single source of truth — the
+  # same doc the human reads). Marker lines:
+  #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
+  #   <!-- reference-doc: <path> -->     quay-specific reference doc, not a loop deliverable
+  selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+  refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+  for r in $refs; do
+    # exact-line membership in the declared sets (newline-separated — a `case` pattern would
+    # need spaces the multi-line variable does not have)
+    if printf '%s\n' "$selfcreate" "$refdoc" | grep -qxF "$r"; then
+      continue   # declared self-create or reference-doc — not a defect
+    fi
+    if [ ! -e "$ws/$r" ]; then
+      echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" = 1 ]; then
+    echo "ERROR: quay-init --loop would ship skills/tick docs that reference files it does not lay down (referenced ⊆ landed violated)." >&2
+    echo "       Add the script to the landing set, or declare the file self-create/reference-doc in plugin/skills/init/SKILL.md." >&2
+    return 1
+  fi
+  echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc)"
+  return 0
+}
+
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 
@@ -640,27 +687,30 @@ PYEOF
   mkdir -p "$WORKSPACE_ROOT/docs/analysis"
 
   # Mechanism scripts (checkers + gate + token + observation) → <workspace>/plugin/scripts/.
-  # The last 5 are TRANSITIVE DEPENDENCIES of the checkers (imported by them): the laid-down
-  # mechanism must be functional, so the dependency closure ships too (e2e proved the checkers
-  # cannot run without gate-script-base.ts / workflow-event-schema.mjs).
+  # gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down, Chosen-mechanism (a): the landing
+  # list for scripts is DERIVED from the shipped skills + tick docs' own `plugin/scripts/*`
+  # references — precise (only what is called ships, no dev-tree-only tools like sync-vendor.sh)
+  # and drift-immune (a new reference auto-ships; there is no second hand-maintained copy to drift
+  # from). The explicit additions below are ONLY files the docs call by BARE NAME (no
+  # `plugin/scripts/` prefix, so not derivable) plus the checkers' TRANSITIVE DEPENDENCIES
+  # (imported by them, not doc-referenced — the laid-down mechanism must be functional; e2e proved
+  # the checkers cannot run without gate-script-base.ts / workflow-event-schema.mjs). The
+  # referenced-set ⊆ landed-set invariant is mechanically enforced by verify_referenced_landed
+  # below — a future skill/tick reference to a script that does not exist in the plugin FAILS the
+  # install (never the empty-set verifier).
   # NOTE: inner-state.sh is deliberately NOT here (gap-retire-inner-state-one-observer-targets-by-
-  # parameter AC3) — it is retired; observation has exactly ONE tool, session-liveness.sh, which is
-  # laid down separately below.
+  # parameter AC3) — it is retired and not referenced by any shipped doc; observation has exactly
+  # ONE tool, session-liveness.sh, which is laid down separately below (its env config is generated).
+  DERIVED_SCRIPTS="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
+  # shellcheck disable=SC2207
   LOOP_SCRIPTS=(
-    fast-mode-telemetry.ts
-    inner-blocked-signal.ts
-    inner-forensics.mjs
+    $DERIVED_SCRIPTS
+    # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
     inner-idle-log.ts
-    loop-driver-check.sh
-    resource-gate.sh
     heavy-op-token.sh
-    task-contract-check.ts
-    task-status-drift-check.ts
-    touches-orthogonality-check.ts
-    concurrent-batch-scheduler.ts
     it0-split-or-commit-check.ts
     pipe-exit-code-check.sh
-    # transitive deps of the above:
+    # transitive deps of the checkers (imported by them, not doc-referenced):
     gate-script-base.ts
     workflow-event-schema.mjs
     task-schema.ts
@@ -745,6 +795,15 @@ PYEOF
   # The executor is every quay-init --loop run (incl. cold-start-e2e in CI).
   if [ "$DRY_RUN" != true ] && [ -f "$PLUGIN_ROOT/scripts/verify-installed-executables.sh" ]; then
     bash "$PLUGIN_ROOT/scripts/verify-installed-executables.sh" "$PLUGIN_ROOT" "$WORKSPACE_ROOT"
+  fi
+
+  # gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down: after the lay-down, enforce
+  # "referenced set ⊆ landed set" mechanically (verify_referenced_landed above). This is the
+  # two-hand-maintained-lists bond: a shipped skill/tick doc referencing a file that did NOT land
+  # (and is not declared self-create/reference-doc) FAILS the install instead of shipping a
+  # mechanism that calls files it never laid down. Same executor as the AC6 check — every --loop run.
+  if [ "$DRY_RUN" != true ]; then
+    verify_referenced_landed "$WORKSPACE_ROOT" || exit 2
   fi
 fi
 

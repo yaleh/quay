@@ -50,16 +50,65 @@ conflict, listed and left untouched (upgrade path).
 
 ## Mapping
 
+For `--loop`, the mechanism-script landing list is **DERIVED** from the shipped skills + tick
+docs' own `plugin/scripts/*` references (gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down,
+Chosen-mechanism (a)) — a script referenced by a shipped skill/tick doc ships automatically, so the
+table below is illustrative, not exhaustive. The `referenced ⊆ landed` invariant is enforced
+mechanically by quay-init's `verify-referenced-landed` (see below).
+
 | Plugin source (`${CLAUDE_PLUGIN_ROOT}/`) | Workspace target |
 |---|---|
 | `workflows/*.js` | `.claude/workflows/` |
 | `agents/*.md` | `.claude/agents/` |
 | `gate-scripts/*.sh`, `gate-scripts/*.ts` | `scripts/gates/` |
-| `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (with placeholder substitution) |
-| `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (with placeholder substitution) |
-| `scripts/fast-mode-telemetry.ts`, `task-contract-check.ts`, `task-status-drift-check.ts`, `touches-orthogonality-check.ts`, `concurrent-batch-scheduler.ts`, `inner-blocked-signal.ts`, `inner-idle-log.ts`, `it0-split-or-commit-check.ts` | `plugin/scripts/` |
-| `scripts/resource-gate.sh`, `heavy-op-token.sh`, `inner-forensics.mjs`, `pipe-exit-code-check.sh` | `plugin/scripts/` |
+| `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (byte-identical, no substitution) |
+| `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (byte-identical, no substitution) |
+| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-verified.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, …) | `plugin/scripts/` |
+| `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `heavy-op-token.sh`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
+| `scripts/session-liveness.sh` (the ONE observer; `inner-state.sh` is retired and NOT laid down) | `plugin/scripts/` |
+
+## Loop install: local-state files (self-create) and quay reference docs
+
+`--loop` does NOT lay down the following. They are referenced by the shipped tick template by
+path, and are resolved as follows:
+
+**Local-state files — declared self-create, NOT shipped empty (AC8).** These are per-project
+state the loop writes to on first use. Laying down an empty factory copy would break the
+byte-identical upgrade check (gap-install-rewrites-files-…): the target writes to them
+immediately, so an upgrade would forever see a "user edit" and CONFLICT. The mechanical check does
+not count them as missing:
+
+| File | Self-create command (first tick / first tool run) |
+|---|---|
+| `orchestration/tick-log.md` | `touch orchestration/tick-log.md` (outer tick appends) |
+| `orchestration/escalations.md` | `touch orchestration/escalations.md` (outer tick appends) |
+| `docs/analysis/batch2-queue-state.md` | `touch docs/analysis/batch2-queue-state.md` (inner tick writes queue state) |
+| `docs/analysis/contract-violations.md` | `touch docs/analysis/contract-violations.md` (task-contract-check.ts writes) |
+
+**Quay-specific reference docs — referenced by the tick template but not loop deliverables.**
+The shipped tick template is quay-flavored prose and references quay's own experiment/analysis docs
+that do not ship with the plugin bundle. They are declared here so the mechanical check can tell a
+documented reference from a genuine missing file:
+
+| File | Why it is not shipped |
+|---|---|
+| `orchestration/exp6-phase1-sustained-unattended-operation.md` | quay's exp6 goals/AC/DoD — not a generic loop deliverable |
+| `orchestration/throughput-decomposition.md` | quay's analysis doc — not a generic loop deliverable |
+| `orchestration/outer-phase-goal.md` | retired outer-phase-goal (referenced as historical) |
+| `docs/analysis/normative-prose-audit.md` | quay's audit doc — not a generic loop deliverable |
+
+Machine-readable declarations consumed by `quay-init.sh`'s `verify-referenced-landed` (single
+source of truth — the same doc the human reads):
+
+<!-- self-create: orchestration/tick-log.md -->
+<!-- self-create: orchestration/escalations.md -->
+<!-- self-create: docs/analysis/batch2-queue-state.md -->
+<!-- self-create: docs/analysis/contract-violations.md -->
+<!-- reference-doc: orchestration/exp6-phase1-sustained-unattended-operation.md -->
+<!-- reference-doc: orchestration/throughput-decomposition.md -->
+<!-- reference-doc: orchestration/outer-phase-goal.md -->
+<!-- reference-doc: docs/analysis/normative-prose-audit.md -->
 
 ## Behavior
 
@@ -71,10 +120,12 @@ For each file in the requested category, the script runs an idempotent copy:
   - With `--force`: overwrite (with backup comment)
 - **Source directory empty or missing** → warn, skip category (never fail)
 
-For `--loop` tick docs, the copy is **substituted**: the target's test command / repo root / tmux
-session replace the quay-specific literals (`scripts/test.sh`, the quay repo root, `quay-0:0.0`).
-The substitution is mechanical (in the script) — no hand `sed`. After laying down, grep the copies
-for `scripts/test.sh` and the quay repo root: both must be absent (negative control).
+For `--loop` tick docs, the copy is **byte-identical** — no text substitution
+(gap-install-rewrites-files-…: install is configuration-driven, not text-substitution). The target's
+test command / repo root / tmux session live in ONE config file (`.quay/config.yml` `loop:`), read at
+runtime; the laid-down tick docs are `cmp`-identical to the product, so the upgrade path can tell a
+stale install-managed copy from a genuine user edit. The `managed` copy mode handles that upgrade
+distinction; a local tick-doc edit is a reported CONFLICT, never silently overwritten.
 
 `--loop` also writes `.quay/quay-init-state.json` recording the plugin version, so a re-run after a
 plugin upgrade detects "upgrade from vX to vY" and only fills the diff (per-file idempotent copy;
@@ -92,18 +143,32 @@ nothing is detected — never a guessed default. (AC2/AC3, gap-cold-start-…-ei
 
 ### 2. Verify plugin root
 
-Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` to confirm this is the quay plugin.
-If `${CLAUDE_PLUGIN_ROOT}` is not set or the file is absent → error, exit.
+`quay-init.sh` resolves the plugin root in this order: `--plugin-root <dir>` (highest precedence),
+then `${CLAUDE_PLUGIN_ROOT}`, then **self-resolution from the script's own path**
+(`<plugin-root>/scripts/quay-init.sh`). The script verifies `<plugin-root>/.claude-plugin/plugin.json`
+exists and **fails closed otherwise — never a silent wrong path** (gap-init-ships-a-skill-that-calls-
+files-it-does-not-lay-down AC6).
 
 ### 3. Run the copy script
 
+The host does NOT inject `CLAUDE_PLUGIN_ROOT` under Skill invocation, so determine the plugin root
+first: `PLUGIN_ROOT` is the quay plugin directory containing `.claude-plugin/plugin.json` (use
+`${CLAUDE_PLUGIN_ROOT}` when set; otherwise locate it yourself — the plugin install directory, or
+the parent of this skill's `scripts/`). Then run:
+
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/quay-init.sh" \
+bash "${PLUGIN_ROOT}/scripts/quay-init.sh" \
   --root "$(pwd)" \
+  --plugin-root "${PLUGIN_ROOT}" \
   [--all|--workflows|--agents|--gate-scripts|--loop] \
   [--force] [--dry-run] \
   [--test-command <cmd> --project <name> --repo-root <path> --tmux-session <sess>]
 ```
+
+Passing `--plugin-root` explicitly makes the call work without the injected variable, and the
+script's self-resolution is the fallback when the flag is omitted. **Fail-closed is retained**: a
+missing/unusable plugin root aborts with an error naming the searched location — never a silent
+wrong path.
 
 ### 4. Report summary
 
