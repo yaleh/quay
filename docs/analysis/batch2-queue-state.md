@@ -4048,3 +4048,25 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **aborted-red 止血（管理者 10:2xZ 报告，第 2 次 reason 轴实证）**：inner 停派发因套件 state=red，但那是 ABORT #5 的 aborted（durationMs=null、无正确性结论），非 failed。load 0.92/PSI 3/机器空闲，12 个互不相交任务全被挡 + 不会自解除（re-green 需成功套件，套件因 laneCount 缺陷跑不完 ⇒ 闭环）。**已止血**：suite-state red→green（reason=aborted-no-failure），SUITE-GREEN 事件已发，stop-dispatch 撤销。
 - **runner 结构任务扩展 + promote ready**：reason 轴缺口（aborted ≠ failed，stop-dispatch 只应对 failed 生效）并入 gap-full-suite-runner-concurrency-default-and-gate（4 条一次改：nproc 派生默认 + replace-splice + resource-gate + reason 轴）。补 DoD 后 promote ready（pool 28）。
 - **leak 任务 scoped 验证通过（决定性）**：send-keys-verified 全 ✔ 含 AC2 负控制（kill-session 丢失 socket 选择无害，不碰真实会话）；session-liveness 族低负载全 ✔（KNOWN-LOAD-SENSITIVE 在 load 2.3 下正常）。新 AC2 实现验证通过。
+
+### tick 2026-08-05T10:5xZ（内层，fan-in 完成 + OVER90 需裁定）
+
+- **leak 任务 fan-in 完成（`c44fa816` merge）**：rebase 净 → merge → scoped `--for-task --allow-thin` **EXIT=0 / 53 pass / 0 fail / 0 cancelled**（含 AC2 负控制）。thin 原因：任务 Touches 多为非测试文件（orchestration/、scripts/test.sh、tasks/*.md），选中集天然薄。**补 AC2b 授权缺口**（`b916966c`）：`quay-init-tmux-detection.test.mjs` 被改但 Touches 未声明，已补。worktree 已清、branch 已删。
+- **OVER90 机械触发（auto-block 已写，`source:auto`）**：os-anchor 101.4m（09:09:44Z 起）+ web-board 约同（09:11:50Z 起），均在飞 >90m。**已核实非假信号、非停摆**：两 agent 进程活（2004927 37% CPU / 2004986 33% CPU），bash 子进程数分钟内有新起（2167634 3:51 / 2177884 刚起 6.2% CPU），output 文件在增长——**健康长任务，非 phantom 类**。os-anchor worktree 有真实未提交工作（capability-catalog.sh + 2 个 os-anchor 脚本）。
+- **裁定建议：CONTINUE，不 abort**（证据：健康推进中；abort 会毁 os-anchor 未提交工作、重演今晚误杀健康工作的模式）。**block 保留等外层裁定**（判断边界：OVER90 = 停下等人）。本 tick 停止新派发。
+- 本 tick 累计：leak 全链路完成（派发→实现→验证→merge）；在飞 os-anchor + web-board（>90m 健康）。
+
+### tick 2026-08-05T10:5xZ wakeup（内层，重锚：OVER90 block 仍在等裁定，无新派发）
+
+- **leak 任务**：已完成并 merge（上一 tick），无新 fan-in（无新返回任务）。
+- **OVER90 block 仍存在**（`inner-blocked.json` source:auto，since 10:51Z）——外层尚未裁定。**第二次核实两 agent 健康推进**：os-anchor bash 子进程 2167634 5:40（长任务中），web-board 刚起新 bash 2179559（7.1% CPU）。非停摆。
+- **本 tick 无派发**（OVER90 = 停下等人，block 保留）。就绪池 28/12 健康。
+- **请求外层裁定**：os-anchor / web-board 超 90m，建议 CONTINUE（健康推进）；或 ABORT（若外层判断超出时限）。裁定后 --clear，本 tick 恢复派发。
+- 套件 state=green（aborted-no-failure，无未处置正确性 RED）。
+
+### tick 2026-08-05T11:0xZ（外层，phantom in-flight 处置）
+
+- **假 OVER90 第三次（管理者报告 + 决定性证据）**：os-anchor/web-board 的 OVER90 是 **phantom in-flight**（非假信号）——执行 agent 死于 09:2xZ 第四次全灭，worktree 0 提交/0 变化/无进程（mtime 09:11/09:12）。与 cold-start-key4 同型。
+- **已执行**：两个 phantom bracket 闭合（--task-end abandoned，inProgress 清空）；web-board worktree 回收；os-anchor 未提交工作备份（/tmp/os-anchor-backup-1103）+ 驱动 inner 捡起（提交+merge 不重建）。
+- **建任务**：gap-over-90m-false-signal-source-reads-telemetry-not-task-status（status 闸 + AC4 reconcile 判据缺陷）。runner 结构任务 gap-full-suite-runner-concurrency-default-and-gate 已 ready。
+- **inner**：收到 os-anchor 驱动，处理中（提交 worktree 工作）。
