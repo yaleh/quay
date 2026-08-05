@@ -4694,3 +4694,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   false-flake 正是该规则保护的场景）。余 7 条 not-yet-flipped 仍卡全量绿。
 - **在飞 1/3**（upgrade-channel regression）。套件 green（stale）。Monitor 三判据绿、detect-stop 无 block、
   .halt quay/archguard 运行中 meta-cc 暂停。
+
+### tick 2026-08-05T17:2xZ（外层，config.yml untrack + AC12b 4/4 确认）
+
+- **管理者 B 机执行裁定后撞更深冲突 → 根治**：.quay/config.yml 跟踪但实质是 quay-init 生成产物
+  （provider path/tmux_session 每工作区不同），下游主机本地化后**每次 pull 结构性冲突**（非一次性）。
+  外层核实：config.yml 已跟踪、.gitignore 无规则、模板在 `packages/quay-native/examples/sample-workspace/`。
+  **裁定+执行**：`.gitignore` 加 root-anchored `/.quay/config.yml` + `git rm --cached`（本地保留 9248B，
+  模板保留跟踪不误伤）。B 机可重新 pull。
+- **AC12b 4/4 代码落地确认**（ecea6830=#4 upgrade-channel：src-mtime-vs-dist 陈旧检测 + fail-closed +
+  mcp_entry 字节比对 + user-scope 版本一致性，45/45 scoped + 7 新测试）。4 任务全 ready、AC 未全勾
+  （实跑证据 + 全量绿 pending）——**closure 维持 ready**（非账本滞后，同 16:4xZ 裁定；全量绿未过不能翻）。
+- **inner 按计划派 3/3**：ruling-required + web-board + upgrade-channel fan-in（cap=3 满）。全量推迟
+  （inner 满负荷串行纪律）——closure 全卡全量绿的等待链已记录（inner 落定后起全量解锁）。
+- **在飞 3/3**。套件 green（stale 7h+）。Monitor 三判据绿、detect-stop 无 block。
