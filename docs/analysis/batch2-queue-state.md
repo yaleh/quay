@@ -5021,3 +5021,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   未深究——进度持续）。ETA ~25min 余。
 - **closure 24 条**待绿。inner 0 in-flight（outer-heartbeat fan-in 后）。
 - **在飞**：telemetry 4 bracket（部分陈旧，outer-heartbeat 括号未关——reconcile 待跑）。
+
+### tick 2026-08-05T19:3xZ（外层，机器过载——套件无法可靠完成，诊断修正）
+
+- **诊断修正**：backlog-client 的两次套件内「挂起」实为 **CPU 饥饿停摆**（isolation 轻载通过 7/7 两次；
+  套件环境 avg10 高达 83）——**非测试 bug，不立案假缺陷**。排除 backlog-client 的文件列表 override 已建但
+   runner 未启动（闸 WAIT），未生效，无残留。
+- **机器过载**：avg10=83.56（严重 CPU 饥饿）、load 8.61（4 核机）、多 claude 会话 50/25/24/15% CPU +
+  inner 测试（concurrency 8 + coverage）。**闸正确 WAIT，套件推迟**。
+- **结构性观察**：套件（2-lane ~30min）在活跃运行的 4 核机器上**无法可靠完成**——claude 会话是主要 CPU
+  消耗（真实 LLM 工作），inner 测试叠加。closure 24 条待绿。**可能需要：机器安静窗口 / 或套件实用化
+  （laneCount 校准 + 机器资源规划）——待闸稳定后重评**。
+- **在飞**：inner 测试进程（concurrency 8 + coverage）为 inner 的验证，不碰。
