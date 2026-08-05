@@ -5454,3 +5454,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ② **多文件一行**（`a.md / b.md / c.md`）→ 整行当 1 个 glob → 匹配不到（broken）。
 - **管理者「空 Touches」是近似**；真因是目录 glob 过宽 + 多文件行。修法：Touches 收窄到具体文件 +
   多文件拆行。4 任务在池（部分 ready）——需逐任务判断实际触摸文件后收窄，立案待办。
+
+### tick 2026-08-05T23:5xZ 补充（外层，管理者 AC11 撤回——4 任务 Touches 发现作废）
+
+- **管理者撤回**：checkTouchesPair 调用参数类型误用（传任务 ID 字符串而非 {hasSection,globs} 对象），
+  `undefined.hasSection` 恒假 ⇒ 任何调用返回「conservative 无 Touches」，与任务真实内容无关。
+- **正确重扫**（extractTouchesSection + parseTouchEntries 全 102 存活任务）：仅 8 个真解析不出（7.8%）
+  ——5 个无 Touches 标题的遗留老任务（DIR-043/QC-T1/TG 等，惯例引入前）+ 3 个标题下为空。**原报 4 任务
+  全不在问题列表，Touches 正常**。
+- **修正上一条记录**（a3f725b6）：该记录基于管理者的误报框架（「4 任务 Touches 过宽缺陷」）——实为
+  正常。4 任务与 branch-model 的 overlap 是真实触摸交集（plugin/scripts 目录），非解析问题。
