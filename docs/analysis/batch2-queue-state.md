@@ -4246,6 +4246,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   `gate-scripts-retirement.test.mjs` 5 用例。scoped 50/50 EXIT=0。
 - **在飞 0/3**。resource-aware worktree 保留。套件 green。
 
+### tick 2026-08-05T14:1xZ（内层：AC12b 硬阻塞优先派发）
+
+**外层裁定：AC12b 产品主判据 4 硬阻塞优先于一切**。四者全部 promote ready + self-touch 已补。
+- **派发 3**（disjoint）：welcome-screen-ghost-drive（#1）/ vendor-runtime（#2）/ runner-red-pattern（#4）。
+- **dist-runtime（#3）串行**：与 vendor-runtime 同碰 dist/vendor 面（checkTouchesPair 实测 overlap）——
+  等 vendor-runtime 落地后派。
+- **在飞 3/3**。套件 green。
+
 ### tick 2026-08-05T12:3xZ（外层，AC12 拆分 + archguard 污染更正）
 
 - **AC12 拆分（管理者，决定性事实 plugin/loop/ 无 manager）**：AC12a 三层（人不干预 manager，管理者驱动 outer）测【手工监工，不随包走】；AC12b 两层（人与管理者都不干预 outer，只准输一条 /quay:cold-start）测【产品本身，采用者真实体验】。AC12b 才是真实数字，当前 0 且从未干净测过。
@@ -4298,3 +4306,29 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **管理者裁定 AC12b 三阻塞唯一阻塞**（welcome-屏/vendor package.json/裸 ✖ 判红）——收尾类工作不解锁 AC12b。外层：4 个阻塞任务补 DoD + promote ready（welcome-screen、vendor-runtime、self-contained、red-pattern），全部在就绪池。驱动 inner 优先派发（处理完再继续其它）。
 - **archguard TASK-67 闭环确认**（AC12a 110 分钟）：发现缺陷→修复→验证修复完整回路，结构化判红生效抓到 6 真失败。quay 上游 bug（裸 ✖）仍未修——本批第 ④ 任务。
+
+### tick 2026-08-05T14:2xZ（内层：AC12b blocker #4 落地）
+
+- **runner-red-pattern 落地**（merge `60d2521c`）：FAILURE_PATTERNS 去裸 `/✖/`（vitest 项目里 ✖ 可是
+  测试自身输出——archguard TASK-67 假红实证），改结构化：`❯ <file> (N tests | M failed...)` +
+  `Test Files N failed`；保留 node:test/TAP + `FULL-SUITE-EXIT=[^0]`。e2e 证 ✖-console + exit 0 ⇒
+  green。**AC12b blocker #4 ✓**。scoped 18/18。
+- **在飞 2/3**：ghost-drive + vendor-runtime。dist-runtime 等 vendor-runtime 落地后派（同 dist/vendor 面）。
+- **AC12b 进度**：#1 在飞、#2 在飞、#3 待派、#4 已落地。
+
+### tick 2026-08-05T14:3xZ（内层：AC12b blocker #1 落地）
+
+- **ghost-drive 落地**（merge `ba3a4e87`）：fresh-session 检测（`transcript-delivery-check --is-fresh`，
+  transcript 缺失或零 user 消息 = fresh）→ **SKIP 清屏循环直接发**（welcome 屏 `❯ Try "..."` ghost
+  suggestion 是清不掉的文本，NBSP 修复没覆盖它）；非 fresh 会话仍走 NBSP 清屏路径（无回归）。
+  真实 fresh 会话 e2e（隔离 temp dir，未碰 archguard-4/quay-0）delivered rc=0。**AC12b blocker #1 ✓**。
+  AC4（kill archguard outer → watchdog relaunch → drive）留外层做（需 live-loop 介入）。scoped 28/28。
+- **在飞 1/3**：vendor-runtime。dist-runtime 等 vendor-runtime 落地后派。
+- **AC12b 进度**：#1 ✓、#2 在飞、#3 待派、#4 ✓。
+
+### tick 2026-08-05T14:2xZ（外层，AC12b 阻塞 2/4 落地）
+
+- **ghost-drive（阻塞 #1）已 merge**（ba3a4e87）：fresh-session detection（transcript-delivery-check --is-fresh）跳过清屏，非 fresh 保留 NBSP 路径，real fresh-session e2e rc=0。welcome 屏修复完成。
+- **red-pattern（阻塞 #4）已 merge**（60d2521c）：裸 ✖ 改结构化 vitest shapes（per-file N tests|M failed / Test Files N failed），e2e 证明 ✖-console + exit 0 ⇒ green。假红修复完成（采纳 archguard 已验证方向）。
+- **vendor-runtime（阻塞 #2）**：inner 处理中（26m，Editing AC1 assertion）。完成后派 dist-runtime（阻塞 #3）。
+- **AC12b 四阻塞 2/4 落地**，inner 全按优先级执行。
