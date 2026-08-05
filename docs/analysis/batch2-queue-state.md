@@ -2570,6 +2570,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   计数——口径不影响派发）。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。
 
+### tick 2026-08-05T00:24Z（外层，`no-action`：overshoot 全量 1 失败 = 已知负载 flake，内层重跑中）
+
+- **overshoot 全量首跑 1 失败**（tests 2284 / fail 1 / cancelled 0）：失败测试 =
+  `session-liveness.test.mjs:755`「noise gate」。**核实为已知负载诱发既有 flake**（suite-speed 已确认
+  baseline/2 复现；overshoot 修复只碰 ready-pool-check/drift-check，不碰 session-liveness）。
+  **单跑该测试 pass 2 / fail 0**——证实负载 flake，非修复回归。
+- **内层已自动重跑全量**（full-suite-overshoot-2.log，c8）——绿后按优先级驱动派 gap-init-ships。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

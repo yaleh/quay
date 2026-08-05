@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 00:24Z | `no-action` | 核实 overshoot 全量 1 失败=已知负载 flake（session-liveness noise-gate，单跑 pass 2/0，非修复回归）；内层自动重跑全量（overshoot-2）；绿后派 gap-init-ships 优先 | 内层：重跑 overshoot 全量（c8，~12min） | ①失败测试名定位（session-liveness.test.mjs:755）；②单跑该测试 pass 2/0（负载 flake 实证）；③ps 核内层重跑全量 |
 | 2026-08-05 00:22Z | `no-action` | 人裁定结晶化（--check-residue 三态工具，运行时 C-u 探针为判据，立案）；管理者优先级裁定（gap-init-ships 优先于 ghost——卡自建目标，已驱动内层）；写回 | 内层：等 overshoot 全量，绿后派 gap-init-ships 优先 | ①gap-init-ships ready+resolve 核实；②residue 任务立案；③`--detect-stop` 无命中 |
 | 2026-08-05 00:03Z | `no-action` | 核实 overshoot 修复全量验证在跑（scripts/test.sh c8 → full-suite-overshoot.log，load 14.65）；就绪池 4（6 候选已补晋）；内层绿后派下一批；框内备忘非已提交 | 内层：等 overshoot 全量（Baked 9m，1 shell） | ①ps 核 scripts/test.sh c8 运行 + load；②ready-pool-check pool 4；③`--detect-stop` 无命中 |
 | 2026-08-05 00:01Z | `no-action` | 核实 overshoot 修复关闭（AC4 pool 0→4，晋级解阻塞）；立案 ghost 源头消除（--prompt-suggestions false 从源头关故障 6，验证用 throwaway、人裁定列为冷启动要求）；写回 | 内层：overshoot 修复已 close + 6 候选补晋；pool 4 | ①ready-pool-check 实跑 pool 4（修复实证）；②claude --help 核 --prompt-suggestions 存在；③git log 核 overshoot 关闭 + 补晋 |
@@ -267,11 +268,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 101 | 36% |
+| no-action | 102 | 36% |
 | unblock | 37 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **237** | — |
+| **合计** | **238** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
