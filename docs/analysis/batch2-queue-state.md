@@ -3946,3 +3946,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **管理者自我更正**：观察者无 TMUX_TMPDIR，07:5x「先不动 9 个」顾虑多余，保守间接让它们活到
   ABORT #3。记在管理者头上。
 - **当前**：资源门 GO（PSI 10.39）；M3 验证套件（blfvjpxok lane-1）在干净环境跑。
+
+### tick 2026-08-05T09:00Z（外层，`unblock`：supervisor 架构 umbrella 立案 + M3 验证推进）
+
+- **supervisor 基座层架构立案（管理者 SPEC，post-friction，AC10 保持 7）**：今晚 10 类事故倒推三层
+  判据——基座（调度/消息+身份/会话状态/槽位/抢占/资源门）须在 agent 会话外存活（7/10 类是 CC 缺原语、
+  用屏幕抓取假装，占今晚代价大部分）；机件（94 scripts + 14 gates）留外面可执行；行为（tick 文档/
+  Contract/AC/ADR）留文本。supervisor 守护进程收编 7 类假基座——无判断/不读任务/不写代码（越界判据=
+  需理解任务即越界）。落地次序按代价：持久调度→槽位/状态→投递集中化+真 TUI e2e→抢占→消息总线。
+  OS-anchor（=①）+ slot-visibility（=②）交叉标注。
+- **M3 验证套件**：干净环境推进（残留清、无冲突、lane-1，log 3606→3659 增长）；等完成后收尾 ROUND 3。
+- 本 tick 累计立案：supervisor 架构（umbrella）+ slot-visibility + OS-anchor + tmux 泄漏 + NBSP +
+  reason 轴 + checker-cost 扩展。最高优先集（OS-anchor / supervisor / laneCount / 泄漏 / NBSP）。
