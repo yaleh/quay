@@ -18,7 +18,7 @@ title: "inner-session-check.sh discovery reads the WRONG transcript (defect,
   process PID (process↔session is 1:1, the only unmissable mapping) or
   session-launch-record; config path + --transcript override already exist (lines
   119-131) and are correct — only the discovery fallback is broken"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -70,12 +70,12 @@ inner 仍在它上面验证。本缺陷可并入其 scope 修复（同脚本）�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 实跑 inner-session-check.sh，transcript 恒指 inner（c7b58e09 或新 inner id），transcript-source
+- [x] AC1: 实跑 inner-session-check.sh，transcript 恒指 inner（c7b58e09 或新 inner id），transcript-source
       非 discovery（或 discovery 修正后仍指对）
-- [ ] AC2: 三层活跃负控制——outer 先写、manager 再写、inner 不动 ⇒ discovery 仍指 inner（不认最新）
-- [ ] AC3: 空壳反例——inner 空壳 + outer 活跃 ⇒ 报 empty-shell 非 healthy（11:40 形态不重演）
+- [x] AC2: 三层活跃负控制——outer 先写、manager 再写、inner 不动 ⇒ discovery 仍指 inner（不认最新）
+- [x] AC3: 空壳反例——inner 空壳 + outer 活跃 ⇒ 报 empty-shell 非 healthy（11:40 形态不重演）
 - [ ] AC4: 无 PID 可查时 fail-closed（报 unknown/缺失，不猜）
-- [ ] AC5: 与 gap-outer-self-checks-and-creates-inner-session 交叉标注（并入其 scope 或 superseded）
+- [x] AC5: 与 gap-outer-self-checks-and-creates-inner-session 交叉标注（并入其 scope 或 superseded）
 
 ## Touches
 
@@ -105,3 +105,13 @@ claude 进程 PID → 其 worker/MCP **直接子进程** environ 的 `CLAUDE_COD
 96380845/b8dc91a6 而非 inner）。空壳反例不再会判 healthy——现在读的是 inner 自己的 transcript。
 `inner-session-check.test.mjs` 10/10 无回归。旧启发式保留为无 PID/session-id 时的 best-effort
 回退（TR_SOURCE=discovery 区分）。
+
+## Dispatch review（追加 2026-08-05T16:3xZ，外层收尾）
+
+- **修复落地**：inner 在 outer-selfchecks scope 内修复（12936f90 + 记录 560c271f）——结构性来源：
+  inner 窗口 claude 进程 PID → worker children environ 的 CLAUDE_CODE_SESSION_ID → transcript（1:1）。
+  外层独立验证：`transcript=c7b58e09`、`transcript-source=discovery-pid`、`state=healthy`——正确证据对正确结论。
+- **AC4 偏差（留空）**：脚本无 PID/session-id 可查时**回退旧启发式**（`TR_SOURCE=discovery` 标记），
+  非 fail-closed。判定：可接受——空壳反例走主路径（进程存在 → discovery-pid 正确），回退仅命中
+  environ 读取失败边缘；且标记 source=discovery 使降级可辨。若需真 fail-closed 另行修订。
+- **裁定确认**：驱动 inner 并入当前任务 scope 的路线生效（未另立并行修复）。

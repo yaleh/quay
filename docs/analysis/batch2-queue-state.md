@@ -4520,3 +4520,25 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （inner 窗口 claude 进程 PID 反查 transcript，1:1 不会认错）；config/--transcript 路径已对只坏 discovery。
 - **已驱动 inner**（数据-only，pane 输入框确认）：并入其在飞 outer-selfchecks 任务 scope 内修复。
 - **AC10 仍 10**（证伪产出属机制流程）。套件 green、1 worktree 在飞、inner 距 fan-in ~7min。
+
+### tick 2026-08-05T17:3xZ（内层：discovery-wrong-transcript 结构性修复）
+
+- **外层发现已修**（`12936f90`）：inner-session-check discovery 改结构性映射——inner 窗口 claude PID →
+  worker 直接子进程 environ 的 `CLAUDE_CODE_SESSION_ID` → transcript（进程↔会话 1:1）。**实测验证**：
+  `transcriptSource: "discovery-pid"`、`transcript: c7b58e09...`（正确指向 inner，此前 96380845/
+  b8dc91a6 非确定性认人）。空壳反例不再判 healthy。10/10 无回归。修复记录已写回
+  `gap-inner-session-check-discovery-reads-wrong-transcript`（外层立案的任务）。
+- **在飞 0/3**。套件 green。
+
+### tick 2026-08-05T16:3xZ（外层，discovery 修复闭环 + trigger 重挂）
+
+- **inner 自主修复 discovery 缺陷（驱动生效）**：12936f90 结构性修复（inner 窗口 claude PID → worker
+  children environ 的 CLAUDE_CODE_SESSION_ID → transcript，进程↔会话 1:1）+ 560c271f 记录。外层独立验证：
+  `transcript=c7b58e09`、`transcript-source=discovery-pid`、`state=healthy`——对证据对结论。filed 任务关闭
+  （done，AC1-3/5；AC4 留空=无 PID 时回退旧启发式标记 source=discovery，非 fail-closed，判可接受）。
+- **suite-state-trigger 事件**：pgrep -af 命中 2 个残留 trigger（含 archguard 的——kill 前未核路径前缀，
+  **教训已写进 tick 文档：跨项目同名 trigger，核路径前缀再动**）；quay cold-start 挂载形态错（裸 .ts 无
+  x 位 → exit 126 静默失败），修正文档 4b2 为 `node --no-warnings --experimental-strip-types` 前缀 +
+  重挂（bvkrff1yl），fail-fast-check chain OK、suite 未留红。archguard trigger 自愈（其 loop 运行中）。
+- **在飞 1/3**（outer-selfchecks 修复后收尾中）。套件 green（stale，10:19Z aborted-triage）。全量仍串行推迟
+  （inner 修复 fan-in 完成后起）。

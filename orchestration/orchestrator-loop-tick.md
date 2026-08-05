@@ -125,10 +125,16 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
 「cron 才检查状态」改成「状态变化即触发」：
 
 ```
-Monitor({command: "$REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
          description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
          persistent: true, timeout_ms: 3600000})
 ```
+
+**挂载形态必须是 `node --no-warnings --experimental-strip-types` 前缀**（2026-08-05 实测：裸
+`.ts` 路径不可执行——文件无 x 位，bash 直接执行报 exit 126 Permission denied，Monitor 静默失败
+「存在≠生效」）。`pgrep -af 'suite-state-trigger.ts --monitor'` 会同时命中**其它项目**的同名
+trigger（archguard 也有一个）——核对挂的是不是**本仓**那份时，读进程 cmdline 里的路径前缀
+（`/home/yale/work/quay/` vs `/home/yale/work/archguard/`），别只数个数。
 
 事件流里出现 `SUITE-RED` ⇒ **立即**进入步骤 1b「红窗分诊」（不等下一次 cron——本轮的
 「红着无人处置 30 分钟」场景即被消灭）；出现 `SUITE-RUNNING` ⇒ 按「RUNNING 乐观派发执行者」驱动
