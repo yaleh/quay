@@ -65,6 +65,16 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(pluginDir, 'scripts', 'os-anchor-install.sh'),
       reason: 'drives FOREIGN/legacy workspaces (meta-cc, archguard) that may still run the old orchestration/ layout — the old tick-doc path is a supported target, not a quay-repo reference (live ref surfaced by the AC1b scan 2026-08-05: os-anchor landed 11:05Z, the AC1b table predated it)',
     },
+    {
+      rel: 'docs/analysis/fast-mode-loop-tick.md',
+      target: path.join(repoRoot, 'docs', 'analysis', 'fast-mode-loop-tick.md'),
+      reason: "deployed copy of the inner tick-doc template — its template-params NOTE documents the TARGET layout (same class as plugin/loop/, excluded below)",
+    },
+    {
+      rel: 'orchestration/orchestrator-loop-tick.md',
+      target: path.join(repoRoot, 'orchestration', 'orchestrator-loop-tick.md'),
+      reason: "deployed copy of the outer tick-doc template — its template-params NOTE documents the TARGET layout (same class as plugin/loop/, excluded below)",
+    },
     { rel: 'test/cold-start-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-e2e.sh'), reason: 'target layout (asserts the laid-down project)' },
     { rel: 'test/cold-start-oneliner-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), reason: 'AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)' },
     { rel: 'plugin/skills/init/SKILL.md', target: path.join(pluginDir, 'skills', 'init', 'SKILL.md'), reason: "mapping table's target column" },

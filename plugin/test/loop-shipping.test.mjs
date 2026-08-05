@@ -51,10 +51,23 @@ test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old p
     assert.ok(fs.existsSync(p), `${rel} must ship inside the plugin (role: ${reason})`);
     assert.ok(fs.statSync(p).isFile(), `${rel} must be a regular file (not a symlink leaving the package)`);
   }
+  // The two tick-doc old paths legitimately hold the DEPLOYED copies (quay as a target project lays
+  // them down at orchestration/ + docs/analysis/ per the template-params note; outer deployed them
+  // 2026-08-05 for cold-start/launch-config). A real file there is the target-layout deployment,
+  // NOT a compat shell — only a SYMLINK shim is forbidden. The other four old paths must be gone.
+  const deployedOldPaths = new Set([
+    'orchestration/orchestrator-loop-tick.md',
+    'docs/analysis/fast-mode-loop-tick.md',
+  ]);
   for (const rel of oldPaths) {
     const p = path.join(repoRoot, rel);
-    assert.ok(!fs.existsSync(p),
-      `old path must NOT remain (no compat shell / symlink shim): ${rel}`);
+    if (deployedOldPaths.has(rel)) {
+      assert.ok(!(fs.existsSync(p) && fs.lstatSync(p).isSymbolicLink()),
+        `old path must NOT be a compat symlink shim: ${rel}`);
+    } else {
+      assert.ok(!fs.existsSync(p),
+        `old path must NOT remain (no compat shell / symlink shim): ${rel}`);
+    }
   }
 });
 
