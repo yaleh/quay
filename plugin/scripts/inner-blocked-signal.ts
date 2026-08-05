@@ -46,12 +46,35 @@
 // for a start/end pair (no orphaned pollution). SCHEMA_VERSION stays "1".
 //
 // Run:
-//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--pane <pane.txt>]   (MECHANICAL trigger — see below)
-//   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
-//   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
-//   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]     (prints the record, exit 1 if absent)
-//   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>]  ("blocked <reason>" | "clear")
+//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--pane <pane.txt>]   (MECHANICAL trigger — see below)
+//   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
+//   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
+//   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>] [--target <name>]     (prints the record, exit 1 if absent)
+//   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>] [--target <name>]  ("blocked <reason>" | "clear")
 //   node --experimental-strip-types inner-blocked-signal.ts --schema                  (schema + valid reasons)
+//
+// PARAMETERIZED OBSERVATION PRIMITIVE (gap-ruling-required-only-covers-outer-to-inner-not-manager-to-
+// outer, 2026-08-05): the "who-is-waiting" mechanism used to be ONE-DIRECTIONAL + HARDCODED — the
+// outer watched ONLY the inner pane, writing ONLY `.quay/inner-blocked.json` (BLOCKED_FILE_NAME),
+// with ONLY one reaction (write the file), and the samples threshold lived only in an env override.
+// Two real incidents (2026-08-05) fell in the blind spot: nobody watched the outer/manager layer.
+// This module is now a parameterized observation primitive — WHO is watched, HOW MANY consecutive
+// samples, and WHAT happens on detection are all caller-configured, not re-implemented per direction:
+//   --target <name>   who is being observed. `inner` (default) keeps the legacy path
+//                     `.quay/inner-blocked.json` (backward compatible); any other filename-safe name
+//                     (`outer`, `manager`, …) writes `.quay/blocked-signals/<target>.json`. The three
+//                     canonical targets are inner/outer/manager — each observable with one call.
+//   --samples <N>     consecutive needs-input samples before a ruling-required condition (default 3,
+//                     overridable; env INNER_BLOCKED_RULING_SAMPLES remains a test/ops override).
+//   --action <a>      the ACTION PLUGIN POINT: what happens AFTER a stop condition is detected.
+//                     "write-file" (default) writes the block record (existing behavior);
+//                     "notify" prints `detect-stop: BLOCKED <reason>: <question>` and writes nothing;
+//                     "command" runs --action-command <cmd> with the condition JSON + signal path in
+//                     the environment (BLOCKED_CONDITION_JSON / BLOCKED_SIGNAL_PATH / BLOCKED_TARGET).
+//                     The reaction is caller-configured, not the only reaction.
+// For non-inner targets ONLY the SCREEN observer runs (the observation primitive) — the inner-specific
+// mechanical conditions (merge-conflict / transcript composite / task-over-90m) are inner-layer state
+// and do not apply to watching the outer/manager pane.
 //
 // --detect-stop is the "fire as a consequence of a stop condition" trigger (AC1): it evaluates the
 // mechanically-detectable stop-and-wait conditions (merge-conflict from git state, task-over-90m
@@ -93,11 +116,12 @@
 // region as evidence. `--transcript` is preserved as side evidence for "session actually dead" but
 // is no longer the primary criterion (AC3); `--clear` also resets the observer's rolling counter.
 //
-// Storage: `.quay/inner-blocked.json` (gitignored, same family as gate-events.jsonl).
+// Storage: `.quay/inner-blocked.json` for `--target inner` (gitignored, same family as
+// gate-events.jsonl); `.quay/blocked-signals/<target>.json` for any other target.
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
@@ -115,6 +139,40 @@ import { classifyPaneState } from "./pane-state-classify.ts";
 
 /** File name of the block record, under `<root>/.quay/`. */
 export const BLOCKED_FILE_NAME = "inner-blocked.json";
+
+/**
+ * The canonical observation targets (AC1: inner/outer/manager each observable). Any filename-safe
+ * name is accepted — these three are the ones the two-layer fast mode actually has layers for.
+ */
+export const CANONICAL_TARGETS = Object.freeze(["inner", "outer", "manager"]);
+
+/** Default `--target` — keeps the legacy `.quay/inner-blocked.json` path (backward compatible). */
+export const DEFAULT_TARGET = "inner";
+
+/** A `--target` is used as a path component — must be filename-safe (no traversal, no slashes). */
+const TARGET_SAFE_RE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Validate + normalize a `--target` name. Fail-closed on anything not filename-safe. The default
+ * (undefined) resolves to `inner`.
+ * @param {string} [name]
+ * @returns {string}
+ */
+export function resolveTarget(name) {
+  const t = name === undefined || name === null || name === "" ? DEFAULT_TARGET : String(name);
+  if (!TARGET_SAFE_RE.test(t)) {
+    throw new Error(`invalid --target "${t}": must be filename-safe (${TARGET_SAFE_RE})`);
+  }
+  return t;
+}
+
+/**
+ * The action plugin point (AC3): what happens AFTER a stop condition is detected. The reaction is
+ * caller-configured — not hardcoded to "write the signal file". `write-file` is the default (the
+ * existing behavior); `notify` prints and writes nothing; `command` runs a caller-supplied command.
+ */
+export const BLOCK_ACTIONS = Object.freeze(["write-file", "notify", "command"]);
+export const DEFAULT_BLOCK_ACTION = "write-file";
 
 /**
  * Legal `reason` values = the inner layer's EXISTING stop-and-wait conditions (AC2). This list is
@@ -219,12 +277,29 @@ export function findSharedRoot(startDir = path.dirname(fileURLToPath(import.meta
 // ── Path helpers ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Absolute path to the block record for a root.
+ * Absolute path to the block record for a root + target. `--target inner` (default) keeps the legacy
+ * `.quay/inner-blocked.json`; any other target namespaces under `.quay/blocked-signals/<target>.json`
+ * (AC1 — output is namespaced by target, not hardcoded).
  * @param {string} root
+ * @param {string} [target]
  * @returns {string}
  */
-export function blockedFilePath(root) {
-  return path.join(root, ".quay", BLOCKED_FILE_NAME);
+export function blockedFilePath(root, target = DEFAULT_TARGET) {
+  const t = resolveTarget(target);
+  if (t === "inner") return path.join(root, ".quay", BLOCKED_FILE_NAME);
+  return path.join(root, ".quay", "blocked-signals", `${t}.json`);
+}
+
+/**
+ * Repo-root-relative path of the block record for a target — used in stdout (so a watcher can grep
+ * the namespace without knowing the root) and in telemetry `observedWrites`.
+ * @param {string} [target]
+ * @returns {string}
+ */
+export function blockedFileRelPath(target = DEFAULT_TARGET) {
+  const t = resolveTarget(target);
+  if (t === "inner") return `.quay/${BLOCKED_FILE_NAME}`;
+  return `.quay/blocked-signals/${t}.json`;
 }
 
 // ── Record build / validate ───────────────────────────────────────────────────────────────────────────
@@ -301,13 +376,14 @@ export function buildBlockedRecord({ taskId, reason, question, options, evidence
 // ── Read / write / clear ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Read and validate the block record, or null when absent. Throws on a malformed file (a corrupted
- * signal must surface, not be silently ignored).
+ * Read and validate the block record for a target, or null when absent. Throws on a malformed file
+ * (a corrupted signal must surface, not be silently ignored).
  * @param {string} root
+ * @param {string} [target]
  * @returns {object | null}
  */
-export function readBlockedRecord(root) {
-  const f = blockedFilePath(root);
+export function readBlockedRecord(root, target = DEFAULT_TARGET) {
+  const f = blockedFilePath(root, target);
   if (!fs.existsSync(f)) return null;
   let rec;
   try {
@@ -321,17 +397,18 @@ export function readBlockedRecord(root) {
 }
 
 /**
- * Write the block record — the ONLY writer of `.quay/inner-blocked.json` (AC4: the inner layer
- * never hand-writes it). Refuses to overwrite an existing block (file exists == inner is waiting;
+ * Write the block record — the ONLY writer of the block JSON (AC4: the layer never hand-writes it).
+ * Refuses to overwrite an existing block for the SAME target (file exists == that target is waiting;
  * a second assert while already blocked is a state bug — --clear first). Fail-closed on validation.
  * @param {string} root
  * @param {object} rec — validated by buildBlockedRecord / validateBlockedRecord
+ * @param {string} [target] — which observation target's signal file to write
  * @returns {string} — the file path written
  */
-export function writeBlockedRecord(root, rec) {
+export function writeBlockedRecord(root, rec, target = DEFAULT_TARGET) {
   const v = validateBlockedRecord(rec);
-  if (!v.ok) throw new Error(`refusing to write ${BLOCKED_FILE_NAME}: ${v.error}`);
-  const f = blockedFilePath(root);
+  if (!v.ok) throw new Error(`refusing to write ${blockedFileRelPath(target)}: ${v.error}`);
+  const f = blockedFilePath(root, target);
   if (fs.existsSync(f)) {
     throw new Error(`${f} already exists — a block is already asserted; --clear it first`);
   }
@@ -355,9 +432,10 @@ export function writeBlockedRecord(root, rec) {
  * @param {number} opts.clearedAtMs
  * @param {string|null} [opts.baseCommit]
  * @param {string} opts.root
+ * @param {string} [opts.target] — observation target (drives observedWrites' namespaced path)
  * @returns {object}
  */
-export function buildBlockedEvent({ taskId, reason, question, sinceMs, clearedAtMs, baseCommit = null, root }) {
+export function buildBlockedEvent({ taskId, reason, question, sinceMs, clearedAtMs, baseCommit = null, root, target = DEFAULT_TARGET }) {
   const safe = String(taskId).replace(/[^A-Za-z0-9._-]/g, "-");
   const runId = `blk-${safe}-${sinceMs}-${Math.random().toString(36).slice(2, 8)}`;
   return {
@@ -377,7 +455,7 @@ export function buildBlockedEvent({ taskId, reason, question, sinceMs, clearedAt
     outcome: null,
     waitReason: null,
     resourceClaim: null,
-    observedWrites: [`.quay/${BLOCKED_FILE_NAME}`],
+    observedWrites: [blockedFileRelPath(target)],
     isolationMode: null,
     dispatchMode: "serial",
     recordedAtMs: clearedAtMs,
@@ -417,12 +495,13 @@ export function emitBlockedTelemetry(root, event) {
  * today"), so losing it silently is worse than keeping the block visible for investigation.
  *
  * @param {string} root
+ * @param {string} [target]
  * @returns {{cleared: boolean, record: object|null, durationMs?: number, telemetryPath?: string}}
  */
-export function clearBlockedRecord(root) {
-  const f = blockedFilePath(root);
+export function clearBlockedRecord(root, target = DEFAULT_TARGET) {
+  const f = blockedFilePath(root, target);
   if (!fs.existsSync(f)) return { cleared: false, record: null };
-  const rec = readBlockedRecord(root);
+  const rec = readBlockedRecord(root, target);
   const clearedAtMs = Date.now();
   const durationMs = Math.max(0, clearedAtMs - rec.since);
   let telemetryPath;
@@ -435,6 +514,7 @@ export function clearBlockedRecord(root) {
       clearedAtMs,
       baseCommit: getBaseCommit(root),
       root,
+      target,
     }));
   } catch (e) {
     throw new Error(`failed to record blocked-wait telemetry (block NOT cleared): ${e.message}`);
@@ -627,23 +707,30 @@ export async function detectTaskOver90m(root) {
 // ── Pane-observer rolling state (gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick) ────
 
 /**
- * Absolute path to the pane observer's rolling counter file for a root.
+ * Absolute path to the pane observer's rolling counter file for a root + target. Per-target state
+ * (a counter must never be shared across observation directions — inner and outer polls must not
+ * reset each other). `inner` keeps the legacy `.quay/.ruling-observer-state.json`; other targets
+ * namespace under `.quay/blocked-signals/`.
  * @param {string} root
+ * @param {string} [target]
  * @returns {string}
  */
-export function rulingObserverStatePath(root) {
-  return path.join(root, ".quay", RULING_OBSERVER_STATE_FILE);
+export function rulingObserverStatePath(root, target = DEFAULT_TARGET) {
+  const t = resolveTarget(target);
+  if (t === "inner") return path.join(root, ".quay", RULING_OBSERVER_STATE_FILE);
+  return path.join(root, ".quay", "blocked-signals", `.${t}-observer-state.json`);
 }
 
 /**
- * Read the pane observer's rolling counter. An absent or malformed file ⇒ zero (fail-closed toward
- * NOT flagging — a corrupted counter must never itself become a stop condition).
+ * Read the pane observer's rolling counter for a target. An absent or malformed file ⇒ zero
+ * (fail-closed toward NOT flagging — a corrupted counter must never itself become a stop condition).
  * @param {string} root
+ * @param {string} [target]
  * @returns {{consecutiveNeedsInput: number, updatedAtMs: number}}
  */
-export function readRulingObserverState(root) {
+export function readRulingObserverState(root, target = DEFAULT_TARGET) {
   try {
-    const raw = JSON.parse(fs.readFileSync(rulingObserverStatePath(root), "utf8"));
+    const raw = JSON.parse(fs.readFileSync(rulingObserverStatePath(root, target), "utf8"));
     const n = Math.floor(Number(raw.consecutiveNeedsInput));
     const t = Number(raw.updatedAtMs);
     return {
@@ -656,13 +743,14 @@ export function readRulingObserverState(root) {
 }
 
 /**
- * Persist the pane observer's rolling counter (atomic — write a temp file then rename, so a
- * concurrent reader never sees a half-written record).
+ * Persist the pane observer's rolling counter for a target (atomic — write a temp file then rename,
+ * so a concurrent reader never sees a half-written record).
  * @param {string} root
  * @param {{consecutiveNeedsInput: number, updatedAtMs: number}} state
+ * @param {string} [target]
  */
-export function writeRulingObserverState(root, state) {
-  const f = rulingObserverStatePath(root);
+export function writeRulingObserverState(root, state, target = DEFAULT_TARGET) {
+  const f = rulingObserverStatePath(root, target);
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const tmp = `${f}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
@@ -735,13 +823,16 @@ export async function telemetryHasInProgressTask(root) {
  *     consecutive does a ruling-required condition emerge.
  *
  * `panePath` is EXPLICIT CONFIG. `samples` is the multi-sample consistency requirement
- * (INNER_BLOCKED_RULING_SAMPLES overrides it for tests).
+ * (--samples overrides it; INNER_BLOCKED_RULING_SAMPLES remains a test/ops override). `target` names
+ * WHO is being observed — it selects the per-target rolling counter and the recorded taskId/question
+ * (the observation primitive is direction-parameterized, AC1/AC5).
  *
  * @param {string} root
- * @param {{panePath?: string, nowMs?: number, samples?: number}} [opts]
+ * @param {{panePath?: string, nowMs?: number, samples?: number, target?: string}} [opts]
  * @returns {Promise<{state: string, confidence: number, consecutive: number, needsInput: boolean, condition: object|null}>}
  */
-export async function observePaneForRuling(root, { panePath, nowMs = Date.now(), samples = RULING_REQUIRED_PANE_SAMPLES } = {}) {
+export async function observePaneForRuling(root, { panePath, nowMs = Date.now(), samples = RULING_REQUIRED_PANE_SAMPLES, target = DEFAULT_TARGET } = {}) {
+  const t = resolveTarget(target);
   if (!panePath) {
     return { state: "unobserved", confidence: 0, consecutive: 0, needsInput: false, condition: null };
   }
@@ -749,32 +840,35 @@ export async function observePaneForRuling(root, { panePath, nowMs = Date.now(),
   try {
     paneText = fs.readFileSync(panePath, "utf8");
   } catch {
-    writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: nowMs });
+    writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: nowMs }, t);
     return { state: "unreadable", confidence: 0, consecutive: 0, needsInput: false, condition: null };
   }
   const cls = classifyPaneState(paneText);
   const needsInputShape = cls.state === "waiting-input" || cls.state === "permission-prompt";
   // waiting-input is suppressed while the session is waiting on its own background agent/task;
-  // permission-prompt is never suppressed (a dialog is a human-wait by definition).
+  // permission-prompt is never suppressed (a dialog is a human-wait by definition). The status-area
+  // "← N agent" shape check is a PURE PANE check and applies to ANY target (the outer/manager pane
+  // shows the same indicator when waiting on its own subagent); the telemetry in-progress bracket is
+  // INNER-LAYER telemetry, consulted only when observing inner.
   const inFlightAgent = cls.state === "waiting-input"
-    ? statusAreaShowsInFlightAgent(cls.region) || (await telemetryHasInProgressTask(root))
+    ? statusAreaShowsInFlightAgent(cls.region) || (t === "inner" && (await telemetryHasInProgressTask(root)))
     : false;
   const needsInput = needsInputShape && !inFlightAgent;
-  const prev = readRulingObserverState(root);
+  const prev = readRulingObserverState(root, t);
   // Capped at `samples` so the counter stays bounded once the threshold is reached (a persistent
   // needs-input state keeps re-verifying "still needs-input", not inflating an unbounded number).
   const consecutive = needsInput ? Math.min(prev.consecutiveNeedsInput + 1, samples) : 0;
-  writeRulingObserverState(root, { consecutiveNeedsInput: consecutive, updatedAtMs: nowMs });
+  writeRulingObserverState(root, { consecutiveNeedsInput: consecutive, updatedAtMs: nowMs }, t);
 
   if (consecutive < samples) {
     return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition: null };
   }
 
   const question = cls.state === "permission-prompt"
-    ? `inner pane shows a permission prompt — the inner is stopped on a dialog the outer must rule on (grant/deny), then run --clear`
-    : `inner pane has been waiting for input for ${consecutive} consecutive observations — the inner appears stopped without saying why; rule on what to do, then run --clear`;
+    ? `${t} pane shows a permission prompt — the ${t} is stopped on a dialog that needs a ruling (grant/deny), then run --clear`
+    : `${t} pane has been waiting for input for ${consecutive} consecutive observations — the ${t} appears stopped without saying why; rule on what to do, then run --clear`;
   const condition = {
-    taskId: "fast-mode-loop",
+    taskId: t === "inner" ? "fast-mode-loop" : t,
     reason: "ruling-required",
     question,
     evidence: [
@@ -800,56 +894,77 @@ export async function observePaneForRuling(root, { panePath, nowMs = Date.now(),
  * invocation.
  *
  * @param {string} root
- * @param {{transcriptPath?: string, panePath?: string, paneObservation?: object|null, nowMs?: number, stallMs?: number, samples?: number}} [opts]
+ * @param {{transcriptPath?: string, panePath?: string, paneObservation?: object|null, nowMs?: number, stallMs?: number, samples?: number, target?: string}} [opts]
  * @returns {Promise<Array<{reason: string, question: string, evidence?: string[]}>>}
  */
 export async function detectStopConditions(root, opts = {}) {
+  const target = opts.target ?? DEFAULT_TARGET;
   const found = [];
-  const conflict = detectMergeConflict(root);
-  if (conflict) found.push(conflict);
+  // The merge-conflict / transcript-composite / task-over-90m detectors are INNER-LAYER state
+  // (telemetry, git conflict, the inner's transcript). Watching outer/manager is the SCREEN
+  // OBSERVATION PRIMITIVE only — those inner-specific mechanical conditions do not apply to a
+  // non-inner target and must not fire while observing the outer/manager pane (AC1/AC5).
+  if (target === "inner") {
+    const conflict = detectMergeConflict(root);
+    if (conflict) found.push(conflict);
+  }
   const pane = opts.paneObservation ?? (await observePaneForRuling(root, opts));
   if (pane.condition) found.push(pane.condition);
-  const stall = await detectRulingRequiredStall(root, opts);
-  // Transcript composite is side evidence for "session actually dead" — but a BUSY pane proves the
-  // inner is actively working, so the stale-transcript heuristic must not override live screen
-  // evidence (AC4: busy never writes ruling-required, from ANY detector).
-  if (stall && !pane.condition && pane.state !== "busy") found.push(stall);
-  const over = await detectTaskOver90m(root);
-  if (over) found.push(over);
+  if (target === "inner") {
+    const stall = await detectRulingRequiredStall(root, opts);
+    // Transcript composite is side evidence for "session actually dead" — but a BUSY pane proves the
+    // inner is actively working, so the stale-transcript heuristic must not override live screen
+    // evidence (AC4: busy never writes ruling-required, from ANY detector).
+    if (stall && !pane.condition && pane.state !== "busy") found.push(stall);
+    const over = await detectTaskOver90m(root);
+    if (over) found.push(over);
+  }
   return found;
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────────────────────────────────
 
-const usage = `inner-blocked-signal.ts — explicit "inner is stopped and waiting" signal (gap-no-explicit-blocked-signal-from-inner-layer)
+const usage = `inner-blocked-signal.ts — explicit "who-is-waiting" observation signal, parameterized
+(gap-no-explicit-blocked-signal-from-inner-layer + gap-ruling-required-only-covers-outer-to-inner-
+not-manager-to-outer)
 
 Usage:
-  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--transcript <path>] [--pane <path>]
-  node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>]
-  node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>]
-  node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>]
-  node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>]
+  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--transcript <path>] [--pane <path>]
+  node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
+  node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
+  node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>] [--target <name>]
+  node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --schema
 
+--target <name> — WHO is being observed (AC1): "inner" (default) writes the legacy
+.quay/inner-blocked.json; any other filename-safe name ("outer", "manager", …) writes
+.quay/blocked-signals/<target>.json. inner/outer/manager are each observable with one call.
+--samples <N> — consecutive needs-input samples before a ruling-required condition (default 3,
+overridable; env INNER_BLOCKED_RULING_SAMPLES remains a test/ops override).
+--action <a> — the ACTION PLUGIN POINT (AC3): "write-file" (default) writes the block record;
+"notify" prints "detect-stop: BLOCKED <reason>: <question>" and writes nothing; "command" runs
+--action-command <cmd> with BLOCKED_CONDITION_JSON / BLOCKED_SIGNAL_PATH / BLOCKED_TARGET in the env.
+
 --detect-stop is the MECHANICAL trigger (AC1): it evaluates the mechanically-detectable stop
-conditions (merge-conflict, task-over-90m, ruling-required) and writes the block automatically when
-any holds, as a consequence of the stop-condition check the tick already runs. It clears a prior
-"auto" block when no condition holds; a "manual" block (judgment assert) is never auto-cleared.
---pane <path> additionally enables the ruling-required SCREEN observer (gap-ruling-required-trigger-
-is-dead-code-never-wired-into-any-tick) — the PRIMARY ruling-required trigger. The pane text is
-classified by classifyPaneState (pure SHAPE classification of the bottom region, ADR-016 Amendment:
-no whole-screen hash) and, after INNER_BLOCKED_RULING_SAMPLES (default 3) CONSECUTIVE waiting-input
-/ permission-prompt samples (60s poll ⇒ ~3min structural latency ≤ 5min p100 budget, AC2), a
-ruling-required stop condition is produced. busy / error-banner / unknown, a missing pane file, or
-an explicit --clear all reset the rolling counter (AC4). Explicit config, never inferred.
+conditions (for --target inner: merge-conflict, task-over-90m, ruling-required) and writes the block
+automatically when any holds, as a consequence of the stop-condition check the tick already runs. It
+clears a prior "auto" block when no condition holds; a "manual" block (judgment assert) is never
+auto-cleared. For a NON-inner target only the SCREEN observer runs (the observation primitive).
+--pane <path> enables the ruling-required SCREEN observer (gap-ruling-required-trigger-is-dead-code-
+never-wired-into-any-tick) — the PRIMARY ruling-required trigger. The pane text is classified by
+classifyPaneState (pure SHAPE classification of the bottom region, ADR-016 Amendment: no whole-screen
+hash) and, after N CONSECUTIVE waiting-input / permission-prompt samples (60s poll ⇒ ~3min structural
+latency ≤ 5min p100 budget, AC2), a ruling-required stop condition is produced. busy / error-banner /
+unknown, a missing pane file, or an explicit --clear all reset the rolling counter (AC4). Explicit
+config, never inferred.
 --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) additionally enables the "ruling-required"
-composite trace (gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger): transcript
-heartbeat stale ≥30m AND a task in-progress AND a clean working tree. Explicit config, never
-inferred; omitted ⇒ no-op, the other two conditions are unaffected. PRESERVED but no longer the
-primary ruling-required criterion (AC3) — it fires only when the pane observer produced nothing,
-as side evidence for "session actually dead".
---assert-blocked writes .quay/inner-blocked.json manually (for judgment conditions that cannot be
-detected from repo state, or when no --transcript is configured). The CLI is the ONLY writer — never
+composite trace (gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger; INNER-LAYER
+only — ignored for non-inner targets): transcript heartbeat stale ≥30m AND a task in-progress AND a
+clean working tree. Explicit config, never inferred; omitted ⇒ no-op, the other two conditions are
+unaffected. PRESERVED but no longer the primary ruling-required criterion (AC3) — it fires only when
+the pane observer produced nothing, as side evidence for "session actually dead".
+--assert-blocked writes the block record manually (for judgment conditions that cannot be detected
+from repo state, or when no --transcript is configured). The CLI is the ONLY writer — never
 hand-write the JSON.
 --clear records the wait duration into telemetry, then deletes the file, and resets the pane
 observer's rolling counter. --root defaults to the SHARED checkout root (a worktree invocation
@@ -885,7 +1000,10 @@ export async function main(argv) {
   // --schema — pure informational (AC1: the schema is defined here, not in a second doc).
   if (args.includes("--schema")) {
     console.log(JSON.stringify({
-      file: `.quay/${BLOCKED_FILE_NAME}`,
+      file: blockedFileRelPath(),
+      targets: { default: DEFAULT_TARGET, canonical: CANONICAL_TARGETS, nonInnerPath: `.quay/blocked-signals/<target>.json` },
+      samplesDefault: RULING_REQUIRED_PANE_SAMPLES,
+      actions: BLOCK_ACTIONS,
       schema: BLOCKED_RECORD_SCHEMA,
       reasons: VALID_BLOCKED_REASONS.map((r) => ({ [r]: REASON_DESCRIPTIONS[r] })),
       example: {
@@ -903,6 +1021,17 @@ export async function main(argv) {
   const rootArg = getArgValue(args, "--root");
   const root = rootArg ? path.resolve(rootArg) : findSharedRoot();
 
+  // --target <name> — WHO is being observed (AC1). Resolved once, fail-closed on a non-filename-safe
+  // name; every branch below threads it (inner ⇒ legacy .quay/inner-blocked.json, any other name ⇒
+  // .quay/blocked-signals/<target>.json).
+  let target;
+  try {
+    target = resolveTarget(getArgValue(args, "--target"));
+  } catch (e) {
+    console.error(`inner-blocked-signal: ${e.message}`);
+    return 1;
+  }
+
   // --assert-blocked
   if (args.includes("--assert-blocked")) {
     const taskId = getArgValue(args, "--taskId");
@@ -918,7 +1047,7 @@ export async function main(argv) {
       options = parseStringArrayArg(args, "options");
       evidence = parseStringArrayArg(args, "evidence");
       const rec = buildBlockedRecord({ taskId, reason, question, options, evidence });
-      const f = writeBlockedRecord(root, rec);
+      const f = writeBlockedRecord(root, rec, target);
       console.log(`inner-blocked-signal: blocked asserted (${reason}) — ${f}`);
       return 0;
     } catch (e) {
@@ -928,21 +1057,37 @@ export async function main(argv) {
   }
 
   // --detect-stop — THE MECHANICAL TRIGGER (AC1). Evaluates the mechanically-detectable stop
-  // conditions (merge-conflict, ruling-required from the pane observer, task-over-90m). Any condition
-  // holds ⇒ WRITE `.quay/inner-blocked.json` as a consequence (auto reason/question/evidence, source
-  // "auto"). None holds ⇒ clear a prior "auto" block. A "manual" block (an --assert-blocked with no
-  // matching mechanical condition) is NEVER auto-cleared — only an explicit --clear does that (AC3
-  // negative control). The tick file's step-3 stop-condition check IS this command, so the write
+  // conditions (for --target inner: merge-conflict, ruling-required from the pane observer,
+  // task-over-90m; for a NON-inner target: the ruling-required screen observer ONLY — the observation
+  // primitive, AC1/AC5). Any condition holds ⇒ the configured ACTION fires (AC3): default "write-file"
+  // writes the target's block record as a consequence (auto reason/question/evidence, source "auto");
+  // "notify" prints and writes nothing; "command" runs --action-command with the condition in the env.
+  // For write-file, none holds ⇒ clear a prior "auto" block. A "manual" block (an --assert-blocked
+  // with no matching mechanical condition) is NEVER auto-cleared — only an explicit --clear does that
+  // (AC3 negative control). The tick file's step-3 stop-condition check IS this command, so the write
   // happens on an action the inner already takes every tick — not because someone remembered to call
   // --assert-blocked.
   //
   // --pane <path> is EXPLICIT config for the PRIMARY ruling-required trigger (the screen observer —
-  // see observePaneForRuling). --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) is EXPLICIT
-  // config for the preserved-but-secondary composite trace (never inferred). INNER_BLOCKED_RULING_STALL_MS
-  // is a test-only override of the 30-minute threshold; INNER_BLOCKED_RULING_SAMPLES is a test-only
-  // override of the pane observer's multi-sample consistency requirement.
+  // see observePaneForRuling). --target <name> selects the signal namespace. --samples <N> overrides
+  // the consecutive-sample threshold (default 3). --action / --action-command select the post-detect
+  // reaction. --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) is EXPLICIT config for the
+  // preserved-but-secondary composite trace (never inferred; INNER-LAYER only). INNER_BLOCKED_RULING_STALL_MS
+  // is a test-only override of the 30-minute threshold; INNER_BLOCKED_RULING_SAMPLES remains a
+  // test/ops override of the pane observer's multi-sample consistency requirement.
   if (args.includes("--detect-stop")) {
     try {
+      const actionArg = getArgValue(args, "--action") ?? DEFAULT_BLOCK_ACTION;
+      const actionCommandArg = getArgValue(args, "--action-command");
+      const action = actionCommandArg !== undefined ? "command" : actionArg;
+      if (!BLOCK_ACTIONS.includes(action)) {
+        console.error(`inner-blocked-signal: invalid --action "${action}"; must be one of: ${BLOCK_ACTIONS.join(", ")}`);
+        return 1;
+      }
+      if (action === "command" && (!actionCommandArg || !actionCommandArg.trim())) {
+        console.error("inner-blocked-signal: --action command requires --action-command <cmd>");
+        return 1;
+      }
       const transcriptArg = getArgValue(args, "--transcript");
       const transcriptPath = transcriptArg
         ? path.resolve(transcriptArg)
@@ -954,22 +1099,27 @@ export async function main(argv) {
         : undefined;
       const paneArg = getArgValue(args, "--pane");
       const panePath = paneArg ? path.resolve(paneArg) : undefined;
-      const samplesOverride = process.env.INNER_BLOCKED_RULING_SAMPLES
-        ? Number(process.env.INNER_BLOCKED_RULING_SAMPLES)
-        : undefined;
+      const samplesArg = getArgValue(args, "--samples");
+      const envSamples = process.env.INNER_BLOCKED_RULING_SAMPLES;
+      const samplesRaw = samplesArg !== undefined ? samplesArg : envSamples;
+      const samplesOverride = samplesRaw !== undefined ? Number(samplesRaw) : undefined;
       const samples = Number.isFinite(samplesOverride) && samplesOverride >= 1
         ? Math.floor(samplesOverride)
         : RULING_REQUIRED_PANE_SAMPLES;
       const paneObservation = panePath
-        ? await observePaneForRuling(root, { panePath, samples })
+        ? await observePaneForRuling(root, { panePath, samples, target })
         : null;
       const found = await detectStopConditions(root, {
         transcriptPath,
         paneObservation,
         panePath,
         samples,
+        target,
         ...(Number.isFinite(stallMsOverride) ? { stallMs: stallMsOverride } : {}),
       });
+      // Stable target/signal line (Contract measure greps the namespace): printed for EVERY
+      // --detect-stop run so a watcher can see which target's signal this invocation owns.
+      console.log(`detect-stop: target=${target} signal=${blockedFileRelPath(target)}`);
       // Decision-branch field (Contract measure reads it): whenever the pane was evaluated, print a
       // stable, parseable line naming the shape, the branch (ruling-required | accumulating |
       // reset) and the consecutive-sample count.
@@ -984,7 +1134,42 @@ export async function main(argv) {
         );
       }
       const reasons = found.map((c) => c.reason);
-      const existing = readBlockedRecord(root);
+
+      // AC3 ACTION PLUGIN POINT — the post-detect reaction is caller-configured.
+      if (action === "notify") {
+        if (reasons.length) {
+          const cond = found[0];
+          console.log(`detect-stop: BLOCKED ${cond.reason}: ${cond.question}`);
+          return 0;
+        }
+        console.log("detect-stop: no stop condition; no block");
+        return 0;
+      }
+      if (action === "command") {
+        if (!reasons.length) {
+          console.log("detect-stop: no stop condition; no block");
+          return 0;
+        }
+        const cond = found[0];
+        const run = spawnSync("/bin/sh", ["-c", actionCommandArg], {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            BLOCKED_CONDITION_JSON: JSON.stringify(cond),
+            BLOCKED_SIGNAL_PATH: blockedFilePath(root, target),
+            BLOCKED_TARGET: target,
+          },
+        });
+        if (run.status !== 0) {
+          console.error(`inner-blocked-signal: action command failed (exit ${run.status}): ${run.stderr || run.stdout}`);
+          return 1;
+        }
+        console.log(`detect-stop: action command executed — ${actionCommandArg}`);
+        return 0;
+      }
+
+      // Default write-file action — the existing behavior, threaded with the target.
+      const existing = readBlockedRecord(root, target);
       if (existing) {
         if (existing.source === "manual") {
           console.log(
@@ -997,7 +1182,7 @@ export async function main(argv) {
           console.log(`detect-stop: still blocked (auto ${existing.reason}) — conditions persist: ${reasons.join(", ")}`);
           return 0;
         }
-        const res = clearBlockedRecord(root);
+        const res = clearBlockedRecord(root, target);
         console.log(
           `detect-stop: stop condition cleared — removed block (${res.record.taskId}, ${res.record.reason}), wait ${(res.durationMs / 1000).toFixed(1)}s`,
         );
@@ -1013,7 +1198,7 @@ export async function main(argv) {
           evidence: cond.evidence,
           source: "auto",
         });
-        const f = writeBlockedRecord(root, rec);
+        const f = writeBlockedRecord(root, rec, target);
         console.log(`detect-stop: STOP CONDITION — ${cond.reason} (auto-block written) — ${f}`);
         for (const extra of found.slice(1)) {
           console.log(`detect-stop: also: ${extra.reason} — ${extra.question}`);
@@ -1031,10 +1216,10 @@ export async function main(argv) {
   // --clear
   if (args.includes("--clear")) {
     try {
-      const res = clearBlockedRecord(root);
+      const res = clearBlockedRecord(root, target);
       // An explicit clear also resets the pane observer's rolling counter (the ruling landed / the
       // observation window ended — a stale needs-input streak must not linger and re-fire).
-      writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: Date.now() });
+      writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: Date.now() }, target);
       if (!res.cleared) {
         console.log("inner-blocked-signal: no block to clear");
         return 0;
@@ -1052,7 +1237,7 @@ export async function main(argv) {
   // --read — print the record JSON (or exit 1 when absent). Used by the readiness check and monitor.
   if (args.includes("--read")) {
     try {
-      const rec = readBlockedRecord(root);
+      const rec = readBlockedRecord(root, target);
       if (!rec) {
         console.error("inner-blocked-signal: no block");
         return 1;
@@ -1068,7 +1253,7 @@ export async function main(argv) {
   // --status — one line: "blocked <reason> <question>" or "clear". Exit 0 either way.
   if (args.includes("--status")) {
     try {
-      const rec = readBlockedRecord(root);
+      const rec = readBlockedRecord(root, target);
       if (rec) {
         console.log(`blocked ${rec.reason} ${rec.question}`);
       } else {
