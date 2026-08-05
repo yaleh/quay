@@ -5319,3 +5319,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   重生/写死驱动/硬编码三项目 = quay 特有）；默认禁用 + 全配置化。
 - **立案 gap-os-anchor-watchdog-lease-model-instead-of-absence-inference**（todo, defect）。
 - **现状**：watchdog 保持 active（维持运行中的循环；relaunch 路径 0 次未造成实害），租约重做落地后切换。
+
+### tick 2026-08-05T23:0xZ（内层，global-count fan-in + 人优先级 dispatch-tick-boundary 派发）
+
+- **global-count fan-in 完成（真实现）**：`test-file-snapshot.sh`（相对基线：snapshot+check，单一来源
+  `--list-files`；移除=真回归红、新增=允许）——B3-2 族已在 master 相对化（0e26e6a6，运行时关系断言）。
+  Touches 收敛到具体路径（agent 自做——顺带缓解池碰撞）。scoped 5/5 + 6/6 关系断言。worktree/branch 已清。
+- **人优先级 dispatch-tick-boundary 已派**（`fm-...-3uq0rx`，吞吐瓶颈——事件驱动回填槽位）：global-count land
+  后生产闸不再冲突，self-touch/resolve 过。**外层已接受并发更正**（b2cf2e23「correct-self：手测触摸不相交被
+  生产闸推翻——lesson：永不手测，用 checkTouchesPair」）。
+- 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。
