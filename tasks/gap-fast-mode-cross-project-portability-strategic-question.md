@@ -40,13 +40,103 @@ Phase 3 想回答的战略问题**本身仍然成立、仍然重要**：
 
 ## Acceptance Criteria
 
-- [ ] AC1: 新战略文档存在——陈述「fast-mode 双层循环能否真跨项目迁移，还是过拟合 quay」+ 为什么
+- [x] AC1: 新战略文档存在——陈述「fast-mode 双层循环能否真跨项目迁移，还是过拟合 quay」+ 为什么
       重要 + 可迁移/过拟合判据
-- [ ] AC2: 文档显式链接 meta-cc/archguard 冷启动为证据收集载体（不是孤立文档）
-- [ ] AC3: 判据可判——「可迁移」与「过拟合」各有 ≥2 条具体、可测的证据形状（实跑输出贴任务体）
-- [ ] AC4: 至少一条 meta-cc 或 archguard 冷启动的真实结果已记录到容器（非空，DIR-026 real-object）
-- [ ] AC5: 与 superseded 路线图交叉引用（`gap-roadmap-silently-stale-...` 的 AC3 提取）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若适用）
+      → `docs/proposals/fast-mode-cross-project-portability.md`（§1 问题陈述、§2 为什么重要、
+      §3 判据）
+- [x] AC2: 文档显式链接 meta-cc/archguard 冷启动为证据收集容器（不是孤立文档）
+      → 文档 §4「证据收集容器：meta-cc / archguard 冷启动」，每条冷启动结果回写为 `- [x]` 条目；
+      §6 交叉引用冷启动规格 `orchestration/SPEC-cold-start-one-liner.md`
+- [x] AC3: 判据可判——「可迁移」与「过拟合」各有 ≥2 条具体、可测的证据形状（实跑输出贴任务体）
+      → 文档 §3.1 可迁移 P1/P2/P3（≥2）、§3.2 过拟合 O1/O2/O3（≥2），每条带「可测判据」；
+      实跑输出见下「AC3/AC4 实跑输出」
+- [x] AC4: 至少一条 meta-cc 或 archguard 冷启动的真实结果已记录到容器（非空，DIR-026 real-object）
+      → 文档 §4 已录 7 条 `- [x]`（meta-cc 4 + archguard 3），含遥测 JSON、workflow 事件、
+      config 实读、git 历史；CONTRACT measure `portability_evidence_count` = 7（band ≥1）
+- [x] AC5: 与 superseded 路线图交叉引用（`gap-roadmap-silently-stale-...` 的 AC3 提取）
+      → 文档 §6 引用 `docs/proposals/quay-harness-crystallization-roadmap.md`（SUPERSEDED）§6
+      Phase 3 的战略问题转交；路线图自身也已交叉引用本任务（该任务 AC3 已提取）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若适用）
+      → `plugin/test/portability-strategy-check.test.mjs`（`// @test-group governance`，
+      实跑输出见下）
+
+### AC3/AC4 实跑输出（2026-08-05，`gap-fast-mode-cross-project-portability-strategic-question`）
+
+**CONTRACT measure（portability_evidence_count）** = 7（band ≥1；文档 §4 已录 7 条真实冷启动证据）：
+
+```text
+$ grep -c '^- \[' docs/proposals/fast-mode-cross-project-portability.md
+7
+```
+
+**CONTRACT invoke（`cat <战略文档路径>` 头部）**：
+
+```text
+$ head -12 docs/proposals/fast-mode-cross-project-portability.md
+# 战略文档：fast-mode 双层循环能否真正跨项目迁移，还是过拟合了 quay？
+
+**日期**：2026-08-05
+**性质**：战略问题钉住 + 证据收集容器（本文件不是路线图，无 AC/DoD——它是承载问题的容器；
+任务体 `tasks/gap-fast-mode-cross-project-portability-strategic-question.md` 驱动本容器的执行与回写）
+**关联**：
+- 原路线图 Phase 3：`docs/proposals/quay-harness-crystallization-roadmap.md`（**SUPERSEDED by
+  ADR-022 2026-08-03**；其 §6 把跨项目可迁移性战略问题转交本容器）
+- 调查：`orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`
+- 冷启动规格：`orchestration/SPEC-cold-start-one-liner.md`（安装/冷启动 8 步现状）
+- 执行任务：`tasks/gap-fast-mode-cross-project-portability-strategic-question.md`
+```
+
+**meta-cc（Go 项目）真实冷启动结果**：
+
+```text
+$ cat /home/yale/work/meta-cc/.quay/config.yml | grep -A5 loop:
+loop:
+  repo_root: /home/yale/work/meta-cc
+  test_command: go test ./...
+  tmux_session: meta-cc-3
+  worktree_root: /home/yale/work/meta-cc-worktrees
+
+$ cat /home/yale/work/meta-cc/milestones/fast-mode-telemetry/2026-08-05.json
+{"generatedAt":"2026-08-05T07:31:28.575Z","tasks":[
+  {"taskId":"DIR-102","minutes":22.03865,"outcome":"done"},
+  {"taskId":"DIR-103","minutes":12.021916666666666,"outcome":"needs-human"}], ...}
+
+$ tail -1 /home/yale/work/meta-cc/.workflow-events/fm-DIR-102-1785803348909-jfvc26.jsonl
+{"commandIdentity":"fast-mode-telemetry:task-end","eventKind":"end","executionCwd":"/home/yale/work/meta-cc","outcome":"done","taskId":"DIR-102",...}
+```
+
+**archguard（TypeScript 项目）真实冷启动结果**：
+
+```text
+$ grep -A4 'loop:' /home/yale/work/archguard/.quay/config.yml
+loop:
+  repo_root: /home/yale/work/archguard
+  test_command: npx vitest run
+  tmux_session: archguard-4
+  worktree_root: /home/yale/work/archguard-worktrees
+
+$ for f in /home/yale/work/archguard/.workflow-events/fm-*.jsonl; do tail -1 "$f" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('taskId'), d.get('eventKind'), d.get('outcome'))"; done
+TASK-53 end done
+TASK-54 end done
+TASK-55 end done
+TASK-56 end done
+TASK-57 end done
+TASK-58 end done
+TASK-59 end done
+TASK-60 start None
+TASK-61 start None
+```
+
+**AC6 测试**（`plugin/test/portability-strategy-check.test.mjs`，`node:test` + `// @test-group governance`）：
+
+```text
+$ node --experimental-strip-types --test plugin/test/portability-strategy-check.test.mjs
+✔ AC1/AC3/AC5: strategic doc pins the question, carries >=2 shapes per side, and cross-references the SUPERSEDED roadmap
+✔ AC2/AC4: doc names meta-cc/archguard as the vehicle and records >=1 real cold-start result
+✔ AC4 negative control: stripping all evidence entries makes the evidence audit go RED (empty container is caught)
+✔ task AC boxes (this task's own file) reference the strategic doc path for invoke evidence
+ℹ tests 4  ℹ pass 4  ℹ fail 0
+```
 
 ## Definition of Done
 
@@ -57,9 +147,11 @@ Phase 3 想回答的战略问题**本身仍然成立、仍然重要**：
 ## Touches
 - tasks/gap-fast-mode-cross-project-portability-strategic-question.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
-- docs/proposals/quay-harness-crystallization-roadmap.md（或替换文档）
-- orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md
-- （meta-cc/archguard 冷启动的证据回写位置）
+- docs/proposals/fast-mode-cross-project-portability.md（新增：战略问题钉住 + 证据收集容器）
+- docs/proposals/quay-harness-crystallization-roadmap.md（交叉引用：SUPERSEDED 路线图 §6）
+- orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md（引用）
+- plugin/test/portability-strategy-check.test.mjs（新增：AC1–AC5 机械检查，`// @test-group governance`）
+- （meta-cc/archguard 冷启动的证据回写位置 = 容器 §4）
 
 ## Contract
 
