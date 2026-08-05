@@ -3997,3 +3997,48 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   处理 leak teardown + cold-start 修复。信号是噪音不是冻结（它自己推进）。
 - **ROUND 3 三修复已验证**（M3/AC16/NBSP scoped 全 PASS）；套件 ABORT #4（session-liveness 族须单独跑）。
 - 内层持续推进，无需干预。
+
+### tick 2026-08-05T10:1xZ（内层，冷启动后 dispatch：tmux-leak 最高优先，新 AC2）
+
+第四次全灭后全新会话冷启动。假信号已清、套件已恢复 running（scoped-full 验证在跑，乐观派发照常）。
+
+- **监控**：Monitor 三判据全过（mounted=true / targetRoot=本仓 / delivered=true，eventsFresh）。
+- **停止条件**：`--detect-stop --pane` → pane_decision=busy，consecutive=0/3 → **无阻塞**；无 `.halt`。
+- **就绪池**：pool=27 / floor=12 / dispatchable_disjoint=12（cap=3）——无需补晋。
+- **派发前闸**：
+  - Touches resolve：0/7 缺失 ✓
+  - **Self-touch 原 MISSING**（机制已 done 但 ready 池未回填——31 条 ready 全缺自文件）→ 补
+    `tasks/<id>.md` 到 leak 任务 Touches（commit `93749b38`），scan 通过后派发。
+  - **并发闸机械 DEFERRED**（leak 的 `orchestration/`+`plugin/scripts/` 宽 glob vs os-anchor 重叠）——
+    管理者明确指令最高优先派发，两在飞 agent（os-anchor 2004927 / web-board 2004986）均 worktree
+    隔离、fan-in 串行 → **按指令派发，override 记录在此**（非静默违反）。
+- **派发**：`gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`（后台 Agent，
+  worktree `/home/yale/work/quay-worktrees/tmux-leak`，branch `task/<id>`）。telemetry
+  `fm-...-d1niqc`。驱动文本明示：**新 AC2（kill-session -t，禁 kill-server）+ 必跑负控制**（管理者
+  第四次全灭=env 丢失→默认 socket 清空全机 tmux）+ AC2b（quay-init-tmux-detection 4 处 kill-server
+  改 kill-session）+ AC2c（-S 显式路径）+ AC1 套件尾断言 + AC4 多轮稳定性。**不实现撤回版**。
+- **并发**：3/3 满（os-anchor + web-board + tmux-leak）。
+- **遥测**：inProgress 3（os-anchor / web-board / tmux-leak）；tasksPerHour 1.394（窗口 71.7h）。
+- **系统性 gap（记入待查，非本次阻塞）**：31 条 ready 任务全缺 self-touch——自我接触机制已 done 但
+  ready 池未回填；本次按 tick 4.4 逐任务补丁。建议后续批量回填 + 让 ready-pool-check 报
+  missingArtifacts 覆盖 self-touch。
+
+### tick 2026-08-05T10:1xZ（外层，冷启动恢复 + 套件 red 分诊）
+
+**第四次全灭后冷启动恢复（09:5x–10:1xZ）**：
+- **管理者 5 件事全部完成**：①读机制文件（外层模板 plugin/loop/orchestrator-loop-tick.md，部署位缺失已铺回）；②cron 重建（6a62788b，loop-driver-check LIVE）；③leak 任务 AC2 重写已提交（1a823268，master 上是新版本，inner worktree 读不到旧 kill-server 版）；④实况建立（pool 27/dispatchable 12）；⑤假信号裁定+clear（cold-start-key4：bracket 闭合+翻 done+clear，wait 2834.6s 入账）。
+- **Monitor 重挂**（三判据全绿）+ **suite-state-trigger 重挂**（node 前缀，SUITE-RED/RUNNING 事件正常）。
+- **泄漏清理**：隔离测试又泄漏 3 个 tmux server，已按 RUNBOOK kill-session/kill -TERM 清（quay-0 存活）。
+- **ABORT #4 分诊**：full-suite.log 0 逻辑失败，卡死 KNOWN-LOAD-SENSITIVE session-liveness 族（低负载隔离也超时，套件级不可行）；无肇事 merge。round 3 已记录。
+- **scoped-full runner 起跑**（bm66azgca，排除 KNOWN-LOAD-SENSITIVE 族）——**发现 12 天既有 RED**：chart2-s2-delivery-completeness 3 断言 stale（evidence 07-24 已翻 true，断言仍 both false/cov 0.0，DELIVERY-C/D 漏同步）。已建任务 gap-chart2-s2-test-assertions-stale-after-delivery-c-d。
+- **驱动 inner 冷启动**（已送达，Crunching 中）。inner 会读到 suite-state=red 停派发——待 scoped-full 跑完确认仅 chart2-s2 失败后处置。
+- **部署位 tick 文件缺失发现**：orchestrator-loop-tick.md / fast-mode-loop-tick.md 不在磁盘（仅模板），quay-init 未铺出。已铺回，缺口待记录。
+- **web-board 残留**：gap-web-board-needs-an-inconsistency-verdict 是「promote 但未实现」（AC 0 勾选、分支空 merge、worktree 干净），非真在飞。bracket reconcile 保留待判。
+
+### tick 2026-08-05T10:2xZ 增补（管理者紧急报警 + ABORT #5）
+
+- **ABORT #5（10:2xZ，管理者报警 + 外层核实）**：scoped-full runner 实测 `--test-concurrency=8 --test-concurrency=8`（两个 8）——外层显式传 8 + test.sh 拼默认 8。有效并发 8（nproc=4，AC5 派生应为 1）。PSI cpu 88、resource-gate WAIT、load 15.77，同 ABORT #1/#3/#4 形态。**已立即中止**（kill runner 进程树 + 孤儿 test proc），load 回落 6.8。
+- **根因（管理者预警兑现）**：①runner laneCount 默认硬编码 8（非 nproc 派生）；②--test-concurrency splice 是 append 非 replace；③runner 从不调 resource-gate（WAIT 态开跑）。已建任务 gap-full-suite-runner-concurrency-default-and-gate（三条同一次改动）。
+- **chart2-s2 是唯一真失败**（ABORT 前）：12 天既有 RED，已建 gap-chart2-s2-test-assertions-stale-after-delivery-c-d。
+- **inner 正常推进**：冷启动完成、第一个 tick 执行完毕，leak 任务 subagent 在飞（已读到新 AC2，kill-session 8 处）。无 blocked。load 6.81 恢复。
+- **套件验证策略**：runner 结构修复 + chart2-s2 修复后才重跑。当前 suite-state=red+aborted（ABORT #5）。
