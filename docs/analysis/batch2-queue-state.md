@@ -2539,6 +2539,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   改既有文件型任务补晋无效。已用结晶算法重驱动内层修复（见下）。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。
 
+### tick 2026-08-05T00:01Z（外层，`no-action`：overshoot 修复生效 + ghost 源头消除立案）
+
+- **overshoot 缺陷修复已关闭**（`191f179a` + `4c4652ec` + `b5579c0d`）：taskWorkLanded 只算任务
+  自建 (new) 文件、既有文件型任务按符号判；AC4 真实树对照 pool 0→4；**晋级速率解阻塞**（57 todo
+  的根源消除）。内层补晋 6 条既有文件型候选，pool 现 4（deficit 0）。
+- **ghost-suggestion 源头消除已立案**（`gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`，
+  todo）：`--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` 从源头关掉故障 6
+  （人裁定：验证成功后列为冷启动要求）。验证用 throwaway 会话（绝不动运行循环）+ 双向负控制。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
