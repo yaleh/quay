@@ -168,3 +168,14 @@ AC3 负向（`pool < floor` 但 `dispatchable_disjoint ≥ cap` ⇒ 不误报）
 补晋后池可达 `dispatchable_disjoint ≥ cap(3)`。带 `--in-flight` 时排序纳入在飞：
 `--in-flight gap-closure-sync-…,gap-drive-text-…` 后 promotion 前 5 的 `disjointScore` 升至 5/5
 （3 池 + 2 在飞）。DoD 全量套件绿由外层 verification-round 判（SCOPED ONLY 下任务内不可知），未勾。
+
+**Re-verification note（2026-08-05，inner 独立复验——工作已在 master `be2037d1` 落地，本 dispatch 复验）**：
+`bash scripts/test.sh --for-task gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness --allow-thin`
+全绿（`tests 19 · pass 19 · fail 0 · cancelled 0 · exit 0`），静态档位
+（test-framework-policy / test-isolation / task-contract strict-subset / drive-contract）全 PASS。产物已含
+AC1 floor=cap×4（`computePoolFloor` 单一来源）、AC2 `dispatchable_disjoint`（`checkTouchesPair` 同源
+expander）、AC3 池大自报 + 负向不误报、AC4 补晋 disjointness 排序（池+在飞）、AC5 touchesResolve 守卫、
+AC6 成本不对称头注、AC8 `node:test` + `@test-group governance`。实时池当前已恢复健康
+（`pool 26/12 · dispatchable_disjoint 11/3 · criterion_met true`——正是补晋机制运转的实证）。backward
+compat 复核：`pool`/`deficit`/`ready`/`excluded`/`candidates`/`promotions`/`scanned`/`floor` 字段全部保留
+（`floor` 语义由硬编码 3 → cap×4，即本任务修正本身），无下游消费者解析该 JSON 形状。
