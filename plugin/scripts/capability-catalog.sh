@@ -117,6 +117,7 @@ declare -A QUESTION=(
   [routine-scheduler.ts]="Which routine probes are due to run now?"
   [run-identity.ts]="What is this run's canonical identity (reproducible handle)?"
   [runtime-usage-inventory.ts]="What does the two-layer mode actually run, and is any of it unaccounted?"
+  [select-static-checks-for-touches.ts]="Which static checks should a scoped run execute for this change's touched files (change-relevant tier)?"
   [select-tests-for-touches.ts]="Which tests should run for this task's ## Touches?"
   [send-keys-reliable.sh]="Did the reliable five-step send-keys sequence land in the foreign session?"
   [send-keys-verified.sh]="Did the C-u → text → Enter send-keys sequence deliver to the target pane?"

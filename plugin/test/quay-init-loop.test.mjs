@@ -199,20 +199,24 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     assert.ok(!all.includes('myproj-0:0.0'), 'laid-down tick docs must NOT contain the target tmux session (AC3)');
     // No quay-specific literals either (the old substitution inputs are gone from the docs).
     // AC4 (b53f7402/gap-load-sensitive-session-family-confounds-step-three): the SHIPPED
-    // fast-mode-loop-tick.md now legitimately carries a KNOWN-LOAD-SENSITIVE annotation naming
-    // the quay test command (`scripts/test.sh plugin/test/session-liveness.test.mjs
-    // plugin/test/cold-start-skill.test.mjs`). The byte-identity assertion above already pins the
-    // laid-down doc to the product. The negative control's intent is unchanged — a config-driven
-    // install must not BAKED-IN target values — so `scripts/test.sh` is allowed ONLY as part of
-    // that fixed annotation (every line carrying it must also name the load-sensitive family's
-    // test files), never as a bare baked-in value.
-    const scriptsTestLines = all.split('\n').filter((l) => l.includes('scripts/test.sh'));
-    assert.ok(scriptsTestLines.length > 0,
-      'the shipped tick doc must carry the KNOWN-LOAD-SENSITIVE annotation naming scripts/test.sh (b53f7402)');
-    for (const l of scriptsTestLines) {
-      assert.ok(l.includes('session-liveness.test.mjs') && l.includes('cold-start-skill.test.mjs'),
-        `scripts/test.sh must appear only in the KNOWN-LOAD-SENSITIVE family annotation, got: ${l}`);
-    }
+    // fast-mode-loop-tick.md carries a KNOWN-LOAD-SENSITIVE annotation naming the load-sensitive
+    // family via the CONFIG-DRIVEN generic name `$TEST_COMMAND` (gap-full-suite-belongs-to-outer-
+    // background reframed the literal `scripts/test.sh` → `$TEST_COMMAND`: the config-driven doc
+    // must not name the quay-repo-specific path, and the inner side greps `scripts/test.sh` to 0).
+    // The byte-identity assertion above already pins the laid-down doc to the product. The negative
+    // control's intent is unchanged — a config-driven install must not BAKED-IN target values — so
+    // the annotation must name the family's test files via the generic command, never a bare value,
+    // and the repo-specific `scripts/test.sh` literal must not appear anywhere in the docs.
+    const klsLines = all.split('\n').filter((l) => l.includes('KNOWN-LOAD-SENSITIVE'));
+    const familyCmdLines = all.split('\n')
+      .filter((l) => l.includes('$TEST_COMMAND')
+        && l.includes('session-liveness.test.mjs') && l.includes('cold-start-skill.test.mjs'));
+    assert.ok(klsLines.length > 0,
+      'the shipped tick doc must carry the KNOWN-LOAD-SENSITIVE marker (b53f7402)');
+    assert.ok(familyCmdLines.length > 0,
+      'the KNOWN-LOAD-SENSITIVE baseline annotation must invoke the load-sensitive family via $TEST_COMMAND');
+    assert.ok(!all.includes('scripts/test.sh'),
+      'laid-down tick docs must NOT name the quay-repo-specific scripts/test.sh (config-driven; full-suite-to-outer reframe)');
     assert.ok(!all.includes('/home/yale/work/quay'), 'laid-down tick docs must NOT contain the quay dev-tree root (AC8 negative control)');
     assert.ok(!all.includes('quay-0:0.0'), 'laid-down tick docs must NOT contain quay tmux session');
 

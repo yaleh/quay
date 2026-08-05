@@ -183,10 +183,12 @@ test("AC5 — formula derives max(1, floor(nproc/amp)); default is TEMPORARILY o
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  // All FOUR invocation sites must use the derived default: 3 `exec node --test ...` lines
-  // (run_selected, --group-explicit, explicit-file) + 1 `node --test ...` line (--for-task, no exec).
+  // All FIVE invocation sites must use the derived default: 4 `exec node --test ...` lines
+  // (run_selected, --group-explicit, explicit-file, --scoped <file...>) + 1 `node --test ...`
+  // line (--for-task, no exec). The --scoped <file...> site was added by
+  // gap-scoped-runs-pay-full-static-check-overhead and correctly uses the derived default.
   const allSites = src.match(/node --test --test-concurrency="\$\(default_test_concurrency\)"/g);
-  assert.equal(allSites.length, 4, `expected 4 derived-concurrency invocation sites, got ${allSites.length}`);
+  assert.equal(allSites.length, 5, `expected 5 derived-concurrency invocation sites, got ${allSites.length}`);
   assert.doesNotMatch(src, /--test-concurrency=8/, "no hardcoded 8 may remain in test.sh");
 });
 
