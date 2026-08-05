@@ -3138,3 +3138,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   prepare-milestone（no-promote 裁定，AC8 过滤未接池机制，记录）。
 - 无停止条件、无 BLOCKED；1 agent（c 块）token 上升；loop-driver LIVE。下轮 verification-round 用
   full-suite-runner（后台）+ 捕获 AC6(i)/AC5 实跑证据。
+
+### tick 2026-08-05T03:45Z（外层，`unblock`：人裁定池 floor 缩放 + 补晋 disjointness → 立案 ready-pool 机制任务）
+
+- **人裁定 + 管理者实测**：pool=2 / floor=3 / deficit=1——**就绪池比并发上限还小**（并发 3），58 todo
+  积压。**人的裁定**：floor 应 ~10× 并发上限（并发 3 ⇒ floor ~30）——池供给的是「3 条互不冲突任务」，
+  今晚 3 条 2 条同触 loop 文档，floor=3 零缓冲任一冲突就空槽。**成本不对称**：过量晋级 = 前移非浪费
+  （四件套迟早要写）、欠量 = 空槽纯浪费 ⇒ 偏向过量；touchesResolve 兜陈旧（ADR-022 8 条 ready 教训）。
+- **第二条缺口**：§3.6 补晋 gap>DIR 不看触摸相交性 ⇒ 补进来全撞一起，floor 30 也凑不出 3 条并发。
+  **两条一起才有效。**
+- **已立案 `gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness`**（ready，dod
+  通过）：POOL_FLOOR = 并发 × 10（可配）+ 补晋排序纳入与在飞/池内候选的 disjointness（checkTouchesPair）
+  + touchesResolve 守卫保留 + 补晋应用机械化 + 成本不对称文档化。ready-pool-check 产品机制修正。
+- 在飞：closure-grant (c) 11m+；scoped 门控后。
