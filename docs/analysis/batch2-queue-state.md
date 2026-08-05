@@ -3020,6 +3020,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **无在飞**：槽位全空。等外层 ROUND 3 verification-round（全量 gate + 关括号 + 翻 done）。新契约下
   inner 不跑全量、不关括号、不翻 done。loop-driver LIVE。
 
+### tick 2026-08-05T06:0xZ（内层，`dispatch`：关键路径冷启动 key4，ROUND 3 running 乐观窗口）
+
+- **外层关键路径裁定**：meta-cc/archguard 启动唯一任务周期 = cold-start SKILL.md AC8c 键 4 仍教
+  send-keys-verified.sh 哈希判据（F 判 superseded、假阳性 3 次）；替代品 send-keys-reliable.sh +
+  transcript-delivery-check.ts 已造好测过同目录。ROUND 3 套件 running 中 → 乐观派发（red-window
+  executor 在动，池有可派即派，不待轮）。
+- **派 `gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash`**（ready，关键路径，不排队）→ 空槽，
+  bracket 已开（fm-...-vx2eq6）。机制：键 4 判据换可靠发送（transcript 出现该驱动文本 user message =
+  可信送达，Fault 5）+ AC2 grep 哈希 0 命中 + F 交叉标注 + CRYSTALLIZED-reliable-send 引用 +
+  manager-layer umbrella 交叉标注。触 SKILL.md + 2 引用文件。
+- **在飞 1**：coldstart-key4。ROUND 3 套件 running（乐观照常派发）。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
