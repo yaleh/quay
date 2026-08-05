@@ -205,9 +205,11 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 读队列文件。若与 `git log` / `git worktree list` 不一致，**以 git 为准**并修正文件——文件可能是 compact 前的旧快照。
 
-### 2. Fan-in 已返回的任务（合并串行，全量套件批量）
+### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 
-**先逐个合并，再统一跑一次全量套件。**
+**只合并与清理，不写任何任务状态。** 全量套件验证已从 inner 移除——它是外层的验证 gate
+（`orchestrator-loop-tick.md` 步骤 1b「异步验证例程」），inner 的停止条件只读外层的
+`verification-round` 结果文件（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、不写 `--task-end`**。
 
 对每个已返回但未合并的 subagent，逐个：
 
@@ -224,22 +226,13 @@ bash plugin/scripts/monitor-mount-check.sh --json
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
 
-全部合并完成后，**跑一次**全量 `$TEST_COMMAND`：
+合并完成后对每个已合并任务做**合并清理**：`git worktree remove` + `git branch -d`。这只是清理
+worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层异步做（`orchestrator-loop-tick.md`
+步骤 1b），inner 不需要也不应该碰。
 
-5. 非绿 → **立即停止**，不再合并任何东西；逐个回退或 `git bisect` 定位是哪个 merge 导致，报告
-6. 绿 → 对每个已合并任务：`git worktree remove` + `git branch -d`，关闭任务状态（AC 和 DoD 都勾；勾不上写理由或留 `ready`），记录耗时
-
-**Land 时刻落盘汇总（必做，gap-telemetry-report-writes-and-deadlocks-readiness）**：全批合并 + 关闭完成后
-跑一次显式 `--snapshot`，否则被 git 跟踪的聚合文件不会反映本批结果（`--report` 已是纯读、不落盘，
-聚合只随 `--snapshot` 变化）：
-```bash
-node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot
-```
-落盘后随本 tick 的正常提交一起提交，**不要**为聚合单开「refresh telemetry aggregate」式提交。
-
-**为什么批量：** 全量套件 ~7 分钟（418s 实测）。逐个合并各跑一次，3 个任务就是 21 分钟纯重复。批量后 7 分钟。B2/B3 这批 5 个任务在旧方式下花了约 35 分钟在重复跑同一套件上。
-
-**不削弱任何断言**——合并仍逐个、每个仍有选中集把关、全量仍然跑，只是把全量的验证点从「每次合并」移到「一批合并」。红了用 bisect 定位，比省下的时间便宜。
+**全量套件验证为什么不在 inner 跑**：旧的「全部合并后跑一次全量」+「绿 → 写任务状态」就是批次
+同步点——同步期间零新派发，写状态变成调度边界。全量 gate 移给外层（验证 gate，见步骤 3 的停止
+条件），inner 只保留逐任务的 `--for-task` 选中集把关（秒级）。
 
 **合并本身必须串行。** 并发合并会在共享工作树上撞车。
 
@@ -265,7 +258,9 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 - **机械检测**可判定条件：**合并冲突**（git 有未解决路径）、**任务超 90 分钟**（遥测
   in-progress > 90m）。任一成立 ⇒ **自动**写入 `.quay/inner-blocked.json`（带 `reason` + 可行动
   `question` + `evidence`，`source:"auto"`）——**写入是检测本身的后果**，你跑的这条命令就是停止
-  条件检查，不存在「忘了写阻塞信号」这回事。
+  条件检查，不存在「忘了写阻塞信号」这回事。**OVER90 注意（2026-08-05 起）**：遥测括号由外层异步
+  闭合（`orchestrator-loop-tick.md` 步骤 1b），in-progress 会因此多算至多一个外层 tick 的滞后——
+  命中 OVER90 时先核对是不是「外层尚未闭合该括号」而非真超时，避免把运行 70–90 分钟的任务误判。
 - **`ruling-required` 的屏幕观察者（`--pane`）**：`classifyPaneState` 只读 pane 的**底部区域**
   （输入框 + 状态行，ADR-016 修订 boundary b——**不做整屏哈希**），分类成五态之一。连续
   `INNER_BLOCKED_RULING_SAMPLES`（默认 3）次 `waiting-input` / `permission-prompt` ⇒ 写
@@ -288,7 +283,11 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 - **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
   它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
   不是仓库里 needs-human 的总数。分诊规则见 `orchestrator-loop-tick.md` 步骤 3）
-- 上一步全量 suite 非绿
+- **外层最近 verification-round 非绿**：读 `.quay/verification-round.jsonl` 最后一条的 `suiteGreen`，
+  `false` ⇒ 停止派发。**文件缺失 ⇒ 不阻塞**（这是外层异步活，缺只说明外层还没跑到第一轮，不是套件
+  红；等下一 tick 再读）。注意该文件有至多一个外层 tick 的滞后——inner 刚合并的任务可能还没被外层收进
+  一轮，读到的「绿」是上一轮的；这是异步设计的固有窗口，外层下一轮会追上（见
+  `orchestrator-loop-tick.md` 步骤 1b）
 - 就绪队列为空
 - 对抗审查 2 轮后仍 REFUTED、队列文件与 git 状态矛盾且无法判定（判断边界表）
 
@@ -301,12 +300,8 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-sta
 # 记下打印的 runId
 ```
 
-fan-in 关闭任务时：
-
-```bash
-node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts \
-  --task-end --taskId <id> --runId <r> --outcome <done|needs-human|abandoned>
-```
+inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步写**（`orchestrator-loop-tick.md`
+步骤 1b），inner 不需要也不应该调它——`--report` 的 `inProgress` 在外层闭合前会显示在飞，这是预期。
 
 **这不是可选步骤。** 工具在 B2-1 造好并合并了，但截至 2026-08-02 11:08 `--report` 返回
 `{tasks: [], tasksPerHour: 0}`——一次都没被调用过。所有耗时数字仍靠 commit 时间戳反推，
@@ -393,7 +388,7 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 | 情况 | 动作 |
 |---|---|
 | 合并冲突 | abort，needs-human，停止派发 |
-| 全量 suite 非绿 | 立即停，不再合并 |
+| 外层 verification-round 结果非绿 | 停止派发（读 `.quay/verification-round.jsonl` 最后一条 `suiteGreen`；文件缺失不阻塞，等下一 tick） |
 | 对抗审查 2 轮后仍 REFUTED | 标 needs-human，停止该任务 |
 | 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |
@@ -550,8 +545,9 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 在飞任务及其已运行时长
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
-- 遥测吞吐：`tasksPerHour`（= 收尾任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/`windowHours`
-  ——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发无关）
+- 遥测吞吐：`tasksPerHour`（= `--task-end` 闭合任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/
+  `windowHours`——2026-08-03 起口径由 `60/均耗时` 修正，旧量更名为 `serialEquivalentPerHour`，与并发
+  无关；`--task-end` 由外层异步写，见 `orchestrator-loop-tick.md` 步骤 1b）
 - 阻塞信号状态（步骤 3 `--detect-stop` 的输出：命中了哪些停止条件、`.quay/inner-blocked.json`
   存在与否；存在则报 `reason` + `question`，以及 `fast-mode-telemetry --report` 的累计死时间/单次最长
   ——2026-08-03 起该数有基线）
