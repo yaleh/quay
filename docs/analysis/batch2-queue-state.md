@@ -3787,3 +3787,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   50 次 fail-loud——但那是内层真实输入被误当 placeholder（非 fresh），判据待内层修。
 - **驱动中**：内层正在处理管理者的资源门消息（已形成 archguard 裁决），等它空闲后驱动 no-resource-
   awareness 修复（laneCount+gate+reason 一并）。
+
+### tick 2026-08-05T07:55Z 增补（管理者 07:41Z：四条发现 + 外层 laneCount 自曝）
+
+- **laneCount 字段失真（外层自曝）**：07:37 重跑 note 写「laneCount explicitly 1」但 JSON 字段是 8——
+  外层**没传 `--lane-count 1` 却声称传了**，实际跑的是默认 8。已改 note 诚实记录；重跑时必须显式传
+  `--lane-count 1`（管理者①指示的临时形态，绕过硬编码 8）。
+- **管理者的 cron 信号坏（自曝）**：task/ 分支残存数当派发信号是错的——残存代表最老未合并分支；
+  **全部干净合并时零分支残存 = 健康时报最严重假警**（17h「无派发」）。换真信号：fan-in merge 提交
+  （最近 05:52，距今 108min）。
+- **红窗吞吐实测（比之前任何数字都硬）**：108 分钟零任务落地，全被红窗 triage + 资源中止 + 重跑吃掉；
+  池 24 就绪 / 10 互不相交一直挂着。内层 6a950975 transcript 07:35 仍在写 = 一直在干活。
+- **遥测路径漂移（外层已修）**：CLAUDE.md 写 `.quay/fast-mode-telemetry.jsonl` 实测不存在；代码写
+  `milestones/fast-mode-telemetry/<date>.json`（机制活着，路径漂移）。CLAUDE.md:140 已修正。
+- **当前**：资源门 WAIT（PSI 80，Go 编译 modernc.org/sqlite 瞬时 82% CPU）；内层 ACTIVE（验证 archguard
+  闭环）；M3 验证套件待 gate GO + --lane-count 1 后跑。
