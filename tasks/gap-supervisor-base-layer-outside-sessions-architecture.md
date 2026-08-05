@@ -69,6 +69,13 @@ extra:
 - 形式化三约束：规则引用状态字段名不复述状态；每条规则有机械挂载点；禁止手写逃生舱
   （note 那次说明逃生舱位置 = 缺失字段位置）
 
+**隔离与资源治理细则（SPEC-isolation-and-resource-governance-2026-08-05.md，管理者规格）**：
+**限额不可被绕过**——resource-gate 曾被绕过（ABORT #5 实测 runner 0 次调用），cgroup 限额无法被
+「忘记调用」。**次序：-p 迁移 → 容器化**（先迁 -p 使投递从 TUI 注入变进程，跨容器自然退化队列问题；
+反着做把最脆弱通道叠网络复杂度）。**容器边界**：宿主留 supervisor/watchdog/共享状态/manager；
+每项目一容器（outer+inner+工作树+套件）；跨边界只留 deliver()/observe() 两窄接口。**中间步**：
+systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops）。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **三层判据可用**——任何新机制归属判据（基座→进 CC/outlive 会话；机件→可执行；行为→
@@ -91,20 +98,27 @@ extra:
       实现时：六实体各恰一个写入者；名词进代码动词留文本；规则引用字段名不复述；每条规则有机械
       挂载点；禁止手写逃生舱（逃生舱位置 = 缺失字段位置）。实测「一个事实六个源四个答案」为验收基
       准——实现后问「几个任务在飞」各源答案应一致
+- [ ] AC9: **容器化边界与次序**（SPEC-isolation-and-resource-governance-2026-08-05.md）——supervisor/
+      watchdog/共享状态/manager 留宿主；每项目一容器；跨边界只留 deliver()/observe() 两窄接口；
+      **次序：-p 迁移 → 容器化**（先迁 -p 后容器，不反着做）；systemd-run 限额为前置中间步
+      （tasks/gap-systemd-run-limits-for-suite-and-heavy-ops）
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上；落地次序①②③完成 + ④⑤有对应任务
+- [ ] AC1–AC9 全部勾上；落地次序①②③完成 + ④⑤有对应任务
 - [ ] 基座层从三会话抽出（supervisor 在，不随会话死）；机件走 MCP、行为留文本；越界判据在
 - [ ] 「几个任务在飞」单一答案（遥测/阻塞/会话状态/槽位账本一致，实测输出贴任务体）
+- [ ] systemd-run 限额下套件可跑（AC9 前置，gap-systemd-run 任务落地）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
 - orchestration/SPEC-integration-architecture-2026-08-05.md（引用）
 - orchestration/SPEC-state-crystallization-2026-08-05.md（AC8 引用）
+- orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md（AC9 引用）
 - tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md（AC4：= 落地①）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC4：= 落地②）
+- tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md（AC9 前置）
 - plugin/scripts/（supervisor 若成：基座层实现，后续步骤）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC6 记账引用）
 
