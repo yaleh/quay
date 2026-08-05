@@ -670,6 +670,15 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
    ——inner 核对发现需补队/派发时，照 `fast-mode-loop-tick.md` 步骤 3.6/4 自己的规则执行，不是重锚
    prompt 给的新指令。
 5. **每个 tick 必报**：本轮是否转发重锚、转发时 inner 的空闲判据（哪条观察判据成立）。
+6. **重锚有效性 = 语义收敛（自述措辞审计，`gap-reanchor-must-converge-inner-self-reported-vocabulary`）**：
+   重锚的有效性以**语义收敛**度量（`reanchor_effectiveness_is_convergence = 1`），不是「重锚发生了」
+   ——锚点通道存在 ≠ 词汇收敛（inner 会把历史批措辞内化成自己的组织方式，doc 侧改不到）。每次重锚后
+   对 inner 最近自述（commit subject / fan-in 注记 / 收尾汇报）跑
+   `node --experimental-strip-types plugin/scripts/self-report-vocab-audit.ts --git-log 15
+   --exclude-prefix outer: --window 3 --json`，读 stdout 的 `inner_self_report_vocab` 字段（连续 3 轮
+   无 batch 式自述 = 收敛）与 `converged`。「Batch of N fully merged」式门控汇报 = 漂移（被审计标记）；
+   verification-round-N / 滚动派发语义 = 合规。**每个 tick 必报**本轮 `inner_self_report_vocab` 与
+   收敛状态。
 
 **为什么「空闲才转发」**：重锚是「给 inner 一个周期读出厂文档的机会」，不是催活。inner 忙时
 （在飞 agent / 有 bracket）读文档的机会会打断工作；空闲时转发才是在它回合结束时给下一次行为对齐
