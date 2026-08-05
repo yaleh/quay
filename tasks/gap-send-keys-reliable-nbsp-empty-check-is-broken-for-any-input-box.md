@@ -189,5 +189,23 @@ retired 计入 adr016 但不计数）。**无需修改**（Touches 里该项只�
 
 **AC7**：测试文件已是 `import { test } from "node:test"` + `// @test-group governance`（AC2 新增用例继承）。
 
+**再验证（2026-08-05 内层重派复核）**：修复已由前序内层实现并落 master（`7df8b373` NBSP 判空 + `a75dde7e`
+fresh-session skip），任务状态仍 `ready`，本重派做复核确认。作用域实跑
+（`scripts/test.sh --for-task gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box
+--allow-thin`，worktree 内 node_modules 符号链接自主仓）：
+
+```
+ℹ tests 33
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ duration_ms 4737.808304
+```
+
+exit 0。含 AC2 e2e（NBSP 提示符夹具 pane 判空 → clear 循环快速退出（CLEAR_MAX=2）→ transcript 送达，
+1130ms）与 AC1 e2e（fresh welcome ghost → 跳过清屏，862ms）。Contract measure 现为 **7**（band ≥ 1 ✓）；
+`grep -n "\[:space:\]\|NBSP"` 实跑确认显式 NBSP 剥离（line 93 `nbsp=$'\302\240'`）与 `[:space:]` 判空共存。
+
 DoD 全量套件绿：未勾（`scripts/test.sh` 全量套件当前 RED——pending full-suite-runner laneCount 修复，
 与本任务无关，见 dispatch 约束）。
