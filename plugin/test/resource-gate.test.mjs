@@ -85,6 +85,17 @@ test("AC2 — gate reads /proc/pressure/cpu `some avg10` (structural), not load 
   assert.doesNotMatch(code, /\/proc\/loadavg/, "gate must NOT read /proc/loadavg");
 });
 
+// ── AC2 (gap-adaptive-concurrency-cap-tied-to-resource-gate): the gate also reports avg300 ─────────
+// cap-from-gate reads the adaptive-concurrency signal via the SAME report line (single source): the
+// avg300 field must be parsed AND printed under its own test seam.
+test("AC2b — gate parses AND prints `some avg300` (the adaptive-cap signal), seam-controlled", () => {
+  const src = fs.readFileSync(GATE, "utf8");
+  assert.match(src, /avg300=/, "gate must parse the some avg300 field");
+  assert.match(src, /RESOURCE_GATE_TEST_CPU_AVG300/, "the avg300 test seam must exist");
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_CPU_AVG300: "12.34", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" });
+  assert.match(r.stdout, /cpu_stall\(some avg300\)=12\.34/, "report mode must print the avg300 line");
+});
+
 // ── AC4: pgrep -xc node-MainThread (exact comm), never pgrep -f / grep -x node ─────────────────────
 test("AC4 — gate counts `pgrep -xc node-MainThread` (exact comm), never `pgrep -f` / `grep -x node`", () => {
   const src = fs.readFileSync(GATE, "utf8");

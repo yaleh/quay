@@ -45,6 +45,12 @@
 //   --in-flight            task ids of currently in-flight subagents (ranked against for disjointness)
 //   --json                 accepted for Contract parity; output is always JSON
 //
+// ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
+// cap-from-gate.sh to get `effective_cap` and passes it as `--cap` — so the floor (cap × 4) follows
+// the resource-adaptive cap (GO=5 ⇒ floor 20; WAIT=2 ⇒ floor 8; EXTREME=1 ⇒ floor 4). The bare
+// CONCURRENCY_CAP_DEFAULT=3 below is the CONSERVATIVE FALLBACK when no --cap is passed (manual runs),
+// not a fixed production cap.
+//
 // The pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
@@ -64,7 +70,9 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
 import { taskWorkLanded } from "./task-status-drift-check.ts";
 
-/** Default concurrency cap (max in-flight subagents). The ready-pool floor is DERIVED from it. */
+/** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
+ *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
+ *  (gap-adaptive-concurrency-cap-tied-to-resource-gate); the floor is DERIVED from the cap passed. */
 export const CONCURRENCY_CAP_DEFAULT = 3;
 
 /** Default floor multiplier: floor = cap × this. 4× leaves one notch of headroom, far below the old

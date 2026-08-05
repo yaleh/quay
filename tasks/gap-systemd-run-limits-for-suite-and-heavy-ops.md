@@ -72,3 +72,8 @@ band      suite_cgroup >= 1（套件实际在 cgroup 限额下）
 invoke    `systemd-run --user --scope -p MemoryMax=4G -p CPUQuota=200% -p TasksMax=200 bash -c 'echo ok'`
 control   无限额跑（当前形态）⇒ 无 cgroup 属性；限额跑 ⇒ 有（AC1）
 resume    套件限额与重脚本限额分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05
+changed: 交叉标注（AC8，gap-adaptive-concurrency-cap-tied-to-resource-gate 引用本任务为 cgroup 硬限额的上位解对照——本任务补「限额不可被绕过」，自适应并发补「cap 随资源回落」；两者同源于 SPEC-isolation-and-resource-governance-2026-08-05）
