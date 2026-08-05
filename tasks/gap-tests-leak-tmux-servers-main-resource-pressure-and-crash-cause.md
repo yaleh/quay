@@ -95,20 +95,67 @@ socket 路径），**全文件零处调用 `tmux kill-server`/`kill-session`**�
 这一个 helper 缺一行**。本文件真正起 server 的测试是 104 行（skv-noecho）与 121 行（skv-ok）——对应
 两波不同前缀的泄漏。
 
-**修法（比「套件尾部断言」更该先做的）**：
-- **① 立即修（优先）**：`cleanup()` 里 `rmSync` 之前加一行 `tmux(['kill-server'], env)`（用文件里已有
-  的 `tmux()` 助手；隔离环境下 kill-server 只杀自己这个隔离 socket 下的 server，不影响默认 server——
-  管理者验证 TMUX_TMPDIR 隔离对 kill-server 同样有效）。
-- **② 套件尾部残留断言（第二道防线）**：仍值得做，但现在是防未来同类文件的兜底，不是唯一手段。
+---
+
+## ⚠️ 管理者撤回声明（2026-08-05 09:2xZ，第四次崩溃后重写）
+
+**本节以下的修法在 09:17Z 版本里写的是「加一行 `tmux(['kill-server'], env)`」，并标注
+「管理者验证 TMUX_TMPDIR 隔离对 kill-server 同样有效」。这句话是错的，现予撤回。**
+
+**撤回依据（实测，代价是第四次全灭）**：管理者去实测该断言时，把测试拆成两次独立
+Bash 调用，`export ISO_TMPDIR=...` 在第二次调用里已丢失（工具本身文档写明 shell 状态
+不跨调用保留）。于是 `sockDir=undefined` → `TMUX_TMPDIR` 这个 key 被 Node 丢弃 → 又主动
+`delete env.TMUX` → **既无 `-S`/`-L`、无 `$TMUX`、也无 `TMUX_TMPDIR`** → `tmux kill-server`
+落到**默认 socket**，杀掉 quay-0 / meta-cc-3 / archguard-4 全部会话
+（outer pid 2600919、inner 2600928、默认 server 2591128 全部死亡，实测确认）。
+
+**结论：`kill-server` 的危险不在于「隔离写法对不对」，而在于它的爆炸半径由环境决定，
+而环境可以静默丢失。** 一旦丢失，失败模式不是报错，是**清空整台机器的 tmux**。
+
+**仓库内已有正确写法可直接照抄**（读码实测，非推断）：
+
+| 文件 | 写法 | 爆炸半径 |
+|---|---|---|
+| `session-liveness.test.mjs` | `tmux(["kill-session", "-t", session], env)` ×3 | 只杀指名会话 |
+| `quay-init-tmux-detection.test.mjs` | `tmux(['kill-server'], env)` ×4 | **整个 server（同类风险，已埋在生产代码里）** |
+
+三个文件的 `-S` 用法**均为 0 处**——全部靠环境变量选 socket，即全部依赖运气而非机制。
+
+---
+
+## 修法（撤回后的安全版本）
+
+- **① 立即修（优先）**：`cleanup()` 里 `rmSync` 之前，对本 helper 起过的会话逐个
+  **`tmux(["kill-session", "-t", <会话名>], env)`**——本文件会话名是已知常量
+  （`skv-ok`、`skv-noecho`）。最坏情况是「杀一个不存在的会话」→ 报错，
+  **不可能清空默认 socket**。最后一个会话被杀后 server 自行退出，达到同样的回收效果。
+- **②【新增，同等优先】把 `quay-init-tmux-detection.test.mjs` 现有 4 处 `kill-server`
+  一并改成 `kill-session -t <名>`**——那 4 处是**已经存在于生产代码中的同类风险**，
+  今晚没炸只是因为环境变量一直没丢。
+- **③【机制性收窄，建议】socket 选择改用 `-S <显式路径>` 而非 `TMUX_TMPDIR` 环境变量**：
+  `-S` 是命令行参数，丢失会报错而非回退默认 socket。这是把「依赖运气」变成「机制保证」
+  的关键一步（`-S`/`-L` > `$TMUX` > `TMUX_TMPDIR` 的优先级今晚已实测确认）。
+- **④ 减少起 server 的必要性**：`send-keys-verified.test.mjs` 四个测试里只有两个
+  （104 行 `stty -echo`、121 行「送达真的落地」）**必须**要真 pane；
+  另两个（用法错误、目标不存在）不需要活会话。
+- **⑤ 套件尾部残留断言（第二道防线）**：仍值得做，但是防未来同类文件的兜底，不是唯一手段。
 
 ## Acceptance Criteria
 
 - [ ] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`
       前缀的 tmux server 或 /tmp 目录残留（机械检查，一次覆盖全类）
-- [ ] AC2: **teardown 回收（精确一行修复优先）**——`send-keys-verified.test.mjs` 的
-      `newHermetic().cleanup()` 在 `rmSync` 前加 `tmux(['kill-server'], env)`（隔离环境 kill-server
-      只杀自己 socket 下的 server，不影响默认 server；用文件已有的 tmux() 助手）；同族两文件已有 kill
-      不需改。**套件尾部断言是第二道防线**（防未来同类），非唯一手段
+- [ ] AC2: **teardown 回收——用 `kill-session -t <名>`，禁止 `kill-server`**（2026-08-05 撤回重写，
+      见上方「管理者撤回声明」）。`send-keys-verified.test.mjs` 的 `newHermetic().cleanup()` 在
+      `rmSync` 前，对本文件已知会话名逐个 `tmux(["kill-session","-t", "skv-ok"|"skv-noecho"], env)`。
+      **判据（负控制，必须实跑）**：故意把 `env` 的 socket 选择弄空（模拟环境变量丢失），
+      该 cleanup 必须**报错或无害**，且 `tmux list-sessions` 显示真实会话**未受影响**——
+      这条负控制正是 09:2xZ 第四次全灭暴露的失败形态，不做它就等于没验
+- [ ] AC2b: **同类风险一并消除**——`quay-init-tmux-detection.test.mjs` 现有 **4 处**
+      `tmux(['kill-server'], env)` 改为 `kill-session -t <名>`。理由：那 4 处与被撤回的建议是
+      同一形态，**已埋在生产代码里**，今晚未炸仅因环境变量未丢
+- [ ] AC2c: **机制性收窄（建议，非阻塞）**——socket 选择从 `TMUX_TMPDIR` 环境变量改为
+      `-S <显式路径>` 参数（三个文件当前 `-S` 用法均为 0）。参数丢失会报错，环境变量丢失会
+      静默回退默认 socket——今晚全灭的机制根
 - [ ] AC3: **残留清理**——8 个 session-liveness-* + 1 个 enter-repro 泄漏在判断后清除（先确认挂载
       观察者 pid 2598198 未用，再清）
 - [ ] AC4: **回归控制**——217 泄漏形态不再复现：连续多轮套件后 server 数稳定（不随轮数累积）；
