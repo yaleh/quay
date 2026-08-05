@@ -83,6 +83,15 @@
 今晚已立案 `gap-quality-criteria-are-point-in-time-no-trend-criteria`，
 但它的实例只有「每测试成本」与「早期 RED 检测延迟」两条，**第 3 节列的其余三类还没进去**。
 
+**层次二活实例（2026-08-05，`gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`）——
+「循环在转」判据**：本文件 §2 实测的 meta-cc/archguard「29 小时零进展却全绿 + 自报健康」暴露了
+L1 判据全部在查「仪器铺没铺」、没有一条查「循环转没转」。该任务把最小判据固化成了机制
+`plugin/scripts/dead-loop-check.sh`（Contract measure：`loop_alive` 字段）：
+最近 N 分钟（默认 30）目标项目 outer/inner transcript 有新的 user 消息 或 项目 git 有提交
+——任一存在 ⇒ `alive`；都无 ⇒ `dead`（dead-loop）。**与 backlog 空无关**（invariant
+`liveness_independent_of_backlog=1`）——队列空（queue-empty）与没人驱动（dead-loop）从此可区分。
+这就是「层次二 = 动态、运转期间周期性跑」的第一个落盘实例（层次一查交付完整性、层次二查持续健康）。
+
 ---
 
 **本文件不建 AC/DoD、不排优先级——那是外层的活。**
