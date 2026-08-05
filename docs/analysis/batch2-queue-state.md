@@ -3860,3 +3860,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **外层操作教训**：tmux pane 引用必须用 `quay-0:2`（inner），`quay-0:0` 是 manager、`quay-0:1` 是
   outer、`quay-0:3` 是 scratch。今晚多次驱动失败皆因引用错误。
 - **blocked-signal 未消费族**：管理者建议记一笔（哨兵存在但没人消费），不新开——并入收尾机制相关任务。
+
+### tick 2026-08-05T08:30Z（外层，`unblock`：AC16 落地 + M3 验证套件重跑）
+
+- **AC16 修复落地（8f6d0fc6，内层）**：full-suite-runner `--lane-count N` 现在传播
+  `--test-concurrency=N` 进 test.sh command（原静态 command 只写 state 字段）；省略时让 test.sh
+  派生默认。回归测试 +9。**ABORT #2 根因修复完成。**
+- **M3 验证套件重跑（bntu2rmod，--lane-count 1）**：AC16 修复后真实传播，进程实证
+  `--test-concurrency=1`；无 concurrency=8 残留。资源门 GO（PSI 10.20）。
+- **内层已恢复**（48min 冻结根因：task-over-90m 信号未消费 + 外层 pane 引用错误 quay-0:0 vs quay-0:2），
+  恢复后修完 AC16、继续 NBSP 修复（任务文件已修改）。
+- **NBSP 任务**：内层开始处理（gap-send-keys-reliable-nbsp 文件被修改）。
+- 套件跑完（lane-1 预计较久）后收尾 ROUND 3（4 not-yet-flipped）。
