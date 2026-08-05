@@ -4976,3 +4976,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   两两碰撞（batch 单成员=冲突）——池 disjoint 3 主要来自已落地 3 条（red-pattern/ghost-drive/leak）。**已落地
   3 条仍在 ready**（gitHistoryLanded 未排除，外层 triage 时核）。
 - 在飞 1/3。无 block、无 .halt、Monitor 三判据绿。
+
+### tick 2026-08-05T19:0xZ（外层，全量 1-lane 慢速观察 + 等绿）
+
+- **全量套件 1-lane 慢速确认**：169 测试文件完成 34（~20%）@17.5min ⇒ ETA ~80min。nproc=4 → laneCount=1
+  （runner-gate 的 floor(nproc/2.1) 派生）——「正确性优先」的代价（旧 8-lane 12min 但超订触发 ABORT #5）。
+  **裁定：让套件跑完**（绝不再超订；闸 GO 守卫）。**观察**：1-lane 不可实用，laneCount 校准（2-3 lane +
+  闸守卫）值得立案，但非本 tick 阻塞。closure 24 条待全量绿。
+- **inner**：1 agent（session-liveness 全量验证 10m47s）+ 新派 outer-heartbeat 任务；4 bracket。
+- **等 SUITE-FINISHED**（bvfh6zyp3 后台）。套件 running，log 持续推进（非挂起）。
