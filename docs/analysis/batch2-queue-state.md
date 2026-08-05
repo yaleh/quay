@@ -3199,3 +3199,11 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   AC5 / suite(a) AC6(i) 实跑证据（inner 无等待 + 外层后台套件同时进行）。
 - **池 4**（deficit 0）健康；ready-pool-floor 任务入池。
 - 无停止条件、无 BLOCKED；1 agent（scoped）token 上升；loop-driver LIVE。
+
+> **04:05Z 增补（floor 修正）**：人裁定修正 ×10 → **×4（cap=3 ⇒ floor 12）**——历史实测 08-02→08-04
+> 池稳定 11（9 真 + 2 夹具 QENG-5-DEMO）= **9/3 = 3.0×**（非 3.7×），该期并发顺畅；08-04 崩到 4、现 2。
+> 理由：3.0× 只证够用非下限取 4× 留档；缺口 2 落地后池被筛选 ⇒ **disjointness 先行、floor 按需再调**；
+> 12 一轮 tick 补 ~10 条承受（30 需先批量机械化）。**更本质**：pool 是代理指标，新增
+> **`dispatchable_disjoint`（checkTouchesPair 算池内最大互不冲突子集）= 判据**，floor = 手段——5 全不冲突
+> 就够、30 全撞机制自报（今晚 pool=3/2 同触的机械版）。已重写任务 `gap-ready-pool-floor-scales-...`
+> （AC：floor=cap×4 + dispatchable_disjoint 上报 + 缺口 2 先行 + touchesResolve 守卫 + 成本不对称）。
