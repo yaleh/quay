@@ -2880,6 +2880,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **结论**：一处偏差已对齐修正，其余符合 → 本唤醒无动作（不决定任何任务动作）。重锚机制首跑成功
   （inner-anchor AC6 证据之一）。
 
+### tick 2026-08-05T04:0xZ（外层 verification-round ROUND 1 + 内层派新批）
+
+- **ROUND 1 完成**：suiteGreen=true（`.quay/verification-round.jsonl`，2319 tests / fail 1 = 已知
+  noise-gate 负载抖动 isolated / cancelled 0）。**已关 3 条**：roadmap、review-cadence、inner-anchor
+  （done，DoD 全量绿勾上；inner-anchor AC6 靠重锚 #1 实跑）。**留 ready 2 条**：closure-sync（AC5
+  「inner 持续派发未停顿」未满足——本轮 inner 停摆正是要修的问题）、drive-text（DoD 真实驱动验证待补）。
+- **新批派发（外层裁定优先级，管理者活证据）**：
+  - **① `gap-full-suite-belongs-to-outer-background-above-3-min`**（ready，立即止血——inner 永不等待）：
+    已派发在飞，telemetry bracket 已开（fm-...-kktyfz）。机制：全量套件移外层后台异步 + `.quay/
+    full-suite-state.json` + runner 早标 RED + 红窗乐观/停派 + 阈值规则（≥3min outer / <3min 下放）。
+    (a) 套件块，与 closure-sync (b) 收尾块、closure-decomposition (c) AC/证据块合消批次。
+  - **② `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`**（ready）：
+    门控 ①（同触 fast-mode-loop-tick.md + closure-sync 任务文件，串行）。收尾变每任务一行 DoD。
+  - **③ `gap-scoped-runs-pay-full-static-check-overhead`**（todo，最后）：scoped 静态检查档位，
+    AC5 实测固定开销 ~16s → ≤5s。排 ①② 后（需先晋级 ready）。
+- **在飞 1**：full-suite-outer ①。无停止条件（verification-round suiteGreen=true）、无阻塞；loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
