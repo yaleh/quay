@@ -3660,3 +3660,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   可证伪判据（AC9 替换：每晚统计无触发立案数，当前 0）+ 预测力回归控制（5/5）。
 - **归并裁定**：point-in-time quality（time 轴）+ stop-conditions-no-scope（scope 轴）= 同一生成器两
   投影——标注为输出，不合并中期任务；生成器系统化发现，不再一条条捡实例（捡实例受限于人在场）。
+
+> **07:10Z 增补（生成器自查的作用域缺陷 + AC10 诚实记账）**：管理者把生成器用在自己阻塞决定上——冷启动
+> gate「整个套件绿」过宽（量化整个套件但只铺 19 派生脚本），正确判据 = 派生铺设集内脚本全绿（铺什么
+> 验什么，集合已机械派生）；本次等待正确（session-liveness 在铺设集 + M3 会随铺）。与红窗共享闸门任务
+> 并列（同作用域轴不同机制）。**AC10 诚实**：post-friction 不计分，计数保持 0（管理者特意不算边缘案例）。
+> 已立案 `gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`（ready）。

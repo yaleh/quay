@@ -1,0 +1,98 @@
+---
+id: gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite
+title: "the cold-start gate criterion is too wide — 'whole suite green' lets
+  cold-start be blocked indefinitely by any failure unrelated to the laydown
+  set, same scope-axis type as the red-window blanket stop-dispatch; the manager
+  applied the new axis-generator to their own blocking decision: the
+  wait-for-green quantifies the WHOLE suite but cold-start only lays the 19
+  DERIVED scripts (session-liveness.sh + session-liveness-mount.sh measured IN
+  the set, so THIS wait was correct — laying now would ship the M3 regression);
+  correct criterion = 'the derived laydown set's scripts are green' (lay what
+  you verify; the set is already mechanically derived via grep
+  plugin/skills/*/SKILL.md + plugin/loop/*.md, no new mechanism); parallel to
+  gap-red-window-dispatch-stop-should-be-shared-gate-conditional (same scope
+  axis)"
+status: ready
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+---
+
+**type:** execution
+
+## Proposal
+
+管理者把新生成器用在自己那条阻塞决定上（2026-08-05）——**作用域缺陷**。
+
+**事实**：管理者一直在等「quay 套件转绿」才对 meta-cc/archguard 铺设冷启动。用生成器问句自查：
+**这条判据量化的是哪个范围？答案是【整个套件】**——但冷启动实际铺下去的只有**派生出的 19 个脚本**。
+实测 `session-liveness.sh` 与 `session-liveness-mount.sh` 确实在这 19 个里，**所以本次等待是对的**
+（现在铺会把 M3 那条真回归一起发到另外两个项目）。
+
+**【缺陷】判据本身过宽**：「整个套件绿」会让冷启动被**任何与铺设集无关的失败**无限期阻塞——与
+「红窗一刀切停派发」是**同一根作用域轴上的同型缺陷**。
+
+**正确判据**：**【派生铺设集内的脚本全绿】——铺什么就验什么**。这个集合已经是机械派生的
+（`grep plugin/skills/*/SKILL.md plugin/loop/*.md`），**不需要新机制**。
+
+**AC10 诚实记账（管理者自陈）**：这条【不计分】——管理者是在**被阻塞（卡顿）的状态**下才去问这个
+范围的，属 **post-friction**，AC10 计数仍为 **0**。管理者特意不把它算进去——把边缘案例算成达成，正是
+这个判据最容易失效的方式（同「AC 文本跨度大于实现、在已实现那半被勾上」同型）。
+
+### 选定机制（外层裁定：立案 + 与红窗任务并列）
+
+1. **冷启动判据收窄**：gate = **派生铺设集内脚本全绿**（铺什么验什么），非「整个套件绿」。集合机械
+   派生（grep SKILL/loop 文档），不需新机制。
+2. **与红窗共享闸门任务并列**：`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（RED
+   停派按失败作用域条件化）与本条（冷启动 gate 按铺设集收窄）是**同一作用域轴的并列实例**——交叉标注，
+   不归并（不同机制：一个管 suite-RED 处置、一个管冷启动 gate）。
+3. **AC10 记账诚实**：本条立案属 post-friction（管理者被阻塞时问的范围），可证伪判据（生成器 AC2）
+   计数保持 0——把边缘案例算成达成正是判据最易失效的方式。
+
+## Acceptance Criteria
+
+- [ ] AC1: 冷启动 gate = **派生铺设集内脚本全绿**（铺什么验什么），非「整个套件绿」——与铺设集无关的
+      套件失败不再无限期阻塞冷启动
+- [ ] AC2: 铺设集**机械派生**（grep `plugin/skills/*/SKILL.md` + `plugin/loop/*.md`），不需新机制
+- [ ] AC3: **并列交叉标注**——`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（同作用域
+      轴，不同机制：suite-RED 处置 vs 冷启动 gate）
+- [ ] AC4: **真实使用**——本次等待正确（session-liveness 在铺设集 + M3 会随铺扩散）；收窄后与铺设集
+      无关的失败不阻塞冷启动（实测输出贴任务体）
+- [ ] AC5: **AC10 诚实记账**——本条 post-friction（被阻塞时问范围），不计入可证伪判据；计数保持 0
+      （记录不勾）
+- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Definition of Done
+
+- [ ] AC1–AC6 全部勾上；AC4 实测输出贴任务体
+- [ ] 冷启动 gate 收窄到铺设集（与铺设集无关的套件失败不阻塞）；AC10 计数诚实（0）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+## Touches
+
+- plugin/skills/cold-start/SKILL.md（AC8c 键或 gate 判据：铺设集内脚本全绿）
+- plugin/scripts/（铺设集机械派生 helper，若成脚本）
+- tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md（AC3 并列交叉标注）
+- tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用）
+
+## Contract
+
+measure   laydown_set_green = `bash <铺设集检查>` stdout 的绿/红字段
+band      laydown_set_green = 绿（铺设集内脚本全绿即可铺，无关套件失败不阻塞）
+invariant lay_what_you_verify = 1（gate 集合 = 派生铺设集，机械派生）
+invoke    `grep -rn 'scripts/test.sh\|full suite\|全量' plugin/skills/cold-start/SKILL.md`
+control   铺设集外失败 ⇒ 不阻塞冷启动（AC4 负向）；铺设集内失败（如 M3）⇒ 阻塞（本次等待正确）
+resume    判据收窄与铺设集派生分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T07:1xZ
+changed: 外层受管理者生成器自查裁定立案。四处收紧：
+(1) **判据过宽**——「整个套件绿」让冷启动被无关失败无限期阻塞；收窄为「派生铺设集内脚本全绿」；
+(2) **铺什么验什么**——铺设集机械派生（grep SKILL/loop 文档），不需新机制；本次等待正确（M3 会随铺）；
+(3) **与红窗任务并列**——同一作用域轴不同机制（suite-RED 处置 vs 冷启动 gate），交叉标注不归并；
+(4) **AC10 诚实**——post-friction 不计分，计数 0；把边缘案例算成达成正是判据最易失效的方式。
+status: todo——作用域轴缺陷；排 ROUND 3 收尾后，高优先。
