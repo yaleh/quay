@@ -4435,3 +4435,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **现状**：session-topology skill + quay-topology.sh 已是完整工厂（幂等、按名寻址、launch 从 checked-in 配置），cold-start 已引用（TOPOLOGY-IN-PLACE + build）。缺 outer 自己调用（现在靠人/管理者手动）。
 - **建任务** gap-outer-self-checks-and-creates-inner-session（outer 冷启动第 3 步自检 inner + 缺失调 quay-topology 创建 + INNER-DRIVEN 验证 + 幂等）。
 - **user-scope 陈旧**（dist 06:01，dist-runtime 15:11 修复不在）已并入 dist-follow 任务（AC4 两种安装路径新鲜度）。
+
+### tick 2026-08-05T16:0xZ（外层，manager 拓扑错误——遗传物质级）
+
+- **管理者紧急更正**：manager 是跨项目的，outer 不该管——我上条「三窗口」措辞错误（应两窗口：outer + inner）。
+- **错误已固化进交付物**（实测三处）：quay-topology.sh ROLES="manager outer inner"（64/97/101/115 行）+ topology-check.sh ROLES（67 行，会判两窗口项目不合规——正在生效的假判据）+ SKILL.md 13 处 three-window/manager。与产品轮廓「manager 跨项目非 per-project」矛盾。
+- **严重性**：进入遗传物质的错误——出厂定义结构性错误，每次繁殖复制（B 机手工建 quay-b 两窗口恰好对，交付物却是错的）。
