@@ -32,8 +32,16 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // Trailing "(…)" annotation strip — a Touches entry commonly carries a trailing parenthetical
 // note (`(new)`, `(refactor Verify phase)`, `(extract from)`) that is NOT part of the path.
 // Repo paths never contain parentheses, so stripping a trailing "(…)" cannot corrupt a real path.
+// The FULL-WIDTH spelling `（…）` (the CJK convention used by many task Touches bullet lists in
+// this repo, e.g. `plugin/scripts/（触摸→…映射）`) is stripped too (gap-scoped-runs-pay-full-static-
+// check-overhead AC3: the touch-selection mechanism must resolve every annotation spelling the repo
+// actually uses, so a scoped run never silently skips a change-relevant check because of a
+// full-width annotation).
 export function stripTouchAnnotation(entry) {
-  return entry.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  return entry
+    .replace(/\s*（[^）]*）\s*$/, "")   // full-width （…） first
+    .replace(/\s*\([^)]*\)\s*$/, "")  // then ASCII (…)
+    .trim();
 }
 
 // Parse a `## Touches` bullet list into bare path/glob strings (backticks/quotes removed,

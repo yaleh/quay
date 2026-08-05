@@ -135,7 +135,15 @@ test("AC3: mutations_that_stayed_green is 0 (no checker stays green under its in
   assert.equal(r.json.mutations_that_always_red, 0,
     `checkers that stayed red after restore: ${JSON.stringify(r.json.always_red)}`);
   assert.equal(r.json.errors, 0);
-  assert.equal(Object.keys(r.json.results).length, 11, "9 registered (incl. the mechanism itself) + 2 regression cases");
+  // Relationship, not snapshot: every registered checker with a mutation case runs once, plus the
+  // 2 regression cases. The hardcoded 11 was stale the moment a checker was added to
+  // run_static_checks (9 → 12); the count must track the parsed manifest (gap-scoped-runs-pay-full-
+  // static-check-overhead surfaced this — the tier's annotations live in the same function body).
+  assert.equal(
+    Object.keys(r.json.results).length,
+    r.json.checkers_total + 2,
+    `every registered checker (${r.json.checkers_total}) + 2 regression cases must have a result`,
+  );
 });
 
 // ── AC4: meta-mutation — breaking the mechanism itself must fail ──────────────────────────────────

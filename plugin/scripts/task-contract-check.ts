@@ -278,6 +278,7 @@ export function runCli(argv) {
   let writeRatchetFlag = false;
   let allowGrowth = false;
   let resetBaseline = false;
+  let strictSubset = false;
   const files = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -286,6 +287,7 @@ export function runCli(argv) {
     else if (a === "--write-ratchet") { writeRatchetFlag = true; }
     else if (a === "--allow-growth") { allowGrowth = true; }
     else if (a === "--reset-baseline") { resetBaseline = true; }
+    else if (a === "--strict-subset") { strictSubset = true; }
     else if (a.startsWith("-")) { console.error(`task-contract-check: unknown flag: ${a}`); process.exit(2); }
     else { files.push(a); }
   }
@@ -338,10 +340,10 @@ export function runCli(argv) {
     if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset });
   }
 
-  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset });
+  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset });
 }
 
-function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset }) {
+function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false }) {
   if (json) {
     const report = {
       workspaceRoot: wsRoot,
@@ -369,12 +371,19 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
     console.log(`violations: ${currentEntries.length} unique across ${violationTasks.length} task(s); info findings (non-ratchet, pre-opt-in baseline): ${allInfo.length} — see --json for details`);
     if (subset) {
       console.log("subset scan (<task-file> args) — ratchet comparison skipped (it is only meaningful over the full store)");
+      if (strictSubset) {
+        console.log("strict-subset mode (scoped static-check tier) — a violation on a scanned task FAILS this run (exit 1); unrelated tasks are not scanned");
+      }
     } else if (baselineCount !== null) {
       console.log(`ratchet ceiling: ${baselineCount}; new since baseline: ${newOnes.length}${newOnes.length ? ` (${newOnes.join(", ")})` : ""}; resolved: ${resolved.length}${resolved.length ? ` (${resolved.join(", ")})` : ""}`);
     }
     if (writeOutcome) console.log(`write: ${writeOutcome.reason}`);
   }
-  process.exit(growth ? 1 : 0);
+  // strict-subset (the scoped tier's contract-consumer): a violation on ANY scanned (touched) task
+  // is a failure — the touched task's Contract is change-relevant, so scoped MUST catch it (AC4-i).
+  // The ratchet comparison stays skipped (unrelated tasks are not scanned, so nothing to compare).
+  const strictFail = strictSubset && subset && perTask.some((t) => t.violations.length > 0);
+  process.exit(growth || strictFail ? 1 : 0);
 }
 
 // Entry point when run directly (not imported).

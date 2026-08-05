@@ -34,6 +34,22 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     (`--test-concurrency=4`); a space-separated value (`--test-concurrency 4`) is treated as a file
     path and silently auto-discovers (see scripts/test.sh header).
     For a coverage run over an explicit subset: `scripts/test.sh --experimental-test-coverage packages/quay/test/*.mjs`.
+  - **SCOPED STATIC-CHECK TIER** (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6): a
+    task-scoped run (`scripts/test.sh --for-task <id>` / `--scoped <id>`, the inner loop's per-task
+    verification) runs the **change-relevant** static-check subset — checkers whose object intersects
+    the task's `## Touches` (e.g. test-framework-policy/test-isolation when a test file is touched,
+    the doc/shell ratchets when their objects are touched) PLUS the `## Contract` consumer on the
+    TOUCHED task files (`--strict-subset`, AC4-i) — **skipping** `checker-mutation-check` (~13s) and
+    the unrelated repo-level ratchets. The mapping is MECHANICAL: `plugin/scripts/
+    select-static-checks-for-touches.ts` parses the `# @static-tier <always|change|full>` /
+    `# @static-object <glob>…` annotations in `scripts/test.sh`'s `run_static_checks()` (the same
+    single source checker-mutation-check.sh parses — never a hand-maintained list, AC3). The COMPLETE
+    set (run_static_checks) is byte-unchanged and always runs in full-suite mode (`scripts/test.sh`
+    no-args / `--static-checks`) — the outer verification-round gate is NOT weakened (AC2). Trade-off
+    (AC6): **scoped = fast feedback on the change; full = complete gate.** A scoped skip is DEFERRED
+    to the full-suite gate, never dropped — an unrelated repo-level ratchet violation is not caught by
+    the scoped run and MUST be caught by the full run (AC4-ii). `--static-checks` runs the complete
+    static set with no test run (the outer's gate-only surface).
   - **3 files hit LIVE GitHub** (`packages/quay/test/serve-github.test.mjs`,
     `provider-abi-conformance.test.mjs`, `cli-edit-parity-conformance.test.mjs`) — each declares
     its OWN in-file `node:test` skip condition (ADR-019 decision #1), so `scripts/test.sh`'s
