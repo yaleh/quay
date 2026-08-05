@@ -3,7 +3,7 @@ id: gap-reliable-send-crystallize-the-five-failure-modes-into-a-script
 title: F closed send-keys-verified but D only covers the classify/wait half —
   the SENDING half (5 measured delivery-failure modes) has no owner; crystallize
   the reliable-send algorithm into a script
-status: done
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -104,3 +104,55 @@ changed: 外层受管理者交办立案。四处收紧：
 (3) **零哈希是 invariant（AC7）**——F 判死的是哈希判据本身，任何把它带回来的实现都是倒退；
 (4) **DoD 要求真实对象**——AC6 必须对真实会话+真实 transcript 判定送达，构造的夹具不够。
 status: todo——不紧急（文档明写不阻塞当前批次），排当前批之后。
+
+## Re-open 2026-08-05T07:40Z — 第六种送达失败模式（fresh welcome 屏 placeholder，冷启动卡死）
+
+**触发**：archguard 外层独立实证（管理者转达）+ meta-cc 独立观测吻合。**专门打在冷启动上**——恰是
+cold-start INNER-DRIVEN 判据第一次驱动新项目的时刻。
+
+**证据（archguard）**：send-keys-reliable.sh 在全新 welcome 屏卡死——第 1 步 C-u 清屏循环**清不掉
+TUI 的 ghost placeholder**（`Try "how do I log an error?"` 灰色占位），clear 循环跑满 N=50 后 fail
+loud 退出，驱动发不出去。改用手动序列（`-l` → 等稳定 → Enter）成功，transcript `76bbb31e` 核实
+1648 字节驱动文本作为 user 消息落地。**meta-cc 吻合**：长文本被 TUI 折叠成 paste 块（`paste again to
+expand`）看起来像没送出去但实际送到了。
+
+**根因**：全新会话的 TUI 处于 C-u 语义与已用会话不同的状态——**placeholder 不是 readline 缓冲内容，
+C-u 对它无效**，清屏循环把「清不掉」当成失败。前五种模式全在已用会话上测出，第六种只在新会话出现，
+此前测不到。
+
+**与故障 6 的区分**：故障 6 = 已用会话的 gray ghost-suggestion（直接输入覆盖可解）；故障 7 = 全新
+welcome 屏 placeholder（C-u 无效 + 覆盖后仍显示不清）。**结晶文档已补故障 7 段 + 算法步骤 0 分支。**
+
+**外层裁定方向**：清屏终止条件从「输入框为空」改为「输入框不含用户输入的内容」；**更省事的分支**：
+fresh session（transcript 不存在或零条 user 消息）⇒ **跳过清屏直接发**。
+
+### 新增 Acceptance Criteria（re-open）
+
+- [ ] AC9: **fresh-session 分支**——target transcript 不存在或零条 user 消息 ⇒ 跳过清屏循环直接进入
+      发送（故障 7 分支；cold-start 场景不卡死）
+- [ ] AC10: **终止条件修正**——清屏循环终止条件改为「输入框不含用户输入的内容」而非「逐字为空」
+      （placeholder 是渲染提示非输入，C-u 无效时不再 fail-loud）
+- [ ] AC11: **冷启动真实对象回归控制**——对全新会话（无 transcript）驱动成功，transcript 核实送达
+      （AC6 同款真实对象纪律，冷启动形态）
+- [ ] AC12: 测试用 `node:test` 且带 `// @test-group governance`（沿用既有声明）
+
+### Re-open Touches 增补
+
+- plugin/scripts/send-keys-reliable.sh（步骤 0 fresh-session 分支 + 步骤 1 终止条件）
+- orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（故障 7 已补；算法步骤 0 已加）
+- plugin/test/send-keys-reliable.test.mjs（AC9/AC10 fixture）
+
+### Re-open Contract
+
+measure   fresh_branch_hits = `grep -c "fresh\|零条\|跳过清屏" plugin/scripts/send-keys-reliable.sh` stdout 的数字段
+band      fresh_branch_hits >= 1（fresh-session 分支存在；步骤 0 跳过清屏）
+invariant no_fail_loud_on_placeholder = 1（C-u 对 placeholder 无效不 fail-loud——先判 fresh 再清屏）
+invoke    `grep -n "transcript\|零条\|user 消息" plugin/scripts/send-keys-reliable.sh`
+control   构造零条 user 消息的 transcript ⇒ 跳过清屏直接发（AC9）；已用会话仍走清屏（AC10 负向）
+resume    fresh 分支与终止条件分两步提交，任一步完成即写盘
+
+reviewer: outer (re-open)
+at: 2026-08-05T07:40Z
+changed: done→ready——第六种送达失败模式（fresh welcome 屏 placeholder）未覆盖。AC9/AC10/AC11/AC12
+  新增；结晶文档故障 7 段 + 算法步骤 0 分支已补。AC10 记账：post-friction（被 archguard 实证撞出），
+  不计分。

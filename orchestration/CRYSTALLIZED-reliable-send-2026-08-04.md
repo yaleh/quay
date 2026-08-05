@@ -73,16 +73,46 @@ until-loop 承载这个等待，不要用短 sleep 硬编码猜测延迟。
 当前行」，循环 C-u 最终能清空；故障 6 是「ghost 显示」，循环 C-u 永不生效——**判定靠「循环后 pane
 内容是否逐字不变」**。
 
+## 故障 7：全新会话的 welcome 屏占位符——C-u 循环清不掉、直接覆盖也卡（第六种送达失败模式）
+
+**证据**：2026-08-05 archguard 外层首次驱动自己的内层时，send-keys-reliable.sh 在**全新 welcome 屏**
+上卡死：第 1 步的 C-u 清屏循环**清不掉 TUI 的 ghost placeholder**（那句 `Try "how do I log an
+error?"` 的灰色占位提示），clear 循环跑满 N=50 上限后 fail loud 退出，驱动发不出去。archguard 外层
+改用手动序列（`-l` 发送 → 等稳定 → Enter）成功，并用 transcript `76bbb31e` 核实了 1648 字节驱动文本
+确实作为 user 消息落地。
+
+**同一根因的另一面（meta-cc 独立观测吻合）**：06:59Z 驱动 meta-cc 时撞到**长文本被 TUI 折叠成 paste
+块**，pane 底部显示 `paste again to expand`，看起来像没送出去——但 transcript 核实是**送到了**。
+合起来是同一个根因的两个表现：**全新会话的 TUI 处于一个 C-u 语义与已用过的会话不同的状态**
+（占位符不是 readline 缓冲内容，C-u 对它无效），而清屏循环把「清不掉」当成了失败。
+
+**与故障 6 的区分**：故障 6 是**已用过的会话**的 gray ghost-suggestion（`Enter` 不提交、`C-u` 不清，
+直接输入覆盖可解）；故障 7 是**全新 welcome 屏**的 placeholder（`C-u` 无效且**直接覆盖后仍可能显示
+不清**，清屏循环把「清不掉」当成失败）。**为什么重要**：它专门打在**冷启动**上——恰恰是第一次驱动
+一个新项目的时刻，也就是 cold-start 的 INNER-DRIVEN 判据要用这个脚本的时刻。前五种模式全在**已用过
+的会话**上测出来，第六种只在新会话出现，此前测不到。失败形态是 fail-loud（这点是好的），但后果是
+**冷启动被卡住**——而冷启动正是要产品化的东西。
+
+**修法（外层裁定方向）**：清屏循环的终止条件不应是「输入框内容为空」，而应是「**输入框不含用户输入
+的内容**」——占位符是 TUI 渲染的提示文本，不是待清除的输入。可判据做法：记录 welcome 屏的占位符
+文本，清屏循环把它当成空等价物；**更省事**：把「fresh session（transcript 不存在或零条 user 消息）」
+当成一个已知分支，**跳过清屏直接发**——后者更简单且正好覆盖冷启动场景。修法实现归内层
+（`gap-reliable-send-crystallize-the-five-failure-modes-into-a-script` 或 re-open）。
+
 ## 算法（交给外层判断具体实现位置——新脚本，或重写 `send-keys-verified.sh`）
 
 ```
 输入: target(tmux 目标), text, target_session_jsonl(目标会话的 transcript 路径)
 
-1. 清空目标输入框：
+0. 分支（故障 7）：fresh session（target transcript 不存在 或 零条 user 消息）⇒ **跳过清屏直接进
+   步骤 2**——全新 welcome 屏的 placeholder 不是可清除的输入，清屏循环只会 fail-loud 卡死冷启动。
+
+1. 清空目标输入框（仅已用过的会话——故障 7 分支在步骤 0 已分流）：
    loop up to N=50:
      send-keys target C-u
      if capture-pane(target) 已空: break
    若循环到上限仍未空 → 报失败（fail loud），不静默继续
+   终止条件 = 「不含用户输入的内容」，不是「逐字为空」（placeholder 是渲染提示非输入）
 
 2. 发送文本：
    send-keys target -l text   # 三次分开调用里的第二次，ADR-016 既有规矩

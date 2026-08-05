@@ -2,7 +2,7 @@
 id: gap-no-resource-awareness-heavy-ops-run-blind
 title: Heavy operations run blind to CPU/memory — measured 4.25x
   oversubscription and swap is 0, so OOM is a cliff
-status: done
+status: ready
 labels:
   - gap
   - defect
@@ -342,3 +342,62 @@ at: 2026-08-03T03:19:46Z
 changed: 初稿写「4 核跑 8 = 2× 超订」，外层实测在跑套件的真实进程数后改为 **17 个进程、4.25×**；
   据此改掉机制设计（`--test-concurrency` 不是正确旋钮）与 AC5（先实测放大系数，不许照 `nproc*2` 推导）；
   并加 AC10（gate 输出单列 ppid=1 且 cwd 已删除的孤儿进程）
+
+## Re-open 2026-08-05T07:30Z — 修复未接线生产调用方（外层，资源安全，最高优先）
+
+**触发**：管理者 07:24Z 高优先级资源安全告警 + 外层实测坐实。**机器今晚已崩三次，负载是从未被排除的
+候选根因。**
+
+**证据链（外层逐条核实）**：
+1. `nproc = 4`。
+2. `scripts/test.sh` 第 82-83 行派生默认（本任务 AC5 产出）：`max(1, floor(nproc / 2.1))` ⇒ 本机应为 **1**。
+3. 但当前全量套件进程实参是 `--test-concurrency=8`（ps 实证，约 200 个测试文件）。
+4. **根因**：`plugin/scripts/full-suite-runner.ts` 第 94 行
+   `const laneCount = Number(parseArg(argv, '--lane-count') ?? '8')`，第 32 行注释 `default: 8
+   (canonical full-suite concurrency)`——**硬编码 8，不读 nproc**。CLAUDE.md 明写「显式
+   --test-concurrency=N 永远覆盖派生默认」，test.sh 的资源感知对这条路径**完全失效**。
+5. **resource-gate 也未接线**：`grep -n 'resource-gate' plugin/scripts/full-suite-runner.ts` = NOT
+   REFERENCED——外层后台 runner 起跑前没有过闸。
+6. 当前 load average **30.91**（4 核 ⇒ 7.7× 超订），`/proc/pressure/cpu` some avg10=95.49，claude
+   进程 34 个。
+
+**后果（为什么比其它缺口都急）**：本任务 AC5 的原始论据是「硬编码 8 在 4 核上 4.25× 超订、8 workers +
+派生子进程 = 17 个进程」。修复只改了 test.sh 默认，**没改真正在生产里跑全套件的调用方
+（full-suite-runner）**——所以本任务的收益是 **0**，超订反而更严重（7.7×）。后果不是慢，是**整机
+崩溃**。属于「修复 landed 但生产路径未接线」族。
+
+**外层已止血**：07:26Z 中止当前套件（state→red + note），load 从 31.74 回落。**修复归内层**。
+
+### 新增 Acceptance Criteria（re-open）
+
+- [ ] AC12: **full-suite-runner laneCount 派生统一**——`plugin/scripts/full-suite-runner.ts` 的
+      laneCount 默认改为与 test.sh 同一派生（读 nproc，`max(1, floor(nproc / 2.1))`，不硬编码 8），
+      或干脆不传 `--lane-count` 让 test.sh 自己派生；显式 `--lane-count=N` 保留为覆盖手段。
+      本机 ⇒ 1。
+- [ ] AC13: **full-suite-runner 启动前过资源闸**——runner 起跑前调用
+      `scripts/resource-gate.sh --for full-suite`，WAIT 时打印数字退出非 0（与本任务 AC7 对 test.sh
+      的接入同一纪律）；当前路径 NOT REFERENCED。
+- [ ] AC14: **回归控制**——修复后全量套件进程实参必须不再出现 `--test-concurrency=8` 而按派生 1 跑
+      （ps 实证贴任务体）；显式 `--lane-count=8` 仍能覆盖（逃生口保留）。
+- [ ] AC15: 测试用 `node:test` 且带 `// @test-group engine`（沿用本任务 AC11 声明）。
+
+### Re-open Touches 增补
+
+- plugin/scripts/full-suite-runner.ts（AC12/AC13：laneCount 派生 + 过闸）
+- plugin/test/full-suite-runner.test.mjs（AC12/AC14 fixture）
+- plugin/scripts/（resource-gate 接线验证，若 runner 调用路径需包装）
+
+### Re-open Contract
+
+measure   runner_lane_count = `grep -n "lane-count" plugin/scripts/full-suite-runner.ts` stdout 的默认值段
+band      runner_lane_count = 派生（max(1, floor(nproc/2.1))，本机 1）或取消默认让 test.sh 派生
+invariant no_hardcoded_oversubscription = 1（生产 runner 与 test.sh 同源派生，不硬编码 8）
+invoke    `ps -eo args | grep -c -- '--test-concurrency=8'`
+control   本机跑全量 ⇒ 进程实参不得再出现 concurrency=8（AC14）；显式 --lane-count=8 仍覆盖（逃生口）
+resume    laneCount 派生与过闸分两步提交，任一步完成即写盘
+
+reviewer: outer (re-open)
+at: 2026-08-05T07:30Z
+changed: done→ready——原 AC5 只改 test.sh，未接线的生产调用方 full-suite-runner 仍硬编码 8（7.7×
+  超订、本机已崩三次、resource-gate NOT REFERENCED）。AC12/AC13/AC14/AC15 新增。外层已中止套件止血。
+  AC10 记账：post-friction（被管理者资源告警撞出），不计分。
