@@ -32,6 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isFailureLine } from "../scripts/full-suite-runner.ts";
+import { runOnce } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -66,15 +67,35 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount }) {
+function runRunner({ root, command, laneCount, env = {} }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
   if (command) args.push("--command", command);
-  if (laneCount) args.push("--lane-count", String(laneCount));
-  const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+  if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
+  const mergedEnv = { ...process.env, ...env };
+  // AC3 seam — hermetic tests skip the REAL resource gate by default; the AC3 tests override it
+  // (QUAY_TEST_SKIP_RESOURCE_GATE != "1") and force GO/WAIT via the gate's RESOURCE_GATE_TEST_* seams.
+  if (!("QUAY_TEST_SKIP_RESOURCE_GATE" in mergedEnv)) mergedEnv.QUAY_TEST_SKIP_RESOURCE_GATE = "1";
+  const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
   // Drain pipes so a chatty fake suite cannot block the child.
   child.stdout.on("data", () => {});
   child.stderr.on("data", () => {});
   return child;
+}
+
+/**
+ * A fake `<root>/scripts/test.sh` that records its args to `argsLog` and prints a green TAP summary.
+ * Used to observe the runner's spliced --test-concurrency (the real test.sh's static checks / dist
+ * build are irrelevant to the runner's splice).
+ */
+function fakeTestShRecordingArgs(root) {
+  const argsLog = path.join(root, "args.txt");
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "scripts", "test.sh"),
+    `#!/usr/bin/env bash\necho "$*" > '${argsLog}'\necho "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  return { argsLog };
 }
 
 function waitExit(child) {
@@ -158,6 +179,183 @@ test("AC16 — --lane-count N propagates --test-concurrency=N into the spawned t
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── gap-full-suite-runner-concurrency-default-and-gate: AC1/AC2/AC3/AC4 ─────────────────────────────
+
+test("AC1 — default laneCount is NPROC-derived (nproc=4 → 1); spawned command carries ONE --test-concurrency=1", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  try {
+    // NO --lane-count, NO --command → default path; RESOURCE_GATE_NPROC=4 forces the derivation.
+    const child = runRunner({ root, env: { RESOURCE_GATE_NPROC: "4" } });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.equal(s.laneCount, 1, "derived default laneCount = max(1, floor(4/2.1)) = 1 (was hardcoded 8)");
+    await poll(() => fs.existsSync(argsLog));
+    const args = fs.readFileSync(argsLog, "utf8").trim();
+    assert.equal(args, "--test-concurrency=1", `exactly ONE --test-concurrency=<derived> spliced, got: ${args}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — the splice is REPLACE: an existing --test-concurrency=8 (= and space spellings) is stripped and replaced by the derived value", async () => {
+  for (const existing of ["--test-concurrency=8", "--test-concurrency 8"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2-"));
+    const { argsLog } = fakeTestShRecordingArgs(root);
+    try {
+      const child = runRunner({
+        root,
+        command: `bash scripts/test.sh ${existing}`,
+        env: { RESOURCE_GATE_NPROC: "4" },
+      });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 on green (existing '${existing}'), got ${code}`);
+      await poll(() => fs.existsSync(argsLog));
+      const args = fs.readFileSync(argsLog, "utf8").trim();
+      assert.equal(
+        args,
+        "--test-concurrency=1",
+        `existing '${existing}' must be REPLACED by the derived value (single flag), got: ${args}`,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("AC3 — resource gate WAIT ⇒ the runner does NOT start and leaves the state file untouched", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  // A prior GREEN suite verdict that MUST survive a WAIT byte-untouched (AC3: state stays running/green).
+  const prior = {
+    state: "green",
+    runner: "outer",
+    startedAt: "2026-08-05T06:00:00.000Z",
+    finishedAt: "2026-08-05T06:05:00.000Z",
+    durationMs: 300000,
+    laneCount: 1,
+  };
+  fs.mkdirSync(path.join(root, ".quay"), { recursive: true });
+  fs.writeFileSync(statePath(root), JSON.stringify(prior, null, 2) + "\n", "utf8");
+  try {
+    const child = runRunner({
+      root,
+      env: {
+        QUAY_TEST_SKIP_RESOURCE_GATE: "0", // force the REAL gate path, with seams
+        RESOURCE_GATE_TEST_CPU_AVG10: "84.77", // WAIT (cpu stalled)
+        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "WAIT ⇒ the runner exits non-zero (did not run)");
+    const s = readState(root);
+    assert.equal(s.state, "green", "state stays green (untouched) on WAIT");
+    assert.equal(s.durationMs, 300000, "the prior state object is byte-untouched");
+    assert.ok(!fs.existsSync(argsLog), "the suite was NEVER spawned on WAIT");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — resource gate GO ⇒ the runner starts (state=running then green)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac3go-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  try {
+    const child = runRunner({
+      root,
+      env: {
+        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
+        RESOURCE_GATE_TEST_CPU_AVG10: "10", // GO (cpu calm)
+        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "GO ⇒ the runner runs and exits 0 on green");
+    assert.equal(readState(root).state, "green");
+    assert.ok(fs.existsSync(argsLog), "the suite WAS spawned on GO");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — negative control: explicit --lane-count 8 + command already has =8 ⇒ exactly ONE =8 (replace, not two)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac4-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  try {
+    const child = runRunner({ root, command: "bash scripts/test.sh --test-concurrency=8", laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    await poll(() => fs.existsSync(argsLog));
+    const args = fs.readFileSync(argsLog, "utf8").trim();
+    assert.equal(
+      args,
+      "--test-concurrency=8",
+      `existing =8 stripped + explicit 8 spliced ⇒ ONE =8 total (ABORT #5 was two 8s), got: ${args}`,
+    );
+    assert.equal(readState(root).laneCount, 8, "explicit --lane-count 8 wins and is recorded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — a signal-killed run writes state=red reason=aborted, which must NOT trigger stop-dispatch", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac5-"));
+  // Flake fix (fan-in reland 2026-08-05): the external `child.kill("SIGTERM")` was delivered to the
+  // runner only intermittently in the node --test harness (state stayed "running" after exit ~30-70%
+  // of runs). Instead, the fake suite SIGNALS THE RUNNER ITSELF — after sleep 1, it walks its own
+  // ancestor chain up to the nearest node process (the runner, which spawned the suite AFTER
+  // registering its SIGTERM handler, so the handler is guaranteed registered) and SIGTERMs it.
+  // Deterministic: the signal comes from inside the runner's own process tree, no external delivery.
+  const { f, dir } = fakeSuite(
+    'sleep 1\n' +
+    'runner_pid=$PPID\n' +
+    'while [ -n "$runner_pid" ] && [ "$runner_pid" != "1" ]; do\n' +
+    '  comm=$(ps -o comm= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
+    '  case "$comm" in node*) kill -TERM "$runner_pid"; break ;; esac\n' +
+    '  runner_pid=$(ps -o ppid= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
+    'done\n' +
+    'sleep 5\n' +
+    'echo "# fail 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    await poll(() => {
+      const s = readState(root);
+      return s && s.state === "running" ? s : null;
+    }, { timeoutMs: 10000 });
+    // The fake suite signals the runner at ~t+1s; the runner exits when the handler runs.
+    await waitExit(child);
+    // The runner's signal handler writes red+aborted (no correctness conclusion).
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
+    }, { timeoutMs: 10000 });
+    assert.equal(s.reason, "aborted", "a kill produces reason=aborted, not failed");
+    // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, false, "aborted-red must NOT trigger stop-dispatch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC6 — this task cross-annotates the shared stop-dispatch family (gap-red-window-dispatch-stop-should-be-shared-gate-conditional)", () => {
+  const task = read(path.join(REPO_ROOT, "tasks/gap-full-suite-runner-concurrency-default-and-gate.md"));
+  assert.match(
+    task,
+    /gap-red-window-dispatch-stop-should-be-shared-gate-conditional/,
+    "this task must cross-annotate the shared-gate stop-dispatch task (AC6)",
+  );
+  const shared = read(path.join(REPO_ROOT, "tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md"));
+  assert.match(
+    shared,
+    /gap-full-suite-runner-concurrency-default-and-gate/,
+    "the shared-gate task must cross-annotate THIS task (AC6)",
+  );
 });
 
 test("AC1 — while the suite runs, state=running with finishedAt/durationMs null", async () => {
