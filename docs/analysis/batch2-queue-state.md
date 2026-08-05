@@ -3958,3 +3958,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **M3 验证套件**：干净环境推进（残留清、无冲突、lane-1，log 3606→3659 增长）；等完成后收尾 ROUND 3。
 - 本 tick 累计立案：supervisor 架构（umbrella）+ slot-visibility + OS-anchor + tmux 泄漏 + NBSP +
   reason 轴 + checker-cost 扩展。最高优先集（OS-anchor / supervisor / laneCount / 泄漏 / NBSP）。
+
+### tick 2026-08-05T09:15Z（外层，`unblock`：假信号根因 + ABORT #4 + M3 scoped 验证）
+
+- **假阻塞信号根因（管理者因果链，外层验证）**：--task-start/--task-end 从没被调用 ⇒ 任务永远
+  in-progress ⇒ task-over-90m 虚假触发 ⇒ inner 停下等裁定 ⇒ 没人消费 ⇒ 冻结。**解释今晚所有冻结**
+  （48+44=92min 被假信号吃掉）。已清 cold-start-key4 假信号（wait 2641.4s=44min），inner 恢复
+  （Embellishing）。slot-visibility 升根因级（AC8 over-90m 源统一、AC9 信号超时自动升级）。
+- **ABORT #4（09:12Z）**：M3 验证套件第三次卡 session-liveness（KNOWN-LOAD-SENSITIVE tmux 时序），
+  3 个 skv-ok server 累积、log 停 5935。**套件级 session-liveness 验证不可行**（文档：族须单独跑）。
+- **M3 scoped 验证（替代套件）**：①M3 takeover ✔（kill-9 后接管报 takeover_ms）；②AC16 ✔（lane-count
+  传播 --test-concurrency）；③NBSP ✔（真 TUI e2e，NBSP 夹具判空 + 送达）。**ROUND 3 三修复全部有效。**
+- **套件 state=red+aborted**（ABORT #4）。
+- 本 tick 立案：slot-visibility 升根因级（AC8/AC9）。累计最高优先：OS-anchor / supervisor / slot-
+  visibility 根因级 / laneCount / 泄漏 / NBSP。
