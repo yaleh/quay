@@ -11,8 +11,6 @@ title: "no ACTIVE Node version check — package.json engines>=20 is passive
 status: todo
 labels:
   - gap
-  - defect
-  - milestone-candidate
 parent: null
 children: []
 extra:
@@ -34,7 +32,7 @@ nvm 管理 node，管理者的**非交互 ssh 调用绕过了 nvm.sh**（~/.bash
 - Node 20（广泛 LTS）用户按文档直接跑 CLI 会撞裸 `bad option`，无升级提示；`engines>=20` 是**被动声明**
   （npm install 才警告）；
 - quay 代码 grep 不到任何 node 版本检查 ⇒ 主动探针（清晰错误 + 升级提示）是防御性改进，非已确认缺陷。
-- **待重验**：dist 直跑 ERR_UNKNOWN_FILE_EXTENSION 那条同样用非交互 ssh 测得，需交互式 shell 重验。
+已彻底撤回（2026-08-05 17:3xZ，管理者 tmux 交互式 v25.2.0 重测：quay init + task list 端到端干净成功；ERR_UNKNOWN_FILE_EXTENSION 同源非交互 ssh 假象，不要基于它建 defect）。
 
 **【为什么是采纳者门槛缺陷】**：采纳者第一眼就撞裸报错，且无法得知「升级 Node 即可」。这正是
 「写了但不在决策时被调用」的变体——engines 声明了但没有任何运行时检查把它变成可行动的提示。

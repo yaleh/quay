@@ -4745,3 +4745,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   均 overlap（batch 单一成员 = 冲突），串行等 ruling-required land。
 - 停止条件无、套件 green、Monitor 三判据绿、无 block。待派：send-keys-nbsp（self-touch 已补）、web-board 池
   排除缺陷（已立案）。
+
+### tick 2026-08-05T17:3xZ（外层，dist 彻底撤回 + --root bug 立案 + node-version 降级）
+
+- **管理者彻底撤回 dist 发现**：tmux 交互式 v25.2.0 重测，`quay init + task list` 端到端干净成功；
+  ERR_UNKNOWN_FILE_EXTENSION 同源非交互 ssh node 假象（v18 解析不了 mcp_entry 的 .ts，v25 原生可）。
+  已更新 node-version 任务（不基于它建 defect）。
+- **node-version 任务降级**：移除 defect + milestone-candidate，仅 gap 防御性建议（Node 20 用户 UX 改进，
+  无实证受害者）。
+- **真 bug 立案 `gap-task-list-root-does-not-scope-config-lookup`**：`task list --root <path>` 不按 --root
+  找配置，CWD 向上找 .quay/config.yml——管理者「测试忽好忽坏」的真实根因（cwd 对齐用 quay 开发树配置）。
+  代码核实：discoverWorkspaceRoot 默认 process.cwd()，--root 未接入。fix：--root 传入 discoverWorkspaceRoot
+  / fail-closed。
+- **B 机唯一剩阻塞已解**：.quay/config.yml 跟踪问题外层已裁定+执行（1a220576 gitignore + git rm --cached），
+  B 可 pull。
+- **在飞 3/3**。套件 green（stale）。
