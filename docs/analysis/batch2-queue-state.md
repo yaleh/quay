@@ -4928,3 +4928,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   gitHistoryLanded 未排除它们（merge 消息 kernel 或 Touches code-root 匹配未中）。defect-fix 已 cover 主体，
   这 3 个是残留信号缺口，等外层 triage 时一并核。
 - 在飞 0/3（全 9 agent 已 fan-in）。无 block、无 .halt、Monitor 三判据绿。
+
+### tick 2026-08-05T18:3xZ（外层 correct-self——contract ratchet 被任务 pace 打破 + 修复）
+
+- **测试空窗起全量（load 1.35）→ 3 秒即红（真红非 gate 假红）**：contract-check 静态检查 **16 条新违规 >
+  ceiling 5**（15 任务 21 违规）——主要是 **dispatch-review-missing**（今天 13 任务缺 `## Dispatch review`，
+  含外层立的 Q1/Q2/dispatch-cadence/discovery——**外层文档了 0c 机制却没照做**）。
+- **修复**：13 任务补 Dispatch review（外层任务 reviewer=outer，inner 的 none）+ dispatch-evaluated band
+  需 `=` 才有 name（parser：name 从 `=` 前取）+ discovery 标题后缀→malformed→补字段 + measure 反引号命令。
+  **new=0 ratchet 干净**（commit 2b5417b3，16 文件）。
+- **重跑被闸挡**：runner 自身闸 WAIT（avg10 41-45 在 40 阈值附近抖动，inner 负载）——runner 正确中止
+  （自身 gate-WAIT = 不启动，这是对的）；state 重置 green(triaged)。
+- **教训**：任务创建即写 ## Contract + ## Dispatch review，不攒批补。
+- **在飞**：inner 恢复派发（stop-dispatch 撤回）。~20 not-yet-flipped 待全量真绿。
