@@ -43,11 +43,30 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
 export type SuiteStateReason = "failed" | "aborted";
+
+/**
+ * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
+ * (gap-red-window-dispatch-stop-should-be-shared-gate-conditional). `line` is the raw failure
+ * line that flipped state to red (the 判定信息); `file` is the best-effort test-file context.
+ */
+export interface SuiteFailure {
+  line: string;
+  file?: string;
+}
+
+/** Where a suite failure landed, for the shared-gate-vs-specific-test dispatch conditional. */
+export interface FailureLocation {
+  kind: "shared-gate" | "specific-test" | "unknown";
+  file?: string; // specific-test: the failing test file (repo-relative, best-effort)
+  line: string;
+}
 
 export interface SuiteState {
   state: SuiteStateValue;
@@ -63,6 +82,14 @@ export interface SuiteState {
    * A missing reason (legacy red) is treated as "failed" — fail-closed toward stopping.
    */
   reason?: SuiteStateReason;
+  /**
+   * Present on red+failed — the failure line(s) + best-effort file context written by
+   * full-suite-runner. The SUITE-RED event carries this (failureLocation) so the inner dispatch
+   * decision can distinguish a SHARED-GATE failure (run_static_checks — every scoped run pays it
+   * ⇒ stop dispatch) from a SPECIFIC-TEST failure unrelated to a candidate's touch-set (⇒ dispatch
+   * continues). Absent (legacy red) ⇒ fail-closed toward stopping.
+   */
+  failures?: SuiteFailure[];
 }
 
 /**
@@ -86,6 +113,113 @@ export interface SuiteStateEvent {
   early: boolean; // red with finishedAt null = 早期 RED（(a) 块 AC2）
   stopSignal: boolean; // state=red IS the stop-dispatch signal（(a) 块 AC4）— 事件自带确认
   state: SuiteState | null;
+  /**
+   * SUITE-RED only — the classified failure location(s), the input to the shared-gate-vs-
+   * specific-test dispatch conditional (gap-red-window-dispatch-stop-should-be-shared-gate-
+   * conditional). A factual projection of state.failures (translation, not a dispatch decision —
+   * the decision is made at the inner dispatch site per the tick-doc rule, whose executable form
+   * is `shouldDispatchOnRed`).
+   */
+  failureLocation?: FailureLocation[];
+}
+
+// ── failure-location classification + shared-gate dispatch conditional ─────────────────────────────
+// (gap-red-window-dispatch-stop-should-be-shared-gate-conditional — the red-window rule refinement)
+//
+// The red-window dispatch-stop is a SHARED, gate-conditional rule (not two divergent copies):
+//   RED ⇒ ALWAYS hold fan-in (the real protection — the red tree must not accumulate mixed failures);
+//   RED ⇒ dispatch stops ONLY when the failure lands in the SHARED GATE (run_static_checks — the
+//   static-check checkers every scoped run pays); RED ⇒ dispatch CONTINUES when the failure lands in
+//   a SPECIFIC TEST file unrelated to the new task's touch-set (the new task's worktree is an
+//   independent master-branch copy running its own scoped tests).
+// The judgment info is already available: the early-RED failure line tells which test failed → shared
+// gate vs specific test → intersects the candidate's touches. No new mechanism is needed — the runner
+// records state.failures (the failure line + file), this module classifies it, and the existing
+// touches machinery (matchGlob / parseTouches) does the intersection.
+
+/** The shared gate = run_static_checks' static-check CHECKERS (plugin/scripts/*-check.*). */
+const SHARED_GATE_CHECKER_RE = /(?:^|[/\\])[a-z0-9_.-]+-check\.(?:ts|sh|mjs)$/i;
+const SHARED_GATE_NAME_RE =
+  /split-or-commit|test-framework-policy|test-isolation|task-contract|task-ac-carryover|adr016|strategic-doc-staleness|drive-contract|checker-mutation|run_static_checks|run_scoped_static_checks|select-static-checks-for-touches/i;
+const TEST_FILE_RE = /[\w./@-]+\.(?:test|spec)\.(?:mjs|ts|js|tsx|jsx)\b/i;
+
+function classifyFile(file: string): FailureLocation["kind"] {
+  if (SHARED_GATE_CHECKER_RE.test(file)) return "shared-gate";
+  if (TEST_FILE_RE.test(file)) return "specific-test";
+  return "unknown";
+}
+
+/**
+ * Classify ONE failure into its dispatch relevance (a FACT about where the red landed, not the
+ * dispatch decision). Precedence: shared-gate wins over specific-test (a failure naming a checker
+ * is a gate failure even if it also names a test file).
+ */
+export function classifyFailure(input: SuiteFailure | string): FailureLocation {
+  const line = typeof input === "string" ? input : input.line;
+  const file = typeof input === "string" ? undefined : input.file;
+  const haystack = [file, line].filter(Boolean).join("\n");
+
+  // 1. a static-check checker is named (checker path / checker name / run_static_checks) ⇒ shared gate
+  const checkerPath = file && SHARED_GATE_CHECKER_RE.test(file);
+  if (checkerPath) return { kind: "shared-gate", line };
+  if (SHARED_GATE_NAME_RE.test(haystack)) return { kind: "shared-gate", line };
+
+  // 2. a specific test file is named (vitest `❯ <file>` / TAP location / stack frame) ⇒ specific test
+  if (file) {
+    const kind = classifyFile(file);
+    if (kind === "specific-test") return { kind: "specific-test", file, line };
+    if (kind === "shared-gate") return { kind: "shared-gate", file, line };
+  }
+  const testFile = haystack.match(TEST_FILE_RE)?.[0];
+  if (testFile) return { kind: "specific-test", file: testFile, line };
+
+  // 3. cannot determine the location — fail-closed toward stopping (cannot confirm it is an
+  //    unrelated specific-test failure).
+  return { kind: "unknown", line };
+}
+
+/**
+ * The red-window dispatch conditional (this task's refinement) — executable form of the shared,
+ * gate-conditional rule the two tick docs state in prose:
+ *
+ *   shouldDispatchOnRed(state, touches) === true ⇒ BLOCK this candidate's dispatch
+ *   shouldDispatchOnRed(state, touches) === false ⇒ allow dispatch
+ *
+ * - absent / running / green ⇒ allow;
+ * - red + reason:aborted (no correctness conclusion) ⇒ allow;
+ * - red + failed (or missing reason):
+ *   - no failure location (legacy red) ⇒ BLOCK (fail-closed — cannot confirm it is an unrelated
+ *     specific-test failure);
+ *   - ANY failure lands in the SHARED GATE (run_static_checks) ⇒ BLOCK (every scoped run pays it —
+ *     every new task is polluted by the same red);
+ *   - a SPECIFIC-TEST failure whose file intersects the candidate's touch-set ⇒ BLOCK (the new task
+ *     would run that red);
+ *   - a SPECIFIC-TEST failure unrelated to the candidate's touch-set ⇒ allow (the new task's
+ *     worktree runs its own scoped tests — the red elsewhere is irrelevant);
+ *   - an UNKNOWN location ⇒ BLOCK (fail-closed).
+ *
+ * `touches` is the candidate task's `## Touches` section text (parsed with the existing
+ * parseTouches/matchGlob — no new mechanism), or an array of touch glob strings.
+ */
+export function shouldDispatchOnRed(state: SuiteState | null, touches: string | string[]): boolean {
+  if (!state) return false;
+  if (state.state !== "red") return false;
+  if (state.reason === "aborted") return false;
+  const failures = state.failures ?? [];
+  if (failures.length === 0) return true; // legacy red — fail-closed toward stopping
+  const globs = Array.isArray(touches) ? touches : parseTouches(touches).globs;
+
+  let sawUnknown = false;
+  for (const f of failures) {
+    const loc = classifyFailure(f);
+    if (loc.kind === "shared-gate") return true; // shared gate pollutes every scoped run
+    if (loc.kind === "unknown") {
+      sawUnknown = true;
+      continue;
+    }
+    if (loc.file && globs.some((g) => matchGlob(g, loc.file))) return true; // candidate would run this red
+  }
+  return sawUnknown; // any unclassifiable failure ⇒ fail-closed block
 }
 
 export interface RunOnceResult {
@@ -149,6 +283,12 @@ export function recordTransition(
     early: nextState.state === "red" && nextState.finishedAt === null,
     stopSignal: shouldStopDispatch(nextState),
     state: nextState,
+    // SUITE-RED carries the failure location — the input to the shared-gate-vs-specific-test
+    // dispatch conditional (gap-red-window-dispatch-stop-should-be-shared-gate-conditional).
+    // A factual projection of state.failures (translation, not a dispatch decision).
+    ...(kind === "SUITE-RED" && nextState.failures
+      ? { failureLocation: nextState.failures.map((f) => classifyFailure(f)) }
+      : {}),
   };
   try {
     fs.mkdirSync(path.dirname(eventsPath(root)), { recursive: true });
@@ -199,9 +339,14 @@ export function runOnce(root: string): RunOnceResult {
 }
 
 function formatEventLine(ev: SuiteStateEvent): string {
+  const loc = ev.failureLocation;
+  const locSummary = loc
+    ? ` failures=${loc.length} sharedGate=${loc.filter((l) => l.kind === "shared-gate").length}` +
+      ` specificTest=${loc.filter((l) => l.kind === "specific-test").length}`
+    : "";
   return (
     `${ev.event} state=${ev.state?.state ?? "?"} early=${ev.early} ` +
-    `stopSignal=${ev.stopSignal} at=${ev.at}`
+    `stopSignal=${ev.stopSignal} at=${ev.at}${locSummary}`
   );
 }
 

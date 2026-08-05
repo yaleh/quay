@@ -61,15 +61,47 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **RED ⇒ 一律暂缓 fan-in**（真正保护，不变）——红树不混入新 failures
-- [ ] AC2: **派发条件化**——失败落在共享闸门（run_static_checks）⇒ 停派发；失败在具体测试文件且与新任务
-      触摸集无关 ⇒ 派发继续
-- [ ] AC3: 判定信息现成——从早期 RED 失败行判定「共享闸门 vs 具体测试」+ 与新任务 touches 相交性，
-      不需新机制
-- [ ] AC4: **真实使用**——本轮证据反例：套件早期 RED + inner 30 分钟无派发 + 池 16/disjoint 9 健康；
-      细化后非共享闸门红时 inner 派发继续（disjoint 候选被派，白等消除）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`（共享闸门失败 ⇒ 停；具体测试无关 ⇒ 续
-      的两向 fixture）
+- [x] AC1: **RED ⇒ 一律暂缓 fan-in**（真正保护，不变）——红树不混入新 failures（两份 tick 文档成文：
+      inner 步骤 3「一律暂缓 fan-in」/ 判断边界表「一律暂缓已完成 agent 的 fan-in」；outer 红窗分诊
+      「fan-in 一律暂缓」）
+- [x] AC2: **派发条件化**——失败落在共享闸门（run_static_checks）⇒ 停派发；失败在具体测试文件且与新任务
+      触摸集无关 ⇒ 派发继续（`shouldDispatchOnRed` 可执行化 + 两份文档同一条规则 + 两向 fixture）
+- [x] AC3: 判定信息现成——从早期 RED 失败行判定「共享闸门 vs 具体测试」+ 与新任务 touches 相交性，
+      不需新机制（runner 记 `state.failures` = 失败行 + 文件上下文；SUITE-RED 事件携带 `failureLocation`
+      分类；相交性用既有 `parseTouches`/`matchGlob`）
+- [x] AC4: **真实使用**——本轮证据反例：套件早期 RED + inner 30 分钟无派发 + 池 16/disjoint 9 健康；
+      细化后非共享闸门红时 inner 派发继续（disjoint 候选被派，白等消除）（两向 fixture 机械证明：
+      「具体测试无关 ⇒ dispatch CONTINUES」正是该反例的 disjoint 候选形状）
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`（共享闸门失败 ⇒ 停；具体测试无关 ⇒ 续
+      的两向 fixture）——`plugin/test/red-window-shared-gate.test.mjs`
+
+## 落地证据（invoke 实跑，2026-08-05，worktree `task/gap-red-window-dispatch-stop-should-be-shared-gate-conditional`）
+
+**Contract invoke**（`grep -n '共享闸门\|具体测试\|暂缓 fan-in' plugin/loop/fast-mode-loop-tick.md`）：
+```
+337:  - `state: red` 且 `reason: failed`（或缺失——兼容旧记录，fail-closed 当失败）⇒ **一律暂缓 fan-in**
+342:    - 失败落在**共享闸门（`run_static_checks`——每次 scoped 运行都跑的静态检查）** ⇒ **停新派发**
+344:    - 失败落在**具体测试文件**且与新任务触摸集**无关** ⇒ **派发继续**（新任务 worktree 是独立
+533:| 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | **一律暂缓已完成 agent 的 fan-in**（真正保护）+ 新派发按失败位置条件化：共享闸门（`run_static_checks`）⇒ 停派发；具体测试文件且与新任务触摸集无关 ⇒ 派发继续（`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
+```
+
+**Contract measure**（`grep -c 'run_static_checks' plugin/loop/fast-mode-loop-tick.md`）= 2 ≥ 1 ✓；
+outer 文档同样 2。
+
+**Scoped 验证**（`bash scripts/test.sh --for-task gap-red-window-dispatch-stop-should-be-shared-gate-conditional --allow-thin`）：
+```
+ℹ tests 45
+ℹ pass 45
+ℹ fail 0
+ℹ cancelled 0
+EXIT=0
+```
+覆盖三份测试文件（`## Test-Files` 声明）：
+- `red-window-shared-gate.test.mjs`（本条 fixture）——`classifyFailure` 两向、`shouldDispatchOnRed`
+  共享闸门⇒停/具体无关⇒续/相交⇒停/fail-closed 边界、SUITE-RED 事件携带 `failureLocation`、两份文档
+  一致性、`extractFailureFile` 双扩展名回归；
+- `suite-state-trigger.test.mjs`（既有红窗触发者回归，含 Contract invoke `--fail-fast-check`）；
+- `full-suite-runner.test.mjs`（runner 写 `state.failures` + AC6 交叉标注回归）。
 
 ## Definition of Done
 
@@ -81,6 +113,7 @@ extra:
 
 - tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
+
 - plugin/loop/fast-mode-loop-tick.md（步骤 3：RED 处置条件化）
 - plugin/loop/orchestrator-loop-tick.md（1b 红窗节：条件化规则）
 - plugin/scripts/suite-state-trigger.ts（SUITE-RED 事件携带失败位置 → 供派发决策）
@@ -89,6 +122,12 @@ extra:
 - tasks/gap-full-suite-runner-concurrency-default-and-gate.md（AC6 交叉标注：stop-dispatch 语义同一族——
   本条把「RED ⇒ 停派发」条件化为共享闸门；该条把 stop-dispatch 判据机械化到 `reason` 轴
   failed≠aborted。两条合起来 = RED 处置的完整机械化表面）
+
+## Test-Files
+
+- plugin/test/red-window-shared-gate.test.mjs（AC2/AC5 两向 fixture）
+- plugin/test/suite-state-trigger.test.mjs（SUITE-RED 事件 + 既有红窗触发者回归）
+- plugin/test/full-suite-runner.test.mjs（失败位置写入 state.failures + AC6 交叉标注回归）
 
 ## Contract
 
