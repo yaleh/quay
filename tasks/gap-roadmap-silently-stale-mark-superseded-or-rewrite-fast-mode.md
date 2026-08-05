@@ -43,17 +43,102 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 路线图头部标注 SUPERSEDED + 指向 ADR-022（含日期与一句话理由）
-- [ ] AC2: 每个 Phase 段标注「引用机制 + fast-mode 状态」（退役的机制点名，不暧昧）
-- [ ] AC3: 仍有效的战略问题显式提取并交叉引用 cross-project-portability 任务
-- [ ] AC4: **grep 证明**——路线图不再有任何「无标注地指向已删除代码」的引用（每个删除机制引用都带
+- [x] AC1: 路线图头部标注 SUPERSEDED + 指向 ADR-022（含日期与一句话理由）
+- [x] AC2: 每个 Phase 段标注「引用机制 + fast-mode 状态」（退役的机制点名，不暧昧）
+- [x] AC3: 仍有效的战略问题显式提取并交叉引用 cross-project-portability 任务
+- [x] AC4: **grep 证明**——路线图不再有任何「无标注地指向已删除代码」的引用（每个删除机制引用都带
       retired/superseded 标注；实跑输出贴任务体）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`（若标注检查可测试化）
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`（若标注检查可测试化）
+
+### AC4 实跑输出（2026-08-05，`gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode`）
+
+**CONTRACT measure（stale_refs）** = 26（band ≥1 命中；仍引用但已全部带 retired/superseded 标注）：
+
+```text
+$ grep -cE 'prepare-milestone|execute-milestone|ProposalReview|PlanCheck' docs/proposals/quay-harness-crystallization-roadmap.md
+26
+```
+
+**CONTRACT invoke（SUPERSEDED）**：
+
+```text
+$ grep -n 'SUPERSEDED' docs/proposals/quay-harness-crystallization-roadmap.md
+3:> ## ⛔ SUPERSEDED by ADR-022 (2026-08-03) — do not use as a live roadmap
+22:- **Status:** ⛔ **SUPERSEDED** (2026-08-05) — built on the ADR-022-retired classic
+47:## 0. Mechanism status annotations (SUPERSEDED)
+```
+
+**AC4 grep（每个删除机制引用都带标注——banner / 机制状态表 / `[retired mechanism]` 块注 / 行内标记）**：
+
+```text
+$ grep -nE 'prepare-milestone|execute-milestone|ProposalReview|PlanCheck|proposal-convergence|milestone-preparation-check|OUTER-LOOP|milestone-worktree|StageReceiptEnvelope|milestones/M' docs/proposals/quay-harness-crystallization-roadmap.md
+6:> `prepare-milestone.js` / `execute-milestone.js`、ProposalReview、PlanCheck、kernel/policy 分离、
+7:> `OUTER-LOOP.md`——这些文件已于 `gap-retire-the-prepare-execute-pipeline-cluster`（2026-08-03）
+15:> ProposalReview/PlanCheck；subagent REFUTE 轮取代 Audit；`git worktree add $WORKTREE_ROOT/<slug>`
+16:> 取代 milestone-worktree.ts；遥测在 `.quay/fast-mode-telemetry.jsonl`。
+26:- **Scope:** define the next phase of crystallization after the prepare-milestone +
+27:  execute-milestone workflow pipeline [both **RETIRED under ADR-022**, 2026-08-03]
+37:  [`quay-execute-milestone-build-efficiency.md`](./quay-execute-milestone-build-efficiency.md)
+41:  [`gap-prepare-milestone-no-size-aware-routing`](../../tasks/gap-prepare-milestone-no-size-aware-routing.md)
+51:| `prepare-milestone.js` / `execute-milestone.js`（workflow 文件） | **RETIRED** — 已物理删除 | 双层快速模式：`fast-mode-loop-tick.md` tick + worktree 隔离派发 |
+52:| ProposalReview | **RETIRED** | `## Contract` 六键 + `task-contract-check.ts` |
+53:| PlanCheck | **RETIRED** | 同上 |
+54:| `proposal-convergence.ts` | **RETIRED** — 已删除；`checkSplitRecommendation` 导出保留但未接入 fast-mode | 见 `gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode` |
+55:| `milestone-preparation-check.ts` | **RETIRED** — 已删除；`computeTouchesExpansion`→`concurrent-batch-scheduler.ts`、`parsePlanStages`/`validatePlanStructure`→`prepare-admission-check.ts` | `task-contract-check.ts` / `prepare-admission-check.ts` |
+56:| `OUTER-LOOP.md`（经典循环驱动器） | **RETIRED** | `fast-mode-loop-tick.md`（内层）+ orchestrator-loop-tick（外层） |
+58:| `milestone-worktree.ts` | **RETIRED** — 已删除 | `git worktree add $WORKTREE_ROOT/<slug>` 直接建 |
+59:| `StageReceiptEnvelope` / `milestones/M*` 目录 | **RETIRED** — 经典里程碑簿记 | `.quay/fast-mode-telemetry.jsonl` + 任务体 + per-task worktree |
+106:> **历史数据提示（[retired mechanism]）**：§2 的收敛数据（ProposalReview 轮次 ρ 序列、信息效率衰减、
+111:Ten ProposalReview [retired, ADR-022] rounds produced this finding sequence:
+170:> **⚠ [retired mechanism]** 本 Phase 依赖 `proposal-convergence.ts` 与 `milestone-preparation-check.ts`
+171:> ——两者均已于 ADR-022 退役（2026-08-03 物理删除；`contentAgentMs` 字段随 `proposal-convergence.ts`
+219:### 3.3 Required action *(references `proposal-convergence.ts` / `milestone-preparation-check.ts` — both RETIRED, ADR-022; historical)*
+221:1. Populate `contentAgentMs` in `proposal-convergence.ts`'s
+224:   Adjudicate, ProposalReview, PlanAuthor, PlanCheck). This is ~50 lines of
+227:2. Report `contentAgentMs` in `milestone-preparation-check.ts`'s
+239:> **⚠ [retired mechanism]** 本 Phase 的探测器要挂进 **PlanCheck**——PlanCheck 已被 ADR-022 退役
+258:Detectable at:    PlanCheck (after Plan is written, before Build dispatch)
+287:   facts existed at PlanCheck ("AC requires real journal, Plan commits
+289:2. Implement a deterministic detector in `milestone-preparation-check.ts`
+290:   (or a PlanCheck sub-step) that compares extracted evidence modality per AC
+302:6. After one real later milestone is caught at PlanCheck (not Audit), record
+312:> **⚠ [retired mechanism]** 本 Phase 针对已删除的 `prepare-milestone.js` / `execute-milestone.js`
+319:The (now-deleted, ADR-022) prepare-milestone.js and execute-milestone.js source code mixed
+355:`prepare-milestone.js`'s `meta.description` field is 1033 characters.
+357:once per landed change and never subtracted. `execute-milestone.js`'s
+387:   OUTER-LOOP.md. The profile is the sole owner. Verification: changing one
+443:  Compare: Prepare wall time, PlanCheck finding yield, Audit outcome,
+478:> **⚠ [retired mechanism]** 本 Phase 依赖经典 milestone 目录（`milestones/M*`）、`StageReceiptEnvelope`、
+532:1. DIR-124-B defines the canonical `StageReceiptEnvelope` with RunIdentity,
+555:> `proposal-convergence.ts` / `milestone-preparation-check.ts` / DIR-124-D 均已退役。保留作历史。
+578:> **提示（[retired mechanism]）**：本表的 pass/fail 条件大多引用已退役的 PlanCheck、DIR-124-D policy
+586:| 1 | Evidence-modality detector catches ≥1 real mismatch at PlanCheck (not Audit) in a later milestone; false-positive rate < 5% | Detector fires on valid evidence mappings OR catches zero real mismatches over 10 milestones |
+609:> **提示（[retired mechanism]）**：开放问题 1–4 引用已退役机制（`proposal-convergence.ts`、
+610:> PlanCheck、DIR-124-D policy profile、L0 公式）——机制不存在后这些问题大部分已失去对象。
+617:2. Should the first back-propagation detector be blocking (fail PlanCheck,
+```
+
+逐行核对：6–16 在 SUPERSEDED banner 块注内；26–27 行内 `[RETIRED under ADR-022]`；37/41 下一行行内
+`[retired-era doc]` / `[ADR-022-retired pipeline task]`；51–59 机制状态表（每行 RETIRED）；
+106 在 `[retired mechanism]` 块注；111 行内；170–171 Phase 0 块注；219 §3.3 标题行内标记；
+221/224/227 在 §3.3 标题标记下；239 Phase 1 块注；258/287/289–290/302 在 Phase 1 块注下；
+312 Phase 2 块注；319 行内；355/357/387 在 Phase 2 块注下；443 在 Phase 3 块注下；478 Phase 4 块注；
+532 在 Phase 4 块注下；555 §8 块注；578/586 在 §9 块注下；609–610 §11 块注；617 在 §11 块注下。
+**无一行是无标注地指向已删除代码。**
+
+**AC5 测试**（`plugin/test/roadmap-superseded-check.test.mjs`，`node:test` + `// @test-group governance`）：
+
+```text
+$ node --experimental-strip-types --test plugin/test/roadmap-superseded-check.test.mjs
+✔ AC1/AC3: roadmap carries SUPERSEDED banner (ADR-022 + date) and the cross-project reference
+✔ AC4 negative control: stripping the annotation blockquotes makes the audit fail (silent rot is caught)
+ℹ tests 2  ℹ pass 2  ℹ fail 0
+```
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC4 grep 输出贴任务体
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC4 grep 输出贴任务体
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**本任务按外层 scoped-doc 指令不跑全量套件**（dispatch: "do NOT run the full suite"）；已跑单文件 `roadmap-superseded-check.test.mjs` 2 pass 0 fail + `test-framework-policy-check.ts` PASS
 
 ## Touches
 

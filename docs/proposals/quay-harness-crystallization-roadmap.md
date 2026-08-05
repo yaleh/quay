@@ -1,28 +1,67 @@
 # Proposal — Quay harness crystallization: quantitative roadmap
 
-- **Status:** proposal / measurement-grounded implementation sequence
+> ## ⛔ SUPERSEDED by ADR-022 (2026-08-03) — do not use as a live roadmap
+>
+> **本路线图已作废。** 它整篇建立在 **ADR-022（2026-08-03）已废除的经典 milestone 管线**——
+> `prepare-milestone.js` / `execute-milestone.js`、ProposalReview、PlanCheck、kernel/policy 分离、
+> `OUTER-LOOP.md`——这些文件已于 `gap-retire-the-prepare-execute-pipeline-cluster`（2026-08-03）
+> 物理删除（详见 [`ADR-022`](../../adr/ADR-022-retire-the-classic-milestone-loop-two-layer-is-the-sole-mode.md)）。
+> **现状是沉默地过期，比没有路线图更危险**——它看起来还在，可能误导下一个读它的人（含未来的 outer
+> 自己）。调查见
+> [`orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`](../../orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md)。
+>
+> **当前唯一开发模式是双层快速模式（two-layer fast mode）**：内层 tick 见
+> `plugin/loop/fast-mode-loop-tick.md`；`## Contract` 六键 + `task-contract-check.ts` 取代
+> ProposalReview/PlanCheck；subagent REFUTE 轮取代 Audit；`git worktree add $WORKTREE_ROOT/<slug>`
+> 取代 milestone-worktree.ts；遥测在 `.quay/fast-mode-telemetry.jsonl`。
+> 本路线图 5 个 Phase 引用的机制状态见下节「机制状态注解」。
+>
+> **仍有效的战略问题**（Phase 3 的跨项目可迁移性）已单独提取并钉住：
+> [`gap-fast-mode-cross-project-portability-strategic-question`](../../tasks/gap-fast-mode-cross-project-portability-strategic-question.md)。
+
+- **Status:** ⛔ **SUPERSEDED** (2026-08-05) — built on the ADR-022-retired classic
+  milestone pipeline; kept as historical record only.
 - **Date:** 2026-07-31
 - **Evidence cutoff:** commit `fb349328` at 2026-07-31T12:00:00Z
 - **Scope:** define the next phase of crystallization after the prepare-milestone +
-  execute-milestone workflow pipeline stabilized: fix the measurement blind spots,
-  activate the first feedback back-propagation detector, separate invariant harness
-  kernel from calibrated policy profile, validate cross-project, and structure
-  milestone outputs as training data.
-- **Related:**
+  execute-milestone workflow pipeline [both **RETIRED under ADR-022**, 2026-08-03]
+  stabilized: fix the measurement blind spots, activate the first feedback
+  back-propagation detector, separate invariant harness kernel from calibrated
+  policy profile, validate cross-project, and structure milestone outputs as
+  training data.
+- **Related:**（以下关联文档大多描述 ADR-022 已退役的经典管线机制，保留作历史记录，fast-mode 下不作为依据。）
   [`quay-prepare-execute-feedback-convergence.md`](./quay-prepare-execute-feedback-convergence.md)
   defines the geometric convergence model and unified feedback contract. ·
   [`quay-milestone-workflow-task-sizing-and-adaptive-execution.md`](./quay-milestone-workflow-task-sizing-and-adaptive-execution.md)
   defines size-aware Prepare routing. ·
   [`quay-execute-milestone-build-efficiency.md`](./quay-execute-milestone-build-efficiency.md)
-  defines size-aware Build routing and the test-ladder/fuse policy. ·
+  defines size-aware Build routing and the test-ladder/fuse policy [retired-era doc]. ·
   [`quay-milestone-workflow-throughput-capacity-model.md`](./quay-milestone-workflow-throughput-capacity-model.md)
   defines pipeline capacity and stage concurrency. ·
   [`gap-prepare-milestone-no-size-aware-routing`](../../tasks/gap-prepare-milestone-no-size-aware-routing.md)
-  (filed 2026-07-31) owns fast-lane prepare routing and execution manifests. ·
+  (filed 2026-07-31) owns fast-lane prepare routing and execution manifests
+  [ADR-022-retired pipeline task — not to be acted on under fast-mode]. ·
   [`gap-audit-findings-not-backpropagated-to-earlier-detectors`](../../tasks/gap-audit-findings-not-backpropagated-to-earlier-detectors.md)
   owns the feedback back-propagation pipeline.
 
+## 0. Mechanism status annotations (SUPERSEDED)
+
+| 引用机制 | 退役状态（ADR-022，2026-08-03） | fast-mode 对应物 |
+|---|---|---|
+| `prepare-milestone.js` / `execute-milestone.js`（workflow 文件） | **RETIRED** — 已物理删除 | 双层快速模式：`fast-mode-loop-tick.md` tick + worktree 隔离派发 |
+| ProposalReview | **RETIRED** | `## Contract` 六键 + `task-contract-check.ts` |
+| PlanCheck | **RETIRED** | 同上 |
+| `proposal-convergence.ts` | **RETIRED** — 已删除；`checkSplitRecommendation` 导出保留但未接入 fast-mode | 见 `gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode` |
+| `milestone-preparation-check.ts` | **RETIRED** — 已删除；`computeTouchesExpansion`→`concurrent-batch-scheduler.ts`、`parsePlanStages`/`validatePlanStructure`→`prepare-admission-check.ts` | `task-contract-check.ts` / `prepare-admission-check.ts` |
+| `OUTER-LOOP.md`（经典循环驱动器） | **RETIRED** | `fast-mode-loop-tick.md`（内层）+ orchestrator-loop-tick（外层） |
+| kernel/policy 分离（DIR-124-C/D） | **RETIRED** — 机制已不存在 | 战略问题仍成立 → 见 §6 Phase 3 注解与 cross-project 任务 |
+| `milestone-worktree.ts` | **RETIRED** — 已删除 | `git worktree add $WORKTREE_ROOT/<slug>` 直接建 |
+| `StageReceiptEnvelope` / `milestones/M*` 目录 | **RETIRED** — 经典里程碑簿记 | `.quay/fast-mode-telemetry.jsonl` + 任务体 + per-task worktree |
+
 ## 1. Decision summary
+
+> **⚠ 本节的 DIR-124/126 与 gap-* 映射关系建立在已退役的经典管线上，全部作废（ADR-022）。**
+> 见上节「机制状态注解」。
 
 Quay's methodology layer has converged on a working feedback system (prepare →
 execute → audit → land) whose measured behaviour now supports five concrete next
@@ -64,9 +103,12 @@ inform future task filing when the prerequisite phases complete.
 
 ## 2. What the numbers say: convergence is real but information-inefficient
 
+> **历史数据提示（[retired mechanism]）**：§2 的收敛数据（ProposalReview 轮次 ρ 序列、信息效率衰减、
+> fast-mode 自然实验对比）来自已退役的 DIR-120/124 era 机制，保留作历史记录，不代表 fast-mode 机制行为。
+
 ### 2.1 DIR-120's contraction ratio
 
-Ten ProposalReview rounds produced this finding sequence:
+Ten ProposalReview [retired, ADR-022] rounds produced this finding sequence:
 
 ```text
 r1→2:   8→2   ρ=0.25  ← contracting
@@ -125,6 +167,11 @@ overhead does not necessarily mean worse outcomes.
 
 ## 3. Phase 0 — Fix the measurement blind spots
 
+> **⚠ [retired mechanism]** 本 Phase 依赖 `proposal-convergence.ts` 与 `milestone-preparation-check.ts`
+> ——两者均已于 ADR-022 退役（2026-08-03 物理删除；`contentAgentMs` 字段随 `proposal-convergence.ts`
+> 一并消失）。「η 无法计算」的测量缺口在 fast-mode 下是否仍存在（`.quay/fast-mode-telemetry.jsonl`
+> 键集是否覆盖 content-agent 时间），见 `gap-fast-mode-no-telemetry`；下文列出的文件路径是历史。
+
 ### 3.1 Current measurement quality
 
 | Metric | N | Current value | Uncertainty (est. 95% CI) | Status |
@@ -169,7 +216,7 @@ Cost = critical-path wall time
 At N=30, the measurement system can reliably distinguish a real improvement
 from sampling noise. At the current N=3–6, almost nothing is distinguishable.
 
-### 3.3 Required action
+### 3.3 Required action *(references `proposal-convergence.ts` / `milestone-preparation-check.ts` — both RETIRED, ADR-022; historical)*
 
 1. Populate `contentAgentMs` in `proposal-convergence.ts`'s
    `buildTelemetryRecord()`. Record the actual dispatch-start and
@@ -188,6 +235,10 @@ from sampling noise. At the current N=3–6, almost nothing is distinguishable.
 The field exists in the schema; it only needs to be populated.
 
 ## 4. Phase 1 — Activate the first back-propagation detector
+
+> **⚠ [retired mechanism]** 本 Phase 的探测器要挂进 **PlanCheck**——PlanCheck 已被 ADR-022 退役
+> （`## Contract` 六键 + `task-contract-check.ts` 取代）。「AC 要求证据类 X、Plan 承诺更弱类 Y」的
+> 反向传播想法在 fast-mode 下没有现成挂载点；本 Phase 作为写成的行动清单不可执行，保留作历史。
 
 ### 4.1 Candidate: evidence-modality mismatch
 
@@ -258,9 +309,14 @@ candidate rather than leaving the choice open.
 
 ## 5. Phase 2 — Separate invariant harness kernel from calibrated policy profile
 
+> **⚠ [retired mechanism]** 本 Phase 针对已删除的 `prepare-milestone.js` / `execute-milestone.js`
+> 做 kernel/policy 分离（DIR-124-C/D）——两个文件均已退役删除，机制不存在。「invariant 与 calibrated
+> 分离」在 fast-mode 下的对应物未定义；作为战略问题转交
+> [`gap-fast-mode-cross-project-portability-strategic-question`](../../tasks/gap-fast-mode-cross-project-portability-strategic-question.md)。
+
 ### 5.1 The 4/6 split
 
-The current prepare-milestone.js and execute-milestone.js source code mixes
+The (now-deleted, ADR-022) prepare-milestone.js and execute-milestone.js source code mixed
 two classes of content that must be separated for cross-project transfer:
 
 | # | Component | Class | Rationale |
@@ -336,6 +392,15 @@ machine-readable and does not consume the human-facing description field.
 
 ## 6. Phase 3 — Cross-project calibration on archguard
 
+> **⚠ [mechanism retired — strategic question survives]**
+> 本 Phase 描述的机制（把 quay milestone kernel 部署到 archguard、影子模式跑 10 个 milestone、拟合
+> policy profile）已随 ADR-022 **不存在**。但它要回答的战略问题——「**fast-mode 双层循环是否能真跨
+> 项目迁移，还是过拟合 quay？**」——**仍然成立、仍然重要**，且已被单独提取并钉住：
+>
+> [`gap-fast-mode-cross-project-portability-strategic-question`](../../tasks/gap-fast-mode-cross-project-portability-strategic-question.md)
+> ——问题陈述 + 可迁移/过拟合判据 + 证据收集容器（meta-cc/archguard 冷启动结果逐条回写）。
+> 本 Phase 的量化预期（spec/code 比 1.45→0.80 等）是经典管线假设下的推算，fast-mode 下需重新校准。
+
 ### 6.1 Why archguard first
 
 The feedback-convergence proposal §2.7 reconstructed historical cross-project
@@ -410,6 +475,11 @@ needs revision.
 
 ## 7. Phase 4 — Structured training-data pipeline
 
+> **⚠ [retired mechanism]** 本 Phase 依赖经典 milestone 目录（`milestones/M*`）、`StageReceiptEnvelope`、
+> DIR-124-B——均随 ADR-022 退役。fast-mode 的输出载体是 `.quay/fast-mode-telemetry.jsonl` + 任务体 +
+> per-task worktree；「把 milestone 输出结构化为训练数据」没有接在任何现存输出 schema 上，本 Phase
+> 当前不可执行，保留作历史。
+
 ### 7.1 What one milestone produces
 
 A completed milestone is a structured (input, execution, verification,
@@ -481,6 +551,9 @@ a mechanical step, not a retrospective reconstruction from prose.
 
 ## 8. Dependency chain
 
+> **⚠ [retired mechanism]** 依赖链基于已退役的 Phase 0–4（见各 Phase 注解）；各节点引用的
+> `proposal-convergence.ts` / `milestone-preparation-check.ts` / DIR-124-D 均已退役。保留作历史。
+
 ```text
 Phase 0 (contentAgentMs)
   └─> Phase 1 (first back-propagation detector)
@@ -502,6 +575,9 @@ Phases 1 and 2 are partially parallelizable:
 
 ## 9. Metrics for the roadmap itself
 
+> **提示（[retired mechanism]）**：本表的 pass/fail 条件大多引用已退役的 PlanCheck、DIR-124-D policy
+> profile、经典 milestone 目录——机制不存在后不能作为 fast-mode 下的判据。保留作历史指标定义。
+
 The roadmap is falsifiable at each phase boundary:
 
 | Phase | Pass condition | Fail condition |
@@ -513,6 +589,9 @@ The roadmap is falsifiable at each phase boundary:
 | 4 | Milestone-to-training-sample exporter runs deterministically on ≥10 real milestones; output validates against schema | Exporter requires Claude session JSONL OR produced samples have null/missing fields for >20% of schema |
 
 ## 10. Non-goals
+
+> **⚠ [retired mechanism]** 本节的「不设目标」声明针对已退役的 Phase 0–4 机制；fast-mode 下的
+> 非目标需另行定义。保留作历史。
 
 - This roadmap does not create new directives or gap tasks beyond those
   already filed. Phases 0–2 map onto existing DIR-124/126 and gap-* tasks.
@@ -526,6 +605,10 @@ The roadmap is falsifiable at each phase boundary:
   training. What model, if any, consumes the dataset is a separate decision.
 
 ## 11. Open decisions
+
+> **提示（[retired mechanism]）**：开放问题 1–4 引用已退役机制（`proposal-convergence.ts`、
+> PlanCheck、DIR-124-D policy profile、L0 公式）——机制不存在后这些问题大部分已失去对象。
+> 保留作历史；唯一仍在 fast-mode 下有意义的是问题 5（训练数据导出器的时序）。
 
 1. Should `contentAgentMs` record only the content-agent subprocess wall
    time (simpler, ~20-line change), or also distinguish model-reasoning time
