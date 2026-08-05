@@ -3487,3 +3487,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > （monitor-mount-check.sh / send-keys-verified.sh）when cannot land（AC2）。**疑似 key4 落地回归**：
 > key4 把 cold-start 里的 send-keys-verified 换成 reliable-send，可能破坏断言旧 specimen 的测试（fixture
 > 陈旧）。等套件完 → bisect → inner 修。
+
+> **06:20Z 增补（管理者五透镜：交付面立案修正）**：
+> **L_D**：漂移轴 = 派生集（19）非文件数（92）——meta-cc 真缺 8（非 68，夸大 8.5×）；升级任务已改
+> （漂移报告分母 = 派生铺设集）。
+> **L_T**：六类里三类用廉价代理判据（同 curl-vs-subagent 同型，pane-hash 就是它的复现）——循环文档
+> （出厂文档在≠inner 读了照做）、周期锚点（cron 存在≠真重锚）、观测校验（AC8c 启动瞬间≠持续健康）；
+> 真判据各归 convergence/anchor-realuse/trend-L2。L1 检查判据须落真维度（修采样仪器，非补代理）。
+> **L_G 正面**：send-keys-verified.sh 分层退役正确（在树不在派生集），升级通道不得铺回。
+> 已更新 delivery-surface spec + upgrade 两任务。

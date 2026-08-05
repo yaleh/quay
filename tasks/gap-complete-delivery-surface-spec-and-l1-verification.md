@@ -54,6 +54,15 @@ extra:
    （本文件 §3 的语义一致 / 升级正确性 / 三层完整性三类补进该任务）。
 4. **不重复建任务**：manager 层（productize umbrella）/ 启动配置（launch-config）/ 周期锚点
    （anchor+converge）/ 会话拓扑（另立）/ 升级通道（另立）各自落地；本条是**规格 + L1 校验**。
+5. **L_T 代理消除（管理者五透镜 2026-08-05）——六类里三类仍用廉价代理判据，须按真维度重定**：
+   - **循环文档**：代理 =「出厂文档在」；真 =「inner 读了并照做」——实测 inner 复读自己上下文旧措辞，
+     ⇒ 真判据 = 语义收敛（`gap-reanchor-must-converge`，inner 自述向出厂语义收敛）；
+   - **周期锚点**：代理 =「CRON-CREATED 键测 cron 存在」；真 =「循环真的重锚」⇒ 真判据 = 重锚实跑
+     （anchor 任务 AC6 + convergence）；
+   - **观测与校验**：代理 =「AC8c 测启动瞬间」；真 =「持续健康」⇒ 真判据 = 趋势型 L2
+     （`gap-quality-criteria-are-point-in-time`）。
+   **L1 检查的六类判据必须落在真维度上**（同 curl-vs-subagent 修采样仪器的教训——廉价代理在错误轴给
+   伪收敛）。
 
 ## Acceptance Criteria
 
