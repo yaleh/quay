@@ -2969,3 +2969,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **待我收尾的落地未翻集合（inner 确认 4 条）**：roadmap / review-cadence / closure-sync /
   inner-anchor，AC 全勾；全量 gate + 真实使用 AC 证据属外层收尾例程。
 - **在飞**：drive-text（串行链第 4 个，读 QUAY-OUTER-HANDOFF）；套件重跑中（bcu8ar4dm）。
+
+> **02:55Z 增补（verification-round 第二轮）**：
+> - 重跑全量套件（contract 修复后）→ **RED**：fail 8 = **7 capability-catalog**（真回归）+ **1 noise-gate**
+>   （29s，负载抖动非回归）。真回归根因：capability-catalog.sh 声明表缺 2 条 question——
+>   `drive-contract-check.ts`（drive-text 产物）+ `strategic-doc-staleness-check.ts`（review-cadence 产物）
+>   未声明（89 scripts | 87 declared | 2 unclassified | 84 ship）。
+> - **红窗分诊**：已定位（2 声明缺失 + 目录约定 `[basename]="问句"`）→ 驱动 inner 补声明
+>   （03:01:30Z 投递，transcript 验证）；inner 已在 catalog 实测 + 修改中。
+> - 修后我重跑套件做 gate，绿则关 4 条落地未翻（roadmap/review-cadence/closure-sync/inner-anchor）。
