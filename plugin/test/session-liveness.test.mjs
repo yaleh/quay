@@ -1366,7 +1366,21 @@ test("M3 (AC20d) — after kill -9 of the holder, the next mount TAKES OVER and 
       const newPid = parseInt(token2.match(/pid=(\d+)/)[1], 10);
       assert.equal(newPid, m3.pid, `after takeover the new holder must be the new mount:\n${token2}`);
       assert.ok(fs.existsSync(`/proc/${newPid}`), "the new holder must be running");
-      assert.equal(countMountProcesses(globalDir), 1, "takeover must not create a second monitor process");
+      // The holder's observer forks TRANSIENT subshells for its command substitutions (pid=$(...),
+      // ttype=$(...), etc.) — same cmdline + env, parented by the observer, gone within a loop tick.
+      // countMountProcesses cannot distinguish them from a real second holder at an arbitrary instant,
+      // so a single-shot count races them (intermittent count=2 — reproduced pre-session-idle; the
+      // transcript-fusion command substitutions raise the spawn rate). The AC's intent is "no PERMANENT
+      // second monitor": poll until the count settles at exactly 1. A real takeover leak keeps 2+
+      // persistently and fails the bounded wait.
+      let settled = 0;
+      const dlSettle = Date.now() + 5000;
+      while (Date.now() < dlSettle) {
+        const c = countMountProcesses(globalDir);
+        if (c === 1) { settled = c; break; }
+        await sleep(50);
+      }
+      assert.equal(settled, 1, `takeover must not leave a second monitor process (settled count was ${settled})`);
     } finally {
       m3.kill("SIGKILL");
     }
