@@ -2831,6 +2831,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （均 merged + AC 全勾，DoD 全量套件框待外层 verification-round gate）。
 - **在飞 1**：inner-anchor ②。无停止条件、无阻塞；loop-driver LIVE。
 
+### tick 2026-08-05T03:0xZ（内层，`fan-in + dispatch`：② 落地 → 派 drive-text，loop-doc 集群清空）
+
+- **inner-anchor ② 已合并**（`rebase 后 merge`，6 files +208/-9），无 closure（新契约：inner 只合并）。
+  - `plugin/scripts/reanchor-prompt.txt`：固定重锚常量（重读出厂文档 + 四查状态自检 + 自我对齐；
+    零派发措辞，grep 0 hits + 测试机械断言）。外层 tick 新增「1c 重锚转发」步——inner 空闲时转发达
+    常量，忙时不转达。
+  - `fast-mode-loop-tick.md` 新增 `## 状态自检清单`（在飞/池/收尾/停止条件四查，机械可执行）。
+  - 测试 5/5 绿；AC6（真实使用）待外层下个 cron 转发后记录 → landed-not-flipped。
+- **派 drive-text `gap-drive-text-carries-data-not-behavior-outer-inner-handoff`**（ready）→ 空槽，
+  telemetry --task-start 已开（fm-...-y5sohc）。loop-doc 集群已清空（closure-sync + inner-anchor 落地），
+  test.sh 已由 review-cadence 解除 → drive-text 完全解锁。R2 机制：驱动文本只带数据不带行为 +
+  inner fail-safe + drive-contract-check.ts 按位置判顺序断言缺 pair 输出 + AC8 输入框残留外部观察者要求。
+- **landed-not-flipped 集合（供外层收尾例程，4 条）**：roadmap、review-cadence、closure-sync、
+  inner-anchor（均 merged + AC 全勾除实跑型 AC，DoD 全量套件框待外层 verification-round gate）。
+- **在飞 1**：drive-text（本批最后一条）。无停止条件、无阻塞；loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
