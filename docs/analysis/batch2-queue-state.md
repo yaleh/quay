@@ -5103,3 +5103,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 池 11/12、disjoint 2（真候选 glob-碰撞，独立问题）。promotion 候选 gap-prepare-milestone-no-size-aware-routing
   待池补晋，red 下不执行。
 - Monitor 绿、无 block、无 .halt。
+
+### tick 2026-08-05T20:1xZ（外层，closure round 7——8 小时来首次大收尾）
+
+- **closure 批量**：7 任务翻 done（session-idle/ready-pool-floor/red-window/outer-heartbeat/dist-runtime/
+  closure-sync/stale-check）——AC 由落地 merge + 外层验证支撑（verification-round round 7）。
+- **套件有效验证**：第 7 次运行 22min / 34 文件 / 2000+ 测试通过，唯一失败=session-liveness M5
+  **KNOWN-LOAD-SENSITIVE flake**（隔离通过 1/1，已有任务 gap-load-sensitive-session-family）——分诊为
+  非回归，套件有效验证用于 closure（记录偏差）。
+- **剩余 16 条 ready**：卡真实运行证据（fresh-session e2e / cross-project 负载 / 效果验证 / B 机路径）——
+  reliable-send/web-board/send-keys-nbsp/adaptive-concurrency/ruling-required/upgrade-channel/two-thirds/
+  tmux/axis/vendor-runtime/measure-claude-p/manager-baked/DIR-119/DIR-121/taskworklanded/ready-pool-check。
+- **套件结构性结论**：本机（4 核，多 claude 会话）难出真全量绿——闸抖 + 已知 flake + 停摆。有效验证 +
+  记录偏差成为 closure 的实际路径。
