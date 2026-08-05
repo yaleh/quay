@@ -4111,3 +4111,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **runner 结构任务 merge**（16068661：nproc 派生默认 + REPLACE splice 杀 ABORT #5 =8 =8 + resource-gate + reason 轴 aborted≠failed），AC1-AC6 全勾，scoped 29/29。**今晚最大结构性风险（ABORT #5 崩溃类 + aborted-red 停派）根除**。
 - **os-anchor timer active**（AC1 实跑过，watchdog 判读三项目正确）。AC2 崩溃模拟 inner 排队中（AC 未勾）。
 - inner 3 agent 在飞（Grep 90-min 常量 = 可能处理 over-90m 任务）。
+
+### tick 2026-08-05T11:3xZ（外层，AC2 真实 kill 验证开始）
+
+- **AC2 kill 测试执行**：kill archguard-4:outer claude（pid 2269708）——watchdog 实际盯的目标（重拉 outer）。负控制已过（--check-all 正确判三项目）。下次 timer 触发 11:39:15，观察 watchdog 是否 relaunch-outer。
+- **watchdog --decide seam 验证通过**（alive=1→noop / dead+session→relaunch-outer / dead+nosession→recreate-session / halted→halted）——决策逻辑正确。
+- **watchdog 盯 outer 不盯 inner**（AC2 原文「重拉 claude 会话」= outer；kill inner 测不到重拉逻辑）。
+
+### tick 2026-08-05T11:4xZ（外层，AC2 真实 kill 验证结果）
+
+- **AC2 kill 测试执行完成**：kill archguard-4:outer claude → watchdog 11:40:08 触发 → **检测死亡（alive=0 session=1）+ 重拉 claude 成功（2284029）**。核心机制（崩溃自恢复检测+重拉）**验证通过**。
+- **两个缺陷暴露**：①drive SKIPPED（transcript 时序竞态——新 claude jsonl 未就绪，冷启动文本没发）；②rc=1 RECOVERY-FAILED（drive 临时失败使 service FAILURE）。已建任务 gap-os-anchor-watchdog-drive-retry-and-rc-semantics。
+- **archguard outer 现状**：新 claude 停在欢迎界面（未驱动）。watchdog 下 tick 会重试 drive。
+- watchdog --decide seam 验证通过（决策逻辑正确）。
