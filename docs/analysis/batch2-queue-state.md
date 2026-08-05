@@ -3000,6 +3000,26 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   不再发生）+ RUNNING/GREEN 乐观派发有执行者；不引入新调度源（执行既有处置逻辑）。
 - **在飞 2**：session-idle ③ + red-executor ②。停止条件：suite-state green（乐观照常）。loop-driver LIVE。
 
+### tick 2026-08-05T05:5xZ（内层，`fan-in complete`：本批 3 条全合并）
+
+- **③ session-idle 已合并**（rebase 后，2 files +290/-35）+ 任务体 AC 勾选单独提交（agent 自触留在主检出，
+  已收）。7/7 AC + DoD 2/3（实对象验证 done，全量套件待外层）→ landed-not-flipped。
+  - `session-liveness.sh` 加 transcript 最后消息类型融合：pending-tool-use/user-input = 确定忙（优先级高，
+    忙零漏报）；纯文本 = 候选闲；pane 哈希降级为去抖候选闲辅助。去抖 2 轮（120s）才报 SESSION-IDLE。
+  - AC3 真空闲检出 / AC4 间隙不报 / AC5 挂起 tool_use 永不 idle 实跑全绿 + 真实 transcript 验证。
+- **② red-executor 已合并**（rebase 后，8 files +658/-9），无 closure。6/6 AC（AC5 待真 RED 实况）+
+  DoD 全量套件未勾 → landed-not-flipped。capability-catalog 92/92（suite-state-trigger.ts 已声明），
+  测试 10/10 绿。
+  - `suite-state-trigger.ts`：状态转换即触发（SUITE-RED/SUITE-RUNNING 事件流，Monitor 推送不等 cron）；
+    stopSignal=state=red 确认；RUNNING 乐观派发执行者接 orchestrator step 1b；AC4 测试断言无
+    CronCreate/新调度源。
+- **本批 3 条全部落地**：pool-floor ① / session-idle ③ / red-executor ②。
+- **landed-not-flipped 集合（供外层 ROUND 3 收尾，8 条）**：closure-sync、drive-text（ROUND 1/2 遗留）
+  + full-suite-outer、closure-decomp、scoped-tier（ROUND 2 已关 3 条，剩余为上述）+ pool-floor、
+  session-idle、red-executor（本轮新）。
+- **无在飞**：槽位全空。等外层 ROUND 3 verification-round（全量 gate + 关括号 + 翻 done）。新契约下
+  inner 不跑全量、不关括号、不翻 done。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
