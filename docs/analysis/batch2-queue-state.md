@@ -5426,3 +5426,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   agent 复核）——测量任务本身已完成，非派发候选。**B 机稳定前提满足** ⇒ -p 无头迁移的**后续**可推进——该后续
   非本任务 AC scope（本任务只测往返/退出语义），需外层决定：建后续任务（B 机 -p 迁移）或外层直接驱动。
 - 在飞 1/3（branch-model）。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T23:4xZ（外层，claude-p 测量完成 + closure round 13）
+
+- **claude-p 测量完成**（inner 4/4，B 稳定前提满足）——-p 往返/退出语义已测，证据在任务体
+  （AC1 往返 PASS + 负控制 + no-billing claude-deepseek only）。closure round 13：claude-p 翻 done
+  （共 13 个）。
+- **-p 迁移后续**：测量完成 ⇒ 下一步是 -p 迁移（容器化前置，SPEC-isolation 推荐次序）。inner 留决策——
+  外层记：迁移任务待测量结论审阅后立案。
+- **two-machine-collab**：ready + self-touch，按闸串行在 branch-model 后（Q2 AC3 依赖 integration）。
+- inner 在飞 branch-model；pool 6/dispatchable 2。
