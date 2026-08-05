@@ -2779,6 +2779,24 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **在飞**：review-cadence（PRIORITY，唯一）。槽位空 2 但 drive-text 门控等 review-cadence 落地
   （共享 scripts/test.sh）——暂不补派其他池任务（外层批范围=这 4 条）。无停止条件、无阻塞。
 
+### tick 2026-08-05T02:3xZ（内层，`dispatch`：外层更正滚动语义 + 补派 closure-async）
+
+- **外层更正**：就绪池 4 条是当时快照非批次门控；派发按滚动语义槽空即派（出厂文档）。我的「持槽等批」
+  行为正是 closure-async 任务要消除的形态。
+- **补派 `gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`**（ready，
+  机制根，人裁定）→ 空槽。telemetry bracket 已开（fm-gap-closure-sync-...-4szd1p）。
+  机制：inner 循环删收尾步（只执行+派发+合并），外层 20-min-cron 异步收尾（taskWorkLanded 非
+  status 探测 → --task-end → 翻 done → verification-round-N），inner 停止条件改读外层结果文件。
+- **loop-doc 串行链发现**：① closure-sync、② gap-inner-has-no-periodic-anchor、drive-text **三者都触**
+  `fast-mode-loop-tick.md` + `orchestrator-loop-tick.md`（同文件集群）——必须逐个落地再派下一个；
+  drive-text 另等 review-cadence（scripts/test.sh）。顺序：review-cadence ∥ ① 在飞 → ②（① 落地后）
+  → drive-text（review-cadence + ① 都落地后）。
+- **② 状态为 todo**（任务文件 self-declared，依赖①），非 ready——按外层「排①后」处置。
+- **就绪池探测**：pool=2；eligible:true 候选 = prepare-milestone（外层已裁定不晋：ADR-022 退休管线、
+  touches false-resolve）+ session-idle / session-liveness（未经外层点名，不自主补派）。槽位空由机械
+  门控造成（②依赖①、drive-text 串行），非持批。
+- **在飞 2**：review-cadence（PRIORITY）+ closure-sync。无停止条件、无阻塞；loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
