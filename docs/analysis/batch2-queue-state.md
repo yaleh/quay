@@ -5308,3 +5308,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **教训**：触摸不相交**不手工判**——用机械闸（checkTouchesPair）。外层手工比较劣于机制（今天第二次：
   basename 误判 + 触摸漏判）。
 - **gate WAIT**（avg10>=40，load 5.25）、inner global-count 在飞（symlinking node_modules 13m28s）。
+
+### tick 2026-08-05T22:5xZ（外层，os-anchor watchdog 租约模型裁定立案）
+
+- **人方向性问题 + 管理者实测 → 外层裁定**：os-anchor watchdog 从缺席推断意图（违反仓库自己的
+  inner-blocked-signal.ts「existence signal, not absence inference」原则）。实测：.halt 混淆两种意图 /
+  backoff 上限缺失 / relaunch 路径 0 次生产 / /exit=崩溃=relaunch / Linger=no=登录+5min 自启。
+- **裁定：租约模型**——显式时间戳「我要它跑」声明；无租约=不看护；租约过期=停（解决意图+退避）。
+- **产品化裁定**：机制交付（通用——会话锚随会话死是 Claude Code 固有），策略默认不交付（登录自启/无限
+  重生/写死驱动/硬编码三项目 = quay 特有）；默认禁用 + 全配置化。
+- **立案 gap-os-anchor-watchdog-lease-model-instead-of-absence-inference**（todo, defect）。
+- **现状**：watchdog 保持 active（维持运行中的循环；relaunch 路径 0 次未造成实害），租约重做落地后切换。
