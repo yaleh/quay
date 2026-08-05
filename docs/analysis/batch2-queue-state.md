@@ -4859,3 +4859,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **已知局限延伸**：tick 文档记录 IDLE=无在飞任务代理；OVERDUE 是同一局限的升级表现（subagent 工作不写
   主 transcript）。与在飞 `gap-session-idle-true-idle-via-transcript-fusion-and-debounce` 相关（信号质量
   修正在途），不另立案。处置纪律：OVERDUE 先交叉验证（process/git/subagent），不裸信。
+
+### tick 2026-08-05T18:5xZ（内层，axis-generator fan-in + 第 5 次 already-landed + 派发保守化）
+
+- **axis-generator fan-in 完成**：**第五次 already-landed 重派实证**（`4c8cebd5` 实现已落地；git-log
+  --grep="axis-generator" 漏检——head-3 截断/消息不定名）。agent 复核 AC1-AC5 live（--criteria 28 判据、
+  prefriction 73 新任务全触发、--selfcheck 5/5）、**修了一个真 CI 潜在缺陷**：config 依赖的 gate-set 断言在
+  无 .quay/config.yml 的 fresh clone 上必败 ⇒ 改 config-present 才断言 gates，否则断言 checker-set + gates==0
+  （两种场景 10/10 绿）。merge `6dfbdb5e`。worktree/branch 已清。
+- **派发保守化（第 5 次教训）**：git-log-by-id + partial-id 对「提交消息不定名任务 id」的重派漏检率 5/5
+  （web-board/measure-claude-p/send-keys-nbsp/ready-pool-floor/axis-generator 全中招）。**hold 第 3 槽**——等
+  defect-fix（在飞，taskWorkLanded 加 git-history 信号）land 后池自动排除，再派发更安全。在飞 2/3。
+- 停止条件无、套件 green、Monitor 三判据绿、无 block。
