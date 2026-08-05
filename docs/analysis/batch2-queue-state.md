@@ -2928,6 +2928,26 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   仓库级 ratchet，延迟到全量 gate 而非丢弃）；全量档位不变（AC2 机械证明）。
 - **在飞 1**：scoped-tier ③（本批最后一条）。② 落地后无停止条件；loop-driver LIVE。
 
+### tick 2026-08-05T05:0xZ（内层，`fan-in complete`：③ 落地，本批 3 条全合并）
+
+- **③ scoped-tier 已合并**（rebase 后，9 files +996/-28），无 closure。7/7 AC 全勾（task 代理自勾 +
+  自贴证据），DoD 全量套件框未勾 → landed-not-flipped。status 保留 ready（晋级翻转 stash-pop 保留，
+  与分支 AC 勾选合并无冲突）。
+  - `select-static-checks-for-touches.ts`（new）：scoped 静态检查档位——always（contract strict-subset
+    对 touched 任务）∪ change（对象∩touches）− full（checker-mutation ~13s + 无关仓库级 ratchet 延迟
+    到全量 gate）。AC5 实测：静态段 17.2s → ~3.1s；完整 scoped 运行 ~5.3s。
+  - 全量档位不变（AC2 机械证明：test.sh 9 条 checker 调用字节不变，checker-mutation-check.sh --list
+    仍 12 checkers）；AC4 两向实跑贴任务体（touched 违规 scoped 必抓 exit 1 / 无关 ratchet scoped
+    不抓全量必抓）。
+  - **顺带修复**：`stripTouchAnnotation` 现在剥全角（）——修了我先前在 checkTouchesPair 见到的
+    「全角注释使 scripts/test.sh 重叠显示 disjoint」同族 bug；checker-mutation-check.test.mjs 陈旧
+    硬编码 11→动态（checker 数已 9→12）。
+- **本批 3 条全部落地**：full-suite-outer ① / closure-decomp ② / scoped-tier ③。
+- **landed-not-flipped 集合（供外层 ROUND 2 收尾，5 条）**：closure-sync、drive-text（ROUND 1 遗留，
+  待 AC5/DoD 实跑证据）+ full-suite-outer、closure-decomp、scoped-tier（新）。
+- **无在飞**：槽位全空。外层 ROUND 2（verification-round gate + 关括号 + 翻 done）后按滚动语义可派下一批。
+  新契约下我不跑全量、不关括号、不翻 done。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
