@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# quay-topology.sh — 三窗口会话拓扑工厂（gap-tmux-session-topology-no-factory-definition, AC2）。
+# quay-topology.sh — 两窗口会话拓扑工厂（gap-tmux-session-topology-no-factory-definition, AC2；
+# 两窗口修正：gap-manager-baked-into-project-topology-factory——manager 跨项目，不属于项目拓扑）。
 #
-# 把 `<project>-N:outer / :inner / :manager` 三窗口结构按出厂定义建出来
-# （定义见 plugin/skills/session-topology/SKILL.md）。冷启动不再手工拼：
+# 把 `<project>-N:outer / :inner` 两窗口结构按出厂定义建出来
+# （定义见 plugin/skills/session-topology/SKILL.md）。manager 是跨项目的，由人另行启动，
+# 不属于项目拓扑——本工厂只建 outer + inner。冷启动不再手工拼：
 # 每个窗口的运行命令由 plugin/scripts/quay-launch.sh <role> 生成（从检查进仓库的
 # .claude/launch.settings.json 读启动参数），本脚本只负责按定义摆窗口。
 #
@@ -60,8 +62,8 @@ if [ -z "$SESSION" ]; then
   exit 2
 fi
 
-# 拓扑窗口顺序（与 quay-0 实测布局一致：manager=窗口0, outer=1, inner=2）。
-ROLES="manager outer inner"
+# 拓扑窗口顺序（与 quay-0 实测布局一致：outer=窗口0, inner=1）。manager 跨项目，不属于项目拓扑。
+ROLES="outer inner"
 LAUNCH_CMD_OVERRIDE="${TOPOLOGY_LAUNCH_CMD:-}"
 
 launch_cmd() {
@@ -94,11 +96,13 @@ has_claude_child() {
   return 1
 }
 
-# 会话不存在 ⇒ 从零建：第一个窗口（manager）即会话首窗（窗口 0）。
+# 会话不存在 ⇒ 从零建：第一个角色（outer）即会话首窗（窗口 0）。
+# FIRST 初始化空串：会话已存在时保持空，循环里 `[ "$role" = "$FIRST" ]` 在 set -u 下安全。
 SESSION_EXISTED=1
+FIRST=""
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   SESSION_EXISTED=0
-  FIRST="manager"
+  FIRST="${ROLES%% *}"
   CMD="$(launch_cmd "$FIRST")"
   if [ "$DRY_RUN" = 1 ]; then
     echo "would-create-session: tmux new-session -d -s $SESSION -n $FIRST \"$CMD\""
@@ -109,14 +113,13 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   fi
 fi
 
-# 逐个角色确保窗口在位。manager 若是刚随会话创建的首窗，跳过（刚起的 claude 未就绪，直接判
-# 会误走重拉路径）。
+# 逐个角色确保窗口在位。首窗若是刚随会话创建，跳过（刚起的 claude 未就绪，直接判会误走重拉路径）。
 for role in $ROLES; do
-  if [ "$role" = "manager" ] && [ "$SESSION_EXISTED" = 0 ]; then
+  if [ "$role" = "$FIRST" ] && [ "$SESSION_EXISTED" = 0 ]; then
     if [ "$DRY_RUN" = 1 ]; then
-      echo "would-create (first window): $SESSION:manager (the new session's window 0)"
+      echo "would-create (first window): $SESSION:$role (the new session's window 0)"
     else
-      echo "in-place: $SESSION:manager (first window of the new session)"
+      echo "in-place: $SESSION:$role (first window of the new session)"
     fi
     continue
   fi

@@ -45,7 +45,10 @@ inner 按我的方式存在」。
 并行工作而不互相破坏。
 
 **与 manager 移除出拓扑同一次改动的两面**：拓扑里不含 manager，但拓扑**可能由 manager 预先建好**，
-outer 要能识别并接受。
+outer 要能识别并接受。**两窗口拓扑已落地（交叉标注：gap-manager-baked-into-project-topology-factory，
+2026-08-05 已修正）**——`quay-topology.sh` ROLES="outer inner"、`topology-check.sh` 判据只查两窗口，
+本任务 AC4 的「缺失 ⇒ 调 quay-topology.sh 创建两窗口（outer+inner）」即以该出厂定义为准，无 manager
+窗口。
 
 **实测支撑（手工建会话不可靠）**：meta-cc-3/archguard-4 只有单 bash 窗口零 claude——每个建的人猜一种
 结构，不一致不可复现。session-topology skill + quay-topology.sh 已是工厂（幂等、按名寻址、launch 从

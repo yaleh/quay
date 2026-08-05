@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# topology-check.sh — 三窗口拓扑在位检查（gap-tmux-session-topology-no-factory-definition, AC3）。
+# topology-check.sh — 两窗口拓扑在位检查（gap-tmux-session-topology-no-factory-definition, AC3；
+# 两窗口修正：gap-manager-baked-into-project-topology-factory——manager 跨项目，不属于项目拓扑）。
 #
-# 校验 `<project>-N:outer / :inner / :manager` 三窗口结构是否真的在位：每个窗口存在，
+# 校验 `<project>-N:outer / :inner` 两窗口结构是否真的在位：每个窗口存在，
 # 且每个窗口里有一个 claude 进程（不是单 bash 窗口——meta-cc-3/archguard-4 实测只有
 # 单个 bash 窗口、无 claude 进程，那正是本检查要消除的失败形态）。
+# manager 是跨项目的、由人另行启动，不在本检查的判据内。
 #
 # 判据（AC3 的正/负控制）：
 #   - 单 bash 窗口（无 claude）⇒ 校验必报缺（每个拓扑窗口 MISSING）
-#   - 三窗口在位、每层有 claude 进程 ⇒ 通过（exit 0）
+#   - 两窗口在位、每层有 claude 进程 ⇒ 通过（exit 0）
 #   - 窗口在但无 claude（纯 bash）⇒ 报 NO-CLAUDE
 #
 # 窗口按名字寻址（pane 索引会漂，窗口名不会，session-launch-recipes §3）。
@@ -64,7 +66,7 @@ if [ -z "$SESSION" ]; then
   exit 2
 fi
 
-ROLES="manager outer inner"
+ROLES="outer inner"
 
 # 窗口是否存在（按名字寻址）。
 window_exists() {
@@ -125,7 +127,7 @@ else
     printf '%-22s %s\n' "$SESSION:$role" "$state"
   done <<<"$STATES"
   if [ "$ALL_OK" = 1 ]; then
-    echo "topology OK: $SESSION has all three windows ($(echo "$ROLES" | tr '\n' ' ')) each with a claude process"
+    echo "topology OK: $SESSION has the two-window topology ($(echo "$ROLES" | tr '\n' ' ')) each with a claude process"
     exit 0
   else
     echo "topology INCOMPLETE: $SESSION is missing a topology window or a claude process" >&2
