@@ -68,6 +68,7 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/quay-init.sh（死闸门从铺设集移除或接线）
 - plugin/scripts/checker-mutation-check.sh（闸门层纳入变异对象，若有活闸门）
