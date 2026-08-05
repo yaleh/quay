@@ -4137,3 +4137,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **驱动失败根因确认（升级通道，非 watchdog 逻辑）**：archguard 的 send-keys-reliable.sh 是 **NBSP 未修版**（grep 0 处 vs quay 4 处，diff 确认缺 nbsp 剥离）——空输入框判非空 → clear 跑满 CLEAR_MAX=50 → fail-loud rc=1。**「交付面长大、目标冻结在安装那一刻」第一次造成真实功能失效**（gap-delivery-surface-grows-but-target-freezes-no-upgrade 硬实例）。
 - **次要缺陷**：watchdog launch-cmd 缺 --prompt-suggestions false（0 命中）——重启的会话显示 ghost 占位符（Try "write a test..."），需对齐 RUNBOOK §2。
 - **处置（采纳管理者建议）**：①同步 quay send-keys-reliable.sh 到 archguard（管理者做，跨项目归它）→ watchdog 下周期重试 = 干净机制验证；②不叠加 systemd-run（避免归因变浑）；③watchdog launch 参数修复建任务。
+
+### tick 2026-08-05T11:5xZ（外层，archguard 仍需手动驱动）
+
+- **archguard send-keys-reliable 已同步**（管理者执行，NBSP 5 处）✓
+- **但 watchdog 不会主动驱动 archguard**：11:50:51 判 archguard healthy (alive=1)——claude 2284029 活着 → watchdog 不 drive（drive 只在 relaunch 事件时）。archguard outer 停在欢迎界面（Try "write a test..."）。**「claude 活着」≠「循环在工作」——watchdog alive 判据不触发 drive，同步 send-keys 后仍不自恢复**。
+- **archguard 需手动驱动**（outer 冷启动文本）。archguard 是管理者范围，不越界驱动。已提示管理者：同步文件还不够，watchdog 不会主动驱动已活着但没在工作的 claude。
