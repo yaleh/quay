@@ -4760,3 +4760,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **B 机唯一剩阻塞已解**：.quay/config.yml 跟踪问题外层已裁定+执行（1a220576 gitignore + git rm --cached），
   B 可 pull。
 - **在飞 3/3**。套件 green（stale）。
+
+### tick 2026-08-05T17:4xZ（内层，ruling-required fan-in + send-keys-nbsp 派发）
+
+- **ruling-required fan-in 完成**（外层 16:5xZ 优先级任务）：agent 完成（`123b5da8`/`5871a1ac` → rebase `ddc2636e`/
+  `5cbfec61` → merge `1d585da6`）。AC1-AC6 全落地：--target 参数化（inner 默认=旧 inner-blocked.json 负控制、
+  outer/manager → blocked-signals/<target>.json）、--samples 覆盖、动作插件点（write-file/notify/command）、
+  pane-state-classify 封闭枚举 byte-未动、manager 盯 outer 一次调用（orchestrator-loop-tick 已加例）。scoped
+  60/60 绿（含 18 新测试），task-contract/drive-contract 0 违规。worktree/branch 已清。**AC6 交叉标注在自身
+  任务体**（agent 遵守「不碰其它任务文件」指令未编辑 2 个目标任务文件——Touches 授权但选择性未做，closure 时
+  可补）。
+- **send-keys-nbsp 派发**（`fm-...-2462vj`）：ruling-required land 后 glob 不再挡——生产闸与 measure-claude-p
+  互不相交（batch 判定，deferred 空）。self-touch 已补（上 tick）。
+- 在飞 2/3（measure-claude-p + send-keys-nbsp）。停止条件无、套件 green、Monitor 三判据绿。master `1d585da6`。
