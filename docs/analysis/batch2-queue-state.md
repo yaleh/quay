@@ -3080,6 +3080,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   若复发，捕获实际失败环境的 laid-down doc 再诊断。
 - **ROUND 3 landed-not-flipped 集合（9 条）不变**。loop-driver LIVE。
 
+### tick 2026-08-05T07:3xZ（内层，`ROUND 3 RED 分诊 #3`：M3 接管计数竞态）
+
+- **外层 ROUND 3 补充分诊**：session-liveness M3 (AC20d)「kill -9 holder 后接管 + takeover_ms 报告」
+  isolated 658ms fail（疑 session-idle 影响接管逻辑）。noise-gate isolated 过 = 负载抖动。
+- **git-log bisect + 复现（结论：接管逻辑未坏，是测试计数竞态）**：
+  1. session-idle diff 只加 transcript 融合（tr_path 非空时走函数）+ 去抖状态 + API 段重缩进——
+    **未碰接管/超时代码**（_sl_acquire_or_noop 逐字节未动）。
+  2. **M3 在 pre-session-idle master 上也能复现**（~6% 失败率）；当前 master ~18%——session-idle 的
+    `ttype=$(transcript_last_message_type)` 等新命令替换**提高了 fork 子 shell 频率**，非改坏接管。
+  3. **根因**：`countMountProcesses` 把观察者的**命令替换 fork 出的瞬态子 shell**（同 cmdline+env，
+    父=观察者，~1 循环 tick 内退出）误计为第二个 monitor——pid=$(session_pid)、ttype=$(...) 等
+    每次循环都 fork。接管本身正确（takeover_ms 报出、token pid=新 holder、单飞保持）。
+- **修复**（`6fc0f252`，直落 master）：M3「不得创建第二个 monitor」断言改**settle-based**——有界
+  轮询（5s）直到计数稳定为 1。真接管泄漏会持续 2+ 而超时失败；瞬态子 shell 通过。**M3 10/10 绿**
+  （原 ~18% fail）。保留 AC 意图（无持久第二个 monitor）。
+- **scoped 自测**：M3 10/10；session-liveness 全文件跑中（慢，负载敏感族）。等外层重启 ROUND 3 gate。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
