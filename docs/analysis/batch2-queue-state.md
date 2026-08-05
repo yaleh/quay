@@ -5064,3 +5064,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **套件 1min**：静态检查推进（SELFTEST PASS）。**闸已翻 WAIT**（套件自身负载推高 avg10）——test.sh 内部
   闸检查若触发会 abort（外层 17:4xZ 立的 reason 轴 bug 会暴露，已预备分诊）。等 bt633dlz7。
 - **待绿后**：24 条 closure 批量收尾。
+
+### tick 2026-08-05T20:3xZ（内层 cron，false OVER90 二次复发清）
+
+- **false OVER90 复发**（第二次）：同 4 个已 merge 任务的未闭 bracket（外层 closure 滞后未消），已再 `--clear`
+  （wait 11.2s）。**外层必须 --task-end 闭这 4 个括号**（axis-generator/outer-heartbeat/taskworklanded/
+  session-idle），否则每 tick 复发。观察：inner-blocked-signal 的 OVER90 检测可排除「工作已落地」的 bracket
+  （调 taskWorkLanded 或查 merge），待确认后立案。
+- **perf-fix 在飞**（改 ready-pool-check.ts + task-status-drift-check.ts + 测试 + 镜像，0 提交工作中）。
+- 套件 running、在飞 1/3、无真 stop、Monitor 绿。
