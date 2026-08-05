@@ -7,9 +7,11 @@ title: "two-machine collaboration via git-branch claiming (measured: of the
   fast-mode single-flight; suggest claim via git: pre-push empty task/<id>
   branch = claim, branch exists = claimed, merge+delete = release; reuse
   checkTouchesPair against task/* branches on the shared bare repo; PRECONDITION:
-  authority/push-direction must be fixed first — current topology A→bare→B is
-  one-way, B cannot push back, and B's package.json ENOENT blocker is open; to
-  be evaluated TOGETHER with gap-branch-model-integration-branch (integration
+  authority/push-direction must be fixed first — NETWORK is bidirectional
+  (B can SSH back to A, verified vhs.wan.hwang.men 2026-08-05 17:2xZ; the
+  old 'one-way' premise was a mis-stated mechanical obstacle, the real
+  question is the AUTHORITY decision); B's package.json ENOENT blocker is
+  open; to be evaluated TOGETHER with gap-branch-model-integration-branch (integration
   model is built for exactly 'multiple sources in, stale baseline' = cross-host
   is its natural use case)"
 status: todo
@@ -39,12 +41,18 @@ extra:
 **为什么不用 manager 中心分配**：manager 在 A 机、单点；与 QUAY_GLOBAL_DIR 单飞锁跨主机失效同源
 （状态放在假设共享文件系统的地方）。**git 是唯一真正跨主机共享的状态存储**——认领机制建在它上面。
 
-**前提（必须先解决）**：
+**前提（必须先解决）——前提已于 2026-08-05 17:2xZ 修正**：
 ① B 机还不能开发 quay——package.json ENOENT 阻塞未闭（任务 ready 在飞）；
-② 当前拓扑 A机 → 裸仓库 → B机**单向**，不支持 B 推回。两机协作前必须先确定权威与推送方向（A机 master
-现领先 origin/master 644 提交，B 机跟的是 A 机裸仓库）。涉及仓库拓扑变更，**与 integration 分支模型
-（gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point，ready 已等 9 小时）一起考虑**——
-integration 分支模型正是为「多个来源汇入、基线陈旧」设计的，跨主机是天然用例。
+② **网络层是双向连通的（管理者真测：B 机 SSH 回 A 机 vhs.wan.hwang.men，hostname/uptime 精确匹配）**——
+  原「A→bare→B 单向、B 不能推回」是**被误当理由的机械障碍，已排除**。剩下的才是真问题：**权威与推送
+  方向的设计裁定（AC3）**——B 有能力推回，但**该不该**推回仍待定（A 机 master 领先 origin/master 644 提交，
+  B 机跟 A 机裸仓库）。涉及仓库拓扑变更，**与 integration 分支模型
+  （gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point，ready 已等 9 小时）一起考虑**——
+  integration 分支模型正是为「多个来源汇入、基线陈旧」设计的，跨主机是天然用例。
+③ **B→A 对称白名单（外层裁定 2026-08-05 17:2xZ）**：现有跨主机白名单（git/tmux-send-keys/capture-pane/
+  只读，禁 kill/rm-rf/批量）是 A→B 方向的自我约束；B 机既然能主动连回 A，**B→A 方向需对称约束**——
+  跨主机破坏性/批量操作在**两个方向**都禁止（伤害不认方向）。若 B 将来跑自主 outer/inner，此对称约束
+  是其安全前置。
 
 ### 选定机制
 

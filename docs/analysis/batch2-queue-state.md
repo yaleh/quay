@@ -4708,3 +4708,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **inner 按计划派 3/3**：ruling-required + web-board + upgrade-channel fan-in（cap=3 满）。全量推迟
   （inner 满负荷串行纪律）——closure 全卡全量绿的等待链已记录（inner 落定后起全量解锁）。
 - **在飞 3/3**。套件 green（stale 7h+）。Monitor 三判据绿、detect-stop 无 block。
+
+### tick 2026-08-05T17:2xZ 补充（外层，Q2 前提修正 + B→A 对称白名单裁定）
+
+- **管理者核实前提 → 修正 Q2 任务**：B 机能 SSH 回 A 机（vhs.wan.hwang.men，hostname/uptime 精确匹配，
+  真测非猜测）——**网络层双向连通**，原「A→bare→B 单向、B 不能推回」是被误当理由的机械障碍，已从
+  gap-two-machine-collaboration 任务的 title + Proposal 前提②排除。权威/推送方向（AC3）仍是设计裁定——
+  B 有能力推回，但该不该推回待定（与 integration-branch 一起评估）。
+- **B→A 对称白名单（外层裁定）**：现有跨主机白名单（git/send-keys/capture-pane/只读，禁 kill/rm/批量）
+  是 A→B 自我约束；B 能主动连回 A ⇒ **B→A 需对称约束**——跨主机破坏性/批量操作两个方向都禁止
+  （伤害不认方向）。B 若跑自主 outer/inner，对称约束是其安全前置。已记入 Q2 任务前提③。
+- **在飞 3/3**（ruling-required / web-board / upgrade-channel fan-in）。套件 green（stale）。
