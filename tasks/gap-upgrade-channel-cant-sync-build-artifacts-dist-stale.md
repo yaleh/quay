@@ -48,11 +48,37 @@ ensure_vendor_runtime 已会跑 sync-vendor.sh，缺「什么时候该重跑」�
 
 ## Acceptance Criteria
 
-- [ ] AC1: ensure_vendor_runtime 检测 dist 陈旧（src mtime > dist mtime）⇒ 自动重建或 fail-closed（负控制：当前只在缺失时跑，陈旧不跑）
-- [ ] AC2: verify 增加新鲜度检查（文件存在 且 与当前源码一致）
-- [ ] AC3: B 机场景复测：git pull 新源码（不重建 dist）⇒ quay-init 检测陈旧并处理
-- [ ] AC4: **user-scope 安装物新鲜度**——安装/启动时检查 dist 落后（如 mtime/版本）⇒ 提示重建（负控制：当前无检查，06:01 陈旧物被当新鲜用）
-- [ ] AC5: 与 gap-vendor-runtime-not-in-git-clone-broken-mcp-entry + gap-delivery-surface-grows 交叉标注（升级通道两种形态 + 两种安装路径）
+- [x] AC1: ensure_vendor_runtime 检测 dist 陈旧（src mtime > dist mtime）⇒ 自动重建或 fail-closed（负控制：当前只在缺失时跑，陈旧不跑）
+      —— `plugin/scripts/quay-init.sh` 新增 `dist_stale`（find packages/quay/src + packages/quay-native/src 最新 mtime
+      vs vendor/*/dist/*.js mtime，0=STALE/1=fresh/2=no-source-tree）+ `ensure_vendor_runtime` 陈旧分支：
+      陈旧时先走 sync-vendor.sh 自动重建（`auto-rebuilt STALE vendor runtime via sync-vendor.sh (AC1)`），重建失败
+      fail-closed（exit 2，无 `quay-init complete`）。**负控制**（实测输出，plugin 副本 dist mtime=1e9 < src mtime=2e9）：
+      ```
+      vendor runtime STALE (source mtime newer than dist mtime — a git pull synced source without rebuilding the gitignored bundle). Attempting auto-rebuild via sync-vendor.sh (AC1) ...
+      auto-rebuilt STALE vendor runtime via sync-vendor.sh (AC1)
+      ```
+      反方向负控制（dist 比 src 新 ⇒ 不重建、sync-vendor 不跑）实测通过。
+- [x] AC2: verify 增加新鲜度检查（文件存在 且 与当前源码一致）
+      —— `verify_provider_runtime_existence` 增加 freshness 分支：mcp_entry 指向已知 quay 运行时
+      （quay.js / quay-native.js）时，byte-compare 目标运行时与 plugin 当前 vendored bundle；
+      不一致 ⇒ FAIL CLOSED（`stale-runtime`）。存在检查仍先行（旧 verify 只查存在，现查「存在且当前」）。
+      实测（目标 bin/quay.js 陈旧 vs plugin 当前 bundle）：`FAIL (stale-runtime): ... differs from the plugin's current vendored bundle` + exit 非 0。
+- [x] AC3: B 机场景复测：git pull 新源码（不重建 dist）⇒ quay-init 检测陈旧并处理
+      —— B 机场景 = src mtime > dist mtime（git pull 同步源码、gitignored dist 不跟随）。AC1 自动重建测试
+      即该场景的机械复测（stale core v1 → auto-rebuild → laid bundle = `// rebuilt core`）。fail-closed 变体
+      （重建无法产出）实测 exit 非 0、无 complete。
+- [x] AC4: **user-scope 安装物新鲜度**——安装/启动时检查 dist 落后（如 mtime/版本）⇒ 提示重建（负控制：当前无检查，06:01 陈旧物被当新鲜用）
+      —— `vendor_runtime_user_scope_stale_check`：无 packages/ 源树（user-scope 安装缓存）时，version-consistency
+      判据——embedded dist version（`node dist/quay.js --version`）vs `plugin/vendor/quay/package.json` version。
+      不一致 ⇒ 打印 STALE 警告 + 提示更新/重装（prompt，不 fail-closed——缓存无源可重建）。**负控制实测**
+      （embedded 0.3.12 vs declared 0.3.13）：
+      ```
+      STALE (user-scope vendor runtime): the built bundle embeds version 0.3.12 but plugin/vendor/quay/package.json declares 0.3.13.
+             The 06:01 stale dist was previously treated as fresh (AC4 negative control). Update/reinstall the plugin so the runtime matches the plugin version.
+      ```
+      一致（0.3.13 vs 0.3.13）⇒ 不告警实测通过。
+- [x] AC5: 与 gap-vendor-runtime-not-in-git-clone-broken-mcp-entry + gap-delivery-surface-grows 交叉标注（升级通道两种形态 + 两种安装路径）
+      —— 已在本任务体 + 两个任务体各加交叉标注段（见下 `## Cross-annotation` 与各任务文件）。
 
 ## Definition of Done
 
@@ -78,4 +104,23 @@ band      dist_fresh = 1（dist 不陈旧）
 invariant install_artifacts_fresh = 1（安装物（git-clone 与 user-scope）都有新鲜度判据）
 invoke    `grep -n 'ensure_vendor_runtime\|mtime\|stale' plugin/scripts/quay-init.sh`
 control   src 更新后不重建 ⇒ dist 陈旧（AC1 负控制）；重建后 ⇒ 新鲜；user-scope 06:01 陈旧物 ⇒ 提示（AC4）
+
+## Cross-annotation（AC5）
+
+升级通道的两种形态 + 两种安装路径，三任务互指：
+
+- **gap-vendor-runtime-not-in-git-clone-broken-mcp-entry**：fresh-clone 缺 dist（missing）→ quay-init
+  auto-build/fail-closed。**本任务 = 它的动态漂移后继**：clone 后有 dist，但 git pull 新源码后 dist 不跟随
+  （stale）→ ensure_vendor_runtime 现在同一函数里同时处理 missing 与 stale。
+- **gap-delivery-surface-grows-but-target-freezes-no-upgrade**：交付面（派生脚本）长大而目标项目冻结
+  （静态漂移，L2 升级正确性）。**本任务 = 构建产物轴上的同族**：源码同步但构建产物不跟随，verify 只查
+  存在不查新鲜度。两条升级通道缺陷同一根因：「安装物没有新鲜度判据」。
+
+## Dispatch review
+
+reviewer: inner
+at: 2026-08-05T16:57:00Z
+changed: 无 dispatch 改动——执行本任务：quay-init.sh 增加 dist_stale + vendor_runtime_user_scope_stale_check +
+ensure_vendor_runtime 陈旧分支 + verify freshness；quay-init-loop.test.mjs 新增 7 条 AC1/AC2/AC4 测试；AC1–AC5
+勾上并贴实测证据；DoD 留空（未达全量绿门）。
 resume    陈旧检测与 verify 新鲜度分步提交，任一步完成即写盘

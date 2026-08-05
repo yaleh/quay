@@ -629,7 +629,60 @@ verify_referenced_landed() {
   return 0
 }
 
-# ensure_vendor_runtime — gap-vendor-runtime-not-in-git-clone-broken-mcp-entry (AC1/AC2).
+# dist_stale <bundle> <src_dir> — AC1 stale detection for the vendored runtime bundle
+# (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale). A git pull syncs SOURCE (tracked)
+# but not the gitignored dist/, so the bundle can be older than the source that produced it — the
+# exact B-machine mixed state (dist built 13:34, fix merged 15:10, ENOENT persists because verify
+# checked existence, not freshness). Returns:
+#   0 (STALE) when any source file under <src_dir> is newer than <bundle>
+#   1 (fresh) when <bundle> is newer than every source file (or the src dir is empty)
+#   2 (no-source-tree) when <src_dir> does not exist — an installed plugin cache (user-scope) has
+#     no packages/ tree, so this check cannot fire there (AC4's version-based check owns that path).
+dist_stale() {
+  local bundle="$1" src_dir="$2" newest=0 m bm
+  [ -d "$src_dir" ] || return 2
+  while IFS= read -r -d '' f; do
+    m="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+    [ "$m" -gt "$newest" ] && newest="$m"
+  done < <(find "$src_dir" -type f -print0 2>/dev/null || true)
+  bm=0
+  if [ -f "$bundle" ]; then
+    bm="$(stat -c %Y "$bundle" 2>/dev/null || echo 0)"
+  fi
+  [ "$newest" -gt "$bm" ] && return 0
+  return 1
+}
+
+# vendor_runtime_user_scope_stale_check — AC4 stale detection for the USER-SCOPE install cache
+# (~/.local/share/quay-plugin/ or the Claude Code plugin cache). The cache carries the vendored
+# dist bundle but NO packages/ source tree, so the AC1 mtime check cannot fire. Its freshness
+# criterion is VERSION CONSISTENCY: the version embedded in the built bundle
+# (`node dist/quay.js --version`) must match the plugin's vendored package.json version — both are
+# written by sync-vendor.sh from the SAME source at build time (plugin/vendor/quay/package.json is
+# tracked in git; the dist is the gitignored generated mirror of the same version). A mismatch
+# means one is stale relative to the other (a mixed snapshot); the negative control is that BEFORE
+# this check the 06:01 stale dist was treated as fresh. Prints a visible STALE warning + the fix;
+# NEVER fail-closed (there is no source tree to rebuild from in the cache — the action is a prompt
+# to update/reinstall the plugin). Returns 0 when consistent or unverifiable, 1 when a mismatch was
+# reported (callers decide whether a warning is fatal).
+vendor_runtime_user_scope_stale_check() {
+  local dist="$PLUGIN_ROOT/vendor/quay/dist/quay.js"
+  local pkg="$PLUGIN_ROOT/vendor/quay/package.json"
+  [ -f "$dist" ] && [ -f "$pkg" ] || return 0
+  local embedded declared
+  embedded="$(node "$dist" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+  declared="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version",""))' "$pkg" 2>/dev/null || true)"
+  [ -n "$embedded" ] && [ -n "$declared" ] || return 0
+  if [ "$embedded" != "$declared" ]; then
+    echo "  STALE (user-scope vendor runtime): the built bundle embeds version ${embedded} but plugin/vendor/quay/package.json declares ${declared}." >&2
+    echo "         The 06:01 stale dist was previously treated as fresh (AC4 negative control). Update/reinstall the plugin so the runtime matches the plugin version." >&2
+    return 1
+  fi
+  return 0
+}
+
+# ensure_vendor_runtime — gap-vendor-runtime-not-in-git-clone-broken-mcp-entry (AC1/AC2) +
+# gap-upgrade-channel-cant-sync-build-artifacts-dist-stale (AC1/AC4).
 # The vendored runtime bundles (plugin/vendor/quay/dist/quay.js + plugin/vendor/quay-native/dist/
 # quay-native.js) are GENERATED artifacts — gitignored by the bare `dist/` rule (M172), so a fresh
 # plugin clone has NONE of them. Writing a provider config whose mcp_entry references a missing
@@ -641,23 +694,64 @@ verify_referenced_landed() {
 # Returns 0 only when BOTH bundles are present (present to begin with, or auto-built); exits 2
 # otherwise. In --dry-run it prints what would happen and returns 0 so the dry-run listing continues.
 ensure_vendor_runtime() {
-  local missing=0
+  local missing=0 stale=0
   [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] || missing=1
   [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ] || missing=1
-  [ "$missing" = 0 ] && return 0
+
+  # AC1 (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale): STALE detection — the bundles
+  # exist but the SOURCE is newer. The pre-fix code only rebuilt on MISSING; a git pull that synced
+  # source without rebuilding the gitignored dist left a STALE bundle that was silently accepted
+  # (B machine: dist built 13:34, fix merged 15:10, ENOENT persists — verify checked existence, not
+  # freshness). When the source tree is absent (user-scope install cache) the mtime check cannot
+  # fire — AC4's version-consistency check below owns that path.
+  if [ "$missing" = 0 ]; then
+    local core_src="$PLUGIN_ROOT/../packages/quay/src"
+    local native_src="$PLUGIN_ROOT/../packages/quay-native/src"
+    local rc=0 core_stale=0 native_stale=0 core_nosrc=0 native_nosrc=0
+    rc=0; dist_stale "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$core_src" || rc=$?
+    [ "$rc" = 0 ] && core_stale=1
+    [ "$rc" = 2 ] && core_nosrc=1
+    rc=0; dist_stale "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$native_src" || rc=$?
+    [ "$rc" = 0 ] && native_stale=1
+    [ "$rc" = 2 ] && native_nosrc=1
+    [ "$core_stale" = 1 ] && stale=1
+    [ "$native_stale" = 1 ] && stale=1
+    # AC4 (user-scope): no packages/ source tree → the mtime check cannot fire. The user-scope
+    # install cache's freshness criterion is VERSION CONSISTENCY (embedded dist version vs the
+    # vendored package.json version). WARN + prompt only — there is no source to rebuild from in
+    # the cache, so this never fail-closes (the negative control was NO check at all: the 06:01
+    # stale dist was treated as fresh).
+    if [ "$core_nosrc" = 1 ] && [ "$native_nosrc" = 1 ] && [ "$DRY_RUN" != true ]; then
+      vendor_runtime_user_scope_stale_check || true
+    fi
+  fi
+
+  [ "$missing" = 0 ] && [ "$stale" = 0 ] && return 0
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  would-ensure-vendor-runtime: plugin source lacks the built vendor runtime (gitignored dist/) — quay-init would auto-build via sync-vendor.sh or fail closed (AC1/AC2)" >&2
+    if [ "$missing" = 1 ]; then
+      echo "  would-ensure-vendor-runtime: plugin source lacks the built vendor runtime (gitignored dist/) — quay-init would auto-build via sync-vendor.sh or fail closed (AC1/AC2)" >&2
+    else
+      echo "  would-ensure-vendor-runtime: the vendored dist is STALE (source newer than the bundle — a git pull synced source without rebuilding the gitignored dist) — quay-init would auto-rebuild via sync-vendor.sh or fail closed (AC1)" >&2
+    fi
     return 0
   fi
 
-  echo "  vendor runtime missing from plugin source (gitignored dist/ — a fresh clone has no built bundles). Attempting auto-build via sync-vendor.sh (AC2, path 2) ..." >&2
+  if [ "$missing" = 1 ]; then
+    echo "  vendor runtime missing from plugin source (gitignored dist/ — a fresh clone has no built bundles). Attempting auto-build via sync-vendor.sh (AC2, path 2) ..." >&2
+  else
+    echo "  vendor runtime STALE (source mtime newer than dist mtime — a git pull synced source without rebuilding the gitignored bundle). Attempting auto-rebuild via sync-vendor.sh (AC1) ..." >&2
+  fi
   local vlog
   vlog="$(mktemp)"
   if [ -f "$PLUGIN_ROOT/scripts/sync-vendor.sh" ] && bash "$PLUGIN_ROOT/scripts/sync-vendor.sh" >"$vlog" 2>&1; then
     if [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] && [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ]; then
       rm -f "$vlog"
-      echo "  auto-built vendor runtime via sync-vendor.sh (AC2)" >&2
+      if [ "$stale" = 1 ]; then
+        echo "  auto-rebuilt STALE vendor runtime via sync-vendor.sh (AC1)" >&2
+      else
+        echo "  auto-built vendor runtime via sync-vendor.sh (AC2)" >&2
+      fi
       return 0
     fi
   fi
@@ -687,7 +781,7 @@ ensure_vendor_runtime() {
 # catches a config that already exists (or a lay-down regression) whose mcp_entry points at a missing
 # runtime. FAIL CLOSED (return 1) when the referenced file does not exist.
 verify_provider_runtime_existence() {
-  local ws="$1"
+  local ws="$1" plugin_root="${2:-}"
   local cfg="$ws/.quay/config.yml"
   if [ "$DRY_RUN" = true ]; then
     echo "  verify-provider-runtime-existence: (dry-run, skipped)"
@@ -717,6 +811,28 @@ PYEOF
   fi
   if [ -f "$entry_file" ]; then
     echo "  verify-provider-runtime-existence: OK ($entry_file exists)"
+    # AC2 (gap-upgrade-channel-cant-sync-build-artifacts-dist-stale): the verify now checks
+    # FRESHNESS, not just existence — the referenced runtime must be byte-identical to the
+    # plugin's CURRENT vendored bundle (the source-derived artifact quay-init lays down). A target
+    # copy that differs is a stale dist from an older install (git pull synced source; the
+    # gitignored target dist did not follow) and FAILS CLOSED. Scoped to KNOWN quay runtime
+    # basenames (quay.js / quay-native.js); an arbitrary runtime is existence-checked only (the
+    # AC3 negative control's scope guard).
+    local base src_bundle
+    base="$(basename "$entry_file")"
+    src_bundle=""
+    case "$base" in
+      quay.js) src_bundle="$plugin_root/vendor/quay/dist/quay.js" ;;
+      quay-native.js) src_bundle="$plugin_root/vendor/quay-native/dist/quay-native.js" ;;
+    esac
+    if [ -n "$src_bundle" ] && [ -n "$plugin_root" ] && [ -f "$src_bundle" ]; then
+      if cmp -s "$entry_file" "$src_bundle"; then
+        echo "  verify-provider-runtime-freshness: OK ($entry_file matches the plugin's current vendored bundle)"
+      else
+        echo "  FAIL (stale-runtime): $entry_file differs from the plugin's current vendored bundle ($src_bundle) — a stale dist from an older install" >&2
+        return 1
+      fi
+    fi
     return 0
   fi
   echo "  FAIL (referenced-runtime-missing): the provider mcp_entry references $entry_file but it does not exist in the target" >&2
@@ -968,7 +1084,7 @@ PYEOF
     # the LANDING SET; this second check verifies the provider config's mcp_entry references a
     # runtime that ACTUALLY EXISTS in the target — the referenced-not-landed complement. Defense in
     # depth after AC1's fail-closed (a config that already exists still gets checked every run).
-    verify_provider_runtime_existence "$WORKSPACE_ROOT" || exit 2
+    verify_provider_runtime_existence "$WORKSPACE_ROOT" "$PLUGIN_ROOT" || exit 2
   fi
 fi
 

@@ -175,3 +175,9 @@ quay-native mcp: serving tasks from <target>/tasks   # Provider ABI 可用
 626:# verify_provider_runtime_existence <workspace-root> — gap-vendor-runtime-not-in-git-clone-broken-
 867:  # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry
 ```
+## Cross-annotation（AC5，gap-upgrade-channel-cant-sync-build-artifacts-dist-stale）
+
+本任务闭环 fresh-clone **missing**（dist 不存在 ⇒ auto-build/fail-closed）；`gap-upgrade-channel-...-dist-stale`
+是它的**动态漂移后继**：clone 后有 dist，但 git pull 新源码后 dist 不跟随（stale）。两条缺陷现已由同一函数
+`ensure_vendor_runtime` 处理——missing 与 stale 都走 auto-build/fail-closed（`dist_stale` 判 src mtime >
+dist mtime）。两种安装路径（git-clone 与 user-scope）都已有新鲜度判据（mtime / 版本一致性）。

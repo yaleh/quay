@@ -95,3 +95,10 @@ changed: 外层读 SPEC 五处缺口之升级通道裁定立案。四处收紧�
 (3) **漂移报告 = L2 升级正确性维度**——漂移/缺失/一致 机械输出（10/68/8 的机械版）；
 (4) **不静默覆盖**——本地改动列漂移需确认，缺失自动补。
 status: todo——升级通道；排 delivery-surface umbrella 后。
+
+## Cross-annotation（AC5，gap-upgrade-channel-cant-sync-build-artifacts-dist-stale）
+
+本任务 = 交付面（派生脚本）长大而目标项目冻结（静态漂移，L2 升级正确性）。`gap-upgrade-channel-...-dist-stale`
+是**构建产物轴上的同族**：源码同步但构建产物不跟随（git pull 新 src + stale dist），verify 只查存在不查
+新鲜度。两条升级通道缺陷同一根因：「安装物没有新鲜度判据」——本任务补静态交付面判据，dist-stale 任务补
+构建产物新鲜度判据（`dist_stale` mtime + user-scope 版本一致性）。
