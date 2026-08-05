@@ -108,6 +108,7 @@ documented reference from a genuine missing file:
 | `docs/analysis/normative-prose-audit.md` | quay's audit doc — not a generic loop deliverable |
 | `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` | quay's reliable-send crystallization doc (cold-start key-4 delivery criterion) — not a generic loop deliverable |
 | `orchestration/outer-rulings-2026-08-04-A-F.md` | quay's outer rulings incl. ruling F (superseded-judgment provenance) — not a generic loop deliverable |
+| `orchestration/SPEC-cut-the-waiting.md` | quay's "cut the waiting" spec (referenced by fast-mode-loop-tick §4 dispatch form rationale) — not a generic loop deliverable |
 
 Machine-readable declarations consumed by `quay-init.sh`'s `verify-referenced-landed` (single
 source of truth — the same doc the human reads):
@@ -122,6 +123,7 @@ source of truth — the same doc the human reads):
 <!-- reference-doc: docs/analysis/normative-prose-audit.md -->
 <!-- reference-doc: orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md -->
 <!-- reference-doc: orchestration/outer-rulings-2026-08-04-A-F.md -->
+<!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 
 ## Behavior
 
