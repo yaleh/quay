@@ -3,7 +3,7 @@ id: gap-crystallize-launch-config-into-checked-in-settings-file
 title: the correct launch command lives as an easily-mistyped shell one-liner —
   crystallize researched CLI params (--exclude-dynamic-system-prompt-sections,
   -n/--name, --settings, --bare) into a checked-in settings file + launch spec
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -76,6 +76,7 @@ AC1 的负控制正是那次）。调研找到 5 项高相关，其中 3 项适�
 
 ## Touches
 
+- tasks/gap-crystallize-launch-config-into-checked-in-settings-file.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - orchestration/RESEARCH-claude-code-cli-config-2026-08-05.md（结果回写）
 - orchestration/restart-plan-2026-08-04-third.md（或当前启动计划）
 - plugin/skills/cold-start/SKILL.md
