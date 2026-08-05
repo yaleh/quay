@@ -5257,3 +5257,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（cold-start-gate 工作中：SKILL.md + 新 laydown-set-check.sh + test，0 提交）。无 fan-in、无新派发
   （池碰撞 + 候选与 cold-start 触摸面冲突）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T22:3xZ（内层，cold-start-gate fan-in — 真实现）
+
+- **cold-start-gate fan-in 完成（真实现）**：gate 收窄到 **derived-laydown-set green**——`laydown-set-check.sh`
+  （跑派生铺设集测试，与 quay-init DERIVED_SCRIPTS 同 grep 单一来源）+ cold-start/SKILL.md fail-closed
+  Precondition（**明确不 etc 全量**）。真实使用：session-liveness 在派生集内（known load-sensitive flake 正确
+  阻塞门）。scoped 7/7。worktree/branch 已清。在飞 0/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
