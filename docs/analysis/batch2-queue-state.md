@@ -2599,6 +2599,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   兜底内）。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。
 
+### tick 2026-08-05T00:42Z（外层，`no-action`：batch-4 在飞，优先级兑现）
+
+- **overshoot 全量重跑 GREEN（2284/0/0）**——负载 flake 确认（单跑 pass 2/0），overshoot 修复验证
+  通过，晋级机制完全解阻塞。
+- **batch-4 已派且优先级兑现**：**gap-init-ships（按裁定优先，第一条）** + eighty-one + load-sensitive
+  （`ee6d6e86`）。eighty-one 已合并（`9b05a2f9`：81-instruments MCP 入口工具，derive+expose）；init-ships
+  （改 @test-group header）与 load-sensitive（AC2 并发跑）在飞。
+- inProgress 2（init-ships + load-sensitive）；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

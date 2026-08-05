@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 00:42Z | `no-action` | 核实 overshoot 全量重跑 GREEN（2284/0/0，负载 flake 确认）；batch-4 派发且 gap-init-ships 优先（裁定兑现）；eighty-one 已合并；init-ships+load-sensitive 在飞 | 内层：batch-4 2 agent 在飞，备忘「完成后关批 4」 | ①git log 核 batch-4 派发（init-ships 优先）+ eighty-one 合并 + overshoot 全量绿；②inProgress 2 + detect-stop 无命中 |
 | 2026-08-05 00:35Z | `no-action` | 核实 session-liveness idle 判据是 pane 哈希（line 13）；立案真空闲判据（transcript 消息类型融合 + 2 轮去抖，忙零漏报，pane 哈希降级）；写回 | 内层：重跑 overshoot 全量中 | ①session-liveness.sh:13 读核（pane 哈希单判）；②真空闲任务立案；③`--detect-stop` 无命中 |
 | 2026-08-05 00:24Z | `no-action` | 核实 overshoot 全量 1 失败=已知负载 flake（session-liveness noise-gate，单跑 pass 2/0，非修复回归）；内层自动重跑全量（overshoot-2）；绿后派 gap-init-ships 优先 | 内层：重跑 overshoot 全量（c8，~12min） | ①失败测试名定位（session-liveness.test.mjs:755）；②单跑该测试 pass 2/0（负载 flake 实证）；③ps 核内层重跑全量 |
 | 2026-08-05 00:22Z | `no-action` | 人裁定结晶化（--check-residue 三态工具，运行时 C-u 探针为判据，立案）；管理者优先级裁定（gap-init-ships 优先于 ghost——卡自建目标，已驱动内层）；写回 | 内层：等 overshoot 全量，绿后派 gap-init-ships 优先 | ①gap-init-ships ready+resolve 核实；②residue 任务立案；③`--detect-stop` 无命中 |
@@ -269,11 +270,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 103 | 36% |
+| no-action | 104 | 36% |
 | unblock | 37 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **239** | — |
+| **合计** | **240** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
