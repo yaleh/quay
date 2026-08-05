@@ -646,22 +646,36 @@ tick 做一次收尾 pass。
 
 | 状态变化 | 事件 | 本层动作（全部是既有逻辑的执行，不是新决策） |
 |---|---|---|
-| → `red` + `reason: failed`（或缺失） | `SUITE-RED`（`stopSignal:true`，即确认 stop-dispatch 信号在位） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red + failed，(a) 块 AC4 / AC5） |
+| → `red` + `reason: failed`（或缺失） | `SUITE-RED`（`stopSignal:true` 确认 stop-dispatch 信号在位；**携带失败位置** `failureLocation` = `state.failures` 的分类：共享闸门 vs 具体测试文件） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red + failed；**派发停/续按失败位置条件化**——共享闸门（`run_static_checks`）⇒ 停；具体测试文件且与新任务触摸集无关 ⇒ 续，(a) 块 AC4 / AC5 + `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`） |
 | → `red` + `reason: aborted` | `SUITE-RED`（`stopSignal:false`——套件未完成、无正确性结论，**不触发停派**） | **记录 + 等重跑**：aborted-red 不是失败结论，外层按 `gap-full-suite-runner-concurrency-default-and-gate` AC5 语义处置（不挡 inner 派发；re-tick 时按起跑条件重起） |
 | → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
 | → `green` | `SUITE-GREEN` | 平静基线，无处置 |
 
 **触发者是执行者，不是新调度源（AC2/AC4）**：它只做「状态变化 → 事件」的翻译与通知，不做任何分诊/
-派发决策；分诊 = 本文件下方既有「红窗分诊」，派发 = inner 出厂文档既有 §4 规则。节奏仍唯一（步骤 4
-的 `*/20` cron）；Monitor 是事件监测（同 session-liveness），不驱动任何 tick。事件日志只记事实，
-处置逻辑在文档/既有实现里——触发者不引入第二条决策链。冷启动即红（外层 `/clear` 后套件仍红）也触发
+派发决策；分诊 = 本文件下方既有「红窗分诊」，派发 = inner 出厂文档既有 §4 规则。**失败位置也是翻译不是
+决策**：`SUITE-RED` 携带的 `failureLocation` 只是把 `state.failures`（runner 记下的失败行 + 文件上下文）
+分类成「共享闸门 vs 具体测试文件」——停/续的**判定**由内层按共享闸门条件化规则做
+（`shouldDispatchOnRed(state, touches)`，`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`）。
+节奏仍唯一（步骤 4 的 `*/20` cron）；Monitor 是事件监测（同 session-liveness），不驱动任何 tick。事件日志
+只记事实，处置逻辑在文档/既有实现里——触发者不引入第二条决策链。冷启动即红（外层 `/clear` 后套件仍红）也触发
 `SUITE-RED`（第一眼即红），正是本轮「红着无人处置」形态的兜底。**触发链自检**（Contract invoke）：
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
-（构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
+（构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位 + failureLocation 携带，退出 0 = 链完好）。
 
-**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**：
-`.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号**
-（runner 一检测失败即写 `reason: failed`，AC2/AC5；套件触发者发 `SUITE-RED` 时确认它在位）。`reason:
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一律暂缓）**：
+`.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号在位**
+（runner 一检测失败即写 `reason: failed`，AC2/AC5；套件触发者发 `SUITE-RED` 时确认它在位，并携带失败
+位置 `failureLocation`）。**派发停/续按失败位置条件化**（共享闸门规则，
+`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`——与 `fast-mode-loop-tick.md` 步骤 3
+同一份规则，不是两份）：
+- 失败落在**共享闸门（`run_static_checks`——每次 scoped 运行都跑的静态检查）** ⇒ **停新派发**
+  （所有新任务都被同一个红污染）；
+- 失败落在**具体测试文件**且与新任务触摸集**无关** ⇒ **派发继续**（新任务 worktree 独立跑自己 scoped
+  测试，与别处的红无关）；
+- 失败文件与新任务触摸集**相交** ⇒ 该任务停派。
+判定信息现成：`state.failures`（早期 RED 失败行 + 文件上下文）→ 共享闸门 vs 具体测试 → 与新任务 touches
+相交性（`suite-state-trigger.ts` 的 `shouldDispatchOnRed(state, touches)`）；无法判定 ⇒ 保守停派发
+（fail-closed）。**fan-in 一律暂缓**（真正保护——红树不混入新 failures，不随失败位置变化）。`reason:
 aborted`（套件未完成、无正确性结论）**不触发停派**——记录 + 按起跑条件重跑，不挡 inner。state 为 red 时：
 1. **本层独占分诊**，不把红树丢给 inner：对 red window 内新合并的 merge 二分定位（`git bisect` 或按
    merge 顺序回滚、逐个重跑 `--for-task` 选中集判断肇事者）。
@@ -907,8 +921,8 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
-| `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal`；gitignored 运行时态，`suite-state-trigger.ts` 写） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal` + `failureLocation`（SUITE-RED 携带，供派发决策）；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
 | `adr/ADR-021-*.md` | 四项原则 |

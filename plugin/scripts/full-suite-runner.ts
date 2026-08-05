@@ -73,6 +73,18 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 export type SuiteStateValue = "running" | "green" | "red";
 export type SuiteStateReason = "failed" | "aborted";
 
+/**
+ * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
+ * (gap-red-window-dispatch-stop-should-be-shared-gate-conditional). `line` is the raw failure
+ * line that flipped state to red (the 判定信息 — the runner already knew which test failed);
+ * `file` is the best-effort test-file context (from the TAP detail block / vitest per-file line /
+ * stack frame) used to classify "shared gate vs specific test" for dispatch.
+ */
+export interface SuiteFailure {
+  line: string;
+  file?: string;
+}
+
 export interface SuiteState {
   state: SuiteStateValue;
   runner: "outer" | "inner";
@@ -88,6 +100,15 @@ export interface SuiteState {
    * "failed" (fail-closed toward stopping) by shouldStopDispatch.
    */
   reason?: SuiteStateReason;
+  /**
+   * Present on red+failed — the failure line(s) that flipped red, with best-effort file context.
+   * This is what the SUITE-RED event carries (failureLocation) so the inner dispatch decision can
+   * distinguish a SHARED-GATE failure (run_static_checks — every scoped run pays it ⇒ stop dispatch)
+   * from a SPECIFIC-TEST failure unrelated to a candidate's touch-set (⇒ dispatch continues).
+   * Absent (legacy red) ⇒ fail-closed toward stopping (the dispatch rule cannot confirm it is an
+   * unrelated specific test).
+   */
+  failures?: SuiteFailure[];
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -123,6 +144,40 @@ function writeState(file: string, state: SuiteState): void {
 /** Does a stream line match any AC2 failure marker? */
 export function isFailureLine(line: string): boolean {
   return FAILURE_PATTERNS.some((re) => re.test(line));
+}
+
+// ── failure-location capture (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) ──────
+// The SUITE-RED event must carry WHERE the red landed (state.failures) so the inner dispatch rule can
+// distinguish a SHARED-GATE failure (run_static_checks — every scoped run pays it ⇒ stop dispatch)
+// from a SPECIFIC-TEST failure unrelated to a candidate's touch-set (⇒ dispatch continues). The
+// failure LINE is what flipped red (AC2 already knew which test failed); the best-effort FILE context
+// comes from the failure's detail block (node:test TAP `location:`/stack frames, vitest `❯ <file>`).
+
+const FILE_PATH_TOKEN_RE = /[^\s'`",()]+\.(?:(?:test|spec)\.)?(?:mjs|ts|js|tsx|jsx|cjs|mts|sh)\b/g;
+
+/** Normalize a path token from a failure line into a repo-relative file (best-effort). */
+export function normalizeFailureFile(raw: string, root: string): string | undefined {
+  let p = String(raw).trim().replace(/^file:\/\//, "");
+  // strip a trailing `:line:col` suffix (TAP location / stack frames)
+  p = p.replace(/:\d+(?::\d+)?$/, "");
+  // strip surrounding punctuation the regex may have dragged in
+  p = p.replace(/['"`,()\]]+$/, "");
+  if (!p) return undefined;
+  if (path.isAbsolute(p)) {
+    const rel = path.relative(root, p);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) return rel;
+    return undefined; // outside the repo — won't match repo-relative touches, treat as unknown
+  }
+  return p;
+}
+
+/** First file-path token in a stream line, normalized repo-relative (best-effort). */
+export function extractFailureFile(line: string, root: string): string | undefined {
+  for (const m of line.matchAll(FILE_PATH_TOKEN_RE)) {
+    const f = normalizeFailureFile(m[0], root);
+    if (f) return f;
+  }
+  return undefined;
 }
 
 // ── AC1/AC2: nproc-derived default laneCount + REPLACE splice ───────────────────────────────────────
@@ -255,6 +310,11 @@ export async function run(argv: string[]): Promise<number> {
   // is never downgraded — the failure conclusion stands.
   let redDetected = false;
   let runDone = false;
+  // failure-location capture: the FIRST failure line + its detail-block file context
+  // (gap-red-window-dispatch-stop-should-be-shared-gate-conditional).
+  const redFailures: SuiteFailure[] = [];
+  let pendingFailure: SuiteFailure | null = null;
+  let detailRemaining = 0;
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
     const at = new Date().toISOString();
@@ -279,11 +339,39 @@ export async function run(argv: string[]): Promise<number> {
 
   const onLine = (line: string) => {
     logStream.write(line + "\n");
+    // Enrich a pending failure with its file context (TAP detail block / stack frames follow the
+    // `not ok` line; the file is NOT on the failure line itself). Best-effort, bounded lookahead.
+    if (pendingFailure && detailRemaining > 0) {
+      detailRemaining--;
+      if (!pendingFailure.file) {
+        const f = extractFailureFile(line, root);
+        if (f) {
+          pendingFailure.file = f;
+          // file found — re-write state so the SUITE-RED event carries it (idempotent).
+          writeState(stateFile, { state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures });
+        }
+      }
+      if (detailRemaining <= 0) pendingFailure = null;
+    }
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
       // AC2 — mark RED immediately, while the run is still in progress. reason=failed (AC5: this
-      // IS a real failure — the stop-dispatch signal).
-      writeState(stateFile, { state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null });
+      // IS a real failure — the stop-dispatch signal). Record the failure LINE (the 判定信息 —
+      // which test failed is already known) + open a short detail lookahead for the file context.
+      // A file on the failure line itself (vitest `❯ <file>` / `test at <file>`) is captured now;
+      // TAP detail-block files are captured by the lookahead.
+      const failure: SuiteFailure = { line, file: extractFailureFile(line, root) };
+      redFailures.push(failure);
+      pendingFailure = failure;
+      detailRemaining = 15;
+      writeState(stateFile, {
+        state: "red",
+        reason: "failed",
+        ...base,
+        finishedAt: null,
+        durationMs: null,
+        failures: redFailures,
+      });
       process.stderr.write(
         `full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)\n  ${line}\n`
       );
@@ -339,6 +427,8 @@ export async function run(argv: string[]): Promise<number> {
         ...base,
         finishedAt,
         durationMs,
+        // carry the failure location(s) — the SUITE-RED event's failureLocation source
+        ...(spawnError === null ? { failures: redFailures } : {}),
       };
   writeState(stateFile, finalState);
   process.stderr.write(
@@ -365,9 +455,10 @@ async function failFastCheck(): Promise<number> {
     const code = await run(["--root", tmp, "--command", fakeCommand, "--fail-fast-check"]);
     const { status, events, stopSignal } = runOnce(tmp);
     const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
+    const failures = redEv?.state?.failures ?? redEv?.failureLocation ?? [];
     console.log(
       `fail-fast-check: suite exit=${code} state=${status} reason=${redEv?.state?.reason ?? "?"} stopSignal=${stopSignal} ` +
-        `suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
+        `failures=${failures.length} suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
     );
     if (code !== 1) {
       console.error("fail-fast-check FAIL: expected the fake suite to exit 1 (red)");
@@ -389,7 +480,13 @@ async function failFastCheck(): Promise<number> {
       console.error(`fail-fast-check FAIL: expected reason=failed on the red state, got ${redEv.state?.reason}`);
       return 1;
     }
-    console.log("fail-fast-check OK: runner wrote state=red reason=failed → trigger recorded SUITE-RED → stopSignal in place");
+    if (failures.length === 0) {
+      console.error(
+        "fail-fast-check FAIL: expected the SUITE-RED event to carry the failure location (state.failures / failureLocation) — the red-window dispatch decision needs it",
+      );
+      return 1;
+    }
+    console.log("fail-fast-check OK: runner wrote state=red reason=failed → trigger recorded SUITE-RED → stopSignal in place + failureLocation carried");
     return 0;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
