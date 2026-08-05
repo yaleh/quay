@@ -3396,3 +3396,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   排序补晋起作用（2/3 → 9/3），池多样性达标。
 - 在飞：session-idle ③（23m，提交 session-liveness.sh 测试中）+ red-window-executor ②（9m，catalog
   测试中）；无停止条件、无 BLOCKED。
+
+### tick 2026-08-05T05:42Z（外层，`no-action`：批 ①②③ 全落地；ROUND 3 gate 启动）
+
+- **批 ①②③ 全落地**（1c907449：batch of 3 fully merged）：pool-floor（floor=cap×4 + dispatchable_disjoint
+  + disjointness 补晋）+ session-idle（transcript 融合 + 2 轮去抖）+ red-window-executor（suite-state-
+  trigger.ts 自动触发 SUITE-RED/RUNNING，Monitor 推送，非 cron）。**8 landed-not-flipped 待 ROUND 3**。
+- **ROUND 3 gate 已启动**（bhzr5p459，inner 空闲干净窗口）；收尾集 = closure-sync、drive-text（R1/2 留）
+  + pool-floor、session-idle、red-executor +（其余）。
+- **性能观察**：ready-pool-check 在池 10+ 时 maxMutuallyDisjointSubset 计算超 2 分钟（超时）——
+  pool-floor 落地的性能面确认（disjointness 计算随池规模不缩放），记入后续优化（候选：近似子集 /
+  增量计算 / 缓存）。
+- 无停止条件、无 BLOCKED；inner 空闲待 ROUND 3 绿；loop-driver LIVE。
