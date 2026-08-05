@@ -80,6 +80,8 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 
 **后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号。这个 tick 是**兜底心跳**，处理「会话 turn 结束了但队列还有活」的情况。因此间隔应长（20–30 分钟），不是快轮询。
 
+**派发是事件驱动的，不只是 tick 边界的（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`）**：被 `<task-notification>` 唤起时——某个后台 subagent 完成、释放了一个并发槽——**立即**按「事件驱动派发（槽位回填）」一节评估是否回填空槽，不等下一 tick。tick 心跳保留，但它是**兜底**（跨 `/clear`/`/compact` 恢复、停摆推进），不是派发的主节奏。**没有完成事件就没有派发评估**（负控制），也不引入新的轮询源/双驱动。
+
 <!-- unmechanizable: 判断题，无代码可强制。形态是启发式，靠每 tick 复读 -->
 **不要把「没收到通知」当作「还在跑」（2026-08-02 两次停摆教训）**：后台 agent 会静默停止（transcript 静止、无 notify），尤其长测量任务。空闲时**先查进程再决定等不等**，别只依赖通知：
 ```bash
@@ -213,6 +215,42 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 有明确偏差 ⇒ 向文档对齐：重新执行本文档对应步骤修正（补 worktree 纪律、按步骤 3.6 补就绪池、
 撤销偷偷收尾的状态写入、按步骤 3 停止条件停止派发），修完才继续。
+
+---
+
+## 事件驱动派发（槽位回填）——完成即重评估，不等下一 tick
+
+**派发评估的触发源有两个，且只有两个**（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`）：
+1. **tick 边界**（下面的 Tick 步骤 3/4，`/loop` 心跳 1200–1800s）
+2. **完成事件**——任一在飞后台 subagent 完成，`<task-notification>` 唤起本会话的那一刻
+
+**被 `<task-notification>` 唤起时（≠ tick 心跳）**，不是空转等下一 tick，而是立即走**槽位回填**路径：
+把刚完成的任务从在飞集合里移除（**它的槽位在完成时刻释放，不在 fan-in 时刻**——遥测括号未闭合不意味着槽位还被占着，AC6：括号≠subagent，`gap-telemetry-brackets-vs-subagents-no-slot-visibility`），然后评估是否立即派发新任务填这个空槽。**不 fan-in、不写任务状态、不重排程**——只做派发重评估；合并与收尾仍归下一 tick / 外层异步。
+
+**先看是什么唤起了本回合**：transcript 里出现 `<task-notification>`（后台 agent 完成）⇒ 走本节的槽位回填；
+否则（/loop 心跳、重锚、人工）⇒ 按「Tick 步骤」全流程。两者都跑步骤 3 停止条件 + 步骤 4 派发闸——回填
+只是把「何时评估派发」从 tick 边界提前到完成时刻，不是另一套更宽松的闸。
+
+### 槽位回填的机械判定（强制）
+
+```bash
+effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
+node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <仍在跑的任务id逗号分隔>
+```
+
+- stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。
+- **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
+- **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
+- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 avg300 + 滞回 + 档位配置的产物）或无可派发候选（负控制）。
+
+### 规则
+
+- **只有完成事件触发槽位回填。** 无完成事件、无 tick → 零派发评估（AC4 负控制）。**不引入新轮询源**：不建第二个 `/loop`、不改 `ScheduleWakeup` 间隔成快轮询、不设常驻 watcher——完成通知是 harness 原生事件，不是轮询来的。
+- **回填走与 tick 相同的派发闸**：被唤起后仍先按步骤 3 查停止条件（`--detect-stop`、`.halt`、外层 suite-state、needs-human 窗口、就绪队列空），命中任一 ⇒ 不派发，报告后重新排程。事件驱动不绕过任何停止条件。
+- **在飞集合是本会话所有**：派发时把任务 id 加进在飞集合；收到该任务的完成通知时移出。**回填派发新任务后，下一次评估的 `--in-flight` 必须包含它**——否则 `slots_free` 虚高，把刚占用的槽又算成空闲，可能双派发。
+- **已完成未 fan-in 的任务仍持有未合并的改动**：回填候选若与它 Touches 重叠，先 fan-in 它再回填，或把它 id 留在 `--in-flight` 直到 fan-in（宁可少派一个，不制造合并冲突——冲突仍会 needs-human 被抓住，但那是浪费）。
+- **幂等（无双派发）**：`slot-refill.ts` 是纯状态读取器（exit 0 恒、零写入、零派发）——同输入同输出。双派发在结构上不可能：派发动作在步骤 4（消费 `should_refill`/`recommended` 并 spawn Agent），不在 helper 里。
+- **交叉标注（AC6）**：回填依赖**准确的完成感知**——`<task-notification>` 是真实完成信号；遥测括号（`--task-start`/`--task-end`）在括号失真时不能当完成/在飞判据，否则空槽计算失真。括号对齐是 `gap-telemetry-brackets-vs-subagents-no-slot-visibility` 的活，回填机制不读括号。
 
 ---
 
@@ -425,6 +463,10 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 
 ### 4. 派发就绪任务（并发）
 
+**派发评估有两个触发源，走同一步、同一道闸**：① tick 边界（本步随 Tick 步骤执行）；② 完成事件——
+任一在飞 subagent 完成释放槽位时，由「事件驱动派发（槽位回填）」节触发，**立即**重评估（不等下一 tick）。
+两者共用下面的并发上限、逐候选检查与派发形态。
+
 **并发上限 = 步骤 3.6 前置块算出的 `effective_cap`（自适应，非固定 3）**：`cap-from-gate.sh` 在派发
 决策点读 `some avg300`（5 分钟窗口）+ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时
 GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT/EXTREME 档（不加重，AC6）。本 tick 只派发
@@ -519,7 +561,8 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 
 ### 6. 重新排程
 
-`ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起，这只是兜底。
+`ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起——完成即触发
+派发评估（见「事件驱动派发（槽位回填）」），tick 只是兜底心跳。
 
 ---
 

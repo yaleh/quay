@@ -62,19 +62,68 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 实测确认当前形态——派发仅发生在 inner tick 边界（派发时间戳簇 + 槽位空置期）
-- [ ] AC2: 事件驱动接线——任一 subagent 完成通知触发派发步骤重评估（非等下一 tick）
-- [ ] AC3: 复测：槽位释放后 <5 分钟内有新派发（对比现状的 39 分钟），池子 health 时有货可派
-- [ ] AC4: 负控制——无完成事件时零派发（不引入新轮询源/双驱动）
-- [ ] AC5: 并发上限语义不变（cap=3 仍在，机制/策略分离，档位配置可调）
-- [ ] AC6: 与 gap-telemetry-brackets-vs-subagents（括号≠子代理）交叉标注——事件驱动依赖准确的完成感知
+- [x] AC1: 实测确认当前形态——派发仅发生在 inner tick 边界（派发时间戳簇 + 槽位空置期）— 诊断即本任务 Proposal 的 meta-cc 实测（3 簇派发时间戳 + 39/30/18/33/50min 空槽）；fix 把「完成事件」设为第二个派发触发源
+- [x] AC2: 事件驱动接线——任一 subagent 完成通知触发派发步骤重评估（非等下一 tick）— fast-mode-loop-tick.md 新增「事件驱动派发（槽位回填）」节（步骤 4 注明双触发源）+ plugin/scripts/slot-refill.ts helper（机械承载）
+- [ ] AC3: 复测：槽位释放后 <5 分钟内有新派发（对比现状的 39 分钟），池子 health 时有货可派 — 需实跑 loop 的派发时间戳复测（运行时验证，scoped 内不可得），留给外层/下一轮；机制已接：完成通知触发回填、slot-refill 给出 go/no-go
+- [x] AC4: 负控制——无完成事件时零派发（不引入新轮询源/双驱动）— slot-refill.ts 是纯状态读取器（exit 0 恒、零写入、零派发）；tick 文档明令不建第二个 /loop、不改 ScheduleWakeup 成快轮询、无常驻 watcher；测试覆盖「无候选 ⇒ should_refill=false」
+- [x] AC5: 并发上限语义不变（cap=3 仍在，机制/策略分离，档位配置可调）— cap 是输入（cap-from-gate.sh 的 effective_cap），slot-refill 不硬编码；测试覆盖 in-flight≥cap ⇒ no refill、cap 可调
+- [x] AC6: 与 gap-telemetry-brackets-vs-subagents（括号≠子代理）交叉标注——事件驱动依赖准确的完成感知 — 回填用 `<task-notification>` 真实完成信号、不读遥测括号；tick 文档「事件驱动派发（槽位回填）」节与本任务 Proposal 均交叉引用 gap-telemetry-brackets-vs-subagents-no-slot-visibility
+
+## Invoke evidence（scoped 实跑，2026-08-05）
+
+**Contract invoke（tick 文档含事件驱动派发机制的字面命中）**：
+
+```text
+$ grep -n '派发\|slot\|refill\|完成通知\|task-notification' plugin/loop/fast-mode-loop-tick.md
+81:  **后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号…
+83:  **派发是事件驱动的，不只是 tick 边界的（gap-dispatch-…）**：被 `<task-notification>` 唤起时…立即按「事件驱动派发（槽位回填）」一节评估是否回填空槽，不等下一 tick…
+221: ## 事件驱动派发（槽位回填）——完成即重评估，不等下一 tick
+225: 2. **完成事件**——任一在飞后台 subagent 完成，`<task-notification>` 唤起本会话的那一刻
+234: node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight …
+237-240: slots_free / should_refill / recommended / no_refill_reason 字段语义
+244-248: 规则（只有完成事件触发回填 / 回填走同一派发闸 / 在飞集合本会话所有 / 幂等 / AC6 交叉标注）
+```
+
+**scoped 测试**（`bash scripts/test.sh --for-task gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release --allow-thin`）：
+
+```text
+== scoped static checks (change-relevant tier) ==
+  task-contract-check --strict-subset: no violations.
+  drive-contract-check — 3 drive-contract doc(s) scanned; violations: 0
+== plugin/test/slot-refill.test.mjs ==
+✔ computeSlotsFree = max(0, cap − in_flight), never negative (AC1)
+✔ should_refill=true with a free slot and a dispatchable candidate (AC2/AC3)
+✔ recommended is capped at slots_free (AC3)
+✔ in-flight ≥ cap ⇒ should_refill=false, no_refill_reason names the bound (AC5)
+✔ cap is an INPUT — a smaller cap reduces free slots (AC5 mechanism/strategy separation)
+✔ empty ready pool ⇒ should_refill=false with a named reason (AC4)
+✔ only a majority-missing-touches candidate ⇒ should_refill=false (step-4 touches-resolve applied)
+✔ ready candidate whose parent is not done ⇒ not recommended (deps-ready filter)
+✔ recommended never contains two colliding candidates (assembleBatch disjointness)
+✔ ready candidate colliding with an in-flight task is not recommended (concurrency eligibility)
+✔ analyzeSlotRefill is a pure reader: same inputs ⇒ deep-equal output, no store mutation (AC7)
+✔ CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (exit 0)
+ℹ tests 12 · pass 12 · fail 0 · cancelled 0 · exit 0
+```
+
+**机制实跑快照（工作树，slot-refill 决定输出）**：
+
+```text
+$ node --no-warnings --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap 3
+{ "cap": 3, "in_flight_count": 0, "slots_free": 3, "pool": 7,
+  "dispatchable_disjoint": 2, "should_refill": true, "recommended": ["gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point"] }
+$ node … --cap 3 --in-flight gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point
+{ "cap": 3, "in_flight_count": 1, "slots_free": 2, "should_refill": true, "recommended": [] }  # 与在飞相撞 ⇒ 无候选
+$ node … --cap 3 --in-flight <3个id>   # in_flight=3
+{ "in_flight_count": 3, "slots_free": 0, "should_refill": false, "no_refill_reason": "no free slots (in-flight >= cap)" }
+```
 
 ## Touches
 
 - tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/loop/fast-mode-loop-tick.md（派发步骤：tick 边界 → 事件驱动）
-- plugin/scripts/（若有派发评估 helper：slot-refill.ts 或类似）
+- plugin/scripts/slot-refill.ts（新增：槽位回填决策 helper，事件驱动派发的机械承载）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC6 交叉标注）
 
 ## Contract
