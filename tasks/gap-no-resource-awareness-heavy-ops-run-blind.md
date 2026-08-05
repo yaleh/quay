@@ -380,6 +380,12 @@ changed: 初稿写「4 核跑 8 = 2× 超订」，外层实测在跑套件的真
 - [ ] AC14: **回归控制**——修复后全量套件进程实参必须不再出现 `--test-concurrency=8` 而按派生 1 跑
       （ps 实证贴任务体）；显式 `--lane-count=8` 仍能覆盖（逃生口保留）。
 - [ ] AC15: 测试用 `node:test` 且带 `// @test-group engine`（沿用本任务 AC11 声明）。
+- [ ] AC17: **`--test-concurrency=*` 替换非追加**（管理者 09:03Z 隐患）——runner 拼接前**剥掉命令里
+      已有 `--test-concurrency=*` 再拼**（或设环境变量让 test.sh 自己派生），让它是替换不是追加。
+      当前实跑命令行同时出现 `--test-concurrency=8 --test-concurrency=1`（node 取最后一个生效 1，
+      行为正确），但**生效值依赖拼接顺序**——重构调换次序就静默回到 8，无判据会发现（两个值都合法，
+      退化只表现为负载升高 → 一路到 PSI 94 + 整机崩溃）。node 取值规则实测：`=8 =1` 同时给 8.72s（=1
+      生效）、`=1 =8` 同时给 2.62s（=8 生效）——**取最后一个**。
 - [ ] AC16: **显式传参必须传播到 test.sh**——`full-suite-runner.ts` 的 `--lane-count N` 必须真正拼进
       传给 test.sh 的 command（转成 `--test-concurrency=N` 或 `--lane-count N` 传递），**不能只写
       state 字段**；ps 实证 `--test-concurrency=<传值>` 生效（ABORT #2 根因：runner.ts:91 command 静态、
