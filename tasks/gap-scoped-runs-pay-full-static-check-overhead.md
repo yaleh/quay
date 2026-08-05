@@ -83,7 +83,7 @@ session-liveness+monitor-mount-check）。既然每次只跑 1-2 个文件，~16
 ## Contract
 
 measure   scoped_static_overhead = `time scripts/test.sh --scoped <单文件>` 中 run_static_checks 段的秒数
-band      scoped_static_overhead < 8s（从 ~16s 降）
+band      scoped_static_overhead = 8（目标上限，秒；从 ~16s 降，与测试本身同量级）
 invariant full_gate_unchanged = 1（全量套件静态检查覆盖与今日一致）
 invoke    `scripts/test.sh --scoped <被触碰的单测试文件>`
 control   被触碰任务的 Contract 违规 ⇒ scoped 必抓（AC4-i）；无关仓库级 ratchet 违规 ⇒ 全量必抓（AC4-ii）
