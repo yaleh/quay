@@ -4542,3 +4542,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   重挂（bvkrff1yl），fail-fast-check chain OK、suite 未留红。archguard trigger 自愈（其 loop 运行中）。
 - **在飞 1/3**（outer-selfchecks 修复后收尾中）。套件 green（stale，10:19Z aborted-triage）。全量仍串行推迟
   （inner 修复 fan-in 完成后起）。
+
+### tick 2026-08-05T16:4xZ（外层 correct-self——管理者纠正 trigger「双挂」误判）
+
+- **管理者纠正**：16:25 判定 suite-state-trigger 双挂是 **basename 误判**——ps 展开两个进程分属不同项目
+  （quay 10:02:46 + archguard 12:03:49），pgrep -af basename 匹配把跨项目同名算成自己的重复（与当天
+  resource-gate/select-tests basename 配对问题同族）。
+- **实伤**：kill 了 archguard 的 monitor（2315031）——archguard loop 已自愈重挂（16:27 新进程）。
+- **真问题**：重挂没先停旧（16:27:45 裸 .ts exit 126 + 16:28:39 正确 node 前缀，一分钟两次；10:02 同对）。
+- **管理者另注**：quay 10:02:46 与 archguard 12:03:49 同时死=系统/harness 层（exit 144 那次），非本脚本。
+- **已核实**：两项目各一 trigger（quay 3380823 / archguard 3379550）——正常态，不再动。
+- **教训已写进 tick 文档 4b2**：basename 命中≠所有权；判断重复前展开 ps 验全路径；跨项目进程绝对不 kill
+  （外部项目自愈，如 archguard 实测 1 分钟内重挂）；重挂先 TaskStop 旧的再挂新的。

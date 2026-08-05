@@ -133,8 +133,13 @@ Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plug
 **挂载形态必须是 `node --no-warnings --experimental-strip-types` 前缀**（2026-08-05 实测：裸
 `.ts` 路径不可执行——文件无 x 位，bash 直接执行报 exit 126 Permission denied，Monitor 静默失败
 「存在≠生效」）。`pgrep -af 'suite-state-trigger.ts --monitor'` 会同时命中**其它项目**的同名
-trigger（archguard 也有一个）——核对挂的是不是**本仓**那份时，读进程 cmdline 里的路径前缀
-（`/home/yale/work/quay/` vs `/home/yale/work/archguard/`），别只数个数。
+trigger（archguard 也有一个）——**basename 命中≠本仓所有权**（管理者 2026-08-05 纠正，与当天
+resource-gate/select-tests basename 配对问题同族）：核对挂的是不是**本仓**那份，读进程 cmdline 里
+的**完整路径前缀**（`/home/yale/work/quay/` vs `/home/yale/work/archguard/`），别只数个数。
+**跨项目同名进程不属你，绝对不要 kill**——判断「重复」前必须展开 `ps -eo pid,cmd` 验全路径；
+无法验明归属的进程保持不动（外部项目 monitor 由其自身 loop 自愈，如 archguard 实测 1 分钟内重挂）。
+**重挂前先停自己的旧 monitor**（TaskStop），再挂新的——「先挂新再等旧死」会短暂双进程（本会话
+16:27-16:28 一分钟内挂两次的教训）。
 
 事件流里出现 `SUITE-RED` ⇒ **立即**进入步骤 1b「红窗分诊」（不等下一次 cron——本轮的
 「红着无人处置 30 分钟」场景即被消灭）；出现 `SUITE-RUNNING` ⇒ 按「RUNNING 乐观派发执行者」驱动
