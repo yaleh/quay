@@ -3408,3 +3408,7 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   pool-floor 落地的性能面确认（disjointness 计算随池规模不缩放），记入后续优化（候选：近似子集 /
   增量计算 / 缓存）。
 - 无停止条件、无 BLOCKED；inner 空闲待 ROUND 3 绿；loop-driver LIVE。
+> **05:44Z 增补（ROUND 3 首跑 RED = 第 6 次格式踩坑）**：ROUND 3 gate 6.8s 静态门 RED——新违规来自我刚立案的
+> `gap-outer-heartbeat-source...`（control 折行，同 ready-pool-floor 同款错误）。**第 6 次**。已修 →
+> 重跑（b2hyctn7l）。教训：我的 control 行反复折行——派发前 contract 静态预审计（self-touch-scan 同型）
+> 必须落地，否则每轮 gate 兜底浪费 15 分钟。
