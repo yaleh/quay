@@ -53,16 +53,72 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 冷启动 gate = **派生铺设集内脚本全绿**（铺什么验什么），非「整个套件绿」——与铺设集无关的
+- [x] AC1: 冷启动 gate = **派生铺设集内脚本全绿**（铺什么验什么），非「整个套件绿」——与铺设集无关的
       套件失败不再无限期阻塞冷启动
-- [ ] AC2: 铺设集**机械派生**（grep `plugin/skills/*/SKILL.md` + `plugin/loop/*.md`），不需新机制
-- [ ] AC3: **并列交叉标注**——`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（同作用域
+- [x] AC2: 铺设集**机械派生**（grep `plugin/skills/*/SKILL.md` + `plugin/loop/*.md`），不需新机制
+- [x] AC3: **并列交叉标注**——`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（同作用域
       轴，不同机制：suite-RED 处置 vs 冷启动 gate）
-- [ ] AC4: **真实使用**——本次等待正确（session-liveness 在铺设集 + M3 会随铺扩散）；收窄后与铺设集
+- [x] AC4: **真实使用**——本次等待正确（session-liveness 在铺设集 + M3 会随铺扩散）；收窄后与铺设集
       无关的失败不阻塞冷启动（实测输出贴任务体）
 - [ ] AC5: **AC10 诚实记账**——本条 post-friction（被阻塞时问范围），不计入可证伪判据；计数保持 0
       （记录不勾）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+
+## 落地证据（invoke 实跑，2026-08-05，worktree `task/gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`）
+
+**Contract measure**（`bash plugin/scripts/laydown-set-check.sh --json`，真实仓库）：
+```
+{"laydown_set_green": "red", "derived_scripts": 26, "test_files_run": [ ..., "plugin/test/laydown-set-check.test.mjs", "plugin/test/session-liveness.test.mjs", ... ], "no_test_scripts": [ ... ], "pass": P, "fail": 1, "cancelled": 0}
+```
+→ **`laydown_set_green: red` = 铺设集内确有测试红 ⇒ 冷启动被阻塞——这正是收窄后的判据在工作**：
+不是整个套件绿才可铺，而是铺设集内脚本全绿才可铺。实测当前铺设集里的红是
+`session-liveness.test.mjs`（**已知负载敏感族，预存在 flake**——outer 2026-08-05 20:06Z 的
+`full-suite-state.json` 记录：34 files / 2000+ tests passed in 22min，**ONLY failure =
+session-liveness.test.mjs KNOWN-LOAD-SENSITIVE flake**，passes isolated 1/1；同一根：
+`gap-load-sensitive-session-family`）。铺设集 = 26 个脚本（含本 helper 自身——被 cold-start
+SKILL.md 引用后自动进派生集，铺什么验什么闭环）。**green 路径**（铺设集内测试全绿即可铺）由
+fixture 双向证明（见 Scoped 验证 AC1/AC4 用例）。
+
+**Contract invoke**（`grep -rn 'scripts/test.sh\|full suite\|全量' plugin/skills/cold-start/SKILL.md`）：
+```
+91:**Do NOT wait for the whole suite (`scripts/test.sh` no-args / the full-suite run / 「全量」) to be
+```
+→ cold-start SKILL.md 明写 gate = 派生铺设集，**非**整个套件绿。
+
+**AC2 机械派生单源**（`laydown-set-check.sh` 的派生 grep == `quay-init.sh` 的 `DERIVED_SCRIPTS`，测试断言
+相等；无手写清单）。**AC4 真实使用**：`session-liveness.sh` / `session-liveness-mount.sh` 都在派生集内
+（M3 回归会随铺扩散 → 本次等待正确）；负向 fixture（铺设集外的红测试）⇒ 仍 green，不阻塞。
+
+**AC3 并列交叉标注（本任务体记录）**：与 `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`
+是同一作用域轴的并列实例——同一 scope 轴（判据量化范围过宽 vs 实际动作范围），不同机制（suite-RED 处置
+vs 冷启动 gate），交叉标注不归并。
+
+**AC5 AC10 诚实记账（记录不勾）**：本条 post-friction——管理者是在**被阻塞（卡顿）**状态下才去问这个
+范围的，属 post-friction，**不计入**可证伪判据（`prefriction_dimensions` 保持 0）。计数引用
+`gap-axis-generator-question-what-range-every-standing-criterion`（AC5 记账引用）；把边缘案例算成达成
+正是判据最易失效的方式，故本 AC 勾选框按任务体「记录不勾」保持未勾。
+
+**Scoped 验证**（`bash scripts/test.sh --for-task gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite --allow-thin`）：
+```
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+task-contract-check: no violations.   violations: 0 unique across 0 task(s)
+✔ AC2 — the helper derives the laydown set by the SAME grep as quay-init.sh (single source)
+✔ AC4 — session-liveness.sh and session-liveness-mount.sh ARE in the derived set (the M3 wait was correct)
+✔ AC1/AC4 — derived-set tests all pass ⇒ laydown_set_green: green, exit 0
+✔ AC4 positive control — a FAILING derived-set test ⇒ red, exit 1 (blocks cold-start)
+✔ AC4 negative — a failing test OUTSIDE the derived set does NOT block (whole-suite red ≠ cold-start red)
+✔ adversarial — 0 test files resolved ⇒ fail-closed red, NEVER a whole-suite fallback
+✔ usage — a bad --root fails with exit 2 (fail-closed on misuse, not a silent green)
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+EXIT=0
+```
+
+## Test-Files
+
+- plugin/test/laydown-set-check.test.mjs（AC1/AC2/AC4 双向 fixture + fail-closed 负控制 + AC6 node:test）
 
 ## Definition of Done
 

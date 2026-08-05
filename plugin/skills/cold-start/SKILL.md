@@ -33,6 +33,7 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `fast-mode-telemetry.ts` exist |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
+| derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
 **Launch config is checked-in, not remembered.** The correct per-role launch command lives in
 `<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
@@ -67,6 +68,30 @@ start did NOT complete.
 - `root = $(pwd)` (this skill runs inside the target project's outer session).
 - `project = basename "$root"`.
 - `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-liveness.env`, else `${project}-0:0.0`.
+
+### 1b. Gate the derived laydown set — lay what you verify, not the whole suite (fail-closed)
+
+The cold start only relies on the **DERIVED laydown set** — the scripts quay-init laid down. That set
+is mechanically derived (`grep plugin/skills/*/SKILL.md plugin/loop/*.md` → the `plugin/scripts/*`
+they reference — the SAME derivation quay-init.sh uses; no hand-written list). The gate is therefore
+**"that set is green", not "the whole suite is green"**: an unrelated suite failure must NOT block the
+cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross:
+`gap-red-window-dispatch-stop-should-be-shared-gate-conditional` — same scope axis, different
+mechanism: suite-RED 处置 vs 冷启动 gate).
+
+Run the check in the **quay SOURCE repo** (where `plugin/test/` lives — the target project only has
+the laid-down scripts, not the tests):
+
+```bash
+bash <quay-source>/plugin/scripts/laydown-set-check.sh
+# laydown_set_green: green → proceed; red → STOP (a derived-set script's test is failing; laying it
+# would ship the regression — e.g. session-liveness.sh's test IS in the set, so the M3 wait was correct)
+```
+
+**Do NOT wait for the whole suite (`scripts/test.sh` no-args / the full-suite run / 「全量」) to be
+green** — that is the too-wide criterion this gate replaces. Only the derived set gates the cold
+start. The check **never falls back to the whole suite**: if 0 test files resolve from the derived
+set it fails closed (red) — a silent "nothing checked" green is not an acceptable gate.
 
 ### 2. Build and verify the two-window session topology (AC4 — the other half of 装得上)
 
