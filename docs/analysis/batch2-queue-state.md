@@ -3819,3 +3819,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **当前**：资源门 WAIT（PSI 66，内层 meta-cc 协调 3 subagent 跑 DIR-082/083/084）；套件 state=red+
   aborted；内层已读到 AC16 根因（Cogitated 3m38s 后处理 meta-cc 协调）；待内层空闲驱动 AC16 修复。
 - 本 tick 新立案：OS-anchor（最高优先，崩溃无法自恢复）；ABORT #2 根因入 no-resource-awareness AC16。
+
+### tick 2026-08-05T08:10Z（外层，`unblock`：tmux 泄漏 = 资源主因 + 崩溃候选根因）
+
+- **管理者发现并清除真实资源泄漏**：217 个 tmux server（最老 12h）全来自 send-keys-verified.test.mjs
+  的 skv-ok 会话——隔离设计对（各自 TMUX_TMPDIR），但测试跑完不 kill 自己起的 server，全套件每轮
+  留一批。清理后 PSI 94.18→31.47、gate WAIT→GO、server 217→10。**这是当前资源压力主要来源，非
+  laneCount、非另两项目**（管理者两次归因不完整，已记录）。
+- **已立案 `gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`**（最高优先）：一整类
+  （teardown 回收 + 套件尾部机械断言覆盖 skv-/session-liveness-/enter-repro- 前缀）+ 残留 9 个留内层
+  判断 + 三次崩溃获具体机制（随轮数累积→崩溃前负载飙升）。
+- **M3 验证套件**：泄漏清理后 gate 一度 GO，但内层跑 ready-pool-check（70.9% CPU）+ meta-cc Go 测试
+  编译把 PSI 拉回 62-83——**活跃工作非泄漏**。待内层忙完 + gate GO 后跑（laneCount 显式传参传播 AC16
+  未修，须临时手段）。
+- 本 tick 新立案：OS-anchor（最高优先）、tmux 泄漏（最高优先）、ABORT #2 根因入 AC16。累计最高优先
+  3 条（OS-anchor / 泄漏 / laneCount 系）。
