@@ -36,6 +36,9 @@ import {
   globMatch,
   inTestGlob,
   buildInventory,
+  extractHeaderComment,
+  extractInstrumentDeclaration,
+  buildInstrumentsManifest,
   DORMANT_BY_DECISION,
   TEST_GLOB_PATTERNS,
 } from "../scripts/runtime-usage-inventory.ts";
@@ -295,6 +298,52 @@ if (process.env.QUAY_TEST_GROUPS && !process.env.QUAY_TEST_GROUPS.split(",").inc
     assert.ok(mention, "echo-mentioned .ts enumerated");
     assert.equal(mention.main.indirectExec, false, "echo mention is NOT indirect-executed (REFUTE finding 1)");
     assert.notEqual(mention.class, "live");
+  });
+
+  // ── Instrument manifest (gap-eighty-one-instruments...) ──────────────────────────────────────
+  // The entry-point directory is DERIVED from the filesystem (never a hardcoded "81"), and the
+  // admission filter (AC4: cannot say what question it answers => does not get in) is mechanical.
+  test("extractHeaderComment: block comments, // runs, and # runs (shebang-safe)", () => {
+    assert.equal(extractHeaderComment("/* a\n b */\ncode"), " a\n b "); // block interior preserved as-is
+    assert.equal(extractHeaderComment("// one\n// two\n\ncode\n"), "one\ntwo");
+    assert.equal(extractHeaderComment("#!/usr/bin/env bash\n# a comment\necho hi\n"), "/usr/bin/env bash\na comment");
+    assert.equal(extractHeaderComment("export const a = 1;\n"), "");
+  });
+
+  test("extractInstrumentDeclaration: @instrument tag wins; em-dash header derived; silent => null", () => {
+    assert.equal(
+      extractInstrumentDeclaration("// foo.ts — a derived description.\nexport const a = 1;\n", "foo.ts"),
+      "a derived description."
+    );
+    assert.equal(
+      extractInstrumentDeclaration('// foo.ts\n// @instrument "answers the foo question"\nexport const a = 1;\n', "foo.ts"),
+      "answers the foo question"
+    );
+    assert.equal(extractInstrumentDeclaration("#!/usr/bin/env bash\necho hi\n", "x.sh"), null);
+    assert.equal(extractInstrumentDeclaration("export const a = 1;\n", "bar.ts"), null);
+  });
+
+  test("buildInstrumentsManifest: derived count + visible admission filter", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rui-instr-"));
+    const root = path.join(tmp, "repo");
+    fs.mkdirSync(path.join(root, "plugin", "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "alpha.ts"), "// alpha.ts — answers the alpha question.\nexport const a = 1;\n");
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "beta.sh"), "#!/usr/bin/env bash\n# @instrument \"echoes beta\"\necho beta\n");
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "gamma.ts"), "export const g = 1;\n"); // silent -> not admitted
+    fs.writeFileSync(path.join(root, "plugin", "scripts", "tsconfig.json"), "{}"); // non-script -> excluded
+    const m = buildInstrumentsManifest(root);
+    assert.equal(m.total, 3); // alpha.ts + beta.sh + gamma.ts (tsconfig.json is not a script)
+    assert.equal(m.admitted, 2);
+    assert.deepEqual(m.notAdmitted, ["plugin/scripts/gamma.ts"]);
+    const alpha = m.instruments.find((i) => i.name === "alpha");
+    assert.ok(alpha, "alpha is admitted");
+    assert.equal(alpha.description, "answers the alpha question.");
+    assert.equal(alpha.kind, "node");
+    const beta = m.instruments.find((i) => i.name === "beta");
+    assert.equal(beta.kind, "bash");
+    // derived, not hardcoded: the real repo's plugin/scripts is enumerated by the same code path
+    const real = buildInstrumentsManifest(REPO_ROOT);
+    assert.ok(real.total >= 70, `real plugin/scripts instrument count is derived (>=70 floor), got ${real.total}`);
   });
 
   // ── AC4: real-transcript bidirectional control (skips if the sessions dir is absent) ────────
