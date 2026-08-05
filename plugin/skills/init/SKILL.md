@@ -130,6 +130,7 @@ source of truth — the same doc the human reads):
 <!-- reference-doc: orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md -->
 <!-- reference-doc: orchestration/outer-rulings-2026-08-04-A-F.md -->
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
+<!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
 
 ## Behavior
 

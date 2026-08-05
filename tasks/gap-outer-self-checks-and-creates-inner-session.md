@@ -91,3 +91,12 @@ invariant healthy_inner_untouched = 1（健康 inner 不被 outer 动——权�
 invoke    `grep -n 'topology\|inner\|自检' plugin/loop/orchestrator-loop-tick.md`
 control   inner 健康 ⇒ 不动（AC2）；空壳 ⇒ 驱动不重建（AC3）；缺失 ⇒ 创建两窗口（AC4）
 resume    自检接入 + 三态处理分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T16:3xZ
+changed: 管理者优先级裁定（遗传物质级拓扑修复的后续）：manager-baked（two-window 拓扑修复）落地后用
+新拓扑定义实现本任务——outer 自检 + 按三态（健康/空壳/缺失）处理 inner 会话。与
+gap-manager-baked-into-project-topology-factory 交叉标注（新拓扑 ROLES='outer inner'）。
+status: todo——排在 manager-baked 落地后。
