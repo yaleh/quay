@@ -96,7 +96,10 @@ gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 
 claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
 ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，测试命令的默认并发已改为
 **推导值 `max(1, floor(nproc / 2.1)) = 1`**（不再写死 8——8 worker + 子进程 = 17 进程、4.25× 超订，
-是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先。两层绝不同时跑全量套件。
+是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先（**分叉**：这是
+node:test/test.sh 项目的旋钮；**vitest 项目真实文件级并行 flag 是 `--maxWorkers`**，archguard 用
+`--maxWorkers=8` 跑通全量——同一份文档服务两种测试框架，`gap-full-suite-runner-red-pattern-matches-
+bare-x-vitest-false-red` AC3）。两层绝不同时跑全量套件。
 **全量套件本身已移到外层后台**（`gap-full-suite-belongs-to-outer-background-above-3-min`，AC1/AC3）：
 inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json` 的 `state`（见步骤 3）——上面这条
 资源闸是**外层后台 runner 起跑前**要过的闸，不是 inner 的。inner 只保留 `--for-task` 选中集

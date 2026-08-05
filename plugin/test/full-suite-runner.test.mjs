@@ -20,6 +20,14 @@
 //         task file and the loop docs reference the (c) closure-decomposition task id.
 //   AC8 — this file uses node:test and declares // @test-group governance.
 //
+// Task: gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red
+//   AC1 — FAILURE_PATTERNS no longer matches the bare ✖ glyph; a vitest-style suite whose
+//         PASSING test logs `✖ ...` console output stays GREEN (unit negative control +
+//         e2e fake-suite proof). Structured vitest shapes (`❯ <file> (N tests | M failed)`,
+//         `Test Files <N> failed`) DO flag.
+//   AC2 — node:test/TAP true failures still flip red (`not ok` / `# fail` / `# cancelled`),
+//         and a vitest structured failure line flips red EARLY (before the run completes).
+//
 // Run:
 //   scripts/test.sh plugin/test/full-suite-runner.test.mjs
 
@@ -410,13 +418,16 @@ test("AC2 — RED is marked on first failure detection, before the run completes
   }
 });
 
-test("AC2 unit — the failure markers match concrete node:test/TAP failure lines, not passing lines", () => {
+test("AC2 unit — the failure markers match STRUCTURED failure lines, never bare glyphs or passing lines", () => {
   for (const line of [
     "not ok 1 - something failed",
     "# fail 2",
     "# cancelled 1",
-    "✖ failing test",
     "FULL-SUITE-EXIT=1",
+    // vitest structured failures (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC1)
+    " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms",
+    " ❯ test/foo.test.ts (3 tests | 1 failed | 2 skipped) 12ms",
+    "Test Files  1 failed | 10 passed (11)",
   ]) {
     assert.equal(isFailureLine(line), true, `should flag: ${line}`);
   }
@@ -427,8 +438,66 @@ test("AC2 unit — the failure markers match concrete node:test/TAP failure line
     "# cancelled 0",
     "FULL-SUITE-EXIT=0",
     "ok 1 - passing test",
+    // bare ✖ console noise must NOT flag (AC1 negative control: a passing vitest negative-control
+    // test logs `✖ Diagram test failed` — the old /✖/ pattern produced a FALSE early-red)
+    "✖ Diagram test failed",
+    // vitest passing lines must NOT flag (structured shapes only, not bare glyphs)
+    " ✓ test/foo.test.ts (3 tests) 12ms",
+    " ❯ test/foo.test.ts (3 tests) 12ms",
+    "Test Files  10 passed (11)",
+    "   × some individual test name",
   ]) {
     assert.equal(isFailureLine(line), false, `should not flag: ${line}`);
+  }
+});
+
+test("AC1 — a passing vitest-style suite logging a bare-X console line stays GREEN (no false early-red)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1x-"));
+  // archguard TASK-67 shape: a PASSING negative-control test logs `✖ Diagram test failed` to
+  // console.error; the vitest summary is 0 failed / exit 0. The old bare-✖ FAILURE_PATTERN turned
+  // this GREEN suite red. With structured matching it must stay green (AC1).
+  const { f, dir } = fakeSuite(
+    'echo "✖ Diagram test failed" >&2\n' +
+      'echo "# tests 5"\necho "# pass 5"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+    const s = readState(root);
+    assert.equal(s.state, "green", "bare ✖ console noise must NOT flip state to red (AC1)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a vitest structured failure line flips red EARLY, before the run completes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-vit-"));
+  const marker = path.join(root, "post-failure-marker");
+  // A real failing vitest run prints the structured per-file line (`❯ <file> (N tests | M failed)`)
+  // BEFORE its summary and exit. Red must be marked on that line, not at exit — the same early-red
+  // property node:test/TAP gets from `not ok` (AC2 preserved for vitest projects).
+  const { f, dir } = fakeSuite(
+    'echo " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms"\nsleep 2\necho done > "' +
+      marker +
+      '"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const redObserved = await poll(() => {
+      const s = readState(root);
+      return s && s.state === "red" ? s : null;
+    }, { timeoutMs: 5000 });
+    assert.equal(redObserved.state, "red");
+    assert.equal(redObserved.reason, "failed", "a structured vitest failure is a REAL failure (stop-dispatch signal)");
+    assert.equal(redObserved.finishedAt, null, "red written while the run is still in progress (AC2 early-red)");
+    assert.ok(!fs.existsSync(marker), "red appeared before the suite's post-failure step completed");
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

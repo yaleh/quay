@@ -562,10 +562,19 @@ tick 做一次收尾 pass。
      running`）且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 =
      WAIT，下一 tick 再起）。
    - **早期 RED（AC2）**：runner **一检测到失败立即把 state 标成 red**（非等全套跑完）——缩「变红到
-     发现」窗口。判红模式 = `not ok` / `✖` / `# fail [1-9]` / `# cancelled [1-9]` /
-     `FULL-SUITE-EXIT` 非 0 / 退出码非 0。`state: red` + `reason: failed` 即 AC4 的 **stop-dispatch
+     发现」窗口。判红模式 = 结构化失败形态，**不匹配裸字形**（`gap-full-suite-runner-red-pattern-
+     matches-bare-x-vitest-false-red`，archguard TASK-67 实证裸 `✖` 误伤 vitest 假红）：
+     node:test/TAP 的 `not ok` / `# fail [1-9]` / `# cancelled [1-9]`、vitest 结构化行
+     `❯ <file> (N tests | M failed)` / `Test Files <N> failed`、`FULL-SUITE-EXIT` 非 0，
+     以及兜底退出码非 0。`state: red` + `reason: failed` 即 AC4 的 **stop-dispatch
      信号**（inner 读它停派发 + 暂缓 fan-in，见下「红窗分诊」）；`reason: aborted`（被信号杀/spawn
      失败）**不是** stop-dispatch 信号——inner 照常派发，本层按 aborted 语义处置（记录 + 重跑）。
+   - **并发旋钮分叉（同一份文档服务两种测试框架）**：runner 的 `--lane-count` 拼接只对
+     node:test/test.sh 项目生效（`--test-concurrency=N`，test.sh 的派生默认）；**vitest 项目
+     真实文件级并行 flag 是 `--maxWorkers`**（archguard 用 `--maxWorkers=8` 跑通全量 4902 passed），
+     **不是** `--test-concurrency`——文档/命令里指导 vitest 项目用 `--test-concurrency` 的地方一律
+     改用 `--maxWorkers`（`.quay/config.yml` 的 `loop.test_command` 由各项目自己定，runner 对非
+     test.sh 命令不拼接）。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。

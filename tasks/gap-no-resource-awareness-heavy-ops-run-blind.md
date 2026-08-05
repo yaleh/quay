@@ -316,6 +316,12 @@ gate 只守默认全量集合（`is_default_set "product,engine"`）；`--group 
 - `docs/analysis/fast-mode-loop-tick.md`：同样改为调用 gate；并更新「默认 --test-concurrency=8
   （设计性 2 倍超订）」为「默认并发已改为推导值 = 1」
 
+**交叉标注（AC3，`gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red`）**：本任务
+的 `--test-concurrency` 是 **node:test/test.sh 项目的旋钮**；同一份机制文档服务 vitest 项目时
+分叉已写清——vitest 真实文件级并行 flag 是 `--maxWorkers`（archguard 用 `--maxWorkers=8` 跑通
+全量 4902 passed），两个 tick 文件与 full-suite-runner 用法均不再对 vitest 项目指导
+`--test-concurrency`。判红模式也不再匹配裸 `✖`（vitest 假红负控制实证）。
+
 ### AC9 — 记录已补
 
 `tasks/gap-suite-cost-model-is-wrong-optimizations-buy-nothing.md` 的 Execution record 后新增
