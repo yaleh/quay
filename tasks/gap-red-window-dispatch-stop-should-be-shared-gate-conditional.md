@@ -11,7 +11,7 @@ title: "the red-window RED handling is a coarse blanket (stop dispatch + hold
   stops ONLY on shared-gate failures, continues for specific-test-file failures
   unrelated to the new task's touch-set (this round's evidence: suite early-RED,
   inner 30+ min no dispatch, pool 16/disjoint 9 healthy)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -105,9 +105,9 @@ EXIT=0
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC4 实跑输出贴任务体
-- [ ] RED 处置条件化：一律暂缓 fan-in + 共享闸门才停派发（具体测试无关时继续）；inner 白等大部分消失
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC4 实跑输出贴任务体
+- [x] RED 处置条件化：一律暂缓 fan-in + 共享闸门才停派发（具体测试无关时继续）；inner 白等大部分消失
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 

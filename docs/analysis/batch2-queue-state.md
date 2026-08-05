@@ -5201,3 +5201,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   docs/analysis/fast-mode-loop-tick.md）仍是旧红窗规则——外层维护铺出副本，需同步（quay-init re-lay 或手动，
   注意铺出副本有本地编辑会 CONFLICT）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T21:2xZ（外层，red-window-stop 落地 + closure round 10 + 部署滞后注）
+
+- **inner red-window-stop fan-in 落地（REAL mechanism）**：`a1c5e9fe` shouldDispatchOnRed(state, touches)
+  共享闸（shared-gate block / specific-test-unrelated continue / intersecting block / fail-closed /
+  aborted-never-block）+ SUITE-RED 带 failureLocation，45/45。**RED 停派发条件化**（具体测试无关时继续，
+  inner 白等消失）。closure round 10：red-window-dispatch-stop 翻 done（共 10 个 closure）。
+- **template/deployed divergence（inner 注 + 外层确认）**：plugin/loop/fast-mode-loop-tick.md 有 shared-gate
+  规则（line 340-347），docs/analysis/ 部署副本 0 提及——**部署滞后**（inner 实现了机制故行为正确，但文档
+  副本未同步；升级通道 theme 的又一体）。待 quay-init 重铺或手动同步。
+- **套件 green**、闸 GO、load 0.72（极低）、monitor 三判据绿。
