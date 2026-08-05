@@ -60,6 +60,11 @@ orchestration/inner-idle-log.jsonl
 # same live control-plane-state family as gate-events.jsonl/inner-blocked.json, not a test
 # artifact. It predates any test run in this session (created 02:40:46Z at cold-start).
 **/.quay/loop-driver.jsonl
+# gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async: the outer layer's
+# append-only verification-round record (one line per round: round/at/suiteGreen/closed ids). Same
+# live control-plane-state family as gate-events.jsonl/inner-blocked.json — written by the outer's
+# async closure pass, read by the inner's stop condition; never committed.
+**/.quay/verification-round.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/
