@@ -2806,3 +2806,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （taskWorkLanded 探测 → --task-end → 翻 done → verification-round-N 记录 → 全量 suite 为外层 gate）；
   AC5 要求证一次外层收尾窗口内 inner 持续派发不空转。与 batch 措辞任务分层（机制根 vs 措辞层）。
 - 在飞：3 agent（review-cadence/roadmap/preflight）继续执行中；新任务 ready 入池，等槽位空滚动派发。
+
+### tick 2026-08-05T02:20Z（外层，`unblock`：结构性发现 → 立案 inner 周期锚任务）
+
+- **管理者实测**：inner Cron 调用数 = 0，整晚 59 次驱动全来自外层 send-keys；外层有 */20 cron（强制
+  重读出厂文档）。**锚点不对称**——inner 唯一锚是外层措辞各异的散文 ⇒ 今晚串行 A→D→B、batch 语义
+  渗透成排序依据的结构根。R2 修散文内容，未给散文之外的周期锚。
+- **已立案 `gap-inner-has-no-periodic-anchor-prose-only-drives-drift`**（ready，dod 通过）——机制裁定：
+  **外层 cron 转发固定重锚 prompt**（单一调度源，结构上不可能成第二调度器）；唤醒契约 = 一致性核对
+  非调度（prompt 零派发措辞，AC3 grep 保证）；措辞独立（固定常量 check-in）；依赖 closure-async
+  （重锚要核「是否偷偷收尾」需出厂文档先改无收尾形态）。inner 自带 cron 记为考虑过但延后。
+- **TodoWrite=0 / TaskCreate+TaskUpdate=12+24**：人观察的「没建 todo-list」属显示层，不影响执行，
+  不需处理（管理者已核实）。
+- 在飞：2 agent（review-cadence/roadmap）；preflight 已 done；drive-text 排队；closure-sync +
+  reanchor 两任务 ready 入池等槽。
