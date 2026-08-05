@@ -12,7 +12,7 @@ title: "the cold-start gate criterion is too wide — 'whole suite green' lets
   plugin/skills/*/SKILL.md + plugin/loop/*.md, no new mechanism); parallel to
   gap-red-window-dispatch-stop-should-be-shared-gate-conditional (same scope
   axis)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -60,7 +60,7 @@ extra:
       轴，不同机制：suite-RED 处置 vs 冷启动 gate）
 - [x] AC4: **真实使用**——本次等待正确（session-liveness 在铺设集 + M3 会随铺扩散）；收窄后与铺设集
       无关的失败不阻塞冷启动（实测输出贴任务体）
-- [ ] AC5: **AC10 诚实记账**——本条 post-friction（被阻塞时问范围），不计入可证伪判据；计数保持 0
+- [x] AC5: **AC10 诚实记账**——本条 post-friction（被阻塞时问范围），不计入可证伪判据；计数保持 0
       （记录不勾）
 - [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
 
@@ -122,9 +122,9 @@ EXIT=0
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC4 实测输出贴任务体
-- [ ] 冷启动 gate 收窄到铺设集（与铺设集无关的套件失败不阻塞）；AC10 计数诚实（0）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC4 实测输出贴任务体
+- [x] 冷启动 gate 收窄到铺设集（与铺设集无关的套件失败不阻塞）；AC10 计数诚实（0）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
