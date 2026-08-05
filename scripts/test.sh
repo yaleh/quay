@@ -44,6 +44,20 @@
 #   scripts/test.sh --test-concurrency=4           # flags-only: extra node --test flag + the DEFAULT glob
 #   scripts/test.sh --experimental-test-coverage   # flags-only form also passes through (default glob kept)
 #   QUAY_TEST_LIVE_GITHUB=1 scripts/test.sh   # opt IN to the 3 live/conformance files too
+#   scripts/test.sh --for-task <id>                # task-scoped: change-relevant static checks + the
+#                                                  #   task's ## Touches-selected test set (scoped tier)
+#   scripts/test.sh --scoped <id>                  # same as --for-task (the scoped measure surface)
+#   scripts/test.sh --scoped <file...>             # scoped tier keyed to the given files as touches
+#   scripts/test.sh --static-checks                # gate-only: run the COMPLETE static-check set, no tests
+#
+# SCOPED STATIC-CHECK TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6):
+#   A task-scoped run (`--for-task` / `--scoped`) runs the change-relevant static-check subset —
+#   checkers whose object intersects the task's `## Touches` plus the ## Contract consumer on the
+#   TOUCHED task files — SKIPPING checker-mutation-check (~13s) and unrelated repo-level ratchets.
+#   The COMPLETE set (run_static_checks) is unchanged and always runs in full-suite mode (the outer
+#   verification-round gate is NOT weakened); a scoped skip is DEFERRED to the full gate, never
+#   dropped. Trade-off: scoped = fast feedback on the change; full = complete gate (AC4-ii:
+#   an unrelated repo-level ratchet violation is caught by full, not by the scoped run).
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
@@ -129,9 +143,21 @@ else
   echo "scripts/test.sh: WARNING — could not create NODE_COMPILE_CACHE dir '${node_compile_cache_dir}'; running uncached (slow but correct, AC3 fail-open)" >&2
 fi
 
-# run_static_checks — the repo-wide invariants that run on EVERY test-running invocation,
+# run_static_checks — the repo-wide invariants that run on EVERY FULL-SUITE-mode test-running
+# invocation (the default, --group, flags-only, explicit files) AND on `--static-checks`.
 # independent of which test files were requested (fast; the metadata modes --list-groups/
 # --list-files skip them). CI inherits them because its only test step is `bash scripts/test.sh`.
+#
+# SCOPED TIER (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC2/AC6): TASK-scoped runs
+# (`--for-task <id>` / `--scoped <id>`) do NOT pay this full set every time — they run the
+# change-relevant subset (run_scoped_static_checks_sel below): checkers whose object intersects
+# the task's `## Touches` plus the ## Contract consumer on the touched task files, SKIPPING
+# checker-mutation-check (~13s) and the unrelated repo-level ratchets. The complete set here is
+# byte-unchanged (AC2 — the full-suite gate is NOT weakened); a scoped skip is DEFERRED to the
+# full-suite gate, never dropped (AC4-ii: scoped = fast feedback on the change; full = complete gate).
+# Each checker carries a `# @static-tier <always|change|full>` + `# @static-object <glob>…`
+# annotation that select-static-checks-for-touches.ts parses (the SAME single source
+# checker-mutation-check.sh parses — never a hand-maintained list, AC3).
 run_static_checks() {
   # QUAY_TEST_NESTED — set by mark_nested() right before the outer suite's node --test. A nested
   # invocation (a test that spawns scripts/test.sh) inherits it and skips the whole-store checks
@@ -152,10 +178,15 @@ run_static_checks() {
     return 0
   fi
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
   echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
   echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
@@ -164,8 +195,11 @@ run_static_checks() {
   # whole-store checkers) gives every test-running invocation — and CI, which inherits it via its
   # single `bash scripts/test.sh` step — the ratchet enforcement for free. exit 1 on ratchet growth
   # aborts the suite (set -euo pipefail), so a NEW violation red-lights the commit, not the dispatch.
+  # @static-tier always
+  # @static-scoped-mode subset-touched
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
   echo "== AC-carryover check (gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC6) =="
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   # A done task may leave ACs unchecked ONLY if a successor `## Carries` section names them — the
   # gate on the gates: nothing previously noticed a done task closing with half its ACs unchecked and
   # no carrier (measured 2026-08-03: session-liveness closed done with 8/16 unchecked, stage-2
@@ -180,6 +214,8 @@ run_static_checks() {
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
   # a shell script), band 0..1 (the ONE active legacy observer — session-liveness.sh — is carried
   # by the sibling task; a NEW active violation red-lights the commit).
+  # @static-tier change
+  # @static-object **/*.sh **/*.bash
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
   echo "== strategic-doc-staleness check (gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8) =="
   # The generic strategic-doc staleness checker: scans docs/proposals + orchestration/*ROADMAP* for
@@ -189,6 +225,8 @@ run_static_checks() {
   # (set -euo pipefail), so a strategic doc silently pointing at deleted code red-lights the commit.
   # The AC8 pool-candidate regression (gap-prepare-milestone-no-size-aware-routing must be flagged)
   # is asserted in plugin/test/strategic-doc-staleness-check.test.mjs, not here.
+  # @static-tier change
+  # @static-object docs/proposals/ orchestration/
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/strategic-doc-staleness-check.ts" --root "${repo_root}"
   echo "== drive-contract check (gap-drive-text-carries-data-not-behavior-outer-inner-handoff, AC3) =="
   # The drive-text contract checker: a drive text (the OUTER's dispatch instructions to the INNER)
@@ -201,6 +239,8 @@ run_static_checks() {
   # (set -euo pipefail), red-lighting an order-asserting drive text without its mechanical evidence.
   # The AC4 negative control (order-without-output flags, +output clean) is exercised by the
   # checker's own mutation case and plugin/test/drive-contract-check.test.mjs.
+  # @static-tier change
+  # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
@@ -212,8 +252,55 @@ run_static_checks() {
   # green) plus the two AC5 regression cases (the #6 zero-dependency-probe rename control and
   # the #10 activity-present-telemetry-empty /live direction). `mutations_that_stayed_green`
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
+  # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
   bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
 }
+
+# run_scoped_static_checks — the change-relevant static-check TIER for SCOPED task runs
+# (gap-scoped-runs-pay-full-static-check-overhead, AC1/AC3/AC6). A per-task scoped run used to pay
+# the FULL run_static_checks fixed overhead (~16s, ~13s of it checker-mutation-check) even when it
+# ran 1-2 test files. Scoped mode runs ONLY the checkers whose object intersects the task's
+# `## Touches` (e.g. test-framework-policy/isolation when a test file is touched, the doc/shell
+# ratchets when their objects are touched) PLUS the always-relevant ## Contract consumer on the
+# TOUCHED task files (AC1's exemplar — it has already caught 7 Contract violations), SKIPPING
+# checker-mutation-check and the unrelated repo-level ratchets.
+#
+# The FULL set is byte-unchanged in run_static_checks above (AC2 — the full-suite gate is NOT
+# weakened: the outer verification round still runs every checker every time). A scoped skip is
+# DEFERRED to the full-suite gate, never dropped (AC4-ii: an unrelated repo-level ratchet violation
+# is not caught by the scoped run and MUST be caught by the full run). The touch→checker relevance
+# mapping is MECHANICAL (select-static-checks-for-touches.ts parses the `# @static-tier` /
+# `# @static-object` annotations in run_static_checks — the SAME single source checker-mutation-check.sh
+# parses; never a hand-maintained list, AC3).
+run_scoped_static_checks_sel() {
+  # "$@" = --task <id> OR --touches <csv>
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping scoped static checks (nested invocation; outer suite ran them)"
+    return 0
+  fi
+  if [ "${QUAY_TEST_SKIP_STATIC_CHECKS:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_STATIC_CHECKS=1 — skipping scoped static checks (nested 0-match/smoke run; outer suite ran them)"
+    return 0
+  fi
+  echo "== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) =="
+  local cmds
+  if ! cmds="$(node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/select-static-checks-for-touches.ts" --root "${repo_root}" "$@" --commands 2>&1)"; then
+    echo "scripts/test.sh: scoped static-check selection FAILED — not silently skipping the gate" >&2
+    exit 1
+  fi
+  if [ -z "${cmds}" ]; then
+    echo "scripts/test.sh: scoped static checks — no change-relevant checkers selected (deferred to the full-suite gate)"
+    return 0
+  fi
+  local cmd
+  while IFS= read -r cmd; do
+    [ -n "${cmd}" ] || continue
+    echo "  scoped check: ${cmd}"
+    eval "${cmd}"
+  done <<< "${cmds}"
+}
+run_scoped_static_checks() { run_scoped_static_checks_sel --task "$1"; }
+run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"; }
 
 # ── derived default concurrency (gap-no-resource-awareness-heavy-ops-run-blind, AC5) ──────────────
 # node --test with concurrency N actually runs ~N × AMPLIFICATION node processes: each worker
@@ -599,17 +686,42 @@ if [ "$#" -eq 0 ]; then
   # so they report `skipped`, not absent (ADR-019 decision #1 precedent). run_selected runs
   # the split-or-commit whole-store scan.
   run_selected "$(effective_groups)"
-elif [ "${1:-}" = "--for-task" ]; then
+elif [ "${1:-}" = "--static-checks" ]; then
+  # Gate-only mode (gap-scoped-runs-pay-full-static-check-overhead, AC2 proof): run the COMPLETE
+  # static-check set (run_static_checks — the same set the full-suite path runs) with NO test run.
+  # The outer verification round and the AC2 "full set unchanged" mechanical proof use this to run
+  # the full gate without paying the test suite.
   run_static_checks
+  exit 0
+elif [ "${1:-}" = "--for-task" ] || [ "${1:-}" = "--scoped" ]; then
   # gap-test-selection-not-scoped-to-touches: mechanical per-task test selection. `scripts/test.sh
   # --for-task <id>` delegates to select-tests-for-touches.ts (which resolves the task's ## Touches
-  # to a test set) and runs EXACTLY that set. Additive: the full-suite default and the explicit-file
-  # form above are unchanged. `--allow-thin` passes through to the selector (see its exit codes).
-  task_id="${2:-}"
-  if [ -z "${task_id}" ]; then
-    echo "scripts/test.sh: --for-task requires a task id" >&2
+  # to a test set) and runs EXACTLY that set. `--scoped <id>` is the SAME scoped task path (the
+  # measure surface named by the gap-scoped-runs-pay-full-static-check-overhead Contract); `--scoped
+  # <file...>` (a repo-relative test file, not a task id) treats the given files as the change's
+  # touches and runs them with the scoped static-check tier. Additive: the full-suite default and
+  # the explicit-file form are unchanged. `--allow-thin` passes through to the selector.
+  #
+  # Scoped static-check tier: instead of the FULL run_static_checks (which scoped runs used to pay,
+  # ~16s, 13s of it checker-mutation-check), a task-scoped run runs the change-relevant subset —
+  # checks whose object intersects the touches + the ## Contract consumer on the touched task files
+  # (run_scoped_static_checks_sel below). The full set is deferred to the full-suite gate, not dropped.
+  scoped_flag="${1}"
+  scoped_arg="${2:-}"
+  if [ -z "${scoped_arg}" ]; then
+    echo "scripts/test.sh: ${scoped_flag} requires a task id (or, for --scoped, a test-file path)" >&2
     exit 2
   fi
+  if [ "${scoped_flag}" = "--scoped" ] && [ ! -f "${repo_root}/tasks/${scoped_arg}.md" ]; then
+    # --scoped <file...>: the argument is not a task id — treat the given files as the change's
+    # touches and run them with the scoped static-check tier (the contract's `<单文件>` surface).
+    shift 1
+    run_scoped_static_checks_touches "$(IFS=,; echo "$*")"
+    build_dist_once
+    mark_nested
+    exec node --test --test-concurrency="$(default_test_concurrency)" "$@"
+  fi
+  task_id="${scoped_arg}"
   shift 2
   allow_thin_flag=""
   sel_mode="--paths-only"     # default: emit paths for test.sh to run
@@ -635,23 +747,26 @@ elif [ "${1:-}" = "--for-task" ]; then
   fi
   if [ -n "${explicit_mode}" ]; then
     # The user asked for the selector's output, not a test execution — print it and exit with the
-    # selector's own code (so `test-selection-thin` still surfaces non-zero).
+    # selector's own code (so `test-selection-thin` still surfaces non-zero). Scoped static checks
+    # do not run for a selector-only query (no test run to gate) — same as --list-files/--list-groups.
     printf '%s\n' "${sel_out}"
     exit "${sel_code}"
   fi
+  # Scoped static-check tier — the change-relevant subset (the full set is the full-suite gate's job).
+  run_scoped_static_checks "${task_id}"
   # A here-string always appends a newline, so `mapfile <<< ""` yields a 1-element [""] array — the
   # empty case MUST be guarded on the string itself, not on the array length.
   if [ -z "${sel_out}" ]; then
     if [ "${sel_code}" -eq 2 ]; then
-      echo "scripts/test.sh: --for-task ${task_id} — selector could not resolve the task (exit 2)" >&2
+      echo "scripts/test.sh: ${scoped_flag} ${task_id} — selector could not resolve the task (exit 2)" >&2
       exit 2
     fi
     if [ -n "${allow_thin_flag}" ]; then
       # --allow-thin + zero tests to run: nothing to do, and the user explicitly accepted thin.
-      echo "scripts/test.sh: --for-task ${task_id} — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in" >&2
+      echo "scripts/test.sh: ${scoped_flag} ${task_id} — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in" >&2
       exit 0
     fi
-    echo "scripts/test.sh: --for-task ${task_id} selected no test files (selector exit ${sel_code}); add --allow-thin to force" >&2
+    echo "scripts/test.sh: ${scoped_flag} ${task_id} selected no test files (selector exit ${sel_code}); add --allow-thin to force" >&2
     exit 1
   fi
   mapfile -t files <<< "${sel_out}"
@@ -667,7 +782,7 @@ elif [ "${1:-}" = "--for-task" ]; then
   test_code=$?
   set -e
   if [ "${sel_code}" -ne 0 ]; then
-    echo "scripts/test.sh: --for-task ${task_id} — test-selection-thin (selector exit ${sel_code}); re-run with --allow-thin to suppress" >&2
+    echo "scripts/test.sh: ${scoped_flag} ${task_id} — test-selection-thin (selector exit ${sel_code}); re-run with --allow-thin to suppress" >&2
     exit "${sel_code}"
   fi
   exit "${test_code}"

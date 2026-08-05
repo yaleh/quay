@@ -44,6 +44,7 @@ const SECTION_FIXTURES = [
   "- ./packages/a.js",                                       // leading ./ — every parser strips it
   '- "packages/b.js"',                                       // double-quoted path
   "- `experiments/quay-perpetual-stream/scripts/*run-identity*`", // backticked wildcard glob
+  "- plugin/test/foo.test.mjs（档位测试）",                  // FULL-WIDTH （…） annotation (CJK convention) — stripped too
 ];
 
 const EXPECTED = [
@@ -57,6 +58,7 @@ const EXPECTED = [
   ["packages/a.js"],
   ["packages/b.js"],
   ["experiments/quay-perpetual-stream/scripts/*run-identity*"],
+  ["plugin/test/foo.test.mjs"],
 ];
 
 const bodyOf = (section) => `**type:** execution\n\n## Touches\n${section}`;
