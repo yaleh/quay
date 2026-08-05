@@ -4480,3 +4480,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **archguard 第三实例（lint）**：TASK-66 测试文件 14 个新 lint error，scoped 全绿 AC 全勾 npm run lint exit 1。三个项目三种检查（打包态/ADR-007/lint）共同点完全一样——跨切判据 scoped 失明。
 - **治本（archguard 建议 + 外层采纳）**：任务模板 AC 默认含「跨切检查清单」（lint-clean + check-adr + 打包态，按任务类型），非逐个加规则。已扩大 gap-scoped-selection-blind-to-packaging-state-diff 范围为跨切判据类通用问题（三实例统领）。
+
+### tick 2026-08-05T16:0xZ（外层，Q1+Q2 立案收尾管理者报告）
+
+- **Q1 已提交（8ab62afc）**：`gap-user-scope-install-reinstall-criterion-and-version`——user-scope 重装判据按能力边界（①新能力 ②安全/崩溃修复 ③遗传缺陷修复 立即重装，其余攒批）+ VERSION 标记与比对检查。无 VERSION 无陈旧判据，user-scope dist 落后 ~10h 且是活消费路径。
+- **Q2 已提交（495bff2e）**：`gap-two-machine-collaboration-git-branch-claiming`——两机协作认领用 git 分支（推空 task/<id> 分支=认领，存在=被认领，合并删=释放），复用 checkTouchesPair 与共享仓库 task/* 分支查触摸相交；不用 manager 中心分配（单点 + QUAY_GLOBAL_DIR 锁跨主机失效同源）。**前提**：权威/推送方向（现 A→bare→B 单向）+ package.json ENOENT blocker；与 integration-branch（ready 已等 9h）一起考虑——integration 模型正是「多源汇入、基线陈旧」的设计，跨主机是天然用例。
+- **inner 状态**：outer-self-checks 在飞（background agent a159abb 活跃，16:00Z pendingBackgroundAgentCount 1），manager-topology fix 已落地（8fe59ec3），下次唤醒 16:26Z。
