@@ -53,7 +53,9 @@ CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000 CLA
       判据：outer 与 inner 两个会话 transcript 的 `message.model` **都** == `deepseek-v4-flash`。
       **负控制**：任一侧若是 `claude-*` 值，AC1 判定不成立（这正是本次犯的错）。
       **2026-08-04 14:0xZ 证据**：新 outer 会话 `e8e80f27` → `deepseek-v4-flash` ✅。
-      inner 尚无 assistant 消息（外层还没驱动它）⇒ **本条只勾一半，不整条勾**。
+      **14:2xZ 补齐**：inner 会话 `6a950975` → `deepseek-v4-flash` ✅，
+      且其首条消息为「执行 fast-mode-loop-tick.md 的 tick。外层已裁定 A-F 并立案…」
+      ⇒ **驱动者是外层，不是管理者**（AC7 边界的旁证）。本条整条成立。
       **负控制确实响了**：错启动留下的旧 outer 会话 `27c03bf0` → `claude-opus-5`，
       与判据预言的失败形态逐字吻合。**这是本次 AC 里唯一一条被真实反例验证过的判据。**
 
@@ -78,9 +80,19 @@ CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000 CLA
       且新 outer transcript `e8e80f27` 的首条 user 消息即本次驱动文本。
       理由：该判据正是 A–F 里判定不可信的那个，用它自证是循环论证。
 
-- [ ] **AC6 — 六条裁定真的落到任务板，不是停在简报里**
+- [~] **AC6 — 六条裁定真的落到任务板，不是停在简报里**
       判据：A–F 每条对应一个 task 文件或一条明确的关闭裁定；ADR-016 的 carve-out 有实际文本修改。
-      理由：防「简报写了 = 事情做了」——这正是前两次恢复里反复出现的失效形态。
+      **前半 ✅**（提交 `45c0f91a` / `25eb1c30`）：裁定书 `outer-rulings-2026-08-04-A-F.md`（177 行）+
+      三条新任务（A=`...the-whole-screen-hash-it-was-meant-to-forbid`、
+      D=`...not-classified-so-needs-input-is-unobservable`、
+      B=`...trigger-is-dead-code-never-wired-into-any-tick`）+ F 判 `done + superseded`。
+      **后半 ❌ 未到**：ADR-016 最后一次提交仍是 `fe7e7b92`，carve-out 尚未改字。
+
+      **这条 AC 的写法本身有缺陷，如实记**：我把「外层立案」（分钟级）和「内层落地改字」（一个任务的寿命）
+      塞进了同一条判据。按现在的措辞，它要么长期不能勾，要么被人在「已做到的那半」上勾掉——
+      **正是本仓已记录的那个失效形态**（见 `gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger`：
+      「一条 AC 的文本跨度大于实现，于是它在『已实现的那部分』上被勾上」）。
+      **我在写 AC 时又犯了一次。** 正确写法应拆成两条：AC6a 立案（管理者可验），AC6b 落地（跟随任务生命周期）。
 
 - [ ] **AC7 — 我不越界**
       判据：本次重启我不写任务体/AC/DoD、不直接改代码、不直接派 `Agent` 做实现。
