@@ -4554,3 +4554,19 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **已核实**：两项目各一 trigger（quay 3380823 / archguard 3379550）——正常态，不再动。
 - **教训已写进 tick 文档 4b2**：basename 命中≠所有权；判断重复前展开 ps 验全路径；跨项目进程绝对不 kill
   （外部项目自愈，如 archguard 实测 1 分钟内重挂）；重挂先 TaskStop 旧的再挂新的。
+
+### tick 2026-08-05T16:4xZ（外层 correct——inner「AC12b 四阻塞全收齐」汇报不准确）
+
+- **管理者 16:37Z 核实未过关 → 外层独立验证成立**：
+  | 阻塞 | merge | status | AC |
+  |---|---|---|---|
+  | welcome-screen (ghost-drive) | a75dde7e ✓ | ready | 3/8 |
+  | vendor-runtime | 38b33c85+ac293ec6 ✓ | ready | 4/8 |
+  | red-pattern | 60d2521c ✓ | ready | 4/9 |
+  | **dist-stale (upgrade-channel)** | **无 merge** | **todo** | **0/5** |
+- **真实状态 = 3/4 工作落地未收口 + 1/4 真 todo**，不是「4/4 收齐」。
+- **证伪问题回答**（inner 汇报是否查 status）：**凭对话记忆，未查 status 字段**（dist-stale 是 todo 却说收齐）。
+- **收口裁定**：3 条已 merge 的按纪律留 ready——未勾 AC 全需实跑证据 + 全量绿（vendor B 机 blocker /
+  welcome watchdog e2e / red-pattern 负控制），收口在 outer 异步 verification-round 全量绿后；**dist-stale
+  是真实缺口，在池待派**（升级通道无 VERSION 无陈旧判据，管理者已量化 user-scope 落后 ~10h）。
+- **已驱动 inner 纠正**（数据-only，pane 确认）：报 status 前查字段。
