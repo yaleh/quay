@@ -5298,3 +5298,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ⇒ concurrent-batch-scheduler 判 **CONFLICT**（overlap 未指名具体文件，glob 碰撞）。**不可与在飞 global-count
   并发**。机制优先（fail-safe 子句），外层「可并发」声明不成立——fast-mode-loop-tick/plugin/scripts vs
   plugin/test/self 的目测漏了双 glob。**该任务 ready 待命，global-count land 后第一批派发**（人的优先级保留）。
+
+### tick 2026-08-05T22:4xZ（外层 correct-self——我的触摸手工比较漏了共享 glob，生产闸纠正）
+
+- **inner refute 我的「不相交」判断**（b22623f8）：dispatch-evaluated 与 global-count **冲突**（都含
+  plugin/scripts/ glob）——**我的手工触摸比较漏了 global-count 第 4 行的 plugin/scripts/**（基线快照
+  helper，若成脚本），只看前 4 行。**生产闸 checkTouchesPair 权威**。inner 正确处理：promote + self-touch +
+  hold 到 global-count 落地（下一批首位）。
+- **教训**：触摸不相交**不手工判**——用机械闸（checkTouchesPair）。外层手工比较劣于机制（今天第二次：
+  basename 误判 + 触摸漏判）。
+- **gate WAIT**（avg10>=40，load 5.25）、inner global-count 在飞（symlinking node_modules 13m28s）。
