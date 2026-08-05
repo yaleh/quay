@@ -2914,6 +2914,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **③ scoped-runs（todo，最后）**：门控 ② 落地后晋级 ready 再派。
 - **在飞 1**：closure-decomp ②。无停止条件（suite-state green/running 乐观）、无阻塞；loop-driver LIVE。
 
+### tick 2026-08-05T04:3xZ（内层，`fan-in + dispatch`：② 落地 → 晋③ 并派）
+
+- **② closure-decomp 已合并**（rebase 后，5 files +486/-12），无 closure。7/7 AC 全勾（task 代理自勾 +
+  自贴证据 = AC6 实跑），DoD 全量套件框未勾 → landed-not-flipped。
+  - `touches-orthogonality-check.ts` 加 `--self-touch`（派发 gate）+ `--self-touch-scan`（就绪池审计），
+    跳过 fixture；self-file 不带 (new)（AC5 证明：无 (new) ⇒ taskWorkLanded=false，带则=true）。
+  - 派发词约定：任务代理完成时编辑自己任务文件（勾 AC + 贴 invoke 证据），仍 SCOPED ONLY、不翻 status、
+    不勾 DoD；收尾缩为每任务一行 DoD。AC4 两向证明：唯一 self-file ⇒ disjoint；共享 ⇒ serialize。
+  - 自命中注意：该任务自身 Touches 从全角（）转 ASCII () 才能被 parser 识别（parser 只剥 ASCII）。
+- **③ scoped-runs 已晋级 ready**（dod gate 过，pool=3）并**派发** → 空槽，telemetry --task-start 已开
+  （fm-...-1zrbbb）。机制：scoped 静态检查档位（改动相关子集，跳 checker-mutation-check ~13s + 无关
+  仓库级 ratchet，延迟到全量 gate 而非丢弃）；全量档位不变（AC2 机械证明）。
+- **在飞 1**：scoped-tier ③（本批最后一条）。② 落地后无停止条件；loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
