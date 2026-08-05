@@ -391,6 +391,23 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 （硬上限 2 轮），只提交不合并。
 `milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
 
+**驱动文本只携带数据，不复述行为（外层裁定 R2 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff，AC1）**：
+外层驱动内层的文本只携带**数据**——任务 id、裁定结论、依赖事实（如「B 消费 D 的 classifyPaneState」）。
+**行为**（怎么派发、worktree 位置、纪律、并发上限）一律由本节供给，外层**不复述**——出厂文档的行为错了
+就**改文档**，不用散文覆盖。若驱动文本**确需指定任务顺序**，必须**附 `checkTouchesPair` 实际输出**
+（机械证据）：
+
+```text
+A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：顺序断言自带证据
+```
+
+否则不按顺序执行，按本节的并发规则执行。
+
+**内层 fail-safe 子句（机械承载，不是自觉）**：收到与本节派发契约**矛盾**的驱动文本——如「按 A→D→B
+顺序」且同文无任何 `checkTouchesPair` 输出（2026-08-04 实锤的静默串行形态；对比上面的合规形态），或与
+「并发上限 3」冲突——**以本节为准执行，并向外层标注矛盾**，不静默服从散文。产品不被散文覆盖的机械承载
+是这一句，不是「指望外层永远记得不复述」。
+
 ### 5. 写回状态
 
 更新队列文件：已完成 / 在飞（含 worktree 路径和派发时刻）/ 待执行 / 计量表 / 本 tick 做了什么。
@@ -562,7 +579,9 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 ## 每个 tick 必报
 
 - 本 tick 合并了什么、派发了什么
-- 在飞任务及其已运行时长
+- 在飞任务及其已运行时长——**「在飞」按 AC7 拆两种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）
+  vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）；核实并发读原始字段，不用 START
+  事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
 - 遥测吞吐：`tasksPerHour`（= `--task-end` 闭合任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/
