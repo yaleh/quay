@@ -4354,6 +4354,28 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **派发 2**（disjoint）：adaptive-concurrency-cap-tied-to-resource-gate + DIR-119（directive）。self-touch 已补。
 - **在飞 2/3**。套件 green。
 
+### tick 2026-08-05T15:3xZ（内层：DIR-119 状态通过 + impasse 裁定请求）
+
+- **DIR-119 落地**（merge `3ae4a21d`，task-file-only）：agent 诚实发现 **DIR-119 执行侧陷入退役僵局**——
+  SELECT 侧（DIR-119-A）**真 live**（67/67 + 真实 select-preflight 合成 `portfolio.selected` 26-task composite
+  对 50 rejected）；但执行侧（DIR-119-B/C）目标文件被 ADR-022 `gap-retire-the-prepare-execute-pipeline-cluster`
+  （commit `95033927`，2026-08-03）**物理删除**；DIR-119-D2/D3/D4 外层 2026-08-04 明令 stay needs-human。
+  重建 execute-milestone.js/composite-*.ts 违背 ADR-022 与外层裁定 ⇒ **不建**。AC1/AC5/AC6 勾（有证据），
+  AC2/AC3/AC4/AC7 + DoD 诚实未勾。
+- **⚠ 需外层裁定**：DIR-119 执行架构已退役——**重新映射到两层循环**，还是**裁定 directive superseded 关闭**？
+  父任务在裁定前保持 NOT-done。scoped 37/37。
+- **在飞 1/3**：adaptive-concurrency。套件 green。
+
+### tick 2026-08-05T16:0xZ（内层：adaptive-concurrency 落地）
+
+- **adaptive-concurrency 落地**（merge `4ecdcb8d`）：`cap-from-gate.ts` 自适应派发上限——读
+  `resource-gate.sh` 报告里 cpu `some avg300`（5 分钟窗，单一来源；不查 avg10）→ 按配置 band
+  （go/wait/extreme_wait）得 cap；**滞回**（2 连续同向采样才切 band，单采样不翻转）；**fail-closed**
+  （不可测 avg300 → EXTREME cap 1）。替换固定 cap=3，接 ready-pool floor + 步骤 4 派发上限。
+  实跑：live host avg300=23.42 → cap 5（GO）；模拟 archguard 负载 → 滞回保持后降到 WAIT cap 2；
+  不可测 → cap 1。scoped 35/35。**8 AC 全勾**；DoD（live 派发 ≥3 / archguard 高负载实跑）留外层。
+- **在飞 0/3**。套件 green。
+
 ### tick 2026-08-05T14:2xZ（外层，AC12b 阻塞 2/4 落地）
 
 - **ghost-drive（阻塞 #1）已 merge**（ba3a4e87）：fresh-session detection（transcript-delivery-check --is-fresh）跳过清屏，非 fresh 保留 NBSP 路径，real fresh-session e2e rc=0。welcome 屏修复完成。
@@ -4400,3 +4422,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **升级通道缺失第二种形态（动态漂移）**：源码能同步（git pull），构建产物不能自动跟随。verify 只查存在不查新鲜度。ensure_vendor_runtime 只在 dist 缺失时跑，不在陈旧时跑。
 - **建任务** gap-upgrade-channel-cant-sync-build-artifacts-dist-stale（陈旧检测：src mtime > dist mtime ⇒ 重建/fail-closed + verify 新鲜度检查）。
 - **AC10 边界**：本轮发现由 tick 强制问句引发（pre-friction 但触发源是按流程执行非被伤害）——管理者裁不计数（边缘案例宁可不计）。
+
+### tick 2026-08-05T15:4xZ（外层，user-scope 陈旧 + 建议→AC 传导失效）
+
+- **archguard ADR-007 三连发（过程信号）**：TASK-64/65/66 每加 MCP tool 都缺 query.ts flag，scoped 全绿 AC 全勾但漏 check-adr。archguard 明写「前两次提示『AC 应加 check-adr 0 violations』未被采纳，第三次才强制」。**「建议→AC」链路传导失效**（同族「判据存在无人调用」）——quay 侧需关注同型（反复提示但没进 AC）。
+- **user-scope 路径正面发现 + 新问题**：~/.local/share/quay-plugin/ 自带 vendor dist（1.3MB/1.1MB，node 直接跑返回 0.3.13）——**绕过 git clone 路径的全部构建问题**（产品主推荐安装路径通）。但 dist mtime 06:01（陈旧，dist-runtime 15:11 修复不在里面，readFileSync 21 vs A机 20）——**安装物陈旧无新鲜度判据**，与 git clone 路径陈旧同根（两条都指向安装物无新鲜度判据）。
+- **流程缺 session-topology**：cold-start 前提第 3 条「inner 会话可达」不创建 inner，session-topology skill 补这个洞，但人流程描述没这步。
