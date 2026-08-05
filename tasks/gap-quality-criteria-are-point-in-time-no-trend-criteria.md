@@ -13,6 +13,13 @@ extra:
 
 ## Proposal
 
+> **生成器标注（AC4，`gap-axis-generator-question-what-range-every-standing-criterion`）**：本条是轴
+> 生成器在**时间轴**上的一个投影。生成器问句：「『绿了吗 / 契约合规吗』量化的是哪一个范围？」⇒
+> 眼前这一次（点状，无窗口、无趋势）⇒ **时间轴未打开**。本任务即该未打开轴的一个实例，与
+> `gap-quantified-stop-conditions-have-no-scope`（作用域轴投影）同属一个生成器——两投影**交叉标注、不
+> 合并**；系统化发现由生成器负责（`plugin/scripts/axis-generator.ts --criteria`），本任务不再一条条捡
+> 实例。
+
 `SYNTHESIS-four-gaps-2026-08-05.md` 缺口 3：**多维度质量——只覆盖了「正确性」，没覆盖「趋势」**。
 
 **已有的质量维度**（都在工作，不是问题）：正确性（2298 测试）、契约合规（7 个静态检查 + mutation

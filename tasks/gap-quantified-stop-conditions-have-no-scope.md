@@ -15,6 +15,13 @@ extra:
 
 ## Proposal
 
+> **生成器标注（AC4，`gap-axis-generator-question-what-range-every-standing-criterion`）**：本条是轴
+> 生成器在**作用域轴**上的一个投影。生成器问句：「『needs-human 积压 ≥ 3』量化的是哪一个范围？」
+> ⇒ 无命名集合、无窗口（全局一刀切）⇒ **作用域轴未打开**。本任务即该未打开轴的一个实例，与
+> `gap-quality-criteria-are-point-in-time-no-trend-criteria`（时间轴投影）同属一个生成器——两投影
+> **交叉标注、不合并**；系统化发现由生成器负责（`plugin/scripts/axis-generator.ts --criteria`），本
+> 任务不再一条条捡实例。
+
 2026-08-03 内层停止派发，理由是 `needs-human 积压 ≥ 3`。实际情况：那 7 个任务全部是历史遗留
 （最后改动 07-29 至 08-02 05:54，**全部早于窗口起点 ≥12 小时**），窗口内新增为 **0**。
 
