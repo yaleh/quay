@@ -16,7 +16,7 @@ title: "dispatch re-evaluated ONLY at inner's own tick boundary, not at slot
   notification already exists in the two-layer protocol), not tick-polling;
   investigate whether the task-notification turn currently re-runs the dispatch
   step"
-status: todo
+status: ready
 labels:
   - gap
   - defect
