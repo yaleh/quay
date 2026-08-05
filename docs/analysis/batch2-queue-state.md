@@ -3326,3 +3326,11 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （误读 dispatch-review 的「todo」字样，实为 frontmatter ready——3 条全 ready，已核）。
 - **池 3**（deficit 0）全可派；suite-state green（round 2）；无停止条件、无 BLOCKED；loop-driver LIVE。
 - 下批即本轮已立案的战略/机制任务（池 floor+disjointness / red-window 执行者 / session-idle 融合）。
+
+> **05:07Z 增补（管理者更正判据，人指正框架）**：撤销「套件耗时 ≤ 落地间隔」判据（一次套件覆盖多合并 ⇒
+> RED 分诊候选数增长）——**不按它立案**。多任务对一次 suite 本来是对的（ROUND 2 分诊 b37b7750 三根因全
+> 是直接归因 [触摸集给归因能力，N:1 可行，cap 6 也不破坏]，非二分）。正确约束 = **爆炸半径**（乐观派发
+> 下 inner 在套件 15 分钟里持续合并，若第 15 分钟才发现红则都建在红树上）——**已被早期 RED 缓解**（实测
+> 7.5 分钟报首 failure）。⇒ **该监测的趋势判据 = 早期 RED 检测延迟**（首个真实失败 → state 转 red），非
+> 耗时/间隔比。当前数据：suite 15.0 分钟（2347 测试，+22% vs 12.3）、落地速率 3.00/小时。已更新
+> `gap-quality-criteria-are-point-in-time-no-trend-criteria`（Proposal 加第二实例 + AC3b）。
