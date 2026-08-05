@@ -3123,3 +3123,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   机制仍推荐 = 记录在案）。
 - **在飞**：suite(a) agent（3m，读 test.sh run_static_checks 实现红窗乐观规则）；无停止条件、无 BLOCKED；
   loop-driver LIVE。
+
+### tick 2026-08-05T03:42Z（外层，`no-action`：套件 (a) 块落地 + inner 无等待推进 (c)）
+
+- **套件 (a) 块落地**（4d08c6db/19445386/747e5e04/3ddadb65）：`full-suite-runner.ts`（后台跑 + 写
+  `.quay/full-suite-state.json` + 早期 RED）+ inner 读 state 零全量自跑（grep 证明）+ 红窗乐观/暂缓 +
+  阈值规则（≥3min outer / <3min inner）；capability-catalog 90/90 声明；8/8 AC，landed-not-flipped
+  待外层 verification-round。
+- **inner 无等待推进实证**：fan-in (a) 后直接派 (c)（3ddadb65），未等外层 verification-round——
+  **红窗乐观行为已活**（closure-sync AC5「inner 不因记账停顿」的实跑证据在下轮正式捕获）。
+- **三块消除批次进度**：a 落地 + b（closure-sync）落地 + **c 在飞**（closure-grant 11m，代理自勾 AC +
+  贴证据）；scoped (③) 门控 c 后。
+- **池 2**（deficit 1）：full-suite 误判 ready（landed-not-flipped）+ session-idle；机制仍推荐
+  prepare-milestone（no-promote 裁定，AC8 过滤未接池机制，记录）。
+- 无停止条件、无 BLOCKED；1 agent（c 块）token 上升；loop-driver LIVE。下轮 verification-round 用
+  full-suite-runner（后台）+ 捕获 AC6(i)/AC5 实跑证据。
