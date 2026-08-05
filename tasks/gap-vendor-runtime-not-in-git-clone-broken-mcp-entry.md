@@ -44,10 +44,26 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: quay-init 遇 vendor 运行时缺失 ⇒ fail-closed（报错退出非 0，不报 complete；负控制——当前 WARN 照报成功）
-- [ ] AC2: 形态②（安装自动构建）落地——fresh-clone + quay-init（含 npm install + sync-vendor）⇒ MCP 入口指向的运行时存在
-- [ ] AC3: verify 增加运行时存在性检查（不只检查铺设集，检查被引用文件确实存在）
-- [ ] AC4: 与 AC12b（gap-quay-has-never-self-hosted）交叉标注（本缺陷是 AC12b 的第二硬阻塞）
+- [x] AC1: quay-init 遇 vendor 运行时缺失 ⇒ fail-closed（报错退出非 0，不报 complete；负控制——当前 WARN 照报成功）
+      —— `plugin/scripts/quay-init.sh` 新增 `ensure_vendor_runtime`（auto-build via sync-vendor.sh 失败后 `exit 2`，
+      no `quay-init complete`）。实测（AC1 负控制，plugin 副本删两 bundle + stub sync-vendor 失败）：
+      `EXIT=2`，stdout 无 `quay-init complete`，stderr 点名 `vendor/quay/dist/quay.js` + `vendor/quay-native/dist/quay-native.js`
+      与 `FAILS CLOSED`。测试 `quay-init-loop.test.mjs`「AC1 — …FAILS CLOSED…」绿。
+- [x] AC2: 形态②（安装自动构建）落地——fresh-clone + quay-init（含 npm install + sync-vendor）⇒ MCP 入口指向的运行时存在
+      —— `ensure_vendor_runtime` 在 bundle 缺失时调用插件自带 `sync-vendor.sh`（无参全构建），成功后继续 lay-down。
+      实测（stub sync-vendor 写出 bundle）：`auto-built vendor runtime via sync-vendor.sh (AC2)` 打到 stderr，
+      `ws/vendor/quay/dist/quay.js` + `ws/vendor/quay-native/dist/quay-native.js` 铺进目标，
+      config `mcp_entry: ["node", "<ws>/vendor/quay-native/dist/quay-native.js", "mcp"]` 指向存在文件。
+      测试「AC2 — …AUTO-BUILDS and lays the runtime…」绿。真实路径（fresh-clone + npm install → postinstall→sync-vendor）
+      由 DoD 的 B 机验证场景覆盖（本机 worktree 无 esbuild，auto-build 如实 fail-closed——即 AC1 场景）。
+- [x] AC3: verify 增加运行时存在性检查（不只检查铺设集，检查被引用文件确实存在）
+      —— `plugin/scripts/quay-init.sh` 新增 `verify_provider_runtime_existence`，读 `.quay/config.yml` 的
+      provider `mcp_entry[1]` 并断言该文件在目标中存在；与 `verify_referenced_landed` 一起在每次 `--loop` 末尾执行。
+      测试正方向（lay-down 后 mcp_entry 目标存在 ⇒ `verify-provider-runtime-existence: OK`）与负方向
+      （pre-existing config 的 mcp_entry 指向 `$ws/nonexistent/runtime.js` ⇒ `referenced-runtime-missing` + exit 非 0）均绿。
+- [x] AC4: 与 AC12b（gap-quay-has-never-self-hosted）交叉标注（本缺陷是 AC12b 的第二硬阻塞）
+      —— `tasks/gap-quay-has-never-self-hosted-its-own-cold-start.md` Proposal 顶部新增
+      「**AC12b hard blockers (2026-08-05, manager-directed)**」两段，明确本任务是 blocker #2（+ welcome-screen 为 #1）。
 
 ## Definition of Done
 
@@ -72,3 +88,86 @@ invariant fail_closed_on_missing_vendor = 1（vendor 缺失 ⇒ quay-init 报错
 invoke    `grep -n 'vendor\|dist\|WARN\|fail' plugin/scripts/quay-init.sh`
 control   当前形态（vendor 缺失）⇒ WARN 照报成功（AC1 负控制）；修后 ⇒ fail-closed 或运行时存在
 resume    fail-closed 与自动构建分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T14:05:00Z
+changed: 管理者（外层）2026-08-05 裁定 AC12b 四个硬阻塞中第 2 个，直接派发内层执行。
+  选定机制=任务体 Chosen-mechanism ①②③：fail-closed + 安装自动构建（sync-vendor）+ verify 存在性检查。
+  实现：`quay-init.sh` 新增 `ensure_vendor_runtime`（AC1/AC2）+ `verify_provider_runtime_existence`（AC3），
+  AC4 交叉标注写进 `gap-quay-has-never-self-hosted-its-own-cold-start.md`；测试三增一改。
+  未动 sync-vendor.sh 本身（dist-runtime 任务的 Touches）。
+
+## 完成记录（2026-08-05，fast mode, worktree task/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry）
+
+**根因（任务体已证）**：`.gitignore` 第 4 行 `dist/`（M172 注释）把 `plugin/vendor/quay/dist/quay.js` ignore，
+fresh clone 的 plugin 源没有 built bundle，而 quay-init 旧行为只打两条 WARN 照报 complete——mcp_entry 指向不存在的文件，
+挡整个 Provider ABI/MCP（AC12b 硬阻塞 #2），且骗过两条 verify（它们只查铺设集，不查被引用文件存在性）。
+
+**机制（AC1/AC2/AC3）**：
+1. `ensure_vendor_runtime()`（quay-init.sh 新函数）——bundle 缺失 ⇒ 调插件自带 `sync-vendor.sh` 自动构建（路径二）；
+   构建仍无法产出 ⇒ **fail-closed**（`exit 2`，无 `quay-init complete`，点名缺失 bundle + 修复法）。DRY_RUN 只打印 would-ensure。
+2. lay-down 块改为 `ensure_vendor_runtime` 返回后无条件 `copy_one` 三件套（Core bundle + native bundle + provider.yml），
+   删除旧 WARN 分支。
+3. `verify_provider_runtime_existence()`（quay-init.sh 新函数）——读 `.quay/config.yml` provider `mcp_entry[1]`，
+   断言该文件在目标中确实存在（referenced-not-landed 补集），随 `verify_referenced_landed` 在每次 `--loop` 末尾执行。
+
+**scoped 测试**：`bash scripts/test.sh --for-task gap-vendor-runtime-not-in-git-clone-broken-mcp-entry --allow-thin`
+→ 选中 `plugin/test/quay-init-loop.test.mjs`；AC1/AC2/AC3 新测试 + 既有 AC7b 测试全绿，scoped static 全过。
+
+**AC1 fail-closed 负控制实跑**（plugin 副本删两 bundle + stub sync-vendor 失败，quay-init --loop）：
+```
+EXIT=2
+stderr: ERROR: plugin source has no built vendor runtime and the auto-build did not produce one (gap-vendor-runtime-not-in-git-clone-broken-mcp-entry AC1).
+        The provider mcp_entry would reference a nonexistent runtime — the install FAILS CLOSED instead of shipping a broken MCP entry.
+        Missing bundles:
+          - plugin/vendor/quay/dist/quay.js
+          - plugin/vendor/quay-native/dist/quay-native.js
+stdout: 无 `quay-init complete`
+```
+真实 sync-vendor 也验证（本 worktree 无 esbuild）——auto-build 如实失败 ⇒ 同样 fail-closed，报错末尾附 sync-vendor 输出。
+
+**AC2 auto-build 实跑**（stub sync-vendor 写出 bundle）：
+```
+stderr: vendor runtime missing from plugin source (gitignored dist/ — a fresh clone has no built bundles). Attempting auto-build via sync-vendor.sh (AC2, path 2) ...
+        auto-built vendor runtime via sync-vendor.sh (AC2)
+ws/vendor/quay/dist/quay.js + ws/vendor/quay-native/dist/quay-native.js 铺进目标
+config mcp_entry: ["node", "<ws>/vendor/quay-native/dist/quay-native.js", "mcp"] 指向存在文件
+```
+
+**fresh-clone 路径二端到端实跑**（2026-08-05，本机模拟 B 机路径二：`git clone` 本分支到 /var/tmp → 无 dist → 安装步 →
+`quay-init --loop` → MCP 入口指向存在运行时）：
+```
+$ git clone --branch task/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry ... /var/tmp/fresh-clone-vr
+$ ls plugin/vendor/quay/dist/  →  No such file or directory        # 复现缺陷：fresh clone 无运行时
+$ git ls-files plugin/vendor/  →  plugin/vendor/quay-native/provider.yml
+                                  plugin/vendor/quay/package.json   # 仅 2 个跟踪文件，运行时本体不入库
+$ bash plugin/scripts/sync-vendor.sh   # 等价 npm install postinstall
+[sync-vendor] done. The vendored dist/quay.js ...
+$ ls plugin/vendor/quay/dist/quay.js plugin/vendor/quay-native/dist/quay-native.js   # 现在存在
+$ bash plugin/scripts/quay-init.sh --loop --root <target> ...
+EXIT=0；两处 WARN 均消失（grep -c WARN = 0）
+verify-installed-executables: OK
+verify-referenced-landed: OK
+verify-provider-runtime-existence: OK (<target>/vendor/quay-native/dist/quay-native.js exists)
+config mcp_entry: ["node", "<target>/vendor/quay-native/dist/quay-native.js", "mcp"]   # 指向存在文件
+$ node <target>/vendor/quay-native/dist/quay-native.js mcp
+quay-native mcp: serving tasks from <target>/tasks   # Provider ABI 可用
+```
+注：`node vendor/quay/dist/quay.js --version` 的 ENOENT（version.ts 读外部 package.json）属
+**另一任务** `gap-dist-runtime-not-self-contained-reads-external-package-json`（AC12b 阻塞②延伸）的缺陷域，
+本任务（运行时存在性 + fail-closed + auto-build）已闭环。
+
+**invoke 证据**（`grep -n 'vendor\|dist\|WARN\|fail' plugin/scripts/quay-init.sh`）：
+```
+588:ensure_vendor_runtime() {
+590:  [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] || missing=1
+591:  [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ] || missing=1
+599:  echo "  vendor runtime missing from plugin source (gitignored dist/ — a fresh clone has no built bundles). Attempting auto-build via sync-vendor.sh (AC2, path 2) ..." >&2
+602:  if [ -f "$PLUGIN_ROOT/scripts/sync-vendor.sh" ] && bash "$PLUGIN_ROOT/scripts/sync-vendor.sh" >"$vlog" 2>&1; then
+605:      echo "  auto-built vendor runtime via sync-vendor.sh (AC2)" >&2
+609:  echo "ERROR: plugin source has no built vendor runtime and the auto-build did not produce one (gap-vendor-runtime-not-in-git-clone-broken-mcp-entry AC1)." >&2
+626:# verify_provider_runtime_existence <workspace-root> — gap-vendor-runtime-not-in-git-clone-broken-
+867:  # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry
+```

@@ -25,6 +25,19 @@ prose): quay should be able to start *itself* using the same `quay:cold-start` s
 other projects, and that skill's determinism should be as formal as possible (AC clauses, not
 prose).
 
+**AC12b hard blockers (2026-08-05, manager-directed, cross-annotated from
+[[gap-vendor-runtime-not-in-git-clone-broken-mcp-entry]] AC4 and
+[[gap-send-keys-reliable-welcome-screen-ghost-drive-fails]] AC12b)**: this compound's cold-start
+proof is blocked by two independent product hard-blockers, both dispatched ahead of it (status
+`ready`, the ONLY blockers to the product metric):
+1. `gap-send-keys-reliable-welcome-screen-ghost-drive-fails` — AC12b blocker #1 (blocks
+   cold-start INNER-DRIVEN: fresh-session ghost text defeats the drive).
+2. `gap-vendor-runtime-not-in-git-clone-broken-mcp-entry` — AC12b blocker #2 (blocks the WHOLE
+   Provider ABI/MCP on a fresh clone: the gitignored vendored runtime is absent, so quay-init
+   used to WARN-and-report-complete with an mcp_entry pointing at a nonexistent file — the task
+   store is unreadable. This task's AC4 cross-annotates that blocker; the fix is fail-closed +
+   auto-build-at-install in quay-init.sh).
+
 **Reality check already done** (not assumed): `quay:cold-start`'s existing AC8c six-key checklist
 (`MONITORS-MOUNTED` / `MONITORS-DELIVERING` / `CRON-CREATED` / `INNER-DRIVEN` /
 `TELEMETRY-RECORD` / `FIRST-TASK`) is already solid — precise definitions, required evidence,
