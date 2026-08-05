@@ -1,0 +1,270 @@
+// @test-group governance
+// slot-refill.test.mjs — the event-driven dispatch ("slot-refill") decision helper
+// (tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release). Dispatch was
+// evaluated ONLY at the inner loop's tick boundary; a completed subagent's freed slot was not
+// backfilled until the next tick (measured 39/30/18/33/50-min gaps with a healthy pool). This test
+// pins the PRODUCT mechanism for the event-driven path: computing "is a slot free + is there a
+// dispatchable candidate" at a COMPLETION event.
+//
+// AC1 slots_free = max(0, cap − in_flight) — the caller passes the running set explicitly (AC6:
+//   telemetry brackets ≠ subagents, never read from telemetry) · AC2 should_refill is the
+//   event-driven go/no-go, based on the recommended set (step-4 checks applied) · AC3 recommended is
+//   capped at slots_free and production-disjoint (assembleBatch) · AC4 negative control: no
+//   dispatchable candidate ⇒ should_refill=false; the helper never writes/dispatches (pure) ·
+//   AC5 cap semantics: in-flight ≥ cap ⇒ should_refill=false; cap is an input, never hardcoded ·
+//   AC7 idempotent: same inputs ⇒ identical output · AC8 node:test + @test-group governance
+//
+// Run: scripts/test.sh plugin/test/slot-refill.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+
+import {
+  analyzeSlotRefill,
+  computeSlotsFree,
+} from "../scripts/slot-refill.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── fixture helpers ───────────────────────────────────────────────────────────────────────────────
+
+function makeWorkspace(tag) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `slot-refill-${tag}-`));
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "code"), { recursive: true });
+  return dir;
+}
+
+function writeTask(root, id, { status = "todo", labels = [], parent = null, body }) {
+  const fm = [
+    "---",
+    `id: ${id}`,
+    `title: fixture ${id}`,
+    `status: ${status}`,
+    "labels:",
+    ...labels.map((l) => `  - ${l}`),
+    `parent: ${parent}`,
+    "extra:",
+    "  schema: v1",
+    "---",
+  ].join("\n");
+  fs.writeFileSync(path.join(root, "tasks", `${id}.md`), `${fm}\n\n${body}`);
+}
+
+// A dispatchable ready task: `(new)` touches on ABSENT files ⇒ stays in the ready pool (not
+// not-yet-flipped: the (new) file does not exist on disk) AND passes the touches-resolve gate
+// ((new) entries are not must-exist, so majority-missing is never fired).
+function dispatchableBody(touches, extra = "") {
+  return [
+    "**type:** execution",
+    "## Proposal",
+    "A real proposal paragraph that is definitely more than forty non-whitespace chars.",
+    "## Contract",
+    "measure   slot = `node plugin/scripts/slot-refill.ts` stdout 的 slots_free 字段",
+    "band      slot = ≥0",
+    "invoke    `node plugin/scripts/slot-refill.ts`",
+    "control   in-flight≥cap ⇒ should_refill false",
+    "resume    分步提交",
+    "## Touches",
+    ...touches,
+    "## Acceptance Criteria",
+    "- [ ] an AC item that is long enough",
+    "## Definition of Done",
+    "standard DoD — the five clauses; meta-enforcer fixture-pinned.",
+    extra,
+  ].join("\n");
+}
+
+function inFlightTask(id, touches) {
+  return { id, body: dispatchableBody(touches) };
+}
+
+// ── AC1: slots_free arithmetic ─────────────────────────────────────────────────────────────────────
+
+test("computeSlotsFree = max(0, cap − in_flight), never negative (AC1)", () => {
+  assert.equal(computeSlotsFree(3, 0), 3);
+  assert.equal(computeSlotsFree(3, 1), 2);
+  assert.equal(computeSlotsFree(3, 2), 1);
+  assert.equal(computeSlotsFree(3, 3), 0);
+  assert.equal(computeSlotsFree(3, 5), 0, "never negative under overload");
+  assert.equal(computeSlotsFree(1, 0), 1);
+});
+
+// ── AC2/AC3: positive — free slot + dispatchable candidate ⇒ should_refill, capped recommended ──────
+
+test("should_refill=true with a free slot and a dispatchable candidate (AC2/AC3)", (t) => {
+  const root = makeWorkspace("pos");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.slots_free, 3);
+  assert.equal(r.pool, 2);
+  assert.equal(r.should_refill, true);
+  assert.equal(r.no_refill_reason, null);
+  assert.equal(r.recommended.length, 2, "both disjoint candidates recommended (capped at slots_free=3)");
+  assert.ok(r.recommended.includes("gap-a"));
+  assert.ok(r.recommended.includes("gap-b"));
+});
+
+test("recommended is capped at slots_free (AC3)", (t) => {
+  const root = makeWorkspace("cap-rec");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const id of ["gap-r1", "gap-r2", "gap-r3", "gap-r4"]) {
+    writeTask(root, id, { status: "ready", labels: ["gap"], body: dispatchableBody([`- code/${id}.ts (new)`]) });
+  }
+  // Only 1 slot free (cap 3, 2 in-flight).
+  const inFlight = [inFlightTask("gap-in1", ["- code/in1.ts (new)"]), inFlightTask("gap-in2", ["- code/in2.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.equal(r.slots_free, 1);
+  assert.equal(r.recommended.length, 1, "recommended never exceeds slots_free");
+});
+
+// ── AC5: the cap bound — in-flight ≥ cap ⇒ no refill ───────────────────────────────────────────────
+
+test("in-flight ≥ cap ⇒ should_refill=false, no_refill_reason names the bound (AC5)", (t) => {
+  const root = makeWorkspace("cap-bound");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  const inFlight = [
+    inFlightTask("gap-f1", ["- code/f1.ts (new)"]),
+    inFlightTask("gap-f2", ["- code/f2.ts (new)"]),
+    inFlightTask("gap-f3", ["- code/f3.ts (new)"]),
+  ];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.equal(r.slots_free, 0);
+  assert.equal(r.should_refill, false);
+  assert.match(r.no_refill_reason, /no free slots/);
+  assert.deepEqual(r.recommended, []);
+});
+
+test("cap is an INPUT — a smaller cap reduces free slots (AC5 mechanism/strategy separation)", (t) => {
+  const root = makeWorkspace("cap-input");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  const r1 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  const r2 = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 1 });
+  assert.equal(r1.slots_free, 3);
+  assert.equal(r2.slots_free, 1, "a cap of 1 leaves exactly 1 free slot");
+  assert.equal(r1.should_refill, true);
+  assert.equal(r2.should_refill, true);
+});
+
+// ── AC4: negative control — no dispatchable candidate ⇒ no refill ──────────────────────────────────
+
+test("empty ready pool ⇒ should_refill=false with a named reason (AC4)", (t) => {
+  const root = makeWorkspace("neg-empty");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 0);
+  assert.equal(r.slots_free, 3);
+  assert.equal(r.should_refill, false);
+  assert.match(r.no_refill_reason, /no dispatchable candidate/);
+  assert.deepEqual(r.recommended, []);
+});
+
+test("only a majority-missing-touches candidate ⇒ should_refill=false (step-4 touches-resolve applied)", (t) => {
+  const root = makeWorkspace("neg-missing");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Touches point at ABSENT files WITHOUT the (new) tag → majority-missing → not dispatchable.
+  writeTask(root, "gap-missing", {
+    status: "ready",
+    labels: ["gap"],
+    body: dispatchableBody(["- code/absent-1.ts", "- code/absent-2.ts"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 1, "the candidate is in the ready pool…");
+  assert.equal(r.should_refill, false, "…but fails the step-4 touches-resolve check ⇒ no refill");
+  assert.deepEqual(r.recommended, []);
+});
+
+test("ready candidate whose parent is not done ⇒ not recommended (deps-ready filter)", (t) => {
+  const root = makeWorkspace("neg-deps");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-orphan", { status: "todo", labels: ["gap"], body: dispatchableBody(["- code/orphan.ts (new)"]) });
+  writeTask(root, "gap-child", {
+    status: "ready",
+    labels: ["gap"],
+    parent: "gap-ghost-parent", // parent file missing ⇒ fail-closed, deps not ready
+    body: dispatchableBody(["- code/child.ts (new)"]),
+  });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.pool, 1, "gap-child is ready and in the pool");
+  assert.deepEqual(r.recommended, [], "undone-parent ready candidate is not dispatchable");
+  assert.equal(r.should_refill, false);
+});
+
+// ── AC3: recommended is production-disjoint (no two colliding candidates) ───────────────────────────
+
+test("recommended never contains two colliding candidates (assembleBatch disjointness)", (t) => {
+  const root = makeWorkspace("disjoint");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-shared-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  writeTask(root, "gap-shared-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/shared.ts (new)"]) });
+  writeTask(root, "gap-other", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/other.ts (new)"]) });
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3 });
+  assert.equal(r.slots_free, 3);
+  assert.equal(r.recommended.length, 2, "one of the colliding pair + gap-other");
+  // The two colliding tasks must never BOTH be recommended.
+  const hasA = r.recommended.includes("gap-shared-a");
+  const hasB = r.recommended.includes("gap-shared-b");
+  assert.ok(!(hasA && hasB), "colliding candidates must not be recommended together");
+  assert.ok(r.recommended.includes("gap-other"));
+});
+
+test("ready candidate colliding with an in-flight task is not recommended (concurrency eligibility)", (t) => {
+  const root = makeWorkspace("inflight-collide");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  writeTask(root, "gap-blocked", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/inflight.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-in1", ["- code/inflight.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 3, inFlight });
+  assert.equal(r.slots_free, 2);
+  assert.ok(r.recommended.includes("gap-free"), "disjoint-from-in-flight candidate recommended");
+  assert.ok(!r.recommended.includes("gap-blocked"), "candidate colliding with in-flight is not recommended");
+});
+
+// ── AC7: idempotence — pure, no writes, same inputs ⇒ identical output ─────────────────────────────
+
+test("analyzeSlotRefill is a pure reader: same inputs ⇒ deep-equal output, no store mutation (AC7)", (t) => {
+  const root = makeWorkspace("idem");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  const tasksDir = path.join(root, "tasks");
+  const before = fs.readFileSync(path.join(tasksDir, "gap-a.md"), "utf8");
+  const r1 = analyzeSlotRefill({ tasksDir, root, cap: 3 });
+  const r2 = analyzeSlotRefill({ tasksDir, root, cap: 3 });
+  assert.deepEqual(r2, r1, "repeated evaluation with the same state is byte-identical");
+  const after = fs.readFileSync(path.join(tasksDir, "gap-a.md"), "utf8");
+  assert.equal(after, before, "the helper must not mutate the store");
+});
+
+// ── CLI smoke ─────────────────────────────────────────────────────────────────────────────────────
+
+test("CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (exit 0)", (t) => {
+  const root = makeWorkspace("cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/b.ts (new)"]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--cap", "3"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(typeof parsed.slots_free, "number");
+  assert.equal(typeof parsed.should_refill, "boolean");
+  assert.equal(typeof parsed.dispatchable_disjoint, "number");
+  assert.equal(parsed.slots_free, 3);
+  assert.equal(parsed.should_refill, true);
+  assert.ok(Array.isArray(parsed.recommended));
+  assert.equal(parsed.recommended.length, 2);
+});
