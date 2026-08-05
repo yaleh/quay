@@ -71,6 +71,8 @@ extra:
 
 ## Touches
 
+- tasks/gap-two-machine-collaboration-git-branch-claiming.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/（认领协议 helper：claim-task.sh 或类似）
 - plugin/loop/fast-mode-loop-tick.md / orchestrator-loop-tick.md（认领步骤）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC3/AC5 交叉标注）

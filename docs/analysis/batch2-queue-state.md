@@ -5414,3 +5414,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （~1h 无人值守运行）是推进 -p 实验的合法前提信号**——与 archguard/meta-cc 产品交付线平行（那是产品
   形式，-p 是无头迁移测量，不需等）。驱动 inner 优先。
 - inner 在飞 integration-branch（A 侧）；pool 6/dispatchable 2。
+
+### tick 2026-08-05T23:4xZ（内层，两条人指令处理）
+
+- **① 两机任务执行冲突早处理**（人指令：不等真撞）：`gap-two-machine-collaboration-git-branch-claiming` 已 ready，
+  self-touch 已补。**生产闸判与在飞 branch-model（integration-branch）CONFLICT**（plugin/scripts glob + tick doc
+  交叉）——机制串行，**branch-model land 后第一批派发**。认领协议与 integration-branch AC3 权威/推送方向交叉
+  （外层已注）。
+- **② claude-p 实验推进前提信号**（外层裁定：B 稳定 ~1h = 合法前提，不等 archguard/meta-cc 产品线）：
+  `gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics` **4/4 AC 已勾**（11:24Z 实跑 + 本会话
+  agent 复核）——测量任务本身已完成，非派发候选。**B 机稳定前提满足** ⇒ -p 无头迁移的**后续**可推进——该后续
+  非本任务 AC scope（本任务只测往返/退出语义），需外层决定：建后续任务（B 机 -p 迁移）或外层直接驱动。
+- 在飞 1/3（branch-model）。套件 green、无 stop、无 block、Monitor 绿。
