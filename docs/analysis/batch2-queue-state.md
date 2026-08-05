@@ -4216,3 +4216,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **AC12b 与既有任务重合**：gap-quay-has-never-self-hosted-its-own-cold-start（todo，capstone）的 AC2 正是 AC12b——「six-key checklist on quay own repo，无 human-in-the-loop」。AC12b 当前 0 就是这个 capstone 没跑。**不新开任务**。
 - **AC12b 前置三阻塞（修完再跑 capstone）**：(a) welcome-screen drive（已建任务）；(b) suite-state-trigger 每项目实例；(c) transcript 定位。
+
+### tick 2026-08-05T12:5xZ（外层，quay-init 从不 commit 立案）
+
+- **quay-init 从不 commit（archguard 12:36 报告 + 外层独立验证）**：quay-init.sh git add/commit 0 次 ⇒ consumer 机制活在未提交工作树，committed 态自洽纯属运气。archguard 已自裁（d9dbd75 地基）；meta-cc 46 处未提交（22 在 plugin/scripts）同型。建任务 gap-quay-init-never-commits-broken-committed-state（自动 commit + chore(quay-init): 前缀 + 冲突检测）。
+- **交付契约合成**：铺设 → 版本标记 → 提交 → 可升级（与 delivery-surface 同根）。
+- inner resource-aware agent 在飞（31m，AC boxes 更新中）。
