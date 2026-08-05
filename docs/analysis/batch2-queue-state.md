@@ -4967,3 +4967,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - `fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1785970210919-db661c`
   - `fm-gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency-1785970211047-eol2m5`
 - 在飞 3/5。停止条件无、外层套件 running、Monitor 三判据绿、无 block。master 在 `d8f6a51c`。
+
+### tick 2026-08-05T23:1xZ（内层，split-batch fan-in → suite RED 暂缓）
+
+- **split-batch-vocab agent 完成**（`b67c49f3`，rebase 于 db373e20）：doc-only 词汇拆分（inner/outer tick 模板去门控 batch 措辞 + `verification-round-N` 规范语句 + 历史名标注不重命名）；新增 `plugin/test/batch-vocabulary-check.test.mjs`（`// @test-group governance`，AC6，8/8 pass）；AC1–AC6 已勾 + 证据逐字贴；DoD 不勾。`--static-checks` PASS（12/12 + contract/drive）。**合并暂缓**——外层 suite-state `red`（reason: failed，22:58 终，外层已根因 stale config.yml 修复、重跑推迟到内层 agent 落定）⇒ 按步骤 3 红树不 fan-in。分支待 re-green 后合并。
+- 在飞 2/3（productize / spawn-count 仍工作）。停止条件命中 **suite-red**（暂缓 fan-in，无新派发）。Monitor 三判据绿。无 .halt、无 block（suite-red 是外层自己管理的瞬态，state 文件即协调信号，不写 inner-blocked）。
