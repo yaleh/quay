@@ -4199,6 +4199,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **portability 落地**（merge `70c30165`）：`docs/proposals/fast-mode-cross-project-portability.md`（§1-§6，7 条实测证据）+ `plugin/test/portability-strategy-check.test.mjs`（4/4，AC4 负控制）。**判定：running-loop 可移植**（meta-cc Go + archguard TS 同跑 fast-mode loop，遥测/事件结构一致）；**两个边界诚实标注未证**：安装/采纳路径（cold-start 曾人肉口述）+ task-carrier 耦合（两仓都采纳 quay-native tasks/*.md，驱动外来仓原生任务格式未测）。
 - **在飞 2/3**：exclusion-lists + resource-aware（刚派，未完成）。套件 green。
 
+### tick 2026-08-05T12:4xZ（内层：exclusion-lists 落地 + 预存 AC1 潜失效修复）
+
+- **exclusion-lists 落地**（merge `0b42580f`）：`loop-shipping-exclusion-data.mjs`（oldPaths/patterns/排除表单一源，防扫描与检测器漂移）+ `loop-shipping-necessity-check.test.mjs`（inert 文件级排除=违规除非 retainedNote）。移除真实 inert 排除（quay-init-loop.test.mjs）、加入 legit os-anchor-install old-path 条目。
+- **fan-in 暴露 + 修复预存潜失效**：merge 后 scoped 检查 AC1/AC1b 红——**部署的 tick doc 副本（`orchestration/orchestrator-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`，外层 2026-08-05 部署）位于 old paths**，触发了「old path must NOT remain」。两处修复：① 部署副本加入排除表（target-layout 类）；② **AC1 豁免 2 个 tick-doc old path 上的真实文件（只拒 symlink shim）**——语义保持「无 compat shell」，允许合法部署副本。**40/40 EXIT=0**。
+- **在飞 1/3**：resource-aware（刚派，未完成）。套件 green。
+
 ### tick 2026-08-05T12:3xZ（外层，AC12 拆分 + archguard 污染更正）
 
 - **AC12 拆分（管理者，决定性事实 plugin/loop/ 无 manager）**：AC12a 三层（人不干预 manager，管理者驱动 outer）测【手工监工，不随包走】；AC12b 两层（人与管理者都不干预 outer，只准输一条 /quay:cold-start）测【产品本身，采用者真实体验】。AC12b 才是真实数字，当前 0 且从未干净测过。

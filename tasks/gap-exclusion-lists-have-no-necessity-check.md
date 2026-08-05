@@ -2,7 +2,7 @@
 id: gap-exclusion-lists-have-no-necessity-check
 title: AC1b's exclusion table only grows and nothing can discover an unnecessary
   entry — green is not the same as necessary
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -4,7 +4,7 @@ title: full-suite-runner laneCount default hardcoded 8 (not nproc-derived) +
   --test-concurrency splice is append-not-replace + resource-gate never called —
   ABORT#5 (=8 =8, PSI 88, WAIT-start) same crash class as ABORT#1/3/4; fix all
   three in ONE change
-status: ready
+status: done
 labels:
   - gap
   - defect

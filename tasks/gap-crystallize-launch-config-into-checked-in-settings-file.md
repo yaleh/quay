@@ -3,7 +3,7 @@ id: gap-crystallize-launch-config-into-checked-in-settings-file
 title: the correct launch command lives as an easily-mistyped shell one-liner —
   crystallize researched CLI params (--exclude-dynamic-system-prompt-sections,
   -n/--name, --settings, --bare) into a checked-in settings file + launch spec
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
