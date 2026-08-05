@@ -5329,3 +5329,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   后生产闸不再冲突，self-touch/resolve 过。**外层已接受并发更正**（b2cf2e23「correct-self：手测触摸不相交被
   生产闸推翻——lesson：永不手测，用 checkTouchesPair」）。
 - 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T22:5xZ 补充（外层，watchdog node 未解析繁殖缺陷 + B 机里程碑）
+
+- **B 机实测繁殖缺陷**（管理者）：watchdog:298 裸 `node --experimental-strip-types` 在 systemd PATH（无
+  nvm → node 18.19.1）下必然失败——驱动实际送达但核实失败 ⇒ 重复驱动。**A 机盲区**（11:40 卡更早从没到
+  这行；healthy 分支不调用）。立案 `gap-os-anchor-watchdog-node-unresolved-in-systemd-context`（显式解析
+  node / 非 strip-types / 失败告警不只日志）。
+- **B 机里程碑**：inner 首个自主提交 d8e10093（22:51:46）——**两层在 B 真跑起来了**（AC12b 测量真正开始）。
+- 与 lease-model 任务交叉（同文件，alarm + 租约一起改）。
