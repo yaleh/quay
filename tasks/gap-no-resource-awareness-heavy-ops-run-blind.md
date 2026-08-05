@@ -380,6 +380,28 @@ changed: 初稿写「4 核跑 8 = 2× 超订」，外层实测在跑套件的真
 - [ ] AC14: **回归控制**——修复后全量套件进程实参必须不再出现 `--test-concurrency=8` 而按派生 1 跑
       （ps 实证贴任务体）；显式 `--lane-count=8` 仍能覆盖（逃生口保留）。
 - [ ] AC15: 测试用 `node:test` 且带 `// @test-group engine`（沿用本任务 AC11 声明）。
+- [ ] AC16: **显式传参必须传播到 test.sh**——`full-suite-runner.ts` 的 `--lane-count N` 必须真正拼进
+      传给 test.sh 的 command（转成 `--test-concurrency=N` 或 `--lane-count N` 传递），**不能只写
+      state 字段**；ps 实证 `--test-concurrency=<传值>` 生效（ABORT #2 根因：runner.ts:91 command 静态、
+      lane-count 从不到达 test.sh，显式 1 实际跑 8）。
+
+### ABORT #2（2026-08-05 07:48Z）——显式传参也不生效（比硬编码更危险）
+
+**触发**：管理者紧急告警 + 外层核实——外层 07:42 传 `--lane-count 1` 重跑 M3 验证套件，但 ps 实证
+**实际跑的是 `--test-concurrency=8`**（9 个并发 8 进程，load 26.92/PSI 94，07:26 ABORT 状态复现）。
+
+**根因定位（问题②，比硬编码更严重）**：`full-suite-runner.ts:91`
+`const command = parseArg(argv, "--command") ?? "bash scripts/test.sh"`——`--lane-count` **只写进 state
+文件的 laneCount 字段**（第 94/97 行），**从没拼进传给 test.sh 的 command**（第 102 行 spawn 只传
+静态 command）。test.sh 收不到任何并发覆盖，走自己默认 8。⇒ **`--lane-count 1` 完全没到达 test.sh**，
+它只影响 state 字段不影响实际并发。**「对并发的控制失效，且你以为它生效了」**——这比硬编码 8 更危险，
+因为它在错误安全感下重启了一轮。
+
+**外层决定：ABORT #2**（07:48Z）——PSI 94 = 07:26 复现状态，机器今晚已崩三次，8 并发下 M3 验证套件
+必然负载敏感假红 + 有崩溃风险。state=red + reason=aborted 已标记。
+
+**连带（管理者自曝，归因完整）**：跨项目 .halt 暂停有帮助但不是修复——做决定时还不知 quay 自己套件
+跑在 8，真正主因在 quay 这边。真修复是 laneCount 链路，且现在多了「显式传参也不生效」这一条。
 
 ### Re-open Touches 增补
 
@@ -393,7 +415,7 @@ measure   runner_lane_count = `grep -n "lane-count" plugin/scripts/full-suite-ru
 band      runner_lane_count = 派生（max(1, floor(nproc/2.1))，本机 1）或取消默认让 test.sh 派生
 invariant no_hardcoded_oversubscription = 1（生产 runner 与 test.sh 同源派生，不硬编码 8）
 invoke    `ps -eo args | grep -c -- '--test-concurrency=8'`
-control   本机跑全量 ⇒ 进程实参不得再出现 concurrency=8（AC14）；显式 --lane-count=8 仍覆盖（逃生口）
+control   本机跑全量 ⇒ 进程实参不得再出现 concurrency=8（AC14）；显式 --lane-count=1 ⇒ 实跑 concurrency=1（AC16 负向——ABORT #2 根因必须消失）
 resume    laneCount 派生与过闸分两步提交，任一步完成即写盘
 
 reviewer: outer (re-open)
