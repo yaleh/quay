@@ -60,22 +60,65 @@ resume 先量出低负载基线，再定「稳定化 or 标注」的方向
 
 ## Acceptance Criteria
 
-- [ ] AC1: **低负载基线**——单套件下连跑该族 2 次全绿（`fail 0` / `cancelled 0`，实跑贴出）
-- [ ] AC2: **敏感是真实的（负控制）**——人为制造高负载（如并发放量套件）下该族**确实变红**，
+- [x] AC1: **低负载基线**——单套件下连跑该族 2 次全绿（`fail 0` / `cancelled 0`，实跑贴出）
+- [x] AC2: **敏感是真实的（负控制）**——人为制造高负载（如并发放量套件）下该族**确实变红**，
       证明「负载敏感」不是伪装的借口（实跑贴出）
-- [ ] AC3: **标注落地**——该族被标记为已知负载敏感，标记写在**第三步的跑批协议会读的地方**
+- [x] AC3: **标注落地**——该族被标记为已知负载敏感，标记写在**第三步的跑批协议会读的地方**
       （tick 文档或等价物），不是只写在任务体里（实跑贴出标记位置）
-- [ ] AC4: **第三步判据不受污染**——第三步放宽实验的判据明确排除该族的 fail（或其单独跑批），
+- [x] AC4: **第三步判据不受污染**——第三步放宽实验的判据明确排除该族的 fail（或其单独跑批），
       判定不会把「已知时序敏感被放大」误读成「并发放宽暴露了真问题」（实跑贴出判据文本）
-- [ ] AC5: 测试用 `node:test` 且带恰当的 `// @test-group`
-- [ ] AC6: 任务体记录证据：套件 #6/#7 该族失败的输出、隔离下通过的结果（证明并发敏感非逻辑错误）
+- [x] AC5: 测试用 `node:test` 且带恰当的 `// @test-group`
+- [x] AC6: 任务体记录证据：套件 #6/#7 该族失败的输出、隔离下通过的结果（证明并发敏感非逻辑错误）
 
 ## Definition of Done
 
-- [ ] AC1 与 AC2 的实跑输出都贴进任务体
+- [x] AC1 与 AC2 的实跑输出都贴进任务体
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——注意：若该族已标注，判据里
       「该族已知负载敏感」这一事实必须不影响这两次全绿的达成方式
-- [ ] 任务体记录：第三步起跑前必须处理这族（稳定化或标注），否则放宽判读失效
+      （本 dispatch 按约束只跑该族选中集，未跑全量——留给 fan-in 的全量判绿）
+- [x] 任务体记录：第三步起跑前必须处理这族（稳定化或标注），否则放宽判读失效
+
+## Evidence（实跑，2026-08-05，worktree `load-sensitive-step3`）
+
+**AC1 低负载基线（单套件，`QUAY_TEST_SKIP_STATIC_CHECKS=1 bash scripts/test.sh plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）：**
+
+运行 1：`tests 46 / pass 45 / fail 0 / cancelled 0 / skipped 1 / duration_ms ~123-125s`
+运行 2：`tests 46 / pass 45 / fail 0 / cancelled 0 / skipped 1 / duration_ms ~124-129s`
+（注释标注后重跑一次同样 `fail 0 / cancelled 0`。）`skipped 1` 是「SESSION-RESUMED then SESSION-IDLE …
+real probe session quay-0:probe is not present」——探针会话缺席的正常 skip，不是失败。
+
+**AC2 负控制（人为高负载）——该族确实变红：**
+
+负载构成：6 个 CPU burner（`while :; do :; done`）+ 2 个并发家族套件副本（≈ 第三步的「2 并发套件」），
+load1 升到 ~7-10（nproc=4）。两个家族套件运行结果：
+
+- 运行 A：`tests 46 / pass 42 / fail 3 / cancelled 0 / skipped 1 / duration_ms 220149`，三个 fail 全在
+  时序敏感测试：`noise gate — an idle transition with an OLD tick log… (29104ms)`、
+  `noise gate — an idle transition with a FRESH tick log… (29220ms)`、`AC21 … (28879ms)`
+- 运行 B：`tests 46 / pass 43 / fail 2 / cancelled 0 / skipped 1 / duration_ms 202945`，两个 fail 都在
+  `noise gate` 两条（29178ms / 29310ms）
+
+失败特征与套件 #6/#7 同款（28-29s 超时、时序敏感测试），隔离下全绿 ⇒ **负载敏感是真实的，不是伪装的借口**。
+（注：3 个家族副本并发但无 CPU burner 时仍全绿——单靠这族自身进程数不足以复现；复现需要外部 CPU 争用，
+这正是「全量套件 #6/#7 才挂、隔离才绿」的机制。）
+
+**AC3 标注位置（第三步跑批协议会读的地方）：**
+
+- `plugin/loop/fast-mode-loop-tick.md` 新增 `## 已知负载敏感族（KNOWN-LOAD-SENSITIVE）——判绿/放宽判据必须排除，不得读成真回归` 一节（在判绿三条件之后）
+- `plugin/test/session-liveness.test.mjs` 头部 `// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族")…`
+- `plugin/test/cold-start-skill.test.mjs` 头部 `// KNOWN-LOAD-SENSITIVE …`（rehearsal 测试说明）
+
+**AC4 判据文本（tick 文档原文）：**
+
+> 1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
+>    并发套件，= 负载翻倍）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
+>    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
+> 2. **这族永远单独跑批或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用…
+
+**AC5：** 两个测试文件均为 `import { test } from "node:test"` + 头部 `// @test-group governance`。
+**AC6：** 套件 #6/#7 失败详见 `orchestration/tick-log.md` 2026-08-04 05:20Z（#6/#7 各挂一条不同但同族：
+cold-start rehearsal / session-liveness AC3/AC7 / AC6/AC7 RESUMED 29.9s / M2/M4 mount NO-OP 进程计数 3）；
+本段上方 AC1 的隔离全绿即「并发敏感非逻辑错误」的证明。
 
 ## Touches
 

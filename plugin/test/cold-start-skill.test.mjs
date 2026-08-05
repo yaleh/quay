@@ -1,4 +1,9 @@
 // @test-group governance
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — the rehearsal
+// test below runs a real quay-init --loop project + a real --task-start; it passes isolated under low
+// load but may fail under concurrent-suite load (gap-load-sensitive-session-family-confounds-step-three,
+// 2026-08-04). A full-suite failure here is NOT a real regression by default: re-run this file alone
+// (low load) before concluding anything.
 // cold-start-skill.test.mjs — gap-cold-start-needs-a-human-to-dictate-eight-steps, phase 2 (AC5 +
 // merged telemetry AC + AC8c observable-consequences checklist).
 //
