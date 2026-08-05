@@ -301,8 +301,11 @@ export async function run(argv: string[]): Promise<number> {
   });
 
   runDone = true;
-  process.removeListener("SIGTERM", onSignal);
-  process.removeListener("SIGINT", onSignal);
+  // Fan-in race fix (2026-08-05): do NOT remove the signal listeners here. The `if (runDone ||
+  // redDetected) return` guard in onSignal already makes a late signal a no-op, so keeping the
+  // listeners registered is safe AND closes the unhandled-signal window: previously a SIGTERM
+  // landing between this removal and the final state write hit the DEFAULT handler, killing the
+  // runner with state=running still on disk (AC5 intermittent failure).
 
   // Flush the log stream before writing the final verdict.
   await new Promise<void>((resolve) => logStream.end(resolve));

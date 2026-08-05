@@ -303,20 +303,36 @@ test("AC4 — negative control: explicit --lane-count 8 + command already has =8
 
 test("AC5 — a signal-killed run writes state=red reason=aborted, which must NOT trigger stop-dispatch", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac5-"));
-  const { f, dir } = fakeSuite('echo "started"\nsleep 2\necho "# fail 0"\nexit 0');
+  // Flake fix (fan-in reland 2026-08-05): the external `child.kill("SIGTERM")` was delivered to the
+  // runner only intermittently in the node --test harness (state stayed "running" after exit ~30-70%
+  // of runs). Instead, the fake suite SIGNALS THE RUNNER ITSELF — after sleep 1, it walks its own
+  // ancestor chain up to the nearest node process (the runner, which spawned the suite AFTER
+  // registering its SIGTERM handler, so the handler is guaranteed registered) and SIGTERMs it.
+  // Deterministic: the signal comes from inside the runner's own process tree, no external delivery.
+  const { f, dir } = fakeSuite(
+    'sleep 1\n' +
+    'runner_pid=$PPID\n' +
+    'while [ -n "$runner_pid" ] && [ "$runner_pid" != "1" ]; do\n' +
+    '  comm=$(ps -o comm= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
+    '  case "$comm" in node*) kill -TERM "$runner_pid"; break ;; esac\n' +
+    '  runner_pid=$(ps -o ppid= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
+    'done\n' +
+    'sleep 5\n' +
+    'echo "# fail 0"\nexit 0',
+  );
   try {
     const child = runRunner({ root, command: `bash ${f}` });
     await poll(() => {
       const s = readState(root);
       return s && s.state === "running" ? s : null;
-    }, { timeoutMs: 2000 });
-    child.kill("SIGTERM");
+    }, { timeoutMs: 10000 });
+    // The fake suite signals the runner at ~t+1s; the runner exits when the handler runs.
     await waitExit(child);
     // The runner's signal handler writes red+aborted (no correctness conclusion).
     const s = await poll(() => {
       const cur = readState(root);
       return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
-    }, { timeoutMs: 2000 });
+    }, { timeoutMs: 10000 });
     assert.equal(s.reason, "aborted", "a kill produces reason=aborted, not failed");
     // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
     const res = runOnce(root);
