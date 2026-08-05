@@ -5094,3 +5094,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   检出）——AC3 排除语义正确。disjoint 2 < cap 3 是**真候选 glob-碰撞**（独立问题，非 perf 回归）：ready 11 条
   多数带 `plugin/scripts/`/`plugin/test/` glob。red-pattern/ghost-drive/leak 3 条已落地仍未排除（信号残留）。
 - 在飞 0/3。套件 running。false OVER90 待外层闭 4 括号。
+
+### tick 2026-08-05T20:5xZ（内层 cron，suite RED → 停派发）
+
+- **外层 20:0xZ 已 reconcile 闭 4 个 stale bracket**（false OVER90 bracket-lag **根愈**——不再复发）。
+- **suite red**（reason: failed，19:43→20:05 **21.8 分钟完整 2-lane 跑**，第 7 次尝试过全部 stall 点）——这是
+  完整跑出的真红。机械处理：**停止新派发**。在飞 0/3、无待并。**等外层 triage + re-green**。
+- 池 11/12、disjoint 2（真候选 glob-碰撞，独立问题）。promotion 候选 gap-prepare-milestone-no-size-aware-routing
+  待池补晋，red 下不执行。
+- Monitor 绿、无 block、无 .halt。
