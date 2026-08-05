@@ -5188,3 +5188,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **inner 新派 red-window-dispatch-stop**（shared gate-conditional RED 规则）+ l2 signal gap 注（merge msg
   无 kernel，red-pattern 类）。
 - **套件 green**（有效验证）、闸 GO、load 2.99。
+
+### tick 2026-08-05T21:4xZ（内层，red-window-stop fan-in — 真实现）
+
+- **red-window-dispatch-stop fan-in 完成（真实现）**：RED 停派条件化为**共享闸门**——
+  `shouldDispatchOnRed(state, touches)`（suite-state-trigger.ts）：shared-gate 命中 ⇒ 停、specific-test 无关 ⇒ 续、
+  交叉 ⇒ 停、unknown/legacy ⇒ fail-closed、aborted 永不阻。SUITE-RED 事件携带 failureLocation
+  （full-suite-runner failures capture）。**RED ⇒ 一律暂缓 fan-in 不变式**写入两 tick 模板。双向夹具
+  （AC4 反例的 disjoint-candidate 续派形状被机械证）。修了 double-extension regex bug。scoped 45/45。
+  worktree/branch 已清。在飞 0/3。
+- **⚠ 模板/铺出分歧注记**：改的是 `plugin/loop/` **模板**；铺出副本（orchestration/orchestrator-loop-tick.md +
+  docs/analysis/fast-mode-loop-tick.md）仍是旧红窗规则——外层维护铺出副本，需同步（quay-init re-lay 或手动，
+  注意铺出副本有本地编辑会 CONFLICT）。
+- 套件 green、无 stop、无 block、Monitor 绿。
