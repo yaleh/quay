@@ -115,3 +115,4 @@ milestones/M9[0-9][0-9][0-9][0-9][0-9]/
 # the same shape of orphan behind.
 docs/plans/M997-*.md
 milestones/M997/
+/.quay/config.yml
