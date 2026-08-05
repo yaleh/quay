@@ -99,4 +99,8 @@ changed: 外层受管理者第 5 条裁定立案（生成器问出 + 正在影�
 (2) **逃生舱判据**——我被迫手写 note = schema 不够时人发明 workaround，其位置就是缺失维度的位置；
 (3) **aborted 路由**——不按代码风险停派，恢复由 resource-gate GO/WAIT 决定；failed 照旧分诊；
 (4) **AC10 5→6**——pre-friction（无东西在疼，巧合尚未破裂）。
-status: todo——schema 缺原因轴、正在影响派发；排 ROUND 3 收尾后，高优先。
+status: todo——schema 缺原因轴、正在影响派发；**优先级提到与 laneCount 同级**（管理者 07:52Z：同一
+次事故的两半——laneCount 让机器崩、reason 让机器恢复后仍然停摆；此刻 load 5.86/资源门 GO/机器完全
+空闲而 state 仍是 ABORTED 的 red、红窗照旧停派 = 正在发生的白等）。**最小止血已由外层执行**（07:53Z
+手工把 state 改回 running + 用 --lane-count 1 重跑，下游解冻）；schema 修复仍归内层，与
+gap-no-resource-awareness AC12/AC13 一并落地。
