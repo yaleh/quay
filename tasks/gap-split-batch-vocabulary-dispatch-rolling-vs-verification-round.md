@@ -31,14 +31,17 @@ extra:
 > 剩余词汇工作是外层文档同步 + 历史名（batch2-queue-state.md / batch4a/b/c / concurrent-batch-
 > scheduler.ts）标注，以及 AC5 把「分派滚动 / 验证 verification-round」写死成规范语句。
 
-### 核实：tick 文档里 `batch` 的分布（外层 grep）
+### 核实：tick 文档里 `batch` 的分布（管理者精确重查，2026-08-05）
+
+`fast-mode-loop-tick.md` 现存 **5 处** batch，分**两类**——**不是全仓替换这个词**：
 
 | 位置 | 语义 | 处置 |
 |---|---|---|
-| `fast-mode-loop-tick.md:368`「两者都在 batch ⇒ disjoint，可同批」 | **分派并发资格**（触摸重叠检查）——可能被读成门控分批 | **改措辞**：显式「可并发/无触摸重叠，非门控分批」 |
-| `fast-mode-loop-tick.md` step 2「合并串行，全量套件批量」 | **验证/收尾攒批**（保留义） | **改名 `verification-round-N`** + 显式注记 |
-| `batch2-queue-state.md` 文件名、`batch4a/4b/4c`、`concurrent-batch-scheduler.ts` | **历史名**（机制/文件名） | **不改名**，标注历史引用 |
-| orchestrator-loop-tick.md | 队列文件名引用 + 需同步词汇 | 同步 |
+| `concurrent-batch-scheduler.ts` 路径 + 其 `--json` 输出 `{batch, deferred}` 字段（407/414/415 行） | **机件真名**（代码标识符 + 真实输出字段） | **白名单豁免**——改了会断调用和解析，不动 |
+| 272 行引用任务名 `gap-closure-sync-is-the-true-batch-boundary` | **任务 id** | **白名单豁免**——id 不能改 |
+| （fast-mode-loop-tick step 2「合并串行，全量套件批量」已随机制根删除；cold-start/SKILL.md 已 0 处） | — | 本条只剩 tick 文档要处理 |
+
+**⇒ 真正该消除的是散文里暗示「门控」语义的用法**（batch 作调度单位），不是 batch 这个词本身。
 
 **范围**：措辞与文档，**不改机制本身**；覆盖 tick 文档里所有会被 inner 读到的位置，不只是 commit
 message。
@@ -59,8 +62,11 @@ message。
 - [ ] AC2: `fast-mode-loop-tick.md` fan-in/验证节（step 2）改名 `verification-round-N`，并显式注记
       「关于验证/收尾，不是分派门控」
 - [ ] AC3: `orchestrator-loop-tick.md` 同步同一词汇拆分（派发滚动 / 验证 round）
-- [ ] AC4: **grep 证明**——tick 文档里每个 `batch` 出现分类为「分派资格（已改措辞）/ 验证收尾（已改名）/
-      历史名（标注）」，**零个可被读成分派门控的新用法**（实跑输出贴任务体）
+- [ ] AC4: **grep 证明（白名单豁免 + 负控制）**——inner 会读到的散文里每个 `batch` 出现分类为：
+      「门控语义（必须消除）/ 机件真名（concurrent-batch-scheduler.ts 路径 + {batch,deferred} 输出字段）
+      / 任务 id（gap-closure-sync-is-the-true-batch-boundary）白名单豁免」；**散文零个把 batch 用作调度
+      单位的新表述**；**负控制**——刻意在散文写一句「batch 门控」表述 ⇒ 检查必须报出（证明白名单不是
+      万能借口，实跑输出贴任务体）
 - [ ] AC5: **tick-log/commit message 词汇规范**——tick 文档加一条规范性语句：「分派是滚动的（不叫
       batch-N）；全量验证/收尾节奏叫 verification-round-N」，未来会话（含换模型后）沿用拆分词汇
 - [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若词汇检查可测试化——grep 断言

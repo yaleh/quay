@@ -3435,3 +3435,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   umbrella 隔离的小任务：AC8c 键 4 判据替换（哈希 → 可靠发送，transcript user-message = 可信送达 Fault 5）
   + AC2 grep 哈希 0 命中 + F 交叉标注。**关键路径，立即派发**（inner 空闲 + ROUND 3 套件 running =
   顺带动用乐观派发）。
+
+> **05:50Z 增补（batch 词汇任务必要区分，管理者）**：fast-mode-loop-tick.md 现存 5 处 batch 分两类——
+> ①3 处机件真名（concurrent-batch-scheduler.ts 路径 + {batch,deferred} 输出字段 407/414/415）白名单豁免
+> （改了断调用）；②2 处散文（含 272 行任务 id 引用不能改）。**真正该消除的是散文里暗示门控的用法，
+> 不是全仓替换 batch 这个词**。AC4 已改为白名单豁免 + 负控制（刻意写 batch 门控表述 ⇒ 检查必须报出）。
+> cold-start/SKILL.md 已 0 处，本条只剩 tick 文档。
