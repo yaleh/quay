@@ -14,7 +14,7 @@ title: "two-machine collaboration via git-branch claiming (measured: of the
   open; to be evaluated TOGETHER with gap-branch-model-integration-branch (integration
   model is built for exactly 'multiple sources in, stale baseline' = cross-host
   is its natural use case)"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
