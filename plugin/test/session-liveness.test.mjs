@@ -1444,3 +1444,175 @@ test("M7 (AC1) — the reuse point: session-liveness.sh calls heavy-op-token.sh'
   const mount = fs.readFileSync(MOUNT, "utf8");
   assert.match(mount, /exec bash .*session-liveness\.sh/, "the mount entry must exec session-liveness.sh (holder pid survives exec)");
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 阶段三（gap-session-idle-true-idle-via-transcript-fusion-and-debounce，2026-08-05）：
+// transcript 最后一条消息类型融合 + 候选闲去抖。AC1/AC2/AC3/AC4/AC5。
+// 核心：pane 哈希只答「屏幕变没变」，分不清真空闲与工具间隙。transcript 最后一条【消息】的
+// 类型是结构信号（已发生事实的日志，故障 5/6 结晶的结论）——assistant 带 tool_use = 回合进行中
+// （确定忙，AC5 硬上限）；assistant 纯文本 = 候选闲；user = 模型即将应答（按忙）。忙闲判据 =
+// pane_busy || transcript_busy；候选闲需连续 IDLE_DEBOUNCE_ROUNDS（=2）轮都闲才报 SESSION-IDLE
+// （AC2）。pane 哈希降级为去抖的候选闲辅助，不再单判（AC7）。
+// ═════════════════════════════════════════════════════════════════════════════
+
+// 合成 transcript 记录（阶段三）：与真实 Claude Code JSONL 顶层格式一致（实测 2026-08-05）。
+function assistantToolUseRecord(ts) {
+  return JSON.stringify({ type: "assistant",
+    message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "true" } }] },
+    timestamp: ts });
+}
+function assistantTextRecord(ts, text = "ok") {
+  return JSON.stringify({ type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text }] },
+    timestamp: ts });
+}
+function userInputRecord(ts, content = "hello") {
+  return JSON.stringify({ type: "user", message: { role: "user", content }, timestamp: ts });
+}
+
+// writeTranscript —— 覆盖写 transcript 并可选回拨 mtime（回拨 = 陈旧：不发 marker-stale、hmin≥1）。
+function writeTranscript(file, records, backdateMin = 0) {
+  fs.writeFileSync(file, records.join("\n") + "\n");
+  if (backdateMin > 0) spawnSync("touch", ["-d", `${backdateMin} minutes ago`, file], { encoding: "utf8" });
+}
+
+// waitForHeartbeats —— 等共享 events.jsonl 里出现 ≥n 条 HEARTBEAT（监视器每轮写一条，作为轮次刻度）。
+function countHeartbeats(globalDir) {
+  const f = path.join(globalDir, "events.jsonl");
+  if (!fs.existsSync(f)) return 0;
+  const content = fs.readFileSync(f, "utf8");
+  if (!content.trim()) return 0;
+  return content.split("\n").filter((l) => l.includes('"event":"HEARTBEAT"')).length;
+}
+async function waitForHeartbeats(globalDir, n, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (countHeartbeats(globalDir) >= n) return true;
+    await sleep(100);
+  }
+  return countHeartbeats(globalDir) >= n;
+}
+
+// ── AC1 单元测试：--last-message-type 接缝（确定性，不依赖 tmux）──────────────────────────
+
+test("AC1 seam — --last-message-type classifies pending-tool-use / pure-text / user-input / unknown (transcript is the structural signal, AC7)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sl-lmt-"));
+  try {
+    const pend = path.join(tmp, "pend.jsonl");
+    writeTranscript(pend, [assistantToolUseRecord(isoAgo(0.1))]);
+    const pure = path.join(tmp, "pure.jsonl");
+    writeTranscript(pure, [assistantTextRecord(isoAgo(0.1))]);
+    const user = path.join(tmp, "user.jsonl");
+    writeTranscript(user, [userInputRecord(isoAgo(0.1))]);
+    // 最后一条消息是 assistant 纯文本，但文件尾有元数据（last-prompt）——必须跳过元数据找真消息
+    const meta = path.join(tmp, "meta.jsonl");
+    writeTranscript(meta, [assistantTextRecord(isoAgo(0.2)), JSON.stringify({ type: "last-prompt", lastPrompt: "x" })]);
+    const empty = path.join(tmp, "empty.jsonl");
+    writeTranscript(empty, []);
+    const run = (f) => spawnSync("bash", [SCRIPT, "--last-message-type", f], { encoding: "utf8" }).stdout.trim();
+
+    assert.equal(run(pend), "pending-tool-use", "assistant + tool_use block = pending-tool-use (AC1 确定忙)");
+    assert.equal(run(pure), "pure-text", "assistant pure text = pure-text (AC1 候选闲)");
+    assert.equal(run(user), "user-input", "user record = user-input (按忙处理, AC5 防漏报方向)");
+    assert.equal(run(meta), "pure-text", "trailing metadata (last-prompt) must be skipped; the last MESSAGE is pure-text");
+    assert.equal(run(empty), "unknown", "empty transcript = unknown (无消息记录 → 回落到 pane 信号)");
+    assert.equal(run("/nonexistent"), "unknown", "missing transcript = unknown");
+  } finally { cleanup(tmp); }
+});
+
+// ── AC3（真·空闲被检出）：纯文本轮 + 无新工具调用 ⇒ 报 SESSION-IDLE ──────────────────────────
+// 管理者实测场景：纯文本轮次完成后 8.5 分钟无新工具调用 + pane 无忙碌标志 = 真空闲。测试用
+// transcript 控制：先挂起 tool_use（忙轮，SEEN_BUSY=1），再切成纯文本并回拨 8 分钟（真闲）。
+// 去抖（2 轮）后必须报 SESSION-IDLE——真空闲被检出，不是间隙误判。
+
+test("AC3 — a pure-text round with no new tool calls (stale transcript) reports SESSION-IDLE after the 2-round debounce (true idle detected, not a gap misjudged)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-trueidle");
+  const x = path.join(p.tmp, "session.jsonl");
+  writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // busy phase first (SEEN_BUSY=1)
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `ac3 ${p.tmp} ${p.session}`,
+      { transcripts: `ac3 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    try {
+      // busy phase: ≥2 rounds so SEEN_BUSY=1 (the debounce never fires on a never-busy session).
+      assert.ok(await waitForHeartbeats(mon.globalDir, 2, 15000), `monitor must run ≥2 busy rounds:\n${mon.output()}`);
+      // true idle: pure-text round, 8 minutes no new tool calls (the manager's measured scenario).
+      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
+      const idle = await waitForOutput(mon, /SESSION-IDLE ac3/, 20000);
+      assert.ok(idle, `AC3: a true idle (pure-text round + 8.5min no tool calls + no pane busy flag) MUST report SESSION-IDLE:\n${mon.output()}`);
+      assert.ok(/心跳 \d+ 分钟前更新/.test(mon.output()),
+        `AC3: the IDLE must carry the heartbeat staleness (true idle, not a gap):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC4（间隙不被报）：两次工具调用间短到一次轮询的纯文本不得报 SESSION-IDLE ────────────────
+// 用 HEARTBEAT 行作轮次刻度做确定性同步：忙轮（挂起 tool_use）→ 恰好一轮纯文本（间隙）→
+// 忙轮。去抖（连续 2 轮才报）必须按住这一轮；随后持续纯文本（真闲）必须报——证明间隙抑制
+// 是去抖的功劳，不是探测器坏了。
+
+test("AC4 — a pure-text blip lasting exactly ONE monitor round between two tool_use rounds does NOT report SESSION-IDLE (debounce holds); a persistent pure-text then DOES", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-gap4");
+  const x = path.join(p.tmp, "session.jsonl");
+  writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // busy: pending-tool-use, stale
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `gap4 ${p.tmp} ${p.session}`,
+      { transcripts: `gap4 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    try {
+      // phase 1: ≥2 busy rounds (SEEN_BUSY=1); HEARTBEAT lines give the round cadence.
+      assert.ok(await waitForHeartbeats(mon.globalDir, 2, 15000), `monitor must run ≥2 rounds:\n${mon.output()}`);
+      // phase 2: the GAP — exactly one round of pure-text, then back to busy before the 2nd idle round.
+      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 1); // the gap: transcript pure-text, pane static
+      assert.ok(await waitForHeartbeats(mon.globalDir, 3, 15000), `one idle round must elapse:\n${mon.output()}`);
+      writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // back to busy before the 2nd idle round
+      // phase 3: several busy rounds — a wrongly-held debounce would have fired by now.
+      assert.ok(await waitForHeartbeats(mon.globalDir, 6, 20000), `several busy rounds must elapse:\n${mon.output()}`);
+      assert.ok(!/SESSION-IDLE gap4/.test(mon.output()),
+        `AC4: a single-round pure-text gap between tool calls must NOT report SESSION-IDLE (debounce):\n${mon.output()}`);
+      // positive control: a PERSISTENT pure-text (true idle) DOES fire after the 2-round debounce.
+      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8); // hmin≈8 ≥ loopMin=1 → stdout report
+      assert.ok(await waitForOutput(mon, /SESSION-IDLE gap4/, 15000),
+        `AC4 control: a persistent true-idle MUST fire SESSION-IDLE (proves the gap suppression is the debounce, not a broken detector):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ── AC5（忙判据零漏报）：transcript 有挂起 tool_use（回合进行中）⇒ 任何情况下不得报 idle ──
+// 硬上限：pane 恰好不动（pane_idle=1）时，transcript 的 pending-tool-use 仍判忙——零漏报。
+// 随后切成纯文本（挂起 tool_use 清除）⇒ 必须报 idle——证明忙抑制来自 pending-tool-use。
+
+test("AC5 — a pending tool_use in the transcript (round in progress) NEVER reports idle, even with a static pane; pure-text then DOES (control)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-busy5");
+  const x = path.join(p.tmp, "session.jsonl");
+  writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // pending-tool-use, stale, pane static
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `ac5 ${p.tmp} ${p.session}`,
+      { transcripts: `ac5 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    try {
+      await sleep(6000); // ≥6 rounds with a pending tool_use + static pane
+      assert.ok(!/SESSION-IDLE ac5/.test(mon.output()),
+        `AC5: pending tool_use ⇒ NEVER report idle, even with the pane exactly unchanged (AC5 hard cap):\n${mon.output()}`);
+      // control: the idle path is NOT globally broken — pure-text fires it.
+      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
+      assert.ok(await waitForOutput(mon, /SESSION-IDLE ac5/, 15000),
+        `AC5 control: after the pending tool_use clears, a persistent pure-text idle MUST fire (proves the busy suppression is the pending tool_use):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});

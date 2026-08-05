@@ -125,6 +125,26 @@
 #   同时用时以谁为准：忙闲以屏幕为准（即时、语义）；心跳/逾期以 transcript 为准（不依赖
 #   TUI）；二者冲突（transcript 刚写过而屏幕判空闲）⇒ 屏幕标志存疑，报 SESSION-MARKER-STALE。
 #
+# 阶段三（gap-session-idle-true-idle-via-transcript-fusion-and-debounce，2026-08-05）：
+# 真空闲 vs 工具间隙。管理者实测：pane 哈希只答「屏幕 60 秒内变没变」，分不清「真空闲」与
+# 「两次工具调用间的正常间隙」（间隙通常几秒到几十秒，真空闲是 8.5 分钟级）——单轮 pane 不变
+# 判空闲是假判据。外层裁定采纳：把 transcript 最后一条【消息】的【类型】接入 idle 判据，并对
+# 候选闲去抖。人的风险偏好：可接受误报（持续降低概率），强烈不希望漏报。
+#   * transcript_last_message_type()：最后一条消息（type=assistant|user，跳过 system/mode/
+#     last-prompt/file-history-* 等元数据）的类型。assistant 且 content 含 tool_use 块 =
+#     pending-tool-use（回合进行中，确定忙）；assistant 且无 tool_use（纯文本）= pure-text
+#     （候选闲）；user = user-input（刚收到输入或工具回执，模型即将应答，按忙处理）。
+#     transcript 是【已发生事实的日志】（故障 5/6 结晶的结论：唯一可信信号族，不是 pane 那样
+#     的代理）——AC7 把这一族接入 idle 判据。
+#   * 融合（AC1/AC5）：fused_busy = pane_busy || transcript_busy。transcript 侧优先级更高——
+#     pending-tool-use / user-input ⇒ 无论 pane 如何（含 pane 恰好不动）都判忙，绝不报 idle。
+#     忙判据零漏报（AC5）是硬上限：transcript 有挂起 tool_use ⇒ 任何情况下不得报 idle。
+#   * 去抖（AC2）：候选闲（fused idle）要求【连续 2 轮】都为闲才报 SESSION-IDLE（IDLE_CONSEC
+#     计数，2 轮 = 2×INTERVAL，默认 120s）。单轮转换不报——只延迟 ≤1 轮询周期（真空闲下一轮
+#     还是闲，不造成漏报），远在 20 分钟 cron 兜底之内。pane 哈希从「唯一判据」降级为「去抖的
+#     候选闲辅助」（AC7）；忙→闲后须见过忙轮（SEEN_BUSY）才报，避免监视器启动时把一直闲着的
+#     会话误报成「转入空闲」。
+#
 # 逐事件类别与阈值理由（AC5）：
 #   SESSION-GONE              不可自愈（无界）→ 无阈值，立即报（宁可误报）
 #   SESSION-IDLE              可自愈（上界=外层 20min tick）→ 从严：默认 LOOP_MIN=20
@@ -156,11 +176,14 @@ FRESH_SECS=${FRESH_SECS:-15}        # SESSION-MARKER-STALE 的「刚写过」窗
                                     # ≤ 此秒数 = 会话确定在动（工具调用刚发生）。
 API_ERROR_WINDOW=${API_ERROR_WINDOW:-200}  # AC9：扫最近多少条 transcript 记录找 isApiErrorMessage
 API_ERROR_MIN=${API_ERROR_MIN:-1}          # AC9：窗口内 ≥ 此条即判「发不出请求」（宁可误报一侧）
+# 阶段三（2026-08-05）：候选闲去抖轮数。SESSION-IDLE 要求连续 IDLE_DEBOUNCE_ROUNDS 轮 fused-idle
+# 才报（AC2——2 轮 × INTERVAL 60s = 120s 结构下界）；单轮转换不报，只延迟 ≤1 轮询周期。
+IDLE_DEBOUNCE_ROUNDS=${IDLE_DEBOUNCE_ROUNDS:-2}
 # 文案常数（LOOP_MIN 含义拆分，2026-08-03）：OVERDUE 消息里的「预期周期」是固定描述，不是运行时
 # 阈值——LOOP_MIN 可以被设成 0（管理者配置），而「预期周期 0 分钟」是文案 bug。两个含义拆开。
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UNHALT_TS \
-  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE
+  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE IDLE_CONSEC SEEN_BUSY
 
 # ── L0（gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX，AC3）──
 # 本监视器必须读【真实默认服务端】上的会话，所以不走 tmux-isolated.sh（那会指向一个没有真实
@@ -224,6 +247,35 @@ transcript_api_error_count() {
   n=$(tail -n "$API_ERROR_WINDOW" "$t" 2>/dev/null | grep -c '"isApiErrorMessage"[[:space:]]*:[[:space:]]*true' 2>/dev/null || true)
   [ -z "$n" ] && n=0
   printf '%s\n' "$n"
+}
+
+# transcript_last_message_type —— transcript 最后一条【消息】的类型（阶段三 AC1）。决定「候选闲」
+# 还是「确定忙」；输出：
+#   pending-tool-use  最后一条消息是 assistant 且 content 含 tool_use 块 = 回合进行中，确定忙
+#   pure-text         最后一条消息是 assistant 且 content 无 tool_use（纯文本/思考）= 候选闲
+#   user-input        最后一条消息是 user（新输入或 tool_result 回执）= 模型即将应答，按忙处理
+#   unknown           取不到/无消息记录
+# 扫描只认顶层 type=assistant|user 的记录（跳过 system/mode/last-prompt/file-history-* 等元数据），
+# 从尾部向前找最后一条消息——「最后一条消息」才是忙闲判据，不是「文件最后一行」（那常是元数据，
+# 实测距文件尾 ≤2 行的元数据会盖住真正的最后消息）。grep 模式 `"type":"assistant"` 只命中顶层：
+# content 块的类型是 text/thinking/tool_use/tool_result，message 对象的类型是 message，都不是
+# assistant；同理 `"type":"user"` 只命中顶层 user 记录（tool_result 块的类型是 tool_result）。
+# tail 界 500 行提速（最后一条消息实测距文件尾 ≤2 行）；无匹配再全扫兜底。
+transcript_last_message_type() {
+  local t=$1 line
+  line=$(tail -n 500 "$t" 2>/dev/null | grep -E '"type":"(assistant|user)"' | tail -1)
+  [ -n "$line" ] || line=$(grep -E '"type":"(assistant|user)"' "$t" 2>/dev/null | tail -1)
+  [ -n "$line" ] || { echo "unknown"; return 0; }
+  case "$line" in
+    *'"type":"user"'*)
+      echo "user-input" ;;
+    *)
+      if printf '%s' "$line" | grep -q '"type":"tool_use"'; then
+        echo "pending-tool-use"
+      else
+        echo "pure-text"
+      fi ;;
+  esac
 }
 
 # last_user_input_epoch —— transcript 里最近一条 type=user 记录的时间戳转 epoch（AC7）。
@@ -306,7 +358,10 @@ case "${1:-}" in
     [ -n "${2:-}" ] || { echo "用法: $0 --last-input <transcript>" >&2; exit 2; }
     if last_user_input_epoch "$2"; then :; else echo "取不到"; fi
     exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--mask] [--api-errors <t>] [--last-input <t>]"; exit 0 ;;
+  --last-message-type)
+    [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
+    transcript_last_message_type "$2"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--mask] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -649,39 +704,32 @@ while true; do
       h=$(printf '%s' "$masked" | md5sum | cut -c1-16)
       if [ -n "${PREV_HASH[$name]:-}" ]; then
         content_changed=$([ "$h" = "${PREV_HASH[$name]}" ] && echo 0 || echo 1)
-        busy=$(( busy_sem || content_changed ))
-        idle=$(( 1 - busy ))
+        pane_busy=$(( busy_sem || content_changed ))
+        pane_idle=$(( 1 - pane_busy ))
+        # 阶段三（AC1）：transcript 最后一条消息类型接入忙闲判据。transcript 侧优先级更高——
+        # pending-tool-use / user-input ⇒ 确定忙，无论 pane 如何（AC5 忙判据零漏报）。
+        transcript_busy=0
+        if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+          ttype=$(transcript_last_message_type "$tr_path")
+          case "$ttype" in
+            pending-tool-use|user-input) transcript_busy=1 ;;
+            *) transcript_busy=0 ;;
+          esac
+        fi
+        fused_busy=$(( pane_busy || transcript_busy ))
+        idle=$(( 1 - fused_busy ))
+        # AC2 去抖：连续 fused-idle 轮数计数；忙轮清零。pane 哈希降级为候选闲辅助（AC7）。
+        if [ "$idle" = "1" ]; then
+          IDLE_CONSEC[$name]=$(( ${IDLE_CONSEC[$name]:-0} + 1 ))
+        else
+          IDLE_CONSEC[$name]=0
+          SEEN_BUSY[$name]=1
+        fi
         if [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
           if [ "$idle" = "1" ]; then
-            hb=$(heartbeat_for "$name" "$root"); hmin="?"
-            hmod=$(heartbeat_mtime "${hb:-/nonexistent}")
-            [ "$hmod" != "0" ] && hmin=$(( ( $(date +%s) - hmod ) / 60 ))
-            halt_msg=$([ "$halted" = "1" ] && echo "（该项目已暂停，空闲是预期状态）" || echo "")
-            # AC9（盲点13）：空闲且发不出请求（最近 transcript 记录带结构性 isApiErrorMessage）。
-            # 这是「不可自愈类」——发不出请求不会自己好，按 AC5 宁可误报一侧，见即报（升级给人）。
-            # 与常规 IDLE 互斥：能发请求才谈「没活干」，故这里直接二选一。
-            api_n=0; api_blocked=0
-            if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
-              api_n=$(transcript_api_error_count "$tr_path")
-              api_blocked=$([ "$api_n" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
-            fi
-            PREV_API_BLOCKED[$name]=$api_blocked
-            if [ "$api_blocked" = "1" ]; then
-              sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
-            elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
-              # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
-              # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
-              # hmin < LOOP_MIN 的空闲 = 正常收尾 → 持有者 stdout 静默；hmin ≥ LOOP_MIN 或未知
-              # （无心跳文件）=「空闲了但没动」，会话可能跑一半就停 / 已死 → 持有者 stdout 报。
-              # SESSION-RESUMED 保留不静默（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
-              sl_emit "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
-            else
-              # AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）：
-              # hmin < LOOP_MIN（正常收尾）——持有者自己的 stdout 静默（噪声闸门），但共享 events.jsonl
-              # 照记全量（含 hmin 原始量），让订阅方（管理者）自己决定报不报。这就是 AC21c 的负控制：
-              # 持有者 LOOP_MIN=20 时，共享文件里仍须出现 hmin < 20 的 IDLE 记录——出现即通过。
-              sl_emit_shared "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
-            fi
+            # 忙→闲【单轮转换不报】——去抖（AC2）持有：只延迟 ≤1 轮询周期（真空闲下一轮还是闲，
+            # 不造成漏报），远在 20 分钟 cron 兜底之内。真正的 SESSION-IDLE 由下面 counter 分支报。
+            :
           else
             resumed=1
             # AC6/AC7：SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）+ 上次收到输入时刻。
@@ -707,10 +755,44 @@ while true; do
           fi
         fi
         PREV_IDLE[$name]=$idle
-        # AC2（交叉正控制）：transcript 刚写过（会话确定在动）而屏幕判空闲 ⇒ 屏幕标志可能失效。
+        # 去抖后的 SESSION-IDLE 报告（AC2）：连续 IDLE_DEBOUNCE_ROUNDS 轮 fused-idle 且此前见过
+        # 忙轮（SEEN_BUSY，防启动误报）才报。单轮转换不报（上面）；counter==N 精确触发一次。
+        if [ "$idle" = "1" ] && [ "${IDLE_CONSEC[$name]:-0}" -eq "$IDLE_DEBOUNCE_ROUNDS" ] && [ "${SEEN_BUSY[$name]:-0}" = "1" ]; then
+          hb=$(heartbeat_for "$name" "$root"); hmin="?"
+          hmod=$(heartbeat_mtime "${hb:-/nonexistent}")
+          [ "$hmod" != "0" ] && hmin=$(( ( $(date +%s) - hmod ) / 60 ))
+          halt_msg=$([ "$halted" = "1" ] && echo "（该项目已暂停，空闲是预期状态）" || echo "")
+          # AC9（盲点13）：空闲且发不出请求（最近 transcript 记录带结构性 isApiErrorMessage）。
+          # 这是「不可自愈类」——发不出请求不会自己好，按 AC5 宁可误报一侧，见即报（升级给人）。
+          # 与常规 IDLE 互斥：能发请求才谈「没活干」，故这里直接二选一。
+          api_n=0; api_blocked=0
+          if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+            api_n=$(transcript_api_error_count "$tr_path")
+            api_blocked=$([ "$api_n" -ge "$API_ERROR_MIN" ] 2>/dev/null && echo 1 || echo 0)
+          fi
+          PREV_API_BLOCKED[$name]=$api_blocked
+          if [ "$api_blocked" = "1" ]; then
+            sl_emit "SESSION-IDLE-CANT-SEND $name 的会话空闲且发不出请求（最近 ${API_ERROR_WINDOW} 条 transcript 记录含 ${api_n} 条 isApiErrorMessage 结构字段）——不可自愈类，立即升级给人"
+          elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
+            # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
+            # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
+            # hmin < LOOP_MIN 的空闲 = 正常收尾 → 持有者 stdout 静默；hmin ≥ LOOP_MIN 或未知
+            # （无心跳文件）=「空闲了但没动」，会话可能跑一半就停 / 已死 → 持有者 stdout 报。
+            # SESSION-RESUMED 保留不静默（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
+            sl_emit "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
+          else
+            # AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）：
+            # hmin < LOOP_MIN（正常收尾）——持有者自己的 stdout 静默（噪声闸门），但共享 events.jsonl
+            # 照记全量（含 hmin 原始量），让订阅方（管理者）自己决定报不报。这就是 AC21c 的负控制：
+            # 持有者 LOOP_MIN=20 时，共享文件里仍须出现 hmin < 20 的 IDLE 记录——出现即通过。
+            sl_emit_shared "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
+          fi
+        fi
+        # AC2（交叉正控制）：transcript 刚写过（会话确定在动）而【屏幕】判空闲 ⇒ 屏幕标志可能失效。
         # 只对「心跳是 transcript」的目标成立——tick 日志是 loop 写的，不是会话活动的证据。
         # 假→真沿报一次；不一致率基线由观察者从事件流里数（全忙会话同时报 = TUI 文案变了）。
-        if [ "$idle" = "1" ] && [ "$halted" = "0" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+        # 判据用 pane_idle（屏幕判定）——transcript 侧确定忙时不该报「屏幕判空闲」。
+        if [ "$pane_idle" = "1" ] && [ "$halted" = "0" ] && [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
           hmod2=$(heartbeat_mtime "$tr_path")
           if [ "$hmod2" != "0" ]; then
             age=$(( $(date +%s) - hmod2 ))
@@ -740,6 +822,7 @@ while true; do
       PREV_BUSY_SEM[$name]=$busy_sem
     else
       PREV_HASH[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
+      IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。
