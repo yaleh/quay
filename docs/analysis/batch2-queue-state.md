@@ -4179,3 +4179,34 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **三机件缺口（archguard 实测）**：①transcript 定位——Claude Code 首 user 消息前不创建 transcript 文件，send-keys-reliable 要求传路径但发送前路径可能不存在（需 process-tracing 非文件猜测）；②suite-state-trigger REPO_ROOT 从脚本位置解析 ⇒ 每项目需自己实例 + .ts 无执行权限（node 前缀）；③monitor-mount-check 三判据只覆盖 session-liveness 不覆盖 suite-state-trigger。
 - **welcome-drive 真根因任务已建**：gap-send-keys-reliable-welcome-screen-ghost-drive-fails（fresh-session 跳过清屏直接发）。
+
+### tick 2026-08-05T12:2xZ（内层：外层两项裁定全部执行完毕）
+
+**① os-anchor DONE**（外层裁定：修 drive 后勾 AC2/AC6 翻 done）：
+- drive 修复（`792c6c91`）：`drive_outer` 改 **SEND→DISCOVER→VERIFY**——可靠发送冷启动文本（C-u/逐字/Enter）→ 路径式发现该发送创建的新 transcript（对照 launch 前快照，取代旧的 base_ts-after-launch strictly-newer 启发式）→ `transcript-delivery-check.ts` 验证。**端到端实测 delivered:true**（新 transcript `319f48e8...` 出现，54→55 文件）。
+- 与「Claude Code 首 user 消息前不创建 transcript」实测一致（外层 archguard 同证）。AC2/AC6 已勾，**status → done**（`40d20a8c`）。
+
+**② runner-gate reland**（外层裁定：修 AC5 后 reland）：
+- AC5 竞态修复（`f35459c7`）：① runner 保留 SIGTERM/SIGINT 监听器（关闭无处理窗口）；② **AC5 测试由 fake suite 内部沿祖先链向 runner 发 SIGTERM**（handler 注册后信号必达）——消除外部 child.kill 投递竞态。
+- **实测：AC5 隔离 10/10 稳定**（此前 ~30-70% 失败）；完整 scoped **29/29 EXIT=0**。merge reland，status 恢复 ready（closure 归外层）。ABORT #5 机制修复已重新落地。
+- 恢复分支时曾踩 rebase fold（merge+revert 后 rebase 跳过被认作已应用的 commit）——用 `--reapply-cherry-picks` + 从 dangling `5ceb039d` 恢复解决。
+
+**状态**：在飞 0；worktree 全清（仅 M239 存档）；就绪池 25/12 健康；套件 green；Monitor ✓。
+
+### tick 2026-08-05T12:3xZ（内层：派发批 3 + portability 落地）
+
+- **派发 3**（两两 disjoint，self-touch 已补）：fast-mode-cross-project / exclusion-lists / no-resource-awareness。
+- **portability 落地**（merge `70c30165`）：`docs/proposals/fast-mode-cross-project-portability.md`（§1-§6，7 条实测证据）+ `plugin/test/portability-strategy-check.test.mjs`（4/4，AC4 负控制）。**判定：running-loop 可移植**（meta-cc Go + archguard TS 同跑 fast-mode loop，遥测/事件结构一致）；**两个边界诚实标注未证**：安装/采纳路径（cold-start 曾人肉口述）+ task-carrier 耦合（两仓都采纳 quay-native tasks/*.md，驱动外来仓原生任务格式未测）。
+- **在飞 2/3**：exclusion-lists + resource-aware（刚派，未完成）。套件 green。
+
+### tick 2026-08-05T12:3xZ（外层，AC12 拆分 + archguard 污染更正）
+
+- **AC12 拆分（管理者，决定性事实 plugin/loop/ 无 manager）**：AC12a 三层（人不干预 manager，管理者驱动 outer）测【手工监工，不随包走】；AC12b 两层（人与管理者都不干预 outer，只准输一条 /quay:cold-start）测【产品本身，采用者真实体验】。AC12b 才是真实数字，当前 0 且从未干净测过。
+- **archguard 已被污染不能当产品基线**：12:01 管理者发 1500 字定制驱动（transcript 26 处命中）+ 11:46 手工 cp 同步 send-keys-reliable。archguard 自称「11:40→12:10 无真人干预」是假的（12:01 有手工驱动）。AC11 一族（转述没质疑）。
+- **AC12b 三个前置阻塞（修完再测）**：(a) send-keys-reliable fresh welcome 屏 fail（已建任务）；(b) suite-state-trigger REPO_ROOT 每项目实例；(c) transcript 首消息前不存在（process-tracing）。
+- **资源观察**：PSI 70 非缺陷（=8/=4 都来自 no-resource-awareness 任务的 scoped 测试夹具）。
+
+### tick 2026-08-05T12:3xZ（外层，AC12b = gap-quay-has-never-self-hosted capstone）
+
+- **AC12b 与既有任务重合**：gap-quay-has-never-self-hosted-its-own-cold-start（todo，capstone）的 AC2 正是 AC12b——「six-key checklist on quay own repo，无 human-in-the-loop」。AC12b 当前 0 就是这个 capstone 没跑。**不新开任务**。
+- **AC12b 前置三阻塞（修完再跑 capstone）**：(a) welcome-screen drive（已建任务）；(b) suite-state-trigger 每项目实例；(c) transcript 定位。
