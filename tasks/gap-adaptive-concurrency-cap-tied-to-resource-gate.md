@@ -75,6 +75,7 @@ concurrent-batch-scheduler.ts）——设计实现在 quay 做一次，走升级
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-adaptive-concurrency-cap-tied-to-resource-gate.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/loop/fast-mode-loop-tick.md（步骤 4：派发决策点读 avg300 + 滞回 + 档位配置）
 - plugin/scripts/resource-gate.sh（avg300 读取）或新 helper（cap-from-gate 读 avg300 带滞回，档位读 config）
