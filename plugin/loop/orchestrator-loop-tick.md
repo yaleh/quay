@@ -671,7 +671,8 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 **就绪池维持（todo→ready 晋级）不再靠外层自愿 AC-queue**（`gap-promotion-cadence-is-role-volition-
 not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先级是**产品机制**，由内层 tick
 `fast-mode-loop-tick.md` 步骤 3.6「就绪池维护」承载——内层跑 `plugin/scripts/ready-pool-check.ts`
-（读 stdout `pool` 字段；`pool < 3` 按脚本推荐的顺序补晋）。**外层只引用它，不独立维护候选集构造规则**
+（读 stdout `pool` 字段；`pool < floor`（=cap×4，默认 12）按脚本推荐的顺序补晋；**判据是
+`dispatchable_disjoint ≥ cap`**，floor 只是手段）。**外层只引用它，不独立维护候选集构造规则**
 （旧 `outer-phase-goal.md` AC-queue 已降级为引用）。本步骤的 `gap-*` 优先顺序与内层 checker 的定义
 顺序同源，不再各写一份。
 

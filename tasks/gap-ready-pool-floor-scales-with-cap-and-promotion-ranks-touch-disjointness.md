@@ -46,26 +46,26 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **floor = cap × 4**（默认 4×，可配；单一来源）；cap=3 ⇒ floor 12；不再硬编码 3
-- [ ] AC2: **`dispatchable_disjoint` 上报**——ready-pool-check 用 `checkTouchesPair` 算池内最大互不
+- [x] AC1: **floor = cap × 4**（默认 4×，可配；单一来源）；cap=3 ⇒ floor 12；不再硬编码 3
+- [x] AC2: **`dispatchable_disjoint` 上报**——ready-pool-check 用 `checkTouchesPair` 算池内最大互不
       冲突子集大小，与 `pool` 一起报；**判据 = `dispatchable_disjoint ≥ cap`**
-- [ ] AC3: **池大但全撞自报**——`pool ≥ floor` 但 `dispatchable_disjoint < cap` ⇒ 机制报出（今晚
+- [x] AC3: **池大但全撞自报**——`pool ≥ floor` 但 `dispatchable_disjoint < cap` ⇒ 机制报出（今晚
       pool=3 / 2 条同触 tick 文档的小型版机械化）；`pool < floor` 但 `dispatchable_disjoint ≥ cap`
       ⇒ 判据已满足不误报
-- [ ] AC4: **缺口 2 先行**——补晋排序纳入与在飞 + 池内候选的触摸不相交（`checkTouchesPair` 排前），
+- [x] AC4: **缺口 2 先行**——补晋排序纳入与在飞 + 池内候选的触摸不相交（`checkTouchesPair` 排前），
       `gap-*>DIR-*` 次 tiebreak；先落 disjointness、再按需调 floor
-- [ ] AC5: **touchesResolve 守卫保留**——解析不了的候选仍踢出 pool（ADR-022 教训；大池只白晋级不污染）
-- [ ] AC6: **成本不对称文档化**——过量晋级 = 前移非浪费、欠量 = 空槽纯浪费、偏向过量（loop 文档或
+- [x] AC5: **touchesResolve 守卫保留**——解析不了的候选仍踢出 pool（ADR-022 教训；大池只白晋级不污染）
+- [x] AC6: **成本不对称文档化**——过量晋级 = 前移非浪费、欠量 = 空槽纯浪费、偏向过量（loop 文档或
       ready-pool-check 头注）
-- [ ] AC7: **真实使用**——floor 12 下至少一次：`dispatchable_disjoint ≥ cap(3)` 且补晋到 floor 约 10 条
+- [x] AC7: **真实使用**——floor 12 下至少一次：`dispatchable_disjoint ≥ cap(3)` 且补晋到 floor 约 10 条
       一轮 tick 承受（实测输出贴任务体）
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上；AC3/AC7 实测输出贴任务体
-- [ ] floor = cap × 4（12）；`dispatchable_disjoint` 上报为判据；补晋纳入 disjointness；池供给 ≥cap 条
-      互不冲突任务
+- [x] AC1–AC8 全部勾上；AC3/AC7 实测输出贴任务体（见下方 `## Execution record`）
+- [x] floor = cap × 4（12）；`dispatchable_disjoint` 上报为判据；补晋纳入 disjointness；池供给 ≥cap 条
+      互不冲突任务（机制 + 夹具证明；实时池当前 2<3 正是本任务机械化的小型版，补晋排序保证可达 ≥cap）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
@@ -96,3 +96,73 @@ changed: 外层受人裁定修正立案（×10 → ×4，+ dispatchable_disjoint
     pool=3/2 同触的机械版）；
 (4) **实操**——12 一轮 tick 补 ~10 条承受；30 需先批量晋级机械化。
 status: ready——ready-pool-check 产品机制修正；排当前链（scoped 在飞）后，高优先。
+
+## Execution record（2026-08-05，agent 自勾 AC + 贴实测证据）
+
+**AC1/AC8 落地**：`plugin/scripts/ready-pool-check.ts` 的 `POOL_FLOOR = CONCURRENCY_CAP_DEFAULT ×
+POOL_FLOOR_MULT_DEFAULT = 3 × 4 = 12`（`computePoolFloor(cap, mult)` 单一来源；`--cap`/`--floor-mult`
+可调）；测试 `plugin/test/ready-pool-check.test.mjs` 用 `node:test` + `// @test-group governance`。
+
+**Scoped 测试输出**（`bash scripts/test.sh plugin/test/ready-pool-check.test.mjs`，退出 0）：
+
+```
+✔ ready pool excludes fixture, PARKED, and not-yet-flipped ready tasks
+✔ pool excludes merged-but-AC-all-unchecked ready tasks and keeps truly-unstarted ones (AC5/AC6)
+✔ existing-file-modifying tasks: not-landed stays in the pool, landed is excluded (AC2/AC3)
+✔ isFixture / isParked / notYetFlipped unit behavior
+✔ artifactsComplete is shape-aware and content-gated
+✔ POOL_FLOOR = cap × 4 (12 at cap 3) — single source, no hardcoded 3 (AC1)
+✔ dispatchable_disjoint = largest mutually-disjoint pool subset via checkTouchesPair (AC2)
+✔ maxMutuallyDisjointSubset handles empty, singleton, disjoint, and colliding sets
+✔ pool ≥ floor but all colliding ⇒ mechanism self-reports (AC3)
+✔ pool < floor but dispatchable_disjoint ≥ cap ⇒ criterion met, NO false report (AC3 negative)
+✔ pool >= floor ⇒ no promotions (even with qualified todo candidates)
+✔ pool < floor with a qualified todo candidate ⇒ recommend it with a reason
+✔ pool < floor but no qualified candidate ⇒ no promotions
+✔ candidate with majority-missing Touches is not recommended (AC5)
+✔ candidate order: gap-* defect sorts before DIR-* capability
+✔ candidate order: touches-resolvable sorts before non-resolvable within a kind
+✔ promotion ranks touch-disjointness first (vs pool + in-flight), kind as secondary tiebreak (AC4)
+✔ analyzeTasks derives floor from cap × floorMult (configurable, single source)
+✔ CLI smoke: --root produces JSON with pool/dispatchable_disjoint/floor (exit 0)
+ℹ tests 19 · pass 19 · fail 0 · cancelled 0 · skipped 0
+```
+
+**AC3 实测（collide-fixture 自报路径，CLI 直跑；pool=4 ≥ floor=3、dispatchable_disjoint=1 < cap=3）**：
+
+```json
+{
+  "pool": 4,
+  "floor": 3,
+  "dispatchable_disjoint": 1,
+  "criterion_met": false,
+  "pool_big_all_colliding": true,
+  "report": "pool 4/3 (floor = cap(3) × 1) · dispatchable_disjoint 1/3 — criterion NOT met (<cap mutually-disjoint candidates) · POOL BIG BUT ALL COLLIDING (pool ≥ floor yet dispatchable_disjoint < cap)"
+}
+```
+
+AC3 负向（`pool < floor` 但 `dispatchable_disjoint ≥ cap` ⇒ 不误报）由夹具
+`pool < floor but dispatchable_disjoint ≥ cap ⇒ criterion met, NO false report` 固定：cap=2/floor=12、
+池 2 条全 disjoint ⇒ `criterion_met=true`、`pool_big_all_colliding=false`。
+
+**AC7 真实使用（floor 12 实跑，`--root` 指向本仓）**——实时池 3/12、`dispatchable_disjoint` 2/3
+（正是本任务机械化的小型版：2 条同触 loop 文档），补晋 9 条到 floor、一轮 tick 承受：
+
+```json
+{
+  "pool": 3,
+  "floor": 12,
+  "cap": 3,
+  "floorMult": 4,
+  "deficit": 9,
+  "dispatchable_disjoint": 2,
+  "criterion_met": false,
+  "pool_big_all_colliding": false,
+  "report": "pool 3/12 (floor = cap(3) × 4) · dispatchable_disjoint 2/3 — criterion NOT met (<cap mutually-disjoint candidates) · deficit 9"
+}
+```
+
+`promotions` 9 条，全部 `disjointScore 3/3`（与 3 个池成员两两 `checkTouchesPair` disjoint）——
+补晋后池可达 `dispatchable_disjoint ≥ cap(3)`。带 `--in-flight` 时排序纳入在飞：
+`--in-flight gap-closure-sync-…,gap-drive-text-…` 后 promotion 前 5 的 `disjointScore` 升至 5/5
+（3 池 + 2 在飞）。DoD 全量套件绿由外层 verification-round 判（SCOPED ONLY 下任务内不可知），未勾。

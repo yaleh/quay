@@ -199,7 +199,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 | # | 核对项 | 机械判据 |
 |---|---|---|
 | ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ 3（步骤 4 并发上限）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` 的 `pool` 字段；`pool < 3` 时是否已按步骤 3.6 补晋 |
+| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` 的 `pool` / `dispatchable_disjoint` 字段；`pool < floor`（=cap×4，默认 12）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
 
@@ -353,7 +353,7 @@ inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步
 
 ### 3.6 就绪池维护（晋级节奏是机制，不是角色自觉——强制）
 
-**就绪池 < 3 时，本 tick 内从 todo 补晋到 ready。** 晋级节奏与优先级曾只活在外层的**自愿 AC-queue**
+**就绪池 < floor 时，本 tick 内从 todo 补晋到 ready。** 晋级节奏与优先级曾只活在外层的**自愿 AC-queue**
 （`orchestration/outer-phase-goal.md` 的旧 AC-queue）——角色自觉，换会话/模型就丢。**现在是 tick 调用的
 子机制**（`gap-promotion-cadence-is-role-volition-not-product-mechanism`），任何未来冷启动本项目的会话
 都会继承它。**顺序由脚本承载，不是散文。**
@@ -364,12 +364,22 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 
 - stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
   （① 本批已做完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
-  标记的）。`pool ≥ 3` ⇒ 无需补晋，直接进步骤 4 派发。
-- **`pool < 3` ⇒ 按 `promotions` 数组补晋**（数组顺序就是定义好的顺序：`gap-*` 缺陷 > `DIR-*` 新能力；
-  同类里 touches resolve 的排前）。对每个候选：**缺四件套的先补齐**（`missingArtifacts` 字段点名缺哪个），
-  再 `status: todo → ready`。`touchesResolve: false` 的候选不派发。
+  标记的）。**`floor` 字段 = cap × 4**（默认 cap=3 ⇒ floor 12；`--cap` / `--floor-mult` 可调）。
+  `pool ≥ floor` ⇒ 无需补晋，直接进步骤 4 派发。
+- **判据是 `dispatchable_disjoint` 不是 pool 数**：脚本同报**池内最大互不冲突子集大小**
+  （两两 `checkTouchesPair` disjoint，用派发闸同一个 declared-path expander）。**`dispatchable_disjoint
+  ≥ cap` 才是「池够用」**——池 5 条全不冲突就够了；池 30 条全撞（`pool ≥ floor` 但
+  `dispatchable_disjoint < cap`）机制自报 `POOL BIG BUT ALL COLLIDING`，仍要补晋/排障。floor 是手段、
+  `dispatchable_disjoint` 是结果。
+- **`pool < floor` ⇒ 按 `promotions` 数组补晋**（数组顺序就是定义好的顺序：**触摸不相交排最前**——
+  与池内已有候选 + 在飞任务两两 `checkTouchesPair` 不相交者优先；`gap-*` 缺陷 > `DIR-*` 新能力作次
+  tiebreak；同类里 touches resolve 的排前）。对每个候选：**缺四件套的先补齐**（`missingArtifacts`
+  字段点名缺哪个），再 `status: todo → ready`。`touchesResolve: false` 的候选**不派发、不补晋**
+  （解析不了的候选踢出，大池只白晋级不污染——ADR-022 教训）。
 - 补晋落盘后，步骤 4 就用这份就绪池派发——不再重复判定 promotion 顺序，只需做步骤 4 自己的并发资格
   （`checkTouchesPair`）与触摸可解析性复核。
+- **成本不对称（AC6，偏向过量）**：过量晋级 = 前移非浪费（池更深，下个 tick 直接派）；欠量 = 空槽纯浪费
+  （当 tick 无人可补）。floor 取 cap×4 已留这一档余量。
 
 ### 4. 派发就绪任务（并发）
 

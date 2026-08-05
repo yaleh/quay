@@ -3,13 +3,15 @@
 // (tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism). Promotion cadence used to
 // live in an outer's VOLUNTARY AC-queue (role volition, lost on session/model change); this test
 // pins the PRODUCT mechanism: computing the REAL ready pool (excluding not-yet-flipped / fixture /
-// PARKED) and recommending todo→ready promotions in a DEFINED order (gap-* > DIR-*, touches-resolve
-// first) when pool < 3.
+// PARKED), reporting dispatchable_disjoint (the largest mutually-disjoint pool subset via
+// checkTouchesPair) as the CRITERION, and recommending todo→ready promotions in a DEFINED order
+// (touch-disjointness FIRST vs the pool + in-flight, then gap-* > DIR-*, then touches-resolve
+// first) when pool < floor (= cap × 4, default 12).
 //
-// AC1 pool computation + recommendation-with-reason · AC2 tick-doc step · AC3 orchestrator sync
-// AC4 negative controls (pool≥3 ⇒ no recommend; pool<3 + no qualified candidate ⇒ no recommend;
-//   pool<3 + qualified candidate ⇒ recommend) · AC5 orderability (gap before DIR; resolve before not)
-// AC6 node:test + @test-group governance · AC7 SPEC sustained-health dimension reference
+// AC1 floor = cap × 4 (12 at cap 3, configurable) · AC2 dispatchable_disjoint via checkTouchesPair
+// AC3 pool-big-but-all-colliding self-report + no-false-report-on-criterion-met · AC4 disjointness
+//   ranks before kind, incl. in-flight · AC5 touchesResolve guard kept · AC6 cost asymmetry doc
+// AC7 real use · AC8 node:test + @test-group governance
 //
 // Run: scripts/test.sh plugin/test/ready-pool-check.test.mjs
 
@@ -29,6 +31,10 @@ import {
   isFixture,
   classifyKind,
   POOL_FLOOR,
+  CONCURRENCY_CAP_DEFAULT,
+  POOL_FLOOR_MULT_DEFAULT,
+  computePoolFloor,
+  maxMutuallyDisjointSubset,
   PARKED_MARKER_RE,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
@@ -240,7 +246,85 @@ test("artifactsComplete is shape-aware and content-gated", () => {
   assert.equal(artifactsComplete("## Some unknown heading\ncontent").complete, false);
 });
 
-// ── AC4: negative controls (pool ≥ 3 ⇒ no recommendation) ─────────────────────────────────────────
+// ── AC1: floor = cap × 4 (12 at cap 3) — single source, no hardcoded 3 ────────────────────────────
+
+test("POOL_FLOOR = cap × 4 (12 at cap 3) — single source, no hardcoded 3 (AC1)", () => {
+  assert.equal(CONCURRENCY_CAP_DEFAULT, 3);
+  assert.equal(POOL_FLOOR_MULT_DEFAULT, 4);
+  assert.equal(POOL_FLOOR, 12, "default floor = 3 × 4");
+  assert.equal(computePoolFloor(3, 4), 12);
+  assert.equal(computePoolFloor(3), 12, "floorMult defaults to 4");
+  assert.equal(computePoolFloor(2, 4), 8);
+  assert.equal(computePoolFloor(4, 4), 16);
+  assert.equal(computePoolFloor(1, 1), 1, "small floors are legal for tests/experiments");
+});
+
+// ── AC2: dispatchable_disjoint = largest mutually-disjoint pool subset via checkTouchesPair ────────
+
+test("dispatchable_disjoint = largest mutually-disjoint pool subset via checkTouchesPair (AC2)", (t) => {
+  const root = makeWorkspace("disjoint");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // a,b,c mutually disjoint; d,e collide (code/shared.ts); a,f collide (code/a.ts).
+  // Conflicts = the matching {(d,e),(a,f)} ⇒ MIS = 6 − 2 = 4.
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/b.ts"] }) });
+  writeTask(root, "gap-c", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/c.ts"] }) });
+  writeTask(root, "gap-d", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/shared.ts"] }) });
+  writeTask(root, "gap-e", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/shared.ts"] }) });
+  writeTask(root, "gap-f", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.equal(r.pool, 6);
+  assert.equal(r.dispatchable_disjoint, 4, "largest mutually-disjoint subset is 4 ({a,b,c,d} or {a,b,c,e})");
+  assert.equal(r.criterion_met, true, "4 ≥ cap 3 ⇒ criterion met");
+  assert.equal(r.pool_big_all_colliding, false);
+});
+
+test("maxMutuallyDisjointSubset handles empty, singleton, disjoint, and colliding sets", () => {
+  const expand = (globs) => new Set(globs);
+  const a = { hasSection: true, globs: ["code/a.ts"] };
+  const b = { hasSection: true, globs: ["code/b.ts"] };
+  const shared = { hasSection: true, globs: ["code/shared.ts"] };
+  assert.equal(maxMutuallyDisjointSubset([], expand), 0);
+  assert.equal(maxMutuallyDisjointSubset([a], expand), 1);
+  assert.equal(maxMutuallyDisjointSubset([a, b], expand), 2);
+  assert.equal(maxMutuallyDisjointSubset([a, shared, { hasSection: true, globs: ["code/shared.ts"] }], expand), 2);
+});
+
+// ── AC3: pool-big-but-all-colliding self-report; no false report when criterion already met ────────
+
+test("pool ≥ floor but all colliding ⇒ mechanism self-reports (AC3)", (t) => {
+  const root = makeWorkspace("all-collide");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const id of ["gap-r1", "gap-r2", "gap-r3", "gap-r4"]) {
+    writeTask(root, id, { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/shared.ts"] }) });
+  }
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }); // floor 3
+  assert.equal(r.pool, 4);
+  assert.ok(r.pool >= r.floor, "pool is at/above the floor");
+  assert.equal(r.dispatchable_disjoint, 1, "all four collide on code/shared.ts");
+  assert.equal(r.criterion_met, false, "1 < cap 3");
+  assert.equal(r.pool_big_all_colliding, true, "pool big but all colliding must self-report");
+  assert.match(r.report, /POOL BIG BUT ALL COLLIDING/);
+});
+
+test("pool < floor but dispatchable_disjoint ≥ cap ⇒ criterion met, NO false report (AC3 negative)", (t) => {
+  const root = makeWorkspace("criterion-met");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  writeTask(root, "gap-b", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/b.ts"] }) });
+  // cap 2, floorMult 6 ⇒ floor 12; pool 2 < 12 but 2 mutually-disjoint ≥ cap 2.
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 2, floorMult: 6 });
+  assert.equal(r.floor, 12);
+  assert.equal(r.pool, 2);
+  assert.ok(r.pool < r.floor, "pool below floor");
+  assert.equal(r.dispatchable_disjoint, 2);
+  assert.equal(r.criterion_met, true, "2 ≥ cap 2 ⇒ criterion satisfied");
+  assert.equal(r.pool_big_all_colliding, false, "must NOT report pool-big-all-colliding");
+  assert.doesNotMatch(r.report, /POOL BIG BUT ALL COLLIDING/);
+});
+
+// ── AC4: negative controls (pool ≥ floor ⇒ no recommendation) ─────────────────────────────────────
 
 test("pool >= floor ⇒ no promotions (even with qualified todo candidates)", (t) => {
   const root = makeWorkspace("neg-pool-full");
@@ -251,14 +335,15 @@ test("pool >= floor ⇒ no promotions (even with qualified todo candidates)", (t
   // A fully-qualified todo candidate exists, but the pool is healthy.
   writeTask(root, "gap-candidate", gapTask("gap-candidate"));
 
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }); // floor 3
   assert.equal(r.pool, 3);
+  assert.equal(r.floor, 3);
   assert.equal(r.deficit, 0);
-  assert.deepEqual(r.promotions, [], "pool ≥ 3 must never recommend");
+  assert.deepEqual(r.promotions, [], "pool ≥ floor must never recommend");
   assert.deepEqual(r.candidates, [], "candidate scan is skipped when the pool is healthy");
 });
 
-// ── AC4: pool < 3 + qualified candidate ⇒ recommend ──────────────────────────────────────────────
+// ── AC4: pool < floor + qualified candidate ⇒ recommend ───────────────────────────────────────────
 
 test("pool < floor with a qualified todo candidate ⇒ recommend it with a reason", (t) => {
   const root = makeWorkspace("pos-rec");
@@ -267,7 +352,7 @@ test("pool < floor with a qualified todo candidate ⇒ recommend it with a reaso
   writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
   writeTask(root, "gap-candidate", gapTask("gap-candidate")); // no Touches → resolves trivially, no parent → deps ready
 
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }); // floor 3
   assert.equal(r.pool, 2);
   assert.equal(r.deficit, 1);
   assert.equal(r.promotions.length, 1);
@@ -276,7 +361,7 @@ test("pool < floor with a qualified todo candidate ⇒ recommend it with a reaso
   assert.match(r.promotions[0].reason, /four-artifacts complete/);
 });
 
-// ── AC4: pool < 3 + NO qualified candidate ⇒ no recommendation ───────────────────────────────────
+// ── AC4: pool < floor + NO qualified candidate ⇒ no recommendation ───────────────────────────────
 
 test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   const root = makeWorkspace("neg-no-qual");
@@ -289,7 +374,7 @@ test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   // Candidate fails deps (parent file missing → fail-closed, parent cannot be confirmed done).
   writeTask(root, "gap-child", { ...gapTask("gap-child"), parent: "gap-ghost-parent" });
 
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }); // floor 3
   assert.equal(r.deficit, 1);
   assert.deepEqual(r.promotions, [], "no qualified candidate ⇒ nothing to recommend");
   const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
@@ -299,9 +384,9 @@ test("pool < floor but no qualified candidate ⇒ no promotions", (t) => {
   assert.equal(byId["gap-child"].depsReady, false);
 });
 
-// ── AC4: pool < 3 + candidate whose Touches do not resolve ⇒ not recommended ─────────────────────
+// ── AC5: candidate with majority-missing Touches is not recommended (guard KEPT) ──────────────────
 
-test("candidate with majority-missing Touches is not recommended", (t) => {
+test("candidate with majority-missing Touches is not recommended (AC5)", (t) => {
   const root = makeWorkspace("neg-touches");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
@@ -311,7 +396,7 @@ test("candidate with majority-missing Touches is not recommended", (t) => {
     body: fourArtifactBody({ touches: ["- code/does-not-exist.ts", "- plugin/scripts/also-missing.ts"] }),
   }));
 
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }); // floor 3
   assert.equal(r.deficit, 1);
   assert.deepEqual(r.promotions, []);
   const c = r.candidates.find((x) => x.id === "gap-missing-touch");
@@ -319,7 +404,7 @@ test("candidate with majority-missing Touches is not recommended", (t) => {
   assert.equal(c.eligible, false);
 });
 
-// ── AC5: ordering — gap-* before DIR-* ────────────────────────────────────────────────────────────
+// ── AC4: ordering — touch-disjointness ranks FIRST (pool + in-flight), gap-*>DIR-* as tiebreak ────
 
 test("candidate order: gap-* defect sorts before DIR-* capability", (t) => {
   const root = makeWorkspace("order-kind");
@@ -329,15 +414,13 @@ test("candidate order: gap-* defect sorts before DIR-* capability", (t) => {
   writeTask(root, "DIR-new-cap", dirTask("DIR-new-cap"));
   writeTask(root, "gap-defect", gapTask("gap-defect"));
 
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
   const ids = r.candidates.map((c) => c.id);
-  assert.deepEqual(ids, ["gap-defect", "DIR-new-cap"], "gap-* must sort before DIR-*");
+  assert.deepEqual(ids, ["gap-defect", "DIR-new-cap"], "gap-* must sort before DIR-* (equal disjointness)");
   assert.equal(classifyKind("gap-defect"), "gap");
   assert.equal(classifyKind("DIR-new-cap"), "dir");
   assert.equal(classifyKind("ARCH-x"), "other");
 });
-
-// ── AC5: ordering — touches-resolvable before not ────────────────────────────────────────────────
 
 test("candidate order: touches-resolvable sorts before non-resolvable within a kind", (t) => {
   const root = makeWorkspace("order-resolve");
@@ -352,7 +435,7 @@ test("candidate order: touches-resolvable sorts before non-resolvable within a k
     body: fourArtifactBody({ touches: ["- code/missing.ts"] }),
   }));
 
-  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
   const byId = Object.fromEntries(r.candidates.map((c) => [c.id, c]));
   assert.equal(byId["gap-resolvable"].touchesResolve, true);
   assert.equal(byId["gap-unresolvable"].touchesResolve, false);
@@ -361,15 +444,55 @@ test("candidate order: touches-resolvable sorts before non-resolvable within a k
   assert.ok(idxResolvable < idxUnresolvable, "resolvable candidate must sort before non-resolvable");
 });
 
-// ── AC4/AC5: hard-cap floor constant is what the ticks use ───────────────────────────────────────
+test("promotion ranks touch-disjointness first (vs pool + in-flight), kind as secondary tiebreak (AC4)", (t) => {
+  const root = makeWorkspace("rank");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const f of ["code/pool.ts", "code/other.ts", "code/other2.ts", "code/inflight.ts"]) {
+    fs.writeFileSync(path.join(root, f), "export const x = 1;\n");
+  }
+  // Pool: 1 ready task touching code/pool.ts.
+  writeTask(root, "gap-pool", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) });
+  // Candidates (all eligible; disjointScore vs pool(1) + in-flight(1)):
+  writeTask(root, "gap-colliding", gapTask("gap-colliding", { body: fourArtifactBody({ touches: ["- code/pool.ts"] }) })); // collides pool → 1
+  writeTask(root, "DIR-disjoint", dirTask("DIR-disjoint", { body: fourArtifactBody({ touches: ["- code/other.ts"] }) })); // disjoint both → 2
+  writeTask(root, "gap-inf-disjoint", gapTask("gap-inf-disjoint", { body: fourArtifactBody({ touches: ["- code/other2.ts"] }) })); // disjoint both → 2
+  writeTask(root, "ARCH-colliding-inf", { status: "todo", labels: [], body: fourArtifactBody({ touches: ["- code/inflight.ts"] }) }); // collides in-flight → 1
 
-test("POOL_FLOOR is the documented healthy-pool floor", () => {
-  assert.equal(POOL_FLOOR, 3);
+  const inFlight = [{ id: "gap-inflight", body: fourArtifactBody({ touches: ["- code/inflight.ts"] }) }];
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, inFlight });
+  assert.deepEqual(
+    r.candidates.map((c) => c.id),
+    ["gap-inf-disjoint", "DIR-disjoint", "gap-colliding", "ARCH-colliding-inf"],
+    "disjointness score first (gap before dir within a score), then kind",
+  );
+  assert.equal(r.promotions[0].id, "gap-inf-disjoint", "most-disjoint candidate promoted first");
+  // Disjointness beats kind: a disjoint DIR* ranks before a colliding gap*.
+  const idxDir = r.candidates.findIndex((c) => c.id === "DIR-disjoint");
+  const idxGap = r.candidates.findIndex((c) => c.id === "gap-colliding");
+  assert.ok(idxDir < idxGap, "disjoint DIR candidate ranks before colliding gap candidate");
+  // In-flight dimension: disjoint-from-in-flight ranks before colliding-with-in-flight.
+  const idxInfD = r.candidates.findIndex((c) => c.id === "gap-inf-disjoint");
+  const idxInfC = r.candidates.findIndex((c) => c.id === "ARCH-colliding-inf");
+  assert.ok(idxInfD < idxInfC, "disjoint-from-in-flight ranks before colliding-with-in-flight");
+});
+
+// ── AC4/AC5: hard-cap floor constant is what the ticks use ────────────────────────────────────────
+
+test("analyzeTasks derives floor from cap × floorMult (configurable, single source)", (t) => {
+  const root = makeWorkspace("floor-derive");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // cap 5 × floorMult 2 ⇒ floor 10; pool 1 ⇒ deficit 9.
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 5, floorMult: 2 });
+  assert.equal(r.cap, 5);
+  assert.equal(r.floorMult, 2);
+  assert.equal(r.floor, 10);
+  assert.equal(r.deficit, 9);
 });
 
 // ── CLI smoke: --root runs and prints a JSON pool field ──────────────────────────────────────────
 
-test("CLI smoke: --root produces JSON with a pool field (exit 0)", (t) => {
+test("CLI smoke: --root produces JSON with pool/dispatchable_disjoint/floor (exit 0)", (t) => {
   const root = makeWorkspace("cli");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
@@ -382,5 +505,8 @@ test("CLI smoke: --root produces JSON with a pool field (exit 0)", (t) => {
   const parsed = JSON.parse(out);
   assert.equal(typeof parsed.pool, "number");
   assert.equal(parsed.pool, 1);
+  assert.equal(parsed.floor, 12, "default floor = cap×4 = 12");
+  assert.equal(typeof parsed.dispatchable_disjoint, "number");
+  assert.equal(typeof parsed.criterion_met, "boolean");
   assert.equal(typeof parsed.scanned, "number");
 });
