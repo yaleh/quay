@@ -59,15 +59,34 @@ WAIT、load 15.77，**正是 ABORT #1/#3/#4 与两次整机崩溃的同一形态
 
 ## Acceptance Criteria
 
-- [ ] AC1: runner 默认 laneCount 读 nproc 派生（nproc=4 → 1），无 `--lane-count` 时生效并发 = 1
-- [ ] AC2: splice 是 replace——命令里已有 `--test-concurrency=8`（`=` 与空格拼写）时被替换为派生值，进程只出现一个 `--test-concurrency=<派生>`
-- [ ] AC3: 起跑前过 resource-gate，WAIT 时不启动（state 保持 running/green 不动）
-- [ ] AC4: `full-suite-runner.test.mjs` 扩展覆盖三行为（负控制：显式 8 + 已有 `=8` → 替换为派生值）
-- [ ] AC5: **inner 停止条件区分 failed vs aborted**——`state: red` + `reason: aborted`（或等价语义）
+- [x] AC1: runner 默认 laneCount 读 nproc 派生（nproc=4 → 1），无 `--lane-count` 时生效并发 = 1
+      — `defaultLaneCount()` = `max(1, floor(nproc/2.1))`（同 test.sh AC5 派生；`RESOURCE_GATE_NPROC`
+      seam）。测试 `AC1 — default laneCount is NPROC-derived`：`RESOURCE_GATE_NPROC=4` ⇒
+      `state.laneCount = 1` 且 spawn 命令 = `--test-concurrency=1`（唯一）。
+- [x] AC2: splice 是 replace——命令里已有 `--test-concurrency=8`（`=` 与空格拼写）时被替换为派生值，进程只出现一个 `--test-concurrency=<派生>`
+      — `stripConcurrencyFlags()` 剥 `=` 与空格两种拼写；`spliceConcurrency()` 只拼一个派生值。
+      测试 `AC2 — splice is REPLACE`：命令含 `--test-concurrency=8` **与** `--test-concurrency 8`
+      均被替换为唯一的 `--test-concurrency=1`。**配套 test.sh 改动**（`has_explicit_concurrency`）：
+      显式 flag 存在时 test.sh 不再拼自己的默认——真实 node 进程也只出现一个
+      `--test-concurrency`（ABORT #5 的 `=8 =8` 双拼杜绝）。
+- [x] AC3: 起跑前过 resource-gate，WAIT 时不启动（state 保持 running/green 不动）
+      — `checkResourceGate()` 在写 `state=running` **之前**跑 `resource-gate.sh --for full-suite`；
+      WAIT ⇒ 退出非 0、state 文件字节不动。测试 `AC3 — resource gate WAIT`：预先写的 green 状态在
+      WAIT 下原样保留、suite 未被 spawn；`AC3 — GO`：GO 下正常跑绿。
+- [x] AC4: `full-suite-runner.test.mjs` 扩展覆盖三行为（负控制：显式 8 + 已有 `=8` → 替换为派生值）
+      — 新增 AC1/AC2/AC3/AC4 测试（见上）；AC4 负控制 `explicit --lane-count 8 + command has =8`
+      ⇒ 唯一 `--test-concurrency=8`（非两个 8）。
+- [x] AC5: **inner 停止条件区分 failed vs aborted**——`state: red` + `reason: aborted`（或等价语义）
       不触发 stop-dispatch；只有 `reason: failed`（或检测到真实失败行）才停。测试覆盖两种形态
       （负控制：aborted 下 inner 继续派发；failed 下 inner 停止）
-- [ ] AC6: 与 `gap-red-window-dispatch-stop-should-be-shared-gate-conditional` 交叉标注（stop-dispatch
-      语义同一族）
+      — `suite-state-trigger.ts` 新增 `shouldStopDispatch()`（`red && reason !== aborted`），
+      `runOnce().stopSignal` / `SUITE-RED.stopSignal` 都走它；runner 写 red 时带 `reason`
+      （`failed`/`aborted`），SIGTERM/SIGINT 处理写 `red+aborted`。测试：`shouldStopDispatch`
+      单元（aborted=false, failed/missing=true）+ `runOnce` 两形态 + runner 信号杀 ⇒ red+aborted
+      ⇒ `stopSignal=false`。文档（fast-mode-loop-tick 步骤 3 / orchestrator-loop-tick 红窗）同步。
+- [x] AC6: 与 `gap-red-window-dispatch-stop-should-be-shared-gate-conditional` 交叉标注（stop-dispatch
+      语义同一族）— 本任务体提到该任务；该任务体加回链（见 Dispatch review / Touches）；
+      测试 `AC6 — cross-annotation` 双向断言。
 
 ## Definition of Done
 
@@ -82,7 +101,10 @@ WAIT、load 15.77，**正是 ABORT #1/#3/#4 与两次整机崩溃的同一形态
 
 - tasks/gap-full-suite-runner-concurrency-default-and-gate.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - plugin/scripts/full-suite-runner.ts
+- plugin/scripts/suite-state-trigger.ts（`shouldStopDispatch` + `reason` 字段——stop-dispatch 消费者）
 - plugin/test/full-suite-runner.test.mjs
+- plugin/test/suite-state-trigger.test.mjs（AC5 两形态测试）
+- scripts/test.sh（`has_explicit_concurrency`——显式 flag 为唯一并发源，杜绝 `=8 =8` 双拼）
 - plugin/loop/fast-mode-loop-tick.md（步骤 3 停止条件：failed vs aborted）
 - plugin/loop/orchestrator-loop-tick.md（红窗分诊：aborted 处置语义）
 - tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（AC3 交叉标注）
@@ -91,9 +113,61 @@ WAIT、load 15.77，**正是 ABORT #1/#3/#4 与两次整机崩溃的同一形态
 
 ## Contract
 
-measure   effective_concurrency = `ps -e -o args | grep -o -- '--test-concurrency=[0-9]*' | wc -l` stdout 数字段（应=1 且值为派生）
+measure   effective_concurrency = `ps -e -o args | grep -o -- '--test-concurrency=[0-9]*' | wc -l` stdout 数字段（应=1 且值为派生；实测等价断言：fake test.sh 记录的 spawn 参数恰一个 `--test-concurrency=<派生>`）
 band      effective_concurrency = 1（派生值，无重复拼接）
 invariant aborted_not_stop_dispatch = 1（`state: red` + `reason: aborted` 不触发 stop-dispatch）
 invoke    `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 control   显式传 `--lane-count 8` 且命令已含 `=8` ⇒ 进程只出现一个 `=8`（replace 生效）；aborted-red 构造 ⇒ inner 不停止（AC5）
 resume    四条修改分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T11:2xZ
+changed: ABORT #5（`--test-concurrency=8 =8` 双拼、PSI 88、WAIT 下开跑）同 ABORT #1/3/4 形态的
+机制性修复，四条同一族改动一次做完：
+1. **AC1** runner 默认 laneCount 改为 nproc 派生（`max(1, floor(nproc/2.1))`，本机 nproc=4 ⇒ 1），
+   不再硬编码 8——测试以 `RESOURCE_GATE_NPROC=4` 实测 `laneCount=1` 且 spawn 恰一个
+   `--test-concurrency=1`。
+2. **AC2** splice 改为 REPLACE：`stripConcurrencyFlags()` 剥命令里已有的 `--test-concurrency=*`
+   （`=` 与空格两种拼写）再拼派生值；配套 **test.sh `has_explicit_concurrency`**——显式 flag 存在时
+   test.sh 不拼自己的默认，真实 node 进程也只一个 `--test-concurrency`（负控制：`--lane-count 8` +
+   命令含 `=8` ⇒ 恰一个 `=8`）。
+3. **AC3** 起跑前过 `resource-gate.sh --for full-suite`；WAIT ⇒ 退出非 0、state 文件字节不动
+   （green 预写状态在 WAIT 下原样保留、suite 未 spawn）。
+4. **AC5 reason 轴** runner 写 red 带 `reason`（failed/aborted），SIGTERM/SIGINT 写 red+aborted；
+   `suite-state-trigger.shouldStopDispatch()`（red && reason ≠ aborted）成为 stop-dispatch 唯一判据，
+   负控制 aborted-red ⇒ `stopSignal=false`（12 个互不相交任务被 aborted-red 全挡的第二次实证的机制
+   修复）。文档（fast-mode-loop-tick 步骤 3 / orchestrator-loop-tick 红窗）同步 reason 轴语义。
+DoD 未勾——全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）由外层异步验证 gate 在
+修复后重跑确认；本任务只实现 + scoped 验证。
+
+**验证证据（scoped 实跑，2026-08-05）**：
+
+```text
+$ bash scripts/test.sh --for-task gap-full-suite-runner-concurrency-default-and-gate --allow-thin
+warning: test-selection-thin: task ... resolved tests for 4/11 Touches entries (0.36) < 0.5; pass --allow-thin
+  (thin 预期：touches 多为 loop-tick 文档 + 任务交叉标注，仅 full-suite-runner / suite-state-trigger 两个测试文件)
+✔ AC1 — default laneCount is NPROC-derived (nproc=4 → 1); spawned command carries ONE --test-concurrency=1
+✔ AC2 — the splice is REPLACE: an existing --test-concurrency=8 (= and space spellings) is stripped and replaced by the derived value
+✔ AC3 — resource gate WAIT ⇒ the runner does NOT start and leaves the state file untouched
+✔ AC3 — resource gate GO ⇒ the runner starts (state=running then green)
+✔ AC4 — negative control: explicit --lane-count 8 + command already has =8 ⇒ exactly ONE =8 (replace, not two)
+✔ AC5 — a signal-killed run writes state=red reason=aborted, which must NOT trigger stop-dispatch
+✔ AC5 — shouldStopDispatch distinguishes failed vs aborted (aborted does NOT stop; failed/missing DOES)
+✔ AC5 — runOnce reports stopSignal=false for red+aborted and true for red+failed
+✔ Contract invoke — full-suite-runner.ts --fail-fast-check: failure suite => red => SUITE-RED => stopSignal
+ℹ tests 29 / pass 29 / fail 0 / cancelled 0
+```
+
+```text
+$ node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check
+full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)
+full-suite-runner: FINAL state=red reason=failed durationMs=37 exit=1
+fail-fast-check: suite exit=1 state=red reason=failed stopSignal=true suiteRedEvent=recorded early=false
+fail-fast-check OK: runner wrote state=red reason=failed → trigger recorded SUITE-RED → stopSignal in place
+```
+
+配套 test.sh 改动验证（`resource-gate.test.mjs` AC5 5 个派生站点 + `select-tests-for-touches.test.mjs` AC11
+exec 行 pinning 均绿：33/33 pass）——`has_explicit_concurrency` 使显式 flag 为唯一并发源，真实
+node --test 进程只出现一个 `--test-concurrency`（杜绝 ABORT #5 的 `=8 =8` 双拼）。

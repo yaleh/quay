@@ -19,6 +19,22 @@
 //         (fast-mode-loop-tick.md step 3): red => inner stops new dispatch AND holds
 //         completed-agent fan-in until the outer re-greens.
 //
+// Task: gap-full-suite-runner-concurrency-default-and-gate (2026-08-05, ABORT #5)
+//   AC1 — the default laneCount is NPROC-DERIVED (max(1, floor(nproc / 2.1)) — the SAME
+//         derivation as test.sh's AC5), NOT the hardcoded 8. On this box nproc=4 ⇒ 1.
+//   AC2 — the --test-concurrency splice is a REPLACE, not an append: any existing
+//         --test-concurrency=* (both `=` and space spellings) is stripped from the command
+//         before the effective value is spliced, so the spawned process shows EXACTLY ONE
+//         --test-concurrency=<effective>. ABORT #5 was `--test-concurrency=8 =8` (two 8s) —
+//         the outer's explicit 8 and test.sh's own default 8 coexisted, and last-flag-wins
+//         silently reverted to 8 with no criterion catching it.
+//   AC3 — the shared resource gate (plugin/scripts/resource-gate.sh --for full-suite) is
+//         consulted BEFORE the suite starts; on WAIT the runner does NOT start and leaves the
+//         state file untouched (still running/green).
+//   AC5 (reason axis) — red states carry a `reason` field: "failed" (a real failure was
+//         detected — the stop-dispatch signal) or "aborted" (the run produced NO correctness
+//         conclusion — spawn error / signal kill; MUST NOT stop dispatch).
+//
 // It also tees the suite's stdout+stderr to a log file (default .quay/full-suite.log)
 // so the outer's verification gate can grep the 判绿 markers (cancelled 0 /
 // FULL-SUITE-EXIT=0 / tests N = reference).
@@ -29,17 +45,17 @@
 //     [--command "<test command>"]   # default: bash scripts/test.sh (canonical full suite)
 //     [--state-file <path>]          # default: .quay/full-suite-state.json
 //     [--log-file <path>]            # default: .quay/full-suite.log
-//     [--lane-count <n>]             # default: 8 (canonical full-suite concurrency)
+//     [--lane-count <n>]             # default: max(1, floor(nproc/2.1)) (nproc-derived, AC1)
 //     [--root <path>]                # workspace root (test-hermetic; default repo root)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
-// Exit: 0 if the suite is green, 1 if red. The durable signal the inner reads is the
-// state file, not the exit code.
+// Exit: 0 if the suite is green, 1 if red OR the resource gate said WAIT (not started).
+// The durable signal the inner reads is the state file, not the exit code.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
@@ -49,6 +65,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
+export type SuiteStateReason = "failed" | "aborted";
 
 export interface SuiteState {
   state: SuiteStateValue;
@@ -57,6 +74,14 @@ export interface SuiteState {
   finishedAt: string | null; // ISO 8601; null while running
   durationMs: number | null; // finishedAt - startedAt; null while running
   laneCount: number;
+  /**
+   * Present only on red (AC5 reason axis). "failed" = a real failure was detected (the
+   * stop-dispatch signal). "aborted" = the run produced NO correctness conclusion (spawn
+   * error / signal kill) and MUST NOT trigger stop-dispatch (gap-full-suite-runner-
+   * concurrency-default-and-gate AC5). Legacy red states without `reason` are treated as
+   * "failed" (fail-closed toward stopping) by shouldStopDispatch.
+   */
+  reason?: SuiteStateReason;
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -86,23 +111,118 @@ export function isFailureLine(line: string): boolean {
   return FAILURE_PATTERNS.some((re) => re.test(line));
 }
 
+// ── AC1/AC2: nproc-derived default laneCount + REPLACE splice ───────────────────────────────────────
+
+/**
+ * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
+ * derivation: max(1, floor(nproc / 2.1)). The old hardcoded 8 was a 4.25× oversubscription on a
+ * 4-core box (8 workers + spawned subprocesses = 17 processes, PSI 88 — the crash family behind
+ * ABORT #1/#3/#4/#5). RESOURCE_GATE_NPROC / RESOURCE_GATE_AMPLIFICATION are the deterministic test
+ * seams (the same env test.sh's default_concurrency_formula reads).
+ */
+export function defaultLaneCount(): number {
+  const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
+    typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
+  );
+  const ncpu = Number(ncpuRaw);
+  const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "2.1");
+  const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 2.1;
+  return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp));
+}
+
+/**
+ * AC2 — strip any existing `--test-concurrency=*` from a command string, both the `=` spelling
+ * (`--test-concurrency=8`) and the SPACE spelling (`--test-concurrency 8`). The splice is a
+ * REPLACE so the spawned process carries exactly ONE --test-concurrency (the effective value).
+ */
+export function stripConcurrencyFlags(cmd: string): string {
+  let out = cmd.replace(/\s+--test-concurrency=\d+/g, "");
+  out = out.replace(/\s+--test-concurrency\s+\d+/g, "");
+  return out.trim();
+}
+
+/**
+ * Whether a command is concurrency-relevant — the default full suite (`bash scripts/test.sh`),
+ * or any command that references a test.sh / already carries a --test-concurrency flag. Arbitrary
+ * commands (a fake suite in tests, the --fail-fast-check control) are NOT spliced — the runner
+ * cannot control their concurrency, and appending a node flag would corrupt them.
+ */
+export function isConcurrencyRelevantCommand(cmd: string): boolean {
+  return /\btest\.sh\b/.test(cmd) || cmd.includes("--test-concurrency");
+}
+
+/** Build the spawned command with the effective laneCount spliced as the ONLY --test-concurrency. */
+export function spliceConcurrency(cmd: string, laneCount: number): string {
+  const stripped = stripConcurrencyFlags(cmd);
+  return `${stripped} --test-concurrency=${laneCount}`;
+}
+
+// ── AC3: resource-gate consultation before starting ──────────────────────────────────────────────────
+
+/**
+ * AC3 — consult the shared resource gate BEFORE starting the full suite. WAIT (non-zero exit) ⇒
+ * the runner must NOT start; the state file is left untouched (still running/green), and the runner
+ * exits non-zero so the caller re-ticks. The gate is the REAL plugin/scripts/resource-gate.sh (its
+ * RESOURCE_GATE_TEST_* env seams flow through for deterministic tests). QUAY_TEST_SKIP_RESOURCE_GATE=1
+ * is the test escape hatch (same env test.sh honors).
+ */
+export function checkResourceGate(root: string): { ok: boolean; output: string } {
+  const gate = path.join(__dirname, "resource-gate.sh");
+  try {
+    const output = execFileSync("bash", [gate, "--for", "full-suite"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { ok: true, output };
+  } catch (e) {
+    const err = e as { stdout?: string | Buffer; stderr?: string | Buffer; status?: number };
+    return {
+      ok: false,
+      output: `${String(err.stdout ?? "")}${String(err.stderr ?? "")}`,
+    };
+  }
+}
+
+// ── run ─────────────────────────────────────────────────────────────────────────────────────────────
+
 export async function run(argv: string[]): Promise<number> {
   const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const explicitCommand = parseArg(argv, "--command");
   const laneCountArg = parseArg(argv, "--lane-count");
-  const laneCount = Number(laneCountArg ?? "8");
-  // AC16 (outer 2026-08-05, ABORT #2): `--lane-count` must PROPAGATE to the spawned
-  // test.sh — before this, the command was static `bash scripts/test.sh`, so an explicit
-  // `--lane-count 1` only wrote the state field while the suite still ran the default
-  // concurrency (measured: 9 processes at --test-concurrency=8, PSI 94 — the crash).
-  // When --lane-count is explicitly given, splice `--test-concurrency=<N>` (the `=`
-  // spelling test.sh's flags-only form requires); when omitted, defer to test.sh's own
-  // derived default (currently pinned to 8 per resource-gate AC5) and record 8.
+  // AC1 — effective laneCount = explicit --lane-count if given, else the nproc-derived default.
+  const laneCount = laneCountArg !== undefined ? Number(laneCountArg) : defaultLaneCount();
+  if (!Number.isFinite(laneCount) || laneCount < 1) {
+    process.stderr.write(`full-suite-runner: invalid --lane-count '${laneCountArg}' (must be a positive integer)\n`);
+    return 1;
+  }
+
+  const baseCommand = explicitCommand ?? "bash scripts/test.sh";
+  // AC2 — REPLACE splice: strip any existing --test-concurrency (both spellings) and splice the
+  // effective laneCount as the ONLY concurrency flag. Arbitrary non-concurrency commands (a fake
+  // suite, --fail-fast-check) are left untouched — their concurrency is their own business.
   const command =
-    explicitCommand ??
-    (laneCountArg ? `bash scripts/test.sh --test-concurrency=${laneCount}` : "bash scripts/test.sh");
+    explicitCommand === undefined || isConcurrencyRelevantCommand(baseCommand)
+      ? spliceConcurrency(baseCommand, laneCount)
+      : baseCommand;
+
   const stateFile = path.resolve(root, parseArg(argv, "--state-file") ?? ".quay/full-suite-state.json");
   const logFile = path.resolve(root, parseArg(argv, "--log-file") ?? ".quay/full-suite.log");
+
+  // AC3 — the resource gate MUST be consulted BEFORE the suite starts (state=running is written
+  // AFTER the gate, so a WAIT leaves the previous state — running/green — untouched). --fail-fast-check
+  // is a lightweight hermetic control, not a heavy op — it skips the gate.
+  const skipGate = process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" || argv.includes("--fail-fast-check");
+  if (!skipGate) {
+    const gate = checkResourceGate(root);
+    if (!gate.ok) {
+      process.stderr.write(
+        `full-suite-runner: resource gate says WAIT — NOT starting (state untouched; re-tick when the gate reports GO)\n${gate.output}\n`
+      );
+      return 1;
+    }
+    process.stderr.write("full-suite-runner: resource gate says GO — starting\n");
+  }
 
   const startedAt = new Date().toISOString();
   const base = { runner: "outer" as const, startedAt, laneCount };
@@ -116,19 +236,42 @@ export async function run(argv: string[]): Promise<number> {
     env: { ...process.env },
   });
 
+  // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
+  // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
+  // is never downgraded — the failure conclusion stands.
+  let redDetected = false;
+  let runDone = false;
+  const onSignal = (sig: string) => {
+    if (runDone || redDetected) return;
+    const at = new Date().toISOString();
+    writeState(stateFile, {
+      state: "red",
+      reason: "aborted",
+      ...base,
+      finishedAt: at,
+      durationMs: Date.parse(at) - Date.parse(startedAt),
+    });
+    process.stderr.write(
+      `full-suite-runner: ${sig} received -> state=red reason=aborted (no correctness conclusion)\n`
+    );
+    process.exit(1);
+  };
+  process.once("SIGTERM", onSignal);
+  process.once("SIGINT", onSignal);
+
   // Tee the suite output to the log (the outer's verification gate greps it for the
   // 判绿 markers), and flip red the instant a failure line appears (AC2).
   const logStream = fs.createWriteStream(logFile, { flags: "w" });
-  let redDetected = false;
 
   const onLine = (line: string) => {
     logStream.write(line + "\n");
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
-      // AC2 — mark RED immediately, while the run is still in progress.
-      writeState(stateFile, { state: "red", ...base, finishedAt: null, durationMs: null });
+      // AC2 — mark RED immediately, while the run is still in progress. reason=failed (AC5: this
+      // IS a real failure — the stop-dispatch signal).
+      writeState(stateFile, { state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null });
       process.stderr.write(
-        `full-suite-runner: FAILURE detected on stream -> state=red (run still in progress)\n  ${line}\n`
+        `full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)\n  ${line}\n`
       );
     }
   };
@@ -142,13 +285,24 @@ export async function run(argv: string[]): Promise<number> {
   child.on("error", (err) => {
     spawnError = err;
     redDetected = true;
-    writeState(stateFile, { state: "red", ...base, finishedAt: null, durationMs: null });
-    process.stderr.write(`full-suite-runner: spawn error -> state=red\n  ${String(err)}\n`);
+    // AC5 (reason axis) — a spawn error means the suite never ran: NO correctness conclusion.
+    writeState(stateFile, {
+      state: "red",
+      reason: "aborted",
+      ...base,
+      finishedAt: null,
+      durationMs: null,
+    });
+    process.stderr.write(`full-suite-runner: spawn error -> state=red reason=aborted\n  ${String(err)}\n`);
   });
 
   const exitCode: number | null = await new Promise<number | null>((resolve) => {
     child.once("close", (code) => resolve(code));
   });
+
+  runDone = true;
+  process.removeListener("SIGTERM", onSignal);
+  process.removeListener("SIGINT", onSignal);
 
   // Flush the log stream before writing the final verdict.
   await new Promise<void>((resolve) => logStream.end(resolve));
@@ -156,17 +310,22 @@ export async function run(argv: string[]): Promise<number> {
   const finishedAt = new Date().toISOString();
   const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
 
-  // AC1/判绿 — green ONLY if no failure line was detected AND the suite exited 0.
+  // AC1/判绿 — green ONLY if no failure line was detected AND the suite exited 0. Red carries the
+  // reason axis (AC5): a spawn error (never started) is aborted; anything else with a red verdict
+  // (detected failure line or non-zero exit) is failed.
   const green = !redDetected && spawnError === null && exitCode === 0;
-  const finalState: SuiteState = {
-    state: green ? "green" : "red",
-    ...base,
-    finishedAt,
-    durationMs,
-  };
+  const finalState: SuiteState = green
+    ? { state: "green", ...base, finishedAt, durationMs }
+    : {
+        state: "red",
+        reason: spawnError !== null ? "aborted" : "failed",
+        ...base,
+        finishedAt,
+        durationMs,
+      };
   writeState(stateFile, finalState);
   process.stderr.write(
-    `full-suite-runner: FINAL state=${finalState.state} durationMs=${durationMs} exit=${exitCode}\n`
+    `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
   return green ? 0 : 1;
 }
@@ -174,8 +333,8 @@ export async function run(argv: string[]): Promise<number> {
 /**
  * --fail-fast-check（gap-red-window-has-no-automatic-executor Contract invoke）：
  * 构造一次失败 suite ⇒ 验证 RED 自动触发链端到端：
- *   runner 写 state=red（早期或终态）→ suite-state-trigger 的 runOnce 检测到转变 →
- *   记 SUITE-RED 事件 → stopSignal 在位（state=red 即信号，AC1(b)）。
+ *   runner 写 state=red → suite-state-trigger 的 runOnce 检测到转变 →
+ *   记 SUITE-RED 事件 → stopSignal 在位（state=red + reason=failed 即信号，AC1(b)/AC5）。
  * 用临时根（hermetic），不触碰真实 `.quay/full-suite-state.json`。退出 0 = 链验证通过；
  * 退出非 0 = 链某环断裂（触发者坏了，外层据此知道机制失效，而不是红着无人处置）。
  */
@@ -183,11 +342,14 @@ async function failFastCheck(): Promise<number> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ffc-"));
   try {
     const fakeCommand = 'echo "not ok 1 - fail-fast-check (RED auto-trigger control)"; exit 1';
-    const code = await run(["--root", tmp, "--command", fakeCommand]);
+    // --fail-fast-check is a lightweight hermetic control (NOT a heavy full-suite op) — it must skip
+    // the resource gate (run() checks argv for the marker), so a loaded machine cannot make the
+    // Contract self-check flake on a WAIT.
+    const code = await run(["--root", tmp, "--command", fakeCommand, "--fail-fast-check"]);
     const { status, events, stopSignal } = runOnce(tmp);
     const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
     console.log(
-      `fail-fast-check: suite exit=${code} state=${status} stopSignal=${stopSignal} ` +
+      `fail-fast-check: suite exit=${code} state=${status} reason=${redEv?.state?.reason ?? "?"} stopSignal=${stopSignal} ` +
         `suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
     );
     if (code !== 1) {
@@ -199,14 +361,18 @@ async function failFastCheck(): Promise<number> {
       return 1;
     }
     if (!stopSignal) {
-      console.error("fail-fast-check FAIL: expected stopSignal (state=red IS the stop-dispatch signal)");
+      console.error("fail-fast-check FAIL: expected stopSignal (state=red + reason=failed IS the stop-dispatch signal)");
       return 1;
     }
     if (!redEv) {
       console.error("fail-fast-check FAIL: expected a SUITE-RED event recorded by suite-state-trigger");
       return 1;
     }
-    console.log("fail-fast-check OK: runner wrote state=red → trigger recorded SUITE-RED → stopSignal in place");
+    if (redEv.state?.reason !== "failed") {
+      console.error(`fail-fast-check FAIL: expected reason=failed on the red state, got ${redEv.state?.reason}`);
+      return 1;
+    }
+    console.log("fail-fast-check OK: runner wrote state=red reason=failed → trigger recorded SUITE-RED → stopSignal in place");
     return 0;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
