@@ -96,10 +96,10 @@ extra:
       （= 有没有在没疼时开维度；当前 0）；趋势打标
       **证据**：`plugin/scripts/prefriction-count.sh`（`bash plugin/scripts/prefriction-count.sh`）对
       git 窗口内新增任务逐条扫触发证据（失败/崩溃/泄漏/OOM/告警/恶化/矛盾/「今晚」等，触发面从宽）计
-      数无触发者；实测最近 24h 滚动窗口输出 `prefriction_dimensions=0`（63 条新立案全部有触发，含
-      quay-init 断检出等——触发面从宽后与任务「当前 0」基线一致）；**趋势打标 = 滚动窗口计数的逐夜序列**
-      （`--since` 接受固定 ISO 以复现）。fixture（一触发一干净）在 `plugin/test/axis-generator.test.mjs`
-      里断言计数=1 且 `--json` 逐条归因，双向可控。
+      数无触发者；实测最近 24h 滚动窗口（2026-08-05 复验）输出 `prefriction_dimensions=0`（73 条新立案
+      全部有触发，含 quay-init 断检出等——触发面从宽后与任务「当前 0」基线一致）；**趋势打标 = 滚动窗口
+      计数的逐夜序列**（`--since` 接受固定 ISO 以复现）。fixture（一触发一干净）在
+      `plugin/test/axis-generator.test.mjs` 里断言计数=1 且 `--json` 逐条归因，双向可控。
 - [x] AC3: **预测力检验**——生成器能反推已知的轴（今晚 5 条 5/5 作为回归控制；新轴生成须可被同一问句
       复现）
       **证据**：`node --experimental-strip-types plugin/scripts/axis-generator.ts --selfcheck` 输出
@@ -114,6 +114,20 @@ extra:
 - [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
       **证据**：`plugin/test/axis-generator.test.mjs` 首行 `// @test-group governance`，10 条全部
       `node:test`（`node --test plugin/test/axis-generator.test.mjs` → pass 10 / fail 0）。
+
+## Verification（scoped，2026-08-05 复验）
+
+`bash scripts/test.sh --for-task gap-axis-generator-question-what-range-every-standing-criterion --allow-thin`
+→ **exit 0，pass 10 / fail 0 / cancelled 0**（`plugin/test/axis-generator.test.mjs` 10 条全绿）。实跑 invoke：
+`--criteria` **total criteria: 28 | with ≥1 unopened axis: 28**（gate 16 + static-checker 12）；
+`--selfcheck` **ALL PASS（5/5 regression + negative + invariant）**；`prefriction-count.sh`
+**prefriction_dimensions=0**。
+
+**复验发现并修复（fixture 确定性）**：`.quay/config.yml` 是 gitignored 的工作区本地配置（DIR-050），
+fresh clone/CI 上不存在 ⇒ 门禁枚举合法地为 0。原测试无条件断言 `gates >= 10` / `total >= 15` 会在 fresh
+clone 上红。已在 `plugin/test/axis-generator.test.mjs` 中把两处 config 依赖测试改为：config 存在时断言门禁
+集合（工作区实测 16 门禁），config 缺失时走 checker-only 分支（checker 集来自被跟踪的
+`scripts/test.sh`，无条件的断言仍在）。两场景实测均 10/10 绿。
 
 ## Definition of Done
 

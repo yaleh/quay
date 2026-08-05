@@ -92,7 +92,16 @@ test("AC1 classification shape: every criterion gets a per-axis range verdict", 
 
 test("AC1 enumerateCriteria: gates + static checkers are discovered mechanically with descriptions", () => {
   const { gates, checkers, all } = enumerateCriteria(REPO_ROOT);
-  assert.ok(gates.length >= 10, `expected a real gate set, got ${gates.length}`);
+  // `.quay/config.yml` is gitignored and workspace-local (DIR-050) — a fresh clone/CI checkout has
+  // NO workspace config, so the gate enumeration legitimately yields 0 there (the real workspace's
+  // gate set is not part of the repo). The gate-set assertion is therefore live-workspace-only; the
+  // checker set (discovered from the tracked scripts/test.sh) is asserted unconditionally so a fresh
+  // clone still exercises the mechanical enumeration.
+  if (fs.existsSync(path.join(REPO_ROOT, ".quay", "config.yml"))) {
+    assert.ok(gates.length >= 10, `expected a real gate set, got ${gates.length}`);
+  } else {
+    assert.equal(gates.length, 0, "no workspace .quay/config.yml on a fresh clone — 0 gates is expected");
+  }
   assert.ok(checkers.length >= 5, `expected real static checkers, got ${checkers.length}`);
   assert.equal(all.length, gates.length + checkers.length);
   // descriptions come from the scripts' own header comments (a checker with none is suspicious)
@@ -109,7 +118,10 @@ test("AC1 CLI --criteria emits a JSON report", () => {
   });
   assert.equal(res.status, 0, res.stderr);
   const parsed = JSON.parse(res.stdout);
-  assert.ok(parsed.total >= 15);
+  // Gate count depends on the gitignored workspace config (absent on a fresh clone/CI); the tracked
+  // static checkers alone must still clear the floor so the report is meaningful either way.
+  const floor = fs.existsSync(path.join(REPO_ROOT, ".quay", "config.yml")) ? 15 : 5;
+  assert.ok(parsed.total >= floor, `expected >= ${floor} criteria, got ${parsed.total}`);
   assert.equal(parsed.criteria.length, parsed.total);
 });
 
