@@ -239,6 +239,7 @@ grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.m
 
 - tasks/gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - plugin/test/send-keys-verified.test.mjs（teardown kill 自己起的 server，TMUX_TMPDIR 校验）
+- plugin/test/quay-init-tmux-detection.test.mjs（AC2b：4 处 kill-server 改 kill-session -t）
 - plugin/test/heavy-op-token*.test.mjs（ol-tok 泄漏源，同族 teardown）
 - plugin/test/session-liveness.test.mjs（同族 teardown）
 - plugin/scripts/（套件尾部泄漏断言：skv-/session-liveness-/enter-repro- 前缀扫描）
