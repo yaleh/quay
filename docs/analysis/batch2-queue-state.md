@@ -4338,6 +4338,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   延伸域）。telemetry `fm-...-ee13ls`。
 - **AC12b 进度**：#1 ✓、#2 ✓、#3 在飞、#4 ✓。在飞 1/3。
 
+### tick 2026-08-05T15:0xZ（内层：AC12b 四阻塞全部收齐）
+
+- **dist-runtime 落地**（merge `a3d3091b`）：version.ts 改 `import pkg from "../package.json" with {type:"json"}`，
+  esbuild json loader **构建时内联版本号**（SEA 构建同一机制）——dist 单独拷到无 package.json 隔离目录
+  `--version` = 0.3.13、ENOENT grep=0、bundle 无 `../package.json`。**+AC4** 旧 config mcp_entry 指向
+  不存在路径 ⇒ quay-init 迁移到安装态 vendor 路径（升级通道 config 迁移，B 机 dev-tree 残留 `./bin/quay-native.ts`）；
+  **+AC6** 交叉标注。scoped 54/54（首跑 1 pre-existing flake，复跑 54/54）。
+- **✅ AC12b 四阻塞全部落地**：#1 ghost-drive、#2 vendor-runtime、#3 dist-runtime、#4 runner-red-pattern。
+  **恢复正常派发**（外层裁定：四阻塞收齐后继续其它）。在飞 0/3。
+
+### tick 2026-08-05T15:1xZ（内层：恢复派发）
+
+- **恢复正常派发**（AC12b 收齐后）。就绪池 27/12（dispatchable_disjoint=12）。
+- **派发 2**（disjoint）：adaptive-concurrency-cap-tied-to-resource-gate + DIR-119（directive）。self-touch 已补。
+- **在飞 2/3**。套件 green。
+
 ### tick 2026-08-05T14:2xZ（外层，AC12b 阻塞 2/4 落地）
 
 - **ghost-drive（阻塞 #1）已 merge**（ba3a4e87）：fresh-session detection（transcript-delivery-check --is-fresh）跳过清屏，非 fresh 保留 NBSP 路径，real fresh-session e2e rc=0。welcome 屏修复完成。
@@ -4377,3 +4393,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **archguard 系统性模式（跨项目证据）**：TASK-64/65 加 MCP tool 缺 ADR-007 flag，scoped 全绿 AC 全勾但没跑 check-adr——跨切判据无法被 basename 配对选中，只能 full-suite 兜底。与 quay scoped-packaging blindspot 同型。**跨切判据标记**（无论 touches 必须进 scoped）补入 gap-scoped-selection-blind-to-packaging-state-diff（AC2）。
 - **机制/策略分离（管理者纠正）**：并发档位数字是策略（archguard GO=4/WAIT=2 合理），联动机制（读什么/何时读/滞回）quay 统一实现可配置。自适应任务补 AC4 档位可配置 + invariant cap_bands_configurable。
+
+### tick 2026-08-05T15:2xZ（外层，升级通道第二种形态立案）
+
+- **AC12b #3 的 mcp_entry 修好 + verify OK**（B 机正当升级通道验证），但 package.json ENOENT 仍在——**新根因：dist 陈旧**（B 机 dist 13:34 构建，修复 15:10 合并，git pull 不重建 dist）。
+- **升级通道缺失第二种形态（动态漂移）**：源码能同步（git pull），构建产物不能自动跟随。verify 只查存在不查新鲜度。ensure_vendor_runtime 只在 dist 缺失时跑，不在陈旧时跑。
+- **建任务** gap-upgrade-channel-cant-sync-build-artifacts-dist-stale（陈旧检测：src mtime > dist mtime ⇒ 重建/fail-closed + verify 新鲜度检查）。
+- **AC10 边界**：本轮发现由 tick 强制问句引发（pre-friction 但触发源是按流程执行非被伤害）——管理者裁不计数（边缘案例宁可不计）。
