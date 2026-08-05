@@ -2,7 +2,7 @@
 id: gap-exclusion-lists-have-no-necessity-check
 title: AC1b's exclusion table only grows and nothing can discover an unnecessary
   entry — green is not the same as necessary
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -75,6 +75,7 @@ resume 先抓出当前惰性条目，再加检查
 - [ ] 任务体记录：排除表没有必要性强制函数这件事被机械化，不再是「记得检查」
 
 ## Touches
+- tasks/gap-exclusion-lists-have-no-necessity-check.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/test/loop-shipping.test.mjs
 - plugin/test/loop-shipping-necessity-check.test.mjs（新）

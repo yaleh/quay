@@ -322,6 +322,7 @@ gate 的作用不是让测试更快，是让「现在能不能跑」成为一个
 `free -m` available。WAIT 的「原因」是打印出来的数字，不是各自脑中的印象。
 
 ## Touches
+- tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - scripts/resource-gate.sh（新增，本任务核心产出）
 - scripts/test.sh

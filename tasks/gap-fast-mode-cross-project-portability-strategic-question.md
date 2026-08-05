@@ -3,7 +3,7 @@ id: gap-fast-mode-cross-project-portability-strategic-question
 title: Phase 3's strategic question — is the fast-mode two-layer loop truly
   portable cross-project, or overfit to quay — is being answered ad-hoc via
   meta-cc cold-start with no written reference; pin it explicitly
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -55,6 +55,7 @@ Phase 3 想回答的战略问题**本身仍然成立、仍然重要**：
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-fast-mode-cross-project-portability-strategic-question.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - docs/proposals/quay-harness-crystallization-roadmap.md（或替换文档）
 - orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md
