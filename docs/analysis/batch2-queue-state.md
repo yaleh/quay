@@ -3802,3 +3802,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   `milestones/fast-mode-telemetry/<date>.json`（机制活着，路径漂移）。CLAUDE.md:140 已修正。
 - **当前**：资源门 WAIT（PSI 80，Go 编译 modernc.org/sqlite 瞬时 82% CPU）；内层 ACTIVE（验证 archguard
   闭环）；M3 验证套件待 gate GO + --lane-count 1 后跑。
+
+### tick 2026-08-05T08:00Z（外层，`unblock`：ABORT #2 + 显式传参传播根因）
+
+- **ABORT #2（07:48Z，紧急）**：管理者告警——外层 07:42 传 `--lane-count 1` 重跑，ps 实证实跑
+  `--test-concurrency=8`（9 进程，load 26.92/PSI 94，07:26 状态复现）。**根因定位（比硬编码更严重）**：
+  `full-suite-runner.ts:91` command 静态（`?? "bash scripts/test.sh"`），`--lane-count` 只写 state
+  字段（:94/:97）**从没拼进 command**（:102 spawn 只传静态 command）⇒ test.sh 收不到并发覆盖走默认 8。
+  **显式传参不生效 + 你以为生效 = 错误安全感下重启一轮**。外层已 ABORT + state=red+reason=aborted。
+- **AC16 立案**（no-resource-awareness re-open）：`--lane-count N` 必须真正传播到 test.sh（拼进 command
+  转 `--test-concurrency`），不能只写 state 字段；ps 实证 `--test-concurrency=<传值>` 生效。
+- **连带（管理者自曝）**：跨项目 .halt 暂停有帮助但不是修复——做决定时还不知 quay 自己跑 8，真正主因
+  在 quay；真修复是 laneCount 链路 + 显式传参传播。
+- **state 文件两项不可信（并入 checker-cost/reason 轴）**：note 被覆盖、laneCount 非实参——趋势数据源
+  不可信。
+- **当前**：资源门 WAIT（PSI 66，内层 meta-cc 协调 3 subagent 跑 DIR-082/083/084）；套件 state=red+
+  aborted；内层已读到 AC16 根因（Cogitated 3m38s 后处理 meta-cc 协调）；待内层空闲驱动 AC16 修复。
+- 本 tick 新立案：OS-anchor（最高优先，崩溃无法自恢复）；ABORT #2 根因入 no-resource-awareness AC16。
