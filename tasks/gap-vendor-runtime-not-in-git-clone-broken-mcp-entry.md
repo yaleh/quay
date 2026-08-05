@@ -57,6 +57,7 @@ extra: {}
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/quay-init.sh（fail-closed + 自动构建）
 - plugin/scripts/sync-vendor.sh（安装时调用）

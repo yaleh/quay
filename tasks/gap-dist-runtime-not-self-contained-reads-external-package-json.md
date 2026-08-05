@@ -63,6 +63,7 @@ self-contained (no npm install needed)」——但产物不自包含，有未声
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-dist-runtime-not-self-contained-reads-external-package-json.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - packages/quay/src/version.ts（内联版本号，不在 __init 读外部文件）
 - packages/quay/scripts/build-dist.mjs（构建时注入版本号）

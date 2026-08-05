@@ -57,6 +57,7 @@ INNER-DRIVEN 用它驱动内层。**排在任何其它任务之前**。
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-send-keys-reliable-welcome-screen-ghost-drive-fails.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/send-keys-reliable.sh（fresh-session 分支）
 - plugin/test/send-keys-reliable.test.mjs（AC1-AC2 测试）

@@ -63,6 +63,7 @@ bug】——只在 vitest 项目暴露（上游看不见自己的缺陷，环境
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/full-suite-runner.ts（FAILURE_PATTERNS 改结构化匹配）
 - plugin/test/full-suite-runner.test.mjs（AC1-AC2 测试）
