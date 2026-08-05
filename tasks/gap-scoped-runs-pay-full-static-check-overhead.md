@@ -24,6 +24,16 @@ tmux/监视器族（ls/lf/ri）——**那是 spawn 型测试的固有成本，�
 `checker-mutation-check` 13 秒 ≈ **16 秒**）⇒ 对那 13 个 3 秒以内的 scoped 运行，**固定开销是测试本身的
 5 倍以上**。这条的收益面是**每个任务、不是每批一次**。
 
+**杠杆点补充（管理者实测）**：17 次 scoped 调用**全部只跑 1-2 个测试文件**（12 次 1 文件、5 次 2 文件，
+无超过 2 的；配对都合理：实现+消费者，如 ruling-required-wiring+inner-blocked-signal、
+session-liveness+monitor-mount-check）。既然每次只跑 1-2 个文件，~16 秒静态检查固定开销占比极极端——
+**13 个快 scoped 里有 7 个，90%+ 的时间花在静态检查上而非测试本身**（fanin-ss 测试仅 0.2s、fanin-d
+0.3s、fanin-pc/rpd 0.8s、fanin-ov 0.9s、fanin-rs 1.2s、fanin-de 1.6s、fanin-a 1.7s）。反过来慢的那几个
+（ri 251s、ls/ls2 119-129s）固定开销可忽略，它们慢是 spawn 密集本身，人已裁定这类必要、不动。
+
+**⇒ 这是两个不同问题**：**快测试被固定开销压着（该动静态检查粒度）**；**慢测试是 spawn 成本（不动）**。
+本条只动前者的杠杆。
+
 ### 选定机制（外层裁定：值得做，且不削弱闸门）
 
 **scoped 加一个「改动相关」静态检查档位；全量套件保持完整不动。**
@@ -52,7 +62,8 @@ tmux/监视器族（ls/lf/ri）——**那是 spawn 型测试的固有成本，�
       非手工清单
 - [ ] AC4: **双向负控制**——(i) 被触碰任务的 Contract 违规 ⇒ scoped 必抓（改动相关检查在跑）；
       (ii) 与改动无关的仓库级 ratchet 违规 ⇒ scoped 不抓、全量必抓（延迟而非静默丢弃，文档化）
-- [ ] AC5: **实测**——快速任务 scoped 运行固定开销下降（~16s → 目标 ~4-6s），before/after 数据贴任务体
+- [ ] AC5: **实测**——快速任务（1-2 文件 scoped）固定开销下降（~16s → 目标 ≤5s，与测试本身同量级，
+      即 fanin-ss 0.2s 类任务的 scoped 运行从 ~16s 降到 ~2-5s），before/after 数据贴任务体
 - [ ] AC6: 权衡文档化——scoped 快反馈 / 全量完整闸门；延迟发现语义写进 test.sh 头或 CLAUDE.md
 - [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
