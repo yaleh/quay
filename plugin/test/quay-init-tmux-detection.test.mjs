@@ -58,6 +58,23 @@ function tmux(args, env) {
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
+// socketPathFor / tmuxAt — explicit -S socket argv (AC2c of
+// gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause). The socket file tmux
+// materializes for TMUX_TMPDIR=<dir> is <dir>/tmux-<uid>/default; carrying it as a -S argv makes
+// the KILL calls immune to a silently lost socket-selection env var (the 09:2xZ wipe shape).
+// Session CREATION stays env-based because quay-init.sh's detection is an env contract — it must
+// resolve the SAME socket the test set up. AC2b: the four teardowns below use kill-session -t
+// <name> (never the old `tmux ['kill-server']` — that command's blast radius is decided by the
+// environment, which can silently vanish).
+function socketPathFor(sockDir) {
+  return path.join(sockDir, `tmux-${process.getuid()}`, 'default');
+}
+function tmuxAt(sockPath, args, env) {
+  const argv = sockPath ? ['-S', sockPath, ...args] : args;
+  const r = spawnSync('tmux', argv, { encoding: 'utf8', env: env ?? process.env });
+  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
 // A worktree root quay-init's validation ACCEPTS: a real disk path, not tmpfs. /tmp is tmpfs on
 // dev boxes and the sibling-of-repo default for a /tmp test workspace would be rejected
 // fail-closed (gap-the-shipped-tick-doc-... AC3). /var/tmp is the disk-backed tmp on Linux.
@@ -137,7 +154,9 @@ test('AC1 — a UNIQUE matching tmux session is detected and written (no --tmux-
     assert.equal(tmux(['has-session', '-t', 'ac1proj-0'], env).status, 0,
       'tmux has-session -t <written value> must exit 0');
   } finally {
-    tmux(['kill-server'], env);
+    // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
+    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'ac1proj-0'], env);
+    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'other-2'], env);
     cleanup(ws);
   }
 });
@@ -196,7 +215,9 @@ test('AC3 — MULTIPLE matching sessions: require explicit --tmux-session (never
     assert.match(envFile, /SESSION_TMUX_SESSION=ac3proj-1/, 'the explicit value must be written');
     assert.equal(tmux(['has-session', '-t', 'ac3proj-1'], env).status, 0, 'AC5: the written value must resolve');
   } finally {
-    tmux(['kill-server'], env);
+    // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
+    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'ac3proj-0'], env);
+    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'ac3proj-1'], env);
     cleanup(ws);
   }
 });
@@ -221,7 +242,8 @@ test('explicit --tmux-session takes priority over detection (the fallback the hu
     const envFile = fs.readFileSync(path.join(ws, 'orchestration', 'session-liveness.env'), 'utf8');
     assert.match(envFile, /SESSION_TMUX_SESSION=myexplicit/, 'the explicit value must be written');
   } finally {
-    tmux(['kill-server'], env);
+    // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
+    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'ac2bproj-0'], env);
     cleanup(ws);
   }
 });
@@ -269,7 +291,8 @@ test('session-liveness.sh — with a configured session the zero-config default 
     assert.match(r.stdout, new RegExp(`SESSION-STATUS ${base} alive=1`),
       `must identify the configured session as alive under the zero-config default target (project root basename ${base}, NOT the session name confproj):\n${r.stdout}`);
   } finally {
-    tmux(['kill-server'], env);
+    // AC2b: kill-session per created session (never kill-server — see socketPathFor comment).
+    tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', 'confproj'], env);
     cleanup(ws);
   }
 });

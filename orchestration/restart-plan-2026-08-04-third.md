@@ -114,3 +114,26 @@ CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000 CLAUDE_CODE_AUTO_COMPACT_WINDOW=917000 CLA
 
 两个窗口在我启动后不久整体消失（连 pane shell 一起）。我没有证据判定是人手动关闭，
 还是我那条命令导致的。**未查清前不作结论**——但 AC4 已经把这条不确定性隔离在启动路径之外。
+
+---
+
+## 6. 更新 2026-08-05 —— 三次崩溃根因获具体机制（AC6, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause）
+
+管理者 2026-08-05 实测：**本仓库测试套件每轮跑完都泄漏一批 tmux server 进程**（217 个，最老 12h，
+全部来自 `plugin/test/send-keys-verified.test.mjs` 的 `skv-ok` 会话，各自带隔离 `TMUX_TMPDIR=/tmp/skv-*/sock`）。
+清理后 PSI cpu avg10 从 **94.18 → 31.47**、`resource-gate.sh --for full-suite` 从 **WAIT → GO**、tmux server
+从 **217 → 10**。
+
+**这给三次崩溃的根因调查补上了此前缺失的机制环节**：各 tick/记录里把「负载飙升」当作未排除候选，
+而负载为什么在崩溃前飙升一直无定论。现在机制是具体的——**套件随轮数累积泄漏 tmux server，每轮几十个
+孤儿进程 → 崩溃前负载被拖到 90+ → 资源压力击穿（OOM / ABORT）**。这解释了 07:26 资源 ABORT 与 07:50
+跨项目暂停为何当时判得对、但归因不完整（主因是套件泄漏，不是 laneCount、不是另外两个项目）。
+
+**修正 2026-08-05 09:2xZ（第四次全灭后）**：管理者实测「`tmux kill-server` 在隔离 `TMUX_TMPDIR` 下安全」
+时，环境变量在两次独立 Bash 调用间静默丢失 → `kill-server` 落到默认 socket → 清空整机 tmux（含
+quay-0 / meta-cc-3 / archguard-4 与 outer/inner 驱动会话）。**结论已撤回并写入任务体**：测试 teardown 一律
+用 `tmux kill-session -t <名>`（爆炸半径只限指名会话，最坏是「无此会话」报错，绝不清空默认 socket），
+绝不用 `kill-server`。第四次崩溃是本次泄漏修复的派生事故，不是第三次崩溃的复发。
+
+关联：`tasks/gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause.md`（本任务，AC1-AC7）；
+`tasks/gap-tests-never-clean-up-their-tmpdirs.md`（同族交叉标注，AC5）。

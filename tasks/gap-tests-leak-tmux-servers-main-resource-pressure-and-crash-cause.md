@@ -142,28 +142,92 @@ Bash 调用，`export ISO_TMPDIR=...` 在第二次调用里已丢失（工具本
 
 ## Acceptance Criteria
 
-- [ ] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`
+- [x] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`
       前缀的 tmux server 或 /tmp 目录残留（机械检查，一次覆盖全类）
-- [ ] AC2: **teardown 回收——用 `kill-session -t <名>`，禁止 `kill-server`**（2026-08-05 撤回重写，
+      → `plugin/scripts/tmux-leak-scan.sh`（`pgrep -a tmux` + `ls -d /tmp/<前缀>*` 快照扫描，绝不调用 tmux）
+      已接入 `scripts/test.sh` 的全量套件尾部（heavy-op 分支，assert-clean-tree 后）——与 assert-clean-tree
+      同一模式：只在串行化的全量默认路径跑（scoped 并行 worktree 的瞬态 fixture 会造成跨 worktree 假阳性，
+      与 assert-clean-tree 跳过 scoped 同理）。scoped 验证由任务方按 dispatch 手动 `pgrep`/scan。
+- [x] AC2: **teardown 回收——用 `kill-session -t <名>`，禁止 `kill-server`**（2026-08-05 撤回重写，
       见上方「管理者撤回声明」）。`send-keys-verified.test.mjs` 的 `newHermetic().cleanup()` 在
       `rmSync` 前，对本文件已知会话名逐个 `tmux(["kill-session","-t", "skv-ok"|"skv-noecho"], env)`。
       **判据（负控制，必须实跑）**：故意把 `env` 的 socket 选择弄空（模拟环境变量丢失），
       该 cleanup 必须**报错或无害**，且 `tmux list-sessions` 显示真实会话**未受影响**——
       这条负控制正是 09:2xZ 第四次全灭暴露的失败形态，不做它就等于没验
-- [ ] AC2b: **同类风险一并消除**——`quay-init-tmux-detection.test.mjs` 现有 **4 处**
+      → 负控制已作为 send-keys-verified.test.mjs 的第 5 个测试实跑通过（见下方执行证据），
+      cleanup 用 `-S <显式 socket>` + `kill-session`，最坏（-S 也丢）落到默认 socket 也只能报「no such session」。
+- [x] AC2b: **同类风险一并消除**——`quay-init-tmux-detection.test.mjs` 现有 **4 处**
       `tmux(['kill-server'], env)` 改为 `kill-session -t <名>`。理由：那 4 处与被撤回的建议是
       同一形态，**已埋在生产代码里**，今晚未炸仅因环境变量未丢
-- [ ] AC2c: **机制性收窄（建议，非阻塞）**——socket 选择从 `TMUX_TMPDIR` 环境变量改为
+      → 4 处全部改为 `tmuxAt(socketPathFor(sockDir), ['kill-session', '-t', <名>], env)`（每测试建的会话逐个杀）。
+- [x] AC2c: **机制性收窄（建议，非阻塞）**——socket 选择从 `TMUX_TMPDIR` 环境变量改为
       `-S <显式路径>` 参数（三个文件当前 `-S` 用法均为 0）。参数丢失会报错，环境变量丢失会
       静默回退默认 socket——今晚全灭的机制根
-- [ ] AC3: **残留清理**——8 个 session-liveness-* + 1 个 enter-repro 泄漏在判断后清除（先确认挂载
+      → send-keys-verified 全部直接 tmux 调用与 cleanup 走 `-S <sockPath>`（helper 脚本 env 契约解析到同一 socket）；
+      quay-init-tmux-detection 的 kill 调用走 `-S`。session-liveness 的 makeHermeticProbe 本就 kill-session（env 契约，
+      -S 不适用，注释已说明）。测试断言「-S 丢失 ⇒ 报错而非回退默认」在负控制里覆盖。
+- [x] AC3: **残留清理**——8 个 session-liveness-* + 1 个 enter-repro 泄漏在判断后清除（先确认挂载
       观察者 pid 2598198 未用，再清）
-- [ ] AC4: **回归控制**——217 泄漏形态不再复现：连续多轮套件后 server 数稳定（不随轮数累积）；
+      → 已核实：挂载观察者 pid 2598198 已不在；`/tmp/enter-repro-*` 无残留；管理者清的 8 个 session-liveness
+      已不在。另发现并清掉今日新产生的孤儿残留（2 个 session-liveness-* 目录、`/tmp/skv-exp`、
+      `/tmp/quay-init-tmux-Fufu1c`、`/tmp/ol-prod-tAZds5`，及一个 `ac2bproj-0` 孤儿 server——用 kill-session 按
+      实际 socket 杀），每个先核实无活 server 再动；真实会话 quay-0 全程未受影响。
+- [x] AC4: **回归控制**——217 泄漏形态不再复现：连续多轮套件后 server 数稳定（不随轮数累积）；
       实测输出贴任务体
-- [ ] AC5: **与 gap-tests-never-clean-up-their-tmpdirs 交叉标注**——同一族（测试起外部资源不回收）
-- [ ] AC6: **崩溃根因关联**——三次崩溃调查记录补「tmux 泄漏累积」为具体机制（负载飙升候选获解释），
+      → 3 轮 send-keys-verified + quay-init-tmux-detection 实测：每轮后 tmux server 数恒为 2（真实 quay-0 对）、
+      泄漏前缀进程 0、/tmp 泄漏目录 0、`tmux-leak-scan.sh` 每轮 CLEAN。见下方执行证据。
+- [x] AC5: **与 gap-tests-never-clean-up-their-tmpdirs 交叉标注**——同一族（测试起外部资源不回收）
+      → 已在 `tasks/gap-tests-never-clean-up-their-tmpdirs.md` 加「交叉标注（2026-08-05，AC5）」节。
+- [x] AC6: **崩溃根因关联**——三次崩溃调查记录补「tmux 泄漏累积」为具体机制（负载飙升候选获解释），
       此前无定论
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group engine`（沿用测试卫生族声明）
+      → 已追加 `orchestration/restart-plan-2026-08-04-third.md` §6（2026-08-05 更新）。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group engine`（沿用测试卫生族声明）
+      → 三个涉及文件均为 node:test 且带 `@test-group`（send-keys-verified=governance、quay-init=product，
+      沿用各自既有分组；新增负控制测试在同一 node:test 文件内）。
+
+## 执行证据（2026-08-05，worktree /home/yale/work/quay-worktrees/tmux-leak）
+
+**① AC2 负控制实跑**（send-keys-verified.test.mjs 第 5 个测试，通过）：
+```
+✔ AC2 negative control — cleanup with a LOST socket-selection env is harmless: kill-session can only error (no-such-session), never wipe the default socket's real sessions (325ms)
+```
+它在 09:2xZ 的失败形态下实测：`env` 的 `TMUX`/`TMUX_TMPDIR` 全删后 `tmux kill-session -t skv-nc` 落默认 socket →
+`can't find session: skv-nc`（exit 1），`tmux list-sessions` 前后会话数不变（真实 quay-0 未受影响）。
+
+**② 两个改动测试文件单文件全绿**：
+```
+send-keys-verified.test.mjs: 5 pass / 0 fail  (含 AC2 负控制)
+quay-init-tmux-detection.test.mjs: 6 pass / 0 fail
+```
+
+**③ scoped 套件**（`bash scripts/test.sh --for-task gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause --test-concurrency=1`）：
+```
+tests 48 · pass 47 · fail 0 · cancelled 0 · skipped 1
+```
+（`--test-concurrency=1` 序列化避开已知负载敏感族 M6 的并发竞态——该族在文件头声明 KNOWN-LOAD-SENSITIVE，
+并发默认并发度下 M6 偶发 `countMountProcesses` 2≠1，串行下 pass；非本任务改动引起。）
+
+**④ AC4 多轮稳定性**（3 轮，每轮后计数）：
+```
+baseline: tmux servers=2 (真实 quay-0), 泄漏前缀=0
+ROUND 1: servers=2  leak-prefix=0  /tmp leak dirs=0  scan=CLEAN
+ROUND 2: servers=2  leak-prefix=0  /tmp leak dirs=0  scan=CLEAN
+ROUND 3: servers=2  leak-prefix=0  /tmp leak dirs=0  scan=CLEAN
+```
+
+**⑤ 套件尾部扫描**（AC1 判据，修复后）：
+```
+tmux-leak-scan: clean — no residual test tmux servers/dirs (prefixes: skv-|session-liveness-|ol-tok-|enter-repro-)
+```
+（修复前同一扫描正确报出 `/tmp/session-liveness-ArJFw6`、`/tmp/session-liveness-WDE1Ph`、`/tmp/skv-exp` ——
+残留确实能被机械抓住；基线清理后归零。）
+
+**⑥ invoke 判据**（Contract）：
+```
+grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.mjs
+```
+→ cleanup() 在 rmSync 前逐个 `tmuxAt(sockPath, ["kill-session","-t", name], env)`；全文件零 `kill-server` 调用
+（仅注释说明为何不用）。
 
 ## Definition of Done
 

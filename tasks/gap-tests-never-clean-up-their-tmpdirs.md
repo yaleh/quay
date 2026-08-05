@@ -107,6 +107,14 @@ MemAvailable 5,291→7,370 MB、swap 1,779→1,142 MB。
 外层清理只清存量；只要测试还在 `mkdtemp` 而从不删，回填速率（活跃期约 3,200/小时）会重新填满。
 修复 = AC2（给泄漏测试加 `try/finally` / `t.after()` 删除）+ 本任务 R6 契约规则。
 
+## 交叉标注（2026-08-05，AC5 of gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause）
+
+同族任务：测试起外部进程/服务器却不在 teardown 回收。本任务管「mkdtemp 建了目录不删」（tmpfs 内存泄漏），
+姊妹任务管「测试起了 tmux server 不 kill」（进程泄漏，217 个 tmux server / PSI cpu 94→31）。两条同根：
+**测试必须回收它自己创建的外部资源**。姊妹任务的套件尾部断言（`plugin/scripts/tmux-leak-scan.sh`，
+`skv-`/`session-liveness-`/`ol-tok-`/`enter-repro-` 前缀）与 teardown 修复（`tmux kill-session -t <名>`，
+绝不用 `kill-server`）交叉覆盖，互不替代。
+
 ## Contract
 
 ```
