@@ -5177,3 +5177,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层 closure round 8：**l2 翻 done**（real-use verified）。在飞 1/3（red-window-stop 工作中，4 文件 + 新测试，
   0 提交）。无 fan-in、无新派发（剩余真候选与 red-window 的 tick-doc/suite-state 触摸全碰撞）。
 - 套件 green、load 2.73、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T21:0xZ（外层，L2 dead-loop 落地 + closure round 8/9）
+
+- **inner L2 dead-loop 判据落地（REAL mechanism）**：`1c41c5d2` dead-loop-check.sh（transcript user-msg OR
+  git commit 窗口判活，liveness_independent_of_backlog）——**实测 meta-cc dead 机械捕获 / archguard alive /
+  quay alive**，mtime 预过滤 <1s/1.4GB，8/8。**从此 dead-loop 不需人看**（AC12b 方向的机制）。
+- **closure round 8/9**：L2 + manager-baked 翻 done（共 9 个 closure）。L2 的 real-use 证据（meta-cc dead 捕获）
+  满足判据 AC。
+- **inner 新派 red-window-dispatch-stop**（shared gate-conditional RED 规则）+ l2 signal gap 注（merge msg
+  无 kernel，red-pattern 类）。
+- **套件 green**（有效验证）、闸 GO、load 2.99。
