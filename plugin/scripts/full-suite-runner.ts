@@ -37,10 +37,13 @@
 // state file, not the exit code.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+
+import { runOnce } from "./suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -157,8 +160,51 @@ export async function run(argv: string[]): Promise<number> {
   return green ? 0 : 1;
 }
 
+/**
+ * --fail-fast-check（gap-red-window-has-no-automatic-executor Contract invoke）：
+ * 构造一次失败 suite ⇒ 验证 RED 自动触发链端到端：
+ *   runner 写 state=red（早期或终态）→ suite-state-trigger 的 runOnce 检测到转变 →
+ *   记 SUITE-RED 事件 → stopSignal 在位（state=red 即信号，AC1(b)）。
+ * 用临时根（hermetic），不触碰真实 `.quay/full-suite-state.json`。退出 0 = 链验证通过；
+ * 退出非 0 = 链某环断裂（触发者坏了，外层据此知道机制失效，而不是红着无人处置）。
+ */
+async function failFastCheck(): Promise<number> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ffc-"));
+  try {
+    const fakeCommand = 'echo "not ok 1 - fail-fast-check (RED auto-trigger control)"; exit 1';
+    const code = await run(["--root", tmp, "--command", fakeCommand]);
+    const { status, events, stopSignal } = runOnce(tmp);
+    const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
+    console.log(
+      `fail-fast-check: suite exit=${code} state=${status} stopSignal=${stopSignal} ` +
+        `suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
+    );
+    if (code !== 1) {
+      console.error("fail-fast-check FAIL: expected the fake suite to exit 1 (red)");
+      return 1;
+    }
+    if (status !== "red") {
+      console.error(`fail-fast-check FAIL: expected state=red, got ${status}`);
+      return 1;
+    }
+    if (!stopSignal) {
+      console.error("fail-fast-check FAIL: expected stopSignal (state=red IS the stop-dispatch signal)");
+      return 1;
+    }
+    if (!redEv) {
+      console.error("fail-fast-check FAIL: expected a SUITE-RED event recorded by suite-state-trigger");
+      return 1;
+    }
+    console.log("fail-fast-check OK: runner wrote state=red → trigger recorded SUITE-RED → stopSignal in place");
+    return 0;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirect) {
-  const exitCode = await run(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const exitCode = argv.includes("--fail-fast-check") ? await failFastCheck() : await run(argv);
   process.exit(exitCode);
 }

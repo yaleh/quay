@@ -124,6 +124,7 @@ declare -A QUESTION=(
   [serial-fanin-absorb.ts]="How should concurrent survivors be absorbed serially at fan-in?"
   [session-liveness-mount.sh]="Is the session-liveness monitor mounted as the single observer?"
   [session-liveness.sh]="Is the inner Claude Code session alive, busy, and within heartbeat?"
+  [suite-state-trigger.ts]="Has the full-suite state changed to red or running, and has the outer been notified (the red-window auto-executor)?"
   [strategic-doc-staleness-check.ts]="Does a strategic doc reference a deleted path or a retired ADR mechanism?"
   [sync-vendor.sh]="Is the plugin's vendored runtime in sync with the product build?"
   [task-ac-carryover-check.ts]="Do children carry over the parent's acceptance criteria?"
