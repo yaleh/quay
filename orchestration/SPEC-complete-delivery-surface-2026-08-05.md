@@ -17,7 +17,7 @@
 | `plugin/test/` | 98 | 测试 |
 | `plugin/fixtures/` | 38 | 夹具 |
 | `plugin/skills/` | 20 | 技能（含 `cold-start`、`init`） |
-| `plugin/gate-scripts/` | 14 | 闸门 |
+| `plugin/gate-scripts/` | 14 | 闸门（**RETIRED 2026-08-05**：经典管线 era 门，铺进目标项目但无调用方=死重；分层退役，文件留树、`quay-init` 不再铺、`sync.sh` 不再 sync） |
 | `plugin/probes/` | 4 | 探针 |
 | `plugin/vendor/` | 4 | **自包含运行时**（`quay/dist/quay.js`、`quay-native/dist/quay-native.js` + `provider.yml`） |
 | `plugin/loop/` | 2 | `fast-mode-loop-tick.md`（inner）、`orchestrator-loop-tick.md`（outer） |
@@ -25,7 +25,8 @@
 | `plugin/agents/` | 1 | |
 
 `quay-init` 铺进目标项目的目录：`.claude/`、`.quay/`、`docs/`、`orchestration/`、
-`plugin/scripts/`、`scripts/`、`tasks/`、`vendor/quay/dist/`、`vendor/quay-native/dist/`。
+`plugin/scripts/`、`tasks/`、`vendor/quay/dist/`、`vendor/quay-native/dist/`（`scripts/` 不再铺——
+`--gate-scripts` 类别退役，见上）。
 
 ---
 

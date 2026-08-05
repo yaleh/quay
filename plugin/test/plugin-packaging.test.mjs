@@ -486,6 +486,12 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 // directories exist with the expected file counts, sync.sh is executable,
 // the init skill carries no research-layer references, and the vendored agent
 // file is present.
+//
+// gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked (2026-08-05): plugin/gate-scripts/
+// is RETIRED — the classic-pipeline era gates were laid into target projects but nothing called
+// them (dead weight). The files remain in the plugin tree (layered retirement) but quay-init no
+// longer lays them down and sync.sh no longer syncs them. The tests below pin that retirement:
+// quay-init.sh carries ZERO 'gate-scripts' references (contract measure dead_gates_remaining = 0).
 // ---------------------------------------------------------------------------
 
 test('M143: plugin/workflows/ exists with the 2 surviving JS workflow files', () => {
@@ -500,21 +506,21 @@ test('M143: plugin/workflows/ exists with the 2 surviving JS workflow files', ()
   }
 });
 
-test('M143: plugin/gate-scripts/ exists with 13 gate scripts', () => {
+test('M143: plugin/gate-scripts/ is RETIRED — kept in tree, not laid down by quay-init', () => {
+  // Layered retirement (send-keys-verified precedent): the classic-pipeline era gate scripts
+  // stay in the plugin tree as a historical artifact, but they are NO LONGER in the distribution.
   const gateDir = path.join(pluginDir, 'gate-scripts');
-  assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist');
-  const wanted = [
-    'it0-backlog-projection-check.sh', 'it0-ceiling-check.sh',
-    'it0-ceiling-line-budget-check.sh', 'it0-dashboard-line-budget-check.sh',
-    'it0-dod-check.sh', 'it0-dogfood-evidence-gate.sh',
-    'it0-gate-hash-check.sh', 'it0-impl-row-check.sh',
-    'vmeta-lag-check.sh', 'tree-hygiene-check.sh',
-    'worktree-branch-hygiene-check.sh', 'audit-independence-check.sh',
-    'drain-scheduler.ts',
-  ];
-  for (const f of wanted) {
-    assert.ok(existsSync(path.join(gateDir, f)), `plugin/gate-scripts/${f} must exist`);
-  }
+  assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist (retired artifact kept in tree)');
+  // Contract measure dead_gates_remaining: quay-init.sh must carry ZERO 'gate-scripts' references
+  // (dead gates no longer laid down).
+  const quayInit = readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');
+  assert.equal(quayInit.includes('gate-scripts'), false,
+    'quay-init.sh must contain ZERO gate-scripts references (dead weight no longer laid down)');
+  // sync.sh must no longer run any cp into the retired gate-scripts dir (a comment naming the
+  // retired dir is documentation of the retirement, not a sync operation).
+  const syncSrc = readFileSync(path.join(pluginDir, 'sync.sh'), 'utf8');
+  assert.doesNotMatch(syncSrc, /cp\s+.*gate-scripts\//,
+    'sync.sh must no longer sync the retired gate scripts');
 });
 
 test('M143: plugin/agents/baime-iteration-executor.md exists', () => {
@@ -530,8 +536,7 @@ test('M143: plugin/sync.sh exists and is executable', () => {
   const src = readFileSync(syncPath, 'utf8');
   assert.match(src, /drain-directives\.js/, 'sync.sh must sync drain-directives.js');
   assert.match(src, /run-routines\.js/, 'sync.sh must sync run-routines.js');
-  assert.match(src, /drain-scheduler\.ts/, 'sync.sh must sync drain-scheduler.ts');
-  assert.match(src, /vmeta-lag-check\.sh/, 'sync.sh must sync vmeta-lag-check.sh');
+  assert.doesNotMatch(src, /cp\s+.*gate-scripts\//, 'sync.sh must no longer sync the retired gate-scripts');
 });
 
 test('M143: init skill has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {

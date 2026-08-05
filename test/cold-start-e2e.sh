@@ -187,7 +187,10 @@ fi
 # --all categories
 assert_file "$PROJECT/.claude/workflows/drain-directives.js"
 assert_file "$PROJECT/.claude/agents/baime-iteration-executor.md"
-if ! ls "$PROJECT"/scripts/gates/*.sh >/dev/null 2>&1; then fail "no gate scripts laid down"; fi
+# gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked (2026-08-05): the retired
+# plugin/gate-scripts/ category is NO LONGER laid down — the classic-pipeline era gates were dead
+# weight in target projects. Negative control: scripts/gates/ must NOT exist after --all --loop.
+if [ -e "$PROJECT/scripts/gates" ]; then fail "scripts/gates/ must NOT be laid down (retired gate scripts are dead weight)"; fi
 echo "  all laid-down files present"
 
 # ── AC6/AC4 (gap-quay-init-rewrites-an-executable-instead-of-generating-config): byte-identical ─────
