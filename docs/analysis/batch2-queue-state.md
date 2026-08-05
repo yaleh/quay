@@ -3559,3 +3559,11 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > rendered outer tick doc declares exactly one driver after substitution（6.7s）。疑似 red-window-executor
 > 落地引入（suite-state-trigger 接进 orchestrator-loop-tick 4b2，doc 出现多个 driver 类引用）。等套件完 →
 > bisect → inner 修。
+
+> **06:30Z 增补（红窗停派时长 = 第四实例 + 管理者 cron 重建）**：人观察「过去半小时 inner 常等」→ 管理者
+> 查明是红窗停派（正确行为，池 16/12/disjoint 9 健康）但顺带量出**此前无人计量的代价**：早期 RED 把
+> inner 停派起点提前到「首个失败出现」（套件 15 分钟、首败可能 2 分钟 ⇒ 白等 13 分钟）。**红窗停派
+> 时长（state 转 red → finishedAt）已进 quality 任务第四实例**，与早期 RED 检测延迟是同一机制两侧
+> （爆炸半径 vs 白等，无数据支撑任一侧）。**管理者 cron 已重建**：原三问不含「inner 是否推进」+ 写了
+> 不查 IDLE/RESUMED，把核心观测滤掉（人观察到的现象结构上看不见）；加必做第 0 步（派发间隔+池水位+
+> 红窗状态组合判据，不依赖 IDLE）+ 红窗停派时长进其趋势清单。
