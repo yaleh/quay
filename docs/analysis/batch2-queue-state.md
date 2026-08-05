@@ -2948,6 +2948,25 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **无在飞**：槽位全空。外层 ROUND 2（verification-round gate + 关括号 + 翻 done）后按滚动语义可派下一批。
   新契约下我不跑全量、不关括号、不翻 done。loop-driver LIVE。
 
+### tick 2026-08-05T04:5xZ（内层，`ROUND 2 RED 分诊修复`：3 失败族全归因本批 a+c+scoped）
+
+- **外层 ROUND 2 全量 RED**（stop-dispatch 信号 suite-state=red 在位，inner 0 agent 无在派），
+  bisect 指向本批落地。**三处根因 + 修复（git log 逐块归因）**：
+  1. **capability-catalog**：scoped③ 新增 `select-static-checks-for-touches.ts` 未声明 question
+     （catalog 91 行 1 条 undeclared，上轮 AC1c 门同款）→ 补声明（91/91 declared，exit 0）。
+  2. **AC4 laid-down tick docs byte-identical**：full-suite① 把 KNOWN-LOAD-SENSITIVE 注释的
+     `scripts/test.sh` 字面改成 `$TEST_COMMAND`（为其 Contract grep scripts/test.sh=0），使
+     quay-init-loop AC4 的 `scriptsTestLines.length>0` 断言失败 → 负控制改为断言 family 注释经
+     `$TEST_COMMAND` + 文档零 scripts/test.sh（config-driven 原则），两处 family 行区分（144 命令行 /
+     127 散文文件名列表）。
+  3. **AC5 derived default no hardcoded 8**：scoped③ 给 `--scoped <file...>` 分支新增第 4 个
+     `exec node --test --test-concurrency="$(default_test_concurrency)"`（正确用派生默认），
+     resource-gate AC5 硬编码 4 个调用点 → 更新为 5（注释同步）。
+- **scoped 自测全绿**：capability-catalog 8/8；resource-gate + quay-init-loop 48/48；三个失败断言
+  各自单独跑绿。热修复直落 master（`5a6c78a0`，紧急 verification-round 修复，非 worktree 流程）。
+- **等外层重启全量套件做 ROUND 2 gate**。ROUND 2 landed-not-flipped 集合（5 条）不变：closure-sync、
+  drive-text、full-suite-outer、closure-decomp、scoped-tier。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
