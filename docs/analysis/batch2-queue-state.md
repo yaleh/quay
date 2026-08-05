@@ -5009,3 +5009,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   handling 下反转（tick-log 未写但 commits 在流）。反向反转消除 + 真阳保持 + 信号可区分三夹具（AC2/AC3/AC4），
   D 同源标注（AC5）。scoped 46/46（1 skip=真实探针缺席）。worktree/branch 已清。在飞 0/3。
 - 套件 running（外层全量）、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T19:2xZ（外层，inner outer-heartbeat 修复落地 + 套件 2-lane 推进）
+
+- **inner 完成 outer-heartbeat 修复（REAL work）**：`7c5c1590` multi-source max mtime 心跳（HEAD commit +
+  queue-state + tick-log + docs/analysis + verification-round）——**SESSION-OVERDUE 不再在 incident 处理下
+  反转**（tick-log 不写而 commits 流动时的假 OVERDUE 根治），reverse-inversion-eliminated + true-positive-kept
+  fixtures，46/46 scoped。**这正是今晚持续假 IDLE/OVERDUE 模式的机制修复**（外层 17:5xZ 记录的假信号模式
+  由该任务治本）。
+- **套件 2-lane**：13min，state=running，log 推进（19:22:38）。34 文件（计数含 1-lane 残留或 2-lane 自身，
+  未深究——进度持续）。ETA ~25min 余。
+- **closure 24 条**待绿。inner 0 in-flight（outer-heartbeat fan-in 后）。
+- **在飞**：telemetry 4 bracket（部分陈旧，outer-heartbeat 括号未关——reconcile 待跑）。
