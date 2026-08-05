@@ -3515,3 +3515,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   specimen）；AC4 loop-driver isolated 已过（负载抖动非真）；runner-grouping flags isolated 仍跑中
   （慢——spawn 全量对比，结果待）。
 - 无停止条件、无 BLOCKED；loop-driver LIVE。inner 修完 → 重启 ROUND 3 gate → 绿后关 9 条。
+
+### tick 2026-08-05T06:08Z（外层，`unblock`：meta-cc/archguard 启动操作归属裁定 + ②③ 已执行）
+
+- **归属裁定（管理者请求）**：①建三窗口 = 管理者（建过 quay 的三窗口）；②刷新已安装插件 = **我**
+  （AC3b 血缘，机械操作不立案）；③重铺 meta-cc 机件 = **我**（quay-init 是 quay 交付机制，跑在目标项目
+  是标准安装；管理者 AC5 有越界史不该动）。②③ 是操作性完成 AC3b/meta-cc 启动路径，不需新任务。
+- **② 已执行**：~/.local/share/quay-plugin 的 quay.js 刷新到当前 dev build（06:07，cmp IDENTICAL）。
+- **③ 已执行**：quay-init --loop 跑在 ~/work/meta-cc——copied=23 / skipped=10 / conflicted=2（本地改动
+  备份到 .quay/quay-init-backups，未 force 覆盖）；verify-installed-executables OK（30 全字节一致）；
+  verify-referenced-landed OK。meta-cc 机件已重铺。
+- **管理者 loop 缺陷自陈（记录）**：manager cron 每轮问「推进哪一格」，第一轮答出答案却只写报告没行动
+  ——loop 只有诊断步骤没有行动步骤 = AC9 主动性缺口换形态复发（已记 manager-phase-goal.md）。归属
+  manager-layer umbrella（manager 循环需行动步骤，不只诊断）。
