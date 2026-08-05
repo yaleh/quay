@@ -5,7 +5,7 @@ title: "upgrade channel syncs source but not build artifacts — git pull gets n
   persists; verify checks existence not freshness); 2nd upgrade-channel-gap form
   (dynamic drift); fix: ensure_vendor_runtime rebuilds/fails-closed when src
   mtime > dist mtime"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -54,7 +54,15 @@ ensure_vendor_runtime 已会跑 sync-vendor.sh，缺「什么时候该重跑」�
 - [ ] AC4: **user-scope 安装物新鲜度**——安装/启动时检查 dist 落后（如 mtime/版本）⇒ 提示重建（负控制：当前无检查，06:01 陈旧物被当新鲜用）
 - [ ] AC5: 与 gap-vendor-runtime-not-in-git-clone-broken-mcp-entry + gap-delivery-surface-grows 交叉标注（升级通道两种形态 + 两种安装路径）
 
+## Definition of Done
+
+- [ ] AC1–AC5 全部勾上；AC1/AC3/AC4 实跑输出贴任务体
+- [ ] fresh-clone / git-pull 升级路径 e2e：pull 新源码（不重建 dist）⇒ quay-init 检测陈旧并自动重建或 fail-closed（负控制实测）
+- [ ] user-scope 安装物新鲜度检查生效（06:01 陈旧物不再被当新鲜用）
+- [ ] 全量套件绿（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+
 ## Touches
+- tasks/gap-upgrade-channel-cant-sync-build-artifacts-dist-stale.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/quay-init.sh（ensure_vendor_runtime 陈旧检测 + verify 新鲜度）
 - plugin/scripts/sync-vendor.sh（如涉及重建判据）
