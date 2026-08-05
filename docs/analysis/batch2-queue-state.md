@@ -3165,3 +3165,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   通过）：POOL_FLOOR = 并发 × 10（可配）+ 补晋排序纳入与在飞/池内候选的 disjointness（checkTouchesPair）
   + touchesResolve 守卫保留 + 补晋应用机械化 + 成本不对称文档化。ready-pool-check 产品机制修正。
 - 在飞：closure-grant (c) 11m+；scoped 门控后。
+
+### tick 2026-08-05T04:02Z（外层，`no-action`：(c) 块落地 = 三块消除批次全落；scoped 在飞、ROUND 2 临近）
+
+- **(c) closure-grant 块落地**（3a73a1a8/9840255f）：self-touch 约定（每任务 Touches 含自身
+  tasks/<id>.md 无 (new)；代理完成时自勾 AC + 贴证据，仍 SCOPED ONLY）+ --self-touch dispatch gate +
+  --self-touch-scan ready-pool 审计；self-touch-convention.test.mjs 10/10。**AC6 真实使用 = 本条自身**
+  （代理自勾 + 自贴 = 约定首个实跑）。**三块消除批次 (a)+(b)+(c) 全部落地**——inner 侧只剩执行+派发+合并。
+- **scoped (③) 在飞**（11m，读 test.sh --for-task 分支 = 改动相关静态检查档位）；落地后本批全并，归外层
+  verification-round。
+- **ROUND 2 收尾集在累积**（inner 自记）：closure-sync、drive-text（R1 留）+ full-suite (a)、
+  closure-decomp (c) +（③ scoped）≈ 5 条。**下轮用 full-suite-runner 后台 gate** + 捕获 closure-sync
+  AC5 / suite(a) AC6(i) 实跑证据（inner 无等待 + 外层后台套件同时进行）。
+- **池 4**（deficit 0）健康；ready-pool-floor 任务入池。
+- 无停止条件、无 BLOCKED；1 agent（scoped）token 上升；loop-driver LIVE。
