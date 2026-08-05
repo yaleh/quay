@@ -1,7 +1,39 @@
 ---
 id: gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash
-title: "THE structural blocker to the primary goal (self-evolution without a human present): the loop CANNOT self-recover after a crash — verified three times tonight, not a hazard. All four loop anchors live INSIDE Claude sessions (quay outer CronCreate, meta-cc ff528b51, archguard 23141e72+ScheduleWakeup, manager 0245d9b2) and OS-level has ZERO anchor: crontab command not even installed, systemd user timers = only launchpadlib-cache-clean (unrelated), no quay/claude/loop service or timer, /etc/cron.d/ only e2scrub_all. CronCreate/ScheduleWakeup are session-scoped — session death = anchor PERMANENTLY gone with no trace. ALREADY OCCURRED (not inference): ① three total machine crashes tonight; ② meta-cc/archguard stalled 29h — both outers independently traced root cause to 'cron died with old session, nobody drives'; ③ during those 29h ALL delivery-surface checks (verify-installed-executables/verify-referenced-landed/quay-init) PASSED and both projects' last ticks self-reported quiet-holding/backlog-cleared — a dead loop looks IDENTICAL to a healthy one; ④ recovery was MANUAL manager driving, no mechanism. WHY THIS OVERSHADOWS ALL OTHER GAPS: human corrected the goal to 'self-evolve without a human'; under current architecture ANY crash = entire network permanently silently dead until a human notices and manually restarts — not 'evolves slowly' but 'stops evolving while looking fine'. ALL other gaps (criterion-cost, reason-axis, needs-human black hole, laneCount oversubscription) are optimizations that only matter while the loop is ALIVE; this one decides whether it lives. Fix direction (manager, ruling mine): repair must live OUTSIDE Claude session — an OS-level systemd user timer or real crontab entry that periodically checks each project's session liveness + anchor presence, re-spawns and drives if missing. All needed capabilities already validated: session-liveness.sh (PSI/pane dual signal), send-keys-reliable.sh + transcript-delivery-check.ts (6 failure modes crystallized), cold-start drive text (the two manually-written tonight proved effective). Also fills SPEC-complete-delivery-surface §4 category 5 (periodic anchors, currently marked 'outer has, inner+manager missing' — measured WORSE: all three layers missing because all session-scoped). AC10: does NOT score (axis opened by the 29h stall, post-friction), count stays 6; priority is independent of pre/post-friction"
-status: todo
+title: "THE structural blocker to the primary goal (self-evolution without a
+  human present): the loop CANNOT self-recover after a crash — verified three
+  times tonight, not a hazard. All four loop anchors live INSIDE Claude sessions
+  (quay outer CronCreate, meta-cc ff528b51, archguard 23141e72+ScheduleWakeup,
+  manager 0245d9b2) and OS-level has ZERO anchor: crontab command not even
+  installed, systemd user timers = only launchpadlib-cache-clean (unrelated), no
+  quay/claude/loop service or timer, /etc/cron.d/ only e2scrub_all.
+  CronCreate/ScheduleWakeup are session-scoped — session death = anchor
+  PERMANENTLY gone with no trace. ALREADY OCCURRED (not inference): ① three
+  total machine crashes tonight; ② meta-cc/archguard stalled 29h — both outers
+  independently traced root cause to 'cron died with old session, nobody
+  drives'; ③ during those 29h ALL delivery-surface checks
+  (verify-installed-executables/verify-referenced-landed/quay-init) PASSED and
+  both projects' last ticks self-reported quiet-holding/backlog-cleared — a dead
+  loop looks IDENTICAL to a healthy one; ④ recovery was MANUAL manager driving,
+  no mechanism. WHY THIS OVERSHADOWS ALL OTHER GAPS: human corrected the goal to
+  'self-evolve without a human'; under current architecture ANY crash = entire
+  network permanently silently dead until a human notices and manually restarts
+  — not 'evolves slowly' but 'stops evolving while looking fine'. ALL other gaps
+  (criterion-cost, reason-axis, needs-human black hole, laneCount
+  oversubscription) are optimizations that only matter while the loop is ALIVE;
+  this one decides whether it lives. Fix direction (manager, ruling mine):
+  repair must live OUTSIDE Claude session — an OS-level systemd user timer or
+  real crontab entry that periodically checks each project's session liveness +
+  anchor presence, re-spawns and drives if missing. All needed capabilities
+  already validated: session-liveness.sh (PSI/pane dual signal),
+  send-keys-reliable.sh + transcript-delivery-check.ts (6 failure modes
+  crystallized), cold-start drive text (the two manually-written tonight proved
+  effective). Also fills SPEC-complete-delivery-surface §4 category 5 (periodic
+  anchors, currently marked 'outer has, inner+manager missing' — measured WORSE:
+  all three layers missing because all session-scoped). AC10: does NOT score
+  (axis opened by the 29h stall, post-friction), count stays 6; priority is
+  independent of pre/post-friction"
+status: ready
 labels:
   - gap
   - milestone-candidate

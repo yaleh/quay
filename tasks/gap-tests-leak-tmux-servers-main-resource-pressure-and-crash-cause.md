@@ -1,7 +1,27 @@
 ---
 id: gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause
-title: "tests LEAK tmux servers — the MAIN resource pressure and very likely the three-crash cause (manager found + cleared 217, oldest 12h): all from plugin/test/send-keys-verified.test.mjs's skv-ok sessions — isolation design is RIGHT (each leaks a TMUX_TMPDIR=/tmp/skv-XXXXXX/sock, never touches default socket, NOT the 'kill-through-isolation' class of crash #3) but tests never kill the servers they spawn, and tonight's dozens of full-suite runs left a fresh batch each round; PSI cpu avg10 94.18 → 31.47, gate WAIT→GO, tmux servers 217 → 10 after cleanup — THIS is the main resource pressure, NOT laneCount and NOT the other two projects (manager's earlier attributions both incomplete); 9 residual leaks remain (8 /tmp/session-liveness-*/sock oldest 16h53m + 1 /tmp/enter-repro-79bc/sock) left for inner judgment (a mounted observer pid 2598198 may use one); fix is a CLASS not one file: tests that spawn external processes/servers must reclaim them in teardown (same family as gap-tests-never-clean-up-their-tmpdirs); mechanically checkable: after a test run NO tmux server or /tmp dir carrying the test's characteristic prefix (skv-/session-liveness-/enter-repro-) may remain — the assertion goes at the END of the suite covering the whole class at once; reconsider: ① three-crash root cause now has a concrete mechanism (accumulate over time → load spikes before crash) where load was an unexcluded candidate; ② the 07:26 resource ABORT and 07:50 cross-project pause were both right decisions with incomplete attribution; ③ gate is GO now, M3 validation suite can run"
-status: todo
+title: "tests LEAK tmux servers — the MAIN resource pressure and very likely the
+  three-crash cause (manager found + cleared 217, oldest 12h): all from
+  plugin/test/send-keys-verified.test.mjs's skv-ok sessions — isolation design
+  is RIGHT (each leaks a TMUX_TMPDIR=/tmp/skv-XXXXXX/sock, never touches default
+  socket, NOT the 'kill-through-isolation' class of crash #3) but tests never
+  kill the servers they spawn, and tonight's dozens of full-suite runs left a
+  fresh batch each round; PSI cpu avg10 94.18 → 31.47, gate WAIT→GO, tmux
+  servers 217 → 10 after cleanup — THIS is the main resource pressure, NOT
+  laneCount and NOT the other two projects (manager's earlier attributions both
+  incomplete); 9 residual leaks remain (8 /tmp/session-liveness-*/sock oldest
+  16h53m + 1 /tmp/enter-repro-79bc/sock) left for inner judgment (a mounted
+  observer pid 2598198 may use one); fix is a CLASS not one file: tests that
+  spawn external processes/servers must reclaim them in teardown (same family as
+  gap-tests-never-clean-up-their-tmpdirs); mechanically checkable: after a test
+  run NO tmux server or /tmp dir carrying the test's characteristic prefix
+  (skv-/session-liveness-/enter-repro-) may remain — the assertion goes at the
+  END of the suite covering the whole class at once; reconsider: ① three-crash
+  root cause now has a concrete mechanism (accumulate over time → load spikes
+  before crash) where load was an unexcluded candidate; ② the 07:26 resource
+  ABORT and 07:50 cross-project pause were both right decisions with incomplete
+  attribution; ③ gate is GO now, M3 validation suite can run"
+status: ready
 labels:
   - gap
   - defect

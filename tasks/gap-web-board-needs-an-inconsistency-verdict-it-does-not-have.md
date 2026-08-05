@@ -1,8 +1,8 @@
 ---
 id: gap-web-board-needs-an-inconsistency-verdict-it-does-not-have
-title: "/board must join intent, execution and landing — and decide whether to
-  reuse the drift checker or reimplement its judgment"
-status: todo
+title: /board must join intent, execution and landing — and decide whether to
+  reuse the drift checker or reimplement its judgment
+status: ready
 labels:
   - gap
   - milestone-candidate
