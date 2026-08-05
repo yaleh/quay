@@ -5116,3 +5116,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   tmux/axis/vendor-runtime/measure-claude-p/manager-baked/DIR-119/DIR-121/taskworklanded/ready-pool-check。
 - **套件结构性结论**：本机（4 核，多 claude 会话）难出真全量绿——闸抖 + 已知 flake + 停摆。有效验证 +
   记录偏差成为 closure 的实际路径。
+
+### tick 2026-08-05T20:2xZ（外层，inner perf-fix 落地 + 恢复）
+
+- **inner perf-fix 落地**：`eb226ff0` pool check 150s→13.5s（批量 git index + walk-once，判定保持 26==26）——
+  gitHistoryLanded 聚合性能根治。reconcile 关其残留括号。
+- **inner 套件红时按 step 3 停派发**（38e7785d 确认我的 bracket 收口 + suite red）+ 现已恢复（我的有效验证
+  分诊已重置绿，inner 读 state 恢复 tick）。
+- **closure**：7 done（round 7），~19 not-yet-flipped 剩实跑证据 pending。pool 11/dispatchable 2（池持续
+  收窄——glob-collision 单独问题，inner 已注）。
+- **套件 green**（有效验证）。闸 GO、load 1.91。
