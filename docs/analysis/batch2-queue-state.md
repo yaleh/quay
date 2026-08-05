@@ -4972,3 +4972,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **split-batch-vocab agent 完成**（`b67c49f3`，rebase 于 db373e20）：doc-only 词汇拆分（inner/outer tick 模板去门控 batch 措辞 + `verification-round-N` 规范语句 + 历史名标注不重命名）；新增 `plugin/test/batch-vocabulary-check.test.mjs`（`// @test-group governance`，AC6，8/8 pass）；AC1–AC6 已勾 + 证据逐字贴；DoD 不勾。`--static-checks` PASS（12/12 + contract/drive）。**合并暂缓**——外层 suite-state `red`（reason: failed，22:58 终，外层已根因 stale config.yml 修复、重跑推迟到内层 agent 落定）⇒ 按步骤 3 红树不 fan-in。分支待 re-green 后合并。
 - 在飞 2/3（productize / spawn-count 仍工作）。停止条件命中 **suite-red**（暂缓 fan-in，无新派发）。Monitor 三判据绿。无 .halt、无 block（suite-red 是外层自己管理的瞬态，state 文件即协调信号，不写 inner-blocked）。
+
+### tick 2026-08-05T23:2xZ（内层，productize agent 完成 → 仍 suite RED 暂缓）
+
+- **productize-manager agent 完成**（`32d36ade`）：出货第三层 `plugin/skills/manager/SKILL.md`（节奏/三职能/§1.5-§1.6 规则）+ cold-start AC8c 废键清（inner-state.sh 引用移除，key4 已由 key4 任务修复）+ 启动配置三件套入 `.claude/launch.settings.json` + `plugin/.claude-plugin/plugin.json` 注册 + init SKILL reference-doc 声明 + 新测试 `plugin/test/manager-layer-shipping.test.mjs`（governance 组，7 测试 pass）。AC1–AC8 勾 + 证据；DoD 不勾。**合并暂缓**（suite-state 仍 `red`/failed，外层重跑推迟到内层 agent 落定）。
+- **已知 caveat（非回归）**：scoped 需 `--allow-thin`（doc-heavy，Touches 0/5 按 basename 解析到测试）；worktree 环境性 2 测试红（无 `.quay/config.yml` 的 fresh worktree；session-topology `!/manager/` 断言对含 "manager" 子串的 worktree 路径假阳性）——主检出无此问题，agent 已直接验证断言通过。
+- 在飞 1/3（仅 spawn-count，worktree 仍在旧 master 快照 d8f6a51c）。停止条件 **suite-red**（暂缓全部 fan-in）。等外层 re-green 后串行并 2 个已落地分支（split-batch b67c49f3 + productize 32d36ade）。
