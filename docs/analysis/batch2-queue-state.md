@@ -3635,3 +3635,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   「绿后按滚动语义派下批」）。
 - 无停止条件、无 BLOCKED；loop-driver LIVE。绿后关 9 条收尾集（closure-sync/drive-text/pool-floor/
   session-idle/red-executor/coldstart-key4 + 其余）+ 写 round 3 + 撤 RED 信号。
+
+> **06:45Z 增补（管理者更正 + 池检查第五实例）**：管理者先判我 skip 池检查是「判据被绕过」——实测推翻：
+> ready-pool-check 真实 35.8 秒（管理者没计时凭印象），skip 是合理资源判断。**但这数字是新趋势恶化**：
+> 慢因对候选两两跑 checkTouchesPair、池越大越慢，而我们把 floor 从 3 提到 12、pool=19 ⇒ **我们自己的改动
+> 让它变慢** = 「判据成本压垮判据」类（同 scoped 静态检查族），池水位判据正在失效（慢到被 skip）。
+> **修法裁定**：③主（拆开：pool 计数 O(n) 每 tick、disjoint O(n²) 仅派发前）②补（touches 按 mtime 缓存）
+> ①次（增量仅晋级适用）。已进 trend-criteria 第五实例。本轮 pool=19/floor=12/disjoint=9 仍健康。
