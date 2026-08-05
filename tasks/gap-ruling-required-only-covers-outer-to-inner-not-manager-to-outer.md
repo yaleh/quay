@@ -18,51 +18,59 @@ extra: {}
 
 ## Proposal
 
-**「谁在等人」机制只覆盖 outer→inner，缺 outer/manager 层被等待的观测（管理者查实 + 外层核实）**：
+**「谁在等人」机制只覆盖 outer→inner——通用化为参数化观测原语（管理者两轮更正 + 外层裁定）**：
 
-**已存在的机制（严谨，已验证）**：inner-blocked-signal.ts 的 screen observer——outer 每 60s 轮询 inner
-pane 底部，classifyPaneState 纯 SHAPE 分类（ADR-016，never 整屏哈希），**连续 N 次（默认 3，~3min）
-waiting-input/permission-prompt 才判 ruling-required**，写阻塞信号 + 可行动问题 + 底部区域证据。
-管理者手工试错摸出的判据（连续多次不 busy）它早就存在且多处理了 permission-prompt。
+**已存在的机制（严谨，已验证）**：inner-blocked-signal.ts 的 screen observer——outer 每 60s 轮询
+inner pane 底部，classifyPaneState 纯 SHAPE 分类（ADR-016，never 整屏哈希），连续 N 次（默认 3，~3min）
+waiting-input/permission-prompt 才判 ruling-required。
 
-**但它是单向的**：只有 outer 盯 inner，**没有人盯 outer/manager**。今天两次真实场景都落这盲区：
-①outer 等管理者裁定拓扑优先级（靠临时观测发现）；②archguard outer 假阳性（若真的也测不到）。
-⇒ **outer/manager 被等待目前无任何机械观测**，只能靠人偶然瞥见或管理者临时搭——而管理者不该临时搭。
+**单向 + 硬编码**：只有 outer 盯 inner，没人盯 outer/manager（今天两次真实场景落盲区）。写死的只在
+薄壳三处：①输出路径 .quay/inner-blocked.json（BLOCKED_FILE_NAME 硬编码）；②阈值 RULING_REQUIRED_
+PANE_SAMPLES=3（observePaneForRuling 已参数化 samples，但调用固定）；③orchestrator-loop-tick 固定指向
+inner pane。
 
-**搜索结果**：无任务精确指向缺口。相邻都不是：suite-state-has-no-reason-axis（套件语义）、
-red-window-has-no-automatic-executor（红窗执行者）、ruling-required-trigger（已 done，正是建现有机制
-的任务，但只做了 outer→inner 一层，无下一层跟进）。
+**通用化（管理者更正 + 外层裁定）**：不是「反向应用 manager→outer」，是**把工具通用化**——盯谁、盯
+什么参数化，允许调用方配置：
+1. **目标/路径参数化**：--target <名字>（inner/outer/manager）⇒ 输出 .quay/blocked-signals/<target>.json
+   （而非硬编码 inner-blocked.json）
+2. **阈值参数化**：--samples <N>（默认 3 保留，可覆盖；复用 session-liveness OVERDUE_MIN 校准值）
+3. **动作可扩展**：触发后动作做成插件点/回调（写文件 vs 通知 vs 其它），调用方决定「检测到阻塞后做什么」
+4. **不开放状态枚举**：classifyPaneState 的 ENUMERATED_STATES（waiting-input/permission-prompt/busy/
+   error-banner/unknown）是 ADR-016 封闭枚举（防游戏化），**不开放**——除非重新评估 ADR-016（那是一个
+   更大的决定，不在此次顺带做）
 
-**实现方式（管理者建议 + 外层采纳）**：**复用现有机制同一套判据**（classifyPaneState + 连续 N 次采样 +
-底部区域），观测方向反过来——不是新发明，是把已验证机制应用到未覆盖层。观测者：**manager 盯 outer**
-（manager 本来就该跨项目做，且已确认是合法职责）；manager 自己被盯大概率是人，可先不机械化。
+**与「机制做一次、下游配置复用」同原则**：manager 盯 outer、未来任何新方向都是配置一次调用，不新写
+代码。
 
 ### 选定机制
 
-1. manager 用同一套判据（classifyPaneState + 连续 N 次 + 底部区域）盯 outer——outer 连续 waiting-input/
-   permission-prompt ⇒ 报「outer 在等人」
-2. 复用 inner-blocked-signal 的 screen observer 机制（参数化观测方向），不新发明
-3. manager 被盯：先不机械化（人盯）
-4. 验证：outer 等裁定（如拓扑优先级）⇒ manager 侧观测报出
+1. inner-blocked-signal.ts 泛化为参数化观测原语：--target（决定输出路径命名空间）、--samples（可覆盖）、--pane（已有）
+2. 动作插件点/回调：检测到阻塞后写文件 / 通知 / 其它（调用方配置）
+3. classifyPaneState 保持封闭枚举（不开放）
+4. manager 盯 outer：用通用原语配置一次调用
 
 ## Acceptance Criteria
 
-- [ ] AC1: manager 侧观测 outer——outer 连续 waiting-input/permission-prompt ⇒ 报「outer 在等人」（复用 classifyPaneState + 连续采样 + 底部区域）
-- [ ] AC2: 复用 inner-blocked-signal screen observer 机制（参数化方向），非新发明（grep 证明同源）
-- [ ] AC3: 实测：outer 等裁定场景 ⇒ manager 观测报出（负控制：outer busy 时不报）
-- [ ] AC4: 与 ruling-required-trigger + inner-blocked-signal 交叉标注（同一机制的下一层）
+- [ ] AC1: --target <名字> 参数化——输出 .quay/blocked-signals/<target>.json（非硬编码 inner-blocked.json），inner/outer/manager 各可观测
+- [ ] AC2: --samples <N> 参数化（默认 3 保留可覆盖）
+- [ ] AC3: 动作插件点/回调——检测到阻塞后写文件/通知/其它由调用方配置（非只有写信号文件一种反应）
+- [ ] AC4: classifyPaneState 封闭枚举不变（ADR-016，ENUMERATED_STATES 不开放——grep 证明）
+- [ ] AC5: manager 盯 outer 配置一次调用（实测：outer 等裁定 ⇒ 报出；busy ⇒ 不报）
+- [ ] AC6: 与 ruling-required-trigger + ADR-016 + 自适应并发（机制一次下游复用）交叉标注
 
 ## Touches
 
-- plugin/scripts/inner-blocked-signal.ts（参数化观测方向：inner 或 outer）
-- plugin/scripts/（manager 侧观测器，复用 classifyPaneState）
-- plugin/test/（AC1-AC3 测试）
-- tasks/gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick.md（AC4 交叉标注）
+- plugin/scripts/inner-blocked-signal.ts（--target/--samples 参数化 + 动作回调）
+- plugin/scripts/pane-state-classify.ts（不动，仅确认封闭枚举）
+- plugin/loop/orchestrator-loop-tick.md（调用参数化）
+- plugin/test/（AC1-AC5 测试）
+- tasks/gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick.md（AC6 交叉标注）
+- tasks/gap-adaptive-concurrency-cap-tied-to-resource-gate.md（AC6 交叉标注）
 
 ## Contract
 
-measure   outer_waiting_detected = `bash <manager-observer> --pane <outer-pane> 2>&1 | grep -c 'ruling-required\|waiting-input'` stdout 数字段
-band      outer_waiting_detected >= 1（outer 等人时被观测报出）
-invoke    `grep -n 'classifyPaneState\|waiting-input\|permission-prompt' plugin/scripts/inner-blocked-signal.ts`
-control   outer 等裁定 ⇒ 报出（AC3）；outer busy ⇒ 不报
-resume    参数化方向与 manager 观测器分步提交，任一步完成即写盘
+measure   observer_targets = `node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --target outer --pane <f> 2>&1 | grep -c 'blocked-signals/outer'` stdout 数字段
+band      observer_targets >= 1（--target 参数化生效，输出按目标命名空间）
+invoke    `grep -n 'BLOCKED_FILE_NAME\|RULING_REQUIRED_PANE_SAMPLES\|--target\|--samples' plugin/scripts/inner-blocked-signal.ts`
+control   --target inner ⇒ inner-blocked.json；--target outer ⇒ blocked-signals/outer.json（AC1）
+resume    参数化与动作回调分步提交，任一步完成即写盘

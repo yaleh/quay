@@ -4457,3 +4457,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **「谁在等人」机制只覆盖 outer→inner**：inner-blocked-signal screen observer（classifyPaneState + 连续 3 次 + 底部区域）已验证严谨，但单向——没人盯 outer/manager。今天两次真实场景落盲区（outer 等裁定、archguard 假阳性）。
 - **无任务精确指向缺口**（ruling-required 已 done 只做了一层）。建任务 gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer（复用现有机制，观测方向反过来：manager 盯 outer）。
+
+### tick 2026-08-05T16:1xZ（外层，观测机制通用化裁定）
+
+- **管理者更正**：不是「反向应用到 manager→outer」，是**把工具通用化**——盯谁、盯什么参数化，允许调用方配置。
+- **核实**：classifyPaneState 纯函数（pane-state-classify.ts，无 inner/outer 假设，ADR-016 封闭枚举）；写死的只在薄壳三处（BLOCKED_FILE_NAME、RULING_REQUIRED_PANE_SAMPLES 但 observePaneForRuling 已参数化 samples、调用固定 inner）。
+- **裁定**：通用化 = 目标/路径/阈值参数化 + 动作可扩展（插件点/回调），**不开放状态枚举**（ADR-016 防游戏化，除非重新评估那是另一个决定）。并入 gap-ruling-required 任务（观测方向的实现方式）。
