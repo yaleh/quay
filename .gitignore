@@ -65,6 +65,14 @@ orchestration/inner-idle-log.jsonl
 # live control-plane-state family as gate-events.jsonl/inner-blocked.json — written by the outer's
 # async closure pass, read by the inner's stop condition; never committed.
 **/.quay/verification-round.jsonl
+# gap-red-window-has-no-automatic-executor (2026-08-05): the outer background suite's runtime state
+# + the suite-state trigger's transition event log + memo — same live control-plane-state family as
+# gate-events.jsonl/verification-round.jsonl (written by full-suite-runner.ts / suite-state-trigger.ts,
+# read by the inner stop condition / outer Monitor; never committed).
+**/.quay/full-suite-state.json
+**/.quay/full-suite.log
+**/.quay/suite-state-events.jsonl
+**/.quay/suite-state-last.json
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/
