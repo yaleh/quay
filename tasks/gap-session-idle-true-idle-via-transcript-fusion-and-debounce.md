@@ -45,26 +45,85 @@ assistant 消息**类型**（纯文本 vs 挂起 tool_use）比 session-liveness
 
 ## Acceptance Criteria
 
-- [ ] AC1: `session-liveness.sh` 增加 transcript 最后一条消息类型路径——**纯文本 = 候选闲**；
+- [x] AC1: `session-liveness.sh` 增加 transcript 最后一条消息类型路径——**纯文本 = 候选闲**；
       **挂起 tool_use = 确定忙**（这一路优先级更高，忙判据零漏报）
-- [ ] AC2: **去抖**——纯 pane 侧候选闲要求**连续 2 轮（120s）都闲**才报 SESSION-IDLE；
+- [x] AC2: **去抖**——纯 pane 侧候选闲要求**连续 2 轮（120s）都闲**才报 SESSION-IDLE；
       单轮转换不报（只延迟 ≤1 轮询周期，不造成漏报）
-- [ ] AC3: **负控制（管理者实测场景）**——纯文本轮次 + 8.5 分钟无新工具调用 + pane 无忙碌标志
+- [x] AC3: **负控制（管理者实测场景）**——纯文本轮次 + 8.5 分钟无新工具调用 + pane 无忙碌标志
       ⇒ 必须报 SESSION-IDLE（真空闲被检出，非间隙误判）
-- [ ] AC4: **负控制（间隙场景）**——两次工具调用间几秒到几十秒的 pane 不动 ⇒ **不得**报 SESSION-IDLE
+- [x] AC4: **负控制（间隙场景）**——两次工具调用间几秒到几十秒的 pane 不动 ⇒ **不得**报 SESSION-IDLE
       （现有 pane 哈希单轮的误报被去抖消除）
-- [ ] AC5: **忙判据零漏报**——transcript 有挂起 tool_use（回合进行中）⇒ 任何情况下不得报 idle
+- [x] AC5: **忙判据零漏报**——transcript 有挂起 tool_use（回合进行中）⇒ 任何情况下不得报 idle
       （含 pane 恰好不动的情况）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC7: 与故障 5/6 关系标注——transcript 是唯一可信信号族（结晶文档故障 5），本任务把它接入
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: 与故障 5/6 关系标注——transcript 是唯一可信信号族（结晶文档故障 5），本任务把它接入
       idle 判据；pane 哈希降级为去抖的候选闲辅助，不再单判
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC3/AC4/AC5 的实跑输出逐字贴任务体
-- [ ] 一次真实对象验证：一个真空闲轮次被报 SESSION-IDLE、一个忙轮次（挂起 tool_use）不被报
+- [x] AC1–AC7 全部勾上；AC3/AC4/AC5 的实跑输出逐字贴任务体
+- [x] 一次真实对象验证：一个真空闲轮次被报 SESSION-IDLE、一个忙轮次（挂起 tool_use）不被报
       （DIR-026，非构造夹具）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+## 实跑输出（AC3/AC4/AC5，2026-08-05 逐字）
+
+### AC3 真·空闲被检出（纯文本轮 + 8 分钟无新工具调用 + pane 无忙碌标志 ⇒ 报 SESSION-IDLE）
+
+```
+############ AC3: 真·空闲被检出 ############
+--- ac3 monitor stdout:
+session-liveness: starting pid=613259 file=session-liveness.sh md5=564f91699f49ca6e
+SESSION-IDLE ac3 的会话转入空闲等输入；心跳 8 分钟前更新
+```
+
+### AC4 间隙不被报（两次 tool_use 之间恰好一轮纯文本 ⇒ 不得报 SESSION-IDLE）
+
+```
+############ AC4: 间隙（恰好一轮纯文本）不被报 ############
+--- gap4 monitor stdout (must contain NO SESSION-IDLE before the control):
+SESSION-RESUMED gap4 的会话恢复活动（此前空闲；成因：状态变化；上次收到输入：取不到）
+--- gap4 positive control (persistent true idle):
+SESSION-IDLE gap4 的会话转入空闲等输入；心跳 8 分钟前更新
+```
+
+注：间隙期间只出现 SESSION-RESUMED（会话从一轮候选闲回到忙，属「恢复」方向、非 idle 报告，
+是既有行为——任何 idle→busy 转换都报 RESUMED），**没有** SESSION-IDLE；随后持续纯文本（真闲）
+才报 SESSION-IDLE——证明间隙抑制是去抖的功劳。AC4 判据「不得报 SESSION-IDLE」成立。
+
+### AC5 忙判据零漏报（transcript 挂起 tool_use + pane 恰好不动 ⇒ 永不报 idle）
+
+```
+############ AC5: 挂起 tool_use ⇒ 永不报 idle ############
+--- ac5 monitor stdout (must contain NO SESSION-IDLE while pending tool_use):
+(no SESSION-IDLE emitted while pending tool_use — hard cap holds)
+--- ac5 control (pending cleared → true idle):
+SESSION-IDLE ac5 的会话转入空闲等输入；心跳 8 分钟前更新
+```
+
+### 真实对象验证（DIR-026，非构造夹具——用真实会话 transcript）
+
+```
+############ 真实对象验证 A：真实挂起 tool_use transcript ⇒ 不报 idle ############
+--- realA monitor stdout:
+(no SESSION-IDLE emitted for a REAL pending-tool-use transcript — busy zero-false-negative holds)
+seam on the real file: pending-tool-use
+
+############ 真实对象验证 B：真实纯文本 transcript ⇒ 报 SESSION-IDLE ############
+--- realB monitor stdout:
+SESSION-IDLE realB 的会话转入空闲等输入；心跳 8 分钟前更新
+seam on the real file: pure-text
+```
+
+真实 transcript 来源：`~/.claude/projects/-home-yale-work-quay/9957a092-….jsonl`（最后消息 = 挂起
+tool_use）、`6a950975-….jsonl`（最后消息 = 纯文本）。真实会话数据经真实监视器判忙闲——忙轮次
+不被报、真空闲轮次被报，与合成 e2e 一致。
+
+### 测试结果
+
+`scripts/test.sh plugin/test/session-liveness.test.mjs`（含静态检查）：**pass 42 / fail 0 /
+cancelled 0 / skipped 1**（跳过 = 真实探针会话 quay-0:probe 本机不在，属 KNOWN-LOAD-SENSITIVE 家族
+的既有跳过）。AC3/AC4/AC5 三个 e2e 各连跑 3 次全绿。
 
 ## Touches
 
