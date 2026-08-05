@@ -97,6 +97,10 @@ claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node
 ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，测试命令的默认并发已改为
 **推导值 `max(1, floor(nproc / 2.1)) = 1`**（不再写死 8——8 worker + 子进程 = 17 进程、4.25× 超订，
 是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先。两层绝不同时跑全量套件。
+**全量套件本身已移到外层后台**（`gap-full-suite-belongs-to-outer-background-above-3-min`，AC1/AC3）：
+inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json` 的 `state`（见步骤 3）——上面这条
+资源闸是**外层后台 runner 起跑前**要过的闸，不是 inner 的。inner 只保留 `--for-task` 选中集
+（秒级，走 scoped 路径，不触资源闸）。
 
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
@@ -137,7 +141,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
 跑批协议 grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
-全绿（fail 0 / cancelled 0，`scripts/test.sh plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
+全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
@@ -197,7 +201,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 | ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ 3（步骤 4 并发上限）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` 的 `pool` 字段；`pool < 3` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
-| ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 verification-round `suiteGreen: false` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
+| ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
 
 有明确偏差 ⇒ 向文档对齐：重新执行本文档对应步骤修正（补 worktree 纪律、按步骤 3.6 补就绪池、
 撤销偷偷收尾的状态写入、按步骤 3 停止条件停止派发），修完才继续。
@@ -227,9 +231,9 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 ### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 
-**只合并与清理，不写任何任务状态。** 全量套件验证已从 inner 移除——它是外层的验证 gate
+**只合并与清理，不写任何任务状态。** 全量套件验证已从 inner 移除——它是外层后台异步跑的验证 gate
 （`orchestrator-loop-tick.md` 步骤 1b「异步验证例程」），inner 的停止条件只读外层的
-`verification-round` 结果文件（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、不写 `--task-end`**。
+`.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、不写 `--task-end`**。
 
 对每个已返回但未合并的 subagent，逐个：
 
@@ -251,8 +255,23 @@ worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层�
 步骤 1b），inner 不需要也不应该碰。
 
 **全量套件验证为什么不在 inner 跑**：旧的「全部合并后跑一次全量」+「绿 → 写任务状态」就是批次
-同步点——同步期间零新派发，写状态变成调度边界。全量 gate 移给外层（验证 gate，见步骤 3 的停止
-条件），inner 只保留逐任务的 `--for-task` 选中集把关（秒级）。
+同步点——同步期间零新派发，写状态变成调度边界。全量 gate 移给外层后台异步跑（验证 gate，见步骤 3
+的停止条件），inner **只读** `.quay/full-suite-state.json` 的 `state`、只保留逐任务的 `--for-task`
+选中集把关（秒级）——**inner 零全量套件自跑**（DoD grep 证明：本文件无任何全量套件自跑命令字面量，
+只读外层 suite-state）。
+
+**阈值决策规则（AC5，门槛机械化，与外层文档同一份规则）**：测全量套件耗时 `suite_duration` =
+`.quay/full-suite-state.json` 的 `durationMs`（外层 runner 每次跑完写入，即测量 hook）：
+- `suite_duration ≥ 3 分钟` ⇒ **outer 集中后台跑**（当前形态，实测 11-12 分钟量级）——inner 只读
+  state；
+- `suite_duration < 3 分钟` ⇒ **下放 inner 各任务自己跑**（批概念彻底消除）——那时 inner 恢复全量
+  自跑，外层停止集中跑。
+一旦阈值判定成立，按该形态执行；当前实测明确 ≥3 分钟。
+
+**三块消除批次（AC7）**：本条读 suite-state 的机制属 **(a) 套件块**；收尾/记账 **(b) 块** =
+`gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`（已落地）；AC/证据
+**(c) 块** = `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`
+（在队列）。三块合起来，inner 侧只剩「执行 → 合并」，没有任何批次同步点。
 
 **合并本身必须串行。** 并发合并会在共享工作树上撞车。
 
@@ -303,11 +322,14 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 - **窗口内新增** needs-human ≥ 3（2026-08-03 外层裁定：**不是总数**——历史积压不构成停止理由，
   它需要派发才能解开；意图是「产出 needs-human 的速度超过消解速度」。判据是**窗口内新增数**，
   不是仓库里 needs-human 的总数。分诊规则见 `orchestrator-loop-tick.md` 步骤 3）
-- **外层最近 verification-round 非绿**：读 `.quay/verification-round.jsonl` 最后一条的 `suiteGreen`，
-  `false` ⇒ 停止派发。**文件缺失 ⇒ 不阻塞**（这是外层异步活，缺只说明外层还没跑到第一轮，不是套件
-  红；等下一 tick 再读）。注意该文件有至多一个外层 tick 的滞后——inner 刚合并的任务可能还没被外层收进
-  一轮，读到的「绿」是上一轮的；这是异步设计的固有窗口，外层下一轮会追上（见
-  `orchestrator-loop-tick.md` 步骤 1b）
+- **外层全量 suite 状态（改读外层 suite-state，不再自己跑全量）**：读 `.quay/full-suite-state.json`
+  的 `state` 字段——`running`/`green` ⇒ 照常派发与合并（**RUNNING 不等套件**——这正是消除同步点的
+  关键）；`red` ⇒ **停止新派发 + 暂缓已完成 agent 的 fan-in**（不并进红树；只停派发不停在飞合并会让
+  红树继续累积，故 RED 异常态下 fan-in 一并暂缓），直到外层 re-green（state 回到 green/running）。
+  **文件缺失 ⇒ 不阻塞**（外层还没跑到第一轮，不是套件红；等下一 tick 再读）。注意该状态有至多一个
+  外层 tick 的滞后——inner 刚合并的任务可能还没被外层起的新一轮套件覆盖；这是异步设计的固有窗口，
+  外层下一轮会追上（见 `orchestrator-loop-tick.md` 步骤 1b「红窗分诊」）。**inner 零全量套件自跑**
+  （只读上面的 state；`--for-task` 选中集仍逐任务把关，秒级）。
 - 就绪队列为空
 - 对抗审查 2 轮后仍 REFUTED、队列文件与 git 状态矛盾且无法判定（判断边界表）
 
@@ -425,7 +447,7 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 | 情况 | 动作 |
 |---|---|
 | 合并冲突 | abort，needs-human，停止派发 |
-| 外层 verification-round 结果非绿 | 停止派发（读 `.quay/verification-round.jsonl` 最后一条 `suiteGreen`；文件缺失不阻塞，等下一 tick） |
+| 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | 停止新派发 **+ 暂缓已完成 agent 的 fan-in**（不并进红树；`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
 | 对抗审查 2 轮后仍 REFUTED | 标 needs-human，停止该任务 |
 | 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |

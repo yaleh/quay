@@ -83,6 +83,7 @@ declare -A QUESTION=(
   [drivable-workspace-check.ts]="Is the workspace drivable by a loop (canonical fail-closed gate)?"
   [drive-contract-check.ts]="When a drive text asserts a task order (X→Y), does it attach the checkTouchesPair output in the same text?"
   [fast-mode-telemetry.ts]="What did the fast mode actually do (telemetry events over a window)?"
+  [full-suite-runner.ts]="Is the full suite green, red, or still running, who ran it, and how long did it take (outer background async runner)?"
   [gate-dispatch-coverage.ts]="Is every registered gate dispatched somewhere (coverage report)?"
   [gate-script-base.ts]="Do TypeScript gate scripts share the framework primitives they need?"
   [gate-script-lib.sh]="Do bash gate/selfcheck scripts share the framework primitives they need?"

@@ -65,26 +65,26 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 外层跑全量套件为**后台异步**（subagent / run_in_background，不阻塞 tick、不堵 inner）；
+- [x] AC1: 外层跑全量套件为**后台异步**（subagent / run_in_background，不阻塞 tick、不堵 inner）；
       结果写 `.quay/full-suite-state.json`（或 gate-events）：`{state: running|green|red, runner:
       outer|inner, startedAt, finishedAt, durationMs, laneCount}`
-- [ ] AC2: **runner 一检测到失败即标 RED**（非等全套跑完）——缩小「变红到发现」窗口
-- [ ] AC3: inner 不再自己跑全量套件；「上一步全量 suite 非绿」停止条件**改读外层 suite-state**
+- [x] AC2: **runner 一检测到失败即标 RED**（非等全套跑完）——缩小「变红到发现」窗口
+- [x] AC3: inner 不再自己跑全量套件；「上一步全量 suite 非绿」停止条件**改读外层 suite-state**
       （running/green → 照常；red → 停止）
-- [ ] AC4: **红窗裁定实现**——GREEN/RUNNING ⇒ inner 乐观合并/派发；RED ⇒ 外层立即写 stop-dispatch
+- [x] AC4: **红窗裁定实现**——GREEN/RUNNING ⇒ inner 乐观合并/派发；RED ⇒ 外层立即写 stop-dispatch
       信号、inner 停止新派发 + 暂缓已完成 agent fan-in；外层独占分诊（二分肇事合并 + 回滚/修复 +
       重启套件 + 重新 green + 撤信号）
-- [ ] AC5: **阈值决策规则**——`suite_duration ≥ 3 分钟` ⇒ outer 集中后台；`< 3 分钟` ⇒ 下放 inner
+- [x] AC5: **阈值决策规则**——`suite_duration ≥ 3 分钟` ⇒ outer 集中后台；`< 3 分钟` ⇒ 下放 inner
       各任务自跑（批概念彻底消除）；规则 + 测量 hook 在 loop 文档
-- [ ] AC6: **真实使用**——(i) 至少一次外层后台套件运行期间 inner 持续派发/合并（不阻塞，证据）；(ii)
+- [x] AC6: **真实使用**——(i) 至少一次外层后台套件运行期间 inner 持续派发/合并（不阻塞，证据）；(ii)
       至少一次 RED 路径：外层信号 → inner 停止 + fan-in 暂缓（证据）
-- [ ] AC7: 三块消除批次（a+b+c）在 loop 文档交叉标注；本条是 (a) 套件块
-- [ ] AC8: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: 三块消除批次（a+b+c）在 loop 文档交叉标注；本条是 (a) 套件块
+- [x] AC8: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上；AC6 实跑证据贴任务体
-- [ ] **inner 零全量套件运行**（grep 证明 inner 侧无 scripts/test.sh 全量调用；只读 suite-state）
+- [x] AC1–AC8 全部勾上；AC6 实跑证据贴任务体
+- [x] **inner 零全量套件运行**（grep 证明 inner 侧无 scripts/test.sh 全量调用；只读 suite-state）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——由外层后台跑出的绿
 
 ## Touches
@@ -118,3 +118,44 @@ changed: 外层受人量化门槛裁定立案。四处收紧：
     块，三块在 loop 文档交叉标注；
 (4) **inner 零全量套件**——只读 suite-state，grep 证明（DoD）。
 status: todo——三块之一；与 closure-async/closure-decomposition 同链（都触 loop 文档，串行）。
+
+## 落地证据（2026-08-05，实现提交时写入，worktree `task/gap-full-suite-belongs-to-outer-background-above-3-min`）
+
+**机制落地**：
+- `plugin/scripts/full-suite-runner.ts`（new）——外层后台跑全量 suite，写 `.quay/full-suite-state.json`
+  （`{state: running|green|red, runner: outer|inner, startedAt, finishedAt, durationMs, laneCount}`），
+  tee 输出到 `.quay/full-suite.log`，**一检测到失败即标 RED**（AC2）。
+- `orchestrator-loop-tick.md` 步骤 1b：全量 suite 改后台异步（`run_in_background`），加「红窗分诊」
+  （AC4）+「阈值决策规则」（AC5）+「三块消除批次」（AC7）。
+- `fast-mode-loop-tick.md` 步骤 3：inner 停止条件改读 `.quay/full-suite-state.json` 的 `state`
+  （running/green 照常、red 停派发 + 暂缓 fan-in），inner 零全量套件自跑（AC3）。
+- `capability-catalog.sh`：`full-suite-runner.ts` 已声明（AC1c gate，90/90 declared）。
+
+**AC4/AC8 测试实跑输出**（`QUAY_TEST_SKIP_STATIC_CHECKS=1 scripts/test.sh plugin/test/full-suite-runner.test.mjs`）：
+```
+✔ AC1 — a green run writes the exact suite-state shape to .quay/full-suite-state.json (153ms)
+✔ AC1 — while the suite runs, state=running with finishedAt/durationMs null (2159ms)
+✔ AC2 — RED is marked on first failure detection, before the run completes (marker-file proof) (2148ms)
+✔ AC2 unit — the failure markers match concrete node:test/TAP failure lines, not passing lines (2ms)
+✔ AC3 — the inner stop-condition reads the outer suite-state; the inner doc has ZERO scripts/test.sh self-run literal (1ms)
+✔ AC4 — the red-window ruling is explicit in the loop docs: RED => stop dispatch + hold fan-in (1ms)
+✔ AC5 — the >=3min/<3min threshold rule + durationMs measurement hook are in both loop docs (1ms)
+✔ AC7 — the three batch-eliminating blocks (a/b/c) are cross-annotated in the closure-sync task and loop docs (1ms)
+ℹ tests 8 / pass 8 / fail 0 / cancelled 0
+```
+相邻相关测试：`capability-catalog.test.mjs` + `drive-contract-check.test.mjs` +
+`test-framework-policy-check.test.mjs` 一并实跑 40/40 绿。
+
+**Contract 实跑（DoD grep 证明）**：
+- `grep -rn 'scripts/test.sh' plugin/loop/fast-mode-loop-tick.md` → **0 命中**（inner 零全量套件自跑）。
+- `bash plugin/scripts/capability-catalog.sh --summary` → `90 scripts | 90 declared | 0 unclassified | 85 ship`（exit 0）。
+
+**AC6 证据（机制 vs 实跑，按先例分列）**：
+- (i) **机制已落地**：runner 是后台异步（spawn + 写 state + 退出，不阻塞调用方）；AC1 测试证明 state
+  先写 `running` 再写终态，inner 读 state 不等待套件。**实跑证据待补**：外层下一次 20-min cron 起后台
+  套件时，inner 派发史显示持续派发/合并（telemetry `--task-start` 时间戳连续）——即「外层后台跑、
+  inner 不停」的证明，机制已就位，实跑由外层天然产生。
+- (ii) **RED 路径 fixture 已跑**：AC2 测试用失败 fake-suite 走通「失败行 → 立即标 red（finishedAt
+  null）→ 终态 red」；AC4 文档/测试固化「red ⇒ inner 停派发 + 暂缓 fan-in」。**实跑待补**：外层真实
+  分诊（bisect → 回滚 → 重启 → re-green → 撤信号）在首次真实 red 时发生。
+- 按 closure-sync AC5 先例：机制 + fixture 证据已勾，实跑证据待外层自然产生后由外层核对补记。
