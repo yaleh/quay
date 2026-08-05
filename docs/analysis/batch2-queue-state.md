@@ -4070,3 +4070,19 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **已执行**：两个 phantom bracket 闭合（--task-end abandoned，inProgress 清空）；web-board worktree 回收；os-anchor 未提交工作备份（/tmp/os-anchor-backup-1103）+ 驱动 inner 捡起（提交+merge 不重建）。
 - **建任务**：gap-over-90m-false-signal-source-reads-telemetry-not-task-status（status 闸 + AC4 reconcile 判据缺陷）。runner 结构任务 gap-full-suite-runner-concurrency-default-and-gate 已 ready。
 - **inner**：收到 os-anchor 驱动，处理中（提交 worktree 工作）。
+
+### tick 2026-08-05T11:0xZ（内层：os-anchor fan-in + 满并发 3 派发）
+
+- **os-anchor fan-in 完成**（外层裁定 CONTINUE + 捡起未提交工作）：worktree 未提交工作（capability-catalog.sh +2、os-anchor-install.sh、os-anchor-watchdog.sh）提交为 `ae305135`（+699 行）→ rebase 净 → merge → scoped `--allow-thin` **63/0/1 EXIT=0** → worktree 已清、branch 已删。备份 /tmp/os-anchor-backup-1103 与落地内容一致。
+- **web-board 重新派发**（phantom 已回收，外层裁定可重派）：self-touch 补 `82c65b55`，fresh agent 在 /home/yale/work/quay-worktrees/web-board（bracket `fm-...-qw5qbk`）。
+- **runner 结构任务派发**（`gap-full-suite-runner-concurrency-default-and-gate`，最高优先——解套件 ABORT 循环）：self-touch 补 `0d74af60`，agent 在 /home/yale/work/quay-worktrees/runner-gate（bracket `fm-...-ewzep7`）。四修：nproc 派生默认 + replace-splice + resource-gate + reason 轴（aborted≠failed）。
+- **claude-p 实测任务派发**（`gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics`）：self-touch 补 `27816c8c`，agent 在 /home/yale/work/quay-worktrees/claude-p-measure（bracket `fm-...-3usk8j`）。与 web-board + runner 两两 disjoint（checkTouchesPair 实测）。
+- **并发 3/3 满**：web-board + runner-gate + claude-p-measure。就绪池 28/12 健康。
+- 外层已清 phantom bracket（os-anchor/web-board 旧括号 --task-end abandoned）。
+
+### tick 2026-08-05T11:2xZ（外层，状态健康 + os-anchor 收尾待实跑）
+
+- **inner 满负荷恢复**：3/3 槽位在飞（runner 结构 / measure-claude-p / web-board 重派发），telemetry bracket 与 pane agent 数一致（3=3，inner 本次正确打点）。
+- **os-anchor 已 merge + fan-in 完成**（492b69b5 + worktree 清理），scoped 验证绿（150s）。但任务 AC 7/7 未勾、status 仍 ready——AC1（systemd timer active）/AC2（崩溃自动恢复实跑）需要**真实系统操作验证**（install + 模拟崩溃），非机械 merge 可勾。待 inner 完成 AC 实跑后翻 done。
+- **SPEC-state-crystallization 已立案**（并入 supervisor 任务 AC8，c385bcbf）。六实体唯一写入者 + 名词进代码动词留文本 + 形式化三约束。
+- 套件 green、Monitor 绿、无 blocked。
