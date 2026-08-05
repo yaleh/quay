@@ -81,12 +81,34 @@ WAIT 转 GO，tmux server 从 217 降到 10。⇒ 这个泄漏是当前资源压
    - 07:26 资源 ABORT、07:50 跨项目暂停：两个决定当时都对，但归因都不完整；
    - 资源门现 GO，M3 验证套件可跑（但 laneCount 显式传参传播 AC16 仍未修——重跑须临时手段）。
 
+### 精确根因 + 修法优先级（2026-08-05 09:2xZ，管理者源码验证）
+
+**根因（比「teardown 缺失」更精确，也更易修）**：`send-keys-verified.test.mjs` 的
+`newHermetic().cleanup()`（55-67 行）只 `fs.rmSync(tmp, {recursive,force})`——删掉临时目录（含
+socket 路径），**全文件零处调用 `tmux kill-server`/`kill-session`**（grep kill 命中数=0）。**删目录
+≠ 杀进程**：由 `tmux new-session -d -s S bash` 起的 server，socket 文件被删后仍作为孤儿进程活着——
+正是今晚两波泄漏（TMUX_TMPDIR=/tmp/skv-*/sock 存在但目录早已不在）。
+
+**范围更窄（好事）**：同族用 isolateTmuxEnv/newHermetic 模式的有 quay-init-tmux-detection.test.mjs
+（8 处 new-session、4 处 kill）与 session-liveness.test.mjs（6 处 new-session、3 处 kill）——**两者都
+有 kill 调用**，只有 send-keys-verified.test.mjs 是**零**。⇒ 不是整族缺 teardown，是**这一个文件的
+这一个 helper 缺一行**。本文件真正起 server 的测试是 104 行（skv-noecho）与 121 行（skv-ok）——对应
+两波不同前缀的泄漏。
+
+**修法（比「套件尾部断言」更该先做的）**：
+- **① 立即修（优先）**：`cleanup()` 里 `rmSync` 之前加一行 `tmux(['kill-server'], env)`（用文件里已有
+  的 `tmux()` 助手；隔离环境下 kill-server 只杀自己这个隔离 socket 下的 server，不影响默认 server——
+  管理者验证 TMUX_TMPDIR 隔离对 kill-server 同样有效）。
+- **② 套件尾部残留断言（第二道防线）**：仍值得做，但现在是防未来同类文件的兜底，不是唯一手段。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`
       前缀的 tmux server 或 /tmp 目录残留（机械检查，一次覆盖全类）
-- [ ] AC2: **teardown 回收**——send-keys-verified.test.mjs（及同族）测试结束 kill 自己起的 server，
-      带 TMUX_TMPDIR 校验、绝不用 tmux kill-server（第三次崩溃路径）
+- [ ] AC2: **teardown 回收（精确一行修复优先）**——`send-keys-verified.test.mjs` 的
+      `newHermetic().cleanup()` 在 `rmSync` 前加 `tmux(['kill-server'], env)`（隔离环境 kill-server
+      只杀自己 socket 下的 server，不影响默认 server；用文件已有的 tmux() 助手）；同族两文件已有 kill
+      不需改。**套件尾部断言是第二道防线**（防未来同类），非唯一手段
 - [ ] AC3: **残留清理**——8 个 session-liveness-* + 1 个 enter-repro 泄漏在判断后清除（先确认挂载
       观察者 pid 2598198 未用，再清）
 - [ ] AC4: **回归控制**——217 泄漏形态不再复现：连续多轮套件后 server 数稳定（不随轮数累积）；
