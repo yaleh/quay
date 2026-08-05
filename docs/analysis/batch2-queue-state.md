@@ -4984,3 +4984,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **spawn-count 存活确认（修正 ps 误判）**：`ps` 无独立进程 ⇒ 曾疑死；`TaskOutput` 实查 `status: running`，transcript 活跃（23:17:24 仍在分析 A 层转换）。**in-process subagent 不产生独立 OS 进程**——存活判据用 TaskOutput status，不用 ps（ps 只对 out-of-process agent 有效）。
 - **停止条件 suite-red 持续**：state 仍 `red`/failed（外层等 spawn-count 落定后重跑，a464eb91「waiting tick」确认）。⇒ 无新派发、fan-in 继续暂缓。两个已落地分支（split-batch b67c49f3 + productize 32d36ade）持等 re-green。
 - 在飞 1/3（spawn-count，~30min，测量任务，未超 90m）。Monitor 三判据绿、无 .halt、无 block。master `a464eb91`。
+
+### tick 2026-08-05T23:4xZ（内层，waiting tick #2：spawn-count 深工作中）
+
+- **spawn-count 仍在飞**（~55min，TaskOutput `running`，transcript 23:44 活跃）：A 层转换 22 文件已做、逐文件验证中——10 处 dir032-audit-independence 失败正在调查（`listGates()` actual:false，疑为其 worktree 旧 master 快照 d8f6a51c 缺 audit-independence gate 注册，非转换回归；agent 自查中）。未超 90m（上限 ~00:20Z）。
+- **停止条件 suite-red 持续**：外层仍等 spawn-count 落定后重跑。⇒ 无新派发、fan-in 暂缓。2 分支持等 re-green。
+- 无 .halt、无 block、Monitor 三判据绿、detect-stop 无停止条件（pane 0/3）。
