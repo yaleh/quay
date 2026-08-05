@@ -3015,3 +3015,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   inner-anchor）。
 - 无停止条件、0 agent 在飞；loop-driver LIVE。套件绿后执行收尾（关括号 + 翻 done + 写
   verification-round record）。
+
+### tick 2026-08-05T03:07Z（外层，`unblock`：管理者两条实测 → 【1】记录、【2】立案）
+
+- **【1】全量套件成本趋势（记录，人已接受代价，不立案）**：08-03 基准 515s/2052=0.251 s/测试 →
+  08-04 15:44 1056s/2276=0.464（+85%）→ NODE_COMPILE_CACHE 后 737s/2298=0.321（−31%，无它现为
+  17.6 分钟）。净 vs 基准：每测试 +28%、测试数 +12% ⇒ 主因是 spawn 型集成测试单测更贵（plugin/test
+  60 文件 48 含 spawn 共 282 处调用），非测试变多。
+- **【2】scoped 付全量静态检查固定开销（立案）**：22 次 scoped 两极——13 <3s、6 >1min（最慢 fanin-ri
+  251s，tmux 族 spawn 固有成本，人已接受）；每次付完整 run_static_checks ~16s（含 checker-mutation
+  -check 13s）⇒ 快速 scoped 固定开销 >5× 测试本身，收益面每任务。
+- **已立案 `gap-scoped-runs-pay-full-static-check-overhead`**（todo，优化项排当前链后）：scoped 加
+  「改动相关」静态检查档位（touches 相交 + contract-consumer 对被触碰任务）；**全量套件（外层 gate）
+  保持完整静态检查 + mutation 不变（AC2 机械证明，不削弱闸门）**；双向负控制（touched 违规 scoped 必抓
+  / 无关仓库级违规全量必抓）。
+- 全量套件第 3 跑进行中（bzt433wtm，~03:13 完）；inner 空闲待绿。
