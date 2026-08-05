@@ -4332,3 +4332,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **red-pattern（阻塞 #4）已 merge**（60d2521c）：裸 ✖ 改结构化 vitest shapes（per-file N tests|M failed / Test Files N failed），e2e 证明 ✖-console + exit 0 ⇒ green。假红修复完成（采纳 archguard 已验证方向）。
 - **vendor-runtime（阻塞 #2）**：inner 处理中（26m，Editing AC1 assertion）。完成后派 dist-runtime（阻塞 #3）。
 - **AC12b 四阻塞 2/4 落地**，inner 全按优先级执行。
+
+### tick 2026-08-05T14:3xZ（外层，探针死亡 + 实验遗留普查立案）
+
+- **探针机制已死 15 天（管理者实测 + 外层核实）**：routine-scheduler.ts 存在但无生产调用（只有 config-wiring-check/read-probe-spec/SKILL.md 引用），tick 文档引用 0 处，trigger every(N) 用迭代计数（经典管线概念，两层模式无迭代号）。最后一次真跑 07-15。**「机制存在无人调用」第五实例**（前四：loop-driver.jsonl 无写入者、遥测括号没调用、human-steered 消费者退休、strategic-doc-staleness orchestration 臂死 glob）。**重新接线方向**：触发器从迭代计数改为两层模式实际量（tick 计数/时间/事件）。
+- **实验遗留普查（管理者 §8b）**：46 测试文件默认 glob 每轮全跑，32 无人引用(70%)、15 被测实现已删。脚本 63 真·仅存 experiments。
+- **值得回收的四个**：git-lens-l-d-code-doc-ratio（L_D）、git-lens-l-g-structural-drift（L_G）、git-lens-l-s-behavior-variance（L_S）——ADR-006/007 五透镜的量化实现，补 architecture-analysis 探针；derive-touches-heuristic——解决 ## Touches 声明不准痛点。
+- **判据建议**：测试文件被测实现已不存在 ⇒ 随实现删除（15 个文件每轮空跑）。
