@@ -4,7 +4,7 @@ title: preflightMergedMarkdownClaims silently returns zero findings for a
   genuine mid-line-bulleted block naming fewer than 2 backtick identifiers --
   pre-existing, found incidentally during a 2026-07-31 adversarial review of two
   sibling false-positive fixes, unrelated to either
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
