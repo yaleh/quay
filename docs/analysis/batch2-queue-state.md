@@ -4505,3 +4505,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **收尾 0 条**：7 条 not-yet-flipped 全有正当未勾理由（vendor-runtime B 机 blocker / reliable-send 安全窗 / adaptive-concurrency 实跑证据 / closure-sync+drive-text 全量绿 pending / two-thirds 5 未勾 / DIR-119 inner superseded 处理中）。全量套件串行规则推迟（inner agent 在飞）。
 - **meta-cc 方法固化进 tick 文档**：历史过程类问题（什么时候发生了什么）→ meta-cc 派发时间戳；git 提交时间只标完成不标开始，重建过程必错。
 - **在飞 1/3**（outer-selfchecks）。套件 green（stale）。内层转录「Next wakeup scheduled…harness re-invokes on wakeup or task-notification」——派发绑定 inner 自己的 tick 边界，即本 tick 立案的退化。
+
+### tick 2026-08-05T16:2xZ（外层，证伪式提问抓到 inner-session-check 真缺陷）
+
+- **管理者方法改进（人 16:1xZ 指出其提问全确认性）→ 新问句「支持结论的证据能否同样支持相反结论」→ 本产出**：
+  检验刚 merge 的 outer-selfchecks，抓到 inner-session-check.sh discovery 认错 inner transcript。
+- **外层独立验证（更糟）**：重跑 `bash plugin/scripts/inner-session-check.sh` → transcript=b8dc91a6
+  （管理者会话，非 inner c7b58e09）、transcript-source=discovery、transcript-fresh=false、state=healthy。
+  根因：discovery 排除「CLAUDE_CODE_SESSION_ID」+「含 user 消息」前提在 3 会话拓扑下错（两层都含 user
+  消息）⇒ 退化成「最新 jsonl 不是自己」，**非确定性**（管理者跑→outer、外层跑→manager）。
+- **为什么现在没事但会重演 11:40 watchdog 形态**：state=healthy 恰好对但错证据；空壳+外层活跃 ⇒ 读外层
+  fresh=false 报 healthy ⇒ 外层不驱动空壳。
+- **立案 `gap-inner-session-check-discovery-reads-wrong-transcript`（todo, defect）**：修法=结构性来源
+  （inner 窗口 claude 进程 PID 反查 transcript，1:1 不会认错）；config/--transcript 路径已对只坏 discovery。
+- **已驱动 inner**（数据-only，pane 输入框确认）：并入其在飞 outer-selfchecks 任务 scope 内修复。
+- **AC10 仍 10**（证伪产出属机制流程）。套件 green、1 worktree 在飞、inner 距 fan-in ~7min。
