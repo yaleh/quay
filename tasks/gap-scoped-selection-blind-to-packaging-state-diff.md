@@ -17,54 +17,56 @@ extra: {}
 
 ## Proposal
 
-**scoped 选中集看不见「打包态 vs 源码态」差异 + 跨切判据系统性失明（管理者使用视角提问查出，archguard 同型 = 跨项目证据）**：
+**跨切判据 scoped 系统性失明——三个项目三种检查的通用问题 + 任务模板治本（管理者 14:26/16:1x + archguard 三实例 + 外层裁定）**：
 
-**实例（archguard 报告 #5 + TASK-64/65）**：TASK-62 scoped 测试全绿没抓到 driver↔direct 分叉（tsc 不复制
-.scm，packed dist 加载空查询）。TASK-64/65 加 MCP tool 缺 ADR-007 canonical CLI flag——**scoped 全绿、AC
-全勾，但都没跑 check-adr**（ADR-007 检查是跨切测试，scoped 覆盖不到，check-adr.test.ts 唯一抓到）。
+**三个独立实例（跨项目证据）**：
+1. **打包态一致性**（quay + archguard）：select-tests-for-touches basename 配对不匹配打包态测试
+   （npm-pack-e2e/build-dist/...），src 任务 scoped 选不中 → 打包态坏等到 CI/采用者。
+2. **ADR-007 合规**（archguard TASK-64/65/66）：加 MCP tool 缺 canonical CLI flag，scoped 全绿 AC 全勾
+   但没跑 check-adr（跨切测试，scoped 覆盖不到）。三连复发后 archguard 落档「MCP-tool 任务 AC 必含
+   check-adr 0 violations」。
+3. **lint**（archguard TASK-66，第三个独立实例）：测试文件引入 14 个新 lint error，scoped 全绿 AC 全勾，
+   npm run lint 仍 exit 1。
 
-**quay 同型盲区（管理者实测）**：(a) quay 有 4 个打包态测试（npm-pack-e2e / build-dist /
-build-dist-smoke / package-json-bin）；(b) select-tests-for-touches 选择规则是 basename 配对
-（<dir>/foo.ts → */test/foo.test.mjs）；(c) 打包态测试的 basename 与任何 src 文件都不配对；
-(d) 真实 ready 任务实测选中集是 plugin/test/axis-generator.test.mjs，打包态测试命中 0。
+**共同模式**：跨切判据无法通过 basename/touches 配对进 scoped 选中集，只能靠全量/独立复验兜底。
+**三个项目、三种检查，共同点完全一样**——不是单项目偶发，是「scoped 层对跨切判据系统性失明」。
 
-**跨项目证据（archguard 2026-08-05 15:08 报告）**：两个项目独立撞到同一类缺陷——【跨切判据
-（ADR-007 合规、打包态一致性）无法通过 basename/touches 配对被 scoped 选中，只能靠 full-suite 兜底，
-而 full-suite 跑得少】。⇒ **「scoped 层对跨切判据系统性失明」是跨项目证据，非单项目偶发**。
-
-**判据形态建议（管理者）**：某些判据应标记为【跨切】——无论 touches 是什么都必须进 scoped 选中集。
-
-**为什么值得修**：CLAUDE.md 明写 packaging e2e 不在 scripts/test.sh 覆盖范围（CI dist-verify-node-floor
-job）——已知边界。但 archguard 事故证明：改 src 的任务 scoped 绿甚至 full-suite 绿，仍可能打包态坏掉。
-quay vendor 运行时正是打包产物（B 机实测 dist 不随 clone / package.json 缺失，全属此类）。
+**治本方向（archguard 建议 + 外层采纳）**：任务模板 AC 默认应含一份「跨切检查清单」（哪些检查必须在
+任务内跑而非留给全量）——**不是逐个检查各自加规则**（每出现第 4 个跨切检查又要再加一条）。与「机制
+在一处做好、下游配置复用」同原则：quay 侧一份通用任务模板，不是每个项目各自总结治本规则。
 
 ### 选定机制
 
-1. **跨切判据标记**：select-tests-for-touches 加「跨切」概念——标记为跨切的判据测试（打包态 e2e、
-   ADR 合规、契约检查等）无论任务 touches 是什么，只要任务触碰对应对象（src/新 MCP tool）就必须进
-   scoped 选中集
-2. 打包态测试保留在 CI（不变），但 scoped 层也能触达
-3. 验证：触碰 src 的任务 scoped 选中集含打包态测试；加 MCP tool 的任务 scoped 含 ADR 检查
+1. **范围扩大**：本任务从「打包态 vs 源码态」扩大为「跨切判据类」通用问题（三实例统领）
+2. **治本**：任务模板（plugin/skills/author/SKILL.md）AC 默认含「跨切检查清单」——新代码 lint-clean +
+   check-adr 0 violations + 打包态一致性（按任务类型），使跨切检查成为任务内可测项
+3. **scoped 侧**：select-tests-for-touches 加「跨切」标记（标记为跨切的判据测试无论 touches 必须进 scoped
+   选中集）——机制层兜底
+4. 验证：任务模板生成的 AC 含跨切清单；跨切判据测试进 scoped
 
 ## Acceptance Criteria
 
-- [ ] AC1: 触碰 packages/*/src 的任务，scoped 选中集强制含至少一个打包态测试（实测）
-- [ ] AC2: 触碰 src 或新增 MCP tool 的任务，scoped 含 ADR/跨切检查（check-adr 类，实测）
-- [ ] AC3: 纯 plugin/文档任务不含打包态/跨切测试（不误加，scoped 保持秒级）
-- [ ] AC4: 打包态测试仍跑在 CI（dist-verify-node-floor，不重复/不冲突）
-- [ ] AC5: 与 archguard TASK-62/64/65 事故 + CLAUDE.md packaging e2e 边界交叉标注（跨项目证据）
+- [ ] AC1: 任务模板（author SKILL.md）AC 默认含「跨切检查清单」——新代码 lint-clean + check-adr 0 violations + 打包态一致性（按任务类型，实测模板生成含）
+- [ ] AC2: select-tests-for-touches 加「跨切」标记——跨切判据测试（打包态/ADR/lint 检查器）无论 touches 进 scoped 选中集（实测）
+- [ ] AC3: 触碰 packages/*/src 的任务 scoped 含至少一个打包态测试（实测，原打包态 AC 保留）
+- [ ] AC4: 触碰 src 或新增 MCP tool 的任务 scoped 含 check-adr（ADR 跨切检查，实测）
+- [ ] AC5: 新代码 lint 检查进任务内（scoped 跑 lint 或任务 AC 含 lint-clean，实测 14-error 形态被抓）
+- [ ] AC6: 纯 plugin/文档任务不含跨切测试（不误加，scoped 保持秒级）
+- [ ] AC7: 与 archguard TASK-62/64/65/66 + CLAUDE.md packaging e2e + 自适应并发（机制一次下游复用）交叉标注
 
 ## Touches
 
-- plugin/scripts/select-tests-for-touches.ts（跨切判据标记）
-- plugin/test/select-tests-for-touches.test.mjs（AC1-AC3 测试）
-- CLAUDE.md（packaging e2e 边界更新：scoped 层也能触达 + 跨切判据说明）
-- tasks/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry.md（AC5 交叉标注）
+- plugin/skills/author/SKILL.md（任务模板 AC 默认跨切检查清单）
+- plugin/scripts/select-tests-for-touches.ts（跨切标记）
+- plugin/test/select-tests-for-touches.test.mjs（AC2-AC6 测试）
+- CLAUDE.md（packaging e2e 边界 + 跨切判据说明）
+- tasks/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry.md（AC7 交叉标注）
 
 ## Contract
 
-measure   crosscut_in_scoped = `node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task <src-touching-task> 2>&1 | grep -c 'npm-pack-e2e\|build-dist\|check-adr'` stdout 数字段
+measure   crosscut_in_scoped = `node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task <src-touching-task> 2>&1 | grep -c 'npm-pack-e2e\|build-dist\|check-adr\|lint'` stdout 数字段
 band      crosscut_in_scoped >= 1（src/新 tool 任务 scoped 含跨切测试）
-invoke    `grep -n 'basename\|pair\|crosscut\|跨切' plugin/scripts/select-tests-for-touches.ts`
-control   触碰 src 任务 ⇒ 含打包态测试（AC1）；加 MCP tool 任务 ⇒ 含 ADR 检查（AC2）；纯 plugin 任务 ⇒ 不含（AC3）
-resume    跨切标记与测试分步提交，任一步完成即写盘
+invariant task_template_has_crosscut = 1（任务模板 AC 默认含跨切检查清单）
+invoke    `grep -n '跨切\|lint\|check-adr\|crosscut' plugin/skills/author/SKILL.md plugin/scripts/select-tests-for-touches.ts`
+control   src 任务 ⇒ 含打包态/ADR/lint（AC3/4/5）；纯 plugin 任务 ⇒ 不含（AC6）
+resume    模板 AC 清单与 scoped 跨切标记分步提交，任一步完成即写盘

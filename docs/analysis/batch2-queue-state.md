@@ -4463,3 +4463,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **管理者更正**：不是「反向应用到 manager→outer」，是**把工具通用化**——盯谁、盯什么参数化，允许调用方配置。
 - **核实**：classifyPaneState 纯函数（pane-state-classify.ts，无 inner/outer 假设，ADR-016 封闭枚举）；写死的只在薄壳三处（BLOCKED_FILE_NAME、RULING_REQUIRED_PANE_SAMPLES 但 observePaneForRuling 已参数化 samples、调用固定 inner）。
 - **裁定**：通用化 = 目标/路径/阈值参数化 + 动作可扩展（插件点/回调），**不开放状态枚举**（ADR-016 防游戏化，除非重新评估那是另一个决定）。并入 gap-ruling-required 任务（观测方向的实现方式）。
+
+### tick 2026-08-05T16:2xZ（外层，跨切失明扩为通用 + 任务模板治本）
+
+- **archguard 第三实例（lint）**：TASK-66 测试文件 14 个新 lint error，scoped 全绿 AC 全勾 npm run lint exit 1。三个项目三种检查（打包态/ADR-007/lint）共同点完全一样——跨切判据 scoped 失明。
+- **治本（archguard 建议 + 外层采纳）**：任务模板 AC 默认含「跨切检查清单」（lint-clean + check-adr + 打包态，按任务类型），非逐个加规则。已扩大 gap-scoped-selection-blind-to-packaging-state-diff 范围为跨切判据类通用问题（三实例统领）。
