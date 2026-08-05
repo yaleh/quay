@@ -3533,3 +3533,7 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > runner-grouping isolated 测试（spawn 全量对比）在吃 CPU。**停掉它**（bo2hxt15y）→ CPU 回落 6.48 →
 > 闸 GO → 重跑（bsgro72hp）。资源闸正确阻止了 CPU 饥饿下跑套件（gap-no-resource-awareness 机制生效）；
 > runner-grouping 的 flags 测试结果待套件覆盖。
+> **06:12Z 增补（ROUND 3 二次 RED = 第 7 次格式踩坑）**：重启 gate 6.3s 静态门 RED——新违规来自我的
+> `gap-delivery-surface-grows-but-target-freezes-no-upgrade`（band 无名）。**第 7 次**。已修 → 重跑
+> （b7s6tko5c）。自伤统计：我的任务 Contract 段 7 次踩坑（measure/band/control 格式），每次 gate 兜底
+> 15 分钟。**派发前 contract 静态预审计必须成为我自己的固定动作**——不是等 round gate 抓。
