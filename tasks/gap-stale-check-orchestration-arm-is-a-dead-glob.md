@@ -63,6 +63,8 @@ orchestration 臂是一条死 glob**。**不是被硌出来的**（所有检查�
 
 ## Touches
 
+- tasks/gap-stale-check-orchestration-arm-is-a-dead-glob.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/strategic-doc-staleness-check.ts（orchestration 臂：*ROADMAP* → *.md 全量/前缀派生）
 - plugin/test/strategic-doc-staleness-check.test.mjs（AC2 fixture）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC4 记账引用）

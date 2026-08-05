@@ -4784,3 +4784,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **ready-pool-floor 派发**（`fm-...-35d7qn`，人类池裁定任务）：git-log 验证真未落地（唯一命中是外层 filed 提交
   `56232835`），与 send-keys-nbsp 互不相交（batch 判定）。self-touch 已补（本 tick bookkeeping）。
 - 在飞 2/3（send-keys-nbsp + ready-pool-floor）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。
+
+### tick 2026-08-05T18:0xZ（内层，send-keys-nbsp fan-in + 就绪池落地审计 + stale-check 派发）
+
+- **send-keys-nbsp fan-in 完成**：第三次 already-landed 重派实证（`7df8b373` NBSP 修复早落地、status 留
+  ready 待 closure）。agent 复核（33/33 scoped、AC1-AC7、adversarial clean、Contract measure 7≥1）、补
+  re-verification note（merge `23066316`→`aa99b47c` 后）。worktree/branch 已清。**git-log 判据确认有效**：
+  `7df8b373` 消息含完整任务 id——只怪派 send-keys-nbsp 时该纪律尚未建立（自 ready-pool-floor 起执行）。
+- **就绪池全量落地审计（防第 4 起重派）**：git-log-by-id + partial-id 双查 27 ready 任务 → **约 15 个
+  already-landed 待 closure**（web-board/measure-claude-p/red-pattern 用 partial-id 才命中；dist-runtime/
+  leak/ghost-drive/manager-baked/red-window-executor 等 full-id 命中）——这些**不应再派发**，等外层 closure
+  （全量绿 + 实跑证据 + 翻 done）。真未落地约 12 个。**closure 积压是池卫生主问题**——filed defect
+  `gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks` 的 fix 会让池自动排除这些。
+- **stale-check 派发**（`fm-...-9xvjhu`）：git-log 双查真未落地，与 ready-pool-floor 互不相交（batch 判定）。
+  self-touch 已补。
+- 在飞 2/3（ready-pool-floor + stale-check）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。
