@@ -3763,3 +3763,27 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   meta-cc/archguard 停滞（红窗停派是生效中的正确行为，异常判据要求 state != red）。
 - 本 tick 新立案：laydown 派生盲点、checker-cost 新轴；needs-human（前 tick）。contract 审计 new-since
   baseline 0。
+
+### tick 2026-08-05T07:45Z（外层，`unblock`：资源安全 ABORT + 4 裁定立案 + 驱动内层修复）
+
+- **资源安全（最高优先）**：07:26Z 外层**亲手中止全套件**——full-suite-runner.ts:94 硬编码
+  laneCount=8（绕过 test.sh 的 `max(1,floor(nproc/2.1))=1` 派生）+ 不调 resource-gate（NOT
+  REFERENCED），load 31.74（4 核 7.7× 超订）、CPU pressure some avg10=95.49、机器今晚已崩三次。
+  load 现已回落到 12.5。**re-open `gap-no-resource-awareness-heavy-ops-run-blind`（done→ready）**：
+  AC12 laneCount 派生统一、AC13 runner 过资源闸、AC14 回归控制、AC15 test-group。
+- **套件耗时序列（管理者 07:24）**：full-suite-state.json 单文件覆盖无历史（上轮 872756ms 已被覆盖）；
+  verification-round.jsonl 只有 2 行停在 05:03（红窗让收尾没走到写记录步，机制没死但无序列=无指标）。
+  **并入 checker-cost 任务**：加 load 字段（拆「n 变大」vs「机器变忙」）+ 套件序列 {round,startedAt,
+  durationMs,laneCount,pass,fail,load}。
+- **归因更正（管理者 07:27）**：ready-pool 35.8→91.2→157s 三点，后两点 pool 相同（24）成本却涨 1.7×
+  ⇒ 主导是 load 不是 n。**撤回三条 pool 优化优先级建议**；先修 load（laneCount）。方法论：两点不足以定
+  斜率，需控制变量点。
+- **reason 轴（管理者 07:40，生成器问出）**：state 只有一个 red 值，无 failed/aborted/infra 区分；
+  外层被迫手写 note = 逃生舱判据。**立案 `gap-suite-state-has-no-reason-axis`**（AC1 schema+reason 枚举、
+  AC2 trigger 按 reason 路由、AC4 note 收编）。AC10 5→6（pre-friction）。
+- **故障 7 第六种送达失败模式（archguard 实证）**：全新 welcome 屏 C-u 清不掉 ghost placeholder，
+  清屏循环 fail-loud 卡死冷启动。**re-open `gap-reliable-send`（done→ready）** AC9 fresh-session 分支
+  + AC10 终止条件；结晶文档补故障 7 段 + 算法步骤 0。**本 tick 实测复现**：外层驱动内层时 C-u 清屏
+  50 次 fail-loud——但那是内层真实输入被误当 placeholder（非 fresh），判据待内层修。
+- **驱动中**：内层正在处理管理者的资源门消息（已形成 archguard 裁决），等它空闲后驱动 no-resource-
+  awareness 修复（laneCount+gate+reason 一并）。
