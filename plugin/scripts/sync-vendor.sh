@@ -142,23 +142,48 @@ cmp_or_report() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Vendor dist bundle
+# 1. Vendor dist bundles (Core quay.js + native provider quay-native.js)
 # ---------------------------------------------------------------------------
+# gap-ac3b-prove-installed-quay-runs-without-dev-tree (AC1): the installed
+# plugin must be able to lay down a FUNCTIONAL provider runtime into a target
+# project (so the project's mcp_entry points at a project-local copy, never a
+# PATH-resolved `quay-native` into a dev tree). The native provider's
+# self-contained bundle (packages/quay-native/dist/quay-native.js, built by
+# build-dist.mjs — bundles quay/yaml/zod/sdk, runs on plain node) is mirrored
+# into plugin/vendor/quay-native/ alongside the Core bundle, exactly like the
+# Core dist/quay.js. provider.yml travels with it (the bundle resolves it
+# relative to its own location, so the laid-down pair must stay together).
+NATIVE_SRC="${REPO_ROOT}/packages/quay-native"
+NATIVE_DEST="${PLUGIN_DIR}/vendor/quay-native"
+
 if $CHECK_MODE; then
   echo "[sync-vendor --check] verifying vendor dist bundle ..."
   cmp_or_report "vendor/quay/dist/quay.js" \
     "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  echo "[sync-vendor --check] verifying vendor native-provider bundle ..."
+  cmp_or_report "vendor/quay-native/dist/quay-native.js" \
+    "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
+  cmp_or_report "vendor/quay-native/provider.yml" \
+    "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 elif $SYNC_DIST_MODE; then
-  # --sync-dist: mirror an already-built source bundle, no rebuild (see header
+  # --sync-dist: mirror already-built source bundles, no rebuild (see header
   # comment — used by scripts/test.sh so the vendored mirror stays fresh before
-  # every test run).
+  # every test run). scripts/test.sh's build_dist_once builds BOTH source
+  # bundles (quay.js + quay-native.js) before calling --sync-dist, so a missing
+  # bundle here is a real failure (never silently papered over).
   if [ ! -f "${SRC}/dist/quay.js" ]; then
-    echo "ERROR: --sync-dist requires a built source bundle: ${SRC}/dist/quay.js (run the build first)" >&2
+    echo "ERROR: --sync-dist requires a built Core bundle: ${SRC}/dist/quay.js (run the build first)" >&2
     exit 2
   fi
-  echo "[sync-vendor --sync-dist] mirroring packages/quay/dist/quay.js -> plugin/vendor/quay/dist/quay.js (no rebuild)"
-  mkdir -p "${DEST}/dist"
+  if [ ! -f "${NATIVE_SRC}/dist/quay-native.js" ]; then
+    echo "ERROR: --sync-dist requires a built native bundle: ${NATIVE_SRC}/dist/quay-native.js (run the build first)" >&2
+    exit 2
+  fi
+  echo "[sync-vendor --sync-dist] mirroring packages/quay/dist/quay.js + packages/quay-native -> plugin/vendor/ (no rebuild)"
+  mkdir -p "${DEST}/dist" "${NATIVE_DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  cp "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
+  cp "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 else
   if [ ! -d "$SRC" ]; then
     echo "ERROR: source not found: $SRC" >&2
@@ -170,6 +195,11 @@ else
   bash "${SRC}/scripts/build-dist.sh"
   mkdir -p "${DEST}/dist"
   cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
+  echo "[sync-vendor] building + mirroring packages/quay-native dist bundle -> plugin/vendor/quay-native/dist ..."
+  bash "${NATIVE_SRC}/scripts/build-dist.sh"
+  mkdir -p "${NATIVE_DEST}/dist"
+  cp "${NATIVE_SRC}/dist/quay-native.js" "${NATIVE_DEST}/dist/quay-native.js"
+  cp "${NATIVE_SRC}/provider.yml" "${NATIVE_DEST}/provider.yml"
 fi
 
 # --sync-dist is dist-bundle-only: mirror the source bundle and stop. All other
