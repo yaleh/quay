@@ -137,3 +137,17 @@ quay-0 / meta-cc-3 / archguard-4 与 outer/inner 驱动会话）。**结论已�
 
 关联：`tasks/gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause.md`（本任务，AC1-AC7）；
 `tasks/gap-tests-never-clean-up-their-tmpdirs.md`（同族交叉标注，AC5）。
+
+---
+
+## 7. 更新 2026-08-05 —— AC1 那类「选错命令」已机械可查（gap-crystallize-launch-config）
+
+§0 记的「我自拟启动命令，没有先查历史」——那种错误现在**不再依赖人先查历史**：启动参数已结晶进
+检查进仓库的 `.claude/launch.settings.json`，冷启动走 `plugin/scripts/quay-launch.sh <role>`（manager|outer|inner）。
+
+- **启动前可验**（正控）：`bash plugin/scripts/quay-launch.sh <role> --dry-run` 输出逐字来自 settings 文件。
+- **负控**（防 §0 那类错）：刻意改 `_launchSpec.roles.<role>.model`（如 flash→pro）⇒ `--dry-run` 输出即变；
+  `plugin/test/launch-settings.test.mjs` 有机械断言（AC4）。§1 的 `--model deepseek-v4-flash` 现在由
+  settings 文件 + launcher 承载，不是一条要手打的 shell 一行。
+- **invoke 校验**：`claude --settings .claude/launch.settings.json --version`（settings 文件本身可加载）。
+- 逐角色命令见 `orchestration/session-launch-recipes.md` §7。

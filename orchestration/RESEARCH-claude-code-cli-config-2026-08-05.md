@@ -33,3 +33,37 @@
 ---
 
 **这份文档只是调研，优先级判断与是否立案交给外层**——不阻塞当前批。
+
+---
+
+## 结果回写（2026-08-05，gap-crystallize-launch-config-into-checked-in-settings-file）
+
+外层裁定立案后，本任务把「当前 tmux 模式适用」的 3 项 + ghost 的 prompt-suggestions **结晶进检查进仓库的
+`.claude/launch.settings.json`**，由 `plugin/scripts/quay-launch.sh` 机械加载。
+
+### 已结晶（settings 文件 + launcher 落地）
+
+| 参数 | 落地形态 | 说明 |
+|---|---|---|
+| `--exclude-dynamic-system-prompt-sections` | `_launchSpec.excludeDynamicSystemPromptSections: true` → launcher 翻译成 CLI 参数 | settings.json **无对应键**（官方 schema 证实：`json.schemastore.org/claude-code-settings.json` 无此键、根 `additionalProperties:true` 允许 `_launchSpec` 扩展）。实测跨 cwd system prompt 逐字节相同（Δ input_tokens=0） |
+| `-n, --name <name>` | `_launchSpec.roles.<role>.name`（quay-manager/outer/inner）→ launcher `-n` | settings.json **无对应键**（flag-only）。实跑会话记 `custom-title` |
+| `--prompt-suggestions false` | `env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false"` | settings.json **无 promptSuggestions 键**；官方给的环境变量路线是禁用的正确形态 |
+| `--permission-mode bypassPermissions` | `permissions.defaultMode: "bypassPermissions"` | settings.json **有对应键**（ADR-016 前置条件） |
+| 917k 上下文/压缩 + ADR-016 `DISABLE_*` | `env` 六个键 | settings.json `env` 任意环境变量（官方 schema）。917k 是 deepseek 专用：manager 角色在 `_launchSpec.roles.manager.env` 置空串，launcher 合并时删键，避免 Anthropic 默认模型「压缩过晚 API 报错」（session-launch-recipes §5） |
+| `--bare`（一次性验证） | `_launchSpec.bare` + launcher `--bare` 参数 | flag-only；标注「一次性验证用，不长驻」 |
+
+### 已标注不实现（-p 条件性，AC6）
+
+`--replay-user-messages` / `--max-budget-usd` / `--forward-subagent-text` → `_launchSpec.deferredToPpMigration`
+三项（flag/why/when），**延后到 -p 迁移决定**后改写结晶算法与计费风险。
+
+### 明确不做
+
+二进制里翻出的几百个未文档化 `CLAUDE_CODE_*` 内部环境变量——不推荐使用任何一个，不进产品。
+
+### 边界（settings 文件能装什么，不能装什么）
+
+`--settings <file>` 消费的是 **settings.json schema**（`model`/`env`/`permissions`/…），**不是 CLI 参数**。
+所以 flag-only 的 `--exclude-dynamic-system-prompt-sections`、`-n`、`--bare` 必须由 launcher 翻译；
+把它们直接塞进 settings 文件根会被当作未知键（根 schema 宽容接受，但语义上不生效）。这正是
+`_launchSpec` 扩展存在的原因——**settings 文件是唯一事实源，launcher 是加载器**。
