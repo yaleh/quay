@@ -4592,3 +4592,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   家/身份迁出 quay + 独立 OS 锚 + 机械检查 + 单飞锁 + adopt 后动作次数=0（AC12b 可测性）+ 离乳判据
   （裸机 start+adopt 两项目+杀 manager 会话⇒OS 锚恢复）。
 - **在飞 1/3**（outer-selfchecks 验证中）。套件 green（stale）。
+
+### tick 2026-08-05T16:5xZ（外层，inner 采纳 AC12b 纠正 + 收尾 outer-selfchecks）
+
+- **inner 采纳纠正**：promote dist-stale（gap-upgrade-channel-cant-sync-build-artifacts-dist-stale）到
+  ready（9bcad11e：self-touch + DoD + ready-pool missingArtifacts 补齐）——上 tick 驱动生效，真 4th
+  blocker 开工。在跑 sync.sh source mapping agent（分析，非测试，110k tokens）。
+- **收尾 1 条**：`gap-outer-self-checks-and-creates-inner-session` → done（7/7 AC + discovery fix 12936f90
+  落地 + 560c271f 记录 + 外层独立验证 discovery-pid→c7b58e09）；括号 reconcile 关（phantom，worktree 已
+  随 merge 移除）。
+- **全量套件资源闸 WAIT**（cpu avg10≥40，load 8.49，13 node 进程）——闸自己裁决，串行推迟；余 7 条
+  not-yet-flipped 仍卡「全量绿 + 实跑证据」。
+- **在飞 2/3**（upgrade-channel agent + 收尾后新派发空间）。套件 green（stale）。Monitor 三判据绿、
+  detect-stop 无 block、.halt quay/archguard 运行中 meta-cc 暂停。

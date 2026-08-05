@@ -6,7 +6,7 @@ title: "outer should self-check env and create tmux windows / start inner
   session-topology factory exists + cold-start references it, but outer doesn't
   auto-call; fix: outer cold-start step 3 self-checks inner (process +
   transcript) and calls quay-topology.sh when missing, idempotent)"
-status: ready
+status: done
 labels:
   - gap
   - defect
