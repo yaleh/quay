@@ -71,7 +71,7 @@ extra:
 ## Contract
 
 measure   drift_report = `bash plugin/scripts/quay-init.sh --check-drift` stdout 的 漂移/缺失/一致 数字段
-band      drift_report 可解析（三数字齐全；缺失/漂移可升级到 0 或列明）
+band      drift_report = 可解析（三数字齐全；缺失/漂移可升级到 0 或列明）
 invariant not_snapshot = 1（安装是版本可升级，非一次性快照）
 invoke    `bash plugin/scripts/quay-init.sh --check-drift`
 control   构造目标项目缺一个派生脚本 ⇒ 升级必补 + 报告缺失-1；本地改动脚本 ⇒ 列漂移不静默覆盖
