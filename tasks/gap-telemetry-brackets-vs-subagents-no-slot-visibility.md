@@ -119,3 +119,15 @@ changed: 外层受管理者（比「前台空等」更根本的观测缺失）�
 (3) **自检①是恒真空检查**——in-flight 恒 ≤3 恒真，是装饰非判据，任何并发违规静默通过；
 (4) **AC10 +1 ⇒ 6→7**——pre-friction（照生成器问句发现，量化的是历史不是当下）。
 status: todo——观测缺失直接决定吞吐；排 ROUND 3 收尾后，高优先。
+
+## Dispatch review（追加 2026-08-05T16:1xZ，管理者量化复核）
+
+- **数量级坐实**：遥测总记录 105 条，而近 6h fan-in merge 有 20 次——`--task-start`/`--task-end`
+  不系统，历史并发数据不可信（本 tick 实测：reconcile 前 inProgress 16 个陈旧括号，over-90m 假块
+  反复写 inner-blocked.json，正是本条目的另一面——不只在「看不见真实并发」方向，也在「假块骚扰 inner」
+  方向）。
+- **与事件驱动派发任务交叉**：`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`
+  AC6——事件驱动依赖准确的完成感知，括号失真会让完成感知也失真。
+- **本 tick 实证**：reconcile（worktree-gone-and-no-process 判据）一次性关 14 个陈旧括号，剩余 2
+  （1 真实在飞 + 1 手动 needs-human 闭合）——reconcile 判据本身有效，缺的是**派发路径没人调
+  --task-end**。

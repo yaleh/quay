@@ -4486,3 +4486,22 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **Q1 已提交（8ab62afc）**：`gap-user-scope-install-reinstall-criterion-and-version`——user-scope 重装判据按能力边界（①新能力 ②安全/崩溃修复 ③遗传缺陷修复 立即重装，其余攒批）+ VERSION 标记与比对检查。无 VERSION 无陈旧判据，user-scope dist 落后 ~10h 且是活消费路径。
 - **Q2 已提交（495bff2e）**：`gap-two-machine-collaboration-git-branch-claiming`——两机协作认领用 git 分支（推空 task/<id> 分支=认领，存在=被认领，合并删=释放），复用 checkTouchesPair 与共享仓库 task/* 分支查触摸相交；不用 manager 中心分配（单点 + QUAY_GLOBAL_DIR 锁跨主机失效同源）。**前提**：权威/推送方向（现 A→bare→B 单向）+ package.json ENOENT blocker；与 integration-branch（ready 已等 9h）一起考虑——integration 模型正是「多源汇入、基线陈旧」的设计，跨主机是天然用例。
 - **inner 状态**：outer-self-checks 在飞（background agent a159abb 活跃，16:00Z pendingBackgroundAgentCount 1），manager-topology fix 已落地（8fe59ec3），下次唤醒 16:26Z。
+
+### tick 2026-08-05T17:0xZ（内层：outer-self-checks 落地，两层裁定完成）
+
+- **outer-self-checks 落地**（merge `9277fa19`）：cold-start 第 3 步改「自检 inner 三态」——健康
+  （窗口+进程+user 消息）⇒ **不动**（权限边界，可能 manager 建）/ 空壳（窗口+进程无 user 消息）⇒
+  **驱动不重建**（接手 manager 预建）/ 缺失 ⇒ **调 quay-topology.sh 建两窗口**（outer+inner，无 manager）
+  + 起 inner claude + INNER-DRIVEN 验证。新机制 `inner-session-check.sh`（JSON 三态 + fail-closed）。
+  scoped 19/19 + topology 回归 9/9。
+- **✅ 管理者两层裁定全部完成**：manager-baked（遗传物质级拓扑修复）+ outer-self-checks（三态自检）。
+- **在飞 0/3**。套件 green。
+
+### tick 2026-08-05T16:1xZ（外层，遥测假块根治 + 事件驱动派发立案）
+
+- **reconcile 关 14 陈旧括号**（worktree-gone-and-no-process 判据）：inProgress 16→1（只剩 outer-selfchecks 真实在飞），over-90m 假块清——管理者「遥测括号系统性未调用」（105 条 vs 6h 20 merge）的量化坐实，本 tick 实证另一面：假块反复骚扰 inner。
+- **resource-aware worktree 裁定：保留**。任务 needs-human，但 worktree 有 160 行未提交 re-open 工作（AC12/13/17 source-pin 测试，实读 diff 确认）——不是孤儿，是调查现场。括号已 needs-human 闭合（进程死）。「needs-human worktree 计为在飞」是记账缺陷，归 gap-over-90m 任务（worktree 存在 ≠ mid-flight 判据）。
+- **立 `gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`（todo）**：管理者 meta-cc 实测派发时间戳=3 簇（12:22/13:07/13:55，簇内 2-3s），簇间 15-55min 零派发；槽位释放后 39min 不回填而池子 health（pool 27/dispatchable 12）——**batch 非滚动**，正是 fast-mode 文档「并发打破外层瓶颈」警告的退化（瓶颈搬到了 inner 自己的 tick）。fix 方向：subagent 完成即事件驱动重评估。**高优先——吞吐瓶颈。**
+- **收尾 0 条**：7 条 not-yet-flipped 全有正当未勾理由（vendor-runtime B 机 blocker / reliable-send 安全窗 / adaptive-concurrency 实跑证据 / closure-sync+drive-text 全量绿 pending / two-thirds 5 未勾 / DIR-119 inner superseded 处理中）。全量套件串行规则推迟（inner agent 在飞）。
+- **meta-cc 方法固化进 tick 文档**：历史过程类问题（什么时候发生了什么）→ meta-cc 派发时间戳；git 提交时间只标完成不标开始，重建过程必错。
+- **在飞 1/3**（outer-selfchecks）。套件 green（stale）。内层转录「Next wakeup scheduled…harness re-invokes on wakeup or task-notification」——派发绑定 inner 自己的 tick 边界，即本 tick 立案的退化。
