@@ -198,7 +198,21 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     assert.ok(!all.includes('/srv/target'), 'laid-down tick docs must NOT contain the target repo root (AC3)');
     assert.ok(!all.includes('myproj-0:0.0'), 'laid-down tick docs must NOT contain the target tmux session (AC3)');
     // No quay-specific literals either (the old substitution inputs are gone from the docs).
-    assert.ok(!all.includes('scripts/test.sh'), 'laid-down tick docs must NOT contain scripts/test.sh (AC4 negative control)');
+    // AC4 (b53f7402/gap-load-sensitive-session-family-confounds-step-three): the SHIPPED
+    // fast-mode-loop-tick.md now legitimately carries a KNOWN-LOAD-SENSITIVE annotation naming
+    // the quay test command (`scripts/test.sh plugin/test/session-liveness.test.mjs
+    // plugin/test/cold-start-skill.test.mjs`). The byte-identity assertion above already pins the
+    // laid-down doc to the product. The negative control's intent is unchanged — a config-driven
+    // install must not BAKED-IN target values — so `scripts/test.sh` is allowed ONLY as part of
+    // that fixed annotation (every line carrying it must also name the load-sensitive family's
+    // test files), never as a bare baked-in value.
+    const scriptsTestLines = all.split('\n').filter((l) => l.includes('scripts/test.sh'));
+    assert.ok(scriptsTestLines.length > 0,
+      'the shipped tick doc must carry the KNOWN-LOAD-SENSITIVE annotation naming scripts/test.sh (b53f7402)');
+    for (const l of scriptsTestLines) {
+      assert.ok(l.includes('session-liveness.test.mjs') && l.includes('cold-start-skill.test.mjs'),
+        `scripts/test.sh must appear only in the KNOWN-LOAD-SENSITIVE family annotation, got: ${l}`);
+    }
     assert.ok(!all.includes('/home/yale/work/quay'), 'laid-down tick docs must NOT contain the quay dev-tree root (AC8 negative control)');
     assert.ok(!all.includes('quay-0:0.0'), 'laid-down tick docs must NOT contain quay tmux session');
 
@@ -489,49 +503,72 @@ test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is proj
     // to the dev-tree symlink). It must be an absolute path into the target.
     assert.ok(!/mcp_entry: \["node", "quay-native", "mcp"\]/.test(src),
       'config must not PATH-resolve a bare quay-native command — that is the dev-tree symlink dependency (AC7b negative control)');
-    assert.match(src, /mcp_entry: \["node", "\/[^"]*\/packages\/quay-native\/bin\/quay-native\.ts", "mcp"\]/,
-      'the mcp_entry command must be an absolute project-local path into the laid-down runtime');
+    // The command must be an absolute project-local path into the laid-down SELF-CONTAINED native
+    // provider bundle (vendor/quay-native/dist/quay-native.js) — the runtime quay-init actually lays
+    // down (gap-ac3b-prove-installed-quay-runs-without-dev-tree). It must NOT reference a bin/quay-native.ts
+    // source file that needs a node_modules quay/yaml/zod/sdk (not laid down).
+    assert.match(src, /mcp_entry: \["node", "\/[^"]*\/vendor\/quay-native\/dist\/quay-native\.js", "mcp"\]/,
+      'the mcp_entry command must be an absolute project-local path into the laid-down provider runtime (self-contained bundle)');
     assert.ok(src.includes('QUAY_NATIVE_TASKS_DIR'), 'config must set the native tasks dir');
   } finally { cleanup(ws); }
 });
 
-test('AC7b — when the plugin has no built runtime bundle, --loop warns (does not fail) and still writes the config', () => {
-  // Construct the no-bundle scenario deterministically: a temp COPY of the plugin with
-  // vendor/quay/dist/quay.js removed. The real pluginDir may have a bundle (the full suite
-  // builds dist into it), so the test must not depend on ambient build state.
+test('AC7b — when the plugin has no built runtime bundles, --loop warns (does not fail) and still writes the config', () => {
+  // Construct the no-bundle scenario deterministically: a temp COPY of the plugin with the Core
+  // and native provider bundles removed. The real pluginDir may have bundles (the full suite builds
+  // dist into it), so the test must not depend on ambient build state.
   const src = makeTmp();
   try {
     fs.cpSync(pluginDir, src, { recursive: true });
     fs.rmSync(path.join(src, 'vendor', 'quay', 'dist', 'quay.js'), { force: true });
+    fs.rmSync(path.join(src, 'vendor', 'quay-native', 'dist', 'quay-native.js'), { force: true });
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
         '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
-      assert.equal(r.status, 0, `init must exit 0 even without a built runtime:\n${r.stderr}`);
-      assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the runtime bundle is absent');
+      assert.equal(r.status, 0, `init must exit 0 even without built runtimes:\n${r.stderr}`);
+      assert.match(r.stderr, /WARN:.*vendor\/quay\/dist\/quay\.js/, 'must warn that the Core runtime bundle is absent');
+      assert.match(r.stderr, /WARN:.*vendor\/quay-native\/dist\/quay-native\.js/, 'must warn that the native provider runtime bundle is absent');
       assert.ok(fs.existsSync(path.join(ws, '.quay', 'config.yml')), 'config must still be written');
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
 });
 
-test('AC7b — a plugin source WITH a built runtime lays it into the target (project-local copy)', () => {
-  // Use a temp COPY of the plugin + a fake built bundle, so the real worktree is never polluted.
+test('AC7b — a plugin source WITH built runtimes lays them into the target (project-local copies, config points at the native bundle)', () => {
+  // Use a temp COPY of the plugin + fake built bundles, so the real worktree is never polluted.
   const src = makeTmp();
   try {
     fs.cpSync(pluginDir, src, { recursive: true });
     const fakeDist = path.join(src, 'vendor', 'quay', 'dist', 'quay.js');
     fs.mkdirSync(path.dirname(fakeDist), { recursive: true });
     fs.writeFileSync(fakeDist, '// fake built quay.js bundle\n', 'utf8');
+    const fakeNativeDist = path.join(src, 'vendor', 'quay-native', 'dist', 'quay-native.js');
+    fs.mkdirSync(path.dirname(fakeNativeDist), { recursive: true });
+    fs.writeFileSync(fakeNativeDist, '// fake built quay-native.js bundle\n', 'utf8');
+    const fakeProviderYml = path.join(src, 'vendor', 'quay-native', 'provider.yml');
+    fs.writeFileSync(fakeProviderYml, 'id: native\nname: "quay-native"\n', 'utf8');
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
         '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
       assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-      assert.match(r.stdout, /vendor\/quay\/dist\/quay\.js/, 'must report the runtime lay-down');
+      assert.match(r.stdout, /vendor\/quay\/dist\/quay\.js/, 'must report the Core runtime lay-down');
+      assert.match(r.stdout, /vendor\/quay-native\/dist\/quay-native\.js/, 'must report the native provider runtime lay-down');
       const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
-      assert.ok(fs.existsSync(laid), 'the runtime must be laid into the target project');
+      assert.ok(fs.existsSync(laid), 'the Core runtime must be laid into the target project');
       assert.equal(fs.readFileSync(laid, 'utf8'), '// fake built quay.js bundle\n',
-        'the laid-down runtime must be byte-identical to the plugin source');
+        'the laid-down Core runtime must be byte-identical to the plugin source');
+      const laidNative = path.join(ws, 'vendor', 'quay-native', 'dist', 'quay-native.js');
+      assert.ok(fs.existsSync(laidNative), 'the native provider runtime must be laid into the target project');
+      assert.equal(fs.readFileSync(laidNative, 'utf8'), '// fake built quay-native.js bundle\n',
+        'the laid-down native runtime must be byte-identical to the plugin source');
+      const laidProviderYml = path.join(ws, 'vendor', 'quay-native', 'provider.yml');
+      assert.ok(fs.existsSync(laidProviderYml), 'provider.yml must be laid into the target project');
+      assert.equal(fs.readFileSync(laidProviderYml, 'utf8'), 'id: native\nname: "quay-native"\n',
+        'the laid-down provider.yml must be byte-identical to the plugin source');
+      const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+      assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/vendor\/quay-native\/dist\/quay-native\.js", "mcp"\]/,
+        'config must point the provider mcp_entry at the laid-down self-contained native bundle');
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
 });
