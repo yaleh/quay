@@ -4811,3 +4811,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （git-history of declared specific Touches），带 AC4 负控制（未派发 todo 不误判；overshoot 反向不重演）。
   目标：ready-pool 排除 web-board/measure-claude-p，终止重派 class。
 - 在飞 2/3（stale-check + defect-fix）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。
+
+### tick 2026-08-05T18:3xZ（内层，stale-check fan-in + session-idle 派发）
+
+- **stale-check fan-in 完成（真实现，非重派）**：dead orchestration glob 修复——`*ROADMAP*` 对 44 个
+  orchestration .md 命中 0 ⇒ 改 `*.md` 覆盖全部（扫 88 = 44 proposals + 44 orchestration）。3 个预存 stale
+  引用（roadmap-predates-ADR-022/escalations/tick-log）入 KNOWN_STALE（report-not-count，shrink-only 机制），
+  gate 保持绿只拦新 stale。AC2 夹具（SPEC-foo 带 prepare-milestone ref ⇒ exit 1）+ AC4 axis cross-mark。
+  scoped 10/10 绿。worktree/branch 已清。
+- **session-idle 派发**（`fm-...-bnmm17`）：git-log 双查真未落地，与 defect-fix 互不相交（batch 判定）。
+  session-liveness 族 KNOWN-LOAD-SENSITIVE 已在派发词标明。self-touch 已补。
+- 在飞 2/3（defect-fix + session-idle）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。

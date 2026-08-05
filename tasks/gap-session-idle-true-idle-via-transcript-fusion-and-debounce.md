@@ -127,6 +127,8 @@ cancelled 0 / skipped 1**（跳过 = 真实探针会话 quay-0:probe 本机不�
 
 ## Touches
 
+- tasks/gap-session-idle-true-idle-via-transcript-fusion-and-debounce.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/session-liveness.sh
 - plugin/test/session-liveness.test.mjs
 
