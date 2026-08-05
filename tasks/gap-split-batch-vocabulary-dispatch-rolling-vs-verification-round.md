@@ -22,6 +22,15 @@ extra:
 **望文生义**，把「batch」读成「分派要门控」，行为漂移回去——**与 R2（驱动文本只带数据不带行为）同一
 类风险，只是载体是外层自己的 tick-log/commit message 措辞，不是驱动文本。**
 
+> **AC7 交叉标注（2026-08-05，`gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-
+> async` 落地时写）**：本任务（词汇拆分）是**措辞层**，`gap-closure-sync-...` 是**机制根**——批次边界
+> 的真源是记账同步（「Close batch-N」三次在 inner 派发历史、收尾期零新派发），**改名解决不了同步点**。
+> 机制根已把 inner 侧彻底清掉收尾/记账/批次概念：inner 只剩「派发 + 执行 + 合并」，全量验证/收尾节奏
+> 由外层异步做并记 `verification-round-N`。因此本任务的词汇拆分范围**自然收窄**：inner 侧已不再有
+> 「批」语义可被误读（`fast-mode-loop-tick.md` step 2 的「合并串行，全量套件批量」已随机制根删除）；
+> 剩余词汇工作是外层文档同步 + 历史名（batch2-queue-state.md / batch4a/b/c / concurrent-batch-
+> scheduler.ts）标注，以及 AC5 把「分派滚动 / 验证 verification-round」写死成规范语句。
+
 ### 核实：tick 文档里 `batch` 的分布（外层 grep）
 
 | 位置 | 语义 | 处置 |

@@ -48,20 +48,21 @@ Agent 派发历史里（21:56:29 / 23:33:28 / 01:59:27），且每次收尾之�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `fast-mode-loop-tick.md` inner 循环删除收尾/记账步——无「Close batch-N」、无任务体翻 done、
+- [x] AC1: `fast-mode-loop-tick.md` inner 循环删除收尾/记账步——无「Close batch-N」、无任务体翻 done、
       无关闭记录；循环 = 派发（含 `--task-start`）+ 执行 + 合并（fan-in）
-- [ ] AC2: `orchestrator-loop-tick.md` 外层 tick 加**异步收尾例程**——每 tick 用 `taskWorkLanded`
+- [x] AC2: `orchestrator-loop-tick.md` 外层 tick 加**异步收尾例程**——每 tick 用 `taskWorkLanded`
       （非 status）探测落地未翻任务，逐个关遥测括号 + 翻 done + 写 `verification-round-N` 记录；
       全量 suite 为外层收尾 gate（非 inner 同步点）
-- [ ] AC3: inner 的「上一步全量 suite 非绿」停止条件**改读外层 verification-round 结果文件**（非自己跑）；
+- [x] AC3: inner 的「上一步全量 suite 非绿」停止条件**改读外层 verification-round 结果文件**（非自己跑）；
       读不到时按文档定义处理（fail 或等下一 tick），但不产生 inner 侧记账
-- [ ] AC4: **grep 证明**——inner 侧（`fast-mode-loop-tick.md` + inner 派发路径的脚本）零「收尾/Close
+- [x] AC4: **grep 证明**——inner 侧（`fast-mode-loop-tick.md` + inner 派发路径的脚本）零「收尾/Close
       batch/记账/close」指令，且零 `status: done` 依赖（实跑输出贴任务体）
 - [ ] AC5: **真实使用**——本变更后至少一次 verification-round 收尾由**外层**执行（非 inner），且该窗口
       内 inner 的派发历史显示**持续派发、未因记账停顿**（证据 = inner Agent 派发时间戳 + 外层收尾
-      记录时间戳对比）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若收尾探测逻辑成脚本）
-- [ ] AC7: `gap-split-batch-vocabulary-...` 任务体更新——注明本任务是「批次边界」的机制根，词汇任务是
+      记录时间戳对比；机制已落地，实跑证据待外层首个异步收尾，见「落地证据」节）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若收尾探测逻辑成脚本——本次未建新脚本，
+      复用 ready-pool-check，n/a）
+- [x] AC7: `gap-split-batch-vocabulary-...` 任务体更新——注明本任务是「批次边界」的机制根，词汇任务是
       措辞层（改名解决不了同步点）
 
 ## Definition of Done
@@ -99,3 +100,39 @@ changed: 外层受人设计裁定立案。四处收紧：
     （ready-pool-check.ts:128-130），收尾异步化无隐藏依赖；
 (4) **AC5 真实使用**——必须证一次外层收尾窗口内 inner 持续派发，不空转。
 status: ready——人裁定机制根，优先于就绪队列一般项；与 batch 措辞任务分层（机制根 vs 措辞层）。
+
+## 落地证据（2026-08-05，实现提交时写入）
+
+**AC4 grep 实跑输出**（worktree `task/gap-closure-sync-...`，基于 master `3930207c`）：
+
+`$ grep -rn 'Close batch\|收尾\|记账' plugin/loop/fast-mode-loop-tick.md plugin/scripts/`（Contract invoke 范围）
+→ 命中 3 处，全在 `plugin/scripts/session-liveness.sh`（99/674/680）：
+```
+plugin/scripts/session-liveness.sh:99:   # 默认 LOOP_MIN=20 的噪声闸门（刚动过=正常收尾→持有者 stdout 静默；心跳陈旧/未知才报）。
+plugin/scripts/session-liveness.sh:674: # hmin < LOOP_MIN 的空闲 = 正常收尾 → 持有者 stdout 静默；hmin ≥ LOOP_MIN 或未知
+plugin/scripts/session-liveness.sh:680: # hmin < LOOP_MIN（正常收尾）——持有者自己的 stdout 静默（噪声闸门），但共享 events.jsonl
+```
+分类：这三处是**会话存活监视的噪声闸门语义**（「正常收尾」= 心跳新近的空闲静默），**不是任务记账/
+收尾指令**；且 `session-liveness.sh` 是两层共挂的存活监视脚本，**不是 inner 派发路径脚本**。
+
+**AC4 范围（inner 侧 = inner 文档 + inner 派发路径脚本）实跑 = 0 命中**：
+- `grep -rn 'Close batch\|收尾\|记账\|关闭\|status: *done'` over
+  `fast-mode-loop-tick.md` + `task-status-drift-check.ts` `fast-mode-telemetry.ts` `monitor-mount-check.sh`
+  `resource-gate.sh` `inner-blocked-signal.ts` `ready-pool-check.ts` `touches-orthogonality-check.ts`
+  `concurrent-batch-scheduler.ts` → **0 命中**
+- `grep -n 'status: *done' plugin/loop/fast-mode-loop-tick.md` → **0 命中（零 status: done 依赖）**
+- 唯一残余 `close` 形态：`fast-mode-loop-tick.md:17` 的 `fail-closed`——既有安全术语（失败即拒绝），
+  非记账指令，非本变更引入
+
+**AC5 证据记录（机制已落地，实跑证据待外层首个异步收尾）**：
+- 机制：inner 循环已无任何收尾/记账步（AC4 grep = 0）；外层 tick 已含步骤 1b 异步收尾例程
+  （`ready-pool-check` 的 `not-yet-flipped` 探测 = `taskWorkLanded` → `--task-end` → 翻 done →
+  `.quay/verification-round.jsonl` 记录 → 全量 suite 为 gate）。
+- **待补证据**：外层下一次 20-min cron 收尾一轮时，`.quay/verification-round.jsonl` 的记录
+  （`closed` 清单 + `suiteGreen`）对比该窗口 inner 派发史（telemetry `--task-start` 时间戳连续、
+  无收尾期空档）——即 AC5 的「持续派发、未因记账停顿」证明。此证据在合并落地后由外层天然产生；
+  本轮先记录机制与待证形状，AC5 勾选等待该实跑。
+
+**AC6**：未创建收尾探测脚本——探测复用 `ready-pool-check.ts` 现有 `excluded[].reasons ==
+["not-yet-flipped"]` 输出（内部即 `taskWorkLanded`，ready-pool-check.ts:128-130），无新脚本 ⇒ AC6 n/a
+（若未来把探测逻辑独立成脚本，必须 `import { test } from "node:test"` + `// @test-group governance`）。

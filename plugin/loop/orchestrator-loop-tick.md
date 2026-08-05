@@ -495,6 +495,58 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 请求窗口早于它首条记录时，工具会打印 `⚠ … 个更早的会话未被包含`，并给出 `--session <id>`。
 **看到那条警告就说明本次输出不是完整窗口**——跨 `/clear` 的分析要逐个会话跑再合并。
 
+### 1b. 异步收尾例程（verification-round closure pass，强制）
+
+**批次边界的真源是记账同步，不是措辞**（`gap-closure-sync-is-the-true-batch-boundary-move-
+bookkeeping-to-outer-async`，人 2026-08-05 设计裁定，决定不是建议）：「Close batch-N」三次在 inner
+派发历史里、每次收尾后必跟 3 连发、收尾期间零新派发 ⇒ 记账曾是调度的同步点。**inner 只执行 + 派发 +
+合并，永远不因记账停顿、也不知道收尾存在；收尾是本层（外层 20-min cron）的异步活。** 本步骤每个
+tick 做一次收尾 pass。
+
+**探测用 `taskWorkLanded`，不用 `status: done`**（技术安全已核，无隐藏依赖）：`ready-pool-check.ts`
+的 `notYetFlipped` 走 `taskWorkLanded(task.body, repoRoot)`（`ready-pool-check.ts:128-130`），不依赖
+`status: done` 字段——所以 inner 的就绪池计算不受收尾异步化影响，外层延迟翻 done 不会导致任务被重复
+派发。
+
+**每 tick 执行：**
+
+1. **探测落地未翻任务**：
+   ```bash
+   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$REPO_ROOT" --json
+   ```
+   读 stdout 的 `excluded[]`：`reasons` 含 `not-yet-flipped` 的条目 = 工作已落地（`taskWorkLanded`
+   为真）但 `status` 仍 `ready` 的任务——正是 inner 合并完成、等待收尾的任务集。**复用现有实现，
+   不新建探测脚本。**
+2. **逐个收尾**，对每个 `not-yet-flipped` 任务：
+   - **关遥测括号**：先 `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts
+     --report --json` 拿 `inProgress[]` 里该 `taskId` 的 `runId`，再
+     `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-end
+     --taskId <id> --runId <r> --outcome done`。若 `inProgress[]` 里找不到该任务的 runId（无对应
+     `--task-start`），跳过 `--task-end`，只翻 done。
+   - **翻 done**：核对 AC/DoD 是否真实满足（与旧 inner fan-in 同一纪律：勾得上就勾、勾不上写理由
+     或留 `ready`），然后写 `tasks/<id>.md` 的 `status: ready → done`（写 `tasks/` 是外层授权范围）。
+   - 记进本轮 `closed` 清单。
+   - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
+     已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
+3. **全量 suite 为本轮的验证 gate（非 inner 同步点）**：本轮收尾了 ≥1 个任务才跑；跑前调资源闸
+   （`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 = WAIT 不跑）。判绿三条件
+   （`cancelled 0` / `FULL-SUITE-EXIT=0` / `tests` 数 = 参考值）。
+4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
+   ```json
+   {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}
+   ```
+   `N` = 上一条记录 `round` + 1（空文件从 1 起）。`suiteGreen` = 步骤 3 的判绿结果。**inner 的停止
+   条件读这个文件最后一条**（见 `fast-mode-loop-tick.md` 步骤 3）：
+   - 缺文件 ⇒ inner 不阻塞（收尾是异步活，缺只说明外层还没跑到第一轮）；
+   - `suiteGreen: false` ⇒ inner 停止派发，本层按步骤 3「全量 suite 非绿」处置（bisect 定位新引入
+     还是既有；定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
+5. **落盘聚合**：本轮收尾后跑一次
+   `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
+   否则被 git 跟踪的聚合文件不反映本批结果。
+
+**每 tick 必报**补一条：本轮收尾几条、`.quay/verification-round.jsonl` 最新 `suiteGreen`、本轮全量
+suite 是否跑/绿。
+
 ### 2. 分类本 tick 的动作
 
 **必须**记录本 tick 属于哪一类——这是判断分层是否退化的唯一依据：
@@ -619,6 +671,8 @@ tick 或 `/clear` 后的会话会重犯。
 - 内层在飞任务数与各自已运行时长
 - 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
+- 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/verification-round.jsonl` 最新 `suiteGreen`、本轮
+  全量 suite 是否跑/绿
 - 累计动作类型分布（退化判据）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
@@ -635,5 +689,6 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
+| `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（inner 停止条件读最后一条 `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
 | `adr/ADR-021-*.md` | 四项原则 |
 | `docs/proposals/exp6-queue-driven-concurrent-executor.md` §0 | 两阶段交付范围 |
