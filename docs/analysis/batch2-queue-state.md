@@ -3049,6 +3049,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **无在飞**：槽位全空。ROUND 3 套件 running（外层 gate）。新契约下 inner 不跑全量、不关括号、
   不翻 done。loop-driver LIVE。
 
+### tick 2026-08-05T06:3xZ（内层，`ROUND 3 RED 分诊修复`：1 真回归）
+
+- **外层 ROUND 3 全量 RED**（fail 5 = 2 已知 noise-gate 抖动 + 1 runner-grouping flags isolated 跑中 +
+  2 quay-init-loop）。isolated 确认 **1 真回归**：quay-init-loop AC2 的 specimen 清单仍把
+  `send-keys-verified.sh` 当 live specimen（key4 已分层退役：skill 不再引用它，移除它不再触发
+  referenced-not-landed），测试 fixture 陈旧。
+- **修复**（`bb1727f5`，直落 master）：AC2 specimen `send-keys-verified.sh` → 现活替代品
+  `send-keys-reliable.sh`（cold-start skill 现 3 引用，移除可触发 referenced-not-landed）。
+  quay-init-loop 全文件 34/34 绿 + AC2 isolated 1/1。其余 send-keys-verified 引用均为合法
+  （cold-start 负断言 / 脚本自身测试 / ADR-016 夹具 / catalog 声明——脚本仍发货，只是 skill 不再教）。
+- **等外层重启 ROUND 3 gate**。ROUND 3 landed-not-flipped 集合（9 条）不变。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
