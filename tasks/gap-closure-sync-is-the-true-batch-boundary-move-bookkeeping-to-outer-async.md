@@ -135,3 +135,17 @@ plugin/scripts/session-liveness.sh:680: # hmin < LOOP_MIN（正常收尾）—�
 **AC6**：未创建收尾探测脚本——探测复用 `ready-pool-check.ts` 现有 `excluded[].reasons ==
 ["not-yet-flipped"]` 输出（内部即 `taskWorkLanded`，ready-pool-check.ts:128-130），无新脚本 ⇒ AC6 n/a
 （若未来把探测逻辑独立成脚本，必须 `import { test } from "node:test"` + `// @test-group governance`）。
+
+## 三块消除批次（AC7 交叉标注，2026-08-05，由 `gap-full-suite-belongs-to-outer-background-above-3-min` 写入）
+
+本条是**收尾/记账 (b) 块**（把收尾异步移到外层）。三块合起来才消除「批次」同步点，已在内外层 loop
+文档交叉标注（`orchestrator-loop-tick.md` 步骤 1b「三块消除批次」/ `fast-mode-loop-tick.md` 步骤 2）：
+
+- **(a) 套件块** = `gap-full-suite-belongs-to-outer-background-above-3-min`——全量 suite 移到外层后台
+  异步跑（`full-suite-runner.ts`），inner 零全量自跑、只读 `.quay/full-suite-state.json` 的 `state`；
+- **(b) 收尾块** = 本条——收尾/记账移到外层异步（`verification-round`），inner 只执行+派发+合并；
+- **(c) AC/证据块** = `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`
+  ——任务代理自勾 AC + 贴 invoke 证据（在队列）。
+
+三者无依赖耦合（各自落自己的外层异步机制），但**都触两份 loop 文档**，串行落地（a→b→c 顺序即当前
+派发排序）。inner 侧完成三块后只剩「执行 → 合并」，没有任何批次同步点。
