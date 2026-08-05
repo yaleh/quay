@@ -1,0 +1,100 @@
+---
+id: gap-os-anchor-watchdog-lease-model-instead-of-absence-inference
+title: "os-anchor watchdog rework — flip from absence-inference ('no .halt =
+  always watch') to explicit timestamped LEASE ('I want it running until X';
+  no lease = don't watch; lease expiry = stop): measured defects (2026-08-05,
+  manager + human): ①.halt conflates 'project paused' vs 'I just closed this
+  session' (two intents, one switch; manager's morning meta-cc resource-priority
+  .halt vs human exiting outer to be quiet are different — only the former is
+  recognized); ②no backoff/limit/rate (crash-looping project pulled up every 5
+  min forever, no alarm); ③respawn path barely ran in production (0 except
+  11:40); ④/exit clean exit = crash in the alive=0&session_exists=1 branch
+  (human actively exits, 5 min later it comes back); ⑤Linger=no so actually
+  'login + 5min auto-start'; PRINCIPLE: repo's own inner-blocked-signal.ts
+  states 'existence signal, not an absence inference' — current watchdog
+  violates it; FIX: explicit lease solves both intent and backoff (lease expiry
+  = stop, no invented retry limit); PRODUCTIZATION (human asked): deliver the
+  MECHANISM (generic — session-scoped anchor dying with session is an inherent
+  Claude Code property; archguard/meta-cc each hit a 29h case), NOT the current
+  STRATEGY defaults (login-auto-start / infinite respawn / hardcoded drive-text
+  / hardcoded three-project watch-list = quay dev-unstable-period specific);
+  default DISABLED; enable = explicit expiry-bearing lease; OnBootSec/respawn-
+  count/drive-text/watch-list all configurable"
+status: todo
+labels:
+  - gap
+  - defect
+  - milestone-candidate
+parent: null
+children: []
+extra:
+  schema: v1
+---
+**type:** execution
+
+## Proposal
+
+**os-anchor watchdog 从缺席推断意图——违反仓库自己的原则，需翻转为显式租约。**
+（人方向性问题 + 管理者实测，外层核实 + 裁定）
+
+**【实测缺陷（管理者，外层部分核实）】**：
+1. **唯一意图信号是 .halt**——它表达「项目暂停开发」，不是「我刚关掉这个会话」。两种意图压进同一个开关。
+   管理者早上给 meta-cc 挂 .halt（资源优先级）vs 人手工退出 outer 想安静——完全不同，当前逻辑只认前者。
+2. **grep backoff/retry/max_respawn/attempts 几乎 0 命中**——无退避、无上限、无速率限制。反复崩溃的项目
+   每 5 分钟无限拉起且不告警。
+3. **relaunch/recreate 实际发生 0 次**（除 11:40）——这条路径几乎没在生产跑过。
+4. **/exit 干净退出和 claude 崩溃在 alive=0&session_exists=1 分支下完全一样**——都判 relaunch。人主动关掉
+   它 5 分钟后自己回来。
+5. **Linger=no**——准确说不是开机自启，是「登录后 5 分钟自启」。
+
+**【核心缺陷】**：这套逻辑在**从缺席推断意图**。而仓库自己的 inner-blocked-signal.ts 头注释写死相反原则：
+**「existence signal, not an absence inference」**。当前 watchdog 违反它。
+
+**【裁定（外层采纳管理者方向）】**：**反过来**——要有**明确的带时间戳的「我要它跑」租约声明**；没声明=
+不看护。而不是现在的「没 .halt = 一直看护」。**这同时解决意图和退避**（租约过期即停，不需另发明重试上限）。
+
+**【产品化裁定（人问，外层采纳管理者判断）】**：**机制该交付，当前策略默认值不该交付**。
+- **机制通用**：会话作用域锚点随会话死，是 Claude Code 固有性质（archguard/meta-cc 各撞过一次 29 小时）。
+- **策略 quay 特有**：登录即自启 / 无限重生 / 驱动文本写死 / 看护名单硬编码三项目——是 quay 开发不稳定期
+  特有。给别的项目按这套默认装上 = 替人家决定「你机器只要有人登录这循环就该跑」。
+- **形态**：交付能力但**默认不启用**；启用需**显式带过期的意向声明**；OnBootSec / 重生次数 / 驱动文本 /
+  看护名单全配置化。
+
+### 选定机制
+
+1. 显式租约：带时间戳的「我要它跑」声明（`os-anchor lease <project> --until <ISO>`）；无租约 = 不看护
+2. /exit 干净退出清租约（不 relaunch）；崩溃但租约有效 → relaunch（租约窗口内）
+3. 租约过期 = 停止看护（天然退避，不需 retry 上限）
+4. 默认不启用；启用需显式租约；OnBootSec/respawn/驱动文本/名单配置化
+
+## Acceptance Criteria
+
+- [ ] AC1: 租约模型——显式时间戳租约；无租约 = 不看护（默认 off 实测）
+- [ ] AC2: /exit 干净退出 **不** relaunch（干净退出清租约）；崩溃 + 租约有效 → relaunch（实测对照）
+- [ ] AC3: 重生受租约窗口约束（无无限重生）；上限/退避配置化
+- [ ] AC4: OnBootSec/respawn 次数/驱动文本/看护名单全配置化（无硬编码三项目）
+- [ ] AC5: 默认禁用（能力交付，不自动启用）
+- [ ] AC6: 产品化——机制通用，策略 per-project；与 gap-manager-productization 交叉标注（manager 的 OS 锚同理）
+
+## Touches
+
+- plugin/scripts/os-anchor-install.sh / os-anchor-watchdog.sh（租约模型 + 配置化）
+- plugin/scripts/os-anchor-projects.conf（看护名单 → 配置）
+- packages/quay/bin/（lease 命令，若走 CLI 入口）
+- tasks/gap-manager-productization-five-constraints.md（AC6 交叉标注）
+
+## Contract
+
+measure   lease_default = `bash plugin/scripts/os-anchor-watchdog.sh --check 2>&1 | grep -c 'no-lease\|lease-missing'` 在无租约时 stdout 数字段
+band      lease_default >= 1（无租约 = 不看护）
+invoke    `grep -n 'lease\|--until\|no-lease' plugin/scripts/os-anchor-watchdog.sh`
+control   /exit 后不 relaunch（AC2）；崩溃 + 租约 → relaunch（AC2 负控制）
+resume    租约模型与配置化分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T22:5xZ
+changed: 人方向性问题 + 管理者实测 + 外层裁定立案。核实：Linger=no 确认、backoff 逻辑缺失、relaunch 路径
+0 次生产运行。裁定：租约模型（翻转缺席推断为显式声明，符合仓库 existence-signal 原则）+ 产品化
+（机制交付、策略默认不交付、默认禁用配置化）。
