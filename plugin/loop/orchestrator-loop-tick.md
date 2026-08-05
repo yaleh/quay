@@ -133,7 +133,8 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 **5. 核对前置条件**
 
-`.halt` 是否还在、套件是否绿、内层 loop 是否已启动。见目标任务的 AC1–AC6。
+`.halt` 是否还在、套件是否绿（读 `.quay/full-suite-state.json` 的 `state`——`green` 绿、`red` 需按
+步骤 1b「红窗分诊」处理、缺文件 = 外层还没跑）、内层 loop 是否已启动。见目标任务的 AC1–AC6。
 
 **6. 补记一次 tick**
 
@@ -528,24 +529,60 @@ tick 做一次收尾 pass。
    - 记进本轮 `closed` 清单。
    - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
      已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
-3. **全量 suite 为本轮的验证 gate（非 inner 同步点）**：本轮收尾了 ≥1 个任务才跑；跑前调资源闸
-   （`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 = WAIT 不跑）。判绿三条件
-   （`cancelled 0` / `FULL-SUITE-EXIT=0` / `tests` 数 = 参考值）。
+3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
+   - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
+     `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
+     （`{state: running|green|red, runner: outer|inner, startedAt, finishedAt, durationMs,
+     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。**起跑条件**：本轮收尾了 ≥1 个任务
+     （或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state != running`）
+     且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 = WAIT，下一
+     tick 再起）。
+   - **早期 RED（AC2）**：runner **一检测到失败立即把 state 标成 red**（非等全套跑完）——缩「变红到
+     发现」窗口。判红模式 = `not ok` / `✖` / `# fail [1-9]` / `# cancelled [1-9]` /
+     `FULL-SUITE-EXIT` 非 0 / 退出码非 0。`state: red` 即 AC4 的 **stop-dispatch 信号**（inner 读它
+     停派发 + 暂缓 fan-in，见下「红窗分诊」）。
+   - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
+     ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
+     （外层还没跑第一轮，不阻塞）。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}
    ```
-   `N` = 上一条记录 `round` + 1（空文件从 1 起）。`suiteGreen` = 步骤 3 的判绿结果。**inner 的停止
-   条件读这个文件最后一条**（见 `fast-mode-loop-tick.md` 步骤 3）：
-   - 缺文件 ⇒ inner 不阻塞（收尾是异步活，缺只说明外层还没跑到第一轮）；
-   - `suiteGreen: false` ⇒ inner 停止派发，本层按步骤 3「全量 suite 非绿」处置（bisect 定位新引入
-     还是既有；定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
+   `N` = 上一条记录 `round` + 1（空文件从 1 起）。`suiteGreen` = 步骤 3 读 `.quay/full-suite-state.json`
+   的判绿结果。**inner 的停止条件现在直接读 suite-state**（`fast-mode-loop-tick.md` 步骤 3），本文件
+   的轮次记录只是收尾记账，不再被 inner 读取：
+   - 缺 suite-state ⇒ inner 不阻塞（外层还没跑第一轮）；
+   - `state: red` ⇒ inner 停止派发 + 暂缓 fan-in，本层按「红窗分诊」处置（bisect 定位新引入还是既有；
+     定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
 5. **落盘聚合**：本轮收尾后跑一次
    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
    否则被 git 跟踪的聚合文件不反映本批结果。
 
-**每 tick 必报**补一条：本轮收尾几条、`.quay/verification-round.jsonl` 最新 `suiteGreen`、本轮全量
-suite 是否跑/绿。
+**每 tick 必报**补一条：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
+与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
+
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 时 fan-in 一并暂缓）**：
+`.quay/full-suite-state.json` 的 `state: red` 即 **stop-dispatch 信号**（runner 一检测失败即写，AC2）。
+state 为 red 时：
+1. **本层独占分诊**，不把红树丢给 inner：对 red window 内新合并的 merge 二分定位（`git bisect` 或按
+   merge 顺序回滚、逐个重跑 `--for-task` 选中集判断肇事者）。
+2. **回滚/修复**：定位到某次 merge 引入 → 回退该 merge（+ 回退对应翻 done）；判定为既有失败 →
+   建任务（`tasks/` 属本层授权范围）。**state: red 期间本层不自动重启套件**——先分诊，修好才重启。
+3. **重启套件**：修复后重新起 `full-suite-runner.ts`（state → running）。
+4. **重新 green**：runner 完成且绿 ⇒ state → green。
+5. **撤信号**：state 回到 green/running 即撤——inner 恢复派发与 fan-in。信号是存在性状态，无需单独
+   删文件。
+
+**阈值决策规则（AC5，门槛机械化）**：测全量套件耗时 `suite_duration` = `.quay/full-suite-state.json`
+的 `durationMs`（runner 每次跑完写入，即测量 hook）：
+- `suite_duration ≥ 3 分钟` ⇒ **outer 集中后台跑**（当前形态，实测 11-12 分钟量级）；
+- `suite_duration < 3 分钟` ⇒ **下放 inner 各任务自己跑**（批概念彻底消除）。
+规则在内外层 loop 文档各写一份；每次全量 suite 的 `durationMs` 就是判定输入。
+
+**三块消除批次（AC7）**：本条是 **(a) 套件块**；收尾/记账 **(b) 块** =
+`gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`（已落地）；AC/证据
+**(c) 块** = `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`
+（在队列）。三块合起来，inner 侧只剩「执行 → 合并」，没有任何批次同步点。
 
 ### 1c. 重锚转发（re-anchor，强制——机制不是散文）
 
@@ -615,7 +652,7 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 | 内层停在 | 外层做什么 |
 |---|---|
 | 合并冲突 | 读两边意图，指示内层回退或修复。**不自己 merge** |
-| 全量 suite 非绿 | bisect 定位；判断新引入还是既有；既有的指示建任务，新引入的指示回退 |
+| 全量 suite 红（`.quay/full-suite-state.json` `state: red`） | 按步骤 1b「红窗分诊」独占处理：bisect 定位肇事 merge（新引入）或既有失败（建任务）→ 回滚/修复 → 重启套件 → 重新 green → 撤信号 |
 | 审查 2 轮仍 REFUTED | 读审查发现，判断是否真实。真实 → 指示缩小范围重做；不实 → 指示记录理由后推进 |
 | 任务超 90 分钟 | 判断是任务过大（指示拆分）还是卡住（指示放弃并建任务记录） |
 | needs-human 积压 ≥3 | 分诊：真阻塞的攒给人，可继续的指示内层继续 |
@@ -750,8 +787,8 @@ tick 或 `/clear` 后的会话会重犯。
 - 内层在飞任务数与各自已运行时长
 - 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
-- 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/verification-round.jsonl` 最新 `suiteGreen`、本轮
-  全量 suite 是否跑/绿
+- 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
+  与 `durationMs`、本轮全量 suite 是否在跑/绿/红
 - 累计动作类型分布（退化判据）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
@@ -768,6 +805,7 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（inner 停止条件读最后一条 `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` 即 stop-dispatch 信号；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
 | `adr/ADR-021-*.md` | 四项原则 |
 | `docs/proposals/exp6-queue-driven-concurrent-executor.md` §0 | 两阶段交付范围 |
