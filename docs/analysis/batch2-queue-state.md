@@ -4091,3 +4091,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **os-anchor AC1 真落差确认（管理者实测 + 外层复核）**：`systemctl --user list-timers | grep quay` = 0——timer 未安装。代码在 master（install.sh + watchdog.sh）但 AC1「systemd user timer 存在且 active」未满足。**裁定：需要显式安装动作**（代码落地 ≠ 已安装）——指示 inner 执行 `os-anchor-install.sh install` + 模拟崩溃验证 AC2，作为 AC 实跑验证 + 翻 done 的前置。理由：timer 不 active，下一次崩溃仍是网络永久静默死亡（管理者判为压倒性优先级）。inner 当前 3 agent 满负荷，待有空驱动。
 - **产品轮廓文档核实（管理者已建）**：docs/proposals/quay-product-outline.md（199 行）——strategic-doc-staleness-check.ts 唯一真实覆盖路径，--judge 实测 clean。README/DESIGN/quay-proposal 各覆盖一片，supervisor/upgrade 几乎全缺，无单一完整轮廓。已建文档补上。
+
+### tick 2026-08-05T11:1xZ（内层：claude-p fan-in + launch-config 补派）
+
+- **claude-p 实测 fan-in 完成**（merge `bcd0939a`）：rebase 净 → merge → scoped `--allow-thin` EXIT=0（0 测试文件——纯实测任务，静态检查过）→ worktree 已清、branch 已删。**关键结论**：gating 过（`claude-deepseek -p` 经 ANTHROPIC_BASE_URL 第三方端点可往返）；stream-json 形态持 stdin = 不关 EOF 不退出 ⇒ **现有并发模型可移植**；plain `-p` 照退。发现 Contract 负控制行字面不失败（launcher 内部重 source key）+ >10min 后台 subagent wait-cap 未测（诚实标注）。
+- **launch-config 补派**（`gap-crystallize-launch-config-into-checked-in-settings-file`）：self-touch 补 `8149f7d3`，agent 在 /home/yale/work/quay-worktrees/launch-config（bracket `fm-...-or6nej`）。与 web-board + runner 两两 disjoint。
+- **并发 3/3 满**：web-board + runner-gate + launch-config。
+- **⚠ os-anchor AC1 真落差（管理者 11:1xZ 裁定）**：`systemctl --user list-timers | grep quay` = 0——timer 未安装。代码已落 master 但 AC1 未满足。**PENDING（待有空槽驱动，管理者「压倒性优先级」）**：`os-anchor-install.sh install` + 模拟崩溃验证 AC2，作为翻 done 前置。当前 3/3 满，首个 agent 完成后执行。
+
+### tick 2026-08-05T11:3xZ（外层，os-anchor 激活里程碑）
+
+- **quay timer 已安装并 active（AC1 实跑通过）**：`quay-os-anchor-watchdog.timer` active，下次触发 11:34。安装目录 ~/.config/quay/os-anchor/ 含 watchdog.sh + projects.conf + watchdog.log。
+- **watchdog 已真实工作**（log 11:29:04）：quay healthy(alive=1)、meta-cc/archguard halted（.halt 正确判读）。崩溃自恢复机制已激活——「网络永久静默死亡」风险解除。
+- **AC2（崩溃恢复模拟）待 inner 验证**。os-anchor 任务 AC 未勾/status ready（inner 处理中，4 agent 忙）。
+- inner 已超过并发上限（+1 第 4 agent）——需留意 inner 是否超派发（camelCase probing 是 web-board 相关，可能跨任务）。
