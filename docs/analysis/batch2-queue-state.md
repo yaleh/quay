@@ -4167,3 +4167,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **os-anchor AC 勾选（05e4e0c6）**：AC1/3/4/5/7 checked；**AC2 left unchecked**（re-spawn verified but drive gap——drive 缺陷已确认）；**task stays ready NOT flipped done**。inner 诚实收尾（与我们的 watchdog 三缺陷发现一致）。
 - **web-board merge（0950b0b6）**：/board route 用 REUSE-via-subprocess 接 intent/execution/landing，4/4 tests。web-board 任务（重派发后）完成。
 - inner 1 agent 在飞（serve-board scoped 测试 47m）。
+
+### tick 2026-08-05T12:1xZ（外层，welcome-screen drive 真根因 + AC12 首个正面数值）
+
+- **NBSP 修复不覆盖 welcome 屏（管理者复核确认，推翻 11:46 修复结论）**：`pane_input_box_empty` 只剥 NBSP + ANSI，welcome 屏 `❯ Try "fix lint errors"` 有真实 ghost 文本 → 判非空 → CLEAR_MAX=50 fail loud → rc=1。**watchdog 11:40 驱动失败真根因**，同步 NBSP 版没修好（两个失败场景不同：空框 NBSP vs welcome ghost 文本）。AC11 一族（「已同步」≠「问题已解决」）。
+- **修法（archguard 已验证）**：判空不「清空」ghost，把 fresh session（transcript 不存在/零 user 消息）当已知分支【跳过清屏直接发】。
+- **三机件缺口**：①transcript 定位（首 user 消息前不创建文件，需 process-tracing）；②suite-state-trigger REPO_ROOT 从脚本位置解析 + .ts 无执行权限（node 前缀）；③monitor-mount-check 三判据不覆盖 suite-state-trigger。
+- **AC12 首个真实数值（正面）**：archguard 11:40 拉起 → 12:10 自驱动冷启动完成（读 orchestrator-loop-tick 冷启动 7 步、重建 cron 8e053e10 LIVE、清 3 stranded 分支、驱动 inner fan-in TASK-60/61）——**全程无真人干预，冷启动自驱动路径可工作**。AC12 计时从 12:01 开始，~17 分钟在增长。
+
+### tick 2026-08-05T12:2xZ（外层，三机件缺口记录）
+
+- **三机件缺口（archguard 实测）**：①transcript 定位——Claude Code 首 user 消息前不创建 transcript 文件，send-keys-reliable 要求传路径但发送前路径可能不存在（需 process-tracing 非文件猜测）；②suite-state-trigger REPO_ROOT 从脚本位置解析 ⇒ 每项目需自己实例 + .ts 无执行权限（node 前缀）；③monitor-mount-check 三判据只覆盖 session-liveness 不覆盖 suite-state-trigger。
+- **welcome-drive 真根因任务已建**：gap-send-keys-reliable-welcome-screen-ghost-drive-fails（fresh-session 跳过清屏直接发）。
