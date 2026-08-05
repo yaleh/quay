@@ -80,6 +80,7 @@ WAIT、load 15.77，**正是 ABORT #1/#3/#4 与两次整机崩溃的同一形态
 
 ## Touches
 
+- tasks/gap-full-suite-runner-concurrency-default-and-gate.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - plugin/scripts/full-suite-runner.ts
 - plugin/test/full-suite-runner.test.mjs
 - plugin/loop/fast-mode-loop-tick.md（步骤 3 停止条件：failed vs aborted）
