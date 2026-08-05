@@ -24,7 +24,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 export const FAST_MODE_EVENTS_DIR = ".workflow-events";
 export const ORCHESTRATION_DIR = "orchestration";
@@ -411,4 +415,157 @@ export function readJournal(root: string): JournalResult {
     tickLog: readRecentTableRows(path.join(root, ORCHESTRATION_DIR), TICK_LOG_FILE, JOURNAL_TICK_ROWS),
     commits: readRecentCommits(root, GIT_LOG_LIMIT),
   };
+}
+
+// ── Board: three-source join (意图/执行/落地) — gap-web-board-needs-an-inconsistency-verdict-it-does-not-have ──
+//
+// ARCHITECTURE DECISION (AC1, the task's primary deliverable — the four questions are answered
+// in the task body with code facts): the LANDING judgment is REUSED, not reimplemented.
+//   Q1: The drift checker's judgment is NOT a pure function (it spawns a `grep` subprocess via
+//       resolveSymbol and reads the filesystem), but its functions are parameterized by repoRoot
+//       and exported, so the reuse cost is a subprocess call — no code needs to move.
+//   Q2: Core does NOT yet depend on plugin/ (grep of packages/quay/src → zero imports). This IS
+//       a new Core→plugin edge, BUT observation.ts already shells out to `git` (a workspace
+//       tool) and reads workspace-local files; the drift checker is the SAME class of
+//       workspace-observation tool, so invoking it as a subprocess is consistent with this
+//       module's existing role — it is not the provider-agnostic task-rendering path.
+//   Q3: The "third way" (extract the judgment to a shared location) is not implementable within
+//       this task's Touches (observation.ts / serve-handlers.ts / the test only). The drift
+//       checker stays authoritative where it is; observation.ts resolves it relative to its own
+//       module location and consumes its JSON. No second copy exists.
+//   Q4: Not reimplementing — the drift checker is authoritative, so AC4's "who is authoritative
+//       when the two drift" question is moot: there is only ONE implementation.
+// CONSEQUENCE: the board's data-flag agrees with `task-status-drift-check.ts --json` per-task
+// BY CONSTRUCTION (AC2/AC3) — the board consumes the checker's own suspects/reverse output.
+// DEGRADATION: the subprocess is fail-closed. If plugin/scripts is absent (a product install
+// without the methodology layer) the landing column reports 「无数据」; if it fails to run/parse
+// it reports 「读失败」. Either way /board returns 200 (AC6), never a 500.
+
+/** Relative path from THIS module (packages/quay/src/observation.ts) to the drift checker. */
+export const DRIFT_CHECKER_REL = "../../../plugin/scripts/task-status-drift-check.ts";
+
+/**
+ * 「在飞超时」threshold — a fast-mode run that started but has no end after this many minutes is
+ * flagged. 90 minutes matches the repo's task-over-90m budget (inner-blocked-signal.ts: "任务超
+ * 90 分钟"). Deliberately NOT a checker-reused value: the drift checker has no timeout criterion;
+ * this is the board's own execution-column judgment.
+ */
+export const IN_FLIGHT_TIMEOUT_MINUTES = 90;
+
+export interface BoardLanding {
+  status: ObservationStatus;
+  reason: string | null;
+  /** taskId → landing flag: "done-unlanded" | "landed-not-closed" (drift checker reverse/suspects). */
+  flags: Map<string, string>;
+  /** Number of tasks the checker scanned (0 when degraded). */
+  scanned: number;
+}
+
+export interface BoardExecution {
+  status: ObservationStatus;
+  reason: string | null;
+  /** taskId → Set of execution flags: "in-flight-timeout" | "orphan". */
+  flags: Map<string, Set<string>>;
+  /** In-flight run detail for the page (runId + elapsed minutes). */
+  inFlight: InFlightTask[];
+}
+
+/**
+ * Reuse the drift checker as the single authoritative landing judgment. Runs
+ * `plugin/scripts/task-status-drift-check.ts --json` (resolved relative to THIS module, with
+ * cwd = the served workspace root so findRepoRoot finds the served store) and maps its output:
+ *   suspects  → "landed-not-closed"  (已落地但未收尾: code in tree, status not closed)
+ *   reverse   → "done-unlanded"      (done 但未落地: done, code never landed)
+ * Fail-closed: script absent → 「无数据」; run/parse failure → 「读失败」. Never throws (AC6).
+ */
+export async function readBoardLanding(root: string): Promise<BoardLanding> {
+  let scriptPath: string;
+  try {
+    scriptPath = fileURLToPath(new URL(DRIFT_CHECKER_REL, import.meta.url));
+  } catch {
+    return { status: "error", reason: "landing 判断源解析失败（plugin 路径不可用）", flags: new Map(), scanned: 0 };
+  }
+  if (!fs.existsSync(scriptPath)) {
+    return {
+      status: "empty",
+      reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts 不存在 — 产品安装无 methodology 层）",
+      flags: new Map(),
+      scanned: 0,
+    };
+  }
+  try {
+    const { stdout } = await execFileP("node", ["--experimental-strip-types", scriptPath, "--json"], {
+      cwd: root,
+      timeout: 120_000,
+      maxBuffer: 32 * 1024 * 1024,
+      encoding: "utf8",
+    });
+    const parsed = JSON.parse(stdout);
+    const flags = new Map<string, string>();
+    for (const s of parsed.suspects ?? []) flags.set(s.taskId, "landed-not-closed");
+    for (const r of parsed.reverse ?? []) flags.set(r.taskId, "done-unlanded");
+    return { status: "ok", reason: null, flags, scanned: parsed.scanned ?? 0 };
+  } catch (err) {
+    return {
+      status: "error",
+      reason: `landing 判断源读失败：${err instanceof Error ? err.message : String(err)}`,
+      flags: new Map(),
+      scanned: 0,
+    };
+  }
+}
+
+/**
+ * Best-effort process-liveness probe for a fast-mode runId, mirroring fast-mode-telemetry.ts's
+ * processAlive (scan /proc cmdlines for the runId's distinctive tail). Returns:
+ *   true  — a live process cmdline contains the runId tail (executor alive → NOT orphan)
+ *   false — /proc was readable and no process matched (executor observably gone → orphan)
+ *   null  — /proc unavailable or unreadable (unknown → fail-closed: NOT flagged orphan)
+ * This is a small NEW probe (not a reimplementation of the drift judgment), documented to mirror
+ * the telemetry module so the board's orphan signal agrees with --reconcile's process probe.
+ */
+export async function isRunProcessAlive(runId: string): Promise<boolean | null> {
+  if (!runId || runId.length < 4) return null;
+  const parts = runId.split("-");
+  const needle = parts.length >= 2 ? parts.slice(-2).join("-") : runId;
+  if (needle.length < 4) return null;
+  let readable = 0;
+  try {
+    const procs = fs.readdirSync("/proc").filter((d) => /^\d+$/.test(d));
+    for (const pid of procs) {
+      try {
+        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+        readable++;
+        if (cmd.includes(needle)) return true;
+      } catch {
+        // pid exited mid-scan — not a match
+      }
+    }
+  } catch {
+    return null; // /proc unavailable (non-Linux / restricted) — unknown
+  }
+  return readable > 0 ? false : null;
+}
+
+/**
+ * Execution column (遥测 start/end). Reuses readLive's in-flight pairing (start without end) and
+ * adds the two execution-only flags:
+ *   in-flight-timeout — started > IN_FLIGHT_TIMEOUT_MINUTES ago with no end (在飞超时)
+ *   orphan            — started with no end AND the runId's process is observably gone (孤儿)
+ * Degrades like readLive: telemetry absent → 「无数据」; unreadable → 「读失败」. Never throws.
+ */
+export async function readBoardExecution(root: string, { nowMs = Date.now() } = {}): Promise<BoardExecution> {
+  const live = readLive(root, { nowMs });
+  if (live.status === "error") {
+    return { status: "error", reason: live.reason, flags: new Map(), inFlight: [] };
+  }
+  const flags = new Map<string, Set<string>>();
+  for (const t of live.inFlight) {
+    const set = new Set<string>();
+    if (t.minutes > IN_FLIGHT_TIMEOUT_MINUTES) set.add("in-flight-timeout");
+    const alive = await isRunProcessAlive(t.runId);
+    if (alive === false) set.add("orphan");
+    if (set.size) flags.set(t.taskId, set);
+  }
+  return { status: live.status, reason: live.reason, flags, inFlight: live.inFlight };
 }
