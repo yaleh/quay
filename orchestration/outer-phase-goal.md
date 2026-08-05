@@ -238,8 +238,29 @@ R6 一处清理赦免整个文件（7 建 2 清、每小时漏 136 个）、
 
 **每个 tick 复核一次**：有没有 AC 已达成而没勾、已失效而没改、或现状栏过期。
 
+**方向漂移两行（2026-08-05 起，`gap-establish-daily-review-cadence-mechanism` AC5/AC6）**——复核记录
+从「只覆盖角色纪律」扩到「覆盖方向本身」：每次复盘加 (1) 近窗口 gap-* 战略追溯、(2) 路线图是否过期
+两行。节奏机制见 `orchestration/REVIEW-cadence.md`。
+
 | 时刻 | 复核结论 |
 |---|---|
+| 2026-08-05 03:0xZ | **第一次复盘（机制落地即跑，`gap-establish-daily-review-cadence-mechanism` AC6）**，三项清单逐项实跑：
+  **清单 3a（机械过期检查）**——`node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts --root .`：
+  `stale_refs_found (new) = 0`，KNOWN_STALE 基线 6 份文档、31 条未标注引用（含路线图）。**路线图过期**：
+  `docs/proposals/quay-harness-crystallization-roadmap.md`（07-31）整篇建立在 ADR-022（08-03）已废除的经典
+  milestone 管线上（Phase 0–4 指向已删代码），检查器检出、sibling 任务
+  `gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode` 修复。
+  **池晋级候选**——`--pool-candidate gap-prepare-milestone-no-size-aware-routing` **被标**（2 条未标注引用
+  `prepare-milestone.js`/`execute-milestone.js`，皆 ADR-022 已删）⇒ ready-pool-check 推荐它的「touches
+  resolve」是解析假通过（三子路径反引号包裹、磁盘上不存在）。AC8 回归控制达成。
+  **清单 3b（gap-* 可追溯性）**——近窗口新建 6 条 gap-*（batch-4 产物）逐条判：`gap-establish-daily-review-
+  cadence-mechanism` 可追溯到人裁定 + FINDING；`gap-roadmap-silently-stale-...` 可追溯到 FINDING；其余 4 条
+  （gap-* 批次）**纯反应式（记录）**——干活顺手撞见、无书面战略追溯。`gap-establish-...` 立案时的池机制推荐
+  已退休管线任务（gap-prepare-milestone-no-size-aware-routing）即纯反应式实例。
+  **清单 3c（方向漂移）**——**路线图过期（本行第 2 列）+ 临场推 meta-cc 无对照**：当晚 meta-cc 冷启动在回答
+  Phase 3 跨项目可迁移性战略问题，但没对照任何写下来的路线图，**纯临场推**——框架本身 3 天前失效、无人回去
+  重写成 fast-mode 版本，比「偏离框架」更严重。方向性结论：**复盘是机制不是角色记得**（REVIEW-cadence 文档 +
+  通用检查器 + 复核记录扩展三部件落地），方向裁定权保留在人。 |
 | 2026-08-04 10:5xZ | **第二次 OOM 后首次复核——上次记录停在 02:5xZ，之间发生的事全未回填，如实核对**。**新增 AC14**：「外层不直接改代码」一直是「人明说的」不可协商规则，但从未被写成本文件自己可判定的 AC——今晚我自己违反了它两次（直接用 `Agent` 工具派两个 subagent 实现代码 + 自己在共享检出跑 fan-in 全量），是人先发现的，纠正后已改为经 `tmux send-keys` 驱动内层。**保持未勾，仍在观察持续遵守**。**AC9/AC9c 有新证据，非新失败——是同族形态第 4/5 次复现**：`send-keys-verified.sh` 今晚被我实测复现 3 次同一缺陷（报「已送达」，目标 20+ 秒未提交）——但**三次我都是先核实真实 pane 状态再判断，没有一次盲信「已送达」的报告**，AC9 的精神（不信零命中/已送达这类信号本身，要核实）被我自己的行为兑现了，缺陷已建独立任务（`gap-send-keys-verified-hash-check-cannot-tell-typed-from-submitted`，已提到 `ready`）。**AC9c 有一次几乎失败**：截了一次 inner 的屏（正赶上它 fan-in 收尾的中间态）就等了 15 分钟，管理者独立记录为「两层都在正确等待，但合起来是没人推进」——**教训与文件里已有的 68 分钟教训同族**：等对方自己给出的结论，不要靠一次时机不对的截屏。**AC1 有真实缺口，如实记**：`orchestration/tick-log.md` 本会话零行——我做了大量独立核实（`touches` 解析、call-graph 追溯、`quay task check` 闸口、真实测试输出），但没有按 AC1 要求的格式落进 tick-log.md，**这是记录形式的缺口，不是核实本身的缺口，不混为一谈**。**AC3/AC7 有新的正面证据**：清理孤儿 worktree/分支前逐个核实 `merge-base --is-ancestor`（而非目测分支名像是已合并）；`gap-split-decision-finality-not-enforced` 与 D2/D3/D4/两条 `gap-plancheck-*`/`gap-recursive-guard-...` 的裁定，全部先追真实调用链（`grep` 找 caller）而非只信「文件存在」——这正是本文件 AC7 记录过的「find/存在性不构成证据」纪律的直接应用，且这次抓到一个更深的例子：`checkSplitRecommendation` 被 ADR-022 明文保留、CLAUDE.md 文档描述为活跃路由策略，**实测零调用点**——已建 `gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode`。**AC11 本次无法重算**：tick-log.md 无本会话行，没有数据可用，如实标「无法判定」而非编一个数。**AC12 未触发**：本班持续有真实落地（DIR-103-C/one-condition/readyqueue 三批 fan-in + 6 个新建/裁定任务 + 2 个任务提到 ready）。 |
 | 2026-08-04 02:5xZ | **OOM 后第一个 tick 的复核，两条改判、一条新失败。** **AC4 从「靠手工」变成机械且当场通过**：重挂后跑 `monitor-mount-check.sh --json` 得 `mounted=true` / `targetRoot` 等于本仓根 / `delivered=true` ——三判据由一条命令给出，不再是我手工扫 `/proc`。**AC10 兑现了一次，抓到的是新的一个**：照 tick 文档冷启动做完，`loop-driver-check.sh` 报 **STALLED**，而 cron 确已建。查明它读的是自述注册表 `.quay/loop-driver.jsonl`，**写入那一行的步骤只写在 `plugin/skills/cold-start/SKILL.md:117`，tick 文档步骤 4 里没有**。⇒ **照 tick 文档逐字执行必然得到 STALLED**，而文档对 STALLED 的处置是「回步骤 4 重建 cron」——**文档自己的补救动作会制造出它要防的那个双触发**。已补写注册行，检查器转 LIVE(1)；**这条尚未立任务，是本 tick 未了项**。**AC7 新增一次真实失败，形态是第三种**：前两次是过滤器排除项（`grep -viE`）与陈旧日志，**这次是 `head -20` 截断**——扫 worktree 路径引用面时恰好把 `plugin/loop/fast-mode-loop-tick.md` 的命中截掉，于是我只看到 `docs/analysis/` 那份非交付物副本，**差点把一个正在向每个目标项目传播的交付物缺陷判成本仓卫生问题**。⇒ **AC7 的措辞再扩一句：任何「规模是 N」的扫描，其输出限制器（`head`/`tail`/`-m`）与过滤器同属排除项，都必须在断言里说明会漏掉什么。** **AC11 实测未越线**：全量重算 `correct 80 / 190 = 42.1%`。**AC6 保持**：本 tick 每个数字都来自本次运行的命令。 |
 | 2026-08-03 15:5xZ | **AC13 降级为 `[~]`：我的改名负控制测了一个不可能失败的东西。** 我两次（12:0x 的 AC13、15:2x 的产物交付）用「改名后铺设项目的 `plugin/scripts/resource-gate.sh` 仍 exit 0」证明「运行时不依赖 quay 开发树」。**实测推翻**：`resource-gate.sh` 是独立 bash、**对 quay 零依赖**，开发树在不在它都跑得通 ⇒ **我选的探针不可能失败**。真正的运行时路径是 `.quay/config.yml` 的 `mcp_entry: ["quay-native","mcp"]` → PATH → **`/home/yale/.nvm/.../bin/quay-native` 是指向 `/home/yale/work/quay/packages/quay-native/dist/quay-native.js` 的符号链接**；而 `quay-init` **没有**把产物里的 `vendor/quay/dist/quay.js` 铺进目标项目（tarball 里有、archguard 里没有）⇒ **archguard 的循环运行时确实依赖 quay 开发树**。**我把两个不同的断言合成了一个**：「铺设文本里 0 个 quay 绝对路径」为真，「运行时不依赖开发树」为假。**AC7 因此扩一句：负控制必须走被测系统的真实执行路径，探针本身必须能在缺陷存在时失败**——否则它与「永远通过」同形。 |

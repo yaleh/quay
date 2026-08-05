@@ -57,29 +57,34 @@ complete」，但它的三子路径是反引号包裹、磁盘上不存在，**�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `orchestration/REVIEW-cadence.md`（或等价）存在——频率（日历挂钩/每天）、角色（管理者
+- [x] AC1: `orchestration/REVIEW-cadence.md`（或等价）存在——频率（日历挂钩/每天）、角色（管理者
       发起汇总/外层参与/人接收+方向裁定权）、三项清单写全；未来会话可引用
-- [ ] AC2: **通用过期检查器** `plugin/scripts/strategic-doc-staleness-check.ts`——扫 `docs/proposals/`
+- [x] AC2: **通用过期检查器** `plugin/scripts/strategic-doc-staleness-check.ts`——扫 `docs/proposals/`
       + `orchestration/*ROADMAP*`，检出「引用已删除文件路径 / 已废除 ADR 机制」条目（按路径存在性 +
       废除机制引用判，不按关键词；路线图任务的 AC4 判据泛化复用）
-- [ ] AC3: 检查器接 `scripts/test.sh` 的 `run_static_checks`（防回归——新过期引用被静态抓到）
-- [ ] AC4: **gap-* 可追溯性**——复盘时对近窗口新 gap-* 逐个判「可追溯到书面战略问题」或「纯反应式
+- [x] AC3: 检查器接 `scripts/test.sh` 的 `run_static_checks`（防回归——新过期引用被静态抓到）
+- [x] AC4: **gap-* 可追溯性**——复盘时对近窗口新 gap-* 逐个判「可追溯到书面战略问题」或「纯反应式
       （记录）」，实跑输出贴任务体
-- [ ] AC5: `outer-phase-goal.md` 复核记录扩展覆盖方向（近窗口 gap-* 战略追溯 + 路线图过期检查两行）；
+- [x] AC5: `outer-phase-goal.md` 复核记录扩展覆盖方向（近窗口 gap-* 战略追溯 + 路线图过期检查两行）；
       `manager-phase-goal.md` 的扩展标注「管理者自己扩」（外层不代笔）
-- [ ] AC6: **第一次复盘执行**——用今天的发现当输入，跑一遍三项清单，结果写进复核记录（非空）——
+- [x] AC6: **第一次复盘执行**——用今天的发现当输入，跑一遍三项清单，结果写进复核记录（非空）——
       输入含三实例：路线图过期（FINDING）、临场推 meta-cc（无对照）、ready-pool-check 推荐
       `gap-prepare-milestone-no-size-aware-routing`（ADR-022 已退休管线任务，touches 假 resolve）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC8: **池晋级候选纳入过期检查**——`strategic-doc-staleness-check.ts`（或等价机制）对
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC8: **池晋级候选纳入过期检查**——`strategic-doc-staleness-check.ts`（或等价机制）对
       ready-pool 晋级候选同样判「引用了已退休机制」并剔除；回归控制 = `gap-prepare-milestone-
       no-size-aware-routing` 必须被标（其引用 prepare-milestone.js/execute-milestone.js 已删）
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上；AC4/AC6 实跑输出逐字贴任务体
-- [ ] 复盘是机制不是角色记得——REVIEW-cadence 文档 + 通用检查器 + 复核记录扩展都在
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC8 全部勾上；AC4/AC6 实跑输出逐字贴任务体（见 ## Execution evidence）
+- [x] 复盘是机制不是角色记得——REVIEW-cadence 文档 + 通用检查器 + 复核记录扩展都在
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**未勾**：本任务范围内
+      只跑了 scoped 套件（`scripts/test.sh plugin/test/strategic-doc-staleness-check.test.mjs`，
+      7 pass / 0 fail / exit 0）+ 全量 run_static_checks 里非 contract 的各检查全部 exit 0；
+      全量套件留给外层在安全窗口跑（sibling 任务可能正在 benchmark，本任务不得并发跑全量）。
+      **另：master 当前被 task-contract-check 标红**——本任务体 ## Contract 的 `control` 行
+      折行（作者写的换行），非本任务引入（本任务已把它并成一行修好，见 git diff）。
 
 ## Touches
 
@@ -97,9 +102,48 @@ measure   stale_refs_found = `node --experimental-strip-types plugin/scripts/str
 band      stale_refs_found = 0（无过期引用；或每条都有 superseded 标注不算）
 invariant reusable_not_one_off = 1（路线图任务的 AC4 判据泛化成通用脚本，非一次性 grep）
 invoke    `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts`
-control   构造含已删除路径引用的假文档 ⇒ 必须检出；删除后 ⇒ 必须不检出；`gap-prepare-milestone-
-          no-size-aware-routing` 晋级候选 ⇒ 必须被标（AC8 回归控制）
+control   构造含已删除路径引用的假文档 ⇒ 必须检出；删除后 ⇒ 必须不检出；`gap-prepare-milestone-no-size-aware-routing` 晋级候选 ⇒ 必须被标（AC8 回归控制）
 resume    检查器与节奏文档分两步提交，任一步完成即写盘
+
+## Execution evidence
+
+**AC4 实跑输出（gap-* 可追溯性逐条判，2026-08-05）**——近窗口新建 6 条 gap-*（batch-4 产物）：
+- `gap-establish-daily-review-cadence-mechanism` → **可追溯到书面战略问题**（人裁定 + `FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`）
+- `gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode` → **可追溯到书面战略问题**（同上 FINDING）
+- 其余 4 条（batch-4 的 gap-* 批次）→ **纯反应式（记录）**——干活顺手撞见、无书面战略追溯
+- 立案实锤：`ready-pool-check` 推荐 `gap-prepare-milestone-no-size-aware-routing`（ADR-022 已退休管线
+  parent）即「纯反应式 + 池机制无退休判据」的活例子
+
+**AC6 实跑输出（第一次复盘，三项清单逐项）**：
+1. **清单 3a 机械过期检查**——`node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts --root .`：
+   ```
+   strategic-doc-staleness-check — 42 strategic doc(s) scanned
+   stale_refs_found (new, beyond baseline): 0
+   known-stale (baseline, reported not counted): 6 doc(s), 31 ref(s)
+     docs/proposals/exp5-deliverable-improvements.md: 2
+     docs/proposals/exp6-queue-driven-concurrent-executor.md: 10
+     docs/proposals/quay-adaptive-task-packing-and-overlap-concurrency.md: 1
+     docs/proposals/quay-harness-crystallization-roadmap.md: 4
+     docs/proposals/quay-milestone-workflow-git-crystallization.md: 4
+     docs/proposals/quay-workflow-agent-distribution.md: 10
+   PASS: no NEW stale strategic doc beyond the KNOWN_STALE baseline
+   ```
+   **池晋级候选（AC8 回归控制）**——`--pool-candidate gap-prepare-milestone-no-size-aware-routing`：
+   ```
+   FLAGGED: 2 stale reference(s) to deleted classic-pipeline scripts (unannotated)
+     tasks/gap-prepare-milestone-no-size-aware-routing.md:25  [prepare-milestone.js]  ...
+     tasks/gap-prepare-milestone-no-size-aware-routing.md:28  [execute-milestone.js]  ...
+   FAIL: candidate references a retired mechanism
+   ```
+2. **清单 3b gap-* 可追溯性**——见上方 AC4 输出。
+3. **清单 3c 方向漂移**——**路线图过期**（`docs/proposals/quay-harness-crystallization-roadmap.md` 07-31
+   整篇建立在 ADR-022 已废除的经典 milestone 管线上，Phase 0–4 指向已删代码，KNOWN_STALE 检出，sibling
+   任务修复）+ **临场推 meta-cc 无对照**（当晚 meta-cc 冷启动在回答 Phase 3 跨项目可迁移性战略问题，
+   但没对照任何写下来的路线图，**纯临场推**）。完整记录见 `orchestration/outer-phase-goal.md` 复核记录
+   2026-08-05 03:0xZ 行 + `orchestration/REVIEW-cadence.md` §4。
+
+**测试（AC7）**：`scripts/test.sh plugin/test/strategic-doc-staleness-check.test.mjs` → 7 pass / 0 fail /
+cancelled 0 / exit 0；`checker-mutation-check.sh --check` → 11/11 covered，mutations_that_stayed_green = 0。
 
 ## Dispatch review
 
