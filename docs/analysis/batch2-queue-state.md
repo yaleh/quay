@@ -4605,3 +4605,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   not-yet-flipped 仍卡「全量绿 + 实跑证据」。
 - **在飞 2/3**（upgrade-channel agent + 收尾后新派发空间）。套件 green（stale）。Monitor 三判据绿、
   detect-stop 无 block、.halt quay/archguard 运行中 meta-cc 暂停。
+
+### tick 2026-08-05T16:5xZ 补充（外层，ruling-required 通用化任务提优先级）
+
+- **管理者优先级意见 → 裁定提优先级**：`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer`
+  （todo）加 `milestone-candidate` 标签（此前非候选集成员）+ 驱动 inner 尽早 promote。证据：观测方向只有
+  outer→inner，manager 无替代方式观测 outer（现用 git 提交间隔 + tmux pane 命令名两个低精度代理）；
+  今天两起实况（100% context 转达未核实、39 分钟空档一度误判）。池 28>floor 12 无自动晋级压力，故显式驱动。
+- 通用化裁定已在该任务体内（--target/--path/阈值参数化 + 动作可扩展 + 不开放 ADR-016 状态枚举）。

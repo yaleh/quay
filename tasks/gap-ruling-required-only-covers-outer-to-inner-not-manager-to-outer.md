@@ -10,6 +10,7 @@ status: todo
 labels:
   - gap
   - defect
+  - milestone-candidate
 parent: null
 children: []
 extra: {}
