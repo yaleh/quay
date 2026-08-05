@@ -2967,6 +2967,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **等外层重启全量套件做 ROUND 2 gate**。ROUND 2 landed-not-flipped 集合（5 条）不变：closure-sync、
   drive-text、full-suite-outer、closure-decomp、scoped-tier。loop-driver LIVE。
 
+### tick 2026-08-05T05:1xZ（外层 ROUND 2 绿 + 内层派新批）
+
+- **ROUND 2 完成**：suiteGreen=true（verification-round.jsonl round 2，2347 tests / fail 2 = 文档化负载
+  抖动 isolated / cancelled 0）。**已关 3 条**：closure-decomp / scoped / full-suite。**留 ready 2**：
+  closure-sync（AC5 部分）、drive-text（DoD 待补）。RED 信号已撤（suite-state green）。
+- **新批派发（池可派 3 条，滚动语义）**：
+  - **③ `gap-session-idle-true-idle-via-transcript-fusion-and-debounce`**（ready）：已派在飞（ac9d...），
+    bracket 已开（fm-...-9mw2lf）。transcript 最后消息类型融合（纯文本=候选闲 / 挂起 tool_use=确定忙，
+    忙零漏报）+ 去抖 2 轮 120s。只触 session-liveness.{sh,test}——与 ①② 全 disjoint。
+  - **① `gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness`**（ready）：已派
+    在飞（a570...），bracket 已开（fm-...-zurq5h）。floor=cap×4（12）+ dispatchable_disjoint 判据 +
+    补晋 disjointness 排序。触 ready-pool-check + 两 loop 文档。
+  - **② `gap-red-window-has-no-automatic-executor`**（ready）：门控 ①（同触 orchestrator-loop-tick.md，
+    串行）——① 落地后派。红窗规则执行者层（state=red 立即通知外层 + RUNNING 乐观派发有执行者）。
+- **在飞 2**：session-idle ③ + pool-floor ①。停止条件：suite-state green（乐观照常）。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
