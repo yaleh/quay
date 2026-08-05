@@ -95,6 +95,16 @@ export function checkTranscriptDelivered(transcriptFragment: string, sentText: s
   return { delivered: false };
 }
 
+/** A session is FRESH when its transcript contains NO real user message yet — a brand-new
+ * Claude Code session's transcript either does not exist, or holds only system/assistant
+ * records before the first typed prompt. On a fresh session the welcome screen renders a real
+ * ghost suggestion AFTER the prompt (`❯ Try "fix lint errors"`) — VISIBLE text that the C-u
+ * clear loop can never remove, so send-keys-reliable must SKIP the clear loop and send directly
+ * (gap-send-keys-reliable-welcome-screen-ghost-drive-fails AC1). PURE: no side effects. */
+export function hasUserMessages(transcriptFragment: string): boolean {
+  return extractUserTextCandidates(transcriptFragment).length > 0;
+}
+
 /** Tail of `fullText` restricted to lines whose byte offset in the file is >= `startBytes`
  * (line-boundary safe for JSONL appends: each line's UTF-8 byte length is accumulated, so a
  * multibyte sent text cannot misalign the cut). Used so a poll only sees content appended after
@@ -115,7 +125,8 @@ export function tailFromByteOffset(fullText: string, startBytes: number): string
 function usageError(message: string): number {
   console.error(`transcript-delivery-check: ${message}`);
   console.error("usage: transcript-delivery-check.ts --check <transcript.jsonl> [--start <bytes>] --text <sent-text>");
-  console.error("exit: 0 = delivered · 1 = not delivered · 2 = usage/IO error");
+  console.error("       transcript-delivery-check.ts --is-fresh <transcript.jsonl>");
+  console.error("exit: 0 = delivered / fresh · 1 = not delivered / not fresh · 2 = usage/IO error");
   return 2;
 }
 
@@ -134,8 +145,14 @@ export function main(argv: string[]): number {
   let jsonlPath: string | undefined;
   let sentText: string | undefined;
   let startBytes = 0;
+  let mode: "check" | "is-fresh" | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--check") {
+      mode = "check";
+      jsonlPath = args[i + 1];
+      i++;
+    } else if (args[i] === "--is-fresh") {
+      mode = "is-fresh";
       jsonlPath = args[i + 1];
       i++;
     } else if (args[i] === "--start") {
@@ -147,7 +164,29 @@ export function main(argv: string[]): number {
       i++;
     }
   }
-  if (!jsonlPath) return usageError("missing --check <transcript.jsonl>");
+  if (!jsonlPath) return usageError("missing --check/--is-fresh <transcript.jsonl>");
+  if (mode === "is-fresh") {
+    // Fresh-session verdict for send-keys-reliable's welcome-screen skip (AC1): a transcript that
+    // does not exist, or exists with ZERO real user messages, is a brand-new session → fresh.
+    // ENOENT is the NORMAL fresh case (a new claude writes its jsonl only on first input), NOT an
+    // IO error — the caller must be able to skip the clear loop before any input has ever been
+    // committed. Any other read failure is a real environment error → exit 2 (fail loud).
+    let full: string;
+    try {
+      full = fs.readFileSync(jsonlPath, "utf8");
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        console.log("fresh: true");
+        return 0;
+      }
+      console.error(`transcript-delivery-check: cannot read transcript ${jsonlPath}: ${err.message}`);
+      return 2;
+    }
+    const fresh = !hasUserMessages(full);
+    console.log(`fresh: ${fresh}`);
+    return fresh ? 0 : 1;
+  }
   if (sentText === undefined) return usageError("missing --text <sent-text>");
 
   const read = readJsonlTail(jsonlPath, startBytes);
@@ -204,6 +243,12 @@ export function selfcheck(): boolean {
   check("malformed-skipped", checkTranscriptDelivered(malformed, "real marker here").delivered === true);
 
   check("tail-byte-offset-keeps-appended", tailFromByteOffset("{\"a\":1}\n{\"b\":2}\n", "{\"a\":1}\n".length).includes('"b":2'));
+
+  // fresh-session detection (welcome-screen ghost text skip — AC1)
+  check("fresh-empty-transcript", hasUserMessages("") === false);
+  check("fresh-assistant-only", hasUserMessages(redAssistantOnly) === false);
+  check("fresh-tool-result-only-is-not-typed-input", hasUserMessages(redToolResultOnly) === false);
+  check("fresh-real-user-message", hasUserMessages(green) === true);
 
   console.log(`\ntranscript-delivery-check --selfcheck: ${pass} passed, ${fail} failed`);
   return fail === 0;
