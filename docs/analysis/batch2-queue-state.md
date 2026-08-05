@@ -2668,6 +2668,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   管理者 meta-cc 安装的陈旧快照阻塞已解除（无需外层再通知）。改名负控制 AC3/AC4 待安全窗口。
 - inProgress 1（ac3b）；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-05T01:42Z（外层，`no-action`：AC3b 证明完成）
+
+- **ac3b 已合并完成**（`2b0ba79a` + `fd7f8272`）：AC1 刷新 + vendor-local mcp_entry + **改名负控制
+  AC3/AC4 已执行**（AC1–AC7 全勾）。**AC3b 证明完整**——已安装 quay 不依赖开发树（真实改名负控制证
+  过判据本身，非单元测试声称）。管理者 meta-cc 安装彻底解阻塞。
+- **batch-4 全量套件运行中**（内层「等 ac3b 完成通知后 fan-in 关批 4」，实际 ac3b 已 done，等套件绿
+  关 5 任务）。inProgress 0；无停止条件；监视器 mounted:true。
+- 内层上下文已 1h8m（auto-compact 3%）——长回合，套件后关批。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
