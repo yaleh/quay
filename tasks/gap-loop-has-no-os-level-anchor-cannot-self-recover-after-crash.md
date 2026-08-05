@@ -33,7 +33,7 @@ title: "THE structural blocker to the primary goal (self-evolution without a
   all three layers missing because all session-scoped). AC10: does NOT score
   (axis opened by the 29h stall, post-friction), count stays 6; priority is
   independent of pre/post-friction"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -107,13 +107,39 @@ pre-friction 无关。**
       → **2026-08-05 内层实跑**：`os-anchor-install.sh install` 落地，`systemctl --user list-timers` 显示
       `quay-os-anchor-watchdog.timer` active（5min 周期）。安装接缝另由 `os-anchor-watchdog.test.mjs`
       AC1/install 用例（hermetic OS_ANCHOR_SKIP_SYSTEMCTL=1）验证。
-- [ ] AC2: **崩溃自动恢复**——模拟/实测会话死亡 ⇒ watchdog 自动重新拉起 claude 会话 + send-keys-reliable
+- [x] AC2: **崩溃自动恢复**——模拟/实测会话死亡 ⇒ watchdog 自动重新拉起 claude 会话 + send-keys-reliable
       驱动冷启动文本（实跑输出贴任务体；今晚三次全灭形态被自动恢复而非手工）
-      → **部分：re-spawn ✓ / drive ✗**。2026-08-05 内层实跑（throwaway session 崩溃模拟）：
-      `recreate-session (alive=0 session=0) → relaunch/launch OK（真实 claude 2.1.222 重新拉起，prompt up）`，
-      但 **drive SKIPPED — no transcript found**：`drive_outer` 的 transcript 基线在 launch **之后**计算
-      （base_ts 含新会话），strictly-newer 恒失败 ⇒ 冷启动文本从不送达。外层生产实测同证（11:4xZ：
-      「watchdog relaunched claude 但 drive failed」）。**drive 修复未完成，AC2 不勾**。
+      → **re-spawn ✓ + drive ✓（2026-08-05 修后完整实跑）**。throwaway session 崩溃模拟实测：
+      `recreate-session (alive=0 session=0) → relaunch OK（真实 claude 2.1.222 重新拉起，prompt up）`。
+      **drive 修复（外层裁定，commit `792c6c91`）**：原 drive 因 transcript 基线在 launch 后计算而恒
+      SKIPPED。改为 **SEND→DISCOVER→VERIFY**：① 可靠发送冷启动文本（C-u/逐字/Enter）；② 路径式发现
+      该发送创建的新 transcript（对照 launch 前快照，非旧的 strictly-newer-mtime）；③
+      `transcript-delivery-check.ts` 验证送达。**端到端实测**：发送后新 transcript 出现
+      （`319f48e8...`，54→55 文件），checker 返回 `delivered: true`（真实 user message
+      `"echo ac2-drive-ok"` 在 transcript）。外层生产（11:5xZ archguard watchdog）同证 drive 已能送达。
+- [x] AC3: **复用已验证能力**——判活用 session-liveness.sh（PSI/pane 双信号）、送达用
+      send-keys-reliable.sh + transcript-delivery-check.ts（六种失败模式）、冷启动用已验证的驱动文本；
+      零新发明
+      → 源码核实：`outer_liveness` 调 `session-liveness.sh --once`；`drive_outer` 复用 send-keys 可靠
+      发送模式（C-u/逐字/Enter）+ `transcript-delivery-check.ts`（唯一信任的送达信号）；drive 文本与
+      已验证 cold-start 文本一致。
+- [x] AC4: **跨项目覆盖**——quay/meta-cc/archguard 三项目的会话都在 watchdog 范围内（29h 停摆形态
+      未来被自动抓）
+      → `~/.config/quay/os-anchor/os-anchor-projects.conf` 含 quay/quay-0 + meta-cc/meta-cc-3 +
+      archguard/archguard-4 三行（install 默认覆盖，实测）。
+- [x] AC5: **SPEC §4 第 5 类修正**——周期锚点标注从「outer 有、inner/manager 缺」改为「三层全缺，
+      OS 级锚点为真实落点」（实测 29h 停摆证明）
+      → `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` §4 第 5 类已改为「三层全缺，
+      OS 级锚点为真实落点」。
+- [x] AC6: **AC10 诚实记账**——post-friction（被 29h 停摆打开）不计分，计数仍 6；优先级与是否
+      pre-friction 无关
+      → 诚实记账（2026-08-05）：OS 级锚点轴是 **post-friction**（被 29h 停摆打开，非预先预测的轴）——
+      不计入 pre-friction 轴计数（SYNTHESIS-axis-generation §3 判据计数保持 0/6），但其**优先级与
+      pre/post-friction 无关**（崩溃自恢复是压倒性优先级，管理者裁定）。这条记录在本任务体即为
+      记账本身——不伪造 pre-friction 分数。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → `plugin/test/os-anchor-watchdog.test.mjs`（`// @test-group governance`，2 用例：decide 矩阵 +
+      idempotent install 接缝），`node --test` 2/2 绿。
 - [x] AC3: **复用已验证能力**——判活用 session-liveness.sh（PSI/pane 双信号）、送达用
       send-keys-reliable.sh + transcript-delivery-check.ts（六种失败模式）、冷启动用已验证的驱动文本；
       零新发明
