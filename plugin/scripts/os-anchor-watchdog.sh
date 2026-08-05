@@ -179,11 +179,41 @@ transcript_for() {
   return 1
 }
 
+# transcript_snapshot — the space-separated list of EXISTING project transcript paths. Captured
+# BEFORE a launch so the re-spawned session's NEW file (created on its first input) is discoverable
+# by path — NOT by the fragile strictly-newer-mtime heuristic (which failed because base_ts was
+# computed AFTER the launch, so the just-created file was never "newer than the baseline").
+transcript_snapshot() {
+  local root="$1" slug dir
+  slug="$(printf '%s' "$root" | tr '/' '-')"
+  dir="${HOME:-/home/yale}/.claude/projects/${slug}"
+  [ -d "$dir" ] || return 0
+  ls "$dir"/*.jsonl 2>/dev/null | sort | tr '\n' ' '
+}
+
+# new_transcript_since — the newest project transcript path NOT in the pre-launch snapshot
+# (i.e. the just-re-spawned session's file). Empty when none yet.
+new_transcript_since() {
+  local root="$1" prelaunch="$2" slug dir f newest=""
+  slug="$(printf '%s' "$root" | tr '/' '-')"
+  dir="${HOME:-/home/yale}/.claude/projects/${slug}"
+  [ -d "$dir" ] || { echo ""; return 1; }
+  for f in "$dir"/*.jsonl; do
+    [ -e "$f" ] || continue
+    case " $prelaunch " in *" $f "*) continue ;; esac
+    newest="$f"
+  done
+  echo "$newest"
+  [ -n "$newest" ]
+}
+
 # ── re-spawn (the ONLY new behavior: the point of the task) ─────────────────────
 # recreate_session — the session itself is gone: build a minimal session with one
 # outer window running the launch command, then drive.
 recreate_session() {
   local name="$1" root="$2" session="$3" outer="$4" launch="$5" drive="$6" transcript_override="$7"
+  local prelaunch
+  prelaunch=$(transcript_snapshot "$root")
   if ! "${_os_tmux[@]}" new-session -d -s "$session" -n "$outer" -c "$root" 2>/dev/null; then
     log "$name: recreate-session FAILED — tmux new-session (maybe a race); falling back to relaunch"
     return 1
@@ -191,7 +221,7 @@ recreate_session() {
   launch_in_window "$name" "$session" "$outer" "$root" "$launch"
   local rc=$?
   [ "$rc" -eq 0 ] || return 1
-  drive_outer "$name" "$session" "$outer" "$root" "$drive" "$transcript_override"
+  drive_outer "$name" "$session" "$outer" "$root" "$drive" "$transcript_override" "$prelaunch"
   return $?
 }
 
@@ -199,10 +229,12 @@ recreate_session() {
 # the launch command into the existing outer pane, then drive.
 relaunch_outer() {
   local name="$1" root="$2" session="$3" outer="$4" launch="$5" drive="$6" transcript_override="$7"
+  local prelaunch
+  prelaunch=$(transcript_snapshot "$root")
   launch_in_window "$name" "$session" "$outer" "$root" "$launch"
   local rc=$?
   [ "$rc" -eq 0 ] || return 1
-  drive_outer "$name" "$session" "$outer" "$root" "$drive" "$transcript_override"
+  drive_outer "$name" "$session" "$outer" "$root" "$drive" "$transcript_override" "$prelaunch"
   return $?
 }
 
@@ -223,42 +255,54 @@ launch_in_window() {
   return 1
 }
 
-# drive_outer — send the validated cold-start text via send-keys-reliable.sh.
-# Delivery verdict comes from transcript-delivery-check.ts (the only trusted signal).
+# drive_outer — send the validated cold-start text + verify delivery (AC2 drive).
+# The re-spawned session creates its transcript ONLY on its first input, so the transcript path is
+# unknowable before the send. Flow (outer ruling 2026-08-05): (1) send the cold-start text via the
+# same reliable pattern send-keys-reliable.sh uses (C-u clear → literal send → Enter), (2) DISCOVER
+# the new transcript path created by that send (path-based, vs the pre-launch snapshot — NOT the old
+# strictly-newer-mtime heuristic whose base_ts was computed AFTER launch, making the just-created
+# file "never newer" and skipping the drive entirely), (3) verify delivery with
+# transcript-delivery-check.ts — the only trusted delivery signal (AC3).
 drive_outer() {
-  local name="$1" session="$2" outer="$3" root="$4" drive="$5" transcript_override="$6"
+  local name="$1" session="$2" outer="$3" root="$4" drive="$5" transcript_override="$6" prelaunch="${7:-}"
+  local target="${session}:${outer}"
   local skr="$root/plugin/scripts/send-keys-reliable.sh"
+  local tdc="$root/plugin/scripts/transcript-delivery-check.ts"
   [ -x "$skr" ] || { log "$name: drive SKIPPED — no send-keys-reliable.sh (project not quay-init'd)"; return 1; }
-  local base_ts=0 f
-  local slug dir
-  slug="$(printf '%s' "$root" | tr '/' '-')"
-  dir="${HOME:-/home/yale}/.claude/projects/${slug}"
-  if [ -d "$dir" ]; then
-    for f in "$dir"/*.jsonl; do
-      [ -e "$f" ] || continue
-      local ts
-      ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
-      [ "$ts" -gt "$base_ts" ] && base_ts=$ts
-    done
-  fi
-  local tr
-  tr=$(transcript_for "$root" "$transcript_override" "$base_ts") || tr=""
+  [ -f "$tdc" ] || { log "$name: drive SKIPPED — no transcript-delivery-check.ts (project not quay-init'd)"; return 1; }
+
+  # (1) reliable send — clear, type the cold-start text literally, submit.
+  "${_os_tmux[@]}" send-keys -t "$target" C-u 2>/dev/null || true
+  sleep 0.5
+  "${_os_tmux[@]}" send-keys -t "$target" -l "$drive" 2>/dev/null || true
+  sleep 0.5
+  "${_os_tmux[@]}" send-keys -t "$target" Enter 2>/dev/null || true
+
+  # (2) discover the NEW transcript created by this send (bounded poll — fault 4's queuing delay).
+  local tr="" end now
+  end=$(( $(date +%s) + 20 ))
+  while [ -z "$tr" ] && [ "$(date +%s)" -lt "$end" ]; do
+    tr=$(new_transcript_since "$root" "$prelaunch")
+    [ -z "$tr" ] && sleep 2
+  done
   if [ -z "$tr" ]; then
-    log "$name: drive SKIPPED — no transcript found (re-spawn happened; drive retries next tick)"
+    log "$name: DRIVE FAILED — no new transcript appeared after send (path discovery timeout)"
     return 1
   fi
-  local target="${session}:${outer}"
   log "$name: driving $target with cold-start text → transcript $tr"
+
+  # (3) verify delivery — bounded poll via the same checker send-keys-reliable uses (exit 0 =
+  #     delivered; exit 2 = environment failure → fail loud).
   local out rc
-  out=$(RELIABLE_DELIVERY_FIRST_S=15 RELIABLE_DELIVERY_VERIFY_S=45 \
-        bash "$skr" "$target" "$drive" "$tr" 2>&1)
+  out=$(RELIABLE_DELIVERY_VERIFY_S=45 \
+        node --experimental-strip-types "$tdc" --check "$tr" --text "$drive" 2>&1)
   rc=$?
   if [ "$rc" -eq 0 ]; then
     log "$name: DRIVE OK — cold-start text delivered (real user message in transcript)"
     printf '%s\n' "$out" | sed 's/^/    /' | while IFS= read -r l; do log "$name: $l"; done
     return 0
   fi
-  log "$name: DRIVE FAILED (exit $rc) — needs attention"
+  log "$name: DRIVE NOT YET DELIVERED (exit $rc) — retry next tick"
   printf '%s\n' "$out" | sed 's/^/    /' | while IFS= read -r l; do log "$name: $l"; done
   return 1
 }
