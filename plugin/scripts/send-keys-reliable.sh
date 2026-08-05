@@ -98,22 +98,49 @@ pane_input_box_empty() {
   esac
 }
 
-# Step 1 (fault 1): loop C-u + capture-pane until the input box is empty; cap at CLEAR_MAX;
-# fail loud on exhaustion rather than silently continuing.
-clear_ok=0
-i=0
-while [ "$i" -lt "$CLEAR_MAX" ]; do
-  tmux send-keys -t "$TARGET" C-u
-  pane=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
-  if [ -z "$pane" ] || pane_input_box_empty "$pane"; then
-    clear_ok=1
-    break
+# Step 0.5 (welcome-screen ghost text — gap-send-keys-reliable-welcome-screen-ghost-drive-fails):
+# a FRESH session (target transcript absent, or present with ZERO real user messages) has no typed
+# input yet — but its welcome screen renders a REAL ghost suggestion AFTER the prompt
+# (`❯ Try "fix lint errors"`), which is VISIBLE text that the C-u clear loop can NEVER remove
+# (the 11:40 watchdog drive failure root cause: the clear loop ran all CLEAR_MAX=50 against the
+# ghost text and failed loud rc=1). A fresh session has nothing real to clear, so SKIP the clear
+# loop and send directly. The verdict is the pure `--is-fresh` mode of the checker (exit 0 =
+# fresh, 1 = not fresh, 2 = IO/usage → fail loud). The NBSP empty-box path below (step 1) still
+# handles the NON-fresh case: an already-active session whose empty input box renders as
+# `❯`+NBSP still walks the clear loop (AC2 — no regression).
+fresh_session=0
+if node --experimental-strip-types "$CHECKER" --is-fresh "$TARGET_JSONL" >/dev/null 2>&1; then
+  fresh_session=1
+else
+  fresh_rc=$?
+  if [ "$fresh_rc" -eq 2 ]; then
+    echo "send-keys-reliable: transcript 读取失败（exit 2）——fail loud" >&2
+    exit 1
   fi
-  i=$((i + 1))
-done
-if [ "$clear_ok" -ne 1 ]; then
-  echo "send-keys-reliable: 输入框在 ${CLEAR_MAX} 次 C-u 后仍未清空——fail loud，不静默继续" >&2
-  exit 1
+  fresh_session=0
+fi
+
+# Step 1 (fault 1): loop C-u + capture-pane until the input box is empty; cap at CLEAR_MAX;
+# fail loud on exhaustion rather than silently continuing. SKIPPED ENTIRELY on a fresh session
+# (nothing to clear — the welcome screen's ghost suggestion is not removable input).
+clear_ok=0
+if [ "$fresh_session" -ne 1 ]; then
+  i=0
+  while [ "$i" -lt "$CLEAR_MAX" ]; do
+    tmux send-keys -t "$TARGET" C-u
+    pane=$(tmux capture-pane -p -t "$TARGET" 2>/dev/null || true)
+    if [ -z "$pane" ] || pane_input_box_empty "$pane"; then
+      clear_ok=1
+      break
+    fi
+    i=$((i + 1))
+  done
+  if [ "$clear_ok" -ne 1 ]; then
+    echo "send-keys-reliable: 输入框在 ${CLEAR_MAX} 次 C-u 后仍未清空——fail loud，不静默继续" >&2
+    exit 1
+  fi
+else
+  echo "send-keys-reliable: fresh session（transcript 无 user 消息）——SKIP 清屏循环，直接发送"
 fi
 
 # Step 2 (fault 2, part 1): send the text literally.

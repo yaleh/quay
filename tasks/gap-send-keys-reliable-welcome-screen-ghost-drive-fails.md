@@ -44,10 +44,43 @@ INNER-DRIVEN 用它驱动内层。**排在任何其它任务之前**。
 
 ## Acceptance Criteria
 
-- [ ] AC1: fresh welcome 屏（`❯ Try "..."` ghost 文本）⇒ send-keys-reliable 跳过清屏直接发送，rc=0（archguard 场景，负控制——当前会 fail loud rc=1）
-- [ ] AC2: 正常空框（`❯`+NBSP）⇒ 仍走 NBSP 清屏路径（不回归）
-- [ ] AC3: 与 gap-os-anchor-watchdog-drive-retry-and-rc-semantics 交叉标注（watchdog 驱动依赖此修复）
+- [x] AC1: fresh welcome 屏（`❯ Try "..."` ghost 文本）⇒ send-keys-reliable 跳过清屏直接发送，rc=0（archguard 场景，负控制——当前会 fail loud rc=1）
+- [x] AC2: 正常空框（`❯`+NBSP）⇒ 仍走 NBSP 清屏路径（不回归）
+- [x] AC3: 与 gap-os-anchor-watchdog-drive-retry-and-rc-semantics 交叉标注（watchdog 驱动依赖此修复）
 - [ ] AC4: 实测：kill archguard outer → watchdog relaunch → drive 成功（transcript 出现 user 消息）——AC2 完整闭环
+
+### AC1–AC3 验证证据（2026-08-05，worktree 分支 task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails）
+
+**真实 fresh session 实测（AC1，claude-deepseek --model deepseek-v4-flash，独立临时目录，非 live 会话）**：
+启动后欢迎屏实测内容为 `❯ Try "write a test for <filepath>"`（ghost 文本），target transcript 尚不存在。运行修复后脚本：
+
+```
+$ bash plugin/scripts/send-keys-reliable.sh skr-real-2864688 "echo real-fresh-drive-ok-2864688" ~/.claude/projects/-tmp-skr-real-fresh-2864688/<session>.jsonl
+send-keys-reliable: fresh session（transcript 无 user 消息）——SKIP 清屏循环，直接发送
+send-keys-reliable: 已送达 skr-real-2864688（transcript 出现内容匹配的真实 user message）
+delivered: true
+matched_line: {"...","type":"user","message":{"role":"user","content":"echo real-fresh-drive-ok-2864688"},...}
+RC=0
+```
+
+输出无 `fail loud` 且无 `CLEAR_MAX`（Contract measure `fresh_welcome_drive`=0）。transcript 由「不存在」变为含该驱动文本的真实 user message。
+
+**真实 active session 实测（AC2 不回归）**：首条消息后 session 已非 fresh（transcript 已有 2 条 user 消息），输入框为空（`❯`+NBSP）。第二次驱动：
+
+```
+$ bash plugin/scripts/send-keys-reliable.sh skr-real-2864688 "echo real-active-drive-ok-2864688" <同上 transcript>
+send-keys-reliable: 已送达 skr-real-2864688（transcript 出现内容匹配的真实 user message）
+delivered: true
+RC=0
+```
+
+输出**无** `SKIP 清屏循环` 分支（走的是 NBSP 清屏路径），user 消息 2→3。
+
+**AC1 e2e 自动化测试**（`plugin/test/send-keys-reliable.test.mjs`，真实 tmux fixture 渲染 `❯ Try "fix lint errors"` ghost 文本、CLEAR_MAX=2）：fresh welcome → rc=0、断言无 `fail loud|CLEAR_MAX`、断言走 `SKIP 清屏循环` 分支、transcript 出现 marker。AC2 e2e 改为非 fresh（transcript 预置 user 消息）保 NBSP 清屏路径回归，断言无 SKIP 分支。**scoped 运行**：`bash scripts/test.sh --for-task gap-send-keys-reliable-welcome-screen-ghost-drive-fails` → EXIT=0，`tests 28 / pass 28 / fail 0 / cancelled 0 / skipped 0`，scoped 静态检查全 PASS（test-framework-policy、test-isolation、task-contract-check「no violations」、adr016-screen-use）。
+
+**AC3 交叉标注**：已在 `tasks/gap-os-anchor-watchdog-drive-retry-and-rc-semantics.md` Proposal 加「交叉标注（2026-08-05…）」段 + Dispatch review，写明 watchdog 驱动依赖此修复、修 drive 重试/rc 语义时须验证 fresh 屏不回归。
+
+**AC4 未勾**：需 kill archguard outer 走 watchdog 重拉闭环，属 live-loop 干预；本任务在 worktree 隔离分支执行，不动 archguard-4/quay-0。留 fan-in 由外层实测（DoD 未勾）。
 
 ## Definition of Done
 
@@ -71,3 +104,15 @@ invariant fresh_session_skips_clear = 1（transcript 不存在/零 user 消息 �
 invoke    `grep -n 'fresh\|transcript\|skip\|CLEAR_MAX' plugin/scripts/send-keys-reliable.sh`
 control   fresh welcome 屏（ghost 文本）⇒ rc=0 直接发（AC1）；空框 ⇒ NBSP 路径（AC2）
 resume    fresh-session 分支与测试分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05
+changed: inner 执行——(1) transcript-delivery-check.ts 新增 hasUserMessages 纯函数 + `--is-fresh`
+CLI（ENOENT=不存在 ⇒ fresh；零 user 消息 ⇒ fresh）；(2) send-keys-reliable.sh 新增 fresh-session
+分支：transcript 不存在/零 user 消息 ⇒ SKIP 清屏循环直接发（welcome 屏 ghost 文本不再 CLEAR_MAX
+fail loud）；(3) send-keys-reliable.test.mjs 新增 AC1 fresh-welcome e2e（ghost 文本 + CLEAR_MAX=2，
+rc=0 无 fail loud）+ AC2 改非 fresh（transcript 预置 user 消息）保 NBSP 清屏路径回归；(4) watchdog
+任务 AC3 交叉标注。AC4（kill archguard outer → watchdog 重拉驱动）为 live-loop 干预，worktree 隔离
+下不做，留 fan-in 由外层实测。

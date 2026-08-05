@@ -14,13 +14,14 @@
 // string fixture (pure function) or a temp .jsonl file (CLI). No tmux server, no pty, no fake TUI
 // (ruling E pattern — the dangerous test surface is structurally absent for the pure part).
 //
-// AC2 CARVE-OUT (gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box): the ONE
-// e2e test at the bottom DOES spawn a dedicated tmux fixture session — the NBSP-empty-input-box
-// defect lives ONLY in the clear loop's behavior on a real TUI, which no string fixture can reach,
-// and this is a user-facing contract (CLAUDE.md test-layer strategy item 1: ≥1 REAL e2e check
-// against the shipped artifact). The carve-out owns EXACTLY ONE session with a per-run-unique name
-// and cleans it up with a scoped `tmux kill-session -t <unique>` — never kill-server, never a
-// shared/attached session, never the loop's own sessions.
+// AC2 CARVE-OUT (gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box +
+// gap-send-keys-reliable-welcome-screen-ghost-drive-fails): the e2e tests at the bottom DO spawn
+// dedicated tmux fixture sessions — the NBSP-empty-input-box defect and the welcome-screen
+// ghost-text defect live ONLY in the clear loop's behavior on a real TUI, which no string fixture
+// can reach, and this is a user-facing contract (CLAUDE.md test-layer strategy item 1: ≥1 REAL e2e
+// check against the shipped artifact). The carve-out owns exactly TWO sessions (one per scenario),
+// each with a per-run-unique name, cleaned up with a scoped `tmux kill-session -t <unique>` —
+// never kill-server, never a shared/attached session, never the loop's own sessions.
 //
 // AC4 pure function, imported directly · AC5 negative controls (absent message ⇒ not delivered;
 // present-but-mismatched ⇒ not delivered) · AC7 zero hash (script + test contain zero
@@ -41,6 +42,7 @@ import { fileURLToPath } from "node:url";
 import {
   checkTranscriptDelivered,
   extractUserTextCandidates,
+  hasUserMessages,
   tailFromByteOffset,
 } from "../scripts/transcript-delivery-check.ts";
 
@@ -155,6 +157,19 @@ test("tailFromByteOffset: the delivery poll only sees content appended after the
   assert.equal(tailFromByteOffset(full, 0), full);
 });
 
+// ── AC1: fresh-session detection (welcome-screen ghost text → skip the clear loop) ────────────────
+
+test("AC1 pure: hasUserMessages — an empty/assistant-only transcript is FRESH (zero user messages)", () => {
+  assert.equal(hasUserMessages(""), false, "empty transcript is fresh");
+  assert.equal(hasUserMessages(assistantLine("hi") + "\n"), false, "assistant-only transcript is fresh");
+  assert.equal(hasUserMessages(userArrayLine([{ type: "tool_result", content: "x" }]) + "\n"), false, "tool-result-only user record is injected context, not typed input — still fresh");
+});
+
+test("AC1 pure: hasUserMessages — a real user string (or text block) makes the session NOT fresh", () => {
+  assert.equal(hasUserMessages(userStringLine("hello") + "\n"), true);
+  assert.equal(hasUserMessages(userArrayLine([{ type: "text", text: "echo x" }]) + "\n"), true);
+});
+
 // ── ## Contract measure CLI path ───────────────────────────────────────────────────────────────────
 
 function runCli(args) {
@@ -212,6 +227,36 @@ test("CLI usage: missing --text → exit 2", () => {
   assert.equal(r.status, 2, `exit 2 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
 });
 
+test("CLI fresh: --is-fresh on an empty transcript → fresh: true, exit 0", () => {
+  withTempJsonl("", (file) => {
+    const r = runCli(["--is-fresh", file]);
+    assert.equal(r.status, 0, `exit 0 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /fresh: true/);
+  });
+});
+
+test("CLI fresh: --is-fresh on an assistant-only transcript → fresh: true, exit 0", () => {
+  withTempJsonl(assistantLine("hi") + "\n", (file) => {
+    const r = runCli(["--is-fresh", file]);
+    assert.equal(r.status, 0, `exit 0 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /fresh: true/);
+  });
+});
+
+test("CLI fresh: --is-fresh on a transcript with a real user message → fresh: false, exit 1", () => {
+  withTempJsonl(userStringLine("hello") + "\n", (file) => {
+    const r = runCli(["--is-fresh", file]);
+    assert.equal(r.status, 1, `exit 1 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /fresh: false/);
+  });
+});
+
+test("CLI fresh: --is-fresh on a MISSING transcript → fresh: true, exit 0 (brand-new session has no file yet)", () => {
+  const r = runCli(["--is-fresh", path.join(os.tmpdir(), "no-such-fresh-file.jsonl")]);
+  assert.equal(r.status, 0, `fresh for absent file, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /fresh: true/);
+});
+
 // ── the reliable-send script: only the no-terminal surfaces ────────────────────────────────────────
 
 test("script: missing arguments exit 2 with a usage message, before any tmux call", () => {
@@ -231,6 +276,10 @@ test("script: the file exists, is executable, and step 5 delegates to the pure c
   const src = fs.readFileSync(SCRIPT, "utf8");
   assert.ok(src.includes("transcript-delivery-check.ts"), "step 5 delegates to the pure delivery check");
   assert.ok(src.includes("C-u"), "step 1 uses the C-u clear mechanism");
+  // AC1 wiring: fresh-session detection must consult the pure `--is-fresh` checker mode.
+  assert.match(src, /--is-fresh/, "fresh-session detection delegates to the pure --is-fresh verdict");
+  assert.match(src, /fresh_session/, "script carries a fresh-session branch");
+  assert.match(src, /SKIP/, "the fresh branch skips the clear loop");
 });
 
 // ── AC7: zero hash (the family ruling F killed stays dead) ────────────────────────────────────────
@@ -249,17 +298,19 @@ test("AC7: script and test contain zero occurrences of the three hash-tool names
   assert.equal(total, 0, `forbidden hash-tool names appear ${total} time(s) across script+test`);
 });
 
-// ── AC2: REAL end-to-end — the clear loop on a REAL TUI (NBSP prompt) ─────────────────────────────
-// The pure-function tests above never spawn a pane, yet the ONLY broken part of the script was the
-// clear loop's behavior on a REAL TUI: an EMPTY Claude Code input box renders as `❯` + NBSP
-// (U+00A0, bytes c2 a0), and the old `[:space:]` check judged it non-empty → the clear loop ran all
-// CLEAR_MAX=50 then failed loud. This is a user-facing contract (CLAUDE.md test-layer strategy
-// item 1: ≥1 REAL end-to-end check against the shipped artifact). The carve-out owns exactly one
-// dedicated fixture session (unique name), drives it once, and cleans up with a scoped
-// `tmux kill-session -t <unique>` — never kill-server, never a shared session. If tmux is
-// unavailable the test skips cleanly.
+// ── AC1/AC2: REAL end-to-end — the clear loop on a REAL TUI ───────────────────────────────────────
+// The pure-function tests above never spawn a pane, yet BOTH clear-loop defects live ONLY in
+// behavior on a REAL TUI: (AC2) an EMPTY Claude Code input box renders as `❯` + NBSP (U+00A0,
+// bytes c2 a0), which the old `[:space:]` check judged non-empty → CLEAR_MAX fail loud; (AC1) a
+// FRESH session's welcome screen renders `❯ Try "..."` — REAL visible text after the prompt that
+// C-u can never remove, so the clear loop must be SKIPPED entirely (transcript has zero user
+// messages). This is a user-facing contract (CLAUDE.md test-layer strategy item 1: ≥1 REAL
+// end-to-end check against the shipped artifact). The carve-out owns exactly two dedicated fixture
+// sessions (unique names), drives each once, and cleans up with a scoped `tmux kill-session -t
+// <unique>` — never kill-server, never a shared session. If tmux is unavailable the tests skip
+// cleanly.
 
-/** Unique-per-run tmux session / tmp names (the AC2 carve-out owns exactly one session). */
+/** Unique-per-run tmux session / tmp names (the AC1/AC2 carve-out owns exactly two sessions). */
 function uniqueName(prefix) {
   return `${prefix}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -283,7 +334,7 @@ done
 `;
 }
 
-test("AC2 e2e: NBSP-prompt fixture pane is judged EMPTY — clear loop exits fast (CLEAR_MAX=2), text delivered via transcript", { timeout: 90000 }, async (t) => {
+test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session is judged EMPTY — clear loop exits fast (CLEAR_MAX=2), text delivered via transcript", { timeout: 90000 }, async (t) => {
   const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
   if (tmuxV.error || tmuxV.status !== 0) {
     t.skip("tmux not available — skipping the real-TUI e2e");
@@ -294,7 +345,9 @@ test("AC2 e2e: NBSP-prompt fixture pane is judged EMPTY — clear loop exits fas
   const fixture = path.join(tmp, "fixture.sh");
   const transcript = path.join(tmp, "transcript.jsonl");
   fs.writeFileSync(fixture, fixtureScriptSrc(transcript), "utf8");
-  fs.writeFileSync(transcript, "", "utf8");
+  // NOT fresh: seed the transcript with a prior user message so the fresh-session skip does NOT
+  // fire — this forces the script through the NBSP clear-loop path (AC2 regression protection).
+  fs.writeFileSync(transcript, `${userStringLine("prior-session-message")}\n`, "utf8");
   const marker = `skr-e2e-marker-${process.pid}`;
   let result = null;
   let cap = null;
@@ -324,6 +377,82 @@ test("AC2 e2e: NBSP-prompt fixture pane is judged EMPTY — clear loop exits fas
       },
     });
     assert.equal(result.status, 0, `send-keys-reliable.sh failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /已送达/, `script should report delivery:\n${result.stdout}`);
+    // The clear loop must have been exercised, not skipped: the fresh-session skip line is ABSENT.
+    assert.doesNotMatch(result.stdout, /SKIP 清屏循环/, `non-fresh session must walk the clear loop, not the fresh skip:\n${result.stdout}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
+  } finally {
+    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
+// ── AC1: REAL end-to-end — fresh welcome-screen ghost text → clear loop SKIPPED ───────────────────
+/** The welcome-screen ghost suggestion text: a REAL visible string rendered after the `❯` prompt on
+ * a brand-new Claude Code session. It is NOT removable input (C-u cannot clear it) — the clear loop
+ * would judge it non-empty and exhaust CLEAR_MAX. */
+const GHOST_WELCOME = 'Try "fix lint errors"';
+
+/** A tiny "TUI" for the AC1 e2e: renders the welcome-screen ghost suggestion after the prompt, and
+ * on every submitted line appends a REAL user JSONL record to the transcript (the receiver
+ * committing the typed text). The transcript file is ABSENT initially — a brand-new session. */
+function ghostFixtureScriptSrc(transcriptPath) {
+  return `#!/usr/bin/env bash
+TRANSCRIPT="${transcriptPath}"
+printf '❯ ${GHOST_WELCOME}'
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$line" >> "$TRANSCRIPT"
+  printf '❯ ${GHOST_WELCOME}'
+done
+`;
+}
+
+test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) — clear loop SKIPPED (CLEAR_MAX=2, would fail loud if not skipped), text delivered via transcript", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("skr-ghost");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skr-ghost-"));
+  const fixture = path.join(tmp, "fixture.sh");
+  const transcript = path.join(tmp, "transcript.jsonl");
+  fs.writeFileSync(fixture, ghostFixtureScriptSrc(transcript), "utf8");
+  // Transcript is deliberately ABSENT — a fresh session (nothing typed yet).
+  const marker = `skr-ghost-marker-${process.pid}`;
+  let result = null;
+  try {
+    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+
+    // Wait (bounded) for the fixture pane to render the ghost welcome text.
+    let ready = false;
+    for (let i = 0; i < 100 && !ready; i++) {
+      const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      if (cap.status === 0 && cap.stdout.includes(GHOST_WELCOME)) ready = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(ready, `fixture pane should render the ghost welcome text`);
+
+    result = spawnSync("bash", [SCRIPT, session, marker, transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...process.env,
+        RELIABLE_CLEAR_MAX: "2",          // if the fresh-skip regresses, the clear loop exhausts at 2 against the ghost text and fails loud
+        RELIABLE_STABLE_TIMEOUT_S: "3",
+        RELIABLE_DELIVERY_FIRST_S: "3",
+        RELIABLE_DELIVERY_VERIFY_S: "15",
+        RELIABLE_DELIVERY_POLL_S: "1",
+      },
+    });
+    assert.equal(result.status, 0, `fresh welcome drive failed (exit ${result.status}) — the clear loop must be SKIPPED:\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    // Contract `measure`: a fresh welcome drive must NOT fail loud (no 'fail loud', no CLEAR_MAX).
+    assert.doesNotMatch(result.stdout + result.stderr, /fail loud|CLEAR_MAX/, `fresh welcome drive must not fail loud:\n${result.stdout}${result.stderr}`);
+    // The fresh-skip branch was taken (transcript had no user message).
+    assert.match(result.stdout, /SKIP 清屏循环/, `fresh session must take the skip branch:\n${result.stdout}`);
     assert.match(result.stdout, /已送达/, `script should report delivery:\n${result.stdout}`);
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);

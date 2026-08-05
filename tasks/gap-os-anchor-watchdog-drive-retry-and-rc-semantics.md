@@ -32,6 +32,8 @@ kill archguard-4:outer claude 后，watchdog 在下一 timer 周期（11:40:08�
 
 **注意**：`drive_outer` 里 `[ -x "$skr" ] || return 1`（项目没 quay-init'd 时返回 1）——这个应保留（真错误），但「transcript 未就绪」是临时态，应区分。
 
+**交叉标注（2026-08-05，gap-send-keys-reliable-welcome-screen-ghost-drive-fails AC3）**：watchdog 11:40 drive 失败的**真根因**是 fresh welcome 屏的 ghost 文本（`❯ Try "fix lint errors"` = 真实可见文本，C-u 清不掉）使 send-keys-reliable 清屏循环跑满 CLEAR_MAX=50 fail loud rc=1。send-keys-reliable.sh 已修：fresh session（target transcript 不存在或零条 user 消息）⇒ SKIP 清屏循环直接发（`--is-fresh` 纯判定）。**watchdog 驱动依赖此修复**——cold-start 用它驱动 fresh 内层时不再在 welcome 屏 fail loud；本任务修 drive 重试 + rc 语义时须一并验证 fresh 屏场景不回归。
+
 ## Acceptance Criteria
 
 - [ ] AC1: relaunch 后 drive **重试而非立即放弃**——新 claude jsonl 出现前 drive 标记「待重试」不返回 1（service 不 FAILURE）；jsonl 出现后自动驱动成功
@@ -52,3 +54,13 @@ band      ac2_recovery = 0（修后无 drive-skipped 且无 RECOVERY-FAILED）
 invoke    `bash plugin/scripts/os-anchor-watchdog.sh --decide 0 1 0`
 control   kill archguard outer（AC2 真实测试）⇒ watchdog 重拉 + 驱动成功（AC3）；relaunch 后 drive 临时失败 ⇒ service exit 0（AC2）
 resume    drive 重试与 rc 语义分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05
+changed: AC3 交叉标注——send-keys-reliable-welcome-screen-ghost-drive-fails：fresh welcome 屏 ghost
+文本（`❯ Try "..."` 真实可见文本，C-u 清不掉）是 watchdog 11:40 drive 失败的真根因；
+send-keys-reliable.sh 已加 fresh-session SKIP 清屏分支（target transcript 不存在/零 user 消息
+⇒ 直接发，不再 CLEAR_MAX fail loud）。watchdog 驱动依赖此修复，本任务修 drive 重试 + rc 语义时
+须验证 fresh 屏不回归。仅交叉标注，未改 status/AC/DoD。
