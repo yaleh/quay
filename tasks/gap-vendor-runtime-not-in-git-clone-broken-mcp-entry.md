@@ -136,6 +136,29 @@ ws/vendor/quay/dist/quay.js + ws/vendor/quay-native/dist/quay-native.js 铺进�
 config mcp_entry: ["node", "<ws>/vendor/quay-native/dist/quay-native.js", "mcp"] 指向存在文件
 ```
 
+**fresh-clone 路径二端到端实跑**（2026-08-05，本机模拟 B 机路径二：`git clone` 本分支到 /var/tmp → 无 dist → 安装步 →
+`quay-init --loop` → MCP 入口指向存在运行时）：
+```
+$ git clone --branch task/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry ... /var/tmp/fresh-clone-vr
+$ ls plugin/vendor/quay/dist/  →  No such file or directory        # 复现缺陷：fresh clone 无运行时
+$ git ls-files plugin/vendor/  →  plugin/vendor/quay-native/provider.yml
+                                  plugin/vendor/quay/package.json   # 仅 2 个跟踪文件，运行时本体不入库
+$ bash plugin/scripts/sync-vendor.sh   # 等价 npm install postinstall
+[sync-vendor] done. The vendored dist/quay.js ...
+$ ls plugin/vendor/quay/dist/quay.js plugin/vendor/quay-native/dist/quay-native.js   # 现在存在
+$ bash plugin/scripts/quay-init.sh --loop --root <target> ...
+EXIT=0；两处 WARN 均消失（grep -c WARN = 0）
+verify-installed-executables: OK
+verify-referenced-landed: OK
+verify-provider-runtime-existence: OK (<target>/vendor/quay-native/dist/quay-native.js exists)
+config mcp_entry: ["node", "<target>/vendor/quay-native/dist/quay-native.js", "mcp"]   # 指向存在文件
+$ node <target>/vendor/quay-native/dist/quay-native.js mcp
+quay-native mcp: serving tasks from <target>/tasks   # Provider ABI 可用
+```
+注：`node vendor/quay/dist/quay.js --version` 的 ENOENT（version.ts 读外部 package.json）属
+**另一任务** `gap-dist-runtime-not-self-contained-reads-external-package-json`（AC12b 阻塞②延伸）的缺陷域，
+本任务（运行时存在性 + fail-closed + auto-build）已闭环。
+
 **invoke 证据**（`grep -n 'vendor\|dist\|WARN\|fail' plugin/scripts/quay-init.sh`）：
 ```
 588:ensure_vendor_runtime() {

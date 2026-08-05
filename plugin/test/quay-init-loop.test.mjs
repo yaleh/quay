@@ -544,6 +544,8 @@ test('AC1 — when the plugin has no built runtime bundles and auto-build cannot
       assert.match(r.stderr, /vendor\/quay\/dist\/quay\.js/, 'must name the missing Core runtime bundle');
       assert.match(r.stderr, /vendor\/quay-native\/dist\/quay-native\.js/, 'must name the missing native provider runtime bundle');
       assert.match(r.stderr, /FAILS CLOSED/, 'the error must state the fail-closed resolution');
+      assert.ok(!fs.existsSync(path.join(ws, '.quay', 'config.yml')),
+        'must NOT write a config whose mcp_entry points at a missing runtime (the fail-closed fires before write_provider_config)');
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
 });
