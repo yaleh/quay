@@ -2,7 +2,7 @@
 id: gap-no-resource-awareness-heavy-ops-run-blind
 title: Heavy operations run blind to CPU/memory — measured 4.25x
   oversubscription and swap is 0, so OOM is a cliff
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -10,6 +10,22 @@ labels:
 extra:
   schema: v1
 ---
+
+> **内层 fan-in 处理（2026-08-05 12:5xZ）：fail/timeout，needs-human。** 外层裁定：本任务 scoped 套件
+> 已中止（25 分钟超时；嵌套套件 2529066 内部又跑 40+ 文件 coverage，PSI 80+，疑似自指死锁）。agent
+> （a79458bb）首轮 scoped 已 42/42 过，但第二轮（加入 full-suite-runner.test.mjs 后）死锁。已停 agent。
+> **不重跑全 scoped**（外层指令）。
+>
+> **seam 调查（外层点名 RESOURCE_GATE_TEST_CPU_AVG10）**：seam **存在且两处测试都用对了**——
+> `resource-gate.test.mjs` 的 `runGate` 传 seam env；`full-suite-runner.test.mjs` AC3 用
+> `QUAY_TEST_SKIP_RESOURCE_GATE=0` + `RESOURCE_GATE_TEST_CPU_AVG10` 强制 WAIT/GO（确定性）。死锁
+> **不是「seam 没生效」**——是 `--for-task` 选中集把 gate 测试与 `full-suite-runner.test.mjs` 同跑，
+> 后者嵌套起真实 `test.sh`（40+ 文件 coverage）把 PSI 推到 80+；gate 的**非 CPU 检查**（mem/
+> node_procs/orphans）读真实值，负载下可能触 WAIT，测试等死。**建议**：gate 测试全量密封（全部检查
+> 都 seam 化）或调整选中集避免二者同跑。
+>
+> **保留**：worktree `/home/yale/work/quay-worktrees/resource-aware`（agent 未提交的 source-pin 测试
+> ——assert runner 查 gate / nproc 派生 / replace splice，价值保留，修复后可 reland）。
 
 **type:** execution
 
