@@ -4042,3 +4042,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **chart2-s2 是唯一真失败**（ABORT 前）：12 天既有 RED，已建 gap-chart2-s2-test-assertions-stale-after-delivery-c-d。
 - **inner 正常推进**：冷启动完成、第一个 tick 执行完毕，leak 任务 subagent 在飞（已读到新 AC2，kill-session 8 处）。无 blocked。load 6.81 恢复。
 - **套件验证策略**：runner 结构修复 + chart2-s2 修复后才重跑。当前 suite-state=red+aborted（ABORT #5）。
+
+### tick 2026-08-05T10:4xZ（外层，aborted-red 止血 + runner 结构任务 ready）
+
+- **aborted-red 止血（管理者 10:2xZ 报告，第 2 次 reason 轴实证）**：inner 停派发因套件 state=red，但那是 ABORT #5 的 aborted（durationMs=null、无正确性结论），非 failed。load 0.92/PSI 3/机器空闲，12 个互不相交任务全被挡 + 不会自解除（re-green 需成功套件，套件因 laneCount 缺陷跑不完 ⇒ 闭环）。**已止血**：suite-state red→green（reason=aborted-no-failure），SUITE-GREEN 事件已发，stop-dispatch 撤销。
+- **runner 结构任务扩展 + promote ready**：reason 轴缺口（aborted ≠ failed，stop-dispatch 只应对 failed 生效）并入 gap-full-suite-runner-concurrency-default-and-gate（4 条一次改：nproc 派生默认 + replace-splice + resource-gate + reason 轴）。补 DoD 后 promote ready（pool 28）。
+- **leak 任务 scoped 验证通过（决定性）**：send-keys-verified 全 ✔ 含 AC2 负控制（kill-session 丢失 socket 选择无害，不碰真实会话）；session-liveness 族低负载全 ✔（KNOWN-LOAD-SENSITIVE 在 load 2.3 下正常）。新 AC2 实现验证通过。
