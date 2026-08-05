@@ -5443,3 +5443,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（branch-model 工作中：fork-baseline.ts + integration-batch-merge.sh + 两 tick doc，0 提交）。
   无 fan-in、无新派发（池碰撞）。two-machine-collab 待 branch-model land 后第一批。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T23:4xZ 补充（外层，4 任务 Touches 过宽——永不可并行派发）
+
+- **管理者滚动派发观测发现的真缺陷，核实+精确定位**：4 任务（complete-delivery-surface / delivery-surface-
+  grows / send-keys-welcome / tests-leak-tmux）checkTouchesPair 全部保守串行。**实际机制**（正确 API 测）：
+  Touches **能解析**（非「空」）——但含：
+  ① **目录 glob**（plugin/scripts/、plugin/test/、orchestration/）→ 展开成全部文件 → 与任何在飞任务
+     overlap（保守串行，正确但过度限制）；
+  ② **多文件一行**（`a.md / b.md / c.md`）→ 整行当 1 个 glob → 匹配不到（broken）。
+- **管理者「空 Touches」是近似**；真因是目录 glob 过宽 + 多文件行。修法：Touches 收窄到具体文件 +
+  多文件拆行。4 任务在池（部分 ready）——需逐任务判断实际触摸文件后收窄，立案待办。
