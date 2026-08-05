@@ -4634,3 +4634,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   outer→inner，manager 无替代方式观测 outer（现用 git 提交间隔 + tmux pane 命令名两个低精度代理）；
   今天两起实况（100% context 转达未核实、39 分钟空档一度误判）。池 28>floor 12 无自动晋级压力，故显式驱动。
 - 通用化裁定已在该任务体内（--target/--path/阈值参数化 + 动作可扩展 + 不开放 ADR-016 状态枚举）。
+
+### tick 2026-08-05T16:5xZ 补充2（外层，discovery-pid 修复的静默退化路径立案）
+
+- **管理者繁殖关切 → 外层独立核实成立**：inner-session-check.sh discovery-pid 修复（12936f90）依赖
+  /proc/<pid>/environ（**Linux 专属**）；line 178 无 PID/session id 时**静默退回旧启发式**（今天证明会认错
+  transcript 那套），TR_SOURCE=discovery 标记但**无消费者检查**——tick 文档 :63 的 --json 消费者读
+  state/window/process/transcript/transcriptFresh 不含 transcriptSource，cold-start skill 完全不引用。
+- **繁殖形态**：B 机 Linux 现在不炸，但非 Linux/无 /proc 时修复无声退化回原 bug 仍报 healthy——「对结论错
+  证据」无声回归，下一位采用者继承。
+- **立案 `gap-inner-session-check-discovery-fallback-silent`**（todo, defect, milestone-candidate）：
+  fail-closed 或 loud（stderr + state 标 degraded）；--json 消费者读 transcriptSource==discovery 报警；
+  AC4 关联已 done 任务留空的 AC4。
+- **在飞**：upgrade-channel agent 继续（sync.sh 映射）。套件 green（stale）。
