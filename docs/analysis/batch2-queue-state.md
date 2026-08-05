@@ -3711,3 +3711,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   计数仍 0。
 - **ROUND 3 状态**：M3 修复未落地（inner Thinking 15m+，采样无参重入）；套件红（06:50 完）；gate 待
   修复后重启。
+
+### tick 2026-08-05T07:20Z（外层，`unblock`：laydown 派生盲点立案 + contract 审计 6 修）
+
+- **管理者根因链①-⑦（自己引入的实例）全坐实**：quay-init 铺设集派生正则要求 `plugin/scripts/` 前缀，
+  cold-start/SKILL.md:49/132 对 transcript-delivery-check.ts 是**裸文件名**引用（0 命中 19 个派生集），
+  send-keys-reliable.sh 有前缀被铺 ⇒ **铺了消费者没铺依赖**，meta-cc/archguard 送达校验从首用即坏。
+- **比管理者描述更严重一处（外层核实）**：quay-init.sh:547 verify-referenced-landed **与铺设器共用同一
+  派生正则**——检查器和被检查者共享盲点，该类别判据**永远不会发现**（self-create/reference-doc 豁免
+  552-557 同一 grep 语义，裸文件名完全静默）。
+- **已立案 `gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure`**（todo，高优先）：
+  方向 (b) 依赖闭包为主（send-keys-reliable.sh:41 CHECKER=SCRIPT_DIR/... 机械可解析，抓 (a) 抓不到的
+  一整类）+ (a) 裸文件名存在性解析辅 + verify 盲点补齐 + send-keys-reliable fail-loud。
+- **AC10 post-friction 不计分**（被 meta-cc 撞出），计数仍 4。
+- **contract 审计（第 8 次教训前置抓出）**：新立案 needs-human（band 缺=、measure 无反引号、control 折行）
+  + laydown（control 折行）+ 既有 axis-generator（measure 无反引号）+ branch-model（measure 无字段）
+  共 6 条 new-since-baseline 全修，`new since baseline: 0`。
+- **ROUND 3**：M3 修复仍未落地（inner 采样无参重入）；套件红（06:50）；gate 待修复后重启。
