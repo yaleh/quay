@@ -3924,8 +3924,25 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （log 停 5935、CPU 0.3%），同时内层并发跑自己的 session-liveness 验证（concurrency=4，起 skv-ok
   server）——**两个 session-liveness 实例在全局 tmux socket 撞车**（都用 skv-ok 会话名）。资源 GO
   （PSI 4）非 CPU，是 tmux socket 冲突。外层让位内层验证。
-- **残留泄漏清理（管理者留判断的）**：9 个 session-liveness-* + 1 个 enter-repro-79bc，全无活 socket
-  确认后清理（观察者 2598198 用 SESSION_TARGETS=quay-0:outer，不依赖这些目录）。残留清零。
+- **残留泄漏清理（管理者留判断的）**：9 个 session-liveness-* + 1 个 enter-repro-79bc 的 **/tmp 目录**
+  全无活 socket 确认后清理（观察者 2598198 用 SESSION_TARGETS=quay-0:outer，不依赖这些目录）。
+  **措辞更正（08:55Z，管理者核对）**：这是**目录**清理，**不是 tmux server 进程**——12 个隔离
+  TMUX_TMPDIR 的 tmux server 进程还活着（最老 17h52m，含 ol-tok 夹具非仅 session-liveness），
+  管理者已补杀（12+1→1，只剩默认 server）。**泄漏源是多个测试夹具共有的 teardown 缺失**，
+  ol-tok（heavy-op-token 族）也是；已并入 leak 任务（AC1 前缀加 ol-tok-）。管理者自我更正：观察者
+  无 TMUX_TMPDIR，07:5x 的「先不动」顾虑多余，那 9 个当时可安全清。
 - **M3 验证重跑（blfvjpxok，lane-1）**：冲突根因清除后干净启动（concurrency=1 单进程、无 8 残留）。
 - **内层**：静止（Baked 13m51s），session-liveness 验证完成；输入框「重跑 M3 验证」待外层套件。
 - 套件结果出来后收尾 ROUND 3（4 not-yet-flipped）+ 关闭已落地任务。
+
+### tick 2026-08-05T08:55Z 增补（管理者核对：ABORT #3 泄漏根因范围更大 + 外层措辞误导）
+
+- **管理者实测 12 个隔离 tmux server 还活着**（最老 17h52m session-liveness-l4SQh4/sock；最新 4 分钟
+  ol-tok——heavy-op-token 夹具）。**外层 08:48「清理 10 个残留」是目录清理，不是进程清理**——socket
+  目录被 rm 但进程没被杀。措辞误导已更正（queue-state 08:50Z 条目）。
+- **泄漏源范围扩大**：不只 session-liveness，**ol-tok（heavy-op-token 族）也是**——多个测试夹具共有
+  teardown 缺失，同 skv-ok 族。leak 任务 AC1 前缀已加 ol-tok-。
+- **管理者补杀**：12+1→1（只剩默认 server），三会话存活、观察者 2598198 活着（S 态）。
+- **管理者自我更正**：观察者无 TMUX_TMPDIR，07:5x「先不动 9 个」顾虑多余，保守间接让它们活到
+  ABORT #3。记在管理者头上。
+- **当前**：资源门 GO（PSI 10.39）；M3 验证套件（blfvjpxok lane-1）在干净环境跑。

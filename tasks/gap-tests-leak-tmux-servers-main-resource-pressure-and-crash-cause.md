@@ -36,6 +36,18 @@ WAIT 转 GO，tmux server 从 217 降到 10。⇒ 这个泄漏是当前资源压
 53 分）+ `/tmp/enter-repro-79bc/sock` 1 个，来自 session-liveness 相关测试。数量小、且不确定挂载中的
 观察者（pid 2598198）是否用着其中之一，**留给内层判断后再清**。
 
+**【更正 2026-08-05 08:55Z——范围更大 + 外层措辞误导】**
+1. **泄漏源不止 session-liveness**：管理者 08:52 数到 **12 个**带隔离 TMUX_TMPDIR 的 tmux server 还
+   活着，最老 `session-liveness-l4SQh4/sock` **17h52m**；最新 4 分钟那个来自 **`ol-tok`**（heavy-op-
+   token 测试夹具），非 session-liveness 系列。⇒ **多个测试夹具共有的 teardown 缺失**，和 skv-ok 同族。
+2. **外层 08:48 措辞误导**：写「清理 10 个残留泄漏」——实际清的是 **/tmp 目录**（session-liveness-*
+   9 + enter-repro 1），**不是 tmux server 进程**（17h 老的进程 socket 目录被删但进程没被杀）。措辞
+   会被后续 tick 误当「已解决」。**管理者已补杀 12 个进程**（12+1→1，只剩默认 server），三会话存活。
+3. **管理者自我更正**：07:5x 的「先不动 9 个 session-liveness server」顾虑是多余的——观察者 2598198
+   的 environ **没有 TMUX_TMPDIR**，从不使用那些隔离 socket；那 9 个当时可安全清掉，保守间接让它们
+   活到了 ABORT #3。**记在管理者头上**。
+4. **判据形态确认**：套件尾部断言前缀扩展为 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`。
+
 ### 选定机制（外层裁定：立案，最高优先级测试卫生）
 
 1. **一整类，不只修一个文件**——测试起了外部进程/服务器却不在 teardown 里回收。
@@ -51,8 +63,8 @@ WAIT 转 GO，tmux server 从 217 降到 10。⇒ 这个泄漏是当前资源压
 
 ## Acceptance Criteria
 
-- [ ] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `enter-repro-` 前缀的 tmux
-      server 或 /tmp 目录残留（机械检查，一次覆盖全类）
+- [ ] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`
+      前缀的 tmux server 或 /tmp 目录残留（机械检查，一次覆盖全类）
 - [ ] AC2: **teardown 回收**——send-keys-verified.test.mjs（及同族）测试结束 kill 自己起的 server，
       带 TMUX_TMPDIR 校验、绝不用 tmux kill-server（第三次崩溃路径）
 - [ ] AC3: **残留清理**——8 个 session-liveness-* + 1 个 enter-repro 泄漏在判断后清除（先确认挂载
@@ -73,6 +85,7 @@ WAIT 转 GO，tmux server 从 217 降到 10。⇒ 这个泄漏是当前资源压
 ## Touches
 
 - plugin/test/send-keys-verified.test.mjs（teardown kill 自己起的 server，TMUX_TMPDIR 校验）
+- plugin/test/heavy-op-token*.test.mjs（ol-tok 泄漏源，同族 teardown）
 - plugin/test/session-liveness.test.mjs（同族 teardown）
 - plugin/scripts/（套件尾部泄漏断言：skv-/session-liveness-/enter-repro- 前缀扫描）
 - scripts/test.sh（套件尾部挂泄漏断言，若并入）
