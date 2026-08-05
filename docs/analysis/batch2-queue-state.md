@@ -2815,6 +2815,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **在飞 1**：closure-sync ①。槽位空 2 但 ② inner-anchor（依赖①落地）与 drive-text（loop-doc 与①重叠 +
   test.sh 已由 review-cadence 解除）都门控 ①。loop-doc 串行链：① → ② → drive-text。无停止条件、无阻塞。
 
+### tick 2026-08-05T02:5xZ（内层，`fan-in + dispatch`：closure-sync 落地 → 新契约生效 → 派②）
+
+- **closure-sync 已合并**（`2ce5f1b0`，rebase 后），telemetry bracket 过渡性关闭（该任务按旧纪律派发）。
+  8/8 AC 除 AC5（实跑证据待外层首个异步收尾）+ DoD 全量套件框未勾 → status 保留 ready（landed-not-flipped）。
+- **新契约生效（我此后遵守）**：fast-mode-loop-tick.md step 2 =「合并串行，不写任务状态」——inner
+  不翻 done、不写轮次记录、不写 --task-end；停止条件改读 `.quay/verification-round.jsonl` 最后一条
+  suiteGreen（缺失不阻塞、等下一 tick）。收尾由外层 20-min-cron 异步做（ready-pool-check
+  not-yet-flipped = taskWorkLanded，非 status:done）。
+- **派② `gap-inner-has-no-periodic-anchor-prose-only-drives-drift`**（ready，外层已晋级）→ 空槽，
+  telemetry --task-start 已开（fm-...-dwx4p4）。机制：外层 cron 转发固定重锚常量（一致性核对、
+  零派发措辞、防双调度源），出厂文档加状态自检清单。与 closure-async 一致（「偷偷收尾」检查现成立）。
+- **drive-text 门控不变**：② 落地后再派（loop-doc 与②重叠 + test.sh 已由 review-cadence 解除）。
+- **landed-not-flipped 集合（供外层收尾例程）**：roadmap、review-cadence、closure-sync 三条
+  （均 merged + AC 全勾，DoD 全量套件框待外层 verification-round gate）。
+- **在飞 1**：inner-anchor ②。无停止条件、无阻塞；loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
