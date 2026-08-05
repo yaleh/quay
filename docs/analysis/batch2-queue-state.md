@@ -4871,3 +4871,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （web-board/measure-claude-p/send-keys-nbsp/ready-pool-floor/axis-generator 全中招）。**hold 第 3 槽**——等
   defect-fix（在飞，taskWorkLanded 加 git-history 信号）land 后池自动排除，再派发更安全。在飞 2/3。
 - 停止条件无、套件 green、Monitor 三判据绿、无 block。
+
+### tick 2026-08-05T19:0xZ（内层 cron，空转核对）
+
+- 无 fan-in（defect-fix 0 提交 / session-idle 1 提交，均在飞工作中）、无派发（保守化 hold 第 3 槽）。
+- 停止条件无（pane busy=agent 工作）、套件 green、Monitor 三判据绿、load 3.97。
+- 待 defect-fix land（池自动排除 already-landed）后恢复第 3 槽派发。
