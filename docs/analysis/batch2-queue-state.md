@@ -4387,6 +4387,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   等 manager-baked 落地后 promote + 派。
 - **在飞 1/3**。套件 green。
 
+### tick 2026-08-05T16:5xZ（内层：遗传物质级拓扑修复落地 + outer-self-checks 派发）
+
+- **manager-baked 落地**（merge `19d4095c`）：ROLES='outer inner' 两窗口拓扑全面修正（factory/
+  skill/catalog/cold-start 7 个交付面 grep 0 three-window 残留）；manager 完全移出项目拓扑（人跨项目
+  启动）；topology-check 同步（不再判两窗口项目不合规）+ FIRST init bug 修复。**遗传物质级缺陷已修**。
+  scoped 9/9。
+- **顺带修 2 个预存 referenced-not-landed**：`SPEC-isolation-and-resource-governance`（gap-systemd-run-limits
+  引入）+ outer-self-checks 的 dispatch-review（strict-subset 契约）。
+- **outer-self-checks 已派**（telemetry `fm-...-s68m47`）：outer 冷启动第 3 步自检 inner 三态
+  （健康=不动/空壳=驱动/缺失=调 quay-topology 建两窗口 outer+inner，无 manager 窗口）。用新拓扑定义。
+- **在飞 1/3**。套件 green。
+
 ### tick 2026-08-05T14:2xZ（外层，AC12b 阻塞 2/4 落地）
 
 - **ghost-drive（阻塞 #1）已 merge**（ba3a4e87）：fresh-session detection（transcript-delivery-check --is-fresh）跳过清屏，非 fresh 保留 NBSP 路径，real fresh-session e2e rc=0。welcome 屏修复完成。
