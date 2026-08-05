@@ -3114,6 +3114,21 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **在飞 1**：nbsp-fix。套件 state=red+aborted（待 AC16 修复后外层重跑 M3 验证 + ROUND 3 gate）。
   loop-driver LIVE。
 
+### tick 2026-08-05T09:0xZ（内层，`fan-in complete`：NBSP 落地）
+
+- **NBSP 判空修复已合并**（rebase 后，5 files +237/-15），无 closure。7/7 AC 全勾 + DoD 全量套件框未勾
+  → landed-not-flipped。
+  - `pane_input_box_empty` 用 bash 参数展开剥掉 NBSP 双字节（c2 a0）再判 `[:space:]`——C locale 不含
+    NBSP 不再影响；真空输入框判空、clear 循环快速退出（不再 CLEAR_MAX=50 fail-loud）。Contract
+    measure = 5（≥1）。
+  - AC2 真 e2e：专用 tmux 夹具 pane 渲染 `❯`+两个 c2 a0，RELIABLE_CLEAR_MAX=2 驱动，transcript 送达；
+    **RED 证明**：临时回退修复 ⇒ 同一 e2e 以精确 fail-loud 失败。测试 21/21。
+  - AC5 确认 send-keys-verified.sh 无同款判空（只读，不改）；CRYSTALLIZED 加故障 8 段；reliable-send
+    任务交叉标注。AC6 诚实记账（post-friction 不计分，计数 6）。
+- **两处修复全部落地**：AC16 laneCount 传播（`8f6d0fc6`）+ NBSP 判空（本合并）。
+- **landed-not-flipped 集合追加**：nbsp-fix（reliable-send 家族）。无在飞。套件 state=red+aborted——
+  等外层重跑 M3 验证（AC16 修复后）与 ROUND 3 gate。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
