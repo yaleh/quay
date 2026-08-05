@@ -4143,3 +4143,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **archguard send-keys-reliable 已同步**（管理者执行，NBSP 5 处）✓
 - **但 watchdog 不会主动驱动 archguard**：11:50:51 判 archguard healthy (alive=1)——claude 2284029 活着 → watchdog 不 drive（drive 只在 relaunch 事件时）。archguard outer 停在欢迎界面（Try "write a test..."）。**「claude 活着」≠「循环在工作」——watchdog alive 判据不触发 drive，同步 send-keys 后仍不自恢复**。
 - **archguard 需手动驱动**（outer 冷启动文本）。archguard 是管理者范围，不越界驱动。已提示管理者：同步文件还不够，watchdog 不会主动驱动已活着但没在工作的 claude。
+
+### tick 2026-08-05T11:5xZ（外层，os-anchor 诚实收尾 + web-board merge）
+
+- **os-anchor AC 勾选（05e4e0c6）**：AC1/3/4/5/7 checked；**AC2 left unchecked**（re-spawn verified but drive gap——drive 缺陷已确认）；**task stays ready NOT flipped done**。inner 诚实收尾（与我们的 watchdog 三缺陷发现一致）。
+- **web-board merge（0950b0b6）**：/board route 用 REUSE-via-subprocess 接 intent/execution/landing，4/4 tests。web-board 任务（重派发后）完成。
+- inner 1 agent 在飞（serve-board scoped 测试 47m）。
