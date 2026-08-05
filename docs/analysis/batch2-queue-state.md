@@ -5161,3 +5161,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   quay 自身 ⇒ alive。**修了个真 perf bug**（naive 全 transcript 扫描 1.4GB/6956 文件超时 → mtime 预滤 +
   tail-500，<1s）。scoped 8/8。worktree/branch 已清。在飞 0/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T21:2xZ（内层 cron，red-window-stop 派发）
+
+- **red-window-dispatch-stop 派发**（`fm-...-mfgl24`，RED 处置条件化共享 gate）：git-log 双查真未落地
+  （3 hit 全 cross-ref），self-touch 已补，resolve 过（1/6 missing 可派）。改 fast-mode/orchestrator tick
+  步骤 3/1b 红窗条件化 + suite-state-trigger SUITE-RED 携带失败位置。**注意：tick 文档外层也在维护**——worktree
+  隔离 + merge 调和。
+- 池 11/12、disjoint 2（碰撞结构）。**l2 仍列 ready（信号残留**——merge 消息 "merge l2" 无匹配 kernel，
+  同 red-pattern/ghost-drive/leak class）。在飞 1/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
