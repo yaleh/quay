@@ -4799,3 +4799,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **stale-check 派发**（`fm-...-9xvjhu`）：git-log 双查真未落地，与 ready-pool-floor 互不相交（batch 判定）。
   self-touch 已补。
 - 在飞 2/3（ready-pool-floor + stale-check）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。
+
+### tick 2026-08-05T18:1xZ（内层，ready-pool-floor fan-in + taskWorkLanded 缺陷修复派发）
+
+- **ready-pool-floor fan-in 完成**：**第四次 already-landed 重派实证**（`be2037d1` floor=cap×4 + dispatchable_disjoint
+  + disjointness-ranked promotion 已落地；提交消息**不含任务 id** ⇒ git-log-by-id 漏检）。agent 复核 19/19 scoped、
+  backward-compat shape 保留、补 re-verification note（merge `313a21fb`）。worktree/branch 已清。
+- **系统性结论**：本会话 4 起 already-landed 重派（web-board/measure-claude-p/send-keys-nbsp/ready-pool-floor）
+  全部源于 taskWorkLanded 欠检测 + 提交消息不定名任务 id 的双重盲区。git-log 纪律有漏（id 不在消息里）。
+- **taskWorkLanded 缺陷修复已派**（`fm-...-utp61a`，todo→ready + DoD）：加第三条 landed 信号
+  （git-history of declared specific Touches），带 AC4 负控制（未派发 todo 不误判；overshoot 反向不重演）。
+  目标：ready-pool 排除 web-board/measure-claude-p，终止重派 class。
+- 在飞 2/3（stale-check + defect-fix）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。

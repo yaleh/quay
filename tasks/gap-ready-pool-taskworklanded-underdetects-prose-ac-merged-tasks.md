@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks
 title: "ready-pool notYetFlipped under-detects merged-not-flipped tasks whose AC is prose-heavy — web-board's work landed on master (0950b0b6) yet taskWorkLanded=false, so it stayed in the dispatchable pool and got a THIRD dispatch; fix: add a landed signal independent of AC symbol extraction (e.g. git-history of declared specific Touches), with negative controls"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -52,6 +52,13 @@ gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks）**�
 - [ ] AC3: ready-pool 排除 web-board（`not-yet-flipped`），三派风险消除
 - [ ] AC4: 负控制——一个从未派发的 todo 任务（Touches 具体路径被别的任务顺带改过）不判 landed；glob/`(new)` 触摸不参与 git-history 信号
 - [ ] AC5: 测试用 `node:test` + `// @test-group engine`（沿用 ready-pool-check 自身测试组）
+
+## Definition of Done
+
+- [ ] AC1–AC5 全部勾上；AC1/AC3 实跑输出贴任务体
+- [ ] 信号落地实跑：web-board 判 landed（排除）、upgrade-channel 仍 landed（回归）、未派发 todo 不判（负控制）
+- [ ] ready-pool 排除 web-board/measure-claude-p（此前三/四派的池污染消失）
+- [ ] 全量套件绿（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
 
 ## Touches
 
