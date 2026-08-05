@@ -2643,6 +2643,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **eighty-two 在飞**（capability-catalog worktree，agent 9m47s——填空槽，滚动派发验证）；batch-4
   2/3 合并。inProgress 1；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-05T01:07Z（外层，`no-action`：gap-ac3b 优先晋级派发）
+
+- **管理者优先级意见（成立）**：`gap-ac3b-prove-installed-quay-runs-without-dev-tree` 是管理者驱动
+  meta-cc 安装前的**唯一硬阻塞**（已安装物 `~/.local/share/quay-plugin` 仍是 08-03 23:03 旧快照；
+  init-ships 已确认结构性修复落地——LOOP_SCRIPTS 改 derive，monitor-mount-check/send-keys-verified
+  都被抓到）。裁定：优先晋级派发。
+- **已晋级 ready** + 修 touches 格式（括号注记在路径里导致 resolve 5/5 MISSING 不可派发 → 移出后
+  1/5 可派发）——**自修自晋的又一例**（类似 L0 早前格式 bug）。
+- **已驱动内层派发**：AC1 刷新（安全任何时候）先行，改名负控制 AC3/AC4 等安全窗口（在飞清空后）。
+  落地后管理者自行核实插件刷新（无需外层通知）。
+- inProgress 1（eighty-two）；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
