@@ -3904,3 +3904,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   恢复后修完 AC16、继续 NBSP 修复（任务文件已修改）。
 - **NBSP 任务**：内层开始处理（gap-send-keys-reliable-nbsp 文件被修改）。
 - 套件跑完（lane-1 预计较久）后收尾 ROUND 3（4 not-yet-flipped）。
+
+### tick 2026-08-05T08:40Z（外层，`unblock`：ROUND 3 双 RED 修复落地 + M3 验证套件重跑）
+
+- **ROUND 3 双 RED 修复落地（内层）**：AC16 laneCount 传播（8f6d0fc6，--lane-count 拼进 test.sh
+  command）+ NBSP 判空修复（17ad9126，21/21 e2e RED-proof，真实 TUI 夹具）。**ABORT #1/#2 根因全修。**
+- **M3 验证套件重跑**（bntu2rmod，--lane-count 1）：AC16 修复后真实传播，进程实证
+  `--test-concurrency=1`（last-flag-win）。lane-1 慢（约 15-20 分钟），测试在推进。
+- **管理者「前台等待时不做并行」裁定**：pool=26 ≥ floor=12，就绪池没空——OS-anchor/tmux-leak 作为
+  todo 留在队列是正确（pool 已够无需补晋）；内层等待时连续落地 AC16+NBSP+YAML 修复（非闲置）。
+  **不单独立案**；若未来 pool 长期 < floor 而等待时不补晋才是退化，届时再立案。
+- **管理者 OVERDUE 假警排除**：outer/inner transcript 都活着在写（heartbeat 冻结已知缺陷复发，不重立案）。
+- **内层**：Baked 13m 等 M3 验证套件结果；1 agent（nbsp-fix 已 fan-in）。
+- 套件结果出来后收尾 ROUND 3（4 not-yet-flipped）+ 关闭多个已落地任务。
