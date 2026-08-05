@@ -574,6 +574,100 @@ verify_referenced_landed() {
   return 0
 }
 
+# ensure_vendor_runtime — gap-vendor-runtime-not-in-git-clone-broken-mcp-entry (AC1/AC2).
+# The vendored runtime bundles (plugin/vendor/quay/dist/quay.js + plugin/vendor/quay-native/dist/
+# quay-native.js) are GENERATED artifacts — gitignored by the bare `dist/` rule (M172), so a fresh
+# plugin clone has NONE of them. Writing a provider config whose mcp_entry references a missing
+# runtime is the exact broken-MCP-entry defect: it blocks the whole Provider ABI / MCP (AC12b hard
+# blocker #2) and the pre-fix behavior WARNED and reported complete anyway ("判据存在但绕过了真正
+# 重要的东西"). Resolution (the manager-verified path 2): if the bundles are missing, AUTO-BUILD them
+# via the plugin's own sync-vendor.sh; only when the build cannot produce them, FAIL CLOSED (exit
+# non-zero, no `quay-init complete`) naming the missing bundles + the fix.
+# Returns 0 only when BOTH bundles are present (present to begin with, or auto-built); exits 2
+# otherwise. In --dry-run it prints what would happen and returns 0 so the dry-run listing continues.
+ensure_vendor_runtime() {
+  local missing=0
+  [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] || missing=1
+  [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ] || missing=1
+  [ "$missing" = 0 ] && return 0
+
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-ensure-vendor-runtime: plugin source lacks the built vendor runtime (gitignored dist/) — quay-init would auto-build via sync-vendor.sh or fail closed (AC1/AC2)" >&2
+    return 0
+  fi
+
+  echo "  vendor runtime missing from plugin source (gitignored dist/ — a fresh clone has no built bundles). Attempting auto-build via sync-vendor.sh (AC2, path 2) ..." >&2
+  local vlog
+  vlog="$(mktemp)"
+  if [ -f "$PLUGIN_ROOT/scripts/sync-vendor.sh" ] && bash "$PLUGIN_ROOT/scripts/sync-vendor.sh" >"$vlog" 2>&1; then
+    if [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ] && [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ]; then
+      rm -f "$vlog"
+      echo "  auto-built vendor runtime via sync-vendor.sh (AC2)" >&2
+      return 0
+    fi
+  fi
+  echo "ERROR: plugin source has no built vendor runtime and the auto-build did not produce one (gap-vendor-runtime-not-in-git-clone-broken-mcp-entry AC1)." >&2
+  echo "       The provider mcp_entry would reference a nonexistent runtime — the install FAILS CLOSED instead of shipping a broken MCP entry." >&2
+  echo "       Missing bundles:" >&2
+  echo "         - plugin/vendor/quay/dist/quay.js" >&2
+  echo "         - plugin/vendor/quay-native/dist/quay-native.js" >&2
+  echo "       Fix one of:" >&2
+  echo "         - run 'npm install' at the repo root (the postinstall runs sync-vendor.sh to build them), then re-run quay-init" >&2
+  echo "         - run 'bash plugin/scripts/sync-vendor.sh' manually to build + mirror the bundles" >&2
+  echo "         - install the plugin from the dist-plugin orphan branch, which TRACKS the built bundles" >&2
+  if [ -s "$vlog" ]; then
+    echo "       sync-vendor.sh output (last 15 lines):" >&2
+    tail -n 15 "$vlog" >&2
+  fi
+  rm -f "$vlog"
+  exit 2
+}
+
+# verify_provider_runtime_existence <workspace-root> — gap-vendor-runtime-not-in-git-clone-broken-
+# mcp-entry (AC3). verify_referenced_landed above checks the LANDING SET (every skill/tick-doc
+# referenced file is laid down), but NOT that the provider config's mcp_entry references a file that
+# ACTUALLY EXISTS in the target. This is the referenced-not-landed complement: it reads the generated
+# .quay/config.yml provider mcp_entry and asserts the referenced runtime file is present. Defense in
+# depth — AC1 (fail-closed) prevents writing a broken config in the first place; this second check
+# catches a config that already exists (or a lay-down regression) whose mcp_entry points at a missing
+# runtime. FAIL CLOSED (return 1) when the referenced file does not exist.
+verify_provider_runtime_existence() {
+  local ws="$1"
+  local cfg="$ws/.quay/config.yml"
+  if [ "$DRY_RUN" = true ]; then
+    echo "  verify-provider-runtime-existence: (dry-run, skipped)"
+    return 0
+  fi
+  if [ ! -f "$cfg" ]; then
+    echo "  verify-provider-runtime-existence: FAIL — no .quay/config.yml to verify" >&2
+    return 1
+  fi
+  local entry_file
+  entry_file="$(python3 - "$cfg" <<'PYEOF'
+import sys, yaml
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        d = yaml.safe_load(f) or {}
+    prov = (d.get("providers") or {}).get("native") or {}
+    mcp = prov.get("mcp_entry") or []
+    if isinstance(mcp, list) and len(mcp) >= 2:
+        print(mcp[1])
+except Exception:
+    pass
+PYEOF
+)"
+  if [ -z "$entry_file" ]; then
+    echo "  verify-provider-runtime-existence: OK (no mcp_entry path found in the provider config — nothing to verify)"
+    return 0
+  fi
+  if [ -f "$entry_file" ]; then
+    echo "  verify-provider-runtime-existence: OK ($entry_file exists)"
+    return 0
+  fi
+  echo "  FAIL (referenced-runtime-missing): the provider mcp_entry references $entry_file but it does not exist in the target" >&2
+  return 1
+}
+
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 
@@ -771,28 +865,23 @@ PYEOF
     write_session_env
   fi
 
-  # AC7b (gap-cold-start-...-eight-steps): lay down the runtime INTO the target. The target's loop
-  # must NOT depend on the quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/
-  # packages/quay-native/dist/). The built Core runtime (vendor/quay/dist/quay.js) AND the built
-  # native provider runtime (vendor/quay-native/dist/quay-native.js + provider.yml — the
-  # self-contained provider bundle, gap-ac3b-prove-installed-quay-runs-without-dev-tree) are copied
-  # into the target so the target's .quay/config.yml can point its provider mcp_entry at a
-  # PROJECT-LOCAL copy of the provider runtime (an absolute path into vendor/quay-native/, never a
-  # bare `quay-native` that PATH-resolves to a dev tree). The two laid-down files must stay together:
-  # the bundle resolves provider.yml relative to its own location. A plugin source without the built
-  # bundles (a raw checkout that hasn't run sync-vendor.sh) warns instead of failing — the runtimes
-  # are generated artifacts, not tracked sources.
-  if [ -f "$PLUGIN_ROOT/vendor/quay/dist/quay.js" ]; then
-    copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/vendor/quay/dist/quay.js" clean
-  else
-    echo "  WARN: plugin has no built Core runtime (vendor/quay/dist/quay.js) — skipping Core runtime lay-down (AC7b). Run sync-vendor.sh to build it." >&2
-  fi
-  if [ -f "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" ]; then
-    copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$WORKSPACE_ROOT/vendor/quay-native/dist/quay-native.js" clean
-    copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$WORKSPACE_ROOT/vendor/quay-native/provider.yml" clean
-  else
-    echo "  WARN: plugin has no built native provider runtime (vendor/quay-native/dist/quay-native.js) — the provider mcp_entry will reference a missing runtime (AC7b). Run sync-vendor.sh to build it." >&2
-  fi
+  # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry
+  # (AC1/AC2): lay the runtime INTO the target. The target's loop must NOT depend on the quay dev
+  # tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/). The
+  # built Core runtime (vendor/quay/dist/quay.js) AND the built native provider runtime
+  # (vendor/quay-native/dist/quay-native.js + provider.yml — the self-contained provider bundle,
+  # gap-ac3b-prove-installed-quay-runs-without-dev-tree) are copied into the target so the target's
+  # .quay/config.yml can point its provider mcp_entry at a PROJECT-LOCAL copy of the provider runtime
+  # (an absolute path into vendor/quay-native/, never a bare `quay-native` that PATH-resolves to a
+  # dev tree). The two laid-down files must stay together: the bundle resolves provider.yml relative
+  # to its own location. The runtimes are GENERATED artifacts (gitignored dist/ — M172), so a fresh
+  # plugin clone has none: ensure_vendor_runtime AUTO-BUILDS them via sync-vendor.sh (AC2) or FAILS
+  # CLOSED (AC1) — never a WARN-and-complete with a broken mcp_entry. After it returns, both bundles
+  # are guaranteed present, so the lay-down is unconditional.
+  ensure_vendor_runtime
+  copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/vendor/quay/dist/quay.js" clean
+  copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$WORKSPACE_ROOT/vendor/quay-native/dist/quay-native.js" clean
+  copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$WORKSPACE_ROOT/vendor/quay-native/provider.yml" clean
   write_provider_config
 
   # Upgrade-path state record (AC5): detect prior plugin version + already-laid assets.
@@ -820,6 +909,11 @@ PYEOF
   # mechanism that calls files it never laid down. Same executor as the AC6 check — every --loop run.
   if [ "$DRY_RUN" != true ]; then
     verify_referenced_landed "$WORKSPACE_ROOT" || exit 2
+    # AC3 (gap-vendor-runtime-not-in-git-clone-broken-mcp-entry): verify_referenced_landed checks
+    # the LANDING SET; this second check verifies the provider config's mcp_entry references a
+    # runtime that ACTUALLY EXISTS in the target — the referenced-not-landed complement. Defense in
+    # depth after AC1's fail-closed (a config that already exists still gets checked every run).
+    verify_provider_runtime_existence "$WORKSPACE_ROOT" || exit 2
   fi
 fi
 
