@@ -505,11 +505,24 @@ cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状�
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
 `--transcript` 从未进过任何生产调用，是死代码；现在 `ruling-required` 的主判据是**屏幕形状分类**。
-外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`：
+外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`。**通用化观测原语
+（`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer`）**：盯谁（`--target`）、
+几个连续采样（`--samples`）、检测到后做什么（`--action` / `--action-command`）都由调用方配置——
+内层/外层/管理者各是**一次调用**，不新写代码。`--target inner` 保持旧路径 `.quay/inner-blocked.json`；
+其它 target 写 `.quay/blocked-signals/<target>.json`。
+
+外层盯内层（主路径，显式 `--target inner`）：
 
 ```bash
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
-node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --target inner --pane .quay/last-pane.txt
+```
+
+管理者盯外层（AC5，一次配置调用——外层等裁定 ⇒ 报出，busy ⇒ 不报）：
+
+```bash
+tmux capture-pane -p -t "$OUTER_SESSION" > .quay/last-outer-pane.txt && \
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --target outer --pane .quay/last-outer-pane.txt
 ```
 
 `classifyPaneState` 只读**底部区域**（ADR-016 修订 boundary b——不做整屏哈希），连续 3 次
