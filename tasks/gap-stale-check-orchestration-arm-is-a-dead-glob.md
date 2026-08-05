@@ -47,13 +47,43 @@ orchestration 臂是一条死 glob**。**不是被硌出来的**（所有检查�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `strategic-doc-staleness-check.ts` orchestration 臂覆盖 `orchestration/*.md` 全量（或前缀
+- [x] AC1: `strategic-doc-staleness-check.ts` orchestration 臂覆盖 `orchestration/*.md` 全量（或前缀
       派生），不再硬编码 `*ROADMAP*`；43 个文档全被扫描
-- [ ] AC2: **死 glob 消除**——第二条臂从 0 匹配变全量（fixture：orchestration/ 下任一 SPEC-*/FINDING-*
+- [x] AC2: **死 glob 消除**——第二条臂从 0 匹配变全量（fixture：orchestration/ 下任一 SPEC-*/FINDING-*
       被扫描）
-- [ ] AC3: 现有 docs/proposals 臂不变（路线图仍覆盖）
-- [ ] AC4: **AC10 诚实记账**——本条 pre-friction（照问句主动问出），计入 AC10（管理者 1→3）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC3: 现有 docs/proposals 臂不变（路线图仍覆盖）
+- [x] AC4: **AC10 诚实记账**——本条 pre-friction（照问句主动问出），计入 AC10（管理者 1→3）
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+
+### 实跑证据（2026-08-05，worktree `gap-stale-check-orchestration-arm-is-a-dead-glob`）
+
+AC2/AC4 实跑输出：
+
+```text
+$ node --no-warnings --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts --root . --json
+{
+  "mode": "strategic-docs",
+  "scanned": 88,               # 44 docs/proposals + 44 orchestration（此前 44 = 44 + 0）
+  "stale_refs_found": 0,       # 无新增陈旧引用
+  "known_stale_docs": [ ... 6 docs/proposals + 3 orchestration: FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md, escalations.md, tick-log.md ... ],
+  "ok": true
+}
+```
+
+死 glob 消除（fixture）：`orchestration/SPEC-foo.md` 含 `prepare-milestone.js` 过期引用 ⇒ 退出码 1 被检出
+（`plugin/test/strategic-doc-staleness-check.test.mjs` 的 AC2 用例）。
+
+AC4 记账：`tasks/gap-axis-generator-question-what-range-every-standing-criterion.md` 已加
+`gap-stale-check-orchestration-arm-is-a-dead-glob` cross-mark（count-3 pre-friction "dead-glob"，照问句
+问出；镜像既有 gate-scripts-dead cross-mark，仅记账引用）。
+
+范围化验证（scoped，exit 0）：
+
+```text
+$ bash scripts/test.sh --for-task gap-stale-check-orchestration-arm-is-a-dead-glob --allow-thin
+scoped static checks: test-framework-policy PASS; test-isolation PASS; task-contract-check: no violations
+ℹ tests 10  ℹ pass 10  ℹ fail 0  ℹ cancelled 0  (exit 0)
+```
 
 ## Definition of Done
 
