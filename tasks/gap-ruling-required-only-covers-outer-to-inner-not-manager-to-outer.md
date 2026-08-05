@@ -6,7 +6,7 @@ title: "'who-is-waiting' mechanism covers only outer→inner, no observation of
   (ruling-required done = built one direction only); fix: reuse
   classifyPaneState + consecutive-sample observer with direction reversed
   (manager watches outer), not new invention"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -59,7 +59,17 @@ inner pane。
 - [ ] AC5: manager 盯 outer 配置一次调用（实测：outer 等裁定 ⇒ 报出；busy ⇒ 不报）
 - [ ] AC6: 与 ruling-required-trigger + ADR-016 + 自适应并发（机制一次下游复用）交叉标注
 
+## Definition of Done
+
+- [ ] AC1–AC6 全部勾上；AC1/AC2/AC5 实跑输出贴任务体
+- [ ] 通用化原语实跑：--target outer/manager 各输出命名空间正确（.quay/blocked-signals/<target>.json）；--target inner 兼容旧路径 inner-blocked.json（负控制）
+- [ ] manager 盯 outer 配置一次调用实跑（outer 等裁定 ⇒ 报出；busy ⇒ 不报，负控制）
+- [ ] classifyPaneState 封闭枚举 grep 证明未开放（ENUMERATED_STATES 不变，ADR-016）
+- [ ] 全量套件绿（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+
 ## Touches
+
+- tasks/gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/inner-blocked-signal.ts（--target/--samples 参数化 + 动作回调）
 - plugin/scripts/pane-state-classify.ts（不动，仅确认封闭枚举）
