@@ -2608,6 +2608,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （改 @test-group header）与 load-sensitive（AC2 并发跑）在飞。
 - inProgress 2（init-ships + load-sensitive）；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-05T00:47Z（外层，`no-action`：CLI 配置调研立案）
+
+- **读调研全文并裁定**（`RESEARCH-claude-code-cli-config-2026-08-05.md`，人要求全面调查）：
+  - **立案 1 个合并任务** `gap-crystallize-launch-config-into-checked-in-settings-file`（todo）：当前
+    tmux 模式适用的 3 项高相关——`--exclude-dynamic-system-prompt-sections`（并发 worktree 子代理
+    prompt cache 复用，今晚最重成本点）+ `-n/--name`（会话身份）+ `--settings` 文件（防「启动命令
+    打错」= restart-plan AC1 的错）+ `--bare`（一次性验证会话安全）+ ghost 的 `--prompt-suggestions
+    false`——合并成一个检查进仓库的 settings 文件，启动规范从「手打一行」变「引用文件」。
+  - **-p 条件性 3 项延后**（replay-user-messages / max-budget-usd / forward-subagent-text）：标注为
+    -p 迁移决定后改写（结晶算法原生版 + 计费对冲 + 子代理转发），不现在实现。
+  - **未文档化内部 env var 明确不碰**（无官方背书，不进产品）。
+  - 中等项 `--effort`/`--tmux` 记备注不立案（--tmux 需先查 quay-worktrees 兼容）。
+- inProgress 2（init-ships + load-sensitive）；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
