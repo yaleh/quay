@@ -4205,6 +4205,30 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **fan-in 暴露 + 修复预存潜失效**：merge 后 scoped 检查 AC1/AC1b 红——**部署的 tick doc 副本（`orchestration/orchestrator-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`，外层 2026-08-05 部署）位于 old paths**，触发了「old path must NOT remain」。两处修复：① 部署副本加入排除表（target-layout 类）；② **AC1 豁免 2 个 tick-doc old path 上的真实文件（只拒 symlink shim）**——语义保持「无 compat shell」，允许合法部署副本。**40/40 EXIT=0**。
 - **在飞 1/3**：resource-aware（刚派，未完成）。套件 green。
 
+### tick 2026-08-05T12:5xZ（内层：resource-aware fail/超时 + 补派 3）
+
+- **resource-aware fail/超时（外层裁定）**：scoped 死锁（25min 超时、嵌套真实 test.sh 40+ 文件 coverage、PSI 80+）。agent 首轮 42/42 过、第二轮死锁 → 已停。**不重跑全 scoped**。**seam 调查**：`RESOURCE_GATE_TEST_CPU_AVG10` 存在且 `resource-gate.test.mjs` + `full-suite-runner.test.mjs` 都用对（WAIT/GO seam 强制确定性）；死锁**不是 seam 没生效**——是选中集同跑两者、嵌套 test.sh 推高 PSI，gate 的非 CPU 检查（mem/node_procs/orphans）读真实值触 WAIT。**建议**：gate 测试全量密封或调选中集。任务标 needs-human，worktree 保留（agent source-pin 测试价值保留）。
+- **补派 3**（两两 disjoint，self-touch 已补）：axis-generator / tmux-session-topology / two-thirds-polling。
+- **在飞 3/3**。套件 green。
+
+### tick 2026-08-05T13:0xZ（内层：two-thirds-polling 落地）
+
+- **two-thirds-polling 落地**（merge `c19ca3f4`，doc-only）：`fast-mode-loop-tick.md` 派发形态改为显式
+  `Agent(run_in_background: true)`（实测：live inner 会话 11 次 Agent 派发全部缺 run_in_background =
+  foreground；6a950975 19 次全 true）+ DoD 负控制段（连跑 2 次全绿不放松，--for-task 仅迭代期）。
+  Contract band `dod_full_runs` 0→1。**AC3/AC5 诚实未勾**（doc-only 无法测历史全量/未来会话间隔）。
+  scoped EXIT=0。
+- **在飞 2/3**：axis-generator + tmux-topology。resource-aware worktree 保留（needs-human）。套件 green。
+
+### tick 2026-08-05T13:2xZ（内层：axis-generator 落地）
+
+- **axis-generator 落地**（merge `a09f8fe3`）：`plugin/scripts/axis-generator.ts`（机械枚举 28 条 standing
+  criterion，逐轴判定 + unopened_axes + finding；live 实测 **28/28 每条至少有一个未开轴**）+ 
+  `prefriction-count.sh`（可证伪 pre-friction 计数，24h 窗口实测 0）+ `axis-generator.test.mjs`
+  （10/10，含 5 反向派生回归 + 4 负 fixture + generator_is_question 不变量）。AC4 标注加进 2 个
+  投影任务体（time 轴 point-in-time / scope 轴 quantified-stop）。scoped 10/10 EXIT=0。
+- **在飞 1/3**：tmux-topology。套件 green。
+
 ### tick 2026-08-05T12:3xZ（外层，AC12 拆分 + archguard 污染更正）
 
 - **AC12 拆分（管理者，决定性事实 plugin/loop/ 无 manager）**：AC12a 三层（人不干预 manager，管理者驱动 outer）测【手工监工，不随包走】；AC12b 两层（人与管理者都不干预 outer，只准输一条 /quay:cold-start）测【产品本身，采用者真实体验】。AC12b 才是真实数字，当前 0 且从未干净测过。
@@ -4228,3 +4252,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **管理者报告可能的自指死锁，外层核实 + 中止**：`--for-task gap-no-resource-awareness` scoped 套件跑了 11-25 分钟（远超秒级把关），主进程 CPU 0.0% + sleep 5 循环。核实：sleep 5 是 full-suite-runner.test.mjs 的 fake suite 结构（非死锁循环本身）；**真正的异常是嵌套套件**——2460796（--for-task 选中集 4 文件）内部 spawn 了 2529066（node --test --experimental-test-coverage 跑几十文件，覆盖 resource-aware worktree）。资源门测试制造 =8 负载 → PSI 80+ → 可能等 WAIT 解除。
 - **裁定：中止**（符合管理者「无论死锁还是太慢都值得中止单独查」）。已 kill scoped 套件树。inner subagent 仍在等（不知套件被杀，会超时）。
 - **方法论观察确认**：资源感知任务的测试在真机跑 =8 制造它要测的负载——「测试即扰动」，测的手段污染测的量。resource-gate.test.mjs 有 seam（RESOURCE_GATE_TEST_CPU_AVG10）但 --for-task 路径可能没走 seam。
+
+### tick 2026-08-05T13:3xZ（外层，B 机实验 + 优先级）
+
+- **实验扩到 B 机（orangevps，管理者）**：SSH 通（同用户 yale）、nproc 4（干净对照组）、几乎空载、工具全齐、A 机裸仓库 3326 提交到位（未碰 GitHub）。
+- **副产品更正**：B 机干净 clone 跑通 ready-pool-check（pool 22/floor 12/criterion_met true）+ resource-gate（GO）⇒ **quay 仓库自身 committed 态自洽**。archguard 12:36 报的 broken committed 态属 quay-init 铺设形态（不 commit），**非 quay 仓库问题**。gap-quay-init-never-commits 任务应收紧表述。
+- **AC12b 阻塞**：B 机是唯一干净测量场，但 fresh-session 分支命中 0（welcome 屏缺陷原封不动），cold-start INNER-DRIVEN 用它驱动内层 ⇒ 现在测第一个数字必是「卡在 INNER-DRIVEN」。**welcome-屏修复排最前**（产品主判据唯一硬阻塞）。
+- **同步走 git 不走手工 cp**：B 机从 A 机裸仓库 git pull（升级通道正确形态，对照 archguard 手工 cp 污染）。
