@@ -80,14 +80,20 @@ fi
 # targeted shape check, never a whole-screen equality/hash.
 pane_input_box_empty() {
   local pane_text="$1"
-  local input_line after
+  local input_line after nbsp
   input_line=$(printf '%s\n' "$pane_text" | grep '❯' | tail -n 1)
   [ -z "$input_line" ] && return 1   # no prompt line → cannot confirm empty → keep clearing
   after="${input_line#*❯}"
   # strip ANSI CSI sequences (capture-pane -p keeps color escapes; the typed text is plain)
   after=$(printf '%s' "$after" | sed -E $'s/\x1B\[[0-9;]*[A-Za-z]//g')
+  # NBSP (U+00A0, bytes c2 a0): bash's [:space:] in the C locale does NOT include NBSP, so an EMPTY
+  # Claude Code input box (whose prompt is ❯ + c2 a0 c2 a0) would otherwise be judged non-empty and
+  # the clear loop would run all CLEAR_MAX=50 then fail loud. Strip the exact two-byte NBSP sequence
+  # explicitly; do NOT rely on [:space:] locale behavior.
+  nbsp=$'\302\240'
+  after="${after//$nbsp/}"
   case "$after" in
-    *[![:space:]]*) return 1 ;;   # non-whitespace still present → not empty
+    *[![:space:]]*) return 1 ;;   # non-whitespace (anything other than NBSP/spaces) → not empty
     *) return 0 ;;
   esac
 }

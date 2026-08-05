@@ -156,3 +156,14 @@ at: 2026-08-05T07:40Z
 changed: done→ready——第六种送达失败模式（fresh welcome 屏 placeholder）未覆盖。AC9/AC10/AC11/AC12
   新增；结晶文档故障 7 段 + 算法步骤 0 分支已补。AC10 记账：post-friction（被 archguard 实证撞出），
   不计分。
+
+## Cross-annotation 2026-08-05 — NBSP 判空缺陷（姊妹任务，已 ready/执行）
+
+`gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box`（2026-08-05 执行）修复了判空的
+**NBSP 误判**：bash `[:space:]` 在 C locale 不含 NBSP（U+00A0，字节 c2 a0），真空输入框（`❯` 后仅 NBSP）
+被永远判「非空」⇒ clear 循环跑满 CLEAR_MAX=50 后 fail-loud。这是对**任何**输入框都生效的根因缺陷，也是
+本任务故障 7（welcome 屏 placeholder）的放大版——结晶文档已补「故障 8」段。修复：判空显式剥离 NBSP
+（`nbsp=$'\302\240'; after="${after//$nbsp/}"`）+ 真端到端测试（fixture 渲染 `❯`+NBSP 的 tmux pane、
+`RELIABLE_CLEAR_MAX=2` 证明 clear 快速退出、transcript 核实送达）。**本任务的 AC9（fresh-session 分支）
+与 AC10（终止条件修正）仍独立待执行；NBSP 修复不替代它们**——fresh-session 分支是「跳过清屏直接发」，
+NBSP 修复是「已用会话的清屏判空正确」，二者正交。

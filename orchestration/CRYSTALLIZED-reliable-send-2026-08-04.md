@@ -99,6 +99,28 @@ error?"` 的灰色占位提示），clear 循环跑满 N=50 上限后 fail loud 
 当成一个已知分支，**跳过清屏直接发**——后者更简单且正好覆盖冷启动场景。修法实现归内层
 （`gap-reliable-send-crystallize-the-five-failure-modes-into-a-script` 或 re-open）。
 
+## 故障 8：判空把 NBSP 当非空白——【任何】输入框的空盒判定都坏（不只是 welcome 屏）
+
+**证据（2026-08-05，archguard 报 + 管理者独立验证扩大范围）**：**任何** Claude Code 输入框空闲时
+`❯` 之后的字节是 `c2 a0`（NBSP U+00A0），而脚本判空用 `case ... in *[![:space:]]*)`——bash 的
+`[:space:]` 在 **C locale 下不含 NBSP** ⇒ NBSP 被当非空白 ⇒ **永远判「非空」** ⇒ clear 循环必然跑满
+CLEAR_MAX=50 后 fail loud（脚本第 109 行）。逐字节验证：quay-0:outer 与 meta-cc-3:outer 两个【真正空的】
+输入框，`❯` 后全部字节就是 `c2 a0`，脚本判「非空」；外层当场复现（对真空输入框输出「输入框在 50 次 C-u
+后仍未清空——fail loud」）。
+
+**与故障 7 的关系**：故障 7 是「welcome 屏 placeholder 清不掉」；故障 8 是「判空把 NBSP 当非空白」——
+后者**对任何输入框都生效**，是故障 7 的放大版根因（即使没有 placeholder，空盒也判不空）。**三个消费者
+（quay/meta-cc/archguard）全部静默绕过本脚本**（改用手动序列 `send-keys -l` → sleep → Enter），所以坏了
+数小时无人报。既有测试全绿正是因为它们只覆盖用法错误 + transcript 纯函数，**从不起带真实提示符的 tmux
+pane**——clear 循环对真实 TUI 的行为恰是唯一坏掉的部分（命中 CLAUDE.md 测试分层判据：用户面契约需 ≥1
+真实 e2e）。
+
+**修法（实现：`gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box`）**：判空显式剥离
+NBSP——bash 参数展开 `nbsp=$'\302\240'; after="${after//$nbsp/}"` 精确删掉两字节 NBSP 序列后再走
+`[:space:]` 判空，**不依赖 locale 行为**。真空输入框（`❯` + `c2 a0`）立即判空，clear 循环不再跑满
+CLEAR_MAX。配套真端到端测试：起一个渲染 `❯`+NBSP 提示符的夹具 tmux pane，驱动一次、transcript 核实
+送达，并用 `RELIABLE_CLEAR_MAX=2` 证明 clear 循环快速退出（回归则 fail-loud，RED 已证）。
+
 ## 算法（交给外层判断具体实现位置——新脚本，或重写 `send-keys-verified.sh`）
 
 ```

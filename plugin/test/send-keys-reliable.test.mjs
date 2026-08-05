@@ -9,10 +9,18 @@
 // transcript fragment + sent text it answers whether a REAL user message whose content matches
 // the sent text appeared. This test exercises that pure function and the CLI contract ONLY.
 //
-// outer ruling R3 (the kill-server family crashed two machines): this test NEVER creates or
-// cleans up terminal sessions/windows, and never invokes tmux. Everything is a string fixture
-// (pure function) or a temp .jsonl file (CLI). No tmux server, no pty, no fake TUI (ruling E
-// pattern — the dangerous test surface is structurally absent).
+// outer ruling R3 (the kill-server family crashed two machines): the PURE-function tests below
+// NEVER create or clean up terminal sessions/windows, and never invoke tmux. Everything is a
+// string fixture (pure function) or a temp .jsonl file (CLI). No tmux server, no pty, no fake TUI
+// (ruling E pattern — the dangerous test surface is structurally absent for the pure part).
+//
+// AC2 CARVE-OUT (gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box): the ONE
+// e2e test at the bottom DOES spawn a dedicated tmux fixture session — the NBSP-empty-input-box
+// defect lives ONLY in the clear loop's behavior on a real TUI, which no string fixture can reach,
+// and this is a user-facing contract (CLAUDE.md test-layer strategy item 1: ≥1 REAL e2e check
+// against the shipped artifact). The carve-out owns EXACTLY ONE session with a per-run-unique name
+// and cleans it up with a scoped `tmux kill-session -t <unique>` — never kill-server, never a
+// shared/attached session, never the loop's own sessions.
 //
 // AC4 pure function, imported directly · AC5 negative controls (absent message ⇒ not delivered;
 // present-but-mismatched ⇒ not delivered) · AC7 zero hash (script + test contain zero
@@ -239,6 +247,90 @@ test("AC7: script and test contain zero occurrences of the three hash-tool names
     }
   }
   assert.equal(total, 0, `forbidden hash-tool names appear ${total} time(s) across script+test`);
+});
+
+// ── AC2: REAL end-to-end — the clear loop on a REAL TUI (NBSP prompt) ─────────────────────────────
+// The pure-function tests above never spawn a pane, yet the ONLY broken part of the script was the
+// clear loop's behavior on a REAL TUI: an EMPTY Claude Code input box renders as `❯` + NBSP
+// (U+00A0, bytes c2 a0), and the old `[:space:]` check judged it non-empty → the clear loop ran all
+// CLEAR_MAX=50 then failed loud. This is a user-facing contract (CLAUDE.md test-layer strategy
+// item 1: ≥1 REAL end-to-end check against the shipped artifact). The carve-out owns exactly one
+// dedicated fixture session (unique name), drives it once, and cleans up with a scoped
+// `tmux kill-session -t <unique>` — never kill-server, never a shared session. If tmux is
+// unavailable the test skips cleanly.
+
+/** Unique-per-run tmux session / tmp names (the AC2 carve-out owns exactly one session). */
+function uniqueName(prefix) {
+  return `${prefix}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** The fixture's prompt bytes: ❯ (U+276F, UTF-8 E2 9D AF) + two NBSP (U+00A0, UTF-8 C2 A0) — the
+ * exact bytes of an EMPTY Claude Code input box after the `❯` (bash octal escapes, passed through
+ * the fixture's `printf` format string). */
+const FIXTURE_PROMPT = "\\342\\235\\257\\302\\240\\302\\240";
+
+/** A tiny "TUI" for the e2e: renders the NBSP prompt, and on every submitted line appends a REAL
+ * user JSONL record to the transcript (the receiver committing the typed text). */
+function fixtureScriptSrc(transcriptPath) {
+  return `#!/usr/bin/env bash
+TRANSCRIPT="${transcriptPath}"
+printf '${FIXTURE_PROMPT}'
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '{"type":"user","message":{"role":"user","content":"%s"}}\\n' "$line" >> "$TRANSCRIPT"
+  printf '${FIXTURE_PROMPT}'
+done
+`;
+}
+
+test("AC2 e2e: NBSP-prompt fixture pane is judged EMPTY — clear loop exits fast (CLEAR_MAX=2), text delivered via transcript", { timeout: 90000 }, async (t) => {
+  const tmuxV = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (tmuxV.error || tmuxV.status !== 0) {
+    t.skip("tmux not available — skipping the real-TUI e2e");
+    return;
+  }
+  const session = uniqueName("skr-e2e");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skr-e2e-"));
+  const fixture = path.join(tmp, "fixture.sh");
+  const transcript = path.join(tmp, "transcript.jsonl");
+  fs.writeFileSync(fixture, fixtureScriptSrc(transcript), "utf8");
+  fs.writeFileSync(transcript, "", "utf8");
+  const marker = `skr-e2e-marker-${process.pid}`;
+  let result = null;
+  let cap = null;
+  try {
+    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
+
+    // Wait (bounded) for the fixture pane to render the NBSP prompt.
+    let ready = false;
+    for (let i = 0; i < 100 && !ready; i++) {
+      cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      if (cap.status === 0 && cap.stdout.includes("❯")) ready = true;
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(ready, `fixture pane should render the ❯ prompt (capture: ${cap?.stdout ?? ""})`);
+
+    result = spawnSync("bash", [SCRIPT, session, marker, transcript], {
+      encoding: "utf8",
+      timeout: 90000,
+      env: {
+        ...process.env,
+        RELIABLE_CLEAR_MAX: "2",          // if the NBSP empty-check regresses, the clear loop exhausts at 2 and fails loud
+        RELIABLE_STABLE_TIMEOUT_S: "3",
+        RELIABLE_DELIVERY_FIRST_S: "3",
+        RELIABLE_DELIVERY_VERIFY_S: "15",
+        RELIABLE_DELIVERY_POLL_S: "1",
+      },
+    });
+    assert.equal(result.status, 0, `send-keys-reliable.sh failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /已送达/, `script should report delivery:\n${result.stdout}`);
+    const transcriptText = fs.readFileSync(transcript, "utf8");
+    assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
+  } finally {
+    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
 });
 
 } // end governance self-skip else
