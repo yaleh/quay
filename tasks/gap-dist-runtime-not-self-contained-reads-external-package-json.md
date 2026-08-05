@@ -6,7 +6,7 @@ title: "dist runtime 'self-contained' claim false — version.ts reads
   3-layer gap all passed by verify (package.json in neither lay-down set nor
   referenced); fix: inline version at build time (option ②) + fix sync-vendor
   claim; AC12b blocker ② extension"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -35,18 +35,16 @@ self-contained (no npm install needed)」——但产物不自包含，有未声
 都已落地，两条都 OK——因为 package.json 既不在铺设集也不被任何 SKILL.md 引用，**判据看不见它**。
 与 vendor 运行时被 WARN 放过同一族：判据覆盖「声明过的东西」，漏的恰是「没人声明所以没人检查」。
 
-**修法（管理者建议，外层倾向②）**：
-- ① sync-vendor 写 package.json 算产物一部分，quay-init 铺设映射补 vendor/<pkg>/package.json；
+**修法（管理者建议，外层裁定选②）**：
 - ② **version.ts 不在 __init 读外部文件，构建时内联版本号进 bundle**——真正的自包含，对得起
-  sync-vendor 那句完成语。外层倾向②。
-- ③ 无论选哪条，sync-vendor 那句「fully self-contained」修好前应改掉（会误导下一个人）。
+  sync-vendor 那句完成语。
+- ③ sync-vendor 那句「fully self-contained」修好前应改掉（会误导下一个人）。
 
 ### 选定机制
 
 1. version.ts 版本号构建时内联进 bundle（build-dist 注入），不在 __init readFileSync 外部文件
-2. 或：quay-init 铺设映射补 vendor/<pkg>/package.json（若保留运行时读文件）
-3. sync-vendor 完成语修正（修好前不声称自包含）
-4. 验证：B 机路径二安装后，node vendor/quay/dist/quay.js task list 正常（无 ENOENT）
+2. sync-vendor 完成语修正（修好前不声称自包含）
+3. 验证：B 机路径二安装后，node vendor/quay/dist/quay.js task list 正常（无 ENOENT）
 
 ## Acceptance Criteria
 
@@ -55,6 +53,14 @@ self-contained (no npm install needed)」——但产物不自包含，有未声
 - [ ] AC3: sync-vendor 完成语修正（修好前不声称 fully self-contained，或改为准确的描述）
 - [ ] AC4: B 机路径二验证：安装后 task list 无 ENOENT（实跑输出贴任务体）
 - [ ] AC5: 与 gap-vendor-runtime-not-in-git-clone-broken-mcp-entry 交叉标注（AC12b 阻塞②延伸）
+
+## Definition of Done
+
+- [ ] AC1–AC5 全部勾上
+- [ ] version.ts 不在 __init 读外部 package.json（构建时内联版本号），node vendor/quay/dist/quay.js --version 返回 0.3.13（实跑输出贴任务体）
+- [ ] B 机路径二验证：fresh 安装后 task list 无 ENOENT（实跑输出贴任务体）
+- [ ] sync-vendor 完成语已修正（不声称 fully self-contained）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
@@ -68,6 +74,7 @@ self-contained (no npm install needed)」——但产物不自包含，有未声
 
 measure   dist_no_external_read = `node --no-warnings vendor/quay/dist/quay.js --version 2>&1 | grep -c 'ENOENT\|Error'` stdout 数字段（fresh 安装后）
 band      dist_no_external_read = 0（无 ENOENT/Error）
+invariant version_inlined_at_build = 1（版本号构建时内联，运行时零外部文件读）
 invoke    `grep -n 'package.json\|readFileSync\|self-contained' plugin/scripts/sync-vendor.sh packages/quay/src/version.ts`
 control   当前形态（读外部 package.json）⇒ fresh 安装 ENOENT（AC1 负控制）；修后 ⇒ 无 ENOENT
 resume    version 内联与 sync-vendor 完成语分步提交，任一步完成即写盘

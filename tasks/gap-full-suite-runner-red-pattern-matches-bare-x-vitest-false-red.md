@@ -5,7 +5,7 @@ title: "full-suite-runner FAILURE_PATTERNS matches bare ✖ glyph — vitest con
   test logs '✖ Diagram test failed' → suite green but stop-dispatch wrongly on;
   vitest 0 failed/exit 0); quay won't self-hit (node:test ✖ is structured),
   downstream verified fix; adopt structured matching + --maxWorkers doc split"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -29,8 +29,8 @@ console.error 里打了 `✖ Diagram test failed...`，导致 runner 触发 earl
 
 **为什么重要**：(a) 它是【假红】——与 aborted-no-failure reason 轴同一根轴的另一源头（判红的模式
 本身会误伤）；(b) quay 自己跑 node:test，裸 ✖ 恰好是结构化失败字形，所以【quay 不会自己撞到这个
-bug】——只在 vitest 项目暴露（上游看不见自己的缺陷，环境恰好掩盖它）；(c) archguard 已验证修复方向，
-quay 直接采纳即可。
+bug】——只在 vitest 项目暴露（上游看不见自己的缺陷，环境恰好掩盖它）；(c) archguard TASK-67 已验证
+修复方向（13:52 确认：修复后结构化判红生效，抓到 3 文件 6 真失败，假阳性不复发），quay 直接采纳即可。
 
 **修复（archguard TASK-67 已验证，直接采纳）**：改匹配结构化形态（`❯ <file> (N tests | M failed)`
 与 `Test Files ... failed`），不再匹配裸 ✖，保留 node:test/TAP 模式（`not ok`、`# fail 1+`、
@@ -54,6 +54,14 @@ quay 直接采纳即可。
 - [ ] AC3: 文档修正 vitest --maxWorkers（分叉写清，不指导 --test-concurrency）
 - [ ] AC4: 与 archguard TASK-67 交叉标注（下游验证过，直接采纳）
 
+## Definition of Done
+
+- [ ] AC1–AC4 全部勾上
+- [ ] vitest 假红负控制：通过测试打 `✖` console ⇒ 不 early-red（实跑输出贴任务体）
+- [ ] node:test 真失败（not ok / # fail）⇒ 仍 red（实跑输出贴任务体，不回归）
+- [ ] 文档已修正 vitest --maxWorkers 分叉
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts（FAILURE_PATTERNS 改结构化匹配）
@@ -65,6 +73,7 @@ quay 直接采纳即可。
 
 measure   false_red = `node --test plugin/test/full-suite-runner.test.mjs 2>&1 | grep -c '✖'` stdout 数字段（vitest 假红负控制测试）
 band      false_red = 0（裸 ✖ 不再触发 red）
+invariant structured_failure_matching = 1（判红匹配结构化形态，非裸字形）
 invoke    `grep -n 'FAILURE_PATTERNS\|✖' plugin/scripts/full-suite-runner.ts`
 control   vitest 负控制打 ✖ console ⇒ 不 early-red（AC1）；node:test 真失败 ⇒ red（AC2）
 resume    判红模式与文档分叉分步提交，任一步完成即写盘

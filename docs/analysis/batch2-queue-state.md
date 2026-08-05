@@ -4229,6 +4229,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   投影任务体（time 轴 point-in-time / scope 轴 quantified-stop）。scoped 10/10 EXIT=0。
 - **在飞 1/3**：tmux-topology。套件 green。
 
+### tick 2026-08-05T13:3xZ（内层：tmux-topology 落地 + 3 处跨 merge 缺口修复）
+
+- **tmux-topology 落地**（merge `b0849448`）：session-topology 工厂（`plugin/skills/session-topology/SKILL.md` 定义 + `quay-topology.sh` 构建 + `topology-check.sh` 验证 + 8 用例测试）。meta-cc-3/archguard-4 单窗口无 claude 的失效形态现可机械检查。scoped 58/58。
+- **fan-in 暴露 3 处跨 merge 缺口（已修）**：
+  ① axis-generator merge 漏给 `axis-generator.ts`/`prefriction-count.sh` 加 capability-catalog 问题 → 补 2 条；
+  ② two-thirds-polling merge 在 fast-mode-loop-tick.md 引 `orchestration/SPEC-cut-the-waiting.md` 但未声明 reference-doc → 补 init/SKILL.md 机器可读声明（+ 人类表）；
+  ③ **预存 AC1b 红**：`docs/analysis/batch2-queue-state.md` 引部署 tick-doc 路径但不在排除表 → 补入（否则全量套件 AC1b 会红）。
+- **在飞 1/3**：gate-scripts。套件 green。
+
+### tick 2026-08-05T14:0xZ（内层：gate-scripts 落地）
+
+- **gate-scripts 落地**（merge `92c6b16b`）：14 个 `plugin/gate-scripts/` 副本确认死门（零非安装器活调用方），
+  `--gate-scripts` 类别从 quay-init/sync.sh 退役（分层退役，send-keys-verified 先例；文件留树不铺不 sync）。
+  mutation 层自然清空（无 gate 可接），it0-split-or-commit 仍被 mutation 覆盖。新增
+  `gate-scripts-retirement.test.mjs` 5 用例。scoped 50/50 EXIT=0。
+- **在飞 0/3**。resource-aware worktree 保留。套件 green。
+
 ### tick 2026-08-05T12:3xZ（外层，AC12 拆分 + archguard 污染更正）
 
 - **AC12 拆分（管理者，决定性事实 plugin/loop/ 无 manager）**：AC12a 三层（人不干预 manager，管理者驱动 outer）测【手工监工，不随包走】；AC12b 两层（人与管理者都不干预 outer，只准输一条 /quay:cold-start）测【产品本身，采用者真实体验】。AC12b 才是真实数字，当前 0 且从未干净测过。
@@ -4276,3 +4293,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **full-suite-runner 判红模式误伤 vitest（archguard TASK-67，下游修好上游未修）**：FAILURE_PATTERNS 裸 `/✖/`（93 行），vitest 项目 console 打 ✖ 触发 early-red（通过测试负控制打 `✖ Diagram test failed`）。quay 自己跑 node:test 不会撞到（✖ 是结构化字形），只在 vitest 暴露。建任务 gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red（采纳 archguard 结构化匹配修复 + --maxWorkers 文档分叉）。
 - **archguard 全量绿**（4902 passed/0 failed/exit 0，第一轮自主全量验证）。AC12a 94 分钟。
 - AC12b 两阻塞均未动（welcome-屏 ready、vendor package.json 未进铺设映射）。
+
+### tick 2026-08-05T13:5xZ（外层，AC12b 阻塞优先级）
+
+- **管理者裁定 AC12b 三阻塞唯一阻塞**（welcome-屏/vendor package.json/裸 ✖ 判红）——收尾类工作不解锁 AC12b。外层：4 个阻塞任务补 DoD + promote ready（welcome-screen、vendor-runtime、self-contained、red-pattern），全部在就绪池。驱动 inner 优先派发（处理完再继续其它）。
+- **archguard TASK-67 闭环确认**（AC12a 110 分钟）：发现缺陷→修复→验证修复完整回路，结构化判红生效抓到 6 真失败。quay 上游 bug（裸 ✖）仍未修——本批第 ④ 任务。
