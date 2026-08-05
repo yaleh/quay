@@ -3465,3 +3465,19 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 锚点机制有效性以**语义收敛**度量（inner 自述措辞向出厂语义收敛，连续 N 轮无 batch 式汇报），不只
 > 「重锚发生了」；与措辞任务两条一起排（交叉标注）。**管理者自陈**：manager 层此前也 Cron=0（同病），
 > 已自建 17 分钟 manager cron——三层都需周期锚。
+
+### tick 2026-08-05T06:15Z（外层，`unblock`：SPEC-complete-delivery-surface 立案 3 新任务 + 更新趋势任务）
+
+- **人问「完整冷启动要交付什么」→ 管理者写 SPEC-complete-delivery-surface（交付面实测清单）**：五处
+  缺口（启动配置✗ / 会话拓扑✗ / manager 层✗ / inner 锚点✗ / 升级通道✗）+ 六类交付面 + 两层次校验
+  （L1 静态交付完整性 / L2 动态持续健康）。
+- **已立案 3 新任务**（ready，dod 通过）：
+  1. `gap-complete-delivery-surface-spec-and-l1-verification`（umbrella）——六类交付面活文档 + L1 检查
+     从 verify-referenced-landed 第 1 类扩到六类；
+  2. `gap-tmux-session-topology-no-factory-definition`——三窗口拓扑出厂定义 + quay-init 铺设 + 校验
+     （meta-cc-3/archguard-4 单 bash 窗口场景消除）；
+  3. `gap-delivery-surface-grows-but-target-freezes-no-upgrade`——升级/刷新通道 + 漂移报告（漂移/缺失/
+     一致，meta-cc 10/68/8 的机械版）= L2 升级正确性维度。
+- **更新 trend-criteria 任务**：补 §3 其余三类持续健康（语义一致 / 升级正确性 / 三层完整性）。
+- 六类归属无空洞：manager 层（productize）/ 启动配置（launch-config）/ 锚点（anchor+converge）/
+  会话拓扑 / 升级通道各归已立案任务。

@@ -50,7 +50,15 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
    可能红的树上）——**已被早期 RED 缓解**（实测 7.5 分钟就报首 failure，不等 15 分钟）。⇒ **该监测的
    趋势判据 = 「早期 RED 检测延迟」**（首个真实失败发生 → state 转 red 的时间），不是耗时/间隔比。
    当前数据：suite 15.0 分钟（2347 测试，+22% vs 12.3 分钟）、落地速率 3.00/小时。
-5. **归入 manager 层复盘**：趋势打标进每日复盘（REVIEW-cadence）的检查项——复盘不只是「这次绿了吗」，
+5. **其余三类持续健康维度（SPEC-complete-delivery-surface §3，管理者 2026-08-05）**——趋势判据
+   覆盖的完整面：
+   - **语义一致**：inner 自述措辞是否与出厂语义一致（措辞漂移实测存在——「Batch of N」式汇报）→
+     归属 `gap-reanchor-must-converge-inner-self-reported-vocabulary`（趋势：自述批式汇报数随窗口）；
+   - **升级正确性**：目标项目机件与当前交付物差异（meta-cc 实测 漂移 10/缺失 68/一致 8）→
+     归属 `gap-delivery-surface-grows-but-target-freezes-no-upgrade`（趋势：漂移/缺失数随窗口）；
+   - **三层完整性**：manager 层是否存在 + 是否有周期锚点（三层同病：inner/manager 曾 Cron=0）→
+     归属 `gap-productize-the-manager-layer`（趋势：层完整性检查结果随窗口）。
+6. **归入 manager 层复盘**：趋势打标进每日复盘（REVIEW-cadence）的检查项——复盘不只是「这次绿了吗」，
    还看「比上次更贵了吗 / 离目标更近了吗」。
 
 **不引入新调度**：趋势是**读已有记录**的被动判据（suite-state / verification-round 历史），不是新的
