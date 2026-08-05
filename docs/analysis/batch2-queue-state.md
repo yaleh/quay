@@ -5230,3 +5230,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   自述**（含两条 "batch of 3 fully merged"）+ 最近窗口 converged=true。scoped 20/20。worktree/branch 已清。
   在飞 0/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T21:4xZ（外层，reanchor 词汇收敛落地 + closure round 11）
+
+- **inner reanchor 词汇收敛机制落地**：`42390452` self-report-vocab-audit.ts（batch 风格自报检测
+  BATCH_FLAG_PATTERNS）+ 收敛判据 fail-closed + **deployed-copy sync**（上一 tick 的 divergence 由 inner 同步）
+  ——实测标记 26 个历史 batch 风格自报 / 近期窗口收敛，20/20。closure round 11：reanchor 翻 done（共 11）。
+- **套件 green**、闸 GO、load 1.07、pool 8/dispatchable 2。
+- **inProgress 0**（reanchor 括号已 reconcile）。

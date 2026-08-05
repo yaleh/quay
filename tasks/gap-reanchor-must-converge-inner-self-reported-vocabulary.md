@@ -10,7 +10,7 @@ title: "the inner's OWN words — 'Batch of 3 fully merged' — persist despite
   criterion to the re-anchor cycle: after re-anchor cycles, the inner's
   self-reported wording (commit/fan-in notes) must use factory semantics
   (rolling dispatch / verification-round), batch-style reports flagged"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -81,10 +81,10 @@ inner 的自述措辞与出厂语义一致」**。本任务补这个判据。
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC4 实测输出贴任务体
-- [ ] 重锚有效性以语义收敛度量；inner 自述不再「按批」组织（commit/fan-in 注记用 verification-round/
+- [x] AC1–AC5 全部勾上；AC4 实测输出贴任务体
+- [x] 重锚有效性以语义收敛度量；inner 自述不再「按批」组织（commit/fan-in 注记用 verification-round/
       滚动语义）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
