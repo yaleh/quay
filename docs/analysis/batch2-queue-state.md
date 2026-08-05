@@ -4372,3 +4372,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **30 分钟 fan-in 假警（非停滞）**：inner transcript 每秒在写（14:55 持续），2 worktree 在飞，pool 26/disjoint 12。资源争抢非停滞。
 - **PSI 61.78 成因 = archguard 非 quay**：CPU 最高进程 archguard-worktrees（task-66 tsc 102% + task-68 eslint 76%），archguard 自己跑 vitest/tsc。resource-gate 读整机 PSI 不区分项目——SPEC-isolation 核心论据实锤。**补入 systemd-run 任务 AC6**（跨项目隔离：archguard 高负载时 quay 套件在自身 scope 正常）。
 - dist-runtime 任务已立案 ready（管理者 14:44 转达的 package.json ENOENT 那条），转达→立案链路通。
+
+### tick 2026-08-05T15:0xZ（外层，跨切判据跨项目证据 + 机制/策略分离）
+
+- **archguard 系统性模式（跨项目证据）**：TASK-64/65 加 MCP tool 缺 ADR-007 flag，scoped 全绿 AC 全勾但没跑 check-adr——跨切判据无法被 basename 配对选中，只能 full-suite 兜底。与 quay scoped-packaging blindspot 同型。**跨切判据标记**（无论 touches 必须进 scoped）补入 gap-scoped-selection-blind-to-packaging-state-diff（AC2）。
+- **机制/策略分离（管理者纠正）**：并发档位数字是策略（archguard GO=4/WAIT=2 合理），联动机制（读什么/何时读/滞回）quay 统一实现可配置。自适应任务补 AC4 档位可配置 + invariant cap_bands_configurable。
