@@ -72,6 +72,8 @@ extra:
 
 ## Touches
 
+- tasks/gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/skills/cold-start/SKILL.md（AC8c 键或 gate 判据：铺设集内脚本全绿）
 - plugin/scripts/（铺设集机械派生 helper，若成脚本）
 - tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md（AC3 并列交叉标注）

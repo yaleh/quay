@@ -5238,3 +5238,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ——实测标记 26 个历史 batch 风格自报 / 近期窗口收敛，20/20。closure round 11：reanchor 翻 done（共 11）。
 - **套件 green**、闸 GO、load 1.07、pool 8/dispatchable 2。
 - **inProgress 0**（reanchor 括号已 reconcile）。
+
+### tick 2026-08-05T22:1xZ（内层 cron，cold-start-gate 派发）
+
+- 外层 closure round 11（reanchor 翻 done，11 total），0 in-flight。
+- **cold-start-gate 派发**（`fm-...-n10coc`，derived-laydown-set green 替代 whole-suite）：git-log 唯一命中是
+  外层 filed 提交（非落地），self-touch 已补，resolve 过。池 8/12、disjoint 2（碰撞结构）。
+- 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。
