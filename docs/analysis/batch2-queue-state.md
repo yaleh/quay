@@ -3676,3 +3676,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   判据（transcript user 消息 + git 提交最近 N 分钟，都无即 dead，与 backlog 无关——队列空 vs 没人驱动
   可区分）+ 归入 L2 持续健康 + 已处置固化（2a9aaef3/4aaf2f29 驱动 + 目标 transcript 核实）。
 - **AC10 首计 +1**：管理者 pre-friction 发现（非被硌），0→1；机器 pre-friction 计数仍 0（生成器 AC2）。
+
+### tick 2026-08-05T07:02Z（外层，`no-action`：inner 深挖 M3 调试中，gate 待修复）
+
+- **M3 takeover 修复深挖中**（inner 思考 6m47s + m3-debug2.sh 被 Killed [SESSION_LIVENESS_GLOBAL 变量，
+  疑似资源]）——session-idle ③ 落地的接管回归定位耗时较长，inner 在调试。
+- **suite-state**：上次 ROUND 3 尝试 red（06:50 完）；gate 待 M3 修复后重启。
+- 红窗停派（正确，suite red）；inner 在工作非停摆。无 BLOCKED；loop-driver LIVE。
