@@ -65,24 +65,49 @@ checked-in 配置），cold-start 已引用。缺 outer 自己调用。
 
 ## Acceptance Criteria
 
-- [ ] AC1: outer 冷启动第 3 步自检 inner（窗口存在 + 活 claude + transcript 有 user 消息）——三态判定（健康/空壳/缺失）
-- [ ] AC2: **权限边界**——健康（窗口+进程+user 消息）⇒ 什么都不做，直接驱动流程，不重建/不重启/不改参数（负控制：健康 inner 不被动）
-- [ ] AC3: **中间态驱动**——空壳（窗口+进程，无 user 消息）⇒ 驱动而非重建（负控制：11:40 watchdog 形态被接手驱动，不丢上下文）
-- [ ] AC4: 缺失（无窗口或无进程）⇒ 调 quay-topology.sh 创建**两窗口**（outer+inner）+ 起 inner claude（checked-in 启动命令），无 manager 窗口
-- [ ] AC5: 创建后 INNER-DRIVEN 验证送达（transcript 出现 user 消息，不假设成功）
-- [ ] AC6: **与 manager 分工**——manager 预建的会话被 outer 接手驱动（不推倒重来）；manager 与 outer 可并行不互相破坏
-- [ ] AC7: 与 session-topology skill + cold-start + launch-config + manager-topology 任务交叉标注（同一次改动两面）
+- [x] AC1: outer 冷启动第 3 步自检 inner（窗口存在 + 活 claude + transcript 有 user 消息）——三态判定（健康/空壳/缺失）
+      落地：`plugin/loop/orchestrator-loop-tick.md` 冷启动第 3 步由「找到内层会话」改为「自检内层会话（三态处理）」——
+      新增机械自检 `plugin/scripts/inner-session-check.sh`（`--json` 输出 `{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}`）。
+      验证：`node --test plugin/test/inner-session-check.test.mjs` → 10/10 通过（含 AC1 文档断言 + 三态状态机测试）
+      `bash plugin/scripts/inner-session-check.sh --session measure-0 --transcript <fresh> --json` → `{"window":true,"process":true,"transcriptFresh":true,"state":"empty-shell"}`
+- [x] AC2: **权限边界**——健康（窗口+进程+user 消息）⇒ 什么都不做，直接驱动流程，不重建/不重启/不改参数（负控制：健康 inner 不被动）
+      落地：tick doc 第 3 步 `healthy` 行「什么都不做（权限边界——已存在的 inner 可能是 manager 建的，外层无权判断/重建/改参数），直接进入正常驱动流程」+ 分派节「不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）」。
+      验证：`node --test plugin/test/inner-session-check.test.mjs` → `AC2 — the tick doc treats a healthy inner as 'do nothing, proceed to drive' (permission boundary)` PASS；状态机 healthy 测试（窗口+进程+user 消息 ⇒ healthy，不动）PASS
+- [x] AC3: **中间态驱动**——空壳（窗口+进程，无 user 消息）⇒ 驱动而非重建（负控制：11:40 watchdog 形态被接手驱动，不丢上下文）
+      落地：tick doc 第 3 步 `empty-shell` 行「驱动而非重建——不丢可能已有的上下文，接手 manager 预建的会话」+ 分派节「send-keys-reliable 驱动（transcript 验证送达）」。
+      验证：状态机 empty-shell 测试（窗口+进程，system-only transcript 或无 transcript ⇒ empty-shell）PASS
+- [x] AC4: 缺失（无窗口或无进程）⇒ 调 quay-topology.sh 创建**两窗口**（outer+inner）+ 起 inner claude（checked-in 启动命令），无 manager 窗口
+      落地：tick doc 第 3 步 `missing` 行「调 quay-topology.sh 创建两窗口拓扑 + 起 inner claude（checked-in launch 命令），然后驱动 inner」+ 分派节（quay-topology.sh + topology-check.sh 验证）。
+      验证：`grep -n 'ROLES="outer inner"' plugin/scripts/quay-topology.sh plugin/scripts/topology-check.sh` 各 1 处、无 manager；hermetic 工厂建两窗口后
+      `bash plugin/scripts/topology-check.sh --session measure-0 --json 2>&1 | grep -c '"ok": true'` → `1`（Contract measure 达标）；`node --test plugin/test/inner-session-check.test.mjs` 的 factory 测试（建 outer+inner、无 manager）PASS
+- [x] AC5: 创建后 INNER-DRIVEN 验证送达（transcript 出现 user 消息，不假设成功）
+      落地：tick doc 第 3 步分派节「创建后 INNER-DRIVEN 验证送达：transcript 出现真实 user 消息（send-keys-reliable 的 transcript-delivery-check.ts 判据），不假设成功」。
+      验证：`node --test plugin/test/inner-session-check.test.mjs` → `AC5 — the tick doc verifies the inner drive via the transcript (never assumed success)` PASS
+- [x] AC6: **与 manager 分工**——manager 预建的会话被 outer 接手驱动（不推倒重来）；manager 与 outer 可并行不互相破坏
+      落地：tick doc 第 3 步健康/空壳两行分别覆盖「manager 建好且已驱动 ⇒ 不动（权限边界）」与「manager 预建未驱动 ⇒ 接手驱动不重建」。
+      验证：状态机 healthy 测试（manager 建好+驱动过 ⇒ healthy 不动）+ empty-shell 测试（manager 预建未驱动 ⇒ empty-shell 驱动不重建）PASS
+- [x] AC7: 与 session-topology skill + cold-start + launch-config + manager-topology 任务交叉标注（同一次改动两面）
+      落地：`plugin/skills/session-topology/SKILL.md` 既有「A pre-existing manager-built session is accepted by the outer without being rebuilt; see gap-outer-self-checks-and-creates-inner-session」；
+      `plugin/skills/cold-start/SKILL.md` 步骤 2 新增三态自检交叉标注；`tasks/gap-manager-baked-into-project-topology-factory.md` AC4 已交叉标注本任务；
+      `tasks/gap-tmux-session-topology-no-factory-definition.md` 与 `tasks/gap-crystallize-launch-config-into-checked-in-settings-file.md` 新增本任务交叉引用。
+      验证：`grep -rn 'gap-outer-self-checks-and-creates-inner-session' plugin/skills/ tasks/` 命中 session-topology SKILL + cold-start SKILL + manager-baked + topology-no-factory + launch-config
 
 ## Touches
 - tasks/gap-outer-self-checks-and-creates-inner-session.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/loop/orchestrator-loop-tick.md（冷启动第 3 步自检 + 三态处理）
-- plugin/skills/cold-start/SKILL.md（如涉及）
+- plugin/skills/cold-start/SKILL.md（AC7 交叉标注：三态自检与 build-by-definition 同面）
 - plugin/scripts/quay-topology.sh（工厂，已存在——outer 调用它；两窗口）
 - plugin/scripts/topology-check.sh（自检，已存在）
+- plugin/scripts/inner-session-check.sh（新增：三态自检机制）
+- plugin/test/inner-session-check.test.mjs（新增：三态状态机 + 文档断言测试）
 - tasks/gap-manager-baked-into-project-topology-factory.md（AC7 交叉标注）
 - tasks/gap-tmux-session-topology-no-factory-definition.md（AC7 交叉标注）
 - tasks/gap-crystallize-launch-config-into-checked-in-settings-file.md（AC7 交叉标注）
+
+## Test-Files
+- plugin/test/inner-session-check.test.mjs（三态自检机制 + 文档 AC1-AC6 断言）
+- plugin/test/session-topology.test.mjs（两窗口拓扑工厂/检查回归，AC4 同面）
 
 ## Contract
 
