@@ -2633,6 +2633,16 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 核实：`fast-mode-loop-tick.md:368`「可同批」是最需改措辞的点（并发资格可能被读成门控）。
 - inProgress 2（init-ships + load-sensitive）；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-05T01:05Z（外层，`no-action`：gap-init-ships 合并，管理者优先任务完成）
+
+- **gap-init-ships 已合并**（`9a4367b3`：derived LOOP_SCRIPTS、referenced ⊆ landed ∪ declared——
+  cold-start skill 只引用 quay-init.sh 实际铺下的文件；**卡 quay 自建 AC-SH 自举 / meta-cc 独立冷启动
+  的优先任务完成**）。
+- **load-sensitive 已合并**（`11b01d37`：KNOWN-LOAD-SENSITIVE 家族标注——step-3 的 2-并发套件放宽
+  判据显式排除它）。
+- **eighty-two 在飞**（capability-catalog worktree，agent 9m47s——填空槽，滚动派发验证）；batch-4
+  2/3 合并。inProgress 1；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 01:05Z | `no-action` | 核实 gap-init-ships 合并（referenced⊆landed∪declared，管理者优先任务完成）+ load-sensitive 合并（KNOWN-LOAD-SENSITIVE）；eighty-two 在飞（滚动派发填空槽） | 内层：eighty-two agent（capability-catalog），batch-4 2/3 | ①git log 核 init-ships/load-sensitive 合并；②inProgress 1 + detect-stop 无命中 |
 | 2026-08-05 01:04Z | `no-action` | 立案 batch 词汇拆分（分派滚动 / 验证收尾 verification-round-N，R2 同族措辞漂移风险）；grep 核 tick 文档 batch 分布（368「可同批」最需改）；历史名保留标注 | 内层：batch-4 在飞（init-ships+load-sensitive） | ①tick 文档 batch grep 分布核；②词汇拆分任务立案；③`--detect-stop` 无命中 |
 | 2026-08-05 00:47Z | `no-action` | 读 CLI 配置调研全文并裁定：立案 1 个合并任务（settings 文件结晶：exclude-dynamic cache + name + settings 防打错 + bare + prompt-suggestions）；-p 条件性 3 项延后标注；未文档化 env var 不碰 | 内层：batch-4 在飞（init-ships+load-sensitive） | ①调研文档读核（5 高相关/4 中/不建议）；②合并任务立案；③`--detect-stop` 无命中 |
 | 2026-08-05 00:42Z | `no-action` | 核实 overshoot 全量重跑 GREEN（2284/0/0，负载 flake 确认）；batch-4 派发且 gap-init-ships 优先（裁定兑现）；eighty-one 已合并；init-ships+load-sensitive 在飞 | 内层：batch-4 2 agent 在飞，备忘「完成后关批 4」 | ①git log 核 batch-4 派发（init-ships 优先）+ eighty-one 合并 + overshoot 全量绿；②inProgress 2 + detect-stop 无命中 |
@@ -272,11 +273,11 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 106 | 36% |
+| no-action | 107 | 36% |
 | unblock | 37 | 17% |
 | correct | 92 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **242** | — |
+| **合计** | **243** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
