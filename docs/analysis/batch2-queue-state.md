@@ -3496,3 +3496,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 真判据各归 convergence/anchor-realuse/trend-L2。L1 检查判据须落真维度（修采样仪器，非补代理）。
 > **L_G 正面**：send-keys-verified.sh 分层退役正确（在树不在派生集），升级通道不得铺回。
 > 已更新 delivery-surface spec + upgrade 两任务。
+
+### tick 2026-08-05T06:03Z（外层，`no-action`：inner 修 ROUND 3 RED 中）
+
+- **inner 修 AC2 陈旧 fixture**（quay-init-loop.test.mjs 的 send-keys-verified 引用 → 现派生集活
+  specimen）；AC4 loop-driver isolated 已过（负载抖动非真）；runner-grouping flags isolated 仍跑中
+  （慢——spawn 全量对比，结果待）。
+- 无停止条件、无 BLOCKED；loop-driver LIVE。inner 修完 → 重启 ROUND 3 gate → 绿后关 9 条。
