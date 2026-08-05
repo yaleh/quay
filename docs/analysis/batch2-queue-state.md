@@ -59,7 +59,7 @@
 
 **派发 3（run_in_background:true，全 disjoint，telemetry 已开）：**
 - **`gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`（PRIORITY，外层裁定）**——quay 自建 AC-SH 自举 + meta-cc 独立冷启动的阻塞；cold-start skill 调用 quay-init.sh 不铺的文件（引用集合 ⊄ 落地集合）；虽被 pool 符号边缘排除在计数外，那是口径不影响派发
-- `gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point`（81 仪器缺入口点）
+- ✅ `gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point`：已 merge（`9b05a2f9`，遥测同步闭），`instrument` MCP 工具（list/run，清单派生非硬编码），scoped 22/22
 - `gap-load-sensitive-session-family-confounds-step-three`（负载敏感步骤三）
 - **gap-eighty-two 待 gap-init-ships 落地后派**（同碰 `plugin/scripts/quay-init.sh`，串行）
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
