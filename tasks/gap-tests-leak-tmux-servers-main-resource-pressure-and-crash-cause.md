@@ -173,6 +173,7 @@ Bash 调用，`export ISO_TMPDIR=...` 在第二次调用里已丢失（工具本
 
 ## Touches
 
+- tasks/gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - plugin/test/send-keys-verified.test.mjs（teardown kill 自己起的 server，TMUX_TMPDIR 校验）
 - plugin/test/heavy-op-token*.test.mjs（ol-tok 泄漏源，同族 teardown）
 - plugin/test/session-liveness.test.mjs（同族 teardown）
