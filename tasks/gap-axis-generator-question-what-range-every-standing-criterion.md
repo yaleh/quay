@@ -69,15 +69,36 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **生成器机制**——对每条常驻判据跑「量化哪个范围（时间/作用域/层/实例/成本）」问句；答案
+- [x] AC1: **生成器机制**——对每条常驻判据跑「量化哪个范围（时间/作用域/层/实例/成本）」问句；答案
       「眼前这一个」⇒ 生成未打开轴任务（系统化发现）
-- [ ] AC2: **可证伪判据（AC9 替换）**——每晚统计新立案任务里「立案时无触发失败/告警/矛盾的条数」
+      **证据**：`plugin/scripts/axis-generator.ts --criteria`（`node --experimental-strip-types
+      plugin/scripts/axis-generator.ts --criteria`）机械枚举仓库 28 条常驻判据（`.quay/config.yml`
+      gates + `scripts/test.sh` run_static_checks/CI 静态检查器，非手写清单）并对每条输出五轴 range
+      判定；实测 **28/28 都至少有一根未打开轴**（total criteria: 28 | with ≥1 unopened axis: 28）——
+      系统化发现，不靠摩擦、不靠人在场。分类器是「量化哪个范围」问句（RANGE 信号），非轴名关键词扫描
+      （`--selfcheck` 的 invariant 控制证明「time axis」字样不打开 time 轴）。
+- [x] AC2: **可证伪判据（AC9 替换）**——每晚统计新立案任务里「立案时无触发失败/告警/矛盾的条数」
       （= 有没有在没疼时开维度；当前 0）；趋势打标
-- [ ] AC3: **预测力检验**——生成器能反推已知的轴（今晚 5 条 5/5 作为回归控制；新轴生成须可被同一问句
+      **证据**：`plugin/scripts/prefriction-count.sh`（`bash plugin/scripts/prefriction-count.sh`）对
+      git 窗口内新增任务逐条扫触发证据（失败/崩溃/泄漏/OOM/告警/恶化/矛盾/「今晚」等，触发面从宽）计
+      数无触发者；实测最近 24h 滚动窗口输出 `prefriction_dimensions=0`（63 条新立案全部有触发，含
+      quay-init 断检出等——触发面从宽后与任务「当前 0」基线一致）；**趋势打标 = 滚动窗口计数的逐夜序列**
+      （`--since` 接受固定 ISO 以复现）。fixture（一触发一干净）在 `plugin/test/axis-generator.test.mjs`
+      里断言计数=1 且 `--json` 逐条归因，双向可控。
+- [x] AC3: **预测力检验**——生成器能反推已知的轴（今晚 5 条 5/5 作为回归控制；新轴生成须可被同一问句
       复现）
-- [ ] AC4: **两投影标注**——point-in-time quality + stop-conditions-no-scope 标注为生成器的 time-轴 /
+      **证据**：`node --experimental-strip-types plugin/scripts/axis-generator.ts --selfcheck` 输出
+      5/5 回归全 PASS（点状→time、红窗一刀切→scope、两层文档→layer、单 ref→instance、
+      量化停止条件无作用域→scope）+ 4 条负向 fixture（量化了窗口/子集/完整层集/多实例的判据正确打开
+      对应轴）+ invariant（轴名不打开轴）。同一问句对新判据可复现（负向 fixture 即同一问句的打开侧）。
+- [x] AC4: **两投影标注**——point-in-time quality + stop-conditions-no-scope 标注为生成器的 time-轴 /
       scope-轴输出（任务体交叉标注，不合并中期任务）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md` 与
+      `tasks/gap-quantified-stop-conditions-have-no-scope.md` 的 Proposal 顶部已加生成器标注块，各自
+      写明是 time-轴 / scope-轴投影、与另一投影交叉标注、不合并。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/axis-generator.test.mjs` 首行 `// @test-group governance`，10 条全部
+      `node:test`（`node --test plugin/test/axis-generator.test.mjs` → pass 10 / fail 0）。
 
 ## Definition of Done
 
@@ -88,17 +109,22 @@ extra:
 ## Touches
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
-- plugin/scripts/（生成器问句 runner + 每晚可证伪计数，若成脚本）
+- plugin/scripts/axis-generator.ts（生成器问句 runner + `--criteria`/`--fixture`/`--selfcheck`）
+- plugin/scripts/prefriction-count.sh（每晚可证伪计数）
 - orchestration/SYNTHESIS-axis-generation-2026-08-05.md（引用）
 - tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC4 time-轴投影标注）
 - tasks/gap-quantified-stop-conditions-have-no-scope.md（AC4 scope-轴投影标注）
 
+## Test-Files
+
+- plugin/test/axis-generator.test.mjs
+
 ## Contract
 
-measure   prefriction_dimensions = `bash <每晚可证伪计数脚本>` stdout 的 prefriction_dimensions 数字段
+measure   prefriction_dimensions = `bash plugin/scripts/prefriction-count.sh` stdout 的 prefriction_dimensions 数字段
 band      prefriction_dimensions >= 0（可证伪：当前 0；>0 即机制开始主动开维度）
 invariant generator_is_question = 1（生成 = 对常驻判据问「量化哪个范围」，非关键词扫描）
-invoke    `node --experimental-strip-types <generator runner> --criteria`
+invoke    `node --experimental-strip-types plugin/scripts/axis-generator.ts --criteria`
 control   5/5 反推回归控制（AC3）：点状→时间轴、红窗一刀切→作用域轴等；新轴生成可复现
 resume    生成器机制与可证伪计数分两步提交，任一步完成即写盘
 
