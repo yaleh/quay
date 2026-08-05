@@ -3364,3 +3364,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **观察**：池变大后 ready-pool-check 的 maxMutuallyDisjointSubset 计算超 120s（background 跑中）——
   disjointness 计算成本随池规模增长，是 pool-floor 落地的性能面（候选机械化/性能优化方向）。
 - 在飞：session-idle ③（17m）+ red-window-executor ②（3m）；无停止条件、无 BLOCKED。
+
+### tick 2026-08-05T05:30Z（外层，`unblock`：心跳源缺陷立案 + 池补晋生效）
+
+- **心跳源缺陷（管理者实测）已立案** `gap-outer-heartbeat-source-inverts-under-incident-handling`
+  （ready）：SESSION-OVERDUE 看 tick-log mtime，红窗处置写 queue-state+提交不写 tick-log ⇒ 越认真心跳
+  越旧（71 分钟陈旧期间 5 提交 + 分诊记录）；同一信号今晚真阳/假阳各一次无法自判。**判据改多源 max
+  mtime**（提交/queue-state/tick-log/分诊/verification-round 任一最新即 alive）+ 真阳性保留（30 分钟零
+  产出仍报）。与 D 同源（单一代理信号不足）。单独立案（非趋势判据范围）。
+- **池补晋生效**：7 条晋级后 pool 10/12、**dispatchable_disjoint 9、criterion_met True**——disjointness
+  排序补晋起作用（2/3 → 9/3），池多样性达标。
+- 在飞：session-idle ③（23m，提交 session-liveness.sh 测试中）+ red-window-executor ②（9m，catalog
+  测试中）；无停止条件、无 BLOCKED。

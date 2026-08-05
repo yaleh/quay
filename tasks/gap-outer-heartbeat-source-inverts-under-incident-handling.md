@@ -1,0 +1,97 @@
+---
+id: gap-outer-heartbeat-source-inverts-under-incident-handling
+title: "SESSION-OVERDUE heartbeat source is orchestration/tick-log.md mtime,
+  which INVERTS under incident handling — during red-window triage I write
+  docs/analysis/batch2-queue-state.md + commits but NOT tick-log, so the more
+  diligently I handle incidents the OLDER my heartbeat looks (measured: 71min
+  stale while 5 commits + triage records were produced); the same signal fired
+  once true-positive (30-min unhandled RED) and once false-positive (just now),
+  indistinguishable without manual commit-history checks; fix: outer-alive
+  criterion = NEWEST mtime among ANY output (commits / queue-state / triage
+  records / tick-log), same class as D's single-proxy-insufficiency"
+status: ready
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+---
+
+**type:** execution
+
+## Proposal
+
+管理者转的心跳源缺陷（实测，非推测）。**SESSION-OVERDUE 在最该起作用的时候反向失效**。
+
+**实测**：监视器报外层心跳 71 分钟未更新，因为它看 `orchestration/tick-log.md` 的 mtime（停在 04:02）；
+但此后有大量真实产出——**04:23/04:36/04:44/05:05/05:12 五次提交**、红窗分诊记录、热修、更正全都做了。
+
+**根因**：红窗处置期间写的是 `docs/analysis/batch2-queue-state.md` 和提交，**不写 tick-log** ⇒
+**越认真处理事故，心跳看起来越旧**。
+
+**严重性**：同一信号今晚出现两次、性质相反——一次真阳性（套件红着 30 分钟没人碰，管理者据此介入是
+对的）、一次假阳性（刚才这次），**无法从信号本身区分**，两次都得手工查提交历史才知道。
+
+**⇒ 心跳源选错了**：判据该是「外层有没有产出」（提交 / 队列状态文件 / 分诊记录任一的 mtime 取最新），
+不是「有没有写某个特定文件」。**与 D 分类器要解决的问题同源——单一代理信号不足以判定状态。**
+
+### 选定机制（外层裁定：单独立案）
+
+**外层存活判据 = 任一产出的最新 mtime**（多源 max），不是 tick-log 单源：
+
+1. **多源心跳**：外层「alive」= `max(最近一次 git 提交时间, batch2-queue-state.md mtime,
+   tick-log.md mtime, 分诊/triage 记录 mtime, verification-round.jsonl mtime)`。**任一在阈值内 ⇒ alive**。
+   红窗处置写 queue-state + 提交（不写 tick-log）⇒ 心跳仍新鲜——反向失效消除。
+2. **真阳性保留**：什么都没产出（30 分钟无任何写入）⇒ SESSION-OVERDUE 仍报——「套件红 30 分钟没人碰」
+   场景必须仍被抓到。
+3. **与 D 同源标注**：单一代理信号不足以判定状态（D 的 pane 分类器同型）；本条是多源融合的又一实例。
+4. **不归入趋势判据任务**（gap-quality-criteria 是成本/检测延迟等趋势维度，本条是信号正确性）——单独立案，
+   交叉标注。
+
+**归属**：session-liveness.sh 的外层心跳源（SESSION-OVERDUE 判据）。
+
+## Acceptance Criteria
+
+- [ ] AC1: 外层存活判据改为**多源 max mtime**——`max(HEAD commit 时间, queue-state mtime, tick-log mtime,
+      分诊记录 mtime, verification-round.jsonl mtime)`；任一在阈值内 ⇒ alive
+- [ ] AC2: **反向失效消除（fixture）**——模拟红窗处置（写 queue-state + 提交、不写 tick-log）⇒ 心跳保持
+      新鲜、不报 SESSION-OVERDUE
+- [ ] AC3: **真阳性保留（fixture）**——30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（「红着没人碰」必须被抓）
+- [ ] AC4: 信号可区分——假阳性（有产出但 tick-log 旧）与真阳性（无产出）从信号本身可判，不需手工查
+      提交历史（实跑输出贴任务体）
+- [ ] AC5: 与 D 同源标注——单一代理信号不足；本条是多源融合实例（任务体交叉引用 D / gap-pane-state）
+- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Definition of Done
+
+- [ ] AC1–AC6 全部勾上；AC2/AC3/AC4 实跑输出贴任务体
+- [ ] 心跳源多源化；红窗处置期间心跳不反向失效；真阳性仍被抓
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+## Touches
+
+- plugin/scripts/session-liveness.sh（外层心跳源：tick-log 单源 → 多源 max mtime）
+- plugin/test/session-liveness.test.mjs（AC2/AC3/AC4 fixture）
+- orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（与 D 同源标注，若适用）
+
+## Contract
+
+measure   heartbeat_source_count = `grep -c 'mtime' plugin/scripts/session-liveness.sh` stdout 数字段
+band      heartbeat_source_count >= 3（多源：提交/队列状态/分诊记录至少 3 源）
+invariant incident_handling_keeps_heartbeat = 1（红窗处置写 queue-state+提交不写 tick-log ⇒ 心跳新鲜）
+invoke    `bash plugin/scripts/session-liveness.sh --selfcheck`
+control   模拟红窗处置（queue-state 写入、tick-log 不动）⇒ 不报 OVERDUE（AC2）；30 分钟零写入 ⇒ 报
+          OVERDUE（AC3，真阳性保留）
+resume    多源判据与 fixture 分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T05:3xZ
+changed: 外层受管理者心跳源缺陷实测裁定立案（单独立案）。四处收紧：
+(1) **反向失效根因**——心跳源是 tick-log 单源，红窗处置写 queue-state+提交不写 tick-log ⇒ 越认真心跳
+    越旧；改多源 max mtime；
+(2) **真阳性保留**——30 分钟零产出仍报 OVERDUE（「红着没人碰」必须被抓）；
+(3) **与 D 同源**——单一代理信号不足（D 分类器同型），本条多源融合；不并趋势判据任务（范围不同）；
+(4) **可区分性硬 AC**——假阳/真阳从信号本身可判，不需手工查提交历史。
+status: todo——session-liveness 心跳源修正；排当前批（②③ 在飞）后。
