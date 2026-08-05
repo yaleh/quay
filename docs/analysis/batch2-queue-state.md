@@ -5381,3 +5381,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   push 合并时处理。
 - **① watchdog B 机每 5min 跑**：lease-model 裁定（default-off + 顶端 + quay 自用）经 ③ 同步后达 B，
   届时配置。
+
+### tick 2026-08-05T23:2xZ（外层，dispatch-tick-boundary 落地 + AC3 观测计划）
+
+- **dispatch-tick-boundary 落地（人优先级 REAL work）**：`6688629e` slot-refill.ts 事件驱动派发
+  （completion-event 触发重评估，无第二 /loop/快轮询/常驻 watcher；cap 语义不变；slot-refill 纯检测
+  exit 0 零写入），fast-mode-loop-tick 事件驱动派发节，12/12。**吞吐瓶颈修复**（batch→event-driven）。
+- **AC3 留外层复测**：槽位释放后 <5min 新派发（对比现状 39min）。**外层开始观测**——loop 运行中，
+  看几轮派发间隔（下几 tick 检查 slot-release→next-dispatch gap）。
+- **reconcile 关 2 括号**（dispatch-evaluated + global-count）——inner 0 in-flight。
+- **套件 green**、闸 GO、load 1.09。
