@@ -5404,3 +5404,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **branch-model 派发**（`fm-...-m5cx2c`，integration 分支模型——fork-baseline 与 merge-point 角色分离）：
   git-log 唯一命中是 global-count 的 AC4 交叉标注（非落地），self-touch 已补，resolve 过。池 6/12、disjoint 2。
 - 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T23:3xZ（外层，人两条指令执行——Q2 promote + -p 实验推进）
+
+- **① 两机冲突早处理（人指令）**：gap-two-machine-collaboration-git-branch-claiming promote todo→ready
+  （此刻 A/B 无撞车纯属运气；fast-mode-loop-tick.md 冲突是更小粒度证据）。驱动 inner 排下一批
+  （与 integration-branch 交叉，AC3 依赖权威/推送方向）。
+- **② claude -p 实验推进（人指令）**：gap-measure-claude-p-headless 已 ready；**外层裁定：B 稳定
+  （~1h 无人值守运行）是推进 -p 实验的合法前提信号**——与 archguard/meta-cc 产品交付线平行（那是产品
+  形式，-p 是无头迁移测量，不需等）。驱动 inner 优先。
+- inner 在飞 integration-branch（A 侧）；pool 6/dispatchable 2。
