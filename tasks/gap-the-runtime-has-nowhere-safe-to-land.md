@@ -1,7 +1,9 @@
 ---
 id: gap-the-runtime-has-nowhere-safe-to-land
-title: "The runtime lands in the target's vendor/ — a reserved dir in Go — and is 1.3MB against common large-file hooks; both are the same decision about where it may live"
-status: todo
+title: The runtime lands in the target's vendor/ — a reserved dir in Go — and is
+  1.3MB against common large-file hooks; both are the same decision about where
+  it may live
+status: ready
 labels:
   - gap
   - milestone-candidate

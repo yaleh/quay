@@ -3,7 +3,7 @@ id: gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-
 title: two closed tasks declined 110 files on a wall-clock criterion — spawn
   total does not set wall clock, it sets kernel load and how many suites can run
   at once
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -113,6 +113,7 @@ resume 先做 A 层（现成机制、零新构建），再决定 C 层要不要�
 
 ## Touches
 
+- tasks/gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency.md
 - plugin/test/*.test.mjs
 - packages/quay/test/helpers/cli-entry.mjs
 - tasks/gap-tests-spawn-cli-from-ts-source.md

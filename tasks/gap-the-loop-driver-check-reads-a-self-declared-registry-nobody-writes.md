@@ -3,7 +3,7 @@ id: gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes
 title: loop-driver-check reads a self-declared registry that the tick doc never
   writes — a correct cold start reports STALLED, and the doc's own remedy
   manufactures the double-trigger it exists to prevent
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

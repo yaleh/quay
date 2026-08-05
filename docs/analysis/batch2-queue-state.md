@@ -4951,3 +4951,19 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ac-carryover + 其余 ratchet 全解决。
 - **全量重跑**（18:46:55 起，state=running, laneCount=1）——已过静态检查进入真测试，~11-12min。
 - **待全量绿后**：~20 条 not-yet-flipped 批量收尾（closure backlog）。
+
+### tick 2026-08-05T22:4xZ（内层，重启后首 tick：池分诊 + 补晋 6 + 派发 3/5）
+
+- **会话重启自检**：两层会话 22:35/22:36Z 重启（队列上次日志 19:3xZ，3.7h 空档）。`quay-init --loop` 22:36Z 重铺 tick 文档（外层已提交 ee25698d/d8f6a51c）。Monitor 三判据绿（mounted=true / targetRoot=本仓 / delivered=true）。`.halt` 无。detect-stop 无停止条件（pane waiting-input 1/3，非 block）。外层全量套件 **running**（22:42:24Z 起，runner=outer，laneCount 1）——running ⇒ 照常派发。
+- **fan-in**：无（会话重启，无遗留 worktree/`task/*` 分支）。
+- **worktree_root 重建**：`/home/yale/work/quay-worktrees` 缺失（重启后），已 `mkdir`（ext4 磁盘，非 tmpfs）。
+- **池分诊（关键）**：ready-pool-check pool=12/floor=20/disjoint=3。
+  - **排除 3 个已落地未翻 done**（gitHistoryLanded 漏检假阴性，merge 消息不定名任务 id——第 7 次重派 class 前拦截）：`full-suite-runner-red-pattern`（37947f75 merged）、`ghost-drive`（ba3a4e87 merged）、`leak-tmux-servers`（c1c15dfd landed）。AC 全勾、等外层 closure。**不派发**。
+  - **hold 6 个「排 ROUND 3 收尾后」**（frontmatter ready 但任务体自述等 ROUND 3，ROUND 3 收尾未完成——24 not-yet-flipped 仍待外层）：`branch-model` / `cold-start-gate` / `complete-delivery`（后三者另带 `plugin/scripts/` 目录 glob，派发会串行化全池）/ `l2-continuous` / `red-window-dispatch` / `telemetry-brackets`。等外层核 ROUND 3。
+  - **不晋 `no-size-aware-routing`**（ADR-022 退休管线任务，外层 88a49faa 曾明令不晋——Touches 仅 A/B/C 子任务文件，无代码根）。
+- **补晋 6 个**（todo→ready，四件套全、touches resolve、self-touch 已具）：`productize-manager` / `split-batch-vocab` / `spawn-count-criterion` / `loop-driver-check` / `runtime-nowhere-safe` / `ghost-suggestion`。
+- **派发 3/5**（background Agent `run_in_background:true`，concurrent-batch-scheduler 实测两两 disjoint，batch 判定不含已落地/ROUND-3 hold）：`productize-manager` / `split-batch-vocab` / `spawn-count-criterion`。派发前补 self-touch（3 个均缺，已补）。telemetry `--task-start` 已开：
+  - `fm-gap-productize-the-manager-layer-1785970210798-64rnod`
+  - `fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1785970210919-db661c`
+  - `fm-gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency-1785970211047-eol2m5`
+- 在飞 3/5。停止条件无、外层套件 running、Monitor 三判据绿、无 block。master 在 `d8f6a51c`。

@@ -1,7 +1,14 @@
 ---
 id: gap-productize-the-manager-layer
-title: "the third layer exists in practice (three layers run) but only two ship — plugin/skills/manager* is absent, all manager mechanisms are quay-local in orchestration/ (manager-loop-tick.md / manager-phase-goal.md); ship the manager layer (cadence = daily review, three functions = planning/prioritization/trend, the two verified §1.5/§1.6 rules, cold-start AC8c stale-key fix, launch-config port) so gaps 1-3 have an owner — a cold-start on another machine currently gets a two-layer system that executes fast but never plans/prioritizes/trend-watches"
-status: todo
+title: the third layer exists in practice (three layers run) but only two ship —
+  plugin/skills/manager* is absent, all manager mechanisms are quay-local in
+  orchestration/ (manager-loop-tick.md / manager-phase-goal.md); ship the
+  manager layer (cadence = daily review, three functions =
+  planning/prioritization/trend, the two verified §1.5/§1.6 rules, cold-start
+  AC8c stale-key fix, launch-config port) so gaps 1-3 have an owner — a
+  cold-start on another machine currently gets a two-layer system that executes
+  fast but never plans/prioritizes/trend-watches
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -79,6 +86,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-productize-the-manager-layer.md
 - plugin/skills/manager/SKILL.md (new)（或 plugin/loop/manager-loop-tick.md）
 - plugin/skills/cold-start/SKILL.md（AC8c 废键修复）
 - orchestration/REVIEW-cadence.md（引用，done 机制）
