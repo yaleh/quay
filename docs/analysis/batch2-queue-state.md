@@ -4105,3 +4105,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **watchdog 已真实工作**（log 11:29:04）：quay healthy(alive=1)、meta-cc/archguard halted（.halt 正确判读）。崩溃自恢复机制已激活——「网络永久静默死亡」风险解除。
 - **AC2（崩溃恢复模拟）待 inner 验证**。os-anchor 任务 AC 未勾/status ready（inner 处理中，4 agent 忙）。
 - inner 已超过并发上限（+1 第 4 agent）——需留意 inner 是否超派发（camelCase probing 是 web-board 相关，可能跨任务）。
+
+### tick 2026-08-05T11:3xZ（外层，runner 结构修复落地）
+
+- **runner 结构任务 merge**（16068661：nproc 派生默认 + REPLACE splice 杀 ABORT #5 =8 =8 + resource-gate + reason 轴 aborted≠failed），AC1-AC6 全勾，scoped 29/29。**今晚最大结构性风险（ABORT #5 崩溃类 + aborted-red 停派）根除**。
+- **os-anchor timer active**（AC1 实跑过，watchdog 判读三项目正确）。AC2 崩溃模拟 inner 排队中（AC 未勾）。
+- inner 3 agent 在飞（Grep 90-min 常量 = 可能处理 over-90m 任务）。
