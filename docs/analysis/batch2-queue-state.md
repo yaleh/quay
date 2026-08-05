@@ -5073,3 +5073,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （调 taskWorkLanded 或查 merge），待确认后立案。
 - **perf-fix 在飞**（改 ready-pool-check.ts + task-status-drift-check.ts + 测试 + 镜像，0 提交工作中）。
 - 套件 running、在飞 1/3、无真 stop、Monitor 绿。
+
+### tick 2026-08-05T20:0xZ（外层，bracket-lag 根治 + 套件将完成）
+
+- **reconcile 关 4 陈旧括号**（axis-generator/outer-heartbeat/taskworklanded/session-idle——工作已落地，
+  括号滞后）——**根治 inner 报的 false OVER90 复发**（bracket-lag 假象）。inProgress 1（perf-fix 在飞）。
+- **套件 20.5min 健康**（34 文件，闸 GO，load 3.87）——低负载窗口有效，~10min 完成。第 7 次尝试通过所有
+  先前停摆点（backlog-client/build-evidence 区域）。
+- **inner**：perf-fix（pool-check gitHistoryLanded 聚合 >150s）在飞。
+- **待绿后**：24 条 closure 批量收尾。
