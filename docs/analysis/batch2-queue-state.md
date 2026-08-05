@@ -2705,3 +2705,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   若下一 tick 仍未派，驱动内层。监视器 check 新语义 mounted:true（session-liveness，管理者挂载）；
   我的 --detect-stop --pane 轮询（bep2jmw1g）运行中。
 - 无停止条件、无阻塞；loop-driver LIVE。
+
+### tick 2026-08-05T02:05Z（外层，`unblock`：人裁定复盘节奏 → 立案机制任务）
+
+- **人裁定复盘节奏为决定**（非建议）：①每天一次、按日历挂钩（架构决定不随任务速度发生）；②管理者
+  发起汇总、外层参与作答、人接收并保留方向裁定权；③三项清单：(a) 机械检查战略文档过期（路线图任务
+  的 AC4 grep 固化成**通用可复用脚本**，非一次性）、(b) gap-* 可追溯到书面战略问题或纯反应式（记录）、
+  (c) 复核记录从角色纪律扩到**方向有没有偏**。
+- **已立案** `gap-establish-daily-review-cadence-mechanism`（todo，高优先，不阻塞当前批）——落成机制
+  而非靠角色记得：`orchestration/REVIEW-cadence.md` 节奏文档 + `plugin/scripts/strategic-doc-
+  staleness-check.ts` 通用过期检查器 + `scripts/test.sh` run_static_checks 接线 + outer-phase-goal
+  复核记录扩方向（manager-phase-goal 标注管理者自扩）+ **AC6 第一次复盘用今天的发现当输入**。
+- **batch-4 closure 在飞**：1 background agent（general-purpose 查 `quay-native task edit` CLI flags，
+  1m51s / 99.4k tokens，判为 closure agent 的翻转手段核实）。5 任务（ac3b/eighty-one/eighty-two/
+  load-sensitive/preflight）仍 `status: ready`——closure 后翻转 done。
+- **就绪池 5**（池满 ≥3，无需 promote）：全部为待 closure 翻转项；closure 后池将骤降 → 机制自动翻转
+  not-yet-flipped（drive-text-carries-data / init-ships）补池。review-cadence 排 closure 后晋级派发。
+- **内层输入框有未提交备忘**「继续关批：等 closure agent 完成后收尾批 4」——R2 AC8：非动作、不读作
+  行动；本 tick 不驱动（closure 在飞 + 避免与框内残留拼接）。
+- 无停止条件、无阻塞；loop-driver LIVE。

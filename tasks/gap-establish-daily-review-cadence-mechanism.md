@@ -1,0 +1,101 @@
+---
+id: gap-establish-daily-review-cadence-mechanism
+title: land the human's daily review cadence decision as a mechanism — calendar-
+  tied once/day, manager initiates/aggregates, three checklist items incl. a
+  reusable strategic-doc-staleness checker (generalize the roadmap AC4 grep)
+status: todo
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+---
+
+**type:** execution
+
+## Proposal
+
+人已裁定复盘节奏（**决定，不是建议**），来源：`FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`
+引出的「外层有没有做整体分析」缺口的处置。
+
+**裁定的三要素**：
+
+1. **频率**：每天一次，**按日历时间挂钩**，不按任务量/tick 数——架构决定（ADR-022 这类）不会与任务
+   速度成比例发生；
+2. **谁做**：管理者发起并汇总，外层参与作答，人接收结果、**保留方向裁定权**（不要求人自己审查，
+   但方向性改变仍需人点头）；
+3. **看什么（三项具体清单）**：
+   (a) **机械检查战略文档是否过期**——扫 `docs/proposals/`、`orchestration/*ROADMAP*` 类文件，
+      查引用已删除文件路径或已废除 ADR 描述的机制。**`gap-roadmap-silently-stale-...` 任务里写的
+      AC4 grep 检查要固化成通用可复用脚本，不是一次性用完**；
+   (b) 近期新建 `gap-*` 任务**能不能追溯到明确写下来的战略问题**，还是纯反应式；
+   (c) **扩展 `outer-phase-goal.md` / `manager-phase-goal.md` 现有的「复核记录」范围**，从只覆盖角色
+      纪律扩到覆盖**方向本身有没有偏**，不另起一套。
+
+### 选定机制
+
+**把复盘变成机制**（不是靠角色记得）：
+
+1. **复盘节奏文档**（`orchestration/REVIEW-cadence.md` 或等价）：写下频率（日历挂钩/每天）、角色
+   （管理者发起汇总/外层参与/人接收+方向裁定权）、三项清单——未来任何会话可引用；
+2. **通用过期检查器** `plugin/scripts/strategic-doc-staleness-check.ts`：扫 `docs/proposals/` +
+   `orchestration/*ROADMAP*`，检出「引用已删除文件路径 / 已废除 ADR 机制」的条目（把路线图任务的
+   AC4 判据泛化：按**路径存在性 + 已废除机制引用**判，不按关键词）；接 `scripts/test.sh` 的
+   `run_static_checks`（防回归）；
+3. **复核记录扩方向**：`outer-phase-goal.md` 复核记录加「方向漂移」一列（近窗口 gap-* 是否有书面
+   战略追溯、路线图是否过期）；`manager-phase-goal.md` 的复核由管理者自己扩（外层不代笔，任务标注）。
+
+**第一次复盘输入**：今天的发现（`FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`）——
+机制落地的同时跑第一次，把「路线图过期 + 临场推 meta-cc」记进复核记录。
+
+## Acceptance Criteria
+
+- [ ] AC1: `orchestration/REVIEW-cadence.md`（或等价）存在——频率（日历挂钩/每天）、角色（管理者
+      发起汇总/外层参与/人接收+方向裁定权）、三项清单写全；未来会话可引用
+- [ ] AC2: **通用过期检查器** `plugin/scripts/strategic-doc-staleness-check.ts`——扫 `docs/proposals/`
+      + `orchestration/*ROADMAP*`，检出「引用已删除文件路径 / 已废除 ADR 机制」条目（按路径存在性 +
+      废除机制引用判，不按关键词；路线图任务的 AC4 判据泛化复用）
+- [ ] AC3: 检查器接 `scripts/test.sh` 的 `run_static_checks`（防回归——新过期引用被静态抓到）
+- [ ] AC4: **gap-* 可追溯性**——复盘时对近窗口新 gap-* 逐个判「可追溯到书面战略问题」或「纯反应式
+      （记录）」，实跑输出贴任务体
+- [ ] AC5: `outer-phase-goal.md` 复核记录扩展覆盖方向（近窗口 gap-* 战略追溯 + 路线图过期检查两行）；
+      `manager-phase-goal.md` 的扩展标注「管理者自己扩」（外层不代笔）
+- [ ] AC6: **第一次复盘执行**——用今天的发现当输入，跑一遍三项清单，结果写进复核记录（非空）
+- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Definition of Done
+
+- [ ] AC1–AC7 全部勾上；AC4/AC6 实跑输出逐字贴任务体
+- [ ] 复盘是机制不是角色记得——REVIEW-cadence 文档 + 通用检查器 + 复核记录扩展都在
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+## Touches
+
+- orchestration/REVIEW-cadence.md (new)
+- plugin/scripts/strategic-doc-staleness-check.ts (new)
+- plugin/test/strategic-doc-staleness-check.test.mjs (new)
+- scripts/test.sh（run_static_checks 接线）
+- orchestration/outer-phase-goal.md（复核记录扩方向）
+- orchestration/manager-phase-goal.md（标注管理者自扩）
+- orchestration/FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md（第一次复盘输入）
+
+## Contract
+
+measure   stale_refs_found = `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts` stdout 的条目数字段
+band      stale_refs_found = 0（无过期引用；或每条都有 superseded 标注不算）
+invariant reusable_not_one_off = 1（路线图任务的 AC4 判据泛化成通用脚本，非一次性 grep）
+invoke    `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts`
+control   构造含已删除路径引用的假文档 ⇒ 必须检出；删除后 ⇒ 必须不检出
+resume    检查器与节奏文档分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T02:2xZ
+changed: 外层受人裁定（决定）立案。三处收紧：
+(1) **频率按日历不按任务量**——架构决定不随任务速度发生，写死日历挂钩；
+(2) **AC2 通用脚本**——路线图任务的 AC4 grep 判据泛化成 reusable 检查器 + run_static_checks 接线，
+不允许「一次性用完」；
+(3) **AC6 第一次复盘用今天发现当输入**——机制落地即跑第一次，把「路线图过期 + 临场推 meta-cc」
+记进复核记录，不空转。
+status: todo——不阻塞当前批；这是人对「战略分析缺口」的处置，排高优先。

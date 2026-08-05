@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 02:05Z | `unblock` | 人裁定复盘节奏为决定（每天一次按日历/管理者发起汇总/外层参与/人保留方向裁定权；三项清单 a 通用过期检查器 b gap-* 可追溯 c 复核记录扩方向）→ 立案机制任务 `gap-establish-daily-review-cadence-mechanism`（todo 高优先，REVIEW-cadence 文档 + strategic-doc-staleness-check.ts + run_static_checks 接线 + 复核记录扩展 + 第一次复盘用今天发现） | 内层：batch-4 closure agent 在飞（general-purpose 查 quay-native task edit CLI flags，1m51s/99.4k tokens）；5 任务仍 ready 待翻转 | ①人裁定原文读核（三要素 + 三项清单）；②任务四件套写全 + Dispatch review；③closure 实况 pane+transcript 核实（1 agent 99.4k tokens，非空跑） |
 | 2026-08-05 01:45Z | `correct`（correct-self：外层承认没做整体分析——0 设计改动 + 路线图静默过期） | 读调查全文；立案 2 条战略任务（路线图 superseded + 跨项目可迁移问题钉住）；复盘节奏建议交人裁定 | 内层：batch-4 全量运行中 | ①调查文档读核（两层发现）；②2 条战略任务立案；③`--detect-stop` 无命中 |
 | 2026-08-05 01:42Z | `no-action` | 核实 ac3b 合并完成（AC1-AC7 全勾含改名负控制，AC3b 证明完整——管理者 meta-cc 解阻塞）；batch-4 全量运行中；内层上下文 1h8m | 内层：等 batch-4 全量，绿后关 5 任务 | ①ac3b 任务 AC/DoD 读核（改名负控全勾）；②git log 核合并；③inProgress 0 + detect-stop 无命中 |
 | 2026-08-05 01:22Z | `no-action` | 核实 batch-4 全关（eighty-two 合并）+ ac3b 已派发且 AC1 刷新落地（installed quay.js mtime 08-03→08-05 01:21，管理者 meta-cc 阻塞解除）；改名负控待安全窗口 | 内层：ac3b agent 完成刷新，备忘「等完成通知后关批 4」 | ①stat 核 installed mtime 变化（刷新实证）；②git log 核 batch-4 全关 + ac3b 派发；③inProgress 1 + detect-stop 无命中 |
