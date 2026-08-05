@@ -5338,3 +5338,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   node / 非 strip-types / 失败告警不只日志）。
 - **B 机里程碑**：inner 首个自主提交 d8e10093（22:51:46）——**两层在 B 真跑起来了**（AC12b 测量真正开始）。
 - 与 lease-model 任务交叉（同文件，alarm + 租约一起改）。
+
+### tick 2026-08-05T22:5xZ 补充2（外层，watchdog 范围裁定——最顶端会话）
+
+- **管理者能力边界实测**：session-liveness 纯观测不能动手；inner-session-check 能动手；manager Monitor
+  只观测。⇒ inner 层不需要 watchdog（outer 三态自检覆盖）；**唯一不可替代角色 = 最顶端会话**（真实用户 =
+  outer，无 manager 可救）。
+- **频率异议采纳**：低触发 ≠ 低风险（今晚 4 次全灭正是场景，当时没装）。
+- **范围裁定**（比「取消」更窄）：不取消——默认关 + 租约启用 + **只看护最顶端一个会话**（3→1 爆炸半径）；
+  inner 归 outer 三态自检、outer 归 manager（有 manager 时）。已并入 lease-model 任务。
