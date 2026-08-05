@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "env": {
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "917000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "917000",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "80",
+    "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1",
+    "CLAUDE_CODE_DISABLE_MOUSE": "1",
+    "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false"
+  },
+  "_launchSpec": {
+    "version": 1,
+    "excludeDynamicSystemPromptSections": true,
+    "roles": {
+      "manager": {
+        "name": "quay-manager",
+        "launcher": "claude",
+        "model": null,
+        "env": {
+          "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "",
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "",
+          "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": ""
+        }
+      },
+      "outer": {
+        "name": "quay-outer",
+        "launcher": "claude-deepseek",
+        "model": "deepseek-v4-flash",
+        "env": {}
+      },
+      "inner": {
+        "name": "quay-inner",
+        "launcher": "claude-deepseek",
+        "model": "deepseek-v4-flash",
+        "env": {}
+      }
+    },
+    "bare": {
+      "enabled": true,
+      "purpose": "一次性验证会话（AC5）：--bare 最小模式（跳过 hooks/LSP/plugin 同步/自动记忆/预取），不长驻",
+      "usage": "quay-launch.sh <role> --bare"
+    },
+    "deferredToPpMigration": [
+      {
+        "flag": "--replay-user-messages",
+        "why": "结晶送达确认算法（send-keys-reliable.sh）的原生版本",
+        "when": "-p 迁移决定后（stream-json 模式）"
+      },
+      {
+        "flag": "--max-budget-usd",
+        "why": "对冲 -p 只认 API key 的计费风险",
+        "when": "-p 迁移决定后（print 模式）"
+      },
+      {
+        "flag": "--forward-subagent-text",
+        "why": "子代理文字转发，减少手工读 subagent jsonl",
+        "when": "-p 迁移决定后（print+stream-json）"
+      }
+    ]
+  }
+}

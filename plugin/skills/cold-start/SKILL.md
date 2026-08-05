@@ -34,6 +34,15 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 
+**Launch config is checked-in, not remembered.** The correct per-role launch command lives in
+`<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
+materialized by `<root>/plugin/scripts/quay-launch.sh`. If a session must be (re)started during this
+skill, run `bash <root>/plugin/scripts/quay-launch.sh <role>` (roles `manager|outer|inner`) — never
+hand-type a shell one-liner from memory (`gap-crystallize-launch-config-into-checked-in-settings-file`).
+Verify the command without starting anything: `bash <root>/plugin/scripts/quay-launch.sh <role> --dry-run`.
+For a one-shot verification session use `bash <root>/plugin/scripts/quay-launch.sh <role> --bare`
+(minimal mode, not long-lived).
+
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
 "The same skill command produces the same observable consequences on any model" is only meaningful

@@ -51,21 +51,59 @@ AC1 的负控制正是那次）。调研找到 5 项高相关，其中 3 项适�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 检查进仓库的 settings 文件（或等价固化形态）含当前模式必带参数：
+- [x] AC1: 检查进仓库的 settings 文件（或等价固化形态）含当前模式必带参数：
       `--exclude-dynamic-system-prompt-sections` + `-n/--name`（outer/inner/manager 各自身份）+ 既有
       `--prompt-suggestions false`（ghost 任务）；启动规范（restart-plan + cold-start SKILL.md）引用它，
       **不再是一条手打 shell 一行**
-- [ ] AC2: 并发子代理 cache 收益可证——并发 worktree 子代理（如 batch-4 形态）启动带
+      落地：`.claude/launch.settings.json`（schema 键 `permissions.defaultMode=bypassPermissions` +
+      `env` 六项含 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="false"`；扩展 `_launchSpec` 含
+      `excludeDynamicSystemPromptSections:true` + 三角色 `name`/`launcher`/`model`/`env`）。917k 上下文/
+      压缩是 deepseek 专用——manager 角色 `env` 把三个 917k 变量置空串（launcher 合并时删键），避免
+      Anthropic 默认模型「压缩过晚 API 报错」（session-launch-recipes §5）。launcher
+      `plugin/scripts/quay-launch.sh` 把 `_launchSpec` 翻译成逐字 CLI 参数，其余 claude 参数透传
+      （如 `-p`）。启动规范（session-launch-recipes §7、cold-start SKILL §Preconditions、restart-plan §7）
+      均引用 settings 文件。
+      全链路实跑：`bash plugin/scripts/quay-launch.sh inner --bare -p "reply with exactly: E2E-OK"`
+      → `E2E-OK`（settings 文件 → launcher → claude-deepseek wrapper → 真实 claude 会话）。
+- [x] AC2: 并发子代理 cache 收益可证——并发 worktree 子代理（如 batch-4 形态）启动带
       `--exclude-dynamic-system-prompt-sections` 后，prompt cache 命中率/token 量变化记录
       （cache 命中率上升或同负载 token 下降为判据）
-- [ ] AC3: `-n/--name` 落地——outer/inner/manager 会话有稳定可读名，session-liveness 的
+      实测（两个不同 cwd，back-to-back `claude -p --output-format json --verbose`，同 prompt）：
+      ```
+      无 flag：cwd1 in=54936  |  cwd2 in=55418  → Δ=482 tokens（system prompt 含 cwd/env/git 段，跨 cwd 不同）
+      带 flag：cwd1 in=54856  |  cwd2 in=54856  → Δ=0   （per-machine 段挪进首条 user 消息，system prompt 逐字节相同）
+      ```
+      Δ=0 即跨 worktree cwd 复用的**可观测前置条件**（相同 system prompt 前缀 ⇒ cache 可命中）。注：deepseek
+      端点对 `cache_read_input_tokens`/`cache_creation_input_tokens` 一律报 0，故记 input_tokens 稳定性为判据；
+      真 batch-4 的命中率绝对值待下次并发批实测。
+- [x] AC3: `-n/--name` 落地——outer/inner/manager 会话有稳定可读名，session-liveness 的
       「这是谁的会话」判据能按名分辨（实跑输出贴任务体）
-- [ ] AC4: **负控制（settings 文件防打错）**——按 settings 文件启动的会话，其启动参数与文件逐字一致
+      实跑：`claude-deepseek --settings .claude/launch.settings.json --exclude-dynamic-system-prompt-sections
+      --model deepseek-v4-flash -n quay-ac3-probe -p "reply with exactly: NAME-OK"` → `NAME-OK`；
+      会话 transcript 记名：
+      `{"type":"custom-title","customTitle":"quay-ac3-probe","sessionId":"61fed127-0f9b-4d30-99a1-9b2056508c36"}`
+      launcher 三角色 `-n quay-manager / quay-outer / quay-inner` 互不相同（AC7 测试断言）。
+- [x] AC4: **负控制（settings 文件防打错）**——按 settings 文件启动的会话，其启动参数与文件逐字一致
       （对照输出贴任务体）；刻意改错一个参数 ⇒ 启动参数与文件不一致（负控制）
-- [ ] AC5: `--bare` 用于一次性验证会话的规范落地（记录在启动规范；标注「一次性验证用」，不长驻）
-- [ ] AC6: -p 条件性三项标注在启动规范/调研文档（replay/max-budget/forward-subagent-text 延后到 -p
+      正控（launcher --dry-run 输出与 settings 文件逐字一致）：
+      ```
+      $ bash plugin/scripts/quay-launch.sh outer --dry-run
+      claude-deepseek --settings /home/yale/work/quay-worktrees/launch-config/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --model deepseek-v4-flash -n quay-outer
+      ```
+      invoke 校验：`claude --settings .claude/launch.settings.json --version` → `2.1.222 (Claude Code)`（exit 0）。
+      负控（AC7 测试）：把 `_launchSpec.roles.inner.model` 从 `deepseek-v4-flash` 改成 `deepseek-v4-pro` ⇒
+      `quay-launch.sh inner --dry-run` 输出含 `--model deepseek-v4-pro`，与正控命令不一致。
+- [x] AC5: `--bare` 用于一次性验证会话的规范落地（记录在启动规范；标注「一次性验证用」，不长驻）
+      落地：`_launchSpec.bare`（enabled+purpose+usage）+ launcher `--bare` 参数（AC7 测试断言正常启动不含
+      `--bare`、显式 `--bare` 才追加）；cold-start SKILL §Preconditions 记录一次性验证形态。
+- [x] AC6: -p 条件性三项标注在启动规范/调研文档（replay/max-budget/forward-subagent-text 延后到 -p
       迁移决定），不现在实现
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`（若 settings 校验可测试化）
+      落地：`_launchSpec.deferredToPpMigration` 三项（flag/why/when）+ RESEARCH 文档 §高相关但 -p 条件性
+      标注「不现在实现」。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（若 settings 校验可测试化）
+      落地：`plugin/test/launch-settings.test.mjs`（`// @test-group governance`，11 用例全过）：
+      `node --test plugin/test/launch-settings.test.mjs` → `pass 11 / fail 0 / cancelled 0`；
+      `scripts/test.sh --for-task ... --allow-thin` 全绿（静态 tier + dist build + 11 用例，exit 0）。
 
 ## Definition of Done
 
@@ -81,7 +119,13 @@ AC1 的负控制正是那次）。调研找到 5 项高相关，其中 3 项适�
 - orchestration/restart-plan-2026-08-04-third.md（或当前启动计划）
 - plugin/skills/cold-start/SKILL.md
 - orchestration/session-launch-recipes.md
-- （新增）启动 settings 文件（如 `.claude/launch.settings.json`）
+- `.claude/launch.settings.json` (new)（启动 settings 文件）
+- `plugin/scripts/quay-launch.sh` (new)（launch spec 的机械加载器：settings → 逐字启动命令）
+- `plugin/test/launch-settings.test.mjs` (new)（AC7 settings/launcher 校验测试）
+
+## Test-Files
+
+- plugin/test/launch-settings.test.mjs
 
 ## Contract
 
