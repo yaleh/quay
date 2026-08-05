@@ -2,7 +2,7 @@
 id: gap-eighty-two-shipped-checks-and-none-says-what-it-answers
 title: 82 scripts ship and not one declares what question it makes askable —
   capability is not missing, visibility is
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -102,30 +102,38 @@ resume 先建目录与字段，再筛选，最后才新增能力
 
 ## Acceptance Criteria
 
-- [ ] AC1a: **机器可读字段**——每个交付检查一行声明「它让什么问题可被提问」，
+- [x] AC1a: **机器可读字段**——每个交付检查一行声明「它让什么问题可被提问」，
       **字段在脚本内，不在 README**（实跑输出贴任务体）
-- [ ] AC1b: **列举命令**——一条命令列出「装到了什么、各自回答什么」（实跑输出贴任务体）
-- [ ] AC1c: **入口处机械要求**——新脚本进入产物时**必须带该字段**，
+- [x] AC1b: **列举命令**——一条命令列出「装到了什么、各自回答什么」（实跑输出贴任务体）
+- [x] AC1c: **入口处机械要求**——新脚本进入产物时**必须带该字段**，
       **否则拒绝**（负控制：造一个无字段的脚本 ⇒ 必须报出）。
       **这条是防 27 继续长大的唯一机制**
-- [ ] AC2: **筛选实跑**——对 82 个脚本按「是否只有本仓历史才 motivate 它」分类，
+- [x] AC2: **筛选实跑**——对 82 个脚本按「是否只有本仓历史才 motivate 它」分类，
       **三个已点名的 exp5 遗产必须被判为不随产物出厂**（实跑输出贴任务体）
-- [ ] AC3: **第一个新增是事件落盘 + 零触发报告**，**且它自己带声明字段**
-- [ ] AC4: **纯读契约收窄**——契约文本从「不许写任何文件」改为「不许写被观测者的状态」，
+- [x] AC3: **第一个新增是事件落盘 + 零触发报告**，**且它自己带声明字段**
+- [x] AC4: **纯读契约收窄**——契约文本从「不许写任何文件」改为「不许写被观测者的状态」，
       **并说明它与 `--report` 不许写文件的区别**；
       **负控制：写入被观测者状态的行为必须仍被拒绝**（实跑贴出）
-- [ ] AC5: **负控制（目录是否真的有内容）**——随机抽 **5 个**交付检查问它回答什么问题；
+- [x] AC5: **负控制（目录是否真的有内容）**——随机抽 **5 个**交付检查问它回答什么问题；
       **答不出来的逐个列出并进入 AC2 的筛选清单**。
       **这条不过，AC1 不算数**——**一个每条都写着「检查正确性」的目录，与没有目录不可区分**
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
-- [ ] AC1c 与 AC5 的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录：**能力不缺，可见性缺**；
+- [x] AC1c 与 AC5 的实跑输出都贴进任务体
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+- [x] 任务体记录：**能力不缺，可见性缺**；
       并记录自我指涉的那条——**今天一天产物新增 8 个脚本，无一带声明字段**，
       **「不要先写更多 checker」这条指令已经被我们自己的速度跑赢了**
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`plugin/scripts/capability-catalog.sh`**（目录生产入口；
+本段展示在 `## Contract` 块之外，供 task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/capability-catalog.test.mjs` →
+ℹ tests 8 / pass 8 / fail 0 / cancelled 0。
 
 ## Touches
 

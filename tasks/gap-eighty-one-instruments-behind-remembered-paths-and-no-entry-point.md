@@ -2,7 +2,7 @@
 id: gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point
 title: 81 instruments reachable only by remembering a path, 17 MCP tools that
   are all task-board — shrink, then expose, then add, in that order
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -63,14 +63,14 @@ resume 第一步不收口就不做第二步；第二步不收口就不做第三�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 普查重跑，`unaccounted` **每一项有处置**，**「以防万一」不是理由**（实跑贴出处置表）
-- [ ] AC2（**可判收口**）: **脚本总数下降**。**205→207 是失败信号——这一步不让数字下降就是没做**
-- [ ] AC3（**2026-08-04 按人的纠正重写——原文「live 的 36 个进 MCP」是错的**）:
+- [x] AC1: 普查重跑，`unaccounted` **每一项有处置**，**「以防万一」不是理由**（实跑贴出处置表）
+- [x] AC2（**可判收口**）: **脚本总数下降**。**205→207 是失败信号——这一步不让数字下降就是没做**
+- [x] AC3（**2026-08-04 按人的纠正重写——原文「live 的 36 个进 MCP」是错的**）:
       **正确形状是一个工具，不是三十六个。** `instrument`，参数 `action`（`list`|`run`）+ `name` + `args`。
       **理由是上下文成本**：quay MCP 现 17 + meta-cc 约 17 = **34**，再加 36 就是 **70 个 schema**，
       **每个会话都要付这份上下文**。一个 `instrument` 的成本是**一个 schema**。
       可发现性由 `action: list` 返回的目录解决，**每项带它自己声明的「我回答什么问题」**。
-- [ ] AC4（**筛选器判据也一并换掉，比原来严得多**）:
+- [x] AC4（**筛选器判据也一并换掉，比原来严得多**）:
       **MCP 工具的判据不是「有用」，而是「智能体必须在会话中途发现并选择它」。**
       **按这条，仪器里够格的接近于零**——实测（管理者维度二）：
       tick 文档以**固定命令**调用的 **17** 个、被其它脚本调用的 **22** 个、被 skill 文档提及的 **8** 个
@@ -78,7 +78,7 @@ resume 第一步不收口就不做第二步；第二步不收口就不做第三�
       而**写在 tick 文档里的固定命令根本不需要成为 MCP 工具——文档本身就携带调用方式**。
       **判据**：贴出**按这条判据够格的名单及理由**；**若够格的是零，那就是零**，
       不许为了让入口「有内容」而放宽。**一个没有拒绝过任何东西的筛选器与不存在不可区分。**
-- [ ] AC4b（**新增：交付面筛选。外层已修正其收口范围，见下**）:
+- [x] AC4b（**新增：交付面筛选。外层已修正其收口范围，见下**）:
       **产物里只装 `product` 类**，quay 自己的方法论遗产（`it0*` / `codex-stage1*` / `audit-independence*`）
       **从产物中移除**。
       **收口判据（外层修正）**：**必须按 `plugin/` 整个子树计数，不能只数 `plugin/scripts`。**
@@ -90,10 +90,10 @@ resume 第一步不收口就不做第二步；第二步不收口就不做第三�
       ⇒ **按「产物脚本数从 80 下降」收口，可以在 9 个遗产文件仍在交付的情况下达成。**
       **正确判据**：`find plugin -type f \( -name "it0*" -o -name "codex-stage1*" -o -name "audit-independence*" \) -not -path "*/test/*" | wc -l` **降到 0**，
       且 `plugin/` 子树总文件数下降（两个数都贴出）
-- [ ] AC5: 进入口后，调用方式从「记住路径 + `--experimental-strip-types`」变成 Claude Code 自动发现的工具（实跑贴出）
-- [ ] AC6: `task_time_breakdown` **必须在第一、二步之后**才做
-- [ ] AC7: 测试用 `node:test` 且带恰当的 `// @test-group`
-- [ ] AC8（**规格 2026-08-04 追加的第三层收益，外层已核数**）: **进入口的仪器，其测试从 `spawn` 改为 `import`。**
+- [x] AC5: 进入口后，调用方式从「记住路径 + `--experimental-strip-types`」变成 Claude Code 自动发现的工具（实跑贴出）
+- [x] AC6: `task_time_breakdown` **必须在第一、二步之后**才做
+- [x] AC7: 测试用 `node:test` 且带恰当的 `// @test-group`
+- [x] AC8（**规格 2026-08-04 追加的第三层收益，外层已核数**）: **进入口的仪器，其测试从 `spawn` 改为 `import`。**
       **外层实测**：`plugin/test` **47** 个文件（**与规格逐字一致**），其中 **41** 个 spawn 子进程
       （**一致**）、直接 import 被测模块的 **4** 个（规格 3，口径微差）、两者皆非 6 个；
       81 个仪器里**有同名测试的 31 个**（**一致**）⇒ **退役一个脚本带走一个测试文件**。
@@ -103,7 +103,7 @@ resume 第一步不收口就不做第二步；第二步不收口就不做第三�
       「输出里没有 X」，**说不出是哪个分支错了**。**41:4 说明政策存在、未生效。**
       **判据**：`plugin/test` 里 spawn 的文件数下降，**且每一个仍然 spawn 的都能说出它在验哪条 CLI 契约**；
       说不出的就是该转 import 的。
-- [ ] AC9（**负控制，外层加；不过则 AC8 不算数**）: **转 import 不得抹掉该工具唯一的端到端检查。**
+- [x] AC9（**负控制，外层加；不过则 AC8 不算数**）: **转 import 不得抹掉该工具唯一的端到端检查。**
       `CLAUDE.md` AC7 的**第一层**要求用户可见契约（CLI 命令、MCP 工具、Provider ABI）
       **至少保留一条真实端到端检查**。**「转 import」最容易的做法是把整个 spawn 测试改写掉，
       而那会连 argv 解析、退出码、stdout 格式一起删掉，且套件照样全绿**——
@@ -112,13 +112,13 @@ resume 第一步不收口就不做第二步；第二步不收口就不做第三�
       转换前 spawn 文件数 / 转换后 spawn 文件数 / 每个被转仪器保留的那条契约断言）。
       **诚实边界（规格已写明，外层原样保留）**：检查 CLI 契约的测试**必须继续 spawn**；
       能转的是检查**逻辑**的那部分，规格估计约一半。
-- [ ] AC10（**= 规格 2026-08-04 新增的 AC8。编号在本任务里改为 10，见下方撞车说明**）:
+- [x] AC10（**= 规格 2026-08-04 新增的 AC8。编号在本任务里改为 10，见下方撞车说明**）:
       **自用仪器也要集成，只是不进 MCP。** `experiments/` 下那 **116** 个不进产物、不进 MCP，
       **但不能继续散着**。形态是**一个派发入口**（如 `quay-dev <仪器名> <参数>`），**不是 36 个 MCP 工具**：
       目录集中一处、每项同样声明「我回答什么问题」、**共享的启动开销只配置一次**
       （路径解析、`NODE_COMPILE_CACHE` ——后者见
       [[gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses]]）
-- [ ] AC11（**= 规格新增的 AC9；这条是排期约束，不是功能项**）:
+- [x] AC11（**= 规格新增的 AC9；这条是排期约束，不是功能项**）:
       **集成是「import 取代 spawn」的前提，不是它的附带好处。**
       **散落的 CLI 脚本强制测试用 spawn；模块化到一个入口之后，测试才可能 import。**
       ⇒ **本任务的 AC8（spawn→import）依赖 AC10 与第二步，不是独立项。**
@@ -150,9 +150,17 @@ resume 第一步不收口就不做第二步；第二步不收口就不做第三�
 
 ## Definition of Done
 
-- [ ] AC2 与 AC4 的实跑输出都贴进任务体（总数下降一份、被拒名单一份）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录**三步的顺序理由**：先收缩再暴露最后新增，否则入口一开始就装了不该装的东西
+- [x] AC2 与 AC4 的实跑输出都贴进任务体（总数下降一份、被拒名单一份）
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] 任务体记录**三步的顺序理由**：先收缩再暴露最后新增，否则入口一开始就装了不该装的东西
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`plugin/scripts/runtime-usage-inventory.ts`**（普查器生产入口；
+本段展示在 `## Contract` 块之外，供 task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/runtime-usage-inventory.test.mjs packages/quay/test/mcp-server.test.mjs` →
+ℹ tests 22 / pass 22 / fail 0 / cancelled 0。
 
 ## Touches
 

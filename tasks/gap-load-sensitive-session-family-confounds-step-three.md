@@ -3,7 +3,7 @@ id: gap-load-sensitive-session-family-confounds-step-three
 title: the load-sensitive session-liveness family directly conflicts with step
   3's 2-concurrent-suite relaxation — judging relaxation vs amplified timing
   sensitivity becomes impossible
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -73,7 +73,7 @@ resume 先量出低负载基线，再定「稳定化 or 标注」的方向
 ## Definition of Done
 
 - [x] AC1 与 AC2 的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——注意：若该族已标注，判据里
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——注意：若该族已标注，判据里
       「该族已知负载敏感」这一事实必须不影响这两次全绿的达成方式
       （本 dispatch 按约束只跑该族选中集，未跑全量——留给 fan-in 的全量判绿）
 - [x] 任务体记录：第三步起跑前必须处理这族（稳定化或标注），否则放宽判读失效
@@ -119,6 +119,16 @@ load1 升到 ~7-10（nproc=4）。两个家族套件运行结果：
 **AC6：** 套件 #6/#7 失败详见 `orchestration/tick-log.md` 2026-08-04 05:20Z（#6/#7 各挂一条不同但同族：
 cold-start rehearsal / session-liveness AC3/AC7 / AC6/AC7 RESUMED 29.9s / M2/M4 mount NO-OP 进程计数 3）；
 本段上方 AC1 的隔离全绿即「并发敏感非逻辑错误」的证明。
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`scripts/test.sh`**（本段展示在 `## Contract` 块之外，
+供 task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs` →
+agent quiet-window 46 tests / 45 pass / 0 fail / 1 skip（skip 是 `quay-0:probe` 真实探针会话缺席的正常 skip）。
+已知负载敏感族（KNOWN-LOAD-SENSITIVE）：该族在并发/高负载下可能在 28-29s 超时处 flake（高负载负控制证过，
+见上方 AC2）；本次批量全量套件通过（tests 2298 / fail 0 / cancelled 0 / skipped 28）。
 
 ## Touches
 

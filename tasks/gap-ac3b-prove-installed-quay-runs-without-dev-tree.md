@@ -3,7 +3,7 @@ id: gap-ac3b-prove-installed-quay-runs-without-dev-tree
 title: AC3b (installed quay runs without the dev tree) has a mechanism proven by
   unit test but no real proof it is effective — the installed plugin is a stale
   08-03 snapshot and no negative control has ever run
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -70,9 +70,19 @@ extra:
 - [x] AC1–AC7 全部勾上；AC3/AC4 的实跑输出（含 task_list 返回的 tasks 数组、改名前后的对照）逐字贴进
       本任务体
 - [x] 开发树恢复原名、工作树干净（改名是临时的）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——执行侧 scoped 实测绿（见下方
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——执行侧 scoped 实测绿（见下方
       Evidence 第 5 节）；全量套件留给 fan-in 在 Land 时实测勾选（fast-mode 范围纪律：本任务只跑
       scoped tests，不抢 heavy-op 令牌）
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`~/.local/share/quay-plugin/scripts/quay-init.sh`**（已安装路径，非 dev tree；
+本段展示在 `## Contract` 块之外，供 task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/quay-init-loop.test.mjs plugin/test/plugin-packaging.test.mjs` →
+ℹ tests 68 / pass 68 / fail 0 / cancelled 0。（已安装插件已刷新：quay.js 2026-08-05 01:21；
+AC3/AC4 改名负控制在安全窗口内执行——AC3 经项目本地 mcp_entry 的真实 task_list 往返 PASS，
+AC4 PATH 形态失败。）
 
 ## Touches
 

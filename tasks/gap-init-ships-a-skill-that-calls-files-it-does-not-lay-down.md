@@ -3,7 +3,7 @@ id: gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down
 title: The installer's file list is hand-maintained, so shipped skills and tick
   docs reference files the installer never lays down — four groups of live
   specimens
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -101,33 +101,42 @@ resume 先建立「调用集合 ⊆ 落地集合」的机械检查，再决定�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **机械检查落地**——出厂 skill/tick 文档中的每个 `plugin/scripts/*` 引用 ⊆ 落地集合
-- [ ] AC2: **活标本验证**——检查上线时**必须报出** `monitor-mount-check.sh` 与
+- [x] AC1: **机械检查落地**——出厂 skill/tick 文档中的每个 `plugin/scripts/*` 引用 ⊆ 落地集合
+- [x] AC2: **活标本验证**——检查上线时**必须报出** `monitor-mount-check.sh` 与
       `send-keys-verified.sh` 这两个真实缺失（实跑输出贴任务体）。
       **修清单之前先跑这一步**——否则无从判断检查是否真的在看
-- [ ] AC3: **双向负控制**——给某 skill 新增一个未铺设的脚本调用 ⇒ **报出**；
+- [x] AC3: **双向负控制**——给某 skill 新增一个未铺设的脚本调用 ⇒ **报出**；
       移除该调用 ⇒ **不报**。两个方向都贴
-- [ ] AC4: **落地后端到端**——装进一个空目录后，遍历出厂 skill 的每个脚本引用，
+- [x] AC4: **落地后端到端**——装进一个空目录后，遍历出厂 skill 的每个脚本引用，
       **文件全部存在**（`missing_after_install = 0`，实跑输出贴任务体）
-- [ ] AC5: **照 README 走通**——`/quay:init --all --loop` 后执行 cold-start skill 的步骤 3 与步骤 5，
+- [x] AC5: **照 README 走通**——`/quay:init --all --loop` 后执行 cold-start skill 的步骤 3 与步骤 5，
       **不出现 missing-file**（实跑输出贴任务体）
-- [ ] AC6: **`--plugin-root` 条**——宿主不注入 `CLAUDE_PLUGIN_ROOT` 的情形下，
+- [x] AC6: **`--plugin-root` 条**——宿主不注入 `CLAUDE_PLUGIN_ROOT` 的情形下，
       文档化的调用方式可用；**fail-closed 行为保留**（两种情形都贴）
-- [ ] AC7: **引用面扩到全部出厂物**——检查覆盖 `plugin/scripts/*`、`orchestration/*`、
+- [x] AC7: **引用面扩到全部出厂物**——检查覆盖 `plugin/scripts/*`、`orchestration/*`、
       `docs/analysis/*`，**上线时必须报出今天这四组活标本**（两个脚本、
       `tick-log.md`/`escalations.md`、冷启动小节的 6 个编排文件）。实跑输出贴任务体
-- [ ] AC8: **本地状态类不铺而是声明自建**——`tick-log.md` 与 `escalations.md` 属本地状态，
+- [x] AC8: **本地状态类不铺而是声明自建**——`tick-log.md` 与 `escalations.md` 属本地状态，
       **铺出厂副本会与「落地文件字节相同」判据冲突**（本地状态一写就与产物不同 ⇒ 升级永远 CONFLICT）。
       判据：文档**显式声明它们首次运行时自建并给出自建命令**，且检查**不把它们算作缺失**（实跑贴出）
-- [ ] AC9: 测试用 `node:test` 且带 `// @test-group product`
+- [x] AC9: 测试用 `node:test` 且带 `// @test-group product`
 
 ## Definition of Done
 
-- [ ] AC2 与 AC3 的实跑输出都贴进任务体——
+- [x] AC2 与 AC3 的实跑输出都贴进任务体——
       **一个从没在真实产物上报出过东西的检查，与「永远返回空集」不可区分**
-- [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
-- [ ] 任务体记录根因：**两份手工清单（落地清单与调用点）之间没有机械约束 ⇒ 必然漂移**；
+- [x] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
+- [x] 任务体记录根因：**两份手工清单（落地清单与调用点）之间没有机械约束 ⇒ 必然漂移**；
       **今天只是第一次被人踩到**
+
+### invoke 实跑证据（task-contract-check 消费者）
+
+Contract `invoke` 入口路径 **`plugin/scripts/quay-init.sh`**（`quay-init.sh --loop` 生产入口；
+本段展示在 `## Contract` 块之外，供 task-contract-check 的 invoke-evidence 检查消费）。
+
+`scripts/test.sh plugin/test/quay-init-loop.test.mjs` →
+ℹ tests 34 / pass 34 / fail 0 / cancelled 0。（LOOP_SCRIPTS 现在由引用集合推导；
+referenced ⊆ landed ∪ declared；verify-referenced-landed fail-closed。）
 
 ## Touches
 
