@@ -43,11 +43,45 @@ glob 展开 + MIS 子集算法的叠加）。
 
 ## Acceptance Criteria
 
-- [ ] AC1: `ready-pool-check --root "$(pwd)"` 回到 <10s（timeout 150 不再触发）
-- [ ] AC2: 判定不变——web-board/upgrade-channel/measure-claude-p 的 landed=true 保持（回归不破）
-- [ ] AC3: `notYetFlipped` 排除集不变（web-board/measure-claude-p/ready-pool-floor 仍 excluded）
-- [ ] AC4: 负控制——未派发 todo 仍不判 landed；glob/(new) 不参与（既有 AC4 夹具全绿）
-- [ ] AC5: 测试 `node:test` + `// @test-group governance`（沿用 ready-pool-check 自身测试组）
+- [x] AC1: `ready-pool-check --root "$(pwd)"` 回到 <10s（timeout 150 不再触发）
+- [x] AC2: 判定不变——web-board/upgrade-channel/measure-claude-p 的 landed=true 保持（回归不破）
+- [x] AC3: `notYetFlipped` 排除集不变（web-board/measure-claude-p/ready-pool-floor 仍 excluded）
+- [x] AC4: 负控制——未派发 todo 仍不判 landed；glob/(new) 不参与（既有 AC4 夹具全绿）
+- [x] AC5: 测试 `node:test` + `// @test-group governance`（沿用 ready-pool-check 自身测试组）
+
+## Evidence
+
+**修复实现**（两处，均在 `plugin/scripts/` + 镜像）：
+1. `task-status-drift-check.ts`：新增 `buildGitHistoryIndex()` —— **一次** `git log master --full-history
+   -m --name-only --no-renames` 全仓扫描建 path→commit 内存索引（`-m` 使 merge 逐 parent 出文件、按 hash 取
+   并集，与 per-task 路径受限 `--full-history` 的 merge 判定语义完全一致——merge 对某路径「touched」当且仅当
+   其结果与任一 parent 不同）。`gitHistoryLanded` 在 `opts.gitIndex` 存在时走内存匹配；否则保持原 per-task
+   `git log -- <paths>`（单任务 `--check` 路径不变）。
+2. `ready-pool-check.ts`：`analyzeTasks` **每进程一次** `buildGitHistoryIndex(root)`，经 `notYetFlipped`
+   透传给全部 taskWorkLanded；另将 `expandDeclaredTouches` 的 **walk-once** 文件列表（select-preflight
+   既有模式）共享给 O(n²) 的 pairwise checkTouchesPair，避免每对重走全树。
+3. `concurrent-batch-scheduler.ts`：`expandDeclaredTouches(globs, root, files=null)` 新增可选预计算文件列表
+   （缺省行为不变）。
+
+**Before/after（2026-08-05 19:47-19:56Z 实跑，4 核 load 5-13 的负载机）**：
+- before：`timeout 25` 未完成（EXIT=124，25s 截断；任务体记录 >150s ×2）。
+- after：`time node .../ready-pool-check.ts --root "$(pwd)"` = **7.2–8.2s**（3 次：7.630s / 7.248s /
+  8.223s，load≈8）；`analyzeTasks` profile = 7.1s。
+- 组件 profile：taskWorkLanded×39 用索引 **1.2s** vs 不用索引 **8.9s**；checkTouchesPair×741 共享 walk
+  **0.46s** vs 每对重走 **39s**；buildGitHistoryIndex **1.5s**（git log 1.3s + 解析）。
+
+**判定回归（Contract invoke / control）**：
+- `task-status-drift-check.ts --check gap-web-board-...` = `landed=true`（0.6s）。
+- `--check gap-upgrade-channel-cant-sync-build-artifacts-dist-stale` = `landed=true`；
+  `--check gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics` = `landed=true`。
+- pool-check `excluded`（not-yet-flipped）含 web-board / measure-claude-p / ready-pool-floor —— AC3 排除集不变。
+- 真实仓 landed 计数：索引路径 **26** == per-task 路径 **26**（无判定漂移）。
+
+**Scoped 测试（`bash scripts/test.sh --for-task gap-ready-pool-check-times-out-after-git-history-signal --allow-thin`）**：
+- EXIT=0；静态检查全 PASS（test-framework-policy / test-isolation / task-contract-check **no violations**）。
+- 测试 **69 tests, 68 pass, 0 fail, 0 cancelled**（1 skipped 为 opt-in 真实仓）。
+- 新增 3 条 batch-index 路径等价测试（web-board 正向 + never-dispatched/shared-kernel/glob+(new)/overshoot
+  负向，索引路径 == per-task 路径）。
 
 ## Definition of Done
 
@@ -78,4 +112,4 @@ resume    批量化与回归分两步提交，任一步完成即写盘
 
 reviewer: none
 at: 2026-08-05T19:4xZ
-changed: contract-ratchet compliance，外层补齐（未审——inner 新立任务）
+changed: contract-ratchet compliance，外层补齐（未审——inner 新立任务）；agent 补录实现改动：gitHistoryLanded 批量索引 + ready-pool-check walk-once + 镜像同步，见下方 AC（reviewer: inner 原注，格式补录无语义）。

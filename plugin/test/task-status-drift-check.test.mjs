@@ -51,6 +51,7 @@ import {
   formatStrandedText,
   taskWorkLanded,
   gitHistoryLanded,
+  buildGitHistoryIndex,
   messageReferencesTask,
   taskIdTokens,
   taskIdFromTouches,
@@ -897,8 +898,9 @@ test("AC6: source contains zero write calls, and a run leaves a task store byte-
   );
   // Zero fs-write APIs in the module ⇒ no code path can mutate tasks/** (the detector's Touches
   // walk only reads). The literal `tasks/**` string in its own doc comment is fine — what matters
-  // is that no write primitive exists.
-  assert.ok(!/writeFile|appendFile|createWriteStream|mkdirSync|rmSync|rm\(|unlink|copyFile|rename/.test(src), "no filesystem write calls in the detector");
+  // is that no write primitive exists. `rename` is matched as a CALL (`rename(`/`renameSync`) so a
+  // git `--no-renames` FLAG (buildGitHistoryIndex's batched `git log`) does not false-positive.
+  assert.ok(!/writeFile|appendFile|createWriteStream|mkdirSync|rmSync|rm\(|unlink|copyFile|rename\(|renameSync/.test(src), "no filesystem write calls in the detector");
 
   // A run must not mutate the store: snapshot and compare on a synthetic workspace (fast — the real
   // 553-task store scan is opt-in via AC2).
@@ -1187,6 +1189,112 @@ test("git-history: an existing-file touch coincidentally modified by other work 
     assert.equal(gitHistoryLanded(task, repo, { taskId: id }), false,
       "file existence + unrelated modification is NOT landing evidence");
     assert.equal(taskWorkLanded(task, repo), false, "existing-file task with unlanded work stays unlanded");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index path agrees with the per-task path (web-board positive + never-dispatched negative)", (t) => {
+  const repo = makeGitHistoryRepo("batch");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // web-board shape: prose AC, existing-file Touches, self-file in Touches. The fan-in merge
+    // "merge web-board: …" modified code/board.ts → the git-history signal fires.
+    const id = "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have";
+    const task = gitHistoryTask(id, "- code/board.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${id}.md`), task);
+    // A never-dispatched todo task sharing the SAME Touches path (coincidentally modified by the
+    // web-board merge) → must stay unlanded on BOTH paths (the merge does not reference it).
+    const neverId = "gap-never-dispatched";
+    const neverTask = gitHistoryTask(neverId, "- code/board.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${neverId}.md`), neverTask);
+    commitAndMerge(repo, "task/gap-web-board", "code/board.ts", "board\n",
+      "merge web-board: /board route joins intent/execution/landing");
+
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id, gitIndex: index }), true,
+      "batched index fires the positive (web-board merge touched code/board.ts)");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId, gitIndex: index }), false,
+      "batched index does NOT fire for the never-dispatched sibling sharing the path");
+    // Regression control: the per-task path agrees with the index path.
+    assert.equal(gitHistoryLanded(task, repo, { taskId: id }), true, "per-task path still fires");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId }), false, "per-task path still negative");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index preserves the shared-kernel negative control (AC4 via index)", (t) => {
+  const repo = makeGitHistoryRepo("batch-collide");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const gateId = "gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite";
+    const ac8cId = "gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash";
+    const gate = gitHistoryTask(gateId, "- code/cold.ts");
+    const ac8c = gitHistoryTask(ac8cId, "- code/cold.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${gateId}.md`), gate);
+    fs.writeFileSync(path.join(repo, "tasks", `${ac8cId}.md`), ac8c);
+    // Third task's merge: mentions the shared word "cold-start", touches the shared file.
+    commitAndMerge(repo, "task/outer-self-checks", "code/cold.ts", "cold\n",
+      "merge outer-self-checks: cold-start step 3 three-state self-check (healthy=noop / empty-shell=drive)");
+    const index = buildGitHistoryIndex(repo);
+    for (const [task, id] of [[gate, gateId], [ac8c, ac8cId]]) {
+      const viaIndex = gitHistoryLanded(task, repo, { taskId: id, gitIndex: index });
+      const viaPerTask = gitHistoryLanded(task, repo, { taskId: id });
+      assert.equal(viaIndex, viaPerTask, `index and per-task paths agree for ${id}`);
+      assert.equal(viaIndex, false, `shared kernel must NOT fire for ${id} via the index`);
+    }
+    // The landed sibling's OWN fan-in merge (longer id prefix) DOES fire it — via the index too.
+    commitAndMerge(repo, "task/gap-cold-start-ac8c", "code/cold.ts", "cold2\n",
+      "fan-in gap-cold-start-ac8c-key4 (critical path): AC8c key 4 + step 5 teach reliable-send");
+    const index2 = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(ac8c, repo, { taskId: ac8cId, gitIndex: index2 }), true,
+      "the landed sibling IS caught via the index's longer id prefix");
+    assert.equal(gitHistoryLanded(gate, repo, { taskId: gateId, gitIndex: index2 }), false,
+      "the never-landed sibling STAYS unlanded via the index");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git-history: the BATCHED index preserves glob/(new) exclusion and the overshoot negative (AC4 via index)", (t) => {
+  const repo = makeGitHistoryRepo("batch-globnew");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    const globNewId = "gap-glob-new-only";
+    const globNewTask = `---
+id: ${globNewId}
+status: ready
+---
+## Acceptance Criteria
+- [ ] AC1: prose only
+## Touches
+- tasks/${globNewId}.md
+- code/*.ts
+- code/gen.ts (new)
+`;
+    fs.writeFileSync(path.join(repo, "tasks", `${globNewId}.md`), globNewTask);
+    commitAndMerge(repo, "task/gap-glob-new", "code/gen.ts", "gen\n", "merge gap-glob-new-only: generate the file");
+    // Overshoot: an existing-file task whose Touches path was modified by an UNRELATED merge.
+    const overId = "gap-mod-existing";
+    const overTask = gitHistoryTask(overId, "- code/existing.ts");
+    fs.writeFileSync(path.join(repo, "tasks", `${overId}.md`), overTask);
+    fs.writeFileSync(path.join(repo, "code", "existing.ts"), "existing\n");
+    git(repo, "add", "code/existing.ts");
+    git(repo, "commit", "-q", "-m", "add existing file");
+    commitAndMerge(repo, "task/gap-other", "code/existing.ts", "changed\n", "merge gap-other: unrelated change");
+
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(globNewTask, repo, { taskId: globNewId, gitIndex: index }), false,
+      "glob/(new) touches do not participate via the index (only code/gen.ts exists as a real path, and it is (new))");
+    assert.equal(gitHistoryLanded(overTask, repo, { taskId: overId, gitIndex: index }), false,
+      "existing-file + unrelated modification is NOT landing evidence via the index (overshoot not re-opened)");
+    // Per-task path agrees.
+    assert.equal(gitHistoryLanded(globNewTask, repo, { taskId: globNewId }), false);
+    assert.equal(gitHistoryLanded(overTask, repo, { taskId: overId }), false);
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

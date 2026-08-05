@@ -61,6 +61,7 @@ import {
   findRepoRoot,
   parseTouches,
   checkTouchesPair,
+  walkFiles,
 } from "./touches-orthogonality-check.ts";
 // The dispatch gate's OWN declared-path expander (single-source — ready-pool-check must not carry a
 // parallel copy of "which files does a Touches declaration intend to touch?").
@@ -68,7 +69,10 @@ import { expandDeclaredTouches } from "./concurrent-batch-scheduler.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 // Reused "work has landed on master" signal (AC6: reuse, never a parallel copy) — the same
 // symbol-resolution / touch-file evidence task-status-drift-check.ts uses to judge landing.
-import { taskWorkLanded } from "./task-status-drift-check.ts";
+// buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
+// git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
+// ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
+import { taskWorkLanded, buildGitHistoryIndex } from "./task-status-drift-check.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -174,9 +178,11 @@ export function kindOrder(kind) {
  *  the closeout signal (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). taskId is
  *  passed through so the git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-
  *  merged-tasks) can anchor on the task's own id without depending on the self-touch Touches entry. */
-export function notYetFlipped(task, repoRoot) {
+export function notYetFlipped(task, repoRoot, gitIndex) {
   if (task.status !== "ready") return false;
-  return taskWorkLanded(task.body, repoRoot, { taskId: task.id });
+  const opts = { taskId: task.id };
+  if (gitIndex) opts.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
+  return taskWorkLanded(task.body, repoRoot, opts);
 }
 
 export function isFixture(task) {
@@ -293,6 +299,11 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   }
 
   // Real ready pool: `status: ready` minus the three non-dispatchable classes.
+  // BATCHED git-history (gap-ready-pool-check-times-out-after-git-history-signal): build the
+  // master-history path→commit index ONCE for the whole pool scan — ONE `git log` pass instead of
+  // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
+  const readyCount = [...allTasks.values()].filter((t) => t.status === "ready").length;
+  const gitIndex = readyCount > 0 ? buildGitHistoryIndex(root) : null;
   const ready = [];
   const excluded = [];
   for (const [id, t] of allTasks) {
@@ -300,7 +311,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     const reasons = [];
     if (isFixture(t)) reasons.push("fixture");
     if (isParked(t)) reasons.push("parked");
-    if (notYetFlipped(t, root)) reasons.push("not-yet-flipped");
+    if (notYetFlipped(t, root, gitIndex)) reasons.push("not-yet-flipped");
     if (reasons.length > 0) excluded.push({ id, reasons });
     else ready.push(id);
   }
@@ -314,7 +325,11 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // dispatchable_disjoint — the criterion. The same expander the dispatch gate uses for its
   // pairwise checkTouchesPair: concrete declared paths resolve whether or not they exist, only
   // wildcards hit the filesystem (expandDeclaredTouches, single-source from the batch scheduler).
-  const expand = (globs) => expandDeclaredTouches(globs, root);
+  // WALK-ONCE (gap-select-preflight-json-real-store-too-slow pattern): the O(n²) pairwise scan
+  // would re-walk the whole tree per glob side (190ms × ~146 glob pairs = ~28s on the real store);
+  // one shared walkFiles(root) makes the whole scan one walk.
+  const sharedFiles = walkFiles(root);
+  const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
   const poolParsed = ready.map((id) => ({ id, touches: parseTouches(allTasks.get(id).body) }));
   const dispatchableDisjoint = maxMutuallyDisjointSubset(poolParsed.map((p) => p.touches), expand);
 

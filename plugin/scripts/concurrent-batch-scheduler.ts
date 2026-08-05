@@ -114,11 +114,15 @@ export function touchesSharedState(globs) {
 //     expandGlobs stays for exactly that; a wildcard that matches nothing is genuinely "likely a
 //     typo" and the conservative branch below still fires (AC4 keeps wildcard support).
 // expandGlobs itself is UNTOUCHED (it is correct for its own callers, e.g. test selection).
-export function expandDeclaredTouches(globs, root) {
+// `files` is an optional PRE-COMPUTED walkFiles(root) list (the walk-once pattern from
+// gap-select-preflight-json-real-store-too-slow): ready-pool-check's O(n²) pairwise
+// checkTouchesPair scan shares ONE tree walk instead of re-walking per pair. Omitted → walks per
+// call (unchanged behavior).
+export function expandDeclaredTouches(globs, root, files = null) {
   const set = new Set();
   for (const g of globs) {
     if (/[*?]/.test(g)) {
-      for (const f of expandGlobs([g], root)) set.add(f);
+      for (const f of expandGlobs([g], root, files)) set.add(f);
     } else {
       set.add(normalizePath(g));
     }
