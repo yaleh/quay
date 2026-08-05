@@ -3097,6 +3097,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （原 ~18% fail）。保留 AC 意图（无持久第二个 monitor）。
 - **scoped 自测**：M3 10/10；session-liveness 全文件跑中（慢，负载敏感族）。等外层重启 ROUND 3 gate。
 
+### tick 2026-08-05T08:4xZ（内层，`RED 分诊续`：AC16 laneCount 传播 + NBSP 判空修复）
+
+- **外层 ABORT #2 根因 = AC16**：`full-suite-runner.ts:91` command 静态（`bash scripts/test.sh`），
+  `--lane-count` 只写 state 字段从不拼进 command ⇒ 显式 `--lane-count 1` 实跑仍是
+  `--test-concurrency=8`（ps 实证 9 进程、PSI 94 复现崩溃）——比硬编码更危险（错误安全感下重启）。
+- **AC16 修复**（`8f6d0fc6`，直落 master）：`--lane-count N` 显式给出时拼接
+  `--test-concurrency=N`（= 拼写，test.sh flags-only 形式）；省略时让 test.sh 派生默认。回归测试
+  +1（fake scripts/test.sh 收到 `--test-concurrency=2`），runner 测试 9/9。
+- **NBSP 判空缺陷**（`gap-send-keys-reliable-nbsp-...`）：`send-keys-reliable.sh` line 90 判空用
+  `[:space:]` 但 C locale 不含 NBSP（`❯` 后字节 = c2 a0）⇒ 真空输入框永远判非空 ⇒ clear 循环跑满
+  CLEAR_MAX=50 fail-loud。三消费者（quay/meta-cc/archguard）全部静默绕过。既有测试零端到端（只覆盖
+  纯函数 + 参数校验）——命中 CLAUDE.md 用户面契约 ≥1 真实 e2e 判据。
+  **已晋级 ready + 派发**（后台 agent，bracket 已开 fm-...-21ycgf）。另修两个任务 frontmatter YAML
+  转义（`\302\240` / `\${SCRIPT_DIR}` 非法转义 → malformed 无法注册，`eed0b692`）。
+- **在飞 1**：nbsp-fix。套件 state=red+aborted（待 AC16 修复后外层重跑 M3 验证 + ROUND 3 gate）。
+  loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
