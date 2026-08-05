@@ -3061,6 +3061,25 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （cold-start 负断言 / 脚本自身测试 / ADR-016 夹具 / catalog 声明——脚本仍发货，只是 skill 不再教）。
 - **等外层重启 ROUND 3 gate**。ROUND 3 landed-not-flipped 集合（9 条）不变。loop-driver LIVE。
 
+### tick 2026-08-05T07:0xZ（内层，`ROUND 3 RED 分诊 #2`：AC1 laid-down 假阳性，非真回归）
+
+- **外层 ROUND 3 重跑 RED**（fail 2 = 1 真回归 AC1 laid-down + 1 已知 noise-gate 抖动）。外层疑
+  red-window-executor 的 4b2 接线给 doc 加了第二个 driver 类引用。
+- **git log bisect + 内容验证（结论：无第二个 driver 引用，假阳性）**：
+  1. `git log plugin/loop/orchestrator-loop-tick.md` 近期改动：red-window 接线（94f27cd6）/
+    pool-floor（be2037d1）/ full-suite（4d08c6db）/ drive-contract（668dfe25）/ re-anchor（f6bfafb2）
+    ——均无 ScheduleWakeup、无 `/loop Nm`。
+  2. 当前 doc：CronCreate 8×、ScheduleWakeup 0、`/loop [0-9]+m` 0。4b2 段明确「事件监测（同
+    session-liveness），不是新调度源」——suite-state-trigger 是 Monitor 非 driver。
+  3. **手动 init 渲染 laid-down doc 实测**：CronCreate 8 / ScheduleWakeup 0 / /loop Nm 0 /
+    loop-driver-check.sh 2 ⇒ `distinctDriverMechanisms` = 恰 `['CronCreate']`。
+  4. 测试稳定性：isolated 2×（34/34）+ 3 文件并发（84/85，1 预置 skip）+ 手动渲染全过；
+    AC1 laid-down 本测 ~1.7-2.1s vs 外层跑 6.7s（套件负载下 init 子进程被饿）。
+- **结论**：AC1 laid-down 是负载敏感抖动（同 noise-gate 族），非真回归；「第二个 driver」假说不成立。
+  **未改代码**（无 bug 可修；4b2 已自声明 Monitor，改也是 cosmetic 追鬼）。建议外层重跑 ROUND 3 gate；
+  若复发，捕获实际失败环境的 laid-down doc 再诊断。
+- **ROUND 3 landed-not-flipped 集合（9 条）不变**。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
