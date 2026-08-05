@@ -4963,3 +4963,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   watchdog（无人值守测量需要自己的锚）；③B→A 对称白名单生效（17:2xZ 裁定）；④走现有拓扑工厂 + RUNBOOK
   启动命令（产品化 manager start/adopt 未建，过渡路径）。
 - **在飞**：全量套件重跑中（18:46:55 起，过静态进真测试）。~20 not-yet-flipped 待全量绿。
+
+### tick 2026-08-05T19:4xZ（内层 cron，suite re-green → 恢复派发）
+
+- **suite 转 running（外层 re-green）**：18:3xZ/18:4xZ 两次真红（contract-check ratchet 16 new>ceiling 5、
+  AC-carryover 违约）外层已 bulk-fix + root-fix（new=0、ratchet 0），全量 re-running past static。red 停派解除。
+- **恢复派发 1/3**：**outer-heartbeat**（`fm-...-o8929h`，SESSION-OVERDUE 心跳源反转缺陷，multi-source max
+  mtime 修复）。git-log 唯一命中是外层 filed 提交（非落地），self-touch 已补，resolve 过。KNOWN-LOAD-SENSITIVE
+  已在派发词标明。
+- **池碰撞观察**：剩余真候选（cold-start-gate/red-window/complete-delivery/delivery-grows/global-count/l2/
+  reanchor/branch-model）Touches 全带 `plugin/scripts/` 或 `plugin/test/` glob ⇒ 与 outer-heartbeat 及其彼此
+  两两碰撞（batch 单成员=冲突）——池 disjoint 3 主要来自已落地 3 条（red-pattern/ghost-drive/leak）。**已落地
+  3 条仍在 ready**（gitHistoryLanded 未排除，外层 triage 时核）。
+- 在飞 1/3。无 block、无 .halt、Monitor 三判据绿。

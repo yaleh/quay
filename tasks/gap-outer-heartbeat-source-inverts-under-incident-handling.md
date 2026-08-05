@@ -70,6 +70,8 @@ extra:
 
 ## Touches
 
+- tasks/gap-outer-heartbeat-source-inverts-under-incident-handling.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/session-liveness.sh（外层心跳源：tick-log 单源 → 多源 max mtime）
 - plugin/test/session-liveness.test.mjs（AC2/AC3/AC4 fixture）
 - orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（与 D 同源标注，若适用）
