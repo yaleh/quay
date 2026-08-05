@@ -3666,3 +3666,13 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 验什么，集合已机械派生）；本次等待正确（session-liveness 在铺设集 + M3 会随铺）。与红窗共享闸门任务
 > 并列（同作用域轴不同机制）。**AC10 诚实**：post-friction 不计分，计数保持 0（管理者特意不算边缘案例）。
 > 已立案 `gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`（ready）。
+
+### tick 2026-08-05T07:15Z（外层，`unblock`：dead-loop 判据立案 + AC10 首计）
+
+- **管理者跨项目实测**：meta-cc/archguard 四个会话零驱动、29 小时零进展（最后提交 08-04 02:06/01:57），
+  但 quay-init 完整 + verify 全绿 + 自报健康 ⇒ **从未运行与健康运行在所有判据下完全一样**——判据查
+  「铺没铺」（L1）、无一条查「转没转」（L2 不存在）。
+- **已立案 `gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`**（ready）：dead-loop
+  判据（transcript user 消息 + git 提交最近 N 分钟，都无即 dead，与 backlog 无关——队列空 vs 没人驱动
+  可区分）+ 归入 L2 持续健康 + 已处置固化（2a9aaef3/4aaf2f29 驱动 + 目标 transcript 核实）。
+- **AC10 首计 +1**：管理者 pre-friction 发现（非被硌），0→1；机器 pre-friction 计数仍 0（生成器 AC2）。

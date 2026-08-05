@@ -1,0 +1,104 @@
+---
+id: gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed
+title: "a NEVER-RUN loop and a HEALTHY-RUNNING loop look COMPLETELY IDENTICAL
+  under all existing criteria (measured: meta-cc + archguard outer/inner got
+  ZERO drives since setup, last commits 08-04 02:06/01:57 = 29h zero progress,
+  yet quay-init complete + verify-installed-executables +
+  verify-referenced-landed ALL green + their own last ticks self-reported
+  healthy) — the criteria check 'was the instrument laid down' (L1), none check
+  'is the loop actually running' (L2 continuous health from
+  SPEC-complete-delivery-surface §5); minimal viable criterion: target
+  outer/inner transcript has new user messages in last N min + project git has
+  commits in last N min — both NO = dead-loop, INDEPENDENT of backlog emptiness
+  (queue-empty vs nobody-driving are two states, currently indistinguishable)"
+status: ready
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+---
+
+**type:** execution
+
+## Proposal
+
+管理者跨项目实测（2026-08-05）——**L1/L2 缺口的具体实例 + 本阶段第一个 AC10 计分**。
+
+**事实**：meta-cc 与 archguard 的 outer/inner 四个会话，从起好之后**一条驱动都没收到**——pane 显示的
+仍是 "Try ..." 占位提示，零条 user 消息；两个项目最后提交分别停在 08-04 02:06 与 01:57，**29 小时零
+进展**。而与此同时：quay-init 铺设完整（两个 loop tick 文档在目标路径
+`orchestration/orchestrator-loop-tick.md` 与 `docs/analysis/fast-mode-loop-tick.md`——最初查
+`plugin/loop/` 判「缺」是查错布局，已自更正）、verify-installed-executables + verify-referenced-landed
+**都通过**、两个项目自己的最后 tick 自报 quiet holding state / entire backlog cleared。
+
+**【缺口】⇒ 一个从未运行过的循环，与一个健康运行的循环，在所有现存判据下【完全一样】。**
+L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 SPEC-complete-delivery-surface 第 5 节写的
+两个层次，现在有了实测实例：**判据检查的是「仪器铺没铺」，没有一条检查「循环有没有在转」。**
+
+**最小可行判据**：目标项目的 outer/inner transcript 在最近 N 分钟内是否有**新的 user 消息** + 项目 git
+最近 N 分钟是否有**提交**——两者都为否即判 **dead-loop**，与 backlog 是否为空**无关**（**队列空和没人
+驱动是两种状态，现在无法区分**）。
+
+**AC10 记账：+1，本阶段第一个**——这条缺口被发现时**没有任何东西在疼**（无失败/无告警/无判据矛盾/
+无卡顿，两项目所有检查绿 + 自报健康）。是因为目标要求去看才看见，不是被硌到——与机器那 7 根轴
+（全 post-friction）形态不同。⇒ **AC10 计数 0 → 1**（管理者的 pre-friction 发现；机器计数仍 0）。
+
+### 选定机制（外层裁定：立案）
+
+**dead-loop 判据（L2 持续健康——循环在转，不只是装了）**：
+
+1. **dead-loop 检测**：目标项目 outer/inner transcript 最近 N 分钟无新 user 消息 + git 最近 N 分钟无
+   提交 ⇒ dead-loop（与 backlog 空无关；队列空 vs 没人驱动从此可区分）。
+2. **归入 L2 持续健康**：SPEC-complete-delivery-surface 第 5 节层次二（循环在转）的活实例——判据从
+   「仪器铺没铺」补「循环转没转」。
+3. **已处置（管理者）**：两个 outer 已驱动 + 目标 transcript 核实送达（meta-cc 2a9aaef3 / archguard
+   4aaf2f29）；驱动内容含建 */20 cron 周期锚点、清点就绪池、send-keys-reliable 驱动内层。本条把处置
+   固化成判据（未来同类不会靠人去看）。
+
+## Acceptance Criteria
+
+- [ ] AC1: **dead-loop 判据**——目标项目 outer/inner transcript 最近 N 分钟无新 user 消息 + git 最近
+      N 分钟无提交 ⇒ dead-loop（与 backlog 空无关）
+- [ ] AC2: **队列空 vs 没人驱动可区分**——两种状态从此分开（queue-empty = 健康空闲；dead-loop = 没在转）
+- [ ] AC3: **归入 L2 持续健康**——SPEC-complete-delivery-surface 第 5 节层次二（循环在转）；判据补
+      「铺了 + 在转」两层
+- [ ] AC4: **真实使用**——meta-cc/archguard 现在会被判 dead-loop（29 小时零进展），处置后（2a9aaef3 /
+      4aaf2f29 驱动）转健康；判据未来自动抓同类
+- [ ] AC5: **AC10 诚实记账**——本条 pre-friction（管理者去看才发现，非被硌），AC10 +1（0→1）；机器
+      pre-friction 计数仍 0（生成器 AC2）
+- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Definition of Done
+
+- [ ] AC1–AC6 全部勾上；AC4 实测输出贴任务体
+- [ ] dead-loop 判据在：未运行循环被自动判出（非靠人去看）；队列空 vs 没人驱动可区分
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+## Touches
+
+- plugin/scripts/（dead-loop 检测 helper：transcript user 消息 + git 提交时间窗）
+- orchestration/SPEC-complete-delivery-surface-2026-08-05.md（第 5 节 L2 实例交叉标注）
+- tasks/gap-complete-delivery-surface-spec-and-l1-verification.md（L2 补「循环在转」）
+- tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用）
+
+## Contract
+
+measure   loop_alive = `bash <dead-loop check>` stdout 的 alive/dead 字段
+band      loop_alive = alive（最近 N 分钟 transcript user 消息或 git 提交任一存在；都无 = dead）
+invariant liveness_independent_of_backlog = 1（dead-loop 判据与 backlog 空无关）
+invoke    `grep -rn 'transcript\|提交\|N 分钟' <dead-loop check>`
+control   构造无驱动 + 无提交项目 ⇒ 判 dead（AC1）；队列空但有驱动/提交 ⇒ 判 alive（AC2 负向）
+resume    判据与已处置固化分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T07:2xZ
+changed: 外层受管理者跨项目实测裁定立案（L1/L2 活实例 + AC10 首计）。四处收紧：
+(1) **判据查铺不查转**——从未运行与健康运行在所有判据下一样；补「循环在转」L2；
+(2) **dead-loop 最小判据**——transcript user 消息 + git 提交最近 N 分钟，都无即 dead，与 backlog 无关
+    （队列空 vs 没人驱动从此可区分）；
+(3) **AC10 +1**——管理者 pre-friction 发现（非被硌），0→1；机器计数仍 0；
+(4) **已处置固化**——2a9aaef3/4aaf2f29 驱动 + 目标 transcript 核实，判据未来自动抓。
+status: todo——L2 持续健康活实例；排 ROUND 3 收尾后，高优先。
