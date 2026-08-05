@@ -4270,3 +4270,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 
 - **dist「自包含」声称不成立（管理者 B 机实测 + 外层核实）**：version.ts:13-14 在 __init 读 ../package.json，fresh 安装 ENOENT。sync-vendor 声称 fully self-contained 但产物不自包含（未声明运行期文件依赖）。三层缺口被 verify 放过（package.json 不在铺设集也不被引用）。建任务 gap-dist-runtime-not-self-contained-reads-external-package-json（修法②：构建时内联版本号）。
 - **AC12b 现状**：阻塞①welcome 屏（ready 代码未动）+ 阻塞②vendor 运行时（路径二可行 + 新 package.json 依赖）。两条修好 + git 同步 B 机后开测。
+
+### tick 2026-08-05T13:5xZ（外层，archguard 报告 #3 立案回流）
+
+- **full-suite-runner 判红模式误伤 vitest（archguard TASK-67，下游修好上游未修）**：FAILURE_PATTERNS 裸 `/✖/`（93 行），vitest 项目 console 打 ✖ 触发 early-red（通过测试负控制打 `✖ Diagram test failed`）。quay 自己跑 node:test 不会撞到（✖ 是结构化字形），只在 vitest 暴露。建任务 gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red（采纳 archguard 结构化匹配修复 + --maxWorkers 文档分叉）。
+- **archguard 全量绿**（4902 passed/0 failed/exit 0，第一轮自主全量验证）。AC12a 94 分钟。
+- AC12b 两阻塞均未动（welcome-屏 ready、vendor package.json 未进铺设映射）。
