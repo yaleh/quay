@@ -45,6 +45,11 @@ extra:
 判据只查两窗口、`session-topology/SKILL.md` 从拓扑表移除 manager（注明跨项目另行启动）。本条的 AC 记录
 三窗口为原始交付形态，修正以 gap-manager-baked 任务为准。
 
+**消费方交叉标注（gap-outer-self-checks-and-creates-inner-session，2026-08-05）**：外层冷启动第 3 步
+自检 inner 三态（健康/空壳/缺失），缺失时调用本条的工厂 `quay-topology.sh` 创建**两窗口**拓扑
+（outer+inner，无 manager 窗口）——即「会话拓扑」的消费者已从 cold-start skill 延伸到外层 tick 文档，
+同一次改动两面。
+
 ## Acceptance Criteria
 
 - [x] AC1: 三窗口拓扑出厂定义在交付物里（`<project>-N:outer/:inner/:manager`：每层命令、谁驱动谁、

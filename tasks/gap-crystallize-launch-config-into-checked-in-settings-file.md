@@ -48,6 +48,10 @@ AC1 的负控制正是那次）。调研找到 5 项高相关，其中 3 项适�
   与本任务的 settings 文件**落到同一个启动配置**——本任务落地时合并两者，启动规范一份。
 - 中等项 `--effort`（成本杠杆）与 `--tmux`（内置 worktree+tmux 配对，需先查兼容 `quay-worktrees/<slug>`
   命名）**记为本任务备注**，不立案。
+- **消费方交叉标注（gap-outer-self-checks-and-creates-inner-session，2026-08-05）**：外层冷启动第 3 步
+  自检 inner 缺失时调 `quay-topology.sh` 创建两窗口并起 inner claude——「起 inner claude」用的**正是**
+  本任务固化的 checked-in 启动命令（`quay-topology.sh` → `quay-launch.sh <inner>` → `.claude/launch.settings.json`），
+  不再手打一行 shell。同一次改动两面。
 
 ## Acceptance Criteria
 

@@ -74,7 +74,11 @@ The session the loop lives in is built **by definition**, never hand-assembled
 (`gap-tmux-session-topology-no-factory-definition`; two-window correction
 `gap-manager-baked-into-project-topology-factory` — manager is cross-project, not part of the
 project topology). The definition ships in the `quay-session-topology` skill; this step applies
-it:
+it. **Cross-annotation (`gap-outer-self-checks-and-creates-inner-session`):** this step is the
+build-by-definition half; the OUTER's own cold-start path
+(`orchestration/orchestrator-loop-tick.md` step 3) independently SELF-CHECKS inner in three
+states — healthy (window+process+user message) ⇒ untouched, empty-shell (window+process, no user
+message) ⇒ driven not rebuilt, missing (no window or process) ⇒ calls this same factory.
 
 ```bash
 bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner per definition (idempotent; manager is cross-project, not built here)
