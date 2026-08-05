@@ -84,3 +84,8 @@ at: 2026-08-05T16:5xZ
 changed: 管理者繁殖关切（使用视角）+ 外层独立核实（无消费者读 transcriptSource）立案。证据链：
 内层修复 12936f90 → 退化路径 line 178 静默 → tick 文档 :63 消费者不含 transcriptSource →
 cold-start skill 不引用 → 非 Linux 无声回归原 bug。AC4 关联已 done 任务的留空 AC4。
+
+## Carries
+
+from: gap-inner-session-check-discovery-reads-wrong-transcript
+acs: AC4（无 PID 时 fail-closed/loud——本任务的 fix 方向承接）

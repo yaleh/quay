@@ -153,7 +153,7 @@ pre-friction 无关。**
       OS 级锚点为真实落点」（实测 29h 停摆证明）
       → `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` §4 第 5 类已改为「三层全缺，
       OS 级锚点为真实落点」。
-- [ ] AC6: **AC10 诚实记账**——post-friction（被 29h 停摆打开）不计分，计数仍 6；优先级与是否
+^# placeholder——post-friction（被 29h 停摆打开）不计分，计数仍 6；优先级与是否
       pre-friction 无关
 - [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
       → `plugin/test/os-anchor-watchdog.test.mjs`（`// @test-group governance`，2 用例：decide 矩阵 +
