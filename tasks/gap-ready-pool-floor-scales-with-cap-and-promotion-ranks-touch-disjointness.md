@@ -70,6 +70,8 @@ extra:
 
 ## Touches
 
+- tasks/gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/ready-pool-check.ts（floor=cap×4 + dispatchable_disjoint + 补晋 disjointness 排序）
 - plugin/test/ready-pool-check.test.mjs（AC2/AC3/AC4/AC5 断言 + 既有行为回归）
 - plugin/loop/fast-mode-loop-tick.md（§3.6：floor 语义 + dispatchable_disjoint 判据 + disjointness 补晋

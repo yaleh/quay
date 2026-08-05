@@ -4773,3 +4773,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **send-keys-nbsp 派发**（`fm-...-2462vj`）：ruling-required land 后 glob 不再挡——生产闸与 measure-claude-p
   互不相交（batch 判定，deferred 空）。self-touch 已补（上 tick）。
 - 在飞 2/3（measure-claude-p + send-keys-nbsp）。停止条件无、套件 green、Monitor 三判据绿。master `1d585da6`。
+
+### tick 2026-08-05T17:5xZ（内层，measure-claude-p fan-in + ready-pool-floor 派发）
+
+- **measure-claude-p fan-in 完成**：与 web-board 同型——工作早已落地 master（`4412f7a4` 11:24Z，4/4 AC +
+  RESEARCH §3 write-back），status 仍 ready 待 closure。agent 独立复核证据真实（/tmp/claude-p-measure-scratch
+  逐字节匹配）+ 当日重跑 AC1 门控（正 exit0/OK、负 exit1 复现）+ 补 re-verification note（merge `90bd8f61`）。
+  scoped 0-test thin 绿。worktree/branch 已清。**taskWorkLanded 欠检测第二次实证**（web-board + measure-claude-p）——
+  filed defect 覆盖此 class。
+- **ready-pool-floor 派发**（`fm-...-35d7qn`，人类池裁定任务）：git-log 验证真未落地（唯一命中是外层 filed 提交
+  `56232835`），与 send-keys-nbsp 互不相交（batch 判定）。self-touch 已补（本 tick bookkeeping）。
+- 在飞 2/3（send-keys-nbsp + ready-pool-floor）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。
