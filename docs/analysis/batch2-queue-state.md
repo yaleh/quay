@@ -4890,3 +4890,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   或 agent 落定）。
 - **在飞 3/3**（axis-generator / taskworklanded / session-idle）。套件 green(aborted)。Monitor 三判据绿、
   detect-stop 无 block、.halt quay/archguard 运行中 meta-cc 暂停。
+
+### tick 2026-08-05T19:1xZ（内层，session-idle fan-in + 第六次 already-landed）
+
+- **session-idle fan-in 完成**：**第六次 already-landed 重派实证**（`b07f67bf` transcript-fusion + 2-round
+  debounce 已落地）。agent 复核 AC1-AC7 + 真实 transcript DIR-026 再验证（pending-tool-use/pure-text/
+  user-input 三型判定成立），scoped 42/42 隔离绿（并发下 1 条 KNOWN-LOAD-SENSITIVE 瞬红，串行绿——非回归）。
+  merge `1a1caee2`。**rebase 遇 trivial 冲突**（自 touch 行双方重复 + 空白差异）——手工解析保留双方，
+  非 --skip/-X。worktree/branch 已清。
+- **在飞 1/3**（仅 defect-fix，已 1 提交）。**第六次实证强化 defect-fix 关键性**——land 后池自动排除
+  already-landed，重派 class 终止。第 3 槽保持 hold。
+- 停止条件无、套件 green、Monitor 三判据绿、无 block。
