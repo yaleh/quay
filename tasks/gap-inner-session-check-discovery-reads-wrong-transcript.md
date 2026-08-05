@@ -90,3 +90,18 @@ band      transcript_target >= 1（transcript 恒指 inner）
 invoke    `grep -n 'discovery\|CLAUDE_CODE_SESSION_ID\|transcript' plugin/scripts/inner-session-check.sh`
 control   三层活跃 ⇒ discovery 指 inner（AC2）；空壳+外层活跃 ⇒ empty-shell（AC3）
 resume    结构性来源与 fail-closed 分步提交，任一步完成即写盘
+
+---
+
+## 修复记录（2026-08-05 17:2xZ，内层，在外层裁定 scope 内修复）
+
+**已修**（commit `12936f90`）：`inner-session-check.sh` discovery 改为**结构性映射**——inner 窗口
+claude 进程 PID → 其 worker/MCP **直接子进程** environ 的 `CLAUDE_CODE_SESSION_ID` → transcript
+文件名（进程↔会话 1:1）。顶层 claude environ 通常不带 session id（启动时未赋），worker 子进程带
+（实测 2005103/2005117 携带 c7b58e09）。
+
+**实测验证**：`bash plugin/scripts/inner-session-check.sh --session quay-0 --json` →
+`transcriptSource: "discovery-pid"`、`transcript: c7b58e09...jsonl`（**正确指向 inner**，此前读
+96380845/b8dc91a6 而非 inner）。空壳反例不再会判 healthy——现在读的是 inner 自己的 transcript。
+`inner-session-check.test.mjs` 10/10 无回归。旧启发式保留为无 PID/session-id 时的 best-effort
+回退（TR_SOURCE=discovery 区分）。
