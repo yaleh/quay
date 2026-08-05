@@ -4086,3 +4086,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **os-anchor 已 merge + fan-in 完成**（492b69b5 + worktree 清理），scoped 验证绿（150s）。但任务 AC 7/7 未勾、status 仍 ready——AC1（systemd timer active）/AC2（崩溃自动恢复实跑）需要**真实系统操作验证**（install + 模拟崩溃），非机械 merge 可勾。待 inner 完成 AC 实跑后翻 done。
 - **SPEC-state-crystallization 已立案**（并入 supervisor 任务 AC8，c385bcbf）。六实体唯一写入者 + 名词进代码动词留文本 + 形式化三约束。
 - 套件 green、Monitor 绿、无 blocked。
+
+### tick 2026-08-05T11:2xZ（外层，os-anchor 安装裁定 + 产品轮廓核实）
+
+- **os-anchor AC1 真落差确认（管理者实测 + 外层复核）**：`systemctl --user list-timers | grep quay` = 0——timer 未安装。代码在 master（install.sh + watchdog.sh）但 AC1「systemd user timer 存在且 active」未满足。**裁定：需要显式安装动作**（代码落地 ≠ 已安装）——指示 inner 执行 `os-anchor-install.sh install` + 模拟崩溃验证 AC2，作为 AC 实跑验证 + 翻 done 的前置。理由：timer 不 active，下一次崩溃仍是网络永久静默死亡（管理者判为压倒性优先级）。inner 当前 3 agent 满负荷，待有空驱动。
+- **产品轮廓文档核实（管理者已建）**：docs/proposals/quay-product-outline.md（199 行）——strategic-doc-staleness-check.ts 唯一真实覆盖路径，--judge 实测 clean。README/DESIGN/quay-proposal 各覆盖一片，supervisor/upgrade 几乎全缺，无单一完整轮廓。已建文档补上。
