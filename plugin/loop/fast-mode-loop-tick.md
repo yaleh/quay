@@ -184,6 +184,26 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 ---
 
+## 状态自检清单（重锚时逐项核对，机械可执行，强制）
+
+**本文档是 inner 的出厂锚。** 外层每 20 分钟经 cron 转发固定重锚 prompt
+（`plugin/scripts/reanchor-prompt.txt`，外层 `orchestrator-loop-tick.md` 步骤 1c）。收到该唤醒时，
+按下面清单**逐项机械核对**当前状态是否符合本文档：符合 ⇒ 无操作；有明确偏差 ⇒ 向本文档对齐自我
+修正。**本唤醒只做一致性核对，不决定任何任务动作**——派发与否由本文档步骤 3/4 自己的规则决定，
+不是重锚唤醒的新决策。
+
+| # | 核对项 | 机械判据 |
+|---|---|---|
+| ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ 3（步骤 4 并发上限）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` 的 `pool` 字段；`pool < 3` 时是否已按步骤 3.6 补晋 |
+| ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
+| ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 verification-round `suiteGreen: false` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
+
+有明确偏差 ⇒ 向文档对齐：重新执行本文档对应步骤修正（补 worktree 纪律、按步骤 3.6 补就绪池、
+撤销偷偷收尾的状态写入、按步骤 3 停止条件停止派发），修完才继续。
+
+---
+
 ## Tick 步骤
 
 ### 0. 哨兵

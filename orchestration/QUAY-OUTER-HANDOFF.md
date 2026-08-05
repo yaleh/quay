@@ -22,6 +22,12 @@ pid 不钉死——会随重启漂移，寻址用窗口名。
 你的 tick 记进 `orchestration/tick-log.md`（**已有 94 行历史，接着写**）。
 管理者写的是另一份 `orchestration/manager-tick-log.md`，别混。
 
+**重锚惯例（gap-inner-has-no-periodic-anchor-prose-only-drives-drift）**：tick 步骤 1c 有一个
+**重锚转发**步——inner 空闲时经 send-keys 转发固定常量 `plugin/scripts/reanchor-prompt.txt`
+（逐字原样，不是现写散文），让 inner 周期重读出厂文档自我对齐。这是**本层已有 cron 转发固定文本**，
+不是新唤醒源：节奏仍是唯一 `*/20` cron。忙时不转发。转发后若 inner 报告「核对到明确偏差」，按
+`orchestrator-loop-tick.md` 步骤 1c/3 处置。
+
 ## 当前状态：quay 正在 `.halt`
 
 ```

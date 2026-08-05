@@ -60,23 +60,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 外层 tick（`orchestrator-loop-tick.md`）新增**重锚步**——inner 空闲时转发**固定重锚 prompt**
+- [x] AC1: 外层 tick（`orchestrator-loop-tick.md`）新增**重锚步**——inner 空闲时转发**固定重锚 prompt**
       （check-in 常量/脚本，每次原样），指向重读出厂 `fast-mode-loop-tick.md`；忙时不转发
-- [ ] AC2: 重锚 prompt 的**唤醒契约 = 一致性核对**——重读出厂文档 + 核对当前状态是否符合（在飞/
+- [x] AC2: 重锚 prompt 的**唤醒契约 = 一致性核对**——重读出厂文档 + 核对当前状态是否符合（在飞/
       池/收尾/停止条件四查）+ 明确偏差向文档自我修正；**prompt 文本零派发指令**
-- [ ] AC3: **防双调度源机械保证**——重锚 prompt 不含「派发/排序/batch/批」措辞（grep 断言；
+- [x] AC3: **防双调度源机械保证**——重锚 prompt 不含「派发/排序/batch/批」措辞（grep 断言；
       修正派发逐字照搬出厂文档规则，不是重锚的新决策）
-- [ ] AC4: **措辞独立**——重锚是固定常量（check-in），非外层每次现写散文；tick 转达的是常量不是新段落
+- [x] AC4: **措辞独立**——重锚是固定常量（check-in），非外层每次现写散文；tick 转达的是常量不是新段落
       （grep/断言验证）
-- [ ] AC5: 出厂文档加「**状态自检清单**」小节——inner 重锚时逐项核对的机械清单（在飞数/池/收尾/停止
+- [x] AC5: 出厂文档加「**状态自检清单**」小节——inner 重锚时逐项核对的机械清单（在飞数/池/收尾/停止
       条件），让「核对状态是否符合」可机械执行而非散文
 - [ ] AC6: **真实使用**——至少一次重锚：inner 重读出厂文档后要么报符合（no-op）要么修正明确偏差，
       证据记录；若期间有驱动文本偏差，展示下周期重锚自我对齐（非必须但优先）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`（重锚常量 + 转发步若成脚本）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（重锚常量 + 转发步若成脚本）
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC6 实跑证据贴任务体
+- [ ] AC1–AC7 全部勾上；AC6 实跑证据贴任务体（AC6 待外层首个 cron 重锚周期实跑，机制+待证形状已记录）
 - [ ] inner 有周期锚：重锚转发生效（至少一个周期 inner 重读出厂文档）；措辞独立（固定常量）
 - [ ] 无第二调度源：重锚 prompt 零派发措辞（grep 证明）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
@@ -91,10 +91,10 @@ extra:
 
 ## Contract
 
-measure   reanchor_cycles = 最近窗口内 inner 重读出厂文档的周期数（重锚转发记录）
+measure   reanchor_cycles = `grep -c '重锚转发' orchestration/tick-log.md` count   # count 字段：tick-log 中重锚转发记录条数（最近窗口 inner 重读出厂文档的周期数）
 band      reanchor_cycles >= 1（生效期间至少一个重锚周期）
 invariant reanchor_has_no_dispatch_language = 1（重锚 prompt 零「派发/排序/batch」措辞）
-invoke    `grep -n '派发\|排序\|batch\|批' <重锚 prompt 常量文件>`
+invoke    `grep -n '派发\|排序\|batch\|批' plugin/scripts/reanchor-prompt.txt`
 control   构造一次带偏差的驱动文本 ⇒ 下周期重锚必须触发 inner 重读出厂文档并向文档对齐（自我对齐演示）
 resume    重锚步与出厂文档自检清单分两步提交，任一步完成即写盘
 
@@ -111,3 +111,39 @@ changed: 外层受管理者结构性发现 + 意见裁定立案。四处收紧�
     出厂文档规则；
 (4) **依赖**——排在 closure-async 之后（重锚要核「是否偷偷收尾」，需出厂文档先改无收尾形态）。
 status: todo——排在 closure-async 机制根之后；这是行为漂移的结构根修复，高优先。
+
+## 落地证据（2026-08-05，实现提交时写入）
+
+**实现形态**：重锚常量 = `plugin/scripts/reanchor-prompt.txt`（固定 check-in 文本，每 tick 外层
+`cat` 该文件逐字原样转发）；外层 tick 新增步骤 1c「重锚转发」（`orchestrator-loop-tick.md`）；
+出厂文档新增「状态自检清单」小节（`fast-mode-loop-tick.md`）；AC3/AC4/AC5/AC7 机械断言 =
+`plugin/test/reanchor-prompt.test.mjs`（`import { test } from "node:test"` + `// @test-group governance`）。
+
+**AC3 grep 实跑输出**（worktree `task/gap-inner-has-no-periodic-anchor-...`，基于 master `b2fa5c60`）：
+
+`$ grep -n '派发\|排序\|batch\|批' plugin/scripts/reanchor-prompt.txt; echo "exit=$?"`
+→ 无输出，`exit=1`（0 命中）——常量零派发措辞。更严的 `grep -n '派\|调度' plugin/scripts/reanchor-prompt.txt`
+同样 0 命中。AC3 断言固化在 `reanchor-prompt.test.mjs` 的「AC3 — the re-anchor constant contains ZERO
+dispatch language」测试（负控制：改入任一禁用词该测试即红）。
+
+**AC4 grep/断言实跑**（`scripts/test.sh plugin/test/reanchor-prompt.test.mjs`，5/5 pass）：
+`reanchor-prompt.txt` 是 check-in 常量；`orchestrator-loop-tick.md` 步骤 1c 引用
+`plugin/scripts/reanchor-prompt.txt` 并要求逐字原样转发（测试断言 tick 引用常量路径 + 逐字语义）。
+
+**AC5**：`fast-mode-loop-tick.md` 新增「## 状态自检清单（重锚时逐项核对，机械可执行，强制）」小节——
+四项核对（①在飞 agent 是否符合文档 / ②就绪池是否维护 / ③是否在偷偷做收尾 / ④停止条件是否被遵守）
+各带机械判据（遥测 `inProgress[]` 长度 ≤3、`ready-pool-check` `pool` 字段、无 `status: *done`/`--task-end`/
+轮次记录写入、步骤 3 命中项 + `.halt`），使「核对状态是否符合」可机械执行。
+
+**AC7 测试实跑**（`import { test } from "node:test"` + `// @test-group governance`）：
+`$ QUAY_TEST_SKIP_STATIC_CHECKS=1 bash scripts/test.sh plugin/test/reanchor-prompt.test.mjs`
+→ `# pass 5 / fail 0`（5 个断言全过：AC3×2、AC4×2、AC5×1）。
+
+**AC6 证据记录（机制已落地，实跑证据待外层下一个 cron 周期）**：
+- 机制：外层 tick 步骤 1c 在判 inner 空闲时经既有 send-keys 信道转发固定常量
+  `plugin/scripts/reanchor-prompt.txt`（逐字原样），inner 收到后按「状态自检清单」四项机械核对：
+  符合 ⇒ 无操作（no-op）；有明确偏差 ⇒ 向出厂文档自我修正。节奏 = 外层唯一 `*/20` cron，单一调度源，
+  唤醒契约 = 一致性核对非调度。
+- **待补证据**：外层下一次 20-min cron 重锚转发后，inner 重读出厂文档的报告（符合/no-op 或
+  修正某明确偏差）——即 AC6 的「至少一次重锚」证明。此证据在合并落地后由外层 cron 天然产生；
+  本轮先记录机制与待证形状，AC6 勾选等待该实跑（与 closure-sync 任务 AC5 同款待证处理）。

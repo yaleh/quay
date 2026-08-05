@@ -547,6 +547,37 @@ tick 做一次收尾 pass。
 **每 tick 必报**补一条：本轮收尾几条、`.quay/verification-round.jsonl` 最新 `suiteGreen`、本轮全量
 suite 是否跑/绿。
 
+### 1c. 重锚转发（re-anchor，强制——机制不是散文）
+
+**给 inner 一个独立于外层措辞的周期锚。** 背景（gap-inner-has-no-periodic-anchor-prose-only-drives-
+drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 次驱动全来自外层 send-keys 散文，而
+外层自己每 20 分钟被 cron 强制重读出厂文档——**锚点不对称是 inner 行为漂移的结构根**。R2（驱动散文
+只带数据不带行为）管散文别越权；本步管「散文之外还有周期锚」。
+
+**机制 = 用本层已有 cron 转发一条固定重锚 prompt，不是给 inner 另建 cron、不是每次现写散文：**
+
+1. **判空闲才转发**：本 tick 已判 inner 空闲才转发（「空闲」按本层既有观察判据：pane 哈希两次相同、
+   且遥测无在飞任务 bracket、且不是 `ruling-required` 等待人类裁定——忙时不打扰）。**重锚量上界 =
+   空闲时长**，外层 cron（`*/20`）仍是唯一节奏源。
+2. **转发固定常量，逐字原样**：转发的文本 = `plugin/scripts/reanchor-prompt.txt` 的内容，
+   **逐字原样**（`cat plugin/scripts/reanchor-prompt.txt` 读出来发），**不是本层现写的新段落**。
+   送达走既有 send-keys 信道（`C-u` → 常量文本 → `Enter`，三次分开调用；发完 `capture-pane` 确认
+   出现新的 `⏺` 输出——未确认送达的重锚等于没发）。**这不是新增唤醒源**：节奏仍是唯一 `*/20` cron，
+   信道仍是既有 send-keys，只是把固定文本从文件转发出去。
+3. **唤醒契约 = 一致性核对，不是调度**（AC2）：重锚 prompt 是「重读出厂 `fast-mode-loop-tick.md` +
+   按「状态自检清单」核对当前状态是否符合（在飞 / 就绪池 / 收尾 / 停止条件四查）+ 明确偏差向文档
+   自我修正」。它**零派发指令**——机械保证是 grep 断言：
+   `grep -n '派发\|排序\|batch\|批' plugin/scripts/reanchor-prompt.txt`（期望 0 命中；
+   `plugin/test/reanchor-prompt.test.mjs` 固化）。
+4. **偏差修正若需派发，逐字照搬出厂文档自己的派发规则**（文档是唯一规则源）：重锚 prompt 不做新决策
+   ——inner 核对发现需补队/派发时，照 `fast-mode-loop-tick.md` 步骤 3.6/4 自己的规则执行，不是重锚
+   prompt 给的新指令。
+5. **每个 tick 必报**：本轮是否转发重锚、转发时 inner 的空闲判据（哪条观察判据成立）。
+
+**为什么「空闲才转发」**：重锚是「给 inner 一个周期读出厂文档的机会」，不是催活。inner 忙时
+（在飞 agent / 有 bracket）读文档的机会会打断工作；空闲时转发才是在它回合结束时给下一次行为对齐
+锚点。**与驱动散文的关系**：驱动散文带任务数据（R2 约束），重锚零数据、只指向文档——两者互补。
+
 ### 2. 分类本 tick 的动作
 
 **必须**记录本 tick 属于哪一类——这是判断分层是否退化的唯一依据：
