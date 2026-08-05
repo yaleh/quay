@@ -3628,3 +3628,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **已立案 2 任务**（ready）：`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`
   （两线模型 + 分叉基线即依赖 + 批量合 integration→develop + 前置②③ + 命名 integration）+
   `gap-global-count-assertions-fragile-relative-baseline`（前置②，B3-2 族相对化）。
+
+### tick 2026-08-05T06:44Z（外层，`no-action`：ROUND 3 gate 第 7 次 running）
+
+- **ROUND 3 gate running**（bzik1is7r，06:35:30 起，~8 分钟，ETA ~06:50）；inner 空闲待绿（box 注记
+  「绿后按滚动语义派下批」）。
+- 无停止条件、无 BLOCKED；loop-driver LIVE。绿后关 9 条收尾集（closure-sync/drive-text/pool-floor/
+  session-idle/red-executor/coldstart-key4 + 其余）+ 写 round 3 + 撤 RED 信号。
