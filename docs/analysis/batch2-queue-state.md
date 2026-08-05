@@ -4265,3 +4265,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **vendor 运行时不随 git clone（管理者 B 机实测 + 外层核实）**：.gitignore dist/ 排除 plugin/vendor/quay/dist，git ls-files vendor/ = 0，B 机 quay-init 表面全绿但 WARN（vendor 缺失），mcp_entry 指向不存在文件。**比 welcome-屏更根本**（挡整个 Provider ABI/MCP，AC12b 第二硬阻塞）。verify 检查铺设集不检查被引用运行时——「判据绕过真正重要的东西」族。
 - **处置**：fail-closed（vendor 缺失报错非 WARN）+ 形态取舍（②安装自动构建 或 ①negate 入库，外层倾向②）。建任务 gap-vendor-runtime-not-in-git-clone-broken-mcp-entry。
 - **AC12b 两个硬阻塞**：welcome-屏（已 promote ready）+ vendor 运行时（本任务）。修好 + git 同步 B 机后开测。
+
+### tick 2026-08-05T13:5xZ（外层，AC12b 阻塞②延伸立案）
+
+- **dist「自包含」声称不成立（管理者 B 机实测 + 外层核实）**：version.ts:13-14 在 __init 读 ../package.json，fresh 安装 ENOENT。sync-vendor 声称 fully self-contained 但产物不自包含（未声明运行期文件依赖）。三层缺口被 verify 放过（package.json 不在铺设集也不被引用）。建任务 gap-dist-runtime-not-self-contained-reads-external-package-json（修法②：构建时内联版本号）。
+- **AC12b 现状**：阻塞①welcome 屏（ready 代码未动）+ 阻塞②vendor 运行时（路径二可行 + 新 package.json 依赖）。两条修好 + git 同步 B 机后开测。
