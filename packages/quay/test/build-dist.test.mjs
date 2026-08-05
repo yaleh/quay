@@ -20,12 +20,18 @@
 //       sync-vendor --check reads concurrently in the full suite
 //       (no bash coverage tool in this repo — RED/GREEN exit-code + existence
 //       assertion, per the plan's shell strategy).
+//   (e) self-contained regression (gap-dist-runtime-not-self-contained-reads-
+//       external-package-json): the bundle runs `--version` with NO sibling
+//       package.json — the version is inlined at build time, so the dist is a
+//       single loose standalone file (pre-fix this crashed with ENOENT).
 //
 // The runnable-bundle assertions build into a DEPTH-MATCHED temp tree
-// (<root>/l1/l2/pkg/{package.json,dist/quay.js}) so BOTH src/version.ts's
-// `../package.json` read AND src/gate/registry.ts's 4-levels-up REPO_ROOT
-// resolve INSIDE the temp root — never the real repo tree, and never a
-// mismatched /tmp/package.json.
+// (<root>/l1/l2/pkg/{package.json,dist/quay.js}). After the self-contained fix,
+// src/version.ts NO LONGER reads `../package.json` at runtime (version inlined
+// at build time — test (e) asserts the bundle runs with zero sibling package.json);
+// the depth-match survives for src/gate/registry.ts's 4-levels-up REPO_ROOT,
+// which still resolves inside the temp root — never the real repo tree, and
+// never a mismatched /tmp/package.json.
 //
 // Run: node --test --experimental-test-coverage packages/quay/test/build-dist.test.mjs
 
@@ -45,7 +51,10 @@ const pkgDir = path.resolve(__dirname, "..");
 const scriptSh = path.join(pkgDir, "scripts", "build-dist.sh");
 
 // Build target inside a temp tree whose depth mirrors packages/quay/dist so the
-// bundle's own relative reads (version.ts, registry.ts REPO_ROOT) stay in temp.
+// bundle's own relative reads (registry.ts's 4-levels-up REPO_ROOT) stay in
+// temp. The package.json copy was historically needed for src/version.ts's
+// `../package.json` read; after the self-contained fix (test (e)) version.ts no
+// longer reads it, but the copy is harmless and kept for depth-matching parity.
 function tempTree(tag) {
   const root = makeTmpDir(`quay-m120-builddist-${tag}-`);
   const pkg = path.join(root, "l1", "l2", "pkg");
@@ -116,5 +125,35 @@ test("(d) shell wrapper: `bash scripts/build-dist.sh` exits 0 and writes the con
     assert.ok(fs.existsSync(out), `build-dist.sh must write ${out}`);
   } finally {
     fs.rmSync(outRoot, { recursive: true, force: true });
+  }
+});
+
+test("(e) self-contained: built bundle runs --version with NO sibling package.json (version inlined at build time)", async () => {
+  // gap-dist-runtime-not-self-contained-reads-external-package-json: the dist
+  // runtime must not read an external package.json at startup — version.ts
+  // embeds the version at build time (esbuild json loader inlines it). This
+  // subtest builds the bundle into a BARE temp dir (no package.json, no depth
+  // matching) and asserts --version prints the real version. Pre-fix this
+  // crashed with `Error: ENOENT ... open <dir>/../package.json`.
+  const root = makeTmpDir("quay-m120-builddist-nopkg-");
+  try {
+    const out = path.join(root, "quay.js");
+    const written = await buildDist({ outfile: out });
+    assert.equal(written, out);
+    assert.ok(fs.existsSync(out), `expected bundle at ${out}`);
+
+    // The bundle must physically not carry version.ts's old runtime read
+    // (`../package.json` relative path); the version string is inlined instead.
+    const src = fs.readFileSync(out, "utf8");
+    assert.ok(
+      !src.includes("../package.json"),
+      "the bundle must not contain version.ts's '../package.json' runtime read"
+    );
+
+    const pkgVersion = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
+    const version = execFileSync("node", [out, "--version"], { encoding: "utf8" }).trim();
+    assert.equal(version, pkgVersion, `--version must print the inlined version (${pkgVersion}) with no sibling package.json`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

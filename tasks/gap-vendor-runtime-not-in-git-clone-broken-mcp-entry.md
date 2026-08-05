@@ -158,6 +158,10 @@ quay-native mcp: serving tasks from <target>/tasks   # Provider ABI 可用
 注：`node vendor/quay/dist/quay.js --version` 的 ENOENT（version.ts 读外部 package.json）属
 **另一任务** `gap-dist-runtime-not-self-contained-reads-external-package-json`（AC12b 阻塞②延伸）的缺陷域，
 本任务（运行时存在性 + fail-closed + auto-build）已闭环。
+**交叉标注（AC12b 阻塞③，2026-08-05）**：该 ENOENT 缺陷域已由
+`gap-dist-runtime-not-self-contained-reads-external-package-json` 闭环——version.ts 改为构建时内联版本号
+（esbuild json loader），dist 运行时零外部 package.json 读，`node vendor/quay/dist/quay.js --version` 与
+`task list` 在无 package.json 布局下均正常（AC12b 阻塞③ 与阻塞② 在此互补闭环）。
 
 **invoke 证据**（`grep -n 'vendor\|dist\|WARN\|fail' plugin/scripts/quay-init.sh`）：
 ```

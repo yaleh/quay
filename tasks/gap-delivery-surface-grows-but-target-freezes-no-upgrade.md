@@ -77,6 +77,14 @@ invoke    `bash plugin/scripts/quay-init.sh --check-drift`
 control   构造目标项目缺一个派生脚本 ⇒ 升级必补 + 报告缺失-1；本地改动脚本 ⇒ 列漂移不静默覆盖
 resume    升级路径与漂移报告分两步提交，任一步完成即写盘
 
+## 交叉标注（AC4，2026-08-05，gap-dist-runtime-not-self-contained-reads-external-package-json）
+
+本条（升级通道 umbrella）的 **config 迁移切片**已由 `gap-dist-runtime-not-self-contained-reads-external-package-json`
+AC4 先行闭环：`plugin/scripts/quay-init.sh` 新增 `migrate_stale_mcp_entry()`——旧 `.quay/config.yml` 的
+native provider `path`/`mcp_entry` 指向目标中不存在的路径（dev-tree 残留）⇒ 升级到安装态
+`vendor/quay-native` + `vendor/quay-native/dist/quay-native.js`（范围守卫：只迁移 quay 运行时引用，保留 AC3
+fail-closed 负控制）。本条其余派生脚本漂移/缺失检测仍为本条（delivery-surface）范围。
+
 ## Dispatch review
 
 reviewer: outer
