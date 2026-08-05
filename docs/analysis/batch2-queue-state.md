@@ -3302,3 +3302,11 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   laid-down docs/test.sh derived-default] + 负载抖动）→ 全部 triage → 绿。**教训**：①派发前 contract
   静态预审计可抓我的格式踩坑；②inner 并发 plugin-packaging 构建会抖 timing 测试——负载抖动是真实面。
 - 待驱动 inner：round 2 绿 + 池有可派 → 下批（ready-pool-floor/red-window-executor/session-idle）。
+
+### tick 2026-08-05T05:05Z（外层，`no-action`：下批 inner 派发中——串行 ①② / 并发 ③）
+
+- **ROUND 2 后下批**：inner 映射 3 条——①ready-pool-floor + ②red-window-executor 同触
+  orchestrator-loop-tick.md ⇒ 串行；③session-idle（仅 session-liveness）disjoint。inner 正在核 status
+  （误读 dispatch-review 的「todo」字样，实为 frontmatter ready——3 条全 ready，已核）。
+- **池 3**（deficit 0）全可派；suite-state green（round 2）；无停止条件、无 BLOCKED；loop-driver LIVE。
+- 下批即本轮已立案的战略/机制任务（池 floor+disjointness / red-window 执行者 / session-idle 融合）。
