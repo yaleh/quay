@@ -193,6 +193,54 @@ test("existing-file-modifying tasks: not-landed stays in the pool, landed is exc
   assert.ok(reasonsById["gap-mod-landed"].includes("not-yet-flipped"), "landed existing-file task excluded (AC3)");
 });
 
+// ── git-history landed signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) ──
+// A prose-heavy-AC merged-not-flipped task (no resolvable symbols, no (new) touches) whose work
+// landed via a fan-in merge that references it must be excluded from the dispatchable pool. These
+// tests need a REAL git repo (the signal reads `git log master`), created inline (mkdtemp + the
+// same t.after cleanup the other ready-pool tests use) so the R6 isolation checker sees the
+// directory covered.
+
+test("ready pool excludes a prose-heavy merged task via git-history (AC1/AC3)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-gh-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "init");
+  // A prose-heavy task whose AC yields no resolvable symbols and whose Touches are existing-file
+  // paths (no (new)) — the shape that was under-detected (web-board). Its work lands via a fan-in
+  // merge "merge web-board: …" that modified code/board.ts → git-history fires.
+  writeTask(root, "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/board.ts"] }),
+  });
+  // A genuinely-unstarted ready task stays in the pool (no commit references it).
+  writeTask(root, "gap-unstarted", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/never.ts"] }) });
+  git("checkout", "-q", "-b", "task/gap-web-board");
+  fs.writeFileSync(path.join(root, "code", "board.ts"), "board\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "board impl");
+  git("checkout", "-q", "master");
+  git("merge", "--no-ff", "task/gap-web-board", "-m", "merge web-board: /board route joins intent/execution/landing", "-q");
+  git("branch", "-D", "task/gap-web-board");
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.ok(
+    byId["gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"]?.includes("not-yet-flipped"),
+    "prose-heavy merged task excluded via the git-history signal (AC1/AC3)",
+  );
+  assert.equal(r.ready.includes("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), false,
+    "the landed task is NOT in the dispatchable pool");
+  assert.equal(r.ready.includes("gap-unstarted"), true, "a genuinely-unstarted ready task stays in the pool");
+});
+
 test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
   const root = makeWorkspace("n-y-f");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

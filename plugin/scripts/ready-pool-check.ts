@@ -168,13 +168,15 @@ export function kindOrder(kind) {
 }
 
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
- *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file evidence)
- *  but `status` is still `ready` (fan-in has not flipped it). Deliberately does NOT depend on AC
- *  checkbox state: the inner's fan-in merges WITHOUT ticking AC boxes, so all-checked is not the
- *  closeout signal (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). */
+ *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file / git-history
+ *  evidence) but `status` is still `ready` (fan-in has not flipped it). Deliberately does NOT depend
+ *  on AC checkbox state: the inner's fan-in merges WITHOUT ticking AC boxes, so all-checked is not
+ *  the closeout signal (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). taskId is
+ *  passed through so the git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-
+ *  merged-tasks) can anchor on the task's own id without depending on the self-touch Touches entry. */
 export function notYetFlipped(task, repoRoot) {
   if (task.status !== "ready") return false;
-  return taskWorkLanded(task.body, repoRoot);
+  return taskWorkLanded(task.body, repoRoot, { taskId: task.id });
 }
 
 export function isFixture(task) {
