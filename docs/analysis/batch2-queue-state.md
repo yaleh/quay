@@ -3649,3 +3649,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > **06:55Z 增补（M3 takeover 真回归确认 + 已驱动修复）**：session-liveness isolated（43/41/1）——M3 (AC20d)
 > 接管测试 **isolated fail（658ms）= 真回归**（noise-gate isolated 过 = 负载抖动）。疑 session-idle ③
 > 落地（改 session-liveness.sh）影响接管/超时逻辑。已驱动 inner bisect + 修 + scoped 自测。
+
+### tick 2026-08-05T07:00Z（外层，`unblock`：预测性生成器立案 + 归并裁定）
+
+- **SYNTHESIS-axis-generation 读核 + 立案**：机器维度生成是**摩擦副产品**（200 gap 中机器 36/人 20，
+  机器 1.8×，开过 7 根新维度全 post-friction）；无人时会**渐近**（修完硌人的、未开轴上报绿——今晚 4 条
+  恶化指标全没报警全靠人问）。**有预测力生成器**（5/5 反推）：「每条常驻判据量化哪个范围？答案眼前
+  这一个 ⇒ 有一根没开的轴」。
+- **已立案 `gap-axis-generator-question-what-range-every-standing-criterion`**（ready）：生成器机制 +
+  可证伪判据（AC9 替换：每晚统计无触发立案数，当前 0）+ 预测力回归控制（5/5）。
+- **归并裁定**：point-in-time quality（time 轴）+ stop-conditions-no-scope（scope 轴）= 同一生成器两
+  投影——标注为输出，不合并中期任务；生成器系统化发现，不再一条条捡实例（捡实例受限于人在场）。
