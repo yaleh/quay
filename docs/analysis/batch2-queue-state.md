@@ -3048,3 +3048,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - 对管理者「套件移外层不会立即止血」的精确化：套件「移去哪」不是止血，套件任务的**红窗乐观规则**才是；
   我据此把 (a) 块派发提到最前（它就是 closure-async 的完成态）。
 - 本轮到绿后：关 5 条 → 空槽先派 (a) 块。
+
+### tick 2026-08-05T03:20Z（外层，`unblock`：verification-round ROUND 1 完成 + 下批按裁定排序派发）
+
+- **verification-round ROUND 1 完成**（外层首轮实跑）：suite GREEN（2319 tests / fail 1 = 已知
+  noise-gate 负载抖动，isolated 1/0 pass / cancelled 0）。**已关 3 条**：roadmap、review-cadence、
+  inner-anchor（done；DoD 全量绿勾上，inner-anchor AC6 靠重锚 #1 实跑 + 自我修正 fcd8e88e）。**留
+  ready 2 条**：closure-sync（AC5「inner 持续派发未停顿」未满足——本轮 inner 停摆正是要修的问题，
+  留待 suite (a) 红窗乐观规则落地后再证）、drive-text（DoD 真实驱动验证待补）。round 记录写入
+  `.quay/verification-round.jsonl`（round 1，gitignored 运行时态）。
+- **下批派发按排序裁定**（inner 已确认）：①gap-full-suite-belongs-to-outer-background-above-3-min
+  （红窗乐观 = 永不等待补全 = 立即止血）→ ②gap-closure-could-not-run-in-task-grant-self-touches
+  （收尾变一行）→ ③gap-scoped-runs-pay-full-static-check-overhead 最后。inner 读 3 任务建简报中。
+- **闭环证据**：重锚 #1 + 首个 verification-round + 红窗分诊（2 次 RED→修复→绿）全程在 git 历史
+  （fcd8e88e/bada334d/f2e0ea8c/c86a9b25）。
