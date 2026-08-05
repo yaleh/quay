@@ -5,6 +5,9 @@
 （`gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable`，已 done）。
 **但 D 的范围只是「分类器本体 + 接线」**（判断目标在不在等输入），**不覆盖「发送」这一半**——
 本文档记录的 5 个故障模式，全部发生在发送侧，D/B 都不管。**F 关掉后这块地是空的。**
+**同源标注（2026-08-05）**：D 的「单一代理信号不足以判定状态」原则在这里还有第二个实例——
+`gap-outer-heartbeat-source-inverts-under-incident-handling`（外层心跳源从 tick-log 单源改为多源
+max mtime；红窗处置写 queue-state + 提交但不写 tick-log，单源会把「越认真处理事故」读成「心跳越旧」）。
 
 以下每一条都是今晚真实发生、非推断的故障，附证据。
 
