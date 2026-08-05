@@ -3412,3 +3412,14 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > `gap-outer-heartbeat-source...`（control 折行，同 ready-pool-floor 同款错误）。**第 6 次**。已修 →
 > 重跑（b2hyctn7l）。教训：我的 control 行反复折行——派发前 contract 静态预审计（self-touch-scan 同型）
 > 必须落地，否则每轮 gate 兜底浪费 15 分钟。
+
+### tick 2026-08-05T05:55Z（外层，`unblock`：meta-cc/archguard 关键路径立案 → 立即派发）
+
+- **管理者关键路径核实**：meta-cc/archguard 启动只剩 1 条真正任务周期——cold-start SKILL.md AC8c 键 4
+  （INNER-DRIVEN）仍教 send-keys-verified.sh 哈希判据（F 判 superseded、假阳性 3 次含骗过外层 2 次）；
+  替代品 send-keys-reliable.sh + transcript-delivery-check.ts 已造好测过同目录。**交付物传播已知缺陷**
+  （同 tmpfs worktree 类）。其余 2 条阻塞是几分钟机械操作（插件刷新 01:08 快照 + 重跑 quay-init）。
+- **已立案 `gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash`**（ready）——从 manager-layer
+  umbrella 隔离的小任务：AC8c 键 4 判据替换（哈希 → 可靠发送，transcript user-message = 可信送达 Fault 5）
+  + AC2 grep 哈希 0 命中 + F 交叉标注。**关键路径，立即派发**（inner 空闲 + ROUND 3 套件 running =
+  顺带动用乐观派发）。
