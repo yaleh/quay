@@ -79,6 +79,8 @@ inner 的自述措辞与出厂语义一致」**。本任务补这个判据。
 
 ## Touches
 
+- tasks/gap-reanchor-must-converge-inner-self-reported-vocabulary.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/loop/orchestrator-loop-tick.md（重锚步：加自述措辞审计/收敛判据）
 - plugin/scripts/（自述措辞审计 helper，若成脚本）
 - plugin/test/（AC2/AC4 fixture）
