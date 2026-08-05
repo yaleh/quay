@@ -4376,6 +4376,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   不可测 → cap 1。scoped 35/35。**8 AC 全勾**；DoD（live 派发 ≥3 / archguard 高负载实跑）留外层。
 - **在飞 0/3**。套件 green。
 
+### tick 2026-08-05T16:2xZ（内层：遗传物质级拓扑缺陷优先派发）
+
+**外层裁定（管理者）：`gap-manager-baked-into-project-topology-factory` 遗传物质级**——ROLES 含
+manager 是出厂定义错误（每繁殖复制一次），topology-check 是正在生效的假判据（判两窗口项目不合规）。
+改 ROLES='outer inner'、SKILL/注释 three-window→two-window、manager 完全移出项目拓扑（人跨项目
+另行启动）、topology-check 同步。改好后 `gap-outer-self-checks-and-creates-inner-session` 用新拓扑
+定义实现。
+- **manager-baked 已派**（telemetry `fm-...-ax7d3e`）。outer-self-checks 当前 todo——依赖新拓扑定义，
+  等 manager-baked 落地后 promote + 派。
+- **在飞 1/3**。套件 green。
+
 ### tick 2026-08-05T14:2xZ（外层，AC12b 阻塞 2/4 落地）
 
 - **ghost-drive（阻塞 #1）已 merge**（ba3a4e87）：fresh-session detection（transcript-delivery-check --is-fresh）跳过清屏，非 fresh 保留 NBSP 路径，real fresh-session e2e rc=0。welcome 屏修复完成。
@@ -4441,3 +4452,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **管理者紧急更正**：manager 是跨项目的，outer 不该管——我上条「三窗口」措辞错误（应两窗口：outer + inner）。
 - **错误已固化进交付物**（实测三处）：quay-topology.sh ROLES="manager outer inner"（64/97/101/115 行）+ topology-check.sh ROLES（67 行，会判两窗口项目不合规——正在生效的假判据）+ SKILL.md 13 处 three-window/manager。与产品轮廓「manager 跨项目非 per-project」矛盾。
 - **严重性**：进入遗传物质的错误——出厂定义结构性错误，每次繁殖复制（B 机手工建 quay-b 两窗口恰好对，交付物却是错的）。
+
+### tick 2026-08-05T16:0xZ（外层，观测方向缺口立案）
+
+- **「谁在等人」机制只覆盖 outer→inner**：inner-blocked-signal screen observer（classifyPaneState + 连续 3 次 + 底部区域）已验证严谨，但单向——没人盯 outer/manager。今天两次真实场景落盲区（outer 等裁定、archguard 假阳性）。
+- **无任务精确指向缺口**（ruling-required 已 done 只做了一层）。建任务 gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer（复用现有机制，观测方向反过来：manager 盯 outer）。
