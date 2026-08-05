@@ -4647,3 +4647,19 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   fail-closed 或 loud（stderr + state 标 degraded）；--json 消费者读 transcriptSource==discovery 报警；
   AC4 关联已 done 任务留空的 AC4。
 - **在飞**：upgrade-channel agent 继续（sync.sh 映射）。套件 green（stale）。
+
+### tick 2026-08-05T16:5xZ 补充3（外层，B 机采纳者三发现裁定）
+
+- **① Node 版本检查缺口 → 立案 `gap-no-active-node-version-check-users-cant-tell-upgrade`**：
+  `--experimental-strip-types` 需 Node ≥22.6，B 机 18.19.1 报裸 bad option；engines>=20 被动声明不
+  可行动。fix：入口版本探针（纯 JS 不依赖 strip-types，老 node 也能跑）fail-closed 报清晰错误。
+- **② dist 直跑（dev-tree dist/quay.js + dev-tree 外 --root）**：mcp_entry 指回 dev-tree .ts +
+  ERR_UNKNOWN_FILE_EXTENSION——管理者降级为 **未 verified**（可能非标准安装流程），不代判。已关联在飞
+  upgrade-channel 任务（dist 自包含 / mcp_entry 指向）。
+- **③ B 机 git 冲突 → 裁定：备份未跟踪文件后 pull**。B 机卡 a3d3091b（落后 1h43m），
+  `orchestration/orchestrator-loop-tick.md` 是 B 机未跟踪文件（pre-commit 铺出副本）与即将 pull 的
+  同名已跟踪文件冲突。**处理**（B 机上，git 操作，管理者执行——外层无 B 机文件系统访问）：
+  `mv orchestration/orchestrator-loop-tick.md orchestration/orchestrator-loop-tick.md.bak-$(date +%s)`
+  后 `git pull`；已跟踪版 supersede 本地副本。注意：B 机 Node 18.19.1 即使 pull 成功也无法源码执行 quay
+  （卡 ①），需升 Node ≥22.6 或用 dist。
+- **在飞**：upgrade-channel agent 继续。套件 green（stale）。
