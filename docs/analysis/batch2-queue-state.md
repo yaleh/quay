@@ -60,7 +60,7 @@
 **派发 3（run_in_background:true，全 disjoint，telemetry 已开）：**
 - ✅ **`gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`（PRIORITY）**：已 merge（`a8a52266`，遥测同步闭）——LOOP_SCRIPTS 改为从文档引用派生（自动铺 6 个此前缺失脚本），local-state 文件声明 self-create（touch 命令，不铺空副本保字节相同升级），quay 实验散文声明 reference-doc；verify-referenced-landed 机械步（fail-closed）；scoped 34/34
 - ✅ `gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point`：已 merge（`9b05a2f9`，遥测同步闭），`instrument` MCP 工具（list/run，清单派生非硬编码），scoped 22/22
-- `gap-load-sensitive-session-family-confounds-step-three`（负载敏感步骤三）
+- ✅ `gap-load-sensitive-session-family-confounds-step-three`：已 merge（`11b01d37`，遥测同步闭）——KNOWN-LOAD-SENSITIVE 注解（步骤三放宽排除该族；高负载负控制复现 28-29s timing 签名证明敏感为真）；scoped 46/45/0/0/1
 - **gap-eighty-two 待 gap-init-ships 落地后派**（同碰 `plugin/scripts/quay-init.sh`，串行）
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
