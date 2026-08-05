@@ -65,7 +65,17 @@
 - ✅ `gap-load-sensitive-session-family-confounds-step-three`：已 merge（`11b01d37`，遥测同步闭）——KNOWN-LOAD-SENSITIVE 注解（高负载负控制复现 28-29s timing 签名证明敏感为真）；scoped 46/45/0/0/1
 - ✅ `gap-eighty-two-shipped-checks-and-none-says-what-it-answers`：已 merge（`9d3735a1`，遥测同步闭）——capability-catalog.sh（派生 87-check 清单，每个 check 声明它回答什么），scoped 8/8
 - ✅ `gap-ac3b-prove-installed-quay-runs-without-dev-tree`：已 merge（`2b0ba79a`，遥测同步闭）——**meta-cc 安装前唯一硬阻塞已解除**；AC1 刷已装插件（quay.js 2026-08-05 01:21 新于 08-04）+ 改名负控制 AC3/AC4（安全窗实跑，AC3 真 task_list 往返 / AC4 PATH 形态失败）+ AC6 零残留；**顺带修了 quay-init 只写 mcp_entry 不铺运行时缺口**（vendor 本地 provider bundle）；scoped 68/68
-- **批 4 全量（5 条 merged）**：首跑 2 fail——**2 个 task 文件 frontmatter 标题含内嵌引号导致 yaml.parse 失败**（gap-residue-check / gap-split-batch-vocabulary，非 batch-4 引入，是既有书写路径绕过 task-write 的 YAML 安全引号）。**已修**（`6c137696`，整值引号包裹）。**重跑全绿 — tests 2298 / fail 0 / cancelled 0 / skipped 28**（新参考值 2298）。5 条任务 body 关闭由 closure agent 执行中
+- **批 4 全量（5 条 merged）**：首跑 2 fail——**2 个 task 文件 frontmatter 标题含内嵌引号导致 yaml.parse 失败**（gap-residue-check / gap-split-batch-vocabulary，非 batch-4 引入，是既有书写路径绕过 task-write 的 YAML 安全引号）。**已修**（`6c137696`，整值引号包裹）。**重跑全绿 — tests 2298 / fail 0 / cancelled 0 / skipped 28**（新参考值 2298）。**批 4 关闭完成**（closure `9c71b5d8`）：5 条全 done，invoke 证据齐全（task-contract 0 新违规），遥测全配对，worktree 全清。
+
+## 累计（2026-08-04~05 四个批）
+
+- **批 1**：A/D/B/L0 四任务 done，全量 2276。
+- **批 2**：8 任务 done，全量 2298。
+- **批 3**：3 任务 done，全量 2283。
+- **批 4**：5 任务 done（init-ships / eighty-one / load-sensitive / eighty-two / ac3b），全量 2298。
+- **全量参考值演变**：2276 → 2298 → 2283 → 2298。
+- **累计 20 任务 done**。**meta-cc 安装前唯一硬阻塞（ac3b）已解除**——已装插件已刷新（quay.js 08-05 01:21）。
+- 顺带修复：2 个 task frontmatter 内嵌引号标题导致 yaml.parse 失败（`6c137696`）。
 - 就绪池待派：`gap-promotion-cadence-is-role-volition-not-product-mechanism`（ready，未选入本轮 2 条）
 - 待关闭时注意：D/L0 关闭曾引入 task-contract `invoke-evidence-missing` ratchet（2 条）——已补 invoke 实跑证据修掉（`new since baseline: 0`）。后续 done 任务都须带 invoke 证据。
 
