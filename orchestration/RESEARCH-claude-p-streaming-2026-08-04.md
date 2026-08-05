@@ -52,12 +52,45 @@ Anthropic 不允许该模式用 Claude 订阅（这是尚未采用的原因之�
 
 **⇒ 不能用则整个计划作废。这条必须先测。**
 
+#### 实测结论（2026-08-05，`gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics`）：**能往返，gating 过**
+
+实测 `claude-deepseek -p '回复 OK 即可'` → exit 0，stdout 收到模型回复 `OK`（1 行）。
+stderr 出现「claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is
+set」警告——反向证明 auth 走 env key，非 claude.ai 订阅态。
+
+负控制（证明 key 真被用上）：
+- **Contract 字面行 `env -u ANTHROPIC_API_KEY -u DEEPSEEK_API_KEY claude-deepseek -p '回复 OK'`
+  意外 SUCCESS**——`claude-deepseek` launcher 内部 `source ~/.local/etc/deepseek-api-key`
+  **重新设置** key 并 `export ANTHROPIC_AUTH_TOKEN`，父环境 `env -u` 拦不住。**Contract 负控制行
+  规格有误**，需忠实变体。
+- **忠实负控制（key 文件不可达，HOME 指向空目录）→ exit 1**：
+  `Error: DeepSeek API key file not found: <nohome>/.local/etc/deepseek-api-key` —— 证明 key 文件
+  是往返的承载。
+- 追加：坏 key 值 → API 层 `Execution error`（挂起重试，不干净），进一步证明真实命中第三方端点。
+
+**未知 A 判定：`ANTHROPIC_BASE_URL` → DeepSeek 在 `claude -p` headless 下可往返。整个方向可用。**
+
 ### 未知 B（决定「移植」还是「重新设计」）：stdin 保持打开时，退出语义是否改变
 
 `headless.md` 的原文措辞是 final result 返回 **且 stdin 已关闭**之后才杀后台 —— **两个条件并列**。
 
 - 若 **stdin 不关就不退出** ⇒ 现有并发派发模型（3 个在飞 subagent，跨小时）可以**原样保留**
 - 若**照退** ⇒ 内层的并发必须改成「驱动进程起 N 个独立 `-p` 进程」，**这是重新设计，不是移植**
+
+#### 实测结论（2026-08-05，`gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics`）：**分形态——stream-json = 移植；plain 参数形态 = 照退**
+
+判据全程是 `ps` 进程存活，不是日志文本。
+
+- **plain `-p 'prompt'` 参数形态（stdin 用 `tail -f /dev/null` 保持打开）→ 照退。** 主回合 + 后台
+  subagent 回合结束（~t+46s）即退出，stdin 打开**不**持有会话。
+- **stream-json 形态（`--input-format stream-json --output-format stream-json --verbose`，
+  driver 实际形态）→ 不关 stdin 就不退出。** writer 握 stdin 200s：后台 subagent 于 ~t+138s 完成
+  （`task_notification` 事件，status completed），其后进程**仍存活**到 t+203s（writer `sleep 200`
+  结束、fifo EOF）才退出。后台 subagent 的完成由事件流异步投递，进程本身存活。
+
+**未知 B 判定：**「驱动进程握 stdin = 持久会话」只在 **stream-json 形态**成立；plain 参数形态照退。
+现有并发派发模型（3 个在飞 subagent、跨小时）可**原样保留（移植）**，前提是驱动进程用 stream-json
+形态持续握着 stdin——与调研 §2 的「驱动进程接管调度与观测」设计一致。plain 形态不可用于此目的。
 
 ---
 
