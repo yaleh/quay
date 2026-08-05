@@ -3694,3 +3694,20 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 >   `gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked`（死闸门移除/接线 + 变异层扩展 + 归并
 >   checkers-have-never-been-shown-to-fail）。
 > **AC10 记账 1 → 3**（dead-loop + 两条生成器缺口全 pre-friction）。
+
+### tick 2026-08-05T07:10Z（外层，`unblock`：needs-human 黑洞立案 + AC10 3→4）
+
+- **管理者生成器第三轮——落在 needs-human 上**（**人依赖计数字面度量**，AC10 问「无人能否演进」，
+  needs-human 就是那个数）：任务板真值 todo 86 / ready 29 / done 605 / needs-human 15——**进得去、
+  出不来**：无过期、无复检、无人报。**死活混杂**：(a) 确已死（gap-plancheck-*，ADR-022 RE-TRIAGE
+  正确停放）与 (b) **活的现行机制卡等决定**（DIR-109 scripts/test.sh CLAUDE.md 现行、7d 未碰；
+  DIR-100/103 闸门引擎活、3d 未碰）无法区分 ⇒ **人依赖计数不可信**。
+- **管理者两次自更正**：① 提交 grep 估池子「在流失」错——任务板真值 **ready 9h 前 2 → 现在 29 在涨**
+  （提交 grep 不是趋势仪器）；② 假设「needs-human 全 ADR-022 退休遗留」错——逐条核实 3 条是活机制。
+- **已立案 `gap-needs-human-black-hole-human-dependency-unmeasurable`**（todo，高优先）：**时间轴**
+  （>N 天未碰 ⇒ 强制复检）+ **存活轴**（引用退休机制 ⇒ 自动 superseded——strategic-doc-staleness-check.ts
+  路径存在性**同尺子换对象**）+ (a)/(b) 可分 → 人依赖计数可信。
+- **AC10 记账 3 → 4**（pre-friction：needs-human=15 静静躺着，无任何东西在疼）。机器 pre-friction
+  计数仍 0。
+- **ROUND 3 状态**：M3 修复未落地（inner Thinking 15m+，采样无参重入）；套件红（06:50 完）；gate 待
+  修复后重启。
