@@ -80,8 +80,7 @@ measure   heartbeat_source_count = `grep -c 'mtime' plugin/scripts/session-liven
 band      heartbeat_source_count >= 3（多源：提交/队列状态/分诊记录至少 3 源）
 invariant incident_handling_keeps_heartbeat = 1（红窗处置写 queue-state+提交不写 tick-log ⇒ 心跳新鲜）
 invoke    `bash plugin/scripts/session-liveness.sh --selfcheck`
-control   模拟红窗处置（queue-state 写入、tick-log 不动）⇒ 不报 OVERDUE（AC2）；30 分钟零写入 ⇒ 报
-          OVERDUE（AC3，真阳性保留）
+control   模拟红窗处置（queue-state 写入、tick-log 不动）⇒ 不报 OVERDUE；30 分钟零写入 ⇒ 报 OVERDUE（真阳性保留）
 resume    多源判据与 fixture 分两步提交，任一步完成即写盘
 
 ## Dispatch review
