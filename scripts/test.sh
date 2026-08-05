@@ -614,6 +614,14 @@ run_selected() {
     if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" "${repo_root}"; then
       code=1
     fi
+    # Suite-AFTER assertion (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
+    # a FULL SUITE must leave no test-characteristic tmux server or /tmp dir behind (skv- /
+    # session-liveness- / ol-tok- / enter-repro- prefixes). Second line of defense — the teardown
+    # fix (kill-session, never kill-server) is primary; this covers the whole leak class at once.
+    # Same flip-only-a-passing-run semantics as assert-clean-tree above.
+    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh"; then
+      code=1
+    fi
     exit "$code"
   fi
   mark_nested
