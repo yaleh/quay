@@ -102,6 +102,11 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 资源闸是**外层后台 runner 起跑前**要过的闸，不是 inner 的。inner 只保留 `--for-task` 选中集
 （秒级，走 scoped 路径，不触资源闸）。
 
+**DoD 的最后「连跑 2 次全绿」不因上述放宽（AC4 负控制，`gap-two-thirds-of-a-task-is-polling-a-suite-log`）**：
+`--for-task` 跳资源闸、只跑 `## Touches` 选中集，**对「这次改动有没有破坏别处」是无知的**——它只能用在
+迭代中途。任务收尾（外层异步）仍必须按 DoD 要求**连跑 2 次全量全绿**（`fail 0` 且 `cancelled 0`，判绿
+三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
+
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
@@ -440,9 +445,12 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    `node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch-scan --root "$(pwd)"`
    ——任一 ready 任务缺自身文件 ⇒ exit 1（先补，否则该任务不可派发）。
 
-派发形态：后台 `Agent(run_in_background)`，subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，
-不在 `/tmp`——tmpfs 是内存，`worktree_root` 见上）和 `task/<id>` 分支，内部起独立对抗审查
-（硬上限 2 轮），只提交不合并。
+派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**
+（`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到整批返回、拿不到先完成者的
+早期反馈、期间什么也做不了，`<task-notification>` 唤醒流永远不会被触发——那是本仓实测等待的另一半来源，
+见 `orchestration/SPEC-cut-the-waiting.md`。同一条消息里发多个 `Agent` 调用拿到的并发是 harness 并发执行，
+不是后台派发）。subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，不在 `/tmp`——tmpfs 是内存，
+`worktree_root` 见上）和 `task/<id>` 分支，内部起独立对抗审查（硬上限 2 轮），只提交不合并。
 `milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
 
 **任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：

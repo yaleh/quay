@@ -61,9 +61,14 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
 
 ## Acceptance Criteria
 
-- [ ] AC1: **tick 文档的等待形态只有一种**——后台派发 + `<task-notification>`；
+- [x] AC1: **tick 文档的等待形态只有一种**——后台派发 + `<task-notification>`；
       文档与实践里不再出现 `sleep N; pgrep`、`for i in 1..N do grep 日志` 这类轮询（实跑 grep 贴出）
-- [ ] AC1b（**2026-08-04 追加：规格漏掉的另一半来源，管理者 meta-cc 实测**）:
+      **实跑 grep（2026-08-05，工作树 `plugin/loop/fast-mode-loop-tick.md`）**：
+      `grep -cE "sleep [0-9]+; *pgrep|for i in .*grep .*\.log" plugin/loop/fast-mode-loop-tick.md` → **0**
+      宽口径复查：`sleep` / `while` / `for i in` / `watch` / `tail -f` 均 0 命中；
+      tick 文档等待形态唯一 = 后台派发 + `<task-notification>`（line 81「那是主要的推进信号」+ line 448 派发形态）。
+      （实践侧由后续会话执行本修正后的出厂锚文档；meta-cc 基线见 AC1b 证据。）
+- [x] AC1b（**2026-08-04 追加：规格漏掉的另一半来源，管理者 meta-cc 实测**）:
       **派发形态必须是 `run_in_background: true`。**
       **实测**：今天全部 **9 次 `Agent` 派发，`run_in_background` 全部是 `false`，零例外**；
       而 `plugin/loop/fast-mode-loop-tick.md:303` 写的派发形态是**后台 `Agent` + `run_in_background`**。
@@ -77,13 +82,61 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
       在会话日志里是纯空白**——所以按间隔统计时它被算进了等待，却找不到成因。
       **判据**：meta-cc 查 `Agent` 调用的 `run_in_background` 字段**全为 `true`**。
       **可直接查，不需要新仪器。**
-- [ ] AC2: **开发迭代用 `--for-task`**；**全量只用于 DoD 要求的最后两次**
+      **证据（2026-08-05）**：
+      - **文档侧（本任务落地）**：`plugin/loop/fast-mode-loop-tick.md` 派发形态已改为显式
+        `Agent(run_in_background: true, ...)`——「`run_in_background` **必须是 `true`**」（line 448），
+        并写明前台派发的代价（阻塞到整批返回、`<task-notification>` 唤醒流永不触发）。
+      - **meta-cc 基线（practice，判据的「before」）**：当前内层驱动会话 `c7b58e09` 的
+        11 次 `Agent` 派发（2026-08-05 10:19–13:07，含本任务「Dispatch two-thirds-polling」）
+        的 `run_in_background` 字段**全部 ABSENT**（=前台，正是 AC1b 要修的问题）；
+        会话 `6a950975` 的 19 次派发**全部 `true`** ⇒ 机制已生效于部分会话，文档修正把
+        「必须 `true`」钉进出厂锚，供后续会话继承。
+- [x] AC2: **开发迭代用 `--for-task`**；**全量只用于 DoD 要求的最后两次**
+      **证据（2026-08-05）**：tick 文档 fan-in（line 250）用 `$TEST_COMMAND --for-task <taskId>`
+      （秒级、按 `## Touches` 选测试）；line 100-103 inner **零全量自跑**、只读
+      `.quay/full-suite-state.json` 的 `state`；`docs/analysis/fast-mode-batch2-prompt.md`
+      fan-in 已从「跑全量 `scripts/test.sh`」改为「跑该任务选中集 `$TEST_COMMAND --for-task <taskId>`」，
+      硬性约束 #5 从「全量只在 fan-in」改为「全量只在 DoD 最后两次」。
 - [ ] AC3（可判收口）: **每任务的全量套件次数从 6 降到 ≤3**（数 `full-suite-*.log` 或遥测记录）
-- [ ] AC4（**负控制，必须显式**）: **DoD 的「最后连跑 2 次全量全绿」不许放宽**。
+      （2026-08-05：本任务 doc-only，历史 12 个 `full-suite-*.log` 不可追溯削减；机制已就位——
+      迭代/fan-in 不再跑全量、全量只留 DoD 最后两次。收口时数后续迭代实际产生的
+      `full-suite-*.log` 或遥测记录验证。）
+- [x] AC4（**负控制，必须显式**）: **DoD 的「最后连跑 2 次全量全绿」不许放宽**。
       砍的是中间的迭代跑，**不是闸**。**把 AC2 读成「少跑全量就行」就是把方向 C 做成方向 A，人已明确排除方向 A**
+      **证据（2026-08-05）**：tick 文档新增「DoD 的最后「连跑 2 次全绿」不因上述放宽（AC4 负控制，
+      `gap-two-thirds-of-a-task-is-polling-a-suite-log`）」段——`grep -c "连跑 2 次全绿"
+      plugin/loop/fast-mode-loop-tick.md` → **1**（band `dod_full_runs >= 1` 满足）；本任务 DoD
+      「完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）」**未改一字**。batch2 prompt 同标注。
 - [ ] AC5（**效果验证，用 meta-cc 不要用墙钟**）: 改后再查一次会话间隔分布，
       **等待占比应从 64% 降到 ~35%**。**不许用套件墙钟验证**——σ=297.6s 会把它吃掉
-- [ ] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
+      （2026-08-05：doc-only 任务无法在本任务内实测会话间隔分布；需后续真实会话按修正后
+      出厂锚文档跑完一轮后，再经 meta-cc 查相邻命令间隔验证。基线 64%（4020s/104.4min）见
+      `orchestration/SPEC-cut-the-waiting.md` 实测表。）
+- [x] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
+      （n/a：doc-only 任务，未新增任何测试文件，无违反面；scoped 验证走 2 个静态检查器
+      task-contract-check + drive-contract-check，均 PASS。）
+
+## 执行证据（invoke 实跑，2026-08-05 工作树 `quay-worktrees/polling`）
+
+```bash
+$ bash scripts/test.sh --for-task gap-two-thirds-of-a-task-is-polling-a-suite-log --allow-thin
+warning: test-selection-thin: task gap-two-thirds-of-a-task-is-polling-a-suite-log resolved tests for 0/3 Touches entries (0.00) < 0.5; pass --allow-thin to run anyway
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  scoped check: task-contract-check.ts --strict-subset tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md
+task-contract-check: no violations.
+  scoped check: drive-contract-check.ts --root .../polling
+drive-contract-check — 3 drive-contract doc(s) scanned
+violations: 0
+  [ok] plugin/loop/fast-mode-loop-tick.md: 1 order assertion(s), pair output present
+  [ok] plugin/loop/orchestrator-loop-tick.md: 1 order assertion(s), pair output present
+  [ok] orchestration/QUAY-OUTER-HANDOFF.md: 0 order assertion(s), pair output present
+PASS: no drive-contract doc asserts a task order without its checkTouchesPair output
+scripts/test.sh: --for-task ... — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in
+```
+
+（doc-only 任务选中 0 个测试文件属预期——`## Touches` 均为文档；scoped 静态检查器全绿。
+quay-init-loop 的 laid-down tick-doc 内容约束复查：tick 文档无 `scripts/test.sh` 字面量、无
+`npm test`/`/srv/target`/`myproj-0:0.0`、`KNOWN-LOAD-SENSITIVE` 仍存在 ⇒ 铺装字节一致不受影响。）
 
 ## Definition of Done
 
