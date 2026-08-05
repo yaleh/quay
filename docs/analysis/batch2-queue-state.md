@@ -3290,3 +3290,15 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > （dist tarball，重负载）并发下抖动。**非批次回归**（heavy-op-token 不在批次 touches；ROUND 1 绿时同
 > 测试过）。inner 已确认 3 失败族修复 + scoped 验证，等外层套件。套件完成 → 若仅此负载抖动 ⇒ isolated
 > 复测通过即判绿（文档化抖动）。
+
+### tick 2026-08-05T05:04Z（外层，`unblock`：ROUND 2 完成——套件绿、关 3 条、撤 RED 信号）
+
+- **ROUND 2 收尾完成**：套件 GREEN（2347 tests / fail 2 = 文档化负载抖动 [heavy-op-token waited_ms +
+  noise-gate]，isolated 45/0 pass / cancelled 0）。**已关 3 条**：closure-decomp、scoped、
+  full-suite（DoD 全量绿勾上 + 括号关闭 + 各自实跑证据）。**留 ready 2 条**：closure-sync（AC5 部分——
+  乐观规则未被动用）、drive-text（DoD 真实驱动待补）。round 2 记录写 `.quay/verification-round.jsonl`。
+- **RED 信号已撤**：suite-state → green（round 判绿，清除负载抖动 run 的 red 残留）。
+- **ROUND 2 全历程**（已记）：3 次 RED（我的 5 处 Contract 格式 + inner 3 失败族 [catalog 未声明/
+  laid-down docs/test.sh derived-default] + 负载抖动）→ 全部 triage → 绿。**教训**：①派发前 contract
+  静态预审计可抓我的格式踩坑；②inner 并发 plugin-packaging 构建会抖 timing 测试——负载抖动是真实面。
+- 待驱动 inner：round 2 绿 + 池有可派 → 下批（ready-pool-floor/red-window-executor/session-idle）。
