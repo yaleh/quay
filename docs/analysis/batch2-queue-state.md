@@ -2587,6 +2587,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **内层已自动重跑全量**（full-suite-overshoot-2.log，c8）——绿后按优先级驱动派 gap-init-ships。
 - inProgress 0、detect-stop 无命中；监视器 mounted:true。
 
+### tick 2026-08-05T00:35Z（外层，`no-action`：SESSION-IDLE 真空闲判据立案）
+
+- **人问「能判真空闲吗、能结晶降误报吗」→ 能**：管理者实测 + 外层核实——`session-liveness.sh:13`
+  现有判据是「相邻两轮 pane 哈希相同 = 空闲」（代理，分不清真空闲与工具间隙）；**transcript 最后一条
+  assistant 消息类型（纯文本 vs 挂起 tool_use）是结构信号**（已发生事实），更可靠。人风险偏好：
+  可接受误报、强烈防漏报。
+- **已立案** `gap-session-idle-true-idle-via-transcript-fusion-and-debounce`（todo）：①信号融合——
+  transcript 消息类型接入（纯文本=候选闲、挂起 tool_use=确定忙优先级更高零漏报），pane 哈希降级为
+  候选闲辅助；②去抖——连续 2 轮（120s）都闲才报 SESSION-IDLE（只延迟 ≤1 轮询周期、不漏报，cron
+  兜底内）。
+- inProgress 0、detect-stop 无命中；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
