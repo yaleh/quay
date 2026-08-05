@@ -3845,3 +3845,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **本 tick 立案累计（最高优先 4 条）**：OS-anchor（崩溃无法自恢复）、tmux 泄漏（资源主因+崩溃候选）、
   NBSP（发送机制任何输入框不可用）、laneCount 传播 AC16（显式传参不生效）。全等内层执行。
 - **本轮无停摆**：内层推进中；三层会话存活（quay-0/meta-cc-3/archguard-4）。
+
+### tick 2026-08-05T08:25Z（外层，`unblock`：内层冻结 48min 根因 = 哨兵未消费 + pane 引用错误）
+
+- **管理者异常停滞判据触发，三项独立实测正确**：内层 transcript 6a950975 冻结 07:35:54（48 分钟），
+  pane 动画被误读为活跃，blocked-signal 有未清除的 task-over-90m（gap-ready-pool-floor，since
+  06:35:38）。
+- **根因定位（今晚最重要）**：内层**不是死了，是卡在等外层消费 task-over-90m 裁定**——信号 06:35
+  触发从未被消费。**外层（我）一直用错误 pane `quay-0:0`（manager）而非 `quay-0:2`（inner）**——
+  这是今晚多次 send-keys 失败/驱动打错面板的真正原因。正是管理者说的「哨兵存在但没人消费」族。
+- **处置**：①裁定 gap-ready-pool-floor **abort**（AC 10/10 全勾工作已落地，over-90m 是括号未关残留），
+  --clear 清除；②向正确 pane quay-0:2 发送恢复指令；③**内层恢复**（transcript 08:23:30 重新写入，
+  处理 NBSP + laneCount AC16 修复中）。
+- **外层操作教训**：tmux pane 引用必须用 `quay-0:2`（inner），`quay-0:0` 是 manager、`quay-0:1` 是
+  outer、`quay-0:3` 是 scratch。今晚多次驱动失败皆因引用错误。
+- **blocked-signal 未消费族**：管理者建议记一笔（哨兵存在但没人消费），不新开——并入收尾机制相关任务。
