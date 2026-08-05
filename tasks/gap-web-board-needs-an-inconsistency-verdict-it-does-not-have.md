@@ -173,6 +173,25 @@ AC2 逐任务一致对照（来自测试实际断言，0 个不一致）：
 - BD-3（ready，无独特符号）→ 两边都不标 ✓
 - count(data-flag) == suspects.length + reverse.length ✓
 
+**re-dispatch 复核（2026-08-05，inner agent 验证，非重实现）：** 该任务此前已在
+`fb1fd520`（master 祖先提交）完整落地（observation.ts::readBoardLanding +
+serve-handlers.ts::handleBoard + serve-board.test.mjs），任务体 AC 已勾选。本次
+re-dispatch 复核为**验证性**——在干净 worktree 复跑 scoped 集与既有路由回归，
+实现未改动：
+
+```
+bash scripts/test.sh --for-task gap-web-board-needs-an-inconsistency-verdict-it-does-not-have --allow-thin
+✔ AC2: /board data-flag agrees with the drift checker per-task (reuse by construction)
+✔ AC3 negative control: done task with Touches→nonexistent code is flagged by BOTH (same kind); fixing the touch unflags BOTH
+✔ AC5/AC6: three data sources visible; a missing source degrades to 200 (never 500)
+✔ AC7/execution column: /board renders the execution (telemetry) column with in-flight + timeout flags
+ℹ tests 4  ℹ pass 4  ℹ fail 0  ℹ cancelled 0
+```
+
+既有路由回归（AC7，复核）：`node --test packages/quay/test/serve.test.mjs
+packages/quay/test/live-state.test.mjs` → serve 5 pass / 0 fail；live-state 4 pass / 0 fail。
+核对结论：落地实现与任务体 AC1/AC2/AC3/AC4/AC5/AC6/AC7/AC8 逐条相符，无缺漏、无重实现漂移。
+
 ## Definition of Done
 
 - [ ] AC1 的四问回答与 AC2 的逐任务一致性对照贴进任务体
