@@ -79,7 +79,7 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
 ## Contract
 
 measure   trend_flags = `node --experimental-strip-types plugin/scripts/trend-check.ts`（或等价）stdout 的打标数组
-band      trend_flags 无「恶化超阈值未报」的漏报（窗口内恶化必打标）
+band      trend_flags = 0（窗口内恶化必打标，无漏报）
 invariant trend_is_passive = 1（读已有记录，非新运行触发）
 invoke    `node --experimental-strip-types plugin/scripts/trend-check.ts --window <N>`
 control   0.251→0.464→0.321 序列 ⇒ 必被捕获（AC3）；平坦序列 ⇒ 不打标（负控制）

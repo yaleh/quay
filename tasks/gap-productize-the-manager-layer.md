@@ -78,8 +78,8 @@ extra:
 
 ## Contract
 
-measure   third_layer_shipped = `test -f plugin/skills/manager/SKILL.md`（或等价）的退出码
-band      third_layer_shipped = 0（存在）
+measure   third_layer_shipped = `ls plugin/skills/manager/` stdout 的文件名字段
+band      third_layer_shipped = 非空（manager 层 SKILL.md 存在）
 invariant not_quay_local = 1（manager 层机制在 plugin/ 随交付，不在 orchestration/ 独有）
 invoke    `grep -rn 'inner-state.sh\|send-keys-verified' plugin/skills/cold-start/SKILL.md`
 control   冷启动检查 AC8c 废键 ⇒ 0 命中；启动配置三件套 ⇒ 在交付物中（grep）

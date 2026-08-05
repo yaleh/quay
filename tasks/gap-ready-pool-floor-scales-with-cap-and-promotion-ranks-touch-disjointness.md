@@ -82,8 +82,7 @@ measure   dispatchable_disjoint = `node --experimental-strip-types plugin/script
 band      dispatchable_disjoint >= 并发上限（cap=3 时 ≥3）
 invariant floor_is_cap_x4 = 1（`POOL_FLOOR = cap × 4`，默认 12）
 invoke    `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --json`
-control   3 条候选 2 条同触 loop 文档 ⇒ dispatchable_disjoint=2 <3 ⇒ 报出（AC3）；5 条全 disjoint ⇒
-          判据满足（AC3 负向）；解析不了候选 ⇒ 踢出（AC5）
+control   3 条候选 2 条同触 loop 文档 ⇒ dispatchable_disjoint=2<3 ⇒ 报出；5 条全 disjoint ⇒ 判据满足（负向）；解析不了候选 ⇒ 踢出
 resume    disjointness 排序与 dispatchable_disjoint 分两步提交，任一步完成即写盘
 
 ## Dispatch review
