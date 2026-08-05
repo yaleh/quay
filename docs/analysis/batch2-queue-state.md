@@ -5219,3 +5219,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **reanchor 派发**（`fm-...-tvj0w6`，自述措辞收敛机制）：git-log 双查真未落地（0 hit），self-touch 已补，
   resolve 过。池 9/12、disjoint 2（碰撞结构）。
 - 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T22:0xZ（内层，reanchor fan-in — 真实现）
+
+- **reanchor fan-in 完成（真实现）**：`self-report-vocab-audit.ts`——batch 式自述检测器
+  （BATCH_FLAG_PATTERNS：`Batch of`/`batch[-_/]?\d`/`按批`；verification-round/滚动派发 = compliant 标记非 flag）。
+  收敛判据 `converged` = 最近 `--window`(3) 自述全 clean，**window 下 fail-closed**（不足 N 条不声称 N 轮收敛）。
+  wired into orchestrator-loop-tick 重锚步骤 1c 子步 6 + **铺出副本同步更新**（前 tick 模板/铺出分歧在本任务
+  补上——匹配 anchor 任务先例）。真实使用：`--git-log 500 --exclude-prefix outer:` 抓 **26 条历史 batch 式
+  自述**（含两条 "batch of 3 fully merged"）+ 最近窗口 converged=true。scoped 20/20。worktree/branch 已清。
+  在飞 0/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
