@@ -5436,3 +5436,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   外层记：迁移任务待测量结论审阅后立案。
 - **two-machine-collab**：ready + self-touch，按闸串行在 branch-model 后（Q2 AC3 依赖 integration）。
 - inner 在飞 branch-model；pool 6/dispatchable 2。
+
+### tick 2026-08-05T23:5xZ（内层 cron，轻触）
+
+- 外层 closure round 13：**claude-p 测量 done**（4/4、无账单验证）；-p 迁移 next（pending 测量 review）。
+- 在飞 1/3（branch-model 工作中：fork-baseline.ts + integration-batch-merge.sh + 两 tick doc，0 提交）。
+  无 fan-in、无新派发（池碰撞）。two-machine-collab 待 branch-model land 后第一批。
+- 套件 green、无 stop、无 block、Monitor 绿。
