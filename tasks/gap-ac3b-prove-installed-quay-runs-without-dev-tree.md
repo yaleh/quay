@@ -3,7 +3,7 @@ id: gap-ac3b-prove-installed-quay-runs-without-dev-tree
 title: AC3b (installed quay runs without the dev tree) has a mechanism proven by
   unit test but no real proof it is effective — the installed plugin is a stale
   08-03 snapshot and no negative control has ever run
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -73,11 +73,14 @@ extra:
 
 ## Touches
 
-- ~/.local/share/quay-plugin（已安装插件，刷新目标；不在 git）
-- plugin/scripts/sync-vendor.sh（若刷新需重建 dist）
-- plugin/scripts/quay-init.sh（若暴露刷新/验证缺口）
-- plugin/test/quay-init-loop.test.mjs（AC7 若加检查）
-- tasks/gap-ac3b-prove-installed-quay-runs-without-dev-tree.md（本任务体，证据记录）
+- ~/.local/share/quay-plugin
+- plugin/scripts/sync-vendor.sh
+- plugin/scripts/quay-init.sh
+- plugin/test/quay-init-loop.test.mjs
+- tasks/gap-ac3b-prove-installed-quay-runs-without-dev-tree.md
+
+（注记：`~/.local/share/quay-plugin` 是刷新目标、不在 git；`sync-vendor.sh` 若刷新需重建 dist；
+`quay-init.sh` 若暴露缺口；`quay-init-loop.test.mjs` AC7 若加检查——注记不放路径里，resolve 不误判。）
 
 ## Contract
 
