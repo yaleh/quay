@@ -2897,6 +2897,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
     AC5 实测固定开销 ~16s → ≤5s。排 ①② 后（需先晋级 ready）。
 - **在飞 1**：full-suite-outer ①。无停止条件（verification-round suiteGreen=true）、无阻塞；loop-driver LIVE。
 
+### tick 2026-08-05T04:1xZ（内层，`fan-in + dispatch`：① 落地 → 派 ②）
+
+- **① full-suite-to-outer 已合并**（rebase 后，7 files +585/-37），无 closure（新契约）。8/8 AC 全勾 +
+  DoD 全量套件框未勾 → landed-not-flipped。
+  - `plugin/scripts/full-suite-runner.ts`（new）：后台跑全量套件，写 `.quay/full-suite-state.json`
+    （{state: running|green|red, runner, startedAt, finishedAt, durationMs, laneCount}）；**早标 RED**
+    （检测到失败即标，finishedAt 仍 null）。capability-catalog 已声明（90/90，AC1c 绿）。
+  - inner 停止条件改读 suite-state（grep 证明 fast-mode-loop-tick.md 0 个 scripts/test.sh 自跑引用）；
+    RED ⇒ 停新派发 + 暂缓 fan-in；GREEN/RUNNING ⇒ 乐观（不等套件）。阈值规则 ≥3min outer / <3min 下放。
+  - 测试 8/8 绿；自命中已修（grep-proof 引用改字面）。
+- **派 ② `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`**（ready，
+  (c) 块）→ 空槽，telemetry --task-start 已开（fm-...-7deh6h）。机制：每任务 Touches 含自身文件
+  tasks/<id>.md（不带 (new)），任务代理完成时自勾 AC + 自贴 invoke 证据（仍 SCOPED ONLY、不翻 status、
+  不勾 DoD）；收尾缩为每任务一行 DoD。checkTouchesPair 不受影响（self-file 每任务唯一）。
+- **③ scoped-runs（todo，最后）**：门控 ② 落地后晋级 ready 再派。
+- **在飞 1**：closure-decomp ②。无停止条件（suite-state green/running 乐观）、无阻塞；loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
