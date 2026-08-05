@@ -149,3 +149,8 @@ plugin/scripts/session-liveness.sh:680: # hmin < LOOP_MIN（正常收尾）—�
 
 三者无依赖耦合（各自落自己的外层异步机制），但**都触两份 loop 文档**，串行落地（a→b→c 顺序即当前
 派发排序）。inner 侧完成三块后只剩「执行 → 合并」，没有任何批次同步点。
+
+**细化层（2026-08-05，由 `gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence` 交叉标注）**：
+本条是**收尾异步的机制根**；(c) 块是 AC/证据下放的**细化层**——任务代理完成时自勾 AC + 贴 invoke
+实跑证据（Touches 已授权自身文件 `tasks/<id>.md`，不带 `(new)`），本条收尾例程对每任务只剩「核对
+DoD 行 + 翻 done + 关遥测括号」。细化层落地后，收尾对已自勾 AC/证据的任务是 no-op，量小到不是同步点。

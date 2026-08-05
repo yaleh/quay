@@ -408,10 +408,34 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 
 重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
+4. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
+   每个任务的 `## Touches` 必须含**它自己的任务文件** `tasks/<id>.md`——**不带 `(new)` 标注**（带
+   `(new)` 会误触 `hasAnyLandedNewTouch` 的 new-touch 路径，把每个任务都判成「工作已落地」、
+   破坏就绪池）。自身文件是任务代理完成时编辑自己任务文件（勾 AC + 贴证据）的**授权**；缺它 ⇒
+   **不派发**（先给 Touches 补 `tasks/<id>.md`）。**只允许自己的文件，禁止碰其他任务文件**（并发
+   资格仍由 checkTouchesPair 判：自身文件每任务唯一，A.md≠B.md ⇒ 仍 disjoint）：
+
+```bash
+node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch tasks/<id>.md --root "$(pwd)"
+# 输出 SELF-TOUCH ... ok + exit 0 ⇒ 可派发；MISSING ... + exit 1 ⇒ 不派发
+```
+
+   就绪池整体核验用 `--self-touch-scan`（AC1 静态检查）：
+   `node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch-scan --root "$(pwd)"`
+   ——任一 ready 任务缺自身文件 ⇒ exit 1（先补，否则该任务不可派发）。
+
 派发形态：后台 `Agent(run_in_background)`，subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，
 不在 `/tmp`——tmpfs 是内存，`worktree_root` 见上）和 `task/<id>` 分支，内部起独立对抗审查
 （硬上限 2 轮），只提交不合并。
 `milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
+
+**任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
+任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
+自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
+（不跑全量 suite——全量判据归外层 verification-round）；**不翻 status**（翻 done 是外层收尾的活）；
+**不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。收尾（外层异步）因此
+每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——量小到不是同步点（(c) 块落地后，closure-async
+机制根的收尾对已自勾 AC/证据的任务是 no-op）。
 
 **驱动文本只携带数据，不复述行为（外层裁定 R2 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff，AC1）**：
 外层驱动内层的文本只携带**数据**——任务 id、裁定结论、依赖事实（如「B 消费 D 的 classifyPaneState」）。
