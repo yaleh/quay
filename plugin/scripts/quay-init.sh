@@ -408,6 +408,60 @@ print(f"  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/wor
 PYEOF
 }
 
+# migrate_stale_mcp_entry: upgrade-channel config migration (gap-dist-runtime-not-self-contained-
+# reads-external-package-json AC4). A pre-existing .quay/config.yml from an OLD install can carry a
+# provider `path` / `mcp_entry` that points at a path which does NOT exist in the target — the
+# manager-verified case is a dev-tree source residual (`path: <ws>/bin`, `mcp_entry: .../bin/quay-
+# native.ts`) left by an earlier install, which the AC3 referenced-existence verify would otherwise
+# FAIL CLOSED on forever (the "config already exists is never rewritten" upgrade hole). quay-init
+# lays the install-state provider (vendor/quay-native/dist/quay-native.js + provider.yml) BEFORE
+# write_provider_config runs, so a stale provider path is migrated to that install-state provider
+# dir (bin/quay.ts uses `provider.path` as the provider spawn cwd — a nonexistent dir makes the
+# spawn ENOENT) and a dangling reference to a QUAY runtime file is migrated to the install-state
+# runtime bundle (config migration, not a blank rewrite — other keys are preserved). SCOPE GUARD:
+# only a `path` that is not a real directory AND only references whose basename is a quay runtime
+# file (`quay-native.js/ts`, `quay.js/ts`) are migrated; an arbitrary dangling path (e.g.
+# ./nonexistent/runtime.js) is left untouched so the landed vendor-runtime AC3 negative control
+# (verify FAILS CLOSED on a dangling mcp_entry it cannot recognize) keeps its meaning.
+migrate_stale_mcp_entry() {
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
+  local install_provider="${WORKSPACE_ROOT}/vendor/quay-native"
+  local install_runtime="${install_provider}/dist/quay-native.js"
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-migrate: stale provider path/mcp_entry -> ${install_provider} (upgrade-channel config migration — AC4)"
+    return
+  fi
+  if [ ! -f "$cfg" ]; then return; fi
+  python3 - "$cfg" "$install_provider" "$install_runtime" <<'PYEOF'
+import sys, os, re, yaml
+cfg, install_provider, install_runtime = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg, encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+prov = (data.get("providers") or {}).get("native")
+if not isinstance(prov, dict):
+    sys.exit(0)
+changed = False
+# path: a stale provider dir (does not exist) is migrated to the install-state provider dir.
+p = prov.get("path")
+if isinstance(p, str) and p != install_provider and not os.path.isdir(p):
+    prov["path"] = install_provider
+    changed = True
+# mcp_entry: a dangling reference to a QUAY runtime file is migrated to the install-state runtime.
+me = prov.get("mcp_entry")
+if isinstance(me, list) and len(me) >= 2 and isinstance(me[1], str):
+    ref = me[1]
+    # Scope guard (see header comment): only a dangling reference to a quay runtime file is migrated.
+    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and not os.path.exists(ref):
+        prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
+        changed = True
+if not changed:
+    sys.exit(0)
+with open(cfg, "w", encoding="utf-8") as f:
+    yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+print(f"  migrated: stale provider config -> {install_provider} (upgrade-channel config migration — AC4)")
+PYEOF
+}
+
 write_provider_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ "$DRY_RUN" = true ]; then
@@ -416,6 +470,7 @@ write_provider_config() {
   fi
   if [ -f "$cfg" ]; then
     echo "  note: .quay/config.yml already exists — keep the provider mcp_entry on project-local absolute paths, never a PATH-resolved quay-native (AC7b)"
+    migrate_stale_mcp_entry
     ensure_loop_config
   else
     mkdir -p "$WORKSPACE_ROOT/.quay" "$WORKSPACE_ROOT/tasks"

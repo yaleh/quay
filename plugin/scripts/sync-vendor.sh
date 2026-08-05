@@ -440,5 +440,10 @@ if $CHECK_MODE; then
     exit 1
   fi
 else
-  echo "[sync-vendor] done. The vendored dist/quay.js is fully self-contained (no npm install needed)."
+  # gap-dist-runtime-not-self-contained-reads-external-package-json (AC3): the
+  # completion claim is now ACCURATE — src/version.ts embeds the version at build
+  # time (esbuild json loader inlines it into dist/quay.js), so the vendored
+  # bundle never reads a sibling package.json at runtime. It is self-contained:
+  # version inlined at build time, no runtime package.json read, no npm install.
+  echo "[sync-vendor] done. The vendored dist/quay.js is self-contained: version inlined at build time (no runtime package.json read), no npm install needed."
 fi

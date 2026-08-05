@@ -684,6 +684,50 @@ test('AC3 — verify FAILS CLOSED when the provider mcp_entry references a runti
   } finally { cleanup(src); }
 });
 
+// gap-dist-runtime-not-self-contained-reads-external-package-json (AC4, upgrade-channel config
+// migration): a PRE-EXISTING config from an OLD install can carry a provider mcp_entry pointing at a
+// dev-tree source path (e.g. ./bin/quay-native.ts) that does NOT exist in the target. quay-init lays
+// the install-state runtime (vendor/quay-native/dist/quay-native.js) before writing the config, so a
+// dangling reference to a QUAY runtime file must be MIGRATED to that install-state path (not left for
+// the AC3 verify to fail closed forever — the "config already exists is never rewritten" upgrade
+// hole). SCOPE GUARD: an arbitrary dangling path (e.g. nonexistent/runtime.js) is NOT migrated, so
+// the AC3 negative control above keeps its fail-closed meaning.
+test('AC4 — a pre-existing config whose mcp_entry points at a stale dev-tree runtime is migrated to the install-state path (upgrade channel)', () => {
+  const src = makeTmp();
+  try {
+    fs.cpSync(pluginDir, src, { recursive: true });
+    const fakeDist = path.join(src, 'vendor', 'quay', 'dist', 'quay.js');
+    fs.mkdirSync(path.dirname(fakeDist), { recursive: true });
+    fs.writeFileSync(fakeDist, '// fake built quay.js bundle\n', 'utf8');
+    const fakeNativeDist = path.join(src, 'vendor', 'quay-native', 'dist', 'quay-native.js');
+    fs.mkdirSync(path.dirname(fakeNativeDist), { recursive: true });
+    fs.writeFileSync(fakeNativeDist, '// fake built quay-native.js bundle\n', 'utf8');
+    fs.writeFileSync(path.join(src, 'vendor', 'quay-native', 'provider.yml'), 'id: native\nname: "quay-native"\n', 'utf8');
+    const ws = makeTmp();
+    try {
+      // Old-install config: mcp_entry points at a dev-tree SOURCE path that does not exist in the target.
+      fs.mkdirSync(path.join(ws, '.quay'), { recursive: true });
+      fs.writeFileSync(path.join(ws, '.quay', 'config.yml'),
+        `providers:\n  native:\n    enabled: true\n    path: "${ws}/bin"\n    tasks_dir: "${ws}/tasks"\n    mcp_entry: ["node", "${ws}/bin/quay-native.ts", "mcp"]\n`, 'utf8');
+      const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
+        '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
+      assert.equal(r.status, 0, `quay-init must succeed after migrating the stale mcp_entry:\n${r.stderr}`);
+      assert.match(r.stdout, /migrated: stale provider config/, 'must report the config migration (AC4)');
+      assert.match(r.stdout, /verify-provider-runtime-existence: OK/, 'after migration the referenced-existence verify must pass');
+      const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
+      assert.ok(!cfg.includes(`${ws}/bin/quay-native.ts`), 'the stale dev-tree mcp_entry must no longer be present');
+      assert.ok(!cfg.includes(`${ws}/bin`), 'the stale dev-tree provider path must no longer be present');
+      assert.match(cfg, new RegExp(`${ws.replaceAll('/', '\\/')}/vendor/quay-native/dist/quay-native\\.js`),
+        'the config mcp_entry must now point at the install-state runtime (vendor/quay-native/dist/quay-native.js)');
+      assert.match(cfg, new RegExp(`${ws.replaceAll('/', '\\/')}/vendor/quay-native`),
+        'the config provider path must now point at the install-state provider dir (vendor/quay-native)');
+      // Other provider keys must be preserved (config migration, not a blank rewrite).
+      assert.match(cfg, /enabled: true/, 'the existing provider enabled: true must be preserved');
+      assert.match(cfg, /tasks_dir:/, 'the existing provider tasks_dir must be preserved');
+    } finally { cleanup(ws); }
+  } finally { cleanup(src); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // gap-the-tick-doc-ships-three-contradictory-loop-drivers
 // 外层 tick 文档只声明一个循环驱动（CronCreate）；另外两个（ScheduleWakeup / /loop Nm）被显式处置。

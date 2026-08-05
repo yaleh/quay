@@ -1,8 +1,8 @@
 {
-  "//": "Root tsconfig — ADR-012 P0 (tooling only, exp5-M-TS-MIGRATION-P0). Covers the npm workspaces (packages/*, per root package.json's own `workspaces` field) so `tsc --noEmit` type-checks BOTH the current all-JS product code (via allowJs+checkJs) and any future .ts files, from one root invocation — no per-package tsconfig needed at this phase. Strictness is set LENIENT ON PURPOSE: the goal here is a GREEN gate on the CURRENT repo (0 errors), not immediate type rigor. Ramp strictness in a later phase (P1+), file-by-file, once product code actually has type annotations worth enforcing — turning strict on now against un-annotated JS would fail closed and defeat the point of this milestone (establish the run+check path, not retrofit types).",
+  "//": "Root tsconfig — ADR-012 P0 (tooling only, exp5-M-TS-MIGRATION-P0). Covers the npm workspaces (packages/*, per root package.json's own `workspaces` field) so `tsc --noEmit` type-checks BOTH the current all-JS product code (via allowJs+checkJs) and any future .ts files, from one root invocation — no per-package tsconfig needed at this phase. Strictness is set LENIENT ON PURPOSE: the goal here is a GREEN gate on the CURRENT repo (0 errors), not immediate type rigor. Ramp strictness in a later phase (P1+), file-by-file, once product code actually has type annotations worth enforcing — turning strict on now against un-annotated JS would fail closed and defeat the point of this milestone (establish the run+check path, not retrofit types). `module` is `esnext` (not `ES2022`): the repo's actual module system is esbuild ESM bundling + Node type-stripping, and `gap-dist-runtime-not-self-contained-reads-external-package-json` made `packages/quay/src/version.ts` use an import attribute (`with { type: \"json\" }`), which `ES2022` cannot type-check (TS2823) but `esnext` can.",
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
+    "module": "esnext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
     "allowJs": true,

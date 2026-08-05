@@ -62,6 +62,11 @@ export async function buildDist(opts = {}) {
       platform: "node",
       format: "esm",
       outfile,
+      // The `json` loader inlines `src/version.ts`'s `import pkg from "../package.json"`
+      // INTO the bundle at build time (gap-dist-runtime-not-self-contained-reads-external-
+      // package-json). The dist therefore carries the version string inside the file and the
+      // runtime never readFileSyncs a sibling package.json — the vendored plugin/vendor/quay/
+      // dist/quay.js is truly self-contained (runs standalone with no package.json beside it).
       loader: { ".json": "json" },
       banner: { js: REQUIRE_BANNER },
       logLevel: "info",
