@@ -9,7 +9,7 @@ title: cold-start SKILL.md AC8c key 4 (INNER-DRIVEN, lines 49/132/135) still
   propagating a known defect (same class as the tmpfs-worktree propagation);
   single critical path blocking meta-cc/archguard startup + the manager's
   AC3b/AC-SH
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

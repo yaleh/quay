@@ -59,3 +59,8 @@ band      s2_fail = 0（修后单独跑无失败）
 invoke    `node --test experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs`
 control   evidence 临时改 false ⇒ cov 0.0 断言仍抓（AC2）
 resume    断言更新与负控制分两步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

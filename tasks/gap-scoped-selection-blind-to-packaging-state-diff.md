@@ -70,3 +70,8 @@ invariant task_template_has_crosscut = 1（任务模板 AC 默认含跨切检查
 invoke    `grep -n '跨切\|lint\|check-adr\|crosscut' plugin/skills/author/SKILL.md plugin/scripts/select-tests-for-touches.ts`
 control   src 任务 ⇒ 含打包态/ADR/lint（AC3/4/5）；纯 plugin 任务 ⇒ 不含（AC6）
 resume    模板 AC 清单与 scoped 跨切标记分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

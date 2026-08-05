@@ -131,3 +131,8 @@ invariant in_flight_single_answer = 1（「几个任务在飞」各源答案一�
 invoke    `grep -rn "supervisor\|base.layer\|基座" orchestration/SPEC-integration-architecture-2026-08-05.md`
 control   多写入者（当前形态）⇒ 六源四答案（AC8 实测基准）；唯一写入者实现后 ⇒ 答案收敛
 resume    每落地一步（①②③④⑤）即写盘，AC 逐条勾
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

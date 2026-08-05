@@ -74,3 +74,8 @@ band      committed_complete >= 1（quay-init 有自动提交记录）
 invoke    `grep -n 'git add\|git commit' plugin/scripts/quay-init.sh`
 control   fresh-clone + quay-init ⇒ committed 态完整（AC2）；已有未提交 ⇒ 提示不覆盖（AC3）
 resume    自动 commit 与冲突检测分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

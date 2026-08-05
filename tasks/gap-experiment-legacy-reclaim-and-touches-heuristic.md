@@ -67,3 +67,8 @@ band      reclaimed_scripts = 4（四脚本回收）
 invoke    `ls experiments/quay-perpetual-stream/scripts/git-lens-*.ts experiments/quay-perpetual-stream/scripts/derive-touches-heuristic.ts`
 control   回收前（在 experiments）⇒ 0；回收后 ⇒ 4（AC1）
 resume    四脚本回收与 15 文件删除分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

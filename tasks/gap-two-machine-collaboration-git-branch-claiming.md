@@ -83,3 +83,9 @@ band      claim_success >= 1（认领成功路径可跑）
 invoke    `grep -n 'claim\|认领\|task/' plugin/scripts/<claim-task.sh>`
 control   disjoint 任务两机认领 ⇒ 都成功（AC4）；同任务 ⇒ 第二个失败
 resume    认领协议与权威确定分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T18:2xZ
+changed: 外层 filing 时已审（ratchet compliance 补齐 section）

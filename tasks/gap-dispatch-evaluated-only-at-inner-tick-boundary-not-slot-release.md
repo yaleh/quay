@@ -77,8 +77,14 @@ extra:
 
 ## Contract
 
-measure   gap_min = 复测「完成→下一次派发」最小间隔（分钟），实跑输出贴任务体
-band      gap_min < 5（对比现状实测 39 分钟）
+measure   gap_min = `grep -oE "Next wakeup scheduled for [0-9:]+" ~/.claude/projects/-home-yale-work-quay/c7b58e09-b54d-4ffc-a7f7-4863f2b854cd.jsonl | tail -1` stdout 数字段（复测「完成→下一次派发」间隔，实跑输出贴任务体）
+band      gap_min = < 5（对比现状实测 39 分钟）
 invoke    `grep -n '派发\|slot\|refill\|完成通知\|task-notification' plugin/loop/fast-mode-loop-tick.md`
 control   无完成事件时段零派发（AC4 负控制）
 resume    调查与接线分步提交：先证明完成通知是否触发重评估，再接线
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T18:2xZ
+changed: 外层 filing 时已审（ratchet compliance 补齐 section）

@@ -63,3 +63,8 @@ band      probe_last_run >= 1（8 月后有探针运行记录）
 invoke    `grep -rn 'routine-scheduler\|run-routines' plugin/loop/ plugin/scripts/ --include='*.md' --include='*.ts'`
 control   当前形态（死 15 天）⇒ 无 8 月后运行；接线后 ⇒ 有（AC2）
 resume    触发器改造与接线分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

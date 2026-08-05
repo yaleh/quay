@@ -63,3 +63,8 @@ band      version_stale_detected >= 1（user-scope 落后时检查报出）
 invoke    `grep -n 'VERSION\|git describe\|version' plugin/VERSION plugin/sync.sh 2>/dev/null`
 control   user-scope 落后 ⇒ 报出（AC2）；一致 ⇒ 不报
 resume    VERSION 与比对检查分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T18:2xZ
+changed: 外层 filing 时已审（ratchet compliance 补齐 section）

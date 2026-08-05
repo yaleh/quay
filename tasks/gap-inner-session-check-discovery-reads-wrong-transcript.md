@@ -91,7 +91,6 @@ invoke    `grep -n 'discovery\|CLAUDE_CODE_SESSION_ID\|transcript' plugin/script
 control   三层活跃 ⇒ discovery 指 inner（AC2）；空壳+外层活跃 ⇒ empty-shell（AC3）
 resume    结构性来源与 fail-closed 分步提交，任一步完成即写盘
 
----
 
 ## 修复记录（2026-08-05 17:2xZ，内层，在外层裁定 scope 内修复）
 
@@ -106,7 +105,13 @@ claude 进程 PID → 其 worker/MCP **直接子进程** environ 的 `CLAUDE_COD
 `inner-session-check.test.mjs` 10/10 无回归。旧启发式保留为无 PID/session-id 时的 best-effort
 回退（TR_SOURCE=discovery 区分）。
 
-## Dispatch review（追加 2026-08-05T16:3xZ，外层收尾）
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T16:3xZ
+changed: 修复落地（12936f90）+ AC4 偏差留空 + 裁定确认
+
+（追加 2026-08-05T16:3xZ，外层收尾）
 
 - **修复落地**：inner 在 outer-selfchecks scope 内修复（12936f90 + 记录 560c271f）——结构性来源：
   inner 窗口 claude 进程 PID → worker children environ 的 CLAUDE_CODE_SESSION_ID → transcript（1:1）。

@@ -164,3 +164,9 @@ resume   每分析完一个脚本即写盘                                    # 
 - plugin/scripts/runtime-usage-inventory.ts
 - plugin/test/runtime-usage-inventory.test.mjs
 - docs/analysis/runtime-usage-inventory.md
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

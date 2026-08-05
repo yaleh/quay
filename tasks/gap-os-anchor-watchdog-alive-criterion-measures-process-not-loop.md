@@ -58,3 +58,8 @@ band      false_healthy = 0（修后停摆项目不报 healthy）
 invoke    `bash plugin/scripts/os-anchor-watchdog.sh --check archguard`
 control   进程在但 transcript 停（archguard 现状）⇒ 修后判非 healthy（AC3）；进程在且 transcript 新增 ⇒ healthy
 resume    alive 判据与跨周期标记分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

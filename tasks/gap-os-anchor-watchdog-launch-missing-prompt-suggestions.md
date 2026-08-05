@@ -51,3 +51,8 @@ band      launch_prompt_suggestions >= 1（launch-cmd 含参数）
 invoke    `grep -n 'launch-cmd\|prompt-suggestions' ~/.config/quay/os-anchor/os-anchor-projects.conf`
 control   当前形态（无参数）⇒ 0 命中；修后 ⇒ ≥1（AC1）
 resume    参数对齐与单一定义分步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）

@@ -68,3 +68,8 @@ band      false_over90 = 0（负控制不误触发后无失败）
 invoke    `node --test plugin/test/inner-blocked-signal.test.mjs`
 control   构造 status=ready + 超 90min bracket ⇒ 不触发（AC1）；status=in-progress ⇒ 触发（AC2）
 resume    判据源改动与测试分两步提交，任一步完成即写盘
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T18:2xZ
+changed: contract-ratchet compliance，外层 18:2xZ 补齐（未审）
