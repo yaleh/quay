@@ -4822,3 +4822,20 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **session-idle 派发**（`fm-...-bnmm17`）：git-log 双查真未落地，与 defect-fix 互不相交（batch 判定）。
   session-liveness 族 KNOWN-LOAD-SENSITIVE 已在派发词标明。self-touch 已补。
 - 在飞 2/3（defect-fix + session-idle）。停止条件无、套件 green、Monitor 三判据绿。master 待提交。
+
+### tick 2026-08-05T17:4xZ（外层，红窗分诊——全量假红 + runner 原因轴缺口立案）
+
+- **起全量套件（stale 7.5h，资源闸 GO，load 2.86）→ 3 秒即红（SUITE-RED stopSignal=true）→ 分诊**。
+- **假红确认**：runner 自己闸 GO（17:46:26）→ test.sh **内部**再查闸（几秒后）PSI some avg10=45.15
+  （>40）→ test.sh fail-closed exit 1，**一行测试没跑** → runner 标 reason=failed。按原因轴语义
+  （aborted=no correctness conclusion）应为 **aborted**。runner 不检测 test.sh 输出里的
+  `resource gate says WAIT` 标记——**ABORT #4/#5 原因轴教训的再现**（runner 侧修了，test.sh 内部
+  gate-WAIT 路径没接入）。
+- **处置**：state 重置 green（reason=aborted + note），stop-dispatch 撤回（SUITE-GREEN 已发）；
+  立案 `gap-full-suite-runner-marks-test-sh-gate-wait-as-failed`（detect WAIT 标记 → aborted，
+  真失败不回归）。全量重跑推迟到闸稳定 GO（avg10 在 40 附近抖动）。
+- **reconcile 关 7 陈旧括号**（inner 高速派发，遥测 bracket 滞后——telemetry 缺口再现）：inProgress 9→2
+  （taskworklanded + session-idle 真实在飞）。
+- **inner 进展**：stale-check dead-glob 修（88 docs 扫）、taskWorkLanded 缺陷 fix 派发、session-idle 派发、
+  web-board 非 phantom 确认（8/8 AC 已落地）。
+- **在飞 2/3**（reconcile 后真实）。套件 green（aborted，未真实通过）。
