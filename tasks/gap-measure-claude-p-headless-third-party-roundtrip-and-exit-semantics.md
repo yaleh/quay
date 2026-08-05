@@ -83,6 +83,19 @@ set and takes precedence over your claude.ai login · Unset it to load your orga
 ```
 （stderr 的 connector 警告恰好反向证明：auth 走的是 env 里的 key，不是 claude.ai 订阅态。）
 
+**同日晚间复验（dispatch 的 inner agent，2026-08-05 17:xx UTC，scratch 内，仍经 `claude-deepseek`）：**
+```
+$ cd /tmp/claude-p-measure-scratch && time claude-deepseek -p '回复 OK 即可'
+exit: 0   （real 0m11.144s）
+stdout: OK
+stderr: ⚠ claude.ai connectors are disabled ...（同上）
+$ env -u ANTHROPIC_API_KEY -u DEEPSEEK_API_KEY -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
+    HOME=/tmp/claude-p-measure-scratch/nohome claude-deepseek -p '回复 OK'
+exit: 1   stdout:（空）  stderr: Error: DeepSeek API key file not found: <nohome>/.local/etc/deepseek-api-key
+```
+复验与上午实测完全一致：正控制 exit 0 stdout=OK（往返成立），忠实负控制 exit 1（key 缺失必失败）。
+AC1 gating 结论独立复现，非一次性巧合。
+
 **负控制 1（Contract 字面行）—— 意外 SUCCESS，暴露 Contract 行规格错误**
 ```
 $ env -u ANTHROPIC_API_KEY -u DEEPSEEK_API_KEY claude-deepseek -p '回复 OK'
