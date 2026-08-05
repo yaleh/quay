@@ -40,11 +40,11 @@ extra:
 ## Contract
 
 ```
-measure inert_exclusions = `bash scripts/test.sh plugin/test/loop-shipping-necessity-check.test.mjs` 输出的 inert 条目数字段
-measure exclusion_count = `grep -c "path.join(repoRoot" plugin/test/loop-shipping.test.mjs` 输出的计数字段
+measure inert_exclusions = `bash scripts/test.sh --scoped plugin/test/loop-shipping-necessity-check.test.mjs` 输出的 inert 条目数字段
+measure exclusion_count = `grep -c "path.join(repoRoot" plugin/scripts/loop-shipping-exclusion-data.mjs` 输出的计数字段
 band inert_exclusions = 0
 invariant 排除表不允许惰性条目——每条排除项必须有它抑制的命中，或写明为何保留
-invoke `bash scripts/test.sh plugin/test/loop-shipping.test.mjs`
+invoke `bash scripts/test.sh --scoped plugin/test/loop-shipping.test.mjs`
 control 往某排除项目标文件注入一条旧路径活引用 ⇒ 该条必须不再被报为惰性（判定翻转）
 resume 先抓出当前惰性条目，再加检查
 ```
@@ -58,15 +58,72 @@ resume 先抓出当前惰性条目，再加检查
 **不做**：不声称能证明「必要」（去掉仍绿）——那仍需要真移除+实测。惰性检测只抓
 「**必然不必要**」的确定性下界，不抓「可能不必要」的灰色地带。
 
+**执行落定（2026-08-05）**：
+- **名单搬家**：`excluded` + 6 条旧路径从 `loop-shipping.test.mjs` 内联搬进
+  `plugin/scripts/loop-shipping-exclusion-data.mjs`（单一事实源，`exclusion_count` 度量已改指此处）。
+  扫描（AC1b）与惰性检测（necessity-check）读**同一份**数据，两条路径不可能漂移。
+- **报告形态定为报出阻断**：惰性条目**无** `retainedNote` ⇒ 检测报出并 `fail`（退出非 0）。
+  实际惰性数量 = 1（`quay-init-loop.test.mjs`），属死重（目标文件不含任何旧路径模式），**移除**。
+  移除后当前表 `inert_exclusions: 0`。
+- **invariant 的「或写明为何保留」分支机械化**为 `retainedNote` 字段：惰性条目若带书面保留理由
+  则计入 `inert-but-retained`（不阻断）；当前表无条目使用它，未来防御性重加必须写理由。
+- **范围**：文件级条目（target 是普通文件；目录条目治理增长的子树、结构性向前看，属文档化外延）。
+  缺失 target 视同惰性（陈旧条目——目标已不存在，抑制不了任何命中）。
+- **measure/invoke 改用 `--scoped` 形态**：显式文件形态（`scripts/test.sh <file>`）会走**全量静态档**，
+  当前 master 上有 8 条**他任务**的契约棘轮新违规（dispatch-review-missing 等，os-anchor 系 2026-08-05 落地）
+  使全量静态档先于测试即红，`inert_exclusions` 出不来。`--scoped <file>` 只跑改动相关静态档 + 该测试，
+  隔离本任务字段（与 `--for-task` 同一 scoped 度量面）。**全量套件 2 连绿（DoD）依赖那些他任务修完棘轮。**
+
 ## Acceptance Criteria
 
-- [ ] AC1: 对当前排除表跑检测，**逐条报出惰性条目**（实跑贴出；若无则如实报零）
-- [ ] AC2: 移除惰性条目后，检测对剩余条目零报告（实跑贴出）
-- [ ] AC3: **负控制**——往某排除项目标文件注入一条旧路径活引用，该条**不再**被报为惰性（实跑贴出）
-- [ ] AC4: 检测**报告而不只是存在**——构造一个惰性条目时它必须报出/退出非 0，不静默通过
+- [x] AC1: 对当前排除表跑检测，**逐条报出惰性条目**（实跑贴出；若无则如实报零）
+      — 移除前实测（把已死的 `quay-init-loop.test.mjs` 排除项临时放回，检测逐条报出并 fail）：
+      ```
+      inert_exclusions: 1
+      scanned file-level exclusion entries: 13
+      inert-but-retained entries: 0
+        inert plugin/test/quay-init-loop.test.mjs (hits=0) retainedNote=NO
+        VIOLATION plugin/test/quay-init-loop.test.mjs — inert with no retainedNote
+      ✖ AC1/AC2 — … (fail 1)
+      ```
+      该条目标文件对 6 条旧路径模式**零命中**（全用 `path.join(ws, 'orchestration', …)` 分写），
+      排除它不抑制任何命中——与 inner-brief 死重同形。
+- [x] AC2: 移除惰性条目后，检测对剩余条目零报告（实跑贴出）
+      — 移除 `quay-init-loop.test.mjs` 排除项后（本分支最终提交态），实测：
+      ```
+      inert_exclusions: 0
+      scanned file-level exclusion entries: 12
+      inert-but-retained entries: 0
+      ✔ AC1/AC2 — … (pass)
+      ✔ AC3 — … ✔ AC4 — …  (pass 3 / fail 0 / cancelled 0)
+      ```
+- [x] AC3: **负控制**——往某排除项目标文件注入一条旧路径活引用，该条**不再**被报为惰性（实跑贴出）
+      — `AC3 — negative control` 子测试（实跑 pass）：
+      ```
+      clean target:   countOldPathHits = 0  → inert → violation(1)
+      live target:    注入 path.join('orchestration','orchestrator-loop-tick.md') 后 countOldPathHits > 0
+                      → 该条不再被报为惰性（violations = 0，判定翻转）✔
+      ```
+      （注入串用 `path.join` 在运行时拼出，测试源里**不出现连续旧路径字面量**，避免自触发 AC1b。）
+- [x] AC4: 检测**报告而不只是存在**——构造一个惰性条目时它必须报出/退出非 0，不静默通过
       （与「一个从没红过的检查与永远返回空集不可区分」同一族）
-- [ ] AC5: 测试用 `node:test` 且带恰当的 `// @test-group`
-- [ ] AC6: 任务体记录本次实例（inner-brief 排除项死重被人工实测揪出）作为证据
+      — `AC4 — the detector REPORTS an inert entry` 子测试（实跑 pass）：构造四类条目并断言分类：
+      `violations = ['constructed-inert', 'constructed-missing']`（无 `retainedNote` 的惰性条目，
+      以及**缺失 target** 的陈旧条目——目标已删除，抑制不了任何命中），且
+      `retainedInert = ['constructed-retained']`（惰性 + 书面 `retainedNote` ⇒ invariant「或写明为何保留」分支，
+      不阻断）。若检测返回空集，这些断言即红——证明检测「报出」而非静默。主测试对真实表
+      `assert.deepEqual(violations, [])`，任何无 `retainedNote` 的惰性条目都使整个 necessity-check 退出非 0。
+- [x] AC5: 测试用 `node:test` 且带恰当的 `// @test-group`
+      — 新文件 `plugin/test/loop-shipping-necessity-check.test.mjs` 头部 `// @test-group governance`
+      且 `import { test } from 'node:test'`；scoped 静态档的 test-framework-policy 检查全绿
+      （`real repo: every glob file imports node:test or is on the exemption list; list is 34` pass；
+      新文件无需登记 legacy 豁免，故 `test-framework-policy-check.ts` 本任务**未改**）。
+- [x] AC6: 任务体记录本次实例（inner-brief 排除项死重被人工实测揪出）作为证据
+      — 见上方「执行落定」。另记**执行期新实例**：os-anchor（`plugin/scripts/os-anchor-install.sh`
+      于 2026-08-05 11:05Z 落地）给 AC1b 引入一条**漏网活引用**（`$root/orchestration/orchestrator-loop-tick.md` 兼容旧布局），
+      AC1b 表先于它，全绿跑到它即红——正是本任务「名单没有必要性强制函数」的镜面（缺名单条目的漏网）。
+      修复为**加排除项**（该脚本驱动 meta-cc/archguard 等外部旧布局工作区，旧路径是合法目标布局，非 quay 自身引用），
+      必要性检查对它报非惰性（命中 > 0）。
 
 ## Definition of Done
 
@@ -79,7 +136,11 @@ resume 先抓出当前惰性条目，再加检查
 
 - plugin/test/loop-shipping.test.mjs
 - plugin/test/loop-shipping-necessity-check.test.mjs（新）
-- plugin/scripts/test-framework-policy-check.ts（如涉及新文件注册）
+- plugin/scripts/loop-shipping-exclusion-data.mjs（新——排除表 + 6 条旧路径的单一事实源；
+  `exclusion_count` 度量已改指此处）
+- plugin/scripts/test-framework-policy-check.ts（如涉及新文件注册）——**未改**：新测试文件用
+  `node:test` + `@test-group governance`，无需登记 legacy 豁免
+- （仅数据引用，文件本体未改）plugin/scripts/os-anchor-install.sh——AC1b 漏网活引用，加排除项修复
 
 ## Dispatch review
 
