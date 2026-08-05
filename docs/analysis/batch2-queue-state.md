@@ -5391,3 +5391,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   看几轮派发间隔（下几 tick 检查 slot-release→next-dispatch gap）。
 - **reconcile 关 2 括号**（dispatch-evaluated + global-count）——inner 0 in-flight。
 - **套件 green**、闸 GO、load 1.09。
+
+### tick 2026-08-05T23:3xZ（外层，B 机 push 备份窄任务立案）
+
+- **管理者核实无独立窄任务 → 立案 `gap-b-machine-periodic-push-backup-to-bare-repo`**：B 机低频 cron
+  （10-15min）git push 到 ~/work/quay-sync.git——纯备份防单点丢失，不涉及认领/权威/冲突（留 Q2 范围）。
+  执行者：管理者在 B（具上下文）或 B 机 outer。
