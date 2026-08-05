@@ -3607,3 +3607,7 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > checks）时停，具体测试文件无关新任务 touches 时继续；判定信息现成（早期 RED 失败行）。本轮活证据：
 > 早期 RED + inner 30 分钟无派发 + 池 16/disjoint 9 健康 = 细化前白等样本。第四实例框架已更正（量测仍
 > 有效，但不再当「权衡两侧」）。
+> **06:35Z 增补（AC1 laid-down = 负载敏感假阳性，非真回归）**：inner triage #2（112de33d）——git-log
+> bisect + 手动 render 证明**恰好一个 CronCreate driver**（ScheduleWakeup 0 / /loop Nm 0），4b2 是
+> Monitor 非 driver，**无代码改动**；编辑是 cosmetic ghost-chasing。判为负载敏感假阳性（同 noise-gate
+> 族）。已重启 ROUND 3 gate（bzik1is7r）；若复发则抓失败环境的实际 rendered doc 诊断。
