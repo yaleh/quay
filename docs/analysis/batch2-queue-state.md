@@ -3481,3 +3481,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **更新 trend-criteria 任务**：补 §3 其余三类持续健康（语义一致 / 升级正确性 / 三层完整性）。
 - 六类归属无空洞：manager 层（productize）/ 启动配置（launch-config）/ 锚点（anchor+converge）/
   会话拓扑 / 升级通道各归已立案任务。
+
+> **05:57Z 增补（ROUND 3 early-RED：cold-start/init 区）**：套件 early-RED——2 失败族在 cold-start/init
+> 区：①loop-driver-check.sh 由 quay-init 铺设（AC4）；②check 报告两个 real live specimen
+> （monitor-mount-check.sh / send-keys-verified.sh）when cannot land（AC2）。**疑似 key4 落地回归**：
+> key4 把 cold-start 里的 send-keys-verified 换成 reliable-send，可能破坏断言旧 specimen 的测试（fixture
+> 陈旧）。等套件完 → bisect → inner 修。
