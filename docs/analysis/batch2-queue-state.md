@@ -3278,3 +3278,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **suite-state 仍 red**（停跑残留，等修复后重启覆盖）；池 5（deficit 0）。
 - 无停止条件、无 BLOCKED；监视器 bw650bprz 等在飞修复提交；loop-driver LIVE。修复落 → 重启全量套件
   做 ROUND 2 gate。
+
+> **04:45Z 增补（ROUND 2 二次 RED + 第 5 次格式踩坑）**：重启套件 6.7s 静态门 RED——新违规来自我刚立案的
+> `gap-red-window-has-no-automatic-executor`（band 无名 + measure 无命令）。**这是我第 5 次 Contract 段
+> 格式踩坑**（measure/band 需反引号命令 + 命名格式）。已修（4f4f92b1）→ 重启（bqtt18ecw）。教训固化：
+> **派发前应跑 contract 静态检查预审计**（self-touch-scan 同型：在派发/提交前抓格式违规，不靠 round
+> gate 兜底）——这是 ready-pool-floor 任务 AC6 的「补晋应用机械化」+ 本轮的 RED 分诊共同指向的候选机制。
