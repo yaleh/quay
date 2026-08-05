@@ -5043,3 +5043,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **可选路径（记录待选）**：①.halt 暂停 inner 制造安静窗口跑套件（但 fan-in 也停，有中断成本）；
   ②套件实用化（laneCount 校准 + 资源规划——待立案）；③closure 判定不依赖全量绿（需 AC 语义调整）。
 - **暂不强行起套件**（闸抖启动即 abort）。下 tick 再查闸，稳定 GO 即起。
+
+### tick 2026-08-05T20:2xZ（内层 cron，false OVER90 清 + 池检查性能回归立案派发）
+
+- **false OVER90 清**：detect-stop 报 task-over-90m（axis-generator 99.6m）——核后为**括号滞后伪阳**：
+  4 个「在飞」bracket（axis-generator/outer-heartbeat/taskworklanded/session-idle）全部已 merge（git
+  merge-base 证实 ON master），bracket 未闭是外层异步 closure 滞后（19:2xZ「closures wait」）。0 live agent。
+  已 `--clear`（wait 41.1s 记录）。**外层需 --task-end 闭这 4 个括号，否则每 tick 假 OVER90 复发**。
+- **池检查性能回归立案 + 派发**：`ready-pool-check` 从秒级退化到 >150s timeout（套件 abort 后仍 timeout，
+  排除了 load 因素）——gitHistoryLanded 的 per-task `git log --full-history` 聚合（~50-60 次×多路径）是根因。
+  单任务 --check 0.8s（per-task 不慢）。立案 `gap-ready-pool-check-times-out-after-git-history-signal`
+  （AC 要求回 <10s + 判定不破 + 负控制），**已派**（`fm-...-f3qjjw`）。
+- 套件 green（aborted-triaged）、在飞 1/3、无 block、Monitor 绿。
