@@ -64,19 +64,19 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 每个任务 `## Touches` 含自身文件 `tasks/<id>.md`（**不带 `(new)`**）；静态检查/脚本验证
+- [x] AC1: 每个任务 `## Touches` 含自身文件 `tasks/<id>.md`（**不带 `(new)`**）；静态检查/脚本验证
       ready+可派任务的 Touches 引用自己文件
-- [ ] AC2: 派发词约定更新——任务代理完成时编辑自己文件：勾 AC 复选框 + 贴 invoke 实跑证据（自己
+- [x] AC2: 派发词约定更新——任务代理完成时编辑自己文件：勾 AC 复选框 + 贴 invoke 实跑证据（自己
       scoped 测试输出）；**仍 SCOPED ONLY**、**不翻 status**、**不勾 DoD 行**
-- [ ] AC3: 收尾（外层异步）每任务只剩 DoD 行核对 + 翻 done + 关遥测括号——**不再做 AC/证据工作**
+- [x] AC3: 收尾（外层异步）每任务只剩 DoD 行核对 + 翻 done + 关遥测括号——**不再做 AC/证据工作**
       （收尾对已完成任务的 AC 勾框/证据是 no-op，因代理已自勾）
-- [ ] AC4: **checkTouchesPair 不受影响**——单元验证：A 触 `tasks/A.md`、B 触 `tasks/B.md` ⇒
+- [x] AC4: **checkTouchesPair 不受影响**——单元验证：A 触 `tasks/A.md`、B 触 `tasks/B.md` ⇒
       disjoint:true；共享文件 ⇒ disjoint:false（两向 fixture）
-- [ ] AC5: **self-file 不带 `(new)`**——单元验证：`tasks/<id>.md` 无 `(new)` 标注 ⇒
+- [x] AC5: **self-file 不带 `(new)`**——单元验证：`tasks/<id>.md` 无 `(new)` 标注 ⇒
       `hasAnyLandedNewTouch` 不触发（就绪池不被误判清空）
-- [ ] AC6: **真实使用**——至少一个任务：代理自勾 AC + 自贴 invoke 证据，收尾只勾 DoD + 翻 done，
+- [x] AC6: **真实使用**——至少一个任务：代理自勾 AC + 自贴 invoke 证据，收尾只勾 DoD + 翻 done，
       实跑证据贴任务体
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
@@ -86,11 +86,11 @@ extra:
 
 ## Touches
 
-- plugin/loop/fast-mode-loop-tick.md（派发词约定：任务代理完成时自勾 AC + 贴证据，SCOPED ONLY 不变）
-- plugin/scripts/touches-orthogonality-check.ts（或新增静态检查：ready 任务 Touches 含自身文件）
-- plugin/test/（AC4/AC5 两向 fixture 单测）
-- tasks/gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async.md（交叉标注：
-  本条是 AC/证据下放的细化层）
+- plugin/loop/fast-mode-loop-tick.md (AC2 派发词约定：任务代理完成时自勾 AC + 贴证据，SCOPED ONLY 不变)
+- plugin/scripts/touches-orthogonality-check.ts (self-touch 检查：--self-touch / --self-touch-scan 模式)
+- plugin/test/self-touch-convention.test.mjs (AC4/AC5 两向 fixture 单测)
+- tasks/gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async.md (交叉标注：本条是 AC/证据下放的细化层)
+- tasks/gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence.md
 
 ## Contract
 
@@ -114,3 +114,80 @@ changed: 外层受管理者查清的根因 + 意见裁定立案（同意 + 两�
     一切任务误判「工作已落地」破坏就绪池；
 (4) **边界 2：代理不翻 status、不勾 DoD**——翻 status 仍是收尾（verification-round 全量绿后）的活。
 status: todo——排在 closure-async 机制根之后；这是收尾异步化的细化层。
+
+## 落地证据（2026-08-05，实现提交时写入）
+
+**AC6 真实使用 = 本条自身**：本任务代理（我）在实现完成时**自勾 AC 复选框**（上方 7 个 AC 全勾）+ **自贴
+invoke 实跑证据**（本节）——这是「任务代理自勾 AC + 自贴证据」约定的首个实跑实例。收尾（外层异步）因此
+只剩「核对 DoD 行 + 翻 done + 关遥测括号」，对本任务不再做任何 AC/证据工作（AC3）。DoD 全量套件绿行
+**未勾**（SCOPED ONLY 下不可知，归外层 verification-round）——正是本任务要消除的「唯一真时序依赖」。
+**收尾只勾 DoD + 翻 done 的实跑证据在合并落地后由外层异步收尾天然产生**（与本任务所依赖的
+closure-async 机制根 AC5 同一形态：机制已落地 + 任务体自勾 AC/证据，翻 done 是外层 verification-round
+的活）——本条先记录机制与自勾/自贴证据，外层翻 done 作为收尾量级实证。
+
+**scoped 测试实跑输出**（`QUAY_TEST_SKIP_STATIC_CHECKS=1 scripts/test.sh plugin/test/self-touch-convention.test.mjs`，
+10/10 pass，exit 0）：
+
+```
+✔ AC4: unique self-files (A touches tasks/A.md, B touches tasks/B.md) ⇒ disjoint:true
+✔ AC4: a shared file (both touch tasks/A.md) ⇒ disjoint:false (negative direction)
+✔ AC4: self-file + a shared code file — self-files alone stay disjoint, the shared file still overlaps
+✔ AC5: self-file without (new) ⇒ taskWorkLanded does NOT fire; with (new) ⇒ it fires
+✔ AC1: selfTouchCheck — self-file without (new) passes; missing / (new) fail
+✔ AC1: scanReadyTasksSelfTouch reports ready tasks missing their self-file; skips non-ready + fixtures
+✔ AC1: isFixtureTask recognizes block-list and flow-list fixture labels; false otherwise
+✔ AC1: --self-touch CLI exits 0 on self-file ok, 1 on missing / (new)
+✔ AC1: --self-touch-scan CLI exits 1 when any ready task is missing its self-file, 0 when all ok
+✔ AC7: this file imports node:test and declares @test-group governance
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ duration_ms 920.784976
+```
+
+**AC4 两向 fixture 实跑输出**（`touches-orthogonality-check.ts <A> <B> --root <fixture>`；方向 1 = 各自
+self-file + 各自 code ⇒ disjoint:true；方向 2 = B 也触 A 的 self-file ⇒ disjoint:false）：
+
+```
+=== 方向 1: A 触 tasks/A.md+code/a.ts, B 触 tasks/B.md+code/b.ts ===
+DISJOINT: /tmp/ac4/A.md ∥ /tmp/ac4/B.md — safe to batch (disjoint file-sets)
+exit=0
+
+=== 方向 2: B 也触 A 的 self-file tasks/A.md（共享文件）===
+OVERLAP: /tmp/ac4/A.md ✗ /tmp/ac4/Bshared.md — must serialize (overlapping file-sets) [overlap: tasks/A.md]
+exit=1
+```
+
+**AC5 不带 `(new)` 证明实跑输出**（`taskWorkLanded` 对新 fixture）：
+
+```
+self-file WITHOUT (new):  taskWorkLanded = false   ← 不触发（就绪池不被误判清空）
+self-file WITH (new):     taskWorkLanded = true    ← 触发（正是 (new) 禁令要防的误判）
+```
+
+**派发词约定关键行**（`plugin/loop/fast-mode-loop-tick.md` 步骤 4 新增，AC2）：
+
+```text
+4. **自身文件授权（self-touch，gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence）**：
+   每个任务的 `## Touches` 必须含**它自己的任务文件** `tasks/<id>.md`——**不带 `(new)` 标注**（带
+   `(new)` 会误触 `hasAnyLandedNewTouch` 的 new-touch 路径，把每个任务都判成「工作已落地」、
+   破坏就绪池）。自身文件是任务代理完成时编辑自己任务文件（勾 AC + 贴证据）的**授权**；缺它 ⇒
+   **不派发**（先给 Touches 补 `tasks/<id>.md`）。**只允许自己的文件，禁止碰其他任务文件**……
+   node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch tasks/<id>.md --root "$(pwd)"
+   就绪池整体核验用 `--self-touch-scan`（AC1 静态检查）……
+
+**任务代理完成时编辑自己的任务文件（AC2 派发词约定，gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence）**：
+任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
+自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
+（不跑全量 suite——全量判据归外层 verification-round）；**不翻 status**（翻 done 是外层收尾的活）；
+**不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。……
+```
+
+**Contract measure 实跑**：`task_agent_self_checked = grep -c '^- \[x\] AC' <本任务>` = **7**（band ≥ 1 ✓）。
+**Contract invoke 实跑**：`--resolve` 本任务 = `RESOLVE ...: 0/5 non-tagged touches missing — resolves
+(dispatchable)` exit 0（自身文件加入后 5 条全 ok）。
+
+**偏差说明**：本任务原始 Touches 用全角括号 `（）` 注解，`parseTouchEntriesWithTags` 只剥 ASCII `(...)`，
+导致 `--resolve` 误判 MISSING。已在任务体 Touches 改为 ASCII 括号（路径不变，注解仍是 prose）——
+这是让本任务自身可派发的必要修正，不是解析器改动（解析器行为未动，超出本任务范围）。

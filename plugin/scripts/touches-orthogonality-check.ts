@@ -251,6 +251,71 @@ export function checkTaskTouchesResolve(taskBody, root) {
   return { hasSection, ...checkTouchesResolve(entries, root) };
 }
 
+// ── self-touch check (gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence) ──
+// (c) block of the three-block batch elimination: every task's `## Touches` MUST include its own
+// task file `tasks/<id>.md` — WITHOUT the `(new)` annotation. The self-file grants the executing
+// agent permission to edit its own task file at completion (tick AC checkboxes + paste its invoke
+// real-run evidence) — the AC/evidence delegation that shrinks outer closure to one DoD line per
+// task. The `(new)` ban is load-bearing: `hasAnyLandedNewTouch` fires on a `(new)`-marked entry
+// whose file exists, so a `(new)` self-file would misjudge every task as "work already landed",
+// emptying the ready pool (gap-ready-pool-check-taskworklanded-overshoot-excludes-existing-file-tasks).
+// checkTouchesPair is UNAFFECTED: the self-file is unique per task (tasks/A.md ≠ tasks/B.md), so two
+// tasks touching only their own files stay disjoint (filesDisjoint: overlaps.length === 0).
+export function selfTouchEntry(taskBody, taskId) {
+  const { hasSection, section } = extractTouchesSection(taskBody);
+  if (!hasSection) return null;
+  const expected = `tasks/${taskId}.md`;
+  return parseTouchEntriesWithTags(section).find((e) => e.path === expected) ?? null;
+}
+
+/** { ok, expected, entry } — ok: true iff the task's Touches contains `tasks/<id>.md` and that
+ *  entry carries no `(new)` tag (a `(delete)` self-file is likewise not a grant). */
+export function selfTouchCheck(taskBody, taskId) {
+  const expected = `tasks/${taskId}.md`;
+  const entry = selfTouchEntry(taskBody, taskId);
+  const ok = entry !== null && entry.tag !== "new";
+  return { ok, expected, entry };
+}
+
+// True when the task frontmatter declares the `fixture` label (block list `labels:\n  - fixture` or
+// flow list `labels: [..., fixture]`). Fixtures are gate demo tasks — never real work, never
+// dispatchable — so the ready-pool scan skips them (matching ready-pool-check.ts's isFixture).
+export function isFixtureTask(raw) {
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fm) return false;
+  const flow = fm[1].match(/^labels:\s*\[([^\]]*)\]\s*$/m);
+  if (flow) return flow[1].split(",").some((v) => v.trim().replace(/^["']|["']$/g, "") === "fixture");
+  const lines = fm[1].split(/\r?\n/);
+  const idx = lines.findIndex((l) => /^labels:\s*$/.test(l));
+  if (idx < 0) return false;
+  for (let i = idx + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
+    if (m) {
+      if (m[1].replace(/^["']|["']$/g, "") === "fixture") return true;
+    } else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
+  }
+  return false;
+}
+
+// Scan a tasks directory for `status: ready` tasks and return each one's self-touch status. This is
+// the AC1 static check over the READY pool: a ready task whose Touches lacks its own file is not
+// dispatchable (the dispatch gate's `--self-touch` per-candidate check blocks it). Fixture tasks are
+// skipped (not dispatchable by definition — ready-pool-check.ts excludes them as `fixture`).
+export function scanReadyTasksSelfTouch(tasksDir) {
+  const out = [];
+  if (!fs.existsSync(tasksDir)) return out;
+  for (const f of fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))) {
+    const id = f.replace(/\.md$/, "");
+    const raw = fs.readFileSync(path.join(tasksDir, f), "utf8");
+    if (!/^status:\s*["']?ready["']?\s*$/m.test(raw)) continue;
+    if (isFixtureTask(raw)) continue;
+    const { ok, expected, entry } = selfTouchCheck(raw, id);
+    out.push({ id, ok, expected, entry });
+  }
+  out.sort((a, b) => a.id.localeCompare(b.id));
+  return out;
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 export function findRepoRoot(start) {
   let dir = start;
@@ -265,6 +330,8 @@ export function findRepoRoot(start) {
 function usage() {
   process.stderr.write("Usage: touches-orthogonality-check.mjs [--root <dir>] <charterA.md> <charterB.md>\n");
   process.stderr.write("       touches-orthogonality-check.mjs --resolve [--root <dir>] <task.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --self-touch [--root <dir>] <task.md>\n");
+  process.stderr.write("       touches-orthogonality-check.mjs --self-touch-scan [--root <dir>]\n");
 }
 
 // --resolve mode: run the dispatch-eligibility resolve check over ONE task/charter file. Prints a
@@ -300,8 +367,59 @@ function mainResolve(args) {
   return r.majorityMissing ? 1 : 0;
 }
 
+// --self-touch mode: verify ONE task's `## Touches` includes its own `tasks/<id>.md` WITHOUT the
+// `(new)` annotation. This is the dispatch-gate eligibility check (fast-mode-loop-tick.md step 4,
+// AC1 of gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence): a ready
+// candidate whose Touches does not grant its own file is NOT dispatchable — the executing agent has
+// no authorization to tick its AC boxes / paste its invoke evidence at completion.
+function mainSelfTouch(args) {
+  let root = null;
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--self-touch") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+    files.push(args[i]);
+  }
+  if (files.length !== 1) { usage(); return 2; }
+  const file = files[0];
+  if (!fs.existsSync(file)) { process.stderr.write(`ERROR: task not found: ${file}\n`); return 2; }
+  const body = fs.readFileSync(file, "utf8");
+  const id = path.basename(file, ".md");
+  const { ok, expected } = selfTouchCheck(body, id);
+  if (ok) {
+    process.stdout.write(`SELF-TOUCH ${file}: ok (Touches includes ${expected} without (new))\n`);
+    return 0;
+  }
+  process.stdout.write(`SELF-TOUCH ${file}: MISSING ${expected} (without (new)) in ## Touches — not dispatchable\n`);
+  return 1;
+}
+
+// --self-touch-scan mode: the AC1 static check over the READY pool — every `status: ready` task in
+// `<root>/tasks/` must have its own file in Touches. Exits 1 when any ready task is missing it.
+function mainSelfTouchScan(args) {
+  let root = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--self-touch-scan") continue;
+    if (args[i] === "--root") { root = args[++i]; continue; }
+  }
+  const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
+  const rows = scanReadyTasksSelfTouch(path.join(rootDir, "tasks"));
+  const missing = rows.filter((r) => !r.ok);
+  for (const r of rows) {
+    if (r.ok) process.stdout.write(`  ok:      ${r.id} (touches ${r.expected})\n`);
+    else process.stdout.write(`  MISSING: ${r.id} (expected ${r.expected} in ## Touches without (new))\n`);
+  }
+  process.stdout.write(
+    `SELF-TOUCH-SCAN: ${rows.length} ready task(s), ${missing.length} missing self-file entry — ` +
+    (missing.length === 0 ? "all dispatchable" : "NOT all dispatchable (add tasks/<id>.md to each ## Touches)") + "\n",
+  );
+  return missing.length === 0 ? 0 : 1;
+}
+
 export async function main(argv) {
   const args = argv.slice(2);
+  if (args.includes("--self-touch-scan")) return mainSelfTouchScan(args);
+  if (args.includes("--self-touch")) return mainSelfTouch(args);
   if (args.includes("--resolve")) return mainResolve(args);
   let root = null;
   const files = [];
