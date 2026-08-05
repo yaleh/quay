@@ -2838,3 +2838,19 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   不需处理（管理者已核实）。
 - 在飞：2 agent（review-cadence/roadmap）；preflight 已 done；drive-text 排队；closure-sync +
   reanchor 两任务 ready 入池等槽。
+
+### tick 2026-08-05T02:22Z（外层，`no-action`：2 agent 在飞、串行链正确、无介入）
+
+- **roadmap 战略任务落地**（`51d62823` + `e68bca16`）：路线图标 SUPERSEDED by ADR-022 + 逐机制
+  标注 + governance 测试（stale_refs=26 全标注，剥离后负控制 RED）。战略发现闭环。
+- **2 agent 在飞**：review-cadence（13m，contract-check ratchet 验证中）+ closure-sync（1m，
+  **正在读 ready-pool-check.ts 的 taskWorkLanded**——正是人核实过的机制）。closure-async 机制根实施中。
+- **外层更正确认吸收**：inner 明确记录「slot empty is mechanical gating, not batch-holding」——第三
+  槽空是机械门控（唯一 eligible 候选是 outer 裁定 no-promote 的 prepare-milestone + 未授权 session
+  任务），不是批持有。**更正确认生效。**
+- **串行链正确映射**（inner 自记 3930207c）：closure-async ∥ review-cadence 现在 → inner-anchor
+  （依赖①，todo 未 ready 自声明）→ drive-text（等 review-cadence + closure-sync 双落地，
+  scripts/test.sh 共享）。三任务都触 loop 文档，串行正确。
+- **transition 状态**：roadmap `ready`（工作已落地）等 verification-round 收尾——closure-async 未落地
+  前外层不抢先收尾（防双收尾冲突），等机制根落地后外层接管。
+- 无停止条件、无 BLOCKED；2 agent token 持续上升；loop-driver LIVE。
