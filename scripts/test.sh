@@ -181,6 +181,15 @@ run_static_checks() {
   # a shell script), band 0..1 (the ONE active legacy observer — session-liveness.sh — is carried
   # by the sibling task; a NEW active violation red-lights the commit).
   node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
+  echo "== strategic-doc-staleness check (gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8) =="
+  # The generic strategic-doc staleness checker: scans docs/proposals + orchestration/*ROADMAP* for
+  # unannotated references to classic-pipeline scripts ADR-022 deleted (prepare-milestone.js /
+  # execute-milestone.js / milestone-worktree.ts). The six known-stale docs (the shrink-only
+  # baseline) are reported but not counted; a NEW stale strategic doc exits 1 and aborts the suite
+  # (set -euo pipefail), so a strategic doc silently pointing at deleted code red-lights the commit.
+  # The AC8 pool-candidate regression (gap-prepare-milestone-no-size-aware-routing must be flagged)
+  # is asserted in plugin/test/strategic-doc-staleness-check.test.mjs, not here.
+  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/strategic-doc-staleness-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
