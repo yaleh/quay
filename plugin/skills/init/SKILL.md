@@ -97,6 +97,8 @@ documented reference from a genuine missing file:
 | `orchestration/throughput-decomposition.md` | quay's analysis doc — not a generic loop deliverable |
 | `orchestration/outer-phase-goal.md` | retired outer-phase-goal (referenced as historical) |
 | `docs/analysis/normative-prose-audit.md` | quay's audit doc — not a generic loop deliverable |
+| `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` | quay's reliable-send crystallization doc (cold-start key-4 delivery criterion) — not a generic loop deliverable |
+| `orchestration/outer-rulings-2026-08-04-A-F.md` | quay's outer rulings incl. ruling F (superseded-judgment provenance) — not a generic loop deliverable |
 
 Machine-readable declarations consumed by `quay-init.sh`'s `verify-referenced-landed` (single
 source of truth — the same doc the human reads):
@@ -109,6 +111,8 @@ source of truth — the same doc the human reads):
 <!-- reference-doc: orchestration/throughput-decomposition.md -->
 <!-- reference-doc: orchestration/outer-phase-goal.md -->
 <!-- reference-doc: docs/analysis/normative-prose-audit.md -->
+<!-- reference-doc: orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md -->
+<!-- reference-doc: orchestration/outer-rulings-2026-08-04-A-F.md -->
 
 ## Behavior
 

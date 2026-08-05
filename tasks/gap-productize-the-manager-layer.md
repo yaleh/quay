@@ -35,7 +35,12 @@ extra:
    （规划/排序/看趋势——各自机制挂接点）、**两条已验证规则**（§1.5 ask-vs-act、§1.6 事件 triage，
    从 `orchestration/manager-loop-tick.md` 提取）。**可安装**（在 plugin/ 下随交付，非 quay 本地）。
 2. **冷启动技能修复**：AC8c 六键的 2 个废键（inner-state.sh、send-keys-verified 哈希）换成活机制
-   （closure-async 收尾探测 + pane-state-classify 或等价）。
+   （closure-async 收尾探测 + pane-state-classify 或等价）。**与 key-4 隔离的关系**：2 个废键中
+   **键 4（send-keys-verified 哈希判据）已由 `gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash`
+   （关键路径隔离，优先于本条落地）先行修复**——cold-start SKILL.md 已改教 reliable-send 机制
+   （`send-keys-reliable.sh` + `transcript-delivery-check.ts`，交付判据 = 目标 transcript 出现该驱动
+   文本的 user message，外裁定 F superseded 已交叉标注）。**本条落地时复用该结果**，只需处理剩余废键
+   （inner-state.sh 引用，SKILL.md 现仅在「retired」语境提及）并照 AC2/AC4 的机械证明方式核对。
 3. **启动配置结晶**：三件套进交付物（check-in settings 或 cold-start SKILL 的启动段），部落知识→可安装。
 4. **路线图对照物**：复盘节奏解决「定期回头看」，不解决「往哪走」——manager 层规划职能挂一个活的
    fast-mode 战略对照物（引用 `gap-fast-mode-cross-project-portability-strategic-question` 或等价）。

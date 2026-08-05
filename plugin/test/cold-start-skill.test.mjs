@@ -18,8 +18,9 @@
 //          (MONITORS-MOUNTED / MONITORS-DELIVERING / CRON-CREATED / INNER-DRIVEN /
 //          TELEMETRY-RECORD / FIRST-TASK), so "same command, same results on any model" is
 //          falsifiable rather than prose.
-//   AC1 correction — the skill EXPLICITLY drives inner (send-keys-verified.sh), never treats the
-//          inner start as a side effect of outer guidance.
+//   AC1 correction — the skill EXPLICITLY drives inner (send-keys-reliable.sh + the
+//          transcript-delivery-check.ts verdict), never treats the inner start as a side effect
+//          of outer guidance; the superseded whole-pane-hash criterion is NOT taught (AC2/AC3).
 //
 // Plus a mechanical rehearsal: a quay-init --loop temp project + a real `--task-start` call must
 // produce the .workflow-events/ record the skill's step 7 asserts — the wiring the skill relies
@@ -124,10 +125,20 @@ test('AC8c — the skill defines the observable-consequences checklist as a conc
 });
 
 // ── AC1 correction: the inner start is DRIVEN, never assumed as a side effect ────────────────────────
-test('AC1 correction — the skill explicitly drives inner via send-keys-verified.sh, not as a side effect', () => {
-  assert.match(skillSrc, /send-keys-verified\.sh/s, 'the skill must drive inner via send-keys-verified.sh');
+test('AC1 correction — the skill explicitly drives inner via send-keys-reliable.sh (reliable-send), not as a side effect', () => {
+  assert.match(skillSrc, /send-keys-reliable\.sh/s, 'the skill must drive inner via send-keys-reliable.sh (reliable-send)');
+  assert.ok(!/send-keys-verified\.sh/.test(skillSrc), 'the skill must NOT reference the superseded send-keys-verified.sh (outer ruling F)');
   assert.match(skillSrc, /EXPLICIT, never a side effect|not assumed as a side effect/i,
     'the skill must state the inner start is explicit, never assumed');
+});
+
+test('AC2 — the skill teaches the reliable-send delivery criterion (transcript user message), with zero pane-hash criterion', () => {
+  assert.match(skillSrc, /transcript-delivery-check\.ts/s, 'the skill must reference the transcript-delivery-check.ts pure verdict');
+  assert.match(skillSrc, /send-keys-reliable\.sh/s, 'the skill must teach send-keys-reliable.sh (reliable-send)');
+  assert.match(skillSrc, /CRYSTALLIZED-reliable-send-2026-08-04\.md/s, 'the skill must cross-reference the crystallized reliable-send doc (AC3)');
+  assert.match(skillSrc, /outer-rulings-2026-08-04-A-F\.md/s, 'the skill must cross-reference outer ruling F (AC3)');
+  assert.ok(!/send-keys-verified\.sh/.test(skillSrc), 'send-keys-verified.sh must be gone from the skill (AC2, 0 hits)');
+  assert.ok(!/pane hash/.test(skillSrc), 'the "pane hash" criterion must be gone from the skill (AC2, 0 hits)');
 });
 
 // ── Mechanical rehearsal: a real --task-start in a quay-init --loop project produces the record ───────
