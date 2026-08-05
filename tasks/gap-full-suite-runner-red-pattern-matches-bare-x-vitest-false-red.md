@@ -49,10 +49,56 @@ bug】——只在 vitest 项目暴露（上游看不见自己的缺陷，环境
 
 ## Acceptance Criteria
 
-- [ ] AC1: FAILURE_PATTERNS 去掉裸 `/✖/`，改匹配结构化形态（❯ <file> (N tests|M failed) / Test Files ... failed）——vitest 假红负控制不再误触
-- [ ] AC2: node:test/TAP 真失败仍触发 red（not ok / # fail / # cancelled）——不回归
-- [ ] AC3: 文档修正 vitest --maxWorkers（分叉写清，不指导 --test-concurrency）
-- [ ] AC4: 与 archguard TASK-67 交叉标注（下游验证过，直接采纳）
+- [x] AC1: FAILURE_PATTERNS 去掉裸 `/✖/`，改匹配结构化形态（❯ <file> (N tests|M failed) / Test Files ... failed）——vitest 假红负控制不再误触
+- [x] AC2: node:test/TAP 真失败仍触发 red（not ok / # fail / # cancelled）——不回归
+- [x] AC3: 文档修正 vitest --maxWorkers（分叉写清，不指导 --test-concurrency）
+- [x] AC4: 与 archguard TASK-67 交叉标注（下游验证过，直接采纳）
+
+### 实跑证据（执行 agent，2026-08-05）
+
+**AC1 实跑（vitest 假红负控制：通过测试打 ✖ console，0 failed，exit 0 ⇒ 不 early-red）**：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root "$TMP" \
+    --command 'echo "✖ Diagram test failed" >&2; echo "# tests 5"; echo "# pass 5"; echo "# fail 0"; echo "# cancelled 0"; exit 0' --lane-count 1 --sync
+full-suite-runner: FINAL state=green durationMs=33 exit=0
+state: green
+```
+Contract invoke（`grep -n 'FAILURE_PATTERNS\|✖' plugin/scripts/full-suite-runner.ts`）——`✖` 只出现在注释，FAILURE_PATTERNS 无裸 `/✖/`：
+```
+96:// vitest-false-red, AC1): a bare `✖` in a vitest suite can be the test's OWN console
+104:const FAILURE_PATTERNS: RegExp[] = [
+```
+结构化匹配已入模式：`❯ <file> (N tests | M failed [| K skipped])`、`Test Files <N> failed`。Contract measure
+`node --test plugin/test/full-suite-runner.test.mjs 2>&1 | grep -c '✖'` = **0**（band false_red=0 满足）。
+
+**AC2 实跑（node:test/TAP 真失败 not ok，exit 1 ⇒ 仍 red）**：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --root "$TMP" \
+    --command 'echo "not ok 1 - boom"; echo "# tests 1"; echo "# pass 0"; echo "# fail 1"; echo "# cancelled 0"; exit 1' --lane-count 1 --sync
+full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)
+full-suite-runner: FINAL state=red reason=failed durationMs=24 exit=1
+state: red reason: failed
+```
+vitest 结构化真失败（`❯ test/foo.test.ts (3 tests | 1 failed) 12ms`）⇒ 同样 state=red reason=failed（early-red 保留）。
+
+**scoped 验证（`scripts/test.sh --for-task gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red --allow-thin`）**：
+```
+ℹ tests 18
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+task-contract-check: no violations.
+```
+新增 3 条测试：AC2 unit（结构化判红，含 ✖ 负控制）、AC1 e2e（✖ console + exit 0 ⇒ green）、
+AC2 e2e（vitest 结构化行 ⇒ early-red）。原 AC2 marker-file proof（not ok ⇒ red）仍绿。
+
+**AC3 实改**：`plugin/loop/orchestrator-loop-tick.md` 判红模式段 + 新增「并发旋钮分叉」段、
+`plugin/loop/fast-mode-loop-tick.md` 并发旋钮分叉、`plugin/scripts/full-suite-runner.ts` 用法头注释
+（`--maxWorkers` 而非 `--test-concurrency`，archguard `--maxWorkers=8` 跑通 4902 passed）、
+`tasks/gap-no-resource-awareness-heavy-ops-run-blind.md` AC8 交叉标注。
+
+**AC4 交叉标注**：Proposal 已引 archguard TASK-67（13:52 下游验证 3 文件 6 真失败、假阳性不复发）；
+runner FAILURE_PATTERNS 注释亦引 archguard TASK-67。直接采纳下游已验证修复。
 
 ## Definition of Done
 
@@ -67,7 +113,7 @@ bug】——只在 vitest 项目暴露（上游看不见自己的缺陷，环境
 
 - plugin/scripts/full-suite-runner.ts（FAILURE_PATTERNS 改结构化匹配）
 - plugin/test/full-suite-runner.test.mjs（AC1-AC2 测试）
-- plugin/loop/orchestrator-loop-tick.md / docs（vitest --maxWorkers 分叉）
+- plugin/loop/orchestrator-loop-tick.md / plugin/loop/fast-mode-loop-tick.md / docs（vitest --maxWorkers 分叉）
 - tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（AC3 交叉标注）
 
 ## Contract
@@ -78,3 +124,12 @@ invariant structured_failure_matching = 1（判红匹配结构化形态，非裸
 invoke    `grep -n 'FAILURE_PATTERNS\|✖' plugin/scripts/full-suite-runner.ts`
 control   vitest 负控制打 ✖ console ⇒ 不 early-red（AC1）；node:test 真失败 ⇒ red（AC2）
 resume    判红模式与文档分叉分步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-05T14:00:48Z
+changed: AC12b product hard-blocker #4（HIGHEST priority）直接派发执行。采纳 archguard TASK-67
+已下游验证的结构化判红修复（改匹配 `❯ <file> (N tests | M failed)` / `Test Files <N> failed`，
+去裸 `✖`），同一报告附带的 vitest `--maxWorkers` 文档分叉一并修正。验证用 scoped 选中集
+（`--for-task`），不跑全量。

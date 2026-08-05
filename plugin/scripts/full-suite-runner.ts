@@ -49,6 +49,12 @@
 //     [--root <path>]                # workspace root (test-hermetic; default repo root)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
+// Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
+// the --lane-count splice only applies to node:test/test.sh projects (--test-concurrency=N).
+// For a vitest project pass --command "npx vitest run --maxWorkers=<n>" — vitest's real
+// file-level parallel flag is --maxWorkers (archguard ran the full suite with --maxWorkers=8,
+// 4902 passed); the runner leaves non-test.sh commands untouched.
+//
 // Exit: 0 if the suite is green, 1 if red OR the resource gate said WAIT (not started).
 // The durable signal the inner reads is the state file, not the exit code.
 
@@ -85,14 +91,22 @@ export interface SuiteState {
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
-// stdout/stderr stream, never waiting for the run to finish. These are the concrete
-// node:test/TAP markers plus the repo's own FULL-SUITE-EXIT marker. A generic
-// non-zero exit code is the catch-all for failures no line matched (applied at exit).
+// stdout/stderr stream, never waiting for the run to finish. These are STRUCTURED
+// failure shapes, NOT bare glyphs (gap-full-suite-runner-red-pattern-matches-bare-x-
+// vitest-false-red, AC1): a bare `✖` in a vitest suite can be the test's OWN console
+// output — archguard TASK-67 proved a PASSING negative-control test logging `✖ Diagram
+// test failed` triggered a FALSE early-red while vitest reported 0 failed / exit 0. Under
+// a pipe node:test emits TAP, so `not ok` / `# fail 1+` / `# cancelled 1+` cover node:test
+// failures (AC2, no regression); vitest failures are covered by their structured lines:
+// `❯ <file> (N tests | M failed)` (per-file) and `Test Files <N> failed` (summary).
+// FULL-SUITE-EXIT is the repo's own marker. A generic non-zero exit code is the catch-all
+// for failures no line matched (applied at exit).
 const FAILURE_PATTERNS: RegExp[] = [
   /^not ok\b/, // node:test / TAP per-test failure
-  /✖/, // node:test failure glyph
   /^#\s*fail\s+[1-9]/, // TAP summary: # fail 1+
   /^#\s*cancelled\s+[1-9]/, // TAP summary: # cancelled 1+ (cancelled is a failure even when fail 0)
+  /❯\s+\S+\s+\(\d+\s+tests?\s*\|\s*[1-9]\d*\s+failed(?:[^)]*)\)/, // vitest per-file: ❯ <file> (N tests | M failed [| K skipped])
+  /Test Files\s+[1-9]\d*\s+failed/, // vitest summary: Test Files <N> failed
   /FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero
 ];
 
