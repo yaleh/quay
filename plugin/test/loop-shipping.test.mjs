@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { oldPaths, oldPathPatterns, exclusionEntries } from '../scripts/loop-shipping-exclusion-data.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
@@ -42,14 +43,9 @@ test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old p
     // (gap-retire-inner-state-one-observer-targets-by-parameter) — observation has one tool,
     // session-liveness.sh, which ships via the separate session-liveness section of quay-init.sh.
   ];
-  const oldPaths = [
-    'orchestration/orchestrator-loop-tick.md',
-    'docs/analysis/fast-mode-loop-tick.md',
-    'orchestration/watch/inner-forensics.mjs',
-    'orchestration/watch/inner-state.sh',
-    'scripts/resource-gate.sh',
-    'scripts/heavy-op-token.sh',
-  ];
+  // oldPaths + oldPathPatterns + the exclusion table are the SINGLE SOURCE in
+  // plugin/scripts/loop-shipping-exclusion-data.mjs (gap-exclusion-lists-have-no-necessity-check)
+  // so the AC1b scan and the inert-exclusion necessity check can never disagree.
   for (const [rel, reason] of canonicalInside) {
     const p = path.join(pluginDir, rel.replace(/^plugin\//, ''));
     assert.ok(fs.existsSync(p), `${rel} must ship inside the plugin (role: ${reason})`);
@@ -64,42 +60,15 @@ test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old p
 
 // ── AC (coordinator): no LIVE reference to the 6 old paths anywhere in the repo ─────────────────────
 test('AC1b — after the move, no live reference to the 6 old paths remains (comments/history excluded)', () => {
-  // The `scripts/*.sh` old paths are SUBSTRINGS of the new `plugin/scripts/*.sh` paths, so use a
-  // negative lookbehind to match only the bare old form (never the `plugin/`-prefixed new path).
-  // The `orchestration/` + `docs/analysis/` old paths are NOT substrings of their new `plugin/loop/`
-  // locations, so plain substring is exact there.
-  const oldPathPatterns = [
-    /(?<!plugin\/)scripts\/resource-gate\.sh/,
-    /(?<!plugin\/)scripts\/heavy-op-token\.sh/,
-    /orchestration\/watch\/inner-state\.sh/,
-    /orchestration\/watch\/inner-forensics\.mjs/,
-    /docs\/analysis\/fast-mode-loop-tick\.md/,
-    /orchestration\/orchestrator-loop-tick\.md/,
-  ];
+  // oldPathPatterns + the exclusion table live in plugin/scripts/loop-shipping-exclusion-data.mjs
+  // (single source — the necessity check reads the SAME data). The patterns are derived from
+  // oldPaths there: the `scripts/*.sh` old paths are SUBSTRINGS of the new `plugin/scripts/*.sh`
+  // paths, so those two carry a negative lookbehind to match only the bare old form (never the
+  // `plugin/`-prefixed new path); the `orchestration/` + `docs/analysis/` old paths are NOT
+  // substrings of their new `plugin/loop/` locations, so plain substring is exact there.
   // Files that MAY legitimately mention the old paths (historical record / target-layout), and
   // are therefore excluded from the "no live reference" scan:
-  const excluded = [
-    path.join(repoRoot, 'tasks'),            // historical task records (descriptions of the past)
-    path.join(repoRoot, 'milestones'),       // historical milestone journals
-    path.join(repoRoot, 'orchestration', 'tick-log.md'),   // the outer's running log
-    path.join(pluginDir, 'scripts', 'quay-init.sh'),        // target layout (orchestration/ + docs/analysis/)
-    path.join(repoRoot, 'test', 'cold-start-e2e.sh'),       // target layout (asserts the laid-down project)
-    path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), // AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)
-    path.join(pluginDir, 'skills', 'init', 'SKILL.md'),     // mapping table's target column
-    path.join(pluginDir, 'skills', 'cold-start', 'SKILL.md'), // cold-start skill operates on the TARGET project's laid-down layout (orchestration/ + docs/analysis/) — the AC8d target-layout paths, not the quay plugin/loop paths
-    path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),// asserts the laid-down target layout
-    path.join(repoRoot, 'packages', 'quay', 'test', 'install-config-driven-e2e.test.mjs'), // asserts the laid-down target layout: REQUIRED_PRODUCT_FILES lists the cold-started project's orchestration/ + docs/analysis/ tick-doc paths (the reinstall-gate e2e, landed RED-first; its target-layout references were never added here)
-    path.join(pluginDir, 'loop'),                           // canonical templates: their /loop prompts and cross-refs use plugin/loop/; the only old-path strings left are in the template-params note documenting the TARGET layout
-    path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), // this file's own regexes define the old paths
-    path.join(pluginDir, 'test', 'task-contract-check.test.mjs'), // fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs
-    path.join(repoRoot, 'README.md'),                       // the cold-start section documents the TARGET project's laid-down layout (orchestration/ + docs/analysis/)
-    path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'fixtures', 'scheduler'), // replay fixtures (gap-dispatch-eligibility-blind-to-files-that-do-not-exist-yet): the eligibility check's OUTPUT embeds the old-path regex patterns as DATA (the replay pins what the scheduler names), not live callers
-    // plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET layout
-    // (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path strings are
-    // therefore only policed by AC1c's three assertions, and AC1c's liveLines filter drops
-    // `>`-blockquote lines, so old paths inside reference/blockquote blocks are NOT scanned here —
-    // intentional: blockquotes are documentation of the target layout, not live instructions.
-  ];
+  const excluded = exclusionEntries(repoRoot, pluginDir).map((e) => e.target);
   const hits = [];
   // Corpus non-emptiness guard (gap-checks-that-verify-an-empty-set family): assert.deepEqual(hits, [])
   // alone would pass silently if walk() returned early, the extension filter changed, or the excluded
