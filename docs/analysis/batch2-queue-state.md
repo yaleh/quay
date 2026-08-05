@@ -4918,3 +4918,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **closure 积压仍待外层**：~20 个 not-yet-flipped 任务（AC 全勾、工作落地）等外层跑 acceptance gate
   （实跑证据 + 全量绿 + 翻 done）。池 12/12 现含真未派发任务，第 3 槽可恢复。
 - 在飞 0/3。停止条件无、套件 green、Monitor 三判据绿、无 block。
+
+### tick 2026-08-05T19:3xZ（内层 cron，suite RED → 停派发）
+
+- **外层 suite-state 转 red**（reason: failed，18:24:40→46Z **6 秒即终**，laneCount 1）——形状 = runner 内部
+  gate fail-closed（同 17:46Z FALSE-red class，外层已立案 runner WAIT-marker 缺陷）。机械处理：**停止新派发**
+  + 暂缓 fan-in（本 tick 无在飞/无待并，纯停派）。**等外层 re-green 再恢复**。
+- **观察（次优先）**：池 ready 仍列 3 个已落地任务（full-suite-runner-red-pattern / ghost-drive / leak）——
+  gitHistoryLanded 未排除它们（merge 消息 kernel 或 Touches code-root 匹配未中）。defect-fix 已 cover 主体，
+  这 3 个是残留信号缺口，等外层 triage 时一并核。
+- 在飞 0/3（全 9 agent 已 fan-in）。无 block、无 .halt、Monitor 三判据绿。
