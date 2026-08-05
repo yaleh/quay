@@ -50,19 +50,42 @@ plugin 传播那条是**同一类问题**（交付物传播已知缺陷）。它
 
 ## Acceptance Criteria
 
-- [ ] AC1: cold-start SKILL.md AC8c 键 4 改用可靠发送判据（transcript-delivery-check.ts /
+- [x] AC1: cold-start SKILL.md AC8c 键 4 改用可靠发送判据（transcript-delivery-check.ts /
       send-keys-reliable.sh）——交付判据 = 目标 transcript 出现该驱动文本的 user message，非 pane hash
-- [ ] AC2: **grep 证明**——`send-keys-verified` / 「pane hash changed」从 cold-start SKILL.md 消失
+- [x] AC2: **grep 证明**——`send-keys-verified` / 「pane hash changed」从 cold-start SKILL.md 消失
       （实跑输出贴任务体）
-- [ ] AC3: 交叉标注 F（superseded 判定）+ `CRYSTALLIZED-reliable-send-2026-08-04.md` 引用
-- [ ] AC4: 测试用 `node:test` 且带 `// @test-group governance`（若可测试化：SKILL.md 无哈希判据断言）
-- [ ] AC5: 与 manager-layer umbrella 交叉标注（AC3 覆盖 2/6 键，本条是 key-4 关键路径隔离）
+- [x] AC3: 交叉标注 F（superseded 判定）+ `CRYSTALLIZED-reliable-send-2026-08-04.md` 引用
+- [x] AC4: 测试用 `node:test` 且带 `// @test-group governance`（若可测试化：SKILL.md 无哈希判据断言）
+- [x] AC5: 与 manager-layer umbrella 交叉标注（AC3 覆盖 2/6 键，本条是 key-4 关键路径隔离）
+
+## AC2 实跑输出（贴任务体）
+
+```
+$ grep -n 'send-keys-verified\|pane hash' plugin/skills/cold-start/SKILL.md
+grep exit=1（1 = 0 命中）——哈希判据从 cold-start SKILL.md 消失
+```
+
+作用域测试输出（AC4，`QUAY_TEST_SKIP_STATIC_CHECKS=1`）：
+
+```
+$ scripts/test.sh plugin/test/cold-start-skill.test.mjs
+✔ AC5 — the cold-start skill exists, is a Monitor-based agent skill, and is registered in plugin.json
+✔ AC5 — the skill mounts THE ONE monitor via the Monitor tool (session-liveness-mount.sh; inner-state.sh retired)
+✔ AC5 — the skill explicitly forbids nohup
+✔ telemetry AC — the skill asserts a real --task-start record in .workflow-events/
+✔ AC8c — the skill defines the observable-consequences checklist as a concrete six-key list
+✔ AC1 correction — the skill explicitly drives inner via send-keys-reliable.sh (reliable-send), not as a side effect
+✔ AC2 — the skill teaches the reliable-send delivery criterion (transcript user message), with zero pane-hash criterion
+✔ rehearsal — a real --task-start against a quay-init --loop project writes the .workflow-events/ record the skill asserts
+ℹ tests 8   ℹ pass 8   ℹ fail 0   ℹ cancelled 0
+EXIT=0
+```
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC2 实跑输出贴任务体
-- [ ] 冷启动技能不再教已知不可信判据（哈希 → 可靠发送）；meta-cc/archguard 关键路径解除
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC2 实跑输出贴任务体
+- [x] 冷启动技能不再教已知不可信判据（哈希 → 可靠发送）；meta-cc/archguard 关键路径解除
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——ROUND 3 正在外层后台跑，本任务只跑作用域测试
 
 ## Touches
 
