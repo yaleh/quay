@@ -3030,3 +3030,21 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   保持完整静态检查 + mutation 不变（AC2 机械证明，不削弱闸门）**；双向负控制（touched 违规 scoped 必抓
   / 无关仓库级违规全量必抓）。
 - 全量套件第 3 跑进行中（bzt433wtm，~03:13 完）；inner 空闲待绿。
+
+### tick 2026-08-05T03:12Z（外层，`correct-self`：管理者的活证据 → 排序裁定 + 承认落地不完整）
+
+- **管理者活证据（比分析直接）**：此刻两层同时停摆——inner 空闲（最后派发 02:44:47）+ 外层等套件，
+  等的是一件纯记账事（勾复选框+贴已有结果，收尾子代理实测 0 次测试调用）；5 条 landed 任务在 limbo
+  （closure-sync/drive-text/daily-review-cadence/inner-anchor/roadmap）。**自指讽刺**：修同步阻塞的
+  closure-sync 自己就在那 5 条里排队。
+- **措辞已改行为未变**：我把 batch 改成 verification-round（措辞任务生效），但 inner 仍在等它不该知道
+  的事——印证「改名不足、结构是根因」（closure-sync 任务自身的框架）。
+- **外层承认：closure-async 落地不完整**——它让 inner「读 suiteGreen」→ inner 选择等绿，这正是当前
+  停摆的机制。**「永不因记账停顿」的语义没随机制落地。**
+- **排序裁定**：**1) 先派 `gap-full-suite-belongs-to-outer-background-above-3-min`（(a) 块，已 ready）**——
+  它的红窗规则（GREEN/RUNNING ⇒ inner 乐观派发、RED ⇒ 停）就是 closure-async「永不等待」的补全，是
+  唯一立即止血的机制（每轮停摆的根在「inner 等绿」，不是「套件跑哪」）；**2) 后派
+  `gap-closure-could-not-run-in-task-...`（(c) 块，收尾变一行）**；**3) scoped 优化最后**（每任务成本，无停摆）。
+- 对管理者「套件移外层不会立即止血」的精确化：套件「移去哪」不是止血，套件任务的**红窗乐观规则**才是；
+  我据此把 (a) 块派发提到最前（它就是 closure-async 的完成态）。
+- 本轮到绿后：关 5 条 → 空槽先派 (a) 块。
