@@ -39,6 +39,12 @@ extra:
 **与 cold-start 的关系**：cold-start SKILL.md 教的是「循环启动」；本条补「会话拓扑」——两者一起才是
 「装得上」。
 
+**拓扑修正（交叉标注：gap-manager-baked-into-project-topology-factory，2026-08-05 已落地）**：本条
+原定的三窗口（manager/outer/inner）拓扑中，**manager 不属于项目拓扑**——它是跨项目的、由人另行启动。
+出厂定义已修正为**两窗口（outer+inner）**：`quay-topology.sh` ROLES="outer inner"、`topology-check.sh`
+判据只查两窗口、`session-topology/SKILL.md` 从拓扑表移除 manager（注明跨项目另行启动）。本条的 AC 记录
+三窗口为原始交付形态，修正以 gap-manager-baked 任务为准。
+
 ## Acceptance Criteria
 
 - [x] AC1: 三窗口拓扑出厂定义在交付物里（`<project>-N:outer/:inner/:manager`：每层命令、谁驱动谁、

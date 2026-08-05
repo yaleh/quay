@@ -1,25 +1,28 @@
 // @test-group governance
-// session-topology.test.mjs — gap-tmux-session-topology-no-factory-definition, AC1–AC5.
+// session-topology.test.mjs — gap-tmux-session-topology-no-factory-definition, AC1–AC5;
+// two-window correction pinned by gap-manager-baked-into-project-topology-factory (manager is
+// CROSS-PROJECT, NOT part of a project's topology).
 //
-// The three-window tmux session topology (<project>-N:outer / :inner / :manager) used to be a
-// convention with no factory definition — the human hand-built meta-cc-3 / archguard-4 sessions
-// measured to have ONLY a single bash window and no claude process. This test pins the shipped
-// factory definition + the mechanisms that make cold start build the topology by definition:
+// The two-window tmux session topology (<project>-N:outer / :inner) used to be a convention with
+// no factory definition — the human hand-built meta-cc-3 / archguard-4 sessions measured to have
+// ONLY a single bash window and no claude process. This test pins the shipped factory definition
+// + the mechanisms that make cold start build the topology by definition:
 //
 //   AC1 — the definition ships in plugin/skills/session-topology/SKILL.md (invariant
-//         three_window_shipped=1; invoke `grep -rn ':outer\|:inner\|:manager' plugin/skills/`),
-//         names all three windows (Contract measure topology_windows >= 3), and documents each
-//         layer's launch command / who drives whom / what each layer mounts.
+//         project_topology_has_no_manager=1; invoke `grep -rn ':outer\|:inner' plugin/skills/`),
+//         names both windows (Contract measure topology_windows >= 2), documents each layer's
+//         launch command / who drives whom / what each layer mounts, and states manager is
+//         cross-project (NOT a topology window — :manager is absent from the definition).
 //   AC2 — quay-init --loop lays down the factory (quay-topology.sh) + check (topology-check.sh)
 //         into a target project, byte-identical to the plugin source (config-driven install).
-//   AC3 — topology-check.sh: three windows each with a claude process ⇒ ok:true (exit 0); a
-//         single bash window (the meta-cc-3/archguard-4 failure shape) ⇒ all missing (exit
+//   AC3 — topology-check.sh: two windows each with a claude process ⇒ ok:true (exit 0); a
+//         single bash window (the meta-cc-3/archguard-4 failure shape) ⇒ both missing (exit
 //         non-zero); a topology window that is a bare bash ⇒ no-claude (exit non-zero).
 //   AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE key + the
 //         factory/check references) — SKILL teaches the loop start, this task teaches the session
 //         topology; together they are 装得上.
 //   AC5 — this file is node:test + // @test-group governance.
-// Plus: the factory's --dry-run emits the three-window plan; a real build creates the windows.
+// Plus: the factory's --dry-run emits the two-window plan; a real build creates the windows.
 //
 // All tmux work is on a HERMETIC server on a private socket (TMUX_TMPDIR + explicit -S argv),
 // never the machine's real sessions. Cleanup kills each session it started (kill-session, never
@@ -152,16 +155,19 @@ function runCheck(env, args = []) {
 
 // ── AC1 — the factory definition ships in plugin/skills/ ───────────────────────────────────────────
 
-test("AC1 — the three-window topology definition ships in plugin/skills/ (invariant three_window_shipped=1)", () => {
+test("AC1 — the two-window topology definition ships in plugin/skills/ (invariant project_topology_has_no_manager=1)", () => {
   assert.ok(fs.existsSync(TOPOLOGY_DEF), "plugin/skills/session-topology/SKILL.md must exist — the shipped definition, not quay-local");
   const src = fs.readFileSync(TOPOLOGY_DEF, "utf8");
-  // Contract measure: topology_windows = grep -c 'outer\|inner\|manager' <定义文件> ≥ 3
-  const count = (src.match(/outer|inner|manager/g) || []).length;
-  assert.ok(count >= 3, `definition must name outer/inner/manager at least 3 times (got ${count})`);
-  // Contract invoke: `grep -rn ':outer\|:inner\|:manager' plugin/skills/` must hit the definition
-  for (const w of [":outer", ":inner", ":manager"]) {
+  // Contract measure: topology_windows = grep -c 'outer\|inner' <定义文件> ≥ 2
+  const count = (src.match(/outer|inner/g) || []).length;
+  assert.ok(count >= 2, `definition must name outer/inner at least 2 times (got ${count})`);
+  // Contract invoke: `grep -rn ':outer\|:inner' plugin/skills/` must hit the definition
+  for (const w of [":outer", ":inner"]) {
     assert.ok(src.includes(w), `definition must use the ${w} window-addressing convention`);
   }
+  // Invariant project_topology_has_no_manager: manager is CROSS-PROJECT, not a topology window.
+  assert.ok(/cross-project|跨项目/i.test(src), "the definition must state manager is cross-project, not part of the project topology");
+  assert.ok(!src.includes(":manager"), "the definition must NOT address a :manager topology window (manager is not part of project topology)");
 });
 
 test("AC1 — the definition documents each layer's command, who drives whom, and what each layer mounts", () => {
@@ -169,11 +175,10 @@ test("AC1 — the definition documents each layer's command, who drives whom, an
   // each layer's launch command comes from the checked-in launcher (not a hand-typed one-liner)
   assert.match(src, /quay-launch\.sh/, "each layer's launch command must reference quay-launch.sh (settings-crystallized)");
   assert.match(src, /launch\.settings\.json/, "the launch command source must be the checked-in settings file");
-  // who drives whom: outer drives inner via send-keys; manager observes + relays
+  // who drives whom: outer drives inner via send-keys
   assert.match(src, /send-keys/, "the definition must state that outer drives inner via send-keys");
-  assert.match(src, /observer|observes|relays/i, "the definition must state the manager observes + relays");
-  // what each layer mounts: monitor / cron / re-anchor for outer, observer for manager
-  assert.match(src, /monitor|cron|observer/i, "the definition must state what each layer mounts");
+  // what each layer mounts: monitor / cron for outer, work product for inner
+  assert.match(src, /monitor|cron/i, "the definition must state what each layer mounts");
 });
 
 // ── AC2 — quay-init lays down the topology factory + check ─────────────────────────────────────────
@@ -198,34 +203,34 @@ test("AC2 — quay-init --loop lays down the topology factory + check, byte-iden
 
 // ── AC3 — topology-check verification (positive / negative / mixed controls) ───────────────────────
 
-test("AC3 — positive control: three windows each with a claude process ⇒ ok:true, exit 0", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+test("AC3 — positive control: two windows each with a claude process ⇒ ok:true, exit 0", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const h = newHermetic();
   try {
     h.newSession("topo-pos", "bash");
-    for (const role of ["manager", "outer", "inner"]) {
+    for (const role of ["outer", "inner"]) {
       h.newWindow("topo-pos", role, "bash");
       h.send(`topo-pos:${role}`, "exec -a claude-probe sleep 10000 &");
     }
-    for (const role of ["manager", "outer", "inner"]) {
+    for (const role of ["outer", "inner"]) {
       assert.ok(await waitForClaude(h.env, `topo-pos:${role}`, 5000), `${role} must have a claude child before the check`);
     }
     const r = runCheck(h.env, ["--session", "topo-pos", "--json"]);
-    assert.equal(r.status, 0, `three-window topology in place must exit 0:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 0, `two-window topology in place must exit 0:\n${r.stdout}\n${r.stderr}`);
     const j = JSON.parse(r.stdout);
     assert.equal(j.ok, true, `must report ok:true:\n${r.stdout}`);
-    assert.deepEqual(j.windows, { manager: "ok", outer: "ok", inner: "ok" });
+    assert.deepEqual(j.windows, { outer: "ok", inner: "ok" });
   } finally { h.cleanup(); }
 });
 
-test("AC3 — negative control: a single bash window (no claude) ⇒ all three missing, exit non-zero (the meta-cc-3/archguard-4 failure shape)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("AC3 — negative control: a single bash window (no claude) ⇒ both topology windows missing, exit non-zero (the meta-cc-3/archguard-4 failure shape)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   try {
-    h.newSession("topo-neg", "bash"); // only a bare bash window — no manager/outer/inner
+    h.newSession("topo-neg", "bash"); // only a bare bash window — no outer/inner
     const r = runCheck(h.env, ["--session", "topo-neg", "--json"]);
     assert.notEqual(r.status, 0, "a single-bash-window session must fail the check");
     const j = JSON.parse(r.stdout);
     assert.equal(j.ok, false);
-    assert.deepEqual(j.windows, { manager: "missing", outer: "missing", inner: "missing" });
+    assert.deepEqual(j.windows, { outer: "missing", inner: "missing" });
   } finally { h.cleanup(); }
 });
 
@@ -233,19 +238,15 @@ test("AC3 — mixed: a topology window that is a bare bash (no claude) ⇒ no-cl
   const h = newHermetic();
   try {
     h.newSession("topo-mix", "bash");
-    h.newWindow("topo-mix", "manager", "bash");
-    h.send("topo-mix:manager", "exec -a claude-probe sleep 10000 &");
     h.newWindow("topo-mix", "outer", "bash"); // bare bash, no claude child
     h.newWindow("topo-mix", "inner", "bash");
     h.send("topo-mix:inner", "exec -a claude-probe sleep 10000 &");
-    assert.ok(await waitForClaude(h.env, "topo-mix:manager", 5000), "manager must be alive");
     assert.ok(await waitForClaude(h.env, "topo-mix:inner", 5000), "inner must be alive");
     const r = runCheck(h.env, ["--session", "topo-mix", "--json"]);
     assert.notEqual(r.status, 0, "an incomplete topology must fail the check");
     const j = JSON.parse(r.stdout);
     assert.equal(j.ok, false);
     assert.equal(j.windows.outer, "no-claude", "a bare-bash outer must be reported no-claude (window present, no claude process)");
-    assert.equal(j.windows.manager, "ok");
     assert.equal(j.windows.inner, "ok");
   } finally { h.cleanup(); }
 });
@@ -262,14 +263,15 @@ test("AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY
 
 // ── the factory (quay-topology.sh): dry-run plan + real build ──────────────────────────────────────
 
-test("factory — quay-topology.sh --dry-run emits the three-window plan; a real build creates the windows", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+test("factory — quay-topology.sh --dry-run emits the two-window plan; a real build creates the windows", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
   const h = newHermetic();
   try {
     const dry = spawnSync("bash", [FACTORY, "--session", "topo-factory", "--dry-run"], { encoding: "utf8", env: h.env });
     assert.equal(dry.status, 0, `dry-run must exit 0:\n${dry.stderr}`);
-    for (const role of ["manager", "outer", "inner"]) {
+    for (const role of ["outer", "inner"]) {
       assert.match(dry.stdout, new RegExp(role), `dry-run must plan the ${role} window`);
     }
+    assert.ok(!/manager/.test(dry.stdout), `dry-run must NOT plan a manager window (got:\n${dry.stdout})`);
     // Real build with a harmless launch-command override (no real claude launched — the override
     // keeps the pane shell as the pane_pid so a claude-named child appears, mirroring the real
     // quay-launch.sh launch shape).
@@ -279,11 +281,33 @@ test("factory — quay-topology.sh --dry-run emits the three-window plan; a real
     });
     assert.equal(build.status, 0, `build must exit 0:\n${build.stderr}`);
     const names = h.windowNames("topo-factory");
-    for (const role of ["manager", "outer", "inner"]) {
+    for (const role of ["outer", "inner"]) {
       assert.ok(names.includes(role), `the factory must create the ${role} window (got: ${names.join(", ")})`);
     }
+    assert.ok(!names.includes("manager"), `the factory must NOT create a manager window (got: ${names.join(", ")})`);
     // and the topology-check passes on the factory-built session (each window has a claude child).
     const r = runCheck(h.env, ["--session", "topo-factory", "--json"]);
     assert.equal(r.status, 0, `factory-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
+  } finally { h.cleanup(); }
+});
+
+test("factory — idempotent on an EXISTING session (re-run must not error under set -u, leaves live claude windows alone)", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+  const h = newHermetic();
+  try {
+    const launch = { ...h.env, TOPOLOGY_LAUNCH_CMD: "bash -c 'exec -a claude-probe sleep 10000 & wait'" };
+    // First run creates the session (outer first window + inner).
+    const first = spawnSync("bash", [FACTORY, "--session", "topo-idem"], { encoding: "utf8", env: launch });
+    assert.equal(first.status, 0, `first build must exit 0:\n${first.stderr}`);
+    // Second run against the SAME session — the idempotent path (SESSION_EXISTED=1, FIRST unset).
+    // Regression guard: the loop's `[ "$role" = "$FIRST" ]` must not hit "FIRST: unbound variable".
+    const second = spawnSync("bash", [FACTORY, "--session", "topo-idem"], { encoding: "utf8", env: launch });
+    assert.equal(second.status, 0, `re-run must exit 0 (no FIRST-unbound under set -u):\n${second.stdout}\n${second.stderr}`);
+    assert.match(second.stdout, /in-place: topo-idem:outer/, "re-run must leave the live outer window in place");
+    assert.match(second.stdout, /in-place: topo-idem:inner/, "re-run must leave the live inner window in place");
+    const names = h.windowNames("topo-idem");
+    assert.deepEqual(names.filter((n) => n !== "topo-idem"), ["outer", "inner"], "windows must stay outer+inner (no manager, no duplicates)");
+    // and the check still passes.
+    const r = runCheck(h.env, ["--session", "topo-idem", "--json"]);
+    assert.equal(r.status, 0, `idempotent-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
   } finally { h.cleanup(); }
 });

@@ -58,7 +58,7 @@ start did NOT complete.
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
-| 7 | `TOPOLOGY-IN-PLACE` | The three-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:manager/:outer/:inner` exists AND has a claude process, not a bare bash window). A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + all three windows `ok`) |
+| 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
 
 ## Steps
 
@@ -68,14 +68,16 @@ start did NOT complete.
 - `project = basename "$root"`.
 - `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-liveness.env`, else `${project}-0:0.0`.
 
-### 2. Build and verify the three-window session topology (AC4 — the other half of 装得上)
+### 2. Build and verify the two-window session topology (AC4 — the other half of 装得上)
 
 The session the loop lives in is built **by definition**, never hand-assembled
-(`gap-tmux-session-topology-no-factory-definition`). The definition ships in the
-`quay-session-topology` skill; this step applies it:
+(`gap-tmux-session-topology-no-factory-definition`; two-window correction
+`gap-manager-baked-into-project-topology-factory` — manager is cross-project, not part of the
+project topology). The definition ships in the `quay-session-topology` skill; this step applies
+it:
 
 ```bash
-bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner/manager per definition (idempotent)
+bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner per definition (idempotent; manager is cross-project, not built here)
 bash <root>/plugin/scripts/topology-check.sh --session <session> --json # verify: each window exists AND has a claude process
 ```
 
