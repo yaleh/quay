@@ -4130,3 +4130,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **archguard outer 停摆（AC2 kill 测试的遗留）**：watchdog 重拉了 claude（2284029）但 drive SKIPPED（transcript 竞态），archguard outer 停在欢迎界面。watchdog 11:45 判 archguard alive=1 不再 drive——**「claude 进程活着」≠「循环在工作」**（死循环与健康循环判据全一样，SPEC 已预警）。archguard outer+inner 都是欢迎界面，未驱动。
 - **archguard 是管理者范围**（跨项目），外层不越界驱动。但暴露 watchdog alive 判据不足（应加「循环推进」信号，非仅 claude 存活）——并入 gap-os-anchor-watchdog-drive-retry-and-rc-semantics 任务的考量。
 - inner 2 agent 在飞（crystallize-launch-config + runner-gate restart-plan），正常推进。
+
+### tick 2026-08-05T11:5xZ（外层，AC13 后半条真实场景验证 + 根因确认）
+
+- **AC13 后半条真实场景验证（管理者实测，比人为 kill 更有说服力）**：journalctl 实录——11:34 archguard noop(健康) → 11:40 **relaunch-outer (alive=0 session=1)** → 11:40:09 relaunch OK（新 claude 2284029）→ **RECOVERY-FAILED rc=1**。**拉起成功（AC2 前半✅）、驱动失败（后半❌）**。
+- **驱动失败根因确认（升级通道，非 watchdog 逻辑）**：archguard 的 send-keys-reliable.sh 是 **NBSP 未修版**（grep 0 处 vs quay 4 处，diff 确认缺 nbsp 剥离）——空输入框判非空 → clear 跑满 CLEAR_MAX=50 → fail-loud rc=1。**「交付面长大、目标冻结在安装那一刻」第一次造成真实功能失效**（gap-delivery-surface-grows-but-target-freezes-no-upgrade 硬实例）。
+- **次要缺陷**：watchdog launch-cmd 缺 --prompt-suggestions false（0 命中）——重启的会话显示 ghost 占位符（Try "write a test..."），需对齐 RUNBOOK §2。
+- **处置（采纳管理者建议）**：①同步 quay send-keys-reliable.sh 到 archguard（管理者做，跨项目归它）→ watchdog 下周期重试 = 干净机制验证；②不叠加 systemd-run（避免归因变浑）；③watchdog launch 参数修复建任务。
