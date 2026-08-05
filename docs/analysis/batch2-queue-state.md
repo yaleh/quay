@@ -2935,3 +2935,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **三块消除批次**：a) 本条套件块；b) closure-async 收尾块；c) closure-decomposition AC/证据块。三块
   同链（都触 loop 文档，串行）。
 - 在飞：closure-sync（机制根，编辑 inner loop 停止条件中）；串行链 closure-sync→inner-anchor→drive-text。
+
+### tick 2026-08-05T02:45Z（外层，`unblock`：closure-async 机制上线 + 首个 verification-round 实测）
+
+- **closure-async 机制根落地**（8849004b/5ea2b474/2ce5f1b0/b2fa5c60）：inner 循环删收尾/记账
+  （dispatch --task-start → 执行 → 合并）；外层 tick 加异步收尾例程（1b：探测 taskWorkLanded 非
+  status → 关遥测括号 → 翻 done → 写 .quay/verification-round.jsonl；inner 停止条件读 suiteGreen）。
+  **inner 明确按新契约运行**：「dispatch with --task-start, merge only — no closure」。
+- **首个 verification-round 实测**：探测得 4 条 not-yet-flipped（含 2 假阳 closure-decomposition/
+  drive-text——taskWorkLanded 误判族；漏 roadmap/inner-anchor——以 inner 已合并清单为准）。
+  跑全量套件 → **RED（静态检查）**：我的 4 条新立案 Contract 段违规 7 处（measure/invoke 非反引号
+  命令 + control 折行），突破 ratchet（上限 5）。**红窗分诊**：修复 3 条（f2e0ea8c）+ inner 自修
+  inner-anchor（f6bfafb2）→ new-since-baseline 归 0 → 重跑套件中。
+- **待我收尾的落地未翻集合（inner 确认 4 条）**：roadmap / review-cadence / closure-sync /
+  inner-anchor，AC 全勾；全量 gate + 真实使用 AC 证据属外层收尾例程。
+- **在飞**：drive-text（串行链第 4 个，读 QUAY-OUTER-HANDOFF）；套件重跑中（bcu8ar4dm）。
