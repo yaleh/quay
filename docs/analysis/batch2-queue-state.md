@@ -5245,3 +5245,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **cold-start-gate 派发**（`fm-...-n10coc`，derived-laydown-set green 替代 whole-suite）：git-log 唯一命中是
   外层 filed 提交（非落地），self-touch 已补，resolve 过。池 8/12、disjoint 2（碰撞结构）。
 - 在飞 1/3。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T22:0xZ（外层，inner 派发 cold-start-gate）
+
+- **inner 新派 cold-start-gate**（8eb9e594：derived-laydown-set green gate）——冷启动绿判据改为派生铺设集
+  而非全量套件，正是「套件在本机不可靠」主题的解法方向（21:0xZ 结构性观察的落地）。
+- **套件 green**、闸 GO、load 1.65、pool 8/dispatchable 2、closure 11 done。
