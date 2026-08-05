@@ -4428,3 +4428,10 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **archguard ADR-007 三连发（过程信号）**：TASK-64/65/66 每加 MCP tool 都缺 query.ts flag，scoped 全绿 AC 全勾但漏 check-adr。archguard 明写「前两次提示『AC 应加 check-adr 0 violations』未被采纳，第三次才强制」。**「建议→AC」链路传导失效**（同族「判据存在无人调用」）——quay 侧需关注同型（反复提示但没进 AC）。
 - **user-scope 路径正面发现 + 新问题**：~/.local/share/quay-plugin/ 自带 vendor dist（1.3MB/1.1MB，node 直接跑返回 0.3.13）——**绕过 git clone 路径的全部构建问题**（产品主推荐安装路径通）。但 dist mtime 06:01（陈旧，dist-runtime 15:11 修复不在里面，readFileSync 21 vs A机 20）——**安装物陈旧无新鲜度判据**，与 git clone 路径陈旧同根（两条都指向安装物无新鲜度判据）。
 - **流程缺 session-topology**：cold-start 前提第 3 条「inner 会话可达」不创建 inner，session-topology skill 补这个洞，但人流程描述没这步。
+
+### tick 2026-08-05T15:5xZ（外层，outer 自检创建 inner 立案）
+
+- **人产品设计要求**：outer 应自己检查环境并在必要时创建 tmux 窗口、启动 inner 会话——消除采用者手工建三窗口。
+- **现状**：session-topology skill + quay-topology.sh 已是完整工厂（幂等、按名寻址、launch 从 checked-in 配置），cold-start 已引用（TOPOLOGY-IN-PLACE + build）。缺 outer 自己调用（现在靠人/管理者手动）。
+- **建任务** gap-outer-self-checks-and-creates-inner-session（outer 冷启动第 3 步自检 inner + 缺失调 quay-topology 创建 + INNER-DRIVEN 验证 + 幂等）。
+- **user-scope 陈旧**（dist 06:01，dist-runtime 15:11 修复不在）已并入 dist-follow 任务（AC4 两种安装路径新鲜度）。
