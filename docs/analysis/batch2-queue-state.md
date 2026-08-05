@@ -2747,3 +2747,34 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 >   （AC 里引用了已存在文件 → symbol 解析≥60% → 假 landed）。池计数偏低、机制多推了候选。这是
 >   taskWorkLanded 误判族第三次变体，记入复盘证据。
 > - **内层**：closure 完成，等待下一批派发（preflight 仍 ready 待关或待派）；就绪池 ≥3 可派。
+
+### tick 2026-08-05T02:1xZ（内层，`dispatch`：batch-5 四任务派发）
+
+- **batch-5 派发**（4 任务全 ready，两两触摸 disjoint:true 已核实）：**gap-establish-daily-review-
+  cadence-mechanism（PRIORITY，人裁定复盘节奏为机制）** + gap-roadmap-silently-stale-mark-superseded-
+  or-rewrite-fast-mode + gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss。
+  3 槽位满即派 3；**gap-drive-text-carries-data-not-behavior-outer-inner-handoff 待 review-cadence
+  落地后补派**——两者都 touch `scripts/test.sh`，checkTouchesPair 因全角 `（run_static_checks 接线）`
+  注释未剥离而显示 disjoint:false 阴性，实为同文件重叠，串行化在 fan-in 时避免冲突。
+- **telemetry bracket 已开**（3 条）：review-cadence / roadmap / preflight（runId 见
+  .quay/fast-mode-telemetry.jsonl）。drive-text 补派时同步开 bracket。
+- **review-cadence 执行顺序**（外层裁定，任务体 AC 是待做的活）：①REVIEW-cadence.md 节奏文档 →
+  ②strategic-doc-staleness-check.ts 通用检查器（AC8 回归控制：gap-prepare-milestone-no-size-aware-
+  routing 必须被标）→ ③test.sh run_static_checks 接线 → ④outer-phase-goal 复核记录扩方向 →
+  ⑤AC6 第一次复盘（三输入：路线图过期 / 临场 meta-cc 无对照 / 池机制推荐退休管线任务）。
+- **三在飞**：review-cadence / roadmap / preflight 后台 agent。无停止条件、无阻塞；loop-driver LIVE。
+
+### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
+
+- **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
+- **驱动落地**（02:08Z）：内层按就绪池 4 条派 3 agent（cap 3 满）：review-cadence（PRIORITY，人裁定
+  机制）+ roadmap + preflight；drive-text 因与 review-cadence 同触 scripts/test.sh 留待 fan-in 串行。
+- **内层独立抓到 touches 格式 bug**：它注明「full-width（…）annotations make the scripts/test.sh
+  overlap invisible to checkTouchesPair」——我的 review-cadence 任务原 touches 带（中文注释）在路径
+  token 里，把与 drive-text 的 test.sh 重叠藏起来了；内层补偿（fan-in 串行 review-cadence vs
+  drive-text）。我的 825ff412 修复（移出注释）已提交，后续解析干净。**内层判断可靠，无需外层纠。**
+- **pool-check 仍推荐 prepare-milestone**（已退休管线任务）——AC8 过滤属在飞 review-cadence 任务范围，
+  落地前机制噪音预期内，记录。
+- **就绪池 2**（preflight/roadmap 已派仍计 ready——池检查不知在飞，计数偏高的已知面）。
+- 3 agent 均在飞（57s/54s/50s，token 持续上升）；内层 auto-compact 中（43%）；无停止条件、无
+  BLOCKED；loop-driver LIVE。
