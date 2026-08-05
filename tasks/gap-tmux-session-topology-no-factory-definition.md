@@ -41,13 +41,47 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 三窗口拓扑出厂定义在交付物里（`<project>-N:outer/:inner/:manager`：每层命令、谁驱动谁、
+- [x] AC1: 三窗口拓扑出厂定义在交付物里（`<project>-N:outer/:inner/:manager`：每层命令、谁驱动谁、
       每层挂什么）——plugin/skills 或 plugin/loop 下可读
-- [ ] AC2: quay-init 铺三窗口拓扑（冷启动按定义建，不再手工拼）
-- [ ] AC3: 校验——「三窗口在位」检查（每层有对应 claude 进程，非单 bash 窗口；meta-cc-3/archguard-4
+      落地：`plugin/skills/session-topology/SKILL.md`（new）——三窗口拓扑的出厂定义。顶层表定义
+      每层：launch command（`quay-launch.sh <role>`，从检查进仓库的 `.claude/launch.settings.json`
+      读启动参数）、Drives / Is driven by（outer 经 send-keys 驱动 inner；manager 观察 + 转达）、
+      Mounts（outer: session-liveness 监视器 + 20-min cron + 重锚；manager: 多目标 observer +
+      `.halt` 仲裁；inner: `.workflow-events/` 工作产物）。窗口按名字寻址（session-launch-recipes §3），
+      顺序 manager=0 / outer=1 / inner=2（与 quay-0 实测布局一致）。
+      Contract 证据：`grep -c 'outer\|inner\|manager' plugin/skills/session-topology/SKILL.md` → **12** ≥ 3；
+      `grep -rn ':outer\|:inner\|:manager' plugin/skills/` → 命中 session-topology（3 行）+ cold-start（1 行）。
+- [x] AC2: quay-init 铺三窗口拓扑（冷启动按定义建，不再手工拼）
+      落地：`plugin/scripts/quay-topology.sh`（new，三窗口工厂——按定义建/补/重拉窗口，幂等，`--dry-run`
+      校验）+ `plugin/scripts/topology-check.sh`（new，在位校验）。两者被 cold-start / session-topology
+      skill 引用，quay-init `--loop` 的 DERIVED_SCRIPTS 机制自动铺进目标项目（referenced ⊆ landed，
+      init/SKILL.md 已记录该铺设）。冷启动按定义建三窗口，不再手工拼。
+      实测：temp 项目 `quay-init --loop` 后
+      `plugin/scripts/{quay-topology.sh, topology-check.sh, quay-launch.sh}` 均落地且与 plugin 源**逐字节一致**。
+- [x] AC3: 校验——「三窗口在位」检查（每层有对应 claude 进程，非单 bash 窗口；meta-cc-3/archguard-4
       场景不再出现）
-- [ ] AC4: 与 cold-start 交叉标注（SKILL 教循环启动，本条教会话拓扑，一起才是装得上）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      落地：`plugin/scripts/topology-check.sh` —— 每窗口存在 **且** 有 claude 进程才算 ok；缺窗口报
+      `missing`，窗口在但无 claude 报 `no-claude`。正/负/混合三控制（hermetic tmux，`exec -a claude-probe`
+      造 claude 子进程）：
+      ```
+      $ bash plugin/scripts/topology-check.sh --session quay-0 --json     # 真实三窗口全在
+      {"session": "quay-0", "ok": true, "windows": {"manager": "ok", "outer": "ok", "inner": "ok"}}   exit 0
+      # 负控制：单 bash 窗口（meta-cc-3/archguard-4 失败形态）
+      {"session": "topo-neg", "ok": false, "windows": {"manager": "missing", "outer": "missing", "inner": "missing"}}   exit 1
+      # 混合控制：三窗口但 outer 是裸 bash（无 claude）
+      {"session": "topo-mix", "ok": false, "windows": {"manager": "ok", "outer": "no-claude", "inner": "ok"}}   exit 1
+      ```
+      （quay-0 实测为真会话真 claude；负/混合为 hermetic 私有 socket 上构造，kill-session 清理，无泄漏。）
+- [x] AC4: 与 cold-start 交叉标注（SKILL 教循环启动，本条教会话拓扑，一起才是装得上）
+      落地：`plugin/skills/cold-start/SKILL.md` —— AC8c 六键清单加第 7 键 `TOPOLOGY-IN-PLACE`（
+      `topology-check.sh --json` 报 `ok: true` 才算过；单 bash 窗口必须报 `ok: false`）；新步骤 2「Build
+      and verify the three-window session topology」——`quay-topology.sh` 建 + `topology-check.sh` 验，
+      显式引用 `session-topology` skill（会话拓扑是「装得上」的另一半）。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      落地：`plugin/test/session-topology.test.mjs`（`// @test-group governance`，8 用例）——AC1 定义
+      shipped + measure/invoke、AC2 铺设逐字节、AC3 正/负/混合三控制、AC4 cold-start 交叉标注、工厂
+      dry-run + 实建。
+      `node --test plugin/test/session-topology.test.mjs` → `pass 8 / fail 0 / cancelled 0`。
 
 ## Definition of Done
 
@@ -56,11 +90,22 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
-- tasks/gap-tmux-session-topology-no-factory-definition.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
-- plugin/skills/（或 plugin/loop/）：三窗口拓扑定义（new 或并入 cold-start/init skill）
-- plugin/skills/cold-start/SKILL.md（AC4 交叉标注 + 铺设接线）
-- plugin/test/（AC3 校验断言）
+- tasks/gap-tmux-session-topology-no-factory-definition.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- plugin/skills/session-topology/SKILL.md（new：三窗口拓扑出厂定义）
+- plugin/scripts/quay-topology.sh（new：三窗口工厂）
+- plugin/scripts/topology-check.sh（new：三窗口在位校验）
+- plugin/scripts/capability-catalog.sh（新增 5 条声明：quay-topology / topology-check / quay-launch / tmux-leak-scan / loop-shipping-exclusion-data）
+- plugin/skills/cold-start/SKILL.md（AC4 交叉标注 + 步骤 2 拓扑建/验接线）
+- plugin/skills/init/SKILL.md（铺设说明：拓扑机件随 --loop 落地）
+- plugin/test/session-topology.test.mjs（new：AC3/AC5 断言）
+- plugin/test/cold-start-skill.test.mjs（AC8c 六键 → 七键断言更新）
+- plugin/test/plugin-packaging.test.mjs（bundled skills 11 → 12 断言更新）
+- plugin/.claude-plugin/plugin.json（注册 session-topology skill）
+
+## Test-Files
+
+- plugin/test/session-topology.test.mjs
 
 ## Contract
 

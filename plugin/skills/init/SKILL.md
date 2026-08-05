@@ -63,12 +63,21 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `gate-scripts/*.sh`, `gate-scripts/*.ts` | `scripts/gates/` |
 | `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (byte-identical, no substitution) |
 | `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (byte-identical, no substitution) |
-| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-verified.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, …) | `plugin/scripts/` |
+| `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-verified.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `heavy-op-token.sh`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
 | `scripts/session-liveness.sh` (the ONE observer; `inner-state.sh` is retired and NOT laid down) | `plugin/scripts/` |
 
 ## Loop install: local-state files (self-create) and quay reference docs
+
+**Session topology lay-down (`gap-tmux-session-topology-no-factory-definition`):** the three-window
+session factory + check (`plugin/scripts/quay-topology.sh`, `plugin/scripts/topology-check.sh`) ship
+with `--loop` because the shipped cold-start / session-topology skills reference them (referenced ⊆
+landed). The topology **definition** itself lives in the `quay-session-topology` skill (a plugin
+skill, not laid down); cold start builds the windows by definition via the laid-down factory and
+verifies them via the laid-down check. The per-project session name comes from the same config
+(`orchestration/session-liveness.env` `SESSION_TMUX_SESSION`), so the factory and check address the
+target's real session without a guessed default.
 
 `--loop` does NOT lay down the following. They are referenced by the shipped tick template by
 path, and are resolved as follows:

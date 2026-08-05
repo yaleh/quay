@@ -46,7 +46,7 @@ For a one-shot verification session use `bash <root>/plugin/scripts/quay-launch.
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
 "The same skill command produces the same observable consequences on any model" is only meaningful
-if the consequences are a concrete, checkable list. After this skill completes, **all six** must be
+if the consequences are a concrete, checkable list. After this skill completes, **all seven** must be
 true. Report each as `<KEY>: true|false` plus the one-line evidence; `false` on any key = the cold
 start did NOT complete.
 
@@ -58,6 +58,7 @@ start did NOT complete.
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
+| 7 | `TOPOLOGY-IN-PLACE` | The three-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:manager/:outer/:inner` exists AND has a claude process, not a bare bash window). A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + all three windows `ok`) |
 
 ## Steps
 
@@ -67,7 +68,22 @@ start did NOT complete.
 - `project = basename "$root"`.
 - `session =` value of `SESSION_TMUX_SESSION=` in `<root>/orchestration/session-liveness.env`, else `${project}-0:0.0`.
 
-### 2. Mount the monitor via the Monitor tool (AC5 — events to THIS session)
+### 2. Build and verify the three-window session topology (AC4 — the other half of 装得上)
+
+The session the loop lives in is built **by definition**, never hand-assembled
+(`gap-tmux-session-topology-no-factory-definition`). The definition ships in the
+`quay-session-topology` skill; this step applies it:
+
+```bash
+bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner/manager per definition (idempotent)
+bash <root>/plugin/scripts/topology-check.sh --session <session> --json # verify: each window exists AND has a claude process
+```
+
+Require the check to report `ok: true`. A single-bash-window session (the meta-cc-3 / archguard-4
+failure shape) reports `ok: false` — STOP; a cold start in a hand-built single-bash-window session
+would start the loop in a session that is visibly not the shipped topology.
+
+### 3. Mount the monitor via the Monitor tool (AC5 — events to THIS session)
 
 Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md).
 `inner-state.sh` is retired — it never observed the session (tmux hits 0) and its signature signal
@@ -83,7 +99,7 @@ Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
 `persistent: true` — it must outlive the current turn. The command is the ABSOLUTE laid-down path in
 the target project (it self-locates, so it works from the laid-down copy).
 
-### 3. Verify mount AND delivery — do not assume "looks mounted"
+### 4. Verify mount AND delivery — do not assume "looks mounted"
 
 ```bash
 bash <root>/plugin/scripts/monitor-mount-check.sh --json
@@ -99,7 +115,7 @@ least one delivered event line**
 each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
 `MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
 
-### 4. Re-create the 20-minute cron — THE single loop driver (session-scoped, dies with the session)
+### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped, dies with the session)
 
 **`CronCreate` is the ONE loop-driving mechanism.** Do NOT also start a `/loop` (a fixed-interval
 `/loop` is the same cron mechanism — a second one is a double-trigger) and do NOT use the self-paced
@@ -135,7 +151,7 @@ proceed as if it did. If this is a fresh cold-start after a previous session and
 LIVE from a stale registration (the previous session's cron is dead), clear the stale registry with
 `rm -f <root>/.quay/loop-driver.jsonl` and re-run the pre-check before creating the cron.
 
-### 5. Drive inner to start fast mode — EXPLICIT, never a side effect (AC1 correction)
+### 6. Drive inner to start fast mode — EXPLICIT, never a side effect (AC1 correction)
 
 Delivery criterion = the TARGET session's own transcript jsonl shows the drive text as a REAL user
 message (`transcript-delivery-check.ts`, Fault 5 in
@@ -153,7 +169,7 @@ that transcript shows a real user message containing the drive text (delivery co
 exits non-zero, inner is unreachable / the text was not delivered — **STOP**; do not claim the
 inner start.
 
-### 6. Dispatch the first task
+### 7. Dispatch the first task
 
 If no task is `ready`, promote the top `label:milestone-candidate` task to `ready` (MCP
 `task_write`), or create the first task. The inner fast-mode tick picks it up and dispatches it
@@ -164,10 +180,10 @@ before inner's first tick lands, ensure a `--task-start` record exists:
 node --experimental-strip-types <root>/plugin/scripts/fast-mode-telemetry.ts --task-start --taskId <firstTaskId> --root <root>
 ```
 
-(the runId printed here is what step 7 greps for). Only do this yourself if inner has not already
+(the runId printed here is what step 8 greps for). Only do this yourself if inner has not already
 written one — never report success on a missing record.
 
-### 7. Assert the telemetry record — the "loop is up" proof (telemetry AC)
+### 8. Assert the telemetry record — the "loop is up" proof (telemetry AC)
 
 ```bash
 ls <root>/.workflow-events/*.jsonl
@@ -178,12 +194,12 @@ If no `.jsonl` carries a `--task-start` record, the loop has NOT connected — t
 and tick-log writes, but the loop never recorded its own start. **Report `TELEMETRY-RECORD: false`
 and STOP.** The record must be in the TARGET project (`.workflow-events/`), not somewhere else.
 
-### 8. Report the observable-consequences checklist
+### 9. Report the observable-consequences checklist
 
-Print all six keys (`MONITORS-MOUNTED`, `MONITORS-DELIVERING`, `CRON-CREATED`, `INNER-DRIVEN`,
-`TELEMETRY-RECORD`, `FIRST-TASK`) with `true|false` and the one-line evidence each. This is the
-deliverable — the user's whole cold start is this command, and this list is how they (and a future
-model) know it actually took.
+Print all seven keys (`MONITORS-MOUNTED`, `MONITORS-DELIVERING`, `CRON-CREATED`, `INNER-DRIVEN`,
+`TELEMETRY-RECORD`, `FIRST-TASK`, `TOPOLOGY-IN-PLACE`) with `true|false` and the one-line evidence
+each. This is the deliverable — the user's whole cold start is this command, and this list is how
+they (and a future model) know it actually took.
 
 ## Non-goals
 
