@@ -284,8 +284,15 @@ export function wordMatch(message, token) {
  *  share "cold-start" / "red-window"; a sibling's merge that merely MENTIONS the shared word (e.g.
  *  gap-full-suite-belongs-to-outer's merge describing the red-window hold) must not judge the
  *  sibling landed (AC4 negative control). Computed from task FILE NAMES only (id = filename). */
+// Per-process memo (gap-ready-pool-check-times-out-after-git-history-signal): the pool check calls
+// gitHistoryLanded per ready task, and each call recomputes ambiguousShortPrefixes over the whole
+// task store. The store does not mutate within one process (ready-pool-check is read-only), so
+// caching by tasksDir is safe and cuts ~N readdirs+prefix-scans down to one.
+const _ambiguousShortPrefixCache = new Map(); // tasksDir → Set<prefix>
 function ambiguousShortPrefixes(repoRoot, tasksDir) {
   const dir = tasksDir || path.join(repoRoot, "tasks");
+  const cached = _ambiguousShortPrefixCache.get(dir);
+  if (cached) return cached;
   let files;
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return new Set(); }
   const counts = new Map();
@@ -304,6 +311,7 @@ function ambiguousShortPrefixes(repoRoot, tasksDir) {
   }
   const ambiguous = new Set();
   for (const [p, c] of counts) if (c > 1) ambiguous.add(p);
+  _ambiguousShortPrefixCache.set(dir, ambiguous);
   return ambiguous;
 }
 
@@ -348,7 +356,15 @@ export function taskIdFromTouches(touchesSection) {
 /** The THIRD landed signal: a master-reachable commit whose message references the task AND that
  *  modified one of the task's SPECIFIC code-root Touches paths (non-glob, non-(new)/(delete),
  *  non-bookkeeping). Skips (does not crash on) Touches paths that do not exist — `git log -- <p>`
- *  on a never-existing path is simply empty. Returns false on any git failure (fail-closed). */
+ *  on a never-existing path is simply empty. Returns false on any git failure (fail-closed).
+ *
+ *  Two execution paths, SAME judgment:
+ *   - DEFAULT (no opts.gitIndex): one `git log master --full-history -- <paths>` per call — the
+ *     original per-task path. Kept for single-task `--check` invocations (Contract invoke), where
+ *     the batched index would be strictly more work than one path-limited log.
+ *   - BATCHED (opts.gitIndex): ready-pool-check passes a prebuilt buildGitHistoryIndex() so the
+ *     pool scan (30-50 tasks) makes ONE git pass and matches in memory —
+ *     gap-ready-pool-check-times-out-after-git-history-signal (>150s -> <10s). */
 export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
   const touchesSection = extractSection(rawTaskText, "Touches");
   if (!touchesSection) return false;
@@ -363,6 +379,24 @@ export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
   // Ambiguous short prefixes (shared by sibling tasks) — computed once per call so a shared kernel
   // ("cold-start", "red-window") can never fire the signal on its own.
   const ambiguous = ambiguousShortPrefixes(repoRoot, opts.tasksDir);
+  // BATCHED path: match the task's paths against a prebuilt path→commits index in memory.
+  if (opts.gitIndex) {
+    const { commits, byPath } = opts.gitIndex;
+    const seen = new Set();
+    for (const p of paths) {
+      const hashes = byPath.get(p);
+      if (!hashes) continue;
+      for (const hash of hashes) {
+        if (seen.has(hash)) continue;
+        seen.add(hash);
+        const rec = commits.get(hash);
+        if (!rec) continue;
+        const isMerge = rec.parents.split(/\s+/).filter(Boolean).length >= 2;
+        if (messageReferencesTask(rec.subject, taskId, { isMerge, ambiguousShortPrefixes: ambiguous })) return true;
+      }
+    }
+    return false;
+  }
   // --full-history: git's default path-history SIMPLIFICATION elides merge commits whose file
   // change is identical to one parent's (so the fan-in's "merge <task>: …" commit would never
   // appear — web-board's 0950b0b6 was hidden until --full-history). The signal needs those merges
@@ -378,6 +412,65 @@ export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
     if (messageReferencesTask(msg, taskId, { isMerge, ambiguousShortPrefixes: ambiguous })) return true;
   }
   return false;
+}
+
+/** BATCHED git-history source (gap-ready-pool-check-times-out-after-git-history-signal): ONE
+ *  `git log` pass over ALL of master, returning every commit with the paths it touched. The pool
+ *  check was aggregating ~30-50 per-task `git log master --full-history -- <paths>` calls (each
+ *  O(history)) into >150s; this builds the same evidence in O(1) git calls, and gitHistoryLanded
+ *  matches in memory via byPath.
+ *
+ *  `-m` makes each merge emit one record per parent diff; the per-hash path sets are UNIONED so a
+ *  merge's touched set = exactly the set of paths for which path-limited `--full-history -- <p>`
+ *  would include it. A merge is "touched" by p when its result differs from ANY parent — the union
+ *  of the per-parent `-m` diffs — verified empirically (web-board's fan-in merge differs from
+ *  parent 1 only, and the per-task path-limited log DOES return it).
+ *
+ *  Fail-closed: any git failure returns an empty index (gitHistoryLanded then judges false, the
+ *  same fail-closed result the per-task `git log` failure produced). */
+export function buildGitHistoryIndex(repoRoot, opts = {}) {
+  // Deliberately NOT via gitTry: the full-history `--name-only` dump can exceed execFileSync's
+  // default maxBuffer (measured 1.47MB for this repo at ~3.4k commits → ENOBUFS), so a dedicated
+  // call raises the cap. Any failure still fails-closed to an empty index.
+  let raw;
+  try {
+    raw = execFileSync("git", [
+      "log", "master", "--full-history", "-m", "--name-only", "--no-renames",
+      "--format=%H%x00%P%x00%s",
+    ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    const commits = new Map();
+    const byPath = new Map();
+    return { commits, byPath };
+  }
+  const commits = new Map(); // hash → { hash, parents, subject, paths: Set<path> }
+  const byPath = new Map();  // path → Set<hash>
+  if (!raw) return { commits, byPath };
+  let cur = null;
+  for (const line of raw.split("\n")) {
+    // A line containing NUL is a record header `<hash>\0<parents>\0<subject>`; all following
+    // non-empty lines until the next header are the paths THAT record touched. `-m` repeats the
+    // header per non-empty parent diff, so the per-hash path set is the UNION of those blocks.
+    if (line.includes("\0")) {
+      const parts = line.split("\0");
+      if (parts.length < 3) { cur = null; continue; }
+      let rec = commits.get(parts[0]);
+      if (!rec) {
+        rec = { hash: parts[0], parents: parts[1], subject: parts[2], paths: new Set() };
+        commits.set(parts[0], rec);
+      }
+      cur = rec;
+      continue;
+    }
+    const p = line.trim();
+    if (p === "" || !cur) continue;
+    if (cur.paths.has(p)) continue;
+    cur.paths.add(p);
+    let set = byPath.get(p);
+    if (!set) { set = new Set(); byPath.set(p, set); }
+    set.add(cur.hash);
+  }
+  return { commits, byPath };
 }
 
 // Reusable "the task's declared work has landed on master" predicate — exported for reuse by
