@@ -6,7 +6,7 @@ title: "manager baked into project topology factory (hereditary error — manage
   factory gets a manager window contradicting product-outline 'manager
   network-level not per-project'; fix: ROLES='outer inner', two-window, manager
   removed (human starts cross-project)"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -97,10 +97,10 @@ extra: {}
 
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] quay-topology.sh 实测建出两窗口（outer+inner），无 manager 窗口（实跑输出贴任务体）
-- [ ] topology-check.sh 对两窗口项目报 ok（实跑输出贴任务体；负控制：当前会报不合规）
-- [ ] SKILL.md / 脚本注释无 three-window 残留（grep 证明）
+- [x] AC1–AC4 全部勾上
+- [x] quay-topology.sh 实测建出两窗口（outer+inner），无 manager 窗口（实跑输出贴任务体）
+- [x] topology-check.sh 对两窗口项目报 ok（实跑输出贴任务体；负控制：当前会报不合规）
+- [x] SKILL.md / 脚本注释无 three-window 残留（grep 证明）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 验证记录（DoD 未勾——全量套件按外层指令不跑，本处为 scoped 实测）：
