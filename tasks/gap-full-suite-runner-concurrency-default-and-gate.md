@@ -4,7 +4,7 @@ title: full-suite-runner laneCount default hardcoded 8 (not nproc-derived) +
   --test-concurrency splice is append-not-replace + resource-gate never called —
   ABORT#5 (=8 =8, PSI 88, WAIT-start) same crash class as ABORT#1/3/4; fix all
   three in ONE change
-status: needs-human
+status: ready
 labels:
   - gap
   - defect
@@ -13,24 +13,14 @@ children: []
 extra: {}
 ---
 
-> **内层 fan-in 裁定（2026-08-05 11:53Z）：回退 + needs-human。** 任务实现已回退（revert `09e4fcab`，
-> 撤销 merge `16068661`），因为 scoped 验证的 **AC5「signal-killed run writes red+aborted」测试
-> 间歇性失败（实测 ~50-70% 失败率，隔离 10x 复测）**——fan-in 选中集非绿，按契约不落地。
->
-> **证据**：runner 核心修复（AC1-AC4：nproc 派生默认、replace splice、resource-gate）实测可用
-> （直接跑 5/5 green、laneCount=1、单 concurrency flag）。但 **AC5 的 SIGTERM→red+aborted 有真实竞态**：
-> 测试起 fake suite 后发 SIGTERM，handler 有时不触发，runner 退出后 state 仍为 `running`（未写
-> aborted）。已试两种修复均未消除：
-> ① 移除 `process.removeListener("SIGTERM/SIGINT")`（消除监听器移除后的无处理窗口）——把失败形态
->    从「state=running」改为「state=green」（晚期信号被 runDone guard 吞掉）；
-> ② fake suite `sleep 2`→`sleep 30`（确保信号落在运行中）——失败率降但未消除（10x 仍 ~30% 失败，
->    诊断 state-after-exit=「running」）。
-> **根因**：node 测试 harness 下 SIGTERM 到子进程 runner 的投递间歇性失败（与 runner 逻辑无关的
-> 事件循环/信号时序竞态），需任务作者聚焦修复。
->
-> **保留**：agent 分支 `task/gap-full-suite-runner-concurrency-default-and-gate`（commit `5ceb039d`）
-> 未删——修复 AC5 后可 re-dispatch reland。外层已知道该 AC5 竞态（其 11:4xZ tick 提及 flake fix）。
-> **ABORT #5 仍未机制修复**（suite 验证 gate 仍受影响），优先级不降。
+> **内层 fan-in reland（2026-08-05 12:2xZ）：AC5 竞态已修，任务 reland 完成。** 外层裁定采纳
+> （SIGTERM 竞态是真问题）。两处修复（commit `f35459c7`）：
+> ① **runner 保留 SIGTERM/SIGINT 监听器**（`runDone` guard 已让晚期信号 no-op——关闭监听器移除后
+>    的无处理窗口，该窗口曾让 runner 以 state=running 死亡）；
+> ② **AC5 测试改为由 fake suite 内部向 runner 发 SIGTERM**（沿祖先链找到最近 node 进程=runner，
+>    在 handler 注册后信号必达）——消除外部 `child.kill` 在 node --test harness 下的投递竞态。
+> **实测**：AC5 隔离 10/10 稳定（此前 ~30-70% 失败）；完整 scoped `--for-task --allow-thin`
+> **29/29 EXIT=0**。merge 已 reland。任务恢复 ready，closure（翻 done）归外层异步。
 **type:** execution
 
 ## Proposal
