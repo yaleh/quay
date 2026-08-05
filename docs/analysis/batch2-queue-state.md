@@ -3236,3 +3236,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   触发，等驱动/等轮）。**closure-sync AC5 保持未满足**；本轮不强行派发（保护 round gate 免负载抖动），
   optimistic 行为的实跑证明留给自然窗口（下批 ready 恰逢 running 态时）。
 - 池 4（deficit 0）；无停止条件、无 BLOCKED；loop-driver LIVE。
+
+### tick 2026-08-05T04:35Z（外层，`unblock`：管理者介入 → RED 处置启动 + 执行者缺口立案）
+
+- **管理者介入（非例行）**：ROUND 2 套件转红无人处置——state=red（早期 RED 生效 = (a) 块设计行为）但
+  RED 处置一步没执行（无 stop-dispatch 信号/无分诊/无二分），两层空闲 + 两条 SESSION-OVERDUE（30 分钟
+  无心跳）。我最后提交停在 04:23 报告 running。
+- **RED 处置已启动**：确认 stop-dispatch 信号（state=red 在位，inner 0 agent 无在派）；停红跑
+  （bs84jg1l3）；bisect 归因——**3 失败族**：①capability-catalog select-static-checks-for-touches.ts
+  （scoped③）未声明（91 行 1 条 undeclared，AC1c 门同款复发）；②AC4 laid-down tick docs byte-identity
+  （本批改两份 loop 文档未同步）；③AC5 test.sh derived default（scoped③ 改 test.sh 后 exec 行）。已驱动
+  inner bisect + 修三处 + scoped 自测。
+- **结构性缺口已立案 `gap-red-window-has-no-automatic-executor`**（ready）：红窗两分支无自动触发者
+  （RED 处置等 cron 窗口 20 分钟 / 乐观派发无执行者）——**存在≠生效**活例；加 state 变化即触发的执行者
+  （runner/监视器通知外层 + RUNNING 驱动 inner 照常派发），触发者非新调度。
+- 待 inner 修复 → 我重启全量套件做 ROUND 2 gate。
