@@ -2764,6 +2764,21 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   ⑤AC6 第一次复盘（三输入：路线图过期 / 临场 meta-cc 无对照 / 池机制推荐退休管线任务）。
 - **三在飞**：review-cadence / roadmap / preflight 后台 agent。无停止条件、无阻塞；loop-driver LIVE。
 
+### tick 2026-08-05T02:2xZ（内层，`fan-in`：batch-5 两任务落地）
+
+- **preflight 已关**（`done`，accepted-risk 决议：0 真 <2-identifier 案例、镜像 byte-identical、
+  83/83 绿；task-check 3/3 AC + 1/1 DoD 全勾）。merge `16576259` → telemetry --task-end 同步。
+- **roadmap 已落地**（`ready` 保留，DoD 全量套件框待 verification-round 勾）：merge `51d62823`
+  （rebase 后），telemetry --task-end 同步。路线图标 SUPERSEDED by ADR-022 + 逐机制注释表 +
+  fast-mode 指针 + 战略问题提取（Phase 3 跨项目可迁移仍有效）；FINDING 文档引用未动（untracked，
+  与 review-cadence 共享）；新增 governance 测试 `plugin/test/roadmap-superseded-check.test.mjs`
+  （node:test，AC1/AC3/AC4 机械强制 + 负控制，2/2 绿）。stale_refs=26 全注释。
+- **外层新裁定**（master `0d38df51`）：立案 `gap-closure-sync-is-the-true-batch-boundary-move-
+  bookkeeping-to-outer-async`（ready）——closure/bookkeeping 移外层 async（20-min-cron 经
+  taskWorkLanded 关批），inner 只 execute+dispatch+merge。机制未实现前，本批按在飞纪律关。
+- **在飞**：review-cadence（PRIORITY，唯一）。槽位空 2 但 drive-text 门控等 review-cadence 落地
+  （共享 scripts/test.sh）——暂不补派其他池任务（外层批范围=这 4 条）。无停止条件、无阻塞。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
