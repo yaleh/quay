@@ -3528,3 +3528,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **管理者 loop 缺陷自陈（记录）**：manager cron 每轮问「推进哪一格」，第一轮答出答案却只写报告没行动
   ——loop 只有诊断步骤没有行动步骤 = AC9 主动性缺口换形态复发（已记 manager-phase-goal.md）。归属
   manager-layer umbrella（manager 循环需行动步骤，不只诊断）。
+
+> **06:09Z 增补（ROUND 3 gate WAIT → GO）**：重启 gate 时资源闸 **WAIT**（CPU avg10 80 ≥ 40）——后台的
+> runner-grouping isolated 测试（spawn 全量对比）在吃 CPU。**停掉它**（bo2hxt15y）→ CPU 回落 6.48 →
+> 闸 GO → 重跑（bsgro72hp）。资源闸正确阻止了 CPU 饥饿下跑套件（gap-no-resource-awareness 机制生效）；
+> runner-grouping 的 flags 测试结果待套件覆盖。
