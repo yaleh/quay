@@ -4124,3 +4124,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **两个缺陷暴露**：①drive SKIPPED（transcript 时序竞态——新 claude jsonl 未就绪，冷启动文本没发）；②rc=1 RECOVERY-FAILED（drive 临时失败使 service FAILURE）。已建任务 gap-os-anchor-watchdog-drive-retry-and-rc-semantics。
 - **archguard outer 现状**：新 claude 停在欢迎界面（未驱动）。watchdog 下 tick 会重试 drive。
 - watchdog --decide seam 验证通过（决策逻辑正确）。
+
+### tick 2026-08-05T11:4xZ（外层，archguard 停摆发现）
+
+- **archguard outer 停摆（AC2 kill 测试的遗留）**：watchdog 重拉了 claude（2284029）但 drive SKIPPED（transcript 竞态），archguard outer 停在欢迎界面。watchdog 11:45 判 archguard alive=1 不再 drive——**「claude 进程活着」≠「循环在工作」**（死循环与健康循环判据全一样，SPEC 已预警）。archguard outer+inner 都是欢迎界面，未驱动。
+- **archguard 是管理者范围**（跨项目），外层不越界驱动。但暴露 watchdog alive 判据不足（应加「循环推进」信号，非仅 claude 存活）——并入 gap-os-anchor-watchdog-drive-retry-and-rc-semantics 任务的考量。
+- inner 2 agent 在飞（crystallize-launch-config + runner-gate restart-plan），正常推进。
