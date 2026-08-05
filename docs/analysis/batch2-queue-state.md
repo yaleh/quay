@@ -3580,3 +3580,11 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > exactly one driver（6.7s，疑 red-window-executor 的 suite-state-trigger 接线引入第二个 driver 类引用）
 > + **1 noise-gate 已知抖动**（isolated 过）。已驱动 inner bisect 修 AC1（doc 只声明一个 cron driver，
 > suite-state-trigger 是 Monitor 非 driver）。
+
+> **06:35Z 增补（红窗规则条件化细化 + 第四实例框架更正）**：管理者更正自己（「爆炸半径 vs 白等」是粒度
+> 太粗的假性冲突，两者本不必权衡——出厂文档已写 running/green 照常派发，inner 从不因套件跑而等，停是
+> 因为 state=red 的一刀切规则）。**已裁定接受细化** `gap-red-window-dispatch-stop-should-be-shared-gate-
+> conditional`（ready）：RED ⇒ 一律暂缓 fan-in（真保护）；RED ⇒ 派发只在失败落共享闸门（run_static_
+> checks）时停，具体测试文件无关新任务 touches 时继续；判定信息现成（早期 RED 失败行）。本轮活证据：
+> 早期 RED + inner 30 分钟无派发 + 池 16/disjoint 9 健康 = 细化前白等样本。第四实例框架已更正（量测仍
+> 有效，但不再当「权衡两侧」）。
