@@ -4901,3 +4901,20 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **在飞 1/3**（仅 defect-fix，已 1 提交）。**第六次实证强化 defect-fix 关键性**——land 后池自动排除
   already-landed，重派 class 终止。第 3 槽保持 hold。
 - 停止条件无、套件 green、Monitor 三判据绿、无 block。
+
+### tick 2026-08-05T19:2xZ（内层，defect-fix fan-in + 池清理验证 — 里程碑）
+
+- **defect-fix fan-in 完成（机制落地）**：`taskWorkLanded` 加 **第三条 landed 信号 `gitHistoryLanded`**——
+  master 可达提交（message 引用任务 kernel）修改了任务 specific code-root Touches 路径 ⇒ landed
+  （`--full-history` 防 merge commit 被 path-simplification 隐藏）。碰撞感知短 kernel 匹配（≥2 段前缀、
+  merge-only、store 内唯一）——修了 2 个真假阳（gap-cold-start-gate / gap-red-window-dispatch-stop，均恢复可派发）。
+  负控制 4 条（无关 merge 不触发 / 共享短 kernel 不触发 / glob+(new) 不参与 / overshoot 不重演）。scoped
+  65/65 绿。worktree/branch 已清。
+- **池清理验证（AC3 实证）**：ready-pool-check 现 **pool 12/12、disjoint 3（≥cap 判据过）**——
+  web-board / measure-claude-p / ready-pool-floor / upgrade-channel / ruling-required / session-idle /
+  stale-check / axis-generator / send-keys-nbsp / dist-runtime / manager-baked / vendor-runtime 等
+  **全部 already-landed 任务正确排除（not-yet-flipped）**。**重派 class 终止**——本会话 6 起 already-landed
+  重派（web-board/measure-claude-p/send-keys-nbsp/ready-pool-floor/axis-generator/session-idle）不再可能。
+- **closure 积压仍待外层**：~20 个 not-yet-flipped 任务（AC 全勾、工作落地）等外层跑 acceptance gate
+  （实跑证据 + 全量绿 + 翻 done）。池 12/12 现含真未派发任务，第 3 槽可恢复。
+- 在飞 0/3。停止条件无、套件 green、Monitor 三判据绿、无 block。
