@@ -4259,3 +4259,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **副产品更正**：B 机干净 clone 跑通 ready-pool-check（pool 22/floor 12/criterion_met true）+ resource-gate（GO）⇒ **quay 仓库自身 committed 态自洽**。archguard 12:36 报的 broken committed 态属 quay-init 铺设形态（不 commit），**非 quay 仓库问题**。gap-quay-init-never-commits 任务应收紧表述。
 - **AC12b 阻塞**：B 机是唯一干净测量场，但 fresh-session 分支命中 0（welcome 屏缺陷原封不动），cold-start INNER-DRIVEN 用它驱动内层 ⇒ 现在测第一个数字必是「卡在 INNER-DRIVEN」。**welcome-屏修复排最前**（产品主判据唯一硬阻塞）。
 - **同步走 git 不走手工 cp**：B 机从 A 机裸仓库 git pull（升级通道正确形态，对照 archguard 手工 cp 污染）。
+
+### tick 2026-08-05T13:4xZ（外层，AC12b 第二硬阻塞立案）
+
+- **vendor 运行时不随 git clone（管理者 B 机实测 + 外层核实）**：.gitignore dist/ 排除 plugin/vendor/quay/dist，git ls-files vendor/ = 0，B 机 quay-init 表面全绿但 WARN（vendor 缺失），mcp_entry 指向不存在文件。**比 welcome-屏更根本**（挡整个 Provider ABI/MCP，AC12b 第二硬阻塞）。verify 检查铺设集不检查被引用运行时——「判据绕过真正重要的东西」族。
+- **处置**：fail-closed（vendor 缺失报错非 WARN）+ 形态取舍（②安装自动构建 或 ①negate 入库，外层倾向②）。建任务 gap-vendor-runtime-not-in-git-clone-broken-mcp-entry。
+- **AC12b 两个硬阻塞**：welcome-屏（已 promote ready）+ vendor 运行时（本任务）。修好 + git 同步 B 机后开测。

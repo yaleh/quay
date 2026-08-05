@@ -5,7 +5,7 @@ title: "send-keys-reliable pane-empty check fails on welcome-screen ghost text
   fail-loud) — the TRUE root of watchdog 11:40 drive failure; NBSP fix (11:46
   sync) doesn't cover it; fix: fresh-session (no transcript/zero user msgs)
   skips clear-loop, sends directly (archguard manual seq proven)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -30,6 +30,10 @@ ghost 文本」。11:46 同步 NBSP 修复版过去**没有修好这个**。
 **修法（archguard 手工序列已验证成功）**：判空不应试图「清空」ghost 占位符（清不掉），而应把
 **fresh session（transcript 不存在或零条 user 消息）当成已知分支【跳过清屏直接发】**。
 
+**优先级（管理者 13:3xZ 裁定）**：这是 **AC12b（产品主判据，两层无人干预区间）的唯一硬阻塞**——
+B 机（orangevps）是唯一干净测量场，但 fresh-session 分支命中 0，welcome 屏缺陷原封不动，cold-start
+INNER-DRIVEN 用它驱动内层。**排在任何其它任务之前**。
+
 **AC11 一族**：管理者 11:46 说「已同步并校验一致」是真的，但隐含断言「问题已解决」没验证。
 
 ### 选定机制
@@ -45,6 +49,13 @@ ghost 文本」。11:46 同步 NBSP 修复版过去**没有修好这个**。
 - [ ] AC3: 与 gap-os-anchor-watchdog-drive-retry-and-rc-semantics 交叉标注（watchdog 驱动依赖此修复）
 - [ ] AC4: 实测：kill archguard outer → watchdog relaunch → drive 成功（transcript 出现 user 消息）——AC2 完整闭环
 
+## Definition of Done
+
+- [ ] AC1–AC4 全部勾上
+- [ ] fresh welcome 屏实测：send-keys-reliable 跳过清屏直接发送，rc=0，transcript 出现驱动文本的 user 消息（AC1/AC4 实跑输出贴任务体）
+- [ ] 正常空框（`❯`+NBSP）仍走 NBSP 清屏路径，rc=0（AC2 不回归，实跑输出贴任务体）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
 ## Touches
 
 - plugin/scripts/send-keys-reliable.sh（fresh-session 分支）
@@ -55,6 +66,7 @@ ghost 文本」。11:46 同步 NBSP 修复版过去**没有修好这个**。
 
 measure   fresh_welcome_drive = `bash plugin/scripts/send-keys-reliable.sh <fresh-pane> <text> 2>&1 | grep -c 'fail loud\|CLEAR_MAX'` stdout 数字段
 band      fresh_welcome_drive = 0（fresh 屏不再 fail loud）
+invariant fresh_session_skips_clear = 1（transcript 不存在/零 user 消息 ⇒ 跳过清屏直接发）
 invoke    `grep -n 'fresh\|transcript\|skip\|CLEAR_MAX' plugin/scripts/send-keys-reliable.sh`
 control   fresh welcome 屏（ghost 文本）⇒ rc=0 直接发（AC1）；空框 ⇒ NBSP 路径（AC2）
 resume    fresh-session 分支与测试分步提交，任一步完成即写盘
