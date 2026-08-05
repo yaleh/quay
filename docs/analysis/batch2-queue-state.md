@@ -2677,6 +2677,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   关 5 任务）。inProgress 0；无停止条件；监视器 mounted:true。
 - 内层上下文已 1h8m（auto-compact 3%）——长回合，套件后关批。
 
+### tick 2026-08-05T01:45Z（外层，`correct-self`：人的「外层有在做整体分析吗」→ 诚实答案：没有）
+
+- **调查发现**（`FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`，人问引出）：①tick 7 步
+  全机械执行，outer-phase-goal 是角色纪律非架构方向——近 6 小时 6 条 gap-* 新建、设计文档改动 0；
+  ②唯一路线图 `quay-harness-crystallization-roadmap.md`（07-31）整篇建于 ADR-022（08-03）已废除的
+  经典 milestone 管线，Phase 0–4 指向已删除代码，**沉默过期比没有更危险**；Phase 3 的战略问题
+  （跨项目可迁移 vs 过拟合 quay）仍成立，meta-cc 冷启动在回答它但纯临场无对照。
+- **外层诚实认领**：没有在做整体分析/规划/设计，证据清晰（0 设计改动 + 路线图过期无人核对）。
+- **已立案 2 条战略任务**（排高优先，不阻塞当前批）：
+  - `gap-roadmap-silently-stale-mark-superseded-or-rewrite-fast-mode`——标记 superseded + 逐 Phase
+    点名退役机制 + 提取仍有效问题；
+  - `gap-fast-mode-cross-project-portability-strategic-question`——钉住「跨项目可迁移 vs 过拟合」
+    问题 + 判据 + meta-cc 冷启动为证据容器。
+- **复盘节奏（建议，交给人裁定）**：是否在 tick 循环外建整体复盘节奏（多久/谁做/看什么）——方向性
+  判断，非 gap-* 缺陷。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：

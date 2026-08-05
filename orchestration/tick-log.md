@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 01:45Z | `correct`（correct-self：外层承认没做整体分析——0 设计改动 + 路线图静默过期） | 读调查全文；立案 2 条战略任务（路线图 superseded + 跨项目可迁移问题钉住）；复盘节奏建议交人裁定 | 内层：batch-4 全量运行中 | ①调查文档读核（两层发现）；②2 条战略任务立案；③`--detect-stop` 无命中 |
 | 2026-08-05 01:42Z | `no-action` | 核实 ac3b 合并完成（AC1-AC7 全勾含改名负控制，AC3b 证明完整——管理者 meta-cc 解阻塞）；batch-4 全量运行中；内层上下文 1h8m | 内层：等 batch-4 全量，绿后关 5 任务 | ①ac3b 任务 AC/DoD 读核（改名负控全勾）；②git log 核合并；③inProgress 0 + detect-stop 无命中 |
 | 2026-08-05 01:22Z | `no-action` | 核实 batch-4 全关（eighty-two 合并）+ ac3b 已派发且 AC1 刷新落地（installed quay.js mtime 08-03→08-05 01:21，管理者 meta-cc 阻塞解除）；改名负控待安全窗口 | 内层：ac3b agent 完成刷新，备忘「等完成通知后关批 4」 | ①stat 核 installed mtime 变化（刷新实证）；②git log 核 batch-4 全关 + ac3b 派发；③inProgress 1 + detect-stop 无命中 |
 | 2026-08-05 01:07Z | `no-action` | 管理者优先意见裁定成立（gap-ac3b=meta-cc 安装唯一硬阻塞）；晋级 ready + 修 touches 格式（5/5 MISSING→1/5 可派发）；驱动内层派发（AC1 刷新先行，改名负控等安全窗口） | 内层：eighty-two agent 在飞，ac3b 派发指令排队 | ①resolve 修前/修后对照；②ac3b 晋级 + 驱动；③`--detect-stop` 无命中 |
@@ -278,9 +279,9 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 |---|---|---|
 | no-action | 110 | 36% |
 | unblock | 37 | 17% |
-| correct | 92 | 43% |
+| correct | 93 | 43% |
 | escalate | 7 | 3% |
-| **合计** | **246** | — |
+| **合计** | **247** | — |
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`
