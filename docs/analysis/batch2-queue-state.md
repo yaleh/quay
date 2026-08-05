@@ -5368,3 +5368,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   重评估，非下个 tick）。AC1/2/4/5/6 勾；**AC3（活循环重测 <5min）正确留外层**（运行时验证，scoped 不可得）。
   scoped 12/12。worktree/branch 已清。在飞 0/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T23:0xZ 补充（外层，B 机三问裁定——③ 单点风险立即授权）
+
+- **③ 同步零机制（此刻实际单点风险）**：B 的 origin = 本地裸仓库（停在 8371d741，从未 push）；B 的 8 个
+  提交（含新 SKILL.md + 新测试文件）只在 B 工作树——裸仓库/GitHub/A 机都没有。磁盘挂 = 工作直接消失。
+  **裁定：授权 B 立即定期 push 到裸仓库（一行 cron 备份）**——不等待认领机制设计。跨主机 git 白名单内。
+  管理者在 B 执行。push 会提前暴露 fast-mode-loop-tick.md 冲突（② 的真实后果），届时按合并处理。
+- **② 任务板分叉 + 认领零机制**：gap-productize-manager-layer A 机 todo / B 机已 done（新 SKILL.md）；
+  dispatch-tick-boundary A 机完成 B 不知道；同小时内 06e4106f（A）与 b67c49f3（B）都改 fast-mode-loop-
+  tick.md ~45 行（将来硬冲突）。**属 two-machine-collaboration（Q2）范围**——认领机制是治本，冲突在
+  push 合并时处理。
+- **① watchdog B 机每 5min 跑**：lease-model 裁定（default-off + 顶端 + quay 自用）经 ③ 同步后达 B，
+  届时配置。
