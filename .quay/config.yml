@@ -131,6 +131,17 @@ loop:
   # `config-wiring-check.ts --driver bespoke`. It is real and consumed by the generic
   # `plugin/skills/loop-driver/SKILL.md` (used by sibling projects), just not by this workspace yet.
   concurrency: 4
+  # Adaptive concurrency bands (gap-adaptive-concurrency-cap-tied-to-resource-gate AC4): the cap is
+  # NOT a fixed number — cap-from-gate.sh reads cpu `some avg300` at the dispatch decision point
+  # (fast-mode-loop-tick.md step 4, no new polling) and picks a band. The BAND NUMBERS are STRATEGY
+  # (per-project, this block); the MECHANISM (avg300 read + hysteresis + config lookup) is shared
+  # quay infrastructure downstream projects adopt via the upgrade channel. Bands: GO when avg300 < 40
+  # (default cap 5), WAIT 40..70 (default cap 2), EXTREME >= 70 (default cap 1). Override here, e.g.
+  # archguard GO=4/WAIT=2/extreme=1 — same mechanism, different numbers.
+  concurrency_bands:
+    go: 5
+    wait: 2
+    extreme_wait: 1
   # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
   # the DISK root for per-task git worktrees. /tmp is tmpfs — every MB is memory — and the
   # 2026-08-04 machine-wide OOM traced straight to in-flight worktrees living in it. quay-init

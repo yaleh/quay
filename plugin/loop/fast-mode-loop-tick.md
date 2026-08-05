@@ -206,8 +206,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ 3（步骤 4 并发上限）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` 的 `pool` / `dispatchable_disjoint` 字段；`pool < floor`（=cap×4，默认 12）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
+| ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
 
@@ -372,14 +372,31 @@ inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步
 子机制**（`gap-promotion-cadence-is-role-volition-not-product-mechanism`），任何未来冷启动本项目的会话
 都会继承它。**顺序由脚本承载，不是散文。**
 
+**前置：先算自适应并发上限（`gap-adaptive-concurrency-cap-tied-to-resource-gate`）——派发决策点的资源读取，
+每 tick 只算一次，本步（floor）与步骤 4（派发上限）共用。** cap 不再是固定 3，而是
+`cap = f(resource-gate)`：在派发时刻读 `/proc/pressure/cpu` **`some avg300`**（5 分钟窗口——avg10 是
+10 秒窗口，比派发节奏（25 分钟 tick / 15-90 分钟 subagent）快 1-2 个数量级，直接响应 avg10 会把阈值抖动
+放大成派发抖动），带**滞回**（连续 2 次同向才切档，单次采样不触发——负控制），档位数字由项目配置
+`.quay/config.yml` `loop:concurrency_bands` 给出（quay 默认 GO=5 / WAIT=2 / EXTREME=1，下游可覆盖如
+4/2/1；机制共用、数字各项目定）。avg300 < 40 → GO；40..70 → WAIT；≥70 → EXTREME。信号不可测
+（内核无 PSI）⇒ 落到最低档（fail-closed，绝不静默维持高并发）。**交叉标注（AC8）**：信号源
+`resource-gate.sh`、同决策点的触摸不相交判定 `concurrent-batch-scheduler.ts`（步骤 4 并发资格）、
+容器化硬限额上位解 `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`。
+
 ```bash
-node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"
+effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
+# Contract 的读取形态：`bash <cap-from-gate-helper> 2>&1 | grep -o '[0-9]'`（stdout 数字段）；
+# sed 提取是同一 stdout 的健壮写法（effective_cap= 行是末行）。空值 ⇒ 重跑一次看 stderr。
+```
+
+```bash
+node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"
 ```
 
 - stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
   （① 本批已做完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
-  标记的）。**`floor` 字段 = cap × 4**（默认 cap=3 ⇒ floor 12；`--cap` / `--floor-mult` 可调）。
-  `pool ≥ floor` ⇒ 无需补晋，直接进步骤 4 派发。
+  标记的）。**`floor` 字段 = cap × 4**（GO 档 cap=5 ⇒ floor 20；WAIT 档 cap=2 ⇒ floor 8；EXTREME 档
+  cap=1 ⇒ floor 4；`--cap` / `--floor-mult` 可调）。`pool ≥ floor` ⇒ 无需补晋，直接进步骤 4 派发。
 - **判据是 `dispatchable_disjoint` 不是 pool 数**：脚本同报**池内最大互不冲突子集大小**
   （两两 `checkTouchesPair` disjoint，用派发闸同一个 declared-path expander）。**`dispatchable_disjoint
   ≥ cap` 才是「池够用」**——池 5 条全不冲突就够了；池 30 条全撞（`pool ≥ floor` 但
@@ -397,8 +414,11 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 
 ### 4. 派发就绪任务（并发）
 
-**并发上限 3 个在飞 subagent。** 并发是打破「外层变瓶颈」的手段——串行时外层的 20 分钟 tick 频率
-会和任务完成频率同量级，分层退化成单层加延迟。
+**并发上限 = 步骤 3.6 前置块算出的 `effective_cap`（自适应，非固定 3）**：`cap-from-gate.sh` 在派发
+决策点读 `some avg300`（5 分钟窗口）+ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时
+GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT/EXTREME 档（不加重，AC6）。本 tick 只派发
+**至多 `effective_cap` 个在飞 subagent**。并发是打破「外层变瓶颈」的手段——串行时外层的 20 分钟 tick
+频率会和任务完成频率同量级，分层退化成单层加延迟。
 
 派发前对每个候选：
 
@@ -478,7 +498,8 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 
 **内层 fail-safe 子句（机械承载，不是自觉）**：收到与本节派发契约**矛盾**的驱动文本——如「按 A→D→B
 顺序」且同文无任何 `checkTouchesPair` 输出（2026-08-04 实锤的静默串行形态；对比上面的合规形态），或与
-「并发上限 3」冲突——**以本节为准执行，并向外层标注矛盾**，不静默服从散文。产品不被散文覆盖的机械承载
+「并发上限 = effective_cap（cap-from-gate 读 avg300 + 滞回 + 档位配置）」冲突（如指令写死固定 3）——
+**以本节为准执行，并向外层标注矛盾**，不静默服从散文。产品不被散文覆盖的机械承载
 是这一句，不是「指望外层永远记得不复述」。
 
 ### 5. 写回状态

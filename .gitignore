@@ -32,6 +32,10 @@ experiment/timing/*.log
 **/.quay/node-compile-cache/
 **/.quay/heavy-op-token-events.jsonl
 **/.quay/prepare-leases/
+# gap-adaptive-concurrency-cap-tied-to-resource-gate: adaptive-cap hysteresis state (written by
+# cap-from-gate.ts at each dispatch decision point). Same gitignored runtime-state family as
+# gate-events.jsonl — the band decision is per-dispatch state, not committed provenance.
+**/.quay/concurrency-cap-state.json
 # DIR-124-A1a: per-run event log — transient diagnostic data, not committed provenance
 .workflow-events/
 # gap-no-explicit-blocked-signal-from-inner-layer (2026-08-03): the inner layer's explicit

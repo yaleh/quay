@@ -80,6 +80,15 @@ read_cpu_avg10() {
     /proc/pressure/cpu
 }
 
+# cpu some avg300 from /proc/pressure/cpu (5-minute window — the ADAPTIVE-CONCURRENCY signal;
+# gap-adaptive-concurrency-cap-tied-to-resource-gate AC2: avg300 matches the dispatch rhythm
+# (25-min tick / 15-90-min subagents), avg10 (10s) is 1-2 orders of magnitude faster than the
+# actuator and would react to jitter that dispatch cannot track). Same parse as avg10, different field.
+read_cpu_avg300() {
+  awk 'NR==1{for(i=1;i<=NF;i++){if($i ~ /^avg300=/){sub(/^avg300=/,"",$i); print $i; exit}}}' \
+    /proc/pressure/cpu
+}
+
 # mem available in MB (the `available` column of `free -m`, NOT the `free` column — AC contract).
 read_mem_avail_mb() {
   free -m | awk 'NR==2{print $7}'
@@ -111,11 +120,17 @@ read_orphans() {
 
 # ── apply readings (test-seam overrides honored) ───────────────────────────────────────────────────
 cpu_stall="${RESOURCE_GATE_TEST_CPU_AVG10:-$(read_cpu_avg10)}"
+# avg300 — the adaptive-concurrency signal (AC2). Its own test seam so cap-from-gate can be
+# driven deterministically WITHOUT disturbing the avg10 verdict the gate's own GO/WAIT uses.
+cpu_stall_avg300="${RESOURCE_GATE_TEST_CPU_AVG300:-$(read_cpu_avg300)}"
 mem_avail_mb="${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-$(read_mem_avail_mb)}"
 # Test seam: the literal value "unmeasurable" forces the fail-closed path deterministically
 # (simulates a missing /proc/pressure/cpu — kernel without PSI).
 if [ "${RESOURCE_GATE_TEST_CPU_AVG10:-}" = "unmeasurable" ]; then
   cpu_stall=""
+fi
+if [ "${RESOURCE_GATE_TEST_CPU_AVG300:-}" = "unmeasurable" ]; then
+  cpu_stall_avg300=""
 fi
 if [ "${RESOURCE_GATE_TEST_MEM_AVAIL_MB:-}" = "unmeasurable" ]; then
   mem_avail_mb=""
@@ -167,6 +182,12 @@ if [ "$cpu_stall" = "UNMEASURABLE" ]; then
 else
   printf 'cpu_stall(some avg10)=%.2f  [limit %s]   %s\n' \
     "$cpu_stall" "$CPU_LIMIT" "$([ "$cpu_wait" = 1 ] && echo WAIT || echo ok)"
+fi
+# avg300 line — consumed by cap-from-gate (adaptive concurrency). Stable field name for the parser.
+if [ -z "${cpu_stall_avg300}" ]; then
+  printf 'cpu_stall(some avg300)=UNMEASURABLE\n'
+else
+  printf 'cpu_stall(some avg300)=%.2f\n' "$cpu_stall_avg300"
 fi
 printf 'mem_avail=%sMB             [limit %s] %s\n' \
   "$mem_avail_mb" "$MEM_LIMIT_MB" "$([ "$mem_wait" = 1 ] && echo WAIT || echo ok)"
