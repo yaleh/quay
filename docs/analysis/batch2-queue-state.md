@@ -4326,6 +4326,18 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **在飞 1/3**：vendor-runtime。dist-runtime 等 vendor-runtime 落地后派。
 - **AC12b 进度**：#1 ✓、#2 在飞、#3 待派、#4 ✓。
 
+### tick 2026-08-05T14:4xZ（内层：AC12b blocker #2 落地 + #3 派发）
+
+- **vendor-runtime 落地**（merge `38b33c85`）：quay-init `ensure_vendor_runtime()` 在 dist 缺失时
+  **自动经 sync-vendor.sh 构建**（管理者验证的 path 2），构建不出来才 **fail-closed exit 2**（命名缺的
+  bundle + 修法）；`verify_provider_runtime_existence()` 断言 mcp_entry 引用的运行时真实存在于目标
+  （referenced-not-landed 的补全）。fresh-clone path-2 e2e 实证（git ls-files 只有 provider.yml/
+  package.json → sync-vendor 构建 → --loop EXIT=0 → mcp_entry 指向存在文件 → provider ABI 可用）。
+  **AC12b blocker #2 ✓**。scoped 37/37（首跑 1 flake——pre-existing 环境 flake，隔离过 + 复跑过）。
+- **dist-runtime 已派**（AC12b #3，串行于 #2 之后）：version.ts 构建时内联版本号（ENOENT 是 #2 的
+  延伸域）。telemetry `fm-...-ee13ls`。
+- **AC12b 进度**：#1 ✓、#2 ✓、#3 在飞、#4 ✓。在飞 1/3。
+
 ### tick 2026-08-05T14:2xZ（外层，AC12b 阻塞 2/4 落地）
 
 - **ghost-drive（阻塞 #1）已 merge**（ba3a4e87）：fresh-session detection（transcript-delivery-check --is-fresh）跳过清屏，非 fresh 保留 NBSP 路径，real fresh-session e2e rc=0。welcome 屏修复完成。
@@ -4345,3 +4357,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **AC12b 三阻塞去二存一**：①welcome-屏（fresh 分支 17 处，ghost-drive merge）✓、③裸 ✖ 判红（结构化匹配）✓、剩②vendor package.json 铺设（命中仍 0）。
 - **使用视角提问查盲区**：scoped 选中集看不见打包态差异（select-tests-for-touches basename 配对不匹配打包态测试，src 任务 scoped 绿仍可能打包态坏）。已知边界（CLAUDE.md packaging e2e CI 独占）的代价。建任务 gap-scoped-selection-blind-to-packaging-state-diff（src 触碰任务强制含打包态测试）。
 - **archguard AC12a 157 分钟** + 完整红窗自愈闭环（真红 6 失败→归因→forward-fix→重跑绿→5019 passed→re-green→恢复派发，36 分钟零人工）。
+
+### tick 2026-08-05T14:5xZ（外层，AC12b 阻塞②只解决三分之一）
+
+- **管理者 B 机实测（走正当升级通道 git push/pull，非手工 cp）**：
+  - **有效**：WARN→FAIL（referenced-runtime-missing）——fail-closed 正确生效（判据从「无依据仍给答案」变「拒绝回答」）。
+  - **暴露第三层**：FAIL 内容是 mcp_entry references ./bin/quay-native.ts 但不存在——B 机 config 是旧版（dev-tree 路径）残留，quay-init「config 已存在不重写」。quay-init 生成逻辑本身正确（vendor 绝对路径）。
+  - **package.json ENOENT 未解决**：version.ts 仍 readFileSync 外部 package.json，node vendor/quay/dist/quay.js task list 仍报错。dist-runtime 任务（ready）覆盖此。
+- **共同形态**：每修好一层下一层才暴露（上层失败掩盖下层）——只能在真实目标环境端到端逐层剥出，开发树检查看不见。
+- **管理者自曝判据错误**（今晚第 10 次测量错误）：grep 'vendor.*package.json' quay-init.sh 命中 0 差点报「没修」，实际修法是 ensure_vendor_runtime。先验证后转达才没发出去。
