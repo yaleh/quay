@@ -69,7 +69,13 @@ glob 展开 + MIS 子集算法的叠加）。
 ## Contract
 
 measure   pool_check_ms = `time node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` stdout 的 real 秒数
-band      pool_check_ms < 10（回归前秒级基线；150s timeout 不再触发）
+band      pool_check_ms = < 10（回归前秒级基线；150s timeout 不再触发）
 invoke    `time node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --check gap-web-board-needs-an-inconsistency-verdict-it-does-not-have`
 control   web-board/upgrade-channel/measure-claude-p 判定不变（AC2）；未派发 todo 不判 landed（AC4）
 resume    批量化与回归分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-05T19:4xZ
+changed: contract-ratchet compliance，外层补齐（未审——inner 新立任务）
