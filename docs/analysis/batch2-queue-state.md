@@ -3646,3 +3646,6 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > cancelled 0）。**AC1 laid-down 未复发**（inner 判假阳性正确）。2 失败：①M3 (AC20d) monitor takeover
 > （kill -9 后接管，1.9s）；②noise-gate OLD（已知抖动）。session-liveness isolated 跑中（bwwvpoh82）
 > 判 M3 真/负载。
+> **06:55Z 增补（M3 takeover 真回归确认 + 已驱动修复）**：session-liveness isolated（43/41/1）——M3 (AC20d)
+> 接管测试 **isolated fail（658ms）= 真回归**（noise-gate isolated 过 = 负载抖动）。疑 session-idle ③
+> 落地（改 session-liveness.sh）影响接管/超时逻辑。已驱动 inner bisect + 修 + scoped 自测。
