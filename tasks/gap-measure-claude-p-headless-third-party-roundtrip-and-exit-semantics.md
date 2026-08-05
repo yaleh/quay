@@ -3,7 +3,7 @@ id: gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics
 title: claude -p headless mode has two unknowns official docs cannot answer —
   third-party-endpoint round-trip (gating) and stdin-open exit semantics — that
   decide whether the two-layer loop can migrate off tmux
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -67,6 +67,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - （本任务不改产品代码——纯实测）
 - orchestration/RESEARCH-claude-p-streaming-2026-08-04.md（AC4 结果回写，改此文件）
 
