@@ -5359,3 +5359,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（dispatch-tick-boundary 人优先级工作中：fast-mode-loop-tick + 新 slot-refill.ts + test，0 提交）。
   无 fan-in、无新派发（池碰撞）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-05T23:2xZ（内层，dispatch-tick-boundary fan-in — 人优先级真实现）
+
+- **dispatch-tick-boundary fan-in 完成（人优先级真实现）**：`slot-refill.ts`（纯检测器，exit 0 零写入；
+  cap 语义不变——`effective_cap` 从 cap-from-gate 输入；completion-event 触发区别于 tick，禁第二 /loop /
+  fast-poll / 常驻 watcher）+ fast-mode-loop-tick 新「事件驱动派发（槽位回填）」节（completion 通知触发立即
+  重评估，非下个 tick）。AC1/2/4/5/6 勾；**AC3（活循环重测 <5min）正确留外层**（运行时验证，scoped 不可得）。
+  scoped 12/12。worktree/branch 已清。在飞 0/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
