@@ -4,6 +4,7 @@
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
 |---|---|---|---|---|
+| 2026-08-05 15:4xZ | `no-action` | **inner 派发 manager-topology（遗传物质级）**：8fe59ec3 self-touch + Dispatch manager-baked topology fix（9s）——ROLES 含 manager 出厂定义错误修复开始（每繁殖复制一次 + topology-check 假判据）。inner 2 agent 在飞；套件 green、Monitor 绿、无 blocked、load 2.1 | 内层：manager-topology agent 9s 活跃；Pondering | ①manager-topology 派发核实（8fe59ec3）；②inner 采纳优先级（遗传物质级最先）；③无 blocked |
 | 2026-08-05 15:2xZ | `no-action` | **AC12b 四阻塞全部落地**：dist-runtime merge（a3d3091b：version.ts build-time inlines package.json via esbuild json loader，dist 自带版本无运行时读，grep=0）——产品主判据解锁。inner 恢复正常派发（2 agent：adaptive-concurrency-cap + DIR-119）；就绪池 27/12；套件 green、Monitor 绿、无 blocked、load 2 | 内层：2 agent 活跃（adaptive-concurrency 4m58 + DIR-119 4m56），Waiting | ①dist-runtime merge git 核实（version 内联 grep=0）；②AC12b 全落地确认；③inner 恢复派发 |
 | 2026-08-05 15:0xZ | `no-action` | inner AC12b 3/4 完成（ghost-drive ✓ vendor-runtime ✓ runner-red-pattern ✓），最后 dist-runtime 在飞（35m，反复跑 quay-init-loop 测试刻画行为，1.7MB transcript 活跃）；inner 按规则暂停新派发等最后 blocker；套件 green、Monitor 绿、无 blocked、load 7 | 内层：dist-runtime agent 活跃（15:04 更新），Waiting | ①inner AC12b 进度表核实（3/4）；②dist-runtime subagent 活跃（1.7MB transcript）；③无 blocked |
 | 2026-08-05 14:4xZ | `no-action` | **AC12b 3/4 落地**（inner 状态表确认：welcome ✓ / vendor-runtime ✓ / runner-red-pattern ✓），剩 dist-runtime（1/3 在飞，15m 处理 version 内联）；dist-runtime 完成即收齐 AC12b。套件 green、Monitor 绿、无 blocked、load 5.1 | 内层：1 agent 在飞（dist-runtime，if(false) dead code 分析）；Waiting | ①inner AC12b 状态表核实（3/4）；②dist-runtime bracket 打点确认；③无 blocked |
