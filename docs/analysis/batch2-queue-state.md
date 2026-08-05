@@ -4366,3 +4366,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   - **package.json ENOENT 未解决**：version.ts 仍 readFileSync 外部 package.json，node vendor/quay/dist/quay.js task list 仍报错。dist-runtime 任务（ready）覆盖此。
 - **共同形态**：每修好一层下一层才暴露（上层失败掩盖下层）——只能在真实目标环境端到端逐层剥出，开发树检查看不见。
 - **管理者自曝判据错误**（今晚第 10 次测量错误）：grep 'vendor.*package.json' quay-init.sh 命中 0 差点报「没修」，实际修法是 ensure_vendor_runtime。先验证后转达才没发出去。
+
+### tick 2026-08-05T14:5xZ（外层，隔离规格实锤补入）
+
+- **30 分钟 fan-in 假警（非停滞）**：inner transcript 每秒在写（14:55 持续），2 worktree 在飞，pool 26/disjoint 12。资源争抢非停滞。
+- **PSI 61.78 成因 = archguard 非 quay**：CPU 最高进程 archguard-worktrees（task-66 tsc 102% + task-68 eslint 76%），archguard 自己跑 vitest/tsc。resource-gate 读整机 PSI 不区分项目——SPEC-isolation 核心论据实锤。**补入 systemd-run 任务 AC6**（跨项目隔离：archguard 高负载时 quay 套件在自身 scope 正常）。
+- dist-runtime 任务已立案 ready（管理者 14:44 转达的 package.json ENOENT 那条），转达→立案链路通。

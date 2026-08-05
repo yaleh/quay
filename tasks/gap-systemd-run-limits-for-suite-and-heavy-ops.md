@@ -35,6 +35,12 @@ cgroup v2 本机已可用（cpuset cpu io memory pids 已核实），systemd-run
 **注意**：runner-structure 已修 resource-gate 接入（AC3，16068661），但「主动调用才能生效」的结构
 弱点仍在——本任务用 cgroup 硬限额补上「无法被忘记调用」。
 
+**新增实测证据（2026-08-05 14:56，管理者 + 外层核实）**：quay 资源门会因**其它项目**的活动报
+WAIT——resource-gate 读整机 /proc/pressure/cpu，不区分负载来自哪个项目。实测：CPU 最高进程是
+archguard-worktrees（task-66 tsc 102% + task-68 eslint 76%），PSI 58.37 高但**全是 archguard 自己
+的 vitest/tsc**，quay 完全空闲。⇒ SPEC-isolation 核心论据（资源门看不到项目边界）真实运行实锤——
+cgroup 限额（每项目 scope）天然解决此问题。
+
 ### 选定机制
 
 1. **套件 runner 包 systemd-run**：`full-suite-runner.ts` 起套件时用
@@ -50,12 +56,13 @@ cgroup v2 本机已可用（cpuset cpu io memory pids 已核实），systemd-run
 - [ ] AC3: 内存爆（模拟 ugrep 灾难回溯）⇒ MemoryMax 杀一个进程，非全机进 swap（负控制）
 - [ ] AC4: 通信通道零改动（同机 tmux/file，实测驱动/送达正常）
 - [ ] AC5: 与 gap-no-resource-awareness-heavy-ops-run-blind + SPEC-isolation 交叉标注
+- [ ] AC6: **跨项目隔离实锤**——资源门因其它项目活动报 WAIT 时，本机 cgroup 限额下 quay 自身套件不受影响（实测：archguard 高负载时 quay 套件在自身 scope 内正常跑）
 
 ## Touches
 
 - plugin/scripts/full-suite-runner.ts（套件包限额）
 - plugin/test/full-suite-runner.test.mjs（AC1-AC3 测试）
-- orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md（AC5 引用）
+- orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md（AC5/AC6 引用）
 - tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（AC5 交叉标注）
 
 ## Contract
