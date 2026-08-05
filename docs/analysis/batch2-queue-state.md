@@ -3251,3 +3251,11 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   （RED 处置等 cron 窗口 20 分钟 / 乐观派发无执行者）——**存在≠生效**活例；加 state 变化即触发的执行者
   （runner/监视器通知外层 + RUNNING 驱动 inner 照常派发），触发者非新调度。
 - 待 inner 修复 → 我重启全量套件做 ROUND 2 gate。
+
+### tick 2026-08-05T04:42Z（外层，`no-action`：inner 修 RED 中——catalog 8/8 绿，另两族验证中）
+
+- **inner RED 修复推进**：capability-catalog 8/8 绿（select-static-checks-for-touches.ts 已声明）；
+  正在全量跑另两个受影响文件（AC4 laid-down docs + AC5 test.sh derived default）验证。修复提交未落。
+- **suite-state 仍 red**（停跑残留，等修复后重启覆盖）；池 5（deficit 0）。
+- 无停止条件、无 BLOCKED；监视器 bw650bprz 等在飞修复提交；loop-driver LIVE。修复落 → 重启全量套件
+  做 ROUND 2 gate。
