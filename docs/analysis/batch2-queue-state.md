@@ -3129,6 +3129,22 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **landed-not-flipped 集合追加**：nbsp-fix（reliable-send 家族）。无在飞。套件 state=red+aborted——
   等外层重跑 M3 验证（AC16 修复后）与 ROUND 3 gate。loop-driver LIVE。
 
+### tick 2026-08-05T09:2xZ（内层，`dispatch`：OS-anchor + web-board）
+
+- **外层确认**：task-over-90m 是 cold-start-key4 括号未关的假信号（工作已落地 AC 7/7 ready）——已消费。
+  M3 验证套件在 outer 后台跑（lane-1，AC16 修复后），完成后外层收尾 ROUND 3。
+- **OS-anchor `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`**（最高优先——决定循环
+  活不活）：已晋级 ready + 派发（bracket fm-...-qk1q0y）。机制：OS 级 systemd user timer / crontab
+  挂 watchdog——周期检查三项目会话存活 + 锚点存在，不在则重拉起 claude 会话 + send-keys-reliable 驱动
+  冷启动文本（复用已验证能力，零新发明）；补 SPEC §4 第 5 类。触 plugin/scripts/（宽 glob →
+  保守与多数池任务 serialize）。
+- **web-board `gap-web-board-needs-an-inconsistency-verdict-it-does-not-have`**（ready）：与 OS-anchor
+  **disjoint**（只触 packages/quay）→ 并派（bracket fm-...-pwxyo5）。机制：/board 三列（意图/执行/落地）
+  + 不一致高亮；第一步回答架构问题（复用 task-status-drift-check 纯函数 vs 重实现双源 vs 抽取共享），
+  AC2 与检查器逐任务一致。
+- **tmux-leak 门控**：与 OS-anchor 重叠（orchestration/** 宽 glob）→ OS-anchor 落地后派。
+- **在飞 2**：os-anchor + web-board。套件 state=red+aborted（外层 M3 验证跑中）。loop-driver LIVE。
+
 ### tick 2026-08-05T02:10Z（外层，`no-action`：3 agent 在飞、推进正常，无介入）
 
 - **batch-4 关闭完成**（内层自记 `3f5f04be`：5 done，full-suite reference 2298，累计 20 任务 done）。
@@ -3972,3 +3988,12 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **套件 state=red+aborted**（ABORT #4）。
 - 本 tick 立案：slot-visibility 升根因级（AC8/AC9）。累计最高优先：OS-anchor / supervisor / slot-
   visibility 根因级 / laneCount / 泄漏 / NBSP。
+
+### tick 2026-08-05T09:20Z 增补（假信号复发 = AC8 紧迫性直接证据）
+
+- **同一假 over-90m 信号复发**（cold-start-key4，09:07:50 第三条）——括号没关的持续产物。已清（wait
+  257.2s），但**会一直复发直到 AC8（over-90m 源统一）落地**。这是 slot-visibility 根因级的直接证据。
+- **inner 未被阻塞**：在读 session-liveness + cold-start skill（general-purpose subagent 102k tokens），
+  处理 leak teardown + cold-start 修复。信号是噪音不是冻结（它自己推进）。
+- **ROUND 3 三修复已验证**（M3/AC16/NBSP scoped 全 PASS）；套件 ABORT #4（session-liveness 族须单独跑）。
+- 内层持续推进，无需干预。
