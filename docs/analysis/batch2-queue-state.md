@@ -3284,3 +3284,9 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > 格式踩坑**（measure/band 需反引号命令 + 命名格式）。已修（4f4f92b1）→ 重启（bqtt18ecw）。教训固化：
 > **派发前应跑 contract 静态检查预审计**（self-touch-scan 同型：在派发/提交前抓格式违规，不靠 round
 > gate 兜底）——这是 ready-pool-floor 任务 AC6 的「补晋应用机械化」+ 本轮的 RED 分诊共同指向的候选机制。
+
+> **04:52Z 增补（ROUND 2 三次 RED 根因——负载抖动）**：重启套件（bqtt18ecw）early-RED——`heavy-op-token
+> -events.test.mjs` AC2（waited_ms 锁等待时序）在 8-lane 套件 + inner 后台 plugin-packaging 构建
+> （dist tarball，重负载）并发下抖动。**非批次回归**（heavy-op-token 不在批次 touches；ROUND 1 绿时同
+> 测试过）。inner 已确认 3 失败族修复 + scoped 验证，等外层套件。套件完成 → 若仅此负载抖动 ⇒ isolated
+> 复测通过即判绿（文档化抖动）。
