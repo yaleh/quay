@@ -56,6 +56,7 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-tmux-session-topology-no-factory-definition.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/skills/（或 plugin/loop/）：三窗口拓扑定义（new 或并入 cold-start/init skill）
 - plugin/skills/cold-start/SKILL.md（AC4 交叉标注 + 铺设接线）

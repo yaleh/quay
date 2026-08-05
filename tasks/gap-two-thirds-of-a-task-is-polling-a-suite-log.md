@@ -2,7 +2,7 @@
 id: gap-two-thirds-of-a-task-is-polling-a-suite-log
 title: 64% of inner task time is waiting on suite logs — the mechanism that
   removes it is already documented and already implemented, and neither is used
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -92,6 +92,7 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
 - [ ] 任务体记录：**这是「存在≠生效」的第三次**，并列出前两次
 
 ## Touches
+- tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/loop/fast-mode-loop-tick.md
 - docs/analysis/fast-mode-batch2-prompt.md

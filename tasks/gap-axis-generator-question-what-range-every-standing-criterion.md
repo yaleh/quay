@@ -86,6 +86,7 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 - plugin/scripts/（生成器问句 runner + 每晚可证伪计数，若成脚本）
 - orchestration/SYNTHESIS-axis-generation-2026-08-05.md（引用）
