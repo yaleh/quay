@@ -5288,3 +5288,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   优先级，排进下一批。**外层执行**：promote todo→ready（零进展自 3f78e428）+ 触摸集与在飞 global-count
   不相交（可并发）+ 驱动 inner 排下一批（数据-only，pane 确认）。
 - 不重评优先级（已提）；决定排位 + 怎么派（并发资格已核）。
+
+### tick 2026-08-05T22:5xZ（内层，dispatch-tick-boundary 优先级处理 — 串行注记）
+
+- **人的优先级 + 外层 promote**：`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`
+  （吞吐瓶颈——派发只在 tick 边界、槽位空置不回填）todo→ready（外层已执行）。self-touch 已补、resolve 过、
+  git-log 唯一命中是外层 filed 提交（非落地）。
+- **⚠ 并发核验更正（外层「与 global-count 不相交」被生产闸推翻）**：两任务都带 `plugin/scripts/` glob
+  ⇒ concurrent-batch-scheduler 判 **CONFLICT**（overlap 未指名具体文件，glob 碰撞）。**不可与在飞 global-count
+  并发**。机制优先（fail-safe 子句），外层「可并发」声明不成立——fast-mode-loop-tick/plugin/scripts vs
+  plugin/test/self 的目测漏了双 glob。**该任务 ready 待命，global-count land 后第一批派发**（人的优先级保留）。
