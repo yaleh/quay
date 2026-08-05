@@ -3575,3 +3575,8 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 - **ROUND 3 套件仍 running**（early-RED：AC1 laid-down driver，~10 分钟，ETA ~06:27）；完 → bisect AC1
   （疑似 red-window-executor 接线）→ 修 → 重启。
 - 无停止条件、无 BLOCKED；loop-driver LIVE。
+> **06:28Z 增补（ROUND 3 套件完：fail 2 = AC1 laid-down driver 真回归 + noise-gate 抖动）**：套件完
+> （2368 tests / fail 2 / cancelled 0）。**1 真回归**：AC1 (laid-down) rendered outer tick doc declares
+> exactly one driver（6.7s，疑 red-window-executor 的 suite-state-trigger 接线引入第二个 driver 类引用）
+> + **1 noise-gate 已知抖动**（isolated 过）。已驱动 inner bisect 修 AC1（doc 只声明一个 cron driver，
+> suite-state-trigger 是 Monitor 非 driver）。
