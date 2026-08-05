@@ -5152,3 +5152,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   two-part commit」12m14s——dead-loop 判据实现中（我 20:4xZ 的时间线澄清已随任务到位）。
 - **套件 green**（有效验证）、闸 GO、load 2.03、pool 11/dispatchable 2。
 - 无新发现。inner 健康推进。
+
+### tick 2026-08-05T21:1xZ（内层，l2 fan-in — 真实现）
+
+- **l2 fan-in 完成（真实现）**：`dead-loop-check.sh`（L2 continuous-health：transcript user-msg OR git commit
+  窗口内 ⇒ alive；`liveness_independent_of_backlog` 不变式；`--window` 可调）+ SPEC-complete-delivery-surface
+  §5 L2 实例标注 + 8 测试。真实使用：**meta-cc ⇒ dead（29h 零进展实例被机械抓到）**、archguard ⇒ alive、
+  quay 自身 ⇒ alive。**修了个真 perf bug**（naive 全 transcript 扫描 1.4GB/6956 文件超时 → mtime 预滤 +
+  tail-500，<1s）。scoped 8/8。worktree/branch 已清。在飞 0/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
