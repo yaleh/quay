@@ -716,6 +716,11 @@ PYEOF
     task-schema.ts
     touches-parser.ts
     wiring-coverage-check.ts
+    # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
+    # ships with the loop so an installed project can see what each laid-down check
+    # answers. Deliberate explicit addition (no doc references it by path — the catalog
+    # is self-describing, so it cannot be derived from a doc's plugin/scripts reference).
+    capability-catalog.sh
   )
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then

@@ -225,7 +225,8 @@ copied out of the quay development tree):
 - `plugin/scripts/` — the checkers (`fast-mode-telemetry.ts`,
   `task-contract-check.ts`, `task-status-drift-check.ts`,
   `touches-orthogonality-check.ts`, `concurrent-batch-scheduler.ts`,
-  `inner-blocked-signal.ts`, …), the resource gate, the heavy-op token, and the
+  `inner-blocked-signal.ts`, …), the resource gate, the heavy-op token, the
+  capability catalog (`capability-catalog.sh` — see below), and the
   observation mechanism (`session-liveness.sh` — the ONE observer;
   `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-
   parameter), plus their transitive dependencies.
@@ -233,6 +234,31 @@ copied out of the quay development tree):
   `.quay/config.yml` `mcp_entry` points at a **project-local copy**, never at a
   `quay-native` PATH symlink into the quay dev tree (the loop must keep working
   even when that dev tree is gone).
+
+### Capability catalog — what each installed check answers
+
+Every shipped check declares the question it makes askable, in one machine-readable
+line (the catalog, `plugin/scripts/capability-catalog.sh` — a script, never the
+README, because prose drifts). `--loop` lays it into the target so an installed
+project can see what it got:
+
+```
+$ bash plugin/scripts/capability-catalog.sh            # human-readable catalog
+$ bash plugin/scripts/capability-catalog.sh --json     # machine-readable JSON
+$ bash plugin/scripts/capability-catalog.sh --summary  # one summary line
+```
+
+The check count is **derived from the filesystem**, never hardcoded, and the catalog
+is self-describing (it declares its own question). A script that enters the artifact
+without a declared question is reported as unclassified and the catalog exits
+non-zero — the entry-point gate that stops the undeclared-check number growing.
+The `--json` output feeds the task's `## Contract` measures verbatim:
+
+```
+declared_questions = bash plugin/scripts/capability-catalog.sh --json | jq '[.[]|select(.question)]|length'
+shipped_checks     = ls plugin/scripts/*.{sh,ts,mjs} 2>/dev/null | wc -l
+unclassified       = bash plugin/scripts/capability-catalog.sh --json | jq '[.[]|select(.question==null)]|length'   # band 0
+```
 
 Upgrading an already-initialized project is the same command: `quay-init` is
 idempotent, only fills the diff, and never overwrites local edits to laid-down
