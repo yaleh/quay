@@ -3207,3 +3207,23 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
 > **`dispatchable_disjoint`（checkTouchesPair 算池内最大互不冲突子集）= 判据**，floor = 手段——5 全不冲突
 > 就够、30 全撞机制自报（今晚 pool=3/2 同触的机械版）。已重写任务 `gap-ready-pool-floor-scales-...`
 > （AC：floor=cap×4 + dispatchable_disjoint 上报 + 缺口 2 先行 + touchesResolve 守卫 + 成本不对称）。
+
+### tick 2026-08-05T04:10Z（外层，`unblock`：scoped 落地 = 本批全并；ROUND 2 verification-round 启动）
+
+- **scoped (③) 落地**（c97ba750/9d56bb64/f17195b9）：scoped 静态检查档位（改动相关子集 + 总是便宜检查，
+  跳过 checker-mutation + 无关 ratchet，延迟非丢弃）；**full-gate byte-unchanged**（9 checker 行一致）；
+  touch→check 映射机械（select-static-checks-for-touches.ts）；stripTouchAnnotation 修全角（…）触摸注释
+  bug；**实测 17.2s → ~3.1s** scoped 静态段。AC 7/7 自勾（self-touch 约定生效）。**本批 3 块全并**。
+- **ROUND 2 verification-round 启动**（b3i1f3h5z）：**首个按 (a) 机制跑的 round**——full-suite-runner
+  后台 + suite-state 渐进写（running→green/red）。**收尾集 5 条**（inner 自记）：closure-sync、
+  drive-text、full-suite、closure-decomp、scoped。
+- **本轮将捕获**：closure-sync AC5（inner 无等待实证——红窗乐观已落地）+ suite(a) AC6(i)（外层后台套件
+  运行期间 inner 派发史）。观察 inner 在 running 态是否派发（红窗乐观的实际表现）。
+- 无停止条件、无 BLOCKED；loop-driver LIVE。
+
+> **04:22Z 增补（ROUND 2 首跑 RED → 红窗分诊）**：full-suite-runner 7.2s 静态门 RED——**3 条新违规全来自
+> 我的立案**（第 4 次 Contract 格式踩坑）：ready-pool-floor control 折行、productize-manager-layer
+> measure-no-field、quality-trend band-no-name。**红窗分诊**：已修 3 条（264ea206）→ new-since-baseline
+> 归 0 → 重跑（bs84jg1l3）。教训记录：我的任务 Contract 段反复踩格式坑（measure/band/control 需
+> 反引号命令 + 不折行），self-touch 约定的 --self-touch-scan 若在派发前审计可提前抓到——是后续派发词
+> 机械化的候选。
