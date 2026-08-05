@@ -94,11 +94,11 @@ extra:
 
 ## Contract
 
-measure   task_agent_self_checked = 完成时由任务代理自勾 AC + 自贴证据的任务数
+measure   task_agent_self_checked = `grep -c '^- \[x\] AC' tasks/gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence.md` stdout 数字段
 band      task_agent_self_checked >= 1（真实使用至少一个）
 invariant closure_work_per_task = 1 DoD 行（收尾对每任务不再做 AC/证据）
-invoke    checkTouchesPair 两向 fixture（AC4）+ hasAnyLandedNewTouch 负控制（AC5）
-control   共享文件两任务 ⇒ disjoint:false（真实冲突仍拦）；各自 self-file 仅 ⇒ disjoint:true
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence.md --root "$(pwd)"`
+control   共享文件两任务 ⇒ disjoint:false；各自 self-file 仅 ⇒ disjoint:true（AC4 fixture 两向）
 resume    派发词约定与静态检查分两步提交，任一步完成即写盘
 
 ## Dispatch review

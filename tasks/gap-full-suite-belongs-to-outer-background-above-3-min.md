@@ -66,8 +66,8 @@ extra:
 ## Acceptance Criteria
 
 - [ ] AC1: 外层跑全量套件为**后台异步**（subagent / run_in_background，不阻塞 tick、不堵 inner）；
-      结果写 `.quay/full-suite-state.json`（或 gate-events）：`{state: running|green|red, startedAt,
-      finishedAt, durationMs, laneCount}`
+      结果写 `.quay/full-suite-state.json`（或 gate-events）：`{state: running|green|red, runner:
+      outer|inner, startedAt, finishedAt, durationMs, laneCount}`
 - [ ] AC2: **runner 一检测到失败即标 RED**（非等全套跑完）——缩小「变红到发现」窗口
 - [ ] AC3: inner 不再自己跑全量套件；「上一步全量 suite 非绿」停止条件**改读外层 suite-state**
       （running/green → 照常；red → 停止）
@@ -98,7 +98,7 @@ extra:
 
 ## Contract
 
-measure   last_suite_runner = 最近一次全量套件的执行方（outer 后台 vs inner 前台）
+measure   last_suite_runner = `cat .quay/full-suite-state.json` stdout 的 runner 字段
 band      last_suite_runner = outer（≥3 分钟量级；<3 分钟才可下放 inner）
 invariant inner_full_suite_runs = 0（grep：inner 侧无全量套件自跑，只读 suite-state）
 invoke    `grep -rn 'scripts/test.sh' plugin/loop/fast-mode-loop-tick.md`（应只见「读外层结果」引用）

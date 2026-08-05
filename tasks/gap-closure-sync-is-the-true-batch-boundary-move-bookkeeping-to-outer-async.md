@@ -80,12 +80,11 @@ Agent 派发历史里（21:56:29 / 23:33:28 / 01:59:27），且每次收尾之�
 
 ## Contract
 
-measure   last_closure_actor = 最近一次 verification-round 收尾的执行者（git 记录 + Agent 派发历史）
+measure   last_closure_actor = `tail -1 .quay/verification-round.jsonl` stdout 的 closed 字段（收尾执行者=外层）
 band      last_closure_actor = outer（收尾只能由外层做；inner 不得出现 Close-batch 派发）
 invariant inner_dispatch_no_stall = 1（演示窗口内 inner 持续派发、零因记账停顿）
 invoke    `grep -rn 'Close batch\|收尾\|记账' plugin/loop/fast-mode-loop-tick.md plugin/scripts/`
-control   构造落地未翻任务（合并已落、status 仍 ready）⇒ 外层收尾必须翻 done；inner 不得翻
-          （grep 证明 inner 无收尾路径）
+control   构造落地未翻任务（合并已落、status 仍 ready）⇒ 外层收尾必须翻 done；inner 不得翻（grep 证明 inner 无收尾路径）
 resume    内层循环删步与外层收尾例程分两步提交，任一步完成即写盘
 
 ## Dispatch review
