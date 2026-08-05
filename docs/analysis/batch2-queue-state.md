@@ -2622,6 +2622,17 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   - 中等项 `--effort`/`--tmux` 记备注不立案（--tmux 需先查 quay-worktrees 兼容）。
 - inProgress 2（init-ships + load-sensitive）；无停止条件；监视器 mounted:true。
 
+### tick 2026-08-05T01:04Z（外层，`no-action`：batch 词汇拆分立案）
+
+- **管理者+人裁定**：「batch」一词两义（滚动派发 vs 验证/收尾攒批）——望文生义会漂回「分派要门控」，
+  R2 同族风险，载体是外层自己的 tick-log/commit 措辞。
+- **已立案** `gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`（todo）：词汇拆分——
+  分派侧不叫 batch-N（滚动）；验证/收尾节奏叫 `verification-round-N` + 显式注记非门控；历史名
+  （batch2-queue-state 文件名 / batch4a/b/c / concurrent-batch-scheduler.ts）保留标注。AC4 用 grep
+  分类表证明零门控误读；AC5 写死规范语句进 tick 文档（未来会话含换模型沿用）。
+- 核实：`fast-mode-loop-tick.md:368`「可同批」是最需改措辞的点（并发资格可能被读成门控）。
+- inProgress 2（init-ships + load-sensitive）；无停止条件；监视器 mounted:true。
+
 ### tick 2026-08-04T16:42Z（外层，`no-action`）
 
 - **task-write 已合并**（`b1c96299` fan-in + `d2f1f2be` 注记，YAML-safe 标题序列化）。本批已完成：
