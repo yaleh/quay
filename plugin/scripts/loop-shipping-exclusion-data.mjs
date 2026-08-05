@@ -58,6 +58,7 @@ export function exclusionEntries(repoRoot, pluginDir) {
   return [
     { rel: 'tasks', target: path.join(repoRoot, 'tasks'), reason: 'historical task records (descriptions of the past)' },
     { rel: 'milestones', target: path.join(repoRoot, 'milestones'), reason: 'historical milestone journals' },
+    { rel: 'docs/analysis/batch2-queue-state.md', target: path.join(repoRoot, 'docs', 'analysis', 'batch2-queue-state.md'), reason: "the queue-state's tick records reference the deployed tick-doc target layout (docs/analysis/ + orchestration/ paths) as living documentation — same class as the deployed copies excluded below" },
     { rel: 'orchestration/tick-log.md', target: path.join(repoRoot, 'orchestration', 'tick-log.md'), reason: "the outer's running log" },
     { rel: 'plugin/scripts/quay-init.sh', target: path.join(pluginDir, 'scripts', 'quay-init.sh'), reason: 'target layout (orchestration/ + docs/analysis/)' },
     {
