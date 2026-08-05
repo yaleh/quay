@@ -3728,3 +3728,21 @@ pane 的 `← N agent` 指示），主 prompt 空闲不算 ruling-required；任
   + laydown（control 折行）+ 既有 axis-generator（measure 无反引号）+ branch-model（measure 无字段）
   共 6 条 new-since-baseline 全修，`new since baseline: 0`。
 - **ROUND 3**：M3 修复仍未落地（inner 采样无参重入）；套件红（06:50）；gate 待修复后重启。
+
+### tick 2026-08-05T07:35Z（外层，`unblock`：管理者 07:16Z tick 两条裁定 + M3 修复稳定）
+
+- **趋势：判据成本一小时 2.5×**——ready-pool-check 06:44Z 35.8s → 07:15Z 91.2s，pool 19→24
+  （n 1.26×、成本 2.55×，比 O(n²) 的 1.6× 还陡）。裁定：**pool-check 三条修法提高优先**（③拆 O(n)/O(n²)
+  频率、②touches mtime 缓存、①增量），斜率数据入 quality-criteria 实例 #10。
+- **生成器新轴：无判据记录自身成本**——16 检查器 + 14 闸门零落盘（full-suite-state durationMs 唯一例外、
+  仅套件级）；35.8→91.2 斜率仅靠手工掐表可见。**已立案
+  `gap-no-criterion-records-its-own-cost-checker-cost-jsonl`**（todo，高优先）：checker-cost.jsonl 纯追加
+  {name, ms, n} + 与 quality-criteria **并列**交叉标注（checker-cost 提供数据/quality 提供打标）。
+- **AC10 记账拆半**：ready-pool 斜率 post-friction（因 skip 才去测）不计分；「判据不记成本」pre-friction
+  计 +1 ⇒ **4 → 5**。
+- **M3 修复稳定**：内层 10/10 pass（was ~18% fail），根因已定位（fork 出的命令替换子壳被误当第二持有者），
+  全文件确认中——确认后提交，随即重启 ROUND 3 gate。
+- **跨项目**：meta-cc 已恢复（cron ff528b51 + 内层 575f30b1 已驱动）；archguard 外层活跃无提交；不判
+  meta-cc/archguard 停滞（红窗停派是生效中的正确行为，异常判据要求 state != red）。
+- 本 tick 新立案：laydown 派生盲点、checker-cost 新轴；needs-human（前 tick）。contract 审计 new-since
+  baseline 0。
