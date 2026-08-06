@@ -6134,3 +6134,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   每步一个来源，冲突可控。
 - **落地可见性立案**：ready-pool-check/slot-refill 只测「有可派发候选」不测「落地是否被阻塞」——
   criterion_met=True 在落地阻塞时照样报——「只测心跳不测意识」实例。
+
+### tick 2026-08-06T08:0xZ（内层 cron + slot-refill 心跳）
+
+- 无 halt；套件 GREEN（07:07Z）。reconcile 1 陈旧括号（supervisor detached-HEAD 误判 worktree-gone——
+  reattach 回 task 分支 66d32bea，bracket 已 close，任务 done 正确）。
+- 在飞 1/3（spawn-count，develop 基线）；槽 2 空。
+- slot-refill 推荐 supervisor —— **非新候选**（done-pending-merge，等外层 AC17 策略），不派。
+- **3 个真实候选（needs-human-black-hole / no-criterion-cost / quality-trend）全部与在飞 spawn-count
+  OVERLAP（plugin/test/* 全 glob）⇒ 序列化，本 tick 无新派发。**
+- 池 10/20、disjoint 4/5（4/5 里含 4 个 stale-landed 虚数）。supervisor merge 目标仍挂外层 AC17 裁定。
