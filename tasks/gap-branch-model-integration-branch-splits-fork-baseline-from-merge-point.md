@@ -90,7 +90,8 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 
 - plugin/loop/fast-mode-loop-tick.md（分叉/合并线：develop/integration）
 - plugin/loop/orchestrator-loop-tick.md（verification-round 批量合 integration→develop）
-- plugin/scripts/（分支模型 helper：分叉基线判定 / integration→develop 批量合，若成脚本）
+- plugin/scripts/fork-baseline.ts（分叉基线判定 helper——外层裁定收窄：裸 plugin/scripts/ 展开 100+ 文件拖 5 候选入保守串行）
+- plugin/scripts/integration-batch-merge.sh（integration→develop 批量合 helper——同上收窄）
 - tasks/gap-global-count-assertions-fragile-relative-baseline.md（前置②交叉标注）
 - orchestration/SPEC-branching-model-integration-branch-2026-08-05.md（引用）
 
