@@ -5662,3 +5662,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   新任务** gap-blocked-signal-timeout-auto-escalation。closure round 17。
 - **ghost-suggestion 关闭**（--prompt-suggestions false 源头，13/13 + live 正负控制）。closure round 18。
 - **套件 green**、闸 GO、load 2.36、inner 1 agent（worktree 测试）。
+
+### tick 2026-08-06T02:1xZ（内层 cron，轻触）
+
+- 外层 closure round 17+18：telemetry-brackets + ghost-suggestion done（AC9 载到新 blocked-signal-timeout 任务）。
+- 在飞 1/3（session-liveness-hashes 工作中：pane-state-classify + session-liveness，0 提交）。无 fan-in。
+- 套件 green、无 stop、无 block、Monitor 绿。
