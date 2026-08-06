@@ -175,6 +175,10 @@ function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, st
     INTERVAL: String(interval),
     STALL_MIN: String(stallMin),
     OVERDUE_MIN: String(overdueMin),
+    // The busy judgment consumes classifyPaneState (ADR-016 Amendment / ruling D). Pin the
+    // classifier path so a COPY of the script (the AC6 mutation test) still resolves the real
+    // classifier — BASH_SOURCE-relative lookup would point at the temp copy's directory.
+    SL_CLASSIFY: path.resolve(__dirname, "..", "scripts", "pane-state-classify.ts"),
   };
   if (tickLogs) monEnv.SESSION_HEARTBEATS = tickLogs;
   if (transcripts) monEnv.SESSION_TRANSCRIPTS = transcripts;
@@ -518,8 +522,10 @@ test("G — removing .halt resets the staleness baseline: no OVERDUE/REPO-STALL 
       await sleep(4000); // ≥3 rounds parked: both suppressed
       assert.ok(!/REPO-STALL/.test(mon.output()) && !/SESSION-OVERDUE/.test(mon.output()),
         `parked project must not STALL or OVERDUE:\n${mon.output()}`);
-      // reproduce the coordinator's incident: the pane redraws (→ RESUMED) at the same moment .halt is removed.
-      startBusyLoop(p.env, p.session);
+      // reproduce the coordinator's incident: the pane goes to the BUSY SHAPE (classifyPaneState)
+      // at the same moment .halt is removed → RESUMED. (Shape-based since ruling D: the whole-pane
+      // hash is gone, so a busy pane must show the busy shape, not just redrawn content.)
+      makePaneBusy(p.env, p.session);
       fs.rmSync(path.join(gitRoot, ".halt")); // un-halt
       const resumed = await waitForOutput(mon, /SESSION-RESUMED gate/, 25000);
       assert.ok(resumed, `RESUMED must fire on the busy transition:\n${mon.output()}`);
@@ -529,7 +535,7 @@ test("G — removing .halt resets the staleness baseline: no OVERDUE/REPO-STALL 
       assert.ok(!/REPO-STALL/.test(mon.output()),
         `REPO-STALL must NOT fire right after un-halt (repo-age baseline reset):\n${mon.output()}`);
     } finally {
-      stopBusyLoop(p.env, p.session);
+      makePaneIdle(p.env, p.session);
       mon.child.kill("SIGKILL");
     mon.cleanup();
     }
@@ -607,33 +613,24 @@ function runInit(workspace, args, pluginRoot = path.resolve(__dirname, "..")) {
   });
 }
 
-// busy-loop controls for a hermetic probe (claude child is job %1; the busy loop is job %2).
-function startBusyLoop(env, session) {
-  tmux(["send-keys", "-t", session, "while true; do date +%s.%N; sleep 0.2; done &"], env);
-  tmux(["send-keys", "-t", session, "Enter"], env);
+// busy controls for a hermetic probe — SHAPE-based (ADR-016 Amendment / ruling D): the busy/idle
+// judgment is classifyPaneState's bottom-region shape, so the probe is driven to the busy shape by
+// TYPING "esc to interrupt" into its input line (no Enter — it stays in the status area, which is
+// exactly the shape the classifier's BUSY_RE reads). The old content-hash busy loop (dates scrolling
+// the pane) can no longer flip the verdict: with the whole-pane hash gone, a shape-stable pane is
+// idle by definition. The claude child is job %1; nothing here touches it.
+function makePaneBusy(env, session) {
+  tmux(["send-keys", "-t", session, "C-u"], env);   // clear any prior typed input
+  tmux(["send-keys", "-t", session, "esc to interrupt"], env);  // typed, no Enter → status-area busy
 }
-function stopBusyLoop(env, session) {
-  tmux(["send-keys", "-t", session, "kill %2"], env);
-  tmux(["send-keys", "-t", session, "Enter"], env);
+function makePaneIdle(env, session) {
+  tmux(["send-keys", "-t", session, "C-u"], env);   // clear the input line → shape back to idle
 }
 
 // startTouchLoop — simulate a live session writing to its transcript: touch <file> every 0.5s.
 function startTouchLoop(file) {
   return spawn("bash", ["-c", 'while true; do touch "$1"; sleep 0.5; done', "touch-loop", file],
     { stdio: "ignore" });
-}
-
-async function waitForPaneStable(env, session, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  const last3 = [];
-  while (Date.now() < deadline) {
-    const h = md5(tmux(["capture-pane", "-p", "-t", session], env).stdout);
-    last3.push(h);
-    if (last3.length > 3) last3.shift();
-    if (last3.length === 3 && last3.every((x) => x === last3[0])) return h;
-    await sleep(1000);
-  }
-  return null;
 }
 
 // ── AC1: plugin source is clean ────────────────────────────────────────────────────────────────────
@@ -773,11 +770,9 @@ test("noise gate — an idle transition with an OLD tick log IS reported (idle b
     const mon = spawnMonitor(p.env, `gate ${p.tmp} ${p.session}`, { tickLogs: `gate ${tick}`, interval: 1, loopMin: 5 });
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
-      startBusyLoop(p.env, p.session);
+      makePaneBusy(p.env, p.session); // shape-busy (ruling D): busy shape, not content redraw
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 25000), `RESUMED must fire on busy:\n${mon.output()}`);
-      stopBusyLoop(p.env, p.session);
-      const stable = await waitForPaneStable(p.env, p.session, 15000);
-      assert.ok(stable !== null, "pane must return to a stable idle state");
+      makePaneIdle(p.env, p.session); // back to the idle shape
       assert.ok(await waitForOutput(mon, /SESSION-IDLE gate/, 10000),
         `IDLE must fire when the tick is stale (idle but no tick):\n${mon.output()}`);
     } finally {
@@ -798,12 +793,10 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
     const mon = spawnMonitor(p.env, `gate ${p.tmp} ${p.session}`, { tickLogs: `gate ${tick}`, interval: 1, loopMin: 5 });
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
-      startBusyLoop(p.env, p.session);
+      makePaneBusy(p.env, p.session); // shape-busy (ruling D)
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED gate/, 25000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
-      stopBusyLoop(p.env, p.session);
-      const stable = await waitForPaneStable(p.env, p.session, 15000);
-      assert.ok(stable !== null, "pane must return to a stable idle state");
-      await sleep(3500); // ≥3 rounds after stability — IDLE would have fired by now if not gated
+      makePaneIdle(p.env, p.session); // back to the idle shape
+      await sleep(3500); // ≥3 rounds after idle — IDLE would have fired by now if not gated
       assert.ok(!/SESSION-IDLE/.test(mon.output()),
         `IDLE must be SILENT when the tick is fresh (healthy cycle end, noise gate):\n${mon.output()}`);
     } finally {
@@ -841,12 +834,10 @@ test("AC21 — with LOOP_MIN=20 and a fresh heartbeat (hmin<20), the shared even
     const mon = spawnMonitor(p.env, `ac21 ${p.tmp} ${p.session}`, { tickLogs: `ac21 ${tick}`, interval: 1, loopMin: 20 });
     try {
       await sleep(2500); // idle baseline: PREV_IDLE=1
-      startBusyLoop(p.env, p.session);
+      makePaneBusy(p.env, p.session); // shape-busy (ruling D)
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac21/, 25000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
-      stopBusyLoop(p.env, p.session);
-      const stable = await waitForPaneStable(p.env, p.session, 15000);
-      assert.ok(stable !== null, "pane must return to a stable idle state");
-      await sleep(3500); // ≥3 rounds after stability — IDLE would have fired by now if not gated
+      makePaneIdle(p.env, p.session); // back to the idle shape
+      await sleep(3500); // ≥3 rounds after idle — IDLE would have fired by now if not gated
 
       // AC21d: the holder's stdout must stay silent on a fresh-heartbeat idle (LOOP_MIN gate).
       assert.ok(!/SESSION-IDLE ac21/.test(mon.output()),
@@ -981,9 +972,8 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
     // (same isolation test A uses).
     const mon = spawnMonitor(p.env, `esc ${p.tmp} ${p.session}`, { tickLogs: `esc /nonexistent` });
     try {
-      await sleep(3000); // idle baseline: bash prompt, no esc flag
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
-      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      await sleep(3000); // idle baseline: bash prompt, no busy shape
+      makePaneBusy(p.env, p.session); // type "esc to interrupt" into the input line → busy SHAPE
       const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 25000);
       assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
       const out = mon.output();
@@ -991,9 +981,7 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
         `RESUMED must name the semantic flag as the cause (AC3/AC6 — 可解释、无需再采样):\n${out}`);
       assert.ok(/上次收到输入：取不到/.test(out),
         `RESUMED must say 取不到 when no transcript is configured (AC7 — 不得省略该字段):\n${out}`);
-      tmux(["send-keys", "-t", p.session, "C-u"], p.env);
-      tmux(["send-keys", "-t", p.session, "clear"], p.env);
-      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      makePaneIdle(p.env, p.session); // clear the input → back to the idle shape
       assert.ok(await waitForOutput(mon, /SESSION-IDLE esc/, 8000),
         `IDLE must fire once the semantic flag disappears:\n${mon.output()}`);
     } finally {
@@ -1137,8 +1125,7 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
       await sleep(3000); // idle baseline
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
-      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       // Window is generous (25000ms, not 8000ms): under the full suite's ~4× oversubscription the
       // monitor's per-round tmux capture-pane + transcript reads stretch several-fold (observed
       // >11s with no event in suite7/suite12), and the mechanism is correct — it fires at ~5s in
@@ -1177,8 +1164,7 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
       await sleep(3000); // idle baseline
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
-      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
       const li = out.match(/上次收到输入：([^）]*)/);
@@ -1213,8 +1199,7 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
     try {
       await sleep(3000); // idle baseline
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
-      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      makePaneBusy(p.env, p.session); // shape-busy (ruling D): typed esc → busy shape
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
       assert.ok(/成因：；/.test(out),
@@ -1450,7 +1435,19 @@ test("M6 (AC20c/AC7) — a SESSION-* event + HEARTBEAT land in the shared events
     content = fs.readFileSync(eventsFile, "utf8");
     assert.match(content, /SESSION-GONE sh/, `SESSION-GONE must land in the shared file (AC20c: 第二方不挂载即可读到同一批事件):\n${content}`);
     assert.match(content, /"event":"SESSION-GONE"/, `the event must be JSON-structured:\n${content}`);
-    assert.equal(countMountProcesses(globalDir), 1, "reading the shared file must not require a second mount");
+    // The holder's observer forks TRANSIENT subshells for its per-round command substitutions
+    // (same cmdline + env, gone within a loop tick); countMountProcesses cannot distinguish them
+    // from a real second holder at an arbitrary instant. The AC is "no PERMANENT second monitor" —
+    // poll until the count settles at 1 (same settle-poll M3 uses). A real second holder keeps 2+
+    // persistently and fails the bounded wait.
+    let settled = 0;
+    const dlSettle = Date.now() + 5000;
+    while (Date.now() < dlSettle) {
+      const c = countMountProcesses(globalDir);
+      if (c === 1) { settled = c; break; }
+      await sleep(50);
+    }
+    assert.equal(settled, 1, "reading the shared file must not require a second mount (settled count must be 1)");
 
     // kill the holder → the heartbeat stops growing → a subscriber sees staleness (AC7, no one re-mounts)
     const lastTsBefore = Number([...fs.readFileSync(eventsFile, "utf8").matchAll(/"ts":(\d+)/g)].at(-1)[1]);
@@ -1768,4 +1765,120 @@ test("Contract — --selfcheck passes (exit 0): heartbeat_source_count ≥ 3, in
   assert.match(r.stdout, /no-output heartbeat STALE/,
     `selfcheck must prove zero-output staleness (AC3 真阳性保留):\n${r.stdout}`);
   assert.match(r.stdout, /selfcheck: ALL PASS/, `selfcheck must report ALL PASS:\n${r.stdout}`);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 姊妹任务（gap-session-liveness-hashes-the-token-counter-as-if-it-were-work）：
+// 忙闲判据从「mask 后整屏 md5」改为 classifyPaneState 的底部区域【形状分类】
+//（ADR-016 Amendment 2026-08-04 / 裁定 D）。AC1/AC4/AC5/AC7/AC9 的正控制。
+// ═════════════════════════════════════════════════════════════════════════════
+
+test("AC1 — the header documents the chrome line set (each with WHY it is not an activity signal) and the classifyPaneState integration (ruling D)", () => {
+  const src = fs.readFileSync(SCRIPT, "utf8");
+  // chrome 行集合逐条进文件头，每条附理由（AC1：用真实 pane 采样支持）
+  assert.ok(src.includes("/clear to save") && src.includes("token 计数行"),
+    "AC1: the token-counter chrome line must be documented in the header");
+  assert.ok(src.includes("✽") && src.includes("转圈"),
+    "AC1: the spinner chrome line must be documented in the header");
+  assert.ok(src.includes("✻") && src.includes("残留"),
+    "AC1: the ✻ residue chrome line must be documented in the header");
+  assert.ok(src.includes("为什么它不是活动信号") || src.includes("为什么它不是活动"),
+    "AC1: each chrome entry must carry its reason (为什么它不是活动信号)");
+  // 机制：消费 classifyPaneState，不是整屏哈希（裁定 D / ADR-016 Amendment）
+  assert.ok(src.includes("classifyPaneState"),
+    "AC1: the busy judgment must consume classifyPaneState (ruling D)");
+  assert.ok(!/(capture-pane[^#]*md5sum|md5sum[^#]*capture-pane)/.test(src),
+    "ADR-016 Amendment: no capture-pane→md5sum whole-screen hash may remain in session-liveness.sh");
+});
+
+test("AC5 — an empty pane capture / empty region is NOT silently judged idle: --pane-state on empty input reports busy=1 (the anti-filter guard)", () => {
+  // empty input → classifier tier-2 unknown with an EMPTY region → the AC5 guard must NOT silently
+  // call it idle (a busy session whose pane reads empty would be reported idle forever — silent).
+  const r = spawnSync("bash", [SCRIPT, "--pane-state"], { input: "", encoding: "utf8" });
+  assert.equal(r.status, 0, `--pane-state must exit 0:\n${r.stderr}`);
+  assert.match(r.stdout, /state=unknown busy=1/, `empty pane must be non-idle (AC5 anti-filter):\n${r.stdout}`);
+  // blank-only input → bottom region is empty → same guard.
+  const blank = spawnSync("bash", [SCRIPT, "--pane-state"], { input: "\n\n\n", encoding: "utf8" });
+  assert.match(blank.stdout, /busy=1/, `blank-only pane must be non-idle (AC5):\n${blank.stdout}`);
+  // control: a real idle shape (❯ present) is still idle — the guard does not block normal idle.
+  const idle = spawnSync("bash", [SCRIPT, "--pane-state"], { input: "❯ \n---\n", encoding: "utf8" });
+  assert.match(idle.stdout, /state=waiting-input busy=0/, `a real idle shape must stay idle:\n${idle.stdout}`);
+});
+
+test("AC4 — a pane whose ONLY real change is the agent task line (↓ NN.Nk tokens) while the busy shape persists stays BUSY (no false idle); the idle→busy transition RESUMEs within one polling cycle and the agent line is NOT filtered", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-ac4");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // unit level: the agent task line is REAL content — classifyPaneState preserves it in the
+    // region and the busy SHAPE (esc in the status area) drives the busy verdict. Two snapshots
+    // that differ ONLY in the agent task line BOTH classify busy (real work = busy shape present).
+    const snap1 = "◯ general-purpose Reading session-liveness.test.mjs 1m 35s · ↓ 57.3k tokens\n───────────────────────────────\n❯ \n───────────────────────────────\nesc to interrupt";
+    const snap2 = "◯ general-purpose Reading session-liveness.test.mjs 1m 41s · ↓ 61.2k tokens\n───────────────────────────────\n❯ \n───────────────────────────────\nesc to interrupt";
+    for (const [label, snap] of [["v1", snap1], ["v2", snap2]]) {
+      const unit = spawnSync("bash", [SCRIPT, "--pane-state"], { input: snap, encoding: "utf8" });
+      assert.match(unit.stdout, /state=busy busy=1/, `AC4: agent-line snapshot ${label} + busy shape must be busy:\n${unit.stdout}`);
+      // the agent task line must be PRESERVED (real content, not filtered by chrome stripping)
+      const cls = spawnSync("node", ["--no-warnings", "--experimental-strip-types",
+        path.resolve(__dirname, "..", "scripts", "pane-state-classify.ts"), "--classify"], { input: snap, encoding: "utf8" });
+      assert.ok(cls.stdout.includes("general-purpose") && cls.stdout.includes("tokens"),
+        `AC4: the agent task line must be preserved in the classifier region:\n${cls.stdout}`);
+    }
+    const mon = spawnMonitor(p.env, `ac4 ${p.tmp} ${p.session}`, { tickLogs: `ac4 /nonexistent` });
+    try {
+      await sleep(2500); // idle baseline
+      // real work in a Claude Code pane: the agent task line is visible (printed) AND the busy
+      // shape (esc typed) is present. Idle → busy must surface as SESSION-RESUMED within a few
+      // polling cycles (AC7: no debounce was added to the busy path).
+      tmux(["send-keys", "-t", p.session, "printf '◯ general-purpose Reading session-liveness.test.mjs 1m 35s · ↓ 57.3k tokens\\n'"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      makePaneBusy(p.env, p.session);
+      const t0 = Date.now();
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac4/, 8000),
+        `AC4: RESUMED must fire promptly when real work starts:\n${mon.output()}`);
+      const latencyMs = Date.now() - t0;
+      assert.ok(latencyMs < 8000, `AC7: busy_latency must stay within polling-cycle range (no debounce on the busy path): ${latencyMs}ms`);
+      assert.ok(/成因：esc to interrupt 标志出现/.test(mon.output()),
+        `AC4: the RESUMED cause must name the busy shape:\n${mon.output()}`);
+      // while busy, only the agent task line advances (↓ 57.3k → 61.2k) — the busy shape persists,
+      // so no false IDLE (the AC4 negative-control direction: real content must not read as idle).
+      tmux(["send-keys", "-t", p.session, "printf '◯ general-purpose Reading session-liveness.test.mjs 1m 41s · ↓ 61.2k tokens\\n'"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      makePaneBusy(p.env, p.session); // re-affirm the busy shape in the status area
+      await sleep(3500); // ≥3 rounds
+      assert.ok(!/SESSION-IDLE ac4/.test(mon.output()),
+        `AC4: the advancing agent task line must NOT read as idle (real work continues):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC9 — a known-continuous-work window reports SESSION-RESUMED at most ONCE (the 23-RESUMED noise is gone): the busy shape persists, so idle is never entered", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-ac9");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `ac9 ${p.tmp} ${p.session}`, { tickLogs: `ac9 /nonexistent` });
+    try {
+      await sleep(2500); // idle baseline
+      // continuous work = the busy shape (esc typed) held across several rounds. With the busy
+      // shape present the pane is NEVER judged idle, so RESUMED fires at most once (the real work
+      // of the inner session no longer flip-flops idle→busy the way the old masked-hash did).
+      makePaneBusy(p.env, p.session);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac9/, 8000),
+        `AC9: RESUMED must fire once on the busy transition:\n${mon.output()}`);
+      await sleep(5000); // ≥4 more rounds of continuous busy shape (esc stays in the input line)
+      const resumedCount = (mon.output().match(/SESSION-RESUMED ac9/g) || []).length;
+      assert.ok(resumedCount <= 1, `AC9: continuous busy work must report RESUMED at most once, got ${resumedCount}:\n${mon.output()}`);
+      assert.ok(!/SESSION-IDLE ac9/.test(mon.output()),
+        `AC9: continuous busy work must not report IDLE:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
 });

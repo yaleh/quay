@@ -163,6 +163,25 @@ export function selfcheck(): boolean {
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isDirect) {
-  const ok = selfcheck();
-  process.exit(ok ? 0 : 1);
+  if (process.argv[2] === "--classify") {
+    // Shell-consumer seam (session-liveness.sh): read the pane text on stdin, print the
+    // classification as PLAIN TEXT — line 1 = state, line 2 = the bottom region (real newlines).
+    // Pure — no tmux, no file reads, no writes beyond stdout. The busy/idle judgment in
+    // session-liveness.sh consumes THIS instead of a whole-pane hash (ADR-016 Amendment 2026-08-04,
+    // ruling D): the verdict is a SHAPE of the bottom region, so volatile chrome (token counter /
+    // spinner / ✻ residue) can never flip it. Plain text (not JSON) keeps the bash consumer to ONE
+    // subprocess per round (fewer transient shells → less load on the mount-count tests).
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (d) => { input += d; });
+    process.stdin.on("end", () => {
+      const r = classifyPaneState(input);
+      process.stdout.write(r.state + "\n" + r.region + "\n");
+      process.exit(0);
+    });
+    process.stdin.resume();
+  } else {
+    const ok = selfcheck();
+    process.exit(ok ? 0 : 1);
+  }
 }

@@ -10,9 +10,11 @@
 #
 # 事件与它们的信号源（AC7，规格 AC14）——每个事件到底在看什么，哪些是会话面、哪些不是：
 #   SESSION-GONE / SESSION-BACK      tmux pane 里 claude 进程的存在性        —— 会话面
-#   SESSION-IDLE / SESSION-RESUMED   相邻两轮 pane 哈希相同=空闲；转换后一轮内报 —— 会话面
-#                                    （但哈希输入含 chrome 等易变区，见姊妹任务
-#                                    gap-session-liveness-hashes-the-token-counter-as-if-it-were-work）
+#   SESSION-IDLE / SESSION-RESUMED   相邻两轮 pane 的【形状】从空闲转忙/忙转闲；
+#                                    忙闲判据 = classifyPaneState（底部区域形状分类，
+#                                    ADR-016 Amendment / 裁定 D）——不是整屏哈希
+#                                    （姊妹任务 gap-session-liveness-hashes-the-token-counter-
+#                                    as-if-it-were-work 把假阳性源从哈希输入里去掉）
 #   REPO-STALL                       仓库 ≥STALL_MIN 分钟无新提交              —— 仓库信号，不是会话面
 #   SESSION-OVERDUE                  心跳源 mtime ≥OVERDUE_MIN 未动             —— 会话面（心跳源=transcript）
 #   SESSION-STATUS                   --once 接缝：每目标一行（名字/活/pid）
@@ -89,11 +91,19 @@
 # 屏幕语义标志 + 屏蔽易变区 + 交叉正控制 + payload + 每类阈值。承接前任务未完成的
 # AC9-AC14（阶段一 = 信号源 + 基线，见上）。各 AC 的实现点：
 #   AC1（原AC10/规格AC18）主信号改语义标志：`esc to interrupt` 按【存在性】判忙，
-#       不按计数（实测管理者 4 次/内层 1 次——计数无意义）。屏蔽转圈耗时行（✽）、
-#       token 计数行（`/clear to save …`）、提示语行；`✻ …` 残留不得作为忙的判据。
-#       判忙 = esc 标志存在 或 屏蔽易变区后的内容区有变化——后者保住非 TUI 探针 /
-#       subagent 输出这类真活动（TUI 之外还有内容在变）。屏蔽规则集中在 mask_pane()，
-#       逐条附「为什么它不是活动信号」（见函数注释）。
+#       不按计数（实测管理者 4 次/内层 1 次——计数无意义）。
+#       【2026-08-06 裁定 D 改判】忙闲判据不再用「mask 后整屏 md5」——那被判成
+#       ADR-016 Amendment 禁止的整屏哈希，且正是 token 计数假阳性的来源。改用
+#       `classifyPaneState`（plugin/scripts/pane-state-classify.ts，纯函数）：只读
+#       底部区域（输入框 + 状态行）的【形状】，枚举五态（waiting-input /
+#       permission-prompt / busy / error-banner / unknown）。busy / permission-prompt /
+#       error-banner ⇒ 忙；waiting-input ⇒ 闲；unknown ⇒ 闲（transcript 融合兜底）。
+#       转圈耗时行（✽）、token 计数行（`/clear to save …`）、`✻ …` 残留天然进不了
+#       判据——形状分类读的是「有没有 esc/❯/权限框」这种结构，不是逐字节比较，
+#       所以 chrome 的抖动永远不会被判成活动（本任务假阳性源在此吸收）。
+#       屏蔽规则仍集中记录在 mask_pane()（AC1 的 chrome 行集合，--mask 接缝可测），
+#       但忙闲判据不再依赖它。AC5（防过滤）：pane 捕获为空/区域为空 ⇒ 不判空闲，
+#       显式告警（会话若在忙不会被静默漏掉）。
 #   AC2（原AC11/规格AC18正控制）标志失效必须可发现：屏幕与 transcript 交叉正控制——
 #       transcript 刚写过（会话确定在动）而屏幕判空闲 ⇒ 报 SESSION-MARKER-STALE。
 #       只对「心跳源是 transcript」的目标成立（tick 日志是 loop 写的，不是会话活动的证据）。
@@ -123,10 +133,14 @@
 #       无该标记的空闲仍走常规 SESSION-IDLE。
 #
 # 两种信号（AC4/规格AC17）：各自的盲区与同时用时以谁为准
-#   - 屏幕（tmux capture-pane）：语义清晰、即时、是「人真正看的那几个标志」；但依赖 tmux，
-#     且 TUI 布局/文案一改标志就失效——失效形态是【静默】（找不到 esc to interrupt 就永远
-#     判空闲）。易变区（转圈耗时/token 计数/提示语/✻ 残留）必须屏蔽，否则把 chrome 的抖动
-#     读成活动（姊妹任务确认的假阳性源）。
+#   - 屏幕（tmux capture-pane）：语义清晰、即时、是「人真正看的那几个标志」。判据 =
+#     classifyPaneState 的底部区域【形状分类】（ADR-016 Amendment / 裁定 D）——不是整屏哈希：
+#     枚举五态（waiting-input / permission-prompt / busy / error-banner / unknown），
+#     busy/permission-prompt/error-banner 判忙、waiting-input 判闲、unknown 判闲（transcript
+#     融合兜底）。chrome（转圈耗时/token 计数/提示语/✻ 残留）天然进不了判据——形状分类
+#     读结构不读字节，chrome 的抖动不会再被判成活动（姊妹任务确认的假阳性源在此吸收）。
+#     仍依赖 tmux，且 TUI 布局/文案一改标志就失效——失效形态是【静默】；AC5 兜住
+#     「捕获为空/区域为空」不让它静默判闲。
 #   - transcript（~/.claude/projects/<slug>/<id>.jsonl）：不依赖 tmux、不受重绘影响、stat 便宜；
 #     但只在【工具调用】时写（读代码/纯思考/等 subagent 时主 transcript 不写——subagent 写
 #     在 <id>/subagents/，heartbeat_mtime 并上），且 pid→文件映射受 /clear 与 --resume 解耦，
@@ -191,8 +205,17 @@ IDLE_DEBOUNCE_ROUNDS=${IDLE_DEBOUNCE_ROUNDS:-2}
 # 文案常数（LOOP_MIN 含义拆分，2026-08-03）：OVERDUE 消息里的「预期周期」是固定描述，不是运行时
 # 阈值——LOOP_MIN 可以被设成 0（管理者配置），而「预期周期 0 分钟」是文案 bug。两个含义拆开。
 EXPECTED_CYCLE_MIN=20
-declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UNHALT_TS \
-  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE IDLE_CONSEC SEEN_BUSY
+declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
+  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY
+
+# ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
+# 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
+# SL_NODE 是测试接缝（分别覆盖分类器路径与 node 命令）；生产用 BASH_SOURCE 自定位到同目录的
+# pane-state-classify.ts，不硬编码绝对路径。放在文件前部（L0/函数/接缝之前），因为 --pane-state
+# 接缝与 _sl_pane_verdict 都要用到。
+_sl_pane_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo .)"
+SL_CLASSIFY="${SL_CLASSIFY:-$_sl_pane_dir/pane-state-classify.ts}"
+SL_NODE="${SL_NODE:-node}"
 
 # ── L0（gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX，AC3）──
 # 本监视器必须读【真实默认服务端】上的会话，所以不走 tmux-isolated.sh（那会指向一个没有真实
@@ -222,17 +245,20 @@ printf 'session-liveness: starting pid=%s file=%s md5=%s\n' \
 
 # ── 阶段二新增的纯函数（在 case 之前定义，供测试接缝直接调用）────────────────────────────
 
-# mask_pane —— 屏蔽「不是会话内容」的易变区（AC1/规格 AC18）。每条屏蔽规则附「为什么它不是
-# 活动信号」：
-#   * `/clear to save …`（token 计数行）：停泊会话唯一会变的东西——姊妹任务确认的假阳性源
+# mask_pane —— chrome 行集合的【记录 + --mask 诊断接缝】（AC1：每条附「为什么它不是活动信号」）。
+# 【2026-08-06 裁定 D 改判】忙闲判据不再消费 mask_pane 的输出（它不再流向 md5sum——ADR-016
+# Amendment 禁止 capture-pane→md5 一族）。判据改由 classifyPaneState 的底部区域形状分类承担：
+# chrome 天然进不了判据（形状分类读结构不读字节）。本函数保留为 AC1 的 chrome 行集合文档与
+# --mask 可测接缝（`bash session-liveness.sh --mask < pane.txt` 打印剥离后的内容区）：
+#   * `/clear to save …`（token 计数行）：停泊会话唯一会变的东西——本任务确认的假阳性源
 #     （archguard 停泊 pane 只有 150.2k→151.2k 变，被判成一堆事件）。这是提示语行的 chrome。
 #   * 含 ✽ 的行（转圈耗时行）：活跃 spinner，每秒跳——「人不看的部分」。
 #   * 含 ✻ 的行（`✻ Baked for …` 残留）：上一次动作留在屏上的字，五个会话全部存在（含空闲的），
 #     不能当忙的判据（外层实测：两个停泊 pane 各 2/1，而它们 esc=0）。
 # 注意：不按关键词 `tokens` 一刀切——subagent 任务行 `◯ general-purpose … ↓ 57.3k tokens`
 # 是真内容，随真实工作而变，必须保留（滤掉它=把假阳性换成假阴性，后者静默、更糟）。
-# 输出保留真内容；剥离后内容区为空时主循环的 busy_sem（esc 标志）仍能独立判忙，
-# 不会静默判空闲（AC1 的「剥离后内容区不得为空」防过滤保障）。
+# 防过滤（AC5）由主循环承担：pane 捕获为空 / 分类器区域为空 ⇒ 不判空闲、显式 WARN，
+# 不依赖 mask_pane 输出是否为空。
 mask_pane() {
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
@@ -242,6 +268,32 @@ mask_pane() {
       *) printf '%s\n' "$line" ;;
     esac
   done
+}
+
+# _sl_pane_verdict —— classifyPaneState + AC5 防过滤守卫的【共享实现】（主循环与 --pane-state
+# 接缝共用，避免两处逻辑漂移）。入参：$1 = pane 原始文本。结果写到三个全局：_sl_pane_state /
+# _sl_pane_busy / _sl_pane_region。
+#   state ∈ busy|permission-prompt|error-banner ⇒ busy=1；waiting-input/unknown ⇒ busy=0；
+#   空捕获（$1 为空）或分类器区域为空 ⇒ busy=1（AC5：无内容可判不得静默判空闲）。
+_sl_pane_verdict() {
+  local raw=$1 cls
+  _sl_pane_state="unknown"; _sl_pane_busy=0; _sl_pane_region=""
+  if [ -z "$raw" ]; then
+    _sl_pane_busy=1
+    return 0
+  fi
+  # --classify prints "state\nregion"（纯文本，见 pane-state-classify.ts 接缝注释）。用 bash 字符串
+  # 切分（${var%%$'\n'*} / ${var#*$'\n'}）而不是再开几个 $(...) 子 shell——每轮只多一个 node 子进程，
+  # 压住 mount-count 测试的瞬态进程竞争（M3 注释记录过同类竞争）。
+  cls=$(printf '%s\n' "$raw" | "$SL_NODE" --no-warnings --experimental-strip-types "$SL_CLASSIFY" --classify 2>/dev/null || printf 'unknown\n')
+  _sl_pane_state=${cls%%$'\n'*}
+  _sl_pane_region=${cls#*$'\n'}
+  [ -z "$_sl_pane_state" ] && _sl_pane_state="unknown"
+  case "$_sl_pane_state" in
+    busy|permission-prompt|error-banner) _sl_pane_busy=1 ;;
+    *) _sl_pane_busy=0 ;;   # waiting-input / unknown → 闲；unknown 的歧义由 transcript 融合兜底
+  esac
+  [ -z "$_sl_pane_region" ] && _sl_pane_busy=1
 }
 
 # transcript_api_error_count —— 最近 API_ERROR_WINDOW 条记录里「结构性」isApiErrorMessage 字段
@@ -440,6 +492,12 @@ ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;
   --mask) mask_pane; exit 0 ;;
+  --pane-state)
+    # 诊断接缝（AC4/AC5 单测直接调用）：从 stdin 读 pane 文本，跑与主循环相同的
+    # _sl_pane_verdict（classifyPaneState + AC5 守卫），打印 "state=<s> busy=<0|1>"。
+    _sl_pane_verdict "$(cat)"
+    echo "state=$_sl_pane_state busy=$_sl_pane_busy"
+    exit 0 ;;
   --api-errors)
     [ -n "${2:-}" ] || { echo "用法: $0 --api-errors <transcript>" >&2; exit 2; }
     transcript_api_error_count "$2"; exit 0 ;;
@@ -452,7 +510,7 @@ case "${1:-}" in
     transcript_last_message_type "$2"; exit 0 ;;
   --selfcheck)
     _sl_selfcheck; exit $? ;;
-  -h|--help) echo "用法: $0 [--once] [--mask] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--selfcheck]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--selfcheck]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -801,22 +859,31 @@ while true; do
     # 人 2026-08-03 指出：「我可以接受让 outer 等待，但应当是你及时知道发生了什么并决定让它等待。」
     # 原来的事件集只有滞后指标：会话跑完一次操作转入空闲时，进程活着、刚提交过，全部静默。
     #
-    # 判据（阶段二，AC1/规格 AC18）：屏幕信号改为【语义标志 + 屏蔽易变区】，不是整屏哈希。
-    #   忙 = `esc to interrupt` 存在（按【存在性】判，不按计数——实测管理者 4 次/内层 1 次，
-    #   计数无意义）或 屏蔽易变区后的内容区有变化（保住非 TUI 探针 / subagent 输出这类真活动）。
-    #   闲 = 两样都没有。易变区（转圈耗时 ✽ / token 计数 /clear to save / ✻ 残留）被 mask_pane
-    #   剥离，所以「停泊会话只有 token 计数器在变」不会判忙（姊妹任务的假阳性源在此吸收）。
-    # 不用 /proc CPU 增量：空闲的 Claude Code TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
+    # 判据（裁定 D / ADR-016 Amendment 2026-08-04）：屏幕信号 = classifyPaneState 的
+    #   底部区域【形状分类】——不是整屏哈希（md5(capture-pane) 一族已被 ADR 禁止，无论是否
+    #   先 mask）。忙 = 形状是 busy（esc to interrupt 在状态区）/ permission-prompt /
+    #   error-banner；闲 = waiting-input / unknown（unknown 由 transcript 融合兜底，AC5 只
+    #   兜「捕获为空/区域为空」不静默判闲）。chrome（转圈耗时 ✽ / token 计数 /clear to save /
+    #   ✻ 残留）天然进不了判据——形状分类读结构不读字节，所以「停泊会话只有 token 计数器
+    #   在变」不会判忙（本任务假阳性源在此吸收）。不用 /proc CPU 增量：空闲的 Claude Code
+    #   TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
     if [ "$alive" = "1" ]; then
       raw=$("${_sl_tmux[@]}" capture-pane -p -t "$target" 2>/dev/null)
-      busy_esc=$(printf '%s\n' "$raw" | grep -c 'esc to interrupt' 2>/dev/null || true)
-      [ -z "$busy_esc" ] && busy_esc=0
-      busy_sem=$([ "$busy_esc" -ge 1 ] 2>/dev/null && echo 1 || echo 0)
-      masked=$(printf '%s\n' "$raw" | mask_pane)
-      h=$(printf '%s' "$masked" | md5sum | cut -c1-16)
-      if [ -n "${PREV_HASH[$name]:-}" ]; then
-        content_changed=$([ "$h" = "${PREV_HASH[$name]}" ] && echo 0 || echo 1)
-        pane_busy=$(( busy_sem || content_changed ))
+      _sl_pane_verdict "$raw"
+      pane_state="$_sl_pane_state"; busy_sem="$_sl_pane_busy"; region="$_sl_pane_region"
+      if [ -z "${raw:-}" ] || [ -z "$region" ]; then
+        # AC5（防过滤）：pane 捕获为空（tmux 失败 / pane 不可读）或分类器区域为空 ⇒ 不判空闲
+        # ——忙会话若读到空屏会被永远报成空闲（静默）。显式 WARN 一次 + 判非闲（_sl_pane_verdict
+        # 已把 busy 置 1）。
+        if [ "${PREV_PANE_EMPTY[$name]:-0}" = "0" ]; then
+          echo "session-liveness: WARN $name 的 pane 内容为空/区域为空——不判空闲（AC5 防过滤）" >&2
+          PREV_PANE_EMPTY[$name]=1
+        fi
+      else
+        PREV_PANE_EMPTY[$name]=0
+      fi
+      if [ -n "${PREV_STATE[$name]:-}" ]; then
+        pane_busy=$busy_sem
         pane_idle=$(( 1 - pane_busy ))
         # 阶段三（AC1）：transcript 最后一条消息类型接入忙闲判据。transcript 侧优先级更高——
         # pending-tool-use / user-input ⇒ 确定忙，无论 pane 如何（AC5 忙判据零漏报）。
@@ -830,7 +897,8 @@ while true; do
         fi
         fused_busy=$(( pane_busy || transcript_busy ))
         idle=$(( 1 - fused_busy ))
-        # AC2 去抖：连续 fused-idle 轮数计数；忙轮清零。pane 哈希降级为候选闲辅助（AC7）。
+        # AC2 去抖：连续 fused-idle 轮数计数；忙轮清零。pane 形状分类是候选闲的辅助
+        # （AC7）——transcript 最后一条消息类型是忙闲的结构信号。
         if [ "$idle" = "1" ]; then
           IDLE_CONSEC[$name]=$(( ${IDLE_CONSEC[$name]:-0} + 1 ))
         else
@@ -847,8 +915,14 @@ while true; do
             # AC6/AC7：SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）+ 上次收到输入时刻。
             # 判据：收到事件后无需再采样即可判真假（原外层 3-4 次调用，改后 1 次）。
             cause_parts=()
-            [ "$busy_sem" = "1" ] && [ "${PREV_BUSY_SEM[$name]:-0}" = "0" ] && cause_parts+=("esc to interrupt 标志出现")
-            [ "$content_changed" = "1" ] && cause_parts+=("屏蔽易变区后的屏幕内容区变化")
+            if [ "$busy_sem" = "1" ] && [ "${PREV_BUSY_SEM[$name]:-0}" = "0" ]; then
+              case "$pane_state" in
+                busy) cause_parts+=("esc to interrupt 标志出现（底部区域分类器判忙）") ;;
+                permission-prompt) cause_parts+=("权限确认框出现") ;;
+                error-banner) cause_parts+=("错误横幅出现") ;;
+                *) cause_parts+=("屏幕形状判忙（$pane_state）") ;;
+              esac
+            fi
             cause=""
             for part in "${cause_parts[@]:-}"; do
               [ -n "$part" ] || continue
@@ -930,10 +1004,11 @@ while true; do
           PREV_API_BLOCKED[$name]=0
         fi
       fi
-      PREV_HASH[$name]=$h
+      PREV_STATE[$name]=$pane_state
       PREV_BUSY_SEM[$name]=$busy_sem
     else
-      PREV_HASH[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
+      PREV_STATE[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
+      PREV_PANE_EMPTY[$name]=0
       IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0
     fi
 
