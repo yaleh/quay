@@ -160,7 +160,10 @@ test('AC2 — fast-mode-telemetry.ts has ONE physical copy; plugin/scripts/ is a
   const copies = [];
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist') continue;
+      // Skip the gitignored pack-time snapshot packages/quay/plugin/ (package.sh materializes a
+      // byte-identical copy of plugin/ so the tarball carries it) — it is NOT a second authority.
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' ||
+          (dir === path.join(repoRoot, 'packages', 'quay') && e.name === 'plugin')) continue;
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.name === 'fast-mode-telemetry.ts' && !fs.lstatSync(p).isSymbolicLink()) copies.push(p);
