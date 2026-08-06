@@ -69,22 +69,90 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **遥测括号与真实 subagent 对齐**——inProgress[] 反映真实并发（红窗遗留的未闭合 start 被
+- [x] AC1: **遥测括号与真实 subagent 对齐**——inProgress[] 反映真实并发（红窗遗留的未闭合 start 被
        reconcile/闭合；nbsp-fix 类新任务正确记录）
-- [ ] AC2: **空槽机械可见**——外层能从遥测（或等价结构信号）读出「还剩几个并发槽」，不再依赖内层
+      → 新增 `--slot-status` 纯读子命令（`analyzeSlotStatus`）：对 inProgress[] 跑与 `--reconcile` 同一
+      执行者可观测探针的 **dry-run**，分 `real_in_flight`（执行者仍存活）vs `stale_brackets`（`--reconcile`
+      会闭合的幽灵括号）。`stale_brackets > 0` ⇒ 红窗遗留可见且可由 `--reconcile` 闭合；`--report` 的
+      `inProgress[]` 括号视角保持原样。scoped 测试 `SLOT-STATUS — 5 stale brackets + 1 real agent…` 全绿。
+- [x] AC2: **空槽机械可见**——外层能从遥测（或等价结构信号）读出「还剩几个并发槽」，不再依赖内层
        手写叙事 markdown
-- [ ] AC3: **状态自检①从装饰变判据**——in-flight 反映真实在飞（不再恒真）；并发违规能被判据抓住
+      → `--slot-status --cap <n> --json` 输出 `slots_free = max(0, cap − real_in_flight)`——纯读（不写盘，
+      观测轮询不弄脏工作树），外层不再读 batch2-queue-state.md 式手写叙事。`orchestrator-loop-tick.md`
+      步骤 4b 已加「槽位视角」小节，步骤 1b 收尾加「括号对账」。
+- [x] AC3: **状态自检①从装饰变判据**——in-flight 反映真实在飞（不再恒真）；并发违规能被判据抓住
        （5 个遗留括号 > cap 3 不应误判健康态，1 个真实 agent 不应误判满负荷）
-- [ ] AC4: **--task-start/--task-end 调用恢复**——派发路径在派发/收尾时正确调用这对（遥测从历史归档
+      → `fast-mode-loop-tick.md` 状态自检①判据从「遥测 inProgress[] 长度 ≤ cap」改为
+      「`--slot-status` 的 `real_in_flight` ≤ `effective_cap`」——5 遗留括号 + 1 真实 agent ⇒ real=1 ≤ cap
+      判健康（不再 5>3 假红）；`real_in_flight > cap` ⇒ 真并发违规被抓。scoped 测试
+      `SLOT-STATUS — real_in_flight > cap is a detectable violation` 全绿。
+- [x] AC4: **--task-start/--task-end 调用恢复**——派发路径在派发/收尾时正确调用这对（遥测从历史归档
        变回当前状态；阻塞信号消费族同源）
-- [ ] AC5: **回归控制**——今晚形态（5 红窗遗留括号 + 1 真实 agent）下，外层能看到「11 槽位闲置」而非
+      → 调用点确认并在文档固化：inner 派发 `fast-mode-loop-tick.md` 步骤 3.5 写 `--task-start`；外层收尾
+      `orchestrator-loop-tick.md` 步骤 1b 写 `--task-end`（`--reconcile` 兜底执行者已消失的）。新增机械
+      可判据：`--slot-status` 的 `brackets_reflect_subagents: false` ⇒ 有陈旧括号（`--reconcile`）或
+      `--task-start`/`--task-end` 没调齐（AC4 违规）。外层步骤 1b 收尾批次后跑 `--slot-status` 对账。
+- [x] AC5: **回归控制**——今晚形态（5 红窗遗留括号 + 1 真实 agent）下，外层能看到「11 槽位闲置」而非
        「满负荷」或「空」（实测输出贴任务体）
-- [ ] AC6: **AC10 诚实记账**——pre-friction（无东西在疼），计 +1 ⇒ 6 → 7
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC8: **task-over-90m 判据源统一**——over-90m 用遥测的 in-progress（真实在飞），不再用与遥测矛盾
-      的另一个源；任务真正 done/reconcile 后不触发假 over-90m
+      → 实跑 `--slot-status --cap 3 --json`（构造 5 分支已合并幽灵 + 1 open-worktree 真实 agent，见下
+      「AC5 实跑输出」）：`in_progress_total 6 / stale_brackets 5 / real_in_flight 1 / slots_free 2 /
+      slot_state free / brackets_reflect_subagents false`——空槽可见为 **2**（非满负荷、非空）。scoped
+      测试 `SLOT-STATUS CLI — real git…` 同形态全绿。
+- [x] AC6: **AC10 诚实记账**——pre-friction（无东西在疼），计 +1 ⇒ 6 → 7
+      → 照生成器问句「这条判据量化什么范围」→ 答案：**历史不是当下**（`--report` 括号视角量化的是历史归档，
+      `--slot-status` 才量化当下槽位）。pre-friction（无失败/告警、套件在跑、内层在干活、遥测命令 exit 0），
+      +1 ⇒ 6 → 7。引用任务 `gap-loop-has-no-os-level-anchor…` 的 0/6 判据计数保持（本轴是 +1 的 pre-friction
+      轴）。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → 新增测试全部在 `plugin/test/fast-mode-telemetry.test.mjs`（`// @test-group governance`），用
+      `node:test`。4 个 SLOT-STATUS 用例：AC5 回归形态 / real_in_flight>cap 违规 / 空态 / CLI 真实 git +
+      纯读性 / 人类可读输出。
+- [x] AC8: **task-over-90m 判据源统一**——over-90m 用遥测的 in-progress（真实在飞），不再用与遥测矛盾
+       的另一个源；任务真正 done/reconcile 后不触发假 over-90m
+      → 判据源已统一：机械检测器 `detectTaskOver90m`（`inner-blocked-signal.ts`）读的就是遥测
+      `.workflow-events/` + `aggregate().inProgress`（旧 inner-state.sh OVER90 另一源已退役）。「任务真正
+      done/reconcile 后不触发假 over-90m」：reconcile 闭合的幽灵离开 inProgress ⇒ OVER90 静默——既有测试
+      `AC5 — OVER90 no longer fires for a reconcile-closed record` 全绿。本任务让 reconcile 成为**收尾常规**
+      （`--slot-status` 暴露 `stale_brackets` + 外层步骤 1b 对账跑 `--reconcile`），幽灵不再滞留触发假块。
+      scoped 静态检查 `task-contract-check: no violations`。
 - [ ] AC9: **阻塞信号超时自动升级**——一条没人消费的阻塞信号不应让 inner 无限期等（自动升级为需要
       人工介入/超时归档，不无限冻结）；今晚 92 分钟假阻塞形态消除
+      → **未实现**——独立机制（`inner-blocked-signal.ts` 的消费超时/自动升级），不在本任务 DoD（AC1–AC7）
+      与 Contract（slot_visibility）范围内；留待专门任务/外层裁定。
+
+
+### AC5 实跑输出（invoke evidence，2026-08-06 内层实跑）
+
+构造 5 红窗遗留幽灵括号（`task/stale-1..5` 分支已合并进 master，执行者可观测消失）+ 1 真实 agent
+（`task/live-1` 分支在 open worktree，执行者仍存活），cap 3：
+
+```
+$ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --root <ws> --slot-status --cap 3 --json
+{
+  "cap": 3,
+  "in_progress_total": 6,
+  "stale_brackets": 5,
+  "real_in_flight": 1,
+  "slots_free": 2,
+  "slot_state": "free",
+  "brackets_reflect_subagents": false,
+  "closed": [ {taskId: stale-1..5, reconcileReason: "branch-merged", startedAtMsUnreliable: true}, ... ],
+  "kept":   [ {taskId: "live-1", keepReason: "worktree-present", startedAtMsUnreliable: false} ]
+}
+
+$ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --root <ws> --slot-status --cap 3   # human
+slot status (generated 2026-08-06T01:38:46.777Z)
+  cap: 3
+  in-progress brackets (raw --report inProgress): 6
+  stale brackets (reconcile would close, executor observably gone): 5
+  real in-flight (executor still present): 1
+  slots free: 2 (slot_state free)
+  brackets reflect subagents: NO (stale brackets or missing --task-end)
+```
+
+同形态 scoped 测试 `SLOT-STATUS — 5 stale brackets + 1 real agent ⇒ real_in_flight 1, slots_free 2 (AC5
+regression shape)` 与 `SLOT-STATUS CLI — real git: merged-branch phantom counts stale…` 全绿（45 pass,
+0 fail, 0 cancelled，见下验证）。
 
 ## Definition of Done
 
