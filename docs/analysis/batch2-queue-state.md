@@ -5154,3 +5154,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **laydown-derivation 在飞 ~15min**（TaskOutput running，worktree 有未提交改动：quay-init.sh bare-resolution + send-keys fail-loud + SKILLs + 新测试 quay-init-laydown-closure.test.mjs）。自查阶段（加了 bare_resolved_scripts 空参数守卫 + AC6 记账核对）。未 commit，未超 90m。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。master `b1b3b25e`。
+
+### tick 2026-08-06T05:2xZ（内层，laydown-derivation fan-in 完成 —— 在飞清零）
+
+- **laydown-derivation 合并**（`11e02bda`）：quay-init 铺设集改**四源派生**（路径前缀 + 机制语料裸文件名存在性解析 + 显式 + `${SCRIPT_DIR}` 兄弟依赖闭包至 fixpoint）——铺了消费者必然铺依赖（transcript-delivery-check.ts / cap-from-gate.ts）；verify 用同一把尺子（不再共享盲点）+ 依赖闭包 fail-closed；send-keys-reliable fail-loud。AC1–AC7 勾（78/78）。已并已清。
+- **在飞 0/5**（全部落定）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
