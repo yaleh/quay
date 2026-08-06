@@ -6081,3 +6081,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ⚠️ 记录：develop 落后 master 57 提交，worktree 任务体 status 仍 todo（master 侧补晋未进 develop）——
   任务体/AC 同源，仅状态字段滞后，agent 已被告知按 body 执行。
 - 在飞 2/3（supervisor + spawn-count）。池 10/20。
+
+### tick 2026-08-06T07:4xZ（supervisor 完成，fan-in 目标待外层裁定）
+
+- **supervisor-base-layer 完成**（66d32bea，13 files +1145/−94，worktree 内 23 scoped tests green，
+  capability-catalog 0 unclassified，os-anchor-watchdog.test.mjs worktree-agnostic 修复）。
+  步骤④⑤ 已立案（gap-supervisor-preemption + gap-supervisor-message-bus-with-identity）。
+- **fan-in 目标悬置【转外层裁定】**：supervisor 分支 = master~9 + 1 任务提交（结构证明：master..branch=1、
+  integration..branch=50），而 integration/develop 冻结 926d771b（落后 master 57）。
+  直接把分支合进 integration 会拖入 50 个 master-only 提交（integration 将含 develop 没有的工作，
+  正是两线模型要消除的污染）；合进 master 违反新冻结。**候选方案**：① rebase 到 integration 再合
+  （需外层确认无冲突处置）；② 等外层先把 develop FF 到含 supervisor 基线的点；③ 旧模型合 master
+  （违反冻结，除非人豁免）。supervisor 本身 done，等外层定 merge 目标。
+- 在飞 1/3（spawn-count，develop 基线）；池 10/20。
