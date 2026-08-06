@@ -58,9 +58,10 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 | **健康** | inner 窗口存在 **且** claude 进程存在 **且** transcript 有真实 user 消息 | **什么都不做**（权限边界——已存在的 inner 可能是 manager 建的，外层无权判断/重建/改参数），直接进入正常驱动流程 |
 | **空壳** | inner 窗口存在 **且** claude 进程存在 **但** transcript 无真实 user 消息（被拉起但未驱动，11:40 watchdog 形态） | **驱动而非重建**——不丢可能已有的上下文，接手 manager 预建的会话 |
 | **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner，manager 跨项目不属于项目拓扑）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
+| **退化** | inner 窗口+进程存在，但 transcript 仅由发现启发式解析（`transcriptSource=discovery`，旧启发式会认错 transcript） | **报警 + 不信任**——state=degraded（fail-closed），**绝不按 healthy 放行**；先用结构方式解析 inner transcript（`--transcript` / `SESSION_TRANSCRIPTS`）重试，仍无法结构确认 ⇒ 升级（step 5） |
 
 ```bash
-bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
+bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, window, process, transcript, transcriptSource, transcriptFresh}
 ```
 
 按 `state` 分派：
@@ -79,12 +80,21 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
   创建后 **INNER-DRIVEN 验证送达**：transcript 出现真实 user 消息（send-keys-reliable 的
   `transcript-delivery-check.ts` 判据），不假设成功。**工厂失败/验证不过 ⇒ 升级给人**（step 5），
   不静默继续——建不出来就进不了正常驱动流程。
+- **`degraded`** ⇒ **报警（不自认 healthy）**——inner 窗口/进程存在但 transcript 只由发现启发式解析
+  （`transcriptSource=discovery`，旧启发式在 3 会话拓扑下会认错 transcript；「对结论错证据」静默 healthy
+  正是 gap-inner-session-check-discovery-fallback-silent 消灭的形态）。**本步是 --json 消费者，必须读
+  `transcriptSource`**：`==discovery` ⇒ 报警 + 按 degraded 处理，**不得**按 healthy 放行。先加
+  `--transcript <path>` 或用 `SESSION_TRANSCRIPTS` 结构解析 inner transcript 后重试自检；仍无法结构
+  确认 ⇒ 升级给人（step 5），不静默继续。
 
 **transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
 > `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
-**发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
-inner 会话的（例如 inner claude 进程启动时刻之后的），否则按空壳驱动——驱动不重建，代价有界。
+**发现路径是 KNOWN-BROKEN 的退化路径（不静默）**（gap-inner-session-check-discovery-reads-wrong-transcript
+→ gap-inner-session-check-discovery-fallback-silent）：旧启发式在 3 会话拓扑下会认错 transcript，所以
+`transcriptSource=discovery` 时脚本本身 stderr 报警且 state=**degraded**（fail-closed，绝不静默报 healthy）。
+**本步（--json 消费者）必须读 `transcriptSource`**：`==discovery` ⇒ 报警 + 按 degraded 处理（结构解析
+重试 / 升级），**不得**按 healthy 放行——「对结论错证据」的无声回归正是这条要消灭的形态。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
