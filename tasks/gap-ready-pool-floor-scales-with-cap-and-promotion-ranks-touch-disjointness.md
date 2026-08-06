@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness
 title: "ready pool floor = cap x 4 (12 when cap=3; historical 08-02→08-04 pool was stable at 11 = 9 real / 3 cap = 3.0x proven, 4x leaves one notch far below 10x) AND promotion ranks touch-disjointness (else promoted candidates all collide) AND ready-pool-check reports dispatchable_disjoint (largest mutually-disjoint subset via checkTouchesPair) — floor is the means, dispatchable_disjoint >= cap is the criterion: 5 all-disjoint is enough, 30 all-colliding gets flagged; gap 2 (disjointness) lands first since a filtered pool needs a smaller raw floor"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

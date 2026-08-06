@@ -5,7 +5,7 @@ title: "upgrade channel syncs source but not build artifacts — git pull gets n
   persists; verify checks existence not freshness); 2nd upgrade-channel-gap form
   (dynamic drift); fix: ensure_vendor_runtime rebuilds/fails-closed when src
   mtime > dist mtime"
-status: ready
+status: done
 labels:
   - gap
   - defect

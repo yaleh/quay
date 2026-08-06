@@ -4,7 +4,7 @@ title: '"batch" now means two things (rolling dispatch vs batched
   verification/closure) — a future reader could misread it as dispatch-gating
   and drift the behavior back; split the vocabulary, R2-family risk in
   tick-log/commit wording'
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

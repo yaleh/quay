@@ -3,7 +3,7 @@ id: gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false
 title: ghost-suggestion (reliable-send fault 6) can be eliminated at source via
   --prompt-suggestions false / CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false —
   verify safely, then make it a required cold-start launch parameter
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

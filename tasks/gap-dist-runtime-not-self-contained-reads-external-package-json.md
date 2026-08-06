@@ -6,7 +6,7 @@ title: "dist runtime 'self-contained' claim false — version.ts reads
   3-layer gap all passed by verify (package.json in neither lay-down set nor
   referenced); fix: inline version at build time (option ②) + fix sync-vendor
   claim; AC12b blocker ② extension"
-status: ready
+status: done
 labels:
   - gap
   - defect

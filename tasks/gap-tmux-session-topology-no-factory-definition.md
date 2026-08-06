@@ -6,7 +6,7 @@ title: the tmux session/window topology (<project>-N:outer / :inner / :manager
   have ONLY a single bash window, no claude process; ship the three-window
   convention (each layer's launch command, who drives whom) as a checked-in
   deliverable + quay-init lays it down
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

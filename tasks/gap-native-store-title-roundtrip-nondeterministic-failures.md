@@ -2,7 +2,7 @@
 id: gap-native-store-title-roundtrip-nondeterministic-failures
 title: native store AC4 round-trip fails NON-DETERMINISTICALLY on random
   plain-letter titles
-status: ready
+status: done
 labels:
   - gap
   - defect

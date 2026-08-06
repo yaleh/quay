@@ -11,7 +11,7 @@ title: "the strategic-doc-staleness-check's orchestration arm is a DEAD GLOB —
   quantifies WHICH instances? the one filename it was written thinking about;
   fix: cover orchestration/*.md entirely (or derive by prefix), don't hardcode a
   single filename pattern"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

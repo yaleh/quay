@@ -9,7 +9,7 @@ title: "SESSION-OVERDUE heartbeat source is orchestration/tick-log.md mtime,
   indistinguishable without manual commit-history checks; fix: outer-alive
   criterion = NEWEST mtime among ANY output (commits / queue-state / triage
   records / tick-log), same class as D's single-proxy-insufficiency"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

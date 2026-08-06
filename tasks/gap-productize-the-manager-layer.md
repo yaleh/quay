@@ -8,7 +8,7 @@ title: the third layer exists in practice (three layers run) but only two ship â
   AC8c stale-key fix, launch-config port) so gaps 1-3 have an owner â€” a
   cold-start on another machine currently gets a two-layer system that executes
   fast but never plans/prioritizes/trend-watches
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

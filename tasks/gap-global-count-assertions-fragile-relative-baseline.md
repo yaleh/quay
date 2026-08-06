@@ -8,7 +8,7 @@ title: global-count assertions are inherently fragile — B3-2 went red because
   (compare against the fork baseline's snapshot, not an absolute global count)
   BEFORE the branch model goes live so its rounds aren't obscured by assertion
   noise (ruling ②)
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -5,7 +5,7 @@ title: "concurrency cap fixed 3 → adaptive (human: raise throughput; manager:
   f(resource-gate): GO=5/WAIT=2/extreme-WAIT=1, wire into fast-mode-loop-tick
   step 4 + ready-pool floor=cap×4; components exist (gate verified + scheduler),
   missing the junction"
-status: ready
+status: done
 labels:
   - gap
   - defect

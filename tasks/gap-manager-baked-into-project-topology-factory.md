@@ -6,7 +6,7 @@ title: "manager baked into project topology factory (hereditary error — manage
   factory gets a manager window contradicting product-outline 'manager
   network-level not per-project'; fix: ROLES='outer inner', two-window, manager
   removed (human starts cross-project)"
-status: ready
+status: done
 labels:
   - gap
   - defect

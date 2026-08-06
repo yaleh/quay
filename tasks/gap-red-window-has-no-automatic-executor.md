@@ -8,7 +8,7 @@ title: the red-window rules have no automatic executor — the ROUND 2 suite wen
   'exists ≠ effective' pattern; add an automatic suite-state trigger
   (runner/monitor notify → outer RED handling starts; optimistic-proceed gets an
   exerciser)
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -10,7 +10,7 @@ title: the 14 plugin/gate-scripts/ gates are LAID DOWN BUT DEAD — quay-init
   run); the real defect is delivery propagates dead weight; same axis
   (criterion's own validity) as gap-checkers-have-never-been-shown-to-fail,
   layer dimension extension
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
