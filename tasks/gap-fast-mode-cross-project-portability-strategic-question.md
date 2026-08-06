@@ -3,7 +3,7 @@ id: gap-fast-mode-cross-project-portability-strategic-question
 title: Phase 3's strategic question — is the fast-mode two-layer loop truly
   portable cross-project, or overfit to quay — is being answered ad-hoc via
   meta-cc cold-start with no written reference; pin it explicitly
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

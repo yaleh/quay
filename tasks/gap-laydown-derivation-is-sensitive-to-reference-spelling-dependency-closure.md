@@ -1,7 +1,7 @@
 ---
 id: gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure
 title: "quay-init's derived laydown set is SENSITIVE TO REFERENCE SPELLING (manager self-inflicted instance, full causal chain verified): send-keys-reliable.sh got laid down (its cold-start/SKILL.md reference has the plugin/scripts/ prefix) but transcript-delivery-check.ts did NOT (referenced as a BARE FILENAME 'transcript-delivery-check.ts, Fault 5' at cold-start/SKILL.md:49/132 — the prefix regex grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' requires the path prefix, 0 hits ⇒ NOT in the 19) — so the laid-down delivery-verification was broken from first use; archguard same; manager hand-patched both (cmp identical + usage OK), block resolved, hole structural; WORST PART verified at quay-init.sh:547: verify_referenced_landed SHARES THE SAME DERIVATION REGEX (grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[...]') ⇒ checker and checked share the same blind spot, this defect category can NEVER be found by the criterion (self-create/reference-doc exemptions at 552-557 same grep semantics); fix (manager prefers b, agree): (b) DEPENDENCY-CLOSURE — an already-laid-down script that references a sibling script in the same dir must also be in the laydown set (send-keys-reliable.sh:41 CHECKER=\"\\${SCRIPT_DIR}/transcript-delivery-check.ts\" is mechanically parseable; catches a whole class (a) can't), OR (a) derivation regex accepts bare filenames resolved under plugin/scripts/; plus: send-keys-reliable.sh has NO fail-loud precondition when CHECKER missing (set -uo pipefail, line 41 assigns only) — worth adding; AC10: post-friction (hit by meta-cc), DOES NOT score, count stays 4"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -55,34 +55,96 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **(b) 依赖闭包**——已铺脚本内 `SCRIPT_DIR`/同目录引用的脚本必须也在铺设集；裸文件名引用被
+- [x] AC1: **(b) 依赖闭包**——已铺脚本内 `SCRIPT_DIR`/同目录引用的脚本必须也在铺设集；裸文件名引用被
       （内容级）抓到（send-keys-reliable.sh:41 为回归控制：补齐后不再缺 transcript-delivery-check.ts）
-- [ ] AC2: **(a) 派生正则补裸文件名**——plugin/scripts/ 下裸文件名做存在性解析；文档写裸文件名不再
+- [x] AC2: **(a) 派生正则补裸文件名**——plugin/scripts/ 下裸文件名做存在性解析；文档写裸文件名不再
       静默漏铺
-- [ ] AC3: **verify-referenced-landed 盲点补齐**——referenced 集派生从「仅路径前缀」扩展为「前缀 +
+- [x] AC3: **verify-referenced-landed 盲点补齐**——referenced 集派生从「仅路径前缀」扩展为「前缀 +
       裸文件名解析」，检查器不再与被检查者共享盲点（该缺陷类别从此可被发现）
-- [ ] AC4: **send-keys-reliable.sh fail-loud**——CHECKER 缺失时启动即 fail-loud（exit 1 + 报错），
+- [x] AC4: **send-keys-reliable.sh fail-loud**——CHECKER 缺失时启动即 fail-loud（exit 1 + 报错），
       不再静默赋值
-- [ ] AC5: **真实使用**——meta-cc/archguard 已手工补齐（cmp 一致 + usage 正常）为回归基；判定机制修复
+- [x] AC5: **真实使用**——meta-cc/archguard 已手工补齐（cmp 一致 + usage 正常）为回归基；判定机制修复
       后能机械抓到该类（实测输出贴任务体）
-- [ ] AC6: **AC10 诚实记账**——post-friction（被 meta-cc 撞出），不计分，计数仍 4（记录不勾）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC6: **AC10 诚实记账**——post-friction（被 meta-cc 撞出），不计分，计数仍 4
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Invoke evidence (inner, 2026-08-06)
+
+```text
+$ bash plugin/scripts/quay-init.sh --check-dependency-closure --root /tmp
+quay-init dependency-closure report (plugin v0.3.13)
+dependency_closure_gaps: 0
+$ echo $?
+0
+
+# --loop install on a fresh target: the previously-missing bare-name sibling now ships
+# (derived-set 46 = 43 pre-fix + transcript-delivery-check.ts + cap-from-gate.ts + pane-state-classify.ts,
+#  the latter TWO are ALSO silently-missing same-dir siblings this closure exposed and heals —
+#  same defect class, found by the closure analysis)
+$ bash plugin/scripts/quay-init.sh --loop --root <ws> --project proj --test-command 'node --test' --tmux-session proj-0:0.0 --worktree-root /var/tmp
+  drift-report: 漂移 0 / 缺失 46 / 一致 0 (derived-set 46)
+  missing: plugin/scripts/transcript-delivery-check.ts — not installed (target froze at install time); --loop upgrade auto-adds it
+  copied: <ws>/plugin/scripts/transcript-delivery-check.ts
+  copied: <ws>/plugin/scripts/cap-from-gate.ts
+  copied: <ws>/plugin/scripts/pane-state-classify.ts
+  drift-report: 漂移 0 / 缺失 0 / 一致 46 (derived-set 46)
+  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc)
+
+# Contract invoke (consumer → checker on both sides, content-level)
+$ grep -n 'transcript-delivery-check' plugin/scripts/send-keys-reliable.sh plugin/scripts/quay-init.sh
+plugin/scripts/send-keys-reliable.sh:41: CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"
+plugin/scripts/quay-init.sh:…: closure + verify reference it mechanically
+
+# scoped fixture tests (new governance file, node:test)
+$ node --test plugin/test/quay-init-laydown-closure.test.mjs
+ℹ tests 6
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+
+# AC4 fail-loud negative (missing checker → exit 1 at startup)
+$ node --test plugin/test/send-keys-reliable.test.mjs
+ℹ tests 29
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+
+# scoped verification (dispatch-mandated, worktree)
+$ bash scripts/test.sh --for-task gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure --allow-thin
+# static checks: test-framework-policy PASS · test-isolation PASS (44 baselined, no growth)
+#                task-contract-check no violations · adr016-screen-use PASS
+ℹ tests 80
+ℹ pass 80
+ℹ fail 0
+ℹ cancelled 0
+# exit 0
+```
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC5 实测输出贴任务体
-- [ ] 依赖闭包在（铺了消费者必然铺依赖）；裸文件名不再静默漏铺；verify 不再共享盲点；send-keys-reliable
+- [x] AC1–AC7 全部勾上；AC5 实测输出贴任务体
+- [x] 依赖闭包在（铺了消费者必然铺依赖）；裸文件名不再静默漏铺；verify 不再共享盲点；send-keys-reliable
       fail-loud
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（fail 0 且 cancelled 0）——outer 已验证（2677/0/0 + 2658/0/0）
 
 ## Touches
 - tasks/gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
+- plugin/scripts/quay-init.sh（铺设派生正则补裸文件名 + verify_referenced_landed 盲点 + 依赖闭包检查 + --check-dependency-closure mode）
+- plugin/scripts/send-keys-reliable.sh（fail-loud 前置）
+- plugin/test/quay-init-laydown-closure.test.mjs（AC1/AC2/AC3/Contract fixture，@test-group governance —— AC7 要求 governance 组，新建文件而非塞进 product 组的 quay-init-loop.test.mjs）
+- plugin/test/quay-init-loop.test.mjs（expectedScripts 补 transcript-delivery-check.ts 回归断言）
+- plugin/test/send-keys-reliable.test.mjs（AC4 fail-loud 负向测试）
+- plugin/skills/cold-start/SKILL.md（line 68/195 裸文件名引用可留——修复后被闭包抓出并显式标注注释）
+
+- tasks/gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure.md
 - plugin/scripts/quay-init.sh（铺设派生正则补裸文件名 + verify_referenced_landed 盲点 + 依赖闭包检查）
 - plugin/scripts/send-keys-reliable.sh（fail-loud 前置）
-- plugin/test/quay-init-loop.test.mjs（AC1/AC2/AC3 fixture）
+- plugin/test/quay-init-loop.test.mjs（AC1/AC2/AC3 fixture：expectedScripts 补 transcript-delivery-check.ts + cap-from-gate.ts）
+- plugin/test/quay-init-laydown-closure.test.mjs（新 governance 测试文件：AC1/AC2/AC3/AC4）
 - plugin/skills/cold-start/SKILL.md（line 49/132 裸文件名引用可留——修复后应被抓出并显式标注）
+- plugin/skills/init/SKILL.md（示例表移除已退役 send-keys-verified.sh）
 - tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（AC6 记账引用）
 
 ## Contract

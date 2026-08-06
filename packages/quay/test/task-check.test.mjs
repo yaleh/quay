@@ -24,9 +24,11 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { connectProvider } from "../src/provider-client.ts";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -78,7 +80,7 @@ async function main() {
   const client = await connectProvider({
     command: "node",
     args: [nativeBin, "mcp"],
-    cwd: path.dirname(nativeBin),
+    cwd: nativeProviderDir,
     env: { QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 

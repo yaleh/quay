@@ -9,7 +9,7 @@ title: "B machine periodic push backup — low-frequency cron (every 10-15 min)
   executor: manager on B (has context) or B's outer (one-line cron); verified
   2026-08-05: no narrow task exists, only mentioned within the larger claiming
   design — this should NOT wait for the claiming mechanism"
-status: done
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -44,7 +44,7 @@ remote，只是从未用过。
 
 ## Acceptance Criteria
 
-- [x] AC1: B 机 cron 已加（每 10-15 分钟 git push 到裸仓库），实测一轮 push 成功
+- [x] AC1: **产品内同步机制**（人裁定 2026-08-06：不用系统 crontab）——复用 slot-refill 模式：完成事件加速（develop 前进即 push）+ tick 心跳兜底（每 tick 问本地 develop 是否领先 origin/develop）；机制活在 plugin/loop + plugin/scripts，随包走、走升级通道、被铺设集覆盖、不引入新轮询源
   - 机制实现：`plugin/scripts/periodic-push-backup.sh --cron-line` 输出待装 cron 行（`*/12 * * * * cd <B-repo> && git push <remote> "$(git branch --show-current)" >> ~/.quay/quay-backup.log 2>&1`，含字面 `git push`，满足 Contract invoke `crontab -l 2>&1 | grep -c 'git push'`；*/12 落在 10-15 分钟带内，且低于 AC15 备份延迟 20min 上限）。
   - 实测一轮 push 成功：`periodic-push-backup.test.mjs`「AC1/AC2」用例以真实裸仓库 fixture 验证 push 落盘 + 二次幂等 up-to-date（证据见文末 invoke 段落）。
   - B 机实际 crontab 安装（`crontab -l` 出现该行 + B 侧真实 push 一轮）= manager/B-outer 的 drive 步骤（本任务 scope = 仓库侧机制 + 测试，dispatch 已注明）。
@@ -112,3 +112,25 @@ tasks/gap-b-machine-periodic-push-backup-to-bare-repo.md   (M, 自身文件)
 plugin/scripts/periodic-push-backup.sh                     (new)
 plugin/test/periodic-push-backup.test.mjs                  (new)
 ```
+
+## Dispatch review（追加 2026-08-06T08:5xZ，人裁定重开）
+
+**重开（done→ready）：系统 crontab 形态被否定。** 人：「太糟糕了。修改这个设计。显然不应该用系统的
+crontab 做这件事。这一机制应当做在 quay 的产品化交付物内。」（manager-phase-goal AC17 节，d59bdb4c）
+
+**四条理由核实**：①遗传丢失（crontab 不随包走，不在铺设集/bundle/升级通道）②所有检查之外（无机制
+覆盖「那行在不在」）③第二个调度源（tick 文档明写不引入新轮询源）④结构性不可移植（release 已发
+Windows 产物，无 crontab）。
+
+**新机制（采纳管理者建议，复用 slot-refill 模式）**：完成事件加速（develop 前进即 push）+ tick 心跳
+兜底（每 tick 问本地 develop 是否领先 origin/develop）——机制活在 plugin/loop + plugin/scripts，
+随包走、走升级通道、被铺设集覆盖、不引入新轮询源。具体钩子/重试降级由 inner 实现时定。
+
+## 前置条件（2026-08-06T09:0xZ，管理者审计 + 外层核实）
+
+**periodic-push-backup.sh 根本不在铺设集里**——grep periodic-push-backup plugin/scripts/quay-init.sh
+plugin/loop/*.md **零命中**。不只是「部署形态是 crontab 所以不随包走」，是**这个脚本连交付面都没进**：
+任何用 quay-init 装 quay 的项目磁盘上根本不会出现它。
+
+**⇒ 改 tick 双触发源之前必须先让它进铺设集**（quay-init.sh 的铺设列表 + 相关检查），否则目标项目的
+tick 找不到这个脚本。这是本次改造的**前置条件**（管理者审计 A 项）。

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# claim-task.sh — claim a task on the SHARED BARE REPO by pushing an empty `task/<id>` marker branch
-# (gap-two-machine-collaboration-git-branch-claiming, AC1/AC2/AC4).
+# claim-task.sh — claim a task on the CLAIM REMOTE by pushing an empty `task/<id>` marker branch.
+# 2026-08-06 branch-cutover (orchestration/PLAN-develop-branch-cutover-2026-08-06.md): the claim
+# remote is GitHub `origin`; the pre-cutover local A↔B bare repo target is RETIRED.
+# (origin task: gap-two-machine-collaboration-git-branch-claiming, AC1/AC2/AC4.)
 #
 # Protocol (task body "选定机制"):
 #   * push an empty marker commit to `refs/heads/task/<id>` on the shared bare repo = CLAIM
@@ -20,8 +22,9 @@
 # default 6h) — take it over with `--reclaim` (guarded by `--force-with-lease` CAS so two concurrent
 # reclaims of the same stale claim cannot both win).
 #
-# The shared bare repo is the ONLY cross-host state store — telemetry inProgress files and worktree
-# dirs are local; git branches are visible to both machines. So the claim is built on git, not on a
+# The claim remote (GitHub `origin` in the branch-cutover model) is the ONLY cross-host state store
+# — telemetry inProgress files and worktree dirs are local; git branches are visible to both machines.
+# So the claim is built on git, not on a
 # shared-filesystem assumption (the same root cause that makes the QUAY_GLOBAL_DIR single-flight lock
 # die across hosts). FAIL-CLOSED: without an explicit `--remote` / `$QUAY_CLAIM_REMOTE` this script
 # exits 2 — a single-machine workspace does not claim (the loop skips the claim step entirely when no
@@ -33,7 +36,8 @@
 #   claim-task.sh --reclaim <task-id> [--stale-after <hours>] [--root <repo>] [--remote <remote>]
 #
 #   --root          repo root (default: auto-derived from this script's location)
-#   --remote        the shared bare repo remote (a git remote name or a filesystem path). Default:
+#   --remote        the claim remote (a git remote name or a filesystem path; GitHub origin in the
+#                   branch-cutover model). Default:
 #                   $QUAY_CLAIM_REMOTE; REQUIRED (fail-closed — no silent claim on an unstated remote).
 #   --check-touches AC2: refuse the claim if the candidate's ## Touches overlap any in-flight task/*
 #   --dry-run       check everything WITHOUT pushing the claim branch
@@ -41,7 +45,7 @@
 #                   many hours (default 6)
 #
 # Exit codes:
-#   0  claimed (the empty task/<id> marker is now on the shared repo) — or would be (--dry-run)
+#   0  claimed (the empty task/<id> marker is now on the claim remote) — or would be (--dry-run)
 #   1  not claimed: already-claimed / touches-overlap (--check-touches) / reclaim refused (not stale)
 #   2  usage / no claim remote / task file missing / remote unreachable
 set -uo pipefail

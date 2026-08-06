@@ -282,6 +282,25 @@ test("script: the file exists, is executable, and step 5 delegates to the pure c
   assert.match(src, /SKIP/, "the fresh branch skips the clear loop");
 });
 
+test("AC4: a MISSING checker exits 1 at startup (fail-loud), never a silent broken delivery (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure)", () => {
+  // Reproduce the pre-fix defect's environment: the script present, the pure checker absent (the
+  // laydown derivation's spelling-sensitivity once shipped exactly this). The script must FAIL LOUD
+  // at startup — not assign CHECKER and silently fail every later poll.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skr-checker-"));
+  try {
+    fs.copyFileSync(SCRIPT, path.join(dir, "send-keys-reliable.sh"));
+    assert.ok(!fs.existsSync(path.join(dir, "transcript-delivery-check.ts")), "checker must be absent");
+    const r = spawnSync("bash", [path.join(dir, "send-keys-reliable.sh"), "tgt", "text", "t.jsonl"], {
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 1, `missing checker must exit 1 (fail loud), got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /缺少校验器/, `must name the missing checker:\n${r.stderr}`);
+    assert.match(r.stderr, /transcript-delivery-check\.ts/, `must name the missing checker path:\n${r.stderr}`);
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+});
+
 // ── AC7: zero hash (the family ruling F killed stays dead) ────────────────────────────────────────
 
 test("AC7: script and test contain zero occurrences of the three hash-tool names (grep = 0)", () => {

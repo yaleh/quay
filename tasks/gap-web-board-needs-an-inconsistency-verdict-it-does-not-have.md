@@ -2,7 +2,7 @@
 id: gap-web-board-needs-an-inconsistency-verdict-it-does-not-have
 title: /board must join intent, execution and landing — and decide whether to
   reuse the drift checker or reimplement its judgment
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -138,6 +138,8 @@ resume   n/a: 单次请求，无中途产物
 - [x] AC8: 测试带 `// @test-group product` 声明（serve-board.test.mjs 首行）
 
 ## Execution record
+
+invoke 入口路径（Contract invoke 的 executable 入口）：`node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173`（web-board serve 路由，由 serve-board.test.mjs 覆盖真实 HTTP 端点；scoped + 全量绿证实）。
 
 invoke 证据（scoped，`scripts/test.sh --for-task ... --allow-thin`，2026-08-05）：
 

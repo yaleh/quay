@@ -26,7 +26,7 @@ title: "send-keys-reliable.sh's empty-input check is BROKEN FOR ANY Claude Code
   renders the NBSP prompt), drive once, verify delivery via transcript; ③ check
   send-keys-verified.sh for the same empty-check logic. AC10: does NOT score
   (axis opened by archguard hitting it, post-friction), count stays 6"
-status: ready
+status: done
 labels:
   - gap
   - defect

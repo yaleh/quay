@@ -16,9 +16,10 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { validateConfig } from "../src/config-validate.ts";
+import { QUAY_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const quayBin = QUAY_CLI;
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -88,7 +88,10 @@ extra:
 标注是「outer 有、inner 与 manager 全缺」——**实测更严重：三层全缺，因为它们全在会话内**。
 
 **AC10 记账：不计分**——这根轴被 29 小时停摆打开的，post-friction，计数仍为 6。**但它的优先级与是否
-pre-friction 无关。**
+pre-friction 无关。**（**2026-08-06 追加，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC6
+记账引用**：该任务立案为 **pre-friction** 观测轴——遥测 in-flight 括号 ≠ 真实并发、空槽不可见、无人调用
+`--task-start`/`--task-end`——照 SYNTHESIS-axis-generation §3 判据 **+1 ⇒ 6 → 7**。本任务仍 post-friction
+不计分，7 是含新 pre-friction 轴的最新计数。）
 
 ### 选定机制（外层裁定：立案，最高优先级）
 

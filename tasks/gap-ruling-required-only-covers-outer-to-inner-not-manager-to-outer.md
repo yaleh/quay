@@ -6,7 +6,7 @@ title: "'who-is-waiting' mechanism covers only outer→inner, no observation of
   (ruling-required done = built one direction only); fix: reuse
   classifyPaneState + consecutive-sample observer with direction reversed
   (manager watches outer), not new invention"
-status: ready
+status: done
 labels:
   - gap
   - defect

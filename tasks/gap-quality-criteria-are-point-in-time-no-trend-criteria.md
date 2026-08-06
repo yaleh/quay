@@ -1,7 +1,11 @@
 ---
 id: gap-quality-criteria-are-point-in-time-no-trend-criteria
-title: "all quality criteria are point-in-time (was it green this time / does this contract conform) — none is a trend criterion (is it more expensive than last time / closer to the goal); the per-test-cost trend 0.251→0.464→0.321 (net +28%) worsened a whole day before anyone asked; add a per-run metrics recording + trend-flag category as the manager layer's quality function"
-status: todo
+title: all quality criteria are point-in-time (was it green this time / does
+  this contract conform) — none is a trend criterion (is it more expensive than
+  last time / closer to the goal); the per-test-cost trend 0.251→0.464→0.321
+  (net +28%) worsened a whole day before anyone asked; add a per-run metrics
+  recording + trend-flag category as the manager layer's quality function
+status: ready
 labels:
   - gap
   - milestone-candidate

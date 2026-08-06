@@ -52,6 +52,10 @@ const CONFIG_CLASS = new Set([
   ".quay/config.yml",
   ".quay/quay-init-state.json",
   "orchestration/session-liveness.env",
+  // .gitignore — quay-init writes (or appends) the `.quay/runtime/` entry itself
+  // (gap-the-runtime-has-nowhere-safe-to-land AC10); it is install-generated config, not a
+  // product artifact. Deterministic content across workspaces, so A1's byte-identity holds.
+  ".gitignore",
 ]);
 
 const substantive = (label) =>
@@ -118,11 +122,24 @@ function productSource(rel) {
   if (rel === "docs/analysis/fast-mode-loop-tick.md") {
     return path.join(PLUGIN_ROOT, "loop", "fast-mode-loop-tick.md");
   }
-  if (rel === "vendor/quay/dist/quay.js") {
+  if (rel === ".quay/runtime/bin/quay.js") {
     // The built runtime is laid verbatim when the plugin source has it (a gitignored
     // build artifact, present after scripts/test.sh's build step, absent in a raw
-    // checkout). Compare it only when it exists.
+    // checkout). Compare it only when it exists. The TARGET landing path is
+    // .quay/runtime/bin/quay.js (gap-the-runtime-has-nowhere-safe-to-land AC9 — never
+    // vendor/, a Go reserved dir), mapped to the plugin-source bundle at
+    // plugin/vendor/quay/dist/quay.js.
     const src = path.join(PLUGIN_ROOT, "vendor", "quay", "dist", "quay.js");
+    return fs.existsSync(src) ? src : null;
+  }
+  if (rel === ".quay/runtime/bin/quay-native.js") {
+    const src = path.join(PLUGIN_ROOT, "vendor", "quay-native", "dist", "quay-native.js");
+    return fs.existsSync(src) ? src : null;
+  }
+  if (rel === ".quay/runtime/provider.yml") {
+    // provider.yml travels with the native bundle (resolved via `../provider.yml` from the
+    // bundle's bin/ dir); byte-identity to the plugin source is part of G2 (AC6).
+    const src = path.join(PLUGIN_ROOT, "vendor", "quay-native", "provider.yml");
     return fs.existsSync(src) ? src : null;
   }
   return null;
@@ -235,6 +252,77 @@ test("A1 — two workspaces with genuinely different derived test commands lay d
   const diffs = crossWorkspaceDiffs(ws1, ws2);
   assert.deepEqual(diffs, [],
     `A1: laid-down files must be byte-identical across the two workspaces (only the config file may differ); differing=${JSON.stringify(diffs)}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// A5 — heterogeneous target builds (AC8/AC11 of gap-the-runtime-has-nowhere-safe-to-land)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// The runtime used to land in `<target>/vendor/quay/dist/quay.js` — `vendor/` is Go's reserved
+// module-vendoring directory, and `dist/` is a reserved build-output name. The landing decision
+// (task AC2): the runtime is a GENERATED ARTIFACT, so it lands in `.quay/runtime/` (quay's own
+// namespace) OUTSIDE git (gitignored by quay-init, AC10). AC8: the same artifact installs into a
+// Node target and a Go target and BOTH still build after install (`npm test` / `go build ./...`).
+// Byte-identity across targets (A1) does not save this — a Go target resolves `vendor/` by
+// directory name, so the GO half is the one that can expose the collision (task AC11, the reinstall
+// gate's A5 was missing `go build`).
+test("A5 — a Node target still builds (npm test) after quay-init lands the runtime", () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "node --test test/smoke.test.mjs" } }, null, 2));
+  fs.mkdirSync(path.join(ws, "test"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "test", "smoke.test.mjs"),
+    'import { test } from "node:test";\nimport assert from "node:assert";\ntest("smoke", () => assert.equal(1, 1));\n');
+  const r = runInit(ws);
+  assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
+  // AC8 Node half: the target's own build must still pass after the runtime lands.
+  const npmTest = spawnSync("npm", ["test"], { cwd: ws, encoding: "utf8" });
+  assert.equal(npmTest.status, 0, `npm test must pass after install:\n${npmTest.stdout}\n${npmTest.stderr}`);
+  assert.match(npmTest.stdout + npmTest.stderr, /smoke/, "the target's own test must actually have run");
+});
+
+test("A5 — a Go target still builds (go build ./...) after quay-init lands the runtime", (t) => {
+  // ADR-019 decision #1 pattern: an in-file skip guard for an externally-tooled assertion. `go` is
+  // present locally (proven green here) but not on the CI image — a missing tool must SKIP, not fail.
+  const goProbe = spawnSync("go", ["version"], { encoding: "utf8" });
+  if (goProbe.status !== 0) return t.skip(`go toolchain not available on this image (${goProbe.error?.message ?? goProbe.stderr})`);
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "go.mod"), "module example.com/proj\n\ngo 1.22\n");
+  // A real main package so `go build ./...` compiles something (no network: no external requires).
+  fs.writeFileSync(path.join(ws, "main.go"), 'package main\n\nfunc main() {}\n');
+  const r = runInit(ws);
+  assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
+  // AC8/AC11 Go half: the target's Go build must still pass after the runtime lands. If the runtime
+  // still sat in `vendor/`, Go's module resolution could treat that reserved directory specially and
+  // break the build — the whole reason this half belongs in the reinstall gate.
+  const goBuild = spawnSync("go", ["build", "./..."], { cwd: ws, encoding: "utf8" });
+  assert.equal(goBuild.status, 0, `go build ./... must pass after install:\n${goBuild.stdout}\n${goBuild.stderr}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// A5/AC9 — the runtime lands under no target-language-reserved directory (task AC9)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// AC9 (task): the landing path must NOT sit under vendor / node_modules / target / build / dist — any
+// of those is a reserved directory name in at least one target language/toolchain (Go vendor/,
+// npm node_modules/, cargo/rust target/, make/cmake build/, bundler dist/). The check is by PATH
+// LITERAL segment, extensible — the list below is the current exclusion set, not an exhaustive one.
+test("AC9 — the laid-down runtime path contains no reserved directory segment (vendor/node_modules/target/build/dist)", () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "node --test" } }, null, 2));
+  const r = runInit(ws);
+  assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
+  const RESERVED = ["vendor", "node_modules", "target", "build", "dist"];
+  const runtimes = [
+    ".quay/runtime/quay/quay.js",
+    ".quay/runtime/quay-native/quay-native.js",
+    ".quay/runtime/quay-native/provider.yml",
+  ];
+  for (const rel of runtimes) {
+    assert.ok(fs.existsSync(path.join(ws, rel)), `runtime must exist at ${rel}`);
+    const segments = rel.split("/");
+    for (const seg of segments) {
+      assert.ok(!RESERVED.includes(seg),
+        `AC9: runtime path ${rel} must not contain reserved directory segment "${seg}" (reserved set: ${RESERVED.join(", ")})`);
+    }
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -454,4 +542,65 @@ test("A6 — a landed quay-init --loop writes a loop.worktree_root that is NOT o
   assert.equal(t.status, 0, `stat of worktree root's fs must work: ${wtRoot}`);
   assert.notEqual(t.stdout.trim(), "tmpfs",
     `A6: the landed worktree root must NOT be on tmpfs (it is memory, not disk); got "${t.stdout.trim()}" for ${wtRoot}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// A5 / AC11 — the GO half of the reinstall gate (GOAL-when-to-reinstall.md A5, gap-the-runtime-has-
+// nowhere-safe-to-land AC11). A1 only requires byte-identity of the laid-down files; but vendor/ is a
+// Go RESERVED dir — a non-Go vendor/ dir flips a Go module with dependencies into vendor mode and
+// breaks `go build ./...` with "inconsistent vendoring". Only a Go target can expose this, so the Go
+// half of the gate must assert `go build ./...` still passes after quay-init lands. This test is
+// HERMETIC: the Go module uses a LOCAL replace dependency (no network, no external module downloads).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+function writeGoTarget(ws) {
+  fs.writeFileSync(path.join(ws, "go.mod"),
+    "module example.com/proj\n\ngo 1.22\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./dep\n");
+  fs.writeFileSync(path.join(ws, "main.go"),
+    'package main\n\nimport (\n\t"fmt"\n\t"example.com/dep"\n)\n\nfunc main() { fmt.Println(dep.Greet()) }\n');
+  fs.mkdirSync(path.join(ws, "dep"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "dep", "go.mod"), "module example.com/dep\n\ngo 1.22\n");
+  fs.writeFileSync(path.join(ws, "dep", "dep.go"), 'package dep\n\nfunc Greet() string { return "hi" }\n');
+}
+
+function goBuild(ws) {
+  return spawnSync("go", ["build", "./..."], { cwd: ws, encoding: "utf8" });
+}
+
+test("A5/AC11 — a Go target still builds after quay-init lands (.quay/runtime/, never vendor/); the OLD vendor/ landing demonstrably breaks the build", () => {
+  // Skip cleanly when go is not installed (the reinstall gate's Go half needs a real toolchain).
+  if (!spawnSync("go", ["version"], { encoding: "utf8" }).stdout) {
+    return;
+  }
+  const ws = makeWorkspace("install-e2e-go-");
+  writeGoTarget(ws);
+
+  // Precondition: without quay-init the Go module builds.
+  let b = goBuild(ws);
+  assert.equal(b.status, 0, `baseline go build must pass:\n${b.stdout}${b.stderr}`);
+
+  // NEGATIVE control (the pre-fix layout): a non-Go vendor/ dir (quay-init's OLD landing) flips Go
+  // into vendor mode → the build must FAIL with "inconsistent vendoring". This proves the test is
+  // NOT vacuous: a runtime laid under vendor/ would break exactly this target.
+  fs.mkdirSync(path.join(ws, "vendor", "quay", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "vendor", "quay", "dist", "quay.js"), "// old layout\n", "utf8");
+  b = goBuild(ws);
+  assert.notEqual(b.status, 0, "the OLD vendor/ landing must break the Go build (inconsistent vendoring)");
+  assert.match(b.stderr, /inconsistent vendoring/, "must fail with Go's vendor-mode error — the exact meta-cc DIR-103 defect");
+  fs.rmSync(path.join(ws, "vendor"), { recursive: true, force: true });
+
+  // quay-init --loop lands into the Go target (test command derived: go test ./...).
+  const r = runInit(ws);
+  assert.equal(r.status, 0, `quay-init must succeed on the Go target:\n${r.stderr}`);
+
+  // The runtime must land OUTSIDE vendor/ — in .quay/runtime/ (never under a Go-reserved dir).
+  assert.ok(fs.existsSync(path.join(ws, ".quay", "runtime", "bin", "quay-native.js")),
+    "the native provider runtime must land in .quay/runtime/bin/");
+  assert.ok(fs.existsSync(path.join(ws, ".quay", "runtime", "bin", "quay.js")),
+    "the Core runtime must land in .quay/runtime/bin/");
+  assert.ok(!fs.existsSync(path.join(ws, "vendor")),
+    "quay-init must NOT create a vendor/ dir in the Go target (the Go-reserved dir stays clean)");
+
+  // The Go target still builds after landing.
+  b = goBuild(ws);
+  assert.equal(b.status, 0, `go build must pass after quay-init lands (A5 Go half / AC11):\n${b.stdout}${b.stderr}`);
 });

@@ -56,6 +56,7 @@
 按顺序读这四份，然后从 tick 步骤 1 开始：
 
 1. `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名；文件本身是当前队列状态）—— 队列当前状态（已完成/在飞/待执行）
+1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）
 2. `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD
 3. `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` —— 四项原则
 4. 本文件其余部分
@@ -81,7 +82,6 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 **后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号。这个 tick 是**兜底心跳**，处理「会话 turn 结束了但队列还有活」的情况。因此间隔应长（20–30 分钟），不是快轮询。
 
 **派发评估有两个触发源，且都机械接线（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release` + `gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat`）**：① **完成事件（加速源）**——被 `<task-notification>` 唤起时，某个后台 subagent 完成、释放了一个并发槽，**立即**按「事件驱动派发（槽位回填）」一节评估是否回填空槽，不等下一 tick；② **tick 心跳（兜底必跑）**——每 tick（含轻触）**无条件跑 slot-refill**（`slot-refill.ts`，纯状态读取器）并按结果行动（`should_refill=true` + `recommended` 非空 ⇒ 派发），**不依赖完成事件**。两个触发源走同一步骤 4 派发闸。**没有完成事件、且 tick 心跳没到，才零派发评估**（负控制，AC4）；不引入新的轮询源/双驱动——tick 心跳是现成节奏，完成通知是 harness 原生事件，都不是新轮询。
-
 <!-- unmechanizable: 判断题，无代码可强制。形态是启发式，靠每 tick 复读 -->
 **不要把「没收到通知」当作「还在跑」（2026-08-02 两次停摆教训）**：后台 agent 会静默停止（transcript 静止、无 notify），尤其长测量任务。空闲时**先查进程再决定等不等**，别只依赖通知：
 ```bash
@@ -113,6 +113,7 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
 
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次（历史引用）
+**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
 ```bash
@@ -123,6 +124,9 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361（历史引用）→ … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
 （gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled（历史引用）可能有
+只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
+**判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
+（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled 可能有
 自身异步结构的触发条件（Promise 未决 + 事件循环已解决）。**判绿三条件成立的理由改为：「cancelled 是一种
 会被 fail 0 掩盖的失败」——显式查它是为了不漏掉这种失败，不是因为饥饿必然产生它。**
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）→ **+stranded +parser = 2052**
@@ -181,6 +185,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 ## 状态单一来源
 
 `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名；文件本身为当前状态源）
+`docs/analysis/batch2-queue-state.md`
 
 每个 tick 结束**必须**写回该文件。它是 compact 后唯一可信的状态——不要靠记忆。
 
@@ -209,6 +214,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 | # | 核对项 | 机械判据 |
 |---|---|---|
 | ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`real_in_flight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -252,7 +258,6 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 - **交叉标注（AC6）**：回填依赖**准确的完成感知**——`<task-notification>` 是真实完成信号；遥测括号（`--task-start`/`--task-end`）在括号失真时不能当完成/在飞判据，否则空槽计算失真。括号对齐是 `gap-telemetry-brackets-vs-subagents-no-slot-visibility` 的活，回填机制不读括号。
 
 ---
-
 ## Tick 步骤
 
 ### 0. 哨兵
@@ -310,6 +315,17 @@ ref 上）。拆成两线：
    rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
 1. `git merge --no-ff task/<taskId>`（合并目标 = 当前检出的 integration——两线模型下内层共享检出
    立在 `integration` 上，不是 master；develop 只由外层批量合推进）
+对每个已返回但未合并的 subagent，逐个：
+
+0. **先 rebase 到当前 master**：
+   ```bash
+   git -C $WORKTREE_ROOT/<slug> rebase master
+   ```
+   worktree 建立时对 master 取了快照，之后并发合并的其它任务它看不到。B3-2 就是这样红的——
+   它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
+   **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
+   rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
+1. `git merge --no-ff task/<taskId>`
 2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
@@ -323,7 +339,6 @@ worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层�
 `bash plugin/scripts/release-task.sh <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
 `merge + delete = release`）。释放只删共享仓库上的 `task/<id>` 认领标记，不碰已合并进 `integration`
 的工作——下台机可再认领该任务。未设置 `QUAY_CLAIM_REMOTE`（单机）⇒ 跳过，无行为变化。
-
 **全量套件验证为什么不在 inner 跑**：旧的「全部合并后跑一次全量」+「绿 → 写任务状态」就是批次
 同步点——同步期间零新派发，写状态变成调度边界。全量 gate 移给外层后台异步跑（验证 gate，见步骤 3
 的停止条件），inner **只读** `.quay/full-suite-state.json` 的 `state`、只保留逐任务的 `--for-task`
@@ -412,6 +427,9 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
     touches 相交性（用既有 `parseTouches`/`matchGlob`）；可机械执行的判定函数 =
     `suite-state-trigger.ts` 的 `shouldDispatchOnRed(state, touches)`。无法判定失败位置（legacy red /
     未知）⇒ **保守停派发**（fail-closed）。
+  - `state: red` 且 `reason: failed`（或缺失——兼容旧记录，fail-closed 当失败）⇒ **停止新派发 +
+    暂缓已完成 agent 的 fan-in**（不并进红树；只停派发不停在飞合并会让红树继续累积，故 RED 失败态下
+    fan-in 一并暂缓），直到外层 re-green（state 回到 green/running）。
   - `state: red` 且 `reason: aborted`（套件**未完成、无任何正确性结论**——被外层中止/信号杀/spawn
     失败）⇒ **不触发 stop-dispatch**，照常派发与合并——把 aborted 当 failed 处理 = 用一个中止事件
     挡住全线派发，且不会自解除（re-green 需一轮成功套件，套件因缺陷跑不完 ⇒ 闭环）。
@@ -439,7 +457,6 @@ inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步
 `--slot-status --cap "${effective_cap:-3}"`（纯读，不写盘）：`real_in_flight` 是执行者仍存活的括号数，
 `stale_brackets` 是 `--reconcile` 会闭合的幽灵括号数，`slots_free = max(0, cap − real_in_flight)`
 ——「还剩几个并发槽」机械可见（AC2）。
-
 **这不是可选步骤。** 工具在 B2-1 造好并合并了，但截至 2026-08-02 11:08 `--report` 返回
 `{tasks: [], tasksPerHour: 0}`——一次都没被调用过。所有耗时数字仍靠 commit 时间戳反推，
 正是这个工具本该消除的考古。
@@ -509,7 +526,6 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 `concurrent-batch-scheduler.ts` 输出的 `{batch, deferred}` 字段是机件真名，不是分派门控。
 **全量验证/收尾节奏叫 `verification-round-N`**（关于验证/收尾，不是分派门控）。未来会话
 （含换模型后）沿用拆分词汇。
-
 **并发上限 = 步骤 3.6 前置块算出的 `effective_cap`（自适应，非固定 3）**：`cap-from-gate.sh` 在派发
 决策点读 `some avg300`（5 分钟窗口）+ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时
 GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT/EXTREME 档（不加重，AC6）。本 tick 只派发
@@ -563,6 +579,13 @@ node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id
    （`fork_baseline_is_dependency = 1`）。
 
 5. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
+# 输出 { batch, deferred }。两者都在 batch ⇒ disjoint，可同批；
+# deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
+```
+
+重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
+
+4. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
    每个任务的 `## Touches` 必须含**它自己的任务文件** `tasks/<id>.md`——**不带 `(new)` 标注**（带
    `(new)` 会误触 `hasAnyLandedNewTouch` 的 new-touch 路径，把每个任务都判成「工作已落地」、
    破坏就绪池）。自身文件是任务代理完成时编辑自己任务文件（勾 AC + 贴证据）的**授权**；缺它 ⇒
@@ -596,7 +619,6 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    `task/*` 分支判触摸相交——**与单机串行是同一个约束，只是提前到认领时**。任务合并进 `integration`
    后由步骤 2 释放认领（`release-task.sh`）。**单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 认领步骤为 no-op，
    直接跳过**——现有单机派发零回归（claim-task.sh 无 remote 时 fail-closed 退出 2）。
-
 派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**
 （`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到整批返回、拿不到先完成者的
 早期反馈、期间什么也做不了，`<task-notification>` 唤醒流永远不会被触发——那是本仓实测等待的另一半来源，
@@ -640,6 +662,7 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 `ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起——完成即触发
 派发评估（见「事件驱动派发（槽位回填）」）；tick 是兜底必跑心跳（每 tick 无条件跑 slot-refill，见步骤 4），
 不是派发的主节奏也不是新轮询源。
+`ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起，这只是兜底。
 
 ---
 
@@ -651,6 +674,7 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 |---|---|
 | 合并冲突 | abort，needs-human，停止派发 |
 | 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | **一律暂缓已完成 agent 的 fan-in**（真正保护）+ 新派发按失败位置条件化：共享闸门（`run_static_checks`）⇒ 停派发；具体测试文件且与新任务触摸集无关 ⇒ 派发继续（`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
+| 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | 停止新派发 **+ 暂缓已完成 agent 的 fan-in**（不并进红树；`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
 | 对抗审查 2 轮后仍 REFUTED | 标 needs-human，停止该任务 |
 | 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |

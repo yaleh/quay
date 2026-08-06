@@ -16,6 +16,7 @@
 		"./skills/loop-driver/SKILL.md",
 		"./skills/init/SKILL.md",
 		"./skills/cold-start/SKILL.md",
+		"./skills/manager/SKILL.md",
 		"./skills/quay-task-operator/SKILL.md",
 		"./skills/quay-task-to-plan/SKILL.md",
 		"./skills/routines/SKILL.md",

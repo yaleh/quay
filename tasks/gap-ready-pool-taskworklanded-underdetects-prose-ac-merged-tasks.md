@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks
 title: "ready-pool notYetFlipped under-detects merged-not-flipped tasks whose AC is prose-heavy — web-board's work landed on master (0950b0b6) yet taskWorkLanded=false, so it stayed in the dispatchable pool and got a THIRD dispatch; fix: add a landed signal independent of AC symbol extraction (e.g. git-history of declared specific Touches), with negative controls"
-status: ready
+status: done
 labels:
   - gap
   - defect

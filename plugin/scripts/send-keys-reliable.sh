@@ -40,6 +40,14 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"
 
+# fail-loud precondition (gap-laydown-derivation-is-sensitive-to-reference-spelling-... AC4):
+# a missing CHECKER must abort at STARTUP, never a silent assignment. The pre-fix script ran the
+# whole delivery flow and only failed deep in the step-5 poll when node could not spawn the checker.
+if [ ! -f "$CHECKER" ]; then
+  echo "send-keys-reliable: 依赖的校验器缺失: $CHECKER — 无法验证送达，fail loud" >&2
+  exit 1
+fi
+
 TARGET="${1:-}"
 TEXT="${2:-}"
 TARGET_JSONL="${3:-}"
@@ -58,6 +66,13 @@ usage() {
 [ -n "$TARGET" ] || { usage; exit 2; }
 [ -n "$TEXT" ] || { echo "send-keys-reliable: 文本为空" >&2; exit 2; }
 [ -n "$TARGET_JSONL" ] || { echo "send-keys-reliable: 缺少目标 transcript 路径" >&2; exit 2; }
+
+# fail-loud precondition (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure
+# AC4): the delivery verdict depends on the pure checker; a MISSING checker means the whole
+# deliver-confirmed-verdict promise is broken (the pre-fix script only ASSIGNED CHECKER at line 41
+# and silently failed every delivery poll against a nonexistent file — set -uo pipefail cannot catch
+# an assignment). Fail at startup with exit 1 + the missing path, never silently assign.
+[ -f "$CHECKER" ] || { echo "send-keys-reliable: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
 
 # Step 0. The target must exist (positive control: a nonexistent target → fail loud, never a
 # silent 0). Nothing is sent before this check.

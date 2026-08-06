@@ -5914,3 +5914,358 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ③ laydown-derivation-spelling（`fm-...-m6xqmw`）。生产闸 4 互不相交候选取 3。
 - **⚠ PLAN-develop-branch-cutover（develop/GitHub 主线 + master 冻结）待人确认——确认前不执行**（已注记）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:5xZ（内层 cron，轻触）
+
+- 在飞 3/3（value-prioritization 3 文件 / token-watches-shell 1 / laydown-derivation 1，均 0 提交工作中）。
+  无 fan-in、无新派发（cap 满）。套件 green、无 stop、无 block、Monitor 绿。
+- 外层 0b64ffdb：接受池 refill + DIR-124 拒绝；telemetry 3/3 real reflect=true。926d771b：branch-cutover
+  计划裁定锁定（人 ruling 2026-08-06）。
+
+### tick 2026-08-06T06:0xZ（内层，value-prioritization fan-in — 真实现）
+
+- **value-prioritization fan-in 完成（真实现）**：ready-pool-check 每候选 relevance 信号
+  （strategic/blocking/cost/value，全机械）+ `--top N` CLI（manager 层 Prioritization 挂点）。
+  AC1-AC7、27/27（relevance 7 新测试）。DIR-124 blocking 6 children 排 relevance 第一（答「谁 next」——
+  超 gap>DIR tiebreak；但派发仍判 directive 父拒绝）。worktree/branch 已清。在飞 2/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:1xZ（内层，token-watches-shell fan-in — 真实现）
+
+- **token-watches-shell fan-in 完成（真实现）**：token lease/renew 重绑定到**工作属主**——`--acquire` 写
+  lease_expires_ms、`--renew`（retry loop 调）延租 + 重绑 pid 到 work（acquiring shell 被杀不再误 reclaim
+  运行中工作）、reclaim = pid-dead+stale 早 / lease 过期 / legacy 回退；TOCTOU guard。AC1-AC7、19/19 +
+  token 族 12/12。worktree/branch 已清。在飞 1/3（laydown-derivation）。
+- 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:2xZ（内层 cron，token-status 派发）
+
+- **token-status-dead-holder 派发**（`fm-...-mbsm4t`）：git-log 0 hit 真未落地，与在飞 laydown-derivation
+  生产闸 DISJOINT，self-touch 过。runtime-nowhere-safe 与 laydown-derivation CONFLICT（不并发）。
+- 套件 green（2658 tests EFFECTIVE GREEN）。在飞 2/3。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:3xZ（内层，laydown-derivation + token-status fan-in）
+
+- **laydown-derivation fan-in 完成（真实现）**：derive_loop_scripts 拼写不敏感依赖闭包（script-dir sibling
+  refs fixpoint；**heal 两个静默缺失 sibling cap-from-gate.ts + pane-state-classify.ts，集 43→46**）、
+  verify blind-spot 共享尺、AC4 fail-loud CHECKER 前置。AC1-AC5/7、**80/80**（首跑 1 瞬态 flake——重跑
+  80/80 绿）。**follow-up**：laydown-set-check.sh 仍 prefix-only（与闭包集分歧，弱化 lay-what-you-verify，
+  待后续对齐）。
+- **token-status-dead-holder fan-in 完成（真实现）**：--status 发 holder_alive + reclaimable_now（共享
+  classify_hold()，读答案 == 下次 acquire 动作）、只读永不 reclaim、AC7 pull-based 指引。AC1-AC7、16/16 +
+  token 族 20/20。AC6 governance→engine 解决（retag 会 unpin token 测试出默认 gate）。worktree/branch 已清。
+- **在飞 0/3**。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:4xZ（内层 cron，轻触）
+
+- 套件 running——外层 red-window 分诊（contract-check 7 new 来自 2 个 manager branch-cutover 任务 code-block
+  Contract 不可解析，已重写标准格式 new=0；AC-carryover ratchet loop-driver AC3 unowned → 立 layer-2 cron
+  observability successor + Carries 声明），suite relaunch。
+- 池 7/12、disjoint 6（runtime-nowhere-safe 真候选；token-status 已 fan-in 待 closure——信号缺口）。派发 hold
+  （套件运行）。在飞 0/3。
+
+### tick 2026-08-06T06:3xZ（内层 cron + slot-refill 心跳）
+
+- **发现并纠正一个自伤事故**：本 tick 早前我误用 `full-suite-runner.ts --state`（非合法 flag），
+  它静默启动第二个并发全量套件（06:31:38→06:32:22, 44.7s, failures=[] fail-closed），
+  撞上外层正在跑的真套件（PID 3751740 06:28:26 起），把 state 文件 clobber 成 red。
+  外层已纠正回 running（e313eaf3）并归档根因缺陷：
+  **full-suite-runner.ts:139 writeState() last-write-wins 无 generation guard**（102453ac）。
+- 套件 running（外层真跑，219 files concurrency=1）⇒ 照常派发（tick doc step 3 停止条件未命中）。
+- slot-refill 心跳：should_refill=true、slots_free=3、real_in_flight=0；
+  **推荐 3 个候选全为陈旧信号缺口**（DIR-124 directive-parent、red-pattern/ghost-drive 已 landed）。
+- 派发 1/3：**runtime-nowhere-safe**（唯一真实未落地 ready 候选；touches 解析全 OK；
+  与刚合并的 laydown-derivation 的冲突已解除——后者先落地，本任务在其上构建）。
+  worktree /home/yale/work/quay-worktrees/runtime-nowhere-safe + telemetry bracket 已开。
+- 池 7/12、disjoint 6/3、criterion met；在飞 1/3（runtime-nowhere-safe）。
+
+### tick 2026-08-06T06:5xZ（外层，人裁定「按计划优先推进」分支切换）
+
+- **人已裁定**「按计划优先推进」branch-cutover 方案。
+- **现状核实**：develop/integration 冻结在 926d771b（阶段一快照点），master 领先 33 提交且仍被每次
+  tick 直接写（master 冻结 invariant 未生效）。
+- **驱动内层**：gap-two-layer-loop-tick-docs-hardcode-master 提为本轮最高优先级（当前 todo 未派发；
+  touches 可解析、与在飞 runtime-nowhere-safe disjoint）。内层收到后将优先派发。
+
+### tick 2026-08-06T06:4xZ（人裁定：按计划优先推进分支切换）
+
+- **人裁定已执行**：`gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model`
+  提为本轮最高优先级派发（master 冻结 invariant 未生效：develop/integration 冻结 926d771b、
+  master 领先 33 且仍被每 tick 直接写）。外层已在 add5fd0a 记裁。
+- 派发闸验证：touches 全解析；checkTouchesPair 判 **DISJOINT**（与在飞 runtime-nowhere-safe）。
+- 派发 2/3：branch-model-cutover → worktree /home/yale/work/quay-worktrees/branch-model-cutover
+  + telemetry bracket 已开。外层已裁定 AC6（共享文件可配置默认 master、本仓副本字面量 develop）。
+- 在飞 2/3（runtime-nowhere-safe + branch-model-cutover）；套件仍 running（外层 verify）。
+
+### tick 2026-08-06T06:5xZ（内层 cron + slot-refill 心跳 + 3.6 补晋）
+
+- 套件 running（外层 verify，PID 3751740 24:41 仍在跑）⇒ 照常派发；无停止条件命中。
+- 在飞 2/3（runtime-nowhere-safe + branch-model-cutover）；slot-refill 心跳 `--in-flight` 修正后
+  slots_free=1、recommended=DIR-124（directive parent → 拒绝）。
+- **3.6 补晋**：cap=5（GO 档）⇒ floor=20，池 7 < floor ⇒ 触发补晋。promotions 数组多候选陈旧
+  （含已派发的 branch-model；quality-criteria 的 git 命中是 cross-annotation 非落地）。
+  补晋 2 个真实未落地候选：**claim-task-and-backup-push**（disjoint 6/7，config-only，branch-cutover
+  阶段四同伴，`--pool-candidate` clean）+ **supervisor-base-layer**（disjoint 1，`--pool-candidate` clean）。
+- **派发 3/3**：claim-task-cutover（与两个在飞 DISJOINT，touches 解析全 OK）→ worktree
+  /home/yale/work/quay-worktrees/claim-task-cutover + telemetry bracket 已开。
+  supervisor 与 runtime-nowhere-safe **OVERLAP quay-init.sh** → 序列化，本 tick 不派发。
+- 池 9/20（补晋 2）；在飞 3/3 满。
+
+### tick 2026-08-06T07:0xZ（三 agent 完成 + fan-in 收口）
+
+- **三个 agent 全部完成，fan-in 合并收口**：
+  - runtime-nowhere-safe（ac893257→rebased+merged fcb9f178）——运行时落 `.quay/runtime/`（非 vendor/）、
+    quay-init 自写 gitignore、Go 半边重装门补上；AC1-AC11 全证据，scoped 61 pass/0 fail。
+  - claim-task-cutover（93017f7d+08eab128→merged）——claim-task/backup 指向 GitHub origin、quay-sync.git 退役；
+    Contract measure 正则修正；AC1-AC5 证据，scoped 15 pass/0 fail。
+  - branch-model-cutover（3940c1a8→merged）——tick 文档 11 处硬编码 master → 可配置 $FORK_BASELINE/$MERGE_TARGET
+    （默认 master 保下游）、本仓副本字面量 develop；AC1-AC6 证据，branch-model 9/9 pass。
+- **套件 GREEN（07:07Z 完成）**——外层 verify 通过。
+- worktree 清理 + 三个 telemetry bracket 已 close（outcome done）。在飞 0/3。
+- **【转外层决策】config 激活**：branch-model agent 标明的部署步骤——`.quay/config.yml` `loop:` 加
+  `fork_baseline: develop` / `merge_target: integration`。**未静默执行**：
+  ① 该文件 gitignored、人/外层所有（注释记录人工 concurrency 决策）；
+  ② **时序风险**——develop 停在 926d771b（落后 master 33+ 提交），今日全部 fan-in 都在 master，
+     此刻激活会让下一 tick 从过期基线分叉；PLAN 阶段三 step 11 的正常流（fork develop→merge integration→
+     outer FF develop）需要先有 develop 追上 master 的一步。转外层裁定激活时机（先快进 develop？等阶段二 B 合并？）。
+
+### tick 2026-08-06T07:1xZ（内层 cron + slot-refill 心跳 + 3.6 补晋）
+
+- 无 halt；套件 GREEN（07:07Z 完成）。在飞 0/3 全槽空。
+- telemetry 2 个陈旧括号（claim-task/branch-model 的 --task-end 未闭合，worktree-gone 误判）——`--reconcile` 已清。
+- **3.6 补晋**：池 6/20、dispatchable_disjoint 4/5 不达标 ⇒ 补晋 4 个真实未落地候选（全部
+  `--pool-candidate` clean、touches resolve）：spawn-count-criterion / needs-human-black-hole /
+  no-criterion-records-cost / quality-criteria-trend。DIR-043 有真实落地（519285ca 结晶 tmux 契约）
+  但 status 仍 todo——stale-status 工件，不晋。
+- **派发 1/3**：supervisor-base-layer（池内唯一真实未落地 ready；其 quay-init.sh OVERLAP 对象
+  runtime-nowhere-safe 已合并 ⇒ 在此之上构建，非在飞冲突）。worktree + telemetry bracket 已开。
+- 池 10/20；在飞 1/3。config 激活仍挂外层裁定（上一 tick 转交）。
+
+### tick 2026-08-06T07:1xZ（外层 config 激活裁定——两线模型生效）
+
+- **config 激活不再挂起**：`fork_baseline: develop` + `merge_target: integration` 已落
+  `.quay/config.yml:116-117`（外层 ab541024，07:09:43）。本地 develop=926d771b（冻结快照）、
+  integration 存在、master=13b5855c。
+- **从下一个新派发开始按两线模型分叉**：`fork-baseline.ts --task <id>` 机械判定
+  （independent→develop / 依赖 integration 上未验证任务→integration）；判别法：
+  `rev-list develop..分支` 与 `develop..master` 交集 ≠ 全量 ⇒ 从 develop 分叉。
+- 在飞 supervisor-base-layer worktree 从 master 分叉（07:10 创建，晚于 config 28s）——
+  已立案 gap-dispatch-fork-does-not-read-config-fork-baseline，记录在案不重做；
+  supervisor 完成后按新规则派发。
+- 池 10/20；在飞 1/3（supervisor，master 基线，历史遗留）。
+
+### tick 2026-08-06T07:3xZ（外层，人分工轴裁定 + 三个待办）
+
+- **人裁定分工轴**（manager-phase-goal 96b32bd2）：轴 = 谁生产/谁验收，两目标同轴。
+  - 目标1 生产（files 加 plugin/、develop 打 tag、v0.4.0、SEA）= **A**
+  - 目标1 验收 = **B**（A 结构上无法验证自己 release——开发树在场，与 verify-delivery-surface 0/6 同形态）
+  - 目标2 机制（claim 协议/同步 cron/冲突策略）= **A**（plugin/ 产品面，B 不得自发明）
+  - 目标2 证明（首个跨机任务生命周期）= 两机双边
+- **三个待办顺序前提**（branch cutover 收口前分工无处落地）：
+  ① B 推送成功（b-machine-push-backup → GitHub develop）
+  ② **A 下次派发真的从 develop 分叉**（外层下个派发实测判别式：rev-list develop..分支 ∩ develop..master 交集大小）
+  ③ B 的 origin 指向修正
+- **当前状态**：config 已激活（07:09 fork_baseline:develop），内层已记录（fddb0955），supervisor 在飞
+  （14m），**尚无新派发**——待办②待 supervisor 完成后下一个派发验证。
+
+### tick 2026-08-06T07:3xZ（内层 cron + slot-refill 心跳）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 1/3（supervisor，master 基线，历史遗留）。
+- 池 10/20、disjoint 4/5 不达标。slot-refill 推荐 split-batch-vocab —— **陈旧**（bfd66d94 已落地，
+  taskWorkLanded 信号缺口），不派。
+- **首个两线模型新派发**：spawn-count-criterion（唯一与在飞 supervisor DISJOINT 的候选；其余 3 个新晋
+  needs-human-black-hole/no-criterion-cost/quality-trend 与 supervisor 在 plugin/scripts/ OVERLAP ⇒ 序列化）。
+  `--pool-candidate` clean、touches resolve 4/4。
+- **fork-baseline.ts 判定 develop**（independent，integration 未验证 0）⇒ 按 config 新规则从 **develop**
+  （926d771b）分叉。判别法验证：develop..branch=0（干净 develop fork）。
+  ⚠️ 记录：develop 落后 master 57 提交，worktree 任务体 status 仍 todo（master 侧补晋未进 develop）——
+  任务体/AC 同源，仅状态字段滞后，agent 已被告知按 body 执行。
+- 在飞 2/3（supervisor + spawn-count）。池 10/20。
+
+### tick 2026-08-06T07:4xZ（supervisor 完成，fan-in 目标待外层裁定）
+
+- **supervisor-base-layer 完成**（66d32bea，13 files +1145/−94，worktree 内 23 scoped tests green，
+  capability-catalog 0 unclassified，os-anchor-watchdog.test.mjs worktree-agnostic 修复）。
+  步骤④⑤ 已立案（gap-supervisor-preemption + gap-supervisor-message-bus-with-identity）。
+- **fan-in 目标悬置【转外层裁定】**：supervisor 分支 = master~9 + 1 任务提交（结构证明：master..branch=1、
+  integration..branch=50），而 integration/develop 冻结 926d771b（落后 master 57）。
+  直接把分支合进 integration 会拖入 50 个 master-only 提交（integration 将含 develop 没有的工作，
+  正是两线模型要消除的污染）；合进 master 违反新冻结。**候选方案**：① rebase 到 integration 再合
+  （需外层确认无冲突处置）；② 等外层先把 develop FF 到含 supervisor 基线的点；③ 旧模型合 master
+  （违反冻结，除非人豁免）。supervisor 本身 done，等外层定 merge 目标。
+- 在飞 1/3（spawn-count，develop 基线）；池 10/20。
+
+### tick 2026-08-06T07:5xZ（外层，AC17 第一个真实汇合点分析）
+
+- **B 推送成功**（GitHub develop = d0edd8ab）：B 领先我们的 develop **105 提交**（共同祖先 926d771b）。
+- **我们的 master 领先 B 的 develop 59 提交**。
+- **B 改了 150 个文件**——冲突潜力大。
+- **这是 PLAN 阶段二（A/B 历史分叉合并）的执行点** + AC17 判据 4（真实协作）核心。
+- **裁定方向**：A 的 master 59 提交并入 develop（与 B 的 105 汇合）。冲突处理需谨慎（150 文件）。
+  这是方向性/高风险操作——记录现状，合并策略待管理者/人确认后执行（不擅自 merge 大冲突）。
+
+### tick 2026-08-06T07:5xZ（supervisor merge 裁定①执行——遇 plan-vs-reality 冲突，已中止待外层）
+
+- **外层裁定①（rebase 到 integration 再合）执行受阻**：`git rebase --onto integration c998b2ac HEAD`
+  干净地把 66d32bea 单提交 lift 到 integration 上（master..branch=0 达成），但**冲突在 quay-init.sh**。
+- **冲突根因（外层数据的盲点）**：「integration 自 926d771b 后 0 文件改动」属实，但**任务提交携带的是
+  master 线的文件状态**——66d32bea 的 quay-init.sh diff 假设 runtime-nowhere-safe 的 `.quay/runtime/`
+  重写（+laydown-derivation 的闭包检查）已在场；integration 上这些 commit 都不存在（frozen 926d771b）。
+  `--onto` 把任务提交的 diff 施加到旧版 quay-init ⇒ 冲突。**不是 integration 有改动，是任务基线在 master 线。**
+- **手动解决 = 重写任务提交的 quay-init 改动以适配旧版**——错误率高、可能把 runtime 层的既有修复弄丢。
+  **已中止 rebase（分支回到 66d32bea 未动）**，不冒损坏风险。
+- **给外层的方案演进**：
+  - ①a **先把 master 合并到 integration（或把 develop FF 到 master 再合）**——让 integration 获得
+    runtime-nowhere-safe + 其它 master 工作，再 rebase supervisor 就无冲突。但这等于「把 57 master 提交
+    并入 develop」的 AC17 大汇合提前（外层已说 AC17 待人确认策略单独处理）。
+  - ①b **在 master 上把 66d32bea 的 quay-init.sh 改动先独立成 commit**（剥离 master 依赖）——复杂。
+  - ①c **合回 master**（supervisor 本来就是 master 基线任务）——违反冻结，除非人豁免这一个。
+  - 建议：**等 AC17 大汇合策略确认**后把 supervisor 一并并入（它 23 scoped green 的验证在 master 线有效，
+    合进 integration 反而丢失验证语境）。
+
+### tick 2026-08-06T08:0xZ（外层，AC17 catch-up 裁定 + 落地可见性立案）
+
+- **管理者异常判据（坐实）**：距 merge 43min + disjoint=4≥3 + suite green。根因 = **两线模型激活但
+  基线内容从未迁移**——develop/integration 都冻结 926d771b（2h 前），master 62 提交真实工作未迁。
+  spawn-count 从 develop 分叉（缺 master 工作）、supervisor 从 master 分叉（rebase 到 integration
+  遇 62 提交缺失）。**可预见的后果，非意外**。
+- **catch-up 顺序裁定**：① master 62 提交并入 develop（A 内部迁移，先让 develop 有完整 A 基线）→
+  ② 拉 GitHub develop（B 105 提交）→ ③ rebase 任务分支（supervisor/spawn-count）到新 develop。
+  每步一个来源，冲突可控。
+- **落地可见性立案**：ready-pool-check/slot-refill 只测「有可派发候选」不测「落地是否被阻塞」——
+  criterion_met=True 在落地阻塞时照样报——「只测心跳不测意识」实例。
+
+### tick 2026-08-06T08:0xZ（内层 cron + slot-refill 心跳）
+
+- 无 halt；套件 GREEN（07:07Z）。reconcile 1 陈旧括号（supervisor detached-HEAD 误判 worktree-gone——
+  reattach 回 task 分支 66d32bea，bracket 已 close，任务 done 正确）。
+- 在飞 1/3（spawn-count，develop 基线）；槽 2 空。
+- slot-refill 推荐 supervisor —— **非新候选**（done-pending-merge，等外层 AC17 策略），不派。
+- **3 个真实候选（needs-human-black-hole / no-criterion-cost / quality-trend）全部与在飞 spawn-count
+  OVERLAP（plugin/test/* 全 glob）⇒ 序列化，本 tick 无新派发。**
+- 池 10/20、disjoint 4/5（4/5 里含 4 个 stale-landed 虚数）。supervisor merge 目标仍挂外层 AC17 裁定。
+
+### tick 2026-08-06T08:1xZ（外层 AC17 catch-up 裁定收到，待 spawn-count 完成执行）
+
+- **外层 AC17 catch-up 裁定**（已记录）：顺序① master 62 提交并入 develop（A 内部迁移，让 develop 有
+  完整 A 基线）→ ② 拉 GitHub develop（B 105 提交，d0edd8ab）→ ③ rebase 任务分支（supervisor/spawn-count）
+  到新 develop。每步一个来源冲突可控。理由：两线模型激活但基线内容从未迁移（develop/integration 冻结
+  926d771b 2h，master 62 提交未迁）。supervisor 的 rebase-to-integration 裁定保留。
+- **执行时机**：裁定注明「spawn-count 完成后执行」。当前 spawn-count 仍在飞（1/3，worktree 存在，
+  develop..branch=0 尚无提交，agent 工作中）。**不在在飞时迁移 develop**——会使其 worktree 基线失效。
+- spawn-count 完成通知到达时：先 fan-in 或先 catch-up？按裁定顺序 catch-up 优先（①→②→③ 含 rebase
+  任务分支），即完成通知后先执行 catch-up 的①②，再 rebase spawn-count 分支（③），然后按新 develop
+  基线 fan-in。
+
+### tick 2026-08-06T08:0xZ（外层，人催 AC16）
+
+- **人催 AC16**：archguard backlog 已空（"待接续：quay 升级/新能力/凭据/发布"），在等能装的 release。
+  AC16 卡着 archguard 下一步没落点——不是排期可延。
+- **裁定：现在派**。AC16（gap-release-excludes-plugin-bundle）Touches = packages/quay/package.json +
+  scripts，与在飞 spawn-count（quay-native）+ catch-up（git 分支）disjoint。优先于 catch-up（AC16
+  小改动 + archguard 等）。四项机制决定：files 加 plugin/、develop 打 tag、SEA 继续、v0.4.0。
+- 已驱动 inner：spawn-count 完成后优先派发 AC16，再执行 catch-up。
+
+### tick 2026-08-06T08:2xZ（外层 AC16 优先裁定执行）
+
+- **人催 AC16（GitHub release 完整可用）**：派发 gap-release-excludes-plugin-bundle-agent-surface
+  （todo 未派发，archguard backlog 空在等能装的 release）。外层裁定 4 项机制：files 加 plugin/、
+  from develop 打 tag、SEA 继续、v0.4.0。
+- 派发闸：touches resolve 5/5、checkTouchesPair DISJOINT vs 在飞 spawn-count（机械验证）、
+  `--pool-candidate` clean、**fork-baseline.ts 判 develop**。
+- **AC16 优先于 catch-up**：外层裁定顺序「spawn-count 完成后优先 AC16，再 catch-up」——AC16 与
+  spawn-count 在飞 disjoint 且同 develop 基线，**立即派发无冲突**；catch-up 大合并继续等 spawn-count 完成。
+- 派发 2/3：ac16-release → worktree /home/yale/work/quay-worktrees/ac16-release（develop 926d771b
+  基线）+ telemetry bracket 已开。
+- 在飞 2/3（spawn-count + ac16-release）。supervisor merge + AC17 catch-up 仍挂（spawn-count 完成后）。
+
+### tick 2026-08-06T08:4xZ（内层 cron + slot-refill 心跳，轻触）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 2/3（spawn-count + ac16-release，brackets aligned）。
+- 池 10/20、disjoint 4/5 不达标；slot-refill 推荐 supervisor（done-pending-merge，非新候选）拒绝。
+- 3 个真实候选全部与在飞 spawn-count OVERLAP（plugin/test/*）⇒ 序列化，本 tick 无新派发。
+- 外层在 AC16 agent 工作中扩展其 scope（62ba83b0）：第三条安装路径 dist-plugin marketplace
+  分支（落后 master 3755 提交），AC6 新增——agent 处理时需注意，fan-in 后核实 AC6。
+- supervisor merge + AC17 catch-up 仍挂（spawn-count 完成后）。
+
+### tick 2026-08-06T08:5xZ（AC16 fan-in 到 integration 完成）
+
+- **AC16 合入 integration**（第一个正确落两线模型的任务）：7adb6307（files+plugin、package.sh 快照、
+  v0.4.0、SEA 保留、dist-plugin 第三条路径）→ 8cca89d5 merge → bd273f5a contract 格式修复。
+  分支 develop 基线（926d771b）+1 提交，无 master-only 污染（与 supervisor 不同）。
+- **contract-check 抓到 band 格式违规**（`band bundle_in_pack = > 0` 无 name=value 形）——
+  严格子集 scoped 闸抓出，改为 `band bundle_in_pack = 1`。scoped 5/5 pass（含 bundle_in_pack>0 回归）。
+- worktree 清理 + branch 删除 + telemetry close（outcome done）。在飞 1/3（spawn-count）。
+- **AC17 catch-up 仍待 spawn-count 完成**（裁定顺序 ①master 62→develop ②拉 GitHub B ③rebase 任务分支）。
+  integration 现领先 develop 2 提交（AC16），等 catch-up ①②后由外层 FF 到 develop。
+
+### tick 2026-08-06T08:2xZ（外层，AC16 生产侧完成）
+
+- **AC16 landed on integration**（e1aed902，first two-line merge）：files+plugin、v0.4.0、5/5 green。
+  核实：integration 的 files 已含 plugin、version 0.4.0。
+- **按分工轴分 AC**：生产侧（AC1 files+plugin / AC4 develop tag+v0.4.0 / AC5 交叉标注）A 已勾；
+  验收侧（AC2 干净机端到端 / AC3 非 quay 项目两层循环）**待 B**（A 结构上无法验证自己 release）；
+  AC6 dist-plugin 重建待后续。任务保持 ready（生产完成待验收），不翻 done。
+- **待办**：AC16 FF develop → 打 tag → dist-plugin 重建 → B 验收；catch-up（master 62→develop、拉 B 105）
+  待 spawn-count 完成后由内层执行、外层 FF。
+
+### tick 2026-08-06T09:0xZ（内层 cron + slot-refill 心跳，轻触）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 1/3（spawn-count，brackets aligned，develop 基线）。
+- spawn-count 已跑 ~85min、分支 0 提交（agent 长任务中，未到 OVER90 阈值，未收完成通知 ⇒ 仍在工作）。
+- 池 10/20、disjoint 4/5；slot-refill 推荐 supervisor（done-pending-merge）拒绝。
+- 3 个真实候选（needs-human-black-hole / no-criterion-cost / quality-trend）均未落地但全部与
+  spawn-count OVERLAP（plugin/test/*）⇒ 序列化，本 tick 无新派发。
+- 挂起：supervisor merge + AC17 catch-up（spawn-count 完成后）；integration 领先 develop 2 提交（AC16）。
+
+### tick 2026-08-06T09:1xZ（外层，AC17 catch-up ② 完成 + 跨机合并回归）
+
+- **AC17 catch-up ② 完成**（da065182：merge origin/develop，B 105 提交并入 A develop）——跨机合并落地。
+  17 个文件冲突由 inner 解决。
+- **跨机合并第一个真实回归（管理者定位，非新写 bug）**：ready-pool-check 崩溃——
+  ① computeRelevance arity 不匹配（A 四参定义 + B 三参调用点，parentRefCount undefined → .get() 崩）
+  ② top 未声明（B 的 --top N 特性写 top，A 参数名 topN）——内层已修 ①（签名默认值），② 已驱动（top→topN）。
+  两边各自绿、合起来红——scoped 测试未覆盖的跨机合并形态。
+- **audit 记录 A/B（periodic-push-backup 铺设集 + verify-delivery-surface 第5项）随 merge 提交**，安全。
+
+- **ready-pool-check 跨机合并回归根治**（内层）：① arity 崩溃（b6bf8297）② blocking 静默失效
+  （buildCandidate 补 childrenByTask/parentRefCount + 四参调用）——已验证 exit 0 + pool 9/12。
+  跨机合并两边各自绿/合起来红的第二例（scoped 未覆盖）。
+
+### tick 2026-08-06T09:5xZ（AC17 catch-up ①②③ 完成 + 跨机合并回归修复）
+
+- **catch-up ①**：develop FF 到 master（ea2208cf，76 提交，纯快进无冲突）。
+- **catch-up ②**：merge origin/develop（B 105 提交 d0edd8ab，merge-base 926d771b）→ 17 冲突文件逐层解决
+  （da065182）。布局判定：A 的 .quay/runtime/bin/（测试钉死）为规范，B 的 refactor/superset 嫁接；
+  task bodies 双机证据并集、A board 状态权威。
+- **catch-up ③**：spawn-count（98e23f5b）+ supervisor（rebased）到新 develop。
+- **跨机合并回归修复（4 处，均已在 develop 验证）**：
+  ① ready-pool-check arity（computeRelevance 默认参数→根治 buildCandidate 线程化 maps，blocking 从 1/68→7/68）；
+  ② ready-pool-check top→topN（B 侧 body vs A 侧参数名）；
+  ③ ready-pool-check relevanceReason→c.relevance.reason（悬空 B helper）；
+  ④ heavy-op-token LEASE_MS→LEASE_S*1000（unbound variable 崩溃毁掉 acquire）。
+  附带：ready-pool 28/28、heavy-op-token 30/30 全绿（B 侧测试措辞对齐 A 规范输出）。
+- **在飞 0/3**（spawn-count/supervisor rebase 完成待 fan-in；AC16 已在 integration）。
+- **下一步**：supervisor + spawn-count 合 integration（两线模型）；外层 FF integration→develop。
+
+### tick 2026-08-06T10:1xZ（内层 cron，post-catch-up 首 tick）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 0/3（spawn-count bracket 已 close done）。
+- **fan-in 拓扑 knot【转外层裁定】**：integration（bd273f5a）持 AC16（v0.4.0）但落后 develop 188 提交
+  （develop 1c4938ac 全基线 v0.3.13）；spawn-count（98e23f5b）+ supervisor（39af6de5）在 develop+1。
+  两线模型 fan-in（合 integration → 外层 FF develop）需要 integration 先追上 develop，且 AC16 是
+  integration-only 的 divergence——**integration 如何追上 develop（merge develop into integration /
+  rebase AC16 onto develop）是分支模型决策，转外层**。
+- 池 9/20、disjoint 4/5 不达标；slot-refill 推荐 4 个全陈旧（DIR-124 directive / 3 landed signal-gap）。
+- needs-human-black-hole 经 catch-up 已落地（6f3c68d5，B 侧工作）——stale ready，不派。
+- **派发 1/3**：no-criterion-records-cost（唯一真实未落地 ready；resolve 5/6、pool-candidate clean、
+  fork-baseline=develop）。worktree /home/yale/work/quay-worktrees/no-criterion-cost + bracket 已开。
+
+### tick 2026-08-06T09:3xZ（外层，integration catch-up 策略）
+
+- **AC17 catch-up 完整完成**（1c4938ac：①FF ②17-conflict merge ③rebase both）+ 4 个跨机合并回归修复
+  验证（ready-pool arity/top/relevanceReason + heavy-op LEASE_MS，28+30 green）。blocking 根治 fd41c133。
+- **integration catch-up 策略裁定**：integration 合入 develop（develop→integration 合并）。数据：
+  integration 领先 develop 3 提交（全 AC16），develop 领先 integration 190（catch-up 后全部 A+B 工作）。
+  develop 是权威——integration 追平 develop 且不丢 AC16。已驱动 inner 执行。
+- 池 9/20（disjoint 4/5）、inner 在飞 no-criterion-cost。

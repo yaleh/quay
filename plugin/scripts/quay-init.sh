@@ -33,6 +33,10 @@
 # Flags:
 #   --force         overwrite on conflict (backup the existing file first)
 #   --dry-run       list what would happen, copy nothing
+# Read-only report modes (no category dispatch, no target writes):
+#   --check-drift                  drift report over the derived laydown set (漂移/缺失/一致, L_D)
+#   --check-dependency-closure     dependency-closure report over the derived laydown set
+#                                  (dependency_closure_gaps: N; band 0 — 铺了消费者必然铺依赖)
 # Loop params (consumed only by --loop):
 #   --root <dir>           workspace root (default: cwd)
 #   --project <name>       project name (default: basename of --root)
@@ -77,6 +81,7 @@ DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
 DO_CHECK_DRIFT=false
+DO_CHECK_DEPENDENCY_CLOSURE=false
 ANY_CATEGORY=false
 
 # ── parse args ─────────────────────────────────────────────────────────────────────────────────────
@@ -86,6 +91,7 @@ while [ $# -gt 0 ]; do
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --loop) DO_LOOP=true; ANY_CATEGORY=true; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
+    --check-dependency-closure) DO_CHECK_DEPENDENCY_CLOSURE=true; shift ;;
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -114,6 +120,17 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
   exit 2
 fi
 WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
+
+# gap-the-runtime-has-nowhere-safe-to-land: the RUNTIME LANDING BASE. The quay runtime (Core
+# bundle + native-provider bundle + provider.yml) used to land under `<target>/vendor/quay/` —
+# `vendor/` is a RESERVED directory name in Go (module vendoring resolves it), and `<target>/dist/`
+# is a reserved build-output name for a dozen toolchains. The landing decision (SPEC AC2 in the
+# task): the runtime is a GENERATED ARTIFACT, not source — so it lives OUTSIDE the target's git in
+# quay's OWN namespace `.quay/runtime/`, gitignored by quay-init itself (AC10). Path segments avoid
+# every reserved name (`vendor`/`node_modules`/`target`/`build`/`dist` — AC9). The `dist/` under
+# plugin/vendor/ is the PLUGIN's own build output (unaffected); only the TARGET landing path must
+# stay reserved-name-free.
+RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
 
 # Defaults for loop params.
 if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$(basename "$WORKSPACE_ROOT")"; fi
@@ -378,9 +395,10 @@ detect_tmux_session() {
 # quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
 # If the target has no config yet, write one whose provider uses ABSOLUTE project-local paths (never
 # a bare `quay-native` that PATH-resolves to the dev tree). The mcp_entry command is an absolute path
-# into the laid-down project-local vendor runtime (vendor/quay-native/dist/quay-native.js — the
-# self-contained native provider bundle quay-init lays down alongside the Core bundle; see the AC7b
-# lay-down below). If a config already exists, the project owns it — just note the AC7b requirement
+# into the laid-down project-local runtime (.quay/runtime/bin/quay-native.js — the self-contained
+# native provider bundle quay-init lays down alongside the Core bundle; see the AC7b lay-down below;
+# the landing dir is .quay/runtime/, never vendor/ — gap-the-runtime-has-nowhere-safe-to-land). If a
+# config already exists, the project owns it — just note the AC7b requirement
 # (a future --force could patch it; not silently rewritten).
 # ensure_loop_config: add/update the `loop:` section in an EXISTING `.quay/config.yml` with the
 # three target-project values (repo_root / test_command / tmux_session — SPEC AC2, the single
@@ -416,45 +434,75 @@ PYEOF
 # manager-verified case is a dev-tree source residual (`path: <ws>/bin`, `mcp_entry: .../bin/quay-
 # native.ts`) left by an earlier install, which the AC3 referenced-existence verify would otherwise
 # FAIL CLOSED on forever (the "config already exists is never rewritten" upgrade hole). quay-init
-# lays the install-state provider (vendor/quay-native/dist/quay-native.js + provider.yml) BEFORE
-# write_provider_config runs, so a stale provider path is migrated to that install-state provider
-# dir (bin/quay.ts uses `provider.path` as the provider spawn cwd — a nonexistent dir makes the
-# spawn ENOENT) and a dangling reference to a QUAY runtime file is migrated to the install-state
-# runtime bundle (config migration, not a blank rewrite — other keys are preserved). SCOPE GUARD:
+# lays the install-state provider (.quay/runtime/bin/quay-native.js + .quay/runtime/provider.yml)
+# BEFORE write_provider_config runs, so a stale provider path is migrated to that install-state
+# provider dir (bin/quay.ts uses `provider.path` as the provider spawn cwd — a nonexistent dir makes
+# the spawn ENOENT) and a dangling reference to a QUAY runtime file is migrated to the install-state
+# runtime bundle (config migration, not a blank rewrite — other keys are preserved). A config from
+# an install that laid the runtime under the OLD vendor/ layout is migrated to .quay/runtime/ even
+# when the stale vendor/ copy still exists (the layout moved — gap-the-runtime-has-nowhere-safe-to-
+# land). SCOPE GUARD:
 # only a `path` that is not a real directory AND only references whose basename is a quay runtime
 # file (`quay-native.js/ts`, `quay.js/ts`) are migrated; an arbitrary dangling path (e.g.
 # ./nonexistent/runtime.js) is left untouched so the landed vendor-runtime AC3 negative control
 # (verify FAILS CLOSED on a dangling mcp_entry it cannot recognize) keeps its meaning.
 migrate_stale_mcp_entry() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  local install_provider="${WORKSPACE_ROOT}/vendor/quay-native"
-  local install_runtime="${install_provider}/dist/quay-native.js"
+  local install_provider="${WORKSPACE_ROOT}/.quay/runtime"
+  local install_runtime="${install_provider}/bin/quay-native.js"
   if [ "$DRY_RUN" = true ]; then
     echo "  would-migrate: stale provider path/mcp_entry -> ${install_provider} (upgrade-channel config migration — AC4)"
     return
   fi
   if [ ! -f "$cfg" ]; then return; fi
-  python3 - "$cfg" "$install_provider" "$install_runtime" <<'PYEOF'
+  python3 - "$cfg" "$install_provider" "$install_runtime" "$WORKSPACE_ROOT" <<'PYEOF'
 import sys, os, re, yaml
-cfg, install_provider, install_runtime = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg, install_provider, install_runtime, ws_root = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 with open(cfg, encoding="utf-8") as f:
     data = yaml.safe_load(f) or {}
 prov = (data.get("providers") or {}).get("native")
 if not isinstance(prov, dict):
     sys.exit(0)
+# gap-the-runtime-has-nowhere-safe-to-land: reserved directory names that must never hold the quay
+# runtime in a target (Go vendor/, npm node_modules/, cargo target/, make/build/, bundler dist/).
+# The landing path check is by PATH LITERAL segment (task AC9), the same list here. An EXISTING
+# install (pre-fix) laid the runtime into `<target>/vendor/quay[-native]/` — on upgrade that dir
+# EXISTS, so the old `not os.path.isdir(p)` guard would never migrate it and the target would stay
+# pointed at the Go-reserved directory forever. The upgrade path therefore migrates any provider
+# path/mcp_entry that is (a) dangling, OR (b) a quay runtime path sitting under a reserved segment.
+RESERVED = {"vendor", "node_modules", "target", "build", "dist"}
+def under_reserved(p):
+    parts = [seg for seg in str(p).split(os.sep) if seg]
+    return any(seg in RESERVED for seg in parts)
+def is_quay_runtime_dir(p):
+    base = os.path.basename(str(p).rstrip(os.sep))
+    return base in ("quay", "quay-native")
 changed = False
-# path: a stale provider dir (does not exist) is migrated to the install-state provider dir.
+# path: a stale provider dir is migrated to the install-state provider dir. "Stale" = the dir does
+# not exist, OR it is a quay runtime dir sitting under a reserved segment (the pre-fix vendor/ land).
 p = prov.get("path")
-if isinstance(p, str) and p != install_provider and not os.path.isdir(p):
+if isinstance(p, str) and p != install_provider and (not os.path.isdir(p) or (under_reserved(p) and is_quay_runtime_dir(p))):
     prov["path"] = install_provider
     changed = True
 # mcp_entry: a dangling reference to a QUAY runtime file is migrated to the install-state runtime.
 me = prov.get("mcp_entry")
+legacy_native = os.path.join(ws_root, "vendor", "quay-native", "dist", "quay-native.js")
+legacy_core = os.path.join(ws_root, "vendor", "quay", "dist", "quay.js")
 if isinstance(me, list) and len(me) >= 2 and isinstance(me[1], str):
     ref = me[1]
+    is_quay_runtime = re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) is not None
     # Scope guard (see header comment): only a dangling reference to a quay runtime file is migrated.
-    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and not os.path.exists(ref):
+    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and (not os.path.exists(ref) or under_reserved(ref)):
         prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
+        changed = True
+    # Legacy layout migration (gap-the-runtime-has-nowhere-safe-to-land): a config from an
+    # install that laid the runtime under vendor/ (the OLD layout — vendor/ is a Go reserved
+    # dir and the 1.3MB bundles hit common large-file hooks) is moved to the .quay/runtime/
+    # layout. Fires EVEN IF the legacy vendor/ file still exists — the layout moved, and the
+    # config must not keep pinning the provider to the Go-reserved dir.
+    elif is_quay_runtime and ref in (legacy_native, legacy_core):
+        prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
+        prov["path"] = install_provider
         changed = True
 if not changed:
     sys.exit(0)
@@ -462,6 +510,37 @@ with open(cfg, "w", encoding="utf-8") as f:
     yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
 print(f"  migrated: stale provider config -> {install_provider} (upgrade-channel config migration — AC4)")
 PYEOF
+}
+
+# ensure_runtime_gitignore — gap-the-runtime-has-nowhere-safe-to-land AC10. The chosen
+# mechanism is "the runtime does NOT go into the target's git" (it is install-generated
+# product, never source, and a 1.3MB committed bundle trips common 500KB large-file hooks).
+# quay-init therefore MUST write the .gitignore entry itself — an instruction to the user
+# to add it would be exactly the manual patch G0 bans (人工补丁数必须为 0). Idempotent +
+# non-destructive: if the target's .gitignore already carries the entry (or the whole
+# .quay/ dir, which subsumes it), SKIP; else append (creating the file if needed). NEVER
+# rewrites, reorders, or clobbers the target's other gitignore content (AC10 negative
+# control: a pre-existing same-name entry → no duplicate write, no overwrite).
+ensure_runtime_gitignore() {
+  local gi="$WORKSPACE_ROOT/.gitignore"
+  local entry=".quay/runtime/"
+  if [ -f "$gi" ] && { grep -qxF "$entry" "$gi" || grep -qxF ".quay/" "$gi" || grep -qxF ".quay" "$gi"; }; then
+    if [ "$DRY_RUN" = true ]; then
+      echo "  would-skip: .gitignore already carries $entry"
+    else
+      echo "  skipped: .gitignore already carries $entry"
+    fi
+    return
+  fi
+  if [ "$DRY_RUN" = true ]; then
+    echo "  would-append: $entry to .gitignore"
+    return
+  fi
+  {
+    printf '# quay runtime (install-generated, not source — gap-the-runtime-has-nowhere-safe-to-land)\n'
+    printf '%s\n' "$entry"
+  } >> "$gi"
+  echo "  appended: $entry to .gitignore"
 }
 
 write_provider_config() {
@@ -480,14 +559,17 @@ write_provider_config() {
 # Generated by quay-init --loop (gap-cold-start-...-eight-steps AC7b).
 # The provider mcp_entry uses ABSOLUTE project-local paths — never a PATH-resolved
 # \`quay-native\` symlink into the quay dev tree. The native provider runtime
-# (vendor/quay-native/dist/quay-native.js) is the self-contained bundle quay-init
-# lays down alongside the Core bundle (see the AC7b lay-down in quay-init.sh).
+# (.quay/runtime/bin/quay-native.js) is the self-contained bundle quay-init lays down
+# alongside the Core bundle (see the AC7b lay-down in quay-init.sh). The landing dir is
+# .quay/runtime/ — quay's own namespace, NOT vendor/ (Go reserved), node_modules,
+# target, build or dist (gap-the-runtime-has-nowhere-safe-to-land AC9) — and quay-init
+# writes the .gitignore entry so the install-generated runtime is not committed (AC10).
 providers:
   native:
     enabled: true
-    path: "${WORKSPACE_ROOT}/vendor/quay-native"
+    path: "${WORKSPACE_ROOT}/.quay/runtime"
     tasks_dir: "${WORKSPACE_ROOT}/tasks"
-    mcp_entry: ["node", "${WORKSPACE_ROOT}/vendor/quay-native/dist/quay-native.js", "mcp"]
+    mcp_entry: ["node", "${WORKSPACE_ROOT}/.quay/runtime/bin/quay-native.js", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
 # Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
@@ -593,18 +675,118 @@ validate_worktree_root() {
   return 0
 }
 
+# ── loop-script set derivation (gap-laydown-derivation-is-sensitive-to-reference-spelling-...):
+# The --loop laydown set is DERIVED from the shipped mechanism docs' OWN references, so there is
+# no second hand-maintained copy to drift. It is the union of FOUR sources:
+#   (a) prefix-derived — every `plugin/scripts/<name>` reference in ALL shipped skills + tick docs
+#       (the doc spells the full target-local path — unambiguous → the full corpus).
+#   (b) bare-resolved  — every BARE `<name>.<ext>` filename token in the MECHANISM corpus (the
+#       cold-start skill + the loop tick docs — the docs that describe how the LAID-DOWN mechanism
+#       operates) that exists under plugin/scripts/. A bare filename there is a target-local
+#       mechanism reference (reference-spelling independence: 文档写裸文件名不再静默漏铺). Scoped to
+#       the mechanism corpus because the pipeline/routine/init skills bare-MENTION plugin-local
+#       tools (proposal-convergence.ts, routine-*, quay-init.sh, send-keys-verified.sh) whose
+#       transitive deps are NOT loop mechanisms — auto-laying those would ship broken files.
+#   (c) explicit       — documented additions below (bare-name mechanism files the docs call with
+#       no path at all, the checkers' transitive deps, the self-describing capability catalog).
+#   (d) closure        — every script in the set that calls a SIBLING in the same dir
+#       (`${SCRIPT_DIR}/<name>` / `$SCRIPT_DIR/<name>`) pulls that sibling in, repeated to fixpoint.
+#       This is the dependency-closure invariant (铺了消费者必然铺依赖): send-keys-reliable.sh:41
+#       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` and inner-session-check.sh:43 are the
+#       regression controls — before this, the laid-down delivery-verification was broken from first use.
+# Scripts that must NEVER auto-lay-down (a layer-retired delivery check + the installer itself):
+NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"
+
+# mechanism_corpus — the docs that describe how the LAID-DOWN mechanism operates (bare-filename
+# resolution scope for (b) above).
+mechanism_corpus() {
+  printf '%s\n' "$PLUGIN_ROOT/skills/cold-start/SKILL.md"
+  for f in "$PLUGIN_ROOT"/loop/*.md; do
+    [ -f "$f" ] && printf '%s\n' "$f"
+  done
+}
+
+# bare_resolved_scripts <doc>... — for each BARE `<name>.<ext>` token in the given docs that
+# resolves (by existence) under plugin/scripts/ and is not NEVER_LAYDOWN, print `plugin/scripts/<tok>`.
+bare_resolved_scripts() {
+  [ $# -gt 0 ] || return 0   # no corpus docs → nothing to resolve (never read stdin)
+  grep -ohE '(^|[^/a-zA-Z0-9._-])[a-zA-Z0-9._-]+\.[a-zA-Z0-9]+' "$@" 2>/dev/null \
+    | sed -E 's/^[^a-zA-Z0-9._-]//' | sort -u \
+    | while read -r tok; do
+        [ -f "$PLUGIN_ROOT/scripts/$tok" ] || continue
+        case " $NEVER_LAYDOWN " in *" $tok "*) continue ;; esac
+        printf 'plugin/scripts/%s\n' "$tok"
+      done || true
+}
+
+# derive_loop_scripts — prints the COMPLETE --loop script laydown set (one basename per line),
+# derived as (a)+(b)+(c)+(d) above.
+derive_loop_scripts() {
+  local out changed round s dep f
+  local -a mech_files=()
+  out="$(mktemp)"
+  while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
+  # (a) prefix-derived over the FULL corpus
+  grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null \
+    | sed 's#^plugin/scripts/##' | sort -u >> "$out" || true
+  # (b) bare-resolved over the MECHANISM corpus
+  bare_resolved_scripts "${mech_files[@]}" | sed 's#^plugin/scripts/##' >> "$out" || true
+  # (c) explicit additions:
+  #   tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
+  #   inner-idle-log.ts, heavy-op-token.sh, it0-split-or-commit-check.ts, pipe-exit-code-check.sh;
+  #   transitive deps of the checkers (imported by them, not doc-referenced): gate-script-base.ts,
+  #   workflow-event-schema.mjs, task-schema.ts, touches-parser.ts, wiring-coverage-check.ts;
+  #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
+  #   the loop so an installed project can see what each laid-down check answers. Deliberate
+  #   explicit addition (no doc references it by path — the catalog is self-describing).
+  printf '%s\n' inner-idle-log.ts heavy-op-token.sh it0-split-or-commit-check.ts pipe-exit-code-check.sh \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
+    capability-catalog.sh >> "$out"
+  sort -u "$out" -o "$out"
+  # (d) dependency closure — repeat until fixpoint
+  changed=1; round=0
+  while [ "$changed" -eq 1 ] && [ "$round" -lt 20 ]; do
+    changed=0; round=$((round + 1))
+    for s in $(cat "$out"); do
+      [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+      for dep in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._-]*' "$PLUGIN_ROOT/scripts/$s" 2>/dev/null | sed -E 's#.*/##' | sort -u || true); do
+        [ -n "$dep" ] || continue
+        case " $NEVER_LAYDOWN " in *" $dep "*) continue ;; esac
+        [ -f "$PLUGIN_ROOT/scripts/$dep" ] || continue
+        if ! grep -qxF "$dep" "$out"; then
+          printf '%s\n' "$dep" >> "$out"
+          changed=1
+        fi
+      done
+    done
+  done
+  sort -u "$out"
+  rm -f "$out"
+}
+
 # verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
 # lay-down. The mechanical constraint "referenced set ⊆ landed set": every file the shipped skills
-# and tick docs reference by path (plugin/scripts/*, orchestration/*, docs/analysis/*) must exist
-# in the target workspace after the --loop lay-down, UNLESS it is explicitly declared in
-# plugin/skills/init/SKILL.md as self-create (local state the first run creates — AC8) or
-# reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
+# and tick docs reference — by path (plugin/scripts/*, orchestration/*, docs/analysis/*) OR by BARE
+# filename in the mechanism corpus (resolved under plugin/scripts/, the SAME derivation the laydown
+# uses — AC3: checker and checked can no longer share a blind spot) — must exist in the target
+# workspace after the --loop lay-down, AND every laid-down script's same-dir sibling dependency
+# (${SCRIPT_DIR}/<name>) must be laid down too (dependency closure, AC1), UNLESS explicitly
+# declared in plugin/skills/init/SKILL.md as self-create (local state the first run creates — AC8)
+# or reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
 # hand-maintained lists (call sites vs landing set) with no mechanical bond must drift; this is
 # the bond. A referenced file that is neither landed nor declared = drift → FAIL CLOSED.
 verify_referenced_landed() {
-  local ws="$1" missing=0 r
-  local refs selfcreate refdoc
-  refs="$(grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true)"
+  local ws="$1" missing=0 closure_missing=0 r sd script
+  local refs selfcreate refdoc mech_bare
+  local -a mech_files=()
+  while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
+  # referenced set = docs' path-prefixed refs (full corpus) + docs' BARE filename refs in the
+  # MECHANISM corpus that resolve under plugin/scripts/ — the SAME derivation the laydown uses
+  # (AC3: checker and checked can no longer share the same blind spot).
+  mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
+  refs="$( ( grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
+             printf '%s\n' "$mech_bare"
+           ) | sort -u || true )"
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:
   #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
@@ -622,12 +804,28 @@ verify_referenced_landed() {
       missing=1
     fi
   done
-  if [ "$missing" = 1 ]; then
+  # dependency-closure check (AC1/AC3): every LAID-DOWN script's same-dir sibling reference must be
+  # laid down too — a script calling `${SCRIPT_DIR}/<sibling>` with the sibling absent is a broken
+  # mechanism (send-keys-reliable.sh:41 / inner-session-check.sh:43 → transcript-delivery-check.ts).
+  if [ -d "$ws/plugin/scripts" ]; then
+    for script in "$ws"/plugin/scripts/*.sh; do
+      [ -f "$script" ] || continue
+      for sd in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._-]*' "$script" 2>/dev/null | sed -E 's#.*/##' | sort -u || true); do
+        [ -n "$sd" ] || continue
+        case " $NEVER_LAYDOWN " in *" $sd "*) continue ;; esac
+        if [ ! -e "$ws/plugin/scripts/$sd" ]; then
+          echo "  FAIL (dependency-not-landed): $script references plugin/scripts/$sd but it is not laid down" >&2
+          closure_missing=1
+        fi
+      done
+    done
+  fi
+  if [ "$missing" = 1 ] || [ "$closure_missing" = 1 ]; then
     echo "ERROR: quay-init --loop would ship skills/tick docs that reference files it does not lay down (referenced ⊆ landed violated)." >&2
     echo "       Add the script to the landing set, or declare the file self-create/reference-doc in plugin/skills/init/SKILL.md." >&2
     return 1
   fi
-  echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc)"
+  echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc; every laid-down script's same-dir dependency is landed)"
   return 0
 }
 
@@ -848,45 +1046,6 @@ PYEOF
 # count — L_D) + the upgrade-path integration in the --loop block. Contract measure/invoke:
 #   `bash plugin/scripts/quay-init.sh --check-drift` stdout's 漂移/缺失/一致 number fields.
 
-# derive_loop_scripts — populate the LOOP_SCRIPTS array (the derived laydown set) from the SAME
-# grep the --loop block used before this extraction: every `plugin/scripts/*` reference in the
-# shipped skills + tick docs, PLUS the explicit bare-name / transitive-dependency / capability-catalog
-# additions (their rationale lives in the --loop block's comments, kept verbatim). Single source,
-# drift-immune — there is no second hand-maintained copy of the set.
-derive_loop_scripts() {
-  local derived
-  derived="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
-  local -a all=()
-  # shellcheck disable=SC2207
-  all=(
-    $derived
-    # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
-    inner-idle-log.ts
-    heavy-op-token.sh
-    it0-split-or-commit-check.ts
-    pipe-exit-code-check.sh
-    # transitive deps of the checkers (imported by them, not doc-referenced):
-    gate-script-base.ts
-    workflow-event-schema.mjs
-    task-schema.ts
-    touches-parser.ts
-    wiring-coverage-check.ts
-    # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
-    capability-catalog.sh
-  )
-  # Dedupe (an explicit addition may coincide with a derived reference): count and lay each script
-  # exactly once. A duplicated entry would double-count the drift report's derived-set N (the L2
-  # 升级正确性 measure) and re-process the same copy in the --loop laydown.
-  LOOP_SCRIPTS=()
-  local s t in
-  for s in "${all[@]}"; do
-    in=0
-    for t in "${LOOP_SCRIPTS[@]}"; do
-      [ "$t" = "$s" ] && { in=1; break; }
-    done
-    [ "$in" = 0 ] && LOOP_SCRIPTS+=("$s")
-  done
-}
 
 # compute_drift_report <workspace-root> — the derived-set-axis drift report (AC2). For every script
 # in the derived laydown set, classify the target's copy:
@@ -933,9 +1092,61 @@ if [ "$DO_CHECK_DRIFT" = true ]; then
   echo "  derived-set axis: the delivery surface's DERIVED scripts (L_D — the functional surface is the"
   echo "  derived laydown set, NOT the raw plugin/scripts file count). send-keys-verified.sh is retired"
   echo "  from the derived set (layered retirement) and is intentionally NOT reported."
-  derive_loop_scripts
+  LOOP_SCRIPTS=()
+  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
   compute_drift_report "$WORKSPACE_ROOT"
   exit 0
+fi
+
+# compute_dependency_closure_gaps — the gap-laydown-derivation-is-sensitive-to-reference-spelling-
+# dependency-closure Contract measure: how many LAID-DOWN scripts reference a same-dir sibling that
+# is NOT in the FINAL (post-closure) laydown set — "已铺但依赖未铺的脚本数". derive_loop_scripts
+# runs the closure to a fixpoint, so on the fixed repo every sibling that EXISTS in plugin/scripts/
+# is already in the set ⇒ gaps = 0 (the band; 铺了消费者必然铺依赖). A gap survives the closure
+# only when the referenced sibling DOES NOT EXIST in plugin/scripts/ (the dependency cannot ship —
+# fail loud, the AC4 spirit) or when the closure pass itself is broken (a regression guard: if the
+# closure silently stopped, send-keys-reliable.sh's sibling would re-appear as a gap here). The
+# validator is SCRIPT CONTENT (${SCRIPT_DIR}/<sibling>), never doc wording (invariant
+# closure_not_documentation = 1). Exits 0 on 0 gaps, 1 when gaps > 0.
+compute_dependency_closure_gaps() {
+  local gaps=0 s name v
+  for s in "${LOOP_SCRIPTS[@]}"; do
+    [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+    local vars
+    vars="$(script_dir_vars "$PLUGIN_ROOT/scripts/$s")"
+    [ -n "$vars" ] || continue
+    # distinct same-dir sibling references, UNFILTERED by existence — a reference to a sibling that
+    # does not exist in plugin/scripts/ is exactly the "已铺但依赖未铺" gap this check must surface.
+    local refs
+    refs="$(closure_ref_names "$PLUGIN_ROOT/scripts/$s" $vars | sort -u)"
+    [ -n "$refs" ] || continue
+    for name in $refs; do
+      [ -n "$name" ] || continue
+      local in_set=0 tt
+      for tt in "${LOOP_SCRIPTS[@]}"; do
+        [ "$tt" = "$name" ] && { in_set=1; break; }
+      done
+      if [ "$in_set" = 0 ]; then
+        echo "  gap: plugin/scripts/$s references same-dir sibling plugin/scripts/$name which is NOT in the laydown set — the dependency cannot ship (missing from plugin, or the closure pass is broken)" >&2
+        gaps=$((gaps + 1))
+      fi
+    done
+  done
+  echo "dependency_closure_gaps: $gaps"
+  [ "$gaps" -eq 0 ]
+}
+
+# ── --check-dependency-closure mode (Contract measure/invoke) ────────────────────────────────────────
+# READ-ONLY dependency-closure report over the derived laydown set. No category dispatch, no --loop
+# params. Emits the parseable `dependency_closure_gaps: N` field (Contract band N = 0). Exits 0 when
+# the set is closure-complete, 1 when gaps exist (a regression that would ship a consumer without its
+# dependency). Contract invoke: `grep -n 'transcript-delivery-check' plugin/scripts/send-keys-reliable.sh
+# plugin/scripts/quay-init.sh` must show the consumer → checker reference on both sides.
+if [ "$DO_CHECK_DEPENDENCY_CLOSURE" = true ]; then
+  echo "quay-init dependency-closure report (plugin v${PLUGIN_VERSION})"
+  derive_loop_scripts
+  compute_dependency_closure_gaps
+  exit $?
 fi
 
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
@@ -1075,6 +1286,14 @@ PYEOF
   # upgrade brought the derived set to 一致.
   echo "  drift report (before upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
+  # gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure: the laydown set
+  # is DERIVED from the shipped mechanism docs' OWN references at BOTH spellings (path-prefixed AND
+  # bare filename) PLUS the laid-down scripts' TRANSITIVE SIBLING DEPENDENCIES — so the mechanism
+  # is functional and reference-spelling-independent (see derive_loop_scripts above; the old
+  # hand-written explicit list now lives in derive_loop_scripts' source-(c) additions).
+  # shellcheck disable=SC2207
+  LOOP_SCRIPTS=()
+  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
       # mode "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never
@@ -1129,20 +1348,30 @@ PYEOF
   # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry
   # (AC1/AC2): lay the runtime INTO the target. The target's loop must NOT depend on the quay dev
   # tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/). The
-  # built Core runtime (vendor/quay/dist/quay.js) AND the built native provider runtime
-  # (vendor/quay-native/dist/quay-native.js + provider.yml — the self-contained provider bundle,
-  # gap-ac3b-prove-installed-quay-runs-without-dev-tree) are copied into the target so the target's
-  # .quay/config.yml can point its provider mcp_entry at a PROJECT-LOCAL copy of the provider runtime
-  # (an absolute path into vendor/quay-native/, never a bare `quay-native` that PATH-resolves to a
-  # dev tree). The two laid-down files must stay together: the bundle resolves provider.yml relative
-  # to its own location. The runtimes are GENERATED artifacts (gitignored dist/ — M172), so a fresh
+  # built Core runtime (plugin/vendor/quay/dist/quay.js) AND the built native provider runtime
+  # (plugin/vendor/quay-native/dist/quay-native.js + provider.yml — the self-contained provider
+  # bundle, gap-ac3b-prove-installed-quay-runs-without-dev-tree) are copied into the target so the
+  # target's .quay/config.yml can point its provider mcp_entry at a PROJECT-LOCAL copy of the
+  # provider runtime (an absolute path into .quay/runtime/, never a bare `quay-native` that
+  # PATH-resolves to a dev tree). The two laid-down files must stay together: the bundle resolves
+  # provider.yml relative to its own location (so the bundle sits in `.quay/runtime/bin/` and
+  # provider.yml in `.quay/runtime/` — one level up, exactly the `../provider.yml` contract). The
+  # runtimes are GENERATED artifacts (gitignored dist/ — M172), so a fresh
   # plugin clone has none: ensure_vendor_runtime AUTO-BUILDS them via sync-vendor.sh (AC2) or FAILS
   # CLOSED (AC1) — never a WARN-and-complete with a broken mcp_entry. After it returns, both bundles
   # are guaranteed present, so the lay-down is unconditional.
   ensure_vendor_runtime
-  copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/vendor/quay/dist/quay.js" clean
-  copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$WORKSPACE_ROOT/vendor/quay-native/dist/quay-native.js" clean
-  copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$WORKSPACE_ROOT/vendor/quay-native/provider.yml" clean
+  # gap-the-runtime-has-nowhere-safe-to-land: the runtime lands in .quay/runtime/ — quay's
+  # own namespace — NOT vendor/ (a Go reserved dir whose mere presence flips a Go module
+  # with dependencies into vendor mode → "inconsistent vendoring" build failure) and NOT
+  # node_modules / target / build / dist (other language conventions, AC9). The bundle's
+  # internal `bin/` subdir keeps the native provider's `../provider.yml` resolution intact.
+  # ensure_runtime_gitignore then writes the .gitignore entry so the 1.3MB install-generated
+  # bundles are never committed (AC10) — the target's commit stays under any large-file hook.
+  copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/.quay/runtime/bin/quay.js" clean
+  copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$WORKSPACE_ROOT/.quay/runtime/bin/quay-native.js" clean
+  copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$WORKSPACE_ROOT/.quay/runtime/provider.yml" clean
+  ensure_runtime_gitignore
   write_provider_config
 
   # Upgrade-path state record (AC5): detect prior plugin version + already-laid assets.

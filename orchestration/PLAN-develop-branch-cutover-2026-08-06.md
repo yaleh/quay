@@ -1,7 +1,8 @@
 # 方案：切换到 develop/integration 主线 + GitHub 作为唯一跨机同步点
 
 **日期**：2026-08-06（管理者，人给出方向）
-**状态**：**三个开放问题已由人裁定（见 §4）；方案已按裁定更新；仍等待人对更新后方案的最终确认，未执行任何一步。**
+**状态**：**人已确认执行（"按 orchestration/PLAN-develop-branch-cutover-2026-08-06.md 方案开始
+执行。持续推进，直至完成。"）。执行中——见文末「执行日志」。**
 **触发**：人的直接指令——
 
 > 高优先级落地 branch 策略。develop 和 integration 两个分支都用于持续开发；master branch 应仅在
@@ -125,3 +126,33 @@ A↔B 直接同步（现在的 quay-sync.git 裸仓库）：**退役**
 
 **本文件是给你确认用的完整方案，不建 AC/DoD、不排优先级、不执行任何一步。**
 **三个开放问题已按你的裁定更新（§2、§3 阶段二、§4、阶段四步骤16）——请确认整体方案，确认后我按分工把阶段一交给 A、阶段二交给 B 的循环、阶段三/四/五转给两机 outer 落地。**
+
+---
+
+## 执行日志（2026-08-06，人确认后）
+
+**阶段一 —— 完成（管理者，A 机，直接执行，行政性 git 操作，非产品代码）**：
+- `git branch -f develop master && git branch -f integration master`（本地指向当前 `master`）；
+- `git push origin develop:develop integration:integration` → GitHub 新建两分支成功；
+- `git ls-remote --heads origin` 核对：`develop`=`integration`=`926d771b`（A 机当时 master 头），
+  `master`=`9316b797`（旧点，**未动**，仍落后本地 master 1000+ 提交——冻结按设计生效）。
+
+**阶段二 —— 已委派（B 机自己的两层循环执行，非管理者/A 代劳）**：
+- 通过 tmux send-keys（ADR-016 三步：`C-u`→文本→`Enter`，发送前后各 `capture-pane` 核对）
+  通知 `orangevps` 的 `quay-b:0`（outer 窗口，当时 idle 待输入）：阶段一已完成，指示其
+  `git fetch origin`、读取 `origin/develop` 上的本方案文件、把本机独有提交合并到基于
+  `origin/develop` 的新工作上（冲突按自己的常规红窗处理方式裁定）、完成后推回 `origin develop`；
+  发送后确认 B outer 进入处理状态（"Choreographing…"）。**进行中，未有完成回报。**
+
+**阶段三/四 —— 已立案为 A 机自己任务板上的两条 `todo` 任务**（转给 A 自己的两层循环落地，
+管理者不直接改产品代码）：
+- `tasks/gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model.md`
+  （tick 文档 11 处硬编码 master → develop/integration；master 写保护约束）；
+- `tasks/gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github.md`
+  （`claim-task.sh`/`periodic-push-backup.sh` 改指 GitHub，退役 `quay-sync.git` 目标）。
+- 两条均已通过 `mcp__quay__task_list` 核对可被正常解析（无 malformed），已提交入库。
+
+**阶段五（验证）**：尚未开始——依赖阶段三任务落地后的真实生命周期自证，见该任务 AC2。
+
+**下一步（manager 持续观察，不代执行）**：等 B 完成阶段二回报；等 A 自己的两层循环拾取
+两条新任务；周期性 tick 里核对 `orchestration/manager-phase-goal.md` AC15 三条度量的变化。

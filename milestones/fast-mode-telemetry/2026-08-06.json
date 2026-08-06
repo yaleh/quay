@@ -1,0 +1,65 @@
+{
+  "generatedAt": "2026-08-06T03:06:49.525Z",
+  "since": null,
+  "tasks": [
+    {
+      "taskId": "gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false",
+      "minutes": 172.0847,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-global-count-assertions-fragile-relative-baseline",
+      "minutes": 172.0831,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-outer-heartbeat-source-inverts-under-incident-handling",
+      "minutes": 84.74008333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-productize-the-manager-layer",
+      "minutes": 256.48386666666664,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+      "minutes": 256.48415,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes",
+      "minutes": 84.7423,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency",
+      "minutes": 256.4859833333333,
+      "outcome": "done"
+    }
+  ],
+  "orphaned": [],
+  "inProgress": [],
+  "meanMinutes": 183.30059761904758,
+  "medianMinutes": 172.0847,
+  "tasksPerHour": 1.63653579142741,
+  "serialEquivalentPerHour": 0.3273311750172119,
+  "windowStart": "2026-08-05T22:50:10.803Z",
+  "windowEnd": "2026-08-06T03:06:49.183Z",
+  "windowHours": 4.277327777777778,
+  "haltedHours": 0,
+  "halted": [],
+  "blocked": [
+    {
+      "taskId": "gap-productize-the-manager-layer",
+      "reason": "task-over-90m",
+      "sinceMs": 1785980413604,
+      "clearedAtMs": 1785980447395,
+      "durationMs": 33791
+    }
+  ],
+  "totalBlockedMs": 33791,
+  "longestBlockedMs": 33791,
+  "reconciled": [],
+  "unreliable": []
+}
