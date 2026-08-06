@@ -6406,3 +6406,22 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **派发 1/3 — gap-supervisor-message-bus-with-identity**（supervisor step ⑤，3.6 补晋）：
   resolve 5/5、pool-candidate clean、fork-baseline=develop。worktree + bracket 已开。
 - 在飞 1/3。
+
+### tick 2026-08-06T10:5xZ（外层，ad-arm1 冷启动发现 session-liveness 回归）
+
+- **ad-arm1 冷启动 fail 7**：第一个硬错误 = plugin/test/session-liveness.test.mjs:260 SyntaxError
+  （Identifier 'commit' already declared——模块加载期崩，整文件测不了）。A 本机逐字复现（非 ARM 专属）。
+- **根因**：da065182（catch-up②）**第三次回归**（同 arity/title 根因）——session-liveness.test.mjs:240-262
+  合并错乱（makeFreshGitRepo body 无闭合 + initGitRepo 内两个 const commit 同作用域）。
+- **修法**（驱动 inner）：makeFreshGitRepo 补完整 body + initGitRepo 删重复 commit + 边界分离。
+- 套件自 07:07 未真跑全量——此缺陷活在 develop 未被发现。其余 6 失败项 ad-arm1 陆续报。
+
+### tick 2026-08-06T11:0xZ（外层，ad-arm1 冷启动 4 条根因）
+
+- **ad-arm1 冷启动门禁完整诊断**（管理者转达）：4 条根因全 da065182 合并回归。
+  #1 session-liveness.test.mjs 硬 SyntaxError——**已修提交**（e8f0a015）。
+  #2 loop-driver-check.test.mjs 整文件两份版本拼接（最严重，测 cold-start 单驱动不变式）——驱动 inner 修。
+  #3 cap-from-gate.test.mjs 硬编码 effective_cap >= 3——**外层裁定：测试应断言 effective_cap == 配置 GO 值**
+    （config 注释明写同一机制不同数字，ad-arm1 GO=2 合法）——驱动 inner 修。
+  #4 send-keys-reliable AC4 文案漂移（脚本 vs 测试正则措辞）——驱动 inner 修。
+- **ad-arm1 会等推 GitHub develop 后 pull 重跑**。
