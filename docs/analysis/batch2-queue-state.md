@@ -6165,3 +6165,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   scripts，与在飞 spawn-count（quay-native）+ catch-up（git 分支）disjoint。优先于 catch-up（AC16
   小改动 + archguard 等）。四项机制决定：files 加 plugin/、develop 打 tag、SEA 继续、v0.4.0。
 - 已驱动 inner：spawn-count 完成后优先派发 AC16，再执行 catch-up。
+
+### tick 2026-08-06T08:2xZ（外层 AC16 优先裁定执行）
+
+- **人催 AC16（GitHub release 完整可用）**：派发 gap-release-excludes-plugin-bundle-agent-surface
+  （todo 未派发，archguard backlog 空在等能装的 release）。外层裁定 4 项机制：files 加 plugin/、
+  from develop 打 tag、SEA 继续、v0.4.0。
+- 派发闸：touches resolve 5/5、checkTouchesPair DISJOINT vs 在飞 spawn-count（机械验证）、
+  `--pool-candidate` clean、**fork-baseline.ts 判 develop**。
+- **AC16 优先于 catch-up**：外层裁定顺序「spawn-count 完成后优先 AC16，再 catch-up」——AC16 与
+  spawn-count 在飞 disjoint 且同 develop 基线，**立即派发无冲突**；catch-up 大合并继续等 spawn-count 完成。
+- 派发 2/3：ac16-release → worktree /home/yale/work/quay-worktrees/ac16-release（develop 926d771b
+  基线）+ telemetry bracket 已开。
+- 在飞 2/3（spawn-count + ac16-release）。supervisor merge + AC17 catch-up 仍挂（spawn-count 完成后）。
