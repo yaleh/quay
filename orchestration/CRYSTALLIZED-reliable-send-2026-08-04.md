@@ -81,6 +81,14 @@ until-loop 承载这个等待，不要用短 sleep 硬编码猜测延迟。
 **运行时判定逻辑（直接输入覆盖）保留作历史兜底**——防未来版本行为变化（例如 flag/env 失效、
 新形态 ghost），不删。
 
+**2026-08-06 标注（AC7，gap-residue-check-crystallized-as-tool-mode）**：故障 6 的**运行时判定逻辑
+现由工具承载**——`plugin/scripts/pane-state-classify.ts --check-residue` 把「框里有字 vs 真的提交了」
+从角色目测结晶成命令产物：对目标 pane 循环 C-u + capture，`C-u 后输入行变空 ⇒ real-unsubmitted-text`、
+`C-u 循环 N 次 pane 逐字不变 ⇒ ghost-suggestion-only`（有界 N=50、判不了 fail-loud 报 unknown）。
+本节的判据（「循环后 pane 内容是否逐字不变」）是纯函数 `classifyResidueFromCaptures` 的唯一判据，
+夹具三态为 2026-08-06 真实录制。**源头消除后此工具仍作历史兜底**：flag/env 失效或新形态 ghost 再出现
+时，发送前的 residue 检查会先于故障 6 的「直接输入覆盖」把它机械地判出来，不靠人目测。
+
 ## 故障 7：全新会话的 welcome 屏占位符——C-u 循环清不掉、直接覆盖也卡（第六种送达失败模式）
 
 **证据**：2026-08-05 archguard 外层首次驱动自己的内层时，send-keys-reliable.sh 在**全新 welcome 屏**
