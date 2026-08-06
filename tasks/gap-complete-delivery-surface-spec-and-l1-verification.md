@@ -84,6 +84,8 @@ extra:
 
 ## Touches
 
+- tasks/gap-complete-delivery-surface-spec-and-l1-verification.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - orchestration/SPEC-complete-delivery-surface-2026-08-05.md（升级为六类活文档）
 - plugin/scripts/（verify-referenced-landed 或等价：扩展到六类）
 - plugin/test/（L1 六类全覆盖断言）
