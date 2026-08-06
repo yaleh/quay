@@ -5986,3 +5986,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   tick 直接写（master 冻结 invariant 未生效）。
 - **驱动内层**：gap-two-layer-loop-tick-docs-hardcode-master 提为本轮最高优先级（当前 todo 未派发；
   touches 可解析、与在飞 runtime-nowhere-safe disjoint）。内层收到后将优先派发。
+
+### tick 2026-08-06T06:4xZ（人裁定：按计划优先推进分支切换）
+
+- **人裁定已执行**：`gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model`
+  提为本轮最高优先级派发（master 冻结 invariant 未生效：develop/integration 冻结 926d771b、
+  master 领先 33 且仍被每 tick 直接写）。外层已在 add5fd0a 记裁。
+- 派发闸验证：touches 全解析；checkTouchesPair 判 **DISJOINT**（与在飞 runtime-nowhere-safe）。
+- 派发 2/3：branch-model-cutover → worktree /home/yale/work/quay-worktrees/branch-model-cutover
+  + telemetry bracket 已开。外层已裁定 AC6（共享文件可配置默认 master、本仓副本字面量 develop）。
+- 在飞 2/3（runtime-nowhere-safe + branch-model-cutover）；套件仍 running（外层 verify）。
