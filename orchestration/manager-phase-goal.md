@@ -3,6 +3,13 @@
 **角色**：三项目（quay / archguard / meta-cc）管理者。**不是任何一个项目的外层。**
 **建立时间**：2026-08-03 11:5xZ ——人指出「你应该把自己这个阶段的 AC 明确列出来」。
 
+**切分（SPEC-manager-productization §6，AC9，2026-08-05）**：本文件只保留**本实验的阶段状态**
+（名词）——目标、AC、预算、三步顺序。**产品侧的 manager 行为（动词）**——角色边界纪律、
+每日复盘、三职能、ask-vs-act、事件 triage、每 tick 必做——已随 plugin 交付到
+`plugin/loop/manager-loop-tick.md`（与 `orchestrator-loop-tick.md` / `fast-mode-loop-tick.md`
+同级的 shipped loop 模板）。manager 的**可安装启动**是 `quay manager start` / `quay manager adopt`
+（C4/C5，见 `plugin/scripts/manager-start.sh` / `manager-adopt.sh`）。
+
 ---
 
 ## 目标
