@@ -7338,3 +7338,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **manager-productization 不碰**：外层 17:09 裁定「双括号留待人工裁定」（worktree 老 base 56d60671 + 1 脏文件 + 16:23 cf7gcr 括号）。本 tick 不 re-dispatch / 不 reconcile / 不清理。
 - **在飞 0/5**：slot-status `real_in_flight:0`、`slots_free:5`、`brackets_reflect_subagents:false`（仅剩 2 条 manager 陈旧括号在 reconcile 关闭投影——**未跑 --reconcile**：slug 截断会误关 manager 括号，且外层已接走裁定）。green-verdict/shipped/no-post-merge 括号已被外层 16:58 收尾关闭（本 tick detect-stop **无停止条件、无块**——OVER90 假阳性已随括号关闭消失）。
 - **遥测**：tasksPerHour 1.22（window 102.9h）/ mean 65.4m / median 49.7m / 累计死时间 31.2m。Monitor `mounted:true / targetOk:true`。inbox unread=0。
+
+### 事件 17:4xZ（外层静态链修复请求——修红树，非新派发）
+
+- **外层请求**（人/外层）：adr016-screen-use-check 报 `packages/quay/plugin/scripts/send-keys-verified.sh`（17:00 打包副本）2 处整屏哈希违规，band 0..1 超限——已退役的 `plugin/scripts/send-keys-verified.sh` 在 RETIRED_FILES 正常不计，但该副本未入。套件卡在静态链，到不了 quay-init 测试。
+- **根因**：`packages/quay/plugin/` 是 gitignored 的 pack-time 快照（package.sh 铺出，17:00 打包副本），与 `plugin/` 源是同一退役文件的两个路径；RETIRED_FILES 只含源路径。
+- **修复**：`plugin/scripts/adr016-screen-use-check.ts` RETIRED_FILES 增加 `packages/quay/plugin/scripts/send-keys-verified.sh`（同文件同退役，继承豁免）。已验证：adr016 0 active（两副本均 retired 报出）、mutation pass、`scripts/test.sh --static-checks` 全绿（STATIC-EXIT 0）。commit `25196d9a`。
+- **顺带**：`tasks/gap-manager-productization-five-constraints.md` 有未提交改动（manager 改写 AC5，人三条裁定禁 OS watchdog/Desktop 定时任务，仅 `/loop`/CronCreate 合法）——并发人工工作，未触碰。
