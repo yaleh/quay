@@ -321,8 +321,11 @@ test("AC5 — a signal-killed run writes state=red reason=aborted, which must NO
     'sleep 1\n' +
     'runner_pid=$PPID\n' +
     'while [ -n "$runner_pid" ] && [ "$runner_pid" != "1" ]; do\n' +
-    '  comm=$(ps -o comm= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
-    '  case "$comm" in node*) kill -TERM "$runner_pid"; break ;; esac\n' +
+    '  # detect the node runner via /proc/<pid>/exe, not `ps -o comm` — node\n' +
+    '  # processes report comm=`MainThread` on this machine, so a `node*` match\n' +
+    '  # silently misses the runner and the self-signal is never delivered.\n' +
+    '  exe=$(readlink "/proc/$runner_pid/exe" 2>/dev/null || true)\n' +
+    '  case "$exe" in */node|*/nodejs) kill -TERM "$runner_pid"; break ;; esac\n' +
     '  runner_pid=$(ps -o ppid= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
     'done\n' +
     'sleep 5\n' +
