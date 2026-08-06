@@ -5248,3 +5248,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **gate-wait-as-failed 合并**（`ac2506b6`）：机制本体已由 reason-axis 任务先行落地（ABORT_PATTERNS 等）；本任务补 `--wait-check` CLI 控制 + 端到端核查（24/24）。已并已清。
 - **checksplitrecommendation 合并**（`3ecfd05a`）：裁定 **mark-aspirational 不接线**（分类器输入在 fast mode 不存在 + countMechanisms 3/5 不可靠 + ADR-021 人判 + 已有等价机械范围守卫）；CLAUDE.md 加 STATUS 引用性政策注。已并已清。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `a60c3beb`。
+
+### tick 2026-08-06T09:5xZ（内层，外层补池 3 后首派：2/5）
+
+- **外层补池 3**（3a23531c）：audit-findings / cold-start-outer-validation / inner-session-discovery-fallback 晋 ready。pool 13 / disjoint 5（升）。
+- **派发 2/5**（disjoint batch）：`audit-findings-backpropagated`（后续机制发现回灌到更早检测器——覆盖该类别）+ `inner-session-discovery-fallback-silent`（退化路径报警/fail-closed，防静默降级冒充健康）。self-touch（inner-session 缺已补）+ telemetry 已开。cold-start-outer-validation deferred（与 audit-findings 碰撞）。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。

@@ -65,6 +65,7 @@ transcript，commit 12936f90），verified c7b58e09。但 line 178 无 PID/无 s
 
 ## Touches
 
+- tasks/gap-inner-session-check-discovery-fallback-silent.md
 - plugin/scripts/inner-session-check.sh（退化路径报警/fail-closed）
 - plugin/loop/orchestrator-loop-tick.md（cold-start 3 自检消费者读 transcriptSource）
 - plugin/test/inner-session-check.test.mjs（退化路径负控制）
