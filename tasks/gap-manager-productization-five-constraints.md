@@ -85,6 +85,7 @@ manager 手里出现 .sh/.ts 实现即越界信号。
 
 ## Touches
 
+- tasks/gap-manager-productization-five-constraints.md
 - plugin/scripts/（manager start/adopt 命令、quay-topology.sh 单飞锁、无-manager-tick-doc checker）
 - plugin/loop/manager-loop-tick.md（新建，产品侧 manager 行为）
 - orchestration/manager-phase-goal.md（切分）
