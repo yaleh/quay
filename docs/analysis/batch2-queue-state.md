@@ -7301,3 +7301,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **green-verdict fan-in**（3ab4fb45）：suite 红窗暂缓解除（外层 32204513 修 merge-carried breakages + 重跑 running）。
   rebase 到 integration（顺带并入外层 develop-only commit），scoped verify green（fail 0）。worktree/分支清理。
 - 在飞 1/2（shipped-verifiers）。integration 现含 6 fan-in（supervisor/concurrency/split-batch/send-keys/no-post-merge/green-verdict）。
+
+### 事件 15:4xZ（shipped-verifiers fan-in 落 integration a43d4a90；在飞 0/2 无干净候选）
+
+- **shipped-verifiers fan-in**（a43d4a90）：uncalled-verifier-check.ts（551 行）+ 37 条目 shrink-only ratchet +
+  verify-delivery-surface.ts 真实 gate 调用点（AC3，c65c411c 单一事实源首次被执行）；AC1-6 勾；静态闸 exit 0；
+  merged 树上 mechanism 实跑 uncalled=0、mentions_excluded=true。worktree/分支清理。
+- **零 refill**：slot-refill 仅推荐 DIR-124（human-steered）+ audit-findings——后者 mechanism 已落 develop
+  （finding-backpropagate.ts 908 行 / execution-policy.ts 487 行，7/11 AC），integration 无 → 不派发（避免双做），
+  需外层定处置（reconcile AC 或翻 done）。
+- **integration 现含 7 fan-in**（supervisor/concurrency/split-batch/send-keys/no-post-merge/green-verdict/shipped-verifiers）。
+  在飞 0/2。外层 suite running（15:06 起，breakage 修复后重跑）。
