@@ -2,22 +2,22 @@
 id: gap-manager-productization-five-constraints
 title: "manager productization (C1-C5, SPEC-manager-productization-2026-08-05):
   C1 plugin/ + npm pack must contain manager; C2 manager's home/state/identity
-  must NOT belong to any single project (current instance lives in quay-0:manager
-  cwd=/home/yale/work/quay — violates C2/C3); C3 outer NEVER creates/drives/
-  checks manager (mechanical grep check, currently 0 mentions in tick doc);
-  C4 independent cold start (quay manager start, accepts NO project args);
-  C5 two commands separated (manager start ≠ manager adopt; AC12b testability:
-  'adopt 之后 manager 对该项目动作次数=0'); SHARPEST GAP: manager not in
+  must NOT belong to any single project (current instance lives in
+  quay-0:manager cwd=/home/yale/work/quay — violates C2/C3); C3 outer NEVER
+  creates/drives/ checks manager (mechanical grep check, currently 0 mentions in
+  tick doc); C4 independent cold start (quay manager start, accepts NO project
+  args); C5 two commands separated (manager start ≠ manager adopt; AC12b
+  testability: 'adopt 之后 manager 对该项目动作次数=0'); SHARPEST GAP: manager not in
   os-anchor-projects.conf + */17 heartbeat is session-only CronList = the
   watchdog has NO ONE watching it, 4 crashes tonight needed human restart
-  (direct manifestation); RULED: dual-creator conflict = option ① whoever
-  finds missing inner creates via SAME idempotent entry (quay-topology.sh +
+  (direct manifestation); RULED: dual-creator conflict = option ① whoever finds
+  missing inner creates via SAME idempotent entry (quay-topology.sh +
   single-flight lock), NOT centralized to manager — shipped quay = outer+inner,
   manager optional, centralizing kills single-project self-healing (contradicts
   'manager for cross-project'); split: manager-phase-goal.md product-behavior
   (axis-open/verification-first/boundary) → plugin/loop/manager-loop-tick.md,
   experiment state stays orchestration/"
-status: ready
+status: needs-human
 labels:
   - gap
   - milestone-candidate

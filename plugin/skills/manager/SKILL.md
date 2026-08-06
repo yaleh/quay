@@ -127,14 +127,16 @@ allowed-tools: Bash, Read, Monitor
 
 ## 7. 方法论来源（AC6）——SPEC-*.md 索引，不批量结晶
 
-以下 14 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：
+以下 16 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：
 
 | 文件 | 主题 |
 |---|---|
+| `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` | 分支模型（integration 线） |
 | `orchestration/SPEC-cold-start-one-liner.md` | 冷启动一条命令 |
 | `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` | 完整交付面 |
 | `orchestration/SPEC-cut-the-waiting.md` | 削减等待 |
 | `orchestration/SPEC-instruments-behind-one-entry.md` | 仪器统一入口 |
+| `orchestration/SPEC-integration-architecture-2026-08-05.md` | 集成架构 |
 | `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` | 隔离与资源治理 |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | manager 产品化（五约束 + 建造/运行归属） |
 | `orchestration/SPEC-methodology-as-a-deliverable.md` | 方法论作为交付物 |
