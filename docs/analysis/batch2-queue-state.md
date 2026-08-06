@@ -6547,3 +6547,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   quality-criteria/message-bus/preemption 已 merge。**池真正耗尽，无新派发**。
 - develop 13903a45（ad-arm1 gate #1/#2/#3 修复后）→ 待推 GitHub 让 ad-arm1 pull 重跑二轮门禁。
 - 下一事件：ad-arm1 门禁结果 / 外层新增任务。
+
+### tick 2026-08-06T12:3xZ（外层，monitor 三条修复推送）
+
+- **dbc17135 + 13903a45（monitor 三条修复）已推 origin**（develop →4cdde3f2，50 提交含 9 任务收口 +
+  我的 cap-from-gate 更正 + SEA 缺陷）。ad-arm1 可第三轮 pull 重跑。
