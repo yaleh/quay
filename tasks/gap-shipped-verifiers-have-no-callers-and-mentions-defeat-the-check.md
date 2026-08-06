@@ -110,6 +110,7 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
 - [ ] 任务体记录本类今晚的全部已知实例及其编号，作为该类的登记册
 
 ## Touches
+- plugin/scripts/uncalled-verifier-check.ts（本任务新建；已在 integration fan-in a43d4a90 合并，develop 待批量吸收）
 - plugin/scripts/capability-catalog.sh
 - plugin/scripts/quay-init.sh
 - scripts/test.sh
