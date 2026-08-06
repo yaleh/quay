@@ -6323,3 +6323,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **两线模型当前态**：develop = 全部 A+B 基线 + AC16 + 3 rebase 任务 + no-criterion-cost + 记录提交。
   integration 已空（并入 develop）。master 冻结 ea2208cf（人触发才同步）。
 - **在飞 0/3**。池唯一真实候选 quality-criteria（解除序列化）。
+
+### tick 2026-08-06T09:5xZ（外层，AC16 落实 + AC17 push）
+
+- **AC16 已实现生产侧**（files+plugin v0.4.0 在 develop，4d15e7cf 验证 all 4 task sets + AC16 present）——
+  管理者的「未派发」基于旧状态（integration 已实现但当时未合 develop）。任务 status 待验收侧（AC2/3 在 B）。
+- **剩余动作**：从 develop 打 tag v0.4.0 + 触发 release（含 dist-plugin 重建 AC6）——这才是 archguard 能装的。
+- **AC17 push**：本地 develop 领先 origin/develop 105（含分支切换，无阻塞）——已驱动 inner 立即 push
+  develop 到 origin（B 下次拉取拿最新分支切换）。先 push 再打 tag。
