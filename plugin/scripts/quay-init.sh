@@ -33,6 +33,10 @@
 # Flags:
 #   --force         overwrite on conflict (backup the existing file first)
 #   --dry-run       list what would happen, copy nothing
+# Read-only report modes (no category dispatch, no target writes):
+#   --check-drift                  drift report over the derived laydown set (漂移/缺失/一致, L_D)
+#   --check-dependency-closure     dependency-closure report over the derived laydown set
+#                                  (dependency_closure_gaps: N; band 0 — 铺了消费者必然铺依赖)
 # Loop params (consumed only by --loop):
 #   --root <dir>           workspace root (default: cwd)
 #   --project <name>       project name (default: basename of --root)
@@ -77,6 +81,7 @@ DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
 DO_CHECK_DRIFT=false
+DO_CHECK_DEPENDENCY_CLOSURE=false
 ANY_CATEGORY=false
 
 # ── parse args ─────────────────────────────────────────────────────────────────────────────────────
@@ -86,6 +91,7 @@ while [ $# -gt 0 ]; do
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --loop) DO_LOOP=true; ANY_CATEGORY=true; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
+    --check-dependency-closure) DO_CHECK_DEPENDENCY_CLOSURE=true; shift ;;
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -603,8 +609,22 @@ validate_worktree_root() {
 # the bond. A referenced file that is neither landed nor declared = drift → FAIL CLOSED.
 verify_referenced_landed() {
   local ws="$1" missing=0 r
-  local refs selfcreate refdoc
+  local refs selfcreate refdoc b
   refs="$(grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true)"
+  # AC3 (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure): the
+  # referenced set is no longer PREFIX-ONLY. A bare script name in a TICK DOC (the target's runtime
+  # instruction set, laid down) is existence-resolved under plugin/scripts/ and added as a
+  # plugin/scripts/* ref — so the checker and the laydown derivation share the same ruler and the
+  # bare-name class is no longer a SHARED BLIND SPOT (the pre-fix checker silently ignored exactly
+  # the references its own derivation was missing). Skills' bare names stay out (ambiguous prose —
+  # meta-examples, plugin-root refs; their mechanism references are caught by the AC1 closure in the
+  # laydown set, so no referenced-but-unlanded skill bare name can exist).
+  refs="$({
+    printf '%s\n' "$refs"
+    for b in $(grep -ohE '[a-zA-Z0-9._-]+\.(sh|ts|mjs|js|mts|cjs)' "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true); do
+      [ -f "$PLUGIN_ROOT/scripts/$b" ] && printf 'plugin/scripts/%s\n' "$b"
+    done
+  } | sed '/^[[:space:]]*$/d' | sort -u)"
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:
   #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
@@ -851,15 +871,84 @@ PYEOF
 # derive_loop_scripts — populate the LOOP_SCRIPTS array (the derived laydown set) from the SAME
 # grep the --loop block used before this extraction: every `plugin/scripts/*` reference in the
 # shipped skills + tick docs, PLUS the explicit bare-name / transitive-dependency / capability-catalog
-# additions (their rationale lives in the --loop block's comments, kept verbatim). Single source,
-# drift-immune — there is no second hand-maintained copy of the set.
+# additions (their rationale lives in the --loop block's comments, kept verbatim), PLUS two
+# spelling-insensitive passes (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-
+# closure): (AC2) bare-name references in the TICK DOCS are existence-resolved under plugin/scripts/,
+# and (AC1) the DEPENDENCY CLOSURE — a laid-down script that references a same-dir sibling via a
+# script-dir variable must force that sibling into the set. Single source, drift-immune — there is
+# no second hand-maintained copy of the set.
+
+# script_dir_vars <file> — the variable names a script binds to its OWN directory via the canonical
+# self-locating idiom `VAR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`. AC1's closure walker
+# follows exactly these variables to find same-dir sibling references (content-level, so it is
+# immune to how a doc happened to spell the reference).
+script_dir_vars() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  # The EXACT self-dir idiom `VAR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"` — the `)" && pwd`
+  # right after `BASH_SOURCE[0]` excludes parent-dir variants like `dirname ...)/../..` (repo_root
+  # computed TWO levels up is NOT a sibling dir and must not seed closure refs).
+  grep -E 'dirname[[:space:]]+"\$\{BASH_SOURCE\[0\]\}"\)" && pwd' "$f" 2>/dev/null \
+    | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=".*/\1/' \
+    | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' || true
+}
+
+# closure_ref_names <file> <dir-var...> — the same-dir sibling basenames <file> references via
+# `$VAR/<name>` / `${VAR}/<name>` for each script-dir variable. NO existence filter — the closure
+# GAP check needs to see references to siblings that do not exist in plugin/scripts/ (a dependency
+# that cannot ship), which the existence-filtered closure_siblings intentionally hides. Skips the
+# `..`/`.` traversal refs (REPO_ROOT-style `"$SCRIPT_DIR/../.."` computes a PARENT dir, not a
+# sibling).
+closure_ref_names() {
+  local f="$1"; shift
+  local v m name
+  for v in "$@"; do
+    [ -n "$v" ] || continue
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      name="${m##*/}"
+      # skip traversal refs (`..`, `.`) and dotfiles (.git, .env — repo-internal, not a mechanism sibling)
+      case "$name" in ''|.|..|.*) continue ;; esac
+      echo "$name"
+    done < <(grep -oE "\\\$\{?${v}\}?/[a-zA-Z0-9._-]+" "$f" 2>/dev/null || true)
+  done
+}
+
+# closure_siblings <file> <dir-var...> — closure_ref_names filtered to names that EXIST under
+# plugin/scripts/ (the closure pass can only force siblings that actually exist).
+closure_siblings() {
+  local f="$1"; shift
+  local name
+  for name in $(closure_ref_names "$f" "$@"); do
+    [ -n "$name" ] || continue
+    [ -f "$PLUGIN_ROOT/scripts/$name" ] && echo "$name"
+  done
+}
+
 derive_loop_scripts() {
-  local derived
+  local derived bare_refs
   derived="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
+  # AC2 (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure): the docs can
+  # reference a script by BARE NAME (no plugin/scripts/ prefix) — the manager's cold-start/SKILL.md
+  # did exactly this for transcript-delivery-check.ts and it silently never shipped. Bare-name
+  # existence-resolution is scoped to the TICK DOCS (plugin/loop/*.md): they are LAID DOWN into the
+  # target and are the target's RUNTIME instruction set, so a bare script name there is a runtime
+  # reference (orchestrator-loop-tick.md's `transcript-delivery-check.ts`). Skills are plugin-side
+  # docs whose bare names are ambiguous prose — meta-examples (init/SKILL.md's send-keys-verified.sh),
+  # ${CLAUDE_PLUGIN_ROOT}/scripts/* plugin-root refs, the installer itself — so resolving those would
+  # RE-DERIVE layer-retired scripts and dev-tree tools. A skill bare-name reference to a mechanism
+  # script is caught by the AC1 closure pass below (send-keys-reliable.sh:41
+  # ${SCRIPT_DIR}/transcript-delivery-check.ts), which is spelling-independent.
+  bare_refs="$(grep -ohE '[a-zA-Z0-9._-]+\.(sh|ts|mjs|js|mts|cjs)' "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true)"
   local -a all=()
+  local b p
+  for b in $bare_refs; do
+    [ -f "$PLUGIN_ROOT/scripts/$b" ] && all+=("$b")
+  done
+  for p in $derived; do all+=("$p"); done
   # shellcheck disable=SC2207
   all=(
-    $derived
+    "${all[@]}"
     # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
     inner-idle-log.ts
     heavy-op-token.sh
@@ -885,6 +974,32 @@ derive_loop_scripts() {
       [ "$t" = "$s" ] && { in=1; break; }
     done
     [ "$in" = 0 ] && LOOP_SCRIPTS+=("$s")
+  done
+  # AC1 DEPENDENCY CLOSURE (the PRIMARY mechanism): a laid-down script that references a same-dir
+  # sibling forces that sibling into the set — send-keys-reliable.sh:41
+  # `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` is the regression control. Content-level,
+  # spelling-independent, so it catches the whole class (b) that doc-spelling (a) can never see.
+  # Iterate to a fixpoint (a newly-closed sibling may itself reference one more); the round cap is a
+  # safety valve, not an expected path (the repo's sibling graph is shallow).
+  local changed=1 round=0
+  while [ "$changed" = 1 ] && [ "$round" -lt 20 ]; do
+    changed=0; round=$((round + 1))
+    local -a add=()
+    for s in "${LOOP_SCRIPTS[@]}"; do
+      [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+      local vars name
+      vars="$(script_dir_vars "$PLUGIN_ROOT/scripts/$s")"
+      [ -n "$vars" ] || continue
+      for name in $(closure_siblings "$PLUGIN_ROOT/scripts/$s" $vars); do
+        [ -n "$name" ] || continue
+        local already=0 tt
+        for tt in "${LOOP_SCRIPTS[@]}" "${add[@]}"; do
+          [ "$tt" = "$name" ] && { already=1; break; }
+        done
+        [ "$already" = 0 ] && { add+=("$name"); changed=1; }
+      done
+    done
+    LOOP_SCRIPTS+=("${add[@]}")
   done
 }
 
@@ -936,6 +1051,57 @@ if [ "$DO_CHECK_DRIFT" = true ]; then
   derive_loop_scripts
   compute_drift_report "$WORKSPACE_ROOT"
   exit 0
+fi
+
+# compute_dependency_closure_gaps — the gap-laydown-derivation-is-sensitive-to-reference-spelling-
+# dependency-closure Contract measure: how many LAID-DOWN scripts reference a same-dir sibling that
+# is NOT in the FINAL (post-closure) laydown set — "已铺但依赖未铺的脚本数". derive_loop_scripts
+# runs the closure to a fixpoint, so on the fixed repo every sibling that EXISTS in plugin/scripts/
+# is already in the set ⇒ gaps = 0 (the band; 铺了消费者必然铺依赖). A gap survives the closure
+# only when the referenced sibling DOES NOT EXIST in plugin/scripts/ (the dependency cannot ship —
+# fail loud, the AC4 spirit) or when the closure pass itself is broken (a regression guard: if the
+# closure silently stopped, send-keys-reliable.sh's sibling would re-appear as a gap here). The
+# validator is SCRIPT CONTENT (${SCRIPT_DIR}/<sibling>), never doc wording (invariant
+# closure_not_documentation = 1). Exits 0 on 0 gaps, 1 when gaps > 0.
+compute_dependency_closure_gaps() {
+  local gaps=0 s name v
+  for s in "${LOOP_SCRIPTS[@]}"; do
+    [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+    local vars
+    vars="$(script_dir_vars "$PLUGIN_ROOT/scripts/$s")"
+    [ -n "$vars" ] || continue
+    # distinct same-dir sibling references, UNFILTERED by existence — a reference to a sibling that
+    # does not exist in plugin/scripts/ is exactly the "已铺但依赖未铺" gap this check must surface.
+    local refs
+    refs="$(closure_ref_names "$PLUGIN_ROOT/scripts/$s" $vars | sort -u)"
+    [ -n "$refs" ] || continue
+    for name in $refs; do
+      [ -n "$name" ] || continue
+      local in_set=0 tt
+      for tt in "${LOOP_SCRIPTS[@]}"; do
+        [ "$tt" = "$name" ] && { in_set=1; break; }
+      done
+      if [ "$in_set" = 0 ]; then
+        echo "  gap: plugin/scripts/$s references same-dir sibling plugin/scripts/$name which is NOT in the laydown set — the dependency cannot ship (missing from plugin, or the closure pass is broken)" >&2
+        gaps=$((gaps + 1))
+      fi
+    done
+  done
+  echo "dependency_closure_gaps: $gaps"
+  [ "$gaps" -eq 0 ]
+}
+
+# ── --check-dependency-closure mode (Contract measure/invoke) ────────────────────────────────────────
+# READ-ONLY dependency-closure report over the derived laydown set. No category dispatch, no --loop
+# params. Emits the parseable `dependency_closure_gaps: N` field (Contract band N = 0). Exits 0 when
+# the set is closure-complete, 1 when gaps exist (a regression that would ship a consumer without its
+# dependency). Contract invoke: `grep -n 'transcript-delivery-check' plugin/scripts/send-keys-reliable.sh
+# plugin/scripts/quay-init.sh` must show the consumer → checker reference on both sides.
+if [ "$DO_CHECK_DEPENDENCY_CLOSURE" = true ]; then
+  echo "quay-init dependency-closure report (plugin v${PLUGIN_VERSION})"
+  derive_loop_scripts
+  compute_dependency_closure_gaps
+  exit $?
 fi
 
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
