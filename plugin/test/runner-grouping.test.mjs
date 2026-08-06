@@ -132,10 +132,12 @@ test("--group governance --list-files lists exactly the governance files", () =>
   assert.equal(out.length, g.governance);
   // Every governance file is a test file under one of the governance roots. The path is a live
   // membership, not a contract: inventory (2026-08-03) added the first governance test outside
-  // experiments/ (plugin/test/runtime-usage-inventory.test.mjs). Allowed roots:
+  // experiments/ (plugin/test/runtime-usage-inventory.test.mjs), and message-bus-identity.test.mjs
+  // (2026-08-06) declared governance under packages/quay/test/. Allowed roots:
   //   experiments/quay-perpetual-stream/test/  (historic home of governance)
   //   plugin/test/                             (governance tests may live next to plugin tests)
-  for (const f of out) assert.match(f, /(experiments\/quay-perpetual-stream\/test\/|plugin\/test\/)/);
+  //   packages/quay/test/                      (a governance-declared product-tree test)
+  for (const f of out) assert.match(f, /(experiments\/quay-perpetual-stream\/test\/|plugin\/test\/|packages\/quay\/test\/)/);
 });
 
 // ── AC1/AC2/AC4/AC6: flags-only keeps the selected set (gap-test-sh-flags-only-...) ───────────────
@@ -151,8 +153,16 @@ test("--group governance --list-files lists exactly the governance files", () =>
 // ~2296 tests / ~7min and would recurse through this very file. The literal default-glob before/
 // after counts are recorded in the task DoD, and the structural test below pins the DEFAULT-glob
 // branch's existence. All counts are RELATIONSHIPS computed at runtime, never hardcoded.
+//
+// Concurrency note (2026-08-06, gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-
+// still-report-derived): the nested `--group governance` runs pass an EXPLICIT --test-concurrency
+// (=8 base/covered, =4 flagged) so the grown governance sub-suite stays within runTestShRaw's 300s
+// timeout. The derived default (max(1, floor(nproc/2.1)) = 1 on 4 cores) would take the nested
+// suite >830s (the KNOWN-LOAD-SENSITIVE marker above). This test asserts SELECTION parity (flags
+// must not change the selected set) — the concurrency VALUE itself is asserted in
+// resource-gate.test.mjs AC5, and "explicit always wins" is the documented escape hatch.
 test("AC1/AC2/AC6: flags-only forms run the same test count as the group default; AC4 self-report", () => {
-  const base = runTestShRaw("--group", "governance");
+  const base = runTestShRaw("--group", "governance", "--test-concurrency=8");
   const baseCount = parseTestCount(`${base.stdout}\n${base.stderr}`);
   // AC4: every run self-reports its selection before executing (this is what makes a changed
   // selection impossible to hide), and N must equal the --list-files count.
@@ -175,8 +185,9 @@ test("AC1/AC2/AC6: flags-only forms run the same test count as the group default
   assert.ok(flaggedSel, `flags-only run must self-report its selection (AC4):\n${flagged.stdout.slice(-300)}`);
   assert.equal(Number(flaggedSel[1]), listed, "flags-only self-reported N must equal --list-files count");
 
-  // AC2: the documented coverage form likewise keeps the same selection.
-  const covered = runTestShRaw("--group", "governance", "--experimental-test-coverage");
+  // AC2: the documented coverage form likewise keeps the same selection (explicit concurrency for
+  // the heavy governance sub-suite — see the note above the test).
+  const covered = runTestShRaw("--group", "governance", "--test-concurrency=8", "--experimental-test-coverage");
   assert.equal(
     parseTestCount(`${covered.stdout}\n${covered.stderr}`),
     baseCount,
@@ -192,7 +203,7 @@ test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes ext
   const src = readFileSync(testSh, "utf8");
   assert.match(src, /elif all_flags "\$@"; then/, "default dispatch must have a flags-only branch");
   assert.match(src, /run_selected "\$\(effective_groups\)" "\$@"/, "flags-only must route to the default glob");
-  assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/, "user flags must precede the file list (last-flag-wins); default concurrency is derived (gap-no-resource-awareness-heavy-ops-run-blind AC5)");
+  assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/, "user flags must precede the file list (last-flag-wins); the exec line must source concurrency from default_test_concurrency — the VALUE it returns is asserted directly in resource-gate.test.mjs AC5 (this spelling pin only proves the single-source call site, not derivation)");
   // The --group dispatch has the same flags-only branch, routing to the group's glob.
   assert.match(src, /run_selected "\$groups" "\$@"/, "group flags-only must route to the group glob");
 });

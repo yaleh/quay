@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,8 +52,9 @@ function runGate(envOverrides = {}, args = []) {
 /** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams. */
 function derivedConcurrency(nproc, amplification) {
   const src = fs.readFileSync(TEST_SH, "utf8");
-  // The formula lives in default_concurrency_formula; default_test_concurrency is TEMPORARILY
-  // overridden to 8 (outer correction 2026-08-03) pending AC5's tradeoff experiment.
+  // The formula lives in default_concurrency_formula; default_test_concurrency CALLS it (the
+  // 2026-08-03 TEMPORARY pin to 8 was reverted by
+  // gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived).
   const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
   const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nprintf '%s' "$(default_concurrency_formula)"\n`;
@@ -62,12 +63,19 @@ function derivedConcurrency(nproc, amplification) {
   return Number(res.stdout.trim());
 }
 
-/** Assert the TEMPORARY concurrency override is active (default_test_concurrency returns 8). */
+/** Directly EXECUTE default_test_concurrency (the real effective default) and return its value.
+ *  This is the AC1/AC3 "test the real value, not the spelling" seam: it runs the actual function
+ *  the exec lines call, so a function that returns a constant instead of the derived formula is
+ *  caught HERE, not by a call-site-spelling assertion. */
 function currentDefaultConcurrency() {
   const src = fs.readFileSync(TEST_SH, "utf8");
   const fnMatch = src.match(/default_test_concurrency\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define default_test_concurrency()");
-  const script = `${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
+  // default_test_concurrency calls default_concurrency_formula — extract BOTH functions so the
+  // isolated subshell is self-contained (matches the ## Contract effective_concurrency measure).
+  const formulaMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
+  assert.ok(formulaMatch, "scripts/test.sh must define default_concurrency_formula()");
+  const script = `${formulaMatch[0]}\n${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `currentDefaultConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -178,18 +186,25 @@ test("AC10 — orphaned node procs (ppid=1, cwd deleted) are listed on their own
   assert.match(orphanLines[1], /222:\/home\/yale\/work\/quay-worktrees\/b \(deleted\)/);
 });
 
-// ── AC5: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────────────
-test("AC5 — formula derives max(1, floor(nproc/amp)); default is TEMPORARILY overridden to 8", () => {
-  // The REAL formula from scripts/test.sh (default_concurrency_formula), run with test seams. This
-  // tests the derivation the override will restore once AC5's tradeoff experiment lands.
+// ── AC5/AC1/AC3: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────
+test("AC5 — formula derives max(1, floor(nproc/amp)); the DEFAULT executes that formula (not a constant)", () => {
+  // The REAL formula from scripts/test.sh (default_concurrency_formula), run with test seams.
   assert.equal(derivedConcurrency(4, 2.1), 1, "4 cores / 2.1 → 1 (the oversubscription fix)");
   assert.equal(derivedConcurrency(16, 2.1), 7, "16 cores / 2.1 → 7");
   assert.equal(derivedConcurrency(4, 1), 4, "amplification 1 → nproc (no subprocess amplification)");
   assert.equal(derivedConcurrency(1, 2.1), 1, "floor(nproc/amp) must clamp at 1 (max(1, ...))");
   assert.equal(derivedConcurrency(8, 2.1), 3, "8 cores / 2.1 → 3");
-  // TEMPORARY override (outer correction 2026-08-03): the derived default of 1 made every full suite
-  // ~55 min (stranded's OVER90 came from this); reverted to 8 until AC5's cost-side experiment runs.
-  assert.equal(currentDefaultConcurrency(), 8, "default_test_concurrency is temporarily pinned to 8");
+  // AC1/AC3 of gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived:
+  // the EFFECTIVE default (default_test_concurrency) must equal the derived formula on the REAL host
+  // — the 2026-08-03 TEMPORARY pin to 8 was reverted (that drift: docs/tests said derived while the
+  // code returned a constant). This assertion directly executes the real function, so a future
+  // constant-return regression goes RED here (the Contract's control clause).
+  const realNproc = Number(execSync("nproc").toString().trim());
+  assert.equal(
+    currentDefaultConcurrency(),
+    derivedConcurrency(realNproc, 2.1),
+    "default_test_concurrency must return the derived value max(1, floor(nproc/2.1)) on the real host (was temporarily pinned to 8 — see the revert record)"
+  );
 });
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {

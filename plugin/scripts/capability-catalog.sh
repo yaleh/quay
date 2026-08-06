@@ -86,6 +86,7 @@ declare -A QUESTION=(
   [concurrent-batch-scheduler.ts]="Which ready tasks can be dispatched concurrently without touching overlapping files?"
   [config-wiring-check.ts]="Does every declared config field have exactly one wirer?"
   [coupling-graph.ts]="Which tasks are coupled by shared touches?"
+  [dead-code-after-return-check.ts]="Does any shell function have executable statements AFTER a top-level return (dead code — the 2026-08-03 concurrency-pin shape)?"
   [dead-loop-check.sh]="Is a target project's loop alive or dead (L2 continuous-health: transcript user-msg or git commit window)?"
   [drivable-workspace-check.sh]="Is the workspace drivable by a loop (safe to hand to an autonomous driver)?"
   [drivable-workspace-check.ts]="Is the workspace drivable by a loop (canonical fail-closed gate)?"

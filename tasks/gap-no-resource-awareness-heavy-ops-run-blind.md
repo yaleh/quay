@@ -452,3 +452,33 @@ at: 2026-08-05T07:30Z
 changed: done→ready——原 AC5 只改 test.sh，未接线的生产调用方 full-suite-runner 仍硬编码 8（7.7×
   超订、本机已崩三次、resource-gate NOT REFERENCED）。AC12/AC13/AC14/AC15 新增。外层已中止套件止血。
   AC10 记账：post-friction（被管理者资源告警撞出），不计分。
+
+## Addendum 2026-08-06 — 回退记录 + 恢复（gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived）
+
+**回退记录（本任务 AC5 要求的追溯）**：`scripts/test.sh` 的默认并发推导在
+**623d662b**（2026-08-03 07:29，"fix(test.sh): TEMPORARILY pin default concurrency back to 8
+(outer urgent correction)"）被**临时回退**为硬编码 8——推导默认 1 把全量墙钟从 ~8min 推到
+~55min（stranded 的 OVER90 直接因此），AC5 的 cost-side tradeoff 实验未跑，注释明写
+「REVERT this override to the derived formula once AC5's tradeoff experiment is run」。回退后：
+- `default_test_concurrency()` 变成 `echo "8"; return 0; default_concurrency_formula`——
+  **公式在 return 之后，不可达**；
+- 但 CLAUDE.md、两个 tick 文档、本任务 AC5 的勾、resource-gate.test.mjs（正则抽取不可达公式）
+  与 runner-grouping.test.mjs（只断言拼写、消息却称 "derived"）**三层全部仍报告「已推导」**；
+- 实测本机 nproc=4 ⇒ 声称值 `floor(4/2.1)=1` vs 实际 8 = **恰好 4.25× 超订**——CLAUDE.md 自己
+  描述为「已消除」的那个缺陷仍在生效。
+
+**恢复（2026-08-06，由 `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived` 执行）**：
+走「让现实追上声称」方向——推导就是 AC5 的交付物，回退是没等到实验的临时覆盖，且 cost 侧已被
+ci.yml 显式 `--test-concurrency=N`（10 分钟预算逃生口）与 full-suite-runner.ts 的 nproc 派生
+laneCount 覆盖。`default_test_concurrency()` 恢复为直接调用 `default_concurrency_formula`
+（公式可达，`formula_reachable = 1`），doc/AC/测试三层回归一致。
+
+**AC5 勾选状态**：保持 `[x]`——推导已恢复且真实生效（本机实测 `default_test_concurrency`
+返回值 = `floor(4/2.1)` = 1，与 CLAUDE.md/文档一致）。回退期间（623d662b → 恢复）该勾是
+「勾在一个被回退的机制上」——**本任务是这一形态的首个实例**（DoD 记录）。
+
+**交叉标注**：本任务 ↔ `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
+（回退与恢复的完整记录；新增 `dead-code-after-return-check` 静态检查禁止该形态复发）。
+
+## Touches 增补（Addendum 2026-08-06）
+- tasks/gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived.md（新增，恢复与防复发）

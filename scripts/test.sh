@@ -231,6 +231,13 @@ run_static_checks() {
   # @static-tier change
   # @static-object **/*.sh **/*.bash
   checker_cost_wrap "adr016-screen-use-check" -- node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
+  echo "== dead-code-after-return check (gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived, AC6) =="
+  # The 2026-08-03 TEMPORARY pin shape (`echo 8; return 0; <formula>` — a statement after a top-level
+  # return) is the drift that made docs/ACs/tests report "derived" while the code returned a constant.
+  # This checker bans that form across all shell scripts; a NEW instance red-lights the commit.
+  # @static-tier change
+  # @static-object **/*.sh **/*.bash
+  checker_cost_wrap "dead-code-after-return-check" -- node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dead-code-after-return-check.ts" --root "${repo_root}"
   echo "== strategic-doc-staleness check (gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8) =="
   # The generic strategic-doc staleness checker: scans docs/proposals + orchestration/*ROADMAP* for
   # unannotated references to classic-pipeline scripts ADR-022 deleted (prepare-milestone.js /
@@ -326,16 +333,24 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 #   default = max(1, floor(nproc / AMPLIFICATION))
 # which on this box gives floor(4 / 2.1) = 1 (~3 processes, under 4 cores).
 #
-# TEMPORARILY OVERRIDDEN BACK TO 8 (2026-08-03, outer urgent correction): the derived default of 1
-# turned every full suite from ~8 min to ~55 min (Σ ≈ 3300s at concurrency 1 vs 460-570s wall at 8).
-# The AC5 tradeoff experiment was never run: the task body measured the amplification side (17/8 =
-# 2.125) but NOT the cost side — AC5 required running concurrency ∈ {2,4,6,8} once each in the same
-# low-pressure window with cancelled == 0 as the criterion. Meanwhile sigma measured Σ/wall ≈ 7.1 at
-# 8 lanes (8-lane is saturated, not overloaded), and its high-pressure negative control (41→99)
-# still captured 155/155 with no cancelled — "lower concurrency to avoid cancel" is unproven, while
-# the cost of lowering is a definite ~7×. REVERT this override to the derived formula once AC5's
-# tradeoff experiment is run and the choice is data-backed on BOTH sides. (stranded's OVER90 was a
-# direct casualty of the 55-min suites.)
+# REVERT HISTORY (single source of truth — gap-concurrency-derivation-reverted-but-doc-ac-and-tests-
+# all-still-report-derived): the derived default was TEMPORARILY pinned back to 8 and then restored.
+#   - 2026-08-03 (623d662b, outer urgent correction): pinned default_test_concurrency back to 8. The
+#     derived default of 1 turned every full suite from ~8 min to ~55 min (Σ ≈ 3300s at concurrency 1
+#     vs 460-570s wall at 8). AC5's tradeoff experiment never ran: the amplification side (17/8 =
+#     2.125) was measured but NOT the cost side. sigma measured Σ/wall ≈ 7.1 at 8 lanes (saturated,
+#     not overloaded); "lower concurrency to avoid cancel" was unproven, the cost of lowering was a
+#     definite ~7×. The pin was EXPLICITLY temporary ("REVERT this override once AC5's tradeoff
+#     experiment is run").
+#   - 2026-08-06 (gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived):
+#     REVERTED the pin — restored the derived formula. The drift being fixed: docs/ACs/tests all
+#     reported the derived form while the code returned a constant, and the unreachable call made
+#     default_concurrency_formula a dead organ. Reconciliation direction = "make reality catch up to
+#     claims": the derived formula IS the AC5 deliverable; the revert was a temporary override that
+#     never got its experiment. The cost side is already handled — ci.yml passes the EXPLICIT
+#     escape hatch (`--test-concurrency=N`, pinned there for the 10-min budget), so the derived
+#     default only governs LOCAL default runs, and full-suite-runner.ts already derives laneCount
+#     from nproc.
 # An EXPLICIT --test-concurrency=N on the command line ALWAYS overrides (node --test is
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
@@ -349,11 +364,6 @@ default_concurrency_formula() {
 }
 
 default_test_concurrency() {
-  # TEMPORARY (2026-08-03): fixed at 8 pending AC5's tradeoff experiment — see comment above.
-  # The derived formula (max(1, floor(nproc/2.1))) is preserved in default_concurrency_formula
-  # for when the experiment lands.
-  echo "8"
-  return 0
   default_concurrency_formula
 }
 
@@ -820,7 +830,7 @@ elif all_flags "$@"; then
   # `--test-concurrency=4` and `--experimental-test-coverage` forms). Previously these fell to the
   # explicit-file branch with an empty file list → node auto-discovered a 3.7x-larger suite (8573
   # vs 2296). node --test is last-flag-wins, so the user's own --test-concurrency=N still overrides
-  # the default 8.
+  # the derived default (default_test_concurrency, gap-no-resource-awareness-heavy-ops-run-blind AC5).
   run_selected "$(effective_groups)" "$@"
 else
   build_dist_once
