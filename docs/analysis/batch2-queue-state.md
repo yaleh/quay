@@ -5711,3 +5711,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   legacy observer）。AC1-AC9、scoped **74/74 + 1 pre-existing skip**、M6 settle-poll 硬化。worktree/branch 已清。
   **在飞 0/3**。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:5xZ（内层，slot-refill 回填处理）
+
+- **slot-refill 回填（外层数据）**：should_refill=true，recommended=[red-pattern, productize-manager-layer]。
+- **red-pattern 拒绝派发（已落地）**：git-log 证实 `37947f75`「red-pattern merged」（AC12b 2/4）——already-landed
+  待 closure，gitHistoryLanded 信号缺口使其留在池。**记录不派理由：已落地**。
+- **派发 2/3**：① productize-manager-layer（`fm-...-2eurri`，manager 层产品化 umbrella——git-log 7 hit 全
+  filing/cross-ref 非落地）② gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat（`fm-...-6ph2wv`，
+  心跳必跑 slot-refill 但仅 completion 触发；todo→ready + self-touch + resolve 过）。两候选生产闸互不相交。
+- 套件 green、无 stop、无 block、Monitor 绿。
