@@ -14,7 +14,7 @@ title: "introduce an integration branch to split the 'fork baseline' from the
   baseline (independent→develop, declared-dependency→integration); rulings: ①
   two lines (develop+integration, master release role empty), ② fix fragile
   global-count assertions FIRST, ③ clean 60 historical branches FIRST"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -138,10 +138,10 @@ DELETED: __mt_master _review-master-check audit-m116-verify experiment-4-iterati
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC2/AC3/AC4/AC5 实跑输出贴任务体
-- [ ] develop+integration 两线运转：inner 分叉 develop/integration → 合 integration → outer 验证 → 批量
+- [x] AC1–AC7 全部勾上；AC2/AC3/AC4/AC5 实跑输出贴任务体
+- [x] develop+integration 两线运转：inner 分叉 develop/integration → 合 integration → outer 验证 → 批量
       合 develop；红窗停派结构性消除；历史分支已清；全局断言已修
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
