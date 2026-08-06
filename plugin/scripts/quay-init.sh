@@ -1331,16 +1331,6 @@ PYEOF
   # NOTE: inner-state.sh is deliberately NOT here (gap-retire-inner-state-one-observer-targets-by-
   # parameter AC3) — it is retired and not referenced by any shipped doc; observation has exactly
   # ONE tool, session-liveness.sh, which is laid down separately below (its env config is generated).
-  derive_loop_scripts
-
-  # AC1/AC2 (gap-delivery-surface-grows-but-target-freezes-no-upgrade): the upgrade/refresh path's
-  # drift report. BEFORE the update, classify the target's derived scripts (漂移/缺失/一致 on the
-  # derived-set axis) so the upgrade action below is preceded by the L2 "升级正确性" diagnosis —
-  # exactly what the frozen-at-install-time target needs: what it is missing (auto-added) and what
-  # has drifted (backed up + replaced, never silent). The POST report after the loop proves the
-  # upgrade brought the derived set to 一致.
-  echo "  drift report (before upgrade):"
-  compute_drift_report "$WORKSPACE_ROOT"
   # gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure: the laydown set
   # is DERIVED from the shipped mechanism docs' OWN references at BOTH spellings (path-prefixed AND
   # bare filename) PLUS the laid-down scripts' TRANSITIVE SIBLING DEPENDENCIES — so the mechanism
@@ -1349,6 +1339,17 @@ PYEOF
   # shellcheck disable=SC2207
   LOOP_SCRIPTS=()
   while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
+
+  # AC1/AC2 (gap-delivery-surface-grows-but-target-freezes-no-upgrade): the upgrade/refresh path's
+  # drift report. BEFORE the update, classify the target's derived scripts (漂移/缺失/一致 on the
+  # derived-set axis) so the upgrade action below is preceded by the L2 "升级正确性" diagnosis —
+  # exactly what the frozen-at-install-time target needs: what it is missing (auto-added) and what
+  # has drifted (backed up + replaced, never silent). LOOP_SCRIPTS is populated above so the
+  # before-report's derived-set is non-empty (compute_drift_report reads the global — a stale
+  # empty-array call reported derived-set 0 and the before/after reports disagreed with reality).
+  # The POST report after the loop proves the upgrade brought the derived set to 一致.
+  echo "  drift report (before upgrade):"
+  compute_drift_report "$WORKSPACE_ROOT"
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
       # mode "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never

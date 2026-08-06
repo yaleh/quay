@@ -310,10 +310,13 @@ test("AC9 — the laid-down runtime path contains no reserved directory segment 
   const r = runInit(ws);
   assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
   const RESERVED = ["vendor", "node_modules", "target", "build", "dist"];
+  // f9414dd3 moved the landing layout to .quay/runtime/bin/ (keeps the native bundle's
+  // ../provider.yml resolution — provider.yml sits one level up from bin/). The A5/AC11 and
+  // quay-init-loop config-path assertions use this same layout; this AC9 path list tracks it.
   const runtimes = [
-    ".quay/runtime/quay/quay.js",
-    ".quay/runtime/quay-native/quay-native.js",
-    ".quay/runtime/quay-native/provider.yml",
+    ".quay/runtime/bin/quay.js",
+    ".quay/runtime/bin/quay-native.js",
+    ".quay/runtime/provider.yml",
   ];
   for (const rel of runtimes) {
     assert.ok(fs.existsSync(path.join(ws, rel)), `runtime must exist at ${rel}`);

@@ -8,8 +8,8 @@
 // report (`quay-init.sh --check-drift`, Contract measure) and the upgrade path that fills
 // drifted/missing derived scripts on re-run:
 //
-// AC2 — `--check-drift` prints a parseable `漂移报告: 漂移 N / 缺失 N / 一致 N（派生集 M）` with all
-//       three numbers present; on a clean install every derived script is 一致.
+// AC2 — `--check-drift` prints a parseable `drift-report: 漂移 N / 缺失 N / 一致 N (derived-set M)`
+//       with all three numbers present; on a clean install every derived script is 一致.
 // AC1/control — construct a target missing one derived script ⇒ `--check-drift` reports 缺失-1 and
 //       lists it; re-running `--loop` (the upgrade path) fills it; `--check-drift` then reports 缺失-0.
 // AC3/control — locally modify a derived script ⇒ `--check-drift` lists it as 漂移 and is READ-ONLY
@@ -105,9 +105,11 @@ function runCheckDrift(ws, pluginRoot) {
   return runQuayInit(ws, ['--check-drift', '--root', ws], pluginRoot);
 }
 
-// Parse the summary line `漂移报告: 漂移 N / 缺失 N / 一致 N（派生集 M）`.
+// Parse the summary line `drift-report: 漂移 N / 缺失 N / 一致 N (derived-set M)` — the
+// compute_drift_report output that --check-drift actually produces (the older 漂移报告: format was
+// superseded; quay-init-drift-report.test.mjs asserts the same drift-report: line).
 function parseDriftSummary(stdout) {
-  const m = stdout.match(/漂移报告: 漂移 (\d+) \/ 缺失 (\d+) \/ 一致 (\d+)（派生集 (\d+)）/);
+  const m = stdout.match(/drift-report: 漂移 (\d+) \/ 缺失 (\d+) \/ 一致 (\d+) \(derived-set (\d+)\)/);
   if (!m) return null;
   return { drift: Number(m[1]), missing: Number(m[2]), consistent: Number(m[3]), derived: Number(m[4]) };
 }
@@ -145,7 +147,7 @@ test('AC1/control — missing derived script is listed 缺失-1 and the upgrade 
     const before = runCheckDrift(ws, src);
     const sBefore = parseDriftSummary(before.stdout);
     assert.equal(sBefore.missing, 1, 'drift report must list exactly one missing');
-    assert.match(before.stdout, /缺失: resource-gate\.sh/, 'the missing script must be named');
+    assert.match(before.stdout, /missing: plugin\/scripts\/resource-gate\.sh/, 'the missing script must be named');
 
     const upgrade = runLoop(ws, src);
     assert.equal(upgrade.status, 0, `upgrade (--loop re-run) must exit 0:\n${upgrade.stderr}`);
@@ -167,14 +169,14 @@ test('AC3/control — local edit is listed 漂移, --check-drift is read-only (�
   try {
     const r1 = runLoop(ws, src);
     assert.equal(r1.status, 0, `first --loop must exit 0:\n${r1.stderr}`);
-    const target = path.join(ws, 'plugin', 'scripts', 'heavy-op-token.sh');
+    const target = path.join(ws, 'plugin', 'scripts', 'resource-gate.sh');
     const original = fs.readFileSync(target, 'utf8');
     fs.writeFileSync(target, original + '\n# local customisation\n', 'utf8');   // local edit
 
     const before = runCheckDrift(ws, src);
     const sBefore = parseDriftSummary(before.stdout);
     assert.equal(sBefore.drift, 1, 'drift report must list exactly one drift');
-    assert.match(before.stdout, /漂移: heavy-op-token\.sh/, 'the locally-modified script must be named as drift');
+    assert.match(before.stdout, /drift: plugin\/scripts\/resource-gate\.sh/, 'the locally-modified script must be named as drift');
 
     // READ-ONLY: --check-drift must NOT modify the target (不静默覆盖 — it lists, never overwrites).
     const afterCheck = fs.readFileSync(target, 'utf8');
@@ -183,7 +185,7 @@ test('AC3/control — local edit is listed 漂移, --check-drift is read-only (�
     // Upgrade path: clean-mode derived scripts back up + replace with a VISIBLE report (never silent).
     const upgrade = runLoop(ws, src);
     assert.equal(upgrade.status, 0, `upgrade must exit 0:\n${upgrade.stderr}`);
-    assert.match(upgrade.stdout, /cleaned-residue: .*heavy-op-token\.sh/, 'the upgrade must visibly dispose of the drifted script');
+    assert.match(upgrade.stdout, /cleaned-residue: .*resource-gate\.sh/, 'the upgrade must visibly dispose of the drifted script');
     assert.match(upgrade.stdout, /backup:/, 'the upgrade must report the backup path (not silent)');
     assert.equal(fs.readFileSync(target, 'utf8'), original,
       'after the upgrade the drifted script is replaced with the product content');
@@ -207,8 +209,11 @@ test('L_G — retired send-keys-verified.sh stays in the plugin tree but is NOT 
     assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'send-keys-verified.sh')),
       'the install must NOT lay down the retired send-keys-verified.sh');
     const c = runCheckDrift(ws, src);
-    assert.ok(!c.stdout.includes('send-keys-verified.sh'),
-      'the drift report must NOT list send-keys-verified.sh as missing (it is not in the derived set)');
+    // The header prose legitimately names the retired file (explains why it is not reported); the
+    // missing/drift per-item lists must NOT contain it (matches quay-init-drift-report.test.mjs L_G).
+    const itemLines = c.stdout.split('\n').filter((l) => /^\s+(missing|drift):/.test(l));
+    assert.ok(!itemLines.some((l) => l.includes('send-keys-verified')),
+      'the drift report must NOT list send-keys-verified.sh as missing/drift (it is not in the derived set)');
     const s = parseDriftSummary(c.stdout);
     assert.ok(s, 'summary must still be parseable');
   } finally { cleanup(ws); cleanup(src); }
