@@ -2,7 +2,7 @@
 id: gap-audit-findings-not-backpropagated-to-earlier-detectors
 title: Independently confirmed Execute findings are not classified, calibrated,
   and promoted into earlier Prepare or Verify detectors
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

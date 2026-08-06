@@ -13,7 +13,7 @@ title: "inner-session-check discovery-pid fix has a SILENT degraded fallback —
   next adopter); fix direction: fail-closed OR loud alarm on
   TR_SOURCE=discovery (stderr + state marked degraded/unknown), consumer reads
   transcriptSource and alarms"
-status: todo
+status: ready
 labels:
   - gap
   - defect
