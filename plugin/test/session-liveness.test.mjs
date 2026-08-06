@@ -75,7 +75,7 @@
 //   node --test plugin/test/session-liveness.test.mjs
 //   scripts/test.sh --group governance plugin/test/session-liveness.test.mjs
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -88,6 +88,20 @@ import { setTimeout as sleep } from "node:timers/promises";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "session-liveness.sh");
 const PROBE_TARGET = "quay-0:probe"; // the manager's real, dedicated probe session
+
+// KNOWN-LOAD-SENSITIVE: under suite load a hermetic-probe test can be cancelled mid-run,
+// skipping its finally → /tmp/session-liveness-* (and sl-*) dirs leak and trip the suite-tail
+// tmux-leak-scan. Sweep leftovers after all tests (test-side cleanup safety net).
+after(() => {
+  for (const prefix of ["session-liveness-", "sl-global-", "sl-mount-", "sl-lmt-"]) {
+    let entries = [];
+    try { entries = fs.readdirSync(os.tmpdir()); } catch { continue; }
+    for (const name of entries) {
+      if (!name.startsWith(prefix)) continue;
+      try { fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+  }
+});
 
 // ── helpers ────────────────────────────────────────────────────────────────────────────────────────
 
