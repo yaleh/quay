@@ -66,8 +66,14 @@ const SKIP_DIRS = new Set([
 
 /** Known RETIRED whole-screen-hash implementations. send-keys-verified.sh's task was superseded
  * under outer ruling F (2026-08-04) and its hash mechanism is deprecated; the file awaits
- * retirement. Reported but NOT counted against the band — it is not a "new" violation. */
-export const RETIRED_FILES = new Set(["plugin/scripts/send-keys-verified.sh"]);
+ * retirement. Reported but NOT counted against the band — it is not a "new" violation. The
+ * packages/quay/plugin/ copy is the gitignored pack-time snapshot of plugin/ (package.sh
+ * materializes it so the tarball carries the plugin bundle) — the same retired file, so it
+ * inherits the same retirement rather than double-counting against the band. */
+export const RETIRED_FILES = new Set([
+  "plugin/scripts/send-keys-verified.sh",
+  "packages/quay/plugin/scripts/send-keys-verified.sh",
+]);
 
 /** Shell script extensions scanned (the pattern lives in shell commands, not .md prose). */
 const SHELL_EXT = new Set([".sh", ".bash"]);
