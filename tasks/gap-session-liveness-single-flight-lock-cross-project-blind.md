@@ -64,3 +64,21 @@ at: 2026-08-06T12:1xZ
 changed: 人要求立案——跨项目监视缺口（archguard 一天多无监视器）。三段查证坐实（诊断正确+升级 /
 锁机制结构性 no-op / 无机制接住）。跨项目缺陷正确诊断升级却掉「谁都不负责」缝隙。采纳管理者两建议
 （锁按 targetRoot 分域 + monitor-mount-check 答「在看我」）。
+
+## 补充证据（2026-08-06T12:2xZ，管理者新跨项目监视覆盖器上线即抓）
+
+**第三种失效形态**：ad-arm1 报 mounted=true 但 targetOk=false、delivered=false——targetRoot 是
+`/tmp/session-liveness-CTeeVW/incident`（三个 PID 全指向测试夹具临时目录，非真实仓库）。正在跑的
+laydown-set-check 测试夹具生成的 session-liveness 进程**占据了全局监视命名空间**，真实仓库没有监视器。
+
+**三种形态同一根因**：监视状态是**每机器全局的**，不按 targetRoot 分域：
+① 别的项目抢了锁（archguard 被 quay 持有者 no-op）
+② 自己项目的测试夹具污染全局监视状态（ad-arm1 夹具占命名空间）
+③ （隐含）没有任何机制区分「真监视器」vs「夹具进程」
+
+**消费纪律（管理者建议）**：monitor-mount-check 的 targetOk 有判别力（正确报 false），但**只看 mounted
+的消费者会被骗**——判断「有没有监视器在看我」必须**三判据齐看**（mounted + targetOk + delivered），不能
+只看 mounted。人工查同样会踩（管理者自己被 mounted=true 骗过）——更要机械化。
+
+**A 机核实**：管理者跨项目覆盖器已运行（4 项目每 10 分钟查三判据，状态变化才上报）；A 机也有夹具进程
+但未污染我们的命名空间（我们三判据全 true）。
