@@ -100,6 +100,34 @@ body 里承载 ## Proposal / ## Plan / ## Acceptance Criteria / ## Definition of
 **边界**：`cold-start` 的前提第 3 条是「inner 会话可达」——**它假设会话已存在**。
 **创建会话是它之前的一步**，见 `orchestration/RUNBOOK-session-bringup-2026-08-05.md`。
 
+### 3.5 主动发现：探针（routine track）
+
+**这是产品里唯一「主动去找缺陷并建议任务」的机制**，其余判据都是被动的（有人跑才答）。
+
+| 组成 | 内容 |
+|---|---|
+| 探针定义 | `plugin/probes/` 4 个：`architecture-analysis`（用 archguard 查依赖环/上帝包/重复抽象，ADR-007 的 `L_D`/`L_G` 仪器）、`history-mining`（挖会话史找模式）、`self-validation`（自检）、`browser-explorer` |
+| 机件 | `routine-scheduler.ts`（判哪些该跑）、`read-probe-spec.ts`（校验探针规格）、`routine-file-gate.ts`（findings 过闸：新颖性/质量/限流） |
+| skill | `plugin/skills/routines/`（106 行） |
+| 配置 | `.quay/config.yml` 的 `loop.routines:`，`trigger: every(5)` / `every(10)` |
+| 产出 | findings → 候选任务文件（FILE-ONLY 不变式） |
+
+**⚠️ 现状：机制完整，但已死 15 天（2026-08-05 实测）**
+
+- **两层循环文档对探针的引用：`orchestrator-loop-tick.md` 0 处、`fast-mode-loop-tick.md` 0 处**
+- 触发器 `every(N)` 按**迭代计数**触发，而「迭代」是 ADR-022（2026-08-03）退休掉的
+  经典管线的概念——两层快速模式**没有迭代号**，也没有任何地方调用 `routine-scheduler`
+- 最后一次真跑：2026-07-15（提交信息里的 `Iteration 49/52`），彼时经典管线尚在
+
+**为什么这条比它看起来重要**：2026-08-05 实测，机器自己开出的 7 根新维度**全部是
+post-friction**（被硌了才发现）。而探针**本来就是设计来做 pre-friction 发现的**。
+⇒ 手工跑生成器问句不可持续，**探针才是可持续的 pre-friction 发现机制**，
+它死了 15 天而没有任何东西报警——这本身是「机制存在但无人调用」那一族的第五个实例
+（前四：`loop-driver.jsonl` 无写入者、遥测括号从没被调用、`human-steered` 标签消费者
+全在退休管线、`strategic-doc-staleness` 的 orchestration 臂是死 glob）。
+
+**重新接线的方向**：触发器从「迭代计数」改为两层模式实际拥有的量（tick 计数 / 时间 / 事件）。
+
 ---
 
 ## 4. 人面
@@ -114,13 +142,32 @@ body 里承载 ## Proposal / ## Plan / ## Acceptance Criteria / ## Definition of
 ⇒ 循环侧那 97 个 `plugin/scripts` 的收拢，应当是**扩展这个已有形状**
 （`quay session` / `suite` / `meter` / `tree`），**不是另起一套**。
 
+### 4b. 人的角色已经变了（2026-08-06，人给出方向 + 实测支撑）
+
+**实测**：`.quay/gate-events.jsonl` 365 条闸门事件，`actor` 分布 **365 × `quay-cli`、0 × web**
+——web 的 action 按钮**从未产生过一条状态变更**，且它自带一个已确认的 open-redirect 修复
+（`serve-handlers.ts:1068`）：**一个从未被使用的功能贡献了一个真实漏洞**。
+
+**根因不是「人懒得点」，是人在这套机制里的位置变了**：人给方向、提问、裁定优先级；
+**改任务的只有 agent**。按钮是为一个已经不存在的角色建的 ⇒ 标准的退化器官。
+
+⇒ 人面的三份新提案（**方向已定、AC/立案归外层**）：
+
+| 文档 | 主张 |
+|---|---|
+| [`quay-web-human-is-not-an-operator.md`](./quay-web-human-is-not-an-operator.md) | **减法**：删 action 按钮；负控制＝删后 `actor` 分布不应变化 |
+| [`quay-message-bus-human-in-the-network.md`](./quay-message-bus-human-in-the-network.md) | 人是 `deliver()`/`observe()` 的**第三个 target**；`.quay/manager-inbox/` 是已自发出现的粗糙版；**它让 AC12b 第一次可机械测量** |
+| [`quay-saas-remote-access-to-an-onprem-loop.md`](./quay-saas-remote-access-to-an-onprem-loop.md) | SaaS ＝**第三种传输**而非第二个产品；启动条件是**外部信号**，不是内部判断 |
+
+**次序**：先删（零风险、消一个安全面）→ 再做总线（但按传输层无关设计）→ SaaS 保留选项、暂不动工。
+
 ---
 
 ## 5. 基座（最薄的一面）
 
 | 职责 | 现状 |
 |---|---|
-| **周期锚点** | **代码已落地，但尚未实际安装**（本文第 8 节的核对命令 2026-08-05 首次自检即抓到：`plugin/scripts/os-anchor-install.sh` + `os-anchor-watchdog.sh` 共 699 行已合并，而 `systemctl --user list-timers` 里 **0 个 quay timer**，AC1「timer 存在且 active」仍未勾）。此前全部是会话作用域的 `CronCreate`，**会话一死锚点永久消失且不留痕迹**——三次崩溃 + 两个项目停摆 29 小时的机制根 |
+| **周期锚点** | **OS 级 timer 已 active**（2026-08-05 11:35 实测：`quay-os-anchor-watchdog.timer` is-active=active、is-enabled=enabled，11:34:15 真实触发过一次）。**但「自动拉起」尚未被真实 kill 验证**——timer active 只证明它在跑，不证明它跑对了。此前全部是会话作用域的 `CronCreate`，**会话一死锚点永久消失且不留痕迹**——三次崩溃 + 两个项目停摆 29 小时的机制根 |
 | **观测信道** | `session-liveness.sh` + Monitor 工具。**只信目标会话自己的 transcript**——pane 哈希 3 次假阳性、heartbeat 冻结 42 分钟仍报假警 |
 | **动作信道** | **无统一实现**。投递 = 手写 `send-keys` 序列（6 种失败模式）；抢占 = `.halt` 文件（挡不住连续流程） |
 | **状态存储** | **无权威家**。2026-08-05 实测「有几个任务在飞」有 **6 个源、4 个答案** |
@@ -189,6 +236,50 @@ git worktree list | grep -c quay-worktrees
 grep -l '^status: in-progress' tasks/*.md | wc -l
 # ⇒ 三个数字若不一致，第 5 节「状态无权威家」仍然成立
 ```
+
+---
+
+## 8b. 实验遗留中值得回收的工具（2026-08-05 普查）
+
+`experiments/quay-perpetual-stream/` 是经典管线（ADR-022 已退休）的家：
+测试 15,940 行 + 脚本 26,325 行。**普查结论：大部分该清，但有一小批通用工具值得回收进产品。**
+
+### 规模（实测）
+
+| 项 | 数 |
+|---|---|
+| `experiments/*/test/*.test.mjs` 在**默认套件 glob 里** | **46**（每轮全套件都跑） |
+| 其中被现行文档/脚本引用 | 14（30%） |
+| **其中无人引用** | **32（70%）** |
+| **其中连被测实现都已删除** | **15** |
+| `scripts/` 实体文件 | 103（另有 15 个是指向 `plugin/` 的符号链接，同一份代码不算遗留） |
+| 其中已回收进 `plugin/scripts/` | 40 |
+| **真·仅存 experiments** | **63** |
+
+### 值得回收的（通用价值，几乎不依赖退休管线）
+
+| 脚本 | 行 | 它回答什么 | 对退休管线的引用 |
+|---|---|---|---|
+| `git-lens-l-d-code-doc-ratio.ts` | 125 | `L_D` 收敛代理：某 git 范围内代码:文档行增量比 | 2 处 |
+| `git-lens-l-g-structural-drift.ts` | 233 | `L_G` 收敛代理：结构漂移 | 1 处 |
+| `git-lens-l-s-behavior-variance.ts` | 167 | `L_S` 收敛代理：被触模块的行为方差（轻量变异探针） | 1 处 |
+| `derive-touches-heuristic.ts` | 188 | 任务体缺 `## Touches` 时机械/启发式抽取——**直接喂给 `checkTouchesPair`** | 1 处 |
+
+**前三条是 ADR-006/007 的 GIT 五透镜里 `L_D`/`L_G`/`L_S` 的量化实现**，与经典管线无关，
+且正好补上 `architecture-analysis` 探针的同一类能力。
+**第四条直接解决今晚实测过的痛点**：`## Touches` 声明不准是并发派发与分支模型的成本上界。
+
+### 绑死退休管线、应随清理一起走的（示例）
+
+`drain-scheduler` / `deliverable-governor` / `drain-dispose-corruption-check` /
+`chart2-s1|s2|s3-*` / `chart-headroom` / `chart-saturation-check` /
+`explore-exploit-cadence`（按「≥1/5 EXPLORE 里程碑」规则判 milestone 是否到期——
+milestone 概念已随 ADR-022 退休）。
+
+### 判据（避免下次再堆积）
+
+**一个测试文件若其被测实现已不存在，应当随实现一起删除**——15 个这样的文件仍在每轮
+全套件里跑，**无论绿红都不携带关于现行系统的信息**。
 
 ---
 
