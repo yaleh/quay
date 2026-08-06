@@ -97,40 +97,87 @@ resume 若中断，先跑 measure 读当前绕过防护的测试数，不要假�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 全部起真实 tmux 的测试文件改为走 `tmux-isolated.sh`（或经论证保留手写，但必须同时具备
-      `env -u TMUX` + 显式 `-S`），贴出改前/改后 `tests_bypassing_guard` 与
-      `tests_missing_both_isolation` 两个数字
+> **执行顺序是本任务的一部分，不是建议（人裁定 2026-08-06）**：三阶段必须按 STAGE 1 → 2 → 3
+> 推进，**不得等 STAGE 3 的库建好再止血**。理由：这是同一失效模式的第五次，STAGE 1 是几行改动
+> 就能关掉今天这条崩溃路径的止血，STAGE 3 是正确的终局但工作量大；先做 3 意味着止血要等到 3 完成。
+> **STAGE 1 未完成前，本任务不得进入 STAGE 3。**
+
+### STAGE 1 —— 止血（必须最先完成，几行改动，立即见效）
+
+- [ ] AC1: 4 个不合格测试补齐**两个强制隔离条件**（`env -u TMUX` + 显式 `-S`）：
+      `supervisor-deliver.test.mjs`（两样全无，`:142` 裸 `tmux new-session`）、
+      `send-keys-reliable.test.mjs`（两样全无）、`session-liveness.test.mjs`（缺 `-S`）、
+      `session-bootstrap.test.mjs`（缺 `env -u TMUX`）。
+      贴出改前/改后 `tests_missing_both_isolation` 两个数字（预期 4 → 0）
 - [ ] AC2: **负控制（承重条）**——复现头注声明的机制：进程继承 `$TMUX`、只设 `TMUX_TMPDIR`、
       跑 `tmux new-session` ⇒ 必须证明它落在**默认 socket**（这是崩溃的实际路径）；
-      改后同一场景必须落私有 socket。若无法复现该行为，说明头注的前提本身需要重新验证，
-      任务方向需要修正而不是照做
+      改后同一场景必须落私有 socket。**若无法复现该行为，说明 `tmux-isolated.sh` 头注的前提
+      本身需要重新验证，本任务方向需要修正而不是照做**——此时应停下来报出，不得跳过继续
+
+### STAGE 2 —— 防复发（机械挂载点，管新写的代码）
+
 - [ ] AC3: **机械强制，不靠注释**——新增一条静态检查，禁止测试文件出现"起真实 tmux 但既不走
-      tmux-isolated.sh 也不同时具备两个隔离条件"的形态；接进 `run_static_checks`
-- [ ] AC4: 与 `gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check` 交叉标注——
+      `tmux-isolated.sh` 也不同时具备两个隔离条件"的形态；接进 `run_static_checks`。
+      **这一步比写库更能防复发**，因为它管的是未来新增的代码，而库只能管已迁移的部分
+- [ ] AC4: AC3 的检查本身要有负控制——故意在一个测试文件里写一条不合格的裸 tmux 调用 ⇒
+      检查必须报红；报绿则该检查等于没有（同 `gap-shipped-verifiers` 的"提及不构成调用点"教训）
+
+### STAGE 3 —— 结晶为 `.ts` 库（终局，工作量大，STAGE 1 完成后才启动）
+
+- [ ] AC5: **三层切分落地**（人 2026-08-06 裁定的架构）：
+      | 层 | 形态 | 测试方式 | 预期数量 |
+      |---|---|---|---|
+      | 决策核 | 纯函数（选哪个 socket / argv 怎么构造 / pane 什么状态） | 零 tmux，纯单测 | 大部分 |
+      | 副作用边 | 实际 spawn，**exec 可注入** | 注入假 exec，测 argv 正确性 | 中等 |
+      | 真实语义验证 | 真 tmux，**必须在私有 socket 上** | 集成测试 | **个位数** |
+      贴出改后三层各自的调用点数量
+- [ ] AC6: **`.ts` 而非 `.sh`，理由必须是可注入而不只是"可测试"**——任务体记录：`.sh` 无依赖注入
+      接缝，测 `.sh` 的唯一办法是真起 tmux，所以当前 **139 个测试侧 tmux 调用点全部是真实爆炸半径**；
+      `.ts` + 可注入 exec 让绝大多数测试用假 exec，真实 tmux 集成测试压到个位数。
+      遵循仓库已有的 8 对 `.sh`/`.ts` 双实现惯例（canonical `.ts` + 薄 `.sh` wrapper，不破现有调用方）
+- [ ] AC7: **不得全假**——必须保留个位数的真实 tmux 集成测试覆盖 AC2 那类真实语义
+      （`$TMUX` 覆盖 `TMUX_TMPDIR`、只有 `-S` 能压过 `$TMUX`）。
+      全部改成假 exec 会产生"测试全绿但真实环境仍落默认 socket"的新型假绿，**比现状更危险**
+- [ ] AC8: **窄接口**（人裁定第 3 条）——使用该库的工具数量尽量少。注意窄接口与 `.ts` 是
+      **正交的两件事**（`supervisor-deliver.sh` 是 `.sh` 但确实是正确的窄接口），任务体需分别记录
+      这两个决定，不得混为一谈
+- [ ] AC9: **manager/outer 只能用基于该库的工具**（人裁定第 2 条）——但这条**必须靠 AC3 的机械检查
+      执行，不得只写成散文规则**：`SPEC-manager-productization` §5 已有同形规则，而管理者在
+      读过它的同一会话里仍违反 8 次，证明散文规则无效
+
+### 贯穿（不属于任何单一阶段）
+
+- [ ] AC10: 与 `gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check` 交叉标注——
       本条是该类里"不被调用的是安全防护本身"的最严重实例
-- [ ] AC5: 与 `gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX` 及
+- [ ] AC11: 与 `gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX` 及
       `restart-plan-2026-08-04-third.md` §6 交叉标注——任务体记录这是同一失效模式的**第五次**，
       并说明前四次之后建的防护为什么没能阻止第五次（零采用）
-- [ ] AC6: 任务体记录 sudo 核实的排除性证据（今天无内核 OOM、最近 OOM 是 8月1日、无 kill/signal
+- [ ] AC12: 任务体记录 sudo 核实的排除性证据（今天无内核 OOM、最近 OOM 是 8月1日、无 kill/signal
       内核事件），防止后续再把这类崩溃误归因为内存压力
 
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴进任务体
+- [ ] **STAGE 1（AC1-AC2）单独可交付**——完成即可提交并关闭今天这条崩溃路径，不必等 STAGE 2/3
+- [ ] AC1-AC12 实跑输出贴进任务体
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——本任务尤其需要，因为它改的正是套件自身的夹具
+- [ ] 任务体记录三阶段各自的完成时刻，用于回答"止血用了多久"（本任务的核心教训是前四次之后
+      建了防护却零采用，第五次仍然发生）
 
 ## Touches
-- plugin/test/supervisor-deliver.test.mjs
-- plugin/test/send-keys-reliable.test.mjs
-- plugin/test/session-liveness.test.mjs
-- plugin/test/session-bootstrap.test.mjs
-- plugin/scripts/tmux-isolated.sh
-- scripts/test.sh
+- plugin/test/supervisor-deliver.test.mjs（STAGE 1）
+- plugin/test/send-keys-reliable.test.mjs（STAGE 1）
+- plugin/test/session-liveness.test.mjs（STAGE 1）
+- plugin/test/session-bootstrap.test.mjs（STAGE 1）
+- scripts/test.sh（STAGE 2：静态检查接线）
+- plugin/scripts/tmux-isolated.sh（STAGE 3：作为 `.ts` 库的薄 wrapper 保留）
 - tasks/gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check.md（交叉标注）
 - tasks/gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX.md（交叉标注）
 
 ## Dispatch review
 
 reviewer: none
-at: 2026-08-06T16:2xZ
-changed: 尚未派发/审阅（管理者立案，人提示"检查之前曾造成类似问题的 tmux 误操作"后查证得出）
+at: 2026-08-06T16:3xZ
+changed: 尚未派发/审阅。管理者立案（人提示"检查之前曾造成类似问题的 tmux 误操作"后查证得出）；
+  随后人裁定把 tmux 操作结晶为 `.ts` 库 + 窄接口 + 限制 manager/outer 只能用该库，
+  管理者据此把 AC 重排为三阶段（止血 → 防复发 → 结晶），并写入"STAGE 1 未完成前不得进入 STAGE 3"
+  的顺序约束——理由是这是同一失效模式第五次，先做库意味着止血要等库完成。
