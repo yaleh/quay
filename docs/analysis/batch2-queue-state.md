@@ -5107,3 +5107,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **runtime-nowhere-safe 合并**（`04422f8e`）：运行时落地 **`.quay/runtime/`**（quay 命名空间，非目标保留目录）+ `quay-init` 自写 gitignore（AC10 三例）+ 大文件钩子 AC3/AC4 双向证明 + 异构构建 AC8（Node npm test + Go go build 双绿）+ AC9 保留目录 + AC11 Go 半边入 e2e。AC1–AC11 勾（runtime-landing 5/5 + quay-init-loop 45/45）。已并已清。
 - **本仓自查**：本仓 config 用 `./bin/quay-native.ts`（非 vendor/），runtime 改动只影响新装（quay-init 路径），无破坏。
 - **在飞 1/5**（仅 DIR-124，worktree a064cbc6 未 commit）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:3xZ（内层，waiting tick：DIR-124 深工作中）
+
+- **DIR-124 在飞 ~26min**（TaskOutput running，transcript 03:35 活跃）：巨型 directive——agent 在范围分析（A 族 parent 关闭 vs B2 控制面内核基底）。未 commit，未超 90m。
+- 套件 green（02:49 参考，最近 merge 待外层下轮覆盖）。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。master `d1097689`。
