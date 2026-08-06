@@ -6,7 +6,7 @@ title: "no upgrade channel — meta-cc is missing 8 derived scripts, 7 of them
   / 缺失 68 / 一致 8); the quay-init install is a snapshot, not a version — add an
   upgrade/refresh path (re-run quay-init detects + updates drifted/missing
   derived scripts) + a drift report as an L2 continuous-health criterion"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -106,9 +106,9 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC2 实测输出贴任务体
-- [ ] 目标项目可升级（重跑检测 + 更新）；漂移报告可读；「装了 quay」= 能用最新 quay
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC2 实测输出贴任务体
+- [x] 目标项目可升级（重跑检测 + 更新）；漂移报告可读；「装了 quay」= 能用最新 quay
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 
