@@ -1,19 +1,23 @@
 ---
 id: gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived
-title: "the nproc-derived test concurrency was REVERTED to a hardcoded 8 on 2026-08-03 (623d662b,
-  'TEMPORARILY pin ... pending AC5 tradeoff experiment') and every reporting layer still says it
-  shipped — default_test_concurrency() is `echo 8; return 0; default_concurrency_formula` so the
-  formula is UNREACHABLE (its only call site is after the return); CLAUDE.md:22 states flatly that
-  test.sh 'derives its default concurrency from max(1, floor(nproc/2.1))' and calls 8 'the old
-  hardcoded' value with no hedge; the owning task's AC5 is [x] checked and its body has ZERO
-  mention of the revert (grep revert/回退/TEMPORARY/临时/pin = 0 hits); resource-gate.test.mjs:52-58
-  regex-EXTRACTS the unreachable default_concurrency_formula and tests it in isolation (its own
-  comment admits default_test_concurrency is TEMPORARILY pinned), while runner-grouping.test.mjs:195
-  asserts only the call-site SPELLING with the message 'default concurrency is derived' — a false
-  message on a passing test; measured on this host nproc=4 so claimed=1 vs actual=8 = precisely the
-  4.25x oversubscription CLAUDE.md says was eliminated, and the live in-flight scoped gate is
-  running --test-concurrency=8 at PSI avg300=16.27; manager claim-vs-actual lens 2026-08-06"
-status: todo
+title: the nproc-derived test concurrency was REVERTED to a hardcoded 8 on
+  2026-08-03 (623d662b, 'TEMPORARILY pin ... pending AC5 tradeoff experiment')
+  and every reporting layer still says it shipped — default_test_concurrency()
+  is `echo 8; return 0; default_concurrency_formula` so the formula is
+  UNREACHABLE (its only call site is after the return); CLAUDE.md:22 states
+  flatly that test.sh 'derives its default concurrency from max(1,
+  floor(nproc/2.1))' and calls 8 'the old hardcoded' value with no hedge; the
+  owning task's AC5 is [x] checked and its body has ZERO mention of the revert
+  (grep revert/回退/TEMPORARY/临时/pin = 0 hits); resource-gate.test.mjs:52-58
+  regex-EXTRACTS the unreachable default_concurrency_formula and tests it in
+  isolation (its own comment admits default_test_concurrency is TEMPORARILY
+  pinned), while runner-grouping.test.mjs:195 asserts only the call-site
+  SPELLING with the message 'default concurrency is derived' — a false message
+  on a passing test; measured on this host nproc=4 so claimed=1 vs actual=8 =
+  precisely the 4.25x oversubscription CLAUDE.md says was eliminated, and the
+  live in-flight scoped gate is running --test-concurrency=8 at PSI
+  avg300=16.27; manager claim-vs-actual lens 2026-08-06
+status: ready
 labels:
   - gap
   - defect
