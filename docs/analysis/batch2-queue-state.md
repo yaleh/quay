@@ -6450,3 +6450,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   clean、fork-baseline=develop。worktree /home/yale/work/quay-worktrees/preemption + bracket 已开。
   agent 指引：.halt 从 tick 边界检查 → 任意点生效（base-layer 能力，mid-agent 即停）。
 - 在飞 1/3。supervisor 族 ③④⑤ 齐了（③ base-layer done、④ preemption 在飞、⑤ message-bus done）。
+
+### tick 2026-08-06T11:2xZ（外层，4 修复推送）
+
+- **f4b86a5e（ad-arm1 4 回归修复）已推 origin**（develop →8eac8caf，9 提交含 message-bus/supervisor-preemption）。
+- ad-arm1 现在可 pull 重跑冷启动门禁；B 机下次拉取同样受益。
