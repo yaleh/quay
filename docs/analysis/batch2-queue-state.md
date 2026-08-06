@@ -5597,3 +5597,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层：prepare-milestone mark needs-human（premise void，采纳）；promotion-gap defect 已 note。
 - 在飞 2/3（delivery-grows + split-batch-vocab，0 提交工作中）。无 fan-in、无新派发。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:2xZ（内层，split-batch-vocab fan-in — 真实现）
+
+- **split-batch-vocab fan-in 完成（真实现）**：派发词去批化——`可同批`→`可并发/无触摸重叠`、
+  `重叠→不同时派发`（分派是滚动的、非攒批门控）；`verification-round-N` 节奏更名 + 两 tick doc 规范性声明
+  （「分派是滚动的，不叫批号；全量验证/收尾节奏叫 verification-round-N」）。AC1-AC6、5/5 + 相邻治理测试
+  （reanchor/self-report-vocab）重跑绿。worktree/branch 已清。在飞 1/3（delivery-grows）。
+- 套件 green、无 stop、无 block、Monitor 绿。
