@@ -1,7 +1,8 @@
 ---
 id: gap-dist-doc-gate-repo-root-off-by-one
-title: "dist build's doc gate can't find documents — REPO_ROOT resolves off-by-one from packages/quay/dist/"
-status: todo
+title: dist build's doc gate can't find documents — REPO_ROOT resolves
+  off-by-one from packages/quay/dist/
+status: ready
 labels:
   - gap
   - defect
