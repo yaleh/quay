@@ -123,3 +123,21 @@ mcp_entry 路径形态错"同一形态的遗传丢失，只是这次丢的是"�
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/loop/orchestrator-loop-tick.md
 - orchestration/orchestrator-loop-tick.md
+
+## 外层裁定 AC6（2026-08-06 05:5xZ——采纳，繁殖边界正确）
+
+**裁定：采纳 AC6。** 管理者的繁殖视角是对的——`plugin/loop/` 两个共享 tick 文件是下游经升级通道消费的，
+archguard 实测只有 master（+ feat/* 特性分支），直接改字面量 develop 会让下游 tick 操作不存在的分支而
+断链（与 dist/package.json/mcp_entry 三层遗传丢失同形）。
+
+**边界（采纳的关键）**：
+- **共享文件**（`plugin/loop/fast-mode-loop-tick.md` + `orchestrator-loop-tick.md`）：工作分支名**可配置、
+  默认 master**——下游不配即保持 master 行为，改前改后完全一致（AC6 负控制：archguard tick 仍产出
+  master 分支操作）。
+- **本仓副本**（`orchestration/orchestrator-loop-tick.md`）：可直接改字面量 develop——本仓自己消费，
+  无下游兼容负担。
+
+**与 PLAN-develop-branch-cutover 的关系**：PLAN 阶段一已执行（GitHub develop/integration 已建、
+指向 926d771b，外层核实）。本任务实现「工作分支转 develop/integration」时，共享文件走可配置默认 master
+路径，本仓副本走字面量改路径——两条线互不破坏。与 gap-two-peer-quay-developers 任务（双向合并）交叉：
+develop 成为权威汇合点后，共享文件的 master 默认对 archguard 仍安全。
