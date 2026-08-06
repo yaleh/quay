@@ -100,6 +100,26 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       2. 「注意与 **os 提供的 cron** 区分」 ⇒ OS crontab 不是本 AC 的达成手段
       3. 「**禁止使用 Desktop 定时任务。仅可使用 Claude Code 的 loop 或 cron**」
          ⇒ 即使将来某台机器装了 Desktop app，这条路**依然关闭**（裁定不随环境变化而失效）
+
+      **范围分界（人 2026-08-06 确认，管理者提出、人裁「同意保留这 3 条」）**——
+      「会话真死出范围」**不等于**「一切会话观测出范围」。分界线是：
+
+      | | 在范围内 | 出范围 |
+      |---|---|---|
+      | **观测状态** ✅ | 外层现在在不在干活；活着但接不了输入（上下文饱和）；超时不推进 | — |
+      | **探测死亡并恢复** ❌ | — | 会话消失后拉回；OS 看护名单；崩溃自动重启 |
+
+      **被这条分界保住的 3 条任务**（人确认保留，不作废）：
+      `gap-session-liveness-session-pid-blind-to-claude-as-pane-process`（卡的是管理者观测
+      外层是否在干活）、`gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-
+      take-input`（活着但接不了输入——不是死）、`gap-session-liveness-remove-shared-events-and-lock`
+      （机制清理）。
+
+      **这条分界有真实区分力，已在 2026-08-06 18:0x tick 上用过一次**：
+      `outer-liveness.sh` 报三类事件——「消失」（出范围，不再需要）/「恢复」（同）/
+      **「活着但超 45 分钟不推进」（在范围内，仍需要）**。
+      同一个监视器，**按分界拆开后只剩第三类值得挂**——所以没有照着 tick 文档盲目重挂它。
+      当晚 inner 空转 8 分钟正属第三类。
       **原 AC5 文本（"OS 锚看护名单含 manager 或独立 unit"）当前无路可走，故改写。**
 
       **实测的三条产品路径与各自的结论**（`code.claude.com/docs/en/scheduled-tasks` 对照表，
