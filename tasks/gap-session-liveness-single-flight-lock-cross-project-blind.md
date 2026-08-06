@@ -1,7 +1,21 @@
 ---
 id: gap-session-liveness-single-flight-lock-cross-project-blind
-title: "session-liveness single-flight lock is PER-MACHINE not per-project — archguard has had NO liveness monitor for a day+ (diagnosed correctly + escalated by archguard tick #53, 2026-08-05 07:31, 'single-flight lock held by quay only watches quay sessions; archguard/meta-cc events never produced → escalated (holder target scope beyond outer authority)'); root cause verified: SL_GLOBAL_DIR=$HOME/.quay-global/session-liveness (per-machine, session-liveness.sh:777), lock_token=$SL_GLOBAL_DIR/heavy-op/token (per-machine not per-project, :799), _sl_acquire_or_noop returns 1=noop+caller exit 0 on live holder (:794-796) so archguard mount silently no-ops with exit 0 (looks successful, monitors nothing); no mechanism catches it — no task filed, monitor-mount-check only answers 'is there a monitor on this machine' (target_ok = all targetRoot==REPO_ROOT, per-project boundary) not 'is there a monitor watching ME'; cross-project defect correctly diagnosed+escalated but falls through 'nobody owns the machine' seam; human ruling 2026-08-06: file it"
-status: todo
+title: "session-liveness single-flight lock is PER-MACHINE not per-project —
+  archguard has had NO liveness monitor for a day+ (diagnosed correctly +
+  escalated by archguard tick #53, 2026-08-05 07:31, 'single-flight lock held by
+  quay only watches quay sessions; archguard/meta-cc events never produced →
+  escalated (holder target scope beyond outer authority)'); root cause verified:
+  SL_GLOBAL_DIR=$HOME/.quay-global/session-liveness (per-machine,
+  session-liveness.sh:777), lock_token=$SL_GLOBAL_DIR/heavy-op/token
+  (per-machine not per-project, :799), _sl_acquire_or_noop returns 1=noop+caller
+  exit 0 on live holder (:794-796) so archguard mount silently no-ops with exit
+  0 (looks successful, monitors nothing); no mechanism catches it — no task
+  filed, monitor-mount-check only answers 'is there a monitor on this machine'
+  (target_ok = all targetRoot==REPO_ROOT, per-project boundary) not 'is there a
+  monitor watching ME'; cross-project defect correctly diagnosed+escalated but
+  falls through 'nobody owns the machine' seam; human ruling 2026-08-06: file
+  it"
+status: ready
 labels:
   - gap
   - defect
@@ -123,3 +137,19 @@ laydown-set-check 测试夹具生成的 session-liveness 进程**占据了全局
 **修法（采纳，比锁分域更小）**：**不改锁实现**——session-liveness 调用时把 `--root` 从 `$SL_GLOBAL_DIR`
 换成按 targetRoot 分域子目录（`$SL_GLOBAL_DIR/<target-root-slug>`），锁代码一行不动。正确区分：
 重测试互斥（每机器对）+ 监视器互斥（每项目对）。
+
+## 前提撤回（2026-08-06T12:5xZ，管理者自我更正 + 外层独立核实）
+
+**主前提（archguard 因锁无监视）不成立——撤回。**
+
+- **archguard 其实被实时监视**：共享事件文件 105 条 archguard 事件（REPO-STALL 30 + SESSION-OVERDUE 75），
+  最新 4.3 分钟前（ts 毫秒）。mounted=false/delivered=true 是**单持有者+共享文件设计的正确状态**
+  （fast-mode-loop-tick.md:176-180 明写「都挂同一把锁、同一份共享事件；先挂上者成为唯一持有者，
+  其余空操作。要看事件的人订阅共享文件即可」）。
+- **多目标配置在生效**：REPO-STALL/SESSION-OVERDUE 是外层级信号，证明 manager 多目标配置一直在工作。
+- **archguard 07:31 抱怨是旧证据**（manager 配置 14:35 建，晚于抱怨——很可能正是为修它）。
+- **管理者的过失**：读 mounted=false 就下结论，忽略旁边 delivered=true——「只看 mounted 的消费者会被骗」
+  他自己就是那个消费者。
+
+**唯一仍成立**：ad-arm1（quay-C）delivered=false——共享文件 0 条 ad-arm1 事件（新机器未进 manager
+多目标配置）。**配置缺失，非锁 bug**。本任务缩窄为 ad-arm1 配置缺失。
