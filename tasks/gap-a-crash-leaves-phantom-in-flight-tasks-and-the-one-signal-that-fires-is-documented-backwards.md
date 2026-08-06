@@ -90,6 +90,18 @@ resume 先改文档方向（一行、且随交付物走），再做对账
 worktree 不存在 / 进程不存在 / 分支已合并，**不能只用「时龄超过 N 分钟」**
 （那与一个真的很慢的任务同形，正是本条要修的病）。
 
+**交叉标注（`gap-over-90m-false-signal-source-reads-telemetry-not-task-status`，2026-08-06）——
+reconcile 判据缺陷：worktree 存在 ≠ mid-flight**。本条的 `--reconcile` 判据仍有盲区：
+`makeDefaultExecutorGone` 把「worktree 存在」当作「执行者在跑」（`worktree-present` ⇒ KEEP），但
+**崩溃留下的 0 提交死 worktree 恰好满足该判据**——执行者已死、worktree 空挂在盘上，幽灵任务却永远
+保持 `kept`，随后的 over-90m 仍会误报（2026-08-05 第三次复发：`gap-loop-has-no-os-level-anchor` /
+`gap-web-board` 的 0 提交死 worktree + 永不闭合 bracket，48min + 27min + 本次）。判据应加 mtime/
+进程佐证：**worktree 存在且近 N 分钟有变化（或对应进程活着）才等于 mid-flight**。over-90m 侧的独立
+止血已落在该任务：`detectTaskOver90m` 增加任务 status 闸——先读 `tasks/<id>.md` 的 `status` 字段，
+非 `in-progress`（ready/done/needs-human/todo）即跳过，bracket 仅作「何时开始」来源、status 作「是否
+真在跑」的闸。与本条的 reconcile 互补：reconcile 关「执行者确实不在」，status 闸关「任务状态确实
+不在跑」。
+
 **不做**：**不删除记录**（它们是真实发生过的事，`--task-start` 写下时是真的）；
 不把 `OVER90` 阈值调高（**那只是让幽灵更晚出现**）；
 **不在本任务里改 `inner-state.sh` 的 ORPHAN 语义**——代码是对的，错的是文档。

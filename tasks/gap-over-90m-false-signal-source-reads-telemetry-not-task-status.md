@@ -49,10 +49,85 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: `detectTaskOver90m` 对 status=ready 的超时 bracket 不触发（负控制，复现今晚形态）
-- [ ] AC2: status=in-progress（或任务文件缺失）的超时 bracket 仍触发（正控制，真超时不漏）
-- [ ] AC3: 测试覆盖两种形态 + 今晚复发案例（os-anchor 的 ready+超时 bracket）
-- [ ] AC4: 与 `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards` 交叉标注（reconcile 判据缺陷——worktree 存在不等于 mid-flight，应有 mtime/进程佐证）
+- [x] AC1: `detectTaskOver90m` 对 status=ready 的超时 bracket 不触发（负控制，复现今晚形态）
+      **invoke 证据**（`bash scripts/test.sh --for-task gap-over-90m-false-signal-source-reads-telemetry-not-task-status`，
+      tests 36 / pass 36 / fail 0 / cancelled 0，全文贴于下方「作用域测试输出」）：
+      新增测试 `AC1 — task-status gate: status=ready + >90m bracket does NOT fire over-90m (negative
+      control, reproduces tonight's phantom shape)`——写 `tasks/gap-os-anchor.md` status=ready + 91min
+      悬置 bracket，`detectTaskOver90m` 返回 null、`--detect-stop` 不写 block（`no stop condition`）。
+      `taskStatusAllowsOver90` 单测矩阵：ready/done/needs-human/todo ⇒ drop，in-progress ⇒ keep。
+- [x] AC2: status=in-progress（或任务文件缺失）的超时 bracket 仍触发（正控制，真超时不漏）
+      **invoke 证据**：新增两条正控制——`status=in-progress + 91min bracket` ⇒ 仍写 block（reason
+      task-over-90m）；`task file MISSING + 91min bracket` ⇒ 仍触发（缺文件时无法核对 status，fail 向
+      旧行为——真超时永不静默丢失）。
+- [x] AC3: 测试覆盖两种形态 + 今晚复发案例（os-anchor 的 ready+超时 bracket）
+      **invoke 证据**：上述负/正控制 + os-anchor 形态（`gap-os-anchor` status=ready + 91min bracket ⇒
+      不触发）均落在 `plugin/test/inner-blocked-signal.test.mjs`（5 条新测试，`// @test-group
+      governance`）；并在 `tasks/gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash.md`
+      交叉标注同型案例（92min eaten：括号在飞 ≠ 任务在跑）。
+- [x] AC4: 与 `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards` 交叉标注（reconcile 判据缺陷——worktree 存在不等于 mid-flight，应有 mtime/进程佐证）
+      **invoke 证据**：在该任务「二、崩溃对账」段写入交叉标注——`makeDefaultExecutorGone` 把
+      「worktree 存在」当「执行者在跑」，但崩溃留下的 0 提交死 worktree 恰好满足该判据 ⇒ 幽灵保持
+      kept、over-90m 仍误报；判据应加 mtime/进程佐证。本条 status 闸与 reconcile 互补。
+
+### 作用域测试输出（AC1–AC4 实跑证据）
+
+Contract `invoke`：`bash scripts/test.sh --for-task gap-over-90m-false-signal-source-reads-telemetry-not-task-status`
+（EXIT=0）。静态作用域 tier（test-framework-policy-check PASS / test-isolation-check PASS /
+test-impl-census clean / task-contract-check 无违规）＋ 36 测试全绿：
+
+```
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  scoped check: run_checker "test-framework-policy-check" ...
+test-framework-policy-check — 233 glob file(s), 34 exemption(s)
+PASS: every test file uses node:test or is a listed legacy exemption; exemption list is at/below the ratchet ceiling and did not grow; new files declare @test-group.
+  scoped check: run_checker "test-isolation-check" ...
+PASS: all 44 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+  scoped check: run_checker "test-impl-census-check" ...
+test-impl-census: checked 233 test files · clean 233 · impl-deleted 0
+  scoped check: run_checker "task-contract-check" ...
+task-contract-check: no violations.
+violations: 0 unique across 0 task(s); info findings (non-ratchet, pre-opt-in baseline): 0
+strict-subset mode (scoped static-check tier) — a violation on a scanned task FAILS this run (exit 1)
+== build dist/quay.js ... ==  ⚡ Done in 114ms
+== build dist/quay-native.js ... ==  ⚡ Done in 102ms
+== mirror vendored plugin dist (plugin/scripts/sync-vendor.sh --sync-dist) ==
+✔ AC1 — the module defines the .quay/inner-blocked.json schema (BLOCKED_RECORD_SCHEMA)
+✔ AC2 — VALID_BLOCKED_REASONS is exactly the inner layer's existing stop conditions
+✔ AC4 — --assert-blocked writes .quay/inner-blocked.json with the full record
+✔ AC4/AC7 — --clear emits a schema-valid blocked telemetry event into .workflow-events/
+✔ AC7 — aggregate() reports blocked waits with cumulative and longest durations
+✔ AC3 — the tick file requires assert-before-stop and clear-after-recovery
+✔ AC4 — findSharedRoot resolves the SHARED (main) checkout even from inside a linked worktree
+✔ AC1 — detectRulingRequiredStall is a no-op with no transcript config (never inferred)
+✔ AC2/AC3 — --detect-stop --transcript writes ruling-required (real trigger: stale transcript + in-progress + clean tree)
+✔ AC5 — a dirty working tree does NOT fire ruling-required even with a stale transcript + in-progress task
+✔ AC4 — reverse negative control (real shape): a task in-progress 78 real minutes with a FRESH transcript must NOT be flagged
+✔ AC1 — a fresh subagents/ file counts as activity even when the main transcript file is stale (busy delegating, not frozen)
+✔ AC5 — --detect-stop without --transcript is byte-for-behavior unchanged (composite trigger never engages)
+✔ AC6 — an auto ruling-required-stall block auto-clears once the transcript resumes (mirrors the existing auto-clear path)
+✔ AC5 — --detect-stop with no stop condition produces no block file
+✔ AC5 — a long in-progress task under the 90m budget does NOT produce a block
+✔ AC1/AC2/AC6 — --detect-stop writes the block for a task-over-90m (real trigger path)
+✔ AC1/AC6 — --detect-stop writes the block for a merge conflict (real trigger path)
+✔ AC3 — --detect-stop keeps the block while the conflict persists and clears it once resolved
+✔ AC3 — --detect-stop never auto-clears a manual (judgment) block; only --clear does
+✔ AC4 — end-to-end: a stop condition produces the block and the outer reads the record (inner-state.sh retired)
+✔ AC1 — task-status gate: status=ready + >90m bracket does NOT fire over-90m (negative control, reproduces tonight's phantom shape)
+✔ AC2 — task-status gate: status=in-progress + >90m bracket STILL fires (positive control, real timeout not masked)
+✔ AC2 — task-status gate: task file MISSING + >90m bracket STILL fires (fall back to bracket — genuine timeout never masked)
+✔ AC1/AC3 — task-status gate: the non-running statuses ready/done/needs-human/todo all suppress over-90m; only in-progress fires
+✔ AC1 — task-status gate unit matrix: taskStatusAllowsOver90 verdict per shape (missing → keep, in-progress → keep, else drop, unparseable → keep)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+```
+
+Contract `measure`（`node --test plugin/test/inner-blocked-signal.test.mjs 2>&1 | grep -c '✖'`）输出数字段：`0`（band false_over90 = 0 达成）。
 
 ## Touches
 
