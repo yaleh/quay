@@ -6644,3 +6644,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层另立案：tmux fail-closed at laydown 与 human ruling 冲突（--tmux-session 应冷启动可选）、
   delivery-outline-vs-verify-surface single-source——外层侧，非本管线。
 - 下一事件：remove-shared-events 完成。
+
+### tick 2026-08-06T14:1xZ（外层，人直接指令：同步两边）
+
+- **人裁定**：「通知两边做同步。保证其已经处理好合并问题并 push 后才能处理其它任务。」
+- **A 动作（完成）**：本地 develop 26 个未推提交已 push origin（4cdde3f2→7cf3c650）。push 完成前不开新任务。
+- **B 冲突预警（管理者实测）**：B 落后 origin 405 提交、6h 没交互。A 改 238 文件、B 改 117、交集 56。
+  高危重叠：plugin/loop/fast-mode-loop-tick.md + orchestrator-loop-tick.md（branch cutover 改的，B 不知道）、
+  session-liveness.sh / ready-pool-check.ts / slot-refill.ts / full-suite-runner.ts / quay-init.sh
+  （A 今晚修合并回归的，B 同期独立改）。**最尖锐**：plugin/test/session-liveness.test.mjs 又在交集——
+  上次硬 SyntaxError（const commit 重复）正是合并此文件产生，同文件双边改动酝酿第二次。47 个同名
+  tasks/gap-*.md 双方都改。
+- **B 侧解冲突提示**（人已裁定 B 自己的循环负责自己合并）：特别小心上述文件——上次 35 冲突里出问题的
+  是「两边各留一半」机械式合并。
