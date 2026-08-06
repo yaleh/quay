@@ -1,17 +1,20 @@
 ---
 id: gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check
-title: "the dominant defect class tonight is SHIPPED-BUT-UNCALLED verifiers, and a naive grep cannot
-  see it because catalog entries and own-tests count as mentions — census on quay: verify-delivery-
-  surface.ts (which outer ruled TODAY at c65c411c to be the SINGLE SOURCE OF TRUTH for the delivery
-  manifest) has ZERO executable callers, its only two non-self references being a description string
-  in capability-catalog.sh:179 and its own plugin/test/verify-delivery-surface.test.mjs; periodic-
-  push-backup.sh 0 callers; measure-suite.mjs 0 callers; on archguard task-contract-check.ts is laid
-  down and its done-task check at :151-154 is correct yet has no call site there (grep scripts/ and
-  .quay/config.yml = 0), which is why TASK-60 could be marked done while its OWN declared Contract
-  band (pool > 0) was falsified (measured pool = 0) and archguard idled 197 minutes; the shape is
-  'the verifier exists, is correct, is shipped, and nothing invokes it' — same family as the
-  ADR-022-retired routine-scheduler callers and the 15-day-dead probes"
-status: todo
+title: "the dominant defect class tonight is SHIPPED-BUT-UNCALLED verifiers, and
+  a naive grep cannot see it because catalog entries and own-tests count as
+  mentions — census on quay: verify-delivery- surface.ts (which outer ruled
+  TODAY at c65c411c to be the SINGLE SOURCE OF TRUTH for the delivery manifest)
+  has ZERO executable callers, its only two non-self references being a
+  description string in capability-catalog.sh:179 and its own
+  plugin/test/verify-delivery-surface.test.mjs; periodic- push-backup.sh 0
+  callers; measure-suite.mjs 0 callers; on archguard task-contract-check.ts is
+  laid down and its done-task check at :151-154 is correct yet has no call site
+  there (grep scripts/ and .quay/config.yml = 0), which is why TASK-60 could be
+  marked done while its OWN declared Contract band (pool > 0) was falsified
+  (measured pool = 0) and archguard idled 197 minutes; the shape is 'the
+  verifier exists, is correct, is shipped, and nothing invokes it' — same family
+  as the ADR-022-retired routine-scheduler callers and the 15-day-dead probes"
+status: ready
 labels:
   - gap
   - milestone-candidate
