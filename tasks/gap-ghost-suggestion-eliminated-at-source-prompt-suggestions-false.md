@@ -54,6 +54,7 @@ C-u/C-a+C-k 循环 N 次 pane 内容逐字不变）**可以从源头消除**，�
 
 ## Touches
 
+- tasks/gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false.md
 - orchestration/restart-plan-2026-08-04-third.md（或当前生效的启动计划）
 - plugin/skills/cold-start/SKILL.md
 - orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（故障 6 标注）

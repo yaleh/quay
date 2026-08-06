@@ -5008,3 +5008,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **worktree/branch 全部清**（`git worktree list` 只剩主检出；无 task/* 分支残留）。
 - 在飞 0/3。停止条件无（外层套件 running）。无 .halt、无 block、Monitor 绿。master `60dca6e4`。
 - **套件覆盖滞后**：外层当前 run 测的是 5411d425（fan-in 前），三 merge 代码需外层下一轮套件覆盖（异步设计固有窗口）。
+
+### tick 2026-08-06T00:2xZ（内层，fan-in 后首派：2/5）
+
+- **派发 2/5**（background Agent，concurrent-batch-scheduler 实测 disjoint）：`ghost-suggestion-eliminated`（`--prompt-suggestions false` 冷启动必带参数 + throwaway 会话双向验证，AC1/AC2 需安全实跑）+ `global-count-assertions`（B3-2 族全局计数断言 → 相对基线，branch-model 前置②）。派发前补 self-touch（均缺）。telemetry 已开：`fm-gap-ghost-suggestion-...-iro2c9` / `fm-gap-global-count-...-5anq8r`。
+- **delivery-surface 判定不派**：计划自述「排 delivery-surface umbrella 后」= 依赖被 hold 的 complete-delivery（ROUND-3）⇒ 同被 hold。池 15 中另 3 个已落地 + 5 个 ROUND-3 均不派。
+- 在飞 2/5（ghost-suggestion / global-count）。外层套件 running（00:09 起，测 fan-in 前 master）。无停止条件、无 .halt、无 block、Monitor 绿。
