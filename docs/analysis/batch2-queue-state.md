@@ -6392,3 +6392,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   agent 指引：postinstall `(echo...; exit 0)` → `|| true`（cmd.exe 可解析），WARN 移入 sync-vendor.sh；
   AC4 需裁定 live-GitHub 测试阻塞（skip/adapt/split）。
 - 在飞 1/3。quality-criteria 已落 integration（上一 tick）。
+
+### tick 2026-08-06T13:5xZ（postinstall 修复 fan-in 完成）
+
+- **postinstall 修复合 integration**（d9c1c638→031842d0→05153568）：cmd.exe-safe postinstall
+  （bash 专属 `(echo...; exit 0)` 移除 → `|| true`，WARN 移入 sync-vendor.sh 的 POSTINSTALL_MODE + trap），
+  release-gate live-GitHub 测试 **SKIP** 决策（AC4，release 验产物不验可变 live store，与 ADR-019 一致）。
+  AC1-AC5 证据、scoped **6/6**（含 cli.test.mjs live blocks SKIP + sync-vendor.test.mjs 5/5）。
+- 状态 reconcile：task 文件在 integration 置 ready（agent 的 develop-fork 副本是 todo，外层 promotion 保留）。
+- worktree/branch 清理、bracket close。**在飞 0/3**。
+- **integration 现 = develop 基线 + 6 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/postinstall）
+  + ADR-030/031/032**。**下一步**：外层 merge integration→develop → 打 **v0.4.1** 触发完整三平台 release
+  （windows_postinstall_ok band 证明）。
