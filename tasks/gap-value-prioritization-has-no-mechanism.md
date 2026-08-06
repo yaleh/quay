@@ -46,15 +46,54 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `ready-pool-check` 增加**相关性信号**——每候选计算：战略追溯（任务体引用 FINDING-*/战略问题，
+- [x] AC1: `ready-pool-check` 增加**相关性信号**——每候选计算：战略追溯（任务体引用 FINDING-*/战略问题，
       机械 grep）+ 阻塞性（parent/children）+ 成本（touches 规模）；输出到 JSON
-- [ ] AC2: **优先级查询输出**——「当前 todo 里价值最高的 N 条 + 理由」（非仅池<3 时补谁）；54 条里哪条
+      → `computeRelevance()`（`plugin/scripts/ready-pool-check.ts`）：`strategicTraceable`（
+      `STRATEGIC_REF_RE = /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/` 机械 grep）+ blocking（
+      `readChildren()` 的 children 字段 + 被其他任务 `parent:` 引用计数）+ cost（`touchesScale()`
+      的 touches glob 数）；每条目输出 `{strategic, blocking, cost, value, reason}` 到 JSON
+      （`top_relevance` / `ready_relevance`）。
+- [x] AC2: **优先级查询输出**——「当前 todo 里价值最高的 N 条 + 理由」（非仅池<3 时补谁）；54 条里哪条
       最重要有机械答案（实跑输出贴任务体）
-- [ ] AC3: 价值信号来源**机械**（grep/字段/touches 规模），**不引入人肉打分**
-- [ ] AC4: **不削弱现有机制**——gap>DIR 顺序保留、AC-queue 数量逻辑不变（既有行为回归证明）
-- [ ] AC5: 归属 manager 层——与 `gap-productize-the-manager-layer` 交叉标注（排序职能挂该层）
-- [ ] AC6: **真实使用**——至少一次用相关性排序回答「下一条该派谁」（非 gap>DIR 平局），实跑证据
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → `--top <n>` 查询：`top_relevance` = 价值最高的 N 条 todo + 机械理由。实跑（2026-08-06，
+      `--root . --top 5`，54→72 条 todo 里）：
+      ```
+      value   id  reason
+      6.000   gap-quay-has-never-self-hosted-its-own-cold-start   value 6 · strategic Y · blocking Y(3 children) · cost 0 touches
+      4.500   gap-cold-start-skill-has-no-recovery-branch          value 4.5 · strategic Y · blocking N · cost 2 touches
+      4.500   gap-quay-self-hosting-e2e-proof                      value 4.5 · strategic Y · blocking N · cost 2 touches
+      4.333   gap-no-formalized-bare-metal-session-bootstrap       value 4.333 · strategic Y · blocking N · cost 3 touches
+      4.250   gap-quality-criteria-are-point-in-time-no-trend-criteria  value 4.25 · strategic Y · blocking N · cost 4 touches
+      ```
+      「哪条最重要」有机械答案：#1 = 自举演进目标（冷启动自托管，战略追溯 + 解 3 子任务阻塞）。
+- [x] AC3: 价值信号来源**机械**（grep/字段/touches 规模），**不引入人肉打分**
+      → 信号全来自 `STRATEGIC_REF_RE` grep / frontmatter `parent`+`children` 字段 / `parseTouches`
+      glob 数，无任何人工打分输入；`computeRelevance` 纯函数（export + 单测）。
+- [x] AC4: **不削弱现有机制**——gap>DIR 顺序保留、AC-queue 数量逻辑不变（既有行为回归证明）
+      → 回归测试「value-prioritization does not alter the gap>DIR promotion order」：`analyzeTasks`
+      有/无 `topN` 时 `candidates`/`promotions` 逐项相同；既有 gap>DIR / disjointness 排序测试全绿
+      （27/27 pass）。`pool`/`deficit`/`dispatchable_disjoint`/`excluded` 字段与 tick 消费语义不变。
+- [x] AC5: 归属 manager 层——与 `gap-productize-the-manager-layer` 交叉标注（排序职能挂该层）
+      → `tasks/gap-productize-the-manager-layer.md` 加「AC5 归属」交叉标注：ready-pool-check 的
+      `--top N` 相关性查询即该层 SKILL Prioritization 职能的机制挂接点。
+- [x] AC6: **真实使用**——至少一次用相关性排序回答「下一条该派谁」（非 gap>DIR 平局），实跑证据
+      → 用相关性排序 ready 池（`--top 5 --in-flight gap-value-prioritization-has-no-mechanism`，
+      排除在飞）回答「下一条该派谁」：**`DIR-124` 排第一**（value 2.056，解 6 子任务阻塞）——
+      纯 gap>DIR 机械 tiebreak 会把它排最后（DIR 非 gap），相关性把它翻到第一。实跑输出贴任务体：
+      ```
+      value   id   reason
+      2.056   DIR-124  value 2.056 · strategic N · blocking Y(6 children) · cost 18 touches
+      0.333   gap-token-status-reports-a-dead-holder-as-busy  value 0.333 · strategic N · blocking N · cost 3 touches
+      0.250   gap-send-keys-reliable-welcome-screen-ghost-drive-fails  value 0.25 · strategic N · blocking N · cost 4 touches
+      0.200   gap-the-runtime-has-nowhere-safe-to-land  value 0.2 · strategic N · blocking N · cost 5 touches
+      ...
+      ```
+      同 gap-* 内部按 cost 区分（token-status cost 3 > runtime cost 5）——非平局。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → `plugin/test/ready-pool-check.test.mjs`：`import { test } from "node:test"` +
+      `// @test-group governance`（首行）；7 个新测试（computeRelevance 单测、readChildren/
+      strategicTraceable/touchesScale 来源、top_relevance、ready_relevance + in-flight 排除、
+      AC4 回归、CLI --top 冒烟）全部 node:test。
 
 ## Definition of Done
 

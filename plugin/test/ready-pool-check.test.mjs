@@ -36,6 +36,13 @@ import {
   computePoolFloor,
   maxMutuallyDisjointSubset,
   PARKED_MARKER_RE,
+  computeRelevance,
+  readChildren,
+  strategicTraceable,
+  touchesScale,
+  STRATEGIC_REF_RE,
+  STRATEGIC_WEIGHT,
+  BLOCKING_WEIGHT,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 
@@ -50,7 +57,7 @@ function makeWorkspace(tag) {
   return dir;
 }
 
-function writeTask(root, id, { status = "todo", labels = [], parent = null, body }) {
+function writeTask(root, id, { status = "todo", labels = [], parent = null, children = [], body }) {
   const fm = [
     "---",
     `id: ${id}`,
@@ -59,6 +66,8 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, body
     `labels:`,
     ...labels.map((l) => `  - ${l}`),
     `parent: ${parent}`,
+    children.length > 0 ? "children:" : "children: []",
+    ...children.map((c) => `  - ${c}`),
     "extra:",
     "  schema: v1",
     "---",
@@ -558,3 +567,185 @@ test("CLI smoke: --root produces JSON with pool/dispatchable_disjoint/floor (exi
   assert.equal(typeof parsed.criterion_met, "boolean");
   assert.equal(typeof parsed.scanned, "number");
 });
+
+// ── Value-prioritization relevance signal (gap-value-prioritization-has-no-mechanism) ──────────────
+// AC1: per-candidate relevance signal (strategic traceability grep + parent/children blocking +
+// touches-scale cost) output to JSON. AC3: all sources mechanical (no human scoring). AC2/AC6: the
+// --top query emits the highest-value N todos with reasons, and ready_relevance ranks the ready pool
+// by the same signal (the "who to dispatch next" answer). AC4: the existing promotion order is
+// untouched (regression assertion).
+
+test("computeRelevance: strategic grep, blocking, cost scale, composite value (AC1/AC3)", () => {
+  const childrenByTask = new Map([["gap-parent", ["gap-child-a", "gap-child-b"]]]);
+  const parentRefCount = new Map([["gap-blocked-by", 1]]);
+
+  // strategic (3) + cost 1 benefit (1) = 4 — outranks everything.
+  const strategic = computeRelevance(
+    "gap-strategic",
+    { body: "references SYNTHESIS-four-gaps-2026-08-05.md\n## Touches\n- code/a.ts" },
+    childrenByTask,
+    parentRefCount,
+  );
+  assert.equal(strategic.strategic, true, "SYNTHESIS- reference ⇒ strategic traceable");
+  assert.equal(strategic.blocking, false);
+  assert.equal(strategic.cost, 1);
+  assert.equal(strategic.value, STRATEGIC_WEIGHT + 1);
+  assert.match(strategic.reason, /strategic Y/);
+
+  // blocking via children (2) + cost 1 benefit (1) = 3.
+  const blocker = computeRelevance("gap-parent", { body: "plain\n## Touches\n- code/a.ts" }, childrenByTask, parentRefCount);
+  assert.equal(blocker.strategic, false);
+  assert.equal(blocker.blocking, true);
+  assert.equal(blocker.value, BLOCKING_WEIGHT + 1);
+  assert.match(blocker.reason, /blocking Y\(2 children\)/);
+
+  // blocking via being named as parent by another task.
+  const blockedBy = computeRelevance("gap-blocked-by", { body: "plain\n## Touches\n- code/a.ts" }, childrenByTask, parentRefCount);
+  assert.equal(blockedBy.blocking, true, "referenced as parent by another task ⇒ blocking");
+
+  // low value: no strategic, no blocking, 4 touches → cost benefit 0.25.
+  const costly = computeRelevance(
+    "gap-costly",
+    { body: "plain\n## Touches\n- code/a.ts\n- code/b.ts\n- code/c.ts\n- code/d.ts" },
+    childrenByTask,
+    parentRefCount,
+  );
+  assert.equal(costly.value, 0.25);
+  assert.match(costly.reason, /cost 4 touches/);
+
+  // Composite ordering: strategic > blocking > cheap-plain > costly.
+  assert.ok(strategic.value > blocker.value, "strategic outranks blocking");
+  assert.ok(blocker.value > costly.value, "blocking outranks plain-costly");
+});
+
+test("readChildren / strategicTraceable / touchesScale mechanical sources (AC3)", () => {
+  assert.deepEqual(readChildren("---\nchildren:\n  - a\n  - b\n---\nbody"), ["a", "b"]);
+  assert.deepEqual(readChildren("---\nchildren: [x, y]\n---\nbody"), ["x", "y"]);
+  assert.deepEqual(readChildren("---\nchildren: []\n---\nbody"), []);
+  assert.deepEqual(readChildren("---\nno children here\n---\nbody"), []);
+
+  assert.equal(strategicTraceable("proposal cites FINDING-roadmap-2026"), true);
+  assert.equal(strategicTraceable("proposal cites SPEC-state-crystallization"), true);
+  assert.equal(strategicTraceable("proposal cites REVIEW-cadence mechanism"), true);
+  assert.equal(strategicTraceable("just a normal task"), false);
+  assert.equal(STRATEGIC_REF_RE.test("lowercase spec- reference"), false, "case-sensitive prefix match");
+
+  assert.deepEqual(touchesScale("## Touches\n- code/a.ts\n- code/b.ts"), { hasSection: true, count: 2 });
+  assert.equal(touchesScale("no touches section").count, 0, "missing Touches = unknown scope (high cost)");
+});
+
+test("analyzeTasks --top: top_relevance = highest-value N todos with reasons; strategic ranks front (AC2/control)", (t) => {
+  const root = makeWorkspace("top-rel");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // todos: strategic, blocking (children), plain small — all gap-* so the gap>DIR tiebreak cannot
+  // separate them; only the relevance signal can.
+  writeTask(root, "gap-strategic", gapTask("gap-strategic", {
+    body: fourArtifactBody({ extra: "\nproposal references SYNTHESIS-four-gaps-2026-08-05.md" }),
+  }));
+  writeTask(root, "gap-blocker", { ...gapTask("gap-blocker"), children: ["gap-child"] });
+  writeTask(root, "gap-small", gapTask("gap-small", { body: fourArtifactBody({ touches: ["- code/a.ts"] }) }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 3 });
+  assert.ok(Array.isArray(r.top_relevance));
+  assert.equal(r.top_relevance.length, 3);
+  // control: strategic traceability candidate ranks front (AC6 instance).
+  assert.equal(r.top_relevance[0].id, "gap-strategic", "strategic candidate must rank first");
+  assert.equal(r.top_relevance[0].strategic, true);
+  // every entry carries the mechanical signal fields (AC1 output to JSON).
+  for (const e of r.top_relevance) {
+    assert.equal(typeof e.strategic, "boolean");
+    assert.equal(typeof e.blocking, "boolean");
+    assert.equal(typeof e.cost, "number");
+    assert.equal(typeof e.value, "number");
+    assert.equal(typeof e.reason, "string");
+  }
+  // value-sorted desc.
+  const vals = r.top_relevance.map((e) => e.value);
+  assert.deepEqual(vals, [...vals].sort((a, b) => b - a), "top_relevance sorted by value desc");
+});
+
+test("analyzeTasks --top: ready_relevance ranks the ready pool by the same signal (AC6)", (t) => {
+  const root = makeWorkspace("ready-rel");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Ready pool of two gap-* tasks — the gap>DIR tiebreak cannot pick between them; relevance can.
+  writeTask(root, "gap-plain-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/plain.ts"] }) });
+  writeTask(root, "gap-strategic-ready", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/s.ts"], extra: "\nproposal references SYNTHESIS-four-gaps-2026-08-05.md" }),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.ok(Array.isArray(r.ready_relevance), "ready_relevance always emitted");
+  assert.equal(r.ready_relevance.length, 2);
+  const vals = r.ready_relevance.map((e) => e.value);
+  assert.deepEqual(vals, [...vals].sort((a, b) => b - a), "ready_relevance sorted by value desc");
+  assert.equal(r.ready_relevance[0].id, "gap-strategic-ready", "strategic ready task ranks first in the ready pool");
+});
+
+test("analyzeTasks --top: ready_relevance excludes in-flight ids (AC6 dispatchable set)", (t) => {
+  const root = makeWorkspace("ready-rel-inf");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-strategic-ready", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/s.ts"], extra: "\nproposal references SYNTHESIS-four-gaps-2026-08-05.md" }),
+  });
+  writeTask(root, "gap-plain-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/plain.ts"] }) });
+
+  const r = analyzeTasks({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 3,
+    floorMult: 1,
+    inFlight: [{ id: "gap-strategic-ready", body: "in flight" }],
+  });
+  assert.deepEqual(
+    r.ready_relevance.map((e) => e.id),
+    ["gap-plain-ready"],
+    "in-flight ready task excluded from the dispatchable relevance ranking",
+  );
+});
+
+test("value-prioritization does not alter the gap>DIR promotion order (AC4 regression)", (t) => {
+  const root = makeWorkspace("rel-regress");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "DIR-new-cap", dirTask("DIR-new-cap"));
+  writeTask(root, "gap-defect", gapTask("gap-defect"));
+
+  const plain = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const withTop = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, topN: 5 });
+  assert.deepEqual(
+    plain.candidates.map((c) => c.id),
+    withTop.candidates.map((c) => c.id),
+    "candidate set/order identical with and without --top",
+  );
+  assert.deepEqual(plain.promotions.map((p) => p.id), withTop.promotions.map((p) => p.id));
+  assert.deepEqual(withTop.candidates.map((c) => c.id), ["gap-defect", "DIR-new-cap"], "gap>DIR order preserved");
+});
+
+test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC2/Contract measure)", (t) => {
+  const root = makeWorkspace("cli-top");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-strategic", gapTask("gap-strategic", {
+    body: fourArtifactBody({ extra: "\nproposal references SYNTHESIS-four-gaps-2026-08-05.md" }),
+  }));
+  writeTask(root, "gap-small", gapTask("gap-small", { body: fourArtifactBody({ touches: ["- code/a.ts"] }) }));
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--top", "5"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.ok(Array.isArray(parsed.top_relevance), "band: top_n_relevance is an array");
+  assert.ok(parsed.top_relevance.length >= 1, "band: at least one relevance-sorted entry");
+  assert.equal(parsed.top_relevance[0].strategic, true, "control: strategic candidate ranks front");
+  assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
+});
+
