@@ -60,8 +60,8 @@ quay 开发者需要**持续合并彼此进展**。这比「--slot-status 单点
 
 ## Contract
 
-measure   bidi_sync = `git -C <A> log --oneline <integration>..origin/<B分支> | wc -l` + 反向（B 能见 A 进展、A 能见 B 进展）
-band      bidi_sync 双向都非零（A 能拉 B、B 能拉 A，对称）
+measure   bidi_sync = `git -C <A> log --oneline <integration>..origin/<B分支> | wc -l` stdout 的 commit 数（双向各自计数：A 见 B 进展 + B 见 A 进展）
+band      bidi_sync = 双向都非零（A 能拉 B、B 能拉 A，对称）
 invoke    `grep -rn '双向\|bidirectional\|integration.*merge\|权威' plugin/scripts/ orchestration/manager-phase-goal.md`
 control   A 拉 B 最新 + B 拉 A 最新都可行（AC1）；权威定义明确（AC2）
 resume    双向合并与权威定义分步提交，任一步完成即写盘
