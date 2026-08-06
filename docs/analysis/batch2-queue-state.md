@@ -6709,3 +6709,34 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   re-open 工作，待 needs-human 处置后收尾**。
 - 两件均在 remove-shared-events 完成后处理：① 按机制派 cross-machine-sync；② 按外层 needs-human
   处置推进 resource-aware re-open 收尾。
+
+### tick 2026-08-07T00:5xZ（remove-shared-events fan-in 完成 + cross-machine-sync hold 解除）
+
+- **remove-shared-events 落 integration**（1f340d57→5cd05cf3，33 files +455/−3138）：
+  **B 全删执行**——heavy-op-token.sh + 4 测试文件删除、全调用点清理、per-observer 事件流、
+  无锁、目标无感、观察者互不知情。AC1-AC5 证据、monitor-mount 11/11、session-liveness 49（agent worktree）。
+- **拓扑修正**：integration 原落后 develop 81（stale ancestor）。先 merge develop into integration
+  带其 current，再合任务分支（两线模型 fan-in）。rebase 时发现 integration rebase 是错的（无限 queue-state
+  replay）→ abort + rebase onto develop（干净 4 提交）。遗留 5 处 heavy-op-token 引用全是**退役标注**（prose 注释），非 dangling 调用。
+- **cross-machine-sync hold 解除**（fast-mode-loop-tick.md 重叠已随 fan-in 消失）。
+- 在飞 0/3。下一步：按裁定#1 派发 cross-machine-sync（serialize 已解）。
+
+### tick 2026-08-07T01:0xZ（cross-machine-sync 派发 — serialize hold 解除）
+
+- **按裁定#1派发 gap-cross-machine-sync**（serialize hold 已解除——remove-shared-events fan-in 后
+  fast-mode-loop-tick.md 重叠随其落地，新任务在其上构建非在飞冲突）。
+  resolve 4/4、pool-candidate clean、fork-baseline=develop、在飞 0/3。
+- worktree /home/yale/work/quay-worktrees/cross-machine-sync + bracket 已开。
+  agent 指引：slot-refill 双触发模式（事件驱动 + tick 心跳兜底）、禁系统 crontab、AC1-AC6 全机械可测。
+- 在飞 1/3。
+
+### tick 2026-08-07T01:4xZ（派发 concurrency-derivation-reverted）
+
+- 池新增 2 个 promotion 候选（外层新立案）：concurrency-derivation-reverted（disjoint 6）+
+  no-post-merge-cross-machine-verification-latency（disjoint 4）。
+- **派发 2/3 — concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived**：
+  resolve 5/5、pool-candidate clean、fork-baseline=develop、**DISJOINT vs 在飞 cross-machine-sync**。
+  worktree /home/yale/work/quay-worktrees/concurrency-revert + bracket 已开。
+  agent 指引：并发派生被 revert（回固定值）但 docs/AC/tests 仍报派生形——single-source drift，按任务体
+  Chosen mechanism 定方向（restore code vs fix docs）。
+- 在飞 2/3（cross-machine-sync + concurrency-revert）。no-post-merge-latency 待后续。

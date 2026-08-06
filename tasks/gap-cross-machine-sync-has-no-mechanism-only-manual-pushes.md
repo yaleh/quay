@@ -1,14 +1,15 @@
 ---
 id: gap-cross-machine-sync-has-no-mechanism-only-manual-pushes
-title: "cross-machine sync has NO mechanism — both A and B accumulated unpushed work
-  (A 26, B 98) and B fell 405 behind over ~6h, discovered only because the human
-  looked; periodic-push-backup.sh ships but has ZERO live callers (grep in
+title: cross-machine sync has NO mechanism — both A and B accumulated unpushed
+  work (A 26, B 98) and B fell 405 behind over ~6h, discovered only because the
+  human looked; periodic-push-backup.sh ships but has ZERO live callers (grep in
   plugin/loop/*.md + all SKILL.md = 0), and AC17's sync-lag criterion has ZERO
-  mechanical measurement; the earlier task that should have covered this was marked
-  done on ACs that only checked 'the remote points at GitHub' and 'it was invoked
-  once' — AC text narrower than the problem, ticked off on the implemented half
-  (2nd instance of the AC6 failure shape, and the manager wrote those ACs)"
-status: todo
+  mechanical measurement; the earlier task that should have covered this was
+  marked done on ACs that only checked 'the remote points at GitHub' and 'it was
+  invoked once' — AC text narrower than the problem, ticked off on the
+  implemented half (2nd instance of the AC6 failure shape, and the manager wrote
+  those ACs)
+status: ready
 labels:
   - gap
   - milestone-candidate
