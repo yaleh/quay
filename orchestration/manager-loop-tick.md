@@ -19,8 +19,9 @@
    「把 archguard 的开发工作留给它自己的会话」
 4. **不直接改任何项目的代码**
 
-**唯一例外**：跨项目的共享机件（`heavy-op-token.sh`、三项目 `.halt` 约定、
-tmux 布局约定）——那些没有别的主人。
+**唯一例外**：跨项目的共享机件（三项目 `.halt` 约定、tmux 布局约定）——那些没有别的主人。
+（`heavy-op-token.sh` 已于 2026-08-06 退休：人裁定「彻底删掉」，见
+gap-session-liveness-remove-shared-events-and-lock。）
 
 ## 0.5 每个 tick 先看一眼自己的目标
 
@@ -98,16 +99,11 @@ echo "<理由> | 解除条件: <条件> | 管理者 <ISO>" > <repo>/.halt   # �
 rm <repo>/.halt                                                  # 恢复
 ```
 
-跨项目重活（全量套件等）**已由 `plugin/scripts/heavy-op-token.sh` 串行化**——
-那是事件驱动的，管理者**不需要轮询资源冲突**。这正是管理者 tick 可以比外层 tick 稀疏的原因。
+跨项目重活（全量套件等）的串行化 **已退休**——`heavy-op-token.sh`（「一次只跑一个重测试」令牌）
+于 2026-08-06 被整删（人裁定，gap-session-liveness-remove-shared-events-and-lock）。资源压力改由
+`plugin/scripts/resource-gate.sh` 按单次运行负载门控（`scripts/test.sh` 全量路径仍 consult 它）。
 
-**令牌状态在哪看**（2026-08-03 补：管理者查压力尖峰时在 `.quay/` 和 `/tmp` 里翻了半天，
-因为这条从没写下来）：
-
-```bash
-T="${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/heavy-op"
-cat "$T/token"        # holder / pid / acquired_ms / host；文件不存在 = 无人持有
-```
+（旧的「令牌状态在哪看」一段随令牌退休而删除——`$QUAY_GLOBAL_DIR/heavy-op/token` 不再存在。）
 
 **判「是不是绕过令牌」不能只数 `node --test` 进程**——一个并发套件本来就有多个 worker，
 测试内部还可能再跑嵌套套件。**要看进程血统**：这些 `node --test` 的祖先是不是同一个
@@ -240,6 +236,11 @@ case "$a0" in */session-liveness.sh) ... ;; esac
 **实测代价**:OOM 约 02:15Z,人 05:59Z 问「你的 monitor 在跑吗」,
 **中间 3 小时 44 分我没有任何会话面观测,而且不是我发现的。**
 期间外层其实落了 41 个提交——**我知道那些是靠 `git log`,不是靠监视器。**
+
+> **RETIRED (2026-08-06)**：下面这段是 2026-08-04 的 OOM 复盘，其机制（AC20 单飞挂载 + 共享
+> events.jsonl + HEARTBEAT 订阅判据）已被人裁定整体移除（gap-session-liveness-remove-shared-events-
+> and-lock：观测是树、只读不排他、共享文件严格劣于独立流）。保留为历史记录——「谁在看我」现在由
+> **挂载方自己的 Monitor 事件流**直接回答（谁挂的谁拥有），不再有共享文件可订阅。
 
 **判据修正(2026-08-04 二次修正——我第一版仍然绕过了设计好的接口)**:
 

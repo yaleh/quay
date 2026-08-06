@@ -75,9 +75,9 @@ start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer, per SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
-| 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `HEARTBEAT`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (an observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer, per SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` | the `--json` output (two criteria) |
+| 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `SESSION-IDLE`, etc. — each observer owns its own stdout stream, 2026-08-06). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
      bare-name reference to transcript-delivery-check.ts (no plugin/scripts/ prefix) is INTENTIONAL
@@ -168,14 +168,15 @@ the target project (it self-locates, so it works from the laid-down copy).
 bash <root>/plugin/scripts/monitor-mount-check.sh --json
 ```
 
-Require `mounted=true` AND `targetOk=true` AND `delivered=true` — the three criteria are three
-different ways to be wrong (not mounted / mounted on the wrong project / no events actually reaching
-the shared session-liveness events file). AC9 (gap-liveness-mounting-is-a-single-flight-role-with-no-
-owner): the ownership criterion is ABOLISHED — the criterion is "事件是否真的送达", not "是不是本会话
-挂的"; a mount from another session that is delivering normally must still PASS. Then **wait for at
+Require `mounted=true` AND `targetOk=true` — the two criteria are two
+different ways to be wrong (not mounted / mounted on the wrong project). 2026-08-06
+(gap-session-liveness-remove-shared-events-and-lock): the old `delivered` criterion (shared events
+file freshness) is GONE — the shared file was removed; observation is a tree, each observer owns its
+own stdout stream, and delivery is verified by THIS session's own Monitor stream (criterion 2 below),
+not by a cross-observer file. Then **wait for at
 least one delivered event line**
-(`session-liveness.sh --once` in the skill's own run is faster; a resident mount emits a `HEARTBEAT`
-each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
+(`session-liveness.sh --once` in the skill's own run is faster; a resident mount emits its events on
+the Monitor stream each round). If no event arrives within ~90s, the monitor is not delivering — **STOP and report**
 `MONITORS-DELIVERING: false`; do not proceed to pretend the loop is up.
 
 ### 5. Re-create the 20-minute cron — THE single loop driver (session-scoped, dies with the session)
