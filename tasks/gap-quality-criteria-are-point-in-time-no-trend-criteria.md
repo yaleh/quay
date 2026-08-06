@@ -65,6 +65,12 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
      归属 `gap-delivery-surface-grows-but-target-freezes-no-upgrade`（趋势：漂移/缺失数随窗口）；
    - **三层完整性**：manager 层是否存在 + 是否有周期锚点（三层同病：inner/manager 曾 Cron=0）→
      归属 `gap-productize-the-manager-layer`（趋势：层完整性检查结果随窗口）。
+   **交叉标注（SPEC-complete-delivery-surface，2026-08-06）**：本条是六类交付面里**观测与校验**
+   （类别 6）的 L2 持续健康判据承载任务——`gap-complete-delivery-surface-spec-and-l1-verification`
+   （AC3）把 SPEC §3 的**语义一致 / 升级正确性 / 三层完整性**三类补进本条；本条 §5 即该三类的
+   归属解析（语义一致 → `gap-reanchor-must-converge-inner-self-reported-vocabulary`；升级正确性 →
+   `gap-delivery-surface-grows-but-target-freezes-no-upgrade`；三层完整性 → `gap-productize-the-manager-layer`）。
+   L1（`verify-delivery-surface.ts`）查交付完整性，L2（本条）查持续健康——两层次分工。
 6. **归入 manager 层复盘**：趋势打标进每日复盘（REVIEW-cadence）的检查项——复盘不只是「这次绿了吗」，
    还看「比上次更贵了吗 / 离目标更近了吗」。
 7. **断言覆盖面判据（管理者 2026-08-05，两条实例）**——**断言覆盖面时必须说明证据覆盖了多少，不是抽样
