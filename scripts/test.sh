@@ -400,6 +400,13 @@ resource_gate_check() {
 # (40/480 ≈ 8% of a full suite). The token script's --timeout N is a bounded poll (re-checks reclaim
 # each second, AC1), so a dead holder is reclaimed mid-wait and the suite proceeds; a LIVE holder is
 # never stolen (AC3) — the wait only converts the DEAD-holder grace window, never a running op.
+#
+# Lease note (gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs): --acquire now also
+# writes a lease_expires_ms (HEAVY_OP_LEASE_S, default 3600s — far above a full-suite run, so a
+# non-renewing one-shot holder never hits it). test.sh is a one-shot holder, NOT a retry loop: it does
+# not call --renew (the retry-loop caller contract lives in the token script's header); the EXIT trap
+# releases the token on every path, which is the correct one-shot release. The lease only matters as a
+# backstop for a live-but-abandoned holder, and for retry-loop holders that --renew between attempts.
 HEAVY_OP_ACQUIRE_TIMEOUT_S="${HEAVY_OP_ACQUIRE_TIMEOUT_S:-40}"
 heavy_op_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then

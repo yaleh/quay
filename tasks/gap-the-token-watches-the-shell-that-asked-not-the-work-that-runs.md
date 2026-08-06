@@ -101,19 +101,19 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **夹具复现可达状态**——取锁 shell 被 `kill` 而「活」仍在跑 ⇒
+- [x] AC1: **夹具复现可达状态**——取锁 shell 被 `kill` 而「活」仍在跑 ⇒
       **当前实现下 `--acquire` 成功回收**（这是修复前的必备证据，实跑输出贴任务体）
-- [ ] AC2: **修复后同一夹具**——续租仍在进行 ⇒ `--acquire` **失败**、令牌原样保留（实跑输出贴任务体）
-- [ ] AC3: **反向负控制（不得永久锁死）**——重试循环本身被杀、无人续租 ⇒
+- [x] AC2: **修复后同一夹具**——续租仍在进行 ⇒ `--acquire` **失败**、令牌原样保留（实跑输出贴任务体）
+- [x] AC3: **反向负控制（不得永久锁死）**——重试循环本身被杀、无人续租 ⇒
       **租约到期后必须可回收**，记录到期耗时。**这条不过，AC2 不算数**——
       把「误放行」换成「永久锁死」是更坏的交易
-- [ ] AC4: **pid 加速路径保留**——pid 已死且过短宽限期 ⇒ 仍可提前回收（实跑贴出）
-- [ ] AC5: **调用方改动是一行**——`--renew` 的接入点与用法写进脚本头，
+- [x] AC4: **pid 加速路径保留**——pid 已死且过短宽限期 ⇒ 仍可提前回收（实跑贴出）
+- [x] AC5: **调用方改动是一行**——`--renew` 的接入点与用法写进脚本头，
       **并说明为什么责任在重试循环而不在令牌**
-- [ ] AC6: **测量纪律（管理者提出，外层当场又踩一次）**——本任务任何「有几个重活在跑」的判断
+- [x] AC6: **测量纪律（管理者提出，外层当场又踩一次）**——本任务任何「有几个重活在跑」的判断
       **不得用 cmdline 文本计数**（模式串会匹配到发起查询的那条命令自身），
       必须用**进程血统**或**令牌自己记录的 pid**；**自匹配数必须为 0** 并在输出中证明
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Definition of Done
 
@@ -124,12 +124,68 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
       并记录否定推理——**pid / pgid / session 都无法代表「这份活」，
       所以存活信号必须来自知道活是否继续的那个实体**
 
+## Invoke evidence (inner, 2026-08-06)
+
+**AC1 —— 修复前复现（取锁 shell 死、活仍在跑 ⇒ `--acquire` 成功回收）：**
+
+```
+=== token content after acquire (holder pid should now be dead) ===
+holder=archguard
+pid=3242218
+acquired_ms=1785995402649
+host=vhs
+=== recorded holder pid: 3242218 ===
+recorded pid DEAD (the attempt shell died)
+=== the WORK (retry loop) is still running: pid 3242217 ===
+work is STILL RUNNING (kill -0 ok)
+
+=== a competing project tries to acquire WHILE the work is still running (pre-fix) ===
+exit code: 0
+heavy-op-token: RECLAIMED stale token (mtime 600s old, pid 3242218 not alive) — reclaim #1
+waited_ms=0 holder=quay acquired=yes
+=== who holds the token now? ===
+holder=quay
+pid=3242271
+acquired_ms=1785995402848
+host=vhs
+>>> AC1 CONFIRMED: --acquire SUCCEEDED (token reclaimed) while the work is still running
+```
+
+**修复后同一夹具（AC2）—— 活在续租 ⇒ `--acquire` 失败、令牌原样保留：**
+
+```
+=== competing acquire while renew in progress (AC2) ===
+exit: 1
+heavy-op-token: HELD by archguard (pid 3258319, held 696ms) — quay did not acquire (no silent wait)
+heavy-op-token: did not acquire within 0s wait window — token held by archguard (pid 3258319, ALIVE, held 696ms) — quay did not acquire
+waited_ms=0 acquired=no
+=== token preserved? ===
+holder=archguard  pid=3258319  acquired_ms=1785995498007  lease_expires_ms=1785999098760  host=vhs
+>>> AC2 OK: acquire FAILED, token preserved
+```
+
+**AC3 —— 反向负控制（无人续租 ⇒ 租约到期可回收，记录到期耗时）：** scoped 测试实跑 `AC3 evidence: lease HEAVY_OP_LEASE_S=2 → reclaimed 2415ms after acquire (expiry duration)`；`--acquire` 在租约到期后 exit 0、`RECLAIMED stale token (lease expired ...)`、`acquired=yes`。
+
+**AC4 —— pid 加速路径保留（pid 死 + mtime 过宽限期 ⇒ 租约仍有效也提前回收）：** scoped 测试实跑 `RECLAIMED stale token (pid ... not alive + mtime 600s old) — reclaim #1`，且回收时 `lease_remaining_ms=[1-9]`（租约未到期）。
+
+**AC6 —— 测量纪律（自匹配数 = 0，输出中证明）：**
+```
+AC6 evidence: holder recorded-pid=3288895; measuring pids=[3287436,3288909]; token-pid self-match=0; token-pid heavy-op count=1
+AC6 evidence: naive cmdline-grep count=2, cmdline-grep self-match=1 (the banned method) vs token-pid self-match=0
+```
+持有者用**令牌自己记录的 pid** 识别（`--status` 报告 holder 真实 pid），自匹配 0；naive `pgrep -f heavy-op` 会把发起查询的命令自身算进去（self-match=1）——即被 AC6 禁止的 cmdline 文本计数。
+
+**Scoped 验证（`bash scripts/test.sh --for-task gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs --allow-thin`，in worktree）：**
+```
+ℹ tests 19   ℹ pass 19   ℹ fail 0   ℹ cancelled 0   ℹ skipped 0
+```
+含新增 `heavy-op-token-lease.test.mjs`（8 tests：AC2/AC3/AC4/renew/AC5/AC6/AC7/Contract，`@test-group governance`）与既有 `heavy-op-token.test.mjs`（11 tests，`engine`，全部通过，含 AC4 crash-recovery、AC3 live-holder-protection）。同族治理文件 `heavy-op-token-wait.test.mjs` + `heavy-op-token-events.test.mjs`（12 tests）单独复跑全绿。scoped 静态检查（test-framework-policy / test-isolation / task-contract-check / adr016-screen-use）全 PASS。
+
 ## Touches
 - tasks/gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs.md（自身文件：勾 AC + 贴 invoke 证据授权）
-
-
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
+- plugin/test/heavy-op-token-lease.test.mjs（新增：lease/renew 契约测试，@test-group governance）
 - scripts/test.sh
 
 ## Dispatch review
