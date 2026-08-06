@@ -6269,3 +6269,86 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   integration 领先 develop 3 提交（全 AC16），develop 领先 integration 190（catch-up 后全部 A+B 工作）。
   develop 是权威——integration 追平 develop 且不丢 AC16。已驱动 inner 执行。
 - 池 9/20（disjoint 4/5）、inner 在飞 no-criterion-cost。
+
+### tick 2026-08-06T10:4xZ（integration catch-up + 双 fan-in 完成）
+
+- **integration catch-up（外层裁定执行）**：merge develop into integration（58927990）——integration
+  追上全 A+B 基线（190 提交）+ 保留 AC16 3 提交（v0.4.0、files+plugin、contract fix）。
+  唯一冲突 = AC16 自身 task 文件（add/add，integration 版本为完成态 superset → 取 HEAD）。
+  验证：develop ⊆ integration（ancestor）、AC16 v0.4.0 + "plugin" 字段在、develop..integration=4。
+- **双 fan-in 到 integration（两线模型）**：
+  - spawn-count（98e23f5b → 208c1329，16 files）：A 层 .ts→QUAY_CLI 转换，scoped 8/8。
+  - supervisor（39af6de5 → 2f343eb8，12 files）：base-layer deliver/health，scoped 23/23。
+- worktree/branch 清理；主检出回 develop。manager-inbox stash 还原（manager WIP，未动）。
+- **在飞 1/3**（no-criterion-cost，develop 基线）。integration 现 = develop + AC16 + spawn-count + supervisor，
+  待外层 FF integration→develop（verification-round）。
+
+### tick 2026-08-06T11:0xZ（内层 cron + slot-refill 心跳，轻触）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 1/3（no-criterion-cost，brackets aligned）。
+- 池 9/20、disjoint 4/5 不达标。ready 9 中：6 陈旧 landed/directive/done（DIR-043/DIR-124/red-pattern/
+  ghost-drive/split-batch/tests-leak/supervisor），1 在飞（no-criterion-cost），唯一真实候选
+  quality-criteria 与在飞 OVERLAP（plugin/test/*）⇒ 序列化。
+- **slot-refill 机械确认 no_refill_reason='no dispatchable candidate passes step-4 checks'** —
+  与手动分析一致，本 tick 无新派发。
+- 待外层：FF integration（现 = develop + AC16 + spawn-count + supervisor）→ develop（verification-round）。
+- develop 已领先 integration（外层 merge archguard 工作 bccbc6b9）。
+
+### tick 2026-08-06T11:2xZ（no-criterion-cost fan-in 完成）
+
+- **no-criterion-cost 合 integration**（afb05ca7→cbc9ca43，11 files +730）：checker-cost.sh 纯追加成本账本
+  + gate recordGateCost（env-guarded）+ verification-round.jsonl 套件时长序列。AC1-AC7 全证据、
+  capability-catalog 0 unclassified、scoped **31/31**。
+- **附带修复**：full-suite-runner.ts `extractFailureFile` 缺失闭括号（develop 基线 import 即 SyntaxError）
+  → 修复后 full-suite-runner.test.mjs 23/23。
+- worktree/branch 清理、bracket close（done）。**在飞 0/3**。
+- **integration 现 = develop 基线 + AC16 + spawn-count + supervisor + no-criterion-cost**（cbc9ca43）。
+  **待外层 FF integration→develop**（verification-round-N 批量合 FORK_BASELINE）。
+- 池内唯一剩余真实候选 quality-criteria 已解除序列化（no-criterion-cost 完成）→ 下一 tick 可派。
+
+### tick 2026-08-06T09:5xZ（外层，integration→develop 收口）
+
+- **integration 已含全部任务工作**（cbc9ca43 = A+B 基线 + AC16 + spawn-count + supervisor +
+  no-criterion-cost；58927990 已 merge develop）。develop 领先 integration 6（外层/管理者记录类提交）。
+- **收口裁定：merge integration into develop**（非 FF）——integration 10 提交并入 develop，保留
+  develop 6 记录，develop 成为含全部的权威分支。已驱动 inner 执行。
+- 内层请求：FF integration→develop + 派发 quality-criteria（no-criterion-cost 完成后唯一真实候选）。
+
+### tick 2026-08-06T11:4xZ（integration→develop 收口完成）
+
+- **外层裁定执行**：merge integration into develop（非 FF）——integration 10 任务提交（AC16 + spawn-count +
+  supervisor + no-criterion-cost）并入 develop，develop 6 记录提交（ADR-025/032、delivery-surface、tick 记录）保留。
+- **验证**：integration ⊆ develop（ancestor，integration..develop=0）；AC16 v0.4.0+"plugin" 在、
+  QUAY_CLI helper、supervisor-deliver/health.sh、checker-cost.sh 全部 PRESENT。develop = 5caf14dc 权威分支。
+- **两线模型当前态**：develop = 全部 A+B 基线 + AC16 + 3 rebase 任务 + no-criterion-cost + 记录提交。
+  integration 已空（并入 develop）。master 冻结 ea2208cf（人触发才同步）。
+- **在飞 0/3**。池唯一真实候选 quality-criteria（解除序列化）。
+
+### tick 2026-08-06T09:5xZ（外层，AC16 落实 + AC17 push）
+
+- **AC16 已实现生产侧**（files+plugin v0.4.0 在 develop，4d15e7cf 验证 all 4 task sets + AC16 present）——
+  管理者的「未派发」基于旧状态（integration 已实现但当时未合 develop）。任务 status 待验收侧（AC2/3 在 B）。
+- **剩余动作**：从 develop 打 tag v0.4.0 + 触发 release（含 dist-plugin 重建 AC6）——这才是 archguard 能装的。
+- **AC17 push**：本地 develop 领先 origin/develop 105（含分支切换，无阻塞）——已驱动 inner 立即 push
+  develop 到 origin（B 下次拉取拿最新分支切换）。先 push 再打 tag。
+
+### tick 2026-08-06T12:0xZ（人催 + 排期：AC17 push + AC16 tag/release）
+
+- **① AC17 push 完成**：origin/develop d0edd8ab → **27b9d7e5**（105 提交全推，含分支切换；origin 0 领先无阻塞）。B 下次拉取即可拿最新分支切换。
+- **② AC16 release 触发**：tag v0.4.0 从 stale 7adb6307（210 落后）**移到 develop 27b9d7e5**（外层裁定"从 develop 打 tag"），push 触发两个 workflow（均 queued）：
+  - **release.yml**（Release v0.4.0）→ npm pack 产物 + GitHub Release（archguard 可装）
+  - **publish-plugin-dist.yml**（Publish plugin dist v0.4.0）→ dist-plugin 重建（AC6）
+- 验证：origin/tag v0.4.0 = origin/develop = 27b9d7e5。v0.3.13 为上一 release（2026-07-24）。
+
+### tick 2026-08-06T12:2xZ（AC16 release 结果：部分成功 + 缺陷立案）
+
+- **v0.4.0 release 已创建**（09:48:28Z，Latest）：linux-x64 + macos-arm64 SEA 二进制 + npm pack 产物。
+- **但 workflow conclusion=failure**，两个原因：
+  ① **windows sea-release 在 npm install 失败**——postinstall 的 bash 专属 `(echo ...; exit 0)` 回退
+     cmd.exe 解析不了（`re-run: was unexpected at this time`）⇒ **缺 windows-x64 SEA 二进制**。
+  ② release job "Run tests" 的 live-GitHub 测试 repo 漂移失败（E3 adr-001 / M52 delivery-standalone-smoke /
+     AC5 real-store scan）——CLAUDE.md 记载的已知脆弱类，现在阻塞 release。
+- **已立案**：gap-release-postinstall-fallback-breaks-windows-sea-build（postinstall 跨平台化 + live 测试阻塞评估）。
+- **archguard 可用性**：linux 可装（linux-x64 在）；但 release 不完整 + workflow 红。修复路径：修 postinstall →
+  打 v0.4.1 重发完整 release。
+- dist-plugin（AC6）已 publish success。

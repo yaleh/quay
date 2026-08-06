@@ -150,33 +150,63 @@ gate 两路径）。⇒ 本条趋势判据（「比上次更贵了吗」）以�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 全量套件每次跑记录指标到运行时文件（`{at, durationMs, tests, fail, cancelled, per_test_ms}`，
+- [x] AC1: 全量套件每次跑记录指标到运行时文件（`{at, durationMs, tests, fail, cancelled, per_test_ms}`，
       复用 suite-state/verification-round，扩 schema 不新建）
-- [ ] AC2: **趋势打标**——最近窗口 per-test 成本斜率；恶化超阈值打标报出（「比上次更贵了吗」有机械
+      **证据**：`plugin/scripts/full-suite-runner.ts` 的 verification-round 追加记录扩为
+      `{round, startedAt(=at), durationMs, laneCount, pass, fail, cancelled, tests, per_test_ms, redAt,
+      load, state, reason, runner}`——`tests` = pass+fail+cancelled，`per_test_ms` = durationMs/tests
+      （无测试跑时 0）。复用既有 verification-round.jsonl（sibling AC6 已建），**扩 schema 不新建**。
+      `plugin/test/trend-check.test.mjs` AC1 断言实跑输出见下方 Execution record。
+- [x] AC2: **趋势打标**——最近窗口 per-test 成本斜率；恶化超阈值打标报出（「比上次更贵了吗」有机械
       答案）；阈值可配
-- [ ] AC3: **回归控制**——0.251→0.464→0.321（净 +28%）序列必须能被趋势判据捕获（实跑输出贴任务体）
-- [ ] AC3b: **早期 RED 检测延迟趋势**——记录「首个真实失败 → state 转 red」的延迟（从 suite-state/runner
+      **证据**：`plugin/scripts/trend-check.ts` 三轴（suite_per_test_cost / early_red_latency /
+      per_checker_cost）各取最近 `--window` 点算净变化 + 回归斜率，`netChange > threshold OR
+      normSlope > threshold` 即打标；`--threshold` 默认 +10%/窗口、可配。`plugin/test/trend-check.test.mjs`
+      AC2：同一序列 threshold 0.10 打标、0.50 不打标（可配）；平坦序列不打标（负控制）。
+- [x] AC3: **回归控制**——0.251→0.464→0.321（净 +28%）序列必须能被趋势判据捕获（实跑输出贴任务体）
+      **证据**：实跑输出贴下方 Execution record——fixture 三绿轮 per_test_ms 0.251/0.464/0.321，每点
+      都低于点状带（0.5），但 `trend-check --window 5` 捕获 suite_per_test_cost 恶化（net +27.9%）、
+      CLI exit 1；平坦序列 exit 0。
+- [x] AC3b: **早期 RED 检测延迟趋势**——记录「首个真实失败 → state 转 red」的延迟（从 suite-state/runner
       日志读）；检测延迟随窗口恶化打标（爆炸半径的缓解度监控；当前实测 ~7.5 分钟报首 failure，
       不等 15 分钟套件完）
-- [ ] AC4: 趋势判据**归入每日复盘**——REVIEW-cadence 检查项加「比上次更贵了吗 / 离目标更近了吗」
+      **证据**：`full-suite-runner.ts` 在首个真实失败行翻转 red 时记 `redAt`（ISO）入 verification-round；
+      `trend-check.ts` `redLatencySeries` 算 `redAt − startedAt` 序列并随窗口打标。AC3b 测试：三条红轮
+      延迟 1000/5000/9000ms ⇒ early_red_latency 轴打标。
+- [x] AC4: 趋势判据**归入每日复盘**——REVIEW-cadence 检查项加「比上次更贵了吗 / 离目标更近了吗」
       （点状之外的趋势检查）
-- [ ] AC5: **不引入新调度**——趋势是读已有记录（suite-state/verification-round 历史）的被动判据，
+      **证据**：`orchestration/REVIEW-cadence.md` 新增 3d 检查项（趋势判据，`trend-check.ts` 命令 +
+      三轴 + 输出进汇总），复盘常项。AC4 测试断言文件包含 trend-check.ts 与两问句。
+- [x] AC5: **不引入新调度**——趋势是读已有记录（suite-state/verification-round 历史）的被动判据，
       非新运行触发
-- [ ] AC6: 归属 manager 层——与 `gap-productize-the-manager-layer` 交叉标注
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`trend-check.ts` 只 `readFileSync` 两个 jsonl，无 spawn/无写盘；`--json` meta 报
+      `trendIsPassive: 1`（invariant）。AC5 测试：对空 `.quay/` 跑 CLI ⇒ 不新增任何文件、exit 0。
+- [x] AC6: 归属 manager 层——与 `gap-productize-the-manager-layer` 交叉标注
+      **证据**：`tasks/gap-productize-the-manager-layer.md` 加「趋势职能归属」交叉标注（trend-check.ts
+      是 manager 层 Trend 职能的机制挂接点）；本条 §5 三层完整性的归属引用同任务。AC6 测试断言
+      manager 任务引用本条 id + 趋势职能。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/trend-check.test.mjs` 首行 `// @test-group governance` + `import { test }
+      from "node:test"`；13 个测试全过（见 Execution record）。
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC3 实跑输出贴任务体
-- [ ] 「比上次更贵了吗」有机械答案（非人肉问出来）；趋势判据是复盘常项
+- [x] AC1–AC7 全部勾上；AC3 实跑输出贴任务体（见下方 Execution record）
+- [x] 「比上次更贵了吗」有机械答案（非人肉问出来）；趋势判据是复盘常项
+      （`trend-check.ts` exit 1 打标 + REVIEW-cadence 3d 复盘常项）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+      ——由外层/fan-in 合入时全量确认（本 worktree 按规则不跑全量；scoped 44 pass / 0 fail 已绿）
 
 ## Touches
 
-- plugin/scripts/（趋势判据：读 suite-state/verification-round 历史 + 打标；或扩 runner 记录 schema）
-- plugin/test/（AC3 回归控制 + AC2 断言）
-- orchestration/REVIEW-cadence.md（AC4：复盘加趋势检查项）
-- tasks/gap-productize-the-manager-layer.md（AC6 交叉标注）
+- plugin/scripts/trend-check.ts（新增——趋势判据 checker：读 verification-round/checker-cost 历史 + 打标；
+  capability-catalog.sh 已声明 AC1c）
+- plugin/scripts/full-suite-runner.ts（AC1/AC3b 扩 verification-round schema：tests/per_test_ms/redAt/reason）
+- plugin/scripts/capability-catalog.sh（AC1c：声明 trend-check.ts 的能力问题）
+- plugin/test/trend-check.test.mjs（AC3 回归控制 + AC2 断言 + AC3b 延迟趋势 + per-checker 成本 + AC5 被动
+  + AC1 runner 扩 schema + AC4/AC6/AC7 断言）
+- orchestration/REVIEW-cadence.md（AC4：复盘加趋势检查项 3d）
+- tasks/gap-productize-the-manager-layer.md（AC6 交叉标注：趋势职能归属）
 
 ## Contract
 
@@ -197,3 +227,47 @@ changed: 外层读 SYNTHESIS 缺口 3 裁定立案。四处收紧：
 (3) **回归控制**——0.251→0.464→0.321 必须能被机械捕获（人肉发现的实例要能被机制复现）；
 (4) **入复盘常项**——每日复盘加趋势检查，不是一次性。
 status: todo——排 manager 层 umbrella + 价值排序之后；战略层职能机制。
+
+## Execution record（2026-08-06，agent 自勾 AC + 贴实测证据）
+
+**worktree**：`/home/yale/work/quay-worktrees/quality-criteria`（branch
+`task/gap-quality-criteria-are-point-in-time-no-trend-criteria`，fork from **develop** 440162de）。
+
+**AC3 实跑（回归控制 0.251→0.464→0.321）**——fixture 三绿轮 per_test_ms 0.251/0.464/0.321（每点都低于
+0.5 的点状带——点状系统看三次全绿），`trend-check.ts --window 5` 捕获窗口整体恶化：
+```
+$ node --experimental-strip-types plugin/scripts/trend-check.ts --root <fixture> --window 5 --json
+{ "flags": [ {
+    "axis": "suite_per_test_cost", "name": "full-suite",
+    "values": [0.251, 0.464, 0.321],
+    "first": 0.251, "last": 0.321,
+    "netChange": 0.2789, "normSlope": 0.1394, "threshold": 0.1,
+    "message": "suite_per_test_cost: full-suite trending up over 3 points — 0.251 → 0.321 (net 27.9%, slope 13.9%/point, threshold 10.0%)"
+} ], "meta": { "trendIsPassive": 1, ... } }
+$ echo $?   # exit=1  ⇒ 窗口内恶化必打标（band trend_flags = 0 被违反）
+```
+负控制（平坦 0.3/0.3/0.3）⇒ `flags: []`、exit 0（平坦序列不打标）。
+
+**AC1/AC3b 实跑**——`full-suite-runner.ts` 扩 verification-round 记录：
+```
+绿轮:  {"round":…, "tests":5, "per_test_ms":<durationMs/5>, "state":"green", …}
+红轮:  {"round":…, "tests":5, "per_test_ms":…, "redAt":"…", "state":"red", "reason":"failed", …}
+      ⇒ redAt − startedAt 可量（AC3b 早期 RED 延迟）
+```
+
+**测试结果**——scoped 套件（`scripts/test.sh --for-task gap-quality-criteria-are-point-in-time-no-trend-criteria`）：
+```
+tests 44 / pass 44 / fail 0 / cancelled 0   （含 trend-check.test.mjs 13 项 + full-suite-runner + capability-catalog）
+scoped 静态检查全 PASS：node:test 策略（AC7 @test-group）✓ test-isolation ✓ task-contract-check 0 violations ✓
+adr016 ✓ strategic-doc-staleness ✓
+```
+
+**Contract 满足**：measure=stdout 打标数组（默认 JSON 数组）；band=0（健康 0 打标；恶化必打标，AC3 控制
+证明）；invariant trend_is_passive=1（只读不调度，`--json` meta 报出）；invoke=`--window <N>`（默认 5）；
+control=AC3 捕获 + 平坦负控制；resume=AC1（full-suite-runner 记录）与 AC2/AC3（trend-check 打标）分文件
+独立落地。
+
+**Worktree 基线备注**：develop 基线（440162de）无 master 近期改动；verification-round.jsonl /
+checker-cost.jsonl 为 sibling（gap-no-criterion-records-its-own-cost）已合并到 develop 的数据源，
+本条直接复用（扩 schema 不新建）。全量套件绿（DoD 第三项）由外层/fan-in 在合入时确认——按 worktree
+规则不在此跑全量。
