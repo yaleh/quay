@@ -54,7 +54,7 @@ bug】——只在 vitest 项目暴露（上游看不见自己的缺陷，环境
 - [x] AC3: 文档修正 vitest --maxWorkers（分叉写清，不指导 --test-concurrency）
 - [x] AC4: 与 archguard TASK-67 交叉标注（下游验证过，直接采纳）
 
-### 实跑证据（执行 agent，2026-08-05）
+### 实跑证据（执行 agent，2026-08-05；复核 2026-08-06 执行确认不改动，结果一致）
 
 **AC1 实跑（vitest 假红负控制：通过测试打 ✖ console，0 failed，exit 0 ⇒ 不 early-red）**：
 ```
@@ -81,16 +81,17 @@ state: red reason: failed
 ```
 vitest 结构化真失败（`❯ test/foo.test.ts (3 tests | 1 failed) 12ms`）⇒ 同样 state=red reason=failed（early-red 保留）。
 
-**scoped 验证（`scripts/test.sh --for-task gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red --allow-thin`）**：
+**scoped 验证（`scripts/test.sh --for-task gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red --allow-thin`，复核 2026-08-06 EXIT=0）**：
 ```
-ℹ tests 18
-ℹ pass 18
+ℹ tests 24
+ℹ pass 24
 ℹ fail 0
 ℹ cancelled 0
 task-contract-check: no violations.
 ```
-新增 3 条测试：AC2 unit（结构化判红，含 ✖ 负控制）、AC1 e2e（✖ console + exit 0 ⇒ green）、
-AC2 e2e（vitest 结构化行 ⇒ early-red）。原 AC2 marker-file proof（not ok ⇒ red）仍绿。
+（复核运行选 24 条 —— 自初跑 18 条后 `--wait-check` AC1 Contract invoke 控制等 6 条并入同一文件。
+AC1 e2e 负控制 ✖ console + exit 0 ⇒ state=green、AC2 e2e not ok ⇒ state=red reason=failed、
+vitest 结构化行 `❯ test/foo.test.ts (3 tests | 1 failed) 12ms` ⇒ 同 red，复核逐一复现，输出与上文一致。）
 
 **AC3 实改**：`plugin/loop/orchestrator-loop-tick.md` 判红模式段 + 新增「并发旋钮分叉」段、
 `plugin/loop/fast-mode-loop-tick.md` 并发旋钮分叉、`plugin/scripts/full-suite-runner.ts` 用法头注释

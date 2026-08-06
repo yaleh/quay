@@ -103,6 +103,60 @@ extra:
       —— 新测试文件 `plugin/test/quay-init-drift-report.test.mjs`（`import { test } from "node:test"` +
       `// @test-group governance`，AC1/AC2/AC3 fixture + L_G 正注 + idempotence 回归）。实跑：
       `tests 6 / pass 6 / fail 0 / cancelled 0`。
+      → `plugin/scripts/quay-init.sh` 新增 `--check-drift`（只读漂移报告，Contract invoke）+
+      升级路径复用 `--loop` 重跑的逐文件 copy（缺失自动补、漂移备份+替换+报告）。证据（scoped 测试
+      `quay-init-check-drift.test.mjs`「AC1/control」）：构造目标缺一个派生脚本 ⇒ `--check-drift`
+      报 `缺失 1` 并点名 → 重跑 `--loop` 补回（`copied: .../pipe-exit-code-check.sh`）→
+      `--check-drift` 报 `缺失 0`。机制见下方 **AC2 实跑输出**。
+- [x] AC2: **漂移报告**——输出 `漂移 N / 缺失 N / 一致 N`（meta-cc 实测 10/68/8 的机械版）；L2「升级
+      正确性」维度
+      → `--check-drift` 输出可解析的 `漂移报告: 漂移 N / 缺失 N / 一致 N（派生集 M）`，分母 = 当前
+      派生铺设集（`derive_loop_scripts`，本仓现 45；SPEC 写时 19——**面长大了，这正是本任务根因**）。
+      实跑输出见下方 **AC2 实跑输出**。
+- [x] AC3: **不静默覆盖**——本地改动的派生脚本 = 漂移（列出需确认），缺失的自动补
+      → `--check-drift` 把本地改动脚本列为 `漂移`（点名列出），且只读不写（`--check-drift` 不改任何
+      文件）；升级路径（`--loop` 重跑）对漂移脚本备份+替换+可见报告（`cleaned-residue` + `backup:`）。
+      证据见 scoped 测试「AC3/control」：本地改 `heavy-op-token.sh` ⇒ `漂移 1` 点名；`--check-drift`
+      后文件仍是本地版（只读）；重跑 `--loop` ⇒ `cleaned-residue` + `backup:` + 恢复产品内容。
+- [x] AC4: 与 L2 交叉标注——升级正确性补进 `gap-quality-criteria-are-point-in-time-no-trend-criteria`
+      → 该任务 Proposal §3 已列「升级正确性 → gap-delivery-surface-grows...（趋势：漂移/缺失数随窗口）」；
+      本条执行后补写 **AC4 交叉标注**：`--check-drift` 即该维度的机械数据源（见
+      `tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md`）。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      → `plugin/test/quay-init-check-drift.test.mjs`：首行 `// @test-group governance`，4 用例全用
+      `node:test`（`import { test } from "node:test"`）。scoped 测试 4/4 绿。
+
+**AC2 实跑输出**（Contract measure/invoke `bash plugin/scripts/quay-init.sh --check-drift`，对安装后目标）：
+
+```
+$ CLAUDE_PLUGIN_ROOT=<plugin> bash plugin/scripts/quay-init.sh --check-drift
+quay-init (plugin v0.3.13)
+  drift report (派生集轴, not file count — the delivery surface GROWS, the target must follow):
+漂移报告: 漂移 0 / 缺失 0 / 一致 45（派生集 45）
+
+# 构造缺一个派生脚本（rm pipe-exit-code-check.sh）：
+  缺失: pipe-exit-code-check.sh
+漂移报告: 漂移 0 / 缺失 1 / 一致 44（派生集 45）
+
+# 升级（重跑 --loop）补回后：
+  copied: /var/tmp/drift-evidence-*/plugin/scripts/pipe-exit-code-check.sh
+漂移报告: 漂移 0 / 缺失 0 / 一致 45（派生集 45）
+```
+
+**scoped 测试输出**（`bash scripts/test.sh --for-task gap-delivery-surface-grows-but-target-freezes-no-upgrade --allow-thin`）：
+
+```
+scoped check: run_checker "test-framework-policy-check" ... PASS
+scoped check: run_checker "test-isolation-check" ... PASS (all 44 violation(s) baselined)
+scoped check: run_checker "test-impl-census-check" ... clean 230
+scoped check: run_checker "task-contract-check" --strict-subset ... no violations
+scoped check: run_checker "adr016-screen-use-check" ... PASS (within band 0..1)
+✔ AC2 — --check-drift prints a parseable 漂移/缺失/一致 report; a clean install is 一致
+✔ AC1/control — missing derived script is listed 缺失-1 and the upgrade path (--loop re-run) fills it
+✔ AC3/control — local edit is listed 漂移, --check-drift is read-only (不静默覆盖), upgrade backs up + replaces visibly
+✔ L_G — retired send-keys-verified.sh stays in the plugin tree but is NOT in the derived set
+ℹ tests 4  ℹ pass 4  ℹ fail 0  ℹ cancelled 0  ℹ skipped 0
+```
 
 ## Definition of Done
 
@@ -116,12 +170,17 @@ extra:
 
 - plugin/scripts/quay-init.sh（升级/刷新 + 漂移检测：`--check-drift` + `--loop` 前/后漂移报告）
 - plugin/test/quay-init-drift-report.test.mjs（AC1/AC2/AC3 fixture + L_G + idempotence，新文件）
+- tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md
+- plugin/scripts/quay-init.sh（或等价：升级/刷新 + 漂移检测）
+- plugin/scripts/（漂移报告 helper，若成脚本）
+- plugin/test/（AC1/AC2/AC3 fixture）
 - tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC4 交叉标注）
 
 ## Test-Files
 
 - plugin/test/quay-init-drift-report.test.mjs（新：AC1/AC2/AC3 漂移报告 fixture + L_G 正注 + idempotence 回归）
 - plugin/test/quay-init-loop.test.mjs（回归：派生脚本铺设 + residue/idempotent/AC6 verify 行为）
+- plugin/test/quay-init-check-drift.test.mjs（AC1/AC2/AC3/AC5 断言；`// @test-group governance`）
 
 ## Contract
 

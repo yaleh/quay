@@ -1458,7 +1458,7 @@ Description:
       pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout, envFile: resolveAcceptanceEnvFile(cfg, provider) });
       // M56-gate-cli-error-ux (AC1): missing-task is a guarded error.
       await withGuardedErrors(async () => {
-        await runComplete({ client, id, logPath });
+        await runComplete({ client, id, logPath, workspaceRoot: cfg.workspaceRoot });
       });
     }, { providerId: vf.provider });
     return;
@@ -1488,7 +1488,7 @@ Description:
       // M56-gate-cli-error-ux (AC1): missing-task / illegal-transition are
       // guarded errors — assertTransition() throws `illegal transition: ...`.
       await withGuardedErrors(async () => {
-        await runPromote({ client, id, logPath });
+        await runPromote({ client, id, logPath, workspaceRoot: cfg.workspaceRoot });
       });
     }, { providerId: vf.provider });
     return;

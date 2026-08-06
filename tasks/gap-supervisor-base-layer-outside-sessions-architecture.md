@@ -29,7 +29,7 @@ title: "ARCHITECTURE: tonight's 10 incident classes reverse-engineered into a
   stop each faking the base via screen-scraping; conversely if supervisor starts
   needing judgment the design is wrong, push that judgment back to the
   corresponding agent layer"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -128,6 +128,36 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
 - [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
       **证据**：`plugin/test/supervisor-deliver.test.mjs` + `plugin/test/supervisor-health.test.mjs`
       均为 `import { test } from "node:test"` + 首行 `// @test-group governance`；实测 8 + 5 全绿。
+      → `orchestration/SPEC-integration-architecture-2026-08-05.md` §2 给可判定判据（事实/原语⇒基座；
+      规则/理由⇒行为；规则必须有机械挂载点）；§7 每步落地按判据归层
+- [x] AC2: **supervisor 边界判据**——无判断/不读任务/不写代码；越界判据（需理解任务即越界）在代码
+      评审可查
+      → SPEC §4.2 边界判据成文：不做判断/不读任务内容/不写代码；「任何一行需理解任务在讲什么 = 越界」
+- [x] AC3: **落地次序执行**——①持久调度 → ②槽位账本+会话状态 → ③投递集中化+真 TUI e2e → ④抢占
+      → ⑤消息总线带身份（按代价，每步有对应任务）
+      → SPEC §7 次序表 + 每步对应任务：① OS-anchor（done）② slot-visibility（ready）③ reliable-send+
+      NBSP（done）④ `gap-supervisor-step-4-preemption`（立案）⑤ `gap-supervisor-step-5-message-bus-with-identity`
+      （立案）
+- [x] AC4: **与既有基座任务归并**——OS-anchor（= ①）、slot-visibility（= ②）标注为 supervisor 步骤；
+      不新开重复任务
+      → 两任务体各加 `## Supervisor step（base-layer-outside-sessions 步骤①/②）` 交叉注（本提交）；
+      SPEC §7 明确「不新开重复任务」
+- [x] AC5: **真 TUI e2e**（投递集中化的核心）——唯一不可靠操作一处硬化 + 真 TUI 端到端测试（NBSP
+      反例的结构性解）
+      → SPEC §6（集中化收益）+ §7 步骤③映射到已 done 的 reliable-send（六模式结晶）+ NBSP（判空修复，
+      tick-log 实测「NBSP 真 TUI e2e ✔」）；唯一不可靠操作一处硬化
+- [x] AC5b: **`claude -p` 形态路径**——外层/inner 走 headless 时五原语解四个（消息→进程参数、
+      校验→退出码、状态→进程在不在、槽位→子进程数、抢占→kill）；supervisor 做的事少一大半
+      → SPEC §11 原语对照表（TUI 形态 vs `-p` 形态，五原语解四个）+「supervisor 做的事少一大半」
+- [x] AC5c: **次序裁定**——先在 archguard/meta-cc 验证产品化，**再**开 claude -p 实验（先验交付再换
+      形态，坏处能归因）；-p 之前 tmux 仍用时清理观测路径（session-liveness 去掉剩 2 次 capture-pane）
+      → SPEC §11 裁定成文（先验交付再换形态）；观测路径清理标注为 `-p` 前置（supervisor 若成的后续
+      步骤，本架构任务不执行代码改动）
+- [x] AC6: **AC10 诚实记账**——post-friction（被今晚事故打开）不计分，计数保持 7
+      → SPEC §12 记账成文（post-friction 开口不计分；计数保持 7，引用 gap-axis-generator）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → 本任务为文档/规格类（无新代码/测试）；零测试写入，要求空满足。新任务（④⑤）为 todo 立案，
+      未写测试
 - [x] AC8: **状态结晶设计准则落地**（SPEC-state-crystallization-2026-08-05.md）——②槽位/会话状态
       实现时：六实体各恰一个写入者；名词进代码动词留文本；规则引用字段名不复述；每条规则有机械
       挂载点；禁止手写逃生舱（逃生舱位置 = 缺失字段位置）。实测「一个事实六个源四个答案」为验收基
@@ -135,6 +165,8 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
       **证据**：六实体单一写入者逐条核实（见 `## Evidence` §AC8）+ 实测 2026-08-06T07:25Z 各源读数；
       遥测 inProgress=0 / blocked-signals 空 / tasks in-progress=0 三者一致；worktree 账本 = 权威在飞
       视图（2 活动 task worktree），与「遥测括号 ≠ 在飞」的 slot-visibility 结论一致。
+      → SPEC §9 设计准则成文（六实体唯一写入者 + 名词进代码动词留文本 + 形式化三约束 + 六源四答案
+      验收基准）；步骤②（slot-visibility）是首个应用
 - [x] AC9: **容器化边界与次序**（SPEC-isolation-and-resource-governance-2026-08-05.md）——supervisor/
       watchdog/共享状态/manager 留宿主；每项目一容器；跨边界只留 deliver()/observe() 两窄接口；
       **次序：-p 迁移 → 容器化**（先迁 -p 后容器，不反着做）；systemd-run 限额为前置中间步
@@ -142,6 +174,8 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
       **证据**：deliver()/observe() 两窄接口 = supervisor-deliver.sh（deliver）+ pane-state-classify /
       inner-blocked-signal（observe），跨边界接口数 = 2（判据满足）；-p→容器化次序记入 SPEC §3.2 + 本任务；
       systemd-run 前置 = tasks/gap-systemd-run-limits（todo，交叉标注引用，不在本任务实现范围）。
+      → SPEC §10 边界与次序成文（宿主留 supervisor/watchdog/共享状态/manager；每项目一容器；
+      deliver()/observe() 两窄接口；`-p` 迁移 → 容器化次序；systemd-run 前置）
 
 ## Definition of Done
 
@@ -157,8 +191,38 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**由外层/fan-in 验证轮执行**
       （本任务按规范只跑 scoped 测试）
 
+## 执行证据（invoke + 落地产物）
+
+**Contract invoke**（`grep -rn "supervisor\|base.layer\|基座" orchestration/SPEC-integration-architecture-2026-08-05.md`）
+实测 41 行命中（节选）：
+
+```
+orchestration/SPEC-integration-architecture-2026-08-05.md:1:# 规格：集成架构——基座层必须活在 agent 会话之外（supervisor）
+orchestration/SPEC-integration-architecture-2026-08-05.md:75:## 4. supervisor 守护进程：当真正的整合不可能时
+orchestration/SPEC-integration-architecture-2026-08-05.md:96:> **supervisor 明确不做判断、不读任务内容、不写代码。**
+orchestration/SPEC-integration-architecture-2026-08-05.md:149:| 步骤 | 内容 | 对应任务 | 状态 | supervisor 职责收编 |
+orchestration/SPEC-integration-architecture-2026-08-05.md:158:（slot-visibility）——已在各自任务体标注为 supervisor 步骤（见两任务体的 `## Supervisor step` 交叉注）。
+```
+
+**落地产物**：
+1. `orchestration/SPEC-integration-architecture-2026-08-05.md`（新建）——三层判据（§2）、supervisor 边界
+   判据（§4.2）、落地次序与对应任务（§7）、`-p` 形态与次序裁定（§11）、AC10 记账（§12）、
+   状态结晶（§9）/隔离治理（§10）合流
+2. `tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md`——加 `## Supervisor step
+   （base-layer-outside-sessions 步骤①）` 交叉注（AC4）
+3. `tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md`——加 `## Supervisor step
+   （base-layer-outside-sessions 步骤②）` 交叉注（AC4）
+4. `tasks/gap-supervisor-step-4-preemption.md`（新建）——落地次序 ④ 抢占（AC3/DoD「④⑤有对应任务」）
+5. `tasks/gap-supervisor-step-5-message-bus-with-identity.md`（新建）——落地次序 ⑤ 消息总线带身份
+   （AC3/DoD「④⑤有对应任务」）
+
+**scoped 验证**：`scripts/test.sh --for-task gap-supervisor-base-layer-outside-sessions-architecture
+--allow-thin` —— task-contract-check 无违规；strategic-doc-staleness-check 无新 stale；test-selection-thin
+（0/10 Touches 为文档/任务文件，无测试文件）。
+
 ## Touches
 
+- tasks/gap-supervisor-base-layer-outside-sessions-architecture.md
 - orchestration/SPEC-integration-architecture-2026-08-05.md（引用）
 - orchestration/SPEC-state-crystallization-2026-08-05.md（AC8 引用）
 - orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md（AC9 引用）
@@ -173,6 +237,12 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
 - plugin/scripts/quay-init.sh（laydown：supervisor-deliver.sh / supervisor-health.sh 入 derived set）
 - plugin/test/supervisor-deliver.test.mjs（AC5 真 TUI e2e）
 - plugin/test/supervisor-health.test.mjs（Contract measure）
+- tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md（AC4：= 落地①，加 Supervisor step 注）
+- tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC4：= 落地②，加 Supervisor step 注）
+- tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md（AC9 前置）
+- tasks/gap-supervisor-step-4-preemption.md（AC3：落地次序 ④，本任务立案）
+- tasks/gap-supervisor-step-5-message-bus-with-identity.md（AC3：落地次序 ⑤，本任务立案）
+- plugin/scripts/（supervisor 若成：基座层实现，后续步骤）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC6 记账引用）
 
 ## Test-Files

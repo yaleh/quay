@@ -35,6 +35,24 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 | derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
+**From bare metal to a session is ONE command (`gap-no-formalized-bare-metal-session-bootstrap`).**
+This skill runs inside an already-existing outer session — the step BEFORE that (bare metal → a
+tmux window layout with a Claude Code process live in each pane) is the formalized product
+`plugin/scripts/session-bootstrap.sh <root> <layout>`:
+
+```bash
+bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer        # project topology
+bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # full quay-0-shaped layout
+```
+
+It creates each named window (idempotent — re-runs leave live windows alone), launches each
+role's Claude Code process from the checked-in `quay-launch.sh <role>` convention, verifies each
+process is actually alive (the same `/proc` process-detection `session-liveness.sh` uses), and
+exits non-zero naming the failing window if any window cannot be confirmed live (fail-closed).
+After it returns, this skill's "inner session reachable" precondition is already satisfied — the
+same command a cold start used to follow ("hand-build the session, then one command") is now
+truly one command.
+
 **Launch config is checked-in, not remembered.** The correct per-role launch command lives in
 `<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
 materialized by `<root>/plugin/scripts/quay-launch.sh`. If a session must be (re)started during this
@@ -65,6 +83,36 @@ params, both REQUIRED (not optional), present in EVERY launched session (manager
 A `--dry-run` that omits `--prompt-suggestions false` for any role means the checked-in launch spec
 has drifted from the REQUIRED cold-start contract — STOP and fix the settings file before starting
 (`plugin/test/launch-settings.test.mjs` asserts this mechanically).
+
+## Gate criterion — 铺什么验什么 (scoped to the laydown set, not the whole suite)
+
+**What gates a cold start.** The gate is: **all scripts in the DERIVED laydown set are green** — NOT
+"the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
+derived laydown set (the `plugin/scripts/*` the shipped skill + loop docs reference), so a suite
+failure UNRELATED to that set must NOT block it (与铺设集无关的失败不再无限期阻塞冷启动); a failure
+INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-liveness.sh` +
+`session-liveness-mount.sh` are both derived members, so laying then would have shipped the M3
+busy/idle regression into the target project.
+
+**Mechanical derivation (no new mechanism).** The set is derived by grepping the shipped docs — the
+same derivation quay-init.sh's `derive_loop_scripts()` step (a) uses. Never hand-edit the set; re-run
+the grep:
+
+```bash
+grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root>/plugin/loop/*.md
+```
+
+**Run the gate:**
+
+```bash
+bash <root>/plugin/scripts/laydown-set-check.sh   # → `laydown_set_green: green|red`
+```
+
+`red` (a missing / non-parsing member, or a member's OWN test failing — the M3 class of logic
+regression a syntax check cannot see) blocks the cold start; `green` means the exact scripts this cold
+start will lay down are verifiably working. This is the full-suite gate's SCOPED-ED down cousin: it
+runs exactly the laid-down set's tests, nothing else — an unrelated red in the whole suite does not
+hold up the cold start.
 
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
@@ -129,7 +177,12 @@ The session the loop lives in is built **by definition**, never hand-assembled
 (`gap-tmux-session-topology-no-factory-definition`; two-window correction
 `gap-manager-baked-into-project-topology-factory` — manager is cross-project, not part of the
 project topology). The definition ships in the `quay-session-topology` skill; this step applies
-it. **Cross-annotation (`gap-outer-self-checks-and-creates-inner-session`):** this step is the
+it. **Bare-metal entry (`gap-no-formalized-bare-metal-session-bootstrap`):** if the session does
+NOT exist yet (nothing to build on), first run
+`bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer` — the formalized
+from-bare-metal step that produces a session with live claude windows, after which this topology
+factory/check applies idempotently. **Cross-annotation
+(`gap-outer-self-checks-and-creates-inner-session`):** this step is the
 build-by-definition half; the OUTER's own cold-start path
 (`orchestration/orchestrator-loop-tick.md` step 3) independently SELF-CHECKS inner in three
 states — healthy (window+process+user message) ⇒ untouched, empty-shell (window+process, no user

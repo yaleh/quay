@@ -52,6 +52,15 @@ extra:
 **机制还在不在**（不检查）？缺时间轴 + 存活轴。生成器问句对判据成本：量化哪个范围？**没有量化**（完全
 空着）。生成器问句对 suite-state：量化「这一轮没成」——缺**原因轴**（为何没成：failed/aborted/infra）。
 
+> **AC5 cross-mark (2026-08-06, `gap-no-criterion-records-its-own-cost-checker-cost-jsonl`)**:
+> the count-5 pre-friction "判据不记自身成本" (manager-discovered 2026-08-05, 生成器问句「判据成本量化在
+> 哪个范围」→ 没有量化) is that task. It asked the generator's cost question and got "nothing — no
+> criterion persists its own execution time; 16 检查器 + 14 闸门零落盘". The fix (each criterion exit
+> appends `{name, ms, n, load}` to `.quay/checker-cost.jsonl`, pure-append zero-judgment) is tracked
+> in that task; this entry is the AC10 accounting cross-reference only. Its cross-ref
+> `gap-suite-state-has-no-reason-axis-failed-aborted-infra` (count-6, suite-state 缺原因轴) is the
+> same pre-friction axis's next instance.
+>
 > **AC5 cross-mark (2026-08-05, `gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked`)**:
 > the count-3 pre-friction "gate-scripts-dead" (generator-run, 照问句问出) is that task. It asked
 > the generator's own layer question — "量化哪个范围" for `plugin/gate-scripts/` — and got "laid
@@ -73,6 +82,22 @@ extra:
 > whole orchestration layer (43+ docs, ZERO matching `*ROADMAP*`). The fix (orchestration arm
 > widened to `orchestration/*.md`, dead glob eliminated) is tracked in that task; this entry is the
 > AC10 accounting cross-reference only.
+>
+> **AC5 cross-mark (2026-08-06, `gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`)**:
+> the scope-axis instance "cold-start gate criterion too wide — whole-suite green" (manager-discovered
+> 2026-08-05, 生成器问句「这条判据量化的是哪个范围」→ 整个套件, but cold-start only lays the DERIVED
+> laydown set) is that task. The fix (gate narrowed to the derived laydown set's scripts green, 铺什么
+> 验什么, mechanically derived via grep SKILL/loop docs) is tracked in that task; this entry is the AC10
+> accounting cross-reference only — **post-friction, NOT counted** (the manager asked the range question
+> while BLOCKED on the wait, not before friction; AC10 计数保持 0, 记录不勾, per the task's AC5).
+>
+> **AC5 cross-mark (2026-08-05, `gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`)**:
+> the count-1 pre-friction "dead-loop" (manager-discovered 2026-08-05, 「去看才看见」——不是被硌出来的,
+> 见 AC10 记账行 `0 → 1（dead-loop，去看才看见）`) is that task. It is the L2 continuous-health instance
+> of the generator's time/instance question applied to the whole standing-criterion set: every L1 criterion
+> quantifies "was the instrument laid down", none quantifies "is the loop actually running". The fix (the
+> dead-loop criterion: target outer/inner transcript user messages + git commit time window, `plugin/scripts/
+> dead-loop-check.sh`) is tracked in that task; this entry is the AC10 accounting cross-reference only.
 
 **生成器**：对系统里每一条常驻判据问——**「它量化的是哪一个范围？时间 / 作用域 / 层 / 实例 / 成本？
 如果答案是『眼前这一个』，那就有一根没打开的轴。」** 检验：反推人今晚给的 5 条，**5/5 成功**。⇒ 有

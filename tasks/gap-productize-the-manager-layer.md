@@ -49,6 +49,15 @@ extra:
 **与已立案的关系**：`gap-establish-daily-review-cadence-mechanism`（done）= 层的复盘节奏；
 `gap-crystallize-launch-config-into-checked-in-settings-file`（todo）= 层的启动配置，本条扩展为
 「随层出货」；缺口 2/3 的机制（价值排序、趋势判据）是层的职能内容，另立任务、归属本条。
+**交叉标注（AC6，`gap-quality-criteria-are-point-in-time-no-trend-criteria`）**：缺口 3 的「趋势判据」
+（读 verification-round/checker-cost/suite-state-events 历史，窗口恶化超阈值打标——「比上次更贵了吗」
+有机械答案）已由该任务落地为 `plugin/scripts/trend-check.ts`，并挂进 `orchestration/REVIEW-cadence.md`
+3d 作为每日复盘常项——本条 manager 层的「看趋势」职能的机制挂接点即该判据。
+
+**AC4 交叉标注（2026-08-06，`gap-complete-delivery-surface-spec-and-l1-verification`）**：六类交付面
+（`orchestration/SPEC-complete-delivery-surface-2026-08-05.md` §4/§6）把本条列为**循环文档类（第 2 类）**
+的归属任务——manager 层交付物 = `plugin/skills/manager/SKILL.md`。L1 检查
+（`plugin/scripts/l1-delivery-surface-check.ts --surface`）机械校验该交付物在位 + 归属任务已立案（无空洞）。
 
 **交叉标注（SPEC-complete-delivery-surface，2026-08-06）**：本条是六类交付面里**循环文档**（类别 2）
 manager 层的归属任务——`gap-complete-delivery-surface-spec-and-l1-verification` 的 L1 六类完整性检查

@@ -13,7 +13,7 @@ title: "inner-session-check discovery-pid fix has a SILENT degraded fallback —
   next adopter); fix direction: fail-closed OR loud alarm on
   TR_SOURCE=discovery (stderr + state marked degraded/unknown), consumer reads
   transcriptSource and alarms"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -57,14 +57,15 @@ transcript，commit 12936f90），verified c7b58e09。但 line 178 无 PID/无 s
 
 ## Acceptance Criteria
 
-- [ ] AC1: TR_SOURCE=discovery 路径不静默报 healthy——stderr 报警 或 state=degraded/unknown（实测）
-- [ ] AC2: cold-start 自检 --json 消费者读 transcriptSource，==discovery 时报/拒收
-- [ ] AC3: 非 Linux / 无 /proc 实测：不无声回退到旧启发式（fail-closed 或 loud）
-- [ ] AC4: 与 gap-inner-session-check-discovery-reads-wrong-transcript（done）交叉标注——其 AC4 留空
+- [x] AC1: TR_SOURCE=discovery 路径不静默报 healthy——stderr 报警 或 state=degraded/unknown（实测）
+- [x] AC2: cold-start 自检 --json 消费者读 transcriptSource，==discovery 时报/拒收
+- [x] AC3: 非 Linux / 无 /proc 实测：不无声回退到旧启发式（fail-closed 或 loud）
+- [x] AC4: 与 gap-inner-session-check-discovery-reads-wrong-transcript（done）交叉标注——其 AC4 留空
       （无 PID 回退启发式非 fail-closed）正是本条目的起源
 
 ## Touches
 
+- tasks/gap-inner-session-check-discovery-fallback-silent.md
 - plugin/scripts/inner-session-check.sh（退化路径报警/fail-closed）
 - plugin/loop/orchestrator-loop-tick.md（cold-start 3 自检消费者读 transcriptSource）
 - plugin/test/inner-session-check.test.mjs（退化路径负控制）
@@ -89,3 +90,56 @@ cold-start skill 不引用 → 非 Linux 无声回归原 bug。AC4 关联已 don
 
 from: gap-inner-session-check-discovery-reads-wrong-transcript
 acs: AC4（无 PID 时 fail-closed/loud——本任务的 fix 方向承接）
+
+## 修复记录（2026-08-06，内层执行）
+
+**机制**：TR_SOURCE=discovery（退化路径/旧启发式）不再静默——脚本 stderr 报警 + state=degraded
+（fail-closed），绝不静默报 healthy；cold-start --json 消费者读 transcriptSource==discovery 时报警/拒收。
+
+1. **脚本**（plugin/scripts/inner-session-check.sh）：
+   - `resolve_transcript` 后：`TR_SOURCE=discovery` ⇒ stderr WARNING + state=**degraded**
+     （state 判定链：missing → discovery→degraded → fresh→empty-shell → healthy）。
+   - 结构性发现（discovery-pid）里 `/proc/<pid>/environ` 不可读（非 Linux/hidepid/权限）⇒ 专门 WARNING
+     （AC3：不无声回退）。用法/JSON 注释改为四态。
+2. **消费者**（plugin/loop/orchestrator-loop-tick.md 冷启动第 3 步）：state 表新增 **退化** 行 +
+   `degraded` 分派（报警+结构解析重试+升级）；transcript 解析段改为「发现路径 KNOWN-BROKEN，消费者必须读
+   `transcriptSource`，==discovery 报警/拒收，不得按 healthy 放行」。
+3. **负控制测试**（plugin/test/inner-session-check.test.mjs）：新增 AC1（discovery 报警+degraded）、
+   AC2（tick 文档消费者读 transcriptSource）、AC3（would-be-healthy 不报 healthy）三测；healthy 正常
+   路径断言零告警（Contract control 不回归）。13/13 pass。
+
+**AC 证据**：
+- AC1（实测）：`inner-session-check.test.mjs`「AC1 — TR_SOURCE=discovery alarms on stderr and marks
+  state=degraded」——强制 discovery（结构来源不可用 + 植入候选 transcript）⇒ stderr 含
+  discovery/degraded/WARNING，state=degraded（非 healthy/empty-shell）。
+- AC2（实测）：tick 文档冷启动第 3 步现含 `transcriptSource` + `==discovery` + `不得按 healthy 放行`；
+  测试「AC2 (fallback-silent) — the cold-start consumer reads transcriptSource」断言通过。
+- AC3（实测）：测试「AC3 — a discovery-sourced USER_MSG transcript (would-be-healthy breeding shape)
+  yields degraded + alarm, never healthy」——USER_MSG 候选（旧启发式会判 healthy）⇒ state=degraded +
+  stderr 报警；`/proc environ 不可读`分支有专门 WARNING（代码路径；对 /proc 不能 chmod，无 hermetic 直测，
+  行为契约「不无声回退」由上述两测覆盖）。
+- AC4（交叉标注）：本文件 `## Carries` 已记 from 该任务 AC4；done 任务
+  `gap-inner-session-check-discovery-reads-wrong-transcript.md` 追加交叉标注，注明本任务收口其留空 AC4。
+
+**invoke 证据**：
+```
+$ grep -n 'transcriptSource\|TR_SOURCE\|degraded' plugin/scripts/inner-session-check.sh plugin/loop/orchestrator-loop-tick.md
+plugin/scripts/inner-session-check.sh:10:#   degraded     窗口+进程存在，但 transcript 仅由发现启发式解析（TR_SOURCE=discovery）——
+plugin/scripts/inner-session-check.sh:196:    echo "WARNING: ... /proc environ unreadable ... (non-Linux host / hidepid / permission) ..."
+plugin/scripts/inner-session-check.sh:208:    TR_PATH="$candidate"; TR_SOURCE="discovery"
+plugin/scripts/inner-session-check.sh:245:if [ "$TR_SOURCE" = "discovery" ]; then
+plugin/scripts/inner-session-check.sh:246:  echo "WARNING: inner-session-check: transcript resolved via DISCOVERY heuristic ... state=degraded (fail-closed) ..."
+plugin/scripts/inner-session-check.sh:256:elif [ "$TR_SOURCE" = "discovery" ]; then
+plugin/scripts/inner-session-check.sh:257:  STATE="degraded"
+plugin/scripts/inner-session-check.sh:273:    "transcriptSource": os.environ["TR_SOURCE"],
+plugin/loop/orchestrator-loop-tick.md:61:| **退化** | inner 窗口+进程存在，但 transcript 仅由发现启发式解析（`transcriptSource=discovery`，...）| ...
+plugin/loop/orchestrator-loop-tick.md:64:bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, ..., transcriptSource, ...}
+plugin/loop/orchestrator-loop-tick.md:83:- **`degraded`** ⇒ **报警（不自认 healthy）** ...
+plugin/loop/orchestrator-loop-tick.md:96:**本步（--json 消费者）必须读 `transcriptSource`**：`==discovery` ⇒ 报警 + 按 degraded 处理（结构解析重试 / 升级）...
+```
+
+**Contract measure（强制退化实测）**：
+`degraded_alarm = bash plugin/scripts/inner-session-check.sh 2>&1 | grep -c 'degraded\|warning\|discovery'`
+= **2**（WARNING 行 + `"transcriptSource": "discovery"` 行）≥ band 1。healthy 正常路径（--transcript）stderr
+零告警（Contract control 不回归）。范围化套件 `scripts/test.sh --for-task ...` 全绿：13/13 tests pass，
+task-contract-check / drive-contract-check / adr016 全部 PASS。

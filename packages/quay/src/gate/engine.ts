@@ -7,9 +7,38 @@
 // `taskCheck` returns.
 
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { resolveGate } from "./registry.ts";
 import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
 import type { Task } from "../abi.ts";
+
+// ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ────────────
+// Every gate execution appends ONE `{name, ms, n, load, at}` line to `<root>/.quay/checker-cost.jsonl`
+// on exit — pure append, zero judgment (no threshold, no flag; the trend-criterion reads it). This is
+// the gate-side writer for AC1's "gate 执行路径"; the bash static-check wrapper lives in
+// plugin/scripts/checker-cost-lib.sh and the TS helper in plugin/scripts/checker-cost.ts — the SHAPE
+// is pinned by plugin/test/checker-cost.test.mjs. `load` = /proc/loadavg 1-min (splits "the gate got
+// slower" into "n got bigger" vs "the machine got busier"). Inlined here (not imported from
+// plugin/scripts) so the published Core package stays dependency-free.
+function load1(): number {
+  try {
+    const v = Number(fs.readFileSync("/proc/loadavg", "utf8").trim().split(/\s+/)[0]);
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+function recordGateCost(opts: { root: string; name: string; ms: number }): void {
+  const file = path.join(opts.root, ".quay", "checker-cost.jsonl");
+  const rec = { name: opts.name, ms: opts.ms, n: 1, load: load1(), at: new Date().toISOString() };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");
+  } catch {
+    // fail-open — a cost-record write must never break the gate verdict
+  }
+}
 
 export interface RunGateArgs {
   /** provider client (taskGet / taskCheck) */
@@ -50,7 +79,16 @@ export async function runGate({ client, id, gate = "dod", logPath, actor = "quay
   if (!fn) throw new Error(`unknown gate: ${gate}`);
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
+  // criterion-cost meter (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): every gate
+  // execution is timed, and the cost is recorded ONLY when the caller told us where the workspace
+  // is (the CLI/MCP gate paths pass cfg.workspaceRoot). In-process callers that don't (the
+  // lifecycle/driver unit paths, most tests) skip the write — no synthetic rows pollute the real
+  // .quay/checker-cost.jsonl during the suite.
+  const t0 = Date.now();
   const { ok, reason } = await fn(task, client);
+  if (workspaceRoot) {
+    recordGateCost({ root: workspaceRoot, name: `gate:${gate}:${id}`, ms: Date.now() - t0 });
+  }
   const event: GateEvent = {
     id: randomUUID(),
     item_id: id,

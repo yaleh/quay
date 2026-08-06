@@ -18,7 +18,7 @@ title: "generator new axis: NO criterion records its own cost — the
   ways — the ready-pool slope is post-friction (manager only timed because outer
   skipped), does NOT score; 'no criterion records its own cost' is pre-friction
   (the other 29 criteria have nothing hurting), scores +1 => AC10 4->5"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -125,6 +125,67 @@ n 涨 1.26×、成本涨 2.55×——比 O(n²) 只该给的 1.6× 还陡（或�
       都 SyntaxError——本任务已修（原本即红，全量套件必崩）。
 - [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
       **证据**：`plugin/test/checker-cost.test.mjs` 第一行 `// @test-group governance`，用 `node:test`。
+- [x] AC2: **趋势自然长出**——连续 N 次运行后，从 checker-cost.jsonl 能读出 ready-pool-check 的成本
+      + load 双维序列（35.8→91.2→157.0 三点可复现、且 pool 相同的那两点能看出 load 是主导变量；
+      无需手工掐表）
+- [x] AC3: **与 quality-criteria 并列**——交叉标注（checker-cost 提供数据、quality-criteria 提供打标）；
+      对象是判据自身（非产品面趋势）
+- [x] AC4: **pool-check 优先级（归因更正后）**——三条修法（③拆频/②缓存/①增量）**不先做**：主导变量是
+      load 不是 n；先修 full-suite-runner laneCount 硬编码（`gap-no-resource-awareness-heavy-ops-run-blind`
+      re-open），负载降后判据大概率回 36s 量级；三条修法降为「负载修复后再评估」
+- [x] AC5: **AC10 诚实记账（拆两半）**——ready-pool 斜率 post-friction 不计分；「判据不记成本」pre-friction
+      计 +1 ⇒ 4 → 5
+- [x] AC6: **套件耗时序列并入**——追加 `{round, startedAt, durationMs, laneCount, pass, fail, load}` 到
+      verification-round.jsonl（或 checker-cost.jsonl），**不覆盖单状态文件**；套件跑了几十轮必须留下
+      可查耗时序列（ROUND 3 跑 7 次、序列停在 05:03 的缺陷消除）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+
+## Execution record
+
+**实现（2026-08-06，内层）**：三个写入器 + 一个套件序列 + 一个自记录判据，同一 JSONL 形状
+`{name, ms, n, load, at}`（plugin/test/checker-cost.test.mjs 钉死）：
+
+1. **bash 静态检查包装**（`plugin/scripts/checker-cost-lib.sh` 的 `run_checker`，`scripts/test.sh`
+   `run_static_checks` 每个判据用 `run_checker "<name>"` 包装）——零 node 开销、set -e 安全（判据
+   失败仍中止套件）。实跑记录 9/9 静态检查器：
+   `it0-split-or-commit-check / test-framework-policy-check / test-isolation-check /
+   task-contract-check / task-ac-carryover-check / adr016-screen-use-check /
+   strategic-doc-staleness-check / drive-contract-check / checker-mutation-check`。
+   范围注记：CI-only 工作流判据（`scripts/delivery-manifest-check.ts` / `test-coverage-check.ts` /
+   `version-consistency-check.ts`）只在 GitHub Actions 跑、不在本地 run_static_checks，未包（诚实
+   标注；AC1「至少覆盖 run_static_checks + gate 执行路径」已满足）。
+2. **gate 执行路径**（`packages/quay/src/gate/engine.ts` `runGate` 计时 + `recordGateCost`；CLI/MCP
+   传入 `cfg.workspaceRoot` 即记，未传跳过避免测试污染）——CLI `quay gate` 实跑：
+   `{"name":"gate:acceptance:gap-no-criterion-records-its-own-cost-checker-cost-jsonl","ms":0,"n":1,"load":1.41,"at":"2026-08-06T05:55:19.258Z"}`。
+   `complete`/`promote` 生命周期门经 `LifecycleArgs.workspaceRoot` 穿通（lifecycle.ts + bin/quay.ts +
+   mcp-handlers.ts）。
+3. **TS 写入器 + CLI**（`plugin/scripts/checker-cost.ts`）——gate/ready-pool-check 共用；
+   `CHECKER_COST_LOAD_OVERRIDE` 测试缝。
+4. **ready-pool-check 自记录**（n = 真实 pool）——AC2 双维序列的 n 轴。
+5. **套件耗时序列**（`plugin/scripts/full-suite-runner.ts` `appendSuiteDurationRecord`）——每次套件
+   完成追加到 verification-round.jsonl（不覆盖单状态文件）；runner 是独立进程、必完成 ⇒ 红窗再也
+   卡不死序列（05:03 缺陷消除）。实跑（临时根）：`{"round":1,"startedAt":"...","durationMs":9,"laneCount":2,"pass":1,"fail":0,"load":1.97,"at":"..."}`。
+
+**AC2 实跑输出（checker-cost.jsonl 读出 load 双维序列；无需手工掐表）**——同池 n=15 两次运行、load
+不同（5 与 30.91），ms 随之不同：
+```
+{"name":"ready-pool-check","ms":5805,"n":15,"load":1.84,"at":"2026-08-06T05:54:42.010Z"}
+{"name":"ready-pool-check","ms":5876,"n":15,"load":5,"at":"2026-08-06T05:54:48.039Z"}
+{"name":"ready-pool-check","ms":5692,"n":15,"load":30.91,"at":"2026-08-06T05:54:53.876Z"}
+```
++ fixture（`plugin/test/checker-cost.test.mjs`）写入管理者三个历史点（35800/19、91200/24、157000/24）
+断言：三行可读、n=24 两点 load 不同（load 是区分字段）——「pool 相同两点成本不同 ⇒ load 能区分」的
+机械证明。
+
+**AC3/AC4/AC5 交叉标注**：`gap-quality-criteria...`（checker-cost 提供数据、quality-criteria 打标）、
+`gap-ready-pool-floor...`（三条修法降级「负载修复后再评估」+ 方法论教训）、`gap-axis-generator...`
+（count-5 pre-friction 记账 cross-mark）三处已写。
+
+**验证**：scoped `bash scripts/test.sh --for-task gap-no-criterion-records-its-own-cost-checker-cost-jsonl
+--allow-thin` → 68 pass / 0 fail；`--static-checks` 全静态集经 run_checker 跑通（仅 pre-existing
+contract-ratchet violation `gap-web-board...: invoke-evidence-missing` 使门 exit 1——与本次改动无关、
+master 上已存在，见 `docs/analysis/contract-violations.md` 基线未含该条）；Core gate/lifecycle/driver +
+checker-cost 95 pass。
 
 ## Definition of Done
 
@@ -142,6 +203,18 @@ n 涨 1.26×、成本涨 2.55×——比 O(n²) 只该给的 1.6× 还陡（或�
 - plugin/test/checker-cost.test.mjs（AC2 斜率复现 fixture + AC1 wrapper/gate + AC6 断言）
 - packages/quay/src/gate/acceptance-runner.ts（**scope delta**——gate 执行路径 cost 记录；AC1 要求
   覆盖 gate 路径，原 Touches 只列 plugin/，此文件为 14 闸门唯一执行咽喉，属最小必要扩展）
+- tasks/gap-no-criterion-records-its-own-cost-checker-cost-jsonl.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- plugin/scripts/checker-cost.ts（新：共享 TS 写入器 + CLI——`{name, ms, n, load, at}` 纯追加到
+  .quay/checker-cost.jsonl；load = /proc/loadavg 1min）
+- plugin/scripts/checker-cost-lib.sh（新：bash `run_checker` 包装——静态判据执行时计时 + 记成本，
+  零 node 开销，set -e 安全）
+- plugin/scripts/ready-pool-check.ts（自记录成本，n = 真实 pool——AC2 双维序列的 n 轴）
+- plugin/scripts/full-suite-runner.ts（套件耗时序列并入 verification-round.jsonl——AC6）
+- plugin/test/checker-cost.test.mjs（新：AC1/AC2/AC6 夹具 + AC7 node:test）
+- plugin/test/scoped-static-checks.test.mjs（run_checker 包装后的 commandLine 断言更新）
+- scripts/test.sh（source checker-cost-lib.sh；run_static_checks 每个判据用 run_checker 包装）
+- packages/quay/src/gate/engine.ts（runGate 记录 gate:<gate>:<id> 成本——AC1 gate 执行路径）
+- .gitignore（**/.quay/checker-cost.jsonl）
 - tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC3 并列交叉标注 + 实例 #10 斜率已记）
 - tasks/gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness.md（AC4 优先级标注）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用，已存在）

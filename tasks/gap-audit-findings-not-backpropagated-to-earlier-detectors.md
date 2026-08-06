@@ -2,7 +2,7 @@
 id: gap-audit-findings-not-backpropagated-to-earlier-detectors
 title: Independently confirmed Execute findings are not classified, calibrated,
   and promoted into earlier Prepare or Verify detectors
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -76,23 +76,31 @@ feedback surface.
 
 ## Acceptance Criteria
 
-- [ ] Classification rejects promotion when required evidence does not exist at the proposed
+- [x] Classification rejects promotion when required evidence does not exist at the proposed
   earlier stage; a runtime-only finding remains Audit/Wiring-Audit scoped.
-- [ ] One independently confirmed real finding has stable recurrence identity, complete-input
+- [x] One independently confirmed real finding has stable recurrence identity, complete-input
   proof, RED/GREEN fixtures, known-good and ambiguous-valid calibration, and false-positive
   measurements.
-- [ ] Profile/global activation requires a distinct authorized policy transition; the originating
+- [x] Profile/global activation requires a distinct authorized policy transition; the originating
   observer cannot mutate the policy or authoritative task state.
-- [ ] A policy activation changes the DIR-124-D hash and invalidates exactly the affected cached
+- [x] A policy activation changes the DIR-124-D hash and invalidates exactly the affected cached
   receipts.
 - [ ] A later real milestone is caught at the declared earlier stage with the same recurrence key
   and zero dispatches for downstream work made unnecessary by that failure.
-- [ ] The later Acceptance/Wiring Audit remains enabled and independently checks for escapes; lower
+- [x] The later Acceptance/Wiring Audit remains enabled and independently checks for escapes; lower
   cost caused by removing review is not accepted as success.
-- [ ] Metrics are reproducible from canonical receipts and DIR-126-D/E telemetry without reading
+- [x] Metrics are reproducible from canonical receipts and DIR-126-D/E telemetry without reading
   private Claude session JSONL. Missing value/cost inputs remain explicit unknowns.
-- [ ] A false-positive or reopened-finding control disables/fails the candidate safely and records
+- [x] A false-positive or reopened-finding control disables/fails the candidate safely and records
   the policy/receipt consequences.
+
+### AC5 (unchecked — pending a future real milestone)
+
+The AC5 early-catch proof requires a LATER real milestone that exhibits the class to be caught at
+PlanCheck with the same recurrence key and zero downstream dispatches. That is a forward-looking
+proof this task cannot supply: the mechanism is wired and demonstrated on the real M208 finding
+(emits the same recurrence key `ac7-checklist-missing` at PlanCheck), but the "later real milestone"
+occurrence is pending. Reported as unknown rather than fabricated (AC7 discipline).
 
 ## Definition of Done
 
@@ -113,10 +121,74 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 ## Touches
 
 - `tasks/gap-audit-findings-not-backpropagated-to-earlier-detectors.md`
-- `experiments/quay-perpetual-stream/scripts/*finding*`
-- `plugin/scripts/*finding*`
-- `experiments/quay-perpetual-stream/scripts/*execution-policy*`
-- `plugin/scripts/*execution-policy*`
-- `experiments/quay-perpetual-stream/test/*finding*.test.mjs`
-- `plugin/test/*finding*.test.mjs`
+- `experiments/quay-perpetual-stream/scripts/finding-backpropagate.ts`
+- `plugin/scripts/finding-backpropagate.ts`
+- `experiments/quay-perpetual-stream/scripts/execution-policy.ts`
+- `plugin/scripts/execution-policy.ts`
+- `experiments/quay-perpetual-stream/test/finding-backpropagate.test.mjs`
+- `plugin/test/finding-backpropagate.test.mjs`
+- `experiments/quay-perpetual-stream/test/execution-policy.test.mjs`
+- `plugin/test/execution-policy.test.mjs`
 - `docs/proposals/quay-prepare-execute-feedback-convergence.md`
+
+## Test-Files
+
+- `plugin/test/finding-backpropagate.test.mjs`
+- `plugin/test/execution-policy.test.mjs`
+
+## Execution record
+
+**Mechanism (landed, both mirrors byte-identical):**
+
+- `finding-backpropagate.ts` — `classifyFinding` (task-specific|profile|global +
+  `earliestDetectableStage` + promotion decision; AC1 rejection), `detectAcCoverageCitations`
+  (the real M208 PlanCheck detector class, recurrenceKey `ac7-checklist-missing`),
+  `proveDetector` (RED/GREEN/ambiguous calibration with measured false-positive rate; AC2),
+  `backpropagate` (authorized activation; AC3/AC4), `controlFalsePositive` (AC8),
+  `reportBackpropagationMetrics` (AC7 — reads only canonical receipts + DIR-126-D/E telemetry;
+  missing cost inputs are explicit unknowns).
+- `execution-policy.ts` — the minimal versioned policy-hash + authorized-activation substrate
+  DIR-124-D adopts: `createPolicy`, `authorizeActivation` (distinct authorized transition; the
+  originating observer can never self-activate), `revokeActivation`, `bindPolicyHash`,
+  `invalidateReceiptsForPolicyChange` (exact-affected invalidation, AC4).
+
+**Proof case (real, not synthetic):** `milestones/M208/proposal-ledger.json` entry `55016c0b`
+(rootCauseKey `ac7-checklist-missing`) migrates via `migratePrepareLedger` to a FindingEnvelope,
+classifies eligible for PlanCheck (complete-input proof = the real task file hash
+`tasks/gap-build-phase-null-result-not-gated.md`), and is calibrated against RED/GREEN/ambiguous
+corpora. The M192 Build-null runtime finding is the AC1 negative control (rejected for promotion to
+PlanCheck because `buildRuntimeResult` first exists at Build).
+
+**Invoke evidence (scoped run, exit 0):**
+
+```text
+$ bash scripts/test.sh --for-task gap-audit-findings-not-backpropagated-to-earlier-detectors
+PASS: every test file uses node:test ... new files declare @test-group.
+PASS: all 44 violation(s) are baselined in plugin/test-isolation-violations.txt ...
+task-contract-check: no violations.
+PASS: no NEW stale strategic doc beyond the KNOWN_STALE baseline
+ℹ pass 36
+ℹ fail 0
+ℹ duration_ms 459.384987
+```
+
+Real-finding classification CLI output (M208 finding `55016c0b`):
+
+```text
+MIGRATED finding: 55016c0b | ac7-checklist-missing
+CLASSIFY: {"earliestDetectableStage":"PlanCheck","generalization":"profile","promotionAllowed":true,
+  "detectorCandidate":{"detectorId":"det-ac-coverage-citations","recurrenceKey":"ac7-checklist-missing",
+  "rule":"detectAcCoverageCitations","stage":"PlanCheck"}}
+CALIBRATION: {"ok":true,"redHitRate":1,"falsePositiveRate":0,"ambiguousValidRate":1}
+BACKPROP audit-attempt: false | authorizer-role-not-authorized: "Audit" cannot activate ...
+BACKPROP authorized: true | back-propagated ac7-checklist-missing to PlanCheck; 1 affected receipt(s) invalidated
+METRICS: {"total":2,"generalizable":1,"promoted":1,"backPropagationRate":1,
+  "unknownFields":["agent-minutes (contentAgentMs) absent from canonical telemetry",
+  "token delta absent from canonical telemetry"]}
+```
+
+**AC status:** AC1, AC2, AC3, AC4, AC6, AC7, AC8 satisfied with mechanical tests (36 scoped tests,
+0 fail). AC5 unchecked (requires a future real milestone). DoD unchecked per fast-mode discipline.
+Dependency note: DIR-124-D (full execution-policy registry) and DIR-118 (post-Land observer) are
+`todo`; this task supplies the versioned policy-hash + authorized-activation substrate that
+DIR-124-D adopts, and wires the mechanism without depending on the unlanded post-Land observer.

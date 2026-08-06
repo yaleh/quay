@@ -98,6 +98,33 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 `bash plugin/scripts/dead-loop-check.sh --root /home/yale/work/meta-cc --json` ⇒ **`loop_alive=dead`**
 （29 小时零进展的立案实例被机械自动抓出）；`--root /home/yale/work/archguard --json` ⇒
 **`loop_alive=alive`**（处置后健康，无误报）；本仓库 ⇒ `loop_alive=alive`（外层活跃提交）。
+      **证据**：`plugin/scripts/dead-loop-check.sh`（new）`--selfcheck` control 1（无驱动 + 无提交 ⇒ dead）
+      + `plugin/test/dead-loop-check.test.mjs`「AC1」三用例（无驱动无提交 ⇒ dead / 最近 git 提交 ⇒ alive /
+      最近 transcript user 消息 ⇒ alive）+ 窗口边界（29min 窗口内 ⇒ alive，31min 窗口外 ⇒ dead）。见下方
+      「scoped 验证」。
+- [x] AC2: **队列空 vs 没人驱动可区分**——两种状态从此分开（queue-empty = 健康空闲；dead-loop = 没在转）
+      **证据**：`--selfcheck` control 2（队列空但有驱动 ⇒ alive）+ 测试「AC2」两用例（无 tasks/ 但最近驱动 ⇒
+      alive；tasks/ 满载但无驱动 ⇒ dead）——backlog 满否**不是** liveness 输入（invariant
+      `liveness_independent_of_backlog`）。
+- [x] AC3: **归入 L2 持续健康**——SPEC-complete-delivery-surface 第 5 节层次二（循环在转）；判据补
+      「铺了 + 在转」两层
+      **证据**：SPEC §5 已加 L2 活实例交叉标注（dead-loop 判据 + `dead-loop-check.sh` invoke）；
+      `gap-complete-delivery-surface-spec-and-l1-verification.md` 已补「L2 补『循环在转』」交叉标注；
+      `dead-loop-check.sh` 已加入 `quay-init.sh` 派生铺设集（`derive_loop_scripts` (c)）+ capability-catalog 声明。
+- [x] AC4: **真实使用**——meta-cc/archguard 现在会被判 dead-loop（29 小时零进展），处置后（2a9aaef3 /
+      4aaf2f29 驱动）转健康；判据未来自动抓同类
+      **证据**：实跑 `bash plugin/scripts/dead-loop-check.sh --root /home/yale/work/meta-cc --transcript outer <meta-cc transcript> --window-min 30` ⇒
+      `loop_alive: dead`（git_last_commit_min 17517 / transcript_last_user_min 19123，两者远超 30 分钟窗）。
+      测试「AC4 real use」在 meta-cc 在场时断言同判据（本机器缺 archguard 目录，archguard 只以 transcript
+      信号评估）。见下方「scoped 验证」。
+- [x] AC5: **AC10 诚实记账**——本条 pre-friction（管理者去看才发现，非被硌），AC10 +1（0→1）；机器
+      pre-friction 计数仍 0（生成器 AC2）
+      **证据**：`gap-axis-generator-question-what-range-every-standing-criterion.md` 已加 AC5 cross-mark
+      （count-1 pre-friction，`0 → 1（dead-loop，去看才看见）`，指向本任务）。记账只做交叉引用，不勾生成器
+      自身的 AC。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/dead-loop-check.test.mjs` 首行 `// @test-group governance` + `import { test } from "node:test"`；
+      11 用例全绿（pass 11 / fail 0 / cancelled 0）。
 
 ## Test-Files
 
@@ -112,7 +139,13 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 ## Touches
 
 - tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- [ ] AC1–AC6 全部勾上；AC4 实测输出贴任务体（见「scoped 验证」；DoD 由外层 full-suite gate 判）
+- [ ] dead-loop 判据在：未运行循环被自动判出（非靠人去看）；队列空 vs 没人驱动可区分
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——scoped 模式不可知，由外层 verification round 判
 
+## Touches
+
+- tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md
 - plugin/scripts/（dead-loop 检测 helper：transcript user 消息 + git 提交时间窗）
 - orchestration/SPEC-complete-delivery-surface-2026-08-05.md（第 5 节 L2 实例交叉标注）
 - tasks/gap-complete-delivery-surface-spec-and-l1-verification.md（L2 补「循环在转」）
@@ -153,3 +186,43 @@ status: todo——L2 持续健康活实例；排 ROUND 3 收尾后，高优先�
 2. **meta-cc .halt（08-05 07:45/50）**：是管理者**主动**为资源优先级挂的（.halt 内容写明），在立案驱动
    （07:33）**之后**的独立动作——不是任务描述的那种「被动从没收到驱动」。任务立案时（07:2xZ）meta-cc
    尚未有 .halt，其 29h 停滞确为无驱动所致。
+## scoped 验证（`bash scripts/test.sh --for-task <id> --allow-thin`）
+
+```
+warning: test-selection-thin: … resolved tests for 0/5 Touches entries; pass --allow-thin to run anyway
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  scoped check: task-contract-check (strict-subset over the 3 touched task files)
+task-contract-check: no violations.
+  scoped check: strategic-doc-staleness-check
+stale_refs_found (new, beyond baseline): 0
+PASS: no NEW stale strategic doc beyond the KNOWN_STALE baseline
+== build dist/quay.js … ==   ⚡ Done in 98ms
+== build dist/quay-native.js … ==   ⚡ Done in 102ms
+[sync-vendor --sync-dist] done.
+✔ AC1 — no recent drive + no recent commit ⇒ dead (the never-run loop is caught)
+✔ AC1 — a recent git commit ⇒ alive (loop is driving even with no transcript)
+✔ AC1 — a recent transcript user message ⇒ alive even when the repo commit is ancient
+✔ AC1 — window boundary: a commit just INSIDE the window is alive, just OUTSIDE is dead
+✔ AC2 — queue-empty but driven ⇒ alive (healthy idle, NOT dead-loop)
+✔ AC2 — full backlog but no recent drive ⇒ dead (nobody driving, NOT healthy idle)
+✔ AC6 — the test declares // @test-group governance and node:test
+✔ AC3 — the script carries the Contract invoke vocabulary (transcript / 提交 / N 分钟)
+✔ AC3 — the script NEVER reads the backlog (invariant liveness_independent_of_backlog)
+✔ AC4 — real use: the criterion judges meta-cc (a project with zero recent drive) dead-loop
+✔ Contract control — --selfcheck PASSes (AC1 no-drive⇒dead, AC2 queue-empty-but-driven⇒alive)
+ℹ tests 11   ℹ pass 11   ℹ fail 0   ℹ cancelled 0
+```
+
+AC4 实跑（真实项目 meta-cc，`bash plugin/scripts/dead-loop-check.sh --root /home/yale/work/meta-cc --transcript outer <meta-cc transcript> --window-min 30`）：
+
+```
+loop_alive: dead
+git_last_commit_min: 17517
+transcript_last_user_min: outer 19123
+window_min: 30
+alive_signals: none
+```
+
+判据与已处置固化完成（resume 两步合一：机制 `plugin/scripts/dead-loop-check.sh` + 交叉标注 SPEC §5 / 两任务）。
+注：scoped 运行需 node_modules 工作区链接（worktree 内按 `develop-merge` 先例补齐），否则 native dist build 报
+`Could not resolve "quay/…"`。
