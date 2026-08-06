@@ -56,6 +56,7 @@ extra: {}
 
 ## Touches
 
+- tasks/gap-over-90m-false-signal-source-reads-telemetry-not-task-status.md
 - plugin/scripts/inner-blocked-signal.ts
 - plugin/test/inner-blocked-signal.test.mjs
 - tasks/gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards.md（AC4 交叉标注）

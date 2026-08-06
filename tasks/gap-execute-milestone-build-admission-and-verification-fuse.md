@@ -2,7 +2,7 @@
 id: gap-execute-milestone-build-admission-and-verification-fuse
 title: execute-milestone has no size-aware Build admission, bounded verification
   ladder, or repeated-test failure fuse
-status: ready
+status: needs-human
 labels:
   - gap
   - milestone-candidate
