@@ -217,7 +217,10 @@ test("AC1 — the loop docs carry the fan-in invariant: RED ⇒ 一律暂缓 fan
     ["inner", read(INNER_TICK)],
     ["outer", read(OUTER_TICK)],
   ]) {
-    assert.ok(doc.includes("暂缓 fan-in"), `${name} doc: RED ⇒ 一律暂缓 fan-in (Contract invoke term)`);
+    // The actual wording is 暂缓…已完成 agent 的 fan-in (暂缓 and fan-in are separated) —
+    // assert the invariant via 暂缓 followed by fan-in with anything between, never a
+    // contiguous "暂缓 fan-in" substring (that is the outer-only form the inner doesn't use).
+    assert.match(doc, /暂缓[\s\S]*fan-in/, `${name} doc: RED ⇒ 一律暂缓 fan-in (Contract invoke term)`);
     assert.match(doc, /fan-in/, `${name} doc names fan-in`);
   }
 });

@@ -1,4 +1,8 @@
 // @test-group engine
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells
+// out to the REAL scripts/test.sh including `--group governance` (the grown governance sub-suite,
+// >830s isolated) — inherently heavy + fragile under full-suite concurrency (nested node --test
+// spawns; the outer reruns this family isolated per the 判绿 rules).
 // gap-test-suite-has-no-layer-grouping — tests for the layer-grouping mechanics in
 // scripts/test.sh: extended glob (AC2), realpath dedup (AC3), default groups product,engine
 // with governance self-skipping (AC4/AC6), --group (AC5), undeclared→engine (AC7), and

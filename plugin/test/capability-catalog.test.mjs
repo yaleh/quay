@@ -51,7 +51,18 @@ function runCatalog(args = [], opts = {}) {
 }
 
 function catalogRows() {
-  const r = runCatalog(["--json"]);
+  // The catalog is a pure read-only fs reader, but under the full suite a CONCURRENT test can
+  // briefly create/remove a script in plugin/scripts (its own temp fixture) — the catalog would
+  // then see a transient undeclared file and exit non-zero (AC1c gate). That is the reported
+  // concurrency flake (isolated 8/8 green). Retry the read-only catalog a few times before
+  // declaring it red — a transient file disappears; a real undeclared entry persists.
+  let r;
+  for (let attempt = 0; ; attempt++) {
+    r = runCatalog(["--json"]);
+    if (r.status === 0) break;
+    if (attempt >= 2) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  }
   assert.equal(r.status, 0, `catalog --json must exit 0:\n${r.stderr}`);
   return JSON.parse(r.stdout);
 }
