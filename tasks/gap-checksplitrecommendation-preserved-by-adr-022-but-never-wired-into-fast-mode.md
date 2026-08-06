@@ -72,17 +72,73 @@ route to; not bundling this with `gap-recursive-guard-only-covers-multi-mechanis
 recursion-depth bug fix (fixing a bug in an uncalled function is out of order until this is
 resolved).
 
+### Ruling (AC1 — 2026-08-06, fast-mode executor): **mark-aspirational (candidate 2), NOT wire-in**
+
+Decision recorded, not left implicit. The routing table is retained as **reference/manual
+policy** — the intended procedure for a human/agent authoring or triaging a task BY HAND — and
+CLAUDE.md is edited to say so (AC3). It is NOT mechanically enforced by any fast-mode code path.
+
+Rationale (evidence-based, not deferral-by-default):
+
+1. **The classifier's data inputs do not exist in the fast-mode task-authoring path.**
+   `checkSplitRecommendation` consumes a typed mechanism inventory (a review agent's
+   `mechanisms` array via `deriveMechanismInventory`) and a blocking-findings `ledger`. Fast mode
+   replaced ProposalReview/PlanCheck with `task-contract-check.ts` + subagent REFUTE rounds — no
+   fast-mode task body carries either a typed `mechanisms` inventory or a review ledger, so the
+   `split-multi-mechanism` and `split-subsystem-blocking-cluster` triggers have no honest data
+   source to read.
+2. **The only mechanical count source is calibrated UNRELIABLE.** `countMechanisms()` /
+   `extractMechanismClaims` (`wiring-coverage-check.ts`) was measured at 3/5 correct split
+   decisions — "NOT reliable enough to wire into the split path (A4 would falsely split)" —
+   `gap-extract-mechanism-claims-calibration` (status done, re-scoped 2026-08-02). Wiring a
+   60%-accurate counter into a split gate would manufacture false `split-multi-mechanism`
+   signals. The mechanism count is today LLM-agent-reported (classic loop only).
+3. **ADR-021 principle**: "不要在证据不足时把策略机械化" — the tick doc's judgment-boundary
+   section (unmechanized) explicitly keeps this class of split judgment human-made until enough
+   real cases accumulate.
+4. **Fast mode already mechanically enforces the scope guards the touch-set trigger was meant to
+   provide**: touch orthogonality (`checkTouchesPair` via `concurrent-batch-scheduler.ts` /
+   `ready-pool-check.ts`), compound decomposition (`it0-split-or-commit-check.ts`), and touch
+   resolvability (`touches-orthogonality-check.ts --resolve`).
+5. **Session precedent (2026-08-04)**: sibling `gap-plancheck-*` tasks were ruled `needs-human`
+   when their wiring target (`prepare-milestone.js`) was retired — same shape as this one; no
+   current evidence of harm beyond the doc drift itself.
+6. **ADR-022's preservation note is factually stale for 2 of its 3 named functions**: grep
+   shows `checkSplitRecommendation` AND `planCheckNextAction` both have zero non-test callers in
+   fast mode; only `checkTouchesPair` is genuinely wired.
+
+**Forward path (not abandoned):** the wire-in is deferred to `countMechanisms()` calibration
+(tracked in `gap-extract-mechanism-claims-calibration`'s re-scope note). When mechanism-count
+extraction is reliable, wire `checkSplitRecommendation` into `task-contract-check.ts`
+(report-only) or the todo→ready promotion path.
+
+**Grep evidence (the same exit criterion that found the gap, re-run 2026-08-06 on master@
+7cf74600):**
+```
+$ grep -rn "checkSplitRecommendation" --include="*.ts" --include="*.mjs" plugin/ experiments/quay-perpetual-stream/ | grep -v "/test/"
+plugin/scripts/proposal-convergence.ts:217  (definition + internal refs only)
+experiments/quay-perpetual-stream/scripts/proposal-convergence.ts:217  (mirror, same)
+```
+Zero hits in any fast-mode tick/skill/checker file (`task-contract-check.ts`,
+`concurrent-batch-scheduler.ts`, `ready-pool-check.ts`, `it0-split-or-commit-check.ts`,
+`touches-orthogonality-check.ts`, `plugin/loop/fast-mode-loop-tick.md`, `plugin/skills/author/SKILL.md`).
+
 ## Acceptance Criteria
 
-- [ ] AC1: human/task decides wire-in vs. mark-aspirational (real ruling recorded in this task
-      body, not left implicit)
-- [ ] AC2: if wire-in — `checkSplitRecommendation` has a real, live, non-test caller in the
-      fast-mode dispatch or task-authoring path (grep evidence pasted, exit criterion same shape
-      as the one that found the gap)
-- [ ] AC3: if mark-aspirational — `CLAUDE.md`'s split-decision routing policy section is edited to
-      say the table is not currently mechanically enforced, with a pointer to this task
-- [ ] AC4: `gap-recursive-guard-only-covers-multi-mechanism`'s narrow bug-fix scope is re-evaluated
-      once AC1 lands — dispatchable if wire-in was chosen, stays `needs-human` if aspirational
+- [x] AC1: **RULING LANDED — mark-aspirational (candidate 2), NOT wire-in.** Full decision +
+      evidence in "Chosen mechanism → Ruling (AC1)" above (2026-08-06).
+- [x] AC2: **n/a — wire-in NOT chosen** (AC1 ruling is mark-aspirational). Grep evidence of the
+      zero-caller state pasted in the Ruling block above (the same exit criterion that found the
+      gap); the antecedent of this conditional AC is false, so there is nothing to wire.
+- [x] AC3: **LANDED — `CLAUDE.md`'s split-decision routing policy section edited** to state the
+      table is NOT mechanically enforced, with a pointer to this task (see the STATUS note added
+      at `CLAUDE.md` §"Split-decision routing policy", 2026-08-06).
+- [x] AC4: **RE-EVALUATED — `gap-recursive-guard-only-covers-multi-mechanism` stays `needs-human`.**
+      Since AC1 chose aspirational, the AC4 outcome is "stays needs-human", which matches that
+      task's current `status: needs-human` (verified 2026-08-06) — no status write needed. Its
+      remaining AC7 target (`prepare-milestone.js` `_splitCheck()`) is retired under ADR-022, and
+      its core mechanism (the hoisted `wbsLevel >= 2` guard in the retained
+      `checkSplitRecommendation`) is already landed + unit-tested.
 
 ## Definition of Done
 
