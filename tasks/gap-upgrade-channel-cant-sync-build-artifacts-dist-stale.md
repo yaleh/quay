@@ -115,6 +115,11 @@ control   src 更新后不重建 ⇒ dist 陈旧（AC1 负控制）；重建后 
 - **gap-delivery-surface-grows-but-target-freezes-no-upgrade**：交付面（派生脚本）长大而目标项目冻结
   （静态漂移，L2 升级正确性）。**本任务 = 构建产物轴上的同族**：源码同步但构建产物不跟随，verify 只查
   存在不查新鲜度。两条升级通道缺陷同一根因：「安装物没有新鲜度判据」。
+- **gap-no-active-node-version-check-users-cant-tell-upgrade（AC4 交叉标注）**：dist 路径（dist/quay.js）
+  与源码执行路径（`--experimental-strip-types`）的 Node floor **分开声明**。源码执行需 Node >= 22.6，
+  由新入口探针（packages/quay/bin/node-version-probe.cjs）主动 fail-closed 检查；dist 路径是
+  esbuild 转译产物，floor 由 dist-verify-node-floor CI 单独声明，**不经过**源码探针（两者互不依赖，
+  各自按自己的 floor 判断）。
 
 ## Dispatch review
 

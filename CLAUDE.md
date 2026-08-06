@@ -14,7 +14,7 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
 
 No `package.json` scripts and no build step (plain ESM Node ≥20; repo developed on Node 25). `npm install` at the root (npm workspaces, `packages/*`).
 
-- **Run the CLI:** `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` (Core), `node packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
+- **Run the CLI:** `node packages/quay/bin/quay.cjs <cmd>` (Core — the source-execution ENTRY: a pure-JS Node-version probe that FAILS CLOSED with a clear "requires Node >= 22.6" message below the `--experimental-strip-types` floor, then runs the real TS entry; the older direct spelling `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` still works on a compliant Node), `node packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly). **Node floor:** running quay from source (`--experimental-strip-types`) needs **Node >= 22.6** — the entry probe (`packages/quay/bin/node-version-probe.cjs`) checks `process.versions.node` at startup and names the floor + an upgrade hint instead of the bare `bad option` error (gap-no-active-node-version-check-users-cant-tell-upgrade). The dist bundle `dist/quay.js` has its OWN floor (dist-verify-node-floor CI), separate from the source-execution floor (AC4).
 - **Tests** (Node's built-in runner, `.mjs` under each package's `test/`):
   - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
     file and `.github/workflows/ci.yml` invoke; it owns the test-file glob
@@ -117,7 +117,7 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     applies to every quay/meta-cc/archguard/playwright MCP tool used across this repo's workflows
     and skills. If `ToolSearch` returns zero results for a name you expect to exist, that is a
     real failure signal (a renamed/removed tool, a stale skill reference) — do not retry blindly.
-- **Web UI:** `node --experimental-strip-types packages/quay/bin/quay.ts serve --host <ip> --port <p>` (renders task bodies as markdown; reads the task store live per request).
+- **Web UI:** `node packages/quay/bin/quay.cjs serve --host <ip> --port <p>` (renders task bodies as markdown; reads the task store live per request; requires Node >= 22.6 — see the Run-the-CLI note above).
 
 ## Architecture — the product (`packages/`)
 

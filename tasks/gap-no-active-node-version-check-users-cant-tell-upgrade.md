@@ -53,10 +53,81 @@ nvm 管理 node，管理者的**非交互 ssh 调用绕过了 nvm.sh**（~/.bash
 
 ## Acceptance Criteria
 
-- [ ] AC1: Node 18.x 上跑 quay 入口 ⇒ 清晰报错（命名所需版本 + 升级提示），非裸 bad option（实测）
-- [ ] AC2: Node ≥22.6 正常路径零影响（探针不挡正常使用）
-- [ ] AC3: 探针纯 JS 可在老 node 上执行（不依赖 strip-types）
-- [ ] AC4: 与 dist-follow/upgrade-channel（在飞）交叉标注——dist 路径 floor 单独判断
+- [x] AC1: Node 18.x 上跑 quay 入口 ⇒ 清晰报错（命名所需版本 + 升级提示），非裸 bad option（实测）
+      —— 实测：worktree 无 Node 18 二进制（nvm 仅 v22.23.1/v25.2.0），用 `QUAY_TEST_NODE_VERSION`
+      seam 等价替换探针解析的 `process.versions.node` 字符串，走**真实 launcher 同一代码路径**。该
+      seam 无法制造假通过——在真正无 strip-types 的老运行时上跳过探针只会重现裸 bad option。
+      ```
+      $ QUAY_TEST_NODE_VERSION=18.19.1 node packages/quay/bin/quay.cjs --version; echo exit=$?
+      quay: requires Node >= 22.6 to run from source (this is Node 18.19.1).
+      quay: `node --experimental-strip-types` needs Node >= 22.6; upgrade Node and re-run.
+      quay: 升级提示 — upgrade Node (e.g. nvm install 22) and re-run, or use the built dist/quay.js whose floor is declared separately (AC4).
+      exit=1
+      ```
+      Contract measure（低版本实测）：
+      ```
+      $ node --version && QUAY_TEST_NODE_VERSION=18.19.1 node packages/quay/bin/quay.cjs --version 2>&1 | grep -c 'Node.*22\.\|升级\|>=22'
+      v25.2.0
+      3
+      ```
+      `clear_error` = 3 ≥ band 1（低版本报清晰错误非裸 bad option）。scoped 测试 AC1 e2e（模拟低版本走真实
+      launcher，断言 stderr 含 22.6 + 升级提示且**不含** `bad option`）PASS。
+- [x] AC2: Node ≥22.6 正常路径零影响（探针不挡正常使用）
+      —— 高版本 control：`node packages/quay/bin/quay.cjs --version` 正常透传（exit 0，输出 0.3.13），
+      grep 计数 = 0（零告警）。scoped 测试 AC2 e2e（真实 launcher 透传到 quay.ts）PASS。探针仅在新
+      `.cjs` 入口；旧直连 `node --experimental-strip-types packages/quay/bin/quay.ts` 原样可用。
+- [x] AC3: 探针纯 JS 可在老 node 上执行（不依赖 strip-types）
+      —— probe 为纯 CommonJS（`packages/quay/bin/node-version-probe.cjs`，`.cjs`，仅用
+      require/process/console，无任何 strip-types/ESM-only 语法）。scoped 测试 AC3 用
+      `createRequire` 无 strip-types 纯加载通过（老 node 上 `require` 即可执行，满足鸡生蛋约束）。
+- [x] AC4: 与 dist-follow/upgrade-channel（在飞）交叉标注——dist 路径 floor 单独判断
+      —— CLAUDE.md Run-the-CLI 注明：dist 路径（dist/quay.js，esbuild 转译产物）由
+      dist-verify-node-floor CI 声明**独立 floor**，不经过源码探针（探针只保护
+      `--experimental-strip-types` 源码路径的 22.6 floor）。`tasks/gap-upgrade-channel-cant-sync-
+      build-artifacts-dist-stale.md` `## Cross-annotation` 加交叉标注段（见该文件）。
+
+## Evidence（scoped 验证实跑输出）
+
+```
+$ bash scripts/test.sh --for-task gap-no-active-node-version-check-users-cant-tell-upgrade --allow-thin
+warning: test-selection-thin: ... resolved tests for 0/5 Touches entries (0.00) < 0.5; pass --allow-thin to run anyway
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  scoped check: run_checker "task-contract-check" ... --strict-subset '<this task>' '<upgrade-channel task>'
+task-contract-check: no violations.
+...
+  scoped check: run_checker "adr016-screen-use-check" ...
+adr016-screen-use-check — 117 shell script(s) scanned
+violations: 1
+  plugin/scripts/session-liveness.sh:913 ... [taint-flow ← $masked_content]
+PASS: active whole-screen-hash violations (1) within band (0..1)
+== build dist/quay.js ... ==
+== build dist/quay-native.js ... ==
+== mirror vendored plugin dist ... ==
+✔ AC3: the probe module is pure CommonJS — loads without strip-types (plain node:test run)
+✔ AC1: versions below the 22.6 floor fail closed with a clear message (naming floor + upgrade hint)
+✔ AC2: versions at/above the 22.6 floor are a no-op (ok, empty message)
+✔ AC1 e2e: the real launcher fails closed on a simulated low Node (QUAY_TEST_NODE_VERSION seam)
+✔ AC2 e2e: the real launcher passes through on the current Node (>= floor, zero impact)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+```
+
+Contract invoke（探针存在性 grep）：
+```
+$ grep -rn 'versions.node\|process.version\|22\.6' packages/quay/bin/ plugin/scripts/
+packages/quay/bin/quay.cjs:7:  // real TS entry when the runtime is below the `--experimental-strip-types` floor (22.6),
+packages/quay/bin/node-version-probe.cjs:6:  // (`node --experimental-strip-types bin/quay.ts`) requires Node >= 22.6. package.json's
+packages/quay/bin/node-version-probe.cjs:23:  // `node --experimental-strip-types` needs Node >= 22.6 (the source-execution floor).
+packages/quay/bin/node-version-probe.cjs:39:  // version string the way Node reports it in `process.versions.node` — it does NOT trust the
+packages/quay/bin/node-version-probe.cjs:42:  // When `versionString` is omitted, the REAL runtime's `process.versions.node` is checked,
+packages/quay/bin/node-version-probe.cjs:52:  // *   required — the floor as "22.6"
+packages/quay/bin/node-version-probe.cjs:57:      versionString || process.env.QUAY_TEST_NODE_VERSION || process.versions.node
+```
 
 ## Touches
 
@@ -65,6 +136,10 @@ nvm 管理 node，管理者的**非交互 ssh 调用绕过了 nvm.sh**（~/.bash
 - plugin/scripts/quay-init.sh（若探针放 init）
 - CLAUDE.md（调用方式注明所需 Node 版本）
 - tasks/gap-upgrade-channel-cant-sync-build-artifacts-dist-stale.md（AC4 交叉标注）
+
+## Test-Files
+
+- packages/quay/test/node-version-probe.test.mjs（AC1/AC2/AC3 探针测试；用 createRequire 纯加载探针 + 真实启动 launcher 的 QUAY_TEST_NODE_VERSION seam）
 
 ## Contract
 
