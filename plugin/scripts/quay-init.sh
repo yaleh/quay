@@ -1028,45 +1028,6 @@ PYEOF
 # count — L_D) + the upgrade-path integration in the --loop block. Contract measure/invoke:
 #   `bash plugin/scripts/quay-init.sh --check-drift` stdout's 漂移/缺失/一致 number fields.
 
-# derive_loop_scripts — populate the LOOP_SCRIPTS array (the derived laydown set) from the SAME
-# grep the --loop block used before this extraction: every `plugin/scripts/*` reference in the
-# shipped skills + tick docs, PLUS the explicit bare-name / transitive-dependency / capability-catalog
-# additions (their rationale lives in the --loop block's comments, kept verbatim). Single source,
-# drift-immune — there is no second hand-maintained copy of the set.
-derive_loop_scripts() {
-  local derived
-  derived="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
-  local -a all=()
-  # shellcheck disable=SC2207
-  all=(
-    $derived
-    # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
-    inner-idle-log.ts
-    heavy-op-token.sh
-    it0-split-or-commit-check.ts
-    pipe-exit-code-check.sh
-    # transitive deps of the checkers (imported by them, not doc-referenced):
-    gate-script-base.ts
-    workflow-event-schema.mjs
-    task-schema.ts
-    touches-parser.ts
-    wiring-coverage-check.ts
-    # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
-    capability-catalog.sh
-  )
-  # Dedupe (an explicit addition may coincide with a derived reference): count and lay each script
-  # exactly once. A duplicated entry would double-count the drift report's derived-set N (the L2
-  # 升级正确性 measure) and re-process the same copy in the --loop laydown.
-  LOOP_SCRIPTS=()
-  local s t in
-  for s in "${all[@]}"; do
-    in=0
-    for t in "${LOOP_SCRIPTS[@]}"; do
-      [ "$t" = "$s" ] && { in=1; break; }
-    done
-    [ "$in" = 0 ] && LOOP_SCRIPTS+=("$s")
-  done
-}
 
 # compute_drift_report <workspace-root> — the derived-set-axis drift report (AC2). For every script
 # in the derived laydown set, classify the target's copy:

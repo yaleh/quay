@@ -101,9 +101,6 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
       （`plugin/scripts/test-file-snapshot.sh` + `plugin/test/test-file-snapshot.test.mjs`，scoped 5/5 绿）；
       本任务与其双向交叉标注（Touches 互引 + 本任务 Proposal AC4 前置②注明）。
 - [x] AC5: **前置③ 先清历史分支**——60 个历史遗留（experiment-4-iteration-* / _master_check 等）清理，
-- [ ] AC4: **前置② 先修全局计数断言**——脆弱断言（B3-2 族）改成相对基线判据，先于模型轮次落地
-      （前置任务：`gap-global-count-assertions-fragile-relative-baseline`，其 AC1–AC5 全绿后本 AC 视为满足）
-- [ ] AC5: **前置③ 先清历史分支**——60 个历史遗留（experiment-4-iteration-* / _master_check 等）清理，
       保留有未合并工作的分支
       落地：`git branch -d` 清理 **31 个** fully-merged-into-master 历史分支（experiment-4-iteration-0..12、
       `_master_check`、`_review-master-check`、`__mt_master`、`master-check`、`master-latest`、
