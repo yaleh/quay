@@ -251,3 +251,20 @@ changed: 执行落地。AC1/AC2/AC3/AC4/AC5/AC6 全过，证据贴任务体「�
 AC6（第三条路径 dist-plugin）无代码改动——机制已存在（publish-dist-branch.sh + publish-plugin-dist.yml），
 本地实跑证明从 v0.4.0 baseline 能重建完整 plugin 树；真实 --push 留待 release 流程。新增回归测试
 `packages/quay/test/npm-pack-e2e.test.mjs`（bundle_in_pack>0，5/5 PASS）；scoped --for-task 退出 0。
+
+## AC16 改判未达成（2026-08-06T10:4xZ，archguard 消费方 + 管理者双确认）
+
+**SEA 产物不含 plugin——AC16 未在产物层达成。**
+
+- **双确认**：archguard 下载 quay-sea-0.4.0-linux-x64.tar.gz 反查二进制字符串，6 个新机制名全不在；
+  管理者 `gh release download` + `tar tzf` 实测 tarball 只有 ./quay ./quay-native ./tasks/ ./.quay/config.yml
+  ——**完全没有 plugin 目录**。
+- **根因（管理者推测 + 外层核实坐实）**：SEA（--experimental-sea-config）打包用独立 assets 机制——
+  `esbuild-sea.mjs` 只 bundle `bin/quay.ts`（Core CLI），sea-config.json 无 assets 映射 plugin。
+  `package.json.files` 只影响 npm pack/publish（tgz），**对 SEA 二进制资产嵌入无作用**。
+  SEA 是单文件可执行 + plugin 是目录树——**结构性装不下**。
+- **含义**：AC16 的 files+plugin 只修了 npm tgz（非推荐分发），release 页面推荐的 quay-sea-*.tar.gz
+  **没修**。AC1-AC6 勾选基于 npm 视角，**产物层未达成**。
+
+**后续**：SEA 打包流程单独立案（gap-release-sea-bundle-excludes-plugin-tree），AC16 保持未达成直到
+SEA 产物含 plugin（或架构改为 release 同时发 SEA + plugin bundle 目录）。
