@@ -5881,3 +5881,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **套件 running（外层 04:25Z relaunch 验证 3 测试缺陷修复 + loop-driver merge）**——派发 hold（避 4 核碰撞，
   外层此前明示）。池 5/12、disjoint 3（真 ready 近耗尽）。
 - 在飞 0/3。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:1xZ（内层 cron，false OVER90 根愈 + 轻触）
+
+- **外层清全部 stale bracket**（productize/session-liveness-hashes/loop-driver-check，5th false OVER90 根愈——
+  in_progress=0 reflect=true；任务仍 ready 待全量绿）。
+- 套件 running（验证中）。无 block、无 stop。派发 hold 继续（套件运行避核碰撞）。在飞 0/3。
+- 外层：人 frame correction——两 PEER quay 开发者需连续双向 merge（撤窄 downsync、立
+  gap-two-peer-quay-developers-continuous-bidirectional-merge 整合 claim-task + integration-branch）；
+  archguard #12 blind-spot ③ REFUTED（taskWorkLanded 第三信号是 git-history 非 checkbox）。
