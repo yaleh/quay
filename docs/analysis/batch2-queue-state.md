@@ -5225,3 +5225,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **reanchor fan-in 完成**（`b1746d2a`，自述措辞收敛判据）。在飞 0。
 - **池可派候选耗尽**：DIR-043 自述 `dirStatus: deferred`（M76/M77 裁定 + Resolution「still deferred as a standing loop routine」）——ready-pool-check 误读 frontmatter 才列入 promotion，我误晋已回退 todo。其余全为 hold/landed（3 already-landed + 5 ROUND-3 + delivery-surface + DIR-124 parent）。**无可派候选**——等外层清 held/landed、定 ROUND-3、或补新候选。
 - 套件 green。在飞 0/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T08:3xZ（内层，外层补池后首派：1/5）
+
+- **外层 closure round 2 + 补池**（d55a1cd6/781c957d）：flip 14 done + **关 15 遥测括号**（stale-bracket OVER90 假阳源已除——`--slots` 0/0/0）+ 晋 3 新 gap-* defect（dispatch-evaluated / gate-wait-as-failed / checksplitrecommendation）。**分支 cutover PHASE-2 完成**（b9769115）：develop 99 commits 已合推 GitHub，B 角色转 acceptance env。
+- **detect-stop 无停止条件、无 block**（括号已关，假阳不再）。
+- **派发 1/5**：`dispatch-evaluated`（派发资格只在 tick 边界评估 → slot 释放事件驱动——空槽即派）。补 self-touch + telemetry 已开。gate-wait-as-failed / checksplitrecommendation deferred（与 dispatch-evaluated 碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

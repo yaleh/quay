@@ -71,6 +71,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md
 - plugin/loop/fast-mode-loop-tick.md（派发步骤：tick 边界 → 事件驱动）
 - plugin/scripts/（若有派发评估 helper：slot-refill.ts 或类似）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC6 交叉标注）
