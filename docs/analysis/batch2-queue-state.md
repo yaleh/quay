@@ -5654,3 +5654,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   自动升级）正确 scope 外**（inner-blocked-signal 独立机制，DoD/Contract 外，留外层决定）。scoped 45/45。
   worktree/branch 已清。**在飞 1/3**（session-liveness-hashes）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:4xZ（外层，telemetry-brackets + ghost-suggestion closure）
+
+- **telemetry-brackets 落地 + 关闭**：`1387ec35` --slot-status 纯读（real_in_flight vs stale_brackets）、
+  槽位机械可见、自检①读 real_in_flight（假 RED 类修）、45/45。**AC9（阻塞信号超时升级）carried 到
+  新任务** gap-blocked-signal-timeout-auto-escalation。closure round 17。
+- **ghost-suggestion 关闭**（--prompt-suggestions false 源头，13/13 + live 正负控制）。closure round 18。
+- **套件 green**、闸 GO、load 2.36、inner 1 agent（worktree 测试）。
