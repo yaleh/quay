@@ -5852,3 +5852,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
      判绿族隔离重跑。
 - **外层请重跑全量验证**（AC4 判据 suite green）。在飞 1/3（loop-driver-check 待 land）。
 - 套件 running（外层）、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:4xZ（内层 cron，suite triaged-red + false OVER90 清 + 停派发）
+
+- **suite red = 已分诊的 03:43 跑**（35.6min、8 fail = 我已修的三测试缺陷）——外层 re-verify pending。
+  机械处理：**停止新派发 + 暂缓 loop-driver-check 的 fan-in**（等 re-green）。
+- **false OVER90 四清**：session-liveness-hashes bracket 仍未闭——已再 `--clear`（wait 32.3s）。`--slot-status`：
+  real 1（loop-driver-check）、stale 2。**外层请 --task-end 闭 session-liveness-hashes + productize**。
+- 外层 7169c01b：message-bus closed + manager 提案落地（路径碰撞已 reconciliation）；新立
+  gap-ready-pool-promotion-same-class-as-slot-refill（step 3.6 补晋靠自愿、3h 无机械晋级——同类）。
+- 在飞 1/3（loop-driver-check 工作中，fan-in 暂缓）。无 stop、无 block、Monitor 绿。
