@@ -6504,3 +6504,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   postinstall/message-bus/preemption + SEA 缺陷）。
 - 待外层 merge integration→develop（一次收口多个任务）+ 处理 SEA 缺陷（AC16 结构性问题）。
 
+
+### tick 2026-08-06T17:0xZ（integration→develop 收口完成 — 9 任务全落 develop）
+
+- **外层裁定执行**（2f84a566 模式）：merge integration into develop。integration 35 任务提交并入，
+  develop 33 记录保留。3 冲突解决：queue-state/tick-log 双留、postinstall 任务取完成态证据版。
+- **验证**：integration ⊆ develop（ancestor，develop..integration=0）；9 任务工作集全部 PRESENT
+  （supervisor-preempt/deliver/busy-identity、trend-check、checker-cost、package.sh、sync-vendor.test、
+  SEA 缺陷任务）。
+- **develop = 权威分支**（52d3804b）= 全 A+B 基线 + AC16 + spawn-count + supervisor③④⑤ + no-criterion +
+  quality-criteria + postinstall + message-bus + SEA 缺陷 + 记录提交。
+- **在飞 0/3**。master 冻结 ea2208cf（人触发才同步）。
+- **AC16 待办**：SEA 缺陷（单二进制 vs plugin 目录树结构性冲突）——develop 已含缺陷任务，待架构裁定。
