@@ -6053,3 +6053,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   已立案 gap-dispatch-fork-does-not-read-config-fork-baseline，记录在案不重做；
   supervisor 完成后按新规则派发。
 - 池 10/20；在飞 1/3（supervisor，master 基线，历史遗留）。
+
+### tick 2026-08-06T07:3xZ（外层，人分工轴裁定 + 三个待办）
+
+- **人裁定分工轴**（manager-phase-goal 96b32bd2）：轴 = 谁生产/谁验收，两目标同轴。
+  - 目标1 生产（files 加 plugin/、develop 打 tag、v0.4.0、SEA）= **A**
+  - 目标1 验收 = **B**（A 结构上无法验证自己 release——开发树在场，与 verify-delivery-surface 0/6 同形态）
+  - 目标2 机制（claim 协议/同步 cron/冲突策略）= **A**（plugin/ 产品面，B 不得自发明）
+  - 目标2 证明（首个跨机任务生命周期）= 两机双边
+- **三个待办顺序前提**（branch cutover 收口前分工无处落地）：
+  ① B 推送成功（b-machine-push-backup → GitHub develop）
+  ② **A 下次派发真的从 develop 分叉**（外层下个派发实测判别式：rev-list develop..分支 ∩ develop..master 交集大小）
+  ③ B 的 origin 指向修正
+- **当前状态**：config 已激活（07:09 fork_baseline:develop），内层已记录（fddb0955），supervisor 在飞
+  （14m），**尚无新派发**——待办②待 supervisor 完成后下一个派发验证。
