@@ -3,6 +3,7 @@
 每 20 分钟一行。`动作类型` 是判断分层是否退化的唯一依据（`correct` 占比 ≥50% = 内层自主性不足）。
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
+| 2026-08-06 22:2xZ | `no-action` | **进展 tick**：inner 在飞 3 任务——session-pid（60min，OVER90 预测 ~22:57 临近，AC1-4 checked AC5 deferred）；ac8 40→6 大集成（2 subagents：task-contract-check + counting .ts）；shipped-ts 新派（10.7min）。套件 green。OVER90 预测结果待验 | 内层：2 subagents（ac8），1 agent，2% until auto-compact | ①inProgress 3 条年龄核实；②session-pid 距 90min 29.7min |
 | 2026-08-06 22:0xZ | `no-action` | **进展 tick**：session-pid fan-in 已验证（52/50, cherry-pick 到 integration）但 4/9 ACs——未 done，留 ready（5 AC 待补：manager 路径/承重条负控制等）；ac8 40→6 大集成在飞（subagent Converting runChecker，223.6k tokens）；inner 22:16 再排程 | 内层：等 ac8 background agent，1 agent | ①session-pid 4/9 AC 核实；②ac8 subagent 在飞核实 |
 | 2026-08-06 21:4xZ | `no-action` | **进展 tick**：inner 在飞 session-pid（priority, in-flight）；ac8 自我触达已加但 defer（touches 与 session-pid 重叠）；chart2-s2 仍 needs-human。套件 green | 内层：Frolicking 1m44s，session-pid 执行中 | ①session-pid 仍 in-flight 核实；②套件 green |
 | 2026-08-06 21:2xZ | `unblock` | **派发恢复**：inner 派发 session-pid（优先项，task-start baseCommit=SUITE GREEN）并开工；chart2-s2 早先派发但 fan-in 冲突 → needs-human（71aef62c，worktree/branch 保留）。套件 green 确认 | 内层：Honking 1m29s，working on session-pid；1 agent | ①session-pid task-start 记录核实；②套件 green 21:25:29 |
