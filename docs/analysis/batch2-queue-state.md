@@ -5214,3 +5214,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层 develop-merge 合并回归已修复**（ad4efc48）：laydown-derivation 的 quay-init.sh 改动与 develop 分支重复 derive_loop_scripts（A-populate + B-print 不兼容契约）→ 92 laydown 失败；外层根因 + 修复 + 合并套件重跑。**协调注意**：我 merge 的 quay-init.sh 改动与 develop 分支相撞——外层已解。
 - **派发 1/5**：`reanchor-must-converge`（重锚步加自述措辞审计/收敛判据；split-batch 已 done，耦合满足）。补 self-touch + telemetry 已开。DIR-043 deferred（与 reanchor 碰撞）。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:5xZ（内层，reanchor fan-in 完成）
+
+- **reanchor 合并**（`b1746d2a`）：`self-report-vocab-check.ts` 自述措辞审计 + 收敛判据（连续 N 轮无 batch 式自述 ⇒ converged；非单调）——重锚有效性以语义收敛度量，非「重锚发生了」；tick 文档 1c 第 6 条接线。AC1–AC5 勾（16/16）。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
