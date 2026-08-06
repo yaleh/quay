@@ -604,14 +604,12 @@ export async function run(argv: string[]): Promise<number> {
     reason: finalState.reason ?? null,
     runner: base.runner,
   });
-  appendSuiteDurationRecord(root, {
-    startedAt,
-    durationMs,
-    laneCount,
-    green,
-    tests: testsSeen,
-    cancelled: cancelledSeen,
-  });
+  // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
+  // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
+  // The now-removed appendSuiteDurationRecord call wrote a SECOND record to the SAME file every
+  // run — 2 runs produced 4 lines and AC6's "pure append, one per run" assertion failed. The
+  // appendVerificationRound record is the canonical shape (state/pass/fail/round); the other
+  // function is retained as an exported helper only (no live callers).
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
