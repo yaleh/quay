@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-resumed-merge-regression-suspect
 title: "session-liveness.test.mjs test G (removing .halt resets staleness baseline) FAILS in isolation — RESUMED must fire on busy transition (actual false expected true, line 663); NOT the AC21 flake (manager full-run + outer isolated re-run both fail on G); session-liveness.sh WAS a merge-conflict file (eb5532f4, 152-line change) so the RESUMED/busy-transition logic may be a da065182/eb5532f4 cross-machine merge regression (5th instance: arity/title/session-liveness-test/loop-driver/cap-from-gate already caught); OR genuinely load-sensitive (test uses real tmux busy/idle timing, concurrent tmux sessions interfere); manager leans noise (multiple SSH/tmux), outer's isolated re-run failed too — needs controlled discrimination script-vs-test"
-status: done
+status: ready
 labels:
   - gap
   - defect
