@@ -70,8 +70,10 @@ done
 # (2026-08-06, gap-prefriction-trigger-regex-too-broad-signal-is-dead: the previous list matched 90.6%
 # of newly-filed tasks, deadening the signal. Bare '今晚' is a pure temporal reference. 'warning' was
 # dropped too — '--no-warnings' is a pervasive Node flag. Countable failures require a NON-ZERO count
-# ([1-9]...) so green "pass N / 0 failed" output and "AC6 fail-safe"-style terms don't trigger.)
-POST_FRICTION_RE='state=red|红了|SUITE-RED|full-suite red|red window|watchdog|OOM|out of memory|内存泄漏|memory leak|泄漏|卡死|死循环|死锁|崩溃|\bcrash(ed|es)?\b|\bhang(s|ing|ed)?\b|告警|报警|\balarm(s)?\b|[1-9][0-9]* ?fail(ed|ure)?s?([^a-z-]|$)|\bfailure(s)?[: =][ ]?[1-9][0-9]*'
+# ([1-9]...) so green "pass N / 0 failed" output and "AC6 fail-safe"-style hyphenated terms don't
+# trigger (the `([^-]|$)` guard rejects fail followed by a hyphen, while still catching "3 failing
+# tests" / "8 failed" — a real countable failure event.)
+POST_FRICTION_RE='state=red|红了|SUITE-RED|full-suite red|red window|watchdog|OOM|out of memory|内存泄漏|memory leak|泄漏|卡死|死循环|死锁|崩溃|\bcrash(ed|es)?\b|\bhang(s|ing|ed)?\b|告警|报警|\balarm(s)?\b|[1-9][0-9]* ?fail(ed|ure|ing)?s?([^-]|$)|\bfailure(s)?[: =][ ]?[1-9][0-9]*'
 
 # ── enumerate newly-filed tasks (git-added in the window) ─────────────────────────────────────────
 if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
