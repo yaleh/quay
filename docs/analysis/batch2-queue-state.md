@@ -5629,3 +5629,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ② session-liveness-hashes-token-counter（`fm-...-sxqszn`）③ telemetry-brackets-vs-subagents（`fm-...-eri043`）。
   全 self-touch/resolve 过，派发词带 Touches 精度规则。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:3xZ（外层，config-preserving 升级另立——archguard 子代发现）
+
+- **archguard 实跑**（01:27 tick #114）：`quay init --loop` 不加 --force ⇒ 停 config-conflict（新文件零铺设）；
+  加 --force ⇒ 覆盖丢 loop 值。**升级对已有消费者要么停要么毁 config**。51 测试测漂移报告非「报后怎么办」。
+- **裁定：另立** `gap-quay-init-config-preserving-incremental-upgrade`（done 的 delivery-grows 漂移检测
+  正确，config 保留是后继）。archguard 从 9 个 stopped-state 恢复（此验证即其接的方向）。
