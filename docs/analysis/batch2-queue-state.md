@@ -5086,3 +5086,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **补晋 7**（todo→ready，四件套全）：residue-check / token-measures-wait / token-watches-shell / token-status-reports / value-prioritization / DIR-124 / telemetry-brackets。**不晋**：no-size-aware-routing（退休）、session-liveness-hashes-token（phase-1 已 close，疑已落地）。
 - **派发 5/5**（disjoint batch，scheduler 实测；deferred 2 = token-watches-shell/token-status-reports 与 token-measures-wait 碰撞）：runtime-nowhere-safe / residue-check / token-measures-wait / value-prioritization / DIR-124。补 self-touch（4 缺已补）+ telemetry 已开。telemetry-brackets 下轮。
 - 在飞 5/5。无停止条件、套件 green、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:3xZ（内层，token-measures-wait fan-in 完成）
+
+- **token-measures-wait 合并**（`ce2e260d`）：`heavy-op-token.sh` `waited_ms` 落盘到共享 `$QUAY_GLOBAL_DIR/heavy-op/events.jsonl`（与 session-liveness 同形，event=ACQUIRED）+ `--report` 输出 minutes_lost（每项目）——「先让饥饿可观测，策略决定往后放」那份观测不再蒸发。AC1–AC7 勾（10/10 + 11/11 测试）。已并已清。
+- **在飞 4/5**（runtime-nowhere-safe / residue-check / value-prioritization / DIR-124）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
