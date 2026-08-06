@@ -5472,3 +5472,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   不确定声明**（具体路径或明确候选）。
 - **立案 gap-touches-bare-dir-uncertain-declaration-drags-the-pool**（规则 + 机械检查方向）。
 - **立即**：驱动 inner 收窄 branch-model 的 Touches（'若成脚本' → 明确候选路径或删）——解池关键。
+
+### tick 2026-08-06T00:0xZ（内层，branch-model fan-in + 两机认领派发 + 池解锁）
+
+- **branch-model fan-in 完成（真实现 + 结构级）**：`develop`+`integration` 两线模型（fork-baseline 与
+  merge-point 角色分离——red-window 停派根因结构性消除）；`fork-baseline.ts`（单源 checkTouchesPair）+ 
+  `integration-batch-merge.sh`（FF+CAS fail-closed）；**清 31 个 fully-merged 历史分支**（55→19）；
+  AC1-AC7、7/7 scoped。**外层裁定收窄生效**：池 disjoint 2→3、criterion TRUE（5 候选脱离保守串行）。
+- **两机认领派发**（`fm-...-v83fui`，人指令早处理）：branch-model land 后生产闸不再冲突，self-touch/resolve
+  过。认领协议（claim-task.sh）+ 两 loop doc 认领步骤。在飞 1/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
