@@ -151,3 +151,22 @@ quay-0 / meta-cc-3 / archguard-4 与 outer/inner 驱动会话）。**结论已�
   settings 文件 + launcher 承载，不是一条要手打的 shell 一行。
 - **invoke 校验**：`claude --settings .claude/launch.settings.json --version`（settings 文件本身可加载）。
 - 逐角色命令见 `orchestration/session-launch-recipes.md` §7。
+
+---
+
+## 8. 更新 2026-08-06 —— ghost-suggestion 源头消除为**必带参数（REQUIRED）**（gap-ghost-suggestion-eliminated-at-source）
+
+人 2026-08-05 裁定：可靠发送故障 6（gray ghost-suggestion 无法硬清空）**从源头消除**，验证成功后
+作为**冷启动要求（REQUIRED，非可选）**。2026-08-06 throwaway 会话双向实测通过（AC1/AC2，见任务体逐字证据）。
+
+**启动命令规范的必带参数**（三条路线，缺一不可，`plugin/test/launch-settings.test.mjs` 机械断言）：
+
+1. **CLI 参数**：`--prompt-suggestions false` —— `_launchSpec.promptSuggestions=false` 由
+   `plugin/scripts/quay-launch.sh` 翻译成 CLI 参数（settings.json 无 promptSuggestions 键，flag-only）。
+2. **环境变量**：`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` —— settings 文件 `env` 块承载
+   （官方环境变量路线是禁用的正确形态，RESEARCH-claude-code-cli-config §结果回写）。
+3. **验证判据**：`bash plugin/scripts/quay-launch.sh <role> --dry-run` 输出**必须含**
+   `--prompt-suggestions false`（负控：删 `_launchSpec.promptSuggestions` ⇒ 输出即变，测试红）。
+
+**throwaway 会话也可带 `--bare`**（一次性验证，不长驻）。任何角色（manager|outer|inner）的启动命令
+都不再可选地省略这两条——省略即启动规范不达标。

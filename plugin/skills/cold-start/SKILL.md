@@ -44,6 +44,15 @@ Verify the command without starting anything: `bash <root>/plugin/scripts/quay-l
 For a one-shot verification session use `bash <root>/plugin/scripts/quay-launch.sh <role> --bare`
 (minimal mode, not long-lived).
 
+**Ghost-suggestion elimination is REQUIRED, not optional** (`gap-ghost-suggestion-eliminated-at-source-
+prompt-suggestions-false`, 人 2026-08-05 裁定): the launch config MUST carry `--prompt-suggestions false`
+(as `_launchSpec.promptSuggestions=false`, translated by `quay-launch.sh`) AND
+`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (as the `env` key) — both routes, for every role. A cold
+start MUST confirm the materialized command contains the flag: `bash <root>/plugin/scripts/quay-launch.sh
+<role> --dry-run` output includes `--prompt-suggestions false`. A fresh session launched without it shows
+gray ghost-suggestion text in the input box that the reliable-send / pane classifier can misread as a
+submitted action (fault 6/7).
+
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
 "The same skill command produces the same observable consequences on any model" is only meaningful

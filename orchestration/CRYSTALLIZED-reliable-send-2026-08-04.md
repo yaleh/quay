@@ -76,6 +76,13 @@ until-loop 承载这个等待，不要用短 sleep 硬编码猜测延迟。
 当前行」，循环 C-u 最终能清空；故障 6 是「ghost 显示」，循环 C-u 永不生效——**判定靠「循环后 pane
 内容是否逐字不变」**。
 
+> **已被环境配置从源头消除（2026-08-05 立案 / 2026-08-06 实跑验证，
+> `gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`）**：
+> 启动规范（`.claude/launch.settings.json` + `plugin/scripts/quay-launch.sh`）已把
+> `--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` 列为**必带参数（REQUIRED）**，
+> 输入框不再渲染灰色占位建议 ⇒ 故障 6 不再出现。**运行时判定逻辑（直接输入覆盖）保留作历史兜底**——
+> 不删（防未来版本行为变化 / 非本仓启动的会话仍可能带 ghost）。
+
 ## 故障 7：全新会话的 welcome 屏占位符——C-u 循环清不掉、直接覆盖也卡（第六种送达失败模式）
 
 **证据**：2026-08-05 archguard 外层首次驱动自己的内层时，send-keys-reliable.sh 在**全新 welcome 屏**

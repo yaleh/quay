@@ -32,19 +32,90 @@ C-u/C-a+C-k 循环 N 次 pane 内容逐字不变）**可以从源头消除**，�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **安全验证**——一次性 throwaway 会话（scratch 目录、独立 tmux session、与 quay-0 运行
+- [x] AC1: **安全验证**——一次性 throwaway 会话（scratch 目录、独立 tmux session、与 quay-0 运行
       循环隔离）以 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` + `--prompt-suggestions false` 启动，
       空闲时输入框**不出现**灰色占位建议；验证后 kill 该会话，运行循环零接触
-- [ ] AC2: **负控制（对照）**——另一个 throwaway 会话**不带**该配置启动 ⇒ 输入框**出现**灰色占位建议
+- [x] AC2: **负控制（对照）**——另一个 throwaway 会话**不带**该配置启动 ⇒ 输入框**出现**灰色占位建议
       （证明测试能检出该形态）；带配置 ⇒ 不出现。两个方向的实跑输出逐字贴任务体
-- [ ] AC3: **冷启动要求**——验证通过后，启动命令规范（`orchestration/restart-plan-*.md` 与
+- [x] AC3: **冷启动要求**——验证通过后，启动命令规范（`orchestration/restart-plan-*.md` 与
       `plugin/skills/cold-start/SKILL.md`）加入 **必带参数**：`--prompt-suggestions false` +
       `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`，标注 **REQUIRED 非可选**
-- [ ] AC4: **故障 6 标注**——`orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 故障 6 标注
+- [x] AC4: **故障 6 标注**——`orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 故障 6 标注
       「已被环境配置从源头消除；运行时判定逻辑（直接输入覆盖）保留作历史兜底」
-- [ ] AC5: 一致性——`QUAY-OUTER-HANDOFF.md` / tick 文档若描述启动命令，同步该参数（grep 全仓核对；
+- [x] AC5: 一致性——`QUAY-OUTER-HANDOFF.md` / tick 文档若描述启动命令，同步该参数（grep 全仓核对；
       无则记「无其它实例」）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若验证逻辑可测试化）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若验证逻辑可测试化）
+
+## Invoke Evidence（2026-08-06 实跑，throwaway 会话；quay-0 零接触）
+
+**验证环境**：scratch 目录 `/tmp/ghost-verify-1785980028/`，独立 tmux session（`ghost-neg-*` / `ghost-pos-*`），
+与 quay-0 运行循环隔离；验证后按名 `tmux kill-session`，`tmux ls` 无 ghost 残留，quay-0 manager/outer/inner 原样。
+
+### AC2 负控制（不带配置 ⇒ 有建议）
+
+会话命令（无 prompt-suggestion 配置）：
+```
+CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 CLAUDE_CODE_DISABLE_MOUSE=1 claude-deepseek --permission-mode bypassPermissions
+```
+`tmux capture-pane -p -t ghost-neg-1785980028`（空闲 35s 后）输入框行（逐字，hexdump 佐证）：
+```
+❯ Try "fix lint errors"
+```
+字节级：`e2 9d af c2 a0 54 72 79 20 22 66 69 78 20 6c 69 6e 74 20 65 72 72 6f 72 73 22 0a`
+= `❯ <NBSP> Try "fix lint errors"\n` —— 灰色占位建议**出现**。
+
+### AC1 / AC2 正控制（带配置 ⇒ 无建议）
+
+会话命令（配置齐全，即启动规范要求的双路线）：
+```
+CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 CLAUDE_CODE_DISABLE_MOUSE=1 CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude-deepseek --prompt-suggestions false --permission-mode bypassPermissions
+```
+`tmux capture-pane -p -t ghost-pos-1785980085`（空闲 35s 后）输入框行（逐字，hexdump 佐证）：
+```
+❯ 
+```
+字节级：`e2 9d af c2 a0 0a` = `❯ <NBSP>\n` —— 输入框**无**灰色占位建议；整 pane grep `Try |fix lint|write a test|how do I` = **0 命中**。
+
+### 启动规范真实路径验证（AC1 补强，走更新后的启动规范）
+
+用 `plugin/scripts/quay-launch.sh inner --bare`（materialized 启动命令 = settings 文件 + launcher，
+含 `--prompt-suggestions false` + env 变量）起 throwaway 会话，输入框行逐字：
+```
+❯ 
+```
+字节级：`e2 9d af c2 a0 0a` = `❯ <NBSP>\n` —— 无 ghost；整 pane grep 建议文本 = **0 命中**。
+⇒ 更新后的启动规范（AC3 路径）实跑无 ghost-suggestion（非构造，真实冷启动路径的 one-shot 形态）。
+
+### 启动规范落地（AC3）—— 机械可验
+
+- `.claude/launch.settings.json`：`env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false"` **且**
+  `_launchSpec.promptSuggestions: false`（双路线 REQUIRED）。
+- `plugin/scripts/quay-launch.sh`：`_launchSpec.promptSuggestions == false` ⇒ 逐角色 `--dry-run` 输出含
+  `--prompt-suggestions false`（实测 manager/outer/inner 三角色均有）。
+- `orchestration/restart-plan-2026-08-04-third.md` §8、`plugin/skills/cold-start/SKILL.md`：REQUIRED 标注。
+
+### AC6 测试（node:test，`// @test-group governance`）
+
+`plugin/test/launch-settings.test.mjs` 新增两条 AC6 断言（双路线 REQUIRED + 负控删键掉 flag）。
+scoped 验证输出摘录：
+```
+node --test plugin/test/launch-settings.test.mjs
+ℹ tests 13
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+```
+`scripts/test.sh --for-task gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false --allow-thin`
+→ **EXIT 0**，task-contract-check 0 violations，drive-contract-check 0 violations，stale-refs 无新增。
+
+### AC5 一致性核对（grep 全仓）
+
+- `orchestration/QUAY-OUTER-HANDOFF.md`：**不拼写启动命令**（仅提及模型裁定 `claude-deepseek`）⇒ 无需同步。
+- `plugin/skills/session-topology/SKILL.md` / `plugin/scripts/quay-topology.sh`：启动命令**由 quay-launch.sh 单源生成**，
+  无手打命令可漂移 ⇒ 无需同步。
+- `plugin/scripts/os-anchor-install.sh` / `os-anchor-watchdog.sh`：硬编码 launch-cmd **缺** `--prompt-suggestions false`
+  —— 但已由**独立任务** `gap-os-anchor-watchdog-launch-missing-prompt-suggestions`（todo）单独追踪，非本任务范围。
+- `orchestration/RESEARCH-claude-code-cli-config-2026-08-05.md`：落地行已更新为双路线描述（本任务顺手订正）。
 
 ## Definition of Done
 
@@ -54,12 +125,13 @@ C-u/C-a+C-k 循环 N 次 pane 内容逐字不变）**可以从源头消除**，�
 
 ## Touches
 - tasks/gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false.md（自身文件：勾 AC + 贴 invoke 证据授权）
-
-
-- orchestration/restart-plan-2026-08-04-third.md（或当前生效的启动计划）
+- .claude/launch.settings.json
+- plugin/scripts/quay-launch.sh
+- plugin/test/launch-settings.test.mjs
+- orchestration/restart-plan-2026-08-04-third.md
 - plugin/skills/cold-start/SKILL.md
 - orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（故障 6 标注）
-- orchestration/QUAY-OUTER-HANDOFF.md（AC5 若需同步）
+- orchestration/RESEARCH-claude-code-cli-config-2026-08-05.md（双路线落地行订正）
 
 ## Contract
 

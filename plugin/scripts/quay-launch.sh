@@ -51,7 +51,12 @@ LAUNCHER="$(jq -er --arg r "$ROLE" '._launchSpec.roles[$r].launcher // empty' "$
 NAME="$(jq -er --arg r "$ROLE" '._launchSpec.roles[$r].name // empty' "$SETTINGS_FILE")"
 MODEL="$(jq -r --arg r "$ROLE" '._launchSpec.roles[$r].model // ""' "$SETTINGS_FILE")"
 EXCLUDE_DYNAMIC="$(jq -r '._launchSpec.excludeDynamicSystemPromptSections // false' "$SETTINGS_FILE")"
+# _launchSpec.promptSuggestions — ghost-suggestion 源头消除（gap-ghost-suggestion-eliminated-at-source-
+# prompt-suggestions-false，REQUIRED 非可选）。用 jq -e 判「字面 false」：键缺失或为 true 都不 emit，
+# 只有显式 false 才翻译成 CLI 参数 `--prompt-suggestions false`（settings.json 无 promptSuggestions 键，
+# 官方环境变量 CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false 由 env 块承载；两条路线都 REQUIRED）。
 ROLE_ENV="$(jq -c --arg r "$ROLE" '._launchSpec.roles[$r].env // {}' "$SETTINGS_FILE")"
+PROMPT_SUGGESTIONS_OFF="$(if jq -e '._launchSpec.promptSuggestions == false' "$SETTINGS_FILE" >/dev/null 2>&1; then echo 1; else echo 0; fi)"
 
 if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then
   echo "ERROR: role '${ROLE}' not defined in ${SETTINGS_FILE} (_launchSpec.roles)" >&2
@@ -73,6 +78,9 @@ fi
 CMD=( "$LAUNCHER" "--settings" "$SETTINGS_ARG" )
 if [[ "$EXCLUDE_DYNAMIC" == "true" ]]; then
   CMD+=( "--exclude-dynamic-system-prompt-sections" )
+fi
+if [[ "$PROMPT_SUGGESTIONS_OFF" == "1" ]]; then
+  CMD+=( "--prompt-suggestions" "false" )
 fi
 if [[ -n "$MODEL" && "$MODEL" != "null" ]]; then
   CMD+=( "--model" "$MODEL" )
