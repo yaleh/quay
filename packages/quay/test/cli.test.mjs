@@ -118,6 +118,19 @@ const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin")
 const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
+// ADR-019 (M173/DIR-109) in-file skip declaration, extended to this file's live-GitHub blocks
+// (tests 8, 10, 11). gap-release-postinstall-fallback-breaks-windows-sea-build (AC4): the release
+// job's "Run tests" step set GH_TOKEN, which ENABLED these live blocks against the real
+// yaleh/quay issue store — and their assertions drift with that store's current state (e.g. gh-3's
+// status label), so v0.4.0's release run failed on live-store drift that is unrelated to whether
+// the tagged commit's deterministic tests pass. Aligning with the three conformance files
+// (serve-github / provider-abi-conformance / cli-edit-parity-conformance): these blocks now run
+// ONLY with QUAY_TEST_LIVE_GITHUB=1. A release gate must verify the ARTIFACT, not re-verify the
+// live GitHub store's mutable state — so the release job does NOT set this env (and no longer
+// needs GH_TOKEN on its test step).
+const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
+const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
+
 let failures = 0;
 let _lastAssertMs = 0; // AC1b assertion-gap timing (gap-suite-cost-model-is-wrong-optimizations-buy-nothing)
 function assert(cond, msg) {
@@ -486,7 +499,7 @@ async function main() {
   //    so a genuinely successful, non-empty `task list` result is itself
   //    live proof the passthrough branch works, not an assumption. This
   //    makes a real (read-only) `gh api` call against yaleh/quay.
-  {
+  if (liveGithubEnabled) {
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
@@ -531,6 +544,8 @@ async function main() {
         "",
       ].join("\n")
     );
+  } else {
+    console.log("SKIP: test 8 (live-GitHub `task list --provider github`) — opt in with QUAY_TEST_LIVE_GITHUB=1");
   }
 
   // 9. QN-039 (iteration 29): `quay serve`'s own CLI dispatch branch
@@ -652,7 +667,7 @@ async function main() {
   //     status label ever changes, this assertion (not the harness) would
   //     need to be revisited, exactly as test 8's own live-repo dependency
   //     already requires.
-  {
+  if (liveGithubEnabled) {
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
@@ -728,6 +743,8 @@ async function main() {
       ].join("\n")
     );
     fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
+  } else {
+    console.log("SKIP: test 10 (live-GitHub `action run gh-3 --provider github`) — opt in with QUAY_TEST_LIVE_GITHUB=1");
   }
 
   // 11. Iteration 55: a systematic sweep of every Provider-parameterized
@@ -768,7 +785,7 @@ async function main() {
   //     that reasoning applies identically at the Core CLI dispatch layer,
   //     so `task edit --provider github` remains a correctly-excluded,
   //     already-precedented gap, not an oversight.
-  {
+  if (liveGithubEnabled) {
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
@@ -863,6 +880,8 @@ async function main() {
         "",
       ].join("\n")
     );
+  } else {
+    console.log("SKIP: test 11 (live-GitHub `task view/action list/task check` against gh-3) — opt in with QUAY_TEST_LIVE_GITHUB=1");
   }
 
   // 12. QN-062 (iteration 58): Provider-subprocess STARTUP-FAILURE
