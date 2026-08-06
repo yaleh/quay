@@ -14,7 +14,7 @@ title: "the dominant defect class tonight is SHIPPED-BUT-UNCALLED verifiers, and
   (measured pool = 0) and archguard idled 197 minutes; the shape is 'the
   verifier exists, is correct, is shipped, and nothing invokes it' — same family
   as the ADR-022-retired routine-scheduler callers and the 15-day-dead probes"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -86,19 +86,19 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 检查存在且实跑——报出当前 `uncalled_verifiers` 清单，贴出输出；
+- [x] AC1: 检查存在且实跑——报出当前 `uncalled_verifiers` 清单，贴出输出；
       `verify-delivery-surface.ts`、`periodic-push-backup.sh`、`measure-suite.mjs` 必须在首次输出里
-- [ ] AC2: **负控制（承重条）**——按 `control` 摘掉 `resource-gate.sh` 的唯一执行调用点，
+- [x] AC2: **负控制（承重条）**——按 `control` 摘掉 `resource-gate.sh` 的唯一执行调用点，
       只留目录条目 + 自带测试，检查**必须**把它报为 uncalled；报绿则本机制无效，
       不得以 AC1 通过为由结案
-- [ ] AC3: **权威文件优先收口**——`verify-delivery-surface.ts` 获得一个真实执行调用点
+- [x] AC3: **权威文件优先收口**——`verify-delivery-surface.ts` 获得一个真实执行调用点
       （tick 步骤 / gate / CI 三选一），贴出该调用点与一次实跑输出；
       理由：它已被 `c65c411c` 裁定为交付物单一事实源，权威而不被执行是最高危的形态
-- [ ] AC4: **豁免名单是只减不增的 ratchet**——与本仓既有 ratchet（如
+- [x] AC4: **豁免名单是只减不增的 ratchet**——与本仓既有 ratchet（如
       `test-framework-policy-exemptions.txt`）同形，含 baseline-count 上限与 git 严格子集
-- [ ] AC5: **下游可用**——机制位于 `plugin/` 且在 `quay-init` 铺设集里；
+- [x] AC5: **下游可用**——机制位于 `plugin/` 且在 `quay-init` 铺设集里；
       在 archguard 上实跑一次，报出它那边的零调用点清单（预期至少含 `task-contract-check.ts`）
-- [ ] AC6: 与以下任务交叉标注：`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`、
+- [x] AC6: 与以下任务交叉标注：`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`、
       `gap-single-file-test-duration-trend-unwatched`、
       `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
       ——它们各自是本类的一个实例，本任务是类级机制

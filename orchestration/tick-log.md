@@ -3,6 +3,7 @@
 每 20 分钟一行。`动作类型` 是判断分层是否退化的唯一依据（`correct` 占比 ≥50% = 内层自主性不足）。
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
+| 2026-08-06 16:58Z | `unblock` | **收尾 pass（冷启动后首 tick）**：关 3 个 merged 括号（green-verdict/no-post-merge/shipped-verifiers `--task-end done`），翻 done 2 个（AC1-6 勾，fan-in 证据）；no-post-merge 留 ready（AC1/2 B-side deferred）；red 分诊：套件红 178 失败，quay-init laydown 主导（quay-init-loop 44 + 族 ~58），非假红（资源门 GO，套件真跑真失败），不重启（先分诊）；file `gap-quay-init-laydown-dominant-red-suite-blocker`（板上无 open 任务的全 loop dispatch 阻断器） | 内层：首个 tick 完成（ce481cfd, zero dispatch red fail-closed, OVER90 假阳已清），已重排 17:14；manager-productization 401 ahead 等人工 merge；inProgress=2（manager-productization 双括号，歧义留待人工） | ①no-post-merge 4a877953 在 integration（ancestor）✓；②green-verdict/shipped-verifiers fan-in 合并证据（AC1-6）✓；③套件 178 失败分类（quay-init 族主导） |
 | 2026-08-06 15:58Z | `no-action` | **裁定管理者立案（prefriction 触发词过宽）**：管理者立案 gap-prefriction-trigger-regex-too-broad-signal-is-dead——POST_FRICTION_RE 词表含纯时间词 `今晚`（无摩擦语义），导致 64 条新任务 90.6% 判 post-friction（含管理者 5 条手工判定的 pre-friction 全误判）。**独立核实**：(1) `今晚` 确在词表（prefriction-count.sh:61）；(2) **91 个文件含「今晚」**（tick-log/tasks 频繁用它指代当天）——最大误判源；(3) 任务 contract-clean（todo）；(4) 修复 = 从词表移除 `今晚`（一行）。**裁定：接受立案**——`今晚` 纯时间词无摩擦语义，直接影响人的主判据（自我演进量表，post-friction 占比虚高扭曲测量）。修复正确且低风险。任务已立案待内层执行 | 内层：1 agent 在飞（Reviewing test.sh wiring），suite red | ①`今晚` 在词表核实（line 61）；②91 文件含它（误判源确认）；③管理者 5 条 pre-friction 误判 claim 支撑；④任务 contract-clean + 修复一行范围 |
 | 2026-08-06 15:53Z | `no-action` | **suite 最终 verdict（red, 95 fail）+ 主根因定位**：suite 15:53:32 完成，**tests 2854 / pass 2714 / fail 95**（191 markers，重复记录）。95 失败中 **162 短耗时**（<3s，真实失败主导）+ 28 长耗时（M63 tsc 等负载）。**主根因聚类 = quay-init 铺设集/依赖闭包破坏**：隔离跑 quay-init-laydown-closure AC1/AC2/AC3 失败（transcript-delivery-check/cap-from-gate 未铺设、mechanism-corpus 引用不解析）→ 连锁触发 AC7b/AC8/AC9/Wiring/usage/rehearsal/detection-ladder 等大量 quay-init 族失败。**已修 4 个 merge 破坏**（runner `});`、test.sh checker_cost_wrap、quay-init printf、referenced-not-landed 定位）。**其余失败**：task-check（已立案）、trend-check、plugin.json（已立案）、manager SKILL SPEC（已立案）。**策略**：quay-init 铺设主根因 = 实现性修复 → 驱动内层（内层 1 agent 在飞 Reviewing test.sh 接线——可能已自行发现），待其完成驱动 | 内层：1 agent 在飞（Reviewing run_static_checks wiring in test.sh 1.5m），suite red 认知，7 fan-in 待翻 done | ①suite 最终 2854/2714/95 核实；②失败分类（162 短耗时真实主导）；③quay-init 主根因隔离定位（laydown-closure AC1-3）；④4 merge 修复状态确认 |
 | 2026-08-06 15:50Z | `no-action` | **核实管理者独立修复（session-liveness.env）**：管理者修复 d9c38ff0「A's own session-liveness.env pointed at B's tmux session name」——SESSION_TMUX_SESSION 从 quay-b 改回 quay-0。**独立核实**：(1) 修复 commit 存在（d9c38ff0，15:48 推送）；(2) 当前值 quay-0 正确（符合 08-04 显式配置意图，注释含历史背景）；(3) **引入源头坐实**：6200f935（08-06 01:46 outer tree-hygiene cleanup，我提交）把 quay-b 写进去——管理者判断正确，我 01:46 提交引入，存在 ~14h。接受修复，无冲突（与 session-liveness 相关任务一致） | 内层：空闲等 suite（Baked 1h+），7 fan-in 待外层翻 done | ①d9c38ff0 修复 commit 核实；②SESSION_TMUX_SESSION=quay-0 当前值确认；③源头 6200f935 坐实（01:46 我引入）；④与 session-liveness 任务一致性 |
@@ -394,11 +395,15 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 
 | 类型 | 次数 | 占比 |
 |---|---|---|
-| no-action | 110 | 36% |
-| unblock | 37 | 17% |
-| correct | 93 | 43% |
-| escalate | 7 | 3% |
-| **合计** | **247** | — |
+| no-action | 192 | 53% |
+| unblock | 60 | 16% |
+| correct | 94 | 26% |
+| correct-inner | 3 | 1% |
+| correct-self | 8 | 2% |
+| escalate | 7 | 2% |
+| **合计** | **364** | — |
+
+> **2026-08-06 16:58Z 重算**：严格匹配全部 364 行（含动作列注记行）。correct 分裂为 correct/correct-inner/correct-self；退化口径 correct-inner(含 plain correct)=97，非 correct-self 行=356，占比 27.2% < 50%，分层健康。
 
 > **2026-08-04 14:36Z 重算**：此前表值 156（no-action 58/unblock 22/correct 72/escalate 4）与实际行数
 > **201 不符**——表已漂移 45 行，正应「累计分布从行数重算、不得手工加减」规则。已按 `grep '^| 2026-'`

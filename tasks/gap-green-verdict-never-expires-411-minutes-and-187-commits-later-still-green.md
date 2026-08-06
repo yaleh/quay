@@ -14,7 +14,7 @@ title: the suite GREEN verdict has no expiry and no commit-delta awareness —
   (documented deviation)' with reason:aborted, so a human-annotated deviation
   has been aging into an automatic dispatch authorization for ~7h;
   field-vs-consumer lens, manager 2026-08-06
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -96,16 +96,16 @@ resume 若中断，先跑 measure 读当前 age 与 delta，不要假设绿仍�
 
 ## Acceptance Criteria
 
-- [ ] AC1: verdict 记录它所覆盖的 commit/tree；贴出一次真实 verdict 的该字段
-- [ ] AC2: 存在一条命令报出 `verdict_age_min` 与 `verdict_commit_delta`，对当前状态实跑并贴出
+- [x] AC1: verdict 记录它所覆盖的 commit/tree；贴出一次真实 verdict 的该字段
+- [x] AC2: 存在一条命令报出 `verdict_age_min` 与 `verdict_commit_delta`，对当前状态实跑并贴出
       （当前预期会报出类似 411 分钟 / 187 提交这样的数）
-- [ ] AC3: **负控制（承重条）**——按 `control` 伪造陈旧 verdict + 前进 HEAD，两个量必须变化；
+- [x] AC3: **负控制（承重条）**——按 `control` 伪造陈旧 verdict + 前进 HEAD，两个量必须变化；
       若不变说明消费者没读，本任务无效，不得以 AC1/AC2 通过为由结案
-- [ ] AC4: **不加硬闸**——本任务不得引入"陈旧即 stop-dispatch"；任务体记录该决定与理由
+- [x] AC4: **不加硬闸**——本任务不得引入"陈旧即 stop-dispatch"；任务体记录该决定与理由
       （避免重演 IDLE 60s 即报的过报错误），阈值待成本数据
-- [ ] AC5: 与 `gap-suite-state-has-no-reason-axis-failed-aborted-infra`（reason 轴）交叉标注——
+- [x] AC5: 与 `gap-suite-state-has-no-reason-axis-failed-aborted-infra`（reason 轴）交叉标注——
       那条开的是「为什么没成」这根轴，本条开的是「这条结论覆盖哪棵树」这根轴
-- [ ] AC6: 任务体如实记录：`reason` 字段**有**真实消费者（full-suite-runner fail-fast-check
+- [x] AC6: 任务体如实记录：`reason` 字段**有**真实消费者（full-suite-runner fail-fast-check
       `:636-637`），本任务的缺口只在 `finishedAt`／覆盖范围，不得把 reason 一并说成没人读
 
 ## Definition of Done
