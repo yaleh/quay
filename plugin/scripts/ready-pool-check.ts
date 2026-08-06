@@ -101,6 +101,27 @@ export const MIN_SECTION_CHARS = 40;
  *  (e.g. this very task's exclusion-rule description) is NOT a marker — matched only when bolded. */
 export const PARKED_MARKER_RE = /\*\*PARKED\b/i;
 
+// ── Value-prioritization relevance signal (tasks/gap-value-prioritization-has-no-mechanism) ─────────
+// The "which of the N todos matters most" question gets a MECHANICAL answer (no human scoring, AC3).
+// Three signal sources, all mechanical:
+//   strategic — body references a written strategic question: the orchestration/ strategic-doc
+//               naming convention FINDING-* / SYNTHESIS-* / SPEC-* / REVIEW-cadence (grep).
+//   blocking  — parent/children frontmatter: the task is a parent (children non-empty) OR is named
+//               as `parent:` by another task — landing it unblocks that dependent.
+//   cost      — declared Touches scale (parseTouches glob count; a MISSING Touches section is
+//               unknown scope, treated as high cost — the same conservative stance the dispatch gate
+//               takes: no usable Touches collides with everything).
+// value = strategic*STRATEGIC_WEIGHT + blocking*BLOCKING_WEIGHT + costBenefit(1/cost capped at 1).
+// The weights make the dominance chain STRICT: strategic (min 4) > non-strategic max (blocking 2 +
+// costBenefit max 1 = 3), and blocking (min 2) > costBenefit max (1). So a traceable task always
+// ranks before an untraceable one, a blocking task before a non-blocking one, and small-cost /
+// high-benefit breaks ties within a class. Sort is value desc (stable by id asc). Output to JSON as
+// `top_relevance` (the --top N todo query) + `ready_relevance` (the ready pool, "who to dispatch
+// next" — AC6). The existing gap-* > DIR-* / disjointness promotion ORDER is untouched (AC4).
+export const STRATEGIC_REF_RE = /FINDING-|SYNTHESIS-|SPEC-|REVIEW-cadence/;
+export const STRATEGIC_WEIGHT = 4;
+export const BLOCKING_WEIGHT = 2;
+
 // Shape-aware registered sections (mirrors quay-native store.ts SHAPE_REGISTRY, single-source shape
 // dispatch: contract → finding → plan; unknown fails closed). The four artifacts are the shape's own
 // registered sections — a `finding`-shape task has no plan dimension, a `contract`-shape task uses
@@ -193,6 +214,63 @@ export function isParked(task) {
   return PARKED_MARKER_RE.test(task.body);
 }
 
+/** Parse the `children:` frontmatter field — flow `[a, b]` or block `- a` list. Mirrors the labels
+ *  parser in task-schema.ts (lenient; no YAML dep). Returns the child task-id array. */
+export function readChildren(frontmatterRaw) {
+  const flow = frontmatterRaw.match(/^children:\s*\[([^\]]*)\]\s*$/m);
+  if (flow) {
+    return flow[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  }
+  const lines = frontmatterRaw.split(/\r?\n/);
+  const idx = lines.findIndex((l) => /^children:\s*$/.test(l));
+  if (idx < 0) return [];
+  const out = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
+    if (m) out.push(m[1].replace(/^["']|["']$/g, "").trim());
+    else if (/^\S/.test(lines[i])) break; // next top-level key ends the list
+  }
+  return out;
+}
+
+/** Mechanical strategic-traceability grep: does the body reference a written strategic question
+ *  (the orchestration/ strategic-doc naming convention — FINDING-, SYNTHESIS-, SPEC-, or
+ *  REVIEW-cadence)? */
+export function strategicTraceable(body) {
+  return STRATEGIC_REF_RE.test(body);
+}
+
+/** Declared Touches scale — { hasSection, count }. No Touches section = unknown scope (high cost). */
+export function touchesScale(body) {
+  const { hasSection, globs } = parseTouches(body);
+  return { hasSection, count: globs.length };
+}
+
+/** The composite relevance signal for one task. All inputs mechanical (grep / frontmatter fields /
+ *  touches count) — no human scoring. `childrenByTask` / `parentRefCount` are precomputed once per
+ *  analyzeTasks call (blocking needs to know if ANY other task names this id as its parent). */
+export function computeRelevance(id, task, childrenByTask, parentRefCount) {
+  const strategic = strategicTraceable(task.body);
+  const children = childrenByTask.get(id) || [];
+  const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0;
+  const { hasSection, count } = touchesScale(task.body);
+  const cost = hasSection ? count : 0;
+  const costBenefit = hasSection && count > 0 ? Math.min(1, 1 / count) : 0;
+  const value = (strategic ? STRATEGIC_WEIGHT : 0) + (blocking ? BLOCKING_WEIGHT : 0) + costBenefit;
+  const v = Number(value.toFixed(3));
+  return {
+    id,
+    strategic,
+    blocking,
+    cost,
+    value: v,
+    reason:
+      `value ${v} · strategic ${strategic ? "Y" : "N"} · ` +
+      `blocking ${blocking ? `Y(${children.length} ${children.length === 1 ? "child" : "children"})` : "N"} · ` +
+      `cost ${cost} touch${cost === 1 ? "" : "es"}`,
+  };
+}
+
 function depsReadyFor(task, allTasks) {
   const parent = task.parent;
   if (!parent || parent === "null" || parent === "~") return true;
@@ -280,10 +358,12 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
 
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
- *  scanned }. `root` is the repo root used to resolve `## Touches` existence claims; `tasksDir`
- *  defaults to `<root>/tasks`; `cap`/`floorMult` derive the floor (default 3×4 ⇒ 12); `inFlight`
- *  is an optional array of `{ id, body }` for currently in-flight tasks (ranked against). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [] }) {
+ *  scanned, top_relevance, ready_relevance }. `root` is the repo root used to resolve `## Touches`
+ *  existence claims; `tasksDir` defaults to `<root>/tasks`; `cap`/`floorMult` derive the floor
+ *  (default 3×4 ⇒ 12); `inFlight` is an optional array of `{ id, body }` for currently in-flight
+ *  tasks (ranked against); `topN` is the value-prioritization query size — when > 0 the `top_relevance`
+ *  array (the highest-value N todo tasks + reasons, the AC2 "which matters most" answer) is produced. */
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], topN = 0 }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -296,6 +376,17 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     task.status = readFrontField(task.frontmatterRaw, "status") || "";
     task.parent = readFrontField(task.frontmatterRaw, "parent");
     allTasks.set(id, task);
+  }
+
+  // Value-prioritization index (built once — blocking needs to know if ANY other task names this id
+  // as its parent, so the maps are precomputed here rather than re-scanned per task).
+  const childrenByTask = new Map();
+  const parentRefCount = new Map();
+  for (const [id, t] of allTasks) {
+    childrenByTask.set(id, readChildren(t.frontmatterRaw));
+    if (t.parent && t.parent !== "null" && t.parent !== "~") {
+      parentRefCount.set(t.parent, (parentRefCount.get(t.parent) || 0) + 1);
+    }
   }
 
   // Real ready pool: `status: ready` minus the three non-dispatchable classes.
@@ -317,6 +408,26 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   }
   ready.sort();
   excluded.sort((a, b) => a.id.localeCompare(b.id));
+
+  // ── Value-prioritization relevance (AC1/AC2/AC6 — tasks/gap-value-prioritization-has-no-mechanism).
+  // todo_relevance: every non-done, non-fixture, non-parked todo ranked by the mechanical value
+  // signal — the "which of the N todos matters most" answer. top_relevance = the top-N query slice.
+  // ready_relevance: the READY pool ranked by the same signal — the "who to dispatch next" answer
+  // (AC6), which the gap-* > DIR-* mechanical tiebreak alone cannot give. Both carry per-entry
+  // { strategic, blocking, cost, value, reason }. Existing promotion order is untouched (AC4).
+  const relevanceOf = (id) => computeRelevance(id, allTasks.get(id), childrenByTask, parentRefCount);
+  const todoRelevance = [...allTasks.values()]
+    .filter((t) => t.status === "todo" && !isFixture(t) && !isParked(t))
+    .map((t) => relevanceOf(t.id))
+    .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
+  // ready_relevance ranks the ready pool by value — the "who to dispatch next" answer. In-flight ids
+  // (the --in-flight param) are excluded so the ranking reflects the actually-dispatchable set.
+  const inFlightIds = new Set((inFlight || []).map((t) => t.id));
+  const readyRelevance = ready
+    .filter((id) => !inFlightIds.has(id))
+    .map(relevanceOf)
+    .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
+  const topRelevance = topN > 0 ? todoRelevance.slice(0, topN) : [];
 
   const floor = computePoolFloor(cap, floorMult);
   const pool = ready.length;
@@ -388,6 +499,8 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     candidates,
     promotions,
     scanned: allTasks.size,
+    top_relevance: topRelevance,
+    ready_relevance: readyRelevance,
   };
 }
 
