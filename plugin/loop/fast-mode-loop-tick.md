@@ -317,6 +317,12 @@ ref 上）。拆成两线：
 worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层异步做（`orchestrator-loop-tick.md`
 步骤 1b），inner 不需要也不应该碰。
 
+**两机协作：合并后释放认领（`gap-two-machine-collaboration-git-branch-claiming`）**——若本任务派发时
+经认领协议认领过（`QUAY_CLAIM_REMOTE` 设置了共享裸仓库），合并进 `integration` 后**释放认领**：
+`bash plugin/scripts/release-task.sh <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
+`merge + delete = release`）。释放只删共享仓库上的 `task/<id>` 认领标记，不碰已合并进 `integration`
+的工作——下台机可再认领该任务。未设置 `QUAY_CLAIM_REMOTE`（单机）⇒ 跳过，无行为变化。
+
 **全量套件验证为什么不在 inner 跑**：旧的「全部合并后跑一次全量」+「绿 → 写任务状态」就是批次
 同步点——同步期间零新派发，写状态变成调度边界。全量 gate 移给外层后台异步跑（验证 gate，见步骤 3
 的停止条件），inner **只读** `.quay/full-suite-state.json` 的 `state`、只保留逐任务的 `--for-task`
@@ -552,6 +558,25 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    就绪池整体核验用 `--self-touch-scan`（AC1 静态检查）：
    `node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch-scan --root "$(pwd)"`
    ——任一 ready 任务缺自身文件 ⇒ exit 1（先补，否则该任务不可派发）。
+
+6. **两机认领（跨主机互斥，`gap-two-machine-collaboration-git-branch-claiming`）**：两机协作时
+   （`.quay/config.yml` `loop:` 未配置、但环境变量 `QUAY_CLAIM_REMOTE` 指向**共享裸仓库**），派发前
+   **先认领**本任务：
+
+   ```bash
+   bash plugin/scripts/claim-task.sh <id> --remote "$QUAY_CLAIM_REMOTE" --check-touches
+   # claimed            → 可派发（空 task/<id> 分支已推到共享裸仓库）
+   # already-claimed    → 对方在飞，不派发本任务
+   # touches-overlap    → 与对方在飞任务触摸相交，不派发本任务（AC2，换一个任务）
+   ```
+
+   认领 = 把空 `task/<id>` 分支推到共享裸仓库：**git 是唯一真正跨主机共享的状态存储**（遥测
+   inProgress 文件与 worktree 目录都是本机的，B 机看不到；`task/*` 分支双方 `git ls-remote` 都可见）。
+   推送本身是**原子互斥**（同任务两机抢认领，一成一败——git 的非快进拒绝就是 CAS）。`--check-touches`
+   复用单一来源 `checkTouchesPair`（`plugin/scripts/claim-task.ts`）与本机 `tasks/<peer>.md` 对共享仓库
+   `task/*` 分支判触摸相交——**与单机串行是同一个约束，只是提前到认领时**。任务合并进 `integration`
+   后由步骤 2 释放认领（`release-task.sh`）。**单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 认领步骤为 no-op，
+   直接跳过**——现有单机派发零回归（claim-task.sh 无 remote 时 fail-closed 退出 2）。
 
 派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**
 （`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到整批返回、拿不到先完成者的

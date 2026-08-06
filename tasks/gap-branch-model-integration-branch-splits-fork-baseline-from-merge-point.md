@@ -57,6 +57,19 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
    （裁定③：**先清分支**）——60 个历史遗留分支（experiment-4-iteration-* / _master_check 等）先清，
    否则新旧并存让「哪条线是权威」更难看清。
 
+> **AC3 交叉标注——权威与推送方向（2026-08-06，来自 `tasks/gap-two-machine-collaboration-git-branch-claiming.md`）**：
+> 两机认领协议的权威/推送方向与本模型**逐条一致**（认领协议就是本模型「多源汇入、基线陈旧」的跨主机
+> 天然用例）：
+> - **认领与 task 分支推送：双向**——任一机可把空 `task/<id>` 认领分支推到共享裸仓库、可把自己的 task
+>   工作合并进 `integration`（integration 是待验证汇入点，设计上就是「多个来源汇入」，跨主机是其天然
+>   用例）；
+> - **develop：单一权威**——只由外层 verification-round 批量合推进（`integration-batch-merge.sh`），
+>   任一机的 task 分支永不直推 develop（develop 永不从未验证树推进，本模型 AC3 不变式跨主机保持）；
+> - **master 发布线：继续空置**——quay 无发布流程，push 需人显式授权，两机都不推 master；
+> - **跨主机破坏性/批量操作：两方向对称禁止**（外层裁定 2026-08-05 17:2xZ：伤害不认方向）。
+> 认领的触摸相交检查复用同一单一来源 `checkTouchesPair`（`claim-task.ts`）——**同机串行与跨机不认领是
+> 同一个约束**，只是跨机把它提前到认领时（AC2）。
+
 > **AC4 前置②交叉标注（2026-08-05，来自 `tasks/gap-global-count-assertions-fragile-relative-baseline.md`）**：
 > 本 AC4（先修全局计数断言）由 `gap-global-count-assertions-fragile-relative-baseline` 实现并已落地其 AC1–AC3
 > （基线快照 helper `plugin/scripts/test-file-snapshot.sh` + B3-2 场景 fixture `plugin/test/test-file-snapshot.test.mjs`，
