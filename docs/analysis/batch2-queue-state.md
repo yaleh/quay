@@ -5177,3 +5177,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **OVER90 假阳性再处置**：detect-stop 报 residue-check 145.8m——新 `--slots` 实证 **brackets 11 / reconcilable 11 / real-in-flight 0**（全部陈旧括号，任务早已 merged；外层 closure 才关）。`--clear` 已清（wait 14.9s）。**reconcile-aware slots 首次实盘证明工作**（telemetry-brackets 修复的直接收益）。
 - **派发 1/5**：`no-criterion-cost`（判据执行包装记 time+load → checker-cost.jsonl 纯追加，每判据自身成本可测）。补 self-touch + telemetry 已开。池仍结构性串行（其余候选互撞）。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:3xZ（内层，no-criterion-cost fan-in 完成）
+
+- **no-criterion-cost 合并**（`e5cb225d`）：`checker-cost.jsonl` 纯追加计量器——静态检查器 9/9（`run_checker` bash 包装）+ gate 执行路径（engine.ts 计时 + workspaceRoot 穿通）+ ready-pool-check 自记录（n=真实 pool）+ 套件耗时序列（verification-round.jsonl 追加，红窗卡不死序列，05:03 缺陷消除）。load 双维（n + loadavg）使 35.8→91.2→157.0 归因到 load 非 n（归因更正）。AC1–AC7 勾（9/9 + scoped 68）。已并已清。
+- **合同 ratchet 预警**（agent 报）：`--static-checks` exit 1 于 `tasks/gap-web-board...: invoke-evidence-missing`（不在 baseline）——agent 证实与本次改动无关、master 上已存在，**外层应分诊**（可能影响下轮套件静态层）。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
