@@ -4,7 +4,7 @@ title: chart2-s2 delivery-completeness test asserts stale evidence (both
   false/cov 0.0) since DELIVERY-C/D flipped it to both true — 12-day RED masked
   by 'modulo load-flake' phrasing; update 3 assertions to match real evidence +
   keep fail-closed negative control
-status: todo
+status: ready
 labels:
   - gap
   - defect
