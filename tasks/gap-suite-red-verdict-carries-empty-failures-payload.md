@@ -27,9 +27,9 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 ## 实测（2026-08-06 18:47 判决后）
 
 - `.quay/full-suite.log`：**9251 行 / 792K**，含 fail 字样 410 行，但**0 条** `# fail` / `# pass` 汇总行；日志**末尾断在一条断言中间**（`diff: 'simple'`）。
-- ⇒ 从状态文件读不到落点，从日志也读不到汇总——**两条读路都死**，只能人肉翻 9251 行。
-- 唯一对得上的：日志末尾失败是 "quay-init --loop would ship skills/tick docs that reference files it does not lay down"（今晚早先判定的主红因 quay-init laydown）。
-- 内层此刻靠**另一条路**找到落点（`timeout 300 node --test --test-concurrency=1 plugin/test/quay-init-loop.test.mjs` 单跑）——不是靠这份判决。
+- **日志本身可用**（2026-08-06 更正）：外层从日志提取出完整逐文件分解（168 assertion fails；quay-init-loop 40 / install-config-driven-e2e 9 / runtime-landing 5 / drift/tmux/laydown ~10）——但要**自己数**（无汇总行）。
+- 主红因 = "quay-init --loop would ship skills/tick docs that reference files it does not lay down"（referenced⊆landed 违规）。
+- **缺陷不依赖能否绕过**：消费者能从日志绕过（手动数），恰说明本应由 `state.failures` 载荷提供的工作被迫由消费者做。
 
 ## 性质
 
