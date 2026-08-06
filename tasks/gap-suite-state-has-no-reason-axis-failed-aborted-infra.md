@@ -72,18 +72,46 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **state 加 reason 枚举**——`{state, reason?: failed|aborted|infra-error}`；runner 早标 RED
+- [x] AC1: **state 加 reason 枚举**——`{state, reason?: failed|aborted|infra-error}`；runner 早标 RED
       写 `reason: failed`，外层中止写 `reason: aborted`（可机械区分，不再手写 note）
-- [ ] AC2: **trigger 按 reason 路由**——`red + aborted` ⇒ 不按代码风险停派，恢复由 resource-gate 的
+      → `SuiteStateReason = "failed" | "aborted" | "infra-error"`（两文件同源）；runner 失败行→failed、
+      信号杀/spawn 错/门禁 WAIT 早退→aborted。实跑：`FINAL state=red reason=aborted durationMs=12 exit=1`
+      （见 AC4）。
+- [x] AC2: **trigger 按 reason 路由**——`red + aborted` ⇒ 不按代码风险停派，恢复由 resource-gate 的
       GO/WAIT 决定；`red + failed` ⇒ 红窗照旧停派 + 分诊（bisect）
-- [ ] AC3: **巧合破裂场景消除**——load 恢复后 red+aborted 不再无限期停派（资源 GO 即恢复，不靠
+      → 新增 `routeRed()`：failed/legacy→`red-window-triage`；aborted/infra-error→`resource-gate`；
+      非 red→`proceed`。`shouldStopDispatch` 改为 `routeRed()==="red-window-triage"`。单元+实跑见下。
+- [x] AC3: **巧合破裂场景消除**——load 恢复后 red+aborted 不再无限期停派（资源 GO 即恢复，不靠
       「red 还在所以继续停」的错误理由）；failed 无此放宽
-- [ ] AC4: **note 逃生舱收编**——reason 字段使手写 note 不再必要（ABORT 场景实跑输出贴任务体：
+      → runner 新增 ABORT 标记识别（test.sh 内部门禁 `resource gate says WAIT` 早退→aborted），
+      aborted-red 的 stopSignal=false（由资源门决定恢复）；failed 仍 stopSignal=true（无放宽）。
+- [x] AC4: **note 逃生舱收编**——reason 字段使手写 note 不再必要（ABORT 场景实跑输出贴任务体：
       reason=aborted + trigger 读它路由而非只读 state=red）
-- [ ] AC5: **真实使用**——本轮 ABORT（07:26Z）作为回归基：修复后同场景 reason=aborted、trigger 按
+      → 实跑（ABORT 场景，gate-WAIT 早退）：
+      ```
+      full-suite-runner: ABORT marker detected on stream -> state=red reason=aborted (no correctness conclusion)
+      full-suite-runner: FINAL state=red reason=aborted durationMs=12 exit=1
+      -- state file: {"state":"red","reason":"aborted","runner":"outer","startedAt":"2026-08-06T04:40:20.668Z","laneCount":1,"finishedAt":"2026-08-06T04:40:20.680Z","durationMs":12}
+      -- trigger reads it: SUITE-STATUS red / SUITE-RED state=red early=false stopSignal=false / stopSignal=false
+      ```
+      reason 字段承载语义，trigger 读 reason 路由（stopSignal=false），不再手写 note。
+- [x] AC5: **真实使用**——本轮 ABORT（07:26Z）作为回归基：修复后同场景 reason=aborted、trigger 按
       资源路由（实测输出贴任务体）
-- [ ] AC6: **AC10 诚实记账**——pre-friction（无东西在疼），计 +1 ⇒ 5 → 6
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → 实测输出（见 AC4）；负向对照（真实失败，07:26Z 的「假红」相反侧）：
+      ```
+      full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)
+      full-suite-runner: FINAL state=red reason=failed durationMs=11 exit=1
+      -- trigger reads it: SUITE-STATUS red / SUITE-RED state=red early=false stopSignal=true / stopSignal=true
+      ```
+      同场景 gate-WAIT 早退 → reason=aborted → trigger 按资源路由（stopSignal=false）；真失败 → failed → 停派。
+- [x] AC6: **AC10 诚实记账**——pre-friction（无东西在疼），计 +1 ⇒ 5 → 6
+      → `gap-no-criterion-records-its-own-cost-checker-cost-jsonl.md` 已加跨引用（本条计 +1 ⇒ 5 → 6）；
+      AC10 总账在 `gap-axis-generator-question-what-range-every-standing-criterion`（已完成，账上已列 → 6）。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → `plugin/test/full-suite-runner.test.mjs` + `plugin/test/suite-state-trigger.test.mjs` 均
+      `import { test } from "node:test"` + `// @test-group governance`（测试框架策略检查 PASS）。
+      新增用例：isAbortLine 单元、gate-WAIT 早退→aborted、SIGKILL→aborted、无标记非零退出→failed、
+      routeRed 四路由、shouldStopDispatch 三值。
 
 ## Definition of Done
 

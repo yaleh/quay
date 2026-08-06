@@ -71,7 +71,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
-export type SuiteStateReason = "failed" | "aborted";
+export type SuiteStateReason = "failed" | "aborted" | "infra-error";
 
 export interface SuiteState {
   state: SuiteStateValue;
@@ -81,11 +81,14 @@ export interface SuiteState {
   durationMs: number | null; // finishedAt - startedAt; null while running
   laneCount: number;
   /**
-   * Present only on red (AC5 reason axis). "failed" = a real failure was detected (the
-   * stop-dispatch signal). "aborted" = the run produced NO correctness conclusion (spawn
-   * error / signal kill) and MUST NOT trigger stop-dispatch (gap-full-suite-runner-
-   * concurrency-default-and-gate AC5). Legacy red states without `reason` are treated as
-   * "failed" (fail-closed toward stopping) by shouldStopDispatch.
+   * Present only on red (AC5 reason axis — gap-full-suite-runner-concurrency-default-and-gate AC5;
+   * gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1). Three-value reason enum:
+   *   - "failed"     = a real failure was detected (the stop-dispatch signal).
+   *   - "aborted"    = the run produced NO correctness conclusion (spawn error / signal kill /
+   *                    early gate-WAIT exit) and MUST NOT trigger stop-dispatch.
+   *   - "infra-error" = an environment problem (neither a code failure nor a deliberate abort) —
+   *                    ALSO not a code-failure conclusion, so it does NOT stop dispatch on code risk.
+   * Legacy red states without `reason` are treated as "failed" (fail-closed toward stopping).
    */
   reason?: SuiteStateReason;
 }
@@ -110,6 +113,18 @@ const FAILURE_PATTERNS: RegExp[] = [
   /FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero
 ];
 
+// AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3) — ABORT markers
+// that flip state to red + reason=aborted: the suite emitted NO correctness conclusion. The concrete
+// shape today is test.sh's INTERNAL resource-gate fail-closed: when the gate says WAIT, test.sh
+// prints `resource gate says WAIT — not running the full suite ...` and exits 1 in ~6s WITHOUT
+// running a single test. A real failure line (FAILURE_PATTERNS) still wins over an abort marker
+// (a failure conclusion is never downgraded); an abort marker is only applied when no failure line
+// has been seen. A generic non-zero exit with NEITHER marker stays failed (fail-closed catch-all).
+const ABORT_PATTERNS: RegExp[] = [
+  /resource gate says WAIT/, // test.sh internal gate fail-closed — the suite never ran tests
+  /not running the full suite/, // same gate-WAIT message (both halves of the canonical line)
+];
+
 function parseArg(argv: string[], name: string): string | undefined {
   const idx = argv.indexOf(name);
   return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
@@ -123,6 +138,11 @@ function writeState(file: string, state: SuiteState): void {
 /** Does a stream line match any AC2 failure marker? */
 export function isFailureLine(line: string): boolean {
   return FAILURE_PATTERNS.some((re) => re.test(line));
+}
+
+/** Does a stream line match an AC5 reason-axis ABORT marker (no correctness conclusion)? */
+export function isAbortLine(line: string): boolean {
+  return ABORT_PATTERNS.some((re) => re.test(line));
 }
 
 // ── AC1/AC2: nproc-derived default laneCount + REPLACE splice ───────────────────────────────────────
@@ -252,8 +272,12 @@ export async function run(argv: string[]): Promise<number> {
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)
-  // is never downgraded — the failure conclusion stands.
+  // is never downgraded — the failure conclusion stands. abortDetected is the reason-axis marker for
+  // an early-EXIT red (gap-suite-state-has-no-reason-axis-failed-aborted-infra): the suite emitted
+  // an abort marker (e.g. test.sh's internal resource-gate WAIT) and never reached a correctness
+  // conclusion — red + reason=aborted, NOT failed.
   let redDetected = false;
+  let abortDetected = false;
   let runDone = false;
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
@@ -287,6 +311,17 @@ export async function run(argv: string[]): Promise<number> {
       process.stderr.write(
         `full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)\n  ${line}\n`
       );
+    } else if (!redDetected && !abortDetected && isAbortLine(line)) {
+      // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3): an ABORT
+      // marker on the stream (e.g. test.sh's internal resource-gate WAIT fail-closed — the suite
+      // exited in seconds WITHOUT running tests) means NO correctness conclusion: red + reason=aborted,
+      // NOT failed. A real failure line is never downgraded (the `!redDetected` guard). A later real
+      // failure line still upgrades to failed (the first branch checks redDetected, not abortDetected).
+      abortDetected = true;
+      writeState(stateFile, { state: "red", reason: "aborted", ...base, finishedAt: null, durationMs: null });
+      process.stderr.write(
+        `full-suite-runner: ABORT marker detected on stream -> state=red reason=aborted (no correctness conclusion)\n  ${line}\n`
+      );
     }
   };
 
@@ -310,9 +345,10 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(`full-suite-runner: spawn error -> state=red reason=aborted\n  ${String(err)}\n`);
   });
 
-  const exitCode: number | null = await new Promise<number | null>((resolve) => {
-    child.once("close", (code) => resolve(code));
+  const exit: { code: number | null; signal: NodeJS.Signals | null } = await new Promise((resolve) => {
+    child.once("close", (code, signal) => resolve({ code, signal }));
   });
+  const exitCode = exit.code;
 
   runDone = true;
   // Fan-in race fix (2026-08-05): do NOT remove the signal listeners here. The `if (runDone ||
@@ -327,15 +363,26 @@ export async function run(argv: string[]): Promise<number> {
   const finishedAt = new Date().toISOString();
   const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
 
-  // AC1/判绿 — green ONLY if no failure line was detected AND the suite exited 0. Red carries the
-  // reason axis (AC5): a spawn error (never started) is aborted; anything else with a red verdict
-  // (detected failure line or non-zero exit) is failed.
-  const green = !redDetected && spawnError === null && exitCode === 0;
+  // AC1/判绿 — green ONLY if no failure/abort marker was detected, no spawn error, and the suite
+  // exited 0. Red carries the three-value reason axis (AC5, gap-suite-state-has-no-reason-axis-
+  // failed-aborted-infra AC1/AC3):
+  //   - redDetected (a real failure line)      ⇒ reason=failed   (stop-dispatch signal).
+  //   - abortDetected / spawnError / the child killed by a signal (code null) ⇒ reason=aborted
+  //     (NO correctness conclusion — early-EXIT red is an abort, not a failure).
+  //   - a generic non-zero exit with NEITHER marker ⇒ reason=failed (fail-closed catch-all: a
+  //     failure we could not match a structured line for is still a failure conclusion).
+  const childKilledBySignal = exitCode === null && spawnError === null;
+  const green = !redDetected && !abortDetected && spawnError === null && exitCode === 0;
+  // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
+  // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) is never
+  // downgraded by an earlier abort marker — redDetected dominates (AC5: failure conclusion stands).
+  const noCorrectnessConclusion =
+    !redDetected && (abortDetected || childKilledBySignal || spawnError !== null);
   const finalState: SuiteState = green
     ? { state: "green", ...base, finishedAt, durationMs }
     : {
         state: "red",
-        reason: spawnError !== null ? "aborted" : "failed",
+        reason: noCorrectnessConclusion ? "aborted" : "failed",
         ...base,
         finishedAt,
         durationMs,
