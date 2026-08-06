@@ -5817,3 +5817,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （laid-down/gitignore/driver）非本任务实现——真未落地；与 message-bus 生产闸 DISJOINT。池真 ready 已近耗尽
   （剩 red-pattern/ghost-drive/leak 已落地 + split-batch 待 closure）。
 - 在飞 2/3（message-bus + loop-driver-check）。套件 running（外层全量）。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:2xZ（内层，message-bus fan-in — 人优先②真实现）
+
+- **message-bus fan-in 完成（真实现，人优先②）**：`message-bus.ts` transport-agnostic deliver/observe、
+  **human 第三 target**（同一 deliver/observe 入口、transport 可换）+ `inbox-reader.sh` 消费挂载点
+  （delivered vs consumed 独立建模）。AC1-AC6、30/30 + tsc 0。**adversarial 2 轮**（deliver fail-closed/id
+  唯一/target 权威）。worktree/branch 已清。
+- **顺带修 catalog 三回归**：periodic-push-backup.sh 未声明（b-machine fan-in 漏）——agent 已补，
+  catalog 117/117、0 unclassified。
+- **⚠ 文档路径冲突**：manager 中文提案（untracked `docs/proposals/quay-message-bus-human-in-the-network.md`）
+  与 agent 英文设计文档同路径碰撞——**manager 提案已备份 /tmp/quay-message-bus-manager-proposal-untracked.md**，
+  外层请 reconciliation（两份内容不同，agent 版被 SPEC 引用）。
+- 在飞 1/3（loop-driver-check）。套件 running。无 stop、无 block、Monitor 绿。
