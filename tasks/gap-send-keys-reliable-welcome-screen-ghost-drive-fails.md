@@ -82,6 +82,20 @@ RC=0
 
 **AC4 未勾**：需 kill archguard outer 走 watchdog 重拉闭环，属 live-loop 干预；本任务在 worktree 隔离分支执行，不动 archguard-4/quay-0。留 fan-in 由外层实测（DoD 未勾）。
 
+**AC1–AC3 复核（2026-08-06，worktree task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails，复用 master 已落地的修复 a75dde7e）**：本次内层复核 scoped 验证：
+
+```
+$ bash scripts/test.sh --for-task gap-send-keys-reliable-welcome-screen-ghost-drive-fails   (EXIT=0)
+ℹ tests 28 · pass 28 · fail 0 · cancelled 0 · skipped 0
+scoped check: run_checker "test-framework-policy-check" … PASS
+scoped check: run_checker "test-isolation-check" … PASS (all 44 violation(s) are baselined …)
+scoped check: run_checker "test-impl-census-check" … checked 226 test files · clean 226 · impl-deleted 0
+scoped check: run_checker "task-contract-check" … task-contract-check: no violations.
+scoped check: run_checker "adr016-screen-use-check" … PASS: active whole-screen-hash violations (1) within band (0..1)
+```
+
+直接运行任务命名的测试文件 `bash scripts/test.sh plugin/test/send-keys-reliable.test.mjs` → 同样 `tests 28 / pass 28 / fail 0 / cancelled 0 / skipped 0`。其中 AC1 e2e（fresh welcome 屏 ghost 文本 + CLEAR_MAX=2）断言无 `fail loud|CLEAR_MAX` 且走 `SKIP 清屏循环` 分支、rc=0、transcript 出现 marker；AC2 e2e（非 fresh，transcript 预置 user 消息）断言无 SKIP 分支、走 NBSP 清屏路径。Contract measure `fresh_welcome_drive`=0 由 AC1 e2e 的 `doesNotMatch(fail loud|CLEAR_MAX)` 断言覆盖；`invoke` grep 确认 `--is-fresh`/`fresh_session`/`SKIP 清屏循环`/`CLEAR_MAX` 均在 `plugin/scripts/send-keys-reliable.sh` 中。AC4 仍未勾：需 kill archguard outer 走 watchdog 重拉闭环（live-loop 干预），worktree 隔离执行不动 archguard-4/quay-0，留 fan-in 由外层实测。
+
 ## Definition of Done
 
 - [ ] AC1–AC4 全部勾上
