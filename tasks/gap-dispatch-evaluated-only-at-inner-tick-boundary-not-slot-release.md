@@ -65,7 +65,7 @@ extra:
 - [x] AC1: 实测确认当前形态——派发仅发生在 inner tick 边界（派发时间戳簇 + 槽位空置期）— 诊断即本任务 Proposal 的 meta-cc 实测（3 簇派发时间戳 + 39/30/18/33/50min 空槽）；fix 把「完成事件」设为第二个派发触发源
 - [x] AC2: 事件驱动接线——任一 subagent 完成通知触发派发步骤重评估（非等下一 tick）— fast-mode-loop-tick.md 新增「事件驱动派发（槽位回填）」节（步骤 4 注明双触发源）+ plugin/scripts/slot-refill.ts helper（机械承载）
 - [ ] AC3: 复测：槽位释放后 <5 分钟内有新派发（对比现状的 39 分钟），池子 health 时有货可派 — 需实跑 loop 的派发时间戳复测（运行时验证，scoped 内不可得），留给外层/下一轮；机制已接：完成通知触发回填、slot-refill 给出 go/no-go
-- [x] AC4: 负控制——无完成事件时零派发（不引入新轮询源/双驱动）— slot-refill.ts 是纯状态读取器（exit 0 恒、零写入、零派发）；tick 文档明令不建第二个 /loop、不改 ScheduleWakeup 成快轮询、无常驻 watcher；测试覆盖「无候选 ⇒ should_refill=false」
+- [x] AC4: 负控制——无完成事件时零派发（不引入新轮询源/双驱动）— slot-refill.ts 是纯状态读取器（exit 0 恒、零写入、零派发）；tick 文档明令不建第二个 /loop、不改 ScheduleWakeup 成快轮询、无常驻 watcher；测试覆盖「无候选 ⇒ should_refill=false」 **交叉标注（2026-08-06，gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat）**：本 AC4 的负控制正是该任务的反面形态——「无完成事件即零派发」把长任务霸占期间的空槽写成了正确行为，实为缺陷（实测 in_flight=1/slots_free=2/should_refill=true 却 34 分钟零派发）。该任务另立（不重开本任务），把负控制修正为「无完成事件、且 tick 心跳没到」才零派发：tick 心跳每 tick 无条件跑 slot-refill（兜底必跑触发源），完成事件只是加速源
 - [x] AC5: 并发上限语义不变（cap=3 仍在，机制/策略分离，档位配置可调）— cap 是输入（cap-from-gate.sh 的 effective_cap），slot-refill 不硬编码；测试覆盖 in-flight≥cap ⇒ no refill、cap 可调
 - [x] AC6: 与 gap-telemetry-brackets-vs-subagents（括号≠子代理）交叉标注——事件驱动依赖准确的完成感知 — 回填用 `<task-notification>` 真实完成信号、不读遥测括号；tick 文档「事件驱动派发（槽位回填）」节与本任务 Proposal 均交叉引用 gap-telemetry-brackets-vs-subagents-no-slot-visibility
 
