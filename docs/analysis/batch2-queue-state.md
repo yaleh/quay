@@ -6247,3 +6247,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   附带：ready-pool 28/28、heavy-op-token 30/30 全绿（B 侧测试措辞对齐 A 规范输出）。
 - **在飞 0/3**（spawn-count/supervisor rebase 完成待 fan-in；AC16 已在 integration）。
 - **下一步**：supervisor + spawn-count 合 integration（两线模型）；外层 FF integration→develop。
+
+### tick 2026-08-06T10:1xZ（内层 cron，post-catch-up 首 tick）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 0/3（spawn-count bracket 已 close done）。
+- **fan-in 拓扑 knot【转外层裁定】**：integration（bd273f5a）持 AC16（v0.4.0）但落后 develop 188 提交
+  （develop 1c4938ac 全基线 v0.3.13）；spawn-count（98e23f5b）+ supervisor（39af6de5）在 develop+1。
+  两线模型 fan-in（合 integration → 外层 FF develop）需要 integration 先追上 develop，且 AC16 是
+  integration-only 的 divergence——**integration 如何追上 develop（merge develop into integration /
+  rebase AC16 onto develop）是分支模型决策，转外层**。
+- 池 9/20、disjoint 4/5 不达标；slot-refill 推荐 4 个全陈旧（DIR-124 directive / 3 landed signal-gap）。
+- needs-human-black-hole 经 catch-up 已落地（6f3c68d5，B 侧工作）——stale ready，不派。
+- **派发 1/3**：no-criterion-records-cost（唯一真实未落地 ready；resolve 5/6、pool-candidate clean、
+  fork-baseline=develop）。worktree /home/yale/work/quay-worktrees/no-criterion-cost + bracket 已开。
