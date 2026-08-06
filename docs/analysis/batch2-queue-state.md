@@ -7498,3 +7498,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **标 needs-human**：ACs 4/6/7/8 + AC1 checked-plan 半需**真实 fresh Codex 会话 + 人在场授权**执行真实任务 edit/create + refused-CAS probe + 独立对抗审计。任务自身 anti-fakery 条（line 50-53）禁止用 CODEX-PROBE fixture 顶替真落地。标 needs-human 防止 dispatch 闸重派一个不可完成的任务。
 - **无代码 fan-in**：机械面（AGENTS.md / skills / .codex/config.toml / 测试）本就已在 develop——DIR-121 的改动只含任务文件。worktree + branch 已清。
 - **在飞只剩 residue-check**（1 real），4 空槽但 divergence 阻塞全池派发（见 23:1x 条目）。
+
+### 事件 23:5xZ（tick：residue-check 完成；全池派发仍被 divergence 阻塞）
+
+- **residue-check 完成**：实现早已在 develop（793f0204，前一轮落地）+ 两分支一致 → **无代码 fan-in**；本 re-dispatch 验证 + tick DoD（full suite 2866/0 green）。任务文件已入 develop，worktree/branch 清理。
+- **在飞归零**：0 real in-flight，5 空槽。但 **8 个 eligible+depsReady 候选全部触碰分叉文件**，4 个 slot-refill 推荐逐条出局（DIR-124 dep 未满+退役文件、audit-findings 9/9 diverged、cold-start outer 型、concurrency-derivation scripts/test.sh+CLAUDE.md+capability-catalog diverged）。
+- **无安全派发**：divergence（integration 33 / develop 272）结构性阻塞全池。外层已升级（d8f9eb75），manager 在诊结构因（8da06396："26 个 commit 是我的"）。
+- **保留 worktree**：ac8 / chart2-s2 / shipped-ts（needs-human）；manager-productization / resource-aware（历史遗留）。
+- **本 tick 不派发**。下一解锁动作 = 外层对齐分支。
