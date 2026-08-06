@@ -5065,3 +5065,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **loop-driver-check fan-in 完成**（`6178aa8d`）：tick 文档步骤 4 补写注册表行（与 cold-start SKILL 逐字同源）、STALLED 处置先查注册表不再制造双触发、AC7 `.halt` 打印改「未暂停」（控制面非传感器）、新测试 `loop-driver-check.test.mjs` 7/7。AC1/2/4/5/6/7 勾；**AC3 如实记录未解决**（自述注册表结构性无法分辨陈旧行，转入 L2，未打勾）。已并已清。
 - **outer-heartbeat 仍在飞**（worktree ca392fd8，未 commit）。外层套件重跑等它落定。
 - 在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:1xZ（内层，outer-heartbeat fan-in 完成 —— 全部在飞清零）
+
+- **outer-heartbeat fan-in 完成**（`cd774806`）：session-liveness 外层心跳 **多源 max mtime**（HEAD commit / queue-state / tick-log / 分诊记录 / verification-round 任一在阈值内 ⇒ alive）——红窗处置写 queue-state+提交不写 tick-log ⇒ 反向失效消除；真阳性（30min 零产出）保留。AC2/3/4 fixture 3/3 + `--selfcheck` PASS。已并已清。
+- **外层套件重跑已起**（02:09:54Z running，5cf3d73d「tree clean, suite re-run started for green」）——两个 doc 修复已落地、树净 ⇒ 预期 **green** → closure（~24 not-yet-flipped + 各 ready 任务）。
+- **在飞 0/5**（本批全部落定：productize/split-batch/spawn-count/ghost-suggestion/global-count/dist-doc-gate/codex/native-store/loop-driver-check/outer-heartbeat 全部 merged）。worktree/branch 全清。无停止条件、无 .halt、无 block、Monitor 绿。master `5cf3d73d`。
