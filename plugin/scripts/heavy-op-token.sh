@@ -33,10 +33,14 @@
 #   bash plugin/scripts/heavy-op-token.sh --events-file <p> ... # test seam: override the events file (default $QUAY_GLOBAL_DIR/heavy-op/events.jsonl)
 #
 # Contract (from the task's ## Contract block):
-#   measure  holder   = `--status` 的 holder 字段
-#   measure  wait_ms  = `--acquire <project>` 输出的 waited_ms 字段
-#   measure  reclaims = `--status` 的 stale_reclaims 字段
+#   measure  holder       = `--status` 的 holder 字段
+#   measure  holder_alive = `--status` 的 holder_alive 字段（持有者 pid 是否存活；与 kill -0 一致，
+#                           gap-token-status-reports-a-dead-holder-as-busy 新增）
+#   measure  wait_ms      = `--acquire <project>` 输出的 waited_ms 字段
+#   measure  reclaims     = `--status` 的 stale_reclaims 字段
 #   band     concurrent_holders = 1
+#   invariant status 只读不写：--status 绝不在读路径回收（那会让读操作产生副作用）；对死持有者，
+#            只报告「下一个 --acquire 会怎样」并给出该跑的 --acquire 命令（AC4/AC5/AC7）。
 #   invoke   `bash plugin/scripts/heavy-op-token.sh --acquire quay --timeout 0`
 #   control  A 持有时 B --acquire ⇒ B 失败且打印 A 的身份与已持有时长；A --release 后 B 成功
 #
@@ -361,27 +365,67 @@ try_acquire() {
 
 # ── subcommands ───────────────────────────────────────────────────────────────────────────────────────
 do_status() {
-  local holder pid held lease_expires now_msv lease_left
+  local holder pid held lease_expires now_msv lease_left alive
   if ! fail_open_or_prepare; then
-    printf 'holder=none\nheld_ms=n/a\nlease_expires_ms=n/a\nlease_remaining_s=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
+    printf 'holder=none\nheld_ms=n/a\nlease_expires_ms=n/a\nlease_remaining_s=n/a\nholder_alive=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
     return 0
   fi
   if [ ! -e "${TOKEN_FILE}" ]; then
-    printf 'holder=none\nheld_ms=n/a\nlease_expires_ms=n/a\nlease_remaining_s=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
+    printf 'holder=none\nheld_ms=n/a\nlease_expires_ms=n/a\nlease_remaining_s=n/a\nholder_alive=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
     return 0
   fi
   holder="$(read_holder)"
   pid="$(read_holder_pid)"
   held="$(held_ms_of_token)"
   lease_expires="$(read_field lease_expires_ms)"
+  now_msv="$(now_ms)"
   lease_left="n/a"
   if [ -n "$lease_expires" ] && [ "$lease_expires" -ge 0 ] 2>/dev/null; then
-    now_msv="$(now_ms)"
     lease_left=$(( (lease_expires - now_msv) / 1000 ))
     [ "$lease_left" -lt 0 ] && lease_left=0
   fi
-  printf 'holder=%s\npid=%s\nheld_ms=%s\nlease_expires_ms=%s\nlease_remaining_s=%s\nstale_reclaims=%s\n' \
-    "${holder:-unknown}" "${pid:-?}" "${held:-0}" "${lease_expires:-n/a}" "${lease_left}" "$(read_reclaim_counter)"
+  # holder_alive — the honesty fix (gap-token-status-reports-a-dead-holder-as-busy): the SAME liveness
+  # test try_acquire uses for its precedence branch 1 (pid exists AND is not a zombie). A dead holder
+  # must never read as "busy" on the one output the arbiter actually reads. Read-only: this never
+  # reclaims — reclaim happens ONLY inside --acquire (AC4: a read must not mutate the token).
+  alive="no"
+  if [ -n "$pid" ] && pid_alive "$pid"; then
+    alive="yes"
+  fi
+  printf 'holder=%s\npid=%s\nheld_ms=%s\nlease_expires_ms=%s\nlease_remaining_s=%s\nholder_alive=%s\nstale_reclaims=%s\n' \
+    "${holder:-unknown}" "${pid:-?}" "${held:-0}" "${lease_expires:-n/a}" "${lease_left}" "$alive" "$(read_reclaim_counter)"
+
+  # ── dead-holder honesty block (AC5/AC7) ──────────────────────────────────────────────────────
+  # A dead holder is a "you can have it NOW" state, not a "wait and it clears" state. State exactly
+  # what the NEXT --acquire would do (the same criteria try_acquire applies), and why polling --status
+  # to wait is an INVALID strategy: reclaim is PULL-based — it happens only at the instant a --acquire
+  # runs, never as a side effect of this read, so holder=none will never appear on its own.
+  if [ "$alive" = "no" ]; then
+    local reclaimable="yes" why="" mtime_s age
+    # Lease expiry is the deciding liveness signal (the work stopped renewing).
+    if [ -n "$lease_expires" ] && [ "$lease_expires" -ge 0 ] 2>/dev/null && [ "$now_msv" -ge "$lease_expires" ]; then
+      why="lease expired"
+    else
+      # Accelerated release: pid dead AND mtime stale (crash recovery; same as try_acquire branch 3).
+      mtime_s="$(token_mtime_s)"
+      age=$(( now_msv / 1000 - mtime_s ))
+      if [ "$age" -ge "${STALE_TIMEOUT_S}" ]; then
+        why="mtime ${age}s old (stale >= ${STALE_TIMEOUT_S}s crash grace)"
+      else
+        reclaimable="no"
+        why="mtime only ${age}s old (fresh, inside the ${STALE_TIMEOUT_S}s crash grace) and lease active"
+      fi
+    fi
+    if [ "$reclaimable" = "yes" ]; then
+      printf 'status: holder %s (pid %s) is DEAD and RECLAIMABLE on the next --acquire (%s)\n' "${holder:-unknown}" "${pid:-?}" "$why"
+      printf 'status: WAITING IS INVALID — reclaim is PULL-based: it happens ONLY at the instant a --acquire runs.\n'
+      printf 'status: Polling --status for holder=none will NEVER return while this dead-holder file exists.\n'
+      printf 'status: Take the token now: bash plugin/scripts/heavy-op-token.sh --acquire <your-project>\n'
+    else
+      printf 'status: holder %s (pid %s) is DEAD but NOT yet reclaimable (%s)\n' "${holder:-unknown}" "${pid:-?}" "$why"
+      printf 'status: It becomes reclaimable once mtime ages past %ss or the lease expires. Polling --status will NOT show the free state — the token is reclaimed only when a --acquire runs.\n' "${STALE_TIMEOUT_S}"
+    fi
+  fi
 }
 
 do_acquire() {

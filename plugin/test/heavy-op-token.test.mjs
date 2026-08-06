@@ -549,3 +549,182 @@ test("L-AC7 — the script header documents --renew + why the retry loop owns li
   // The script itself must not count cmdlines; the token's OWN recorded pid/lease is the source.
   assert.doesNotMatch(src, /pgrep -f|ps -ef.*grep|ps aux.*grep/, "no cmdline-text process matching in the token script");
 });
+
+// ── gap-token-status-reports-a-dead-holder-as-busy: --status HONESTY ─────────────────────────────────
+// The bug: `--status` printed holder/pid/held_ms exactly as stored WITHOUT checking whether the pid is
+// alive — so a token held by a DEAD process read identically to one held by a live process, and an
+// arbiter reading --status would defer to a corpse (and, worse, poll forever: reclaim is PULL-based and
+// only happens at the instant a --acquire runs). The fix: --status reports holder_alive (the SAME
+// liveness test try_acquire uses), and for a dead holder states whether the NEXT --acquire would
+// reclaim it + gives the --acquire command (AC5/AC7). It stays READ-ONLY: never reclaims, never mutates
+// the token (AC4's negative control — a read must not write).
+
+function writeTokenFile(root, fields, mtimeMs = null) {
+  const p = path.join(root, "heavy-op", "token");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, fields);
+  if (mtimeMs != null) {
+    const t = new Date(mtimeMs);
+    fs.utimesSync(p, t, t);
+  }
+  return p;
+}
+
+test("S-AC1 — --status reports holder_alive=yes for a LIVE pid, no for a DEAD pid (consistent with kill -0)", () => {
+  const root = makeTmp();
+  try {
+    // LIVE: record pid = THIS node test process (alive for the whole test). kill -0 must succeed.
+    writeTokenFile(root, `holder=liveproj\npid=${process.pid}\nacquired_ms=${Date.now()}\nhost=test\n`);
+    let r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `live status failed:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=yes/, "a live pid must report holder_alive=yes");
+    assert.doesNotMatch(r.stdout, /DEAD/, "a live holder must NOT be described as dead");
+    process.kill(process.pid, 0); // throws if not alive — direct band with the reported field
+    assert.ok(true, "kill -0 <live-pid> succeeded, matching holder_alive=yes");
+
+    // DEAD: record a reaped child pid. kill -0 must fail.
+    const dp = deadPid();
+    writeTokenFile(root, `holder=deadproj\npid=${dp}\nacquired_ms=${Date.now()}\nhost=test\n`);
+    r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `dead status failed:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=no/, "a dead pid must report holder_alive=no");
+    assert.throws(() => process.kill(dp, 0), "kill -0 <dead-pid> must throw, matching holder_alive=no");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC2 — negative control (ALIVE): a live holder reports holder_alive=yes with real run output", () => {
+  const root = makeTmp();
+  try {
+    // Hand-write a token whose pid is THIS (alive) node process to pin the ALIVE branch deterministically.
+    writeTokenFile(root, `holder=archguard\npid=${process.pid}\nacquired_ms=${Date.now() - 5000}\nhost=test\n`);
+    const r = runToken(["--status"], { root });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder=archguard/);
+    assert.match(r.stdout, /holder_alive=yes/, "a live holder must report alive");
+    assert.match(r.stdout, /stale_reclaims=0/, "a live holder must never be counted as reclaimed");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC3 — negative control (DEAD): kill the holder ⇒ the SAME --status command reports holder_alive=no", async () => {
+  const root = makeTmp();
+  const tokenPath = path.join(root, "heavy-op", "token");
+  let holder;
+  try {
+    holder = spawn("bash", ["-c", `"${TOKEN}" --root "${root}" --acquire archguard --timeout 0 && exec sleep 1000`]);
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(tokenPath) && Date.now() < deadline) await sleep(20);
+    assert.ok(fs.existsSync(tokenPath), "the holder must acquire before we kill it");
+
+    let r = runToken(["--status"], { root });
+    assert.match(r.stdout, /holder_alive=yes/, "before the kill, the SAME command reports alive");
+
+    // Kill the holder (the recorded pid — exec sleep keeps the pid) ⇒ the SAME command flips to dead.
+    holder.kill("SIGKILL");
+    await sleep(50);
+    r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `status after kill must still exit 0:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=no/, "after the kill, the SAME command reports the holder is dead");
+    assert.match(r.stdout, /DEAD/, "the output must say DEAD, not silently 'busy'");
+    assert.ok(fs.existsSync(tokenPath), "--status must NOT have reclaimed the token (read-only)");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC4 — READ-ONLY negative control: --status on a dead holder leaves mtime + content byte-identical", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 60000}\nlease_expires_ms=${Date.now() + 600000}\nhost=test\n`,
+      Date.now() - 120000);
+    const beforeContent = fs.readFileSync(tokenPath, "utf8");
+    const beforeMtime = fs.statSync(tokenPath).mtimeMs;
+
+    const r = runToken(["--status"], { root });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+
+    const afterContent = fs.readFileSync(tokenPath, "utf8");
+    const afterMtime = fs.statSync(tokenPath).mtimeMs;
+    assert.equal(afterContent, beforeContent, "--status must not change the token content (a read must not write)");
+    assert.equal(afterMtime, beforeMtime, "--status must not touch the token mtime (no reclaim, no rewrite)");
+    const s = runToken(["--status"], { root });
+    assert.match(s.stdout, /stale_reclaims=0/, "--status must never bump the reclaim counter");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC5 — dead holder output states whether the NEXT --acquire would reclaim it + gives the next step", () => {
+  const root = makeTmp();
+  try {
+    // DEAD + STALE mtime ⇒ reclaimable on next acquire (accelerated-release criteria met).
+    writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nhost=test\n`,
+      Date.now() - 120000);
+    let r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+    assert.match(r.stdout, /RECLAIMABLE on the next --acquire/, "the output must say the next --acquire would reclaim it");
+    assert.match(r.stdout, /--acquire <your-project>/, "the output must give the next-step --acquire command");
+
+    // DEAD + FRESH mtime ⇒ NOT yet reclaimable (inside the crash grace) — still DEAD, still honest.
+    writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now()}\nhost=test\n`, Date.now());
+    r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "60" } });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+    assert.match(r.stdout, /DEAD but NOT yet reclaimable/, "a fresh-mtime dead holder is not reclaimable yet");
+    assert.match(r.stdout, /--acquire/, "the output still points at --acquire as the reclaim moment");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC7 — WAITING IS INVALID: polling --status never sees the free state; one --acquire reclaims immediately", () => {
+  const root = makeTmp();
+  try {
+    // Dead holder + mtime past the stale timeout (both acquire reclaim conditions met — yet nobody has
+    // run --acquire, so the file is still there and --status can never show holder=none on its own).
+    const tokenPath = writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nhost=test\n`,
+      Date.now() - 120000);
+
+    // Poll --status N times: EVERY output still shows the dead holder — never holder=none.
+    for (let i = 0; i < 5; i++) {
+      const r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+      assert.equal(r.status, 0, `poll #${i} failed:\n${r.all}`);
+      assert.match(r.stdout, /holder=deadproj/, `poll #${i}: status must still show the dead holder, never holder=none`);
+      assert.match(r.stdout, /holder_alive=no/, `poll #${i}: the dead holder must keep reporting holder_alive=no`);
+      assert.match(r.stdout, /WAITING IS INVALID/, `poll #${i}: the output must say polling is an invalid strategy`);
+      assert.match(r.stdout, /PULL-based/, `poll #${i}: the output must name reclaim as pull-based`);
+      assert.ok(fs.existsSync(tokenPath), `poll #${i}: --status must never reclaim (the file persists)`);
+    }
+    assert.match(fs.readFileSync(tokenPath, "utf8"), /^holder=deadproj$/m, "the dead-holder file is untouched by all polls");
+
+    // ONE --acquire ⇒ immediate success (the reclaim happens at THIS moment, pull-based).
+    const a = runToken(["--acquire", "quay", "--timeout", "0"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    assert.equal(a.status, 0, `one --acquire must reclaim the dead holder immediately:\n${a.all}`);
+    assert.match(a.stderr, /RECLAIM/, "the acquire must perform the reclaim (accelerated release)");
+    assert.match(a.stdout, /acquired=yes/);
+    const s = runToken(["--status"], { root });
+    assert.match(s.stdout, /holder=quay/, "after the acquire, status shows the NEW holder");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC7b — the script header documents holder_alive + the read-only invariant + cites this task id (structural)", () => {
+  const src = fs.readFileSync(TOKEN, "utf8");
+  assert.match(src, /holder_alive/, "the header must document the holder_alive measure");
+  assert.match(src, /status 只读不写/, "the header must pin the read-only invariant");
+  assert.match(src, /gap-token-status-reports-a-dead-holder-as-busy/, "the header must cite this task id");
+  // AC6 of the task: "how many heavy ops are running" must NOT be judged by cmdline-text counting.
+  // The script itself must not count cmdlines; the token's OWN recorded pid/lease is the source.
+  assert.doesNotMatch(src, /pgrep -f|ps -ef.*grep|ps aux.*grep/, "no cmdline-text process matching in the token script");
+});
