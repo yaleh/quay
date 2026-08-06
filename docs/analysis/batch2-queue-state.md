@@ -5702,3 +5702,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（session-liveness-hashes 53m，外层验证 real=1 stale=0——非假 OVER90）。无 fan-in、无新派发。
 - 外层：slot-refill drive 送达验证 + verification-round jsonl 缺口回填 + filed。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:4xZ（内层，session-liveness-hashes fan-in — 重大真实现）
+
+- **session-liveness-hashes fan-in 完成（重大真实现，66min）**：busy/idle 判定重实现在 classifyPaneState
+  底部区域 **shape 分类**上（根因：parked 会话的 token counter 在整屏 hash 里 —— 修复 + 满足 ADR-016
+  Amendment）。`--pane-state` + `--classify` seams；**adr016-screen-use 0 违规**（移除最后一个 tolerated
+  legacy observer）。AC1-AC9、scoped **74/74 + 1 pre-existing skip**、M6 settle-poll 硬化。worktree/branch 已清。
+  **在飞 0/3**。
+- 套件 green、无 stop、无 block、Monitor 绿。
