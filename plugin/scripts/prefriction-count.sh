@@ -14,9 +14,13 @@
 # a TREND criterion: prefriction_dimensions > 0 means the generator has started opening dimensions
 # proactively (before they hurt), which is the mechanism's definition of self-evolving.
 #
-# Detection is CONSERVATIVE about pre-friction: the trigger pattern is deliberately LIBERAL (a task
-# with any red-event evidence counts as post-friction), so a false "pre-friction > 0" is avoided —
-# the band's meaningful signal is a real proactive open, not a parsing artifact.
+# Detection is CONSERVATIVE about pre-friction: the trigger pattern is LIBERAL about *event evidence*
+# (a task with any concrete red-event reference — a red suite, a crash/leak/OOM/hang, a watchdog or
+# alarm firing, a countable failure figure — counts as post-friction), so a false "pre-friction > 0"
+# is avoided. The event markers must be CONCRETE (see POST_FRICTION_RE below), not generic
+# defect-description adjectives: bare 今晚 / missing / broken / 无法 / 不一致 matched 90.6% of
+# newly-filed tasks by construction and deadened the signal (2026-08-06,
+# gap-prefriction-trigger-regex-too-broad-signal-is-dead).
 #
 # Contract measure: `bash plugin/scripts/prefriction-count.sh` -> stdout's prefriction_dimensions
 # field (number). `--json` adds the per-task breakdown.
@@ -55,10 +59,19 @@ while [ $# -gt 0 ]; do
 done
 
 # ── post-friction trigger evidence ────────────────────────────────────────────────────────────────
-# A task body carrying ANY of these is treated as triggered (post-friction): a red event, an alarm,
-# a crash/leak/block, a degradation/regression, or a contradiction — all things that "hurt" at
-# filing time. This list is deliberately generous so pre-friction is not over-reported.
-POST_FRICTION_RE='失败|崩溃|崩|卡死|死循环|堵死|泄漏|OOM|内存|超时|timeout|broken|断的|断了|断档|损坏|corrupt|\bfail(ed|ure|ing)?\b|\bcrash(ed|es)?\b|\bleak(ed|ing)?\b|state=red|红了|告警|报警|alarm|warning|\berror\b|exception|恶化|退化|degrad|漂移|drift|矛盾|contradict|不一致|撞上|今晚|missing|无法|blocked|卡在|警告'
+# A task body carrying ANY of these is treated as triggered (post-friction): a concrete EVENT MARKER
+# — a red-suite state (state=red / SUITE-RED / full-suite red / red window), a crash/leak/OOM/hang,
+# a watchdog/alarm firing, or a COUNTABLE failure figure (a non-zero test-failure count).
+# Words are EVENT REFERENCES ONLY, per the invariant (each must correspond to a concrete event that
+# existed at discovery time). Generic defect-description vocabulary — missing / broken / 无法 / 不一致 /
+# fail / failure / error / 今晚 (tonight) — is deliberately EXCLUDED: those appear in any well-written
+# gap-task body BY CONSTRUCTION (describing a defect requires saying what's missing/wrong) and cannot
+# distinguish "filed because a red light existed" from "filed in ordinary defect prose".
+# (2026-08-06, gap-prefriction-trigger-regex-too-broad-signal-is-dead: the previous list matched 90.6%
+# of newly-filed tasks, deadening the signal. Bare '今晚' is a pure temporal reference. 'warning' was
+# dropped too — '--no-warnings' is a pervasive Node flag. Countable failures require a NON-ZERO count
+# ([1-9]...) so green "pass N / 0 failed" output and "AC6 fail-safe"-style terms don't trigger.)
+POST_FRICTION_RE='state=red|红了|SUITE-RED|full-suite red|red window|watchdog|OOM|out of memory|内存泄漏|memory leak|泄漏|卡死|死循环|死锁|崩溃|\bcrash(ed|es)?\b|\bhang(s|ing|ed)?\b|告警|报警|\balarm(s)?\b|[1-9][0-9]* ?fail(ed|ure)?s?([^a-z-]|$)|\bfailure(s)?[: =][ ]?[1-9][0-9]*'
 
 # ── enumerate newly-filed tasks (git-added in the window) ─────────────────────────────────────────
 if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
