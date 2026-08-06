@@ -7352,3 +7352,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **外层请求重复投递**：adr016 打包副本违规修复已在 `25196d9a` 落地（RETIRED_FILES 增 `packages/quay/plugin/scripts/send-keys-verified.sh`）。本轮复跑验证仍绿：adr016 0 active / mutation pass / `--static-checks` STATIC-EXIT 0（194 scripts scanned）。修复后外层有 manager 新提交（7c8435d8、4e13af90），静态链未被其破坏。
 - **无新动作**：同一修复不重复提交；队列状态仅记本轮复跑验证结果。
+
+### tick 2026-08-06T18:2xZ（零派发：manager OVER90 停止条件命中；suite 转 running）
+
+- **suite 转 running**（18:08:48 起，runner pid 3140874 存活，静态链修复后外层重跑）——红窗停止解除，但**本轮仍零派发**。
+- **停止条件命中：task-over-90m（manager-productization，115m+）**——`--detect-stop` 写 auto-block 并保持。manager 双括号外层 17:09 已裁定「留待人工裁定」；首括号（15:53 hlo8jn）为 crash leftover（agent 静默死，worktree 老 base 56d60671 + 1 脏文件，0 commit），**非假阳性**。doc：命中停止条件 ⇒ 不派发，报告，等裁定。
+- **不派发理由**：OVER90 块是真实停止条件（不是 suite 红——suite 已 running）。块保留，等外层/人工裁定（abort vs continue + `--clear`）。
+- **无 fan-in**：无已完成 agent。send-keys-verified 分支为外层裁定 F 故意不合并（preserve-on-branch），非 fan-in 候选。
+- **池 21 ≥ floor 20**，dispatchable 10，无需补晋。cap=5（GO 档），load1 2.28。
+- **遥测**：tasksPerHour 1.21（window 103.9h）/ mean 65.4m / median 49.7m / 累计死时间 519.7min。Monitor `mounted:true / targetOk:true`。inbox unread=0。
