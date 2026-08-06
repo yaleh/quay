@@ -64,18 +64,77 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **两线模型**——`develop`（已验证基线）+ `integration`（待验证汇入）；master 发布线角色空置
+- [x] AC1: **两线模型**——`develop`（已验证基线）+ `integration`（待验证汇入）；master 发布线角色空置
       （裁定①；等真有发布授权时再加，语义才实）
-- [ ] AC2: **分叉基线即依赖声明**——独立任务从 develop、声明依赖的从 integration 分叉（不需新依赖
+      落地：`git branch develop master` + `git branch integration develop`（两线建立，integration 初始
+      = develop ⇒ `git merge-base --is-ancestor develop integration` exit 0）；两 loop 文档均写入两线
+      分支模型表（内层 `fast-mode-loop-tick.md` 步骤 2「两线分支模型」、外层 `orchestrator-loop-tick.md`
+      步骤 3b「批量合 integration→develop」）；master 发布线角色空置（quay 无发布流程）。
+- [x] AC2: **分叉基线即依赖声明**——独立任务从 develop、声明依赖的从 integration 分叉（不需新依赖
       字段，机械检查：touches 与 integration 未验证任务相交 ⇒ 从 integration 分叉）
-- [ ] AC3: **合并机制**——任务合回 integration（红窗期照常接收）；outer verification-round 批量合回
+      落地：`plugin/scripts/fork-baseline.ts`——`decideForkBaseline(candidate, unverified, expand)`
+      复用单源 `checkTouchesPair`，任一未验证任务相交 ⇒ `integration`、全不相交 ⇒ `develop`；
+      CLI 从 `git log --format=%s develop..integration` 机械导出未验证集；内层派发步骤 4 新增
+      「分叉基线判定」子步骤（`fork_baseline_is_dependency = 1`）。实跑输出见任务体「AC2 实跑输出」。
+- [x] AC3: **合并机制**——任务合回 integration（红窗期照常接收）；outer verification-round 批量合回
       develop（fast-forward 无冲突）；红窗停派结构性消除（develop 永不从未验证树分叉）
-- [ ] AC4: **前置② 先修全局计数断言**——脆弱断言（B3-2 族）改成相对基线判据，先于模型轮次落地
-- [ ] AC5: **前置③ 先清历史分支**——60 个历史遗留（experiment-4-iteration-* / _master_check 等）清理，
+      落地：`plugin/scripts/integration-batch-merge.sh`——ref-level fast-forward（`git update-ref` +
+      CAS on old develop tip），pre-check `git merge-base --is-ancestor <develop> <integration>` 非 0
+      即 fail-closed（真分歧 needs-human，绝不 blind --ours/--theirs）；measure
+      `git merge-base --is-ancestor <integration> <develop>`（band=0）；外层步骤 3b 在 suiteGreen 时调它，
+      红窗期只挡 develop 推进、不挡 integration 接收。实跑输出见任务体「AC3 实跑输出」。
+- [x] AC4: **前置② 先修全局计数断言**——脆弱断言（B3-2 族）改成相对基线判据，先于模型轮次落地
+      落地：由 `tasks/gap-global-count-assertions-fragile-relative-baseline.md` 实现并已落地其 AC1–AC3
+      （`plugin/scripts/test-file-snapshot.sh` + `plugin/test/test-file-snapshot.test.mjs`，scoped 5/5 绿）；
+      本任务与其双向交叉标注（Touches 互引 + 本任务 Proposal AC4 前置②注明）。
+- [x] AC5: **前置③ 先清历史分支**——60 个历史遗留（experiment-4-iteration-* / _master_check 等）清理，
       保留有未合并工作的分支
-- [ ] AC6: **命名 = integration**——gate/staging/next 被否（语义打架/暗示部署/表达不出待验证）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`（合并路径 fixture：integration→develop
+      落地：`git branch -d` 清理 **31 个** fully-merged-into-master 历史分支（experiment-4-iteration-0..12、
+      `_master_check`、`_review-master-check`、`__mt_master`、`master-check`、`master-latest`、
+      `milestones/M6x-cryst-*`、`worktree-agent-*`、`worktree-wf_*` 等——全部为 master 祖先，提交已保留）；
+      保留全部有未合并工作的分支（`experiment-4-iteration-13..19`、`dir-loop-wake`、`dist-plugin-*`、
+      `salvage/exp5-m01-attempt-1`、在飞 task 分支、`milestone/M239/iteration-0`）。删除前后清单见任务体
+      「AC5 实跑输出」。
+- [x] AC6: **命名 = integration**——gate/staging/next 被否（语义打架/暗示部署/表达不出待验证）
+      落地：SPEC §5 命名裁定（integration ✅ / gate ✗ 与 quay gate 概念打架 / staging ✗ 暗示部署 /
+      next ✗ 表达不出待验证）；helper 名 `integration-batch-merge.sh`、`integration` 分支、两 loop 文档
+      均用 `integration`。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（合并路径 fixture：integration→develop
       fast-forward；task→integration 触摸声明冲突暴露）
+      落地：`plugin/test/branch-model.test.mjs`——7 个测试全绿（`fail 0` / `cancelled 0`）：
+      AC3 fast-forward 正路径 + 真分歧负控制 + `--dry-run` 不动 ref；AC2 相交→integration / 不相交→develop /
+      git 导出未验证集 / 无 Touches 保守 integration。实跑输出见任务体「AC7 实跑输出」。
+
+## AC 实跑输出（scoped 2026-08-05，worktree 内）
+
+**AC7（测试，7/7 绿）：**
+```
+✔ AC3: batch-merge fast-forwards develop to integration when integration is a descendant (integration→develop)
+✔ AC3 negative control: a TRUE divergence (develop has commits integration lacks) FAILS closed, nothing moved
+✔ AC3 --dry-run reports ff-ability and the pending surface WITHOUT moving any ref
+✔ AC2: a task whose touches overlap an unverified task on integration forks from INTEGRATION
+✔ AC2: a task whose touches are disjoint from every unverified task forks from DEVELOP
+✔ AC2: git-derived unverified set — a task/<id> merged into integration (not develop) is detected via develop..integration
+✔ AC2: a candidate with NO ## Touches cannot be proven independent → conservative integration
+ℹ tests 7   ℹ pass 7   ℹ fail 0   ℹ cancelled 0
+```
+
+**AC1/AC3（integration→develop fast-forward，真实 repo 干跑）：**
+```
+integration-batch-merge: FF-OK — integration is a descendant of develop
+integration-batch-merge: measure integration_ff_merges=0 (post: integration is ancestor of develop)
+```
+
+**AC5（历史分支清理，删 31 保未合并）：**
+```
+DELETED: __mt_master _review-master-check audit-m116-verify experiment-4-iteration-0..12(13)
+         master-check master-latest milestones/M66-cryst-c1 M67-cryst-inv M68-cryst-b5 M69-cryst-b6
+         worktree-agent-a32c837c361983abe worktree-wf_48b19a73-291-{6,7,8,9} worktree-wf_4e2016c0-10b-6
+         worktree-wf_ccef4799-196-6 worktree-wf_dfc34384-83e-6
+保留（未合并）：experiment-4-iteration-13..19 dir-loop-wake dist-plugin-archguard dist-plugin-local
+         salvage/exp5-m01-attempt-1 task/* milestone/M239/iteration-0 worktree-wf_04ca99df-24b-6
+         worktree-wf_aa397ddd-14f-6  master develop integration
+```
 
 ## Definition of Done
 
@@ -90,10 +149,15 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 
 - plugin/loop/fast-mode-loop-tick.md（分叉/合并线：develop/integration）
 - plugin/loop/orchestrator-loop-tick.md（verification-round 批量合 integration→develop）
-- plugin/scripts/fork-baseline.ts（分叉基线判定 helper——外层裁定收窄：裸 plugin/scripts/ 展开 100+ 文件拖 5 候选入保守串行）
-- plugin/scripts/integration-batch-merge.sh（integration→develop 批量合 helper——同上收窄）
+- plugin/scripts/fork-baseline.ts（分叉基线判定：独立→develop / 声明依赖→integration）
+- plugin/scripts/integration-batch-merge.sh（integration→develop 批量合，fast-forward + CAS）
+- plugin/test/branch-model.test.mjs（AC7 合并路径 fixture）
 - tasks/gap-global-count-assertions-fragile-relative-baseline.md（前置②交叉标注）
 - orchestration/SPEC-branching-model-integration-branch-2026-08-05.md（引用）
+
+## Test-Files
+
+- plugin/test/branch-model.test.mjs
 
 ## Contract
 
