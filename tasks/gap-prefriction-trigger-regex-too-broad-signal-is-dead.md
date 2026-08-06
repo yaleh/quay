@@ -15,7 +15,7 @@ title: "prefriction-count.sh's POST_FRICTION_RE matches on virtually every gap t
   it hurt') is now structurally near-zero for any task written in ordinary defect-description
   prose, independent of whether real friction existed; manager 2026-08-06, adopting the shipped
   tool per human's explicit direction and finding it broken on first real use"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -132,6 +132,7 @@ resume 若中断，先跑 measure 读当前比例，不要假设已经修好
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——按外层规则在 worktree 内不跑全量，由外层/fan-in 在 gate GO 窗口执行（改动为 prefriction-count.sh 单文件正则；`plugin/test/` 无 prefriction 专属测试文件）
 
 ## Touches
+- tasks/gap-prefriction-trigger-regex-too-broad-signal-is-dead.md
 - plugin/scripts/prefriction-count.sh
 
 ## Measured & execution record (2026-08-06, worktree `/home/yale/work/quay-worktrees/prefriction-count`, branch `task/gap-prefriction-trigger-regex-too-broad-signal-is-dead`)
