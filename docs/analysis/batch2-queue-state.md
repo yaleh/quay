@@ -6740,3 +6740,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   agent 指引：并发派生被 revert（回固定值）但 docs/AC/tests 仍报派生形——single-source drift，按任务体
   Chosen mechanism 定方向（restore code vs fix docs）。
 - 在飞 2/3（cross-machine-sync + concurrency-revert）。no-post-merge-latency 待后续。
+
+### tick 2026-08-07T02:0xZ（cross-machine-sync fan-in 完成）
+
+- **cross-machine-sync 落 integration**（8548a671→51001ec7）：sync-lag-check.sh 调用点 +
+  slot-refill 双触发（integration-batch-merge --sync 事件驱动同轮 + tick 心跳兜底），禁 crontab。
+  AC1-AC4 A 侧验证、AC5/AC6 B 侧 deferred（不可达，如实记录）。scoped sync-lag-check 7/7。
+  periodic-push-backup.sh 从 0 活调用方 → 走升级通道 + 铺设集（顺带修 ADR-031 "不在铺设集"）。
+- **拓扑**：integration 原落后 develop → merge develop into integration 带 current，再合任务分支。
+- 在飞 1/3（concurrency-derivation-reverted）。concurrency task 已 promote ready（排队中）。
