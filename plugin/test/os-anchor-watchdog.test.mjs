@@ -71,9 +71,12 @@ test("AC1/install — idempotent installer writes timer/service/config (hermetic
     assert.ok(fs.existsSync(config), "projects config written");
     assert.ok(fs.existsSync(watchdogCopy), "watchdog copied to install dir");
 
-    // config has the invoking repo (quay) with a session + drive text
+    // config has the invoking repo (whatever its basename — a git worktree's root differs from
+    // the main checkout, so the name must be derived, never hardcoded to the checkout's basename)
+    // with a session + drive text
     const conf = fs.readFileSync(config, "utf8");
-    assert.match(conf, /quay\|/, "config includes the invoking project");
+    const repoName = path.basename(REPO_ROOT);
+    assert.match(conf, new RegExp(`${repoName}\\|`), `config includes the invoking project (${repoName})`);
     assert.match(conf, /\|outer\|/, "config carries the outer-window column");
 
     // no duplicate timer/service files from the second install

@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# supervisor-deliver.sh — the supervisor base layer's DELIVERY interface
+# (tasks/gap-supervisor-base-layer-outside-sessions-architecture, step ③).
+#
+# deliver(target, payload) -> delivered | failed — expressed BY INTENT, never by terminal
+# verbs. This is the ONLY delivery implementation: a consumer that wants text to reach a
+# Claude Code session calls THIS and learns delivered|failed. No consumer hand-writes a
+# tmux send-keys sequence.
+#
+# WHY ONE PLACE (SPEC-integration-architecture §4.3f): the ONE unreliable operation — TUI
+# keystroke injection — goes from "3 agents each hand-write" to "one hardened implementation
+# + real TUI e2e". The NBSP counterexample (2026-08-04): send-keys-reliable.sh was broken for
+# hours and all 3 consumers bypassed it with their own sequences — the bypass is the symptom
+# of "the narrow interface doesn't exist". THIS adapter is the narrow interface.
+#
+# WHY INTENT (AC5b): under `claude -p` the delivery mechanism becomes a process launch, but the
+# caller's contract — deliver a payload, learn delivered|failed — does not change. Replacing
+# this adapter is the whole TUI→-p migration of the delivery path.
+#
+# DELEGATES TO (reuse, never re-invent):
+#   send-keys-reliable.sh         the hardened 5-step clear/send/submit/poll procedure
+#   transcript-delivery-check.ts  the pure delivery verdict (the only trusted signal)
+# A FRESH-session path (transcript file absent — a re-spawned session creates its transcript
+# only on first committed input): direct reliable send + bounded wait for the file + pure verify.
+# The transcript is resolved here so callers never discover it themselves:
+#   --transcript <path>  the literal transcript jsonl (a known session)
+#   --root <path>        auto-discover the newest transcript under ~/.claude/projects/<slug>/
+#                        (slug = <path> with '/' → '-'; the config-not-inferred rule's one
+#                        documented exception, same as os-anchor-watchdog.sh)
+#
+# Usage:
+#   supervisor-deliver.sh <tmux-target> <payload> [--transcript <path>|--root <path>]
+# Exit: 0 = delivered (a real user message matching <payload> in the target transcript)
+#       1 = failed (undelivered after bounded retries — needs human)
+#       2 = usage / environment error (fail loud)
+# Env:  SUPERVISOR_DELIVER_VERIFY_S   overall delivery bound (default 60)
+
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELIABLE="$SELF_DIR/send-keys-reliable.sh"
+CHECKER="$SELF_DIR/transcript-delivery-check.ts"
+
+TARGET="${1:-}"
+PAYLOAD="${2:-}"
+TRANSCRIPT=""
+ROOT=""
+VERIFY_S="${SUPERVISOR_DELIVER_VERIFY_S:-60}"
+
+usage() {
+  echo "用法: $0 <tmux目标> <文本> [--transcript <transcript.jsonl>|--root <项目根>] [--verify-s <秒>]" >&2
+  echo "退出码: 0=已送达 · 1=未送达(需人工) · 2=用法/环境错误" >&2
+}
+
+# ── arg parse ────────────────────────────────────────────────────────────────────────────────────
+i=3
+while [ "$i" -le "$#" ]; do
+  case "${!i}" in
+    --transcript)
+      i=$(( i + 1 ))
+      [ "$i" -le "$#" ] || { usage; exit 2; }
+      TRANSCRIPT="${!i}"
+      ;;
+    --root)
+      i=$(( i + 1 ))
+      [ "$i" -le "$#" ] || { usage; exit 2; }
+      ROOT="${!i}"
+      ;;
+    --verify-s)
+      i=$(( i + 1 ))
+      [ "$i" -le "$#" ] || { usage; exit 2; }
+      VERIFY_S="${!i}"
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+  i=$(( i + 1 ))
+done
+
+[ -n "$TARGET" ] || { usage; exit 2; }
+[ -n "$PAYLOAD" ] || { echo "supervisor-deliver: 文本为空" >&2; exit 2; }
+{ [ -n "$TRANSCRIPT" ] || [ -n "$ROOT" ]; } || { echo "supervisor-deliver: 需要 --transcript 或 --root 以解析目标会话 transcript" >&2; exit 2; }
+{ [ -n "$TRANSCRIPT" ] && [ -n "$ROOT" ]; } && { echo "supervisor-deliver: --transcript 与 --root 二选一" >&2; exit 2; }
+
+# fail-loud precondition: the delivery verdict depends on the pure checker; a missing checker
+# means the deliver-confirmed promise is broken (same rule as send-keys-reliable.sh).
+[ -f "$CHECKER" ] || { echo "supervisor-deliver: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
+
+# ── transcript resolution ────────────────────────────────────────────────────────────────────────
+# --transcript → literal, even if the file does not exist yet (fresh — the file appears on the
+# session's first committed input).
+# --root → re-spawn mode. The delivery target is the transcript that appears AFTER the send (a
+# freshly re-spawned session creates its file on first committed input). A PRE-SEND SNAPSHOT of
+# EXISTING paths is kept and the wait loop looks for a file NOT in the snapshot — the just-
+# re-spawned session's own file (the same config-not-inferred exception os-anchor-watchdog.sh
+# documents). TRANSCRIPT is deliberately NOT resolved to any pre-existing file here: the newest
+# pre-existing jsonl is the OLD session's file and is not the delivery target.
+PRE_SEND_SNAPSHOT=""
+proj_dir=""
+if [ -n "$ROOT" ]; then
+  slug="$(printf '%s' "$ROOT" | tr '/' '-')"
+  proj_dir="${HOME:-/home/yale}/.claude/projects/${slug}"
+  if [ -d "$proj_dir" ]; then
+    PRE_SEND_SNAPSHOT="$(ls "$proj_dir"/*.jsonl 2>/dev/null | sort | tr '\n' ' ')"
+  fi
+fi
+
+# ── delivery ─────────────────────────────────────────────────────────────────────────────────────
+# Two modes:
+#   * --transcript <path> with an EXISTING file → a known, long-lived session: delegate the whole
+#     hardened procedure (clear/send/submit/poll) to send-keys-reliable.sh.
+#   * --root <path>, OR --transcript whose file does not exist yet → a freshly re-spawned session
+#     (its transcript appears only on first committed input): the fresh path — nothing to clear
+#     (the welcome-screen ghost text is not removable input — same rule as send-keys-reliable's
+#     is-fresh skip), direct send, bounded wait for the file, then pure verify.
+# The --root mode ALWAYS takes the fresh path: for a re-spawned session the newest pre-existing
+# jsonl is the OLD session's file and is not the delivery target; the target is the file that
+# appears after the send (the snapshot rule below).
+if [ -z "$ROOT" ] && [ -n "$TRANSCRIPT" ] && [ -e "$TRANSCRIPT" ]; then
+  if [ -f "$RELIABLE" ] && [ -x "$RELIABLE" ]; then
+    RELIABLE_DELIVERY_VERIFY_S="$VERIFY_S" bash "$RELIABLE" "$TARGET" "$PAYLOAD" "$TRANSCRIPT"
+    exit $?
+  fi
+  echo "supervisor-deliver: 缺少可靠投递脚本 $RELIABLE——fail loud" >&2
+  exit 1
+fi
+
+# ── fresh-session path (transcript absent, or re-spawn via --root) ──────────────────────────────
+echo "supervisor-deliver: fresh-session 直接投递 + 有界等待（$([ -n "$TRANSCRIPT" ] && echo "等待 $TRANSCRIPT" || echo "--root 自动发现新 transcript")）" >&2
+
+# The target must exist (positive control: a nonexistent target → fail loud, never silent 0).
+if ! tmux list-panes -t "$TARGET" -F '#{pane_pid}' >/dev/null 2>&1; then
+  echo "supervisor-deliver: 目标 $TARGET 不存在——无法送达" >&2
+  exit 1
+fi
+
+# Direct reliable send: fresh session has nothing to clear → C-u (harmless), literal text, Enter.
+tmux send-keys -t "$TARGET" C-u 2>/dev/null || true
+sleep 0.5
+tmux send-keys -t "$TARGET" -l "$PAYLOAD" 2>/dev/null || true
+sleep 0.5
+tmux send-keys -t "$TARGET" Enter 2>/dev/null || true
+
+# Bounded wait for the transcript file to appear (the send is what creates it — fault 4's
+# queuing delay is real; poll, never single-check). With --root, prefer a file NOT in the
+# pre-send snapshot (the re-spawned session's own file), newest by mtime; with an explicit
+# --transcript, wait for exactly that path.
+now=$(date +%s)
+deadline=$(( now + VERIFY_S ))
+while [ "$(date +%s)" -lt "$deadline" ] && { [ -z "$TRANSCRIPT" ] || [ ! -e "$TRANSCRIPT" ]; }; do
+  if [ -n "$ROOT" ] && [ -n "$proj_dir" ] && [ -d "$proj_dir" ]; then
+    best=""; best_ts=0
+    for f in "$proj_dir"/*.jsonl; do
+      [ -e "$f" ] || continue
+      case " $PRE_SEND_SNAPSHOT " in *" $f "*) continue ;; esac   # skip pre-existing (old session)
+      ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+      if [ "$ts" -gt "$best_ts" ]; then best="$f"; best_ts=$ts; fi
+    done
+    [ -n "$best" ] && TRANSCRIPT="$best"
+  fi
+  sleep 2
+done
+
+if [ -z "$TRANSCRIPT" ] || [ ! -e "$TRANSCRIPT" ]; then
+  echo "supervisor-deliver: FAIL——${VERIFY_S}s 内未出现新 transcript（fresh-session 投递后无落盘）；需要人工" >&2
+  exit 1
+fi
+
+# Verify delivery via the pure checker (the only trusted signal): a real user message whose
+# content contains the payload, appended since baseline 0 (a fresh file — nothing precedes it).
+out=$(node --experimental-strip-types "$CHECKER" --check "$TRANSCRIPT" --start 0 --text "$PAYLOAD" 2>&1)
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  echo "supervisor-deliver: 已送达 $TARGET（fresh-session；transcript 出现内容匹配的真实 user message）"
+  printf '%s\n' "$out" | sed 's/^/    /'
+  exit 0
+fi
+if [ "$rc" -eq 2 ]; then
+  printf '%s\n' "$out" >&2
+  echo "supervisor-deliver: transcript 校验失败（exit 2）——fail loud" >&2
+  exit 1
+fi
+echo "supervisor-deliver: FAIL——${VERIFY_S}s 有界等待后 transcript 仍未出现内容匹配的真实 user message；需要人工，不假装成功" >&2
+printf '%s\n' "$out" | sed 's/^/    /' >&2
+exit 1
