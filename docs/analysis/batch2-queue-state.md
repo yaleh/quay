@@ -6028,3 +6028,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ② **时序风险**——develop 停在 926d771b（落后 master 33+ 提交），今日全部 fan-in 都在 master，
      此刻激活会让下一 tick 从过期基线分叉；PLAN 阶段三 step 11 的正常流（fork develop→merge integration→
      outer FF develop）需要先有 develop 追上 master 的一步。转外层裁定激活时机（先快进 develop？等阶段二 B 合并？）。
+
+### tick 2026-08-06T07:1xZ（内层 cron + slot-refill 心跳 + 3.6 补晋）
+
+- 无 halt；套件 GREEN（07:07Z 完成）。在飞 0/3 全槽空。
+- telemetry 2 个陈旧括号（claim-task/branch-model 的 --task-end 未闭合，worktree-gone 误判）——`--reconcile` 已清。
+- **3.6 补晋**：池 6/20、dispatchable_disjoint 4/5 不达标 ⇒ 补晋 4 个真实未落地候选（全部
+  `--pool-candidate` clean、touches resolve）：spawn-count-criterion / needs-human-black-hole /
+  no-criterion-records-cost / quality-criteria-trend。DIR-043 有真实落地（519285ca 结晶 tmux 契约）
+  但 status 仍 todo——stale-status 工件，不晋。
+- **派发 1/3**：supervisor-base-layer（池内唯一真实未落地 ready；其 quay-init.sh OVERLAP 对象
+  runtime-nowhere-safe 已合并 ⇒ 在此之上构建，非在飞冲突）。worktree + telemetry bracket 已开。
+- 池 10/20；在飞 1/3。config 激活仍挂外层裁定（上一 tick 转交）。

@@ -3,7 +3,7 @@ id: gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-
 title: two closed tasks declined 110 files on a wall-clock criterion — spawn
   total does not set wall clock, it sets kernel load and how many suites can run
   at once
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
