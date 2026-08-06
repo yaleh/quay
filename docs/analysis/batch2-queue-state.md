@@ -6479,3 +6479,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **判定：测试时序 flake，非合并回归**。脚本无需改动；全量闸按 KNOWN-LOAD-SENSITIVE 判绿规则
   对 session-liveness.test.mjs 隔离重跑。已记入 gap-session-liveness-resumed-merge-regression-suspect。
 - 在飞 1/3（preemption）。
+
+### tick 2026-08-06T16:4xZ（supervisor-preemption fan-in 完成 — supervisor 族收齐）
+
+- **supervisor-preemption 合 integration**（81e34ec9→a30c1753，19 files）：supervisor-preempt.sh
+  （halt-check/preempt/preempt-all）+ slot-refill.ts checkHaltSentinel（.halt 任意点生效，preemptive）。
+  AC1-AC6 证据、scoped **34/34**。
+- **supervisor 族 ③④⑤ 三件套全部落 integration**：③ base-layer + ④ preemption + ⑤ message-bus。
+- **在飞 0/3**。integration = develop 基线 + 9 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/
+  postinstall/message-bus/preemption + SEA 缺陷）。
+- 待外层 merge integration→develop（一次收口多个任务）+ 处理 SEA 缺陷（AC16 结构性问题）。
