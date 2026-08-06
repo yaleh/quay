@@ -6394,3 +6394,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **integration 现 = develop 基线 + 6 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/postinstall）
   + ADR-030/031/032**。**下一步**：外层 merge integration→develop → 打 **v0.4.1** 触发完整三平台 release
   （windows_postinstall_ok band 证明）。
+
+### tick 2026-08-06T14:1xZ（内层 cron，派发 message-bus-identity）
+
+- 无 halt；套件 GREEN。在飞 0/3（bracket reconcile 1 陈旧——postinstall 的 worktree-gone 误判）。
+- 池 8/20、disjoint 5/5（criterion met），但 ready 全陈旧（quality-criteria/supervisor 已 merge、
+  DIR 指令、4 landed）；slot-refill 推荐 5 全陈旧。
+- **新立案（外层）**：**gap-SEA-bundle-excludes-plugin-tree** —— SEA 推荐发行版无 plugin 树，
+  AC16 未完全达成；根因 esbuild-sea.mjs 只 bundle bin/quay.ts vs npm files 是两套独立机制，
+  单二进制 vs 目录树结构性冲突需架构裁定。**npm release 修复（postinstall）只是半边**。
+- **派发 1/3 — gap-supervisor-message-bus-with-identity**（supervisor step ⑤，3.6 补晋）：
+  resolve 5/5、pool-candidate clean、fork-baseline=develop。worktree + bracket 已开。
+- 在飞 1/3。
