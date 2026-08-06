@@ -5788,3 +5788,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   DISJOINT（② message-bus 与 web-action-buttons CONFLICT 阻塞——③ 先派，② 待 web-action-buttons land）。
   executor=manager on B 的 repo 侧机制 + 测试，B 侧执行属外层/manager drive。
 - 在飞 2/3（web-action-buttons + b-machine）。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:5xZ（内层，b-machine-backup fan-in — AC15 执行者）
+
+- **b-machine-backup fan-in 完成（真实现，AC15 执行者②③）**：`periodic-push-backup.sh`（push 当前分支到
+  origin/bare 路径；`--cron-line` 出 `*/12 * * * * git push` 在 AC15 20min 时延上限内；fail-closed）。
+  AC1-AC3、6/6（真 bare-repo fixture：push 后 ls-remote == HEAD、幂等 up-to-date）。**认领协议互斥性被证**
+  （`--all` 也不能覆盖 task/* claim marker——git 自身 non-fast-forward 保护）。worktree/branch 已清。
+- 在飞 1/3（web-action-buttons 2 提交推进）。优先② message-bus 仍被 web-action-buttons CONFLICT 阻塞。
+- 套件 green、无 stop、无 block、Monitor 绿。
