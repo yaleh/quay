@@ -280,3 +280,8 @@ EXIT=0
 **已知负载敏感**：机器 load 高时（本机 load 一度 >10），`quay-init-loop.test.mjs`（KNOWN-LOAD-SENSITIVE
 族）的多文件并跑会偶发 flake（失败点在 `referenced-not-landed` 上旋转，且与本次改动无关——不含本任务
 新测试文件时同样复现）；该文件**单独跑 45/45 绿**，本任务两轮连跑均绿。
+
+## Carries
+
+from: gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes
+acs: AC3
