@@ -7295,3 +7295,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 暂缓**：外层 15:05 宣布 suite **最终红**（973a0c91，含 3 real defects from triage），红窗策略=暂缓已完成 agent 的 fan-in。
   green-verdict worktree/分支保留（不清理），待 suite 决议后 fan-in。
 - **零派发**：suite 终红 + 外层 Land-merge/缺陷修复中 → 保守不派发。shipped-verifiers 仍在飞（1/2）。
+
+### tick 15:3xZ（green-verdict fan-in 落 integration 3ab4fb45）
+
+- **green-verdict fan-in**（3ab4fb45）：suite 红窗暂缓解除（外层 32204513 修 merge-carried breakages + 重跑 running）。
+  rebase 到 integration（顺带并入外层 develop-only commit），scoped verify green（fail 0）。worktree/分支清理。
+- 在飞 1/2（shipped-verifiers）。integration 现含 6 fan-in（supervisor/concurrency/split-batch/send-keys/no-post-merge/green-verdict）。
