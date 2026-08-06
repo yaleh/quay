@@ -5014,3 +5014,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **派发 2/5**（background Agent，concurrent-batch-scheduler 实测 disjoint）：`ghost-suggestion-eliminated`（`--prompt-suggestions false` 冷启动必带参数 + throwaway 会话双向验证，AC1/AC2 需安全实跑）+ `global-count-assertions`（B3-2 族全局计数断言 → 相对基线，branch-model 前置②）。派发前补 self-touch（均缺）。telemetry 已开：`fm-gap-ghost-suggestion-...-iro2c9` / `fm-gap-global-count-...-5anq8r`。
 - **delivery-surface 判定不派**：计划自述「排 delivery-surface umbrella 后」= 依赖被 hold 的 complete-delivery（ROUND-3）⇒ 同被 hold。池 15 中另 3 个已落地 + 5 个 ROUND-3 均不派。
 - 在飞 2/5（ghost-suggestion / global-count）。外层套件 running（00:09 起，测 fan-in 前 master）。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:3xZ（内层，ghost-suggestion fan-in 完成）
+
+- **ghost-suggestion 合并**（`0b53a057`，rebase 已就位）：`--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` 成**冷启动 REQUIRED 参数**（restart-plan §8 + cold-start SKILL + `quay-launch.sh` 每角色追加 + `.claude/launch.settings.json` `_launchSpec.promptSuggestions:false`）；AC1/AC2 双向 throwaway 验证（独立 socket，带配置无 ghost / 不带配置有 ghost，字节级证据）；AC4 故障 6 标注；AC6 `launch-settings.test.mjs` 扩展 **12/12 pass**。AC1–AC6 勾。已并已清。
+- **in-flight 1/5**（仅 global-count，worktree 仍在旧快照 378eef8c，未 commit）。外层套件 running 超时（00:09 起 ~19min——mid-run 合并致其读混合工作树，套件变慢属预期；外层下轮会干净覆盖）。
+- 无停止条件、无 .halt、无 block、Monitor 绿。master `0b53a057`。
