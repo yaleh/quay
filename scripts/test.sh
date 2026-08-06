@@ -197,6 +197,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-isolation-check" bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
+  echo "== test-impl-census check (gap-experiment-legacy-reclaim-and-touches-heuristic AC5) =="
+  # Mechanized criterion "被测实现不存在的测试文件随实现删除": a test file that imports a
+  # scripts/<name> module that exists NOWHERE (plugin/scripts, experiments/scripts, repo scripts/
+  # or the adjacent package scripts) is an impl-deleted test — the census measured 15 such files
+  # still running every full suite. exit 1 red-lights the commit (set -euo pipefail) so a script
+  # deleted/reclaimed without its test delete can never silently re-accumulate.
+  # @static-tier change
+  # @static-object plugin/test/ packages/*/test/ experiments/*/test/
+  run_checker "test-impl-census-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/test-impl-census-check.ts" --root "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
   # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because
