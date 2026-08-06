@@ -1,14 +1,6 @@
 ---
 id: gap-productize-the-manager-layer
 title: "the third layer exists in practice (three layers run) but only two ship — plugin/skills/manager* is absent, all manager mechanisms are quay-local in orchestration/ (manager-loop-tick.md / manager-phase-goal.md); ship the manager layer (cadence = daily review, three functions = planning/prioritization/trend, the two verified §1.5/§1.6 rules, cold-start AC8c stale-key fix, launch-config port) so gaps 1-3 have an owner — a cold-start on another machine currently gets a two-layer system that executes fast but never plans/prioritizes/trend-watches"
-title: the third layer exists in practice (three layers run) but only two ship —
-  plugin/skills/manager* is absent, all manager mechanisms are quay-local in
-  orchestration/ (manager-loop-tick.md / manager-phase-goal.md); ship the
-  manager layer (cadence = daily review, three functions =
-  planning/prioritization/trend, the two verified §1.5/§1.6 rules, cold-start
-  AC8c stale-key fix, launch-config port) so gaps 1-3 have an owner — a
-  cold-start on another machine currently gets a two-layer system that executes
-  fast but never plans/prioritizes/trend-watches
 status: done
 labels:
   - gap
