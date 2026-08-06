@@ -558,6 +558,40 @@ AC15 问的是"两边会不会漂移"，AC17 问的是"两边能不能**一起�
 
 **归属**：同上——阈值数字、冲突处理策略由各机 outer 按实际负载定，manager 不代定。
 
+#### 【人裁定 2026-08-06】同步节奏不得依赖系统 crontab，必须做进产品交付物
+
+**人的原话**：*「太糟糕了。修改这个设计。显然不应该用系统的 crontab 做这件事。
+这一机制应当做在 quay 的产品化交付物内。」*
+
+**触发的实测（manager 亲跑）**：`periodic-push-backup.sh` 的既定部署形态是一行系统 crontab
+（`--cron-line` 输出 `*/12 * * * * cd <repo> && git push origin develop >> …`），而**两台机器
+都没有真正装上**——A 机 `crontab` 命令不存在；B 机 `crontab -l` = `no crontab for yale`。
+⇒ 当前真实同步频率 = **0**（纯手动/事件驱动，如 B 合并后那次手工 push）。
+
+**为什么 crontab 是错的设计（四条，均可核对）**：
+1. **遗传丢失**：crontab 行**不随包走**——不在 `quay-init` 的铺设集里、不在 plugin bundle 里、
+   不在升级通道里。每一台新主机/新项目都要人手工装一次 ⇒ 正是本仓反复付过学费的「部落知识」
+   一类（启动命令一行、cron 会话作用域）。与 `CronCreate` 是会话作用域**同一失败形态**：
+   一个不能随个体传下去的周期锚点。
+2. **在所有既有检查之外**：没有任何检查覆盖「那行 crontab 在不在」——`verify-delivery-surface`、
+   铺设集派生、升级通道全都看不见它。它可以静默地不存在而无人报警。
+3. **第二个调度源**：循环本身已经有心跳（tick）。tick 文档明写「**不引入新轮询源**」，
+   而系统 crontab 恰恰是产品之外的第二套调度。
+4. **结构性不可移植**：产品**已经在发 Windows 产物**（release 资产含
+   `quay-sea-<ver>-windows-x64.zip`，manager 实测）——**Windows 上根本没有 crontab**。
+   一个已经交付 Windows 的产品，其同步机制却只能在类 Unix 上部署。
+
+**manager 的建议（供 outer 参考，实现选择权在 outer）**：复用本仓**已经验证过的**那个模式，
+不要新发明——`slot-refill` 的「**完成事件加速 + tick 心跳兜底**」双触发源：
+- **事件驱动为主**：`develop` 前进时（fan-in/land 收口后）push，天然比定时更及时、更省；
+- **tick 心跳兜底**：每 tick 无条件问一次「本地 develop 是否领先 origin/develop」，是则 push。
+
+这样机制**活在 `plugin/loop/` 的 tick 文档 + `plugin/scripts/` 里**，随包走、随升级通道流、
+被铺设集覆盖、可被 `verify-delivery-surface` 一类的检查看见，且不引入任何新轮询源。
+
+**归属**：具体接哪个钩子、push 失败如何重试/降级，是 outer 的机制决定；manager 只转达
+人的裁定 + 上述四条理由 + 一个复用既有模式的建议。
+
 ---
 
 ## 下阶段（2026-08-05 11:3xZ 立，AC10 降为常设，主判据换成结果量）
