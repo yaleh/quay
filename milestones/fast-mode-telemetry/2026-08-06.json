@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-06T18:40:06.730Z",
+  "generatedAt": "2026-08-06T18:48:55.194Z",
   "since": null,
   "tasks": [
     {
@@ -673,11 +673,11 @@
   "inProgress": [],
   "meanMinutes": 66.68858489583332,
   "medianMinutes": 50.484475,
-  "tasksPerHour": 1.2287795531082362,
+  "tasksPerHour": 1.2270467269219572,
   "serialEquivalentPerHour": 0.8997042011570526,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-06T18:39:52.240Z",
-  "windowHours": 104.1684,
+  "windowEnd": "2026-08-06T18:48:41.821Z",
+  "windowHours": 104.31550583333333,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -752,6 +752,13 @@
       "durationMs": 496419
     },
     {
+      "taskId": "gap-manager-productization-five-constraints",
+      "reason": "task-over-90m",
+      "sinceMs": 1786038527430,
+      "clearedAtMs": 1786042033368,
+      "durationMs": 3505938
+    },
+    {
       "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
       "reason": "task-over-90m",
       "sinceMs": 1786033520876,
@@ -815,7 +822,7 @@
       "durationMs": 23903
     }
   ],
-  "totalBlockedMs": 31179275,
+  "totalBlockedMs": 34685213,
   "longestBlockedMs": 14548717,
   "reconciled": [
     {
