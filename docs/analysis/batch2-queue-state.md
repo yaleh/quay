@@ -7464,3 +7464,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 冲突（divergence 类）**：cherry-pick 99710897 到 integration → **7 个 modify/delete 冲突**——integration HEAD 已删除 `checker-cost.ts`（改成 .sh）、`git-lens-*.ts`、`self-report-vocab-check.ts`、`derive-touches-heuristic.ts` 等，而 shipped-ts 修改了这些 .ts 守卫（~43 files guard refactor）+ package.sh。integration 已先走一步重构。**doc：冲突 → needs-human，不 --skip/-X ours**。已 `cherry-pick --abort`（integration 干净 a09ddb56），标 needs-human（CAS ready→needs-human 成功）。
 - **worktree/branch 保留**：`quay-worktrees/shipped-ts` @ 99710897。
 - **这是第 3 个被 divergence 卡的 fan-in**（ac8 / chart2-s2 / shipped-ts）——integration/develop 的 31/251 分叉是系统性阻塞，外层需先对齐分支。
+
+### 事件 23:0xZ 续（prefriction 完成 → fan-in 成功）
+
+- **prefriction agent 完成**：commit 8d65dc86+f043a8d1。POST_FRICTION_RE 改为事件标记词表（`今晚`/missing/broken 等泛义词删除）。改前 8.2% → 改后 65.8%（pinned 窗口）；AC2 负控制 counter-example → false（agreement 0→1）；AC3 5 条人工判定全 false；AC4 正控制（真实崩溃/SUITE-RED 任务）仍 true；测试 10/10。
+- **fan-in 成功**：cherry-pick 8d65dc86 → 冲突仅任务文件（integration 无该任务文件，develop 侧产物）；`git rm` 任务文件 + 保留 prefriction-count.sh 代码 → 1880c757。再补 f043a8d1（`([^-]|$)` 守卫让 "3 failing" 触发但 "fail-safe" 不触发）→ 2f95dd1f。**.sh 与 worktree 逐字节一致**，prefriction-count --json 在 integration 实跑 48 newly_filed / 37 dimensions。
+- **worktree 已清理**：prefriction-count worktree removed + branch 删除。
+- **状态**：prefriction 任务文件 AC1-5 全勾、status ready（等外层 verify 翻 done）。在飞剩 **residue-check**（1 真实在飞）；ac8 / shipped-ts / chart2-s2 三任务 needs-human 等外层对齐分支。
