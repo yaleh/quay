@@ -88,8 +88,13 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
 
 - [x] AC1: 检查存在且实跑——报出当前 `uncalled_verifiers` 清单。
       交付物 `plugin/scripts/uncalled-verifier-check.ts`（`--json` 输出含 `uncalled` 数组与
-      `mentions_excluded` 布尔字段）。**首次输出**（接线前，见下方实跑）报 34 个 uncalled，
+      `mentions_excluded` 布尔字段）。**首次输出**（接线前）报 34 个 uncalled，
       其中 **`verify-delivery-surface.ts` ✓、`measure-suite.mjs` ✓** 都在清单里。
+      精度修订（执行标记把**同行的兄弟脚本 `.sh` 扩展名**排除出 `sh` 标记）后，机制再浮出
+      5 个真正零调用点的 verifier（`inner-idle-log.ts`、`os-anchor-install.sh`、
+      `os-anchor-watchdog.sh`、`send-keys-verified.sh`、`task-schema-check.sh`），
+      **真实首次 census 为 39**；5 个已全部进豁免名单。接线 verify-delivery-surface +
+      uncalled-verifier-check 后剩余 37 个，正好被 37 项豁免名单覆盖 → `uncalled=0`。
       **`periodic-push-backup.sh` 不在首次输出里**——因为交叉任务
       `gap-cross-machine-sync-has-no-mechanism-only-manual-pushes` 的 `sync-lag-check.sh:54/115`
       已给它真实执行调用点（`bash "${push_script}"`），机制正确把它判为已接线。这正是本机制的价值：
@@ -145,19 +150,23 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
       ```
       接线后 uncalled-verifier-check 确认它已有调用点：`verify-delivery-surface callers: ['scripts/test.sh']`。
 - [x] AC4: **豁免名单是只减不增的 ratchet**——`plugin/uncalled-verifier-exemptions.txt` 与
-      `test-framework-policy-exemptions.txt` 同形：`# baseline-count: 32` 上限（commit-surviving，
-      清单永不可超过该数）+ git-HEAD 严格子集（工作树新增条目不在已提交基线 ⇒ 失败）+ C2b/C2c/C2d
-      （条目文件不存在 / 已获得调用点 / 不在 verifier 集 ⇒ 失败）。实跑（`--static-checks` gate 段）：
+      `test-framework-policy-exemptions.txt` 同形：`# baseline-count: 37` 上限（commit-surviving，
+      清单永不可超过该数）+ git-HEAD 严格子集（工作树新增条目不在已提交基线 ⇒ 失败）+ C0b
+      （上限本身只减不增：在 32 基线之上把上限抬到 37 会失败——实测该 ratchet 生效）+
+      C2b/C2c/C2d（条目文件不存在 / 已获得调用点 / 不在 verifier 集 ⇒ 失败）。实跑
+      （`scripts/test.sh --static-checks` gate 段，37 项豁免）：
       ```
       == uncalled-verifier check (gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check) ==
       uncalled-verifier-check — 129 verifiers under <root>
       mentions_excluded=1 (257 self/own-test/catalog mentions excluded from call-site counting)
       uncalled_verifiers=0 (un-exempted; band 0)
         (none)
-      exempted=32
+      exempted=37
         anti-gaming-guard.sh axis-generator.ts build-evidence-collector.ts ... workflow-replay.ts
       PASS: every verifier has an execution call site or a listed exemption; ratchet intact
       ```
+      ratchet 的 C0b/C2a 在「32 基线已提交、工作树试图新增 5 项」时**如实报红**
+      （`ceiling was RAISED from 32 to 37` + 5 条 `was ADDED`）——证明只减不增真正被强制。
 - [x] AC5: **下游可用**——机制位于 `plugin/scripts/uncalled-verifier-check.ts` 且在 quay-init 铺设集
       （`quay-init.sh` derive_loop_scripts 显式加列入 `uncalled-verifier-check.ts`，随 `--loop` 铺入目标）。
       在 **archguard** 上实跑（`--root /home/yale/work/archguard`）：
@@ -195,7 +204,7 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
       | `measure-suite.mjs` + `measure-suite-reporter.mjs` | 进豁免名单，指向 `gap-single-file-test-duration-trend-unwatched`（wire 后移除） |
       | `task-contract-check.ts`（archguard 侧铺设但 0 调用点，TASK-60 band 证伪仍 done） | 机制在 archguard 实跑报出（AC5） |
       | `default_concurrency_formula` return 后不可达调用点 | `gap-concurrency-derivation-reverted-...`；`dead-code-after-return-check.ts` 钉住形状 |
-      | 其余 27 个已知有意为之的 uncalled（manual-only 报告工具 / retired-classic-loop 库 / exp5-legacy / test-only 数据模块） | 豁免名单 `plugin/uncalled-verifier-exemptions.txt`（baseline 32，只减不增） |
+      | 其余 32 个已知有意为之的 uncalled（manual-only 报告工具 / retired-classic-loop 库 / exp5-legacy / test-only 数据模块 / os-anchor 开发阶段工具 / 已退役 send-keys-verified） | 豁免名单 `plugin/uncalled-verifier-exemptions.txt`（baseline 37，只减不增） |
 
 ## Touches
 - plugin/scripts/capability-catalog.sh

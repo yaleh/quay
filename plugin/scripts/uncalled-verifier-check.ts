@@ -173,10 +173,12 @@ export function isNonCodeLine(line: string, ext: string): boolean {
   return false;
 }
 
-/** Execution construct markers that can accompany a basename reference on a line. The basename is
- * removed FIRST so a `.sh`/`.ts` extension cannot satisfy `\bsh\b` / `\bts\b` itself. */
+/** Execution construct markers that can accompany a basename reference on a line. The target basename
+ * is removed FIRST so its own `.sh`/`.ts` extension cannot satisfy `\bsh\b`; `sh` additionally uses a
+ * negative lookbehind so a SIBLING's `.sh` extension on the same line cannot satisfy it either
+ * (e.g. `capability-catalog.sh uncalled-verifier-check.ts >> "$out"` is a lay-down, not an execution). */
 export const EXEC_MARKER_RE =
-  /(\bnode\b|\bbash\b|\bsh\b|\bexec\b|\bsource\b|dirname|\$\(|\brun_check\b|\bspawn\b|\bexecFile\b|\bexecSync\b|\bfork\b|\bimport\b|\brequire\b|\brun:|\bmcp_entry\b)/;
+  /(\bnode\b|\bbash\b|(?<![.\w])sh\b|\bexec\b|\bsource\b|dirname|\$\(|\brun_check\b|\bspawn\b|\bexecFile\b|\bexecSync\b|\bfork\b|\bimport\b|\brequire\b|\brun:|\bmcp_entry\b)/;
 
 /** The ScriptDir sibling-invocation spellings (the repo's cross-script wiring convention). */
 export function scriptDirRef(basename: string): RegExp {
