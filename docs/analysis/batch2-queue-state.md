@@ -7450,3 +7450,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **就绪池维护**：self-touch-scan 28→29 ready，6 条缺自身文件（DIR-121/probe/session-liveness×2/no-post-merge/manager-layer）全部补齐 → 0 missing（commit 7f02f510）。
 - **新派发 1/2**：`gap-prefriction-trigger-regex-too-broad-signal-is-dead`（value 1.0、单文件 prefriction-count.sh、fork-baseline develop、与 shipped-ts disjoint、fan-in 安全因为 prefriction-count.sh 在 develop/integration 完全一致）。worktree `quay-worktrees/prefriction-count`，task-start 已记（fm-...-86ch64）。
 - **在飞 2/5**：shipped-ts（bundle plugin .ts）+ prefriction。
+
+### 事件 22:4xZ 续（第二派发）
+
+- **fan-in 安全扫描**（282-commit divergence 下）：全 ready 池仅 3 条全 touched-file 一致——prefriction（已派）、residue-check、DIR-121。
+- **新派发 2/2**：`gap-residue-check-crystallized-as-tool-mode`（`--check-residue` 工具化；4 touched file 全 identical；fork develop；与 shipped-ts/prefriction 均 disjoint）。worktree `quay-worktrees/residue-check`，task-start fm-...-lu9m1f。
+- **fan-in 风险提示**：shipped-ts 的 `packages/quay/scripts/package.sh` 在 develop/integration **DIFFERS**——完成时 fan-in 可能撞冲突（ac8/chart2-s2 同类）。若撞，按 doc：冲突 → needs-human，不 --skip。
+- **在飞 3/5**：shipped-ts + prefriction + residue-check（ac8 已 needs-human 但仍占 bracket 直到 worktree 清理）。
