@@ -1,7 +1,7 @@
 ---
 id: gap-release-postinstall-fallback-breaks-windows-sea-build
 title: "release postinstall bash-only (echo ...; exit 0) subshell breaks windows-latest sea-release — cmd.exe parses `(echo` as invalid (`re-run: was unexpected at this time`), npm install fails, so v0.4.0 published WITHOUT the windows-x64 SEA binary (release marked failure, 2/3 SEA binaries present); fix: cross-platform fallback (move WARN into sync-vendor.sh or use sh-compatible syntax)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
