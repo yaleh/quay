@@ -7421,3 +7421,5 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 用 cherry-pick 而非 rebase+merge**：rebase 到 integration 重放 191 个 develop-only commit 并在 `e33f9b5f`（branch-cutover）冲突。**系统性发现：integration（234 ahead）与 develop（30 ahead）大幅分歧**——task 分支 fork 自 develop 携带全部分歧历史。正确手法 = cherry-pick 任务的真实改动到 integration（干净，无冲突），不用 `--skip`/`-X ours`（chart2-s2 上一轮的 rebase 冲突同理）。session-pid 已落 integration（a09ddb56），worktree/分支清理。
 - **ac8 触摸冲突已解除**：session-pid 不再在飞，ac8（touch-overlap session-liveness.test.mjs）现在可派。
 - **待外层**：integration/develop 分歧需 reconciliation（verification-round 批量合或 rebuild task 分支基线）。
+- **session-pid fan-in 验证**：cherry-pick 到 integration 干净；scoped verify（session-liveness.test.mjs）因 KNOWN-LOAD-SENSITIVE（真实 tmux/进程 spawn）超时未出结果——agent 在 worktree 已实测 52/53（1 skip=环境），cherry-pick 无冲突，fan-in 成立。integration HEAD a09ddb56。
+- **ac8 已派发**（触摸冲突解除后，in-flight 2/5）：`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`（40→6 集成，import over spawn 真正生效），telemetry ...-q30ump，后台 agent 运行中。
