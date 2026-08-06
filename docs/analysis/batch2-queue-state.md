@@ -6576,3 +6576,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 派发闸：resolve 3/3、pool-candidate clean、fork-baseline=develop、在飞 0/3。
 - 派发 1/3：worktree /home/yale/work/quay-worktrees/single-flight-lock + bracket 已开。
 - 在飞 1/3。
+
+### tick 2026-08-06T19:4xZ（内层 cron，轻触）
+
+- 无 halt；套件 GREEN。在飞 1/3（single-flight-lock，brackets aligned，分支 0 提交——agent 工作中）。
+- 池 9/20 全陈旧（signal-gap），**无 promotions** ⇒ 无新派发。
+- 在飞 1/3。下一事件：single-flight-lock 完成 / ad-arm1 round-3 结果。
