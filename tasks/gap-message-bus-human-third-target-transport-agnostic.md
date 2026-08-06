@@ -83,14 +83,14 @@ into a `read`/`consumed` receipt. (Idempotent: re-run stays `1`, never double-wr
 
 **Scoped verification — `bash scripts/test.sh --for-task gap-message-bus-human-third-target-transport-agnostic --allow-thin`:**
 ```
-ℹ tests 29
-ℹ pass 29
+ℹ tests 30
+ℹ pass 30
 ℹ fail 0
 ℹ cancelled 0
 exit 0
 ```
-(14 × message-bus.test.mjs AC1–AC6 + 7 × inbox-reader.test.mjs AC4–AC6 + 8 × capability-catalog
-regression — catalog now 0 unclassified.)
+(15 × message-bus.test.mjs AC1–AC6 incl. a deliver→inbox-reader end-to-end test + 7 ×
+inbox-reader.test.mjs AC4–AC6 + 8 × capability-catalog regression — catalog now 0 unclassified.)
 
 **Contract control (AC6 fail-safe):** `observe(human).measurement.valid` is `false` while
 `delivered > consumed` — the channel cannot confirm human reading, so any out-of-channel human

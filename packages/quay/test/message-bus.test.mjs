@@ -20,6 +20,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -45,6 +47,9 @@ function tmpRoot(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const INBOX_READER = path.join(__dirname, "..", "..", "..", "plugin", "scripts", "inbox-reader.sh");
 
 // ── AC1 — transport-agnostic deliver/observe ────────────────────────────────────────────────────────
 
@@ -255,6 +260,24 @@ test("AC5 — rapid successive delivers produce UNIQUE ids and files (no silent 
   assert.equal(ids.size, 20, "all 20 ids are unique (same-ms deliveries cannot collide)");
   const files = fs.readdirSync(managerInboxDir(root)).filter((f) => f.endsWith(".json"));
   assert.equal(files.length, 20, "20 files on disk — no delivery overwrote another");
+});
+
+test("AC4 — END-TO-END: deliver via the bus → consume via the inbox-reader script (the real mount point)", (t) => {
+  const root = tmpRoot(t);
+  const tx = createFileInboxTransport({ inboxDir: managerInboxDir(root) });
+  tx.deliver({ from: "outer", payload: { text: "e2e 1" } });
+  tx.deliver({ from: "inner", payload: { text: "e2e 2" } });
+  tx.deliver({ from: "manager", payload: { text: "e2e 3" } });
+
+  const out = execFileSync("bash", [INBOX_READER, "--inbox", managerInboxDir(root)], { encoding: "utf8" });
+  const readLines = out.split("\n").filter((l) => l.startsWith("read "));
+  assert.equal(readLines.length, 3, "the mount point reads all 3 delivered messages");
+
+  const obs = tx.observe();
+  assert.equal(obs.delivered, 3);
+  assert.equal(obs.consumed, 3);
+  assert.equal(obs.unread, 0);
+  assert.equal(obs.measurement.valid, true, "all consumed → measurement protocol valid");
 });
 
 test("AC6 — measurement.valid is false while delivered > consumed (channel cannot confirm reading)", (t) => {
