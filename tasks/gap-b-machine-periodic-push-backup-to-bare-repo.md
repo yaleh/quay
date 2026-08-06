@@ -9,7 +9,7 @@ title: "B machine periodic push backup — low-frequency cron (every 10-15 min)
   executor: manager on B (has context) or B's outer (one-line cron); verified
   2026-08-05: no narrow task exists, only mentioned within the larger claiming
   design — this should NOT wait for the claiming mechanism"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

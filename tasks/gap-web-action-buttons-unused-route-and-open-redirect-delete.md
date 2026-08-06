@@ -11,7 +11,7 @@ title: "delete web action buttons (/task/<id>/action/<actionId> POST + two
   deletion the gate-events actor distribution must be UNCHANGED — if it
   changes, the route actually had consumers and the deletion was wrong;
   order: human decided this BEFORE the message-bus channel (① then ②)"
-status: ready
+status: done
 labels:
   - gap
   - defect
