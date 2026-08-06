@@ -594,6 +594,25 @@ B 机 40+ 个提交（含 `plugin/skills/manager/SKILL.md` 等）**只存在于 
 **归属**：机制（`claim-task.sh` 怎么触发、备份 cron 怎么挂）＝ quay/outer 做一次；
 具体的时延阈值、冲突处理策略＝outer 按两机实际负载定，manager 不代其定数字。
 
+**更新（2026-08-06，人裁定切换 branch 策略，`orchestration/PLAN-develop-branch-cutover-
+2026-08-06.md`，指令"按方案开始执行。持续推进，直至完成。"）**：本判据的三条度量的解法，
+本质就是这份方案——GitHub `develop` 作为唯一跨机汇合点，替代裸仓库直连 + 独立任务板演化。
+**阶段一已完成（管理者，A 机，2026-08-06）**：
+- GitHub `origin` 新建 `develop`/`integration` 分支，均指向 A 机当前 `master`（`926d771b`）；
+  `origin/master` 本身未动（冻结，仅人明确要求时才同步）——`git ls-remote --heads origin` 实测核对；
+- 已通过 tmux send-keys（ADR-016）通知 B 机 outer：阶段一完成，指示其按方案阶段二自行合并
+  B 机独有的提交并推回 `origin/develop`（B 自己的两层循环处理，非 A 代裁）；
+- 已立案两条阶段三/四机制任务，交给 A 机自己的两层循环落地（不是管理者直接改产品代码）：
+  `gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model`（tick 文档
+  切换到 develop/integration，master 写保护）、
+  `gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github`
+  （`claim-task.sh`/`periodic-push-backup.sh` 改指 GitHub，退役旧裸仓库目标——两脚本均已参数化，
+  这两条本质是"配置 + 真实首次调用"，不是新机制开发）。
+
+**当前值更新**：① 分叉仍未合并（B 机阶段二进行中）② 0 次（真实调用等阶段四任务落地后才产生）
+③ 无上限（`quay-sync.git` 退役使用，不再是本判据的度量对象——`origin/develop` 落地滞后取而代之，
+待两条新任务完成后才有真实数字）。**本判据尚未达成，方案执行中，非一次性动作**。
+
 ---
 
 ## 实验范围扩到第二台主机（2026-08-05 13:2xZ，人明确授权）
