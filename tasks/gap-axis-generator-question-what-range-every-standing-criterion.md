@@ -52,6 +52,15 @@ extra:
 **机制还在不在**（不检查）？缺时间轴 + 存活轴。生成器问句对判据成本：量化哪个范围？**没有量化**（完全
 空着）。生成器问句对 suite-state：量化「这一轮没成」——缺**原因轴**（为何没成：failed/aborted/infra）。
 
+> **AC5 cross-mark (2026-08-06, `gap-no-criterion-records-its-own-cost-checker-cost-jsonl`)**:
+> the count-5 pre-friction "判据不记自身成本" (manager-discovered 2026-08-05, 生成器问句「判据成本量化在
+> 哪个范围」→ 没有量化) is that task. It asked the generator's cost question and got "nothing — no
+> criterion persists its own execution time; 16 检查器 + 14 闸门零落盘". The fix (each criterion exit
+> appends `{name, ms, n, load}` to `.quay/checker-cost.jsonl`, pure-append zero-judgment) is tracked
+> in that task; this entry is the AC10 accounting cross-reference only. Its cross-ref
+> `gap-suite-state-has-no-reason-axis-failed-aborted-infra` (count-6, suite-state 缺原因轴) is the
+> same pre-friction axis's next instance.
+>
 > **AC5 cross-mark (2026-08-05, `gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked`)**:
 > the count-3 pre-friction "gate-scripts-dead" (generator-run, 照问句问出) is that task. It asked
 > the generator's own layer question — "量化哪个范围" for `plugin/gate-scripts/` — and got "laid

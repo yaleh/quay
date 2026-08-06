@@ -66,6 +66,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { runOnce } from "./suite-state-trigger.ts";
+import { getLoad1 } from "./checker-cost.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -388,10 +389,62 @@ export async function run(argv: string[]): Promise<number> {
         durationMs,
       };
   writeState(stateFile, finalState);
+  appendSuiteDurationRecord(root, { startedAt, durationMs, laneCount, green });
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
   return green ? 0 : 1;
+}
+
+/**
+ * AC6 (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) — append ONE suite-duration row
+ * to .quay/verification-round.jsonl on EVERY suite completion (pure append; NEVER overwrites the
+ * single-state full-suite-state.json). This closes the "sequence stopped at 05:03" defect: the
+ * outer's closure pass could be blocked by a red window and skip its write, but the runner is a
+ * separate process that ALWAYS finishes, so the duration history can no longer die mid-sequence.
+ * Row shape: {round, startedAt, durationMs, laneCount, pass, fail, load} — round = last-round+1
+ * (same rule the outer closure pass uses), load = /proc/loadavg 1-min at finish.
+ */
+export function appendSuiteDurationRecord(
+  root: string,
+  opts: { startedAt: string; durationMs: number; laneCount: number; green: boolean },
+): void {
+  const file = path.resolve(root, ".quay", "verification-round.jsonl");
+  let round = 1;
+  try {
+    if (fs.existsSync(file)) {
+      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const r = JSON.parse(lines[i]);
+          if (typeof r?.round === "number") {
+            round = r.round + 1;
+            break;
+          }
+        } catch {
+          // malformed line — keep scanning backwards for the last valid round
+        }
+      }
+    }
+  } catch {
+    // fail-open: never break the suite verdict on a round-record write
+  }
+  const rec = {
+    round,
+    startedAt: opts.startedAt,
+    durationMs: opts.durationMs,
+    laneCount: opts.laneCount,
+    pass: opts.green ? 1 : 0,
+    fail: opts.green ? 0 : 1,
+    load: getLoad1(),
+    at: new Date().toISOString(),
+  };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");
+  } catch {
+    // fail-open
+  }
 }
 
 /**

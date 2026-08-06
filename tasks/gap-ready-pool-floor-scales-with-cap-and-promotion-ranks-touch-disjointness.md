@@ -44,6 +44,15 @@ extra:
 5. **成本不对称文档化**：过量晋级 = 前移非浪费、欠量 = 空槽纯浪费，偏向过量——loop 文档或
    ready-pool-check 头注。
 
+> **AC4 归因更正标注（2026-08-06，`gap-no-criterion-records-its-own-cost-checker-cost-jsonl`）**：
+> **三条修法（③拆频/②缓存/①增量）不先做。** 管理者三次实测 ready-pool-check：06:44Z 35.8s(pool 19) →
+> 07:15Z 91.2s(pool 24) → 07:27Z **157.0s(pool 24)**。**后两点 pool 完全相同、成本却涨 1.7 倍** ⇒ 主导
+> 变量是**机器负载**（同期 load 30.91），不是池子大小 n——三条修法改的是 n 的系数，而成本增长几乎全来自
+> 负载。先修 full-suite-runner laneCount 硬编码（`gap-no-resource-awareness-heavy-ops-run-blind`
+> re-open），负载降后本条判据大概率回 36s 量级；三条修法降为**「负载修复后再评估」**。**方法论教训**：
+> 两点不足以定斜率归因——必须有至少一个控制变量的点（pool 相同的那两点才是决定性的）；缺的正是 **load**
+> 这一维——`checker-cost.jsonl` 每次判据执行记 `{name, ms, n, load}` 后，这个归因错误一开始就不会发生。
+
 ## Acceptance Criteria
 
 - [x] AC1: **floor = cap × 4**（默认 4×，可配；单一来源）；cap=3 ⇒ floor 12；不再硬编码 3

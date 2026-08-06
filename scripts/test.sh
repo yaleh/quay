@@ -122,6 +122,15 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# ── criterion-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) ──────────
+# Every checker executed by run_static_checks (and the scoped tier, which evals the SAME wrapped
+# command lines) appends ONE `{name, ms, n, load, at}` line to .quay/checker-cost.jsonl on exit —
+# pure append, zero judgment (no threshold, no flag). The load field splits "the criterion got
+# slower" into "n got bigger" vs "the machine got busier" (the ready-pool-check 35.8→91.2→157.0
+# attribution case). run_checker must be defined here, BEFORE run_static_checks / the scoped
+# selector emit command lines that reference it.
+source "${repo_root}/plugin/scripts/checker-cost-lib.sh"
+
 # ── Node compile cache (gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses) ──────────
 # Every `node --experimental-strip-types` spawn in the suite re-parses .ts from source because
 # NODE_COMPILE_CACHE was set nowhere in the repo (measured 2026-08-04: ~450ms cold vs ~150ms warm
@@ -179,15 +188,15 @@ run_static_checks() {
   fi
   echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
-  bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
+  run_checker "it0-split-or-commit-check" bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
   echo "== test-framework-policy check (gap-no-test-framework-policy-for-new-tests, AC1/AC3-AC5) =="
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
-  bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
+  run_checker "test-framework-policy-check" bash "${repo_root}/plugin/scripts/test-framework-policy-check.sh" "${repo_root}"
   echo "== test-isolation contract check (gap-test-isolation-contract-is-unwritten, AC1-AC6) =="
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
-  bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
+  run_checker "test-isolation-check" bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
   echo "== ## Contract consumer check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="
   # gap-contract-ratchet-has-no-runner-and-grew-tenfold-unnoticed: this checker had NO runner — its
   # shrink-only ratchet list (docs/analysis/contract-violations.md) grew 1 -> 12 unnoticed because
@@ -197,7 +206,7 @@ run_static_checks() {
   # aborts the suite (set -euo pipefail), so a NEW violation red-lights the commit, not the dispatch.
   # @static-tier always
   # @static-scoped-mode subset-touched
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
+  run_checker "task-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-contract-check.ts" --root "${repo_root}"
   echo "== AC-carryover check (gap-nothing-checks-whether-a-done-task-left-its-acs-behind, AC6) =="
   # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
   # A done task may leave ACs unchecked ONLY if a successor `## Carries` section names them — the
@@ -208,7 +217,7 @@ run_static_checks() {
   # baseline (docs/analysis/task-ac-carryover-baseline.md) is shrink-only: exit 1 on a NEW unowned
   # AC aborts the suite (set -euo pipefail), red-lighting a done task that just closed with
   # uncarried ACs instead of letting it merge silently.
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}"
+  run_checker "task-ac-carryover-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/task-ac-carryover-check.ts" --root "${repo_root}"
   echo "== ADR-016 screen-use check (gap-adr-016-carve-out-permits-the-whole-screen-hash, AC3) =="
   # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
@@ -216,7 +225,7 @@ run_static_checks() {
   # by the sibling task; a NEW active violation red-lights the commit).
   # @static-tier change
   # @static-object **/*.sh **/*.bash
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
+  run_checker "adr016-screen-use-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
   echo "== strategic-doc-staleness check (gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8) =="
   # The generic strategic-doc staleness checker: scans docs/proposals + orchestration/*ROADMAP* for
   # unannotated references to classic-pipeline scripts ADR-022 deleted (prepare-milestone.js /
@@ -227,7 +236,7 @@ run_static_checks() {
   # is asserted in plugin/test/strategic-doc-staleness-check.test.mjs, not here.
   # @static-tier change
   # @static-object docs/proposals/ orchestration/
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/strategic-doc-staleness-check.ts" --root "${repo_root}"
+  run_checker "strategic-doc-staleness-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/strategic-doc-staleness-check.ts" --root "${repo_root}"
   echo "== drive-contract check (gap-drive-text-carries-data-not-behavior-outer-inner-handoff, AC3) =="
   # The drive-text contract checker: a drive text (the OUTER's dispatch instructions to the INNER)
   # must carry DATA only — behavior (concurrency, worktree, discipline) comes from the shipped
@@ -241,7 +250,7 @@ run_static_checks() {
   # checker's own mutation case and plugin/test/drive-contract-check.test.mjs.
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
-  node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
+  run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
@@ -253,7 +262,7 @@ run_static_checks() {
   # the #10 activity-present-telemetry-empty /live direction). `mutations_that_stayed_green`
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
   # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
-  bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  run_checker "checker-mutation-check" bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
 }
 
 # run_scoped_static_checks — the change-relevant static-check TIER for SCOPED task runs

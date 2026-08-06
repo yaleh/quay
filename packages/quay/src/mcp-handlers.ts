@@ -461,7 +461,7 @@ export function registerLifecycleHandlers(
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-        const result = await runComplete({ client: client as unknown as Parameters<typeof runComplete>[0]['client'], id, logPath });
+        const result = await runComplete({ client: client as unknown as Parameters<typeof runComplete>[0]['client'], id, logPath, workspaceRoot: cfg.workspaceRoot });
         process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -528,7 +528,7 @@ export function registerLifecycleHandlers(
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-        const result = await runPromote({ client: client as unknown as Parameters<typeof runPromote>[0]['client'], id, logPath });
+        const result = await runPromote({ client: client as unknown as Parameters<typeof runPromote>[0]['client'], id, logPath, workspaceRoot: cfg.workspaceRoot });
         process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
