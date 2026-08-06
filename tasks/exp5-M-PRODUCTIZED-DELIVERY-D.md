@@ -50,3 +50,13 @@ Standard inherited-core DoD clauses apply, incl. escrow-Δv and audit-independen
 - [ ] it0 DoD meta-enforcer passes all clauses.
 - [ ] On landing, [[exp5-M-PRODUCTIZED-DELIVERY]]'s parent DoD (all 5 AC satisfied collectively) is re-checked;
   DIR-061 dispositioned `applied` if complete.
+
+## Cross-annotation (gap-chart2-s2-test-assertions-stale-after-delivery-c-d, 2026-08-06)
+
+This delivery flips `experiments/quay-perpetual-stream/chart2-s2-delivery.json` `foreignInstallE2eGreen`
+`false → true`. **Rule: flipping a delivery-evidence flag REQUIRES a synchronous update to
+`experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs`** — the evidence-pinning
+assertions (`loadS2Evidence` + the two CLI cov assertions) must be updated in the SAME change, or the test
+asserts a stale pre-delivery surface and the suite goes RED (this gap task is exactly that miss: DELIVERY-C/D
+flipped evidence without syncing the assertions, masking 12 days of RED). See that gap task for the synced
+assertions + the fail-closed negative control that must be kept.
