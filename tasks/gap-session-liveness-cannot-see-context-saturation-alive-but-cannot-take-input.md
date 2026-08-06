@@ -106,6 +106,7 @@ resume 若中断，先跑 measure 读当前各会话饱和度，不要假设上�
 - [ ] 任务体记录：本条与 `session-liveness` 既有判据的分工——那条测「动不动」，本条测「收不收得进」
 
 ## Touches
+- tasks/gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input.md
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/quay-init.sh
 - plugin/loop/orchestrator-loop-tick.md

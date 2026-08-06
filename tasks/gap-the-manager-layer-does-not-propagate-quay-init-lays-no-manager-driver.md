@@ -102,6 +102,7 @@ resume 若中断，先在目的地跑 measure，不要假设上次铺过了
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
 
 ## Touches
+- tasks/gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver.md
 - plugin/scripts/quay-init.sh
 - orchestration/manager-loop-tick.md
 - tasks/gap-productize-the-manager-layer.md（交叉标注）

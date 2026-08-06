@@ -104,6 +104,7 @@ resume 若中断，先跑 measure 读当前未被验证的合并列表，不要�
 - [ ] 任务体记录本次实测的 `d`，并与模型的 2.2h 盈亏点对照
 
 ## Touches
+- tasks/gap-no-post-merge-cross-machine-verification-detection-latency-is-luck.md
 - plugin/scripts/periodic-push-backup.sh
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/loop/orchestrator-loop-tick.md
