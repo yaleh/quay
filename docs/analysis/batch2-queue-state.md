@@ -6469,3 +6469,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **session-liveness.sh 是 eb5532f4 合并冲突文件**（152行）——RESUMED/busy 逻辑可能是 da065182
   合并回归第 5 实例。已立案 gap-session-liveness-resumed-merge-regression-suspect，驱动 inner 判别
   （脚本回归 vs 测试时序）。
+
+### tick 2026-08-06T16:0xZ（session-liveness test G 判别——非合并回归）
+
+- **判别完成（管理者全量+外层隔离双确认 + 内层受控验证）**：test G（RESUMED must fire on busy, 行663）
+  **隔离跑 1/1 通过**；session-liveness.sh 的 busy→RESUMED 逻辑 **eb5532f4 合并前后字节等价**
+  （diff grep RESUMED/busy_sem/PREV_BUSY/PREV_IDLE/esc-to-interrupt 无功能 [+-] 改动）；
+  文件顶部已带 **KNOWN-LOAD-SENSITIVE 标记**。
+- **判定：测试时序 flake，非合并回归**。脚本无需改动；全量闸按 KNOWN-LOAD-SENSITIVE 判绿规则
+  对 session-liveness.test.mjs 隔离重跑。已记入 gap-session-liveness-resumed-merge-regression-suspect。
+- 在飞 1/3（preemption）。

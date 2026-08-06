@@ -64,3 +64,15 @@ at: 2026-08-06T11:2xZ
 changed: 管理者 full-run + 外层隔离重跑双确认——test G（RESUMED on busy）隔离失败。session-liveness.sh
 是 eb5532f4 合并冲突文件（152 行改）→ RESUMED 逻辑可能是合并回归（第 5 实例）。判别脚本 vs 测试时序，
 外层隔离跑失败提高脚本回归概率但 A 机多 tmux 会话仍可能干扰。
+
+## Discrimination result (inner, 2026-08-06)
+
+**VERDICT: NOT a merge regression — KNOWN-LOAD-SENSITIVE timing flake.**
+
+Evidence:
+1. Test G ("RESUMED must fire on the busy transition", line 663) **passes isolated** (1/1, low load).
+2. Script RESUMED logic **byte-equivalent pre/post eb5532f4 merge**: `git diff eb5532f4^1 eb5532f4 -- session-liveness.sh | grep -E 'RESUMED|busy_sem|PREV_BUSY|PREV_IDLE|esc to interrupt'` → no functional `[+-]` changes on the busy→RESUMED path (idle→busy transition fires RESUMED at line ~1049; `esc to interrupt` presence → busy, lines 94/995).
+3. The file **already carries the KNOWN-LOAD-SENSITIVE marker** (top of file, "已知负载敏感族"): "passes isolated under low load but may fail under concurrent-suite load... re-run this file alone before concluding."
+4. The full-suite failure is the documented pattern: the 25s RESUMED wait window (waitForOutput 25000) is tight when concurrent-suite load delays the busy transition sampling.
+
+Action: no script change. Re-run session-liveness.test.mjs isolated for the full-suite gate (the established KNOWN-LOAD-SENSITIVE 判绿 rule).
