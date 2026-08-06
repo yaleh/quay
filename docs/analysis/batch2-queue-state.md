@@ -5937,3 +5937,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   运行中工作）、reclaim = pid-dead+stale 早 / lease 过期 / legacy 回退；TOCTOU guard。AC1-AC7、19/19 +
   token 族 12/12。worktree/branch 已清。在飞 1/3（laydown-derivation）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:2xZ（内层 cron，token-status 派发）
+
+- **token-status-dead-holder 派发**（`fm-...-mbsm4t`）：git-log 0 hit 真未落地，与在飞 laydown-derivation
+  生产闸 DISJOINT，self-touch 过。runtime-nowhere-safe 与 laydown-derivation CONFLICT（不并发）。
+- 套件 green（2658 tests EFFECTIVE GREEN）。在飞 2/3。无 stop、无 block、Monitor 绿。
