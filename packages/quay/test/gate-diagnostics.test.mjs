@@ -302,8 +302,6 @@ import {
   SEVERITY_LABEL,
 } from "../src/gate/config/loader.ts";
 
-import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
-
 const __diagDirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
 const nativeBin = QUAY_NATIVE_CLI;
