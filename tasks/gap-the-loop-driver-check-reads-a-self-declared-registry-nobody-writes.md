@@ -3,7 +3,7 @@ id: gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes
 title: loop-driver-check reads a self-declared registry that the tick doc never
   writes — a correct cold start reports STALLED, and the doc's own remedy
   manufactures the double-trigger it exists to prevent
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -125,10 +125,10 @@ AC7 只改**打印的措辞**——把一个控制面的读数从状态断言改
 
 ## Definition of Done
 
-- [ ] AC1 与 AC4 的实跑输出都贴进任务体（正向与负控制各一份）
-- [ ] AC3 若未解决，任务体明写「未解决 + 理由 + 已转入第二层」，**不得留白**
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录：**这条是照文档做完之后看结果才发现的**——
+- [x] AC1 与 AC4 的实跑输出都贴进任务体（正向与负控制各一份）
+- [x] AC3 若未解决，任务体明写「未解决 + 理由 + 已转入第二层」，**不得留白**
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] 任务体记录：**这条是照文档做完之后看结果才发现的**——
       读代码不会发现，因为代码和文档各自都自洽
 
 ## Touches

@@ -2,7 +2,7 @@
 id: gap-session-liveness-hashes-the-token-counter-as-if-it-were-work
 title: session-liveness hashes the whole pane including the "/clear to save NNN.Nk
   tokens" counter, so a parked session emits a RESUMED/IDLE pair with zero work
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -291,9 +291,9 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
 
 ## Definition of Done
 
-- [ ] AC3 与 AC4 两个方向的实跑输出都贴进任务体——
+- [x] AC3 与 AC4 两个方向的实跑输出都贴进任务体——
       **只修假阳性而不证明假阴性没有被引入，是把噪声换成静默**
-- [ ] 完整套件连跑 2 次全绿（**若只到 1 次，如实标 `[~]` 并写明**）
+- [x] 完整套件连跑 2 次全绿（**若只到 1 次，如实标 `[~]` 并写明**）
 - [ ] 任务体记录：管理者报此条时标注为「**未确认成因**」，
       外层实测确认了具体机制（计数器在哈希区域内）——**成因确认后，去抖那条取舍不必做**
 
