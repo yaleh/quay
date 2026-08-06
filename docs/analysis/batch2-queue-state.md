@@ -7424,3 +7424,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **session-pid fan-in 验证**：cherry-pick 到 integration 干净；scoped verify（session-liveness.test.mjs）因 KNOWN-LOAD-SENSITIVE（真实 tmux/进程 spawn）超时未出结果——agent 在 worktree 已实测 52/53（1 skip=环境），cherry-pick 无冲突，fan-in 成立。integration HEAD a09ddb56。
 - **ac8 已派发**（触摸冲突解除后，in-flight 2/5）：`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`（40→6 集成，import over spawn 真正生效），telemetry ...-q30ump，后台 agent 运行中。
 - **session-liveness verify 补记**：integration 上 52 tests / 50 pass / 0 fail / 1 skipped；文件整体 200s 超时（KNOWN-LOAD-SENSITIVE 慢），但**0 assertion fail** —— fan-in 成立。
+
+### tick 2026-08-06T22:1xZ（suite GREEN 保持，派发 1：shipped-ts）
+
+- **suite GREEN 保持**（21:25:29，无新 run）。`--detect-stop` 无块。pool 20 ≥ floor 20。
+- **派发 1（shipped-ts，in-flight 1→2）**：`gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact`（5 AC 未勾、self-touch ok、resolves、fork develop；**与 ac8 disjoint** —— production gate 双宽并发批）。telemetry ...-rollav。人裁定方向 bundle（对齐 Core），负控制 AC3=裸 Node 不带 --experimental-strip-types 跑 plugin 能力。
+- **排除**：cold-start（AC 全勾=陈旧）、no-post-merge（已 fan-in）、token-measures（7/7 AC=陈旧待翻 done）。
+- **ac8 在飞**（40→6 集成 agent 运行中，worktree 有未提交改动=agent 活动）。
+- **session-pid self-touch 已提交**（0fc3981b，AC1-4 勾 AC5 deferred）。
