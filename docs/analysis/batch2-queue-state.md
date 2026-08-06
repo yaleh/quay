@@ -5778,3 +5778,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **优先② message-bus 阻塞注记**：生产闸判与在飞 web-action-buttons CONFLICT（batch=[message-bus, productize]，
   web-action-buttons deferred）——**不可并发**，待 web-action-buttons land 后派。③ b-machine 同待。
 - 在飞 2/3（productize 2 提交推进 + web-action-buttons 早期）。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:4xZ（内层，productize fan-in + 优先③派发）
+
+- **productize-manager fan-in 完成（真实现 umbrella）**：manager SKILL 落地（plugin/skills/manager +
+  plugin.json 注册）、cold-start AC8c dead-key 修复、launch-config 三件套确认、SPEC 索引 14、AC1-AC8、
+  scoped 52/52（cold-start 族隔离重跑）。派生集 43（cadence checker 铺到全项目）。worktree/branch 已清。
+- **优先③ b-machine-push-backup 已派**（`fm-...-lp6v0p`，AC15 执行者②③）：生产闸与在飞 web-action-buttons
+  DISJOINT（② message-bus 与 web-action-buttons CONFLICT 阻塞——③ 先派，② 待 web-action-buttons land）。
+  executor=manager on B 的 repo 侧机制 + 测试，B 侧执行属外层/manager drive。
+- 在飞 2/3（web-action-buttons + b-machine）。套件 green、无 stop、无 block、Monitor 绿。
