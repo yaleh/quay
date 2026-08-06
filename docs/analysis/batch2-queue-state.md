@@ -6372,3 +6372,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **在飞 0/3**。**postinstall 缺陷（gap-release-postinstall）现可派**——其 sync-vendor.sh 与 quality-criteria
   的重叠已随后者落地解除。
 - 待外层 merge integration→develop（验证后），或本 tick 直接派 postinstall 缺陷。
+
+### tick 2026-08-06T13:2xZ（内层 cron，派发 postinstall 修复）
+
+- 无 halt；套件 GREEN。在飞 0/3。池 8/20、disjoint 5/5（criterion met，但 ready 多为陈旧 signal-gap）。
+- **派发 1/3 — gap-release-postinstall-fallback-breaks-windows-sea-build**（3.6 补晋 todo→ready）：
+  archguard-blocking 的 release 修复。resolve 3/4、pool-candidate clean、fork-baseline=develop。
+  worktree /home/yale/work/quay-worktrees/postinstall-fix + bracket 已开。
+  agent 指引：postinstall `(echo...; exit 0)` → `|| true`（cmd.exe 可解析），WARN 移入 sync-vendor.sh；
+  AC4 需裁定 live-GitHub 测试阻塞（skip/adapt/split）。
+- 在飞 1/3。quality-criteria 已落 integration（上一 tick）。
