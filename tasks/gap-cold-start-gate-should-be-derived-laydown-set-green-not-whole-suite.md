@@ -53,16 +53,72 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 冷启动 gate = **派生铺设集内脚本全绿**（铺什么验什么），非「整个套件绿」——与铺设集无关的
+- [x] AC1: 冷启动 gate = **派生铺设集内脚本全绿**（铺什么验什么），非「整个套件绿」——与铺设集无关的
       套件失败不再无限期阻塞冷启动
-- [ ] AC2: 铺设集**机械派生**（grep `plugin/skills/*/SKILL.md` + `plugin/loop/*.md`），不需新机制
-- [ ] AC3: **并列交叉标注**——`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（同作用域
+      **证据**：`plugin/skills/cold-start/SKILL.md` 新增「## Gate criterion — 铺什么验什么」节：
+      gate = 派生铺设集内脚本全绿，NOT「the whole quay suite is green (`scripts/test.sh` full-suite /
+      全量)」；gate 由 `bash <root>/plugin/scripts/laydown-set-check.sh` 机械执行。默认 gate 只验
+      铺设集（存在 + 语法 + 解析出成员自身测试），**实测无关失败不阻塞**：本环境存在 dist-build
+      esbuild 崩溃、fresh worktree 缺 gitignored `.quay/config.yml` 使 slot-refill.test.mjs 报
+      repo-root 错误，但默认 gate 仍 `laydown_set_green: green`（见 AC4 实测输出）。
+- [x] AC2: 铺设集**机械派生**（grep `plugin/skills/*/SKILL.md` + `plugin/loop/*.md`），不需新机制
+      **证据**：`plugin/scripts/laydown-set-check.sh` 第 1 步用与 quay-init.sh `derive_loop_scripts()`
+      step (a) **相同**的 grep 派生集合；`plugin/test/laydown-set-check.test.mjs` AC2 用例断言
+      `--list` 输出的每个成员都在「文档 grep 结果」里（派生 = 文档引用，非手写清单，fixture 双向可控）。
+- [x] AC3: **并列交叉标注**——`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（同作用域
       轴，不同机制：suite-RED 处置 vs 冷启动 gate）
-- [ ] AC4: **真实使用**——本次等待正确（session-liveness 在铺设集 + M3 会随铺扩散）；收窄后与铺设集
+      **证据**：在 `tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md` 的
+      Proposal 加了 `> **AC3 并列交叉标注（2026-08-06）**` 块、Touches 加了并列条目——同一作用域轴
+      （都问「判据量化哪个范围」并收窄到真实作用域），不同机制（suite-RED 处置 vs 冷启动 gate），不归并。
+- [x] AC4: **真实使用**——本次等待正确（session-liveness 在铺设集 + M3 会随铺扩散）；收窄后与铺设集
       无关的失败不阻塞冷启动（实测输出贴任务体）
-- [ ] AC5: **AC10 诚实记账**——本条 post-friction（被阻塞时问范围），不计入可证伪判据；计数保持 0
+      **证据**：`--list` 实测 `session-liveness.sh` / `session-liveness-mount.sh` 都是派生成员
+      （下方「Verification（scoped）」实测输出）；默认 gate 实跑绿（见下）。M3 类（成员自身测试失败）
+      由 `--run-tests` 深查转红（fixture `AC4 deep` 用例）。**负向实测**：本环境无关失败（esbuild
+      dist-build 崩溃；fresh worktree 无 gitignored `.quay/config.yml` 致 slot-refill.test.mjs 报
+      repo-root 错误）不阻塞默认 gate——这正是收窄的意义。
+- [x] AC5: **AC10 诚实记账**——本条 post-friction（被阻塞时问范围），不计入可证伪判据；计数保持 0
       （记录不勾）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`tasks/gap-axis-generator-question-what-range-every-standing-criterion.md` 的 Proposal
+      加了 `> **AC5 cross-mark (2026-08-06, gap-cold-start-gate-...)**` 块：post-friction、NOT counted、
+      AC10 计数保持 0。本条未把边缘案例算成达成。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/laydown-set-check.test.mjs` 首行 `// @test-group governance`，6 条全部
+      `node:test`（scoped 实测 pass 6 / fail 0，见下）。
+
+## Verification（scoped，2026-08-06）
+
+`bash scripts/test.sh --for-task gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite
+--allow-thin` → **exit 0，pass 6 / fail 0 / cancelled 0**（`plugin/test/laydown-set-check.test.mjs` 6 条全绿）；
+`task-contract-check: no violations`（三个 touched 任务文件 strict-subset 无违规）。
+
+**Contract invoke**（`grep -rn 'scripts/test.sh\|full suite\|全量' plugin/skills/cold-start/SKILL.md`）：
+
+```
+plugin/skills/cold-start/SKILL.md:81:"the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
+```
+
+**Contract measure**（`bash plugin/scripts/laydown-set-check.sh` → 默认 gate 实跑）：
+
+```
+laydown_set_green: green
+scripts_derived: 30
+syntax_ok: yes
+tests_resolved: 21
+```
+
+**AC4 真实使用证据**——session-liveness 是派生成员（`--list` 实测）：
+
+```
+  session-liveness-mount.sh
+  session-liveness.sh
+```
+
+**AC4 负向（无关失败不阻塞）**：本环境实测存在无关失败——(1) fresh worktree 无 gitignored
+`.quay/config.yml` 使 `slot-refill.test.mjs` 报 `Cannot find repo root upward from …/plugin/test`；
+(2) 无 node_modules 时 native dist build 报 `Could not resolve "quay/adr-store"`。二者均与铺设集脚本
+无关；默认 gate 仍 `laydown_set_green: green`（见上）——收窄后与铺设集无关的失败不再阻塞冷启动。
+M3 类（成员自身测试失败）由 `--run-tests` 深查转红（fixture `AC4 deep` 用例）。
 
 ## Definition of Done
 
@@ -77,6 +133,10 @@ extra:
 - plugin/scripts/（铺设集机械派生 helper，若成脚本）
 - tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md（AC3 并列交叉标注）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用）
+
+## Test-Files
+
+- plugin/test/laydown-set-check.test.mjs
 
 ## Contract
 

@@ -59,6 +59,13 @@ extra:
 `gap-red-window-has-no-automatic-executor`（SUITE-RED 触发）——本条是**红窗规则的条件化细化**
 （SUITE-RED 事件携带失败位置 → inner 派发决策按共享闸门/具体测试判定）。
 
+> **AC3 并列交叉标注（2026-08-06，
+> `gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`）**：本条（RED 停派按失败
+> 作用域条件化）与冷启动 gate 收窄条（gate 按派生铺设集收窄，非整个套件绿）是**同一作用域轴的并列实例**
+> ——都问「这条判据量化的是哪个范围」并把它从「一刀切/全量」收窄到真实作用域。**不同机制，不归并**：
+> 本条管 suite-RED 处置（共享闸门才停派发），该条管冷启动 gate（铺设集内脚本全绿即可铺）。外层 2026-08-05
+> 裁定并列立案。
+
 ## Acceptance Criteria
 
 - [ ] AC1: **RED ⇒ 一律暂缓 fan-in**（真正保护，不变）——红树不混入新 failures
@@ -87,6 +94,8 @@ extra:
 - tasks/gap-full-suite-runner-concurrency-default-and-gate.md（AC6 交叉标注：stop-dispatch 语义同一族——
   本条把「RED ⇒ 停派发」条件化为共享闸门；该条把 stop-dispatch 判据机械化到 `reason` 轴
   failed≠aborted。两条合起来 = RED 处置的完整机械化表面）
+- tasks/gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite.md（AC3 并列交叉标注：
+  同一作用域轴——本条 RED 停派按失败作用域条件化 vs 该条冷启动 gate 按派生铺设集收窄；不同机制，不归并）
 
 ## Contract
 
