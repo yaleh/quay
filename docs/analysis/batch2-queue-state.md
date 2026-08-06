@@ -5499,3 +5499,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **Q2 two-machine-collab 派发**（人优先级任务——branch-model 落地后 gating 放行，AC3 权威/推送方向的
   前置已在 branch-model 中部分落地）。
 - **套件 green**、闸 GO、pool 6/dispatchable 2。
+
+### tick 2026-08-06T00:2xZ（内层，two-machine fan-in — 人优先级真实现）
+
+- **two-machine-collab fan-in 完成（人优先级真实现）**：认领协议 `claim-task.sh`（claim/--status/--reclaim）
+  + `release-task.sh`——认领标记 = empty-tree orphan commit 推到共享 bare repo 的 `task/<id>` ref（push =
+  原子 CAS，两机争同一任务一胜一负）；`claim-task.ts` decideClaim 复用单源 checkTouchesPair；**权威裁定**：
+  认领/task 推双向（integration 多源汇入 = 跨机自然），develop 单权威（仅外层 verification-round 批量合），
+  master 空。真实两克隆 A/B 测试（不相交认领双成、同任务只一胜）。AC1-AC5、9/9 scoped。worktree/branch 已清。
+- **顺带修预存**：branch-model Contract invoke-evidence-missing（`--oneline` vs 实际 `--format=%s`）——two-machine
+  交叉扫描浮出，已对齐。在飞 0/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
