@@ -1,0 +1,54 @@
+---
+id: gap-manager-skill-index-missing-new-specs
+title: "manager SKILL (plugin/skills/manager/SKILL.md) indexes only 14 of 16 on-disk orchestration/SPEC-*.md — missing SPEC-branching-model-integration-branch-2026-08-05.md and SPEC-integration-architecture-2026-08-05.md (both added 08-05); manager-layer-shipping.test.mjs AC6 requires the SKILL to index EVERY on-disk SPEC file (readdir + includes assert); the two new SPECs (branching model / integration architecture) were filed 2026-08-05 but never added to the manager SKILL's methodology index — documentation drift, the same 'added file without updating its index' class; fix = add the two missing SPEC filenames to manager SKILL.md's index section"
+status: todo
+labels:
+  - gap
+  - defect
+extra:
+  schema: v1
+---
+**type:** execution
+
+## Proposal
+
+**manager SKILL 缺索引 2 个新增 SPEC 文件——全量 suite 失败。**
+
+**【实测（外层，suite log line 5373 + 直接核实）】**：`plugin/skills/manager/SKILL.md` 的方法论索引
+覆盖 14/16 个 on-disk `orchestration/SPEC-*.md`，缺：
+- `SPEC-branching-model-integration-branch-2026-08-05.md`
+- `SPEC-integration-architecture-2026-08-05.md`
+
+测试 `manager-layer-shipping.test.mjs` AC6 要求 SKILL 索引**每个** on-disk SPEC（
+`fs.readdirSync(SPEC_DIR).filter(SPEC-.*)` + `src.includes(spec)`）——缺失 2 个 → 失败。
+
+**【性质】**：文档漂移——08-05 新增 2 个 SPEC（branching model / integration architecture）时
+没同步更新 manager SKILL 的索引。与「新增文件没更新索引」类缺陷同族。
+
+### 选定机制
+
+在 manager SKILL.md 的方法论索引区补 2 行（对齐现有条目格式，含一句话说明）。
+
+## Acceptance Criteria
+
+- [ ] AC1: manager SKILL 索引全部 16 个 on-disk SPEC-*.md
+- [ ] AC2: manager-layer-shipping.test.mjs AC6 隔离跑绿
+- [ ] AC3: 索引格式与现有条目对齐（一行一个，带说明）
+
+## Touches
+
+- plugin/skills/manager/SKILL.md
+
+## Contract
+
+measure   spec_index_ok = `node --test plugin/test/manager-layer-shipping.test.mjs 2>&1 | grep -c '# pass'` stdout 数字段
+band      spec_index_ok >= 1（AC6 隔离跑绿）
+invoke    `for f in orchestration/SPEC-*.md; do grep -q "$(basename $f)" plugin/skills/manager/SKILL.md || echo "MISSING $(basename $f)"; done`
+control   当前 MISSING 2 个；修后 0
+resume    修完先跑 manager-layer-shipping 隔离，再进全量
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T14:4xZ
+changed: 全量 suite 分诊确认的真实缺陷（merge 暴露非引入）——分别: nativeProviderDir 未定义(98e23f5b 删定义留使用)、plugin.json 重复 manager/SKILL.md、manager SKILL 缺 2 个 SPEC 索引。
