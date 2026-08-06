@@ -1,7 +1,8 @@
 ---
 id: gap-codex-selfcheck-fails-on-installed-codex-cli-0125
-title: "codex-stage1 selfcheck A8 fails — .codex/config.toml validated against codex-cli 0.146.0 but environment has 0.125.0"
-status: todo
+title: codex-stage1 selfcheck A8 fails — .codex/config.toml validated against
+  codex-cli 0.146.0 but environment has 0.125.0
+status: ready
 labels:
   - gap
   - defect

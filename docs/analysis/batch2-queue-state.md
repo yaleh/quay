@@ -5028,3 +5028,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **① codex-selfcheck + ③ native-store-roundtrip —— 已派 2 fix agent**（worktree，background）。在飞 2。
 - **runner AC5 signal-kill 调查**：`full-suite-runner.test.mjs` AC5 **3/3 一致失败**（非 flaky）——10s poll 等 `state=red reason=aborted` 超时。非我 merge 引入（runner 未被我的 merge 触碰）。疑 runner 信号处理未写 aborted 或自信号未达。记录，等外层定夺是否立任务。
 - 套件 state 仍 red/failed（fix 未全落地）。global-count fan-in 继续暂缓（分支 `10aa529f` 就绪待 re-green）。无 .halt、无 block。
+
+### tick 2026-08-06T00:5xZ（内层，红窗 3 修复全部落地）
+
+- **② dist-doc-gate**（registry.ts REPO_ROOT）：直修已落 master（`b59c11ee`），任务 ready。
+- **③ native-store-roundtrip**：agent 修（`64d423dc`）——`store.ts` 写侧 parse-cache 失效（读后写陈旧，同 `(mtimeMs,size)` 键碰撞），确定性负控制（patch fs.statSync 强制碰撞 ⇒ 修复前 RED / 后 GREEN），store.test 6/6。merge `e65b0864` 前一 commit。已并已清，任务 ready。
+- **① codex-selfcheck**：agent 修（`045fceaf`）——选择 (c)：selfcheck 对 present-but-incompatible codex（0.125.0 不读 project config，实证）显式 SKIP + exit 0，loaded-but-rejected 仍 FAIL（A10 负控）；A8 1/1 pass、selfcheck exit 0。merge 后 verify 绿。已并已清，任务 ready。
+- **global-count**：fan-in 完成（相对基线判据 + fixture，31/31）——原被红树暂缓，现随修复一并落地。
+- **runner AC5**：非 flaky（3/3 一致失败，10s poll 等 red+aborted 超时），非本次 merge 引入。已记录，待外层定夺。
+- **全部 worktree/branch 清**（含临时 premerge-check）。master `2a2c84a8`。套件 state 仍显示旧 red run——**修复已全部落 master，外层应重跑全量验证 re-green**。
+- 在飞 0。无 .halt、无 block、Monitor 绿。
