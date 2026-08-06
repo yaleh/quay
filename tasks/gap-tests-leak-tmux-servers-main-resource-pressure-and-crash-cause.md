@@ -247,6 +247,24 @@ grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.m
 - tasks/gap-tests-never-clean-up-their-tmpdirs.md（AC5 交叉标注）
 - orchestration/（三次崩溃根因调查记录补 AC6 关联）
 
+## 跨主机复现（管理者 2026-08-06 15:4xZ，B 机只读观测）
+
+**范围比已知的更宽——至少 3 个新增泄漏源文件，均不在上面的 Touches 列表里。**
+
+B（orangevps）decommission 前的例行核实（`pgrep -af 'claude|tmux'`，只读，未做任何清理——
+跨主机 kill/批量进程操作禁止执行，这条证据留给 A 侧或人授权后处理）：
+
+| 项 | 值 |
+|---|---|
+| B 上 `tmux: server` 进程数 | **24** |
+| 涉及的会话名前缀 | `ol-*`、`sb-ac1/ac3/ac4/mgr/idem`、`topo-factory/idem`、`isc-factory`、`escprobe` |
+| 已知来源（原任务已列） | `ol-*` → `session-liveness.test.mjs`（同族） |
+| **新增来源（本次新查，原任务未列）** | `sb-*` → `plugin/test/session-bootstrap.test.mjs`；`topo-*` → `plugin/test/session-topology.test.mjs`；`isc-factory` → `plugin/test/inner-session-check.test.mjs` |
+
+⇒ **这不是"send-keys-verified 一个文件的问题"，是这一族会话夹具测试（tmux new-session 起测试会话）普遍缺 teardown 的模式**——本任务标题当初聚焦单一根因，实测范围已扩大到至少 5 个文件（`send-keys-verified` / `session-liveness` / `session-bootstrap` / `session-topology` / `inner-session-check`）。
+
+**未做的事，明确记录**：管理者未清理 B 上任何这些进程（跨主机 kill 禁止），也未修改上述 3 个新增文件——只报出实测证据。AC7（若后续加）应覆盖这 3 个新文件的 teardown，而不只是 AC1-AC6 原定的 3 个。
+
 ## Contract
 
 measure   leaked_servers = `ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/enter-repro-* 2>/dev/null | wc -l` stdout 的数字段
