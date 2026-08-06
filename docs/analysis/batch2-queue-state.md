@@ -5605,3 +5605,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （「分派是滚动的，不叫批号；全量验证/收尾节奏叫 verification-round-N」）。AC1-AC6、5/5 + 相邻治理测试
   （reanchor/self-report-vocab）重跑绿。worktree/branch 已清。在飞 1/3（delivery-grows）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:3xZ（内层，delivery-grows fan-in — 真实现）
+
+- **delivery-grows fan-in 完成（真实现）**：quay-init `--check-drift`（只读派生集漂移报告）+ `--loop` 升级路径
+  （前/后漂移报告、缺失自动补、漂移 backup+replace 永不静默）——L2 升级正确性；AC4 交叉标注 trend-criteria
+  （漂移/缺失计数 = 该任务被动判据的读取源）。scoped **51/51**（1 known-load-sensitive flake 隔离重跑绿），
+  dedupe 修复（派生集 latent 双计）。worktree/branch 已清。**在飞 0/3**。
+- 套件 green、无 stop、无 block、Monitor 绿。
