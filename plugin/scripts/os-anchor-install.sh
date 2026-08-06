@@ -41,6 +41,15 @@ INSTALL_DIR="${OS_ANCHOR_INSTALL_DIR:-${HOME:-/home/yale}/.config/quay/os-anchor
 SYSTEMD_USER_DIR="${OS_ANCHOR_SYSTEMD_USER_DIR:-${HOME:-/home/yale}/.config/systemd/user}"
 SKIP_SYSTEMCTL="${OS_ANCHOR_SKIP_SYSTEMCTL:-0}"
 
+# LAUNCH_CMD — the ONE place the watchdog relaunch command string lives
+# (gap-os-anchor-watchdog-launch-missing-prompt-suggestions AC2: single-source to kill the
+#  two-place double-drift the crystallize task noted; both default_projects() and --add-project
+#  reference it). Carries the REQUIRED cold-start params per restart-plan §8
+#  (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false): the
+#  `--prompt-suggestions false` flag AND the `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`
+#  env prefix — so a watchdog-relaunched session never regresses to ghost-suggestion-on.
+LAUNCH_CMD="CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions --prompt-suggestions false"
+
 TIMER_UNIT="quay-os-anchor-watchdog.timer"
 SERVICE_UNIT="quay-os-anchor-watchdog.service"
 CONFIG_FILE="$INSTALL_DIR/os-anchor-projects.conf"
@@ -63,7 +72,7 @@ default_projects() {
   name="$(basename "$root")"
   session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$root/orchestration/session-liveness.env" 2>/dev/null || true)
   [ -n "$session" ] || session="${name}-0"
-  launch="claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions --prompt-suggestions false"
+  launch="$LAUNCH_CMD"
   if [ -f "$root/plugin/loop/orchestrator-loop-tick.md" ]; then
     drive="执行 $root/plugin/loop/orchestrator-loop-tick.md 中的 tick 指令"
   else
@@ -253,7 +262,7 @@ if [ -n "${ADD_PROJECT:-}" ]; then
     local_session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$ADD_PROJECT/orchestration/session-liveness.env" 2>/dev/null || true)
     [ -n "$local_session" ] || local_session="${local_name}-0"
     local_drive="执行 $ADD_PROJECT/orchestration/orchestrator-loop-tick.md 中的 tick 指令"
-    local_line="${local_name}|${ADD_PROJECT}|${local_session}|outer|claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions --prompt-suggestions false|${local_drive}|"
+    local_line="${local_name}|${ADD_PROJECT}|${local_session}|outer|${LAUNCH_CMD}|${local_drive}|"
     if [ -f "$CONFIG_FILE" ]; then
       # avoid duplication by name
       if ! grep -q "^${local_name}|" "$CONFIG_FILE"; then

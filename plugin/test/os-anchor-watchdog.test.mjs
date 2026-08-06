@@ -71,10 +71,21 @@ test("AC1/install — idempotent installer writes timer/service/config (hermetic
     assert.ok(fs.existsSync(config), "projects config written");
     assert.ok(fs.existsSync(watchdogCopy), "watchdog copied to install dir");
 
-    // config has the invoking repo (quay) with a session + drive text
+    // config has the invoking repo (REPO_ROOT basename — worktree-agnostic, since the fast-mode
+    // loop runs this test inside a task-slug worktree, not the main `quay` checkout) with a
+    // session + drive text
     const conf = fs.readFileSync(config, "utf8");
-    assert.match(conf, /quay\|/, "config includes the invoking project");
+    const repoName = path.basename(REPO_ROOT);
+    assert.match(conf, new RegExp(`${repoName}\\|`), "config includes the invoking project");
     assert.match(conf, /\|outer\|/, "config carries the outer-window column");
+
+    // REQUIRED cold-start launch params
+    // (tasks/gap-os-anchor-watchdog-launch-missing-prompt-suggestions AC1/AC2): the generated
+    // launch-cmd MUST carry `--prompt-suggestions false` (+ the env-form
+    // CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false) so a watchdog-relaunched session never
+    // regresses to ghost-suggestion-on — a regression here is caught mechanically, not by prose.
+    assert.match(conf, /--prompt-suggestions false/, "generated launch-cmd carries the REQUIRED --prompt-suggestions false flag");
+    assert.match(conf, /CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false/, "generated launch-cmd carries the env-form REQUIRED param");
 
     // no duplicate timer/service files from the second install
     const files = fs.readdirSync(systemdDir).filter((f) => f.includes("os-anchor"));
