@@ -5978,3 +5978,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   与刚合并的 laydown-derivation 的冲突已解除——后者先落地，本任务在其上构建）。
   worktree /home/yale/work/quay-worktrees/runtime-nowhere-safe + telemetry bracket 已开。
 - 池 7/12、disjoint 6/3、criterion met；在飞 1/3（runtime-nowhere-safe）。
+
+### tick 2026-08-06T06:5xZ（外层，人裁定「按计划优先推进」分支切换）
+
+- **人已裁定**「按计划优先推进」branch-cutover 方案。
+- **现状核实**：develop/integration 冻结在 926d771b（阶段一快照点），master 领先 33 提交且仍被每次
+  tick 直接写（master 冻结 invariant 未生效）。
+- **驱动内层**：gap-two-layer-loop-tick-docs-hardcode-master 提为本轮最高优先级（当前 todo 未派发；
+  touches 可解析、与在飞 runtime-nowhere-safe disjoint）。内层收到后将优先派发。
