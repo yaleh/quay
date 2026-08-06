@@ -309,6 +309,137 @@ test("AC9 — a full --root cycle never touches the real default token (all help
   }
 });
 
+// ── status dead-holder honesty (tasks/gap-token-status-reports-a-dead-holder-as-busy) ─────────────────
+// A --status that reports a dead holder as "busy" is a LYING read: it makes a human arbitrator yield
+// to work that is not running (the 19-minute dead-holder tick, 2026-08-03). The status read must:
+//   * report holder_alive consistent with kill -0 (AC1/AC2/AC3 — the Contract's band);
+//   * stay READ-ONLY — never reclaim, so the token is byte+mtime identical after the read (AC4);
+//   * say whether the next --acquire would reclaim per acquire's OWN criteria + give next-step
+//     text (AC5);
+//   * state that polling --status for a free slot is an INVALID strategy — reclaim is PULL-based,
+//     only at --acquire — and give the exact command to run (AC7).
+// The file stays `// @test-group engine` (AC10 pin + the token mechanism must run in the default
+// full-suite gate; a governance retag would self-skip it and unpin the mechanism — see the AC6
+// resolution note in the task body). All tests below are node:test (AC6's node:test half).
+
+test("status — a LIVE holder reports holder_alive=yes (consistent with kill -0) and reclaimable_now=no", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    // pid = THIS test process (alive): kill -0 must succeed, so holder_alive must say yes.
+    fs.writeFileSync(tokenPath, `holder=liveproj\npid=${process.pid}\nacquired_ms=${Date.now() - 60000}\nlease_expires_ms=${Date.now() + 60000}\nhost=test\n`);
+    const r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `status must exit 0:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=yes/, `a live pid must report alive:\n${r.all}`);
+    assert.match(r.stdout, /reclaimable_now=no/, "a live holder with a valid lease is not reclaimable");
+    assert.doesNotMatch(r.all, /PULL-based/, "no dead-holder advisory for a live holder");
+    assert.doesNotMatch(r.all, /is DEAD/, "no dead-holder warning for a live holder");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("status — a DEAD holder reports holder_alive=no and reclaimable_now=yes (stale mtime; per acquire criteria)", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    fs.writeFileSync(tokenPath, `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 60000}\nlease_expires_ms=${Date.now() + 60000}\nhost=test\n`);
+    const past = new Date(Date.now() - 10000);
+    fs.utimesSync(tokenPath, past, past); // stale mtime (> HEAVY_OP_STALE_TIMEOUT_S=1)
+
+    const r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    assert.equal(r.status, 0, `status must exit 0:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=no/, `a dead pid must report not-alive:\n${r.all}`);
+    // AC5: the read must say whether the next acquire would reclaim, per acquire's own criteria.
+    assert.match(r.stdout, /reclaimable_now=yes/, "dead pid + stale mtime = reclaimable per acquire criteria");
+    // AC3/AC5: the advisory names the dead process + says the next acquire reclaims automatically.
+    assert.match(r.stderr, /is DEAD/, "the advisory must name the dead holder");
+    assert.match(r.stderr, /next --acquire will reclaim automatically/, "the advisory must give the next-step outcome");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("status — a DEAD holder with a FRESH mtime reports reclaimable_now=no (grace window, not yet per acquire criteria)", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    fs.writeFileSync(tokenPath, `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now()}\nlease_expires_ms=${Date.now() + 60000}\nhost=test\n`);
+    const now = new Date();
+    fs.utimesSync(tokenPath, now, now); // fresh mtime
+    const r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "60" } });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+    assert.match(r.stdout, /reclaimable_now=no/, "dead pid + fresh mtime = NOT reclaimable yet (the AC2 grace window)");
+    assert.match(r.stderr, /NOT yet reclaimable/, "the advisory must say how far from reclaimable");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC4 — --status is READ-ONLY: a dead-held token is byte-identical AND mtime-identical after the read (no reclaim side effect)", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    fs.writeFileSync(tokenPath, `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 60000}\nhost=test\n`);
+    const past = new Date(Date.now() - 10000);
+    fs.utimesSync(tokenPath, past, past);
+    const before = fs.readFileSync(tokenPath, "utf8");
+    const mtimeBefore = fs.statSync(tokenPath).mtimeMs;
+
+    const r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+    assert.ok(fs.existsSync(tokenPath), "a read-only --status must never remove the token (a reclaim would be a write side effect)");
+    assert.equal(fs.readFileSync(tokenPath, "utf8"), before, "token content must be unchanged");
+    assert.equal(fs.statSync(tokenPath).mtimeMs, mtimeBefore, "token mtime must be unchanged");
+    assert.match(r.stdout, /holder=deadproj/, "the read must still report the dead holder (never freed by the read)");
+    assert.match(r.stdout, /stale_reclaims=0/, "no reclaim may ever be counted by a read-only status");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC7 — polling --status NEVER frees a dead-held slot (PULL-based reclaim); one --acquire reclaims immediately", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    const dead = deadPid();
+    fs.writeFileSync(tokenPath, `holder=deadproj\npid=${dead}\nacquired_ms=${Date.now() - 60000}\nhost=test\n`);
+    const past = new Date(Date.now() - 10000);
+    fs.utimesSync(tokenPath, past, past);
+    const env = { HEAVY_OP_STALE_TIMEOUT_S: "1" };
+
+    // N consecutive --status polls: the slot is reclaimable_now=yes, yet it stays held by the dead
+    // process EVERY time — proof that polling the status for a free slot is an invalid wait strategy
+    // (the reclaim is PULL-based, only at --acquire; the 19:47Z incident's second hop).
+    for (let i = 0; i < 3; i++) {
+      const s = runToken(["--status"], { root, env });
+      assert.equal(s.status, 0, `poll ${i} must exit 0:\n${s.all}`);
+      assert.match(s.stdout, /holder=deadproj/, `poll ${i}: the dead holder must still be reported (the read never frees it)`);
+      assert.match(s.stdout, /holder_alive=no/, `poll ${i}: must keep reporting the holder dead`);
+      assert.match(s.stdout, /reclaimable_now=yes/, `poll ${i}: reclaimable per acquire criteria — but the read alone never reclaims`);
+      assert.ok(fs.existsSync(tokenPath), `poll ${i}: the token file must survive the read`);
+      // AC7 text: the read must say polling is futile and give the acquire command.
+      assert.match(s.stderr, /PULL-based/, `poll ${i}: must state reclaim is pull-based`);
+      assert.match(s.stderr, /--acquire <project> --timeout <s>/, `poll ${i}: must give the acquire command`);
+    }
+
+    // One real --acquire: reclaims and acquires IMMEDIATELY (waited_ms=0) — no polling needed.
+    const a = runToken(["--acquire", "quay", "--timeout", "0"], { root, env });
+    assert.equal(a.status, 0, `acquire must succeed immediately:\n${a.all}`);
+    assert.match(a.stderr, /RECLAIMED stale token/, "the dead holder must be reclaimed AT the acquire");
+    assert.match(a.stdout, /waited_ms=0 holder=quay acquired=yes/, "the acquire must not wait (the slot was already reclaimable)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ── AC10: @test-group engine declaration ─────────────────────────────────────────────────────────────
 test("AC10 — `// @test-group engine` is declared (enforced by test-framework-policy-check too)", () => {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
