@@ -6269,3 +6269,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   integration 领先 develop 3 提交（全 AC16），develop 领先 integration 190（catch-up 后全部 A+B 工作）。
   develop 是权威——integration 追平 develop 且不丢 AC16。已驱动 inner 执行。
 - 池 9/20（disjoint 4/5）、inner 在飞 no-criterion-cost。
+
+### tick 2026-08-06T10:4xZ（integration catch-up + 双 fan-in 完成）
+
+- **integration catch-up（外层裁定执行）**：merge develop into integration（58927990）——integration
+  追上全 A+B 基线（190 提交）+ 保留 AC16 3 提交（v0.4.0、files+plugin、contract fix）。
+  唯一冲突 = AC16 自身 task 文件（add/add，integration 版本为完成态 superset → 取 HEAD）。
+  验证：develop ⊆ integration（ancestor）、AC16 v0.4.0 + "plugin" 字段在、develop..integration=4。
+- **双 fan-in 到 integration（两线模型）**：
+  - spawn-count（98e23f5b → 208c1329，16 files）：A 层 .ts→QUAY_CLI 转换，scoped 8/8。
+  - supervisor（39af6de5 → 2f343eb8，12 files）：base-layer deliver/health，scoped 23/23。
+- worktree/branch 清理；主检出回 develop。manager-inbox stash 还原（manager WIP，未动）。
+- **在飞 1/3**（no-criterion-cost，develop 基线）。integration 现 = develop + AC16 + spawn-count + supervisor，
+  待外层 FF integration→develop（verification-round）。
