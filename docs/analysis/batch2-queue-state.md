@@ -6339,3 +6339,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - **release.yml**（Release v0.4.0）→ npm pack 产物 + GitHub Release（archguard 可装）
   - **publish-plugin-dist.yml**（Publish plugin dist v0.4.0）→ dist-plugin 重建（AC6）
 - 验证：origin/tag v0.4.0 = origin/develop = 27b9d7e5。v0.3.13 为上一 release（2026-07-24）。
+
+### tick 2026-08-06T12:2xZ（AC16 release 结果：部分成功 + 缺陷立案）
+
+- **v0.4.0 release 已创建**（09:48:28Z，Latest）：linux-x64 + macos-arm64 SEA 二进制 + npm pack 产物。
+- **但 workflow conclusion=failure**，两个原因：
+  ① **windows sea-release 在 npm install 失败**——postinstall 的 bash 专属 `(echo ...; exit 0)` 回退
+     cmd.exe 解析不了（`re-run: was unexpected at this time`）⇒ **缺 windows-x64 SEA 二进制**。
+  ② release job "Run tests" 的 live-GitHub 测试 repo 漂移失败（E3 adr-001 / M52 delivery-standalone-smoke /
+     AC5 real-store scan）——CLAUDE.md 记载的已知脆弱类，现在阻塞 release。
+- **已立案**：gap-release-postinstall-fallback-breaks-windows-sea-build（postinstall 跨平台化 + live 测试阻塞评估）。
+- **archguard 可用性**：linux 可装（linux-x64 在）；但 release 不完整 + workflow 红。修复路径：修 postinstall →
+  打 v0.4.1 重发完整 release。
+- dist-plugin（AC6）已 publish success。
