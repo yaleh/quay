@@ -5334,3 +5334,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **session-liveness-token-counter fan-in 完成**（merge task/gap-session-liveness...，3 文件 420 行真实改动）：busy/idle 判定重实现——消费 `classifyPaneState`（底部 10 行区域 + shape 分类，非整屏哈希），content-region 哈希排除 `/clear to save` 计数器/`✽` spinner/`✻` 残影；agent 任务行在 content 区仍在判定内（AC4）；AC5 空内容区显式 WARN 不静默；AC7 无去抖。AC1–AC9 全勾（scoped 52/52 + 1 skip，task-contract no violations）。**DoD 如实标 `[~]`**（只 scoped+单文件各一次，未 2 次全量）。留 ready 待外层 closure。
 - **本批全落地**：full-suite-runner-red-pattern / send-keys-welcome-screen / session-liveness-token-counter（3/3）。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T16:3xZ（内层，session-liveness fan-in 后首派：1/5）
+
+- **session-liveness fan-in 完成**（前 tick，本 tick 复核记录）：classifyPaneState 重实现已并 + scoped 52/52 绿。在飞清零。
+- **pool 复核**：pool 11 / dispatchable_disjoint 3——2 个已落地未翻 done 灌水（cold-start-outer-validation / full-suite-runner，taskWorkLanded 漏检 evidence-only）；真实新可派集合 = 1。
+- **串行轴**：剩余 7 个 ready 候选（branch-model / cold-start-gate / manager-productization / delivery-surface / l2-health / tests-leak-tmux / red-window）全部带宽 `plugin/scripts/` 目录 touch，两两互撞 ⇒ 最大互不相交批次 = 1，plugin/scripts/ 轴串行。
+- **派发 1/5**：`cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`（最干净：0/4 touches 缺失 + self-touch 已补）。telemetry --task-start 已开。其余候选等下轴释放或外层补池。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
