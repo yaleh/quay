@@ -6144,3 +6144,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **3 个真实候选（needs-human-black-hole / no-criterion-cost / quality-trend）全部与在飞 spawn-count
   OVERLAP（plugin/test/* 全 glob）⇒ 序列化，本 tick 无新派发。**
 - 池 10/20、disjoint 4/5（4/5 里含 4 个 stale-landed 虚数）。supervisor merge 目标仍挂外层 AC17 裁定。
+
+### tick 2026-08-06T08:1xZ（外层 AC17 catch-up 裁定收到，待 spawn-count 完成执行）
+
+- **外层 AC17 catch-up 裁定**（已记录）：顺序① master 62 提交并入 develop（A 内部迁移，让 develop 有
+  完整 A 基线）→ ② 拉 GitHub develop（B 105 提交，d0edd8ab）→ ③ rebase 任务分支（supervisor/spawn-count）
+  到新 develop。每步一个来源冲突可控。理由：两线模型激活但基线内容从未迁移（develop/integration 冻结
+  926d771b 2h，master 62 提交未迁）。supervisor 的 rebase-to-integration 裁定保留。
+- **执行时机**：裁定注明「spawn-count 完成后执行」。当前 spawn-count 仍在飞（1/3，worktree 存在，
+  develop..branch=0 尚无提交，agent 工作中）。**不在在飞时迁移 develop**——会使其 worktree 基线失效。
+- spawn-count 完成通知到达时：先 fan-in 或先 catch-up？按裁定顺序 catch-up 优先（①→②→③ 含 rebase
+  任务分支），即完成通知后先执行 catch-up 的①②，再 rebase spawn-count 分支（③），然后按新 develop
+  基线 fan-in。
