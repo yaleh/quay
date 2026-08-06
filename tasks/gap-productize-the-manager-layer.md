@@ -50,6 +50,11 @@ extra:
 `gap-crystallize-launch-config-into-checked-in-settings-file`（todo）= 层的启动配置，本条扩展为
 「随层出货」；缺口 2/3 的机制（价值排序、趋势判据）是层的职能内容，另立任务、归属本条。
 
+**交叉标注（SPEC-complete-delivery-surface，2026-08-06）**：本条是六类交付面里**循环文档**（类别 2）
+manager 层的归属任务——`gap-complete-delivery-surface-spec-and-l1-verification` 的 L1 六类完整性检查
+（`verify-delivery-surface.ts`）把 `gap-productize-the-manager-layer` 列为类别 2 的 `attribution`；
+manager 层从 `plugin/loop/`/`plugin/skills/manager*` 出货后，该类别即无剩余缺口（AC4 归属无空洞）。
+
 ## Acceptance Criteria
 
 - [ ] AC1: `plugin/skills/manager/SKILL.md`（或 `plugin/loop/manager-loop-tick.md`）存在——结晶第三层：

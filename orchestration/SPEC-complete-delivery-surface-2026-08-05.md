@@ -1,11 +1,17 @@
 # 规格：完整冷启动 + 持续正确驱动，到底要交付什么
 
-**日期**：2026-08-05（管理者）
+**日期**：2026-08-05（管理者），2026-08-06 升级为活文档
 **触发**：人问「真正完整地冷启动 quay 并可以正确持续驱动开发，要完整交付的到底是什么？
 显然应当维护一份文档，并建立相应的校验机制，这才能说是产品化交付。」
 
 **本文件的性质**：交付面的**测量结果**（不是提案）——每一项都标注了当前是否在交付物里、
 以及证据。**AC/DoD 与校验机制的实现交给外层**，管理者只给清单与缺口。
+
+> **活文档（AC1，2026-08-06）**：本文件是六类交付面的**活清单**——六类 + 每类对应交付物 +
+> 归属任务 + 校验判据。随交付物变化更新（单源），不是冻结快照。机械约束：
+> `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface`
+> 的 `spec_is_live` 字段必须 = 1（本文件的 L1-MANIFEST 块与可执行清单逐项一致）；若交付物
+> 变了而本文没更新，L1 检查会报 `spec_is_live=0`。
 
 ---
 
@@ -57,18 +63,108 @@
 
 ---
 
-## 4. 完整交付面清单（建议的文档结构，供外层立案）
+## 4. 完整交付面清单（活文档：六类 + 交付物 + 归属任务 + 校验判据）
 
-一份「装得上且能持续正确运转」的交付，至少要覆盖六类：
+一份「装得上且能持续正确运转」的交付，至少要覆盖六类。**L1 完整性检查
+（`plugin/scripts/verify-delivery-surface.ts`，AC2）逐类核对下方「交付物」列是否存在于
+交付包 / 目标项目**；「归属任务」列是 AC4 的无空洞判据——每条 gap 可解析到已立案任务。
+下表随交付物变化更新（单源）；机器可读副本在文末 L1-MANIFEST 块（`spec_is_live` 钉住一致）。
 
-1. **机件与运行时**——已有（`plugin/scripts`、`vendor/`），`quay-init` 派生铺设已修好
-2. **循环文档**——已有两层（`fast-mode` / `orchestrator`），**缺 manager 层**
-3. **启动配置**——**全缺**：模型、服务商 launcher、上下文环境变量、TUI 环境变量、`--prompt-suggestions false`
-4. **会话拓扑**——**全缺**：三窗口命名、每层起什么命令、谁驱动谁
-5. **周期锚点**——**三层全缺，OS 级锚点为真实落点**（AC5 修正，2026-08-05）：`gap-loop-has-no-os-level-anchor` 落地后
-   （`os-anchor-install.sh` systemd user timer + `os-anchor-watchdog.sh`），锚点不再依赖任何 Claude 会话——
-   cron/`ScheduleWakeup`/`CronCreate` 全随会话死，OS 级 timer 才是跨崩溃存活的真实周期锚点
-6. **观测与校验**——AC8c 六键（启动瞬间）+ **缺持续健康判据**（第 3 节那五类）
+| # | 类别 | 交付物 | 归属任务 | 校验判据 |
+|---|---|---|---|---|
+| 1 | **机件与运行时** | `plugin/scripts/quay-init.sh`、`sync-vendor.sh`、`verify-installed-executables.sh` | —（自足） | referenced-set ⊆ landed-set（verify_referenced_landed）+ 已铺可执行文件逐字节（verify-installed-executables）；vendor 运行时由 sync-vendor.sh 构建、quay-init 铺入目标 |
+| 2 | **循环文档** | `plugin/loop/fast-mode-loop-tick.md`（inner）、`plugin/loop/orchestrator-loop-tick.md`（outer） | `gap-productize-the-manager-layer` | outer+inner 两层 tick 文档随包，铺入 `docs/analysis/` + `orchestration/`；manager 层缺 → 归属该任务 |
+| 3 | **启动配置** | `.claude/launch.settings.json`、`plugin/scripts/quay-launch.sh` | `gap-crystallize-launch-config-into-checked-in-settings-file` | 启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 settings 文件；quay-launch.sh 读取并生成启动命令，不再靠手打一行 shell |
+| 4 | **会话拓扑** | `plugin/scripts/quay-topology.sh`、`topology-check.sh`、`plugin/skills/session-topology/SKILL.md` | `gap-tmux-session-topology-no-factory-definition` | 三窗口（outer/inner/manager）拓扑出厂定义：每层起什么命令、谁驱动谁（topology-check 钉住） |
+| 5 | **周期锚点** | `plugin/scripts/os-anchor-install.sh`、`os-anchor-watchdog.sh` | `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash` | OS 级周期锚点（systemd user timer + watchdog）——跨崩溃存活的真实锚点，不依赖任何 Claude 会话 |
+| 6 | **观测与校验** | `plugin/scripts/verify-delivery-surface.ts`（L1）、`plugin/skills/cold-start/SKILL.md`（AC8c 六键） | `gap-quality-criteria-are-point-in-time-no-trend-criteria`（L2） | L1 六类完整性检查（本条）+ AC8c 六键（启动瞬间）+ L2 趋势判据（§3 其余三类补进 trend-criteria 任务，AC3） |
+
+<!-- L1-MANIFEST-BEGIN -->
+```json
+{
+  "schemaVersion": 1,
+  "categories": [
+    {
+      "id": 1,
+      "name": "mechanism-and-runtime",
+      "label": "机件与运行时",
+      "deliverables": [
+        "plugin/scripts/quay-init.sh",
+        "plugin/scripts/sync-vendor.sh",
+        "plugin/scripts/verify-installed-executables.sh"
+      ],
+      "attribution": [],
+      "criterion": "referenced-set ⊆ landed-set（verify_referenced_landed，verify-installed-executables 钉住逐字节）；vendor 运行时由 sync-vendor.sh 构建、quay-init 铺入目标"
+    },
+    {
+      "id": 2,
+      "name": "loop-docs",
+      "label": "循环文档",
+      "deliverables": [
+        "plugin/loop/fast-mode-loop-tick.md",
+        "plugin/loop/orchestrator-loop-tick.md"
+      ],
+      "attribution": ["gap-productize-the-manager-layer"],
+      "criterion": "outer+inner 两层 tick 文档随包（铺入 docs/analysis/ 与 orchestration/）；manager 层缺 → 归属 gap-productize-the-manager-layer"
+    },
+    {
+      "id": 3,
+      "name": "launch-config",
+      "label": "启动配置",
+      "deliverables": [
+        ".claude/launch.settings.json",
+        "plugin/scripts/quay-launch.sh"
+      ],
+      "attribution": ["gap-crystallize-launch-config-into-checked-in-settings-file"],
+      "criterion": "启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 .claude/launch.settings.json；quay-launch.sh 读取并生成启动命令（不再靠手打一行 shell）"
+    },
+    {
+      "id": 4,
+      "name": "session-topology",
+      "label": "会话拓扑",
+      "deliverables": [
+        "plugin/scripts/quay-topology.sh",
+        "plugin/scripts/topology-check.sh",
+        "plugin/skills/session-topology/SKILL.md"
+      ],
+      "attribution": ["gap-tmux-session-topology-no-factory-definition"],
+      "criterion": "三窗口（outer/inner/manager）拓扑出厂定义：quay-topology.sh + topology-check.sh + session-topology skill（每层起什么命令、谁驱动谁）"
+    },
+    {
+      "id": 5,
+      "name": "periodic-anchor",
+      "label": "周期锚点",
+      "deliverables": [
+        "plugin/scripts/os-anchor-install.sh",
+        "plugin/scripts/os-anchor-watchdog.sh"
+      ],
+      "attribution": ["gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash"],
+      "criterion": "OS 级周期锚点（os-anchor-install.sh systemd user timer + os-anchor-watchdog.sh）——跨崩溃存活的真实周期锚点，不依赖任何 Claude 会话"
+    },
+    {
+      "id": 6,
+      "name": "observation-and-verification",
+      "label": "观测与校验",
+      "deliverables": [
+        "plugin/scripts/verify-delivery-surface.ts",
+        "plugin/skills/cold-start/SKILL.md"
+      ],
+      "attribution": ["gap-quality-criteria-are-point-in-time-no-trend-criteria"],
+      "criterion": "L1 六类完整性检查（本条）+ AC8c 六键（启动瞬间）+ L2 趋势判据（gap-quality-criteria-are-point-in-time-no-trend-criteria 承载）"
+    }
+  ]
+}
+```
+<!-- L1-MANIFEST-END -->
+
+**AC4 归属无空洞（2026-08-06，`gap-complete-delivery-surface-spec-and-l1-verification`）**：本文档 §2
+每个缺口都可逐项解析到已立案任务（L1 检查的 `attribution` 列 + `attributionHoles` 报出机械钉住）：
+- manager 层（循环文档第 3 层）→ `gap-productize-the-manager-layer`
+- 启动配置 → `gap-crystallize-launch-config-into-checked-in-settings-file`
+- 会话拓扑 → `gap-tmux-session-topology-no-factory-definition`
+- 周期锚点 → `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`（OS 级锚点）
+- 升级通道 → `gap-delivery-surface-grows-but-target-freezes-no-upgrade`（+ `gap-upgrade-channel-cant-sync-build-artifacts-dist-stale`）
+- L2 持续健康（趋势判据）→ `gap-quality-criteria-are-point-in-time-no-trend-criteria`
 
 ---
 
