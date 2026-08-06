@@ -100,23 +100,98 @@ resume 先补文档与 gitignore（两处都是一行），再谈注册表要不
 
 ## Acceptance Criteria
 
-- [ ] AC1: **照文档逐字冷启动 ⇒ LIVE**——在一个干净仓里按 tick 文档步骤 4 走完，
+- [x] AC1: **照文档逐字冷启动 ⇒ LIVE**——在一个干净仓里按 tick 文档步骤 4 走完，
       `loop-driver-check.sh` **退出码 0**（实跑贴出，含它打印的那行）
-- [ ] AC2: **注册表被 gitignore**——`git check-ignore -v .quay/loop-driver.jsonl` **退出码 0**，
+- [x] AC2: **注册表被 gitignore**——`git check-ignore -v .quay/loop-driver.jsonl` **退出码 0**，
       且命中的规则与 `gate-events.jsonl` 同形（实跑贴出）
 - [ ] AC3: **陈旧注册表不得报 LIVE**——这是本条最难也最关键的一条：
       **构造「注册表有一行、但那个驱动早已不存在」的状态**，检查器**不得报 LIVE**。
       **若第一层机制做不到（自述注册表在结构上就分辨不了），如实记录「本任务不解决这一条」
       并把它写进第二层**——**不许把做不到写成通过**
-- [ ] AC4: **双触发不得回归（负控制）**——真装两个驱动仍报 `DOUBLE-TRIGGER` 退出 4（实跑贴出）
-- [ ] AC5: **文档的 STALLED 处置不再制造双触发**——改写后的措辞里，
+      **⇒ 本任务不解决这一条（如实记录，未打勾）。** 理由：`loop-driver-check.sh` 是纯读
+      注册表的（脚本头自述「只读注册表，不写任何东西」），注册表行**不带会话身份或存活探针**——
+      cron 死了、会话结束了，那行还在；一行陈旧注册与一行活注册在检查器眼里**逐字节相同**。
+      要让「零驱动的仓库绝不报 LIVE」成立，判据必须来自能观测的会话内对象（`CronList` 输出 /
+      会话内任务列表），而这需要先回答「bash 检查器能否看到会话内的 cron」——**已转入第二层，
+      不在本任务里顺手猜实现**（本仓已为「代理信号迟早误报」付过五次学费）。实跑证明该限制：
+      一行陈旧注册仍报 LIVE 退出 0（见下证据）。
+- [x] AC4: **双触发不得回归（负控制）**——真装两个驱动仍报 `DOUBLE-TRIGGER` 退出 4（实跑贴出）
+- [x] AC5: **文档的 STALLED 处置不再制造双触发**——改写后的措辞里，
       「重建 cron」之前必须先查注册表；`plugin/skills/cold-start/SKILL.md` 与 tick 文档**逐字同源**（贴两处 diff）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
-- [ ] AC7: **`.halt` 的打印不得冒充状态读数**——`plugin/loop/orchestrator-loop-tick.md:418`
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC7: **`.halt` 的打印不得冒充状态读数**——`plugin/loop/orchestrator-loop-tick.md:418`
       在无 `.halt` 时打印 `运行中`，**而 `.halt` 是控制面不是传感器**：它回答「这个项目的循环
       下一个边界要不要停」，**不回答「它在不在跑」**。一个没有循环在跑的项目同样打印「运行中」。
       改为「未暂停」（实跑贴出改后输出）。**这条与本任务同族**：都是**一个东西被读成了它
       证明不了的另一个东西**——注册表被读成「驱动在跑」，`.halt` 缺席被读成「项目在跑」
+
+## 执行证据（Invoke Evidence）
+
+**AC1 正向（照 tick 文档步骤 4 冷启动 ⇒ LIVE，退出 0）**——干净仓按文档写一行注册后：
+
+```
+$ bash plugin/scripts/loop-driver-check.sh <ws>
+loop-driver: LIVE (1) — exactly one loop driver (cron */20 * * * *)
+$ echo $?
+0
+```
+
+**AC4 负控制（双触发不回归 ⇒ DOUBLE-TRIGGER，退出 4）**——注册表两行：
+
+```
+$ bash plugin/scripts/loop-driver-check.sh <ws>
+loop-driver: DOUBLE-TRIGGER (2) — 2 loop drivers registered; a literal reader double-installed
+$ echo $?
+4
+```
+
+**AC3 未解决（如实记录，非通过）**——一行陈旧注册（驱动早已不存在）仍报 LIVE 退出 0，
+正是自述注册表的结构性限制：
+
+```
+$ bash plugin/scripts/loop-driver-check.sh <ws>   # ws 只有一行陈旧注册，无任何真实驱动
+loop-driver: LIVE (1) — exactly one loop driver (cron */20 * * * *)
+$ echo $?
+0
+```
+
+**AC2 gitignore（与 gate-events.jsonl 同形）**：
+
+```
+$ git check-ignore -v .quay/loop-driver.jsonl; echo $?
+.gitignore:73:**/.quay/loop-driver.jsonl	.quay/loop-driver.jsonl
+0
+$ git check-ignore -v .quay/gate-events.jsonl; echo $?
+.gitignore:26:**/.quay/gate-events.jsonl	.quay/gate-events.jsonl
+0
+```
+
+**AC5 逐字同源（两处 diff，同一 printf + 同一 JSON payload；根路径占位符各按本档约定：
+SKILL 用 `<root>`，tick 文档用 `$REPO_ROOT`，解析为同一仓库根）**：
+
+```
+plugin/skills/cold-start/SKILL.md:165:
+printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> <root>/.quay/loop-driver.jsonl
+
+plugin/loop/orchestrator-loop-tick.md:100（新增）:
+printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> "$REPO_ROOT/.quay/loop-driver.jsonl"
+```
+
+**AC7 改后输出（`.halt` 是控制面不是传感器，缺席打印「未暂停」）**：
+
+```
+# 无 .halt
+$ printf "%-12s %s\n" "$(basename $d)" "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 未暂停)"
+haltproj     未暂停
+# 有 .halt
+haltproj     暂停: 测试暂停 | 解除条件: 人工确认 | 外层 2026-08-06
+```
+
+**Scoped 套件**：`bash scripts/test.sh --for-task gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes --allow-thin`
+——`tests 52 / pass 52 / fail 0 / cancelled 0`，退出 0；scoped 静态检查全 PASS
+（test-framework-policy / test-isolation / task-contract-check `no violations` /
+drive-contract-check）。选择器报 2/5 Touches 命中（thin），`--allow-thin` 显式接受；
+完整套件 2 次全绿是外层验证轮（fan-in）的职责，按纪律本执行轮只跑 scoped。
 
 ## Non-goals
 
@@ -138,6 +213,7 @@ AC7 只改**打印的措辞**——把一个控制面的读数从状态断言改
 - plugin/skills/cold-start/SKILL.md
 - .gitignore
 - plugin/test/quay-init-loop.test.mjs
+- plugin/test/loop-driver-check.test.mjs
 
 ## Dispatch review
 
