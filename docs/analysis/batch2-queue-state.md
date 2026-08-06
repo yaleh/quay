@@ -7391,3 +7391,4 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   6. **trend-check.test.mjs**：8e2e49b9 merge 把 trend-check.ts 复制成两份叠在一个文件（1-323 旧版 + 325-567 新版），中间有错位 shebang 使 strip-types loader 崩。修复：恢复 42767afa 干净版（82b1a719）。13/13。
 - **全部验证绿**：静态链 STATIC-EXIT 0；unparseable 6/6、task-check 1/1、ts-typecheck 5/5、checker-cost 8/8、tick-vocabulary 5/5、trend-check 13/13、message-bus 25/25。
 - **无 flaky 标注**：16 个失败全部为真回归/真缺陷，已全部修复。待外层重跑套件最终确认。
+- **triage 收尾**：16 个失败全部为真回归/真缺陷，已全部修复并提交（9c6b4efd / f611a094 / 82b1a719 / 3241b4fb / a1a001ae）。外层 04ca6921 确认 triage 完成，20:48 重跑全量套件验证。静态链 STATIC-EXIT 0，所有单测绿。
