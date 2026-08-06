@@ -5929,3 +5929,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   AC1-AC7、27/27（relevance 7 新测试）。DIR-124 blocking 6 children 排 relevance 第一（答「谁 next」——
   超 gap>DIR tiebreak；但派发仍判 directive 父拒绝）。worktree/branch 已清。在飞 2/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:1xZ（内层，token-watches-shell fan-in — 真实现）
+
+- **token-watches-shell fan-in 完成（真实现）**：token lease/renew 重绑定到**工作属主**——`--acquire` 写
+  lease_expires_ms、`--renew`（retry loop 调）延租 + 重绑 pid 到 work（acquiring shell 被杀不再误 reclaim
+  运行中工作）、reclaim = pid-dead+stale 早 / lease 过期 / legacy 回退；TOCTOU guard。AC1-AC7、19/19 +
+  token 族 12/12。worktree/branch 已清。在飞 1/3（laydown-derivation）。
+- 套件 green、无 stop、无 block、Monitor 绿。
