@@ -7378,3 +7378,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **非 quay-init 族残留**（不在外层 64 列表内）：checker-cost AC2/AC6、trend-check、tick-vocabulary AC4、cold-start-skill、session-liveness、capability-catalog、serve、store、task-check、unparseable-frontmatter、ts-typecheck-gate——独立问题，待单独处置。
 - **quay-init-loop 48/48 全绿（最终确认，becm145zh v3 复跑）**：AC4 stale fixture 修 minor-decrement 后 48/48。quay-init 族 10 个测试文件全部独立绿（install-config 10 / runtime-landing 5 / check-drift 4 / drift-report 6 / tmux-detection 6 / laydown-set 7 / loop-shipping 12 / manager-layer 7 / plugin-packaging 34 / quay-init-loop 48）。外层 19:48 重跑全量套件验证中（concurrency 1，~15min+）。
 - **非 quay-init 族残留**（独立问题，不在外层 64 列表）：checker-cost AC2/AC6（6 rows vs 3 疑似 wrapper 双 append）、trend-check、tick-vocabulary AC4（历史批名误报）、cold-start-skill、session-liveness、capability-catalog、serve、store、task-check、unparseable-frontmatter、ts-typecheck-gate——待单独处置。
+
+### 事件 20:2xZ–20:5xZ（外层 triage 请求：剩余 16 失败区分真回归 vs flaky，修真的、标 flaky 的）
+
+- **外层确认 quay-init 修复生效**：套件重跑 168→16 失败，quay-init 族从失败列表消失（20:26 完成）。剩余 16 要求 triage。
+- **逐项 triage 结果（16 个失败，全部为真回归/真缺陷，无一 flaky）**：
+  1. **unparseable-frontmatter AC5/AC6 + store.test**（8 unparseable tasks）：8 个任务文件 frontmatter 有重复 title:/status:（8e2e49b9 跨机 merge A+B 双份保留，`yaml` npm parser 'Map keys must be unique'）。修复：8 文件归一为单 title+单 status（9c6b4efd）。验证 unparseable 6/6、store 6/6。
+  2. **task-check.test.mjs**：A-layer spawn 转换（98e23f5b）丢 `nativeProviderDir` 变量（ReferenceError）。修复：cwd 用 `path.dirname(QUAY_NATIVE_CLI)`（9c6b4efd）。1/1。
+  3. **ts-typecheck-gate M63 A2/C1/D1**（3 fails）：`message-bus.ts` deliver() 未类型化 → `msg.from`/`opts.from` 在 `object` 上 TS2339。修复：类型化 deliver params + 先算 sender 再 spread（9c6b4efd）。ts-typecheck-gate 5/5、message-bus 25/25。
+  4. **checker-cost AC2 + AC6**：AC2 双记录（ready-pool-check 内部 recordCheckerCost + wrapper 各记一行 → 3 跑 6 行）；AC6 双 append（run() 同时调 appendVerificationRound + appendSuiteDurationRecord → 2 跑 4 行）。修复：wrapCost 设 CHECKER_COST_SKIP=1 + 删冗余 appendSuiteDurationRecord 调用（f611a094）。8/8。
+  5. **tick-vocabulary AC4**：批词汇规则自身 meta 文本（batch4a 历史批名 / batch+编号 / batch 式汇报·自述 / 门控语义漂移）被误判为未分类。修复：SAFE_SUBSTRINGS 增 历史批名/batch+编号/batch 式/门控语义漂移（3241b4fb）。5/5。
+  6. **trend-check.test.mjs**：8e2e49b9 merge 把 trend-check.ts 复制成两份叠在一个文件（1-323 旧版 + 325-567 新版），中间有错位 shebang 使 strip-types loader 崩。修复：恢复 42767afa 干净版（82b1a719）。13/13。
+- **全部验证绿**：静态链 STATIC-EXIT 0；unparseable 6/6、task-check 1/1、ts-typecheck 5/5、checker-cost 8/8、tick-vocabulary 5/5、trend-check 13/13、message-bus 25/25。
+- **无 flaky 标注**：16 个失败全部为真回归/真缺陷，已全部修复。待外层重跑套件最终确认。
