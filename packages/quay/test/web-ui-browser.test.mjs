@@ -1,9 +1,17 @@
 // @test-group product
 // QC-001 (experiment 2, iteration 1): browser-automation verification of
 // packages/quay's Web UI pages — GET / and GET /task/:id flows.
-// QC-002 (experiment 2, iteration 2): extends browser-automation verification
-// to the POST action trigger flow — the third reachable Web UI flow, completing
-// web_ui_verification (0.5 → 1.0).
+// QC-002 (experiment 2, iteration 2): historically extended browser-automation
+// verification to the POST action trigger flow — the third reachable Web UI
+// flow, completing web_ui_verification (0.5 → 1.0).
+//
+// NOTE (2026-08-06): the web action-buttons POST route and its form renders
+// were REMOVED (gap-web-action-buttons-unused-route-and-open-redirect-delete).
+// The QC-002 POST-action-trigger flow below is now historical only — the
+// browser-automation observations it recorded are kept as the audit trail, but
+// the committed file no longer mechanically guards the action button form or
+// the POST /task/:id/action/:actionId route (those assertions were removed
+// with the route).
 //
 // BROWSER-AUTOMATION VERIFICATION (playwright MCP, iteration 1, 2026-07-16):
 // A live browser session was driven via playwright MCP tooling (the session-
@@ -82,9 +90,9 @@
 // What THIS committed file mechanically guards (re-runnable in CI without a
 // browser): the structurally-detectable properties that any correct browser
 // rendering depends on — page titles embedded in <title> tags, heading text
-// in <h1> tags, table rows with the correct task data, the action button
-// form for todo-status tasks and its absence for done-status tasks. A
-// regression in serve.js that breaks these structural properties is caught
+// in <h1> tags, table rows with the correct task data, the detail-page back
+// link, the 404 for nonexistent tasks, and the list-page structural columns.
+// A regression in serve.js that breaks these structural properties is caught
 // here even in a browser-less CI run, just as QN-046 catches the charset
 // regression mechanically.
 //
@@ -126,21 +134,6 @@ function get(port, urlPath) {
   });
 }
 
-function post(port, urlPath) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path: urlPath, method: "POST" },
-      (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
-      }
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
-
 const VALID_SECTIONS =
   "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
   "## Plan\nThis is a sufficiently long plan section so the gate's minimum-content check passes cleanly.\n" +
@@ -150,19 +143,20 @@ const VALID_SECTIONS =
 async function main() {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-web-ui-browser-test-"));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-web-ui-browser-workspace-"));
-  // QC-002 (iteration 2): mock log path for POST action trigger verification.
-  // QUAY_ACTION_MOCK_LOG is set in process.env before startServer() so
-  // serve.js's action route picks it up and routes deliverTrigger() through
-  // the deterministic file-log mode instead of manda/print — the same env
-  // var the real CLI uses (src/serve.js line "QUAY_ACTION_MOCK_LOG || undefined").
-  const mockLogPath = path.join(tasksDir, "action-mock.jsonl");
+  // NOTE (2026-08-06): the web action-buttons POST route and its form renders were
+  // removed (gap-web-action-buttons-unused-route-and-open-redirect-delete), so the
+  // QC-002 POST /task/:id/action/:actionId trigger flow and the QUAY_ACTION_MOCK_LOG
+  // setup this file previously exercised are gone. WUI-ACT remains as a plain todo
+  // fixture used by the status-filter/sort/label/pagination assertions below. CLI-side
+  // deliverTrigger() mock-mode behavior is still covered by action-mock-delivery.test.mjs
+  // / serve-action-delivery.test.mjs.
 
   // Three tasks seeded for core UI tests, plus three for QW-004 sort tests,
   // plus three for QW-005 label filter tests, plus 25 for QW-007 pagination tests:
-  // - WUI-1 (todo): action button PRESENT (per provider.yml whenStatus: [todo, ready])
-  // - WUI-2 (done): action button ABSENT — negative control (no matching whenStatus)
-  // - WUI-ACT (todo): used exclusively for the POST action trigger test (QC-002)
-  //   so the GET/detail assertions on WUI-1 remain isolated from the POST test.
+  // - WUI-1 (todo): detail-page rendering fixture
+  // - WUI-2 (done): detail-page rendering fixture (done status)
+  // - WUI-ACT (todo): extra todo fixture used by the status-filter / sort / label
+  //   / pagination assertions (previously the POST action trigger fixture, QC-002).
   // - SORT-A (todo), SORT-B (done), SORT-C (ready): QW-004 sort verification tasks.
   //   Inserted in C, A, B order to test that sort overrides insertion order.
   // - LBL-1 (todo, labels:[alpha]), LBL-2 (done, labels:[beta]), LBL-3 (todo, labels:[alpha,beta]):
@@ -247,13 +241,6 @@ async function main() {
 
   const port = 47180 + (process.pid % 1000);
   const originalCwd = process.cwd();
-  // QC-002 (iteration 2): set QUAY_ACTION_MOCK_LOG before startServer() so
-  // serve.js's action route routes deliverTrigger() through the mock/file-log
-  // mode — the three-way symmetry that QUAY_ACTION_MOCK_LOG was designed for
-  // (QN-042/DIR-009). The env var is restored in the finally block so we do
-  // not pollute process.env for later tests.
-  const prevMockLog = process.env.QUAY_ACTION_MOCK_LOG;
-  process.env.QUAY_ACTION_MOCK_LOG = mockLogPath;
   let server;
   try {
     process.chdir(workspaceRoot);
@@ -295,13 +282,16 @@ async function main() {
     assert(list.body.includes('href="/task/WUI-2'),
       'GET / body contains link href starting with "/task/WUI-2" (task id is a clickable link, QX-011 may add ?from=)');
 
-    // ── GET /task/:id (detail page — todo, action button PRESENT) ─────────
+    // ── GET /task/:id (detail page — todo) ────────────────────────────────
     // Browser-rendered observation (playwright MCP, iteration 1):
     //   Page title: "WUI-1"
     //   Heading h1: "WUI-1: Web UI browser test task one [todo]"
     //   Back link: "← back to list" -> /
     //   Paragraph: "role: primitive · labels:"
-    //   Button "Advance" present
+    // NOTE (2026-08-06): the "Advance" action button was removed from the detail
+    // page with the web action-buttons route
+    // (gap-web-action-buttons-unused-route-and-open-redirect-delete), so the
+    // button-presence/absence assertions that lived here are gone.
     const detail1 = await get(port, "/task/WUI-1");
     assert(detail1.status === 200, `GET /task/WUI-1 returns 200 (got ${detail1.status})`);
 
@@ -324,19 +314,11 @@ async function main() {
     assert(detail1.body.includes("role:") && detail1.body.includes("primitive"),
       'GET /task/WUI-1 body contains role paragraph with "primitive" role');
 
-    // Action button for todo status (browser-observed: button "Advance"
-    // present; form posts to /task/WUI-1/action/advance).
-    assert(detail1.body.includes("Advance"),
-      "GET /task/WUI-1 (status=todo) renders the 'Advance' action button");
-    assert(detail1.body.includes('action="/task/WUI-1/action/advance"'),
-      "GET /task/WUI-1 action button form posts to /task/WUI-1/action/advance");
-
-    // ── GET /task/:id (detail page — done, action button ABSENT) ──────────
+    // ── GET /task/:id (detail page — done) ────────────────────────────────
     // Browser-rendered observation (playwright MCP, iteration 1):
     //   Page title: "WUI-2"
     //   Heading h1: "WUI-2: Web UI browser test task two (done) [done]"
     //   Back link: "← back to list" -> /
-    //   NO button element (done status has no matching whenStatus)
     const detail2 = await get(port, "/task/WUI-2");
     assert(detail2.status === 200, `GET /task/WUI-2 returns 200 (got ${detail2.status})`);
 
@@ -346,16 +328,6 @@ async function main() {
       "GET /task/WUI-2 heading includes [done] status bracket");
     assert(detail2.body.includes('href="/"'),
       'GET /task/WUI-2 body contains href="/" back-to-list link');
-
-    // Negative control: no action button for done status (browser-observed:
-    // no <button> element — the same discipline QN-031/serve.test.mjs used
-    // for its own "Advance" button negative control).
-    // QX-017 (iteration 4): CSS comment in pageStyles() now mentions "Advance button",
-    // so checking for the button element instead of the bare string.
-    assert(!detail2.body.includes(">Advance<"),
-      "GET /task/WUI-2 (status=done) does NOT render the 'Advance' button element (negative control)");
-    assert(!detail2.body.includes("<button"),
-      "GET /task/WUI-2 (status=done) has no <button> element at all (full negative control)");
 
     // ── GET /task/:id (nonexistent id — 404) ──────────────────────────────
     // Browser-observed (playwright MCP, iteration 1): HTTP 404 Not Found.
@@ -369,55 +341,6 @@ async function main() {
       `GET / Content-Type declares charset=utf-8 (got "${list.headers["content-type"]}")`);
     assert(/charset=utf-8/i.test(detail1.headers["content-type"] || ""),
       `GET /task/WUI-1 Content-Type declares charset=utf-8 (got "${detail1.headers["content-type"]}")`);
-
-    // ── POST /task/:id/action/:actionId → 302 redirect (QC-002) ─────────────
-    // Browser-automation verification (playwright MCP, iteration 2, 2026-07-16):
-    //   Navigated to GET /task/ACT-1 (todo); clicked "Advance" button.
-    //   Browser followed 302 → GET /task/ACT-1; final URL and title unchanged.
-    //   Mock log record written with channel="task-ACT-1", payload/taskId/status/skill.
-    //
-    // This committed test mechanically guards:
-    //   1. The 302 status and Location header (redirect to /task/<id>)
-    //   2. The mock log file is created and contains a valid JSON record
-    //   3. The record has the correct channel, taskId, and status fields
-    //
-    // QUAY_ACTION_MOCK_LOG is set in process.env before startServer() (above),
-    // so serve.js reads it from process.env on each POST and routes through
-    // the deterministic file-log mode. No live manda daemon required.
-    const actionPost = await post(port, "/task/WUI-ACT/action/advance");
-    assert(actionPost.status === 302,
-      `POST /task/WUI-ACT/action/advance returns 302 (got ${actionPost.status})`);
-    // QX-013 (iteration 3): successful action now appends ?success= to the redirect.
-    // WUI-ACT has all ACs checked (VALID_SECTIONS), so gate passes and we get ?success=.
-    assert(actionPost.headers.location && actionPost.headers.location.startsWith("/task/WUI-ACT"),
-      `POST redirect Location starts with /task/WUI-ACT (got "${actionPost.headers.location}")`);
-
-    // Mock log verification: the record must exist and be valid JSON with the
-    // expected fields (same structure confirmed in the playwright MCP live run).
-    const mockLogExists = fs.existsSync(mockLogPath);
-    assert(mockLogExists, `mock log file created at ${mockLogPath}`);
-    if (mockLogExists) {
-      const lines = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean);
-      assert(lines.length >= 1, "mock log contains at least one delivery record");
-      if (lines.length >= 1) {
-        let record;
-        let parseOk = false;
-        try { record = JSON.parse(lines[lines.length - 1]); parseOk = true; } catch {}
-        assert(parseOk, "mock log last line is valid JSON");
-        if (parseOk) {
-          assert(record.channel === "task-WUI-ACT",
-            `mock log record channel is "task-WUI-ACT" (got "${record.channel}")`);
-          assert(record.taskId === "WUI-ACT",
-            `mock log record taskId is "WUI-ACT" (got "${record.taskId}")`);
-          assert(record.status === "todo",
-            `mock log record status is "todo" (got "${record.status}")`);
-          assert(typeof record.payload === "string" && record.payload.length > 0,
-            "mock log record payload is a non-empty string");
-          assert(typeof record.timestamp === "string" && record.timestamp.length > 0,
-            "mock log record has a non-empty ISO-8601 timestamp");
-        }
-      }
-    }
 
     // ── QW-001: CSS styling system assertions ────────────────────────────
     // QW-001 (experiment 3, iteration 1): verify the pageStyles() CSS system
@@ -778,9 +701,6 @@ async function main() {
       if (server.client) await server.client.close();
     }
     process.chdir(originalCwd);
-    // Restore QUAY_ACTION_MOCK_LOG env var (QC-002: set before startServer).
-    if (prevMockLog === undefined) delete process.env.QUAY_ACTION_MOCK_LOG;
-    else process.env.QUAY_ACTION_MOCK_LOG = prevMockLog;
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }

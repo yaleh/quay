@@ -23,8 +23,13 @@
 //     !startsWith("//")), and even the stronger guard missed two further
 //     real bypass shapes (backslash-prefixed and control-char-prefixed
 //     targets that WHATWG URL / real browsers normalize to an external
-//     origin). Fixed: both routes now share one isSafeRelativeRedirect()
-//     helper that closes all of these.
+//     origin). Fixed: both routes once shared one isSafeRelativeRedirect()
+//     helper that closes all of these. NOTE (2026-08-06): the POST .../action/
+//     <id> route itself was REMOVED by
+//     gap-web-action-buttons-unused-route-and-open-redirect-delete, so the
+//     POST-route open-redirect regression test below was deleted with it; the
+//     GET detail route (which still uses the shared helper via backHref)
+//     remains covered by testDetailRouteOpenRedirectBackslashBypass().
 //
 // Run: node test/serve-adversarial-eval.test.mjs
 
@@ -62,25 +67,6 @@ function get(port, urlPath, timeoutMs = 5000) {
       req.destroy();
       reject(new Error("TIMEOUT: request never completed (this is exactly the crash/hang failure mode ADV-002 fixes)"));
     });
-  });
-}
-
-function post(port, urlPath, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path: urlPath, method: "POST", timeout: timeoutMs },
-      (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
-      }
-    );
-    req.on("error", reject);
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("TIMEOUT"));
-    });
-    req.end();
   });
 }
 
@@ -177,67 +163,6 @@ async function testMalformedTaskFileDegradesSafely() {
   }
 }
 
-// --- ADV-003: POST .../action/<id>?from=//evil.com open-redirect bypass
-// (the route that previously had a WEAKER guard than the GET detail route).
-async function testActionRouteOpenRedirectProtocolRelative() {
-  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-redirect-"));
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-redirect-ws-"));
-
-  execFileSync(
-    "node",
-    [nativeBin, "task", "create", "RDR-1", "--title", "Redirect target task", "--status", "todo", "--body", VALID_SECTIONS],
-    { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir } }
-  );
-  writeConfig(workspaceRoot, tasksDir);
-
-  const port = 41730 + (process.pid % 500);
-  const originalCwd = process.cwd();
-  let server;
-  try {
-    process.chdir(workspaceRoot);
-    server = await startServer({ port });
-
-    const protoRel = encodeURIComponent("//evil.com");
-    const r1 = await post(port, `/task/RDR-1/action/advance?from=${protoRel}`);
-    assert(r1.status === 302, `POST .../action/advance?from=//evil.com returns 302 (got ${r1.status})`);
-    assert(
-      r1.headers.location && !r1.headers.location.startsWith("//") && !r1.headers.location.includes("evil.com"),
-      `POST .../action/advance?from=//evil.com redirect Location does NOT point at evil.com (open-redirect guard, ADV-003) (Location: ${r1.headers.location})`
-    );
-
-    // Backslash-prefixed bypass (browsers normalize \ to / per WHATWG URL,
-    // so "/\\evil.com" resolves to http://evil.com/ despite starting with a
-    // single "/" -- confirmed during Phase A audit with a direct `new URL()`
-    // resolution check).
-    const backslashTarget = "/\\evil.com";
-    const backslashEncoded = encodeURIComponent(backslashTarget);
-    const r2 = await post(port, `/task/RDR-1/action/advance?from=${backslashEncoded}`);
-    assert(r2.status === 302, `POST .../action/advance?from=/\\evil.com returns 302 (got ${r2.status})`);
-    assert(
-      r2.headers.location && !r2.headers.location.includes("evil.com"),
-      `POST .../action/advance?from=/\\evil.com redirect Location does NOT point at evil.com (backslash-normalization bypass guard, ADV-003) (Location: ${r2.headers.location})`
-    );
-
-    // A genuinely safe same-origin from= target must still work normally
-    // (no false-positive regression from the tightened guard).
-    const safeTarget = encodeURIComponent("/?status=todo");
-    const r3 = await post(port, `/task/RDR-1/action/advance?from=${safeTarget}`);
-    assert(r3.status === 302, `POST .../action/advance?from=/?status=todo (safe, same-origin) returns 302 (got ${r3.status})`);
-    assert(
-      r3.headers.location && r3.headers.location.startsWith("/?status=todo"),
-      `POST .../action/advance with a genuinely safe from= target redirects there correctly (no over-blocking regression) (Location: ${r3.headers.location})`
-    );
-  } finally {
-    process.chdir(originalCwd);
-    if (server) {
-      server.close();
-      if (server.client) await server.client.close();
-    }
-    fs.rmSync(tasksDir, { recursive: true, force: true });
-    fs.rmSync(workspaceRoot, { recursive: true, force: true });
-  }
-}
-
 // --- ADV-003: GET /task/<id>?from=/\evil.com backslash-bypass on the
 // detail-page route too (the route that already had the //-guard, but not
 // the backslash-normalization guard, before this milestone's fix).
@@ -279,7 +204,6 @@ async function testDetailRouteOpenRedirectBackslashBypass() {
 
 async function main() {
   await testMalformedTaskFileDegradesSafely();
-  await testActionRouteOpenRedirectProtocolRelative();
   await testDetailRouteOpenRedirectBackslashBypass();
 
   console.log(

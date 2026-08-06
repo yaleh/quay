@@ -93,21 +93,6 @@ function get(port, urlPath) {
   });
 }
 
-function post(port, urlPath) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path: urlPath, method: "POST" },
-      (res) => {
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
-      }
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
-
 const VALID_SECTIONS =
   "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
   "## Plan\nThis is a sufficiently long plan section so the gate's minimum-content check passes cleanly.\n" +
@@ -172,41 +157,21 @@ async function main() {
     assert(list.body.includes("Servable task one"),
       "GET / body contains the seeded task's title");
 
-    // --- GET /task/<id> (detail, button PRESENT for todo status) ---
+    // --- GET /task/<id> (detail) ---
+    // The web action-buttons POST route and its form renders were removed
+    // (gap-web-action-buttons-unused-route-and-open-redirect-delete), so the
+    // detail page no longer renders an Advance button. The detail page itself
+    // still returns 200 and renders the task's data.
     const detail1 = await get(port, "/task/SRV-1");
     assert(detail1.status === 200, `GET /task/SRV-1 returns 200 (got ${detail1.status})`);
-    assert(detail1.body.includes("Advance"),
-      "GET /task/SRV-1 (status=todo) renders the 'Advance' action button (matches provider.yml whenStatus)");
-    assert(detail1.body.includes("action/advance"),
-      "GET /task/SRV-1 button form posts to /task/SRV-1/action/advance");
 
-    // --- GET /task/<id> (detail, button ABSENT for done status — negative control) ---
+    // --- GET /task/<id> (detail, done status) ---
     const detail2 = await get(port, "/task/SRV-2");
     assert(detail2.status === 200, `GET /task/SRV-2 returns 200 (got ${detail2.status})`);
-    // QX-017 (iteration 4): CSS comment now mentions "Advance button" in pageStyles(),
-    // so the string "Advance" appears in the <style> block. Check the actual button element instead.
-    assert(!detail2.body.includes('<button') || !detail2.body.includes('>Advance<'),
-      "GET /task/SRV-2 (status=done, no matching whenStatus) does NOT render the 'Advance' button element (negative control)");
 
     // --- GET /task/<nonexistent> -> 404 ---
     const notFound = await get(port, "/task/NOPE-999");
     assert(notFound.status === 404, `GET /task/NOPE-999 returns 404 (got ${notFound.status})`);
-
-    // --- POST /task/<nonexistent>/action/<actionId> -> 404 ---
-    // M160: handleTaskAction must return 404 for nonexistent tasks (was crashing with
-    // null dereference). Tests fix for gap-handleTaskAction-null-crash.
-    const actionNotFound = await post(port, "/task/NOPE-999/action/advance");
-    assert(actionNotFound.status === 404, `POST /task/NOPE-999/action/advance returns 404 (got ${actionNotFound.status})`);
-    assert(actionNotFound.body === "not found" || actionNotFound.body.includes("not found"),
-      `POST /task/NOPE-999/action/advance body contains "not found" (got "${actionNotFound.body}")`);
-
-    // --- POST /task/<id>/action/<actionId> -> 302 redirect ---
-    // QX-013 (iteration 3): gate passes (VALID_SECTIONS has all ACs checked) so
-    // redirect now includes ?success= param. Check the redirect starts with /task/SRV-1.
-    const action = await post(port, "/task/SRV-1/action/advance");
-    assert(action.status === 302, `POST /task/SRV-1/action/advance returns 302 (got ${action.status})`);
-    assert(action.headers.location && action.headers.location.startsWith("/task/SRV-1"),
-      `POST redirect Location header points back to /task/SRV-1 (got ${action.headers.location})`);
   } finally {
     if (server) {
       server.close();
@@ -344,89 +309,6 @@ async function main() {
     }
   }
 
-  // --- QX-009 (experiment 4, iteration 2): inline action buttons on list page ---
-  // Tests for CB-003 (action buttons only on detail page; not on list page).
-  // Uses the existing fixture's tasks (SRV-1 at todo with advance button, SRV-2 at done without).
-  // This reuses the main server (already closed above) so creates a fresh one.
-  {
-    const actTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-listaction-test-"));
-    const actWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-listaction-workspace-"));
-    fs.mkdirSync(path.join(actWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(actWorkspaceRoot, ".quay", "config.yml"),
-      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${actTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${actTasksDir.replaceAll("\\", "\\\\")}"\n`
-    );
-
-    // SRV2-1: todo status → should have Advance button on list page.
-    // SRV2-2: done status → should NOT have Advance button (whenStatus: ["todo","ready"]).
-    // Pure-data fixtures → store write.
-    seedTask(actTasksDir, "SRV2-1", { title: "List action task (todo)", status: "todo", body: VALID_SECTIONS });
-    seedTask(actTasksDir, "SRV2-2", { title: "List action task (done, no button)", status: "done", body: VALID_SECTIONS });
-
-    const actPort = port + 3;
-    const actOrigCwd = process.cwd();
-    let actServer;
-    try {
-      process.chdir(actWorkspaceRoot);
-      actServer = await startServer({ port: actPort });
-
-      // GET / (list): Advance button appears for SRV2-1 (todo), absent for SRV2-2 (done).
-      const listPage = await get(actPort, "/");
-      assert(listPage.status === 200, "GET / (list page with actions) returns 200");
-      assert(listPage.body.includes("SRV2-1") && listPage.body.includes("SRV2-2"),
-        "GET / body includes both seeded tasks");
-      // The list page should include at least one "Advance" button (for SRV2-1).
-      assert(
-        listPage.body.includes("Advance"),
-        "GET / list page body includes 'Advance' action button for todo-status task (QX-009)"
-      );
-      // The table should have an "actions" column header.
-      assert(
-        listPage.body.toLowerCase().includes("actions"),
-        "GET / list page body includes 'actions' column header (QX-009)"
-      );
-      // The action form on the list page posts to the task's action URL.
-      assert(
-        listPage.body.includes(`/task/${encodeURIComponent("SRV2-1")}/action/advance`) ||
-        listPage.body.includes("/task/SRV2-1/action/advance"),
-        "GET / list page body includes action form posting to SRV2-1's advance action endpoint"
-      );
-
-      // POST action from list page: should redirect back to the list (not /task/<id>).
-      // The from= param is URL-encoded "/" (the list root).
-      // QX-013 (iteration 3): gate passes (VALID_SECTIONS all ACs checked) so redirect
-      // now includes ?success= appended to the from= target. Check starts-with "/" (list root).
-      const fromEncoded = encodeURIComponent("/");
-      const actionPost = await post(actPort, `/task/SRV2-1/action/advance?from=${fromEncoded}`);
-      assert(actionPost.status === 302, `POST /task/SRV2-1/action/advance?from=/ returns 302 (got ${actionPost.status})`);
-      assert(
-        actionPost.headers.location && actionPost.headers.location.startsWith("/"),
-        `POST action from list page redirects back to list (starts with /) (Location: ${actionPost.headers.location})`
-      );
-      assert(
-        actionPost.headers.location && actionPost.headers.location.includes("success="),
-        `POST action from list page redirect includes ?success= param (QX-013) (Location: ${actionPost.headers.location})`
-      );
-
-      // POST action without from= param: should still redirect to task detail (existing behavior).
-      // QX-013: now also appends ?success= to the task detail redirect.
-      const actionPostNoFrom = await post(actPort, `/task/SRV2-1/action/advance`);
-      assert(actionPostNoFrom.status === 302, `POST /task/SRV2-1/action/advance (no from=) returns 302 (got ${actionPostNoFrom.status})`);
-      assert(
-        actionPostNoFrom.headers.location && actionPostNoFrom.headers.location.startsWith("/task/SRV2-1"),
-        `POST action without from= redirects to task detail (starts with /task/SRV2-1) (Location: ${actionPostNoFrom.headers.location})`
-      );
-    } finally {
-      if (actServer) {
-        actServer.close();
-        if (actServer.client) await actServer.client.close();
-      }
-      process.chdir(actOrigCwd);
-      fs.rmSync(actTasksDir, { recursive: true, force: true });
-      fs.rmSync(actWorkspaceRoot, { recursive: true, force: true });
-    }
-  }
-
   // --- composePayload() unit-level check (action.js), real manifest shape ---
   const manifest = {
     action_buttons: [
@@ -449,10 +331,13 @@ async function main() {
   assert(threw, "composePayload() throws for an unknown actionId (no such action button)");
 
   // --- QX-011..QX-015 (experiment 4, iteration 3): back-link context, mobile columns,
-  //     gate-fail feedback, button tooltips, orientation banner ---
+  //     error/success banners, orientation banner ---
   // Uses a fresh isolated server with one todo task (AC section with no
-  // checkboxes, for gate-fail testing) and one todo task with all ACs checked
-  // (for gate-pass testing and back-link testing).
+  // checkboxes, for error-banner rendering) and one todo task with all ACs checked
+  // (for back-link testing). The web action-buttons POST route's gate-fail/gate-pass
+  // redirect tests that lived here were REMOVED with the route itself
+  // (gap-web-action-buttons-unused-route-and-open-redirect-delete); the read-only
+  // banner-rendering assertions are kept (AC5).
   {
     const ux3TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-ux3-test-"));
     const ux3WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-ux3-workspace-"));
@@ -515,15 +400,6 @@ async function main() {
         "GET / page styles include media-query rule hiding .col-role and .col-labels (QX-012)"
       );
 
-      // --- QX-014 / QX-019 (UQ-014, UQ-018): Advance button on list page has target-status
-      //     tooltip (QX-019 backport: was generic "Advance task to next status";
-      //     now shows "Advance to ready" for todo-status tasks).
-      assert(
-        listForBanner.body.includes('title="Advance to ready"') ||
-        listForBanner.body.includes('title="Advance task to next status"'),
-        'GET / list page Advance button has title= tooltip attribute (QX-014/QX-019, UQ-014/UQ-018)'
-      );
-
       // --- QX-011 (UQ-009): task title links include ?from= on list page ---
       assert(
         listForBanner.body.includes("?from="),
@@ -564,23 +440,6 @@ async function main() {
         "GET /task/UX3-1?from=//evil.com: open-redirect guard rejects protocol-relative URL, defaults to / (SH-002)"
       );
 
-      // --- M26-F3 (M26-adversarial-eval, Phase B hardening): open-redirect guard on the
-      // POST .../action/:actionId route's ?from= param — mirrors the GET /task/:id guard's
-      // existing //evil.com coverage above (SH-002), which this route lacked until this
-      // milestone. The audit found the underlying value was already neutralized end-to-end
-      // by addParam()'s pathname-only URL parsing (not independently exploitable), but the
-      // guard itself was inconsistent with its GET sibling; this test locks in both the
-      // guard-level rejection and the redirect-target safety net.
-      const protoRelFromPost = encodeURIComponent("//evil.com");
-      const actionProtoRel = await post(ux3Port, `/task/UX3-1/action/advance?from=${protoRelFromPost}`);
-      assert(actionProtoRel.status === 302, `POST /task/UX3-1/action/advance?from=//evil.com returns 302 (got ${actionProtoRel.status})`);
-      assert(
-        actionProtoRel.headers.location &&
-          actionProtoRel.headers.location.startsWith("/task/UX3-1") &&
-          !actionProtoRel.headers.location.includes("evil.com"),
-        `POST .../action/advance?from=//evil.com: open-redirect guard rejects protocol-relative URL, falls back to /task/UX3-1 (M26-F3) (Location: ${actionProtoRel.headers.location})`
-      );
-
       // --- CR-010 / UQ-016: orientation banner removed (DIR-007); verify no 'in_progress' status leaks ---
       // The banner text was the only known location using 'in_progress'; verify it's gone.
       assert(
@@ -590,26 +449,6 @@ async function main() {
       assert(
         listForBanner.body.includes("ready"),
         "GET / page still contains 'ready' status (filter nav) (CR-010, UQ-016)"
-      );
-
-      // --- QX-014 (UQ-014): detail page Advance button has target-status tooltip ---
-      // UX3-1 is at status=todo, so next status is "ready"
-      assert(
-        detailNoFrom.body.includes('title="Advance to ready"'),
-        'GET /task/UX3-1 (todo status) detail page Advance button has title="Advance to ready" (QX-014)'
-      );
-
-      // --- QX-013 (UQ-013): gate-fail feedback — POST on UX3-2 (AC no checkboxes) ---
-      // Gate should block and redirect with ?error= instead of silently delivering
-      const gateFailPost = await post(ux3Port, `/task/UX3-2/action/advance`);
-      assert(gateFailPost.status === 302, `POST /task/UX3-2/action/advance (blocked gate) returns 302 (got ${gateFailPost.status})`);
-      assert(
-        gateFailPost.headers.location && gateFailPost.headers.location.includes("error="),
-        `POST /task/UX3-2/action/advance: gate-blocked redirect includes ?error= param (QX-013, UQ-013) (Location: ${gateFailPost.headers.location})`
-      );
-      assert(
-        !(gateFailPost.headers.location && gateFailPost.headers.location.includes("success=")),
-        `POST /task/UX3-2/action/advance: gate-blocked redirect does NOT include ?success= (QX-013)`
       );
 
       // --- QX-013 (UQ-013): error banner rendered on list page when ?error= is in URL ---
@@ -631,19 +470,6 @@ async function main() {
         'GET /task/UX3-1?error=...: detail page renders .error-banner element (QX-013)'
       );
 
-      // --- QX-013 (UQ-013): gate-pass → redirect includes ?success= ---
-      // UX3-1 has all ACs checked, so gate passes
-      const gatePassPost = await post(ux3Port, `/task/UX3-1/action/advance`);
-      assert(gatePassPost.status === 302, `POST /task/UX3-1/action/advance (gate passes) returns 302 (got ${gatePassPost.status})`);
-      assert(
-        gatePassPost.headers.location && gatePassPost.headers.location.includes("success="),
-        `POST /task/UX3-1/action/advance: gate-pass redirect includes ?success= param (QX-013) (Location: ${gatePassPost.headers.location})`
-      );
-      assert(
-        !(gatePassPost.headers.location && gatePassPost.headers.location.includes("error=")),
-        `POST /task/UX3-1/action/advance: gate-pass redirect does NOT include ?error= (QX-013)`
-      );
-
       // --- QX-013 (UQ-013): success banner rendered on list page when ?success= is in URL ---
       const successInURL = await get(ux3Port, "/?success=Task+advanced");
       assert(
@@ -662,115 +488,13 @@ async function main() {
     }
   }
 
-  // --- M33 (G-S4-01, m33): POST action-route success banner text is
-  //     conditioned on deliverTrigger()'s result.delivered, not a hardcoded
-  //     "advanced" string. Covers the "print" (degraded, realistic default
-  //     for bare `quay serve`) and "mock" (QUAY_ACTION_MOCK_LOG) modes.
-  //     "manda" is not covered here — exercising it deterministically would
-  //     require a live daemon; action-mock-delivery.test.mjs/serve-action-
-  //     delivery.test.mjs already document that live-manda reachability is
-  //     non-deterministic in this sandbox (mandaAvailable() has been observed
-  //     to return both true and false across runs here), so gating an
-  //     assertion on it would itself be a flaky test — the same anti-pattern
-  //     those files were written to avoid.
-  {
-    const m33TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-m33-test-"));
-    const m33WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-m33-workspace-"));
-    fs.mkdirSync(path.join(m33WorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(m33WorkspaceRoot, ".quay", "config.yml"),
-      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${m33TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${m33TasksDir.replaceAll("\\", "\\\\")}"\n`
-    );
-    // M33-P1: gate-pass todo task, used for the "print"-degraded banner assertion.
-    // M33-M1: gate-pass todo task, used for the "mock"-mode banner assertion.
-    // Pure-data fixtures → store write.
-    seedTask(m33TasksDir, "M33-P1", { title: "M33 print-mode banner test task", status: "todo", body: VALID_SECTIONS });
-    seedTask(m33TasksDir, "M33-M1", { title: "M33 mock-mode banner test task", status: "todo", body: VALID_SECTIONS });
-
-    const m33Port = port + 16;
-    const m33OrigCwd = process.cwd();
-    let m33Server;
-    try {
-      process.chdir(m33WorkspaceRoot);
-      m33Server = await startServer({ port: m33Port });
-
-      // --- "print" mode: force deliverTrigger()'s manda-availability check
-      // to fail deterministically by temporarily clearing PATH so the
-      // `manda` binary cannot be found (spawn ENOENT), rather than relying
-      // on ambient sandbox state (action-mock-delivery.test.mjs's own
-      // comments document that mandaAvailable()'s live outcome is NOT
-      // deterministic in this sandbox — observed both true and false across
-      // runs). No QUAY_ACTION_MOCK_LOG is set, so deliverTrigger() falls
-      // through past the (now-unreachable) manda branch to "print".
-      const prevPath = process.env.PATH;
-      process.env.PATH = "";
-      let printPost;
-      try {
-        printPost = await post(m33Port, "/task/M33-P1/action/advance");
-      } finally {
-        process.env.PATH = prevPath;
-      }
-      assert(printPost.status === 302,
-        `POST /task/M33-P1/action/advance (print mode, PATH cleared) returns 302 (got ${printPost.status})`);
-      assert(
-        printPost.headers.location && printPost.headers.location.includes("success="),
-        `POST /task/M33-P1/action/advance (print mode): redirect includes ?success= param (Location: ${printPost.headers.location})`
-      );
-      const printSuccessMsg = decodeURIComponent(
-        (printPost.headers.location.match(/success=([^&]*)/) || [, ""])[1]
-      );
-      assert(
-        printSuccessMsg.includes("requested") && !/advanced|done/i.test(printSuccessMsg),
-        `M33 G-S4-01: "print"-mode banner text uses "requested"-flavored language, not "advanced"/"done" (got "${printSuccessMsg}")`
-      );
-
-      // --- "mock" mode: QUAY_ACTION_MOCK_LOG selects the deterministic
-      // file-log delivery mode (QN-042/DIR-009), independent of manda/PATH
-      // state — the existing, already-established deterministic-test pattern.
-      const mockLogPath = path.join(m33TasksDir, "m33-action-mock.jsonl");
-      const prevMockLog = process.env.QUAY_ACTION_MOCK_LOG;
-      process.env.QUAY_ACTION_MOCK_LOG = mockLogPath;
-      let mockPost;
-      try {
-        mockPost = await post(m33Port, "/task/M33-M1/action/advance");
-      } finally {
-        if (prevMockLog === undefined) delete process.env.QUAY_ACTION_MOCK_LOG;
-        else process.env.QUAY_ACTION_MOCK_LOG = prevMockLog;
-      }
-      assert(mockPost.status === 302,
-        `POST /task/M33-M1/action/advance (mock mode) returns 302 (got ${mockPost.status})`);
-      assert(
-        mockPost.headers.location && mockPost.headers.location.includes("success="),
-        `POST /task/M33-M1/action/advance (mock mode): redirect includes ?success= param (Location: ${mockPost.headers.location})`
-      );
-      const mockSuccessMsg = decodeURIComponent(
-        (mockPost.headers.location.match(/success=([^&]*)/) || [, ""])[1]
-      );
-      assert(
-        !/advanced|done/i.test(mockSuccessMsg),
-        `M33 G-S4-01: "mock"-mode banner text does not claim "advanced"/"done" (got "${mockSuccessMsg}")`
-      );
-      assert(fs.existsSync(mockLogPath),
-        "M33: mock log file created by the POST action route in mock mode (confirms mock path was actually taken, not a false-positive banner match)");
-
-      // Distinct-strings check: print and mock banners must not be identical
-      // (each mode's own honest description, not one shared generic string).
-      assert(printSuccessMsg !== mockSuccessMsg,
-        `M33 G-S4-01: "print" and "mock" mode banners are distinct strings (print="${printSuccessMsg}", mock="${mockSuccessMsg}")`);
-
-    } finally {
-      if (m33Server) {
-        m33Server.close();
-        if (m33Server.client) await m33Server.client.close();
-      }
-      process.chdir(m33OrigCwd);
-      fs.rmSync(m33TasksDir, { recursive: true, force: true });
-      fs.rmSync(m33WorkspaceRoot, { recursive: true, force: true });
-    }
-  }
-
-  // --- QX-016..QX-019 (experiment 4, iteration 4): multi-label filter, sticky actions,
-  //     updatedAt display, and target-status tooltip backport ---
+  // --- QX-016..QX-019 (experiment 4, iteration 4): multi-label filter, updatedAt
+  //     display, and target-status tooltip backport (the former M33 G-S4-01 POST
+  //     action-route banner-honesty block and the sticky .col-actions CSS checks
+  //     were REMOVED with the web action-buttons route —
+  //     gap-web-action-buttons-unused-route-and-open-redirect-delete; CLI-side
+  //     deliverTrigger() banner honesty remains covered by
+  //     action-mock-delivery.test.mjs / serve-action-delivery.test.mjs) ---
   {
     const qx16TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx16-test-"));
     const qx16WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx16-workspace-"));
@@ -814,17 +538,6 @@ async function main() {
       assert(noLabel.body.includes("BOTH-1") && noLabel.body.includes("BUGONLY-1") && noLabel.body.includes("NOLAB-1"),
         "GET / (no label filter) returns all tasks — no regression (QX-016)");
 
-      // --- QX-017 (UQ-011): sticky actions column in CSS ---
-      assert(
-        noLabel.body.includes(".col-actions") && noLabel.body.includes("position: sticky") && noLabel.body.includes("right: 0"),
-        "GET / page styles include .col-actions with position:sticky and right:0 (QX-017, UQ-011)"
-      );
-      // The actions column header has class="col-actions".
-      assert(
-        noLabel.body.includes('class="col-actions"'),
-        'GET / list page actions column header has class="col-actions" (QX-017, UQ-011)'
-      );
-
       // --- QX-018 (UQ-017): updatedAt displayed on list page as "updated" column ---
       assert(
         noLabel.body.includes(">updated<") || noLabel.body.includes(">updated</th>"),
@@ -842,13 +555,6 @@ async function main() {
       assert(
         detailQX18.body.includes("last updated"),
         'GET /task/BOTH-1 detail page includes "last updated" meta (QX-018, UQ-017)'
-      );
-
-      // --- QX-019 (UQ-018): list-page Advance button has target-status tooltip ---
-      // BOTH-1 is at todo status, so next status should be "ready"
-      assert(
-        noLabel.body.includes('title="Advance to ready"'),
-        'GET / list page Advance button for todo-status task has title="Advance to ready" (QX-019, UQ-018)'
       );
 
     } finally {
