@@ -6362,3 +6362,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   /home/yale/work/quay-worktrees/quality-criteria + bracket 已开。
   agent 被告知 leverage 刚合并的 verification-round.jsonl/checker-cost.jsonl 账本（趋势判据数据源）。
 - 新立案 gap-release-postinstall（todo，未晋——与 quality-criteria 在 sync-vendor.sh 重叠，等其落地再派）。
+
+### tick 2026-08-06T13:0xZ（quality-criteria fan-in 完成）
+
+- **quality-criteria 合 integration**（42767afa→e39d966b）：trend-check.ts 被动读取 verification-round/
+  checker-cost 账本，3 轴（suite_per_test_cost / early_red_latency / per_checker_cost），AC3 回归
+  0.251→0.464→0.321 编码。AC1-AC7 证据、capability-catalog 125/125、scoped **44/44**。
+- rebase 带入 ADR-030/031/032 + postinstall 缺陷（一并落 integration）。worktree/branch 清理，bracket close。
+- **在飞 0/3**。**postinstall 缺陷（gap-release-postinstall）现可派**——其 sync-vendor.sh 与 quality-criteria
+  的重叠已随后者落地解除。
+- 待外层 merge integration→develop（验证后），或本 tick 直接派 postinstall 缺陷。
