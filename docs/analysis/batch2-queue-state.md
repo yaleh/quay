@@ -5058,3 +5058,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **OVER90 假阳性处置**：detect-stop 报 task-over-90m（productize 括号 170m）——核对 = 5 个已完成 agent 的**陈旧开放括号**（外层 closure 才关，卡套件绿），非真超时（OVER90 注意：外层未闭合括号的滞后）。`--clear` 已清（死时间 33.8s 计入遥测）。无真实在飞 >90m。
 - **派发 2/5**（disjoint batch）：`outer-heartbeat`（session-liveness 心跳多源 max mtime，KNOWN-LOAD-SENSITIVE 族）+ `loop-driver-check`（自述注册表缺陷 L1 修复 + AC7 .halt 措辞）。补 self-touch + telemetry 已开。reanchor/runtime-nowhere-safe deferred（碰撞）。
 - 池 13（9 非可派：3 landed + 5 ROUND-3 + delivery-surface）。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:0xZ（内层，loop-driver-check fan-in 完成）
+
+- **外层套件判定**（ad5f9142/6200f935）：**TESTS GREEN 2480/0** —— 红仅剩 clean-tree 断言（预存 dirt：root vendor/ + last-pane.txt + 未提交 env/lockfile/task-evidence/inner-doc）。外层已清树（删 vendor/ + last-pane，提交合法改动）。**套件重跑推迟到内层 2 个 doc agent commit**（避免再 dirty）。
+- **loop-driver-check fan-in 完成**（`6178aa8d`）：tick 文档步骤 4 补写注册表行（与 cold-start SKILL 逐字同源）、STALLED 处置先查注册表不再制造双触发、AC7 `.halt` 打印改「未暂停」（控制面非传感器）、新测试 `loop-driver-check.test.mjs` 7/7。AC1/2/4/5/6/7 勾；**AC3 如实记录未解决**（自述注册表结构性无法分辨陈旧行，转入 L2，未打勾）。已并已清。
+- **outer-heartbeat 仍在飞**（worktree ca392fd8，未 commit）。外层套件重跑等它落定。
+- 在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
