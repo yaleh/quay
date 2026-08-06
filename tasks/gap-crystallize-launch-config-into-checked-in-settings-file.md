@@ -59,6 +59,10 @@ AC1 的负控制正是那次）。调研找到 5 项高相关，其中 3 项适�
   自检 inner 缺失时调 `quay-topology.sh` 创建两窗口并起 inner claude——「起 inner claude」用的**正是**
   本任务固化的 checked-in 启动命令（`quay-topology.sh` → `quay-launch.sh <inner>` → `.claude/launch.settings.json`），
   不再手打一行 shell。同一次改动两面。
+- **AC4 交叉标注（2026-08-06，`gap-complete-delivery-surface-spec-and-l1-verification`）**：六类交付面
+  （`orchestration/SPEC-complete-delivery-surface-2026-08-05.md` §4/§6）把本条列为**启动配置类（第 3 类）**
+  的归属任务——交付物 = `.claude/launch.settings.json` + `plugin/scripts/quay-launch.sh`。L1 检查
+  （`plugin/scripts/l1-delivery-surface-check.ts --surface`）机械校验该交付物在位 + 归属任务已立案（无空洞）。
 
 ## Acceptance Criteria
 

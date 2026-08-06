@@ -719,9 +719,13 @@ derive_loop_scripts() {
   #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
   #   the loop so an installed project can see what each laid-down check answers. Deliberate
   #   explicit addition (no doc references it by path — the catalog is self-describing).
+  #   l1-delivery-surface-check.ts (gap-complete-delivery-surface-spec-and-l1-verification): the
+  #   SIX-category L1 delivery-completeness check ships with the loop so an installed project can
+  #   re-run it (装后能跑). Deliberate explicit addition — no shipped doc references it by path
+  #   (the SPEC §6 machine-readable list is its single source, resolved via --spec).
   printf '%s\n' inner-idle-log.ts heavy-op-token.sh it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
-    capability-catalog.sh >> "$out"
+    capability-catalog.sh l1-delivery-surface-check.ts >> "$out"
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0
@@ -1261,6 +1265,27 @@ PYEOF
     # runtime that ACTUALLY EXISTS in the target — the referenced-not-landed complement. Defense in
     # depth after AC1's fail-closed (a config that already exists still gets checked every run).
     verify_provider_runtime_existence "$WORKSPACE_ROOT" "$PLUGIN_ROOT" || exit 2
+    # gap-complete-delivery-surface-spec-and-l1-verification (AC2): the SIX-category L1
+    # delivery-completeness check. verify_referenced_landed above covers category 1 (mechanisms/
+    # runtime: referenced ⊆ landed); this extends the L1 surface to ALL SIX categories — each
+    # category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is the
+    # single source). Runs post-laydown against the SHIPPED delivery surface (the quay checkout
+    # root — the SPEC lives at <repo>/orchestration/, outside the plugin bundle), fail-closed on any
+    # uncovered category. In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent →
+    # SKIP (referenced⊆landed still guards the mechanism axis).
+    l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
+    delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
+    spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
+    if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
+      if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then
+        : # six-category delivery surface complete — the OK line is on the check's stdout
+      else
+        echo "ERROR: delivery-surface L1 check failed — the six-category delivery surface is incomplete." >&2
+        exit 2
+      fi
+    elif [ -f "$l1_script" ]; then
+      echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
+    fi
   fi
 fi
 
