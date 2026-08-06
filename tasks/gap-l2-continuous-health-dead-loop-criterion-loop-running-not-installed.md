@@ -44,6 +44,17 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 无卡顿，两项目所有检查绿 + 自报健康）。是因为目标要求去看才看见，不是被硌到——与机器那 7 根轴
 （全 post-friction）形态不同。⇒ **AC10 计数 0 → 1**（管理者的 pre-friction 发现；机器计数仍 0）。
 
+### 交叉标注（「机制存在无人调用」族，gap-probe-mechanism-dead-15-days-rewire-to-two-layer）
+
+本任务与本仓「**机制存在但无人调用**」族同源：**判据检查的是「仪器铺没铺」（L1），没有一条检查「循环
+有没有在转」（L2）** ⇔ 探针机制（`routine-scheduler.ts`）**机制完整但无生产调用**——触发器仍按已退休的
+经典管线迭代号（ADR-022），两层模式没有迭代号 ⇒ 死了 15 天（最后一次真跑 2026-07-15 Iteration 49/52）无人
+报警。同一族前四实例：loop-driver.jsonl 无写入者、遥测括号从没被调用、human-steered 消费者全在退休管线、
+strategic-doc-staleness orchestration 臂死 glob。本任务（dead-loop 判据）与
+`gap-probe-mechanism-dead-15-days-rewire-to-two-layer`（探针 rewire）是这一族的第 5/6 实例：前者把
+「循环在不在转」变成机械判据，后者把「探针有没有按两层模式量触发」重新接线（触发器改 tick 计数/时间/事件 +
+外层 tick step 1d 每 tick 检查 due）。两任务的共同教训：**造了机制 ≠ 机制被调用；文档指令 ≠ 执行。**
+
 ### 选定机制（外层裁定：立案）
 
 **dead-loop 判据（L2 持续健康——循环在转，不只是装了）**：
