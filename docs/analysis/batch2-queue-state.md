@@ -5038,3 +5038,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **runner AC5**：非 flaky（3/3 一致失败，10s poll 等 red+aborted 超时），非本次 merge 引入。已记录，待外层定夺。
 - **全部 worktree/branch 清**（含临时 premerge-check）。master `2a2c84a8`。套件 state 仍显示旧 red run——**修复已全部落 master，外层应重跑全量验证 re-green**。
 - 在飞 0。无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:6xZ（内层，AC5 根因 + 修复 —— 套件 5 失败全部清零）
+
+- **AC5 signal-kill 根因找到 + 修复**（`07b3f253`）：fake suite 的祖先链自信号用 `ps -o comm=` 匹配 `node*`，但本机 node 进程 comm=`MainThread`（实测 walk 日志：`walk: pid=... comm='MainThread'`）⇒ 永远不匹配 ⇒ 信号从未送达 ⇒ runner 跑完 ⇒ `state=green`（非 red+aborted）⇒ AC5 poll 超时。**3/3 一致失败根因就是 comm 检测**，不是 flaky。修 = 改 `/proc/<pid>/exe` readlink 检测 node（`*/node|*/nodejs`）。AC5 3/3 + 整个 full-suite-runner.test.mjs **18/18**。
+- **套件 5 失败全部落地清零**：① store AC4（store.ts 缓存失效）② doc-gate D1（registry.ts dist REPO_ROOT）③ codex A8（selfcheck degrade）④ AC1b（外层清 quay-init 伪影）⑤ AC5（MainThread comm）。master `07b3f253`。
+- **外层应重跑全量验证 re-green**（上轮 state 仍显示 00:09 red run）。所有 worktree/branch 清。在飞 0。无 .halt、无 block、Monitor 绿。
