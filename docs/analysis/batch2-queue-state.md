@@ -5542,3 +5542,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **inner 派发 complete-delivery-surface**（六类交付面 L1，Touches 精度规则已在派发中应用）——subagent
   「quay-init failure 是 worktree artifact」13m18s 在飞。
 - **套件 green**、闸 GO、load 2.44。①② 人指示任务（action-buttons/message-bus）todo 在池待派。
+
+### tick 2026-08-06T00:4xZ（内层，complete-delivery fan-in + catalog 二次修复）
+
+- **complete-delivery fan-in 完成（真实现）**：SPEC-complete-delivery-surface 六类活文档（L1-MANIFEST +
+  spec_is_live 漂移绑定）+ `verify-delivery-surface.ts`（L1 六类完整性 6/6、attribution holes 0）。scoped 9/9。
+  worktree/branch 已清。
+- **capability-catalog 二次修复**（`73355f46`）：11 个新脚本进 artifact 未声明（claim-task/dead-loop/
+  fork-baseline/integration-batch-merge/laydown-set/release-task/self-report-vocab/slot-refill/
+  test-file-snapshot/verify-delivery-surface）——0 unclassified 恢复。**系统性发现**：两次回归共 14 脚本在
+  创建时未声明（scoped 静态层 defer catalog 到全量 ⇒ 任务绿 catalog 红）。已立案
+  `gap-capability-catalog-declarations-not-enforced-at-script-creation`（scoped 层强制 + 负控制）。
+- 在飞 0/3。套件 green、无 stop、无 block、Monitor 绿。
