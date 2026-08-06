@@ -11,7 +11,7 @@ title: "delete web action buttons (/task/<id>/action/<actionId> POST + two
   deletion the gate-events actor distribution must be UNCHANGED — if it
   changes, the route actually had consumers and the deletion was wrong;
   order: human decided this BEFORE the message-bus channel (① then ②)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -54,6 +54,8 @@ M26 ADV-003：`POST .../action/<id>'s baseRedirect had only...`）——**未被
 - [ ] AC6: open-redirect 漏洞面消除（该路由删除后无此攻击面）
 
 ## Touches
+- tasks/gap-web-action-buttons-unused-route-and-open-redirect-delete.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - packages/quay/src/serve-handlers.ts（删 POST 路由 + 两处 form）
 - packages/quay/test/（对应测试）

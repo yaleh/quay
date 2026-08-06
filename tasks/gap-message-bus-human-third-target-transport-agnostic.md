@@ -14,7 +14,7 @@ title: "message bus for human-in-the-network — CORE constraint: transport-
   unattended interval — the measurement protocol must explicitly constrain
   'humans only use the channel'; human directive: AFTER action-buttons delete
   (① then ②)"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -59,6 +59,8 @@ extra:
 - [ ] AC6: fail-safe——测量协议显式约束「人只走信道」（绕过信道则无干预区间失真）
 
 ## Touches
+- tasks/gap-message-bus-human-third-target-transport-agnostic.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - packages/quay/src/（deliver/observe 传输抽象 + 人 target）
 - plugin/scripts/（消费者挂载点 / manager-inbox 读者）

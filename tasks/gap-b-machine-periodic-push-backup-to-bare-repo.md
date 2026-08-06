@@ -9,7 +9,7 @@ title: "B machine periodic push backup — low-frequency cron (every 10-15 min)
   executor: manager on B (has context) or B's outer (one-line cron); verified
   2026-08-05: no narrow task exists, only mentioned within the larger claiming
   design — this should NOT wait for the claiming mechanism"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -49,6 +49,8 @@ remote，只是从未用过。
 - [ ] AC3: 范围窄——未触碰认领/权威/冲突逻辑（grep 无相关改动）
 
 ## Touches
+- tasks/gap-b-machine-periodic-push-backup-to-bare-repo.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - B 机 crontab（一行 cron）
 - tasks/gap-two-machine-collaboration-git-branch-claiming.md（AC3 交叉标注——冲突/认领留其范围）
