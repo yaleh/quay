@@ -740,7 +740,6 @@ derive_loop_scripts() {
   #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
   #   the loop so an installed project can see what each laid-down check answers. Deliberate
   #   explicit addition (no doc references it by path — the catalog is self-describing).
-  printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
   #   l1-delivery-surface-check.ts (gap-complete-delivery-surface-spec-and-l1-verification): the
   #   SIX-category L1 delivery-completeness check ships with the loop so an installed project can
   #   re-run it (装后能跑). Deliberate explicit addition — no shipped doc references it by path
@@ -750,6 +749,7 @@ derive_loop_scripts() {
   #   ships with the loop so an installed project's manager can ask "is the loop actually running".
   #   Deliberate explicit addition — the SPEC §5 annotation is the cross-reference (not a shippable
   #   SKILL.md/loop-doc path reference, so (a)/(b) derivation would miss it).
+  printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh >> "$out"
   sort -u "$out" -o "$out"
