@@ -19,6 +19,11 @@ experiment/timing/*.log
 .playwright-mcp/
 # QX-033: npm pack build artifacts — do not commit .tgz release files
 *.tgz
+# gap-release-excludes-plugin-bundle-agent-surface (AC16): packages/quay/plugin/ is a
+# generated SNAPSHOT of the repo-root plugin/ bundle, staged by package.sh right before
+# `npm pack` (npm pack's files entries cannot reach the sibling ../plugin). Never tracked —
+# the source of truth is the repo-root plugin/ tree, mirrored by sync-vendor.sh.
+packages/quay/plugin/
 
 # BAIME experiment throwaway checkouts / build output — never track
 **/worktrees/
