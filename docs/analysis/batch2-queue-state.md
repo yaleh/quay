@@ -5149,3 +5149,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **suite-state-reason-axis 合并**（`561388d9`）：`full-suite-state` **三值 reason 枚举**（failed/aborted/infra-error）——门禁 WAIT 早退/信号杀 ⇒ aborted（无正确性结论，不按代码风险停派，恢复由资源门 GO/WAIT 决定）；真失败 ⇒ failed（照旧停派分诊）；note 逃生舱收编为字段。AC1–AC7 勾（37/37）。已并已清。
 - **在飞 1/5**（仅 laydown-derivation）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:0xZ（内层，waiting tick：laydown-derivation 自查中）
+
+- **laydown-derivation 在飞 ~15min**（TaskOutput running，worktree 有未提交改动：quay-init.sh bare-resolution + send-keys fail-loud + SKILLs + 新测试 quay-init-laydown-closure.test.mjs）。自查阶段（加了 bare_resolved_scripts 空参数守卫 + AC6 记账核对）。未 commit，未超 90m。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。master `b1b3b25e`。
