@@ -966,6 +966,10 @@ function printHumanReport(report, aggFile) {
       console.log(`  ${p.taskId} (runId ${p.runId})${unrel}`);
     }
   }
+  // Reconcile-aware real in-flight (gap-telemetry-brackets-vs-subagents-no-slot-visibility):
+  // the raw bracket count does NOT reflect real concurrency (stale red-window brackets); realInFlight
+  // = brackets whose executor is observably present. This is the number the state self-check ① reads.
+  console.log(`real in-flight (reconcile-aware, executor present): ${report.realInFlight ?? report.inProgress.length} of ${report.inProgress.length} brackets`);
   // Reconcile-closed phantom records (gap-a-crash-leaves-phantom-in-flight-tasks...): real events
   // preserved, but never counted as completed tasks.
   if ((report.reconciled ?? []).length) {
@@ -1000,7 +1004,9 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
   node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight vs stale brackets vs slots free)
+  node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes; carries reconcilable/realInFlight)
   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)
+  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight)
   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRTES an end event per close)`;
 
 function getArgValue(args, name) {
@@ -1033,7 +1039,35 @@ async function loadAndAggregate(root, sinceArg) {
   const firstKnownCommitMsByTask = makeFirstKnownCommitMsByTask(root);
   // nowMs = Date.now(): a live report's window extends to the current instant (AC1's window end).
   const report = aggregate(events, { sinceMs, nowMs: Date.now(), haltEvents, firstKnownCommitMsByTask });
-  return { report: { generatedAt: new Date().toISOString(), since: sinceArg ?? null, ...report } };
+  // Reconcile-aware slot visibility (gap-telemetry-brackets-vs-subagents-no-slot-visibility).
+  // `--report` is PURE READ, so this is a DRY-RUN verdict: which inProgress brackets WOULD be closed
+  // by `--reconcile` (executor observably gone — process dead / worktree gone / branch merged),
+  // WITHOUT writing end events. `realInFlight` = brackets whose executor is still present — the
+  // number that reflects REAL concurrency, as opposed to the raw bracket count that made the state
+  // self-check ① a vacuous `≤ cap` check (5 stale red-window brackets ≠ 1 real subagent). Fail-closed:
+  // a probe failure leaves realInFlight = raw count (never understate in-flight).
+  let reconcilable = [];
+  let realInFlight = report.inProgress.length;
+  try {
+    const { closed } = reconcileInFlight(report.inProgress, {
+      executorGone: makeDefaultExecutorGone(root),
+      firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
+    });
+    reconcilable = closed;
+    realInFlight = report.inProgress.length - closed.length;
+  } catch (_) {
+    reconcilable = [];
+    realInFlight = report.inProgress.length;
+  }
+  return {
+    report: {
+      generatedAt: new Date().toISOString(),
+      since: sinceArg ?? null,
+      ...report,
+      reconcilable,
+      realInFlight,
+    },
+  };
 }
 
 /**
@@ -1228,6 +1262,50 @@ export async function main(argv) {
       console.log(JSON.stringify(reportWithMeta, null, 2));
     } else {
       printHumanReport(reportWithMeta, aggFile);
+    }
+    return 0;
+  }
+
+  // --slots (gap-telemetry-brackets-vs-subagents-no-slot-visibility, AC2/AC5): machine-readable
+  // slot visibility — how many real concurrency slots are in flight vs remaining. PURE READ (never
+  // writes). `bracketsInFlight` is the raw start-without-end count; `reconcilable` is the subset
+  // whose executor is OBSERVABLY gone (would be closed by --reconcile); `realInFlight` = brackets
+  // whose executor is still present — the REAL concurrency signal the state self-check ① must read
+  // instead of the raw bracket count. `--cap` supplies the concurrency cap (the tick passes its
+  // `effective_cap` from cap-from-gate.sh); when omitted, slotsTotal/slotsRemaining are null.
+  if (args.includes("--slots")) {
+    const capArg = getArgValue(args, "--cap");
+    let cap = null;
+    if (capArg !== undefined) {
+      cap = Number(capArg);
+      if (!Number.isFinite(cap) || cap < 0) {
+        console.error(`fast-mode-telemetry: invalid --cap "${capArg}" (expected a non-negative number)`);
+        return 1;
+      }
+    }
+    let reportWithMeta;
+    try {
+      ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    const slotsTotal = cap != null ? cap : null;
+    const slotsRemaining = cap != null ? Math.max(0, cap - reportWithMeta.realInFlight) : null;
+    const out = {
+      bracketsInFlight: reportWithMeta.inProgress.length,
+      reconcilable: reportWithMeta.reconcilable.length,
+      realInFlight: reportWithMeta.realInFlight,
+      slotsTotal,
+      slotsRemaining,
+    };
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(out, null, 2));
+    } else {
+      const capPart = cap != null ? `, slots-total ${out.slotsTotal}, slots-remaining ${out.slotsRemaining}` : "";
+      console.log(
+        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}${capPart}`,
+      );
     }
     return 0;
   }

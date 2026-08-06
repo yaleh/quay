@@ -39,7 +39,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isFailureLine } from "../scripts/full-suite-runner.ts";
+import { isFailureLine, isAbortLine } from "../scripts/full-suite-runner.ts";
 import { runOnce } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -321,8 +321,11 @@ test("AC5 — a signal-killed run writes state=red reason=aborted, which must NO
     'sleep 1\n' +
     'runner_pid=$PPID\n' +
     'while [ -n "$runner_pid" ] && [ "$runner_pid" != "1" ]; do\n' +
-    '  comm=$(ps -o comm= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
-    '  case "$comm" in node*) kill -TERM "$runner_pid"; break ;; esac\n' +
+    '  # detect the node runner via /proc/<pid>/exe, not `ps -o comm` — node\n' +
+    '  # processes report comm=`MainThread` on this machine, so a `node*` match\n' +
+    '  # silently misses the runner and the self-signal is never delivered.\n' +
+    '  exe=$(readlink "/proc/$runner_pid/exe" 2>/dev/null || true)\n' +
+    '  case "$exe" in */node|*/nodejs) kill -TERM "$runner_pid"; break ;; esac\n' +
     '  runner_pid=$(ps -o ppid= -p "$runner_pid" 2>/dev/null | tr -d " ")\n' +
     'done\n' +
     'sleep 5\n' +
@@ -448,6 +451,114 @@ test("AC2 unit — the failure markers match STRUCTURED failure lines, never bar
     "   × some individual test name",
   ]) {
     assert.equal(isFailureLine(line), false, `should not flag: ${line}`);
+  }
+});
+
+// ── gap-suite-state-has-no-reason-axis-failed-aborted-infra: AC1/AC2/AC3 (reason axis) ─────────────
+
+test("AC5 unit — isAbortLine matches the early-EXIT gate-WAIT shape, never a failure line", () => {
+  for (const line of [
+    "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO.",
+    "resource gate says WAIT",
+    "not running the full suite",
+  ]) {
+    assert.equal(isAbortLine(line), true, `should flag as abort: ${line}`);
+  }
+  for (const line of [
+    "not ok 1 - boom",
+    "# fail 2",
+    "# cancelled 1",
+    "FULL-SUITE-EXIT=1",
+    " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms",
+  ]) {
+    assert.equal(isAbortLine(line), false, `a real failure line is NOT an abort line: ${line}`);
+  }
+});
+
+test("AC1/AC3 — an early-EXIT red (test.sh internal resource-gate WAIT fail-closed) is reason=aborted, NOT failed", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-abort-"));
+  // The concrete shape from today's FALSE-RED incidents: test.sh's INTERNAL resource-gate fail-closed
+  // prints `resource gate says WAIT — not running the full suite ...` to stderr and exits 1 in ~6s
+  // WITHOUT running a single test. The runner must classify this as reason=aborted (NO correctness
+  // conclusion), never reason=failed — a failed label would stop dispatch on code risk with zero
+  // evidence (the coincidence gap the task exists to close).
+  const { f, dir } = fakeSuite(
+    'echo "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO." >&2\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red", "gate-WAIT early-exit is red (not green)");
+    assert.equal(s.reason, "aborted", "early gate-WAIT exit is reason=aborted, NOT failed (AC1/AC3)");
+    assert.ok(s.finishedAt, "final aborted-red has finishedAt");
+    assert.equal(typeof s.durationMs, "number", "durationMs recorded even on the aborted run");
+    // The stop-dispatch consumer must NOT stop on this aborted-red (AC2: aborted routes to the
+    // resource-gate, NOT to code-risk stop).
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, false, "aborted-red must NOT trigger stop-dispatch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — a REAL failure after an abort marker is NOT downgraded: reason stays failed (failure conclusion stands)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-dom-"));
+  // Defensive: even if an abort marker appears first, a later real failure line is the stronger
+  // conclusion — redDetected must dominate abortDetected (AC5: the failure conclusion stands).
+  const { f, dir } = fakeSuite('echo "resource gate says WAIT" >&2\necho "not ok 1 - boom"\nexit 1');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1);
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed", "a real failure after an abort marker stays failed, never downgraded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — a child killed by a signal (SIGKILL) writes reason=aborted (no correctness conclusion)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sigkill-"));
+  // A SIGKILL'd suite exits with code=null + signal=SIGKILL: the runner cannot read a verdict, so it
+  // is an abort (no correctness conclusion), NOT a failure. Previously this fell into the fail-closed
+  // catch-all and was mislabelled failed (the early-EXIT-red-as-failed bug).
+  const { f, dir } = fakeSuite('echo "about to die"\nkill -9 $$\necho "unreachable"');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on a killed suite");
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
+    }, { timeoutMs: 5000 });
+    assert.ok(s, "signal-killed child is final state=red reason=aborted");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — a generic non-zero exit with NO failure/abort marker stays reason=failed (fail-closed catch-all)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-catch-"));
+  // The reason-axis boundary: an unmatched non-zero exit could be a real failure no structured line
+  // matched. Failing CLOSED (reason=failed) preserves the stop-dispatch signal for that class; only a
+  // recognised NO-conclusion shape (abort marker / signal kill / spawn error) is relaxed to aborted.
+  const { f, dir } = fakeSuite('echo "something went wrong"\nexit 3');
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed", "an unmatched non-zero exit stays fail-closed failed");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

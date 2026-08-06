@@ -29,12 +29,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(pkgDir, "..", "..");
-const nativeBin = path.join(pkgDir, "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
 
 // Copy the package tree into a FRESH temp dir so package.sh's build-dist step

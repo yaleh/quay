@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group governance
 // heavy-op-token.test.mjs — gap-no-cross-project-heavy-op-token. Pins the cross-project heavy-op
 // token (plugin/scripts/heavy-op-token.sh) as a MECHANICAL mechanism, not prose:
 //
@@ -17,7 +17,22 @@
 //         R3 of the test-isolation contract — so the wiring is pinned STRUCTURALLY here).
 //   AC8 — the token is a single file with no repo dependency: copied to an empty dir it still runs
 //   AC9 — every test touches only a --root / QUAY_GLOBAL_DIR temp dir, never the real token
-//   AC10 — `// @test-group engine` declaration (enforced by test-framework-policy-check too)
+//   AC10 — `// @test-group governance` declaration (enforced by test-framework-policy-check too)
+//
+//   gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs (lease) adds:
+//   L-AC1 — pre-fix reproduction: a token whose recorded pid is dead + mtime stale is reclaimed
+//           (the "acquiring shell killed but work still running" fixture) — see the task body for
+//           the real pre-fix run; here we pin the POST-fix behavior for each branch.
+//   L-AC2 — killed acquiring shell + RENEW ongoing ⇒ --acquire FAILS, token preserved (renew from a
+//           DIFFERENT shell refreshes pid to the live loop shell + lease + mtime).
+//   L-AC3 — negative control: retry loop killed (dead pid), no renewal ⇒ after lease expiry the
+//           token IS reclaimable (no permanent lockout); --renew by a NON-holder fails.
+//   L-AC4 — pid-death accelerated path preserved: dead pid + stale mtime + ACTIVE lease ⇒ still
+//           reclaimed early (crash recovery, not after the full lease).
+//   L-AC5 — a pre-lease token (no lease_expires_ms field) still behaves like today: dead pid +
+//           stale mtime ⇒ reclaimed; dead pid + fresh mtime ⇒ HELD.
+//   L-AC6 — the lease is written on acquire and refreshed by renew (lease_expires_ms advances);
+//           --status exposes lease_remaining_s; holder-liveness source is the lease_expires_ms field.
 //
 // Run:
 //   scripts/test.sh plugin/test/heavy-op-token.test.mjs
@@ -40,9 +55,11 @@ const makeTmp = (prefix = "heavy-op-token-") => fs.mkdtempSync(path.join(os.tmpd
 
 /** Run the REAL token script with a temp --root (never the real default dir). */
 function runToken(args, { root, env = {} } = {}) {
-  // Every acquire now lands a JSONL record (gap-token-wait-times-...); point --events-file at the
-  // temp root so a --root test cycle never writes the real workspace's .quay/heavy-op-token-events.jsonl
-  // (same isolation discipline as AC9's "never touch the real default token").
+  // Every acquire lands a JSONL record (gap-the-token-measures-the-wait-and-throws-it-away); the
+  // default events file is $QUAY_GLOBAL_DIR/heavy-op/events.jsonl — --root redirects it into the test
+  // root, and --events-file is still passed as belt-and-suspenders so a --root test cycle never
+  // touches the real default events file (same isolation discipline as AC9's "never touch the real
+  // default token").
   const fullArgs = root
     ? ["--root", root, "--events-file", path.join(root, "heavy-op-events.jsonl"), ...args]
     : args;
@@ -257,8 +274,14 @@ test("AC6 — test.sh acquires on the full-suite default path ONLY, before the g
   // gap-the-only-token-waiter-refuses-to-wait-at-all: the acquire passes the BOUNDED wait
   // (HEAVY_OP_ACQUIRE_TIMEOUT_S, default 40), NOT --timeout 0 — a zero wait turns a ≤30s grace
   // window into a failed suite run (AC2/AC4).
-  assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --acquire quay --timeout "\$\{HEAVY_OP_ACQUIRE_TIMEOUT_S\}"/), "default path must acquire the token with the bounded wait bound");
+  // gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs: the acquire ALSO passes an
+  // explicit --lease (HEAVY_OP_LEASE_S, default 3600) — test.sh is a SINGLE-SHOT holder (its own
+  // shell runs the suite, so pid IS the work and an alive pid protects the token), and the caller-
+  // responsibility contract is: a holder that neither renews nor declares a lease >= its hold time
+  // can be reclaimed at lease expiry.
+  assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --acquire quay --timeout "\$\{HEAVY_OP_ACQUIRE_TIMEOUT_S\}" --lease "\$\{HEAVY_OP_LEASE_S\}"/), "default path must acquire the token with the bounded wait bound + an explicit single-shot lease");
   assert.ok(src.match(/HEAVY_OP_ACQUIRE_TIMEOUT_S="\$\{HEAVY_OP_ACQUIRE_TIMEOUT_S:-40\}"/), "the bounded wait default (40s) must be declared + documented");
+  assert.ok(src.match(/HEAVY_OP_LEASE_S="\$\{HEAVY_OP_LEASE_S:-3600\}"/), "the single-shot holder lease default (3600s) must be declared + documented");
   assert.ok(src.match(/bash "\$\{repo_root\}\/plugin\/scripts\/heavy-op-token\.sh" --release quay/), "release must be wired (EXIT trap)");
   // Release is armed as an EXIT trap, so a gate WAIT / build failure / static-check failure /
   // node completion ALL release the token — one WAIT must never hold the cross-project mutex.
@@ -443,5 +466,396 @@ test("AC7 — polling --status NEVER frees a dead-held slot (PULL-based reclaim)
 // ── AC10: @test-group engine declaration ─────────────────────────────────────────────────────────────
 test("AC10 — `// @test-group engine` is declared (enforced by test-framework-policy-check too)", () => {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
-  assert.match(src, /^\/\/ @test-group engine$/m);
+  assert.match(src, /^\/\/ @test-group governance$/m);
+});
+
+// ── gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs: LEASE ─────────────────────────
+// The token's liveness used to be "is the pid that ACQUIRED it alive" — which a retry loop breaks:
+// each `timeout 590 …` attempt kills its own acquiring shell, so the recorded pid dies while the
+// work continues in a NEW shell, and another project could reclaim the token mid-work. The fix makes
+// the liveness signal the LEASE (`lease_expires_ms`), refreshed ONLY by `--renew <project>` — the one
+// entity that KNOWS the work is still going: the retry loop. pid-death is kept as an ACCELERATED
+// release (crash recovery), never the deciding signal. See the task body's negative reasoning:
+// pid/pgid/session were all DISPROVEN as "the work".
+//
+// L-AC1 (pre-fix reproduction is in the task body): a DEAD-pid STALE-mtime token is reclaimed even
+// with an ACTIVE lease — this is the accelerated release, and it is also exactly what the OLD code
+// did (the bug: it reclaimed the SAME fixture with no lease concept at all).
+
+test("L-AC1 — a dead-pid stale-mtime token is reclaimed (accelerated release; the pre-fix fixture)", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    const leaseFuture = Date.now() + 600000; // lease ACTIVE for 10 more minutes
+    fs.writeFileSync(tokenPath, `holder=archguard\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nlease_expires_ms=${leaseFuture}\nhost=test\n`);
+    const past = new Date(Date.now() - 120000);
+    fs.utimesSync(tokenPath, past, past);
+
+    const r = runToken(["--acquire", "quay", "--timeout", "0"], { root });
+    assert.equal(r.status, 0, `dead pid + stale mtime + active lease must be reclaimed via the accelerated path:\n${r.all}`);
+    assert.match(r.stderr, /accelerated release/);
+    assert.match(r.stdout, /acquired=yes/);
+    const s = runToken(["--status"], { root });
+    assert.match(s.stdout, /stale_reclaims=1/, "the accelerated reclaim must be counted");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// L-AC2 — the fixture from the task: the ACQUIRING shell is killed, but the retry loop is still
+// running and RENEWS. The renew comes from a DIFFERENT shell (a new attempt), so it re-records pid
+// to the live loop shell + refreshes lease + mtime. quay --acquire must FAIL and the token must be
+// preserved — the whole point of the fix.
+test("L-AC2 — killed acquiring shell + renewal ongoing ⇒ --acquire FAILS, token preserved (retry loop keeps the token)", async () => {
+  const root = makeTmp();
+  const tokenPath = path.join(root, "heavy-op", "token");
+  let holder;
+  try {
+    // The acquiring shell (the attempt) acquires as archguard, then gets killed — the recorded pid
+    // dies. The retry loop (a DIFFERENT process, still alive) then renews.
+    holder = spawn("bash", ["-c", `"${TOKEN}" --root "${root}" --acquire archguard --timeout 0 --lease 5 && sleep 1000`]);
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(tokenPath) && Date.now() < deadline) await sleep(20);
+    assert.ok(fs.existsSync(tokenPath), "the acquiring shell must hold the token before it is killed");
+
+    holder.kill("SIGKILL");
+    await sleep(80);
+    assert.ok(fs.existsSync(tokenPath), "killing the acquiring shell must NOT delete the token (that is the bug)");
+
+    // The retry loop renews from THIS test process (a different, alive shell).
+    const renew = runToken(["--renew", "archguard"], { root });
+    assert.equal(renew.status, 0, `renew must succeed from the loop shell:\n${renew.all}`);
+    const recPid = fs.readFileSync(tokenPath, "utf8").split("\n").find((l) => l.startsWith("pid=")).split("=")[1];
+    assert.equal(recPid, String(process.pid), "renew must re-record pid to the RENEWING (live loop) shell, not the dead acquiring shell");
+
+    const r = runToken(["--acquire", "quay", "--timeout", "0"], { root });
+    assert.equal(r.status, 1, `quay must FAIL to acquire while archguard's retry loop is renewing:\n${r.all}`);
+    assert.match(r.stderr, /HELD by archguard/, "the holder must still be archguard");
+    assert.ok(fs.existsSync(tokenPath), "the token must be preserved byte-for-byte through the failed acquire");
+    assert.match(fs.readFileSync(tokenPath, "utf8"), /^holder=archguard$/m, "holder must be untouched");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// L-AC3 — negative control (no permanent lockout): the retry loop is killed (its recorded pid is
+// dead) and NOBODY renews ⇒ once the lease expires the token MUST be reclaimable. Without this, the
+// fix would trade "wrongly released" for "permanently locked" — a worse deal (task AC3).
+test("L-AC3 — negative control: retry loop dead + no renewal ⇒ lease expiry reclaims (no permanent lockout)", async () => {
+  const root = makeTmp();
+  const tokenPath = path.join(root, "heavy-op", "token");
+  try {
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    // Simulate a token as a retry loop left it right before dying: recorded pid DEAD (loop killed),
+    // lease about to expire in ~1.5s. acquired_ms in the past.
+    const now = Date.now();
+    const dead = deadPid();
+    fs.writeFileSync(tokenPath, `holder=archguard\npid=${dead}\nacquired_ms=${now - 60000}\nlease_expires_ms=${now + 1500}\nhost=test\n`);
+
+    // Just before expiry: --acquire must FAIL (lease still active, mtime fresh → no accelerated path).
+    const before = runToken(["--acquire", "quay", "--timeout", "0"], { root });
+    assert.equal(before.status, 1, `before lease expiry the token must still be held:\n${before.all}`);
+    assert.match(before.stderr, /lease ACTIVE/);
+
+    // Renew by a NON-holder must fail (archguard's work cannot be renewed by quay).
+    const wrong = runToken(["--renew", "quay"], { root });
+    assert.equal(wrong.status, 1, `a non-holder must not be able to renew:\n${wrong.all}`);
+    assert.match(wrong.stderr, /held by archguard, not quay/);
+
+    // Wait out the lease.
+    const t0 = Date.now();
+    await sleep(2000);
+    const expiryMs = Date.now() - t0;
+
+    // After expiry: --acquire MUST reclaim. Record the expiry duration (task AC3 "记录到期耗时").
+    const after = runToken(["--acquire", "quay", "--timeout", "0"], { root });
+    assert.equal(after.status, 0, `after lease expiry the token MUST be reclaimable (waited ${expiryMs}ms):\n${after.all}`);
+    assert.match(after.stderr, /EXPIRED lease/);
+    assert.match(after.stdout, /acquired=yes/);
+    console.log(`L-AC3 expiry-reclaim evidence: lease was ${now + 1500 - Date.now()}ms-in-the-future at setup; reclaimed after expiry (elapsed ${expiryMs}ms)`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// L-AC4 — the pid-death ACCELERATED path is preserved: dead pid + stale mtime ⇒ reclaimed EARLY,
+// even though the lease is still active. This is crash recovery (kill -9 the holder → the other side
+// reclaims in ~STALE_TIMEOUT_S, not after the full lease).
+test("L-AC4 — dead pid + stale mtime + ACTIVE lease ⇒ still reclaimed early (accelerated crash recovery)", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    const leaseFuture = Date.now() + 600000; // lease NOT expired — the accelerated path must win anyway
+    fs.writeFileSync(tokenPath, `holder=archguard\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nlease_expires_ms=${leaseFuture}\nhost=test\n`);
+    const past = new Date(Date.now() - 120000);
+    fs.utimesSync(tokenPath, past, past);
+
+    const r = runToken(["--acquire", "quay", "--timeout", "0"], { root });
+    assert.equal(r.status, 0, `dead pid + stale mtime must be reclaimed BEFORE lease expiry:\n${r.all}`);
+    assert.match(r.stderr, /accelerated release/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// L-AC5 — backward compat: a token written by the PRE-lease script (no lease_expires_ms field) must
+// behave exactly like today: dead pid + stale mtime ⇒ reclaimed; dead pid + fresh mtime ⇒ HELD.
+test("L-AC5 — a pre-lease token (no lease_expires_ms) still behaves like today (dead+stale reclaims; dead+fresh held)", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = path.join(root, "heavy-op", "token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    // Dead pid + stale mtime, NO lease field → accelerated reclaim (same as pre-lease).
+    fs.writeFileSync(tokenPath, `holder=archguard\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nhost=test\n`);
+    const past = new Date(Date.now() - 120000);
+    fs.utimesSync(tokenPath, past, past);
+    let r = runToken(["--acquire", "quay", "--timeout", "0"], { root });
+    assert.equal(r.status, 0, `pre-lease dead+stale token must be reclaimed:\n${r.all}`);
+
+    // Dead pid + FRESH mtime, NO lease field → HELD (the mtime guard protects a freshly-crashed holder).
+    fs.writeFileSync(tokenPath, `holder=archguard\npid=${deadPid()}\nacquired_ms=${Date.now()}\nhost=test\n`);
+    const now = new Date();
+    fs.utimesSync(tokenPath, now, now);
+    r = runToken(["--acquire", "quay", "--timeout", "0"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "5" } });
+    assert.equal(r.status, 1, `pre-lease dead+fresh token must be HELD:\n${r.all}`);
+    assert.match(r.stderr, /mtime only \d+s old/);
+    assert.ok(fs.existsSync(tokenPath), "the pre-lease held token must be preserved");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// L-AC6 — the lease field is the holder-liveness SOURCE (contract measure holder_liveness_source):
+// --acquire writes lease_expires_ms; --renew ADVANCES it (now + LEASE_S each call); --status exposes
+// lease_remaining_s so a reader can SEE the liveness source without guessing processes.
+test("L-AC6 — lease written on acquire, advanced by renew, exposed by --status (lease is the liveness source)", () => {
+  const root = makeTmp();
+  try {
+    const a = runToken(["--acquire", "quay", "--timeout", "0", "--lease", "300"], { root });
+    assert.equal(a.status, 0, `acquire failed:\n${a.all}`);
+    const tokenText = fs.readFileSync(path.join(root, "heavy-op", "token"), "utf8");
+    assert.match(tokenText, /^lease_expires_ms=\d+$/m, "acquire must write lease_expires_ms");
+    const exp1 = Number(tokenText.match(/^lease_expires_ms=(\d+)$/m)[1]);
+    assert.ok(exp1 > Date.now(), "the initial lease must be in the future");
+
+    const s = runToken(["--status"], { root });
+    assert.equal(s.status, 0);
+    assert.match(s.stdout, /lease_expires_ms=\d+/);
+    const rem = Number(s.stdout.match(/lease_remaining_s=(\d+)/)[1]);
+    assert.ok(rem > 250 && rem <= 300, `lease_remaining_s must reflect the 300s lease (got ${rem})`);
+
+    // Renew advances the expiry by LEASE_S (a fresh 300s from now, strictly > the previous expiry).
+    const renew = runToken(["--renew", "quay"], { root });
+    assert.equal(renew.status, 0, `renew failed:\n${renew.all}`);
+    const exp2 = Number(fs.readFileSync(path.join(root, "heavy-op", "token"), "utf8").match(/^lease_expires_ms=(\d+)$/m)[1]);
+    assert.ok(exp2 > exp1, `renew must advance lease_expires_ms (${exp1} -> ${exp2})`);
+
+    // The events landing (sibling task) is untouched by the lease: a renew must NOT land a new event
+    // record, and the acquire DID land one (runToken redirects events to $root/heavy-op-events.jsonl).
+    const ev = path.join(root, "heavy-op-events.jsonl");
+    if (fs.existsSync(ev)) {
+      const records = fs.readFileSync(ev, "utf8").trim().split("\n").filter(Boolean);
+      assert.equal(records.length, 1, "only the acquire (not the renew) may land an ACQUIRED event");
+    }
+    runToken(["--release", "quay"], { root });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// L-AC7 — the caller change is ONE LINE: the retry loop calls `--renew <project>` between attempts.
+// The script header documents the integration point and WHY the responsibility is on the loop (it is
+// the only entity that knows the work continues) — AC5 of the task. Pinned structurally here.
+test("L-AC7 — the script header documents --renew + why the retry loop owns liveness (AC5)", () => {
+  const src = fs.readFileSync(TOKEN, "utf8");
+  assert.match(src, /--renew <project>/, "the usage line must document --renew");
+  assert.match(src, /renew <project>/i);
+  assert.match(src, /lease_expires_ms/, "the lease field must be documented");
+  assert.match(src, /retry loop/, "the header must name the retry loop as the renewing entity");
+  assert.match(src, /gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs/, "the header must cite the task id");
+  // AC6 of the task: "how many heavy ops are running" must NOT be judged by cmdline-text counting.
+  // The script itself must not count cmdlines; the token's OWN recorded pid/lease is the source.
+  assert.doesNotMatch(src, /pgrep -f|ps -ef.*grep|ps aux.*grep/, "no cmdline-text process matching in the token script");
+});
+
+// ── gap-token-status-reports-a-dead-holder-as-busy: --status HONESTY ─────────────────────────────────
+// The bug: `--status` printed holder/pid/held_ms exactly as stored WITHOUT checking whether the pid is
+// alive — so a token held by a DEAD process read identically to one held by a live process, and an
+// arbiter reading --status would defer to a corpse (and, worse, poll forever: reclaim is PULL-based and
+// only happens at the instant a --acquire runs). The fix: --status reports holder_alive (the SAME
+// liveness test try_acquire uses), and for a dead holder states whether the NEXT --acquire would
+// reclaim it + gives the --acquire command (AC5/AC7). It stays READ-ONLY: never reclaims, never mutates
+// the token (AC4's negative control — a read must not write).
+
+function writeTokenFile(root, fields, mtimeMs = null) {
+  const p = path.join(root, "heavy-op", "token");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, fields);
+  if (mtimeMs != null) {
+    const t = new Date(mtimeMs);
+    fs.utimesSync(p, t, t);
+  }
+  return p;
+}
+
+test("S-AC1 — --status reports holder_alive=yes for a LIVE pid, no for a DEAD pid (consistent with kill -0)", () => {
+  const root = makeTmp();
+  try {
+    // LIVE: record pid = THIS node test process (alive for the whole test). kill -0 must succeed.
+    writeTokenFile(root, `holder=liveproj\npid=${process.pid}\nacquired_ms=${Date.now()}\nhost=test\n`);
+    let r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `live status failed:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=yes/, "a live pid must report holder_alive=yes");
+    assert.doesNotMatch(r.stdout, /DEAD/, "a live holder must NOT be described as dead");
+    process.kill(process.pid, 0); // throws if not alive — direct band with the reported field
+    assert.ok(true, "kill -0 <live-pid> succeeded, matching holder_alive=yes");
+
+    // DEAD: record a reaped child pid. kill -0 must fail.
+    const dp = deadPid();
+    writeTokenFile(root, `holder=deadproj\npid=${dp}\nacquired_ms=${Date.now()}\nhost=test\n`);
+    r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `dead status failed:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=no/, "a dead pid must report holder_alive=no");
+    assert.throws(() => process.kill(dp, 0), "kill -0 <dead-pid> must throw, matching holder_alive=no");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC2 — negative control (ALIVE): a live holder reports holder_alive=yes with real run output", () => {
+  const root = makeTmp();
+  try {
+    // Hand-write a token whose pid is THIS (alive) node process to pin the ALIVE branch deterministically.
+    writeTokenFile(root, `holder=archguard\npid=${process.pid}\nacquired_ms=${Date.now() - 5000}\nhost=test\n`);
+    const r = runToken(["--status"], { root });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder=archguard/);
+    assert.match(r.stdout, /holder_alive=yes/, "a live holder must report alive");
+    assert.match(r.stdout, /stale_reclaims=0/, "a live holder must never be counted as reclaimed");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC3 — negative control (DEAD): kill the holder ⇒ the SAME --status command reports holder_alive=no", async () => {
+  const root = makeTmp();
+  const tokenPath = path.join(root, "heavy-op", "token");
+  let holder;
+  try {
+    holder = spawn("bash", ["-c", `"${TOKEN}" --root "${root}" --acquire archguard --timeout 0 && exec sleep 1000`]);
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(tokenPath) && Date.now() < deadline) await sleep(20);
+    assert.ok(fs.existsSync(tokenPath), "the holder must acquire before we kill it");
+
+    let r = runToken(["--status"], { root });
+    assert.match(r.stdout, /holder_alive=yes/, "before the kill, the SAME command reports alive");
+
+    // Kill the holder (the recorded pid — exec sleep keeps the pid) ⇒ the SAME command flips to dead.
+    holder.kill("SIGKILL");
+    await sleep(50);
+    r = runToken(["--status"], { root });
+    assert.equal(r.status, 0, `status after kill must still exit 0:\n${r.all}`);
+    assert.match(r.stdout, /holder_alive=no/, "after the kill, the SAME command reports the holder is dead");
+    assert.match(r.stdout, /DEAD/, "the output must say DEAD, not silently 'busy'");
+    assert.ok(fs.existsSync(tokenPath), "--status must NOT have reclaimed the token (read-only)");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC4 — READ-ONLY negative control: --status on a dead holder leaves mtime + content byte-identical", () => {
+  const root = makeTmp();
+  try {
+    const tokenPath = writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 60000}\nlease_expires_ms=${Date.now() + 600000}\nhost=test\n`,
+      Date.now() - 120000);
+    const beforeContent = fs.readFileSync(tokenPath, "utf8");
+    const beforeMtime = fs.statSync(tokenPath).mtimeMs;
+
+    const r = runToken(["--status"], { root });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+
+    const afterContent = fs.readFileSync(tokenPath, "utf8");
+    const afterMtime = fs.statSync(tokenPath).mtimeMs;
+    assert.equal(afterContent, beforeContent, "--status must not change the token content (a read must not write)");
+    assert.equal(afterMtime, beforeMtime, "--status must not touch the token mtime (no reclaim, no rewrite)");
+    const s = runToken(["--status"], { root });
+    assert.match(s.stdout, /stale_reclaims=0/, "--status must never bump the reclaim counter");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC5 — dead holder output states whether the NEXT --acquire would reclaim it + gives the next step", () => {
+  const root = makeTmp();
+  try {
+    // DEAD + STALE mtime ⇒ reclaimable on next acquire (accelerated-release criteria met).
+    writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nhost=test\n`,
+      Date.now() - 120000);
+    let r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+    assert.match(r.stdout, /RECLAIMABLE on the next --acquire/, "the output must say the next --acquire would reclaim it");
+    assert.match(r.stdout, /--acquire <your-project>/, "the output must give the next-step --acquire command");
+
+    // DEAD + FRESH mtime ⇒ NOT yet reclaimable (inside the crash grace) — still DEAD, still honest.
+    writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now()}\nhost=test\n`, Date.now());
+    r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "60" } });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /holder_alive=no/);
+    assert.match(r.stdout, /DEAD but NOT yet reclaimable/, "a fresh-mtime dead holder is not reclaimable yet");
+    assert.match(r.stdout, /--acquire/, "the output still points at --acquire as the reclaim moment");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC7 — WAITING IS INVALID: polling --status never sees the free state; one --acquire reclaims immediately", () => {
+  const root = makeTmp();
+  try {
+    // Dead holder + mtime past the stale timeout (both acquire reclaim conditions met — yet nobody has
+    // run --acquire, so the file is still there and --status can never show holder=none on its own).
+    const tokenPath = writeTokenFile(root,
+      `holder=deadproj\npid=${deadPid()}\nacquired_ms=${Date.now() - 120000}\nhost=test\n`,
+      Date.now() - 120000);
+
+    // Poll --status N times: EVERY output still shows the dead holder — never holder=none.
+    for (let i = 0; i < 5; i++) {
+      const r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+      assert.equal(r.status, 0, `poll #${i} failed:\n${r.all}`);
+      assert.match(r.stdout, /holder=deadproj/, `poll #${i}: status must still show the dead holder, never holder=none`);
+      assert.match(r.stdout, /holder_alive=no/, `poll #${i}: the dead holder must keep reporting holder_alive=no`);
+      assert.match(r.stdout, /WAITING IS INVALID/, `poll #${i}: the output must say polling is an invalid strategy`);
+      assert.match(r.stdout, /PULL-based/, `poll #${i}: the output must name reclaim as pull-based`);
+      assert.ok(fs.existsSync(tokenPath), `poll #${i}: --status must never reclaim (the file persists)`);
+    }
+    assert.match(fs.readFileSync(tokenPath, "utf8"), /^holder=deadproj$/m, "the dead-holder file is untouched by all polls");
+
+    // ONE --acquire ⇒ immediate success (the reclaim happens at THIS moment, pull-based).
+    const a = runToken(["--acquire", "quay", "--timeout", "0"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
+    assert.equal(a.status, 0, `one --acquire must reclaim the dead holder immediately:\n${a.all}`);
+    assert.match(a.stderr, /RECLAIM/, "the acquire must perform the reclaim (accelerated release)");
+    assert.match(a.stdout, /acquired=yes/);
+    const s = runToken(["--status"], { root });
+    assert.match(s.stdout, /holder=quay/, "after the acquire, status shows the NEW holder");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("S-AC7b — the script header documents holder_alive + the read-only invariant + cites this task id (structural)", () => {
+  const src = fs.readFileSync(TOKEN, "utf8");
+  assert.match(src, /holder_alive/, "the header must document the holder_alive measure");
+  assert.match(src, /status 只读不写/, "the header must pin the read-only invariant");
+  assert.match(src, /gap-token-status-reports-a-dead-holder-as-busy/, "the header must cite this task id");
+  // AC6 of the task: "how many heavy ops are running" must NOT be judged by cmdline-text counting.
+  // The script itself must not count cmdlines; the token's OWN recorded pid/lease is the source.
+  assert.doesNotMatch(src, /pgrep -f|ps -ef.*grep|ps aux.*grep/, "no cmdline-text process matching in the token script");
 });

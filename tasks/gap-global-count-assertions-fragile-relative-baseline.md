@@ -8,7 +8,7 @@ title: global-count assertions are inherently fragile — B3-2 went red because
   (compare against the fork baseline's snapshot, not an absolute global count)
   BEFORE the branch model goes live so its rounds aren't obscured by assertion
   noise (ruling ②)
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -78,6 +78,34 @@ develop/integration 滞后不再触发断言噪声。
 B3-2 族关系断言（master 0e26e6a6 的相对化）非嵌套子集单独验证：`--test-name-pattern="list-groups|realpath dedup|same files as no-args|undeclared file|governance --list-files|structural" plugin/test/runner-grouping.test.mjs`
 → **6 pass / 0 fail / 0 cancelled**（6 个关系断言全绿）。3 个嵌套 `--group <fixture>` 测试在当前 master 红，
 原因 = 既有 task-contract 违规（done 任务缺 invoke-evidence），主仓库复现确认非本任务引入。
+- [x] AC2: **基线快照**——worktree 建立时记录测试文件集快照（可机械比对：当前 = 基线 + 本任务新增）
+- [x] AC3: **B3-2 场景不红**——worktree 建于并发合并前 13 分钟 ⇒ 断言不再过期（fixture 复现 B3-2 场景
+      ⇒ 绿）
+- [x] AC4: 与分支模型前置②交叉标注（`gap-branch-model-integration-branch-...` AC4）
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+
+### Invoke evidence
+
+- AC3 实跑（fixture 复现 B3-2 场景 ⇒ 绿）：
+
+```
+scripts/test.sh plugin/test/relative-baseline.test.mjs
+✔ AC2: snapshotTestFiles dedupes and sorts — a snapshot is a stable set, not a count
+✔ AC1/AC2: expectedTestFiles = fork-baseline ∪ declared touch additions (deduped)
+✔ AC3: B3-2 fixture — a concurrent merge adding a test file keeps the relative-baseline assertion GREEN
+✔ AC1/AC3: a declared touch addition is part of the task's own baseline and must not vanish
+✔ AC1: a baseline file that disappears is a violation (⊇ direction), regardless of the count
+✔ AC1: relativeBaselineViolations does NOT reject unrelated concurrent additions (the B3-2 fix core)
+ℹ tests 6  ℹ pass 6  ℹ fail 0  ℹ cancelled 0  ℹ skipped 0
+```
+
+- invoke `grep -rn 'baseline\|基线快照' plugin/test/`（新 helper 测试含 `baseline`；measure grep 现只匹配注释，零绝对计数断言）：
+
+```
+plugin/test/relative-baseline.test.mjs:  AC1 — the relative-baseline relation is asserted, never an absolute global count ...
+plugin/test/runner-grouping.test.mjs:  all assertions here are RELATIONSHIPS over the live glob
+plugin/test/select-tests-for-touches.test.mjs:  Relationship, not snapshot (tick rule "测试不得硬编码全局计数")
+```
 
 ## Definition of Done
 
@@ -91,6 +119,9 @@ B3-2 族关系断言（master 0e26e6a6 的相对化）非嵌套子集单独验�
 
 - plugin/test/test-file-snapshot.test.mjs（AC3 B3-2 fixture + AC1/AC2 机械验证）
 - plugin/scripts/test-file-snapshot.sh（基线快照 helper：snapshot + check）
+- tasks/gap-global-count-assertions-fragile-relative-baseline.md
+- plugin/test/（B3-2 族全局计数断言 → 相对基线判据）
+- plugin/scripts/（基线快照 helper，若成脚本）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
 
 > B3-2 族（`plugin/test/runner-grouping.test.mjs`）的相对化在 master 上已由 0e26e6a6 落地（运行时关系断言，

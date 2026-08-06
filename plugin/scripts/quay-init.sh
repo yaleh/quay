@@ -121,6 +121,17 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
 fi
 WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
 
+# gap-the-runtime-has-nowhere-safe-to-land: the RUNTIME LANDING BASE. The quay runtime (Core
+# bundle + native-provider bundle + provider.yml) used to land under `<target>/vendor/quay/` —
+# `vendor/` is a RESERVED directory name in Go (module vendoring resolves it), and `<target>/dist/`
+# is a reserved build-output name for a dozen toolchains. The landing decision (SPEC AC2 in the
+# task): the runtime is a GENERATED ARTIFACT, not source — so it lives OUTSIDE the target's git in
+# quay's OWN namespace `.quay/runtime/`, gitignored by quay-init itself (AC10). Path segments avoid
+# every reserved name (`vendor`/`node_modules`/`target`/`build`/`dist` — AC9). The `dist/` under
+# plugin/vendor/ is the PLUGIN's own build output (unaffected); only the TARGET landing path must
+# stay reserved-name-free.
+RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
+
 # Defaults for loop params.
 if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$(basename "$WORKSPACE_ROOT")"; fi
 if [ -z "$REPO_ROOT" ]; then REPO_ROOT="$WORKSPACE_ROOT"; fi
@@ -452,10 +463,25 @@ with open(cfg, encoding="utf-8") as f:
 prov = (data.get("providers") or {}).get("native")
 if not isinstance(prov, dict):
     sys.exit(0)
+# gap-the-runtime-has-nowhere-safe-to-land: reserved directory names that must never hold the quay
+# runtime in a target (Go vendor/, npm node_modules/, cargo target/, make/build/, bundler dist/).
+# The landing path check is by PATH LITERAL segment (task AC9), the same list here. An EXISTING
+# install (pre-fix) laid the runtime into `<target>/vendor/quay[-native]/` — on upgrade that dir
+# EXISTS, so the old `not os.path.isdir(p)` guard would never migrate it and the target would stay
+# pointed at the Go-reserved directory forever. The upgrade path therefore migrates any provider
+# path/mcp_entry that is (a) dangling, OR (b) a quay runtime path sitting under a reserved segment.
+RESERVED = {"vendor", "node_modules", "target", "build", "dist"}
+def under_reserved(p):
+    parts = [seg for seg in str(p).split(os.sep) if seg]
+    return any(seg in RESERVED for seg in parts)
+def is_quay_runtime_dir(p):
+    base = os.path.basename(str(p).rstrip(os.sep))
+    return base in ("quay", "quay-native")
 changed = False
-# path: a stale provider dir (does not exist) is migrated to the install-state provider dir.
+# path: a stale provider dir is migrated to the install-state provider dir. "Stale" = the dir does
+# not exist, OR it is a quay runtime dir sitting under a reserved segment (the pre-fix vendor/ land).
 p = prov.get("path")
-if isinstance(p, str) and p != install_provider and not os.path.isdir(p):
+if isinstance(p, str) and p != install_provider and (not os.path.isdir(p) or (under_reserved(p) and is_quay_runtime_dir(p))):
     prov["path"] = install_provider
     changed = True
 # mcp_entry: a dangling reference to a QUAY runtime file is migrated to the install-state runtime.
@@ -466,7 +492,7 @@ if isinstance(me, list) and len(me) >= 2 and isinstance(me[1], str):
     ref = me[1]
     is_quay_runtime = re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) is not None
     # Scope guard (see header comment): only a dangling reference to a quay runtime file is migrated.
-    if is_quay_runtime and ref != install_runtime and not os.path.exists(ref):
+    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and (not os.path.exists(ref) or under_reserved(ref)):
         prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
         changed = True
     # Legacy layout migration (gap-the-runtime-has-nowhere-safe-to-land): a config from an
@@ -649,32 +675,118 @@ validate_worktree_root() {
   return 0
 }
 
+# ── loop-script set derivation (gap-laydown-derivation-is-sensitive-to-reference-spelling-...):
+# The --loop laydown set is DERIVED from the shipped mechanism docs' OWN references, so there is
+# no second hand-maintained copy to drift. It is the union of FOUR sources:
+#   (a) prefix-derived — every `plugin/scripts/<name>` reference in ALL shipped skills + tick docs
+#       (the doc spells the full target-local path — unambiguous → the full corpus).
+#   (b) bare-resolved  — every BARE `<name>.<ext>` filename token in the MECHANISM corpus (the
+#       cold-start skill + the loop tick docs — the docs that describe how the LAID-DOWN mechanism
+#       operates) that exists under plugin/scripts/. A bare filename there is a target-local
+#       mechanism reference (reference-spelling independence: 文档写裸文件名不再静默漏铺). Scoped to
+#       the mechanism corpus because the pipeline/routine/init skills bare-MENTION plugin-local
+#       tools (proposal-convergence.ts, routine-*, quay-init.sh, send-keys-verified.sh) whose
+#       transitive deps are NOT loop mechanisms — auto-laying those would ship broken files.
+#   (c) explicit       — documented additions below (bare-name mechanism files the docs call with
+#       no path at all, the checkers' transitive deps, the self-describing capability catalog).
+#   (d) closure        — every script in the set that calls a SIBLING in the same dir
+#       (`${SCRIPT_DIR}/<name>` / `$SCRIPT_DIR/<name>`) pulls that sibling in, repeated to fixpoint.
+#       This is the dependency-closure invariant (铺了消费者必然铺依赖): send-keys-reliable.sh:41
+#       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` and inner-session-check.sh:43 are the
+#       regression controls — before this, the laid-down delivery-verification was broken from first use.
+# Scripts that must NEVER auto-lay-down (a layer-retired delivery check + the installer itself):
+NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"
+
+# mechanism_corpus — the docs that describe how the LAID-DOWN mechanism operates (bare-filename
+# resolution scope for (b) above).
+mechanism_corpus() {
+  printf '%s\n' "$PLUGIN_ROOT/skills/cold-start/SKILL.md"
+  for f in "$PLUGIN_ROOT"/loop/*.md; do
+    [ -f "$f" ] && printf '%s\n' "$f"
+  done
+}
+
+# bare_resolved_scripts <doc>... — for each BARE `<name>.<ext>` token in the given docs that
+# resolves (by existence) under plugin/scripts/ and is not NEVER_LAYDOWN, print `plugin/scripts/<tok>`.
+bare_resolved_scripts() {
+  [ $# -gt 0 ] || return 0   # no corpus docs → nothing to resolve (never read stdin)
+  grep -ohE '(^|[^/a-zA-Z0-9._-])[a-zA-Z0-9._-]+\.[a-zA-Z0-9]+' "$@" 2>/dev/null \
+    | sed -E 's/^[^a-zA-Z0-9._-]//' | sort -u \
+    | while read -r tok; do
+        [ -f "$PLUGIN_ROOT/scripts/$tok" ] || continue
+        case " $NEVER_LAYDOWN " in *" $tok "*) continue ;; esac
+        printf 'plugin/scripts/%s\n' "$tok"
+      done || true
+}
+
+# derive_loop_scripts — prints the COMPLETE --loop script laydown set (one basename per line),
+# derived as (a)+(b)+(c)+(d) above.
+derive_loop_scripts() {
+  local out changed round s dep f
+  local -a mech_files=()
+  out="$(mktemp)"
+  while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
+  # (a) prefix-derived over the FULL corpus
+  grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null \
+    | sed 's#^plugin/scripts/##' | sort -u >> "$out" || true
+  # (b) bare-resolved over the MECHANISM corpus
+  bare_resolved_scripts "${mech_files[@]}" | sed 's#^plugin/scripts/##' >> "$out" || true
+  # (c) explicit additions:
+  #   tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
+  #   inner-idle-log.ts, heavy-op-token.sh, it0-split-or-commit-check.ts, pipe-exit-code-check.sh;
+  #   transitive deps of the checkers (imported by them, not doc-referenced): gate-script-base.ts,
+  #   workflow-event-schema.mjs, task-schema.ts, touches-parser.ts, wiring-coverage-check.ts;
+  #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
+  #   the loop so an installed project can see what each laid-down check answers. Deliberate
+  #   explicit addition (no doc references it by path — the catalog is self-describing).
+  printf '%s\n' inner-idle-log.ts heavy-op-token.sh it0-split-or-commit-check.ts pipe-exit-code-check.sh \
+    gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
+    capability-catalog.sh >> "$out"
+  sort -u "$out" -o "$out"
+  # (d) dependency closure — repeat until fixpoint
+  changed=1; round=0
+  while [ "$changed" -eq 1 ] && [ "$round" -lt 20 ]; do
+    changed=0; round=$((round + 1))
+    for s in $(cat "$out"); do
+      [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
+      for dep in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._-]*' "$PLUGIN_ROOT/scripts/$s" 2>/dev/null | sed -E 's#.*/##' | sort -u || true); do
+        [ -n "$dep" ] || continue
+        case " $NEVER_LAYDOWN " in *" $dep "*) continue ;; esac
+        [ -f "$PLUGIN_ROOT/scripts/$dep" ] || continue
+        if ! grep -qxF "$dep" "$out"; then
+          printf '%s\n' "$dep" >> "$out"
+          changed=1
+        fi
+      done
+    done
+  done
+  sort -u "$out"
+  rm -f "$out"
+}
+
 # verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
 # lay-down. The mechanical constraint "referenced set ⊆ landed set": every file the shipped skills
-# and tick docs reference by path (plugin/scripts/*, orchestration/*, docs/analysis/*) must exist
-# in the target workspace after the --loop lay-down, UNLESS it is explicitly declared in
-# plugin/skills/init/SKILL.md as self-create (local state the first run creates — AC8) or
-# reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
+# and tick docs reference — by path (plugin/scripts/*, orchestration/*, docs/analysis/*) OR by BARE
+# filename in the mechanism corpus (resolved under plugin/scripts/, the SAME derivation the laydown
+# uses — AC3: checker and checked can no longer share a blind spot) — must exist in the target
+# workspace after the --loop lay-down, AND every laid-down script's same-dir sibling dependency
+# (${SCRIPT_DIR}/<name>) must be laid down too (dependency closure, AC1), UNLESS explicitly
+# declared in plugin/skills/init/SKILL.md as self-create (local state the first run creates — AC8)
+# or reference-doc (quay-specific template prose that is not a loop-mechanism deliverable). The two
 # hand-maintained lists (call sites vs landing set) with no mechanical bond must drift; this is
 # the bond. A referenced file that is neither landed nor declared = drift → FAIL CLOSED.
 verify_referenced_landed() {
-  local ws="$1" missing=0 r
-  local refs selfcreate refdoc b
-  refs="$(grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true)"
-  # AC3 (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure): the
-  # referenced set is no longer PREFIX-ONLY. A bare script name in a TICK DOC (the target's runtime
-  # instruction set, laid down) is existence-resolved under plugin/scripts/ and added as a
-  # plugin/scripts/* ref — so the checker and the laydown derivation share the same ruler and the
-  # bare-name class is no longer a SHARED BLIND SPOT (the pre-fix checker silently ignored exactly
-  # the references its own derivation was missing). Skills' bare names stay out (ambiguous prose —
-  # meta-examples, plugin-root refs; their mechanism references are caught by the AC1 closure in the
-  # laydown set, so no referenced-but-unlanded skill bare name can exist).
-  refs="$({
-    printf '%s\n' "$refs"
-    for b in $(grep -ohE '[a-zA-Z0-9._-]+\.(sh|ts|mjs|js|mts|cjs)' "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true); do
-      [ -f "$PLUGIN_ROOT/scripts/$b" ] && printf 'plugin/scripts/%s\n' "$b"
-    done
-  } | sed '/^[[:space:]]*$/d' | sort -u)"
+  local ws="$1" missing=0 closure_missing=0 r sd script
+  local refs selfcreate refdoc mech_bare
+  local -a mech_files=()
+  while IFS= read -r f; do mech_files+=("$f"); done < <(mechanism_corpus)
+  # referenced set = docs' path-prefixed refs (full corpus) + docs' BARE filename refs in the
+  # MECHANISM corpus that resolve under plugin/scripts/ — the SAME derivation the laydown uses
+  # (AC3: checker and checked can no longer share the same blind spot).
+  mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
+  refs="$( ( grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
+             printf '%s\n' "$mech_bare"
+           ) | sort -u || true )"
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:
   #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
@@ -692,12 +804,28 @@ verify_referenced_landed() {
       missing=1
     fi
   done
-  if [ "$missing" = 1 ]; then
+  # dependency-closure check (AC1/AC3): every LAID-DOWN script's same-dir sibling reference must be
+  # laid down too — a script calling `${SCRIPT_DIR}/<sibling>` with the sibling absent is a broken
+  # mechanism (send-keys-reliable.sh:41 / inner-session-check.sh:43 → transcript-delivery-check.ts).
+  if [ -d "$ws/plugin/scripts" ]; then
+    for script in "$ws"/plugin/scripts/*.sh; do
+      [ -f "$script" ] || continue
+      for sd in $(grep -oE '\$\{SCRIPT_DIR\}/[a-zA-Z0-9][a-zA-Z0-9._-]*|\$SCRIPT_DIR/[a-zA-Z0-9][a-zA-Z0-9._-]*' "$script" 2>/dev/null | sed -E 's#.*/##' | sort -u || true); do
+        [ -n "$sd" ] || continue
+        case " $NEVER_LAYDOWN " in *" $sd "*) continue ;; esac
+        if [ ! -e "$ws/plugin/scripts/$sd" ]; then
+          echo "  FAIL (dependency-not-landed): $script references plugin/scripts/$sd but it is not laid down" >&2
+          closure_missing=1
+        fi
+      done
+    done
+  fi
+  if [ "$missing" = 1 ] || [ "$closure_missing" = 1 ]; then
     echo "ERROR: quay-init --loop would ship skills/tick docs that reference files it does not lay down (referenced ⊆ landed violated)." >&2
     echo "       Add the script to the landing set, or declare the file self-create/reference-doc in plugin/skills/init/SKILL.md." >&2
     return 1
   fi
-  echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc)"
+  echo "  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc; every laid-down script's same-dir dependency is landed)"
   return 0
 }
 
@@ -918,140 +1046,6 @@ PYEOF
 # count — L_D) + the upgrade-path integration in the --loop block. Contract measure/invoke:
 #   `bash plugin/scripts/quay-init.sh --check-drift` stdout's 漂移/缺失/一致 number fields.
 
-# derive_loop_scripts — populate the LOOP_SCRIPTS array (the derived laydown set) from the SAME
-# grep the --loop block used before this extraction: every `plugin/scripts/*` reference in the
-# shipped skills + tick docs, PLUS the explicit bare-name / transitive-dependency / capability-catalog
-# additions (their rationale lives in the --loop block's comments, kept verbatim), PLUS two
-# spelling-insensitive passes (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-
-# closure): (AC2) bare-name references in the TICK DOCS are existence-resolved under plugin/scripts/,
-# and (AC1) the DEPENDENCY CLOSURE — a laid-down script that references a same-dir sibling via a
-# script-dir variable must force that sibling into the set. Single source, drift-immune — there is
-# no second hand-maintained copy of the set.
-
-# script_dir_vars <file> — the variable names a script binds to its OWN directory via the canonical
-# self-locating idiom `VAR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`. AC1's closure walker
-# follows exactly these variables to find same-dir sibling references (content-level, so it is
-# immune to how a doc happened to spell the reference).
-script_dir_vars() {
-  local f="$1"
-  [ -f "$f" ] || return 0
-  # The EXACT self-dir idiom `VAR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"` — the `)" && pwd`
-  # right after `BASH_SOURCE[0]` excludes parent-dir variants like `dirname ...)/../..` (repo_root
-  # computed TWO levels up is NOT a sibling dir and must not seed closure refs).
-  grep -E 'dirname[[:space:]]+"\$\{BASH_SOURCE\[0\]\}"\)" && pwd' "$f" 2>/dev/null \
-    | sed -E 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=".*/\1/' \
-    | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' || true
-}
-
-# closure_ref_names <file> <dir-var...> — the same-dir sibling basenames <file> references via
-# `$VAR/<name>` / `${VAR}/<name>` for each script-dir variable. NO existence filter — the closure
-# GAP check needs to see references to siblings that do not exist in plugin/scripts/ (a dependency
-# that cannot ship), which the existence-filtered closure_siblings intentionally hides. Skips the
-# `..`/`.` traversal refs (REPO_ROOT-style `"$SCRIPT_DIR/../.."` computes a PARENT dir, not a
-# sibling).
-closure_ref_names() {
-  local f="$1"; shift
-  local v m name
-  for v in "$@"; do
-    [ -n "$v" ] || continue
-    while IFS= read -r m; do
-      [ -n "$m" ] || continue
-      name="${m##*/}"
-      # skip traversal refs (`..`, `.`) and dotfiles (.git, .env — repo-internal, not a mechanism sibling)
-      case "$name" in ''|.|..|.*) continue ;; esac
-      echo "$name"
-    done < <(grep -oE "\\\$\{?${v}\}?/[a-zA-Z0-9._-]+" "$f" 2>/dev/null || true)
-  done
-}
-
-# closure_siblings <file> <dir-var...> — closure_ref_names filtered to names that EXIST under
-# plugin/scripts/ (the closure pass can only force siblings that actually exist).
-closure_siblings() {
-  local f="$1"; shift
-  local name
-  for name in $(closure_ref_names "$f" "$@"); do
-    [ -n "$name" ] || continue
-    [ -f "$PLUGIN_ROOT/scripts/$name" ] && echo "$name"
-  done
-}
-
-derive_loop_scripts() {
-  local derived bare_refs
-  derived="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
-  # AC2 (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure): the docs can
-  # reference a script by BARE NAME (no plugin/scripts/ prefix) — the manager's cold-start/SKILL.md
-  # did exactly this for transcript-delivery-check.ts and it silently never shipped. Bare-name
-  # existence-resolution is scoped to the TICK DOCS (plugin/loop/*.md): they are LAID DOWN into the
-  # target and are the target's RUNTIME instruction set, so a bare script name there is a runtime
-  # reference (orchestrator-loop-tick.md's `transcript-delivery-check.ts`). Skills are plugin-side
-  # docs whose bare names are ambiguous prose — meta-examples (init/SKILL.md's send-keys-verified.sh),
-  # ${CLAUDE_PLUGIN_ROOT}/scripts/* plugin-root refs, the installer itself — so resolving those would
-  # RE-DERIVE layer-retired scripts and dev-tree tools. A skill bare-name reference to a mechanism
-  # script is caught by the AC1 closure pass below (send-keys-reliable.sh:41
-  # ${SCRIPT_DIR}/transcript-delivery-check.ts), which is spelling-independent.
-  bare_refs="$(grep -ohE '[a-zA-Z0-9._-]+\.(sh|ts|mjs|js|mts|cjs)' "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sort -u || true)"
-  local -a all=()
-  local b p
-  for b in $bare_refs; do
-    [ -f "$PLUGIN_ROOT/scripts/$b" ] && all+=("$b")
-  done
-  for p in $derived; do all+=("$p"); done
-  # shellcheck disable=SC2207
-  all=(
-    "${all[@]}"
-    # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
-    inner-idle-log.ts
-    heavy-op-token.sh
-    it0-split-or-commit-check.ts
-    pipe-exit-code-check.sh
-    # transitive deps of the checkers (imported by them, not doc-referenced):
-    gate-script-base.ts
-    workflow-event-schema.mjs
-    task-schema.ts
-    touches-parser.ts
-    wiring-coverage-check.ts
-    # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
-    capability-catalog.sh
-  )
-  # Dedupe (an explicit addition may coincide with a derived reference): count and lay each script
-  # exactly once. A duplicated entry would double-count the drift report's derived-set N (the L2
-  # 升级正确性 measure) and re-process the same copy in the --loop laydown.
-  LOOP_SCRIPTS=()
-  local s t in
-  for s in "${all[@]}"; do
-    in=0
-    for t in "${LOOP_SCRIPTS[@]}"; do
-      [ "$t" = "$s" ] && { in=1; break; }
-    done
-    [ "$in" = 0 ] && LOOP_SCRIPTS+=("$s")
-  done
-  # AC1 DEPENDENCY CLOSURE (the PRIMARY mechanism): a laid-down script that references a same-dir
-  # sibling forces that sibling into the set — send-keys-reliable.sh:41
-  # `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` is the regression control. Content-level,
-  # spelling-independent, so it catches the whole class (b) that doc-spelling (a) can never see.
-  # Iterate to a fixpoint (a newly-closed sibling may itself reference one more); the round cap is a
-  # safety valve, not an expected path (the repo's sibling graph is shallow).
-  local changed=1 round=0
-  while [ "$changed" = 1 ] && [ "$round" -lt 20 ]; do
-    changed=0; round=$((round + 1))
-    local -a add=()
-    for s in "${LOOP_SCRIPTS[@]}"; do
-      [ -f "$PLUGIN_ROOT/scripts/$s" ] || continue
-      local vars name
-      vars="$(script_dir_vars "$PLUGIN_ROOT/scripts/$s")"
-      [ -n "$vars" ] || continue
-      for name in $(closure_siblings "$PLUGIN_ROOT/scripts/$s" $vars); do
-        [ -n "$name" ] || continue
-        local already=0 tt
-        for tt in "${LOOP_SCRIPTS[@]}" "${add[@]}"; do
-          [ "$tt" = "$name" ] && { already=1; break; }
-        done
-        [ "$already" = 0 ] && { add+=("$name"); changed=1; }
-      done
-    done
-    LOOP_SCRIPTS+=("${add[@]}")
-  done
-}
 
 # compute_drift_report <workspace-root> — the derived-set-axis drift report (AC2). For every script
 # in the derived laydown set, classify the target's copy:
@@ -1098,7 +1092,8 @@ if [ "$DO_CHECK_DRIFT" = true ]; then
   echo "  derived-set axis: the delivery surface's DERIVED scripts (L_D — the functional surface is the"
   echo "  derived laydown set, NOT the raw plugin/scripts file count). send-keys-verified.sh is retired"
   echo "  from the derived set (layered retirement) and is intentionally NOT reported."
-  derive_loop_scripts
+  LOOP_SCRIPTS=()
+  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
   compute_drift_report "$WORKSPACE_ROOT"
   exit 0
 fi
@@ -1291,6 +1286,14 @@ PYEOF
   # upgrade brought the derived set to 一致.
   echo "  drift report (before upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
+  # gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure: the laydown set
+  # is DERIVED from the shipped mechanism docs' OWN references at BOTH spellings (path-prefixed AND
+  # bare filename) PLUS the laid-down scripts' TRANSITIVE SIBLING DEPENDENCIES — so the mechanism
+  # is functional and reference-spelling-independent (see derive_loop_scripts above; the old
+  # hand-written explicit list now lives in derive_loop_scripts' source-(c) additions).
+  # shellcheck disable=SC2207
+  LOOP_SCRIPTS=()
+  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
       # mode "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never

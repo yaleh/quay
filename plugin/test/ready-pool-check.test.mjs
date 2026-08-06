@@ -547,6 +547,136 @@ test("analyzeTasks derives floor from cap × floorMult (configurable, single sou
   assert.equal(r.deficit, 9);
 });
 
+// ── gap-value-prioritization-has-no-mechanism: relevance signal + priority query (AC1/AC2/AC3/AC6) ──
+// The manager layer's prioritization function: each candidate carries a MECHANICAL relevance signal
+// (strategicTrace = body grep for FINDING-*/RESEARCH-*/GOAL-*/REVIEW-cadence; unblocks = non-done
+// tasks with this candidate as their `parent`; costTouches = declared `## Touches` parsed scale) and
+// `--top N` emits `top_relevance` — the N highest-value current todos with a reason each. AC4: the
+// existing promotion sort (disjointness first, gap>DIR) is untouched.
+
+test("AC1: every candidate carries a mechanical relevance signal (trace/unblocks/cost) in the JSON", (t) => {
+  const root = makeWorkspace("rel-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "code", "a.ts"), "export const a = 1;\n");
+  fs.writeFileSync(path.join(root, "code", "b.ts"), "export const b = 1;\n");
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-trace", gapTask("gap-trace", {
+    body: fourArtifactBody({
+      touches: ["- code/a.ts", "- code/b.ts"],
+      extra: "References FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md",
+    }),
+  }));
+  // A todo child blocked on the candidate.
+  writeTask(root, "gap-child", { ...gapTask("gap-child"), parent: "gap-trace" });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const c = r.candidates.find((x) => x.id === "gap-trace");
+  assert.ok(c, "candidate present in the JSON candidates array");
+  assert.equal(c.relevance.strategicTrace, true, "body grep finds the FINDING-* reference");
+  assert.ok(
+    c.relevance.strategicRefs.includes("FINDING-roadmap-predates-ADR-022-retirement-2026-08-05"),
+    "refs captured",
+  );
+  assert.equal(c.relevance.unblocks, 1, "the todo child with parent=gap-trace is unblocked (field-based)");
+  assert.equal(c.relevance.costTouches, 2, "two declared touches (parsed scale)");
+  assert.equal(typeof c.relevance.relevanceScore, "number");
+  assert.ok(c.relevance.relevanceScore > 0);
+});
+
+test("AC2: --top N emits top_relevance — the N highest-value todos with a reason each", (t) => {
+  const root = makeWorkspace("rel-ac2");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "todo", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  writeTask(root, "gap-trace", gapTask("gap-trace", {
+    body: fourArtifactBody({ touches: ["- code/b.ts"], extra: "FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md" }),
+  }));
+  writeTask(root, "DIR-x", dirTask("DIR-x", { body: fourArtifactBody({ touches: ["- code/c.ts"] }) }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, top: 2 });
+  assert.equal(r.top_relevance.length, 2);
+  assert.equal(r.top_relevance[0].id, "gap-trace", "strategic-traceable todo ranks first (not a gap>DIR tiebreak)");
+  assert.match(r.top_relevance[0].reason, /strategic-traceable/);
+  assert.match(r.top_relevance[0].reason, /score \d+/);
+  assert.equal(typeof r.top_relevance[0].eligible, "boolean");
+
+  // default (top 0) → no top_relevance entries, byte-unchanged for existing consumers.
+  const r0 = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  assert.deepEqual(r0.top_relevance, []);
+});
+
+test("AC6: relevance ranking answers next-to-dispatch — trace dominates, then unblocks, then cost", (t) => {
+  const root = makeWorkspace("rel-ac6");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Two strategic-traceable candidates: one unblocks a child, one does not.
+  writeTask(root, "gap-trace-unblock", gapTask("gap-trace-unblock", {
+    body: fourArtifactBody({ touches: ["- code/a.ts"], extra: "FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md" }),
+  }));
+  writeTask(root, "gap-trace-c", { status: "todo", labels: [], parent: "gap-trace-unblock", body: fourArtifactBody({ touches: ["- code/c1.ts"] }) });
+  writeTask(root, "gap-trace-plain", gapTask("gap-trace-plain", {
+    body: fourArtifactBody({ touches: ["- code/b.ts"], extra: "RESEARCH-claude-p-streaming-2026-08-04.md" }),
+  }));
+  // Untraceable but unblocks 2 — must rank BELOW both traceable candidates.
+  writeTask(root, "DIR-unblock", dirTask("DIR-unblock", { body: fourArtifactBody({ touches: ["- code/d.ts"] }) }));
+  writeTask(root, "DIR-unblock-c1", { status: "todo", labels: [], parent: "DIR-unblock", body: fourArtifactBody({ touches: ["- code/e1.ts"] }) });
+  writeTask(root, "DIR-unblock-c2", { status: "todo", labels: [], parent: "DIR-unblock", body: fourArtifactBody({ touches: ["- code/e2.ts"] }) });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, top: 5 });
+  const ids = r.top_relevance.map((x) => x.id);
+  assert.deepEqual(ids.slice(0, 2), ["gap-trace-unblock", "gap-trace-plain"],
+    "traceable first; the unblocking traceable candidate ranks before the plain traceable one");
+  assert.ok(ids.indexOf("DIR-unblock") > ids.indexOf("gap-trace-plain"),
+    "untraceable (even unblocking 2) ranks below a traceable candidate — strategicTrace dominates");
+  const unblock = r.top_relevance.find((x) => x.id === "DIR-unblock");
+  assert.equal(unblock.relevance.unblocks, 2);
+  assert.equal(unblock.relevance.strategicTrace, false);
+  const unblockTrace = r.top_relevance.find((x) => x.id === "gap-trace-unblock");
+  assert.equal(unblockTrace.relevance.unblocks, 1);
+  assert.equal(unblockTrace.relevance.strategicTrace, true);
+});
+
+test("AC3: signal sources are mechanical — body grep, parent/children fields, touches scale (no human score)", (t) => {
+  const root = makeWorkspace("rel-ac3");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // No FINDING/RESEARCH/GOAL/REVIEW-cadence reference → strategicTrace false, refs empty.
+  writeTask(root, "gap-no-trace", gapTask("gap-no-trace", {
+    body: fourArtifactBody({ touches: ["- code/a.ts", "- code/b.ts", "- code/c.ts"] }),
+  }));
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, top: 5 });
+  const c = r.top_relevance.find((x) => x.id === "gap-no-trace");
+  assert.equal(c.relevance.strategicTrace, false);
+  assert.deepEqual(c.relevance.strategicRefs, []);
+  assert.equal(c.relevance.costTouches, 3, "cost = declared touches parsed scale");
+  assert.equal(c.relevance.unblocks, 0, "no children with parent=this candidate");
+
+  // A lowercase hyphenated compound (finding-ledger, an adapter name) is NOT a strategic-doc reference.
+  const root2 = makeWorkspace("rel-ac3b");
+  t.after(() => fs.rmSync(root2, { recursive: true, force: true }));
+  writeTask(root2, "gap-adapter", gapTask("gap-adapter", {
+    body: fourArtifactBody({ extra: "Prepare finding-ledger adapter (proposal-ledger.json → FindingEnvelope)" }),
+  }));
+  const r2 = analyzeTasks({ tasksDir: path.join(root2, "tasks"), root: root2, top: 5 });
+  const c2 = r2.top_relevance.find((x) => x.id === "gap-adapter");
+  assert.equal(c2.relevance.strategicTrace, false, "lowercase hyphenated compound is not a strategic ref");
+});
+
+test("AC4 regression: top_relevance is additive — promotions/candidates order unchanged when --top is passed", (t) => {
+  const root = makeWorkspace("rel-ac4");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "DIR-cap", dirTask("DIR-cap"));
+  writeTask(root, "gap-defect", gapTask("gap-defect"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, top: 5 });
+  const r0 = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.deepEqual(r.candidates.map((c) => c.id), r0.candidates.map((c) => c.id), "candidate order unchanged");
+  assert.deepEqual(r.promotions, r0.promotions, "promotions unchanged by the priority query");
+  assert.equal(r.promotions.length, 1);
+  assert.equal(r.promotions[0].id, "gap-defect", "gap>DIR promotion order preserved (AC4)");
+  assert.equal(r.top_relevance.length, 2, "top_relevance is additive over the two todos");
+});
+
 // ── CLI smoke: --root runs and prints a JSON pool field ──────────────────────────────────────────
 
 test("CLI smoke: --root produces JSON with pool/dispatchable_disjoint/floor (exit 0)", (t) => {
@@ -749,3 +879,23 @@ test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC
   assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
 });
 
+
+test("CLI smoke: --top N emits top_relevance with reasons (the priority-query invoke surface, AC2)", (t) => {
+  const root = makeWorkspace("cli-top");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-trace", gapTask("gap-trace", {
+    body: fourArtifactBody({ touches: ["- code/a.ts"], extra: "FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md" }),
+  }));
+  writeTask(root, "gap-plain", gapTask("gap-plain", { body: fourArtifactBody({ touches: ["- code/b.ts"] }) }));
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--top", "1"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.top_relevance.length, 1);
+  assert.equal(parsed.top_relevance[0].id, "gap-trace", "top-1 by relevance is the strategic-traceable todo");
+  assert.match(parsed.top_relevance[0].reason, /strategic-traceable/);
+  assert.match(parsed.top_relevance[0].reason, /FINDING-roadmap/);
+});

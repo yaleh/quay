@@ -42,6 +42,7 @@ import {
   writeSuiteState,
   readSuiteEvents,
   shouldStopDispatch,
+  routeRed,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -193,13 +194,24 @@ test("AC4 — the trigger is Monitor-style event monitoring: no new scheduling s
 
 // ── AC5 (gap-full-suite-runner-concurrency-default-and-gate): failed vs aborted reason axis ─────────
 
-test("AC5 — shouldStopDispatch distinguishes failed vs aborted (aborted does NOT stop; failed/missing DOES)", () => {
+test("AC5 — shouldStopDispatch distinguishes failed vs aborted vs infra-error (only failed/missing stops)", () => {
   assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "red+failed stops dispatch");
   assert.equal(shouldStopDispatch({ state: "red" }), true, "legacy red (no reason) stops dispatch — fail-closed");
   assert.equal(shouldStopDispatch({ state: "red", reason: "aborted" }), false, "red+aborted does NOT stop dispatch");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "infra-error" }), false, "red+infra-error does NOT stop dispatch (no code-failure conclusion)");
   assert.equal(shouldStopDispatch({ state: "green" }), false, "green never stops");
   assert.equal(shouldStopDispatch({ state: "running" }), false, "running never stops");
   assert.equal(shouldStopDispatch(null), false, "absent state file never stops (outer hasn't run round 1)");
+});
+
+test("AC2 — routeRed routes by reason: failed/legacy→red-window-triage, aborted/infra-error→resource-gate, non-red→proceed", () => {
+  assert.equal(routeRed({ state: "red", reason: "failed" }), "red-window-triage", "red+failed stops + triage");
+  assert.equal(routeRed({ state: "red" }), "red-window-triage", "legacy red fails closed to red-window-triage");
+  assert.equal(routeRed({ state: "red", reason: "aborted" }), "resource-gate", "red+aborted → resource-gate, NOT code-risk stop");
+  assert.equal(routeRed({ state: "red", reason: "infra-error" }), "resource-gate", "red+infra-error → resource-gate (environment, not code)");
+  assert.equal(routeRed({ state: "green" }), "proceed", "green proceeds");
+  assert.equal(routeRed({ state: "running" }), "proceed", "running proceeds");
+  assert.equal(routeRed(null), "proceed", "absent state file proceeds");
 });
 
 test("AC5 — runOnce reports stopSignal=false for red+aborted and true for red+failed", () => {

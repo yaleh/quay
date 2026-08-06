@@ -66,3 +66,11 @@ at: 2026-08-06T07:2xZ
 changed: archguard 实证（0/6）+ 外层核实（行 17 注释承认查源布局）立案。verify-delivery-surface 查源
 布局看不见消费者 laid 布局——对任何消费方结构性假阴性。AC16 完整性判据的直接威胁（若拿它当证据得
 结构上不可能的绿）。高优先——AC16 交付面。
+
+## 追加违规（2026-08-06T09:0xZ，管理者审计 + 外层核实）
+
+**B·verify-delivery-surface.ts 第 5 项自相矛盾**：deliverables 列 `os-anchor-install.sh +
+os-anchor-watchdog.sh`（criterion「OS 级周期锚点 systemd user timer」），但 **gap-os-anchor-watchdog-
+lease-model 任务 122-140 行已裁定 watchdog 不是产品交付物**（4 次全灭全是实验室自伤、循环论证、
+默认不装不进 plugin/ 推荐路径）。⇒ L1 交付面检查在算一个已裁定不属产品的东西，且 systemd 是
+Linux-only 违反可移植性。修复：第 5 项移除 os-anchor 或改判据为「非产品交付」。

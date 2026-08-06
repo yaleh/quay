@@ -25,12 +25,12 @@
 #
 # Usage:
 #   bash plugin/scripts/heavy-op-token.sh --status
-#   bash plugin/scripts/heavy-op-token.sh --acquire <project> [--timeout <s>]
-#   bash plugin/scripts/heavy-op-token.sh --renew <project>    # the WORK OWNER re-asserts liveness (lease + pid)
+#   bash plugin/scripts/heavy-op-token.sh --acquire <project> [--timeout <s>] [--lease <s>]
+#   bash plugin/scripts/heavy-op-token.sh --renew <project>   # retry loop: "this work is still running" (one line)
 #   bash plugin/scripts/heavy-op-token.sh --release <project>
-#   bash plugin/scripts/heavy-op-token.sh --report            # waited_ms distribution (count/median/p90/max)
+#   bash plugin/scripts/heavy-op-token.sh --report            # waited_ms distribution + minutes lost per project
 #   bash plugin/scripts/heavy-op-token.sh --root <dir> ...   # test seam: override the state-dir root
-#   bash plugin/scripts/heavy-op-token.sh --events-file <p> ... # test seam: override the events file (default ${PWD}/.quay/heavy-op-token-events.jsonl)
+#   bash plugin/scripts/heavy-op-token.sh --events-file <p> ... # test seam: override the events file (default $QUAY_GLOBAL_DIR/heavy-op/events.jsonl)
 #
 # LEASE + RENEW (gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs):
 #   The token's holder identity was "the shell that acquired it", but the WORK can live in a different
@@ -63,26 +63,50 @@
 #   behavior; if the work is truly still running, the loop's own `--renew` is what keeps the mutex.
 #
 # Contract (from the task's ## Contract block):
-#   measure  holder   = `--status` 的 holder 字段
-#   measure  wait_ms  = `--acquire <project>` 输出的 waited_ms 字段
-#   measure  reclaims = `--status` 的 stale_reclaims 字段
+#   measure  holder       = `--status` 的 holder 字段
+#   measure  holder_alive = `--status` 的 holder_alive 字段（持有者 pid 是否存活；与 kill -0 一致，
+#                           gap-token-status-reports-a-dead-holder-as-busy 新增）
+#   measure  wait_ms      = `--acquire <project>` 输出的 waited_ms 字段
+#   measure  reclaims     = `--status` 的 stale_reclaims 字段
 #   band     concurrent_holders = 1
+#   invariant status 只读不写：--status 绝不在读路径回收（那会让读操作产生副作用）；对死持有者，
+#            只报告「下一个 --acquire 会怎样」并给出该跑的 --acquire 命令（AC4/AC5/AC7）。
 #   invoke   `bash plugin/scripts/heavy-op-token.sh --acquire quay --timeout 0`
 #   control  A 持有时 B --acquire ⇒ B 失败且打印 A 的身份与已持有时长；A --release 后 B 成功
 #
 # MECHANISM:
 #   - acquire = atomic `wx`-create (the bash spelling of the Land-lock pattern CLAUDE.md records):
 #     `set -o noclobber` + redirect = O_CREAT|O_EXCL. Nobody can bypass a created token.
-#   - reclaim, in priority order (try_acquire):
-#       * a LIVE pid is held UNLESS the lease has expired — a live holder is never stolen on mtime alone
-#         (protects long-running one-shot holders), but a live holder that never renews or releases is
-#         reclaimable at lease expiry (the anti-hang backstop — AC3's "not permanently locked out").
-#       * pid DEAD + mtime older than HEAVY_OP_STALE_TIMEOUT_S ⇒ reclaim EARLY (accelerated release;
-#         today's verified 20× crash-reclaim behavior, AC4) — even while the lease is still valid.
-#       * pid DEAD + lease expired ⇒ reclaim (the primary lease path, AC3).
-#       * pid DEAD + lease valid + mtime fresh ⇒ HELD (the retry loop just crashed between attempts and
-#         may renew — the AC2 grace window).
-#       * legacy token (no lease_expires_ms field) falls back to the OLD rule: mtime stale AND pid dead.
+#   - LEASE = the token's OWNER-LIVENESS SIGNAL, and the fix for
+#     gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs: --acquire records
+#     `lease_expires_ms = now + HEAVY_OP_LEASE_S` (default 300). The ONE entity that knows whether
+#     "this heavy op" is still going is the entity that STARTED it — for a retry loop that is the
+#     LOOP, not any single attempt's shell (each `timeout 590 …` attempt kills its own acquiring
+#     shell, so a pid-death does NOT mean the work died). The loop therefore RENEWS the lease with
+#     one `--renew <project>` call between attempts: renew updates lease_expires_ms, refreshes the
+#     token mtime (the heartbeat), and re-records pid to the renewing shell. When renewals stop, the
+#     lease expires and the token is reclaimable — pid/mtime are only accelerators, never the
+#     deciding signal (invariant: the liveness signal must come from the entity that knows whether
+#     the work continues, not from a bystander guessing processes; pid/pgid/session were all
+#     DISPROVEN as "the work" — see the task body's negative reasoning).
+#   - reclaim, in precedence order:
+#       1. pid ALIVE ⇒ HELD. (For single-shot holders like scripts/test.sh / session-liveness the
+#          recorded pid IS the work — an alive pid is a true liveness signal; the lease only needs
+#          to outlive the hold, which is why scripts/test.sh passes an explicit long --lease.)
+#       2. pid DEAD **AND** lease expired ⇒ reclaim (the lease is the deciding signal: the work
+#          stopped renewing).
+#       3. pid DEAD **AND** mtime older than HEAVY_OP_STALE_TIMEOUT_S ⇒ reclaim EARLY (accelerated
+#          release — crash recovery, kept from the pre-lease behavior: kill -9 the holder and the
+#          other side reclaims in ~STALE_TIMEOUT_S, not after the full lease). mtime is refreshed
+#          by acquire AND by renew, so a renewing retry loop whose per-attempt shells die is never
+#          reclaimed here.
+#       4. pid DEAD + lease active + mtime fresh ⇒ HELD (a dead holder whose token was JUST touched;
+#          wait for 2 or 3).
+#   - A token whose file predates the lease field (no lease_expires_ms) is treated as having an
+#     active lease (backward compat: it falls back to the pid/mtime logic above exactly as before).
+#   - FAILURE DIRECTION IS SAFE (AC4 of the parent task): a caller that forgets to renew LOSES the
+#     token at lease expiry — no worse than today's crash-recovery, and the lease is the one signal
+#     that cannot be faked by a bystander.
 #   - no silent wait: `--timeout 0` (the default) fails IMMEDIATELY with the holder's identity and
 #     held duration — silent waiting is indistinguishable from a hang. `--timeout N` is a REAL
 #     bounded poll, NOT a single decision: do_acquire re-checks the reclaim conditions once per
@@ -110,26 +134,29 @@ HEAVY_OP_DIR="${GLOBAL_DIR}/heavy-op"
 TOKEN_FILE="${HEAVY_OP_DIR}/token"
 RECLAIM_COUNTER="${HEAVY_OP_DIR}/stale_reclaims"
 STALE_TIMEOUT_S="${HEAVY_OP_STALE_TIMEOUT_S:-30}"
-# LEASE duration: how long a holder is guaranteed exclusive without renewing. Default 1h — FAR above a
-# one-shot heavy op (full suite ~8 min) so a non-renewing holder never hits it; the anti-hang backstop
-# for a live-but-abandoned holder; and crash recovery does NOT wait for it (the pid-dead + mtime-stale
-# accelerated path reclaims in ~30s, AC4). The retry loop extends it via --renew.
-HEAVY_OP_LEASE_S="${HEAVY_OP_LEASE_S:-3600}"
-LEASE_MS=$(( HEAVY_OP_LEASE_S * 1000 ))
+# Lease duration (seconds). `--acquire` records lease_expires_ms = now + LEASE_S*1000; `--renew`
+# resets it to now + LEASE_S*1000. The lease is the OWNER-LIVENESS signal: it is refreshed only by
+# the entity that knows the work continues (the retry loop), so when renewals stop the token is
+# reclaimable at expiry. Must exceed STALE_TIMEOUT_S or the accelerated pid-death path would be
+# slower than the lease and pointless. Default 300s = 5× the 30s crash grace; a retry loop renews
+# every attempt and a single-shot holder (scripts/test.sh) passes an explicit longer --lease.
+LEASE_S="${HEAVY_OP_LEASE_S:-300}"
 # LAST_BLOCK — the reason the most recent try_acquire failed (holder alive / holder dead-not-stale
 # + reclaim delta). Set by try_acquire on each failed claim, surfaced by do_acquire's timeout
 # branch so the FINAL failure line names the holder's real state instead of a generic "held".
 LAST_BLOCK=""
 
-# ── events landing (gap-token-wait-times-are-printed-once-and-never-landed) ─────────────────────────────
-# Every acquire appends one JSONL record to the workspace's `.quay/` runtime-state file — the same
-# shape / location / gitignore treatment as gate-events.jsonl (baseline for the concurrency-relaxation
-# experiment's third number: the real distribution of waited_ms). The landing is OBSERVATION ONLY:
-# a failed write must NEVER change the acquire's exit code (AC4 — the observation mechanism is not a
-# new single point of failure for the global single-flight token). Default resolves from the caller's
-# CWD (scripts/test.sh and the inner dispatch run from the workspace root); HEAVY_OP_EVENTS_FILE or
-# --events-file override it (test seam).
-EVENTS_FILE="${HEAVY_OP_EVENTS_FILE:-${PWD}/.quay/heavy-op-token-events.jsonl}"
+# ── events landing (gap-the-token-measures-the-wait-and-throws-it-away) ────────────────────────────────
+# Every acquire appends one JSONL record to the SHARED cross-project events file
+# $QUAY_GLOBAL_DIR/heavy-op/events.jsonl — the SAME dir the token itself lives in, so archguard /
+# meta-cc / quay all contribute to the one distribution (a per-workspace `.quay/` file could only see
+# quay's waits; the halt-or-not decision needs all three). Each record carries event="ACQUIRED" on
+# every acquire attempt — success AND failure — so the "minutes lost per hour waiting for the token"
+# question (the policy decision the header deferred at :61) is answerable from the file. The landing
+# is OBSERVATION ONLY: a failed write must NEVER change the acquire's exit code (AC4 — the observation
+# mechanism is not a new single point of failure for the global single-flight token). HEAVY_OP_EVENTS_FILE
+# or --events-file override it (test seam); --root redirects it into the test root.
+EVENTS_FILE="${HEAVY_OP_EVENTS_FILE:-}"
 # A distribution (median/p90/max) is only meaningful past this many samples; below it the report says
 # "样本 N 不足" instead of printing a pretty zero (gap-token-wait-times... AC6).
 MIN_EVENTS_FOR_DIST=10
@@ -145,7 +172,7 @@ jsonl_escape() {
 land_event() {
   local project="$1" waited_ms="$2" acquired="$3" outcome="$4" holder="$5"
   { mkdir -p "$(dirname "${EVENTS_FILE}")" \
-      && printf '{"ts":%s,"project":"%s","waited_ms":%s,"acquired":"%s","holder":"%s","outcome":"%s"}\n' \
+      && printf '{"ts":%s,"event":"ACQUIRED","project":"%s","waited_ms":%s,"acquired":"%s","holder":"%s","outcome":"%s"}\n' \
          "$(now_ms)" "$(jsonl_escape "${project}")" "$waited_ms" "$acquired" \
          "$(jsonl_escape "${holder}")" "$outcome" >> "${EVENTS_FILE}"; } 2>/dev/null || true
 }
@@ -179,8 +206,10 @@ while [ "$i" -lt "${#args[@]}" ]; do
     --acquire) cmd="acquire"; project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --renew)   cmd="renew";   project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --release) cmd="release"; project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
+    --renew)   cmd="renew";   project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --status)  cmd="status" ;;
     --timeout) timeout="${args[$((i+1))]:-0}"; i=$((i+1)) ;;
+    --lease)   LEASE_S="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --root)    GLOBAL_DIR="${args[$((i+1))]:-}"; HEAVY_OP_DIR="${GLOBAL_DIR}/heavy-op"; TOKEN_FILE="${HEAVY_OP_DIR}/token"; RECLAIM_COUNTER="${HEAVY_OP_DIR}/stale_reclaims"; i=$((i+1)) ;;
     --events-file) EVENTS_FILE="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --report)  cmd="events-report" ;;
@@ -190,13 +219,19 @@ while [ "$i" -lt "${#args[@]}" ]; do
   i=$((i+1))
 done
 
+# Resolve the default events file AFTER argument parsing so `--root` (which sets HEAVY_OP_DIR) redirects
+# it into the same test root; an explicit --events-file / HEAVY_OP_EVENTS_FILE wins over the default.
+if [ -z "${EVENTS_FILE}" ]; then
+  EVENTS_FILE="${HEAVY_OP_DIR}/events.jsonl"
+fi
+
 case "$cmd" in
   "")
-    printf 'usage: heavy-op-token.sh --status | --acquire <project> [--timeout <s>] | --renew <project> | --release <project>\n' >&2
+    printf 'usage: heavy-op-token.sh --status | --acquire <project> [--timeout <s>] [--lease <s>] | --renew <project> | --release <project>\n' >&2
     exit 2
     ;;
 esac
-if [ "$cmd" = "acquire" ] || [ "$cmd" = "renew" ] || [ "$cmd" = "release" ]; then
+if [ "$cmd" = "acquire" ] || [ "$cmd" = "release" ] || [ "$cmd" = "renew" ]; then
   if [ -z "$project" ]; then
     printf 'heavy-op-token: %s requires a project id\n' "--$cmd" >&2
     exit 2
@@ -204,6 +239,9 @@ if [ "$cmd" = "acquire" ] || [ "$cmd" = "renew" ] || [ "$cmd" = "release" ]; the
 fi
 case "$timeout" in
   ''|*[!0-9]*) printf 'heavy-op-token: --timeout must be a non-negative integer\n' >&2; exit 2 ;;
+esac
+case "$LEASE_S" in
+  ''|*[!0-9]*) printf 'heavy-op-token: --lease must be a positive integer (seconds)\n' >&2; exit 2 ;;
 esac
 
 # ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
@@ -337,6 +375,8 @@ classify_hold() {
 
 # try_acquire <project> — one atomic claim attempt. 0 = acquired; 1 = held/stale-but-not-reclaimable.
 # Prints holder identity + held duration to stderr on failure (the control contract).
+# Reclaim precedence (see header MECHANISM): alive pid ⇒ held; dead pid + expired lease ⇒ reclaim;
+# dead pid + stale mtime ⇒ accelerated reclaim; dead pid + fresh mtime + active lease ⇒ held.
 try_acquire() {
   local project="$1" holder pid lease now mtime_s held reclaim_in
   if [ -e "${TOKEN_FILE}" ]; then
@@ -520,7 +560,7 @@ do_renew() {
 }
 
 do_release() {
-  local project="$1" token_pid
+  local project="$1" token_pid token_holder
   if ! fail_open_or_prepare; then
     printf 'heavy-op-token: release FAIL-OPEN (state dir not writable) — no-op\n' >&2
     return 0
@@ -529,26 +569,46 @@ do_release() {
     printf 'heavy-op-token: release: no token held (idempotent no-op)\n'
     return 0
   fi
+  token_holder="$(read_holder)"
   token_pid="$(read_holder_pid)"
-  if [ -n "$token_pid" ] && [ "$token_pid" = "$PPID" ]; then
+  # Ownership = the self-reported project identity (the retry loop's shell changes across attempts,
+  # so pid is not stable; holder is). The pid==PPID check is kept as a fallback for pre-lease /
+  # direct-shell callers, and prevents a DIFFERENT project from releasing another's token.
+  if [ "${token_holder}" = "${project}" ] || { [ -n "$token_pid" ] && [ "$token_pid" = "$PPID" ]; }; then
     rm -f "${TOKEN_FILE}"
     printf 'heavy-op-token: released (project=%s, pid=%s)\n' "${project:-?}" "$PPID"
     return 0
   fi
-  printf 'heavy-op-token: release: token held by pid %s, not us (%s) — NOT releasing (idempotent no-op)\n' \
-    "${token_pid:-unknown}" "$PPID" >&2
+  printf 'heavy-op-token: release: token held by %s (pid %s), not %s — NOT releasing (idempotent no-op)\n' \
+    "${token_holder:-unknown}" "${token_pid:-unknown}" "$project" >&2
   return 0
 }
 
-# ── events report (gap-token-wait-times-are-printed-once-and-never-landed AC6) ──────────────────────────
+# ── events report (gap-the-token-measures-the-wait-and-throws-it-away AC3 / AC6) ────────────────────────
+# One command answers the halt-or-not question the header deferred at :61: per project, how many
+# minutes were lost waiting for the token (sum(waited_ms)/60000). That per-project figure is printed
+# whenever there is >= 1 record; the distribution (median/p90/max) is still gated on the sample
+# threshold (refusing a "pretty 0" over too few samples).
 do_events_report() {
-  local file="${EVENTS_FILE}" count=0 vals
+  local file="${EVENTS_FILE}" count=0 vals total_min project_min
   if [ ! -f "${file}" ]; then
     printf 'heavy-op-token-events: no events file at %s (count 0)\n' "${file}"
     return 0
   fi
   count="$(grep -c '^{' "${file}" 2>/dev/null || echo 0)"
   case "$count" in ''|*[!0-9]*) count=0 ;; esac
+  if [ "$count" -gt 0 ]; then
+    # Contract wait_ms_per_hour: sum(waited_ms)/1000/60 minutes — globally AND per project (AC3).
+    # Best-effort like the landing: a line missing waited_ms (truncated/corrupt) must not crash the
+    # report — `|| true` keeps a no-match grep from tripping `set -euo pipefail`.
+    total_min="$(grep -o '"waited_ms":[0-9]*' "${file}" 2>/dev/null | sed 's/^"waited_ms"://' \
+      | awk '{ s += $1 } END { printf "%.2f", s / 60000 }' || true)"
+    project_min="$(grep -o '"project":"[^"]*","waited_ms":[0-9]*' "${file}" 2>/dev/null \
+      | sed 's/"project":"//; s/","waited_ms":/ /' \
+      | awk '{ sum[$1] += $2 } END { for (p in sum) printf "%s=%.2f ", p, sum[p] / 60000 }' || true)"
+    printf 'heavy-op-token-events: minutes_lost_total=%s over %s acquires\n' "${total_min}" "${count}"
+    printf 'heavy-op-token-events: minutes_lost by project: %s\n' "${project_min}"
+  fi
   if [ "$count" -lt "${MIN_EVENTS_FOR_DIST}" ]; then
     # Refusing a "pretty 0": a median/p90/max over too few samples is noise dressed as signal.
     printf 'heavy-op-token-events: count=%s — 样本 %s 不足 (need >= %s for a distribution); no median/p90/max printed\n' \
@@ -563,6 +623,52 @@ do_events_report() {
       p90i = int(n * 0.9) + 1; if (p90i > n) p90i = n;
       printf "heavy-op-token-events: count=%d median_ms=%d p90_ms=%d max_ms=%d\n", n, med, a[p90i], a[n];
     }'
+}
+
+# do_renew <project> — the lease heartbeat. Called ONCE between attempts by the retry loop — the ONLY
+# entity that knows whether the work is still going (each attempt's shell dies on `timeout`, so pid
+# is not a reliable "is the work alive" signal; the LOOP is). Renew:
+#   - re-records pid to the renewing shell ($PPID) — so the accelerated path sees a live pid while
+#     the loop lives, and a dead pid once the loop dies;
+#   - pushes lease_expires_ms to now + LEASE_S*1000 — the deciding liveness signal;
+#   - refreshes the token mtime (atomic temp+mv) — the heartbeat that keeps the accelerated
+#     stale-mtime path quiet while renewals continue.
+# Fails (exit 1) if this project does not currently hold the token — a work that lost the token must
+# not keep pretending it holds it.
+do_renew() {
+  local project="$1" holder pid lease acq host tmp
+  if ! fail_open_or_prepare; then
+    printf 'heavy-op-token: renew FAIL-OPEN (state dir not writable) — no-op\n' >&2
+    return 0
+  fi
+  if [ ! -e "${TOKEN_FILE}" ]; then
+    printf 'heavy-op-token: renew: no token held by %s (nothing to renew — --acquire first)\n' "${project:-?}" >&2
+    return 1
+  fi
+  holder="$(read_holder)"
+  if [ "${holder:-}" != "$project" ]; then
+    printf 'heavy-op-token: renew: token held by %s, not %s — NOT renewing (work lost the token)\n' \
+      "${holder:-unknown}" "$project" >&2
+    return 1
+  fi
+  acq="$(read_field acquired_ms)"
+  pid="$PPID"
+  lease="$(( $(now_ms) + LEASE_S * 1000 ))"
+  host="$(read_field host)"
+  tmp="${TOKEN_FILE}.renew.$$"
+  # Atomic rewrite in the same dir (temp + mv): a half-written token must never be observable. The
+  # holder is re-checked immediately before the mv so a concurrent reclaim+acquire (the work lost
+  # the token while we were writing) can never have our mv stomp the NEW holder's token.
+  if printf 'holder=%s\npid=%s\nacquired_ms=%s\nlease_expires_ms=%s\nhost=%s\n' \
+      "$project" "$pid" "$acq" "$lease" "$host" > "${tmp}" 2>/dev/null \
+      && [ "$(read_holder)" = "$project" ] \
+      && mv -f "${tmp}" "${TOKEN_FILE}" 2>/dev/null; then
+    printf 'heavy-op-token: renewed (project=%s, pid=%s, lease now expires in %ss)\n' "$project" "$pid" "$LEASE_S"
+    return 0
+  fi
+  rm -f "${tmp}" 2>/dev/null || true
+  printf 'heavy-op-token: renew FAILED to write token (project=%s) — lease NOT extended (token may have been reclaimed)\n' "$project" >&2
+  return 1
 }
 
 case "$cmd" in

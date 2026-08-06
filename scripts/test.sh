@@ -408,13 +408,14 @@ resource_gate_check() {
 # releases the token on every path, which is the correct one-shot release. The lease only matters as a
 # backstop for a live-but-abandoned holder, and for retry-loop holders that --renew between attempts.
 HEAVY_OP_ACQUIRE_TIMEOUT_S="${HEAVY_OP_ACQUIRE_TIMEOUT_S:-40}"
+HEAVY_OP_LEASE_S="${HEAVY_OP_LEASE_S:-3600}"
 heavy_op_acquire() {
   if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
     echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping heavy-op token (nested runner; outer suite holds it)"
     return 0
   fi
   echo "== heavy-op token (gap-no-cross-project-heavy-op-token) =="
-  if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout "${HEAVY_OP_ACQUIRE_TIMEOUT_S}"; then
+  if ! bash "${repo_root}/plugin/scripts/heavy-op-token.sh" --acquire quay --timeout "${HEAVY_OP_ACQUIRE_TIMEOUT_S}" --lease "${HEAVY_OP_LEASE_S}"; then
     echo "scripts/test.sh: could not acquire the heavy-op token within ${HEAVY_OP_ACQUIRE_TIMEOUT_S}s (holder state printed above — dead vs alive) — not running the full suite to avoid cross-project resource contention. Re-run when the token is free." >&2
     exit 1
   fi

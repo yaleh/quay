@@ -249,6 +249,8 @@ POST https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages
   session-launch-recipes §5 的「压缩过晚 API 报错」形态不发生在 manager）。
 - **flag-only 参数**（settings.json 没有对应键，存于 `_launchSpec`，由 launcher 翻译成 CLI 参数）：
   `--exclude-dynamic-system-prompt-sections`（`_launchSpec.excludeDynamicSystemPromptSections:true`）、
+  `--prompt-suggestions false`（`_launchSpec.promptSuggestions:false`，**REQUIRED**——ghost-suggestion
+  故障 6 从源头消除，人裁定冷启动必带；`gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`）、
   `-n/--name`（`_launchSpec.roles.<role>.name`）、`--bare`（一次性验证，`quay-launch.sh <role> --bare`）、
   `--model`（`_launchSpec.roles.<role>.model`，仅 outer/inner 有；manager 用 claude 默认）。
 
@@ -256,12 +258,15 @@ POST https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages
 
 ```bash
 bash plugin/scripts/quay-launch.sh outer --dry-run
-# claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --model deepseek-v4-flash -n quay-outer
+# claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false --model deepseek-v4-flash -n quay-outer
 bash plugin/scripts/quay-launch.sh inner --dry-run
-# claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --model deepseek-v4-flash -n quay-inner
+# claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false --model deepseek-v4-flash -n quay-inner
 bash plugin/scripts/quay-launch.sh manager --dry-run
-# claude --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections -n quay-manager
+# claude --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false -n quay-manager
 ```
+
+`--prompt-suggestions false` 是 **REQUIRED**（非可选）——每个角色命令都必须出现（launcher 从
+`_launchSpec.promptSuggestions:false` 机械翻译；`plugin/test/launch-settings.test.mjs` 有机械断言）。
 
 - **验命令**（AC4 正控）：`claude --settings .claude/launch.settings.json --version`。
 - **负控**（防 restart-plan-AC1 那类「选错模型」）：刻意改 `_launchSpec.roles.<role>.model` ⇒

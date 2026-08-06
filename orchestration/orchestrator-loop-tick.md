@@ -55,15 +55,44 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report -
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 ```
 
-**3. 找到内层会话**
+**3. 自检内层会话（三态处理，gap-outer-self-checks-and-creates-inner-session）——不是「找到」，是「确保」**
+
+内层不再是「找到就行」——冷启动第 3 步改为**自检**：inner 窗口在不在、claude 进程活不活、
+transcript 有没有真实 user 消息（被驱动过）。三态判定与处理（判据用可信的：窗口按名寻址、
+进程看 `/proc` cmdline、user 消息看 transcript——不用 pane 哈希假阳、不用 heartbeat 冻结假警）：
+
+| 状态 | 判定 | 处理 |
+|---|---|---|
+| **健康** | inner 窗口存在 **且** claude 进程存在 **且** transcript 有真实 user 消息 | **什么都不做**（权限边界——已存在的 inner 可能是 manager 建的，外层无权判断/重建/改参数），直接进入正常驱动流程 |
+| **空壳** | inner 窗口存在 **且** claude 进程存在 **但** transcript 无真实 user 消息（被拉起但未驱动，11:40 watchdog 形态） | **驱动而非重建**——不丢可能已有的上下文，接手 manager 预建的会话 |
+| **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner，manager 跨项目不属于项目拓扑）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
 
 ```bash
-tmux list-sessions && tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} #{pane_current_path}"
+bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
 ```
 
-内层是 `cwd` 为 `$REPO_ROOT` 且**不是你自己**的那个 pane（tmux 会话是 `$TMUX_SESSION`，均见
-`.quay/config.yml` `loop:` 节；用 `tmux capture-pane -p -t <target> | tail -20` 确认它在跑开发任务
-而非编排）。找不到就升级给人。
+按 `state` 分派：
+
+- **`healthy`** ⇒ 什么都不做——不重建、不重启、不改启动参数（权限边界，负控制：健康 inner 不被动）。
+  继续步骤 4（重建 cron）。
+- **`empty-shell`** ⇒ **驱动** inner（send-keys-reliable，transcript 验证送达，不假设成功）：
+  ```bash
+  bash plugin/scripts/send-keys-reliable.sh "$TMUX_SESSION:inner" "执行 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <inner-transcript>
+  ```
+- **`missing`** ⇒ 调**两窗口**工厂创建拓扑，验证在位，然后同样驱动 inner：
+  ```bash
+  bash plugin/scripts/quay-topology.sh --session "$TMUX_SESSION"          # 两窗口工厂（outer+inner，幂等；manager 跨项目，不建）
+  bash plugin/scripts/topology-check.sh --session "$TMUX_SESSION" --json   # 验证：ok:true = 两窗口各有 claude 进程
+  ```
+  创建后 **INNER-DRIVEN 验证送达**：transcript 出现真实 user 消息（send-keys-reliable 的
+  `transcript-delivery-check.ts` 判据），不假设成功。**工厂失败/验证不过 ⇒ 升级给人**（step 5），
+  不静默继续——建不出来就进不了正常驱动流程。
+
+**transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
+> `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
+且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
+**发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
+inner 会话的（例如 inner claude 进程启动时刻之后的），否则按空壳驱动——驱动不重建，代价有界。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
@@ -137,17 +166,6 @@ Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plug
          description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
          persistent: true, timeout_ms: 3600000})
 ```
-
-**挂载形态必须是 `node --no-warnings --experimental-strip-types` 前缀**（2026-08-05 实测：裸
-`.ts` 路径不可执行——文件无 x 位，bash 直接执行报 exit 126 Permission denied，Monitor 静默失败
-「存在≠生效」）。`pgrep -af 'suite-state-trigger.ts --monitor'` 会同时命中**其它项目**的同名
-trigger（archguard 也有一个）——**basename 命中≠本仓所有权**（管理者 2026-08-05 纠正，与当天
-resource-gate/select-tests basename 配对问题同族）：核对挂的是不是**本仓**那份，读进程 cmdline 里
-的**完整路径前缀**（`/home/yale/work/quay/` vs `/home/yale/work/archguard/`），别只数个数。
-**跨项目同名进程不属你，绝对不要 kill**——判断「重复」前必须展开 `ps -eo pid,cmd` 验全路径；
-无法验明归属的进程保持不动（外部项目 monitor 由其自身 loop 自愈，如 archguard 实测 1 分钟内重挂）。
-**重挂前先停自己的旧 monitor**（TaskStop），再挂新的——「先挂新再等旧死」会短暂双进程（本会话
-16:27-16:28 一分钟内挂两次的教训）。
 
 事件流里出现 `SUITE-RED` ⇒ **立即**进入步骤 1b「红窗分诊」（不等下一次 cron——本轮的
 「红着无人处置 30 分钟」场景即被消灭）；出现 `SUITE-RUNNING` ⇒ 按「RUNNING 乐观派发执行者」驱动
@@ -495,11 +513,24 @@ cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状�
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
 `--transcript` 从未进过任何生产调用，是死代码；现在 `ruling-required` 的主判据是**屏幕形状分类**。
-外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`：
+外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`。**通用化观测原语
+（`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer`）**：盯谁（`--target`）、
+几个连续采样（`--samples`）、检测到后做什么（`--action` / `--action-command`）都由调用方配置——
+内层/外层/管理者各是**一次调用**，不新写代码。`--target inner` 保持旧路径 `.quay/inner-blocked.json`；
+其它 target 写 `.quay/blocked-signals/<target>.json`。
+
+外层盯内层（主路径，显式 `--target inner`）：
 
 ```bash
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
-node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --target inner --pane .quay/last-pane.txt
+```
+
+管理者盯外层（AC5，一次配置调用——外层等裁定 ⇒ 报出，busy ⇒ 不报）：
+
+```bash
+tmux capture-pane -p -t "$OUTER_SESSION" > .quay/last-outer-pane.txt && \
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --target outer --pane .quay/last-outer-pane.txt
 ```
 
 `classifyPaneState` 只读**底部区域**（ADR-016 修订 boundary b——不做整屏哈希），连续 3 次
@@ -528,12 +559,6 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 **零命中不等于「内层没做过」**，它与「查询写错了」不可区分。工具会自己提示这一点：先用类别形式
 复核，确认查询正确后零命中才是证据。这条是实测出来的——自检时手写正则得 0 命中，而同一份数据
 `timecost` 报 8 次。
-
-**「历史发生过什么」类问题 → 查 meta-cc，不要用 git 提交时间重建过程**（管理者 2026-08-05
-两次误判的教训）：git 提交时间只标**完成**不标**开始**——大多数任务分支只有一个提交（subagent
-完成时才提交），据此算出的「并发/派发时间」全错（曾得出「最大并发=1」的假结论）。正确工具：
-`meta-cc` 的 `query_session_content`（role=tool 查 Agent 派发时间戳）/ `get_timeline`——那是真实
-派发时刻。**查过程（什么时候发生了什么）用 meta-cc；查结果（什么落地了）用 git log。**
 
 `timecost` 给出空转 / 全量套件 / 范围化测试 / 其它 / 生成的分解，是判断「该修延迟还是该修测试」
 的唯一依据（见 `orchestration/throughput-decomposition.md`）。**注意窗口**：分析外层的影响必须
@@ -579,15 +604,27 @@ tick 做一次收尾 pass。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
-     （`{state: running|green|red, runner: outer|inner, startedAt, finishedAt, durationMs,
-     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。**起跑条件**：本轮收尾了 ≥1 个任务
-     （或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state != running`）
-     且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 = WAIT，下一
-     tick 再起）。
+     （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
+     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。`reason` 只在 red 时出现：
+     `failed`（真实失败——stop-dispatch 信号）或 `aborted`（套件未完成、无正确性结论——**不触发
+     停派**，`gap-full-suite-runner-concurrency-default-and-gate` AC5）。**起跑条件**：本轮收尾了 ≥1
+     个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=
+     running`）且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 =
+     WAIT，下一 tick 再起）。
    - **早期 RED（AC2）**：runner **一检测到失败立即把 state 标成 red**（非等全套跑完）——缩「变红到
-     发现」窗口。判红模式 = `not ok` / `✖` / `# fail [1-9]` / `# cancelled [1-9]` /
-     `FULL-SUITE-EXIT` 非 0 / 退出码非 0。`state: red` 即 AC4 的 **stop-dispatch 信号**（inner 读它
-     停派发 + 暂缓 fan-in，见下「红窗分诊」）。
+     发现」窗口。判红模式 = 结构化失败形态，**不匹配裸字形**（`gap-full-suite-runner-red-pattern-
+     matches-bare-x-vitest-false-red`，archguard TASK-67 实证裸 `✖` 误伤 vitest 假红）：
+     node:test/TAP 的 `not ok` / `# fail [1-9]` / `# cancelled [1-9]`、vitest 结构化行
+     `❯ <file> (N tests | M failed)` / `Test Files <N> failed`、`FULL-SUITE-EXIT` 非 0，
+     以及兜底退出码非 0。`state: red` + `reason: failed` 即 AC4 的 **stop-dispatch
+     信号**（inner 读它停派发 + 暂缓 fan-in，见下「红窗分诊」）；`reason: aborted`（被信号杀/spawn
+     失败）**不是** stop-dispatch 信号——inner 照常派发，本层按 aborted 语义处置（记录 + 重跑）。
+   - **并发旋钮分叉（同一份文档服务两种测试框架）**：runner 的 `--lane-count` 拼接只对
+     node:test/test.sh 项目生效（`--test-concurrency=N`，test.sh 的派生默认）；**vitest 项目
+     真实文件级并行 flag 是 `--maxWorkers`**（archguard 用 `--maxWorkers=8` 跑通全量 4902 passed），
+     **不是** `--test-concurrency`——文档/命令里指导 vitest 项目用 `--test-concurrency` 的地方一律
+     改用 `--maxWorkers`（`.quay/config.yml` 的 `loop.test_command` 由各项目自己定，runner 对非
+     test.sh 命令不拼接）。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
@@ -631,7 +668,8 @@ tick 做一次收尾 pass。
 
 | 状态变化 | 事件 | 本层动作（全部是既有逻辑的执行，不是新决策） |
 |---|---|---|
-| → `red` | `SUITE-RED`（`stopSignal:true`，即确认 stop-dispatch 信号在位） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red 本身，(a) 块 AC4） |
+| → `red` + `reason: failed`（或缺失） | `SUITE-RED`（`stopSignal:true`，即确认 stop-dispatch 信号在位） | **立即**进下面的「红窗分诊」（不等下一次 cron；信号 = state=red + failed，(a) 块 AC4 / AC5） |
+| → `red` + `reason: aborted` | `SUITE-RED`（`stopSignal:false`——套件未完成、无正确性结论，**不触发停派**） | **记录 + 等重跑**：aborted-red 不是失败结论，外层按 `gap-full-suite-runner-concurrency-default-and-gate` AC5 语义处置（不挡 inner 派发；re-tick 时按起跑条件重起） |
 | → `running` | `SUITE-RUNNING` | 「RUNNING 乐观派发执行者」：池有 `dispatchable_disjoint ≥ cap` 就按步骤 4 驱动 inner 照常派发（不待轮——(a) 块 AC4 的乐观行为被实际动用，AC3） |
 | → `green` | `SUITE-GREEN` | 平静基线，无处置 |
 
@@ -643,9 +681,10 @@ tick 做一次收尾 pass。
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 （构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
 
-**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 时 fan-in 一并暂缓）**：
-`.quay/full-suite-state.json` 的 `state: red` 即 **stop-dispatch 信号**（runner 一检测失败即写，AC2；
-套件触发者发 `SUITE-RED` 时确认它在位）。state 为 red 时：
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**：
+`.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号**
+（runner 一检测失败即写 `reason: failed`，AC2/AC5；套件触发者发 `SUITE-RED` 时确认它在位）。`reason:
+aborted`（套件未完成、无正确性结论）**不触发停派**——记录 + 按起跑条件重跑，不挡 inner。state 为 red 时：
 1. **本层独占分诊**，不把红树丢给 inner：对 red window 内新合并的 merge 二分定位（`git bisect` 或按
    merge 顺序回滚、逐个重跑 `--for-task` 选中集判断肇事者）。
 2. **回滚/修复**：定位到某次 merge 引入 → 回退该 merge（+ 回退对应翻 done）；判定为既有失败 →
@@ -905,7 +944,7 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` 即 stop-dispatch 信号；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
 | `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal`；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |

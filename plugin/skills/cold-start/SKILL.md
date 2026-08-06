@@ -52,6 +52,19 @@ start MUST confirm the materialized command contains the flag: `bash <root>/plug
 <role> --dry-run` output includes `--prompt-suggestions false`. A fresh session launched without it shows
 gray ghost-suggestion text in the input box that the reliable-send / pane classifier can misread as a
 submitted action (fault 6/7).
+**REQUIRED launch params (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false, human
+ruling 2026-08-05):** the ghost-suggestion (reliable-send fault 6) is eliminated AT SOURCE by two
+params, both REQUIRED (not optional), present in EVERY launched session (manager/outer/inner):
+
+1. `--prompt-suggestions false` — flag-only form, materialized by `quay-launch.sh` from
+   `_launchSpec.promptSuggestions === false` (verify: `--dry-run` output contains
+   `--prompt-suggestions false`).
+2. `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` — env-var form, carried by the checked-in settings
+   file top-level `env` and loaded via `--settings`.
+
+A `--dry-run` that omits `--prompt-suggestions false` for any role means the checked-in launch spec
+has drifted from the REQUIRED cold-start contract — STOP and fix the settings file before starting
+(`plugin/test/launch-settings.test.mjs` asserts this mechanically).
 
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
@@ -63,6 +76,7 @@ start did NOT complete.
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
 | 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer, per SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
 | 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `HEARTBEAT`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
@@ -71,6 +85,8 @@ start did NOT complete.
      `${SCRIPT_DIR}/transcript-delivery-check.ts` (content-level, spelling-independent), and the
      verify check resolves tick-doc bare names. Do NOT "fix" it to a prefixed form. -->
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
+
+| 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
 | 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
@@ -132,6 +148,10 @@ would start the loop in a session that is visibly not the shipped topology.
 
 Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md), mounted
 through a single-flight mount entry that execs it. Mount `session-liveness-mount.sh`:
+Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md).
+The retired per-parameter observer never observed the session (tmux hits 0) and its signature signal
+(`.quay/inner-blocked.json`) never fired in any project. Mount `session-liveness-mount.sh` (the
+single-flight mount entry, which execs `session-liveness.sh`):
 
 ```
 Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
@@ -197,7 +217,8 @@ LIVE from a stale registration (the previous session's cron is dead), clear the 
 ### 6. Drive inner to start fast mode — EXPLICIT, never a side effect (AC1 correction)
 
 Delivery criterion = the TARGET session's own transcript jsonl shows the drive text as a REAL user
-message (`transcript-delivery-check.ts`, Fault 5 in
+message (`transcript-delivery-check.ts` — BARE-FILENAME reference, resolved by quay-init's laydown
+derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5 in
 `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md`) — only the target transcript is a
 trustworthy delivery signal. The previously-shipped whole-pane-hash exit-0 criterion was superseded
 by outer ruling F (`orchestration/outer-rulings-2026-08-04-A-F.md`, 3 false positives) — do NOT use it.

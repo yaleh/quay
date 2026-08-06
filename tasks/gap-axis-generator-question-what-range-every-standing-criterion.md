@@ -14,7 +14,7 @@ title: "a predictive dimension generator (not another gap): the machine's
   stop-conditions-no-scope) are time-axis + scope-axis outputs of this generator
   — annotate as projections, don't pick instances one by one (that's limited by
   the human being present)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

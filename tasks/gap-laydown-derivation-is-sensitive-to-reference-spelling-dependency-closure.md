@@ -137,6 +137,14 @@ $ bash scripts/test.sh --for-task gap-laydown-derivation-is-sensitive-to-referen
 - plugin/test/quay-init-loop.test.mjs（expectedScripts 补 transcript-delivery-check.ts 回归断言）
 - plugin/test/send-keys-reliable.test.mjs（AC4 fail-loud 负向测试）
 - plugin/skills/cold-start/SKILL.md（line 68/195 裸文件名引用可留——修复后被闭包抓出并显式标注注释）
+
+- tasks/gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure.md
+- plugin/scripts/quay-init.sh（铺设派生正则补裸文件名 + verify_referenced_landed 盲点 + 依赖闭包检查）
+- plugin/scripts/send-keys-reliable.sh（fail-loud 前置）
+- plugin/test/quay-init-loop.test.mjs（AC1/AC2/AC3 fixture：expectedScripts 补 transcript-delivery-check.ts + cap-from-gate.ts）
+- plugin/test/quay-init-laydown-closure.test.mjs（新 governance 测试文件：AC1/AC2/AC3/AC4）
+- plugin/skills/cold-start/SKILL.md（line 49/132 裸文件名引用可留——修复后应被抓出并显式标注）
+- plugin/skills/init/SKILL.md（示例表移除已退役 send-keys-verified.sh）
 - tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（AC6 记账引用）
 
 ## Contract

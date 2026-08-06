@@ -63,6 +63,7 @@
 按顺序读这四份，然后从 tick 步骤 1 开始：
 
 1. `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名；文件本身是当前队列状态）—— 队列当前状态（已完成/在飞/待执行）
+1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）。**「batch2」是历史名**（旧批模型的队列快照，保留不改名以免破坏引用）；今天的派发是滚动的，不读成「分批门控」
 2. `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD
 3. `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` —— 四项原则
 4. 本文件其余部分
@@ -120,16 +121,20 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
 
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次（历史引用）
+**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a（**历史批名**，指旧的全量验证轮次，保留不改名）那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
 ```bash
 grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
-grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，批套件全绿；套件构成每次变都要重测参考值）
+grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，全量套件全绿；套件构成每次变都要重测参考值）
 ```
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361（历史引用）→ … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
 （gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled（历史引用）可能有
+只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c（**历史批名**）稳定 2361 → … → +14 resource-gate =
+**判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
+（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a（**历史批名**）的 cancelled 可能有
 自身异步结构的触发条件（Promise 未决 + 事件循环已解决）。**判绿三条件成立的理由改为：「cancelled 是一种
 会被 fail 0 掩盖的失败」——显式查它是为了不漏掉这种失败，不是因为饥饿必然产生它。**
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）→ **+stranded +parser = 2052**
@@ -151,13 +156,13 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
    并发套件，= 负载翻倍）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
-2. **这族永远单独跑批或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
+2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
    全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
 3. **不要删/降级/改 skip 这族**——它们抓的是真问题（挂载单飞、laid-down 实跑、`--once` 接缝），
    只是天生负载敏感。
 
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
-跑批协议 grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
+grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
@@ -171,7 +176,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 **挂载是单飞（AC20，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）**：挂载是一个
 **有主的、可接管的角色**——取单飞锁（复用 `heavy-op-token.sh` 的锁），已有活持有者时再挂 ⇒
 退出 0（空操作，不是失败）、不新增进程；持有者 kill -9 后下一次挂载自动接管。所以**任何项目
-（quay/archguard/meta-cc）都挂同一把锁、同一批共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
+（quay/archguard/meta-cc）都挂同一把锁、同一份共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
 先挂上者成为唯一持有者，其余挂载一律空操作。要看事件的人**订阅共享文件即可，不必自己挂**。
 
 挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
@@ -216,7 +221,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`real_in_flight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realInFlight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -263,6 +269,12 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 ## Tick 步骤
 
+**词汇规范（AC5，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`，跨模型沿用）**：
+**分派是滚动的，不叫批号**——槽位空即派、不攒批、不等批；任何「batch + 编号」的措辞都只能是历史
+引用或错误。**全量验证/收尾节奏叫 `verification-round-N`**（外层异步例程，见步骤 2 与
+`orchestrator-loop-tick.md` 步骤 1b），它**只关于验证/收尾，不是分派门控**。tick-log 与 commit message
+沿用同一词汇：描述派发用「滚动派发」，描述全量验证/收尾轮次用 `verification-round-N`。
+
 ### 0. 哨兵
 
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
@@ -284,9 +296,15 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 ### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 
+**词汇规范（本步与外层 1b 同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
+全量验证 + 收尾节奏统一叫 **`verification-round-N`**（外层异步例程，每轮一次全量套件验证 + 收尾记账）。
+**`verification-round-N` 只关于验证/收尾，不是分派门控**——分派永远是滚动的（见步骤 4），验证轮的
+节奏不约束、不命名、不门控任何一次派发。旧文里把「全量套件批量」当分派单位的说法已随机制根删除。
+
 **只合并与清理，不写任何任务状态。** 全量套件验证已从 inner 移除——它是外层后台异步跑的验证 gate
-（`orchestrator-loop-tick.md` 步骤 1b「异步验证例程」），inner 的停止条件只读外层的
-`.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、不写 `--task-end`**。
+（`orchestrator-loop-tick.md` 步骤 1b「异步收尾例程（verification-round-N）」），inner 的停止条件
+只读外层的 `.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、
+不写 `--task-end`**。
 
 **两线分支模型（quay 自身配置启用；`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`，AC1/AC2/AC3）**：
 当 workspace 把 `fork_baseline` / `merge_target` 配置为 develop / integration（quay 自身）时，
@@ -382,9 +400,12 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 - **机械检测**可判定条件：**合并冲突**（git 有未解决路径）、**任务超 90 分钟**（遥测
   in-progress > 90m）。任一成立 ⇒ **自动**写入 `.quay/inner-blocked.json`（带 `reason` + 可行动
   `question` + `evidence`，`source:"auto"`）——**写入是检测本身的后果**，你跑的这条命令就是停止
-  条件检查，不存在「忘了写阻塞信号」这回事。**OVER90 注意（2026-08-05 起）**：遥测括号由外层异步
-  闭合（`orchestrator-loop-tick.md` 步骤 1b），in-progress 会因此多算至多一个外层 tick 的滞后——
-  命中 OVER90 时先核对是不是「外层尚未闭合该括号」而非真超时，避免把运行 70–90 分钟的任务误判。
+  条件检查，不存在「忘了写阻塞信号」这回事。**OVER90 注意（2026-08-05 起，`gap-telemetry-brackets-
+  vs-subagents-no-slot-visibility` AC8 起加强）**：遥测括号由外层异步闭合（`orchestrator-loop-tick.md`
+  步骤 1b 的 `--reconcile`），in-progress 会因此多算至多一个外层 tick 的滞后——命中 OVER90 时先核对
+  是不是「外层尚未闭合该括号」而非真超时，避免把运行 70–90 分钟的任务误判。**over-90m 判据本身已
+  reconcile 感知**（`detectTaskOver90m` 只对「工作已落地」——任务分支已 merge/有 merge record——的
+  括号跳过）：一个 fan-in 已落地、只是 `--task-end` 未写的任务不再触发假 over-90m。
 - **`ruling-required` 的屏幕观察者（`--pane`）**：`classifyPaneState` 只读 pane 的**底部区域**
   （输入框 + 状态行，ADR-016 修订 boundary b——**不做整屏哈希**），分类成五态之一。连续
   `INNER_BLOCKED_RULING_SAMPLES`（默认 3）次 `waiting-input` / `permission-prompt` ⇒ 写
@@ -448,10 +469,13 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-sta
 
 inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步写**（`orchestrator-loop-tick.md`
 步骤 1b），inner 不需要也不应该调它——`--report` 的 `inProgress` 在外层闭合前会显示在飞，这是预期。
+**派发/收尾这对调用就是遥测从「历史归档」变回「当前状态」的机制**（`gap-telemetry-brackets-vs-
+subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时的开括号，外层 1b 的 `--task-end`
+/ `--reconcile` 是收尾时的关括号；缺任一半，遥测就退化成只记录历史。
 
 **括号 ≠ subagent（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：`--report` 的
 `inProgress` 是括号视角——红窗遗留的未闭合 start 会让它虚高。要看**真实并发/空槽**，用
-`--slot-status --cap "${effective_cap:-3}"`（纯读，不写盘）：`real_in_flight` 是执行者仍存活的括号数，
+`--slots --cap "${effective_cap:-3}"`（纯读，不写盘）：`real_in_flight` 是执行者仍存活的括号数，
 `stale_brackets` 是 `--reconcile` 会闭合的幽灵括号数，`slots_free = max(0, cap − real_in_flight)`
 ——「还剩几个并发槽」机械可见（AC2）。
 
@@ -460,6 +484,12 @@ inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步
 正是这个工具本该消除的考古。
 
 没有计量，「1 任务/小时」无法判定，也无法知道任何优化是否真的有效。
+
+**派发前先读一次空槽信号（AC2/AC5）**——「还剩几个并发槽」必须机械可见，不靠内层手写叙事：
+```bash
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"
+# real-in-flight N / slots-remaining M；dispatchable_disjoint（步骤 3.6）− realInFlight = 槽位级闲置
+```
 
 ### 3.6 就绪池维护（晋级节奏是机制，不是角色自觉——强制）
 
@@ -490,7 +520,7 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 ```
 
 - stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
-  （① 本批已做完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
+  （① 本回合已派发完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
   标记的）。**`floor` 字段 = cap × 4**（GO 档 cap=5 ⇒ floor 20；WAIT 档 cap=2 ⇒ floor 8；EXTREME 档
   cap=1 ⇒ floor 4；`--cap` / `--floor-mult` 可调）。`pool ≥ floor` ⇒ 无需补晋，直接进步骤 4 派发。
 - **判据是 `dispatchable_disjoint` 不是 pool 数**：脚本同报**池内最大互不冲突子集大小**
@@ -537,7 +567,7 @@ GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT
    AC2）：`checkTouchesResolve`（`plugin/scripts/touches-orthogonality-check.ts` 的 `--resolve`
    模式）对每个 `status: ready` 候选检查其 `## Touches` 是否能在真实树中解析。ADR-022 删除了
    经典管线文件后，8/9 个 ready 任务的 Touches 整体指向不存在的文件，而 `checkTouchesPair`
-   只查两两重叠、**不查文件存在性**——这就是这批任务漏过资格闸的原因。`(new)`/`(delete)`
+   只查两两重叠、**不查文件存在性**——这就是这组任务漏过资格闸的原因。`(new)`/`(delete)`
    标记豁免（前者是任务将创建的文件、后者是任务将删除的文件，都不必已存在）。
    **多数未标记条目缺失 ⇒ 该候选不具备派发资格**：标 needs-human、记录理由，不派发
    （exit 1 即不派发）：
@@ -563,6 +593,12 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 ```
 
 重叠 → 不同时派发，等下一 tick（**分派是滚动的，不是攒批门控**）。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
+# 输出 { batch, deferred }（`batch`/`deferred` 是机件输出字段名，保留）。两者都在 batch ⇒ disjoint，
+# 可并发/无触摸重叠，非门控分批；
+# deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
+```
+
+重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
 4. **分叉基线判定（两线模型 AC2，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
    派发前用 `fork-baseline.ts` 判定每个候选从哪条线分叉（**分叉基线即依赖声明**——独立 →
@@ -613,7 +649,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    直接跳过**——现有单机派发零回归（claim-task.sh 无 remote 时 fail-closed 退出 2）。
 
 派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**
-（`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到整批返回、拿不到先完成者的
+（`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到全部在飞返回、拿不到先完成者的
 早期反馈、期间什么也做不了，`<task-notification>` 唤醒流永远不会被触发——那是本仓实测等待的另一半来源，
 见 `orchestration/SPEC-cut-the-waiting.md`。同一条消息里发多个 `Agent` 调用拿到的并发是 harness 并发执行，
 不是后台派发）。subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，不在 `/tmp`——tmpfs 是内存，
@@ -623,7 +659,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 **任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
-（不跑全量 suite——全量判据归外层 verification-round）；**不翻 status**（翻 done 是外层收尾的活）；
+（不跑全量 suite——全量判据归外层 verification-round-N，见步骤 2 词汇规范）；**不翻 status**（翻 done 是外层收尾的活）；
 **不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。收尾（外层异步）因此
 每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——量小到不是同步点（(c) 块落地后，closure-async
 机制根的收尾对已自勾 AC/证据的任务是 no-op）。
@@ -819,13 +855,16 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 ## 每个 tick 必报
 
 - 本 tick 合并了什么、派发了什么
-- 在飞任务及其已运行时长——**「在飞」按 AC7 拆两种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）
+- 在飞任务及其已运行时长——**「在飞」按 AC7 拆三种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）、
+  **真实在飞**（reconcile 感知 `realInFlight`——括号数扣减 executor 已消失者，`--slots` 的 real-in-flight）
   vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）；核实并发读原始字段，不用 START
   事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
 - **槽位视角（`--slot-status`）**：`real_in_flight` / `stale_brackets` / `slots_free`
-  （`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap "${effective_cap:-3}"`）
+  （`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"`）
   ——「还剩几个并发槽」机械可见（AC2）；`stale_brackets > 0` 时调 `--reconcile` 闭合，别让红窗遗留
   括号污染后续判定
+  事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）。**空槽数**（AC2/AC5）：`--slots --cap
+  ${effective_cap}` 的 slots-remaining + `dispatchable_disjoint − realInFlight` 的槽位级闲置
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
 - 遥测吞吐：`tasksPerHour`（= `--task-end` 闭合任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/

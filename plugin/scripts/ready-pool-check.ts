@@ -38,6 +38,14 @@
 // fields mechanically (Contract measure keys read stdout's fields). Mirrors
 // task-status-drift-check.ts's detector shape (read-only, exit 0 always).
 //
+// RELEVANCE SIGNAL (gap-value-prioritization-has-no-mechanism — the manager layer's prioritization
+// function): each candidate additionally carries a `relevance` object computed from three MECHANICAL
+// sources — strategicTrace (body grep for `FINDING-*`/`RESEARCH-*`/`GOAL-*`/`REVIEW-cadence`),
+// unblocks (how many non-done tasks have this candidate as their `parent`), costTouches (declared
+// `## Touches` parsed scale). `--top <N>` emits `top_relevance` — the N highest-value CURRENT todos
+// with a reason each (NOT the pool<floor promotion list; that keeps its existing gap>DIR order, AC4).
+// Priority query:   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --top 5
+//
 // Run:
 //   node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>]
 //       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>] [--json]
@@ -348,6 +356,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     disjointScore,
+    // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
+    // strategic traceability (grep) + blocking (parent/children fields) + cost (touches parsed scale).
+    relevance: computeRelevance(id, task, allTasks),
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     eligible: depsReady && four.complete && touchesResolve,
   };
@@ -449,6 +460,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const sharedFiles = walkFiles(root);
   const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
   const poolParsed = ready.map((id) => ({ id, touches: parseTouches(allTasks.get(id).body) }));
+  const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
   const dispatchableDisjoint = maxMutuallyDisjointSubset(poolParsed.map((p) => p.touches), expand);
 
   const criterionMet = dispatchableDisjoint >= cap;
@@ -462,7 +474,6 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const candidates = [];
   const promotions = [];
   if (deficit > 0) {
-    const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue; // never promotion candidates
@@ -491,6 +502,30 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     }
   }
 
+  // AC2 (gap-value-prioritization-has-no-mechanism): the priority query — "当前 todo 里价值最高的
+  // N 条 + 理由", a SEPARATE output from the pool-maintenance `promotions` (which keeps its existing
+  // disjointness-first / gap>DIR order — AC4). Scans ALL todo candidates (not gated on deficit>0),
+  // ranks by the mechanical relevance signal (strategicTrace > unblocks > cost, score below), then
+  // gap>DIR as the final tiebreak (AC4 retained), then id for determinism. Only emitted when the
+  // `--top N` flag is passed (default output byte-unchanged for existing consumers).
+  const top_relevance = [];
+  if (top > 0) {
+    const ranked = [];
+    for (const [id, t] of allTasks) {
+      if (t.status !== "todo") continue;
+      if (isFixture(t) || isParked(t)) continue;
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand);
+      ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: relevanceReason(c) });
+    }
+    ranked.sort(
+      (a, b) =>
+        b.relevance.relevanceScore - a.relevance.relevanceScore ||
+        a.kindOrder - b.kindOrder ||
+        a.id.localeCompare(b.id),
+    );
+    top_relevance.push(...ranked.slice(0, top));
+  }
+
   return {
     pool,
     floor,
@@ -505,6 +540,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     excluded,
     candidates,
     promotions,
+    top_relevance,
     scanned: allTasks.size,
     top_relevance: topRelevance,
     ready_relevance: readyRelevance,

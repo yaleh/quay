@@ -170,3 +170,26 @@ quay-0 / meta-cc-3 / archguard-4 与 outer/inner 驱动会话）。**结论已�
 
 **throwaway 会话也可带 `--bare`**（一次性验证，不长驻）。任何角色（manager|outer|inner）的启动命令
 都不再可选地省略这两条——省略即启动规范不达标。
+## 8. 更新 2026-08-06 —— ghost-suggestion 从源头消除是 **REQUIRED 冷启动参数**（人裁定）
+
+可靠发送结晶文档的**故障 6**（gray ghost-suggestion 无法硬清空——C-u/C-a+C-k 循环后 pane 内容逐字不变）
+的根是把输入框里的灰色占位建议读成「内层已提交的行动」——**从源头关掉，故障 6 不再出现**。
+人 2026-08-05 裁定：验证成功后作为冷启动要求，**REQUIRED 非可选**。验证实跑见
+`tasks/gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false.md` AC1/AC2（throwaway 双向对照：
+带配置 ⇒ 输入框 `❯` 后无建议；不带配置 ⇒ `❯ Try "edit <filepath> to..."` 灰色建议出现）。
+
+**必带参数（两条，缺一不可）**：
+
+```bash
+--prompt-suggestions false                          # flag-only 形式（launcher 从 _launchSpec.promptSuggestions=false 翻译）
+CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false          # 环境变量形式（settings 文件顶层 env，经 --settings 加载）
+```
+
+**REQUIRED 机械落实**：
+- `.claude/launch.settings.json`：顶层 `env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="false"`（已在）；
+  `_launchSpec.promptSuggestions: false`（新增，flag-only）。
+- `plugin/scripts/quay-launch.sh`：`_launchSpec.promptSuggestions === false` ⇒ 每个角色命令都追加
+  `--prompt-suggestions false`（`--dry-run` 可验）。
+- `plugin/test/launch-settings.test.mjs`：机械断言每个角色 dry-run 命令都含 `--prompt-suggestions false`；
+  负控把 `promptSuggestions` 翻成 `true` ⇒ flag 消失（REQUIRED 被改掉的形态可检出）。
+- **manager 角色同样必带**（ghost 会误导任何一层，不只 outer/inner）。

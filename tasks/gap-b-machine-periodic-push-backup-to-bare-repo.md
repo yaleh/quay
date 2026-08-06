@@ -125,3 +125,12 @@ Windows 产物，无 crontab）。
 **新机制（采纳管理者建议，复用 slot-refill 模式）**：完成事件加速（develop 前进即 push）+ tick 心跳
 兜底（每 tick 问本地 develop 是否领先 origin/develop）——机制活在 plugin/loop + plugin/scripts，
 随包走、走升级通道、被铺设集覆盖、不引入新轮询源。具体钩子/重试降级由 inner 实现时定。
+
+## 前置条件（2026-08-06T09:0xZ，管理者审计 + 外层核实）
+
+**periodic-push-backup.sh 根本不在铺设集里**——grep periodic-push-backup plugin/scripts/quay-init.sh
+plugin/loop/*.md **零命中**。不只是「部署形态是 crontab 所以不随包走」，是**这个脚本连交付面都没进**：
+任何用 quay-init 装 quay 的项目磁盘上根本不会出现它。
+
+**⇒ 改 tick 双触发源之前必须先让它进铺设集**（quay-init.sh 的铺设列表 + 相关检查），否则目标项目的
+tick 找不到这个脚本。这是本次改造的**前置条件**（管理者审计 A 项）。

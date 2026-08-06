@@ -39,11 +39,12 @@ import http from "node:http";
 
 import { buildDist } from "../scripts/build-dist.mjs";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
-const nativeBin = path.join(pkgDir, "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 // Build the bundle into a depth-matched temp tree (see header comment).
 const bundleRoot = makeTmpDir("quay-m120-smoke-bundle-");

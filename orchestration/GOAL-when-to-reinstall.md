@@ -59,6 +59,12 @@ meta-cc 此刻循环活着、cron 在跳、tick 已 4 行,但 **ready 0 / 遥测
 | **12** | **tick 文档教每个项目把 worktree 建在 `/tmp`**(`fast-mode-loop-tick.md:188,299`),而 `/tmp` 是 tmpfs ⇒ **2026-08-04 全机 OOM 的放大器**。本仓的活 worktree 已挪到磁盘,**但文档仍在传播这个做法** | **新增 A6** |
 | **11** | **`vendor/` 是 Go 的保留目录**——非 Go 的 `vendor/` 打断 Go 项目构建(meta-cc DIR-103 实测)。**只有异构目标能暴露它** | **A1 + 新增 A5** |
 
+> **第 10 + 第 11 条已合并修复(gap-the-runtime-has-nowhere-safe-to-land,2026-08-06)**:
+> 运行时不再铺进目标的 `vendor/`,改铺 `.quay/runtime/`(quay 自己的命名空间,无任何目标语言保留),
+> 由 `quay-init` 自己写 gitignore 条目把 `.quay/runtime/` 排除出目标的 git(AC10)。
+> 落地路径分段避开 `vendor`/`node_modules`/`target`/`build`/`dist`(AC9)。
+> 判定记录在下文「落地集合与 G2(第 10/11 条修复的判定)」。
+
 ---
 
 ## 不构成重装理由
@@ -102,14 +108,37 @@ meta-cc 此刻循环活着、cron 在跳、tick 已 4 行,但 **ready 0 / 遥测
 
 **判据**:Node 目标 `npm test` / Go 目标 `go build ./...` 在 `quay-init` 之后仍通过。
 
+### A5 的 Go 半边已补入门槛 e2e(gap-the-runtime-has-nowhere-safe-to-land AC11,2026-08-06)
+
+`install-config-driven-e2e.test.mjs` 现含三条 A5 相关断言:
+`A5 — Node target still builds (npm test)`、`A5 — Go target still builds (go build ./...)`
+(缺 `go` 工具链时按 ADR-019 决策 #1 就地 skip,本机实跑变绿)、
+`AC9 — runtime path contains no reserved segment`。
+
 ## 门槛已被编码成一个测试(2026-08-04 02:xxZ)
 
-`packages/quay/test/install-config-driven-e2e.test.mjs`(421 行)断言
-`byte-identical` / `idempot` / `upgrade` / `finding` / `npm test`。
+`packages/quay/test/install-config-driven-e2e.test.mjs` 断言
+`byte-identical` / `idempot` / `upgrade` / `finding` / `npm test` / **`go build`**(AC11)。
 
 **⇒ 门槛过没过不再需要管理者判断,那个测试变绿就是过了。**
-**缺口**:没有 `go build` —— **A5 的 Go 半边未覆盖**,而 `vendor` 撞 Go 保留目录那条
-**只有 Go 目标能暴露**。
+
+## 落地集合与 G2(第 10/11 条修复的判定,2026-08-06)
+
+**运行时(gap-the-runtime-has-nowhere-safe-to-land AC2/AC6)落地在 `.quay/runtime/`,不进目标的 git。**
+
+**「落地集合」的定义**:落地集合 = `quay-init` 铺进目标工作区的**全部文件**,无论 git 是否跟踪。
+运行时是落地集合的一员——它被铺进目标、且与产物字节相同。
+
+**G2 判据怎么算**:G2 的「落地文件全部与产物字节相同」是**对磁盘上的文件**逐字节比较,
+不是对 git 跟踪状态比较。`.quay/runtime/` 不进 git 只改变 `git status`,不改变字节。
+`quay-init` 仍从插件产物逐字节复制(`plugin/vendor/quay/dist/quay.js` → `.quay/runtime/quay/quay.js`),
+A2 断言(落地文件与产物字节相同)原样覆盖它。
+**⇒ 非 git 文件仍是落地集合的一员;G2 成立,因为 G2 看的是磁盘字节,不是 git 跟踪。**
+
+**大文件钩子为什么不再撞(AC3/AC4)**:钩子扫描的是**暂存区**;`.quay/runtime/` 被 gitignore
+排除,1.3MB 产物从不进入暂存区,所以任何阈值的 `check-added-large-files` 都看不见它。
+AC4 负控制把阈值降到 1KB 并 `git add -f` 强推运行时,提交必失败、钩子点名那个文件——
+证明钩子真在跑,也证明保护它的是 gitignore 而不是尺寸。
 
 **缺口已关闭(2026-08-06,`gap-the-runtime-has-nowhere-safe-to-land` AC11)**:
 `install-config-driven-e2e.test.mjs` 新增 `A5/AC11` 测试,用本地 `replace` 依赖的 Go module(全离线)
@@ -128,7 +157,8 @@ meta-cc 此刻循环活着、cron 在跳、tick 已 4 行,但 **ready 0 / 遥测
 | 两道闸读同一份证据 | **已修**(`store.ts:991`:`execute->done reads the DoD checked-state`) |
 | 勾选规则形状无关 | **已修**(`acAllChecked` 已不存在) |
 | **meta-cc 的 todo 能否过闸** | **11/14**(先前 **0/15**)——**堵塞已清** |
-| 仍未动 | `LOOP_SCRIPTS`(#2)、tmux 检测(#3)、`--plugin-root`(#7)、`ownedByThisSession`(#8)、大文件钩子(#10)、`inner-state` 退役、A5 的 Go 半边 |
+| 仍未动 | `LOOP_SCRIPTS`(#2)、tmux 检测(#3)、`--plugin-root`(#7)、`ownedByThisSession`(#8)、`inner-state` 退役 |
+| 已修(2026-08-06) | 大文件钩子(#10)+ `vendor` 保留目录(#11)——运行时改铺 `.quay/runtime/` 并 gitignore(见上「落地集合与 G2」);A5 的 Go 半边补入 e2e |
 
 **估计约 5 小时到门槛绿 + 2–3 小时重装(上一版是 10–15 小时)。**
 **但要警告**:近 3 小时关掉的六条都是**概念上有趣**的(闸、信道、分派);

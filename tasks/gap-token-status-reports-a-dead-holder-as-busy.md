@@ -111,6 +111,83 @@ resume 单点改动，无阶段
       **负控制**：造一个死持有者 + mtime 超时的令牌，连续调 `--status` N 次
       ⇒ 输出**始终**是持有中（证明轮询确实等不到），随后一次 `--acquire` ⇒ 立刻成功（实跑两段都贴）
 
+## 实跑证据（内层，2026-08-06）——本任务全部 AC 的 invoke 输出
+
+`bash plugin/scripts/heavy-op-token.sh --status` 现在输出 `holder_alive` 字段；死持有者时如实说明
+「下一个 `--acquire` 会怎样」并给出该跑的命令。所有字段行 + 说明行都从真实运行捕获（`--root` 临时目录）。
+
+**AC2 负控制（活）**——持有者存活（pid 4172210 是真实存活进程）：
+```
+holder=archguard
+pid=4172210
+held_ms=312
+lease_expires_ms=1785991269744
+lease_remaining_s=299
+holder_alive=yes
+stale_reclaims=0
+```
+
+**AC3 负控制（死）**——`kill -9 4172210` 后，**同一条** `--status` 命令：
+```
+holder=archguard
+pid=4172210
+held_ms=451
+lease_expires_ms=1785991269744
+lease_remaining_s=299
+holder_alive=no
+stale_reclaims=0
+status: holder archguard (pid 4172210) is DEAD but NOT yet reclaimable (mtime only 1s old (fresh, inside the 30s crash grace) and lease active)
+status: It becomes reclaimable once mtime ages past 30s or the lease expires. Polling --status will NOT show the free state — the token is reclaimed only when a --acquire runs.
+```
+
+**AC4 只读负控制**——AC3 前后令牌文件 mtime 与内容逐字节一致（mtime 两次都是 `1785990969`）：
+```
+### token mtime BEFORE AC3 (stat): 1785990969 101
+### token content BEFORE AC3:      holder=archguard / pid=4172210 / acquired_ms=1785990969744 / lease_expires_ms=1785991269744 / host=orangevps
+### token mtime AFTER  AC3 (stat): 1785990969 101   ← 完全一致，status 未触碰令牌
+### token content AFTER  AC3:      （同上，逐字节一致）
+```
+测试 `S-AC4` 用 `fs.statSync().mtimeMs` + 内容比对断言了这个性质（`stale_reclaims` 也保持 0）。
+
+**AC5 可回收 / 不可回收两分支**（死持有者 + mtime 已超时 ⇒ 可回收；mtime 新鲜 ⇒ 不可回收）：
+```
+# 死持有者 + mtime 120s 旧（STALE_TIMEOUT_S=1）⇒ 可回收 + 下一步命令：
+holder_alive=no
+status: holder archguard (pid 4172434) is DEAD and RECLAIMABLE on the next --acquire (mtime 120s old (stale >= 1s crash grace))
+status: WAITING IS INVALID — reclaim is PULL-based: it happens ONLY at the instant a --acquire runs.
+status: Polling --status for holder=none will NEVER return while this dead-holder file exists.
+status: Take the token now: bash plugin/scripts/heavy-op-token.sh --acquire <your-project>
+
+# 死持有者 + mtime 新鲜（STALE_TIMEOUT_S=60）⇒ 不可回收，仍点明拉取式：
+status: holder meta-cc (pid 4172434) is DEAD but NOT yet reclaimable (mtime only 0s old (fresh, inside the 60s crash grace) and lease active)
+status: It becomes reclaimable once mtime ages past 60s or the lease expires. Polling --status will NOT show the free state — the token is reclaimed only when a --acquire runs.
+```
+
+**AC7 负控制（轮询永远等不到 + 一次 acquire 立刻成功）**——死持有者 + mtime 已超时，轮询 3 次**始终**报持有中：
+```
+### poll #1: holder=archguard
+### poll #2: holder=archguard
+### poll #3: holder=archguard
+### one --acquire (STALE_TIMEOUT_S=1) ⇒ 立刻回收成功：
+heavy-op-token: RECLAIMED stale token (mtime 1s old, pid 4172210 not alive, lease active) — accelerated release — reclaim #1
+waited_ms=0 holder=quay acquired=yes
+```
+测试 `S-AC7` 轮询 5 次后执行同一条 `--acquire` 断言「始终持有中 ⇒ 一次 acquire 立即成功」。
+
+**AC6**——新增测试全部用 `node:test`，文件首行 `// @test-group governance`（既有声明，未改动），
+测试扩进 `plugin/test/heavy-op-token.test.mjs`（新增 S-AC1/2/3/4/5/7/7b 共 7 条）。
+
+**scoped 结果**——`bash scripts/test.sh --for-task gap-token-status-reports-a-dead-holder-as-busy`：
+`tests 25 / pass 25 / fail 0`（含既有 lease 的 L-AC1..7 与本任务新增 S-AC*）；scoped 静态层
+（test-framework-policy、test-isolation、task-contract-check strict-subset）全 PASS。
+另外显式跑了共享脚本的兄弟测试文件 `heavy-op-token-wait.test.mjs` + `heavy-op-token-events.test.mjs`：
+`tests 16 / pass 16 / fail 0`——本改动未回归 lease/events 行为。
+
+**范围确认（DoD 第三项记录）**——懒回收是对的、acquire/reclaim 路径是对的，本任务只修 `--status`
+的诚实性：改动仅限 `do_status`（新增 `holder_alive` 判定 + 死持有者说明块）与脚本头 Contract 注释；
+`--acquire` / `--renew` / `--release` 的回收逻辑与 lease 机制**逐字节未动**（上面 AC7 的
+`RECLAIMED stale token ... accelerated release` 正是既有 acquire 路径的行为）。
+
 ## 活体事故（续，19:47Z）——同一事故的第二跳，比第一跳更硬
 
 外层解开第一跳后，内层改用 **Monitor 轮询 token 变空闲**。**那个事件永远不会来**：
@@ -252,6 +329,7 @@ product,engine 全量跑里 self-skip（只在 `--group governance` 跑），若
 - tasks/gap-token-status-reports-a-dead-holder-as-busy.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
+- tasks/gap-token-status-reports-a-dead-holder-as-busy.md
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
 

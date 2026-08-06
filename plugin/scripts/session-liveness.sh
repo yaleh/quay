@@ -78,8 +78,9 @@
 #     显式设置的环境变量 SESSION_TARGETS 优先于该文件；generic 项目没有该文件 → 零配置默认。
 #   - 阈值（INTERVAL/STALL_MIN/LOOP_MIN/OVERDUE_MIN）含义与默认值见随包的两份 tick 文档（AC5）。
 #
-# 用法：  plugin/scripts/session-liveness.sh [--once] [--mask] [--api-errors <t>] [--last-input <t>]
+# 用法：  plugin/scripts/session-liveness.sh [--once] [--selfcheck] [--mask] [--api-errors <t>] [--last-input <t>]
 #   --once   跑一轮，打印每个目标的 SESSION-STATUS 行，退出（冷启动/安装后自检接缝，AC7）。
+#   --selfcheck  诊断接缝：验证外层多源心跳判据（红窗处置保持新鲜 / 零产出报 OVERDUE），自包含，退出 0/1。
 #   --mask   测试接缝：从 stdin 读 pane 文本，打印屏蔽易变区后的内容（AC1 单测直接调用）。
 #   --api-errors <t>  测试接缝：打印 transcript <t> 最近 API_ERROR_WINDOW 条记录里
 #                     isApiErrorMessage 结构字段计数（AC9 单测）。
@@ -488,9 +489,135 @@ sl_heartbeat() {
     >> "$SL_EVENTS_FILE" 2>/dev/null || true
 }
 
+# ── 外层多源心跳（gap-outer-heartbeat-source-inverts-under-incident-handling，2026-08-06）──────
+# SESSION-OVERDUE 的原判据 = 单个心跳路径的 mtime（默认 orchestration/tick-log.md）。红窗处置时
+# 外层写 docs/analysis/batch2-queue-state.md + 提交、不写 tick-log ⇒ 越认真处置心跳越旧（实测：
+# 2026-08-05 心跳 71 分钟未更新，期间 5 次提交 + 分诊记录全在做，假阳性）。修法：外层心跳 =
+# 多源 max mtime：
+#   max(HEAD 提交时间, queue-state mtime, tick-log mtime, docs/analysis/*.md max mtime,
+#       .quay/verification-round.jsonl mtime)
+# 任一源在阈值内 ⇒ alive（红窗处置写 queue-state+提交 ⇒ 心跳仍新鲜，反向失效消除）。
+# 真阳性保留：所有源都 ≥OVERDUE_MIN 未动 ⇒ 仍报 SESSION-OVERDUE（「红着没人碰」必须被抓）。
+# 与 D 分类器同源（tasks/gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable）：
+# 单一代理信号不足，多源融合。只在【默认外层心跳】（无 SESSION_HEARTBEATS / SESSION_TRANSCRIPTS
+# 覆盖）时启用——显式配置的心跳仍是用户指认的单源，不悄悄改成多源。
+_outer_heartbeat_max_mtime() {
+  local root=$1 max=0 ts=0 f
+  # 1. HEAD 提交时间（git，红窗处置的最强产出信号）
+  ts=$(git -C "$root" log -1 --format=%ct 2>/dev/null || echo 0)
+  [ "${ts:-0}" -gt "$max" ] 2>/dev/null && max=$ts
+  # 2. queue-state（红窗分诊的主产出）
+  for f in "$root/docs/analysis/batch2-queue-state.md" "$root/docs/analysis/batch-queue-state.md"; do
+    [ -e "$f" ] || continue
+    ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+    [ "$ts" -gt "$max" ] 2>/dev/null && max=$ts
+  done
+  # 3. tick-log（原单源）
+  f="$root/orchestration/tick-log.md"
+  if [ -e "$f" ]; then
+    ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+    [ "$ts" -gt "$max" ] 2>/dev/null && max=$ts
+  fi
+  # 4. 分诊/分析记录（docs/analysis/*.md：红窗分诊记录、热修说明；任一最近 mtime 即算产出）
+  if [ -d "$root/docs/analysis" ]; then
+    while IFS= read -r f; do
+      [ -e "$f" ] || continue
+      ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+      [ "$ts" -gt "$max" ] 2>/dev/null && max=$ts
+    done < <(find "$root/docs/analysis" -maxdepth 1 -name '*.md' 2>/dev/null)
+  fi
+  # 5. verification-round.jsonl（外层异步收尾轮次记录；gitignored 运行时态，存在才用）
+  f="$root/.quay/verification-round.jsonl"
+  if [ -e "$f" ]; then
+    ts=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+    [ "$ts" -gt "$max" ] 2>/dev/null && max=$ts
+  fi
+  echo "$max"
+}
+
+# heartbeat_is_outer_default —— 该心跳路径是否就是【默认外层心跳】（未被 SESSION_HEARTBEATS /
+# SESSION_TRANSCRIPTS 覆盖）。覆盖了 ⇒ 单源 heartbeat_mtime；默认 ⇒ 多源 _outer_heartbeat_max_mtime。
+heartbeat_is_outer_default() {
+  local name=$1 root=$2 hb=$3 n v
+  [ "$hb" = "$root/orchestration/tick-log.md" ] || return 1
+  if [ -n "${SESSION_HEARTBEATS:-}" ]; then
+    while read -r n v; do
+      [ -n "${n:-}" ] || continue
+      [ "$n" = "$name" ] && return 1
+    done <<< "$SESSION_HEARTBEATS"
+  fi
+  if [ -n "${SESSION_TRANSCRIPTS:-}" ]; then
+    while read -r n v; do
+      [ -n "${n:-}" ] || continue
+      [ "$n" = "$name" ] && return 1
+    done <<< "$SESSION_TRANSCRIPTS"
+  fi
+  return 0
+}
+
+# effective_heartbeat_mtime —— 判 SESSION-OVERDUE / SESSION-IDLE 噪声闸门用的心跳陈旧度。
+# 默认外层心跳 = 多源 max mtime；显式配置的心跳 = 单源 heartbeat_mtime。
+effective_heartbeat_mtime() {
+  local name=$1 root=$2 hb=$3
+  if heartbeat_is_outer_default "$name" "$root" "$hb"; then
+    _outer_heartbeat_max_mtime "$root"
+  else
+    heartbeat_mtime "$hb"
+  fi
+}
+
+# --selfcheck（本任务 ## Contract 的 invoke）—— 诊断接缝，验证外层多源心跳判据，自包含：
+#   1. 红窗处置（最近提交 + 新 queue-state + 旧 tick-log）⇒ 心跳新鲜（不报 OVERDUE，AC2）；
+#   2. 30 分钟零产出（旧提交 + 旧 tick-log + 无 queue-state）⇒ 心跳陈旧（真阳性保留，AC3）。
+# 用临时目录，不碰真实仓库/会话/单飞锁。
+selfcheck() {
+  local tmp ws now fresh stale fmin smin rc=1
+  tmp=$(mktemp -d 2>/dev/null) || { echo "session-liveness selfcheck: FAIL 无法创建临时目录" >&2; return 1; }
+  # 控制 1（反向失效消除）：红窗处置 = 最近提交 + 新 queue-state + 旧 tick-log ⇒ 心跳新鲜
+  ws="$tmp/fresh"
+  mkdir -p "$ws/orchestration" "$ws/docs/analysis" "$ws/.quay"
+  git -C "$ws" init -q -b master >/dev/null 2>&1
+  git -C "$ws" config user.email t@t >/dev/null 2>&1
+  git -C "$ws" config user.name t >/dev/null 2>&1
+  echo x > "$ws/a.txt"
+  git -C "$ws" add -A >/dev/null 2>&1
+  git -C "$ws" commit -qm "red-window triage commit" >/dev/null 2>&1
+  echo "# queue-state" > "$ws/docs/analysis/batch2-queue-state.md"
+  echo "# tick" > "$ws/orchestration/tick-log.md"
+  touch -d "3 hours ago" "$ws/orchestration/tick-log.md"   # tick-log 不动
+  fresh=$(_outer_heartbeat_max_mtime "$ws")
+  # 控制 2（真阳性保留）：30 分钟零产出 ⇒ 全源旧 ⇒ 心跳陈旧
+  ws="$tmp/stale"
+  mkdir -p "$ws/orchestration" "$ws/docs/analysis" "$ws/.quay"
+  git -C "$ws" init -q -b master >/dev/null 2>&1
+  git -C "$ws" config user.email t@t >/dev/null 2>&1
+  git -C "$ws" config user.name t >/dev/null 2>&1
+  echo x > "$ws/a.txt"
+  git -C "$ws" add -A >/dev/null 2>&1
+  GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
+    git -C "$ws" commit -qm "old" >/dev/null 2>&1
+  echo "# tick" > "$ws/orchestration/tick-log.md"
+  touch -d "3 hours ago" "$ws/orchestration/tick-log.md"
+  stale=$(_outer_heartbeat_max_mtime "$ws")
+  now=$(date +%s)
+  fmin=$(( (now - fresh) / 60 ))
+  smin=$(( (now - stale) / 60 ))
+  echo "session-liveness selfcheck: red-window-heartbeat_min=${fmin} zero-output-heartbeat_min=${smin} OVERDUE_MIN=${OVERDUE_MIN}"
+  if [ "$fmin" -lt "$OVERDUE_MIN" ] && [ "$smin" -ge "$OVERDUE_MIN" ]; then
+    echo "session-liveness selfcheck: PASS — 红窗处置（queue-state+提交）保持心跳新鲜；零产出触发 OVERDUE（真阳性保留）"
+    rc=0
+  else
+    echo "session-liveness selfcheck: FAIL — fresh_min=${fmin} (<${OVERDUE_MIN} 应为真) stale_min=${smin} (≥${OVERDUE_MIN} 应为真)" >&2
+    rc=1
+  fi
+  rm -rf "$tmp"
+  return $rc
+}
+
 ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;
+  --selfcheck) selfcheck; exit $? ;;
   --mask) mask_pane; exit 0 ;;
   --pane-state)
     # 诊断接缝（AC4/AC5 单测直接调用）：从 stdin 读 pane 文本，跑与主循环相同的
@@ -511,6 +638,7 @@ case "${1:-}" in
   --selfcheck)
     _sl_selfcheck; exit $? ;;
   -h|--help) echo "用法: $0 [--once] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--selfcheck]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck] [--mask] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -618,7 +746,10 @@ heartbeat_for() {
     done <<< "$SESSION_HEARTBEATS"
     return 1
   fi
-  echo "$REPO_ROOT/orchestration/tick-log.md"
+  # 默认外层心跳 = <目标根>/orchestration/tick-log.md。用 $root 而非 $REPO_ROOT：生产零配置下
+  # 两者相等（targets() 的零配置默认 root=REPO_ROOT），但用 $root 让多目标配置与测试能控制它，
+  # 且多源融合（_outer_heartbeat_max_mtime）正是以 $root 为根的。
+  echo "$root/orchestration/tick-log.md"
 }
 
 # heartbeat_mtime —— 心跳源的 mtime（epoch）。对 transcript（*.jsonl）还并上
@@ -946,6 +1077,8 @@ while true; do
         if [ "$idle" = "1" ] && [ "${IDLE_CONSEC[$name]:-0}" -eq "$IDLE_DEBOUNCE_ROUNDS" ] && [ "${SEEN_BUSY[$name]:-0}" = "1" ]; then
           hmin="?"
           hmod=$(heartbeat_mtime_for "$name" "$root")
+          hb=$(heartbeat_for "$name" "$root"); hmin="?"
+          hmod=$(effective_heartbeat_mtime "$name" "$root" "${hb:-/nonexistent}")
           [ "$hmod" != "0" ] && hmin=$(( ( $(date +%s) - hmod ) / 60 ))
           halt_msg=$([ "$halted" = "1" ] && echo "（该项目已暂停，空闲是预期状态）" || echo "")
           # AC9（盲点13）：空闲且发不出请求（最近 transcript 记录带结构性 isApiErrorMessage）。
@@ -1017,9 +1150,12 @@ while true; do
     # outer_heartbeat_mtime）；内层是 transcript（AC1/AC16，见文件头）。用文件 mtime 而不是解析
     # 表内时刻：本仓的 tick 时刻本身就写成 "12:0xZ" 这类模糊值，解析不可靠。陈旧度 =
     # now - max(心跳 mtime, 解除停机时刻)——停泊期间累积的陈旧在解除停机那一刻清零（协调方样本）。
+    # 默认外层心跳 = 多源 max mtime（effective_heartbeat_mtime：git 提交 / queue-state /
+    # tick-log / 分诊记录 / verification-round.jsonl 任一最新即活）——红窗处置写 queue-state+提交
+    # 不写 tick-log 仍保持心跳新鲜（gap-outer-heartbeat-source-inverts-under-incident-handling）。
     hb=$(heartbeat_for "$name" "$root")
-    if [ "$alive" = "1" ] && [ "$halted" = "0" ] && [ -e "${hb:-/nonexistent}" ]; then
-      hmod=$(heartbeat_mtime_for "$name" "$root")
+    if [ "$alive" = "1" ] && [ "$halted" = "0" ] && [ -n "${hb:-}" ]; then
+      hmod=$(effective_heartbeat_mtime "$name" "$root" "$hb")
       if [ "$hmod" != "0" ]; then
         eff=$hmod; [ "$base_ts" -gt "$eff" ] && eff=$base_ts
         omin=$(( ( $(date +%s) - eff ) / 60 ))
@@ -1027,7 +1163,13 @@ while true; do
         # 同一轮已报 RESUMED ⇒ 会话可证明在动（pane 哈希变了），OVERDUE 是自相矛盾
         # （协调方样本：RESUMED 与 OVERDUE 不得同轮同目标同发）。直接证据优先，压制 OVERDUE。
         if [ "$overdue" = "1" ] && [ "${PREV_OVERDUE[$name]:-0}" = "0" ] && [ "$resumed" = "0" ]; then
-          sl_emit "SESSION-OVERDUE $name 的会话活着，但心跳 ${omin} 分钟未更新（阈值 ${OVERDUE_MIN} 分钟，预期周期 ${EXPECTED_CYCLE_MIN} 分钟）——会话可能已死，它会静默地永远空闲"
+          if heartbeat_is_outer_default "$name" "$root" "$hb"; then
+            # AC4（信号可区分）：默认外层心跳的 OVERDUE 自带多源说明——假阳性（有产出但 tick-log 旧）
+            # 不会报 OVERDUE，能报出来就说明所有产出源都 ≥OVERDUE_MIN 没动，无需手工查提交历史。
+            sl_emit "SESSION-OVERDUE $name 的会话活着，但多源心跳（git提交/queue-state/tick-log/分诊记录/verification-round 任一）${omin} 分钟未更新（阈值 ${OVERDUE_MIN} 分钟，预期周期 ${EXPECTED_CYCLE_MIN} 分钟）——会话可能已死，它会静默地永远空闲"
+          else
+            sl_emit "SESSION-OVERDUE $name 的会话活着，但心跳 ${omin} 分钟未更新（阈值 ${OVERDUE_MIN} 分钟，预期周期 ${EXPECTED_CYCLE_MIN} 分钟）——会话可能已死，它会静默地永远空闲"
+          fi
         fi
         PREV_OVERDUE[$name]=$overdue
       fi

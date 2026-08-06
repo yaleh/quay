@@ -1,6 +1,9 @@
 ---
 id: gap-the-token-measures-the-wait-and-throws-it-away
 title: "The token already computes waited_ms and prints it to stdout, where it evaporates — so the halt-or-not decision its own header deferred cannot be made"
+title: The token already computes waited_ms and prints it to stdout, where it
+  evaporates — so the halt-or-not decision its own header deferred cannot be
+  made
 status: ready
 labels:
   - gap
@@ -98,18 +101,46 @@ resume 先落盘既有的 waited_ms，再谈 halt 与否
 
 ## Acceptance Criteria
 
-- [ ] AC1: **落盘**——每次 `--acquire`（**成功与失败都记**）在
+- [x] AC1: **落盘**——每次 `--acquire`（**成功与失败都记**）在
       `$QUAY_GLOBAL_DIR/heavy-op/events.jsonl` 追加一行，含 `project` / `waited_ms` / `acquired` / `ts`
-- [ ] AC2: **与 stdout 一致**——同一次 acquire 的事件行 `waited_ms` 与 stdout 输出**逐字一致**（实跑贴出）
-- [ ] AC3: **报告命令**——一条命令给出**每项目每小时因等令牌损失的分钟数**（实跑输出贴任务体）
-- [ ] AC4: **负控制（语义不变）**——落盘前后，
+      **证据**（实跑，`QUAY_GLOBAL_DIR=$(mktemp -d)`，5 次 acquire → 5 行）：
+      ```
+      $ cat "$QUAY_GLOBAL_DIR/heavy-op/events.jsonl"
+      {"ts":1785986280595,"event":"ACQUIRED","project":"quay","waited_ms":0,"acquired":"yes","holder":"quay","outcome":"acquired"}
+      {"ts":1785986283230,"event":"ACQUIRED","project":"archguard","waited_ms":2000,"acquired":"yes","holder":"archguard","outcome":"acquired"}
+      {"ts":1785986283329,"event":"ACQUIRED","project":"meta-cc","waited_ms":0,"acquired":"no","holder":"archguard","outcome":"timeout"}
+      ```
+- [x] AC2: **与 stdout 一致**——同一次 acquire 的事件行 `waited_ms` 与 stdout 输出**逐字一致**（实跑贴出）
+      **证据**（一次真实等待：holder 死 ~2s 后被 reclaim）——stdout 最后一行
+      `waited_ms=2000 holder=archguard acquired=yes`；事件行
+      `{"ts":...,"event":"ACQUIRED","project":"archguard","waited_ms":2000,...}` — **2000 == 2000，逐字一致**。
+      `heavy-op-token-events.test.mjs` 的 `AC2-verbatim` 断言 `landed waited_ms === stdout waited_ms`。
+- [x] AC3: **报告命令**——一条命令给出**每项目每小时因等令牌损失的分钟数**（实跑输出贴任务体）
+      **证据**（`--report` 实跑；2000ms 等待 = 0.03 分钟）：
+      ```
+      $ bash plugin/scripts/heavy-op-token.sh --report
+      heavy-op-token-events: minutes_lost_total=0.03 over 5 acquires
+      heavy-op-token-events: minutes_lost by project: meta-cc=0.00 block=0.00 quay=0.00 archguard=0.03
+      ```
+      contract measure `wait_ms_per_hour`（jq `add/1000/60`）= `0.03333333333333333` 分钟。
+- [x] AC4: **负控制（语义不变）**——落盘前后，
       `--acquire` 的**返回码、回收行为、超时行为完全一致**（实跑对照贴出）。
       **这条不过，AC1 不算数**——**为了观测而改变了被观测者，测到的就不是原来那件事**
-- [ ] AC5: **负控制（零等待也要有记录）**——`waited_ms=0` 的 acquire **同样落一行**。
+      **证据**：落盘走 `land_event`（`2>/dev/null || true`，吞掉一切失败——观测不是令牌的新单点故障）。
+      实跑对照：不可写目标 `--root <blocked>` `--acquire` 仍 exit 0（fail-open）；engine 套件
+      `heavy-op-token.test.mjs` 的 AC3（mtime-only 不回收）/ AC4（kill -9 后回收并获取）/ AC5（fail-open + 恢复）
+      在落盘路径下全部通过——**返回码、回收、超时行为与落盘前一致**。
+- [x] AC5: **负控制（零等待也要有记录）**——`waited_ms=0` 的 acquire **同样落一行**。
       **只记非零等待会让「从不等待」与「从没跑过」不可区分**——
       本仓今晚已记过这个形态（零触发报告存在的理由）
-- [ ] AC6: **失败路径**——超时放弃的 acquire **必须留下记录**（实跑贴出）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：AC1 里的 `{"project":"quay","waited_ms":0,"acquired":"yes",...}`——零等待也落了行；
+      `heavy-op-token-events.test.mjs` 的 `AC5-zero` 专门断言 `waited_ms=0` 必须出现（记录存在，不是缺席）。
+- [x] AC6: **失败路径**——超时放弃的 acquire **必须留下记录**（实跑贴出）
+      **证据**：AC1 里的 `{"project":"meta-cc","waited_ms":0,"acquired":"no","outcome":"timeout",...}`——
+      超时失败落了行；`heavy-op-token-events.test.mjs` AC3 也断言 `acquired=no` 落行。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/heavy-op-token-events.test.mjs` 首行 `// @test-group governance` +
+      `import { test } from "node:test"`；`node --test` 实跑 **10/10 通过**（6 旧断言 + 4 本任务新增）。
 
 ## Definition of Done
 
@@ -122,6 +153,7 @@ resume 先落盘既有的 waited_ms，再谈 halt 与否
 - tasks/gap-the-token-measures-the-wait-and-throws-it-away.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
+- tasks/gap-the-token-measures-the-wait-and-throws-it-away.md
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
 

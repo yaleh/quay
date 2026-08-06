@@ -22,9 +22,10 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { resolveGate, listGates } from "../src/gate/registry.ts";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const quayBin = QUAY_CLI;
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 

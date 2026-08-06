@@ -40,6 +40,14 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"
 
+# fail-loud precondition (gap-laydown-derivation-is-sensitive-to-reference-spelling-... AC4):
+# a missing CHECKER must abort at STARTUP, never a silent assignment. The pre-fix script ran the
+# whole delivery flow and only failed deep in the step-5 poll when node could not spawn the checker.
+if [ ! -f "$CHECKER" ]; then
+  echo "send-keys-reliable: 依赖的校验器缺失: $CHECKER — 无法验证送达，fail loud" >&2
+  exit 1
+fi
+
 TARGET="${1:-}"
 TEXT="${2:-}"
 TARGET_JSONL="${3:-}"

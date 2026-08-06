@@ -1,0 +1,1 @@
+../../../plugin/test/workflow-journal.test.mjs

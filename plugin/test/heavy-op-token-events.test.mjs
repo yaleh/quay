@@ -1,25 +1,31 @@
 // @test-group governance
-// heavy-op-token-events.test.mjs — gap-token-wait-times-are-printed-once-and-never-landed. Pins the
-// events landing added to plugin/scripts/heavy-op-token.sh: every acquire appends one JSONL record to
-// the workspace's `.quay/heavy-op-token-events.jsonl` (same family as gate-events.jsonl), on the
-// success AND timeout paths, without ever becoming a new single point of failure for the token.
+// heavy-op-token-events.test.mjs — gap-the-token-measures-the-wait-and-throws-it-away. Pins the events
+// landing in plugin/scripts/heavy-op-token.sh: every acquire appends one JSONL record to the SHARED
+// cross-project $QUAY_GLOBAL_DIR/heavy-op/events.jsonl (the same dir the token lives in, so archguard /
+// meta-cc / quay all contribute to ONE distribution), on success AND timeout paths, with event="ACQUIRED"
+// on every record. This is the measurement that makes the header's deferred halt decision answerable
+// (:61 "no fair queue / FIFO: starvation is observable first (waited_ms), the policy decision waits") —
+// the policy decision (halt-or-not) was asked and could not be made because the measurement was printed
+// to stdout and evaporated.
 //
-//   AC1 — every acquire lands exactly one record with waited_ms + acquired (3 acquires -> 3 lines)
-//   AC2 — a REAL queue (token held) lands a waited_ms that matches the actual wait (value, not field
-//         existence — a waited_ms pinned at zero satisfies an existence-only assertion)
-//   AC3 — the timeout/failure path also lands (acquired=no)
+//   AC1 — the DEFAULT landing is $QUAY_GLOBAL_DIR/heavy-op/events.jsonl (no --events-file override),
+//         one record per acquire with event/project/waited_ms/acquired/ts (3 acquires -> 3 lines)
+//   AC2 — a REAL queue lands a waited_ms BYTE-IDENTICAL to the stdout waited_ms (same wait, two surfaces)
+//   AC3 — --report prints minutes_lost by project (sum(waited_ms)/60000) — the halt-decision shape
 //   AC4 — negative control: an unwritable events target must NOT fail the acquire (observation is
 //         never a new single point of failure for the global single-flight token)
-//   AC5 — .gitignore ignores the events file in the same form as gate-events.jsonl
-//   AC6 — the --report command shows count/median/p90/max on real data; below the sample threshold it
-//         says 「样本 N 不足」 instead of printing a pretty zero
-//   AC7 — node:test + `// @test-group governance` (governance = the metering/measurement layer; the
-//         existing engine-tagged heavy-op-token.test.mjs keeps its engine group and AC10 pin)
+//   AC5 — waited_ms=0 acquires land too (zero-wait is distinct from never-ran)
+//   AC6 — the timeout/failure path also lands (acquired=no); the --report distribution still says
+//         「样本 N 不足」 below the threshold and prints median/p90/max above it
+//   AC7 — node:test + `// @test-group governance` (governance = the metering/measurement layer).
+//         gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs moved the base token
+//         suite (heavy-op-token.test.mjs) from engine to governance too; it carries NO in-file
+//         self-skip wrapper (like this file), so it still RUNS in the default suite.
 //
-// Governance-tagged files self-skip in the default product+engine full suite by design (see
-// scripts/test.sh); run this file explicitly or with `--group governance`. The landing code path is
-// STILL exercised in the default suite because the engine-tagged heavy-op-token.test.mjs now routes
-// every acquire through --events-file.
+// Governance-tagged files MAY self-skip in the default product+engine full suite via an in-file
+// wrapper (see scripts/test.sh); files without a wrapper (this one and heavy-op-token.test.mjs)
+// run their tests in every invocation. The landing code path is exercised in the default suite
+// because heavy-op-token.test.mjs routes every acquire through --events-file.
 //
 // Run: node --test plugin/test/heavy-op-token-events.test.mjs
 
@@ -70,6 +76,7 @@ test("AC1 — every acquire lands one JSONL record with waited_ms + acquired (3 
     assert.equal(records.length, 3, `expected 3 landed records, got ${records.length}: ${JSON.stringify(records)}`);
     for (const rec of records) {
       assert.equal(typeof rec.waited_ms, "number");
+      assert.equal(rec.event, "ACQUIRED", "every acquire record must carry event=\"ACQUIRED\"");
       assert.equal(rec.acquired, "yes");
       assert.equal(rec.project, "probe");
       assert.equal(rec.outcome, "acquired");
@@ -195,6 +202,109 @@ test("AC6 — --report: below the threshold says 样本 N 不足 (refuses a pret
     assert.equal(big.status, 0, `--report must exit 0:\n${big.all}`);
     assert.match(big.stdout, /count=10/);
     assert.match(big.stdout, /median_ms=\d+ p90_ms=\d+ max_ms=\d+/, "the distribution must compute real numbers");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── this task (gap-the-token-measures-the-wait-and-throws-it-away) ────────────────────────────────────
+// AC1-global — the DEFAULT events file is $QUAY_GLOBAL_DIR/heavy-op/events.jsonl (the cross-project
+// location the contract measures read — NOT a per-workspace .quay/ file), and every record carries
+// event="ACQUIRED". The only override is the QUAY_GLOBAL_DIR env var (the shared-root seam).
+test("AC1-global — default landing is $QUAY_GLOBAL_DIR/heavy-op/events.jsonl with event=ACQUIRED (no --events-file)", () => {
+  const globalDir = makeTmp();
+  try {
+    const a = runToken(["--acquire", "quay", "--timeout", "0"], { env: { QUAY_GLOBAL_DIR: globalDir } });
+    assert.equal(a.status, 0, `acquire failed:\n${a.all}`);
+    const events = path.join(globalDir, "heavy-op", "events.jsonl");
+    assert.ok(fs.existsSync(events), `default events file must exist at ${events}`);
+    assert.ok(
+      fs.existsSync(path.join(globalDir, "heavy-op", "token")),
+      "the token must live in the SAME global heavy-op dir as the events (one shared cross-project root)"
+    );
+    const rec = JSON.parse(fs.readFileSync(events, "utf8").trim().split("\n").pop());
+    assert.equal(rec.event, "ACQUIRED", "every acquire record must carry event=\"ACQUIRED\"");
+    assert.equal(rec.project, "quay");
+    assert.equal(rec.acquired, "yes");
+    assert.ok(rec.ts > 0, "ts must be a real epoch-ms timestamp");
+    assert.equal(typeof rec.waited_ms, "number");
+    runToken(["--release", "quay"], { env: { QUAY_GLOBAL_DIR: globalDir } });
+  } finally {
+    fs.rmSync(globalDir, { recursive: true, force: true });
+  }
+});
+
+// AC2-verbatim — a real wait's landed waited_ms is BYTE-IDENTICAL to the stdout waited_ms (the
+// "same wait, two surfaces" control contract — not just a numeric near-match).
+test("AC2-verbatim — real wait: landed waited_ms is byte-identical to the stdout waited_ms", async () => {
+  const root = makeTmp();
+  const events = path.join(root, "events.jsonl");
+  let holder;
+  try {
+    holder = spawn("bash", ["-c", `"${TOKEN}" --root "${root}" --events-file "${events}" --acquire block --timeout 0 && sleep 2`]);
+    const tokenPath = path.join(root, "heavy-op", "token");
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(tokenPath) && Date.now() < deadline) await sleep(20);
+    assert.ok(fs.existsSync(tokenPath), "holder must hold the token before the waiter starts");
+
+    const t0 = Date.now();
+    const r = runToken(["--acquire", "waiter", "--timeout", "6"], {
+      root,
+      eventsFile: events,
+      env: { HEAVY_OP_STALE_TIMEOUT_S: "1" },
+    });
+    const wallMs = Date.now() - t0;
+    assert.equal(r.status, 0, `waiter must acquire after the holder dies + reclaim:\n${r.all}`);
+
+    const m = r.stdout.match(/waited_ms=(\d+) holder=\S+ acquired=yes/);
+    assert.ok(m, `stdout must carry the success waited_ms line:\n${r.stdout}`);
+    const stdoutWaitedMs = Number(m[1]);
+    const rec = readRecords(events).find((l) => l.project === "waiter" && l.acquired === "yes");
+    assert.ok(rec, "the waiter's landed record must exist");
+    assert.equal(rec.waited_ms, stdoutWaitedMs, "landed waited_ms must be BYTE-IDENTICAL to the stdout value");
+    assert.ok(rec.waited_ms >= 900, `waited_ms ${rec.waited_ms} must reflect the real wait, not a pinned 0`);
+    assert.ok(Math.abs(rec.waited_ms - wallMs) < 1500, `waited_ms ${rec.waited_ms} must roughly match wall ${wallMs}`);
+    assert.equal(rec.event, "ACQUIRED");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// AC3-report — --report prints minutes_lost by project (sum(waited_ms)/60000 per project) — the
+// halt-decision shape: "how many minutes per hour does each project lose waiting for the token".
+test("AC3-report — --report prints minutes_lost_total + per-project minutes lost", () => {
+  const root = makeTmp();
+  const events = path.join(root, "events.jsonl");
+  try {
+    for (const p of ["quay", "archguard"]) {
+      const a = runToken(["--acquire", p, "--timeout", "0"], { root, eventsFile: events });
+      assert.equal(a.status, 0);
+      runToken(["--release", p], { root, eventsFile: events });
+    }
+    const rep = runToken(["--report"], { root, eventsFile: events });
+    assert.equal(rep.status, 0, `--report must exit 0:\n${rep.all}`);
+    assert.match(rep.stdout, /minutes_lost_total=\d+\.\d{2} over \d+ acquires/, "total minutes lost must be printed");
+    assert.match(rep.stdout, /minutes_lost by project:/, "the per-project breakdown must be printed");
+    assert.match(rep.stdout, /quay=\d+\.\d{2}/, "quay must appear in the per-project breakdown");
+    assert.match(rep.stdout, /archguard=\d+\.\d{2}/, "archguard must appear in the per-project breakdown");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// AC5-zero — waited_ms=0 acquires land too (zero-wait is distinct from never-ran).
+test("AC5-zero — a waited_ms=0 acquire lands a record (zero-wait distinct from never-ran)", () => {
+  const root = makeTmp();
+  const events = path.join(root, "events.jsonl");
+  try {
+    const a = runToken(["--acquire", "quay", "--timeout", "0"], { root, eventsFile: events });
+    assert.equal(a.status, 0, `acquire failed:\n${a.all}`);
+    const rec = readRecords(events).find((l) => l.project === "quay" && l.acquired === "yes");
+    assert.ok(rec, "the zero-wait acquire must land a record");
+    assert.equal(rec.waited_ms, 0, "zero-wait must land waited_ms=0 (record present, not absent)");
+    assert.equal(rec.event, "ACQUIRED");
+    runToken(["--release", "quay"], { root, eventsFile: events });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

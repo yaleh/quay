@@ -105,6 +105,7 @@ extra:
 - tasks/gap-value-prioritization-has-no-mechanism.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
+- tasks/gap-value-prioritization-has-no-mechanism.md（self-touch：AC 勾选 + invoke 实跑证据）
 - plugin/scripts/ready-pool-check.ts（相关性信号 + 优先级查询输出）
 - plugin/test/ready-pool-check.test.mjs（AC4 既有行为回归 + AC1/AC2 断言）
 - tasks/gap-productize-the-manager-layer.md（AC5 交叉标注）

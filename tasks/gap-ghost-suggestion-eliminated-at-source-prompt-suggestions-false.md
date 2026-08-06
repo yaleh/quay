@@ -3,6 +3,8 @@ id: gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false
 title: ghost-suggestion (reliable-send fault 6) can be eliminated at source via
   --prompt-suggestions false / CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false — verify
   safely, then make it a required cold-start launch parameter
+  --prompt-suggestions false / CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false —
+  verify safely, then make it a required cold-start launch parameter
 status: done
 labels:
   - gap
@@ -116,6 +118,72 @@ node --test plugin/test/launch-settings.test.mjs
 - `plugin/scripts/os-anchor-install.sh` / `os-anchor-watchdog.sh`：硬编码 launch-cmd **缺** `--prompt-suggestions false`
   —— 但已由**独立任务** `gap-os-anchor-watchdog-launch-missing-prompt-suggestions`（todo）单独追踪，非本任务范围。
 - `orchestration/RESEARCH-claude-code-cli-config-2026-08-05.md`：落地行已更新为双路线描述（本任务顺手订正）。
+      **证据（2026-08-06，throwaway `ghost-ac1`，独立 socket `/tmp/ghost-ac1.sock`，scratch `/tmp/ghost-ac1`）**：
+      命令 = `cd /tmp/ghost-ac1 && CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude-deepseek --prompt-suggestions false --permission-mode bypassPermissions -n ghost-ac1 --model deepseek-v4-flash`
+      （与 quay-b 运行循环零接触——独立 socket，验证后 `kill-server` + kill 残留进程，quay-b 全程未动）。
+      空闲输入框（`❯` 后）**无灰色占位建议**，实拍输出逐字：
+      ```
+      ╭─── Claude Code v2.1.222 ─────────────────────────────────────────────────────╮
+      │                                           │ Tips for getting started         │
+      │               Welcome back!               │ Ask Claude to create a new app … │
+      ...
+      ─────────────────────────────────────────────────────────────────── ghost-ac1 ──
+      ❯ 
+      ────────────────────────────────────────────────────────────────────────────────
+        ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+      ```
+      字节级（`cat -A`）：输入框行为 `M-bM-^]M-/M-BM- $` = `❯` + NBSP（真空），无任何建议文本。
+- [x] AC2: **负控制（对照）**——另一个 throwaway 会话**不带**该配置启动 ⇒ 输入框**出现**灰色占位建议
+      （证明测试能检出该形态）；带配置 ⇒ 不出现。两个方向的实跑输出逐字贴任务体
+      **方向一（带配置 ⇒ 无建议）**：即 AC1，输入框 `❯ ` 后无文本。
+      **方向二（不带配置 ⇒ 有建议）**——throwaway `ghost-ac2`，独立 socket `/tmp/ghost-ac2.sock`，
+      scratch `/tmp/ghost-ac2`，命令 = `cd /tmp/ghost-ac2 && claude-deepseek --permission-mode bypassPermissions -n ghost-ac2 --model deepseek-v4-flash`（无 flag、无 env）。
+      空闲输入框（`❯` 后）**出现灰色占位建议**，实拍输出逐字：
+      ```
+      ╭─── Claude Code v2.1.222 ─────────────────────────────────────────────────────╮
+      │                                           │ Tips for getting started         │
+      │               Welcome back!               │ Ask Claude to create a new app … │
+      ...
+      ─────────────────────────────────────────────────────────────────── ghost-ac2 ──
+      ❯ Try "edit <filepath> to..."
+      ────────────────────────────────────────────────────────────────────────────────
+        ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+      ```
+      字节级（`cat -A`）：输入框行为 `M-bM-^]M-/M-BM- Try "edit <filepath> to..."$` = `❯` + 空格 +
+      `Try "edit <filepath> to..."`。两个方向唯一变量是配置本身（同一 claude 2.1.222、同一启动形状、
+      同 welcome 屏），AC1 无建议 / AC2 有建议 —— 测试能检出该形态，且配置确实关掉它。
+- [x] AC3: **冷启动要求**——验证通过后，启动命令规范（`orchestration/restart-plan-*.md` 与
+      `plugin/skills/cold-start/SKILL.md`）加入 **必带参数**：`--prompt-suggestions false` +
+      `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`，标注 **REQUIRED 非可选**
+      **落地**：`orchestration/restart-plan-2026-08-04-third.md` §8（REQUIRED 两条 + 机械落实）；
+      `plugin/skills/cold-start/SKILL.md`（REQUIRED launch params 段）。**机械执行**：
+      `.claude/launch.settings.json` 顶层 `env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="false"` +
+      `_launchSpec.promptSuggestions:false`；`plugin/scripts/quay-launch.sh` 对每个角色命令追加
+      `--prompt-suggestions false`（三个角色 `--dry-run` 均含，见下）；测试机械断言（AC6）。
+      三个角色 dry-run 实拍：
+      ```
+      outer:  claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false --model deepseek-v4-flash -n quay-outer
+      inner:  claude-deepseek --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false --model deepseek-v4-flash -n quay-inner
+      manager: claude --settings <root>/.claude/launch.settings.json --exclude-dynamic-system-prompt-sections --prompt-suggestions false -n quay-manager
+      ```
+- [x] AC4: **故障 6 标注**——`orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 故障 6 标注
+      「已被环境配置从源头消除；运行时判定逻辑（直接输入覆盖）保留作历史兜底」
+      **落地**：故障 6 修法段后新增 2026-08-06 标注——「故障 6 **已被环境配置从源头消除**——`
+      --prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`（冷启动 REQUIRED 参数）……
+      **运行时判定逻辑（直接输入覆盖）保留作历史兜底**——防未来版本行为变化，不删」。
+- [x] AC5: 一致性——`QUAY-OUTER-HANDOFF.md` / tick 文档若描述启动命令，同步该参数（grep 全仓核对；
+      无则记「无其它实例」）
+      **grep 全仓核对结果**：`QUAY-OUTER-HANDOFF.md` **无字面启动命令**（仅第 4 行散文提到
+      `claude-deepseek`，非启动命令）→ 无其它实例需同步。字面启动命令在以下文件，均已同步：
+      `orchestration/restart-plan-2026-08-04-third.md`（§8）、`plugin/skills/cold-start/SKILL.md`、
+      `orchestration/session-launch-recipes.md`（§7 dry-run 示例）、`plugin/skills/manager/SKILL.md`、
+      `plugin/scripts/os-anchor-install.sh`（两处 launch 字符串）。引用 `quay-launch.sh` 的
+      （session-topology/init/quay-topology）经 launcher 自动带 flag，无需改。
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若验证逻辑可测试化）
+      **落地**：扩展 `plugin/test/launch-settings.test.mjs`（既有 `// @test-group governance` +
+      `import { test } from "node:test"`）——新增「AC1 _launchSpec.promptSuggestions 必须为 false」、
+      「AC4 正控：每个角色 dry-run 命令都含 `--prompt-suggestions false`」、
+      「AC4 负控：`promptSuggestions` 翻成 `true` ⇒ flag 消失」。实跑 `12 pass / 0 fail / 0 cancelled`。
 
 ## Definition of Done
 
@@ -129,6 +197,9 @@ node --test plugin/test/launch-settings.test.mjs
 - plugin/scripts/quay-launch.sh
 - plugin/test/launch-settings.test.mjs
 - orchestration/restart-plan-2026-08-04-third.md
+
+- tasks/gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false.md
+- orchestration/restart-plan-2026-08-04-third.md（或当前生效的启动计划）
 - plugin/skills/cold-start/SKILL.md
 - orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（故障 6 标注）
 - orchestration/RESEARCH-claude-code-cli-config-2026-08-05.md（双路线落地行订正）

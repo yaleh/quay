@@ -1,6 +1,9 @@
 ---
 id: gap-residue-check-crystallized-as-tool-mode
 title: "\"box has text vs actually submitted\" must be a tool judgment, not role memory — add a --check-residue mode (empty / real-unsubmitted-text / ghost-suggestion-only) reusing D's bottom-region + shape"
+title: "\"box has text vs actually submitted\" must be a tool judgment, not role
+  memory — add a --check-residue mode (empty / real-unsubmitted-text /
+  ghost-suggestion-only) reusing D's bottom-region + shape"
 status: ready
 labels:
   - gap
@@ -46,17 +49,98 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `pane-state-classify.ts --check-residue` 存在——给定 pane 文本/目标，输出三态之一
+- [x] AC1: `pane-state-classify.ts --check-residue` 存在——给定 pane 文本/目标，输出三态之一
       （empty / real-unsubmitted-text / ghost-suggestion-only），复用 `bottomRegion` 与五态形状逻辑
-- [ ] AC2: **运行时探针（fault-6 判据机械化）**——real-unsubmitted 的判定包含「C-u 后文本消失」；
+- [x] AC2: **运行时探针（fault-6 判据机械化）**——real-unsubmitted 的判定包含「C-u 后文本消失」；
       ghost 的判定包含「C-u 循环 N 次 pane 逐字不变」（探针有界、fail-loud）
-- [ ] AC3: 夹具三态各 ≥1 张真实录制（empty 输入框 / 真输入未提交 / ghost-suggestion 占位），附录制来源
-- [ ] AC4: **负控制（双向）**——真输入残留 ⇒ C-u 清掉 ⇒ 判 real-unsubmitted；ghost ⇒ C-u 不清 ⇒ 判
+- [x] AC3: 夹具三态各 ≥1 张真实录制（empty 输入框 / 真输入未提交 / ghost-suggestion 占位），附录制来源
+- [x] AC4: **负控制（双向）**——真输入残留 ⇒ C-u 清掉 ⇒ 判 real-unsubmitted；ghost ⇒ C-u 不清 ⇒ 判
       ghost-suggestion-only（两次实跑贴任务体）
-- [ ] AC5: 与 transcript 交叉验证——判 real-unsubmitted 后，查 transcript 确认该文本**未**作为 user
+- [x] AC5: 与 transcript 交叉验证——判 real-unsubmitted 后，查 transcript 确认该文本**未**作为 user
       message 出现（若已提交则判错）；判 ghost 后，transcript 同样无该文本（实跑贴出）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group engine`（与 D 同类）
-- [ ] AC7: 标注与故障 6 的关系——结晶文档故障 6 的运行时判定逻辑由此工具承载（源头消除后仍作历史兜底）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group engine`（与 D 同类）
+- [x] AC7: 标注与故障 6 的关系——结晶文档故障 6 的运行时判定逻辑由此工具承载（源头消除后仍作历史兜底）
+
+## AC4/AC5 实跑输出（贴任务体，2026-08-06，throwaway pane 真实录制，未触碰 quay-b 活会话）
+
+### AC4 实跑 1 —— 真输入残留 ⇒ C-u 清掉 ⇒ 判 real-unsubmitted
+
+```
+$ tmux send-keys -t residue-fix:0.0 -l 'AC4 real unsubmitted check text'   # 打字未回车
+$ tmux capture-pane -p -t residue-fix:0.0 | grep '❯' | tail -1
+❯ AC4 real unsubmitted check text
+$ node --experimental-strip-types plugin/scripts/pane-state-classify.ts --check-residue residue-fix:0.0
+{"state":"real-unsubmitted-text","reason":"C-u cleared the input line at cycle 1","captures":2,"target":"residue-fix:0.0","maxClicks":50}
+$ tmux capture-pane -p -t residue-fix:0.0 | grep '❯' | tail -1   # 探针已 C-u 清空
+❯
+```
+
+### AC4 实跑 2 —— ghost ⇒ C-u 不清 ⇒ 判 ghost-suggestion-only（有界 3 次 C-u）
+
+```
+$ tmux capture-pane -p -t residue-ghost:0.0 | grep '❯' | tail -1
+❯ Try "fix lint errors"
+$ node --experimental-strip-types plugin/scripts/pane-state-classify.ts --check-residue residue-ghost:0.0 --max-clicks 3
+{"state":"ghost-suggestion-only","reason":"input line byte-identical through all C-u cycles (fault 6) (probe ran 3 C-u cycles, cap 3)","captures":4,"target":"residue-ghost:0.0","maxClicks":3}
+$ tmux capture-pane -p -t residue-ghost:0.0 | grep '❯' | tail -1   # 逐字不变
+❯ Try "fix lint errors"
+```
+
+### AC5 transcript 交叉验证（判后 grep 全部 quay workspace transcript，只数 user-message 内容命中）
+
+```
+real-unsubmitted 文本 'AC4 real unsubmitted check text' → user-message hits = 0（从未被提交）
+ghost 文本 'Try "fix lint errors"'                       → user-message hits = 0（从未被提交）
+```
+说明：早期按字节 grep 出的 1–2 处命中是**本任务自己的 subagent transcript 里那条 `tmux send-keys`
+工具调用命令行**（type=tool_use，不是 user message）——恰是 AC5 要防的「把命令/工具痕迹当成已提交」
+的区分点；按 `type=="user" && message.role=="user" && content 含该文本` 过滤后为 0。
+
+### 真实使用（DoD 实跑，非构造——真 Claude Code TUI，throwaway 会话，未触碰 quay-b 活会话）
+
+生产配置（`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --prompt-suggestions false`，
+冷启动 REQUIRED 参数）下，输入框为空；打字未回车后用 `--check-residue` 判框态，C-u 清掉 ⇒ real：
+
+```
+$ node --experimental-strip-types plugin/scripts/pane-state-classify.ts --check-residue residue-claude:0.0
+{"state":"empty","reason":"input line after ❯ is empty (probe: no C-u needed)","captures":1,"target":"residue-claude:0.0","maxClicks":50}
+$ tmux send-keys -t residue-claude:0.0 -l 'REAL USE residue marker 20260806b'   # 打字未回车
+$ tmux capture-pane -p -t residue-claude:0.0 | grep '❯' | tail -1
+❯ REAL USE residue marker 20260806b
+$ node --experimental-strip-types plugin/scripts/pane-state-classify.ts --check-residue residue-claude:0.0 --max-clicks 5
+{"state":"real-unsubmitted-text","reason":"C-u cleared the input line at cycle 2","captures":3,"target":"residue-claude:0.0","maxClicks":5}
+$ tmux capture-pane -p -t residue-claude:0.0 | grep '❯' | tail -1   # 探针已清空
+❯
+```
+该 throwaway 会话从未提交任何 user message（transcript 文件未创建），marker 从未作为 user message
+出现在任何 transcript——与「real-unsubmitted（未提交）」判一致。
+
+无生产 flag（带 ghost-suggestion）的同一真 Claude TUI 上，输入框是**真实 gray ghost-suggestion**
+（`❯ Try "fix typecheck errors"`），`--check-residue` 判 ghost ⇒ C-u 逐字不变：
+
+```
+$ tmux capture-pane -p -t residue-claude:0.0 | grep '❯' | tail -1
+❯ Try "fix typecheck errors"
+$ node --experimental-strip-types plugin/scripts/pane-state-classify.ts --check-residue residue-claude:0.0 --max-clicks 3
+{"state":"ghost-suggestion-only","reason":"input line byte-identical through all C-u cycles (fault 6) (probe ran 3 C-u cycles, cap 3)","captures":4,"target":"residue-claude:0.0","maxClicks":3}
+$ tmux capture-pane -p -t residue-claude:0.0 | grep '❯' | tail -1   # 逐字不变
+❯ Try "fix typecheck errors"
+```
+（在无生产 flag 的会话里打字后探针会因「清掉后被 ghost 重新渲染」而 fail-loud 报 unknown——这是正确
+的 fail-loud：`--prompt-suggestions false` 已从源头消除该形态，工具对意外形态不猜。）
+
+### AC6 作用域测试输出（`scripts/test.sh --for-task gap-residue-check-crystallized-as-tool-mode`）
+
+```
+✔ AC1: --check-residue pure functions exist; a single snapshot yields only the static part
+✔ AC1: --check-residue CLI is wired — a file/target argument emits one JSON line whose state field is one of the three
+✔ AC1: the residue check reuses bottomRegion — an upper-screen ❯ cannot fake the input line
+✔ AC2: the fault-6 criterion is mechanized in the pure verdict — C-u cleared ⇒ real; byte-identical ⇒ ghost; bounded + fail-loud
+✔ AC3: residue fixtures are real recordings — on disk, multi-line, non-trivial, and classifiable
+✔ AC4: bidirectional negative control — cleared ⇒ real (never ghost); unchanged ⇒ ghost (never real); both decisive
+ℹ tests 17   ℹ pass 17   ℹ fail 0   ℹ cancelled 0
+EXIT=0
+```
 
 ## Definition of Done
 
@@ -68,6 +152,7 @@ extra:
 - tasks/gap-residue-check-crystallized-as-tool-mode.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
+- tasks/gap-residue-check-crystallized-as-tool-mode.md
 - plugin/scripts/pane-state-classify.ts
 - plugin/test/pane-state-classify.test.mjs（或新增 residue-check 测试）
 - plugin/test/fixtures/pane-states/（补三态夹具）
