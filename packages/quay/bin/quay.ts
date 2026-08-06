@@ -5,6 +5,8 @@
 
 import path from "node:path";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
+import { execFileSync } from "node:child_process";
 import { loadConfig, activeProvider } from "../src/config.ts";
 import { connectProvider } from "../src/provider-client.ts";
 import { composePayload, deliverTrigger } from "../src/action.ts";
@@ -171,6 +173,51 @@ function parseFlags(argv) {
 function parseVerbless(sub, rest) {
   const { flags, positional } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
   return { flags, id: positional[0] };
+}
+
+// gap-manager-productization-five-constraints: locate `<name>` (e.g. "plugin/scripts") by walking
+// upward from `startDir` — the manager commands must work on a bare machine WITHOUT a configured
+// .quay/config.yml (C4 independent cold start), so they resolve the plugin scripts from the tree
+// first and only fall back to loadConfig().workspaceRoot.
+function findUpward(name, startDir) {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (fsSync.existsSync(path.join(dir, name))) return path.join(dir, name);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+// printManagerHelp — `quay manager --help` (C4/C5: two separate commands, start ≠ adopt).
+function printManagerHelp() {
+  process.stdout.write(`quay manager — the cross-project manager layer (SPEC-manager-productization-2026-08-05)
+
+Usage:
+  quay manager start                 Start the MANAGER itself (independent cold start).
+                                     Accepts NO project arguments (C4).
+  quay manager adopt <project-root>  Start ONE project's outer+inner (C5 — separate from 'start').
+  quay manager --help
+
+C4 — 'manager start' brings up the manager alone on a bare machine: independent tmux session
+     (quay-manager), home under $QUAY_GLOBAL_DIR/manager/ (C2 — NOT in any project), its OWN
+     systemd unit (quay-manager-watchdog, separate from the project os-anchor watchdog), and a
+     non-session-scoped heartbeat.
+C5 — 'manager adopt <root>' is a SEPARATE command: it reuses inner-session-check.sh's three-state
+     verdict (healthy→noop / empty-shell→drive-not-rebuild / missing→quay-topology.sh + register)
+     and records ONE adopt-register event (AC7: adopt-after manager actions on the project = 0).
+C3 — the outer loop never creates/drives/checks the manager (see no-manager-tick-doc-check.sh).
+
+Flags:
+  --dry-run   (both) print the plan, change nothing.
+  --status    (start only) report current manager state (session/home/unit), change nothing.
+
+Examples:
+  quay manager start
+  quay manager start --status
+  quay manager adopt /home/yale/work/meta-cc
+`);
 }
 
 // resolveProviderEnv is now imported from ../src/provider-env.js (QN-045):
@@ -362,6 +409,8 @@ Usage:
   quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay migrate --from <providerId> --to <providerId> [--json]
   quay serve [--port <port>] [--host <host>]
+  quay manager start                Start the manager layer itself (independent cold start, C4)
+  quay manager adopt <project-root> Start one project's outer+inner (C5, separate from start)
   quay mcp
 
 Options for task list:
@@ -544,6 +593,8 @@ Options:
   --check-files   Also verify that gate script/command paths reference files
                   that exist on disk.
 `);
+  } else if (sub === "manager") {
+    printManagerHelp();
   } else if (sub === "gate") {
     process.stdout.write(`quay gate — run a named gate check against a task
 
@@ -1604,8 +1655,62 @@ Description:
     return;
   }
 
+  // gap-manager-productization-five-constraints: `quay manager start` / `quay manager adopt`.
+  // The manager layer's commands — C4 (start = the MANAGER's independent cold start, NO project
+  // args) / C5 (adopt = start ONE project's outer+inner, SEPARATE from start). Both delegate to
+  // the shipped plugin scripts (C1: the manager implementation lives in plugin/, built by outer/
+  // inner). See printManagerHelp() for the full contract.
+  if (cmd === "manager") {
+    const managerSub = sub;
+    const { flags: mgrFlags, positional: mgrPos } = parseFlags((rest ?? []).filter((a) => a !== undefined));
+    // Resolve the plugin scripts dir WITHOUT requiring .quay/config.yml (C4 bare-machine cold
+    // start): upward from cwd first, then the configured workspace root as a fallback.
+    let scriptsDir = findUpward("plugin/scripts", process.cwd());
+    if (!scriptsDir) {
+      try { scriptsDir = path.join(loadConfig().workspaceRoot, "plugin", "scripts"); } catch { /* no config — leave null */ }
+    }
+    if (managerSub === "start") {
+      if (mgrPos.length > 0) {
+        console.error(`quay manager start: accepts NO project arguments (SPEC C4/C5) — 'manager start' starts the MANAGER; use 'manager adopt <root>' to start a project's outer+inner. Got: ${mgrPos[0]}`);
+        process.exitCode = 1;
+        return;
+      }
+      const script = scriptsDir ? path.join(scriptsDir, "manager-start.sh") : null;
+      if (!script || !fsSync.existsSync(script)) {
+        console.error("quay manager start: plugin script not found (plugin/scripts/manager-start.sh). Is the quay plugin installed in this workspace?");
+        process.exitCode = 1;
+        return;
+      }
+      const mgrArgs = ["bash", script];
+      if (mgrFlags["dry-run"] === true) mgrArgs.push("--dry-run");
+      if (mgrFlags["status"] === true) mgrArgs.push("--status");
+      execFileSync(mgrArgs[0], mgrArgs.slice(1), { stdio: "inherit" });
+      return;
+    }
+    if (managerSub === "adopt") {
+      if (mgrPos.length !== 1) {
+        console.error("quay manager adopt: requires exactly one <project-root> (e.g. quay manager adopt /home/yale/work/meta-cc)");
+        process.exitCode = 1;
+        return;
+      }
+      const script = scriptsDir ? path.join(scriptsDir, "manager-adopt.sh") : null;
+      if (!script || !fsSync.existsSync(script)) {
+        console.error("quay manager adopt: plugin script not found (plugin/scripts/manager-adopt.sh). Is the quay plugin installed in this workspace?");
+        process.exitCode = 1;
+        return;
+      }
+      const mgrArgs = ["bash", script, mgrPos[0]];
+      if (mgrFlags["dry-run"] === true) mgrArgs.push("--dry-run");
+      execFileSync(mgrArgs[0], mgrArgs.slice(1), { stdio: "inherit" });
+      return;
+    }
+    console.error(`quay manager: unknown subcommand "${managerSub}" (try: start, adopt)`);
+    process.exitCode = 1;
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|manager|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 

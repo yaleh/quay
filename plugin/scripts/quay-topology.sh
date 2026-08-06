@@ -66,6 +66,74 @@ fi
 ROLES="outer inner"
 LAUNCH_CMD_OVERRIDE="${TOPOLOGY_LAUNCH_CMD:-}"
 
+# ── single-flight creation lock (AC6, SPEC-manager-productization §7 ruling ①: 谁发现缺失谁创建，
+# 走同一幂等入口 + 锁) ──────────────────────────────────────────────────────────────────────────────
+# The dual-creator race (outer self-heal creates inner when missing ⇔ manager adopt creates
+# outer+inner) must never double-create the topology. The lock lives under $QUAY_GLOBAL_DIR
+# (cross-repo — visible to every project's outer AND the cross-project manager), is per-session,
+# and uses the atomic wx-create grant (noclobber redirect = O_CREAT|O_EXCL) + bounded stale
+# reclaim (dead pid + stale mtime), mirroring heavy-op-token.sh's proven lock.
+# Test seam: TOPOLOGY_LOCK_DIR overrides the lock dir (tests isolate it).
+TOPOLOGY_LOCK_DIR="${TOPOLOGY_LOCK_DIR:-${QUAY_GLOBAL_DIR:-${HOME:-/tmp}/.quay-global}/topology-locks}"
+TOPOLOGY_LOCK_STALE_S="${TOPOLOGY_LOCK_STALE_S:-120}"
+TOPOLOGY_LOCK_WAIT_S="${TOPOLOGY_LOCK_WAIT_S:-30}"
+
+_topology_lock_file() {
+  printf '%s/%s.lock' "$TOPOLOGY_LOCK_DIR" "$(printf '%s' "$1" | tr '/ ' '__')"
+}
+
+_topology_pid_alive() {
+  local p="$1"
+  [ -n "$p" ] && [ "$p" != "0" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  return 0
+}
+
+# topology_lock_acquire <session> — bounded wait for the per-session creation lock.
+# Returns 0 on acquisition, 1 on timeout (the caller proceeds idempotently — the window-exists
+# checks below already make creation idempotent; the lock just removes the concurrent race).
+topology_lock_acquire() {
+  local sess="$1" lock now mtime pid end
+  lock="$(_topology_lock_file "$sess")"
+  mkdir -p "$TOPOLOGY_LOCK_DIR" 2>/dev/null || return 1
+  end=$(( $(date +%s) + TOPOLOGY_LOCK_WAIT_S ))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    if [ -f "$lock" ]; then
+      pid="$(sed -n 's/^pid=//p' "$lock" 2>/dev/null | head -1)"
+      mtime="$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)"
+      if ! _topology_pid_alive "$pid" && [ $(( $(date +%s) - mtime )) -ge "$TOPOLOGY_LOCK_STALE_S" ]; then
+        rm -f "$lock" 2>/dev/null || true
+        echo "topology-lock: reclaimed stale lock for $sess (pid ${pid:-?} dead, mtime ${mtime}s old)" >&2
+      else
+        sleep 0.5
+        continue
+      fi
+    fi
+    # atomic wx-create: noclobber redirect = O_CREAT|O_EXCL (the heavy-op-token / Land-lock pattern).
+    set -o noclobber
+    if printf 'pid=%s\nhost=%s\nts=%s\n' "$PPID" "$(hostname 2>/dev/null || echo unknown)" "$(date +%s)" > "$lock" 2>/dev/null; then
+      set +o noclobber
+      echo "topology-lock: acquired for $sess ($lock)" >&2
+      return 0
+    fi
+    set +o noclobber
+    sleep 0.5
+  done
+  echo "topology-lock: TIMEOUT acquiring lock for $sess after ${TOPOLOGY_LOCK_WAIT_S}s" >&2
+  return 1
+}
+
+topology_lock_release() {
+  local sess="$1" lock pid
+  lock="$(_topology_lock_file "$sess")"
+  pid="$(sed -n 's/^pid=//p' "$lock" 2>/dev/null | head -1)"
+  # Only release a lock we own (the recorded pid is our shell's PPID).
+  if [ "$pid" = "$PPID" ]; then
+    rm -f "$lock" 2>/dev/null || true
+    echo "topology-lock: released for $sess" >&2
+  fi
+}
+
 launch_cmd() {
   local role="$1"
   if [ -n "$LAUNCH_CMD_OVERRIDE" ]; then
@@ -95,6 +163,17 @@ has_claude_child() {
   done
   return 1
 }
+
+# 单飞锁（AC6）：创建/重拉窗口的整个检查-动作段在锁内执行，杜绝双创建者（outer 自愈 vs
+# manager adopt）并发双重创建。dry-run 是纯预览，不取锁。
+LOCK_HELD=0
+if [ "$DRY_RUN" = 1 ]; then
+  : # dry-run never takes the lock (preview only)
+elif topology_lock_acquire "$SESSION"; then
+  LOCK_HELD=1
+else
+  echo "topology-lock: WARNING proceeding WITHOUT lock for $SESSION (bounded wait exceeded) — the idempotent window-exists checks still prevent double-create" >&2
+fi
 
 # 会话不存在 ⇒ 从零建：第一个角色（outer）即会话首窗（窗口 0）。
 # FIRST 初始化空串：会话已存在时保持空，循环里 `[ "$role" = "$FIRST" ]` 在 set -u 下安全。
@@ -145,5 +224,10 @@ for role in $ROLES; do
     fi
   fi
 done
+
+# 释放单飞锁（仅释放自己持有的）。
+if [ "$LOCK_HELD" = 1 ]; then
+  topology_lock_release "$SESSION"
+fi
 
 echo "topology done: $SESSION ($(echo "$ROLES" | tr '\n' ' '))"
