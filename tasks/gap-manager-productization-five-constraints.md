@@ -7,10 +7,16 @@ title: "manager productization (C1-C5, SPEC-manager-productization-2026-08-05):
   checks manager (mechanical grep check, currently 0 mentions in tick doc);
   C4 independent cold start (quay manager start, accepts NO project args);
   C5 two commands separated (manager start ≠ manager adopt; AC12b testability:
-  'adopt 之后 manager 对该项目动作次数=0'); SHARPEST GAP: manager not in
-  os-anchor-projects.conf + */17 heartbeat is session-only CronList = the
-  watchdog has NO ONE watching it, 4 crashes tonight needed human restart
-  (direct manifestation); RULED: dual-creator conflict = option ① whoever
+  'adopt 之后 manager 对该项目动作次数=0'); SCHEDULING SCOPE NARROWED 2026-08-06
+  (human): session DEATH is explicitly OUT of scope — no monitoring, no recovery;
+  the original 'sharpest gap' (manager absent from os-anchor-projects.conf, 4
+  crashes needing human restart) is therefore VOID, as are OS watchdog, OS cron
+  and Desktop scheduled tasks (all three banned by ruling); the only anchor is
+  Claude Code loop/cron, and the only failure mode still in scope is /clear +
+  /compact wiping context while cron keeps firing (AC5c, borrowing manda's
+  derivable-sentinel + read-fresh-at-fire-time pattern) plus cross-tick state
+  durability (AC5b: tick-log went 2 days unwritten, 626 commits, 0 touching it);
+  RULED: dual-creator conflict = option ① whoever
   finds missing inner creates via SAME idempotent entry (quay-topology.sh +
   single-flight lock), NOT centralized to manager — shipped quay = outer+inner,
   manager optional, centralizing kills single-project self-healing (contradicts
@@ -37,8 +43,15 @@ work/quay、transcript 在 quay 目录、目标文档签入 quay 仓库、plugin
 各违反。唯一没违反的是 C3 一半（quay-topology.sh 已改 ROLES="outer inner"）。
 
 **最尖锐缺口（§2.1，外层实测确认）**：`os-anchor-projects.conf` 只看护 quay/meta-cc/archguard 的 outer，
-**manager 不在名单**；其 */17 心跳 CronList 显示 [session-only]。**看门人自己无人看门**——会话一死心跳
-无声消失，今晚四次全灭都靠人重启 manager，是这条缺口的直接表现。
+~~**manager 不在名单**；其 */17 心跳 CronList 显示 [session-only]。**看门人自己无人看门**——会话一死心跳
+无声消失，今晚四次全灭都靠人重启 manager，是这条缺口的直接表现。~~
+
+**【本段动机已作废，2026-08-06】** 人 2026-08-06 裁定：**「会话真死」不在本项目需要监控和恢复的范围内**。
+本段整段的立论是「会话死 ⇒ 无人拉回」——**该失效模式已被明确移出范围**，
+故 §2.1 不再是本任务的"最尖锐缺口"。
+**幸存的部分**：`[session-only]` 这个事实本身仍然成立且仍然重要，但重要的理由变了——
+不是"会话死了没人拉回"，而是 **`/clear` 与 `/compact` 不杀会话却抹掉上下文**（见 AC5c）。
+**失效模式换了一个，判据也跟着换**。
 
 **外层已裁定（§7 双创建者冲突）**：选 **选项①**——谁发现缺失谁创建，但走**同一幂等入口 + 锁**
 （quay-topology.sh 加单飞锁）。不选②（创建权收归 manager）：shipped quay = outer+inner、manager 可选，
@@ -48,8 +61,8 @@ work/quay、transcript 在 quay 目录、目标文档签入 quay 仓库、plugin
 验证 / 边界纪律）按「动词留文本」进 `plugin/loop/manager-loop-tick.md`；本实验阶段状态（测什么/B 机怎么用/
 archguard 排位）留 `orchestration/`。
 
-**外层已裁定（§3 归属）**：建造 = quay outer/inner（manager 是 quay 产品组件）；运行 = 人或 OS 锚，
-**绝不是 outer**。`orchestrator-loop-tick.md` 不得出现创建/驱动/检查 manager 的步骤——**机械检查**（当前
+**外层已裁定（§3 归属）**：建造 = quay outer/inner（manager 是 quay 产品组件）；运行 = 人或 ~~OS 锚~~
+**Claude Code 的 loop/cron**（2026-08-06 改：OS 锚路径已被人禁用），**绝不是 outer**。`orchestrator-loop-tick.md` 不得出现创建/驱动/检查 manager 的步骤——**机械检查**（当前
 0 提及，自然通过；做 checker 防回归）。
 
 **manager 越界机械信号（§5）**：manager 需要新观测/判定能力 ⇒ 产出应是转给外层的需求，不是自己写脚本；
@@ -60,11 +73,15 @@ manager 手里出现 .sh/.ts 实现即越界信号。
 1. `quay manager start`（无项目参数）：独立 session（quay-manager）+ $QUAY_GLOBAL_DIR/manager/ 家 +
    自己的 systemd unit（与项目 watchdog 分开）+ 观测器由 start 挂 + 心跳非会话作用域
 2. `quay manager adopt <root>`：三态复用 inner-session-check.sh 判定（healthy/empty-shell/missing，
-   **不写第二份**）——已活 noop / 空壳驱动 / 缺失调 quay-topology.sh 建两窗口 + 登记 OS 锚看护名单
+   **不写第二份**）——已活 noop / 空壳驱动 / 缺失调 quay-topology.sh 建两窗口
+   ~~+ 登记 OS 锚看护名单~~（2026-08-06 作废：watchdog 已被人禁用）
 3. 双创建者：谁发现缺失谁创建，quay-topology.sh 加单飞锁（原子创建）
 4. 机械检查：grep 断言 orchestrator-loop-tick.md + plugin/loop 模板无创建/驱动/检查 manager 步骤
-5. 验证：离乳判据——只有 git+claude 的机器，manager start + adopt 两项目，杀 manager 会话 ⇒ OS 锚
-   拉回，两项目不受影响
+5. 验证：离乳判据——只有 git+claude 的机器，manager start + adopt 两项目
+   ~~，杀 manager 会话 ⇒ OS 锚拉回，两项目不受影响~~
+   **（后半句 2026-08-06 作废，人 2026-08-06 裁定：**「会话真死」不在本项目需要监控和恢复的范围内**）**。
+   **替代的离乳判据**：`/clear` 一次 ⇒ manager 仍能按哨兵重新武装、并从 tick-log 接上上一轮
+   （AC5b + AC5c），**不再测"杀会话"**
 
 ## Acceptance Criteria
 
@@ -103,29 +120,30 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       - ⇒ **`/loop` / `CronCreate` 是唯一允许路径**，其会话级限制是**产品固有属性**，
         不是本仓缺陷 ⇒ 本 AC 不得以"换一种调度器"来达成，只能在会话级限制内解决。
 
-      **今晚锚点丢失的精确机制（实测，非推断）**：`plugin/scripts/quay-launch.sh:78` 是
-      `CMD=( "$LAUNCHER" "--settings" "$SETTINGS_ARG" )`——**不带 `--resume`**。崩溃后
-      `session-bootstrap.sh` → `quay-launch.sh` 起的是**全新会话**，而文档原文：
-      **「Starting a fresh conversation clears all session-scoped tasks」** ⇒ manager 的
-      `*/17` cron 静默消失，93 分钟无锚点，直到人开口问才被发现。
-      文档同时给出解法：**「Resuming with `claude --resume` / `--continue` restores tasks
-      that have not expired（recurring 任务 7 天内）」**。
+      ~~**今晚锚点丢失的精确机制**：`quay-launch.sh:78` 不带 `--resume`，崩溃重建 = 全新会话
+      ⇒ cron 静默消失，93 分钟无锚点。解法是 `--resume`（恢复 7 天内未过期的 recurring）。~~
+      **【上段已移出范围，2026-08-06 人裁定：「会话真死」不在本项目需要监控和恢复的范围内】**
+      ⇒ **`--resume` 不再是本任务的达成手段**，`quay-launch.sh` 不因本任务而改。
+      **保留记录的唯一理由**：说明为什么本 AC 只剩下面一条腿——不是遗漏，是范围裁定。
 
-      **⇒ 本 AC 的达成形态（两条都要，缺一不可）**：
-      1. **起会话时锚点确定性重建**——`quay manager start`（AC1）必须把「装上 manager 自己的
+      **⇒ 本 AC 的达成形态（收窄后只剩一条，其余转 AC5b/AC5c）**：
+      1. **起会话时锚点确定性建立**——`quay manager start`（AC1）必须把「装上 manager 自己的
          `/loop`」作为其中一步，使**冷启动后锚点必然在位**，而不是靠谁记得。
-         是否用 `--resume` 由执行时权衡并记录理由：`--resume` 保住 cron 但会继承可能已饱和的
-         上下文（**B 机 outer 今日正是撞 100% context 死的**），全新会话上下文干净但丢调度。
-      2. **状态持久化，不依赖会话**——见 AC5b。
-      3. **跨 `/clear` 与 `/compact` 的稳定行为**——见 AC5c（人 2026-08-06 指路借鉴 manda）。
+         **注意这是"初始化"不是"恢复"**：一台新机器第一次起 manager 时锚点必须存在——
+         这条**不依赖**会话死亡场景，故不受本次范围收窄影响。
+      2. ~~是否用 `--resume`~~ **（移出范围）**
+      3. 状态持久化 → **见 AC5b**；跨 `/clear`/`/compact` 稳定 → **见 AC5c**。
 
-      **负控制**：起完 manager 后 `CronList` 必须显示恰好一个 manager loop；
-      杀掉会话再按 AC1 重起 ⇒ `CronList` 必须再次显示恰好一个（不是零、不是两个）。
+      **负控制（改写：不再用"杀会话"作为触发）**：
+      在**不知道任何 cron ID** 的前提下连续执行两次武装步骤 ⇒ `CronList` 必须始终恰好一个
+      manager loop（不是零、不是两个）。~~杀掉会话再重起~~（移出范围）。
 
 - [ ] AC5c (**2026-08-06 新增；人指路：「manda 虽然有其它的问题，但在使用 loop 提供跨 clear /
       compact 操作的稳定行为方面是值得借鉴的」**):
       **`/clear` 与 `/compact` 不杀会话——cron 照常触发，但上下文没了。**
-      这是与 AC5（会话死）**不同的失效模式**，且更常见：本会话今日已发生一次 compaction。
+      **人 2026-08-06 已裁定「会话真死」不在范围内 ⇒ 本条不是"另一种失效模式"，
+      而是本任务在调度这条线上唯一在管的失效模式。**
+      它也确实是更常见的那个：本会话今日已发生一次 compaction，而会话死亡已不需处理。
 
       **从 `manda/plugin/skills/manda-monitor/SKILL.md` 实读到的两条机制（原文引用）**：
 
@@ -172,7 +190,11 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       而**只要记录是持久的，锚点可以是任何触发源**（人、cron、下次冷启动），manager 都能接上上一轮。
 - [ ] AC6 (裁定①): quay-topology.sh 单飞锁——双创建者竞态不会双重创建（原子创建实测）
 - [ ] AC7 (C5 可测性): `manager adopt` 之后 manager 对该项目动作次数 = 0（AC12b 操作定义）
-- [ ] AC8 (离乳判据): 裸机 manager start + adopt 两项目 + 杀 manager 会话 ⇒ OS 锚恢复，两项目不受影响
+- [x] ~~AC8 (离乳判据): 裸机 manager start + adopt 两项目 + 杀 manager 会话 ⇒ OS 锚恢复，两项目不受影响~~
+      **【取消，2026-08-06 人裁定】** 人 2026-08-06 裁定：**「会话真死」不在本项目需要监控和恢复的范围内**。
+      本条整条测的就是会话死后的恢复 ⇒ **无残留部分,整条取消**（不是收窄）。
+      「裸机 start + adopt 两项目」这半句的价值由 **AC1** 承接（它本来就测这个），
+      不在此重复。**取消理由记录在案,防止后来者看到未勾的 AC 又把它捡回来。**
 - [ ] AC9 (§6 切分): manager-phase-goal.md 拆开——产品行为进 plugin/loop/manager-loop-tick.md，
       实验状态留 orchestration/
 

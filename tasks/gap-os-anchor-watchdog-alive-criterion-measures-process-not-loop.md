@@ -5,7 +5,7 @@ title: "os-anchor-watchdog alive criterion measures process-exists not
   but watchdog noop healthy — same axis as gap-l2 (judges
   'installed/in-existence' not 'turning'); fix: alive = process AND
   (transcript-new OR git-commit) + cross-cycle relaunch-failed-drive marker"
-status: todo
+status: superseded
 labels:
   - gap
   - defect
@@ -13,6 +13,20 @@ parent: null
 children: []
 extra: {}
 ---
+
+> **【作废 — 2026-08-06 人裁定，两条独立理由，任一条即足以作废】**
+>
+> 1. **「不得重启 watchdog。请专注于以产品化方法改进」** ⇒ 本条要修的装置**不得再运行**。
+> 2. **「会话真死不要管。我明确这不在本项目需要监控和恢复的范围内」** ⇒ 本条要修的装置的
+>    **目的本身**（探测会话死亡并拉回）**已被移出项目范围**。
+>
+> ⇒ 修好它也不会被使用。**实测佐证（2026-08-06 17:5xZ）**：os-anchor watchdog 当前
+> **0 个 systemd unit、0 条 os crontab 条目、0 个进程**——装置已完全停摆。
+>
+> **不删除本文件**：保留缺陷描述，因为若将来范围重新放开，这些实测缺陷仍然成立、
+> 不必重新发现。**但不得派发**（`status: superseded`）。
+>
+> 完整裁定记录见 `tasks/gap-manager-productization-five-constraints.md` 的 AC5/AC5b/AC5c。
 **type:** execution
 
 ## Proposal
