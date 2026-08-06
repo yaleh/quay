@@ -90,6 +90,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-needs-human-black-hole-human-dependency-unmeasurable.md
 - plugin/scripts/（needs-human 复检 + 存活轴检查，复用 strategic-doc-staleness-check 判据）
 - plugin/test/（AC1/AC2 fixture）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC10 记账引用）

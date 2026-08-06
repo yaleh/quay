@@ -5159,3 +5159,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **laydown-derivation 合并**（`11e02bda`）：quay-init 铺设集改**四源派生**（路径前缀 + 机制语料裸文件名存在性解析 + 显式 + `${SCRIPT_DIR}` 兄弟依赖闭包至 fixpoint）——铺了消费者必然铺依赖（transcript-delivery-check.ts / cap-from-gate.ts）；verify 用同一把尺子（不再共享盲点）+ 依赖闭包 fail-closed；send-keys-reliable fail-loud。AC1–AC7 勾（78/78）。已并已清。
 - **在飞 0/5**（全部落定）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:3xZ（内层，派发 1/5 —— 池结构性串行）
+
+- **池结构性观察**：dispatchable_disjoint=3，但可派候选**全部互撞**（needs-human/no-criterion/quality-criteria/supervisor/reanchor/DIR-043 均为机制级宽 Touches，两两不 disjoint）——与 ROUND-3 held 的 branch-model/cold-start-gate/complete-delivery 同一形态。每轮只能派 1 个。
+- **派发 1/5**：`needs-human-black-hole`（needs-human 等待时间不可测 → 复检 + 存活轴判据，复用 strategic-doc-staleness）。补 self-touch + telemetry 已开。DIR-043 已晋（外部 dogfooding 通道，directive）。其余候选下轮。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
