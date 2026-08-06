@@ -76,6 +76,7 @@ DRY_RUN=false
 DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
+DO_CHECK_DRIFT=false
 ANY_CATEGORY=false
 
 # ── parse args ─────────────────────────────────────────────────────────────────────────────────────
@@ -84,6 +85,7 @@ while [ $# -gt 0 ]; do
     --workflows) DO_WORKFLOWS=true; ANY_CATEGORY=true; shift ;;
     --agents) DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --loop) DO_LOOP=true; ANY_CATEGORY=true; shift ;;
+    --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -839,6 +841,90 @@ PYEOF
   return 1
 }
 
+# ── derived laydown set + drift report (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ────
+# The delivery surface grows (new derived scripts ship) while an installed target freezes at install
+# time — there was no upgrade/refresh channel and no drift report. These two functions are the
+# mechanism: the drift report (漂移/缺失/一致 on the DERIVED-SET axis, not the raw plugin/scripts file
+# count — L_D) + the upgrade-path integration in the --loop block. Contract measure/invoke:
+#   `bash plugin/scripts/quay-init.sh --check-drift` stdout's 漂移/缺失/一致 number fields.
+
+# derive_loop_scripts — populate the LOOP_SCRIPTS array (the derived laydown set) from the SAME
+# grep the --loop block used before this extraction: every `plugin/scripts/*` reference in the
+# shipped skills + tick docs, PLUS the explicit bare-name / transitive-dependency / capability-catalog
+# additions (their rationale lives in the --loop block's comments, kept verbatim). Single source,
+# drift-immune — there is no second hand-maintained copy of the set.
+derive_loop_scripts() {
+  local derived
+  derived="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
+  # shellcheck disable=SC2207
+  LOOP_SCRIPTS=(
+    $derived
+    # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
+    inner-idle-log.ts
+    heavy-op-token.sh
+    it0-split-or-commit-check.ts
+    pipe-exit-code-check.sh
+    # transitive deps of the checkers (imported by them, not doc-referenced):
+    gate-script-base.ts
+    workflow-event-schema.mjs
+    task-schema.ts
+    touches-parser.ts
+    wiring-coverage-check.ts
+    # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
+    capability-catalog.sh
+  )
+}
+
+# compute_drift_report <workspace-root> — the derived-set-axis drift report (AC2). For every script
+# in the derived laydown set, classify the target's copy:
+#   一致 (consistent) = present + byte-identical to the plugin's current delivery
+#   缺失 (missing)    = absent — the target froze at install time and never received this mechanism
+#   漂移 (drift)      = present but differs from the current delivery — stale install content OR a
+#                       local edit (never silent: the --loop upgrade backs it up + reports, and this
+#                       report lists it for confirmation)
+# Emits the parseable summary `漂移 N / 缺失 N / 一致 N` plus a per-file listing of drift/missing.
+# READ-ONLY: never writes (no state, no backups, no copies). Returns 0 — the report is the
+# deliverable, not a pass/fail gate (Contract band: parseable; missing/drift upgradeable to 0 via
+# --loop or listed).
+compute_drift_report() {
+  local ws="$1" drift=0 missing=0 consistent=0 n=0 s tgt
+  local -a drift_list=() missing_list=()
+  for s in "${LOOP_SCRIPTS[@]}"; do
+    [ -f "$PLUGIN_ROOT/scripts/$s" ] || { echo "  WARN: loop mechanism script missing from plugin: plugin/scripts/$s" >&2; continue; }
+    n=$((n + 1))
+    tgt="$ws/plugin/scripts/$s"
+    if [ ! -f "$tgt" ]; then
+      missing=$((missing + 1)); missing_list+=("$s")
+    elif cmp -s "$PLUGIN_ROOT/scripts/$s" "$tgt"; then
+      consistent=$((consistent + 1))
+    else
+      drift=$((drift + 1)); drift_list+=("$s")
+    fi
+  done
+  echo "drift-report: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent} (derived-set ${n})"
+  for s in "${drift_list[@]}"; do
+    echo "  drift: plugin/scripts/$s — target differs from the plugin's current delivery (stale install or local edit); --loop upgrade backs it up + reports, never silent"
+  done
+  for s in "${missing_list[@]}"; do
+    echo "  missing: plugin/scripts/$s — not installed (target froze at install time); --loop upgrade auto-adds it"
+  done
+  return 0
+}
+
+# ── --check-drift mode (Contract invoke) ──────────────────────────────────────────────────────────────
+# READ-ONLY drift report over the derived laydown set for the target workspace (--root, default cwd).
+# No category dispatch, no --loop params (test-command/tmux-session are NOT needed to report drift).
+# Exits 0 — the report is the deliverable.
+if [ "$DO_CHECK_DRIFT" = true ]; then
+  echo "quay-init drift report (plugin v${PLUGIN_VERSION})"
+  echo "  derived-set axis: the delivery surface's DERIVED scripts (L_D — the functional surface is the"
+  echo "  derived laydown set, NOT the raw plugin/scripts file count). send-keys-verified.sh is retired"
+  echo "  from the derived set (layered retirement) and is intentionally NOT reported."
+  derive_loop_scripts
+  compute_drift_report "$WORKSPACE_ROOT"
+  exit 0
+fi
+
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 
@@ -966,27 +1052,16 @@ PYEOF
   # NOTE: inner-state.sh is deliberately NOT here (gap-retire-inner-state-one-observer-targets-by-
   # parameter AC3) — it is retired and not referenced by any shipped doc; observation has exactly
   # ONE tool, session-liveness.sh, which is laid down separately below (its env config is generated).
-  DERIVED_SCRIPTS="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
-  # shellcheck disable=SC2207
-  LOOP_SCRIPTS=(
-    $DERIVED_SCRIPTS
-    # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
-    inner-idle-log.ts
-    heavy-op-token.sh
-    it0-split-or-commit-check.ts
-    pipe-exit-code-check.sh
-    # transitive deps of the checkers (imported by them, not doc-referenced):
-    gate-script-base.ts
-    workflow-event-schema.mjs
-    task-schema.ts
-    touches-parser.ts
-    wiring-coverage-check.ts
-    # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
-    # ships with the loop so an installed project can see what each laid-down check
-    # answers. Deliberate explicit addition (no doc references it by path — the catalog
-    # is self-describing, so it cannot be derived from a doc's plugin/scripts reference).
-    capability-catalog.sh
-  )
+  derive_loop_scripts
+
+  # AC1/AC2 (gap-delivery-surface-grows-but-target-freezes-no-upgrade): the upgrade/refresh path's
+  # drift report. BEFORE the update, classify the target's derived scripts (漂移/缺失/一致 on the
+  # derived-set axis) so the upgrade action below is preceded by the L2 "升级正确性" diagnosis —
+  # exactly what the frozen-at-install-time target needs: what it is missing (auto-added) and what
+  # has drifted (backed up + replaced, never silent). The POST report after the loop proves the
+  # upgrade brought the derived set to 一致.
+  echo "  drift report (before upgrade):"
+  compute_drift_report "$WORKSPACE_ROOT"
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
       # mode "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never
@@ -997,6 +1072,8 @@ PYEOF
       echo "  WARN: loop mechanism script missing from plugin: plugin/scripts/$s" >&2
     fi
   done
+  echo "  drift report (after upgrade):"
+  compute_drift_report "$WORKSPACE_ROOT"
 
   # Tick docs → <workspace>/orchestration/ and <workspace>/docs/analysis/ (mirroring the quay repo's
   # own layout so the docs' internal relative references resolve), laid down VERBATIM — no text
