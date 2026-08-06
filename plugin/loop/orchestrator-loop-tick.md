@@ -620,6 +620,20 @@ tick 做一次收尾 pass。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
+3b. **批量合 integration→develop（两线模型 AC3，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
+   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh`（`--root "$REPO_ROOT"`）把
+   已验证的 integration 批量快进合回 develop——**integration 永远是 develop 后代 ⇒ fast-forward 无冲突**
+   （develop 只被外层批量合推进，inner 任务只合 integration，见 `fast-mode-loop-tick.md` 步骤 2「两线
+   分支模型」）。`integration-batch-merge.sh` 自带：
+   - **pre-check**：`git merge-base --is-ancestor <develop> <integration>` 非 0（真分歧）⇒ 退出非 0、
+     不移动任何 ref、needs-human——**绝不 blind --ours/--theirs**；
+   - **measure**：`git merge-base --is-ancestor <integration> <develop>` 退出码（band = 0 = integration
+     的提交已全部并入 develop）；
+   - **invoke**：`git log --oneline develop..integration`（红窗期不空——integration 照常接收，直到本轮
+     suiteGreen 才批量合）。
+   suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 integration 照常接收任务合并，
+   只是 develop 不推进（结构性消除「红窗必须停派发」；develop 永不从未验证树推进）。**`--dry-run` 先跑**
+   核对 pre-check 与 pending 面，再实跑。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}
