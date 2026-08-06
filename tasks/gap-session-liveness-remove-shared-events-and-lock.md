@@ -108,3 +108,15 @@ bb25732b 未触及；删了会打断 test.sh 调度）。
 **待定**：人更早说「单飞锁是本机开发实验使用、不应进产品化交付」——听起来针对 heavy-op-token 整体
 （「三项目共用四核」是实验室条件），但人未就此明确裁定。A/B 两个范围选项已摆给人、等回复。**人明确
 之前，②按原样保留**。
+
+
+## Scope pin (manager, 2026-08-06 — do not delete heavy-op-token.sh)
+
+heavy-op-token.sh has TWO completely different uses; the human's "remove the lock" applies ONLY to ①:
+1. **① 挂载互斥（session-liveness 借用）—— 去掉**（人已裁定）：session-liveness 调用点传
+   `--root $SL_GLOBAL_DIR` 借 heavy-op-token 的锁。本任务只摘这一侧借用（session-liveness.sh 内
+   ~10 处 acquire/lock_token/noop 引用）。
+2. **② 重测试调度（原始用途）—— 保留**：scripts/test.sh 5 处调用，三项目共用四核、一次只跑一个
+   重测试，与观测无关，不在本次裁定范围。
+**不删 heavy-op-token.sh 本体**（否则打断 test.sh 调度）。人更早那句「单飞锁本机实验不该进产品化」
+针对 heavy-op-token 整体，但人未明确裁定 ②，按原样保留等回复。

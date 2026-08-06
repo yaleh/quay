@@ -6607,3 +6607,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **派发 1/3**：worktree /home/yale/work/quay-worktrees/remove-shared-events + bracket 已开。
   agent 指引：去共享 events → 每观察者自己的流；去锁；AC2/AC4 多观察者并行挂载验证。
 - 在飞 1/3。
+
+### tick 2026-08-06T21:0xZ（范围钉死：只摘 session-liveness 侧借用）
+
+- **范围钉死（防误删）**：heavy-op-token.sh 有两个完全不同的用途，人「彻底去掉互斥锁」只针对①：
+  ① 挂载互斥（session-liveness 借用，--root $SL_GLOBAL_DIR）——去掉（人已裁定）；
+  ② 重测试调度（原始用途，scripts/test.sh 5 处调用，三项目共用四核）——保留，不在裁定范围。
+- **实现只摘 session-liveness 这一侧的借用（10 处引用），不删 heavy-op-token.sh 本体**（否则打断
+  test.sh 调度）。人更早「单飞锁不该进产品化」针对整体但未明确裁定②，按原样保留等回复。
+- 已传达给在飞 agent（SendMessage）+ 记入任务体 Scope pin 段。
+- 在飞 1/3（remove-shared-events）。
