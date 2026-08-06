@@ -6720,3 +6720,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   replay）→ abort + rebase onto develop（干净 4 提交）。遗留 5 处 heavy-op-token 引用全是**退役标注**（prose 注释），非 dangling 调用。
 - **cross-machine-sync hold 解除**（fast-mode-loop-tick.md 重叠已随 fan-in 消失）。
 - 在飞 0/3。下一步：按裁定#1 派发 cross-machine-sync（serialize 已解）。
+
+### tick 2026-08-07T01:0xZ（cross-machine-sync 派发 — serialize hold 解除）
+
+- **按裁定#1派发 gap-cross-machine-sync**（serialize hold 已解除——remove-shared-events fan-in 后
+  fast-mode-loop-tick.md 重叠随其落地，新任务在其上构建非在飞冲突）。
+  resolve 4/4、pool-candidate clean、fork-baseline=develop、在飞 0/3。
+- worktree /home/yale/work/quay-worktrees/cross-machine-sync + bracket 已开。
+  agent 指引：slot-refill 双触发模式（事件驱动 + tick 心跳兜底）、禁系统 crontab、AC1-AC6 全机械可测。
+- 在飞 1/3。
