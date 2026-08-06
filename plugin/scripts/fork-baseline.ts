@@ -25,10 +25,18 @@
 // Invariant (Contract): fork_baseline_is_dependency = 1 — the decision is mechanical, never a
 // judgment call.
 //
+// REF-AWARE OUTPUT (gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model,
+// AC6): the decision LABEL is "develop" (independent line) vs "integration" (dependency line), but
+// the CLI maps the label onto the CONFIGURED ref names before writing stdout. With the defaults
+// (--develop develop --integration integration) the output is unchanged; a single-line downstream
+// that passes `--develop master --integration master` gets `master` (never the literal "develop"),
+// so the shared tick doc's configurable fork-baseline stays safe for projects that only have master.
+//
 // Usage:
 //   node --experimental-strip-types fork-baseline.ts --task <tasks/<id>.md>
 //        [--root <repo>] [--develop <ref>] [--integration <ref>] [--unverified <id1,id2,...>]
-//   stdout: `develop` or `integration` (one line). Exit 0 on success.
+//   stdout: one line — the configured fork baseline (`--develop` ref for independent, `--integration`
+//   ref for dependency; default `develop` / `integration`). Exit 0 on success.
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -116,11 +124,12 @@ Usage:
 
   --task        candidate task file (required)
   --root        repo root (default: auto-detected from the task file)
-  --develop     develop ref (default: develop)
-  --integration integration ref (default: integration)
+  --develop     develop ref (default: develop) — independent line's fork baseline
+  --integration integration ref (default: integration) — dependency line's fork baseline
   --unverified  explicit comma-separated unverified task ids on integration (testability override)
 
-stdout: one line — \`develop\` or \`integration\`. Exit 0 on success.
+stdout: one line — the CONFIGURED fork baseline (the --develop ref for independent, the --integration
+ref for dependency; both default develop/integration). Exit 0 on success.
 `);
 }
 
@@ -178,7 +187,11 @@ export function main(argv) {
   const unverified = unverifiedBodies.map(parseTouches);
 
   const decision = decideForkBaseline(candidate, unverified, expand);
-  process.stdout.write(`${decision.baseline}\n`);
+  // Ref-aware output (AC6): map the line label onto the configured ref names. With
+  // --develop master --integration master (single-line downstream default), an independent
+  // decision ("develop") writes "master", a dependency decision ("integration") writes "master" too.
+  const baselineRef = decision.baseline === "integration" ? integrationRef : developRef;
+  process.stdout.write(`${baselineRef}\n`);
   process.stderr.write(`fork-baseline: ${decision.reason}\n`);
   if (decision.overlaps?.length) {
     process.stderr.write(`fork-baseline: overlap(s): ${decision.overlaps.join(", ")}\n`);

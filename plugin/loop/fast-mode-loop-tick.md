@@ -9,10 +9,17 @@
 > `docs/analysis/fast-mode-loop-tick.md`（内层）/ `orchestration/orchestrator-loop-tick.md`（外层）。
 > 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
 >
-> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` / `WORKTREE_ROOT` 四个名字
-> 在本文件中指 `.quay/config.yml` `loop:` 节的对应值
-> （`repo_root` / `test_command` / `tmux_session` / `worktree_root`）。
+> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` / `WORKTREE_ROOT` /
+> `FORK_BASELINE` / `MERGE_TARGET` 六个名字在本文件中指 `.quay/config.yml` `loop:` 节的对应值
+> （`repo_root` / `test_command` / `tmux_session` / `worktree_root` / `fork_baseline` / `merge_target`）。
 > 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
+>
+> **工作分支模型（gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model）**：
+> 工作分支名是**策略**（各项目自身 branch 模型现状），不是机制——本文件是下游项目经升级通道消费的
+> 共享模板。`FORK_BASELINE`（独立任务分叉基线）与 `MERGE_TARGET`（待验证汇入点/合并目标）**默认
+> 都是 `master`**（单线：独立任务从 master 分叉、合回 master——未做 branch cutover 的下游行为不变）。
+> quay 自身在 `.quay/config.yml` 覆盖成 `fork_baseline: develop` / `merge_target: integration`（两线）。
+> 所有含分支操作的命令先读这两个值代入，**不要字面写死分支名**。
 > **worktree 一律建在 `$WORKTREE_ROOT/<slug>`**——`worktree_root` 是 quay-init 落盘时校验过的磁盘路径
 > （tmpfs 会 fail-closed，见 gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs）；
 > `/tmp` 是 tmpfs，每个 MB 都是内存，worktree 建进去就是在重演整机 OOM。
@@ -192,8 +199,9 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 存在即暂停；移除即放行。
 
 移除前跑 `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh`——
-它检查工作树干净、无半途 merge、master 未被占用等硬条件。注意它有一条是「working tree clean」，
-而快速模式下开发会话本就在 master 上工作，所以**在飞任务未落地时它会 FAIL 是预期的**，
+它检查工作树干净、无半途 merge、工作分支（`$FORK_BASELINE`，quay 自身为 develop）未被占用等硬条件。
+注意它有一条是「working tree clean」，
+而快速模式下开发会话本就在工作分支（`$FORK_BASELINE`）上工作，所以**在飞任务未落地时它会 FAIL 是预期的**，
 不是故障；等在飞任务合并完、树干净了再移除。
 
 ---
@@ -280,36 +288,43 @@ bash plugin/scripts/monitor-mount-check.sh --json
 （`orchestrator-loop-tick.md` 步骤 1b「异步验证例程」），inner 的停止条件只读外层的
 `.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、不写 `--task-end`**。
 
-**两线分支模型（`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`，AC1/AC2/AC3）**：
-master 不再承担「分叉基线」+「汇入点」双角色（这正是红窗必须停派发的结构根因——两个角色压在同一
-ref 上）。拆成两线：
+**两线分支模型（quay 自身配置启用；`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`，AC1/AC2/AC3）**：
+当 workspace 把 `fork_baseline` / `merge_target` 配置为 develop / integration（quay 自身）时，
+`$FORK_BASELINE` 不再承担「分叉基线」+「汇入点」双角色（这正是红窗必须停派发的结构根因——两个角色
+压在同一 ref 上）。拆成两线：
 
 | 线 | 角色 | 从哪分叉 | 合到哪 |
 |---|---|---|---|
-| `develop` | 已验证基线（绿，只含通过 verification-round-N 的工作） | 独立任务 | —（只被外层批量合） |
-| `integration` | 待验证汇入点（含未验证前序工作） | 声明依赖前序的任务 | 所有任务合并目标 |
+| `$FORK_BASELINE`（quay: develop） | 已验证基线（绿，只含通过 verification-round-N 的工作） | 独立任务 | —（只被外层批量合） |
+| `$MERGE_TARGET`（quay: integration） | 待验证汇入点（含未验证前序工作） | 声明依赖前序的任务 | 所有任务合并目标 |
 
-- **分叉基线即依赖声明**（AC2）：独立任务从 `develop` 分叉；声明依赖的从 `integration` 分叉——
-  机械判定 `plugin/scripts/fork-baseline.ts`（touches 与 integration 上未验证任务相交 ⇒ integration）。
-- **合并机制**（AC3）：任务合回 `integration`（红窗期照常接收——结构性消除停派）；外层
-  verification-round-N 批量合 `integration`→`develop`（fast-forward 无冲突，`plugin/scripts/integration-batch-merge.sh`）。
+- **分叉基线即依赖声明**（AC2）：独立任务从 `$FORK_BASELINE` 分叉；声明依赖的从 `$MERGE_TARGET` 分叉——
+  机械判定 `plugin/scripts/fork-baseline.ts`（`--develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`；
+  touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒ `$MERGE_TARGET`）。
+- **合并机制**（AC3）：任务合回 `$MERGE_TARGET`（红窗期照常接收——结构性消除停派）；外层
+  verification-round-N 批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（fast-forward 无冲突，
+  `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`）。
+- **单线（默认）退化**：`$FORK_BASELINE == $MERGE_TARGET == master` 时本节退化为「独立任务从 master
+  分叉、合回 master」——`fork-baseline.ts --develop master --integration master` 恒返回 master
+  （`master..master` 空，无未验证任务），`integration-batch-merge.sh` 为无操作——与未做 branch cutover
+  的下游行为完全一致（AC6 负控制）。
 - master 发布线角色**空置**（裁定①：quay 无发布流程、push 需人显式授权；等真有发布授权时语义才实）。
-- 依赖约束：**fan-in 合到 integration，不合并到 develop**；develop 只由外层批量合推进。
-- **词汇规范（AC2/AC5）**：`verification-round-N` 是**验证/收尾节奏**（批量合 develop），**不是分派门控**——
+- 依赖约束：**fan-in 合到 `$MERGE_TARGET`，不合并到 `$FORK_BASELINE`**；`$FORK_BASELINE` 只由外层批量合推进。
+- **词汇规范（AC2/AC5）**：`verification-round-N` 是**验证/收尾节奏**（批量合 `$FORK_BASELINE`），**不是分派门控**——
   分派是滚动的（不叫批号），规范块见步骤 4。
 
 对每个已返回但未合并的 subagent，逐个：
 
-0. **先 rebase 到当前 integration**（汇入点，含并发任务合并）：
+0. **先 rebase 到当前 `$MERGE_TARGET`**（汇入点，含并发任务合并）：
    ```bash
-   git -C $WORKTREE_ROOT/<slug> rebase integration
+   git -C $WORKTREE_ROOT/<slug> rebase $MERGE_TARGET
    ```
-   worktree 建立时对分叉基线（develop 或 integration）取了快照，之后并发合并的其它任务它看不到。
+   worktree 建立时对分叉基线（`$FORK_BASELINE` 或 `$MERGE_TARGET`）取了快照，之后并发合并的其它任务它看不到。
    B3-2 就是这样红的——它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
    **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
    rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
-1. `git merge --no-ff task/<taskId>`（合并目标 = 当前检出的 integration——两线模型下内层共享检出
-   立在 `integration` 上，不是 master；develop 只由外层批量合推进）
+1. `git merge --no-ff task/<taskId>`（合并目标 = 当前检出的 `$MERGE_TARGET`——两线模型下内层共享检出
+   立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；`$FORK_BASELINE` 只由外层批量合推进）
 2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
@@ -319,9 +334,9 @@ worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层�
 步骤 1b），inner 不需要也不应该碰。
 
 **两机协作：合并后释放认领（`gap-two-machine-collaboration-git-branch-claiming`）**——若本任务派发时
-经认领协议认领过（`QUAY_CLAIM_REMOTE` 设置了共享裸仓库），合并进 `integration` 后**释放认领**：
+经认领协议认领过（`QUAY_CLAIM_REMOTE` 设置了共享裸仓库），合并进 `$MERGE_TARGET` 后**释放认领**：
 `bash plugin/scripts/release-task.sh <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
-`merge + delete = release`）。释放只删共享仓库上的 `task/<id>` 认领标记，不碰已合并进 `integration`
+`merge + delete = release`）。释放只删共享仓库上的 `task/<id>` 认领标记，不碰已合并进 `$MERGE_TARGET`
 的工作——下台机可再认领该任务。未设置 `QUAY_CLAIM_REMOTE`（单机）⇒ 跳过，无行为变化。
 
 **全量套件验证为什么不在 inner 跑**：旧的「全部合并后跑一次全量」+「绿 → 写任务状态」就是批次
@@ -397,16 +412,16 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
   关键）；`red` 则**看 `reason` 轴**（`gap-full-suite-runner-concurrency-default-and-gate` AC5，
   2026-08-05 ABORT #5 第二次实证：12 个互不相交任务全被 aborted-red 挡住）：
   - `state: red` 且 `reason: failed`（或缺失——兼容旧记录，fail-closed 当失败）⇒ **一律暂缓
-    `integration`→`develop` 的批量合**（两线模型 AC3：develop 是已验证基线，绝不被未验证树推进——
-    这是结构性消除红窗停派的关键；任务合 `integration` **不受**红窗阻挡，红窗只挡 `develop` 的推进，
-    见步骤 2「两线分支模型」），直到外层 re-green（state 回到 green/running）。
+    `$MERGE_TARGET`→`$FORK_BASELINE` 的批量合**（两线模型 AC3：`$FORK_BASELINE` 是已验证基线，绝不被
+    未验证树推进——这是结构性消除红窗停派的关键；任务合 `$MERGE_TARGET` **不受**红窗阻挡，红窗只挡
+    `$FORK_BASELINE` 的推进，见步骤 2「两线分支模型」），直到外层 re-green（state 回到 green/running）。
     **新派发按失败位置条件化**
     （`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`，共享闸门规则——与
     `orchestrator-loop-tick.md` 步骤 1b 同一份规则，不是两份）：
     - 失败落在**共享闸门（`run_static_checks`——每次 scoped 运行都跑的静态检查）** ⇒ **停新派发**
       （所有新任务都被同一个红污染）；
     - 失败落在**具体测试文件**且与新任务触摸集**无关** ⇒ **派发继续**（新任务 worktree 是独立
-      master 副本、跑自己 scoped 测试，与别处的红无关）；
+      `$FORK_BASELINE` 副本、跑自己 scoped 测试，与别处的红无关）；
     - 失败文件与新任务触摸集**相交** ⇒ 该任务停派（下一 tick 再评估）。
     判定信息现成：`state.failures`（早期 RED 失败行 + 文件上下文）→ 共享闸门 vs 具体测试 → 与新任务
     touches 相交性（用既有 `parseTouches`/`matchGlob`）；可机械执行的判定函数 =
@@ -550,16 +565,16 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 重叠 → 不同时派发，等下一 tick（**分派是滚动的，不是攒批门控**）。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
 4. **分叉基线判定（两线模型 AC2，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
-   派发前用 `fork-baseline.ts` 判定每个候选从哪条线分叉（**分叉基线即依赖声明**——独立 → `develop`、
-   声明依赖 → `integration`，机械可查）：
+   派发前用 `fork-baseline.ts` 判定每个候选从哪条线分叉（**分叉基线即依赖声明**——独立 →
+   `$FORK_BASELINE`、声明依赖 → `$MERGE_TARGET`，机械可查；分支名**从配置代入，不字面写死**）：
 
 ```bash
-node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id>.md --root "$(pwd)"
-# stdout: develop（独立，从已验证基线分叉）或 integration（依赖未验证前序，从待验证汇入点分叉）
+node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"
+# stdout: $FORK_BASELINE（独立，从已验证基线分叉）或 $MERGE_TARGET（依赖未验证前序，从待验证汇入点分叉）
 ```
 
    worktree 建立命令相应取该基线：`git worktree add $WORKTREE_ROOT/<slug> -b task/<id> <基线>`。
-   这保证**新工作永不从未验证的树上分叉**——develop 永不包含未验证前序，红窗停派由此结构性消除
+   这保证**新工作永不从未验证的树上分叉**——`$FORK_BASELINE` 永不包含未验证前序，红窗停派由此结构性消除
    （`fork_baseline_is_dependency = 1`）。
 
 5. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
@@ -593,7 +608,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    inProgress 文件与 worktree 目录都是本机的，B 机看不到；`task/*` 分支双方 `git ls-remote` 都可见）。
    推送本身是**原子互斥**（同任务两机抢认领，一成一败——git 的非快进拒绝就是 CAS）。`--check-touches`
    复用单一来源 `checkTouchesPair`（`plugin/scripts/claim-task.ts`）与本机 `tasks/<peer>.md` 对共享仓库
-   `task/*` 分支判触摸相交——**与单机串行是同一个约束，只是提前到认领时**。任务合并进 `integration`
+   `task/*` 分支判触摸相交——**与单机串行是同一个约束，只是提前到认领时**。任务合并进 `$MERGE_TARGET`
    后由步骤 2 释放认领（`release-task.sh`）。**单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 认领步骤为 no-op，
    直接跳过**——现有单机派发零回归（claim-task.sh 无 remote 时 fail-closed 退出 2）。
 
