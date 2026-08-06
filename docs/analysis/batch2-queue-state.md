@@ -6593,3 +6593,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   任务重写缩窄为「ad-arm1 配置缺失」（锁代码不修改）。AC1 已核实：ad-arm1 不在 config、
   SESSION_TARGETS 已移出到显式 env 传参（管理者 2026-08-04 挂载约定）。
 - 在飞 0/3。
+
+### tick 2026-08-06T20:5xZ（人裁定：去掉共享事件文件 + 互斥锁）
+
+- **人裁定（e6ca24b9）**：session-liveness 共享事件文件「极端糟糕的设计」+ 互斥锁「彻底去掉」。
+  核心论证：观测拓扑是树、只读天然不排他、共享文件严格劣于独立流、锁的唯一理由（保护共享文件）随之消失。
+  **AC20 单飞前提是错的**（观测非单飞资源，早期 manager 会话引入）。4 危害已核实
+  （启动顺序决定能力/已自生缺陷+补丁/命运共享/无界增长 472KB）。
+- **新方向**：每观察者自己的事件流（谁挂的谁拥有）、无锁、目标无感、观察者互不知情。
+  撤销 ad-arm1 配置方向。
+- 任务文件重命名（旧 id → 新 id gap-session-liveness-remove-shared-events-and-lock，filename 对齐）。
+  派发闸：resolve 4/4、pool-candidate clean、fork-baseline=develop。
+- **派发 1/3**：worktree /home/yale/work/quay-worktrees/remove-shared-events + bracket 已开。
+  agent 指引：去共享 events → 每观察者自己的流；去锁；AC2/AC4 多观察者并行挂载验证。
+- 在飞 1/3。
