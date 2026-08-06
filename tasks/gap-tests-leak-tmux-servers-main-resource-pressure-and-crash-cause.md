@@ -229,6 +229,60 @@ grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.m
 → cleanup() 在 rmSync 前逐个 `tmuxAt(sockPath, ["kill-session","-t", name], env)`；全文件零 `kill-server` 调用
 （仅注释说明为何不用）。
 
+## 复核证据（2026-08-06 dispatch，worktree /home/yale/work/quay-worktrees/gap-tests-leak-tmux）
+
+修复已随 `c1c15dfd` 落在 master；本 dispatch 对当前 master 复核（全部 AC 在原 2026-08-05 勾选上保持成立，
+补充当日实测）：
+
+**① Contract measure（leaked_servers，run 前与 run 后）**：
+```
+$ ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null | wc -l
+run 前: 0    run 后: 0   （band = 0 ✓）
+```
+
+**② Contract invoke（grep 判据，send-keys-verified.test.mjs）**：
+```
+99:        tmuxAt(sockPath, ["kill-session", "-t", name], env);
+```
+cleanup() 在 rmSync 前逐个 kill-session；全文件零 `kill-server` 调用（仅注释说明为何不用）。
+
+**③ send-keys-verified.test.mjs 5/5 全绿（含 AC2 负控制）**：
+```
+✔ missing arguments exit 2 with a usage message (never a partial send)
+✔ a nonexistent target reports failure (exit 1), never a silent 0
+✔ an input-swallowing pane (stty -echo) reports failure (exit 1)
+✔ delivery to a normal pane exits 0 and the text demonstrably lands
+✔ AC2 negative control — cleanup with a LOST socket-selection env is harmless (255ms)
+```
+
+**④ AC4 多轮稳定性（本机 3 轮，`node --test` 两改动文件 + tmux-leak-scan.sh）**：
+```
+ROUND 1: tmux_servers=31  leak_prefix=0  tmp_leak_dirs=0  scan=CLEAN
+ROUND 2: tmux_servers=31  leak_prefix=0  tmp_leak_dirs=0  scan=CLEAN
+ROUND 3: tmux_servers=31  leak_prefix=0  tmp_leak_dirs=0  scan=CLEAN
+```
+（本机共有 31 个真实 tmux server——多项目真实会话，非泄漏；泄漏判据是 leak_prefix=0 + tmp_leak_dirs=0
++ scan=CLEAN，三轮恒稳定，不随轮数累积。）
+
+**⑤ AC1 套件尾部扫描（修复后，run 后实跑）**：
+```
+tmux-leak-scan: clean — no residual test tmux servers/dirs (prefixes: skv-|session-liveness-|ol-tok-|enter-repro-)
+scan-exit=0
+```
+
+**⑥ scoped 套件（`bash scripts/test.sh --for-task ... --allow-thin --test-concurrency=1`）**：
+```
+tests 64 · pass 58 · fail 5 · cancelled 0 · skipped 1
+```
+**5 个 fail 全部为本任务无关的 master 既有漂移**（非本任务改动引起）：`quay-init --loop` 的
+referenced-not-landed 检查被 `gap-branch-model-integration-branch` 任务（commit 32dd44b1）新增的两个
+SPEC 文件触发——`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` 与
+`orchestration/SPEC-integration-architecture-2026-08-05.md` 未被声明进 `plugin/skills/init/SKILL.md`。
+涉及 quay-init-tmux-detection.test.mjs 的 AC1/AC3/explicit --tmux-session（3 个，均经 `quay-init --loop`
+路径）与 session-liveness.test.mjs 的 AC2/AC3-AC7（2 个）。修复内容本身（kill-session teardown + 泄漏扫描）
+零相关；`tmux-leak-scan.sh` 与 scripts/test.sh 的挂接在 fail 之外全部通过。该漂移属外层全量门应捕获的
+既有红窗，非本任务 Touches 可改（`plugin/skills/init/SKILL.md` 不在 Touches 内）。
+
 ## Definition of Done
 
 - [ ] AC1–AC7 全部勾上；AC4 实跑输出贴任务体（多轮后 server 数稳定）
