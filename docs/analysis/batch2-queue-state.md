@@ -5758,3 +5758,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层：manager 对 action-buttons 的 biased head-30 采样撤回（核心证据 365 all quay-cli 独立复验仍成立；
   新事实 25 DIR-* 有 action config = 配置过从未点击）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:2xZ（内层，slot-refill-only fan-in + 优先队列①派发）
+
+- **slot-refill-only fan-in 完成（真实现）**：tick 心跳**无条件必跑 slot-refill**（completion=加速源、
+  heartbeat=兜底必跑、两触发源同一步骤 4 闸）；line-83 负控制修正。**docs/analysis/fast-mode-loop-tick.md
+  现 TRACKED** + 与固定模板 byte-identical 同步（解决模板/铺出分歧；stale untracked 副本已备份 + 移除，
+  旧副本 282 行漂移被合并版本取代）。AC1-AC5、15/15。worktree/branch 已清。
+- **优先队列① web-action-buttons 已派**（`fm-...-fqtpnm`，删 unused route + 关 open-redirect）：slot-refill-only
+  completion 释放槽 + 人优先级 → 立即派发（事件驱动）。与在飞 productize 生产闸 DISJOINT。②③ 待后续槽释放。
+- 在飞 2/3（productize + web-action-buttons）。套件 green、无 stop、无 block、Monitor 绿。
