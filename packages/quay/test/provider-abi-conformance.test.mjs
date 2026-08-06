@@ -75,7 +75,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
 const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";

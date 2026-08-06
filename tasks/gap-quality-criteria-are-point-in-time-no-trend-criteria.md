@@ -137,6 +137,17 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
 - **交叉不合并**：本条是趋势判据品类（点状之外的时间轴），delivery-surface 是机制实现（升级通道 + 漂移报告）；
   两任务交叉标注，各守各的轴。
 
+## 并列交叉标注（AC3，gap-no-criterion-records-its-own-cost-checker-cost-jsonl，2026-08-06）
+
+**checker-cost 是判据成本族的启用机制（提供数据），本条是打标面（读数据）——两条互相引用，并列非子项。**
+实例 #10 的 ready-pool-check 斜率 35.8→91.2→157.0（06:44Z / 07:15Z / 07:27Z，后两点 pool 相同而成本
+1.7×——load 主导）**唯一可见的原因是管理者手工掐了两次表**：16 静态检查器 + 14 闸门全不落盘。现在
+`gap-no-criterion-records-its-own-cost-checker-cost-jsonl` 落地 `plugin/scripts/checker-cost.sh`——
+每个判据退出纯追加 `{name, ms, n, load, exit, ts}` 到 `.quay/checker-cost.jsonl`（run_static_checks +
+gate 两路径）。⇒ 本条趋势判据（「比上次更贵了吗」）以后**直接读 checker-cost.jsonl 的历史**，不再需要
+人手工掐表；`ready_pool_check_ms` 判据形态的数据源就是它（实例 #10 的修法裁定仍有效，但优先级按归因
+更正降级——先修负载、三条优化后评估，见 ready-pool 任务的 AC4 标注）。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 全量套件每次跑记录指标到运行时文件（`{at, durationMs, tests, fail, cancelled, per_test_ms}`，

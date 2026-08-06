@@ -340,6 +340,14 @@ COLD-START E2E PASS: laid-down mechanism present, no quay dev-tree absolute path
 受影响旧测试（resource-gate/heavy-op-token/inner-state/inner-forensics/task-contract-check 的路径常量）
 已同步改新路径，85 项测试 84 过 1 跳过（既有 skip）。
 
+## Cross-annotation (gap-release-excludes-plugin-bundle-agent-surface, 2026-08-06)
+
+本任务把 6 个 plugin 外的机制文件搬进 `plugin/`（tick 文档 → `plugin/loop/`，脚本 → `plugin/scripts/`），
+但 **`plugin/` 本身没进 `packages/quay/package.json` 的 `files`**——release tarball 仍不含 agent 面。
+那是 AC16 判据 2「完整性」的剩余缺口，由 `tasks/gap-release-excludes-plugin-bundle-agent-surface.md`
+补上：`files` 加 `plugin` + `package.sh` 包前快照，release 从 develop 打 v0.4.0 tag。本任务解决「机制
+在 plugin 内」，它解决「plugin 随 release 走」。
+
 ## Dispatch review
 
 reviewer: outer

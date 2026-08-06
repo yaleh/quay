@@ -37,6 +37,12 @@ extra:
 
 **type:** execution
 
+> **Supervisor 步骤标注（2026-08-06，gap-supervisor-base-layer-outside-sessions-architecture AC4）**：
+> 本任务是 supervisor 落地次序的 **②槽位账本+会话状态**（SPEC-integration-architecture §4.4 第 2 步；
+> SPEC-state-crystallization §3 的 Run/Session 实体）——恢复 --task-start/--task-end 单写入者、
+> 把「还剩几个并发槽」变成机械可判。AC8 的「一个事实六源四答案」验收基准即在本任务之上收敛。
+> 不另开重复任务。
+
 ## Proposal
 
 管理者（2026-08-05）——**比「前台空等」更根本的诊断：不是纪律问题，是观测缺失**。请判断立案。

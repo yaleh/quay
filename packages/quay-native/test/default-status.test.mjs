@@ -21,9 +21,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 import { createStore, resolveDefaultStatus } from "../src/store.ts";
+import { QUAY_NATIVE_CLI } from "../../quay/test/helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const binPath = path.join(__dirname, "..", "bin", "quay-native.ts");
+const binPath = QUAY_NATIVE_CLI;
 
 // ── helper ────────────────────────────────────────────────────────────────────
 

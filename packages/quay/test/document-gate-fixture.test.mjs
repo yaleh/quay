@@ -18,7 +18,7 @@ import os from "node:os";
 import { gateRegistry, registerDocumentGate } from "../src/gate/registry.ts";
 import { createDocumentStore } from "../src/document-store.ts";
 import { makeTmpDir } from "../../../plugin/test/helpers/tmp-workspace.mjs";
-import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+import { QUAY_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = QUAY_CLI;
