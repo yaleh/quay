@@ -5232,3 +5232,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **detect-stop 无停止条件、无 block**（括号已关，假阳不再）。
 - **派发 1/5**：`dispatch-evaluated`（派发资格只在 tick 边界评估 → slot 释放事件驱动——空槽即派）。补 self-touch + telemetry 已开。gate-wait-as-failed / checksplitrecommendation deferred（与 dispatch-evaluated 碰撞）。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T08:5xZ（内层，dispatch-evaluated fan-in 完成）
+
+- **dispatch-evaluated 合并**（`02f12f83`）：`slot-refill.ts/.sh` 槽位释放回填评估（组合 cap-from-gate + --slots reconcile realInFlight + ready-pool dispatchable_disjoint → REFILL GO/NO-GO）+ tick 文档定位/步骤 4 接线——**完成通知 = 派发触发源，不等下一 tick**（AC3 live gap_min<5 复测归外层）。AC1–AC6 勾（7/7）。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
