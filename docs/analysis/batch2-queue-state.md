@@ -5195,3 +5195,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **quality-criteria-trend 合并**（`3219002a`）：`trend-check.ts` 被动趋势判据——读 verification-round（套件 perTestMs，schema 扩 tests/cancelled/perTestMs）+ checker-cost（判据自身成本系列）+ suite-state-events（早期 RED 检测延迟），窗口恶化超阈值（默认 +10%）打标；REVIEW-cadence 3d 趋势检查项。AC1–AC7+AC3b 勾（46/46）。已并已清。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:1xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：--slots 13/13 reconcilable、0 real-in-flight，`--clear` 已清（wait 8.3s）。
+- **外层已修 gap-web-board contract-ratchet**（`2d947211`，我上轮 flag 的）——外层分诊闭环。
+- **派发 1/5**：`supervisor-base-layer`（orchestration SPEC 架构任务：supervisor 基座在会话之外，AC4 落地 = OS 级 anchor）。补 self-touch + telemetry 已开。reanchor/DIR-043 deferred（与 supervisor 经 orchestration 文档碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

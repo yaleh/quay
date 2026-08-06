@@ -113,6 +113,7 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
 
 ## Touches
 
+- tasks/gap-supervisor-base-layer-outside-sessions-architecture.md
 - orchestration/SPEC-integration-architecture-2026-08-05.md（引用）
 - orchestration/SPEC-state-crystallization-2026-08-05.md（AC8 引用）
 - orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md（AC9 引用）
