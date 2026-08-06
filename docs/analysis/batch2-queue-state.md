@@ -5452,3 +5452,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **tests-leak-tmux fan-in 完成**（merge task/gap-tests-leak-tmux...，task-body 证据 54 行）：修复本体已在 master `c1c15dfd`（前次派发），本次复核——kill-session teardown + 显式 `-S` socket + 4 kill-server→kill-session 转换 + suite-tail tmux-leak-scan（AC1 扫描 skv-/session-liveness-/ol-tok-/enter-repro- 前缀）。AC1–AC7 全勾（scoped 63/63 + 1 skip，tmux-leak CLEAN，leaked_servers=0）。留 ready。在飞清零。
 - **init/SKILL.md reference-doc 补两 SPEC（真实 pre-existing 红，branch-model + integration-architecture SPEC 未声明）**：`quay-init --loop` referenced-not-landed 红 → 5 个测试失败（quay-init-tmux-detection 3 + session-liveness 2）。补 `SPEC-branching-model-integration-branch-2026-08-05.md` + `SPEC-integration-architecture-2026-08-05.md` 声明 ⇒ quay-init-tmux-detection 6/6、session-liveness 52/52、verify-referenced-landed OK。`17d203e6`。
 - 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-07T01:3xZ（内层，无派发——真实就绪池耗尽，等外层补池）
+
+- **就绪池耗尽**：pool 4 = 3 个已落地漏检（cold-start-outer-validation / full-suite-runner / tests-leak-tmux，taskWorkLanded 对 evidence-only 任务漏检）+ 1 个父跟踪（DIR-124）。**真实新可派 = 0**。
+- **补晋候选核对**：prepare-milestone 父任务（children 指退役 ADR-022 文件，不可派）与 DIR-043（dirStatus: deferred）**均不晋**。
+- **不强迫派发**：池空不是缺陷态，是外层补池节奏；本 tick 在飞 0/5、套件 green、无停止条件——报告后等外层下一轮补池（此前每次补池都带来 2-4 新候选，含可派批次）。
+- 套件 green。无 .halt、无 block、Monitor 绿。
