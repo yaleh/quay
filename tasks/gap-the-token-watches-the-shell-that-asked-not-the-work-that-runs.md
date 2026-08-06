@@ -128,6 +128,7 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
 
 ## Touches
 
+- tasks/gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs.md
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
 - scripts/test.sh

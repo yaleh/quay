@@ -118,6 +118,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md
 - plugin/scripts/fast-mode-telemetry.ts（reconcile 红窗遗留 + 括号闭合 + 空槽信号）
 - plugin/loop/fast-mode-loop-tick.md（状态自检①：in-flight 从括号改为真实并发信号）
 - plugin/loop/orchestrator-loop-tick.md（步骤 4b：括号 vs subagent 的机械区分落地到自检）

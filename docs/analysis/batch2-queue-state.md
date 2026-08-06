@@ -5117,3 +5117,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **DIR-124-B2 合并**（`5f42c788`）：`stage-receipt.ts`（909 行，绑定/校验 receipt，8 个 fail-closed 代码）+ `workflow-journal.ts`（723 行，原子 appendStage + 哈希 receipt + 迁移）——控制面内核基底（可执行 stage journal + 哈希绑定 receipt），双镜像字节相同（cmp 0）。20/20 测试。agent 正确判定 DIR-124 父级 AC 单 tick 不可满足（A 族被 ADR-022 退休 + 不补勾规则阻塞），只勾 B2 子任务 AC。已并已清。
 - **本批 5/5 全落地**：token-measures-wait / residue-check / value-prioritization / runtime-nowhere-safe / DIR-124-B2。在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `e5339234`。
+
+### tick 2026-08-06T04:2xZ（内层，DIR-124-B2 fan-in 后首派：2/5）
+
+- **派发 2/5**（disjoint batch）：`telemetry-brackets`（--task-start/--task-end 调用恢复 + 自检①真实并发信号 + OVER90 判据统一 + 阻塞超时升级——第四起「写了没人调」，最贵）+ `token-watches-shell`（令牌存活判据盯真实运行工作而非获取它的 shell——重试循环下可回收但工作仍在跑）。补 self-touch + telemetry 已开。token-status-reports 与 token-watches-shell 碰撞 deferred（下轮）。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。master `eedb8714`。
