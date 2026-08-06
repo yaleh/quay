@@ -38,11 +38,20 @@
 // fields mechanically (Contract measure keys read stdout's fields). Mirrors
 // task-status-drift-check.ts's detector shape (read-only, exit 0 always).
 //
+// RELEVANCE SIGNAL (gap-value-prioritization-has-no-mechanism — the manager layer's prioritization
+// function): each candidate additionally carries a `relevance` object computed from three MECHANICAL
+// sources — strategicTrace (body grep for `FINDING-*`/`RESEARCH-*`/`GOAL-*`/`REVIEW-cadence`),
+// unblocks (how many non-done tasks have this candidate as their `parent`), costTouches (declared
+// `## Touches` parsed scale). `--top <N>` emits `top_relevance` — the N highest-value CURRENT todos
+// with a reason each (NOT the pool<floor promotion list; that keeps its existing gap>DIR order, AC4).
+// Priority query:   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --top 5
+//
 // Run:
 //   node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>]
-//       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--json]
+//       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>] [--json]
 //   --cap / --floor-mult   override the derived floor (default cap=3, floor-mult=4 ⇒ floor 12)
 //   --in-flight            task ids of currently in-flight subagents (ranked against for disjointness)
+//   --top <n>              also emit `top_relevance` — the top-n todos by relevance signal (AC2)
 //   --json                 accepted for Contract parity; output is always JSON
 //
 // ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
@@ -96,6 +105,84 @@ export const MIN_SECTION_CHARS = 40;
 /** Task-level PARKED marker: a bold `**PARKED` in the body. Plain-text "PARKED" in AC prose
  *  (e.g. this very task's exclusion-rule description) is NOT a marker — matched only when bolded. */
 export const PARKED_MARKER_RE = /\*\*PARKED\b/i;
+
+/** Strategic-trace reference: a body mention of a written strategic artifact — a `FINDING-*`,
+ *  `RESEARCH-*` or `GOAL-*` finding/strategy doc, or the `REVIEW-cadence` doc whose (b) checklist
+ *  items ARE those docs (REVIEW-cadence 3b: gap-* traceability to written strategic questions).
+ *  Mechanical grep — no human scoring (gap-value-prioritization-has-no-mechanism AC1/AC3). */
+export const STRATEGIC_TRACE_RE = /\b(?:FINDING|RESEARCH|GOAL)-[A-Za-z0-9_.-]+|REVIEW-cadence\b/g;
+
+/** Collect every strategic-doc reference in a task body (deduped, first-seen order, trailing `.md`
+ *  normalized away so `FINDING-x` and `FINDING-x.md` are one reference). Pure + mechanical. The
+ *  regex is intentionally CASE-SENSITIVE and excludes `/`: the store's strategic docs are uppercase
+ *  `FINDING-*`/`RESEARCH-*`/`GOAL-*` filenames, and a lowercase hyphenated compound like
+ *  `finding-ledger` (an adapter name) or a prose `FINDING-* /` (REVIEW-cadence's wildcard phrasing)
+ *  must NOT count as a strategic-doc reference. */
+export function collectStrategicRefs(body) {
+  const seen = [];
+  const re = new RegExp(STRATEGIC_TRACE_RE.source, STRATEGIC_TRACE_RE.flags);
+  let m;
+  while ((m = re.exec(body)) !== null) {
+    const ref = m[0].replace(/\.md$/, "");
+    if (!seen.includes(ref)) seen.push(ref);
+  }
+  return seen;
+}
+
+/** The relevance signal — the manager layer's prioritization function
+ *  (gap-value-prioritization-has-no-mechanism AC1/AC3, cross-referenced with
+ *  gap-productize-the-manager-layer AC5: 排序职能挂 manager 层). Three MECHANICAL components, no
+ *  human scoring:
+ *    strategicTrace — the body references a written strategic artifact (FINDING-*, RESEARCH-*,
+ *                     GOAL-* or REVIEW-cadence), via grep;
+ *    unblocks       — how many non-done tasks carry this candidate as their `parent` (field-based
+ *                     blocking: completing the candidate unblocks those children);
+ *    costTouches    — the candidate's `## Touches` parsed scale (declared glob count, the same
+ *                     single-source parseTouches the dispatch gate uses); smaller is cheaper.
+ *  relevanceScore is ONE integer encoding the lexicographic priority (strategicTrace DOMINATES
+ *  unblocks, which DOMINATES cost): trace ±100, unblocks ±10 (capped 9 ⇒ 90), cost ±≤5. A non-trace
+ *  candidate maxes at 9×10 + 5 = 95 < 100, so trace always wins; within a trace tier, unblocks always
+ *  beats cost (10 > 5). The sort in analyzeTasks' top_relevance uses this score, then kindOrder
+ *  (gap>DIR preserved as the final tiebreak), then id. */
+export function computeRelevance(id, task, allTasks) {
+  const body = task.body || "";
+  const strategicRefs = collectStrategicRefs(body);
+  const strategicTrace = strategicRefs.length > 0;
+
+  let unblocks = 0;
+  for (const [otherId, other] of allTasks) {
+    if (otherId === id) continue;
+    if (other.parent && other.parent === id && other.status !== "done") unblocks++;
+  }
+
+  const parsed = parseTouches(body);
+  const costTouches = parsed.hasSection ? parsed.globs.length : 0;
+
+  const relevanceScore =
+    (strategicTrace ? 100 : 0) +
+    Math.min(unblocks, 9) * 10 +
+    Math.max(0, 5 - costTouches);
+
+  return { strategicTrace, strategicRefs, unblocks, costTouches, relevanceScore };
+}
+
+/** A mechanical one-line reason for a ranked candidate (AC2's "理由"), built from the signal
+ *  components + the dispatch-eligibility facts a manager needs to answer "下一条该派谁". */
+export function relevanceReason(c) {
+  const r = c.relevance;
+  const parts = [];
+  parts.push(r.strategicTrace ? `strategic-traceable (${r.strategicRefs.join(", ")})` : "no-strategic-trace");
+  parts.push(r.unblocks > 0 ? `unblocks ${r.unblocks}` : "unblocks 0");
+  parts.push(`cost ${r.costTouches} touches`);
+  parts.push(`score ${r.relevanceScore}`);
+  if (c.eligible) parts.push("eligible");
+  else {
+    if (!c.depsReady) parts.push("deps NOT-ready");
+    if (!c.fourArtifacts) parts.push(`four-artifacts INCOMPLETE (${c.missingArtifacts.join(",")})`);
+    if (!c.touchesResolve) parts.push("touches MISSING");
+  }
+  return parts.join(" · ");
+}
 
 // Shape-aware registered sections (mirrors quay-native store.ts SHAPE_REGISTRY, single-source shape
 // dispatch: contract → finding → plan; unknown fails closed). The four artifacts are the shape's own
@@ -257,6 +344,9 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     fourArtifacts: four.complete,
     missingArtifacts: four.missing,
     disjointScore,
+    // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
+    // strategic traceability (grep) + blocking (parent/children fields) + cost (touches parsed scale).
+    relevance: computeRelevance(id, task, allTasks),
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     eligible: depsReady && four.complete && touchesResolve,
   };
@@ -277,7 +367,7 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
  *  scanned }. `root` is the repo root used to resolve `## Touches` existence claims; `tasksDir`
  *  defaults to `<root>/tasks`; `cap`/`floorMult` derive the floor (default 3×4 ⇒ 12); `inFlight`
  *  is an optional array of `{ id, body }` for currently in-flight tasks (ranked against). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [] }) {
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], top = 0 }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -316,6 +406,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // wildcards hit the filesystem (expandDeclaredTouches, single-source from the batch scheduler).
   const expand = (globs) => expandDeclaredTouches(globs, root);
   const poolParsed = ready.map((id) => ({ id, touches: parseTouches(allTasks.get(id).body) }));
+  const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
   const dispatchableDisjoint = maxMutuallyDisjointSubset(poolParsed.map((p) => p.touches), expand);
 
   const criterionMet = dispatchableDisjoint >= cap;
@@ -329,7 +420,6 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const candidates = [];
   const promotions = [];
   if (deficit > 0) {
-    const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue; // never promotion candidates
@@ -358,6 +448,30 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     }
   }
 
+  // AC2 (gap-value-prioritization-has-no-mechanism): the priority query — "当前 todo 里价值最高的
+  // N 条 + 理由", a SEPARATE output from the pool-maintenance `promotions` (which keeps its existing
+  // disjointness-first / gap>DIR order — AC4). Scans ALL todo candidates (not gated on deficit>0),
+  // ranks by the mechanical relevance signal (strategicTrace > unblocks > cost, score below), then
+  // gap>DIR as the final tiebreak (AC4 retained), then id for determinism. Only emitted when the
+  // `--top N` flag is passed (default output byte-unchanged for existing consumers).
+  const top_relevance = [];
+  if (top > 0) {
+    const ranked = [];
+    for (const [id, t] of allTasks) {
+      if (t.status !== "todo") continue;
+      if (isFixture(t) || isParked(t)) continue;
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand);
+      ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: relevanceReason(c) });
+    }
+    ranked.sort(
+      (a, b) =>
+        b.relevance.relevanceScore - a.relevance.relevanceScore ||
+        a.kindOrder - b.kindOrder ||
+        a.id.localeCompare(b.id),
+    );
+    top_relevance.push(...ranked.slice(0, top));
+  }
+
   return {
     pool,
     floor,
@@ -372,6 +486,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     excluded,
     candidates,
     promotions,
+    top_relevance,
     scanned: allTasks.size,
   };
 }
@@ -381,12 +496,14 @@ function main(argv) {
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
+  let top = 0;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
+    else if (args[i] === "--top") top = Number(args[++i]);
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     }
@@ -398,7 +515,7 @@ function main(argv) {
     if (!fs.existsSync(file)) continue; // advisory — a vanished in-flight id is not a failure
     inFlight.push({ id, body: fs.readFileSync(file, "utf8") });
   }
-  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight });
+  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, top });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }
