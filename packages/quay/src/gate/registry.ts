@@ -10,7 +10,10 @@ import type { Task } from "../abi.ts";
 
 declare const __dirname;
 var moduleDir = typeof __dirname === "string" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
-var REPO_ROOT = path.resolve(moduleDir, "..", "..", "..", "..");
+// REPO_ROOT is workspace-root-relative: discover from the module location so
+// it resolves identically under the source tree (src/gate/) and the bundled
+// dist (dist/) — a fixed up-4 walk is wrong under the dist bundle location.
+var REPO_ROOT = discoverWorkspaceRoot(moduleDir) ?? path.resolve(moduleDir, "..", "..", "..", "..");
 
 export interface GateVerdict { ok: boolean; reason: string; }
 export interface GateDefinition { description?: string; onPass?: string; onFail?: string; check?: (task: Task, client: unknown) => Promise<GateVerdict>; }
