@@ -5,7 +5,7 @@ title: "experiment legacy census & reclaim — 46 test files 70% unreferenced / 
   L_D/L_G/L_S (ADR-006/007 quant impls, feed architecture probe) +
   derive-touches-heuristic (## Touches missing mechanical extraction); delete
   impl-deleted tests (criterion: test without impl = remove)"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect

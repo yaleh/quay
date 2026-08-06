@@ -5299,3 +5299,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层补池 5**（0026b8b9）：legacy-reclaim + manager-productization 晋 ready。
 - **派发 1/5**：`experiment-legacy-reclaim`（git-lens L_D/L_G/L_S 退休脚本回收 + touches 启发式重审）。补 self-touch + telemetry 已开。manager-productization deferred（与 legacy-reclaim 碰撞）。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T14:1xZ（内层，legacy-reclaim fan-in + 派发 3/5）
+
+- **legacy-reclaim fan-in 完成**（rebase + merge task/gap-experiment-legacy-reclaim-and-touches-heuristic，4 脚本回收进 plugin/scripts + derive-touches 接入派发 + test-impl-census-check，scoped 45/45 exit 0）。任务标 **needs-human**：AC4 机械普查 0 个被测实现已删测试（12 个已于 ADR-022 随实现删除），**本 AC 按现状不可满足，交外层裁定**；AC1/2/3/5 勾。worktree+分支已清。
+- **就绪池**：pool 12 < floor 20（deficit 8），dispatchable_disjoint 4 < cap 5 ⇒ 按步骤 3.6 补晋。
+- **补晋 1**：`session-liveness-hashes-the-token-counter` todo→ready（self-touch 已补）。
+- **不晋**：prepare-milestone-no-size-aware-routing（复合父任务，其 A/B/C 子任务 touches 全指已退役 ADR-022 文件——MAJORITY-MISSING 不可派）；DIR-043（`dirStatus: deferred`）。
+- **派发 3/5**（disjoint batch，scheduler 实测）：`full-suite-runner-red-pattern-matches-bare-x-vitest-false-red` + `send-keys-reliable-welcome-screen-ghost-drive-fails` + `session-liveness-hashes-the-token-counter`。telemetry --task-start 已开。
+- **defer**：`manager-productization-five-constraints`（与 full-suite-runner 在 `plugin/scripts/full-suite-runner.ts` 碰撞，等下批）；DIR-124 复合父任务子任务全 todo 不单派。
+- 套件 green（outer 后台）。在飞 3/5。无停止条件、无 .halt、无 block、Monitor 绿。
