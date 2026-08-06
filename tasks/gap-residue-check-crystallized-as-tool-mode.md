@@ -140,11 +140,33 @@ $ tmux capture-pane -p -t residue-claude:0.0 | grep '❯' | tail -1   # 逐字�
 EXIT=0
 ```
 
+### 重新分派执行器复核（2026-08-06，既有实现 commit 793f0204 验证 + 全量套件复跑）
+
+任务在任务分支已有完整实现（commit 793f0204），重新分派后执行器逐项复核（非新构造）：
+
+- **Contract measure/invoke 复跑（夹具）**：`empty` → exit 0；real pair（`--after`）→ `real-unsubmitted-text`
+  exit 0；ghost pair（`--after`，逐字相同）→ `ghost-suggestion-only` exit 0；单张静态快照带文本 →
+  `unknown` exit 1（fail-loud，静态无样式信息）。
+- **live 探针实跑（throwaway tmux pane `residue-verify:0.0`）**：空框 → `empty`；
+  `send-keys -l 'LIVE PROBE residue marker 20260806x'`（未回车）→
+  `{"state":"real-unsubmitted-text","reason":"C-u cleared the input line at cycle 1","captures":2}` exit 0，探针清空框。
+- **AC5 transcript 交叉复核**：三个 marker 文本（`AC4 real unsubmitted check text`、`Try "fix lint errors"`、
+  `LIVE PROBE residue marker 20260806x`）在全部 quay workspace transcript 中 genuine user-text content 命中均 = 0；
+  `AC4 real unsubmitted check text` 的唯一原始命中位于任务自身 body 的 AC4 证据文本
+  （jsonl path `/mcpMeta/structuredContent/tasks[19]/body`）——是文档不是提交，恰是 AC5 要防的区分点。
+- **AC6 作用域测试**：`scripts/test.sh plugin/test/pane-state-classify.test.mjs` → tests 17, pass 17, fail 0, cancelled 0。
+- **AC7 标注已就位**：`orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` 2026-08-06 标注写明故障 6
+  运行时判定由 `pane-state-classify.ts --check-residue` 承载，源头消除后作历史兜底。
+- **全量套件复跑**：worktree 首次全量套件因两个 gitignored 本地工件缺失（`.quay/config.yml` 工作区配置、
+  `packages/quay/plugin/` pack-time 快照，git worktree 不携带）致 workspace 依赖的 gate/loop-shipping 测试
+  fail-closed；补齐两个 gitignored 工件后复跑 → **tests 2866, pass 2821, fail 0, cancelled 0, skipped 45（预期：
+  governance group、live-github 无凭据、tmux 无环境等），FULL-SUITE-EXIT=0**，且套件自带 clean-tree 断言通过。
+
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC4/AC5 实跑输出逐字贴任务体
-- [ ] 一次真实使用：外层驱动内层后用 `--check-residue` 判内层框态，结果与 transcript 一致（非构造）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC7 全部勾上；AC4/AC5 实跑输出逐字贴任务体
+- [x] 一次真实使用：外层驱动内层后用 `--check-residue` 判内层框态，结果与 transcript 一致（非构造）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 - tasks/gap-residue-check-crystallized-as-tool-mode.md（自身文件：勾 AC + 贴 invoke 证据授权）
