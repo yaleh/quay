@@ -5554,3 +5554,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   创建时未声明（scoped 静态层 defer catalog 到全量 ⇒ 任务绿 catalog 红）。已立案
   `gap-capability-catalog-declarations-not-enforced-at-script-creation`（scoped 层强制 + 负控制）。
 - 在飞 0/3。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:5xZ（内层 cron，池补晋 8 + 满额派发 3/3）
+
+- **池补晋 8 条**（tick 3.6，pool 4<floor 12）：prepare-milestone-no-size-aware-routing / productize-manager-layer /
+  split-batch-vocab / residue-check / telemetry-brackets / ghost-suggestion / session-liveness-hashes /
+  loop-driver-check todo→ready + self-touch。**池 4→11、disjoint 2→6、criterion TRUE**（解锁）。
+- **满额派发 3/3**：① prepare-milestone-no-size-aware-routing（`fm-...-zeeizn`）② delivery-surface-grows
+  （`fm-...-bb3rgc`，upgrade/refresh 通道）③ split-batch-vocab（`fm-...-9cl8gf`）。生产闸 4 个互不相交候选
+  中取 3，全 self-touch/resolve 过，派发词带 Touches 精度规则。
+- 套件 green、无 stop、无 block、Monitor 绿。

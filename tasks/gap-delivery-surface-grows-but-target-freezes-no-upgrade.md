@@ -63,6 +63,8 @@ extra:
 
 ## Touches
 
+- tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 - plugin/scripts/quay-init.sh（或等价：升级/刷新 + 漂移检测）
 - plugin/scripts/（漂移报告 helper，若成脚本）
 - plugin/test/（AC1/AC2/AC3 fixture）
