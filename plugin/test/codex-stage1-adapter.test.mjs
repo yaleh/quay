@@ -261,6 +261,64 @@ test('A8: codex-stage1-selfcheck.sh exits 0 (validates config; degrades if codex
   assert.match(r.stdout, /RESULT: PASS/);
 });
 
+// A9/A10: the present-but-incompatible degrade path is MECHANICAL (A9) and the real
+// config-defect path still FAILS (A10 negative) — a fake `codex` on PATH stands in for
+// the two classes of installed codex, so the degrade is covered without a live tool.
+function fakeCodex(binBody) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-fake-bin-'));
+  const p = path.join(bin, 'codex');
+  fs.writeFileSync(p, binBody);
+  fs.chmodSync(p, 0o755);
+  return bin;
+}
+
+test('A9: selfcheck DEGRADES (exit 0) on present-but-incompatible codex (project config not loaded)', () => {
+  // codex-cli 0.125.0 class: `codex mcp list` surfaces NO `quay` row because this version
+  // never loads project-scoped .codex/config.toml MCP servers. The selfcheck must SKIP the
+  // live proof with an explicit present-but-incompatible note — never a raw failure.
+  const bin = fakeCodex(
+    '#!/usr/bin/env bash\n' +
+    'if [[ "$1" == "--version" ]]; then\n  echo "codex-cli 0.125.0"\n' +
+    'elif [[ "$1" == "mcp" && "$2" == "get" ]]; then\n  echo "Error: No MCP server found." >&2\n  exit 1\n' +
+    'elif [[ "$1" == "mcp" && "$2" == "list" ]]; then\n' +
+    '  printf "%-16s  %-10s  %s\\n" "Name" "Command" "Status"\n' +
+    '  printf "%-16s  %-10s  %s\\n" "archguard" "archguard" "enabled"\n' +
+    '  printf "%-16s  %-10s  %s\\n" "playwright" "npx" "enabled"\n' +
+    'else\n  echo "fake codex: unknown args: $*" >&2\n  exit 1\nfi\n'
+  );
+  try {
+    const r = spawnSync('bash', [selfcheck], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    assert.equal(r.status, 0, `selfcheck must exit 0 on present-but-incompatible codex; output:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /RESULT: PASS/);
+    assert.match(r.stdout, /present-but-incompatible/);
+    assert.match(r.stdout, /SKIP/);
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test('A10 (negative): selfcheck still FAILS (exit 1) when codex loads the project config but rejects the quay server', () => {
+  // A version that DOES surface a `quay` row in `codex mcp list` yet rejects `mcp get quay`
+  // is a REAL config defect — it must FAIL, proving the degrade is scoped to the
+  // project-config-not-loaded case and does not mask a broken config.
+  const bin = fakeCodex(
+    '#!/usr/bin/env bash\n' +
+    'if [[ "$1" == "--version" ]]; then\n  echo "codex-cli 0.146.1"\n' +
+    'elif [[ "$1" == "mcp" && "$2" == "get" ]]; then\n  echo "Error: quay server failed to start." >&2\n  exit 1\n' +
+    'elif [[ "$1" == "mcp" && "$2" == "list" ]]; then\n' +
+    '  printf "%-16s  %-10s  %s\\n" "Name" "Command" "Status"\n' +
+    '  printf "%-16s  %-10s  %s\\n" "quay" "node" "enabled"\n' +
+    'else\n  echo "fake codex: unknown args: $*" >&2\n  exit 1\nfi\n'
+  );
+  try {
+    const r = spawnSync('bash', [selfcheck], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    assert.equal(r.status, 1, `selfcheck must FAIL on a loaded-but-rejected quay server; output:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /RESULT: FAIL/);
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 // =================================================================================
 // B. CLI FALLBACK (no MCP)
 // =================================================================================
