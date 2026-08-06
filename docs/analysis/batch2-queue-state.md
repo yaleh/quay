@@ -6293,3 +6293,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   与手动分析一致，本 tick 无新派发。
 - 待外层：FF integration（现 = develop + AC16 + spawn-count + supervisor）→ develop（verification-round）。
 - develop 已领先 integration（外层 merge archguard 工作 bccbc6b9）。
+
+### tick 2026-08-06T11:2xZ（no-criterion-cost fan-in 完成）
+
+- **no-criterion-cost 合 integration**（afb05ca7→cbc9ca43，11 files +730）：checker-cost.sh 纯追加成本账本
+  + gate recordGateCost（env-guarded）+ verification-round.jsonl 套件时长序列。AC1-AC7 全证据、
+  capability-catalog 0 unclassified、scoped **31/31**。
+- **附带修复**：full-suite-runner.ts `extractFailureFile` 缺失闭括号（develop 基线 import 即 SyntaxError）
+  → 修复后 full-suite-runner.test.mjs 23/23。
+- worktree/branch 清理、bracket close（done）。**在飞 0/3**。
+- **integration 现 = develop 基线 + AC16 + spawn-count + supervisor + no-criterion-cost**（cbc9ca43）。
+  **待外层 FF integration→develop**（verification-round-N 批量合 FORK_BASELINE）。
+- 池内唯一剩余真实候选 quality-criteria 已解除序列化（no-criterion-cost 完成）→ 下一 tick 可派。
