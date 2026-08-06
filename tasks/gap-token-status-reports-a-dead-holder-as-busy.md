@@ -161,6 +161,7 @@ stale_reclaims=7
 
 ## Touches
 
+- tasks/gap-token-status-reports-a-dead-holder-as-busy.md
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs
 

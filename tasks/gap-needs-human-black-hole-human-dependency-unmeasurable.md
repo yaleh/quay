@@ -1,7 +1,22 @@
 ---
 id: gap-needs-human-black-hole-human-dependency-unmeasurable
-title: "needs-human is the LITERAL human-dependency count (AC10 asks can the mechanism evolve without a human — this is that measure) and it is currently a BLACK HOLE: the 15 needs-human tasks are an indistinguishable mix of (a) truly-dead ADR-022-retired (gap-plancheck-*, correctly parked with RE-TRIAGE annotations) and (b) ALIVE current-mechanism tasks stuck waiting for a decision nobody knows is still awaited — DIR-109 canonical test runner (CLAUDE.md current, 7d untouched), DIR-100 gate-loader diagnostics + DIR-103 acceptance-runner dry-run (gate engine alive, 3d untouched); needs-human can ENTER but not EXIT: no expiration, no re-review, nothing reports it, so we can't even measure how much the mechanism depends on a human; generator question: needs-human quantifies 'this task needs a human decision' but for HOW LONG? no limit; is the mechanism still alive? not checked — missing TIME axis + SURVIVAL axis; fix: needs-human > N days untouched ⇒ forced re-review; task referencing ADR-retired mechanism ⇒ auto-superseded (reuse strategic-doc-staleness-check.ts's path-existence, same ruler on tasks/needs-human)"
-status: todo
+title: "needs-human is the LITERAL human-dependency count (AC10 asks can the
+  mechanism evolve without a human — this is that measure) and it is currently a
+  BLACK HOLE: the 15 needs-human tasks are an indistinguishable mix of (a)
+  truly-dead ADR-022-retired (gap-plancheck-*, correctly parked with RE-TRIAGE
+  annotations) and (b) ALIVE current-mechanism tasks stuck waiting for a
+  decision nobody knows is still awaited — DIR-109 canonical test runner
+  (CLAUDE.md current, 7d untouched), DIR-100 gate-loader diagnostics + DIR-103
+  acceptance-runner dry-run (gate engine alive, 3d untouched); needs-human can
+  ENTER but not EXIT: no expiration, no re-review, nothing reports it, so we
+  can't even measure how much the mechanism depends on a human; generator
+  question: needs-human quantifies 'this task needs a human decision' but for
+  HOW LONG? no limit; is the mechanism still alive? not checked — missing TIME
+  axis + SURVIVAL axis; fix: needs-human > N days untouched ⇒ forced re-review;
+  task referencing ADR-retired mechanism ⇒ auto-superseded (reuse
+  strategic-doc-staleness-check.ts's path-existence, same ruler on
+  tasks/needs-human)"
+status: ready
 labels:
   - gap
   - milestone-candidate

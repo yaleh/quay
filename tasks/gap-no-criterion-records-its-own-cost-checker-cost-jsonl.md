@@ -1,7 +1,24 @@
 ---
 id: gap-no-criterion-records-its-own-cost-checker-cost-jsonl
-title: "generator new axis: NO criterion records its own cost — the ready-pool-check slope 35.8s→91.2s in one hour (n 19→24, cost 2.55x while O(n2) predicts 1.6x) is ONLY visible because the manager hand-timed it twice; all 16 static checkers + 14 gates persist ZERO execution time (full-suite-state.json durationMs is the single exception and suite-level only) => criterion-cost DEGRADATION is completely invisible until a human hand-measures, and we just proved it can 2.5x in an hour; generator question: what range does a criterion's cost quantify? answer: nothing — no quantification; minimal viable: each criterion appends one line {name, ms, n} to .quay/checker-cost.jsonl on exit, pure-append zero-judgment, the trend grows itself; same time-axis as gap-quality-criteria-are-point-in-time-no-trend-criteria but the OBJECT is the criterion itself not the product — parallel item with cross-reference, NOT a sub-item (the checker-cost recording is the ENABLING mechanism for the whole criterion-cost family, incl the pool-check 91.2s instance); AC10: split two ways — the ready-pool slope is post-friction (manager only timed because outer skipped), does NOT score; 'no criterion records its own cost' is pre-friction (the other 29 criteria have nothing hurting), scores +1 => AC10 4->5"
-status: todo
+title: "generator new axis: NO criterion records its own cost — the
+  ready-pool-check slope 35.8s→91.2s in one hour (n 19→24, cost 2.55x while
+  O(n2) predicts 1.6x) is ONLY visible because the manager hand-timed it twice;
+  all 16 static checkers + 14 gates persist ZERO execution time
+  (full-suite-state.json durationMs is the single exception and suite-level
+  only) => criterion-cost DEGRADATION is completely invisible until a human
+  hand-measures, and we just proved it can 2.5x in an hour; generator question:
+  what range does a criterion's cost quantify? answer: nothing — no
+  quantification; minimal viable: each criterion appends one line {name, ms, n}
+  to .quay/checker-cost.jsonl on exit, pure-append zero-judgment, the trend
+  grows itself; same time-axis as
+  gap-quality-criteria-are-point-in-time-no-trend-criteria but the OBJECT is the
+  criterion itself not the product — parallel item with cross-reference, NOT a
+  sub-item (the checker-cost recording is the ENABLING mechanism for the whole
+  criterion-cost family, incl the pool-check 91.2s instance); AC10: split two
+  ways — the ready-pool slope is post-friction (manager only timed because outer
+  skipped), does NOT score; 'no criterion records its own cost' is pre-friction
+  (the other 29 criteria have nothing hurting), scores +1 => AC10 4->5"
+status: ready
 labels:
   - gap
   - milestone-candidate

@@ -5133,3 +5133,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **token-watches-shell 合并**（`aa942776`）：heavy-op-token 改**租约**（`lease_expires_ms` + `--renew`）——取锁 shell 死而活仍在跑（重试循环每次 timeout 杀自己的 shell）时，旁观者不能再靠「取锁 pid 死了」回收；租约由唯一知情者（重试循环）续，pid 死亡降级为加速释放。AC1–AC7 勾（含修复前可复现 AC1 + 不永久锁死 AC3 + pid 加速保留 AC4，28/28）。已并已清。
 - **在飞 0/5**（全部落定）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:2xZ（内层，下轮派发：3/5）
+
+- **补晋 6**（todo→ready）：laydown-derivation / suite-state-reason-axis / no-criterion-cost / needs-human-black-hole / quality-criteria-trend / supervisor-base-layer。不晋：no-size-aware-routing（退休）、session-liveness-hashes-token（疑已落地）。
+- **派发 3/5**（disjoint batch）：`token-status-reports`（--status 死持有者不报 busy，stale/lease 评估）+ `laydown-derivation`（裸文件名正则 + verify 盲点 + 依赖闭包）+ `suite-state-reason-axis`（full-suite-state reason 枚举：早标 RED → aborted 非 failed，FALSE-RED 类根）。补 self-touch（3 缺已补）+ telemetry 已开。deferred 5（reanchor 等碰撞）。
+- 套件 green。在飞 3/5。无停止条件、无 .halt、无 block、Monitor 绿。
