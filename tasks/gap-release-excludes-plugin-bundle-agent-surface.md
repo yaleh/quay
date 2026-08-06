@@ -46,6 +46,9 @@ plugin/，但 **plugin/ 没进 npm files**——机制「在包外」部分解�
 - [ ] AC4: release 从 develop 打 tag（非 master）；版本号 v0.4.0（或外层裁定的形态）
 - [ ] AC5: 与 exp5-DEFECT-DELIVERY-MANIFEST（done）+ gap-loop-mechanism-lives-outside（done）交叉标注
        ——本任务是它们未覆盖的 files/plugin 缺口
+- [ ] AC6: **dist-plugin 第三条路径覆盖**——Claude Code plugin marketplace（README Option C，/plugin install quay）
+       的 dist-plugin 分支同步重建（落后 master 3755 提交，07-26 后未重建）；AC16 完整性覆盖三条官方安装
+       路径（npm / SEA / plugin marketplace），非只 files 加 plugin/
 
 ## Touches
 
