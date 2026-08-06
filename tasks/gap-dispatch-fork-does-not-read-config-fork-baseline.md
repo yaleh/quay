@@ -1,7 +1,7 @@
 ---
 id: gap-dispatch-fork-does-not-read-config-fork-baseline
 title: "dispatch fork action does NOT read config's fork_baseline — task/gap-supervisor-base-layer created 07:10:11 (AFTER fork_baseline:develop landed in .quay/config.yml at 07:09:43) still forked from master: git rev-list develop..branch = 49, intersection with develop..master = 49 (100% on master line, structural proof not merge-base); develop still frozen at 926d771b, master ahead 52; inner's fan-in note 'config activation deferred to outer (stale-baseline timing risk, gitignored human-owned file)' — fork fell back to master WITHOUT re-reading the now-active config; manager 3-step measurement 2026-08-06: config effective ≠ call-site changed, same class as hardcode-master's own finding; only next dispatch can confirm scope (one-branch timing vs fork-never-reads-config)"
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -58,8 +58,8 @@ config 有 fork_baseline、AC2 scratch 跑通），但**真实 dispatch 的 fork
 
 ## Contract
 
-measure   fork_baseline_used = `git rev-list develop..<下一个task分支> | wc -l` 与 `git rev-list develop..master` 交集数
-band      fork_baseline_used 交集 < 分支超出数（分支含 non-master 提交 = 从 develop 分叉）
+measure   fork_baseline_used = `git reflog show <task分支> | tail -1` stdout 的创建来源（字面量 "Created from develop" / "Created from master"）
+band      fork_baseline_used = Created from develop（新派发分支从 develop 分叉；reflog 一条命令判别）
 invoke    `grep -rn 'fork_baseline\|FORK_BASELINE\|fork-baseline.ts' plugin/scripts/fork-baseline.ts plugin/loop/fast-mode-loop-tick.md`
 control   下一个派发分支从 develop 分叉（AC1）；无配置下游仍 master（AC4）
 resume    fork 接线与验基线分步提交，任一步完成即写盘
@@ -71,3 +71,19 @@ at: 2026-08-06T07:3xZ
 changed: 管理者三步实测 + 外层独立确认（结构证明 49/49 交集）立案。config 已激活但 fork 从 master——
 hardcode-master「配置生效 ≠ 调用点改变」在真实 dispatch 层复现。inner 推迟 config 激活 + fork fallback
 master。范围待下一个派发分辨（时序 vs 结构）。下一个派发必验分叉基线。
+
+## 验证更新（2026-08-06 07:4xZ，管理者更正 + 不复现确认）
+
+**数字更正（管理者）**：supervisor 分支「07:10 创建」实为最后提交时间，reflog 实测创建于 **07:10:11**
+（外层 reflog 复核：`branch: Created from master`）。「晚于 config 28 秒」精度以 reflog 为准（结论方向
+不变：确实从 master 分叉）。
+
+**更好判别式（采纳到 Contract）**：`git reflog show <branch>` 直接给出字面量
+`branch: Created from master` / `Created from develop`——一条命令，非 merge-base 的非判别性，也非
+rev-list 交集把已合并老分支误标。
+
+**不复现确认（管理者第 3 条 + 外层独立验证）**：spawn-count 分支
+（task/gap-the-spawn-count-criterion...）reflog = **`branch: Created from develop`**（926d771b），
+且 tip 是 develop 祖先、`rev-list develop..分支` = 0——**从 develop 分叉**。⇒ fork 路径在 config 激活
+后已读 fork_baseline。**本任务不复现，不实现修复**（supervisor 是 config 激活前最后的 master 分叉，
+记录在案）。若标记为已修复，是在修幻影。
