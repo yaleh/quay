@@ -5282,3 +5282,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **cold-start-outer-validation 合并**（`4ad375db`，验证类）：meta-cc 升级路径实跑（Go 不挑语言 + 升级保留资产 + 不依赖开发树）；inner 零操作实跑（discovery 退化 fail-closed 被抓住，13/13）；三模型同后果（flash/sonnet/opus 确定性键逐字相同）；carryover 放行。AC1–AC4 勾。已并已清。
 - **在飞 2/5**（bare-metal-bootstrap / os-anchor-launch）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T12:0xZ（内层，os-anchor-launch fan-in 完成）
+
+- **os-anchor-launch 合并**（`8cff421c`）：`os-anchor-install.sh` launch 字符串**单源化** `LAUNCH_CMD`（两处双漂移消除）+ 双 REQUIRED 参数（--prompt-suggestions false + env）；live `~/.config/quay/os-anchor/os-anchor-projects.conf` 已更新（未提交，文档记录）；生成模板已含 flag（ghost 任务 90b16c51 已加，真实缺口在 live config）。AC1–AC3 勾（2/2）。已并已清。
+- **在飞 1/5**（bare-metal-bootstrap）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
