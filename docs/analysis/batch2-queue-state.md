@@ -7321,3 +7321,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   cold-start-outer-validation / inner-session-check）AC 全勾 = 陈旧待翻 done。
 - **池膨胀观察**：pool 20 / dispatchable 9 的「可派」主要是陈旧任务（7 fan-in 待外层翻 done + AC 全勾未翻）虚增——
   真候选稀少。外层是 done-flip 瓶颈。
+
+### tick 2026-08-06T16:4xZ（零派发：suite 终红 fail-closed + 池候选全排除；manager 状态存疑待外层）
+
+- **零派发（停止条件命中）**：外层 suite **最终红**（15:53 finished，reason=failed，95 fail，root cause=quay-init laydown，`failures:[]` 空）⇒ 条件化规则「无法判定失败位置 → **保守停派发（fail-closed）**」。cap=5（GO 档，avg300 已回落），但红窗决定不派。slot-refill `should_refill=true` 推荐 5 全排除：DIR-124（human-steered）、audit-findings（机制已落 develop）、chart2-s2 + cold-start-outer-validation（AC 全勾=陈旧待外层翻 done）、concurrency-derivation-reverted（已 fan-in 待翻 done）。
+- **OVER90 自动块 = 假阳性（已清）**：`--detect-stop` 对 no-post-merge（118m）写 auto-block——但该任务已 fan-in integration（4a877953）、worktree 已删、branch 已随 fan-in 删除 ⇒ 两个 merge-evidence probe（isBranchMerged/hasMergeRecord）都探不到，属 AC8 文档化的「work 已落地但 --task-end 未写」假阳性类。同一根因会复现于 green-verdict（3ab4fb45）/shipped-verifiers（a43d4a90）——**三条已 merge 任务的括号都等外层 `--task-end` 关闭**（外层异步收尾职责）。已 `--clear`。
+- **未跑 `--reconcile`（有意）**：`worktreeExists` 查 `refs/heads/task/<taskId>`，而 manager worktree 分支是 `task/manager-productization`（slug 截断）⇒ reconcile 会把 manager 括号误关为 abandoned。且 16:23 出现 manager 第二条 task-start（base f698b772=当时 develop HEAD，runId cf7gcr）——无对应新 worktree（worktree list 仍是 56d60671 老 base），可能为外层再驱（外层 pane "← 1 agent"）。**manager 状态存疑，本 tick 不碰**（不 re-dispatch / 不 reconcile / 不清理）。
+- **在飞 0/5（真实并发）**：slot-status `real_in_flight:0`、`slots_free:5`、`brackets_reflect_subagents:false`——遥测 inProgress 5 条全是陈旧括号（4 条已 merge 待外层 --task-end + manager 旧括号）。manager 首条 agent 已静默死（worktree 1 脏文件 plugin/scripts/quay-topology.sh，0 commit）。
+- **池无需补晋**：pool 20 ≥ floor 20（cap 5×4），dispatchable 9 ≥ cap。Monitor `mounted:true / targetOk:true`。inbox unread=0。
+- **遥测**：tasksPerHour 1.20（window 102.3h）/ mean 64.0m / median 48.9m / 累计死时间 31.2m（最长 14.5m）。
