@@ -51,6 +51,7 @@ LAUNCHER="$(jq -er --arg r "$ROLE" '._launchSpec.roles[$r].launcher // empty' "$
 NAME="$(jq -er --arg r "$ROLE" '._launchSpec.roles[$r].name // empty' "$SETTINGS_FILE")"
 MODEL="$(jq -r --arg r "$ROLE" '._launchSpec.roles[$r].model // ""' "$SETTINGS_FILE")"
 EXCLUDE_DYNAMIC="$(jq -r '._launchSpec.excludeDynamicSystemPromptSections // false' "$SETTINGS_FILE")"
+PROMPT_SUGGESTIONS="$(jq -r '._launchSpec.promptSuggestions' "$SETTINGS_FILE")"
 ROLE_ENV="$(jq -c --arg r "$ROLE" '._launchSpec.roles[$r].env // {}' "$SETTINGS_FILE")"
 
 if [[ -z "$LAUNCHER" || -z "$NAME" ]]; then
@@ -73,6 +74,13 @@ fi
 CMD=( "$LAUNCHER" "--settings" "$SETTINGS_ARG" )
 if [[ "$EXCLUDE_DYNAMIC" == "true" ]]; then
   CMD+=( "--exclude-dynamic-system-prompt-sections" )
+fi
+# ghost-suggestion at-source elimination (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false):
+# _launchSpec.promptSuggestions === false ⇒ append the REQUIRED `--prompt-suggestions false` flag.
+# (The env var CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false is carried via --settings; the flag is the
+# belt-and-suspenders CLI-form REQUIRED by the human ruling. Absent key defaults to true = no flag.)
+if [[ "$PROMPT_SUGGESTIONS" == "false" ]]; then
+  CMD+=( "--prompt-suggestions" "false" )
 fi
 if [[ -n "$MODEL" && "$MODEL" != "null" ]]; then
   CMD+=( "--model" "$MODEL" )

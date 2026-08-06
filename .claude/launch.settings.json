@@ -14,6 +14,7 @@
   "_launchSpec": {
     "version": 1,
     "excludeDynamicSystemPromptSections": true,
+    "promptSuggestions": false,
     "roles": {
       "manager": {
         "name": "quay-manager",

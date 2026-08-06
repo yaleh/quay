@@ -73,9 +73,12 @@ test("AC1 — env carries the 917000 context/compaction + ADR-016 + ghost (promp
   assert.equal(env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION, "false");
 });
 
-test("AC1 — _launchSpec carries --exclude-dynamic-system-prompt-sections + per-role names", () => {
+test("AC1 — _launchSpec carries --exclude-dynamic-system-prompt-sections + --prompt-suggestions false + per-role names", () => {
   const spec = readSettings()._launchSpec;
   assert.equal(spec.excludeDynamicSystemPromptSections, true);
+  // ghost-suggestion at-source elimination (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false AC3):
+  // REQUIRED, not optional — every role's launch must disable prompt suggestions (flag form).
+  assert.equal(spec.promptSuggestions, false, "_launchSpec.promptSuggestions must be false (REQUIRED, not optional)");
   for (const role of ["manager", "outer", "inner"]) {
     const r = spec.roles?.[role];
     assert.ok(r, `role "${role}" must be defined in _launchSpec.roles`);
@@ -138,6 +141,7 @@ test("AC4 — positive control: every role's launch command carries the settings
     assert.ok(cmd.includes("--settings"), `${role}: command must reference --settings`);
     assert.ok(cmd.includes(`-n ${def.name}`), `${role}: command must carry -n ${def.name}`);
     assert.ok(cmd.includes("--exclude-dynamic-system-prompt-sections"), `${role}: command must carry --exclude-dynamic-system-prompt-sections`);
+    assert.ok(cmd.includes("--prompt-suggestions false"), `${role}: command MUST carry --prompt-suggestions false (AC3 REQUIRED, not optional)`);
     assert.ok(cmd.startsWith(def.launcher), `${role}: command must use launcher ${def.launcher}`);
     if (def.model) {
       assert.ok(cmd.includes(`--model ${def.model}`), `${role}: command must carry --model ${def.model}`);
@@ -164,6 +168,25 @@ test("AC4 — deepseek roles reference the checked-in settings file; manager's e
 });
 
 // ── AC4 — negative control: a broken settings file produces a DIFFERENT command ──────────────────
+
+test("AC4 — negative control: flipping promptSuggestions to true removes the REQUIRED flag", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-launch-ps-"));
+  try {
+    const s = readSettings();
+    const good = launch("inner", ["--dry-run"]).stdout.trim();
+    assert.ok(good.includes("--prompt-suggestions false"), "baseline must carry the flag");
+    // Flip the REQUIRED param off — the flag must disappear (restart-plan-AC1 class of error catchable).
+    s._launchSpec.promptSuggestions = true;
+    const brokenPath = path.join(tmp, "launch.settings.ps-on.json");
+    fs.writeFileSync(brokenPath, JSON.stringify(s, null, 2), "utf8");
+    const broken = launch("inner", ["--dry-run"], { QUAY_LAUNCH_SETTINGS: brokenPath });
+    assert.equal(broken.status, 0);
+    assert.ok(!broken.stdout.includes("--prompt-suggestions"), "promptSuggestions=true must drop the flag");
+    assert.notEqual(broken.stdout.trim(), good, "a changed promptSuggestions must change the launch command");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test("AC4 — negative control: deliberate edit changes the launch command (restart-plan-AC1 catchable)", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-launch-neg-"));
