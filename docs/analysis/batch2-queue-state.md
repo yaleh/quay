@@ -5582,3 +5582,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   无法表达「启动过但停了请继续」。**复用 L2 dead-loop-check 加「已停转」分支** + 可执行下一步。
   立案 gap-cold-start-six-keys-measure-installed-not-running。
 - **archguard AC12b 第二条线不适合**：backlog 见底（等方向/凭据/发布）= 真需要人，非机制缺陷。
+
+### tick 2026-08-06T01:0xZ（外层，promotion-gap 缺陷 + prepare-milestone 处置）
+
+- **inner 发现 promotion-gap 缺陷**（f294c428）：ready-pool 晋级不 consult --pool-candidate（AC8 控制）→
+  误晋 ADR-022 已退役管线任务。prepare-milestone 处置：premise void（agent 正确 no-op），外层标
+  **needs-human**。余 7 晋级验证干净。
+- **reconcile 关 2 括号**（complete-delivery-surface + prepare-milestone）。inner 2 agent 在飞（4 bracket
+  前）。
+- **套件 green**、闸 GO、load 3.77。
