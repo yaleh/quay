@@ -25,8 +25,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
-import { classifyPaneState, bottomRegion, DEFAULT_BOTTOM_LINES } from "../scripts/pane-state-classify.ts";
+import {
+  classifyPaneState,
+  bottomRegion,
+  DEFAULT_BOTTOM_LINES,
+  classifyInputResidueStatic,
+  classifyResidueFromCaptures,
+  RESIDUE_CLEAR_MAX_DEFAULT,
+} from "../scripts/pane-state-classify.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = path.join(__dirname, "fixtures", "pane-states");
@@ -199,4 +207,141 @@ test("fixtures are the recorded panes' own real text — the expected-state map 
   for (const name of Object.keys(FIXTURE_EXPECTATIONS)) {
     assert.ok(fs.existsSync(path.join(FIXTURE_DIR, name)), `${name} exists`);
   }
+});
+
+// ── --check-residue mode (tasks/gap-residue-check-crystallized-as-tool-mode) ──────────────────────
+// AC1 pure classifier + CLI wiring · AC2 fault-6 criterion mechanized (C-u cleared ⇒ real; C-u left
+// the pane byte-identical ⇒ ghost; bounded + fail-loud) · AC3 real recorded fixtures with
+// provenance · AC4 bidirectional negative control · AC6 node:test + @test-group engine (file
+// header). AC5 (transcript cross-validation) is a caller-side verification demonstrated as real-run
+// evidence in the task body, not assertable here.
+
+const RESIDUE_STATES = ["empty", "real-unsubmitted-text", "ghost-suggestion-only"];
+
+/** Residue fixtures are REAL recordings from throwaway panes (2026-08-06; provenance inline).
+ * The two text-states are PAIRS (before + after-C-u) because a single static snapshot cannot tell a
+ * real residue from a ghost — the C-u clearing behavior is the criterion (fault 6 mechanized). */
+const RESIDUE_FIXTURES = {
+  // residue-fix:0.0 — throwaway bash pane, PS1='❯ '; input box EMPTY — real capture 2026-08-06.
+  "residue-empty-1.txt": { after: null, state: "empty" },
+  // residue-fix:0.0 — literal text typed with send-keys -l (never Enter); the box holds real
+  // typed-but-unsubmitted residue. residue-real-after-1.txt = same pane after ONE C-u cleared it.
+  // Real pair, captured 2026-08-06.
+  "residue-real-before-1.txt": { after: "residue-real-after-1.txt", state: "real-unsubmitted-text" },
+  // residue-claude:0.0 — a REAL Claude Code TUI (throwaway session, `claude` in this worktree),
+  // whose input box renders the genuine gray ghost-suggestion `❯ Try "fix typecheck errors"`.
+  // residue-ghost-after-1.txt = the SAME pane after a C-u, byte-identical (C-u has no effect on a
+  // ghost). A real fault-6 recording — C-u 循环 N 次 pane 逐字不变 — captured 2026-08-06.
+  "residue-ghost-before-1.txt": { after: "residue-ghost-after-1.txt", state: "ghost-suggestion-only" },
+};
+
+function runResidueCli(args) {
+  const r = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      path.join(repoRoot, "plugin/scripts/pane-state-classify.ts"),
+      "--check-residue",
+      ...args,
+    ],
+    { encoding: "utf8" },
+  );
+  return { stdout: r.stdout, status: r.status };
+}
+
+test("AC1: --check-residue pure functions exist; a single snapshot yields only the static part", () => {
+  assert.equal(typeof classifyInputResidueStatic, "function");
+  assert.equal(typeof classifyResidueFromCaptures, "function");
+  assert.equal(classifyInputResidueStatic(readFixture("residue-empty-1.txt")), "empty");
+  assert.equal(classifyInputResidueStatic(readFixture("residue-real-before-1.txt")), "has-text");
+  assert.equal(classifyInputResidueStatic("no prompt line at all\nsecond line"), "no-input-line");
+});
+
+test("AC1: --check-residue CLI is wired — a file/target argument emits one JSON line whose state field is one of the three (the measure/band surface)", () => {
+  const empty = runResidueCli([path.join(FIXTURE_DIR, "residue-empty-1.txt")]);
+  assert.ok(RESIDUE_STATES.includes(JSON.parse(empty.stdout).state), "empty fixture emits a three-state value");
+  assert.equal(JSON.parse(empty.stdout).state, "empty");
+  assert.equal(empty.status, 0);
+
+  const real = runResidueCli([
+    path.join(FIXTURE_DIR, "residue-real-before-1.txt"),
+    "--after", path.join(FIXTURE_DIR, "residue-real-after-1.txt"),
+  ]);
+  assert.equal(JSON.parse(real.stdout).state, "real-unsubmitted-text");
+  assert.equal(real.status, 0);
+
+  const ghost = runResidueCli([
+    path.join(FIXTURE_DIR, "residue-ghost-before-1.txt"),
+    "--after", path.join(FIXTURE_DIR, "residue-ghost-after-1.txt"),
+  ]);
+  assert.equal(JSON.parse(ghost.stdout).state, "ghost-suggestion-only");
+  assert.equal(ghost.status, 0);
+
+  // Fail-loud: a single static snapshot with text cannot decide real-vs-ghost (dispatch-review
+  // point 1: static text has no style info) → unknown + non-zero exit, never a silent guess.
+  const undecidable = runResidueCli([path.join(FIXTURE_DIR, "residue-real-before-1.txt")]);
+  assert.equal(JSON.parse(undecidable.stdout).state, "unknown");
+  assert.notEqual(undecidable.status, 0);
+});
+
+test("AC1: the residue check reuses bottomRegion — an upper-screen ❯ cannot fake the input line (ADR-016 boundary b)", () => {
+  const idleBottom = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const upperA = "❯ scrolled content with a prompt symbol\n".repeat(30);
+  const upperB = "totally different upper, no prompt\n".repeat(30);
+  assert.equal(classifyInputResidueStatic(upperA + idleBottom), "empty");
+  assert.equal(classifyInputResidueStatic(upperA + idleBottom), classifyInputResidueStatic(upperB + idleBottom));
+});
+
+test("AC2: the fault-6 criterion is mechanized in the pure verdict — C-u cleared ⇒ real; byte-identical ⇒ ghost; bounded + fail-loud", () => {
+  const realPair = [readFixture("residue-real-before-1.txt"), readFixture("residue-real-after-1.txt")];
+  const ghostPair = [readFixture("residue-ghost-before-1.txt"), readFixture("residue-ghost-after-1.txt")];
+  assert.equal(classifyResidueFromCaptures([readFixture("residue-empty-1.txt")]).state, "empty");
+  assert.equal(classifyResidueFromCaptures(realPair).state, "real-unsubmitted-text");
+  assert.equal(classifyResidueFromCaptures(ghostPair).state, "ghost-suggestion-only");
+
+  // Ambiguous (changed but never emptied) ⇒ unknown, never a silent guess.
+  assert.equal(classifyResidueFromCaptures(["❯ abc", "❯ ab"]).state, "unknown");
+  // No prompt line in the bottom region ⇒ unknown.
+  assert.equal(classifyResidueFromCaptures(["a vim help screen", "~ ~ ~"]).state, "unknown");
+  // Bounded: the probe cap is a finite constant (fault 1's ~30-message cap → 50).
+  assert.equal(RESIDUE_CLEAR_MAX_DEFAULT, 50);
+  assert.ok(Number.isInteger(RESIDUE_CLEAR_MAX_DEFAULT) && RESIDUE_CLEAR_MAX_DEFAULT > 0);
+});
+
+test("AC3: residue fixtures are real recordings — on disk, multi-line, non-trivial, and classifiable", () => {
+  let totalLines = 0;
+  for (const [name, spec] of Object.entries(RESIDUE_FIXTURES)) {
+    const src = readFixture(name);
+    const lines = src.split("\n").filter((l) => l.trim());
+    assert.ok(lines.length >= 3, `${name} is a real multi-line recording`);
+    totalLines += lines.length;
+    if (spec.after) {
+      assert.ok(fs.existsSync(path.join(FIXTURE_DIR, spec.after)), `${spec.after} exists`);
+      const v = classifyResidueFromCaptures([src, readFixture(spec.after)]);
+      assert.equal(v.state, spec.state, `${name} pair should classify as ${spec.state}, got ${v.state}`);
+    } else {
+      assert.equal(classifyResidueFromCaptures([src]).state, spec.state);
+    }
+  }
+  assert.ok(totalLines > 10, "residue fixtures carry real screen text");
+});
+
+test("AC4: bidirectional negative control — cleared ⇒ real (never ghost); unchanged ⇒ ghost (never real); both decisive", () => {
+  const realPair = [readFixture("residue-real-before-1.txt"), readFixture("residue-real-after-1.txt")];
+  const ghostPair = [readFixture("residue-ghost-before-1.txt"), readFixture("residue-ghost-after-1.txt")];
+  const realState = classifyResidueFromCaptures(realPair).state;
+  const ghostState = classifyResidueFromCaptures(ghostPair).state;
+  assert.equal(realState, "real-unsubmitted-text");
+  assert.equal(ghostState, "ghost-suggestion-only");
+  // The negative directions:
+  assert.notEqual(realState, "ghost-suggestion-only", "a C-u-cleared box is never a ghost");
+  assert.notEqual(ghostState, "real-unsubmitted-text", "a byte-identical box is never real residue");
+  // Decisive (not unknown):
+  assert.notEqual(realState, "unknown");
+  assert.notEqual(ghostState, "unknown");
 });
