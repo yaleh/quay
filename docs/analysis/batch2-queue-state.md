@@ -5488,3 +5488,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（two-machine-collab 早期，0 提交）。无 fan-in、无新派发（complete-delivery/delivery-grows 与
   在飞 two-machine 冲突）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:0xZ（外层，branch-model 落地 + Q2 派发）
+
+- **branch-model 落地 + 关闭（REAL work）**：`34daba48` develop+integration 两线模型（fork-baseline 与
+  merge-point 分离）、fork-baseline.ts（single-source checkTouchesPair）+ integration-batch-merge.sh
+  （FF+CAS fail-closed）、**31 历史分支清理 55→20**、7/7。**inner 按外层裁定收窄 Touches**（裸
+  plugin/scripts → 实际候选 fork-baseline.ts + integration-batch-merge.sh）——池解（disjoint 2→3）。
+  closure round 14：branch-model 翻 done。
+- **Q2 two-machine-collab 派发**（人优先级任务——branch-model 落地后 gating 放行，AC3 权威/推送方向的
+  前置已在 branch-model 中部分落地）。
+- **套件 green**、闸 GO、pool 6/dispatchable 2。
