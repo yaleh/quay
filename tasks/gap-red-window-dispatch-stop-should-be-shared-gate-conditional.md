@@ -68,15 +68,67 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **RED ⇒ 一律暂缓 fan-in**（真正保护，不变）——红树不混入新 failures
-- [ ] AC2: **派发条件化**——失败落在共享闸门（run_static_checks）⇒ 停派发；失败在具体测试文件且与新任务
+- [x] AC1: **RED ⇒ 一律暂缓 fan-in**（真正保护，不变）——红树不混入新 failures
+      **证据**：`plugin/loop/fast-mode-loop-tick.md` 步骤 3 + 判断边界表、`orchestrator-loop-tick.md` 红窗
+      分诊都成文「**一律暂缓 fan-in**（AC1 真正保护，不变）」——与「派发按作用域条件化」并列（一个 blanket、
+      一个条件化）；`shouldStopDispatch` 保持 red+failed（或缺失）⇒ true 的 blanket 语义（AC5 reason 轴
+      测试 + `AC1 — RED failed ⇒ fan-in ALWAYS held` 测试全绿）。
+- [x] AC2: **派发条件化**——失败落在共享闸门（run_static_checks）⇒ 停派发；失败在具体测试文件且与新任务
       触摸集无关 ⇒ 派发继续
-- [ ] AC3: 判定信息现成——从早期 RED 失败行判定「共享闸门 vs 具体测试」+ 与新任务 touches 相交性，
+      **证据**：`plugin/scripts/suite-state-trigger.ts` 新增 `shouldStopDispatchForFailure(failure, touches)`
+      ——shared-gate ⇒ 停；test-file 且与新任务 touches 无关 ⇒ 续；test-file 且相交 ⇒ 停；unknown/缺失 ⇒
+      fail-closed 停。AC2 两向 fixture 测试（共享闸门 ⇒ 停、具体测试无关 ⇒ 续）实跑 pass。文档两处成文
+      （fast-mode 步骤 3 / 判断边界表；orchestrator 红窗分诊），`run_static_checks` 作为共享闸门显式命名
+      （Contract measure `grep -c 'run_static_checks'` fast-mode=2 / orchestrator=1，均 ≥ 1）。
+- [x] AC3: 判定信息现成——从早期 RED 失败行判定「共享闸门 vs 具体测试」+ 与新任务 touches 相交性，
       不需新机制
-- [ ] AC4: **真实使用**——本轮证据反例：套件早期 RED + inner 30 分钟无派发 + 池 16/disjoint 9 健康；
+      **证据**：SUITE-RED 事件新增 `failure` 字段（`classifyFailureLine` / `extractFailingFiles` /
+      `deriveFailureLocation`，从 `.quay/full-suite.log` 的 early-RED 失败行派生——**现成，不加新机制**）；
+      `failureIntersectsTouches` 做 touches 相交性。`AC2/AC3 — SUITE-RED event carries the failure location`
+      测试实跑 pass（事件携带 scope + files，下游按 touches 判定续/停）。
+- [x] AC4: **真实使用**——本轮证据反例：套件早期 RED + inner 30 分钟无派发 + 池 16/disjoint 9 健康；
       细化后非共享闸门红时 inner 派发继续（disjoint 候选被派，白等消除）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`（共享闸门失败 ⇒ 停；具体测试无关 ⇒ 续
+      **证据**：细化后机制实测——红 + 失败落具体测试文件且与新任务 touches 无关 ⇒ `shouldStopDispatchForFailure`
+      返回 false（派发继续，disjoint 候选照派，白等消除）；红 + 共享闸门失败 ⇒ 返回 true（停派发）。本轮
+      白等反例（早期 RED + 30 分钟无派发 + 池 16/disjoint 9 健康）记在本任务 Proposal 实况；细化后
+      「具体测试无关红不挡派发」由 AC2 两向 fixture 机械证明。live 30 分钟 inner 重跑属全量套件面（DoD
+      未勾，见下——scoped 模式无法证明整轮 inner 时序）。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`（共享闸门失败 ⇒ 停；具体测试无关 ⇒ 续
       的两向 fixture）
+      **证据**：`plugin/test/suite-state-trigger.test.mjs` 首行 `// @test-group governance`，全部 `node:test`；
+      AC2 两向 fixture 用例（`shouldStopDispatchForFailure two-way fixture`）实跑 pass（scoped 24/0/0，见下）。
+
+## Verification（scoped，2026-08-06）
+
+`bash scripts/test.sh --for-task gap-red-window-dispatch-stop-should-be-shared-gate-conditional --allow-thin`
+→ **exit 0，pass 24 / fail 0 / cancelled 0**（`plugin/test/suite-state-trigger.test.mjs` 24 条全绿；thin 提示
+因 1/8 Touches 解析出测试，--allow-thin 放行）；`task-contract-check: no violations`（两个 touched 任务文件
+strict-subset 无违规）；test-framework-policy / test-isolation / test-impl-census / drive-contract /
+no-manager-tick-doc 全 PASS。
+
+**Contract measure**（`grep -c 'run_static_checks' <红窗处置文档>`，band ≥ 1）：
+```
+fast-mode-loop-tick.md: 2
+orchestrator-loop-tick.md: 1
+```
+
+**Contract invariant**（`fan_in_always_held_on_red = 1`）：fast-mode 判断边界表 + 步骤 3 均成文
+「一律暂缓 fan-in（真正保护，不并进红树）」；orchestrator 红窗分诊「一律暂缓 fan-in（AC1 真正保护，不变）」。
+
+**Contract invoke**（`grep -n '共享闸门\|具体测试\|暂缓 fan-in' plugin/loop/fast-mode-loop-tick.md`）：
+```
+392:      - 失败落在**共享闸门**（`run_static_checks`——每次 scoped 运行都跑，所有新任务都被同一红污染）
+394:      - 失败落在**具体测试文件**且与新任务触摸集**无关** ⇒ **派发继续**（worktree 是从 master 分叉的
+630:| 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | **一律暂缓 fan-in**（真正保护，不并进红树）+ **派发按失败作用域条件化**：失败落共享闸门（`run_static_checks`）⇒ 停派发；落具体测试文件且与新任务 touches 无关 ⇒ 派发继续（`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
+```
+
+**Contract control**（AC2 两向）——`plugin/test/suite-state-trigger.test.mjs` 实跑：
+```
+✔ AC2 — shouldStopDispatchForFailure two-way fixture: shared-gate stops; unrelated specific-test continues; related stops
+✔ AC2 — a shared-gate (run_static_checks) failure ⇒ SUITE-RED carries scope=shared-gate ⇒ dispatch stops for every task
+✔ AC2/AC3 — SUITE-RED event carries the failure location; the dispatch decision conditions on it
+ℹ tests 24 / pass 24 / fail 0 / cancelled 0
+```
 
 ## Definition of Done
 

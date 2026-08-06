@@ -50,6 +50,13 @@ SESSION-OVERDUE 已触发（各 30 分钟无心跳）。**这正是「存在≠�
 **归属**：红窗规则在 `gap-full-suite-belongs-to-outer-background-above-3-min`（(a) 块，已落地）；本条是
 它的**执行者层**（存在≠生效的补全）。
 
+> **交叉标注（2026-08-06，
+> `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`）**：本条（红窗规则的**自动执行者**——
+> 状态变化即触发 SUITE-RED/RUNNING）与条件化细化条（RED 处置**按失败作用域条件化**——SUITE-RED 事件
+> 携带失败位置 → 共享闸门 `run_static_checks` 才停派发、具体测试无关时派发继续）是**同一红窗规则的两层
+> 补全**：本条让规则有执行者，条件化条让执行者的处置粒度从一刀切收窄到真实作用域。二者叠加 =
+> 红窗规则从「存在但不生效」到「自动 + 按作用域精确触发」。
+
 ## Acceptance Criteria
 
 - [x] AC1: **RED 自动触发**——state 变 red 时立即通知外层并启动 RED 处置（不等下一次 cron；实测：套件红

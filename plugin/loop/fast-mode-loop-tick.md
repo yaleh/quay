@@ -381,9 +381,18 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
   的 `state` 字段——`running`/`green` ⇒ 照常派发与合并（**RUNNING 不等套件**——这正是消除同步点的
   关键）；`red` 则**看 `reason` 轴**（`gap-full-suite-runner-concurrency-default-and-gate` AC5，
   2026-08-05 ABORT #5 第二次实证：12 个互不相交任务全被 aborted-red 挡住）：
-  - `state: red` 且 `reason: failed`（或缺失——兼容旧记录，fail-closed 当失败）⇒ **停止新派发 +
-    暂缓已完成 agent 的 fan-in**（不并进红树；只停派发不停在飞合并会让红树继续累积，故 RED 失败态下
-    fan-in 一并暂缓），直到外层 re-green（state 回到 green/running）。
+  - `state: red` 且 `reason: failed`（或缺失——兼容旧记录，fail-closed 当失败）⇒ RED 处置**条件化**
+    （`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`，2026-08-06；同作用域轴并列实例
+    见冷启动 gate 收窄条 `gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`）：
+    - **一律暂缓已完成 agent 的 fan-in**（AC1 真正保护，不变——不并进红树，红树 failures 不混、bisect
+      保持可定位；只停派发不停在飞合并会让红树继续累积，故 RED 失败态下 fan-in 一并暂缓），直到外层
+      re-green（state 回到 green/running）。
+    - **派发按失败作用域条件化（AC2）**——判定信息由 SUITE-RED 事件携带（`suite-state-trigger.ts` 的
+      `failure.scope` + `failure.files`，从 early-RED 失败行/套件日志派生——**现成，不需新机制**，AC3）：
+      - 失败落在**共享闸门**（`run_static_checks`——每次 scoped 运行都跑，所有新任务都被同一红污染）
+        ⇒ **停止新派发**；
+      - 失败落在**具体测试文件**且与新任务触摸集**无关** ⇒ **派发继续**（worktree 是从 master 分叉的
+        独立副本，新任务跑自己的 scoped 测试，与别处的红无关；`failureIntersectsTouches` 判定相交性）。
   - `state: red` 且 `reason: aborted`（套件**未完成、无任何正确性结论**——被外层中止/信号杀/spawn
     失败）⇒ **不触发 stop-dispatch**，照常派发与合并——把 aborted 当 failed 处理 = 用一个中止事件
     挡住全线派发，且不会自解除（re-green 需一轮成功套件，套件因缺陷跑不完 ⇒ 闭环）。
@@ -618,7 +627,7 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 | 情况 | 动作 |
 |---|---|
 | 合并冲突 | abort，needs-human，停止派发 |
-| 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | 停止新派发 **+ 暂缓已完成 agent 的 fan-in**（不并进红树；`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
+| 外层全量 suite 红（`.quay/full-suite-state.json` `state: red`） | **一律暂缓 fan-in**（真正保护，不并进红树）+ **派发按失败作用域条件化**：失败落共享闸门（`run_static_checks`）⇒ 停派发；落具体测试文件且与新任务 touches 无关 ⇒ 派发继续（`running`/`green` ⇒ 照常；文件缺失不阻塞，等下一 tick） |
 | 对抗审查 2 轮后仍 REFUTED | 标 needs-human，停止该任务 |
 | 任务超 90 分钟 | 中止 subagent，needs-human，不带内重试 |
 | **窗口内新增** needs-human ≥3 | 停止派发新任务（2026-08-03 裁定：历史积压不构成——它们是范围决定不是解阻塞，升级给人） |

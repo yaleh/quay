@@ -43,6 +43,11 @@ import {
   readSuiteEvents,
   shouldStopDispatch,
   routeRed,
+  classifyFailureLine,
+  extractFailingFiles,
+  deriveFailureLocation,
+  failureIntersectsTouches,
+  shouldStopDispatchForFailure,
 } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -298,4 +303,184 @@ test("AC6 — this file declares node:test and // @test-group governance", () =>
   const src = read(new URL(import.meta.url));
   assert.ok(src.includes('import { test } from "node:test"'), "uses node:test");
   assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+});
+
+// ── AC1/AC2/AC3/AC5 (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) ───────────────
+// The red-window RED handling is conditioned by failure SCOPE: dispatch stops ONLY when the failure
+// lands in the shared gate (run_static_checks — every scoped run pays it) or in a specific test file
+// that intersects the new task's touch-set; a specific-test-file failure UNRELATED to the touches
+// does NOT stop dispatch (the new task's worktree runs its own scoped tests on an independent
+// master-branch copy). fan-in hold stays BLANKET on red+failed (AC1 — the real protection).
+
+function writeLog(root, content) {
+  const dir = path.join(root, ".quay");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "full-suite.log"), content, "utf8");
+}
+
+test("AC2 — classifyFailureLine: shared-gate vs test-file vs unknown", () => {
+  assert.deepEqual(classifyFailureLine("== task-contract-check check =="), { scope: "shared-gate" });
+  assert.deepEqual(classifyFailureLine("run_static_checks: violation"), { scope: "shared-gate" });
+  assert.deepEqual(classifyFailureLine("❯ plugin/test/foo.test.mjs (3 tests | 1 failed)"), {
+    scope: "test-file",
+    files: ["plugin/test/foo.test.mjs"],
+  });
+  assert.deepEqual(classifyFailureLine("not ok 1 - the thing broke"), { scope: "test-file" });
+  assert.deepEqual(classifyFailureLine("# cancelled 1"), { scope: "test-file" });
+  assert.deepEqual(classifyFailureLine("ok 1 - the thing works"), { scope: "unknown" });
+});
+
+test("AC2 — extractFailingFiles: node:test TAP (Subtest-scoped not ok) + vitest (❯ file failed)", () => {
+  const log = [
+    "# Subtest: plugin/test/alpha.test.mjs",
+    "    # Subtest: one",
+    "    ok 1 - one",
+    "    not ok 2 - two",
+    "    not ok 3 - three",
+    "# Subtest: plugin/test/beta.test.mjs",
+    "ok 1 - beta",
+    "❯ plugin/test/gamma.test.mjs (2 tests | 1 failed)",
+  ].join("\n");
+  const files = extractFailingFiles(log);
+  assert.ok(files.includes("plugin/test/alpha.test.mjs"), "TAP not ok resolves the enclosing Subtest file");
+  assert.ok(files.includes("plugin/test/gamma.test.mjs"), "vitest failing-file line names the file");
+  assert.ok(!files.includes("plugin/test/beta.test.mjs"), "a passing file is not a failing file");
+});
+
+test("AC2/AC3 — deriveFailureLocation: shared-gate vs test-file vs absent", () => {
+  // shared gate: static-check phase reached, NO test failure line (set -e aborts before the test phase)
+  const sharedGate = [
+    "== split-or-commit whole-store check ... ==",
+    "== task-contract-check ... ==",
+    "task-contract-check: violation in tasks/foo.md: 1 new violation",
+  ].join("\n");
+  assert.deepEqual(deriveFailureLocation(sharedGate), { scope: "shared-gate" });
+
+  // specific test-file: a test failure line IS present (the file names itself)
+  const testFile = [
+    "== split-or-commit whole-store check ... ==",
+    "# Subtest: plugin/test/foo.test.mjs",
+    "not ok 1 - assertion failed",
+  ].join("\n");
+  assert.deepEqual(deriveFailureLocation(testFile), {
+    scope: "test-file",
+    files: ["plugin/test/foo.test.mjs"],
+  });
+
+  // absent log => null (fail-closed toward stopping in the dispatch decision)
+  assert.equal(deriveFailureLocation(null), null);
+  assert.equal(deriveFailureLocation(undefined), null);
+  assert.equal(deriveFailureLocation(""), null);
+});
+
+test("AC2 — failureIntersectsTouches: equal, directory-prefix, unrelated", () => {
+  assert.equal(failureIntersectsTouches("plugin/loop/fast-mode-loop-tick.md", ["plugin/loop/fast-mode-loop-tick.md"]), true, "exact match");
+  assert.equal(failureIntersectsTouches("plugin/test/foo.test.mjs", ["plugin/test/"]), true, "file under a directory touch");
+  assert.equal(failureIntersectsTouches("plugin/test/foo.test.mjs", ["plugin/loop/fast-mode-loop-tick.md"]), false, "unrelated file");
+  assert.equal(failureIntersectsTouches("./plugin/test/foo.test.mjs", ["plugin/test/"]), true, "leading ./ normalized");
+});
+
+test("AC2 — shouldStopDispatchForFailure two-way fixture: shared-gate stops; unrelated specific-test continues; related stops", () => {
+  const touches = ["plugin/scripts/suite-state-trigger.ts", "plugin/test/"];
+  // shared gate (run_static_checks — every scoped run pays it) ⇒ STOP regardless of touches
+  assert.equal(shouldStopDispatchForFailure({ scope: "shared-gate" }, touches), true, "shared-gate failure stops dispatch (AC2)");
+  // specific test-file UNRELATED to the touches ⇒ CONTINUE (the worktree runs its own scoped tests)
+  assert.equal(
+    shouldStopDispatchForFailure({ scope: "test-file", files: ["plugin/loop/capability-catalog.sh"] }, touches),
+    false,
+    "unrelated specific-test failure continues dispatch (AC2)",
+  );
+  // specific test-file RELATED to the touches (under the touched dir / exact match) ⇒ STOP
+  assert.equal(
+    shouldStopDispatchForFailure({ scope: "test-file", files: ["plugin/test/foo.test.mjs"] }, touches),
+    true,
+    "failing file under a touched dir stops dispatch (AC2)",
+  );
+  assert.equal(
+    shouldStopDispatchForFailure({ scope: "test-file", files: ["plugin/scripts/suite-state-trigger.ts"] }, touches),
+    true,
+    "exact-match touched path stops dispatch (AC2)",
+  );
+  // unknown / absent failure info ⇒ fail-closed STOP (the conservative blanket default)
+  assert.equal(shouldStopDispatchForFailure({ scope: "unknown" }, touches), true, "unknown scope fails closed to stop");
+  assert.equal(shouldStopDispatchForFailure(null, touches), true, "absent failure info fails closed to stop");
+});
+
+test("AC2/AC3 — SUITE-RED event carries the failure location; the dispatch decision conditions on it", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "running" }));
+    runOnce(root);
+    // a specific-test-file failure unrelated to a new task's touches
+    writeLog(root, "# Subtest: plugin/test/capability-catalog.test.mjs\nnot ok 1 - catalog drifted\n");
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null }));
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, true, "red+failed is the blanket RED-failure signal (AC1 fan-in hold)");
+    assert.equal(res.failure.scope, "test-file", "failure scope derived from the early-RED failure line (AC3)");
+    assert.deepEqual(res.failure.files, ["plugin/test/capability-catalog.test.mjs"], "failing file carried");
+    const redEv = res.events.find((e) => e.event === "SUITE-RED");
+    assert.ok(redEv, "SUITE-RED emitted");
+    assert.equal(redEv.failure.scope, "test-file", "event payload carries the failure scope");
+    // the DISPATCH decision for a task whose touches do NOT include that file ⇒ CONTINUE
+    assert.equal(
+      shouldStopDispatchForFailure(redEv.failure, ["plugin/loop/fast-mode-loop-tick.md"]),
+      false,
+      "unrelated specific-test failure continues dispatch (AC2)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — a shared-gate (run_static_checks) failure ⇒ SUITE-RED carries scope=shared-gate ⇒ dispatch stops for every task", () => {
+  const root = tmpRoot();
+  try {
+    writeSuiteState(root, state({ state: "running" }));
+    runOnce(root);
+    writeLog(root, "== task-contract-check ... ==\ntask-contract-check: violation in tasks/foo.md: 1 new violation\n");
+    writeSuiteState(root, state({ state: "red", reason: "failed", finishedAt: null }));
+    const res = runOnce(root);
+    assert.equal(res.failure.scope, "shared-gate", "shared-gate failure scope derived");
+    assert.equal(
+      shouldStopDispatchForFailure(res.failure, ["plugin/loop/fast-mode-loop-tick.md"]),
+      true,
+      "shared-gate failure stops dispatch regardless of touches (AC2)",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — RED failed ⇒ fan-in ALWAYS held (blanket); only the DISPATCH stop is conditioned", () => {
+  // shouldStopDispatch (the RED-failure signal) stays blanket on red+failed (AC1 / AC5 reason axis)
+  assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true);
+  assert.equal(shouldStopDispatch({ state: "red" }), true);
+  assert.equal(shouldStopDispatch({ state: "red", reason: "aborted" }), false);
+  // The docs state the split: 一律暂缓 fan-in + 派发按作用域条件化
+  const inner = read(INNER_TICK);
+  assert.match(inner, /一律暂缓/, "inner: fan-in hold is always on red failed (AC1)");
+  assert.match(inner, /条件化/, "inner: dispatch stop is conditioned by failure scope (AC2)");
+});
+
+test("AC2/AC3 — both loop docs carry the CONDITIONAL red-window rule (shared gate vs specific test)", () => {
+  const inner = read(INNER_TICK);
+  const outer = read(OUTER_TICK);
+  // Contract invoke — the inner doc names 共享闸门 / 具体测试 / 暂缓 fan-in
+  assert.match(inner, /共享闸门/, "inner names the shared gate");
+  assert.match(inner, /具体测试/, "inner names the specific-test case");
+  assert.match(inner, /暂缓 fan-in/, "inner: fan-in hold stays explicit (AC1)");
+  assert.match(inner, /派发继续/, "inner: dispatch continues on unrelated specific-test failure");
+  // Contract measure — the red-window handling docs name run_static_checks as the shared gate (≥1)
+  assert.match(inner, /run_static_checks/, "inner names run_static_checks as the shared gate");
+  assert.match(outer, /run_static_checks/, "outer names run_static_checks as the shared gate");
+  assert.match(outer, /派发继续/, "outer: dispatch continues on unrelated specific-test failure");
+});
+
+test("AC5 — the two-way scope fixture is a node:test governance test", () => {
+  const src = read(new URL(import.meta.url));
+  assert.ok(src.includes('import { test } from "node:test"'), "uses node:test");
+  assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+  // The AC2 two-way fixture actually exercises both directions (shared-gate ⇒ stop; unrelated ⇒ continue)
+  assert.equal(shouldStopDispatchForFailure({ scope: "shared-gate" }, []), true, "shared-gate ⇒ stop");
+  assert.equal(shouldStopDispatchForFailure({ scope: "test-file", files: ["plugin/other/x.test.mjs"] }, []), false, "unrelated specific-test ⇒ continue");
 });
