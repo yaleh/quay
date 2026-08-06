@@ -120,3 +120,22 @@ heavy-op-token.sh has TWO completely different uses; the human's "remove the loc
    重测试，与观测无关，不在本次裁定范围。
 **不删 heavy-op-token.sh 本体**（否则打断 test.sh 调度）。人更早那句「单飞锁本机实验不该进产品化」
 针对 heavy-op-token 整体，但人未明确裁定 ②，按原样保留等回复。
+
+## 范围扩大为 B（2026-08-06T13:2xZ，人裁定推翻上一条范围限制，以本条为准）
+
+**人原话**：「彻底删掉 heavy-op-token.sh 及其调用/相关逻辑。我们不再处理一次只跑一个重测试逻辑。」
+
+**范围 = 全删（B），不是只摘 session-liveness 侧**：
+1. **heavy-op-token.sh 本体删除**
+2. **所有调用点一并清理**：scripts/test.sh（5）、session-liveness.sh（7）、session-liveness-mount.sh（1）、
+   quay-init.sh（2）、capability-catalog.sh（1）、plugin/loop/fast-mode-loop-tick.md（176-180 单飞挂载语义
+   一并改写）、plugin/test/heavy-op-token*.test.mjs、test/cold-start-e2e.sh、install-config-driven-e2e.test.mjs
+3. **「一次只跑一个重测试」约束整体退役，无替代方案**（人明确不再处理）
+
+**理由链（管理者理解，外层认同）**：令牌存在前提 =「三项目共用四核」，本机实验室条件非产品条件；
+随包铺给每个下游（init/SKILL.md 铺设映射）= 把实验室条件当产品约束传播。与 os-anchor watchdog 裁定同形
+（实验期辅助工具，不进产品交付）。
+
+**删除顺序（外层裁定）**：①代码/测试（本体 + 核心调用 + heavy-op-token 测试）→ ②shipped 文档
+（loop tick 176-180 + init/SKILL.md 铺设映射）→ ③历史文档标注退役（SPEC/manager-phase-goal 等不删，
+标注）。历史文档是记录，不追溯改写。
