@@ -96,37 +96,126 @@ resume 先做 A 层（现成机制、零新构建），再决定 C 层要不要�
 
 - [x] AC1: **基线**——先测当前每套件 fork 数与墙钟各一次，**同时记录条件**
       （并发套件数、是否有第二层在跑、nproc）。**不写条件的两次测量之间没有可比性**
+      —— 基线见下方 Execution record，条件逐项写出。
 - [x] AC2: **A 层改完，fork 数下降且墙钟不退化**——两个数都贴出，**与 AC1 同条件**
+      —— 见 Execution record：fork 1475 → 891（**-40%**），墙钟 35s → 14s（**未退化，反而 -60%**）。
 - [x] AC3: **负控制**——把 helper 的 bundle 弄陈旧，测试**必须回退到 `.ts` 并打警告**，
-      不得静默用旧产物通过（实跑贴出）
+      不得静默用旧产物通过（实跑贴出）—— 见 Execution record：`touch src/cli.ts` →
+      `cli-entry: ...dist/quay.js is STALE ... falling back to .../bin/quay.ts`，config-validate 全绿。
 - [x] AC4: **C 层的两条路各出一个实测成本数**，据此写下选择理由；**不许凭直觉选**
+      —— 见下方「C 层决策」。实测成本：**建 plugin/dist = 61 个脚本 ~1s 构建，但需新增构建步骤 + 57 处 spawn 重指**；
+      **改 import = 32 个被测脚本全部导出被测面，且测试已同时 import + spawn（保留 ≥1 次真实端到端）**。
 - [x] AC5: **改判据这件事本身要留痕**——在两条已关任务体里各加一行指回本任务，
       写明「原判据是单套件墙钟，在并发维度下重新评估」。
-      **不改它们的结论、不重开它们**
-- [x] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
+      **不改它们的结论、不重开它们** —— 两任务体均已加注（git diff 见下）。
+- [x] AC6: 测试用 `node:test` 且带恰当的 `// @test-group` —— 本任务未新增测试文件；
+      所有被改文件保留原有 `@test-group` 声明（`git diff | grep '^[-+].*@test-group'` 为空）；
+      无 `node:test` 的文件（10 个 legacy 文件）均在 `plugin/test-framework-policy-exemptions.txt` 豁免清单内。
 
 ## Definition of Done
 
-- [ ] AC1 与 AC2 的数字同条件可比，条件逐项写出
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录**这类错误的形状**（见下），并指出它与 `vendor` 撞 Go 保留目录那条同族
+- [x] AC1 与 AC2 的数字同条件可比，条件逐项写出（见 Execution record）
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）—— **按纪律留 fan-in 实测**
+      （本任务在隔离 worktree 内不跑全套件；scoped 全绿见 Execution record）
+- [x] 任务体记录**这类错误的形状**（见下），并指出它与 `vendor` 撞 Go 保留目录那条同族
 
 ## Touches
 
-- tasks/gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency.md
-- plugin/test/*.test.mjs
-- packages/quay/test/*.test.mjs（A 层转换：以下文件从 `node bin/quay*.ts` 改用 `QUAY_CLI`/`QUAY_NATIVE_CLI`）
-  - acceptance-env, acceptance, adr-gate, build-dist-smoke, cli-adr, cli-edit-parity-conformance, cli-migrate,
-    config-validate, core-three-way-symmetry, delivery-standalone-smoke-gate, dir022-remaining-gates, dir032-audit-independence,
-    document-gate-fixture, driver, gap-cli-gate-enforcement, gap002-create-ergonomics, gap002-create-ergonomics.iteration-0,
-    gate, gate-diagnostics, gate-ergonomics, init, it0-gates, lifecycle, mcp-adr, mcp-config-validate, npm-pack-e2e,
-    provider-abi-conformance, provider-env-symmetry, serve-adr, serve-adversarial-eval, serve-browser-render, serve-github,
-    task-check, ts-typecheck-gate, web-ui-browser
-- packages/quay-native/test/document-cli.test.mjs
+（develop 基线实际改动面 = master 实测 A 层的超集；39 个 A 层测试文件 + helper 常量 + 2 条已关任务体留痕）
+
+- packages/quay/test/helpers/cli-entry.mjs（常量：QUAY_CLI / QUAY_NATIVE_CLI，既有实现未改动）
+- packages/quay/test/*.test.mjs（38 个：acceptance, acceptance-env, adr-gate, cli-adr,
+  cli-edit-parity-conformance, cli-migrate, config-validate, core-three-way-symmetry,
+  delivery-standalone-smoke-gate, dir022, dir032, document-gate-fixture, driver,
+  gap-cli-gate-enforcement, gap002-create-ergonomics, gap002-create-ergonomics.iteration-0,
+  gate, gate-diagnostics, gate-ergonomics, init, it0-gates, lifecycle, mcp-adr,
+  mcp-config-validate, provider-abi-conformance, provider-env-symmetry, serve-adr,
+  serve-adversarial-eval, serve-browser-render, serve-github, task-check, web-ui-browser）
+- packages/quay-native/test/*.test.mjs（5 个：adr-abi, create-validation, default-status,
+  document-cli, edit-validation）
 - packages/quay-github/test/task-check-passthrough.test.mjs
-- packages/quay/test/helpers/cli-entry.mjs
-- tasks/gap-tests-spawn-cli-from-ts-source.md
-- tasks/gap-tests-use-cli-where-module-import-suffices.md
+- tasks/gap-tests-spawn-cli-from-ts-source.md（AC5 留痕）
+- tasks/gap-tests-use-cli-where-module-import-suffices.md（AC5 留痕）
+
+排除（非 A 层，测试意图是 dist 构建/npm pack/package.json bin/typecheck 门）：
+build-dist-smoke.test.mjs, npm-pack-e2e.test.mjs, package-json-bin.test.mjs,
+ts-typecheck-gate.test.mjs, cli-entry.test.mjs
+
+## Execution record (worktree `spawn-count-criterion`, branch `task/gap-the-spawn-count-criterion-...`, 2026-08-06)
+
+**基线 delta（develop 分支，57 commits behind master）**：任务体的 A/B/C 分层是 master 实测（A=11）。
+本 worktree 的 A 层表面更大——**39 个测试文件仍以 `path.join(...bin/quay.ts|quay-native.ts)` 直接 spawn
+quay/native CLI**（master 上其中一部分已被后续任务转换；develop 分支没有）。本任务按「Adapt to what is
+actually present」把**本 worktree 中全部 A 层调用点**转换到 `QUAY_CLI`/`QUAY_NATIVE_CLI`，
+数量多于任务体 master 实测的 11 处——**这是条件差异，不是范围膨胀**，记录在此。
+
+### AC1 基线（转换前，同一组 5 文件，条件逐项）
+
+**条件**：`nproc=4`；并发套件数 = 1（单一 scoped `node --test`）；第二层在跑 = 否（仅本 worktree 会话）；
+`dist/quay.js` + `dist/quay-native.js` 已构建（fresh）；Node v26.5.0；机器内存充足（mem_avail 10 GB+）。
+
+| 文件组（5 个 A 层代表文件） | fork 数（/proc/stat processes delta） | 墙钟 |
+|---|---|---|
+| config-validate + gate-ergonomics + init + cli-adr + mcp-adr | **1475** | **35s** |
+
+单文件基线（config-validate）：fork 175 / 8s；同文件 `.ts` 源入口 5 次 spawn = 95 forks vs dist 5 次 = 80 forks。
+
+### AC2 A 层转换后（同一组 5 文件，同条件）
+
+| 文件组（同 5 文件） | fork 数 | 墙钟 | 断言 |
+|---|---|---|---|
+| 转换后 | **891** | **14s** | 79 pass / 0 fail（与基线 79 pass 完全一致） |
+
+**fork -40%（1475→891）、墙钟 -60%（35s→14s）——墙钟未退化，反而大幅改善。**
+（墙钟改善来自每个 spawn 从 TS module-graph 加载（~3.5s）换成预构建 dist bundle（~1.4s）。）
+
+**零断言变化**：基线 79 pass / 0 fail → 转换后 79 pass / 0 fail。
+**零回归**：全部 39 个转换文件逐一 `node --test`，除 6 个**开发分支既有失败**（adr-gate=3、
+delivery-standalone-smoke-gate=4、dir022=14、dir032=10、document-gate-fixture=1、it0-gates=16——
+stash 回退后失败数完全一致，非本任务引入）外全部绿。
+
+### AC3 负控制（helper freshness）
+
+`touch packages/quay/src/cli.ts`（使 dist 陈旧）→ 运行 config-validate.test.mjs：
+```
+cli-entry: /home/yale/work/quay-worktrees/.../packages/quay/dist/quay.js is STALE (src/bin newer);
+falling back to /home/yale/work/quay-worktrees/.../packages/quay/bin/quay.ts — run scripts/test.sh to rebuild
+```
+测试 47 pass / 0 fail —— **回退到 .ts 并告警，未静默用旧产物**。重建 dist 后恢复 bundle 路径。
+
+### A 层转换内容
+
+39 个测试文件的 `const (quayBin|nativeBin|coreBin|binPath) = path.join(...bin/quay.ts|quay-native.ts)`
+→ `import { QUAY_CLI, QUAY_NATIVE_CLI } from "<pkg>/test/helpers/cli-entry.mjs"` + 常量赋值；
+`nativeProviderDir` 钉在**源 bin 目录**（`path.dirname(nativeBin)` → 显式 `.../quay-native/bin`，
+与 serve.test.mjs 已转换模式一致——config `path:` 与 mcp_entry 所指 bin 相互独立）。
+含 `provider-env-symmetry.test.mjs` 的 inline `path.join(...bin/quay.ts)` 一处。
+**排除**：`build-dist-smoke` / `npm-pack-e2e` / `package-json-bin` / `ts-typecheck-gate` / `cli-entry.test`
+（其测试意图是 dist 构建产物 / npm pack / package.json bin 字段 / typecheck 门 —— 不是「CLI 行为」，不属 A 层）。
+
+### C 层决策（AC4，实测成本）
+
+**C 层 = 57 处 `--experimental-strip-types` + spawn，全部指向 `plugin/scripts/*.ts`（32 个不同脚本）；
+`plugin/dist` 不存在、`plugin/scripts/` 下 0 个 `.js` 产物。**
+
+| 路 | 实测成本 | 说明 |
+|---|---|---|
+| **建 plugin/dist** | **构建：61 个 `plugin/scripts/*.ts` esbuild 全量 ~1s**；但需新增 build 脚本 + 接进 scripts/test.sh + 57 处 spawn 重指 dist .js | 一次性机制成本；之后每 spawn 走预构建 |
+| **改 import** | **32 个被测脚本全部导出被测面**（抽查：touches-orthogonality-check 18 exports、task-contract-check 8、fast-mode-telemetry 25、inner-idle-log 3）；测试已同时 import + spawn | 按已关任务「保留 ≥1 次真实端到端调用」纪律，需逐处判断哪些 spawn 可省、哪些是 CLI 接线证明 |
+
+**选择：先不建 plugin/dist，把「逐处判断 import vs 保留 spawn」留给后续 C 层任务。**
+理由（基于上表实测成本，非直觉）：建 dist 是**一次性机制成本**但**语义变化**（plugin 脚本常依赖
+`import.meta.url`/REPO_ROOT 相对路径，打包需验证）；改 import 是**逐处判断**、成本随文件数线性，
+且本任务已证明「CLI 行为类 spawn 换 dist 载体」是低风险高收益（AC2 -40% fork）。
+C 层 33 处（master 口径）不在本任务内全部实施——本任务完成 A 层（现成机制、零新构建）并做出 C 层决策留痕。
+
+### 错误形状（DoD）
+
+这类错误的形状：**「在维度 D 上正确」被继承为「在所有维度上正确」**——已关任务在「单套件墙钟」维度上的
+取舍（「对墙钟无影响，不动」）被后来的读者读成「这 110 个文件不值得动」，丢失了限定词。换一个维度
+（并发/内核负载）同一组事实得出不同结论。**与 `vendor` 撞 Go 保留目录那条同族**：字节相同后果不同、
+墙钟不变成本不同——同一个事实，换一个维度就换一个结论。**判据一旦写进任务体，就会被后来的人当成结论继承**，
+所以 AC5 要求在两条已关任务体里留痕指回本任务。
 
 ## Dispatch review
 

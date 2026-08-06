@@ -9,9 +9,10 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { QUAY_NATIVE_CLI } from "../../quay/test/helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const binPath = path.join(__dirname, "..", "bin", "quay-native.ts");
+const binPath = QUAY_NATIVE_CLI;
 
 let client, adrDir, tasksDir;
 

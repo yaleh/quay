@@ -104,7 +104,7 @@ async function main() {
 
     // Cross-check: the CLI leg (bin/quay.js, via withProvider()/resolveProviderEnv())
     // must resolve to the SAME directory -- proving all three bindings are now symmetric.
-    const cliOut = execFileSync("node", [path.join(__dirname, "..", "bin", "quay.ts"), "task", "list", "--json"], {
+    const cliOut = execFileSync("node", [QUAY_CLI, "task", "list", "--json"], {
       cwd: workspaceRoot,
       encoding: "utf8",
     });
