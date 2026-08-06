@@ -1,15 +1,16 @@
 ---
 id: gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github
 title: "claim-task.sh (QUAY_CLAIM_REMOTE) and periodic-push-backup.sh (--remote)
-  both point at the local A↔B bare repo (~/work/quay-sync.git) or nowhere — human
-  directive 2026-08-06 retires direct A↔B sync in favor of GitHub develop as the
-  sole cross-host sync point; both mechanisms are already parameterized (no code
-  change needed, config-only) but were never pointed at GitHub for real use:
-  claim-task.sh had 0 real invocations all session, periodic-push-backup.sh landed
-  on A but was never deployed to B (its target would have been quay-sync.git anyway,
-  now moot); companion task to gap-two-layer-loop-tick-docs-hardcode-master-not-
+  both point at the local A↔B bare repo (~/work/quay-sync.git) or nowhere —
+  human directive 2026-08-06 retires direct A↔B sync in favor of GitHub develop
+  as the sole cross-host sync point; both mechanisms are already parameterized
+  (no code change needed, config-only) but were never pointed at GitHub for real
+  use: claim-task.sh had 0 real invocations all session, periodic-push-backup.sh
+  landed on A but was never deployed to B (its target would have been
+  quay-sync.git anyway, now moot); companion task to
+  gap-two-layer-loop-tick-docs-hardcode-master-not-
   wired-to-existing-branch-model"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
