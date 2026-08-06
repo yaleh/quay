@@ -6383,6 +6383,7 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ad-arm1 重新 pull 即可拿到修复。provider 优雅降级（跳过该文件，其余 113 正常）——非新 bug。
 
 
+
 ### tick 2026-08-06T13:2xZ（内层 cron，派发 postinstall 修复）
 
 - 无 halt；套件 GREEN。在飞 0/3。池 8/20、disjoint 5/5（criterion met，但 ready 多为陈旧 signal-gap）。
@@ -6404,3 +6405,4 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **integration 现 = develop 基线 + 6 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/postinstall）
   + ADR-030/031/032**。**下一步**：外层 merge integration→develop → 打 **v0.4.1** 触发完整三平台 release
   （windows_postinstall_ok band 证明）。
+
