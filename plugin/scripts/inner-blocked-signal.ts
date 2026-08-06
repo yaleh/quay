@@ -123,7 +123,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
 import {
   FAST_MODE_STAGE,
@@ -803,6 +803,40 @@ export function makeOver90ExecutorGone(root) {
 }
 
 /**
+ * The task-status gate for the over-90m signal (gap-over-90m-false-signal-source-reads-telemetry-
+ * not-task-status). `detectTaskOver90m` reads TELEMETRY brackets (`rep.inProgress`), which a crash
+ * leaves open forever (`--task-end` never fires). An open bracket is NOT proof a task is running —
+ * the task file's OWN `status` field is the authority on whether the task is mid-flight. This gate
+ * asks that authority before any over-90m candidate is allowed to fire.
+ *
+ * Verdict (fail-closed toward the OLD behavior — KEEP — on any "cannot verify"):
+ *   - task file MISSING      → KEEP (fall back to the bracket; a genuinely long task whose file was
+ *                             removed must not be silently missed — AC2 "真超时不漏")
+ *   - status "in-progress"   → KEEP (the task store itself says it is running)
+ *   - any other status       → DROP (ready/done/needs-human/todo ⇒ not mid-flight per the store ⇒
+ *                             the stale bracket is a phantom, not a running task — AC1 negative
+ *                             control reproduces tonight's ready+stale-bracket shape)
+ *   - unparseable frontmatter / read error → KEEP (cannot verify, never mask a genuine timeout)
+ *
+ * @param {string} root — the SHARED checkout root (tasks live under <root>/tasks/).
+ * @param {string} taskId — the telemetry taskId, which is also the `tasks/<taskId>.md` basename.
+ * @returns {boolean} — true keeps the candidate (may fire over-90m), false drops it.
+ */
+export function taskStatusAllowsOver90(root, taskId) {
+  const f = path.join(root, "tasks", `${taskId}.md`);
+  if (!fs.existsSync(f)) return true; // file missing → cannot verify → fall back to the bracket
+  let status;
+  try {
+    const fm = readFrontmatter(f);
+    if (fm === null) return true; // no parseable frontmatter → cannot verify → keep old behavior
+    status = String(fm.status ?? "").trim();
+  } catch (_) {
+    return true; // read failure → cannot verify → keep old behavior (never mask a real timeout)
+  }
+  return status === "in-progress";
+}
+
+/**
  * Detect a task in-progress over the 90-minute budget (reason "task-over-90m").
  *
  * Mechanical: reads the SAME `.workflow-events/` store the tick's own `--task-start`/`--task-end`
@@ -817,8 +851,19 @@ export function makeOver90ExecutorGone(root) {
  * fake over-90m block froze inner 44 min). The probe is deliberately conservative (only positive
  * merge evidence closes) so a genuinely slow task with a live executor still fires.
  *
+ * TASK-STATUS GATE (gap-over-90m-false-signal-source-reads-telemetry-not-task-status): reconcile
+ * alone still cannot distinguish a GENUINE slow task from a PHANTOM in-flight — a crashed executor
+ * leaves a 0-commit dead worktree that `makeDefaultExecutorGone`/`makeOver90ExecutorGone` both treat
+ * as "present", so the stale bracket stays `kept` and fires a false over-90m (tonight's 3rd
+ * recurrence: 48m + 27m + this one — all phantom in-flight from crashes). So every over-90m
+ * candidate is additionally passed through the task-status gate (`taskStatusAllowsOver90`): the
+ * bracket remains the "when it started" source, but the task's OWN `status` field is the "is it
+ * really running" gate — BOTH must be true for the signal to fire. A task whose file says
+ * `ready`/`done`/`needs-human` (or `todo`) is definitionally not mid-flight ⇒ its stale bracket is a
+ * phantom, not a running task.
+ *
  * @param {string} root
- * @param {{executorGone?: (rec: {taskId: string}) => {gone: boolean, reason: string}}} [opts]
+ * @param {{executorGone?: (rec: {taskId: string}) => {gone: boolean, reason: string}, taskStatusGate?: (root: string, taskId: string) => boolean}} [opts]
  * @returns {Promise<{taskId: string, reason: "task-over-90m", question: string, evidence: string[]} | null>}
  */
 export async function detectTaskOver90m(root, opts = {}) {
@@ -828,8 +873,11 @@ export async function detectTaskOver90m(root, opts = {}) {
   const rep = aggregate(events, { nowMs });
   if (rep.inProgress.length === 0) return null;
   const executorGone = opts.executorGone ?? makeOver90ExecutorGone(root);
+  const taskStatusGate = opts.taskStatusGate ?? taskStatusAllowsOver90;
   const { kept } = reconcileInFlight(rep.inProgress, { executorGone });
-  const over = kept.filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS);
+  const over = kept
+    .filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS)
+    .filter((p) => taskStatusGate(root, p.taskId));
   if (over.length === 0) return null;
   const p = over[0];
   const mins = ((nowMs - p.startedAtMs) / 60_000).toFixed(1);
@@ -837,7 +885,7 @@ export async function detectTaskOver90m(root, opts = {}) {
     taskId: p.taskId,
     reason: "task-over-90m",
     question: `task ${p.taskId} has been in-progress ${mins}m (>90m) — rule on abort vs continue (no inner retry), then run --clear`,
-    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `real in-flight ${over.length} task(s) over budget (reconcile-aware)`],
+    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `real in-flight ${over.length} task(s) over budget (reconcile + task-status gate)`],
   };
 }
 
