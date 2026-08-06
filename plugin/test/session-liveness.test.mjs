@@ -1096,7 +1096,10 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
     const mon = spawnMonitor(p.env, `esc ${p.tmp} ${p.session}`, { tickLogs: `esc /nonexistent` });
     try {
       await sleep(3000); // idle baseline: bash prompt, no esc flag
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      // 阶段四（本任务）重新实现后，busy 判据 = classifyPaneState 的状态行形状（esc to interrupt
+      // 只认底部区域的状态区），不再整屏 grep——所以 busy 触发器改为把 "esc to interrupt" 渲染到
+      // 状态区（最后两行非空行内，与真实 TUI 状态行同形），而不是 `echo` 到内容区。
+      tmux(["send-keys", "-t", p.session, "printf 'esc to interrupt\\n'"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       const resumed = await waitForOutput(mon, /SESSION-RESUMED esc/, 25000);
       assert.ok(resumed, `RESUMED must fire when esc to interrupt appears:\n${mon.output()}`);
@@ -1251,7 +1254,10 @@ test("AC6/AC7 — RESUMED carries the cause AND the last-input time from the tra
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
       await sleep(3000); // idle baseline
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      // 阶段四（本任务）重新实现后，busy 判据 = classifyPaneState 的状态行形状（esc to interrupt
+      // 只认底部区域的状态区），不再整屏 grep——所以 busy 触发器改为把 "esc to interrupt" 渲染到
+      // 状态区（最后两行非空行内，与真实 TUI 状态行同形），而不是 `echo` 到内容区。
+      tmux(["send-keys", "-t", p.session, "printf 'esc to interrupt\\n'"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       // Window is generous (25000ms, not 8000ms): under the full suite's ~4× oversubscription the
       // monitor's per-round tmux capture-pane + transcript reads stretch several-fold (observed
@@ -1291,7 +1297,10 @@ test("AC7 negative control — an EMPTY transcript yields last-input 取不到, 
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { transcripts: `pl ${x}` });
     try {
       await sleep(3000); // idle baseline
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      // 阶段四（本任务）重新实现后，busy 判据 = classifyPaneState 的状态行形状（esc to interrupt
+      // 只认底部区域的状态区），不再整屏 grep——所以 busy 触发器改为把 "esc to interrupt" 渲染到
+      // 状态区（最后两行非空行内，与真实 TUI 状态行同形），而不是 `echo` 到内容区。
+      tmux(["send-keys", "-t", p.session, "printf 'esc to interrupt\\n'"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
@@ -1322,12 +1331,20 @@ test("AC6 negative control — a script mutation that neutralizes the cause yiel
   // The event emitter is sl_emit (writes stdout + shared file); the mutation must target THAT call.
   fs.writeFileSync(mutated, fs.readFileSync(SCRIPT, "utf8").replace(/sl_emit "SESSION-RESUMED/,
     'cause=""\n            sl_emit "SESSION-RESUMED'));
+  // 阶段四（本任务）：session-liveness.sh 消费 ${SCRIPT_DIR}/pane-state-classify.ts（classifyPaneState）。
+  // 被复制的变异脚本在 p.tmp（不在 plugin/scripts/ 下）→ 必须把分类器一并复制过去，否则脚本找不到
+  // 分类器会静默丢忙信号（AC5 反过滤只兜内容区，兜不住依赖缺失）。
+  fs.copyFileSync(path.resolve(__dirname, "..", "scripts", "pane-state-classify.ts"),
+    path.join(p.tmp, "pane-state-classify.ts"));
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `pl ${p.tmp} ${p.session}`, { script: mutated, transcripts: `pl ${x}` });
     try {
       await sleep(3000); // idle baseline
-      tmux(["send-keys", "-t", p.session, "echo 'esc to interrupt'; sleep 100 &"], p.env);
+      // 阶段四（本任务）重新实现后，busy 判据 = classifyPaneState 的状态行形状（esc to interrupt
+      // 只认底部区域的状态区），不再整屏 grep——所以 busy 触发器改为把 "esc to interrupt" 渲染到
+      // 状态区（最后两行非空行内，与真实 TUI 状态行同形），而不是 `echo` 到内容区。
+      tmux(["send-keys", "-t", p.session, "printf 'esc to interrupt\\n'"], p.env);
       tmux(["send-keys", "-t", p.session, "Enter"], p.env);
       assert.ok(await waitForOutput(mon, /SESSION-RESUMED pl/, 25000), `RESUMED must fire:\n${mon.output()}`);
       const out = mon.output();
@@ -1755,6 +1772,179 @@ test("AC5 — a pending tool_use in the transcript (round in progress) NEVER rep
       assert.ok(await waitForOutput(mon, /SESSION-IDLE ac5/, 15000),
         `AC5 control: after the pending tool_use clears, a persistent pure-text idle MUST fire (proves the busy suppression is the pending tool_use):\n${mon.output()}`);
     } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 阶段四（gap-session-liveness-hashes-the-token-counter-as-if-it-were-work，
+// 外层裁定 D，2026-08-04/06）：重新实现——忙闲判据消费 classifyPaneState（底部区域 + 形状分类，
+// 非整屏哈希）；内容哈希只取底部区域之外。AC1 的 chrome 行集合、AC3 假阳性方向、AC4 假阴性方向、
+// AC5 防过滤、AC7 响应速度、AC9 连续工作不重复报，都在这下面。
+// ═════════════════════════════════════════════════════════════════════════════
+
+// --pane-state 接缝：读 stdin pane 文本 → { state, content_hash, contentEmpty } JSON。
+function runPaneState(txt) {
+  const r = spawnSync("bash", [SCRIPT, "--pane-state"], { input: txt, encoding: "utf8" });
+  assert.equal(r.status, 0, `--pane-state must exit 0:\n${r.stderr}`);
+  return JSON.parse(r.stdout);
+}
+
+test("AC3 — --pane-state: a parked pane whose ONLY change is the /clear to save counter gives the SAME state AND the SAME content-region hash (the counter is bottom-region chrome, not activity)", () => {
+  // 真实停泊 pane 形态（archguard 停泊实测：只有 150.2k→151.2k 变）：对话内容在上、状态行
+  // `/clear to save NNN.Nk tokens` 在底部区域。counter 在底部区域内 ⇒ 形状不变 + 内容哈希不变。
+  const parked = (counter) => [
+    "这里是停泊会话的对话内容",
+    "static analysis line 1",
+    "static analysis line 2",
+    "static analysis line 3",
+    "static analysis line 4",
+    "static analysis line 5",
+    "static analysis line 6",
+    "static analysis line 7",
+    "static analysis line 8",
+    "static analysis line 9",
+    "static analysis line 10",
+    "static analysis line 11",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    `new task? /clear to save ${counter} tokens`,
+  ].join("\n");
+  const a = runPaneState(parked("150.2k"));
+  const b = runPaneState(parked("151.2k"));
+  assert.equal(a.state, "waiting-input", "a parked Claude pane classifies waiting-input");
+  assert.equal(b.state, a.state, "the token counter is bottom-region chrome — the classified shape must not change");
+  assert.equal(a.content_hash, b.content_hash,
+    "the token counter must NOT enter the content-region hash (AC3 — 停泊会话只有计数器变 ⇒ 零事件)");
+  assert.equal(a.contentEmpty, false, "a real parked pane has content above the bottom region (not empty)");
+});
+
+test("AC4 seam — --pane-state: two panes differing ONLY in the agent task line (↓ NN.Nk tokens) give DIFFERENT content-region hashes (real content — a change must flip to active)", () => {
+  // 边界（任务体实测）：`◯ general-purpose … ↓ N.Nk tokens` 是 subagent 任务行 = 真内容，
+  // 不是 chrome——它随真实工作而变，正是要检测的活动。它位于内容区（底部区域之外）。
+  const agent = (tok) => [
+    `◯ general-purpose Reading session-liveness.test.mjs 1m 35s · ↓ ${tok}`,
+    "static line 1",
+    "static line 2",
+    "static line 3",
+    "static line 4",
+    "static line 5",
+    "static line 6",
+    "static line 7",
+    "static line 8",
+    "static line 9",
+    "static line 10",
+    "static line 11",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const a = runPaneState(agent("57.3k tokens"));
+  const b = runPaneState(agent("58.1k tokens"));
+  assert.equal(a.state, "waiting-input", "the agent task line does not change the classified SHAPE (no busy flag)");
+  assert.notEqual(a.content_hash, b.content_hash,
+    "the agent task line is REAL content in the content region — a change MUST flip the hash (AC4 假阴性方向)");
+  assert.equal(a.contentEmpty, false);
+});
+
+test("AC4 — a pane whose ONLY change is the agent task line (↓ NN.Nk tokens) is judged ACTIVE: SESSION-RESUMED fires (content-region hash is the signal, not the status flag)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-agent");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `agent ${p.tmp} ${p.session}`, { tickLogs: `agent /nonexistent`, interval: 1 });
+    try {
+      await sleep(2500); // idle baseline: bash prompt, static
+      // mini-TUI：唯一变化的是 agent 任务行（内容区顶部）；其余（静态行 + TUI 底部）逐字不变。
+      // clear + 每轮重绘；agent 行数字递增，内容哈希随之变 → busy。状态形状始终 waiting-input
+      // （无 esc 标志），证明忙来自【内容区变化】而非状态行标志。
+      const render = 'i=0; while true; do clear; printf "◯ general-purpose Reading session-liveness.test.mjs 1m 35s · ↓ %s.%sk tokens\\n" $((i/10)) $((i%10)); for j in $(seq 1 11); do printf "static content line %s\\n" $j; done; printf "───────────────────────────────\\n❯ \\n───────────────────────────────\\n  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage\\n"; i=$((i+1)); sleep 0.3; done';
+      tmux(["send-keys", "-t", p.session, render], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED agent/, 20000),
+        `AC4: a pane whose ONLY change is the agent task line must be judged ACTIVE (RESUMED within one poll):\n${mon.output()}`);
+      const out = mon.output();
+      assert.ok(/内容区变化/.test(out),
+        `AC4: the RESUMED cause must name the content-region change (not a status-flag change):\n${out}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC5 — --pane-state reports contentEmpty=true for a pane whose content region is empty; the monitor emits the explicit WARN (not silent idle)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // seam：只有底部区域、无上方内容的 pane → contentEmpty=true（AC5 防过滤判据）。
+  const tiny = ["line1", "line2", "❯ "].join("\n");
+  const r = runPaneState(tiny);
+  assert.equal(r.contentEmpty, true, "a pane with no content above the bottom region must report contentEmpty=true");
+
+  // monitor：空内容区必须显式告警（WARN），不得静默判空闲。hermetic 探针 pane 很小 → 内容区空。
+  const p = makeHermeticProbe("ol-empty");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `empty ${p.tmp} ${p.session}`, { tickLogs: `empty /nonexistent` });
+    try {
+      await sleep(3500); // ≥3 rounds — the WARN must have fired by now
+      assert.ok(/内容区为空/.test(mon.output()),
+        `AC5: the monitor must WARN on an empty content region (anti-filter), not silently judge idle:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC7 — busy_latency unchanged: RESUMED fires within ≤2 polling rounds of the busy signal appearing (no debounce added)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-ac7lat");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `lat ${p.tmp} ${p.session}`, { tickLogs: `lat /nonexistent`, interval: 1 });
+    try {
+      await sleep(2500); // idle baseline
+      const hbBefore = countHeartbeats(mon.globalDir);
+      tmux(["send-keys", "-t", p.session, "printf 'esc to interrupt\\n'"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED lat/, 15000), `RESUMED must fire:\n${mon.output()}`);
+      const hbAfter = countHeartbeats(mon.globalDir);
+      const latencyRounds = hbAfter - hbBefore;
+      assert.ok(latencyRounds <= 2,
+        `AC7: busy_latency must be ≤2 rounds (unchanged from before the re-implementation — RESUMED is not debounced), got ${latencyRounds}:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC9 — on a KNOWN-continuous-work window, SESSION-RESUMED fires exactly ONCE (the idle→busy transition), never repeatedly (the 23× bug)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-ac9");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `ac9 ${p.tmp} ${p.session}`, { tickLogs: `ac9 /nonexistent` });
+    try {
+      await sleep(2500); // idle baseline: bash prompt, static
+      startBusyLoop(p.env, p.session); // continuous work: content changes every round
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac9/, 15000), `RESUMED must fire once on the first busy round:\n${mon.output()}`);
+      await sleep(6000); // keep the continuous work running for several more rounds
+      const resumed = (mon.output().match(/SESSION-RESUMED ac9/g) || []).length;
+      assert.equal(resumed, 1,
+        `AC9: continuous work must NOT produce repeated RESUMED (the 23× was the bug — a busy session staying busy must not re-fire); got ${resumed}:\n${mon.output()}`);
+      assert.equal((mon.output().match(/SESSION-IDLE ac9/g) || []).length, 0,
+        `AC9: continuous work must not report IDLE either:\n${mon.output()}`);
+    } finally {
+      stopBusyLoop(p.env, p.session);
       mon.child.kill("SIGKILL");
       mon.cleanup();
     }
