@@ -47,7 +47,7 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
-test('plugin.json is valid JSON and declares the 12 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-tmux-session-topology: +session-topology)', () => {
+test('plugin.json is valid JSON and declares the 13 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology; gap-loop-mechanism-...: +quay-task-operator; cold-start-8: +quay-cold-start; gap-tmux-session-topology: +session-topology; gap-productize-the-manager-layer: +manager)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -69,6 +69,7 @@ test('plugin.json is valid JSON and declares the 12 bundled skills (M179/DIR-070
     './skills/quay-native-methodology/SKILL.md',
     './skills/quay-webui-bootstrap-methodology/SKILL.md',
     './skills/session-topology/SKILL.md',
+    './skills/manager/SKILL.md',
   ];
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
@@ -186,6 +187,8 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'visual-review-mechanism.md'),
     path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'effectiveness-timing-corpus.md'),
+    // gap-productize-the-manager-layer: the manager layer (third layer) ships under plugin/.
+    path.join(pluginDir, 'skills', 'manager', 'SKILL.md'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
