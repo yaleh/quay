@@ -239,6 +239,19 @@ function makeBackdatedGitRepo(dir) {
 // HEAD commit as liveness even when the tick-log is stale.
 function makeFreshGitRepo(dir) {
   const git = (args, cwd) => spawnSync("git", args, { encoding: "utf8", cwd });
+  const init = git(["-c", "user.name=t", "-c", "user.email=t@t", "init", "-q", "-b", "master", dir]);
+  assert.equal(init.status, 0, `git init failed: ${init.stderr}`);
+  fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
+  const add = git(["-c", "user.name=t", "-c", "user.email=t@t", "add", "."], dir);
+  assert.equal(add.status, 0, `git add failed: ${add.stderr}`);
+  const commit = git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "fresh"], dir);
+  assert.equal(commit.status, 0, `git commit failed: ${commit.stderr}`);
+  const ct = git(["log", "-1", "--format=%ct"], dir);
+  const now = Math.floor(Date.now() / 1000);
+  assert.ok(ct.status === 0 && Number(ct.stdout.trim()) > now - 600,
+    `commit must be fresh (within 10min), got ${ct.stdout}`);
+}
+
 // initGitRepo — a git repo at `dir` with one commit. `authorDate` (ISO-8601) controls the
 // committer/author date; omit for a fresh (now) commit. The multi-source outer-heartbeat criterion
 // (gap-outer-heartbeat-source-inverts-under-incident-handling) reads HEAD commit time as one source.
@@ -252,12 +265,6 @@ function initGitRepo(dir, { authorDate } = {}) {
   const add = git(["-c", "user.name=t", "-c", "user.email=t@t", "add", "."], dir);
   assert.equal(add.status, 0, `git add failed: ${add.stderr}`);
   const commit = git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "fresh"], dir);
-  assert.equal(commit.status, 0, `git commit failed: ${commit.stderr}`);
-  const ct = git(["log", "-1", "--format=%ct"], dir);
-  const now = Math.floor(Date.now() / 1000);
-  assert.ok(ct.status === 0 && Number(ct.stdout.trim()) > now - 600,
-    `commit must be fresh (within 10min), got ${ct.stdout}`);
-  const commit = git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"], dir);
   assert.equal(commit.status, 0, `git commit failed: ${commit.stderr}`);
 }
 
