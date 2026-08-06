@@ -234,14 +234,14 @@ run_static_checks() {
   # by the sibling task; a NEW active violation red-lights the commit).
   # @static-tier change
   # @static-object **/*.sh **/*.bash
-  checker_cost_wrap "adr016-screen-use-check" -- node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
+  run_checker "adr016-screen-use-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
   echo "== dead-code-after-return check (gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived, AC6) =="
   # The 2026-08-03 TEMPORARY pin shape (`echo 8; return 0; <formula>` — a statement after a top-level
   # return) is the drift that made docs/ACs/tests report "derived" while the code returned a constant.
   # This checker bans that form across all shell scripts; a NEW instance red-lights the commit.
   # @static-tier change
   # @static-object **/*.sh **/*.bash
-  checker_cost_wrap "dead-code-after-return-check" -- node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dead-code-after-return-check.ts" --root "${repo_root}"
+  run_checker "dead-code-after-return-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/dead-code-after-return-check.ts" --root "${repo_root}"
   echo "== strategic-doc-staleness check (gap-establish-daily-review-cadence-mechanism, AC2/AC3/AC8) =="
   # The generic strategic-doc staleness checker: scans docs/proposals + orchestration/*ROADMAP* for
   # unannotated references to classic-pipeline scripts ADR-022 deleted (prepare-milestone.js /

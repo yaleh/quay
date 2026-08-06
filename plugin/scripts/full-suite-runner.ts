@@ -603,6 +603,7 @@ export async function run(argv: string[]): Promise<number> {
     state: finalState.state,
     reason: finalState.reason ?? null,
     runner: base.runner,
+  });
   appendSuiteDurationRecord(root, {
     startedAt,
     durationMs,
