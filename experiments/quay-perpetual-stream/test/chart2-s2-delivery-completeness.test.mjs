@@ -169,9 +169,12 @@ test("loadS2Evidence: missing file → both false (fail-closed)", () => {
   assert.deepEqual(loadS2Evidence(p), { fullManifestPublished: false, foreignInstallE2eGreen: false });
 });
 
-test("loadS2Evidence: the checked-in real evidence file → both false", () => {
+// AC3 cross-annotation: evidence flags were flipped true by DELIVERY-C (ea3a33a9, manifest-published)
+// and DELIVERY-D (1b1c81ab, foreign-install-e2e-green) on 2026-07-24. When a delivery flips an
+// evidence flag, this test's expected values MUST be synced in the same change.
+test("loadS2Evidence: the checked-in real evidence file → both true (DELIVERY-C/D)", () => {
   const p = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "chart2-s2-delivery.json");
-  assert.deepEqual(loadS2Evidence(p), { fullManifestPublished: false, foreignInstallE2eGreen: false });
+  assert.deepEqual(loadS2Evidence(p), { fullManifestPublished: true, foreignInstallE2eGreen: true });
 });
 
 // ── selftest() — the module's own embedded RED+GREEN fixture suite ──────────────────────────────
@@ -199,19 +202,42 @@ test("CLI: --help → usage, exit 2", () => {
   assert.equal(r.status, 2);
 });
 
-test("CLI: against THIS repo (default root) → cov 0.0, version-consistent=false, exit 0", () => {
+test("CLI: against THIS repo (default root) → cov 2/3 (manifest+foreign green, versions drifted), exit 0", () => {
   const r = spawnCli([]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /S2 Delivery-completeness cov = 0 /);
+  assert.match(r.stdout, /S2 Delivery-completeness cov = 0\.6666666666666666 \(2\/3/);
   assert.match(r.stdout, /version-consistent=false/);
-  assert.match(r.stdout, /manifest-published=false/);
-  assert.match(r.stdout, /foreign-install-green=false/);
+  assert.match(r.stdout, /manifest-published=true/);
+  assert.match(r.stdout, /foreign-install-green=true/);
 });
 
-test("CLI: explicit repoRoot arg → cov 0.0 against the real repo", () => {
+test("CLI: explicit repoRoot arg → cov 2/3 against the real repo", () => {
   const r = spawnCli([REPO_ROOT]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /cov = 0 \(0\/3/);
+  assert.match(r.stdout, /S2 Delivery-completeness cov = 0\.6666666666666666 \(2\/3/);
+});
+
+// AC2 negative control (fail-closed): a temp repo whose evidence file has BOTH flags false must
+// still compute cov 0.0 — if a delivery ever removes/negates the evidence without the code noticing,
+// this assertion catches the regression. Drifted versions + both-false evidence → 0/3.
+test("CLI: negative control — temp repo with both-false evidence → cov 0.0 (fail-closed)", () => {
+  const root = writeFixtureRepo(["0.3.8", "0.3.5", "0.3.22", "0.3.16", "0.3.5"]); // drifted → version-consistent=false
+  const evDir = path.join(root, "experiments", "quay-perpetual-stream");
+  fs.mkdirSync(evDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(evDir, "chart2-s2-delivery.json"),
+    JSON.stringify({ fullManifestPublished: false, foreignInstallE2eGreen: false })
+  );
+  try {
+    const r = spawnCli([root]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /S2 Delivery-completeness cov = 0 \(0\/3/);
+    assert.match(r.stdout, /version-consistent=false/);
+    assert.match(r.stdout, /manifest-published=false/);
+    assert.match(r.stdout, /foreign-install-green=false/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 }
