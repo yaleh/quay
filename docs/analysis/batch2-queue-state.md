@@ -6783,3 +6783,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   阻塞随之解除（待外层 verification-round 翻 done）。
 - 在飞 0/5（全部完成）。resource-aware worktree（dd67f7e9）仍待外层处置（3f78e428 KEPT）。
 - 背景 scoped verify（bt2ha1tfy，concurrency+split-batch+send-keys 三连）运行中。
+
+### tick 2026-08-06T05:2xZ（心跳：派发 1，补晋 2，verify 运行中）
+
+- **派发 1**：no-post-merge-latency（fork develop 47e32029，worktree /home/yale/work/quay-worktrees/no-post-merge）。
+  fork-baseline 无依赖 → develop。5 个 slot-refill 推荐里排除 4 个：concurrency-revert + send-keys（**刚 fan-in、工作已落、待外层翻 done**——
+  重复派发隐患，taskWorkLanded 信号缺口再现）；DIR-124（human-steered）；token-measures-wait（**引用已 B-full-delete 的 heavy-op-token 14 处**，
+  触摸集含 heavy-op-token.sh——主题已不存在，需外层定处置，不派发）。
+- **补晋 2**（3.6，pool 14<floor 20）：green-verdict + shipped-verifiers todo→ready（3b7d9e3e）。
+  production gate 显示两者都与在飞 no-post-merge 触摸冲突（共享 orchestrator-loop-tick.md / quay-init.sh）→ **本 tick 不派发，下 tick 再评估**。
+- **在飞 1/5**（no-post-merge）。后台 scoped verify（bt2ha1tfy，concurrency+split-batch+send-keys 三连）运行中，
+  与在飞 no-post-merge agent 均不冲突。外层 suite 状态 running（外层契约修复后重跑）。
