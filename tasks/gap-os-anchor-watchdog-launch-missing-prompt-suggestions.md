@@ -3,7 +3,7 @@ id: gap-os-anchor-watchdog-launch-missing-prompt-suggestions
 title: os-anchor-watchdog launch-cmd lacks --prompt-suggestions false (ghost
   suggestions pollute capture-pane; RUNBOOK §2 requires it) — align launch-cmd
   with RUNBOOK + single-source the launch string to kill double-drift
-status: todo
+status: ready
 labels:
   - gap
   - defect
