@@ -6383,6 +6383,7 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ad-arm1 重新 pull 即可拿到修复。provider 优雅降级（跳过该文件，其余 113 正常）——非新 bug。
 
 
+
 ### tick 2026-08-06T13:2xZ（内层 cron，派发 postinstall 修复）
 
 - 无 halt；套件 GREEN。在飞 0/3。池 8/20、disjoint 5/5（criterion met，但 ready 多为陈旧 signal-gap）。
@@ -6404,3 +6405,50 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **integration 现 = develop 基线 + 6 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/postinstall）
   + ADR-030/031/032**。**下一步**：外层 merge integration→develop → 打 **v0.4.1** 触发完整三平台 release
   （windows_postinstall_ok band 证明）。
+
+
+### tick 2026-08-06T14:1xZ（内层 cron，派发 message-bus-identity）
+
+- 无 halt；套件 GREEN。在飞 0/3（bracket reconcile 1 陈旧——postinstall 的 worktree-gone 误判）。
+- 池 8/20、disjoint 5/5（criterion met），但 ready 全陈旧（quality-criteria/supervisor 已 merge、
+  DIR 指令、4 landed）；slot-refill 推荐 5 全陈旧。
+- **新立案（外层）**：**gap-SEA-bundle-excludes-plugin-tree** —— SEA 推荐发行版无 plugin 树，
+  AC16 未完全达成；根因 esbuild-sea.mjs 只 bundle bin/quay.ts vs npm files 是两套独立机制，
+  单二进制 vs 目录树结构性冲突需架构裁定。**npm release 修复（postinstall）只是半边**。
+- **派发 1/3 — gap-supervisor-message-bus-with-identity**（supervisor step ⑤，3.6 补晋）：
+  resolve 5/5、pool-candidate clean、fork-baseline=develop。worktree + bracket 已开。
+- 在飞 1/3。
+
+### tick 2026-08-06T10:5xZ（外层，ad-arm1 冷启动发现 session-liveness 回归）
+
+- **ad-arm1 冷启动 fail 7**：第一个硬错误 = plugin/test/session-liveness.test.mjs:260 SyntaxError
+  （Identifier 'commit' already declared——模块加载期崩，整文件测不了）。A 本机逐字复现（非 ARM 专属）。
+- **根因**：da065182（catch-up②）**第三次回归**（同 arity/title 根因）——session-liveness.test.mjs:240-262
+  合并错乱（makeFreshGitRepo body 无闭合 + initGitRepo 内两个 const commit 同作用域）。
+- **修法**（驱动 inner）：makeFreshGitRepo 补完整 body + initGitRepo 删重复 commit + 边界分离。
+- 套件自 07:07 未真跑全量——此缺陷活在 develop 未被发现。其余 6 失败项 ad-arm1 陆续报。
+
+### tick 2026-08-06T11:0xZ（外层，ad-arm1 冷启动 4 条根因）
+
+- **ad-arm1 冷启动门禁完整诊断**（管理者转达）：4 条根因全 da065182 合并回归。
+  #1 session-liveness.test.mjs 硬 SyntaxError——**已修提交**（e8f0a015）。
+  #2 loop-driver-check.test.mjs 整文件两份版本拼接（最严重，测 cold-start 单驱动不变式）——驱动 inner 修。
+  #3 cap-from-gate.test.mjs 硬编码 effective_cap >= 3——**外层裁定：测试应断言 effective_cap == 配置 GO 值**
+    （config 注释明写同一机制不同数字，ad-arm1 GO=2 合法）——驱动 inner 修。
+  #4 send-keys-reliable AC4 文案漂移（脚本 vs 测试正则措辞）——驱动 inner 修。
+- **ad-arm1 会等推 GitHub develop 后 pull 重跑**。
+
+### tick 2026-08-06T14:5xZ（ad-arm1 冷启动 4 回归修复 + message-bus fan-in）
+
+- **ad-arm1 冷启动诊断的 4 条 da065182 合并回归全部修复**（f4b86a5e）：
+  ① session-liveness SyntaxError（makeFreshGitRepo 失体 + initGitRepo 重复 const commit）→ 恢复完整。
+  ② loop-driver-check 整文件两份版本拼接（SyntaxError）→ 删第二份，保留一份完整（8/8）；
+     附带 tick-doc AC5 文案（line 179 裸"回步骤 4 重建 cron"→ 查注册表优先 + rm -f 清陈旧）。
+  ③ cap-from-gate 硬编码 effective_cap>=3 → 断言 === DEFAULT_BANDS.go（配置 GO 值，13/13）。
+  ④ send-keys-reliable AC4 文案漂移（依赖的校验器缺失 vs /缺少校验器/）→ 统一（4/4）。
+  全 test 文件 syntax sweep 通过。
+- **message-bus-with-identity fan-in 到 integration**（1037c6ce→8003f001）：deliver 带 sender 身份、
+  agent 信道拒绝 from:human（fail-closed）、tick 读收件箱。AC1-AC7、scoped 24/24。
+- **AC16 状态**：外层 REVERTED to not-achieved（2b5bb273）——SEA tarball 无 plugin（archguard
+  string-scan + manager tar tzf 双确认）；root cause SEA 单二进制 vs plugin 目录树结构性冲突。
+- integration = develop 基线 + 7 任务 + SEA 缺陷任务；在飞 0/3。

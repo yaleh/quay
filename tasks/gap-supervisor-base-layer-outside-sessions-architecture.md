@@ -98,8 +98,9 @@ systemd-run cgroup 限额（tasks/gap-systemd-run-limits-for-suite-and-heavy-ops
       → ⑤消息总线带身份（按代价，每步有对应任务）
       **证据**：① = gap-loop-has-no-os-level-anchor（done，os-anchor timer active）；② =
       gap-telemetry-brackets-vs-subagents-no-slot-visibility（done）；③ = 本任务落地（deliver 适配器 +
-      真 TUI e2e）；④ = tasks/gap-supervisor-preemption.md（新建）；⑤ =
-      tasks/gap-supervisor-message-bus-with-identity.md（新建）。
+      真 TUI e2e）；④ = tasks/gap-supervisor-preemption.md（新建，2026-08-06 落地——
+      supervisor-preempt.sh + slot-refill.ts 挂载点）；⑤ =
+      tasks/gap-supervisor-message-bus-with-identity.md（新建，2026-08-05 已合并）。
 - [x] AC4: **与既有基座任务归并**——OS-anchor（= ①）、slot-visibility（= ②）标注为 supervisor 步骤；
       不新开重复任务
       **证据**：两任务的 `## Proposal` 前加「Supervisor 步骤标注（2026-08-06，本任务 AC4）」blockquote，

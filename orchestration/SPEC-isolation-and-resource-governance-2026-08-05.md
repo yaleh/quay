@@ -37,6 +37,13 @@
 
 这条同时解释了为什么"再加一个检查"修不好这一类问题——今晚已经加过了，它被绕过了。
 
+**同族交叉标注（`tasks/gap-supervisor-preemption` AC3，2026-08-06）：抢占是「不可被绕过」族的一员。**
+`.halt` 的旧形态（「tick 步骤 0 检查」）就是**依赖被抢占方主动调用**的限额——inner 的连续流程
+绕过步骤 0，halt 后仍派发 5 个 subagent（事故 7）。修复后的抢占（`supervisor-preempt.sh`
+`preempt <target>` = 进程级停止信号，TUI 形态 tmux C-c / `-p` 迁移后 `kill <pid>`）**不依赖被抢占方
+调用任何东西**——OS 就是抢占原语；新派发被 `slot-refill.ts` 的代码挂载点挡住。判据与限额同构：
+`preemption_is_process_level = 1`（不可被绕过）。
+
 ---
 
 ## 3. 但通信问题是真的，而且它决定**次序**

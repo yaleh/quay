@@ -152,6 +152,7 @@ declare -A QUESTION=(
   [supervisor-bus-identity.sh]="Can a message's claimed sender identity be mechanically verified (an agent claiming from:human is REJECTED) and is the manager-inbox's delivered/consumed/unread visible to the tick?"
   [supervisor-deliver.sh]="Did a payload get delivered to a target Claude session, by intent, via the single hardened delivery implementation (deliver(target,payload) -> delivered|failed)?"
   [supervisor-health.sh]="Is the supervisor base layer alive outside any Claude session (os-anchor timer + delivery/observe adapters + session liveness)?"
+  [supervisor-preempt.sh]="Is the loop stopped at ANY point (preemptive .halt — process-level preempt(target) enforced in code, not just at a tick boundary)?"
   [sync-vendor.sh]="Is the plugin's vendored runtime in sync with the product build?"
   [task-ac-carryover-check.ts]="Do children carry over the parent's acceptance criteria?"
   [task-contract-check.ts]="Does the task's ## Contract match its declared measures and invariants (and is the ratchet shrinking)?"

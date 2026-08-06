@@ -59,6 +59,13 @@
 **最后一行是这条判据的精细处**：规则可以留文本，但**规则的强制点必须在代码里有挂载**。
 否则它就是「写了但不在决策时被调用」——今晚 AC9/AC10 反复踩的同一个坑。
 
+> **挂载补上（2026-08-06，`tasks/gap-supervisor-preemption`）：`.halt` 的机械挂载点现已存在。**
+> tick 文档只留规则文本（「`.halt` 存在 ⇒ 本 tick 空转」）；强制点在代码：
+> ① `slot-refill.ts` 的 `checkHaltSentinel`（`.halt` 存在 ⇒ `should_refill=false`，新派发被挡）；
+> ② `supervisor-preempt.sh halt-check`（读哨兵，fail-closed——读失败 = 停）；
+> ③ `supervisor-preempt.sh preempt/preempt-all`（对在飞层进程级停止信号，任意点生效）。
+> 规则（动词）留文本，强制点（名词进代码）——与 §3 Session 实体（layer/pid/…）的 pid 账本同构。
+
 ---
 
 ## 3. 该结晶的状态实体（名词清单）

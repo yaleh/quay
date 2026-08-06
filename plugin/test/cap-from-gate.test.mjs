@@ -11,7 +11,7 @@
 //         avg300 smoothing already absorbs) must never amplify into dispatch jitter.
 //   AC4 — bands configurable: numbers come from .quay/config.yml loop:concurrency_bands
 //         (quay default 5/2/1; override e.g. 4/2/1 takes effect). Mechanism shared, numbers per-project.
-//   AC5 — resources empty (low avg300) ⇒ GO band ⇒ cap >= 3 (throughput above the old fixed 3).
+//   AC5 — resources empty (low avg300) ⇒ GO band ⇒ cap equals the configured GO value (quay default 5; per-project override respected).
 //   AC6 — high avg300 (e.g. another project saturating the host) ⇒ WAIT/EXTREME band ⇒ cap drops
 //         (does not add load).
 //   AC7 — ownership: the mechanism lives in quay's plugin/scripts (downstream adopts via upgrade
@@ -98,7 +98,7 @@ test("AC2 — the full decision reads avg300, NOT avg10: high avg10 + low avg300
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "84.77", RESOURCE_GATE_TEST_CPU_AVG300: "12" },
   });
   assert.equal(r1.band, "GO", "avg300 (not avg10) decides the band");
-  assert.ok(r1.effective_cap >= 3, `GO band must be >= 3, got ${r1.effective_cap}`);
+  assert.equal(r1.effective_cap, DEFAULT_BANDS.go, `GO band must equal the configured GO value, got ${r1.effective_cap}`);
   // avg10 is calm (10) but avg300 is 84 → the 5-minute trend says the host is saturated.
   const s2 = tmpState("avg300b");
   const r2 = computeEffectiveCap({
@@ -111,7 +111,7 @@ test("AC2 — the full decision reads avg300, NOT avg10: high avg10 + low avg300
 });
 
 // ── AC5/AC6: the cap tracks resources ──────────────────────────────────────────────────────────────
-test("AC5 — resources empty (low avg300) ⇒ GO band ⇒ cap >= 3 (cold-start first decision adopts immediately)", (t) => {
+test("AC5 — resources empty (low avg300) ⇒ GO band ⇒ cap equals the configured GO value (cold-start first decision adopts immediately)", (t) => {
   const state = tmpState("go");
   const r = computeEffectiveCap({
     repoRoot: REPO_ROOT,
@@ -119,7 +119,7 @@ test("AC5 — resources empty (low avg300) ⇒ GO band ⇒ cap >= 3 (cold-start 
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG300: "12" },
   });
   assert.equal(r.band, "GO");
-  assert.ok(r.effective_cap >= 3, `GO cap must be >= 3 (throughput above fixed 3), got ${r.effective_cap}`);
+  assert.equal(r.effective_cap, DEFAULT_BANDS.go, `GO cap must equal the configured GO value, got ${r.effective_cap}`);
   // The state file is written (a real decision was made and persisted).
   const persisted = loadState(state);
   assert.equal(persisted.band, "GO");
@@ -134,7 +134,7 @@ test("AC6 — high avg300 (host saturated by another project) ⇒ WAIT then EXTR
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG300: "12" },
   });
   assert.equal(cold.band, "GO");
-  assert.ok(cold.effective_cap >= 3);
+  assert.equal(cold.effective_cap, DEFAULT_BANDS.go);
   // First high sample (avg300=55): desired WAIT but hysteresis holds GO (consecutive=1). One sample
   // must NOT switch — the negative control.
   const first = computeEffectiveCap({

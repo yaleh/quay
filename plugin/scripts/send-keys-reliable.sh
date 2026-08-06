@@ -44,7 +44,7 @@ CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"
 # a missing CHECKER must abort at STARTUP, never a silent assignment. The pre-fix script ran the
 # whole delivery flow and only failed deep in the step-5 poll when node could not spawn the checker.
 if [ ! -f "$CHECKER" ]; then
-  echo "send-keys-reliable: 依赖的校验器缺失: $CHECKER — 无法验证送达，fail loud" >&2
+  echo "send-keys-reliable: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2
   exit 1
 fi
 
