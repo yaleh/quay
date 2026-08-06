@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-06T17:09:33.242Z",
+  "generatedAt": "2026-08-06T18:40:06.730Z",
   "since": null,
   "tasks": [
     {
@@ -226,6 +226,16 @@
       "taskId": "gap-m264-build-evidence-regress-flaky",
       "minutes": 69.35986666666666,
       "outcome": "done"
+    },
+    {
+      "taskId": "gap-manager-productization-five-constraints",
+      "minutes": 160.58145,
+      "outcome": "needs-human"
+    },
+    {
+      "taskId": "gap-manager-productization-five-constraints",
+      "minutes": 130.75045,
+      "outcome": "needs-human"
     },
     {
       "taskId": "gap-message-bus-human-third-target-transport-agnostic",
@@ -660,27 +670,14 @@
       "outcome": "done"
     }
   ],
-  "inProgress": [
-    {
-      "taskId": "gap-manager-productization-five-constraints",
-      "runId": "fm-gap-manager-productization-five-constraints-1786031622606-hlo8jn",
-      "startedAtMs": 1786031622625,
-      "startedAtMsUnreliable": false
-    },
-    {
-      "taskId": "gap-manager-productization-five-constraints",
-      "runId": "fm-gap-manager-productization-five-constraints-1786033412934-cf7gcr",
-      "startedAtMs": 1786033412953,
-      "startedAtMsUnreliable": false
-    }
-  ],
-  "meanMinutes": 65.4349759259259,
-  "medianMinutes": 49.715675000000005,
-  "tasksPerHour": 1.2273589014163737,
-  "serialEquivalentPerHour": 0.9169408126308713,
+  "inProgress": [],
+  "meanMinutes": 66.68858489583332,
+  "medianMinutes": 50.484475,
+  "tasksPerHour": 1.2287795531082362,
+  "serialEquivalentPerHour": 0.8997042011570526,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-06T17:09:20.050Z",
-  "windowHours": 102.65945833333333,
+  "windowEnd": "2026-08-06T18:39:52.240Z",
+  "windowHours": 104.1684,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1288,23 +1285,6 @@
       "startedAtMs": 1785998556329
     }
   ],
-  "reconcilable": [
-    {
-      "taskId": "gap-manager-productization-five-constraints",
-      "runId": "fm-gap-manager-productization-five-constraints-1786031622606-hlo8jn",
-      "startedAtMs": 1786031622625,
-      "startedAtMsUnreliable": false,
-      "outcome": "abandoned",
-      "reconcileReason": "worktree-gone-and-no-process"
-    },
-    {
-      "taskId": "gap-manager-productization-five-constraints",
-      "runId": "fm-gap-manager-productization-five-constraints-1786033412934-cf7gcr",
-      "startedAtMs": 1786033412953,
-      "startedAtMsUnreliable": false,
-      "outcome": "abandoned",
-      "reconcileReason": "worktree-gone-and-no-process"
-    }
-  ],
+  "reconcilable": [],
   "realInFlight": 0
 }
