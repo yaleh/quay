@@ -5416,3 +5416,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 7 / dispatchable_disjoint **5**——外层补池 2 新候选（chart2-s2-test-assertions / probe-mechanism-dead-15-days）加入后出现首个 2-wide disjoint 批次。
 - **派发 2/5**（disjoint batch）：`chart2-s2-test-assertions-stale-after-delivery-c-d` + `probe-mechanism-dead-15-days-rewire-to-two-layer`（均补 self-touch + telemetry）。red-window / tests-leak-tmux deferred（与前批碰撞）。
 - 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T22:3xZ（内层，chart2-s2 fan-in 完成 —— 批 2 剩 1 在飞）
+
+- **chart2-s2-test-assertions fan-in 完成**（merge task/gap-chart2-s2...，4 文件 67 行）：3 处 stale 断言与真实 evidence 同步（evidence 两 flag 已 true + 5 源版本一致 ⇒ cov 1/3，原断言按 DELIVERY-C/D 前状态写死 cov 0）+ 新负控制（临时 both-false evidence ⇒ cov 0 fail-closed 保留）。AC1–AC3 全勾（scoped 22/22）。留 ready。
+- **在飞 1/5**（probe-mechanism-dead-15-days-rewire）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
