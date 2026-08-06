@@ -5768,3 +5768,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **优先队列① web-action-buttons 已派**（`fm-...-fqtpnm`，删 unused route + 关 open-redirect）：slot-refill-only
   completion 释放槽 + 人优先级 → 立即派发（事件驱动）。与在飞 productize 生产闸 DISJOINT。②③ 待后续槽释放。
 - 在飞 2/3（productize + web-action-buttons）。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:3xZ（内层 cron，false OVER90 清 + 优先②阻塞注记）
+
+- **false OVER90 清**：detect-stop 报 session-liveness-hashes OVER90——**该任务已 merge（f40ab167）**，bracket
+  未闭（外层未 --task-end）。`--slot-status` 实证：real_in_flight 2（productize + web-action-buttons）、
+  **stale_brackets 1**（session-liveness-hashes）、slots_free 1。已 `--clear`。**外层请闭 session-liveness-hashes
+  bracket**，否则每 tick 假 OVER90 复发。
+- **优先② message-bus 阻塞注记**：生产闸判与在飞 web-action-buttons CONFLICT（batch=[message-bus, productize]，
+  web-action-buttons deferred）——**不可并发**，待 web-action-buttons land 后派。③ b-machine 同待。
+- 在飞 2/3（productize 2 提交推进 + web-action-buttons 早期）。套件 green、无 stop、无 block、Monitor 绿。
