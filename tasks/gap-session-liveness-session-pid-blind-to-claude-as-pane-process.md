@@ -89,4 +89,5 @@ SESSION-STATUS quay alive=0 halted=0          ← inner 活着，报 alive=0
 ## Evidence notes
 
 - `inner-session-check --json --transcript <inner-tr>`: `{"session":"quay-0","window":true,"process":true,"state":"empty-shell"}` — process detection works when the pane_pid self-check is used.
+- **第二个证据维度（2026-08-06 19:4x）假阳性**：outer 起 full-suite-runner 后，monitor 立刻发 `SESSION-BACK quay 的会话已恢复（pid 128773）`——pid 128773 是 suite runner 的 bash wrapper，其 cmdline 含 `/home/yale/.claude/shell-snapshots/...` 路径，`session_pid` 的 `grep -q claude` 匹配到了路径里的 `.claude` 子串。⇒ `session_pid` **既盲**（看不到 claude-as-pane-process → alive=0 恒静默）**又假阳**（任何 cmdline 含 ".claude" 子串的子进程都误报会话恢复）。修法不变：查 pane_pid 自身 + 后代，但匹配必须按进程名（`comm`/argv[0] 是 claude），不能 grep 整个 cmdline。
 - This is the same "signal is dead" class as `gap-prefriction-count-trigger-regex-too-broad` (2026-08-06 15:53 filing): a shipped observer that structurally cannot produce its signal.
