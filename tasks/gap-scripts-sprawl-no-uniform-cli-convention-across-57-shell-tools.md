@@ -108,6 +108,10 @@ resume 若中断，先跑 measure 读当前基线，不要假设已经统一
 ## Touches
 - plugin/scripts/*.sh（57 个文件，具体改动范围由 AC2 选定机制决定）
 - plugin/scripts/capability-catalog.sh
+- tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md（AC5 交叉标注：那条管 `.ts`
+  的交付形态——bundle 成 42 个可执行入口、删 80 个 raw `.ts`；本条管 `.sh` 的界面一致性。两者都是
+  「交付面结晶程度不够」的实例，且本条若选「共享入口壳 `quay-tool <name>`」方案，将直接消费那条
+  bundled 出的 `plugin/scripts/dist/*.js` 作为被分发的工具）
 
 ## Dispatch review
 

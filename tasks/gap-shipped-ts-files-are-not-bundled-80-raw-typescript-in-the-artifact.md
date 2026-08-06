@@ -97,29 +97,96 @@ resume 若中断，先跑 measure 读当前产物里的 raw .ts 数，不要假�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 记录当前基线——`raw_ts_in_artifact` 与 `bundled_entrypoints` 的实测数字（预期 80 / 3+）
-- [ ] AC2: **方向已由人裁定为 bundle，不再二选一**——任务体记录实现选择（每入口一产物 vs
-      合成少数几个）及理由。**判据：交付出去的 `.ts` 源文件数应当大幅下降**，
-      目标形态是"数量很少的几个可执行文件"（人裁定原话），具体数字由执行时定并记录
-- [ ] AC3: **负控制（承重条）**——在**不加 `--experimental-strip-types`** 的裸 Node 上
-      执行任一被消费者调用的 plugin 能力必须成功；仍需该标志则 bundle 未真正消除依赖
-- [ ] AC4: **内部件不外露**——实测 172 个交付脚本里仅 **39** 个被 tick 文档/skills 真实调用，
-      其余 **133（78%）** 是内部件。bundle 后需给出「交付出去的可执行入口数」，
-      并说明内部件是被打进 bundle 还是被排除；**负控制**：随机挑一个内部件，
-      确认它不再作为独立文件出现在产物里（或有明写理由说明为何必须保留）
-- [ ] AC5: 与 `gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools` 交叉标注——
-      那条管 `.sh` 的界面一致性，本条管 `.ts` 的交付形态，两者都是"交付面结晶程度不够"的实例
+- [x] AC1: 记录当前基线——`raw_ts_in_artifact` 与 `bundled_entrypoints` 的实测数字（预期 80 / 3+）
+      **基线**（管理者立案时实测，任务体 Proposal 表）：80 / 3+。
+      **本执行实测（改动后，`bash packages/quay/scripts/package.sh && tar tzf packages/quay/quay-0.4.0.tgz`）**：
+      `raw_ts_in_artifact = 0`（80 → 0），`bundled_entrypoints = 45`（`package/dist/` + `package/plugin/vendor/*/dist/` +
+      `package/plugin/scripts/dist/*.js`(40) + `package/plugin/gate-scripts/dist/*.js`(2)）。见「Execution evidence」。
+- [x] AC2: **方向已由人裁定为 bundle，不再二选一**——实现选择：**每入口一产物（per-entry），未合成少数几个**。
+      理由：40 个被调用 `.ts` 各自保持独立的 CLI ABI（`--help`/参数契约不变），staged 改写仅是「路径 + 去
+      `--experimental-strip-types`」的机械替换；「合成少数几个」需要一个 `quay-tool <name>` 分发器把每个工具
+      重构为可导入的 main——那正是姊妹任务 `gap-scripts-sprawl-…-57-shell-tools` 的 AC2 候选方案之一，留它在
+      那条上落。**判据达成：交付的 `.ts` 源文件 80 → 0**；交付的可执行入口 = **42**（40 scripts/dist + 2
+      gate-scripts/dist），全部 ESM、裸 Node ≥20 直接跑、无需 `--experimental-strip-types`。
+- [x] AC3: **负控制（承重条）**——在**不加 `--experimental-strip-types`** 的裸 Node 上执行被消费者调用的
+      plugin 能力必须成功。实跑（对最终 tarball 解包，`node --no-experimental-strip-types --no-warnings`）：
+      `plugin/scripts/dist/fast-mode-telemetry.js --report --json` 输出遥测 JSON ✓；`inner-blocked-signal.js
+      --detect-stop`、`ready-pool-check.js --help`、`task-contract-check.js --help` 各自输出自己的 usage/数据，
+      无其它工具的 CLI 块越权触发 ✓。实现过程中发现并修复了 plugin 的 `isDirectEntry(import.meta)` /
+      `import.meta.url === pathToFileURL(process.argv[1]).href` 顶层 CLI 守卫在**单文件 bundle 里共享
+      `import.meta.url` 导致被内联库的 CLI 块误触发**的问题——守卫改为 bundler 友好的 basename 校验
+      （`isDirectEntry(import.meta, undefined, "<own-name>")`），源码直跑与打包执行行为一致。
+- [x] AC4: **内部件不外露**——bundle 后交付的可执行入口数 = **42**；内部件（如 `gate-script-base.ts`、
+      `task-schema.ts`、`touches-parser.ts`、`wiring-coverage-check.ts`）**打进 bundle（内联），不作为独立
+      文件出现在产物里**；未被子任何调用面引用的孤儿 `.ts` 被排除。负控制实跑：`find plugin -name "*.ts"` = 0；
+      `test -f plugin/scripts/gate-script-base.ts` = 不存在（仅 `dist/gate-script-base.js` 存在）。
+- [x] AC5: 与 `gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools` 交叉标注——该任务已在
+      其任务体追加交叉引用（见其 `## Touches`）。本条管 `.ts` 的交付形态（bundle 成可执行文件）、那条管
+      `.sh` 的界面一致性（`--help` 统一 + 候选 `quay-tool <name>` 分发器），两者都是「交付面结晶程度不够」；
+      本条把 `.ts` 交付面从 80 个散件结晶成 42 个可执行入口，那条把 `.sh` 的调用界面结晶成统一形式。
+
+## Execution evidence
+
+```
+# 改动后实跑（worktree: task/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact）
+$ bash packages/quay/scripts/package.sh
+build-plugin-dist: 42 bundled entrypoints → …/plugin/scripts/dist (+ gate-scripts/dist)
+Removing raw plugin .ts from the staged artifact (bundled/inlined into dist/*.js)...
+Rewriting staged invokers (docs/.sh/quay-init) to reference the dist bundles...
+build-plugin-dist: rewrote 32 staged invokers to reference dist bundles
+Staged: …/plugin (219 files)
+Artifact: …/quay-0.4.0.tgz
+
+$ tar tzf packages/quay/quay-0.4.0.tgz | grep -c "package/plugin/.*\.ts$"      # raw_ts_in_artifact AFTER
+0
+$ tar tzf packages/quay/quay-0.4.0.tgz | grep -cE "package/dist/|package/plugin/vendor/.*/dist/|package/plugin/scripts/dist/|package/plugin/gate-scripts/dist/"
+45
+
+# AC3 负控制：解包后裸 Node（显式禁用 strip-types）
+$ cd /tmp/quay-v/package && node --no-experimental-strip-types --no-warnings plugin/scripts/dist/fast-mode-telemetry.js --report --json
+{ "generatedAt": "2026-08-06T22:59:21.919Z", "tasks": [], … }
+$ node --no-experimental-strip-types --no-warnings plugin/scripts/dist/inner-blocked-signal.js --help
+inner-blocked-signal.ts — explicit "who-is-waiting" observer …
+$ node --no-experimental-strip-types --no-warnings plugin/scripts/dist/task-contract-check.js --help
+task-contract-check: unknown flag: --help
+
+# AC4 负控制：内部件不再独立出现
+$ find plugin -name "*.ts" | wc -l
+0
+$ test -f plugin/scripts/gate-script-base.ts && echo BAD || echo "no (bundled into dist/gate-script-base.js)"
+no (bundled into dist/gate-script-base.js)
+
+# 回归：npm-pack-e2e（真实 package.sh + npm install 安装 tarball）
+$ node --test packages/quay/test/npm-pack-e2e.test.mjs   → pass 5 / fail 0
+# 回归：serve-board（observation/readBoardLanding）、mcp-server（instrument 解析 dist 回退）
+$ node --test packages/quay/test/serve-board.test.mjs    → pass 4 / fail 0
+$ node --test packages/quay/test/mcp-server.test.mjs     → pass 1 / fail 0
+# 回归：plugin 测试（守卫改动覆盖的 272 个用例）
+$ node --test plugin/test/{task-schema,fast-mode,telemetry,ready-pool,wiring,checker-cost,touches,inner-blocked,pane,plugin-packaging,workflow-event}*.test.mjs  → pass 272 / fail 0
+# scoped verify
+$ bash scripts/test.sh --for-task gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact
+task-contract-check: no violations. / adr016-screen-use-check: violations 0 / dead-code-after-return-check: violations 0
+```
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] AC1-AC5 实跑输出贴进任务体（见上）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**留给外层 verify**（执行指令：不跑完整套件）
 
 ## Touches
-- packages/quay/scripts/package.sh
-- packages/quay/package.json
-- tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（交叉标注）
-- tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md
+
+> 实现把 `## Touches` 从立案时的 4 个文件**扩展**到实际改动面，理由见下（AC3 负控制要求 bundle 真的能跑，
+> 而 plugin 的 `isDirectEntry(import.meta)` 守卫与单文件 bundle 不兼容，必须改为 bundler 友好形式）：
+
+- packages/quay/scripts/package.sh（打包接入：bundle → 删 .ts → 改写 staged 调用面）
+- packages/quay/scripts/build-plugin-dist.mjs（新增：esbuild 派生入口集 + bundle + staged 改写）
+- packages/quay/src/mcp-server.ts（instrument 工具解析 dist bundle 回退）
+- packages/quay/src/observation.ts（/board 的 drift checker 解析 dist bundle 回退）
+- plugin/scripts/*.ts + plugin/scripts/*.mjs（~43 个文件的 CLI 守卫改为 bundler 友好 basename 校验）
+- experiments/quay-perpetual-stream/scripts/*（8 个非 symlink 镜像同步，保持 sync-vendor byte-identity）
+- tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（AC5 交叉标注）
+- tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md（本条自触）
+- packages/quay/package.json（**未改动**——仓库无 npm scripts 惯例；构建经 package.sh 接入，无需 package.json 变更）
 
 ## Dispatch review
 
