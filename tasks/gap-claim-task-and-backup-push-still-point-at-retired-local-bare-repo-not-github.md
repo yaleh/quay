@@ -48,7 +48,7 @@ model` 是同一次切换的两个独立可落地面（分开立案，避免单�
 
 ## Contract
 
-measure   claim_calls = `git ls-remote --heads origin | grep -c '^refs/heads/task/'` stdout 的数字段（GitHub develop 汇合点上出现的、由 claim-task.sh 真实创建的空 task/<id> 认领分支数）
+measure   claim_calls = `git ls-remote --heads origin | grep -c 'refs/heads/task/'` stdout 的数字段（GitHub develop 汇合点上出现的、由 claim-task.sh 真实创建的空 task/<id> 认领分支数）
 band      claim_calls >= 1（迁移后 GitHub 上有真实认领分支）
 invariant claim_remote_target = GitHub origin（claim-task.sh 与 periodic-push-backup.sh 在两机上的实际 remote 目标都是 GitHub origin——不是本地裸仓库、不是对方主机；AC15 ②/③ 度量口径延续）
 invoke    `git remote -v`
@@ -151,6 +151,10 @@ branch-model` 的 `## Touches`，本任务不越界改（并发 worktree 代理�
 
 ## 执行记录（2026-08-06，worktree 执行代理）
 
+- **Contract measure 正则锚点修正（判据 vs 现实）**：原 measure 写作
+  `grep -c '^refs/heads/task/'`——`git ls-remote --heads origin` 的每行是 `<sha>\trefs/heads/…`，
+  行首是 SHA，不是 `refs/heads/task/`，所以 `^` 锚点让该 measure **永远返回 0**，band `claim_calls >= 1`
+  在真实认领分支存在时也无法满足。已修正为子串匹配 `grep -c 'refs/heads/task/'`（实测返回 1）。
 - **AC2 认领分支现留存在 GitHub origin**（`refs/heads/task/gap-claim-task-and-backup-push-…`，
   sha `02629a98`）——这是本任务的真实首次使用证据，也满足 Contract `claim_calls >= 1`。它会在本任务
   落地（合并进 integration→develop）时由 release-task.sh 释放；若外层希望立即清空，可执行
