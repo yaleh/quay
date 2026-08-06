@@ -48,12 +48,61 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **升级/刷新路径**——`quay-init` 重跑检测并更新目标项目派生脚本（差异逐项：漂移/缺失/一致）
-- [ ] AC2: **漂移报告**——输出 `漂移 N / 缺失 N / 一致 N`（meta-cc 实测 10/68/8 的机械版）；L2「升级
+- [x] AC1: **升级/刷新路径**——`quay-init` 重跑检测并更新目标项目派生脚本（差异逐项：漂移/缺失/一致）
+      —— `plugin/scripts/quay-init.sh` 新增 `--check-drift`（只读漂移报告，Contract invoke）+ `--loop`
+      升级路径内前/后漂移报告（`compute_drift_report` 在派生铺设循环前后各跑一次：前 = 诊断目标冻结在
+      装的那一刻缺什么/漂什么；后 = 证明升级把派生集带到一致）。缺失自动补（copy_one 缺失分支），漂移
+      备份+替换（`clean` 模式，AC4 residue 处置，非静默）。实跑证据（目标项目缺 `resource-gate.sh` ⇒
+      升级必补 + 报告缺失-1）：
+      ```
+      $ bash plugin/scripts/quay-init.sh --loop ... （删掉 resource-gate.sh 后重跑）
+        drift report (before upgrade):
+      drift-report: 漂移 0 / 缺失 1 / 一致 41 (derived-set 42)
+        missing: plugin/scripts/resource-gate.sh — not installed (target froze at install time); --loop upgrade auto-adds it
+        copied: <ws>/plugin/scripts/resource-gate.sh
+        drift report (after upgrade):
+      drift-report: 漂移 0 / 缺失 0 / 一致 42 (derived-set 42)
+      ```
+- [x] AC2: **漂移报告**——输出 `漂移 N / 缺失 N / 一致 N`（meta-cc 实测 10/68/8 的机械版）；L2「升级
       正确性」维度
-- [ ] AC3: **不静默覆盖**——本地改动的派生脚本 = 漂移（列出需确认），缺失的自动补
-- [ ] AC4: 与 L2 交叉标注——升级正确性补进 `gap-quality-criteria-are-point-in-time-no-trend-criteria`
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      —— `--check-drift` stdout 可解析三数字（分母 = **派生铺设集** derived-set N，非 plugin/scripts
+      文件数，L_D 修正），并逐项列出漂移/缺失。实跑证据（fresh 目标 + 完整安装后）：
+      ```
+      $ bash plugin/scripts/quay-init.sh --check-drift --root <fresh-ws>
+      quay-init drift report (plugin v0.3.13)
+      drift-report: 漂移 0 / 缺失 42 / 一致 0 (derived-set 42)
+        missing: plugin/scripts/cap-from-gate.sh — ...（逐项列出，42 项）
+      $ bash plugin/scripts/quay-init.sh --check-drift --root <installed-ws>
+      drift-report: 漂移 0 / 缺失 0 / 一致 42 (derived-set 42)
+      ```
+- [x] AC3: **不静默覆盖**——本地改动的派生脚本 = 漂移（列出需确认），缺失的自动补
+      —— `--check-drift` 把本地改动脚本列为漂移并点名；`--loop` 升级时 `clean` 模式**备份 + 报告**
+      后替换（`cleaned-residue` + `backup:` 路径，恢复面 = 备份，绝不静默），缺失自动补。实跑证据
+      （本地改动 `resource-gate.sh`）：
+      ```
+      $ bash plugin/scripts/quay-init.sh --check-drift --root <ws>
+      drift-report: 漂移 1 / 缺失 0 / 一致 41 (derived-set 42)
+        drift: plugin/scripts/resource-gate.sh — target differs from the plugin's current delivery ...
+      $ bash plugin/scripts/quay-init.sh --loop ... （升级）
+        drift report (before upgrade):
+      drift-report: 漂移 1 / 缺失 0 / 一致 41 (derived-set 42)
+        drift: plugin/scripts/resource-gate.sh — ...
+        cleaned-residue: <ws>/plugin/scripts/resource-gate.sh
+          backup: <ws>/.quay/quay-init-backups/<ts>/resource-gate.sh
+        drift report (after upgrade):
+      drift-report: 漂移 0 / 缺失 0 / 一致 42 (derived-set 42)
+      cleaned-residue: 1 stale same-name product file(s) — backups under <ws>/.quay/quay-init-backups/<ts>/
+      ```
+      备份保留本地内容（测试断言 `backup must preserve the local edit`）。
+- [x] AC4: 与 L2 交叉标注——升级正确性补进 `gap-quality-criteria-are-point-in-time-no-trend-criteria`
+      —— 已在 `tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md` 加 `## 交叉标注（AC4，
+      gap-delivery-surface-grows-but-target-freezes-no-upgrade，2026-08-06）`：升级正确性判据的机制实现已落地
+      （`--check-drift` 可解析输出 = 趋势判据的读数来源；漂移/缺失数随窗口可积累；交叉不合并——本条是趋势
+      品类，delivery-surface 是机制实现）。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+      —— 新测试文件 `plugin/test/quay-init-drift-report.test.mjs`（`import { test } from "node:test"` +
+      `// @test-group governance`，AC1/AC2/AC3 fixture + L_G 正注 + idempotence 回归）。实跑：
+      `tests 6 / pass 6 / fail 0 / cancelled 0`。
 
 ## Definition of Done
 
@@ -65,10 +114,14 @@ extra:
 
 - tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
-- plugin/scripts/quay-init.sh（或等价：升级/刷新 + 漂移检测）
-- plugin/scripts/（漂移报告 helper，若成脚本）
-- plugin/test/（AC1/AC2/AC3 fixture）
+- plugin/scripts/quay-init.sh（升级/刷新 + 漂移检测：`--check-drift` + `--loop` 前/后漂移报告）
+- plugin/test/quay-init-drift-report.test.mjs（AC1/AC2/AC3 fixture + L_G + idempotence，新文件）
 - tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC4 交叉标注）
+
+## Test-Files
+
+- plugin/test/quay-init-drift-report.test.mjs（新：AC1/AC2/AC3 漂移报告 fixture + L_G 正注 + idempotence 回归）
+- plugin/test/quay-init-loop.test.mjs（回归：派生脚本铺设 + residue/idempotent/AC6 verify 行为）
 
 ## Contract
 

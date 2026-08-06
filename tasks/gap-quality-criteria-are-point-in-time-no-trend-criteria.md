@@ -120,6 +120,19 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
 **不引入新调度**：趋势是**读已有记录**的被动判据（suite-state / verification-round 历史），不是新的
 运行触发；外层 cron 或复盘时跑。
 
+## 交叉标注（AC4，gap-delivery-surface-grows-but-target-freezes-no-upgrade，2026-08-06）
+
+**升级正确性判据的机制实现已落地**：本条 §5 归属的「升级正确性」（目标项目机件与当前交付物差异）
+由 `gap-delivery-surface-grows-but-target-freezes-no-upgrade` 闭环机制化——`plugin/scripts/quay-init.sh`
+新增 `--check-drift`（只读漂移报告）与 `--loop` 升级路径内的前/后漂移报告：
+
+- **measure 已机械化**：`bash plugin/scripts/quay-init.sh --check-drift` stdout 输出可解析的
+  `漂移 N / 缺失 N / 一致 N`（**派生集轴**——派生铺设集为分母，非 plugin/scripts 文件数，L_D 修正）。
+- **趋势判据的读数来源**：本条（趋势）的「升级正确性」趋势 = 读 `--check-drift` 的历史（漂移/缺失数随窗口），
+  与本条 AC5「不引入新调度、读已有记录」一致——每次升级跑出的 `漂移/缺失/一致` 就是可积累的每窗口记录。
+- **交叉不合并**：本条是趋势判据品类（点状之外的时间轴），delivery-surface 是机制实现（升级通道 + 漂移报告）；
+  两任务交叉标注，各守各的轴。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 全量套件每次跑记录指标到运行时文件（`{at, durationMs, tests, fail, cancelled, per_test_ms}`，
