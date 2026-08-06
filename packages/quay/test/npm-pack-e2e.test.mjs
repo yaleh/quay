@@ -44,24 +44,39 @@ const pkgVersion = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"),
 // (gap-sync-vendor-drift-mislabelled-as-task-schema, round 3: eliminate the
 // interference source, don't mask the check). The repo's node_modules is
 // symlinked into the copy so build-dist.mjs's `import * as esbuild` resolves.
+//
+// The temp copy MIRRORS THE REAL REPO LAYOUT: <base>/packages/quay + <base>/plugin.
+// package.sh (gap-release-excludes-plugin-bundle-agent-surface, AC16) stages the
+// plugin bundle into packages/quay/plugin/ before `npm pack`, resolving its source
+// as <package-dir>/../../plugin. That only resolves to the repo-root plugin/ if the
+// package dir is exactly two levels below the root the plugin lives under — a flat
+// <tmp>/quay-m120-e2e-pkg-XXX would make ../../ resolve to the filesystem root.
 function makeTempPackageCopy() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m120-e2e-pkg-"));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m120-e2e-"));
+  const root = path.join(base, "packages", "quay");
+  fs.mkdirSync(root, { recursive: true });
   for (const rel of ["package.json", "bin", "src", "scripts", "README.md", "CHANGELOG.md", "LICENSE.md"]) {
     fs.cpSync(path.join(pkgDir, rel), path.join(root, rel), { recursive: true });
   }
+  // The copied plugin carries its vendored self-contained runtime
+  // (plugin/vendor/*/dist, built by the root `npm install` postinstall →
+  // sync-vendor.sh), so package.sh's fail-closed guard does not fire.
+  fs.cpSync(path.join(repoRoot, "plugin"), path.join(base, "plugin"), { recursive: true });
   fs.symlinkSync(path.join(repoRoot, "node_modules"), path.join(root, "node_modules"), "dir");
-  return root;
+  return base; // the mkdtemp result itself — caller captures it into tempBase, cleaned in after()
 }
 
 let scratch; // install prefix
 let installedBin; // node_modules/quay/dist/quay.js
 let tgz;
-let tempPkg; // isolated temp copy of the package tree package.sh ran in
+let tempBase; // isolated temp copy of the repo layout package.sh ran in
+let tempPkg; // the package dir (tempBase/packages/quay)
 
 before(() => {
   // Real package.sh run, in a temp COPY of the package tree: builds dist/, then
   // npm pack -> quay-<version>.tgz, all inside the isolated copy.
-  tempPkg = makeTempPackageCopy();
+  tempBase = makeTempPackageCopy();
+  tempPkg = path.join(tempBase, "packages", "quay");
   execFileSync("bash", [path.join(tempPkg, "scripts", "package.sh")], {
     encoding: "utf8",
     cwd: tempPkg,
@@ -82,7 +97,7 @@ before(() => {
 
 after(() => {
   if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
-  if (tempPkg) fs.rmSync(tempPkg, { recursive: true, force: true });
+  if (tempBase) fs.rmSync(tempBase, { recursive: true, force: true });
 });
 
 test("the installed tarball's bin resolves to dist/quay.js and it exists", () => {
@@ -130,4 +145,33 @@ test("installed `quay task list` does a real provider round-trip against a nativ
   assert.match(list, /E2E1/, "installed bin's `task list` must show the seeded task");
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
+});
+
+test("the tarball carries the ENTIRE plugin bundle (bundle_in_pack > 0 — AC16)", () => {
+  // gap-release-excludes-plugin-bundle-agent-surface (AC16): the release tarball must
+  // contain the plugin bundle — the agent surface that IS the self-evolving loop. This
+  // is the task's Contract measure (bundle_in_pack = `npm pack --dry-run 2>&1 | grep -c
+  // 'plugin/'` > 0), asserted against the REAL packed tarball package.sh produced.
+  const tar = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" });
+  const pluginEntries = tar.split("\n").filter((l) => l.includes("/plugin/")).length;
+  assert.ok(pluginEntries > 0, `tarball must contain plugin/ entries (bundle_in_pack = ${pluginEntries})`);
+  // The task's AC1 subdirs must ALL be present (scripts/gate-scripts/skills/probes/loop/vendor/agents).
+  for (const sub of ["plugin/scripts", "plugin/gate-scripts", "plugin/skills", "plugin/probes", "plugin/loop", "plugin/vendor/quay/dist/quay.js", "plugin/vendor/quay-native/dist/quay-native.js", "plugin/agents"]) {
+    assert.ok(tar.includes(`package/${sub}`), `tarball must include ${sub}`);
+  }
+  // The installed copy (from the tarball, not a git clone) must also carry the bundle.
+  const installedPlugin = path.join(scratch, "node_modules", "quay", "plugin");
+  assert.ok(fs.existsSync(installedPlugin), `installed copy must carry the plugin bundle at ${installedPlugin}`);
+  assert.ok(
+    fs.existsSync(path.join(installedPlugin, "scripts", "quay-init.sh")),
+    "installed plugin must carry scripts/quay-init.sh (the quay-init --loop mechanism)"
+  );
+  assert.ok(
+    fs.existsSync(path.join(installedPlugin, "loop", "orchestrator-loop-tick.md")),
+    "installed plugin must carry the outer-loop tick doc"
+  );
+  assert.ok(
+    fs.existsSync(path.join(installedPlugin, "vendor", "quay", "dist", "quay.js")),
+    "installed plugin must carry the vendored self-contained Core runtime"
+  );
 });
