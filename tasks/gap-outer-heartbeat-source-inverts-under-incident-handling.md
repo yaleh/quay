@@ -52,15 +52,34 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 外层存活判据改为**多源 max mtime**——`max(HEAD commit 时间, queue-state mtime, tick-log mtime,
+- [x] AC1: 外层存活判据改为**多源 max mtime**——`max(HEAD commit 时间, queue-state mtime, tick-log mtime,
       分诊记录 mtime, verification-round.jsonl mtime)`；任一在阈值内 ⇒ alive
-- [ ] AC2: **反向失效消除（fixture）**——模拟红窗处置（写 queue-state + 提交、不写 tick-log）⇒ 心跳保持
+- [x] AC2: **反向失效消除（fixture）**——模拟红窗处置（写 queue-state + 提交、不写 tick-log）⇒ 心跳保持
       新鲜、不报 SESSION-OVERDUE
-- [ ] AC3: **真阳性保留（fixture）**——30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（「红着没人碰」必须被抓）
-- [ ] AC4: 信号可区分——假阳性（有产出但 tick-log 旧）与真阳性（无产出）从信号本身可判，不需手工查
+- [x] AC3: **真阳性保留（fixture）**——30 分钟无任何产出 ⇒ SESSION-OVERDUE 仍报（「红着没人碰」必须被抓）
+- [x] AC4: 信号可区分——假阳性（有产出但 tick-log 旧）与真阳性（无产出）从信号本身可判，不需手工查
       提交历史（实跑输出贴任务体）
-- [ ] AC5: 与 D 同源标注——单一代理信号不足；本条是多源融合实例（任务体交叉引用 D / gap-pane-state）
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC5: 与 D 同源标注——单一代理信号不足；本条是多源融合实例（任务体交叉引用 D / gap-pane-state）
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`
+
+### 实跑证据（2026-08-06，工作树 task/gap-outer-heartbeat-source-inverts-under-incident-handling）
+
+**invoke（## Contract）：`bash plugin/scripts/session-liveness.sh --selfcheck`**（退出 0）：
+
+    session-liveness selfcheck: red-window-heartbeat_min=0 zero-output-heartbeat_min=180 OVERDUE_MIN=30
+    session-liveness selfcheck: PASS — 红窗处置（queue-state+提交）保持心跳新鲜；零产出触发 OVERDUE（真阳性保留）
+
+**AC2/AC3/AC4 fixture（scoped 单跑 plugin/test/session-liveness.test.mjs，低负载隔离；KNOWN-LOAD-SENSITIVE）**：
+
+    ✔ AC2 — 多源外层心跳：红窗处置（最近提交 + 新 queue-state + 旧 tick-log）⇒ 不报 SESSION-OVERDUE（反向失效消除） (4431ms)
+    ✔ AC3 — 多源外层心跳：30 分钟零产出（全源旧）⇒ 仍报 SESSION-OVERDUE（真阳性保留） (598ms)
+    ✔ AC4 — OVERDUE 信号可区分：真阳性消息自带「多源心跳」说明（无需手工查提交历史）；假阳性（有产出）从信号本身不报 (4620ms)
+    ✔ Contract invoke — session-liveness.sh --selfcheck 验证多源心跳判据（红窗处置保持新鲜 / 零产出报 OVERDUE），退出 0 (87ms)
+    ℹ tests 4  ℹ pass 4  ℹ fail 0
+
+**scoped tier（`scripts/test.sh --for-task gap-outer-heartbeat-source-inverts-under-incident-handling`）**：静态检查全 PASS（test-framework-policy / test-isolation / task-contract-check strict-subset / adr016-screen-use / strategic-doc-staleness）；plugin/test/session-liveness.test.mjs 全文件 47 tests、46 pass、0 fail、1 skip（real-probe，需要真实 tmux 会话）。
+
+**AC5 与 D 同源**：单一代理信号不足以判定状态（D 分类器同型，`tasks/gap-pane-state-is-hashed-not-classified-so-needs-input-is-unobservable`）；本条是「多源融合」的又一实例——`plugin/scripts/session-liveness.sh` 头部注释与默认外层心跳的 SESSION-OVERDUE 消息均已交叉引用该同源原则。
 
 ## Definition of Done
 
