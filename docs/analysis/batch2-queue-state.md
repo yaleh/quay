@@ -7414,3 +7414,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **ac8 就绪但 deferred**：补 self-touch 后 dispatchable，但与 session-pid **触摸冲突**（都碰 plugin/test/session-liveness.test.mjs）→ 不同时派发，等 session-pid fan-in 后再派。
 - **排除 slot-refill 其它推荐**：DIR-124（human-steered）、audit-findings（7/8 AC 机制已落 develop）、cold-start（AC 全勾=陈旧）、concurrency-reverted（已 fan-in）。
 - **chart2-s2 仍 needs-human**（fan-in 冲突待外层裁定）。
+
+### 事件 21:4xZ（session-pid fan-in 落 integration + 系统性发现）
+
+- **session-pid agent 完成**（52/53 绿，1 skip=环境缺 quay-0:probe；AC1-4 勾，AC5 承重条 deferred=consumer 侧 monitor-mount-check 改动，DoD kill/restart 用 hermetic 证明）。commit `837c74cc`。
+- **fan-in 用 cherry-pick 而非 rebase+merge**：rebase 到 integration 重放 191 个 develop-only commit 并在 `e33f9b5f`（branch-cutover）冲突。**系统性发现：integration（234 ahead）与 develop（30 ahead）大幅分歧**——task 分支 fork 自 develop 携带全部分歧历史。正确手法 = cherry-pick 任务的真实改动到 integration（干净，无冲突），不用 `--skip`/`-X ours`（chart2-s2 上一轮的 rebase 冲突同理）。session-pid 已落 integration（a09ddb56），worktree/分支清理。
+- **ac8 触摸冲突已解除**：session-pid 不再在飞，ac8（touch-overlap session-liveness.test.mjs）现在可派。
+- **待外层**：integration/develop 分歧需 reconciliation（verification-round 批量合或 rebuild task 分支基线）。
