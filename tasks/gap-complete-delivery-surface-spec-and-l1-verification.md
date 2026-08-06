@@ -66,15 +66,76 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **六类交付面活文档**——`SPEC-complete-delivery-surface-2026-08-05.md` 升级为六类清单 +
+- [x] AC1: **六类交付面活文档**——`SPEC-complete-delivery-surface-2026-08-05.md` 升级为六类清单 +
       每类对应交付物 + 归属任务 + 校验判据（单源，随交付物变化更新）
-- [ ] AC2: **L1 检查扩展到六类**——静态检查「六类每一类都有交付物 + 目标项目落地后可解析」，装前装后
+      → `orchestration/SPEC-complete-delivery-surface-2026-08-05.md`：第 4 节六类表格（交付物/归属任务/
+      L1 校验判据）+ 第 6 节机读清单（`<!-- l1-category: … -->` 标注，随交付物变化更新——`spec_is_live`）。
+      机读清单是 `l1-delivery-surface-check.ts` 的单一数据源（机械消费，非冻结快照）。
+- [x] AC2: **L1 检查扩展到六类**——静态检查「六类每一类都有交付物 + 目标项目落地后可解析」，装前装后
       都能跑（现有 verify-referenced-landed 从第 1 类扩展到全六类）
-- [ ] AC3: L2 持续健康判据承载——§3 的语义一致 / 升级正确性 / 三层完整性三类补进
+      → `plugin/scripts/l1-delivery-surface-check.ts`（new）：`--surface` 模式对六类逐类解析交付物 +
+      归属任务，报 `surface-categories-covered: N/6`。装入 `plugin/scripts/quay-init.sh` 的派生铺设集
+      （随 loop 铺进目标，装后能跑）并在 post-laydown 校验段 invoke（`verify_referenced_landed` 之后，
+      fail-closed）。invoke 实跑 + 逐类 fixture 见下方「AC2/AC4 实测输出」。
+- [x] AC3: L2 持续健康判据承载——§3 的语义一致 / 升级正确性 / 三层完整性三类补进
       `gap-quality-criteria-are-point-in-time-no-trend-criteria`（交叉标注）
-- [ ] AC4: 六类归属无空洞——每条 gap（manager 层/启动配置/会话拓扑/周期锚点/升级通道）对应一个
+      → 该任务（done）Proposal 第 5 条已把三类归属到 `gap-reanchor-must-converge-…` /
+      `gap-delivery-surface-grows-but-target-freezes-no-upgrade` / `gap-productize-the-manager-layer`；
+      本条补交叉标注（AC3 注记）确认该承载点 + L1/L2 分工。断言见
+      `plugin/test/l1-delivery-surface-check.test.mjs`「AC3」。
+- [x] AC4: 六类归属无空洞——每条 gap（manager 层/启动配置/会话拓扑/周期锚点/升级通道）对应一个
       已立案任务（实测清单可逐项解析到任务）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`（L1 检查的六类全覆盖断言）
+      → SPEC §6 每条 `l1-category` 标注携带 `task:`；L1 检查机械校验 `tasks/<id>.md` 存在；逐类 fixture
+      （删除归属任务 ⇒ 必报缺）。三个归属任务交叉标注已写回：`gap-productize-the-manager-layer.md` /
+      `gap-crystallize-launch-config-into-checked-in-settings-file.md` /
+      `gap-quality-criteria-are-point-in-time-no-trend-criteria.md`。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`（L1 检查的六类全覆盖断言）
+      → `plugin/test/l1-delivery-surface-check.test.mjs`（new，`// @test-group governance` + `node:test`，
+      6 用例）——AC1 六类机读声明 / AC2 6-6 全绿 + 逐类 fixture / AC4 无空洞 / AC5 wiring / AC3 交叉标注。
+      实跑 `node --test plugin/test/l1-delivery-surface-check.test.mjs` → `pass 6 / fail 0 / cancelled 0`。
+
+## Test-Files
+
+- plugin/test/l1-delivery-surface-check.test.mjs
+
+## AC2/AC4 实测输出
+
+Contract invoke（六类全覆盖）：
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/l1-delivery-surface-check.ts --surface
+surface-categories-covered: 6/6
+```
+（stdout 第二行 = 六类逐类 JSON 详情；exit 0。）
+
+逐类 fixture（每类删除其一个非 SPEC 交付物 ⇒ L1 必报缺并点名，`plugin/test/l1-delivery-surface-check.test.mjs`「AC2 per-category fixture」）：
+```
+# 删除 plugin/scripts（第 1 类交付物）后的输出节选：
+surface-categories-covered: 1/6
+ERROR: 5 of 6 delivery-surface categories uncovered —
+  1. mechanisms-runtime: missing deliverable plugin/scripts
+  ...
+```
+AC4（删除归属任务 ⇒ 必报缺并点名，同测试「AC4 no-holes」）。
+
+scoped 测试（`bash scripts/test.sh --for-task gap-complete-delivery-surface-spec-and-l1-verification --allow-thin`）：
+```
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+test-framework-policy-check — 229 glob file(s), 34 exemption(s)     PASS (at/below ratchet ceiling, no growth)
+test-isolation-check — 229 glob file(s), 44 current violation(s)    PASS (all baselined; live-data-dir-write=0)
+test-impl-census: checked 229 test files · clean 229 · impl-deleted 0   PASS
+task-contract-check: no violations (strict-subset, touched tasks)   PASS
+strategic-doc-staleness-check — 90 strategic doc(s)                 PASS (no NEW stale)
+✔ AC1 — the SPEC declares exactly six machine-readable categories (live single source, spec_is_live)
+✔ AC2 — the L1 check reports 6/6 against the real delivery surface (six-category full coverage)
+✔ AC2 — removing a category deliverable drops the covered count and names it (per-category fixture)
+✔ AC4 — removing a category's owning task file drops the covered count and names it (no holes)
+✔ AC5 — quay-init wiring: the L1 check ships in the derived set and is invoked beside verify_referenced_landed
+✔ AC3 — 语义一致 / 升级正确性 / 三层完整性 are carried by gap-quality-criteria-are-point-in-time-no-trend-criteria
+ℹ tests 6   ℹ pass 6   ℹ fail 0   ℹ cancelled 0   (l1-delivery-surface-check.test.mjs)
+```
+scoped 静态检查全绿（test-framework / test-isolation / test-impl-census / task-contract / strategic-doc-staleness）；
+选中测试 `plugin/test/l1-delivery-surface-check.test.mjs` 6/6 全绿。（注：scoped 运行需 node_modules 工作区链接；
+full-suite gate 的其余整仓 ratchet 由外层 verification round 跑，本 scoped 模式按设计 DEFER 过去。）
 
 ## Definition of Done
 
@@ -86,9 +147,11 @@ extra:
 
 - tasks/gap-complete-delivery-surface-spec-and-l1-verification.md
 - orchestration/SPEC-complete-delivery-surface-2026-08-05.md（升级为六类活文档）
-- plugin/scripts/（verify-referenced-landed 或等价：扩展到六类）
+- plugin/scripts/（verify-referenced-landed 或等价：扩展到六类；l1-delivery-surface-check.ts + quay-init.sh + capability-catalog.sh）
 - plugin/test/（L1 六类全覆盖断言）
-- tasks/gap-productize-the-manager-layer.md / gap-crystallize-launch-config-into-checked-in-settings-file.md / gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC4 交叉标注）
+- tasks/gap-productize-the-manager-layer.md（AC4 交叉标注）
+- tasks/gap-crystallize-launch-config-into-checked-in-settings-file.md（AC4 交叉标注）
+- tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC3 交叉标注）
 
 ## Contract
 

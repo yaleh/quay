@@ -61,6 +61,11 @@ extra:
 有机械答案）已由该任务落地为 `plugin/scripts/trend-check.ts`，并挂进 `orchestration/REVIEW-cadence.md`
 3d 作为每日复盘常项——本条 manager 层的「看趋势」职能的机制挂接点即该判据。
 
+**AC4 交叉标注（2026-08-06，`gap-complete-delivery-surface-spec-and-l1-verification`）**：六类交付面
+（`orchestration/SPEC-complete-delivery-surface-2026-08-05.md` §4/§6）把本条列为**循环文档类（第 2 类）**
+的归属任务——manager 层交付物 = `plugin/skills/manager/SKILL.md`。L1 检查
+（`plugin/scripts/l1-delivery-surface-check.ts --surface`）机械校验该交付物在位 + 归属任务已立案（无空洞）。
+
 ## Acceptance Criteria
 
 - [x] AC1: `plugin/skills/manager/SKILL.md`（或 `plugin/loop/manager-loop-tick.md`）存在——结晶第三层：

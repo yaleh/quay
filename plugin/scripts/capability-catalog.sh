@@ -108,6 +108,7 @@ declare -A QUESTION=(
   [it0-impl-row-check.sh]="Is every implementation row in a design-only milestone accounted for?"
   [it0-split-or-commit-check.sh]="Did the task either split or commit (no limbo)?"
   [it0-split-or-commit-check.ts]="Did the task either split or commit (single-source enforcement)?"
+  [l1-delivery-surface-check.ts]="Is the SIX-category delivery surface complete — every category has a deliverable and its owning gap task is filed (SPEC §6 machine-readable list)?"
   [laydown-set-check.sh]="Are all scripts in the derived cold-start laydown set present, syntactically valid, and green (gate = lay what you verify)?"
   [loadbearing-test-gate.sh]="Is the load-bearing test present and passing before the milestone may land?"
   [loadbearing-test-gate.ts]="Is the load-bearing test gate satisfied (canonical implementation)?"
