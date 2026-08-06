@@ -6538,3 +6538,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **#3 cap-from-gate 机器相关**：早前修 === DEFAULT_BANDS.go（读机器本地 config，B/ad-arm1 go:2≠5 挂）。
   **改为注入密闭 TEST_BANDS {go:3} 断言 === TEST_BANDS.go/wait/extreme_wait**。验证：13/13。
 - 全部在 develop（dbc17135）。ad-arm1 等推 GitHub 后 pull 重跑二轮门禁。
+
+### tick 2026-08-06T18:0xZ（内层 cron + slot-refill，轻触）
+
+- 无 halt；套件 GREEN。在飞 0/3。
+- 池 8/20、disjoint 6/5（criterion met 但虚高——ready 全陈旧 signal-gap）。**无 promotions**。
+  red-pattern（37947f75 短名落地）/ghost-drive/split-batch/tests-leak 全 landed；postinstall/supervisor/
+  quality-criteria/message-bus/preemption 已 merge。**池真正耗尽，无新派发**。
+- develop 13903a45（ad-arm1 gate #1/#2/#3 修复后）→ 待推 GitHub 让 ad-arm1 pull 重跑二轮门禁。
+- 下一事件：ad-arm1 门禁结果 / 外层新增任务。
