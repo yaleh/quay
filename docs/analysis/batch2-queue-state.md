@@ -5750,3 +5750,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **队列**：按人「本批完成后」——三任务排在当前批（productize + slot-refill）完成后派发，优先序①②③。
   第 3 槽保留给优先队列（不提前混入本批）。
 - 在飞 2/3。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:1xZ（内层 cron，轻触）
+
+- 在飞 2/3（productize 4 文件 + slot-refill-only 3 文件，0 提交工作中）。无 fan-in。优先队列（①②③）按人
+  「本批完成后」待派。
+- 外层：manager 对 action-buttons 的 biased head-30 采样撤回（核心证据 365 all quay-cli 独立复验仍成立；
+  新事实 25 DIR-* 有 action config = 配置过从未点击）。
+- 套件 green、无 stop、无 block、Monitor 绿。
