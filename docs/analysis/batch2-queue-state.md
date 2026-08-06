@@ -6178,3 +6178,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 派发 2/3：ac16-release → worktree /home/yale/work/quay-worktrees/ac16-release（develop 926d771b
   基线）+ telemetry bracket 已开。
 - 在飞 2/3（spawn-count + ac16-release）。supervisor merge + AC17 catch-up 仍挂（spawn-count 完成后）。
+
+### tick 2026-08-06T08:4xZ（内层 cron + slot-refill 心跳，轻触）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 2/3（spawn-count + ac16-release，brackets aligned）。
+- 池 10/20、disjoint 4/5 不达标；slot-refill 推荐 supervisor（done-pending-merge，非新候选）拒绝。
+- 3 个真实候选全部与在飞 spawn-count OVERLAP（plugin/test/*）⇒ 序列化，本 tick 无新派发。
+- 外层在 AC16 agent 工作中扩展其 scope（62ba83b0）：第三条安装路径 dist-plugin marketplace
+  分支（落后 master 3755 提交），AC6 新增——agent 处理时需注意，fan-in 后核实 AC6。
+- supervisor merge + AC17 catch-up 仍挂（spawn-count 完成后）。
