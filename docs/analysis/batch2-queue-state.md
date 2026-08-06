@@ -5943,3 +5943,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **token-status-dead-holder 派发**（`fm-...-mbsm4t`）：git-log 0 hit 真未落地，与在飞 laydown-derivation
   生产闸 DISJOINT，self-touch 过。runtime-nowhere-safe 与 laydown-derivation CONFLICT（不并发）。
 - 套件 green（2658 tests EFFECTIVE GREEN）。在飞 2/3。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:3xZ（内层，laydown-derivation + token-status fan-in）
+
+- **laydown-derivation fan-in 完成（真实现）**：derive_loop_scripts 拼写不敏感依赖闭包（script-dir sibling
+  refs fixpoint；**heal 两个静默缺失 sibling cap-from-gate.ts + pane-state-classify.ts，集 43→46**）、
+  verify blind-spot 共享尺、AC4 fail-loud CHECKER 前置。AC1-AC5/7、**80/80**（首跑 1 瞬态 flake——重跑
+  80/80 绿）。**follow-up**：laydown-set-check.sh 仍 prefix-only（与闭包集分歧，弱化 lay-what-you-verify，
+  待后续对齐）。
+- **token-status-dead-holder fan-in 完成（真实现）**：--status 发 holder_alive + reclaimable_now（共享
+  classify_hold()，读答案 == 下次 acquire 动作）、只读永不 reclaim、AC7 pull-based 指引。AC1-AC7、16/16 +
+  token 族 20/20。AC6 governance→engine 解决（retag 会 unpin token 测试出默认 gate）。worktree/branch 已清。
+- **在飞 0/3**。套件 green、无 stop、无 block、Monitor 绿。
