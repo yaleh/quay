@@ -2,6 +2,16 @@
 # os-anchor-watchdog.sh — the OS-level anchor for the two-layer loop
 # (tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash).
 #
+# ⚠ NOT A SHIPPED DELIVERABLE (human ruling 2026-08-06): this is a quay-development-stage
+# tool, not part of the product's delivery build. quay-init.sh never installs or invokes it
+# (verified: 0 references). It requires an EXPLICIT human decision to install/enable —
+# never install, enable, or re-enable it as a side effect of any automated flow (dispatch,
+# cold-start, upgrade). The systemd unit was disabled 2026-08-06 after it revived a
+# deliberately-decommissioned target (absence-inference cannot distinguish "crashed" from
+# "intentionally stopped" — see tasks/gap-os-anchor-watchdog-lease-model-instead-of-
+# absence-inference.md, already-diagnosed, not yet fixed). Files are kept on disk for
+# reference/future use, not deleted.
+#
 # WHY (the measured defect, 2026-08-05): every loop anchor lived INSIDE a Claude
 # session (CronCreate / ScheduleWakeup are session-scoped). A machine crash killed
 # the session AND the anchor with it — the dead loop then looked IDENTICAL to a

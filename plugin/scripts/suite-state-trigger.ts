@@ -39,11 +39,17 @@
 //                                   #   （外层 Monitor 事件流 → 立即推送，不等 cron）
 //     [--interval <sec>]            # Monitor 轮询间隔（默认 5，目标秒级）
 //     [--root <path>]               # 工作区根（测试接缝；默认仓库根）
+//     [--json]                      # 一次 verdict 覆盖范围报告（one-shot，纯读）：
+//                                   #   verdictAgeMin（finishedAt 距今分钟）+ verdictCommitDelta
+//                                   #   （git rev-list --count <verdictCommit>..HEAD）+ 可读性 band —
+//                                   #   「绿是否仍描述当前树」从此可读（gap-green-verdict-never-expires）。
+//                                   #   不加硬闸（AC4）：只报可见性，不引入"陈旧即停派"。
 //
 // Exit: 0（正常）；只有不可解析的参数退出 1。状态是 red 不是错误——它就是要触发处置的信号。
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { matchGlob, parseTouches } from "./touches-orthogonality-check.ts";
@@ -78,6 +84,15 @@ export interface SuiteState {
   finishedAt?: string | null;
   durationMs?: number | null;
   laneCount?: number;
+  /**
+   * The covered-commit anchor (gap-green-verdict-never-expires-411-minutes-and-187-commits-later-
+   * still-green): the git HEAD at the moment the runner STARTED the suite — the tree this verdict
+   * actually tested. Written best-effort by full-suite-runner.ts (absent in non-git roots). The
+   * consumer's coverage read (--json) uses it for verdictCommitDelta and finishedAt for
+   * verdictAgeMin — "the verdict is green" vs "the verdict still describes the CURRENT tree" are
+   * then distinguishable. Absent = covered tree unknown (delta unreadable).
+   */
+  verdictCommit?: string;
   /**
    * Present only on red (AC5 reason axis, gap-full-suite-runner-concurrency-default-and-gate;
    * three-value enum per gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1):
@@ -292,6 +307,92 @@ export function readSuiteState(root: string): SuiteState | null {
   return readJson<SuiteState>(statePath(root));
 }
 
+// ── verdict coverage read (gap-green-verdict-never-expires-411-minutes-and-187-commits-later- ──────
+// still-green) — the mechanically readable covered scope of a suite verdict. The gap: a GREEN verdict
+// was consumed as "safe to dispatch" with NO basis about whether it still describes the CURRENT tree
+// (a 411-min-old / 187-commits-old green stayed authoritative). This adds the READ, not a gate: a
+// stale verdict is REPORTED (verdictAgeMin / verdictCommitDelta), the dispatch decision stays in the
+// outer/inner docs. NO "stale ⇒ stop-dispatch" hard gate (AC4 — that would re-play the IDLE-60s
+// over-report error; the threshold waits for cost data).
+
+/** Best-effort git HEAD commit of the workspace (the anchor a verdict's covered scope is compared to). */
+export function gitHead(root: string): string | null {
+  try {
+    const out = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const sha = String(out).trim();
+    return sha ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Commits between the verdict's covered commit and the CURRENT HEAD (`git rev-list --count <from>..HEAD`). */
+export function gitCommitDelta(root: string, from: string): number | null {
+  try {
+    const out = execFileSync("git", ["rev-list", "--count", `${from}..HEAD`], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const n = Number(String(out).trim());
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verdict AGE in minutes — minutes since the verdict's finishedAt (how long ago the run ENDED, NOT
+ * the run's own durationMs). Null when the state is absent or the verdict is not finished (running).
+ */
+export function verdictAgeMin(state: SuiteState | null): number | null {
+  if (!state || !state.finishedAt) return null;
+  const t = Date.parse(state.finishedAt);
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 60000));
+}
+
+/** The mechanically readable verdict-coverage report (the --json output). */
+export interface VerdictReport {
+  state: SuiteStateValue | "absent";
+  verdictCommit: string | null;
+  verdictAgeMin: number | null;
+  verdictCommitDelta: number | null;
+  verdictCommitDeltaReadable: 0 | 1;
+  stopSignal: boolean;
+  reason: SuiteStateReason | null;
+  runner?: string;
+  startedAt?: string;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+  laneCount?: number;
+}
+
+/** Compose the verdict-coverage report for a workspace root (reads .quay/full-suite-state.json). */
+export function reportVerdict(root: string): VerdictReport {
+  const cur = readSuiteState(root);
+  const commit = cur?.verdictCommit ?? null;
+  const delta = commit ? gitCommitDelta(root, commit) : null;
+  return {
+    state: cur?.state ?? "absent",
+    verdictCommit: commit,
+    verdictAgeMin: verdictAgeMin(cur),
+    verdictCommitDelta: delta,
+    verdictCommitDeltaReadable: delta === null ? 0 : 1,
+    stopSignal: shouldStopDispatch(cur),
+    reason: cur?.reason ?? null,
+    runner: cur?.runner,
+    startedAt: cur?.startedAt,
+    finishedAt: cur?.finishedAt,
+    durationMs: cur?.durationMs,
+    laneCount: cur?.laneCount,
+  };
+}
+
 /**
  * 记录一条转变事件到 append-only 日志（measure 钩子）。无转变 = 不写，返回 null。
  * 写日志不是「决策」——它是状态变化的事实记录，处置决策由外层既有逻辑做（AC2/AC4）。
@@ -399,6 +500,14 @@ function parseArg(argv: string[], name: string): string | undefined {
 export async function run(argv: string[]): Promise<number> {
   const root = path.resolve(parseArg(argv, "--root") ?? REPO_ROOT);
   const interval = Number(parseArg(argv, "--interval") ?? "5");
+
+  // --json（gap-green-verdict-never-expires-... Contract invoke）：one-shot verdict-coverage report —
+  // verdictAgeMin（finishedAt 距今分钟）+ verdictCommitDelta（覆盖 commit → 当前 HEAD 的提交数）。
+  // 纯读，不写任何文件、不做任何派发/停派判定（AC4：不加"陈旧即停派"硬闸——可见性先行）。
+  if (argv.includes("--json")) {
+    console.log(JSON.stringify(reportVerdict(root), null, 2));
+    return 0;
+  }
 
   if (argv.includes("--monitor") || !argv.includes("--once")) {
     const intervalMs = Number.isFinite(interval) && interval > 0 ? interval * 1000 : 5000;

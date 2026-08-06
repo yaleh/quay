@@ -690,8 +690,10 @@ tick 做一次收尾 pass。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
-     （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
-     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。`reason` 只在 red 时出现：
+     （`{state: running|green|red, reason?, failures?, verdictCommit?, runner: outer|inner,
+     startedAt, finishedAt, durationMs, laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。
+     `verdictCommit?` = **这条 verdict 覆盖的 tree/commit**（起跑时 `git rev-parse HEAD`，
+     best-effort；非 git 根缺失——缺失 = 覆盖树未知）。`reason` 只在 red 时出现：
      `failed`（真实失败——stop-dispatch 信号）或 `aborted`（套件未完成、无正确性结论——**不触发
      停派**，`gap-full-suite-runner-concurrency-default-and-gate` AC5）。**起跑条件**：本轮收尾了 ≥1
      个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=
@@ -705,6 +707,16 @@ tick 做一次收尾 pass。
      以及兜底退出码非 0。`state: red` + `reason: failed` 即 AC4 的 **stop-dispatch
      信号**（inner 读它停派发 + 暂缓 fan-in，见下「红窗分诊」）；`reason: aborted`（被信号杀/spawn
      失败）**不是** stop-dispatch 信号——inner 照常派发，本层按 aborted 语义处置（记录 + 重跑）。
+   - **verdict 覆盖范围可读（`gap-green-verdict-never-expires-411-minutes-and-187-commits-later-
+     still-green`，AC2/AC3）**：runner 每次写 verdict 时记录它所覆盖的 tree/commit
+     （`verdictCommit` = 起跑时 `git rev-parse HEAD`，best-effort）。consumer 读覆盖范围用
+     `node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts --json`——
+     输出 `verdictAgeMin`（finishedAt 距今分钟数）与 `verdictCommitDelta`
+     （`git rev-list --count <verdictCommit>..HEAD`）——**「这条绿是否仍描述当前树」从此可读**
+     （「上一次跑完是绿的」≠「现在是绿的」；一个 411 分钟 / 187 提交前的绿被当成现在的授权，正是
+     本任务要消灭的形态）。**只报可见性，不加硬闸**（AC4：不引入「陈旧即停派」——那会用一条新噪声
+     换旧噪声，重复 `IDLE 60s 即报` 的过报；阈值待成本数据，`gap-suite-cost-model-is-wrong-
+     optimizations-buy-nothing` 反对在成本结构未知时定阈值）。
    - **并发旋钮分叉（同一份文档服务两种测试框架）**：runner 的 `--lane-count` 拼接只对
      node:test/test.sh 项目生效（`--test-concurrency=N`，test.sh 的派生默认）；**vitest 项目
      真实文件级并行 flag 是 `--maxWorkers`**（archguard 用 `--maxWorkers=8` 跑通全量 4902 passed），
@@ -1073,7 +1085,9 @@ tick 或 `/clear` 后的会话会重犯。
 - 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
 - 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
-  与 `durationMs`、本轮全量 suite 是否在跑/绿/红
+  与 `durationMs`、本轮全量 suite 是否在跑/绿/红；**verdict 覆盖**（`verdictAgeMin` / `verdictCommitDelta`，
+  一条命令：`node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts --json`，
+  缺文件/非 git 根报 `verdictCommitDeltaReadable: 0`）
 - 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
   排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
@@ -1093,7 +1107,7 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补）。**历史名「batch2」**（旧批模型队列快照，保留不改名） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, verdictCommit?, runner, startedAt, finishedAt, durationMs, laneCount}`；`verdictCommit?` = 该 verdict 覆盖的 tree/commit（起跑时 HEAD，best-effort）；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写。verdict 覆盖/时效经 `suite-state-trigger.ts --json` 读（`verdictAgeMin`/`verdictCommitDelta`，只报可见性不加硬闸） |
 | `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal` + `failureLocation`（SUITE-RED 携带，供派发决策）；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |

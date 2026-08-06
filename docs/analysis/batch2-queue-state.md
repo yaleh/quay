@@ -6783,3 +6783,38 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   阻塞随之解除（待外层 verification-round 翻 done）。
 - 在飞 0/5（全部完成）。resource-aware worktree（dd67f7e9）仍待外层处置（3f78e428 KEPT）。
 - 背景 scoped verify（bt2ha1tfy，concurrency+split-batch+send-keys 三连）运行中。
+
+### tick 2026-08-06T05:2xZ（心跳：派发 1，补晋 2，verify 运行中）
+
+- **派发 1**：no-post-merge-latency（fork develop 47e32029，worktree /home/yale/work/quay-worktrees/no-post-merge）。
+  fork-baseline 无依赖 → develop。5 个 slot-refill 推荐里排除 4 个：concurrency-revert + send-keys（**刚 fan-in、工作已落、待外层翻 done**——
+  重复派发隐患，taskWorkLanded 信号缺口再现）；DIR-124（human-steered）；token-measures-wait（**引用已 B-full-delete 的 heavy-op-token 14 处**，
+  触摸集含 heavy-op-token.sh——主题已不存在，需外层定处置，不派发）。
+- **补晋 2**（3.6，pool 14<floor 20）：green-verdict + shipped-verifiers todo→ready（3b7d9e3e）。
+  production gate 显示两者都与在飞 no-post-merge 触摸冲突（共享 orchestrator-loop-tick.md / quay-init.sh）→ **本 tick 不派发，下 tick 再评估**。
+- **在飞 1/5**（no-post-merge）。后台 scoped verify（bt2ha1tfy，concurrency+split-batch+send-keys 三连）运行中，
+  与在飞 no-post-merge agent 均不冲突。外层 suite 状态 running（外层契约修复后重跑）。
+
+### tick 2026-08-06T06:0xZ（零派发：cap 落 WAIT=2，全部候选被排除）
+
+- **cap=2（WAIT 档）**：外层全量 suite（14:21 起，~38min）加载 4 核，avg300 高 → cap 从 GO=5 落 WAIT=2。
+- **零派发**：slot-refill 4 个推荐全排除——DIR-124（human-steered）、concurrency-revert + send-keys（**刚 fan-in 待外层翻 done**，
+  taskWorkLanded 缺口第三次点名）、token-measures-wait（主题 heavy-op-token 已删）。在飞 1/2（no-post-merge）。
+  green-verdict + shipped-verifiers 仍与在飞冲突，下 tick 再评估。
+- **池 16 ≥ floor 8（cap=2×4）**，dispatchable 6 ≥ cap → 无需补晋。
+- **verify 重跑（bmdd861sd）**：concurrency scoped 仍在跑（外层 suite 负载下慢）。此前 bt2ha1tfy 的 verify-1 断言失败
+  疑似 KNOWN-LOAD-SENSITIVE runner-grouping 被并发放大（agent 已文档化），isolated 重跑待结果。
+
+### verify 结案（bmdd861sd 被 300s 超时杀，改用直跑定位）
+
+- **concurrency-revert 合并验证 GOOD**：dead-code-after-return-check 9/9、resource-gate 15/15、capability-catalog 8/8 全绿。
+  runner-grouping 6/9（3 个失败全为 KNOWN-LOAD-SENSITIVE 嵌套 governance 跑，外层 suite 负载下无法完成——agent 已文档化，按仓规隔离重跑）。
+- **早前 verify-1 "断言失败"根因**：resource-gate.test.mjs 在 /tmp/quay-intg2 缺 gitignore 的 `.quay/config.yml`
+  → `_findRepoRoot` 抛错（文件级失败，非代码缺陷）。**已修复**：symlink config 进临时 worktree。
+  **教训**：temp worktree 的 fan-in scoped verify 必须带 `.quay/config.yml`（gitignored，不随 worktree add 检出）。
+
+### tick 2026-08-06T06:5xZ（零派发：唯一推荐 DIR-124 为 human-steered）
+
+- 零派发：cap=2（WAIT）下 slot-refill 仅推荐 DIR-124（human-steered 不自动派）。其余候选仍为陈旧/冲突/主题删除。
+- 外层 suite 卡在 triage（进程 0% CPU，已 30+min），外层正翻「3 real defects from full-suite triage」；
+  no-post-merge 在飞（8 脏文件，工作推进中）。池 16 无需补晋。

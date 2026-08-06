@@ -2,6 +2,11 @@
 # os-anchor-install.sh — install/remove the OS-level loop watchdog on THIS machine
 # (tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash, AC1).
 #
+# ⚠ NOT A SHIPPED DELIVERABLE (human ruling 2026-08-06): a quay-development-stage tool,
+# not part of the product's delivery build — quay-init.sh never calls this script. Run it
+# ONLY on explicit human request, never as a side effect of an automated flow. See
+# os-anchor-watchdog.sh's matching header for the incident that prompted this.
+#
 # The loop previously had ZERO OS-level anchor: every anchor lived inside a Claude
 # session (session-scoped CronCreate/ScheduleWakeup) and died with it. This installer
 # creates a systemd USER timer (does NOT die with any Claude session) that fires

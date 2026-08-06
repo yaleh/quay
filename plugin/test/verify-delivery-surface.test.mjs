@@ -163,6 +163,12 @@ test("Contract control — removing any one category's deliverables makes L1 rep
   const m = await mod();
   const specText = fs.readFileSync(SPEC_DOC, "utf8");
   for (const cat of m.MANIFEST) {
+    // A category with an EMPTY deliverables array (e.g. id=5 periodic-anchor, excluded from
+    // delivery by human ruling 2026-08-06 — a quay-development-stage tool, not shipped) is
+    // vacuously covered by design (missing.length === 0 trivially) and CANNOT be driven to
+    // MISSING by removing files it has none of. Skip it here rather than let the assertion
+    // fail silently misleading — this is the intended invariant, not a broken control.
+    if (cat.deliverables.length === 0) continue;
     const root = buildFixture(m.MANIFEST, specText);
     try {
       removeCategoryDeliverables(root, cat);
