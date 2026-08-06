@@ -118,6 +118,13 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
 **不引入新调度**：趋势是**读已有记录**的被动判据（suite-state / verification-round 历史），不是新的
 运行触发；外层 cron 或复盘时跑。
 
+> **AC3 并列交叉标注（2026-08-06，`gap-no-criterion-records-its-own-cost-checker-cost-jsonl`）**：
+> 本任务（quality-criteria，产品面趋势）与 checker-cost（判据自身成本，机制面记录）**并列非子项**——
+> checker-cost 提供**数据**（每个判据退出追加 `{name, ms, n, load}` 到 `.quay/checker-cost.jsonl`，
+> 纯追加零判断），本任务提供**打标**（读 checker-cost 历史算成本斜率、恶化超阈值报出）。实例 #10 的
+> 35.8→91.2→157.0 三点斜率已由 checker-cost 落盘（load 轴在场），本任务的趋势判据从 checker-cost
+> 读**判据自身**成本序列、从 suite-state/verification-round 读**套件整体**成本序列。
+
 ## Acceptance Criteria
 
 - [ ] AC1: 全量套件每次跑记录指标到运行时文件（`{at, durationMs, tests, fail, cancelled, per_test_ms}`，
