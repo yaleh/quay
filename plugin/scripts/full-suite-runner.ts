@@ -280,6 +280,11 @@ export async function run(argv: string[]): Promise<number> {
   let redDetected = false;
   let abortDetected = false;
   let runDone = false;
+  // AC1 (gap-quality-criteria-are-point-in-time-no-trend-criteria) — per-run metric recording.
+  // Parsed from the suite's TAP summary (`# tests N`, `# cancelled N`) so the verification-round
+  // record carries tests/cancelled/perTestMs — the input of the trend criterion (trend-check.ts).
+  let testsSeen = 0;
+  let cancelledSeen = 0;
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
     const at = new Date().toISOString();
@@ -304,6 +309,13 @@ export async function run(argv: string[]): Promise<number> {
 
   const onLine = (line: string) => {
     logStream.write(line + "\n");
+    // AC1 — TAP summary parsing: `# tests N` / `# cancelled N` (node:test emits these on the
+    // stream regardless of pass/fail). Fires on every line; a later summary overwrites an earlier
+    // one (TAP prints exactly one summary, but a failing worker may print its own before the root).
+    const testsMatch = /^#\s*tests\s+(\d+)/.exec(line);
+    if (testsMatch) testsSeen = Number(testsMatch[1]);
+    const cancelledMatch = /^#\s*cancelled\s+(\d+)/.exec(line);
+    if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
       // AC2 — mark RED immediately, while the run is still in progress. reason=failed (AC5: this
@@ -389,7 +401,14 @@ export async function run(argv: string[]): Promise<number> {
         durationMs,
       };
   writeState(stateFile, finalState);
-  appendSuiteDurationRecord(root, { startedAt, durationMs, laneCount, green });
+  appendSuiteDurationRecord(root, {
+    startedAt,
+    durationMs,
+    laneCount,
+    green,
+    tests: testsSeen,
+    cancelled: cancelledSeen,
+  });
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
@@ -402,12 +421,21 @@ export async function run(argv: string[]): Promise<number> {
  * single-state full-suite-state.json). This closes the "sequence stopped at 05:03" defect: the
  * outer's closure pass could be blocked by a red window and skip its write, but the runner is a
  * separate process that ALWAYS finishes, so the duration history can no longer die mid-sequence.
- * Row shape: {round, startedAt, durationMs, laneCount, pass, fail, load} — round = last-round+1
- * (same rule the outer closure pass uses), load = /proc/loadavg 1-min at finish.
+ * Row shape: {round, startedAt, durationMs, laneCount, pass, fail, load, at, tests?, cancelled?,
+ * perTestMs?} — round = last-round+1 (same rule the outer closure pass uses), load = /proc/loadavg
+ * 1-min at finish. tests/cancelled/perTestMs are AC1 (gap-quality-criteria-are-point-in-time-no-trend-
+ * criteria): the per-run metrics that feed the trend criterion (trend-check.ts).
  */
 export function appendSuiteDurationRecord(
   root: string,
-  opts: { startedAt: string; durationMs: number; laneCount: number; green: boolean },
+  opts: {
+    startedAt: string;
+    durationMs: number;
+    laneCount: number;
+    green: boolean;
+    tests?: number;
+    cancelled?: number;
+  },
 ): void {
   const file = path.resolve(root, ".quay", "verification-round.jsonl");
   let round = 1;
@@ -429,7 +457,16 @@ export function appendSuiteDurationRecord(
   } catch {
     // fail-open: never break the suite verdict on a round-record write
   }
-  const rec = {
+  // AC1 (gap-quality-criteria-are-point-in-time-no-trend-criteria): extend the round record with
+  // tests/cancelled/perTestMs — the per-run metrics that make the TREND criterion (trend-check.ts)
+  // possible. perTestMs = durationMs / tests (ms per test); omitted when tests is absent/0 so a
+  // legacy-format row without counts stays parseable. Optional fields are included only when
+  // present — existing readers that assert exact fields (checker-cost.test.mjs AC6) keep passing.
+  const perTestMs =
+    opts.tests !== undefined && opts.tests > 0 && opts.durationMs > 0
+      ? Math.round((opts.durationMs / opts.tests) * 1000) / 1000
+      : undefined;
+  const rec: Record<string, unknown> = {
     round,
     startedAt: opts.startedAt,
     durationMs: opts.durationMs,
@@ -439,6 +476,9 @@ export function appendSuiteDurationRecord(
     load: getLoad1(),
     at: new Date().toISOString(),
   };
+  if (opts.tests !== undefined) rec.tests = opts.tests;
+  if (opts.cancelled !== undefined) rec.cancelled = opts.cancelled;
+  if (perTestMs !== undefined) rec.perTestMs = perTestMs;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");

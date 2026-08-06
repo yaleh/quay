@@ -244,3 +244,22 @@ test("AC6 — appendSuiteDurationRecord appends a 7-field row and increments rou
   assert.ok(typeof r1.load === "number", "suite record carries the load axis");
   assert.ok(typeof r1.startedAt === "string" && !Number.isNaN(Date.parse(r1.startedAt)));
 });
+
+// ── AC1 extension (gap-quality-criteria-are-point-in-time-no-trend-criteria): per-run metrics ────
+
+test("AC1 — appendSuiteDurationRecord records tests/cancelled/perTestMs when provided", (t) => {
+  const root = tmpdir(t, "suiteext");
+  appendSuiteDurationRecord(root, { startedAt: "2026-08-05T07:15:00.000Z", durationMs: 251000, laneCount: 1, green: true, tests: 1000, cancelled: 2 });
+  const file = path.join(root, ".quay", "verification-round.jsonl");
+  const [r1] = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(r1.tests, 1000, "tests count recorded");
+  assert.equal(r1.cancelled, 2, "cancelled count recorded");
+  assert.equal(r1.perTestMs, 251, "perTestMs = durationMs/tests (251000/1000 = 251 ms per test)");
+  // A zero/absent tests count leaves perTestMs out (legacy-format rows stay parseable).
+  appendSuiteDurationRecord(root, { startedAt: "2026-08-05T08:00:00.000Z", durationMs: 90000, laneCount: 1, green: false });
+  const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const [r2] = lines.slice(-1).map((l) => JSON.parse(l));
+  assert.equal(r2.round, 2, "round still increments");
+  assert.equal("tests" in r2, false, "tests omitted when not provided");
+  assert.equal("perTestMs" in r2, false, "perTestMs omitted when tests absent");
+});

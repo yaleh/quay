@@ -56,6 +56,10 @@ extra:
 **与已立案的关系**：`gap-establish-daily-review-cadence-mechanism`（done）= 层的复盘节奏；
 `gap-crystallize-launch-config-into-checked-in-settings-file`（todo）= 层的启动配置，本条扩展为
 「随层出货」；缺口 2/3 的机制（价值排序、趋势判据）是层的职能内容，另立任务、归属本条。
+**交叉标注（AC6，`gap-quality-criteria-are-point-in-time-no-trend-criteria`）**：缺口 3 的「趋势判据」
+（读 verification-round/checker-cost/suite-state-events 历史，窗口恶化超阈值打标——「比上次更贵了吗」
+有机械答案）已由该任务落地为 `plugin/scripts/trend-check.ts`，并挂进 `orchestration/REVIEW-cadence.md`
+3d 作为每日复盘常项——本条 manager 层的「看趋势」职能的机制挂接点即该判据。
 
 ## Acceptance Criteria
 
