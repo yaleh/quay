@@ -5901,3 +5901,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - 套件 running（clean-tree，contract new=0 past static）。外层 05:25Z 注：池 5/12 待 re-green 后 refill。
   无 block、无 stop。派发 hold 继续。在飞 0/3。
+
+### tick 2026-08-06T05:4xZ（内层，池 refill + 满额派发）
+
+- **套件 re-green（2 次有效绿）**，外层收尾 3 任务 done（productize/session-liveness/loop-driver）。
+- **池补晋 8**（tick 3.6，pool 4<floor 12）：runtime-nowhere-safe/token-measures-wait/token-watches-shell/
+  token-status-dead-holder/value-prioritization/DIR-124/laydown-derivation-spelling/suite-state-reason-axis
+  todo→ready + self-touch。**池 10/12、disjoint 7（criterion TRUE）**。
+- **DIR-124 拒绝派发（directive 父任务）**：children 全 todo——工作在其 children，非可派发叶（与
+  PARENT-DONE-IFF-CHILDREN 同判）。token-measures-wait + suite-state-reason-axis 未入 ready（待核）。
+- **满额派发 3/3**：① value-prioritization（`fm-...-5xzv3k`）② token-watches-shell（`fm-...-xk3jsq`）
+  ③ laydown-derivation-spelling（`fm-...-m6xqmw`）。生产闸 4 互不相交候选取 3。
+- **⚠ PLAN-develop-branch-cutover（develop/GitHub 主线 + master 冻结）待人确认——确认前不执行**（已注记）。
+- 套件 green、无 stop、无 block、Monitor 绿。
