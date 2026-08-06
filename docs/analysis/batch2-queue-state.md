@@ -5862,3 +5862,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层 7169c01b：message-bus closed + manager 提案落地（路径碰撞已 reconciliation）；新立
   gap-ready-pool-promotion-same-class-as-slot-refill（step 3.6 补晋靠自愿、3h 无机械晋级——同类）。
 - 在飞 1/3（loop-driver-check 工作中，fan-in 暂缓）。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:5xZ（内层，loop-driver-check fan-in — 本批完成）
+
+- **loop-driver-check fan-in 完成（真实现）**：loop-driver registry LIVE-write 接入外层 tick 步骤 4
+  （与 cold-start skill byte-identical）、double-trigger 无回归、STALLED 处置重写、.halt 打印 运行中→未暂停。
+  **AC3（stale registry 不报 LIVE）诚实记 layer-2**（bash 无法观察会话内 cron——结构性不可区分，勾未选 +
+  理由 + layer-2 交接，符合「不许把做不到写成通过」）。scoped **78/78**（~134s，含 KNOWN-LOAD-SENSITIVE
+  quay-init-loop 隔离）。worktree/branch 已清。
+- **本批完成 → 外层可重跑全量**（外层 04:05Z 等 inner scoped suite 完成避 4 核碰撞——现完成）。
+- 在飞 0/3。套件仍 triaged-red（待外层 re-verify）。无 stop、无 block、Monitor 绿。
