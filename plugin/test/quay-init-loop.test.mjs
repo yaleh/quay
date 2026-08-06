@@ -511,10 +511,12 @@ test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is proj
     assert.ok(!/mcp_entry: \["node", "quay-native", "mcp"\]/.test(src),
       'config must not PATH-resolve a bare quay-native command — that is the dev-tree symlink dependency (AC7b negative control)');
     // The command must be an absolute project-local path into the laid-down SELF-CONTAINED native
-    // provider bundle (vendor/quay-native/dist/quay-native.js) — the runtime quay-init actually lays
-    // down (gap-ac3b-prove-installed-quay-runs-without-dev-tree). It must NOT reference a bin/quay-native.ts
-    // source file that needs a node_modules quay/yaml/zod/sdk (not laid down).
-    assert.match(src, /mcp_entry: \["node", "\/[^"]*\/vendor\/quay-native\/dist\/quay-native\.js", "mcp"\]/,
+    // provider bundle (.quay/runtime/bin/quay-native.js) — the runtime quay-init actually lays
+    // down (gap-ac3b-prove-installed-quay-runs-without-dev-tree). The landing dir is .quay/runtime/
+    // (quay's own namespace, never vendor/ — gap-the-runtime-has-nowhere-safe-to-land AC9). It must
+    // NOT reference a bin/quay-native.ts source file that needs a node_modules quay/yaml/zod/sdk
+    // (not laid down).
+    assert.match(src, /mcp_entry: \["node", "\/[^"]*\/\.quay\/runtime\/bin\/quay-native\.js", "mcp"\]/,
       'the mcp_entry command must be an absolute project-local path into the laid-down provider runtime (self-contained bundle)');
     assert.ok(src.includes('QUAY_NATIVE_TASKS_DIR'), 'config must set the native tasks dir');
   } finally { cleanup(ws); }
@@ -571,25 +573,77 @@ test('AC7b — a plugin source WITH built runtimes lays them into the target (pr
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
         '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
       assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-      assert.match(r.stdout, /vendor\/quay\/dist\/quay\.js/, 'must report the Core runtime lay-down');
-      assert.match(r.stdout, /vendor\/quay-native\/dist\/quay-native\.js/, 'must report the native provider runtime lay-down');
-      const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
+      assert.match(r.stdout, /\.quay\/runtime\/bin\/quay\.js/, 'must report the Core runtime lay-down');
+      assert.match(r.stdout, /\.quay\/runtime\/bin\/quay-native\.js/, 'must report the native provider runtime lay-down');
+      const laid = path.join(ws, '.quay', 'runtime', 'bin', 'quay.js');
       assert.ok(fs.existsSync(laid), 'the Core runtime must be laid into the target project');
       assert.equal(fs.readFileSync(laid, 'utf8'), '// fake built quay.js bundle\n',
         'the laid-down Core runtime must be byte-identical to the plugin source');
-      const laidNative = path.join(ws, 'vendor', 'quay-native', 'dist', 'quay-native.js');
+      const laidNative = path.join(ws, '.quay', 'runtime', 'bin', 'quay-native.js');
       assert.ok(fs.existsSync(laidNative), 'the native provider runtime must be laid into the target project');
       assert.equal(fs.readFileSync(laidNative, 'utf8'), '// fake built quay-native.js bundle\n',
         'the laid-down native runtime must be byte-identical to the plugin source');
-      const laidProviderYml = path.join(ws, 'vendor', 'quay-native', 'provider.yml');
+      const laidProviderYml = path.join(ws, '.quay', 'runtime', 'provider.yml');
       assert.ok(fs.existsSync(laidProviderYml), 'provider.yml must be laid into the target project');
       assert.equal(fs.readFileSync(laidProviderYml, 'utf8'), 'id: native\nname: "quay-native"\n',
         'the laid-down provider.yml must be byte-identical to the plugin source');
       const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
-      assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/vendor\/quay-native\/dist\/quay-native\.js", "mcp"\]/,
+      assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/\.quay\/runtime\/bin\/quay-native\.js", "mcp"\]/,
         'config must point the provider mcp_entry at the laid-down self-contained native bundle');
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// gap-the-runtime-has-nowhere-safe-to-land AC10 — the runtime is install-generated product, not
+// source, so quay-init MUST write the .gitignore entry itself (never an instruction to the user —
+// that is exactly the manual patch G0 bans). Idempotent + non-destructive.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+test('AC10 — quay-init writes the .gitignore runtime entry itself; a pre-existing same-name entry is NOT duplicated and the user gitignore is NOT overwritten', () => {
+  const ws = makeTmp();
+  try {
+    // Pre-existing USER gitignore already carrying the entry + user content.
+    fs.writeFileSync(path.join(ws, '.gitignore'), 'node_modules/\n.quay/runtime/\n# user note\n', 'utf8');
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    const gi = fs.readFileSync(path.join(ws, '.gitignore'), 'utf8');
+    assert.equal(gi, 'node_modules/\n.quay/runtime/\n# user note\n',
+      'the user gitignore must be byte-preserved (no duplicate write, no overwrite — AC10 negative control)');
+    assert.match(r.stdout, /skipped: \.gitignore already carries/, 'must report the skip, not a write');
+    const count = (gi.match(/^\.quay\/runtime\/$/gm) || []).length;
+    assert.equal(count, 1, 'the runtime entry must appear exactly once (no duplicate)');
+  } finally { cleanup(ws); }
+});
+
+test('AC10 — quay-init APPENDS the runtime gitignore entry when the target lacks it, preserving the user\'s other content', () => {
+  const ws = makeTmp();
+  try {
+    // A user .gitignore WITHOUT the entry → quay-init appends it, preserving user content.
+    fs.writeFileSync(path.join(ws, '.gitignore'), 'node_modules/\n', 'utf8');
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report the append');
+    const gi = fs.readFileSync(path.join(ws, '.gitignore'), 'utf8');
+    assert.ok(gi.includes('node_modules/\n'), 'the user gitignore content must be preserved');
+    assert.ok(gi.includes('.quay/runtime/\n'), 'the runtime entry must be present');
+    assert.ok(gi.includes('# quay runtime'), 'the entry must carry a self-documenting comment');
+  } finally { cleanup(ws); }
+});
+
+test('AC10 — quay-init CREATES the .gitignore when the target has none, and the entry covers the whole .quay/runtime/ dir', () => {
+  const ws = makeTmp();
+  try {
+    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
+    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
+    assert.match(r.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report creating the entry');
+    const gi = path.join(ws, '.gitignore');
+    assert.ok(fs.existsSync(gi), 'a .gitignore must be created');
+    const text = fs.readFileSync(gi, 'utf8');
+    assert.ok(text.includes('.quay/runtime/\n'), 'the runtime entry must be present');
+    // The landing dir is .quay/runtime/ (quay namespace, never vendor/ — AC9): the config file
+    // .quay/config.yml is NOT ignored by the entry (only .quay/runtime/ is).
+    assert.ok(!text.includes('.quay/config.yml'), 'config.yml must not be swallowed by the gitignore entry');
+  } finally { cleanup(ws); }
 });
 
 // ── gap-vendor-runtime-not-in-git-clone-broken-mcp-entry (AC1/AC2/AC3) ───────────────────────────────
@@ -624,14 +678,14 @@ echo "[stub sync-vendor] built"
         '--tmux-session', 'proj-0:0.0', '--plugin-root', src]);
       assert.equal(r.status, 0, `init must succeed after the auto-build:\n${r.stderr}`);
       assert.match(r.stderr, /auto-built vendor runtime via sync-vendor\.sh/, 'must report the auto-build (AC2)');
-      const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
+      const laid = path.join(ws, '.quay', 'runtime', 'bin', 'quay.js');
       assert.ok(fs.existsSync(laid), 'the auto-built Core runtime must be laid into the target project');
       assert.equal(fs.readFileSync(laid, 'utf8'), '// auto-built quay.js\n',
         'the laid-down Core runtime must be the auto-built bundle');
-      const laidNative = path.join(ws, 'vendor', 'quay-native', 'dist', 'quay-native.js');
+      const laidNative = path.join(ws, '.quay', 'runtime', 'bin', 'quay-native.js');
       assert.ok(fs.existsSync(laidNative), 'the auto-built native provider runtime must be laid into the target project');
       const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
-      assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/vendor\/quay-native\/dist\/quay-native\.js", "mcp"\]/,
+      assert.match(cfg, /mcp_entry: \["node", "\/[^"]*\/\.quay\/runtime\/bin\/quay-native\.js", "mcp"\]/,
         'config must point the provider mcp_entry at the auto-built native bundle');
     } finally { cleanup(ws); }
   } finally { cleanup(src); }
@@ -690,7 +744,7 @@ test('AC3 — verify FAILS CLOSED when the provider mcp_entry references a runti
 // gap-dist-runtime-not-self-contained-reads-external-package-json (AC4, upgrade-channel config
 // migration): a PRE-EXISTING config from an OLD install can carry a provider mcp_entry pointing at a
 // dev-tree source path (e.g. ./bin/quay-native.ts) that does NOT exist in the target. quay-init lays
-// the install-state runtime (vendor/quay-native/dist/quay-native.js) before writing the config, so a
+// the install-state runtime (.quay/runtime/bin/quay-native.js) before writing the config, so a
 // dangling reference to a QUAY runtime file must be MIGRATED to that install-state path (not left for
 // the AC3 verify to fail closed forever — the "config already exists is never rewritten" upgrade
 // hole). SCOPE GUARD: an arbitrary dangling path (e.g. nonexistent/runtime.js) is NOT migrated, so
@@ -720,10 +774,10 @@ test('AC4 — a pre-existing config whose mcp_entry points at a stale dev-tree r
       const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
       assert.ok(!cfg.includes(`${ws}/bin/quay-native.ts`), 'the stale dev-tree mcp_entry must no longer be present');
       assert.ok(!cfg.includes(`${ws}/bin`), 'the stale dev-tree provider path must no longer be present');
-      assert.match(cfg, new RegExp(`${ws.replaceAll('/', '\\/')}/vendor/quay-native/dist/quay-native\\.js`),
-        'the config mcp_entry must now point at the install-state runtime (vendor/quay-native/dist/quay-native.js)');
-      assert.match(cfg, new RegExp(`${ws.replaceAll('/', '\\/')}/vendor/quay-native`),
-        'the config provider path must now point at the install-state provider dir (vendor/quay-native)');
+      assert.match(cfg, new RegExp(`${ws.replaceAll('/', '\\/')}/\.quay/runtime/bin/quay-native\\.js`),
+        'the config mcp_entry must now point at the install-state runtime (.quay/runtime/bin/quay-native.js)');
+      assert.match(cfg, new RegExp(`${ws.replaceAll('/', '\\/')}/\.quay/runtime`),
+        'the config provider path must now point at the install-state provider dir (.quay/runtime)');
       // Other provider keys must be preserved (config migration, not a blank rewrite).
       assert.match(cfg, /enabled: true/, 'the existing provider enabled: true must be preserved');
       assert.match(cfg, /tasks_dir:/, 'the existing provider tasks_dir must be preserved');
@@ -802,7 +856,7 @@ echo "[stub sync-vendor] rebuilt"
       assert.equal(r.status, 0, `quay-init must succeed after the stale auto-rebuild:\n${r.stderr}`);
       assert.match(r.stderr, /vendor runtime STALE/, 'must report the STALE state (AC1 negative control: pre-fix code only rebuilt on missing, never on stale)');
       assert.match(r.stderr, /auto-rebuilt STALE vendor runtime via sync-vendor\.sh/, 'must report the stale auto-rebuild (AC1)');
-      const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
+      const laid = path.join(ws, '.quay', 'runtime', 'bin', 'quay.js');
       assert.ok(fs.existsSync(laid), 'the rebuilt Core runtime must be laid into the target');
       assert.equal(fs.readFileSync(laid, 'utf8'), '// rebuilt core\n', 'the laid Core runtime must be the REBUILT bundle, not the stale one');
     } finally { cleanup(ws); }
@@ -826,7 +880,7 @@ test('AC1 — a FRESH dist (dist mtime > source mtime) is NOT rebuilt (passes th
       assert.equal(r.status, 0, `fresh dist must pass through without a rebuild:\n${r.stderr}`);
       assert.doesNotMatch(r.stderr, /STALE/, 'a fresh dist must NOT be reported stale');
       assert.doesNotMatch(r.stderr, /\[stub sync-vendor\] should NOT run/, 'sync-vendor.sh must NOT run for a fresh dist');
-      const laid = path.join(ws, 'vendor', 'quay', 'dist', 'quay.js');
+      const laid = path.join(ws, '.quay', 'runtime', 'bin', 'quay.js');
       assert.equal(fs.readFileSync(laid, 'utf8'), '// fresh core\n', 'the laid Core runtime must be the existing fresh bundle');
     } finally { cleanup(ws); }
   } finally { cleanup(parent); }

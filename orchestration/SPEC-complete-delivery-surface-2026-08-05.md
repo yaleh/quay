@@ -31,8 +31,9 @@
 | `plugin/agents/` | 1 | |
 
 `quay-init` 铺进目标项目的目录：`.claude/`、`.quay/`、`docs/`、`orchestration/`、
-`plugin/scripts/`、`tasks/`、`vendor/quay/dist/`、`vendor/quay-native/dist/`（`scripts/` 不再铺——
-`--gate-scripts` 类别退役，见上）。
+`plugin/scripts/`、`tasks/`、`.quay/runtime/`（运行时落点，见 §6——不是 `vendor/`/`dist/`，
+见 `gap-the-runtime-has-nowhere-safe-to-land` AC9；`scripts/` 不再铺——`--gate-scripts` 类别退役，
+见上）。
 
 ---
 
@@ -187,6 +188,32 @@ L1 判据全部在查「仪器铺没铺」、没有一条查「循环转没转�
 ——任一存在 ⇒ `alive`；都无 ⇒ `dead`（dead-loop）。**与 backlog 空无关**（invariant
 `liveness_independent_of_backlog=1`）——队列空（queue-empty）与没人驱动（dead-loop）从此可区分。
 这就是「层次二 = 动态、运转期间周期性跑」的第一个落盘实例（层次一查交付完整性、层次二查持续健康）。
+
+---
+
+## 6. 落地集合与 G2 的关系（`gap-the-runtime-has-nowhere-safe-to-land` AC6）
+
+**落地集合（landed set）的定义**：**quay-init 机械铺进目标工作区的文件集合**——按落盘操作
+（filesystem laydown）定义，**不是按「目标是否提交进 git」定义**。运行时（`.quay/runtime/bin/
+quay.js`、`quay-native.js`、`.quay/runtime/provider.yml`）**算落地集合的一员**（算 ⇒ 字节相同）。
+
+**G2「落地文件全部与产物字节相同」判据怎么算**：G2 的字节相同判据是**落盘时的文件系统比较**——
+每个铺下的文件（含运行时）与产物字节相同，由 `copy_one` 的可 `cmp` 复制 + e2e `artifactDiffs`
+断言机械钉住。**git 是否跟踪是另一条正交的轴**：gitignore 是目标项目的 VCS 策略，**不改变落地
+文件的字节身份**。被 gitignore 的运行时仍在落地集合里、仍与产物字节相同——**G2 成立**。
+
+**这不是定义漏洞**（外层的前置问题），因为三点机械成立：
+1. 落地集合从未按「提交的文件」定义——e2e 一直数文件系统文件（`loopLaidDownFiles`），不是
+   git 跟踪文件；
+2. 字节相同判据仍作用于运行时（`copy_one` + `artifactDiffs`），gitignore 不豁免任何字节身份；
+3. **gitignore 条目由 quay-init 自己写入**（AC10，`ensure_runtime_gitignore`）——不是让使用者
+   打补丁 ⇒ **G0（人工补丁数 = 0）成立**。让使用者自己加 gitignore 例外，等价于要求他打一条
+   补丁，正是 G0 明令为 0 的东西。
+
+**为什么运行时不该进目标 git**（约束 #2）：`packages/quay/dist/quay.js` 单文件 **1,340,008 字节**
+（2026-08-06 实测；任务立案时 1,329,851——产物在长），而 `pre-commit` 的 `check-added-large-files`
+默认阈值 **500KB**（= 512,000 字节）。提交运行时会撞任何装了默认阈值钩子的目标；**不提交 + 由
+init 写 gitignore** 才是「运行时是产物不是源码」这一事实的机械落地。
 
 ---
 

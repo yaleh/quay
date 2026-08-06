@@ -111,6 +111,12 @@ meta-cc 此刻循环活着、cron 在跳、tick 已 4 行,但 **ready 0 / 遥测
 **缺口**:没有 `go build` —— **A5 的 Go 半边未覆盖**,而 `vendor` 撞 Go 保留目录那条
 **只有 Go 目标能暴露**。
 
+**缺口已关闭(2026-08-06,`gap-the-runtime-has-nowhere-safe-to-land` AC11)**:
+`install-config-driven-e2e.test.mjs` 新增 `A5/AC11` 测试,用本地 `replace` 依赖的 Go module(全离线)
+断言:基线 `go build ./...` 过 → 旧 `vendor/` 布局 `go build ./...` 必须失败(`inconsistent vendoring`,
+即 meta-cc DIR-103 根因)→ quay-init 落地后 `.quay/runtime/` 落点、无 `vendor/`、`go build ./...` 过。
+**同时该任务把运行时落点从 `vendor/` 改为 `.quay/runtime/`(AC9/AC10),A5 的碰撞源本身被移除。**
+
 ### 进度指标改为「红断言数」,不再用小时数
 
 **红断言数是可数的、单调的、不需要外推。** 已要求 quay 外层每轮 tick 报一次。
