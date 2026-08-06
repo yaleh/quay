@@ -55,6 +55,7 @@ SUITE-RED 判决的载荷是**空的**，而设计上它必须带上红落点。
 ## Evidence
 
 - `.quay/full-suite-state.json`：`failures=[]`
+- **连续三个实例（2026-08-06，管理者交叉核对 + 外层复核）**：red(18:47:46)、running(19:48:03)、red(20:26:23) 三次状态写入 `failures` 均为空——空载荷缺陷第 3 次确认
 - `full-suite-runner.ts:230-238`：设计注释明写 state.failures 必须带落点
 - `.quay/full-suite.log`：`grep -cE '^# (tests|pass|fail|cancelled)'` = 0；tail 断在 `diff: 'simple'`
 - 内层 18:5x：`timeout 300 node --test --test-concurrency=1 plugin/test/quay-init-loop.test.mjs`（另一条路找落点）
