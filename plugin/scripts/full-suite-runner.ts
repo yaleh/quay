@@ -156,6 +156,56 @@ function writeState(file: string, state: SuiteState): void {
   fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
+// ── AC6: append-only suite-duration sequence (gap-no-criterion-records-its-own-cost) ──────────────────
+// `.quay/full-suite-state.json` is a SINGLE-STATE file overwritten every round — the previous
+// round's durationMs is destroyed. The fix (same shape as the checker-cost ledger): append one line
+// {round, startedAt, durationMs, laneCount, pass, fail, load} to `.quay/verification-round.jsonl`
+// per run, NEVER overwriting the single-state file. After dozens of rounds the queryable sequence
+// survives, so "what did the suite cost last hour" is answerable without hand-digging panes/commits.
+//
+// load = /proc/loadavg 1min field — the attribution-correction dimension (a same-n round that cost
+// more is distinguishable as machine-busy rather than n-growth). Best-effort: a ledger write must
+// never fail the run (mirrors checker-cost.sh's fail-open).
+
+/** /proc/loadavg 1min load, or 0 if unreadable (best-effort). */
+export function readLoadAvg(): number {
+  try {
+    const v = Number(String(fs.readFileSync("/proc/loadavg", "utf8")).trim().split(/\s+/)[0]);
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export interface SuiteRoundRecord {
+  round: number;
+  startedAt: string;
+  durationMs: number;
+  laneCount: number;
+  pass: number;
+  fail: number;
+  cancelled: number;
+  load: number;
+  state: string;
+  runner: string;
+}
+
+/** Append one suite-round record to <root>/.quay/verification-round.jsonl (round = prior lines + 1). */
+export function appendVerificationRound(root: string, rec: SuiteRoundRecord): void {
+  try {
+    const file = path.join(root, ".quay", "verification-round.jsonl");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    let prior = 0;
+    if (fs.existsSync(file)) {
+      const text = fs.readFileSync(file, "utf8");
+      for (const l of text.split("\n")) if (l.trim()) prior++;
+    }
+    fs.appendFileSync(file, JSON.stringify({ ...rec, round: rec.round > 0 ? rec.round : prior + 1 }) + "\n", "utf8");
+  } catch {
+    // best-effort — never let the ledger fail the run
+  }
+}
+
 /** Does a stream line match any AC2 failure marker? */
 export function isFailureLine(line: string): boolean {
   return FAILURE_PATTERNS.some((re) => re.test(line));
@@ -193,6 +243,8 @@ export function extractFailureFile(line: string, root: string): string | undefin
     if (f) return f;
   }
   return undefined;
+}
+
 /** Does a stream line match an AC5 reason-axis ABORT marker (no correctness conclusion)? */
 export function isAbortLine(line: string): boolean {
   return ABORT_PATTERNS.some((re) => re.test(line));
@@ -359,8 +411,21 @@ export async function run(argv: string[]): Promise<number> {
   // 判绿 markers), and flip red the instant a failure line appears (AC2).
   const logStream = fs.createWriteStream(logFile, { flags: "w" });
 
+  // AC6 (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) — per-run pass/fail/cancelled
+  // tallies from the TAP summary lines (`# pass N` / `# fail N` / `# cancelled N`), carried into the
+  // append-only verification-round record so the suite's duration sequence is queryable by pass/fail.
+  let tapPass = 0;
+  let tapFail = 0;
+  let tapCancelled = 0;
+
   const onLine = (line: string) => {
     logStream.write(line + "\n");
+    const passM = line.match(/^#\s*pass\s+(\d+)/);
+    if (passM) tapPass = Number(passM[1]);
+    const failM = line.match(/^#\s*fail\s+(\d+)/);
+    if (failM) tapFail = Number(failM[1]);
+    const cancelledM = line.match(/^#\s*cancelled\s+(\d+)/);
+    if (cancelledM) tapCancelled = Number(cancelledM[1]);
     // Enrich a pending failure with its file context (TAP detail block / stack frames follow the
     // `not ok` line; the file is NOT on the failure line itself). Best-effort, bounded lookahead.
     if (pendingFailure && detailRemaining > 0) {
@@ -476,6 +541,21 @@ export async function run(argv: string[]): Promise<number> {
         ...(spawnError === null ? { failures: redFailures } : {}),
       };
   writeState(stateFile, finalState);
+  // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
+  // The full-suite-state.json's durationMs is this run's point value; verification-round.jsonl keeps
+  // the history so the sequence survives rounds (gap-no-criterion-records-its-own-cost AC6).
+  appendVerificationRound(root, {
+    round: 0, // computed from prior line count inside appendVerificationRound
+    startedAt,
+    durationMs,
+    laneCount,
+    pass: tapPass,
+    fail: tapFail,
+    cancelled: tapCancelled,
+    load: readLoadAvg(),
+    state: finalState.state,
+    runner: base.runner,
+  });
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );

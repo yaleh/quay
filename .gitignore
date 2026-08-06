@@ -81,6 +81,11 @@ orchestration/inner-idle-log.jsonl
 # live control-plane-state family as gate-events.jsonl/inner-blocked.json — written by the outer's
 # async closure pass, read by the inner's stop condition; never committed.
 **/.quay/verification-round.jsonl
+# gap-no-criterion-records-its-own-cost-checker-cost-jsonl: the per-criterion pure-append cost
+# ledger — one line {name, ms, n, load, exit, ts} per checker/gate execution (written by
+# plugin/scripts/checker-cost.sh). Same live runtime-state family as verification-round.jsonl /
+# gate-events.jsonl; never committed (the trend criterion reads it as a passive reader).
+**/.quay/checker-cost.jsonl
 # gap-red-window-has-no-automatic-executor (2026-08-05): the outer background suite's runtime state
 # + the suite-state trigger's transition event log + memo — same live control-plane-state family as
 # gate-events.jsonl/verification-round.jsonl (written by full-suite-runner.ts / suite-state-trigger.ts,

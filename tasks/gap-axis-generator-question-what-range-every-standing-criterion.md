@@ -59,6 +59,13 @@ extra:
 > `--gate-scripts` category from quay-init, so `dead_gates_remaining = 0`) is tracked in that task;
 > this entry is the AC10 accounting cross-reference only.
 >
+> **AC5 cross-mark (2026-08-05, `gap-no-criterion-records-its-own-cost-checker-cost-jsonl`)**:
+> the count-5 pre-friction "判据不记自身成本" (16 检查器 + 14 闸门零落盘，退化在被人手工发现前不可见) is
+> that task. It asked the generator's cost-axis question — "判据的成本量化在什么范围?" — and got
+> "没有量化" (完全空着). The fix (checker-cost.jsonl 纯追加 + load 维 + 套件耗时序列并入) is tracked in
+> that task (status: ready); this entry is the AC10 accounting cross-reference only. The follow-on
+> count-6 "suite-state 缺原因轴" is tracked in `gap-suite-state-has-no-reason-axis-failed-aborted-infra`.
+>
 > **AC5 cross-mark (2026-08-05, `gap-stale-check-orchestration-arm-is-a-dead-glob`)**:
 > the count-3 pre-friction "dead-glob" (generator-run, 照问句问出) is that task. It asked the
 > generator's instance question — "陈旧判据量化的是【哪些实例】？" — for the strategic-doc

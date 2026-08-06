@@ -41,6 +41,17 @@ extra:
    - `pool ≥ floor` 但 `dispatchable_disjoint < cap` ⇒ 机制**自报**「池大但全撞」（今晚小型版的机械版）；
    - `pool < floor` 但 `dispatchable_disjoint ≥ cap` ⇒ 判据已满足（5 条全不冲突就够了）。
 4. **touchesResolve 守卫保留**：解析不了的候选踢出（ADR-022 教训兜底），大池只白晋级不污染。
+
+### AC4 优先级标注（归因更正，2026-08-05 07:27Z，管理者撤回先前提优先——gap-no-criterion-records-its-own-cost-checker-cost-jsonl）
+
+**三条修法（③拆频/②缓存/①增量）不先做。** ready-pool-check 三点实测：06:44Z **35.8s**（pool 19）→
+07:15Z **91.2s**（pool 24）→ 07:27Z **157.0s**（pool 24）。**后两点 pool 完全相同、成本却涨 1.7×** ⇒
+主导变量不是池子大小 n，是**机器负载**（同期 load 30.91）。三条修法改的是 n 的系数，而成本增长几乎全来自
+负载——先修负载（full-suite-runner laneCount 硬编码，`gap-no-resource-awareness-heavy-ops-run-blind`
+re-open；develop 基线 1c4938ac 已落地 nproc 派生 + resource-gate 过闸），负载降后本条判据大概率回
+36s 量级。三条修法降为「负载修复后再评估」。方法论教训：两点不足以定斜率归因——必须至少一个控制变量
+的点（本例 pool 相同的那两点才是决定性的）；`checker-cost.jsonl` 每次判据执行记 `{name, ms, n, load}`
+正是为让这种归因以后不再靠手工掐表。
 5. **成本不对称文档化**：过量晋级 = 前移非浪费、欠量 = 空槽纯浪费，偏向过量——loop 文档或
    ready-pool-check 头注。
 
