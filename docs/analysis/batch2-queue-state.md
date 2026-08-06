@@ -5955,3 +5955,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   classify_hold()，读答案 == 下次 acquire 动作）、只读永不 reclaim、AC7 pull-based 指引。AC1-AC7、16/16 +
   token 族 20/20。AC6 governance→engine 解决（retag 会 unpin token 测试出默认 gate）。worktree/branch 已清。
 - **在飞 0/3**。套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:4xZ（内层 cron，轻触）
+
+- 套件 running——外层 red-window 分诊（contract-check 7 new 来自 2 个 manager branch-cutover 任务 code-block
+  Contract 不可解析，已重写标准格式 new=0；AC-carryover ratchet loop-driver AC3 unowned → 立 layer-2 cron
+  observability successor + Carries 声明），suite relaunch。
+- 池 7/12、disjoint 6（runtime-nowhere-safe 真候选；token-status 已 fan-in 待 closure——信号缺口）。派发 hold
+  （套件运行）。在飞 0/3。
