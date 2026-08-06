@@ -5078,3 +5078,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **根因**：KNOWN-LOAD-SENSITIVE 族测试被 load 取消时跳过 finally ⇒ 泄漏 characteristic dirs。外层心跳 merge 新增 AC2/3/4 fixture 增加了泄漏面（模式本身既有）。
 - **修复**：`session-liveness.test.mjs` 加套件级 `after()` sweep（`/tmp/session-liveness-*` / `sl-global-` / `sl-mount-` / `sl-lmt-` 残留清理）。AC fixture 2/2 + leak-scan clean + 静态全量 PASS（`18503497`）。
 - 外层应再重跑（树净 + leak 已清 ⇒ 预期 **green** → closure）。在飞 0。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:1xZ（内层，suite GREEN 后首派：5/5）
+
+- **外层套件 GREEN**（02:49–03:05，961s，2480/0 + clean-tree + leak-clean）——7 个红因全部清零后首次绿。**closure round 1**（d4e4f330）：flip 29 落地任务 done + 关 7 陈旧遥测括号 + verification-round 记录。
+- **池分诊**：pool 11（3 already-landed 未翻 + 5 ROUND-3 + delivery-surface 非可派）。ROUND-3 随 closure round 1 视为收尾，但大结构任务（branch-model/cold-start-gate/complete-delivery 目录 glob）仍保守 hold 待外层明确。
+- **补晋 7**（todo→ready，四件套全）：residue-check / token-measures-wait / token-watches-shell / token-status-reports / value-prioritization / DIR-124 / telemetry-brackets。**不晋**：no-size-aware-routing（退休）、session-liveness-hashes-token（phase-1 已 close，疑已落地）。
+- **派发 5/5**（disjoint batch，scheduler 实测；deferred 2 = token-watches-shell/token-status-reports 与 token-measures-wait 碰撞）：runtime-nowhere-safe / residue-check / token-measures-wait / value-prioritization / DIR-124。补 self-touch（4 缺已补）+ telemetry 已开。telemetry-brackets 下轮。
+- 在飞 5/5。无停止条件、套件 green、无 .halt、无 block、Monitor 绿。

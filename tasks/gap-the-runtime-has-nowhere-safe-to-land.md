@@ -152,6 +152,7 @@ resume 先量出真实阈值分布与可选方案的代价，再选方案
 
 ## Touches
 
+- tasks/gap-the-runtime-has-nowhere-safe-to-land.md
 - plugin/scripts/quay-init.sh
 - packages/quay/scripts/build-dist.mjs
 - plugin/test/quay-init-loop.test.mjs

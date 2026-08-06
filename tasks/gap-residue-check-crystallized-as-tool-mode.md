@@ -1,7 +1,9 @@
 ---
 id: gap-residue-check-crystallized-as-tool-mode
-title: "\"box has text vs actually submitted\" must be a tool judgment, not role memory — add a --check-residue mode (empty / real-unsubmitted-text / ghost-suggestion-only) reusing D's bottom-region + shape"
-status: todo
+title: "\"box has text vs actually submitted\" must be a tool judgment, not role
+  memory — add a --check-residue mode (empty / real-unsubmitted-text /
+  ghost-suggestion-only) reusing D's bottom-region + shape"
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -66,6 +68,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-residue-check-crystallized-as-tool-mode.md
 - plugin/scripts/pane-state-classify.ts
 - plugin/test/pane-state-classify.test.mjs（或新增 residue-check 测试）
 - plugin/test/fixtures/pane-states/（补三态夹具）

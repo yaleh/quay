@@ -1,7 +1,11 @@
 ---
 id: gap-value-prioritization-has-no-mechanism
-title: "which of the 54 todos matters most has no mechanical answer — every real priority decision tonight came from the human or ad-hoc outer/manager judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity (not relevance); add a relevance signal (strategic-question traceability + blocking + cost) as the manager layer's prioritization function"
-status: todo
+title: which of the 54 todos matters most has no mechanical answer — every real
+  priority decision tonight came from the human or ad-hoc outer/manager
+  judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity
+  (not relevance); add a relevance signal (strategic-question traceability +
+  blocking + cost) as the manager layer's prioritization function
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -64,6 +68,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-value-prioritization-has-no-mechanism.md
 - plugin/scripts/ready-pool-check.ts（相关性信号 + 优先级查询输出）
 - plugin/test/ready-pool-check.test.mjs（AC4 既有行为回归 + AC1/AC2 断言）
 - tasks/gap-productize-the-manager-layer.md（AC5 交叉标注）

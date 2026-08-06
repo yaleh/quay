@@ -1,7 +1,8 @@
 ---
 id: gap-token-status-reports-a-dead-holder-as-busy
-title: "heavy-op-token --status says a project holds the token when its process is dead — staleness is only evaluated on acquire"
-status: todo
+title: heavy-op-token --status says a project holds the token when its process
+  is dead — staleness is only evaluated on acquire
+status: ready
 labels:
   - gap
   - milestone-candidate
