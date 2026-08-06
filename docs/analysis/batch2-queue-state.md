@@ -7405,3 +7405,4 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **chart2-s2 agent 完成**：22/22 绿，AC1-3 勾，commit `1a9e6d9e`（仅 test 文件）。
 - **fan-in 冲突**：rebase 到 integration + merge 均冲突——冲突在**无关 task 文件**（gap-send-keys-reliable / gap-shipped-verifiers 的 status/AC 更新），chart2 分支基于旧 develop（b56aa3be）携带了这些 task 文件的过期版本，与 integration 并发更新冲突。doc：冲突 → 停止该任务 fan-in、标 needs-human、报告，不 `--skip`/`-X ours`。已 `rebase --abort` + `merge --abort`（两边干净）。
 - **已标 needs-human**（expectedStatus ready CAS 成功）。worktree/branch 保留（fan-in 失败不清理），待外层/人裁定：可干净 rebase 到最新 develop 再 fan-in（chart2 自身只改 test 文件）。
+- **suite 仍 running**（33min+，外层 16-fix 验证中）。**本 tick 停止后续合并与派发**（chart2-s2 fan-in 冲突命中判断边界：冲突 → 停后续合并+派发）。待外层 suite verdict + chart2-s2 冲突裁定。
