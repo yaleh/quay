@@ -5051,3 +5051,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修复**：`capability-catalog.sh` QUESTION 表补 `[test-file-baseline.ts]="What is the fork-baseline test-file snapshot...?"`（`21178290`）。**105/105 declared, 0 unclassified, exit 0**。静态全量 **PASS**（12/12 checker mutation，exit 0）。
 - **全部红因清零**：原 5（store/doc-gate/codex/AC1b/AC5）+ capability-catalog。master `21178290`。外层应再重跑 → 预期 **green**，closure（~24 not-yet-flipped）随之解锁。
 - 在飞 0。无 .halt、无 block、Monitor 绿。worktree 全清。
+
+### tick 2026-08-06T01:4xZ（内层，re-green 窗口：OVER90 假阳性处置 + 派发 2/5）
+
+- **外层重跑 running**（01:29 起，6 红因全清，预期 green → 解锁 closure）。
+- **OVER90 假阳性处置**：detect-stop 报 task-over-90m（productize 括号 170m）——核对 = 5 个已完成 agent 的**陈旧开放括号**（外层 closure 才关，卡套件绿），非真超时（OVER90 注意：外层未闭合括号的滞后）。`--clear` 已清（死时间 33.8s 计入遥测）。无真实在飞 >90m。
+- **派发 2/5**（disjoint batch）：`outer-heartbeat`（session-liveness 心跳多源 max mtime，KNOWN-LOAD-SENSITIVE 族）+ `loop-driver-check`（自述注册表缺陷 L1 修复 + AC7 .halt 措辞）。补 self-touch + telemetry 已开。reanchor/runtime-nowhere-safe deferred（碰撞）。
+- 池 13（9 非可派：3 landed + 5 ROUND-3 + delivery-surface）。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。

@@ -133,6 +133,7 @@ AC7 只改**打印的措辞**——把一个控制面的读数从状态断言改
 
 ## Touches
 
+- tasks/gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes.md
 - plugin/loop/orchestrator-loop-tick.md
 - plugin/skills/cold-start/SKILL.md
 - .gitignore
