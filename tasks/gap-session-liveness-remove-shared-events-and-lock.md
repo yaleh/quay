@@ -1,7 +1,24 @@
 ---
 id: gap-session-liveness-remove-shared-events-and-lock
-title: "REMOVE the shared events file + the mutual-exclusion lock from session-liveness — observation topology is a TREE (manager→N outers, outer_i→inner_i), each edge an independent (observer,target) pair, read-only, no intersection; the shared file merges N independent streams then forces every consumer to filter back their own (strictly worse than N independent streams, zero benefit); the lock's only reason for existing was to protect the shared file — remove the file, duplicate mounting becomes harmless, lock has no reason; human ruling 2026-08-06 (two direct quotes: '共享事件文件这是个极端糟糕的设计' + '把互斥锁也彻底去掉'); hazard 1: who-starts-first decides what anyone sees (archguard 08-05 07:31 'lock held by quay only watches quay sessions'), 2: already spawned a defect + patch (gap-a-log-already-filtered, LOOP_MIN threshold conflict), 3: fate-sharing (holder death blinds all, lock actively blocks takeover), 4: unbounded growth (measured 472KB, rotate/prune/truncate 0 hits); observation is PURE READ-ONLY (only capture-pane/git log/stat, zero target writes) — read-only is naturally non-exclusive, two observers on same pane cost one extra capture-pane per cycle; AC20's 'single-flight resource' premise is WRONG (observing is not a single-flight resource), introduced by an earlier manager session not by outer/inner"
-status: todo
+title: "REMOVE the shared events file + the mutual-exclusion lock from
+  session-liveness — observation topology is a TREE (manager→N outers,
+  outer_i→inner_i), each edge an independent (observer,target) pair, read-only,
+  no intersection; the shared file merges N independent streams then forces
+  every consumer to filter back their own (strictly worse than N independent
+  streams, zero benefit); the lock's only reason for existing was to protect the
+  shared file — remove the file, duplicate mounting becomes harmless, lock has
+  no reason; human ruling 2026-08-06 (two direct quotes: '共享事件文件这是个极端糟糕的设计' +
+  '把互斥锁也彻底去掉'); hazard 1: who-starts-first decides what anyone sees (archguard
+  08-05 07:31 'lock held by quay only watches quay sessions'), 2: already
+  spawned a defect + patch (gap-a-log-already-filtered, LOOP_MIN threshold
+  conflict), 3: fate-sharing (holder death blinds all, lock actively blocks
+  takeover), 4: unbounded growth (measured 472KB, rotate/prune/truncate 0 hits);
+  observation is PURE READ-ONLY (only capture-pane/git log/stat, zero target
+  writes) — read-only is naturally non-exclusive, two observers on same pane
+  cost one extra capture-pane per cycle; AC20's 'single-flight resource' premise
+  is WRONG (observing is not a single-flight resource), introduced by an earlier
+  manager session not by outer/inner"
+status: ready
 labels:
   - gap
   - defect
@@ -77,3 +94,17 @@ at: 2026-08-06T13:0xZ
 changed: 人裁定重写（替代被撤回前提的任务）——去掉共享事件文件 + 彻底去掉互斥锁。核心论证：观测拓扑
 是树、只读天然不排他、共享文件严格劣于独立流、锁的唯一理由（保护共享文件）随之消失。AC20 单飞前提
 是错的（管理者早期会话引入，非外层/内层的锅）。四条危害核实（启动顺序/自生缺陷/命运共享/无界增长）。
+
+## 范围钉死（2026-08-06T13:1xZ，管理者核实 + 外层确认，防误删）
+
+**heavy-op-token.sh 有两个完全不同的用途，人的「彻底去掉互斥锁」只针对第一个**：
+- **① 挂载互斥（去掉，人已裁定）**：session-liveness 借用（调用点 --root $SL_GLOBAL_DIR）。
+- **② 重测试调度（保留，不在裁定范围）**：原始用途，scripts/test.sh **5 处**调用——三项目共用四核、
+  一次只跑一个重测试，与观测完全无关。**不要动**。
+
+**实现边界**：只摘 session-liveness 这一侧（10 处引用），**不删 heavy-op-token.sh 本体**（最后提交
+bb25732b 未触及；删了会打断 test.sh 调度）。
+
+**待定**：人更早说「单飞锁是本机开发实验使用、不应进产品化交付」——听起来针对 heavy-op-token 整体
+（「三项目共用四核」是实验室条件），但人未就此明确裁定。A/B 两个范围选项已摆给人、等回复。**人明确
+之前，②按原样保留**。
