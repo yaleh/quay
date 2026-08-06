@@ -7312,3 +7312,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   需外层定处置（reconcile AC 或翻 done）。
 - **integration 现含 7 fan-in**（supervisor/concurrency/split-batch/send-keys/no-post-merge/green-verdict/shipped-verifiers）。
   在飞 0/2。外层 suite running（15:06 起，breakage 修复后重跑）。
+
+### tick 15:5xZ（派发 1：manager-productization，在飞 1/2）
+
+- **派发 1**：gap-manager-productization-five-constraints（C1-C5，fork develop 56d60671）。production gate 确认唯一 disjoint 候选——
+  session-liveness-context-saturation + manager-layer 均与它共享 manager 层文件（manager-loop-tick.md / quay-init.sh）被 deferred。
+  slot-refill 的 DIR-124（human-steered）+ audit-findings（机制已落 develop）仍不可派。池内 3 个「ready」任务（full-suite-runner-marks /
+  cold-start-outer-validation / inner-session-check）AC 全勾 = 陈旧待翻 done。
+- **池膨胀观察**：pool 20 / dispatchable 9 的「可派」主要是陈旧任务（7 fan-in 待外层翻 done + AC 全勾未翻）虚增——
+  真候选稀少。外层是 done-flip 瓶颈。
