@@ -46,20 +46,63 @@ M26 ADV-003：`POST .../action/<id>'s baseRedirect had only...`）——**未被
 
 ## Acceptance Criteria
 
-- [ ] AC1: `/task/<id>/action/<actionId>` POST 路由删除（grep 无残留）
-- [ ] AC2: serve-handlers.ts 两处 form 渲染删除（grep 无残留）
-- [ ] AC3: 相应测试更新/删除；CLI `quay action run` 原样保留（grep 确认）
-- [ ] AC4: **负控制**——删后 `.quay/gate-events.jsonl` actor 分布不变（365 全 quay-cli，web 0）
-- [ ] AC5: 只读展示与 actions 概念保留（不误删）
-- [ ] AC6: open-redirect 漏洞面消除（该路由删除后无此攻击面）
+- [x] AC1: `/task/<id>/action/<actionId>` POST 路由删除（grep 无残留）
+- [x] AC2: serve-handlers.ts 两处 form 渲染删除（grep 无残留）
+- [x] AC3: 相应测试更新/删除；CLI `quay action run` 原样保留（grep 确认）
+- [x] AC4: **负控制**——删后 `.quay/gate-events.jsonl` actor 分布不变（365 全 quay-cli，web 0）
+- [x] AC5: 只读展示与 actions 概念保留（不误删）
+- [x] AC6: open-redirect 漏洞面消除（该路由删除后无此攻击面）
+
+## Invoke evidence (inner, 2026-08-06, worktree task/gap-web-action-buttons-unused-route-and-open-redirect-delete)
+
+**Contract measure — route_gone:**
+```
+$ grep -c 'action/${encodeURIComponent\|action/.*actionId' packages/quay/src/serve-handlers.ts
+0
+```
+**Contract invoke — `grep -n 'action/' packages/quay/src/serve-handlers.ts` → 空（无任何 action/ 路由残留）**
+
+**AC1/AC2 grep 残留核查（src）：** `action/advance` / `action_buttons` / `actionCell` / `col-actions` 在 serve-handlers.ts 中 0 功能引用（仅 3 处历史注释，说明该路由已删）。
+
+**AC3 CLI 保留核查：**
+```
+$ grep -n 'action.*run' packages/quay/bin/quay.ts   → 354: quay action run <task-id> <action-id> [--json]
+$ grep -n 'export function composePayload|export async function deliverTrigger' packages/quay/src/action.ts
+  → 31: export function composePayload(...) / 99: export async function deliverTrigger(...)
+```
+`action-mock-delivery.test.mjs` / `serve-action-delivery.test.mjs` / serve.test.mjs 的 composePayload 单测原样保留。
+
+**AC4 负控制（主仓 .quay/gate-events.jsonl，未被本改动触碰）：**
+```
+$ grep -o '"actor":"[^"]*"' .quay/gate-events.jsonl | sort | uniq -c
+    365 "actor":"quay-cli"
+$ wc -l .quay/gate-events.jsonl   → 365
+web actor 计数 = 0  → 分布不变，负控制成立
+```
+
+**AC5 只读展示保留：** serve-handlers.ts 的 `.error-banner`/`.success-banner` 渲染（list 页 errorParam/successParam，detail 页 detailErrorParam/detailSuccessParam）保留；actions 概念本身（action.ts、CLI action list/run、MCP action_list/action_run）保留。
+
+**AC6 open-redirect 面消除：** POST `/task/:id/action/:actionId` 路由连同其 `?from=` redirect 全部删除，无该攻击面。GET detail 路由的 `backHref` 仍走共享 `isSafeRelativeRedirect()` 守卫（保留）。
+
+**Scoped verification（`bash scripts/test.sh --for-task gap-web-action-buttons-unused-route-and-open-redirect-delete --allow-thin`，工作树内）：**
+```
+✔ packages/quay/test/core-three-way-symmetry.test.mjs      (action 触发降为 CLI+MCP 两腿，记录数 3→2，全 PASS)
+✔ packages/quay/test/serve-adversarial-eval.test.mjs       (删 POST-route 开重定向回归；GET detail 开重定向 PASS)
+✔ packages/quay/test/serve.test.mjs                        (删 action 按钮/POST 断言；保留只读 banner 渲染，全 PASS)
+✔ packages/quay/test/web-ui-browser.test.mjs               (删 QC-002 POST flow；WUI-ACT fixture 保留，全 PASS)
+﹣ serve-github.test.mjs                                    (live-GitHub 测试，默认 skip —— 预期)
+ℹ tests 5  ℹ pass 4  ℹ fail 0  ℹ cancelled 0  ℹ skipped 1   → 脚本 exit 0（绿）
+```
 
 ## Touches
 - tasks/gap-web-action-buttons-unused-route-and-open-redirect-delete.md（自身文件：勾 AC + 贴 invoke 证据授权）
-
-
-- packages/quay/src/serve-handlers.ts（删 POST 路由 + 两处 form）
-- packages/quay/test/（对应测试）
-- docs/proposals/quay-web-human-is-not-an-operator.md（提案引用）
+- packages/quay/src/serve-handlers.ts（删 POST 路由 + 两处 form + 关联 CSS/表头/handleTaskAction/addParam）
+- packages/quay/test/serve.test.mjs（删 action 按钮/POST 断言；保留 composePayload 单测与只读 banner 渲染）
+- packages/quay/test/serve-adversarial-eval.test.mjs（删 testActionRouteOpenRedirectProtocolRelative）
+- packages/quay/test/web-ui-browser.test.mjs（删 QC-002 POST flow 断言；保留 WUI-ACT fixture）
+- packages/quay/test/serve-github.test.mjs（删 detail page Advance button 断言）
+- packages/quay/test/core-three-way-symmetry.test.mjs（action 触发降为 CLI+MCP 两腿，记录数 3→2）
+- docs/proposals/quay-web-human-is-not-an-operator.md（提案引用；文件不存在于工作树，未改）
 
 ## Contract
 

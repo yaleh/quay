@@ -124,7 +124,11 @@ async function main() {
       "GET / body contains gh-3's real live title"
     );
 
-    // --- GET /task/gh-3 (detail) — real live status + Advance button ---
+    // --- GET /task/gh-3 (detail) — real live status ---
+    // NOTE (2026-08-06): the "Advance action button" assertion was removed —
+    // the web action-buttons POST route and its form renders were deleted by
+    // gap-web-action-buttons-unused-route-and-open-redirect-delete, so the
+    // detail page no longer renders an action button.
     const detail = await get(port, "/task/gh-3");
     assert(detail.status === 200, `GET /task/gh-3 returns 200 (got ${detail.status})`);
     assert(
@@ -134,10 +138,6 @@ async function main() {
     assert(
       /\[ready\]/.test(detail.body),
       "GET /task/gh-3 body reflects gh-3's real live derived status (ready, from its status:ready label)"
-    );
-    assert(
-      detail.body.includes("Advance") && detail.body.includes("action/advance"),
-      "GET /task/gh-3 renders the Advance action button (gh-3's live status 'ready' matches provider.yml's whenStatus)"
     );
   } finally {
     if (server) {
