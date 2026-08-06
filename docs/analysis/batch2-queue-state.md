@@ -5477,3 +5477,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **就绪池再耗尽**：pool 4 = 3 个已落地漏检 + 1 个父跟踪（DIR-124）；over-90m-false-signal（补池 7 末位）已并落地。**真实新可派 = 0**。
 - **补晋候选**：prepare-milestone 父（退役文件）与 DIR-043（deferred）均不晋。
 - 在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。等外层下一轮补池。
+
+### tick 2026-08-07T03:5xZ（内层，外层补池 8 后派发：1/5）
+
+- **外层补池 8**（92b3a9e4）：node-version-check + quay-init-commits + size-aware-routing-B 晋 ready。
+- **size-aware-routing-B 标 needs-human**：touches 10/15 MAJORITY-MISSING（execution-manifest / prepare-milestone.js 全指 ADR-022 已删文件）+ 任务体 **PAUSED**（2026-08-02 prepare-pipeline reduction，premise 假设已退休管线形状）——外层补晋未过 touches-resolve 闸，交外层裁定。
+- **quay-init-commits deferred**（与 node-version-check 在 packages/quay/bin/ 碰撞，等下批）。
+- **派发 1/5**：`gap-no-active-node-version-check-users-cant-tell-upgrade`（唯一可派新候选；self-touch 已补）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

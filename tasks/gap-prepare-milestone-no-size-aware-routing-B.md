@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing-B
 title: Fast-lane execution manifest + execute-milestone Verify consumption
-status: ready
+status: needs-human
 labels:
   - gap
   - defect

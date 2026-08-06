@@ -60,6 +60,7 @@ nvm 管理 node，管理者的**非交互 ssh 调用绕过了 nvm.sh**（~/.bash
 
 ## Touches
 
+- tasks/gap-no-active-node-version-check-users-cant-tell-upgrade.md
 - packages/quay/bin/（入口版本探针）
 - plugin/scripts/quay-init.sh（若探针放 init）
 - CLAUDE.md（调用方式注明所需 Node 版本）
