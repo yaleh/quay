@@ -728,3 +728,24 @@ test("value-prioritization does not alter the gap>DIR promotion order (AC4 regre
   assert.deepEqual(withTop.candidates.map((c) => c.id), ["gap-defect", "DIR-new-cap"], "gap>DIR order preserved");
 });
 
+test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC2/Contract measure)", (t) => {
+  const root = makeWorkspace("cli-top");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-strategic", gapTask("gap-strategic", {
+    body: fourArtifactBody({ extra: "\nproposal references SYNTHESIS-four-gaps-2026-08-05.md" }),
+  }));
+  writeTask(root, "gap-small", gapTask("gap-small", { body: fourArtifactBody({ touches: ["- code/a.ts"] }) }));
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--top", "5"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.ok(Array.isArray(parsed.top_relevance), "band: top_n_relevance is an array");
+  assert.ok(parsed.top_relevance.length >= 1, "band: at least one relevance-sorted entry");
+  assert.equal(parsed.top_relevance[0].strategic, true, "control: strategic candidate ranks front");
+  assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
+});
+

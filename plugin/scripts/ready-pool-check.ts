@@ -40,9 +40,16 @@
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>]
-//       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--json]
+//       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>] [--json]
 //   --cap / --floor-mult   override the derived floor (default cap=3, floor-mult=4 ⇒ floor 12)
 //   --in-flight            task ids of currently in-flight subagents (ranked against for disjointness)
+//   --top <n>              VALUE-PRIORITIZATION QUERY (gap-value-prioritization-has-no-mechanism):
+//                          emit `top_relevance` = the highest-value n TODO tasks + reasons (the AC2
+//                          "which of the N todos matters most" mechanical answer). `ready_relevance`
+//                          (ready pool ranked by the same signal — the AC6 "who to dispatch next"
+//                          answer) is always emitted. Sources are mechanical: strategic traceability
+//                          (body references FINDING-*/SYNTHESIS-*/SPEC-*/REVIEW-cadence), blocking
+//                          (parent/children fields), cost (touches scale). No human scoring.
 //   --json                 accepted for Contract parity; output is always JSON
 //
 // ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
@@ -509,12 +516,14 @@ function main(argv) {
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
+  let topN = 0;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
+    else if (args[i] === "--top") topN = Number(args[++i]); // value-prioritization query: top-N todos by relevance
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     }
@@ -526,7 +535,7 @@ function main(argv) {
     if (!fs.existsSync(file)) continue; // advisory — a vanished in-flight id is not a failure
     inFlight.push({ id, body: fs.readFileSync(file, "utf8") });
   }
-  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight });
+  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, topN });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }

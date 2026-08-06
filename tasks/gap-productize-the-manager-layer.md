@@ -55,6 +55,11 @@ manager 层的归属任务——`gap-complete-delivery-surface-spec-and-l1-verif
 （`verify-delivery-surface.ts`）把 `gap-productize-the-manager-layer` 列为类别 2 的 `attribution`；
 manager 层从 `plugin/loop/`/`plugin/skills/manager*` 出货后，该类别即无剩余缺口（AC4 归属无空洞）。
 
+**交叉标注（AC5 归属，2026-08-06）**：本条「三职能」里的**排序**职能已落到 `gap-value-prioritization-has-no-mechanism`
+（done-ready → 2026-08-06 实现）：`plugin/scripts/ready-pool-check.ts` 的 `--top N` 相关性查询
+（战略追溯 grep + parent/children 阻塞 + touches 规模成本，`top_relevance`/`ready_relevance` 输出）
+就是 manager 层排序职能的机制挂接点——本层 SKILL 的 Prioritization 职能引用该命令作为机械答案。
+
 ## Acceptance Criteria
 
 - [x] AC1: `plugin/skills/manager/SKILL.md`（或 `plugin/loop/manager-loop-tick.md`）存在——结晶第三层：
