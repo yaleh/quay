@@ -6103,3 +6103,22 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **这是 PLAN 阶段二（A/B 历史分叉合并）的执行点** + AC17 判据 4（真实协作）核心。
 - **裁定方向**：A 的 master 59 提交并入 develop（与 B 的 105 汇合）。冲突处理需谨慎（150 文件）。
   这是方向性/高风险操作——记录现状，合并策略待管理者/人确认后执行（不擅自 merge 大冲突）。
+
+### tick 2026-08-06T07:5xZ（supervisor merge 裁定①执行——遇 plan-vs-reality 冲突，已中止待外层）
+
+- **外层裁定①（rebase 到 integration 再合）执行受阻**：`git rebase --onto integration c998b2ac HEAD`
+  干净地把 66d32bea 单提交 lift 到 integration 上（master..branch=0 达成），但**冲突在 quay-init.sh**。
+- **冲突根因（外层数据的盲点）**：「integration 自 926d771b 后 0 文件改动」属实，但**任务提交携带的是
+  master 线的文件状态**——66d32bea 的 quay-init.sh diff 假设 runtime-nowhere-safe 的 `.quay/runtime/`
+  重写（+laydown-derivation 的闭包检查）已在场；integration 上这些 commit 都不存在（frozen 926d771b）。
+  `--onto` 把任务提交的 diff 施加到旧版 quay-init ⇒ 冲突。**不是 integration 有改动，是任务基线在 master 线。**
+- **手动解决 = 重写任务提交的 quay-init 改动以适配旧版**——错误率高、可能把 runtime 层的既有修复弄丢。
+  **已中止 rebase（分支回到 66d32bea 未动）**，不冒损坏风险。
+- **给外层的方案演进**：
+  - ①a **先把 master 合并到 integration（或把 develop FF 到 master 再合）**——让 integration 获得
+    runtime-nowhere-safe + 其它 master 工作，再 rebase supervisor 就无冲突。但这等于「把 57 master 提交
+    并入 develop」的 AC17 大汇合提前（外层已说 AC17 待人确认策略单独处理）。
+  - ①b **在 master 上把 66d32bea 的 quay-init.sh 改动先独立成 commit**（剥离 master 依赖）——复杂。
+  - ①c **合回 master**（supervisor 本来就是 master 基线任务）——违反冻结，除非人豁免这一个。
+  - 建议：**等 AC17 大汇合策略确认**后把 supervisor 一并并入（它 23 scoped green 的验证在 master 线有效，
+    合进 integration 反而丢失验证语境）。
