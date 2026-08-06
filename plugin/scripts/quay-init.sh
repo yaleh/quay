@@ -76,6 +76,7 @@ DRY_RUN=false
 DO_WORKFLOWS=false
 DO_AGENTS=false
 DO_LOOP=false
+DO_CHECK_DRIFT=false
 ANY_CATEGORY=false
 
 # ── parse args ─────────────────────────────────────────────────────────────────────────────────────
@@ -87,6 +88,7 @@ while [ $# -gt 0 ]; do
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --root) WORKSPACE_ROOT="$2"; shift 2 ;;
     --project) PROJECT_NAME="$2"; shift 2 ;;
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
@@ -748,6 +750,40 @@ derive_loop_scripts() {
   rm -f "$out"
 }
 
+# ── drift report (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ─────────────────────────
+# --check-drift: the L2 "upgrade correctness" drift report. The delivery surface (the DERIVED loop
+# script set) GROWS as the plugin ships new mechanism scripts; a target project installed at time T
+# is frozen at T and never receives scripts added after T (the meta-cc measurement: 7 of the 8
+# missing derived scripts were built after 08-03 — drift is the surface growing, not a misinstall).
+# This report mechanically compares the CURRENT derived set (derive_loop_scripts — the SAME
+# derivation the --loop lay-down uses) against the target's plugin/scripts/:
+#   一致  — present in target AND byte-identical to the plugin source
+#   漂移  — present but content differs (a local edit or a stale install) — listed, never silently
+#           overwritten: the upgrade path (--loop re-run) backs it up + reports before replacing
+#   缺失  — absent from the target — the upgrade path auto-fills it (copy_one's `! -f` branch)
+# Prints per-item lines for 漂移/缺失 + a parseable summary `漂移 N / 缺失 N / 一致 N`.
+# Read-only: never modifies the target. Exit 0 always (a report, not a gate).
+drift_report() {
+  local drift=0 missing=0 consistent=0 total=0 s src dst
+  while IFS= read -r s; do
+    [ -z "$s" ] && continue
+    src="$PLUGIN_ROOT/scripts/$s"
+    [ -f "$src" ] || continue   # only the CURRENT derived set that actually exists in the plugin
+    total=$((total + 1))
+    dst="$WORKSPACE_ROOT/plugin/scripts/$s"
+    if [ ! -f "$dst" ]; then
+      missing=$((missing + 1))
+      echo "  缺失: $s"
+    elif cmp -s "$src" "$dst"; then
+      consistent=$((consistent + 1))
+    else
+      drift=$((drift + 1))
+      echo "  漂移: $s"
+    fi
+  done < <(derive_loop_scripts)
+  echo "漂移报告: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent}（派生集 ${total}）"
+}
+
 # verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
 # lay-down. The mechanical constraint "referenced set ⊆ landed set": every file the shipped skills
 # and tick docs reference — by path (plugin/scripts/*, orchestration/*, docs/analysis/*) OR by BARE
@@ -1025,6 +1061,17 @@ PYEOF
 
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
+
+# ── --check-drift (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ────────────────────────
+# The L2 "upgrade correctness" drift report (Contract measure: the 漂移/缺失/一致 numbers on stdout).
+# Read-only — never writes to the target; exit 0 always (a report, not a gate). Runs the SAME
+# derived-set derivation the --loop lay-down uses, so the denominator is the CURRENT delivery
+# surface, not a frozen snapshot.
+if [ "$DO_CHECK_DRIFT" = true ]; then
+  echo "  drift report (派生集轴, not file count — the delivery surface GROWS, the target must follow):"
+  drift_report
+  exit 0
+fi
 
 # Per-category counters via deltas on the global COPIED/SKIPPED/CONFLICTED.
 record_category() {

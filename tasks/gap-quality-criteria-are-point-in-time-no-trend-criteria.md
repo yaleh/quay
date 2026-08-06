@@ -130,6 +130,14 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
 > 35.8→91.2→157.0 三点斜率已由 checker-cost 落盘（load 轴在场），本任务的趋势判据从 checker-cost
 > 读**判据自身**成本序列、从 suite-state/verification-round 读**套件整体**成本序列。
 
+> **AC4 交叉标注（2026-08-06，`gap-delivery-surface-grows-but-target-freezes-no-upgrade`）**：
+> §3 三类的「升级正确性」维度已由 `gap-delivery-surface-grows-but-target-freezes-no-upgrade` 落成
+> **机械实现**——`quay-init.sh --check-drift` 输出可解析的 `漂移 N / 缺失 N / 一致 N`（分母 = 当前
+> 派生铺设集，非 plugin/scripts 文件数；meta-cc 真缺 8 非 68 的机械版）。本任务（quality-criteria，
+> L2 趋势打标）的「升级正确性」数据源即该 drift report——趋势判据读它随窗口的 漂移/缺失 数序列；
+> 升级正确性由「一次快照」变为「每次重跑可查」。反向标注已写入
+> `tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md`（Contract `--check-drift`）。
+
 ## Acceptance Criteria
 
 - [x] AC1: 全量套件每次跑记录指标到运行时文件（`{at, durationMs, tests, fail, cancelled, per_test_ms}`，
