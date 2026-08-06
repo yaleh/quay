@@ -5830,3 +5830,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   与 agent 英文设计文档同路径碰撞——**manager 提案已备份 /tmp/quay-message-bus-manager-proposal-untracked.md**，
   外层请 reconciliation（两份内容不同，agent 版被 SPEC 引用）。
 - 在飞 1/3（loop-driver-check）。套件 running。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:0xZ（外层，管理者 pool 停滞观察 + 裁定）
+
+- **管理者实测**：pool=5 < floor=12 持续 ~3 小时（上次机械 promote bbf85ea9 00:53），121 todo /
+  33 ready，gap-* 自动补晋 3 小时未触发。
+- **外层独立核实**：git log 确认 00:53 后 2 次 promote 都是人指令/事件驱动（0361893d 人优先级、
+  0aeaef38 slot-refill 处理），非机械 pool<floor 路径。ready-pool-check 当前 promotions 7 候选。
+- **裁定（与 slot-refill 同族）**：3.6 机制无触发缺口（pool<floor ⇒ 本 tick 补晋是强制步骤），但
+  **执行依赖内层 tick 自觉走到**——最近 tick 全被等 agent/fan-in/修缺陷占满，机械路径没机会跑。
+  根因 = 写成强制步骤但无机械保证（同 gap-slot-refill-only-triggered 形态）。待内层修完测试缺陷
+  一并驱动补晋（suite red 中，stop-dispatch 优先）。

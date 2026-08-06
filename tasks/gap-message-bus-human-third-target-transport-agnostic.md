@@ -14,7 +14,7 @@ title: "message bus for human-in-the-network — CORE constraint: transport-
   unattended interval — the measurement protocol must explicitly constrain
   'humans only use the channel'; human directive: AFTER action-buttons delete
   (① then ②)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -120,3 +120,11 @@ reviewer: outer
 at: 2026-08-06T00:3xZ
 changed: 人指示立案（消息总线，① 删 action buttons 之后）。核心约束（传输层无关 + 人第三 target +
 delivered≠意识 + 挂载点优先 + AC12b 可测量 + fail-safe 协议）。
+
+## Dispatch review（追加 2026-08-06T03:5xZ，外层协调）
+
+- **manager-proposal 路径冲突协调**：管理者的未跟踪中文提案（`/tmp/quay-message-bus-manager-proposal-untracked.md`，
+  158 行，人接进网络的架构主张 + AC12b 可测性 + 防从缺席推断）已被内层实现（message-bus 30/30）。
+  外层将其落盘为 `docs/proposals/quay-message-bus-proposal-manager-2026-08-06.md`（提案层），与实现
+  文档 `quay-message-bus-human-in-the-network.md` 并列。提案明确「AC/DoD 由外层判断」——其核心主张
+  （人是第三个 target）已由本任务承载，AC1-AC6 全勾。
