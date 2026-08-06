@@ -5020,3 +5020,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **ghost-suggestion 合并**（`0b53a057`，rebase 已就位）：`--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` 成**冷启动 REQUIRED 参数**（restart-plan §8 + cold-start SKILL + `quay-launch.sh` 每角色追加 + `.claude/launch.settings.json` `_launchSpec.promptSuggestions:false`）；AC1/AC2 双向 throwaway 验证（独立 socket，带配置无 ghost / 不带配置有 ghost，字节级证据）；AC4 故障 6 标注；AC6 `launch-settings.test.mjs` 扩展 **12/12 pass**。AC1–AC6 勾。已并已清。
 - **in-flight 1/5**（仅 global-count，worktree 仍在旧快照 378eef8c，未 commit）。外层套件 running 超时（00:09 起 ~19min——mid-run 合并致其读混合工作树，套件变慢属预期；外层下轮会干净覆盖）。
 - 无停止条件、无 .halt、无 block、Monitor 绿。master `0b53a057`。
+
+### tick 2026-08-06T00:4xZ（内层，红窗修复执行：外层分诊 3 任务）
+
+- **外层分诊**（d254edc4）：套件红根因 3 真失败 + AC1b 已由外层自修（quay-init 伪影清理）。外层立 2 新任务 + codex A8 已有任务。指示内层修复。
+- **② dist-doc-gate-repo-root-off-by-one —— 内层直修完成**：根因 = `registry.ts:13` `REPO_ROOT=path.resolve(moduleDir,"..","..","..","..")` 在 dist bundle（`dist/` 目录）下偏一级 → DOCUMENTS_DIR 错 → gate FAIL "no such document: DOC-001"。修 = `discoverWorkspaceRoot(moduleDir) ?? 原回退`（src/dist 深度都鲁棒）。dist 重建后：gate via dist **PASS**、document-gate-fixture **3/3**、adr-gate 11/11（同族不回归）。AC1-AC4 勾 + 证据，任务 **ready**（commit 638d9266）。
+- **① codex-selfcheck + ③ native-store-roundtrip —— 已派 2 fix agent**（worktree，background）。在飞 2。
+- **runner AC5 signal-kill 调查**：`full-suite-runner.test.mjs` AC5 **3/3 一致失败**（非 flaky）——10s poll 等 `state=red reason=aborted` 超时。非我 merge 引入（runner 未被我的 merge 触碰）。疑 runner 信号处理未写 aborted 或自信号未达。记录，等外层定夺是否立任务。
+- 套件 state 仍 red/failed（fix 未全落地）。global-count fan-in 继续暂缓（分支 `10aa529f` 就绪待 re-green）。无 .halt、无 block。
