@@ -115,9 +115,11 @@ documented reference from a genuine missing file:
 | `orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md` | quay's reliable-send crystallization doc (cold-start key-4 delivery criterion) — not a generic loop deliverable |
 | `orchestration/outer-rulings-2026-08-04-A-F.md` | quay's outer rulings incl. ruling F (superseded-judgment provenance) — not a generic loop deliverable |
 | `orchestration/SPEC-cut-the-waiting.md` | quay's "cut the waiting" spec (referenced by fast-mode-loop-tick §4 dispatch form rationale) — not a generic loop deliverable |
-
-Machine-readable declarations consumed by `quay-init.sh`'s `verify-referenced-landed` (single
-source of truth — the same doc the human reads):
+| `orchestration/REVIEW-cadence.md` | quay's daily-review cadence mechanism (referenced by the shipped manager skill as its cadence hook) — not a generic loop deliverable |
+| `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it) — not a generic loop deliverable |
+| `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
+| `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
+| the manager skill's SPEC methodology-source index | the SPEC files the manager skill lists as an index (AC6) are each declared reference-doc below — referenced, not batch-crystallized, not shipped |
 
 <!-- self-create: orchestration/tick-log.md -->
 <!-- self-create: orchestration/escalations.md -->
@@ -131,6 +133,21 @@ source of truth — the same doc the human reads):
 <!-- reference-doc: orchestration/outer-rulings-2026-08-04-A-F.md -->
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
+<!-- reference-doc: orchestration/REVIEW-cadence.md -->
+<!-- reference-doc: orchestration/manager-loop-tick.md -->
+<!-- reference-doc: orchestration/SYNTHESIS-four-gaps-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
+<!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
+<!-- reference-doc: orchestration/SPEC-methodology-as-a-deliverable.md -->
+<!-- reference-doc: orchestration/SPEC-no-text-substitution-at-install.md -->
+<!-- reference-doc: orchestration/SPEC-one-observer-two-surfaces.md -->
+<!-- reference-doc: orchestration/SPEC-outer-liveness-productization.md -->
+<!-- reference-doc: orchestration/SPEC-quay-self-hosts-its-own-cold-start.md -->
+<!-- reference-doc: orchestration/SPEC-state-crystallization-2026-08-05.md -->
+<!-- reference-doc: orchestration/SPEC-suite-speed.md -->
+<!-- reference-doc: orchestration/SPEC-typed-axes-and-standing-dynamics.md -->
 
 ## Behavior
 

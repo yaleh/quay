@@ -57,24 +57,101 @@ manager 层从 `plugin/loop/`/`plugin/skills/manager*` 出货后，该类别即�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/skills/manager/SKILL.md`（或 `plugin/loop/manager-loop-tick.md`）存在——结晶第三层：
+- [x] AC1: `plugin/skills/manager/SKILL.md`（或 `plugin/loop/manager-loop-tick.md`）存在——结晶第三层：
       节奏（每日复盘）、三职能（规划/排序/趋势）、两条已验证规则（§1.5/§1.6）；可安装（plugin/ 下随交付）
-- [ ] AC2: **可安装性证明**——从干净 checkout 冷启动得到三层（manager 层出现，非 quay 本地）：
+      → 已出货 `plugin/skills/manager/SKILL.md`（`name: quay-manager`，注册进 `plugin/.claude-plugin/plugin.json` commands[]），
+      含 Cadence（挂 `orchestration/REVIEW-cadence.md` 机制）、三职能（规划/排序/看趋势各带机制挂接点）、
+      §1.5 ask-vs-act + §1.6 事件 triage 两条规则（从 `orchestration/manager-loop-tick.md` 提取）。
+- [x] AC2: **可安装性证明**——从干净 checkout 冷启动得到三层（manager 层出现，非 quay 本地）：
       模拟冷启动检查第三层存在（实跑输出贴任务体）
-- [ ] AC3: 冷启动 `plugin/skills/cold-start/SKILL.md` AC8c 修复——2/6 废键（inner-state.sh、
+      → 见下方「AC2 实跑输出」：`ls plugin/skills/manager/` 非空 + plugin.json 注册 +
+      quay-init --loop 演练 exit 0（verify-referenced-landed OK，manager SKILL 引用的机制全部落盘/声明）。
+- [x] AC3: 冷启动 `plugin/skills/cold-start/SKILL.md` AC8c 修复——2/6 废键（inner-state.sh、
       send-keys-verified 哈希）换成活机制（closure-async 探测 + pane-state-classify 或等价）；
       AC-SH1–4 不再被废键阻塞
-- [ ] AC4: 启动配置三件套进交付物（check-in settings 或 cold-start 启动段），部落知识→可安装
+      → `send-keys-verified` 哈希判据已由 key4 隔离任务先行修复（复用）；本条移除 `inner-state.sh` 两处
+      「retired 语境」引用，改指活机制（`session-liveness-mount.sh` 单一观测器）。Contract invoke
+      `grep -rn 'inner-state.sh\|send-keys-verified' plugin/skills/cold-start/SKILL.md` ⇒ **0 命中**（见下方 AC3 实跑）。
+- [x] AC4: 启动配置三件套进交付物（check-in settings 或 cold-start 启动段），部落知识→可安装
       （`claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`）
-- [ ] AC5: 路线图对照物——manager 层规划职能挂活参照（cross-project-portability 或 fast-mode 路线图
+      → `.claude/launch.settings.json`（检查进仓库）+ `plugin/scripts/quay-launch.sh` 已结晶三件套；
+      manager SKILL 的「How the manager itself starts」段引用 `quay-launch.sh manager`（见下方 AC4 实跑）。
+- [x] AC5: 路线图对照物——manager 层规划职能挂活参照（cross-project-portability 或 fast-mode 路线图
       指针）；复盘有对照物可查
-- [ ] AC6: 11 份 `SPEC-*.md` 作为方法论来源引用（在 SKILL 中列索引，不批量结晶）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`（三层存在 + AC8c 无废键检查）
-- [ ] AC8: **交付维度与启动维度独立**（管理者更正，人纠正）——plugin【应当】包含 manager 层（更多开发
+      → manager SKILL Planning 职能引用活战略对照物 `gap-fast-mode-cross-project-portability-strategic-question`
+      + `strategic-doc-staleness-check.ts`（路线图过期探针，随层出货）。
+- [x] AC6: 11 份 `SPEC-*.md` 作为方法论来源引用（在 SKILL 中列索引，不批量结晶）
+      → manager SKILL「Methodology sources (SPEC index)」列出现有 14 份 `SPEC-*.md`（含 manager-productization
+      / outer-liveness / cold-start-one-liner 等），注明 referenced-not-batch-crystallized；每份在
+      `plugin/skills/init/SKILL.md` 声明 `reference-doc`（referenced ⊆ landed 机械约束）。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（三层存在 + AC8c 无废键检查）
+      → `plugin/test/manager-layer-skill.test.mjs`（node:test + `// @test-group governance`）：三层存在、
+      AC8c 无废键、plugin.json 注册、AC4 三件套、AC5 对照物、AC6 SPEC 索引、AC8 交付≠启动。10 pass / 0 fail。
+- [x] AC8: **交付维度与启动维度独立**（管理者更正，人纠正）——plugin【应当】包含 manager 层（更多开发
       者同样需要跨项目协调；不交付 = 人人重发明），但 quay:cold-start【不应】启动它（manager 不属项目
       冷启动范围，一个 network 一个就够）。**进交付物**与**不进冷启动六键**是两条独立判据：冷启动技能
       不得因为 plugin 里有 manager 就去启动它（机械复制 quay 三窗口到 meta-cc/archguard 已犯过——管理者
       自陈 + 自查改回 bash/outer/inner）
+      → plugin.json 注册 manager（交付维度）；cold-start `TOPOLOGY-IN-PLACE` 键明写「manager is cross-project
+      and NOT part of this topology」且无任何步骤 `quay-launch.sh manager`（启动维度）；AC7 测试同时断言两侧。
+
+## AC2 实跑输出（贴任务体）
+
+```
+$ ls plugin/skills/manager/
+SKILL.md
+
+$ node -e "const m=require('./plugin/.claude-plugin/plugin.json'); console.log(m.commands.filter(c=>c.includes('manager')))"
+[ './skills/manager/SKILL.md' ]
+
+$ # 模拟冷启动的铺设面：quay-init --loop 演练（manager SKILL 引用的机制 ⊆ 落盘/声明）
+$ CLAUDE_PLUGIN_ROOT=$PWD/plugin bash plugin/scripts/quay-init.sh --loop --root <tmp> --project proj \
+    --test-command 'node --test' --worktree-root /var/tmp/quay-wt-root --tmux-session proj-0:0.0
+drift-report: 漂移 0 / 缺失 0 / 一致 43 (derived-set 43)
+loop: copied=48 skipped=1 conflicted=0
+verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc)
+exit=0
+```
+
+## AC3 实跑输出（Contract invoke，贴任务体）
+
+```
+$ grep -rn 'inner-state.sh\|send-keys-verified' plugin/skills/cold-start/SKILL.md
+grep exit=1（1 = 0 命中）——AC8c 废键从 cold-start SKILL.md 消失
+```
+
+## AC4 实跑输出（启动配置三件套在交付物中，grep）
+
+```
+$ grep -nE 'deepseek-v4-flash|CLAUDE_CODE_MAX_CONTEXT_TOKENS|claude-deepseek' .claude/launch.settings.json
+7:    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "917000",
+31:        "launcher": "claude-deepseek",
+32:        "model": "deepseek-v4-flash",
+37:        "launcher": "claude-deepseek",
+38:        "model": "deepseek-v4-flash",
+```
+
+## 作用域测试输出（AC7，实跑）
+
+```
+$ node --test --test-concurrency=1 plugin/test/manager-layer-skill.test.mjs
+✔ AC1 — the manager layer SKILL.md exists (the third layer ships under plugin/)
+✔ AC1 — the manager skill is registered in plugin.json commands[] (installed on any plugin install)
+✔ AC7 — the three layers exist: outer + inner tick docs + the manager skill
+✔ AC3 — the cold-start skill has ZERO inner-state.sh / send-keys-verified references (AC8c dead-key fix)
+✔ AC4 — the launch config 三件套 (deepseek-v4-flash + CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000) is checked in
+✔ AC5 — the manager skill planning function carries a live roadmap/strategic-counterpart reference
+✔ AC6 — the manager skill lists the SPEC methodology sources as an index
+✔ AC8 — the plugin ships the manager layer, but the cold-start skill does NOT start it
+✔ AC1 — the manager skill crystallizes the two verified rules (§1.5 ask-vs-act, §1.6 event triage)
+✔ AC7 — the manager skill carries no experiments/quay-perpetual-stream or exp5 references
+ℹ tests 10   ℹ pass 10   ℹ fail 0   ℹ cancelled 0
+EXIT=0
+
+$ node --test --test-concurrency=1 plugin/test/cold-start-skill.test.mjs   # AC3 对应测试
+ℹ tests 8   ℹ pass 8   ℹ fail 0   ℹ cancelled 0
+EXIT=0
+```
 
 ## Definition of Done
 
@@ -84,14 +161,20 @@ manager 层从 `plugin/loop/`/`plugin/skills/manager*` 出货后，该类别即�
 
 ## Touches
 - tasks/gap-productize-the-manager-layer.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- plugin/skills/manager/SKILL.md（AC1 出货 manager 层）
+- plugin/test/manager-layer-skill.test.mjs（AC7 新测试）
+- plugin/skills/cold-start/SKILL.md（AC3 废键修复）
+- plugin/test/cold-start-skill.test.mjs（AC3 对应测试）
+- plugin/.claude-plugin/plugin.json（AC1 注册 manager skill）
+- plugin/test/plugin-packaging.test.mjs（AC1 注册断言 12→13）
+- plugin/skills/init/SKILL.md（AC1/AC6 reference-doc 声明）
+- .claude/launch.settings.json（AC4 启动配置三件套，检查进仓库）
 
+## Test-Files
 
-- plugin/skills/manager/SKILL.md (new)（或 plugin/loop/manager-loop-tick.md）
-- plugin/skills/cold-start/SKILL.md（AC8c 废键修复）
-- orchestration/REVIEW-cadence.md（引用，done 机制）
-- orchestration/manager-loop-tick.md（§1.5/§1.6 提取源）
-- orchestration/SYNTHESIS-four-gaps-2026-08-05.md（引用）
-- （启动配置结晶目标文件：check-in settings 或 cold-start 启动段）
+- plugin/test/manager-layer-skill.test.mjs
+- plugin/test/cold-start-skill.test.mjs
+- plugin/test/plugin-packaging.test.mjs
 
 ## Contract
 
