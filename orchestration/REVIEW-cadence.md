@@ -71,6 +71,24 @@ node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts 
 
 `orchestration/manager-phase-goal.md` 的复核记录由管理者**自己扩**（外层不代笔），加同一方向维度。
 
+### 3d. 趋势判据——点状之外：「比上次更贵了吗 / 离目标更近了吗」
+
+所有 3a–3c 的判据都是**点状**的（这次绿了吗、这条契约合规吗）。**趋势判据是新品类**
+（`gap-quality-criteria-are-point-in-time-no-trend-criteria`）——单次绿/红读不出「在改善还是在恶化」
+（每测试成本 0.251→0.464→0.321、净 +28% 恶化了一整天才有人问出来）。每次复盘跑一次：
+
+```bash
+# 读已有记录（verification-round.jsonl + checker-cost.jsonl 历史），被动判据、不引入新调度；
+# 窗口内恶化超阈值（默认 +10%/窗口，--threshold 可配）即打标，exit 1。
+node --experimental-strip-types plugin/scripts/trend-check.ts --window 5
+```
+
+- **三轴**：①套件每测试成本（per_test_ms，随窗口斜率）；②早期 RED 检测延迟（首真失败 → state 转 red，
+  爆炸半径缓解度的监控）；③单判据成本（checker-cost.jsonl，判据本身是否变贵——ready-pool-check
+  35.8→91.2→157 斜率不需人手工掐表）。
+- **输出写进汇总**：`trend_flags`（打标数组）+ 每条打标的轴/数值/净变化；exit 1 = 窗口内存在恶化，
+  按恶化轴进当日复盘结论（不是一次性，是复盘常项）。
+
 ---
 
 ## 4. 第一次复盘（已执行，见 outer-phase-goal.md 复核记录 2026-08-05）
