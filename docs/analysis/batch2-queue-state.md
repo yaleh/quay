@@ -5264,3 +5264,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **audit-findings 合并**（`6740d4fc`）：`finding-backpropagate.ts`（消费 DIR-124-B FindingEnvelope，classifyFinding 三态 + 最早可检阶段 + proveDetector 校准）+ `execution-policy.ts`（版本化 policy-hash + 授权激活）。真实 M208 finding（ac7-checklist-missing）校准；M192 负控。AC1-4/6/7/8 勾；**AC5 如实未勾**（需未来真实 milestone 证明前向捕获）。已并已清。
 - **在飞 0/5**（本批全落地）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T10:5xZ（内层，补池后派发：1/5）
+
+- **audit-findings fan-in 后**，cold-start-outer-validation-runs 解除碰撞（audit-findings 已并）。
+- **派发 1/5**：`cold-start-outer-validation-runs`（验证类任务——实跑冷启动验证流，产出贴任务体；inner-session discovery 刚改 fail-closed，本任务验证其效果）。补 self-touch + telemetry 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

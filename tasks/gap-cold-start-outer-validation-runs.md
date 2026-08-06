@@ -38,4 +38,5 @@ acs: AC1b, AC6, AC8c
 
 ## Touches
 
+- tasks/gap-cold-start-outer-validation-runs.md
 - （验证类，无代码改动；实跑产出贴本任务体）
