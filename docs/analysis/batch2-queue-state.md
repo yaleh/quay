@@ -5421,3 +5421,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **chart2-s2-test-assertions fan-in 完成**（merge task/gap-chart2-s2...，4 文件 67 行）：3 处 stale 断言与真实 evidence 同步（evidence 两 flag 已 true + 5 源版本一致 ⇒ cov 1/3，原断言按 DELIVERY-C/D 前状态写死 cov 0）+ 新负控制（临时 both-false evidence ⇒ cov 0 fail-closed 保留）。AC1–AC3 全勾（scoped 22/22）。留 ready。
 - **在飞 1/5**（probe-mechanism-dead-15-days-rewire）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T23:0xZ（内层，probe-mechanism fan-in 完成 —— 批 2 全落地）
+
+- **probe-mechanism fan-in 完成**（merge task/gap-probe-mechanism...，6 文件 184 行）：routine-scheduler 触发器从退休迭代计数改两层 tick 计数（`every(N)` 按外层 tick 触发，`--tick` 主参 + `--iteration` 废弃别名）+ 外层 tick step 1d 每 tick 检查 due + 内层边界注。AC1–AC4 全勾（scoped 14/14 + fuzz 42/42）。留 ready。
+- **loop-shipping AC1b 红修复（manager merge 引入的真实 pre-existing 红）**：`no-manager-tick-doc-check.sh` + 其测试/变异用例引用旧 `orchestration/` 布局（扫描两类目标布局——旧部署 + 新 plugin/loop，与 os-anchor 同族）⇒ 加入排除表；`.quay/` 运行时状态目录（gitignored，记录铺设目标布局）整体排除。12/12 + necessity 3/3 绿。`996a570d`。
+- **在飞 0/5**（批 2 全落地）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
