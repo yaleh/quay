@@ -5403,3 +5403,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 6 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（3 候选带宽 plugin/scripts/、orchestration/ touch 串行互撞）。
 - **派发 1/5**：`gap-manager-productization-five-constraints`（scheduler 批次胜者；补 self-touch 后派发）。9-AC 大任务——C1-C5 + 三裁定（谁发现谁创建+单飞锁 / manager-phase-goal 切分 / 建造=outer+inner）；AC5（OS 锚看护）/AC8（离乳判据）如需 live 干预可诚实不勾。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T21:5xZ（内层，manager-productization fan-in 完成 —— 在飞清零）
+
+- **manager-productization fan-in 完成**（merge task/gap-manager-productization...，13 文件 1589 行）：7 机制——manager-start/adopt/watchdog.sh + quay-topology 单飞锁（原子 wx-create）+ no-manager-tick-doc checker（C3）+ CLI 派发 + manager-loop-tick 切分。AC1/2/3/4/6/7/9 勾（scoped 20/20，no-manager-tick-doc CLEAN）；**AC5/AC8 诚实不勾**（杀 manager 会话 + 裸机离乳判据需 live 环境，worktree 不安全）⇒ 标 **needs-human 交外层实测**。
+- **manager SKILL SPEC 索引修复（真实 pre-existing 红，非本任务引入）**：`manager-layer-shipping.test.mjs` AC6 在 master 红——branch-model merge（SPEC-branching-model）与 integration-architecture SPEC 加入后 SKILL 索引仍 14 份。补 2 行（16 份）⇒ 7/7 绿。`05994521`。
+- 在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
