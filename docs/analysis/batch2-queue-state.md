@@ -5575,3 +5575,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   promotion 不消费 strategic-doc-staleness --pool-candidate（review-cadence AC8 控制存在但未接线）。
   在飞 2/3（delivery-grows + split-batch-vocab，均 clean）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:5xZ（外层，cold-start 语义缺陷立案 + archguard AC12b 不适合）
+
+- **cold-start 六键测「装没装好」非「在不在转」**（管理者 AC12b 协议实测）：队列空/等人/从未启动三态全真，
+  无法表达「启动过但停了请继续」。**复用 L2 dead-loop-check 加「已停转」分支** + 可执行下一步。
+  立案 gap-cold-start-six-keys-measure-installed-not-running。
+- **archguard AC12b 第二条线不适合**：backlog 见底（等方向/凭据/发布）= 真需要人，非机制缺陷。
