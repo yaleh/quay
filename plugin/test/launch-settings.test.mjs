@@ -5,7 +5,9 @@
 //   AC1 — the settings file carries the current-mode must-have params: `--exclude-dynamic-system-
 //         prompt-sections` (as _launchSpec.excludeDynamicSystemPromptSections), `-n/--name` per role
 //         (_launchSpec.roles.*.name), and `--prompt-suggestions false` (as
-//         env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="false").
+//         env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="false" AND _launchSpec.promptSuggestions=false →
+//         launcher emits the CLI flag — BOTH routes REQUIRED,
+//         gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false).
 //   AC4 — positive control: the launcher's --dry-run output for every role matches the settings file
 //         verbatim; negative control: a deliberately-broken copy of the settings file produces a
 //         DIFFERENT command (the restart-plan-AC1 mistake is mechanically checkable).
@@ -138,6 +140,7 @@ test("AC4 — positive control: every role's launch command carries the settings
     assert.ok(cmd.includes("--settings"), `${role}: command must reference --settings`);
     assert.ok(cmd.includes(`-n ${def.name}`), `${role}: command must carry -n ${def.name}`);
     assert.ok(cmd.includes("--exclude-dynamic-system-prompt-sections"), `${role}: command must carry --exclude-dynamic-system-prompt-sections`);
+    assert.ok(cmd.includes("--prompt-suggestions false"), `${role}: command must carry --prompt-suggestions false (ghost-suggestion source elimination, REQUIRED)`);
     assert.ok(cmd.startsWith(def.launcher), `${role}: command must use launcher ${def.launcher}`);
     if (def.model) {
       assert.ok(cmd.includes(`--model ${def.model}`), `${role}: command must carry --model ${def.model}`);
@@ -178,6 +181,38 @@ test("AC4 — negative control: deliberate edit changes the launch command (rest
     assert.equal(broken.status, 0);
     assert.notEqual(broken.stdout.trim(), good, "a changed model must change the launch command");
     assert.ok(broken.stdout.includes("--model deepseek-v4-pro"), "the mutated model must be visible in the command");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── ghost-suggestion source elimination (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false) ──
+
+test("AC6 — BOTH routes REQUIRED: _launchSpec.promptSuggestions=false (→ CLI flag) AND env var", () => {
+  const s = readSettings();
+  // Route 1: _launchSpec.promptSuggestions must be literally false → launcher emits --prompt-suggestions false.
+  assert.equal(s._launchSpec.promptSuggestions, false, "_launchSpec.promptSuggestions must be literally false (REQUIRED, not optional)");
+  // Route 2: top-level env must carry the official env-var disable.
+  assert.equal(s.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION, "false", "env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION must be false (REQUIRED)");
+  // Every role's materialized command must carry the CLI flag (belt + suspenders).
+  for (const role of Object.keys(s._launchSpec.roles)) {
+    const r = launch(role, ["--dry-run"]);
+    assert.equal(r.status, 0, `launcher for ${role} must exit 0:\n${r.stderr}`);
+    assert.ok(r.stdout.includes("--prompt-suggestions false"), `${role}: launch command MUST contain --prompt-suggestions false`);
+  }
+});
+
+test("AC6 — negative control: removing _launchSpec.promptSuggestions drops the CLI flag (catches drift)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-launch-ghost-"));
+  try {
+    const s = readSettings();
+    delete s._launchSpec.promptSuggestions;
+    const brokenPath = path.join(tmp, "launch.settings.no-ghost.json");
+    fs.writeFileSync(brokenPath, JSON.stringify(s, null, 2), "utf8");
+    const broken = launch("inner", ["--dry-run"], { QUAY_LAUNCH_SETTINGS: brokenPath });
+    assert.equal(broken.status, 0);
+    assert.ok(!broken.stdout.includes("--prompt-suggestions false"),
+      "removing _launchSpec.promptSuggestions must drop the CLI flag (the REQUIRED invariant is what pins it)");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

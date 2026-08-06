@@ -47,7 +47,7 @@
 |---|---|---|
 | `--exclude-dynamic-system-prompt-sections` | `_launchSpec.excludeDynamicSystemPromptSections: true` → launcher 翻译成 CLI 参数 | settings.json **无对应键**（官方 schema 证实：`json.schemastore.org/claude-code-settings.json` 无此键、根 `additionalProperties:true` 允许 `_launchSpec` 扩展）。实测跨 cwd system prompt 逐字节相同（Δ input_tokens=0） |
 | `-n, --name <name>` | `_launchSpec.roles.<role>.name`（quay-manager/outer/inner）→ launcher `-n` | settings.json **无对应键**（flag-only）。实跑会话记 `custom-title` |
-| `--prompt-suggestions false` | `env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false"` | settings.json **无 promptSuggestions 键**；官方给的环境变量路线是禁用的正确形态 |
+| `--prompt-suggestions false` | 双路线：`env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false"` **且** `_launchSpec.promptSuggestions: false` → launcher 翻译成 CLI 参数 | settings.json **无 promptSuggestions 键**（flag-only）；官方给的环境变量路线是禁用的正确形态。2026-08-06（gap-ghost-suggestion-eliminated-at-source）起**双路线必带（REQUIRED）**：环境变量 + CLI 参数都落地，launcher `--dry-run` 输出含 `--prompt-suggestions false` |
 | `--permission-mode bypassPermissions` | `permissions.defaultMode: "bypassPermissions"` | settings.json **有对应键**（ADR-016 前置条件） |
 | 917k 上下文/压缩 + ADR-016 `DISABLE_*` | `env` 六个键 | settings.json `env` 任意环境变量（官方 schema）。917k 是 deepseek 专用：manager 角色在 `_launchSpec.roles.manager.env` 置空串，launcher 合并时删键，避免 Anthropic 默认模型「压缩过晚 API 报错」（session-launch-recipes §5） |
 | `--bare`（一次性验证） | `_launchSpec.bare` + launcher `--bare` 参数 | flag-only；标注「一次性验证用，不长驻」 |
