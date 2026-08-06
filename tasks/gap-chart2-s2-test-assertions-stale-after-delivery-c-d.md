@@ -51,6 +51,7 @@ DELIVERY-C/D 翻为 **both true**（S2 cov 0.667→1.00，3/3 FULL）。
 - experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs
 - tasks/exp5-M-PRODUCTIZED-DELIVERY-C.md（AC3 交叉标注）
 - tasks/exp5-M-PRODUCTIZED-DELIVERY-D.md（AC3 交叉标注）
+- tasks/gap-chart2-s2-test-assertions-stale-after-delivery-c-d.md
 
 ## Contract
 

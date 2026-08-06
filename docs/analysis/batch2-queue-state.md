@@ -7392,3 +7392,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **全部验证绿**：静态链 STATIC-EXIT 0；unparseable 6/6、task-check 1/1、ts-typecheck 5/5、checker-cost 8/8、tick-vocabulary 5/5、trend-check 13/13、message-bus 25/25。
 - **无 flaky 标注**：16 个失败全部为真回归/真缺陷，已全部修复。待外层重跑套件最终确认。
 - **triage 收尾**：16 个失败全部为真回归/真缺陷，已全部修复并提交（9c6b4efd / f611a094 / 82b1a719 / 3241b4fb / a1a001ae）。外层 04ca6921 确认 triage 完成，20:48 重跑全量套件验证。静态链 STATIC-EXIT 0，所有单测绿。
+
+### tick 2026-08-06T21:1xZ（suite running，派发 1：chart2-s2）
+
+- **suite 仍 running**（20:48 起，~28min，外层验证 16 修复中）——红窗停止解除，`running` ⇒ 照常派发。
+- **停止条件**：`--detect-stop` 无块（manager OVER90 已被外层 18:34 裁定关闭）。`.halt` 无。pool 21 ≥ floor 20，dispatchable 10。
+- **派发 1（cap=5 GO，在飞 0→1）**：`gap-chart2-s2-test-assertions-stale-after-delivery-c-d`（3 AC 未勾、resolves、self-touch 补后 ok；fork develop，telemetry runId ...-lkui4j）。slot-refill 其余 4 推荐排除：DIR-124（human-steered）、audit-findings（7/8 AC，机制已落 develop）、cold-start（AC 全勾=陈旧待翻 done）、concurrency-reverted（已 fan-in）。
+- **自选候选审查**：chart2-s2 是唯一真候选（20:26 套件中 chart2-s2-delivery-completeness 实红，本任务即修复）。
