@@ -5409,3 +5409,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **manager-productization fan-in 完成**（merge task/gap-manager-productization...，13 文件 1589 行）：7 机制——manager-start/adopt/watchdog.sh + quay-topology 单飞锁（原子 wx-create）+ no-manager-tick-doc checker（C3）+ CLI 派发 + manager-loop-tick 切分。AC1/2/3/4/6/7/9 勾（scoped 20/20，no-manager-tick-doc CLEAN）；**AC5/AC8 诚实不勾**（杀 manager 会话 + 裸机离乳判据需 live 环境，worktree 不安全）⇒ 标 **needs-human 交外层实测**。
 - **manager SKILL SPEC 索引修复（真实 pre-existing 红，非本任务引入）**：`manager-layer-shipping.test.mjs` AC6 在 master 红——branch-model merge（SPEC-branching-model）与 integration-architecture SPEC 加入后 SKILL 索引仍 14 份。补 2 行（16 份）⇒ 7/7 绿。`05994521`。
 - 在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T22:0xZ（内层，manager fan-in 后派发 2/5 —— 首次真批量）
+
+- **manager-productization fan-in 完成**（前 tick，本 tick 复核记录）：7 机制已并 + scoped 20/20 绿；AC5/8 needs-human；SKILL SPEC 索引 14→16 修 AC6 红。在飞清零。
+- **pool 复核**：pool 7 / dispatchable_disjoint **5**——外层补池 2 新候选（chart2-s2-test-assertions / probe-mechanism-dead-15-days）加入后出现首个 2-wide disjoint 批次。
+- **派发 2/5**（disjoint batch）：`chart2-s2-test-assertions-stale-after-delivery-c-d` + `probe-mechanism-dead-15-days-rewire-to-two-layer`（均补 self-touch + telemetry）。red-window / tests-leak-tmux deferred（与前批碰撞）。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。

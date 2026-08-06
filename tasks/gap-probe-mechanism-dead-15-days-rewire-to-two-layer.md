@@ -50,6 +50,7 @@ strategic-doc-staleness orchestration 臂死 glob。
 
 ## Touches
 
+- tasks/gap-probe-mechanism-dead-15-days-rewire-to-two-layer.md
 - plugin/scripts/routine-scheduler.ts（触发器改两层量）
 - plugin/loop/orchestrator-loop-tick.md（接线 routine 检查）
 - plugin/loop/fast-mode-loop-tick.md（如涉及）
