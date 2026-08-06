@@ -747,9 +747,13 @@ derive_loop_scripts() {
   #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
   #   the loop so an installed project can see what each laid-down check answers. Deliberate
   #   explicit addition (no doc references it by path — the catalog is self-describing).
+  #   uncalled-verifier-check.ts (gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check):
+  #   the shipped-but-uncalled verifier census. Deliberate explicit addition (no skill/tick doc
+  #   references it by path — it is the check ON the laid-down mechanism set; a target installs it
+  #   so it can run `--json --root .` and see which laid-down verifiers have no execution caller).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
-    capability-catalog.sh >> "$out"
+    capability-catalog.sh uncalled-verifier-check.ts >> "$out"
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0

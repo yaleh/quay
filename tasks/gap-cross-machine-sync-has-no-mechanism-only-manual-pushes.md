@@ -20,6 +20,13 @@ extra:
 ---
 **type:** execution
 
+## Cross-reference (class-level mechanism, 2026-08-06)
+
+本任务是本类（shipped-but-uncalled verifiers）的一个实例：`periodic-push-backup.sh` 曾 0 调用点，
+被本任务用 `sync-lag-check.sh` 接线。类级机制 `plugin/scripts/uncalled-verifier-check.ts`
+（`gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check` AC6）确认它现在有执行调用点
+（`sync-lag-check.sh:54/115`），不再出现在 uncalled 清单里。
+
 ## Proposal
 
 **跨机同步没有机制，只有"人或管理者想起来才推一次"。** 人 2026-08-06 亲自发现并裁定立案。

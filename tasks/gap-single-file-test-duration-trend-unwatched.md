@@ -10,6 +10,14 @@ extra:
 ---
 **type:** execution
 
+## Cross-reference (class-level mechanism, 2026-08-06)
+
+本任务是本类（shipped-but-uncalled verifiers）的一个实例：`measure-suite.mjs` + `measure-suite-reporter.mjs`
+是"能测但不看"的一次性手动工具。类级机制 `plugin/scripts/uncalled-verifier-check.ts`
+（`gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check` AC6）把它们报为 uncalled，
+并列入只减不增的豁免 ratchet（`plugin/uncalled-verifier-exemptions.txt`），注释指向本任务——
+本任务负责把它们接进决策路径（wire 后即从豁免名单移除）。
+
 ## Proposal
 
 **单文件测试耗时增长无人跟踪——能测但不看（能力存在没接进决策路径）。**
