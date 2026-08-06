@@ -7095,3 +7095,99 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 6 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（3 候选带宽 plugin/scripts/、orchestration/ touch 串行互撞）。
 - **派发 1/5**：`gap-manager-productization-five-constraints`（scheduler 批次胜者；补 self-touch 后派发）。9-AC 大任务——C1-C5 + 三裁定（谁发现谁创建+单飞锁 / manager-phase-goal 切分 / 建造=outer+inner）；AC5（OS 锚看护）/AC8（离乳判据）如需 live 干预可诚实不勾。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T14:1xZ（外层，人直接指令：同步两边）
+
+- **人裁定**：「通知两边做同步。保证其已经处理好合并问题并 push 后才能处理其它任务。」
+- **A 动作（完成）**：本地 develop 26 个未推提交已 push origin（4cdde3f2→7cf3c650）。push 完成前不开新任务。
+- **B 冲突预警（管理者实测）**：B 落后 origin 405 提交、6h 没交互。A 改 238 文件、B 改 117、交集 56。
+  高危重叠：plugin/loop/fast-mode-loop-tick.md + orchestrator-loop-tick.md（branch cutover 改的，B 不知道）、
+  session-liveness.sh / ready-pool-check.ts / slot-refill.ts / full-suite-runner.ts / quay-init.sh
+  （A 今晚修合并回归的，B 同期独立改）。**最尖锐**：plugin/test/session-liveness.test.mjs 又在交集——
+  上次硬 SyntaxError（const commit 重复）正是合并此文件产生，同文件双边改动酝酿第二次。47 个同名
+  tasks/gap-*.md 双方都改。
+- **B 侧解冲突提示**（人已裁定 B 自己的循环负责自己合并）：特别小心上述文件——上次 35 冲突里出问题的
+  是「两边各留一半」机械式合并。
+
+### tick 2026-08-06T14:3xZ（外层，跨机同步任务纳入管线）
+
+- **gap-cross-machine-sync-has-no-mechanism-only-manual-pushes（f38514c4）纳入**——人裁定主题，
+  管理者 AC1-AC6 机械可测（兜底实测 / 事件驱动同轮 / 落后量可读 / 负控制 / 两机 / 无 crontab）。
+- **b-machine-push-backup 标 superseded**（其 AC1 文字改了但实现仍 --cron-line crontab，改造不完整；
+  新任务为正确替代）。新任务可派（touches 解析通过）。
+
+### tick 2026-08-06T23:0xZ（cross-machine-sync 派发——OVERLAP 序列化 hold）
+
+- **人裁定派发 gap-cross-machine-sync**（AC1-AC6 全机械可测：兜底实测/事件驱动同轮/落后量可读/负控制/两机/无 crontab）。
+  数据方给「与在飞 remove-shared-events disjoint（checkTouchesPair 机制判）」。
+- **机械验证推翻 disjoint**：checkTouchesPair 实判 **OVERLAP** —— 两任务都改
+  `plugin/loop/fast-mode-loop-tick.md`（remove-shared-events 改写 176-180 单飞挂载语义；
+  cross-machine-sync 加 sync 检查点）。**数据与机制不一致，以机制为准**。
+- **处置**：按 tick doc OVERLAP ⇒ 序列化，**不并行派发**。已 promote 到 ready（排队），
+  等 remove-shared-events fan-in 落地 fast-mode-loop-tick.md 后本 tick 下一轮派发。
+  对应人裁定"可等 remove-shared-events 完成后"分支。
+- 在飞 1/3（remove-shared-events）。池另有 cross-machine-sync 待命。
+
+### tick 2026-08-06T23:5xZ（内层 cron，轻触）
+
+- 无 halt；套件 GREEN。在飞 1/3（remove-shared-events B 全删，agent ~48min，未到 OVER90，
+  brackets reflect subagents=true 健康）。分支 0 提交——大范围删除（heavy-op-token.sh + 全调用点 +
+  测试 + 文档），agent 分析后单提交，48min 合理。
+- 池：cross-machine-sync 已 ready 排队（serialize-held，等 remove-shared-events fan-in 解除
+  fast-mode-loop-tick.md 重叠）。无其它新 promotions。
+- 下一事件：remove-shared-events 完成（→ fan-in + 解除 cross-machine-sync hold）。
+
+### tick 2026-08-06T14:2xZ（外层，两条裁定 + 新立案）
+
+- **矛盾裁定**：ready-pool 可派 6（5 候选全与 in-flight disjoint 机制判），inner serialize-held 是
+  过度保守——等 remove-shared-events 收尾可接受（标注等收尾非机制不允许），完成后按机制派。
+- **滞留 worktree**：resource-aware 25h 无提交 + 未提交改动，已驱动 inner 核实（完成待收尾 or 丢弃）。
+- **新立案接受**：gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target（a021d0cf）——
+  quay-init grep fork_baseline=0、write_provider_config 只写四键——分支切换只存在于三台手工改过的主机，
+  标准新主机拿不到两键静默回落 master-only。与 fork-does-not-read-config 分工（读 vs 铺）。
+
+### tick 2026-08-06T24:0xZ（两裁定：serialize 标注纠正 + resource-aware 核实）
+
+- **裁定#1（矛盾——serialize 过度保守）**：ready-pool-check 可派 6（5 候选全与 remove-shared-events
+  disjoint，机制判），inner 上一条 serialize-held 过度保守。**纠正**：cross-machine-sync 与
+  remove-shared-events 的 OVERLAP（fast-mode-loop-tick.md）仍存在，但 hold 的**标注**应从
+  「机制不允许并行」改为「**等 remove-shared-events 收尾的协调选择**」——避免大改动并行是审慎，
+  不是机制限制。remove-shared-events 完成后按机制派发（OVERLAP 随其 fan-in 消失）。
+- **裁定#2（resource-aware 滞留 worktree 核实）**：分支核心已 merge 进 develop（ancestor 验证 YES）；
+  未提交改动 = **真实 re-open 工作**（resource-gate.test.mjs +43 行 AC12/13/14/15 证据 +
+  任务文件 +129 行），**不在 develop**。外层已裁定（3f78e428）：「worktree KEPT —— real uncommitted
+  re-open work; bracket closed needs-human」。任务 status=needs-human。**结论：非丢弃，是外层刻意保留的
+  re-open 工作，待 needs-human 处置后收尾**。
+- 两件均在 remove-shared-events 完成后处理：① 按机制派 cross-machine-sync；② 按外层 needs-human
+  处置推进 resource-aware re-open 收尾。
+
+### tick 2026-08-07T00:5xZ（remove-shared-events fan-in 完成 + cross-machine-sync hold 解除）
+
+- **remove-shared-events 落 integration**（1f340d57→5cd05cf3，33 files +455/−3138）：
+  **B 全删执行**——heavy-op-token.sh + 4 测试文件删除、全调用点清理、per-observer 事件流、
+  无锁、目标无感、观察者互不知情。AC1-AC5 证据、monitor-mount 11/11、session-liveness 49（agent worktree）。
+- **拓扑修正**：integration 原落后 develop 81（stale ancestor）。先 merge develop into integration
+  带其 current，再合任务分支（两线模型 fan-in）。rebase 时发现 integration rebase 是错的（无限 queue-state
+  replay）→ abort + rebase onto develop（干净 4 提交）。遗留 5 处 heavy-op-token 引用全是**退役标注**（prose 注释），非 dangling 调用。
+- **cross-machine-sync hold 解除**（fast-mode-loop-tick.md 重叠已随 fan-in 消失）。
+- 在飞 0/3。下一步：按裁定#1 派发 cross-machine-sync（serialize 已解）。
+
+### tick 2026-08-07T01:0xZ（cross-machine-sync 派发 — serialize hold 解除）
+
+- **按裁定#1派发 gap-cross-machine-sync**（serialize hold 已解除——remove-shared-events fan-in 后
+  fast-mode-loop-tick.md 重叠随其落地，新任务在其上构建非在飞冲突）。
+  resolve 4/4、pool-candidate clean、fork-baseline=develop、在飞 0/3。
+- worktree /home/yale/work/quay-worktrees/cross-machine-sync + bracket 已开。
+  agent 指引：slot-refill 双触发模式（事件驱动 + tick 心跳兜底）、禁系统 crontab、AC1-AC6 全机械可测。
+- 在飞 1/3。
+
+### tick 2026-08-07T01:4xZ（派发 concurrency-derivation-reverted）
+
+- 池新增 2 个 promotion 候选（外层新立案）：concurrency-derivation-reverted（disjoint 6）+
+  no-post-merge-cross-machine-verification-latency（disjoint 4）。
+- **派发 2/3 — concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived**：
+  resolve 5/5、pool-candidate clean、fork-baseline=develop、**DISJOINT vs 在飞 cross-machine-sync**。
+  worktree /home/yale/work/quay-worktrees/concurrency-revert + bracket 已开。
+  agent 指引：并发派生被 revert（回固定值）但 docs/AC/tests 仍报派生形——single-source drift，按任务体
+  Chosen mechanism 定方向（restore code vs fix docs）。
+- 在飞 2/3（cross-machine-sync + concurrency-revert）。no-post-merge-latency 待后续。

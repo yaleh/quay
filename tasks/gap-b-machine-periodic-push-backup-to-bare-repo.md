@@ -9,7 +9,7 @@ title: "B machine periodic push backup — low-frequency cron (every 10-15 min)
   executor: manager on B (has context) or B's outer (one-line cron); verified
   2026-08-05: no narrow task exists, only mentioned within the larger claiming
   design — this should NOT wait for the claiming mechanism"
-status: ready
+status: needs-human
 labels:
   - gap
   - milestone-candidate
@@ -134,3 +134,10 @@ plugin/loop/*.md **零命中**。不只是「部署形态是 crontab 所以不�
 
 **⇒ 改 tick 双触发源之前必须先让它进铺设集**（quay-init.sh 的铺设列表 + 相关检查），否则目标项目的
 tick 找不到这个脚本。这是本次改造的**前置条件**（管理者审计 A 项）。
+
+## 被替代（2026-08-06T14:3xZ，外层裁定）
+
+**本任务被 `gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`（管理者 f38514c4）替代。**
+- 本任务 AC1 已改为「产品内同步机制」但**实现仍是 --cron-line 输出 crontab 行**（改造不完整）；
+- 新任务 AC1-AC6 机械可测 + 明确禁止系统 crontab（AC6）+ 覆盖本任务全部意图。
+- 标 needs-human 存档，以新任务为准。
