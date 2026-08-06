@@ -3,7 +3,7 @@ id: gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false
 title: ghost-suggestion (reliable-send fault 6) can be eliminated at source via
   --prompt-suggestions false / CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false — verify
   safely, then make it a required cold-start launch parameter
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -119,9 +119,9 @@ node --test plugin/test/launch-settings.test.mjs
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC2 两个方向的实跑输出逐字贴进本任务体
-- [ ] 一次真实冷启动路径验证：按更新后的启动规范起一个会话，输入框无 ghost-suggestion（非构造）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC2 两个方向的实跑输出逐字贴进本任务体
+- [x] 一次真实冷启动路径验证：按更新后的启动规范起一个会话，输入框无 ghost-suggestion（非构造）
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 - tasks/gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false.md（自身文件：勾 AC + 贴 invoke 证据授权）
