@@ -6187,3 +6187,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层在 AC16 agent 工作中扩展其 scope（62ba83b0）：第三条安装路径 dist-plugin marketplace
   分支（落后 master 3755 提交），AC6 新增——agent 处理时需注意，fan-in 后核实 AC6。
 - supervisor merge + AC17 catch-up 仍挂（spawn-count 完成后）。
+
+### tick 2026-08-06T08:5xZ（AC16 fan-in 到 integration 完成）
+
+- **AC16 合入 integration**（第一个正确落两线模型的任务）：7adb6307（files+plugin、package.sh 快照、
+  v0.4.0、SEA 保留、dist-plugin 第三条路径）→ 8cca89d5 merge → bd273f5a contract 格式修复。
+  分支 develop 基线（926d771b）+1 提交，无 master-only 污染（与 supervisor 不同）。
+- **contract-check 抓到 band 格式违规**（`band bundle_in_pack = > 0` 无 name=value 形）——
+  严格子集 scoped 闸抓出，改为 `band bundle_in_pack = 1`。scoped 5/5 pass（含 bundle_in_pack>0 回归）。
+- worktree 清理 + branch 删除 + telemetry close（outcome done）。在飞 1/3（spawn-count）。
+- **AC17 catch-up 仍待 spawn-count 完成**（裁定顺序 ①master 62→develop ②拉 GitHub B ③rebase 任务分支）。
+  integration 现领先 develop 2 提交（AC16），等 catch-up ①②后由外层 FF 到 develop。
