@@ -711,6 +711,19 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 **以本节为准执行，并向外层标注矛盾**，不静默服从散文。产品不被散文覆盖的机械承载
 是这一句，不是「指望外层永远记得不复述」。
 
+### 4a. 跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）
+
+**每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$(pwd)"`——
+它问「本地 `$FORK_BASELINE`（quay: develop）是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
+`periodic-push-backup.sh` 本体），**不依赖任何完成事件**。这是双触发源（`slot-refill` 模式）的**兜底触发源**：
+外层 3b 的事件驱动路径在 land 收口同一轮内推送（加速），本步保证「即使事件驱动漏了 / 外层没跑 / 本机
+`$FORK_BASELINE` 悄悄积累」，每 tick 也会把本地领先推上 origin。**内层与外层同挂**——两机各层 tick 都是
+心跳（幂等，up-to-date 退出 0）。
+
+**同步落后量机械可读（AC3）**：`bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$(pwd)"`
+输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」有测量。心跳跑 `--push` = 测 + 领先即推；
+push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试（fail-closed，绝不 force）。
+
 ### 5. 写回状态
 
 更新队列文件：已完成 / 在飞（含 worktree 路径和派发时刻）/ 待执行 / 计量表 / 本 tick 做了什么。

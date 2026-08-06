@@ -715,10 +715,14 @@ tick 做一次收尾 pass。
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
 3b. **批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（两线模型 AC3，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
-   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"` 把
+   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync` 把
    已验证的 `$MERGE_TARGET` 批量快进合回 `$FORK_BASELINE`——**`$MERGE_TARGET` 永远是 `$FORK_BASELINE`
    后代 ⇒ fast-forward 无冲突**（`$FORK_BASELINE` 只被外层批量合推进，inner 任务只合 `$MERGE_TARGET`，
-   见 `fast-mode-loop-tick.md` 步骤 2「两线分支模型」；单线下两者同为 master ⇒ 无操作）。`integration-batch-merge.sh` 自带：
+   见 `fast-mode-loop-tick.md` 步骤 2「两线分支模型」；单线下两者同为 master ⇒ 无操作）。
+   **`--sync`（事件驱动跨机推送，`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：land
+   收口快进 `$FORK_BASELINE` 后**同一轮内**立即把它推到 `origin/$FORK_BASELINE`（`integration-batch-merge.sh`
+   成功 FF 后调 `sync-lag-check.sh --push`）——不等下一 tick。push 失败（非快进 = 真分歧）只报告、不回滚
+   已推进的 ref，由步骤 3c 的心跳兜底重试。`integration-batch-merge.sh` 自带：
    - **pre-check**：`git merge-base --is-ancestor <$FORK_BASELINE> <$MERGE_TARGET>` 非 0（真分歧）⇒ 退出非 0、
      不移动任何 ref、needs-human——**绝不 blind --ours/--theirs**；
    - **measure**：`git merge-base --is-ancestor <$MERGE_TARGET> <$FORK_BASELINE>` 退出码（band = 0 =
@@ -728,6 +732,15 @@ tick 做一次收尾 pass。
    suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 `$MERGE_TARGET` 照常接收任务合并，
    只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；`$FORK_BASELINE` 永不从未验证树推进）。
    **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。
+3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：
+   每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
+   它问「本地 `$FORK_BASELINE` 是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
+   `periodic-push-backup.sh` 本体），**不依赖任何完成事件**。这是兜底触发源：3b 的事件驱动路径负责「land
+   收口同一轮内推送」的加速，本步负责「万一事件驱动漏了 / 跨机各自主检出悄悄积累」的必跑保底。
+   **同步落后量机械可读（AC3）**：`bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$REPO_ROOT"`
+   输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」从此有测量，不再靠人 `git log`。
+   心跳读 `--json` 的 `leads` 或直接跑 `--push` 均等价（`--push` = 测 + 领先即推）。push 失败（非快进 =
+   真分歧）只报告、不覆写、下一 tick 重试——正是 fail-closed 兜底。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}

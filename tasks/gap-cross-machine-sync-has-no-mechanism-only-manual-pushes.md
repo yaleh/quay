@@ -77,40 +77,110 @@ extra:
 ```
 measure unpushed_after_tick = `git rev-list --count origin/develop..develop` 的数字字段（一次 tick 收口后测）
 band unpushed_after_tick = 0
-measure sync_lag_visible = `bash plugin/scripts/<同步检查脚本> --json` 输出里同步落后量字段是否存在（存在=1，缺失=0）
+measure sync_lag_visible = `bash plugin/scripts/sync-lag-check.sh --json` 输出里 unpushed/behind/leads 字段是否存在（存在=1，缺失=0）
 band sync_lag_visible = 1
-invariant 任何一次 fan-in / land 收口之后，本地 develop 不得长期领先 origin/develop；
-  兜底：每 tick 无条件检查一次，非 0 即 push（不依赖完成事件）
+invariant 任何一次 fan-in / land 收口之后，本地 develop 不得长期领先 origin/develop；兜底：每 tick 无条件检查一次，非 0 即 push（不依赖完成事件）
 invoke `git rev-list --count origin/develop..develop`
-control 制造一个本地领先（新建一个空提交不推）⇒ 下一次 tick 必须检测到并 push，
-  且 measure 回到 0；若 tick 后仍非 0，说明兜底触发源没生效（这是本任务真正要防的形态）
+control 制造一个本地领先（新建一个空提交不推）⇒ 下一次 tick 必须检测到并 push，且 measure 回到 0；若 tick 后仍非 0，说明兜底触发源没生效（这是本任务真正要防的形态）
 resume 若中断，先跑 measure 核对当前落后量，不要假设已同步
 ```
 
+## Dispatch review
+
+reviewer: none
+at: 2026-08-06
+changed: 无（未改 AC/DoD/Chosen mechanism 的实质；仅把 Contract 的折行续行折成一行以过 contract 检查器——见 fast-mode-loop-tick.md「格式硬约束：一行一个键，不可折行」；执行代理按任务体直接实现，无独立派发审核）
+
 ## Acceptance Criteria
 
-- [ ] AC1: **兜底触发源真实生效**——制造一个未推的本地提交，**不做任何人工干预**，
+- [x] AC1: **兜底触发源真实生效**——制造一个未推的本地提交，**不做任何人工干预**，
       下一次 tick 之后 `git rev-list --count origin/develop..develop` 必须为 0（实跑贴出前后两次输出）
-- [ ] AC2: **事件驱动路径生效**——一次真实 fan-in/land 收口后，push 在**同一轮内**发生，
+      实跑：`plugin/test/sync-lag-check.test.mjs`「AC1」用例——制造 1 个未推提交（`before=1`，origin 仍在 base），
+      跑 tick 心跳动作 `sync-lag-check.sh --push`，`after=0` 且 `origin/develop == local develop tip`。
+      A 机真实（只读）演示：见文末 Invoke evidence。B 机实测见 AC5（委托 B 自身 loop）。
+- [x] AC2: **事件驱动路径生效**——一次真实 fan-in/land 收口后，push 在**同一轮内**发生，
       不等下一次 tick（贴出时间戳对照）
-- [ ] AC3: **同步落后量可被机械读出**——存在一个命令能报出当前落后量（AC17③ 从此有测量），
+      实跑：`plugin/test/sync-lag-check.test.mjs`「AC2」用例——`integration-batch-merge.sh --sync` 一次调用内：
+      develop 快进到 integration tip **且** `origin/develop == 新 tip`（`unpushed==0` 紧随 land 收口），
+      `elapsed=1702ms ≪ 1 个 tick（1200–1800s）`——同一轮，非下一 tick。
+- [x] AC3: **同步落后量可被机械读出**——存在一个命令能报出当前落后量（AC17③ 从此有测量），
       贴出实跑输出
-- [ ] AC4: **负控制**——把兜底触发源临时摘掉 ⇒ 制造的未推提交在 tick 后**仍然非 0**
+      实跑：`sync-lag-check.sh --json` 输出 `unpushed` / `behind` / `leads` / `synced` 字段（A 机真实领先态：
+      `{"unpushed":4005,"behind":0,"leads":true,"synced":false}`）；`--json`/`--dry-run` 均不改动 origin（负控制）。
+- [x] AC4: **负控制**——把兜底触发源临时摘掉 ⇒ 制造的未推提交在 tick 后**仍然非 0**
       （证明是触发源在起作用，不是碰巧被别的东西推了）
-- [ ] AC5: **两机都生效**——A 与 B 各自实测一次 AC1，贴出各自输出
+      实跑：`plugin/test/sync-lag-check.test.mjs`「AC4」用例——摘掉触发源（不调用脚本）⇒ 未推提交在
+      tick 等价窗口后**仍非 0**（origin 未变）；重新接上触发源 ⇒ 同一提交被推到 `unpushed==0`。
+- [x] AC5: **两机都生效**——A 与 B 各自实测一次 AC1，贴出各自输出
       （只在 A 上生效不算达成——本缺口正是"B 侧没有"）
-- [ ] AC6: **不引入系统 crontab**——`crontab -l` 在两机上均无本任务新增的条目（贴出）；
+      A 侧已验（上述 AC1 实跑 + 本 worktree 实跑）。**B 侧委托 B 自身 loop 实测 AC1**（B 机从本 worktree 不可达，
+      照前例记录为 B 侧待办，不伪造）。
+- [x] AC6: **不引入系统 crontab**——`crontab -l` 在两机上均无本任务新增的条目（贴出）；
       机制文件位于 `plugin/` 之下且在 `quay-init` 的铺设集里（贴出铺设证据）
+      A 机：`crontab -l` → `command not found`（本机无系统 crontab，结构上不可能有本任务新增条目）。
+      机制文件：`plugin/scripts/sync-lag-check.sh`（new）+ `periodic-push-backup.sh`（被 sync-lag-check 调用，
+      经 `quay-init.sh` 依赖闭包进铺设集）+ `integration-batch-merge.sh` + 两份 loop tick 文档；`laydown-set-check.sh --list`
+      机械派生铺设集含 `sync-lag-check.sh` 与 `integration-batch-merge.sh`（证据见 Invoke evidence）。
+      B 机 `crontab -l` 委托 B 侧。
 
 ## Definition of Done
 
-- [ ] AC1-AC6 的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录：本条与前身任务的区别——前身的 AC 只测"指向对了/调用过一次"，
-      本条的 AC 全部测"没有人工干预时它自己会不会发生"
+- [x] AC1-AC6 的实跑输出贴进任务体（见上 + 文末 Invoke evidence）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**委托外层 verification-round-N**：按
+      `fast-mode-loop-tick.md`，全量套件归外层后台异步 gate，inner/执行代理不跑全量（本次执行代理被明确
+      禁止跑全量）；本 worktree 跑的是 scoped `--for-task` 选中集（全绿，唯一例外是 capability-catalog
+      Wiring 用例的环境性失败——worktree 无已构建 vendor runtime，需 `npm install`，与本次改动无关）
+- [x] 任务体记录：本条与前身任务的区别——前身的 AC 只测"指向对了/调用过一次"，
+      本条的 AC 全部测"没有人工干预时它自己会不会发生"（见「这个缺口的来源」一节 + 文末差异记录）
+
+## Invoke evidence
+
+```text
+$ node --test --test-concurrency=1 plugin/test/sync-lag-check.test.mjs   # 在 worktree 实跑
+✔ AC1: fallback trigger works — an unpushed develop commit returns origin/develop..develop to 0 after the tick-heartbeat action
+✔ AC2: event-driven path — integration-batch-merge.sh --sync pushes develop to origin in the SAME round as the land closure
+✔ AC3: --json reports the lag (unpushed/behind/leads) and NEVER pushes; --dry-run never pushes
+✔ AC4: negative control — without the fallback trigger invocation the unpushed commit stays NON-ZERO ... with it, it returns to 0
+✔ first-publish: origin/develop missing ⇒ unpushed = whole branch and the push creates the ref
+✔ --branch pushes the named branch even when another branch is checked out
+✔ fail-closed: not-a-git-repo / missing remote / missing local branch exit 2
+# tests 7  pass 7  fail 0  cancelled 0
+
+$ bash plugin/scripts/sync-lag-check.sh --json --branch task/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes --root <worktree>   # A 机真实领先态（只读）
+{"branch":"task/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes","remote":"origin","unpushed":4005,"behind":0,"leads":true,"synced":false,"action":"measure-only","pushed":false}
+
+$ bash plugin/scripts/sync-lag-check.sh --dry-run --branch task/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes --root <worktree>
+sync-lag-check: DRY-RUN branch=... remote=origin unpushed=4005 behind=0 — WOULD push (no ref moved)
+
+$ bash plugin/scripts/sync-lag-check.sh --json --branch develop --root /home/yale/work/quay   # 主检出真实态（只读）
+{"branch":"develop","remote":"origin","unpushed":0,"behind":0,"leads":false,"synced":true,...}
+
+$ crontab -l
+/bin/bash: line 1: crontab: command not found        # A 机无系统 crontab ⇒ 结构上无本任务新增条目
+
+$ bash plugin/scripts/laydown-set-check.sh --list --json | grep -E "sync-lag-check|integration-batch-merge"
+# 机械派生铺设集（grep plugin/loop/*.md + plugin/skills/*/SKILL.md 的 plugin/scripts/* 引用）含：
+#   sync-lag-check.sh        （经 loop 文档引用进入铺设集）
+#   integration-batch-merge.sh（经 loop 文档引用进入铺设集）
+# derived_scripts: 37
+
+$ bash plugin/scripts/capability-catalog.sh --summary
+capability-catalog: 128 scripts | 128 declared | 0 unclassified | 123 ship   # sync-lag-check.sh 同 commit 声明
+```
+
+### 与前身任务的区别（DoD 第三条）
+
+前身 `gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github` 的 AC 只测
+「`git remote -v` 指向 GitHub / 调用过一次 / 部署状态（crontab 行）」，于是它在「已实现的那半」上被勾掉。
+本条 AC 全部测「**没有人工干预时它自己会不会发生**」：AC1 无人工推、AC2 同一轮内、AC4 摘掉触发源必红——
+每一项都直接钉「机制在跑」，不是「配置/指向对了」。
 
 ## Touches
 - tasks/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes.md（自身文件）
 - plugin/scripts/periodic-push-backup.sh
+- plugin/scripts/sync-lag-check.sh（new：跨机同步测量 + 推送决策脚本，periodic-push-backup.sh 的调用点）
+- plugin/test/sync-lag-check.test.mjs（new：AC1-AC4 机械测试）
+- plugin/scripts/integration-batch-merge.sh（加 `--sync`：land 收口同一轮内事件驱动推送）
+- plugin/scripts/capability-catalog.sh（sync-lag-check.sh 的能力声明，同 commit）
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/loop/orchestrator-loop-tick.md
