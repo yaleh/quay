@@ -384,53 +384,6 @@ outer_heartbeat_mtime() {
   echo "$max"
 }
 
-# _sl_selfcheck —— 多源心跳的自检接缝（Contract invoke：`bash plugin/scripts/session-liveness.sh
-# --selfcheck`）。确定性的 fixture 断言：
-#   A. 红窗处置（写 queue-state + 提交、tick-log 不动）⇒ 心跳新鲜（反向失效消除，AC2）；
-#   B. 30 分钟零产出 ⇒ 心跳陈旧（真阳性保留，AC3）。
-# 并输出 heartbeat_source_count（= 脚本内 'mtime' 行数，Contract measure）。全部通过 exit 0。
-_sl_selfcheck() {
-  local root now fresh stale n fails=0 _sc_path _sc_dir
-  _sc_path="${BASH_SOURCE[0]:-$0}"
-  _sc_dir=$(cd "$(dirname "$_sc_path")" && pwd 2>/dev/null || echo .)
-  n=$(grep -c 'mtime' "$_sc_dir/$(basename "$_sc_path")" 2>/dev/null || echo 0)
-  echo "heartbeat_source_count=$n"
-  root=$(mktemp -d 2>/dev/null) || root="/tmp/sl-selfcheck-$$"
-  mkdir -p "$root/orchestration" "$root/docs/analysis"
-  # A. 红窗处置：写 queue-state + 提交，tick-log 不动（3 小时前）
-  printf '# tick\n' > "$root/orchestration/tick-log.md"
-  touch -d "3 hours ago" "$root/orchestration/tick-log.md" 2>/dev/null
-  printf 'queue\n' > "$root/docs/analysis/batch2-queue-state.md"
-  printf 'x\n' > "$root/a.txt"
-  git init -q -b master "$root" 2>/dev/null
-  git -C "$root" -c user.name=t -c user.email=t@t add -A 2>/dev/null
-  git -C "$root" -c user.name=t -c user.email=t@t commit -qm incident 2>/dev/null
-  now=$(date +%s)
-  fresh=$(outer_heartbeat_mtime "$root")
-  if [ "$fresh" != "0" ] && [ $(( now - fresh )) -le 60 ]; then
-    echo "selfcheck: incident-handling heartbeat FRESH (max=$fresh, age=$(( now - fresh ))s)"
-  else
-    echo "selfcheck: FAIL incident-handling heartbeat not fresh (max=$fresh, age=$(( now - fresh ))s)"
-    fails=$(( fails + 1 ))
-  fi
-  # B. 30 分钟零产出：全部源陈旧（HEAD 提交回拨到 2000、无 queue-state/tick-log/verification-round）
-  rm -rf "$root/docs/analysis" "$root/orchestration"
-  rm -f "$root/a.txt"
-  GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-    git -C "$root" -c user.name=t -c user.email=t@t commit -qm backdate --allow-empty 2>/dev/null
-  now=$(date +%s)
-  stale=$(outer_heartbeat_mtime "$root")
-  if [ "$stale" != "0" ] && [ $(( now - stale )) -gt 60 ]; then
-    echo "selfcheck: no-output heartbeat STALE (max=$stale, age=$(( now - stale ))s)"
-  else
-    echo "selfcheck: FAIL no-output heartbeat not stale (max=$stale, age=$(( now - stale ))s)"
-    fails=$(( fails + 1 ))
-  fi
-  rm -rf "$root"
-  if [ "$fails" = "0" ]; then echo "selfcheck: ALL PASS"; return 0; fi
-  echo "selfcheck: FAILURES ($fails)"
-  return 1
-}
 
 # ── 共享事件文件与心跳（AC20c/AC7，2026-08-03）──────────────────────────────────────────────
 # AC20c：事件写进共享文件（$QUAY_GLOBAL_DIR/session-liveness/events.jsonl），订阅与挂载分离——
@@ -635,10 +588,7 @@ case "${1:-}" in
   --last-message-type)
     [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
     transcript_last_message_type "$2"; exit 0 ;;
-  --selfcheck)
-    _sl_selfcheck; exit $? ;;
-  -h|--help) echo "用法: $0 [--once] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--selfcheck]"; exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--selfcheck] [--mask] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────

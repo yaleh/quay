@@ -394,7 +394,12 @@ export function selfcheck(): boolean {
 
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isDirect) {
-  if (process.argv[2] === "--classify") {
+  const args = process.argv.slice(2);
+  // THREE-WAY exclusive entry (ad-arm1 gate #1: the old fall-through ran selfcheck()+exit() after
+  // --classify's stdin.resume(), exiting before stdin was consumed — the classifier never ran for
+  // shell consumers, explaining the session-liveness busy/idle failures; --check-residue was
+  // unreachable outside the else).
+  if (args[0] === "--classify") {
     // Shell-consumer seam (session-liveness.sh): read the pane text on stdin, print the
     // classification as PLAIN TEXT — line 1 = state, line 2 = the bottom region (real newlines).
     // Pure — no tmux, no file reads, no writes beyond stdout. The busy/idle judgment in
@@ -411,14 +416,11 @@ if (isDirect) {
       process.exit(0);
     });
     process.stdin.resume();
+    // do NOT fall through — return here; the async stdin path owns the process lifecycle.
+  } else if (args[0] === "--check-residue") {
+    process.exit(runCheckResidue(args.slice(1)));
   } else {
     const ok = selfcheck();
     process.exit(ok ? 0 : 1);
   }
-  const args = process.argv.slice(2);
-  if (args[0] === "--check-residue") {
-    process.exit(runCheckResidue(args.slice(1)));
-  }
-  const ok = selfcheck();
-  process.exit(ok ? 0 : 1);
 }

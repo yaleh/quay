@@ -65,6 +65,14 @@ const REPO_ROOT = findRepoRoot(__dirname);
 const CAP_SCRIPT = path.join(REPO_ROOT, "plugin", "scripts", "cap-from-gate.sh");
 const GATE = path.join(REPO_ROOT, "plugin", "scripts", "resource-gate.sh");
 
+// Hermetic bands injected into every GO/WAIT/EXTREME assertion (ad-arm1 gate #3: the original fix
+// asserted `=== DEFAULT_BANDS.go` — but DEFAULT_BANDS.go is 5 only on THIS machine's config; a
+// project (B / ad-arm1) whose .quay/config.yml overrides concurrency_bands go:2 fails. The test
+// must assert against a KNOWN injected value, never the machine-local config). TEST_BANDS is a
+// deliberately non-default value (go:3) so a test that accidentally reads machine config FAILS
+// loudly instead of passing by coincidence.
+const TEST_BANDS = { go: 3, wait: 2, extreme_wait: 1 };
+
 // R6 carrier-array cleanup: every mkdtemp dir is tracked and removed after the run (no tmp leak).
 const _createdDirs = [];
 function tmpState(prefix) {
@@ -95,19 +103,21 @@ test("AC2 — the full decision reads avg300, NOT avg10: high avg10 + low avg300
   const r1 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: s1,
+    bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "84.77", RESOURCE_GATE_TEST_CPU_AVG300: "12" },
   });
   assert.equal(r1.band, "GO", "avg300 (not avg10) decides the band");
-  assert.equal(r1.effective_cap, DEFAULT_BANDS.go, `GO band must equal the configured GO value, got ${r1.effective_cap}`);
+  assert.equal(r1.effective_cap, TEST_BANDS.go, `GO band must equal the injected hermetic value, got ${r1.effective_cap}`);
   // avg10 is calm (10) but avg300 is 84 → the 5-minute trend says the host is saturated.
   const s2 = tmpState("avg300b");
   const r2 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: s2,
+    bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_CPU_AVG300: "84" },
   });
   assert.equal(r2.band, "EXTREME", "high avg300 must fall to EXTREME regardless of a calm avg10");
-  assert.equal(r2.effective_cap, DEFAULT_BANDS.extreme_wait);
+  assert.equal(r2.effective_cap, TEST_BANDS.extreme_wait);
 });
 
 // ── AC5/AC6: the cap tracks resources ──────────────────────────────────────────────────────────────
@@ -116,10 +126,11 @@ test("AC5 — resources empty (low avg300) ⇒ GO band ⇒ cap equals the config
   const r = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
+    bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG300: "12" },
   });
   assert.equal(r.band, "GO");
-  assert.equal(r.effective_cap, DEFAULT_BANDS.go, `GO cap must equal the configured GO value, got ${r.effective_cap}`);
+  assert.equal(r.effective_cap, TEST_BANDS.go, `GO cap must equal the injected hermetic value, got ${r.effective_cap}`);
   // The state file is written (a real decision was made and persisted).
   const persisted = loadState(state);
   assert.equal(persisted.band, "GO");
@@ -131,10 +142,11 @@ test("AC6 — high avg300 (host saturated by another project) ⇒ WAIT then EXTR
   const cold = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
+    bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG300: "12" },
   });
   assert.equal(cold.band, "GO");
-  assert.equal(cold.effective_cap, DEFAULT_BANDS.go);
+  assert.equal(cold.effective_cap, TEST_BANDS.go);
   // First high sample (avg300=55): desired WAIT but hysteresis holds GO (consecutive=1). One sample
   // must NOT switch — the negative control.
   const first = computeEffectiveCap({
@@ -148,10 +160,11 @@ test("AC6 — high avg300 (host saturated by another project) ⇒ WAIT then EXTR
   const second = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
+    bands: TEST_BANDS,
     env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG300: "55" },
   });
   assert.equal(second.band, "WAIT", "two consecutive same-direction samples switch");
-  assert.equal(second.effective_cap, DEFAULT_BANDS.wait, "WAIT cap is the configured value");
+  assert.equal(second.effective_cap, TEST_BANDS.wait, "WAIT cap is the injected hermetic value");
 });
 
 // ── AC3: hysteresis (negative control) ─────────────────────────────────────────────────────────────
