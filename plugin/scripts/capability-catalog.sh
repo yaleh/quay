@@ -77,6 +77,7 @@ declare -A QUESTION=(
   [cap-from-gate.sh]="What cap should the loop use for in-flight agents at the dispatch point (bash invocation of the adaptive-cap module)?"
   [cap-from-gate.ts]="What cap should the loop use for in-flight agents at the dispatch point (adaptive cap = f(resource-gate some avg300, hysteresis banded, no fixed cap)?"
   [capability-catalog.sh]="What question does each shipped check make askable, and is every check declared?"
+  [checker-cost.sh]="What does each checker/gate execution actually cost — ms, its size dimension n, and the machine load at that moment (the pure-append cost ledger)?"
   [checker-mutation-check.sh]="Would each checker actually fail when its subject is mutated (the L_S instrument)?"
   [claim-task.sh]="Is a task/branch claimed by a specific machine (claim protocol, atomic CAS push)?"
   [claim-task.ts]="Which branch should a candidate task fork from under multi-machine claims (decideClaim)?"

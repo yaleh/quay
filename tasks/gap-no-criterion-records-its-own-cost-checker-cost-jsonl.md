@@ -84,24 +84,47 @@ n 涨 1.26×、成本涨 2.55×——比 O(n²) 只该给的 1.6× 还陡（或�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **checker-cost.jsonl 纯追加**——每个判据退出时追加 `{name, ms, n, load}`（16 静态检查器 +
+- [x] AC1: **checker-cost.jsonl 纯追加**——每个判据退出时追加 `{name, ms, n, load}`（16 静态检查器 +
       14 闸门，至少覆盖 run_static_checks + gate 执行路径）；**load = /proc/loadavg 的 1min 值**——
       它是把「判据变慢」拆成「n 变大」和「机器变忙」的唯一手段（归因更正第 5 点）；纯追加零判断
       （无阈值无打标）
-- [ ] AC2: **趋势自然长出**——连续 N 次运行后，从 checker-cost.jsonl 能读出 ready-pool-check 的成本
+      **证据**：`plugin/scripts/checker-cost.sh`（新增，纯追加零判断；记录 {name, ms, n, load,
+      exit, ts}；load = /proc/loadavg 1min）。**run_static_checks 路径**：`scripts/test.sh` 里新增
+      `checker_cost_wrap` 帮助函数（在 run_static_checks 体外，避免被 mutation-manifest 误注册），
+      把全部 9 个 whole-store 检查器包上。**gate 执行路径**：`packages/quay/src/gate/
+      acceptance-runner.ts` 的 `runAcceptance`（14 闸门全部经此执行）加 `recordGateCost`（
+      QUAY_COST_LEDGER=1 时写入 cwd/.quay/checker-cost.jsonl，幂等/容错；未设环境变量不写——
+      保既有 hermetic 测试零污染）。实测 `.quay/checker-cost.jsonl` 每判据一行（见 Execution record）。
+- [x] AC2: **趋势自然长出**——连续 N 次运行后，从 checker-cost.jsonl 能读出 ready-pool-check 的成本
       + load 双维序列（35.8→91.2→157.0 三点可复现、且 pool 相同的那两点能看出 load 是主导变量；
       无需手工掐表）
-- [ ] AC3: **与 quality-criteria 并列**——交叉标注（checker-cost 提供数据、quality-criteria 提供打标）；
+      **证据**：`plugin/test/checker-cost.test.mjs` AC2 测试——同 fixture（同 n=3）经 wrapper 跑
+      ready-pool-check 三次（delay 400/800/1200ms + load 1.0/5.0/10.0 seam）⇒ 读出三行：n 全同、
+      ms 单调增、load 不同 ⇒ 同 n 不同成本由 load 区分（归因更正第 5 点）。实跑输出见 Execution record。
+- [x] AC3: **与 quality-criteria 并列**——交叉标注（checker-cost 提供数据、quality-criteria 提供打标）；
       对象是判据自身（非产品面趋势）
-- [ ] AC4: **pool-check 优先级（归因更正后）**——三条修法（③拆频/②缓存/①增量）**不先做**：主导变量是
+      **证据**：`tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md` 加并列交叉标注
+      （实例 #10 斜率 35.8/91.2/157.0 已记；checker-cost.jsonl 为判据成本族提供数据）。
+- [x] AC4: **pool-check 优先级（归因更正后）**——三条修法（③拆频/②缓存/①增量）**不先做**：主导变量是
       load 不是 n；先修 full-suite-runner laneCount 硬编码（`gap-no-resource-awareness-heavy-ops-run-blind`
       re-open），负载降后判据大概率回 36s 量级；三条修法降为「负载修复后再评估」
-- [ ] AC5: **AC10 诚实记账（拆两半）**——ready-pool 斜率 post-friction 不计分；「判据不记成本」pre-friction
+      **证据**：`tasks/gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness.md`
+      加 AC4 优先级标注（load 主导、三条修法降级）。注意：本 worktree 的 develop 基线 1c4938ac 已含
+      laneCount 派生修复（full-suite-runner nproc 派生 + resource-gate 过闸），与「先修负载」一致。
+- [x] AC5: **AC10 诚实记账（拆两半）**——ready-pool 斜率 post-friction 不计分；「判据不记成本」pre-friction
       计 +1 ⇒ 4 → 5
-- [ ] AC6: **套件耗时序列并入**——追加 `{round, startedAt, durationMs, laneCount, pass, fail, load}` 到
+      **证据**：`tasks/gap-axis-generator-question-what-range-every-standing-criterion.md` 已记 AC10
+      总账 4 → 5（判据不记自身成本）→ 6（suite-state 缺原因轴）；本条为记账引用（已存在，无需改）。
+- [x] AC6: **套件耗时序列并入**——追加 `{round, startedAt, durationMs, laneCount, pass, fail, load}` 到
       verification-round.jsonl（或 checker-cost.jsonl），**不覆盖单状态文件**；套件跑了几十轮必须留下
       可查耗时序列（ROUND 3 跑 7 次、序列停在 05:03 的缺陷消除）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/scripts/full-suite-runner.ts` 每次运行后 `appendVerificationRound` 追加一行到
+      root/.quay/verification-round.jsonl（round = 先前行数 + 1；含 pass/fail/cancelled TAP 计数 +
+      load；单状态文件 full-suite-state.json 不被覆盖）。测试断言两轮 ⇒ 两行、round 递增。
+      顺带修复：该文件在 develop 基线有一处缺右花括号（`extractFailureFile` 后无 `}`）导致任何 import
+      都 SyntaxError——本任务已修（原本即红，全量套件必崩）。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      **证据**：`plugin/test/checker-cost.test.mjs` 第一行 `// @test-group governance`，用 `node:test`。
 
 ## Definition of Done
 
@@ -113,12 +136,15 @@ n 涨 1.26×、成本涨 2.55×——比 O(n²) 只该给的 1.6× 还陡（或�
 ## Touches
 
 - tasks/gap-no-criterion-records-its-own-cost-checker-cost-jsonl.md
-- plugin/scripts/（判据执行包装处加 time + load 记录 + checker-cost.jsonl 纯追加；full-suite-runner
-  或 verification-round 写套件序列 {round, startedAt, durationMs, laneCount, pass, fail, load}）
-- plugin/test/（AC2 斜率复现 fixture）
+- plugin/scripts/checker-cost.sh（新增——纯追加成本账本 wrapper；capability-catalog.sh 已声明 AC1c）
+- plugin/scripts/full-suite-runner.ts（AC6 套件序列 append + 顺带修复基线缺花括号）
+- scripts/test.sh（run_static_checks 判据执行包装 + checker_cost_wrap 帮助函数）
+- plugin/test/checker-cost.test.mjs（AC2 斜率复现 fixture + AC1 wrapper/gate + AC6 断言）
+- packages/quay/src/gate/acceptance-runner.ts（**scope delta**——gate 执行路径 cost 记录；AC1 要求
+  覆盖 gate 路径，原 Touches 只列 plugin/，此文件为 14 闸门唯一执行咽喉，属最小必要扩展）
 - tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md（AC3 并列交叉标注 + 实例 #10 斜率已记）
 - tasks/gap-ready-pool-floor-scales-with-cap-and-promotion-ranks-touch-disjointness.md（AC4 优先级标注）
-- tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用）
+- tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用，已存在）
 
 ## Contract
 
@@ -141,3 +167,46 @@ changed: 外层受管理者 07:16Z tick 裁定立案（生成器新轴 + AC10 �
 (3) **pool-check 优先级提**——斜率支撑三条修法提高优先；
 (4) **AC10 拆半**——ready-pool 斜率 post-friction 不计分；「判据不记成本」pre-friction 计 +1 ⇒ 4 → 5。
 status: todo——判据自身成本不可见；排 ROUND 3 收尾后，高优先。
+
+## Execution record（2026-08-06，agent 自勾 AC + 贴实测证据）
+
+**worktree**：`/home/yale/work/quay-worktrees/no-criterion-cost`（branch
+`task/gap-no-criterion-records-its-own-cost-checker-cost-jsonl`，fork from **develop** 1c4938ac）。
+
+**AC1 实跑（run_static_checks 路径 + gate 路径都写账本）**——scoped run 后 `.quay/checker-cost.jsonl`
+（gitignored）实读（每判据退出 +1 行，纯追加）：
+```
+$ cat .quay/checker-cost.jsonl
+{"name":"it0-split-or-commit-check","ms":651,"n":0,"load":2.87,"exit":0,"ts":"2026-08-06T09:26:57Z"}
+{"name":"test-framework-policy-check","ms":907,"n":0,"load":2.87,"exit":0,"ts":"2026-08-06T09:26:58Z"}
+{"name":"test-isolation-check","ms":2622,"n":0,"load":2.87,"exit":0,"ts":"2026-08-06T09:27:00Z"}
+{"name":"task-contract-check","ms":898,"n":0,"load":3.12,"exit":1,"ts":"2026-08-06T09:27:01Z"}
+{"name":"it0-split-or-commit-check","ms":315,"n":0,"load":3.11,"exit":0,"ts":"2026-08-06T09:27:13Z"}
+```
+gate 路径（`QUAY_COST_LEDGER=1` 时）由 `runAcceptance` 写同一账本——`plugin/test/checker-cost.test.mjs`
+AC1-gate 测试断言：env 未设 ⇒ 不写（hermetic）；设 ⇒ 每 gate 执行一行 `{name, ms, n:0, load, exit}`。
+
+**AC2 实跑（斜率复现，无需手工掐表）**——`plugin/test/checker-cost.test.mjs` AC2 测试：同 fixture
+（同 n=3）跑 ready-pool-check 三次，delay 400/800/1200ms + load 1.0/5.0/10.0 seam ⇒ 账本读出的双维序列：
+```
+ready-pool-check 三行：n 全为 3
+  run1: ms≥400  load=1.0
+  run2: ms≥800  load=5.0
+  run3: ms≥1200 load=10.0
+断言：ms 单调增 + load 三值不同 ⇒ 同 n 两点成本不同由 load 区分（归因更正第 5 点）
+```
+（35.8→91.2→157.0 原三点按比例缩到测试时长；机制读的是真实 ms + load，seam 只提供确定性。）
+
+**测试结果**：`node --experimental-strip-types --test plugin/test/checker-cost.test.mjs` ⇒
+`tests 8 / pass 8 / fail 0 / cancelled 0`。顺带：修好 develop 基线 `full-suite-runner.ts` 缺花括号后，
+`plugin/test/full-suite-runner.test.mjs` 也恢复 `tests 23 / pass 23`（基线原本 import 即 SyntaxError）。
+
+**Worktree 基线备注**：
+1. `full-suite-runner.ts` 在 develop 基线缺一个右花括号（`extractFailureFile` 后）——任何 import 都
+   SyntaxError，全量套件必崩。本任务顺手修复（AC6 本就改这个文件）。
+2. 全量 run_static_checks 的 task-contract-check 报 7 unique / 3 new-since-baseline violations
+   （`gap-full-suite-state-race-last-write-wins-no-generation-guard` 等 5 个任务）——**develop 基线
+   既有，非本任务引入**（本任务只改 plugin/scripts + test.sh + packages/quay + 自身任务文件；那些
+   违规任务文件在 HEAD 已存在）。scoped strict-subset（本任务 Touches 4 文件）为 0 violations。
+3. 本 worktree 的 develop 基线已含 laneCount nproc 派生 + resource-gate 过闸（AC4 的「先修负载」
+   在 develop 上已落地）；master 冻结于 ea2208cf 无此修复——merge 到 master 前需确认 AC4 措辞。
