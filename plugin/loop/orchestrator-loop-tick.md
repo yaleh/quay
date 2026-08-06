@@ -720,10 +720,18 @@ tick 做一次收尾 pass。
 `node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
 （构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
 
-**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**：
-`.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **stop-dispatch 信号**
+**红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一律暂缓；
+派发按失败作用域条件化，`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`）**：
+`.quay/full-suite-state.json` 的 `state: red` + `reason: failed`（或缺失）即 **RED 失败信号**
 （runner 一检测失败即写 `reason: failed`，AC2/AC5；套件触发者发 `SUITE-RED` 时确认它在位）。`reason:
-aborted`（套件未完成、无正确性结论）**不触发停派**——记录 + 按起跑条件重跑，不挡 inner。state 为 red 时：
+aborted`（套件未完成、无正确性结论）**不触发停派**——记录 + 按起跑条件重跑，不挡 inner。RED 失败时：
+- **一律暂缓 fan-in**（AC1 真正保护，不变——不并进红树，bisect 保持可定位）。
+- **派发只停共享闸门失败**：SUITE-RED 事件携带失败位置（`suite-state-trigger.ts` 的 `failure.scope`
+  + `failure.files`，从 early-RED 失败行/套件日志派生，AC3——判定信息现成，不需新机制）。失败落
+  **共享闸门（`run_static_checks`——每次 scoped 运行都跑）** ⇒ 停派发；失败落**具体测试文件**且与新
+  任务触摸集无关 ⇒ **派发继续**（新任务 worktree 独立、跑自己 scoped 测试，与别处的红无关）。
+
+state 为 red 时：
 1. **本层独占分诊**，不把红树丢给 inner：对 red window 内新合并的 merge 二分定位（`git bisect` 或按
    merge 顺序回滚、逐个重跑 `--for-task` 选中集判断肇事者）。
 2. **回滚/修复**：定位到某次 merge 引入 → 回退该 merge（+ 回退对应翻 done）；判定为既有失败 →

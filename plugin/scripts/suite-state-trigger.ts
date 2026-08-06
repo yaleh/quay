@@ -17,6 +17,10 @@
 //         不做任何分诊/派发决策；分诊 = 外层既有「红窗分诊」（orchestrator-loop-tick.md 步骤 1b），
 //         派发 = 内层既有 §4 规则。不引入新调度源——本脚本是 Monitor 事件监测（同 session-liveness），
 //         节奏仍唯一（外层 `*/20` cron）。
+//   AC2/AC3 扩展（gap-red-window-dispatch-stop-should-be-shared-gate-conditional，2026-08-06）：SUITE-RED
+//         事件携带失败位置（failure.scope + failure.files，从 early-RED 失败行/套件日志派生——判定信息
+//         现成，不需新机制）→ 供 inner 派发决策按作用域条件化：失败落共享闸门（run_static_checks）才停
+//         派发；失败落具体测试文件且与新任务触摸集无关 ⇒ 派发继续。fan-in 暂缓仍一律（AC1）。
 //
 // 状态文件（输入，well-known 位置）：<root>/.quay/full-suite-state.json
 //   {state: running|green|red, reason?: failed|aborted|infra-error, runner, startedAt, finishedAt,
@@ -97,11 +101,15 @@ export function routeRed(state: SuiteState | null): RedRoute {
 }
 
 /**
- * AC5 — the stop-dispatch decision on a suite state. state=red is the stop signal ONLY when the
- * red carries a real failure: `state: red` + `reason: failed` (or a missing reason, legacy/fail-
- * closed) ⇒ STOP dispatch; `state: red` + `reason: aborted|infra-error` (no correctness conclusion)
- * ⇒ do NOT stop — the outer records the abort and re-runs when the resource gate reports GO. Absent
- * state file ⇒ do NOT block (documented: the outer hasn't run its first round yet).
+ * AC5 — the RED-failure signal on a suite state (the reason axis). `state: red` + `reason: failed`
+ * (or a missing reason, legacy/fail-closed) ⇒ TRUE — the blanket RED-failure signal that ALWAYS
+ * holds fan-in (AC1, the real protection: red tree stays bisectable); `state: red` + `reason:
+ * aborted|infra-error` (no correctness conclusion) ⇒ do NOT fire — the outer records the abort and
+ * re-runs when the resource gate reports GO. Absent state file ⇒ do NOT block.
+ *
+ * NOTE (gap-red-window-dispatch-stop-should-be-shared-gate-conditional, 2026-08-06): in the
+ * conditional model this is the AC1 FAN-IN-HOLD signal (blanket), NOT the per-task DISPATCH stop —
+ * dispatch is further conditioned on the failure SCOPE via `shouldStopDispatchForFailure` (AC2).
  */
 export function shouldStopDispatch(state: SuiteState | null): boolean {
   return routeRed(state) === "red-window-triage";
@@ -114,6 +122,17 @@ export interface SuiteStateEvent {
   at: string; // ISO 8601 — measure hook for red_to_triage_ms
   early: boolean; // red with finishedAt null = 早期 RED（(a) 块 AC2）
   stopSignal: boolean; // state=red IS the stop-dispatch signal（(a) 块 AC4）— 事件自带确认
+  /**
+   * AC2/AC3 (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) — the FAILURE LOCATION
+   * of a SUITE-RED event, derived from the early-RED failure line in the suite log (判定信息现成,
+   * no new mechanism). Present only on SUITE-RED; null when there is no failure info (e.g. no log).
+   * The inner dispatch decision conditions on it: dispatch stops ONLY when the failure lands in the
+   * shared gate (run_static_checks — every scoped run pays it) OR in a specific test file that
+   * intersects the new task's touch-set; a specific-test-file failure unrelated to the touches does
+   * NOT stop dispatch (the new task's worktree runs its own scoped tests on an independent
+   * master-branch copy).
+   */
+  failure?: FailureLocation | null;
   state: SuiteState | null;
 }
 
@@ -121,6 +140,129 @@ export interface RunOnceResult {
   status: SuiteStateValue | "absent";
   events: SuiteStateEvent[];
   stopSignal: boolean;
+  /** AC2 — the SUITE-RED failure location (null when not red / no failure info). */
+  failure: FailureLocation | null;
+}
+
+// ── AC2/AC3 failure-location axis (gap-red-window-dispatch-stop-should-be-shared-gate-conditional) ──
+//
+// The red-window RED handling was a coarse blanket ("stop dispatch + hold fan-in") but the two
+// actions have very different real risk:
+//   - HOLD FAN-IN is the real protection (mixing failures on the red tree makes bisect hard) and
+//     stays BLANKET on RED failed (AC1) — this is what `shouldStopDispatch` now names.
+//   - STOP DISPATCH is mostly unnecessary (worktrees are independent master-branch copies running
+//     their own scoped tests, unrelated to the red elsewhere). The ONLY dispatch-danger is when the
+//     red lands in a SHARED GATE — run_static_checks, which EVERY scoped run pays — because then
+//     every new task is polluted by the same red. That is DETERMINABLE from the early-RED failure
+//     line (AC3), so dispatch is conditioned (AC2): `shouldStopDispatchForFailure(failure, touches)`.
+
+export type FailureScope = "shared-gate" | "test-file" | "unknown";
+
+export interface FailureLocation {
+  scope: FailureScope;
+  /** The failing test file(s) (relative paths) when scope = "test-file"; empty otherwise. */
+  files?: string[];
+}
+
+// Static-check phase marker: the run_static_checks headers are `== <name> check (<suffix>) ==` lines
+// (e.g. "== task-contract-check (gap-dispatch-gate-has-no-checklist-and-no-trace, AC6) =="); under
+// `set -e` a failed checker aborts the suite BEFORE the test phase, so a RED log that reaches this
+// phase and has NO test-failure line is a shared-gate failure. `run_static_checks` / 静态检查 named
+// explicitly for the docs' and fixtures' readability.
+const STATIC_PHASE_MARKER = /run_static_checks|静态检查|static-check|^==\s+\S+.*==$/m;
+const TEST_FAILURE_MARKER =
+  /^[ \t]*not ok\b|❯\s+\S+\s+\(\d+\s*tests?\s*\|\s*[1-9]\d*\s+failed|Test Files\s+[1-9]\d*\s+failed|^[ \t]*#\s*cancelled\s+[1-9]/m;
+
+/**
+ * AC2/AC3 — classify a single suite-output line into a failure SCOPE. Shared gate = a
+ * run_static_checks checker (every scoped run pays it); specific test = a test-file failure line
+ * (vitest `❯ <file> (N tests | M failed)` names the file directly; node:test TAP `not ok` is a
+ * per-test failure whose file `extractFailingFiles` resolves via the enclosing `# Subtest: <file>`).
+ */
+export function classifyFailureLine(line: string): FailureLocation {
+  if (STATIC_PHASE_MARKER.test(line)) return { scope: "shared-gate" };
+  const vitest = /❯\s+(\S+)\s+\(\d+\s*tests?\s*\|\s*[1-9]\d*\s+failed/i.exec(line);
+  if (vitest) return { scope: "test-file", files: [vitest[1]] };
+  if (/^[ \t]*not ok\b/i.test(line)) return { scope: "test-file" };
+  if (/^[ \t]*#\s*cancelled\s+[1-9]/.test(line)) return { scope: "test-file" };
+  return { scope: "unknown" };
+}
+
+/**
+ * AC2/AC3 — extract the failing test FILE PATHS from a suite log. Handles node:test TAP
+ * (`# Subtest: <file>` names the currently-running file; a `not ok` / cancelled line inside it is a
+ * failure of that file) and vitest (`❯ <file> (N tests | M failed)` names the file directly).
+ */
+export function extractFailingFiles(log: string): string[] {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  let currentFile: string | null = null;
+  const add = (f: string) => {
+    if (f && !seen.has(f)) {
+      seen.add(f);
+      files.push(f);
+    }
+  };
+  for (const line of log.split("\n")) {
+    // FILE-level subtest is at column 0: `# Subtest: <file>`. Test-level `# Subtest:` lines are
+    // INDENTED and must NOT overwrite the current file.
+    const fileSub = /^#\s*Subtest:\s+(\S+)/.exec(line);
+    if (fileSub) {
+      currentFile = fileSub[1];
+      continue;
+    }
+    // a `not ok` line (indented under the file subtest, or at column 0) is a failure of the file
+    if (/^[ \t]*not ok\b/.test(line) && currentFile) add(currentFile);
+    const vit = /❯\s+(\S+)\s+\(\d+\s*tests?\s*\|\s*[1-9]\d*\s+failed/i.exec(line);
+    if (vit) add(vit[1]);
+    if (/^[ \t]*#\s*cancelled\s+[1-9]/.test(line) && currentFile) add(currentFile);
+  }
+  return files;
+}
+
+/**
+ * AC2/AC3 — derive the failure LOCATION of a red suite from its log. A specific test-file failure
+ * (the test phase ran and a file/test failed) → scope "test-file" with the failing files; a
+ * shared-gate failure (the static-check phase was reached and NO test failure line exists — under
+ * `set -e` a failed checker aborts BEFORE the test phase) → scope "shared-gate"; neither → "unknown"
+ * (fail-closed toward stopping). Absent log → null (fail-closed too).
+ */
+export function deriveFailureLocation(log: string | null | undefined): FailureLocation | null {
+  if (!log) return null;
+  if (TEST_FAILURE_MARKER.test(log)) {
+    return { scope: "test-file", files: extractFailingFiles(log) };
+  }
+  if (STATIC_PHASE_MARKER.test(log)) return { scope: "shared-gate" };
+  return { scope: "unknown" };
+}
+
+/** Path intersection: does a failing test file relate to a touch-set entry (equal, or under a dir)? */
+export function failureIntersectsTouches(failedFile: string, touches: string[]): boolean {
+  const norm = (p: string) => p.replace(/^\.\//, "");
+  const f = norm(failedFile);
+  return touches.some((raw) => {
+    const t = norm(raw);
+    if (t === f) return true;
+    if (t.endsWith("/") && f.startsWith(t)) return true; // directory touch: "plugin/test/"
+    if (f.startsWith(t + "/")) return true; // file under a directory touch
+    return false;
+  });
+}
+
+/**
+ * AC2 — the CONDITIONAL dispatch decision on a red suite's failure location. Dispatch stops ONLY
+ * when the failure lands in the shared gate (run_static_checks — every scoped run pays it) or in a
+ * specific test file that intersects the new task's touch-set; a specific-test-file failure
+ * UNRELATED to the touches does NOT stop dispatch (the worktree runs its own scoped tests).
+ * Absent/unknown failure info fails CLOSED toward stopping (the conservative blanket default).
+ */
+export function shouldStopDispatchForFailure(
+  failure: FailureLocation | null,
+  touches: string[],
+): boolean {
+  if (!failure || failure.scope === "unknown") return true;
+  if (failure.scope === "shared-gate") return true;
+  return (failure.files ?? []).some((f) => failureIntersectsTouches(f, touches));
 }
 
 /** AC1/AC3 纯转变检测器：上一个状态 → 下一个状态，产出一条套件状态事件（无转变 = null）。 */
@@ -144,6 +286,9 @@ function eventsPath(root: string): string {
 function memoPath(root: string): string {
   return path.join(root, ".quay", "suite-state-last.json");
 }
+function suiteLogPath(root: string): string {
+  return path.join(root, ".quay", "full-suite.log");
+}
 
 function readJson<T>(p: string): T | null {
   try {
@@ -156,6 +301,18 @@ function readJson<T>(p: string): T | null {
 /** 读套件状态文件；缺文件（外层还没跑第一轮）= null，不是错误。 */
 export function readSuiteState(root: string): SuiteState | null {
   return readJson<SuiteState>(statePath(root));
+}
+
+/**
+ * 读套件日志（early-RED 失败行所在；full-suite-runner.ts 把完整输出 tee 到 .quay/full-suite.log）。
+ * AC2/AC3 的判定信息从它派生（失败位置现成，不需新机制）。缺文件 = null（无失败信息，fail-closed）。
+ */
+export function readSuiteLog(root: string): string | null {
+  try {
+    return fs.readFileSync(suiteLogPath(root), "utf8");
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -172,11 +329,16 @@ export function recordTransition(
   if (!nextState) return null;
   const kind = detectSuiteEvent(prev, nextState.state);
   if (!kind) return null;
+  // AC2/AC3 — SUITE-RED carries the FAILURE LOCATION (derived from the early-RED failure line in
+  // the suite log) so the inner dispatch decision can be conditional on shared-gate vs specific test.
+  const failure: FailureLocation | null =
+    kind === "SUITE-RED" ? deriveFailureLocation(readSuiteLog(root)) : null;
   const ev: SuiteStateEvent = {
     event: kind,
     at: new Date().toISOString(),
     early: nextState.state === "red" && nextState.finishedAt === null,
     stopSignal: shouldStopDispatch(nextState),
+    failure,
     state: nextState,
   };
   try {
@@ -224,13 +386,20 @@ export function runOnce(root: string): RunOnceResult {
     // 记忆写失败不阻断本轮检测（下次轮询会重新比较——至多多记一条，不会漏掉红）。
   }
 
-  return { status, events, stopSignal: shouldStopDispatch(cur) };
+  // AC2 — the SUITE-RED failure location (red-state view; null when not red / no failure info).
+  const failure: FailureLocation | null =
+    cur?.state === "red" ? deriveFailureLocation(readSuiteLog(root)) : null;
+
+  return { status, events, stopSignal: shouldStopDispatch(cur), failure };
 }
 
 function formatEventLine(ev: SuiteStateEvent): string {
+  const fail = ev.failure
+    ? ` failure=${ev.failure.scope}${ev.failure.files?.length ? ":" + ev.failure.files.join(",") : ""}`
+    : "";
   return (
     `${ev.event} state=${ev.state?.state ?? "?"} early=${ev.early} ` +
-    `stopSignal=${ev.stopSignal} at=${ev.at}`
+    `stopSignal=${ev.stopSignal}${fail} at=${ev.at}`
   );
 }
 
