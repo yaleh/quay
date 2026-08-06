@@ -6231,3 +6231,19 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **ready-pool-check 跨机合并回归根治**（内层）：① arity 崩溃（b6bf8297）② blocking 静默失效
   （buildCandidate 补 childrenByTask/parentRefCount + 四参调用）——已验证 exit 0 + pool 9/12。
   跨机合并两边各自绿/合起来红的第二例（scoped 未覆盖）。
+
+### tick 2026-08-06T09:5xZ（AC17 catch-up ①②③ 完成 + 跨机合并回归修复）
+
+- **catch-up ①**：develop FF 到 master（ea2208cf，76 提交，纯快进无冲突）。
+- **catch-up ②**：merge origin/develop（B 105 提交 d0edd8ab，merge-base 926d771b）→ 17 冲突文件逐层解决
+  （da065182）。布局判定：A 的 .quay/runtime/bin/（测试钉死）为规范，B 的 refactor/superset 嫁接；
+  task bodies 双机证据并集、A board 状态权威。
+- **catch-up ③**：spawn-count（98e23f5b）+ supervisor（rebased）到新 develop。
+- **跨机合并回归修复（4 处，均已在 develop 验证）**：
+  ① ready-pool-check arity（computeRelevance 默认参数→根治 buildCandidate 线程化 maps，blocking 从 1/68→7/68）；
+  ② ready-pool-check top→topN（B 侧 body vs A 侧参数名）；
+  ③ ready-pool-check relevanceReason→c.relevance.reason（悬空 B helper）；
+  ④ heavy-op-token LEASE_MS→LEASE_S*1000（unbound variable 崩溃毁掉 acquire）。
+  附带：ready-pool 28/28、heavy-op-token 30/30 全绿（B 侧测试措辞对齐 A 规范输出）。
+- **在飞 0/3**（spawn-count/supervisor rebase 完成待 fan-in；AC16 已在 integration）。
+- **下一步**：supervisor + spawn-count 合 integration（两线模型）；外层 FF integration→develop。
