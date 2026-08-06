@@ -7423,3 +7423,4 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **待外层**：integration/develop 分歧需 reconciliation（verification-round 批量合或 rebuild task 分支基线）。
 - **session-pid fan-in 验证**：cherry-pick 到 integration 干净；scoped verify（session-liveness.test.mjs）因 KNOWN-LOAD-SENSITIVE（真实 tmux/进程 spawn）超时未出结果——agent 在 worktree 已实测 52/53（1 skip=环境），cherry-pick 无冲突，fan-in 成立。integration HEAD a09ddb56。
 - **ac8 已派发**（触摸冲突解除后，in-flight 2/5）：`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`（40→6 集成，import over spawn 真正生效），telemetry ...-q30ump，后台 agent 运行中。
+- **session-liveness verify 补记**：integration 上 52 tests / 50 pass / 0 fail / 1 skipped；文件整体 200s 超时（KNOWN-LOAD-SENSITIVE 慢），但**0 assertion fail** —— fan-in 成立。
