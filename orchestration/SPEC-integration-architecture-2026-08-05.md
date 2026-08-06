@@ -161,6 +161,13 @@ transcript 引用 **85 次** vs `capture-pane` **2 次**；今晚实测可信度
 4. **抢占**（`.halt` 语义从「tick 边界检查」改成「任意点生效」）
 5. **消息总线带身份**（把我今晚临时建的收件箱正式化）
 
+> **落地标注（2026-08-06，`gap-supervisor-message-bus-with-identity`）**：第 ⑤ 步已落地——收件箱
+> 正式化为带身份的传送带信道。`deliver(target, payload, from=<identity>)` 携带发送方身份
+> （`IDENTITIES` = human/manager/inner/outer）；agent 信道（session transport）只服务 agent 身份，
+> **声称 `from:"human"` 的 agent 消息在注入前被拒**（AC2 spoof gate，fail-closed）；
+> `deliver(human)` 的「已投递 / 已读」两字段分开建模（AC3）；tick 的读状态/观察步显式读收件箱
+> （`supervisor-bus-identity.sh inbox-summary`）——「文件在、无人读」的失败形态有机械挂载点（AC4）。
+
 ### 4.5 补充（2026-08-06，人给出方向）：**人是第三个 target**
 
 第 5 项「消息总线」原本只想着机器之间。人指出 web 面应当承载**人 ↔ manager/outer 的 chat 信道**
