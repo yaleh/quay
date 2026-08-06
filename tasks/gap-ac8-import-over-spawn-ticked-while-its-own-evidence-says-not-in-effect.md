@@ -1,17 +1,19 @@
 ---
 id: gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect
-title: "AC8 of gap-eighty-one-instruments (task status:done, all 11 ACs [x]) is ticked while its
-  OWN cited evidence ends with the sentence '41:4 说明政策存在、未生效' — the evidence text
-  literally states the policy is NOT in effect, and the AC was ticked anyway; what got ticked was
-  'I counted the numbers', not 'I made it happen'; verified 3 days later (2026-08-06): the sibling
-  AC2 (script count must fall) DID land — 207 -> 142 measured — but the import-over-spawn ratio
-  did NOT move at all: .sh tests 30/30 spawn (100%), .ts tests 35/40 spawn (88%), pure-import
-  zero-side-effect tests still 3 (spec recorded 3, outer's recount said 4, today measures 3);
-  SPEC-instruments-behind-one-entry.md's AC9 states the causal order — '集成是「import 取代
-  spawn」的前提，不是它的附带好处 ⇒ AC7 依赖 AC8 与第二步，不是独立项' — so the unmoved ratio
-  means the integration step it depends on never happened either; manager 2026-08-06, found by
-  searching session history for 集成 per human direction"
-status: todo
+title: "AC8 of gap-eighty-one-instruments (task status:done, all 11 ACs [x]) is
+  ticked while its OWN cited evidence ends with the sentence '41:4 说明政策存在、未生效' —
+  the evidence text literally states the policy is NOT in effect, and the AC was
+  ticked anyway; what got ticked was 'I counted the numbers', not 'I made it
+  happen'; verified 3 days later (2026-08-06): the sibling AC2 (script count
+  must fall) DID land — 207 -> 142 measured — but the import-over-spawn ratio
+  did NOT move at all: .sh tests 30/30 spawn (100%), .ts tests 35/40 spawn
+  (88%), pure-import zero-side-effect tests still 3 (spec recorded 3, outer's
+  recount said 4, today measures 3); SPEC-instruments-behind-one-entry.md's AC9
+  states the causal order — '集成是「import 取代 spawn」的前提，不是它的附带好处 ⇒ AC7 依赖 AC8
+  与第二步，不是独立项' — so the unmoved ratio means the integration step it depends on
+  never happened either; manager 2026-08-06, found by searching session history
+  for 集成 per human direction"
+status: ready
 labels:
   - gap
   - defect
