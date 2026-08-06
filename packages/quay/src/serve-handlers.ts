@@ -152,15 +152,13 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
   table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   th, td { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
   /* QX-012 (experiment 4, iteration 3): hide role/labels columns on mobile so
-     id, status, title, and actions all fit in the visible viewport at 375px.
-     Closes UQ-011 (action button hidden off-screen) and UQ-012 (role/labels
-     columns crowd out title and actions). */
+     id, status, title fit in the visible viewport at 375px.
+     Closes UQ-012 (role/labels columns crowd out title). */
   .col-role, .col-labels { display: none; }
-  /* QX-017 (experiment 4, iteration 4): sticky actions column at mobile — the
-     actions column (th/td) sticks to the right edge so Advance button is always
-     visible even when the table scrolls horizontally for long task IDs. Also hide
-     the updated column at mobile to reduce clutter. Closes UQ-011 (remainder). */
-  .col-actions { position: sticky; right: 0; background: #fff; z-index: 2; }
+  /* QX-017 (experiment 4, iteration 4): hide the updated column at mobile to
+     reduce clutter. (The sticky .col-actions rule that once lived here was
+     removed with the web action-buttons route — gap-web-action-buttons-unused-
+     route-and-open-redirect-delete.) */
   .col-updated { display: none; }
 }
 /* QX-015 (experiment 4, iteration 3): project orientation banner — REMOVED by
@@ -378,9 +376,12 @@ export function relativeTime(ts: number): string {
 // M26-adversarial-eval finding ADV-003: shared open-redirect guard for
 // ?from= redirect targets, replacing the two previously-DIVERGING inline
 // checks (GET /task/<id>'s backHref had startsWith("/") &&
-// !startsWith("//"); POST .../action/<id>'s baseRedirect had only
-// startsWith("/"), a real bypass closed by ADV-003 above). Also closes two
-// further real bypasses the audit found neither inline check caught: a
+// !startsWith("//"); the web action-buttons POST route's baseRedirect had
+// only startsWith("/"), a real bypass closed by ADV-003 above — that POST
+// route was later REMOVED wholesale by
+// gap-web-action-buttons-unused-route-and-open-redirect-delete, so only the
+// GET route's backHref uses this helper today). Also closes two further real
+// bypasses the audit found neither inline check caught: a
 // backslash immediately after the leading slash (e.g. "/\evil.com") and a
 // literal-tab/control-char immediately after the leading slash (e.g.
 // "/\t/evil.com") -- both are accepted by a naive startsWith("/") &&
@@ -410,16 +411,6 @@ export function isSafeRelativeRedirect(v: string | null): boolean {
 // CB-006/CB-022 (M08-merge-recover): pagination constants moved here so
 // serve-handlers.ts can use them in buildHref without circular import.
 export const DEFAULT_PAGE_SIZE = 20;
-
-// QX-013 (iteration 3): helper to append a query param to an existing URL path
-// (which may already have params). Used to add ?error= and ?success= to redirect
-// targets without clobbering existing filter params already in the target URL.
-// Previously a closure inside startServer; now module-level (closes over nothing).
-export function addParam(urlPath: string, key: string, value: string): string {
-  const u = new URL(urlPath, "http://x");
-  u.searchParams.set(key, value);
-  return u.pathname + "?" + u.searchParams.toString();
-}
 
 // Build query param helper: merges prefix, status, sort, label, page, and q params.
 // Previously a closure inside GET / handler that closed over PAGE_SIZE and
@@ -601,14 +592,6 @@ export async function handleTaskList(
   }
 
   // QW-009 (experiment 3, iteration 4): add labels column to list table.
-  // QX-009 (experiment 4, iteration 2): add inline action buttons to each
-  // list row. Closes CB-003: "Advance" (and any other applicable action
-  // button) is now available without navigating to the task detail page.
-  // Write-surface: the POST goes to the existing /task/<id>/action/<actionId>
-  // endpoint (not a new write surface — same backend-agnostic composition as
-  // the detail page). The action POST URL includes ?from= carrying the
-  // current list URL so the redirect returns to the list with filter context
-  // preserved, rather than to the task detail page.
   const currentListHref = bh(statusFilter, sortKey, labelFilters, safePage > 1 ? safePage : null, prefixFilter, qFilter);
   const rows = pageTasks
     .map(
@@ -626,27 +609,9 @@ export async function handleTaskList(
             ? html`<a href="/task/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a>`
             : escapeHtml(display);
           return html`<tr class="malformed-row">
-            <td colspan="7">⚠ ${idCell} — 缺少 id 字段</td>
+            <td colspan="6">⚠ ${idCell} — 缺少 id 字段</td>
           </tr>`;
         }
-        const applicableButtons = ((manifest.action_buttons ?? []) as Array<{ id: string; label: string; whenStatus?: string[] }>).filter(
-          (b) => !b.whenStatus || b.whenStatus.includes(t.status)
-        );
-        // QX-014 (iteration 3): action buttons include title= tooltip.
-        // QX-019 (iteration 4): backport target-status tooltip to list page (UQ-018).
-        // Compute next status per-task using the same map as the detail page.
-        const listNextStatusMap: Record<string, string> = { todo: "ready", ready: "done" };
-        const listNextStatus = listNextStatusMap[t.status];
-        const actionCell = applicableButtons.length > 0
-          ? applicableButtons.map((b) => {
-              const titleAttr = listNextStatus
-                ? `title="Advance to ${escapeHtml(listNextStatus)}"`
-                : `title="Advance task to next status"`;
-              return html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}?from=${encodeURIComponent(currentListHref)}" style="display:inline">
-                <button type="submit" ${titleAttr}>${escapeHtml(b.label)}</button>
-              </form>`;
-            }).join("")
-          : "";
         // QX-018 (iteration 4): show updatedAt as relative time in list row.
         const updatedAt = (t as unknown as Record<string, unknown>).updatedAt;
         const updatedCell = typeof updatedAt === "number"
@@ -661,7 +626,6 @@ export async function handleTaskList(
         <td>${escapeHtml(t.title)}</td>
         <td class="col-labels">${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
         <td class="col-updated">${updatedCell}</td>
-        <td class="col-actions">${actionCell}</td>
       </tr>`;
       }
     )
@@ -675,7 +639,7 @@ export async function handleTaskList(
   // "0 tasks and no error" failure this whole mechanism exists to prevent.
   const malformedRows = malformed
     .map((m) => html`<tr class="malformed-row">
-      <td colspan="7">⚠ <code>${escapeHtml(m.file)}</code> — 解析失败: ${escapeHtml(m.error)}</td>
+      <td colspan="6">⚠ <code>${escapeHtml(m.file)}</code> — 解析失败: ${escapeHtml(m.error)}</td>
     </tr>`)
     .join("\n");
   // QW-003: filter navigation links — All, todo, ready, done, needs-human.
@@ -893,7 +857,7 @@ export async function handleTaskList(
       ${pageSizeNav}
       ${pageNav}
       <table>
-        <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>
+        <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th></tr>
         ${malformedRows}
         ${rows}
       </table>
@@ -964,7 +928,6 @@ export async function handleTaskDetail(
   url: URL,
   taskId: string,
   client: ProviderClient,
-  manifest: Manifest,
 ): Promise<void> {
   const t = await client.taskGet(taskId);
   if (!t) {
@@ -978,23 +941,13 @@ export async function handleTaskDetail(
   // isSafeRelativeRedirect()'s own doc comment, ADV-003).
   const fromParam = url.searchParams.get("from");
   const backHref = isSafeRelativeRedirect(fromParam) ? fromParam as string : "/";
-  // QX-013 (iteration 3): read ?error= and ?success= for post-action feedback.
+  // QX-013 (iteration 3): read ?error= and ?success= for read-only display of
+  // gate/action feedback query params. (The web action-buttons POST route that
+  // originally produced these params was removed — gap-web-action-buttons-unused-
+  // route-and-open-redirect-delete — but the read-only banners are kept as a
+  // display surface, AC5.)
   const detailErrorParam = url.searchParams.get("error");
   const detailSuccessParam = url.searchParams.get("success");
-  // QX-014 (iteration 3): compute target status for tooltip on detail page.
-  const nextStatusMap: Record<string, string> = { todo: "ready", ready: "done" };
-  const buttons = ((manifest.action_buttons ?? []) as Array<{ id: string; label: string; whenStatus?: string[] }>)
-    .filter((b) => !b.whenStatus || b.whenStatus.includes(t.status))
-    .map((b) => {
-      const nextStatus = nextStatusMap[t.status];
-      const titleAttr = nextStatus
-        ? `title="Advance to ${escapeHtml(nextStatus)}"`
-        : `title="Advance task to next status"`;
-      return html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}" style="display:inline">
-        <button type="submit" ${titleAttr}>${escapeHtml(b.label)}</button>
-      </form>`;
-    })
-    .join("\n");
   // QN-046: same charset fix as the list route above (the "·" separator
   // on this page is likewise mis-decoded by a real browser without it).
   // QW-008 (experiment 3, iteration 4): render parent and children links in detail page meta.
@@ -1020,100 +973,9 @@ export async function handleTaskDetail(
       <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
       ${typeof tExt.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(tExt.updatedAt as number))}</p>` : ""}
       ${childrenMeta}
-      <div>${buttons}</div>
-      ${t.status === "needs-human" && buttons.length > 0
-        ? html`<div class="info-banner" role="note">This task needs human attention. Use the action buttons above to advance or resolve it.</div>`
-        : ""}
       <h2 class="sr-only">Details</h2>
       <div class="body">${renderMarkdown(t.body)}</div>
     </main></body></html>`);
-}
-
-export async function handleTaskAction(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  taskId: string,
-  actionId: string,
-  client: ProviderClient,
-  manifest: Manifest,
-  cfg: { workspaceRoot: string },
-): Promise<void> {
-  const { composePayload, deliverTrigger } = await import("./action.ts");
-  const decodedId = decodeURIComponent(taskId);
-  const t = await client.taskGet(decodedId);
-  if (!t) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found");
-    return;
-  }
-  // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.
-  // M26-adversarial-eval finding ADV-003/M26-F3 (both iterations independently found
-  // this): this guard previously checked ONLY fromParam.startsWith("/") -- missing the
-  // !startsWith("//") protocol-relative-URL guard the GET /task/<id> detail route's own
-  // ?from= handling already has (QX-011/SH-002, see backHref above). Now uses the same
-  // shared isSafeRelativeRedirect() helper as backHref above, which also closes the
-  // backslash/control-char bypass variants the plain startsWith("//") check would miss
-  // (see that helper's doc comment).
-  // Live-exploitability note (iteration-1's independent finding, verified correct):
-  // `baseRedirect` here is never used directly as a Location header value -- both call
-  // sites below route it through addParam(), which always builds a `new URL(urlPath,
-  // "http://x")` and returns only `.pathname + "?" + ...`, stripping any scheme/host.
-  // That means a `//evil.com`-style bypass value is already neutralized end-to-end on
-  // THIS route regardless of this guard (verified: `new URL("//evil.com", "http://x")`
-  // resolves to the `evil.com` origin with pathname "/", which addParam then discards,
-  // yielding a same-origin path). So this specific fix is defense-in-depth /
-  // guard-consistency with the GET route (which does use its guarded value more
-  // directly, via backHref, rendered straight into an href attribute) -- not a
-  // confirmed live open-redirect on the POST route itself.
-  const fromParam = url.searchParams.get("from");
-  const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam as string : `/task/${decodedId}`;
-  // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.
-  // If gate is blocked (ok: false), redirect back with ?error= instead of silently
-  // delivering. Closes UQ-013 (silent gate-fail feedback). The gate check uses the
-  // same client.taskCheck() the CLI/MCP 'quay task check' uses — no new API surface.
-  const gateResult = await client.taskCheck(decodedId) as { ok: boolean; reason?: string };
-  if (!gateResult.ok) {
-    const errorMsg = gateResult.reason
-      ? `Gate check failed: ${gateResult.reason}`
-      : "Gate check failed: task not ready to advance";
-    const errorRedirect = addParam(baseRedirect, "error", errorMsg);
-    res.writeHead(302, { Location: errorRedirect });
-    res.end();
-    console.log(`[quay serve] action ${actionId} on ${decodedId}: gate blocked — ${errorMsg}`);
-    return;
-  }
-  const payloadObj = composePayload({ providerManifest: manifest, task: t, actionId: decodeURIComponent(actionId) });
-  // QN-042 (DIR-009): QUAY_ACTION_MOCK_LOG opts into the deterministic
-  // mock/file-log delivery mode instead of manda/print — see
-  // src/action.ts#deliverTrigger's own doc comment.
-  const mockLogPath = process.env.QUAY_ACTION_MOCK_LOG || undefined;
-  const result = await deliverTrigger({
-    root: cfg.workspaceRoot,
-    channel: `task-${t.id}`,
-    payloadObj,
-    mockLogPath,
-  }) as { delivered: string };
-  // QX-013 (iteration 3): on success, redirect with ?success= for feedback.
-  // G-S4-01 (M33-webui-trigger-honesty, M28 Scenario 4 finding): the banner
-  // text MUST be conditioned on result.delivered, not a hardcoded
-  // "advanced" claim. None of deliverTrigger()'s three modes perform a
-  // synchronous task-status write (confirmed by reading action.ts's
-  // deliverTrigger() in full — "mock" appends a JSON-lines test record,
-  // "manda" fires an async, fire-and-forget dispatch with no delivery-
-  // confirmation callback, "print" only logs to stdout) — so no mode may
-  // claim "advanced"/"done" wording. "print" and "manda" use "requested"-
-  // flavored language per AC 2; "mock" gets its own honest, non-"advanced"
-  // label since it is a test-only recording mode, not a production claim.
-  const successMsg = ({
-    print: `Task ${t.id}: advance requested (no live dispatcher configured — run the printed command to complete it)`,
-    manda: `Task ${t.id}: advance requested (dispatched to manda, delivery not confirmed)`,
-    mock: `Task ${t.id}: advance recorded (mock delivery mode)`,
-  } as Record<string, string>)[result.delivered] || `Task ${t.id}: advance requested`;
-  const successRedirect = addParam(baseRedirect, "success", successMsg);
-  res.writeHead(302, { Location: successRedirect });
-  res.end();
-  console.log(`[quay serve] action ${actionId} on ${decodedId}:`, result);
 }
 
 // ── Loop-observation routes (gap-web-cannot-show-what-the-loop-is-doing-now) ────────────────
@@ -1432,14 +1294,7 @@ export async function handleAllRoutes(
   const taskM = /^\/task\/([^/]+)$/.exec(url.pathname);
   if (taskM) {
     const id = decodeURIComponent(taskM[1]);
-    await handleTaskDetail(req, res, url, id, client, manifest);
-    return;
-  }
-
-  const actionM = /^\/task\/([^/]+)\/action\/([^/]+)$/.exec(url.pathname);
-  if (actionM && req.method === "POST") {
-    const [, id, actionId] = actionM;
-    await handleTaskAction(req, res, url, id, actionId, client, manifest, cfg);
+    await handleTaskDetail(req, res, url, id, client);
     return;
   }
 
