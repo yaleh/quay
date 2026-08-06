@@ -3,6 +3,7 @@
 每 20 分钟一行。`动作类型` 是判断分层是否退化的唯一依据（`correct` 占比 ≥50% = 内层自主性不足）。
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
+| 2026-08-06 23:0xZ | `unblock` | **shipped-ts 括号关闭 + 收尾检查**：shipped-ts fan-in 冲突 → needs-human，括号 50.7min 未闭合——手动 `--task-end needs-human` 关闭（needs-human 不闭合括号第 3 次实例，OVER90 已避免）；prefriction fan-in 完成但 **6/7 ACs**（留 ready，1 AC+1 DoD 待补）；inner 派 DIR-121。套件 green | 内层：2 subagents（full-suite failing count / DIR-121），restore-dispatch 续 | ①shipped-ts 括号关闭核实；②prefriction 6/7 AC 核实 |
 | 2026-08-06 22:4xZ | `no-action` | **restore-dispatch 健康**：prefriction/residue-check/shipped-ts 在飞（均年轻，无 OVER90 风险）；3 subagents（URL-compare guards / post-friction AC4 / npm install）；token 任务 needs-human （retired script）；self-touch 池已修（28→0 missing）。套件 green | 内层：restore-dispatch round，3 subagents | ①inProgress 3 条均年轻核实；②套件 green |
 | 2026-08-06 22:2xZ | `no-action` | **进展 tick**：inner 在飞 3 任务——session-pid（60min，OVER90 预测 ~22:57 临近，AC1-4 checked AC5 deferred）；ac8 40→6 大集成（2 subagents：task-contract-check + counting .ts）；shipped-ts 新派（10.7min）。套件 green。OVER90 预测结果待验 | 内层：2 subagents（ac8），1 agent，2% until auto-compact | ①inProgress 3 条年龄核实；②session-pid 距 90min 29.7min |
 | 2026-08-06 22:0xZ | `no-action` | **进展 tick**：session-pid fan-in 已验证（52/50, cherry-pick 到 integration）但 4/9 ACs——未 done，留 ready（5 AC 待补：manager 路径/承重条负控制等）；ac8 40→6 大集成在飞（subagent Converting runChecker，223.6k tokens）；inner 22:16 再排程 | 内层：等 ac8 background agent，1 agent | ①session-pid 4/9 AC 核实；②ac8 subagent 在飞核实 |
