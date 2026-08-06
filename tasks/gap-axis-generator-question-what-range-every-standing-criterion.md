@@ -75,6 +75,14 @@ extra:
 > whole orchestration layer (43+ docs, ZERO matching `*ROADMAP*`). The fix (orchestration arm
 > widened to `orchestration/*.md`, dead glob eliminated) is tracked in that task; this entry is the
 > AC10 accounting cross-reference only.
+>
+> **AC5 cross-mark (2026-08-06, `gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`)**:
+> the scope-axis instance "cold-start gate criterion too wide — whole-suite green" (manager-discovered
+> 2026-08-05, 生成器问句「这条判据量化的是哪个范围」→ 整个套件, but cold-start only lays the DERIVED
+> laydown set) is that task. The fix (gate narrowed to the derived laydown set's scripts green, 铺什么
+> 验什么, mechanically derived via grep SKILL/loop docs) is tracked in that task; this entry is the AC10
+> accounting cross-reference only — **post-friction, NOT counted** (the manager asked the range question
+> while BLOCKED on the wait, not before friction; AC10 计数保持 0, 记录不勾, per the task's AC5).
 
 **生成器**：对系统里每一条常驻判据问——**「它量化的是哪一个范围？时间 / 作用域 / 层 / 实例 / 成本？
 如果答案是『眼前这一个』，那就有一根没打开的轴。」** 检验：反推人今晚给的 5 条，**5/5 成功**。⇒ 有

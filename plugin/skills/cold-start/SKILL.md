@@ -75,6 +75,36 @@ A `--dry-run` that omits `--prompt-suggestions false` for any role means the che
 has drifted from the REQUIRED cold-start contract — STOP and fix the settings file before starting
 (`plugin/test/launch-settings.test.mjs` asserts this mechanically).
 
+## Gate criterion — 铺什么验什么 (scoped to the laydown set, not the whole suite)
+
+**What gates a cold start.** The gate is: **all scripts in the DERIVED laydown set are green** — NOT
+"the whole quay suite is green" (`scripts/test.sh` full-suite / 全量). A cold start only lays down the
+derived laydown set (the `plugin/scripts/*` the shipped skill + loop docs reference), so a suite
+failure UNRELATED to that set must NOT block it (与铺设集无关的失败不再无限期阻塞冷启动); a failure
+INSIDE the set MUST block (铺什么验什么). The 2026-08-05 wait was correct: `session-liveness.sh` +
+`session-liveness-mount.sh` are both derived members, so laying then would have shipped the M3
+busy/idle regression into the target project.
+
+**Mechanical derivation (no new mechanism).** The set is derived by grepping the shipped docs — the
+same derivation quay-init.sh's `derive_loop_scripts()` step (a) uses. Never hand-edit the set; re-run
+the grep:
+
+```bash
+grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root>/plugin/loop/*.md
+```
+
+**Run the gate:**
+
+```bash
+bash <root>/plugin/scripts/laydown-set-check.sh   # → `laydown_set_green: green|red`
+```
+
+`red` (a missing / non-parsing member, or a member's OWN test failing — the M3 class of logic
+regression a syntax check cannot see) blocks the cold start; `green` means the exact scripts this cold
+start will lay down are verifiably working. This is the full-suite gate's SCOPED-ED down cousin: it
+runs exactly the laid-down set's tests, nothing else — an unrelated red in the whole suite does not
+hold up the cold start.
+
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
 "The same skill command produces the same observable consequences on any model" is only meaningful
