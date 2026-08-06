@@ -6040,3 +6040,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **派发 1/3**：supervisor-base-layer（池内唯一真实未落地 ready；其 quay-init.sh OVERLAP 对象
   runtime-nowhere-safe 已合并 ⇒ 在此之上构建，非在飞冲突）。worktree + telemetry bracket 已开。
 - 池 10/20；在飞 1/3。config 激活仍挂外层裁定（上一 tick 转交）。
+
+### tick 2026-08-06T07:1xZ（外层 config 激活裁定——两线模型生效）
+
+- **config 激活不再挂起**：`fork_baseline: develop` + `merge_target: integration` 已落
+  `.quay/config.yml:116-117`（外层 ab541024，07:09:43）。本地 develop=926d771b（冻结快照）、
+  integration 存在、master=13b5855c。
+- **从下一个新派发开始按两线模型分叉**：`fork-baseline.ts --task <id>` 机械判定
+  （independent→develop / 依赖 integration 上未验证任务→integration）；判别法：
+  `rev-list develop..分支` 与 `develop..master` 交集 ≠ 全量 ⇒ 从 develop 分叉。
+- 在飞 supervisor-base-layer worktree 从 master 分叉（07:10 创建，晚于 config 28s）——
+  已立案 gap-dispatch-fork-does-not-read-config-fork-baseline，记录在案不重做；
+  supervisor 完成后按新规则派发。
+- 池 10/20；在飞 1/3（supervisor，master 基线，历史遗留）。
