@@ -76,6 +76,26 @@ echo "Staging the plugin bundle (packages/quay/plugin/) from repo-root plugin/ b
 rm -rf "${PLUGIN_DEST}"
 mkdir -p "${PLUGIN_DEST}"
 cp -R "${PLUGIN_SRC}/." "${PLUGIN_DEST}/"
+
+# EXCLUDE quay's OWN tests from the shipped artifact (human ruling 2026-08-06: 剔除测试).
+# Measured before the ruling: plugin/test/ was 151 of 406 plugin entries (37%) and 1.9MB of
+# 7.2MB (27%) — a user installs quay to run its loop, not to run quay's own test suite.
+#
+# SAFE TO REMOVE — verified, not assumed:
+#   * laydown-set-check.sh:110 resolves "$ROOT"/plugin/test/<basename>.test.mjs, BUT only under
+#     the opt-in `--run-tests` deep gate (RUN_TESTS=0 by default, that script's line 38). The
+#     cold-start skill invokes it WITHOUT --run-tests (plugin/skills/cold-start/SKILL.md:108,164),
+#     so the default cold-start gate path is unaffected.
+#   * every other shipped reference to plugin/test/ is a comment or a documented test seam
+#     (dead-loop-check.sh:45, resource-gate.sh:39, l1-delivery-surface-check.ts:23, ...).
+#
+# CONSEQUENCE, stated plainly rather than hidden: an installed copy can no longer run
+# `laydown-set-check.sh --run-tests` (the deep gate that caught 4+3 real defects on ad-arm1 that
+# A's own suite had missed). That capability now requires the source repo. If a downstream
+# acceptor machine needs it back, the fix is a SEPARATE optional test package — not re-inflating
+# the main artifact.
+rm -rf "${PLUGIN_DEST}/test"
+echo "Excluded: plugin/test/ (quay's own suite — not a user-facing deliverable)"
 echo "Staged: ${PLUGIN_DEST} ($(find "${PLUGIN_DEST}" -type f | wc -l) files)"
 
 # Pack the package. This produces quay-<version>.tgz in the current directory.
