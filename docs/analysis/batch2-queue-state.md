@@ -5259,3 +5259,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **inner-session-discovery-fallback 合并**（`3936f715`）：TR_SOURCE=discovery 退化路径**不再静默**——stderr 报警 + state=degraded（fail-closed，绝不静默 healthy）；`/proc environ` 不可读分支专门 WARNING；cold-start --json 消费者读 transcriptSource==discovery 报警/拒收。AC1–AC4 勾（13/13）。已并已清。
 - **在飞 1/5**（audit-findings）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T10:4xZ（内层，audit-findings fan-in 完成 —— 在飞清零）
+
+- **audit-findings 合并**（`6740d4fc`）：`finding-backpropagate.ts`（消费 DIR-124-B FindingEnvelope，classifyFinding 三态 + 最早可检阶段 + proveDetector 校准）+ `execution-policy.ts`（版本化 policy-hash + 授权激活）。真实 M208 finding（ac7-checklist-missing）校准；M192 负控。AC1-4/6/7/8 勾；**AC5 如实未勾**（需未来真实 milestone 证明前向捕获）。已并已清。
+- **在飞 0/5**（本批全落地）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
