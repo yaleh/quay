@@ -5309,3 +5309,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **派发 3/5**（disjoint batch，scheduler 实测）：`full-suite-runner-red-pattern-matches-bare-x-vitest-false-red` + `send-keys-reliable-welcome-screen-ghost-drive-fails` + `session-liveness-hashes-the-token-counter`。telemetry --task-start 已开。
 - **defer**：`manager-productization-five-constraints`（与 full-suite-runner 在 `plugin/scripts/full-suite-runner.ts` 碰撞，等下批）；DIR-124 复合父任务子任务全 todo 不单派。
 - 套件 green（outer 后台）。在飞 3/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T14:3xZ（内层，send-keys fan-in 完成）
+
+- **send-keys-welcome-screen fan-in 完成**（merge task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails）：修复本体已在 master `a75dde7e`（2026-08-05），本次是复核 + 新鲜 scoped 证据（28/28 exit 0，AC1/2/3 重新确认）。标 **needs-human**：AC4 需 kill archguard outer → watchdog 重拉 → drive 成功的 live-loop 闭环实测，worktree 隔离下不可做，留外层。
+- **在飞 2/5**（full-suite-runner-red-pattern / session-liveness-token-counter）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。

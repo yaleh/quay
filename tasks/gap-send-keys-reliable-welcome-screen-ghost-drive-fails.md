@@ -5,7 +5,7 @@ title: "send-keys-reliable pane-empty check fails on welcome-screen ghost text
   fail-loud) — the TRUE root of watchdog 11:40 drive failure; NBSP fix (11:46
   sync) doesn't cover it; fix: fresh-session (no transcript/zero user msgs)
   skips clear-loop, sends directly (archguard manual seq proven)"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
