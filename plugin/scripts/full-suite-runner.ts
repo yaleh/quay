@@ -246,8 +246,11 @@ export async function run(argv: string[]): Promise<number> {
 
   // AC3 — the resource gate MUST be consulted BEFORE the suite starts (state=running is written
   // AFTER the gate, so a WAIT leaves the previous state — running/green — untouched). --fail-fast-check
-  // is a lightweight hermetic control, not a heavy op — it skips the gate.
-  const skipGate = process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" || argv.includes("--fail-fast-check");
+  // / --wait-check are lightweight hermetic controls, not heavy ops — they skip the gate.
+  const skipGate =
+    process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" ||
+    argv.includes("--fail-fast-check") ||
+    argv.includes("--wait-check");
   if (!skipGate) {
     const gate = checkResourceGate(root);
     if (!gate.ok) {
@@ -536,9 +539,71 @@ async function failFastCheck(): Promise<number> {
   }
 }
 
+/**
+ * --wait-check（gap-full-suite-runner-marks-test-sh-gate-wait-as-failed Contract measure）：
+ * 构造一次 test.sh INTERNAL gate-WAIT 场景（WAIT 标记 + exit 1，一行测试都没跑）⇒ 验证 ABORT 链
+ * 端到端：
+ *   runner 写 state=red reason=aborted → suite-state-trigger 的 runOnce 检测到转变 →
+ *   记 SUITE-RED 事件 → stopSignal 缺位（aborted ≠ 代码风险信号，不设 stop-dispatch）。
+ * 用临时根（hermetic），不触碰真实 `.quay/full-suite-state.json`。退出 0 = ABORT 链验证通过；
+ * 退出非 0 = 链某环断裂（gate-WAIT 假红再现——reason-axis 的残余缺口）。这是 --fail-fast-check
+ * （FAILED 链）的 ABORT 侧孪生控制。
+ */
+async function waitCheck(): Promise<number> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-wc-"));
+  try {
+    // The concrete 17:46Z FALSE-RED shape: test.sh's INTERNAL resource-gate fail-closed prints the
+    // WAIT marker to stderr and exits 1 in ~6s WITHOUT running a single test. The runner must classify
+    // this as reason=aborted (NO correctness conclusion), never failed — a failed label would stop
+    // dispatch on code risk with zero evidence.
+    const fakeCommand =
+      'echo "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO." >&2; exit 1';
+    // --wait-check is a lightweight hermetic control (NOT a heavy full-suite op) — it must skip the
+    // resource gate (run() checks argv for the marker), so a loaded machine cannot make the Contract
+    // self-check flake on a WAIT.
+    const code = await run(["--root", tmp, "--command", fakeCommand, "--wait-check"]);
+    const { status, events, stopSignal } = runOnce(tmp);
+    const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
+    console.log(
+      `wait-check: suite exit=${code} state=${status} reason=${redEv?.state?.reason ?? "?"} stopSignal=${stopSignal} ` +
+        `suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
+    );
+    if (code !== 1) {
+      console.error("wait-check FAIL: expected the fake gate-WAIT suite to exit 1 (red)");
+      return 1;
+    }
+    if (status !== "red") {
+      console.error(`wait-check FAIL: expected state=red, got ${status}`);
+      return 1;
+    }
+    if (!redEv) {
+      console.error("wait-check FAIL: expected a SUITE-RED event recorded by suite-state-trigger (red still noticed, routed by reason)");
+      return 1;
+    }
+    if (redEv.state?.reason !== "aborted") {
+      console.error(
+        `wait-check FAIL: expected reason=aborted on the red state (gate-WAIT = NO correctness conclusion), got ${redEv.state?.reason}`,
+      );
+      return 1;
+    }
+    if (stopSignal) {
+      console.error("wait-check FAIL: expected NO stopSignal (aborted must NOT stop dispatch on code risk)");
+      return 1;
+    }
+    console.log("wait-check OK: runner wrote state=red reason=aborted → trigger recorded SUITE-RED → stopSignal absent (no stop-dispatch)");
+    return 0;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirect) {
   const argv = process.argv.slice(2);
-  const exitCode = argv.includes("--fail-fast-check") ? await failFastCheck() : await run(argv);
+  const exitCode = argv.includes("--fail-fast-check")
+    ? await failFastCheck()
+    : argv.includes("--wait-check")
+      ? await waitCheck()
+      : await run(argv);
   process.exit(exitCode);
 }
