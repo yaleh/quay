@@ -5165,3 +5165,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **池结构性观察**：dispatchable_disjoint=3，但可派候选**全部互撞**（needs-human/no-criterion/quality-criteria/supervisor/reanchor/DIR-043 均为机制级宽 Touches，两两不 disjoint）——与 ROUND-3 held 的 branch-model/cold-start-gate/complete-delivery 同一形态。每轮只能派 1 个。
 - **派发 1/5**：`needs-human-black-hole`（needs-human 等待时间不可测 → 复检 + 存活轴判据，复用 strategic-doc-staleness）。补 self-touch + telemetry 已开。DIR-043 已晋（外部 dogfooding 通道，directive）。其余候选下轮。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:5xZ（内层，needs-human-black-hole fan-in 完成）
+
+- **needs-human-black-hole 合并**（`6f3c68d5`）：`needs-human-recheck.ts` 检测器——时间轴（ageDays，>7d ⇒ ALIVE-STALE + FORCED RE-REVIEW）+ 存活轴（Touches 引 ADR-022 退休脚本 ⇒ DEAD-RETIRED，import strategic-doc-staleness-check 的 DELETED_SCRIPTS 同尺子）。AC1–AC5 勾（8/8）。
+- **实测发现**：16 条 needs-human → **7 条 dead-retired**（DIR-119-D2/D3/D4 + gap-plancheck-* + gap-prepare-milestone-no-worktree-isolation + gap-recursive-guard，全引退休管线脚本）+ **1 条 ALIVE-STALE**（DIR-109，7.6d 强制复检）+ 9 条 alive。`--supersede` 写是**外层的有意动作**（单命令），内层只检测不写。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
