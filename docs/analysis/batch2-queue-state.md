@@ -6067,3 +6067,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   ③ B 的 origin 指向修正
 - **当前状态**：config 已激活（07:09 fork_baseline:develop），内层已记录（fddb0955），supervisor 在飞
   （14m），**尚无新派发**——待办②待 supervisor 完成后下一个派发验证。
+
+### tick 2026-08-06T07:3xZ（内层 cron + slot-refill 心跳）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 1/3（supervisor，master 基线，历史遗留）。
+- 池 10/20、disjoint 4/5 不达标。slot-refill 推荐 split-batch-vocab —— **陈旧**（bfd66d94 已落地，
+  taskWorkLanded 信号缺口），不派。
+- **首个两线模型新派发**：spawn-count-criterion（唯一与在飞 supervisor DISJOINT 的候选；其余 3 个新晋
+  needs-human-black-hole/no-criterion-cost/quality-trend 与 supervisor 在 plugin/scripts/ OVERLAP ⇒ 序列化）。
+  `--pool-candidate` clean、touches resolve 4/4。
+- **fork-baseline.ts 判定 develop**（independent，integration 未验证 0）⇒ 按 config 新规则从 **develop**
+  （926d771b）分叉。判别法验证：develop..branch=0（干净 develop fork）。
+  ⚠️ 记录：develop 落后 master 57 提交，worktree 任务体 status 仍 todo（master 侧补晋未进 develop）——
+  任务体/AC 同源，仅状态字段滞后，agent 已被告知按 body 执行。
+- 在飞 2/3（supervisor + spawn-count）。池 10/20。
