@@ -17,7 +17,7 @@ title: "manager productization (C1-C5, SPEC-manager-productization-2026-08-05):
   'manager for cross-project'); split: manager-phase-goal.md product-behavior
   (axis-open/verification-first/boundary) → plugin/loop/manager-loop-tick.md,
   experiment state stays orchestration/"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
