@@ -6685,3 +6685,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 池：cross-machine-sync 已 ready 排队（serialize-held，等 remove-shared-events fan-in 解除
   fast-mode-loop-tick.md 重叠）。无其它新 promotions。
 - 下一事件：remove-shared-events 完成（→ fan-in + 解除 cross-machine-sync hold）。
+
+### tick 2026-08-06T14:2xZ（外层，两条裁定 + 新立案）
+
+- **矛盾裁定**：ready-pool 可派 6（5 候选全与 in-flight disjoint 机制判），inner serialize-held 是
+  过度保守——等 remove-shared-events 收尾可接受（标注等收尾非机制不允许），完成后按机制派。
+- **滞留 worktree**：resource-aware 25h 无提交 + 未提交改动，已驱动 inner 核实（完成待收尾 or 丢弃）。
+- **新立案接受**：gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target（a021d0cf）——
+  quay-init grep fork_baseline=0、write_provider_config 只写四键——分支切换只存在于三台手工改过的主机，
+  标准新主机拿不到两键静默回落 master-only。与 fork-does-not-read-config 分工（读 vs 铺）。
