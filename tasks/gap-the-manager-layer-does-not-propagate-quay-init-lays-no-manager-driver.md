@@ -75,14 +75,12 @@ orchestration/session-liveness.env           <- 会话观测配置
 ## Contract
 
 ```
-measure manager_driver_laid = 新工作区跑 quay-init --loop 后，管理者驱动文档在目的地是否存在（存在=1）
+measure manager_driver_laid = `bash plugin/scripts/quay-init.sh --loop --root /tmp/quay-init-dst-<id> --project proj --dry-run 2>&1; test -f /tmp/quay-init-dst-<id>/orchestration/manager-loop-tick.md && echo 1 || echo 0` stdout 数字段（存在=1）
 band manager_driver_laid = 1
-measure manager_refs_in_initsh = grep -c 的铺设型（非注释）manager 引用数
-invariant 一个被裁定为交付物的层，其驱动文档必须随 quay-init 落到新主机；
-  "源仓库里有这个文件"不构成交付
+measure manager_refs_in_initsh = `grep -c 'manager-loop-tick' plugin/scripts/quay-init.sh` stdout 数字段（铺设型非注释引用数）
+invariant 一个被裁定为交付物的层，其驱动文档必须随 quay-init 落到新主机；"源仓库里有这个文件"不构成交付
 invoke `bash plugin/scripts/quay-init.sh --loop --dry-run --root <tmp> --project proj ...`
-control 在一个全新临时工作区跑铺设，然后在**目的地**（不是源仓库）查管理者驱动文档；
-  若只在源仓库查到就判通过，说明又在验源侧——该判定无效
+control 在一个全新临时工作区跑铺设，然后在**目的地**（不是源仓库）查管理者驱动文档；若只在源仓库查到就判通过，说明又在验源侧——该判定无效
 resume 若中断，先在目的地跑 measure，不要假设上次铺过了
 ```
 
@@ -107,3 +105,10 @@ resume 若中断，先在目的地跑 measure，不要假设上次铺过了
 - plugin/scripts/quay-init.sh
 - orchestration/manager-loop-tick.md
 - tasks/gap-productize-the-manager-layer.md（交叉标注）
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T14:1xZ
+changed: 内层立案任务补 Contract 格式（measure 补 backtick 命令 + 字段、invariant/control 续行合并、加本段）。任务待派（dispatch 记账 0d6e98b7 补晋 ready）。
+

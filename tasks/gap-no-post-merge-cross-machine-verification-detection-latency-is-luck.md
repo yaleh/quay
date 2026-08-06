@@ -83,15 +83,13 @@ A 无法验证自己的合并——同一棵树、同样的路径可解析、同
 ## Contract
 
 ```
-measure detection_latency_h = 合并提交时间到该合并的跨机闸结论时间之差（小时）
+measure detection_latency_h = `bash plugin/scripts/verify-delivery-surface.ts --json 2>/dev/null | grep -o 'post_merge_latency_h[^,]*'` stdout 数字段
 band detection_latency_h = 0..1
-measure verifier_is_participant = 跑闸的机器是否是执行该合并的机器（是=1，否=0）
+measure verifier_is_participant = `bash plugin/scripts/<跨机验证脚本> --report --json` 输出的 verifier_machine 字段是否等于 merger_machine（是=1，否=0）
 band verifier_is_participant = 0
-invariant 任何一次落到 develop/integration 的合并，都必须由一台未参与该合并的机器给出闸结论；
-  该结论的延迟必须可机械读出，而不是事后回忆
+invariant 任何一次落到 develop/integration 的合并，都必须由一台未参与该合并的机器给出闸结论；该结论的延迟必须可机械读出，而不是事后回忆
 invoke `bash plugin/scripts/<跨机验证脚本> --report --json`
-control 故意合入一个已知坏改动（例如把一个被测函数改名而不改调用点）⇒ 闸必须报红；
-  若报绿，说明闸测不到这一类，等于没有
+control 故意合入一个已知坏改动（例如把一个被测函数改名而不改调用点）⇒ 闸必须报红；若报绿，说明闸测不到这一类，等于没有
 resume 若中断，先跑 measure 读当前未被验证的合并列表，不要假设都验过了
 ```
 
@@ -122,3 +120,10 @@ resume 若中断，先跑 measure 读当前未被验证的合并列表，不要�
 - plugin/loop/orchestrator-loop-tick.md
 - plugin/scripts/quay-init.sh
 - tasks/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes.md（同一双触发源模式，交叉标注）
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T14:1xZ
+changed: 内层立案任务补 Contract 格式（measure 补 backtick 命令 + 字段、invariant/control 续行合并、加本段）。任务待派（dispatch 记账 0d6e98b7 补晋 ready）。
+
