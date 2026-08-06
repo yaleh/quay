@@ -397,12 +397,12 @@ print(c, sum(c.values()), 'rows:', len(rows))"
 | 类型 | 次数 | 占比 |
 |---|---|---|
 | no-action | 192 | 53% |
-| unblock | 60 | 16% |
+| unblock | 61 | 17% |
 | correct | 94 | 26% |
 | correct-inner | 3 | 1% |
 | correct-self | 8 | 2% |
 | escalate | 7 | 2% |
-| **合计** | **364** | — |
+| **合计** | **365** | — |
 
 > **2026-08-06 16:58Z 重算**：严格匹配全部 364 行（含动作列注记行）。correct 分裂为 correct/correct-inner/correct-self；退化口径 correct-inner(含 plain correct)=97，非 correct-self 行=356，占比 27.2% < 50%，分层健康。
 
