@@ -5379,3 +5379,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 8 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（5 候选带宽 plugin/scripts/、plugin/test/ 目录 touch 串行互撞）。
 - **派发 1/5**：`gap-delivery-surface-grows-but-target-freezes-no-upgrade`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T19:4xZ（内层，delivery-surface-grows fan-in 完成 —— 在飞清零）
+
+- **delivery-surface-grows fan-in 完成**（merge task/gap-delivery-surface-grows...，4 文件 328 行）：`quay-init.sh` 新增 `--check-drift`（只读升级正确性漂移报告——派生集轴 漂移/缺失/一致，非文件数轴；`--loop` 重跑即升级路径：缺失自动补、漂移备份+替换+可见报告、`send-keys-verified.sh` 分层退役不铺回）。AC1–AC5 全勾（scoped 4/4，task-contract no violations）。留 ready。**agent 所述 verify-referenced-landed 红已在主检出复核为假报警**（SPEC 已落地，`verify-referenced-landed: OK`——agent 的 worktree node_modules 态所致）。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
