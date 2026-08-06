@@ -40,6 +40,7 @@ extra: {}
 
 ## Touches
 
+- tasks/gap-os-anchor-watchdog-launch-missing-prompt-suggestions.md
 - ~/.config/quay/os-anchor/os-anchor-projects.conf（launch-cmd 加参数）
 - plugin/scripts/os-anchor-install.sh（projects.conf 生成模板）
 - tasks/gap-crystallize-launch-config-into-checked-in-settings-file.md（AC3 交叉标注）

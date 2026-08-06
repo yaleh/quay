@@ -72,6 +72,7 @@ a new liveness-detection mechanism (reuse `session-liveness.sh`'s).
 
 ## Touches
 
+- tasks/gap-no-formalized-bare-metal-session-bootstrap.md
 - plugin/scripts/session-bootstrap.sh (new)
 - plugin/test/session-bootstrap.test.mjs (new)
 - plugin/skills/cold-start/SKILL.md

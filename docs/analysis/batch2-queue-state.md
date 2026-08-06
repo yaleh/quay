@@ -5270,3 +5270,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **audit-findings fan-in 后**，cold-start-outer-validation-runs 解除碰撞（audit-findings 已并）。
 - **派发 1/5**：`cold-start-outer-validation-runs`（验证类任务——实跑冷启动验证流，产出贴任务体；inner-session discovery 刚改 fail-closed，本任务验证其效果）。补 self-touch + telemetry 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T11:1xZ（内层，补池 4 后派发：2/5）
+
+- **外层补池 4**（31140406）：bare-metal-session-bootstrap + os-anchor-launch 晋 ready。
+- **OVER90 假阳再处置**：--slots 6 brackets / 5 reconcilable / **1 real-in-flight**（= cold-start-outer-validation，真在飞）——OVER90 块为陈旧括号（dispatch-evaluated），已清。
+- **派发 2/5**（disjoint batch）：`bare-metal-session-bootstrap`（session-bootstrap.sh 形式化）+ `os-anchor-launch-missing-prompt-suggestions`（watchdog 重启补 `--prompt-suggestions false`，ghost 消除源参数）。补 self-touch + telemetry 已开。
+- 在飞 3/5（cold-start-outer-validation + 新 2）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
