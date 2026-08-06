@@ -264,7 +264,7 @@ export function touchesScale(body) {
 /** The composite relevance signal for one task. All inputs mechanical (grep / frontmatter fields /
  *  touches count) — no human scoring. `childrenByTask` / `parentRefCount` are precomputed once per
  *  analyzeTasks call (blocking needs to know if ANY other task names this id as its parent). */
-export function computeRelevance(id, task, childrenByTask, parentRefCount) {
+export function computeRelevance(id, task, childrenByTask = new Map(), parentRefCount = new Map()) {
   const strategic = strategicTraceable(task.body);
   const children = childrenByTask.get(id) || [];
   const blocking = children.length > 0 || (parentRefCount.get(id) || 0) > 0;
@@ -509,13 +509,13 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // gap>DIR as the final tiebreak (AC4 retained), then id for determinism. Only emitted when the
   // `--top N` flag is passed (default output byte-unchanged for existing consumers).
   const top_relevance = [];
-  if (top > 0) {
+  if (topN > 0) {
     const ranked = [];
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue;
       const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand);
-      ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: relevanceReason(c) });
+      ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
       (a, b) =>
@@ -523,7 +523,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
         a.kindOrder - b.kindOrder ||
         a.id.localeCompare(b.id),
     );
-    top_relevance.push(...ranked.slice(0, top));
+    top_relevance.push(...ranked.slice(0, topN));
   }
 
   return {
