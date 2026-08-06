@@ -34,6 +34,24 @@ All must hold before starting; if any fails, STOP and report which precondition 
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
 
+**From bare metal to a session is ONE command (`gap-no-formalized-bare-metal-session-bootstrap`).**
+This skill runs inside an already-existing outer session — the step BEFORE that (bare metal → a
+tmux window layout with a Claude Code process live in each pane) is the formalized product
+`plugin/scripts/session-bootstrap.sh <root> <layout>`:
+
+```bash
+bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer        # project topology
+bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # full quay-0-shaped layout
+```
+
+It creates each named window (idempotent — re-runs leave live windows alone), launches each
+role's Claude Code process from the checked-in `quay-launch.sh <role>` convention, verifies each
+process is actually alive (the same `/proc` process-detection `session-liveness.sh` uses), and
+exits non-zero naming the failing window if any window cannot be confirmed live (fail-closed).
+After it returns, this skill's "inner session reachable" precondition is already satisfied — the
+same command a cold start used to follow ("hand-build the session, then one command") is now
+truly one command.
+
 **Launch config is checked-in, not remembered.** The correct per-role launch command lives in
 `<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
 materialized by `<root>/plugin/scripts/quay-launch.sh`. If a session must be (re)started during this
@@ -88,7 +106,12 @@ The session the loop lives in is built **by definition**, never hand-assembled
 (`gap-tmux-session-topology-no-factory-definition`; two-window correction
 `gap-manager-baked-into-project-topology-factory` — manager is cross-project, not part of the
 project topology). The definition ships in the `quay-session-topology` skill; this step applies
-it. **Cross-annotation (`gap-outer-self-checks-and-creates-inner-session`):** this step is the
+it. **Bare-metal entry (`gap-no-formalized-bare-metal-session-bootstrap`):** if the session does
+NOT exist yet (nothing to build on), first run
+`bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer` — the formalized
+from-bare-metal step that produces a session with live claude windows, after which this topology
+factory/check applies idempotently. **Cross-annotation
+(`gap-outer-self-checks-and-creates-inner-session`):** this step is the
 build-by-definition half; the OUTER's own cold-start path
 (`orchestration/orchestrator-loop-tick.md` step 3) independently SELF-CHECKS inner in three
 states — healthy (window+process+user message) ⇒ untouched, empty-shell (window+process, no user
