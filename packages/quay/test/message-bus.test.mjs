@@ -175,6 +175,16 @@ test("AC4 — managerInboxDir resolves under .quay/manager-inbox/ and deliver la
   assert.equal(files.length, 1, "a delivered message lands as a JSON record in the inbox");
 });
 
+test("AC4 — a write failure is a FAILED delivery (deliver -> delivered|failed), never a throw", (t) => {
+  const root = tmpRoot(t);
+  const inbox = managerInboxDir(root);
+  const tx = createFileInboxTransport({ inboxDir: inbox });
+  fs.chmodSync(inbox, 0o555); // read-only — writes now fail (non-root); tmpRoot cleanup handles read-only dirs
+  const r = tx.deliver({ from: "outer", payload: { text: "will fail" } });
+  assert.equal(r.delivered, false);
+  assert.match(r.reason, /write failed/);
+});
+
 test("AC4 — installDefaultTransports wires human → the real file-inbox mount point", (t) => {
   const root = tmpRoot(t);
   resetTransports();
@@ -218,6 +228,34 @@ test("AC5 — every human message is a timestamped, seq-numbered, countable reco
 });
 
 // ── AC6 — fail-safe: measurement protocol constrains "humans only use the channel" ─────────────────
+
+test("AC2/AC3 — the deliver()/observe() target arg is authoritative over any target in the payload", (t) => {
+  const root = tmpRoot(t);
+  const bus = createTransportRegistry();
+  bus.register("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));
+  // A misleading `target` in the message must NOT relabel the record to another channel.
+  const r = bus.deliver("human", { target: "inner", from: "outer", payload: { text: "authority" } });
+  assert.equal(r.delivered, true);
+  assert.equal(r.target, "human");
+  const [rec] = readInboxRecords(managerInboxDir(root));
+  assert.equal(rec.target, "human", "the record is labeled with the channel it was delivered on");
+
+  // observe: the arg wins over any target the transport echoes.
+  const o = bus.observe("human");
+  assert.equal(o.target, "human");
+});
+
+test("AC5 — rapid successive delivers produce UNIQUE ids and files (no silent overwrite)", (t) => {
+  const root = tmpRoot(t);
+  const tx = createFileInboxTransport({ inboxDir: managerInboxDir(root) });
+  const ids = new Set();
+  for (let i = 0; i < 20; i++) {
+    ids.add(tx.deliver({ from: "outer", payload: { text: `burst ${i}` } }).receiptId);
+  }
+  assert.equal(ids.size, 20, "all 20 ids are unique (same-ms deliveries cannot collide)");
+  const files = fs.readdirSync(managerInboxDir(root)).filter((f) => f.endsWith(".json"));
+  assert.equal(files.length, 20, "20 files on disk — no delivery overwrote another");
+});
 
 test("AC6 — measurement.valid is false while delivered > consumed (channel cannot confirm reading)", (t) => {
   const root = tmpRoot(t);

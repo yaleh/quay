@@ -27,6 +27,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
+// Process-global id-uniqueness counter: two deliver() calls in the SAME millisecond reading the
+// same disk seq would otherwise produce identical ids, and the second write would silently
+// overwrite the first (a delivered-but-lost message — the exact failure class this bus exists to
+// eliminate). A per-process counter guarantees id uniqueness regardless of disk-read timing.
+let _idCounter = 0;
+
 // ── Targets ──────────────────────────────────────────────────────────────────────────────────────────
 
 /** The three deliver()/observe() targets. Human is the THIRD target, same mechanism. */
@@ -114,7 +120,8 @@ export function createFileInboxTransport({ inboxDir }) {
       const records = readInboxRecords(inboxDir);
       const seq = records.reduce((m, r) => Math.max(m, r.seq ?? 0), 0) + 1;
       const deliveredAt = new Date().toISOString();
-      const id = `msg-${deliveredAt.replace(/[:.]/g, "-")}-${seq}`;
+      _idCounter += 1;
+      const id = `msg-${deliveredAt.replace(/[:.]/g, "-")}-${seq}-${_idCounter}`;
       const record = {
         id,
         seq,
@@ -126,7 +133,13 @@ export function createFileInboxTransport({ inboxDir }) {
         consumed: false,
         consumedAt: null,
       };
-      fs.writeFileSync(path.join(inboxDir, `${id}.json`), JSON.stringify(record, null, 2) + "\n", "utf8");
+      try {
+        fs.writeFileSync(path.join(inboxDir, `${id}.json`), JSON.stringify(record, null, 2) + "\n", "utf8");
+      } catch (err) {
+        // Contract: deliver -> delivered | failed. A write failure is a FAILED delivery, never a
+        // throw — the caller can represent/retry it instead of crashing on an unwritable inbox.
+        return { delivered: false, target: record.target, reason: `file-inbox write failed: ${err.message}` };
+      }
       return { delivered: true, target: record.target, receiptId: id, seq, deliveredAt };
     },
     observe() {
@@ -144,7 +157,7 @@ export function createFileInboxTransport({ inboxDir }) {
  * deliver()/observe() entry points as human (AC2), with only the transport differing.
  * @param {{ deliverFn?: Function, observeFn?: Function }} [adapters]
  */
-export function createSessionTransport({ deliverFn, observeFn } = {}) {
+export function createSessionTransport({ deliverFn, observeFn } = { deliverFn: undefined, observeFn: undefined }) {
   return {
     name: "session",
     deliver(message) {
@@ -180,12 +193,15 @@ export function createTransportRegistry() {
     deliver(target, message, opts = {}) {
       const t = transports.get(target);
       if (!t) return { delivered: false, reason: `message-bus: no transport registered for target '${target}'` };
-      return t.deliver({ target, ...message }, opts);
+      // `target` is authoritative: the arg names the channel, and a caller-supplied `target` in
+      // `message` must not relabel a record to a channel it was NOT delivered on (AC2/AC3 integrity).
+      return t.deliver({ ...message, target }, opts);
     },
     observe(target, opts = {}) {
       const t = transports.get(target);
       if (!t) return { target, busy: null, idle: null, blocked: null, last_at: null, reason: `message-bus: no transport registered for target '${target}'` };
-      return { target, ...t.observe(opts) };
+      // Same authority rule: the target arg wins over any target a transport may echo back.
+      return { ...t.observe(opts), target };
     },
     /** Test-only: clear all registered transports. */
     _clear() {
