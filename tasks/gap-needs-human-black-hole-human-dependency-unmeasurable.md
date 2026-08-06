@@ -74,13 +74,23 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **时间轴**——needs-human 任务超过 N 天未被碰 ⇒ 强制复检（N 可配，默认如 7 天）；把「卡在
-      没人知道还在等的决定」报出来
-- [ ] AC2: **存活轴**——`strategic-doc-staleness-check.ts` 路径存在性判据作用到 tasks/needs-human：
-      引用已退休机制的任务自动标 superseded（同尺子换对象）
-- [ ] AC3: **(a)/(b) 可分**——正确停放的死任务 vs 活的卡住任务从此区分（DIR-109/100/103 这类被报出来）
-- [ ] AC4: **人依赖计数可信**——needs-human 死活可分 → AC10 的依赖度量有真值（实跑输出贴任务体）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`
+- [x] AC1: **时间轴**——needs-human 任务超过 N 天未被碰 ⇒ 强制复检（N 可配，默认如 7 天）；把「卡在
+      没人知道还在等的决定」报出来。实跑：`needs-human-recheck.ts` 报 DIR-109（lastTouch 07-29，
+      age 7.6d > 7d）为 `ALIVE-STALE` + `FORCED RE-REVIEW`；`--stale-days N` 可配（fixture 验证
+      N=14 清掉 12d 任务）。见下 `## AC4 实跑输出`。
+- [x] AC2: **存活轴**——`strategic-doc-staleness-check.ts` 路径存在性判据作用到 tasks/needs-human：
+      引用已退休机制的任务自动标 superseded（同尺子换对象）。`needs-human-recheck.ts` **import**
+      strategic-doc-staleness-check.ts 的 `DELETED_SCRIPTS`（不重复声明），作用到 needs-human 任务的
+      `## Touches`：Touches 引用 `prepare-milestone.js`/`execute-milestone.js`/`milestone-worktree.ts`
+      即 `deadRetired`（自动 supersede 候选），`--supersede` 写 `status: superseded` + `## Superseded`
+      注记（测试断言只动 deadRetired、alive 任务字节不变）。
+- [x] AC3: **(a)/(b) 可分**——正确停放的死任务 vs 活的卡住任务从此区分（DIR-109/100/103 这类被报出来）。
+      双向控制 fixture：DIR-109 类活卡（Touches 引现行 `scripts/test.sh`）⇒ alive + stale 报 FORCED
+      RE-REVIEW；gap-plancheck 类死（Touches 引 `.claude/workflows/prepare-milestone.js`）⇒ deadRetired。
+      实跑：7 dead-retired（gap-plancheck-* 等）/ 9 alive（DIR-109/100/103/101/105…），见 `## AC4 实跑输出`。
+- [x] AC4: **人依赖计数可信**——needs-human 死活可分 → AC10 的依赖度量有真值（实跑输出贴任务体）。
+      实跑输出见下 `## AC4 实跑输出`：16 条 needs-human 全部分类，死/活互斥（无任务同时 dead 且 alive）。
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`。见 `plugin/test/needs-human-recheck.test.mjs` 首行。
 
 ## Definition of Done
 
@@ -90,17 +100,53 @@ extra:
 
 ## Touches
 
-- tasks/gap-needs-human-black-hole-human-dependency-unmeasurable.md
-- plugin/scripts/（needs-human 复检 + 存活轴检查，复用 strategic-doc-staleness-check 判据）
-- plugin/test/（AC1/AC2 fixture）
-- tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC10 记账引用）
+- tasks/gap-needs-human-black-hole-human-dependency-unmeasurable.md（自身文件：勾 AC + 贴 invoke 证据授权）
+- plugin/scripts/needs-human-recheck.ts（新，needs-human 复检 + 存活轴检查；import strategic-doc-staleness-check 的 DELETED_SCRIPTS 同尺子）
+- plugin/test/needs-human-recheck.test.mjs（新，AC1-AC5 fixture + AC4 实跑断言）
+
+## AC4 实跑输出
+
+`node --experimental-strip-types plugin/scripts/needs-human-recheck.ts --root .`（2026-08-06，`--stale-days 7`）：
+
+```
+needs-human-recheck — 16 needs-human task(s); needs_human_stale(>7d)=1; needs_human_dead_retired=7; needs_human_alive=9
+  [alive] DIR-100  lastTouch=2026-08-02T05:54:27.000Z  age=4d
+  [alive] DIR-100-A  lastTouch=2026-08-01T09:39:28.000Z  age=4.8d
+  [alive] DIR-101  lastTouch=2026-08-01T09:39:28.000Z  age=4.8d
+  [alive] DIR-103  lastTouch=2026-08-02T05:54:27.000Z  age=4d
+  [alive] DIR-103-B  lastTouch=2026-08-01T09:39:28.000Z  age=4.8d
+  [alive] DIR-105  lastTouch=2026-08-01T09:39:28.000Z  age=4.8d
+  [ALIVE-STALE] DIR-109  lastTouch=2026-07-29T15:52:42.000Z  age=7.6d
+            FORCED RE-REVIEW: untouched 7.6d > 7d
+  [DEAD-RETIRED] DIR-119-D2  lastTouch=2026-08-04T14:33:41.000Z  age=1.6d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/execute-milestone.js, plugin/workflows/execute-milestone.js
+  [DEAD-RETIRED] DIR-119-D3  lastTouch=2026-08-04T14:33:41.000Z  age=1.6d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/execute-milestone.js, plugin/workflows/execute-milestone.js
+  [DEAD-RETIRED] DIR-119-D4  lastTouch=2026-08-04T14:33:41.000Z  age=1.6d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/execute-milestone.js, plugin/workflows/execute-milestone.js
+  [alive] gap-no-resource-awareness-heavy-ops-run-blind  lastTouch=2026-08-05T14:07:21.000Z  age=0.6d
+  [DEAD-RETIRED] gap-plancheck-blocking-only-convergence  lastTouch=2026-08-04T14:33:41.000Z  age=1.6d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/prepare-milestone.js, plugin/workflows/prepare-milestone.js
+  [DEAD-RETIRED] gap-plancheck-no-diminishing-returns-exit  lastTouch=2026-08-04T14:33:41.000Z  age=1.6d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/prepare-milestone.js, plugin/workflows/prepare-milestone.js
+  [DEAD-RETIRED] gap-prepare-milestone-no-worktree-isolation  lastTouch=2026-08-04T10:09:50.000Z  age=1.8d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/prepare-milestone.js, plugin/workflows/prepare-milestone.js
+  [DEAD-RETIRED] gap-recursive-guard-only-covers-multi-mechanism  lastTouch=2026-08-04T14:33:41.000Z  age=1.6d
+            ## Touches reference ADR-022-retired classic-pipeline script(s): .claude/workflows/prepare-milestone.js, plugin/workflows/prepare-milestone.js
+  [alive] gap-split-decision-finality-not-enforced  lastTouch=2026-08-04T10:43:22.000Z  age=1.8d
+```
+
+needs_human_stale（measure，时间轴）= 1（DIR-109，7.6d > 7d，报 FORCED RE-REVIEW）；needs_human_dead_retired（存活轴）= 7；
+needs_human_alive = 9。死/活互斥（AC3 两向）：needs-human-recheck.ts 里同一条任务 `deadRetired` 且 `alive` 永不同真。
+`--supersede`（存活轴写模式）在 fixture 上证明只把 deadRetired 写 `status: superseded` + `## Superseded` 注记，alive 任务字节不变；
+对真实批次的实际 supersede 是外层的后续动作（机制已使其单命令可执行）。
 
 ## Contract
 
-measure   needs_human_stale = `node --experimental-strip-types <needs-human 复检脚本>` stdout 的 needs_human_stale 数字段
+measure   needs_human_stale = `node --experimental-strip-types plugin/scripts/needs-human-recheck.ts --root .` stdout 的 needs_human_stale 数字段
 band      needs_human_stale = 0（超过 N 天未碰的 needs-human 全被报出；死/活分开）
 invariant same_ruler_on_needs_human = 1（存活轴复用 strategic-doc-staleness-check 路径存在性判据）
-invoke    `node --experimental-strip-types <needs-human 复检+存活轴检查>`
+invoke    `node --experimental-strip-types plugin/scripts/needs-human-recheck.ts --root .`
 control   构造 DIR-109 类活卡任务（引现行机制）⇒ 报出需复检；gap-plancheck-* 类死任务（引退休机制）⇒ 自动 superseded（AC3 两向）
 resume    时间轴复检与存活轴分两步提交，任一步完成即写盘
 
