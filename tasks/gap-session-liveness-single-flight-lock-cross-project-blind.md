@@ -1,6 +1,6 @@
 ---
-id: gap-session-liveness-single-flight-lock-cross-project-blind
-title: "session-liveness multi-target coverage gap on ad-arm1 (quay-C): delivered=false because the new machine is NOT in the manager's multi-target config — a CONFIG-GAP not a lock bug (premise of the original lock-scope task withdrawn 2026-08-06: archguard IS monitored, 105 shared-file events latest 4min ago; single-holder+shared-file design is correct per fast-mode-loop-tick.md:176-180; multi-target config working for archguard/meta-cc)"
+id: gap-session-liveness-remove-shared-events-and-lock
+title: "REMOVE the shared events file + the mutual-exclusion lock from session-liveness — observation topology is a TREE (manager→N outers, outer_i→inner_i), each edge an independent (observer,target) pair, read-only, no intersection; the shared file merges N independent streams then forces every consumer to filter back their own (strictly worse than N independent streams, zero benefit); the lock's only reason for existing was to protect the shared file — remove the file, duplicate mounting becomes harmless, lock has no reason; human ruling 2026-08-06 (two direct quotes: '共享事件文件这是个极端糟糕的设计' + '把互斥锁也彻底去掉'); hazard 1: who-starts-first decides what anyone sees (archguard 08-05 07:31 'lock held by quay only watches quay sessions'), 2: already spawned a defect + patch (gap-a-log-already-filtered, LOOP_MIN threshold conflict), 3: fate-sharing (holder death blinds all, lock actively blocks takeover), 4: unbounded growth (measured 472KB, rotate/prune/truncate 0 hits); observation is PURE READ-ONLY (only capture-pane/git log/stat, zero target writes) — read-only is naturally non-exclusive, two observers on same pane cost one extra capture-pane per cycle; AC20's 'single-flight resource' premise is WRONG (observing is not a single-flight resource), introduced by an earlier manager session not by outer/inner"
 status: todo
 labels:
   - gap
@@ -13,43 +13,67 @@ extra:
 
 ## Proposal
 
-**session-liveness 多目标覆盖盲区 = ad-arm1（quay-C）delivered=false——新机器未进 manager 多目标配置，配置缺失非锁 bug。**
+**去掉共享事件文件 + 彻底去掉互斥锁——观测拓扑是树，只读天然不排他。**
 
-**【管理者自我更正，2026-08-06——原「锁分域」前提撤回】**：
-- 原任务标题假设「单飞锁按机器不分项目 ⇒ archguard 无监视器」。**证据核实推翻此假设**：
-  archguard **被实时监视**——共享事件文件 **105 条 archguard 事件，最新 4 分钟前**。
-- `mounted=false / delivered=true` 是**单持有者 + 共享文件设计**的正确状态（fast-mode-loop-tick.md:176-180
-  明写「共享事件文件，任何挂载点都写同一个文件」）——不是锁 bug。
-- **多目标配置在生效**：REPO-STALL / SESSION-OVERDUE 对 archguard 正常产出，就是配置生效的证明。
-- **唯一真盲区 = ad-arm1（quay-C）`delivered=false`**：新机器未进 manager 多目标配置（`orchestration/
-  session-liveness.env` 的 SESSION_TARGETS），**配置缺失**，非锁实现问题。
-- **结论**：锁分域是修不存在的问题（原 premise 撤回），任务缩窄为 ad-arm1 配置缺失。
+**【人裁定（2026-08-06，两条原话）】**：
+- 「共享事件文件这是个极端糟糕的设计！manager 监测多个 outer，多个 outer 监测自己的 inner，
+  为什么要共享文件？」
+- 「目标不需要知道自己被监测。多个观测者观测一个目标互相也不用知道，它们都应当是只读的。」
+- 「把互斥锁也彻底去掉。」
+
+**【核心论证（人）】**：观测拓扑是一棵树——manager→N 个 outer、outer_i→inner_i，每条边是独立的
+(观察者,目标) 对，彼此无交集。共享文件把 N 条不相干的流合并成一条，再要求每个消费者过滤回自己要的
+——**严格劣于 N 条独立流，无任何收益**。
+
+**【AC20 前提本身是错的（管理者早期会话引入）】**：脚本注释原话「谁需要谁自己起一个」对单飞资源是错
+的默认——它假设观测是单飞资源，而观测不是。**实测 session-liveness 对目标是纯只读**（只有
+tmux capture-pane / git log / stat，零写入；send-keys 只在注释解释输入来源）。只读天然不排他——
+两个观察者盯同一 pane 的代价只是每周期多一次 capture-pane 和几次 stat，互不影响也不需要互相知情。
+
+**【因果链（四条已核实危害，去共享后同时消失）】**：
+1. **谁先启动决定能力**：共享文件 → archguard 08-05 07:31「lock held by quay only watches quay sessions;
+   archguard/meta-cc events never produced」——能力由启动顺序决定。
+2. **已自生缺陷并打补丁**：tasks/gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second
+   （manager 要 LOOP_MIN=0 而项目要抑制，一条流服务不了两个阈值；AC21「记全量读时判」是给共享打补丁）。
+3. **命运共享**：持有者死则全瞎，而锁主动阻止他人接管。
+4. **无界增长**：实测 events.jsonl 472KB（460K 行），rotate/prune/truncate grep 0 命中。
+
+**互斥锁存在的唯一理由** = 保护那个共享文件；共享文件本身不该存在——去掉共享文件，重复挂载立刻无害，
+锁就没有存在理由。
+
+### 目标形状
+
+- 每个观察者拥有自己的事件流（谁挂的谁拥有）
+- 无锁，目标完全无感，观察者之间互不知情，谁先启动无关
+- manager 挂 N 个观察各 outer；每个 outer 挂 1 个观察自己 inner——全独立、全只读、零共享写点
 
 ## Acceptance Criteria
 
-- [ ] AC1: 核实 ad-arm1（quay-C）未在 manager 多目标配置中——确认为配置缺失（非锁 bug）
-- [ ] AC2: ad-arm1 加入 `orchestration/session-liveness.env` 的 SESSION_TARGETS 后，`delivered=true` 且事件真实产生
-- [ ] AC3: 记录锁分域前提撤回的证据链（archguard 105 事件 + 共享文件设计正确性 + fast-mode-loop-tick.md:176-180）
-- [ ] AC4: monitor-mount-check 若可答「指定项目有没有监视器」则一并核对 ad-arm1；不强行扩展
-- [ ] AC5: 测试 `node:test` + `// @test-group governance`（如涉及机制改动；纯配置则记录验证输出）
+- [ ] AC1: 共享事件文件移除——每个观察者写自己的事件流（谁挂的谁拥有）
+- [ ] AC2: 互斥锁移除——多观察者并行挂载无冲突（无锁，天然可并行）
+- [ ] AC3: 目标无感——session-liveness 对目标仍纯只读（capture-pane/git log/stat，零写入）
+- [ ] AC4: 观察者互不知情——manager 观 outer + outer 观 inner 独立并行，谁先启动无关
+- [ ] AC5: 与 gap-a-log-already-filtered（打补丁的）交叉标注——本任务去掉根因，该补丁可退役
 
 ## Touches
 
-- orchestration/session-liveness.env（manager 多目标配置：ad-arm1 加入 SESSION_TARGETS）
-- tasks/gap-session-liveness-single-flight-lock-cross-project-blind.md（自身文件：勾 AC + 贴撤回证据）
-- plugin/scripts/session-liveness.sh（只读核实；锁代码**不修改**——前提撤回）
+- plugin/scripts/session-liveness.sh（去共享 events + 去锁；每观察者自己的流）
+- plugin/loop/fast-mode-loop-tick.md（AC20 单飞语义改：观测不排他）
+- plugin/scripts/monitor-mount-check.sh（去 mounted 依赖；「在看我」语义调整）
+- tasks/gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second.md（AC5 交叉标注）
 
 ## Contract
 
-measure   ad_arm1_delivered = `bash plugin/scripts/monitor-mount-check.sh` 对 ad-arm1 的 delivered 布尔字段（或等价：事件文件含 ad-arm1 目标事件的计数）
-band      ad_arm1_delivered = 1（ad-arm1 进入配置后 delivered=true）
-invoke    `grep -n "ad-arm1\|quay-C" orchestration/session-liveness.env`（配置含 ad-arm1 目标）
-control   配置加入前 ad-arm1 delivered=false（记录现状）；加入后 true（AC2 实跑）
-resume    先核实配置现状（ad-arm1 是否已在 SESSION_TARGETS），再决定是加配置还是纯记录
+measure   parallel_observers = `bash plugin/scripts/session-liveness.sh --once 2>&1 | grep -c 'observing\|监测'` stdout 数字段（多观察者并行挂载各自正常）
+band      parallel_observers 多观察者可并行（无锁冲突、各自事件流）
+invoke    `grep -n 'SL_GLOBAL_DIR\|events.jsonl\|heavy-op/token\|_sl_acquire' plugin/scripts/session-liveness.sh`
+control   两观察者盯同一 pane 并行 ⇒ 都正常（AC2）；目标零写入（AC3）
+resume    去共享与去锁分步提交，任一步完成即写盘
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-06T19:5xZ
-changed: 管理者自我更正撤回锁分域 premise（archguard 105 事件已监视，单持有者+共享文件设计正确），
-任务从「锁分域修复」缩窄为「ad-arm1 配置缺失」；锁代码不修改。原派发的 agent 已停（worktree 零改动）。
+at: 2026-08-06T13:0xZ
+changed: 人裁定重写（替代被撤回前提的任务）——去掉共享事件文件 + 彻底去掉互斥锁。核心论证：观测拓扑
+是树、只读天然不排他、共享文件严格劣于独立流、锁的唯一理由（保护共享文件）随之消失。AC20 单飞前提
+是错的（管理者早期会话引入，非外层/内层的锅）。四条危害核实（启动顺序/自生缺陷/命运共享/无界增长）。
