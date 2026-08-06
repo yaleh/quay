@@ -5372,3 +5372,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **complete-delivery-surface fan-in 完成**（merge task/gap-complete-delivery-surface...，9 文件 551 行）：六类交付面活文档（SPEC §4/§5/§6 机读 `l1-category` 标注）+ `l1-delivery-surface-check.ts`（六类逐类解析交付物/归属任务，6/6）；接入 quay-init 派生铺设集 + post-laydown invoke。AC1–AC5 全勾（scoped 6/6，task-contract no violations）。留 ready。在飞清零。
 - **能力目录修复（merge 冲突暴露的真实静态检查回归）**：agent 只加了 2 条声明（l1-delivery + trend-check），但今日合并任务累积 19 个脚本未声明 ⇒ `capability-catalog.sh` FAIL (AC1c)。主检出补全 19 条（每脚本按头部注释写 question），merge 冲突后保留 19 + agent 的 l1-delivery 声明 ⇒ **125/125 declared, 0 unclassified, EXIT 0**（`0fe56211` + merge 内 resolve）。
 - 套件 green。在飞 0/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T19:1xZ（内层，complete-delivery-surface fan-in 后首派：1/5）
+
+- **complete-delivery-surface fan-in 完成**（前 tick，本 tick 复核记录）：六类 spec + L1 check 已并 + scoped 6/6 绿；capability-catalog 125/125。在飞清零。
+- **pool 复核**：pool 8 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（5 候选带宽 plugin/scripts/、plugin/test/ 目录 touch 串行互撞）。
+- **派发 1/5**：`gap-delivery-surface-grows-but-target-freezes-no-upgrade`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
