@@ -67,6 +67,34 @@ test("parseCandidate: type defaults to 'execution' when unstated; learning detec
   assert.equal(parseCandidate("c", "type: learning-experiment\n## Touches\n- a.js").type, "learning-experiment");
 });
 
+// ── gap-experiment-legacy-reclaim-and-touches-heuristic AC3 ─────────────────────────────────────
+// A charter WITHOUT a `## Touches` section + a repoRoot gets a MECHANICAL derived hint from body
+// prose (derive-touches-heuristic.ts), so the scheduler can batch it instead of conservative-
+// serializing it. The hint is marked `derived: true` and `hasSection` becomes true ONLY when at
+// least one path-shaped token is extracted; a charter with no path-shaped tokens stays conservative.
+test("parseCandidate: derives mechanical touches when ## Touches is missing and repoRoot is provided", () => {
+  const c = parseCandidate(
+    "no-touches",
+    "**type:** execution\n## Proposal\nFix the bug in `plugin/scripts/foo.ts` and update `docs/bar.md`.",
+    REPO_ROOT,
+  );
+  assert.equal(c.touches.hasSection, true, "derived globs make hasSection usable");
+  assert.equal(c.touches.derived, true, "derived hint is labeled auto-derived");
+  assert.ok(c.touches.globs.includes("plugin/scripts/foo.ts"), "path-shaped token from prose is extracted");
+  assert.ok(c.touches.globs.includes("docs/bar.md"), "path-shaped token from prose is extracted");
+});
+
+test("parseCandidate: no repoRoot (or no path-shaped tokens) keeps the conservative no-declaration path", () => {
+  // 2-arg call (no repoRoot) — byte-unchanged legacy behavior.
+  const noRoot = parseCandidate("c", "**type:** execution\nFix `plugin/scripts/foo.ts` here.");
+  assert.equal(noRoot.touches.hasSection, false);
+  assert.equal(noRoot.touches.derived, undefined);
+  // repoRoot but no path-shaped tokens → stays conservative.
+  const noPaths = parseCandidate("c", "**type:** execution\nImprove the flow and fix the bug.", REPO_ROOT);
+  assert.equal(noPaths.touches.hasSection, false, "no path-shaped tokens → no derivation");
+  assert.equal(noPaths.touches.derived, undefined);
+});
+
 // ── DIR-116: value-type extraction ──────────────────────────────────────────────────────────────
 test("parseCandidate: value-type defaults to capability-growth when unstated (backward-compat)", () => {
   const c = parseCandidate("c", "**type:** execution\n## Touches\n- a.js");
