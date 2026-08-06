@@ -6812,3 +6812,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **早前 verify-1 "断言失败"根因**：resource-gate.test.mjs 在 /tmp/quay-intg2 缺 gitignore 的 `.quay/config.yml`
   → `_findRepoRoot` 抛错（文件级失败，非代码缺陷）。**已修复**：symlink config 进临时 worktree。
   **教训**：temp worktree 的 fan-in scoped verify 必须带 `.quay/config.yml`（gitignored，不随 worktree add 检出）。
+
+### tick 2026-08-06T06:5xZ（零派发：唯一推荐 DIR-124 为 human-steered）
+
+- 零派发：cap=2（WAIT）下 slot-refill 仅推荐 DIR-124（human-steered 不自动派）。其余候选仍为陈旧/冲突/主题删除。
+- 外层 suite 卡在 triage（进程 0% CPU，已 30+min），外层正翻「3 real defects from full-suite triage」；
+  no-post-merge 在飞（8 脏文件，工作推进中）。池 16 无需补晋。
