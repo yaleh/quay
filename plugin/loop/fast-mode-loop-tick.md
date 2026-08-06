@@ -724,6 +724,25 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」有测量。心跳跑 `--push` = 测 + 领先即推；
 push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试（fail-closed，绝不 force）。
 
+### 4b. 跨机验证心跳（`cross-machine-verify.sh`，兜底必跑——`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`）
+
+**每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/cross-machine-verify.sh --verify --root "$(pwd)"`——
+它问「有没有本机**没参与**的合并还没被跨机验证？」。有就（按最旧优先）跑**快闸**（冷启动/冒烟级，默认
+`laydown-set-check.sh`——完整套件 38 分钟跑不进 `d` 预算）并把闸结论写成 git note（`refs/notes/quay-cmv-*`，
+随包机制，推 origin 共享）。**不依赖任何完成事件**——这是双触发源（`slot-refill` 模式）的**兜底触发源**：
+外层 3b 的 land 收口在**同一轮内**调 `--record-merge`（事件驱动，加速），本步保证「即使事件驱动漏了 /
+合并是在别的机器落的 / 本机悄悄落后」，每 tick 也会把该验的合并验了。**内层与外层同挂**——两机各层 tick
+都是心跳（幂等）。
+
+**结构约束（AC4，不是冗余）**：`--verify` 跳过 `merger_machine == 本机` 的合并——**亲代环境掩盖亲代缺陷**，
+做验证的环境不能正是产生缺陷的环境。无人记录的合并（`--record-merge` 漏了）被标 unattributed、**不验**（无法
+证明非参与 = fail-closed），绝不假设已验证。
+
+**检测延迟机械可读（AC2/AC5）**：`bash plugin/scripts/cross-machine-verify.sh --report --json --root "$(pwd)"`
+输出 `post_merge_latency_h`（合并提交时间 → 闸结论时间，pending 时 = 当前已等时长）与
+`verifier_machine` / `merger_machine`（`verifier_is_participant` band 0 = 验证方非参与方）。这就是 `d` 的测量，
+不再靠事后回忆。
+
 ### 5. 写回状态
 
 更新队列文件：已完成 / 在飞（含 worktree 路径和派发时刻）/ 待执行 / 计量表 / 本 tick 做了什么。

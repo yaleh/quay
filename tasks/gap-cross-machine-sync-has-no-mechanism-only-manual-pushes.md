@@ -69,6 +69,12 @@ extra:
 在所有既有检查之外、是产品之外的第二个调度源、且结构性不可移植。
 机制必须活在 `plugin/loop/` + `plugin/scripts/` 里，随包走、走升级通道、被铺设集覆盖。
 
+**交叉标注（跨机验证复用同一双触发源模式）**：`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`
+用**完全相同的双触发源形态**做跨机验证——事件驱动（land 收口同一轮内 `cross-machine-verify.sh --record-merge`，
+即本条的 3b 事件驱动推送同一位）＋ tick 心跳兜底（每 tick 无条件 `--verify`，即本条的 4a/3c 心跳同一位），
+共享状态走 git notes（`refs/notes/quay-cmv-*`）而非文件。两条机制同根（跨机机制没有「只在一台机器上生效」），
+实现细节见那条任务。
+
 具体接哪个钩子、push 失败如何重试/降级、是否复用 `periodic-push-backup.sh` 本体，
 **留给执行时决定**（它已经参数化，大概率不用改代码，缺的是调用点）。
 
