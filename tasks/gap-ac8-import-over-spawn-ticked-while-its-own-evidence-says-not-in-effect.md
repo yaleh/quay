@@ -84,6 +84,10 @@ extra:
 measure pure_import_tests = `for f in plugin/scripts/*.ts; do b=$(basename "$f" .ts); t="plugin/test/$b.test.mjs"; [ -f "$t" ] || continue; grep -qE "^import .*from .*scripts/" "$t" && ! grep -qE "spawnSync|execSync" "$t" && echo "$t"; done | wc -l` stdout 的数字段（当前基线 3）
 measure spawn_ratio_ts = `for f in plugin/scripts/*.ts; do b=$(basename "$f" .ts); t="plugin/test/$b.test.mjs"; [ -f "$t" ] || continue; grep -qE "spawnSync|execFileSync|execSync" "$t" && echo x; done | wc -l` stdout 的数字段（当前基线 35，分母 40）
 band pure_import_tests = 大于 3（必须真实上升，不接受"核过数"作为达成）
+measure surface_entrypoints = `grep -ohE "plugin/scripts/[a-zA-Z0-9._-]+\.(sh|ts|mjs)" plugin/loop/*.md plugin/skills/*/SKILL.md orchestration/*loop-tick.md | sed 's|.*/||' | sort -u | wc -l` stdout 的数字段（当前基线 40）
+band surface_entrypoints = 6（SPEC-instruments-behind-one-entry AC12 的分组方案，人 2026-08-06 裁定）
+measure sh_entrypoints_on_surface = `grep -ohE "plugin/scripts/[a-zA-Z0-9._-]+\.sh" plugin/loop/*.md plugin/skills/*/SKILL.md orchestration/*loop-tick.md | sed 's|.*/||' | sort -u | wc -l` stdout 的数字段（当前基线 21）
+band sh_entrypoints_on_surface = 0（人原话：让 manager/outer 看到这些 .sh 就是风险）
 invariant 一条 AC 的证据文本自承未生效时，该 AC 不得被勾为完成；证据描述的是现状，不是成果
 invoke `bash -c 'for f in plugin/scripts/*.ts; do b=$(basename "$f" .ts); t="plugin/test/$b.test.mjs"; [ -f "$t" ] || continue; grep -qE "^import .*from .*scripts/" "$t" && ! grep -qE "spawnSync|execSync" "$t" && echo "$t"; done | wc -l'`
 control 把一个当前 spawn 型测试改成 import 型 ⇒ pure_import_tests 必须 +1；若不变，说明 measure 的判定口径错了，需先修 measure
@@ -94,8 +98,14 @@ resume 若中断，先跑 measure 读当前 import/spawn 比例，不要相信�
 
 - [ ] AC1: **比例真实下降**——`pure_import_tests` 从 3 上升，`spawn_ratio_ts` 从 35/40 下降，
       贴出改前/改后实测；**不接受"核过数"作为达成**
-- [ ] AC2: **先集成再转测试**（遵循 SPEC 的 AC9 因果）——任务体记录集成入口的形态与落地证据；
-      若跳过集成直接改测试，需说明为什么 AC9 的因果在此不适用
+- [ ] AC2: **先集成再转测试**（遵循 SPEC 的 AC9 因果）。**分组方案人已裁定「按该方案推进」
+      （2026-08-06），写在 `SPEC-instruments-behind-one-entry.md` 的 AC12**——40 个操作面
+      按「回答什么问题」的自然边界收进 **6 个入口**：
+      `quay-session`（会话与拓扑 9）· `quay-deliver`（送达与抢占 6）· `quay-dispatch`（派发与并发 7）·
+      `quay-branch`（分支与认领 7）· `quay-suite`（套件与门禁 5）· `quay-check`（任务与文档校验 7）。
+      **判据：tick 文档 + skills 里的脚本引用数从 40 降到 6**（`surface_entrypoints` measure）。
+      `.sh` 按调用点迁移——进入口的改写为可注入 `.ts` 模块，132 个内部件不改写只是不暴露，
+      真需 bash 的保留为入口内部薄实现且不独立交付 ⇒ **`.sh` 作为独立入口 21 → 0**
 - [ ] AC3: **负控制（承重条）**——按 `control` 把一个 spawn 型测试转成 import 型，
       `pure_import_tests` 必须 +1；若不变则 measure 口径错，须先修 measure 再谈达成
 - [ ] AC4: **保住端到端覆盖**（复用原任务 AC9 的负控制）——转 import 不得抹掉该工具唯一的

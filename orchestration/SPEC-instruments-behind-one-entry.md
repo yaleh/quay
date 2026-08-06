@@ -139,6 +139,79 @@ task_time_breakdown(taskId) → { waitingPct, workingPct, fullSuiteRuns, gaps[] 
 **都不要用套件墙钟,σ=297.6s 会把两者都吃掉。**
 
 
+## AC12(2026-08-06 人裁定「按该方案推进」):第二步的**具体分组方案**——40 → 6
+
+**背景**:AC3 定了「入口是一个工具,不是 36 个」,但**没给分组**。
+2026-08-06 管理者按人的追问「现在有多少个分散的 .sh .ts?应当如何集成?」实测并提出分组,
+人裁定**同意,按该方案推进**。
+
+### 实测基线(2026-08-06,`plugin/loop/*.md` + `plugin/skills/*/SKILL.md` + `orchestration/*loop-tick.md`)
+
+| 项 | 值 |
+|---|---|
+| **暴露给三层的操作面**(去重) | **40**(`.sh` 21 / `.ts` 18 / `.mjs` 1) |
+| ├ outer 直接调用 | 24 |
+| ├ inner 直接调用 | 22 |
+| └ manager 直接调用 | 3 |
+| 交付脚本总数(scripts + gate-scripts) | **172** |
+| **从不被直接调用的内部件** | **132(77%)** |
+
+**操作面里已有的冗余(实测)**:`claim-task` 与 `slot-refill` **各有 `.sh`+`.ts` 两个入口暴露同一能力**;
+语义重叠另有四组——会话观测有 `session-liveness.sh` / `-mount.sh` / `outer-liveness.sh` /
+`monitor-mount-check.sh` **四个**,拓扑有建/查两个,措辞漂移有 `audit`/`check` 两个。
+
+### 分组:按「回答什么问题」的自然边界,40 个落进 6 组
+
+| 组 | 入口 | 成员(操作面部分) | 数 |
+|---|---|---|---|
+| ① 会话与拓扑 | `quay-session` | session-liveness · -mount · outer-liveness · monitor-mount-check · topology-check · quay-topology · session-bootstrap · inner-session-check · quay-launch | 9 |
+| ② 送达与抢占 | `quay-deliver` | send-keys-reliable · supervisor-deliver · supervisor-preempt · supervisor-bus-identity · inner-blocked-signal · inner-forensics | 6 |
+| ③ 派发与并发 | `quay-dispatch` | cap-from-gate · slot-refill(×2) · ready-pool-check · concurrent-batch-scheduler · touches-orthogonality-check · resource-gate | 7 |
+| ④ 分支与认领 | `quay-branch` | claim-task(×2) · release-task · fork-baseline · integration-branch-model · integration-batch-merge · sync-lag-check | 7 |
+| ⑤ 套件与门禁 | `quay-suite` | full-suite-runner · suite-state-trigger · laydown-set-check · loop-driver-check · fast-mode-telemetry | 5 |
+| ⑥ 任务与文档校验 | `quay-check` | task-contract-check · task-schema-check · task-status-drift-check · self-report-vocab-*(×2) · strategic-doc-staleness-check · read-probe-spec | 7 |
+
+**分组不是硬分的**——是各脚本**自述问题**的自然边界(「会话活着吗 / 消息送到了吗 / 能派几个 /
+从哪分叉 / 套件绿吗 / 这个任务合规吗」),取自 `capability-catalog.sh` 的声明。
+
+### 为什么是 6,不是 1,也不是 10
+
+- **不是 1**:单一入口 `quay-tool <name>` 只是把 40 个名字挪进一个壳,
+  agent 仍要记 40 个子命令——**操作面没有真正变小**。
+- **不是 10**:等于没分。
+- **是 6**:对应 **6 个独立的失效域**,且**每层只需记住自己那几个**
+  (outer 主要 ③⑤,inner 主要 ②⑥,manager 主要 ①)——这才兑现「看到的面更小」。
+  3 组会把「会话观测」与「消息送达」混为一谈,而**今晚(2026-08-06)的事故证明这两者的失效模式完全不同**
+  (session-liveness 恒报 alive=0 是观测盲;supervisor-deliver 的 --root 挑错 transcript 是送达盲)。
+
+### `.sh` 的处理:不逐个改写,**按调用点迁移**
+
+| 类别 | 处理 |
+|---|---|
+| 进 6 个入口的 | 改写为 `.ts` 模块(**可注入 exec**)——这是 AC9「import 取代 spawn」的前提 |
+| 内部件(132 个) | **不改写,直接不暴露**——打进 bundle 或排除出交付物 |
+| 真正需要 bash 的少数 | 保留为入口**内部**的薄实现,**不作为独立文件交付** |
+
+⇒ **`.sh` 作为独立入口从 21 降到 0**。人 2026-08-06 的原话:
+**「让 manager / outer 看到这些 .sh 就是风险」**——集成后它们看不到任何 `.sh`。
+
+### 收益链(每一环可测,不是推断)
+
+| 收益 | 判据 | 当前 → 目标 |
+|---|---|---|
+| 操作面缩小 | tick 文档/skills 里的脚本引用数 | **40 → 6** |
+| 测试转 import | 纯 import 零副作用测试数 | **3 → 显著上升** |
+| 峰值内存 | 每 spawn 省 ~42MB node 基线(本规格实测) | 8 lane × 42MB ≈ **336MB** |
+| 威胁面 | 可被绕过的独立入口数 | **172 → 6** |
+| 升级校验成本 | `verify-installed-executables` 逐字节文件数 | **172 → 常数** |
+
+**因果方向由 AC9 钉死**:集成是前提,import 取代 spawn 是结果,**不是并列项**。
+
+**落地归属**:本方案是 `tasks/gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect.md`
+AC2「先集成再转测试」的**具体形态**;`.ts` bundle 与 `.sh` 交付形态两条姊妹任务同批处理。
+
+---
+
 ## AC8(2026-08-04 人补):自用仪器也要集成,只是入口形态不同
 
 **人的原话**:「对于这些本项目用的仪器,即使不进 mcp,也还是应当适当集成。」
