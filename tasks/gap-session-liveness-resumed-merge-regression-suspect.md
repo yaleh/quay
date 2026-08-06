@@ -38,10 +38,10 @@ RESUMED/busy 转换逻辑——**该逻辑可能在合并中被 A/B 版本拼坏
 
 ## Acceptance Criteria
 
-- [ ] AC1: 判别完成——脚本 RESUMED 逻辑回归 vs 测试时序 flake（读代码 + 受控构造）
-- [ ] AC2: 若是脚本回归——busy→RESUMED 转换修复（隔离跑 G 绿）
-- [ ] AC3: 若是测试 flake——G 标 KNOWN-LOAD-SENSITIVE（文档化，不误报）
-- [ ] AC4: 与 da065182 合并回归族（arity/title/loop-driver/cap-from-gate）交叉标注
+- [x] AC1: 判别完成——脚本 RESUMED 逻辑回归 vs 测试时序 flake（读代码 + 受控构造）
+- [x] AC2: 若是脚本回归——busy→RESUMED 转换修复（隔离跑 G 绿） — N/A：判别证明非脚本回归（byte-equivalent 证据），修复分支不适用
+- [x] AC3: 若是测试 flake——G 标 KNOWN-LOAD-SENSITIVE（文档化，不误报）
+- [x] AC4: 与 da065182 合并回归族（arity/title/loop-driver/cap-from-gate）交叉标注
 
 ## Touches
 
