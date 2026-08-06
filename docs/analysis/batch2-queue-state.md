@@ -5314,3 +5314,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **send-keys-welcome-screen fan-in 完成**（merge task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails）：修复本体已在 master `a75dde7e`（2026-08-05），本次是复核 + 新鲜 scoped 证据（28/28 exit 0，AC1/2/3 重新确认）。标 **needs-human**：AC4 需 kill archguard outer → watchdog 重拉 → drive 成功的 live-loop 闭环实测，worktree 隔离下不可做，留外层。
 - **在飞 2/5**（full-suite-runner-red-pattern / session-liveness-token-counter）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T15:0xZ（内层，full-suite-runner fan-in 完成）
+
+- **full-suite-runner-red-pattern fan-in 完成**（merge task/gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red）：修复本体已在 master `41e7591f`（bare `/✖/` 从 FAILURE_PATTERNS 移除，只匹配结构化失败形态——vitest 通过测试自打 ✖ 不再假红），本次复核 + 新鲜 scoped 证据（24/24 exit 0，task-contract no violations）。AC1–AC4 全勾（AC3 vitest --maxWorkers doc fork 已写）。留 ready 待外层 closure。
+- **在飞 1/5**（session-liveness-token-counter）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
