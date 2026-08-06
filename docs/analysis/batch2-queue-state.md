@@ -5391,3 +5391,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 7 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（4 候选带宽 plugin/scripts/、plugin/test/、SPEC 文档 touch 串行互撞）。
 - **派发 1/5**：`gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T20:4xZ（内层，l2-continuous-health fan-in 完成 —— 在飞清零）
+
+- **l2-continuous-health fan-in 完成**（merge task/gap-l2-continuous-health...，2 新文件 + 交叉标注）：`dead-loop-check.sh`——L2 持续健康判据「循环在转」（transcript user 消息 + git 提交最近 N 分钟，都无 = dead-loop，**与 backlog 空无关**——队列空 vs 没人驱动从此可区分）；入 quay-init 派生铺设集 + capability-catalog 声明（126/126）。AC1–AC6 全勾（scoped 11/11，task-contract no violations）。**AC10 记账 +1**（管理者 pre-friction 首计）。留 ready。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
