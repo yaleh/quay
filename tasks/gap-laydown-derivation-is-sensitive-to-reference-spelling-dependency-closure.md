@@ -77,18 +77,53 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **(b) 依赖闭包**——已铺脚本内 `SCRIPT_DIR`/同目录引用的脚本必须也在铺设集；裸文件名引用被
+- [x] AC1: **(b) 依赖闭包**——已铺脚本内 `SCRIPT_DIR`/同目录引用的脚本必须也在铺设集；裸文件名引用被
       （内容级）抓到（send-keys-reliable.sh:41 为回归控制：补齐后不再缺 transcript-delivery-check.ts）
-- [ ] AC2: **(a) 派生正则补裸文件名**——plugin/scripts/ 下裸文件名做存在性解析；文档写裸文件名不再
+      ——`derive_loop_scripts` 的 (d) closure 把 `${SCRIPT_DIR}/<name>` 兄弟依赖拉到 fixpoint；实测
+      `--loop` 铺出 `transcript-delivery-check.ts` + `cap-from-gate.ts`；负向（删掉前者 ⇒ exit 2
+      `dependency-not-landed`）见 `plugin/test/quay-init-laydown-closure.test.mjs`
+- [x] AC2: **(a) 派生正则补裸文件名**——plugin/scripts/ 下裸文件名做存在性解析；文档写裸文件名不再
       静默漏铺
-- [ ] AC3: **verify-referenced-landed 盲点补齐**——referenced 集派生从「仅路径前缀」扩展为「前缀 +
+      ——`bare_resolved_scripts`（mechanism corpus = cold-start + tick docs）存在性解析；AC2 正测：cold-start
+      裸引用新脚本 ⇒ 铺出 + verify OK
+- [x] AC3: **verify-referenced-landed 盲点补齐**——referenced 集派生从「仅路径前缀」扩展为「前缀 +
       裸文件名解析」，检查器不再与被检查者共享盲点（该缺陷类别从此可被发现）
-- [ ] AC4: **send-keys-reliable.sh fail-loud**——CHECKER 缺失时启动即 fail-loud（exit 1 + 报错），
+      ——`verify_referenced_landed` 的 refs 用同一个 `bare_resolved_scripts`；负向：`transcript-delivery-check.ts`
+      缺铺 ⇒ `FAIL (dependency-not-landed)`（不再静默）
+- [x] AC4: **send-keys-reliable.sh fail-loud**——CHECKER 缺失时启动即 fail-loud（exit 1 + 报错），
       不再静默赋值
-- [ ] AC5: **真实使用**——meta-cc/archguard 已手工补齐（cmp 一致 + usage 正常）为回归基；判定机制修复
+      ——启动 `[ -f "$CHECKER" ] || exit 1`；AC4 负测：缺失 CHECKER ⇒ `exit 1` + 命名错误
+- [x] AC5: **真实使用**——meta-cc/archguard 已手工补齐（cmp 一致 + usage 正常）为回归基；判定机制修复
       后能机械抓到该类（实测输出贴任务体）
-- [ ] AC6: **AC10 诚实记账**——post-friction（被 meta-cc 撞出），不计分，计数仍 4（记录不勾）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      ——机制修复后机械抓到：删掉 `transcript-delivery-check.ts` ⇒ `--loop` FAIL
+      `FAIL (dependency-not-landed): .../send-keys-reliable.sh references plugin/scripts/transcript-delivery-check.ts but it is not laid down`（详见下方 Execute evidence）
+- [x] AC6: **AC10 诚实记账**——post-friction（被 meta-cc 撞出），不计分，计数仍 4（记录不勾）
+      ——本条 post-friction（meta-cc 撞出），AC10 不计分，计数仍 4；记录见
+      `tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md`（AC5 记账引用）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      ——`plugin/test/quay-init-laydown-closure.test.mjs` 文件头 `// @test-group governance` + `node:test`
+
+## Execute evidence
+
+- **Contract invoke**（`grep -n 'transcript-delivery-check' ...`）：
+  ```
+  plugin/scripts/send-keys-reliable.sh:41:CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"
+  plugin/scripts/quay-init.sh:675:#       `CHECKER="${SCRIPT_DIR}/transcript-delivery-check.ts"` ...
+  ```
+- **依赖闭包 measure = 0**（真实 `--loop` 安装）：
+  ```
+  verify-installed-executables: OK — every installed executable is byte-identical to its source (checked 37)
+  verify-referenced-landed: OK (every referenced file is landed or declared self-create/reference-doc; every laid-down script's same-dir dependency is landed)
+  quay-init complete.
+  ```
+- **AC5 机械抓到（负向控制）**——plugin copy 删掉 `transcript-delivery-check.ts`：
+  ```
+  FAIL (dependency-not-landed): .../plugin/scripts/inner-session-check.sh references plugin/scripts/transcript-delivery-check.ts but it is not laid down
+  FAIL (dependency-not-landed): .../plugin/scripts/send-keys-reliable.sh references plugin/scripts/transcript-delivery-check.ts but it is not laid down
+  ERROR: quay-init --loop would ship skills/tick docs that reference files it does not lay down (referenced ⊆ landed violated).
+  ```
+- **scoped suite**：`scripts/test.sh --for-task gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure --allow-thin`
+  → `78 pass / 0 fail / 0 cancelled`；新 governance 测试 5/5 过。
 
 ## Definition of Done
 
@@ -102,8 +137,10 @@ extra:
 - tasks/gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure.md
 - plugin/scripts/quay-init.sh（铺设派生正则补裸文件名 + verify_referenced_landed 盲点 + 依赖闭包检查）
 - plugin/scripts/send-keys-reliable.sh（fail-loud 前置）
-- plugin/test/quay-init-loop.test.mjs（AC1/AC2/AC3 fixture）
+- plugin/test/quay-init-loop.test.mjs（AC1/AC2/AC3 fixture：expectedScripts 补 transcript-delivery-check.ts + cap-from-gate.ts）
+- plugin/test/quay-init-laydown-closure.test.mjs（新 governance 测试文件：AC1/AC2/AC3/AC4）
 - plugin/skills/cold-start/SKILL.md（line 49/132 裸文件名引用可留——修复后应被抓出并显式标注）
+- plugin/skills/init/SKILL.md（示例表移除已退役 send-keys-verified.sh）
 - tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（AC6 记账引用）
 
 ## Contract
