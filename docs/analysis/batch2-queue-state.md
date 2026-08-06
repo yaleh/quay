@@ -6794,3 +6794,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   production gate 显示两者都与在飞 no-post-merge 触摸冲突（共享 orchestrator-loop-tick.md / quay-init.sh）→ **本 tick 不派发，下 tick 再评估**。
 - **在飞 1/5**（no-post-merge）。后台 scoped verify（bt2ha1tfy，concurrency+split-batch+send-keys 三连）运行中，
   与在飞 no-post-merge agent 均不冲突。外层 suite 状态 running（外层契约修复后重跑）。
+
+### tick 2026-08-06T06:0xZ（零派发：cap 落 WAIT=2，全部候选被排除）
+
+- **cap=2（WAIT 档）**：外层全量 suite（14:21 起，~38min）加载 4 核，avg300 高 → cap 从 GO=5 落 WAIT=2。
+- **零派发**：slot-refill 4 个推荐全排除——DIR-124（human-steered）、concurrency-revert + send-keys（**刚 fan-in 待外层翻 done**，
+  taskWorkLanded 缺口第三次点名）、token-measures-wait（主题 heavy-op-token 已删）。在飞 1/2（no-post-merge）。
+  green-verdict + shipped-verifiers 仍与在飞冲突，下 tick 再评估。
+- **池 16 ≥ floor 8（cap=2×4）**，dispatchable 6 ≥ cap → 无需补晋。
+- **verify 重跑（bmdd861sd）**：concurrency scoped 仍在跑（外层 suite 负载下慢）。此前 bt2ha1tfy 的 verify-1 断言失败
+  疑似 KNOWN-LOAD-SENSITIVE runner-grouping 被并发放大（agent 已文档化），isolated 重跑待结果。
