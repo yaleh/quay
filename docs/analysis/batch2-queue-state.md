@@ -5696,3 +5696,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （不重开；dispatch-evaluated 的 AC3 完成即回填 40s 实测真，保留；本任务补「心跳必跑 slot-refill」）。
 - **驱动回填**（数据：recommended 两候选 ready + 触摸可解析 + 与在飞 disjoint 机制判）：
   gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red / gap-productize-the-manager-layer。
+
+### tick 2026-08-06T02:3xZ（内层 cron，轻触）
+
+- 在飞 1/3（session-liveness-hashes 53m，外层验证 real=1 stale=0——非假 OVER90）。无 fan-in、无新派发。
+- 外层：slot-refill drive 送达验证 + verification-round jsonl 缺口回填 + filed。
+- 套件 green、无 stop、无 block、Monitor 绿。
