@@ -5096,3 +5096,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **residue-check 合并**（`793f0204`）：`pane-state-classify.ts --check-residue` 三态（empty / real-unsubmitted-text / ghost-suggestion-only），故障 6 判据机械化（C-u 清除行为判，非静态文本），有界探针 + fail-loud unknown；三态真实夹具 + AC4 双向负控制 + AC5 transcript 交叉验证。AC1–AC7 勾（17/17 测试）。已并已清。
 - **在飞 3/5**（DIR-124 / runtime-nowhere-safe / value-prioritization）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `2d3796fd`。
+
+### tick 2026-08-06T04:1xZ（内层，value-prioritization fan-in 完成）
+
+- **value-prioritization 合并**（`16e8dacd`）：`ready-pool-check.ts` 加**相关性信号**（strategicTrace 机械 grep / unblocks parent-children / costTouches parseTouches）+ `--top N` 优先级查询（当前 todo 价值最高 N 条 + 机械理由）。AC6 实证：DIR-119-D（unblocks 4）越过 gap-quay-has-never-self-hosted（unblocks 3）——相关性越过 kind 平局，非 gap>DIR 机械答案。AC1–AC7 勾（26/26）。已并已清。
+- **在飞 2/5**（DIR-124 / runtime-nowhere-safe）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
