@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-06T18:48:55.194Z",
+  "generatedAt": "2026-08-06T21:49:14.035Z",
   "since": null,
   "tasks": [
     {
@@ -670,14 +670,21 @@
       "outcome": "done"
     }
   ],
-  "inProgress": [],
+  "inProgress": [
+    {
+      "taskId": "gap-session-liveness-session-pid-blind-to-claude-as-pane-process",
+      "runId": "fm-gap-session-liveness-session-pid-blind-to-claude-as-pane-process-1786051655647-m7iuvd",
+      "startedAtMs": 1786051655661,
+      "startedAtMsUnreliable": true
+    }
+  ],
   "meanMinutes": 66.68858489583332,
   "medianMinutes": 50.484475,
-  "tasksPerHour": 1.2270467269219572,
+  "tasksPerHour": 1.1926817174057662,
   "serialEquivalentPerHour": 0.8997042011570526,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-06T18:48:41.821Z",
-  "windowHours": 104.31550583333333,
+  "windowEnd": "2026-08-06T21:49:02.220Z",
+  "windowHours": 107.32117222222222,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1276,6 +1283,14 @@
   ],
   "unreliable": [
     {
+      "taskId": "gap-chart2-s2-test-assertions-stale-after-delivery-c-d",
+      "runId": "fm-gap-chart2-s2-test-assertions-stale-after-delivery-c-d-1786051058797-lkui4j",
+      "minutes": 31.041233333333334,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786051058808
+    },
+    {
       "taskId": "gap-productize-the-manager-layer",
       "runId": "fm-gap-productize-the-manager-layer-1785984338411-2eurri",
       "minutes": 118.91688333333333,
@@ -1293,5 +1308,5 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 0
+  "realInFlight": 1
 }
