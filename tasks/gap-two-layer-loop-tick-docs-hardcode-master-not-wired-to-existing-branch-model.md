@@ -49,15 +49,37 @@ orchestration/orchestrator-loop-tick.md     2 处硬编码 master（workspace �
 
 ## Contract
 
+**判据 vs 现实修正（管理者，2026-08-06 第二轮 tick，使用视角提问自查发现，非推测）**：
+外层已裁定采纳 AC6——共享文件（`plugin/loop/` 下两个）保留 `master` 作为**可配置默认值**，
+不是全部清零。原来写的 `band master_refs = 0` 对整个三文件求和，**会在 AC6 正确实现之后
+仍然非 0**（因为默认值字符串 `master` 依然会以字面量出现在共享文件里，例如
+`branch: master` 这样的默认配置行）——**这个判据在 AC6 之后会拒绝一个正确的实现**，
+是本任务自己开工前就自查到的一个「判据 vs 现实」缺口，现修正为分两条度量：
+
 ```
-measure master_refs = `grep -c "master" plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/orchestrator-loop-tick.md | awk -F: '{s+=$2} END{print s+0}'`
-band master_refs = 0
-invariant 两层循环的 Build（fork）/Land（合并收口）阶段不对 `master` 分支做任何写操作；
-  工作分支为 develop（Build fork 起点）→ task/<id>（Build）→ integration（Land 收口）→
-  develop（outer 批量 fast-forward，按已有 SPEC-branching-model-integration-branch-2026-08-05.md 设计）
-invoke `grep -n "master" plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/orchestrator-loop-tick.md`
-control 往任一 tick 文档手工加回一行含字面量 `master` 的分支操作指令 ⇒ measure 必须非 0（探测器能报出新引入的硬编码，不是"曾经查过一次"）
-resume 若切换中断，先跑 measure 核对当前残留处数，再继续未完成的文件；不要从头假设
+measure master_refs_local = `grep -c "master" orchestration/orchestrator-loop-tick.md`
+band master_refs_local = 0
+  （本仓非共享副本，AC6 不适用——必须完全切到字面量 develop，允许 0 容忍）
+
+measure master_hardcoded_ops_shared = 共享两文件（plugin/loop/fast-mode-loop-tick.md、
+  plugin/loop/orchestrator-loop-tick.md）里，**把 master 硬编码进具体分支操作指令**
+  （如 `git checkout master`/`git merge ... master`/`fork from master` 这类操作性语句，
+  而不是"默认值＝master"这类配置说明性语句）的行数——精确 grep 模式留给执行时定
+  （区分"操作性硬编码"与"默认值声明"需要看上下文，不是纯字符串匹配能可靠做到的）
+band master_hardcoded_ops_shared = 0
+  （容许 master 作为默认值的字面量出现，不容许它被直接硬编码进操作指令）
+
+invariant 两层循环的 Build（fork）/Land（合并收口）阶段不对 `master` 分支做任何写操作
+  （除非工作分支配置显式指向它，即未做 cutover 的下游项目的默认行为）；
+  quay 自己的工作分支为 develop（Build fork 起点）→ task/<id>（Build）→ integration
+  （Land 收口）→ develop（outer 批量 fast-forward，按已有
+  SPEC-branching-model-integration-branch-2026-08-05.md 设计）
+invoke `grep -n "master" orchestration/orchestrator-loop-tick.md`（本仓副本）；
+  共享文件的 invoke 命令由执行时按上面的"操作性 vs 声明性"区分标准编写
+control 往 `orchestration/orchestrator-loop-tick.md` 手工加回一行含字面量 `master` 的分支
+  操作指令 ⇒ `master_refs_local` 必须非 0；往共享文件加一行硬编码 `git checkout master`
+  的操作指令（不是默认值声明）⇒ `master_hardcoded_ops_shared` 必须非 0
+resume 若切换中断，先跑两条 measure 核对当前残留处数，再继续未完成的文件；不要从头假设
 ```
 
 ## Chosen mechanism
@@ -92,12 +114,14 @@ mcp_entry 路径形态错"同一形态的遗传丢失，只是这次丢的是"�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `measure master_refs` 从当前值降到 0（实跑贴出改前/改后两次输出）
+- [ ] AC1: `master_refs_local` 从当前值降到 0（`orchestration/orchestrator-loop-tick.md`，
+      实跑贴出改前/改后两次输出）；`master_hardcoded_ops_shared`（两个共享文件）同样降到 0
+      （允许 `master` 作为默认值字面量保留，只消灭"硬编码进操作指令"的用法）
 - [ ] AC2: 至少完整跑通一次真实的 task 生命周期（Build fork from develop → Land 合并到
       integration → outer fast-forward integration→develop），贴出实测的 `git log --oneline`
       片段证明分支确实按新模型走，而不是仅文档改了字但机制没被触发
-- [ ] AC3: 负控制——往某 tick 文档注入一行 `git checkout master`（或等价字面量），
-      `measure master_refs` 必须翻回非 0（证明探测器真的在测这件事，不是巧合归零）
+- [ ] AC3: 负控制——往某 tick 文档注入一行 `git checkout master`（或等价字面量）的**操作性**
+      指令，两条 measure 中对应的一条必须翻回非 0（证明探测器真的在测这件事，不是巧合归零）
 - [ ] AC4: `master` 分支的写保护——记录任务体一条机械或流程证据，证明"tick 触发的常规 dispatch
       不会写 master"（例如：grep 两层循环全部脚本对 `git push.*master`/`git merge.*master` 之类
       操作的直接调用点，确认唯一调用点在"人明确要求同步"路径上）
