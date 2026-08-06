@@ -176,7 +176,7 @@ bash plugin/scripts/loop-driver-check.sh
 1. `ls "$REPO_ROOT/.quay/loop-driver.jsonl"` 且 `wc -l` 有行——**注册表写过吗？**
 2. **注册表从没写过**（文件不存在或为空）→ 说明步骤 4 的**写注册表**那一步漏做了——不是缺 cron，
    是缺记录。回步骤 4 补上 `printf … >> loop-driver.jsonl` 那一行，再跑检查必须转 `LIVE`。
-3. **注册表确实写过**仍报 `STALLED`（例如上次会话把注册表 `rm -f` 清掉了）→ 这时才回步骤 4 重建 cron。
+3. **注册表确实写过**仍报 `STALLED`（例如上次会话把注册表 `rm -f` 清掉了）→ `rm -f <root>/.quay/loop-driver.jsonl` 清掉陈旧注册，再回步骤 4 补写。
 
 **直接重建 cron 而不先查注册表，会在每次冷启动都多加一行注册——正是本检查要抓的双触发**。
 （注：注册表是自述的，它只能数「装过几次」，不能证明那个 cron 现在还活着——这归
