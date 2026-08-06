@@ -230,10 +230,15 @@ copied out of the quay development tree):
   observation mechanism (`session-liveness.sh` — the ONE observer;
   `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-
   parameter), plus their transitive dependencies.
-- `vendor/quay/dist/quay.js` — the built runtime, laid into the target so its
-  `.quay/config.yml` `mcp_entry` points at a **project-local copy**, never at a
-  `quay-native` PATH symlink into the quay dev tree (the loop must keep working
-  even when that dev tree is gone).
+- `.quay/runtime/quay/quay.js` — the built Core runtime, laid into the target's
+  **`.quay/runtime/`** (quay's own namespace — never `vendor/`, which Go reserves,
+  nor a `dist/` segment) so its `.quay/config.yml` `mcp_entry` points at a
+  **project-local copy**, never at a `quay-native` PATH symlink into the quay dev
+  tree (the loop must keep working even when that dev tree is gone).
+  `.quay/runtime/` is gitignored by `quay-init` itself (gap-the-runtime-has-
+  nowhere-safe-to-land AC10) — the runtime is a generated artifact, not source, so
+  the 1.3MB bundle never trips a large-file pre-commit hook and never enters the
+  target's tracked set.
 
 ### Capability catalog — what each installed check answers
 

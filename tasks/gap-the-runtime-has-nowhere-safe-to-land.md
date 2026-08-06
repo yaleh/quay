@@ -117,32 +117,52 @@ resume 先量出真实阈值分布与可选方案的代价，再选方案
 
 ## Acceptance Criteria
 
-- [ ] AC1: **真实阈值调查**——常见大文件钩子的默认阈值（至少 `pre-commit` 的
+- [x] AC1: **真实阈值调查**——常见大文件钩子的默认阈值（至少 `pre-commit` 的
       `check-added-large-files`）与本产物大小的对照，写进任务体
-- [ ] AC2: **方案选择有理由**——从上面四条里择一（或提出第五条），
-      **写明代价与被放弃的原因**；若选方案 3，**必须先回答「不进 git 的文件算不算落地集合」**
-- [ ] AC3: **正向**——在装有默认阈值钩子的一次性目标上，
-      照文档跑完 ⇒ **提交成功、零人工补丁**（实跑输出贴任务体）
-- [ ] AC4: **钩子真在跑的负控制**——把阈值人为降到 1KB ⇒ **必须失败**。
-      **这条不过，AC3 不算数**——**一个没被证明会拒绝的钩子，与没装钩子不可区分**
-- [ ] AC5: **离线负控制**——若选方案 1，必须证明离线目标仍能冷启动，或**明确声明不支持离线**并写进 README
-- [ ] AC6: **与 G2 的关系明确**——本方案落地后，
-      G2 的「落地文件全部与产物字节相同」判据**怎么算**，写进任务体与 SPEC
-- [ ] AC8（**第 11 条**）: **异构目标构建负控制**——同一产物装进一个 **Node 目标**与一个 **Go 目标**，
-      **落地后两边各自的构建仍然通过**（`npm test` / `go build ./...` 实跑输出都贴出）。
-      **字节相同救不了这一条**：若运行时铺在 Go 会特殊解析的目录里，两边字节相同、Go 那边照样构建失败
-- [ ] AC9（**第 11 条**）: **保留目录负控制**——落地路径**不得**位于
-      `vendor` / `node_modules` / `target` / `build` / `dist` 任一之下；
-      检查按**路径字面量**判定并列出被排除的名字（**可扩充，不是穷举即完**）
-- [ ] AC10: **gitignore 处置**——`quay-init` 若依赖「运行时不进 git」，**必须自己写入那条 gitignore**；
-      **负控制：目标已有同名条目时不得重复写入或覆盖使用者的 gitignore**
-- [ ] AC11（**管理者 2026-08-04 02:10Z 实测缺口**）: **把 Go 那半边补进重装门槛 e2e**——
-      实测 `install-config-driven-e2e.test.mjs` 的断言关键词覆盖
-      `byte-identical` / `idempot` / `upgrade` / `finding` / `npm test`，**但没有 `go build`**。
-      **而 `vendor` 撞 Go 保留目录这条恰恰只有 Go 目标能暴露** ⇒
-      **本任务是它的所有者**（谁修谁证明自己让它变绿）：
-      A5 的 Go 半边由本任务补入 e2e 并证明其变绿
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group product`
+      （**实测**：`pre-commit` `check-added-large-files` 默认阈值 **500kB**
+      （[pre-commit-hooks README](https://github.com/pre-commit/pre-commit-hooks/blob/5c514f85/README.md#check-added-large-files)，`--maxkb` 默认 500）；
+      本产物 `plugin/vendor/quay/dist/quay.js` = **1,346,650 字节（≈1.35MB）**、
+      `plugin/vendor/quay-native/dist/quay-native.js` = **1,122,062 字节（≈1.12MB）**——
+      两者都超默认 500KB。钩子只扫「staged for addition」的文件——gitignore 掉就看不见。
+      ⇒ 见本任务 AC3/AC4 的自动化证明 `plugin/test/runtime-landing.test.mjs`）
+- [x] AC2: **方案选择有理由**——**选方案 3（运行时不进目标的 git，`.quay/runtime/` + `quay-init` 自己写 gitignore）**。
+      **G2 前置回答**：**非 git 文件仍是落地集合的一员**。落地集合 = `quay-init` 铺进目标工作区的全部文件
+      （无论 git 是否跟踪）；G2 的「落地文件全部与产物字节相同」是**对磁盘字节**逐字节比较，不是对 git 跟踪状态比较。
+      运行时仍从插件产物逐字节复制、A2 断言仍覆盖它——G2 成立，因为 G2 看的是磁盘字节。
+      被放弃的方案与代价：**1 安装时获取**——目标需网络与包管理器，离线冷启动断（AC5 负控制过不了）；
+      **2 拆分产物**——只是躲阈值，更低阈值项目仍撞，且增加加载复杂度；
+      **4 目标声明豁免**——就是人工补丁，G0 明令为 0（任务已排除）。
+      **不做**：不要求目标改钩子配置、不用 `.gitignore` 例外或 `--no-verify` 绕过（`--no-verify` 会连带跳过目标其它检查）。
+- [x] AC3: **正向**——在装有默认阈值钩子的一次性目标上，
+      照文档跑完 ⇒ **提交成功、零人工补丁**（实跑输出贴任务体）。
+      **实测**：`plugin/test/runtime-landing.test.mjs` AC3——500KB 钩子 + `quay-init --loop` + `git add -A && git commit`
+      ⇒ `COMMIT_EXIT=0`，且 `git diff --cached --name-only | grep -c runtime` = **0**（运行时被 gitignore 挡在暂存区外）。见下方「Invoke evidence」。
+- [x] AC4: **钩子真在跑的负控制**——把阈值人为降到 1KB ⇒ **必须失败**。
+      **实测**：同一目标阈值改 1KB 并 `git add -f .quay/runtime/`（强推过 gitignore）⇒ `COMMIT_EXIT=1`，
+      钩子点名 **`ERROR: File .quay/runtime/quay/quay.js is 1346650 bytes, which exceeds 1KB threshold`**。
+      外加 500KB 对照：强推运行时同样被拒 ⇒ **AC3 绿是因为 gitignore，不是因为钩子没跑或阈值放行**。
+- [x] AC5: **离线负控制**——**不适用**：选了方案 3（运行时不进 git，本地生成），不是方案 1（安装时获取）。
+      离线冷启动不受影响——运行时由 `quay-init` 从插件产物本地复制，无网络依赖。
+- [x] AC6: **与 G2 的关系明确**——已写入本任务体（AC2 段）与 SPEC
+      `orchestration/GOAL-when-to-reinstall.md`「落地集合与 G2」段：
+      **运行时是落地集合的一员（铺进目标、字节相同）；G2 判据按磁盘字节算，不进 git 不改变字节**。
+- [x] AC8（**第 11 条**）: **异构目标构建负控制**——`install-config-driven-e2e.test.mjs` 新增 A5 双测试：
+      Node 目标 `npm test`（`test/smoke.test.mjs`，pass 1/fail 0，exit 0）与 Go 目标 `go build ./...`（exit 0）都通过。
+      **实跑输出见下方「Invoke evidence」**。
+- [x] AC9（**第 11 条**）: **保留目录负控制**——落地路径 `.quay/runtime/quay/quay.js`、
+      `.quay/runtime/quay-native/quay-native.js`、`.quay/runtime/quay-native/provider.yml` 的**路径字面量分段**
+      不含 `vendor` / `node_modules` / `target` / `build` / `dist` 任一。
+      e2e 新增 AC9 测试按段枚举断言；升级路径额外迁移旧 `vendor/` 配置（runtime-landing「AC9 upgrade」测试）。
+      **排除名单可扩充，非穷举即完**。
+- [x] AC10: **gitignore 处置**——`quay-init` 新增 `ensure_runtime_gitignore`：无 `.gitignore` → 创建；
+      有但无条目 → **追加**（用户既有规则逐字保留）；已有同名条目 → **NO-OP 不重复写**。
+      `plugin/test/runtime-landing.test.mjs` AC10 三例全过（含「已有条目字节不变」负控制）。
+- [x] AC11（**管理者 2026-08-04 02:10Z 实测缺口**）: **把 Go 那半边补进重装门槛 e2e**——
+      `install-config-driven-e2e.test.mjs` 现断言关键词含 **`go build`**（新增 `A5 — a Go target still builds (go build ./...)`，
+      缺 `go` 工具链时按 ADR-019 决策 #1 就地 skip；本机实跑**变绿**）+ `AC9` 保留目录断言。**A5 的 Go 半边已绿。**
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group product`——
+      新增 `plugin/test/runtime-landing.test.mjs` 顶部 `// @test-group product`、全部 `node:test`；
+      `scripts/test.sh` 的 `test-framework-policy-check` 在 scoped 运行里 PASS。
 
 ## Definition of Done
 
@@ -157,6 +177,68 @@ resume 先量出真实阈值分布与可选方案的代价，再选方案
 - packages/quay/scripts/build-dist.mjs
 - plugin/test/quay-init-loop.test.mjs
 - orchestration/GOAL-when-to-reinstall.md
+
+## Test-Files
+
+- plugin/test/quay-init-loop.test.mjs（45 条，运行时落地路径更新后全绿）
+- plugin/test/runtime-landing.test.mjs（新增：AC3/AC4/AC10 大文件钩子 + gitignore 处置 + AC9 升级迁移）
+- packages/quay/test/install-config-driven-e2e.test.mjs（新增 A5 Go/Node 构建 + AC9 保留目录检查）
+
+## Invoke evidence
+
+**落地后的目标布局（`quay-init --loop` 实测，`/tmp/runtime-smoke`）**：
+
+```
+copied: /tmp/runtime-smoke/.quay/runtime/quay/quay.js
+copied: /tmp/runtime-smoke/.quay/runtime/quay-native/quay-native.js
+copied: /tmp/runtime-smoke/.quay/runtime/quay-native/provider.yml
+runtime-gitignore: wrote /tmp/runtime-smoke/.gitignore
+wrote: .quay/config.yml (provider mcp_entry → project-local absolute paths — AC7b; ...)
+verify-provider-runtime-existence: OK (/tmp/runtime-smoke/.quay/runtime/quay-native/quay-native.js exists)
+verify-provider-runtime-freshness: OK (.../quay-native.js matches the plugin's current vendored bundle)
+quay-init complete.
+```
+
+落地后 `.gitignore` 内容：`/.quay/runtime/`（quay-init 自己写）。config `mcp_entry`：
+`["node", "/tmp/.../.quay/runtime/quay-native/quay-native.js", "mcp"]`。
+
+**AC3（正向，默认 500KB 钩子）**——`git add -A && git commit -m 'add runtime'`：
+
+```
+--- staged files count: 42
+--- is runtime staged? 0   (gitignore 把 .quay/runtime/ 挡在暂存区外)
+ create mode 100644 plugin/scripts/task-schema.ts
+ create mode 100644 plugin/scripts/wiring-coverage-check.ts
+COMMIT_EXIT=0
+```
+
+**AC4（负控制，阈值 1KB + 强推运行时）**——`git add -f .quay/runtime/` 后提交：
+
+```
+ERROR: File .quay/runtime/quay-native/provider.yml is 2852 bytes, which exceeds 1KB threshold
+ERROR: File .quay/runtime/quay-native/quay-native.js is 1122062 bytes, which exceeds 1KB threshold
+ERROR: File .quay/runtime/quay/quay.js is 1346650 bytes, which exceeds 1KB threshold
+COMMIT_EXIT=1
+```
+
+（500KB 对照：强推 `quay.js`（1,346,650 字节）同样被拒——AC3 的绿是 gitignore 给的，不是阈值放行。）
+
+**AC8/AC11（异构目标构建，落地后）**：
+
+```
+=== Node target: npm test ===
+ℹ tests 1  ℹ pass 1  ℹ fail 0  ℹ cancelled 0
+NPM_TEST_EXIT=0
+=== Go target: go build ./... ===
+GO_BUILD_EXIT=0
+```
+
+**scoped 套件（`scripts/test.sh --for-task gap-the-runtime-has-nowhere-safe-to-land`）**：
+`tests 64 · pass 64 · fail 0 · cancelled 0`，scoped static checks 全 PASS
+（test-framework-policy / test-isolation / task-contract strict-subset / adr016 / strategic-doc-staleness）。
+
+**旧安装升级迁移（AC9 升级路径）**：配置从 `path: <ws>/vendor/quay-native`（目录存在）迁移到
+`.quay/runtime/quay-native`，输出 `migrated: stale provider config -> .../.quay/runtime/quay-native`。
 
 ## Dispatch review
 
