@@ -6804,3 +6804,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **池 16 ≥ floor 8（cap=2×4）**，dispatchable 6 ≥ cap → 无需补晋。
 - **verify 重跑（bmdd861sd）**：concurrency scoped 仍在跑（外层 suite 负载下慢）。此前 bt2ha1tfy 的 verify-1 断言失败
   疑似 KNOWN-LOAD-SENSITIVE runner-grouping 被并发放大（agent 已文档化），isolated 重跑待结果。
+
+### verify 结案（bmdd861sd 被 300s 超时杀，改用直跑定位）
+
+- **concurrency-revert 合并验证 GOOD**：dead-code-after-return-check 9/9、resource-gate 15/15、capability-catalog 8/8 全绿。
+  runner-grouping 6/9（3 个失败全为 KNOWN-LOAD-SENSITIVE 嵌套 governance 跑，外层 suite 负载下无法完成——agent 已文档化，按仓规隔离重跑）。
+- **早前 verify-1 "断言失败"根因**：resource-gate.test.mjs 在 /tmp/quay-intg2 缺 gitignore 的 `.quay/config.yml`
+  → `_findRepoRoot` 抛错（文件级失败，非代码缺陷）。**已修复**：symlink config 进临时 worktree。
+  **教训**：temp worktree 的 fan-in scoped verify 必须带 `.quay/config.yml`（gitignored，不随 worktree add 检出）。
