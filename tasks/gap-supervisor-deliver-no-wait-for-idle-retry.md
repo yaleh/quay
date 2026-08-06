@@ -16,12 +16,13 @@ extra: {}
 
 `supervisor-deliver.sh`（用 `send-keys-reliable.sh` 作后端）做**一次性** send→verify→failed：目标（inner/outer/manager）忙时不等待空闲、不重试，一次失败即返回需人工。**"目标可接收"的判据已经存在**——`pane-state-classify.ts` 五态分类已被 `session-liveness.sh` / `supervisor-health.sh` / `inner-blocked-signal.ts` 消费，但**没有接到投递路径上**。
 
-## 实测（2026-08-06 17:50，outer 驱动失败）
+## 实测（机制可复现证据，2026-08-06）
 
-- outer 17:50 向 inner 发 targeted drive（修静态链）——inner 正处长 thinking（Puzzling 2m40s+, ↓13k tokens）。
-- `send-keys-reliable.sh` 60s 有界轮询 FAIL：`FAIL——60s 有界轮询后 transcript 仍未出现内容匹配的真实 user message（已含一次独立 Enter 补发）；需要人工，不假装成功`。
-- **后果：链路停摆 8 分钟**。唯一重试触发是外层下一个 `*/20` cron tick（最坏一整个周期空转）——实际靠管理者人工介入才重发成功（inner 17:53 空闲后直接投递即达）。
-- 管理者核实：inner 空闲后（输入框空，`pane-state-classify --check-residue` state=empty）投递即达。
+**投递机制主张独立为真**（与今晚任何具体事故无关）：`supervisor-deliver.sh`/`send-keys-reliable.sh` 是**一次性** send→verify→failed——send 前不判目标可接收、不等空闲、不重试；目标 busy 时一次失败即退（fail loud 需人工）。
+
+**可复现实例**：向一个 busy/thinking 目标投递 ⇒ 文本进输入框但不被提交 ⇒ 60s 有界轮询 FAIL（`FAIL——60s 有界轮询后 transcript 仍未出现内容匹配的真实 user message`）；目标转 waiting-input 后同一投递即达。
+
+**时间线澄清（2026-08-06 管理者更正，以 git 为准）**：17:4x 的 static-chain 驱动**已送达** inner 并执行；17:50 的一次 send FAIL 正是因 inner 在执行【前一次已送达的同一请求】（busy）；inner 17:52 提交 25196d9a + c2b6244f 完成。**不存在"重试从未发生导致停摆"这条因果**——红窗 hold 下 inner 空闲（无待办）是正确行为。tick 文档判据：**推进的判据不是 TUI，是文件系统**。
 
 ## 根因
 
@@ -47,6 +48,7 @@ extra: {}
 
 ## Evidence
 
-- 17:50 outer tick：`send-keys-reliable: FAIL——60s 有界轮询后 transcript 仍未出现...需要人工`
-- inner 空闲后同一驱动重发即达（`delivered: true`）
+- 机制可复现：对 busy/thinking 目标投递 ⇒ 文本进输入框不被提交 ⇒ `send-keys-reliable` 60s 有界轮询 FAIL（fail loud 需人工，不假装成功）
+- 目标转 waiting-input 后同一投递即达（`delivered: true`）
 - `grep pane-state-classify plugin/scripts/`：session-liveness.sh / supervisor-health.sh / inner-blocked-signal.ts 消费，supervisor-deliver.sh 无
+- 时间线（以 git 为准，2026-08-06）：17:4x 驱动送达并执行（inner 25196d9a + c2b6244f, 17:52 完成）；17:50 的 send FAIL 因目标 busy（执行前一次已送达请求）；红窗 hold 下空闲（无待办）是正确行为，无"停摆"因果
