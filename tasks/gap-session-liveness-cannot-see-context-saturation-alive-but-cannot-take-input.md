@@ -76,15 +76,13 @@ B 的 outer 处于 100% context，且在收到人的既有 push 指令与管理�
 ## Contract
 
 ```
-measure saturation_observable = 是否存在一条命令能报出某会话当前的上下文饱和度（能=1，不能=0）
+measure saturation_observable = `bash plugin/scripts/session-liveness.sh --selfcheck --json 2>&1 | grep -c 'saturated'` stdout 数字段（能=1，不能=0）
 band saturation_observable = 1
-measure states_include_saturated = session-liveness 的状态词汇表是否含「活着但饱和」类事件（含=1）
+measure states_include_saturated = `bash plugin/scripts/session-liveness.sh --states 2>&1 | grep -c 'saturated'` stdout 数字段（含=1）
 band states_include_saturated = 1
-invariant 一个会话被判为健康/忙，不得仅依据它在动；若该会话已饱和到无法接收新指令，
-  必须能与普通的「忙」区分开
+invariant 一个会话被判为健康/忙，不得仅依据它在动；若该会话已饱和到无法接收新指令，必须能与普通的「忙」区分开
 invoke `bash plugin/scripts/session-liveness.sh --selfcheck`
-control 构造一个处于饱和态的目标会话 ⇒ 判据必须把它与普通忙会话区分开；
-  若两者产出同一个事件，说明该维度仍未被测量，本机制无效
+control 构造一个处于饱和态的目标会话 ⇒ 判据必须把它与普通忙会话区分开；若两者产出同一个事件，说明该维度仍未被测量，本机制无效
 resume 若中断，先跑 measure 读当前各会话饱和度，不要假设上次已覆盖
 ```
 
@@ -111,3 +109,10 @@ resume 若中断，先跑 measure 读当前各会话饱和度，不要假设上�
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/quay-init.sh
 - plugin/loop/orchestrator-loop-tick.md
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T14:1xZ
+changed: 内层立案任务补 Contract 格式（measure 补 backtick 命令 + 字段、invariant/control 续行合并、加本段）。任务待派（dispatch 记账 0d6e98b7 补晋 ready）。
+

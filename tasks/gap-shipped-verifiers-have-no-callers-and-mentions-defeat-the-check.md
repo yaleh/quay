@@ -71,16 +71,13 @@ done-task 检查**逻辑是对的**，但在 archguard **没有任何调用点**
 ## Contract
 
 ```
-measure uncalled_verifiers = 上述判定下调用点为 0 的 plugin/scripts 检查器数量
+measure uncalled_verifiers = `node --experimental-strip-types plugin/scripts/uncalled-verifier-check.ts --json` 输出的 uncalled 数组长度
 band uncalled_verifiers = 0（豁免名单内的不计）
-measure mentions_not_counted = 目录条目与自带测试是否被正确排除（正确=1）
+measure mentions_not_counted = `node --experimental-strip-types plugin/scripts/uncalled-verifier-check.ts --json` 输出的 mentions_excluded 布尔字段
 band mentions_not_counted = 1
-invariant 一个被裁定为"权威/单一事实源"的检查器，必须存在至少一个执行型调用点；
-  能力目录条目和自带测试都不构成调用点
-invoke `node --experimental-strip-types plugin/scripts/<新检查>.ts --json`
-control 给一个当前有调用点的检查器（如 resource-gate.sh）临时摘掉其唯一执行调用点，
-  只留 capability-catalog 条目与自带测试 ⇒ 该检查必须把它报为 uncalled；
-  若报绿，说明"提及"仍然在冒充调用点，本机制无效
+invariant 一个被裁定为"权威/单一事实源"的检查器，必须存在至少一个执行型调用点；能力目录条目和自带测试都不构成调用点
+invoke `node --experimental-strip-types plugin/scripts/uncalled-verifier-check.ts --json`
+control 给一个当前有调用点的检查器（如 resource-gate.sh）临时摘掉其唯一执行调用点，只留 capability-catalog 条目与自带测试 ⇒ 该检查必须把它报为 uncalled；若报绿，说明"提及"仍然在冒充调用点，本机制无效
 resume 若中断，先跑 measure 读当前零调用点清单，不要假设上次已修完
 ```
 
@@ -116,3 +113,9 @@ resume 若中断，先跑 measure 读当前零调用点清单，不要假设上�
 - tasks/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes.md
 - tasks/gap-single-file-test-duration-trend-unwatched.md
 - tasks/gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived.md
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T14:1xZ
+changed: 类级机制立案（shipped-but-uncalled verifiers）——verify-delivery-surface.ts 为单一事实源却零执行调用点；TASK-60 band 被证伪仍 done（archguard 池空 197 分钟）。修复 Contract 格式（measure 补命令、续行合并、加本段）。

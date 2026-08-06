@@ -57,7 +57,7 @@ suite-state 出现 stale red（finishedAt 06:32:22 = 旧 runner 残留），覆�
 ## Contract
 
 measure   state_writer = `python3 -c "import json; d=json.load(open('.quay/full-suite-state.json')); print(d.get('runId') or 'none')"` stdout 的 run-id 字段
-band      state_writer 非空（运行中状态带 run-id；终态写入前校验）
+band      state_writer = 非空（运行中状态带 run-id；终态写入前校验）
 invoke    `grep -n 'writeState\|runId\|generation\|writeFileSync' plugin/scripts/full-suite-runner.ts`
 control   双 runner 竞态 ⇒ 旧 runner 不覆盖（AC1）；单 runner 正常（AC4）
 resume    run-id 与校验分步提交，任一步完成即写盘

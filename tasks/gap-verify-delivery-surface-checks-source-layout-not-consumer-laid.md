@@ -54,7 +54,7 @@ orchestration/SPEC-*」），而**消费者 laid 布局是 orchestration/ + docs
 ## Contract
 
 measure   consumer_surface = `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <consumer-dir> 2>&1 | grep -c 'ok\|PASS'` stdout 数字段
-band      consumer_surface > 0（消费者 laid 布局可验，非 0/6）
+band      consumer_surface = > 0（消费者 laid 布局可验，非 0/6）
 invoke    `grep -n 'orchestration\|docs/analysis\|plugin/loop\|plugin/scripts' plugin/scripts/verify-delivery-surface.ts`
 control   archguard laid 布局实跑 > 0（AC1）；源布局模式保留（AC4）
 resume    laid 模式与 AC16 接线分步提交，任一步完成即写盘

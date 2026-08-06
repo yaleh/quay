@@ -6766,3 +6766,20 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   **待外层**：这三条翻 done（cross-machine-sync 剩 B 侧 AC5/6 deferred），且 cross-machine-sync 任务文件的
   AC 证据需随 integration→develop 合并上 develop。
 - **resource-aware worktree** 仍在（外层 3f78e428 裁定 KEPT，真实未提交再开工作），待外层定方向。
+
+### tick 2026-08-06T04:5xZ–05:0xZ（4 fan-in 全落 integration；共享树事故与修复）
+
+- **fan-in 4 任务全落 integration**：supervisor-base-layer（c55445fc，实为已落地任务，仅补再验证证据）+
+  concurrency-derivation-reverted（e846cedd，RESTORE 方向：公式恢复 + dead-code-after-return-check 反复发检查器，
+  heavy-op-token 删除未与其冲突——rebase 到 integration 后 0 引用） + split-batch（458a10b1，AC6 whitelist 修复）+
+  send-keys（b4001be1，AC1-3 再验证；**AC4 留外层**：需 live-loop watchdog 重启闭环）。
+  develop 已含 supervisor+concurrency（外层 integration→develop 合）；split-batch+send-keys 待外层下次合。
+- **共享树事故（教训）**：本 tick 早期误判「develop ref 漂到 c55445fc + 工作树 integration 内容」为损坏，
+  `git reset --hard 0d6e98b7` 修复。**事后查明那是外层在并发做 integration→develop 合并**（reflog 明示），
+  不是损坏——reset 暂时回退了外层合并，外层随即重合并（e846cedd）+ 继续提交（f4c4aaa5/86adbbba/397ed97d/3f433c8f，
+  含 contract-ratchet 22→0 修复）。**教训：内层不得在主共享树 reset develop；develop 的推进归外层（integration→develop 合），
+  内层只 fan-in 到 integration（在 /tmp/quay-intg2 专用 worktree 做）。**
+- **外层已修 contract ratchet**（86adbbba：22→0 new violations）——split-batch/send-keys DoD 的「全量套件绿」
+  阻塞随之解除（待外层 verification-round 翻 done）。
+- 在飞 0/5（全部完成）。resource-aware worktree（dd67f7e9）仍待外层处置（3f78e428 KEPT）。
+- 背景 scoped verify（bt2ha1tfy，concurrency+split-batch+send-keys 三连）运行中。
