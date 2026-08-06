@@ -5207,3 +5207,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **supervisor-base-layer 合并**（`486e6b4e`）：`SPEC-integration-architecture-2026-08-05.md`（三层判据 BASE/MACHINERY/BEHAVIOR + supervisor 边界判据「需理解任务即越界」+ 落地次序①-⑤ + `-p` 形态）+ OS-anchor/slot-visibility 步骤交叉注 + 新任务 gap-supervisor-step-4-preemption / step-5-message-bus-with-identity。AC1-9+AC5b/c+AC7 勾。已并已清。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `f6d93f8c`。
+
+### tick 2026-08-06T07:4xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：--slots 14/14 reconcilable、0 real-in-flight，`--clear` 已清（wait 10.5s）。
+- **外层 develop-merge 合并回归已修复**（ad4efc48）：laydown-derivation 的 quay-init.sh 改动与 develop 分支重复 derive_loop_scripts（A-populate + B-print 不兼容契约）→ 92 laydown 失败；外层根因 + 修复 + 合并套件重跑。**协调注意**：我 merge 的 quay-init.sh 改动与 develop 分支相撞——外层已解。
+- **派发 1/5**：`reanchor-must-converge`（重锚步加自述措辞审计/收敛判据；split-batch 已 done，耦合满足）。补 self-touch + telemetry 已开。DIR-043 deferred（与 reanchor 碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
