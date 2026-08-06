@@ -156,6 +156,13 @@ scoped static checks: task-contract-check no violations; strategic-doc-staleness
 
 - plugin/test/manager-layer-shipping.test.mjs
 
+## 排序职能挂接（AC5 交叉标注，2026-08-06）
+
+manager 层三职能中的**排序**由 `gap-value-prioritization-has-no-mechanism` 实现并落地在
+`plugin/scripts/ready-pool-check.ts`：相关性信号（战略追溯 grep + 阻塞 parent/children + 成本
+touches 规模）+ `--top N` 优先级查询（「当前 todo 里价值最高的 N 条 + 理由」）。manager SKILL
+§2 的「排序」行挂该任务。
+
 ## Contract
 
 measure   third_layer_shipped = `ls plugin/skills/manager/` stdout 的文件名字段
