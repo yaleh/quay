@@ -5471,3 +5471,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **over-90m-false-signal fan-in 完成**（merge task/gap-over-90m-false-signal...，5 文件 277 行）：`detectTaskOver90m` 增加任务 status 闸——遥测 bracket 只作「何时开始」来源，`taskStatusAllowsOver90` 读 `tasks/<id>.md` status：in-progress/missing/unparseable ⇒ keep（真超时不漏），ready/done/needs-human/todo ⇒ drop（phantom bracket 不再触发假 OVER90）。AC1–AC4 全勾（scoped 36/36 + slot-visibility 8/8 + fast-mode-telemetry 40/40 无回归）。留 ready。在飞清零。
 - 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-07T03:0xZ（内层，无派发——补池 7 耗尽，等补池 8）
+
+- **就绪池再耗尽**：pool 4 = 3 个已落地漏检 + 1 个父跟踪（DIR-124）；over-90m-false-signal（补池 7 末位）已并落地。**真实新可派 = 0**。
+- **补晋候选**：prepare-milestone 父（退役文件）与 DIR-043（deferred）均不晋。
+- 在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。等外层下一轮补池。
