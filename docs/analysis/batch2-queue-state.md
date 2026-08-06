@@ -5464,3 +5464,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   全不在问题列表，Touches 正常**。
 - **修正上一条记录**（a3f725b6）：该记录基于管理者的误报框架（「4 任务 Touches 过宽缺陷」）——实为
   正常。4 任务与 branch-model 的 overlap 是真实触摸交集（plugin/scripts 目录），非解析问题。
+
+### tick 2026-08-06T00:0xZ（外层，Touches 裸目录规则立案 + branch-model 收窄驱动）
+
+- **管理者生产链实测真根因**：branch-model 的 `plugin/scripts/（...，若成脚本）` 裸目录声明展开 100+ 文件，
+  池 6 候选 5 个判不相交失败（非滚动机制问题，是一次投机性宽泛声明的连带）。裁定：**Touches 禁裸目录 +
+  不确定声明**（具体路径或明确候选）。
+- **立案 gap-touches-bare-dir-uncertain-declaration-drags-the-pool**（规则 + 机械检查方向）。
+- **立即**：驱动 inner 收窄 branch-model 的 Touches（'若成脚本' → 明确候选路径或删）——解池关键。
