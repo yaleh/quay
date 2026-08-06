@@ -5254,3 +5254,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层补池 3**（3a23531c）：audit-findings / cold-start-outer-validation / inner-session-discovery-fallback 晋 ready。pool 13 / disjoint 5（升）。
 - **派发 2/5**（disjoint batch）：`audit-findings-backpropagated`（后续机制发现回灌到更早检测器——覆盖该类别）+ `inner-session-discovery-fallback-silent`（退化路径报警/fail-closed，防静默降级冒充健康）。self-touch（inner-session 缺已补）+ telemetry 已开。cold-start-outer-validation deferred（与 audit-findings 碰撞）。
 - 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T10:1xZ（内层，inner-session-discovery fan-in 完成）
+
+- **inner-session-discovery-fallback 合并**（`3936f715`）：TR_SOURCE=discovery 退化路径**不再静默**——stderr 报警 + state=degraded（fail-closed，绝不静默 healthy）；`/proc environ` 不可读分支专门 WARNING；cold-start --json 消费者读 transcriptSource==discovery 报警/拒收。AC1–AC4 勾（13/13）。已并已清。
+- **在飞 1/5**（audit-findings）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
