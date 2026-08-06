@@ -75,3 +75,18 @@ changed: 人框架更正（对称双向 + 权威未定义）替代窄任务。�
 认领未做双向代码合并；权威模型待人确认。是否并入 config-preserving/claim-task 成更大设计，或保持
 分任务——裁定方向：保持分任务（config-preserving=安装态、本任务=仓库层对等合并，机制不同），但
 本任务内部整合 claim-task+integration+双向合并。
+
+## 权威模型更新（2026-08-06 05:4xZ，人方向方案已落盘）
+
+**人已给出权威模型裁定**（`orchestration/PLAN-develop-branch-cutover-2026-08-06.md`，待确认未执行）：
+- **develop = 跨机汇合点**（唯一），integration 用于持续开发；
+- **GitHub = 唯一跨机同步点**（两机都 push/pull GitHub 的 develop，**两机不再直接同步**）；
+- **master 冻结**（仅人要求时才从 develop 同步）；
+- 任务分支 push 到 GitHub（认领/备份）。
+
+**对本任务的影响**：AC2（权威「最新」定义）有了人裁定输入——develop/GitHub 替代「integration 分支共识」
+的建议。双向合并的机制载体从「A/B 直连」改为「各自与 GitHub develop 同步」。claim-task.sh 已
+`--remote` 参数化，指向 GitHub 即可（无需改代码）。
+
+**本任务状态**：保持 todo——方案待人确认后，本任务按 develop/GitHub 模式实现双向合并（AC1 双向、
+AC2 权威=develop/GitHub、AC3 B 机工具到达）。若方案被拒，回退 integration 共识。
