@@ -57,26 +57,87 @@ no_refill_reason=null, recommended=[gap-full-suite-runner-red-pattern..., gap-pr
 
 ## Acceptance Criteria
 
-- [ ] AC1: tick 心跳（内层每 tick）**无条件跑 slot-refill** 并按结果行动——`should_refill=true` +
+- [x] AC1: tick 心跳（内层每 tick）**无条件跑 slot-refill** 并按结果行动——`should_refill=true` +
        recommended 非空 ⇒ 派发（实测：长任务在飞 1/3、slots_free=2、recommended 非空时，tick 心跳
-       触发新派发，不等完成事件）
-- [ ] AC2: 文档矛盾消除——fast-mode-loop-tick.md 行 83 的负控制措辞修正（完成事件=加速源，tick
-       心跳=必跑兜底），模板与部署副本一致
-- [ ] AC3: 与 gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release（done）交叉标注——
-       本任务是它 AC4 负控制的反面形态（归因记它头上），不重开
-- [ ] AC4: 负控制语义修正——「无完成事件且心跳未到」才零派发；心跳必问（无 `recommended` 或
-       `should_refill=false` 才不派）
-- [ ] AC5: 测试用 `node:test` 且带 `// @test-group governance`（若改 slot-refill.ts 或新增判定逻辑）
+       触发新派发，不等完成事件）— 已接线：fast-mode-loop-tick.md 步骤 4 新增「tick 心跳必须无条件
+       先跑 slot-refill」块（含 `--in-flight <本会话在飞集合>` 调用，`should_refill=true` + `recommended`
+       非空 ⇒ 按 recommended 逐候选派发）+ 行 83「② tick 心跳（兜底必跑）…无条件跑 slot-refill…
+       不依赖完成事件」。slot-refill.ts 的 should_refill 语义（slots_free>0 + 候选通过步骤 4 三道检查）
+       由既有 slot-refill.test.mjs 覆盖（本任务 scoped 实跑 12/12 绿）；新增 slot-refill-heartbeat.test.mjs
+       钉住文档契约（心跳路径必含 slot-refill 无条件调用）。实跑「长任务在飞时心跳触发新派发」留给外层
+       loop 观测（scoped 内无 live 长任务形态，属运行时验证）
+- [x] AC2: 文档矛盾消除——fast-mode-loop-tick.md 行 83 的负控制措辞修正（完成事件=加速源，tick
+       心跳=必跑兜底），模板与部署副本一致 — 模板行 83 改为双触发源措辞（完成事件=加速源、tick 心跳=
+       兜底必跑，负控制=「没有完成事件、且 tick 心跳没到，才零派发评估」）；docs/analysis/
+       fast-mode-loop-tick.md 已重新同步为模板字节一致（`diff` 空，契约 measure `grep -n 'slot-refill'`
+       命中 9）
+- [x] AC3: 与 gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release（done）交叉标注——
+       本任务是它 AC4 负控制的反面形态（归因记它头上），不重开 — 已在 done 任务
+       tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md 的 AC4 追加交叉标注
+       （2026-08-06：本任务另立、不重开，负控制修正为「无完成事件且心跳没到」才零派发）
+- [x] AC4: 负控制语义修正——「无完成事件且心跳未到」才零派发；心跳必问（无 `recommended` 或
+       `should_refill=false` 才不派）— 模板行 83「没有完成事件、且 tick 心跳没到，才零派发评估（负控制，
+       AC4）」+ 行 247「无完成事件、且 tick 心跳没到 → 零派发评估」+ 步骤 4「`should_refill=false` /
+       `recommended` 空 ⇒ 本 tick 不派发」；旧措辞「没有完成事件就没有派发评估」已移除（grep 0 命中）
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`（若改 slot-refill.ts 或新增判定逻辑）—
+       slot-refill.ts 未改动（纯状态读取器本就触发源无关，同一条命令服务完成事件与 tick 心跳，无需心跳
+       模式参数）；新增 plugin/test/slot-refill-heartbeat.test.mjs（`node:test` + `// @test-group
+       governance`）钉文档契约
 
 ## Touches
 - tasks/gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat.md（自身文件：勾 AC + 贴 invoke 证据授权）
-
-
 - plugin/loop/fast-mode-loop-tick.md（行 83 措辞修正 + 心跳必跑 slot-refill）
-- docs/analysis/fast-mode-loop-tick.md（部署副本同步）
-- plugin/scripts/slot-refill.ts（若需加心跳模式/默认参数）
-- plugin/test/（AC1/AC4 测试）
+- docs/analysis/fast-mode-loop-tick.md（部署副本同步：与模板字节一致）
+- plugin/test/slot-refill-heartbeat.test.mjs（新增：AC1/AC4 文档契约测试）
 - tasks/gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release.md（AC3 交叉标注）
+
+## Test-Files
+- plugin/test/slot-refill-heartbeat.test.mjs（本任务新增的文档契约测试）
+- plugin/test/slot-refill.test.mjs（既有：验证 slot-refill.ts 的 should_refill/recommended 语义——心跳路径依赖它）
+
+## Invoke evidence（scoped 实跑，2026-08-06）
+
+**Contract invoke**（`grep -n '没有完成事件\|没有完成事件就没有派发评估\|slot-refill' plugin/loop/fast-mode-loop-tick.md`）：
+
+```text
+83:**派发评估有两个触发源，且都机械接线（…+ gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat）**：① **完成事件（加速源）**…② **tick 心跳（兜底必跑）**——每 tick（含轻触）**无条件跑 slot-refill**…**没有完成事件、且 tick 心跳没到，才零派发评估**（负控制，AC4）…
+231:否则（/loop 心跳、重锚、人工）⇒ 按「Tick 步骤」全流程，**且步骤 4 无条件先跑 slot-refill**…
+247:- **完成事件加速回填，tick 心跳兜底必跑 slot-refill**…**无完成事件、且 tick 心跳没到 → 零派发评估**（AC4 负控制）…
+502:**tick 心跳必须无条件先跑 slot-refill**…`should_refill=true` 且 `recommended` 非空 ⇒ 按 `recommended` 逐候选走下面 1-6 检查后派发，**不等完成事件**…
+```
+
+旧负控制措辞「没有完成事件就没有派发评估」在模板与部署副本中均已移除（`grep -c` = 0）。
+
+**Contract measure**（`grep -n 'slot-refill' docs/analysis/fast-mode-loop-tick.md`）：命中 9 行（band ≥ 1 成立；部署副本与模板 diff 空）。
+
+**scoped 测试**（`bash scripts/test.sh --for-task gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat --allow-thin`，exit 0）：
+
+```text
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  test-framework-policy-check — 219 glob file(s), 34 exemption(s)
+PASS: every test file uses node:test or is a listed legacy exemption; exemption list is at/below the ratchet ceiling and did not grow; new files declare @test-group.
+task-contract-check: no violations.
+drive-contract-check — 3 drive-contract doc(s) scanned; violations: 0
+== plugin/test/slot-refill.test.mjs ==
+ℹ tests 12 · pass 12 · fail 0 · cancelled 0
+✔ computeSlotsFree = max(0, cap − in_flight), never negative (AC1)
+✔ should_refill=true with a free slot and a dispatchable candidate (AC2/AC3)
+✔ recommended is capped at slots_free (AC3)
+✔ in-flight ≥ cap ⇒ should_refill=false, no_refill_reason names the bound (AC5)
+✔ cap is an INPUT — a smaller cap reduces free slots (AC5 mechanism/strategy separation)
+✔ empty ready pool ⇒ should_refill=false with a named reason (AC4)
+✔ only a majority-missing-touches candidate ⇒ should_refill=false (step-4 touches-resolve applied)
+✔ ready candidate whose parent is not done ⇒ not recommended (deps-ready filter)
+✔ recommended never contains two colliding candidates (assembleBatch disjointness)
+✔ ready candidate colliding with an in-flight task is not recommended (concurrency eligibility)
+✔ analyzeSlotRefill is a pure reader: same inputs ⇒ deep-equal output, no store mutation (AC7)
+✔ CLI smoke: --root/--cap/--in-flight produces JSON with the refill fields (exit 0)
+== plugin/test/slot-refill-heartbeat.test.mjs ==
+✔ template (source of truth) exists and carries the slot-refill invocation (AC1/measure)
+✔ negative control corrected: no completion AND no heartbeat = zero dispatch (AC4)
+✔ deployed copy is synced with the template for the slot-refill wording (AC2/Contract measure)
+ℹ tests 3 · pass 3 · fail 0 · cancelled 0
+```
 
 ## Contract
 
