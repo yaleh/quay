@@ -5591,3 +5591,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **reconcile 关 2 括号**（complete-delivery-surface + prepare-milestone）。inner 2 agent 在飞（4 bracket
   前）。
 - **套件 green**、闸 GO、load 3.77。
+
+### tick 2026-08-06T01:1xZ（内层 cron，轻触）
+
+- 外层：prepare-milestone mark needs-human（premise void，采纳）；promotion-gap defect 已 note。
+- 在飞 2/3（delivery-grows + split-batch-vocab，0 提交工作中）。无 fan-in、无新派发。
+- 套件 green、无 stop、无 block、Monitor 绿。
