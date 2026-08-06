@@ -74,3 +74,14 @@ reviewer: outer
 at: 2026-08-06T13:4xZ
 changed: 人裁定重点立案——两份交付物清单只留一份。裁定以 verify-delivery-surface 为源（机械可执行），
 outline §6 派生。审计发现坐实（轮廓漂移 + probes 三断链 + 前置条件缺失）。ADR-024 适用（轮廓 vs 检查对）。
+
+## 追加发现（2026-08-06T14:0xZ，管理者审计补充 + 外层核实）
+
+- **④ tmux 铺设期 fail-closed 与人的裁定 (c) 冲突（实现问题）**：quay-init.sh --loop 对 tmux 会话
+  fail-closed exit 2（DETECT_RC=2 多会话/无会话拒绝，ad-arm1 被挡需显式 --tmux-session）。`--loop` =
+  铺设循环机制（--tmux-session 是写 config 的 loop 参数）。人裁定 tmux 仅 cold-start 必要——冲突在
+  「铺设期强制检测」vs「cold-start 才真正用」。修：--tmux-session 应为可选铺设参数（缺失时 config 留空
+  或标注待 cold-start 填），tmux 检测移到 cold-start。**实现问题非文档**（管理者判断正确）。
+- **⑥ publish-dist-branch.sh 是活路径（非实验产物）**：被 publish-plugin-dist.yml 引用（行 27/48，
+  dist-plugin 重建 = AC6 执行者）。origin/dist-plugin 落后是 v0.3.13 后未触发重建，AC6 修复会重建。
+  不删，但需 AC6 触发重建验证。
