@@ -5613,3 +5613,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （漂移/缺失计数 = 该任务被动判据的读取源）。scoped **51/51**（1 known-load-sensitive flake 隔离重跑绿），
   dedupe 修复（派生集 latent 双计）。worktree/branch 已清。**在飞 0/3**。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:2xZ（外层，delivery-surface-grows 落地 + closure round 16）
+
+- **delivery-surface-grows 落地 + 关闭**：`25a9b7b0` quay-init --check-drift（只读派生集漂移报告）+
+  --loop 升级路径（pre/post 漂移报告、缺失自动补、漂移备份+替换永不静默）+ L2 升级正确性，51/51（
+  load-sensitive flake rerun 绿）+ dedupe 修。**「装了 quay」= 能用最新 quay**。closure round 16。
+- reconcile 关 2 括号（delivery-grows + split-batch-vocabulary）。inner 1 agent 在飞。
+- **套件 green**、闸 GO、load 2.66。
