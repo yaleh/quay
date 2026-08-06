@@ -6516,3 +6516,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   quality-criteria + postinstall + message-bus + SEA 缺陷 + 记录提交。
 - **在飞 0/3**。master 冻结 ea2208cf（人触发才同步）。
 - **AC16 待办**：SEA 缺陷（单二进制 vs plugin 目录树结构性冲突）——develop 已含缺陷任务，待架构裁定。
+
+### tick 2026-08-06T12:0xZ（外层，ad-arm1 二轮门禁三条确定性复现）
+
+- **ad-arm1 二轮门禁**：pass 451 / fail 16，四条修复生效但暴露更深残留，三条确定性复现（精确行号）。
+  #1 pane-state-classify.ts:395-424 入口顺序穿落——--classify 异步 stdin 未消费即 exit、--check-residue 不可达
+  （分类器根本没工作，解释 session-liveness 大批 busy/idle 失败）。
+  #2 session-liveness.sh:618-642 双 --selfcheck 臂（新版先赢，旧版 _sl_selfcheck 死代码）+ 重复 -h|--help。
+  #3 **外层早上的 cap-from-gate 修复机器相关**（=== DEFAULT_BANDS.go 读机器本地 config，B/ad-arm1 go:2≠5 挂）
+  ——我的修复缺陷，改测试为密闭/注入配置。
+- 已驱动 inner 修三条。
