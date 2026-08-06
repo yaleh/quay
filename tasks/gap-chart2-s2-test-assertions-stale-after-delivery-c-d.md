@@ -4,7 +4,7 @@ title: chart2-s2 delivery-completeness test asserts stale evidence (both
   false/cov 0.0) since DELIVERY-C/D flipped it to both true — 12-day RED masked
   by 'modulo load-flake' phrasing; update 3 assertions to match real evidence +
   keep fail-closed negative control
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -42,9 +42,28 @@ DELIVERY-C/D 翻为 **both true**（S2 cov 0.667→1.00，3/3 FULL）。
 
 ## Acceptance Criteria
 
-- [ ] AC1: 3 处失败断言更新为匹配 evidence 真实状态（both true / cov 真实值），单独跑该测试全绿
-- [ ] AC2: 负控制保留——临时 evidence both false 时 cov 仍为 0.0（fail-closed 语义不丢）
-- [ ] AC3: 与 DELIVERY-C/D 交叉标注（交付翻 evidence 时须同步断言）
+- [x] AC1: 3 处失败断言更新为匹配 evidence 真实状态（both true / cov 真实值），单独跑该测试全绿
+- [x] AC2: 负控制保留——临时 evidence both false 时 cov 仍为 0.0（fail-closed 语义不丢）
+- [x] AC3: 与 DELIVERY-C/D 交叉标注（交付翻 evidence 时须同步断言）
+
+## Evidence (2026-08-06, execution agent)
+
+Invoke: `node --test experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs` (scoped)
+
+```
+ℹ tests 22
+ℹ pass 22
+ℹ fail 0
+```
+
+Scoped entrypoint: `scripts/test.sh --for-task gap-chart2-s2-test-assertions-stale-after-delivery-c-d --allow-thin` → EXIT 0 (22 pass / 0 fail). Contract measure (`grep -c '✖'`) = 0.
+
+Changed in `experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs`:
+- `loadS2Evidence: the checked-in real evidence file → both false` → **both true (DELIVERY-C/D)** — evidence file flips fullManifestPublished/foreignInstallE2eGreen to true.
+- `CLI: against THIS repo (default root)` → asserts `cov = 0.6666666666666666 (2/3: version-consistent=false, manifest-published=true, foreign-install-green=true)`.
+- `CLI: explicit repoRoot arg` → asserts `cov = 0.6666666666666666 (2/3)`.
+- Added **AC2 negative control** `CLI: negative control — temp repo with both-false evidence → cov 0.0 (fail-closed)` (drifted versions + both-false evidence file ⇒ cov 0/3, flags all false) — preserves fail-closed semantics.
+- AC3 cross-annotation comment above the evidence assertion naming DELIVERY-C (ea3a33a9) / DELIVERY-D (1b1c81ab) and the sync rule.
 
 ## Touches
 

@@ -7399,3 +7399,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **停止条件**：`--detect-stop` 无块（manager OVER90 已被外层 18:34 裁定关闭）。`.halt` 无。pool 21 ≥ floor 20，dispatchable 10。
 - **派发 1（cap=5 GO，在飞 0→1）**：`gap-chart2-s2-test-assertions-stale-after-delivery-c-d`（3 AC 未勾、resolves、self-touch 补后 ok；fork develop，telemetry runId ...-lkui4j）。slot-refill 其余 4 推荐排除：DIR-124（human-steered）、audit-findings（7/8 AC，机制已落 develop）、cold-start（AC 全勾=陈旧待翻 done）、concurrency-reverted（已 fan-in）。
 - **自选候选审查**：chart2-s2 是唯一真候选（20:26 套件中 chart2-s2-delivery-completeness 实红，本任务即修复）。
+
+### 事件 21:1xZ（chart2-s2 fan-in 冲突 → needs-human）
+
+- **chart2-s2 agent 完成**：22/22 绿，AC1-3 勾，commit `1a9e6d9e`（仅 test 文件）。
+- **fan-in 冲突**：rebase 到 integration + merge 均冲突——冲突在**无关 task 文件**（gap-send-keys-reliable / gap-shipped-verifiers 的 status/AC 更新），chart2 分支基于旧 develop（b56aa3be）携带了这些 task 文件的过期版本，与 integration 并发更新冲突。doc：冲突 → 停止该任务 fan-in、标 needs-human、报告，不 `--skip`/`-X ours`。已 `rebase --abort` + `merge --abort`（两边干净）。
+- **已标 needs-human**（expectedStatus ready CAS 成功）。worktree/branch 保留（fan-in 失败不清理），待外层/人裁定：可干净 rebase 到最新 develop 再 fan-in（chart2 自身只改 test 文件）。
