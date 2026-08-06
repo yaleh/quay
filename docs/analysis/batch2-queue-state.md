@@ -7432,3 +7432,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **排除**：cold-start（AC 全勾=陈旧）、no-post-merge（已 fan-in）、token-measures（7/7 AC=陈旧待翻 done）。
 - **ac8 在飞**（40→6 集成 agent 运行中，worktree 有未提交改动=agent 活动）。
 - **session-pid self-touch 已提交**（0fc3981b，AC1-4 勾 AC5 deferred）。
+
+### 事件 22:2xZ（ac8 fan-in 冲突 → needs-human）
+
+- **ac8 agent 完成**：AC1-6 勾，commit `2f6621ed`（38 files +1039/−236），scoped 46/0 + batch 204/0。40→6 集成（6 入口 quay-{session,deliver,dispatch,branch,suite,check}.ts）、import-over-spawn 真实生效（pure_import 3→10）、AC5 防复发检查（task-contract-check ac-ticked-self-admission）。
+- **fan-in 冲突**：cherry-pick 2f6621ed 到 integration 冲突 6 文件——ac8 自己的改动（tick docs、skills、task 文件）与 integration 版本冲突（不同于 session-pid 的仅 develop-only 历史冲突）。doc：冲突 → 停该任务 fan-in、标 needs-human。已 `cherry-pick --abort`（integration 干净 a09ddb56），标 needs-human（CAS 成功）。
+- **在飞 1/5**：shipped-ts（bundle plugin .ts agent 运行中）。

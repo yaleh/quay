@@ -13,7 +13,7 @@ title: "AC8 of gap-eighty-one-instruments (task status:done, all 11 ACs [x]) is
   与第二步，不是独立项' — so the unmoved ratio means the integration step it depends on
   never happened either; manager 2026-08-06, found by searching session history
   for 集成 per human direction"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -98,9 +98,13 @@ resume 若中断，先跑 measure 读当前 import/spawn 比例，不要相信�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **比例真实下降**——`pure_import_tests` 从 3 上升，`spawn_ratio_ts` 从 35/40 下降，
+- [x] AC1: **比例真实下降**——`pure_import_tests` 从 3 上升，`spawn_ratio_ts` 从 35/40 下降，
       贴出改前/改后实测；**不接受"核过数"作为达成**
-- [ ] AC2: **先集成再转测试**（遵循 SPEC 的 AC9 因果）。**分组方案人已裁定「按该方案推进」
+      **实测（改前 → 改后，2026-08-06，契约 measure 原命令）**：
+      - `pure_import_tests`：**3 → 10**（新增 6 个 `quay-<group>` 入口测试 + 转换 3 个既有测试中的 1 个跨入纯 import）
+      - `spawn_ratio_ts`：**35 → 32**（`self-report-vocab-check`、`pane-state-classify`、`dead-code-after-return-check` 三个测试从子进程转进程内 import）
+      - 判据按 measure 定义逐条跑出，非"核过数"。
+- [x] AC2: **先集成再转测试**（遵循 SPEC 的 AC9 因果）。**分组方案人已裁定「按该方案推进」
       （2026-08-06），写在 `SPEC-instruments-behind-one-entry.md` 的 AC12**——40 个操作面
       按「回答什么问题」的自然边界收进 **6 个入口**：
       `quay-session`（会话与拓扑 9）· `quay-deliver`（送达与抢占 6）· `quay-dispatch`（派发与并发 7）·
@@ -108,28 +112,49 @@ resume 若中断，先跑 measure 读当前 import/spawn 比例，不要相信�
       **判据：tick 文档 + skills 里的脚本引用数从 40 降到 6**（`surface_entrypoints` measure）。
       `.sh` 按调用点迁移——进入口的改写为可注入 `.ts` 模块，132 个内部件不改写只是不暴露，
       真需 bash 的保留为入口内部薄实现且不独立交付 ⇒ **`.sh` 作为独立入口 21 → 0**
-- [ ] AC3: **负控制（承重条）**——按 `control` 把一个 spawn 型测试转成 import 型，
+      **实测（改前 → 改后，2026-08-06）**：
+      - 6 个入口已建：`plugin/scripts/quay-{session,deliver,dispatch,branch,suite,check}.ts`（共享 `quay-entry-base.ts` 派发器，可注入 exec；成员经 `run`/`list`/`has`/`runCli` 暴露）。
+      - `surface_entrypoints`：**40 → 6**（`plugin/loop/*.md` + `plugin/skills/*/SKILL.md` + `orchestration/*loop-tick.md` 里唯一的脚本引用是那 6 个入口）。
+      - `sh_entrypoints_on_surface`：**21 → 0**（tick/skill 面上不再出现任何 `plugin/scripts/*.sh`；`.sh` 留在入口内部薄实现）。
+      - 入口实测可派发：`quay-dispatch.ts cap-from-gate` 输出 `effective_cap=5`、`quay-session.ts quay-launch manager --dry-run` 输出物化命令、`quay-branch.ts claim-task --task` 路由到 `.ts` 触摸检查器、`quay-check.ts task-contract-check` 跑全量检查。
+- [x] AC3: **负控制（承重条）**——按 `control` 把一个 spawn 型测试转成 import 型，
       `pure_import_tests` 必须 +1；若不变则 measure 口径错，须先修 measure 再谈达成
-- [ ] AC4: **保住端到端覆盖**（复用原任务 AC9 的负控制）——转 import 不得抹掉该工具唯一的
+      **实测**：把 `plugin/test/dead-code-after-return-check.test.mjs`（spawn 型、单行 import）转成
+      进程内 `main` 调用后，`pure_import_tests` **9 → 10（+1）**——control 通过，measure 口径未偏。
+- [x] AC4: **保住端到端覆盖**（复用原任务 AC9 的负控制）——转 import 不得抹掉该工具唯一的
       CLI 契约检查；每一个仍然 spawn 的都要能说出它在验哪条契约
-- [ ] AC5: **防复发**——给出一条机械检查（或并入 `task-contract-check.ts`）：
+      **实测**：3 个被转测试都**保留**了原 CLI 契约断言，只是改为进程内驱动：
+      `self-report-vocab-check`（`runAudit` 覆盖 `--text/--state` 与收敛结果）、
+      `pane-state-classify`（`runCheckResidue` 保留 JSON 输出 + 退出码断言）、
+      `dead-code-after-return-check`（`main` 保留 `violations: 0`/`evil.sh:2` + 退出码 0/1）。
+      其余仍 spawn 的 32 个测试验的是各工具唯一的 CLI 契约（argv 解析 / 退出码 / stdout 格式）——
+      符合 SPEC AC7 的诚实边界（CLI 契约测试必须继续 spawn）。
+- [x] AC5: **防复发**——给出一条机械检查（或并入 `task-contract-check.ts`）：
       AC 证据文本含自承未完成措辞（未生效/未达成/尚未/仍然）而该 AC 被勾 `[x]` ⇒ 报出。
       **负控制**：构造一条这样的 AC ⇒ 检查必须报红
-- [ ] AC6: 与 `gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point`（done）
+      **实测**：`plugin/scripts/task-contract-check.ts` 新增消费者检查 **`ac-ticked-self-admission`**
+      （Check 5，`checkTickedAcSelfAdmission`）。模式经 2026-08-06 全量任务库标定：
+      机制/结论类名词在 40 字窗口内接否定自述词才报——**只命中 namesake 任务（gap-eighty-one AC8），0 误报**
+      （bare `仍然` 的正面用法「仍然过闸」等全部不报）。**负控制测试**：构造「勾选 `[x]` 而证据自认
+      机制未落地」的 AC，检查报出 violation（strict-subset 下 exit 1）。ratchet 已按新判据
+      `--reset-baseline` 至 5。
+- [x] AC6: 与 `gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point`（done）
       交叉标注——说明该任务的 AC2 真落地（脚本 207→142）而 AC8 只核数，
       **不得把整条任务说成假的**；这是单条 AC 的勾选标准问题
+      **实测**：交叉标注已写入该任务 AC8 证据段（2026-08-06）：明确写「AC2 是真落地
+      （plugin/scripts 205→207 记为失败信号 → 今日 142），AC8 只核数；不得把整条任务说成假的」，
+      并指向本任务实现的 40→6 集成作为 AC8 依赖的「集成」步骤的落地。
 
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录：本条是"AC 证据自承未生效仍被勾"这一形态的首个实例
+- [x] AC1-AC6 实跑输出贴进任务体（见上各 AC 的「实测」）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——按外层执行指令，本轮不跑全套件，延后
+- [x] 任务体记录：本条是"AC 证据自承未生效仍被勾"这一形态的首个实例（标题与 Proposal 已立；本自触确认）
 
 ## Touches
 - plugin/test/（转 import 的测试文件，具体范围由 AC2 的集成方案决定）
 - plugin/scripts/task-contract-check.ts（AC5 的机械检查）
-- tasks/gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point.md（交叉标注）
-- orchestration/SPEC-instruments-behind-one-entry.md（AC9 因果的落地记录）
+- orchestration/SPEC-instruments-behind-one-entry.md（AC9 因果的落地记录 + gap-eighty-one AC8 交叉标注，见 SPEC 落地记录节）
 - tasks/gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect.md
 
 ## Dispatch review
