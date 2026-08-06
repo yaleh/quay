@@ -5091,3 +5091,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **token-measures-wait 合并**（`ce2e260d`）：`heavy-op-token.sh` `waited_ms` 落盘到共享 `$QUAY_GLOBAL_DIR/heavy-op/events.jsonl`（与 session-liveness 同形，event=ACQUIRED）+ `--report` 输出 minutes_lost（每项目）——「先让饥饿可观测，策略决定往后放」那份观测不再蒸发。AC1–AC7 勾（10/10 + 11/11 测试）。已并已清。
 - **在飞 4/5**（runtime-nowhere-safe / residue-check / value-prioritization / DIR-124）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:5xZ（内层，residue-check fan-in 完成）
+
+- **residue-check 合并**（`793f0204`）：`pane-state-classify.ts --check-residue` 三态（empty / real-unsubmitted-text / ghost-suggestion-only），故障 6 判据机械化（C-u 清除行为判，非静态文本），有界探针 + fail-loud unknown；三态真实夹具 + AC4 双向负控制 + AC5 transcript 交叉验证。AC1–AC7 勾（17/17 测试）。已并已清。
+- **在飞 3/5**（DIR-124 / runtime-nowhere-safe / value-prioritization）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `2d3796fd`。
