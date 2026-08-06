@@ -7438,3 +7438,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **ac8 agent 完成**：AC1-6 勾，commit `2f6621ed`（38 files +1039/−236），scoped 46/0 + batch 204/0。40→6 集成（6 入口 quay-{session,deliver,dispatch,branch,suite,check}.ts）、import-over-spawn 真实生效（pure_import 3→10）、AC5 防复发检查（task-contract-check ac-ticked-self-admission）。
 - **fan-in 冲突**：cherry-pick 2f6621ed 到 integration 冲突 6 文件——ac8 自己的改动（tick docs、skills、task 文件）与 integration 版本冲突（不同于 session-pid 的仅 develop-only 历史冲突）。doc：冲突 → 停该任务 fan-in、标 needs-human。已 `cherry-pick --abort`（integration 干净 a09ddb56），标 needs-human（CAS 成功）。
 - **在飞 1/5**：shipped-ts（bundle plugin .ts agent 运行中）。
+
+### 事件 22:4xZ（恢复派发后的第一轮 dispatch 记账）
+
+- **ac8 fan-in 冲突**（前述）已标 needs-human、worktree/branch 保留。chart2-s2 同因（integration/develop 分叉）在 needs-human。
+- **divergence 现状**：integration 31 ahead of develop、develop 251 ahead of integration（282-commit 双向 gap，merge-base e846cedd）。任何触碰 tick docs/skills/quay-init.sh 的任务 fan-in 都会撞 ac8 同类冲突。
+- **slot-refill GO**：推荐 3 条，逐条过闸后**全部不可派发**：
+  - `gap-cold-start-outer-validation-runs` → outer 执行型任务（三条验证 AC 需外层环境），非 inner 派发对象
+  - `gap-the-token-measures-the-wait-and-throws-it-away` → **已标 needs-human**：其 Contract invoke 引用已退役的 heavy-op-token.sh（commit 2f9d4575 人裁定退役）；events.jsonl 现在由 resource-gate.sh 写（ACQUIRED+waited_ms 今日 14:06 落盘），缺陷可能已被退役重构顺带修复
+  - `gap-no-post-merge-...` → self-touch 缺失（已补）+ 触碰 tick docs/quay-init.sh（ac8 冲突区）
+- **就绪池维护**：self-touch-scan 28→29 ready，6 条缺自身文件（DIR-121/probe/session-liveness×2/no-post-merge/manager-layer）全部补齐 → 0 missing（commit 7f02f510）。
+- **新派发 1/2**：`gap-prefriction-trigger-regex-too-broad-signal-is-dead`（value 1.0、单文件 prefriction-count.sh、fork-baseline develop、与 shipped-ts disjoint、fan-in 安全因为 prefriction-count.sh 在 develop/integration 完全一致）。worktree `quay-worktrees/prefriction-count`，task-start 已记（fm-...-86ch64）。
+- **在飞 2/5**：shipped-ts（bundle plugin .ts）+ prefriction。
