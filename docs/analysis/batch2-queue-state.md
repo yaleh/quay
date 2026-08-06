@@ -5636,3 +5636,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   加 --force ⇒ 覆盖丢 loop 值。**升级对已有消费者要么停要么毁 config**。51 测试测漂移报告非「报后怎么办」。
 - **裁定：另立** `gap-quay-init-config-preserving-incremental-upgrade`（done 的 delivery-grows 漂移检测
   正确，config 保留是后继）。archguard 从 9 个 stopped-state 恢复（此验证即其接的方向）。
+
+### tick 2026-08-06T01:5xZ（内层，ghost-suggestion fan-in — 真实现）
+
+- **ghost-suggestion fan-in 完成（真实现）**：`--prompt-suggestions false` 源头 REQUIRED——quay-launch.sh 每角色
+  发（key false 时 jq-e，absent/true 向后兼容）、cold-start + restart-plan REQUIRED 标注、fault-6 标注
+  「环境配置源头消除」。**活体验证**：负控制（无配置 ⇒ ghost 出现，hexdump e2 9d af...）、正控制（env+flag ⇒
+  输入框空）。AC1-AC6、13/13 scoped。worktree/branch 已清。**在飞 2/3**（session-liveness-hashes +
+  telemetry-brackets）。
+- 套件 green、无 stop、无 block、Monitor 绿。
