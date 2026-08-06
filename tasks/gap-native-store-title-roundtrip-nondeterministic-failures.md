@@ -31,14 +31,59 @@ charset documented`) fails on EVERY run but on a RANDOM plain-letter title. Evid
 
 ## Acceptance Criteria
 
-- [ ] AC1: `node --no-warnings --test packages/quay-native/test/store.test.mjs` passes 5/5
+- [x] AC1: `node --no-warnings --test packages/quay-native/test/store.test.mjs` passes 5/5
       consecutive runs (deterministic green).
-- [ ] AC2: root cause identified and FIXED in the store (not the test) — OR, if it is a
+- [x] AC2: root cause identified and FIXED in the store (not the test) — OR, if it is a
       test-design flaw (e.g. reusing one id across 135 candidates races a shared lock), the fix
       is in the test WITH a store-level regression control.
-- [ ] AC3: a deterministic negative control exists (construct the stale-read condition ⇒ the
+- [x] AC3: a deterministic negative control exists (construct the stale-read condition ⇒ the
       round-trip must fail in a controlled way) so the fix is provable, not "ran N times green".
-- [ ] AC4: `git show --name-only` on the fix touches the store source and/or its test only.
+- [x] AC4: `git show --name-only` on the fix touches the store source and/or its test only.
+
+## Evidence
+
+**Root cause (AC2).** `get()`'s parse cache in `packages/quay-native/src/store.ts` is keyed by
+`(mtimeMs, size)` — a heuristic, not a content identity. Rewriting the SAME id with the SAME
+byte-size content within the same mtime resolution (e.g. `title: aaa` → `title: bbb`, both 3
+bytes, a millisecond apart) produces an IDENTICAL cache key, so a `get()` after the write returns
+the PREVIOUS title's parse — a read-after-write staleness. `deriveTitleCharset` (store.test.mjs)
+round-trips ~135 candidates through the one id `RT` in a tight loop; all `a<ch>b` candidates are
+same-size, so whichever consecutive pair shared an mtime tick lost its round-trip — the random
+plain-letter title per run. Fix: `invalidateCache(id)` called after every in-module write
+(`write()`, `appendNote()`, `addChildRef()`, `removeChildRef()`), so the trailing `get()` always
+re-reads fresh. Cache remains a win for unchanged-file reads.
+
+**Deterministic negative control (AC3).** New test "AC4 negative control: same-(mtimeMs,size)
+cache key must NOT serve a stale title after a same-size rewrite" patches `fs.statSync` to force
+one fixed `(mtimeMs, size)` for `RT.md`, writes `aaa` then `bbb` (same size), and asserts the
+store serves `bbb`. RED on the pre-fix store:
+
+```
+AssertionError [ERR_ASSERTION]: stale-read control: a same-(mtimeMs,size) rewrite must serve the NEW title from the store. store view returned "aaa" — if "aaa", the store served a stale parse-cache entry (read-after-write staleness) and the write-side cache invalidation is missing.
+```
+
+GREEN with the fix (proven deterministically, no wall-clock dependence).
+
+**AC1 invoke evidence** — `node --no-warnings --test --test-name-pattern="AC4" packages/quay-native/test/store.test.mjs`:
+
+```
+✔ AC4: every candidate title round-trips; derived charset documented (591.329928ms)
+✔ AC4 negative control: same-(mtimeMs,size) cache key must NOT serve a stale title after a same-size rewrite (5.273726ms)
+ℹ tests 2
+ℹ pass 2
+ℹ fail 0
+```
+
+**AC1 determinism** — full file 5 consecutive runs (each 6/6 pass, fail 0):
+`pass 6/fail 0` × 5 (plus a further 13+ green runs across the scoped suite and the full
+quay-native dir; all 63 quay-native tests pass). Pre-fix, the AC4 failure reproduced on ~every
+run with a random title (`"axb"`, `"arb"`, `"ajb"`, ...).
+
+**AC4** — `git show --name-only` on the fix commit:
+```
+packages/quay-native/src/store.ts
+packages/quay-native/test/store.test.mjs
+```
 
 ## Contract
 
