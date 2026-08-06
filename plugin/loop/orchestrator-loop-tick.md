@@ -94,6 +94,10 @@ inner 会话的（例如 inner claude 进程启动时刻之后的），否则按
 ```
 CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
 CronList   # 确认它已被列出——没列出的 cron 不是报警，是静默空转
+mkdir -p "$REPO_ROOT/.quay"
+# 写驱动注册表（与 cold-start skill 逐字同源）——loop-driver-check.sh 数的是这一行：
+# 只建 cron 不写注册表 = 检查器看不见这个驱动，照文档冷启动会误报 STALLED
+printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> "$REPO_ROOT/.quay/loop-driver.jsonl"
 ```
 
 **为什么选它（判据：无人值守时最不容易静默停摆）**：
@@ -131,7 +135,16 @@ bash plugin/scripts/loop-driver-check.sh
 ```
 
 必须报 `LIVE`。报 `DOUBLE-TRIGGER` = 有人多装了一个驱动（多半是照旧文档多起了一个 loop）——停下来
-处理；报 `STALLED` = 一个都没有——循环不会 tick，回步骤 4 重建 cron。
+处理；报 `STALLED` = 一个都没有——循环不会 tick。**先查注册表是否写过，再谈重建 cron**：
+
+1. `ls "$REPO_ROOT/.quay/loop-driver.jsonl"` 且 `wc -l` 有行——**注册表写过吗？**
+2. **注册表从没写过**（文件不存在或为空）→ 说明步骤 4 的**写注册表**那一步漏做了——不是缺 cron，
+   是缺记录。回步骤 4 补上 `printf … >> loop-driver.jsonl` 那一行，再跑检查必须转 `LIVE`。
+3. **注册表确实写过**仍报 `STALLED`（例如上次会话把注册表 `rm -f` 清掉了）→ 这时才回步骤 4 重建 cron。
+
+**直接重建 cron 而不先查注册表，会在每次冷启动都多加一行注册——正是本检查要抓的双触发**。
+（注：注册表是自述的，它只能数「装过几次」，不能证明那个 cron 现在还活着——这归
+`gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes` 的第二层。）
 
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
@@ -480,9 +493,11 @@ rm <repo>/.halt
 
 ```bash
 # 每个目标项目的根见各自 .quay/config.yml loop.repo_root（quay 自己的清单：quay/archguard/meta-cc）
+# `.halt` 是控制面不是传感器：没有 `.halt` 只回答「下一个边界不停」，不回答「项目在不在跑」——
+# 一个没有循环在跑的项目同样打印这一行。措辞因此是「未暂停」而不是「运行中」。
 for d in <目标项目根清单>; do
   printf "%-12s %s\n" "$(basename $d)" \
-    "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 运行中)"
+    "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 未暂停)"
 done
 ```
 
