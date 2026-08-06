@@ -55,6 +55,10 @@ extra:
       一致的干净 old-install」（合成样本），新增一个**有机演化消费者**形态：工作区有自定义 loop 值 ≠ 模板
       （模拟 archguard 式真实下游），验证升级保留 config loop 值且铺下机制文件（AC1 的真实形态回归测试）
       → 合成侧可测 archguard 撞到的 config-conflict 形态；这是 2026-08-06 裁定「两者都要」的合成侧一半
+- [ ] AC7: **下游适配验收**（archguard 报告 #12 生态位盲区）——升级铺到下游后，①②③盲区逐项适配测试：
+      ①claim-task 单机无共享裸仓 fail-closed 不误判；②slot-refill cap 阈值与下游资格形状可配；③
+      self-report-vocab 词汇版本漂移不误判不收敛。④（taskWorkLanded checkbox 信号）已核实为
+      archguard 对 quay 机制的误解（第三信号是 git-history 非 checkbox），不列入。
 
 ## Touches
 
@@ -94,3 +98,18 @@ changed: archguard 实跑（子代发现）立案——升级对已有消费者�
    撞不到有机分歧，只有真实目标能。
 
 **只提高频率不改验证对象 = 跑一万次也撞不到那个状态。**
+
+## archguard 生态位盲区裁定（2026-08-06 04:3xZ，管理者转达 archguard 报告 #12）
+
+**archguard 对 8 个新机制做静态判据×生态位矩阵，报 4 个盲区。外层逐项核实：**
+
+| 盲区 | archguard 判断 | 外层核实 | 裁定 |
+|---|---|---|---|
+| ①claim-task 两机认领 | 单机无共享裸仓不适用 | 成立（claim-task 无 remote 时 fail-closed，但单机照搬语义不通） | **真实** |
+| ②slot-refill 槽位回填 | cap=3 阈值不匹配 + 治本 AC 改派发资格形状 | 部分成立（cap 可配，但资格形状差异真实） | **部分** |
+| ③self-report-vocab-audit | 新工厂语义 vs 旧文档版本 0.3.13 误判 | 成立（词汇版本漂移） | **真实** |
+| ④taskWorkLanded 第三信号 | 「AC checkbox 计数 countAcCheckboxes」误判 not-yet-flipped | **错判**——quay taskWorkLanded 第三信号是 **git-history of specific Touches paths**（task-status-drift-check.ts:356-365），非 checkbox；ready-pool-check.ts:14-15/177 明确「不依赖 AC checkbox state（fan-in 不勾框）」 | **不成立** |
+
+**裁定：并入本任务作为适配验收 AC，不单独立案。** 理由：本任务修复后正是「机制铺到下游」的时刻，
+适配测试是其自然验收维度；①②③是升级后的适配验收项，④是 archguard 对 quay 机制的误解（已澄清）。
+**元结论成立**：机制不会自动适配已有下游——config-preserving 实现后需逐项适配测试，不直接照搬判据。
