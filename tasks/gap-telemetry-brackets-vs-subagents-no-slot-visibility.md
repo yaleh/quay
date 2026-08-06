@@ -169,6 +169,13 @@ extra:
 - tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md（AC6 记账引用 6→7）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（self-touch：AC 勾选 + invoke 证据）
 
+## Supervisor step（base-layer-outside-sessions 步骤②）
+
+本任务 = `gap-supervisor-base-layer-outside-sessions-architecture` 落地次序 **② 槽位账本 + 会话状态**。
+基座层判据：槽位账本/会话状态是平台原语，必须 outlive 会话（"几个任务在飞"的单一答案，六实体唯一写入者）——
+本任务的 `--slots`/`realInFlight`/reconcile 正是该判据的落地。详见
+`orchestration/SPEC-integration-architecture-2026-08-05.md` §7 + §9。不新开重复任务（AC4）。
+
 ## Test-Files
 
 - plugin/test/slot-visibility.test.mjs（AC1/AC2/AC3/AC5/AC8/AC9 新测试）
