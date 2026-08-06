@@ -1074,7 +1074,8 @@ if [ "$DO_CHECK_DRIFT" = true ]; then
   echo "  derived-set axis: the delivery surface's DERIVED scripts (L_D — the functional surface is the"
   echo "  derived laydown set, NOT the raw plugin/scripts file count). send-keys-verified.sh is retired"
   echo "  from the derived set (layered retirement) and is intentionally NOT reported."
-  derive_loop_scripts
+  LOOP_SCRIPTS=()
+  while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
   compute_drift_report "$WORKSPACE_ROOT"
   exit 0
 fi
