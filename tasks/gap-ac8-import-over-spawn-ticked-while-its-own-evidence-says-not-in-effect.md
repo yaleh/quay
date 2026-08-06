@@ -130,6 +130,7 @@ resume 若中断，先跑 measure 读当前 import/spawn 比例，不要相信�
 - plugin/scripts/task-contract-check.ts（AC5 的机械检查）
 - tasks/gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point.md（交叉标注）
 - orchestration/SPEC-instruments-behind-one-entry.md（AC9 因果的落地记录）
+- tasks/gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect.md
 
 ## Dispatch review
 

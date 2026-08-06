@@ -7406,3 +7406,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 冲突**：rebase 到 integration + merge 均冲突——冲突在**无关 task 文件**（gap-send-keys-reliable / gap-shipped-verifiers 的 status/AC 更新），chart2 分支基于旧 develop（b56aa3be）携带了这些 task 文件的过期版本，与 integration 并发更新冲突。doc：冲突 → 停止该任务 fan-in、标 needs-human、报告，不 `--skip`/`-X ours`。已 `rebase --abort` + `merge --abort`（两边干净）。
 - **已标 needs-human**（expectedStatus ready CAS 成功）。worktree/branch 保留（fan-in 失败不清理），待外层/人裁定：可干净 rebase 到最新 develop 再 fan-in（chart2 自身只改 test 文件）。
 - **suite 仍 running**（33min+，外层 16-fix 验证中）。**本 tick 停止后续合并与派发**（chart2-s2 fan-in 冲突命中判断边界：冲突 → 停后续合并+派发）。待外层 suite verdict + chart2-s2 冲突裁定。
+
+### tick 2026-08-06T21:2xZ（suite GREEN，红窗结束，恢复派发）
+
+- **suite GREEN（21:25:29 exit 0）**——quay-init 修复 + 16 失败 triage 全量验证通过，红窗结束、门已开。`--detect-stop` 无块。
+- **派发 1（session-pid，优先）**：`gap-session-liveness-session-pid-blind-to-claude-as-pane-process`（人多次升级的盲区缺陷）。补 ## Touches + self-touch（原本 ready 但无 Touches/self-touch 不可派发）。fork develop（0 unverified），telemetry runId ...-m7iuvd。后台 agent 已派发。
+- **ac8 就绪但 deferred**：补 self-touch 后 dispatchable，但与 session-pid **触摸冲突**（都碰 plugin/test/session-liveness.test.mjs）→ 不同时派发，等 session-pid fan-in 后再派。
+- **排除 slot-refill 其它推荐**：DIR-124（human-steered）、audit-findings（7/8 AC 机制已落 develop）、cold-start（AC 全勾=陈旧）、concurrency-reverted（已 fan-in）。
+- **chart2-s2 仍 needs-human**（fan-in 冲突待外层裁定）。
