@@ -109,33 +109,13 @@ bb25732b 未触及；删了会打断 test.sh 调度）。
 （「三项目共用四核」是实验室条件），但人未就此明确裁定。A/B 两个范围选项已摆给人、等回复。**人明确
 之前，②按原样保留**。
 
+## Scope: FULL DELETE of heavy-op-token.sh (human ruling supersedes prior pin)
 
-## Scope pin (manager, 2026-08-06 — do not delete heavy-op-token.sh)
-
-heavy-op-token.sh has TWO completely different uses; the human's "remove the lock" applies ONLY to ①:
-1. **① 挂载互斥（session-liveness 借用）—— 去掉**（人已裁定）：session-liveness 调用点传
-   `--root $SL_GLOBAL_DIR` 借 heavy-op-token 的锁。本任务只摘这一侧借用（session-liveness.sh 内
-   ~10 处 acquire/lock_token/noop 引用）。
-2. **② 重测试调度（原始用途）—— 保留**：scripts/test.sh 5 处调用，三项目共用四核、一次只跑一个
-   重测试，与观测无关，不在本次裁定范围。
-**不删 heavy-op-token.sh 本体**（否则打断 test.sh 调度）。人更早那句「单飞锁本机实验不该进产品化」
-针对 heavy-op-token 整体，但人未明确裁定 ②，按原样保留等回复。
-
-## 范围扩大为 B（2026-08-06T13:2xZ，人裁定推翻上一条范围限制，以本条为准）
-
-**人原话**：「彻底删掉 heavy-op-token.sh 及其调用/相关逻辑。我们不再处理一次只跑一个重测试逻辑。」
-
-**范围 = 全删（B），不是只摘 session-liveness 侧**：
+**人新裁定（2026-08-06，覆盖之前 A 范围钉死）**：原话「彻底删掉 heavy-op-token.sh 及其调用/相关逻辑，
+不再处理一次只跑一个重测试逻辑」。范围 = B 全删：
 1. **heavy-op-token.sh 本体删除**
-2. **所有调用点一并清理**：scripts/test.sh（5）、session-liveness.sh（7）、session-liveness-mount.sh（1）、
-   quay-init.sh（2）、capability-catalog.sh（1）、plugin/loop/fast-mode-loop-tick.md（176-180 单飞挂载语义
-   一并改写）、plugin/test/heavy-op-token*.test.mjs、test/cold-start-e2e.sh、install-config-driven-e2e.test.mjs
-3. **「一次只跑一个重测试」约束整体退役，无替代方案**（人明确不再处理）
-
-**理由链（管理者理解，外层认同）**：令牌存在前提 =「三项目共用四核」，本机实验室条件非产品条件；
-随包铺给每个下游（init/SKILL.md 铺设映射）= 把实验室条件当产品约束传播。与 os-anchor watchdog 裁定同形
-（实验期辅助工具，不进产品交付）。
-
-**删除顺序（外层裁定）**：①代码/测试（本体 + 核心调用 + heavy-op-token 测试）→ ②shipped 文档
-（loop tick 176-180 + init/SKILL.md 铺设映射）→ ③历史文档标注退役（SPEC/manager-phase-goal 等不删，
-标注）。历史文档是记录，不追溯改写。
+2. **所有调用点清理**：scripts/test.sh（5 处）+ session-liveness.sh（7 处）+ session-liveness-mount.sh（1 处）
+   + quay-init.sh（2 处）+ capability-catalog.sh（1 处声明）+ fast-mode-loop-tick.md:176-180（单飞挂载语义
+   改写）+ heavy-op-token 测试文件 + cold-start-e2e.sh
+3. **一次只跑一个重测试约束整体退役，无替代方案**
+**删除顺序**：代码/测试 → shipped 文档 → 历史文档标注退役。

@@ -6617,3 +6617,16 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   test.sh 调度）。人更早「单飞锁不该进产品化」针对整体但未明确裁定②，按原样保留等回复。
 - 已传达给在飞 agent（SendMessage）+ 记入任务体 Scope pin 段。
 - 在飞 1/3（remove-shared-events）。
+
+### tick 2026-08-06T21:4xZ（范围纠正：B 全删覆盖 A 钉死）
+
+- **人新裁定覆盖上一条 A 范围钉死**：原话「彻底删掉 heavy-op-token.sh 及其调用/相关逻辑，不再处理
+  一次只跑一个重测试逻辑」。范围 = **B 全删**：
+  ① heavy-op-token.sh 本体删除
+  ② 所有调用点清理（scripts/test.sh 5 + session-liveness.sh 7 + session-liveness-mount.sh 1 +
+     quay-init.sh 2 + capability-catalog.sh 1 + fast-mode-loop-tick.md:176-180 语义改写 +
+     heavy-op-token 测试文件 + cold-start-e2e.sh）
+  ③ 一次只跑一个重测试约束整体退役无替代方案
+  删除顺序：代码/测试 → shipped 文档 → 历史文档标注退役。
+- SendMessage 更新在飞 agent（B-FULL-DELETE 覆盖之前 A pin）；任务体已改为 B 全删。
+- 在飞 1/3（remove-shared-events）。
