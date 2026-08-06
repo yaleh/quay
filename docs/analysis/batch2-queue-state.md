@@ -5044,3 +5044,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **AC5 signal-kill 根因找到 + 修复**（`07b3f253`）：fake suite 的祖先链自信号用 `ps -o comm=` 匹配 `node*`，但本机 node 进程 comm=`MainThread`（实测 walk 日志：`walk: pid=... comm='MainThread'`）⇒ 永远不匹配 ⇒ 信号从未送达 ⇒ runner 跑完 ⇒ `state=green`（非 red+aborted）⇒ AC5 poll 超时。**3/3 一致失败根因就是 comm 检测**，不是 flaky。修 = 改 `/proc/<pid>/exe` readlink 检测 node（`*/node|*/nodejs`）。AC5 3/3 + 整个 full-suite-runner.test.mjs **18/18**。
 - **套件 5 失败全部落地清零**：① store AC4（store.ts 缓存失效）② doc-gate D1（registry.ts dist REPO_ROOT）③ codex A8（selfcheck degrade）④ AC1b（外层清 quay-init 伪影）⑤ AC5（MainThread comm）。master `07b3f253`。
 - **外层应重跑全量验证 re-green**（上轮 state 仍显示 00:09 red run）。所有 worktree/branch 清。在飞 0。无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:1xZ（内层，capability-catalog 修复 —— 最后一处红清零）
+
+- **外层重跑**（00:49–01:04）：5 项原始失败全绿 → **仅剩 capability-catalog 红**（`test-file-baseline.ts` 未在 QUESTION 表声明 → unclassified 1）。外层已根因 + 驱动内层（drive failed loud，排队到本 wakeup）。
+- **修复**：`capability-catalog.sh` QUESTION 表补 `[test-file-baseline.ts]="What is the fork-baseline test-file snapshot...?"`（`21178290`）。**105/105 declared, 0 unclassified, exit 0**。静态全量 **PASS**（12/12 checker mutation，exit 0）。
+- **全部红因清零**：原 5（store/doc-gate/codex/AC1b/AC5）+ capability-catalog。master `21178290`。外层应再重跑 → 预期 **green**，closure（~24 not-yet-flipped）随之解锁。
+- 在飞 0。无 .halt、无 block、Monitor 绿。worktree 全清。
