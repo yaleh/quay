@@ -6313,3 +6313,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **收口裁定：merge integration into develop**（非 FF）——integration 10 提交并入 develop，保留
   develop 6 记录，develop 成为含全部的权威分支。已驱动 inner 执行。
 - 内层请求：FF integration→develop + 派发 quality-criteria（no-criterion-cost 完成后唯一真实候选）。
+
+### tick 2026-08-06T11:4xZ（integration→develop 收口完成）
+
+- **外层裁定执行**：merge integration into develop（非 FF）——integration 10 任务提交（AC16 + spawn-count +
+  supervisor + no-criterion-cost）并入 develop，develop 6 记录提交（ADR-025/032、delivery-surface、tick 记录）保留。
+- **验证**：integration ⊆ develop（ancestor，integration..develop=0）；AC16 v0.4.0+"plugin" 在、
+  QUAY_CLI helper、supervisor-deliver/health.sh、checker-cost.sh 全部 PRESENT。develop = 5caf14dc 权威分支。
+- **两线模型当前态**：develop = 全部 A+B 基线 + AC16 + 3 rebase 任务 + no-criterion-cost + 记录提交。
+  integration 已空（并入 develop）。master 冻结 ea2208cf（人触发才同步）。
+- **在飞 0/3**。池唯一真实候选 quality-criteria（解除序列化）。
