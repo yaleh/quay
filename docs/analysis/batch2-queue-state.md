@@ -7345,3 +7345,5 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **根因**：`packages/quay/plugin/` 是 gitignored 的 pack-time 快照（package.sh 铺出，17:00 打包副本），与 `plugin/` 源是同一退役文件的两个路径；RETIRED_FILES 只含源路径。
 - **修复**：`plugin/scripts/adr016-screen-use-check.ts` RETIRED_FILES 增加 `packages/quay/plugin/scripts/send-keys-verified.sh`（同文件同退役，继承豁免）。已验证：adr016 0 active（两副本均 retired 报出）、mutation pass、`scripts/test.sh --static-checks` 全绿（STATIC-EXIT 0）。commit `25196d9a`。
 - **顺带**：`tasks/gap-manager-productization-five-constraints.md` 有未提交改动（manager 改写 AC5，人三条裁定禁 OS watchdog/Desktop 定时任务，仅 `/loop`/CronCreate 合法）——并发人工工作，未触碰。
+- **池健康备注**：外层 17:27 把 `gap-ac8-import-over-spawn-...` 晋为 ready（人裁定 40→6 集成方案）——该任务缺 self-touch（`--self-touch-scan` MISSING，不在静态链、不挡本次绿，但红窗解除后派发前需补 `tasks/<id>.md` 到 Touches）。池 21 ≥ floor 20，dispatchable 10。
+- **manager OVER90 块保留**（外层 17:09 裁定「双括号留待人工裁定」，115m 真超时 crash leftover，非假阳性）——本 tick 不 clear、不 reconcile、不 re-dispatch。
