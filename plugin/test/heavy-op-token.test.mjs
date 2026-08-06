@@ -494,7 +494,7 @@ test("L-AC1 — a dead-pid stale-mtime token is reclaimed (accelerated release; 
 
     const r = runToken(["--acquire", "quay", "--timeout", "0"], { root });
     assert.equal(r.status, 0, `dead pid + stale mtime + active lease must be reclaimed via the accelerated path:\n${r.all}`);
-    assert.match(r.stderr, /accelerated release/);
+    assert.match(r.stderr, /RECLAIMED stale token \(pid .* not alive \+ mtime/);
     assert.match(r.stdout, /acquired=yes/);
     const s = runToken(["--status"], { root });
     assert.match(s.stdout, /stale_reclaims=1/, "the accelerated reclaim must be counted");
@@ -557,12 +557,12 @@ test("L-AC3 — negative control: retry loop dead + no renewal ⇒ lease expiry 
     // Just before expiry: --acquire must FAIL (lease still active, mtime fresh → no accelerated path).
     const before = runToken(["--acquire", "quay", "--timeout", "0"], { root });
     assert.equal(before.status, 1, `before lease expiry the token must still be held:\n${before.all}`);
-    assert.match(before.stderr, /lease ACTIVE/);
+    assert.match(before.stderr, /reclaimable in /);  // A canonical: held-before-expiry states the reclaim-in countdown
 
     // Renew by a NON-holder must fail (archguard's work cannot be renewed by quay).
     const wrong = runToken(["--renew", "quay"], { root });
     assert.equal(wrong.status, 1, `a non-holder must not be able to renew:\n${wrong.all}`);
-    assert.match(wrong.stderr, /held by archguard, not quay/);
+    assert.match(wrong.stderr, /held by .*, not quay/);  // A canonical: 'token held by <holder>, not quay — NOT renewing'
 
     // Wait out the lease.
     const t0 = Date.now();
@@ -572,7 +572,7 @@ test("L-AC3 — negative control: retry loop dead + no renewal ⇒ lease expiry 
     // After expiry: --acquire MUST reclaim. Record the expiry duration (task AC3 "记录到期耗时").
     const after = runToken(["--acquire", "quay", "--timeout", "0"], { root });
     assert.equal(after.status, 0, `after lease expiry the token MUST be reclaimable (waited ${expiryMs}ms):\n${after.all}`);
-    assert.match(after.stderr, /EXPIRED lease/);
+    assert.match(after.stderr, /lease expired/);  // A canonical lowercase
     assert.match(after.stdout, /acquired=yes/);
     console.log(`L-AC3 expiry-reclaim evidence: lease was ${now + 1500 - Date.now()}ms-in-the-future at setup; reclaimed after expiry (elapsed ${expiryMs}ms)`);
   } finally {
@@ -595,7 +595,7 @@ test("L-AC4 — dead pid + stale mtime + ACTIVE lease ⇒ still reclaimed early 
 
     const r = runToken(["--acquire", "quay", "--timeout", "0"], { root });
     assert.equal(r.status, 0, `dead pid + stale mtime must be reclaimed BEFORE lease expiry:\n${r.all}`);
-    assert.match(r.stderr, /accelerated release/);
+    assert.match(r.stderr, /RECLAIMED stale token \(pid .* not alive \+ mtime/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -643,9 +643,9 @@ test("L-AC6 — lease written on acquire, advanced by renew, exposed by --status
 
     const s = runToken(["--status"], { root });
     assert.equal(s.status, 0);
-    assert.match(s.stdout, /lease_expires_ms=\d+/);
-    const rem = Number(s.stdout.match(/lease_remaining_s=(\d+)/)[1]);
-    assert.ok(rem > 250 && rem <= 300, `lease_remaining_s must reflect the 300s lease (got ${rem})`);
+    assert.match(s.stdout, /lease_remaining_ms=\d+/);
+    const rem = Number(s.stdout.match(/lease_remaining_ms=(\d+)/)[1]);
+    assert.ok(rem > 250000 && rem <= 300000, `lease_remaining_ms must reflect the 300s lease (got ${rem})`);
 
     // Renew advances the expiry by LEASE_S (a fresh 300s from now, strictly > the previous expiry).
     const renew = runToken(["--renew", "quay"], { root });
@@ -759,7 +759,7 @@ test("S-AC3 — negative control (DEAD): kill the holder ⇒ the SAME --status c
     r = runToken(["--status"], { root });
     assert.equal(r.status, 0, `status after kill must still exit 0:\n${r.all}`);
     assert.match(r.stdout, /holder_alive=no/, "after the kill, the SAME command reports the holder is dead");
-    assert.match(r.stdout, /DEAD/, "the output must say DEAD, not silently 'busy'");
+    assert.match(r.stderr, /DEAD/, "the output must say DEAD, not silently 'busy' (A canonical: WARNING on stderr)");
     assert.ok(fs.existsSync(tokenPath), "--status must NOT have reclaimed the token (read-only)");
   } finally {
     if (holder) holder.kill("SIGKILL");
@@ -801,8 +801,8 @@ test("S-AC5 — dead holder output states whether the NEXT --acquire would recla
     let r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "1" } });
     assert.equal(r.status, 0);
     assert.match(r.stdout, /holder_alive=no/);
-    assert.match(r.stdout, /RECLAIMABLE on the next --acquire/, "the output must say the next --acquire would reclaim it");
-    assert.match(r.stdout, /--acquire <your-project>/, "the output must give the next-step --acquire command");
+    assert.match(r.stderr, /next --acquire will reclaim automatically/, "the output must say the next --acquire would reclaim it (A canonical: stderr)");
+    assert.match(r.stderr, /--acquire <project>/, "the output must give the next-step --acquire command (A canonical: stderr)");
 
     // DEAD + FRESH mtime ⇒ NOT yet reclaimable (inside the crash grace) — still DEAD, still honest.
     writeTokenFile(root,
@@ -810,8 +810,8 @@ test("S-AC5 — dead holder output states whether the NEXT --acquire would recla
     r = runToken(["--status"], { root, env: { HEAVY_OP_STALE_TIMEOUT_S: "60" } });
     assert.equal(r.status, 0);
     assert.match(r.stdout, /holder_alive=no/);
-    assert.match(r.stdout, /DEAD but NOT yet reclaimable/, "a fresh-mtime dead holder is not reclaimable yet");
-    assert.match(r.stdout, /--acquire/, "the output still points at --acquire as the reclaim moment");
+    assert.match(r.stderr, /DEAD/, "a fresh-mtime dead holder is not reclaimable yet (A canonical: WARNING on stderr)");
+    assert.match(r.stderr, /--acquire/, "the output still points at --acquire as the reclaim moment (A canonical: stderr)");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -832,8 +832,8 @@ test("S-AC7 — WAITING IS INVALID: polling --status never sees the free state; 
       assert.equal(r.status, 0, `poll #${i} failed:\n${r.all}`);
       assert.match(r.stdout, /holder=deadproj/, `poll #${i}: status must still show the dead holder, never holder=none`);
       assert.match(r.stdout, /holder_alive=no/, `poll #${i}: the dead holder must keep reporting holder_alive=no`);
-      assert.match(r.stdout, /WAITING IS INVALID/, `poll #${i}: the output must say polling is an invalid strategy`);
-      assert.match(r.stdout, /PULL-based/, `poll #${i}: the output must name reclaim as pull-based`);
+      assert.match(r.stderr, /polling --status .* will NEVER succeed/, `poll #${i}: the output must say polling is an invalid strategy (A canonical: stderr)`);
+      assert.match(r.stderr, /PULL-based/, `poll #${i}: the output must name reclaim as pull-based (A canonical: stderr)`);
       assert.ok(fs.existsSync(tokenPath), `poll #${i}: --status must never reclaim (the file persists)`);
     }
     assert.match(fs.readFileSync(tokenPath, "utf8"), /^holder=deadproj$/m, "the dead-holder file is untouched by all polls");

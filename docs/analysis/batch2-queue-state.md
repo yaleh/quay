@@ -6217,3 +6217,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 3 个真实候选（needs-human-black-hole / no-criterion-cost / quality-trend）均未落地但全部与
   spawn-count OVERLAP（plugin/test/*）⇒ 序列化，本 tick 无新派发。
 - 挂起：supervisor merge + AC17 catch-up（spawn-count 完成后）；integration 领先 develop 2 提交（AC16）。
+
+### tick 2026-08-06T09:1xZ（外层，AC17 catch-up ② 完成 + 跨机合并回归）
+
+- **AC17 catch-up ② 完成**（da065182：merge origin/develop，B 105 提交并入 A develop）——跨机合并落地。
+  17 个文件冲突由 inner 解决。
+- **跨机合并第一个真实回归（管理者定位，非新写 bug）**：ready-pool-check 崩溃——
+  ① computeRelevance arity 不匹配（A 四参定义 + B 三参调用点，parentRefCount undefined → .get() 崩）
+  ② top 未声明（B 的 --top N 特性写 top，A 参数名 topN）——内层已修 ①（签名默认值），② 已驱动（top→topN）。
+  两边各自绿、合起来红——scoped 测试未覆盖的跨机合并形态。
+- **audit 记录 A/B（periodic-push-backup 铺设集 + verify-delivery-surface 第5项）随 merge 提交**，安全。
+
+- **ready-pool-check 跨机合并回归根治**（内层）：① arity 崩溃（b6bf8297）② blocking 静默失效
+  （buildCandidate 补 childrenByTask/parentRefCount + 四参调用）——已验证 exit 0 + pool 9/12。
+  跨机合并两边各自绿/合起来红的第二例（scoped 未覆盖）。

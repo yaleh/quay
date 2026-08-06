@@ -416,7 +416,7 @@ try_acquire() {
   set -o noclobber
   now_once="$(now_ms)"
   if printf 'holder=%s\npid=%s\nacquired_ms=%s\nlease_expires_ms=%s\nhost=%s\n' \
-      "$project" "$PPID" "$now_once" "$(( now_once + LEASE_MS ))" "$(hostname 2>/dev/null || echo unknown)" > "${TOKEN_FILE}" 2>/dev/null; then
+      "$project" "$PPID" "$now_once" "$(( now_once + LEASE_S * 1000 ))" "$(hostname 2>/dev/null || echo unknown)" > "${TOKEN_FILE}" 2>/dev/null; then
     claimed=1
   fi
   set +o noclobber
@@ -539,7 +539,7 @@ do_renew() {
   fi
   acq="$(read_field acquired_ms)"
   case "$acq" in ''|*[!0-9]*) acq="$(now_ms)" ;; esac
-  new_expires="$(( $(now_ms) + LEASE_MS ))"
+  new_expires="$(( $(now_ms) + LEASE_S * 1000 ))"
   # Atomic rewrite: temp file in the same dir + rename. Keeps acquired_ms (held_ms stays continuous);
   # refreshes pid to the RENEWING process (the work owner) and the lease.
   tmp="${TOKEN_FILE}.renew.$$"
@@ -550,7 +550,7 @@ do_renew() {
     # before the atomic rename so a stale renew cannot clobber a freshly-acquired token.
     if [ "$(read_holder)" = "$project" ] && mv -f "${tmp}" "${TOKEN_FILE}" 2>/dev/null; then
       printf 'heavy-op-token: renewed (project=%s, pid=%s, lease extended +%ss, expires in %ss)\n' \
-        "$project" "$PPID" "${HEAVY_OP_LEASE_S}" "${HEAVY_OP_LEASE_S}"
+        "$project" "$PPID" "$LEASE_S" "$LEASE_S"
       return 0
     fi
   fi
