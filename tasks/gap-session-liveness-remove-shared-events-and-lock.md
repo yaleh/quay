@@ -82,7 +82,7 @@ tmux capture-pane / git log / stat，零写入；send-keys 只在注释解释输
 ## Contract
 
 measure   parallel_observers = `bash plugin/scripts/session-liveness.sh --once 2>&1 | grep -c 'observing\|监测'` stdout 数字段（多观察者并行挂载各自正常）
-band      parallel_observers 多观察者可并行（无锁冲突、各自事件流）
+band      parallel_observers_ok = 多观察者可并行（无锁冲突、各自事件流）可并行（无锁冲突、各自事件流）
 invoke    `grep -n 'SL_GLOBAL_DIR\|events.jsonl\|heavy-op/token\|_sl_acquire' plugin/scripts/session-liveness.sh`
 control   两观察者盯同一 pane 并行 ⇒ 都正常（AC2）；目标零写入（AC3）
 resume    去共享与去锁分步提交，任一步完成即写盘
