@@ -47,18 +47,12 @@ model` 是同一次切换的两个独立可落地面（分开立案，避免单�
 
 ## Contract
 
-```
-measure claim_calls = 本次真实迁移后，`git ls-remote --heads origin | grep -c '^refs/heads/task/'`
-  （GitHub develop 汇合点上出现的、由 claim-task.sh 真实创建的空 task/<id> 认领分支数）
-band claim_calls >= 1
-invariant claim-task.sh 与 periodic-push-backup.sh 在两机上的实际 remote 目标都是 GitHub
-  origin（不是本地裸仓库、不是对方主机），且两者不静默指向一个不再被任何人读取的地方
-  （AC15 ②/③ 度量口径延续，不新造一套）
-invoke `git remote -v` （两机分别跑，核对 origin 是否为 https://github.com/yaleh/quay.git）
-control 把某一机的 QUAY_CLAIM_REMOTE 临时设成一个不存在的路径 ⇒ claim-task.sh 必须 fail-closed
-  （exit 2，不静默"认领成功"）——这条已经是现有实现的既有行为，本任务只需重跑一次确认没有回归
-resume 若中断，先跑 measure 核对当前 GitHub 上 task/* 分支数，不要假设从零开始
-```
+measure   claim_calls = `git ls-remote --heads origin | grep -c '^refs/heads/task/'` stdout 的数字段（GitHub develop 汇合点上出现的、由 claim-task.sh 真实创建的空 task/<id> 认领分支数）
+band      claim_calls >= 1（迁移后 GitHub 上有真实认领分支）
+invariant claim_remote_target = GitHub origin（claim-task.sh 与 periodic-push-backup.sh 在两机上的实际 remote 目标都是 GitHub origin——不是本地裸仓库、不是对方主机；AC15 ②/③ 度量口径延续）
+invoke    `git remote -v`
+control   QUAY_CLAIM_REMOTE 设成不存在路径 ⇒ claim-task.sh fail-closed（exit 2，不静默「认领成功」）
+resume    若中断，先跑 measure 核对当前 GitHub 上 task/* 分支数，不要假设从零开始
 
 ## Chosen mechanism
 
@@ -91,3 +85,12 @@ resume 若中断，先跑 measure 核对当前 GitHub 上 task/* 分支数，不
 - tasks/gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github.md（自身文件）
 - plugin/scripts/claim-task.sh
 - plugin/scripts/periodic-push-backup.sh
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T06:3xZ
+changed: 红窗分诊（contract-check ratchet）补合规——Contract 段原包在代码块里导致检查器无法解析
+（contract-line-unknown ×2 + measure-no-field），重写为标准格式（measure 带反引号命令+字段、band/invariant/
+invoke/control/resume 每行一条）；补 Dispatch review 段。任务本身（管理者 stage-3/4 branch-cutover
+机制任务，claim-task/backup 指向 GitHub）范围不变。

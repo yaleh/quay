@@ -49,38 +49,22 @@ orchestration/orchestrator-loop-tick.md     2 处硬编码 master（workspace �
 
 ## Contract
 
-**判据 vs 现实修正（管理者，2026-08-06 第二轮 tick，使用视角提问自查发现，非推测）**：
-外层已裁定采纳 AC6——共享文件（`plugin/loop/` 下两个）保留 `master` 作为**可配置默认值**，
-不是全部清零。原来写的 `band master_refs = 0` 对整个三文件求和，**会在 AC6 正确实现之后
-仍然非 0**（因为默认值字符串 `master` 依然会以字面量出现在共享文件里，例如
-`branch: master` 这样的默认配置行）——**这个判据在 AC6 之后会拒绝一个正确的实现**，
-是本任务自己开工前就自查到的一个「判据 vs 现实」缺口，现修正为分两条度量：
+measure   master_refs_local = `grep -c "master" orchestration/orchestrator-loop-tick.md` stdout 的数字段（本仓非共享副本——AC6 不适用，必须完全切到字面量 develop，允许 0 容忍）
+band      master_refs_local = 0
+measure   master_hardcoded_ops_shared = 共享两文件（plugin/loop/fast-mode-loop-tick.md、plugin/loop/orchestrator-loop-tick.md）里把 master 硬编码进具体分支操作指令（如 `git checkout master`/`git merge ... master`/`fork from master` 这类操作性语句，不是「默认值＝master」配置说明性语句）的行数——精确 grep 模式执行时定（区分操作性与声明性需看上下文，非纯字符串匹配可靠）
+band      master_hardcoded_ops_shared = 0（容许 master 作为默认值字面量，不容许硬编码进操作指令）
+invariant build_land_not_on_master = 1（两层循环 Build fork / Land 收口阶段不对 master 写操作，除非工作分支配置显式指向它——未 cutover 下游的默认行为；quay 工作分支 develop→task/<id>→integration→develop）
+invoke    `grep -n "master" orchestration/orchestrator-loop-tick.md`
+control   往 orchestration/orchestrator-loop-tick.md 加回一行含 master 的分支操作指令 ⇒ master_refs_local 非 0；往共享文件加一行硬编码 git checkout master（非默认值声明）⇒ master_hardcoded_ops_shared 非 0
+resume    若切换中断，先跑两条 measure 核对当前残留处数，再继续未完成的文件
 
-```
-measure master_refs_local = `grep -c "master" orchestration/orchestrator-loop-tick.md`
-band master_refs_local = 0
-  （本仓非共享副本，AC6 不适用——必须完全切到字面量 develop，允许 0 容忍）
+## 判据 vs 现实修正（2026-08-06，管理者自查发现）
 
-measure master_hardcoded_ops_shared = 共享两文件（plugin/loop/fast-mode-loop-tick.md、
-  plugin/loop/orchestrator-loop-tick.md）里，**把 master 硬编码进具体分支操作指令**
-  （如 `git checkout master`/`git merge ... master`/`fork from master` 这类操作性语句，
-  而不是"默认值＝master"这类配置说明性语句）的行数——精确 grep 模式留给执行时定
-  （区分"操作性硬编码"与"默认值声明"需要看上下文，不是纯字符串匹配能可靠做到的）
-band master_hardcoded_ops_shared = 0
-  （容许 master 作为默认值的字面量出现，不容许它被直接硬编码进操作指令）
-
-invariant 两层循环的 Build（fork）/Land（合并收口）阶段不对 `master` 分支做任何写操作
-  （除非工作分支配置显式指向它，即未做 cutover 的下游项目的默认行为）；
-  quay 自己的工作分支为 develop（Build fork 起点）→ task/<id>（Build）→ integration
-  （Land 收口）→ develop（outer 批量 fast-forward，按已有
-  SPEC-branching-model-integration-branch-2026-08-05.md 设计）
-invoke `grep -n "master" orchestration/orchestrator-loop-tick.md`（本仓副本）；
-  共享文件的 invoke 命令由执行时按上面的"操作性 vs 声明性"区分标准编写
-control 往 `orchestration/orchestrator-loop-tick.md` 手工加回一行含字面量 `master` 的分支
-  操作指令 ⇒ `master_refs_local` 必须非 0；往共享文件加一行硬编码 `git checkout master`
-  的操作指令（不是默认值声明）⇒ `master_hardcoded_ops_shared` 必须非 0
-resume 若切换中断，先跑两条 measure 核对当前残留处数，再继续未完成的文件；不要从头假设
-```
+外层已裁定采纳 AC6——共享文件（`plugin/loop/` 下两个）保留 `master` 作为**可配置默认值**，不是全部清零。
+原来写的 `band master_refs = 0` 对整个三文件求和，**会在 AC6 正确实现之后仍然非 0**（因为默认值字符串
+`master` 依然会以字面量出现在共享文件里，例如 `branch: master` 这样的默认配置行）——**这个判据在 AC6
+之后会拒绝一个正确的实现**，是本任务自己开工前就自查到的一个「判据 vs 现实」缺口，现修正为分两条度量
+（见 Contract）。
 
 ## Chosen mechanism
 
@@ -165,3 +149,12 @@ archguard 实测只有 master（+ feat/* 特性分支），直接改字面量 de
 指向 926d771b，外层核实）。本任务实现「工作分支转 develop/integration」时，共享文件走可配置默认 master
 路径，本仓副本走字面量改路径——两条线互不破坏。与 gap-two-peer-quay-developers 任务（双向合并）交叉：
 develop 成为权威汇合点后，共享文件的 master 默认对 archguard 仍安全。
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T06:3xZ
+changed: 红窗分诊（contract-check ratchet）补合规——Contract 段原包在代码块里导致检查器无法解析
+（contract-line-unknown + measure-no-command + measure-no-field），重写为标准格式（measure 带反引号
+命令+字段、band/invariant/invoke/control/resume 每行一条）；补 Dispatch review 段。AC6 边界与
+cd13260c 的判据拆分不变，仅格式化对齐检查器。
