@@ -5721,3 +5721,21 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   filing/cross-ref 非落地）② gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat（`fm-...-6ph2wv`，
   心跳必跑 slot-refill 但仅 completion 触发；todo→ready + self-touch + resolve 过）。两候选生产闸互不相交。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:5xZ（外层，人直接指令 + AC15 裁定）
+
+- **人直接指令①**：优先执行三条 todo（不在就绪池，提优先级排进下一批派发）：
+  `gap-web-action-buttons-unused-route-and-open-redirect-delete` /
+  `gap-message-bus-human-third-target-transport-agnostic` /
+  `gap-b-machine-periodic-push-backup-to-bare-repo`。
+- **人直接指令②**：跨机项目同步立为常设 AC15（已写进 manager-phase-goal.md）。三条机械判据：
+  ①任务板 status 一致率 ②claim-task.sh 真实调用次数 >0 ③quay-sync.git 备份时延有上限。
+- **外层 AC15 阈值裁定**（人留我定，据实）：
+  - **备份时延上限 = 20 分钟**（cron 10-15min 的两倍余量，覆盖 cron 漂移 + push 耗时）；
+  - **任务板收敛**：每对照轮 status 不一致 ≤ 1 处为可接受（机械记录偏差，不自动纠正——冲突处理
+    归 two-machine-collab 机制）；
+  - **claim-task 调用**：>0 即达标（判据②本身机械，无需阈值）。
+  - 冲突处理策略：**备份是纯 push，不 resolve**（b-machine-push-backup 任务既定范围——冲突留
+    two-machine-collab 的权威/合并机制处理，本次备份只保数据不丢）。
+- **当前实测**：quay-sync.git 无 refs（A 机旧点未到）✓判据③无上限坐实；QUAY_CLAIM_REMOTE 未设
+  ✓判据②=0 坐实；内层已派发 slot-refill 回填任务 + productize-manager-layer。
