@@ -21,7 +21,7 @@ title: "full-suite-state.json's state has NO REASON AXIS — state=red carries
   +1 => 5->6, pre-friction (nothing hurting — ABORT handled well, machine
   recovered, downstream behavior happens to be right), found by asking the
   generator question"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

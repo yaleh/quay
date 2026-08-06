@@ -25,7 +25,7 @@ title: "telemetry in-flight brackets do NOT reflect real concurrency — 5
   (nothing hurting — no failure, suite running, inner working, telemetry command
   exits 0; found by asking the generator 'what range does this criterion
   quantify' → answer: HISTORY not CURRENT)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

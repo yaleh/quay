@@ -5,7 +5,7 @@ title: all quality criteria are point-in-time (was it green this time / does
   last time / closer to the goal); the per-test-cost trend 0.251→0.464→0.321
   (net +28%) worsened a whole day before anyone asked; add a per-run metrics
   recording + trend-flag category as the manager layer's quality function
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

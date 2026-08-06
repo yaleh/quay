@@ -18,7 +18,7 @@ title: "generator new axis: NO criterion records its own cost — the
   ways — the ready-pool slope is post-friction (manager only timed because outer
   skipped), does NOT score; 'no criterion records its own cost' is pre-friction
   (the other 29 criteria have nothing hurting), scores +1 => AC10 4->5"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

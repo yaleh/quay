@@ -23,7 +23,7 @@ title: "quay-init's derived laydown set is SENSITIVE TO REFERENCE SPELLING
   NO fail-loud precondition when CHECKER missing (set -uo pipefail, line 41
   assigns only) — worth adding; AC10: post-friction (hit by meta-cc), DOES NOT
   score, count stays 4"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

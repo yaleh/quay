@@ -10,7 +10,7 @@ title: "the inner's OWN words — 'Batch of 3 fully merged' — persist despite
   criterion to the re-anchor cycle: after re-anchor cycles, the inner's
   self-reported wording (commit/fan-in notes) must use factory semantics
   (rolling dispatch / verification-round), batch-style reports flagged"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

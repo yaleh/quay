@@ -3,7 +3,7 @@ id: gap-residue-check-crystallized-as-tool-mode
 title: "\"box has text vs actually submitted\" must be a tool judgment, not role
   memory — add a --check-residue mode (empty / real-unsubmitted-text /
   ghost-suggestion-only) reusing D's bottom-region + shape"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

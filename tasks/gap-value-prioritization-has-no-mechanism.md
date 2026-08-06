@@ -5,7 +5,7 @@ title: which of the 54 todos matters most has no mechanical answer — every rea
   judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity
   (not relevance); add a relevance signal (strategic-question traceability +
   blocking + cost) as the manager layer's prioritization function
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

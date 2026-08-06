@@ -29,7 +29,7 @@ title: "ARCHITECTURE: tonight's 10 incident classes reverse-engineered into a
   stop each faking the base via screen-scraping; conversely if supervisor starts
   needing judgment the design is wrong, push that judgment back to the
   corresponding agent layer"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
