@@ -5183,3 +5183,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **no-criterion-cost 合并**（`e5cb225d`）：`checker-cost.jsonl` 纯追加计量器——静态检查器 9/9（`run_checker` bash 包装）+ gate 执行路径（engine.ts 计时 + workspaceRoot 穿通）+ ready-pool-check 自记录（n=真实 pool）+ 套件耗时序列（verification-round.jsonl 追加，红窗卡不死序列，05:03 缺陷消除）。load 双维（n + loadavg）使 35.8→91.2→157.0 归因到 load 非 n（归因更正）。AC1–AC7 勾（9/9 + scoped 68）。已并已清。
 - **合同 ratchet 预警**（agent 报）：`--static-checks` exit 1 于 `tasks/gap-web-board...: invoke-evidence-missing`（不在 baseline）——agent 证实与本次改动无关、master 上已存在，**外层应分诊**（可能影响下轮套件静态层）。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:5xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：detect-stop 报 laydown-derivation 10.0m——`--slots` 实证 **12/12 reconcilable、real-in-flight 0**（陈旧括号）。`--clear` 已清。reconcile-aware slots 连续实盘证明。
+- **外层 develop-merge worktree 出现**（926d771b）：外层在做分支模型集成（branch-model 任务线）——我 held 的 ROUND-3 任务正由外层推进，不干预。
+- **派发 1/5**：`quality-criteria-trend`（点状判据 → 趋势判据，读 verification-round 历史打标 + REVIEW-cadence 趋势检查项；no-criterion-cost 的自然配对）。补 self-touch + telemetry 已开。池仍结构性串行。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

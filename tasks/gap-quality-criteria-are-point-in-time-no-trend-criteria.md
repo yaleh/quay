@@ -150,6 +150,7 @@ check）、架构（ADR/archguard）、对抗审查（2 轮上限）、DoD 闸�
 
 ## Touches
 
+- tasks/gap-quality-criteria-are-point-in-time-no-trend-criteria.md
 - plugin/scripts/（趋势判据：读 suite-state/verification-round 历史 + 打标；或扩 runner 记录 schema）
 - plugin/test/（AC3 回归控制 + AC2 断言）
 - orchestration/REVIEW-cadence.md（AC4：复盘加趋势检查项）
