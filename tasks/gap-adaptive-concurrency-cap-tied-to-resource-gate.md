@@ -93,6 +93,14 @@ concurrent-batch-scheduler.ts）——设计实现在 quay 做一次，走升级
       「交叉标注（AC8）」句；`tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md` 补 Dispatch review
       记录本任务引用（cgroup 硬限额上位解对照）。测试「AC8」断言三者名字出现在机制源码。
 
+> **AC8 交叉标注（2026-08-06，来自 `tasks/gap-two-machine-collaboration-git-branch-claiming.md`）**：
+> 自适应并发上限（cap = f(resource-gate)，读 avg300 + 滞回 + 档位配置）管**单机**同时派发几个在飞
+> subagent；认领协议（`claim-task.sh`，`task/*` 分支推共享裸仓库 = 认领）管**跨机**哪些任务不撞——
+> 两者是**不同作用域的并发限制器**，认领检查在**同一派发决策点**（`fast-mode-loop-tick.md` 步骤 4）
+> 复用同一 `checkTouchesPair`。跨主机时 `QUAY_GLOBAL_DIR` 单飞锁失效的根因是状态放在「共享文件系统」
+> 假设上；认领建在 git 上（唯一真跨主机状态存储）——机制一次下游复用（`claim-task.ts` 的
+> `decideClaim` + 共享 `checkTouchesPair`）。
+
 ## Definition of Done
 
 - [ ] AC1–AC8 全部勾上

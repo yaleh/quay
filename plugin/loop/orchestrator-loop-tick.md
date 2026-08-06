@@ -803,6 +803,12 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 - 并发资格：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞任务
   和彼此**两两检查，重叠则不同批
 - 优先级：阻塞其它任务的优先；`gap-*` 缺陷类优先于 `DIR-*` 新能力
+- **跨机在飞（两机协作，`gap-two-machine-collaboration-git-branch-claiming`）**：两机协作时
+  （`QUAY_CLAIM_REMOTE` 指向共享裸仓库），**另一台机器的在飞任务 = 共享仓库上存在的 `task/*` 分支**
+  ——本层 telemetry 的 `inProgress` 只覆盖本机内层。候选与跨机在飞任务触摸相交（用内层同源
+  `plugin/scripts/claim-task.ts` / `checkTouchesPair`）或已被对方认领 ⇒ **不补进队列**（候选的认领状态
+  由内层派发前 `claim-task.sh` 机械判定；本层只需在**筛选候选**时把跨机在飞算进「所有在飞任务」）。
+  单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 本条为 no-op，行为不变。
 
 **就绪池维持（todo→ready 晋级）不再靠外层自愿 AC-queue**（`gap-promotion-cadence-is-role-volition-
 not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先级是**产品机制**，由内层 tick
