@@ -83,6 +83,12 @@ plugin/test/select-tests-for-touches.test.mjs:  Relationship, not snapshot (tick
 - plugin/scripts/（基线快照 helper，若成脚本）
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC4 交叉标注）
 
+## 交叉注（前置②执行确认，2026-08-06）
+
+`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md` AC4 引用本任务：
+「其 AC1–AC5 全绿后本 AC 视为满足」。本任务 `status: done`、AC1–AC5 全部勾上（见上方 Invoke
+evidence），前置②已落地——分支模型上线不被断言噪声遮蔽。
+
 ## Contract
 
 measure   global_count_assertions = `grep -rn '全局\|test files.*count\|assert.*files.*==' plugin/test/` stdout 数字段
