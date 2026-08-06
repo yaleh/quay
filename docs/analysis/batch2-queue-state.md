@@ -7347,3 +7347,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **顺带**：`tasks/gap-manager-productization-five-constraints.md` 有未提交改动（manager 改写 AC5，人三条裁定禁 OS watchdog/Desktop 定时任务，仅 `/loop`/CronCreate 合法）——并发人工工作，未触碰。
 - **池健康备注**：外层 17:27 把 `gap-ac8-import-over-spawn-...` 晋为 ready（人裁定 40→6 集成方案）——该任务缺 self-touch（`--self-touch-scan` MISSING，不在静态链、不挡本次绿，但红窗解除后派发前需补 `tasks/<id>.md` 到 Touches）。池 21 ≥ floor 20，dispatchable 10。
 - **manager OVER90 块保留**（外层 17:09 裁定「双括号留待人工裁定」，115m 真超时 crash leftover，非假阳性）——本 tick 不 clear、不 reconcile、不 re-dispatch。
+
+### 事件 18:0xZ（外层重复投递静态链修复请求——已在上轮修复并验证）
+
+- **外层请求重复投递**：adr016 打包副本违规修复已在 `25196d9a` 落地（RETIRED_FILES 增 `packages/quay/plugin/scripts/send-keys-verified.sh`）。本轮复跑验证仍绿：adr016 0 active / mutation pass / `--static-checks` STATIC-EXIT 0（194 scripts scanned）。修复后外层有 manager 新提交（7c8435d8、4e13af90），静态链未被其破坏。
+- **无新动作**：同一修复不重复提交；队列状态仅记本轮复跑验证结果。
