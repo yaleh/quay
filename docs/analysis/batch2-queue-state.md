@@ -5645,3 +5645,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   输入框空）。AC1-AC6、13/13 scoped。worktree/branch 已清。**在飞 2/3**（session-liveness-hashes +
   telemetry-brackets）。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:0xZ（内层，telemetry-brackets fan-in — 真实现）
+
+- **telemetry-brackets fan-in 完成（真实现）**：`--slot-status`（纯读，reconcile dry-run 拆分
+  real_in_flight vs stale_brackets）、slots_free 机械可见（外层不再靠 queue-state 叙述）、**自检①改读
+  real_in_flight**（fix false-RED class——5 stale + 1 real 不再假红）。AC1-AC5/7；**AC9（blocked-signal 超时
+  自动升级）正确 scope 外**（inner-blocked-signal 独立机制，DoD/Contract 外，留外层决定）。scoped 45/45。
+  worktree/branch 已清。**在飞 1/3**（session-liveness-hashes）。
+- 套件 green、无 stop、无 block、Monitor 绿。
