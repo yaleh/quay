@@ -60,10 +60,9 @@ README 的措辞「no global install step required」暗示"直接跑就行"，
 ## Contract
 
 ```
-measure readme_option_b_runs = `node packages/quay/bin/quay.js --help` 退出码（0=可运行）
+measure readme_option_b_runs = `node packages/quay/bin/quay.js --help; echo $?` stdout 的退出码数字段
 band readme_option_b_runs = 0（当前必为非 0，修复后必为 0，或命令文本已同步改为可运行形态）
-invariant README 记录的字面命令必须与 CLAUDE.md 记录的字面命令一致，或明确说明差异原因；
-  不得两份文档给出同一动作的不同命令而只有一份能跑
+invariant README 记录的字面命令必须与 CLAUDE.md 记录的字面命令一致，不得两份文档给出同一动作的不同命令而只有一份能跑
 invoke `node packages/quay/bin/quay.js --help`
 control 改前贴出上面 invoke 的真实报错；改后同一条命令必须成功退出
 resume 若中断，先跑 measure 确认当前 README 的字面命令是否已可运行，不要假设已修
@@ -88,3 +87,9 @@ resume 若中断，先跑 measure 确认当前 README 的字面命令是否已�
 ## Touches
 - README.md
 - CLAUDE.md（若采用"以 CLAUDE.md 为权威"方案）
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-06T14:2xZ
+changed: 尚未派发/审阅（管理者立案，文档 vs 代码使用视角提问）
