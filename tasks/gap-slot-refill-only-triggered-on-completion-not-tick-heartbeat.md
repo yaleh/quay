@@ -1,7 +1,7 @@
 ---
 id: gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat
 title: "slot-refill is ONLY evaluated on <task-notification> completion events, never on the tick heartbeat — a long task (session-liveness-hashes 49m+) holds the only subagent, 2 slots idle 34+ min, mechanism keeps saying should_refill=true, nothing asks it (manager mechanism-self-evidence 2026-08-06 02:0xZ: ran slot-refill.ts itself, in_flight=1/slots_free=2/should_refill=true/recommended=[...], 34min zero dispatch; outer independently re-ran: same answer; doc self-contradicts — line 83 'no completion event = no dispatch evaluation (负控制)' vs line 231 'tick heartbeat goes through step 4 full flow', but step 4 execution has NO mechanical guarantee, depends on inner volition per tick); leftover branch of gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release (its AC3 covers 'after release <5min refill' = completion branch REAL, AC4 'no completion event = zero dispatch' is the OTHER side of today's defect); fix: tick heartbeat MUST unconditionally run slot-refill and act on the result, not only on completion events"
-status: ready
+status: done
 labels:
   - gap
   - defect
