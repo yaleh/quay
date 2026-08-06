@@ -112,6 +112,7 @@ n 涨 1.26×、成本涨 2.55×——比 O(n²) 只该给的 1.6× 还陡（或�
 
 ## Touches
 
+- tasks/gap-no-criterion-records-its-own-cost-checker-cost-jsonl.md
 - plugin/scripts/（判据执行包装处加 time + load 记录 + checker-cost.jsonl 纯追加；full-suite-runner
   或 verification-round 写套件序列 {round, startedAt, durationMs, laneCount, pass, fail, load}）
 - plugin/test/（AC2 斜率复现 fixture）

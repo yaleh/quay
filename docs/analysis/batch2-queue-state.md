@@ -5171,3 +5171,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **needs-human-black-hole 合并**（`6f3c68d5`）：`needs-human-recheck.ts` 检测器——时间轴（ageDays，>7d ⇒ ALIVE-STALE + FORCED RE-REVIEW）+ 存活轴（Touches 引 ADR-022 退休脚本 ⇒ DEAD-RETIRED，import strategic-doc-staleness-check 的 DELETED_SCRIPTS 同尺子）。AC1–AC5 勾（8/8）。
 - **实测发现**：16 条 needs-human → **7 条 dead-retired**（DIR-119-D2/D3/D4 + gap-plancheck-* + gap-prepare-milestone-no-worktree-isolation + gap-recursive-guard，全引退休管线脚本）+ **1 条 ALIVE-STALE**（DIR-109，7.6d 强制复检）+ 9 条 alive。`--supersede` 写是**外层的有意动作**（单命令），内层只检测不写。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:0xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳性再处置**：detect-stop 报 residue-check 145.8m——新 `--slots` 实证 **brackets 11 / reconcilable 11 / real-in-flight 0**（全部陈旧括号，任务早已 merged；外层 closure 才关）。`--clear` 已清（wait 14.9s）。**reconcile-aware slots 首次实盘证明工作**（telemetry-brackets 修复的直接收益）。
+- **派发 1/5**：`no-criterion-cost`（判据执行包装记 time+load → checker-cost.jsonl 纯追加，每判据自身成本可测）。补 self-touch + telemetry 已开。池仍结构性串行（其余候选互撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
