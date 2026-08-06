@@ -43,6 +43,12 @@ extra:
 
 **type:** execution
 
+> **Supervisor 步骤标注（2026-08-06，gap-supervisor-base-layer-outside-sessions-architecture AC4）**：
+> 本任务是 supervisor 落地次序的 **①持久调度**（SPEC-integration-architecture §4.4 第 1 步）——
+> 它把「崩溃 = 永久死亡」的锚点从 Claude 会话内搬到 OS 级 systemd 用户 timer，正是基座层
+> 「不随 agent 会话死」的第一条。supervisor 健康检查（supervisor-health.sh 的
+> `os_anchor_timer=active`）以此为存活证据。不另开重复任务。
+
 ## Proposal
 
 管理者（2026-08-05）——**本阶段主目标的头号结构性障碍**：这套机制**在崩溃后无法不靠人恢复**。
