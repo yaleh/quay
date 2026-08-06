@@ -59,6 +59,13 @@ usage() {
 [ -n "$TEXT" ] || { echo "send-keys-reliable: 文本为空" >&2; exit 2; }
 [ -n "$TARGET_JSONL" ] || { echo "send-keys-reliable: 缺少目标 transcript 路径" >&2; exit 2; }
 
+# fail-loud precondition (gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure
+# AC4): the delivery verdict depends on the pure checker; a MISSING checker means the whole
+# deliver-confirmed-verdict promise is broken (the pre-fix script only ASSIGNED CHECKER at line 41
+# and silently failed every delivery poll against a nonexistent file — set -uo pipefail cannot catch
+# an assignment). Fail at startup with exit 1 + the missing path, never silently assign.
+[ -f "$CHECKER" ] || { echo "send-keys-reliable: 缺少校验器 $CHECKER——无法验证送达（依赖未铺？），fail loud" >&2; exit 1; }
+
 # Step 0. The target must exist (positive control: a nonexistent target → fail loud, never a
 # silent 0). Nothing is sent before this check.
 if ! tmux list-panes -t "$TARGET" -F '#{pane_pid}' >/dev/null 2>&1; then

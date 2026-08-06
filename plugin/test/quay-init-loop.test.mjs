@@ -156,6 +156,9 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
       // transitive deps of the checkers (the laid-down mechanism must be functional)
       'gate-script-base.ts', 'workflow-event-schema.mjs', 'task-schema.ts', 'touches-parser.ts',
       'wiring-coverage-check.ts',
+      // dependency-closure regression (gap-laydown-derivation-is-sensitive-to-reference-spelling-
+      // dependency-closure AC1): the bare-name-referenced checker of send-keys-reliable.sh must ship
+      'transcript-delivery-check.ts',
     ];
     for (const s of expectedScripts) {
       assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', s)), `loop script must be laid down: plugin/scripts/${s}`);
