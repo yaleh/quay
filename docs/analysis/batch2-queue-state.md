@@ -5112,3 +5112,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **DIR-124 在飞 ~26min**（TaskOutput running，transcript 03:35 活跃）：巨型 directive——agent 在范围分析（A 族 parent 关闭 vs B2 控制面内核基底）。未 commit，未超 90m。
 - 套件 green（02:49 参考，最近 merge 待外层下轮覆盖）。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。master `d1097689`。
+
+### tick 2026-08-06T04:0xZ（内层，DIR-124-B2 fan-in 完成 —— 本批 5/5 全落地）
+
+- **DIR-124-B2 合并**（`5f42c788`）：`stage-receipt.ts`（909 行，绑定/校验 receipt，8 个 fail-closed 代码）+ `workflow-journal.ts`（723 行，原子 appendStage + 哈希 receipt + 迁移）——控制面内核基底（可执行 stage journal + 哈希绑定 receipt），双镜像字节相同（cmp 0）。20/20 测试。agent 正确判定 DIR-124 父级 AC 单 tick 不可满足（A 族被 ADR-022 退休 + 不补勾规则阻塞），只勾 B2 子任务 AC。已并已清。
+- **本批 5/5 全落地**：token-measures-wait / residue-check / value-prioritization / runtime-nowhere-safe / DIR-124-B2。在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `e5339234`。
