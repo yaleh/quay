@@ -6440,3 +6440,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **AC16 状态**：外层 REVERTED to not-achieved（2b5bb273）——SEA tarball 无 plugin（archguard
   string-scan + manager tar tzf 双确认）；root cause SEA 单二进制 vs plugin 目录树结构性冲突。
 - integration = develop 基线 + 7 任务 + SEA 缺陷任务；在飞 0/3。
+
+### tick 2026-08-06T15:2xZ（内层 cron，派发 supervisor-preemption）
+
+- 无 halt；套件 GREEN。在飞 0/3（bracket reconcile 1 陈旧——message-bus worktree-gone 误判）。
+- 池 8/20、disjoint 5/5（criterion met），但 ready 全陈旧（message-bus/quality-criteria/supervisor 已 merge、
+  DIR 指令、4 landed）。promotions 数组含 message-bus（stale）+ preemption。
+- **派发 1/3 — gap-supervisor-preemption**（supervisor step ④，3.6 补晋）：resolve 5/5、pool-candidate
+  clean、fork-baseline=develop。worktree /home/yale/work/quay-worktrees/preemption + bracket 已开。
+  agent 指引：.halt 从 tick 边界检查 → 任意点生效（base-layer 能力，mid-agent 即停）。
+- 在飞 1/3。supervisor 族 ③④⑤ 齐了（③ base-layer done、④ preemption 在飞、⑤ message-bus done）。
