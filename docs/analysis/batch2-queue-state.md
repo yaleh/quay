@@ -6526,3 +6526,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   #3 **外层早上的 cap-from-gate 修复机器相关**（=== DEFAULT_BANDS.go 读机器本地 config，B/ad-arm1 go:2≠5 挂）
   ——我的修复缺陷，改测试为密闭/注入配置。
 - 已驱动 inner 修三条。
+
+### tick 2026-08-06T17:4xZ（ad-arm1 二轮门禁 3 条确定性复现修复）
+
+- **#1【最高】pane-state-classify.ts 入口穿落**（395-424）：--classify 异步 stdin resume() 后穿落到
+  同步 selfcheck()+exit()，stdin 未消费进程已退；--check-residue 在 else 外不可达——分类器对 shell
+  消费者没工作，解释大批 busy/idle 失败。**重构为 --classify/--check-residue/else-selfcheck 三选一**。
+  验证：--classify 输出 state、--check-residue 可达、17/17。
+- **#2 session-liveness.sh 双 --selfcheck 臂**（618-642）：新版 selfcheck + 旧版 _sl_selfcheck 死码 +
+  重复 -h|--help。**删旧死臂 + 死函数**。验证：新版 selfcheck exit 0、--pane-state 接缝正常。
+- **#3 cap-from-gate 机器相关**：早前修 === DEFAULT_BANDS.go（读机器本地 config，B/ad-arm1 go:2≠5 挂）。
+  **改为注入密闭 TEST_BANDS {go:3} 断言 === TEST_BANDS.go/wait/extreme_wait**。验证：13/13。
+- 全部在 develop（dbc17135）。ad-arm1 等推 GitHub 后 pull 重跑二轮门禁。
