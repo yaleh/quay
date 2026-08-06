@@ -6455,3 +6455,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **f4b86a5e（ad-arm1 4 回归修复）已推 origin**（develop →8eac8caf，9 提交含 message-bus/supervisor-preemption）。
 - ad-arm1 现在可 pull 重跑冷启动门禁；B 机下次拉取同样受益。
+
+### tick 2026-08-06T15:5xZ（内层 cron + slot-refill，轻触）
+
+- 无 halt；套件 GREEN。在飞 1/3（preemption，brackets aligned，分支 0 提交——agent 工作中）。
+- 池 9/20、disjoint 5/5；ready 全陈旧（含 preemption 在飞 + 已 merge 的 message-bus/quality-criteria/
+  supervisor + DIR + 4 landed）。slot-refill 推荐 4 全陈旧，**无新 promotions** ⇒ 本 tick 无新派发。
+- 在飞 1/3。integration 待外层 merge→develop。
