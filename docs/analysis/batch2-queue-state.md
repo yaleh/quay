@@ -6462,3 +6462,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 池 9/20、disjoint 5/5；ready 全陈旧（含 preemption 在飞 + 已 merge 的 message-bus/quality-criteria/
   supervisor + DIR + 4 landed）。slot-refill 推荐 4 全陈旧，**无新 promotions** ⇒ 本 tick 无新派发。
 - 在飞 1/3。integration 待外层 merge→develop。
+
+### tick 2026-08-06T11:3xZ（外层，session-liveness test G 回归候选）
+
+- **test G 隔离失败**（RESUMED on busy transition，行663）——管理者全量 + 外层隔离双确认，非 AC21。
+- **session-liveness.sh 是 eb5532f4 合并冲突文件**（152行）——RESUMED/busy 逻辑可能是 da065182
+  合并回归第 5 实例。已立案 gap-session-liveness-resumed-merge-regression-suspect，驱动 inner 判别
+  （脚本回归 vs 测试时序）。
