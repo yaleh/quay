@@ -3,6 +3,7 @@
 每 20 分钟一行。`动作类型` 是判断分层是否退化的唯一依据（`correct` 占比 ≥50% = 内层自主性不足）。
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
+| 2026-08-06 21:2xZ | `unblock` | **派发恢复**：inner 派发 session-pid（优先项，task-start baseCommit=SUITE GREEN）并开工；chart2-s2 早先派发但 fan-in 冲突 → needs-human（71aef62c，worktree/branch 保留）。套件 green 确认 | 内层：Honking 1m29s，working on session-pid；1 agent | ①session-pid task-start 记录核实；②套件 green 21:25:29 |
 | 2026-08-06 21:2xZ | `unblock` | **SUITE GREEN 21:25:29（exit 0, durMs 2248421）**——quay-init 修复（168→16） + inner 16 失败 triage（16→0）全量验证通过；**红门清除**；就绪池（session-pid / ac8 / 全部 gap 缺陷）解锁派发 | 内层：Sautéed 等 verdict，现应转派发 | ①state=green finishedAt 21:25:29 实测；②exit 0 / failures=None |
 | 2026-08-06 21:0xZ | `no-action` | **等待型 tick**：套件 running（20:48，验证 inner 的 16 修复，~19 分钟）；inner 空闲等 verdict；verdict 待出 | 内层：Sautéed 22m54s（等套件），1 agent | ①套件 state=running 核实；②树净 |
 | 2026-08-06 20:4xZ | `unblock` | **inner 完成 16 失败 triage + 套件重跑**：a1a001ae 记录 all real defects fixed（dup task frontmatter / task-check dangling var / message-bus tsc / checker-cost double-record / tick-vocab meta-text / **trend-check merge corruption**——正是 obs1 的 ×2，文件复制 2 次卡中段）；多个 fix commit 落地树净；重跑套件（20:48）验证 | 内层：Churning 20m，16 修复全 commit；1 agent | ①a1a001ae + fix commits 核实；②套件 state=running 20:48 |
