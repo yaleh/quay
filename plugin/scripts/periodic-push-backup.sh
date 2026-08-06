@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# periodic-push-backup.sh — B-machine periodic PUSH BACKUP to the shared bare repo
-# (tasks/gap-b-machine-periodic-push-backup-to-bare-repo, AC1/AC2/AC3).
+# periodic-push-backup.sh — B-machine periodic PUSH BACKUP to the backup remote.
+# 2026-08-06 branch-cutover (orchestration/PLAN-develop-branch-cutover-2026-08-06.md): the backup
+# remote is GitHub `origin` on BOTH machines; the pre-cutover local A↔B bare repo target is RETIRED.
+# (origin task: gap-b-machine-periodic-push-backup-to-bare-repo, AC1/AC2/AC3.)
 #
 # NARROW scope: periodic COMMIT BACKUP only. This script:
 #   * NEVER force-pushes — a non-fast-forward rejection means the bare repo has commits you lack,
@@ -13,17 +15,17 @@
 #   * emits the raw `git push 2>&1` output so the ## Contract measure
 #     `git push 2>&1 | grep -c 'To.*quay-sync\|up-to-date'` matches (band push_ok >= 1).
 #
-# B-machine setup (the task's real deployment): B's `origin` remote IS the local bare repo
-# ~/work/quay-sync.git, so the default (no args) pushes the CURRENT branch to it. On the A-side repo
-# `origin` is GitHub — always pass an explicit --remote there, or install the --cron-line (which pins
-# the remote). Verify your remote with `git remote -v` before cron-installing anywhere.
+# Deployment (2026-08-06 branch-cutover): the local A↔B bare repo (~/work/quay-sync.git) direct sync
+# is RETIRED — GitHub `origin` is the sole cross-host sync point and is GitHub on BOTH machines
+# (verify with `git remote -v` before cron-installing anywhere). The default (no args) pushes the
+# CURRENT branch to `origin`; `--remote` pins a different name/path when needed.
 #
 # Usage:
 #   periodic-push-backup.sh [--remote <name|path>] [--branch <branch>] [--all]
 #                           [--root <repo>] [--dry-run] [--cron-line]
 #
 #   (no args)     push the CURRENT branch to `origin`
-#   --remote      remote name OR filesystem path (default: origin; on B, origin = ~/work/quay-sync.git)
+#   --remote      remote name OR filesystem path (default: origin; origin = GitHub on both machines)
 #   --branch      push this local branch instead of the current branch
 #   --all         push ALL local branches (opt-in; still NON-force — a diverged ref is rejected)
 #   --root        repo root (default: auto-derived from this script's location)

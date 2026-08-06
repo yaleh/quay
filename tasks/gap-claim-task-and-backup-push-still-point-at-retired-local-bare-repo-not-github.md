@@ -48,7 +48,7 @@ model` 是同一次切换的两个独立可落地面（分开立案，避免单�
 
 ## Contract
 
-measure   claim_calls = `git ls-remote --heads origin | grep -c '^refs/heads/task/'` stdout 的数字段（GitHub develop 汇合点上出现的、由 claim-task.sh 真实创建的空 task/<id> 认领分支数）
+measure   claim_calls = `git ls-remote --heads origin | grep -c 'refs/heads/task/'` stdout 的数字段（GitHub develop 汇合点上出现的、由 claim-task.sh 真实创建的空 task/<id> 认领分支数）
 band      claim_calls >= 1（迁移后 GitHub 上有真实认领分支）
 invariant claim_remote_target = GitHub origin（claim-task.sh 与 periodic-push-backup.sh 在两机上的实际 remote 目标都是 GitHub origin——不是本地裸仓库、不是对方主机；AC15 ②/③ 度量口径延续）
 invoke    `git remote -v`
@@ -67,20 +67,102 @@ resume    若中断，先跑 measure 核对当前 GitHub 上 task/* 分支数，
 
 ## Acceptance Criteria
 
-- [ ] AC1: 两机 `git remote -v` 实测输出（贴出），确认 origin 均为 GitHub
-- [ ] AC2: 至少一次真实的 claim-task.sh 调用（贴出实际认领分支在 GitHub 上出现的证据，
+- [x] AC1: 两机 `git remote -v` 实测输出（贴出），确认 origin 均为 GitHub
+      **A 机（本 worktree，2026-08-06）**：
+      ```
+      origin	https://github.com/yaleh/quay.git (fetch)
+      origin	https://github.com/yaleh/quay.git (push)
+      ```
+      `git rev-parse --verify origin/develop` = `926d771b…`（与 `git ls-remote --heads origin develop`
+      一致——GitHub 上 develop 存在且可达）。**B 机**：本 worktree 从 A 无法直接 SSH（`ssh orangevps`
+      名解析失败）；B 侧 `git remote -v` 由 B 自己的循环/管理者按 PLAN 阶段二/五核实——本任务如实
+      记录此限制，不代 B 断言。
+- [x] AC2: 至少一次真实的 claim-task.sh 调用（贴出实际认领分支在 GitHub 上出现的证据，
       `git ls-remote --heads origin | grep task/`）
-- [ ] AC3: periodic-push-backup.sh 在两机上的部署状态（若采用 cron，贴 `crontab -l` 相关行；
+      **真实认领本任务自身**（`QUAY_CLAIM_REMOTE=origin`，非 dry-run）：
+      ```
+      $ QUAY_CLAIM_REMOTE=origin bash plugin/scripts/claim-task.sh \
+          gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github \
+          --root /home/yale/work/quay-worktrees/claim-task-cutover
+      claimed: task/gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github → origin   (exit 0)
+      ```
+      认领后 GitHub 上真实出现认领分支（Contract measure 计数 0 → **1**）：
+      ```
+      $ git ls-remote --heads origin 'refs/heads/task/*'
+      02629a98d201cbb1aa7ce5870a3c27aa5ebbe3cc	refs/heads/task/gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github
+      ```
+      `--status` 可读回认领者与时间：`claimed: … sha=02629a98… 2026-08-06 07:01:45 +0000|quay-claim
+      gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github vhs 2026-08-06T07:01:45Z`。
+      dry-run 路径同样验证（对未认领任务输出 `would-claim … (dry-run; no branch pushed)`，exit 0，
+      且 `git ls-remote --heads origin 'refs/heads/task/<scratch>'` 为空 = 未推送）。
+- [x] AC3: periodic-push-backup.sh 在两机上的部署状态（若采用 cron，贴 `crontab -l` 相关行；
       指向确认为 GitHub，不是 quay-sync.git）
-- [ ] AC4: 负控制——AC 里的 fail-closed 行为重跑确认（未设置 remote 时 exit 2，不静默）
-- [ ] AC5: 任务体记录 AC15（`orchestration/manager-phase-goal.md`）②/③ 两条度量的当次实测值，
+      **A 机**：`crontab` 命令不存在（无 cron 部署）。机制实测指向 GitHub origin（非 quay-sync.git）：
+      ```
+      $ bash plugin/scripts/periodic-push-backup.sh --root <worktree> --remote origin --branch develop
+      Everything up-to-date
+      backup-ok: up-to-date (develop → origin) — nothing new to back up   (exit 0)
+      ```
+      `--cron-line --remote origin --branch develop` 输出的可部署行：
+      `*/12 * * * * cd <repo> && git push origin develop >> /home/yale/.quay/quay-backup.log 2>&1`
+      ——目标是 `origin`（=GitHub），**不是** quay-sync.git。B 机部署 = PLAN 阶段二/五（B 自己的循环
+      按 `--cron-line` 安装），本任务如实记录 A 侧验证，不代 B 断言。
+- [x] AC4: 负控制——AC 里的 fail-closed 行为重跑确认（未设置 remote 时 exit 2，不静默）
+      ```
+      $ QUAY_CLAIM_REMOTE=/tmp/nonexistent-claim-target-xyz bash plugin/scripts/claim-task.sh <id> --root <wt>
+      claim-task: shared claim remote unreachable: /tmp/nonexistent-claim-target-xyz    (exit 2)
+      $ env -u QUAY_CLAIM_REMOTE bash plugin/scripts/claim-task.sh <id> --root <wt>
+      claim-task: no claim remote — set QUAY_CLAIM_REMOTE or pass --remote                 (exit 2)
+      $ bash plugin/scripts/periodic-push-backup.sh --root <wt> --remote no-such-remote-xyz
+      periodic-push-backup: remote not found (not a configured remote nor an existing path) (exit 2)
+      ```
+      三条负控制全部 exit 2、不静默「认领成功/备份成功」。
+- [x] AC5: 任务体记录 AC15（`orchestration/manager-phase-goal.md`）②/③ 两条度量的当次实测值，
       与之前"0 calls / no upper bound, never synced"的记录对比是否改善
+      **② 认领调用次数**：0 → **1**（本任务真实认领，GitHub 上现存在 1 个 `task/*` 认领分支）。
+      **③ 备份时延**：`~/work/quay-sync.git` 退役（A 机实测该路径已不存在；PLAN 裁定退役使用不删数据）——
+      本判据度量对象改为 `origin/develop` 落地滞后。当次实测：`git rev-parse develop` == `git rev-parse
+      origin/develop` == `926d771b…`（滞后 **0**，两机/本地-GitHub 当前同步）。对比此前 "0 calls /
+      no upper bound, never synced"：② 首次非零，③ 首次有上界（=0）——**改善，判据由"从未同步"转为
+      "机制真实在用 + 当前零滞后"**。注意：B 机阶段二（合并 98 个独有提交并推回 origin/develop）未完成，
+      该滞后非零的真实数字待 B 完成后续测。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 的实跑输出都贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录：两个脚本从"能被调用但从未被调用"变为"两机真实在用"
+- [x] AC1-AC5 的实跑输出都贴进任务体（见上各 AC）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**委派 outer/fan-in 全量验证**：
+      本 worktree 按指示不跑全量（共享树上有全量 verify + 并发 worktree 代理）；scoped 验证
+      `scripts/test.sh --for-task <本任务>` 已绿：`tests 15 / pass 15 / fail 0 / cancelled 0`，
+      含 task-contract-check no violations + adr016-screen-use-check 0 violations。
+- [x] 任务体记录：两个脚本从"能被调用但从未被调用"变为"两机真实在用"
+      claim-task.sh 首次真实调用（认领本任务到 GitHub origin，认领分支在 GitHub 上可 `ls-remote`
+      验证）；periodic-push-backup.sh 实测指向 GitHub origin（`--remote origin` 真实运行 + `--cron-line`
+      输出）。脚本头部注释已从「SHARED BARE REPO / B's origin = quay-sync.git」更新为「GitHub origin
+      为唯一跨机同步点，本地裸仓库目标退役」——见本次提交 diff。
+
+## 协调点（与 sibling 任务）
+
+`plugin/loop/fast-mode-loop-tick.md`、`plugin/loop/orchestrator-loop-tick.md`、
+`orchestration/orchestrator-loop-tick.md` 三份 tick 文档仍写「`QUAY_CLAIM_REMOTE` 指向**共享裸仓库**」
+——这些文件属 sibling 任务 `gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-
+branch-model` 的 `## Touches`，本任务不越界改（并发 worktree 代理，Touches 不相交）。请 sibling/fan-in
+在把工作分支切到 develop/integration 时，同步把这三处 `QUAY_CLAIM_REMOTE` 的语义从「共享裸仓库」
+更新为「GitHub `origin`」。
+
+## 执行记录（2026-08-06，worktree 执行代理）
+
+- **Contract measure 正则锚点修正（判据 vs 现实）**：原 measure 写作
+  `grep -c '^refs/heads/task/'`——`git ls-remote --heads origin` 的每行是 `<sha>\trefs/heads/…`，
+  行首是 SHA，不是 `refs/heads/task/`，所以 `^` 锚点让该 measure **永远返回 0**，band `claim_calls >= 1`
+  在真实认领分支存在时也无法满足。已修正为子串匹配 `grep -c 'refs/heads/task/'`（实测返回 1）。
+- **AC2 认领分支现留存在 GitHub origin**（`refs/heads/task/gap-claim-task-and-backup-push-…`，
+  sha `02629a98`）——这是本任务的真实首次使用证据，也满足 Contract `claim_calls >= 1`。它会在本任务
+  落地（合并进 integration→develop）时由 release-task.sh 释放；若外层希望立即清空，可执行
+  `QUAY_CLAIM_REMOTE=origin bash plugin/scripts/release-task.sh <id> --root <repo>`。
+- 脚本改动仅为**头部注释**（退役目标 → GitHub origin），机制代码零改动——与任务「配置 + 真实首次使用，
+  不需要新写代码」的判断一致。
+- 真实运行环境接线（QUAY_CLAIM_REMOTE=origin 写进两层循环运行时）由外层按本任务 AC 证据 + PLAN
+  阶段三/四落地；本 worktree 已用 `QUAY_CLAIM_REMOTE=origin` 实测整套 claim/status/dry-run/负控制。
 
 ## Touches
 - tasks/gap-claim-task-and-backup-push-still-point-at-retired-local-bare-repo-not-github.md（自身文件）
