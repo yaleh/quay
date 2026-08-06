@@ -5347,3 +5347,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **cold-start-gate fan-in 完成**（merge task/gap-cold-start-gate...，6 文件 409 行）：gate 判据收窄——冷启动 = **派生铺设集内脚本全绿**（非整套件绿）；`laydown-set-check.sh` 用与 quay-init 同 grep 机械派生（当前 30 脚本）+ 语法 + 解析成员自身测试；无关失败（esbuild dist 崩溃 / 缺 gitignored config）实测不阻塞。AC1–AC6 全勾（scoped 6/6，task-contract no violations）。**偏差已记录**：`plugin/test/laydown-set-check.test.mjs` 超出字面 Touches（AC6 强制 node:test，agent 用 ## Test-Files 声明供选择器拾取）——交外层闭环时知悉。留 ready。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T17:1xZ（内层，cold-start-gate fan-in 后首派：1/5）
+
+- **cold-start-gate fan-in 完成**（前 tick，本 tick 复核记录）：派生铺设集 gate 已并 + scoped 6/6 绿。在飞清零。
+- **pool 复核**：pool 10 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（7 候选带宽 plugin/scripts/ 目录 touch 串行互撞）。
+- **派发 1/5**：`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`（scheduler 批次胜者 + 最高优先——直接 touch 两份 loop tick 文档；补 self-touch 后派发）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
