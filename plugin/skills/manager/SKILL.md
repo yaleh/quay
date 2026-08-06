@@ -103,6 +103,8 @@ allowed-tools: Bash, Read, Monitor
 （`gap-crystallize-launch-config-into-checked-in-settings-file`）。
 
 - **outer / inner**：`claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`
+  （launcher 统一追加 `--prompt-suggestions false`——**REQUIRED**，ghost-suggestion 故障 6 从源头消除，
+  `gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`；`_launchSpec.promptSuggestions:false`）
 - **manager**：`claude`（Anthropic 默认模型，不带 917k 覆盖——917k 只给 deepseek 角色，避免真实窗口
   之上压缩过晚导致 API 报错，session-launch-recipes §5）
 - 验证不启动：`bash plugin/scripts/quay-launch.sh <role> --dry-run`

@@ -43,6 +43,20 @@ Verify the command without starting anything: `bash <root>/plugin/scripts/quay-l
 For a one-shot verification session use `bash <root>/plugin/scripts/quay-launch.sh <role> --bare`
 (minimal mode, not long-lived).
 
+**REQUIRED launch params (gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false, human
+ruling 2026-08-05):** the ghost-suggestion (reliable-send fault 6) is eliminated AT SOURCE by two
+params, both REQUIRED (not optional), present in EVERY launched session (manager/outer/inner):
+
+1. `--prompt-suggestions false` — flag-only form, materialized by `quay-launch.sh` from
+   `_launchSpec.promptSuggestions === false` (verify: `--dry-run` output contains
+   `--prompt-suggestions false`).
+2. `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` — env-var form, carried by the checked-in settings
+   file top-level `env` and loaded via `--settings`.
+
+A `--dry-run` that omits `--prompt-suggestions false` for any role means the checked-in launch spec
+has drifted from the REQUIRED cold-start contract — STOP and fix the settings file before starting
+(`plugin/test/launch-settings.test.mjs` asserts this mechanically).
+
 ## Observable consequences (AC8c) — the falsifiable checklist every cold-start MUST produce
 
 "The same skill command produces the same observable consequences on any model" is only meaningful

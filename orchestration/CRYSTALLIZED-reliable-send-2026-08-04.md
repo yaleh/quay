@@ -73,6 +73,14 @@ until-loop 承载这个等待，不要用短 sleep 硬编码猜测延迟。
 当前行」，循环 C-u 最终能清空；故障 6 是「ghost 显示」，循环 C-u 永不生效——**判定靠「循环后 pane
 内容是否逐字不变」**。
 
+**2026-08-06 标注（gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false）**：
+故障 6 **已被环境配置从源头消除**——`--prompt-suggestions false` +
+`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`（冷启动 REQUIRED 参数，人裁定非可选）从根上关掉
+输入框的灰色占位建议，故障 6 不再出现（throwaway 双向验证：带配置 ⇒ 输入框 `❯` 后无建议；
+不带配置 ⇒ `❯ Try "edit <filepath> to..."` 灰色建议出现，见任务体 AC1/AC2）。
+**运行时判定逻辑（直接输入覆盖）保留作历史兜底**——防未来版本行为变化（例如 flag/env 失效、
+新形态 ghost），不删。
+
 ## 故障 7：全新会话的 welcome 屏占位符——C-u 循环清不掉、直接覆盖也卡（第六种送达失败模式）
 
 **证据**：2026-08-05 archguard 外层首次驱动自己的内层时，send-keys-reliable.sh 在**全新 welcome 屏**
