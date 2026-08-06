@@ -6437,3 +6437,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
     （config 注释明写同一机制不同数字，ad-arm1 GO=2 合法）——驱动 inner 修。
   #4 send-keys-reliable AC4 文案漂移（脚本 vs 测试正则措辞）——驱动 inner 修。
 - **ad-arm1 会等推 GitHub develop 后 pull 重跑**。
+
+### tick 2026-08-06T14:5xZ（ad-arm1 冷启动 4 回归修复 + message-bus fan-in）
+
+- **ad-arm1 冷启动诊断的 4 条 da065182 合并回归全部修复**（f4b86a5e）：
+  ① session-liveness SyntaxError（makeFreshGitRepo 失体 + initGitRepo 重复 const commit）→ 恢复完整。
+  ② loop-driver-check 整文件两份版本拼接（SyntaxError）→ 删第二份，保留一份完整（8/8）；
+     附带 tick-doc AC5 文案（line 179 裸"回步骤 4 重建 cron"→ 查注册表优先 + rm -f 清陈旧）。
+  ③ cap-from-gate 硬编码 effective_cap>=3 → 断言 === DEFAULT_BANDS.go（配置 GO 值，13/13）。
+  ④ send-keys-reliable AC4 文案漂移（依赖的校验器缺失 vs /缺少校验器/）→ 统一（4/4）。
+  全 test 文件 syntax sweep 通过。
+- **message-bus-with-identity fan-in 到 integration**（1037c6ce→8003f001）：deliver 带 sender 身份、
+  agent 信道拒绝 from:human（fail-closed）、tick 读收件箱。AC1-AC7、scoped 24/24。
+- **AC16 状态**：外层 REVERTED to not-achieved（2b5bb273）——SEA tarball 无 plugin（archguard
+  string-scan + manager tar tzf 双确认）；root cause SEA 单二进制 vs plugin 目录树结构性冲突。
+- integration = develop 基线 + 7 任务 + SEA 缺陷任务；在飞 0/3。
