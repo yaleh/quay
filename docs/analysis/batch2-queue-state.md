@@ -5684,3 +5684,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （真实下游 archguard/meta-cc/B 加入验证目标，人「更频繁验证」方向）。config-preserving 修复任务
   已补 AC6（A3 夹具扩配置分歧）。
 - 内层在飞 1/3（session-liveness-hashes）。套件 green。
+
+### tick 2026-08-06T02:2xZ（外层，管理者机制自证 + 裁定）
+
+- **管理者机制自证**：跑 slot-refill.ts 本体——in_flight=1/slots_free=2/should_refill=true/
+  recommended=[gap-full-suite-runner-red-pattern, gap-productize-the-manager-layer]；34min 零派发。
+- **外层独立核实三层一致**：机制答案复现 + 当前实测（内层 pane 确在等 1 background agent 49m30s，
+  套件 green 无停止条件）+ 文档矛盾（template 行 83「无完成事件无派发评估」vs 行 231「心跳走步骤 4
+  全流程」，但步骤 4 无机械保证）。
+- **裁定**：dispatch-tick-boundary 遗留分支，另立 `gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat`
+  （不重开；dispatch-evaluated 的 AC3 完成即回填 40s 实测真，保留；本任务补「心跳必跑 slot-refill」）。
+- **驱动回填**（数据：recommended 两候选 ready + 触摸可解析 + 与在飞 disjoint 机制判）：
+  gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red / gap-productize-the-manager-layer。
