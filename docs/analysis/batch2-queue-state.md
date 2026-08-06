@@ -6305,3 +6305,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **integration 现 = develop 基线 + AC16 + spawn-count + supervisor + no-criterion-cost**（cbc9ca43）。
   **待外层 FF integration→develop**（verification-round-N 批量合 FORK_BASELINE）。
 - 池内唯一剩余真实候选 quality-criteria 已解除序列化（no-criterion-cost 完成）→ 下一 tick 可派。
+
+### tick 2026-08-06T09:5xZ（外层，integration→develop 收口）
+
+- **integration 已含全部任务工作**（cbc9ca43 = A+B 基线 + AC16 + spawn-count + supervisor +
+  no-criterion-cost；58927990 已 merge develop）。develop 领先 integration 6（外层/管理者记录类提交）。
+- **收口裁定：merge integration into develop**（非 FF）——integration 10 提交并入 develop，保留
+  develop 6 记录，develop 成为含全部的权威分支。已驱动 inner 执行。
+- 内层请求：FF integration→develop + 派发 quality-criteria（no-criterion-cost 完成后唯一真实候选）。
