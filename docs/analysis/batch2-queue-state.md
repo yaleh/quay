@@ -6664,3 +6664,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   管理者 AC1-AC6 机械可测（兜底实测 / 事件驱动同轮 / 落后量可读 / 负控制 / 两机 / 无 crontab）。
 - **b-machine-push-backup 标 superseded**（其 AC1 文字改了但实现仍 --cron-line crontab，改造不完整；
   新任务为正确替代）。新任务可派（touches 解析通过）。
+
+### tick 2026-08-06T23:0xZ（cross-machine-sync 派发——OVERLAP 序列化 hold）
+
+- **人裁定派发 gap-cross-machine-sync**（AC1-AC6 全机械可测：兜底实测/事件驱动同轮/落后量可读/负控制/两机/无 crontab）。
+  数据方给「与在飞 remove-shared-events disjoint（checkTouchesPair 机制判）」。
+- **机械验证推翻 disjoint**：checkTouchesPair 实判 **OVERLAP** —— 两任务都改
+  `plugin/loop/fast-mode-loop-tick.md`（remove-shared-events 改写 176-180 单飞挂载语义；
+  cross-machine-sync 加 sync 检查点）。**数据与机制不一致，以机制为准**。
+- **处置**：按 tick doc OVERLAP ⇒ 序列化，**不并行派发**。已 promote 到 ready（排队），
+  等 remove-shared-events fan-in 落地 fast-mode-loop-tick.md 后本 tick 下一轮派发。
+  对应人裁定"可等 remove-shared-events 完成后"分支。
+- 在飞 1/3（remove-shared-events）。池另有 cross-machine-sync 待命。
