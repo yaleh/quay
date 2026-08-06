@@ -91,6 +91,7 @@ resolved).
 
 ## Touches
 
+- tasks/gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.md
 - CLAUDE.md
 - plugin/scripts/task-contract-check.ts (if wire-in chosen)
 - plugin/skills/author/SKILL.md or equivalent todo→ready gate (if wire-in chosen)

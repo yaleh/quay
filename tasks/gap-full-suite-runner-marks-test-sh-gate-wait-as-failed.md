@@ -63,6 +63,7 @@ test.sh 内部的 gate-WAIT 路径没接入原因轴。
 
 ## Touches
 
+- tasks/gap-full-suite-runner-marks-test-sh-gate-wait-as-failed.md
 - plugin/scripts/full-suite-runner.ts（WAIT 标记检测 + reason 分类）
 - plugin/scripts/test.sh（若改专门退出码）
 - plugin/test/full-suite-runner.test.mjs（WAIT-aborted 负控制）

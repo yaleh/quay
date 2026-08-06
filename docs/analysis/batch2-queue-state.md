@@ -5237,3 +5237,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **dispatch-evaluated 合并**（`02f12f83`）：`slot-refill.ts/.sh` 槽位释放回填评估（组合 cap-from-gate + --slots reconcile realInFlight + ready-pool dispatchable_disjoint → REFILL GO/NO-GO）+ tick 文档定位/步骤 4 接线——**完成通知 = 派发触发源，不等下一 tick**（AC3 live gap_min<5 复测归外层）。AC1–AC6 勾（7/7）。已并已清。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T09:0xZ（内层，补池后次派：2/5）
+
+- **派发 2/5**（disjoint batch）：`gate-wait-as-failed`（runner 检测 test.sh 内部门禁 WAIT 标记 → reason=aborted 非 failed——reason-axis 的 runner 侧补全）+ `checksplitrecommendation`（ADR-022 保留的 split 分类器接线决定）。补 self-touch + telemetry 已开。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
