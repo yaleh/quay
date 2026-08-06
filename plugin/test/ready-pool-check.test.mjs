@@ -753,3 +753,25 @@ test("CLI smoke: --top 5 emits top_relevance value-sorted array with reasons (AC
   assert.equal(parsed.top_relevance[0].strategic, true, "control: strategic candidate ranks front");
   assert.ok(parsed.top_relevance.every((e) => typeof e.value === "number" && typeof e.reason === "string"));
 });
+
+// ── Cross-machine merge regression (AC17 catch-up): computeRelevance arity — blocking must work ──
+// The merge left a 3-arg call to the 4-param computeRelevance; the default empty Map silently
+// zeroed blocking (allTasks landed in childrenByTask, .get() → task object, .length undefined).
+// Fix: buildCandidate threads childrenByTask/parentRefCount; a parent with a child must report
+// blocking=true (the manager's counterexample: Y has child X → 4-arg blocking=true, 3-arg false).
+test("relevance blocking works end-to-end — a parent task with a child reports blocking=true (arity regression)", (t) => {
+  const root = makeWorkspace("rel-block");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "PARENT-1", { status: "todo", labels: ["gap"], children: ["CHILD-1"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  writeTask(root, "CHILD-1", { status: "todo", labels: ["gap"], parent: "PARENT-1", body: fourArtifactBody({ touches: ["- code/b.ts"] }) });
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(process.execPath, ["--experimental-strip-types", script, "--root", root, "--top", "5"], { encoding: "utf8" });
+  const parsed = JSON.parse(out);
+  const parent = parsed.top_relevance.find((e) => e.id === "PARENT-1");
+  assert.ok(parent, "parent candidate present in top_relevance");
+  assert.equal(parent.blocking, true, "parent with child must report blocking=true (childrenByTask threaded)");
+  assert.match(parent.reason, /blocking Y/, "reason states blocking Y");
+  // Negative: the child (no children of its own) is not blocking on the children axis.
+  const child = parsed.top_relevance.find((e) => e.id === "CHILD-1");
+  assert.equal(child.blocking, false, "child without children reports blocking=false");
+});

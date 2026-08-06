@@ -334,7 +334,7 @@ export function maxMutuallyDisjointSubset(parsed, expand) {
   return best;
 }
 
-function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand) {
+function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask = new Map(), parentRefCount = new Map()) {
   const kind = classifyKind(id);
   const touches = checkTaskTouchesResolve(task.body, root);
   const touchesResolve = !touches.majorityMissing;
@@ -358,7 +358,7 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     disjointScore,
     // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
     // strategic traceability (grep) + blocking (parent/children fields) + cost (touches parsed scale).
-    relevance: computeRelevance(id, task, allTasks),
+    relevance: computeRelevance(id, task, childrenByTask, parentRefCount),
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
     eligible: depsReady && four.complete && touchesResolve,
   };
@@ -477,7 +477,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue; // never promotion candidates
-      candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand));
+      candidates.push(buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount));
     }
     // AC4: disjointness FIRST (how many pool/in-flight tasks the candidate is pairwise-disjoint
     // from), then `gap-*` > `DIR-*`, then touches-resolvable before not.
@@ -514,7 +514,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
       if (isFixture(t) || isParked(t)) continue;
-      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand);
+      const c = buildCandidate(id, t, root, allTasks, poolParsed, inFlightParsed, expand, childrenByTask, parentRefCount);
       ranked.push({ id, kind: c.kind, kindOrder: c.kindOrder, relevance: c.relevance, eligible: c.eligible, reason: c.relevance.reason });
     }
     ranked.sort(
