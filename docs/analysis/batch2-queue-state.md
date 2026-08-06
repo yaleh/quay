@@ -5446,3 +5446,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 4 / dispatchable_disjoint 3（含 2 个已落地漏检灌水 + DIR-124 父任务）；真实新可派 = 1（仅 tests-leak-tmux 唯一候选）。
 - **派发 1/5**：`gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`（self-touch 已有、resolve 0/9）。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-07T01:0xZ（内层，tests-leak-tmux fan-in 完成 —— 在飞清零）
+
+- **tests-leak-tmux fan-in 完成**（merge task/gap-tests-leak-tmux...，task-body 证据 54 行）：修复本体已在 master `c1c15dfd`（前次派发），本次复核——kill-session teardown + 显式 `-S` socket + 4 kill-server→kill-session 转换 + suite-tail tmux-leak-scan（AC1 扫描 skv-/session-liveness-/ol-tok-/enter-repro- 前缀）。AC1–AC7 全勾（scoped 63/63 + 1 skip，tmux-leak CLEAN，leaked_servers=0）。留 ready。在飞清零。
+- **init/SKILL.md reference-doc 补两 SPEC（真实 pre-existing 红，branch-model + integration-architecture SPEC 未声明）**：`quay-init --loop` referenced-not-landed 红 → 5 个测试失败（quay-init-tmux-detection 3 + session-liveness 2）。补 `SPEC-branching-model-integration-branch-2026-08-05.md` + `SPEC-integration-architecture-2026-08-05.md` 声明 ⇒ quay-init-tmux-detection 6/6、session-liveness 52/52、verify-referenced-landed OK。`17d203e6`。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
