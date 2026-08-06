@@ -5122,3 +5122,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **派发 2/5**（disjoint batch）：`telemetry-brackets`（--task-start/--task-end 调用恢复 + 自检①真实并发信号 + OVER90 判据统一 + 阻塞超时升级——第四起「写了没人调」，最贵）+ `token-watches-shell`（令牌存活判据盯真实运行工作而非获取它的 shell——重试循环下可回收但工作仍在跑）。补 self-touch + telemetry 已开。token-status-reports 与 token-watches-shell 碰撞 deferred（下轮）。
 - 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。master `eedb8714`。
+
+### tick 2026-08-06T04:4xZ（内层，telemetry-brackets fan-in 完成）
+
+- **telemetry-brackets 合并**（`4a4017c2`）：`--report` 加 `reconcilable[]`/`realInFlight`（dry-run reconcile）+ 新 `--slots --cap N`（bracketsInFlight/reconcilable/realInFlight/slotsTotal/slotsRemaining）+ `inner-blocked-signal --escalate-stale`（>30min 无人消费自动归档）+ `detectTaskOver90m` reconcile 感知（merged/done 括号不触发假 over-90m）+ 两个 tick 模板自检①改读 realInFlight + 外层 step 1b 无条件 `--reconcile`。AC1–AC9 勾（slot-visibility 8/8 + scoped 79/79）。已并已清。
+- **--slots 实况**：brackets-in-flight 7 / reconcilable 5 / real-in-flight 2 / slots-remaining 3——**空槽机制终于机械可见**（第四起「写了没人调」关闭）。
+- **在飞 1/5**（仅 token-watches-shell）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `b6993f58`。
