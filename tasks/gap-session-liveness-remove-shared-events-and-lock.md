@@ -114,6 +114,7 @@ heavy-op-token 测试文件（4 个）、cold-start-e2e.sh。「一次只跑一�
 
 ## Touches
 
+- tasks/gap-session-liveness-remove-shared-events-and-lock.md
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/session-liveness-mount.sh
 - plugin/scripts/monitor-mount-check.sh

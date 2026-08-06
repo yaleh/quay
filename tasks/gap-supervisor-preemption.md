@@ -1,13 +1,12 @@
 ---
 id: gap-supervisor-preemption
-title: "supervisor 落地④抢占——.halt 语义从 tick 边界检查改成任意点生效
+title: supervisor 落地④抢占——.halt 语义从 tick 边界检查改成任意点生效
   (SPEC-integration-architecture §4.4 第 4 步)：今晚事故 7 实测 halt 后内层仍派发 5 个
-  subagent、合并 4 次——.halt 是「tick 步骤 0 检查」，连续流程没有步骤 0 就绕过了；
-  fix direction：把停止信号做成 supervisor 基座层的抢占原语——对目标 agent 进程/会话在
-  任意执行点生效的停止信号，判据 = halt 后不再产生任何新的 subagent；在 -p 迁移后 =
-  kill 进程；与 SPEC-state-crystallization 的「规则必须有机械挂载点」一致
-  （.halt 是「规则正确但缺机械挂载点」的实例）"
-status: ready
+  subagent、合并 4 次——.halt 是「tick 步骤 0 检查」，连续流程没有步骤 0 就绕过了； fix direction：把停止信号做成
+  supervisor 基座层的抢占原语——对目标 agent 进程/会话在 任意执行点生效的停止信号，判据 = halt 后不再产生任何新的
+  subagent；在 -p 迁移后 = kill 进程；与 SPEC-state-crystallization 的「规则必须有机械挂载点」一致
+  （.halt 是「规则正确但缺机械挂载点」的实例）
+status: done
 labels:
   - gap
   - defect

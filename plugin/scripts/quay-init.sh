@@ -95,6 +95,7 @@ while [ $# -gt 0 ]; do
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --root) WORKSPACE_ROOT="$2"; shift 2 ;;
     --project) PROJECT_NAME="$2"; shift 2 ;;
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
@@ -697,14 +698,6 @@ validate_worktree_root() {
 # Scripts that must NEVER auto-lay-down (a layer-retired delivery check + the installer itself):
 NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"
 
-# Cross-machine VERIFICATION mechanism (gap-no-post-merge-cross-machine-verification-detection-latency-is-luck):
-# `cross-machine-verify.sh` ships with the loop because the loop tick docs reference it by full path
-# (fast-mode 4b / orchestrator 3b+3d — the SAME derivation that puts sync-lag-check.sh in the set). It
-# needs NO explicit entry here: the derived (a) source over plugin/loop/*.md pulls it in, and its
-# sibling dependency `laydown-set-check.sh` (the default fast gate) is already in the set, so the
-# dependency-closure invariant (d) is satisfied. The mechanism's shared state rides git notes
-# (refs/notes/quay-cmv-*) — a notes ref, not a file, so nothing extra to lay down.
-
 # mechanism_corpus — the docs that describe how the LAID-DOWN mechanism operates (bare-filename
 # resolution scope for (b) above).
 mechanism_corpus() {
@@ -747,13 +740,18 @@ derive_loop_scripts() {
   #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
   #   the loop so an installed project can see what each laid-down check answers. Deliberate
   #   explicit addition (no doc references it by path — the catalog is self-describing).
-  #   uncalled-verifier-check.ts (gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check):
-  #   the shipped-but-uncalled verifier census. Deliberate explicit addition (no skill/tick doc
-  #   references it by path — it is the check ON the laid-down mechanism set; a target installs it
-  #   so it can run `--json --root .` and see which laid-down verifiers have no execution caller).
+  #   l1-delivery-surface-check.ts (gap-complete-delivery-surface-spec-and-l1-verification): the
+  #   SIX-category L1 delivery-completeness check ships with the loop so an installed project can
+  #   re-run it (装后能跑). Deliberate explicit addition — no shipped doc references it by path
+  #   (the SPEC §6 machine-readable list is its single source, resolved via --spec).
+  #   dead-loop-check.sh (gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed):
+  #   the L2 continuous-health DEAD-LOOP criterion (transcript user messages + git commit window)
+  #   ships with the loop so an installed project's manager can ask "is the loop actually running".
+  #   Deliberate explicit addition — the SPEC §5 annotation is the cross-reference (not a shippable
+  #   SKILL.md/loop-doc path reference, so (a)/(b) derivation would miss it).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
-    capability-catalog.sh uncalled-verifier-check.ts >> "$out"
+    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh >> "$out"
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0
@@ -774,6 +772,40 @@ derive_loop_scripts() {
   done
   sort -u "$out"
   rm -f "$out"
+}
+
+# ── drift report (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ─────────────────────────
+# --check-drift: the L2 "upgrade correctness" drift report. The delivery surface (the DERIVED loop
+# script set) GROWS as the plugin ships new mechanism scripts; a target project installed at time T
+# is frozen at T and never receives scripts added after T (the meta-cc measurement: 7 of the 8
+# missing derived scripts were built after 08-03 — drift is the surface growing, not a misinstall).
+# This report mechanically compares the CURRENT derived set (derive_loop_scripts — the SAME
+# derivation the --loop lay-down uses) against the target's plugin/scripts/:
+#   一致  — present in target AND byte-identical to the plugin source
+#   漂移  — present but content differs (a local edit or a stale install) — listed, never silently
+#           overwritten: the upgrade path (--loop re-run) backs it up + reports before replacing
+#   缺失  — absent from the target — the upgrade path auto-fills it (copy_one's `! -f` branch)
+# Prints per-item lines for 漂移/缺失 + a parseable summary `漂移 N / 缺失 N / 一致 N`.
+# Read-only: never modifies the target. Exit 0 always (a report, not a gate).
+drift_report() {
+  local drift=0 missing=0 consistent=0 total=0 s src dst
+  while IFS= read -r s; do
+    [ -z "$s" ] && continue
+    src="$PLUGIN_ROOT/scripts/$s"
+    [ -f "$src" ] || continue   # only the CURRENT derived set that actually exists in the plugin
+    total=$((total + 1))
+    dst="$WORKSPACE_ROOT/plugin/scripts/$s"
+    if [ ! -f "$dst" ]; then
+      missing=$((missing + 1))
+      echo "  缺失: $s"
+    elif cmp -s "$src" "$dst"; then
+      consistent=$((consistent + 1))
+    else
+      drift=$((drift + 1))
+      echo "  漂移: $s"
+    fi
+  done < <(derive_loop_scripts)
+  echo "漂移报告: 漂移 ${drift} / 缺失 ${missing} / 一致 ${consistent}（派生集 ${total}）"
 }
 
 # verify_referenced_landed <workspace-root> — gap-init-ships-a-skill-that-calls-files-it-does-not-
@@ -1164,6 +1196,17 @@ fi
 # ── categories ─────────────────────────────────────────────────────────────────────────────────────
 echo "quay-init (plugin v${PLUGIN_VERSION})"
 
+# ── --check-drift (gap-delivery-surface-grows-but-target-freezes-no-upgrade) ────────────────────────
+# The L2 "upgrade correctness" drift report (Contract measure: the 漂移/缺失/一致 numbers on stdout).
+# Read-only — never writes to the target; exit 0 always (a report, not a gate). Runs the SAME
+# derived-set derivation the --loop lay-down uses, so the denominator is the CURRENT delivery
+# surface, not a frozen snapshot.
+if [ "$DO_CHECK_DRIFT" = true ]; then
+  echo "  drift report (派生集轴, not file count — the delivery surface GROWS, the target must follow):"
+  drift_report
+  exit 0
+fi
+
 # Per-category counters via deltas on the global COPIED/SKIPPED/CONFLICTED.
 record_category() {
   local label="$1" base_copied="$2" base_skipped="$3" base_conflicted="$4"
@@ -1288,16 +1331,6 @@ PYEOF
   # NOTE: inner-state.sh is deliberately NOT here (gap-retire-inner-state-one-observer-targets-by-
   # parameter AC3) — it is retired and not referenced by any shipped doc; observation has exactly
   # ONE tool, session-liveness.sh, which is laid down separately below (its env config is generated).
-  derive_loop_scripts
-
-  # AC1/AC2 (gap-delivery-surface-grows-but-target-freezes-no-upgrade): the upgrade/refresh path's
-  # drift report. BEFORE the update, classify the target's derived scripts (漂移/缺失/一致 on the
-  # derived-set axis) so the upgrade action below is preceded by the L2 "升级正确性" diagnosis —
-  # exactly what the frozen-at-install-time target needs: what it is missing (auto-added) and what
-  # has drifted (backed up + replaced, never silent). The POST report after the loop proves the
-  # upgrade brought the derived set to 一致.
-  echo "  drift report (before upgrade):"
-  compute_drift_report "$WORKSPACE_ROOT"
   # gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure: the laydown set
   # is DERIVED from the shipped mechanism docs' OWN references at BOTH spellings (path-prefixed AND
   # bare filename) PLUS the laid-down scripts' TRANSITIVE SIBLING DEPENDENCIES — so the mechanism
@@ -1306,6 +1339,17 @@ PYEOF
   # shellcheck disable=SC2207
   LOOP_SCRIPTS=()
   while IFS= read -r s; do LOOP_SCRIPTS+=("$s"); done < <(derive_loop_scripts)
+
+  # AC1/AC2 (gap-delivery-surface-grows-but-target-freezes-no-upgrade): the upgrade/refresh path's
+  # drift report. BEFORE the update, classify the target's derived scripts (漂移/缺失/一致 on the
+  # derived-set axis) so the upgrade action below is preceded by the L2 "升级正确性" diagnosis —
+  # exactly what the frozen-at-install-time target needs: what it is missing (auto-added) and what
+  # has drifted (backed up + replaced, never silent). LOOP_SCRIPTS is populated above so the
+  # before-report's derived-set is non-empty (compute_drift_report reads the global — a stale
+  # empty-array call reported derived-set 0 and the before/after reports disagreed with reality).
+  # The POST report after the loop proves the upgrade brought the derived set to 一致.
+  echo "  drift report (before upgrade):"
+  compute_drift_report "$WORKSPACE_ROOT"
   for s in "${LOOP_SCRIPTS[@]}"; do
     if [ -f "$PLUGIN_ROOT/scripts/$s" ]; then
       # mode "clean": a stale same-name target is RESIDUE (AC4) — backed up + replaced, never
@@ -1416,6 +1460,27 @@ PYEOF
     # runtime that ACTUALLY EXISTS in the target — the referenced-not-landed complement. Defense in
     # depth after AC1's fail-closed (a config that already exists still gets checked every run).
     verify_provider_runtime_existence "$WORKSPACE_ROOT" "$PLUGIN_ROOT" || exit 2
+    # gap-complete-delivery-surface-spec-and-l1-verification (AC2): the SIX-category L1
+    # delivery-completeness check. verify_referenced_landed above covers category 1 (mechanisms/
+    # runtime: referenced ⊆ landed); this extends the L1 surface to ALL SIX categories — each
+    # category's deliverables present + owning gap task filed (SPEC §6 machine-readable list is the
+    # single source). Runs post-laydown against the SHIPPED delivery surface (the quay checkout
+    # root — the SPEC lives at <repo>/orchestration/, outside the plugin bundle), fail-closed on any
+    # uncovered category. In a BARE plugin copy (hermetic tests) the repo-level SPEC is absent →
+    # SKIP (referenced⊆landed still guards the mechanism axis).
+    l1_script="$PLUGIN_ROOT/scripts/l1-delivery-surface-check.ts"
+    delivery_root="$(cd "$(dirname "$PLUGIN_ROOT")" && pwd)"
+    spec_file="$delivery_root/orchestration/SPEC-complete-delivery-surface-2026-08-05.md"
+    if [ -f "$l1_script" ] && [ -f "$spec_file" ]; then
+      if node --no-warnings --experimental-strip-types "$l1_script" --surface --root "$delivery_root" --spec "$spec_file"; then
+        : # six-category delivery surface complete — the OK line is on the check's stdout
+      else
+        echo "ERROR: delivery-surface L1 check failed — the six-category delivery surface is incomplete." >&2
+        exit 2
+      fi
+    elif [ -f "$l1_script" ]; then
+      echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
+    fi
   fi
 fi
 

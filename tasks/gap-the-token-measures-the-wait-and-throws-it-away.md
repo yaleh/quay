@@ -1,13 +1,24 @@
 ---
 id: gap-the-token-measures-the-wait-and-throws-it-away
-title: "The token already computes waited_ms and prints it to stdout, where it evaporates — so the halt-or-not decision its own header deferred cannot be made"
-status: ready
+title: The token already computes waited_ms and prints it to stdout, where it
+  evaporates — so the halt-or-not decision its own header deferred cannot be
+  made
+status: needs-human
 labels:
   - gap
   - milestone-candidate
 extra:
   schema: v1
+  needs_human_reason: "stale premise: Contract invoke calls
+    plugin/scripts/heavy-op-token.sh which was RETIRED 2026-08-06 (commit
+    2f9d4575, human ruling, tick doc L182). The events.jsonl it wants to fix is
+    now written by resource-gate.sh (ACQUIRED record with waited_ms persisted,
+    today 14:06) — defect possibly already fixed by the retirement refactor.
+    Touches reference non-existent heavy-op-token.sh + heavy-op-token.test.mjs.
+    Needs human adjudication: close as fixed-by-refactor or re-scope to
+    resource-gate.sh."
 ---
+
 
 **type:** execution
 

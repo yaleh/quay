@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# inner-session-check.sh — 外层冷启动第 3 步的三态自检
+# inner-session-check.sh — 外层冷启动第 3 步的四态自检
 # (gap-outer-self-checks-and-creates-inner-session)。
 #
-# 判定 inner 会话三态（AC1/AC2/AC3/AC4）：
+# 判定 inner 会话四态（AC1/AC2/AC3/AC4）：
 #   healthy      窗口存在 + claude 进程存在 + transcript 有真实 user 消息（已被驱动过）
 #   empty-shell  窗口存在 + claude 进程存在 + transcript 无真实 user 消息（被拉起但未驱动，
 #                —— 11:40 watchdog 形态；外层 DRIVE 而非重建，不丢潜在上下文）
 #   missing      窗口不存在 或 无 claude 进程（外层调 quay-topology.sh 两窗口工厂创建）
+#   degraded     窗口+进程存在，但 transcript 仅由发现启发式解析（TR_SOURCE=discovery）——
+#                旧启发式会认错 transcript（gap-inner-session-check-discovery-reads-wrong-transcript），
+#                无法信任 healthy/empty-shell 判定；fail-closed（不猜）+ stderr 报警，绝不静默 healthy
 #
 # 判据（AC1「判据用可信的」，与 topology-check.sh / transcript-delivery-check.ts 同源）：
 #   窗口存在 —— tmux list-windows 按名寻址（pane 索引会漂，窗口名不会，session-launch-recipes §3）
@@ -23,6 +26,8 @@
 #   4. 发现（启发式，标 source=discovery）：$HOME/.claude/projects/<root-slug>/ 里最晚修改、
 #      且不是外层自己（CLAUDE_CODE_SESSION_ID）的 *.jsonl——inner 由工厂新建时其 transcript 是
 #      该目录最新的「非外层」jsonl。外层自己的 transcript 必含 user 消息，排除它才能区分 healthy。
+#      退化路径（KNOWN-BROKEN，3 会话拓扑下会认错 transcript）：TR_SOURCE=discovery 必须不静默——
+#      stderr 报警 + state=degraded（fail-closed），绝不报 healthy（gap-inner-session-check-discovery-fallback-silent）。
 #   5. 找不到 → transcriptFresh=true（无 transcript = fresh = 空壳判据；外层驱动不重建）
 #
 # 用法：
@@ -33,6 +38,7 @@
 #   TOPOLOGY_CLAUDE_PATTERN —— 覆盖「claude 进程」匹配串（测试用 exec -a claude-probe sleep 造进程）
 #
 # 输出 JSON：{ session, window, process, transcript, transcriptSource, transcriptFresh, state }
+#   state ∈ healthy|empty-shell|missing|degraded（degraded = TR_SOURCE=discovery 退化路径，fail-closed）
 # 退出码：0 = 判定完成（state 在 stdout）· 1 = 无会话配置（fail-closed，绝不猜会话名）· 2 = 用法/环境错误
 #
 # 纯读契约：本脚本只读 tmux 状态、/proc、transcript 文件与配置，不写任何文件、不改任何会话。
@@ -154,16 +160,24 @@ resolve_transcript() {
   # 在 3 会话拓扑下前提错（外层/管理者都含真实 user 消息），退化成「最新 jsonl 不是自己」——
   # 外层独立验证实测读 96380845/b8dc91a6 而非 inner c7b58e09，空壳反例会判 healthy（11:40 watchdog
   # 形态重演）。gap-inner-session-check-discovery-reads-wrong-transcript。
-  local slug claude_pid sid cpid
+  local slug claude_pid sid cpid environ_unreadable=""
   slug="$(printf '%s' "$REPO_ROOT" | tr '/' '-')"
   claude_pid="$(inner_claude_pid "$SESSION" "inner")" || claude_pid=""
   if [ -n "$claude_pid" ]; then
     # 顶层 claude 的 environ；顶层通常不带 session id（启动时未赋），其 worker/MCP 直接子进程带
     # （实测 2005103/2005117 等携带 CLAUDE_CODE_SESSION_ID=c7b58e09）。
-    sid="$(tr '\0' '\n' < "/proc/$claude_pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)"
+    if [ -r "/proc/$claude_pid/environ" ]; then
+      sid="$(tr '\0' '\n' < "/proc/$claude_pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)"
+    else
+      environ_unreadable=1
+    fi
     if [ -z "$sid" ]; then
       for cpid in $(pgrep -P "$claude_pid" 2>/dev/null); do
-        sid="$(tr '\0' '\n' < "/proc/$cpid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)"
+        if [ -r "/proc/$cpid/environ" ]; then
+          sid="$(tr '\0' '\n' < "/proc/$cpid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' | head -1)"
+        else
+          environ_unreadable=1
+        fi
         [ -n "$sid" ] && break
       done
     fi
@@ -175,7 +189,14 @@ resolve_transcript() {
       fi
     fi
   fi
+  # 结构性发现失败：PID 存在但 /proc environ 不可读（非 Linux / hidepid / 权限）——明确报警，
+  # 不允许静默回退到旧启发式（gap-inner-session-check-discovery-fallback-silent AC3）。若下方回退
+  # 找到候选，TR_SOURCE=discovery 会再报警一次 + state=degraded——双层不静默。
+  if [ -n "$environ_unreadable" ]; then
+    echo "WARNING: inner-session-check: /proc environ unreadable for the inner claude pid — cannot structurally resolve the inner transcript (non-Linux host / hidepid / permission). Any DISCOVERY fallback below is LOUD (stderr + state=degraded), never a silent healthy." >&2
+  fi
   # 无 PID / 无 session id → 退回旧启发式（best-effort；TR_SOURCE=discovery 区分于 discovery-pid）。
+  # 退化路径不静默：下方调用方统一处理 TR_SOURCE=discovery —— stderr 报警 + state=degraded。
   local my_id candidate
   my_id="${CLAUDE_CODE_SESSION_ID:-}"
   if [ -n "$my_id" ]; then
@@ -217,6 +238,14 @@ if window_exists "$SESSION" "inner"; then
 fi
 
 resolve_transcript
+
+# TR_SOURCE=discovery = 退化路径（旧启发式，KNOWN-BROKEN——3 会话拓扑下会认错 transcript）。
+# 「对结论错证据」静默报 healthy 正是本条目要消灭的形态。不静默：stderr 报警 + state=degraded
+# （fail-closed）。--json 消费者（冷启动 3 自检）读 transcriptSource==discovery 时同样报警。
+if [ "$TR_SOURCE" = "discovery" ]; then
+  echo "WARNING: inner-session-check: transcript resolved via DISCOVERY heuristic (TR_SOURCE=discovery) — the legacy fallback can misidentify transcripts in a multi-session topology; marking state=degraded (fail-closed), NOT healthy/empty-shell. Structurally resolve the inner transcript (--transcript / SESSION_TRANSCRIPTS) before trusting this self-check." >&2
+fi
+
 FRESH=""
 if ! FRESH="$(transcript_fresh "$TR_PATH")"; then
   exit 2
@@ -224,6 +253,8 @@ fi
 
 if [ "$WINDOW_OK" = "0" ] || [ "$PROCESS_OK" = "0" ]; then
   STATE="missing"
+elif [ "$TR_SOURCE" = "discovery" ]; then
+  STATE="degraded"
 elif [ "$FRESH" = "true" ]; then
   STATE="empty-shell"
 else

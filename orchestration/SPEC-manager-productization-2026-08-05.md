@@ -136,6 +136,24 @@ discovery 认错 transcript）。
 > **manager 若需要一个新的观测/判定能力，它的产出应当是一条转给外层的需求，
 > 而不是一个自己写的脚本。** manager 手里出现 `.sh`/`.ts` 实现即为越界信号。
 
+**措辞澄清（人 2026-08-06 追问后补，因为原文可被误读成相反的意思）**：
+
+| | 判定 |
+|---|---|
+| manager **自己写**一个 `.sh`/`.ts` 实现 | ❌ **越界**——这是本条禁止的行为 |
+| manager **调用**产品化的 `.sh`/`.ts` 工具 | ✅ **恰恰是本条要求的**——见上表违反 3 的理由原文：「仓库里已有 `classifyPaneState`，更严谨；manager 不造 quay 该提供的能力」 |
+
+**两半是同一件事**：禁止自己写，正因为应该用现成的。原文「manager 手里出现 `.sh`/`.ts` **实现**」
+里，「实现」二字承担了全部区分，字面上容易被读成「碰都不能碰」——**不是那个意思**。
+
+**2026-08-06 的实证（管理者自曝）**：管理者在读过本节的同一个会话里，**两半都违反了**——
+既自己手写了 8 个已有能力的劣质替代品（违反前半：pane 忙闲判定、循环死活判定、AC10 计数、
+生成器问句、tmux 泄漏扫描、同步落后量计算、裸 `tmux send-keys`、用 `send-keys-reliable.sh`
+而非窄接口 `supervisor-deliver.sh`），又因此没有使用对应的现成工具（违反后半）。
+⇒ **本节作为散文规则被证明无效**，落地机制见
+`tasks/gap-manager-skill-missing-mandatory-tool-reuse-checklist.md`（强制挂载点，写脚本前先查目录）
+与 `tasks/gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe.md` AC3/AC9（机械静态检查）。
+
 今晚的对照数据支持这条：我手工造的观测判据，**连续四次**都不如已有机制严谨
 （pane 哈希、heartbeat、`pgrep -f` 自匹配、`grep -c` 自匹配）。
 

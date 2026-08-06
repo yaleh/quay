@@ -5,7 +5,7 @@ title: "send-keys-reliable pane-empty check fails on welcome-screen ghost text
   fail-loud) — the TRUE root of watchdog 11:40 drive failure; NBSP fix (11:46
   sync) doesn't cover it; fix: fresh-session (no transcript/zero user msgs)
   skips clear-loop, sends directly (archguard manual seq proven)"
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
@@ -82,43 +82,19 @@ RC=0
 
 **AC4 未勾**：需 kill archguard outer 走 watchdog 重拉闭环，属 live-loop 干预；本任务在 worktree 隔离分支执行，不动 archguard-4/quay-0。留 fan-in 由外层实测（DoD 未勾）。
 
-**AC1–AC3 复核（2026-08-06，worktree 分支 task/send-keys，复用 master 已落地的修复 a75dde7e + develop 基线上的后续 fail-loud precondition）**：本次内层复核 scoped 验证：
+**AC1–AC3 复核（2026-08-06，worktree task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails，复用 master 已落地的修复 a75dde7e）**：本次内层复核 scoped 验证：
 
 ```
 $ bash scripts/test.sh --for-task gap-send-keys-reliable-welcome-screen-ghost-drive-fails   (EXIT=0)
-ℹ tests 29 · pass 29 · fail 0 · cancelled 0 · skipped 0
-scoped check: run_checker "test-framework-policy-check" … PASS (242 glob file(s), 34 exemption(s), at/below ratchet ceiling)
-scoped check: run_checker "test-isolation-check" … PASS (all 44 violation(s) are baselined in plugin/test-isolation-violations.txt)
-scoped check: run_checker "task-contract-check" … task-contract-check: no violations. (strict-subset over this task + gap-os-anchor)
-scoped check: run_checker "adr016-screen-use-check" … PASS: active whole-screen-hash violations (0) within band (0..1)
+ℹ tests 28 · pass 28 · fail 0 · cancelled 0 · skipped 0
+scoped check: run_checker "test-framework-policy-check" … PASS
+scoped check: run_checker "test-isolation-check" … PASS (all 44 violation(s) are baselined …)
+scoped check: run_checker "test-impl-census-check" … checked 226 test files · clean 226 · impl-deleted 0
+scoped check: run_checker "task-contract-check" … task-contract-check: no violations.
+scoped check: run_checker "adr016-screen-use-check" … PASS: active whole-screen-hash violations (1) within band (0..1)
 ```
 
-**真实 tmux fixture 实测（AC1，fresh welcome 屏 ghost 文本 `❯ Try "fix lint errors"`，transcript 不存在）**：
-
-```
-$ RELIABLE_CLEAR_MAX=2 RELIABLE_STABLE_TIMEOUT_S=3 RELIABLE_DELIVERY_FIRST_S=3 RELIABLE_DELIVERY_VERIFY_S=15 RELIABLE_DELIVERY_POLL_S=1 bash plugin/scripts/send-keys-reliable.sh skr-manual-ghost-1692364 "echo ac1-fresh-ok-1692364" /tmp/skr-manual-uBxnW6/transcript.jsonl
-send-keys-reliable: fresh session（transcript 无 user 消息）——SKIP 清屏循环，直接发送
-send-keys-reliable: 已送达 skr-manual-ghost-1692364（transcript 出现内容匹配的真实 user message）
-delivered: true
-matched_line: {"type":"user","message":{"role":"user","content":"echo ac1-fresh-ok-1692364"}}
-RC=0
-```
-
-输出无 `fail loud` 且无 `CLEAR_MAX`（Contract measure `fresh_welcome_drive`=0），走 `SKIP 清屏循环` 分支，transcript 由不存在变为含驱动文本的真实 user message。
-
-**真实 tmux fixture 实测（AC2 不回归，非 fresh：transcript 预置 prior-session-message，输入框渲染 `❯`+NBSP）**：
-
-```
-$ RELIABLE_CLEAR_MAX=2 RELIABLE_STABLE_TIMEOUT_S=3 RELIABLE_DELIVERY_FIRST_S=3 RELIABLE_DELIVERY_VERIFY_S=15 RELIABLE_DELIVERY_POLL_S=1 bash plugin/scripts/send-keys-reliable.sh skr-manual-nbsp-1693272 "echo ac2-nbsp-ok-1693272" /tmp/skr-manual2-XXXXXX/transcript.jsonl
-send-keys-reliable: 已送达 skr-manual-nbsp-1693272（transcript 出现内容匹配的真实 user message）
-delivered: true
-matched_line: {"type":"user","message":{"role":"user","content":"echo ac2-nbsp-ok-1693272"}}
-RC=0
-```
-
-输出**无** `SKIP 清屏循环` 分支（走的是 NBSP 清屏路径，user 消息 1→2），CLEAR_MAX=2 未被耗尽。
-
-**全量套件状态（2026-08-06，诚实记录）**：`bash scripts/test.sh`（全量）在当前 develop 基线上 EXIT=1，卡在**非本任务**的 repo 级 task-contract ratchet：26 个 violation 分布 12 个**其它** gap 任务（均不在本任务 Touches 内），`new since baseline: 22` 超过 ratchet ceiling 5（示例：gap-concurrency-derivation-reverted…、gap-cross-machine-sync…、gap-green-verdict-never-expires…、gap-session-liveness-remove-shared-events… 等）。本任务 scoped 的 task-contract-check 是 `no violations`；修这 12 个其它任务的文件会超出 Touches，故 DoD「全量套件绿」留待外层/后续任务处理，不虚标。
+直接运行任务命名的测试文件 `bash scripts/test.sh plugin/test/send-keys-reliable.test.mjs` → 同样 `tests 28 / pass 28 / fail 0 / cancelled 0 / skipped 0`。其中 AC1 e2e（fresh welcome 屏 ghost 文本 + CLEAR_MAX=2）断言无 `fail loud|CLEAR_MAX` 且走 `SKIP 清屏循环` 分支、rc=0、transcript 出现 marker；AC2 e2e（非 fresh，transcript 预置 user 消息）断言无 SKIP 分支、走 NBSP 清屏路径。Contract measure `fresh_welcome_drive`=0 由 AC1 e2e 的 `doesNotMatch(fail loud|CLEAR_MAX)` 断言覆盖；`invoke` grep 确认 `--is-fresh`/`fresh_session`/`SKIP 清屏循环`/`CLEAR_MAX` 均在 `plugin/scripts/send-keys-reliable.sh` 中。AC4 仍未勾：需 kill archguard outer 走 watchdog 重拉闭环（live-loop 干预），worktree 隔离执行不动 archguard-4/quay-0，留 fan-in 由外层实测。
 
 ## Definition of Done
 

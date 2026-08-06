@@ -22,9 +22,8 @@
 //   AC4 classification — every line containing `batch` in the two tick docs must be classifiable
 //         as one of: 机件真名 (concurrent-batch-scheduler.ts / {batch,deferred} / batch ⇒ field
 //         reference / integration-batch-merge.sh), 任务 id (gap-closure-sync-is-the-true-batch-
-//         boundary, gap-split-batch-vocabulary-...), 历史引用 / 历史批名 (batch2-queue-state.md,
-//         batch4a/4b/4c, 「Close batch」), AC5 规范语句 (batch + 编号 的否认措辞「不叫批号」),
-//         审计检查机制 (reanchor-prompt.txt grep / self-report-vocab-audit /
+//         boundary, gap-split-batch-vocabulary-...), 历史引用 (batch2-queue-state.md, batch4a/4b/4c,
+//         「Close batch」), 审计检查机制 (reanchor-prompt.txt grep / self-report-vocab-audit /
 //         "Batch of N fully merged" quote). NONE is unclassified gate-reading prose.
 //   AC2/AC5 — the verification cadence is named `verification-round-N` with an explicit
 //         "不是分派门控" annotation; both tick docs carry the normative statement
@@ -56,9 +55,7 @@ const MISREAD_PATTERNS = ["同批", "批派发", "batch-N"];
 //   机件真名  concurrent-batch-scheduler.ts / {batch,deferred} / "batch ⇒" field reference /
 //             integration-batch-merge.sh
 //   任务 id    gap-closure-sync-is-the-true-batch-boundary / gap-split-batch-vocabulary-...
-//   历史引用    batch2-queue-state.md / 「Close batch」 (annotated 历史引用)
-//   历史批名    batch4a/4b/4c (annotated 历史批名 — the doc's annotation for the old batch names)
-//   AC5 规范语句  batch + 编号 的否认措辞「不叫批号」(the normative statement that denies batch numbering)
+//   历史引用   batch2-queue-state.md / batch4a/4b/4c / 「Close batch」 (each annotated 历史引用)
 //   审计机制   reanchor-prompt.txt grep / self-report-vocab-audit / "Batch of N fully merged"
 const SAFE_SUBSTRINGS = [
   "concurrent-batch-scheduler.ts",
@@ -69,13 +66,18 @@ const SAFE_SUBSTRINGS = [
   "batch, deferred",
   "batch ⇒",
   "历史引用",
-  "历史批名",
-  "batch + 编号",
+  "历史批名",          // the docs annotate batch4a/4b/4c as 历史批名 (synonym of 历史引用)
   "batch2-queue-state",
   "self-report-vocab-audit",
   "reanchor-prompt.txt",
   "Batch of N fully merged",
   "batch-free",
+  // The vocabulary RULE's own meta-text: it names the forbidden batch phrasing to forbid it —
+  // "batch + 编号 的措辞都只能是历史", "batch-4 = 门控语义漂移", "batch 式汇报 = 自述措辞审计".
+  // These describe the split (batch = historical/forbidden), they do NOT gate dispatch.
+  "batch + 编号",
+  "batch 式",          // batch 式汇报 / batch 式自述 — the vocabulary rule's own meta-text
+  "门控语义漂移",
 ];
 
 function readDocs() {

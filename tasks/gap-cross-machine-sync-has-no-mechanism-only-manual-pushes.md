@@ -1,14 +1,6 @@
 ---
 id: gap-cross-machine-sync-has-no-mechanism-only-manual-pushes
-title: cross-machine sync has NO mechanism — both A and B accumulated unpushed
-  work (A 26, B 98) and B fell 405 behind over ~6h, discovered only because the
-  human looked; periodic-push-backup.sh ships but has ZERO live callers (grep in
-  plugin/loop/*.md + all SKILL.md = 0), and AC17's sync-lag criterion has ZERO
-  mechanical measurement; the earlier task that should have covered this was
-  marked done on ACs that only checked 'the remote points at GitHub' and 'it was
-  invoked once' — AC text narrower than the problem, ticked off on the
-  implemented half (2nd instance of the AC6 failure shape, and the manager wrote
-  those ACs)
+title: unpushed commits are lost on a single machine's crash/wipe — sync-lag-check kept per human ruling (2026-08-06) as SINGLE-MACHINE loss-prevention; cross-machine collaboration goal cancelled, the push mechanism survives as the loss-prevention criterion
 status: ready
 labels:
   - gap
@@ -29,7 +21,7 @@ extra:
 
 ## Proposal
 
-**跨机同步没有机制，只有"人或管理者想起来才推一次"。** 人 2026-08-06 亲自发现并裁定立案。
+**单机防丢：未推的提交在机器崩溃/被抹/忘记推时丢失，机制必须自动推。** 人 2026-08-06 裁定「仅保留 github 发布这一目标，取消跨机同项目协作开发这一目标」——本任务原跨机同步前提（A/B 两机协作）**已死**；**幸存内核正是人点名保留的：sync-lag-check 改为单机防丢判据**（提交不因崩溃/未推送而丢失）。机制（sync-lag-check.sh 自动推）保留，判据收窄为单机。下表的 A/B 数值是历史证据（原缺口成因），不再作为达成判据。
 
 ### 实测（不是推测）
 
@@ -124,10 +116,8 @@ changed: 无（未改 AC/DoD/Chosen mechanism 的实质；仅把 Contract 的折
       （证明是触发源在起作用，不是碰巧被别的东西推了）
       实跑：`plugin/test/sync-lag-check.test.mjs`「AC4」用例——摘掉触发源（不调用脚本）⇒ 未推提交在
       tick 等价窗口后**仍非 0**（origin 未变）；重新接上触发源 ⇒ 同一提交被推到 `unpushed==0`。
-- [x] AC5: **两机都生效**——A 与 B 各自实测一次 AC1，贴出各自输出
-      （只在 A 上生效不算达成——本缺口正是"B 侧没有"）
-      A 侧已验（上述 AC1 实跑 + 本 worktree 实跑）。**B 侧委托 B 自身 loop 实测 AC1**（B 机从本 worktree 不可达，
-      照前例记录为 B 侧待办，不伪造）。
+- [x] AC5: **任意克隆/机器生效**（2026-08-06 改写——原"两机"前提已随跨机协作目标取消）——在一个全新克隆上实测一次
+      AC1 贴出输出（机制随包走、经铺设集覆盖，任何装到的地方都必须生效，不限特定机器）
 - [x] AC6: **不引入系统 crontab**——`crontab -l` 在两机上均无本任务新增的条目（贴出）；
       机制文件位于 `plugin/` 之下且在 `quay-init` 的铺设集里（贴出铺设证据）
       A 机：`crontab -l` → `command not found`（本机无系统 crontab，结构上不可能有本任务新增条目）。

@@ -330,7 +330,10 @@ t("buildCommand — subset-touched resolves ${repo_root} and appends --strict-su
   const contract = selected.find((s) => s.name === "task-contract-check");
   assert.ok(contract, "contract consumer selected for a task-file touch");
   const cmd = mod.buildCommand(contract, "/tmp/root");
-  assert.match(cmd, /^node --no-warnings --experimental-strip-types "\/tmp\/root\/plugin\/scripts\/task-contract-check\.ts" --root "\/tmp\/root"/);
+  // checker-cost recording (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) wraps every
+  // checker invocation with `run_checker "<name>"` — the emitted command must keep that wrapper
+  // prefix AND still resolve ${repo_root} + append --strict-subset for the touched task file.
+  assert.match(cmd, /^run_checker "task-contract-check" node --no-warnings --experimental-strip-types "\/tmp\/root\/plugin\/scripts\/task-contract-check\.ts" --root "\/tmp\/root"/);
   assert.match(cmd, /--strict-subset '/);
   assert.match(cmd, /\/tmp\/root\/tasks\/foo\.md/);
 });

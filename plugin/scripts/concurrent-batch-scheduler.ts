@@ -23,6 +23,14 @@ import {
   checkTouchesPair,
   findRepoRoot,
 } from "./touches-orthogonality-check.ts";
+// gap-experiment-legacy-reclaim-and-touches-heuristic AC3: when a candidate charter lacks a
+// `## Touches` section, derive a MECHANICAL hint from body prose (derive-touches-heuristic.ts,
+// reclaimed from experiments into plugin/scripts) so the scheduler has concrete globs to reason
+// about instead of a vacuous conservative "no/empty ## Touches → serialize" defer. The hint is
+// labeled `derived` and is NEVER a substitute for anti-drift-touches-check.ts's PRE-MERGE hard gate
+// (which verifies ACTUAL `git diff --numstat` files) — a wrong guess can only mis-batch (caught at
+// fan-in), never let a bad write land.
+import { deriveTouches } from "./derive-touches-heuristic.ts";
 // DIR-117 iteration-2 item 4: the SAME touch-set-expansion arithmetic that
 // milestone-preparation-check.ts's `Prepared` gate used to detect a checked Plan outgrowing its
 // declared '## Touches'. milestone-preparation-check.ts is retired with the prepare/execute
@@ -57,8 +65,21 @@ export const SHARED_STATE_PATHS = [
 // with the many pre-DIR-116 charters/fixtures that never declared this field (mirrors the `type`
 // field's own unstated-default policy above); the field is only ever used to DEFER, never to admit
 // something the touches/type checks would otherwise reject.
-export function parseCandidate(id, charterText) {
+export function parseCandidate(id, charterText, repoRoot) {
   const touches = parseTouches(charterText);
+  // AC3: mechanical `## Touches` extraction when the charter lacks a `## Touches` section. Only
+  // runs when a repoRoot is available (callers pass it; unit tests that pass 2 args skip it, so
+  // the conservative no-declaration path is byte-unchanged for them). The derived globs are put in
+  // `touches.globs` and marked `derived: true` so checkTouchesPair can reason about them — but a
+  // candidate whose body yields ZERO path-shaped tokens stays conservative (hasSection stays false).
+  if (!touches.hasSection && repoRoot) {
+    const { globs } = deriveTouches(charterText, repoRoot);
+    if (globs.length > 0) {
+      touches.globs = globs;
+      touches.hasSection = true;
+      touches.derived = true;
+    }
+  }
   let type = "execution";
   // Tolerates `type: x`, `**type:** x` (colon inside bold), and `**type**: x`.
   const m = String(charterText).match(/^\s*\*{0,2}type\*{0,2}\s*:\s*\*{0,2}\s*`?([a-z][\w-]*)/im);
@@ -308,7 +329,9 @@ export async function main(argv) {
   // (likely a typo)". Concrete declared paths resolve to themselves (whether or not they exist yet);
   // only wildcards are expanded against the tree (expandDeclaredTouches).
   const expand = (globs) => expandDeclaredTouches(globs, expandRoot);
-  const parsedCandidates = files.map((f) => parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8")));
+  const parsedCandidates = files.map((f) =>
+    parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8"), expandRoot)
+  );
   const { candidates, expansions } = applyPreparationExpansion(parsedCandidates, receiptsById);
   for (const e of expansions) {
     process.stdout.write(`  re-evaluated (checked Plan expanded '## Touches'): ${e.id} — +${e.addedGlobs.length} path(s): ${e.addedGlobs.join(", ")}\n`);

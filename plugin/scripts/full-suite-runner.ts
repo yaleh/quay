@@ -69,6 +69,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { runOnce } from "./suite-state-trigger.ts";
+import { getLoad1 } from "./checker-cost.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -398,8 +399,11 @@ export async function run(argv: string[]): Promise<number> {
 
   // AC3 — the resource gate MUST be consulted BEFORE the suite starts (state=running is written
   // AFTER the gate, so a WAIT leaves the previous state — running/green — untouched). --fail-fast-check
-  // is a lightweight hermetic control, not a heavy op — it skips the gate.
-  const skipGate = process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" || argv.includes("--fail-fast-check");
+  // / --wait-check are lightweight hermetic controls, not heavy ops — they skip the gate.
+  const skipGate =
+    process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" ||
+    argv.includes("--fail-fast-check") ||
+    argv.includes("--wait-check");
   if (!skipGate) {
     const gate = checkResourceGate(root);
     if (!gate.ok) {
@@ -451,6 +455,11 @@ export async function run(argv: string[]): Promise<number> {
   const redFailures: SuiteFailure[] = [];
   let pendingFailure: SuiteFailure | null = null;
   let detailRemaining = 0;
+  // AC1 (gap-quality-criteria-are-point-in-time-no-trend-criteria) — per-run metric recording.
+  // Parsed from the suite's TAP summary (`# tests N`, `# cancelled N`) so the verification-round
+  // record carries tests/cancelled/perTestMs — the input of the trend criterion (trend-check.ts).
+  let testsSeen = 0;
+  let cancelledSeen = 0;
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
     const at = new Date().toISOString();
@@ -502,6 +511,13 @@ export async function run(argv: string[]): Promise<number> {
       }
       if (detailRemaining <= 0) pendingFailure = null;
     }
+    // AC1 — TAP summary parsing: `# tests N` / `# cancelled N` (node:test emits these on the
+    // stream regardless of pass/fail). Fires on every line; a later summary overwrites an earlier
+    // one (TAP prints exactly one summary, but a failing worker may print its own before the root).
+    const testsMatch = /^#\s*tests\s+(\d+)/.exec(line);
+    if (testsMatch) testsSeen = Number(testsMatch[1]);
+    const cancelledMatch = /^#\s*cancelled\s+(\d+)/.exec(line);
+    if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
       // AC3b — timestamp the red flip (the early-RED detection-latency observation point).
@@ -629,10 +645,88 @@ export async function run(argv: string[]): Promise<number> {
     reason: finalState.reason ?? null,
     runner: base.runner,
   });
+  // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
+  // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
+  // The now-removed appendSuiteDurationRecord call wrote a SECOND record to the SAME file every
+  // run — 2 runs produced 4 lines and AC6's "pure append, one per run" assertion failed. The
+  // appendVerificationRound record is the canonical shape (state/pass/fail/round); the other
+  // function is retained as an exported helper only (no live callers).
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
   return green ? 0 : 1;
+}
+
+/**
+ * AC6 (gap-no-criterion-records-its-own-cost-checker-cost-jsonl) — append ONE suite-duration row
+ * to .quay/verification-round.jsonl on EVERY suite completion (pure append; NEVER overwrites the
+ * single-state full-suite-state.json). This closes the "sequence stopped at 05:03" defect: the
+ * outer's closure pass could be blocked by a red window and skip its write, but the runner is a
+ * separate process that ALWAYS finishes, so the duration history can no longer die mid-sequence.
+ * Row shape: {round, startedAt, durationMs, laneCount, pass, fail, load, at, tests?, cancelled?,
+ * perTestMs?} — round = last-round+1 (same rule the outer closure pass uses), load = /proc/loadavg
+ * 1-min at finish. tests/cancelled/perTestMs are AC1 (gap-quality-criteria-are-point-in-time-no-trend-
+ * criteria): the per-run metrics that feed the trend criterion (trend-check.ts).
+ */
+export function appendSuiteDurationRecord(
+  root: string,
+  opts: {
+    startedAt: string;
+    durationMs: number;
+    laneCount: number;
+    green: boolean;
+    tests?: number;
+    cancelled?: number;
+  },
+): void {
+  const file = path.resolve(root, ".quay", "verification-round.jsonl");
+  let round = 1;
+  try {
+    if (fs.existsSync(file)) {
+      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const r = JSON.parse(lines[i]);
+          if (typeof r?.round === "number") {
+            round = r.round + 1;
+            break;
+          }
+        } catch {
+          // malformed line — keep scanning backwards for the last valid round
+        }
+      }
+    }
+  } catch {
+    // fail-open: never break the suite verdict on a round-record write
+  }
+  // AC1 (gap-quality-criteria-are-point-in-time-no-trend-criteria): extend the round record with
+  // tests/cancelled/perTestMs — the per-run metrics that make the TREND criterion (trend-check.ts)
+  // possible. perTestMs = durationMs / tests (ms per test); omitted when tests is absent/0 so a
+  // legacy-format row without counts stays parseable. Optional fields are included only when
+  // present — existing readers that assert exact fields (checker-cost.test.mjs AC6) keep passing.
+  const perTestMs =
+    opts.tests !== undefined && opts.tests > 0 && opts.durationMs > 0
+      ? Math.round((opts.durationMs / opts.tests) * 1000) / 1000
+      : undefined;
+  const rec: Record<string, unknown> = {
+    round,
+    startedAt: opts.startedAt,
+    durationMs: opts.durationMs,
+    laneCount: opts.laneCount,
+    pass: opts.green ? 1 : 0,
+    fail: opts.green ? 0 : 1,
+    load: getLoad1(),
+    at: new Date().toISOString(),
+  };
+  if (opts.tests !== undefined) rec.tests = opts.tests;
+  if (opts.cancelled !== undefined) rec.cancelled = opts.cancelled;
+  if (perTestMs !== undefined) rec.perTestMs = perTestMs;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");
+  } catch {
+    // fail-open
+  }
 }
 
 /**
@@ -691,9 +785,71 @@ async function failFastCheck(): Promise<number> {
   }
 }
 
+/**
+ * --wait-check（gap-full-suite-runner-marks-test-sh-gate-wait-as-failed Contract measure）：
+ * 构造一次 test.sh INTERNAL gate-WAIT 场景（WAIT 标记 + exit 1，一行测试都没跑）⇒ 验证 ABORT 链
+ * 端到端：
+ *   runner 写 state=red reason=aborted → suite-state-trigger 的 runOnce 检测到转变 →
+ *   记 SUITE-RED 事件 → stopSignal 缺位（aborted ≠ 代码风险信号，不设 stop-dispatch）。
+ * 用临时根（hermetic），不触碰真实 `.quay/full-suite-state.json`。退出 0 = ABORT 链验证通过；
+ * 退出非 0 = 链某环断裂（gate-WAIT 假红再现——reason-axis 的残余缺口）。这是 --fail-fast-check
+ * （FAILED 链）的 ABORT 侧孪生控制。
+ */
+async function waitCheck(): Promise<number> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-wc-"));
+  try {
+    // The concrete 17:46Z FALSE-RED shape: test.sh's INTERNAL resource-gate fail-closed prints the
+    // WAIT marker to stderr and exits 1 in ~6s WITHOUT running a single test. The runner must classify
+    // this as reason=aborted (NO correctness conclusion), never failed — a failed label would stop
+    // dispatch on code risk with zero evidence.
+    const fakeCommand =
+      'echo "scripts/test.sh: resource gate says WAIT — not running the full suite (numbers above). Re-run when the gate reports GO." >&2; exit 1';
+    // --wait-check is a lightweight hermetic control (NOT a heavy full-suite op) — it must skip the
+    // resource gate (run() checks argv for the marker), so a loaded machine cannot make the Contract
+    // self-check flake on a WAIT.
+    const code = await run(["--root", tmp, "--command", fakeCommand, "--wait-check"]);
+    const { status, events, stopSignal } = runOnce(tmp);
+    const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
+    console.log(
+      `wait-check: suite exit=${code} state=${status} reason=${redEv?.state?.reason ?? "?"} stopSignal=${stopSignal} ` +
+        `suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
+    );
+    if (code !== 1) {
+      console.error("wait-check FAIL: expected the fake gate-WAIT suite to exit 1 (red)");
+      return 1;
+    }
+    if (status !== "red") {
+      console.error(`wait-check FAIL: expected state=red, got ${status}`);
+      return 1;
+    }
+    if (!redEv) {
+      console.error("wait-check FAIL: expected a SUITE-RED event recorded by suite-state-trigger (red still noticed, routed by reason)");
+      return 1;
+    }
+    if (redEv.state?.reason !== "aborted") {
+      console.error(
+        `wait-check FAIL: expected reason=aborted on the red state (gate-WAIT = NO correctness conclusion), got ${redEv.state?.reason}`,
+      );
+      return 1;
+    }
+    if (stopSignal) {
+      console.error("wait-check FAIL: expected NO stopSignal (aborted must NOT stop dispatch on code risk)");
+      return 1;
+    }
+    console.log("wait-check OK: runner wrote state=red reason=aborted → trigger recorded SUITE-RED → stopSignal absent (no stop-dispatch)");
+    return 0;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirect) {
   const argv = process.argv.slice(2);
-  const exitCode = argv.includes("--fail-fast-check") ? await failFastCheck() : await run(argv);
+  const exitCode = argv.includes("--fail-fast-check")
+    ? await failFastCheck()
+    : argv.includes("--wait-check")
+      ? await waitCheck()
+      : await run(argv);
   process.exit(exitCode);
 }

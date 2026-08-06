@@ -22,8 +22,7 @@
 		"./skills/routines/SKILL.md",
 		"./skills/quay-native-methodology/SKILL.md",
 		"./skills/quay-webui-bootstrap-methodology/SKILL.md",
-		"./skills/session-topology/SKILL.md",
-		"./skills/manager/SKILL.md"
+		"./skills/session-topology/SKILL.md"
 	],
 	"agents": [
 		"./agents/baime-iteration-executor.md"

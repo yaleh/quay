@@ -139,6 +139,205 @@ task_time_breakdown(taskId) → { waitingPct, workingPct, fullSuiteRuns, gaps[] 
 **都不要用套件墙钟,σ=297.6s 会把两者都吃掉。**
 
 
+## AC12-R2(2026-08-06 人裁定):**设计依据必须是观察到的调用历史,不是概念边界**
+
+人的原话:**「在重构工具的过程中,应当注意观察(包括用 meta-cc 观察会话历史)会话对工具的调用历史,
+分析典型使用过程和常见错误等,并据此进行设计和优化。」**
+
+**这条直接推翻了 AC12 分组的推导方式**:AC12 的 6 组是按「回答什么问题」的**概念边界**推的,
+**没有用过一次真实调用数据**。以下是管理者按该裁定实测的第一批(2026-08-06,meta-cc,
+project 全域,时间跨度 2026-07-25 → 2026-08-06)。
+
+### 一、操作面的真实形状:手写命令行占压倒多数
+
+| 工具 | 调用数 |
+|---|---|
+| **Bash** | **19,618（约占全部工具调用 71%）** |
+| Edit | 2,155 |
+| Read | 1,579 |
+| 全部结构化 quay MCP 工具合计（task_write/get/list/check/lifecycle_promote） | **约 480** |
+
+⇒ **结构化调用只有 Bash 的 2.4%。** 这是 AC12-R「字符串插值」论据的量化底座。
+
+**错误分布必须读准,不要夸大**:546 次错误中 Bash 占 **398（73%）**,但
+**Bash 单次错误率 2.03%,与 Edit 的 2.55% 相当**——
+**Bash 不是"每次更容易错",而是"次数压倒性地多"**。
+⇒ 要降的是**手写命令行的绝对条数**,不是"换一种语言就更安全"。
+
+### 二、真实被调用的脚本面是 115,不是 40 —— **AC12 的基线口径错了**
+
+| 口径 | 数 | 来源 |
+|---|---|---|
+| AC12 现用的 `surface_entrypoints` | **40** | grep `plugin/loop/*.md` + `skills/*/SKILL.md` + `*loop-tick.md` 里的**文档引用** |
+| **实际被调用过的脚本种类** | **115** | 会话历史里真实的 `bash|sh|node … plugin/scripts/X` 调用 |
+| 调用总次数 | **3,896** | 同上 |
+| 仅被 grep/diff **提及**、从未被调用 | 另有 156 种名字 | — |
+
+⇒ **AC12 量的是"文档里写了几个入口",不是"实际用了几个"**,差 2.9 倍。
+**两个口径都要留**:文档口径管"暴露给 agent 的面",调用口径管"真实负载"。
+但**分组设计必须按后者**,否则会为一个不存在的使用模式做设计。
+
+### 三、Pareto:20 个脚本承载 80% 的调用
+
+| | 累计占比 |
+|---|---|
+| Top 5 | **47%** |
+| Top 10 | 65% |
+| **Top 20** | **80%** |
+| Top 50 | 94% |
+
+Top 5:`fast-mode-telemetry.ts`(620)、`task-contract-check.ts`(342)、
+`ready-pool-check.ts`(204)、`monitor-mount-check.sh`(153)、`inner-blocked-signal.ts`(152)。
+
+⇒ **6 个入口只要把 Top 20 覆盖好,就覆盖了 80% 的真实使用**;长尾 95 个脚本合计仅 20%,
+它们该被收进入口内部还是直接退休,是**单独一件事**,不该拖住主线。
+
+### 四、共现数据与我的概念分组**不一致**,以数据为准
+
+同一条命令里共同出现的脚本对(前几名):
+
+| 次数 | 脚本对 |
+|---|---|
+| 44 | `fast-mode-telemetry.ts` + `inner-blocked-signal.ts` |
+| 35 | `fast-mode-telemetry.ts` + `heavy-op-token.sh` |
+| 25 | `fast-mode-telemetry.ts` + `touches-orthogonality-check.ts` |
+| 18 | `ready-pool-check.ts` + `resource-gate.sh` |
+| 18 | `fast-mode-telemetry.ts` + `ready-pool-check.ts` |
+| 16 | `loop-driver-check.sh` + `monitor-mount-check.sh` |
+
+**两条与 AC12 冲突的结论**:
+
+1. **`fast-mode-telemetry.ts` 是横切枢纽,不属于任何一组**——它与 dispatch、resource、
+   touches、pool、monitor、contract **六类都高频共现**。AC12 会把它塞进 `quay-dispatch` 一组,
+   **数据说这是错的**:它应当是所有入口都能读写的**共享状态层**,而不是某个入口的成员。
+2. **`loop-driver-check.sh` + `monitor-mount-check.sh` 天然成对**(都在回答「循环机件挂没挂上」),
+   `ready-pool-check.ts` + `resource-gate.sh` 天然成对(都在回答「现在能不能派」)。
+   ⇒ 分组的自然接缝在**共现**处,而不在我按语义猜的边界处。
+
+### 五、方法本身的两个诚实限度
+
+1. **调用识别式第一版有 bug,被负控制抓出来**:正则的 `^` 在多行命令上只匹配串首,
+   换行后的调用全部漏掉 ⇒ 首次统计为 103 种/3,059 次,**少算 21%**。
+   修正后用 4 个「已知今晚被调用过」的脚本(`supervisor-deliver.sh` 等)做正控制,全部出现才采信。
+   **教训与 AC11 同源:统计口径本身要先被验证,否则得到的是一个自洽但错的分布。**
+2. **历史数据含已退休工具**:`heavy-op-token.sh` 调用 120 次排名靠前,但它 **2026-08-06 已被整删**。
+   ⇒ 用调用历史做设计时必须**按当前存活集过滤**,否则会为死物设计入口。
+
+### ⇒ 对 AC12 的具体修改要求
+
+- **基线改为双口径**:文档面 40 与**调用面 115** 并列,分组判据用调用面。
+- **优先级按 Pareto**:先覆盖 Top 20(80% 负载),长尾另案。
+- **分组接缝按共现修正**,不按语义猜测;`fast-mode-telemetry.ts` 单独作为共享状态层。
+- **重新跑一次本节的测量**,过滤掉已退休脚本后再定稿分组。
+
+## AC12-R(2026-08-06 人补充的**理由**):字符串插值是这次重构的一条独立论据
+
+人的原话:**「这是又一个应当把 .sh 重构为 .ts 的原因。」**——起因是管理者在一个晚上里
+反复踩同一族坑。
+
+**先把论证限定准,不夸大**:管理者今晚的翻车**发生在手写的命令行里**(`git commit -m "…"`、
+临时 `grep`/`pgrep`/管道),**不在 `.sh` 脚本内部**。所以"shell 脚本本身不安全"这个说法**不成立**,
+不要用它当理由——那正是本仓一直在立案反对的那种打折论证。
+
+**成立的是更强的那一版**:
+
+> **shell 靠字符串插值组合,所以每一个调用点都是一次重新出错的机会;
+> 而向模块传值,值不会被二次解析。**
+
+⇒ 决定风险量的不是"工具用什么语言写",而是 **调用方必须手写多少行会被 shell 重新解析的文本**。
+40 个散落入口意味着每次操作都要现编命令行;6 个入口 + 可注入模块意味着**传参**。
+
+**实测证据(2026-08-06 一个晚上、一个操作者、全部为字符串解析类故障)**:
+
+| 形态 | 次数 | 后果 |
+|---|---|---|
+| `pgrep`/`grep` 自匹配(命中自己的命令行) | **5** | 把 26 个非 tmux 进程当成 tmux;把泄漏测试进程当成旧版监视器 |
+| 反引号在双引号串里被命令替换 | **2** | 一次损坏了跨项目转达文本;一次吞掉了提交消息里的一行 |
+| 管道后读 `$?`(读到最后一个管道命令的码) | **1** | `rc=0` 掩盖了真实的 `rc=1 未送达`,据此报了假绿 |
+| grep 模式与目标真实格式不符 ⇒ 零命中当"不存在" | **2** | 差点报告"目标文件里 0 条 AC" |
+| 单引号里写 `\$` 成字面反斜杠 ⇒ 零命中,`&&` 静默不触发 | **1** | 我以为验过了,其实没验 |
+| 宽模式 `grep -c` 多计(把包装进程算进来) | **1** | 监视器数报 4,精确计数为 1 |
+
+**共 12 次,6 种形态,全部可由"传值而非传文本"消除。**
+
+**这条证据的特别之处**:失效表里**每一种都已经成文**(`manager-loop-tick.md` §4 明列
+「管道后读 `$?`」「截断显示当全貌」「零命中当没发生」),而它们**照样在同一个晚上重复发生**。
+⇒ **散文形式的规则挡不住这一族错误**,这与本仓「hard checks over prose」(ADR-004)是同一个结论。
+**这不是操作者更小心就能解决的问题,是调用面形状的问题。**
+
+## AC12(2026-08-06 人裁定「按该方案推进」):第二步的**具体分组方案**——40 → 6
+
+**背景**:AC3 定了「入口是一个工具,不是 36 个」,但**没给分组**。
+2026-08-06 管理者按人的追问「现在有多少个分散的 .sh .ts?应当如何集成?」实测并提出分组,
+人裁定**同意,按该方案推进**。
+
+### 实测基线(2026-08-06,`plugin/loop/*.md` + `plugin/skills/*/SKILL.md` + `orchestration/*loop-tick.md`)
+
+| 项 | 值 |
+|---|---|
+| **暴露给三层的操作面**(去重) | **40**(`.sh` 21 / `.ts` 18 / `.mjs` 1) |
+| ├ outer 直接调用 | 24 |
+| ├ inner 直接调用 | 22 |
+| └ manager 直接调用 | 3 |
+| 交付脚本总数(scripts + gate-scripts) | **172** |
+| **从不被直接调用的内部件** | **132(77%)** |
+
+**操作面里已有的冗余(实测)**:`claim-task` 与 `slot-refill` **各有 `.sh`+`.ts` 两个入口暴露同一能力**;
+语义重叠另有四组——会话观测有 `session-liveness.sh` / `-mount.sh` / `outer-liveness.sh` /
+`monitor-mount-check.sh` **四个**,拓扑有建/查两个,措辞漂移有 `audit`/`check` 两个。
+
+### 分组:按「回答什么问题」的自然边界,40 个落进 6 组
+
+| 组 | 入口 | 成员(操作面部分) | 数 |
+|---|---|---|---|
+| ① 会话与拓扑 | `quay-session` | session-liveness · -mount · outer-liveness · monitor-mount-check · topology-check · quay-topology · session-bootstrap · inner-session-check · quay-launch | 9 |
+| ② 送达与抢占 | `quay-deliver` | send-keys-reliable · supervisor-deliver · supervisor-preempt · supervisor-bus-identity · inner-blocked-signal · inner-forensics | 6 |
+| ③ 派发与并发 | `quay-dispatch` | cap-from-gate · slot-refill(×2) · ready-pool-check · concurrent-batch-scheduler · touches-orthogonality-check · resource-gate | 7 |
+| ④ 分支与认领 | `quay-branch` | claim-task(×2) · release-task · fork-baseline · integration-branch-model · integration-batch-merge · sync-lag-check | 7 |
+| ⑤ 套件与门禁 | `quay-suite` | full-suite-runner · suite-state-trigger · laydown-set-check · loop-driver-check · fast-mode-telemetry | 5 |
+| ⑥ 任务与文档校验 | `quay-check` | task-contract-check · task-schema-check · task-status-drift-check · self-report-vocab-*(×2) · strategic-doc-staleness-check · read-probe-spec | 7 |
+
+**分组不是硬分的**——是各脚本**自述问题**的自然边界(「会话活着吗 / 消息送到了吗 / 能派几个 /
+从哪分叉 / 套件绿吗 / 这个任务合规吗」),取自 `capability-catalog.sh` 的声明。
+
+### 为什么是 6,不是 1,也不是 10
+
+- **不是 1**:单一入口 `quay-tool <name>` 只是把 40 个名字挪进一个壳,
+  agent 仍要记 40 个子命令——**操作面没有真正变小**。
+- **不是 10**:等于没分。
+- **是 6**:对应 **6 个独立的失效域**,且**每层只需记住自己那几个**
+  (outer 主要 ③⑤,inner 主要 ②⑥,manager 主要 ①)——这才兑现「看到的面更小」。
+  3 组会把「会话观测」与「消息送达」混为一谈,而**今晚(2026-08-06)的事故证明这两者的失效模式完全不同**
+  (session-liveness 恒报 alive=0 是观测盲;supervisor-deliver 的 --root 挑错 transcript 是送达盲)。
+
+### `.sh` 的处理:不逐个改写,**按调用点迁移**
+
+| 类别 | 处理 |
+|---|---|
+| 进 6 个入口的 | 改写为 `.ts` 模块(**可注入 exec**)——这是 AC9「import 取代 spawn」的前提 |
+| 内部件(132 个) | **不改写,直接不暴露**——打进 bundle 或排除出交付物 |
+| 真正需要 bash 的少数 | 保留为入口**内部**的薄实现,**不作为独立文件交付** |
+
+⇒ **`.sh` 作为独立入口从 21 降到 0**。人 2026-08-06 的原话:
+**「让 manager / outer 看到这些 .sh 就是风险」**——集成后它们看不到任何 `.sh`。
+
+### 收益链(每一环可测,不是推断)
+
+| 收益 | 判据 | 当前 → 目标 |
+|---|---|---|
+| 操作面缩小 | tick 文档/skills 里的脚本引用数 | **40 → 6** |
+| 测试转 import | 纯 import 零副作用测试数 | **3 → 显著上升** |
+| 峰值内存 | 每 spawn 省 ~42MB node 基线(本规格实测) | 8 lane × 42MB ≈ **336MB** |
+| 威胁面 | 可被绕过的独立入口数 | **172 → 6** |
+| 升级校验成本 | `verify-installed-executables` 逐字节文件数 | **172 → 常数** |
+
+**因果方向由 AC9 钉死**:集成是前提,import 取代 spawn 是结果,**不是并列项**。
+
+**落地归属**:本方案是 `tasks/gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect.md`
+AC2「先集成再转测试」的**具体形态**;`.ts` bundle 与 `.sh` 交付形态两条姊妹任务同批处理。
+
+---
+
 ## AC8(2026-08-04 人补):自用仪器也要集成,只是入口形态不同
 
 **人的原话**:「对于这些本项目用的仪器,即使不进 mcp,也还是应当适当集成。」

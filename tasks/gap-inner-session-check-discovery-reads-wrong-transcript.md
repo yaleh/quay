@@ -120,3 +120,7 @@ changed: 修复落地（12936f90）+ AC4 偏差留空 + 裁定确认
   非 fail-closed。判定：可接受——空壳反例走主路径（进程存在 → discovery-pid 正确），回退仅命中
   environ 读取失败边缘；且标记 source=discovery 使降级可辨。若需真 fail-closed 另行修订。
 - **裁定确认**：驱动 inner 并入当前任务 scope 的路线生效（未另立并行修复）。
+- **AC4 交叉标注（2026-08-06，由 follow-up `gap-inner-session-check-discovery-fallback-silent` 收口）**：
+  本任务留空的 AC4（无 PID 回退启发式非 fail-closed）正是那条目的起源。follow-up 已实现本行承诺的
+  「另行修订」：TR_SOURCE=discovery 现为**不静默**——脚本 stderr 报警 + state=degraded（fail-closed），
+  cold-start --json 消费者读 `transcriptSource==discovery` 时报警/拒收。本任务 AC4 保留留空（origin 记录）。

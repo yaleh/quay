@@ -67,9 +67,10 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 | **健康** | inner 窗口存在 **且** claude 进程存在 **且** transcript 有真实 user 消息 | **什么都不做**（权限边界——已存在的 inner 可能是 manager 建的，外层无权判断/重建/改参数），直接进入正常驱动流程 |
 | **空壳** | inner 窗口存在 **且** claude 进程存在 **但** transcript 无真实 user 消息（被拉起但未驱动，11:40 watchdog 形态） | **驱动而非重建**——不丢可能已有的上下文，接手 manager 预建的会话 |
 | **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner，manager 跨项目不属于项目拓扑）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
+| **退化** | inner 窗口+进程存在，但 transcript 仅由发现启发式解析（`transcriptSource=discovery`，旧启发式会认错 transcript） | **报警 + 不信任**——state=degraded（fail-closed），**绝不按 healthy 放行**；先用结构方式解析 inner transcript（`--transcript` / `SESSION_TRANSCRIPTS`）重试，仍无法结构确认 ⇒ 升级（step 5） |
 
 ```bash
-bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
+bash plugin/scripts/inner-session-check.sh --json   # 四态自检：{state: healthy|empty-shell|missing|degraded, window, process, transcript, transcriptSource, transcriptFresh}
 ```
 
 按 `state` 分派：
@@ -88,12 +89,21 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
   创建后 **INNER-DRIVEN 验证送达**：transcript 出现真实 user 消息（send-keys-reliable 的
   `transcript-delivery-check.ts` 判据），不假设成功。**工厂失败/验证不过 ⇒ 升级给人**（step 5），
   不静默继续——建不出来就进不了正常驱动流程。
+- **`degraded`** ⇒ **报警（不自认 healthy）**——inner 窗口/进程存在但 transcript 只由发现启发式解析
+  （`transcriptSource=discovery`，旧启发式在 3 会话拓扑下会认错 transcript；「对结论错证据」静默 healthy
+  正是 gap-inner-session-check-discovery-fallback-silent 消灭的形态）。**本步是 --json 消费者，必须读
+  `transcriptSource`**：`==discovery` ⇒ 报警 + 按 degraded 处理，**不得**按 healthy 放行。先加
+  `--transcript <path>` 或用 `SESSION_TRANSCRIPTS` 结构解析 inner transcript 后重试自检；仍无法结构
+  确认 ⇒ 升级给人（step 5），不静默继续。
 
 **transcript 路径解析**（inner-session-check.sh）：`--transcript` 显式 > `SESSION_TRANSCRIPTS` 配置
 > `orchestration/session-liveness.env` > 发现（`$HOME/.claude/projects/<root-slug>/` 里最晚修改、
 且不是外层自己的 jsonl，标 `source=discovery`）。找不到 transcript = fresh = 空壳判据（驱动不重建）。
-**发现路径是启发式**：`healthy` 判定若来自 `source=discovery`，先确认所选 transcript 确实是**当前**
-inner 会话的（例如 inner claude 进程启动时刻之后的），否则按空壳驱动——驱动不重建，代价有界。
+**发现路径是 KNOWN-BROKEN 的退化路径（不静默）**（gap-inner-session-check-discovery-reads-wrong-transcript
+→ gap-inner-session-check-discovery-fallback-silent）：旧启发式在 3 会话拓扑下会认错 transcript，所以
+`transcriptSource=discovery` 时脚本本身 stderr 报警且 state=**degraded**（fail-closed，绝不静默报 healthy）。
+**本步（--json 消费者）必须读 `transcriptSource`**：`==discovery` ⇒ 报警 + 按 degraded 处理（结构解析
+重试 / 升级），**不得**按 healthy 放行——「对结论错证据」的无声回归正是这条要消灭的形态。
 
 **4. 重建 cron —— 唯一的循环驱动，这一步最容易漏**
 
@@ -690,10 +700,8 @@ tick 做一次收尾 pass。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
-     （`{state: running|green|red, reason?, failures?, verdictCommit?, runner: outer|inner,
-     startedAt, finishedAt, durationMs, laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。
-     `verdictCommit?` = **这条 verdict 覆盖的 tree/commit**（起跑时 `git rev-parse HEAD`，
-     best-effort；非 git 根缺失——缺失 = 覆盖树未知）。`reason` 只在 red 时出现：
+     （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
+     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。`reason` 只在 red 时出现：
      `failed`（真实失败——stop-dispatch 信号）或 `aborted`（套件未完成、无正确性结论——**不触发
      停派**，`gap-full-suite-runner-concurrency-default-and-gate` AC5）。**起跑条件**：本轮收尾了 ≥1
      个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=
@@ -707,16 +715,6 @@ tick 做一次收尾 pass。
      以及兜底退出码非 0。`state: red` + `reason: failed` 即 AC4 的 **stop-dispatch
      信号**（inner 读它停派发 + 暂缓 fan-in，见下「红窗分诊」）；`reason: aborted`（被信号杀/spawn
      失败）**不是** stop-dispatch 信号——inner 照常派发，本层按 aborted 语义处置（记录 + 重跑）。
-   - **verdict 覆盖范围可读（`gap-green-verdict-never-expires-411-minutes-and-187-commits-later-
-     still-green`，AC2/AC3）**：runner 每次写 verdict 时记录它所覆盖的 tree/commit
-     （`verdictCommit` = 起跑时 `git rev-parse HEAD`，best-effort）。consumer 读覆盖范围用
-     `node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts --json`——
-     输出 `verdictAgeMin`（finishedAt 距今分钟数）与 `verdictCommitDelta`
-     （`git rev-list --count <verdictCommit>..HEAD`）——**「这条绿是否仍描述当前树」从此可读**
-     （「上一次跑完是绿的」≠「现在是绿的」；一个 411 分钟 / 187 提交前的绿被当成现在的授权，正是
-     本任务要消灭的形态）。**只报可见性，不加硬闸**（AC4：不引入「陈旧即停派」——那会用一条新噪声
-     换旧噪声，重复 `IDLE 60s 即报` 的过报；阈值待成本数据，`gap-suite-cost-model-is-wrong-
-     optimizations-buy-nothing` 反对在成本结构未知时定阈值）。
    - **并发旋钮分叉（同一份文档服务两种测试框架）**：runner 的 `--lane-count` 拼接只对
      node:test/test.sh 项目生效（`--test-concurrency=N`，test.sh 的派生默认）；**vitest 项目
      真实文件级并行 flag 是 `--maxWorkers`**（archguard 用 `--maxWorkers=8` 跑通全量 4902 passed），
@@ -744,11 +742,6 @@ tick 做一次收尾 pass。
    suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 `$MERGE_TARGET` 照常接收任务合并，
    只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；`$FORK_BASELINE` 永不从未验证树推进）。
    **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。
-   **事件驱动跨机验证记录（`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`）**：
-   批量合快进 `$FORK_BASELINE` 后**同一轮内**调
-   `bash plugin/scripts/cross-machine-verify.sh --record-merge "$(git -C "$REPO_ROOT" rev-parse "$FORK_BASELINE")" --branch "$FORK_BASELINE" --root "$REPO_ROOT"`
-   ——把这次落地的合并记成 `merger_machine = 本机`（唯一知道谁执行合并的机器就是执行合并的机器）。这是
-   跨机验证双触发源的事件驱动源（加速）：4d 的心跳负责兜底。
 3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：
    每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
    它问「本地 `$FORK_BASELINE` 是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
@@ -758,17 +751,21 @@ tick 做一次收尾 pass。
    输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」从此有测量，不再靠人 `git log`。
    心跳读 `--json` 的 `leads` 或直接跑 `--push` 均等价（`--push` = 测 + 领先即推）。push 失败（非快进 =
    真分歧）只报告、不覆写、下一 tick 重试——正是 fail-closed 兜底。
-3d. **跨机验证心跳（`cross-machine-verify.sh`，兜底必跑——`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`）**：
-   每个 tick（含轻触）**无条件**跑一次
-   `bash plugin/scripts/cross-machine-verify.sh --verify --root "$REPO_ROOT"`——
-   它问「有没有本机**没参与**的合并还没被跨机验证？」，有就（最旧优先）跑**快闸**（冷启动/冒烟级，默认
-   `laydown-set-check.sh`，完整套件 38 分钟跑不进 `d` 预算）并把结论写成 git note（`refs/notes/quay-cmv-*`）。
-   这是兜底触发源：3b 的事件驱动记录负责「land 收口同一轮内记下合并」的加速，本步负责「万一事件驱动漏了 /
-   合并是在别的机器落的 / 本机悄悄落后」的必跑保底。**结构约束（AC4）**：`--verify` 跳过 `merger_machine == 本机`
-   的合并（亲代环境掩盖亲代缺陷——验证方必须未参与该合并）；无人记录的合并标 unattributed、不验（fail-closed）。
-   **检测延迟机械可读（AC2/AC5）**：`bash plugin/scripts/cross-machine-verify.sh --report --json --root "$REPO_ROOT"`
-   输出 `post_merge_latency_h` 与 `verifier_machine` / `merger_machine`（`verifier_is_participant` band 0）——
-   `d` 从此有测量，不再靠事后回忆。
+3.5 **批量合回 develop（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
+    integration 只从 develop 长出、只往 develop 合回 ⇒ 永远是 develop 后代 ⇒ **fast-forward 无冲突**
+    （`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）。`suiteGreen` 为 true 时，
+    把 integration 快进合到 develop（本层共享检出保持在 integration 上，develop 不是检出分支）：
+    ```bash
+    # ff 安全判据：develop 是 integration 的祖先（integration 是 develop 后代）
+    git merge-base --is-ancestor develop integration && git branch -f develop integration
+    # 等价机械判据（helper CLI）：--is-ancestor develop integration 输出 ancestor（exit 0）
+    ```
+    - **`--is-ancestor develop integration` 是硬前置**：develop 不是 integration 祖先（两线不变量被
+      破坏）⇒ `git branch -f` 不执行，标 needs-human、按「红窗分诊」处置，**绝不自动合**。
+    - **红窗期（`state: red`）不做批量合回**——integration 照常接收 inner 的任务合并（结构性消除
+      停派，`fast-mode-loop-tick.md` 步骤 2），develop 保持冻结，直到下一轮 verification-round 绿。
+    - **pending 窗口**：`git log --oneline develop..integration` 在红窗期应**非空**（Contract
+      invoke）——那些正是下一轮批量 fast-forward 的待验证合并。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}
@@ -852,6 +849,8 @@ aborted`（套件未完成、无正确性结论）**不触发停派**——记�
 drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 次驱动全来自外层 send-keys 散文，而
 外层自己每 20 分钟被 cron 强制重读出厂文档——**锚点不对称是 inner 行为漂移的结构根**。R2（驱动散文
 只带数据不带行为）管散文别越权；本步管「散文之外还有周期锚」。
+**重锚机制的有效性以语义收敛度量（步骤 6），不只「重锚发生了」**（
+`gap-reanchor-must-converge-inner-self-reported-vocabulary`）——锚点通道存在 ≠ inner 自述词汇收敛。
 
 **机制 = 用本层已有 cron 转发一条固定重锚 prompt，不是给 inner 另建 cron、不是每次现写散文：**
 
@@ -881,10 +880,35 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
    无 batch 式自述 = 收敛）与 `converged`。「Batch of N fully merged」式门控汇报 = 漂移（被审计标记）；
    verification-round-N / 滚动派发语义 = 合规。**每个 tick 必报**本轮 `inner_self_report_vocab` 与
    收敛状态。
+6. **自述措辞审计 + 语义收敛判据**（inner 侧，`gap-reanchor-must-converge-inner-self-reported-
+   vocabulary`）：重锚转发的同一 tick 审计 inner 最近**自述措辞**（commit / fan-in 注记）——不是
+   「重锚发生了」算有效，是 **inner 自述向出厂语义收敛**才算（AC2，invariant
+   `reanchor_effectiveness_is_convergence`）：
+   ```bash
+   node --no-warnings --experimental-strip-types plugin/scripts/self-report-vocab-check.ts --root "$REPO_ROOT" --json
+   ```
+   读 stdout 的 `count` 与 `converged`：
+   - **门控语义漂移**（`count > 0`）：inner 自述出现「Batch of N fully merged」/「batch N/M all
+     landed」/批次编号式汇报（如 batch-4）/「按批」= **门控语义漂移**——应报 `verification-round-N` /
+     滚动派发语义；记入本轮 tick，并驱动 inner 按出厂词汇（`fast-mode-loop-tick.md` 的词汇规范节）修正
+     其自述措辞。
+   - **合规**（`count === 0`）：自述无 batch 式汇报。
+   - **收敛判据**（AC2）：有效性以**语义收敛**度量——`converged: true`（连续
+     `--convergence-rounds`，默认 3 轮，自述无 batch 式汇报）才算收敛；`count > 0` 的任一轮把计数
+     清零（收敛非单调）。状态存 `.quay/self-report-vocab-state.json`（gitignored 运行时态），跨 tick
+     持久。
+   - **与锚点机制的关系**：锚点机制（`gap-inner-has-no-periodic-anchor-prose-only-drives-drift`，
+     done）提供「周期性拉回出厂语义」的通道；本步是该通道的**有效性判据**——通道存在 ≠ 词汇收敛。
+   - **与措辞任务两条一起**（AC3）：`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`
+     （doc 侧：散文无门控语义，done）+ 本判据（inner 侧：自述向出厂语义收敛）——**单独做任一条都解决不了**：
+     改出厂文档改不到 inner 已内化的措辞，改自述收敛判据也清不掉 doc 散文的歧义。
+   - **每 tick 必报**：自述审计 `count` 与 `converged`（重锚收敛判据）。
 
 **为什么「空闲才转发」**：重锚是「给 inner 一个周期读出厂文档的机会」，不是催活。inner 忙时
 （在飞 agent / 有 bracket）读文档的机会会打断工作；空闲时转发才是在它回合结束时给下一次行为对齐
 锚点。**与驱动散文的关系**：驱动散文带任务数据（R2 约束），重锚零数据、只指向文档——两者互补。
+**步骤 6 是重锚的观测端**：转发让 inner 有周期读文档的机会，审计验证这个机会**真的让 inner 的自述
+词汇收敛**了——机制与判据成对。
 
 ### 2. 分类本 tick 的动作
 
@@ -1085,15 +1109,18 @@ tick 或 `/clear` 后的会话会重犯。
 - 遥测当前：任务数、均耗时、`tasksPerHour`（吞吐 = 收尾数/墙钟窗口小时，带 `windowStart/End/Hours`；
   `serialEquivalentPerHour` = 旧 60/均耗时，与并发无关）
 - 异步收尾例程（步骤 1b）：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
-  与 `durationMs`、本轮全量 suite 是否在跑/绿/红；**verdict 覆盖**（`verdictAgeMin` / `verdictCommitDelta`，
-  一条命令：`node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts --json`，
-  缺文件/非 git 根报 `verdictCommitDeltaReadable: 0`）
+  与 `durationMs`、本轮全量 suite 是否在跑/绿/红
 - 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
   排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
 - Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `targetOk`）——挂没挂、挂的哪个仓库
   （2026-08-06 起 `delivered` 随共享 events.jsonl 移除；事件送达由挂载方自己的 Monitor 流承担）
+- 自述措辞审计（步骤 1c 第 6 条）：本轮 inner 自述 `count`（batch 式汇报数）与 `converged`（重锚收敛
+  判据，连续 N 轮无 batch 式自述）
+- Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+  `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
+  （AC9 起 `delivered` 取代 `ownedByThisSession`）
 
 不要只说「内层在跑」——没有这些，分层是否有效无法判定。
 
@@ -1107,9 +1134,10 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补）。**历史名「batch2」**（旧批模型队列快照，保留不改名） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, verdictCommit?, runner, startedAt, finishedAt, durationMs, laneCount}`；`verdictCommit?` = 该 verdict 覆盖的 tree/commit（起跑时 HEAD，best-effort）；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写。verdict 覆盖/时效经 `suite-state-trigger.ts --json` 读（`verdictAgeMin`/`verdictCommitDelta`，只报可见性不加硬闸） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
 | `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal` + `failureLocation`（SUITE-RED 携带，供派发决策）；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
+| `.quay/self-report-vocab-state.json` | inner 自述措辞审计的收敛状态（`roundsClean` + `converged`；gitignored 运行时态，`self-report-vocab-check.ts` 写，步骤 1c 第 6 条读） |
 | `adr/ADR-021-*.md` | 四项原则 |
 | `docs/proposals/exp6-queue-driven-concurrent-executor.md` §0 | 两阶段交付范围 |

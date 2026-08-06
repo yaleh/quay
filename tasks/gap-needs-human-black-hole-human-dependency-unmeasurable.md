@@ -16,7 +16,7 @@ title: "needs-human is the LITERAL human-dependency count (AC10 asks can the
   task referencing ADR-retired mechanism ⇒ auto-superseded (reuse
   strategic-doc-staleness-check.ts's path-existence, same ruler on
   tasks/needs-human)"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -159,6 +159,8 @@ The methodology SPECs below are the written sources; the manager layer crystalli
 rules* but does not re-implement each SPEC. Index (under `orchestration/` in the quay repo):
 
 - `orchestration/SPEC-manager-productization-2026-08-05.md` — the manager productization spec (C1–C5 constraints, build-vs-run ownership, two separate starts)
+- `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` — the develop/integration two-line branching model (verified baseline + pending-verification merge target)
+- `orchestration/SPEC-integration-architecture-2026-08-05.md` — the integration architecture (merge target / batch merge)
 - `orchestration/SPEC-outer-liveness-productization.md` — outer liveness, the manager's own anchor gap
 - `orchestration/SPEC-cold-start-one-liner.md` — cold-start one-liner (delivery surface)
 - `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` — the complete delivery surface (six classes; this skill is the loop-documentation class-2 owner)

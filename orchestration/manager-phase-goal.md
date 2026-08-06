@@ -548,6 +548,55 @@ plugin bundle（`scripts` 117 · `gate-scripts` · `skills` 13 · `probes` · `l
 **归属**：release 怎么打、`files` 字段怎么改、SEA 要不要继续、版本号怎么定＝**outer 的机制决定**；
 manager 只核对上面三条判据的实测值，不代其设计发布流程。
 
+#### 【人裁定 2026-08-06 17:0xZ】本阶段验证改用**本机 build 的安装包**，暂不走 GitHub Actions
+
+**裁定原话**：「鉴于 quay 还不够稳定，建议本阶段在另两台机器上的安装 quay 应使用 vhs(本机)
+本地 build 的安装包，而暂不走 github action 的 build 流程。应验证在这两台机器上，quay 可以
+正确安装、初始化（项目内）和冷启动（outer 和 inner，不包括 manager）。」
+
+**这条调整保住了 AC16 判据②的关键性质**：判据②原文要求「从 release 资产（**不是 git clone**）
+安装」——"不是 git clone"才是要害（git clone 会带开发树，正是**亲代环境掩盖亲代缺陷**）。
+本机 `package.sh` 产出的 `.tgz` 仍然是**真实产物**，不是开发树 ⇒ 关键性质不变，
+只是把"产物从哪来"从 CI 换成本机，**把产品验证与 CI 健康解耦**（release job 当前是坏的，
+不应让它挡住"证明产品本身能用"）。
+
+**本机 build 实测可用（manager 2026-08-06 17:0xZ 亲跑）**：
+
+```
+$ bash packages/quay/scripts/package.sh
+Artifact: /home/yale/work/quay/packages/quay/quay-0.4.0.tgz
+$ tar tzf quay-0.4.0.tgz | grep -c "package/plugin/"     → 406
+```
+454 文件，其中 plugin bundle 406 条：scripts 159 · skills 22 · gate-scripts 14 · probes 4 ·
+loop 2 · vendor 4 · agents 1 · workflows 2。**agent 面完整在包里。**
+
+> **管理者自曝的一次测量错误（写在这里防止后人重犯）**：我最初直接跑 `npm pack` 得到
+> `plugin/` 条目 **= 0**，据此差点断定「`files: [...,"plugin"]` 从来没生效、AC1 是假勾」。
+> **那是错的**——正确入口是 `packages/quay/scripts/package.sh`，它在打包时把仓库根的
+> `plugin/` **物化成 `packages/quay/plugin/` 快照**（gitignored，与 `dist/` 同款），
+> `files` 里的 `plugin` 才有所指。裸跑 `npm pack` 绕过了这一步。
+> **教训**：CI 调的是 `package.sh` 不是 `npm pack`（`release.yml:64`），
+> 验证一条 CI 行为前先看 CI 实际调什么。
+
+**本阶段验收范围（人明确划定）**：
+
+| 项 | 要求 |
+|---|---|
+| 目标机器 | **两台**：B（orangevps）、C（ad-arm1） |
+| 安装源 | **本机 `package.sh` 产出的 `.tgz`**，不走 GitHub Actions / release 资产 |
+| 要验证 | ① 正确**安装** ② 正确**初始化**（项目内 `quay-init`）③ 正确**冷启动** |
+| 冷启动范围 | **仅 outer + inner，不含 manager**（manager 的独立冷启动是 `gap-manager-productization-five-constraints` 的范围，不在本阶段） |
+
+**已实测的第一道坎（采用者视角，manager 2026-08-06 17:0xZ）**：
+
+| 机器 | 默认 `node` | 有无 ≥20 | 判定 |
+|---|---|---|---|
+| B（orangevps） | **v18.19.1** | 有（nvm 里 v22.23.1 / v25.2.0，但**不在默认 PATH**） | 需切换 PATH |
+| C（ad-arm1，aarch64） | **v18.19.1** | **无任何 ≥20** | **装都装不了，需先解决 Node** |
+
+quay 声明 `engines: {node: ">=20.0.0"}`。⇒ **两台机器形态不同，C 更严重**——
+这正是判据②该暴露的东西，不是意外。
+
 ---
 
 ### ~~AC17：基于 GitHub 同步的跨机同项目协作开发（对应人的目标 2）~~ —— 已取消
@@ -912,8 +961,61 @@ B 机 40+ 个提交（含 `plugin/skills/manager/SKILL.md` 等）**只存在于 
 
 - **AC10（开轴）**：仍需要，但不再是主判据。
 - **AC11（验证方式本身要先被验证）**：第四次全灭的直接教训，永久保留。
+- **AC18（收口不看勾，管理者自己重跑 measure）**：见下，2026-08-06 人裁定后新增，永久保留。
 
 ---
+
+### AC18（2026-08-06 人裁定新增）：**任务收口不看勾选，管理者自己重跑 measure**
+
+**人的裁定原话**：「我的估计是 outer 和 inner 执行上述任务还是会打折。
+你需要在自己的阶段性 AC 中明确相应要求。」
+
+#### 依据：今晚实测到的四种「打折」形态
+
+| # | 形态 | 实例（全部今晚实测） | 可机械检出？ |
+|---|---|---|---|
+| ① | **AC 跨度小于问题跨度** | 跨机同步任务及其前身（×2）——AC 只测"指向对了/调用过一次" | ❌ 需人读 |
+| ② | **AC 勾在后来被回退的机制上** | `gap-concurrency-derivation-reverted-...`——AC5 勾着，机制 3 天前已回退 | ✅ 重跑 measure |
+| ③ | **任务标 done 但交付物没落地** | 形态成立（archguard TASK-60 一度误判、已撤回，但形态本身有效） | ✅ 重跑 measure |
+| ④ | **AC 证据文本自承未生效，仍被勾** | `gap-eighty-one-instruments` 的 AC8——证据原文末句「41:4 说明政策存在、未生效」 | ✅ 关键词 + 勾选状态 |
+
+**②③④ 的共同解法是同一条：不看勾，自己重跑 Contract 里的 measure。**
+而 measure 已经是可执行命令（本仓 `## Contract` 六键的既定形态），**这条不需要新机制，只需要纪律**。
+
+#### 判据（对管理者自己，机械可核）
+
+1. **收口时管理者独立重跑该任务 `## Contract` 的每条 measure**，与 `band` 对照。
+   **任务的 `status: done` 与 AC 的 `[x]` 一律不作为证据**——它们是被检查对象，不是检查结果。
+2. **measure 与 band 不符 ⇒ 该任务不计入阶段目标达成**，无论它被标成什么状态。
+   管理者报出「勾了但没达成」，裁定权归外层，但**计不计入阶段 AC 由管理者判定**。
+3. **对没有 `## Contract` 的任务**：管理者必须能说出「我用什么命令验的」，
+   说不出 ⇒ 按 AC11 降级为「读码推断，未实测」，同样不计入。
+
+#### 对当前集成方案（`SPEC-instruments-behind-one-entry` AC12）的具体应用
+
+该方案的三条 measure 已写好且**我已验证它们真能跑出基线**（不是散文目标）：
+
+| measure | 现值 | band |
+|---|---|---|
+| `surface_entrypoints` | **40** | **6** |
+| `sh_entrypoints_on_surface` | **21** | **0** |
+| `pure_import_tests` | **3** | 大于 3 |
+
+⇒ **收口时我逐条重跑这三个数**。三个数不动而任务被标 done ⇒ 报出并不计入。
+
+#### 特别防范：**这个方案有一种"打折"会让情况变得更糟**
+
+**新旧入口并存**——建了 6 个新入口，但旧的 40 个仍被 tick 文档/skills 引用 ⇒ **总入口变成 46**，
+比现在（40）**更差**：威胁面更大、agent 要记的更多、还多了一层"该用哪个"的歧义。
+
+**`surface_entrypoints` 这条 measure 恰好能抓住它**——它数的是 tick 文档+skills 里的**引用总数**，
+新旧并存会让这个数**上升**而不是下降到 6。**这是本方案最需要盯的单一数字。**
+
+#### 与 AC11 的关系
+
+AC11 管的是**「我说 verified 之前，先验证我的验证方式」**（第四次全灭的教训）；
+AC18 管的是**「别人说 done 之后，我自己重跑」**。
+**两条方向相反、互补**：前者防我自己的假阳性，后者防执行层的假阴性。
 
 ## 维护归属（2026-08-03 人指出后调整）
 

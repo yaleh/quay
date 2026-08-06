@@ -990,3 +990,30 @@ shows:
 8. Should the fast-lane execution manifest be committed Markdown, a
    hash-bound structured receipt, or a generated view over one canonical
    machine-readable artifact?
+
+## 15. Implementation status — finding back-propagation mechanism (2026-08-06)
+
+`gap-audit-findings-not-backpropagated-to-earlier-detectors` landed the §7 back-propagation
+mechanism as two byte-identical script pairs (experiments + plugin mirrors):
+
+- `scripts/finding-backpropagate.ts` — `classifyFinding` (deterministic task-specific|profile|
+  global + `earliestDetectableStage` + promotion decision; rejects promotion when the required
+  evidence does not exist at the proposed earlier stage, AC1), the concrete PlanCheck detector
+  `detectAcCoverageCitations` (the REAL M208 finding class, recurrenceKey `ac7-checklist-missing`),
+  `proveDetector` (RED/GREEN/ambiguous calibration with measured false-positive rate, AC2),
+  `backpropagate` (authorized activation, AC3/AC4), `controlFalsePositive` (AC8), and
+  `reportBackpropagationMetrics` (AC7, reads only canonical receipts + DIR-126-D/E telemetry;
+  missing cost inputs are explicit unknowns).
+- `scripts/execution-policy.ts` — the minimal versioned policy-hash + authorized-activation
+  substrate DIR-124-D adopts: `createPolicy`, `authorizeActivation` (a distinct authorized
+  transition — the originating observer can never self-activate), `revokeActivation`,
+  `invalidateReceiptsForPolicyChange` (a policy activation changes the policy hash and invalidates
+  exactly the affected cached receipts).
+
+Proof case: the real, independently-confirmed M208 finding
+(`milestones/M208/proposal-ledger.json` entry `55016c0b`, rootCauseKey `ac7-checklist-missing`)
+migrates via `migratePrepareLedger` to a FindingEnvelope, classifies eligible at PlanCheck, and is
+calibrated against RED/GREEN/ambiguous corpora. The M192 Build-null runtime finding is the AC1
+negative control (rejected for promotion to PlanCheck). A later-real-milestone early-catch proof
+(AC5) and the end-to-end value estimate (DIR-126-E) remain pending future milestones and are
+reported as unknown rather than fabricated.

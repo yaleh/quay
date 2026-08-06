@@ -1,13 +1,12 @@
 ---
 id: gap-supervisor-message-bus-with-identity
-title: "supervisor 落地⑤消息总线带身份——投递信道正规化（含人↔manager/outer chat）：
+title: supervisor 落地⑤消息总线带身份——投递信道正规化（含人↔manager/outer chat）：
   SPEC-integration-architecture §4.4 第 5 步 + §4.5（人是第三个 target，同一个机制）——
-  .quay/manager-inbox 的失败形态是「文件在、无人读」⇒ 信道正规化的第一优先级不是投递，
-  是消费者的机械挂载点（tick 某一步显式读收件箱）；sender identity：接收侧能区分
-  「人」与「agent-X」（今晚事故 5：agent 消息以 user 身份进入会话，userType:external 与
-  真人不可区分）；deliver(human) 语义 = 已投递 ≠ 已读，两者分开建模；
-  展开见 docs/proposals/quay-message-bus-human-in-the-network.md"
-status: ready
+  .quay/manager-inbox 的失败形态是「文件在、无人读」⇒ 信道正规化的第一优先级不是投递， 是消费者的机械挂载点（tick
+  某一步显式读收件箱）；sender identity：接收侧能区分 「人」与「agent-X」（今晚事故 5：agent 消息以 user
+  身份进入会话，userType:external 与 真人不可区分）；deliver(human) 语义 = 已投递 ≠ 已读，两者分开建模； 展开见
+  docs/proposals/quay-message-bus-human-in-the-network.md
+status: done
 labels:
   - gap
   - milestone-candidate

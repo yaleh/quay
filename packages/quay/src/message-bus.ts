@@ -265,7 +265,7 @@ export function createTransportRegistry() {
     get(target) {
       return transports.get(target) ?? null;
     },
-    deliver(target, message, fromOrOpts = {}) {
+    deliver(target: string, message: Record<string, unknown>, fromOrOpts: string | { from?: string } = {}) {
       const t = transports.get(target);
       if (!t) return { delivered: false, reason: `message-bus: no transport registered for target '${target}'` };
       // `target` is authoritative: the arg names the channel, and a caller-supplied `target` in
@@ -273,13 +273,13 @@ export function createTransportRegistry() {
       // AC1 — deliver(target, payload, from=<identity>): the THIRD arg is the sender identity,
       // authoritative over any `from` a caller smuggled inside `message`. Accepts either a bare
       // identity string (`deliver("inner", payload, "outer")`) or an opts object (`{ from }`).
-      let msg = { ...message, target };
+      // `from` is carried on the record — computed BEFORE the spread so `msg` stays an ordinary
+      // object literal (a spread of `object` erases the `from` property in TS's eyes).
       const opts = typeof fromOrOpts === "object" && fromOrOpts !== null ? fromOrOpts : {};
-      if (typeof fromOrOpts === "string") {
-        msg.from = fromOrOpts;
-      } else if (opts.from !== undefined) {
-        msg.from = opts.from;
-      }
+      const sender = typeof fromOrOpts === "string"
+        ? fromOrOpts
+        : (opts.from !== undefined ? opts.from : undefined);
+      const msg = { ...message, target, ...(sender !== undefined ? { from: sender } : {}) };
       return t.deliver(msg, opts);
     },
     observe(target, opts = {}) {

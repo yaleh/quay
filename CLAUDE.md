@@ -175,6 +175,24 @@ Key cross-cutting facts (require reading several files to see):
 
 ## Split-decision routing policy (DIR-124-A1b, 2026-08-01)
 
+> **STATUS: reference/manual policy — NOT mechanically enforced (2026-08-06,
+> `gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode`).**
+> `checkSplitRecommendation` is retained and unit-tested, but **no fast-mode dispatch or
+> task-authoring code path calls it** (grep-verified: zero non-test callers outside
+> `proposal-convergence.ts`). The table below is the intended procedure for a human/agent
+> authoring or triaging a task **by hand** — nothing enforces it automatically. It was NOT wired
+> in because the classifier's inputs (a typed mechanism inventory from a review agent's
+> `mechanisms` array, and a blocking-findings `ledger`) do not exist in the fast-mode
+> task-authoring path (ProposalReview/PlanCheck were replaced by `task-contract-check.ts` +
+> subagent REFUTE rounds), and the only mechanical count source (`countMechanisms()` in
+> `wiring-coverage-check.ts`) was measured 3/5 correct — "NOT reliable enough to wire into the
+> split path (A4 would falsely split)" (`gap-extract-mechanism-claims-calibration`, done). The
+> fast mode's ACTUAL mechanical scope guards are touch orthogonality (`checkTouchesPair` /
+> `concurrent-batch-scheduler.ts`), compound decomposition (`it0-split-or-commit-check.ts`), and
+> touch resolvability (`touches-orthogonality-check.ts --resolve`). Revisit the wire-in when
+> mechanism-count calibration is fixed. Full decision record:
+> `tasks/gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.md`.
+
 When the split classifier (`checkSplitRecommendation` in `proposal-convergence.ts` — retained; under the classic loop this surfaced via `prepare-milestone` returning `needs-human`/`split-recommended`, which is retired under ADR-022) returns `splitRecommendation.code`, the orchestrator MUST route by that code, NOT auto-approve all splits indiscriminately:
 
 | Code | Action | Rationale |

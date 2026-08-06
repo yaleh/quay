@@ -78,6 +78,18 @@ inner 的自述措辞与出厂语义一致」**。本任务补这个判据。
 - [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`
       （`plugin/test/self-report-vocab-audit.test.mjs`：`import { test } from "node:test"` +
       首行 `// @test-group governance`，15/15 pass）
+      （`plugin/scripts/self-report-vocab-check.ts` + tick 文档 1c 第 6 条；实测见下方 Execute evidence）
+- [x] AC2: **收敛判据**——重锚机制有效性以语义收敛度量（连续 N 轮自述无 batch 式汇报 = 收敛），
+      不只「重锚发生了」（`nextConvergenceState`：连续 N 轮 count=0 ⇒ `converged: true`；任一轮
+      count>0 清零，收敛非单调）
+- [x] AC3: **与措辞任务两条一起**——`gap-split-batch-vocabulary`（doc 侧）+ 本任务（inner 侧内化）；
+      任务体交叉标注「单独做任一条都解决不了」（本任务 Proposal「单独做任一条都解决不了完整问题」+
+      tick 文档 1c 第 6 条交叉标注 + 措辞任务 AC8 已反向引用本任务——双向标注齐全）
+- [x] AC4: **真实使用**——重锚循环下 inner 自述措辞向出厂语义收敛（batch 式汇报消失，实测输出贴任务体）
+      （本次实测：inner 最近 29 条自述 grep 零命中 batch 式措辞，审计 `count=0`；控制用例「Batch of 3
+      fully merged」被审计标记——判据真实区分）
+- [x] AC5: 测试用 `node:test` 且带 `// @test-group governance`（`plugin/test/self-report-vocab-check.test.mjs`，
+      16/16 pass）
 
 ## Definition of Done
 
@@ -95,6 +107,88 @@ inner 的自述措辞与出厂语义一致」**。本任务补这个判据。
 - plugin/test/self-report-vocab-audit.test.mjs（AC2/AC4 fixture）
 - tasks/gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round.md（AC3 交叉标注）
 - tasks/gap-inner-has-no-periodic-anchor-prose-only-drives-drift.md（锚点机制引用）
+- plugin/loop/orchestrator-loop-tick.md（重锚步 1c：加自述措辞审计/收敛判据，步骤 6 + 必报 + 相关文件表）
+- plugin/scripts/self-report-vocab-check.ts（新：自述措辞审计 helper + 收敛判据状态机）
+- plugin/test/self-report-vocab-check.test.mjs（新：AC1/AC2/AC4 审计与收敛判据 fixture + AC5）
+- tasks/gap-reanchor-must-converge-inner-self-reported-vocabulary.md（本任务：AC 勾选 + 证据）
+
+> **交叉标注（AC3，不改动已 done 任务文件）**：措辞任务
+> `gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round` 的 AC8 已反向引用本任务
+> （「必须与 gap-reanchor-must-converge-inner-self-reported-vocabulary（inner 侧自述向出厂语义收敛）
+> 一起排……单独做任一条都解决不了」）；锚点机制
+> `gap-inner-has-no-periodic-anchor-prose-only-drives-drift`（done）在 tick 文档 1c 已被本判据引用为
+> 「通道提供方」——双向标注齐全，无需改 done 任务。
+
+## Test-Files
+
+- plugin/test/self-report-vocab-check.test.mjs
+
+## Execute evidence（2026-08-06，inner executor）
+
+### 机制落点
+
+- **审计 helper**：`plugin/scripts/self-report-vocab-check.ts` —— `flagBatchVocab`（纯函数）标记
+  「Batch of N」/「batch N/M」/批次编号（batch-4）/「按批」式自述；`nextConvergenceState`（纯函数）
+  实现收敛判据（连续 N 轮 count=0 ⇒ `converged: true`，任一轮 count>0 清零）。git-log 模式只审计
+  inner 自述面（`inner:` fan-in 注记 + `merge task/` 合并提交），白名单自然豁免（任务 id、机件真名
+  `concurrent-batch-scheduler.ts`/`{batch, deferred}`、历史名 `batch2-queue-state.md`/`batch4a/b/c`）。
+- **tick 文档接线**：`plugin/loop/orchestrator-loop-tick.md` 1c 重锚步新增**第 6 条「自述措辞审计 +
+  语义收敛判据」**，并写入「每个 tick 必报」与「相关文件表」；锚点机制（已 done）被引用为「通道提供方」，
+  本判据是通道的**有效性判据**——通道存在 ≠ 词汇收敛。
+
+### Contract measure / invoke（inner 自述来源 = 最近 40 提交中 inner/merge 提交，共 29 条）
+
+```text
+$ git log --format='%s' -40 | grep -E '^(inner:|merge )' | grep -c 'Batch of'
+0
+$ git log --format='%s' -40 | grep -E '^(inner:|merge )' | grep -n 'Batch of\|batch-2/3/4\|按批'
+（无输出，exit 1 = 零命中）⇒ inner_self_report_vocab = 0（当前窗口收敛）
+```
+
+### Control（AC1/AC4，构造 inner 自述 ⇒ 审计必标记）
+
+```text
+$ node --experimental-strip-types plugin/scripts/self-report-vocab-check.ts --text 'inner: Batch of 3 fully merged' --json --no-state
+{ "count": 1, "flagged": [ { "pattern": "batch-of", "match": "Batch of 3" } ], ... }
+
+$ node --experimental-strip-types plugin/scripts/self-report-vocab-check.ts --text 'inner: verification-round-1 fan-in complete; 滚动派发; worktrees cleaned' --json --no-state
+{ "count": 0, ... }   # 出厂语义（verification-round-N / 滚动派发）= 合规，不标记
+```
+
+**判据非空转（AC4 反证）**：宽窗（--count 200，112 条 inner 自述）审计**标记**历史 batch 式自述
+「batch 5/5 all landed」（2 处），窄窗（默认 40）为 0——审计真实区分「历史批式自述」与「当前收敛」，
+不是恒 0 的装饰判据：
+
+```text
+$ node --experimental-strip-types plugin/scripts/self-report-vocab-check.ts --root . --count 200 --json --no-state
+{ "count": 2, "windowCount": 112, ... }
+  FLAG: inner: DIR-124-B2 fan-in (...); batch 5/5 all landed, in-flight 0   (batch-count | batch 5/5)
+```
+
+### Convergence（AC2，连续 N=3 轮无 batch 式自述 ⇒ converged，收敛非单调）
+
+```text
+round 1: roundsClean=1 converged=False
+round 2: roundsClean=2 converged=False
+round 3: roundsClean=3 converged=True
+（任一轮 count>0 ⇒ roundsClean 清零，见测试 AC2「flagged round resets」）
+```
+
+### Scoped test（AC5，`node:test` + `// @test-group governance`，16/16 pass）
+
+```text
+$ bash scripts/test.sh plugin/test/self-report-vocab-check.test.mjs plugin/test/batch-vocabulary-check.test.mjs plugin/test/reanchor-prompt.test.mjs
+ℹ tests 37   ℹ pass 37   ℹ fail 0   ℹ cancelled 0
+```
+
+（16 新 + 8 既有 batch-vocabulary + 5 既有 reanchor-prompt + 8 由 selector 附带 —— 见下方 scoped run）
+
+### 与措辞任务/锚点机制的交叉（AC3）
+
+- 措辞任务 `gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`（done）AC8 已反向引用本
+  任务（「必须一起排……单独做任一条都解决不了」）——本任务 Proposal 与 tick 文档 1c 第 6 条双向标注。
+- 锚点机制 `gap-inner-has-no-periodic-anchor-prose-only-drives-drift`（done）提供重锚通道；本判据
+  （`converged`）是其有效性度量。
 
 ## Test-Files
 

@@ -15,7 +15,7 @@
 //   AC4  — negative: artificially lower the hook threshold to 1KB and force-stage the runtime
 //          (bypassing the gitignore). The commit MUST FAIL and the hook MUST name the runtime file.
 //          Without this, AC3's success is indistinguishable from a hook that never runs.
-//   AC10 — gitignore handling: quay-init writes the `/.quay/runtime/` entry itself; an already-
+//   AC10 — gitignore handling: quay-init writes the `.quay/runtime/` entry itself; an already-
 //          present entry is NOT duplicated, and the user's existing .gitignore is never overwritten.
 //
 // The hook is a faithful standalone reimplementation of pre-commit's `check-added-large-files`
@@ -121,8 +121,11 @@ test('AC3 — a target with a default-threshold (500KB) large-file hook commits 
       '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
 
-    // The runtime must be laid into .quay/runtime/ (the task's landing decision).
-    for (const rel of ['.quay/runtime/quay/quay.js', '.quay/runtime/quay-native/quay-native.js', '.quay/runtime/quay-native/provider.yml']) {
+    // The runtime must be laid into .quay/runtime/ (the task's landing decision). f9414dd3
+    // moved the layout to .quay/runtime/bin/ (keeps the native bundle's ../provider.yml
+    // resolution) — the config mcp_entry and install-config-driven-e2e A5/AC11 assert this same
+    // bin/ layout.
+    for (const rel of ['.quay/runtime/bin/quay.js', '.quay/runtime/bin/quay-native.js', '.quay/runtime/provider.yml']) {
       assert.ok(fs.existsSync(path.join(ws, rel)), `runtime file must be laid down: ${rel}`);
     }
 
@@ -164,7 +167,7 @@ test('AC4 — the large-file hook genuinely runs: threshold 1KB + force-staged r
     const commit = commitAll(ws, 1);
     assert.notEqual(commit.status, 0, 'AC4: the commit MUST fail at the 1KB threshold (a hook that never rejects is indistinguishable from no hook)');
     const out = commit.stdout + commit.stderr;
-    assert.match(out, /\.quay\/runtime\/quay\/quay\.js/, `the hook must name the oversized runtime file:\n${out}`);
+    assert.match(out, /\.quay\/runtime\/bin\/quay\.js/, `the hook must name the oversized runtime file:\n${out}`);
     assert.match(out, /bytes, which exceeds 1KB/, `the hook must report the file size:\n${out}`);
   } finally { cleanup(ws); }
 });
@@ -187,7 +190,7 @@ test('AC4 companion — force-staging the runtime at the DEFAULT 500KB threshold
 
     const commit = commitAll(ws, 500);
     assert.notEqual(commit.status, 0, 'the force-staged 1.3MB runtime must be rejected even at the default 500KB threshold');
-    assert.match(commit.stdout + commit.stderr, /\.quay\/runtime\/quay\/quay\.js/, 'the hook must name the runtime file at 500KB too');
+    assert.match(commit.stdout + commit.stderr, /\.quay\/runtime\/bin\/quay\.js/, 'the hook must name the runtime file at 500KB too');
   } finally { cleanup(ws); }
 });
 
@@ -195,8 +198,9 @@ test('AC4 companion — force-staging the runtime at the DEFAULT 500KB threshold
 // `<target>/vendor/quay-native/` and its .quay/config.yml points there. That dir EXISTS on upgrade,
 // so a "migrate only nonexistent paths" guard would leave the target pointed at the Go-reserved
 // directory forever. The migration must move a quay runtime path sitting under a reserved segment
-// (vendor/node_modules/target/build/dist) to `.quay/runtime/quay-native`, even when the old dir exists.
-test('AC9 upgrade — an existing install whose config points at vendor/quay-native (dir exists) is migrated to .quay/runtime/quay-native', () => {
+// (vendor/node_modules/target/build/dist) to `.quay/runtime/` (bin/ layout, f9414dd3), even when
+// the old dir exists.
+test('AC9 upgrade — an existing install whose config points at vendor/quay-native (dir exists) is migrated to .quay/runtime/bin', () => {
   const ws = makeTmp();
   try {
     // Simulate the pre-fix install residue: the vendor/quay-native dir EXISTS.
@@ -215,15 +219,15 @@ test('AC9 upgrade — an existing install whose config points at vendor/quay-nat
     assert.match(r.stdout, /migrated: stale provider config/, 'must report the migration');
     const cfg = fs.readFileSync(path.join(ws, '.quay', 'config.yml'), 'utf8');
     assert.ok(!cfg.includes(`${ws}/vendor/quay-native`), 'the config must no longer point at the Go-reserved vendor/ dir');
-    assert.ok(cfg.includes(`${ws}/.quay/runtime/quay-native`), 'the config must now point at .quay/runtime/quay-native');
-    assert.ok(cfg.includes(`${ws}/.quay/runtime/quay-native/quay-native.js`), 'the mcp_entry must now point at the .quay/runtime bundle');
+    assert.ok(cfg.includes(`${ws}/.quay/runtime`), 'the config must now point at .quay/runtime');
+    assert.ok(cfg.includes(`${ws}/.quay/runtime/bin/quay-native.js`), 'the mcp_entry must now point at the .quay/runtime bundle (bin/ layout, f9414dd3)');
   } finally { cleanup(ws); }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 // AC10 — gitignore handling: quay-init writes the entry; no duplicates; never overwrites the user's file
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
-test('AC10 — quay-init writes the /.quay/runtime/ gitignore entry; an already-present entry is not duplicated', () => {
+test('AC10 — quay-init writes the .quay/runtime/ gitignore entry; an already-present entry is not duplicated', () => {
   // Case 1: existing .gitignore WITHOUT the entry → appended, user rules preserved.
   const ws1 = makeTmp();
   try {
@@ -232,26 +236,26 @@ test('AC10 — quay-init writes the /.quay/runtime/ gitignore entry; an already-
     const r = runInit(ws1, ['--loop', '--root', ws1, '--project', 'proj', '--test-command', 'node --test',
       '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
-    assert.match(r.stdout, /runtime-gitignore: appended/, 'must report the append');
+    assert.match(r.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report the append');
     const gi = fs.readFileSync(path.join(ws1, '.gitignore'), 'utf8');
     assert.ok(gi.includes('node_modules/'), 'user .gitignore rules must be preserved');
     assert.ok(gi.includes('*.log'), 'user .gitignore rules must be preserved');
-    assert.ok(gi.includes('/.quay/runtime/'), 'the runtime gitignore entry must be present');
-    assert.equal(gi.split('/.quay/runtime/').length - 1, 1, 'the entry must appear exactly once');
+    assert.ok(gi.includes('.quay/runtime/'), 'the runtime gitignore entry must be present');
+    assert.equal(gi.split('.quay/runtime/').length - 1, 1, 'the entry must appear exactly once');
   } finally { cleanup(ws1); }
 
   // Case 2: existing .gitignore WITH the entry → no duplicate, no modification.
   const ws2 = makeTmp();
   try {
     fs.writeFileSync(path.join(ws2, 'package.json'), JSON.stringify({ name: 'proj', scripts: { test: 'node --test' } }, null, 2));
-    fs.writeFileSync(path.join(ws2, '.gitignore'), 'node_modules/\n/.quay/runtime/\n', 'utf8');
+    fs.writeFileSync(path.join(ws2, '.gitignore'), 'node_modules/\n.quay/runtime/\n', 'utf8');
     const before = fs.readFileSync(path.join(ws2, '.gitignore'), 'utf8');
     const r = runInit(ws2, ['--loop', '--root', ws2, '--project', 'proj', '--test-command', 'node --test',
       '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
-    assert.match(r.stdout, /already present \(.*no duplicate write\)/, 'must report the no-op');
+    assert.match(r.stdout, /skipped: \.gitignore already carries/, 'must report the no-op');
     assert.equal(fs.readFileSync(path.join(ws2, '.gitignore'), 'utf8'), before, 'an already-present entry must leave the .gitignore byte-identical');
-    assert.equal(before.split('/.quay/runtime/').length - 1, 1, 'the entry must appear exactly once');
+    assert.equal(before.split('.quay/runtime/').length - 1, 1, 'the entry must appear exactly once');
   } finally { cleanup(ws2); }
 
   // Case 3: no .gitignore → created with the entry.
@@ -261,8 +265,8 @@ test('AC10 — quay-init writes the /.quay/runtime/ gitignore entry; an already-
     const r = runInit(ws3, ['--loop', '--root', ws3, '--project', 'proj', '--test-command', 'node --test',
       '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
-    assert.match(r.stdout, /runtime-gitignore: wrote/, 'must report the write');
+    assert.match(r.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report the write');
     assert.ok(fs.existsSync(path.join(ws3, '.gitignore')), '.gitignore must be created');
-    assert.ok(fs.readFileSync(path.join(ws3, '.gitignore'), 'utf8').includes('/.quay/runtime/'), 'the entry must be written');
+    assert.ok(fs.readFileSync(path.join(ws3, '.gitignore'), 'utf8').includes('.quay/runtime/'), 'the entry must be written');
   } finally { cleanup(ws3); }
 });

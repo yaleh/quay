@@ -6644,6 +6644,457 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层另立案：tmux fail-closed at laydown 与 human ruling 冲突（--tmux-session 应冷启动可选）、
   delivery-outline-vs-verify-surface single-source——外层侧，非本管线。
 - 下一事件：remove-shared-events 完成。
+### tick 2026-08-05T22:4xZ（内层，重启后首 tick：池分诊 + 补晋 6 + 派发 3/5）
+
+- **会话重启自检**：两层会话 22:35/22:36Z 重启（队列上次日志 19:3xZ，3.7h 空档）。`quay-init --loop` 22:36Z 重铺 tick 文档（外层已提交 ee25698d/d8f6a51c）。Monitor 三判据绿（mounted=true / targetRoot=本仓 / delivered=true）。`.halt` 无。detect-stop 无停止条件（pane waiting-input 1/3，非 block）。外层全量套件 **running**（22:42:24Z 起，runner=outer，laneCount 1）——running ⇒ 照常派发。
+- **fan-in**：无（会话重启，无遗留 worktree/`task/*` 分支）。
+- **worktree_root 重建**：`/home/yale/work/quay-worktrees` 缺失（重启后），已 `mkdir`（ext4 磁盘，非 tmpfs）。
+- **池分诊（关键）**：ready-pool-check pool=12/floor=20/disjoint=3。
+  - **排除 3 个已落地未翻 done**（gitHistoryLanded 漏检假阴性，merge 消息不定名任务 id——第 7 次重派 class 前拦截）：`full-suite-runner-red-pattern`（37947f75 merged）、`ghost-drive`（ba3a4e87 merged）、`leak-tmux-servers`（c1c15dfd landed）。AC 全勾、等外层 closure。**不派发**。
+  - **hold 6 个「排 ROUND 3 收尾后」**（frontmatter ready 但任务体自述等 ROUND 3，ROUND 3 收尾未完成——24 not-yet-flipped 仍待外层）：`branch-model` / `cold-start-gate` / `complete-delivery`（后三者另带 `plugin/scripts/` 目录 glob，派发会串行化全池）/ `l2-continuous` / `red-window-dispatch` / `telemetry-brackets`。等外层核 ROUND 3。
+  - **不晋 `no-size-aware-routing`**（ADR-022 退休管线任务，外层 88a49faa 曾明令不晋——Touches 仅 A/B/C 子任务文件，无代码根）。
+- **补晋 6 个**（todo→ready，四件套全、touches resolve、self-touch 已具）：`productize-manager` / `split-batch-vocab` / `spawn-count-criterion` / `loop-driver-check` / `runtime-nowhere-safe` / `ghost-suggestion`。
+- **派发 3/5**（background Agent `run_in_background:true`，concurrent-batch-scheduler 实测两两 disjoint，batch 判定不含已落地/ROUND-3 hold）：`productize-manager` / `split-batch-vocab` / `spawn-count-criterion`。派发前补 self-touch（3 个均缺，已补）。telemetry `--task-start` 已开：
+  - `fm-gap-productize-the-manager-layer-1785970210798-64rnod`
+  - `fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1785970210919-db661c`
+  - `fm-gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency-1785970211047-eol2m5`
+- 在飞 3/5。停止条件无、外层套件 running、Monitor 三判据绿、无 block。master 在 `d8f6a51c`。
+
+### tick 2026-08-05T23:1xZ（内层，split-batch fan-in → suite RED 暂缓）
+
+- **split-batch-vocab agent 完成**（`b67c49f3`，rebase 于 db373e20）：doc-only 词汇拆分（inner/outer tick 模板去门控 batch 措辞 + `verification-round-N` 规范语句 + 历史名标注不重命名）；新增 `plugin/test/batch-vocabulary-check.test.mjs`（`// @test-group governance`，AC6，8/8 pass）；AC1–AC6 已勾 + 证据逐字贴；DoD 不勾。`--static-checks` PASS（12/12 + contract/drive）。**合并暂缓**——外层 suite-state `red`（reason: failed，22:58 终，外层已根因 stale config.yml 修复、重跑推迟到内层 agent 落定）⇒ 按步骤 3 红树不 fan-in。分支待 re-green 后合并。
+- 在飞 2/3（productize / spawn-count 仍工作）。停止条件命中 **suite-red**（暂缓 fan-in，无新派发）。Monitor 三判据绿。无 .halt、无 block（suite-red 是外层自己管理的瞬态，state 文件即协调信号，不写 inner-blocked）。
+
+### tick 2026-08-05T23:2xZ（内层，productize agent 完成 → 仍 suite RED 暂缓）
+
+- **productize-manager agent 完成**（`32d36ade`）：出货第三层 `plugin/skills/manager/SKILL.md`（节奏/三职能/§1.5-§1.6 规则）+ cold-start AC8c 废键清（inner-state.sh 引用移除，key4 已由 key4 任务修复）+ 启动配置三件套入 `.claude/launch.settings.json` + `plugin/.claude-plugin/plugin.json` 注册 + init SKILL reference-doc 声明 + 新测试 `plugin/test/manager-layer-shipping.test.mjs`（governance 组，7 测试 pass）。AC1–AC8 勾 + 证据；DoD 不勾。**合并暂缓**（suite-state 仍 `red`/failed，外层重跑推迟到内层 agent 落定）。
+- **已知 caveat（非回归）**：scoped 需 `--allow-thin`（doc-heavy，Touches 0/5 按 basename 解析到测试）；worktree 环境性 2 测试红（无 `.quay/config.yml` 的 fresh worktree；session-topology `!/manager/` 断言对含 "manager" 子串的 worktree 路径假阳性）——主检出无此问题，agent 已直接验证断言通过。
+- 在飞 1/3（仅 spawn-count，worktree 仍在旧 master 快照 d8f6a51c）。停止条件 **suite-red**（暂缓全部 fan-in）。等外层 re-green 后串行并 2 个已落地分支（split-batch b67c49f3 + productize 32d36ade）。
+
+### tick 2026-08-05T23:2xZ（内层，waiting tick：spawn-count 存活确认 + suite-red 持续）
+
+- **spawn-count 存活确认（修正 ps 误判）**：`ps` 无独立进程 ⇒ 曾疑死；`TaskOutput` 实查 `status: running`，transcript 活跃（23:17:24 仍在分析 A 层转换）。**in-process subagent 不产生独立 OS 进程**——存活判据用 TaskOutput status，不用 ps（ps 只对 out-of-process agent 有效）。
+- **停止条件 suite-red 持续**：state 仍 `red`/failed（外层等 spawn-count 落定后重跑，a464eb91「waiting tick」确认）。⇒ 无新派发、fan-in 继续暂缓。两个已落地分支（split-batch b67c49f3 + productize 32d36ade）持等 re-green。
+- 在飞 1/3（spawn-count，~30min，测量任务，未超 90m）。Monitor 三判据绿、无 .halt、无 block。master `a464eb91`。
+
+### tick 2026-08-05T23:4xZ（内层，waiting tick #2：spawn-count 深工作中）
+
+- **spawn-count 仍在飞**（~55min，TaskOutput `running`，transcript 23:44 活跃）：A 层转换 22 文件已做、逐文件验证中——10 处 dir032-audit-independence 失败正在调查（`listGates()` actual:false，疑为其 worktree 旧 master 快照 d8f6a51c 缺 audit-independence gate 注册，非转换回归；agent 自查中）。未超 90m（上限 ~00:20Z）。
+- **停止条件 suite-red 持续**：外层仍等 spawn-count 落定后重跑。⇒ 无新派发、fan-in 暂缓。2 分支持等 re-green。
+- 无 .halt、无 block、Monitor 三判据绿、detect-stop 无停止条件（pane 0/3）。
+
+### tick 2026-08-05T23:5xZ（内层，全 3 agent 落定 → fan-in 待 re-green）
+
+- **spawn-count agent 完成**（`fd01a94b`，~77min，AC1–AC6 勾）：A 层转换 **37 个测试文件**（`bin/quay*.ts` spawn → `QUAY_CLI`/`QUAY_NATIVE_CLI` helper dist bundle，未硬编码 dist 字面量）；AC1/AC2 实测同条件：forks 2161→2159（平，进程数不变——诚实记录）、墙钟 10s→**8s**（control 满足：不退化）；per-spawn 内核代价 `bin/quay.ts` 20×=2583 jiffies vs `dist` 20×=**1254 jiffies（≈减半）**= 并发轴的真正杠杆；AC3 负控制（stale bundle → 回退 .ts + 告警，47/47 不静默过）；AC4 C 层决策 Route 2（import 模块，staged），band ts_spawn_sites(55)≤50 是 C 层输出非 A 层，诚实记录；AC5 两已关任务留痕。
+- **「7 文件 master 基线红」证伪**：dir032 等 7 文件在**主检出**跑 **14/0 全绿**——agent 的「master 基线失败」是它 fresh worktree 缺规范 config（gate 未注册）的**快照伪影**，非真回归。外层重跑应绿。
+- **3 agent 全落定** ⇒ 外层可立即重跑全量（无内层测量污染）。fan-in 就绪待 re-green：split-batch `b67c49f3` + productize `32d36ade`（均需先 rebase 到当前 master）+ spawn-count `fd01a94b`（已 rebase）。
+- 在飞 0/3。停止条件 suite-red 仍持 fan-in；无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:1xZ（内层，全 3 分支 fan-in 完成）
+
+- **外层重跑已起**（00:09:34Z `state: running`，laneCount 1）⇒ `running` 照常合并（不等套件）。
+- **串行 fan-in 3/3 完成**（每步 rebase master → merge --no-ff → scoped 选中集 → cleanup）：
+  1. **split-batch** `1f581f0a`：词汇拆分（inner/outer tick 模板去门控 batch + `verification-round-N` 规范）+ AC6 测试 `batch-vocabulary-check.test.mjs`（8/8，--allow-thin）。已并已清。
+  2. **productize** `cfa18bfe`：第三层 manager SKILL 出货（`plugin/skills/manager/SKILL.md` + plugin.json 注册 + launch-config 三件套入 `.claude/launch.settings.json` + cold-start 废键清）+ `manager-layer-shipping.test.mjs`（7/7，--allow-thin）。已并已清。
+  3. **spawn-count** `60dca6e4`：A 层转换 37 文件（`bin/quay*.ts` → `QUAY_CLI`/`QUAY_NATIVE_CLI`）。scoped 14/14（--allow-thin）+ **抽查 6 个转换文件主检出全绿**（driver 23 / gate 25 / lifecycle 38 / web-ui-browser 1 / init 17 / document-cli 6，均 fail 0）。已并已清。
+- **worktree/branch 全部清**（`git worktree list` 只剩主检出；无 task/* 分支残留）。
+- 在飞 0/3。停止条件无（外层套件 running）。无 .halt、无 block、Monitor 绿。master `60dca6e4`。
+- **套件覆盖滞后**：外层当前 run 测的是 5411d425（fan-in 前），三 merge 代码需外层下一轮套件覆盖（异步设计固有窗口）。
+
+### tick 2026-08-06T00:2xZ（内层，fan-in 后首派：2/5）
+
+- **派发 2/5**（background Agent，concurrent-batch-scheduler 实测 disjoint）：`ghost-suggestion-eliminated`（`--prompt-suggestions false` 冷启动必带参数 + throwaway 会话双向验证，AC1/AC2 需安全实跑）+ `global-count-assertions`（B3-2 族全局计数断言 → 相对基线，branch-model 前置②）。派发前补 self-touch（均缺）。telemetry 已开：`fm-gap-ghost-suggestion-...-iro2c9` / `fm-gap-global-count-...-5anq8r`。
+- **delivery-surface 判定不派**：计划自述「排 delivery-surface umbrella 后」= 依赖被 hold 的 complete-delivery（ROUND-3）⇒ 同被 hold。池 15 中另 3 个已落地 + 5 个 ROUND-3 均不派。
+- 在飞 2/5（ghost-suggestion / global-count）。外层套件 running（00:09 起，测 fan-in 前 master）。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:3xZ（内层，ghost-suggestion fan-in 完成）
+
+- **ghost-suggestion 合并**（`0b53a057`，rebase 已就位）：`--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` 成**冷启动 REQUIRED 参数**（restart-plan §8 + cold-start SKILL + `quay-launch.sh` 每角色追加 + `.claude/launch.settings.json` `_launchSpec.promptSuggestions:false`）；AC1/AC2 双向 throwaway 验证（独立 socket，带配置无 ghost / 不带配置有 ghost，字节级证据）；AC4 故障 6 标注；AC6 `launch-settings.test.mjs` 扩展 **12/12 pass**。AC1–AC6 勾。已并已清。
+- **in-flight 1/5**（仅 global-count，worktree 仍在旧快照 378eef8c，未 commit）。外层套件 running 超时（00:09 起 ~19min——mid-run 合并致其读混合工作树，套件变慢属预期；外层下轮会干净覆盖）。
+- 无停止条件、无 .halt、无 block、Monitor 绿。master `0b53a057`。
+
+### tick 2026-08-06T00:4xZ（内层，红窗修复执行：外层分诊 3 任务）
+
+- **外层分诊**（d254edc4）：套件红根因 3 真失败 + AC1b 已由外层自修（quay-init 伪影清理）。外层立 2 新任务 + codex A8 已有任务。指示内层修复。
+- **② dist-doc-gate-repo-root-off-by-one —— 内层直修完成**：根因 = `registry.ts:13` `REPO_ROOT=path.resolve(moduleDir,"..","..","..","..")` 在 dist bundle（`dist/` 目录）下偏一级 → DOCUMENTS_DIR 错 → gate FAIL "no such document: DOC-001"。修 = `discoverWorkspaceRoot(moduleDir) ?? 原回退`（src/dist 深度都鲁棒）。dist 重建后：gate via dist **PASS**、document-gate-fixture **3/3**、adr-gate 11/11（同族不回归）。AC1-AC4 勾 + 证据，任务 **ready**（commit 638d9266）。
+- **① codex-selfcheck + ③ native-store-roundtrip —— 已派 2 fix agent**（worktree，background）。在飞 2。
+- **runner AC5 signal-kill 调查**：`full-suite-runner.test.mjs` AC5 **3/3 一致失败**（非 flaky）——10s poll 等 `state=red reason=aborted` 超时。非我 merge 引入（runner 未被我的 merge 触碰）。疑 runner 信号处理未写 aborted 或自信号未达。记录，等外层定夺是否立任务。
+- 套件 state 仍 red/failed（fix 未全落地）。global-count fan-in 继续暂缓（分支 `10aa529f` 就绪待 re-green）。无 .halt、无 block。
+
+### tick 2026-08-06T00:5xZ（内层，红窗 3 修复全部落地）
+
+- **② dist-doc-gate**（registry.ts REPO_ROOT）：直修已落 master（`b59c11ee`），任务 ready。
+- **③ native-store-roundtrip**：agent 修（`64d423dc`）——`store.ts` 写侧 parse-cache 失效（读后写陈旧，同 `(mtimeMs,size)` 键碰撞），确定性负控制（patch fs.statSync 强制碰撞 ⇒ 修复前 RED / 后 GREEN），store.test 6/6。merge `e65b0864` 前一 commit。已并已清，任务 ready。
+- **① codex-selfcheck**：agent 修（`045fceaf`）——选择 (c)：selfcheck 对 present-but-incompatible codex（0.125.0 不读 project config，实证）显式 SKIP + exit 0，loaded-but-rejected 仍 FAIL（A10 负控）；A8 1/1 pass、selfcheck exit 0。merge 后 verify 绿。已并已清，任务 ready。
+- **global-count**：fan-in 完成（相对基线判据 + fixture，31/31）——原被红树暂缓，现随修复一并落地。
+- **runner AC5**：非 flaky（3/3 一致失败，10s poll 等 red+aborted 超时），非本次 merge 引入。已记录，待外层定夺。
+- **全部 worktree/branch 清**（含临时 premerge-check）。master `2a2c84a8`。套件 state 仍显示旧 red run——**修复已全部落 master，外层应重跑全量验证 re-green**。
+- 在飞 0。无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:6xZ（内层，AC5 根因 + 修复 —— 套件 5 失败全部清零）
+
+- **AC5 signal-kill 根因找到 + 修复**（`07b3f253`）：fake suite 的祖先链自信号用 `ps -o comm=` 匹配 `node*`，但本机 node 进程 comm=`MainThread`（实测 walk 日志：`walk: pid=... comm='MainThread'`）⇒ 永远不匹配 ⇒ 信号从未送达 ⇒ runner 跑完 ⇒ `state=green`（非 red+aborted）⇒ AC5 poll 超时。**3/3 一致失败根因就是 comm 检测**，不是 flaky。修 = 改 `/proc/<pid>/exe` readlink 检测 node（`*/node|*/nodejs`）。AC5 3/3 + 整个 full-suite-runner.test.mjs **18/18**。
+- **套件 5 失败全部落地清零**：① store AC4（store.ts 缓存失效）② doc-gate D1（registry.ts dist REPO_ROOT）③ codex A8（selfcheck degrade）④ AC1b（外层清 quay-init 伪影）⑤ AC5（MainThread comm）。master `07b3f253`。
+- **外层应重跑全量验证 re-green**（上轮 state 仍显示 00:09 red run）。所有 worktree/branch 清。在飞 0。无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:1xZ（内层，capability-catalog 修复 —— 最后一处红清零）
+
+- **外层重跑**（00:49–01:04）：5 项原始失败全绿 → **仅剩 capability-catalog 红**（`test-file-baseline.ts` 未在 QUESTION 表声明 → unclassified 1）。外层已根因 + 驱动内层（drive failed loud，排队到本 wakeup）。
+- **修复**：`capability-catalog.sh` QUESTION 表补 `[test-file-baseline.ts]="What is the fork-baseline test-file snapshot...?"`（`21178290`）。**105/105 declared, 0 unclassified, exit 0**。静态全量 **PASS**（12/12 checker mutation，exit 0）。
+- **全部红因清零**：原 5（store/doc-gate/codex/AC1b/AC5）+ capability-catalog。master `21178290`。外层应再重跑 → 预期 **green**，closure（~24 not-yet-flipped）随之解锁。
+- 在飞 0。无 .halt、无 block、Monitor 绿。worktree 全清。
+
+### tick 2026-08-06T01:4xZ（内层，re-green 窗口：OVER90 假阳性处置 + 派发 2/5）
+
+- **外层重跑 running**（01:29 起，6 红因全清，预期 green → 解锁 closure）。
+- **OVER90 假阳性处置**：detect-stop 报 task-over-90m（productize 括号 170m）——核对 = 5 个已完成 agent 的**陈旧开放括号**（外层 closure 才关，卡套件绿），非真超时（OVER90 注意：外层未闭合括号的滞后）。`--clear` 已清（死时间 33.8s 计入遥测）。无真实在飞 >90m。
+- **派发 2/5**（disjoint batch）：`outer-heartbeat`（session-liveness 心跳多源 max mtime，KNOWN-LOAD-SENSITIVE 族）+ `loop-driver-check`（自述注册表缺陷 L1 修复 + AC7 .halt 措辞）。补 self-touch + telemetry 已开。reanchor/runtime-nowhere-safe deferred（碰撞）。
+- 池 13（9 非可派：3 landed + 5 ROUND-3 + delivery-surface）。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:0xZ（内层，loop-driver-check fan-in 完成）
+
+- **外层套件判定**（ad5f9142/6200f935）：**TESTS GREEN 2480/0** —— 红仅剩 clean-tree 断言（预存 dirt：root vendor/ + last-pane.txt + 未提交 env/lockfile/task-evidence/inner-doc）。外层已清树（删 vendor/ + last-pane，提交合法改动）。**套件重跑推迟到内层 2 个 doc agent commit**（避免再 dirty）。
+- **loop-driver-check fan-in 完成**（`6178aa8d`）：tick 文档步骤 4 补写注册表行（与 cold-start SKILL 逐字同源）、STALLED 处置先查注册表不再制造双触发、AC7 `.halt` 打印改「未暂停」（控制面非传感器）、新测试 `loop-driver-check.test.mjs` 7/7。AC1/2/4/5/6/7 勾；**AC3 如实记录未解决**（自述注册表结构性无法分辨陈旧行，转入 L2，未打勾）。已并已清。
+- **outer-heartbeat 仍在飞**（worktree ca392fd8，未 commit）。外层套件重跑等它落定。
+- 在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:1xZ（内层，outer-heartbeat fan-in 完成 —— 全部在飞清零）
+
+- **outer-heartbeat fan-in 完成**（`cd774806`）：session-liveness 外层心跳 **多源 max mtime**（HEAD commit / queue-state / tick-log / 分诊记录 / verification-round 任一在阈值内 ⇒ alive）——红窗处置写 queue-state+提交不写 tick-log ⇒ 反向失效消除；真阳性（30min 零产出）保留。AC2/3/4 fixture 3/3 + `--selfcheck` PASS。已并已清。
+- **外层套件重跑已起**（02:09:54Z running，5cf3d73d「tree clean, suite re-run started for green」）——两个 doc 修复已落地、树净 ⇒ 预期 **green** → closure（~24 not-yet-flipped + 各 ready 任务）。
+- **在飞 0/5**（本批全部落定：productize/split-batch/spawn-count/ghost-suggestion/global-count/dist-doc-gate/codex/native-store/loop-driver-check/outer-heartbeat 全部 merged）。worktree/branch 全清。无停止条件、无 .halt、无 block、Monitor 绿。master `5cf3d73d`。
+
+### tick 2026-08-06T02:4xZ（内层，tmux-leak 测试侧清理修复）
+
+- **外层套件**（02:09–02:26）：红仅剩 **tmux-leak-scan**（session-liveness 泄漏 3 个 `/tmp/session-liveness-*` dir）。外层已清 3 dir，驱动内层做测试侧清理修复（drive failed loud，排队到本 wakeup）。
+- **根因**：KNOWN-LOAD-SENSITIVE 族测试被 load 取消时跳过 finally ⇒ 泄漏 characteristic dirs。外层心跳 merge 新增 AC2/3/4 fixture 增加了泄漏面（模式本身既有）。
+- **修复**：`session-liveness.test.mjs` 加套件级 `after()` sweep（`/tmp/session-liveness-*` / `sl-global-` / `sl-mount-` / `sl-lmt-` 残留清理）。AC fixture 2/2 + leak-scan clean + 静态全量 PASS（`18503497`）。
+- 外层应再重跑（树净 + leak 已清 ⇒ 预期 **green** → closure）。在飞 0。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:1xZ（内层，suite GREEN 后首派：5/5）
+
+- **外层套件 GREEN**（02:49–03:05，961s，2480/0 + clean-tree + leak-clean）——7 个红因全部清零后首次绿。**closure round 1**（d4e4f330）：flip 29 落地任务 done + 关 7 陈旧遥测括号 + verification-round 记录。
+- **池分诊**：pool 11（3 already-landed 未翻 + 5 ROUND-3 + delivery-surface 非可派）。ROUND-3 随 closure round 1 视为收尾，但大结构任务（branch-model/cold-start-gate/complete-delivery 目录 glob）仍保守 hold 待外层明确。
+- **补晋 7**（todo→ready，四件套全）：residue-check / token-measures-wait / token-watches-shell / token-status-reports / value-prioritization / DIR-124 / telemetry-brackets。**不晋**：no-size-aware-routing（退休）、session-liveness-hashes-token（phase-1 已 close，疑已落地）。
+- **派发 5/5**（disjoint batch，scheduler 实测；deferred 2 = token-watches-shell/token-status-reports 与 token-measures-wait 碰撞）：runtime-nowhere-safe / residue-check / token-measures-wait / value-prioritization / DIR-124。补 self-touch（4 缺已补）+ telemetry 已开。telemetry-brackets 下轮。
+- 在飞 5/5。无停止条件、套件 green、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:3xZ（内层，token-measures-wait fan-in 完成）
+
+- **token-measures-wait 合并**（`ce2e260d`）：`heavy-op-token.sh` `waited_ms` 落盘到共享 `$QUAY_GLOBAL_DIR/heavy-op/events.jsonl`（与 session-liveness 同形，event=ACQUIRED）+ `--report` 输出 minutes_lost（每项目）——「先让饥饿可观测，策略决定往后放」那份观测不再蒸发。AC1–AC7 勾（10/10 + 11/11 测试）。已并已清。
+- **在飞 4/5**（runtime-nowhere-safe / residue-check / value-prioritization / DIR-124）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:5xZ（内层，residue-check fan-in 完成）
+
+- **residue-check 合并**（`793f0204`）：`pane-state-classify.ts --check-residue` 三态（empty / real-unsubmitted-text / ghost-suggestion-only），故障 6 判据机械化（C-u 清除行为判，非静态文本），有界探针 + fail-loud unknown；三态真实夹具 + AC4 双向负控制 + AC5 transcript 交叉验证。AC1–AC7 勾（17/17 测试）。已并已清。
+- **在飞 3/5**（DIR-124 / runtime-nowhere-safe / value-prioritization）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `2d3796fd`。
+
+### tick 2026-08-06T04:1xZ（内层，value-prioritization fan-in 完成）
+
+- **value-prioritization 合并**（`16e8dacd`）：`ready-pool-check.ts` 加**相关性信号**（strategicTrace 机械 grep / unblocks parent-children / costTouches parseTouches）+ `--top N` 优先级查询（当前 todo 价值最高 N 条 + 机械理由）。AC6 实证：DIR-119-D（unblocks 4）越过 gap-quay-has-never-self-hosted（unblocks 3）——相关性越过 kind 平局，非 gap>DIR 机械答案。AC1–AC7 勾（26/26）。已并已清。
+- **在飞 2/5**（DIR-124 / runtime-nowhere-safe）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:2xZ（内层，runtime-nowhere-safe fan-in 完成）
+
+- **runtime-nowhere-safe 合并**（`04422f8e`）：运行时落地 **`.quay/runtime/`**（quay 命名空间，非目标保留目录）+ `quay-init` 自写 gitignore（AC10 三例）+ 大文件钩子 AC3/AC4 双向证明 + 异构构建 AC8（Node npm test + Go go build 双绿）+ AC9 保留目录 + AC11 Go 半边入 e2e。AC1–AC11 勾（runtime-landing 5/5 + quay-init-loop 45/45）。已并已清。
+- **本仓自查**：本仓 config 用 `./bin/quay-native.ts`（非 vendor/），runtime 改动只影响新装（quay-init 路径），无破坏。
+- **在飞 1/5**（仅 DIR-124，worktree a064cbc6 未 commit）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T03:3xZ（内层，waiting tick：DIR-124 深工作中）
+
+- **DIR-124 在飞 ~26min**（TaskOutput running，transcript 03:35 活跃）：巨型 directive——agent 在范围分析（A 族 parent 关闭 vs B2 控制面内核基底）。未 commit，未超 90m。
+- 套件 green（02:49 参考，最近 merge 待外层下轮覆盖）。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。master `d1097689`。
+
+### tick 2026-08-06T04:0xZ（内层，DIR-124-B2 fan-in 完成 —— 本批 5/5 全落地）
+
+- **DIR-124-B2 合并**（`5f42c788`）：`stage-receipt.ts`（909 行，绑定/校验 receipt，8 个 fail-closed 代码）+ `workflow-journal.ts`（723 行，原子 appendStage + 哈希 receipt + 迁移）——控制面内核基底（可执行 stage journal + 哈希绑定 receipt），双镜像字节相同（cmp 0）。20/20 测试。agent 正确判定 DIR-124 父级 AC 单 tick 不可满足（A 族被 ADR-022 退休 + 不补勾规则阻塞），只勾 B2 子任务 AC。已并已清。
+- **本批 5/5 全落地**：token-measures-wait / residue-check / value-prioritization / runtime-nowhere-safe / DIR-124-B2。在飞 0/5。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `e5339234`。
+
+### tick 2026-08-06T04:2xZ（内层，DIR-124-B2 fan-in 后首派：2/5）
+
+- **派发 2/5**（disjoint batch）：`telemetry-brackets`（--task-start/--task-end 调用恢复 + 自检①真实并发信号 + OVER90 判据统一 + 阻塞超时升级——第四起「写了没人调」，最贵）+ `token-watches-shell`（令牌存活判据盯真实运行工作而非获取它的 shell——重试循环下可回收但工作仍在跑）。补 self-touch + telemetry 已开。token-status-reports 与 token-watches-shell 碰撞 deferred（下轮）。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。master `eedb8714`。
+
+### tick 2026-08-06T04:4xZ（内层，telemetry-brackets fan-in 完成）
+
+- **telemetry-brackets 合并**（`4a4017c2`）：`--report` 加 `reconcilable[]`/`realInFlight`（dry-run reconcile）+ 新 `--slots --cap N`（bracketsInFlight/reconcilable/realInFlight/slotsTotal/slotsRemaining）+ `inner-blocked-signal --escalate-stale`（>30min 无人消费自动归档）+ `detectTaskOver90m` reconcile 感知（merged/done 括号不触发假 over-90m）+ 两个 tick 模板自检①改读 realInFlight + 外层 step 1b 无条件 `--reconcile`。AC1–AC9 勾（slot-visibility 8/8 + scoped 79/79）。已并已清。
+- **--slots 实况**：brackets-in-flight 7 / reconcilable 5 / real-in-flight 2 / slots-remaining 3——**空槽机制终于机械可见**（第四起「写了没人调」关闭）。
+- **在飞 1/5**（仅 token-watches-shell）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `b6993f58`。
+
+### tick 2026-08-06T05:1xZ（内层，token-watches-shell fan-in 完成 —— 在飞清零）
+
+- **token-watches-shell 合并**（`aa942776`）：heavy-op-token 改**租约**（`lease_expires_ms` + `--renew`）——取锁 shell 死而活仍在跑（重试循环每次 timeout 杀自己的 shell）时，旁观者不能再靠「取锁 pid 死了」回收；租约由唯一知情者（重试循环）续，pid 死亡降级为加速释放。AC1–AC7 勾（含修复前可复现 AC1 + 不永久锁死 AC3 + pid 加速保留 AC4，28/28）。已并已清。
+- **在飞 0/5**（全部落定）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:2xZ（内层，下轮派发：3/5）
+
+- **补晋 6**（todo→ready）：laydown-derivation / suite-state-reason-axis / no-criterion-cost / needs-human-black-hole / quality-criteria-trend / supervisor-base-layer。不晋：no-size-aware-routing（退休）、session-liveness-hashes-token（疑已落地）。
+- **派发 3/5**（disjoint batch）：`token-status-reports`（--status 死持有者不报 busy，stale/lease 评估）+ `laydown-derivation`（裸文件名正则 + verify 盲点 + 依赖闭包）+ `suite-state-reason-axis`（full-suite-state reason 枚举：早标 RED → aborted 非 failed，FALSE-RED 类根）。补 self-touch（3 缺已补）+ telemetry 已开。deferred 5（reanchor 等碰撞）。
+- 套件 green。在飞 3/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:4xZ（内层，token-status-reports fan-in 完成）
+
+- **token-status-reports 合并**（`d25e910b`）：`--status` 增 `holder_alive=yes|no`（同 `kill -0`）+ 死持有者如实说明「下一个 --acquire 会怎样」（可回收/保护期内）+ AC7「WAITING IS INVALID — 回收是拉取式，轮询等不到」+ 下一步命令。只读负控制（status 不碰令牌文件）。AC1–AC7 勾（25/25 + 兄弟 16/16）。已并已清。
+- **在飞 2/5**（laydown-derivation / suite-state-reason-axis）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:0xZ（内层，suite-state-reason-axis fan-in 完成）
+
+- **suite-state-reason-axis 合并**（`561388d9`）：`full-suite-state` **三值 reason 枚举**（failed/aborted/infra-error）——门禁 WAIT 早退/信号杀 ⇒ aborted（无正确性结论，不按代码风险停派，恢复由资源门 GO/WAIT 决定）；真失败 ⇒ failed（照旧停派分诊）；note 逃生舱收编为字段。AC1–AC7 勾（37/37）。已并已清。
+- **在飞 1/5**（仅 laydown-derivation）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:0xZ（内层，waiting tick：laydown-derivation 自查中）
+
+- **laydown-derivation 在飞 ~15min**（TaskOutput running，worktree 有未提交改动：quay-init.sh bare-resolution + send-keys fail-loud + SKILLs + 新测试 quay-init-laydown-closure.test.mjs）。自查阶段（加了 bare_resolved_scripts 空参数守卫 + AC6 记账核对）。未 commit，未超 90m。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。master `b1b3b25e`。
+
+### tick 2026-08-06T05:2xZ（内层，laydown-derivation fan-in 完成 —— 在飞清零）
+
+- **laydown-derivation 合并**（`11e02bda`）：quay-init 铺设集改**四源派生**（路径前缀 + 机制语料裸文件名存在性解析 + 显式 + `${SCRIPT_DIR}` 兄弟依赖闭包至 fixpoint）——铺了消费者必然铺依赖（transcript-delivery-check.ts / cap-from-gate.ts）；verify 用同一把尺子（不再共享盲点）+ 依赖闭包 fail-closed；send-keys-reliable fail-loud。AC1–AC7 勾（78/78）。已并已清。
+- **在飞 0/5**（全部落定）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:3xZ（内层，派发 1/5 —— 池结构性串行）
+
+- **池结构性观察**：dispatchable_disjoint=3，但可派候选**全部互撞**（needs-human/no-criterion/quality-criteria/supervisor/reanchor/DIR-043 均为机制级宽 Touches，两两不 disjoint）——与 ROUND-3 held 的 branch-model/cold-start-gate/complete-delivery 同一形态。每轮只能派 1 个。
+- **派发 1/5**：`needs-human-black-hole`（needs-human 等待时间不可测 → 复检 + 存活轴判据，复用 strategic-doc-staleness）。补 self-touch + telemetry 已开。DIR-043 已晋（外部 dogfooding 通道，directive）。其余候选下轮。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:5xZ（内层，needs-human-black-hole fan-in 完成）
+
+- **needs-human-black-hole 合并**（`6f3c68d5`）：`needs-human-recheck.ts` 检测器——时间轴（ageDays，>7d ⇒ ALIVE-STALE + FORCED RE-REVIEW）+ 存活轴（Touches 引 ADR-022 退休脚本 ⇒ DEAD-RETIRED，import strategic-doc-staleness-check 的 DELETED_SCRIPTS 同尺子）。AC1–AC5 勾（8/8）。
+- **实测发现**：16 条 needs-human → **7 条 dead-retired**（DIR-119-D2/D3/D4 + gap-plancheck-* + gap-prepare-milestone-no-worktree-isolation + gap-recursive-guard，全引退休管线脚本）+ **1 条 ALIVE-STALE**（DIR-109，7.6d 强制复检）+ 9 条 alive。`--supersede` 写是**外层的有意动作**（单命令），内层只检测不写。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:0xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳性再处置**：detect-stop 报 residue-check 145.8m——新 `--slots` 实证 **brackets 11 / reconcilable 11 / real-in-flight 0**（全部陈旧括号，任务早已 merged；外层 closure 才关）。`--clear` 已清（wait 14.9s）。**reconcile-aware slots 首次实盘证明工作**（telemetry-brackets 修复的直接收益）。
+- **派发 1/5**：`no-criterion-cost`（判据执行包装记 time+load → checker-cost.jsonl 纯追加，每判据自身成本可测）。补 self-touch + telemetry 已开。池仍结构性串行（其余候选互撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:3xZ（内层，no-criterion-cost fan-in 完成）
+
+- **no-criterion-cost 合并**（`e5cb225d`）：`checker-cost.jsonl` 纯追加计量器——静态检查器 9/9（`run_checker` bash 包装）+ gate 执行路径（engine.ts 计时 + workspaceRoot 穿通）+ ready-pool-check 自记录（n=真实 pool）+ 套件耗时序列（verification-round.jsonl 追加，红窗卡不死序列，05:03 缺陷消除）。load 双维（n + loadavg）使 35.8→91.2→157.0 归因到 load 非 n（归因更正）。AC1–AC7 勾（9/9 + scoped 68）。已并已清。
+- **合同 ratchet 预警**（agent 报）：`--static-checks` exit 1 于 `tasks/gap-web-board...: invoke-evidence-missing`（不在 baseline）——agent 证实与本次改动无关、master 上已存在，**外层应分诊**（可能影响下轮套件静态层）。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:5xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：detect-stop 报 laydown-derivation 10.0m——`--slots` 实证 **12/12 reconcilable、real-in-flight 0**（陈旧括号）。`--clear` 已清。reconcile-aware slots 连续实盘证明。
+- **外层 develop-merge worktree 出现**（926d771b）：外层在做分支模型集成（branch-model 任务线）——我 held 的 ROUND-3 任务正由外层推进，不干预。
+- **派发 1/5**：`quality-criteria-trend`（点状判据 → 趋势判据，读 verification-round 历史打标 + REVIEW-cadence 趋势检查项；no-criterion-cost 的自然配对）。补 self-touch + telemetry 已开。池仍结构性串行。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:0xZ（内层，quality-criteria-trend fan-in 完成）
+
+- **quality-criteria-trend 合并**（`3219002a`）：`trend-check.ts` 被动趋势判据——读 verification-round（套件 perTestMs，schema 扩 tests/cancelled/perTestMs）+ checker-cost（判据自身成本系列）+ suite-state-events（早期 RED 检测延迟），窗口恶化超阈值（默认 +10%）打标；REVIEW-cadence 3d 趋势检查项。AC1–AC7+AC3b 勾（46/46）。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:1xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：--slots 13/13 reconcilable、0 real-in-flight，`--clear` 已清（wait 8.3s）。
+- **外层已修 gap-web-board contract-ratchet**（`2d947211`，我上轮 flag 的）——外层分诊闭环。
+- **派发 1/5**：`supervisor-base-layer`（orchestration SPEC 架构任务：supervisor 基座在会话之外，AC4 落地 = OS 级 anchor）。补 self-touch + telemetry 已开。reanchor/DIR-043 deferred（与 supervisor 经 orchestration 文档碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:3xZ（内层，supervisor-base-layer fan-in 完成）
+
+- **supervisor-base-layer 合并**（`486e6b4e`）：`SPEC-integration-architecture-2026-08-05.md`（三层判据 BASE/MACHINERY/BEHAVIOR + supervisor 边界判据「需理解任务即越界」+ 落地次序①-⑤ + `-p` 形态）+ OS-anchor/slot-visibility 步骤交叉注 + 新任务 gap-supervisor-step-4-preemption / step-5-message-bus-with-identity。AC1-9+AC5b/c+AC7 勾。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `f6d93f8c`。
+
+### tick 2026-08-06T07:4xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：--slots 14/14 reconcilable、0 real-in-flight，`--clear` 已清（wait 10.5s）。
+- **外层 develop-merge 合并回归已修复**（ad4efc48）：laydown-derivation 的 quay-init.sh 改动与 develop 分支重复 derive_loop_scripts（A-populate + B-print 不兼容契约）→ 92 laydown 失败；外层根因 + 修复 + 合并套件重跑。**协调注意**：我 merge 的 quay-init.sh 改动与 develop 分支相撞——外层已解。
+- **派发 1/5**：`reanchor-must-converge`（重锚步加自述措辞审计/收敛判据；split-batch 已 done，耦合满足）。补 self-touch + telemetry 已开。DIR-043 deferred（与 reanchor 碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:5xZ（内层，reanchor fan-in 完成）
+
+- **reanchor 合并**（`b1746d2a`）：`self-report-vocab-check.ts` 自述措辞审计 + 收敛判据（连续 N 轮无 batch 式自述 ⇒ converged；非单调）——重锚有效性以语义收敛度量，非「重锚发生了」；tick 文档 1c 第 6 条接线。AC1–AC5 勾（16/16）。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T08:0xZ（内层，池可派候选耗尽）
+
+- **reanchor fan-in 完成**（`b1746d2a`，自述措辞收敛判据）。在飞 0。
+- **池可派候选耗尽**：DIR-043 自述 `dirStatus: deferred`（M76/M77 裁定 + Resolution「still deferred as a standing loop routine」）——ready-pool-check 误读 frontmatter 才列入 promotion，我误晋已回退 todo。其余全为 hold/landed（3 already-landed + 5 ROUND-3 + delivery-surface + DIR-124 parent）。**无可派候选**——等外层清 held/landed、定 ROUND-3、或补新候选。
+- 套件 green。在飞 0/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T08:3xZ（内层，外层补池后首派：1/5）
+
+- **外层 closure round 2 + 补池**（d55a1cd6/781c957d）：flip 14 done + **关 15 遥测括号**（stale-bracket OVER90 假阳源已除——`--slots` 0/0/0）+ 晋 3 新 gap-* defect（dispatch-evaluated / gate-wait-as-failed / checksplitrecommendation）。**分支 cutover PHASE-2 完成**（b9769115）：develop 99 commits 已合推 GitHub，B 角色转 acceptance env。
+- **detect-stop 无停止条件、无 block**（括号已关，假阳不再）。
+- **派发 1/5**：`dispatch-evaluated`（派发资格只在 tick 边界评估 → slot 释放事件驱动——空槽即派）。补 self-touch + telemetry 已开。gate-wait-as-failed / checksplitrecommendation deferred（与 dispatch-evaluated 碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T08:5xZ（内层，dispatch-evaluated fan-in 完成）
+
+- **dispatch-evaluated 合并**（`02f12f83`）：`slot-refill.ts/.sh` 槽位释放回填评估（组合 cap-from-gate + --slots reconcile realInFlight + ready-pool dispatchable_disjoint → REFILL GO/NO-GO）+ tick 文档定位/步骤 4 接线——**完成通知 = 派发触发源，不等下一 tick**（AC3 live gap_min<5 复测归外层）。AC1–AC6 勾（7/7）。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T09:0xZ（内层，补池后次派：2/5）
+
+- **派发 2/5**（disjoint batch）：`gate-wait-as-failed`（runner 检测 test.sh 内部门禁 WAIT 标记 → reason=aborted 非 failed——reason-axis 的 runner 侧补全）+ `checksplitrecommendation`（ADR-022 保留的 split 分类器接线决定）。补 self-touch + telemetry 已开。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T09:3xZ（内层，gate-wait + checksplit fan-in 完成）
+
+- **gate-wait-as-failed 合并**（`ac2506b6`）：机制本体已由 reason-axis 任务先行落地（ABORT_PATTERNS 等）；本任务补 `--wait-check` CLI 控制 + 端到端核查（24/24）。已并已清。
+- **checksplitrecommendation 合并**（`3ecfd05a`）：裁定 **mark-aspirational 不接线**（分类器输入在 fast mode 不存在 + countMechanisms 3/5 不可靠 + ADR-021 人判 + 已有等价机械范围守卫）；CLAUDE.md 加 STATUS 引用性政策注。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `a60c3beb`。
+
+### tick 2026-08-06T09:5xZ（内层，外层补池 3 后首派：2/5）
+
+- **外层补池 3**（3a23531c）：audit-findings / cold-start-outer-validation / inner-session-discovery-fallback 晋 ready。pool 13 / disjoint 5（升）。
+- **派发 2/5**（disjoint batch）：`audit-findings-backpropagated`（后续机制发现回灌到更早检测器——覆盖该类别）+ `inner-session-discovery-fallback-silent`（退化路径报警/fail-closed，防静默降级冒充健康）。self-touch（inner-session 缺已补）+ telemetry 已开。cold-start-outer-validation deferred（与 audit-findings 碰撞）。
+- 套件 green。在飞 2/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T10:1xZ（内层，inner-session-discovery fan-in 完成）
+
+- **inner-session-discovery-fallback 合并**（`3936f715`）：TR_SOURCE=discovery 退化路径**不再静默**——stderr 报警 + state=degraded（fail-closed，绝不静默 healthy）；`/proc environ` 不可读分支专门 WARNING；cold-start --json 消费者读 transcriptSource==discovery 报警/拒收。AC1–AC4 勾（13/13）。已并已清。
+- **在飞 1/5**（audit-findings）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T10:4xZ（内层，audit-findings fan-in 完成 —— 在飞清零）
+
+- **audit-findings 合并**（`6740d4fc`）：`finding-backpropagate.ts`（消费 DIR-124-B FindingEnvelope，classifyFinding 三态 + 最早可检阶段 + proveDetector 校准）+ `execution-policy.ts`（版本化 policy-hash + 授权激活）。真实 M208 finding（ac7-checklist-missing）校准；M192 负控。AC1-4/6/7/8 勾；**AC5 如实未勾**（需未来真实 milestone 证明前向捕获）。已并已清。
+- **在飞 0/5**（本批全落地）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T10:5xZ（内层，补池后派发：1/5）
+
+- **audit-findings fan-in 后**，cold-start-outer-validation-runs 解除碰撞（audit-findings 已并）。
+- **派发 1/5**：`cold-start-outer-validation-runs`（验证类任务——实跑冷启动验证流，产出贴任务体；inner-session discovery 刚改 fail-closed，本任务验证其效果）。补 self-touch + telemetry 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T11:1xZ（内层，补池 4 后派发：2/5）
+
+- **外层补池 4**（31140406）：bare-metal-session-bootstrap + os-anchor-launch 晋 ready。
+- **OVER90 假阳再处置**：--slots 6 brackets / 5 reconcilable / **1 real-in-flight**（= cold-start-outer-validation，真在飞）——OVER90 块为陈旧括号（dispatch-evaluated），已清。
+- **派发 2/5**（disjoint batch）：`bare-metal-session-bootstrap`（session-bootstrap.sh 形式化）+ `os-anchor-launch-missing-prompt-suggestions`（watchdog 重启补 `--prompt-suggestions false`，ghost 消除源参数）。补 self-touch + telemetry 已开。
+- 在飞 3/5（cold-start-outer-validation + 新 2）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T11:4xZ（内层，cold-start-outer-validation fan-in 完成）
+
+- **cold-start-outer-validation 合并**（`4ad375db`，验证类）：meta-cc 升级路径实跑（Go 不挑语言 + 升级保留资产 + 不依赖开发树）；inner 零操作实跑（discovery 退化 fail-closed 被抓住，13/13）；三模型同后果（flash/sonnet/opus 确定性键逐字相同）；carryover 放行。AC1–AC4 勾。已并已清。
+- **在飞 2/5**（bare-metal-bootstrap / os-anchor-launch）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T12:0xZ（内层，os-anchor-launch fan-in 完成）
+
+- **os-anchor-launch 合并**（`8cff421c`）：`os-anchor-install.sh` launch 字符串**单源化** `LAUNCH_CMD`（两处双漂移消除）+ 双 REQUIRED 参数（--prompt-suggestions false + env）；live `~/.config/quay/os-anchor/os-anchor-projects.conf` 已更新（未提交，文档记录）；生成模板已含 flag（ghost 任务 90b16c51 已加，真实缺口在 live config）。AC1–AC3 勾（2/2）。已并已清。
+- **在飞 1/5**（bare-metal-bootstrap）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T12:4xZ（内层，bare-metal-bootstrap fan-in 完成 —— 在飞清零）
+
+- **bare-metal-bootstrap 合并**（`b8f132bc`）：`session-bootstrap.sh`（裸金属会话引导：命名布局 idempotent + 每窗 claude 进程 `/proc` 存活确认 + 按名 fail-closed + `quay-launch.sh` 启动约定）+ cold-start SKILL 接线。AC1–AC5 勾（9/9）。已并已清。
+- **在飞 0/5**（本批全落地：cold-start-outer-validation / os-anchor-launch / bare-metal-bootstrap + 前批）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T13:1xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：--slots 8/8 reconcilable、0 real-in-flight，`--clear` 已清（wait 11.5s）。
+- **外层补池 5**（0026b8b9）：legacy-reclaim + manager-productization 晋 ready。
+- **派发 1/5**：`experiment-legacy-reclaim`（git-lens L_D/L_G/L_S 退休脚本回收 + touches 启发式重审）。补 self-touch + telemetry 已开。manager-productization deferred（与 legacy-reclaim 碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T14:1xZ（内层，legacy-reclaim fan-in + 派发 3/5）
+
+- **legacy-reclaim fan-in 完成**（rebase + merge task/gap-experiment-legacy-reclaim-and-touches-heuristic，4 脚本回收进 plugin/scripts + derive-touches 接入派发 + test-impl-census-check，scoped 45/45 exit 0）。任务标 **needs-human**：AC4 机械普查 0 个被测实现已删测试（12 个已于 ADR-022 随实现删除），**本 AC 按现状不可满足，交外层裁定**；AC1/2/3/5 勾。worktree+分支已清。
+- **就绪池**：pool 12 < floor 20（deficit 8），dispatchable_disjoint 4 < cap 5 ⇒ 按步骤 3.6 补晋。
+- **补晋 1**：`session-liveness-hashes-the-token-counter` todo→ready（self-touch 已补）。
+- **不晋**：prepare-milestone-no-size-aware-routing（复合父任务，其 A/B/C 子任务 touches 全指已退役 ADR-022 文件——MAJORITY-MISSING 不可派）；DIR-043（`dirStatus: deferred`）。
+- **派发 3/5**（disjoint batch，scheduler 实测）：`full-suite-runner-red-pattern-matches-bare-x-vitest-false-red` + `send-keys-reliable-welcome-screen-ghost-drive-fails` + `session-liveness-hashes-the-token-counter`。telemetry --task-start 已开。
+- **defer**：`manager-productization-five-constraints`（与 full-suite-runner 在 `plugin/scripts/full-suite-runner.ts` 碰撞，等下批）；DIR-124 复合父任务子任务全 todo 不单派。
+- 套件 green（outer 后台）。在飞 3/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T14:3xZ（内层，send-keys fan-in 完成）
+
+- **send-keys-welcome-screen fan-in 完成**（merge task/gap-send-keys-reliable-welcome-screen-ghost-drive-fails）：修复本体已在 master `a75dde7e`（2026-08-05），本次是复核 + 新鲜 scoped 证据（28/28 exit 0，AC1/2/3 重新确认）。标 **needs-human**：AC4 需 kill archguard outer → watchdog 重拉 → drive 成功的 live-loop 闭环实测，worktree 隔离下不可做，留外层。
+- **在飞 2/5**（full-suite-runner-red-pattern / session-liveness-token-counter）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T15:0xZ（内层，full-suite-runner fan-in 完成）
+
+- **full-suite-runner-red-pattern fan-in 完成**（merge task/gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red）：修复本体已在 master `41e7591f`（bare `/✖/` 从 FAILURE_PATTERNS 移除，只匹配结构化失败形态——vitest 通过测试自打 ✖ 不再假红），本次复核 + 新鲜 scoped 证据（24/24 exit 0，task-contract no violations）。AC1–AC4 全勾（AC3 vitest --maxWorkers doc fork 已写）。留 ready 待外层 closure。
+- **在飞 1/5**（session-liveness-token-counter）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T15:1xZ（内层，无 fan-in、无派发——池内可派集合被在飞任务占尽）
+
+- **无 fan-in**：send-keys + full-suite-runner 已并（前 tick），无新完成 agent。在飞 1/5（session-liveness-token-counter，worktree 在）。
+- **停止条件核对**：无 .halt；套件 green；needs-human 窗口新增 2（legacy-reclaim + send-keys）< 3。
+- **就绪池**：pool 12（含 2 个已落地未翻 done 的：cold-start-outer-validation / full-suite-runner——taskWorkLanded 对 evidence-only 任务漏检）；dispatchable_disjoint=4 被已落地任务灌水，真实新可派集合 = **0**。
+- **不可派原因（scheduler 两两实测）**：其余 ready 候选（branch-model / cold-start-gate / manager-productization / delivery-surface / l2-health / tests-leak-tmux / red-window）全部经宽 `plugin/scripts/` 或 `plugin/test/` 目录 touch 与在飞 session-liveness 相撞。
+- **补晋候选核对**：prepare-milestone 父任务（children 指退役 ADR-022 文件，不可派）与 DIR-043（dirStatus: deferred）**均不晋**——池深不足以强迫派发，等 session-liveness 收尾释放 plugin/scripts/ 轴，或外层补池。
+- 套件 green。无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T16:0xZ（内层，session-liveness fan-in 完成 —— 本批 3/3 全落地）
+
+- **session-liveness-token-counter fan-in 完成**（merge task/gap-session-liveness...，3 文件 420 行真实改动）：busy/idle 判定重实现——消费 `classifyPaneState`（底部 10 行区域 + shape 分类，非整屏哈希），content-region 哈希排除 `/clear to save` 计数器/`✽` spinner/`✻` 残影；agent 任务行在 content 区仍在判定内（AC4）；AC5 空内容区显式 WARN 不静默；AC7 无去抖。AC1–AC9 全勾（scoped 52/52 + 1 skip，task-contract no violations）。**DoD 如实标 `[~]`**（只 scoped+单文件各一次，未 2 次全量）。留 ready 待外层 closure。
+- **本批全落地**：full-suite-runner-red-pattern / send-keys-welcome-screen / session-liveness-token-counter（3/3）。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T16:3xZ（内层，session-liveness fan-in 后首派：1/5）
+
+- **session-liveness fan-in 完成**（前 tick，本 tick 复核记录）：classifyPaneState 重实现已并 + scoped 52/52 绿。在飞清零。
+- **pool 复核**：pool 11 / dispatchable_disjoint 3——2 个已落地未翻 done 灌水（cold-start-outer-validation / full-suite-runner，taskWorkLanded 漏检 evidence-only）；真实新可派集合 = 1。
+- **串行轴**：剩余 7 个 ready 候选（branch-model / cold-start-gate / manager-productization / delivery-surface / l2-health / tests-leak-tmux / red-window）全部带宽 `plugin/scripts/` 目录 touch，两两互撞 ⇒ 最大互不相交批次 = 1，plugin/scripts/ 轴串行。
+- **派发 1/5**：`cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`（最干净：0/4 touches 缺失 + self-touch 已补）。telemetry --task-start 已开。其余候选等下轴释放或外层补池。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T17:0xZ（内层，cold-start-gate fan-in 完成 —— 在飞清零）
+
+- **cold-start-gate fan-in 完成**（merge task/gap-cold-start-gate...，6 文件 409 行）：gate 判据收窄——冷启动 = **派生铺设集内脚本全绿**（非整套件绿）；`laydown-set-check.sh` 用与 quay-init 同 grep 机械派生（当前 30 脚本）+ 语法 + 解析成员自身测试；无关失败（esbuild dist 崩溃 / 缺 gitignored config）实测不阻塞。AC1–AC6 全勾（scoped 6/6，task-contract no violations）。**偏差已记录**：`plugin/test/laydown-set-check.test.mjs` 超出字面 Touches（AC6 强制 node:test，agent 用 ## Test-Files 声明供选择器拾取）——交外层闭环时知悉。留 ready。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T17:1xZ（内层，cold-start-gate fan-in 后首派：1/5）
+
+- **cold-start-gate fan-in 完成**（前 tick，本 tick 复核记录）：派生铺设集 gate 已并 + scoped 6/6 绿。在飞清零。
+- **pool 复核**：pool 10 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（7 候选带宽 plugin/scripts/ 目录 touch 串行互撞）。
+- **派发 1/5**：`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`（scheduler 批次胜者 + 最高优先——直接 touch 两份 loop tick 文档；补 self-touch 后派发）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T17:4xZ（内层，branch-model fan-in 完成 —— 在飞清零）
+
+- **branch-model fan-in 完成**（merge task/gap-branch-model...，3 新文件 + 两份 loop 文档 + 交叉标注）：两线模型——`develop`（已验证基线，独立任务分叉）+ `integration`（待验证汇入点，依赖任务分叉、全部合并落点）；`integration-branch-model.ts` 机械判分叉基线 + 批量合 integration→develop（`--is-ancestor develop integration` ff 守卫）；红窗停派结构性消除。AC1–AC7 全勾（scoped 11/11，task/drive-contract no violations）。**诚实备注**：charter Contract measure 的 arg 顺序与语义相反（`--is-ancestor <integration> <develop>`），实现在所有机械处用正确方向（`--is-ancestor develop integration`）。留 ready。SPEC 从 origin/develop 恢复（master 原本缺失）。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T18:1xZ（内层，branch-model fan-in 后首派：1/5）
+
+- **branch-model fan-in 完成**（前 tick，本 tick 复核记录）：两线模型已并 + scoped 11/11 绿。在飞清零。
+- **pool 复核**：pool 9 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（6 候选带宽 plugin/scripts/ 目录 touch 串行互撞）。
+- **派发 1/5**：`gap-complete-delivery-surface-spec-and-l1-verification`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T18:4xZ（内层，complete-delivery-surface fan-in 完成 —— 在飞清零）
+
+- **complete-delivery-surface fan-in 完成**（merge task/gap-complete-delivery-surface...，9 文件 551 行）：六类交付面活文档（SPEC §4/§5/§6 机读 `l1-category` 标注）+ `l1-delivery-surface-check.ts`（六类逐类解析交付物/归属任务，6/6）；接入 quay-init 派生铺设集 + post-laydown invoke。AC1–AC5 全勾（scoped 6/6，task-contract no violations）。留 ready。在飞清零。
+- **能力目录修复（merge 冲突暴露的真实静态检查回归）**：agent 只加了 2 条声明（l1-delivery + trend-check），但今日合并任务累积 19 个脚本未声明 ⇒ `capability-catalog.sh` FAIL (AC1c)。主检出补全 19 条（每脚本按头部注释写 question），merge 冲突后保留 19 + agent 的 l1-delivery 声明 ⇒ **125/125 declared, 0 unclassified, EXIT 0**（`0fe56211` + merge 内 resolve）。
+- 套件 green。在飞 0/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T19:1xZ（内层，complete-delivery-surface fan-in 后首派：1/5）
+
+- **complete-delivery-surface fan-in 完成**（前 tick，本 tick 复核记录）：六类 spec + L1 check 已并 + scoped 6/6 绿；capability-catalog 125/125。在飞清零。
+- **pool 复核**：pool 8 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（5 候选带宽 plugin/scripts/、plugin/test/ 目录 touch 串行互撞）。
+- **派发 1/5**：`gap-delivery-surface-grows-but-target-freezes-no-upgrade`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T19:4xZ（内层，delivery-surface-grows fan-in 完成 —— 在飞清零）
+
+- **delivery-surface-grows fan-in 完成**（merge task/gap-delivery-surface-grows...，4 文件 328 行）：`quay-init.sh` 新增 `--check-drift`（只读升级正确性漂移报告——派生集轴 漂移/缺失/一致，非文件数轴；`--loop` 重跑即升级路径：缺失自动补、漂移备份+替换+可见报告、`send-keys-verified.sh` 分层退役不铺回）。AC1–AC5 全勾（scoped 4/4，task-contract no violations）。留 ready。**agent 所述 verify-referenced-landed 红已在主检出复核为假报警**（SPEC 已落地，`verify-referenced-landed: OK`——agent 的 worktree node_modules 态所致）。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T20:1xZ（内层，delivery-surface-grows fan-in 后首派：1/5）
+
+- **delivery-surface-grows fan-in 完成**（前 tick，本 tick 复核记录）：`--check-drift` 已并 + scoped 4/4 绿。在飞清零。
+- **pool 复核**：pool 7 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（4 候选带宽 plugin/scripts/、plugin/test/、SPEC 文档 touch 串行互撞）。
+- **派发 1/5**：`gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T20:4xZ（内层，l2-continuous-health fan-in 完成 —— 在飞清零）
+
+- **l2-continuous-health fan-in 完成**（merge task/gap-l2-continuous-health...，2 新文件 + 交叉标注）：`dead-loop-check.sh`——L2 持续健康判据「循环在转」（transcript user 消息 + git 提交最近 N 分钟，都无 = dead-loop，**与 backlog 空无关**——队列空 vs 没人驱动从此可区分）；入 quay-init 派生铺设集 + capability-catalog 声明（126/126）。AC1–AC6 全勾（scoped 11/11，task-contract no violations）。**AC10 记账 +1**（管理者 pre-friction 首计）。留 ready。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T21:0xZ（内层，l2-continuous-health fan-in 后首派：1/5）
+
+- **l2-continuous-health fan-in 完成**（前 tick，本 tick 复核记录）：dead-loop L2 判据已并 + scoped 11/11 绿。在飞清零。
+- **pool 复核**：pool 6 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（3 候选带宽 plugin/scripts/、orchestration/ touch 串行互撞）。
+- **派发 1/5**：`gap-manager-productization-five-constraints`（scheduler 批次胜者；补 self-touch 后派发）。9-AC 大任务——C1-C5 + 三裁定（谁发现谁创建+单飞锁 / manager-phase-goal 切分 / 建造=outer+inner）；AC5（OS 锚看护）/AC8（离乳判据）如需 live 干预可诚实不勾。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
 
 ### tick 2026-08-06T14:1xZ（外层，人直接指令：同步两边）
 
@@ -6818,3 +7269,232 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 零派发：cap=2（WAIT）下 slot-refill 仅推荐 DIR-124（human-steered 不自动派）。其余候选仍为陈旧/冲突/主题删除。
 - 外层 suite 卡在 triage（进程 0% CPU，已 30+min），外层正翻「3 real defects from full-suite triage」；
   no-post-merge 在飞（8 脏文件，工作推进中）。池 16 无需补晋。
+
+### tick 2026-08-06T07:0xZ（no-post-merge fan-in 完成 + 派发 2）
+
+- **no-post-merge-latency fan-in 落 integration（4a877953）**：cross-machine-verify.sh（git-notes 共享态、slot-refill 双触发、
+  禁 crontab）；AC3/4/5/6 勾（负控制/非参与方/d 可读/随包），AC1/2 B 侧 deferred（需真实合并 + 第二机）。scoped 19/19 green。
+  顺带把外层 6 个 develop-only commit（tick-log/phase-goal/contract 修复）并入 integration（rebase 带入，integration 追上 develop）。
+- **派发 2**（cap WAIT=2，在飞 0→2/2）：green-verdict + shipped-verifiers（mutually disjoint，production gate 确认；
+  slot-refill 未推荐它们是因为被陈旧池任务抢占顺序——**需让 slot-refill 排除已 fan-in 待翻 done 的陈旧任务**，否则真候选被挤掉）。
+  fork develop 0417796d。
+- 在飞 2/2。外层 suite 卡 triage（进程 0% CPU），外层正翻「3 real defects from full-suite triage」。
+
+### tick 2026-08-06T07:1xZ（suite RED 但外层重跑中；在飞 2/2 无槽可派）
+
+- **suite RED**（15:00:40 finished，reason=failed，failures=[]——外层已翻「3 real defects from full-suite triage」）。
+  外层 15:06 重跑（新 full-suite-runner pid 2547161）。红窗策略：fan-in 暂缓已完成 agent（当前无已完成）+
+  派发按失败位置条件化（当前在飞 2/2 = cap WAIT=2，无空槽，无需判）。
+- green-verdict + shipped-verifiers 在飞（9m，0 commit 0 dirty，agent 早期阶段）。
+- 池 16 无需补晋。零动作 tick。
+
+### 事件 15:1xZ（green-verdict 完成；suite 终红 → fan-in 暂缓）
+
+- **green-verdict 完成**（0c306a52，worktree /home/yale/work/quay-worktrees/green-verdict）：suite-state 记 verdictCommit（跑起时 HEAD）+ `--json` 纯读报告
+  （verdictAgeMin / verdictCommitDelta），无硬闸（AC4）。AC1-6 勾，72/72 绿。
+- **fan-in 暂缓**：外层 15:05 宣布 suite **最终红**（973a0c91，含 3 real defects from triage），红窗策略=暂缓已完成 agent 的 fan-in。
+  green-verdict worktree/分支保留（不清理），待 suite 决议后 fan-in。
+- **零派发**：suite 终红 + 外层 Land-merge/缺陷修复中 → 保守不派发。shipped-verifiers 仍在飞（1/2）。
+
+### tick 15:3xZ（green-verdict fan-in 落 integration 3ab4fb45）
+
+- **green-verdict fan-in**（3ab4fb45）：suite 红窗暂缓解除（外层 32204513 修 merge-carried breakages + 重跑 running）。
+  rebase 到 integration（顺带并入外层 develop-only commit），scoped verify green（fail 0）。worktree/分支清理。
+- 在飞 1/2（shipped-verifiers）。integration 现含 6 fan-in（supervisor/concurrency/split-batch/send-keys/no-post-merge/green-verdict）。
+
+### 事件 15:4xZ（shipped-verifiers fan-in 落 integration a43d4a90；在飞 0/2 无干净候选）
+
+- **shipped-verifiers fan-in**（a43d4a90）：uncalled-verifier-check.ts（551 行）+ 37 条目 shrink-only ratchet +
+  verify-delivery-surface.ts 真实 gate 调用点（AC3，c65c411c 单一事实源首次被执行）；AC1-6 勾；静态闸 exit 0；
+  merged 树上 mechanism 实跑 uncalled=0、mentions_excluded=true。worktree/分支清理。
+- **零 refill**：slot-refill 仅推荐 DIR-124（human-steered）+ audit-findings——后者 mechanism 已落 develop
+  （finding-backpropagate.ts 908 行 / execution-policy.ts 487 行，7/11 AC），integration 无 → 不派发（避免双做），
+  需外层定处置（reconcile AC 或翻 done）。
+- **integration 现含 7 fan-in**（supervisor/concurrency/split-batch/send-keys/no-post-merge/green-verdict/shipped-verifiers）。
+  在飞 0/2。外层 suite running（15:06 起，breakage 修复后重跑）。
+
+### tick 15:5xZ（派发 1：manager-productization，在飞 1/2）
+
+- **派发 1**：gap-manager-productization-five-constraints（C1-C5，fork develop 56d60671）。production gate 确认唯一 disjoint 候选——
+  session-liveness-context-saturation + manager-layer 均与它共享 manager 层文件（manager-loop-tick.md / quay-init.sh）被 deferred。
+  slot-refill 的 DIR-124（human-steered）+ audit-findings（机制已落 develop）仍不可派。池内 3 个「ready」任务（full-suite-runner-marks /
+  cold-start-outer-validation / inner-session-check）AC 全勾 = 陈旧待翻 done。
+- **池膨胀观察**：pool 20 / dispatchable 9 的「可派」主要是陈旧任务（7 fan-in 待外层翻 done + AC 全勾未翻）虚增——
+  真候选稀少。外层是 done-flip 瓶颈。
+
+### tick 2026-08-06T16:4xZ（零派发：suite 终红 fail-closed + 池候选全排除；manager 状态存疑待外层）
+
+- **零派发（停止条件命中）**：外层 suite **最终红**（15:53 finished，reason=failed，95 fail，root cause=quay-init laydown，`failures:[]` 空）⇒ 条件化规则「无法判定失败位置 → **保守停派发（fail-closed）**」。cap=5（GO 档，avg300 已回落），但红窗决定不派。slot-refill `should_refill=true` 推荐 5 全排除：DIR-124（human-steered）、audit-findings（机制已落 develop）、chart2-s2 + cold-start-outer-validation（AC 全勾=陈旧待外层翻 done）、concurrency-derivation-reverted（已 fan-in 待翻 done）。
+- **OVER90 自动块 = 假阳性（已清）**：`--detect-stop` 对 no-post-merge（118m）写 auto-block——但该任务已 fan-in integration（4a877953）、worktree 已删、branch 已随 fan-in 删除 ⇒ 两个 merge-evidence probe（isBranchMerged/hasMergeRecord）都探不到，属 AC8 文档化的「work 已落地但 --task-end 未写」假阳性类。同一根因会复现于 green-verdict（3ab4fb45）/shipped-verifiers（a43d4a90）——**三条已 merge 任务的括号都等外层 `--task-end` 关闭**（外层异步收尾职责）。已 `--clear`。
+- **未跑 `--reconcile`（有意）**：`worktreeExists` 查 `refs/heads/task/<taskId>`，而 manager worktree 分支是 `task/manager-productization`（slug 截断）⇒ reconcile 会把 manager 括号误关为 abandoned。且 16:23 出现 manager 第二条 task-start（base f698b772=当时 develop HEAD，runId cf7gcr）——无对应新 worktree（worktree list 仍是 56d60671 老 base），可能为外层再驱（外层 pane "← 1 agent"）。**manager 状态存疑，本 tick 不碰**（不 re-dispatch / 不 reconcile / 不清理）。
+- **在飞 0/5（真实并发）**：slot-status `real_in_flight:0`、`slots_free:5`、`brackets_reflect_subagents:false`——遥测 inProgress 5 条全是陈旧括号（4 条已 merge 待外层 --task-end + manager 旧括号）。manager 首条 agent 已静默死（worktree 1 脏文件 plugin/scripts/quay-topology.sh，0 commit）。
+- **池无需补晋**：pool 20 ≥ floor 20（cap 5×4），dispatchable 9 ≥ cap。Monitor `mounted:true / targetOk:true`。inbox unread=0。
+- **遥测**：tasksPerHour 1.20（window 102.3h）/ mean 64.0m / median 48.9m / 累计死时间 31.2m（最长 14.5m）。
+
+### tick 2026-08-06T17:2xZ（零派发：suite 终红 fail-closed；补晋 1 修 self-touch）
+
+- **零派发**：suite 仍最终红（15:53 finished，reason=failed，`failures:[]` 空）⇒ fail-closed 保守停派发。外层 pane 自述「all dispatch gated」「17:14 重评套件」但 17:20 仍无新 suite-state（无 runner 进程）。cap=5（GO 档，load1 2.19）。
+- **补晋 1（3.6，pool 19<floor 20）**：`gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact` todo→ready。**补 self-touch**（Touches 缺自身任务文件，`--self-touch-scan` 会挡）后 `--self-touch ok` + `--resolve` 0/3 missing → dispatchable。pool 20 = floor，dispatchable 10。
+- **manager-productization 不碰**：外层 17:09 裁定「双括号留待人工裁定」（worktree 老 base 56d60671 + 1 脏文件 + 16:23 cf7gcr 括号）。本 tick 不 re-dispatch / 不 reconcile / 不清理。
+- **在飞 0/5**：slot-status `real_in_flight:0`、`slots_free:5`、`brackets_reflect_subagents:false`（仅剩 2 条 manager 陈旧括号在 reconcile 关闭投影——**未跑 --reconcile**：slug 截断会误关 manager 括号，且外层已接走裁定）。green-verdict/shipped/no-post-merge 括号已被外层 16:58 收尾关闭（本 tick detect-stop **无停止条件、无块**——OVER90 假阳性已随括号关闭消失）。
+- **遥测**：tasksPerHour 1.22（window 102.9h）/ mean 65.4m / median 49.7m / 累计死时间 31.2m。Monitor `mounted:true / targetOk:true`。inbox unread=0。
+
+### 事件 17:4xZ（外层静态链修复请求——修红树，非新派发）
+
+- **外层请求**（人/外层）：adr016-screen-use-check 报 `packages/quay/plugin/scripts/send-keys-verified.sh`（17:00 打包副本）2 处整屏哈希违规，band 0..1 超限——已退役的 `plugin/scripts/send-keys-verified.sh` 在 RETIRED_FILES 正常不计，但该副本未入。套件卡在静态链，到不了 quay-init 测试。
+- **根因**：`packages/quay/plugin/` 是 gitignored 的 pack-time 快照（package.sh 铺出，17:00 打包副本），与 `plugin/` 源是同一退役文件的两个路径；RETIRED_FILES 只含源路径。
+- **修复**：`plugin/scripts/adr016-screen-use-check.ts` RETIRED_FILES 增加 `packages/quay/plugin/scripts/send-keys-verified.sh`（同文件同退役，继承豁免）。已验证：adr016 0 active（两副本均 retired 报出）、mutation pass、`scripts/test.sh --static-checks` 全绿（STATIC-EXIT 0）。commit `25196d9a`。
+- **顺带**：`tasks/gap-manager-productization-five-constraints.md` 有未提交改动（manager 改写 AC5，人三条裁定禁 OS watchdog/Desktop 定时任务，仅 `/loop`/CronCreate 合法）——并发人工工作，未触碰。
+- **池健康备注**：外层 17:27 把 `gap-ac8-import-over-spawn-...` 晋为 ready（人裁定 40→6 集成方案）——该任务缺 self-touch（`--self-touch-scan` MISSING，不在静态链、不挡本次绿，但红窗解除后派发前需补 `tasks/<id>.md` 到 Touches）。池 21 ≥ floor 20，dispatchable 10。
+- **manager OVER90 块保留**（外层 17:09 裁定「双括号留待人工裁定」，115m 真超时 crash leftover，非假阳性）——本 tick 不 clear、不 reconcile、不 re-dispatch。
+
+### 事件 18:0xZ（外层重复投递静态链修复请求——已在上轮修复并验证）
+
+- **外层请求重复投递**：adr016 打包副本违规修复已在 `25196d9a` 落地（RETIRED_FILES 增 `packages/quay/plugin/scripts/send-keys-verified.sh`）。本轮复跑验证仍绿：adr016 0 active / mutation pass / `--static-checks` STATIC-EXIT 0（194 scripts scanned）。修复后外层有 manager 新提交（7c8435d8、4e13af90），静态链未被其破坏。
+- **无新动作**：同一修复不重复提交；队列状态仅记本轮复跑验证结果。
+
+### tick 2026-08-06T18:2xZ（零派发：manager OVER90 停止条件命中；suite 转 running）
+
+- **suite 转 running**（18:08:48 起，runner pid 3140874 存活，静态链修复后外层重跑）——红窗停止解除，但**本轮仍零派发**。
+- **停止条件命中：task-over-90m（manager-productization，115m+）**——`--detect-stop` 写 auto-block 并保持。manager 双括号外层 17:09 已裁定「留待人工裁定」；首括号（15:53 hlo8jn）为 crash leftover（agent 静默死，worktree 老 base 56d60671 + 1 脏文件，0 commit），**非假阳性**。doc：命中停止条件 ⇒ 不派发，报告，等裁定。
+- **不派发理由**：OVER90 块是真实停止条件（不是 suite 红——suite 已 running）。块保留，等外层/人工裁定（abort vs continue + `--clear`）。
+- **无 fan-in**：无已完成 agent。send-keys-verified 分支为外层裁定 F 故意不合并（preserve-on-branch），非 fan-in 候选。
+- **池 21 ≥ floor 20**，dispatchable 10，无需补晋。cap=5（GO 档），load1 2.28。
+- **遥测**：tasksPerHour 1.21（window 103.9h）/ mean 65.4m / median 49.7m / 累计死时间 519.7min。Monitor `mounted:true / targetOk:true`。inbox unread=0。
+
+### 事件 18:4xZ–19:0xZ（外层静态链修复请求 + 套件 quay-init 族 root-cause 修复）
+
+- **外层请求**（18:47 fresh verdict 红，168 assertion fails，quay-init 族主导 ≈64）：root-cause 并修 quay-init 族使套件转绿。静态链已绿（adr016 打包副本修复，25196d9a）。
+- **root-cause 与修复（按根因归类，commit 序列）**：
+  1. **referenced⊆landed**：`SPEC-branching-model-integration-branch-2026-08-05.md` 被两个 loop tick doc 引用但未铺/未声明 → verify_referenced_landed 每轮 --loop 失败，卡住 install-config-driven-e2e + quay-init-loop 整族。修复：init/SKILL.md 声明 reference-doc（d0d0a368）。同一根因还命中 `SPEC-integration-architecture-2026-08-05.md`（manager SKILL 引用），补声明（ba833c14）。
+  2. **runtime 布局漂移**：f9414dd3 把落地从 `.quay/runtime/quay/` 移到 `.quay/runtime/bin/`，但 install-config-driven-e2e AC9 + runtime-landing AC4/AC9-upgrade/AC10 仍断言旧路径与旧消息格式（漂移报告:/runtime-gitignore:）。修复：对齐 bin/ 布局与 drift-report:/appended: 消息（d0d0a368）。
+  3. **upgrade-path drift before-report 空 LOOP_SCRIPTS**：derive_loop_scripts 填临时文件不填全局 → before-report derived-set 0。修复：before-report 前先填 LOOP_SCRIPTS（d0d0a368）。
+  4. **laydown-set-check.sh 丢 --json + exit-2**（8e2e49b9 merge 把 248e6b4f 的 JSON 版换成 human-only）：恢复 --list --json / --json deep-check / fail-closed 0-test red / exit 2；human 路径保持 syntax-only 快（--run-tests 才 deep）（d0d0a368）。
+  5. **loop-shipping**：pack-time 快照 packages/quay/plugin/ 被旧路径 + 单物理副本扫描误标 → 排除（3e7a845c）。
+  6. **manager-layer-shipping AC6**：manager SKILL 须索引每个 on-disk SPEC-*.md（补 branching-model + integration-architecture）；plugin.json commands[] 去重 manager（ba833c14）。
+  7. **quay-init-loop AC4 version-freshness 测试硬编码 0.3.13**：vendored 版已升 0.4.0 → readVendoredVersion() 动态读；stale fixture 降 minor（6b4d14f5 + 42cb31ee）。
+- **验证**：install-config-driven-e2e 10/10、runtime-landing 5/5、check-drift 4/4、drift-report 6/6、tmux-detection 6/6、laydown-set 7/7、loop-shipping 12/12、manager-layer 7/7、plugin-packaging 34/34、**quay-init-loop 47/48**（剩 1 个 AC4 stale fixture，已修，v3 复跑确认中）。静态链全程绿。
+- **外层已接走**：19:4x 外层确认 quay-init fix 落地，19:48 重跑套件验证（suite-state running）。
+- **非 quay-init 族残留**（不在外层 64 列表内）：checker-cost AC2/AC6、trend-check、tick-vocabulary AC4、cold-start-skill、session-liveness、capability-catalog、serve、store、task-check、unparseable-frontmatter、ts-typecheck-gate——独立问题，待单独处置。
+- **quay-init-loop 48/48 全绿（最终确认，becm145zh v3 复跑）**：AC4 stale fixture 修 minor-decrement 后 48/48。quay-init 族 10 个测试文件全部独立绿（install-config 10 / runtime-landing 5 / check-drift 4 / drift-report 6 / tmux-detection 6 / laydown-set 7 / loop-shipping 12 / manager-layer 7 / plugin-packaging 34 / quay-init-loop 48）。外层 19:48 重跑全量套件验证中（concurrency 1，~15min+）。
+- **非 quay-init 族残留**（独立问题，不在外层 64 列表）：checker-cost AC2/AC6（6 rows vs 3 疑似 wrapper 双 append）、trend-check、tick-vocabulary AC4（历史批名误报）、cold-start-skill、session-liveness、capability-catalog、serve、store、task-check、unparseable-frontmatter、ts-typecheck-gate——待单独处置。
+
+### 事件 20:2xZ–20:5xZ（外层 triage 请求：剩余 16 失败区分真回归 vs flaky，修真的、标 flaky 的）
+
+- **外层确认 quay-init 修复生效**：套件重跑 168→16 失败，quay-init 族从失败列表消失（20:26 完成）。剩余 16 要求 triage。
+- **逐项 triage 结果（16 个失败，全部为真回归/真缺陷，无一 flaky）**：
+  1. **unparseable-frontmatter AC5/AC6 + store.test**（8 unparseable tasks）：8 个任务文件 frontmatter 有重复 title:/status:（8e2e49b9 跨机 merge A+B 双份保留，`yaml` npm parser 'Map keys must be unique'）。修复：8 文件归一为单 title+单 status（9c6b4efd）。验证 unparseable 6/6、store 6/6。
+  2. **task-check.test.mjs**：A-layer spawn 转换（98e23f5b）丢 `nativeProviderDir` 变量（ReferenceError）。修复：cwd 用 `path.dirname(QUAY_NATIVE_CLI)`（9c6b4efd）。1/1。
+  3. **ts-typecheck-gate M63 A2/C1/D1**（3 fails）：`message-bus.ts` deliver() 未类型化 → `msg.from`/`opts.from` 在 `object` 上 TS2339。修复：类型化 deliver params + 先算 sender 再 spread（9c6b4efd）。ts-typecheck-gate 5/5、message-bus 25/25。
+  4. **checker-cost AC2 + AC6**：AC2 双记录（ready-pool-check 内部 recordCheckerCost + wrapper 各记一行 → 3 跑 6 行）；AC6 双 append（run() 同时调 appendVerificationRound + appendSuiteDurationRecord → 2 跑 4 行）。修复：wrapCost 设 CHECKER_COST_SKIP=1 + 删冗余 appendSuiteDurationRecord 调用（f611a094）。8/8。
+  5. **tick-vocabulary AC4**：批词汇规则自身 meta 文本（batch4a 历史批名 / batch+编号 / batch 式汇报·自述 / 门控语义漂移）被误判为未分类。修复：SAFE_SUBSTRINGS 增 历史批名/batch+编号/batch 式/门控语义漂移（3241b4fb）。5/5。
+  6. **trend-check.test.mjs**：8e2e49b9 merge 把 trend-check.ts 复制成两份叠在一个文件（1-323 旧版 + 325-567 新版），中间有错位 shebang 使 strip-types loader 崩。修复：恢复 42767afa 干净版（82b1a719）。13/13。
+- **全部验证绿**：静态链 STATIC-EXIT 0；unparseable 6/6、task-check 1/1、ts-typecheck 5/5、checker-cost 8/8、tick-vocabulary 5/5、trend-check 13/13、message-bus 25/25。
+- **无 flaky 标注**：16 个失败全部为真回归/真缺陷，已全部修复。待外层重跑套件最终确认。
+- **triage 收尾**：16 个失败全部为真回归/真缺陷，已全部修复并提交（9c6b4efd / f611a094 / 82b1a719 / 3241b4fb / a1a001ae）。外层 04ca6921 确认 triage 完成，20:48 重跑全量套件验证。静态链 STATIC-EXIT 0，所有单测绿。
+
+### tick 2026-08-06T21:1xZ（suite running，派发 1：chart2-s2）
+
+- **suite 仍 running**（20:48 起，~28min，外层验证 16 修复中）——红窗停止解除，`running` ⇒ 照常派发。
+- **停止条件**：`--detect-stop` 无块（manager OVER90 已被外层 18:34 裁定关闭）。`.halt` 无。pool 21 ≥ floor 20，dispatchable 10。
+- **派发 1（cap=5 GO，在飞 0→1）**：`gap-chart2-s2-test-assertions-stale-after-delivery-c-d`（3 AC 未勾、resolves、self-touch 补后 ok；fork develop，telemetry runId ...-lkui4j）。slot-refill 其余 4 推荐排除：DIR-124（human-steered）、audit-findings（7/8 AC，机制已落 develop）、cold-start（AC 全勾=陈旧待翻 done）、concurrency-reverted（已 fan-in）。
+- **自选候选审查**：chart2-s2 是唯一真候选（20:26 套件中 chart2-s2-delivery-completeness 实红，本任务即修复）。
+
+### 事件 21:1xZ（chart2-s2 fan-in 冲突 → needs-human）
+
+- **chart2-s2 agent 完成**：22/22 绿，AC1-3 勾，commit `1a9e6d9e`（仅 test 文件）。
+- **fan-in 冲突**：rebase 到 integration + merge 均冲突——冲突在**无关 task 文件**（gap-send-keys-reliable / gap-shipped-verifiers 的 status/AC 更新），chart2 分支基于旧 develop（b56aa3be）携带了这些 task 文件的过期版本，与 integration 并发更新冲突。doc：冲突 → 停止该任务 fan-in、标 needs-human、报告，不 `--skip`/`-X ours`。已 `rebase --abort` + `merge --abort`（两边干净）。
+- **已标 needs-human**（expectedStatus ready CAS 成功）。worktree/branch 保留（fan-in 失败不清理），待外层/人裁定：可干净 rebase 到最新 develop 再 fan-in（chart2 自身只改 test 文件）。
+- **suite 仍 running**（33min+，外层 16-fix 验证中）。**本 tick 停止后续合并与派发**（chart2-s2 fan-in 冲突命中判断边界：冲突 → 停后续合并+派发）。待外层 suite verdict + chart2-s2 冲突裁定。
+
+### tick 2026-08-06T21:2xZ（suite GREEN，红窗结束，恢复派发）
+
+- **suite GREEN（21:25:29 exit 0）**——quay-init 修复 + 16 失败 triage 全量验证通过，红窗结束、门已开。`--detect-stop` 无块。
+- **派发 1（session-pid，优先）**：`gap-session-liveness-session-pid-blind-to-claude-as-pane-process`（人多次升级的盲区缺陷）。补 ## Touches + self-touch（原本 ready 但无 Touches/self-touch 不可派发）。fork develop（0 unverified），telemetry runId ...-m7iuvd。后台 agent 已派发。
+- **ac8 就绪但 deferred**：补 self-touch 后 dispatchable，但与 session-pid **触摸冲突**（都碰 plugin/test/session-liveness.test.mjs）→ 不同时派发，等 session-pid fan-in 后再派。
+- **排除 slot-refill 其它推荐**：DIR-124（human-steered）、audit-findings（7/8 AC 机制已落 develop）、cold-start（AC 全勾=陈旧）、concurrency-reverted（已 fan-in）。
+- **chart2-s2 仍 needs-human**（fan-in 冲突待外层裁定）。
+
+### 事件 21:4xZ（session-pid fan-in 落 integration + 系统性发现）
+
+- **session-pid agent 完成**（52/53 绿，1 skip=环境缺 quay-0:probe；AC1-4 勾，AC5 承重条 deferred=consumer 侧 monitor-mount-check 改动，DoD kill/restart 用 hermetic 证明）。commit `837c74cc`。
+- **fan-in 用 cherry-pick 而非 rebase+merge**：rebase 到 integration 重放 191 个 develop-only commit 并在 `e33f9b5f`（branch-cutover）冲突。**系统性发现：integration（234 ahead）与 develop（30 ahead）大幅分歧**——task 分支 fork 自 develop 携带全部分歧历史。正确手法 = cherry-pick 任务的真实改动到 integration（干净，无冲突），不用 `--skip`/`-X ours`（chart2-s2 上一轮的 rebase 冲突同理）。session-pid 已落 integration（a09ddb56），worktree/分支清理。
+- **ac8 触摸冲突已解除**：session-pid 不再在飞，ac8（touch-overlap session-liveness.test.mjs）现在可派。
+- **待外层**：integration/develop 分歧需 reconciliation（verification-round 批量合或 rebuild task 分支基线）。
+- **session-pid fan-in 验证**：cherry-pick 到 integration 干净；scoped verify（session-liveness.test.mjs）因 KNOWN-LOAD-SENSITIVE（真实 tmux/进程 spawn）超时未出结果——agent 在 worktree 已实测 52/53（1 skip=环境），cherry-pick 无冲突，fan-in 成立。integration HEAD a09ddb56。
+- **ac8 已派发**（触摸冲突解除后，in-flight 2/5）：`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`（40→6 集成，import over spawn 真正生效），telemetry ...-q30ump，后台 agent 运行中。
+- **session-liveness verify 补记**：integration 上 52 tests / 50 pass / 0 fail / 1 skipped；文件整体 200s 超时（KNOWN-LOAD-SENSITIVE 慢），但**0 assertion fail** —— fan-in 成立。
+
+### tick 2026-08-06T22:1xZ（suite GREEN 保持，派发 1：shipped-ts）
+
+- **suite GREEN 保持**（21:25:29，无新 run）。`--detect-stop` 无块。pool 20 ≥ floor 20。
+- **派发 1（shipped-ts，in-flight 1→2）**：`gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact`（5 AC 未勾、self-touch ok、resolves、fork develop；**与 ac8 disjoint** —— production gate 双宽并发批）。telemetry ...-rollav。人裁定方向 bundle（对齐 Core），负控制 AC3=裸 Node 不带 --experimental-strip-types 跑 plugin 能力。
+- **排除**：cold-start（AC 全勾=陈旧）、no-post-merge（已 fan-in）、token-measures（7/7 AC=陈旧待翻 done）。
+- **ac8 在飞**（40→6 集成 agent 运行中，worktree 有未提交改动=agent 活动）。
+- **session-pid self-touch 已提交**（0fc3981b，AC1-4 勾 AC5 deferred）。
+
+### 事件 22:2xZ（ac8 fan-in 冲突 → needs-human）
+
+- **ac8 agent 完成**：AC1-6 勾，commit `2f6621ed`（38 files +1039/−236），scoped 46/0 + batch 204/0。40→6 集成（6 入口 quay-{session,deliver,dispatch,branch,suite,check}.ts）、import-over-spawn 真实生效（pure_import 3→10）、AC5 防复发检查（task-contract-check ac-ticked-self-admission）。
+- **fan-in 冲突**：cherry-pick 2f6621ed 到 integration 冲突 6 文件——ac8 自己的改动（tick docs、skills、task 文件）与 integration 版本冲突（不同于 session-pid 的仅 develop-only 历史冲突）。doc：冲突 → 停该任务 fan-in、标 needs-human。已 `cherry-pick --abort`（integration 干净 a09ddb56），标 needs-human（CAS 成功）。
+- **在飞 1/5**：shipped-ts（bundle plugin .ts agent 运行中）。
+
+### 事件 22:4xZ（恢复派发后的第一轮 dispatch 记账）
+
+- **ac8 fan-in 冲突**（前述）已标 needs-human、worktree/branch 保留。chart2-s2 同因（integration/develop 分叉）在 needs-human。
+- **divergence 现状**：integration 31 ahead of develop、develop 251 ahead of integration（282-commit 双向 gap，merge-base e846cedd）。任何触碰 tick docs/skills/quay-init.sh 的任务 fan-in 都会撞 ac8 同类冲突。
+- **slot-refill GO**：推荐 3 条，逐条过闸后**全部不可派发**：
+  - `gap-cold-start-outer-validation-runs` → outer 执行型任务（三条验证 AC 需外层环境），非 inner 派发对象
+  - `gap-the-token-measures-the-wait-and-throws-it-away` → **已标 needs-human**：其 Contract invoke 引用已退役的 heavy-op-token.sh（commit 2f9d4575 人裁定退役）；events.jsonl 现在由 resource-gate.sh 写（ACQUIRED+waited_ms 今日 14:06 落盘），缺陷可能已被退役重构顺带修复
+  - `gap-no-post-merge-...` → self-touch 缺失（已补）+ 触碰 tick docs/quay-init.sh（ac8 冲突区）
+- **就绪池维护**：self-touch-scan 28→29 ready，6 条缺自身文件（DIR-121/probe/session-liveness×2/no-post-merge/manager-layer）全部补齐 → 0 missing（commit 7f02f510）。
+- **新派发 1/2**：`gap-prefriction-trigger-regex-too-broad-signal-is-dead`（value 1.0、单文件 prefriction-count.sh、fork-baseline develop、与 shipped-ts disjoint、fan-in 安全因为 prefriction-count.sh 在 develop/integration 完全一致）。worktree `quay-worktrees/prefriction-count`，task-start 已记（fm-...-86ch64）。
+- **在飞 2/5**：shipped-ts（bundle plugin .ts）+ prefriction。
+
+### 事件 22:4xZ 续（第二派发）
+
+- **fan-in 安全扫描**（282-commit divergence 下）：全 ready 池仅 3 条全 touched-file 一致——prefriction（已派）、residue-check、DIR-121。
+- **新派发 2/2**：`gap-residue-check-crystallized-as-tool-mode`（`--check-residue` 工具化；4 touched file 全 identical；fork develop；与 shipped-ts/prefriction 均 disjoint）。worktree `quay-worktrees/residue-check`，task-start fm-...-lu9m1f。
+- **fan-in 风险提示**：shipped-ts 的 `packages/quay/scripts/package.sh` 在 develop/integration **DIFFERS**——完成时 fan-in 可能撞冲突（ac8/chart2-s2 同类）。若撞，按 doc：冲突 → needs-human，不 --skip。
+- **在飞 3/5**：shipped-ts + prefriction + residue-check（ac8 已 needs-human 但仍占 bracket 直到 worktree 清理）。
+
+### 事件 23:0xZ（shipped-ts 完成 → fan-in 冲突 → needs-human）
+
+- **shipped-ts agent 完成**：commit 99710897（53 files +492/−91），AC1-5 勾、npm-pack-e2e 5/5、plugin 272/272、裸 Node 负控制通过（80→0 raw .ts、42 可执行入口）。
+- **fan-in 冲突（divergence 类）**：cherry-pick 99710897 到 integration → **7 个 modify/delete 冲突**——integration HEAD 已删除 `checker-cost.ts`（改成 .sh）、`git-lens-*.ts`、`self-report-vocab-check.ts`、`derive-touches-heuristic.ts` 等，而 shipped-ts 修改了这些 .ts 守卫（~43 files guard refactor）+ package.sh。integration 已先走一步重构。**doc：冲突 → needs-human，不 --skip/-X ours**。已 `cherry-pick --abort`（integration 干净 a09ddb56），标 needs-human（CAS ready→needs-human 成功）。
+- **worktree/branch 保留**：`quay-worktrees/shipped-ts` @ 99710897。
+- **这是第 3 个被 divergence 卡的 fan-in**（ac8 / chart2-s2 / shipped-ts）——integration/develop 的 31/251 分叉是系统性阻塞，外层需先对齐分支。
+
+### 事件 23:0xZ 续（prefriction 完成 → fan-in 成功）
+
+- **prefriction agent 完成**：commit 8d65dc86+f043a8d1。POST_FRICTION_RE 改为事件标记词表（`今晚`/missing/broken 等泛义词删除）。改前 8.2% → 改后 65.8%（pinned 窗口）；AC2 负控制 counter-example → false（agreement 0→1）；AC3 5 条人工判定全 false；AC4 正控制（真实崩溃/SUITE-RED 任务）仍 true；测试 10/10。
+- **fan-in 成功**：cherry-pick 8d65dc86 → 冲突仅任务文件（integration 无该任务文件，develop 侧产物）；`git rm` 任务文件 + 保留 prefriction-count.sh 代码 → 1880c757。再补 f043a8d1（`([^-]|$)` 守卫让 "3 failing" 触发但 "fail-safe" 不触发）→ 2f95dd1f。**.sh 与 worktree 逐字节一致**，prefriction-count --json 在 integration 实跑 48 newly_filed / 37 dimensions。
+- **worktree 已清理**：prefriction-count worktree removed + branch 删除。
+- **状态**：prefriction 任务文件 AC1-5 全勾、status ready（等外层 verify 翻 done）。在飞剩 **residue-check**（1 真实在飞）；ac8 / shipped-ts / chart2-s2 三任务 needs-human 等外层对齐分支。
+
+### 事件 23:0xZ 续2（第三派发 + divergence 阻塞说明）
+
+- **新派发 3/3**：`DIR-121`（Codex Stage 1——AGENTS.md + repo Skills + project MCP + drift check；人导向 directive，dirStatus applied）。全闸过：resolve 1/8 missing 可派、self-touch ok、fork develop、与 residue-check disjoint；glob 目标目录（quay-task-operator/quay-directive 在 plugin/skills + .agents/skills）两分支全 0 差异 → fan-in 安全。worktree `quay-worktrees/dir-121`，task-start fm-DIR-121-...-kp00th。
+- **slot-refill 推荐冷启动（outer 执行型）+ no-post-merge（self-touch 已补，但 Touches 触碰 tick docs/quay-init.sh——ac8 冲突区）**。divergence 未对齐前，派 no-post-merge 有 4 连 stranding 风险，本 tick 不派，等外层对齐分支后回填。
+- **在飞 2/2**（真实）：residue-check + DIR-121。ac8/chart2-s2/shipped-ts needs-human 挂起等外层。
+
+### 事件 23:1xZ（tick：divergence 结构性阻塞全部派发——硬结论）
+
+- **slots**：realInFlight=2（residue-check + DIR-121），3 空槽；reconcile 关 prefriction 旧括号。
+- **slot-refill 推荐 3 条，逐条出局**：
+  - `cold-start-outer-validation` → outer 执行型（非 inner）；
+  - `DIR-124` → 前置未满足（DIR-119 仍 ready 非 done）+ Touches 引用 4 个已退役 workflow 文件（execute/prepare-milestone.js×2）；
+  - `audit-findings-not-backpropagated` → 9/9 touched 文件在 develop/integration 全部 DIFFERS。
+- **全池 fan-in 安全扫描（决定性）**：pool-check 的 8 个 eligible+depsReady 候选**全部触碰分叉文件**：
+  observer-registry 1/2 · manager-skill 2/2 · readme-source 1/2 · cross-machine-readonly 1/3 · quay-launch 4/7 · shipped-artifact 2/2 · tmux-isolated 3/6 · scripts-sprawl 13/58。
+  ⇒ **没有任何可安全派发的就绪任务**。divergence 现在结构性阻塞**全部派发**，不再是偶发 fan-in 冲突。
+- **分支 gap 在扩大**：integration 33 ahead / develop 265 ahead（≈298 commit）。ac8 / chart2-s2 / shipped-ts 三任务已卡住。
+- **本 tick 不派发**（避免第 4/5 个 stranding）；pool 17 < floor 20 也**不补晋**（补晋给不能派发的任务无意义——对齐后自然回填）。
+- **→ 需要外层对齐 integration/develop**：这是当前唯一解锁派发的动作。
+
+### 事件 23:2xZ（DIR-121 完成 → needs-human，诚实边界）
+
+- **DIR-121 agent 完成**：机械面已全部在 develop 落地且绿（adapter 26/26、drift-check exit 0、selfcheck PASS 对 codex-cli 0.146.0、task-schema exit 0、task-contract 0）。修复真 gap：Touches 缺自身 test/script 面 → select-tests-for-touches 只有 1/8（0.13 thin）→ 补 3 项后 `--for-task DIR-121 --allow-thin` 27/27。
+- **标 needs-human**：ACs 4/6/7/8 + AC1 checked-plan 半需**真实 fresh Codex 会话 + 人在场授权**执行真实任务 edit/create + refused-CAS probe + 独立对抗审计。任务自身 anti-fakery 条（line 50-53）禁止用 CODEX-PROBE fixture 顶替真落地。标 needs-human 防止 dispatch 闸重派一个不可完成的任务。
+- **无代码 fan-in**：机械面（AGENTS.md / skills / .codex/config.toml / 测试）本就已在 develop——DIR-121 的改动只含任务文件。worktree + branch 已清。
+- **在飞只剩 residue-check**（1 real），4 空槽但 divergence 阻塞全池派发（见 23:1x 条目）。

@@ -95,6 +95,11 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(pluginDir, 'loop'),
       reason: "canonical templates: their /loop prompts and cross-refs use plugin/loop/; the only old-path strings left are in the template-params note documenting the TARGET layout",
     },
+    {
+      rel: 'packages/quay/plugin',
+      target: path.join(repoRoot, 'packages', 'quay', 'plugin'),
+      reason: "gitignored pack-time snapshot of plugin/ (package.sh materializes it so the tarball carries the bundle); byte-identical to plugin/, which is excluded above — same old-path strings are target-layout documentation, not live references",
+    },
     { rel: 'plugin/test/loop-shipping.test.mjs', target: path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), reason: "this file's own regexes + AC1c snippet array define the old paths" },
     {
       rel: 'plugin/scripts/loop-shipping-exclusion-data.mjs',

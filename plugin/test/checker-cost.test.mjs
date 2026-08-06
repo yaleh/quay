@@ -58,6 +58,12 @@ function readLedgerRows(root) {
 function wrapCost({ root, name, n = 0, load, delayMs, command }) {
   const env = { ...process.env, CHECKER_COST_TEST_DELAY_MS: String(delayMs) };
   if (load !== undefined) env.CHECKER_COST_TEST_LOAD = String(load);
+  // The wrapper (checker-cost.sh) is the recorder under test. If the wrapped command ALSO
+  // self-records (ready-pool-check.ts does — its criterion KNOWS n=pool), it would append a
+  // SECOND row per run and the "pure append, one per run" assertion would see 2× rows. The
+  // ready-pool-check self-record has a hermetic seam (CHECKER_COST_SKIP=1 disables it) — set it
+  // so the wrapper's record is the ONLY one (AC2: 3 runs ⇒ exactly 3 rows).
+  env.CHECKER_COST_SKIP = "1";
   const args = [CHECKER_COST, name, "--n", String(n), "--root", root, "--"];
   args.push(...command);
   return spawnSync("bash", args, { env, encoding: "utf8" });

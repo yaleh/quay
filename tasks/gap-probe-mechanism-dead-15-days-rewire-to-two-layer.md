@@ -5,7 +5,7 @@ title: probe mechanism dead 15 days — routine-scheduler exists but no producti
   07-15 Iteration 49/52); 5th 'mechanism exists nobody calls' instance; rewire
   trigger to two-layer quantities (tick-count/time/event) + archguard L_D/L_G
   instrumentation
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -45,10 +45,12 @@ strategic-doc-staleness orchestration 臂死 glob。
 - [ ] AC1: routine 触发器改为两层模式实际量（tick 计数/时间/事件），不再依赖迭代计数
 - [ ] AC2: 探针重新接线——每 tick 或定时检查 due 并执行（架构分析/自验证/历史挖掘），实测跑起来
 - [ ] AC3: architecture-analysis 探针用 archguard（L_D/L_G 仪器），git-lens L_D/L_G/L_S 回收进来
+  - 回收部分已由 `gap-experiment-legacy-reclaim-and-touches-heuristic` 落地（2026-08-06）：git-lens L_D/L_G/L_S 三脚本已回收进 `plugin/scripts/`，architecture-analysis 探针 spec（`plugin/probes/architecture-analysis.md`）已加 fallback: git-lens 说明。本任务余下为探针机制重新接线（触发器改两层量 + 每 tick 检查 due）。
 - [ ] AC4: 与「机制存在无人调用」族前四实例交叉标注
 
 ## Touches
 
+- tasks/gap-probe-mechanism-dead-15-days-rewire-to-two-layer.md
 - plugin/scripts/routine-scheduler.ts（触发器改两层量）
 - plugin/loop/orchestrator-loop-tick.md（接线 routine 检查）
 - plugin/loop/fast-mode-loop-tick.md（如涉及）
