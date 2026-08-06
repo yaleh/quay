@@ -5564,3 +5564,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （`fm-...-bb3rgc`，upgrade/refresh 通道）③ split-batch-vocab（`fm-...-9cl8gf`）。生产闸 4 个互不相交候选
   中取 3，全 self-touch/resolve 过，派发词带 Touches 精度规则。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T01:0xZ（内层，prepare-milestone 误晋 disposition + promotion 缺口立案）
+
+- **prepare-milestone 误晋处置**：`gap-prepare-milestone-no-size-aware-routing` 派发后 agent 发现 premise
+  **void**——目标机制 prepare-milestone.js/execute-milestone.js 已被 ADR-022（08-03）删除。agent 正确未实现、
+  只记 disposition（merge `190fd11e`）。**我的 tick 3.6 误晋**——promotion 不调 `--pool-candidate` retired 检查。
+  其余 7 个补晋候选双查全 clean（误晋隔离到这一个）。**外层请 mark needs-human/superseded**。
+- **promotion 缺口立案**：`gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check`——ready-pool
+  promotion 不消费 strategic-doc-staleness --pool-candidate（review-cadence AC8 控制存在但未接线）。
+  在飞 2/3（delivery-grows + split-batch-vocab，均 clean）。
+- 套件 green、无 stop、无 block、Monitor 绿。
