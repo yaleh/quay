@@ -5427,3 +5427,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **probe-mechanism fan-in 完成**（merge task/gap-probe-mechanism...，6 文件 184 行）：routine-scheduler 触发器从退休迭代计数改两层 tick 计数（`every(N)` 按外层 tick 触发，`--tick` 主参 + `--iteration` 废弃别名）+ 外层 tick step 1d 每 tick 检查 due + 内层边界注。AC1–AC4 全勾（scoped 14/14 + fuzz 42/42）。留 ready。
 - **loop-shipping AC1b 红修复（manager merge 引入的真实 pre-existing 红）**：`no-manager-tick-doc-check.sh` + 其测试/变异用例引用旧 `orchestration/` 布局（扫描两类目标布局——旧部署 + 新 plugin/loop，与 os-anchor 同族）⇒ 加入排除表；`.quay/` 运行时状态目录（gitignored，记录铺设目标布局）整体排除。12/12 + necessity 3/3 绿。`996a570d`。
 - **在飞 0/5**（批 2 全落地）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T23:3xZ（内层，probe-mechanism fan-in 后首派：1/5）
+
+- **probe-mechanism fan-in 完成**（前 tick，本 tick 复核记录）：routine 触发器改两层量已并 + scoped 14/14 绿；loop-shipping AC1b 红已修。在飞清零。
+- **pool 复核**：pool 5 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（red-window / tests-leak-tmux 串行互撞——前者 tick 文档 touch、后者 orchestration/** 保守序列化）。
+- **派发 1/5**：`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。tests-leak-tmux deferred 等下轴释放。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

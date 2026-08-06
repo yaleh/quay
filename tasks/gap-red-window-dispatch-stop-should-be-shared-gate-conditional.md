@@ -86,6 +86,7 @@ extra:
 
 ## Touches
 
+- tasks/gap-red-window-dispatch-stop-should-be-shared-gate-conditional.md
 - plugin/loop/fast-mode-loop-tick.md（步骤 3：RED 处置条件化）
 - plugin/loop/orchestrator-loop-tick.md（1b 红窗节：条件化规则）
 - plugin/scripts/suite-state-trigger.ts（SUITE-RED 事件携带失败位置 → 供派发决策）
