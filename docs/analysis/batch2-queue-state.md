@@ -6818,3 +6818,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 零派发：cap=2（WAIT）下 slot-refill 仅推荐 DIR-124（human-steered 不自动派）。其余候选仍为陈旧/冲突/主题删除。
 - 外层 suite 卡在 triage（进程 0% CPU，已 30+min），外层正翻「3 real defects from full-suite triage」；
   no-post-merge 在飞（8 脏文件，工作推进中）。池 16 无需补晋。
+
+### tick 2026-08-06T07:0xZ（no-post-merge fan-in 完成 + 派发 2）
+
+- **no-post-merge-latency fan-in 落 integration（4a877953）**：cross-machine-verify.sh（git-notes 共享态、slot-refill 双触发、
+  禁 crontab）；AC3/4/5/6 勾（负控制/非参与方/d 可读/随包），AC1/2 B 侧 deferred（需真实合并 + 第二机）。scoped 19/19 green。
+  顺带把外层 6 个 develop-only commit（tick-log/phase-goal/contract 修复）并入 integration（rebase 带入，integration 追上 develop）。
+- **派发 2**（cap WAIT=2，在飞 0→2/2）：green-verdict + shipped-verifiers（mutually disjoint，production gate 确认；
+  slot-refill 未推荐它们是因为被陈旧池任务抢占顺序——**需让 slot-refill 排除已 fan-in 待翻 done 的陈旧任务**，否则真候选被挤掉）。
+  fork develop 0417796d。
+- 在飞 2/2。外层 suite 卡 triage（进程 0% CPU），外层正翻「3 real defects from full-suite triage」。
