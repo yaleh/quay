@@ -6282,3 +6282,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - worktree/branch 清理；主检出回 develop。manager-inbox stash 还原（manager WIP，未动）。
 - **在飞 1/3**（no-criterion-cost，develop 基线）。integration 现 = develop + AC16 + spawn-count + supervisor，
   待外层 FF integration→develop（verification-round）。
+
+### tick 2026-08-06T11:0xZ（内层 cron + slot-refill 心跳，轻触）
+
+- 无 halt；套件 GREEN（07:07Z）。在飞 1/3（no-criterion-cost，brackets aligned）。
+- 池 9/20、disjoint 4/5 不达标。ready 9 中：6 陈旧 landed/directive/done（DIR-043/DIR-124/red-pattern/
+  ghost-drive/split-batch/tests-leak/supervisor），1 在飞（no-criterion-cost），唯一真实候选
+  quality-criteria 与在飞 OVERLAP（plugin/test/*）⇒ 序列化。
+- **slot-refill 机械确认 no_refill_reason='no dispatchable candidate passes step-4 checks'** —
+  与手动分析一致，本 tick 无新派发。
+- 待外层：FF integration（现 = develop + AC16 + spawn-count + supervisor）→ develop（verification-round）。
+- develop 已领先 integration（外层 merge archguard 工作 bccbc6b9）。
