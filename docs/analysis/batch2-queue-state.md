@@ -7330,3 +7330,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **在飞 0/5（真实并发）**：slot-status `real_in_flight:0`、`slots_free:5`、`brackets_reflect_subagents:false`——遥测 inProgress 5 条全是陈旧括号（4 条已 merge 待外层 --task-end + manager 旧括号）。manager 首条 agent 已静默死（worktree 1 脏文件 plugin/scripts/quay-topology.sh，0 commit）。
 - **池无需补晋**：pool 20 ≥ floor 20（cap 5×4），dispatchable 9 ≥ cap。Monitor `mounted:true / targetOk:true`。inbox unread=0。
 - **遥测**：tasksPerHour 1.20（window 102.3h）/ mean 64.0m / median 48.9m / 累计死时间 31.2m（最长 14.5m）。
+
+### tick 2026-08-06T17:2xZ（零派发：suite 终红 fail-closed；补晋 1 修 self-touch）
+
+- **零派发**：suite 仍最终红（15:53 finished，reason=failed，`failures:[]` 空）⇒ fail-closed 保守停派发。外层 pane 自述「all dispatch gated」「17:14 重评套件」但 17:20 仍无新 suite-state（无 runner 进程）。cap=5（GO 档，load1 2.19）。
+- **补晋 1（3.6，pool 19<floor 20）**：`gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact` todo→ready。**补 self-touch**（Touches 缺自身任务文件，`--self-touch-scan` 会挡）后 `--self-touch ok` + `--resolve` 0/3 missing → dispatchable。pool 20 = floor，dispatchable 10。
+- **manager-productization 不碰**：外层 17:09 裁定「双括号留待人工裁定」（worktree 老 base 56d60671 + 1 脏文件 + 16:23 cf7gcr 括号）。本 tick 不 re-dispatch / 不 reconcile / 不清理。
+- **在飞 0/5**：slot-status `real_in_flight:0`、`slots_free:5`、`brackets_reflect_subagents:false`（仅剩 2 条 manager 陈旧括号在 reconcile 关闭投影——**未跑 --reconcile**：slug 截断会误关 manager 括号，且外层已接走裁定）。green-verdict/shipped/no-post-merge 括号已被外层 16:58 收尾关闭（本 tick detect-stop **无停止条件、无块**——OVER90 假阳性已随括号关闭消失）。
+- **遥测**：tasksPerHour 1.22（window 102.9h）/ mean 65.4m / median 49.7m / 累计死时间 31.2m。Monitor `mounted:true / targetOk:true`。inbox unread=0。

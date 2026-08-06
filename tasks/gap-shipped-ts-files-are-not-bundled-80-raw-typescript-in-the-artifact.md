@@ -1,14 +1,16 @@
 ---
 id: gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact
-title: "the shipped artifact carries 80 RAW .ts files — plugin's TypeScript is never bundled or
-  compiled, while Core IS (package/dist/quay.js is a single bundled file, and plugin/vendor/ ships
-  pre-bundled single-file runtimes quay.js 1.3MB + quay-native.js 1.1MB); measured on the locally
-  built quay-0.4.0.tgz (303 files after the test exclusion): 80 .ts entries under package/plugin/,
-  zero bundling applied, so every invocation on a consumer machine pays `node
-  --experimental-strip-types` per script and the consumer's Node must support that flag; the
-  asymmetry is unexplained — the same artifact contains both a bundled Core and unbundled plugin
-  TypeScript; manager 2026-08-06 filed per human direction after inspecting the package contents"
-status: todo
+title: "the shipped artifact carries 80 RAW .ts files — plugin's TypeScript is
+  never bundled or compiled, while Core IS (package/dist/quay.js is a single
+  bundled file, and plugin/vendor/ ships pre-bundled single-file runtimes
+  quay.js 1.3MB + quay-native.js 1.1MB); measured on the locally built
+  quay-0.4.0.tgz (303 files after the test exclusion): 80 .ts entries under
+  package/plugin/, zero bundling applied, so every invocation on a consumer
+  machine pays `node --experimental-strip-types` per script and the consumer's
+  Node must support that flag; the asymmetry is unexplained — the same artifact
+  contains both a bundled Core and unbundled plugin TypeScript; manager
+  2026-08-06 filed per human direction after inspecting the package contents"
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -117,6 +119,7 @@ resume 若中断，先跑 measure 读当前产物里的 raw .ts 数，不要假�
 - packages/quay/scripts/package.sh
 - packages/quay/package.json
 - tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（交叉标注）
+- tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md
 
 ## Dispatch review
 
