@@ -856,8 +856,9 @@ PYEOF
 derive_loop_scripts() {
   local derived
   derived="$(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null | sed 's#^plugin/scripts/##' | sort -u || true)"
+  local -a all=()
   # shellcheck disable=SC2207
-  LOOP_SCRIPTS=(
+  all=(
     $derived
     # tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
     inner-idle-log.ts
@@ -873,6 +874,18 @@ derive_loop_scripts() {
     # capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers):
     capability-catalog.sh
   )
+  # Dedupe (an explicit addition may coincide with a derived reference): count and lay each script
+  # exactly once. A duplicated entry would double-count the drift report's derived-set N (the L2
+  # 升级正确性 measure) and re-process the same copy in the --loop laydown.
+  LOOP_SCRIPTS=()
+  local s t in
+  for s in "${all[@]}"; do
+    in=0
+    for t in "${LOOP_SCRIPTS[@]}"; do
+      [ "$t" = "$s" ] && { in=1; break; }
+    done
+    [ "$in" = 0 ] && LOOP_SCRIPTS+=("$s")
+  done
 }
 
 # compute_drift_report <workspace-root> — the derived-set-axis drift report (AC2). For every script
