@@ -66,11 +66,18 @@ const SAFE_SUBSTRINGS = [
   "batch, deferred",
   "batch ⇒",
   "历史引用",
+  "历史批名",          // the docs annotate batch4a/4b/4c as 历史批名 (synonym of 历史引用)
   "batch2-queue-state",
   "self-report-vocab-audit",
   "reanchor-prompt.txt",
   "Batch of N fully merged",
   "batch-free",
+  // The vocabulary RULE's own meta-text: it names the forbidden batch phrasing to forbid it —
+  // "batch + 编号 的措辞都只能是历史", "batch-4 = 门控语义漂移", "batch 式汇报 = 自述措辞审计".
+  // These describe the split (batch = historical/forbidden), they do NOT gate dispatch.
+  "batch + 编号",
+  "batch 式",          // batch 式汇报 / batch 式自述 — the vocabulary rule's own meta-text
+  "门控语义漂移",
 ];
 
 function readDocs() {
