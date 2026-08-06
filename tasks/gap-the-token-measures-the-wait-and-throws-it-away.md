@@ -1,7 +1,7 @@
 ---
 id: gap-the-token-measures-the-wait-and-throws-it-away
 title: "The token already computes waited_ms and prints it to stdout, where it evaporates — so the halt-or-not decision its own header deferred cannot be made"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -119,6 +119,8 @@ resume 先落盘既有的 waited_ms，再谈 halt 与否
       **而那个策略决定（halt 与否）今天被问到了，答不出来，因为观测被打到 stdout 然后蒸发**
 
 ## Touches
+- tasks/gap-the-token-measures-the-wait-and-throws-it-away.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs

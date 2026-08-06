@@ -1,7 +1,7 @@
 ---
 id: gap-the-runtime-has-nowhere-safe-to-land
 title: "The runtime lands in the target's vendor/ — a reserved dir in Go — and is 1.3MB against common large-file hooks; both are the same decision about where it may live"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -149,6 +149,8 @@ resume 先量出真实阈值分布与可选方案的代价，再选方案
 - [ ] 任务体记录：**「让使用者自己处理」等价于要求他打一个补丁，而 G0 明令补丁数为 0**
 
 ## Touches
+- tasks/gap-the-runtime-has-nowhere-safe-to-land.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/quay-init.sh
 - packages/quay/scripts/build-dist.mjs

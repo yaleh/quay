@@ -1,7 +1,7 @@
 ---
 id: gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs
 title: "The heavy-op token's liveness watches the shell that acquired it, not the work that is running — a retry loop makes the token reclaimable while the work continues"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -125,6 +125,8 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
       所以存活信号必须来自知道活是否继续的那个实体**
 
 ## Touches
+- tasks/gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs

@@ -1,7 +1,7 @@
 ---
 id: gap-token-status-reports-a-dead-holder-as-busy
 title: "heavy-op-token --status says a project holds the token when its process is dead — staleness is only evaluated on acquire"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -159,6 +159,8 @@ stale_reclaims=7
 - [ ] 任务体记录：**懒回收是对的、acquire 路径是对的**，本任务只修 `--status` 的诚实性
 
 ## Touches
+- tasks/gap-token-status-reports-a-dead-holder-as-busy.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/heavy-op-token.sh
 - plugin/test/heavy-op-token.test.mjs

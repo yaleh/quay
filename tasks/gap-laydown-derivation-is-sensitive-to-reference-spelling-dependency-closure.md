@@ -1,7 +1,7 @@
 ---
 id: gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure
 title: "quay-init's derived laydown set is SENSITIVE TO REFERENCE SPELLING (manager self-inflicted instance, full causal chain verified): send-keys-reliable.sh got laid down (its cold-start/SKILL.md reference has the plugin/scripts/ prefix) but transcript-delivery-check.ts did NOT (referenced as a BARE FILENAME 'transcript-delivery-check.ts, Fault 5' at cold-start/SKILL.md:49/132 — the prefix regex grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' requires the path prefix, 0 hits ⇒ NOT in the 19) — so the laid-down delivery-verification was broken from first use; archguard same; manager hand-patched both (cmp identical + usage OK), block resolved, hole structural; WORST PART verified at quay-init.sh:547: verify_referenced_landed SHARES THE SAME DERIVATION REGEX (grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[...]') ⇒ checker and checked share the same blind spot, this defect category can NEVER be found by the criterion (self-create/reference-doc exemptions at 552-557 same grep semantics); fix (manager prefers b, agree): (b) DEPENDENCY-CLOSURE — an already-laid-down script that references a sibling script in the same dir must also be in the laydown set (send-keys-reliable.sh:41 CHECKER=\"\\${SCRIPT_DIR}/transcript-delivery-check.ts\" is mechanically parseable; catches a whole class (a) can't), OR (a) derivation regex accepts bare filenames resolved under plugin/scripts/; plus: send-keys-reliable.sh has NO fail-loud precondition when CHECKER missing (set -uo pipefail, line 41 assigns only) — worth adding; AC10: post-friction (hit by meta-cc), DOES NOT score, count stays 4"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -76,6 +76,8 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/quay-init.sh（铺设派生正则补裸文件名 + verify_referenced_landed 盲点 + 依赖闭包检查）
 - plugin/scripts/send-keys-reliable.sh（fail-loud 前置）

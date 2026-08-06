@@ -1,7 +1,7 @@
 ---
 id: gap-suite-state-has-no-reason-axis-failed-aborted-infra
 title: "full-suite-state.json's state has NO REASON AXIS — state=red carries 'this round didn't succeed' but nothing about WHY: a real test failure (has correctness info, stop-dispatch on code risk) vs a deliberate abort to save the machine (no correctness info, stop by resource state) vs infra-error look IDENTICAL downstream because suite-state-trigger.ts consumes only state==='red' and cannot read note; the outer was FORCED to hand-write a note field ('ABORTED by outer — resource safety') to distinguish — the escape hatch appearing IS the criterion: when the schema is insufficient, a human invents a workaround, and its location marks the missing dimension; generator question: what range does state quantify? 'this round didn't succeed' — the missing range is REASON; fix: add an outcome/reason enum (failed|aborted|infra-error) to the state file, suite-state-trigger.ts routes by reason — aborted does NOT stop-dispatch on code-risk (the red-window rule's stop is driven by resource-gate.sh's GO/WAIT instead); NOW-live: this round's red carries zero correctness info (suite never finished, durationMs=null) yet the red-window stops dispatch anyway — currently CORRECT only by coincidence (machine just recovered from load 31.7), and that coincidence breaks the moment load recovers while red lingers with no evidence supporting continued stop; AC10: +1 => 5->6, pre-friction (nothing hurting — ABORT handled well, machine recovered, downstream behavior happens to be right), found by asking the generator question"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -73,6 +73,8 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-suite-state-has-no-reason-axis-failed-aborted-infra.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/full-suite-runner.ts（state schema + reason 枚举 + 早标 RED 写 failed）
 - plugin/scripts/suite-state-trigger.ts（按 reason 路由：aborted → 资源门 / failed → 红窗分诊）
