@@ -61,3 +61,21 @@ at: 2026-08-06T06:4xZ
 changed: 红窗分诊（AC-carryover ratchet：loop-driver AC3 未勾无 successor）立案——创建第二层任务承载
 AC3。亲代（done）AC3 显式记录「第一层未解决、转入第二层」，本任务是该第二层。前置问题（bash 能否看
 会话内 cron）未答前不猜实现。
+
+## 带时间戳实例（2026-08-06T09:1xZ，管理者实测，贴为证据）
+
+**AC3 第一层失效的具体实例（带时间戳）**：
+
+`.quay/loop-driver.jsonl` 当前唯一一行：
+```json
+{"mechanism":"cron","interval":"*/20 * * * *","source":"outer-cold-start-2026-08-04T02:45Z"}
+```
+- **mtime 2026-08-04 02:40**——距今 2 天 6 小时（管理者实测）。
+- 08-05 当天发生四次全灭 + 多次会话重建；**CronCreate 是会话作用域**，那个 08-04 的会话早就不存在。
+- **但 `loop-driver-check.sh` 此刻仍报 `loop-driver: LIVE (1) — exactly one loop driver (cron */20)`**。
+
+**结论**：注册表是自述的（只数 `.quay/loop-driver.jsonl` 的行），不观测任何真实驱动；注册表 2 天没更新、
+其描述的 cron 已随会话死亡，检查照样报 LIVE。**这正是 AC3 标题「陈旧注册表不得报 LIVE」的具体形态**。
+
+**判别克制（管理者）**：不用「outer tick 提交间隔 08:04 与 08:45 差 40 分钟」反推 cron 没在 */20 触发——
+轻触 tick 不一定产生提交，那个推论不成立。本证据只基于注册表时间戳 + 检查输出。
