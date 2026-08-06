@@ -82,14 +82,12 @@ extra:
 ## Contract
 
 ```
-measure verdict_age_min = 当前 verdict 的 finishedAt 距今分钟数
-measure verdict_commit_delta = 当前 HEAD 与该 verdict 所覆盖 commit 之间的提交数
+measure verdict_age_min = `node --experimental-strip-types plugin/scripts/suite-state-trigger.ts --json` 输出的 finishedAt 距今分钟数字段
+measure verdict_commit_delta = `git rev-list --count <verdict-commit>..HEAD` stdout 数字段
 band verdict_commit_delta 可读（存在=1，缺失=0）
-invariant 一条 GREEN 被用作派发授权时，其覆盖范围必须可被消费者读出；
-  "上一次跑完是绿的" 不等于 "现在是绿的"
+invariant 一条 GREEN 被用作派发授权时，其覆盖范围必须可被消费者读出；"上一次跑完是绿的" 不等于 "现在是绿的"
 invoke `node --experimental-strip-types plugin/scripts/suite-state-trigger.ts --json`
-control 人为把 verdict 的 finishedAt 往前推 8 小时并让 HEAD 前进若干提交 ⇒
-  delta/age 必须随之变化并被报出；若输出不变，说明消费者仍然没在读这两个量
+control 人为把 verdict 的 finishedAt 往前推 8 小时并让 HEAD 前进若干提交 ⇒ delta/age 必须随之变化并被报出；若输出不变，说明消费者仍然没在读这两个量
 resume 若中断，先跑 measure 读当前 age 与 delta，不要假设绿仍然成立
 ```
 
@@ -116,3 +114,10 @@ resume 若中断，先跑 measure 读当前 age 与 delta，不要假设绿仍�
 - plugin/scripts/suite-state-trigger.ts
 - plugin/scripts/full-suite-runner.ts
 - plugin/loop/orchestrator-loop-tick.md
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T14:1xZ
+changed: 内层立案任务补 Contract 格式（measure 补 backtick 命令 + 字段、invariant/control 续行合并、加本段）。任务在飞（dispatch 记账 0d6e98b7 补晋）。
+

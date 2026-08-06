@@ -57,7 +57,7 @@ quay-sea-*.tar.gz **没修**。AC16 改判未达成（2395a05f）。
 ## Contract
 
 measure   sea_has_plugin = `tar tzf quay-sea-<ver>-*.tar.gz 2>/dev/null | grep -c 'plugin'` stdout 数字段（或等价：release 产物含 plugin 条目）
-band      sea_has_plugin > 0（SEA/sidecar 产物含 plugin）
+band      sea_has_plugin = > 0（SEA/sidecar 产物含 plugin）
 invoke    `grep -rn 'assets\|plugin\|entryPoints' packages/quay/scripts/build-sea.sh packages/quay/scripts/esbuild-sea.mjs`
 control   release 产物含 plugin（AC1）；B 机验收装出完整机制（AC4）
 resume    SEA 内嵌/sidecar 与推荐分发分步提交，任一步完成即写盘
