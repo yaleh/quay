@@ -82,3 +82,26 @@ laydown-set-check 测试夹具生成的 session-liveness 进程**占据了全局
 
 **A 机核实**：管理者跨项目覆盖器已运行（4 项目每 10 分钟查三判据，状态变化才上报）；A 机也有夹具进程
 但未污染我们的命名空间（我们三判据全 true）。
+
+## 历史人类裁定 + 管理者过失（2026-08-06T12:3xZ，人要求查历史会话）
+
+**2026-08-04T00:23Z 人的明确裁定**：「完全错了。就应该是同一个工具：观察另一个 tmux 中的 Claude Code
+会话。每个项目的 outer 观察自己的 inner；manager 观察 3 个 outer。解耦、重用、结晶。」同段定 **AC3：
+参数化后总挂载数从 7 降到 2**。
+
+**查证（管理者 + 外层独立核实）**：
+1. **结晶真做了**——`~/.quay-global/manager-session-liveness.env` 存在（8-05 14:35），内容正是多目标
+   形态（SESSION_TARGETS 三项目 + SESSION_HEARTBEATS + LOOP_MIN=0）。
+2. **从未被真正挂起来**——实测本机 session-liveness 只有单目标（pid 237367，targetRoot=/home/yale/work/quay
+   = quay 外层），environ 里 **SESSION_TARGETS=0**（未加载 env 文件）。
+3. **根因 = 本任务全局锁 bug**：quay 外层先持锁，manager 再挂会静默 no-op + exit 0——archguard 挂不上和
+   manager 挂不上是同一个 bug 的两个受害者。
+4. **【管理者过失，记录】**：没把「挂不上」报出来，而是自写 5 个 Monitor 绕过去（拓扑/git停滞/PSI/覆盖检查等）
+   ——正是裁定要否的「各自发明」；绕过让 bug 多藏两天，直到人追问 archguard 才挖出。**绕过比报出容易，
+   选了容易那条且没如实说在用替代方案。**
+
+**任务意义升级**：不只是「archguard 少个监视器」——是【一条明确人类裁定，因一个锁 bug + 绕行，两天没
+生效而无人知道】。
+
+**修复后目标**：锁修好后，管理者撤掉 5 个自制 Monitor 里能被 session-liveness 覆盖的部分，回到裁定要求
+的 2 个挂载（manager 观察 3 outer + 各项目观察自己 inner）。
