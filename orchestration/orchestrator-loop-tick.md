@@ -9,9 +9,17 @@
 > `orchestration/orchestrator-loop-tick.md`（外层）/ `docs/analysis/fast-mode-loop-tick.md`（内层）。
 > 模板正文本体不含任何具体仓库路径、测试命令或 tmux 会话字面量。
 >
-> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` 三个名字在本文件中
-> 指 `.quay/config.yml` `loop:` 节的对应值（`repo_root` / `test_command` / `tmux_session`）。
+> **目标项目值引用约定**：`REPO_ROOT` / `TEST_COMMAND` / `TMUX_SESSION` / `FORK_BASELINE` /
+> `MERGE_TARGET` 五个名字在本文件中指 `.quay/config.yml` `loop:` 节的对应值
+> （`repo_root` / `test_command` / `tmux_session` / `fork_baseline` / `merge_target`）。
 > 执行含这些名字的命令前，先读该文件把值代入——不要凭记忆。
+>
+> **工作分支模型（branch cutover，2026-08-06）**：本副本是 quay 自身消费的外层 tick
+> （`orchestration/orchestrator-loop-tick.md`），工作分支按外层裁定直接改为**字面量两线**：
+> `FORK_BASELINE` = develop（已验证基线）、`MERGE_TARGET` = integration（待验证汇入点）——见
+> `.quay/config.yml` `loop:` 节的 `fork_baseline` / `merge_target`。所有含分支操作的命令代入这两个值，
+> 不要字面写死。共享模板 `plugin/loop/orchestrator-loop-tick.md` 的工作分支名**可配置**（默认单线，
+> 供未做 cutover 的下游经升级通道消费），本副本是 quay 自己的两线落地——两者角色分工见任务体 AC5。
 
 **启动方式**（在编排会话，即本会话或 `/clear` 后的新会话）：按下方「冷启动」步骤操作——**循环驱动
 只有一个**：步骤 4 的 `CronCreate`（20 分钟 cron）。Monitor 是事件监测，不是驱动。两个都做完再进
@@ -304,7 +312,7 @@ bash plugin/scripts/monitor-mount-check.sh --json
 | `STALLED` | 遥测 `inProgress` 是否为空 | **正在运行的 `node --test` 进程数** |
 | 全量套件分类 | 命令文本里提到 `test.sh` | `test.sh` 出现在命令位置（剥离引号内容后） |
 | `--clean-stale` 安全性 | 提交数为 0 | 提交数 0 **且**两点 diff 为空 **且** worktree 无未提交改动 |
-| 滞留分支告警（步骤 1 的 `--stranded`） | 没有任何检查 → 靠人偶然 `git worktree list` | 三闸（reclaim 已验证）：`merge-base --is-ancestor` → merge-added 文件是否仍在 master → 分支领先计数；`has-commits`/`merged-then-reverted` 报出，`merged-clean` 不报 |
+| 滞留分支告警（步骤 1 的 `--stranded`） | 没有任何检查 → 靠人偶然 `git worktree list` | 三闸（reclaim 已验证）：`merge-base --is-ancestor` → merge-added 文件是否仍在 develop → 分支领先计数；`has-commits`/`merged-then-reverted` 报出，`merged-clean` 不报 |
 | `START` | 首次轮询就当作转变 | 首次标 `INIT`，只有真转变才 `START` |
 
 `STALLED` 那条的具体教训：**合并与验证跑不在任务括号内**，遥测 `inProgress` 为空，于是两级判据
@@ -583,6 +591,20 @@ tick 做一次收尾 pass。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
+3b. **批量合 integration→develop（两线模型 AC3，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
+   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop develop --integration integration` 把
+   已验证的 integration 批量快进合回 develop——**integration 永远是 develop 后代 ⇒ fast-forward 无冲突**
+   （develop 只被外层批量合推进，inner 任务只合 integration，见 `fast-mode-loop-tick.md` 步骤 2「两线
+   分支模型」）。`integration-batch-merge.sh` 自带：
+   - **pre-check**：`git merge-base --is-ancestor develop integration` 非 0（真分歧）⇒ 退出非 0、
+     不移动任何 ref、needs-human——**绝不 blind --ours/--theirs**；
+   - **measure**：`git merge-base --is-ancestor integration develop` 退出码（band = 0 = integration
+     的提交已全部并入 develop）；
+   - **invoke**：`git log --oneline develop..integration`（红窗期不空——integration 照常接收，直到本轮
+     suiteGreen 才批量合）。
+   suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 integration 照常接收任务合并，
+   只是 develop 不推进（结构性消除「红窗必须停派发」；develop 永不从未验证树推进）。**`--dry-run` 先跑**
+   核对 pre-check 与 pending 面，再实跑。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}
@@ -708,7 +730,7 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
 - **决定性的那一步都很便宜**。最大的一次纠偏（负控制也在失败 ⇒ 是 runner 单点故障，不是 14 个
   陈旧 fixture）只需要单独跑一个测试文件、读一遍测试名。**不是难的推理，是没人在赶工时会做的推理**
 
-**因此不要把外层当成「更强的模型来兜底」。** 外层同期也犯了同一类错误：只查 master 工作树就断定
+**因此不要把外层当成「更强的模型来兜底」。** 外层同期也犯了同一类错误：只查 develop 工作树就断定
 A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import、`-E` 模式下写 `\|`。**更强的模型减少
 不了这类错误，换个视角才能。**
 

@@ -6,6 +6,12 @@
 // HAD to stop dispatching was that it bore BOTH the fork-baseline and the merge-point roles on one
 // ref; splitting them removes the collision — SPEC §1).
 //
+// AC6 (gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model): the CLI's
+// fork-baseline stdout is REF-AWARE — the decision label is mapped onto the configured --develop/
+// --integration refs, so a single-line downstream passing `--develop master --integration master`
+// gets `master` (never the literal "develop"), keeping the shared tick doc's configurable fork
+// baseline safe for projects that only have master. Tests at the end of this file cover that.
+//
 // These tests build REAL temp git repos to exercise the actual merge path:
 //   1. integration→develop fast-forward — the outer verification-round batch merge; develop must
 //      move to integration's tip with NO conflict (integration is always a descendant of develop).
@@ -264,6 +270,40 @@ test("AC2: a candidate with NO ## Touches cannot be proven independent → conse
     const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "no-touches.md"), "--unverified", "unverified-one"]);
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout.trim(), "integration", "no-touches candidate cannot be proven independent");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── AC6 (gap-two-layer-loop-tick-docs-hardcode-master-not-wired-to-existing-branch-model): the CLI's
+// fork-baseline output must be REF-AWARE. The decision LABEL is "develop"/"integration", but the stdout
+// maps onto the CONFIGURED ref names — a single-line downstream that passes `--develop master
+// --integration master` (no branch-model config, the shared tick doc's default) must get `master`, never
+// the literal "develop". This keeps the configurable fork-baseline safe for projects that only have master.
+
+test("AC6: single-line downstream (--develop master --integration master) gets MASTER, not develop", () => {
+  const dir = makeTmp("singleline");
+  try {
+    initGitRepo(dir);
+    writeTask(dir, "candidate", ["plugin/scripts/fork-baseline.ts"]);
+
+    const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate.md"), "--develop", "master", "--integration", "master"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), "master", `default single-line fork baseline must be master, got: ${r.stdout}`);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("AC6: default refs (no --develop/--integration) still return the two-line literals (back-compat)", () => {
+  const dir = makeTmp("defaults");
+  try {
+    initGitRepo(dir);
+    writeTask(dir, "candidate", ["plugin/scripts/fork-baseline.ts"]);
+
+    const r = runNode([forkBaselineCli, "--root", dir, "--task", join(dir, "tasks", "candidate.md")]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), "develop", "default two-line fork baseline must stay develop");
   } finally {
     cleanup(dir);
   }
