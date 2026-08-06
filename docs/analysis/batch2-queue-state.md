@@ -7457,3 +7457,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **新派发 2/2**：`gap-residue-check-crystallized-as-tool-mode`（`--check-residue` 工具化；4 touched file 全 identical；fork develop；与 shipped-ts/prefriction 均 disjoint）。worktree `quay-worktrees/residue-check`，task-start fm-...-lu9m1f。
 - **fan-in 风险提示**：shipped-ts 的 `packages/quay/scripts/package.sh` 在 develop/integration **DIFFERS**——完成时 fan-in 可能撞冲突（ac8/chart2-s2 同类）。若撞，按 doc：冲突 → needs-human，不 --skip。
 - **在飞 3/5**：shipped-ts + prefriction + residue-check（ac8 已 needs-human 但仍占 bracket 直到 worktree 清理）。
+
+### 事件 23:0xZ（shipped-ts 完成 → fan-in 冲突 → needs-human）
+
+- **shipped-ts agent 完成**：commit 99710897（53 files +492/−91），AC1-5 勾、npm-pack-e2e 5/5、plugin 272/272、裸 Node 负控制通过（80→0 raw .ts、42 可执行入口）。
+- **fan-in 冲突（divergence 类）**：cherry-pick 99710897 到 integration → **7 个 modify/delete 冲突**——integration HEAD 已删除 `checker-cost.ts`（改成 .sh）、`git-lens-*.ts`、`self-report-vocab-check.ts`、`derive-touches-heuristic.ts` 等，而 shipped-ts 修改了这些 .ts 守卫（~43 files guard refactor）+ package.sh。integration 已先走一步重构。**doc：冲突 → needs-human，不 --skip/-X ours**。已 `cherry-pick --abort`（integration 干净 a09ddb56），标 needs-human（CAS ready→needs-human 成功）。
+- **worktree/branch 保留**：`quay-worktrees/shipped-ts` @ 99710897。
+- **这是第 3 个被 divergence 卡的 fan-in**（ac8 / chart2-s2 / shipped-ts）——integration/develop 的 31/251 分叉是系统性阻塞，外层需先对齐分支。
