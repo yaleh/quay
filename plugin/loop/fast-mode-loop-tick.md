@@ -254,12 +254,12 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。
 - **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
 - **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
-- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 avg300 + 滞回 + 档位配置的产物）或无可派发候选（负控制）。
+- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 avg300 + 滞回 + 档位配置的产物）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
 
 ### 规则
 
 - **完成事件加速回填，tick 心跳兜底必跑 slot-refill**（`gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat`）：被 `<task-notification>` 唤起时立即走本节回填（加速）；tick 心跳（含轻触）也**无条件跑 slot-refill**——`should_refill=true` + `recommended` 非空 ⇒ 按步骤 4 派发（兜底，不依赖完成事件）。**无完成事件、且 tick 心跳没到 → 零派发评估**（AC4 负控制）。**不引入新轮询源**：不建第二个 `/loop`、不改 `ScheduleWakeup` 间隔成快轮询、不设常驻 watcher——tick 心跳是现成节奏、完成通知是 harness 原生事件，都不是新轮询。
-- **回填走与 tick 相同的派发闸**：被唤起后仍先按步骤 3 查停止条件（`--detect-stop`、`.halt`、外层 suite-state、needs-human 窗口、就绪队列空），命中任一 ⇒ 不派发，报告后重新排程。事件驱动不绕过任何停止条件。
+- **回填走与 tick 相同的派发闸**：被唤起后仍先按步骤 3 查停止条件（`--detect-stop`、`.halt`、外层 suite-state、needs-human 窗口、就绪队列空），命中任一 ⇒ 不派发，报告后重新排程。事件驱动不绕过任何停止条件。**`.halt` 的机械强制点**：`slot-refill.ts` 在 `.halt` 存在时 `should_refill=false`（`gap-supervisor-preemption` AC2）——回填路径不用等到 tick 边界就被代码挡住。
 - **在飞集合是本会话所有**：派发时把任务 id 加进在飞集合；收到该任务的完成通知时移出。**回填派发新任务后，下一次评估的 `--in-flight` 必须包含它**——否则 `slots_free` 虚高，把刚占用的槽又算成空闲，可能双派发。
 - **已完成未 fan-in 的任务仍持有未合并的改动**：回填候选若与它 Touches 重叠，先 fan-in 它再回填，或把它 id 留在 `--in-flight` 直到 fan-in（宁可少派一个，不制造合并冲突——冲突仍会 needs-human 被抓住，但那是浪费）。
 - **幂等（无双派发）**：`slot-refill.ts` 是纯状态读取器（exit 0 恒、零写入、零派发）——同输入同输出。双派发在结构上不可能：派发动作在步骤 4（消费 `should_refill`/`recommended` 并 spawn Agent），不在 helper 里。
@@ -279,6 +279,22 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
 
+**抢占挂载（`gap-supervisor-preemption`：.halt 任意点生效，不再只是本步骤 0）**：本步骤只是
+tick 边界的**规则文本**；`.halt` 的**强制点在代码**（机械挂载，任意执行点生效——今晚事故 7
+halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」，SPEC-state-crystallization §2.1）：
+
+1. **新派发被代码挡**：`slot-refill.ts`（事件驱动回填 + tick 心跳回填的派发推荐）读
+   `<root>/.halt` —— 存在 ⇒ `should_refill=false` + `no_refill_reason` 点名 halt（AC2 实测）。
+2. **在飞层被进程级停**：`plugin/scripts/supervisor-preempt.sh preempt <target>` 对目标
+   进程/会话发停止信号（TUI 形态 = tmux C-c；`-p` 迁移后 = `kill <pid>`，OS 就是抢占原语，
+   AC4/AC5b）；`preempt-all --root <根> --target <层>[,<层>] --pid <pid>[,<pid>]` 在 halt 时对
+   全部在飞层发信号。
+3. **读哨兵**：`bash plugin/scripts/supervisor-preempt.sh halt-check --root <根>` 输出
+   `halted=true|false` + `reason`（fail-closed——读失败 = 停，gap-halt-sentinel-path-mismatch）。
+
+本 tick 每步派发前（步骤 3/4 与槽位回填）都要先问 halt-check/slot-refill——halt 置位即停派，
+不等到下一 tick 边界。
+
 **Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
 `plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh`
 已退役）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
@@ -293,6 +309,16 @@ bash plugin/scripts/monitor-mount-check.sh --json
 ### 1. 读状态
 
 读队列文件。若与 `git log` / `git worktree list` 不一致，**以 git 为准**并修正文件——文件可能是 compact 前的旧快照。
+
+**收件箱机械挂载点**（`gap-supervisor-message-bus-with-identity` AC4——「文件在、无人读」不再发生）：
+显式读 manager 收件箱，有 `unread:` 行 ⇒ 逐条进本轮决策（人/manager 的消息在决策时被调用，不是落盘即完）：
+
+```bash
+bash plugin/scripts/supervisor-bus-identity.sh inbox-summary
+```
+
+`delivered` = 投递成功（放进了收件箱），`consumed` = 已读回执（人读了）——两者分开（AC3），
+unread = delivered − consumed。本步只读不写回执（消费是人的动作，`inbox-reader.sh` 负责）。
 
 ### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 

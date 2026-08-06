@@ -50,6 +50,36 @@
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Postinstall soft-fail WARN (gap-release-postinstall-fallback-breaks-windows-sea-build)
+# ---------------------------------------------------------------------------
+# The root package.json postinstall used to wrap this script in a bash-only
+# `(echo '...' >&2; exit 0)` subshell that cmd.exe (npm's Windows script shell)
+# cannot parse ("re-run: was unexpected at this time.") — breaking `npm install`
+# on windows-latest sea-release (v0.4.0 shipped WITHOUT the windows-x64 SEA
+# binary). The WARN now lives HERE, in bash, where the failure actually happens;
+# the postinstall is simply `bash plugin/scripts/sync-vendor.sh || true`, which
+# cmd.exe parses fine (the `|| true` swallows the nonzero exit, so npm install
+# never hard-fails on a build artifact that could not be regenerated).
+#
+# We print the WARN only in no-flag (postinstall) mode, and we KEEP the original
+# nonzero exit code — strict callers that invoke this script directly
+# (publish-dist-branch.sh, quay-init.sh, packages/quay/scripts/package.sh) must
+# still fail loudly; only the postinstall's own `|| true` swallows it.
+POSTINSTALL_MODE=false
+if [ "$#" -eq 0 ]; then
+  POSTINSTALL_MODE=true
+fi
+
+postinstall_fail() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$POSTINSTALL_MODE" = "true" ]; then
+    echo '[postinstall] WARNING: sync-vendor.sh failed -- plugin/vendor/quay/dist/quay.js may be missing or stale. This repo runs its own MCP server from plugin/vendor/quay/dist/quay.js (see .mcp.json); re-run: bash plugin/scripts/sync-vendor.sh' >&2
+  fi
+  exit "$rc"
+}
+trap postinstall_fail EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${PLUGIN_DIR}/.." && pwd)"

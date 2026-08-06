@@ -188,6 +188,22 @@ export interface SuiteRoundRecord {
   load: number;
   state: string;
   runner: string;
+  // trend-criteria extension (gap-quality-criteria-are-point-in-time-no-trend-criteria AC1/AC3b):
+  //   tests       = pass + fail + cancelled (the suite's total test count, so per_test_ms is
+  //                 comparable across rounds of different sizes)
+  //   per_test_ms = durationMs / tests (the per-test cost — the AC2 trend axis; in milliseconds)
+  //   redAt       = ISO time the run first flipped state=red on a REAL failure line (the
+  //                 early-RED detection-latency axis, AC3b: redAt − startedAt is how far into
+  //                 the run the first failure was reported; the mitigation shrinks the blast
+  //                 radius, and a growing latency means the mitigation is degrading)
+  // Optional for backward compatibility with earlier appended lines (a reader must tolerate
+  // their absence — trend-check.ts derives tests from pass/fail/cancelled when tests is missing).
+  tests?: number;
+  per_test_ms?: number;
+  redAt?: string | null;
+  // reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra) carried into the
+  // sequence so the trend reader can tell a real-failure red from an abort without re-deriving it.
+  reason?: SuiteStateReason | null;
 }
 
 /** Append one suite-round record to <root>/.quay/verification-round.jsonl (round = prior lines + 1). */
@@ -384,6 +400,11 @@ export async function run(argv: string[]): Promise<number> {
   let redDetected = false;
   let abortDetected = false;
   let runDone = false;
+  // AC3b (gap-quality-criteria-are-point-in-time-no-trend-criteria): the ISO time the FIRST real
+  // failure line flipped state to red — carried into the verification-round record so the early-RED
+  // detection-latency trend (redAt − startedAt) is queryable without hand-digging logs. Null when
+  // the run never went red on a real failure.
+  let redAtIso: string | null = null;
   // failure-location capture: the FIRST failure line + its detail-block file context
   // (gap-red-window-dispatch-stop-should-be-shared-gate-conditional).
   const redFailures: SuiteFailure[] = [];
@@ -442,6 +463,8 @@ export async function run(argv: string[]): Promise<number> {
     }
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
+      // AC3b — timestamp the red flip (the early-RED detection-latency observation point).
+      redAtIso = new Date().toISOString();
       // AC2 — mark RED immediately, while the run is still in progress. reason=failed (AC5: this
       // IS a real failure — the stop-dispatch signal). Record the failure LINE (the 判定信息 —
       // which test failed is already known) + open a short detail lookahead for the file context.
@@ -544,6 +567,11 @@ export async function run(argv: string[]): Promise<number> {
   // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
   // The full-suite-state.json's durationMs is this run's point value; verification-round.jsonl keeps
   // the history so the sequence survives rounds (gap-no-criterion-records-its-own-cost AC6).
+  // AC1 (gap-quality-criteria-are-point-in-time-no-trend-criteria) — extend the sequence record
+  // with the suite's total test count and per-test cost so the AC2 trend axis (per_test_ms) is
+  // comparable across rounds of different sizes. `tests` = pass+fail+cancelled; per_test_ms =
+  // durationMs/tests (0 when no tests ran — a no-test run says nothing about per-test cost).
+  const tapTests = tapPass + tapFail + tapCancelled;
   appendVerificationRound(root, {
     round: 0, // computed from prior line count inside appendVerificationRound
     startedAt,
@@ -552,8 +580,12 @@ export async function run(argv: string[]): Promise<number> {
     pass: tapPass,
     fail: tapFail,
     cancelled: tapCancelled,
+    tests: tapTests,
+    per_test_ms: tapTests > 0 ? Number((durationMs / tapTests).toFixed(3)) : 0,
+    redAt: redAtIso,
     load: readLoadAvg(),
     state: finalState.state,
+    reason: finalState.reason ?? null,
     runner: base.runner,
   });
   process.stderr.write(

@@ -6373,6 +6373,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   的重叠已随后者落地解除。
 - 待外层 merge integration→develop（验证后），或本 tick 直接派 postinstall 缺陷。
 
+
+### tick 2026-08-06T10:1xZ（外层，ad-arm1 第三台机 + 传播滞后修复）
+
+- **ad-arm1（ARM64）加入集群**（管理者）：Node v24、claude+deepseek 核实、gh 认证、从 develop clone、
+  quay-init 冷启动、config validate 通过（concurrency 2/2/1/1 按 2 核降）、未装 os-anchor（按裁定）。
+  尚未启动 outer/inner——是否启动留给外层/人定。
+- **传播滞后实证（管理者）**：ad-arm1 对 gap-productize 报 YAML 重复键——因 8cf12c7c（修复）未推 GitHub。
+  外层核实：本地 develop 领先 origin 6 提交（含修复），origin 停 27b9d7e5。**已立即推**（→3cf2d131），
+  ad-arm1 重新 pull 即可拿到修复。provider 优雅降级（跳过该文件，其余 113 正常）——非新 bug。
+
+
+
 ### tick 2026-08-06T13:2xZ（内层 cron，派发 postinstall 修复）
 
 - 无 halt；套件 GREEN。在飞 0/3。池 8/20、disjoint 5/5（criterion met，但 ready 多为陈旧 signal-gap）。
@@ -6394,6 +6406,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **integration 现 = develop 基线 + 6 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/postinstall）
   + ADR-030/031/032**。**下一步**：外层 merge integration→develop → 打 **v0.4.1** 触发完整三平台 release
   （windows_postinstall_ok band 证明）。
+
+
 
 ### tick 2026-08-06T14:1xZ（内层 cron，派发 message-bus-identity）
 
@@ -6489,3 +6503,4 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **在飞 0/3**。integration = develop 基线 + 9 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/
   postinstall/message-bus/preemption + SEA 缺陷）。
 - 待外层 merge integration→develop（一次收口多个任务）+ 处理 SEA 缺陷（AC16 结构性问题）。
+

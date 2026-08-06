@@ -36,23 +36,26 @@ jobs:
 
       - name: Run tests
         # QX-056 (experiment 4, iteration 15): DIR-004 publish.
-        # GH_TOKEN required: packages/quay/test/cli.test.mjs includes integration
-        # tests that spawn `quay --provider github` making live GitHub API calls
-        # against yaleh/quay. Without GH_TOKEN the gh CLI subprocess returns 403.
-        # github.token has read access to this repo's issues by default.
         # quay-github package tests are excluded (they require broader org perms) —
         # this job intentionally scopes to packages/quay + packages/quay-native only,
         # narrower than scripts/test.sh's default glob, so it does NOT delegate to
         # scripts/test.sh here.
         #
-        # ADR-019/DIR-109 (M173): the hand-written `grep -vE 'serve-github|
-        # provider-abi-conformance|cli-edit-parity-conformance'` exclusion this step
-        # used to need (a 3rd duplicate of the same pattern CLAUDE.md/ci.yml hand-wrote)
-        # is GONE — those 3 files now each declare their own in-file `node:test` skip
-        # condition (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here), so they safely
-        # self-skip without github.token needing the broader perms they used to require.
-        env:
-          GH_TOKEN: ${{ github.token }}
+        # ADR-019/DIR-109 (M173): live-GitHub tests self-skip unless opted in via
+        # QUAY_TEST_LIVE_GITHUB=1 (in-file `node:test` skip conditions in serve-github /
+        # provider-abi-conformance / cli-edit-parity-conformance, and the same opt-in
+        # gate on cli.test.mjs's live blocks 8/10/11).
+        #
+        # gap-release-postinstall-fallback-breaks-windows-sea-build (AC4): this step
+        # deliberately does NOT set GH_TOKEN (nor QUAY_TEST_LIVE_GITHUB). The v0.4.0
+        # release run set GH_TOKEN here, which ENABLED cli.test.mjs's live blocks against
+        # the real yaleh/quay issue store — and those assertions drift with that store's
+        # current state (E3 adr-001 / M52 delivery-standalone-smoke / AC5 real-store
+        # scan failures in the same run), blocking the release on external state unrelated
+        # to whether the tagged commit's deterministic tests pass. A release gate verifies
+        # the ARTIFACT, not the live store's mutable state; the deterministic subset here
+        # runs without the token. Live-GitHub conformance remains covered by the FULL suite
+        # (scripts/test.sh / ci.yml) under QUAY_TEST_LIVE_GITHUB=1, where drift is triaged.
         run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)

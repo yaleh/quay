@@ -60,6 +60,13 @@ manager 层从 `plugin/loop/`/`plugin/skills/manager*` 出货后，该类别即�
 （战略追溯 grep + parent/children 阻塞 + touches 规模成本，`top_relevance`/`ready_relevance` 输出）
 就是 manager 层排序职能的机制挂接点——本层 SKILL 的 Prioritization 职能引用该命令作为机械答案。
 
+**交叉标注（趋势职能归属，2026-08-06，AC6 of gap-quality-criteria-are-point-in-time-no-trend-criteria）**：
+本条「三职能」里的**看趋势**职能已落到 `gap-quality-criteria-are-point-in-time-no-trend-criteria`
+（done → 2026-08-06 实现）：`plugin/scripts/trend-check.ts`（读 verification-round.jsonl +
+checker-cost.jsonl 历史，打标窗口内恶化）就是 manager 层趋势职能的机制挂接点——本层 SKILL 的
+Trend 职能引用该命令作为机械答案（「比上次更贵了吗 / 离目标更近了吗」），且已入每日复盘常项
+（REVIEW-cadence 3d）。趋势判据是 manager 层职能内容，归本层。
+
 ## Acceptance Criteria
 
 - [x] AC1: `plugin/skills/manager/SKILL.md`（或 `plugin/loop/manager-loop-tick.md`）存在——结晶第三层：

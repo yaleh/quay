@@ -38,6 +38,58 @@ let _idCounter = 0;
 /** The three deliver()/observe() targets. Human is the THIRD target, same mechanism. */
 export const TARGETS = Object.freeze(["inner", "outer", "human"]);
 
+// ── Identity ─────────────────────────────────────────────────────────────────────────────────────────
+// (tasks/gap-supervisor-message-bus-with-identity — supervisor step ⑤, sender identity.)
+//
+// A delivered message carries WHO sent it: `from` ∈ {human, manager, inner, outer}. The human
+// channel (file-inbox) is bidirectional — the human's replies and the agents' notes share the same
+// inbox. Agent channels (session transport — the inner/outer target) serve AGENT identities ONLY:
+// "human" is not claimable there. That is the AC2 spoof gate: the incident that started this family
+// (agent messages entering a session with userType:external, indistinguishable from the real user)
+// is killed mechanically — an agent message that claims `from: "human"` is REJECTED before injection.
+
+/** Every known sender identity. The human is an identity like any agent — the bus never special-cases
+ *  "a message that talks like a human" because identity is a carried field, not a text property. */
+export const IDENTITIES = Object.freeze(["human", "manager", "inner", "outer"]);
+
+/** The human's identity — a named constant so callers never string-literal the spoof surface. */
+export const HUMAN_IDENTITY = "human";
+
+/** The identities an agent channel (session transport) serves. "human" is deliberately absent. */
+export const AGENT_IDENTITIES = Object.freeze(["inner", "outer", "manager"]);
+
+/** True when the given identity is a known one. */
+export function isKnownIdentity(id) {
+  return IDENTITIES.includes(id);
+}
+
+/**
+ * Identity-claim gate (AC2: the receiving side can distinguish "human" from "agent-X").
+ * A transport declares which sender identities it serves (`servedIdentities`). A message whose
+ * `from` is not in that set is REJECTED before it is injected — fail-closed, never relayed.
+ * The AC2 spoof — an agent message claiming `from: "human"` — is rejected because agent channels
+ * (session transport) serve only agent identities. Returns { ok: true, identity } or
+ * { ok: false, rejectedIdentity, reason } — mechanically testable, never a throw.
+ */
+export function checkIdentityClaim({ from, servedIdentities }) {
+  const effective = from ?? null;
+  if (effective === null) {
+    return {
+      ok: false,
+      rejectedIdentity: null,
+      reason: `identity rejected: no sender identity ('from') — deliver(target, payload, from=<identity>) requires one on an agent channel`,
+    };
+  }
+  if (!servedIdentities.includes(effective)) {
+    return {
+      ok: false,
+      rejectedIdentity: effective,
+      reason: `identity rejected: '${effective}' is not a claimable sender identity for this channel (served: ${servedIdentities.join(", ")}) — an agent cannot forge another sender's identity`,
+    };
+  }
+  return { ok: true, identity: effective };
+}
+
 /** The HUMAN target's mechanical mount point: `.quay/manager-inbox/` under the workspace root. */
 export function managerInboxDir(root) {
   return path.join(root, ".quay", "manager-inbox");
@@ -114,9 +166,23 @@ export function computeInboxObservation(records) {
  */
 export function createFileInboxTransport({ inboxDir }) {
   fs.mkdirSync(inboxDir, { recursive: true });
+  // The human channel is bidirectional — the human's replies and every agent's notes share the
+  // SAME inbox record (AC1: `from` carries the sender identity). All known identities (plus the
+  // "unknown" omit-default) are claimable here; an explicitly-non-known `from` is a caller bug and
+  // is rejected fail-closed rather than recorded as a mystery sender.
+  const servedIdentities = [...IDENTITIES, "unknown"];
   return {
     name: "file-inbox",
+    servedIdentities,
     deliver(message) {
+      const from = message.from ?? "unknown";
+      if (!servedIdentities.includes(from)) {
+        return {
+          delivered: false,
+          rejectedIdentity: from,
+          reason: `identity rejected: '${from}' is not a known sender identity (known: ${IDENTITIES.join(", ")}; 'unknown' when omitted)`,
+        };
+      }
       const records = readInboxRecords(inboxDir);
       const seq = records.reduce((m, r) => Math.max(m, r.seq ?? 0), 0) + 1;
       const deliveredAt = new Date().toISOString();
@@ -126,7 +192,7 @@ export function createFileInboxTransport({ inboxDir }) {
         id,
         seq,
         target: message.target ?? "human",
-        from: message.from ?? "unknown",
+        from,
         payload: message.payload ?? {},
         delivered: true,
         deliveredAt,
@@ -158,11 +224,20 @@ export function createFileInboxTransport({ inboxDir }) {
  * @param {{ deliverFn?: Function, observeFn?: Function }} [adapters]
  */
 export function createSessionTransport({ deliverFn, observeFn } = { deliverFn: undefined, observeFn: undefined }) {
+  // AC2 — agent channels serve AGENT identities only. "human" is NOT claimable here: this is the
+  // channel where an agent message once impersonated the user (userType:external, indistinguishable
+  // from the real human). The gate rejects the spoof BEFORE the deliverFn injects it, so a spoofed
+  // identity never reaches the session. (An unconfigured session transport returns "not configured"
+  // first — it cannot deliver anything, so the identity gate is moot until the adapter is wired.)
+  const servedIdentities = AGENT_IDENTITIES;
   return {
     name: "session",
+    servedIdentities,
     deliver(message) {
-      if (deliverFn) return deliverFn(message);
-      return { delivered: false, reason: "session transport not configured — supervisor delivery-centralization (step ③) wires the deliverFn adapter" };
+      if (!deliverFn) return { delivered: false, reason: "session transport not configured — supervisor delivery-centralization (step ③) wires the deliverFn adapter" };
+      const claim = checkIdentityClaim({ from: message.from, servedIdentities });
+      if (!claim.ok) return { delivered: false, rejectedIdentity: claim.rejectedIdentity, reason: claim.reason };
+      return deliverFn({ ...message, from: claim.identity });
     },
     observe() {
       if (observeFn) return observeFn();
@@ -190,12 +265,22 @@ export function createTransportRegistry() {
     get(target) {
       return transports.get(target) ?? null;
     },
-    deliver(target, message, opts = {}) {
+    deliver(target, message, fromOrOpts = {}) {
       const t = transports.get(target);
       if (!t) return { delivered: false, reason: `message-bus: no transport registered for target '${target}'` };
       // `target` is authoritative: the arg names the channel, and a caller-supplied `target` in
       // `message` must not relabel a record to a channel it was NOT delivered on (AC2/AC3 integrity).
-      return t.deliver({ ...message, target }, opts);
+      // AC1 — deliver(target, payload, from=<identity>): the THIRD arg is the sender identity,
+      // authoritative over any `from` a caller smuggled inside `message`. Accepts either a bare
+      // identity string (`deliver("inner", payload, "outer")`) or an opts object (`{ from }`).
+      let msg = { ...message, target };
+      const opts = typeof fromOrOpts === "object" && fromOrOpts !== null ? fromOrOpts : {};
+      if (typeof fromOrOpts === "string") {
+        msg.from = fromOrOpts;
+      } else if (opts.from !== undefined) {
+        msg.from = opts.from;
+      }
+      return t.deliver(msg, opts);
     },
     observe(target, opts = {}) {
       const t = transports.get(target);
