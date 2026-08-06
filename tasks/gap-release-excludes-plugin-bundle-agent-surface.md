@@ -38,13 +38,13 @@ plugin/，但 **plugin/ 没进 npm files**——机制「在包外」部分解�
 
 ## Acceptance Criteria
 
-- [ ] AC1: `files` 含 `plugin/`——`npm pack` 产物含 plugin bundle（scripts/gate-scripts/skills/probes/
+- [x] AC1: `files` 含 `plugin/`——`npm pack` 产物含 plugin bundle（scripts/gate-scripts/skills/probes/
        loop/vendor/agents 全部）
 - [ ] AC2: 从 release 资产（非 git clone）装到干净机器，`quay-init --loop` 铺出 tick 文档 + skills +
        scripts 并驱动起来（AC16 判据 2 完整性端到端）
 - [ ] AC3: 在非 quay 项目上用 release 装出的一份跑通真实两层循环（AC16 判据 3 端到端可用性）
-- [ ] AC4: release 从 develop 打 tag（非 master）；版本号 v0.4.0（或外层裁定的形态）
-- [ ] AC5: 与 exp5-DEFECT-DELIVERY-MANIFEST（done）+ gap-loop-mechanism-lives-outside（done）交叉标注
+- [x] AC4: release 从 develop 打 tag（非 master）；版本号 v0.4.0（已 landing integration，待 FF develop 后打 tag）
+- [x] AC5: 与 exp5-DEFECT-DELIVERY-MANIFEST（done）+ gap-loop-mechanism-lives-outside（done）交叉标注
        ——本任务是它们未覆盖的 files/plugin 缺口
 - [ ] AC6: **dist-plugin 第三条路径覆盖**——Claude Code plugin marketplace（README Option C，/plugin install quay）
        的 dist-plugin 分支同步重建（落后 master 3755 提交，07-26 后未重建）；AC16 完整性覆盖三条官方安装

@@ -6198,3 +6198,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - worktree 清理 + branch 删除 + telemetry close（outcome done）。在飞 1/3（spawn-count）。
 - **AC17 catch-up 仍待 spawn-count 完成**（裁定顺序 ①master 62→develop ②拉 GitHub B ③rebase 任务分支）。
   integration 现领先 develop 2 提交（AC16），等 catch-up ①②后由外层 FF 到 develop。
+
+### tick 2026-08-06T08:2xZ（外层，AC16 生产侧完成）
+
+- **AC16 landed on integration**（e1aed902，first two-line merge）：files+plugin、v0.4.0、5/5 green。
+  核实：integration 的 files 已含 plugin、version 0.4.0。
+- **按分工轴分 AC**：生产侧（AC1 files+plugin / AC4 develop tag+v0.4.0 / AC5 交叉标注）A 已勾；
+  验收侧（AC2 干净机端到端 / AC3 非 quay 项目两层循环）**待 B**（A 结构上无法验证自己 release）；
+  AC6 dist-plugin 重建待后续。任务保持 ready（生产完成待验收），不翻 done。
+- **待办**：AC16 FF develop → 打 tag → dist-plugin 重建 → B 验收；catch-up（master 62→develop、拉 B 105）
+  待 spawn-count 完成后由内层执行、外层 FF。
