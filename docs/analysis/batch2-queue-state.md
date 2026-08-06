@@ -5526,3 +5526,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **complete-delivery 派发**（`fm-...-mc8zqn`，六类交付面 + L1 全覆盖验证）：git-log 唯一命中是外层 filed +
   L2 cross-ref（非落地），self-touch 已补，resolve 过。派发词已加 Touches 精度规则（禁裸 glob）。在飞 1/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:3xZ（外层，人两条指示立案——删 action buttons + 消息总线，SaaS 延后）
+
+- **① 删 web action buttons**（先做）：证据核实（365 事件全 quay-cli、web 0 + serve-handlers open-redirect
+  漏洞——未用功能贡献真实漏洞）；范围精确（不删 CLI/只读/概念）；负控制 AC（actor 分布不变）。
+- **② 消息总线**（后做）：核心约束传输层无关（SaaS 换 transport 不重写）；人=第三 target 同一机制；
+  delivered ≠ consciousness-received 分开建模；**挂载点优先**（manager-inbox「无人读」形态）；AC12b
+  可测量 + fail-safe（人只走信道）。
+- **SaaS 明确延后**（仅存档）。
+- **次序人已定**：① 后 ②。
