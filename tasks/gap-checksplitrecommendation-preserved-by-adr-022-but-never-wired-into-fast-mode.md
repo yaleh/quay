@@ -1,7 +1,7 @@
 ---
 id: gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode
 title: "ADR-022 preserved checkSplitRecommendation explicitly because fast-mode reuses it, and CLAUDE.md documents its routing table as current policy — but zero fast-mode code actually calls it"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

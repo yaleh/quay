@@ -9,7 +9,7 @@ title: "full-suite-runner marks scripts/test.sh's INTERNAL resource-gate WAIT
   test.sh's 'resource gate says WAIT — not running' marker in the output;
   fix: detect the marker → reason=aborted (no correctness conclusion), so a
   run that produced ZERO tests never sets the stop-dispatch signal"
-status: todo
+status: ready
 labels:
   - gap
   - defect
