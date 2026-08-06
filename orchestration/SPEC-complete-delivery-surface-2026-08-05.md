@@ -134,13 +134,10 @@
     {
       "id": 5,
       "name": "periodic-anchor",
-      "label": "周期锚点",
-      "deliverables": [
-        "plugin/scripts/os-anchor-install.sh",
-        "plugin/scripts/os-anchor-watchdog.sh"
-      ],
+      "label": "周期锚点（已排除，非交付物）",
+      "deliverables": [],
       "attribution": ["gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash"],
-      "criterion": "OS 级周期锚点（os-anchor-install.sh systemd user timer + os-anchor-watchdog.sh）——跨崩溃存活的真实周期锚点，不依赖任何 Claude 会话"
+      "criterion": "OS 级周期锚点工具（os-anchor-install.sh / os-anchor-watchdog.sh）——人裁定为开发阶段工具，明确排除出交付物，仅供人工显式使用"
     },
     {
       "id": 6,
