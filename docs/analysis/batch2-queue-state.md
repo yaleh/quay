@@ -6694,3 +6694,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **新立案接受**：gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target（a021d0cf）——
   quay-init grep fork_baseline=0、write_provider_config 只写四键——分支切换只存在于三台手工改过的主机，
   标准新主机拿不到两键静默回落 master-only。与 fork-does-not-read-config 分工（读 vs 铺）。
+
+### tick 2026-08-06T24:0xZ（两裁定：serialize 标注纠正 + resource-aware 核实）
+
+- **裁定#1（矛盾——serialize 过度保守）**：ready-pool-check 可派 6（5 候选全与 remove-shared-events
+  disjoint，机制判），inner 上一条 serialize-held 过度保守。**纠正**：cross-machine-sync 与
+  remove-shared-events 的 OVERLAP（fast-mode-loop-tick.md）仍存在，但 hold 的**标注**应从
+  「机制不允许并行」改为「**等 remove-shared-events 收尾的协调选择**」——避免大改动并行是审慎，
+  不是机制限制。remove-shared-events 完成后按机制派发（OVERLAP 随其 fan-in 消失）。
+- **裁定#2（resource-aware 滞留 worktree 核实）**：分支核心已 merge 进 develop（ancestor 验证 YES）；
+  未提交改动 = **真实 re-open 工作**（resource-gate.test.mjs +43 行 AC12/13/14/15 证据 +
+  任务文件 +129 行），**不在 develop**。外层已裁定（3f78e428）：「worktree KEPT —— real uncommitted
+  re-open work; bracket closed needs-human」。任务 status=needs-human。**结论：非丢弃，是外层刻意保留的
+  re-open 工作，待 needs-human 处置后收尾**。
+- 两件均在 remove-shared-events 完成后处理：① 按机制派 cross-machine-sync；② 按外层 needs-human
+  处置推进 resource-aware re-open 收尾。
