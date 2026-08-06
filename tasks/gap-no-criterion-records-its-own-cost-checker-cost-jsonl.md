@@ -59,6 +59,10 @@ n 涨 1.26×、成本涨 2.55×——比 O(n²) 只该给的 1.6× 还陡（或�
 4. **AC10 记账（拆两半）**：
    - ready-pool 斜率 = **post-friction**（管理者只因为外层 skip 才去测）——**不计分**；
    - 「所有判据都不记成本」= **pre-friction**（另外 29 条判据没有任何东西在疼）——**计 +1 ⇒ 4 → 5**。
+   - **跨引用（gap-suite-state-has-no-reason-axis-failed-aborted-infra AC6）**：suite-state 缺原因轴
+     为同一根 pre-friction 轴的下一条——`state=red` 只一个值承载「这轮没成」，failed/aborted/infra-error
+     对下游反应不同被压成标量，且发现时无东西在疼（巧合尚未破裂）——**计 +1 ⇒ 5 → 6**。AC10 总账见
+     `gap-axis-generator-question-what-range-every-standing-criterion`（已完成，账上已列 → 6）。
 5. **归因更正（管理者 2026-08-05 07:27Z，撤回第 3 点的优先级建议）**：ready-pool-check 第三次实测
    **157.0 秒**（pool 24 / floor 12 / disjoint 10 / scanned 702）。三点：06:44Z 35.8s(pool 19) →
    07:15Z 91.2s(pool 24) → 07:27Z 157.0s(pool 24)。**后两点 pool 完全相同、成本却涨 1.7 倍** ⇒ 主导

@@ -19,8 +19,11 @@
 //         节奏仍唯一（外层 `*/20` cron）。
 //
 // 状态文件（输入，well-known 位置）：<root>/.quay/full-suite-state.json
-//   {state: running|green|red, runner, startedAt, finishedAt, durationMs, laneCount}
-//   —— (a) 块的 full-suite-runner.ts 写它；本脚本只读。
+//   {state: running|green|red, reason?: failed|aborted|infra-error, runner, startedAt, finishedAt,
+//    durationMs, laneCount}
+//   —— (a) 块的 full-suite-runner.ts 写它；本脚本只读。`reason` 只在 red 时出现（原因轴，AC5/AC1）：
+//      failed（真实失败——stop-dispatch 信号）/ aborted（无正确性结论——不触发停派）/
+//      infra-error（环境问题——同样不触发代码风险停派）。
 //
 // 记忆文件（本脚本自己的上次观测）：<root>/.quay/suite-state-last.json  —— 跨重启保持「上一个状态」，
 //   使「冷启动即红」（外层 /clear 后重启、套件仍红）也能被检测为一次转变并触发 SUITE-RED。
@@ -47,7 +50,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
-export type SuiteStateReason = "failed" | "aborted";
+export type SuiteStateReason = "failed" | "aborted" | "infra-error";
 
 export interface SuiteState {
   state: SuiteStateValue;
@@ -57,25 +60,51 @@ export interface SuiteState {
   durationMs?: number | null;
   laneCount?: number;
   /**
-   * Present only on red (AC5 reason axis, gap-full-suite-runner-concurrency-default-and-gate):
-   * "failed" = a real failure was detected (the stop-dispatch signal); "aborted" = the run produced
-   * NO correctness conclusion (spawn error / signal kill / outer abort) and MUST NOT stop dispatch.
+   * Present only on red (AC5 reason axis, gap-full-suite-runner-concurrency-default-and-gate;
+   * three-value enum per gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1):
+   *   - "failed"     = a real failure was detected (the stop-dispatch signal);
+   *   - "aborted"    = the run produced NO correctness conclusion (spawn error / signal kill /
+   *                    outer abort / early gate-WAIT exit) and MUST NOT stop dispatch;
+   *   - "infra-error" = an environment problem (neither a code failure nor a deliberate abort) —
+   *                    not a code-failure conclusion, so it does NOT stop dispatch on code risk.
    * A missing reason (legacy red) is treated as "failed" — fail-closed toward stopping.
    */
   reason?: SuiteStateReason;
 }
 
+/** The AC2 reason-axis route a red state takes (gap-suite-state-has-no-reason-axis-failed-aborted-infra). */
+export type RedRoute = "red-window-triage" | "resource-gate" | "proceed";
+
+/**
+ * AC2 — route a suite state by its reason axis. The state=red stop-dispatch signal is the red-window
+ * rule's CODE-RISK stop; it fires ONLY when the red carries a real failure conclusion:
+ *   - red + reason=failed (or legacy red, missing reason — fail-closed) ⇒ "red-window-triage":
+ *     STOP dispatch + red-window triage (定位肇事 merge).
+ *   - red + reason=aborted (NO correctness conclusion — signal kill / spawn error / early gate-WAIT
+ *     exit) ⇒ "resource-gate": do NOT stop on code risk; recovery is decided by resource-gate.sh's
+ *     GO/WAIT (the "现在能不能压" criterion) — the coincidence where a lingering abort-red keeps
+ *     dispatch stopped with NO evidence (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC3)
+ *     cannot happen.
+ *   - red + reason=infra-error (environment problem — neither a code failure nor a deliberate abort)
+ *     ⇒ "resource-gate" too: it carries no code-failure conclusion, so it must not stop dispatch on
+ *     code risk either.
+ *   - non-red / absent state file ⇒ "proceed".
+ */
+export function routeRed(state: SuiteState | null): RedRoute {
+  if (!state || state.state !== "red") return "proceed";
+  if (state.reason === "aborted" || state.reason === "infra-error") return "resource-gate";
+  return "red-window-triage";
+}
+
 /**
  * AC5 — the stop-dispatch decision on a suite state. state=red is the stop signal ONLY when the
  * red carries a real failure: `state: red` + `reason: failed` (or a missing reason, legacy/fail-
- * closed) ⇒ STOP dispatch; `state: red` + `reason: aborted` (no correctness conclusion) ⇒ do NOT
- * stop — the outer records the abort and re-runs. Absent state file ⇒ do NOT block (documented:
- * the outer hasn't run its first round yet).
+ * closed) ⇒ STOP dispatch; `state: red` + `reason: aborted|infra-error` (no correctness conclusion)
+ * ⇒ do NOT stop — the outer records the abort and re-runs when the resource gate reports GO. Absent
+ * state file ⇒ do NOT block (documented: the outer hasn't run its first round yet).
  */
 export function shouldStopDispatch(state: SuiteState | null): boolean {
-  if (!state) return false;
-  if (state.state !== "red") return false;
-  return state.reason !== "aborted";
+  return routeRed(state) === "red-window-triage";
 }
 
 export type SuiteEventKind = "SUITE-RED" | "SUITE-GREEN" | "SUITE-RUNNING";
