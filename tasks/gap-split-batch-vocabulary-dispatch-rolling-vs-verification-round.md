@@ -62,19 +62,19 @@ message。
 
 ## Acceptance Criteria
 
-- [ ] AC1: `fast-mode-loop-tick.md` 派发节（step 4）措辞修正——「可同批」改为显式「可并发/无触摸重叠，
+- [x] AC1: `fast-mode-loop-tick.md` 派发节（step 4）措辞修正——「可同批」改为显式「可并发/无触摸重叠，
       非门控分批」；分派侧不再出现任何可读成「分派要门控」的 batch 措辞
-- [ ] AC2: `fast-mode-loop-tick.md` fan-in/验证节（step 2）改名 `verification-round-N`，并显式注记
+- [x] AC2: `fast-mode-loop-tick.md` fan-in/验证节（step 2）改名 `verification-round-N`，并显式注记
       「关于验证/收尾，不是分派门控」
-- [ ] AC3: `orchestrator-loop-tick.md` 同步同一词汇拆分（派发滚动 / 验证 round）
-- [ ] AC4: **grep 证明（白名单豁免 + 负控制）**——inner 会读到的散文里每个 `batch` 出现分类为：
+- [x] AC3: `orchestrator-loop-tick.md` 同步同一词汇拆分（派发滚动 / 验证 round）
+- [x] AC4: **grep 证明（白名单豁免 + 负控制）**——inner 会读到的散文里每个 `batch` 出现分类为：
       「门控语义（必须消除）/ 机件真名（concurrent-batch-scheduler.ts 路径 + {batch,deferred} 输出字段）
       / 任务 id（gap-closure-sync-is-the-true-batch-boundary）白名单豁免」；**散文零个把 batch 用作调度
       单位的新表述**；**负控制**——刻意在散文写一句「batch 门控」表述 ⇒ 检查必须报出（证明白名单不是
       万能借口，实跑输出贴任务体）
-- [ ] AC5: **tick-log/commit message 词汇规范**——tick 文档加一条规范性语句：「分派是滚动的（不叫
+- [x] AC5: **tick-log/commit message 词汇规范**——tick 文档加一条规范性语句：「分派是滚动的（不叫
       batch-N）；全量验证/收尾节奏叫 verification-round-N」，未来会话（含换模型后）沿用拆分词汇
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若词汇检查可测试化——grep 断言
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`（若词汇检查可测试化——grep 断言
       「tick 文档无『可同批/批派发』式措辞」）
 
 ## Definition of Done
@@ -85,12 +85,14 @@ message。
 
 ## Touches
 - tasks/gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round.md（自身文件：勾 AC + 贴 invoke 证据授权）
-
-
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/loop/orchestrator-loop-tick.md
-- CLAUDE.md（process 段若提及 batch 语义，同步词汇拆分）
+- CLAUDE.md（process 段若提及 batch 语义，同步词汇拆分——核实：CLAUDE.md 的 batch 均在被 ADR-022 标记 RETIRED 的历史记录里，process 段零 batch 措辞，无需改动）
+- plugin/test/tick-vocabulary.test.mjs（AC6 新测试，scoped 静态检查需覆盖）
 - （tick-log 惯例随 AC5 落文档）
+
+## Test-Files
+- plugin/test/tick-vocabulary.test.mjs
 
 ## Contract
 
@@ -114,3 +116,50 @@ changed: 外层受管理者+人裁定立案。四处收紧：
 (4) **历史名不改名但标注**——batch2-queue-state 文件名 / batch4a/b/c / concurrent-batch-scheduler.ts
 是历史引用，改名会破坏链接，标注即可。
 status: todo——不阻塞当前批（batch-4 在飞）；排批后。
+
+## Invoke 证据（AC4 grep 分类表 + 负控制，2026-08-06 内层实跑）
+
+**measure（band = 0）**——`grep -rn '同批\|批派发\|batch-N'` 两份 tick 文档，0 行（exit 1 = 无命中）：
+
+```bash
+$ grep -rn '同批\|批派发\|batch-N' plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md
+（无输出；exit 1）
+```
+
+**invoke——`grep -rn 'batch'` 每个出现分类表**（散文零个把 batch 作调度单位的新表述）：
+
+| 位置 | 出现 | 分类 |
+|---|---|---|
+| fast-mode-loop-tick.md:58/183 | `batch2-queue-state.md`（文件名历史引用） | 历史引用 |
+| fast-mode-loop-tick.md:115/123/125 | `batch4a 那次 / batch4b/4c / batch4a 的 cancelled`（历史引用） | 历史引用 |
+| fast-mode-loop-tick.md:296 | `verification-round-N 批量合 ... integration-batch-merge.sh` | 验证节奏 + 机件真名 |
+| fast-mode-loop-tick.md:343 / orchestrator:715 | `gap-closure-sync-is-the-true-batch-boundary`（任务 id） | 任务 id（白名单豁免） |
+| fast-mode-loop-tick.md:459/527/534 | `concurrent-batch-scheduler.ts` | 机件真名 |
+| fast-mode-loop-tick.md:497 | `gap-split-batch-vocabulary-...`（本任务 id，词汇规范块） | 任务 id |
+| fast-mode-loop-tick.md:499/535/536 | `{batch, deferred}` 输出字段 + `batch ⇒ disjoint`（字段引用） | 机件真名 |
+| orchestrator-loop-tick.md:39/503/955 | `batch2-queue-state.md`（文件名历史引用） | 历史引用 |
+| orchestrator-loop-tick.md:565 | `gap-split-batch-vocabulary-...`（本任务 id，词汇规范块） | 任务 id |
+| orchestrator-loop-tick.md:569/570 | `gap-closure-sync-is-the-true-batch-boundary` + 「Close batch」+ 历史引用 | 任务 id + 历史引用 |
+| orchestrator-loop-tick.md:629/632 | `integration-batch-merge.sh` | 机件真名 |
+| orchestrator-loop-tick.md:739 | `grep -n '...batch...' reanchor-prompt.txt`（重锚检查命令） | 审计机制 |
+| orchestrator-loop-tick.md:751 | `无 batch 式自述 = 收敛` / 「Batch of N fully merged」式漂移 | 审计机制（自述词汇审计引用） |
+
+**负控制**——`plugin/test/tick-vocabulary.test.mjs` 构造「可同批派发 / 批派发门控：攒满 batch-N」文本，
+断言同一谓词必报出（白名单不是万能借口）。实跑输出见下方 AC6 测试结果。
+
+**AC5 规范语句落文档**——fast-mode-loop-tick.md step 4 与 orchestrator-loop-tick.md step 1b 各加一条：
+「分派是滚动的，不叫批号；全量验证/收尾节奏叫 `verification-round-N`（关于验证/收尾，不是分派门控）。」
+
+**真实使用记录（DoD 第二项）**——本任务 commit message 使用 `verification-round-N` 词汇（见提交信息）。
+
+**scoped 测试（AC6）**——`bash scripts/test.sh --for-task gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round --allow-thin`（2026-08-06 实跑）：
+
+```
+✔ AC1/AC4 — measure: zero misreadable batch phrasing (同批/批派发/batch-N) in the tick docs
+✔ AC4 — negative control: a constructed 可同批/批派发/batch-N text MUST be flagged
+✔ AC4 — every `batch` line in the tick docs is classifiable (none is unclassified gate-reading prose)
+✔ AC2/AC5 — verification cadence is named verification-round-N with an explicit not-dispatch-gating annotation
+✔ AC6 — this file is node:test + // @test-group governance
+ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0
+```
+scoped 静态检查全过：test-framework-policy-check PASS、test-isolation-check PASS、task-contract-check（strict-subset 本任务）无违规、drive-contract-check PASS。
