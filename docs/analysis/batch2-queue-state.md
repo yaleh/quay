@@ -5144,3 +5144,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **token-status-reports 合并**（`d25e910b`）：`--status` 增 `holder_alive=yes|no`（同 `kill -0`）+ 死持有者如实说明「下一个 --acquire 会怎样」（可回收/保护期内）+ AC7「WAITING IS INVALID — 回收是拉取式，轮询等不到」+ 下一步命令。只读负控制（status 不碰令牌文件）。AC1–AC7 勾（25/25 + 兄弟 16/16）。已并已清。
 - **在飞 2/5**（laydown-derivation / suite-state-reason-axis）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T06:0xZ（内层，suite-state-reason-axis fan-in 完成）
+
+- **suite-state-reason-axis 合并**（`561388d9`）：`full-suite-state` **三值 reason 枚举**（failed/aborted/infra-error）——门禁 WAIT 早退/信号杀 ⇒ aborted（无正确性结论，不按代码风险停派，恢复由资源门 GO/WAIT 决定）；真失败 ⇒ failed（照旧停派分诊）；note 逃生舱收编为字段。AC1–AC7 勾（37/37）。已并已清。
+- **在飞 1/5**（仅 laydown-derivation）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
