@@ -1,18 +1,6 @@
 ---
 id: gap-no-post-merge-cross-machine-verification-detection-latency-is-luck
-title: "a wrong merge resolution has NO mechanism that finds it — detection
-  latency d is pure luck: the 4+3 real defects from today's cross-machine merges
-  were caught by ad-arm1's cold-start gate (a machine that happened to exist and
-  happened to be running a gate), NOT by A's own suite, which had not run since
-  07:07Z while 161 commits landed; the conflict-cost model
-  (orchestration/ANALYSIS-when-should-B-develop-vs-only-file-tasks-2026-08-06.m\
-  d, parameters measured) shows mechanical conflict resolution is negligible
-  (c=0.006h per conflict, 45 resolved in 13m50s) and essentially ALL cost is p*d
-  — a wrong resolution that stays undetected (p=0.14, 5 regressions / 35
-  conflicts) — with break-even at d*~=2.2h at today's operating point (F_A=238,
-  N=381); driving d from 8h to 0.5h widens the boundary 15x, the single largest
-  lever of the three, and it currently has no owner, no trigger and no
-  measurement"
+title: "a wrong merge resolution has NO mechanism that finds it — post-merge verification is missing: THIS machine merges task/<id> → integration → develop, and a wrongly-resolved merge stays undetected (detection latency d is pure luck). Cross-machine verification goal cancelled 2026-08-06 (human: keep github release only) — the 'merge has no verifier' core survives, reframed to single-repo post-merge verification; the 4+3 historical cross-machine defects are evidence of the shape, not the premise"
 status: ready
 labels:
   - gap
@@ -26,7 +14,7 @@ extra:
 
 ## Proposal
 
-**一次解错的合并没有任何机制会去发现它——发现延迟 $d$ 目前完全靠运气。**
+**一次解错的合并没有任何机制会去发现它——发现延迟 $d$ 目前完全靠运气。** 人 2026-08-06 裁定取消跨机协作目标——原跨机前提（A/B 协作、ad-arm1 非参与机器验证）**已死**；**幸存内核：本机仍在合并**（`task/<id> → integration → develop` 是当前分支模型），一次解错的合并同样没有机制会发现它。本任务收窄为**合并后无验证**（post-merge verification），去掉 cross-machine 限定。下表的 4+3 跨机缺陷与 machine C 是历史证据（形态来源），不再作为达成判据。
 
 ### 实测（不是推测）
 
@@ -100,9 +88,10 @@ resume 若中断，先跑 measure 读当前未被验证的合并列表，不要�
 - [ ] AC2: **延迟达标**——AC1 实测的 `detection_latency_h` **< 1 小时**（模型盈亏点 2.2h，留一倍余量）
 - [ ] AC3: **负控制（本任务最关键的一条）**——故意合入一个已知坏改动，闸**必须报红**并指出文件；
       若报绿则本机制无效，不得以 AC1 通过为由结案
-- [ ] AC4: **验证方非参与方**——机械证明跑闸的机器不是执行该合并的机器（`verifier_is_participant = 0`），
-      贴出证据；这是结构要求（亲代环境掩盖亲代缺陷）
-- [ ] AC5: **`d` 可被机械读出**——存在一条命令报出「当前有哪些合并还没被跨机验证 / 各自已等了多久」，
+- [ ] AC4: **验证方独立于参与方**（2026-08-06 改写——原"非参与机器"依赖跨机前提；本机合并路径下改为结构独立）——
+      机械证明跑验证的不是执行该合并的那个动作/进程（`verifier_is_participant = 0`），贴出证据；这是结构要求
+      （亲代环境掩盖亲代缺陷——合并动作自验会掩盖自己的错）
+- [ ] AC5: **`d` 可被机械读出**——存在一条命令报出「当前有哪些合并还没被独立验证 / 各自已等了多久」，
       贴出实跑输出（否则模型的控制变量仍然无测量，等于没修）
 - [ ] AC6: **不引入系统 crontab；随包传播**——`crontab -l` 两机均无本任务新增条目；机制文件位于
       `plugin/` 之下且在 `quay-init` 的铺设集里（贴出铺设证据）。理由：ad-arm1 之所以能抓到，
