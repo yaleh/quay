@@ -484,6 +484,27 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
   // store actually needs it).
   const parsedCache = new Map<string, { mtimeMs: number; size: number; frontmatter: Record<string, unknown>; body: string }>();
 
+  // gap-native-store-title-roundtrip-nondeterministic-failures: drop the
+  // parse cache for `id` after ANY in-process write to that task's file.
+  //
+  // The cache key is (mtimeMs, size) — a heuristic, not a content identity.
+  // It does NOT change when a task file is rewritten with the SAME byte size
+  // within the same mtime resolution (e.g. `title: aaa` → `title: bbb`: same
+  // frontmatter length, writes a millisecond apart → identical key). Without
+  // this invalidation, a get() after such a write would hit the stale entry
+  // and return the PREVIOUS title's parse — a read-after-write staleness that
+  // surfaced non-deterministically in store.test.mjs AC4's charset derivation
+  // (which round-trips ~135 candidate titles through the same id `RT` in a
+  // tight loop; the colliding key served a random earlier candidate).
+  //
+  // Every file write in this module MUST invalidate the ids it touched so the
+  // next get() re-reads fresh. The cache remains a win for the common
+  // unchanged-file case (repeated get() on an unmodified task still hits); it
+  // only becomes correct-by-construction for the read-after-write case.
+  function invalidateCache(id: string): void {
+    parsedCache.delete(id);
+  }
+
   // QX-018 (experiment 4, iteration 4): get() now includes updatedAt (file mtime
   // in ms) to close UQ-015 (task_get MCP response missing updatedAt field) and
   // enable the detail-page "last updated" display. The stat() call is cheap
@@ -724,6 +745,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (!current.includes(childId)) return; // already absent (e.g. another writer beat us to it)
     const updated = { ...frontmatter, children: current.filter((c) => c !== childId) };
     fs.writeFileSync(filePathFor(parentId), serialize(updated, body), "utf8");
+    invalidateCache(parentId);
   }
 
   /**
@@ -738,6 +760,7 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
     if (current.includes(childId)) return; // already present
     const updated = { ...frontmatter, children: [...current, childId] };
     fs.writeFileSync(filePathFor(parentId), serialize(updated, body), "utf8");
+    invalidateCache(parentId);
   }
 
   /**
@@ -854,6 +877,10 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       // it was newly created) so the store is never left in a corrupted state
       // that would crash task_list for all other tasks.
       fs.writeFileSync(taskFilePath, raw, "utf8");
+      // Read-after-write correctness: the file just changed; the (mtimeMs, size)
+      // cache key may be UNCHANGED (same-size rewrite in the same mtime tick),
+      // so drop any cached parse for this id BEFORE the trailing get() below.
+      invalidateCache(id);
       try {
         validateWrittenYaml(taskFilePath, id, frontmatter);
       } catch (validationErr) {
@@ -908,6 +935,9 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       const finalRaw = serialize(updated, newBody);
       const noteFilePath = filePathFor(id);
       fs.writeFileSync(noteFilePath, finalRaw, "utf8");
+      // Read-after-write correctness (same class as write()): drop any cached
+      // parse for this id before the trailing get() re-reads it fresh.
+      invalidateCache(id);
       // M89: post-write YAML validation (same discipline as write() above).
       try {
         validateWrittenYaml(noteFilePath, id, updated);
