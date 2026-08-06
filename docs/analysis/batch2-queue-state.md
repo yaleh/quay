@@ -7477,3 +7477,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **新派发 3/3**：`DIR-121`（Codex Stage 1——AGENTS.md + repo Skills + project MCP + drift check；人导向 directive，dirStatus applied）。全闸过：resolve 1/8 missing 可派、self-touch ok、fork develop、与 residue-check disjoint；glob 目标目录（quay-task-operator/quay-directive 在 plugin/skills + .agents/skills）两分支全 0 差异 → fan-in 安全。worktree `quay-worktrees/dir-121`，task-start fm-DIR-121-...-kp00th。
 - **slot-refill 推荐冷启动（outer 执行型）+ no-post-merge（self-touch 已补，但 Touches 触碰 tick docs/quay-init.sh——ac8 冲突区）**。divergence 未对齐前，派 no-post-merge 有 4 连 stranding 风险，本 tick 不派，等外层对齐分支后回填。
 - **在飞 2/2**（真实）：residue-check + DIR-121。ac8/chart2-s2/shipped-ts needs-human 挂起等外层。
+
+### 事件 23:1xZ（tick：divergence 结构性阻塞全部派发——硬结论）
+
+- **slots**：realInFlight=2（residue-check + DIR-121），3 空槽；reconcile 关 prefriction 旧括号。
+- **slot-refill 推荐 3 条，逐条出局**：
+  - `cold-start-outer-validation` → outer 执行型（非 inner）；
+  - `DIR-124` → 前置未满足（DIR-119 仍 ready 非 done）+ Touches 引用 4 个已退役 workflow 文件（execute/prepare-milestone.js×2）；
+  - `audit-findings-not-backpropagated` → 9/9 touched 文件在 develop/integration 全部 DIFFERS。
+- **全池 fan-in 安全扫描（决定性）**：pool-check 的 8 个 eligible+depsReady 候选**全部触碰分叉文件**：
+  observer-registry 1/2 · manager-skill 2/2 · readme-source 1/2 · cross-machine-readonly 1/3 · quay-launch 4/7 · shipped-artifact 2/2 · tmux-isolated 3/6 · scripts-sprawl 13/58。
+  ⇒ **没有任何可安全派发的就绪任务**。divergence 现在结构性阻塞**全部派发**，不再是偶发 fan-in 冲突。
+- **分支 gap 在扩大**：integration 33 ahead / develop 265 ahead（≈298 commit）。ac8 / chart2-s2 / shipped-ts 三任务已卡住。
+- **本 tick 不派发**（避免第 4/5 个 stranding）；pool 17 < floor 20 也**不补晋**（补晋给不能派发的任务无意义——对齐后自然回填）。
+- **→ 需要外层对齐 integration/develop**：这是当前唯一解锁派发的动作。
