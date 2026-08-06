@@ -56,6 +56,11 @@ export const oldPathPatterns = oldPaths.map((s) =>
  */
 export function exclusionEntries(repoRoot, pluginDir) {
   return [
+    {
+      rel: '.quay',
+      target: path.join(repoRoot, '.quay'),
+      reason: 'gitignored runtime workspace state (quay-init-state.json records the laid-down target layout incl. old orchestration/ + docs/analysis/ paths; gate-events, telemetry) — not source, not a live caller (dir-level: excluded wholesale; dir-level inertness is out of scope per the necessity-check contract note)',
+    },
     { rel: 'tasks', target: path.join(repoRoot, 'tasks'), reason: 'historical task records (descriptions of the past)' },
     { rel: 'milestones', target: path.join(repoRoot, 'milestones'), reason: 'historical milestone journals' },
     { rel: 'docs/analysis/batch2-queue-state.md', target: path.join(repoRoot, 'docs', 'analysis', 'batch2-queue-state.md'), reason: "the queue-state's tick records reference the deployed tick-doc target layout (docs/analysis/ + orchestration/ paths) as living documentation — same class as the deployed copies excluded below" },
@@ -65,6 +70,21 @@ export function exclusionEntries(repoRoot, pluginDir) {
       rel: 'plugin/scripts/os-anchor-install.sh',
       target: path.join(pluginDir, 'scripts', 'os-anchor-install.sh'),
       reason: 'drives FOREIGN/legacy workspaces (meta-cc, archguard) that may still run the old orchestration/ layout — the old tick-doc path is a supported target, not a quay-repo reference (live ref surfaced by the AC1b scan 2026-08-05: os-anchor landed 11:05Z, the AC1b table predated it)',
+    },
+    {
+      rel: 'plugin/scripts/no-manager-tick-doc-check.sh',
+      target: path.join(pluginDir, 'scripts', 'no-manager-tick-doc-check.sh'),
+      reason: 'scans the outer tick doc at BOTH the old orchestration/ layout (foreign/legacy targets that still run it) AND the new plugin/loop/ layout — the old path is a supported target, not a quay-repo reference (same class as os-anchor-install.sh; manager productization landed 2026-08-06)',
+    },
+    {
+      rel: 'plugin/test/no-manager-tick-doc-check.test.mjs',
+      target: path.join(pluginDir, 'test', 'no-manager-tick-doc-check.test.mjs'),
+      reason: 'fixtures construct the old orchestration/ path to test the checker scans both target layouts (data, not live refs; same class as the checker itself)',
+    },
+    {
+      rel: 'plugin/scripts/checker-mutation-cases/no-manager-tick-doc-check.sh',
+      target: path.join(pluginDir, 'scripts', 'checker-mutation-cases', 'no-manager-tick-doc-check.sh'),
+      reason: 'mutation fixture injects the old orchestration/ path to verify the checker catches a create/drive step in either layout (data, not live refs)',
     },
     {
       rel: 'docs/analysis/fast-mode-loop-tick.md',
