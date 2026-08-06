@@ -387,6 +387,19 @@ async function writeBackdatedStartEvent(tmp, taskId, msAgo) {
   telemetry.writeEvent(ev, tmp);
 }
 
+/**
+ * Write a `tasks/<taskId>.md` file with a YAML frontmatter `status:` — the task-status source
+ * `taskStatusAllowsOver90` reads. (Real task files live in the SHARED checkout's `tasks/`; a tmp
+ * workspace fixture mirrors that shape so the over-90m gate can be tested in isolation.)
+ * @param {string} tmp
+ * @param {string} taskId
+ * @param {string} status
+ */
+function writeTaskFile(tmp, taskId, status) {
+  fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "tasks", `${taskId}.md`), `---\nid: ${taskId}\nstatus: ${status}\n---\n`, "utf8");
+}
+
 // ── gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger: the composite
 // "ruling-required" trace (transcript stale + task in-progress + clean working tree) ───────────────
 //
@@ -772,6 +785,120 @@ test("AC4 — end-to-end: a stop condition produces the block and the outer read
     const clear = runCli(tmp, "--clear");
     assert.equal(clear.status, 0, clear.stderr);
     assert.match(clear.stdout, /wait \d+\.\ds/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── gap-over-90m-false-signal-source-reads-telemetry-not-task-status: the task-status gate ───────────
+// The over-90m signal must read the task's OWN status, not just the telemetry bracket. A crash
+// leaves the `--task-end` never-written, so the bracket stays open forever; an open bracket is NOT
+// proof the task is running. AC1 (negative control): status=ready + >90m bracket ⇒ NO false block
+// (reproduces tonight's 3rd recurrence — phantom in-flight from a crash, 0-commit dead worktree).
+// AC2 (positive control): status=in-progress (or task file missing) + >90m bracket ⇒ STILL fires,
+// so a genuine 90-minute timeout is never masked.
+
+test("AC1 — task-status gate: status=ready + >90m bracket does NOT fire over-90m (negative control, reproduces tonight's phantom shape)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    writeTaskFile(tmp, "gap-os-anchor", "ready"); // the task store says NOT in-progress
+    await writeBackdatedStartEvent(tmp, "gap-os-anchor", 91 * 60 * 1000); // stale unclosed bracket
+
+    const cond = await cli.detectTaskOver90m(tmp);
+    assert.equal(cond, null, `status=ready must suppress over-90m even with a 91m bracket: ${JSON.stringify(cond)}`);
+
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "status=ready + stale bracket must not auto-write a block");
+    assert.match(res.stdout, /no stop condition/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC2 — task-status gate: status=in-progress + >90m bracket STILL fires (positive control, real timeout not masked)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    writeTaskFile(tmp, "gap-running", "in-progress");
+    await writeBackdatedStartEvent(tmp, "gap-running", 91 * 60 * 1000);
+
+    const cond = await cli.detectTaskOver90m(tmp);
+    assert.ok(cond && cond.taskId === "gap-running", `status=in-progress must still fire over-90m: ${JSON.stringify(cond)}`);
+
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    const f = BLOCKED_PATH(tmp);
+    assert.ok(fs.existsSync(f), "status=in-progress + stale bracket must still auto-write the block");
+    const rec = JSON.parse(fs.readFileSync(f, "utf8"));
+    assert.equal(rec.reason, "task-over-90m");
+    assert.equal(rec.taskId, "gap-running");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC2 — task-status gate: task file MISSING + >90m bracket STILL fires (fall back to bracket — genuine timeout never masked)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    // No tasks/<id>.md on disk — cannot verify status ⇒ fail toward the OLD behavior (fire), so a
+    // genuinely long task whose file is missing is never silently dropped.
+    await writeBackdatedStartEvent(tmp, "gap-no-file", 91 * 60 * 1000);
+    const cond = await cli.detectTaskOver90m(tmp);
+    assert.ok(cond && cond.taskId === "gap-no-file", `missing task file must fall back to the bracket: ${JSON.stringify(cond)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC1/AC3 — task-status gate: the non-running statuses ready/done/needs-human/todo all suppress over-90m; only in-progress fires", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    for (const status of ["ready", "done", "needs-human", "todo"]) {
+      const taskId = `gap-${status}`;
+      writeTaskFile(tmp, taskId, status);
+      await writeBackdatedStartEvent(tmp, taskId, 91 * 60 * 1000);
+      const cond = await cli.detectTaskOver90m(tmp);
+      assert.equal(cond, null, `status=${status} must suppress over-90m (non-in-progress per the store): ${JSON.stringify(cond)}`);
+      // cleanup this fixture's telemetry so the next status in the loop is the ONLY candidate
+      fs.rmSync(path.join(tmp, ".workflow-events"), { recursive: true, force: true });
+    }
+    // in-progress is the ONLY status that lets the stale bracket fire.
+    writeTaskFile(tmp, "gap-in-progress", "in-progress");
+    await writeBackdatedStartEvent(tmp, "gap-in-progress", 91 * 60 * 1000);
+    const cond = await cli.detectTaskOver90m(tmp);
+    assert.ok(cond && cond.taskId === "gap-in-progress", `status=in-progress must be the only firing status: ${JSON.stringify(cond)}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC1 — task-status gate unit matrix: taskStatusAllowsOver90 verdict per shape (missing → keep, in-progress → keep, else drop, unparseable → keep)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    // missing file → keep (cannot verify)
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-missing"), true, "missing file ⇒ keep");
+
+    // present file with a real status
+    writeTaskFile(tmp, "gap-r", "ready");
+    writeTaskFile(tmp, "gap-i", "in-progress");
+    writeTaskFile(tmp, "gap-d", "done");
+    writeTaskFile(tmp, "gap-n", "needs-human");
+    writeTaskFile(tmp, "gap-t", "todo");
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-r"), false, "ready ⇒ drop");
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-i"), true, "in-progress ⇒ keep");
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-d"), false, "done ⇒ drop");
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-n"), false, "needs-human ⇒ drop");
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-t"), false, "todo ⇒ drop");
+
+    // present file with NO parseable frontmatter → keep (cannot verify)
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "gap-raw.md"), "no frontmatter here\n", "utf8");
+    assert.equal(cli.taskStatusAllowsOver90(tmp, "gap-raw"), true, "unparseable frontmatter ⇒ keep");
   } finally {
     cleanup(tmp);
   }

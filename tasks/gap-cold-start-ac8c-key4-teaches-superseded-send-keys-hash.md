@@ -48,6 +48,13 @@ plugin 传播那条是**同一类问题**（交付物传播已知缺陷）。它
 **与 manager-layer umbrella 的关系**：`gap-productize-the-manager-layer` 的 AC3 覆盖冷启动 AC8c 废键
 修复（2/6 键），本条把**关键路径那一键**（key 4）隔离成小任务优先落地；umbrella 落地时复用本条结果。
 
+**同型案例交叉标注（`gap-over-90m-false-signal-source-reads-telemetry-not-task-status`，2026-08-06）**：
+本条 key4 的「92min eaten」与本条根因**同型——括号在飞 ≠ 任务在跑**。执行者死于整机 kill 后
+`--task-end` 永不发生，in-progress bracket 永久悬置，`detectTaskOver90m` 读遥测 brackets 而**从不核对
+任务自身 status** ⇒ 假 OVER90 ⇒ inner 停等裁定 ⇒ 全线停派发。修复已落于该任务：over-90m 信号先读
+`tasks/<id>.md` 的 `status` 字段，非 `in-progress`（ready/done/needs-human/todo）即跳过——status 作
+「是否真在跑」的闸、bracket 仅作「何时开始」的来源（AC1 负控制 = 复现 ready+超时 bracket 形态）。
+
 ## Acceptance Criteria
 
 - [x] AC1: cold-start SKILL.md AC8c 键 4 改用可靠发送判据（transcript-delivery-check.ts /
