@@ -7491,3 +7491,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **分支 gap 在扩大**：integration 33 ahead / develop 265 ahead（≈298 commit）。ac8 / chart2-s2 / shipped-ts 三任务已卡住。
 - **本 tick 不派发**（避免第 4/5 个 stranding）；pool 17 < floor 20 也**不补晋**（补晋给不能派发的任务无意义——对齐后自然回填）。
 - **→ 需要外层对齐 integration/develop**：这是当前唯一解锁派发的动作。
+
+### 事件 23:2xZ（DIR-121 完成 → needs-human，诚实边界）
+
+- **DIR-121 agent 完成**：机械面已全部在 develop 落地且绿（adapter 26/26、drift-check exit 0、selfcheck PASS 对 codex-cli 0.146.0、task-schema exit 0、task-contract 0）。修复真 gap：Touches 缺自身 test/script 面 → select-tests-for-touches 只有 1/8（0.13 thin）→ 补 3 项后 `--for-task DIR-121 --allow-thin` 27/27。
+- **标 needs-human**：ACs 4/6/7/8 + AC1 checked-plan 半需**真实 fresh Codex 会话 + 人在场授权**执行真实任务 edit/create + refused-CAS probe + 独立对抗审计。任务自身 anti-fakery 条（line 50-53）禁止用 CODEX-PROBE fixture 顶替真落地。标 needs-human 防止 dispatch 闸重派一个不可完成的任务。
+- **无代码 fan-in**：机械面（AGENTS.md / skills / .codex/config.toml / 测试）本就已在 develop——DIR-121 的改动只含任务文件。worktree + branch 已清。
+- **在飞只剩 residue-check**（1 real），4 空槽但 divergence 阻塞全池派发（见 23:1x 条目）。
