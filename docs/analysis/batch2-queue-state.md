@@ -5277,3 +5277,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **OVER90 假阳再处置**：--slots 6 brackets / 5 reconcilable / **1 real-in-flight**（= cold-start-outer-validation，真在飞）——OVER90 块为陈旧括号（dispatch-evaluated），已清。
 - **派发 2/5**（disjoint batch）：`bare-metal-session-bootstrap`（session-bootstrap.sh 形式化）+ `os-anchor-launch-missing-prompt-suggestions`（watchdog 重启补 `--prompt-suggestions false`，ghost 消除源参数）。补 self-touch + telemetry 已开。
 - 在飞 3/5（cold-start-outer-validation + 新 2）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T11:4xZ（内层，cold-start-outer-validation fan-in 完成）
+
+- **cold-start-outer-validation 合并**（`4ad375db`，验证类）：meta-cc 升级路径实跑（Go 不挑语言 + 升级保留资产 + 不依赖开发树）；inner 零操作实跑（discovery 退化 fail-closed 被抓住，13/13）；三模型同后果（flash/sonnet/opus 确定性键逐字相同）；carryover 放行。AC1–AC4 勾。已并已清。
+- **在飞 2/5**（bare-metal-bootstrap / os-anchor-launch）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
