@@ -6010,3 +6010,21 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   /home/yale/work/quay-worktrees/claim-task-cutover + telemetry bracket 已开。
   supervisor 与 runtime-nowhere-safe **OVERLAP quay-init.sh** → 序列化，本 tick 不派发。
 - 池 9/20（补晋 2）；在飞 3/3 满。
+
+### tick 2026-08-06T07:0xZ（三 agent 完成 + fan-in 收口）
+
+- **三个 agent 全部完成，fan-in 合并收口**：
+  - runtime-nowhere-safe（ac893257→rebased+merged fcb9f178）——运行时落 `.quay/runtime/`（非 vendor/）、
+    quay-init 自写 gitignore、Go 半边重装门补上；AC1-AC11 全证据，scoped 61 pass/0 fail。
+  - claim-task-cutover（93017f7d+08eab128→merged）——claim-task/backup 指向 GitHub origin、quay-sync.git 退役；
+    Contract measure 正则修正；AC1-AC5 证据，scoped 15 pass/0 fail。
+  - branch-model-cutover（3940c1a8→merged）——tick 文档 11 处硬编码 master → 可配置 $FORK_BASELINE/$MERGE_TARGET
+    （默认 master 保下游）、本仓副本字面量 develop；AC1-AC6 证据，branch-model 9/9 pass。
+- **套件 GREEN（07:07Z 完成）**——外层 verify 通过。
+- worktree 清理 + 三个 telemetry bracket 已 close（outcome done）。在飞 0/3。
+- **【转外层决策】config 激活**：branch-model agent 标明的部署步骤——`.quay/config.yml` `loop:` 加
+  `fork_baseline: develop` / `merge_target: integration`。**未静默执行**：
+  ① 该文件 gitignored、人/外层所有（注释记录人工 concurrency 决策）；
+  ② **时序风险**——develop 停在 926d771b（落后 master 33+ 提交），今日全部 fan-in 都在 master，
+     此刻激活会让下一 tick 从过期基线分叉；PLAN 阶段三 step 11 的正常流（fork develop→merge integration→
+     outer FF develop）需要先有 develop 追上 master 的一步。转外层裁定激活时机（先快进 develop？等阶段二 B 合并？）。
