@@ -206,7 +206,7 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | 遥测 `inProgress[]` 长度 ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -317,9 +317,12 @@ node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signa
 - **机械检测**可判定条件：**合并冲突**（git 有未解决路径）、**任务超 90 分钟**（遥测
   in-progress > 90m）。任一成立 ⇒ **自动**写入 `.quay/inner-blocked.json`（带 `reason` + 可行动
   `question` + `evidence`，`source:"auto"`）——**写入是检测本身的后果**，你跑的这条命令就是停止
-  条件检查，不存在「忘了写阻塞信号」这回事。**OVER90 注意（2026-08-05 起）**：遥测括号由外层异步
-  闭合（`orchestrator-loop-tick.md` 步骤 1b），in-progress 会因此多算至多一个外层 tick 的滞后——
-  命中 OVER90 时先核对是不是「外层尚未闭合该括号」而非真超时，避免把运行 70–90 分钟的任务误判。
+  条件检查，不存在「忘了写阻塞信号」这回事。**OVER90 注意（2026-08-05 起，`gap-telemetry-brackets-
+  vs-subagents-no-slot-visibility` AC8 起加强）**：遥测括号由外层异步闭合（`orchestrator-loop-tick.md`
+  步骤 1b 的 `--reconcile`），in-progress 会因此多算至多一个外层 tick 的滞后——命中 OVER90 时先核对
+  是不是「外层尚未闭合该括号」而非真超时，避免把运行 70–90 分钟的任务误判。**over-90m 判据本身已
+  reconcile 感知**（`detectTaskOver90m` 只对「工作已落地」——任务分支已 merge/有 merge record——的
+  括号跳过）：一个 fan-in 已落地、只是 `--task-end` 未写的任务不再触发假 over-90m。
 - **`ruling-required` 的屏幕观察者（`--pane`）**：`classifyPaneState` 只读 pane 的**底部区域**
   （输入框 + 状态行，ADR-016 修订 boundary b——**不做整屏哈希**），分类成五态之一。连续
   `INNER_BLOCKED_RULING_SAMPLES`（默认 3）次 `waiting-input` / `permission-prompt` ⇒ 写
@@ -370,12 +373,21 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-sta
 
 inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步写**（`orchestrator-loop-tick.md`
 步骤 1b），inner 不需要也不应该调它——`--report` 的 `inProgress` 在外层闭合前会显示在飞，这是预期。
+**派发/收尾这对调用就是遥测从「历史归档」变回「当前状态」的机制**（`gap-telemetry-brackets-vs-
+subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时的开括号，外层 1b 的 `--task-end`
+/ `--reconcile` 是收尾时的关括号；缺任一半，遥测就退化成只记录历史。
 
 **这不是可选步骤。** 工具在 B2-1 造好并合并了，但截至 2026-08-02 11:08 `--report` 返回
 `{tasks: [], tasksPerHour: 0}`——一次都没被调用过。所有耗时数字仍靠 commit 时间戳反推，
 正是这个工具本该消除的考古。
 
 没有计量，「1 任务/小时」无法判定，也无法知道任何优化是否真的有效。
+
+**派发前先读一次空槽信号（AC2/AC5）**——「还剩几个并发槽」必须机械可见，不靠内层手写叙事：
+```bash
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"
+# real-in-flight N / slots-remaining M；dispatchable_disjoint（步骤 3.6）− realInFlight = 槽位级闲置
+```
 
 ### 3.6 就绪池维护（晋级节奏是机制，不是角色自觉——强制）
 
@@ -686,9 +698,11 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 ## 每个 tick 必报
 
 - 本 tick 合并了什么、派发了什么
-- 在飞任务及其已运行时长——**「在飞」按 AC7 拆两种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）
+- 在飞任务及其已运行时长——**「在飞」按 AC7 拆三种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）、
+  **真实在飞**（reconcile 感知 `realInFlight`——括号数扣减 executor 已消失者，`--slots` 的 real-in-flight）
   vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）；核实并发读原始字段，不用 START
-  事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
+  事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）。**空槽数**（AC2/AC5）：`--slots --cap
+  ${effective_cap}` 的 slots-remaining + `dispatchable_disjoint − realInFlight` 的槽位级闲置
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
 - 遥测吞吐：`tasksPerHour`（= `--task-end` 闭合任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/
