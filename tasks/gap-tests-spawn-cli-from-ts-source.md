@@ -13,6 +13,8 @@ extra:
 
 **type:** execution
 
+> **判据重新评估（[[gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency]]）**：原判据是单套件墙钟（本任务「对墙钟无影响，不动」的取舍）；在并发维度下重新评估——spawn 总数决定内核负载与可并行套件数，不是单套件墙钟。本任务结论不改、不重开；A 层剩余调用点由该任务继续转换。
+
 ## Proposal
 
 Every test that shells out to the quay CLI pays a full TypeScript module-graph load. Measured

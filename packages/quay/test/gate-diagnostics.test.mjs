@@ -295,6 +295,7 @@ test("behavior preservation: well-formed gates registered, malformed skipped (mi
 
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 import {
   resolveGateDiagnosticsSink,
   emitDiagnostic,
