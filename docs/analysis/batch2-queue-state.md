@@ -5510,3 +5510,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **顺带修预存**：branch-model Contract invoke-evidence-missing（`--oneline` vs 实际 `--format=%s`）——two-machine
   交叉扫描浮出，已对齐。在飞 0/3。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:2xZ（外层，Q2 两机认领落地 + closure round 15）
+
+- **two-machine-collab（Q2，人优先级）落地 + 关闭**：`4d31b998` 认领协议（claim-task.sh 孤儿提交标记推
+  task/<id> = 原子 CAS + release-task.sh + claim-task.ts 单源 checkTouchesPair）、**权威裁定（AC3：
+  任务双向推 integration、develop 单权威、master 空）**、**真 2-clone A/B 竞态测试（仅先者胜）**、3 对抗
+  修复、Touches 收窄、9/9。**两机冲突处理机制落地**（认领不再靠运气）。closure round 15（共 15）。
+- inner 顺带修 branch-model 的 invoke-evidence（cross-scan 浮出）。
+- **套件 green**、闸 GO、load 1.29、inner 0 in-flight（Q2 reconcile 后）。
