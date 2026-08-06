@@ -25,11 +25,18 @@
 # needs a human, never an automatic --ours/--theirs).
 #
 # Usage:
-#   integration-batch-merge.sh [--root <repo>] [--develop <ref>] [--integration <ref>] [--dry-run]
+#   integration-batch-merge.sh [--root <repo>] [--develop <ref>] [--integration <ref>] [--dry-run] [--sync]
 #   --root        repo root (default: auto-derived from this script's location)
 #   --develop     develop ref (default: develop)
 #   --integration integration ref (default: integration)
 #   --dry-run     check ff-ability + report the measure WITHOUT moving any ref
+#   --sync        (gap-cross-machine-sync-has-no-mechanism-only-manual-pushes) after a successful
+#                 fast-forward, IMMEDIATELY push the advanced <develop> ref to origin via
+#                 sync-lag-check.sh (the event-driven trigger of the cross-machine sync mechanism —
+#                 the push happens in the SAME round as the land closure, not at the next tick).
+#                 The merge is the primary outcome; a push failure (non-fast-forward = a real
+#                 cross-machine divergence) is REPORTED and does not roll the ref back — the
+#                 every-tick heartbeat retries it.
 #
 # Exit codes:
 #   0  fast-forward performed (or, with --dry-run, ff-ability verified)
@@ -38,12 +45,14 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 develop_ref="develop"
 integration_ref="integration"
 dry_run=0
+sync=0
 
 usage() {
-  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2
+  sed -n '2,44p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2
   exit 2
 }
 
@@ -53,6 +62,7 @@ while [ "$#" -gt 0 ]; do
     --develop) develop_ref="$2"; shift 2 ;;
     --integration) integration_ref="$2"; shift 2 ;;
     --dry-run) dry_run=1; shift ;;
+    --sync) sync=1; shift ;;
     *) usage ;;
   esac
 done
@@ -119,8 +129,29 @@ if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}
   echo "integration-batch-merge: OK — develop fast-forwarded to integration"
   echo "integration-batch-merge: measure integration_ff_merges=0"
   echo "integration-batch-merge: develop=${integration_tip}"
-  exit 0
 else
   echo "integration-batch-merge: post-measure FAILED — integration not ancestor of develop after ff; needs human" >&2
   exit 1
 fi
+
+# ── --sync: event-driven cross-machine push (gap-cross-machine-sync-has-no-mechanism-only-manual-pushes) ──
+# The land closure just advanced <develop>; push it to origin IMMEDIATELY (same round, not next tick).
+# A push failure (non-fast-forward = origin has commits this repo lacks — a real divergence) is
+# REPORTED but does not fail the merge: the ref already advanced locally, and the every-tick heartbeat
+# (sync-lag-check.sh --push) will keep retrying until a human resolves the divergence.
+if [ "${sync}" -eq 1 ]; then
+  if [ -f "${SCRIPT_DIR}/sync-lag-check.sh" ]; then
+    sync_out="$(bash "${SCRIPT_DIR}/sync-lag-check.sh" --root "${repo_root}" --branch "${develop_ref}" --remote origin --push 2>&1)"
+    sync_rc=$?
+    printf '%s\n' "${sync_out}"
+    if [ "${sync_rc}" -ne 0 ]; then
+      echo "integration-batch-merge: SYNC-PUSH FAILED (exit ${sync_rc}) — develop advanced locally but origin/${develop_ref} NOT updated; the every-tick heartbeat will retry (divergence = human resolution)" >&2
+    else
+      echo "integration-batch-merge: sync-push ok (develop → origin, same round as the land closure)"
+    fi
+  else
+    echo "integration-batch-merge: --sync requested but sync-lag-check.sh not found at ${SCRIPT_DIR}/sync-lag-check.sh; skipping event-driven push (heartbeat will cover it)" >&2
+  fi
+fi
+
+exit 0
