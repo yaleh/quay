@@ -1,17 +1,20 @@
 ---
 id: gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver
-title: "the manager layer does NOT propagate — quay-init lays exactly two files into orchestration/
-  (orchestrator-loop-tick.md = the OUTER driver, and session-liveness.env) and NO manager driver
-  doc; grep manager in quay-init.sh returns only 3 comment mentions, zero laydown; orchestration/
-  manager-loop-tick.md (290 lines, the manager's actual tick instructions) is git-tracked in quay's
-  own repo and in the laydown set 0 times, so a host that runs quay-init --loop gets an outer and an
-  inner and NO watcher at all; the human ruled the manager IS a deliverable, and gap-productize-the-
-  manager-layer is already done with an AC that verified 'the mechanisms the manager SKILL REFERENCES
-  are all landed/declared' — which is true and still leaves the manager's own driver unshipped
-  (AC narrower than the problem, 4th instance); reproduction-lens: the missing genetic material is
-  the entire supervisory layer, and it bears directly on AC12b since the manager is what watches the
-  outers; manager 2026-08-06"
-status: todo
+title: "the manager layer does NOT propagate — quay-init lays exactly two files
+  into orchestration/ (orchestrator-loop-tick.md = the OUTER driver, and
+  session-liveness.env) and NO manager driver doc; grep manager in quay-init.sh
+  returns only 3 comment mentions, zero laydown; orchestration/
+  manager-loop-tick.md (290 lines, the manager's actual tick instructions) is
+  git-tracked in quay's own repo and in the laydown set 0 times, so a host that
+  runs quay-init --loop gets an outer and an inner and NO watcher at all; the
+  human ruled the manager IS a deliverable, and gap-productize-the-
+  manager-layer is already done with an AC that verified 'the mechanisms the
+  manager SKILL REFERENCES are all landed/declared' — which is true and still
+  leaves the manager's own driver unshipped (AC narrower than the problem, 4th
+  instance); reproduction-lens: the missing genetic material is the entire
+  supervisory layer, and it bears directly on AC12b since the manager is what
+  watches the outers; manager 2026-08-06"
+status: ready
 labels:
   - gap
   - milestone-candidate

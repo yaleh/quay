@@ -1,16 +1,19 @@
 ---
 id: gap-no-post-merge-cross-machine-verification-detection-latency-is-luck
-title: "a wrong merge resolution has NO mechanism that finds it — detection latency d is pure luck:
-  the 4+3 real defects from today's cross-machine merges were caught by ad-arm1's cold-start gate
-  (a machine that happened to exist and happened to be running a gate), NOT by A's own suite, which
-  had not run since 07:07Z while 161 commits landed; the conflict-cost model
-  (orchestration/ANALYSIS-when-should-B-develop-vs-only-file-tasks-2026-08-06.md, parameters
-  measured) shows mechanical conflict resolution is negligible (c=0.006h per conflict, 45 resolved
-  in 13m50s) and essentially ALL cost is p*d — a wrong resolution that stays undetected (p=0.14,
-  5 regressions / 35 conflicts) — with break-even at d*~=2.2h at today's operating point (F_A=238,
-  N=381); driving d from 8h to 0.5h widens the boundary 15x, the single largest lever of the three,
-  and it currently has no owner, no trigger and no measurement"
-status: todo
+title: "a wrong merge resolution has NO mechanism that finds it — detection
+  latency d is pure luck: the 4+3 real defects from today's cross-machine merges
+  were caught by ad-arm1's cold-start gate (a machine that happened to exist and
+  happened to be running a gate), NOT by A's own suite, which had not run since
+  07:07Z while 161 commits landed; the conflict-cost model
+  (orchestration/ANALYSIS-when-should-B-develop-vs-only-file-tasks-2026-08-06.m\
+  d, parameters measured) shows mechanical conflict resolution is negligible
+  (c=0.006h per conflict, 45 resolved in 13m50s) and essentially ALL cost is p*d
+  — a wrong resolution that stays undetected (p=0.14, 5 regressions / 35
+  conflicts) — with break-even at d*~=2.2h at today's operating point (F_A=238,
+  N=381); driving d from 8h to 0.5h widens the boundary 15x, the single largest
+  lever of the three, and it currently has no owner, no trigger and no
+  measurement"
+status: ready
 labels:
   - gap
   - milestone-candidate
