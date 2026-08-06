@@ -120,10 +120,10 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 
 ## Contract
 
-measure   loop_alive = `bash <dead-loop check>` stdout 的 alive/dead 字段
+measure   loop_alive = `bash plugin/scripts/dead-loop-check.sh --root <project> --json` stdout 的 alive/dead 字段
 band      loop_alive = alive（最近 N 分钟 transcript user 消息或 git 提交任一存在；都无 = dead）
 invariant liveness_independent_of_backlog = 1（dead-loop 判据与 backlog 空无关）
-invoke    `grep -rn 'transcript\|提交\|N 分钟' <dead-loop check>`
+invoke    `bash plugin/scripts/dead-loop-check.sh --root <project> --json`
 control   构造无驱动 + 无提交项目 ⇒ 判 dead（AC1）；队列空但有驱动/提交 ⇒ 判 alive（AC2 负向）
 resume    判据与已处置固化分两步提交，任一步完成即写盘
 

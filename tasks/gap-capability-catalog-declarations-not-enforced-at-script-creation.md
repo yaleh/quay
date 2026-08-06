@@ -66,3 +66,10 @@ band      catalog_in_scoped >= 1（新脚本任务 scoped 层含 catalog 检查�
 invoke    `bash plugin/scripts/capability-catalog.sh --json`（0 unclassified 保持）
 control   未声明新脚本的任务 scoped 红（AC2）；已声明的不误伤（AC3）
 resume    scoped 层与负控制分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T03:1xZ
+changed: 补充 Dispatch review 段（红窗分诊：contract-check ratchet 报 dispatch-review-missing，
+由外层补写；任务本身 todo 待派发，范围不变）。

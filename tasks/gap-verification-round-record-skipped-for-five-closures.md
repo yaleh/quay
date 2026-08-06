@@ -55,7 +55,7 @@ verification-round.jsonl**——closure-sync AC3 把它从 inner 读取面撤下
 ## Contract
 
 measure   round_continuity = `python3 -c "import json;[json.loads(l) for l in open('.quay/verification-round.jsonl')]"` 后读最后一个 round 值（无异常即所有行可解析）
-band      round_continuity 连续递增（无 gap；补记后 1-18）
+band      round_continuity = 连续递增（无 gap；补记后 1-18）
 invoke    `grep -n 'assert.*round\|last+1\|写轮次记录' orchestration/orchestrator-loop-tick.md`
 control   本轮 ≥1 收尾 ⇒ jsonl 尾部 round 前进 1（AC1）；无收尾 tick 不报警（AC2）
 resume    断言与补记分步提交，任一步完成即写盘

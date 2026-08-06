@@ -64,3 +64,10 @@ band      retired_filter = 1（retired 候选不晋）
 invoke    `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts --pool-candidate gap-prepare-milestone-no-size-aware-routing`
 control   clean 候选（productize-manager 等）仍晋（AC3）；prepare-milestone 不晋（AC2）
 resume    接线与负控制分两步提交，任一步完成即写盘
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-06T03:1xZ
+changed: 补充 Dispatch review 段（红窗分诊：contract-check ratchet 报 dispatch-review-missing，
+由外层补写；任务本身 todo 待派发，范围不变）。
