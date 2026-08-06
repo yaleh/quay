@@ -62,7 +62,25 @@ resume 若切换中断，先跑 measure 核对当前残留处数，再继续未�
 
 ## Chosen mechanism
 
-**留给执行时决定**（inner 是最合适判断"具体怎么改每一处措辞"的一方），但以下两条是硬约束：
+**繁殖视角修正（管理者，2026-08-06，tick 强制使用视角提问实测发现，非推测）**：
+`plugin/loop/fast-mode-loop-tick.md`/`plugin/loop/orchestrator-loop-tick.md` 是**下游项目消费的
+共享 shipped 文件**（CLAUDE.md 已明确的既有原则："MECHANISM…是 shared quay infrastructure
+downstream projects adopt via the upgrade channel"）。**实测**：`archguard`（同一台机器，
+`/home/yale/work/archguard`）**只有 `master` 一个分支**（`git branch --list develop integration
+master` 只命中 `master`）——它没有做过、大概率也不会做这次 branch cutover。**若直接把这两个
+共享文件里的字面量 `master` 替换成字面量 `develop`/`integration`，archguard 下次从升级通道拉取
+这两个文件时会指向它根本没有的分支，直接断链**——与"dist 不随 clone → package.json ENOENT →
+mcp_entry 路径形态错"同一形态的遗传丢失，只是这次丢的是"工作分支名"这段遗传物质。
+
+**因此硬约束新增一条**：工作分支名是**策略**（各项目自身的 branch 模型现状），不是**机制**
+（CLAUDE.md 归属边界原则："策略＝各项目按自身负载特征定，不要让下游各自发明机制"）——
+`plugin/loop/` 下的两个共享文件里，工作分支名**必须可配置**（例如从 `.quay/config.yml` 的
+`loop:` 段读一个新字段，默认值仍是 `master`，保证未做 cutover 的下游项目行为不变），
+**quay 自己的 workspace 在 `.quay/config.yml` 里覆盖成 `develop`/`integration`**——不能是
+两个共享文件里的字面量硬替换。`orchestration/orchestrator-loop-tick.md`（本仓库自己的工作区
+副本，非共享文件）不受此约束，可以直接改字面量。
+
+以下两条仍是硬约束：
 
 - `master` 分支在切换后**只能被一种情况写入**：人用自然语言明确要求同步时，由 outer 执行
   `develop → master`（人已裁定触发形式：纯文本，不定具体格式，频率很低——不需要固定命令）。
@@ -86,6 +104,12 @@ resume 若切换中断，先跑 measure 核对当前残留处数，再继续未�
 - [ ] AC5: 任务体记录 `plugin/loop/orchestrator-loop-tick.md` 与
       `orchestration/orchestrator-loop-tick.md` 的关系核实结果（是否为漂移的两份同源内容——
       若是，按仓库"单一事实源"原则一并修，若不是同源，写明两者各自的角色分工）
+- [ ] AC6（繁殖视角，人裁定权在 outer——本条是管理者的意见，非强制推翻其实现选择）：
+      `plugin/loop/` 下两个共享文件里的工作分支名可配置，默认值仍是 `master`；**实测**
+      archguard（`/home/yale/work/archguard`，只有 `master` 一个分支）在不改任何自身配置的
+      前提下，从升级通道拉到本任务改后的共享文件，行为必须与改前**完全一致**（负控制：
+      在 archguard 工作区跑一次 `plugin/loop/fast-mode-loop-tick.md` 的 tick，产出的分支操作
+      仍然是 `master`，不是 `develop`）
 
 ## Definition of Done
 
