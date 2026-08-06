@@ -100,6 +100,14 @@
 `gap-quality-criteria-are-point-in-time-no-trend-criteria` 已收两个实例（每测试成本 + 早期 RED 检测延迟），
 **§3 列的其余三类**（语义一致 / 升级正确性 / 三层完整性）**已补进该任务**（交叉标注，见该任务 Proposal 第 5 条）。
 
+> **L2 活实例（2026-08-06，`gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`）——
+> 「循环在转」判据**：判据问的是「**铺了 + 在转**」两层的第二层。一个从未运行过的循环与一个健康运行的
+> 循环在所有 L1 判据下【完全一样】（实测：meta-cc/archguard 起好后零驱动、29 小时零进展，quay-init
+> complete + verify-installed-executables + verify-referenced-landed 全绿、自报 healthy）。最小可行判据 =
+> `plugin/scripts/dead-loop-check.sh`：目标 outer/inner transcript 最近 N 分钟有新的 user 消息 **或** git
+> 最近 N 分钟有提交 ⇒ `loop_alive = alive`；**都无** ⇒ `dead`（**与 backlog 空无关**——队列空 vs 没人驱动
+> 从此可区分）。`invoke` = `bash plugin/scripts/dead-loop-check.sh --root <目标> --transcript outer <t> --transcript inner <t>`。
+
 ---
 
 ## 6. 机读清单（L1 检查的单源——随交付物变化更新）

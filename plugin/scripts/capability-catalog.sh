@@ -83,6 +83,7 @@ declare -A QUESTION=(
   [concurrent-batch-scheduler.ts]="Which ready tasks can be dispatched concurrently without touching overlapping files?"
   [config-wiring-check.ts]="Does every declared config field have exactly one wirer?"
   [coupling-graph.ts]="Which tasks are coupled by shared touches?"
+  [dead-loop-check.sh]="Is the loop ACTUALLY RUNNING (L2 continuous health) — a recent transcript user message or git commit in the last N minutes, INDEPENDENT of backlog emptiness (dead-loop vs healthy-idle)?"
   [derive-touches-heuristic.ts]="When a task body lacks a ## Touches section, what globs would a cheap scheduling-time heuristic derive for it?"
   [drivable-workspace-check.sh]="Is the workspace drivable by a loop (safe to hand to an autonomous driver)?"
   [drivable-workspace-check.ts]="Is the workspace drivable by a loop (canonical fail-closed gate)?"

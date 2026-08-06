@@ -83,6 +83,14 @@ extra:
 > 验什么, mechanically derived via grep SKILL/loop docs) is tracked in that task; this entry is the AC10
 > accounting cross-reference only — **post-friction, NOT counted** (the manager asked the range question
 > while BLOCKED on the wait, not before friction; AC10 计数保持 0, 记录不勾, per the task's AC5).
+>
+> **AC5 cross-mark (2026-08-05, `gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`)**:
+> the count-1 pre-friction "dead-loop" (manager-discovered 2026-08-05, 「去看才看见」——不是被硌出来的,
+> 见 AC10 记账行 `0 → 1（dead-loop，去看才看见）`) is that task. It is the L2 continuous-health instance
+> of the generator's time/instance question applied to the whole standing-criterion set: every L1 criterion
+> quantifies "was the instrument laid down", none quantifies "is the loop actually running". The fix (the
+> dead-loop criterion: target outer/inner transcript user messages + git commit time window, `plugin/scripts/
+> dead-loop-check.sh`) is tracked in that task; this entry is the AC10 accounting cross-reference only.
 
 **生成器**：对系统里每一条常驻判据问——**「它量化的是哪一个范围？时间 / 作用域 / 层 / 实例 / 成本？
 如果答案是『眼前这一个』，那就有一根没打开的轴。」** 检验：反推人今晚给的 5 条，**5/5 成功**。⇒ 有

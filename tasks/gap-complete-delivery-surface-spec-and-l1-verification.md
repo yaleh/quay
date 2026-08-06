@@ -42,6 +42,11 @@ extra:
 - **L2 持续健康**（动态，周期跑）：趋势型判据——现有全部点状；`gap-quality-criteria-are-point-in-time`
   只收了 2 个实例，§3 其余三类（语义一致 / 升级正确性 / 三层完整性）未进。
 
+> **L2 补「循环在转」（2026-08-06，`gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`）**：
+> 判据从「铺了」补「在转」——L2 活实例。`plugin/scripts/dead-loop-check.sh` = 目标 outer/inner transcript
+> 最近 N 分钟有新的 user 消息 **或** git 最近 N 分钟有提交 ⇒ `loop_alive = alive`；都无 ⇒ `dead`（与 backlog
+> 空无关）。承载点：SPEC §5 层次二 + 该任务。
+
 ### 选定机制（外层裁定）
 
 **维护一份六类交付面文档 + 建立两层次校验（人问的「这才算产品化交付」）**：

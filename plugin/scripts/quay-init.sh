@@ -725,9 +725,14 @@ derive_loop_scripts() {
   #   SIX-category L1 delivery-completeness check ships with the loop so an installed project can
   #   re-run it (装后能跑). Deliberate explicit addition — no shipped doc references it by path
   #   (the SPEC §6 machine-readable list is its single source, resolved via --spec).
+  #   dead-loop-check.sh (gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed):
+  #   the L2 continuous-health DEAD-LOOP criterion (transcript user messages + git commit window)
+  #   ships with the loop so an installed project's manager can ask "is the loop actually running".
+  #   Deliberate explicit addition — the SPEC §5 annotation is the cross-reference (not a shippable
+  #   SKILL.md/loop-doc path reference, so (a)/(b) derivation would miss it).
   printf '%s\n' inner-idle-log.ts heavy-op-token.sh it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
-    capability-catalog.sh l1-delivery-surface-check.ts >> "$out"
+    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh >> "$out"
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0
