@@ -5872,3 +5872,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   quay-init-loop 隔离）。worktree/branch 已清。
 - **本批完成 → 外层可重跑全量**（外层 04:05Z 等 inner scoped suite 完成避 4 核碰撞——现完成）。
 - 在飞 0/3。套件仍 triaged-red（待外层 re-verify）。无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:0xZ（内层 cron，false OVER90 五清 + 派发 hold）
+
+- **false OVER90 五清**：block 现指 productize（bracket 也未闭——外层闭了 session-liveness 但 productize 还在）——
+  已 `--clear`（wait 21.1s）。`--slot-status`：real 0、stale 3、free 3。**外层请 --task-end 闭剩余 bracket**
+  （session-liveness-hashes + productize + 1）。第 5 次同一类复发——bracket 未闭是根。
+- **套件 running（外层 04:25Z relaunch 验证 3 测试缺陷修复 + loop-driver merge）**——派发 hold（避 4 核碰撞，
+  外层此前明示）。池 5/12、disjoint 3（真 ready 近耗尽）。
+- 在飞 0/3。无 stop、无 block、Monitor 绿。
