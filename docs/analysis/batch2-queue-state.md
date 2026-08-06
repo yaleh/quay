@@ -6749,3 +6749,20 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   periodic-push-backup.sh 从 0 活调用方 → 走升级通道 + 铺设集（顺带修 ADR-031 "不在铺设集"）。
 - **拓扑**：integration 原落后 develop → merge develop into integration 带 current，再合任务分支。
 - 在飞 1/3（concurrency-derivation-reverted）。concurrency task 已 promote ready（排队中）。
+
+### tick 2026-08-06T04:3xZ（心跳派发 3，池修补晋 3，1 槽留空）
+
+- **派发 3**（cap=5 GO，在飞 1→4，全部 fork develop d27ca006）：gap-send-keys-reliable（续做，3/8→剩余 AC）、
+  gap-supervisor-base-layer（续做，14/16→剩余 AC）、gap-split-batch-vocabulary（6/9→剩余 AC）。
+  production gate（concurrent-batch-scheduler）：batch = {send-keys, supervisor, split-batch}；full-suite-runner
+  因与在飞 concurrency-revert 重叠 `tasks/gap-no-resource-awareness-heavy-ops-run-blind.md` 被排除（scheduler
+  把在飞者 deferred 而非新候选——**内层必须把 batch 成员与真实在飞集合交叉核对**，本 tick 据此弃派 full-suite-runner）。
+- **池修补晋 3**（3.6，pool 10<floor 20）：manager-layer、no-post-merge-latency、session-liveness-context-saturation
+  todo→ready。concurrency-revert **跳过**（在飞，不得再补晋）。DIR-124/DIR-043 为 human-steered 不自动派。
+- **1 槽留空**：no-post-merge-latency 与在飞 supervisor+split-batch 触摸冲突（gate 实名），不派（宁可少派不制造合并冲突）。
+- **池膨胀（taskWorkLanded 信号缺口）实测**：cross-machine-sync（AC 8/9 在 integration，develop 拷贝陈旧 0/9）、
+  release-postinstall（5/5 全勾）、remove-shared-events（工作已落 5cfe96fd）三条 status 仍 ready ⇒ 被 slot-refill
+  **重复推荐**（double-dispatch 隐患）。slot-refill 读 develop 陈旧拷贝，看不见 integration 已落地的 AC 证据。
+  **待外层**：这三条翻 done（cross-machine-sync 剩 B 侧 AC5/6 deferred），且 cross-machine-sync 任务文件的
+  AC 证据需随 integration→develop 合并上 develop。
+- **resource-aware worktree** 仍在（外层 3f78e428 裁定 KEPT，真实未提交再开工作），待外层定方向。

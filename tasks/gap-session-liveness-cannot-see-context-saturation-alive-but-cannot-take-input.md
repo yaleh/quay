@@ -1,17 +1,21 @@
 ---
 id: gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input
-title: "nothing measures context saturation — a session at 100% context is alive, busy, heartbeating
-  and classified HEALTHY, yet may be unable to retain new instructions; session-liveness.sh's state
-  vocabulary is SESSION-{GONE,BACK,IDLE,RESUMED,OVERDUE,STALL,MARKER,STATUS} + REPO-STALL with no
-  'alive but saturated', and its comment at :112-113 DELIBERATELY excludes the token-count line and
-  the 100% ratio from the criterion (correctly, to stop TUI chrome jitter reading as activity) — so
-  the exclusion is right for its own purpose and leaves the dimension unmeasured; grep for
-  context-used/auto-compact across plugin/scripts, plugin/loop/*.md and orchestration/*loop-tick.md
-  = ZERO hits, no layer watches it; NOT machine-specific — measured 2026-08-06: B's outer at
-  '100% context used' and quay's own inner at '1% until auto-compact' simultaneously; textbook
-  heartbeat-not-consciousness (假死判据): the criterion measures whether the session MOVES, never
-  whether it can still TAKE IN anything; manager observation 2026-08-06"
-status: todo
+title: "nothing measures context saturation — a session at 100% context is
+  alive, busy, heartbeating and classified HEALTHY, yet may be unable to retain
+  new instructions; session-liveness.sh's state vocabulary is
+  SESSION-{GONE,BACK,IDLE,RESUMED,OVERDUE,STALL,MARKER,STATUS} + REPO-STALL with
+  no 'alive but saturated', and its comment at :112-113 DELIBERATELY excludes
+  the token-count line and the 100% ratio from the criterion (correctly, to stop
+  TUI chrome jitter reading as activity) — so the exclusion is right for its own
+  purpose and leaves the dimension unmeasured; grep for
+  context-used/auto-compact across plugin/scripts, plugin/loop/*.md and
+  orchestration/*loop-tick.md = ZERO hits, no layer watches it; NOT
+  machine-specific — measured 2026-08-06: B's outer at '100% context used' and
+  quay's own inner at '1% until auto-compact' simultaneously; textbook
+  heartbeat-not-consciousness (假死判据): the criterion measures whether the session
+  MOVES, never whether it can still TAKE IN anything; manager observation
+  2026-08-06"
+status: ready
 labels:
   - gap
   - milestone-candidate
