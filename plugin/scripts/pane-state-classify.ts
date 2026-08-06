@@ -27,6 +27,8 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 
 const ENUMERATED_STATES = ["waiting-input", "permission-prompt", "busy", "error-banner", "unknown"];
 
@@ -109,6 +111,212 @@ export function classifyPaneState(paneText: string, opts: { lines?: number } = {
   return { state: "unknown", confidence: 0, region, raw: region };
 }
 
+// ── --check-residue mode (tasks/gap-residue-check-crystallized-as-tool-mode) ─────────────────────
+// "box has text vs actually submitted" must be a TOOL judgment, not role memory (human ruling
+// 2026-08-05, relayed by the manager). The distinguishing criterion is the C-u CLEARING BEHAVIOR
+// (fault 6's mechanized judgment, orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md): a
+// plain-text capture carries no style info, so a gray ghost-suggestion and a real typed-but-
+// unsubmitted line look IDENTICAL in a static snapshot. Only "does C-u make the box empty?" tells
+// them apart:
+//   empty                  — the input line after `❯` is empty (only whitespace / NBSP);
+//   real-unsubmitted-text  — C-u CLEARED the input line (bounded loop, fault 1's ~30 cap);
+//   ghost-suggestion-only  — C-u left the pane BYTE-IDENTICAL through N cycles (fault 6);
+//   unknown                — the probe could not decide (ambiguous partial clear / no prompt line):
+//                            fail loud, never a silent guess (tier-2 philosophy).
+// The runtime probe (side-effectful, tmux) is the judgment; the verdict itself is a PURE function
+// over the capture sequence, so fixtures and tests need no live pane.
+
+export type ResidueState = "empty" | "real-unsubmitted-text" | "ghost-suggestion-only" | "unknown";
+
+/** Bounded C-u cap for the runtime probe — matches send-keys-reliable.sh's RELIABLE_CLEAR_MAX=50
+ * (fault 1: a long multi-line real message can need ~30 C-u). The probe must never loop forever. */
+export const RESIDUE_CLEAR_MAX_DEFAULT = 50;
+
+/** ANSI CSI sequences are stripped from the input-line CONTENT (typed text is plain; the renderer
+ * adds color escapes). The byte-identical ghost comparison below uses the RAW capture, not this. */
+const ANSI_CSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
+const NBSP = " ";
+
+/** The input line: the LAST line of the bottom region carrying the `❯` prompt (matching
+ * send-keys-reliable.sh's `grep '❯' | tail -n 1`). Returns null when no prompt line is present. */
+export function inputLine(paneText: string, lines?: number): string | null {
+  const region = bottomRegion(paneText, lines);
+  const regionLines = region.split("\n");
+  for (let i = regionLines.length - 1; i >= 0; i--) {
+    if (regionLines[i].includes("❯")) return regionLines[i];
+  }
+  return null;
+}
+
+/** Content after the `❯` prompt on the input line, ANSI-stripped and NBSP-stripped (fault 8: an
+ * empty Claude Code input box renders as `❯` + U+00A0, and NBSP is NOT whitespace to the C locale,
+ * so it must be stripped explicitly). Returns null when there is no `❯` prompt line in the bottom
+ * region. */
+export function afterPromptContent(paneText: string, lines?: number): string | null {
+  const line = inputLine(paneText, lines);
+  if (line === null) return null;
+  const idx = line.indexOf("❯");
+  return line.slice(idx + 1).replace(ANSI_CSI_RE, "").replaceAll(NBSP, "");
+}
+
+export type InputResidueStatic = "empty" | "has-text" | "no-input-line";
+
+/** Static examination of a SINGLE pane snapshot. This is the part a static capture can answer —
+ * and no more: "has-text" says nothing about real-vs-ghost (dispatch-review point 1: static text
+ * has no style info), which is exactly why the runtime probe exists. */
+export function classifyInputResidueStatic(paneText: string, lines?: number): InputResidueStatic {
+  const after = afterPromptContent(paneText, lines);
+  if (after === null) return "no-input-line";
+  return after.trim() === "" ? "empty" : "has-text";
+}
+
+export interface ResidueVerdict {
+  state: ResidueState;
+  reason: string;
+}
+
+/** The probe's VERDICT as a pure function over a capture sequence (captures[0] = before; the rest
+ * = the pane after each C-u cycle). This is the fault-6 criterion mechanized:
+ *   empty                          → the box is already empty — no residue to clear;
+ *   some later capture empty       → C-u cleared it → real typed-but-unsubmitted text;
+ *   every capture byte-identical   → C-u had NO effect at all → gray ghost-suggestion (fault 6);
+ *   anything else                  → changed-but-never-emptied → ambiguous, fail loud.
+ * The byte-identical comparison is the task's OWN criterion (AC2: "C-u 循环 N 次 pane 逐字不变"),
+ * deliberately distinct from ADR-016 boundary (c)'s forbidden whole-screen HASH as a STATE
+ * classifier: here the question is "did C-u change anything?", not "what state is the pane in?". */
+export function classifyResidueFromCaptures(captures: string[]): ResidueVerdict {
+  if (!captures.length) return { state: "unknown", reason: "no captures to judge" };
+  const before = captures[0];
+  const staticState = classifyInputResidueStatic(before);
+  if (staticState === "empty") return { state: "empty", reason: "input line after ❯ is empty" };
+  if (staticState === "no-input-line") {
+    return { state: "unknown", reason: "no ❯ prompt line found in the bottom region" };
+  }
+  for (let i = 1; i < captures.length; i++) {
+    if (classifyInputResidueStatic(captures[i]) === "empty") {
+      return { state: "real-unsubmitted-text", reason: `C-u cleared the input line at capture ${i}` };
+    }
+  }
+  if (captures.every((c) => c === before)) {
+    return { state: "ghost-suggestion-only", reason: "input line byte-identical through all C-u cycles (fault 6)" };
+  }
+  return { state: "unknown", reason: "input line changed but never emptied — ambiguous, fail loud" };
+}
+
+export interface ResidueProbeResult {
+  state: ResidueState;
+  reason: string;
+  captures: number;
+}
+
+/** Runtime probe against a pane target: capture → loop C-u + capture (bounded) → judge with
+ * classifyResidueFromCaptures. This turns the fault-6 judgment from a human eyeball into a command
+ * artifact. The probe is bounded (RESIDUE_CLEAR_MAX_DEFAULT) and fail-loud on a target that cannot
+ * be captured or a verdict it cannot make. */
+export function probeResidueTarget(target: string, maxClicks = RESIDUE_CLEAR_MAX_DEFAULT): ResidueProbeResult {
+  const captures: string[] = [];
+  const capture = (): { ok: boolean; out: string; err: string } => {
+    const r = spawnSync("tmux", ["capture-pane", "-p", "-t", target], { encoding: "utf8" });
+    return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "" };
+  };
+  const send = (keys: string): void => {
+    spawnSync("tmux", ["send-keys", "-t", target, keys], { encoding: "utf8" });
+  };
+
+  const first = capture();
+  if (!first.ok) {
+    return { state: "unknown", reason: `capture failed for target ${target} (${first.err.trim() || "no such pane"})`, captures: 0 };
+  }
+  captures.push(first.out);
+  if (classifyInputResidueStatic(first.out) === "empty") {
+    return { state: "empty", reason: "input line after ❯ is empty (probe: no C-u needed)", captures: captures.length };
+  }
+  for (let i = 0; i < maxClicks; i++) {
+    send("C-u");
+    const cur = capture();
+    if (!cur.ok) {
+      return { state: "unknown", reason: `capture failed mid-probe (${cur.err.trim()})`, captures: captures.length };
+    }
+    captures.push(cur.out);
+    if (classifyInputResidueStatic(cur.out) === "empty") {
+      return { state: "real-unsubmitted-text", reason: `C-u cleared the input line at cycle ${i + 1}`, captures: captures.length };
+    }
+  }
+  const verdict = classifyResidueFromCaptures(captures);
+  return {
+    state: verdict.state,
+    reason: `${verdict.reason} (probe ran ${captures.length - 1} C-u cycles, cap ${maxClicks})`,
+    captures: captures.length,
+  };
+}
+
+/** `--check-residue` CLI: emits one JSON line with a `state` field (the measure/band contract reads
+ * `stdout 的 state 字段`). Exit 0 when state is one of the three enumerated states; 1 when the
+ * verdict is `unknown` (fail loud); 2 on usage error.
+ *   file mode   — a real on-disk pane recording; with `--after <file>` the two snapshots give the
+ *                 full three-state judgment; a single snapshot yields `empty` or `unknown`+reason
+ *                 (a static text cannot decide real-vs-ghost);
+ *   target mode — anything else is treated as a pane target and probed live (bounded C-u loop). */
+export function runCheckResidue(argv: string[]): number {
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const flagValue = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    return i !== -1 ? argv[i + 1] : undefined;
+  };
+  const afterFile = flagValue("--after");
+  const maxClicksRaw = flagValue("--max-clicks");
+  const maxClicksParsed = maxClicksRaw ? Number.parseInt(maxClicksRaw, 10) : NaN;
+  // A degenerate cap (non-numeric or < 1) falls back to the default — a 0-click "probe" would
+  // see a single capture and misread real text as ghost (trivially identical), so refuse it.
+  const maxClicks = Number.isFinite(maxClicksParsed) && maxClicksParsed >= 1
+    ? maxClicksParsed
+    : RESIDUE_CLEAR_MAX_DEFAULT;
+  const arg = positional[0];
+
+  const emit = (payload: Record<string, unknown>, exitCode: number): number => {
+    process.stdout.write(JSON.stringify(payload) + "\n");
+    return exitCode;
+  };
+
+  if (!arg) {
+    process.stderr.write(
+      "usage: pane-state-classify.ts --check-residue <pane.txt|target> [--after after.txt] [--max-clicks N]\n",
+    );
+    return 2;
+  }
+
+  if (fs.existsSync(arg)) {
+    const before = fs.readFileSync(arg, "utf8");
+    const staticState = classifyInputResidueStatic(before);
+    if (staticState === "empty") {
+      return emit({ state: "empty", reason: "input line after ❯ is empty", staticState, file: arg }, 0);
+    }
+    if (afterFile && fs.existsSync(afterFile)) {
+      const after = fs.readFileSync(afterFile, "utf8");
+      const verdict = classifyResidueFromCaptures([before, after]);
+      return emit(
+        { state: verdict.state, reason: verdict.reason, staticState, file: arg, afterFile },
+        verdict.state === "unknown" ? 1 : 0,
+      );
+    }
+    // Single static snapshot with text: undecidable without the C-u probe (dispatch-review point
+    // 1). Fail loud with the reason — never silently guess real or ghost.
+    return emit(
+      {
+        state: "unknown",
+        reason:
+          "single static snapshot with text cannot distinguish real residue from a ghost suggestion; run against a live target or pass --after <post-C-u capture>",
+        staticState,
+        file: arg,
+      },
+      1,
+    );
+  }
+
+  const probe = probeResidueTarget(arg, maxClicks);
+  return emit({ ...probe, target: arg, maxClicks }, probe.state === "unknown" ? 1 : 0);
+}
+
 // ── in-file self-check (ADR-018 pattern: prove BOTH the RED and GREEN paths) ──────────────────────
 
 export function selfcheck(): boolean {
@@ -157,6 +365,29 @@ export function selfcheck(): boolean {
   const upperB = "completely different upper\n".repeat(30) + idle;
   check("ac6-region-same-verdict", classifyPaneState(upperA).state === classifyPaneState(upperB).state);
 
+  // ── residue checks (GREEN real + RED relabel, ADR-018) ─────────────────────────────────────────
+
+  // GREEN: an empty input box → empty (no C-u needed).
+  check("residue-empty", classifyResidueFromCaptures([idle]).state === "empty");
+  // GREEN: real typed text, C-u cleared it → real-unsubmitted-text.
+  const realBefore = "line above\n───────────────────────────────\n❯ fix the bug report\n───────────────────────────────\n  status line";
+  const realAfter = "line above\n───────────────────────────────\n❯ \n───────────────────────────────\n  status line";
+  check("residue-real-cleared", classifyResidueFromCaptures([realBefore, realAfter]).state === "real-unsubmitted-text");
+  // GREEN: C-u left the pane byte-identical → ghost-suggestion-only (fault 6 criterion).
+  const ghostPane = "line above\n───────────────────────────────\n❯ Try \"fix lint errors\"\n───────────────────────────────\n  status line";
+  check("residue-ghost-identical", classifyResidueFromCaptures([ghostPane, ghostPane]).state === "ghost-suggestion-only");
+  // RED relabel: an unchanged pane must NOT be read as real-unsubmitted (the mutation a regression
+  // would introduce) and a cleared pane must NOT be read as ghost.
+  check("residue-red-ghost-not-real", classifyResidueFromCaptures([ghostPane, ghostPane]).state !== "real-unsubmitted-text");
+  check("residue-red-real-not-ghost", classifyResidueFromCaptures([realBefore, realAfter]).state !== "ghost-suggestion-only");
+  // RED: changed-but-never-emptied → unknown (ambiguous, fail loud, never a silent guess).
+  check("residue-unknown-ambiguous", classifyResidueFromCaptures(["❯ abc", "❯ ab"]).state === "unknown");
+  // RED: no prompt line in the bottom region → unknown, not a guess.
+  check("residue-unknown-no-prompt", classifyResidueFromCaptures(["a vim help screen", "~ ~ ~"]).state === "unknown");
+  // AC1 reuse: classifyInputResidueStatic distinguishes the static part.
+  check("residue-static-empty", classifyInputResidueStatic(idle) === "empty");
+  check("residue-static-has-text", classifyInputResidueStatic(realBefore) === "has-text");
+
   console.log(`\npane-state-classify --selfcheck: ${pass} passed, ${fail} failed`);
   return fail === 0;
 }
@@ -184,4 +415,10 @@ if (isDirect) {
     const ok = selfcheck();
     process.exit(ok ? 0 : 1);
   }
+  const args = process.argv.slice(2);
+  if (args[0] === "--check-residue") {
+    process.exit(runCheckResidue(args.slice(1)));
+  }
+  const ok = selfcheck();
+  process.exit(ok ? 0 : 1);
 }

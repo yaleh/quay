@@ -2,6 +2,32 @@
 id: gap-telemetry-brackets-vs-subagents-no-slot-visibility
 title: "telemetry in-flight brackets do NOT reflect real concurrency — 5 bracket-holders in-flight (cold-start-key4/ready-pool-floor/red-window/nbsp-fix/session-idle, startedAt 05:19-08:28, all stale red-window leftovers) while the inner actually runs 1 subagent (pane ← 1 agent), so '11 dispatchable slots idle vs 1 running' is INVISIBLE to both layers: the fast-mode-loop-tick state-self-check item ① reads telemetry inProgress[] ≤ 3 (cap) but brackets ≠ subagents (the orchestrator-tick 4b distinction is documented yet the self-check still uses brackets) — the check is DEAD for concurrency (5 brackets ≤ 3 false; even at cap, 5 > 3 would false-RED a healthy 1-agent state); manager measured: telemetry --report in-flight=0 (all outcome-closed) while pane shows ← 1 agent just fan-in'd nbsp-fix — the --task-start/--task-end pair is NOT called in the current dispatch path, telemetry degraded to a historical archive that no longer reflects current state; the only remaining view (batch2-queue-state.md) is hand-written narrative markdown not structural slot state; this is the FOURTH 'writer exists but nobody calls' instance tonight (loop-driver.jsonl no-writer / blocked-signal 90min unconsumed / verification-round.jsonl stopped 05:03), and the COSTLIEST — it directly gates throughput; fix direction: (a) confirm WHO calls --task-start/--task-end in the dispatch path and restore it; (b) self-check item ① is currently a VACUOUS check (in-flight always ≤ 3 trivially — either 0 or stale-brackets), worth its own note because it lets any future concurrency violation pass silently; AC10: +1 => 6->7, pre-friction (nothing hurting — no failure, suite running, inner working, telemetry command exits 0; found by asking the generator 'what range does this criterion quantify' → answer: HISTORY not CURRENT)"
 status: done
+title: "telemetry in-flight brackets do NOT reflect real concurrency — 5
+  bracket-holders in-flight
+  (cold-start-key4/ready-pool-floor/red-window/nbsp-fix/session-idle, startedAt
+  05:19-08:28, all stale red-window leftovers) while the inner actually runs 1
+  subagent (pane ← 1 agent), so '11 dispatchable slots idle vs 1 running' is
+  INVISIBLE to both layers: the fast-mode-loop-tick state-self-check item ①
+  reads telemetry inProgress[] ≤ 3 (cap) but brackets ≠ subagents (the
+  orchestrator-tick 4b distinction is documented yet the self-check still uses
+  brackets) — the check is DEAD for concurrency (5 brackets ≤ 3 false; even at
+  cap, 5 > 3 would false-RED a healthy 1-agent state); manager measured:
+  telemetry --report in-flight=0 (all outcome-closed) while pane shows ← 1 agent
+  just fan-in'd nbsp-fix — the --task-start/--task-end pair is NOT called in the
+  current dispatch path, telemetry degraded to a historical archive that no
+  longer reflects current state; the only remaining view (batch2-queue-state.md)
+  is hand-written narrative markdown not structural slot state; this is the
+  FOURTH 'writer exists but nobody calls' instance tonight (loop-driver.jsonl
+  no-writer / blocked-signal 90min unconsumed / verification-round.jsonl stopped
+  05:03), and the COSTLIEST — it directly gates throughput; fix direction: (a)
+  confirm WHO calls --task-start/--task-end in the dispatch path and restore it;
+  (b) self-check item ① is currently a VACUOUS check (in-flight always ≤ 3
+  trivially — either 0 or stale-brackets), worth its own note because it lets
+  any future concurrency violation pass silently; AC10: +1 => 6->7, pre-friction
+  (nothing hurting — no failure, suite running, inner working, telemetry command
+  exits 0; found by asking the generator 'what range does this criterion
+  quantify' → answer: HISTORY not CURRENT)"
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -153,6 +179,61 @@ slot status (generated 2026-08-06T01:38:46.777Z)
 同形态 scoped 测试 `SLOT-STATUS — 5 stale brackets + 1 real agent ⇒ real_in_flight 1, slots_free 2 (AC5
 regression shape)` 与 `SLOT-STATUS CLI — real git: merged-branch phantom counts stale…` 全绿（45 pass,
 0 fail, 0 cancelled，见下验证）。
+      → **--report --json 新增 reconcile 感知字段**（`fast-mode-telemetry.ts` `loadAndAggregate` 对
+      `inProgress` 做 dry-run reconcile——executor 已消失者进 `reconcilable[]`，其余为 `realInFlight`）；
+      **外层 step 1b 每次收尾无条件跑 `--reconcile`**（`orchestrator-loop-tick.md`）用可观测证据关红窗
+      遗留括号。`--report --json` 实测：`inProgress: 6 | reconcilable: 5 | realInFlight: 1`（5 红窗遗留
+      + 1 真实 agent）。新任务 `--task-start`（inner step 3.5 强制）正确开括号。
+- [x] AC2: **空槽机械可见**——外层能从遥测（或等价结构信号）读出「还剩几个并发槽」，不再依赖内层
+       手写叙事 markdown
+      → 新增 **`--slots --cap N`** 子命令（`fast-mode-telemetry.ts`），输出 `bracketsInFlight /
+      reconcilable / realInFlight / slotsTotal / slotsRemaining`；`--report --json` 的 `realInFlight` 即
+      Contract measure。两个 tick 文档都引用 `--slots`（`fast-mode-loop-tick.md` 步骤 3.5 + 必报、
+      `orchestrator-loop-tick.md` 步骤 1b）。
+- [x] AC3: **状态自检①从装饰变判据**——in-flight 反映真实在飞（不再恒真）；并发违规能被判据抓住
+       （5 个遗留括号 > cap 3 不应误判健康态，1 个真实 agent 不应误判满负荷）
+      → `fast-mode-loop-tick.md` 状态自检①改为读 **`realInFlight`**（`--slots --cap` 的 real-in-flight /
+      `--report --json` 的 `realInFlight`），**不再用原始 `inProgress[]` 括号数**（括号 ≠ subagent）。
+      `orchestrator-loop-tick.md` 步骤 4b 拆三种「在飞」并注明自检①必须读真实在飞。doc 断言测试：
+      `slot-visibility.test.mjs`「item ① 必须读 realInFlight、不得是恒真空原始括号检查」通过。
+- [x] AC4: **--task-start/--task-end 调用恢复**——派发路径在派发/收尾时正确调用这对（遥测从历史归档
+       变回当前状态；阻塞信号消费族同源）
+      → WHO 已确认并写进文档机制：**inner 步骤 3.5 派发时调 `--task-start`（强制）**；**外层 step 1b
+      收尾时调 `--task-end` + `--reconcile`（无条件）**（`orchestrator-loop-tick.md`）。`--reconcile`
+      是机械安全网——即使 `--task-end` 被漏调，executor 已消失的括号也会被关，遥测从「历史归档」变回
+      「当前状态」。阻塞信号消费族（`--detect-stop`/`--clear`/`--escalate-stale`）读同一
+      `.quay/inner-blocked.json` + `.workflow-events/` 同源。
+- [x] AC5: **回归控制**——今晚形态（5 红窗遗留括号 + 1 真实 agent）下，外层能看到「11 槽位闲置」而非
+       「满负荷」或「空」（实测输出贴任务体）
+      → 实测输出（`slot-visibility.test.mjs` AC2/AC3/AC5 用例 + 独立 demo 复现）：
+      ```
+      node ... fast-mode-telemetry.ts --slots --cap 3 --json --root /tmp/slot-demo
+      { "bracketsInFlight": 6, "reconcilable": 5, "realInFlight": 1, "slotsTotal": 3, "slotsRemaining": 2 }
+      ```
+      空槽 = `dispatchable_disjoint − realInFlight` = 12 − 1 = **11 槽位闲置**（非「满负荷」——
+      slotsRemaining 2 非 0；非「空」——realInFlight 1 非 0）。
+- [x] AC6: **AC10 诚实记账**——pre-friction（无东西在疼），计 +1 ⇒ 6 → 7
+      → `tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md` AC10 记账段追加
+      「2026-08-06：`gap-telemetry-brackets-vs-subagents-no-slot-visibility` 立案为 pre-friction 观测轴，
+      照 SYNTHESIS-axis-generation §3 判据 **+1 ⇒ 6 → 7**」。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → 新测试 `plugin/test/slot-visibility.test.mjs`：`// @test-group governance` + `import { test } from
+      "node:test"`；8 用例覆盖 AC1/AC2/AC3/AC5/AC8/AC9。scoped 套件（79 tests）全绿。
+- [x] AC8: **task-over-90m 判据源统一**——over-90m 用遥测的 in-progress（真实在飞），不再用与遥测矛盾
+       的另一个源；任务真正 done/reconcile 后不触发假 over-90m
+      → `detectTaskOver90m`（`inner-blocked-signal.ts`）reconcile 感知：对 inProgress 施加保守的
+      `makeOver90ExecutorGone`（分支已 merge **或**有 durable merge record ⇒ 工作已落地 ⇒ 跳过）。
+      `slot-visibility.test.mjs` AC8 用例：merged-done（fan-in 落地后分支已删）**不**触发假 over-90m，
+      live-slow（打开 worktree）仍触发；非 git 店 fail-closed 仍触发（负控制不回归）。
+- [x] AC9: **阻塞信号超时自动升级**——一条没人消费的阻塞信号不应让 inner 无限期等（自动升级为需要
+       人工介入/超时归档，不无限冻结）；今晚 92 分钟假阻塞形态消除
+      → 新增 **`--escalate-stale`**（`inner-blocked-signal.ts`）：block 超龄（默认 30m）自动归档——记遥测
+      等待时长 + 写 `.quay/blocked-escalations.jsonl` + 移除 block 文件（底层条件若仍成立，下一 tick
+      `--detect-stop` 写新 block 重新验证，每段等待有界）。外层 step 1b 无条件调用。实测：
+      ```
+      inner-blocked-signal: ESCALATED stale block (gap-demo, ruling-required) — waited 31.0m ≥ 30m; archived
+      ```
+      block 文件移除（不无限冻结）。92 分钟假阻塞形态：AC8 消除假 over-90m 源头 + AC9 有界每段等待。
 
 ## Definition of Done
 
@@ -164,18 +245,29 @@ regression shape)` 与 `SLOT-STATUS CLI — real git: merged-branch phantom coun
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
-- plugin/scripts/fast-mode-telemetry.ts（reconcile 红窗遗留 + 括号闭合 + 空槽信号）
-- plugin/loop/fast-mode-loop-tick.md（状态自检①：in-flight 从括号改为真实并发信号）
-- plugin/loop/orchestrator-loop-tick.md（步骤 4b：括号 vs subagent 的机械区分落地到自检）
-- tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md（AC6 记账引用）
+- plugin/scripts/fast-mode-telemetry.ts（reconcile 红窗遗留 + 括号闭合 + 空槽信号：`--report` 增
+  `reconcilable`/`realInFlight`；新增 `--slots` 子命令）
+- plugin/scripts/inner-blocked-signal.ts（AC8：over-90m reconcile 感知——已落地任务不再假触发；
+  AC9：新增 `--escalate-stale` 阻塞信号超时自动升级）
+- plugin/loop/fast-mode-loop-tick.md（状态自检①：in-flight 从括号改为真实并发信号 `realInFlight`）
+- plugin/loop/orchestrator-loop-tick.md（步骤 1b：`--reconcile` + `--escalate-stale`；步骤 4b：括号 vs
+  subagent 的机械区分落地到自检）
+- tasks/gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash.md（AC6 记账引用 6→7）
+- tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（self-touch：AC 勾选 + invoke 证据）
+
+## Test-Files
+
+- plugin/test/slot-visibility.test.mjs（AC1/AC2/AC3/AC5/AC8/AC9 新测试）
+- plugin/test/fast-mode-telemetry.test.mjs
+- plugin/test/inner-blocked-signal.test.mjs
 
 ## Contract
 
-measure   slot_visibility = `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json` stdout 的 inProgress 数
+measure   slot_visibility = `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json` stdout 的 `realInFlight` 数（reconcile 感知——原始 `inProgress[]` 括号数扣减 executor 已消失者；状态自检①读它，非原始括号）
 band      slot_visibility = 真实并发（红窗遗留 reconcile 后 ≤ cap；与 pane ← agent 对齐）
-invariant brackets_reflect_subagents = 1（in-flight 括号数与真实 subagent 数一致，非恒 0/恒 5）
-invoke    `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json`
-control   构造 5 红窗遗留括号 + 1 真实 agent ⇒ 空槽可见为 2 非「满负荷」（AC5）；reconcile 后括号闭合
+invariant brackets_reflect_subagents = 1（`--slots` 的 real-in-flight 与真实 subagent 数一致，非恒 0/恒 5）
+invoke    `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --json`
+control   构造 5 红窗遗留括号 + 1 真实 agent ⇒ `--slots --cap 3` 报 real-in-flight 1 / slots-remaining 2 非「满负荷」（AC5）；reconcile 后括号闭合
 resume    遥测对齐与自检修正分两步提交，任一步完成即写盘
 
 ## Dispatch review

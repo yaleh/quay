@@ -63,7 +63,7 @@ default_projects() {
   name="$(basename "$root")"
   session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$root/orchestration/session-liveness.env" 2>/dev/null || true)
   [ -n "$session" ] || session="${name}-0"
-  launch="claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions"
+  launch="claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions --prompt-suggestions false"
   if [ -f "$root/plugin/loop/orchestrator-loop-tick.md" ]; then
     drive="执行 $root/plugin/loop/orchestrator-loop-tick.md 中的 tick 指令"
   else
@@ -253,7 +253,7 @@ if [ -n "${ADD_PROJECT:-}" ]; then
     local_session=$(awk -F= '/^SESSION_TMUX_SESSION=/{print $2; exit}' "$ADD_PROJECT/orchestration/session-liveness.env" 2>/dev/null || true)
     [ -n "$local_session" ] || local_session="${local_name}-0"
     local_drive="执行 $ADD_PROJECT/orchestration/orchestrator-loop-tick.md 中的 tick 指令"
-    local_line="${local_name}|${ADD_PROJECT}|${local_session}|outer|claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions|${local_drive}|"
+    local_line="${local_name}|${ADD_PROJECT}|${local_session}|outer|claude-deepseek --model deepseek-v4-flash --permission-mode bypassPermissions --prompt-suggestions false|${local_drive}|"
     if [ -f "$CONFIG_FILE" ]; then
       # avoid duplication by name
       if ! grep -q "^${local_name}|" "$CONFIG_FILE"; then

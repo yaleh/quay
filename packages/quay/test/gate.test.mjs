@@ -26,11 +26,12 @@ import { gateRegistry, listGates } from "../src/gate/registry.ts";
 import { runGate } from "../src/gate/engine.ts";
 import { resolveGateLogPath, runGateLogQuery, DEFAULT_GATE_LOG_RELATIVE_PATH } from "../src/gate/gate-log.ts";
 import { makeTmpDir, makeTmpWorkspace } from "../../../plugin/test/helpers/tmp-workspace.mjs";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 // ---------------------------------------------------------------------------
 // Helpers

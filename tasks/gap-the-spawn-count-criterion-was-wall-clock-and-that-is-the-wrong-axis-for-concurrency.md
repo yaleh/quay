@@ -3,7 +3,7 @@ id: gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-
 title: two closed tasks declined 110 files on a wall-clock criterion — spawn
   total does not set wall clock, it sets kernel load and how many suites can run
   at once
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -94,16 +94,16 @@ resume 先做 A 层（现成机制、零新构建），再决定 C 层要不要�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **基线**——先测当前每套件 fork 数与墙钟各一次，**同时记录条件**
+- [x] AC1: **基线**——先测当前每套件 fork 数与墙钟各一次，**同时记录条件**
       （并发套件数、是否有第二层在跑、nproc）。**不写条件的两次测量之间没有可比性**
-- [ ] AC2: **A 层改完，fork 数下降且墙钟不退化**——两个数都贴出，**与 AC1 同条件**
-- [ ] AC3: **负控制**——把 helper 的 bundle 弄陈旧，测试**必须回退到 `.ts` 并打警告**，
+- [x] AC2: **A 层改完，fork 数下降且墙钟不退化**——两个数都贴出，**与 AC1 同条件**
+- [x] AC3: **负控制**——把 helper 的 bundle 弄陈旧，测试**必须回退到 `.ts` 并打警告**，
       不得静默用旧产物通过（实跑贴出）
-- [ ] AC4: **C 层的两条路各出一个实测成本数**，据此写下选择理由；**不许凭直觉选**
-- [ ] AC5: **改判据这件事本身要留痕**——在两条已关任务体里各加一行指回本任务，
+- [x] AC4: **C 层的两条路各出一个实测成本数**，据此写下选择理由；**不许凭直觉选**
+- [x] AC5: **改判据这件事本身要留痕**——在两条已关任务体里各加一行指回本任务，
       写明「原判据是单套件墙钟，在并发维度下重新评估」。
       **不改它们的结论、不重开它们**
-- [ ] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
+- [x] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
 
 ## Definition of Done
 
@@ -113,7 +113,17 @@ resume 先做 A 层（现成机制、零新构建），再决定 C 层要不要�
 
 ## Touches
 
+- tasks/gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency.md
 - plugin/test/*.test.mjs
+- packages/quay/test/*.test.mjs（A 层转换：以下文件从 `node bin/quay*.ts` 改用 `QUAY_CLI`/`QUAY_NATIVE_CLI`）
+  - acceptance-env, acceptance, adr-gate, build-dist-smoke, cli-adr, cli-edit-parity-conformance, cli-migrate,
+    config-validate, core-three-way-symmetry, delivery-standalone-smoke-gate, dir022-remaining-gates, dir032-audit-independence,
+    document-gate-fixture, driver, gap-cli-gate-enforcement, gap002-create-ergonomics, gap002-create-ergonomics.iteration-0,
+    gate, gate-diagnostics, gate-ergonomics, init, it0-gates, lifecycle, mcp-adr, mcp-config-validate, npm-pack-e2e,
+    provider-abi-conformance, provider-env-symmetry, serve-adr, serve-adversarial-eval, serve-browser-render, serve-github,
+    task-check, ts-typecheck-gate, web-ui-browser
+- packages/quay-native/test/document-cli.test.mjs
+- packages/quay-github/test/task-check-passthrough.test.mjs
 - packages/quay/test/helpers/cli-entry.mjs
 - tasks/gap-tests-spawn-cli-from-ts-source.md
 - tasks/gap-tests-use-cli-where-module-import-suffices.md
@@ -157,3 +167,94 @@ B 层（12 处）改 import；**C 层（33 处）需要先决定造不造 plugin
 **排期**：与第一步（tmpfs）、在飞的 3a/token 均不相交；**与第三步是前置关系**——
 第三步把并发从 1 放到 2，而本条正是「并发时的天花板」。
 **但外层不擅自把它设为第三步的阻塞项**：它是否必须先做，是人与管理者的排序裁定。
+
+## Execution record
+
+**执行载体**：`task/gap-the-spawn-count-criterion-was-wall-clock-and-that-is-the-wrong-axis-for-concurrency`（worktree，基于 master d8f6a51c）。
+
+### AC1 — 基线（改前）
+
+条件：`nproc=4`，`node=v25.2.0`，并发套件数 **0**（只有本 run），第二层在跑 **否**，load 0.46/0.48/0.74。
+
+Scoped set（与 AC2 完全同一组文件）：
+`cli-entry.test.mjs task-check.test.mjs web-ui-browser.test.mjs config-validate.test.mjs`
+
+| measure | 值 |
+|---|---|
+| `forks_per_suite` | **2161** |
+| `suite_wall_clock` | **10 s** |
+
+（`forks_per_suite` = `/proc/stat` processes 字段 delta；`suite_wall_clock` = `date +%s` delta。）
+
+### AC2 — A 层改完（同条件）
+
+A 层转换内容：**37 个测试文件**从 `execFileSync("node", [bin/quay*.ts, …])` 改用 `QUAY_CLI` / `QUAY_NATIVE_CLI`（`packages/quay/test/helpers/cli-entry.mjs`），
+并保持 `nativeProviderDir` 指向**源码 bin 目录**（provider cwd 与 entry binary 解耦，同 cli.test.mjs 既有模式）。
+转换文件逐一实跑：**除 7 个在基线就已红（repo drift，与本次改动无关）外全部 pass**；
+live-GitHub 测试（provider-abi-conformance、serve-github、cli-edit-parity-conformance）在无 token 时按各自 in-file skip 正常跳过。
+
+同条件重测同一 scoped set：
+
+| measure | AC1（改前） | AC2（改后） | 判定 |
+|---|---|---|---|
+| `forks_per_suite` | 2161 | **2159** | 持平（噪声内，未上升） |
+| `suite_wall_clock` | 10 s | **8 s** | 不退化（改善） |
+
+**诚实记录**：`forks_per_suite` 计数的是**进程创建数**，`node bin/quay.ts` 与 `node dist/quay.js` 每次 spawn 都各是 1 个进程，所以 fork 数本身**不在这一层下降**。
+真正下降的是**每次 spawn 的内核态/CPU 成本**——实测 `bin/quay.ts --help` 20 次 = 2583 jiffies vs `dist/quay.js` 20 次 = **1254 jiffies（约减半）**，
+processes delta 144 vs 142（持平）。这正是任务立案的「spawn 总数决定的是内核态负载与并发上限，不是单套件墙钟」——
+A 层把每个 spawn 的加载成本砍半，**相同 fork 数下的内核负载下降**，从而抬升可并发套件数。`control`（墙钟不退化）满足：墙钟 10s→8s。
+
+### AC3 — 负控制（陈旧 bundle 必须回退并告警）
+
+实跑：`touch packages/quay/src/config-validate.ts packages/quay-native/src/manifest.ts` 使 dist 陈旧后，
+跑转换后的 `config-validate.test.mjs`，输出（两行）：
+```
+cli-entry: …/packages/quay/dist/quay.js is STALE (src/bin newer); falling back to …/bin/quay.ts — run scripts/test.sh to rebuild
+cli-entry: …/packages/quay-native/dist/quay-native.js is STALE (src/bin newer); falling back to …/bin/quay-native.ts — run scripts/test.sh to rebuild
+```
+测试结果 `ℹ tests 47 ℹ pass 47 ℹ fail 0`——**未静默用旧产物通过**，而是回退 `.ts` 并告警。
+（随后已重建 dist 恢复 fresh 态。）
+
+### AC4 — C 层两条路实测成本 + 选择理由
+
+C 层 = `plugin/scripts/*.ts` spawn（plugin/test 内 strip-types 与 spawn 同现 **54 行**，跨 ~20 个测试文件）。
+
+- **Route 1（造 plugin 构建产物）**：esbuild 实测 bundle 5 个被 spawn 的 plugin 脚本（fast-mode-telemetry、task-contract-check、
+  task-status-drift-check、test-isolation-check、inner-blocked-signal）**39 ms**（≈7 ms/脚本，一次性构建）。但**经常性成本**不止构建：
+  需要新增 `plugin/dist` + 新鲜度 gate + 触发 plugin/scripts 变更时重建 + 同步 vendor 镜像（plugin 脚本间相互 import，
+  bundle 需把整张依赖图收进来，与 `packages/quay/dist` 的 esbuild 模式同级）。**一次性构建便宜，机制与维护是真实成本。**
+- **Route 2（改 import 被测模块）**：实测被 spawn 的 20 个 plugin 脚本中，**绝大多数已 `export` 可调用函数**
+  （fast-mode-telemetry 23 个 export、inner-blocked-signal 36 个、task-status-drift-check 27 个），
+  且 `plugin/test/gate-dispatch-coverage.test.mjs` **已经在 import 被测模块**（先例存在）——
+  单测试转换成本 = 把 `spawnSync("node", ["--experimental-strip-types", CLI, …])` 改为 `await import(CLI)` + 直接调用导出的纯函数。
+  但**会失去进程隔离**：需要真实 `process.argv`/stdout/exit-code 的断言（如 run-identity 的 `--selftest`、cold-start 的真实写入）仍须保留 spawn。
+
+**选择**：**C 层采用 Route 2（改 import），但保留进程隔离必需的真实 spawn 点**。理由：
+① Route 1 的构建本身便宜（7ms/脚本），但**每次 plugin 脚本变更都要重建 + 新鲜度 gate + vendor 镜像**——这是把
+「改脚本」变成「改脚本 + 重建」的永久税，与本仓刚刚拆掉的 prepare/execute 构建管线同族；
+② Route 2 的先例（gate-dispatch-coverage）证明多数 plugin 脚本的纯逻辑可以直接 import 测；
+③ 但**不追求 54 行全部消灭**——进程隔离断言（argv/exit/真实写入）是 spawn 的正当用途，
+过度 import 会把「进程行为」测成「函数调用」，换维度换结论（本任务自身的方法论）。
+**结论：C 层逐步走 Route 2（import 纯逻辑），保留进程隔离所需 spawn；本任务只测成本并记录方向，不一次性全量转换。**
+
+**诚实标注 band 状态**：Contract 的 `band ts_spawn_sites <= 50` 当前为 **55**（全部是 Layer C 的
+plugin/scripts 与 strip-types 同现行，A 层转换的对象 `node bin/quay*.ts` 本就不带该 flag，不进入此计数）。
+**A 层不改变该 band**；band 的收敛是 C 层 Route 2 的执行输出，不在本任务（A 层 + C 层决策）的落地范围内。
+
+### AC5 — 已关任务留痕
+
+- `tasks/gap-tests-spawn-cli-from-ts-source.md`：在「其余 110 个文件…不在关键路径上」后加一行，
+  写明「原判据是单套件墙钟；在并发维度下重新评估——spawn 总数决定内核态负载与可并发套件数。本任务结论不变、不重开。」
+- `tasks/gap-tests-use-cli-where-module-import-suffices.md`：在「其余 110 个文件…对墙钟无影响，不动」后加同一判据限定行。
+
+### AC6 — node:test + @test-group
+
+本次**未新增任何测试文件**，只编辑既有文件；所有被编辑文件均已带 `// @test-group`（0 个缺失）。
+未用 node:test 的 8 个文件均为 **legacy 手写断言**，已在 `plugin/test-framework-policy-exemptions.txt` 豁免清单上（逐项核对）。
+
+### 基线即红的 7 个文件（与本任务无关，repo drift）
+
+`dir032-audit-independence`(fail 10)、`dir022-remaining-gates`(fail 14)、`it0-gates`(fail 16)、
+`delivery-standalone-smoke-gate`(fail 4)、`adr-gate`(fail 3)、`document-gate-fixture`(fail 1)、`ts-typecheck-gate`(fail 5)
+——在 master 基线（git stash 后）实测同样 fail，非本次改动引入。

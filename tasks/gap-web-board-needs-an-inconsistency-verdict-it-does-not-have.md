@@ -2,7 +2,7 @@
 id: gap-web-board-needs-an-inconsistency-verdict-it-does-not-have
 title: /board must join intent, execution and landing — and decide whether to
   reuse the drift checker or reimplement its judgment
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -207,6 +207,56 @@ test("AC4: every candidate title round-trips; derived charset documented", () =>
   }
 });
 
+// --- AC4 NEGATIVE CONTROL — deterministic stale-read reproduction -----------
+
+test("AC4 negative control: same-(mtimeMs,size) cache key must NOT serve a stale title after a same-size rewrite", () => {
+  // gap-native-store-title-roundtrip-nondeterministic-failures.
+  //
+  // The store's get() parse cache is keyed by (mtimeMs, size) — a heuristic,
+  // not a content identity. Two writes to the SAME id with the SAME byte size
+  // that land in the same mtime tick collide on that key (e.g. `title: aaa`
+  // → `title: bbb`). Before the store invalidated the cache on write, the
+  // second get() returned the PREVIOUS title — the read-after-write staleness
+  // that made AC4's charset derivation fail on a RANDOM plain-letter candidate
+  // on every run (the candidates in the `a<ch>b` family are all same-size, so
+  // whichever consecutive pair shared an mtime tick lost its round-trip).
+  //
+  // This control FORCES the collision deterministically by patching
+  // fs.statSync to return ONE fixed (mtimeMs, size) for the RT.md file, instead
+  // of relying on filesystem write timing. It is RED on the pre-fix store
+  // (get() serves the stale "aaa") and GREEN on the fixed store (write()
+  // invalidates the cache → the trailing get() re-reads fresh "bbb").
+  const { store, tasksDir } = makeStore();
+  const originalStatSync = fs.statSync;
+  const FIXED_MTIME = 1_600_000_000_000; // arbitrary but fixed — same every stat
+  const FIXED_SIZE = 42;                 // arbitrary but fixed — same every stat
+  try {
+    fs.statSync = (p) =>
+      String(p).endsWith("RT.md")
+        ? { mtimeMs: FIXED_MTIME, size: FIXED_SIZE }
+        : originalStatSync(p);
+    // Prime the cache with a first title under the colliding key.
+    const first = roundTrip(store, tasksDir, "aaa");
+    assert.equal(first.ok, true, `prime write must round-trip (stale-read control setup)`);
+    // Rewrite the SAME id with a SAME-size title ("bbb" is also 3 bytes, so the
+    // file size is byte-for-byte identical; the patched statSync keeps mtimeMs
+    // identical too). The (mtimeMs,size) cache key therefore COLLIDES with the
+    // primed entry — a get() that trusts the key would return "aaa".
+    store.write("RT", { title: "bbb", status: "todo" });
+    const { parsed } = readFrontmatter(tasksDir, "RT"); // fresh disk read
+    assert.equal(parsed.title, "bbb", `on-disk title must be the new one`);
+    const got = store.get("RT"); // the store's (possibly cached) view
+    assert.equal(got?.title, "bbb",
+      `stale-read control: a same-(mtimeMs,size) rewrite must serve the NEW title from the store. ` +
+      `store view returned ${JSON.stringify(got?.title)} — if "aaa", the store served a stale ` +
+      `parse-cache entry (read-after-write staleness) and the write-side cache invalidation is ` +
+      `missing.`);
+  } finally {
+    fs.statSync = originalStatSync;
+    fs.rmSync(tasksDir, { recursive: true, force: true });
+  }
+});
+
 // --- AC5 — full-store regression (real parser scan, 0 failures) ------------
 
 test("AC5: real-store scan — 0 parse failures; hazardous titles read back unchanged", () => {

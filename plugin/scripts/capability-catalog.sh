@@ -156,6 +156,7 @@ declare -A QUESTION=(
   [task-schema.ts]="Is a task body a valid quay task per the canonical schema?"
   [task-status-drift-check.ts]="Has any task's status drifted from its evidence?"
   [test-file-snapshot.sh]="Does the current test-file set equal baseline + declared additions (relative-baseline)?"
+  [test-file-baseline.ts]="What is the fork-baseline test-file snapshot a task's global-count assertion must be judged against (baseline ∪ declared touch additions, never an absolute count)?"
   [test-framework-policy-check.sh]="Do new tests use node:test, and is the exemption list shrinking (ratchet)?"
   [test-framework-policy-check.ts]="Do new tests use node:test and carry @test-group (mechanical policy)?"
   [test-isolation-check.sh]="Is every test isolated per the test-isolation contract (and is the violation ratchet shrinking)?"

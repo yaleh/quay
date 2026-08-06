@@ -132,6 +132,8 @@ import {
   getBaseCommit,
   readAllEvents,
   aggregate,
+  isBranchMerged,
+  reconcileInFlight,
 } from "./fast-mode-telemetry.ts";
 import { classifyPaneState } from "./pane-state-classify.ts";
 
@@ -223,6 +225,40 @@ export const BLOCKED_RECORD_SCHEMA = Object.freeze({
 
 /** runId for a blocked-wait telemetry event is used verbatim as a path component — must be safe. */
 const RUN_ID_SAFE_RE = /^[A-Za-z0-9._-]+$/;
+
+// ── Blocked-signal timeout escalation (gap-telemetry-brackets-vs-subagents-no-slot-visibility, AC9) ──
+// A blocked signal nobody consumes must not let inner wait forever (the 92-minute false-block class
+// tonight). `--escalate-stale` bounds each blocking episode: a block older than the threshold is
+// auto-archived — the wait duration is recorded into telemetry and an escalation line appended to
+// `.quay/blocked-escalations.jsonl` — so the block file cannot persist indefinitely. The underlying
+// stop condition is untouched: if it genuinely persists, the next `--detect-stop` writes a FRESH
+// block with a fresh `since`, re-validating the wait rather than freezing on a stale one.
+
+/** Default block-age threshold beyond which a block is auto-escalated (30 minutes). */
+export const DEFAULT_BLOCKED_ESCALATION_MS = 30 * 60 * 1000;
+
+/** Filename of the append-only escalation log under `<root>/.quay/`. */
+export const ESCALATION_LOG_FILENAME = "blocked-escalations.jsonl";
+
+/**
+ * Path to the escalation log for a root (always the shared/main checkout, like the block file).
+ * @param {string} root
+ * @returns {string}
+ */
+export function escalationLogPath(root) {
+  return path.join(root, ".quay", ESCALATION_LOG_FILENAME);
+}
+
+/**
+ * Whether a block record is stale (older than the escalation threshold). PURE.
+ * @param {object|null} rec
+ * @param {number} [nowMs]
+ * @param {number} [thresholdMs]
+ * @returns {boolean}
+ */
+export function isBlockStale(rec, nowMs = Date.now(), thresholdMs = DEFAULT_BLOCKED_ESCALATION_MS) {
+  return rec != null && typeof rec.since === "number" && nowMs - rec.since >= thresholdMs;
+}
 
 // ── Shared-root resolution ─────────────────────────────────────────────────────────────────────────────
 
@@ -523,6 +559,53 @@ export function clearBlockedRecord(root, target = DEFAULT_TARGET) {
   return { cleared: true, record: rec, durationMs, telemetryPath };
 }
 
+/**
+ * Auto-escalate a blocked signal nobody consumed (gap-telemetry-brackets-vs-subagents-no-slot-
+ * visibility, AC9). When a block record is older than the escalation threshold, record the wait
+ * duration into telemetry, append an escalation line to `.quay/blocked-escalations.jsonl`, and
+ * remove the block file — bounding the episode so inner cannot wait forever on a stale signal.
+ *
+ * NOT stale / no block ⇒ no-op (the block file is untouched). Fail-closed on telemetry loss: if the
+ * wait duration cannot be recorded, the block is NOT removed (same rule as clearBlockedRecord).
+ *
+ * @param {string} root
+ * @param {string} [target]
+ * @param {{thresholdMs?: number, nowMs?: number}} [opts]
+ * @returns {{escalated: boolean, reason: string, record?: object|null, ageMs?: number, thresholdMs?: number, durationMs?: number, telemetryPath?: string, escalationPath?: string}}
+ */
+export function escalateStaleBlock(root, target = DEFAULT_TARGET, { thresholdMs = DEFAULT_BLOCKED_ESCALATION_MS, nowMs = Date.now() } = {}) {
+  const rec = readBlockedRecord(root, target);
+  if (!rec) return { escalated: false, reason: "no-block", record: null };
+  const ageMs = nowMs - rec.since;
+  if (ageMs < thresholdMs) return { escalated: false, reason: "not-stale", record: rec, ageMs, thresholdMs };
+  const clearedAtMs = nowMs;
+  const durationMs = Math.max(0, clearedAtMs - rec.since);
+  const telemetryPath = emitBlockedTelemetry(root, buildBlockedEvent({
+    taskId: rec.taskId,
+    reason: rec.reason,
+    question: rec.question,
+    sinceMs: rec.since,
+    clearedAtMs,
+    baseCommit: getBaseCommit(root),
+    root,
+    target,
+  }));
+  const esc = {
+    taskId: rec.taskId,
+    reason: rec.reason,
+    question: rec.question,
+    sinceMs: rec.since,
+    escalatedAtMs: clearedAtMs,
+    durationMs,
+    target,
+  };
+  const f = escalationLogPath(root);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.appendFileSync(f, JSON.stringify(esc) + "\n", "utf8");
+  fs.rmSync(blockedFilePath(root, target), { force: true });
+  return { escalated: true, record: rec, ageMs, thresholdMs, durationMs, telemetryPath, escalationPath: f };
+}
+
 // ── Mechanical stop-condition detection (gap-the-blocked-channel-has-a-writer-nobody-calls, AC1) ───────
 
 /**
@@ -677,6 +760,49 @@ export async function detectRulingRequiredStall(root, { transcriptPath, nowMs = 
 }
 
 /**
+ * Whether the task's work has a durable merge record in git history — a merge commit whose message
+ * names `task/<taskId>` (e.g. `Merge branch 'task/<taskId>'`). This survives `git branch -d` after
+ * fan-in, which `isBranchMerged` alone does NOT (that helper requires the branch ref to still exist).
+ * Any git failure → false (never a positive "landed" signal from an unavailable source).
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {boolean}
+ */
+export function hasMergeRecord(root, taskId) {
+  const branch = `task/${taskId}`;
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--all", "--format=%H", "--merges", "--grep", branch], {
+      encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The over-90m executor probe (gap-telemetry-brackets-vs-subagents-no-slot-visibility, AC8).
+ * CONSERVATIVE, fail-closed toward KEEP (fire over-90m): a bracket is closed as "work landed" ONLY
+ * on positive evidence of a merge — either the live branch ref merged into HEAD (`isBranchMerged`)
+ * or a durable merge record names the branch (`hasMergeRecord`, survives fan-in branch deletion).
+ * This is deliberately NARROWER than --reconcile's `makeDefaultExecutorGone`: a crash leftover whose
+ * worktree is gone but whose branch was never merged is still a legitimate over-90m candidate
+ * (abort + needs-human), and `--reconcile` closes it separately. The false-positive class this
+ * removes is the one the manager measured — a task whose work ALREADY landed (fan-in merged) but
+ * whose `--task-end` was never written, so the stale bracket sat in inProgress and fired a fake
+ * over-90m that froze inner for 44+48 minutes.
+ * @param {string} root
+ * @returns {(rec: {taskId: string}) => {gone: boolean, reason: string}}
+ */
+export function makeOver90ExecutorGone(root) {
+  return (rec) => {
+    if (isBranchMerged(root, rec.taskId)) return { gone: true, reason: "branch-merged" };
+    if (hasMergeRecord(root, rec.taskId)) return { gone: true, reason: "merge-record" };
+    return { gone: false, reason: "no-positive-done-evidence" };
+  };
+}
+
+/**
  * Detect a task in-progress over the 90-minute budget (reason "task-over-90m").
  *
  * Mechanical: reads the SAME `.workflow-events/` store the tick's own `--task-start`/`--task-end`
@@ -684,15 +810,26 @@ export async function detectRulingRequiredStall(root, { transcriptPath, nowMs = 
  * is the inner-state.sh OVER90 signal (a task the outer already flags) made into a block: the
  * tick MUST abort the subagent and wait (no inner retry).
  *
+ * AC8 (gap-telemetry-brackets-vs-subagents-no-slot-visibility): the inProgress source is filtered
+ * through a RECONCILE-AWARE verdict so a bracket whose work has LANDED (the task's branch was merged
+ * into HEAD — fan-in done) does not fire a false over-90m even before `--reconcile` runs. This is
+ * the exact false-positive class the manager measured (cold-start-key4: fan-in 05:52 landed, then a
+ * fake over-90m block froze inner 44 min). The probe is deliberately conservative (only positive
+ * merge evidence closes) so a genuinely slow task with a live executor still fires.
+ *
  * @param {string} root
+ * @param {{executorGone?: (rec: {taskId: string}) => {gone: boolean, reason: string}}} [opts]
  * @returns {Promise<{taskId: string, reason: "task-over-90m", question: string, evidence: string[]} | null>}
  */
-export async function detectTaskOver90m(root) {
+export async function detectTaskOver90m(root, opts = {}) {
   const events = [];
   for await (const e of readAllEvents(root)) events.push(e);
   const nowMs = Date.now();
   const rep = aggregate(events, { nowMs });
-  const over = rep.inProgress.filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS);
+  if (rep.inProgress.length === 0) return null;
+  const executorGone = opts.executorGone ?? makeOver90ExecutorGone(root);
+  const { kept } = reconcileInFlight(rep.inProgress, { executorGone });
+  const over = kept.filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS);
   if (over.length === 0) return null;
   const p = over[0];
   const mins = ((nowMs - p.startedAtMs) / 60_000).toFixed(1);
@@ -700,7 +837,7 @@ export async function detectTaskOver90m(root) {
     taskId: p.taskId,
     reason: "task-over-90m",
     question: `task ${p.taskId} has been in-progress ${mins}m (>90m) — rule on abort vs continue (no inner retry), then run --clear`,
-    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `in-progress ${over.length} task(s) over budget`],
+    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `real in-flight ${over.length} task(s) over budget (reconcile-aware)`],
   };
 }
 
@@ -932,6 +1069,7 @@ Usage:
   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--transcript <path>] [--pane <path>]
   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
+  node --experimental-strip-types inner-blocked-signal.ts --escalate-stale [--max-age-ms N] [--root <dir>] [--target <name>]   (AC9: archive a consumed-by-nobody stale block)
   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --schema
@@ -1206,6 +1344,45 @@ export async function main(argv) {
         return 0;
       }
       console.log("detect-stop: no stop condition; no block");
+      return 0;
+    } catch (e) {
+      console.error(`inner-blocked-signal: ${e.message}`);
+      return 1;
+    }
+  }
+
+  // --escalate-stale (gap-telemetry-brackets-vs-subagents-no-slot-visibility, AC9): a blocked
+  // signal nobody consumed must not let inner wait forever. If a block is older than the escalation
+  // threshold, record the wait duration into telemetry, append an escalation line to
+  // .quay/blocked-escalations.jsonl, and remove the block file (bounded episode — the underlying
+  // condition, if it persists, writes a FRESH block on the next --detect-stop). The OUTER runs this
+  // as a safety net in its async cleanup (orchestrator-loop-tick.md step 1b).
+  if (args.includes("--escalate-stale")) {
+    const maxAgeArg = getArgValue(args, "--max-age-ms");
+    let thresholdMs = DEFAULT_BLOCKED_ESCALATION_MS;
+    if (maxAgeArg !== undefined) {
+      const n = Number(maxAgeArg);
+      if (!Number.isFinite(n) || n < 0) {
+        console.error(`inner-blocked-signal: invalid --max-age-ms "${maxAgeArg}" (expected a non-negative number)`);
+        return 1;
+      }
+      thresholdMs = n;
+    }
+    try {
+      const res = escalateStaleBlock(root, target, { thresholdMs });
+      if (res.escalated) {
+        console.log(
+          `inner-blocked-signal: ESCALATED stale block (${res.record.taskId}, ${res.record.reason}) — waited ${(res.durationMs / 60_000).toFixed(1)}m ≥ ${(res.thresholdMs / 60_000).toFixed(0)}m; archived; telemetry ${res.telemetryPath}`,
+        );
+        return 0;
+      }
+      if (res.reason === "no-block") {
+        console.log("inner-blocked-signal: no block to escalate");
+        return 0;
+      }
+      console.log(
+        `inner-blocked-signal: block not stale yet (age ${(res.ageMs / 60_000).toFixed(1)}m < ${(res.thresholdMs / 60_000).toFixed(0)}m)`,
+      );
       return 0;
     } catch (e) {
       console.error(`inner-blocked-signal: ${e.message}`);

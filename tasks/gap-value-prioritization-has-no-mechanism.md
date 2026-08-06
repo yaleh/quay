@@ -1,6 +1,11 @@
 ---
 id: gap-value-prioritization-has-no-mechanism
 title: "which of the 54 todos matters most has no mechanical answer — every real priority decision tonight came from the human or ad-hoc outer/manager judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity (not relevance); add a relevance signal (strategic-question traceability + blocking + cost) as the manager layer's prioritization function"
+title: which of the 54 todos matters most has no mechanical answer — every real
+  priority decision tonight came from the human or ad-hoc outer/manager
+  judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity
+  (not relevance); add a relevance signal (strategic-question traceability +
+  blocking + cost) as the manager layer's prioritization function
 status: ready
 labels:
   - gap
@@ -46,15 +51,50 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: `ready-pool-check` 增加**相关性信号**——每候选计算：战略追溯（任务体引用 FINDING-*/战略问题，
+- [x] AC1: `ready-pool-check` 增加**相关性信号**——每候选计算：战略追溯（任务体引用 FINDING-*/战略问题，
       机械 grep）+ 阻塞性（parent/children）+ 成本（touches 规模）；输出到 JSON
-- [ ] AC2: **优先级查询输出**——「当前 todo 里价值最高的 N 条 + 理由」（非仅池<3 时补谁）；54 条里哪条
+      → `plugin/scripts/ready-pool-check.ts` 新增 `computeRelevance()`：`strategicTrace`（body grep
+      `FINDING-*`/`RESEARCH-*`/`GOAL-*`/`REVIEW-cadence`）、`unblocks`（非 done 的 children 数，
+      `parent` 字段）、`costTouches`（`## Touches` 解析 glob 数）；每个 candidate 携带 `relevance`
+      对象输出到 JSON。
+- [x] AC2: **优先级查询输出**——「当前 todo 里价值最高的 N 条 + 理由」（非仅池<3 时补谁）；54 条里哪条
       最重要有机械答案（实跑输出贴任务体）
-- [ ] AC3: 价值信号来源**机械**（grep/字段/touches 规模），**不引入人肉打分**
-- [ ] AC4: **不削弱现有机制**——gap>DIR 顺序保留、AC-queue 数量逻辑不变（既有行为回归证明）
-- [ ] AC5: 归属 manager 层——与 `gap-productize-the-manager-layer` 交叉标注（排序职能挂该层）
-- [ ] AC6: **真实使用**——至少一次用相关性排序回答「下一条该派谁」（非 gap>DIR 平局），实跑证据
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → 新增 `--top <N>`：stdout 的 `top_relevance` 数组 = 当前 todo 按相关性信号排序的前 N 条 + 每条
+      机械理由。实跑输出见下。
+- [x] AC3: 价值信号来源**机械**（grep/字段/touches 规模），**不引入人肉打分**
+      → 三个分量全部机械：战略追溯 = body 正则 grep；阻塞 = `parent`/`children` 字段遍历；成本 =
+      `parseTouches` 解析规模（与 dispatch gate 同一 single-source parser）。无任何人工打分输入。
+- [x] AC4: **不削弱现有机制**——gap>DIR 顺序保留、AC-queue 数量逻辑不变（既有行为回归证明）
+      → `promotions` 排序（disjointness-first → gap>DIR → touches-resolve）与 candidate 扫描门
+      （`deficit > 0`）**字节未动**；`top_relevance` 是独立附加输出。既有 20 用例全绿 + 新增 AC4
+      回归断言（`top_relevance` 不影响 `candidates`/`promotions` 顺序）。
+- [x] AC5: 归属 manager 层——与 `gap-productize-the-manager-layer` 交叉标注（排序职能挂该层）
+      → 已在 `tasks/gap-productize-the-manager-layer.md` 增加「## 排序职能挂接」节：排序职能由本条
+      落地，manager SKILL §2 排序行挂本任务。
+- [x] AC6: **真实使用**——至少一次用相关性排序回答「下一条该派谁」（非 gap>DIR 平局），实跑证据
+      → 实跑 `--top 5`：DIR-119-D（dir 类、无追溯、unblocks 4、score 40）排第 2，在
+      gap-quay-has-never-self-hosted（gap 类、unblocks 3、score 35，第 3）之前——**相关性（阻塞）
+      越过 kind 平局**，非 gap>DIR 机械答案。实跑输出见下。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      → 测试在既有 `plugin/test/ready-pool-check.test.mjs`（已 `node:test` + `// @test-group
+      governance`）新增 6 用例：AC1 信号、AC2 查询、AC6 排序、AC3 机械来源、AC4 回归、CLI `--top`；
+      scoped 运行 `pass 26 / fail 0`。
+
+**AC2/AC6 实跑输出**（`node --experimental-strip-types plugin/scripts/ready-pool-check.ts --top 5`，
+2026-08-06，本任务已 `status: ready` 故不再在 todo 排名中）：
+
+```
+ 1 gap-quality-criteria-are-point-in-time-no-trend-criteria | kind gap | eligible true  | score 101 | strategic-traceable (REVIEW-cadence) · unblocks 0 · cost 4 touches · eligible
+ 2 DIR-119-D                                                | kind dir | eligible false | score  40 | no-strategic-trace · unblocks 4 · cost 5 touches · deps NOT-ready
+ 3 gap-quay-has-never-self-hosted-its-own-cold-start        | kind gap | eligible false | score  35 | no-strategic-trace · unblocks 3 · cost 0 touches · four-artifacts INCOMPLETE
+ 4 DIR-124-B                                                | kind dir | eligible false | score  20 | no-strategic-trace · unblocks 2 · cost 15 touches · deps NOT-ready
+ 5 DIR-124-F                                                | kind dir | eligible false | score  20 | no-strategic-trace · unblocks 2 · cost 9 touches · deps NOT-ready
+```
+
+AC6 实例：**第 2 名 DIR-119-D（dir 类）在 gap-quay-has-never-self-hosted（gap 类，第 3 名）之前**——
+纯 gap>DIR 机械 tiebreak 会把 gap 排前；相关性信号（unblocks 4 > 3）把它推前 = 非 gap>DIR 的机械答案。
+AC2 实例：`top_relevance[0]` 的答案「gap-quality-criteria（战略可追溯、score 101）」带完整价值理由，
+不是「池<3 补谁」。
 
 ## Definition of Done
 
@@ -66,6 +106,7 @@ extra:
 - tasks/gap-value-prioritization-has-no-mechanism.md（自身文件：勾 AC + 贴 invoke 证据授权）
 
 
+- tasks/gap-value-prioritization-has-no-mechanism.md（self-touch：AC 勾选 + invoke 实跑证据）
 - plugin/scripts/ready-pool-check.ts（相关性信号 + 优先级查询输出）
 - plugin/test/ready-pool-check.test.mjs（AC4 既有行为回归 + AC1/AC2 断言）
 - tasks/gap-productize-the-manager-layer.md（AC5 交叉标注）

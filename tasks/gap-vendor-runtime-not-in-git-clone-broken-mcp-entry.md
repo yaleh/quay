@@ -6,7 +6,7 @@ title: "vendor runtime (dist) not in git clone — fresh-clone quay-init produce
   excludes it, verify checks lay-down set not referenced-runtime; WARN not fail
   = install reports success anyway; MORE fundamental than welcome-screen (blocks
   whole Provider ABI/MCP, AC12b 2nd hard blocker)"
-status: ready
+status: done
 labels:
   - gap
   - defect

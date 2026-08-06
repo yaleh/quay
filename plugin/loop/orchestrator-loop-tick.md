@@ -37,6 +37,7 @@ cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev
 | `orchestration/tick-log.md` | **历史 tick 与动作类型累计分布**——退化判据的唯一来源 |
 | `orchestration/escalations.md` | 已攒给人、尚未处理的非常规项 |
 | `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名） | 内层自报的队列状态（**可能是旧快照，以 git 为准**） |
+| `docs/analysis/batch2-queue-state.md` | 内层自报的队列状态（**可能是旧快照，以 git 为准**）。**「batch2」是历史名**（旧批模型的队列快照，保留不改名以免破坏引用） |
 | `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` | 四项原则 |
 
 **2. 建立实况**（以实测为准，不以上面任何文件的自述为准）
@@ -96,6 +97,10 @@ CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 
 CronList   # 确认它已被列出——没列出的 cron 不是报警，是静默空转
 mkdir -p <root>/.quay
 printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> <root>/.quay/loop-driver.jsonl
+mkdir -p "$REPO_ROOT/.quay"
+# 写驱动注册表（与 cold-start skill 逐字同源）——loop-driver-check.sh 数的是这一行：
+# 只建 cron 不写注册表 = 检查器看不见这个驱动，照文档冷启动会误报 STALLED
+printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> "$REPO_ROOT/.quay/loop-driver.jsonl"
 ```
 
 **最后一行是写驱动注册表**：`CronCreate` 建的 cron 是**会话内的**，对 `loop-driver-check.sh` 本身
@@ -157,6 +162,17 @@ bash plugin/scripts/loop-driver-check.sh
 注册表还是空、check 还是 STALLED、于是再建一个……本检查存在的全部价值就是抓这种「从外面看装得好好的，
 实际不会 tick」。查注册表这一步把「没注册」（STALLED，补写注册表）和「注册了但死了」（LIVE-陈旧，
 清掉再建）分开，两个分支的补救不同。
+必须报 `LIVE`。报 `DOUBLE-TRIGGER` = 有人多装了一个驱动（多半是照旧文档多起了一个 loop）——停下来
+处理；报 `STALLED` = 一个都没有——循环不会 tick。**先查注册表是否写过，再谈重建 cron**：
+
+1. `ls "$REPO_ROOT/.quay/loop-driver.jsonl"` 且 `wc -l` 有行——**注册表写过吗？**
+2. **注册表从没写过**（文件不存在或为空）→ 说明步骤 4 的**写注册表**那一步漏做了——不是缺 cron，
+   是缺记录。回步骤 4 补上 `printf … >> loop-driver.jsonl` 那一行，再跑检查必须转 `LIVE`。
+3. **注册表确实写过**仍报 `STALLED`（例如上次会话把注册表 `rm -f` 清掉了）→ 这时才回步骤 4 重建 cron。
+
+**直接重建 cron 而不先查注册表，会在每次冷启动都多加一行注册——正是本检查要抓的双触发**。
+（注：注册表是自述的，它只能数「装过几次」，不能证明那个 cron 现在还活着——这归
+`gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes` 的第二层。）
 
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
@@ -179,7 +195,7 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
 「cron 才检查状态」改成「状态变化即触发」：
 
 ```
-Monitor({command: "$REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
          description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
          persistent: true, timeout_ms: 3600000})
 ```
@@ -505,6 +521,8 @@ rm <repo>/.halt
 
 ```bash
 # 每个目标项目的根见各自 .quay/config.yml loop.repo_root（quay 自己的清单：quay/archguard/meta-cc）
+# `.halt` 是控制面不是传感器：没有 `.halt` 只回答「下一个边界不停」，不回答「项目在不在跑」——
+# 一个没有循环在跑的项目同样打印这一行。措辞因此是「未暂停」而不是「运行中」。
 for d in <目标项目根清单>; do
   printf "%-12s %s\n" "$(basename $d)" \
     "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 未暂停)"
@@ -526,6 +544,7 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report -
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态（文件名历史引用——batch2 是旧批次名）
+cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态（历史名「batch2」，见 1a 冷启动表注）
 ```
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
@@ -585,7 +604,12 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 请求窗口早于它首条记录时，工具会打印 `⚠ … 个更早的会话未被包含`，并给出 `--session <id>`。
 **看到那条警告就说明本次输出不是完整窗口**——跨 `/clear` 的分析要逐个会话跑再合并。
 
-### 1b. 异步收尾例程（verification-round closure pass，强制）
+### 1b. 异步收尾例程（`verification-round-N`，强制）
+
+**词汇规范（与外层文档同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
+本步骤就是全量验证 + 收尾节奏 **`verification-round-N`**——它**只关于验证/收尾，不是分派门控**；
+分派永远是滚动的（`fast-mode-loop-tick.md` 步骤 4），验证轮不约束、不命名、不门控任何一次派发。
+tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，本步骤的轮次写 `verification-round-N`。
 
 **词汇规范（同步 `gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round` AC5）**：
 **分派是滚动的，不叫批号**；全量验证/收尾节奏叫 `verification-round-N`——**关于验证/收尾，不是分派门控**。
@@ -594,6 +618,10 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 **批次边界的真源是记账同步，不是措辞**（`gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`，
 人 2026-08-05 设计裁定，决定不是建议）：**历史引用**——「Close batch」类收尾动作在 inner 派发历史里
 出现三次、每次收尾后必跟 3 连发、收尾期间零新派发 ⇒ 记账曾是调度的同步点。**inner 只执行 + 派发 +
+**批次边界的真源是记账同步，不是措辞**（`gap-closure-sync-is-the-true-batch-boundary-move-
+bookkeeping-to-outer-async`，人 2026-08-05 设计裁定，决定不是建议）：旧的 inner 收尾日志
+「Close batch-…」（**历史引用**，指过去以批为单位的收尾，已随机制根删除）三次在 inner
+派发历史里、每次收尾后必跟 3 连发、收尾期间零新派发 ⇒ 记账曾是调度的同步点。**inner 只执行 + 派发 +
 合并，永远不因记账停顿、也不知道收尾存在；收尾是本层（外层 20-min cron）的异步活。** 本步骤每个
 tick 做一次收尾 pass。
 
@@ -627,6 +655,21 @@ tick 做一次收尾 pass。
      对账——`brackets_reflect_subagents: false` 且 `stale_brackets > 0` ⇒ 还有 `--task-end` 没调齐的
      陈旧括号，跑 `--reconcile` 闭合（`--task-end` 是收尾路径的活；`--reconcile` 兜底执行者已消失的）。
      `--slot-status` 是纯读，观测轮询不会弄脏工作树。
+   - **关红窗遗留括号（AC4/AC8，`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：每次收尾
+     pass 无条件跑一次 `--reconcile`，用可观测证据（分支已 merge / worktree 已消失 / 进程已死）关掉
+     executor 已消失的未闭合括号——让遥测 `inProgress` 反映**真实在飞**而非红窗遗留：
+     ```bash
+     node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --reconcile --json
+     ```
+   - **阻塞信号超时自动升级（AC9，同上任务）**：没人消费的阻塞信号不无限冻结 inner——对超龄（默认
+     30 分钟）的 block 自动归档（记遥测等待时长 + 写 `.quay/blocked-escalations.jsonl` + 移除 block
+     文件；底层条件若仍成立，下一 tick `--detect-stop` 会写新 block 重新验证）：
+     ```bash
+     node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --escalate-stale
+     ```
+   - **空槽信号（AC2/AC5）**：读 `--slots --cap <effective_cap>` 的 real-in-flight / slots-remaining——
+     「还剩几个并发槽」机械可见，不靠内层手写叙事 markdown；`dispatchable_disjoint − realInFlight`
+     = 槽位级闲置。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
@@ -680,7 +723,7 @@ tick 做一次收尾 pass。
      定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
 5. **落盘聚合**：本轮收尾后跑一次
    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
-   否则被 git 跟踪的聚合文件不反映本批结果。
+   否则被 git 跟踪的聚合文件不反映本轮结果。
 
 **每 tick 必报**补一条：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
 与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
@@ -826,16 +869,17 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 | 审查 2 轮仍 REFUTED | 读审查发现，判断是否真实。真实 → 指示缩小范围重做；不实 → 指示记录理由后推进 |
 | 任务超 90 分钟 | 判断是任务过大（指示拆分）还是卡住（指示放弃并建任务记录） |
 | needs-human 积压 ≥3 | 分诊：真阻塞的攒给人，可继续的指示内层继续 |
-| 就绪队列为空 | 从任务库补一批（见步骤 4） |
+| 就绪队列为空 | 从任务库补一组（见步骤 4） |
 
 ### 4. 队列补充
 
-队列空时，从 `tasks/` 取下一批。**复用已有机制，不新建**：
+队列空时，从 `tasks/` 取下一组。**复用已有机制，不新建**：
 
 - 候选：`status: todo` 或 `ready` 且带 `milestone-candidate` 标签
 - 依赖就绪：父任务 done、无未满足前置（`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN）
 - 并发资格：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞任务
   和彼此**两两检查，重叠则不同时派发（**分派是滚动的，不是攒批门控**）
+  和彼此**两两检查，重叠则不可并发
 - 优先级：阻塞其它任务的优先；`gap-*` 缺陷类优先于 `DIR-*` 新能力
 - **跨机在飞（两机协作，`gap-two-machine-collaboration-git-branch-claiming`）**：两机协作时
   （`QUAY_CLAIM_REMOTE` 指向共享裸仓库），**另一台机器的在飞任务 = 共享仓库上存在的 `task/*` 分支**
@@ -881,17 +925,21 @@ not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先�
 
 ### 4b. 「在飞」词汇拆分 + 输入框纪律（AC7/AC8 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff）
 
-**「在飞」拆为两种含义，报告/队列状态里分别标注**（AC7，2026-08-04 第三次实锤后加）——混用会让并发
+**「在飞」拆为三种含义，报告/队列状态里分别标注**（AC7，2026-08-04 第三次实锤后加；
+`gap-telemetry-brackets-vs-subagents-no-slot-visibility` 起再拆出「真实在飞」）——混用会让并发
 指令看起来已满足：
 
 | 词 | 含义 | 用什么核实 |
 |---|---|---|
 | **遥测括号在飞** | `--task-start` 已写、`--task-end` 未写 | 遥测 `inProgress[]` / START 事件——START **只证括号在飞，不证 subagent 在飞** |
+| **真实在飞** | 括号里 executor **仍可观测存在**（进程/打开 worktree/分支未 merge）——扣掉红窗遗留 | 遥测 `--report --json` 的 `realInFlight` / `--slots` 的 real-in-flight（reconcile 感知） |
 | **subagent 在飞** | 内层真的起了后台 `Agent(run_in_background)` | **读原始 Agent 工具调用的 `input.run_in_background` 字段**（meta-cc transcript 查询）——唯一可靠判据 |
 
 **外层核实并发必须读原始字段，不得用 START 事件或 pane UI 文字。** 实例（本 tick）：内层唯一 Agent 调用
 `run_in_background` 缺失，而 START 事件显示 A|D 双在飞——用错仪器导致静默满足，正是本条目要消灭的形态。
-报告/队列状态里分别写「括号在飞 N」「subagent 在飞 M」，不合并成一个「在飞」。
+报告/队列状态里分别写「括号在飞 N」「真实在飞 M」「subagent 在飞 K」，不合并成一个「在飞」。
+**状态自检①（inner `fast-mode-loop-tick.md`）判并发上限必须读「真实在飞」（`realInFlight`），不是原始
+括号数**——5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会让 ≤cap 恒真（装饰非判据，AC3）。
 
 **槽位视角（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`，AC2）：** 外层不再依赖内层手写
 叙事 markdown 才知道「还剩几个并发槽」——纯读命令直接给：
@@ -996,6 +1044,7 @@ tick 或 `/clear` 后的会话会重犯。
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、AC、DoD |
 | `fast-mode-loop-tick.md` | 内层 tick 指令 |
 | `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名） | 队列状态（内层写，外层读+补） |
+| `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补）。**历史名「batch2」**（旧批模型队列快照，保留不改名） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
 | `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |

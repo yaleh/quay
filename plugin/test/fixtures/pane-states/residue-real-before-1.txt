@@ -1,0 +1,55 @@
+yale@orangevps:/tmp/residue-captures$ source /tmp/residue-captures/setps1.sh
+❯ printf "%s\n" "───────────────────────────────" "  scrolled analysis line above the box" "──────
+─────────────────────────"
+───────────────────────────────
+  scrolled analysis line above the box
+───────────────────────────────
+❯ fix the residue bug report 123
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

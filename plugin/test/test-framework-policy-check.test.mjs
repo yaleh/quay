@@ -172,10 +172,13 @@ test("REFUTE: a list at or below the ratchet ceiling passes", () => {
   assert.deepEqual(failures, []);
 });
 
-test("REFUTE: the data file header carries a parseable baseline-count: 34 ceiling", () => {
+test("REFUTE: the data file header carries a parseable, positive baseline-count ceiling (shrink-only — never a hardcoded absolute)", () => {
   const dataAbs = path.join(REPO_ROOT, DATA_FILE_REL);
   const baselineCount = parseBaselineCount(fs.readFileSync(dataAbs, "utf8"));
-  assert.equal(baselineCount, 34, "data file must carry '# baseline-count: 34'");
+  // The ceiling is a RUNTIME-computed shrink-only ratchet control surface, not a fixed constant:
+  // it can only get LOWER as legacy files convert. A hardcoded `=== 34` would go red on any
+  // legitimate shrink — exactly the global-count-snapshot fragility this task removes.
+  assert.ok(baselineCount !== null && baselineCount > 0, "data file must carry a parseable, positive '# baseline-count' token");
 });
 
 // ── REFUTE round-2 regressions: regex literals, method-call imports, shrink-only ceiling ───────────
@@ -210,15 +213,20 @@ test("REFUTE R2: raising the ratchet ceiling in the working tree fails (shrink-o
   assert.ok(failures.some((f) => f.includes("ceiling was RAISED")), JSON.stringify(failures));
 });
 
-// ── Real repo invariant: the current tree is green and the list is exactly 34 ──────────────────────
-test("real repo: every glob file imports node:test or is on the exemption list; list is 34", () => {
+// ── Real repo invariant: the current tree is green and the list obeys the shrink-only ratchet ───────
+test("real repo: every glob file imports node:test or is on the exemption list; the list is at or below the baseline-count ratchet", () => {
   const files = canonicalTestFiles(REPO_ROOT);
   const dataAbs = path.join(REPO_ROOT, DATA_FILE_REL);
   const list = parseExemptionList(fs.readFileSync(dataAbs, "utf8"));
+  const baselineCount = parseBaselineCount(fs.readFileSync(dataAbs, "utf8"));
 
-  // The exemption list is a data file with exactly the 34 files identified by the 2026-08-02
-  // test-shape analysis.
-  assert.equal(list.length, 34, "exemption list must pin the current 34 legacy files");
+  // The list is a shrink-only ratchet (AC4): it can never EXCEED the `# baseline-count` ceiling
+  // parsed from the data file header — the checker's own C0a invariant, COMPUTED AT RUNTIME. A
+  // hardcoded `=== 34` would go red the moment a legacy file converts (the list legitimately
+  // shrinks) — the global-count-snapshot fragility class this task removes (B3-2 family).
+  assert.ok(baselineCount !== null, "data file must carry '# baseline-count'");
+  assert.ok(list.length <= baselineCount,
+    `exemption list (${list.length}) must not exceed the baseline-count ratchet (${baselineCount})`);
   // Every glob file either imports node:test or is in the list.
   for (const rel of files) {
     const src = fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
