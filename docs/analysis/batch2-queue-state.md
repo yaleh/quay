@@ -4990,3 +4990,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **spawn-count 仍在飞**（~55min，TaskOutput `running`，transcript 23:44 活跃）：A 层转换 22 文件已做、逐文件验证中——10 处 dir032-audit-independence 失败正在调查（`listGates()` actual:false，疑为其 worktree 旧 master 快照 d8f6a51c 缺 audit-independence gate 注册，非转换回归；agent 自查中）。未超 90m（上限 ~00:20Z）。
 - **停止条件 suite-red 持续**：外层仍等 spawn-count 落定后重跑。⇒ 无新派发、fan-in 暂缓。2 分支持等 re-green。
 - 无 .halt、无 block、Monitor 三判据绿、detect-stop 无停止条件（pane 0/3）。
+
+### tick 2026-08-05T23:5xZ（内层，全 3 agent 落定 → fan-in 待 re-green）
+
+- **spawn-count agent 完成**（`fd01a94b`，~77min，AC1–AC6 勾）：A 层转换 **37 个测试文件**（`bin/quay*.ts` spawn → `QUAY_CLI`/`QUAY_NATIVE_CLI` helper dist bundle，未硬编码 dist 字面量）；AC1/AC2 实测同条件：forks 2161→2159（平，进程数不变——诚实记录）、墙钟 10s→**8s**（control 满足：不退化）；per-spawn 内核代价 `bin/quay.ts` 20×=2583 jiffies vs `dist` 20×=**1254 jiffies（≈减半）**= 并发轴的真正杠杆；AC3 负控制（stale bundle → 回退 .ts + 告警，47/47 不静默过）；AC4 C 层决策 Route 2（import 模块，staged），band ts_spawn_sites(55)≤50 是 C 层输出非 A 层，诚实记录；AC5 两已关任务留痕。
+- **「7 文件 master 基线红」证伪**：dir032 等 7 文件在**主检出**跑 **14/0 全绿**——agent 的「master 基线失败」是它 fresh worktree 缺规范 config（gate 未注册）的**快照伪影**，非真回归。外层重跑应绿。
+- **3 agent 全落定** ⇒ 外层可立即重跑全量（无内层测量污染）。fan-in 就绪待 re-green：split-batch `b67c49f3` + productize `32d36ade`（均需先 rebase 到当前 master）+ spawn-count `fd01a94b`（已 rebase）。
+- 在飞 0/3。停止条件 suite-red 仍持 fan-in；无 .halt、无 block、Monitor 绿。
