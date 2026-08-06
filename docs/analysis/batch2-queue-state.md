@@ -6331,3 +6331,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **剩余动作**：从 develop 打 tag v0.4.0 + 触发 release（含 dist-plugin 重建 AC6）——这才是 archguard 能装的。
 - **AC17 push**：本地 develop 领先 origin/develop 105（含分支切换，无阻塞）——已驱动 inner 立即 push
   develop 到 origin（B 下次拉取拿最新分支切换）。先 push 再打 tag。
+
+### tick 2026-08-06T12:0xZ（人催 + 排期：AC17 push + AC16 tag/release）
+
+- **① AC17 push 完成**：origin/develop d0edd8ab → **27b9d7e5**（105 提交全推，含分支切换；origin 0 领先无阻塞）。B 下次拉取即可拿最新分支切换。
+- **② AC16 release 触发**：tag v0.4.0 从 stale 7adb6307（210 落后）**移到 develop 27b9d7e5**（外层裁定"从 develop 打 tag"），push 触发两个 workflow（均 queued）：
+  - **release.yml**（Release v0.4.0）→ npm pack 产物 + GitHub Release（archguard 可装）
+  - **publish-plugin-dist.yml**（Publish plugin dist v0.4.0）→ dist-plugin 重建（AC6）
+- 验证：origin/tag v0.4.0 = origin/develop = 27b9d7e5。v0.3.13 为上一 release（2026-07-24）。
