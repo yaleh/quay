@@ -294,6 +294,16 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 读队列文件。若与 `git log` / `git worktree list` 不一致，**以 git 为准**并修正文件——文件可能是 compact 前的旧快照。
 
+**收件箱机械挂载点**（`gap-supervisor-message-bus-with-identity` AC4——「文件在、无人读」不再发生）：
+显式读 manager 收件箱，有 `unread:` 行 ⇒ 逐条进本轮决策（人/manager 的消息在决策时被调用，不是落盘即完）：
+
+```bash
+bash plugin/scripts/supervisor-bus-identity.sh inbox-summary
+```
+
+`delivered` = 投递成功（放进了收件箱），`consumed` = 已读回执（人读了）——两者分开（AC3），
+unread = delivered − consumed。本步只读不写回执（消费是人的动作，`inbox-reader.sh` 负责）。
+
 ### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 
 **词汇规范（本步与外层 1b 同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：

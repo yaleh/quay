@@ -6382,3 +6382,25 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   外层核实：本地 develop 领先 origin 6 提交（含修复），origin 停 27b9d7e5。**已立即推**（→3cf2d131），
   ad-arm1 重新 pull 即可拿到修复。provider 优雅降级（跳过该文件，其余 113 正常）——非新 bug。
 
+
+### tick 2026-08-06T13:2xZ（内层 cron，派发 postinstall 修复）
+
+- 无 halt；套件 GREEN。在飞 0/3。池 8/20、disjoint 5/5（criterion met，但 ready 多为陈旧 signal-gap）。
+- **派发 1/3 — gap-release-postinstall-fallback-breaks-windows-sea-build**（3.6 补晋 todo→ready）：
+  archguard-blocking 的 release 修复。resolve 3/4、pool-candidate clean、fork-baseline=develop。
+  worktree /home/yale/work/quay-worktrees/postinstall-fix + bracket 已开。
+  agent 指引：postinstall `(echo...; exit 0)` → `|| true`（cmd.exe 可解析），WARN 移入 sync-vendor.sh；
+  AC4 需裁定 live-GitHub 测试阻塞（skip/adapt/split）。
+- 在飞 1/3。quality-criteria 已落 integration（上一 tick）。
+
+### tick 2026-08-06T13:5xZ（postinstall 修复 fan-in 完成）
+
+- **postinstall 修复合 integration**（d9c1c638→031842d0→05153568）：cmd.exe-safe postinstall
+  （bash 专属 `(echo...; exit 0)` 移除 → `|| true`，WARN 移入 sync-vendor.sh 的 POSTINSTALL_MODE + trap），
+  release-gate live-GitHub 测试 **SKIP** 决策（AC4，release 验产物不验可变 live store，与 ADR-019 一致）。
+  AC1-AC5 证据、scoped **6/6**（含 cli.test.mjs live blocks SKIP + sync-vendor.test.mjs 5/5）。
+- 状态 reconcile：task 文件在 integration 置 ready（agent 的 develop-fork 副本是 todo，外层 promotion 保留）。
+- worktree/branch 清理、bracket close。**在飞 0/3**。
+- **integration 现 = develop 基线 + 6 任务（AC16/spawn-count/supervisor/no-criterion/quality-criteria/postinstall）
+  + ADR-030/031/032**。**下一步**：外层 merge integration→develop → 打 **v0.4.1** 触发完整三平台 release
+  （windows_postinstall_ok band 证明）。

@@ -21,6 +21,10 @@ extra:
 
 ## Proposal
 
+> **同族落地次序标注（2026-08-06，`gap-supervisor-message-bus-with-identity`）**：⑤（本族后一落地步）
+> 已落地——消息总线带身份（`deliver(target,payload,from=<identity>)` + agent 信道拒 `from:"human"`
+> 伪装）。本任务（④ 抢占）的进程级停止信号与⑤的身份字段同属基座层「不随会话死」原语族。
+
 **supervisor 落地次序第 ④ 步：抢占**（SPEC-integration-architecture-2026-08-05 §4.4；对应今晚事故 7）。
 抢占是 supervisor 基座层的一个原语（不随会话死，任意点生效），与 SPEC-isolation-and-resource-governance
 的「限额不可被绕过」同构——抢占必须不依赖被抢占方主动调用，否则又会被「忘记调用」绕过。

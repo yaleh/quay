@@ -84,3 +84,30 @@ so it can never inflate the `delivered_vs_read` measure.
   registry, deliver/observe, inbox record + observation model).
 - `plugin/scripts/inbox-reader.sh` — the human channel's consumer mechanical mount point.
 - `packages/quay/test/message-bus.test.mjs`, `plugin/test/inbox-reader.test.mjs` — AC1–AC6.
+
+## Identity (supervisor step ⑤ — `gap-supervisor-message-bus-with-identity`)
+
+The bus carries **WHO sent each message**: `deliver(target, payload, from=<identity>)` with
+`from` ∈ {human, manager, inner, outer} (`IDENTITIES` in `message-bus.ts`). The human is an
+identity like any agent — the bus never special-cases "a message that talks like a human",
+because identity is a **carried field**, not a text property. This is what makes the step-④
+preemption and step-③ delivery centralization compatible with the human channel.
+
+**The AC2 spoof gate.** The incident that opened this family (agent messages entering a session
+with `userType:external`, indistinguishable from the real human) is closed mechanically: agent
+channels (the session transport serving the inner/outer targets) serve **agent identities only**
+(`AGENT_IDENTITIES` = inner/outer/manager — "human" deliberately absent). A message delivered
+through an agent channel that claims `from: "human"` is **rejected before injection**
+(fail-closed, never relayed to the `deliverFn`). The rejection is a `{ delivered: false,
+rejectedIdentity, reason }` return, never a throw — mechanically testable.
+
+| channel | serves senders | rejects |
+|---|---|---|
+| session (inner/outer) | inner, outer, manager | **"human"** (an agent cannot forge the human) |
+| file-inbox (human) | human + all agents (bidirectional) | unknown identities |
+
+`deliver` accepts the explicit `from` as its THIRD argument — `deliver("inner", payload, "outer")` —
+authoritative over any `from` smuggled inside the payload. `plugin/scripts/supervisor-bus-identity.sh`
+exposes `claim-human-test` (proves the spoof is rejected; the Contract measure field
+`identity_rejected=true`) and `inbox-summary` (the tick's mechanical mount point —
+delivered/consumed/unread, read-only).

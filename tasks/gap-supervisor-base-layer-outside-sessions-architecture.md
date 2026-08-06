@@ -40,6 +40,11 @@ extra:
 
 ## Proposal
 
+> **落地次序第 ⑤ 步标注（2026-08-06，`gap-supervisor-message-bus-with-identity`）**：⑤消息总线带身份
+> 已落地——`deliver(target, payload, from=<identity>)` 携带发送方身份；agent 信道拒绝 `from:"human"`
+> 的伪装（AC2 spoof gate）；`deliver(human)` 已投递/已读分开建模（AC3）；tick 读状态步显式读收件箱
+> （AC4 机械挂载点）。落地次序①②③⑤完成，④（抢占）仍 todo。
+
 **ARCHITECTURE：今晚 10 类事故倒推三层判断**——BASE（调度/消息+身份/会话状态/槽位账本/
 抢占/资源门）必须活在 agent 会话**之外**（10 类中 7 类是 CC 原语，我们用屏幕抓取+文件轮询伪造，
 代价占今晚大部分）；MACHINERY（94 脚本 + 14 gate + 任务存储）留在会话外可执行；BEHAVIOR
