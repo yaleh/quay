@@ -281,6 +281,55 @@ send-keys-reliable 的信道收拢，非新判据）。
 未假设旧 vendor/ 布局：新增的 supervisor 脚本在 `plugin/scripts/`（不涉 runtime 落点），laydown 声明加在
 `derive_loop_scripts` 的 derived set。无需调整。
 
+### Re-verification（2026-08-06，worktree task/supervisor-base-layer，工作树干净重放）
+
+任务在 develop 历史（39af6de5 = 本任务落地③，2f343eb8 = fan-in）已完整实现并处于本 worktree
+历史中；本次在工作树内重放验证（无任何工作树改动，`git status` 干净），全 AC 维持勾选，实测输出：
+
+**Scoped 测试（Test-Files，逐条真实运行）**：
+
+```
+$ node --test plugin/test/supervisor-deliver.test.mjs
+✔ AC7: usage — missing target/payload/transcript-resolution exits 2 with a usage message
+✔ AC7: usage — --transcript and --root are mutually exclusive (exit 2)
+✔ AC2: delegation — the adapter names its two dependencies and contains no whole-pane hash
+✔ AC7: a MISSING pure checker exits 1 at startup (fail loud), never a silent broken delivery
+✔ AC5 e2e: existing session (--transcript) — adapter delivers a payload, verified via the target transcript
+✔ AC5 e2e: fresh session (transcript absent) — direct-send path creates the transcript and verifies delivery
+✔ AC5 negative control: nonexistent tmux target → exit 1 (fail loud), nothing sent
+✔ AC5: --root (re-spawn mode) waits for the NEW transcript NOT in the pre-send snapshot and verifies delivery through it
+ℹ tests 8 · pass 8 · fail 0 · cancelled 0
+
+$ node --test plugin/test/supervisor-health.test.mjs
+ℹ tests 5 · pass 5 · fail 0 · cancelled 0
+
+$ node --test plugin/test/os-anchor-watchdog.test.mjs   （回归：drive_outer 改动后 --decide/install 仍绿）
+ℹ tests 2 · pass 2 · fail 0 · cancelled 0
+```
+
+**Contract `measure`（alive 字段）**：
+
+```
+$ bash plugin/scripts/supervisor-health.sh; echo exit=$?
+alive: true
+os_anchor_timer=active
+deliver_adapter=present
+delivery_checker=present
+observe_adapter=present
+session_liveness=present
+exit=0
+```
+
+**AC2 越界判据 grep**：
+
+```
+$ grep -cE 'Proposal|Plan|Acceptance|DoD|task_get|task_write|## AC' plugin/scripts/supervisor-deliver.sh plugin/scripts/supervisor-health.sh
+plugin/scripts/supervisor-health.sh:0
+plugin/scripts/supervisor-deliver.sh:0
+```
+
+**tmux 泄漏检查**：`tmux ls | grep sup-` = 0 残留（scoped `kill-session` 清理，无 kill-server）。
+
 ## Dispatch review
 
 reviewer: none
