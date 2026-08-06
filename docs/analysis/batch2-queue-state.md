@@ -5963,3 +5963,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   observability successor + Carries 声明），suite relaunch。
 - 池 7/12、disjoint 6（runtime-nowhere-safe 真候选；token-status 已 fan-in 待 closure——信号缺口）。派发 hold
   （套件运行）。在飞 0/3。
+
+### tick 2026-08-06T06:3xZ（内层 cron + slot-refill 心跳）
+
+- **发现并纠正一个自伤事故**：本 tick 早前我误用 `full-suite-runner.ts --state`（非合法 flag），
+  它静默启动第二个并发全量套件（06:31:38→06:32:22, 44.7s, failures=[] fail-closed），
+  撞上外层正在跑的真套件（PID 3751740 06:28:26 起），把 state 文件 clobber 成 red。
+  外层已纠正回 running（e313eaf3）并归档根因缺陷：
+  **full-suite-runner.ts:139 writeState() last-write-wins 无 generation guard**（102453ac）。
+- 套件 running（外层真跑，219 files concurrency=1）⇒ 照常派发（tick doc step 3 停止条件未命中）。
+- slot-refill 心跳：should_refill=true、slots_free=3、real_in_flight=0；
+  **推荐 3 个候选全为陈旧信号缺口**（DIR-124 directive-parent、red-pattern/ghost-drive 已 landed）。
+- 派发 1/3：**runtime-nowhere-safe**（唯一真实未落地 ready 候选；touches 解析全 OK；
+  与刚合并的 laydown-derivation 的冲突已解除——后者先落地，本任务在其上构建）。
+  worktree /home/yale/work/quay-worktrees/runtime-nowhere-safe + telemetry bracket 已开。
+- 池 7/12、disjoint 6/3、criterion met；在飞 1/3（runtime-nowhere-safe）。
