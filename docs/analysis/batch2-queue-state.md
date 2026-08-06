@@ -5996,3 +5996,17 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 派发 2/3：branch-model-cutover → worktree /home/yale/work/quay-worktrees/branch-model-cutover
   + telemetry bracket 已开。外层已裁定 AC6（共享文件可配置默认 master、本仓副本字面量 develop）。
 - 在飞 2/3（runtime-nowhere-safe + branch-model-cutover）；套件仍 running（外层 verify）。
+
+### tick 2026-08-06T06:5xZ（内层 cron + slot-refill 心跳 + 3.6 补晋）
+
+- 套件 running（外层 verify，PID 3751740 24:41 仍在跑）⇒ 照常派发；无停止条件命中。
+- 在飞 2/3（runtime-nowhere-safe + branch-model-cutover）；slot-refill 心跳 `--in-flight` 修正后
+  slots_free=1、recommended=DIR-124（directive parent → 拒绝）。
+- **3.6 补晋**：cap=5（GO 档）⇒ floor=20，池 7 < floor ⇒ 触发补晋。promotions 数组多候选陈旧
+  （含已派发的 branch-model；quality-criteria 的 git 命中是 cross-annotation 非落地）。
+  补晋 2 个真实未落地候选：**claim-task-and-backup-push**（disjoint 6/7，config-only，branch-cutover
+  阶段四同伴，`--pool-candidate` clean）+ **supervisor-base-layer**（disjoint 1，`--pool-candidate` clean）。
+- **派发 3/3**：claim-task-cutover（与两个在飞 DISJOINT，touches 解析全 OK）→ worktree
+  /home/yale/work/quay-worktrees/claim-task-cutover + telemetry bracket 已开。
+  supervisor 与 runtime-nowhere-safe **OVERLAP quay-init.sh** → 序列化，本 tick 不派发。
+- 池 9/20（补晋 2）；在飞 3/3 满。
