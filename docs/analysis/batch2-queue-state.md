@@ -6260,3 +6260,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - needs-human-black-hole 经 catch-up 已落地（6f3c68d5，B 侧工作）——stale ready，不派。
 - **派发 1/3**：no-criterion-records-cost（唯一真实未落地 ready；resolve 5/6、pool-candidate clean、
   fork-baseline=develop）。worktree /home/yale/work/quay-worktrees/no-criterion-cost + bracket 已开。
+
+### tick 2026-08-06T09:3xZ（外层，integration catch-up 策略）
+
+- **AC17 catch-up 完整完成**（1c4938ac：①FF ②17-conflict merge ③rebase both）+ 4 个跨机合并回归修复
+  验证（ready-pool arity/top/relevanceReason + heavy-op LEASE_MS，28+30 green）。blocking 根治 fd41c133。
+- **integration catch-up 策略裁定**：integration 合入 develop（develop→integration 合并）。数据：
+  integration 领先 develop 3 提交（全 AC16），develop 领先 integration 190（catch-up 后全部 A+B 工作）。
+  develop 是权威——integration 追平 develop 且不丢 AC16。已驱动 inner 执行。
+- 池 9/20（disjoint 4/5）、inner 在飞 no-criterion-cost。
