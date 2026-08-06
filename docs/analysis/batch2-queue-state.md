@@ -6657,3 +6657,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   tasks/gap-*.md 双方都改。
 - **B 侧解冲突提示**（人已裁定 B 自己的循环负责自己合并）：特别小心上述文件——上次 35 冲突里出问题的
   是「两边各留一半」机械式合并。
+
+### tick 2026-08-06T14:3xZ（外层，跨机同步任务纳入管线）
+
+- **gap-cross-machine-sync-has-no-mechanism-only-manual-pushes（f38514c4）纳入**——人裁定主题，
+  管理者 AC1-AC6 机械可测（兜底实测 / 事件驱动同轮 / 落后量可读 / 负控制 / 两机 / 无 crontab）。
+- **b-machine-push-backup 标 superseded**（其 AC1 文字改了但实现仍 --cron-line crontab，改造不完整；
+  新任务为正确替代）。新任务可派（touches 解析通过）。
