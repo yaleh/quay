@@ -4,7 +4,7 @@
 // package (or a second physical copy) fails loudly instead of silently re-introducing the
 // "half the mechanism lives outside the plugin" gap:
 //
-//   AC1 — the 6 formerly-plugin-external mechanism files now live INSIDE plugin/, and their
+//   AC1 — the 5 formerly-plugin-external mechanism files now live INSIDE plugin/, and their
 //         old paths are symlink re-exports (the fast-mode-telemetry precedent), so the quay
 //         repo's own references keep working without a second physical copy.
 //   AC2 — fast-mode-telemetry.ts has ONE physical copy (plugin/scripts/ is authoritative; the
@@ -29,8 +29,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pluginDir, '..');
 
-// ── AC1: the 6 files are inside plugin/; old paths are gone (no shims left behind) ─────────────────
-test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old paths are gone (no compat shells)', () => {
+// ── AC1: the 5 files are inside plugin/; old paths are gone (no shims left behind) ─────────────────
+test('AC1 — the 5 formerly-external mechanism files live in plugin/; the old paths are gone (no compat shells)', () => {
   // (canonical, reason) — every entry ships with the plugin; the reason is the role it plays in
   // the two-layer loop, not "just in case".
   const canonicalInside = [
@@ -38,8 +38,10 @@ test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old p
     ['plugin/loop/fast-mode-loop-tick.md', 'inner-layer driver doc'],
     ['plugin/scripts/inner-forensics.mjs', 'inner-layer forensics (outer verification)'],
     ['plugin/scripts/resource-gate.sh', 'shared resource gate for heavy ops'],
-    ['plugin/scripts/heavy-op-token.sh', 'cross-project heavy-op token'],
-    // NOTE: plugin/scripts/inner-state.sh was removed from the shipping set when it was retired
+    // NOTE: plugin/scripts/heavy-op-token.sh was RETIRED entirely 2026-08-06 (human ruling:
+    // gap-session-liveness-remove-shared-events-and-lock — the "one heavy test at a time"
+    // constraint is gone with no replacement; resource-gate.sh remains the load gate).
+    // plugin/scripts/inner-state.sh was removed when it was retired
     // (gap-retire-inner-state-one-observer-targets-by-parameter) — observation has one tool,
     // session-liveness.sh, which ships via the separate session-liveness section of quay-init.sh.
   ];
@@ -71,8 +73,8 @@ test('AC1 — the 6 formerly-external mechanism files live in plugin/; the old p
   }
 });
 
-// ── AC (coordinator): no LIVE reference to the 6 old paths anywhere in the repo ─────────────────────
-test('AC1b — after the move, no live reference to the 6 old paths remains (comments/history excluded)', () => {
+// ── AC (coordinator): no LIVE reference to the 5 old paths anywhere in the repo ─────────────────────
+test('AC1b — after the move, no live reference to the 5 old paths remains (comments/history excluded)', () => {
   // oldPathPatterns + the exclusion table live in plugin/scripts/loop-shipping-exclusion-data.mjs
   // (single source — the necessity check reads the SAME data). The patterns are derived from
   // oldPaths there: the `scripts/*.sh` old paths are SUBSTRINGS of the new `plugin/scripts/*.sh`

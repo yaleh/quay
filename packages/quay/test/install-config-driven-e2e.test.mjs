@@ -478,7 +478,6 @@ test("AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0;
     "plugin/scripts/session-liveness.sh",
     "plugin/scripts/fast-mode-telemetry.ts",
     "plugin/scripts/resource-gate.sh",
-    "plugin/scripts/heavy-op-token.sh",
     "plugin/scripts/task-contract-check.ts",
     "plugin/scripts/loop-driver-check.sh",
   ];

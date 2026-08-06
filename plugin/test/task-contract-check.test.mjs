@@ -356,7 +356,7 @@ test("todo task: invoke evidence not required yet", () => {
 
 test("invokeEntryPath: first slash-bearing token, skipping interpreter + flags", () => {
   assert.equal(invokeEntryPath("node orchestration/watch/inner-forensics.mjs verify 全量套件 --since <ISO>"), "orchestration/watch/inner-forensics.mjs");
-  assert.equal(invokeEntryPath("bash scripts/heavy-op-token.sh --acquire quay --timeout 0"), "scripts/heavy-op-token.sh");
+  assert.equal(invokeEntryPath("bash scripts/assert-clean-tree.sh /srv/target"), "scripts/assert-clean-tree.sh");
   assert.equal(invokeEntryPath("node --experimental-strip-types packages/quay/bin/quay.ts serve --host 127.0.0.1 --port 4173"), "packages/quay/bin/quay.ts");
   assert.equal(invokeEntryPath("node --experimental-strip-types plugin/scripts/task-schema-check.ts <file>"), "plugin/scripts/task-schema-check.ts");
   assert.equal(invokeEntryPath("bash scripts/test.sh"), "scripts/test.sh");

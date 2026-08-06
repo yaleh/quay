@@ -1,5 +1,5 @@
 // loop-shipping-exclusion-data.mjs — SINGLE SOURCE OF TRUTH for loop-shipping's AC1/AC1b
-// exclusion table + the 6 old-path definitions (gap-exclusion-lists-have-no-necessity-check).
+// exclusion table + the 5 old-path definitions (gap-exclusion-lists-have-no-necessity-check).
 //
 // Both consumers import from here so the table cannot drift between the AC1b live-reference scan
 // and the inert-exclusion necessity check:
@@ -11,15 +11,17 @@
 //   - target:   the ABSOLUTE path the AC1b scan skips (a directory skips the whole subtree).
 //   - reason:   why the path is in the exclusion list (the role it plays in the two-layer loop).
 //   - retainedNote (OPTIONAL): a written justification for an entry whose target currently
-//     contains ZERO hits of the 6 old-path patterns. The necessity check fails any inert entry
+//     contains ZERO hits of the 5 old-path patterns. The necessity check fails any inert entry
 //     WITHOUT one (the ## Contract invariant's "或写明为何保留" branch). Present only on entries
 //     that are deliberately kept despite suppressing nothing right now.
 
 import path from 'node:path';
 
 /**
- * The 6 formerly-plugin-external mechanism files' OLD paths (pre-move). Single source: the AC1
+ * The 5 formerly-plugin-external mechanism files' OLD paths (pre-move). Single source: the AC1
  * existence check asserts none of these exist on disk; the AC1b patterns derive from them.
+ * (`scripts/heavy-op-token.sh` was removed 2026-08-06 — the heavy-op token was RETIRED entirely
+ * by human ruling, see tasks/gap-session-liveness-remove-shared-events-and-lock.)
  */
 export const oldPaths = [
   'orchestration/orchestrator-loop-tick.md',
@@ -27,7 +29,6 @@ export const oldPaths = [
   'orchestration/watch/inner-forensics.mjs',
   'orchestration/watch/inner-state.sh',
   'scripts/resource-gate.sh',
-  'scripts/heavy-op-token.sh',
 ];
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -98,7 +99,7 @@ export function exclusionEntries(repoRoot, pluginDir) {
     {
       rel: 'plugin/scripts/loop-shipping-exclusion-data.mjs',
       target: path.join(pluginDir, 'scripts', 'loop-shipping-exclusion-data.mjs'),
-      reason: "defines the 6 old paths (oldPaths) + the AC1b patterns + this exclusion table — the reference point, not a live caller; mirrors loop-shipping.test.mjs's own self-exclusion",
+      reason: "defines the 5 old paths (oldPaths) + the AC1b patterns + this exclusion table — the reference point, not a live caller; mirrors loop-shipping.test.mjs's own self-exclusion",
     },
     {
       rel: 'plugin/test/task-contract-check.test.mjs',
@@ -118,7 +119,7 @@ export function exclusionEntries(repoRoot, pluginDir) {
     // here — intentional: blockquotes are documentation of the target layout, not live instructions.
     //
     // The necessity-check invariant (## Contract): every exclusion entry must either suppress a
-    // hit of the 6 old-path patterns in its own target (non-inert), or carry a `retainedNote`
+    // hit of the 5 old-path patterns in its own target (non-inert), or carry a `retainedNote`
     // justifying why it is kept while inert. None of the entries above carry a retainedNote today —
     // every file-level target currently contains at least one old-path pattern hit.
   ];

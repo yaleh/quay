@@ -1,18 +1,17 @@
 // @test-group governance
 // monitor-mount-check.test.mjs — gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right,
 // rewritten for gap-retire-inner-state-one-observer-targets-by-parameter (AC1): observation has
-// exactly ONE tool, session-liveness.sh. Verifies the three criteria of the outer's Monitor mount
+// exactly ONE tool, session-liveness.sh. Verifies the two criteria of the outer's Monitor mount
 // check (plugin/scripts/monitor-mount-check.sh):
 //   (1) mounted             — a real process whose argv[0..1] == `bash <abs|rel session-liveness.sh>`
 //                             exists (basename match on argv[1], so absolute and relative launches
 //                             both count; inner-state.sh is NO LONGER a pass condition);
 //   (2) targetRoot          — the resolved work root (argv script's ../.. resolved via the process
-//                             cwd, or the SESSION_ROOT env override) compared to this repo's root;
-//   (3) delivered           — the SHARED session-liveness events file has fresh events (AC9,
-//                             gap-liveness-mounting-is-a-single-flight-role-with-no-owner:
-//                             ownedByThisSession is ABOLISHED — the criterion is "事件是否真的送达",
-//                             not "是不是本会话挂的". AC20c is one-mount-many-subscribe: another
-//                             session's mount + normal delivery must PASS; no mount ⇒ FAIL.)
+//                             cwd, or the SESSION_ROOT env override) compared to this repo's root.
+// The old (3) delivered criterion — the SHARED session-liveness events file having fresh events —
+// was RETIRED 2026-08-06 (gap-session-liveness-remove-shared-events-and-lock): the shared file is
+// gone, observation is a tree, and each observer owns its own stdout stream (who mounts owns it), so
+// delivery is the owner's own Monitor stream, not a cross-observer file the checker could read.
 // Plus the AC2 self-match negative control (substring in the checker's own argv must NOT count),
 // AC6 (N>1 pids is ONE logical monitor), AC7 (zero writes), and the AC1 negative control
 // (session-liveness deliberately not mounted ⇒ mounted=false ⇒ the six-key check judges cold start
@@ -125,7 +124,7 @@ function runChecker(extraEnv = {}) {
 
 // ── AC1: the three contract fields ──────────────────────────────────────────────────────────────────
 
-test("AC1 — --json emits mounted / targetRoot / delivered (all boolean where promised; ownedByThisSession is GONE)", () => {
+test("AC1 — --json emits mounted / targetRoot / targetOk (all boolean where promised; ownedByThisSession AND delivered are GONE — per-observer streams, 2026-08-06)", () => {
   const tmp = makeTmpWorkspace();
   try {
     const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
@@ -133,11 +132,12 @@ test("AC1 — --json emits mounted / targetRoot / delivered (all boolean where p
     const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.ok("mounted" in data, "mounted field missing");
     assert.ok("targetRoot" in data, "targetRoot field missing");
-    assert.ok("delivered" in data, "delivered field missing (AC9: replaces ownedByThisSession)");
+    assert.ok("targetOk" in data, "targetOk field missing");
     assert.equal(typeof data.mounted, "boolean");
-    assert.equal(typeof data.delivered, "boolean");
-    assert.ok(!("ownedByThisSession" in data),
-      "ownedByThisSession must be ABOLISHED (AC9 — the criterion is delivery, not ownership)");
+    assert.equal(typeof data.targetOk, "boolean");
+    assert.ok(!("ownedByThisSession" in data), "ownedByThisSession must be ABOLISHED");
+    assert.ok(!("delivered" in data) && !("eventsFresh" in data) && !("eventsFile" in data),
+      "delivered/eventsFresh/eventsFile must be REMOVED (2026-08-06 — the shared events file is gone; delivery is the owner's own Monitor stream, so the mount check is mounted + targetOk)");
   } finally { cleanup(tmp); }
 });
 
@@ -152,11 +152,12 @@ test("AC1 NEGATIVE — no session-liveness mounted ⇒ mounted=false (six-key ju
     const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
     writeStubLiveness(livenessPath);
     // No fake spawned — the ONLY liveness process would be a real one, excluded by the hermetic
-    // script path. delivered is also false (absent events file), so all three criteria fail-closed.
-    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath, MONITOR_CHECK_EVENTS_FILE: path.join(tmp, "absent-events.jsonl") });
+    // script path. mounted=false + targetOk=false: fail-closed (the mount check no longer reads a
+    // shared events file, 2026-08-06).
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.equal(data.mounted, false,
       "session-liveness deliberately not mounted must report mounted=false (AC1 negative control)");
-    assert.equal(data.delivered, false, "no events file must report delivered=false");
+    assert.equal(data.targetOk, false, "no mounted observer ⇒ targetOk=false (fail-closed)");
   } finally { cleanup(tmp); }
 });
 
@@ -231,14 +232,16 @@ test("AC4 — monitor aimed at ANOTHER repo ⇒ targetRoot differs and targetOk=
   }
 });
 
-// ── AC5/AC9: delivery criterion replaces ownership ───────────────────────────────────────────────────
-// AC9 (gap-liveness-mounting-is-a-single-flight-role-with-no-owner): ownedByThisSession is ABOLISHED.
-// The criterion is "事件是否真的送达" (shared events file has new events / REPO-STALL visible), NOT
-// "是不是本会话挂的". Negative control: a monitor from another session with NO fresh events ⇒ FAIL
-// (delivered=false). Positive control: a monitor from another session WITH normal delivery ⇒ PASS
-// (delivered=true) — the whole point of AC20c's one-mount-many-subscribe design.
+// ── AC5/AC9: delivery criterion RETIRED with the shared events file (2026-08-06) ───────────────────
+// The old AC9 delivered criterion read the shared events.jsonl's mtime — "事件是否真的送达". The
+// shared file is GONE (gap-session-liveness-remove-shared-events-and-lock): observation is a tree,
+// each observer owns its own stdout stream (who mounts owns it), so delivery is verified by the
+// OWNER's own Monitor stream (cold-start MONITORS-DELIVERING), never by a cross-observer file. The
+// mount check therefore verifies exactly two things: mounted (an observer process exists) and
+// targetOk (it is aimed at the right repo). Who mounted it is irrelevant — an orphaned monitor from
+// a previous session, if alive and aimed right, still counts.
 
-test("AC5 — a monitor orphaned to a PREVIOUS session with NO fresh events ⇒ delivered=false (无人挂载 ⇒ FAIL)", async () => {
+test("AC5 — a monitor orphaned to a PREVIOUS session is still detected as mounted and correctly aimed (who mounted is irrelevant)", async () => {
   const tmp = makeTmpWorkspace();
   const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
   writeStubLiveness(livenessPath);
@@ -256,35 +259,29 @@ test("AC5 — a monitor orphaned to a PREVIOUS session with NO fresh events ⇒ 
       if (ppid !== null && ppid !== wrapperPid && ppid !== process.pid) break;
       await sleep(25);
     }
-    // The shared events file is ABSENT (no mount is delivering) ⇒ delivered=false, regardless of the
-    // alive-but-orphaned process being a real liveness monitor.
-    // Hermetic: point MONITOR_CHECK_EVENTS_FILE at a temp path that does not exist, so the checker
-    // must NOT see the REAL shared events file (the outer's live monitors write HEARTBEAT there —
-    // fresh mtime ⇒ delivered=true would be correct for them, and wrong for this no-events scenario).
-    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath, MONITOR_CHECK_EVENTS_FILE: path.join(tmp, "absent-events.jsonl") });
+    // No shared events file is involved: mounted + targetOk are the whole criterion now. The orphaned
+    // process is alive and SESSION_ROOT=tmp ⇒ it is a live observer aimed at this (hermetic) repo.
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
     assert.equal(data.mounted, true, "the orphaned monitor IS alive — the miss would be silent");
-    assert.equal(data.delivered, false,
-      "with no fresh shared events, delivery must FAIL (AC9: 无人挂载 ⇒ 必须判 FAIL)");
+    assert.equal(data.targetOk, true,
+      "an alive observer aimed at this repo must report targetOk=true (who mounted it is irrelevant; the delivered criterion is gone with the shared file)");
   } finally {
     if (fakePid) { try { process.kill(fakePid, "SIGKILL"); } catch { /* already gone */ } }
     cleanup(tmp);
   }
 });
 
-test("AC9 — a monitor from ANOTHER session with NORMAL delivery ⇒ delivered=true (别的会话挂的、投递正常 ⇒ PASS)", () => {
+test("AC9 (retired) — the shared-events delivery criterion is GONE: the checker's --json output carries no events-file field and the script has no live reader env for it", () => {
   const tmp = makeTmpWorkspace();
-  const eventsFile = path.join(tmp, "events.jsonl");
   try {
-    // The events file exists and is FRESH (just written) — someone (any session) is delivering.
-    fs.writeFileSync(eventsFile, '{"ts":123,"event":"HEARTBEAT","name":"other","msg":"holder alive"}\n');
-    const data = runChecker({
-      MONITOR_CHECK_EVENTS_FILE: eventsFile,
-      MONITOR_DELIVERY_FRESH_S: "300",
-    });
-    assert.equal(data.delivered, true,
-      "fresh shared events must mean delivered=true even though NO process in this session mounted it (AC9 PASS direction)");
-    assert.equal(data.eventsFresh, true);
-    assert.equal(data.lastEvent, "HEARTBEAT");
+    const livenessPath = path.join(tmp, "plugin", "scripts", "session-liveness.sh");
+    writeStubLiveness(livenessPath);
+    const data = runChecker({ MONITOR_CHECK_SESSION_LIVENESS: livenessPath });
+    assert.ok(!("delivered" in data) && !("eventsFresh" in data) && !("eventsFile" in data) && !("lastEvent" in data),
+      "the --json output must not carry delivered/eventsFresh/eventsFile/lastEvent (per-observer streams, 2026-08-06)");
+    const src = fs.readFileSync(CHECKER, "utf8");
+    assert.ok(!src.includes("MONITOR_CHECK_EVENTS_FILE"),
+      "the checker must not read a MONITOR_CHECK_EVENTS_FILE env (the shared events file is gone)");
   } finally { cleanup(tmp); }
 });
 
@@ -322,7 +319,6 @@ test("AC7 — checker is zero-write (git status unchanged) and declares the read
   const src = fs.readFileSync(CHECKER, "utf8");
   assert.match(src, /只读 \/proc/, "the script must explicitly declare it only reads /proc");
   assert.match(src, /不写任何文件/, "the script must explicitly declare it writes nothing");
-  assert.match(src, /只读 \/proc 与共享事件文件/, "the read contract must extend to the shared events file (AC9 delivery check reads it)");
 });
 
 // ── AC1 (rewrite): inner-state.sh is NO LONGER a pass condition ─────────────────────────────────────
