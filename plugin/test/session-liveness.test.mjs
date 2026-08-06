@@ -216,6 +216,22 @@ function makeBackdatedGitRepo(dir) {
   assert.ok(ct.status === 0 && Number(ct.stdout.trim()) < 1000000000, `commit must be backdated, got ${ct.stdout}`);
 }
 
+// initGitRepo — a git repo at `dir` with one commit. `authorDate` (ISO-8601) controls the
+// committer/author date; omit for a fresh (now) commit. The multi-source outer-heartbeat criterion
+// (gap-outer-heartbeat-source-inverts-under-incident-handling) reads HEAD commit time as one source.
+function initGitRepo(dir, { authorDate } = {}) {
+  const env = { ...process.env };
+  if (authorDate) { env.GIT_AUTHOR_DATE = authorDate; env.GIT_COMMITTER_DATE = authorDate; }
+  const git = (args, cwd) => spawnSync("git", args, { encoding: "utf8", cwd, env });
+  const init = git(["-c", "user.name=t", "-c", "user.email=t@t", "init", "-q", "-b", "master", dir]);
+  assert.equal(init.status, 0, `git init failed: ${init.stderr}`);
+  fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
+  const add = git(["-c", "user.name=t", "-c", "user.email=t@t", "add", "."], dir);
+  assert.equal(add.status, 0, `git add failed: ${add.stderr}`);
+  const commit = git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"], dir);
+  assert.equal(commit.status, 0, `git commit failed: ${commit.stderr}`);
+}
+
 // ── availability guards ───────────────────────────────────────────────────────────────────────────
 
 const tmuxAvailable = (() => {
@@ -480,6 +496,108 @@ test("F3 — SESSION_TRANSCRIPTS accepts a session id and resolves it under $HOM
   } finally {
     p.cleanup();
   }
+});
+
+// ── 多源外层心跳（gap-outer-heartbeat-source-inverts-under-incident-handling，2026-08-06）──────
+// SESSION-OVERDUE 的默认外层心跳源从【tick-log 单源】改为【多源 max mtime】：
+//   max(HEAD 提交时间, queue-state mtime, tick-log mtime, docs/analysis/*.md, .quay/verification-round.jsonl)
+// 红窗处置写 queue-state+提交、不写 tick-log ⇒ 心跳仍新鲜（反向失效消除，AC2）；全源旧 ⇒ 仍报 OVERDUE
+// （真阳性保留，AC3）；OVERDUE 消息自带多源说明（信号可区分，AC4）。
+
+test("AC2 — 多源外层心跳：红窗处置（最近提交 + 新 queue-state + 旧 tick-log）⇒ 不报 SESSION-OVERDUE（反向失效消除）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-multi-ok");
+  const ws = path.join(p.tmp, "ws");
+  try {
+    initGitRepo(ws, {}); // 最近提交（红窗处置的产出）
+    fs.mkdirSync(path.join(ws, "docs", "analysis"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "docs", "analysis", "batch2-queue-state.md"), "# queue-state\n");
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "tick-log.md"), "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", path.join(ws, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `outer ${ws} ${p.session}`, { overdueMin: 1 });
+    try {
+      await sleep(4000);
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `红窗处置（写 queue-state + 提交、不写 tick-log）必须不报 OVERDUE（反向失效消除）:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC3 — 多源外层心跳：30 分钟零产出（全源旧）⇒ 仍报 SESSION-OVERDUE（真阳性保留）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-multi-stale");
+  const ws = path.join(p.tmp, "ws");
+  try {
+    initGitRepo(ws, { authorDate: "2000-01-01T00:00:00Z" }); // 旧提交（无产出）
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "tick-log.md"), "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", path.join(ws, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `outer ${ws} ${p.session}`, { overdueMin: 1 });
+    try {
+      assert.ok(await waitForOutput(mon, /SESSION-OVERDUE outer/, 6000),
+        `全源（提交/tick-log/queue-state）都旧 ⇒ 必须报 OVERDUE（真阳性保留）:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC4 — OVERDUE 信号可区分：真阳性消息自带「多源心跳」说明（无需手工查提交历史）；假阳性（有产出）从信号本身不报", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-multi-sig");
+  const ws = path.join(p.tmp, "ws");
+  try {
+    // 假阳性场景：有产出（最近提交 + 新 queue-state）但 tick-log 旧 ⇒ 从信号本身不报 OVERDUE
+    initGitRepo(ws, {});
+    fs.mkdirSync(path.join(ws, "docs", "analysis"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "docs", "analysis", "batch2-queue-state.md"), "# queue-state\n");
+    fs.mkdirSync(path.join(ws, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws, "orchestration", "tick-log.md"), "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", path.join(ws, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const mon = spawnMonitor(p.env, `outer ${ws} ${p.session}`, { overdueMin: 1 });
+    try {
+      await sleep(4000);
+      assert.ok(!/SESSION-OVERDUE/.test(mon.output()),
+        `假阳性（有产出但 tick-log 旧）必须从信号本身不报 OVERDUE:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+    // 真阳性场景：全源旧 ⇒ 报 OVERDUE，且消息自带「多源心跳」自说明（区分判据写在信号里）
+    const ws2 = path.join(p.tmp, "ws2");
+    initGitRepo(ws2, { authorDate: "2000-01-01T00:00:00Z" });
+    fs.mkdirSync(path.join(ws2, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(ws2, "orchestration", "tick-log.md"), "# tick\n");
+    spawnSync("touch", ["-d", "3 hours ago", path.join(ws2, "orchestration", "tick-log.md")], { encoding: "utf8" });
+    const mon2 = spawnMonitor(p.env, `outer ${ws2} ${p.session}`, { overdueMin: 1 });
+    try {
+      assert.ok(await waitForOutput(mon2, /SESSION-OVERDUE outer/, 6000),
+        `真阳性（全源旧）必须报 OVERDUE:\n${mon2.output()}`);
+      assert.ok(/多源心跳/.test(mon2.output()),
+        `OVERDUE 消息必须自带「多源心跳」说明（AC4：不需手工查提交历史即可区分）:\n${mon2.output()}`);
+    } finally {
+      mon2.child.kill("SIGKILL");
+      mon2.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("Contract invoke — session-liveness.sh --selfcheck 验证多源心跳判据（红窗处置保持新鲜 / 零产出报 OVERDUE），退出 0", () => {
+  const r = spawnSync("bash", [SCRIPT, "--selfcheck"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `--selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /selfcheck: PASS/);
+  assert.match(r.stdout, /red-window-heartbeat_min=\d+\s+zero-output-heartbeat_min=\d+/);
 });
 
 // ── Test G: un-halt baseline reset (coordinator 2026-08-03 sample) ──────────────────────────────────
