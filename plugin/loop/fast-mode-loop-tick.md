@@ -78,7 +78,7 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 | compact / `/clear` 后从队列文件恢复状态 | 决定任务优先级 |
 | 触发停止条件时停下并报告 | 替人做合并冲突/审查失败的判断 |
 
-**后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号。这个 tick 是**兜底心跳**，处理「会话 turn 结束了但队列还有活」的情况。因此间隔应长（20–30 分钟），不是快轮询。
+**后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号，也是**派发触发源**（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`：实测派发=3 簇 tick 边界、槽位释放后 39 分钟不回填而池子 health，正是「并发打破外层瓶颈」设计的退化形态——瓶颈从外层搬到了 inner 自己的 tick）。**收到完成通知 = 槽位释放，必须立即重评估派发（「槽位释放回填」，见步骤 4），不等下一 tick。** 这个 tick 是**兜底心跳**，处理「会话 turn 结束了但队列还有活」的情况。因此间隔应长（20–30 分钟），不是快轮询——**派发节奏由完成事件驱动，不由 tick 间隔驱动**。
 
 <!-- unmechanizable: 判断题，无代码可强制。形态是启发式，靠每 tick 复读 -->
 **不要把「没收到通知」当作「还在跑」（2026-08-02 两次停摆教训）**：后台 agent 会静默停止（transcript 静止、无 notify），尤其长测量任务。空闲时**先查进程再决定等不等**，别只依赖通知：
@@ -438,6 +438,31 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 
 ### 4. 派发就绪任务（并发）
 
+**槽位释放回填（slot-release refill）——派发是事件驱动的，不是 tick 边界驱动的（`gap-dispatch-
+evaluated-only-at-inner-tick-boundary-not-slot-release`）**：任一在飞 subagent 完成 → harness 发
+`<task-notification>` 重新唤起会话 → **本回合立即执行本步的派发评估（槽位释放回填），不等下一 tick**。
+完成通知就是派发触发器；tick 心跳只是兜底（「会话 turn 结束了但队列还有活」时推进一次），不是派发节奏。
+**tick 间隔（20–25 分钟）不再是派发节奏**——把派发节奏当 tick 间隔，就是本文档自己警告过的退化形态
+（瓶颈从外层搬到 inner 自己的 tick：实测派发=3 簇 tick 边界、槽位空 39 分钟而池子 health）。
+
+**回填评估是机械的一条命令（slot-refill，纯评估，绝不自己派发）**——每次收到完成通知，先跑回填评估，
+GO 才走下方的候选资格（1-4）与派发：
+
+```bash
+bash plugin/scripts/slot-refill.sh --root "$(pwd)"
+# REFILL GO: slots-remaining M, dispatchable_disjoint N  ⇒ 走下方候选资格后派发
+# REFILL NO-GO: <reason>（cap 已满 / 池空 / .halt / 空槽不可知）⇒ 不派发，本回合到此为止
+```
+
+评估组合的读取与步骤 3.5/3.6/4 同一套（slot-refill.ts 组合它们，不另造平行实现）：
+`cap-from-gate.sh`（effective_cap，**机制/策略分离——档位数字仍由项目配置，AC5**）+
+`fast-mode-telemetry.ts --slots --cap`（realInFlight / slots-remaining，**reconcile 感知——括号 ≠
+subagent**，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3/AC6，事件驱动依赖准确的完成
+感知）+ `ready-pool-check.ts --cap`（pool / dispatchable_disjoint）。**负控制（AC4）**：slot-refill
+只在两类时刻被调用——(a) 完成通知到达（事件驱动）；(b) tick 心跳（兜底）。**它不自排程、不轮询、不双
+驱动**——无完成事件的时段零派发（除 tick 心跳本身）。**并发上限语义不变（AC5）**：回填同样遵守「至多
+`effective_cap` 个在飞 subagent」，只是让派发发生得更早。
+
 **并发上限 = 步骤 3.6 前置块算出的 `effective_cap`（自适应，非固定 3）**：`cap-from-gate.sh` 在派发
 决策点读 `some avg300`（5 分钟窗口）+ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时
 GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT/EXTREME 档（不加重，AC6）。本 tick 只派发
@@ -533,7 +558,9 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 
 ### 6. 重新排程
 
-`ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起，这只是兜底。
+`ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起（那是派发触发源，
+见步骤 4 的「槽位释放回填」），这只是兜底——**tick 间隔不是派发节奏**，派发节奏由完成事件驱动
+（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`）。
 
 ---
 
