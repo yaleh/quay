@@ -51,6 +51,10 @@ extra:
 - [ ] AC3: fresh install 路径不受影响（无 config 冲突）
 - [ ] AC4: 与 gap-delivery-surface-grows（done）交叉标注——漂移报告已交付，本任务是「报后怎么办」
 - [ ] AC5: 与 gap-quay-init-rewrites-an-executable 交叉标注（同 config 覆盖形态）
+- [ ] AC6: **A3 夹具覆盖配置分歧**——`install-config-driven-e2e.test.mjs` 的升级夹具不再只用「配置与模板
+      一致的干净 old-install」（合成样本），新增一个**有机演化消费者**形态：工作区有自定义 loop 值 ≠ 模板
+      （模拟 archguard 式真实下游），验证升级保留 config loop 值且铺下机制文件（AC1 的真实形态回归测试）
+      → 合成侧可测 archguard 撞到的 config-conflict 形态；这是 2026-08-06 裁定「两者都要」的合成侧一半
 
 ## Touches
 
@@ -72,3 +76,21 @@ reviewer: outer
 at: 2026-08-06T01:3xZ
 changed: archguard 实跑（子代发现）立案——升级对已有消费者停/毁 config；51 测试测漂移报告非报后怎么办。
 另立 config-preserving 增量升级（done 任务漂移检测正确，config 保留是后继）。
+
+## 验证范围裁定补充（2026-08-06 01:5xZ，外层——判据 vs 现实：范围不是频率）
+
+**实测**：`install-config-driven-e2e.test.mjs` A3 断言正是 archguard 撞到的场景（old-install 升级到全新
+产品文件），6/6 全绿含 A3（29s）——而 archguard 35 分钟前真实跑 `quay init --loop` 停 config-conflict、
+零文件铺下。**同一场景：合成夹具绿、真实下游撞墙**。
+
+**根因（范围不是频率）**：A3 用 mkdtemp 造的临时工作区（6 处 mkdtemp/tmpdir/fixture），其 old-install 是
+自己刚造的、配置与模板一致的干净样本；archguard 是真实演化过的消费者（.quay/config.yml 有自己的 loop
+值 ≠ 模板）。**冲突来自「这个项目真的用过、真的改过配置」——合成夹具造不出这个状态**。该文件头注释
+写明是 RED-FIRST 落地（当初红的就是 conflict-skip），后来改绿但没覆盖真实下游的配置分歧。
+
+**裁定（人方向「更频繁验证」+ 管理者意见）——两者都要**：
+1. **扩 A3 夹具覆盖配置分歧**（造一个有自定义 loop 值 ≠ 模板的工作区，验证升级保留它）——合成侧可测；
+2. **真实下游加入验证目标**（archguard / meta-cc / B 机）——高频验证真实工作区，跑一万次 mkdtemp 也
+   撞不到有机分歧，只有真实目标能。
+
+**只提高频率不改验证对象 = 跑一万次也撞不到那个状态。**

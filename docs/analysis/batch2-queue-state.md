@@ -5674,3 +5674,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 在飞 1/3（session-liveness-hashes 工作中：pane-state-classify + session-liveness + test，0 提交，推进中）。
   无 fan-in、无新派发。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T02:12Z（外层）
+
+- **记账缺口补记**：verification-round.jsonl 停在 round 13（00:25Z），closure 14-18 已落地翻 done
+  但 jsonl 未追加（叙事写了、机械没写）。外层补记 round 14-18，现 1-18 连续。
+- **立案 2 条**：`gap-verification-round-record-skipped-for-five-closures`（防再犯：≥1 收尾 ⇒
+  jsonl 追加前 assert last+1）+ `gap-install-upgrade-verification-targets-real-downstream-workspaces`
+  （真实下游 archguard/meta-cc/B 加入验证目标，人「更频繁验证」方向）。config-preserving 修复任务
+  已补 AC6（A3 夹具扩配置分歧）。
+- 内层在飞 1/3（session-liveness-hashes）。套件 green。
