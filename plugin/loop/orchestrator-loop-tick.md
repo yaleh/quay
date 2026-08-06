@@ -36,7 +36,7 @@ cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、20 条 AC、DoD、四项已定决策 |
 | `orchestration/tick-log.md` | **历史 tick 与动作类型累计分布**——退化判据的唯一来源 |
 | `orchestration/escalations.md` | 已攒给人、尚未处理的非常规项 |
-| `docs/analysis/batch2-queue-state.md` | 内层自报的队列状态（**可能是旧快照，以 git 为准**） |
+| `docs/analysis/batch2-queue-state.md` | 内层自报的队列状态（**可能是旧快照，以 git 为准**）。**「batch2」是历史名**（旧批模型的队列快照，保留不改名以免破坏引用） |
 | `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` | 四项原则 |
 
 **2. 建立实况**（以实测为准，不以上面任何文件的自述为准）
@@ -500,7 +500,7 @@ git -C "$REPO_ROOT" status --short                  # 树是否干净
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
-cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
+cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态（历史名「batch2」，见 1a 冷启动表注）
 ```
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
@@ -560,10 +560,16 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 请求窗口早于它首条记录时，工具会打印 `⚠ … 个更早的会话未被包含`，并给出 `--session <id>`。
 **看到那条警告就说明本次输出不是完整窗口**——跨 `/clear` 的分析要逐个会话跑再合并。
 
-### 1b. 异步收尾例程（verification-round closure pass，强制）
+### 1b. 异步收尾例程（`verification-round-N`，强制）
+
+**词汇规范（与外层文档同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
+本步骤就是全量验证 + 收尾节奏 **`verification-round-N`**——它**只关于验证/收尾，不是分派门控**；
+分派永远是滚动的（`fast-mode-loop-tick.md` 步骤 4），验证轮不约束、不命名、不门控任何一次派发。
+tick-log 与 commit message 沿用同一词汇：派发写「滚动派发」，本步骤的轮次写 `verification-round-N`。
 
 **批次边界的真源是记账同步，不是措辞**（`gap-closure-sync-is-the-true-batch-boundary-move-
-bookkeeping-to-outer-async`，人 2026-08-05 设计裁定，决定不是建议）：「Close batch-N」三次在 inner
+bookkeeping-to-outer-async`，人 2026-08-05 设计裁定，决定不是建议）：旧的 inner 收尾日志
+「Close batch-…」（**历史引用**，指过去以批为单位的收尾，已随机制根删除）三次在 inner
 派发历史里、每次收尾后必跟 3 连发、收尾期间零新派发 ⇒ 记账曾是调度的同步点。**inner 只执行 + 派发 +
 合并，永远不因记账停顿、也不知道收尾存在；收尾是本层（外层 20-min cron）的异步活。** 本步骤每个
 tick 做一次收尾 pass。
@@ -632,7 +638,7 @@ tick 做一次收尾 pass。
      定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
 5. **落盘聚合**：本轮收尾后跑一次
    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
-   否则被 git 跟踪的聚合文件不反映本批结果。
+   否则被 git 跟踪的聚合文件不反映本轮结果。
 
 **每 tick 必报**补一条：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
 与 `durationMs`、本轮全量 suite 是否在跑/绿/红。
@@ -755,16 +761,16 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 | 审查 2 轮仍 REFUTED | 读审查发现，判断是否真实。真实 → 指示缩小范围重做；不实 → 指示记录理由后推进 |
 | 任务超 90 分钟 | 判断是任务过大（指示拆分）还是卡住（指示放弃并建任务记录） |
 | needs-human 积压 ≥3 | 分诊：真阻塞的攒给人，可继续的指示内层继续 |
-| 就绪队列为空 | 从任务库补一批（见步骤 4） |
+| 就绪队列为空 | 从任务库补一组（见步骤 4） |
 
 ### 4. 队列补充
 
-队列空时，从 `tasks/` 取下一批。**复用已有机制，不新建**：
+队列空时，从 `tasks/` 取下一组。**复用已有机制，不新建**：
 
 - 候选：`status: todo` 或 `ready` 且带 `milestone-candidate` 标签
 - 依赖就绪：父任务 done、无未满足前置（`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN）
 - 并发资格：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞任务
-  和彼此**两两检查，重叠则不同批
+  和彼此**两两检查，重叠则不可并发
 - 优先级：阻塞其它任务的优先；`gap-*` 缺陷类优先于 `DIR-*` 新能力
 
 **就绪池维持（todo→ready 晋级）不再靠外层自愿 AC-queue**（`gap-promotion-cadence-is-role-volition-
@@ -904,7 +910,7 @@ tick 或 `/clear` 后的会话会重犯。
 |---|---|
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、AC、DoD |
 | `fast-mode-loop-tick.md` | 内层 tick 指令 |
-| `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
+| `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补）。**历史名「batch2」**（旧批模型队列快照，保留不改名） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
 | `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |

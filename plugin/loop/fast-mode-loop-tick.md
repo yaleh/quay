@@ -55,7 +55,7 @@
 
 按顺序读这四份，然后从 tick 步骤 1 开始：
 
-1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）
+1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）。**「batch2」是历史名**（旧批模型的队列快照，保留不改名以免破坏引用）；今天的派发是滚动的，不读成「分批门控」
 2. `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD
 3. `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` —— 四项原则
 4. 本文件其余部分
@@ -110,17 +110,17 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 迭代中途。任务收尾（外层异步）仍必须按 DoD 要求**连跑 2 次全量全绿**（`fail 0` 且 `cancelled 0`，判绿
 三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
 
-**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
+**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a（**历史批名**，指旧的全量验证轮次，保留不改名）那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
 ```bash
 grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式查）
 grep 'FULL-SUITE-EXIT=0'
-grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，批套件全绿；套件构成每次变都要重测参考值）
+grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，全量套件全绿；套件构成每次变都要重测参考值）
 ```
-只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
+只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c（**历史批名**）稳定 2361 → … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
-（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled 可能有
+（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a（**历史批名**）的 cancelled 可能有
 自身异步结构的触发条件（Promise 未决 + 事件循环已解决）。**判绿三条件成立的理由改为：「cancelled 是一种
 会被 fail 0 掩盖的失败」——显式查它是为了不漏掉这种失败，不是因为饥饿必然产生它。**
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）→ **+stranded +parser = 2052**
@@ -142,13 +142,13 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
    并发套件，= 负载翻倍）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
-2. **这族永远单独跑批或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
+2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
    全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
 3. **不要删/降级/改 skip 这族**——它们抓的是真问题（挂载单飞、laid-down 实跑、`--once` 接缝），
    只是天生负载敏感。
 
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
-跑批协议 grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
+grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
@@ -162,7 +162,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 **挂载是单飞（AC20，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）**：挂载是一个
 **有主的、可接管的角色**——取单飞锁（复用 `heavy-op-token.sh` 的锁），已有活持有者时再挂 ⇒
 退出 0（空操作，不是失败）、不新增进程；持有者 kill -9 后下一次挂载自动接管。所以**任何项目
-（quay/archguard/meta-cc）都挂同一把锁、同一批共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
+（quay/archguard/meta-cc）都挂同一把锁、同一份共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
 先挂上者成为唯一持有者，其余挂载一律空操作。要看事件的人**订阅共享文件即可，不必自己挂**。
 
 挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
@@ -218,6 +218,12 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 ## Tick 步骤
 
+**词汇规范（AC5，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`，跨模型沿用）**：
+**分派是滚动的，不叫批号**——槽位空即派、不攒批、不等批；任何「batch + 编号」的措辞都只能是历史
+引用或错误。**全量验证/收尾节奏叫 `verification-round-N`**（外层异步例程，见步骤 2 与
+`orchestrator-loop-tick.md` 步骤 1b），它**只关于验证/收尾，不是分派门控**。tick-log 与 commit message
+沿用同一词汇：描述派发用「滚动派发」，描述全量验证/收尾轮次用 `verification-round-N`。
+
 ### 0. 哨兵
 
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
@@ -239,9 +245,15 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 ### 2. Fan-in 已返回的任务（合并串行，不写任务状态）
 
+**词汇规范（本步与外层 1b 同词，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
+全量验证 + 收尾节奏统一叫 **`verification-round-N`**（外层异步例程，每轮一次全量套件验证 + 收尾记账）。
+**`verification-round-N` 只关于验证/收尾，不是分派门控**——分派永远是滚动的（见步骤 4），验证轮的
+节奏不约束、不命名、不门控任何一次派发。旧文里把「全量套件批量」当分派单位的说法已随机制根删除。
+
 **只合并与清理，不写任何任务状态。** 全量套件验证已从 inner 移除——它是外层后台异步跑的验证 gate
-（`orchestrator-loop-tick.md` 步骤 1b「异步验证例程」），inner 的停止条件只读外层的
-`.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、不写 `--task-end`**。
+（`orchestrator-loop-tick.md` 步骤 1b「异步收尾例程（verification-round-N）」），inner 的停止条件
+只读外层的 `.quay/full-suite-state.json`（见步骤 3）。inner 在这里**不翻 done、不写轮次记录、
+不写 `--task-end`**。
 
 对每个已返回但未合并的 subagent，逐个：
 
@@ -394,7 +406,7 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 ```
 
 - stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
-  （① 本批已做完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
+  （① 本回合已派发完未翻 done 的——AC 全勾但 status 仍 `ready`；② `labels: fixture` 的；③ 带 `**PARKED`
   标记的）。**`floor` 字段 = cap × 4**（GO 档 cap=5 ⇒ floor 20；WAIT 档 cap=2 ⇒ floor 8；EXTREME 档
   cap=1 ⇒ floor 4；`--cap` / `--floor-mult` 可调）。`pool ≥ floor` ⇒ 无需补晋，直接进步骤 4 派发。
 - **判据是 `dispatchable_disjoint` 不是 pool 数**：脚本同报**池内最大互不冲突子集大小**
@@ -426,7 +438,7 @@ GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT
    AC2）：`checkTouchesResolve`（`plugin/scripts/touches-orthogonality-check.ts` 的 `--resolve`
    模式）对每个 `status: ready` 候选检查其 `## Touches` 是否能在真实树中解析。ADR-022 删除了
    经典管线文件后，8/9 个 ready 任务的 Touches 整体指向不存在的文件，而 `checkTouchesPair`
-   只查两两重叠、**不查文件存在性**——这就是这批任务漏过资格闸的原因。`(new)`/`(delete)`
+   只查两两重叠、**不查文件存在性**——这就是这组任务漏过资格闸的原因。`(new)`/`(delete)`
    标记豁免（前者是任务将创建的文件、后者是任务将删除的文件，都不必已存在）。
    **多数未标记条目缺失 ⇒ 该候选不具备派发资格**：标 needs-human、记录理由，不派发
    （exit 1 即不派发）：
@@ -446,11 +458,12 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 
 ```bash
 node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --root "$(pwd)" tasks/<A>.md tasks/<B>.md --json
-# 输出 { batch, deferred }。两者都在 batch ⇒ disjoint，可同批；
+# 输出 { batch, deferred }（`batch`/`deferred` 是机件输出字段名，保留）。两者都在 batch ⇒ disjoint，
+# 可并发/无触摸重叠，非门控分批；
 # deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
 ```
 
-重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
+重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
 4. **自身文件授权（self-touch，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
    每个任务的 `## Touches` 必须含**它自己的任务文件** `tasks/<id>.md`——**不带 `(new)` 标注**（带
@@ -469,7 +482,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
    ——任一 ready 任务缺自身文件 ⇒ exit 1（先补，否则该任务不可派发）。
 
 派发形态：**后台 `Agent(run_in_background: true, ...)`——`run_in_background` 必须是 `true`**
-（`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到整批返回、拿不到先完成者的
+（`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到全部在飞返回、拿不到先完成者的
 早期反馈、期间什么也做不了，`<task-notification>` 唤醒流永远不会被触发——那是本仓实测等待的另一半来源，
 见 `orchestration/SPEC-cut-the-waiting.md`。同一条消息里发多个 `Agent` 调用拿到的并发是 harness 并发执行，
 不是后台派发）。subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，不在 `/tmp`——tmpfs 是内存，
@@ -479,7 +492,7 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 **任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：
 任务代理提交前编辑 `tasks/<id>.md`（它自己的任务文件，Touches 已授权）：**勾 AC 复选框**（它实现了、
 自己跑过 scoped 测试，有全部事实）+ **贴 invoke 实跑证据**（自己 scoped 测试的输出）。**仍 SCOPED ONLY**
-（不跑全量 suite——全量判据归外层 verification-round）；**不翻 status**（翻 done 是外层收尾的活）；
+（不跑全量 suite——全量判据归外层 verification-round-N，见步骤 2 词汇规范）；**不翻 status**（翻 done 是外层收尾的活）；
 **不勾 DoD 行**（DoD 全量绿在 SCOPED ONLY 下任务内不可知，是唯一真时序依赖）。收尾（外层异步）因此
 每任务只剩「核对 DoD 行 + 翻 done + 关遥测括号」——量小到不是同步点（(c) 块落地后，closure-async
 机制根的收尾对已自勾 AC/证据的任务是 no-op）。
