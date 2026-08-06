@@ -6564,3 +6564,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 外层已推 50 develop 提交到 origin（7c190cd4，含 gate #1/#2/#3 修复 + 9 任务收口）——
   ad-arm1 第 3 轮 pull 就绪；外层记 progress-dependency：ad-arm1 需显式 manager 通知才 pull+rerun（不自动跟随 push）。
 - develop 43f854ce。下一事件：ad-arm1 第 3 轮门禁结果 / 外层喂新任务。
+
+### tick 2026-08-06T19:0xZ（人裁定派发：single-flight-lock 跨项目盲区）
+
+- **人立案 + 外层裁定派发** gap-session-liveness-single-flight-lock-cross-project-blind（archguard 一天多
+  无监视器，正确诊断+升级却掉进「谁都不负责」缝隙）。根因精确：借锁时作用域照抄——单飞锁按机器不分项目。
+- **外层裁定修法（比锁分域小）**：不改锁实现——session-liveness.sh 调用时把 --root 从 $SL_GLOBAL_DIR
+  换成按 targetRoot 分域子目录（$SL_GLOBAL_DIR/<target-root-slug>），锁代码一行不动（789/814/851 + lock_token 799）。
+  heavy-op-token.sh 原始用途（重测试互斥每机器对）保持正确；监视器互斥应每项目对。人 2026-08-04 裁定
+  多目标挂载 7→2。
+- 派发闸：resolve 3/3、pool-candidate clean、fork-baseline=develop、在飞 0/3。
+- 派发 1/3：worktree /home/yale/work/quay-worktrees/single-flight-lock + bracket 已开。
+- 在飞 1/3。
