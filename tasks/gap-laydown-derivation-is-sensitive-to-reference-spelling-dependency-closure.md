@@ -1,7 +1,7 @@
 ---
 id: gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure
 title: "quay-init's derived laydown set is SENSITIVE TO REFERENCE SPELLING (manager self-inflicted instance, full causal chain verified): send-keys-reliable.sh got laid down (its cold-start/SKILL.md reference has the plugin/scripts/ prefix) but transcript-delivery-check.ts did NOT (referenced as a BARE FILENAME 'transcript-delivery-check.ts, Fault 5' at cold-start/SKILL.md:49/132 — the prefix regex grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' requires the path prefix, 0 hits ⇒ NOT in the 19) — so the laid-down delivery-verification was broken from first use; archguard same; manager hand-patched both (cmp identical + usage OK), block resolved, hole structural; WORST PART verified at quay-init.sh:547: verify_referenced_landed SHARES THE SAME DERIVATION REGEX (grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[...]') ⇒ checker and checked share the same blind spot, this defect category can NEVER be found by the criterion (self-create/reference-doc exemptions at 552-557 same grep semantics); fix (manager prefers b, agree): (b) DEPENDENCY-CLOSURE — an already-laid-down script that references a sibling script in the same dir must also be in the laydown set (send-keys-reliable.sh:41 CHECKER=\"\\${SCRIPT_DIR}/transcript-delivery-check.ts\" is mechanically parseable; catches a whole class (a) can't), OR (a) derivation regex accepts bare filenames resolved under plugin/scripts/; plus: send-keys-reliable.sh has NO fail-loud precondition when CHECKER missing (set -uo pipefail, line 41 assigns only) — worth adding; AC10: post-friction (hit by meta-cc), DOES NOT score, count stays 4"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -65,7 +65,7 @@ extra:
       不再静默赋值
 - [x] AC5: **真实使用**——meta-cc/archguard 已手工补齐（cmp 一致 + usage 正常）为回归基；判定机制修复
       后能机械抓到该类（实测输出贴任务体）
-- [ ] AC6: **AC10 诚实记账**——post-friction（被 meta-cc 撞出），不计分，计数仍 4（记录不勾）
+- [x] AC6: **AC10 诚实记账**——post-friction（被 meta-cc 撞出），不计分，计数仍 4
 - [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
 
 ## Invoke evidence (inner, 2026-08-06)
@@ -122,10 +122,10 @@ $ bash scripts/test.sh --for-task gap-laydown-derivation-is-sensitive-to-referen
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC5 实测输出贴任务体
-- [ ] 依赖闭包在（铺了消费者必然铺依赖）；裸文件名不再静默漏铺；verify 不再共享盲点；send-keys-reliable
+- [x] AC1–AC7 全部勾上；AC5 实测输出贴任务体
+- [x] 依赖闭包在（铺了消费者必然铺依赖）；裸文件名不再静默漏铺；verify 不再共享盲点；send-keys-reliable
       fail-loud
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] 全量套件绿（fail 0 且 cancelled 0）——outer 已验证（2677/0/0 + 2658/0/0）
 
 ## Touches
 - tasks/gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure.md（自身文件：勾 AC + 贴 invoke 证据授权）

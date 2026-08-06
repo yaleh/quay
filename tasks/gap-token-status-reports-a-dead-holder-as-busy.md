@@ -1,7 +1,7 @@
 ---
 id: gap-token-status-reports-a-dead-holder-as-busy
 title: "heavy-op-token --status says a project holds the token when its process is dead — staleness is only evaluated on acquire"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -157,7 +157,7 @@ stale_reclaims=7
 
 ## Definition of Done
 
-- [ ] AC3 与 AC4 的实跑输出贴进任务体——**一个会顺手回收的 `--status`，把读操作变成了写操作**
+- [x] AC3 与 AC4 的实跑输出贴进任务体——**一个会顺手回收的 `--status`，把读操作变成了写操作**
 - [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
 - [ ] 任务体记录：**懒回收是对的、acquire 路径是对的**，本任务只修 `--status` 的诚实性
 

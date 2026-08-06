@@ -1,7 +1,7 @@
 ---
 id: gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs
 title: "The heavy-op token's liveness watches the shell that acquired it, not the work that is running — a retry loop makes the token reclaimable while the work continues"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -117,7 +117,7 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
 
 ## Definition of Done
 
-- [ ] AC1（修复前可复现）与 AC3（不永久锁死）的实跑输出都贴进任务体——
+- [x] AC1（修复前可复现）与 AC3（不永久锁死）的实跑输出都贴进任务体——
       **只证明「修好了」而不先证明「原来真的会坏」，与「碰巧不再发生」不可区分**
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
 - [ ] 任务体记录：**这是一个可达状态，不是已观察到的并发**；

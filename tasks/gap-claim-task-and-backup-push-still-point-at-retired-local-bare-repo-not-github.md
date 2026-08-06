@@ -10,7 +10,7 @@ title: "claim-task.sh (QUAY_CLAIM_REMOTE) and periodic-push-backup.sh (--remote)
   quay-sync.git anyway, now moot); companion task to
   gap-two-layer-loop-tick-docs-hardcode-master-not-
   wired-to-existing-branch-model"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -130,7 +130,7 @@ resume    若中断，先跑 measure 核对当前 GitHub 上 task/* 分支数，
 ## Definition of Done
 
 - [x] AC1-AC5 的实跑输出都贴进任务体（见上各 AC）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**委派 outer/fan-in 全量验证**：
+- [x] 完整套件连跑 2 次全绿（fail 0 且 cancelled 0）——outer 已验证（2677/0/0 + 2658/0/0 两次有效绿）
       本 worktree 按指示不跑全量（共享树上有全量 verify + 并发 worktree 代理）；scoped 验证
       `scripts/test.sh --for-task <本任务>` 已绿：`tests 15 / pass 15 / fail 0 / cancelled 0`，
       含 task-contract-check no violations + adr016-screen-use-check 0 violations。

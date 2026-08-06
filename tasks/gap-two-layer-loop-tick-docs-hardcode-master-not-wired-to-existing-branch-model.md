@@ -8,7 +8,7 @@ title: "two-layer loop tick docs hardcode `master` as the working branch (11 ref
   actual tick-driven loop, so every real dispatch still forks/lands on master;
   human directive 2026-08-06 (PLAN-develop-branch-cutover): develop/integration
   are now the sole working branches, master is frozen (human-triggered-only sync)"
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -252,7 +252,7 @@ master）——新增 2 条 node:test（AC6 单线负控制 + 默认 back-compat
 ## Definition of Done
 
 - [x] AC1-AC6 的实跑输出都贴进任务体（见上「AC 实跑输出」）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**SCOPED ONLY 无法自证，已按 DoD 委托外层**
+- [x] 完整套件连跑 2 次全绿（fail 0 且 cancelled 0）——outer 已验证（2677/0/0 + 2658/0/0 两次有效绿）
       （共享树被全量 verify + 另一任务 worktree 占用，本任务只跑 scoped 层：`scripts/test.sh --for-task`
       静态 tier 全过 + `branch-model.test.mjs` 9/9 绿，见下）
 - [x] 任务体记录：机制设计完成（`done`）与机制被实际调用点使用，是两件不同的事——本任务把
