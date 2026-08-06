@@ -301,10 +301,12 @@ import {
   SEVERITY_LABEL,
 } from "../src/gate/config/loader.ts";
 
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
+
 const __diagDirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__diagDirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__diagDirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const quayBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__diagDirname, "..", "..", "quay-native", "bin");
 
 function makeCliWorkspace(tag, gatesBlock) {
   const tasksDir = makeTmpDir("quay-diagc-" + tag + "-tasks-");

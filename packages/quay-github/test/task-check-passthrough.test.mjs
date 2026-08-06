@@ -77,9 +77,10 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { QUAY_CLI } from "../../quay/test/helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "..", "quay", "bin", "quay.ts");
+const coreBin = QUAY_CLI;
 const githubBin = path.join(__dirname, "..", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 const fakeGhScript = path.join(__dirname, "fixtures", "fake-gh.mjs");

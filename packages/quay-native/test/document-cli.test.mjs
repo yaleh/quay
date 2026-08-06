@@ -11,9 +11,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { QUAY_NATIVE_CLI } from "../../quay/test/helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "bin", "quay-native.ts");
+const nativeBin = QUAY_NATIVE_CLI;
 
 function tmpDocsDir(tag) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `quay-doc-cli-${tag}-`));

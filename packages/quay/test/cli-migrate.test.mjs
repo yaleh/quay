@@ -22,11 +22,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { QUAY_CLI, QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const coreBin = QUAY_CLI;
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 const VALID_SECTIONS =
   "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +

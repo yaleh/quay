@@ -53,14 +53,15 @@ import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
 const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
-const nativeBin = path.join(repoRoot, "packages", "quay-native", "bin", "quay-native.ts");
-const nativeProviderDir = path.dirname(nativeBin);
+const nativeBin = QUAY_NATIVE_CLI;
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 const githubBin = path.join(repoRoot, "packages", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
