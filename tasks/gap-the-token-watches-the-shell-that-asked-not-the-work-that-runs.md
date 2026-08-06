@@ -103,19 +103,75 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
 
 ## Acceptance Criteria
 
-- [ ] AC1: **夹具复现可达状态**——取锁 shell 被 `kill` 而「活」仍在跑 ⇒
+- [x] AC1: **夹具复现可达状态**——取锁 shell 被 `kill` 而「活」仍在跑 ⇒
       **当前实现下 `--acquire` 成功回收**（这是修复前的必备证据，实跑输出贴任务体）
-- [ ] AC2: **修复后同一夹具**——续租仍在进行 ⇒ `--acquire` **失败**、令牌原样保留（实跑输出贴任务体）
-- [ ] AC3: **反向负控制（不得永久锁死）**——重试循环本身被杀、无人续租 ⇒
+      - 实跑输出（**修复前**的 heavy-op-token.sh，2026-08-05 捕获）：
+        ```
+        # token file FULL content (acquiring shell pid 4160165 DEAD, archguard coverage work still running in a new shell):
+        holder=archguard
+        pid=4160165
+        acquired_ms=1785796956346
+        host=vhs
+        # current implementation --acquire (BEFORE the lease fix):
+        heavy-op-token: RECLAIMED stale token (mtime 120s old, pid 4160165 not alive) — reclaim #1
+        waited_ms=0 holder=quay acquired=yes
+        # ⇒ reclaim SUCCEEDS while the work continues — the bug (AC1's mandatory pre-fix proof).
+        ```
+- [x] AC2: **修复后同一夹具**——续租仍在进行 ⇒ `--acquire` **失败**、令牌原样保留（实跑输出贴任务体）
+      - 实跑输出（**修复后**：取锁 shell 被 kill，重试循环在**新 shell** 里 `--renew archguard`）：
+        ```
+        waited_ms=0 holder=archguard acquired=yes
+        heavy-op-token: renewed (project=archguard, pid=4159320, lease now expires in 300s)
+        # quay --acquire while archguard's retry loop is renewing (must FAIL):
+        heavy-op-token: HELD by archguard (pid 4159320, held 653ms, lease 299s remaining) — quay did not acquire (no silent wait)
+        heavy-op-token: did not acquire within 0s wait window — token held by archguard (pid 4159320, ALIVE, held 653ms, lease 299s remaining) — quay did not acquire
+        waited_ms=0 acquired=no
+        # token preserved: holder=archguard, pid=4159320
+        ```
+        `--renew` 把 pid 重记为**活着的循环 shell**（4159320），租约续到 300s ⇒ 旁观者不再能靠「取锁 pid 死了」回收。
+- [x] AC3: **反向负控制（不得永久锁死）**——重试循环本身被杀、无人续租 ⇒
       **租约到期后必须可回收**，记录到期耗时。**这条不过，AC2 不算数**——
       把「误放行」换成「永久锁死」是更坏的交易
-- [ ] AC4: **pid 加速路径保留**——pid 已死且过短宽限期 ⇒ 仍可提前回收（实跑贴出）
-- [ ] AC5: **调用方改动是一行**——`--renew` 的接入点与用法写进脚本头，
+      - 实跑输出（记录 pid=死掉的循环 shell、lease_expires_ms=now+1.5s，无人续租）：
+        ```
+        # lease_expires_ms=1785990350010 (~1.5s in future), recorded pid=4159454 (retry loop DEAD)
+        # BEFORE expiry — acquire must FAIL (lease ACTIVE):
+        heavy-op-token: HELD by archguard (pid 4159454 dead, mtime only 0s old) — holder DEAD; reclaimable in 30s (accelerated release, lease ACTIVE) — quay did not acquire
+        # AFTER expiry — acquire must SUCCEED (no permanent lockout):
+        heavy-op-token: RECLAIMED token with EXPIRED lease (lease_expires_ms=1785990350010, now=1785990350569, pid 4159454 dead) — reclaim #1
+        waited_ms=0 holder=quay acquired=yes
+        # 到期耗时：租约设 ~1.5s 后到期；sleep 2 后立即回收（BEFORE 时 lease ACTIVE 拒收 ⇒ 非永久锁死）
+        ```
+- [x] AC4: **pid 加速路径保留**——pid 已死且过短宽限期 ⇒ 仍可提前回收（实跑贴出）
+      - 实跑输出（pid 死 + mtime 120s 旧 + **租约仍 ACTIVE** ⇒ 提前回收）：
+        ```
+        heavy-op-token: RECLAIMED stale token (mtime 120s old, pid 4159875 not alive, lease active) — accelerated release — reclaim #1
+        waited_ms=0 holder=quay acquired=yes
+        ```
+        kill -9 崩溃恢复仍走 ~STALE_TIMEOUT_S 提前回收，不再等满租约。
+- [x] AC5: **调用方改动是一行**——`--renew` 的接入点与用法写进脚本头，
       **并说明为什么责任在重试循环而不在令牌**
-- [ ] AC6: **测量纪律（管理者提出，外层当场又踩一次）**——本任务任何「有几个重活在跑」的判断
+      - 调用方改动 = 一行：重试循环在每次尝试之间调用 `bash plugin/scripts/heavy-op-token.sh --renew <project>`。
+      - 接入点写进 `plugin/scripts/heavy-op-token.sh` 头部 Usage 与 MECHANISM：
+        `--renew <project>   # retry loop: "this work is still running" (one line)`，
+        MECHANISM 段写明：**存活信号必须来自「知道这份活是否还在继续」的那个实体**——
+        对重试循环而言那个实体是**循环本身**（每个 `timeout 590 …` 尝试都会杀掉自己的取锁 shell，
+        所以 pid 死亡 ≠ 活死亡）；pid/pgid/session 三条「猜哪个进程代表这份活」的路全部被否定
+        （任务体 Proposal 的实测否定推理），**所以责任在重试循环而不在令牌**——令牌不猜进程，
+        只等租约，续租由唯一知情者负责。
+- [x] AC6: **测量纪律（管理者提出，外层当场又踩一次）**——本任务任何「有几个重活在跑」的判断
       **不得用 cmdline 文本计数**（模式串会匹配到发起查询的那条命令自身），
       必须用**进程血统**或**令牌自己记录的 pid**；**自匹配数必须为 0** 并在输出中证明
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      - 修复后的存活判定只用**令牌自己记录的 pid**（`kill -0` / `/proc/<pid>/stat`）与
+        **租约字段**，全脚本无 `pgrep -f` / `ps …grep` 式 cmdline 文本匹配（L-AC7 测试结构性钉住：
+        `assert.doesNotMatch(src, /pgrep -f|ps -ef.*grep|ps aux.*grep/, …)`）。
+      - 自匹配数 = 0 的证明：本任务所有「有几个重活/谁持有」的判定输出都来自 `--status` 的
+        `holder/pid/lease_expires_ms/lease_remaining_s` 字段（见 AC2/AC3/AC4 输出），
+        没有任何判定用模式串去匹配进程列表——发起查询的那条命令永远不会被自己匹配到。
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`
+      - `plugin/test/heavy-op-token.test.mjs` 首行改为 `// @test-group governance`；
+        AC10 测试断言 `^// @test-group governance$`；新 lease 测试（L-AC1..L-AC7）全部 `node:test`。
+        测试实跑 18/18 pass（`scripts/test.sh --for-task …`，fail 0 cancelled 0）。
 
 ## Definition of Done
 
@@ -125,6 +181,21 @@ pid 随 `timeout` 死、pgid 不跨尝试、session 太粗。
 - [ ] 任务体记录：**这是一个可达状态，不是已观察到的并发**；
       并记录否定推理——**pid / pgid / session 都无法代表「这份活」，
       所以存活信号必须来自知道活是否继续的那个实体**
+
+## Execution notes (2026-08-05)
+
+- **这是一个可达状态，不是已观察到的并发**：本条从令牌文件格式直接立案（`holder/pid/acquired_ms/host`
+  四字段，没有干活的 pid），修复全程没有也无需「抓现行」。
+- **否定推理（决定修法的关键产出）**：`pid` 随每个 `timeout 590 …` 尝试死亡而失效；实测同一时刻
+  archguard 两个 vitest 进程 `pgid=3703496` 与 `pgid=3703528` **各自不同** ⇒ pgid 不跨尝试；
+  session 太粗（整天活着）。**三者都无法代表「这份活」** ⇒ 存活信号必须来自**知道活是否继续的那个实体**
+  （重试循环），令牌不猜进程。据此落地**租约 + `--renew`**，pid 死亡降级为加速释放信号。
+- **失败方向安全**：调用方不续租 ⇒ 租约到期 ⇒ 令牌释放，与修复前死持有者回收行为一致，不会更糟。
+- **完整套件验证按 scoped-tier 契约 DEFERRED 到 fan-in 全量闸**（gap-scoped-runs-pay-full-static-check-overhead
+  AC4-ii）：本次按纪律只跑 `scripts/test.sh --for-task …`（18/18 pass，fail 0 cancelled 0，静态子集全 PASS、
+  task-contract-check no violations）；全量 2 连绿由外层 fan-in 全量闸执行，此处不代跑全量套件。
+- **调用方（scripts/test.sh）改动**：`heavy_op_acquire` 现传 `--lease "${HEAVY_OP_LEASE_S:-3600}"`——
+  test.sh 是单次持有者（自己的 shell 跑完整套件，pid 即活），声明显式长租约是「调用方责任」契约的具象。
 
 ## Touches
 

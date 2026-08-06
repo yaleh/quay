@@ -25,7 +25,8 @@
 #
 # Usage:
 #   bash plugin/scripts/heavy-op-token.sh --status
-#   bash plugin/scripts/heavy-op-token.sh --acquire <project> [--timeout <s>]
+#   bash plugin/scripts/heavy-op-token.sh --acquire <project> [--timeout <s>] [--lease <s>]
+#   bash plugin/scripts/heavy-op-token.sh --renew <project>   # retry loop: "this work is still running" (one line)
 #   bash plugin/scripts/heavy-op-token.sh --release <project>
 #   bash plugin/scripts/heavy-op-token.sh --report            # waited_ms distribution + minutes lost per project
 #   bash plugin/scripts/heavy-op-token.sh --root <dir> ...   # test seam: override the state-dir root
@@ -42,11 +43,36 @@
 # MECHANISM:
 #   - acquire = atomic `wx`-create (the bash spelling of the Land-lock pattern CLAUDE.md records):
 #     `set -o noclobber` + redirect = O_CREAT|O_EXCL. Nobody can bypass a created token.
-#   - heartbeat: the HOLDER touches the token file periodically (a live holder's mtime stays fresh).
-#   - stale reclaim = mtime older than HEAVY_OP_STALE_TIMEOUT_S **AND** the holder pid not alive.
-#     BOTH must hold — reclaiming on mtime alone would kill a legitimately long-running holder (the
-#     pid-alive check is what protects it); reclaiming on pid-death alone would not distinguish a
-#     crashed holder from pid reuse (the mtime guard is the other half).
+#   - LEASE = the token's OWNER-LIVENESS SIGNAL, and the fix for
+#     gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs: --acquire records
+#     `lease_expires_ms = now + HEAVY_OP_LEASE_S` (default 300). The ONE entity that knows whether
+#     "this heavy op" is still going is the entity that STARTED it — for a retry loop that is the
+#     LOOP, not any single attempt's shell (each `timeout 590 …` attempt kills its own acquiring
+#     shell, so a pid-death does NOT mean the work died). The loop therefore RENEWS the lease with
+#     one `--renew <project>` call between attempts: renew updates lease_expires_ms, refreshes the
+#     token mtime (the heartbeat), and re-records pid to the renewing shell. When renewals stop, the
+#     lease expires and the token is reclaimable — pid/mtime are only accelerators, never the
+#     deciding signal (invariant: the liveness signal must come from the entity that knows whether
+#     the work continues, not from a bystander guessing processes; pid/pgid/session were all
+#     DISPROVEN as "the work" — see the task body's negative reasoning).
+#   - reclaim, in precedence order:
+#       1. pid ALIVE ⇒ HELD. (For single-shot holders like scripts/test.sh / session-liveness the
+#          recorded pid IS the work — an alive pid is a true liveness signal; the lease only needs
+#          to outlive the hold, which is why scripts/test.sh passes an explicit long --lease.)
+#       2. pid DEAD **AND** lease expired ⇒ reclaim (the lease is the deciding signal: the work
+#          stopped renewing).
+#       3. pid DEAD **AND** mtime older than HEAVY_OP_STALE_TIMEOUT_S ⇒ reclaim EARLY (accelerated
+#          release — crash recovery, kept from the pre-lease behavior: kill -9 the holder and the
+#          other side reclaims in ~STALE_TIMEOUT_S, not after the full lease). mtime is refreshed
+#          by acquire AND by renew, so a renewing retry loop whose per-attempt shells die is never
+#          reclaimed here.
+#       4. pid DEAD + lease active + mtime fresh ⇒ HELD (a dead holder whose token was JUST touched;
+#          wait for 2 or 3).
+#   - A token whose file predates the lease field (no lease_expires_ms) is treated as having an
+#     active lease (backward compat: it falls back to the pid/mtime logic above exactly as before).
+#   - FAILURE DIRECTION IS SAFE (AC4 of the parent task): a caller that forgets to renew LOSES the
+#     token at lease expiry — no worse than today's crash-recovery, and the lease is the one signal
+#     that cannot be faked by a bystander.
 #   - no silent wait: `--timeout 0` (the default) fails IMMEDIATELY with the holder's identity and
 #     held duration — silent waiting is indistinguishable from a hang. `--timeout N` is a REAL
 #     bounded poll, NOT a single decision: do_acquire re-checks the reclaim conditions once per
@@ -63,7 +89,8 @@
 #   - no fair queue / FIFO: starvation is observable first (waited_ms), the policy decision waits
 #     for cost data — setting policy before the cost structure is known is the 416s mistake.
 #
-# Test seams (env): QUAY_GLOBAL_DIR (or --root), HEAVY_OP_STALE_TIMEOUT_S (default 30).
+# Test seams (env): QUAY_GLOBAL_DIR (or --root), HEAVY_OP_STALE_TIMEOUT_S (default 30),
+# HEAVY_OP_LEASE_S (default 300).
 
 set -euo pipefail
 
@@ -73,6 +100,13 @@ HEAVY_OP_DIR="${GLOBAL_DIR}/heavy-op"
 TOKEN_FILE="${HEAVY_OP_DIR}/token"
 RECLAIM_COUNTER="${HEAVY_OP_DIR}/stale_reclaims"
 STALE_TIMEOUT_S="${HEAVY_OP_STALE_TIMEOUT_S:-30}"
+# Lease duration (seconds). `--acquire` records lease_expires_ms = now + LEASE_S*1000; `--renew`
+# resets it to now + LEASE_S*1000. The lease is the OWNER-LIVENESS signal: it is refreshed only by
+# the entity that knows the work continues (the retry loop), so when renewals stop the token is
+# reclaimable at expiry. Must exceed STALE_TIMEOUT_S or the accelerated pid-death path would be
+# slower than the lease and pointless. Default 300s = 5× the 30s crash grace; a retry loop renews
+# every attempt and a single-shot holder (scripts/test.sh) passes an explicit longer --lease.
+LEASE_S="${HEAVY_OP_LEASE_S:-300}"
 # LAST_BLOCK — the reason the most recent try_acquire failed (holder alive / holder dead-not-stale
 # + reclaim delta). Set by try_acquire on each failed claim, surfaced by do_acquire's timeout
 # branch so the FINAL failure line names the holder's real state instead of a generic "held".
@@ -137,8 +171,10 @@ while [ "$i" -lt "${#args[@]}" ]; do
   case "$a" in
     --acquire) cmd="acquire"; project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --release) cmd="release"; project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
+    --renew)   cmd="renew";   project="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --status)  cmd="status" ;;
     --timeout) timeout="${args[$((i+1))]:-0}"; i=$((i+1)) ;;
+    --lease)   LEASE_S="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --root)    GLOBAL_DIR="${args[$((i+1))]:-}"; HEAVY_OP_DIR="${GLOBAL_DIR}/heavy-op"; TOKEN_FILE="${HEAVY_OP_DIR}/token"; RECLAIM_COUNTER="${HEAVY_OP_DIR}/stale_reclaims"; i=$((i+1)) ;;
     --events-file) EVENTS_FILE="${args[$((i+1))]:-}"; i=$((i+1)) ;;
     --report)  cmd="events-report" ;;
@@ -156,11 +192,11 @@ fi
 
 case "$cmd" in
   "")
-    printf 'usage: heavy-op-token.sh --status | --acquire <project> [--timeout <s>] | --release <project>\n' >&2
+    printf 'usage: heavy-op-token.sh --status | --acquire <project> [--timeout <s>] [--lease <s>] | --renew <project> | --release <project>\n' >&2
     exit 2
     ;;
 esac
-if [ "$cmd" = "acquire" ] || [ "$cmd" = "release" ]; then
+if [ "$cmd" = "acquire" ] || [ "$cmd" = "release" ] || [ "$cmd" = "renew" ]; then
   if [ -z "$project" ]; then
     printf 'heavy-op-token: %s requires a project id\n' "--$cmd" >&2
     exit 2
@@ -168,6 +204,9 @@ if [ "$cmd" = "acquire" ] || [ "$cmd" = "release" ]; then
 fi
 case "$timeout" in
   ''|*[!0-9]*) printf 'heavy-op-token: --timeout must be a non-negative integer\n' >&2; exit 2 ;;
+esac
+case "$LEASE_S" in
+  ''|*[!0-9]*) printf 'heavy-op-token: --lease must be a positive integer (seconds)\n' >&2; exit 2 ;;
 esac
 
 # ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
@@ -249,41 +288,71 @@ read_reclaim_counter() {
 
 # try_acquire <project> — one atomic claim attempt. 0 = acquired; 1 = held/stale-but-not-reclaimable.
 # Prints holder identity + held duration to stderr on failure (the control contract).
+# Reclaim precedence (see header MECHANISM): alive pid ⇒ held; dead pid + expired lease ⇒ reclaim;
+# dead pid + stale mtime ⇒ accelerated reclaim; dead pid + fresh mtime + active lease ⇒ held.
 try_acquire() {
-  local project="$1" holder pid mtime_s now_s held
+  local project="$1" holder pid lease_expires now_msv now_s mtime_s held
   if [ -e "${TOKEN_FILE}" ]; then
     holder="$(read_holder)"
     pid="$(read_holder_pid)"
+    lease_expires="$(read_field lease_expires_ms)"
+    now_msv="$(now_ms)"
+    now_s=$(( now_msv / 1000 ))
+
+    # 1) ALIVE pid ⇒ HELD. For single-shot holders the recorded pid IS the work (scripts/test.sh's
+    #    shell runs the whole suite; session-liveness's shell runs the monitor) — an alive pid is a
+    #    real liveness signal and no bystander guess. The lease only needs to outlive the hold.
     if [ -n "$pid" ] && pid_alive "$pid"; then
       held="$(held_ms_of_token)"
-      LAST_BLOCK="token held by ${holder:-unknown} (pid ${pid}, ALIVE, held ${held}ms)"
-      printf 'heavy-op-token: HELD by %s (pid %s, held %sms) — %s did not acquire (no silent wait)\n' \
-        "${holder:-unknown}" "$pid" "$held" "$project" >&2
+      local lease_desc="no lease"
+      if [ -n "$lease_expires" ] && [ "$lease_expires" -ge 0 ] 2>/dev/null; then
+        local lease_left=$(( (lease_expires - now_msv) / 1000 ))
+        [ "$lease_left" -lt 0 ] && lease_left=0
+        lease_desc="${lease_left}s remaining"
+      fi
+      LAST_BLOCK="token held by ${holder:-unknown} (pid ${pid}, ALIVE, held ${held}ms, lease ${lease_desc})"
+      printf 'heavy-op-token: HELD by %s (pid %s, held %sms, lease %s) — %s did not acquire (no silent wait)\n' \
+        "${holder:-unknown}" "$pid" "$held" "$lease_desc" "$project" >&2
       return 1
     fi
-    mtime_s="$(token_mtime_s)"
-    now_s="$(date +%s)"
-    if [ "$(( now_s - mtime_s ))" -ge "${STALE_TIMEOUT_S}" ]; then
+
+    # 2) pid DEAD + lease EXPIRED ⇒ reclaim. The lease is the deciding signal: the work stopped
+    #    renewing. Missing lease field (pre-lease token) is treated as active ⇒ falls through.
+    if [ -n "$lease_expires" ] && [ "$lease_expires" -ge 0 ] 2>/dev/null && [ "$now_msv" -ge "$lease_expires" ]; then
       rm -f "${TOKEN_FILE}"
       bump_reclaim_counter
-      printf 'heavy-op-token: RECLAIMED stale token (mtime %ss old, pid %s not alive) — reclaim #%s\n' \
-        "$(( now_s - mtime_s ))" "${pid:-?}" "$(read_reclaim_counter)" >&2
+      printf 'heavy-op-token: RECLAIMED token with EXPIRED lease (lease_expires_ms=%s, now=%s, pid %s dead) — reclaim #%s\n' \
+        "$lease_expires" "$now_msv" "${pid:-?}" "$(read_reclaim_counter)" >&2
     else
-      held="$(held_ms_of_token)"
-      local age=$(( now_s - mtime_s ))
-      local reclaim_in=$(( STALE_TIMEOUT_S - age ))
-      if [ "$reclaim_in" -lt 0 ]; then reclaim_in=0; fi
-      LAST_BLOCK="token held by ${holder:-unknown} (pid ${pid:-?} DEAD, mtime only ${age}s old — reclaimable in ${reclaim_in}s)"
-      printf 'heavy-op-token: HELD by %s (pid %s dead, mtime only %ss old) — holder DEAD; reclaimable in %ss (reclaim needs BOTH mtime timeout AND dead pid) — %s did not acquire\n' \
-        "${holder:-unknown}" "${pid:-?}" "$age" "$reclaim_in" "$project" >&2
-      return 1
+      # 3/4) lease active (or absent). Accelerated release: pid DEAD **and** mtime stale ⇒ reclaim
+      #      EARLY (crash recovery, pre-lease behavior). mtime is refreshed by acquire AND by renew,
+      #      so a renewing retry loop whose per-attempt shells die is never reclaimed here.
+      mtime_s="$(token_mtime_s)"
+      if [ "$(( now_s - mtime_s ))" -ge "${STALE_TIMEOUT_S}" ]; then
+        rm -f "${TOKEN_FILE}"
+        bump_reclaim_counter
+        printf 'heavy-op-token: RECLAIMED stale token (mtime %ss old, pid %s not alive, lease active) — accelerated release — reclaim #%s\n' \
+          "$(( now_s - mtime_s ))" "${pid:-?}" "$(read_reclaim_counter)" >&2
+      else
+        held="$(held_ms_of_token)"
+        local age=$(( now_s - mtime_s ))
+        local reclaim_in=$(( STALE_TIMEOUT_S - age ))
+        if [ "$reclaim_in" -lt 0 ]; then reclaim_in=0; fi
+        LAST_BLOCK="token held by ${holder:-unknown} (pid ${pid:-?} DEAD, mtime only ${age}s old — reclaimable in ${reclaim_in}s via accelerated release, lease active)"
+        printf 'heavy-op-token: HELD by %s (pid %s dead, mtime only %ss old) — holder DEAD; reclaimable in %ss (accelerated release, lease ACTIVE) — %s did not acquire\n' \
+          "${holder:-unknown}" "${pid:-?}" "$age" "$reclaim_in" "$project" >&2
+        return 1
+      fi
     fi
   fi
   # atomic wx-create: noclobber redirect = O_CREAT|O_EXCL (the Land-lock pattern, bash spelling).
-  local claimed=0
+  # The token records holder / pid (the caller's shell) / acquired_ms / lease_expires_ms / host.
+  local claimed=0 acquired_at lease_at
+  acquired_at="$(now_ms)"
+  lease_at=$(( acquired_at + LEASE_S * 1000 ))
   set -o noclobber
-  if printf 'holder=%s\npid=%s\nacquired_ms=%s\nhost=%s\n' \
-      "$project" "$PPID" "$(now_ms)" "$(hostname 2>/dev/null || echo unknown)" > "${TOKEN_FILE}" 2>/dev/null; then
+  if printf 'holder=%s\npid=%s\nacquired_ms=%s\nlease_expires_ms=%s\nhost=%s\n' \
+      "$project" "$PPID" "$acquired_at" "$lease_at" "$(hostname 2>/dev/null || echo unknown)" > "${TOKEN_FILE}" 2>/dev/null; then
     claimed=1
   fi
   set +o noclobber
@@ -292,20 +361,27 @@ try_acquire() {
 
 # ── subcommands ───────────────────────────────────────────────────────────────────────────────────────
 do_status() {
-  local holder pid held
+  local holder pid held lease_expires now_msv lease_left
   if ! fail_open_or_prepare; then
-    printf 'holder=none\nheld_ms=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
+    printf 'holder=none\nheld_ms=n/a\nlease_expires_ms=n/a\nlease_remaining_s=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
     return 0
   fi
   if [ ! -e "${TOKEN_FILE}" ]; then
-    printf 'holder=none\nheld_ms=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
+    printf 'holder=none\nheld_ms=n/a\nlease_expires_ms=n/a\nlease_remaining_s=n/a\nstale_reclaims=%s\n' "$(read_reclaim_counter)"
     return 0
   fi
   holder="$(read_holder)"
   pid="$(read_holder_pid)"
   held="$(held_ms_of_token)"
-  printf 'holder=%s\npid=%s\nheld_ms=%s\nstale_reclaims=%s\n' \
-    "${holder:-unknown}" "${pid:-?}" "${held:-0}" "$(read_reclaim_counter)"
+  lease_expires="$(read_field lease_expires_ms)"
+  lease_left="n/a"
+  if [ -n "$lease_expires" ] && [ "$lease_expires" -ge 0 ] 2>/dev/null; then
+    now_msv="$(now_ms)"
+    lease_left=$(( (lease_expires - now_msv) / 1000 ))
+    [ "$lease_left" -lt 0 ] && lease_left=0
+  fi
+  printf 'holder=%s\npid=%s\nheld_ms=%s\nlease_expires_ms=%s\nlease_remaining_s=%s\nstale_reclaims=%s\n' \
+    "${holder:-unknown}" "${pid:-?}" "${held:-0}" "${lease_expires:-n/a}" "${lease_left}" "$(read_reclaim_counter)"
 }
 
 do_acquire() {
@@ -341,7 +417,7 @@ do_acquire() {
 }
 
 do_release() {
-  local project="$1" token_pid
+  local project="$1" token_pid token_holder
   if ! fail_open_or_prepare; then
     printf 'heavy-op-token: release FAIL-OPEN (state dir not writable) — no-op\n' >&2
     return 0
@@ -350,14 +426,18 @@ do_release() {
     printf 'heavy-op-token: release: no token held (idempotent no-op)\n'
     return 0
   fi
+  token_holder="$(read_holder)"
   token_pid="$(read_holder_pid)"
-  if [ -n "$token_pid" ] && [ "$token_pid" = "$PPID" ]; then
+  # Ownership = the self-reported project identity (the retry loop's shell changes across attempts,
+  # so pid is not stable; holder is). The pid==PPID check is kept as a fallback for pre-lease /
+  # direct-shell callers, and prevents a DIFFERENT project from releasing another's token.
+  if [ "${token_holder}" = "${project}" ] || { [ -n "$token_pid" ] && [ "$token_pid" = "$PPID" ]; }; then
     rm -f "${TOKEN_FILE}"
     printf 'heavy-op-token: released (project=%s, pid=%s)\n' "${project:-?}" "$PPID"
     return 0
   fi
-  printf 'heavy-op-token: release: token held by pid %s, not us (%s) — NOT releasing (idempotent no-op)\n' \
-    "${token_pid:-unknown}" "$PPID" >&2
+  printf 'heavy-op-token: release: token held by %s (pid %s), not %s — NOT releasing (idempotent no-op)\n' \
+    "${token_holder:-unknown}" "${token_pid:-unknown}" "$project" >&2
   return 0
 }
 
@@ -402,9 +482,56 @@ do_events_report() {
     }'
 }
 
+# do_renew <project> — the lease heartbeat. Called ONCE between attempts by the retry loop — the ONLY
+# entity that knows whether the work is still going (each attempt's shell dies on `timeout`, so pid
+# is not a reliable "is the work alive" signal; the LOOP is). Renew:
+#   - re-records pid to the renewing shell ($PPID) — so the accelerated path sees a live pid while
+#     the loop lives, and a dead pid once the loop dies;
+#   - pushes lease_expires_ms to now + LEASE_S*1000 — the deciding liveness signal;
+#   - refreshes the token mtime (atomic temp+mv) — the heartbeat that keeps the accelerated
+#     stale-mtime path quiet while renewals continue.
+# Fails (exit 1) if this project does not currently hold the token — a work that lost the token must
+# not keep pretending it holds it.
+do_renew() {
+  local project="$1" holder pid lease acq host tmp
+  if ! fail_open_or_prepare; then
+    printf 'heavy-op-token: renew FAIL-OPEN (state dir not writable) — no-op\n' >&2
+    return 0
+  fi
+  if [ ! -e "${TOKEN_FILE}" ]; then
+    printf 'heavy-op-token: renew: no token held by %s (nothing to renew — --acquire first)\n' "${project:-?}" >&2
+    return 1
+  fi
+  holder="$(read_holder)"
+  if [ "${holder:-}" != "$project" ]; then
+    printf 'heavy-op-token: renew: token held by %s, not %s — NOT renewing (work lost the token)\n' \
+      "${holder:-unknown}" "$project" >&2
+    return 1
+  fi
+  acq="$(read_field acquired_ms)"
+  pid="$PPID"
+  lease="$(( $(now_ms) + LEASE_S * 1000 ))"
+  host="$(read_field host)"
+  tmp="${TOKEN_FILE}.renew.$$"
+  # Atomic rewrite in the same dir (temp + mv): a half-written token must never be observable. The
+  # holder is re-checked immediately before the mv so a concurrent reclaim+acquire (the work lost
+  # the token while we were writing) can never have our mv stomp the NEW holder's token.
+  if printf 'holder=%s\npid=%s\nacquired_ms=%s\nlease_expires_ms=%s\nhost=%s\n' \
+      "$project" "$pid" "$acq" "$lease" "$host" > "${tmp}" 2>/dev/null \
+      && [ "$(read_holder)" = "$project" ] \
+      && mv -f "${tmp}" "${TOKEN_FILE}" 2>/dev/null; then
+    printf 'heavy-op-token: renewed (project=%s, pid=%s, lease now expires in %ss)\n' "$project" "$pid" "$LEASE_S"
+    return 0
+  fi
+  rm -f "${tmp}" 2>/dev/null || true
+  printf 'heavy-op-token: renew FAILED to write token (project=%s) — lease NOT extended (token may have been reclaimed)\n' "$project" >&2
+  return 1
+}
+
 case "$cmd" in
   status)  do_status ;;
   acquire) do_acquire "$project" "$timeout" ;;
+  renew)   do_renew "$project" ;;
   release) do_release "$project" ;;
   events-report) do_events_report ;;
 esac

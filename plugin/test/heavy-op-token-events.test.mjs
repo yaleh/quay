@@ -17,13 +17,15 @@
 //   AC5 — waited_ms=0 acquires land too (zero-wait is distinct from never-ran)
 //   AC6 — the timeout/failure path also lands (acquired=no); the --report distribution still says
 //         「样本 N 不足」 below the threshold and prints median/p90/max above it
-//   AC7 — node:test + `// @test-group governance` (governance = the metering/measurement layer; the
-//         existing engine-tagged heavy-op-token.test.mjs keeps its engine group and AC10 pin)
+//   AC7 — node:test + `// @test-group governance` (governance = the metering/measurement layer).
+//         gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs moved the base token
+//         suite (heavy-op-token.test.mjs) from engine to governance too; it carries NO in-file
+//         self-skip wrapper (like this file), so it still RUNS in the default suite.
 //
-// Governance-tagged files self-skip in the default product+engine full suite by design (see
-// scripts/test.sh); run this file explicitly or with `--group governance`. The landing code path is
-// STILL exercised in the default suite because the engine-tagged heavy-op-token.test.mjs now routes
-// every acquire through --events-file.
+// Governance-tagged files MAY self-skip in the default product+engine full suite via an in-file
+// wrapper (see scripts/test.sh); files without a wrapper (this one and heavy-op-token.test.mjs)
+// run their tests in every invocation. The landing code path is exercised in the default suite
+// because heavy-op-token.test.mjs routes every acquire through --events-file.
 //
 // Run: node --test plugin/test/heavy-op-token-events.test.mjs
 
