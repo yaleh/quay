@@ -5287,3 +5287,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **os-anchor-launch 合并**（`8cff421c`）：`os-anchor-install.sh` launch 字符串**单源化** `LAUNCH_CMD`（两处双漂移消除）+ 双 REQUIRED 参数（--prompt-suggestions false + env）；live `~/.config/quay/os-anchor/os-anchor-projects.conf` 已更新（未提交，文档记录）；生成模板已含 flag（ghost 任务 90b16c51 已加，真实缺口在 live config）。AC1–AC3 勾（2/2）。已并已清。
 - **在飞 1/5**（bare-metal-bootstrap）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T12:4xZ（内层，bare-metal-bootstrap fan-in 完成 —— 在飞清零）
+
+- **bare-metal-bootstrap 合并**（`b8f132bc`）：`session-bootstrap.sh`（裸金属会话引导：命名布局 idempotent + 每窗 claude 进程 `/proc` 存活确认 + 按名 fail-closed + `quay-launch.sh` 启动约定）+ cold-start SKILL 接线。AC1–AC5 勾（9/9）。已并已清。
+- **在飞 0/5**（本批全落地：cold-start-outer-validation / os-anchor-launch / bare-metal-bootstrap + 前批）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
