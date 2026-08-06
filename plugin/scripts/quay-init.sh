@@ -113,6 +113,17 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
 fi
 WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
 
+# gap-the-runtime-has-nowhere-safe-to-land: the RUNTIME LANDING BASE. The quay runtime (Core
+# bundle + native-provider bundle + provider.yml) used to land under `<target>/vendor/quay/` —
+# `vendor/` is a RESERVED directory name in Go (module vendoring resolves it), and `<target>/dist/`
+# is a reserved build-output name for a dozen toolchains. The landing decision (SPEC AC2 in the
+# task): the runtime is a GENERATED ARTIFACT, not source — so it lives OUTSIDE the target's git in
+# quay's OWN namespace `.quay/runtime/`, gitignored by quay-init itself (AC10). Path segments avoid
+# every reserved name (`vendor`/`node_modules`/`target`/`build`/`dist` — AC9). The `dist/` under
+# plugin/vendor/ is the PLUGIN's own build output (unaffected); only the TARGET landing path must
+# stay reserved-name-free.
+RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
+
 # Defaults for loop params.
 if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$(basename "$WORKSPACE_ROOT")"; fi
 if [ -z "$REPO_ROOT" ]; then REPO_ROOT="$WORKSPACE_ROOT"; fi
@@ -376,7 +387,7 @@ detect_tmux_session() {
 # quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
 # If the target has no config yet, write one whose provider uses ABSOLUTE project-local paths (never
 # a bare `quay-native` that PATH-resolves to the dev tree). The mcp_entry command is an absolute path
-# into the laid-down project-local vendor runtime (vendor/quay-native/dist/quay-native.js — the
+# into the laid-down project-local runtime (.quay/runtime/quay-native/quay-native.js — the
 # self-contained native provider bundle quay-init lays down alongside the Core bundle; see the AC7b
 # lay-down below). If a config already exists, the project owns it — just note the AC7b requirement
 # (a future --force could patch it; not silently rewritten).
@@ -414,19 +425,21 @@ PYEOF
 # manager-verified case is a dev-tree source residual (`path: <ws>/bin`, `mcp_entry: .../bin/quay-
 # native.ts`) left by an earlier install, which the AC3 referenced-existence verify would otherwise
 # FAIL CLOSED on forever (the "config already exists is never rewritten" upgrade hole). quay-init
-# lays the install-state provider (vendor/quay-native/dist/quay-native.js + provider.yml) BEFORE
+# lays the install-state provider (.quay/runtime/quay-native/quay-native.js + provider.yml) BEFORE
 # write_provider_config runs, so a stale provider path is migrated to that install-state provider
 # dir (bin/quay.ts uses `provider.path` as the provider spawn cwd — a nonexistent dir makes the
 # spawn ENOENT) and a dangling reference to a QUAY runtime file is migrated to the install-state
 # runtime bundle (config migration, not a blank rewrite — other keys are preserved). SCOPE GUARD:
-# only a `path` that is not a real directory AND only references whose basename is a quay runtime
-# file (`quay-native.js/ts`, `quay.js/ts`) are migrated; an arbitrary dangling path (e.g.
+# only a `path` that is not a real directory OR is a quay runtime dir under a reserved segment
+# (vendor/node_modules/target/build/dist — gap-the-runtime-has-nowhere-safe-to-land AC9), AND only
+# references whose basename is a quay runtime file (`quay-native.js/ts`, `quay.js/ts`) are migrated;
+# an arbitrary dangling path (e.g.
 # ./nonexistent/runtime.js) is left untouched so the landed vendor-runtime AC3 negative control
 # (verify FAILS CLOSED on a dangling mcp_entry it cannot recognize) keeps its meaning.
 migrate_stale_mcp_entry() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
-  local install_provider="${WORKSPACE_ROOT}/vendor/quay-native"
-  local install_runtime="${install_provider}/dist/quay-native.js"
+  local install_provider="$RUNTIME_BASE/quay-native"
+  local install_runtime="${install_provider}/quay-native.js"
   if [ "$DRY_RUN" = true ]; then
     echo "  would-migrate: stale provider path/mcp_entry -> ${install_provider} (upgrade-channel config migration — AC4)"
     return
@@ -440,10 +453,25 @@ with open(cfg, encoding="utf-8") as f:
 prov = (data.get("providers") or {}).get("native")
 if not isinstance(prov, dict):
     sys.exit(0)
+# gap-the-runtime-has-nowhere-safe-to-land: reserved directory names that must never hold the quay
+# runtime in a target (Go vendor/, npm node_modules/, cargo target/, make/build/, bundler dist/).
+# The landing path check is by PATH LITERAL segment (task AC9), the same list here. An EXISTING
+# install (pre-fix) laid the runtime into `<target>/vendor/quay[-native]/` — on upgrade that dir
+# EXISTS, so the old `not os.path.isdir(p)` guard would never migrate it and the target would stay
+# pointed at the Go-reserved directory forever. The upgrade path therefore migrates any provider
+# path/mcp_entry that is (a) dangling, OR (b) a quay runtime path sitting under a reserved segment.
+RESERVED = {"vendor", "node_modules", "target", "build", "dist"}
+def under_reserved(p):
+    parts = [seg for seg in str(p).split(os.sep) if seg]
+    return any(seg in RESERVED for seg in parts)
+def is_quay_runtime_dir(p):
+    base = os.path.basename(str(p).rstrip(os.sep))
+    return base in ("quay", "quay-native")
 changed = False
-# path: a stale provider dir (does not exist) is migrated to the install-state provider dir.
+# path: a stale provider dir is migrated to the install-state provider dir. "Stale" = the dir does
+# not exist, OR it is a quay runtime dir sitting under a reserved segment (the pre-fix vendor/ land).
 p = prov.get("path")
-if isinstance(p, str) and p != install_provider and not os.path.isdir(p):
+if isinstance(p, str) and p != install_provider and (not os.path.isdir(p) or (under_reserved(p) and is_quay_runtime_dir(p))):
     prov["path"] = install_provider
     changed = True
 # mcp_entry: a dangling reference to a QUAY runtime file is migrated to the install-state runtime.
@@ -451,7 +479,7 @@ me = prov.get("mcp_entry")
 if isinstance(me, list) and len(me) >= 2 and isinstance(me[1], str):
     ref = me[1]
     # Scope guard (see header comment): only a dangling reference to a quay runtime file is migrated.
-    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and not os.path.exists(ref):
+    if re.match(r"^quay(-native)?\.(js|ts)$", os.path.basename(ref)) and ref != install_runtime and (not os.path.exists(ref) or under_reserved(ref)):
         prov["mcp_entry"] = ["node", install_runtime, "mcp"] + (list(me[3:]) if len(me) > 3 else [])
         changed = True
 if not changed:
@@ -460,6 +488,40 @@ with open(cfg, "w", encoding="utf-8") as f:
     yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
 print(f"  migrated: stale provider config -> {install_provider} (upgrade-channel config migration — AC4)")
 PYEOF
+}
+
+# ensure_runtime_gitignore — gap-the-runtime-has-nowhere-safe-to-land AC10. The runtime lands in
+# .quay/runtime/ (generated artifact, not source), so it must be kept OUT of the target's git.
+# quay-init writes the entry ITSELF — the user is never asked to add a manual patch (G0). Rules:
+#   * missing .gitignore            → create it with the entry
+#   * existing .gitignore, no entry → APPEND the entry, preserving all existing content
+#   * existing .gitignore, entry    → NO-OP (never duplicate, never overwrite the user's file)
+# The entry is repo-root-anchored (`/.quay/runtime/`) so it only ignores the TARGET's own runtime,
+# never a nested project's. `dist/` (the plugin's own build output) is deliberately NOT the rule —
+# the runtime path is what must be ignored, not every dist.
+ensure_runtime_gitignore() {
+  local gi="$WORKSPACE_ROOT/.gitignore"
+  local entry="/.quay/runtime/"
+  if [ "$DRY_RUN" = true ]; then
+    if [ -f "$gi" ] && grep -qxF "$entry" "$gi" 2>/dev/null; then
+      echo "  runtime-gitignore: already present ($entry — no duplicate write)"
+    else
+      echo "  would-write: $gi (+ $entry)"
+    fi
+    return
+  fi
+  if [ -f "$gi" ]; then
+    if grep -qxF "$entry" "$gi"; then
+      echo "  runtime-gitignore: already present ($entry — no duplicate write)"
+    else
+      # Append, never rewrite — the user's existing ignore rules are preserved verbatim.
+      printf '\n# quay runtime (generated artifact, not source — gap-the-runtime-has-nowhere-safe-to-land)\n%s\n' "$entry" >> "$gi"
+      echo "  runtime-gitignore: appended $entry to $gi"
+    fi
+  else
+    printf '# quay runtime (generated artifact, not source — gap-the-runtime-has-nowhere-safe-to-land)\n%s\n' "$entry" > "$gi"
+    echo "  runtime-gitignore: wrote $gi"
+  fi
 }
 
 write_provider_config() {
@@ -478,14 +540,16 @@ write_provider_config() {
 # Generated by quay-init --loop (gap-cold-start-...-eight-steps AC7b).
 # The provider mcp_entry uses ABSOLUTE project-local paths — never a PATH-resolved
 # \`quay-native\` symlink into the quay dev tree. The native provider runtime
-# (vendor/quay-native/dist/quay-native.js) is the self-contained bundle quay-init
+# (.quay/runtime/quay-native/quay-native.js) is the self-contained bundle quay-init
 # lays down alongside the Core bundle (see the AC7b lay-down in quay-init.sh).
+# .quay/runtime/ is gitignored by quay-init itself (AC10) — the runtime is a generated
+# artifact, not source, and it avoids every target-language reserved dir name (AC9).
 providers:
   native:
     enabled: true
-    path: "${WORKSPACE_ROOT}/vendor/quay-native"
+    path: "${WORKSPACE_ROOT}/.quay/runtime/quay-native"
     tasks_dir: "${WORKSPACE_ROOT}/tasks"
-    mcp_entry: ["node", "${WORKSPACE_ROOT}/vendor/quay-native/dist/quay-native.js", "mcp"]
+    mcp_entry: ["node", "${WORKSPACE_ROOT}/.quay/runtime/quay-native/quay-native.js", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "${WORKSPACE_ROOT}/tasks"
 # Target-project loop values (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them,
@@ -1037,22 +1101,31 @@ PYEOF
   fi
 
   # AC7b (gap-cold-start-...-eight-steps) + gap-vendor-runtime-not-in-git-clone-broken-mcp-entry
-  # (AC1/AC2): lay the runtime INTO the target. The target's loop must NOT depend on the quay dev
-  # tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/). The
-  # built Core runtime (vendor/quay/dist/quay.js) AND the built native provider runtime
-  # (vendor/quay-native/dist/quay-native.js + provider.yml — the self-contained provider bundle,
+  # (AC1/AC2) + gap-the-runtime-has-nowhere-safe-to-land: lay the runtime INTO the target. The
+  # target's loop must NOT depend on the quay dev tree through PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/). The
+  # built Core runtime (.quay/runtime/quay/quay.js) AND the built native provider runtime
+  # (.quay/runtime/quay-native/quay-native.js + provider.yml — the self-contained provider bundle,
   # gap-ac3b-prove-installed-quay-runs-without-dev-tree) are copied into the target so the target's
   # .quay/config.yml can point its provider mcp_entry at a PROJECT-LOCAL copy of the provider runtime
-  # (an absolute path into vendor/quay-native/, never a bare `quay-native` that PATH-resolves to a
-  # dev tree). The two laid-down files must stay together: the bundle resolves provider.yml relative
-  # to its own location. The runtimes are GENERATED artifacts (gitignored dist/ — M172), so a fresh
-  # plugin clone has none: ensure_vendor_runtime AUTO-BUILDS them via sync-vendor.sh (AC2) or FAILS
-  # CLOSED (AC1) — never a WARN-and-complete with a broken mcp_entry. After it returns, both bundles
-  # are guaranteed present, so the lay-down is unconditional.
+  # (an absolute path into .quay/runtime/quay-native/, never a bare `quay-native` that PATH-resolves
+  # to a dev tree). The two laid-down files must stay together: the bundle resolves provider.yml
+  # relative to its own location. The runtimes are GENERATED artifacts (gitignored dist/ — M172), so
+  # a fresh plugin clone has none: ensure_vendor_runtime AUTO-BUILDS them via sync-vendor.sh (AC2)
+  # or FAILS CLOSED (AC1) — never a WARN-and-complete with a broken mcp_entry. After it returns, both
+  # bundles are guaranteed present, so the lay-down is unconditional.
   ensure_vendor_runtime
-  copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$WORKSPACE_ROOT/vendor/quay/dist/quay.js" clean
-  copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$WORKSPACE_ROOT/vendor/quay-native/dist/quay-native.js" clean
-  copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$WORKSPACE_ROOT/vendor/quay-native/provider.yml" clean
+  # gap-the-runtime-has-nowhere-safe-to-land: the runtime lands in .quay/runtime/ (quay's own
+  # namespace — no target language reserves `.quay`), NOT under vendor/ (Go-reserved) or a dist/
+  # segment (build-reserved). The `dist/` path segments below are the PLUGIN's own build output
+  # (plugin/vendor/quay/dist/quay.js) — the SOURCE, unchanged; only the TARGET landing path is
+  # reserved-name-free (AC9). `.quay/runtime/` is gitignored by ensure_runtime_gitignore (AC10),
+  # so the 1.3MB generated artifact never enters the target's staging area (AC3/AC4 — no large-file
+  # hook can see it). It remains a LANDED file, byte-identical to the artifact (G2/AC6 — G2 is about
+  # bytes on disk, not git tracking).
+  copy_one "$PLUGIN_ROOT/vendor/quay/dist/quay.js" "$RUNTIME_BASE/quay/quay.js" clean
+  copy_one "$PLUGIN_ROOT/vendor/quay-native/dist/quay-native.js" "$RUNTIME_BASE/quay-native/quay-native.js" clean
+  copy_one "$PLUGIN_ROOT/vendor/quay-native/provider.yml" "$RUNTIME_BASE/quay-native/provider.yml" clean
+  ensure_runtime_gitignore
   write_provider_config
 
   # Upgrade-path state record (AC5): detect prior plugin version + already-laid assets.
