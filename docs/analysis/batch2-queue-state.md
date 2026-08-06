@@ -5739,3 +5739,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
     two-machine-collab 的权威/合并机制处理，本次备份只保数据不丢）。
 - **当前实测**：quay-sync.git 无 refs（A 机旧点未到）✓判据③无上限坐实；QUAY_CLAIM_REMOTE 未设
   ✓判据②=0 坐实；内层已派发 slot-refill 回填任务 + productize-manager-layer。
+
+### tick 2026-08-06T03:0xZ（内层，人优先级三任务 promote + 下一批队列）
+
+- **人直接指令**：三任务 todo→ready + self-touch（git-log 0 hit 真未落地、resolve 过）：
+  ① gap-web-action-buttons-unused-route-and-open-redirect-delete ② gap-message-bus-human-third-target-
+  transport-agnostic ③ gap-b-machine-periodic-push-backup-to-bare-repo（executor=manager on B / B outer
+  一行 cron）。**AC15 常设判据**（manager-phase-goal.md）：备份时延上限 20min、claim-task 调用>0、任务板
+  status 一致率；b-machine-push-backup 是 AC15 判据②③的执行者。
+- **队列**：按人「本批完成后」——三任务排在当前批（productize + slot-refill）完成后派发，优先序①②③。
+  第 3 槽保留给优先队列（不提前混入本批）。
+- 在飞 2/3。套件 green、无 stop、无 block、Monitor 绿。
