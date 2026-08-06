@@ -614,6 +614,21 @@ tick 做一次收尾 pass。
    - 记进本轮 `closed` 清单。
    - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
      已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
+   - **关红窗遗留括号（AC4/AC8，`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：每次收尾
+     pass 无条件跑一次 `--reconcile`，用可观测证据（分支已 merge / worktree 已消失 / 进程已死）关掉
+     executor 已消失的未闭合括号——让遥测 `inProgress` 反映**真实在飞**而非红窗遗留：
+     ```bash
+     node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --reconcile --json
+     ```
+   - **阻塞信号超时自动升级（AC9，同上任务）**：没人消费的阻塞信号不无限冻结 inner——对超龄（默认
+     30 分钟）的 block 自动归档（记遥测等待时长 + 写 `.quay/blocked-escalations.jsonl` + 移除 block
+     文件；底层条件若仍成立，下一 tick `--detect-stop` 会写新 block 重新验证）：
+     ```bash
+     node --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --escalate-stale
+     ```
+   - **空槽信号（AC2/AC5）**：读 `--slots --cap <effective_cap>` 的 real-in-flight / slots-remaining——
+     「还剩几个并发槽」机械可见，不靠内层手写叙事 markdown；`dispatchable_disjoint − realInFlight`
+     = 槽位级闲置。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
@@ -825,17 +840,21 @@ not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先�
 
 ### 4b. 「在飞」词汇拆分 + 输入框纪律（AC7/AC8 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff）
 
-**「在飞」拆为两种含义，报告/队列状态里分别标注**（AC7，2026-08-04 第三次实锤后加）——混用会让并发
+**「在飞」拆为三种含义，报告/队列状态里分别标注**（AC7，2026-08-04 第三次实锤后加；
+`gap-telemetry-brackets-vs-subagents-no-slot-visibility` 起再拆出「真实在飞」）——混用会让并发
 指令看起来已满足：
 
 | 词 | 含义 | 用什么核实 |
 |---|---|---|
 | **遥测括号在飞** | `--task-start` 已写、`--task-end` 未写 | 遥测 `inProgress[]` / START 事件——START **只证括号在飞，不证 subagent 在飞** |
+| **真实在飞** | 括号里 executor **仍可观测存在**（进程/打开 worktree/分支未 merge）——扣掉红窗遗留 | 遥测 `--report --json` 的 `realInFlight` / `--slots` 的 real-in-flight（reconcile 感知） |
 | **subagent 在飞** | 内层真的起了后台 `Agent(run_in_background)` | **读原始 Agent 工具调用的 `input.run_in_background` 字段**（meta-cc transcript 查询）——唯一可靠判据 |
 
 **外层核实并发必须读原始字段，不得用 START 事件或 pane UI 文字。** 实例（本 tick）：内层唯一 Agent 调用
 `run_in_background` 缺失，而 START 事件显示 A|D 双在飞——用错仪器导致静默满足，正是本条目要消灭的形态。
-报告/队列状态里分别写「括号在飞 N」「subagent 在飞 M」，不合并成一个「在飞」。
+报告/队列状态里分别写「括号在飞 N」「真实在飞 M」「subagent 在飞 K」，不合并成一个「在飞」。
+**状态自检①（inner `fast-mode-loop-tick.md`）判并发上限必须读「真实在飞」（`realInFlight`），不是原始
+括号数**——5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会让 ≤cap 恒真（装饰非判据，AC3）。
 
 **输入框是待提交缓冲区，不是笔记本（AC8）**：
 
