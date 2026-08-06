@@ -36,7 +36,7 @@ cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、20 条 AC、DoD、四项已定决策 |
 | `orchestration/tick-log.md` | **历史 tick 与动作类型累计分布**——退化判据的唯一来源 |
 | `orchestration/escalations.md` | 已攒给人、尚未处理的非常规项 |
-| `docs/analysis/batch2-queue-state.md` | 内层自报的队列状态（**可能是旧快照，以 git 为准**） |
+| `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名） | 内层自报的队列状态（**可能是旧快照，以 git 为准**） |
 | `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` | 四项原则 |
 
 **2. 建立实况**（以实测为准，不以上面任何文件的自述为准）
@@ -500,7 +500,7 @@ git -C "$REPO_ROOT" status --short                  # 树是否干净
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
 node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
-cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
+cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态（文件名历史引用——batch2 是旧批次名）
 ```
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
@@ -562,9 +562,13 @@ node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或�
 
 ### 1b. 异步收尾例程（verification-round closure pass，强制）
 
-**批次边界的真源是记账同步，不是措辞**（`gap-closure-sync-is-the-true-batch-boundary-move-
-bookkeeping-to-outer-async`，人 2026-08-05 设计裁定，决定不是建议）：「Close batch-N」三次在 inner
-派发历史里、每次收尾后必跟 3 连发、收尾期间零新派发 ⇒ 记账曾是调度的同步点。**inner 只执行 + 派发 +
+**词汇规范（同步 `gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round` AC5）**：
+**分派是滚动的，不叫批号**；全量验证/收尾节奏叫 `verification-round-N`——**关于验证/收尾，不是分派门控**。
+本步的 closure pass 就是这个节奏的载体。
+
+**批次边界的真源是记账同步，不是措辞**（`gap-closure-sync-is-the-true-batch-boundary-move-bookkeeping-to-outer-async`，
+人 2026-08-05 设计裁定，决定不是建议）：**历史引用**——「Close batch」类收尾动作在 inner 派发历史里
+出现三次、每次收尾后必跟 3 连发、收尾期间零新派发 ⇒ 记账曾是调度的同步点。**inner 只执行 + 派发 +
 合并，永远不因记账停顿、也不知道收尾存在；收尾是本层（外层 20-min cron）的异步活。** 本步骤每个
 tick 做一次收尾 pass。
 
@@ -801,7 +805,7 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 - 候选：`status: todo` 或 `ready` 且带 `milestone-candidate` 标签
 - 依赖就绪：父任务 done、无未满足前置（`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN）
 - 并发资格：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞任务
-  和彼此**两两检查，重叠则不同批
+  和彼此**两两检查，重叠则不同时派发（**分派是滚动的，不是攒批门控**）
 - 优先级：阻塞其它任务的优先；`gap-*` 缺陷类优先于 `DIR-*` 新能力
 - **跨机在飞（两机协作，`gap-two-machine-collaboration-git-branch-claiming`）**：两机协作时
   （`QUAY_CLAIM_REMOTE` 指向共享裸仓库），**另一台机器的在飞任务 = 共享仓库上存在的 `task/*` 分支**
@@ -947,7 +951,7 @@ tick 或 `/clear` 后的会话会重犯。
 |---|---|
 | `orchestration/exp6-phase1-sustained-unattended-operation.md` | 目标、AC、DoD |
 | `fast-mode-loop-tick.md` | 内层 tick 指令 |
-| `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补） |
+| `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名） | 队列状态（内层写，外层读+补） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
 | `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
