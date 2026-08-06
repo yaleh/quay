@@ -5434,3 +5434,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 5 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（red-window / tests-leak-tmux 串行互撞——前者 tick 文档 touch、后者 orchestration/** 保守序列化）。
 - **派发 1/5**：`gap-red-window-dispatch-stop-should-be-shared-gate-conditional`（scheduler 批次胜者；补 self-touch 后派发）。telemetry --task-start 已开。tests-leak-tmux deferred 等下轴释放。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-07T00:0xZ（内层，red-window fan-in 完成 —— 在飞清零）
+
+- **red-window-dispatch-stop fan-in 完成**（merge task/gap-red-window...，6 文件 449 行）：SUITE-RED 事件携带失败位置（FailureScope/FailureLocation，从 early-RED 失败行派生）；`shouldStopDispatchForFailure` 条件化——共享闸门（run_static_checks）⇒ 停派发；具体测试无关新任务 touches ⇒ 续；相交 ⇒ 停；unknown ⇒ fail-closed；**fan-in 一律暂缓**（真正保护，不并红树）。AC1–AC5 全勾（scoped 24/24，task/drive-contract no violations）。留 ready。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
