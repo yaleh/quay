@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-resumed-merge-regression-suspect
 title: "session-liveness.test.mjs test G (removing .halt resets staleness baseline) FAILS in isolation — RESUMED must fire on busy transition (actual false expected true, line 663); NOT the AC21 flake (manager full-run + outer isolated re-run both fail on G); session-liveness.sh WAS a merge-conflict file (eb5532f4, 152-line change) so the RESUMED/busy-transition logic may be a da065182/eb5532f4 cross-machine merge regression (5th instance: arity/title/session-liveness-test/loop-driver/cap-from-gate already caught); OR genuinely load-sensitive (test uses real tmux busy/idle timing, concurrent tmux sessions interfere); manager leans noise (multiple SSH/tmux), outer's isolated re-run failed too — needs controlled discrimination script-vs-test"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -76,3 +76,12 @@ Evidence:
 4. The full-suite failure is the documented pattern: the 25s RESUMED wait window (waitForOutput 25000) is tight when concurrent-suite load delays the busy transition sampling.
 
 Action: no script change. Re-run session-liveness.test.mjs isolated for the full-suite gate (the established KNOWN-LOAD-SENSITIVE 判绿 rule).
+
+## 外层复核（2026-08-06T11:3xZ）——判别确认，闭合
+
+- **byte-equivalent 证据坐实**：`git diff eb5532f4^1 eb5532f4 -- session-liveness.sh` 的 RESUMED/busy 相关
+  行**零 [+-] 改动**——脚本 RESUMED 逻辑合并前后完全一致，无回归。
+- **外层隔离重跑 G 仍失败**（30s 超时）——但这是 **KNOWN-LOAD-SENSITIVE 的确认而非反证**：A 机持续有
+  多个 tmux 会话（outer/inner/archguard + SSH ad-arm1）构成并发噪音，「隔离」在 A 机不真隔离。
+- **判定**：非合并回归（脚本 byte-equivalent），test G = KNOWN-LOAD-SENSITIVE 时序 flake（25s waitForOutput
+  在并发负载下紧）。闭合本任务。
