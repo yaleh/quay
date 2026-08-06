@@ -835,6 +835,90 @@ export function makeDefaultExecutorGone(root) {
   };
 }
 
+// ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ─────────────────────────────
+//
+// `--slot-status` exposes the CONCURRENCY-SLOT view of the telemetry store as a PURE READ (like
+// `--report`, it never writes a file, so a poll cannot dirty the tree and deadlock
+// restart-readiness-check.sh). The slot view is the fix for "telemetry brackets ≠ real subagents":
+// the raw `inProgress[]` counts brackets (a `--task-start` written, `--task-end` not yet), which
+// includes red-window leftovers — phantoms whose executor is observably gone (crash killed the
+// subagent and `--task-end` never came). A 5-bracket store with 1 live agent reads as "5 in flight"
+// in `--report`, which is what made the state self-check item ① vacuous (`5 ≤ cap 3` false-RED a
+// healthy 1-agent state, and `0` always-true when the store only ever holds phantoms).
+//
+// The slot view applies the SAME observable-executor probe `--reconcile` uses (process alive /
+// worktree open → KEEP; branch merged / nothing → CLOSE) as a DRY RUN — nothing is written — and
+// reports:
+//   in_progress_total  — raw bracket count (`--report` inProgress.length).
+//   stale_brackets     — brackets whose executor is observably gone (`--reconcile` would close them).
+//   real_in_flight     — brackets whose executor is still present (the REAL concurrency).
+//   slots_free         — max(0, cap − real_in_flight): the "how many slots are idle" number that was
+//                        previously invisible to both layers.
+//   brackets_reflect_subagents — invariant: in_progress_total === real_in_flight. false ⇒ stale
+//                        brackets exist (reconcile them) or the --task-start/--task-end pair was not
+//                        called in the dispatch path (AC4).
+//
+// AC5 regression shape: 5 red-window leftover brackets + 1 real agent with cap 3 ⇒ stale_brackets 5,
+// real_in_flight 1, slots_free 2 — visible as "2 slots idle", NOT "full" (raw 6 > cap) and NOT
+// "empty" (0 in flight).
+//
+// cap is an INPUT (--cap, the effective_cap from cap-from-gate.sh at the dispatch decision point).
+// The default mirrors ready-pool-check.ts CONCURRENCY_CAP_DEFAULT=3 and is only a degraded fallback
+// for a caller that does not pass one.
+
+/** Degraded fallback cap for --slot-status when no --cap is passed (mirrors ready-pool-check). */
+export const SLOT_STATUS_CAP_DEFAULT = 3;
+
+/**
+ * Compute the slot view of an in-flight set. PURE: all observable facts arrive via the injected
+ * `executorGone` probe (default: no-executor-probe, keep everything) so tests can inject
+ * deterministic verdicts without faking processes/git. Reuses `reconcileInFlight` — the same
+ * classification `--reconcile` would write, but computed without writing anything.
+ *
+ * @param {Array<{taskId:string, runId:string, startedAtMs:number}>} inProgress — from aggregate()
+ * @param {object} [opts]
+ * @param {number} [opts.cap] — concurrency cap (effective_cap from cap-from-gate.sh); default
+ *   SLOT_STATUS_CAP_DEFAULT.
+ * @param {(rec: {taskId:string, runId:string, startedAtMs:number}) => {gone:boolean, reason?:string|null}} [opts.executorGone]
+ *   — observable-executor probe, same contract as reconcileInFlight.
+ * @param {(taskId:string) => number|null} [opts.firstKnownCommitMs] — AC7 annotation probe.
+ * @returns {{cap:number, in_progress_total:number, stale_brackets:number, real_in_flight:number,
+ *   slots_free:number, slot_state:"free"|"full", brackets_reflect_subagents:boolean,
+ *   closed:Array<object>, kept:Array<object>}}
+ */
+export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, firstKnownCommitMs = null } = {}) {
+  const { closed, kept } = reconcileInFlight(inProgress ?? [], { executorGone, firstKnownCommitMs });
+  const realInFlight = kept.length;
+  const slotsFree = Math.max(0, cap - realInFlight);
+  return {
+    cap,
+    in_progress_total: (inProgress ?? []).length,
+    stale_brackets: closed.length,
+    real_in_flight: realInFlight,
+    slots_free: slotsFree,
+    slot_state: slotsFree > 0 ? "free" : "full",
+    brackets_reflect_subagents: (inProgress ?? []).length === realInFlight,
+    closed,
+    kept,
+  };
+}
+
+/**
+ * Human-readable slot-status lines for --slot-status (without --json).
+ */
+function printHumanSlotStatus(slot) {
+  console.log(`slot status (generated ${new Date().toISOString()})`);
+  console.log(`  cap: ${slot.cap}`);
+  console.log(`  in-progress brackets (raw --report inProgress): ${slot.in_progress_total}`);
+  console.log(`  stale brackets (reconcile would close, executor observably gone): ${slot.stale_brackets}`);
+  console.log(`  real in-flight (executor still present): ${slot.real_in_flight}`);
+  console.log(`  slots free: ${slot.slots_free} (slot_state ${slot.slot_state})`);
+  console.log(`  brackets reflect subagents: ${slot.brackets_reflect_subagents ? "YES" : "NO (stale brackets or missing --task-end)"}`);
+  if (!slot.brackets_reflect_subagents) {
+    console.log(`  run '--reconcile' to close the ${slot.stale_brackets} stale bracket(s); if a real in-flight task has NO bracket, its --task-start was never called (AC4)`);
+  }
+}
+
 // ── Committed aggregate ──────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -915,6 +999,7 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
+  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight vs stale brackets vs slots free)
   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)
   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRTES an end event per close)`;
 
@@ -1079,6 +1164,42 @@ export async function main(argv) {
       console.log(JSON.stringify(reportWithMeta, null, 2));
     } else {
       printHumanReport(reportWithMeta, null);
+    }
+    return 0;
+  }
+
+  // --slot-status — PURE READ (gap-telemetry-brackets-vs-subagents-no-slot-visibility). The slot
+  // view of the telemetry store: applies the SAME observable-executor probe --reconcile uses as a
+  // DRY RUN (no writes — never dirties the tree) and reports real_in_flight (brackets whose executor
+  // is still present) vs stale_brackets (would-be-closed phantoms) vs slots_free (max(0, cap −
+  // real_in_flight)). This is the "how many concurrency slots are idle" number both layers were blind
+  // to (AC2): the raw --report inProgress counts brackets, which includes red-window leftovers and
+  // made the state self-check item ① vacuous. cap is an INPUT (--cap, effective_cap from
+  // cap-from-gate.sh); default SLOT_STATUS_CAP_DEFAULT.
+  if (args.includes("--slot-status")) {
+    const capArg = getArgValue(args, "--cap");
+    const cap = capArg !== undefined ? Number(capArg) : SLOT_STATUS_CAP_DEFAULT;
+    if (capArg !== undefined && (!Number.isFinite(cap) || cap < 0)) {
+      console.error(`fast-mode-telemetry: invalid --cap "${capArg}" (expected a non-negative integer)`);
+      return 1;
+    }
+    let reportWithMeta;
+    try {
+      ({ report: reportWithMeta } = await loadAndAggregate(root, null));
+    } catch (e) {
+      console.error(`fast-mode-telemetry: ${e.message}`);
+      return 1;
+    }
+    const firstKnownCommitMsByTask = makeFirstKnownCommitMsByTask(root);
+    const slot = analyzeSlotStatus(reportWithMeta.inProgress, {
+      cap,
+      executorGone: makeDefaultExecutorGone(root),
+      firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
+    });
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(slot, null, 2));
+    } else {
+      printHumanSlotStatus(slot);
     }
     return 0;
   }

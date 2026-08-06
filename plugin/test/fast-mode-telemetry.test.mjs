@@ -981,4 +981,126 @@ test("RECONCILE — processAlive detects a live process by runId (AC3 real-proce
   }
 });
 
+// ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ────────────────────────────
+
+test("SLOT-STATUS — 5 stale brackets + 1 real agent ⇒ real_in_flight 1, slots_free 2 (AC5 regression shape)", async () => {
+  const cli = await importCli();
+  const inProgress = [
+    ...["a", "b", "c", "d", "e"].map((t, i) => ({
+      taskId: `stale-${t}`, runId: `fm-stale-${t}-${i}`, startedAtMs: 1000 + i,
+    })),
+    { taskId: "real-task", runId: "fm-real-1", startedAtMs: 9000 },
+  ];
+  // Injected deterministic probe: stale-* executor observably gone; real-task worktree present.
+  const executorGone = (rec) => rec.taskId.startsWith("stale-")
+    ? { gone: true, reason: "worktree-gone-and-no-process" }
+    : { gone: false, reason: "worktree-present" };
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone });
+  assert.equal(s.in_progress_total, 6, "raw bracket count = 5 stale + 1 real");
+  assert.equal(s.stale_brackets, 5, "5 brackets have an observably-gone executor");
+  assert.equal(s.real_in_flight, 1, "only the worktree-present agent is real in-flight");
+  assert.equal(s.slots_free, 2, "cap 3 − real 1 ⇒ 2 slots idle (not 'full' on raw 6, not 'empty')");
+  assert.equal(s.slot_state, "free");
+  assert.equal(s.brackets_reflect_subagents, false, "raw brackets (6) ≠ real subagents (1) ⇒ invariant false");
+  assert.equal(s.closed.length, 5);
+  assert.equal(s.kept.length, 1);
+  assert.equal(s.kept[0].taskId, "real-task");
+});
+
+test("SLOT-STATUS — real_in_flight > cap is a detectable violation (AC3 criterion not vacuous)", async () => {
+  const cli = await importCli();
+  // 4 live agents, cap 3 — a genuine over-dispatch a vacuous check would let pass.
+  const inProgress = [1, 2, 3, 4].map((i) => ({
+    taskId: `live-${i}`, runId: `fm-live-${i}-1`, startedAtMs: i,
+  }));
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone });
+  assert.equal(s.real_in_flight, 4);
+  assert.equal(s.slots_free, 0);
+  assert.equal(s.slot_state, "full");
+  assert.equal(s.stale_brackets, 0);
+  assert.equal(s.brackets_reflect_subagents, true, "all 4 brackets are real — but 4 > cap 3 is the violation");
+  // The criterion the self-check uses: real_in_flight ≤ cap. 4 > 3 ⇒ violation caught.
+  assert.ok(s.real_in_flight > s.cap, "the slot-status exposes real_in_flight so real_in_flight <= cap is checkable");
+});
+
+test("SLOT-STATUS — 0 brackets ⇒ real_in_flight 0, slots_free cap (empty is visible, not 'full')", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus([], { cap: 3, executorGone: () => ({ gone: false, reason: "n/a" }) });
+  assert.equal(s.in_progress_total, 0);
+  assert.equal(s.stale_brackets, 0);
+  assert.equal(s.real_in_flight, 0);
+  assert.equal(s.slots_free, 3);
+  assert.equal(s.slot_state, "free");
+  assert.equal(s.brackets_reflect_subagents, true, "empty store trivially consistent");
+});
+
+test("SLOT-STATUS CLI — real git: merged-branch phantom counts stale, open-worktree agent real; pure-read (AC2/AC5)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "stale-task.md"), "---\nid: stale-task\n---\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "tasks", "live-task.md"), "---\nid: live-task\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed tasks").status, 0);
+    // stale-task: branch created and MERGED into master ⇒ executor observably done (would close).
+    assert.equal(gitCmd(tmp, "checkout", "-b", "task/stale-task").status, 0);
+    fs.appendFileSync(path.join(tmp, "tasks", "stale-task.md"), "work\n");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "stale work landed").status, 0);
+    assert.equal(gitCmd(tmp, "checkout", "master").status, 0);
+    assert.equal(gitCmd(tmp, "merge", "--no-ff", "task/stale-task", "-m", "Merge branch 'task/stale-task'").status, 0);
+    // live-task: branch checked out in an OPEN worktree ⇒ executor mid-flight (would keep).
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/live-task", path.join(tmp, "wt-live")).status, 0);
+
+    const ps = runCli(tmp, "--task-start", "--taskId", "stale-task");
+    assert.equal(ps.status, 0, ps.stderr);
+    const ls = runCli(tmp, "--task-start", "--taskId", "live-task");
+    assert.equal(ls.status, 0, ls.stderr);
+    // snapshot the .workflow-events/ dir contents BEFORE the slot-status read.
+    const before = fs.readdirSync(path.join(tmp, ".workflow-events")).sort();
+
+    const slot = runCli(tmp, "--slot-status", "--cap", "3", "--json");
+    assert.equal(slot.status, 0, slot.stderr);
+    const out = JSON.parse(slot.stdout);
+    assert.equal(out.in_progress_total, 2, "raw brackets = 2 (stale + live)");
+    assert.equal(out.stale_brackets, 1, "merged-branch phantom is stale");
+    assert.equal(out.real_in_flight, 1, "open-worktree agent is real");
+    assert.equal(out.slots_free, 2, "cap 3 − real 1 ⇒ 2 slots idle");
+    assert.equal(out.brackets_reflect_subagents, false, "2 raw brackets ≠ 1 real subagent");
+
+    // PURE READ: --slot-status must NOT write a reconcile end event (only --reconcile does).
+    const after = fs.readdirSync(path.join(tmp, ".workflow-events")).sort();
+    assert.deepEqual(after, before, "--slot-status is pure-read: no event file appears/vanishes");
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    assert.equal(JSON.parse(rep.stdout).inProgress.length, 2, "stale bracket still in inProgress (slot-status did not close it)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS — human output names the stale/reconcile hint when the invariant fails (AC2 readability)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // 2 starts, no git ⇒ both executors observably gone (bare workspace) ⇒ both stale.
+    const a = runCli(tmp, "--task-start", "--taskId", "ghost-a");
+    assert.equal(a.status, 0, a.stderr);
+    const b = runCli(tmp, "--task-start", "--taskId", "ghost-b");
+    assert.equal(b.status, 0, b.stderr);
+    const slot = runCli(tmp, "--slot-status", "--cap", "3");
+    assert.equal(slot.status, 0, slot.stderr);
+    assert.match(slot.stdout, /real in-flight.*: 0/);
+    assert.match(slot.stdout, /stale brackets.*: 2/, "both bare-workspace brackets report stale");
+    assert.match(slot.stdout, /slots free: 3/);
+    assert.match(slot.stdout, /--reconcile/, "human output points at the reconcile action when brackets ≠ subagents");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 } // ── end governance self-skip (AC6) ──

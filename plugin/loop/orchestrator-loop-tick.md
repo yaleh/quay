@@ -597,6 +597,11 @@ tick 做一次收尾 pass。
    - 记进本轮 `closed` 清单。
    - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
      已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
+   - **括号对账（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：收尾批次后跑
+     `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap "${effective_cap:-3}" --root "$REPO_ROOT" --json`
+     对账——`brackets_reflect_subagents: false` 且 `stale_brackets > 0` ⇒ 还有 `--task-end` 没调齐的
+     陈旧括号，跑 `--reconcile` 闭合（`--task-end` 是收尾路径的活；`--reconcile` 兜底执行者已消失的）。
+     `--slot-status` 是纯读，观测轮询不会弄脏工作树。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
@@ -862,6 +867,20 @@ not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先�
 **外层核实并发必须读原始字段，不得用 START 事件或 pane UI 文字。** 实例（本 tick）：内层唯一 Agent 调用
 `run_in_background` 缺失，而 START 事件显示 A|D 双在飞——用错仪器导致静默满足，正是本条目要消灭的形态。
 报告/队列状态里分别写「括号在飞 N」「subagent 在飞 M」，不合并成一个「在飞」。
+
+**槽位视角（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`，AC2）：** 外层不再依赖内层手写
+叙事 markdown 才知道「还剩几个并发槽」——纯读命令直接给：
+
+```bash
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap "${effective_cap:-3}" --root "$REPO_ROOT" --json
+# real_in_flight / stale_brackets / slots_free（= max(0, cap − real_in_flight)）；brackets_reflect_subagents
+```
+
+- **`slots_free` = 空槽数**——「11 槽位闲置」这类判读变成机械输出（AC5 回归形态：5 红窗遗留括号 + 1 真实
+  agent ⇒ `real_in_flight 1`、`slots_free 2`，不是「满负荷」也不是「空」）。
+- **`stale_brackets > 0` ⇒ 收尾没关括号**——本轮步骤 1b 的 `--task-end` 没调齐，跑
+  `--reconcile` 闭合（别让红窗遗留污染后续判定 / 触发假 over-90m）。
+- **`brackets_reflect_subagents: false` ⇒ `--task-start`/`--task-end` 对没调齐**——AC4 的可机械判据。
 
 **输入框是待提交缓冲区，不是笔记本（AC8）**：
 
