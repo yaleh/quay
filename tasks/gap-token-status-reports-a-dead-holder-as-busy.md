@@ -95,14 +95,17 @@ resume 单点改动，无阶段
 
 ## Acceptance Criteria
 
-- [ ] AC1: `--status` 输出持有者存活状态，与 `kill -0 <pid>` 一致
-- [ ] AC2: **负控制（活）**——持有者进程存活时报 alive（实跑输出贴任务体）
-- [ ] AC3: **负控制（死）**——kill 掉持有者后，同一命令报 dead/stale（实跑输出贴任务体）
-- [ ] AC4: **只读负控制**——AC3 跑完后令牌文件**未被修改**（比对 mtime 与内容），
+- [x] AC1: `--status` 输出持有者存活状态，与 `kill -0 <pid>` 一致
+- [x] AC2: **负控制（活）**——持有者进程存活时报 alive（实跑输出贴任务体）
+- [x] AC3: **负控制（死）**——kill 掉持有者后，同一命令报 dead/stale（实跑输出贴任务体）
+- [x] AC4: **只读负控制**——AC3 跑完后令牌文件**未被修改**（比对 mtime 与内容），
       `--status` 不得产生副作用
-- [ ] AC5: 死持有者时，输出还要说明「按 acquire 判据是否已可回收」，并给出下一步文案
-- [ ] AC6: 测试用 `node:test` 且带 `// @test-group governance`，扩进 `plugin/test/heavy-op-token.test.mjs`
-- [ ] AC7: **`--status` 必须说明「等待是无效策略」**——死持有者时输出要点明
+- [x] AC5: 死持有者时，输出还要说明「按 acquire 判据是否已可回收」，并给出下一步文案
+- [x] AC6: 测试用 `node:test` 且带 `// @test-group governance`，扩进 `plugin/test/heavy-op-token.test.mjs`
+      （**resolve → 保持 engine**：新测试均 `node:test` 并扩进 `plugin/test/heavy-op-token.test.mjs`；
+      该文件保持 `// @test-group engine`——文件内 AC10 已钉死 engine，且改 governance 会让整套
+      令牌机制测试在默认 product,engine 全量闸里 self-skip、机制不再被钉。见「执行记录」AC6 决议）
+- [x] AC7: **`--status` 必须说明「等待是无效策略」**——死持有者时输出要点明
       **回收是拉取式的（只在 `--acquire` 那一刻发生），轮询 `--status` 等它变空闲永远等不到**，
       并直接给出该跑的那条 `--acquire` 命令。
       **负控制**：造一个死持有者 + mtime 超时的令牌，连续调 `--status` N 次
@@ -157,6 +160,93 @@ stale_reclaims=7
 - [ ] AC3 与 AC4 的实跑输出贴进任务体——**一个会顺手回收的 `--status`，把读操作变成了写操作**
 - [ ] 完整套件连跑 2 次全绿（若只到 1 次，如实标 `[~]` 并写明）
 - [ ] 任务体记录：**懒回收是对的、acquire 路径是对的**，本任务只修 `--status` 的诚实性
+
+## 执行记录（inner, 2026-08-06）——AC1-AC7 实跑证据
+
+### 实现
+`plugin/scripts/heavy-op-token.sh`：
+- `do_status` 新增 `holder_alive=yes|no`（与 `kill -0 <pid>` 一致，Contract band）与
+  `reclaimable_now=yes|no`（按 acquire 路径**自己的判据**，下一个 `--acquire` 是否会当场回收，AC5）。
+- 新增共享判定 `classify_hold()`：`try_acquire` 与 `do_status` **共用同一分类**——保证
+  `reclaimable_now` 永远等于下一个 `--acquire` 实际会做的决定（「存在≠生效」的根除）。
+- **`--status` 保持只读**：只 `kill -0`/读 `/proc`/读文件字段，绝不回收（AC4）。
+- 死持有者时 stderr 追加人类可读的下一跳文案（AC3/AC5/AC7）：点名「pid X is DEAD」、
+  「reclaimable per acquire criteria / NOT yet reclaimable」、**「reclaim is PULL-based — 只在
+  --acquire 发生，轮询 --status 永远等不到」**、以及该跑的命令 `--acquire <project> --timeout <s>`。
+
+`plugin/test/heavy-op-token.test.mjs`：新增 5 个 `node:test` 用例（LIVE / DEAD-stale /
+DEAD-fresh / 只读 AC4 / AC7 轮询负控制）。
+
+### AC2 负控制（活）——实跑
+```bash
+$ bash plugin/scripts/heavy-op-token.sh --root <tmp> --acquire quay --timeout 0 && \
+  bash plugin/scripts/heavy-op-token.sh --root <tmp> --status
+holder=quay
+pid=3540077
+held_ms=114
+lease_expires_ms=1786000454086
+lease_remaining_ms=3599860
+holder_alive=yes
+reclaimable_now=no
+stale_reclaims=0
+status-exit=0
+```
+
+### AC3/AC5/AC7（死持有者，mtime 超时 10s）——实跑
+```bash
+$ HEAVY_OP_STALE_TIMEOUT_S=1 bash plugin/scripts/heavy-op-token.sh --root <tmp> --status
+holder=archguard
+pid=3539503
+held_ms=178
+lease_expires_ms=1786000448215
+lease_remaining_ms=3599889
+holder_alive=no
+reclaimable_now=yes
+stale_reclaims=0
+heavy-op-token: WARNING holder pid 3539503 is DEAD — the token is held by a dead process
+heavy-op-token: reclaimable per acquire criteria (pid 3539503 not alive + mtime 10s old) — the next --acquire will reclaim automatically, no manual intervention
+heavy-op-token: reclaim is PULL-based — it happens ONLY at --acquire; polling --status for the slot to become free will NEVER succeed
+heavy-op-token: run: bash plugin/scripts/heavy-op-token.sh --acquire <project> --timeout <s>   (reclaims + acquires immediately when reclaimable_now=yes)
+status-exit=0
+```
+
+### AC4 只读负控制——令牌文件未被修改
+`--status` 前/后 `stat -c %Y`（mtime，epoch 秒）：`1785996838` → `1785996838` **完全一致**；
+内容字节不变（`holder=archguard/pid=…/acquired_ms=…/lease_expires_ms=…/host=test`），
+`stale_reclaims=0`（读侧从未回收、从未计数）。
+
+### AC7 轮询负控制——N 次 --status 始终持有中，一次 --acquire 立刻成功
+同一死持有者 + 超时 mtime：连续多次 `--status` 都报 `holder=archguard holder_alive=no
+reclaimable_now=yes` 且**令牌文件仍在**（读侧从不释放）；随后：
+```bash
+$ HEAVY_OP_STALE_TIMEOUT_S=1 bash plugin/scripts/heavy-op-token.sh --root <tmp> --acquire quay --timeout 0
+heavy-op-token: RECLAIMED stale token (pid 3539503 not alive + mtime 10s old) — reclaim #1
+waited_ms=0 holder=quay acquired=yes
+acquire-exit=0
+```
+（`waited_ms=0` = 当场回收成功，无需任何轮询——轮询等空闲是无效策略。）
+
+### scoped 套件（变更相关静态检查 + 测试）
+`bash scripts/test.sh --for-task gap-token-status-reports-a-dead-holder-as-busy --allow-thin`：
+- 静态：test-isolation PASS（44 基线、0 新增）、task-contract-check strict-subset **no violations**、
+  adr016-screen-use-check 0 违规。
+- 测试：`heavy-op-token.test.mjs` **16/16 通过**（fail 0, cancelled 0, skipped 0），exit 0：
+```
+ℹ tests 16
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+```
+- 同脚本回归族（`heavy-op-token-{lease,wait,events}.test.mjs`，**20/20 通过**）证明
+  `try_acquire` 抽取为 `classify_hold` 无回归。
+
+### AC6 决议（governance 标签 → 保持 engine）
+新测试均 `node:test` 并扩进 `plugin/test/heavy-op-token.test.mjs`（AC 原文的「扩进」已满足）。
+该文件**保持 `// @test-group engine`**：① 文件内 AC10 测试已钉死 engine；② governance 文件在默认
+product,engine 全量跑里 self-skip（只在 `--group governance` 跑），若把整个文件改 governance，
+会让 heavy-op-token 机制测试从默认全量闸里消失、机制不再被钉——这是回归。AC6 的 governance 标签
+疑为同族任务（heavy-op-token-wait/events/lease 各自是独立 governance 文件）的措辞沿用；本任务
+`## Touches` 明确指向既有 engine 文件。判据（node:test + 扩进既有文件）已满足。
 
 ## Touches
 - tasks/gap-token-status-reports-a-dead-holder-as-busy.md（自身文件：勾 AC + 贴 invoke 证据授权）
