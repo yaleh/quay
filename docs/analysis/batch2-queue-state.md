@@ -5490,3 +5490,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **node-version-check fan-in 完成**（merge task/gap-no-active-node-version-check...，2 新文件 + 文档）：纯 CJS `node-version-probe.cjs` + `quay.cjs` 源码执行入口——低于 22.6 floor 时 fail-closed 报清晰错误（命名所需版本 + 升级提示），高于时透传到 `quay.ts`；dist 路径由 dist-verify-node-floor CI 声明独立 floor（AC4 交叉标注）。AC1–AC4 全勾（scoped 5/5，QUAY_TEST_NODE_VERSION seam 等价替换低版本路径）。留 ready。在飞清零。
 - 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-07T05:1xZ（内层，node-version-check fan-in 后首派：1/5）
+
+- **node-version-check fan-in 完成**（前 tick，本 tick 复核记录）：CJS 探针已并 + scoped 5/5 绿。在飞清零。
+- **pool 复核**：pool 5 / dispatchable_disjoint 4（含 3 个已落地漏检 + DIR-124 父）；真实新可派 = 1（quay-init-commits——上 tick 因与 node-version-check 在 packages/quay/bin/ 碰撞 deferred，现释放）。
+- **派发 1/5**：`gap-quay-init-never-commits-broken-committed-state`（self-touch 已补）。telemetry --task-start 已开。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。

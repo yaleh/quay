@@ -62,6 +62,7 @@ committed 态是自洽的**。archguard 报的 broken committed 态属于 **quay
 
 ## Touches
 
+- tasks/gap-quay-init-never-commits-broken-committed-state.md
 - plugin/scripts/quay-init.sh（铺完自动 commit + 冲突检测）
 - plugin/test/quay-init-loop.test.mjs（AC1-AC3 测试）
 - tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md（AC4 交叉标注）
