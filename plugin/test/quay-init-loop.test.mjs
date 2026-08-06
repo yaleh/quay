@@ -972,8 +972,13 @@ test('AC4 — a user-scope install cache (no packages/ source tree) whose dist e
     // check owns it. The declared version is read from the copied plugin's vendor/package.json so
     // the test tracks the actual vendored version (was hardcoded 0.3.13; now 0.4.0).
     const declared = readVendoredVersion(plugin);
-    writeFakeBundles(plugin, `console.log("${declared.replace(/\d+$/, (m) => String(Number(m) - 1))}")\n`, '// native bundle\n');
-    const embeddedStale = declared.replace(/\d+$/, (m) => String(Number(m) - 1));
+    // Make the fake embedded version unambiguously OLDER than declared (0.4.0 → 0.3.0): lower the
+    // MINOR segment by 1 (patch is 0 at a version boundary, so decrementing patch alone would leave
+    // 0.4.0 unchanged and the test would not be stale). The version-freshness check compares the
+    // whole semver string, so any lower version is STALE.
+    const dec = (v) => { const [maj, min, patch] = v.split('.'); return `${maj}.${String(Math.max(0, Number(min) - 1))}.${patch}`; };
+    const embeddedStale = dec(declared);
+    writeFakeBundles(plugin, `console.log("${embeddedStale}")\n`, '// native bundle\n');
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
