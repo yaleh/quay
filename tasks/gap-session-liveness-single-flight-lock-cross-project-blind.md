@@ -105,3 +105,21 @@ laydown-set-check 测试夹具生成的 session-liveness 进程**占据了全局
 
 **修复后目标**：锁修好后，管理者撤掉 5 个自制 Monitor 里能被 session-liveness 覆盖的部分，回到裁定要求
 的 2 个挂载（manager 观察 3 outer + 各项目观察自己 inner）。
+
+## 根因确切来源 + 精确修法（2026-08-06T12:4xZ，管理者读 heavy-op-token.sh 头注释）
+
+**不是锁本身有问题，是借锁时把作用域也照抄了。**
+
+- **heavy-op-token.sh 原始用途完全正确**：三项目共用四核，守「我要开始跑重测试了」这一个动作；
+  注释明确「调度令牌不是安全检查」，对不可写状态目录故意 fail-open（对比 resource-gate.sh 才是
+  fail-closed 安全检查）。「每机器一把」对重测试是对的——四核真共享。
+- **session-liveness.sh:767 注释「复用 heavy-op-token.sh 已验证的那套」**——复用实现（wx 原子创建 +
+  mtime 陈旧回收）对，**但连作用域一起继承了**：行 789/814/851 调用传 `--root "$SL_GLOBAL_DIR"`（每机器
+  全局目录）+ `lock_token="$SL_GLOBAL_DIR/heavy-op/token"`（行 799）。「整机只有一个重测试」这条正确约束
+  →「整机只有一个监视器」这条错误约束。
+- **监视 quay 和 archguard 根本不冲突**：看不同 tmux 会话、几乎不耗 CPU，无理由互斥。
+- **heavy-op-token.sh 随包交付**（init/SKILL.md 铺设映射）——作用域误继承传给每个下游项目。
+
+**修法（采纳，比锁分域更小）**：**不改锁实现**——session-liveness 调用时把 `--root` 从 `$SL_GLOBAL_DIR`
+换成按 targetRoot 分域子目录（`$SL_GLOBAL_DIR/<target-root-slug>`），锁代码一行不动。正确区分：
+重测试互斥（每机器对）+ 监视器互斥（每项目对）。
