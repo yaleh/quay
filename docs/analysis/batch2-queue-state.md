@@ -6352,3 +6352,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **archguard 可用性**：linux 可装（linux-x64 在）；但 release 不完整 + workflow 红。修复路径：修 postinstall →
   打 v0.4.1 重发完整 release。
 - dist-plugin（AC6）已 publish success。
+
+### tick 2026-08-06T12:4xZ（内层 cron，派发 quality-criteria）
+
+- 无 halt；套件 GREEN。在飞 0/3。池 8/20、disjoint 5/5（criterion met）。
+- ready 8 中 6 陈旧（DIR-043/DIR-124 directive、red-pattern/ghost-drive/split-batch/tests-leak landed、
+  supervisor done-merged）；**唯一真实未落地 ready = quality-criteria**（no-criterion-cost 完成后解除序列化）。
+- **派发 1/3**：quality-criteria（resolve 4/4、pool-candidate clean、fork-baseline=develop）→ worktree
+  /home/yale/work/quay-worktrees/quality-criteria + bracket 已开。
+  agent 被告知 leverage 刚合并的 verification-round.jsonl/checker-cost.jsonl 账本（趋势判据数据源）。
+- 新立案 gap-release-postinstall（todo，未晋——与 quality-criteria 在 sync-vendor.sh 重叠，等其落地再派）。
