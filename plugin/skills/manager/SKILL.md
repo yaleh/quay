@@ -37,7 +37,7 @@ summarizes.
 
 Three checklists, run each review (all mechanical):
 
-1. **Strategic-doc staleness** — `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts --root .`
+1. **Strategic-doc staleness** — `node --experimental-strip-types plugin/scripts/quay-check.ts strategic-doc-staleness-check --root .`
    reports stale strategic docs (refs to ADR-022-retired mechanisms without a retired/superseded
    annotation) and pool-candidates that reference retired mechanisms (`--pool-candidate <id>`). New
    staleness is a planning signal.
@@ -74,7 +74,7 @@ perspective exists only at the manager layer). Mechanisms:
   to resume.
 - **Cross-project heavy ops are NOT serialized** — `heavy-op-token.sh` (the "one heavy test at a
   time" token) was RETIRED 2026-08-06 by human ruling (gap-session-liveness-remove-shared-events-and-
-  lock): resource pressure is handled by `plugin/scripts/resource-gate.sh` (per-run load gate), not by
+  lock): resource pressure is handled by `plugin/scripts/quay-dispatch.ts resource-gate` (per-run load gate), not by
   a cross-project mutex.
 - **Escalations are aggregated, not solved** — read each project's `orchestration/escalations.md`,
   dedupe + sort + judge which need the human; solving them is the outer's job. The manager never
@@ -139,11 +139,11 @@ implementation appearing in the manager's hands is the overreach signal.
 
 The per-role launch command lives in the checked-in `.claude/launch.settings.json`
 (`_launchSpec.roles.*`, settings-schema keys + `_launchSpec` extension) and is materialized by
-`plugin/scripts/quay-launch.sh`. The manager starts itself with
-`bash <root>/plugin/scripts/quay-launch.sh manager` (the manager role runs the Anthropic default
+`plugin/scripts/quay-session.ts quay-launch`. The manager starts itself with
+`node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-launch manager` (the manager role runs the Anthropic default
 model — the deepseek 917k context/compaction vars are outer/inner-only by `_launchSpec` design).
 Never hand-type a shell one-liner from memory. Verify first:
-`bash <root>/plugin/scripts/quay-launch.sh manager --dry-run`.
+`node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-launch manager --dry-run`.
 
 ## Delivery ≠ startup (AC8)
 
@@ -218,7 +218,7 @@ allowed-tools: Bash, Read, Monitor
 
 | # | 清单 | 机制 |
 |---|---|---|
-| 3a | 机械检查战略文档是否过期 + 池晋级候选是否引用已退休机制 | `plugin/scripts/strategic-doc-staleness-check.ts` |
+| 3a | 机械检查战略文档是否过期 + 池晋级候选是否引用已退休机制 | `plugin/scripts/quay-check.ts strategic-doc-staleness-check` |
 | 3b | 近窗口 `gap-*` 任务可追溯性（可追溯 vs 纯反应式） | REVIEW-cadence §3b |
 | 3c | 复核记录扩方向：方向本身有没有偏 | REVIEW-cadence §3c（outer/manager-phase-goal 各加两行） |
 
@@ -234,7 +234,7 @@ allowed-tools: Bash, Read, Monitor
   `docs/proposals/quay-harness-crystallization-roadmap.md` 已 **SUPERSEDED by ADR-022**，只作历史。 |
 | **排序（prioritization）** | 跨项目资源仲裁：`.halt` 是仲裁手段（写 `<repo>/.halt` 暂停、`rm` 恢复）；
   优先级 **quay > archguard/meta-cc**（人 2026-08-03 裁定）；跨项目重活由
-  `plugin/scripts/resource-gate.sh` 按负载门控（`heavy-op-token.sh` 已于 2026-08-06 退休）。 |
+  `plugin/scripts/quay-dispatch.ts resource-gate` 按负载门控（`heavy-op-token.sh` 已于 2026-08-06 退休）。 |
 | **看趋势（trend）** | 网络级存活观测（session-liveness 事件 / `monitor-mount-check.sh`，每观察者自己的
   stdout 事件流——2026-08-06 起共享 events.jsonl 已移除）；每次 tick 记当时 `cpu some avg10`（AC4 判据 =
   连续两次 tick 超 80）；REVIEW-cadence 3b 的「纯反应式」信号（同族纯反应式反复出现 = 战略层信号）。 |
@@ -287,7 +287,7 @@ allowed-tools: Bash, Read, Monitor
 ## 5. 启动配置（可安装）——部落知识 → 交付物
 
 启动参数**只存在于检查进仓库的** `.claude/launch.settings.json`（settings-schema 键 + `_launchSpec`
-扩展），由 `plugin/scripts/quay-launch.sh <role>` 物化为真实命令——**永不手打一行 shell**
+扩展），由 `plugin/scripts/quay-session.ts quay-launch <role>` 物化为真实命令——**永不手打一行 shell**
 （`gap-crystallize-launch-config-into-checked-in-settings-file`）。
 
 - **outer / inner**：`claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`
@@ -295,8 +295,8 @@ allowed-tools: Bash, Read, Monitor
   `gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`；`_launchSpec.promptSuggestions:false`）
 - **manager**：`claude`（Anthropic 默认模型，不带 917k 覆盖——917k 只给 deepseek 角色，避免真实窗口
   之上压缩过晚导致 API 报错，session-launch-recipes §5）
-- 验证不启动：`bash plugin/scripts/quay-launch.sh <role> --dry-run`
-- 一次性验证会话：`bash plugin/scripts/quay-launch.sh <role> --bare`
+- 验证不启动：`node --experimental-strip-types plugin/scripts/quay-session.ts quay-launch <role> --dry-run`
+- 一次性验证会话：`node --experimental-strip-types plugin/scripts/quay-session.ts quay-launch <role> --bare`
 
 ---
 
@@ -306,7 +306,7 @@ allowed-tools: Bash, Read, Monitor
 同样需要跨项目协调；**不交付 = 人人重发明**。
 
 **启动**：项目的 cold-start（`plugin/skills/cold-start/SKILL.md`）**不得启动** manager——manager 不属
-项目冷启动范围，**一个 network 一个 manager 就够**。项目拓扑工厂 `plugin/scripts/quay-topology.sh`
+项目冷启动范围，**一个 network 一个 manager 就够**。项目拓扑工厂 `plugin/scripts/quay-session.ts quay-topology`
 只建 `outer inner` 两窗口（`ROLES="outer inner"`）；cold-start 的 `TOPOLOGY-IN-PLACE` 键明示
 「manager is cross-project and NOT part of this topology」。机械复制 quay 三窗口到 meta-cc/archguard
 已犯过（管理者自陈 + 自查改回 bash/outer/inner）——**交付物里有 manager 不意味着冷启动要启动它。**

@@ -162,9 +162,11 @@ function parseArgs(argv) {
   return args;
 }
 
-export function main(argv) {
-  const args = parseArgs(argv);
-
+/** Run one audit round against PARSED args; returns the result object. Extracted from main() so a
+ *  test can drive the full CLI logic IN-PROCESS via `import { runAudit }` — the "import over spawn"
+ *  policy (SPEC-instruments-behind-one-entry AC7/AC9; gap-ac8-import-over-spawn... AC1/AC3): the
+ *  logic part of the instrument no longer forces the test to spawn the CLI. */
+export function runAudit(args) {
   let textSource;
   let records;
   if (args.text !== null) {
@@ -215,7 +217,7 @@ export function main(argv) {
     fs.writeFileSync(statePath, JSON.stringify(conv, null, 2) + "\n");
   }
 
-  const result = {
+  return {
     count,
     flagged,
     roundsClean: conv.roundsClean,
@@ -225,6 +227,11 @@ export function main(argv) {
     textSource,
     stateFile: statePath,
   };
+}
+
+export function main(argv) {
+  const args = parseArgs(argv);
+  const result = runAudit(args);
 
   if (args.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

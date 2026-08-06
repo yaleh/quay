@@ -67,7 +67,7 @@ box, or advances a lifecycle.
    authorized. Mismatch → STOP and report.
 8. **Task schema check.** Run the shipped canonical-task-schema check on the task file
    and require exit 0:
-   `node plugin/scripts/task-schema-check.ts <path-to-task-file>` (or, when installed as
+   `node plugin/scripts/quay-check.ts task-schema-check <path-to-task-file>` (or, when installed as
    a plugin, `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts" ...`). A FAIL
    means fix the task body, not the script.
 9. **CLI readback.** Independently read the SAME values through the CLI fallback —

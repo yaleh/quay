@@ -441,6 +441,50 @@ test("AC2 negative control: entry path inside a Contract MEASURE line does NOT s
   assert.ok(violations.some((v) => v.code === "invoke-evidence-missing"), JSON.stringify(violations));
 });
 
+// ── Check 5 (AC5, gap-ac8-import-over-spawn...): ticked AC whose evidence self-admits it is NOT in effect ──
+
+test("AC5d: ticked AC whose evidence self-admits '未生效' → ac-ticked-self-admission", () => {
+  // The namesake defect: AC8 was ticked while its own evidence ended "41:4 说明政策存在、未生效".
+  const text = taskBody({
+    status: "done",
+    contract: `measure import_count = \`grep -c import plugin/test/x.test.mjs\` stdout 的数字段`,
+    ac: `- [x] AC8: import 比例——实测 41:4 说明政策存在、未生效`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(violations.some((v) => v.code === "ac-ticked-self-admission"), JSON.stringify(violations));
+});
+
+test("AC5d-2: ticked AC with '尚未' on a continuation line → ac-ticked-self-admission", () => {
+  const text = taskBody({
+    status: "ready",
+    contract: `measure m = \`cmd\` 的 f`,
+    ac: `- [x] AC1: 比例真实下降\n      实测输出贴在第 42 行；该机制尚未生效`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(violations.some((v) => v.code === "ac-ticked-self-admission"), JSON.stringify(violations));
+});
+
+test("AC5d-clean: ticked AC with POSITIVE '仍然' (仍然过闸) → no ac-ticked-self-admission", () => {
+  // Bare `仍然` is overwhelmingly positive ("still passes") — an achievement, not an admission.
+  const text = taskBody({
+    status: "done",
+    contract: `measure m = \`cmd\` 的 f`,
+    ac: `- [x] AC4: meta-cc 方向不退化——带 ## Plan 的模板任务仍然过闸（实跑贴出）`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(!violations.some((v) => v.code === "ac-ticked-self-admission"), JSON.stringify(violations));
+});
+
+test("AC5d-clean-2: UNticked [ ] AC with '尚未' → no ac-ticked-self-admission", () => {
+  const text = taskBody({
+    status: "todo",
+    contract: `measure m = \`cmd\` 的 f`,
+    ac: `- [ ] AC1: 尚未迁移的测试转 import`,
+  });
+  const { violations } = scanTaskText(text, "tasks/x.md");
+  assert.ok(!violations.some((v) => v.code === "ac-ticked-self-admission"), JSON.stringify(violations));
+});
+
 test("defect task without control → defect-no-control", () => {
   const text = taskBody({
     labels: ["gap", "defect"],

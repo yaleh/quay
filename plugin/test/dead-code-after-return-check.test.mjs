@@ -19,21 +19,27 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 
-import { detectFileViolations, scanTree, stripShellComments } from "../scripts/dead-code-after-return-check.ts";
+import { detectFileViolations, scanTree, stripShellComments, main as checkerMain } from "../scripts/dead-code-after-return-check.ts";
 
 import { makeTmpDir } from "./helpers/tmp-workspace.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 
-const CHECKER = path.join(repoRoot, "plugin/scripts/dead-code-after-return-check.ts");
-
 function runChecker(root) {
-  return spawnSync("node", ["--no-warnings", "--experimental-strip-types", CHECKER, "--root", root], {
-    encoding: "utf8",
-  });
+  // In-process drive of the CLI (import, not subprocess — the "import over spawn" policy): the
+  // module's main() prints via console.log and returns the exit code, so we capture logs and mirror
+  // the former subprocess result shape { status, stdout }.
+  const logs = [];
+  const origLog = console.log;
+  console.log = (...a) => logs.push(a.join(" "));
+  try {
+    const status = checkerMain(["node", "dead-code-after-return-check.ts", "--root", root]);
+    return { status, stdout: logs.join("\n") };
+  } finally {
+    console.log = origLog;
+  }
 }
 
 // ── RED: the exact defect shapes ────────────────────────────────────────────────────────────────────
