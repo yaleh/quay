@@ -29,13 +29,29 @@ end-to-end doc gate proof. Evidence (isolated + full-suite, 2026-08-06):
 
 ## Acceptance Criteria
 
-- [ ] AC1: `node --no-warnings --test packages/quay/test/document-gate-fixture.test.mjs`
+- [x] AC1: `node --no-warnings --test packages/quay/test/document-gate-fixture.test.mjs`
       passes (the dist path resolves DOC-001 correctly).
-- [ ] AC2: the dist's `REPO_ROOT` resolves to the workspace root (not one level up) — verify
+- [x] AC2: the dist's `REPO_ROOT` resolves to the workspace root (not one level up) — verify
       via the doc gate finding `docs-managed/DOC-001*` OR a mechanical check on the built dist.
-- [ ] AC3: the fix is robust to BOTH the src (`src/gate/`) and dist (`dist/`) module depths —
+- [x] AC3: the fix is robust to BOTH the src (`src/gate/`) and dist (`dist/`) module depths —
       not a one-off patch for the current layout.
-- [ ] AC4: `git show --name-only` on the fix touches only the intended source (+ its test).
+- [x] AC4: `git show --name-only` on the fix touches only the intended source (+ its test).
+
+## Execute evidence（2026-08-06，inner 直修）
+
+Fix commit: `fix(gate): REPO_ROOT resolves off-by-one under dist bundle`（`git show --name-only` = 仅 `packages/quay/src/gate/registry.ts`，AC4）。
+
+Root cause confirmed: `registry.ts:13` `REPO_ROOT = path.resolve(moduleDir, "..","..","..","..")` — src 下 `moduleDir=src/gate/` → 4-up=仓库根（对）；dist 下 `moduleDir=dist/` → 4-up=`/home/yale/work`（偏一级，DOCUMENTS_DIR 错）。
+
+Fix: `REPO_ROOT = discoverWorkspaceRoot(moduleDir) ?? path.resolve(moduleDir, "..","..","..","..")`（loader 的 `discoverWorkspaceRoot` 已 import；从模块位置向上发现工作区，src/dist 深度都鲁棒，AC3）。dist 已重建。
+
+Verification:
+```
+$ node packages/quay/dist/quay.js gate T-doc-gate-e2e-fixture --gate doc-quay-directive-skill  → PASS（修复前 FAIL — no such document: DOC-001，AC2/Contract invoke）
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate ... → PASS（src 不回归）
+$ node --no-warnings --test packages/quay/test/document-gate-fixture.test.mjs → pass 3 / fail 0（AC1）
+$ node --no-warnings --test packages/quay/test/adr-gate.test.mjs → pass 11 / fail 0（同族 gate 不回归）
+```
 
 ## Contract
 
