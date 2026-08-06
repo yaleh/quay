@@ -7287,3 +7287,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   派发按失败位置条件化（当前在飞 2/2 = cap WAIT=2，无空槽，无需判）。
 - green-verdict + shipped-verifiers 在飞（9m，0 commit 0 dirty，agent 早期阶段）。
 - 池 16 无需补晋。零动作 tick。
+
+### 事件 15:1xZ（green-verdict 完成；suite 终红 → fan-in 暂缓）
+
+- **green-verdict 完成**（0c306a52，worktree /home/yale/work/quay-worktrees/green-verdict）：suite-state 记 verdictCommit（跑起时 HEAD）+ `--json` 纯读报告
+  （verdictAgeMin / verdictCommitDelta），无硬闸（AC4）。AC1-6 勾，72/72 绿。
+- **fan-in 暂缓**：外层 15:05 宣布 suite **最终红**（973a0c91，含 3 real defects from triage），红窗策略=暂缓已完成 agent 的 fan-in。
+  green-verdict worktree/分支保留（不清理），待 suite 决议后 fan-in。
+- **零派发**：suite 终红 + 外层 Land-merge/缺陷修复中 → 保守不派发。shipped-verifiers 仍在飞（1/2）。
