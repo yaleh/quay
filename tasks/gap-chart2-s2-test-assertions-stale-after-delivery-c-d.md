@@ -42,9 +42,24 @@ DELIVERY-C/D 翻为 **both true**（S2 cov 0.667→1.00，3/3 FULL）。
 
 ## Acceptance Criteria
 
-- [ ] AC1: 3 处失败断言更新为匹配 evidence 真实状态（both true / cov 真实值），单独跑该测试全绿
-- [ ] AC2: 负控制保留——临时 evidence both false 时 cov 仍为 0.0（fail-closed 语义不丢）
-- [ ] AC3: 与 DELIVERY-C/D 交叉标注（交付翻 evidence 时须同步断言）
+- [x] AC1: 3 处失败断言更新为匹配 evidence 真实状态（both true / cov 真实值），单独跑该测试全绿
+  - `loadS2Evidence: the checked-in real evidence file → both true (post DELIVERY-C/D)` — asserts `{ fullManifestPublished: true, foreignInstallE2eGreen: true }` (was both false).
+  - `CLI: against THIS repo (default root) → cov 1.0, version-consistent=true, exit 0` — matches `/S2 Delivery-completeness cov = 1 /`, `/version-consistent=true/`, `/manifest-published=true/`, `/foreign-install-green=true/` (was cov 0.0 + all false).
+  - `CLI: explicit repoRoot arg → cov 1.0 against the real repo` — matches `/cov = 1 \(3\/3/` (was cov 0.0).
+  - Invoke (contract): `node --test experiments/quay-perpetual-stream/test/chart2-s2-delivery-completeness.test.mjs`
+    ```
+    ℹ tests 22
+    ℹ pass 22
+    ℹ fail 0
+    ```
+  - Scoped verification: `bash scripts/test.sh --for-task gap-chart2-s2-test-assertions-stale-after-delivery-c-d --allow-thin` → exit 0, 22 pass / 0 fail.
+  - Contract measure `s2_fail = grep -c '✖'` = **0**.
+- [x] AC2: 负控制保留——临时 evidence both false 时 cov 仍为 0.0（fail-closed 语义不丢）
+  - Added `CLI negative control: temp repo with evidence both false → cov 0.0 (fail-closed kept)` — builds a temp repo with 5-way version drift + a `chart2-s2-delivery.json` with both flags false, runs the CLI against it, asserts `/S2 Delivery-completeness cov = 0 /` and `/(0\/3: version-consistent=false, manifest-published=false, foreign-install-green=false)/`. PASSES.
+  - Pre-existing `loadS2Evidence: missing file → both false (fail-closed)` also still green.
+- [x] AC3: 与 DELIVERY-C/D 交叉标注（交付翻 evidence 时须同步断言）
+  - `tasks/exp5-M-PRODUCTIZED-DELIVERY-C.md` — added `## Cross-annotation` (fullManifestPublished flip ⇒ sync assertions in the same change).
+  - `tasks/exp5-M-PRODUCTIZED-DELIVERY-D.md` — added `## Cross-annotation` (foreignInstallE2eGreen flip ⇒ sync assertions in the same change).
 
 ## Touches
 
