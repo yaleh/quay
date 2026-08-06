@@ -6828,3 +6828,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   slot-refill 未推荐它们是因为被陈旧池任务抢占顺序——**需让 slot-refill 排除已 fan-in 待翻 done 的陈旧任务**，否则真候选被挤掉）。
   fork develop 0417796d。
 - 在飞 2/2。外层 suite 卡 triage（进程 0% CPU），外层正翻「3 real defects from full-suite triage」。
+
+### tick 2026-08-06T07:1xZ（suite RED 但外层重跑中；在飞 2/2 无槽可派）
+
+- **suite RED**（15:00:40 finished，reason=failed，failures=[]——外层已翻「3 real defects from full-suite triage」）。
+  外层 15:06 重跑（新 full-suite-runner pid 2547161）。红窗策略：fan-in 暂缓已完成 agent（当前无已完成）+
+  派发按失败位置条件化（当前在飞 2/2 = cap WAIT=2，无空槽，无需判）。
+- green-verdict + shipped-verifiers 在飞（9m，0 commit 0 dirty，agent 早期阶段）。
+- 池 16 无需补晋。零动作 tick。
