@@ -224,6 +224,27 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 `orchestrator-loop-tick.md` 步骤 1b），它**只关于验证/收尾，不是分派门控**。tick-log 与 commit message
 沿用同一词汇：描述派发用「滚动派发」，描述全量验证/收尾轮次用 `verification-round-N`。
 
+### 分支模型（两线：develop + integration，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）
+
+**结构根因**（`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）：master 曾同时是
+「分叉基线」和「汇入点」——红窗必须停派发正是这两个角色压在同一 ref 上。**拆开即无此冲突**：
+
+| 线 | 角色 | 谁分叉/合回 |
+|---|---|---|
+| **`develop`** | **已验证基线**（绿） | 独立任务从它分叉；只接受外层 verification-round 的批量 fast-forward 合并（integration→develop） |
+| **`integration`** | **待验证汇入点** | 声明依赖的任务从它分叉；**所有任务合回它**（红窗期照常接收——结构性消除停派） |
+| `master` | 发布线角色**空置**（quay 无发布流程） | 等真有发布授权时再加，语义才实（裁定①） |
+
+- **分叉基线即依赖声明（AC2）**：独立 → develop；声明依赖 / touches 与 integration 未验证任务相交 →
+  integration。机械判定用 `plugin/scripts/integration-branch-model.ts --fork-baseline`（见步骤 4）。
+- **合并机制（AC3）**：任务合回 integration（步骤 2，`git merge --no-ff task/<id>`）；外层
+  verification-round 验证绿后批量合回 develop（`orchestrator-loop-tick.md` 步骤 1b，`--ff-only` 硬约束）。
+- **命名 = `integration`（AC6）**：gate（与 quay gate 概念打架）/ staging（暗示部署）/ next（表达不出
+  待验证）均被否。
+- **前置②**（AC4，`gap-global-count-assertions-fragile-relative-baseline`，done）：全局计数断言已改
+  相对基线判据——develop 相对 integration 滞后不再触发断言噪声。
+- **前置③**（AC5）：历史遗留分支（experiment-4-iteration-* / _master_check 等）已清。
+
 ### 0. 哨兵
 
 `.halt` 存在 → 本 tick 空转，报告「已暂停」，重新排程，结束。
@@ -257,15 +278,19 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 对每个已返回但未合并的 subagent，逐个：
 
-0. **先 rebase 到当前 master**：
+0. **先 rebase 到当前 integration**（待验证汇入点，两线模型——`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）：
    ```bash
-   git -C $WORKTREE_ROOT/<slug> rebase master
+   git -C $WORKTREE_ROOT/<slug> rebase integration
    ```
-   worktree 建立时对 master 取了快照，之后并发合并的其它任务它看不到。B3-2 就是这样红的——
-   它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期。
+   worktree 建立时对**分叉基线**（独立任务 = `develop` / 声明依赖 = `integration`，见步骤 4 的
+   `--fork-baseline` 判定）取了快照，之后并发合并的其它任务它看不到。B3-2 就是这样红的——
+   它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期（该断言形态已由
+   `gap-global-count-assertions-fragile-relative-baseline` 改成相对基线判据）。
    **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
    rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
-1. `git merge --no-ff task/<taskId>`
+1. `git merge --no-ff task/<taskId>` —— **合回 integration**（待验证汇入点；红窗期照常接收合并，
+   这是停派被结构性消除的一半）。**不直接合 develop**——develop 只接受外层 verification-round 的
+   批量 fast-forward 合并（`orchestrator-loop-tick.md` 步骤 1b）。
 2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
@@ -522,8 +547,23 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 （`gap-two-thirds-of-a-task-is-polling-a-suite-log` AC1b：前台派发阻塞内层到全部在飞返回、拿不到先完成者的
 早期反馈、期间什么也做不了，`<task-notification>` 唤醒流永远不会被触发——那是本仓实测等待的另一半来源，
 见 `orchestration/SPEC-cut-the-waiting.md`。同一条消息里发多个 `Agent` 调用拿到的并发是 harness 并发执行，
-不是后台派发）。subagent 自建 `$WORKTREE_ROOT/<slug>` worktree（磁盘，不在 `/tmp`——tmpfs 是内存，
-`worktree_root` 见上）和 `task/<id>` 分支，内部起独立对抗审查（硬上限 2 轮），只提交不合并。
+不是后台派发）。
+
+**分叉基线（两线模型，AC2——分叉基线即依赖声明；`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）**：
+subagent 用裸 `git worktree add` 自建 `$WORKTREE_ROOT/<slug>`（磁盘，不在 `/tmp`——tmpfs 是内存，
+`worktree_root` 见上）和 `task/<id>` 分支，**分叉点由
+`plugin/scripts/integration-branch-model.ts` 的 `forkBaseline` 机械判定**：
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/integration-branch-model.ts \
+  --fork-baseline tasks/<id>.md --overlaps-unverified <integration 上未验证任务 id,...> --root "$(pwd)"
+# 输出 develop（独立，默认）或 integration（声明依赖 / touches 与未验证任务相交）
+```
+- **独立任务（默认）→ 从 `develop` 分叉**（已验证基线，绿）
+- **声明依赖前序任务 / touches 与 integration 上某未验证任务相交 → 从 `integration` 分叉**
+  （含未验证前序；`--overlaps-unverified` 传 integration 上未验证任务的 id，helper 做 touches 交集）
+- **develop 永不从未验证树分叉 ⇒ 红窗停派结构性消除**（AC3）；「基线陈旧只对触摸集相交的任务造成
+  麻烦，而相交任务本来就该串行」——与 checkTouchesPair + disjointness 排序是同一个约束（SPEC §3）。
+- worktree 建立后内部起独立对抗审查（硬上限 2 轮），**只提交不合并**。
 `milestone-worktree.ts` **不可用**——它要求数字 M 号，gap 任务没有；用裸 `git worktree add`。
 
 **任务代理完成时编辑自己的任务文件（AC2 派发词约定，`gap-closure-could-not-run-in-task-grant-self-touches-for-ac-and-invoke-evidence`）**：

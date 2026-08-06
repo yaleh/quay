@@ -666,6 +666,21 @@ tick 做一次收尾 pass。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
+3.5 **批量合回 develop（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
+    integration 只从 develop 长出、只往 develop 合回 ⇒ 永远是 develop 后代 ⇒ **fast-forward 无冲突**
+    （`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）。`suiteGreen` 为 true 时，
+    把 integration 快进合到 develop（本层共享检出保持在 integration 上，develop 不是检出分支）：
+    ```bash
+    # ff 安全判据：develop 是 integration 的祖先（integration 是 develop 后代）
+    git merge-base --is-ancestor develop integration && git branch -f develop integration
+    # 等价机械判据（helper CLI）：--is-ancestor develop integration 输出 ancestor（exit 0）
+    ```
+    - **`--is-ancestor develop integration` 是硬前置**：develop 不是 integration 祖先（两线不变量被
+      破坏）⇒ `git branch -f` 不执行，标 needs-human、按「红窗分诊」处置，**绝不自动合**。
+    - **红窗期（`state: red`）不做批量合回**——integration 照常接收 inner 的任务合并（结构性消除
+      停派，`fast-mode-loop-tick.md` 步骤 2），develop 保持冻结，直到下一轮 verification-round 绿。
+    - **pending 窗口**：`git log --oneline develop..integration` 在红窗期应**非空**（Contract
+      invoke）——那些正是下一轮批量 fast-forward 的待验证合并。
 4. **写轮次记录**：追加一行到 `.quay/verification-round.jsonl`：
    ```json
    {"round": <N>, "at": "<ISO 来自 date -u>", "suiteGreen": <bool>, "closed": ["<id>", ...]}

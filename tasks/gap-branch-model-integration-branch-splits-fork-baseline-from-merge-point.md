@@ -59,19 +59,70 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **两线模型**——`develop`（已验证基线）+ `integration`（待验证汇入）；master 发布线角色空置
+- [x] AC1: **两线模型**——`develop`（已验证基线）+ `integration`（待验证汇入）；master 发布线角色空置
       （裁定①；等真有发布授权时再加，语义才实）
-- [ ] AC2: **分叉基线即依赖声明**——独立任务从 develop、声明依赖的从 integration 分叉（不需新依赖
+- [x] AC2: **分叉基线即依赖声明**——独立任务从 develop、声明依赖的从 integration 分叉（不需新依赖
       字段，机械检查：touches 与 integration 未验证任务相交 ⇒ 从 integration 分叉）
-- [ ] AC3: **合并机制**——任务合回 integration（红窗期照常接收）；outer verification-round 批量合回
+- [x] AC3: **合并机制**——任务合回 integration（红窗期照常接收）；outer verification-round 批量合回
       develop（fast-forward 无冲突）；红窗停派结构性消除（develop 永不从未验证树分叉）
-- [ ] AC4: **前置② 先修全局计数断言**——脆弱断言（B3-2 族）改成相对基线判据，先于模型轮次落地
+- [x] AC4: **前置② 先修全局计数断言**——脆弱断言（B3-2 族）改成相对基线判据，先于模型轮次落地
       （前置任务：`gap-global-count-assertions-fragile-relative-baseline`，其 AC1–AC5 全绿后本 AC 视为满足）
-- [ ] AC5: **前置③ 先清历史分支**——60 个历史遗留（experiment-4-iteration-* / _master_check 等）清理，
+- [x] AC5: **前置③ 先清历史分支**——60 个历史遗留（experiment-4-iteration-* / _master_check 等）清理，
       保留有未合并工作的分支
-- [ ] AC6: **命名 = integration**——gate/staging/next 被否（语义打架/暗示部署/表达不出待验证）
-- [ ] AC7: 测试用 `node:test` 且带 `// @test-group governance`（合并路径 fixture：integration→develop
+- [x] AC6: **命名 = integration**——gate/staging/next 被否（语义打架/暗示部署/表达不出待验证）
+- [x] AC7: 测试用 `node:test` 且带 `// @test-group governance`（合并路径 fixture：integration→develop
       fast-forward；task→integration 触摸声明冲突暴露）
+
+### Invoke evidence
+
+- **AC2/AC3/AC7 实跑**（scoped 选中集 `bash scripts/test.sh --for-task ... --allow-thin`，11/11 pass，
+  fail 0 / cancelled 0，exit 0）——真实输出（2026-08-06）：
+
+```
+warning: test-selection-thin: task gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point resolved tests for 2/7 Touches entries (0.29) < 0.5; pass --allow-thin to run anyway
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+test-framework-policy-check — 228 glob file(s), 34 exemption(s)
+PASS: every test file uses node:test or is a listed legacy exemption; exemption list is at/below the ratchet ceiling and did not grow; new files declare @test-group.
+test-isolation-check — 228 glob file(s), 44 current violation(s) [fixed-path-write=12 ...]
+PASS: all 44 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER ...
+test-impl-census: checked 228 test files · clean 228 · impl-deleted 0
+task-contract-check: no violations.
+  strict-subset mode (scoped static-check tier) — a violation on a scanned task FAILS this run (exit 1)
+strategic-doc-staleness-check — 90 strategic doc(s) scanned (docs/proposals + orchestration/*.md)
+stale_refs_found (new, beyond baseline): 0
+drive-contract-check — 3 drive-contract doc(s) scanned (fast-mode-loop-tick / orchestrator-loop-tick / QUAY-OUTER-HANDOFF)
+violations: 0
+  [ok] plugin/loop/fast-mode-loop-tick.md: 1 order assertion(s), pair output present
+  [ok] plugin/loop/orchestrator-loop-tick.md: 1 order assertion(s), pair output present
+== build dist/quay.js ... ⚡ Done in 117ms ==
+✔ AC2: independent task forks from develop (verified baseline) (1.04ms)
+✔ AC2: a declared dependency forks from integration (no new dependency field needed) (0.16ms)
+✔ AC2: touches overlapping unverified integration work ⇒ integration (mechanically checkable) (0.16ms)
+✔ AC3: develop is an ancestor of integration (integration a descendant) ⇒ fast-forward, no conflict (0.19ms)
+✔ AC3: invariant broken (integration diverged from develop) ⇒ blocked, never auto-merge (0.15ms)
+✔ AC3: overlapping touch declarations surface the imprecision that makes task→integration non-ff (0.82ms)
+✔ AC3: disjoint touch declarations produce no overlap (independent tasks stay ff at merge) (0.14ms)
+✔ AC3: duplicated overlaps are deduped and blank entries are ignored (0.18ms)
+✔ AC2: declaredTouches parses a task body's ## Touches list (0.44ms)
+✔ AC2: declaredTouches strips (new) markers and stops at the next ## heading (0.33ms)
+✔ AC2: declaredTouches returns [] for a body with no ## Touches section (0.17ms)
+ℹ tests 11  ℹ pass 11  ℹ fail 0  ℹ cancelled 0  ℹ skipped 0
+```
+
+- **AC2/AC3 的 Contract invoke/measure 实跑**（`plugin/scripts/integration-branch-model.ts` CLI）：
+  `--fork-baseline tasks/<本任务>.md --root ...` → `integration`；`--is-ancestor develop integration`
+  → `ancestor`（exit 0，两线 ff 不变量成立）；`--pending develop integration` → `(none)`（当前
+  develop 尚未从 integration 收编——pending 窗口在模型上线后的红窗期应非空，Contract invoke）。
+
+- **AC4（前置②）**：`tasks/gap-global-count-assertions-fragile-relative-baseline.md` `status: done`、
+  AC1–AC5 全部勾上（B3-2 族全局计数断言已相对化，fixture 复现绿）；本执行在本任务 Touches 内的该任务
+  体加「## 交叉注（前置②执行确认）」双向标注。
+
+- **AC5（前置③）**：`git branch -a` 实况无 `experiment-4-iteration-*` / `_master_check` 遗留分支
+  （仅 3 local + 7 remote）；历史遗留已在分支切换时清理，本执行以观测确认（保留有未合并工作的分支）。
+
+- **AC6（命名）**：两线分支名在 loop 文档与 helper 中统一为 `integration`；`gate`/`staging`/`next`
+  均未采用（SPEC §5 三候选被否）。
 
 ## Definition of Done
 
@@ -85,9 +136,14 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md
 - plugin/loop/fast-mode-loop-tick.md（分叉/合并线：develop/integration）
 - plugin/loop/orchestrator-loop-tick.md（verification-round 批量合 integration→develop）
-- plugin/scripts/（分支模型 helper：分叉基线判定 / integration→develop 批量合，若成脚本）
+- plugin/scripts/integration-branch-model.ts（分支模型 helper：分叉基线判定 / integration→develop 批量合）
+- plugin/test/integration-branch-model.test.mjs（AC7：合并路径 fixture 测试）
 - tasks/gap-global-count-assertions-fragile-relative-baseline.md（前置②交叉标注）
 - orchestration/SPEC-branching-model-integration-branch-2026-08-05.md（引用）
+
+## Test-Files
+
+- plugin/test/integration-branch-model.test.mjs
 
 ## Contract
 
