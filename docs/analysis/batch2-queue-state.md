@@ -5328,3 +5328,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **不可派原因（scheduler 两两实测）**：其余 ready 候选（branch-model / cold-start-gate / manager-productization / delivery-surface / l2-health / tests-leak-tmux / red-window）全部经宽 `plugin/scripts/` 或 `plugin/test/` 目录 touch 与在飞 session-liveness 相撞。
 - **补晋候选核对**：prepare-milestone 父任务（children 指退役 ADR-022 文件，不可派）与 DIR-043（dirStatus: deferred）**均不晋**——池深不足以强迫派发，等 session-liveness 收尾释放 plugin/scripts/ 轴，或外层补池。
 - 套件 green。无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T16:0xZ（内层，session-liveness fan-in 完成 —— 本批 3/3 全落地）
+
+- **session-liveness-token-counter fan-in 完成**（merge task/gap-session-liveness...，3 文件 420 行真实改动）：busy/idle 判定重实现——消费 `classifyPaneState`（底部 10 行区域 + shape 分类，非整屏哈希），content-region 哈希排除 `/clear to save` 计数器/`✽` spinner/`✻` 残影；agent 任务行在 content 区仍在判定内（AC4）；AC5 空内容区显式 WARN 不静默；AC7 无去抖。AC1–AC9 全勾（scoped 52/52 + 1 skip，task-contract no violations）。**DoD 如实标 `[~]`**（只 scoped+单文件各一次，未 2 次全量）。留 ready 待外层 closure。
+- **本批全落地**：full-suite-runner-red-pattern / send-keys-welcome-screen / session-liveness-token-counter（3/3）。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
