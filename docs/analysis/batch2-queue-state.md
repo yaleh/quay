@@ -5319,3 +5319,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **full-suite-runner-red-pattern fan-in 完成**（merge task/gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red）：修复本体已在 master `41e7591f`（bare `/✖/` 从 FAILURE_PATTERNS 移除，只匹配结构化失败形态——vitest 通过测试自打 ✖ 不再假红），本次复核 + 新鲜 scoped 证据（24/24 exit 0，task-contract no violations）。AC1–AC4 全勾（AC3 vitest --maxWorkers doc fork 已写）。留 ready 待外层 closure。
 - **在飞 1/5**（session-liveness-token-counter）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T15:1xZ（内层，无 fan-in、无派发——池内可派集合被在飞任务占尽）
+
+- **无 fan-in**：send-keys + full-suite-runner 已并（前 tick），无新完成 agent。在飞 1/5（session-liveness-token-counter，worktree 在）。
+- **停止条件核对**：无 .halt；套件 green；needs-human 窗口新增 2（legacy-reclaim + send-keys）< 3。
+- **就绪池**：pool 12（含 2 个已落地未翻 done 的：cold-start-outer-validation / full-suite-runner——taskWorkLanded 对 evidence-only 任务漏检）；dispatchable_disjoint=4 被已落地任务灌水，真实新可派集合 = **0**。
+- **不可派原因（scheduler 两两实测）**：其余 ready 候选（branch-model / cold-start-gate / manager-productization / delivery-surface / l2-health / tests-leak-tmux / red-window）全部经宽 `plugin/scripts/` 或 `plugin/test/` 目录 touch 与在飞 session-liveness 相撞。
+- **补晋候选核对**：prepare-milestone 父任务（children 指退役 ADR-022 文件，不可派）与 DIR-043（dirStatus: deferred）**均不晋**——池深不足以强迫派发，等 session-liveness 收尾释放 plugin/scripts/ 轴，或外层补池。
+- 套件 green。无 .halt、无 block、Monitor 绿。
