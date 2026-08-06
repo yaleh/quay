@@ -1,17 +1,20 @@
 ---
 id: gap-green-verdict-never-expires-411-minutes-and-187-commits-later-still-green
-title: "the suite GREEN verdict has no expiry and no commit-delta awareness — .quay/full-suite-state
-  .json still reads state:green from a run that finished 2026-08-06T07:07:00Z, measured 411 minutes
-  and 187 commits later, and it is still the authoritative dispatch signal; suite-state-trigger.ts
-  routes purely on state TRANSITIONS (red -> stop-dispatch+triage, running -> optimistic dispatch)
-  and touches finishedAt only as a type declaration at :78, while full-suite-runner.ts uses
-  finishedAt solely to compute durationMs (how long the RUN took, never how long ago it ENDED);
-  grep across plugin/scripts for any age/staleness computation on the verdict = zero, so GREEN
-  answers 'safe to dispatch' with no basis about whether it still describes the current tree —
-  and this particular green is itself a hand-documented 'EFFECTIVE GREEN (documented deviation)'
-  with reason:aborted, so a human-annotated deviation has been aging into an automatic
-  dispatch authorization for ~7h; field-vs-consumer lens, manager 2026-08-06"
-status: todo
+title: the suite GREEN verdict has no expiry and no commit-delta awareness —
+  .quay/full-suite-state .json still reads state:green from a run that finished
+  2026-08-06T07:07:00Z, measured 411 minutes and 187 commits later, and it is
+  still the authoritative dispatch signal; suite-state-trigger.ts routes purely
+  on state TRANSITIONS (red -> stop-dispatch+triage, running -> optimistic
+  dispatch) and touches finishedAt only as a type declaration at :78, while
+  full-suite-runner.ts uses finishedAt solely to compute durationMs (how long
+  the RUN took, never how long ago it ENDED); grep across plugin/scripts for any
+  age/staleness computation on the verdict = zero, so GREEN answers 'safe to
+  dispatch' with no basis about whether it still describes the current tree —
+  and this particular green is itself a hand-documented 'EFFECTIVE GREEN
+  (documented deviation)' with reason:aborted, so a human-annotated deviation
+  has been aging into an automatic dispatch authorization for ~7h;
+  field-vs-consumer lens, manager 2026-08-06
+status: ready
 labels:
   - gap
   - defect
