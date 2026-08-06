@@ -1,7 +1,8 @@
 ---
 id: gap-a-to-b-code-downsync-missing-slot-status-not-on-b
+
 title: "NO A→B code downsync mechanism — B machine is running stale quay code and re-enters A's earlier blind spot (--slot-status missing on B: grep -c slot-status B's fast-mode-telemetry.ts=0, B telemetry shows 5 in-flight brackets indistinguishable real vs stale, no tool to verify; A resolved this exact blind spot hours ago via --slot-status/gap-telemetry-brackets; AC15 criterion ③ only covers B→A BACKUP direction (quay-sync.git = B pushes to A), NO A→B code downsync; manager B-machine measurement 2026-08-06 04:1xZ; SAME CLASS as archguard config-preserving (improved mechanisms don't reach running downstream) but DIFFERENT mechanism (repo-layer cross-machine sync vs install-layer upgrade), filed separately + cross-ref"
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -72,3 +73,18 @@ at: 2026-08-06T04:2xZ
 changed: 管理者 B 机实测立案——--slot-status 未传播到 B，B 重入 A 已解决的盲区。外层核实 A→B
 下行机制不存在（AC15 只覆盖 B→A 备份）。同族（archguard config-preserving）不同机制（仓库层 vs
 安装层），单独立案 + 交叉标注。
+
+## 撤回（2026-08-06 04:5xZ，外层——框架更正，人指出问题更大）
+
+**本任务撤回（status: needs-human），不按此窄框架立案。** 管理者更正：人指出问题不是「A 的进展能到 B」
+单向，而是「**两台机器上的 quay 项目都能持续应用最新版本，并在最新版本上继续开发**」——**对称的**。
+且更深一层：A、B 都在独立开发 quay 本身（不是 quay 装给下游，是 quay 开发它自己），**谁的版本对谁是
+权威的「最新」没定义清楚**——不像 archguard「quay 稳定发布、archguard 下游消费」的单向关系。
+
+**外层理解（供裁定参考）**：这可能不是 config-preserving（安装态套壳）能解决的——是两个**对等**的
+quay 开发者需要**持续合并彼此进展**。claim-task.sh / branch-model 已朝这个方向做了机制（任务认领、
+integration 分支），但**只做了任务认领，没做双向代码合并**。原窄任务（--slot-status 单点缺失）是
+这个大问题的一个症状，撤回独立立案。
+
+**替代**：见 `gap-two-peer-quay-developers-continuous-bidirectional-merge`（另立，替代本任务）。
+本任务标记 needs-human 存档（框架更正留痕），不按原范围派发。
