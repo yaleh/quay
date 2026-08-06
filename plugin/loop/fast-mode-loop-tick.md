@@ -55,7 +55,7 @@
 
 按顺序读这四份，然后从 tick 步骤 1 开始：
 
-1. `docs/analysis/batch2-queue-state.md` —— 队列当前状态（已完成/在飞/待执行）
+1. `docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名；文件本身是当前队列状态）—— 队列当前状态（已完成/在飞/待执行）
 2. `orchestration/exp6-phase1-sustained-unattended-operation.md` —— 目标、AC、DoD
 3. `adr/ADR-021-adaptive-budget-self-regulating-methodology.md` —— 四项原则
 4. 本文件其余部分
@@ -112,7 +112,7 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 迭代中途。任务收尾（外层异步）仍必须按 DoD 要求**连跑 2 次全量全绿**（`fail 0` 且 `cancelled 0`，判绿
 三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
 
-**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次
+**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次（历史引用）
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
 ```bash
@@ -120,9 +120,9 @@ grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式�
 grep 'FULL-SUITE-EXIT=0'
 grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，批套件全绿；套件构成每次变都要重测参考值）
 ```
-只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361 → … → +14 resource-gate =
+只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361（历史引用）→ … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
-（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled 可能有
+（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled（历史引用）可能有
 自身异步结构的触发条件（Promise 未决 + 事件循环已解决）。**判绿三条件成立的理由改为：「cancelled 是一种
 会被 fail 0 掩盖的失败」——显式查它是为了不漏掉这种失败，不是因为饥饿必然产生它。**
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）→ **+stranded +parser = 2052**
@@ -180,7 +180,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 
 ## 状态单一来源
 
-`docs/analysis/batch2-queue-state.md`
+`docs/analysis/batch2-queue-state.md`（文件名历史引用——batch2 是旧批次名；文件本身为当前状态源）
 
 每个 tick 结束**必须**写回该文件。它是 compact 后唯一可信的状态——不要靠记忆。
 
@@ -287,15 +287,17 @@ ref 上）。拆成两线：
 
 | 线 | 角色 | 从哪分叉 | 合到哪 |
 |---|---|---|---|
-| `develop` | 已验证基线（绿，只含通过 verification-round 的工作） | 独立任务 | —（只被外层批量合） |
+| `develop` | 已验证基线（绿，只含通过 verification-round-N 的工作） | 独立任务 | —（只被外层批量合） |
 | `integration` | 待验证汇入点（含未验证前序工作） | 声明依赖前序的任务 | 所有任务合并目标 |
 
 - **分叉基线即依赖声明**（AC2）：独立任务从 `develop` 分叉；声明依赖的从 `integration` 分叉——
   机械判定 `plugin/scripts/fork-baseline.ts`（touches 与 integration 上未验证任务相交 ⇒ integration）。
 - **合并机制**（AC3）：任务合回 `integration`（红窗期照常接收——结构性消除停派）；外层
-  verification-round 批量合 `integration`→`develop`（fast-forward 无冲突，`plugin/scripts/integration-batch-merge.sh`）。
+  verification-round-N 批量合 `integration`→`develop`（fast-forward 无冲突，`plugin/scripts/integration-batch-merge.sh`）。
 - master 发布线角色**空置**（裁定①：quay 无发布流程、push 需人显式授权；等真有发布授权时语义才实）。
 - 依赖约束：**fan-in 合到 integration，不合并到 develop**；develop 只由外层批量合推进。
+- **词汇规范（AC2/AC5）**：`verification-round-N` 是**验证/收尾节奏**（批量合 develop），**不是分派门控**——
+  分派是滚动的（不叫批号），规范块见步骤 4。
 
 对每个已返回但未合并的 subagent，逐个：
 
@@ -492,6 +494,12 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
 任一在飞 subagent 完成释放槽位时，由「事件驱动派发（槽位回填）」节触发，**立即**重评估（不等下一 tick）。
 两者共用下面的并发上限、逐候选检查与派发形态。
 
+**词汇规范（AC5，`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`）**：
+**分派是滚动的，不叫批号**——任何给分派编批次号的措辞都该是历史引用或错误；
+`concurrent-batch-scheduler.ts` 输出的 `{batch, deferred}` 字段是机件真名，不是分派门控。
+**全量验证/收尾节奏叫 `verification-round-N`**（关于验证/收尾，不是分派门控）。未来会话
+（含换模型后）沿用拆分词汇。
+
 **并发上限 = 步骤 3.6 前置块算出的 `effective_cap`（自适应，非固定 3）**：`cap-from-gate.sh` 在派发
 决策点读 `some avg300`（5 分钟窗口）+ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时
 GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT/EXTREME 档（不加重，AC6）。本 tick 只派发
@@ -524,11 +532,12 @@ node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --
 
 ```bash
 node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --root "$(pwd)" tasks/<A>.md tasks/<B>.md --json
-# 输出 { batch, deferred }。两者都在 batch ⇒ disjoint，可同批；
+# 输出 { batch, deferred }（batch/deferred 是 concurrent-batch-scheduler.ts 的机件输出字段名）。
+# 两者都在 batch ⇒ disjoint，可并发/无触摸重叠，非门控分批；
 # deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
 ```
 
-重叠 → 不同批，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
+重叠 → 不同时派发，等下一 tick（**分派是滚动的，不是攒批门控**）。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
 4. **分叉基线判定（两线模型 AC2，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
    派发前用 `fork-baseline.ts` 判定每个候选从哪条线分叉（**分叉基线即依赖声明**——独立 → `develop`、
