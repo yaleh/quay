@@ -4997,3 +4997,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **「7 文件 master 基线红」证伪**：dir032 等 7 文件在**主检出**跑 **14/0 全绿**——agent 的「master 基线失败」是它 fresh worktree 缺规范 config（gate 未注册）的**快照伪影**，非真回归。外层重跑应绿。
 - **3 agent 全落定** ⇒ 外层可立即重跑全量（无内层测量污染）。fan-in 就绪待 re-green：split-batch `b67c49f3` + productize `32d36ade`（均需先 rebase 到当前 master）+ spawn-count `fd01a94b`（已 rebase）。
 - 在飞 0/3。停止条件 suite-red 仍持 fan-in；无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T00:1xZ（内层，全 3 分支 fan-in 完成）
+
+- **外层重跑已起**（00:09:34Z `state: running`，laneCount 1）⇒ `running` 照常合并（不等套件）。
+- **串行 fan-in 3/3 完成**（每步 rebase master → merge --no-ff → scoped 选中集 → cleanup）：
+  1. **split-batch** `1f581f0a`：词汇拆分（inner/outer tick 模板去门控 batch + `verification-round-N` 规范）+ AC6 测试 `batch-vocabulary-check.test.mjs`（8/8，--allow-thin）。已并已清。
+  2. **productize** `cfa18bfe`：第三层 manager SKILL 出货（`plugin/skills/manager/SKILL.md` + plugin.json 注册 + launch-config 三件套入 `.claude/launch.settings.json` + cold-start 废键清）+ `manager-layer-shipping.test.mjs`（7/7，--allow-thin）。已并已清。
+  3. **spawn-count** `60dca6e4`：A 层转换 37 文件（`bin/quay*.ts` → `QUAY_CLI`/`QUAY_NATIVE_CLI`）。scoped 14/14（--allow-thin）+ **抽查 6 个转换文件主检出全绿**（driver 23 / gate 25 / lifecycle 38 / web-ui-browser 1 / init 17 / document-cli 6，均 fail 0）。已并已清。
+- **worktree/branch 全部清**（`git worktree list` 只剩主检出；无 task/* 分支残留）。
+- 在飞 0/3。停止条件无（外层套件 running）。无 .halt、无 block、Monitor 绿。master `60dca6e4`。
+- **套件覆盖滞后**：外层当前 run 测的是 5411d425（fan-in 前），三 merge 代码需外层下一轮套件覆盖（异步设计固有窗口）。
