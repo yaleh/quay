@@ -177,7 +177,7 @@ DELETED: __mt_master _review-master-check audit-m116-verify experiment-4-iterati
 measure   integration_ff_merges = `git merge-base --is-ancestor <integration> <develop>` stdout 的退出码（0=是祖先）
 band      integration_ff_merges = 0（integration 永远是 develop 后代 ⇒ fast-forward）
 invariant fork_baseline_is_dependency = 1（独立→develop / 声明依赖→integration，机械可查）
-invoke    `git log --oneline develop..integration`（应只见待验证任务合并，红窗期不空）
+invoke    `git log --format=%s develop..integration`（应只见待验证任务合并，红窗期不空；AC2 实跑输出同命令）
 control   构造红窗期任务合 integration ⇒ 不阻塞（结构性消除停派）；触摸声明不准 ⇒ 冲突暴露（逼修真缺陷）
 resume    两线迁移与前置（断言/清分支）分步提交，任一步完成即写盘
 
