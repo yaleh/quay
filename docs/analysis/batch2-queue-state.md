@@ -5807,3 +5807,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **优先② message-bus 已派**（`fm-...-gr87vt`，human 第三目标 transport-agnostic）：web-action-buttons land 后
   冲突清除，self-touch/resolve 过。**人优先队列 ①②③ 全落地或已派**。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:1xZ（内层 cron，false OVER90 清 + loop-driver-check 派发）
+
+- **false OVER90 三清**：session-liveness-hashes bracket 仍未闭（外层未 --task-end）——已再 `--clear`
+  （wait 34.8s）。`--slot-status`：real 1（message-bus）、stale 2（session-liveness-hashes + productize）。
+  **外层请闭这两个 bracket**（否则每 tick 假 OVER90 复发；productize 已 done、session-liveness-hashes 已 merge）。
+- **loop-driver-check 派发**（`fm-...-a5jpkr`，self-declared registry 无人验证缺陷）：git-log 5 hit 全机制引用
+  （laid-down/gitignore/driver）非本任务实现——真未落地；与 message-bus 生产闸 DISJOINT。池真 ready 已近耗尽
+  （剩 red-pattern/ghost-drive/leak 已落地 + split-batch 待 closure）。
+- 在飞 2/3（message-bus + loop-driver-check）。套件 running（外层全量）。无 stop、无 block、Monitor 绿。
