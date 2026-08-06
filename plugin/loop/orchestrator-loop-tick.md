@@ -725,6 +725,8 @@ aborted`（套件未完成、无正确性结论）**不触发停派**——记�
 drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 次驱动全来自外层 send-keys 散文，而
 外层自己每 20 分钟被 cron 强制重读出厂文档——**锚点不对称是 inner 行为漂移的结构根**。R2（驱动散文
 只带数据不带行为）管散文别越权；本步管「散文之外还有周期锚」。
+**重锚机制的有效性以语义收敛度量（步骤 6），不只「重锚发生了」**（
+`gap-reanchor-must-converge-inner-self-reported-vocabulary`）——锚点通道存在 ≠ inner 自述词汇收敛。
 
 **机制 = 用本层已有 cron 转发一条固定重锚 prompt，不是给 inner 另建 cron、不是每次现写散文：**
 
@@ -745,10 +747,35 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
    ——inner 核对发现需补队/派发时，照 `fast-mode-loop-tick.md` 步骤 3.6/4 自己的规则执行，不是重锚
    prompt 给的新指令。
 5. **每个 tick 必报**：本轮是否转发重锚、转发时 inner 的空闲判据（哪条观察判据成立）。
+6. **自述措辞审计 + 语义收敛判据**（inner 侧，`gap-reanchor-must-converge-inner-self-reported-
+   vocabulary`）：重锚转发的同一 tick 审计 inner 最近**自述措辞**（commit / fan-in 注记）——不是
+   「重锚发生了」算有效，是 **inner 自述向出厂语义收敛**才算（AC2，invariant
+   `reanchor_effectiveness_is_convergence`）：
+   ```bash
+   node --no-warnings --experimental-strip-types plugin/scripts/self-report-vocab-check.ts --root "$REPO_ROOT" --json
+   ```
+   读 stdout 的 `count` 与 `converged`：
+   - **门控语义漂移**（`count > 0`）：inner 自述出现「Batch of N fully merged」/「batch N/M all
+     landed」/批次编号式汇报（如 batch-4）/「按批」= **门控语义漂移**——应报 `verification-round-N` /
+     滚动派发语义；记入本轮 tick，并驱动 inner 按出厂词汇（`fast-mode-loop-tick.md` 的词汇规范节）修正
+     其自述措辞。
+   - **合规**（`count === 0`）：自述无 batch 式汇报。
+   - **收敛判据**（AC2）：有效性以**语义收敛**度量——`converged: true`（连续
+     `--convergence-rounds`，默认 3 轮，自述无 batch 式汇报）才算收敛；`count > 0` 的任一轮把计数
+     清零（收敛非单调）。状态存 `.quay/self-report-vocab-state.json`（gitignored 运行时态），跨 tick
+     持久。
+   - **与锚点机制的关系**：锚点机制（`gap-inner-has-no-periodic-anchor-prose-only-drives-drift`，
+     done）提供「周期性拉回出厂语义」的通道；本步是该通道的**有效性判据**——通道存在 ≠ 词汇收敛。
+   - **与措辞任务两条一起**（AC3）：`gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round`
+     （doc 侧：散文无门控语义，done）+ 本判据（inner 侧：自述向出厂语义收敛）——**单独做任一条都解决不了**：
+     改出厂文档改不到 inner 已内化的措辞，改自述收敛判据也清不掉 doc 散文的歧义。
+   - **每 tick 必报**：自述审计 `count` 与 `converged`（重锚收敛判据）。
 
 **为什么「空闲才转发」**：重锚是「给 inner 一个周期读出厂文档的机会」，不是催活。inner 忙时
 （在飞 agent / 有 bracket）读文档的机会会打断工作；空闲时转发才是在它回合结束时给下一次行为对齐
 锚点。**与驱动散文的关系**：驱动散文带任务数据（R2 约束），重锚零数据、只指向文档——两者互补。
+**步骤 6 是重锚的观测端**：转发让 inner 有周期读文档的机会，审计验证这个机会**真的让 inner 的自述
+词汇收敛**了——机制与判据成对。
 
 ### 2. 分类本 tick 的动作
 
@@ -932,6 +959,8 @@ tick 或 `/clear` 后的会话会重犯。
 - 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
   排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
+- 自述措辞审计（步骤 1c 第 6 条）：本轮 inner 自述 `count`（batch 式汇报数）与 `converged`（重锚收敛
+  判据，连续 N 轮无 batch 式自述）
 - Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
   （AC9 起 `delivered` 取代 `ownedByThisSession`）
@@ -951,5 +980,6 @@ tick 或 `/clear` 后的会话会重犯。
 | `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal`；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |
+| `.quay/self-report-vocab-state.json` | inner 自述措辞审计的收敛状态（`roundsClean` + `converged`；gitignored 运行时态，`self-report-vocab-check.ts` 写，步骤 1c 第 6 条读） |
 | `adr/ADR-021-*.md` | 四项原则 |
 | `docs/proposals/exp6-queue-driven-concurrent-executor.md` §0 | 两阶段交付范围 |
