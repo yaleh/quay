@@ -275,6 +275,24 @@ run_static_checks() {
   # must be 0 (AC3), and the mechanism also mutates itself (AC4, --selftest).
   # @static-tier full  (the ~13s meta-check on the checkers THEMSELVES — deferred to the full-suite gate)
   checker_cost_wrap "checker-mutation-check" -- bash "${repo_root}/plugin/scripts/checker-mutation-check.sh" --check
+  echo "== uncalled-verifier check (gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check) =="
+  # The shipped-but-uncalled verifier gate: every plugin/scripts/*.{sh,ts,mjs} must have an
+  # EXECUTION-TYPE call site (loop doc / gate / CI / script), where the file itself, its own test,
+  # and pure description strings (capability-catalog.sh entries) do NOT count. A NEWLY-uncalled
+  # verifier — or a grown/shrink-violated exemption list (plugin/uncalled-verifier-exemptions.txt) —
+  # exits 1 and aborts the suite (set -euo pipefail), so "shipped and nothing invokes it" red-lights
+  # the commit instead of shipping silent dead weight. The census surface (AC1) is the --json output.
+  # @static-tier full  (whole-store ratchet — deferred to the full-suite gate in scoped mode)
+  checker_cost_wrap "uncalled-verifier-check" -- node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/uncalled-verifier-check.ts" --root "${repo_root}"
+  echo "== delivery-surface check (gap-complete-delivery-surface-spec-and-l1-verification) =="
+  # L1 six-category delivery-completeness check. verify-delivery-surface.ts was ruled the SINGLE
+  # SOURCE OF TRUTH for the delivery manifest (c65c411c, 2026-08-05) yet had ZERO execution callers —
+  # its only two non-self references were a capability-catalog description string and its own test.
+  # This GATE call site is the AC3 real execution call site (gap-shipped-verifiers-...): the
+  # authoritative manifest check now RUNS on every full-suite gate, not just when a human remembers to.
+  # @static-tier change
+  # @static-object plugin/ .claude/ orchestration/
+  checker_cost_wrap "verify-delivery-surface" -- node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/verify-delivery-surface.ts" --root "${repo_root}"
 }
 
 # run_scoped_static_checks — the change-relevant static-check TIER for SCOPED task runs

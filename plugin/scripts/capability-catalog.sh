@@ -179,6 +179,7 @@ declare -A QUESTION=(
   [trend-check.ts]="Is any quality axis trending worse than last time (suite per-test cost, early-RED detection latency, per-checker cost) over a window — even while each point is individually green (the point-in-time blind spot)?"
   [transcript-delivery-check.ts]="Did the reliable-send procedure deliver the transcript (delivery verdict)?"
   [tree-hygiene-check.sh]="Is the repo tree hygienic for the loop (no stray files or commits)?"
+  [uncalled-verifier-check.ts]="Is every shipped verifier actually called by an execution-type call site (or explicitly exempted on the shrink-only ratchet)?"
   [verify-delivery-surface.ts]="Is the complete six-category delivery surface actually delivered (L1 completeness)?"
   [verify-installed-executables.sh]="Is every installed executable byte-identical to its plugin source?"
   [vmeta-lag-check.sh]="How far is the V_meta consolidation lagging behind the evidence?"

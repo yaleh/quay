@@ -1,0 +1,95 @@
+# uncalled-verifier-exemptions.txt — shrink-only exemption list for the uncalled-verifier check
+# (tasks/gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check).
+#
+# POLICY: every verifier in plugin/scripts/*.{sh,ts,mjs} must have an EXECUTION-TYPE call site
+# (loop doc / gate / CI job / script), where the following do NOT count as call sites: (a) the file
+# itself, (b) its own plugin/test/<same-name>.test.mjs, (c) pure description strings
+# (capability-catalog.sh entries, prose docs, task bodies). A verifier with zero execution call
+# sites is SHIPPED-BUT-UNCALLED — it must be WIRED (given a real call site) or EXEMPTED here with a
+# reason. This list records the KNOWN-INTENTIONAL uncalled verifiers: manual-only report tools,
+# retired/dormant libraries, exp5-legacy tools, and test-only data modules.
+#
+# The registry of this class (DoD): the wired instances are verify-delivery-surface.ts (wired into
+# scripts/test.sh's run_static_checks by this task, AC3) and uncalled-verifier-check.ts (the check
+# itself, wired into run_static_checks). periodic-push-backup.sh gained its real call site via
+# sync-lag-check.sh (tasks/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes). measure-suite
+# .mjs / measure-suite-reporter.mjs are cross-referenced to
+# tasks/gap-single-file-test-duration-trend-unwatched. trend-check.ts is cross-referenced to the
+# quality-trend family. The remaining entries below are the current known-intentional census.
+#
+# RATCHET (AC4): this list can ONLY get SHORTER. The check fails if a file is ADDED to it. There is
+# no mechanical way to exempt a NEWLY-uncalled verifier — wire it instead. To remove an entry, give
+# that verifier a real call site FIRST, then delete its line here — the check then fails on the
+# stale entry until it is removed, which is the nudge that makes "wire it, then shrink the list"
+# the default path (same discipline as test-framework-policy-exemptions.txt).
+#
+# baseline-count: 32
+# `# baseline-count: <n>` is the MACHINE-READABLE RATCHET CEILING parsed by the check — the list can
+# NEVER exceed this many entries, even at a clean commit (commit-surviving AC4). It is permanent:
+# it stays 32 as entries are removed (the list only shrinks below it).
+# Format: one plugin/scripts basename per line; '#' starts a comment. Sorted by basename.
+
+# exp5-legacy wrapper for anti-gaming-guard.ts — judged NOT_SHIPPED in capability-catalog.sh AC2
+plugin/scripts/anti-gaming-guard.sh
+# SELECT-phase axis library (retired classic-loop candidate machinery, ADR-022) — no live caller
+plugin/scripts/axis-generator.ts
+# retired classic-loop (ADR-022) Build-evidence collector — the prepare/execute pipeline was deleted
+plugin/scripts/build-evidence-collector.ts
+# retired classic-loop (ADR-022) Build-evidence gate — the prepare/execute pipeline was deleted
+plugin/scripts/build-evidence-gate.ts
+# retired classic-loop (ADR-022) evidence schema — kept as the surviving pure-function source
+plugin/scripts/build-evidence-manifest.ts
+# the self-describing capability catalog — a human/CI entry-point tool, self-referential by design
+plugin/scripts/capability-catalog.sh
+# DIR-121 Codex Stage-1 live-proof check — exp5 methodology, manual/ad-hoc only
+plugin/scripts/codex-stage1-live-proof-check.ts
+# exp5 legacy — judged NOT_SHIPPED in capability-catalog.sh AC2
+plugin/scripts/codex-stage1-selfcheck.sh
+# exp5 L2 continuous-health check — manual/legacy, no live caller
+plugin/scripts/dead-loop-check.sh
+# wrapper for drivable-workspace-check.ts (the .ts is imported as a library); the .sh has no caller
+plugin/scripts/drivable-workspace-check.sh
+# gate-dispatch-coverage — a REPORT tool (constant exit 0 by design, AC8); manual/instrument only
+plugin/scripts/gate-dispatch-coverage.ts
+# manager-layer inbox reader (exp5) — manual/legacy, no live caller
+plugin/scripts/inbox-reader.sh
+# classic-loop (ADR-022 retired) batch-merge tool — manual; the fan-in merge was retired with the pipeline
+plugin/scripts/integration-batch-merge.sh
+# exp5 legacy — judged NOT_SHIPPED in capability-catalog.sh AC2
+plugin/scripts/it0-enforcement-with-design-check.sh
+# single-source loop-shipping data module — consumed by loop-shipping tests only; no production caller
+plugin/scripts/loop-shipping-exclusion-data.mjs
+# custom node:test reporter — consumed by measure-suite.mjs (itself cross-ref'd); manual
+plugin/scripts/measure-suite-reporter.mjs
+# manual suite-duration measurement tool — cross-ref gap-single-file-test-duration-trend-unwatched
+plugin/scripts/measure-suite.mjs
+# needs-human staleness check — manual/legacy, no live caller
+plugin/scripts/needs-human-recheck.ts
+# exp5 pre-friction metering — legacy, no live caller
+plugin/scripts/prefriction-count.sh
+# retired classic-loop (ADR-022) preparation-feedback library — pipeline deleted
+plugin/scripts/preparation-feedback.ts
+# routine probe-spec reader — the routine machinery is retired/dormant (exp6 §0 seal)
+plugin/scripts/read-probe-spec.ts
+# runtime-usage-inventory — a REPORT tool (constant exit 0 by design); manual/instrument only
+plugin/scripts/runtime-usage-inventory.ts
+# session-liveness observer mount — manager-layer manual tool; no mechanical caller (described in the tick doc, not invoked)
+plugin/scripts/session-liveness-mount.sh
+# exp5 supervisor health check — legacy, no live caller
+plugin/scripts/supervisor-health.sh
+# fork-baseline test-file snapshot library — consumed by tests only; no production caller
+plugin/scripts/test-file-baseline.ts
+# relative-baseline snapshot tool — manual/legacy, no live caller
+plugin/scripts/test-file-snapshot.sh
+# test-isolation helper sourced by tests only — no production caller (test-only)
+plugin/scripts/tmux-isolated.sh
+# quality-trend report tool — manual, no live caller (cross-ref the quality-trend family)
+plugin/scripts/trend-check.ts
+# exp5 V_meta lag metering — legacy, no live caller
+plugin/scripts/vmeta-lag-check.sh
+# control-plane StageJournalStore (retired classic-loop) — no live caller
+plugin/scripts/workflow-baseline-metrics.ts
+# control-plane StageJournalStore (retired classic-loop) — no live caller
+plugin/scripts/workflow-journal.ts
+# control-plane workflow replay (retired classic-loop) — no live caller
+plugin/scripts/workflow-replay.ts

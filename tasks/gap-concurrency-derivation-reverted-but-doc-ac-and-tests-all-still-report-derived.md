@@ -26,6 +26,14 @@ extra:
 
 **type:** execution
 
+## Cross-reference (class-level mechanism, 2026-08-06)
+
+本任务是本类（shipped-but-uncalled verifiers）的一个变体：`default_concurrency_formula` 的调用点被
+`return 0` 后的不可达代码吞掉——"存在、正确、已交付，但没有任何东西执行它"，同族同形。类级机制
+`plugin/scripts/uncalled-verifier-check.ts`（`gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check`
+AC6）把"执行型调用点"作为判据（`dead-code-after-return-check.ts` 钉住 return 后不可达形状），
+并登记本类全部已知实例。
+
 ## Proposal
 
 **推导被回退了，但文档、AC、测试三层全都还在报告「已推导」——三层同时报绿，实际行为是当初要消灭的那个缺陷。**
@@ -280,6 +288,14 @@ extra:
 ---
 
 **type:** execution
+
+## Cross-reference (class-level mechanism, 2026-08-06)
+
+本任务是本类（shipped-but-uncalled verifiers）的一个变体：`default_concurrency_formula` 的调用点被
+`return 0` 后的不可达代码吞掉——"存在、正确、已交付，但没有任何东西执行它"，同族同形。类级机制
+`plugin/scripts/uncalled-verifier-check.ts`（`gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check`
+AC6）把"执行型调用点"作为判据（`dead-code-after-return-check.ts` 钉住 return 后不可达形状），
+并登记本类全部已知实例。
 
 ## Proposal
 
