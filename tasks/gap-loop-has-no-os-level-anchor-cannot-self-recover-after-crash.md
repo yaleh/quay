@@ -177,6 +177,13 @@ pre-friction 无关。**（**2026-08-06 追加，`gap-telemetry-brackets-vs-suba
 - tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（交叉标注：dead-loop
   判据的 OS 级落点）
 
+## Supervisor step（base-layer-outside-sessions 步骤①）
+
+本任务 = `gap-supervisor-base-layer-outside-sessions-architecture` 落地次序 **① 持久调度**。
+基座层判据：调度/周期锚点是平台原语，必须 outlive 会话（不随 agent 会话死）——本任务的 systemd user
+timer + os-anchor-watchdog 正是该判据的落地。详见
+`orchestration/SPEC-integration-architecture-2026-08-05.md` §7。不新开重复任务（AC4）。
+
 ## Contract
 
 measure   os_anchor_alive = `systemctl --user list-timers | grep -c quay` stdout 的数字段
