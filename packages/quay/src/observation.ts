@@ -480,21 +480,38 @@ export interface BoardExecution {
  */
 export async function readBoardLanding(root: string): Promise<BoardLanding> {
   let scriptPath: string;
+  let stripTypes = true;
   try {
     scriptPath = fileURLToPath(new URL(DRIFT_CHECKER_REL, import.meta.url));
+    // gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact: the shipped
+    // artifact carries the plugin .ts as bundled dist/*.js executables (no raw .ts), so the
+    // drift checker resolves to plugin/scripts/dist/task-status-drift-check.js there — run
+    // without --experimental-strip-types (a plain ESM .js).
+    if (!fs.existsSync(scriptPath)) {
+      const bundled = fileURLToPath(
+        new URL("../../../plugin/scripts/dist/task-status-drift-check.js", import.meta.url)
+      );
+      if (fs.existsSync(bundled)) {
+        scriptPath = bundled;
+        stripTypes = false;
+      }
+    }
   } catch {
     return { status: "error", reason: "landing 判断源解析失败（plugin 路径不可用）", flags: new Map(), scanned: 0 };
   }
   if (!fs.existsSync(scriptPath)) {
     return {
       status: "empty",
-      reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts 不存在 — 产品安装无 methodology 层）",
+      reason: "landing 判断源缺失（plugin/scripts/task-status-drift-check.ts/dist bundle 不存在 — 产品安装无 methodology 层）",
       flags: new Map(),
       scanned: 0,
     };
   }
   try {
-    const { stdout } = await execFileP("node", ["--experimental-strip-types", scriptPath, "--json"], {
+    const argv = stripTypes
+      ? ["--experimental-strip-types", scriptPath, "--json"]
+      : [scriptPath, "--json"];
+    const { stdout } = await execFileP("node", argv, {
       cwd: root,
       timeout: 120_000,
       maxBuffer: 32 * 1024 * 1024,

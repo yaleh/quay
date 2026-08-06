@@ -240,6 +240,6 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "cap-from-gate")) {
   process.exitCode = main(process.argv);
 }

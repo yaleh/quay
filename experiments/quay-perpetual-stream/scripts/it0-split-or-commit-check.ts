@@ -15,7 +15,7 @@
 //   3. CHILD-LINK-SYMMETRY: A task declaring `parent: Y` MUST be listed in Y's `children` (and Y
 //      must exist). A one-way link makes CHECK 1 exclude the orphaned child, so a parent/program
 //      can be judged `done` while a real phase is still open — the exact modeling hole that made
-//      exp5-M-TS-MIGRATION (children: [P0-only]) read as complete while P1-P4 were unlisted.
+//      M-TS-MIGRATION (children: [P0-only]) read as complete while P1-P4 were unlisted.
 //
 // D3·R7 enforcement pointer: OUTER-LOOP.md's prose description of parent-done-iff-children
 // at Step 1 / SPLIT-OR-COMMIT references THIS script as the mechanical enforcement.
@@ -173,7 +173,7 @@ export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
   // A one-way link (child points up, but the parent omits it from `children`) makes CHECK 1's
   // parent-done-iff-children computation silently EXCLUDE this child — so the parent can be marked
   // `done` while this orphaned phase is still open. This is the "program judged prematurely done"
-  // hole: exp5-M-TS-MIGRATION's children listed only P0 (done) while P1 declared the parent but was
+  // hole: M-TS-MIGRATION's children listed only P0 (done) while P1 declared the parent but was
   // omitted, so the whole TS program read as complete before P1-P4 ran. A hard graph invariant over
   // the stored links — NOT a parse of proposal prose (which drifts, ADR-004).
   for (const [id, t] of taskMap) {
@@ -299,7 +299,7 @@ function usage(): never {
   process.exit(2);
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-split-or-commit-check";
 if (isDirect) {
   const args = process.argv.slice(2);
   if (args.includes("--selftest")) {

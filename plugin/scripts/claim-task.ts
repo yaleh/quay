@@ -167,6 +167,6 @@ export function main(argv) {
   return d.claimable ? 0 : 1;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "claim-task")) {
   process.exitCode = main(process.argv);
 }

@@ -217,6 +217,6 @@ export function main(argv: string[]): number {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "self-report-vocab-audit")) {
   process.exitCode = main(process.argv);
 }

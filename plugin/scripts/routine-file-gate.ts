@@ -93,4 +93,4 @@ export async function main(argv) {
   return r.accept ? 0 : 1;
 }
 
-if (isDirectEntry(import.meta)) { main(process.argv).then((c) => process.exit(c)); }
+if (isDirectEntry(import.meta, undefined, "routine-file-gate")) { main(process.argv).then((c) => process.exit(c)); }

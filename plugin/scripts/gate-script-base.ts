@@ -121,10 +121,23 @@ export function requireArg(value: any, name: string): void {
 // Standard "is this file being run directly?" check for CLI scripts.
 // Usage:
 //   if (isDirectEntry(import.meta)) main(process.argv).then(code => process.exit(code));
-export function isDirectEntry(importMeta: ImportMeta, argv1?: string): boolean {
+//   // bundler-friendly form (see expectedBase below):
+//   if (isDirectEntry(import.meta, undefined, "tool-name")) main(process.argv).then(code => process.exit(code));
+//
+// BUNDLER-FRIENDLY (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact): when a
+// plugin .ts is bundled into a single ESM file, EVERY inlined module shares the bundle's
+// `import.meta.url`, so the URL-equality check alone returns true for imported libraries too — the
+// library's top-level CLI block would fire while another tool runs. Callers therefore pass their own
+// canonical basename as `expectedBase`; when provided, the check requires the executed file's
+// basename to match, which holds for the entry in both source and bundle forms and never for an
+// inlined library (the bundle's basename is the entry's, not the library's).
+export function isDirectEntry(importMeta: ImportMeta, argv1?: string, expectedBase?: string): boolean {
   const entry = argv1 || process.argv[1];
   if (!entry) return false;
   try {
+    if (expectedBase !== undefined) {
+      return path.basename(entry).replace(/\.(?:js|ts|mjs)$/, "") === expectedBase;
+    }
     return fs.realpathSync(path.resolve(entry)) === fileURLToPath(importMeta.url);
   } catch {
     return false;

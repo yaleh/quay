@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// it0-enforcement-with-design-check.ts — Enforcement-WITH-design invariant gate (ADR-011 / exp5-M-CRYST-INV)
+// it0-enforcement-with-design-check.ts — Enforcement-WITH-design invariant gate (ADR-011 / M-CRYST-INV)
 //
-// Checks that every DoD clause in `inherited-core.md`'s "## Definition of DoD" section has a
+// Checks that every DoD clause in `inherited-core.md`'s "## Definition of Done" section has a
 // matching mechanical enforcement in `scripts/it0-dod-check.mjs`. A clause present in
 // inherited-core.md but NOT referenced in it0-dod-check.mjs is "design-only" — a direct violation
 // of ADR-011's invariant ("a new rule/clause/method-step is NOT done without its executable
@@ -40,16 +40,16 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── parseInheritedCoreClauses — extract Clause numbers from the DoD section of inherited-core.md ──
-// Scans the "## Definition of DoD" section for lines matching "### Clause N" or "Clause N —"
+// Scans the "## Definition of Done" section for lines matching "### Clause N" or "Clause N —"
 // headings (the canonical DoD clause format in inherited-core.md).
 // Returns a sorted array of unique clause numbers found (e.g. [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).
 export function parseInheritedCoreClauses(inheritedCoreText: string): number[] {
-  // Find the DoD section: starts at "## Definition of DoD" heading, ends at the next top-level
+  // Find the DoD section: starts at "## Definition of Done" heading, ends at the next top-level
   // "## " heading (a two-character sequence after a real newline). Use a non-greedy match that
   // stops at the next \n## boundary — NOTE: do NOT use the `m` flag with a `$` alternative in the
   // lookahead, as `$` in multiline mode matches end-of-line, which prematurely stops the match at
   // the first heading line when the heading itself spans two physical lines.
-  const dodStart = inheritedCoreText.search(/^## Definition of DoD\b/m);
+  const dodStart = inheritedCoreText.search(/^## Definition of Done\b/m);
   if (dodStart < 0) return [];
 
   // Advance past the DoD heading to the section body.
@@ -72,12 +72,6 @@ export function parseInheritedCoreClauses(inheritedCoreText: string): number[] {
 
   // Primary: "### Clause N" headings — the authoritative clause declarations.
   for (const m of dodSection.matchAll(/^###\s+Clause\s+(\d+)\b/gm)) {
-    clauseNums.add(parseInt(m[1], 10));
-  }
-
-  // Support functional-style format: "clause0 :: Task -> {PASS, FAIL}"
-  // (used in inherited-core.md inside code blocks)
-  for (const m of dodSection.matchAll(/^clause(\d+)\s*::/gm)) {
     clauseNums.add(parseInt(m[1], 10));
   }
 
@@ -121,7 +115,7 @@ export function runChecks(inheritedCoreText: string, dodCheckText: string): Chec
 
   if (coreClauses.length === 0) {
     failures.push(
-      "PARSE-ERROR: no DoD clause headings found in inherited-core.md '## Definition of DoD' section — section may be missing or malformed"
+      "PARSE-ERROR: no DoD clause headings found in inherited-core.md '## Definition of Done' section — section may be missing or malformed"
     );
     return { failures, passes, coreClauses: [], enforcedClauses };
   }
@@ -130,7 +124,7 @@ export function runChecks(inheritedCoreText: string, dodCheckText: string): Chec
   const unenforced = coreClauses.filter((n) => !enforcedClauses.has(n));
   for (const n of unenforced) {
     failures.push(
-      `ENFORCEMENT-MISSING: Clause ${n} is declared in inherited-core.md '## Definition of DoD' ` +
+      `ENFORCEMENT-MISSING: Clause ${n} is declared in inherited-core.md '## Definition of Done' ` +
       `but has NO corresponding '// --- Clause ${n}:' enforcement block in it0-dod-check.mjs ` +
       `— violates ADR-011 (enforcement must land WITH design in the same milestone)`
     );
@@ -142,7 +136,7 @@ export function runChecks(inheritedCoreText: string, dodCheckText: string): Chec
   for (const n of undocumented) {
     failures.push(
       `DESIGN-MISSING: Clause ${n} has an enforcement block in it0-dod-check.mjs ` +
-      `but NO corresponding '### Clause ${n}' heading in inherited-core.md '## Definition of DoD' ` +
+      `but NO corresponding '### Clause ${n}' heading in inherited-core.md '## Definition of Done' ` +
       `— enforcement without design documentation violates ADR-011`
     );
   }
@@ -189,7 +183,7 @@ export function selftest(): boolean {
 
   // ── RED fixture: inherited-core has Clause 0-2 + a NEW Clause 10 not in dod-check ────────────────
   const RED_INHERITED_CORE = `
-## Definition of DoD
+## Definition of Done
 
 ### Clause 0 — AC + DoD present
 Clause 0 is enforced by it0-dod-check.mjs.
@@ -224,7 +218,7 @@ function checkClause2() {}
 
   // ── GREEN fixture: all clauses in inherited-core are in dod-check ────────────────────────────────
   const GREEN_INHERITED_CORE = `
-## Definition of DoD
+## Definition of Done
 
 ### Clause 0 — AC + DoD present
 ### Clause 1 — Per-milestone acceptance audit
@@ -268,7 +262,7 @@ function checkClause4() {}
 
   // ── RED fixture (reverse direction): dod-check enforces Clause 10 not documented in inherited-core ─
   const RED_UNDOCUMENTED_ENFORCEMENT_CORE = `
-## Definition of DoD
+## Definition of Done
 
 ### Clause 0 — AC + DoD present
 ### Clause 1 — Per-milestone acceptance audit
@@ -301,7 +295,7 @@ function usage(): never {
   process.exit(2);
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]) && path.basename(process.argv[1]).replace(/.(?:js|ts|mjs)$/, "") === "it0-enforcement-with-design-check";
 if (isDirect) {
   const args = process.argv.slice(2);
   if (args.includes("--selftest")) {
@@ -331,10 +325,10 @@ if (isDirect) {
 
   const inheritedCorePath = inheritedCoreOverride
     ? path.resolve(process.cwd(), inheritedCoreOverride)
-    : path.join(resolved, "experiments/quay-perpetual-stream/inherited-core.md");
+    : path.join(resolved, "inherited-core.md");
   const dodCheckPath = dodCheckOverride
     ? path.resolve(process.cwd(), dodCheckOverride)
-    : path.join(resolved, "experiments/quay-perpetual-stream/scripts/it0-dod-check.ts");
+    : path.join(resolved, "scripts/it0-dod-check.ts");
 
   if (!fs.existsSync(inheritedCorePath)) {
     console.error(`ERROR: inherited-core.md not found: ${inheritedCorePath}`);

@@ -321,6 +321,6 @@ export function main(argv: string[]): number {
   return flags.length > 0 ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "trend-check")) {
   process.exitCode = main(process.argv);
 }

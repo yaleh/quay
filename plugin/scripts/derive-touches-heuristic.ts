@@ -183,6 +183,6 @@ export function main(argv: string[]): number {
   return 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "derive-touches-heuristic")) {
   process.exit(main(process.argv));
 }

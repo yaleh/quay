@@ -385,6 +385,6 @@ export function runCli(argv) {
   return growth ? 1 : 0;
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "task-ac-carryover-check")) {
   process.exit(runCli(process.argv));
 }

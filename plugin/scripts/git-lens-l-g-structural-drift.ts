@@ -229,6 +229,6 @@ function main(): void {
   process.exit(result.flagged ? 1 : 0);
 }
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "git-lens-l-g-structural-drift")) {
   main();
 }

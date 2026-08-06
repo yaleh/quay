@@ -388,6 +388,6 @@ export function main(argv) {
 
 // ── Direct-entry check ──────────────────────────────────────────────────────────────────────────────
 
-if (isDirectEntry(import.meta)) {
+if (isDirectEntry(import.meta, undefined, "select-tests-for-touches")) {
   process.exitCode = main(process.argv);
 }

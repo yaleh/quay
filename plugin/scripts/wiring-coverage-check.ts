@@ -526,7 +526,13 @@ const _runAsCli = (() => {
       typeof process !== "undefined" &&
       Array.isArray(process.argv) &&
       typeof process.argv[1] === "string" &&
-      import.meta.url === pathToFileURL(process.argv[1]).href
+      // Bundler-friendly (gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact):
+      // when wiring-coverage-check is BUNDLED into another tool (task-schema → many entries), the
+      // inlined module shares the bundle's import.meta.url, so URL equality would falsely fire its
+      // CLI block. Basename match distinguishes running wiring-coverage-check itself from being
+      // inlined into another entry.
+      import.meta.url === pathToFileURL(process.argv[1]).href &&
+      path.basename(process.argv[1]).replace(/\.(?:js|ts|mjs)$/, "") === "wiring-coverage-check"
     );
   } catch {
     return false;
