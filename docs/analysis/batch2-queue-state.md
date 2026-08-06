@@ -5071,3 +5071,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **outer-heartbeat fan-in 完成**（`cd774806`）：session-liveness 外层心跳 **多源 max mtime**（HEAD commit / queue-state / tick-log / 分诊记录 / verification-round 任一在阈值内 ⇒ alive）——红窗处置写 queue-state+提交不写 tick-log ⇒ 反向失效消除；真阳性（30min 零产出）保留。AC2/3/4 fixture 3/3 + `--selfcheck` PASS。已并已清。
 - **外层套件重跑已起**（02:09:54Z running，5cf3d73d「tree clean, suite re-run started for green」）——两个 doc 修复已落地、树净 ⇒ 预期 **green** → closure（~24 not-yet-flipped + 各 ready 任务）。
 - **在飞 0/5**（本批全部落定：productize/split-batch/spawn-count/ghost-suggestion/global-count/dist-doc-gate/codex/native-store/loop-driver-check/outer-heartbeat 全部 merged）。worktree/branch 全清。无停止条件、无 .halt、无 block、Monitor 绿。master `5cf3d73d`。
+
+### tick 2026-08-06T02:4xZ（内层，tmux-leak 测试侧清理修复）
+
+- **外层套件**（02:09–02:26）：红仅剩 **tmux-leak-scan**（session-liveness 泄漏 3 个 `/tmp/session-liveness-*` dir）。外层已清 3 dir，驱动内层做测试侧清理修复（drive failed loud，排队到本 wakeup）。
+- **根因**：KNOWN-LOAD-SENSITIVE 族测试被 load 取消时跳过 finally ⇒ 泄漏 characteristic dirs。外层心跳 merge 新增 AC2/3/4 fixture 增加了泄漏面（模式本身既有）。
+- **修复**：`session-liveness.test.mjs` 加套件级 `after()` sweep（`/tmp/session-liveness-*` / `sl-global-` / `sl-mount-` / `sl-lmt-` 残留清理）。AC fixture 2/2 + leak-scan clean + 静态全量 PASS（`18503497`）。
+- 外层应再重跑（树净 + leak 已清 ⇒ 预期 **green** → closure）。在飞 0。无停止条件、无 .halt、无 block、Monitor 绿。
