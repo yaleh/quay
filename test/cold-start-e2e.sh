@@ -176,11 +176,14 @@ assert_file "$PROJECT/orchestration/orchestrator-loop-tick.md"
 assert_file "$PROJECT/docs/analysis/fast-mode-loop-tick.md"
 for s in \
   fast-mode-telemetry.ts inner-blocked-signal.ts inner-forensics.mjs inner-idle-log.ts \
-  resource-gate.sh heavy-op-token.sh task-contract-check.ts \
+  resource-gate.sh task-contract-check.ts \
   task-status-drift-check.ts touches-orthogonality-check.ts concurrent-batch-scheduler.ts \
   it0-split-or-commit-check.ts pipe-exit-code-check.sh session-liveness.sh; do
   assert_file "$PROJECT/plugin/scripts/$s"
 done
+if [ -e "$PROJECT/plugin/scripts/heavy-op-token.sh" ]; then
+  fail "heavy-op-token.sh must NOT be laid down into target projects (retired 2026-08-06, gap-session-liveness-remove-shared-events-and-lock)"
+fi
 if [ -e "$PROJECT/plugin/scripts/inner-state.sh" ]; then
   fail "inner-state.sh must NOT be laid down into target projects (retired, AC3)"
 fi
@@ -284,9 +287,9 @@ GATE_OUT="$(bash "$PROJECT/plugin/scripts/resource-gate.sh" 2>&1 || true)"
 [ -n "$GATE_OUT" ] || fail "resource-gate.sh produced no output (did not run after the rename)"
 echo "  resource-gate.sh runs after the rename"
 
-# 7b. heavy-op token (state lives outside every repo; --status is read-only)
-bash "$PROJECT/plugin/scripts/heavy-op-token.sh" --status > /dev/null
-echo "  heavy-op-token.sh --status runs (exit 0)"
+# 7b. (removed) heavy-op token — retired entirely 2026-08-06 (human ruling:
+#     gap-session-liveness-remove-shared-events-and-lock; the "one heavy test at a time"
+#     constraint is gone with no replacement, so there is nothing to --status).
 
 # 7c. (removed) inner-state.sh one-shot BLOCKED seam — inner-state.sh is retired
 #     (gap-retire-inner-state-one-observer-targets-by-parameter AC4); the blocked channel is

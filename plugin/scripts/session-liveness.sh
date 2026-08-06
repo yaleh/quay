@@ -116,8 +116,10 @@
 #       宁可误报、可自愈类（IDLE/RESUMED）从严。当前默认曾调反（IDLE 60s 即报、
 #       OVERDUE 等 45min）；改后 OVERDUE_MIN 默认 45→30（不可自愈，早报 15min；阶段一
 #       实测 transcript 长任务最大间隙 20.5min，30min 仍留 ≥9min 余量）；IDLE 从严 =
-#       默认 LOOP_MIN=20 的噪声闸门（刚动过=正常收尾→持有者 stdout 静默；心跳陈旧/未知才报）。
-#       AC21：静默只发生在持有者自己的 stdout，共享 events.jsonl 仍记全量（含 hmin）。
+#       默认 LOOP_MIN=20 的噪声闸门（刚动过=正常收尾→观察者 stdout 静默；心跳陈旧/未知才报）。
+#       2026-08-06 人裁定：阈值只作用于观察者自己的 stdout（自己的流），每个观察者各管各的——
+#       manager 观 outer 的观察者可 LOOP_MIN=0 知悉全部，outer 观 inner 的观察者可 LOOP_MIN=20
+#       抑噪，互不影响。AC21 的根因（共享文件 + 持有者阈值决定一切）已随共享文件移除。
 #       逐事件类别与阈值理由见下节。
 #   AC6（原AC14/损失函数结论二）SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）：
 #       判据是「收到事件后无需再采样即可判真假」——原来外层每次 3-4 次调用，改后 1 次。
@@ -174,9 +176,9 @@
 #   SESSION-IDLE              可自愈（上界=外层 20min tick）→ 从严：默认 LOOP_MIN=20
 #                             噪声闸门，心跳陈旧/未知才报；LOOP_MIN=0（管理者显式配置）
 #                             = 知悉全部（其明确选择，见 orchestration/session-liveness.env）。
-#                             AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-
-#                             serve-a-second）：噪声闸门只作用于持有者自己的 stdout——共享
-#                             events.jsonl 无条件记全量（含 hmin 原始量），订阅方自己决定报不报。
+#                             2026-08-06 人裁定：噪声闸门只作用于观察者自己的 stdout（自己的流）——
+#                             谁挂的谁拥有，每个观察者的阈值只服务它自己的消费者。共享事件文件
+#                             已移除（AC21 的根因随之消失），无需「记全量供订阅方自判」。
 #   SESSION-RESUMED           可自愈但唯一正向信号 → 立即报、保留（便宜，且是唯一能确认
 #                             会话还在按期活动的正向信号）
 #   SESSION-OVERDUE           不可自愈（无界）→ 宁可误报：默认 OVERDUE_MIN=30（原 45），
@@ -385,61 +387,17 @@ outer_heartbeat_mtime() {
 }
 
 
-# ── 共享事件文件与心跳（AC20c/AC7，2026-08-03）──────────────────────────────────────────────
-# AC20c：事件写进共享文件（$QUAY_GLOBAL_DIR/session-liveness/events.jsonl），订阅与挂载分离——
-# 要看事件的人不必自己挂一个。AC7：共享事件文件带心跳/时间戳，订阅方能据此判定「看门的已经不在了」，
-# 且该判定不依赖任何人恰好去尝试挂载。持有者每轮往 events.jsonl 追加一条 HEARTBEAT 事件，订阅方
-# 取最后一条的 ts（或文件 mtime）与当前时间比对，超过阈值即判定持有者已死——即使没有任何人去试挂。
-# 状态目录（含锁、事件、心跳）在 $QUAY_GLOBAL_DIR 之外每个仓库共享，删任何仓库都不能删掉别的状态。
-sl_now_ms() {
-  local out s n
-  out="$(date +%s%N 2>/dev/null || echo 0000000000000000000)"
-  case "$out" in ''|*[!0-9]*) out="0000000000000000000" ;; esac
-  s="${out:0:10}"
-  n="${out:10:9}"
-  case "$n" in ''|*[!0-9]*) n="000000000" ;; esac
-  printf '%s%03d' "${s:-0}" "$(( 10#${n:0:3} ))"
-}
-
-# sl_json_append —— 把一行事件追加进共享 events.jsonl（JSON 行；事件行不换行，python3 负责转义）。
-sl_json_append() {
-  local line="$1" event name ts line_json
-  event="${line%% *}"
-  name="${line#* }"; name="${name%% *}"
-  ts=$(sl_now_ms)
-  line_json=$(printf '%s' "$line" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null \
-    || { printf '%s' "$line" | sed 's/\\/\\\\/g; s/"/\\"/g'; })
-  printf '{"ts":%s,"event":%s,"name":%s,"msg":%s}\n' \
-    "$ts" "$(printf '"%s"' "$event")" "$(printf '"%s"' "$name")" "$line_json" \
-    >> "${SL_EVENTS_FILE:-/dev/null}" 2>/dev/null || true
-}
-
-# sl_emit_shared —— 只写共享 events.jsonl（订阅方读取），不走 stdout。AC21（gap-a-log-already-
-# filtered-by-one-consumers-threshold-cannot-serve-a-second）：共享文件记全量，阈值只作用于持有者
-# 自己的 stdout——被持有者阈值静默的事件（如 hmin < LOOP_MIN 的健康空闲）仍须进入共享文件，让订阅方
-# 自己决定报不报。写共享文件失败（目录不可写）只回落到无操作，绝不 crash（与令牌 fail-open 同源：
-# 调度角色不是安全检查）。
-sl_emit_shared() {
-  [ -n "${SL_EVENTS_FILE:-}" ] || return 0
-  [ -d "${SL_GLOBAL_DIR:-}" ] && [ -w "$SL_GLOBAL_DIR" ] || return 0
-  sl_json_append "$*"
-}
-
-# sl_emit —— 事件同时走 stdout（Monitor 事件流）与共享 events.jsonl（订阅方读取）。stdout 是持有者
-# 自己的通知流，受持有者阈值门控；共享文件由 sl_emit_shared 无条件记全量（AC21：记录与判断分开）。
+# ── 事件发出（2026-08-06 人裁定：观测是树，每观察者自己的流）──────────────────────────────
+# 观测拓扑是树（manager→N 个 outer、outer_i→inner_i），每条边是独立的 (观察者,目标) 对：只读、
+# 无交集。事件只走观察者自己的 stdout（谁挂的谁拥有）——挂载方（Monitor 工具）的事件流就是这条边
+# 的事件流。不再有共享事件文件（那是把 N 条独立流合并成一条、再让每个消费者过滤回自己要的——
+# 严格劣于 N 条独立流，零收益）；不再有互斥锁（观测对目标纯只读，只读天然不排他，重复挂载无害）。
+# AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）的根因
+# （共享文件 + 持有者阈值决定一切）随之消失：每个观察者的阈值（LOOP_MIN/STALL_MIN/OVERDUE_MIN）
+# 只作用于它自己的 stdout、只服务它自己的消费者——manager 观 outer 的观察者可以 LOOP_MIN=0 知悉
+# 全部，outer 观 inner 的观察者可以 LOOP_MIN=20 抑噪，互不影响、互不知情。
 sl_emit() {
   echo "$*"
-  sl_emit_shared "$*"
-}
-
-# sl_heartbeat —— 持有者每轮追加一条 HEARTBEAT（只进共享文件，不污染 stdout/Monitor 事件流）。
-# 订阅方取最后一条 ts 判「看门的不在了」——这是 AC7 的判据，不依赖任何人去试挂。
-sl_heartbeat() {
-  [ -n "${SL_EVENTS_FILE:-}" ] || return 0
-  [ -d "${SL_GLOBAL_DIR:-}" ] && [ -w "$SL_GLOBAL_DIR" ] || return 0
-  printf '{"ts":%s,"event":"HEARTBEAT","name":%s,"msg":"holder alive"}\n' \
-    "$(sl_now_ms)" "$(printf '"%s"' "${SL_OWNER:-unknown}")" \
-    >> "$SL_EVENTS_FILE" 2>/dev/null || true
 }
 
 # ── 外层多源心跳（gap-outer-heartbeat-source-inverts-under-incident-handling，2026-08-06）──────
@@ -522,7 +480,7 @@ effective_heartbeat_mtime() {
 # --selfcheck（本任务 ## Contract 的 invoke）—— 诊断接缝，验证外层多源心跳判据，自包含：
 #   1. 红窗处置（最近提交 + 新 queue-state + 旧 tick-log）⇒ 心跳新鲜（不报 OVERDUE，AC2）；
 #   2. 30 分钟零产出（旧提交 + 旧 tick-log + 无 queue-state）⇒ 心跳陈旧（真阳性保留，AC3）。
-# 用临时目录，不碰真实仓库/会话/单飞锁。
+# 用临时目录，不碰真实仓库/会话。
 selfcheck() {
   local tmp ws now fresh stale fmin smin rc=1
   tmp=$(mktemp -d 2>/dev/null) || { echo "session-liveness selfcheck: FAIL 无法创建临时目录" >&2; return 1; }
@@ -760,121 +718,13 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane shell 的�
   fi
 }
 
-# ── 单飞挂载门（AC20a/b/d/AC5/AC6，管理者 AC20 判据逐字照搬，不改写）──────────────────────────
-# 「谁需要谁自己起一个」对单飞资源是错的默认；正确的默认是「谁需要谁去订阅」，挂载是一个有主的、
-# 可接管的角色。这与令牌同理，区别只在于令牌天然排他、监视器看起来不排他——看起来不是，所以
-# 没人给它加锁。这里补上那把锁：
-#   AC20a 单飞锁：挂载前取锁，**复用 heavy-op-token.sh 已验证的那套**（wx 原子创建 + mtime 陈旧
-#         AND pid 不存活才回收，绝不裸覆盖、绝不永久锁死）。不新写一套——那套锁今天已在真实死
-#         持有者上回收了 17 次，是本仓唯一被实战验证过的锁。复用点：对同一把锁文件调用
-#         `heavy-op-token.sh --acquire <owner> --root <dir> [--timeout N]`。
-#   AC20b 第二个挂载是空操作：检测到活持有者 ⇒ 打印属主与 pid，**退出 0**。报错会让人去 kill，
-#         而 kill 正是这一整摊事的来源。
-#   AC20d 接管负控制：持有者被 kill -9 后，下一次挂载必须接管（陈旧回收），否则单飞就变单点故障。
-#   AC5  反向负控制：持有者活着时再挂 ⇒ 绝不接管、不 kill 任何进程。把「重复挂载」换成「互相抢夺」
-#        是更坏的交易。
-# 状态目录：${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/session-liveness/（测试接缝 SESSION_LIVENESS_GLOBAL_DIR）。
-SL_GLOBAL_DIR="${SESSION_LIVENESS_GLOBAL_DIR:-${QUAY_GLOBAL_DIR:-${HOME:-/tmp}/.quay-global}/session-liveness}"
-SL_EVENTS_FILE="${SL_GLOBAL_DIR}/events.jsonl"
-# 属主 = 挂载这个监视器的会话身份（管理者的多目标配置里 SESSION_LIVENESS_OWNER 可显式给出）。
-SL_OWNER="${SESSION_LIVENESS_OWNER:-$(basename "$REPO_ROOT")}"
-SL_MOUNT_STALE_S="${SESSION_LIVENESS_MOUNT_STALE_S:-3}"   # 死持有者多久可回收（pid 活着永不回收，只影响接管速度）
-SL_MOUNT_WAIT_S=$(( SL_MOUNT_STALE_S + 3 ))               # 接管的有界等待上限（覆盖陈旧窗口 + 余量）
-_sl_lock_holder=0
-
-_sl_release_mount_lock() {
-  [ "$_sl_lock_holder" = "1" ] || return 0
-  local hot="$REPO_ROOT/plugin/scripts/heavy-op-token.sh"
-  if [ -x "$hot" ]; then
-    HEAVY_OP_STALE_TIMEOUT_S="$SL_MOUNT_STALE_S" bash "$hot" --release "$SL_OWNER" --root "$SL_GLOBAL_DIR" >/dev/null 2>&1 || true
-  fi
-  _sl_lock_holder=0
-}
-
-# _sl_acquire_or_noop —— 单飞门的一次性判定。返回：
-#   0 = 已取得锁（本进程成为持有者，继续跑监视器）；1 = 有活持有者（空操作，调用方退出 0）；
-#   2 = fail-open（状态目录不可写，无锁继续——调度角色不是安全检查，与令牌同源）。
-_sl_acquire_or_noop() {
-  local hot="$REPO_ROOT/plugin/scripts/heavy-op-token.sh"
-  local lock_token="$SL_GLOBAL_DIR/heavy-op/token"
-  local start_ms holder_pid acq_out err_file rc took out_file howner
-  if [ ! -x "$hot" ]; then
-    echo "session-liveness: WARN 找不到 $hot，跳过单飞锁（fail-open）" >&2
-    return 2
-  fi
-  local preexisting=0; [ -e "$lock_token" ] && preexisting=1
-  start_ms=$(sl_now_ms)
-  # 关键：必须把 heavy-op-token 的 stdout 重定向到文件再读，不能用命令替换 `$(...)`——命令替换会
-  # 引入一个瞬态子 shell 作为 heavy-op-token 的父进程，而 heavy-op-token 记录的是 $PPID，于是锁会
-  # 记下子 shell 的 pid（随即退出）而非监视器自身的 pid；下一个挂载看到「死 pid」就会误回收活持有者
-  # （实测踩中：锁 pid 是命令替换子 shell，不是监视器进程）。
-  out_file=$(mktemp 2>/dev/null) || out_file="/tmp/sl-mount-out-$$"
-  err_file=$(mktemp 2>/dev/null) || err_file="/tmp/sl-mount-err-$$"
-  HEAVY_OP_STALE_TIMEOUT_S="$SL_MOUNT_STALE_S" bash "$hot" \
-    --acquire "$SL_OWNER" --root "$SL_GLOBAL_DIR" --timeout 0 >"$out_file" 2>"$err_file"
-  rc=$?
-  acq_out=$(cat "$out_file")
-  if [ "$rc" = "0" ]; then
-    case "$acq_out" in
-      *acquired=yes*)
-        rm -f "$out_file" "$err_file"
-        if [ "$preexisting" = "1" ]; then
-          took=$(( $(sl_now_ms) - start_ms ))
-          echo "session-liveness-mount: 接管成功 takeover_ms=${took}（陈旧锁被回收，前一持有者已死）"
-        else
-          echo "session-liveness-mount: 成为挂载持有者（属主 ${SL_OWNER}，pid $$）"
-        fi
-        _sl_lock_holder=1
-        trap _sl_release_mount_lock EXIT
-        return 0 ;;
-      *acquired=no*)   # fail-open：状态目录不可写/不可达，无锁继续
-        echo "session-liveness: WARN 单飞锁 fail-open（$(cat "$err_file" 2>/dev/null || true)），无锁继续运行监视器" >&2
-        rm -f "$out_file" "$err_file"
-        return 2 ;;
-      *) echo "session-liveness: WARN 单飞锁返回异常（$acq_out），无锁继续" >&2
-        rm -f "$out_file" "$err_file"
-        return 2 ;;
-    esac
-  fi
-  # 未取得：区分「活持有者」与「死持有者待接管」。
-  holder_pid=$(awk -F= '$1=="pid"{print $2; exit}' "$lock_token" 2>/dev/null || true)
-  if [ -n "$holder_pid" ] && kill -0 "$holder_pid" 2>/dev/null; then
-    # AC20b：第二个挂载是空操作，退出 0——报错会让人去 kill，而 kill 正是这一整摊事的来源。
-    howner=$(awk -F= '$1=="holder"{print $2; exit}' "$lock_token" 2>/dev/null || echo unknown)
-    echo "session-liveness-mount: 已有活持有者（属主 ${howner}，pid ${holder_pid}）——第二个挂载是空操作（exit 0），不新增进程"
-    rm -f "$out_file" "$err_file"
-    return 1
-  fi
-  # 死持有者（kill -9 后）→ 有界等待接管（AC20d 负控制）。`--timeout N` 会每秒重查回收条件，
-  # 一旦 mtime 越过陈旧阈值就回收并取得——这本身就是接管，takeover_ms 从第一次尝试起算。
-  HEAVY_OP_STALE_TIMEOUT_S="$SL_MOUNT_STALE_S" bash "$hot" \
-    --acquire "$SL_OWNER" --root "$SL_GLOBAL_DIR" --timeout "$SL_MOUNT_WAIT_S" >"$out_file" 2>"$err_file"
-  rc=$?
-  acq_out=$(cat "$out_file")
-  rm -f "$out_file" "$err_file"
-  if [ "$rc" = "0" ] && [[ "$acq_out" == *acquired=yes* ]]; then
-    took=$(( $(sl_now_ms) - start_ms ))
-    echo "session-liveness-mount: 接管成功 takeover_ms=${took}（前一持有者已死，锁被回收）"
-    _sl_lock_holder=1
-    trap _sl_release_mount_lock EXIT
-    return 0
-  fi
-  echo "session-liveness-mount: 无法接管单飞锁（$acq_out）——空操作（exit 0）" >&2
-  return 1
-}
-
-# 单飞门只在长跑模式生效（--once / --mask / --api-errors / --last-input 是诊断接缝，不取锁）。
-# 关键：必须【直接调用】_sl_acquire_or_noop，不能用 `case "$( _sl_acquire_or_noop )" in` 的命令替换——
-# 命令替换会把函数放进一个瞬态子 shell，heavy-op-token 记录的 $PPID 就变成子 shell 的 pid（随即退出），
-# 且子 shell 的 EXIT trap 会在函数返回时立刻释放锁——锁被取到后瞬间释放，单飞直接失效（实测踩中）。
-if [ "$ONE_SHOT" != true ]; then
-  _sl_acquire_or_noop
-  _sl_gate_rc=$?
-  if [ "$_sl_gate_rc" = "1" ]; then
-    exit 0   # 有活持有者：空操作（exit 0，不是失败）
-  fi
-  # 0=持有 / 2=fail-open：继续跑监视器。
-fi
+# ── 无挂载门（2026-08-06 人裁定：彻底去掉互斥锁）──────────────────────────────────────────
+# 观测对目标【纯只读】（只有 tmux capture-pane / git log / stat，零写入）——只读天然不排他，
+# 两个观察者盯同一 pane 的代价只是每周期多一次 capture-pane，互不影响也不需要互相知情。互斥锁
+# 存在的唯一理由 = 保护那个共享事件文件；共享文件不该存在（见 sl_emit 上方注释），锁就没有
+# 存在理由。挂载不再取任何锁、不再区分「第一个/第二个挂载」：谁挂谁拥有自己的 stdout 事件流，
+# 多观察者并行挂载天然无冲突。谁先启动无关——每个观察者的状态完全是进程内的（PREV_* 关联数组），
+# 观察者之间互不知情、不共享任何写点。
 
 while true; do
   while read -r name root target; do
@@ -1045,16 +895,16 @@ while true; do
           elif [ "$hmin" = "?" ] || [ "$hmin" -ge "$LOOP_MIN" ]; then
             # 噪声标定（管理者 3 个完整周期实测，2026-08-03）：健康循环是「刚动过（写了心跳）才转
             # 空闲」（心跳时距 ~1 分钟），每 20 分钟一对事件、三项目满载 18 次/小时，全是「一切正常」。
-            # hmin < LOOP_MIN 的空闲 = 正常收尾 → 持有者 stdout 静默；hmin ≥ LOOP_MIN 或未知
-            # （无心跳文件）=「空闲了但没动」，会话可能跑一半就停 / 已死 → 持有者 stdout 报。
+            # hmin < LOOP_MIN 的空闲 = 正常收尾 → 观察者 stdout 静默；hmin ≥ LOOP_MIN 或未知
+            # （无心跳文件）=「空闲了但没动」，会话可能跑一半就停 / 已死 → 观察者 stdout 报。
             # SESSION-RESUMED 保留不静默（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
             sl_emit "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
           else
-            # AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）：
-            # hmin < LOOP_MIN（正常收尾）——持有者自己的 stdout 静默（噪声闸门），但共享 events.jsonl
-            # 照记全量（含 hmin 原始量），让订阅方（管理者）自己决定报不报。这就是 AC21c 的负控制：
-            # 持有者 LOOP_MIN=20 时，共享文件里仍须出现 hmin < 20 的 IDLE 记录——出现即通过。
-            sl_emit_shared "SESSION-IDLE $name 的会话转入空闲等输入；心跳 ${hmin} 分钟前更新${halt_msg}"
+            # hmin < LOOP_MIN（正常收尾）——观察者自己的 stdout 静默（噪声闸门，服务它自己的消费者）。
+            # 2026-08-06 人裁定：不再有共享事件文件「记全量供订阅方自判」——每个观察者的阈值只
+            # 作用于自己的流。想要知悉健康空闲的消费者（如 manager 观 outer）挂 LOOP_MIN=0 的观察者
+            # 即可，AC21 的根因（共享文件 + 持有者阈值决定一切）已随共享文件移除。
+            :
           fi
         fi
         # AC2（交叉正控制）：transcript 刚写过（会话确定在动）而【屏幕】判空闲 ⇒ 屏幕标志可能失效。
@@ -1127,10 +977,9 @@ while true; do
       PREV_OVERDUE[$name]=0
     fi
   done < <(targets)
-  # AC7 心跳：每轮追加一条 HEARTBEAT（只进共享 events.jsonl）。订阅方据此判定「看门的不在了」，
-  # 不依赖任何人恰好去尝试挂载。持有者一死，心跳线停止增长 → 订阅方看最后一条 ts 即知。
-  # --once 不是持有者（不取锁），不写心跳——诊断接缝不冒充长跑持有者。
   [ "$ONE_SHOT" = true ] && break
-  sl_heartbeat
+  # 测试接缝 SL_ROUND_MARKER：每轮打一行 `# ROUND` 到 stdout，作为轮次刻度（替代旧的共享文件
+  # HEARTBEAT 行——那是「看门的心跳」的载体，已随共享文件移除）。生产不设 → 不打印，事件流干净。
+  [ "${SL_ROUND_MARKER:-0}" = "1" ] && echo "# ROUND"
   sleep "$INTERVAL"
 done

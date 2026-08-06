@@ -72,18 +72,22 @@ perspective exists only at the manager layer). Mechanisms:
 - **Arbitration is done with `.halt`, not by re-ordering a token** — write
   `echo "<reason> | 解除条件: <cond> | manager <ISO>" > <repo>/.halt` to pause a project, `rm <repo>/.halt`
   to resume.
-- **Cross-project heavy ops are serialized** by `plugin/scripts/heavy-op-token.sh` (event-driven; the
-  manager does NOT poll for resource conflicts). Token state: `cat "${QUAY_GLOBAL_DIR:-$HOME/.quay-global}/heavy-op/token"`.
+- **Cross-project heavy ops are NOT serialized** — `heavy-op-token.sh` (the "one heavy test at a
+  time" token) was RETIRED 2026-08-06 by human ruling (gap-session-liveness-remove-shared-events-and-
+  lock): resource pressure is handled by `plugin/scripts/resource-gate.sh` (per-run load gate), not by
+  a cross-project mutex.
 - **Escalations are aggregated, not solved** — read each project's `orchestration/escalations.md`,
   dedupe + sort + judge which need the human; solving them is the outer's job. The manager never
   resolves a project's escalation itself.
 
 ### 3. Trend watching (看趋势) — "what is happening across the network"
 
-Cross-project liveness and trend observation, on the shared observer mechanism
-(`plugin/scripts/session-liveness.sh` → shared `events.jsonl`). The manager **reads the shared event
-file** and applies the §1.6 triage rule — most events are state transitions that need nothing; only
-"should have moved but didn't" needs action. The manager also **relays a defect discovered in one
+Cross-project liveness and trend observation. 2026-08-06 (gap-session-liveness-remove-shared-events-
+and-lock): observation is a tree (manager→N outers, outer_i→inner_i) — each observer owns its own
+stdout event stream (who mounts owns it); there is NO shared events.jsonl anymore. The manager mounts
+its OWN observers for the outers (LOOP_MIN=0 to see everything if it wants) and reads ITS OWN Monitor
+streams; a project outer mounts its own observer for its inner. The manager
+**relays a defect discovered in one
 project to the others** (a cross-project finding a single project's outer cannot see).
 
 ## Two verified rules (extracted from orchestration/manager-loop-tick.md)
@@ -124,8 +128,8 @@ These four are always delegated to the owning project's outer (see `orchestratio
 3. **Does not debug any project's own code / tests / CI** — the human drew this line explicitly.
 4. **Does not directly edit any project's code.**
 
-**Sole exception:** cross-project shared mechanisms that have no other owner (`heavy-op-token.sh`,
-the shared `.halt` convention, tmux layout conventions).
+**Sole exception:** cross-project shared mechanisms that have no other owner (the shared `.halt`
+convention, tmux layout conventions — `heavy-op-token.sh` was retired 2026-08-06).
 
 **Mechanical boundary signal:** if the manager needs a new observation/judgment capability, the
 deliverable is a **request to the outer layer**, not a self-written script. A `.sh`/`.ts`
@@ -228,9 +232,9 @@ allowed-tools: Bash, Read, Monitor
   `docs/proposals/quay-harness-crystallization-roadmap.md` 已 **SUPERSEDED by ADR-022**，只作历史。 |
 | **排序（prioritization）** | 跨项目资源仲裁：`.halt` 是仲裁手段（写 `<repo>/.halt` 暂停、`rm` 恢复）；
   优先级 **quay > archguard/meta-cc**（人 2026-08-03 裁定）；跨项目重活由
-  `plugin/scripts/heavy-op-token.sh` 串行化（事件驱动，不需轮询资源冲突）。 |
-| **看趋势（trend）** | 网络级存活观测（session-liveness 事件 / `monitor-mount-check.sh`，共享事件文件
-  `$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；每次 tick 记当时 `cpu some avg10`（AC4 判据 =
+  `plugin/scripts/resource-gate.sh` 按负载门控（`heavy-op-token.sh` 已于 2026-08-06 退休）。 |
+| **看趋势（trend）** | 网络级存活观测（session-liveness 事件 / `monitor-mount-check.sh`，每观察者自己的
+  stdout 事件流——2026-08-06 起共享 events.jsonl 已移除）；每次 tick 记当时 `cpu some avg10`（AC4 判据 =
   连续两次 tick 超 80）；REVIEW-cadence 3b 的「纯反应式」信号（同族纯反应式反复出现 = 战略层信号）。 |
 
 ---
@@ -269,7 +273,7 @@ allowed-tools: Bash, Read, Monitor
 3. **不替任何项目调试它自己的代码/测试/CI** —— 人 2026-08-03 明确划的线
 4. **不直接改任何项目的代码**
 
-**唯一例外**：跨项目的共享机件（`heavy-op-token.sh`、各项目 `.halt` 约定、tmux 布局约定）——
+**唯一例外**：跨项目的共享机件（各项目 `.halt` 约定、tmux 布局约定——`heavy-op-token.sh` 已于 2026-08-06 退休）——
 那些没有别的主人。
 
 **越界的机械信号**（SPEC-manager-productization §5）：manager 若需要一个新的观测/判定能力，

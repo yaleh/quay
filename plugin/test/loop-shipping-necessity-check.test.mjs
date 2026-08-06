@@ -5,10 +5,10 @@
 // nothing can discover an entry that is no longer NECESSARY. The 2026-08-04 instance:
 // orchestration/inner-brief-2026-08-04-restart.md's exclusion became dead weight once its source
 // was fixed (commit 6e01329e split the full old path into dir+filename) — it suppressed zero hits,
-// only blinding that file to all six old paths. A green AC1b run proves GREEN, not NECESSARY.
+// only blinding that file to all five old paths. A green AC1b run proves GREEN, not NECESSARY.
 //
 // This file is the necessity check's DETERMINISTIC half: for each FILE-level exclusion entry, scan
-// its target file for hits of the 6 old-path patterns. A target with ZERO hits means the exclusion
+// its target file for hits of the 5 old-path patterns. A target with ZERO hits means the exclusion
 // suppresses nothing today — it is INERT (必然不必要), the safe deterministic lower bound. The
 // mechanism enforces the ## Contract invariant:
 //

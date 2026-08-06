@@ -28,7 +28,7 @@ extra:
 ---
 **type:** execution
 
-## Proposal
+## Finding
 
 **去掉共享事件文件 + 彻底去掉互斥锁——观测拓扑是树，只读天然不排他。**
 
@@ -58,32 +58,95 @@ tmux capture-pane / git log / stat，零写入；send-keys 只在注释解释输
 **互斥锁存在的唯一理由** = 保护那个共享文件；共享文件本身不该存在——去掉共享文件，重复挂载立刻无害，
 锁就没有存在理由。
 
+**【B-FULL-DELETE（人 2026-08-06 最终裁定，接续上面的锁裁定）】**：「彻底删掉 heavy-op-token.sh 及其
+调用/相关逻辑，不再处理一次只跑一个重测试逻辑」——**heavy-op-token.sh 整体删除 + 全部调用点清理**：
+scripts/test.sh（5 处）、session-liveness.sh（7 处）、session-liveness-mount.sh（1 处）、quay-init.sh
+（2 处）、capability-catalog.sh（1 处声明）、plugin/loop/fast-mode-loop-tick.md（单飞挂载语义）、
+heavy-op-token 测试文件（4 个）、cold-start-e2e.sh。「一次只跑一个重测试」约束整体退休，无替代。
+（resource-gate.sh 仍是负载闸，与 token 不同——token 是跨项目互斥，gate 是单次运行负载门。）
+
 ### 目标形状
 
-- 每个观察者拥有自己的事件流（谁挂的谁拥有）
-- 无锁，目标完全无感，观察者之间互不知情，谁先启动无关
+- 每个观察者拥有自己的事件流（谁挂的谁拥有，stdout 流，Monitor 工具消费）
+- 无锁（含 session-liveness 的 heavy-op 借用 + heavy-op-token.sh 本体的整体删除），目标完全无感，
+  观察者之间互不知情，谁先启动无关
 - manager 挂 N 个观察各 outer；每个 outer 挂 1 个观察自己 inner——全独立、全只读、零共享写点
+
+## Requested action
+
+**Chosen mechanism**（gap-kind 的机制节，DIR-122 的 `## Requested action` 角色）：
+
+1. **`plugin/scripts/session-liveness.sh`**：删掉共享事件文件机制（`sl_json_append`/`sl_emit_shared`/
+   `sl_heartbeat`/`SL_EVENTS_FILE`/`SL_GLOBAL_DIR`）与互斥锁借用（`_sl_acquire_or_noop`/
+   `_sl_release_mount_lock`/`heavy-op-token.sh` 调用）。事件只走观察者自己的 stdout（`sl_emit` 只
+   echo）；`SL_ROUND_MARKER` 测试接缝给轮次刻度。
+2. **`plugin/scripts/heavy-op-token.sh` 整删**（B-FULL-DELETE）+ 全部调用点：`scripts/test.sh`
+   （heavy_op_acquire 删，full-suite 标记改 `is_default_set`）、`plugin/scripts/quay-init.sh`
+   （laydown 列表删）、`plugin/scripts/capability-catalog.sh`（声明删）、`test/cold-start-e2e.sh`、
+   `plugin/scripts/loop-shipping-exclusion-data.mjs`（oldPaths 6→5）、`plugin/test/heavy-op-token*.test.mjs`（删）。
+3. **`plugin/scripts/monitor-mount-check.sh`**：删共享事件 `delivered` 判据，收敛为 `mounted` +
+   `targetRoot`/`targetOk` 两判据（谁挂的谁拥有 stdout 流，交付由挂载方 Monitor 承担）。
+4. **`plugin/test/session-liveness.test.mjs`**：删 M1-M7（锁 + 共享文件）与 AC21（共享文件补丁）；
+   加 AC2/AC4 并行观测测试（多观察者同一目标、不同 LOOP_MIN，各自流独立）。
+5. **文档同步**：`plugin/loop/{fast-mode,orchestrator}-loop-tick.md`、`plugin/skills/{cold-start,init,manager}/SKILL.md`、
+   `docs/analysis/fast-mode-loop-tick.md`、`orchestration/orchestrator-loop-tick.md` 三判据→两判据、
+   单飞语义改、heavy-op 退休。
 
 ## Acceptance Criteria
 
 - [ ] AC1: 共享事件文件移除——每个观察者写自己的事件流（谁挂的谁拥有）
-- [ ] AC2: 互斥锁移除——多观察者并行挂载无冲突（无锁，天然可并行）
+- [ ] AC2: 互斥锁移除——多观察者并行挂载同一目标无冲突（无锁，天然可并行）；
+      且 heavy-op-token.sh 已整体删除（含全部调用点：test.sh/quay-init/capability-catalog/cold-start-e2e/测试文件）
 - [ ] AC3: 目标无感——session-liveness 对目标仍纯只读（capture-pane/git log/stat，零写入）
-- [ ] AC4: 观察者互不知情——manager 观 outer + outer 观 inner 独立并行，谁先启动无关
+- [ ] AC4: 观察者互不知情——manager 观 outer + outer 观 inner 独立并行，谁先启动无关；
+      同一目标被两个 LOOP_MIN 不同的观察者盯，各自阈值只作用于各自 stdout（AC21 根因消失）
 - [ ] AC5: 与 gap-a-log-already-filtered（打补丁的）交叉标注——本任务去掉根因，该补丁可退役
+
+## Definition of Done
+
+- [ ] 代码落地：`plugin/scripts/session-liveness.sh` 不含共享事件文件/锁/heavy-op 借用（`grep -c` 为 0）
+- [ ] `plugin/scripts/heavy-op-token.sh` 及其 4 个测试文件已删除；test.sh/quay-init/capability-catalog/cold-start-e2e 无引用
+- [ ] 测试绿：`plugin/test/session-liveness.test.mjs`（AC2/AC4 并行观测正控制实跑通过）、
+      `plugin/test/monitor-mount-check.test.mjs`（两判据）、`plugin/test/loop-shipping*.test.mjs`、`plugin/test/quay-init-loop.test.mjs`
+- [ ] 文档同步：两份 tick 文档 + 三个 skill 的「三判据/单飞/共享事件」语义已改
+- [ ] 实跑证据贴进任务体（AC2 两观察者并行、AC4 阈值独立的正控制输出）
+- [ ] 遵循 inherited-core 标准 DoD（五条款：proposal/implementation/verification/evidence/closure 全落地）
 
 ## Touches
 
-- plugin/scripts/session-liveness.sh（去共享 events + 去锁；每观察者自己的流）
-- plugin/loop/fast-mode-loop-tick.md（AC20 单飞语义改：观测不排他）
-- plugin/scripts/monitor-mount-check.sh（去 mounted 依赖；「在看我」语义调整）
-- tasks/gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second.md（AC5 交叉标注）
+- plugin/scripts/session-liveness.sh
+- plugin/scripts/session-liveness-mount.sh
+- plugin/scripts/monitor-mount-check.sh
+- plugin/scripts/heavy-op-token.sh
+- plugin/scripts/quay-init.sh
+- plugin/scripts/capability-catalog.sh
+- plugin/scripts/loop-shipping-exclusion-data.mjs
+- plugin/loop/fast-mode-loop-tick.md
+- plugin/loop/orchestrator-loop-tick.md
+- plugin/skills/cold-start/SKILL.md
+- plugin/skills/init/SKILL.md
+- plugin/skills/manager/SKILL.md
+- plugin/test/heavy-op-token.test.mjs
+- plugin/test/heavy-op-token-events.test.mjs
+- plugin/test/heavy-op-token-lease.test.mjs
+- plugin/test/heavy-op-token-wait.test.mjs
+- plugin/test/session-liveness.test.mjs
+- plugin/test/monitor-mount-check.test.mjs
+- plugin/test/quay-init-loop.test.mjs
+- plugin/test/cold-start-skill.test.mjs
+- plugin/test/loop-shipping.test.mjs
+- plugin/test/loop-shipping-necessity-check.test.mjs
+- plugin/test/task-contract-check.test.mjs
+- scripts/test.sh
+- test/cold-start-e2e.sh
+- packages/quay/test/install-config-driven-e2e.test.mjs
+- tasks/gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second.md
 
 ## Contract
 
-measure   parallel_observers = `bash plugin/scripts/session-liveness.sh --once 2>&1 | grep -c 'observing\|监测'` stdout 数字段（多观察者并行挂载各自正常）
-band      parallel_observers 多观察者可并行（无锁冲突、各自事件流）
-invoke    `grep -n 'SL_GLOBAL_DIR\|events.jsonl\|heavy-op/token\|_sl_acquire' plugin/scripts/session-liveness.sh`
+measure   parallel_observers = `bash plugin/scripts/session-liveness.sh --once 2>&1 | grep -c 'SESSION-STATUS'` stdout 数字段（多观察者并行挂载各自正常）
+band      parallel_observers = ≥2（多观察者可并行，无锁冲突、各自事件流）
+invoke    `grep -c 'SL_GLOBAL_DIR\|events.jsonl\|heavy-op-token\|_sl_acquire\|_sl_release' plugin/scripts/session-liveness.sh` 输出须为 0（共享文件/锁/令牌借用全部移除）
 control   两观察者盯同一 pane 并行 ⇒ 都正常（AC2）；目标零写入（AC3）
 resume    去共享与去锁分步提交，任一步完成即写盘
 

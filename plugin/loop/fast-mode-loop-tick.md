@@ -158,7 +158,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
 2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
    全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
-3. **不要删/降级/改 skip 这族**——它们抓的是真问题（挂载单飞、laid-down 实跑、`--once` 接缝），
+3. **不要删/降级/改 skip 这族**——它们抓的是真问题（并行观测、laid-down 实跑、`--once` 接缝），
    只是天生负载敏感。
 
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
@@ -173,11 +173,13 @@ grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线
 只会看到「没有新遥测」，与「内层在思考一个难题」完全同形——这是本仓当天两次栽过的那一族失效换了个
 位置。内层跑重活，会话死掉代价更大，**更需要**进程存活这一层。
 
-**挂载是单飞（AC20，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）**：挂载是一个
-**有主的、可接管的角色**——取单飞锁（复用 `heavy-op-token.sh` 的锁），已有活持有者时再挂 ⇒
-退出 0（空操作，不是失败）、不新增进程；持有者 kill -9 后下一次挂载自动接管。所以**任何项目
-（quay/archguard/meta-cc）都挂同一把锁、同一份共享事件**（`$QUAY_GLOBAL_DIR/session-liveness/events.jsonl`）；
-先挂上者成为唯一持有者，其余挂载一律空操作。要看事件的人**订阅共享文件即可，不必自己挂**。
+**挂载无锁（2026-08-06 人裁定，gap-session-liveness-remove-shared-events-and-lock）**：观测是**树**
+（manager→N 个 outer、outer_i→inner_i），每条边是独立的 (观察者,目标) 对，**只读天然不排他**。
+挂载**不取任何锁**——观测对目标纯只读（capture-pane/git log/stat，零写入），两个观察者盯同一
+pane 的代价只是每周期多一次 capture-pane；不再有共享 events.jsonl（那是把 N 条独立流合并成一条
+再让每个消费者过滤回自己要的——严格劣于 N 条独立流）。**谁挂的谁拥有自己的 stdout 事件流**：
+挂载方（Monitor 工具）直接消费该流，谁先启动无关，观察者之间互不知情、不共享任何写点。
+（旧的「单飞挂载 + 共享事件」设计及 `heavy-op-token.sh` 已随人裁定整体退休。）
 
 挂法与心跳（AC11/AC16）：内层的心跳不是外层那种 tick 日志，而是它的**会话 transcript**
 （AC1/AC16，2026-08-03 实测选定：`.workflow-events/` 每任务只写 1-2 行、任务进行中完全冻结，
@@ -303,8 +305,9 @@ halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」
 bash plugin/scripts/monitor-mount-check.sh --json
 ```
 
-三判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根、`delivered=true`（AC9 起取代
-`ownedByThisSession`——判据是「事件是否真的送达」共享事件文件，不是「是不是本会话挂的」）。
+两判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根（`targetOk=true`）。2026-08-06 起
+`delivered`（AC9 的共享事件文件判据）随共享 events.jsonl 移除——事件送达由挂载方自己的 Monitor
+事件流承担（谁挂的谁拥有），不是检查器能读的跨观察者文件。
 
 ### 1. 读状态
 
@@ -899,8 +902,8 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 阻塞信号状态（步骤 3 `--detect-stop` 的输出：命中了哪些停止条件、`.quay/inner-blocked.json`
   存在与否；存在则报 `reason` + `question`，以及 `fast-mode-telemetry --report` 的累计死时间/单次最长
   ——2026-08-03 起该数有基线）
-- Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
-  `targetRoot` 是否等于本仓根 / `delivered`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库/事件有没有送达
-  （AC9 起 `delivered` 取代 `ownedByThisSession`：判据是共享事件文件有没有新事件，不是「是不是本会话挂的」）
+- Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+  `targetRoot` 是否等于本仓根 / `targetOk`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库
+  （2026-08-06 起 `delivered` 随共享 events.jsonl 移除；事件送达由挂载方自己的 Monitor 流承担）
 
 不要只说「继续中」——没有这些数字，1 任务/小时的目标无法判定。

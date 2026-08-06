@@ -129,7 +129,8 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
     assert.match(r.stdout, /fast-mode-loop-tick\.md/, 'dry-run must list the inner tick doc');
     assert.match(r.stdout, /fast-mode-telemetry\.ts/, 'dry-run must list the telemetry checker');
     assert.match(r.stdout, /resource-gate\.sh/, 'dry-run must list the resource gate');
-    assert.match(r.stdout, /heavy-op-token\.sh/, 'dry-run must list the heavy-op token');
+    assert.ok(!/heavy-op-token\.sh/.test(r.stdout),
+      'dry-run must NOT list heavy-op-token.sh (retired 2026-08-06 — the "one heavy test at a time" token is gone)');
     // Dry-run must NOT write anything.
     assert.ok(!fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'dry-run must not write files');
     assert.ok(!fs.existsSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh')), 'dry-run must not write files');
@@ -150,7 +151,7 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
     // session-liveness.sh via the separate session-liveness section below).
     const expectedScripts = [
       'fast-mode-telemetry.ts', 'inner-blocked-signal.ts', 'inner-forensics.mjs', 'inner-idle-log.ts',
-      'loop-driver-check.sh', 'resource-gate.sh', 'heavy-op-token.sh', 'task-contract-check.ts',
+      'loop-driver-check.sh', 'resource-gate.sh', 'task-contract-check.ts',
       'task-status-drift-check.ts', 'touches-orthogonality-check.ts', 'concurrent-batch-scheduler.ts',
       'it0-split-or-commit-check.ts', 'pipe-exit-code-check.sh',
       // transitive deps of the checkers (the laid-down mechanism must be functional)

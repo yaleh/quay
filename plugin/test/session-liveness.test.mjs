@@ -176,15 +176,14 @@ function makeHermeticProbe(session) {
 }
 
 // spawnMonitor — run the REAL session-liveness.sh with a fast test interval and overridable targets.
-// Isolation (single-flight mount, 2026-08-03): the monitor now acquires the mount lock + writes
-// heartbeat/events to its global dir, so EVERY spawned monitor gets its OWN SESSION_LIVENESS_GLOBAL_DIR
-// temp dir — otherwise a test monitor would collide with a real production mount (or with a SIGKILLed
-// sibling's stale lock in a shared test dir) and exit 0 as a no-op. cleanup() removes the temp dir.
-function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin, globalDir } = {}) {
-  const gd = globalDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "sl-global-"));
+// 2026-08-06 (gap-session-liveness-remove-shared-events-and-lock): the shared events file + the
+// mount lock are gone — each observer owns its own stdout stream, so there is NO global state to
+// isolate and a spawned monitor can never collide with another mount. SL_ROUND_MARKER=1 (default in
+// tests) prints one `# ROUND` per loop iteration as a deterministic round cadence (the old shared-file
+// HEARTBEAT was the previous cadence carrier). cleanup() is a no-op keep-alive for the old call sites.
+function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin, roundMarker = true } = {}) {
   const monEnv = {
     ...env,
-    SESSION_LIVENESS_GLOBAL_DIR: gd,
     SESSION_TARGETS: targets,
     INTERVAL: String(interval),
     STALL_MIN: String(stallMin),
@@ -194,6 +193,7 @@ function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, st
     // classifier — BASH_SOURCE-relative lookup would point at the temp copy's directory.
     SL_CLASSIFY: path.resolve(__dirname, "..", "scripts", "pane-state-classify.ts"),
   };
+  if (roundMarker) monEnv.SL_ROUND_MARKER = "1";
   if (tickLogs) monEnv.SESSION_HEARTBEATS = tickLogs;
   if (transcripts) monEnv.SESSION_TRANSCRIPTS = transcripts;
   if (loopMin !== undefined) monEnv.LOOP_MIN = String(loopMin);
@@ -204,9 +204,22 @@ function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, st
   return {
     child,
     output: () => out,
-    globalDir: gd,
-    cleanup() { try { fs.rmSync(gd, { recursive: true, force: true }); } catch { /* best-effort */ } },
+    cleanup() { /* per-observer streams are process-local — nothing global to remove */ },
   };
+}
+
+// countRounds / waitForRounds — the stdout round cadence (`# ROUND` under SL_ROUND_MARKER). The old
+// waitForHeartbeats read the shared events file; with the file gone, tests count rounds from stdout.
+function countRounds(mon) {
+  return (mon.output().match(/# ROUND/g) || []).length;
+}
+async function waitForRounds(mon, n, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (countRounds(mon) >= n) return true;
+    await sleep(100);
+  }
+  return countRounds(mon) >= n;
 }
 
 async function waitForOutput(mon, pattern, timeoutMs) {
@@ -941,55 +954,13 @@ test("noise gate — an idle transition with a FRESH tick log is SILENT (healthy
 });
 
 // ── AC21（gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second）──────────────
-// 缺陷形状：单飞挂载 + 共享文件，而过滤发生在【发出端】⇒ 持有者的阈值被强加给所有订阅方。外层持有者
-// LOOP_MIN=20 时，「空闲但心跳新鲜」（hmin < 20，健康循环收尾）在发出端被静默，根本没进共享文件，
-// 管理者（订阅方）需要知道「外层空闲等输入 = 该派活了」，却看不到。
-// AC21 机制：共享 events.jsonl 记全量（含 hmin 原始量），LOOP_MIN 只作用于持有者自己的 stdout。
-// 两个方向一起验（最省事的"修法"是把抑制整个删掉——那会把噪声原样搬到持有者身上，必须同时守住）：
-//   AC21c（负控制）：持有者 LOOP_MIN=20 时，共享 events.jsonl 里仍须出现 hmin < 20 的 IDLE 记录。
-//   AC21d（外层加）：同一场景持有者自己的 stdout 里 SESSION-IDLE 通知数仍为 0。
-
-function readEvents(globalDir) {
-  const f = path.join(globalDir, "events.jsonl");
-  if (!fs.existsSync(f)) return [];
-  return fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean)
-    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-    .filter((e) => e && typeof e.event === "string");
-}
-
-test("AC21 — with LOOP_MIN=20 and a fresh heartbeat (hmin<20), the shared events.jsonl records the IDLE while the holder's stdout stays silent (record full, judge at read time)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const p = makeHermeticProbe("ol-ac21");
-  const tick = path.join(p.tmp, "tick.md");
-  try {
-    fs.writeFileSync(tick, "# tick\n"); // mtime = now → hmin ≈ 0, well under LOOP_MIN=20
-    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
-    const mon = spawnMonitor(p.env, `ac21 ${p.tmp} ${p.session}`, { tickLogs: `ac21 ${tick}`, interval: 1, loopMin: 20 });
-    try {
-      await sleep(2500); // idle baseline: PREV_IDLE=1
-      makePaneBusy(p.env, p.session); // shape-busy (ruling D)
-      assert.ok(await waitForOutput(mon, /SESSION-RESUMED ac21/, 25000), `RESUMED must fire on busy (monitor is tracking):\n${mon.output()}`);
-      makePaneIdle(p.env, p.session); // back to the idle shape
-      await sleep(3500); // ≥3 rounds after idle — IDLE would have fired by now if not gated
-
-      // AC21d: the holder's stdout must stay silent on a fresh-heartbeat idle (LOOP_MIN gate).
-      assert.ok(!/SESSION-IDLE ac21/.test(mon.output()),
-        `holder stdout must stay silent on a fresh-heartbeat idle (AC21d — the gate is on stdout only):\n${mon.output()}`);
-
-      // AC21c: the shared events.jsonl MUST carry the IDLE record with the raw hmin (< 20).
-      const events = readEvents(mon.globalDir);
-      const idle = events.find((e) => e.event === "SESSION-IDLE" && e.name === "ac21");
-      assert.ok(idle, `shared events.jsonl must record the IDLE transition (AC21c — record full, judge at read time):\n${JSON.stringify(events, null, 2)}`);
-      const hminMatch = idle.msg.match(/心跳 (\d+) 分钟前更新/);
-      assert.ok(hminMatch && Number(hminMatch[1]) < 20,
-        `the shared IDLE record must carry hmin < 20 (the raw quantity, AC21b), got msg=${idle.msg}`);
-    } finally {
-      mon.child.kill("SIGKILL");
-    mon.cleanup();
-    }
-  } finally {
-    p.cleanup();
-  }
-});
+// 根因已随 2026-08-06 人裁定移除（gap-session-liveness-remove-shared-events-and-lock）：共享 events.jsonl
+// 与互斥锁被删，观察是树（manager→N 个 outer、outer_i→inner_i），每条边是独立的 (观察者,目标) 对，
+// 每个观察者的阈值（LOOP_MIN/STALL_MIN/OVERDUE_MIN）只作用于它自己的 stdout、只服务它自己的消费者。
+// 「已被一个消费者的阈值筛过的日志服务不了第二个消费者」的前提是「一条流被多个消费者读」——现在每条
+// 流只有一个消费者，缺陷形态不存在。AC21 的「共享文件记全量供订阅方自判」补丁可退役（AC5 交叉标注）。
+// 每个观察者阈值独立、谁先启动无关的正控制由上面的 AC4 并行观测测试承担（LOOP_MIN=0 报 / LOOP_MIN=999
+// 抑，同一目标、同轮，各自流互不影响）。
 
 // ── AC11: heartbeat parameterized for the INNER use case (a directory, not a file) ────────────────
 
@@ -1370,243 +1341,85 @@ test("AC4 — the script header documents the screen-vs-transcript tradeoff, eac
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// 单飞挂载（AC20a/b/d/AC5/AC6/AC7，gap-liveness-mounting-is-a-single-flight-role-with-no-owner）
+// 并行观测（AC2/AC4，gap-session-liveness-remove-shared-events-and-lock，2026-08-06 人裁定）
 // ═════════════════════════════════════════════════════════════════════════════
 //
-// 「谁需要谁自己起一个」对单飞资源是错的默认；正确的默认是「谁需要谁去订阅」，挂载是一个有主的、
-// 可接管的角色。这些测试把 AC20a–d / AC5 / AC6 / AC7 变成机械断言：
-//   M1  AC20a 第一个挂载取单飞锁（复用 heavy-op-token 的锁），锁记录的 pid 就是监视器进程自己。
-//   M2  AC20b 有活持有者时再挂 ⇒ 退出 0、打印属主与 pid、不新增进程（空操作不是失败）。
-//   M3  AC20d kill -9 持有者后下一次挂载必须接管，输出 takeover_ms。
-//   M4  AC5   持有者活着时绝不接管、绝不 kill——锁字节不变、持有者进程不灭。
-//   M5  AC6   三次挂载（一次持有 + 两次空操作）后 mount_count == 1。
-//   M6  AC20c/AC7 事件 + HEARTBEAT 写进共享 events.jsonl；第二方不挂载即可读到同一批事件；
-//                 持有者死后心跳停止增长（订阅方据此判定「看门的不在了」）。
-//   M7  AC1   复用点：session-liveness.sh 调用 heavy-op-token.sh 的锁；mount 入口 exec 监视器。
-//
-// 隔离：每个测试用独立的 SESSION_LIVENESS_GLOBAL_DIR 临时目录，绝不触碰真实 $HOME/.quay-global；
-// mount_count 按「/proc/<pid>/environ 带本测试全局目录 + cmdline 含 session-liveness.sh」统计，
-// 与契约的 `ps -eo ppid,args | grep -c '[s]ession-liveness.sh'` 同构但限定在本测试的锁域内
-// （真实生产监视器不会漏进来）。所有挂载测试都跳过 --once 诊断接缝（不取锁）。
+// 人裁定：观测是树（manager→N 个 outer、outer_i→inner_i），每条边是独立的 (观察者,目标) 对，
+// 只读、无交集。共享 events.jsonl（把 N 条独立流合并成一条再让每个消费者过滤回自己要的）与互斥锁
+// （保护共享文件的唯一存在理由）都被彻底移除。AC20 的单飞挂载判据（第一个持有、第二个空操作、
+// 接管）随之作废——旧 M1-M7 测试删于 2026-08-06。替代测试验证新语义：
+//   AC2 — 多观察者并行挂载同一目标（无锁）：两个观察者都跑、都独立产生事件（无空操作、无冲突）。
+//   AC4 — 观察者互不知情：同一目标被两个 LOOP_MIN 不同的观察者盯，各自阈值只作用于各自 stdout，
+//        谁先启动无关（先起者不决定后起者能看到什么——AC21 根因消失）。
 
-const MOUNT = path.join(__dirname, "..", "scripts", "session-liveness-mount.sh");
-
-function mountEnv(globalDir, { owner = "test-owner", staleS = 2, targets, env = process.env } = {}) {
-  return {
-    ...env,
-    SESSION_LIVENESS_GLOBAL_DIR: globalDir,
-    SESSION_LIVENESS_OWNER: owner,
-    SESSION_LIVENESS_MOUNT_STALE_S: String(staleS),
-    SESSION_TARGETS: targets ?? `mt ${globalDir} mt-nonexistent`,
-    INTERVAL: "1",
-    STALL_MIN: "999",
-    OVERDUE_MIN: "999",
-  };
-}
-
-// countMountProcesses — mount_count scoped to THIS test's lock domain: session-liveness.sh processes
-// (NOT session-liveness-mount.sh) whose /proc/<pid>/environ carries our SESSION_LIVENESS_GLOBAL_DIR.
-function countMountProcesses(globalDir) {
-  let n = 0;
-  for (const d of fs.readdirSync("/proc", { withFileTypes: true })) {
-    if (!/^\d+$/.test(d.name)) continue;
-    let env, cmd;
-    try { env = fs.readFileSync(`/proc/${d.name}/environ`, "utf8"); } catch { continue; }
-    try { cmd = fs.readFileSync(`/proc/${d.name}/cmdline`, "utf8"); } catch { continue; }
-    if (env.includes(`SESSION_LIVENESS_GLOBAL_DIR=${globalDir}`) && cmd.includes("session-liveness.sh")) n++;
-  }
-  return n;
-}
-
-async function waitForToken(globalDir, timeoutMs = 8000) {
-  const tokenPath = path.join(globalDir, "heavy-op", "token");
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline && !fs.existsSync(tokenPath)) await sleep(50);
-  return fs.existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8") : null;
-}
-
-test("M1 (AC20a) — the first mount acquires the single-flight lock; the recorded pid IS the monitor process", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
-  let m;
-  try {
-    m = spawn("bash", [MOUNT], { env: mountEnv(globalDir) });
-    const token = await waitForToken(globalDir);
-    assert.ok(token, "the first mount must acquire the lock");
-    assert.match(token, /holder=test-owner/, `lock must record the owner:\n${token}`);
-    const pid = parseInt(token.match(/pid=(\d+)/)[1], 10);
-    assert.equal(pid, m.pid, `the lock's recorded pid must be the monitor's own pid (got ${pid}, monitor ${m.pid})`);
-    const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
-    assert.ok(cmd.includes("session-liveness.sh"), `recorded pid must be the running monitor:\n${cmd}`);
-  } finally {
-    if (m) m.kill("SIGKILL");
-    fs.rmSync(globalDir, { recursive: true, force: true });
-  }
-});
-
-test("M2 (AC20b) + M4 (AC5) — a second mount with a live holder is a NO-OP: exit 0, prints owner+pid, no new process, never steals", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
-  const tokenPath = path.join(globalDir, "heavy-op", "token");
-  let holder;
-  try {
-    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir) });
-    assert.ok(await waitForToken(globalDir), "holder must have the lock");
-    const before = countMountProcesses(globalDir);
-    assert.equal(before, 1, `exactly one mount process before the second mount, got ${before}`);
-    const tokenBefore = fs.readFileSync(tokenPath, "utf8");
-    const holderPid = holder.pid;
-
-    const t0 = Date.now();
-    const second = spawnSync("bash", [MOUNT], { encoding: "utf8", env: mountEnv(globalDir, { owner: "test-owner2" }) });
-    const elapsed = Date.now() - t0;
-
-    assert.equal(second.status, 0, `second mount must exit 0 (no-op, not a failure):\n${second.stdout}\n${second.stderr}`);
-    assert.ok(elapsed < 10000, `second mount must be quick (a no-op does not wait for the holder to die), took ${elapsed}ms`);
-    assert.match(second.stdout, /已有活持有者/, `second mount must say a live holder exists:\n${second.stdout}`);
-    assert.match(second.stdout, /test-owner/, `second mount must print the holder's owner:\n${second.stdout}`);
-    assert.match(second.stdout, /pid \d+/, `second mount must print the holder's pid:\n${second.stdout}`);
-
-    const after = countMountProcesses(globalDir);
-    assert.equal(after, 1, `second mount must NOT add a process (mount_count stays 1), got ${after}`);
-    assert.equal(fs.readFileSync(tokenPath, "utf8"), tokenBefore,
-      "AC5: the lock must be byte-identical after a no-op — the second mount never steals/kills");
-    assert.ok(fs.existsSync(`/proc/${holderPid}`), "AC5: the original holder must still be alive (never killed)");
-  } finally {
-    if (holder) holder.kill("SIGKILL");
-    fs.rmSync(globalDir, { recursive: true, force: true });
-  }
-});
-
-test("M3 (AC20d) — after kill -9 of the holder, the next mount TAKES OVER and reports takeover_ms", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
-  const tokenPath = path.join(globalDir, "heavy-op", "token");
-  let holder;
-  try {
-    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir, { staleS: 1 }) });
-    assert.ok(await waitForToken(globalDir), "holder must have the lock");
-    const holderPid = holder.pid;
-    holder.kill("SIGKILL"); holder = null;
-    await sleep(100);
-    assert.ok(!fs.existsSync(`/proc/${holderPid}`), "holder must be dead after kill -9");
-
-    const m3 = spawn("bash", [MOUNT], { env: mountEnv(globalDir, { staleS: 1 }) });
-    let out3 = "";
-    m3.stdout.on("data", (d) => { out3 += d; });
-    m3.stderr.on("data", (d) => { out3 += d; });
-    try {
-      const dl2 = Date.now() + 15000;
-      while (Date.now() < dl2 && !/接管成功 takeover_ms=\d+/.test(out3)) await sleep(100);
-      assert.match(out3, /接管成功 takeover_ms=\d+/,
-        `the next mount must take over and measure takeover_ms:\n${out3}`);
-      const token2 = fs.readFileSync(tokenPath, "utf8");
-      const newPid = parseInt(token2.match(/pid=(\d+)/)[1], 10);
-      assert.equal(newPid, m3.pid, `after takeover the new holder must be the new mount:\n${token2}`);
-      assert.ok(fs.existsSync(`/proc/${newPid}`), "the new holder must be running");
-      // The holder's observer forks TRANSIENT subshells for its command substitutions (pid=$(...),
-      // ttype=$(...), etc.) — same cmdline + env, parented by the observer, gone within a loop tick.
-      // countMountProcesses cannot distinguish them from a real second holder at an arbitrary instant,
-      // so a single-shot count races them (intermittent count=2 — reproduced pre-session-idle; the
-      // transcript-fusion command substitutions raise the spawn rate). The AC's intent is "no PERMANENT
-      // second monitor": poll until the count settles at exactly 1. A real takeover leak keeps 2+
-      // persistently and fails the bounded wait.
-      let settled = 0;
-      const dlSettle = Date.now() + 5000;
-      while (Date.now() < dlSettle) {
-        const c = countMountProcesses(globalDir);
-        if (c === 1) { settled = c; break; }
-        await sleep(50);
-      }
-      assert.equal(settled, 1, `takeover must not leave a second monitor process (settled count was ${settled})`);
-    } finally {
-      m3.kill("SIGKILL");
-    }
-  } finally {
-    if (holder) holder.kill("SIGKILL");
-    fs.rmSync(globalDir, { recursive: true, force: true });
-  }
-});
-
-test("M5 (AC6) — three mounts in one lock domain ⇒ exactly ONE surviving session-liveness.sh process (mount_count=1)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const globalDir = fs.mkdtempSync(path.join(os.tmpdir(), "sl-mount-"));
-  let holder;
-  try {
-    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir) });
-    assert.ok(await waitForToken(globalDir), "the first mount must hold the lock");
-    for (let i = 0; i < 2; i++) {
-      const r = spawnSync("bash", [MOUNT], { encoding: "utf8", env: mountEnv(globalDir) });
-      assert.equal(r.status, 0, `mount ${i + 2} must exit 0 (no-op):\n${r.stdout}\n${r.stderr}`);
-    }
-    await sleep(200);
-    assert.equal(countMountProcesses(globalDir), 1,
-      `after three mounts, mount_count must be 1 (one holder, two no-ops), got ${countMountProcesses(globalDir)}`);
-  } finally {
-    if (holder) holder.kill("SIGKILL");
-    fs.rmSync(globalDir, { recursive: true, force: true });
-  }
-});
-
-test("M6 (AC20c/AC7) — a SESSION-* event + HEARTBEAT land in the shared events.jsonl; a second party reads them WITHOUT mounting; heartbeat stops after holder death", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const p = makeHermeticProbe("ol-shared");
-  const globalDir = path.join(p.tmp, "sl-global");
-  const eventsFile = path.join(globalDir, "events.jsonl");
-  let holder;
+test("AC2 — multiple observers mount the SAME target in parallel (no lock, no shared file); both run and both fire SESSION-GONE independently", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-par2");
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
-    holder = spawn("bash", [MOUNT], { env: mountEnv(globalDir, { targets: `sh ${p.tmp} ${p.session}`, env: p.env }) });
-    // wait for the first HEARTBEAT in the shared file
-    const dl1 = Date.now() + 10000;
-    while (Date.now() < dl1 && !(fs.existsSync(eventsFile) && /HEARTBEAT/.test(fs.readFileSync(eventsFile, "utf8")))) await sleep(100);
-    let content = fs.readFileSync(eventsFile, "utf8");
-    assert.match(content, /"event":"HEARTBEAT"/, `shared events file must carry HEARTBEAT lines:\n${content}`);
-    assert.match(content, /"ts":\d+/, `events must carry timestamps (AC7):\n${content}`);
-
-    // trigger a real SESSION-GONE (kill the probe's claude child) — it must land in the shared file
-    tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
-    tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-    const dl2 = Date.now() + 10000;
-    while (Date.now() < dl2 && !(fs.existsSync(eventsFile) && /SESSION-GONE sh/.test(fs.readFileSync(eventsFile, "utf8")))) await sleep(100);
-    content = fs.readFileSync(eventsFile, "utf8");
-    assert.match(content, /SESSION-GONE sh/, `SESSION-GONE must land in the shared file (AC20c: 第二方不挂载即可读到同一批事件):\n${content}`);
-    assert.match(content, /"event":"SESSION-GONE"/, `the event must be JSON-structured:\n${content}`);
-    // The holder's observer forks TRANSIENT subshells for its per-round command substitutions
-    // (same cmdline + env, gone within a loop tick); countMountProcesses cannot distinguish them
-    // from a real second holder at an arbitrary instant. The AC is "no PERMANENT second monitor" —
-    // poll until the count settles at 1 (same settle-poll M3 uses). A real second holder keeps 2+
-    // persistently and fails the bounded wait.
-    let settled = 0;
-    const dlSettle = Date.now() + 5000;
-    while (Date.now() < dlSettle) {
-      const c = countMountProcesses(globalDir);
-      if (c === 1) { settled = c; break; }
-      await sleep(50);
+    // Two observers, same target, same interval. Without the mount lock neither is a no-op: the
+    // SECOND mount must RUN (the old AC20b "empty operation" is gone with the lock).
+    const mon1 = spawnMonitor(p.env, `par ${p.tmp} ${p.session}`, {});
+    const mon2 = spawnMonitor(p.env, `par ${p.tmp} ${p.session}`, {});
+    try {
+      // both must establish ≥2 rounds (PREV_ALIVE=1 baseline) before the probe is killed.
+      assert.ok(await waitForRounds(mon1, 2, 10000), `observer 1 must run ≥2 rounds:\n${mon1.output()}`);
+      assert.ok(await waitForRounds(mon2, 2, 10000), `observer 2 must run ≥2 rounds:\n${mon2.output()}`);
+      // kill the probe's claude child → BOTH observers independently fire SESSION-GONE on their own stream.
+      tmux(["send-keys", "-t", p.session, "kill %1"], p.env);
+      tmux(["send-keys", "-t", p.session, "Enter"], p.env);
+      assert.ok(await waitForOutput(mon1, /SESSION-GONE par/, 6000), `observer 1 must fire GONE:\n${mon1.output()}`);
+      assert.ok(await waitForOutput(mon2, /SESSION-GONE par/, 6000), `observer 2 must fire GONE independently:\n${mon2.output()}`);
+      // neither stream carries the other's events — the streams are independent, not merged.
+      assert.ok(!/SECOND-OBSERVER/.test(mon1.output()), "observer 1's stream must not be polluted by observer 2");
+    } finally {
+      mon1.child.kill("SIGKILL");
+      mon2.child.kill("SIGKILL");
+      mon1.cleanup();
+      mon2.cleanup();
     }
-    assert.equal(settled, 1, "reading the shared file must not require a second mount (settled count must be 1)");
-
-    // kill the holder → the heartbeat stops growing → a subscriber sees staleness (AC7, no one re-mounts)
-    const lastTsBefore = Number([...fs.readFileSync(eventsFile, "utf8").matchAll(/"ts":(\d+)/g)].at(-1)[1]);
-    holder.kill("SIGKILL"); holder = null;
-    await sleep(1500);
-    const lastTsAfter = Number([...fs.readFileSync(eventsFile, "utf8").matchAll(/"ts":(\d+)/g)].at(-1)[1]);
-    assert.equal(lastTsAfter, lastTsBefore,
-      "after the holder dies, no new heartbeat events are appended — the subscriber can detect the holder is gone (AC7)");
   } finally {
-    if (holder) holder.kill("SIGKILL");
     p.cleanup();
   }
 });
 
-test("M7 (AC1) — the reuse point: session-liveness.sh calls heavy-op-token.sh's lock; session-liveness-mount.sh execs the monitor", () => {
-  const sl = fs.readFileSync(SCRIPT, "utf8");
-  // AC1 复用点：不新写一套锁——直接调用 heavy-op-token.sh 的 --acquire（wx 原子创建 + mtime 陈旧 AND
-  // pid 不存活才回收，那套锁已在真实死持有者上回收 17 次）。
-  assert.ok(sl.includes("heavy-op-token.sh") && sl.includes("--acquire"),
-    "session-liveness.sh must call heavy-op-token.sh --acquire (the reuse point, AC1)");
-  assert.ok(sl.includes("mtime 陈旧") && sl.includes("pid 不存活"),
-    "the header must cite the lock's stale-reclaim rule (mtime stale AND dead pid)");
-  const mount = fs.readFileSync(MOUNT, "utf8");
-  assert.match(mount, /exec bash .*session-liveness\.sh/, "the mount entry must exec session-liveness.sh (holder pid survives exec)");
+test("AC4 — observers don't know each other: the same target watched by two observers with DIFFERENT LOOP_MIN thresholds (LOOP_MIN=0 reports the healthy idle, LOOP_MIN=999 suppresses it), who-starts-first irrelevant", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-par4");
+  const tick = path.join(p.tmp, "tick.md");
+  try {
+    fs.writeFileSync(tick, "# tick\n"); // hmin ≈ 0 — a healthy idle, under every LOOP_MIN
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    // Start observer A FIRST (LOOP_MIN=999 — suppress healthy idles), THEN observer B (LOOP_MIN=0 —
+    // report everything). Who-starts-first must be irrelevant: A's threshold cannot decide what B sees.
+    // Each observer needs ≥2 IDLE baseline rounds (round 1 sets PREV_STATE, round 2 sets PREV_IDLE)
+    // before a busy transition can fire SESSION-RESUMED — see the RESUMED guard on PREV_IDLE.
+    const monA = spawnMonitor(p.env, `pa ${p.tmp} ${p.session}`, { tickLogs: `pa ${tick}`, interval: 1, loopMin: 999 });
+    assert.ok(await waitForRounds(monA, 2, 10000), `observer A (started first) must run ≥2 idle rounds:\n${monA.output()}`);
+    const monB = spawnMonitor(p.env, `pa ${p.tmp} ${p.session}`, { tickLogs: `pa ${tick}`, interval: 1, loopMin: 0 });
+    try {
+      assert.ok(await waitForRounds(monB, 2, 10000), `observer B must run ≥2 idle rounds despite A being already mounted:\n${monB.output()}`);
+      // both track the pane: busy → RESUMED fires in BOTH observers (neither is a no-op).
+      makePaneBusy(p.env, p.session);
+      assert.ok(await waitForOutput(monA, /SESSION-RESUMED pa/, 25000), `observer A must fire RESUMED:\n${monA.output()}`);
+      assert.ok(await waitForOutput(monB, /SESSION-RESUMED pa/, 25000), `observer B must fire RESUMED:\n${monB.output()}`);
+      makePaneIdle(p.env, p.session);
+      // B (LOOP_MIN=0) reports the healthy idle; A (LOOP_MIN=999) stays silent — each observer's
+      // threshold serves ONLY its own stream (the AC21 "holder threshold decides everyone's blindness"
+      // defect cannot exist with per-observer streams).
+      assert.ok(await waitForOutput(monB, /SESSION-IDLE pa/, 10000), `observer B (LOOP_MIN=0) must report the healthy idle:\n${monB.output()}`);
+      await sleep(3500);
+      assert.ok(!/SESSION-IDLE pa/.test(monA.output()),
+        `observer A (LOOP_MIN=999) must suppress the healthy idle on ITS OWN stream — per-observer threshold:\n${monA.output()}`);
+    } finally {
+      monA.child.kill("SIGKILL");
+      monB.child.kill("SIGKILL");
+      monA.cleanup();
+      monB.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
 // 阶段三（gap-session-idle-true-idle-via-transcript-fusion-and-debounce，2026-08-05）：
 // transcript 最后一条消息类型融合 + 候选闲去抖。AC1/AC2/AC3/AC4/AC5。
 // 核心：pane 哈希只答「屏幕变没变」，分不清真空闲与工具间隙。transcript 最后一条【消息】的
@@ -1637,22 +1450,9 @@ function writeTranscript(file, records, backdateMin = 0) {
   if (backdateMin > 0) spawnSync("touch", ["-d", `${backdateMin} minutes ago`, file], { encoding: "utf8" });
 }
 
-// waitForHeartbeats —— 等共享 events.jsonl 里出现 ≥n 条 HEARTBEAT（监视器每轮写一条，作为轮次刻度）。
-function countHeartbeats(globalDir) {
-  const f = path.join(globalDir, "events.jsonl");
-  if (!fs.existsSync(f)) return 0;
-  const content = fs.readFileSync(f, "utf8");
-  if (!content.trim()) return 0;
-  return content.split("\n").filter((l) => l.includes('"event":"HEARTBEAT"')).length;
-}
-async function waitForHeartbeats(globalDir, n, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (countHeartbeats(globalDir) >= n) return true;
-    await sleep(100);
-  }
-  return countHeartbeats(globalDir) >= n;
-}
+// waitForHeartbeats/countHeartbeats REMOVED 2026-08-06: they read the shared events.jsonl, which no
+// longer exists. Round cadence is now counted from stdout (`# ROUND` under SL_ROUND_MARKER) via the
+// waitForRounds/countRounds helpers defined next to spawnMonitor at the top of this file.
 
 // ── AC1 单元测试：--last-message-type 接缝（确定性，不依赖 tmux）──────────────────────────
 
@@ -1696,7 +1496,7 @@ test("AC3 — a pure-text round with no new tool calls (stale transcript) report
       { transcripts: `ac3 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
     try {
       // busy phase: ≥2 rounds so SEEN_BUSY=1 (the debounce never fires on a never-busy session).
-      assert.ok(await waitForHeartbeats(mon.globalDir, 2, 15000), `monitor must run ≥2 busy rounds:\n${mon.output()}`);
+      assert.ok(await waitForRounds(mon, 2, 15000), `monitor must run ≥2 busy rounds:\n${mon.output()}`);
       // true idle: pure-text round, 8 minutes no new tool calls (the manager's measured scenario).
       writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
       const idle = await waitForOutput(mon, /SESSION-IDLE ac3/, 20000);
@@ -1727,13 +1527,13 @@ test("AC4 — a pure-text blip lasting exactly ONE monitor round between two too
       { transcripts: `gap4 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
     try {
       // phase 1: ≥2 busy rounds (SEEN_BUSY=1); HEARTBEAT lines give the round cadence.
-      assert.ok(await waitForHeartbeats(mon.globalDir, 2, 15000), `monitor must run ≥2 rounds:\n${mon.output()}`);
+      assert.ok(await waitForRounds(mon, 2, 15000), `monitor must run ≥2 rounds:\n${mon.output()}`);
       // phase 2: the GAP — exactly one round of pure-text, then back to busy before the 2nd idle round.
       writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 1); // the gap: transcript pure-text, pane static
-      assert.ok(await waitForHeartbeats(mon.globalDir, 3, 15000), `one idle round must elapse:\n${mon.output()}`);
+      assert.ok(await waitForRounds(mon, 3, 15000), `one idle round must elapse:\n${mon.output()}`);
       writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // back to busy before the 2nd idle round
       // phase 3: several busy rounds — a wrongly-held debounce would have fired by now.
-      assert.ok(await waitForHeartbeats(mon.globalDir, 6, 20000), `several busy rounds must elapse:\n${mon.output()}`);
+      assert.ok(await waitForRounds(mon, 6, 20000), `several busy rounds must elapse:\n${mon.output()}`);
       assert.ok(!/SESSION-IDLE gap4/.test(mon.output()),
         `AC4: a single-round pure-text gap between tool calls must NOT report SESSION-IDLE (debounce):\n${mon.output()}`);
       // positive control: a PERSISTENT pure-text (true idle) DOES fire after the 2-round debounce.
@@ -1885,18 +1685,26 @@ test("AC4 — 信号可区分：同一目标先有产出（不报 OVERDUE）→ 
 });
 
 // Contract invoke：`bash plugin/scripts/session-liveness.sh --selfcheck`。断言多源逻辑本身——
-// 红窗处置 ⇒ 心跳新鲜（AC2）、零产出 ⇒ 心跳陈旧（AC3）、heartbeat_source_count ≥ 3（band）。
-test("Contract — --selfcheck passes (exit 0): heartbeat_source_count ≥ 3, incident-handling heartbeat FRESH, no-output heartbeat STALE, ALL PASS", () => {
+// 红窗处置 ⇒ 心跳新鲜（AC2，red-window-heartbeat_min < OVERDUE_MIN）、零产出 ⇒ 心跳陈旧
+// （AC3，zero-output-heartbeat_min ≥ OVERDUE_MIN）、selfcheck: PASS（band）。
+// NOTE 2026-08-06: this assertion was realigned to the CURRENT selfcheck output format
+// (red-window-heartbeat_min / zero-output-heartbeat_min) — the old format
+// (heartbeat_source_count / "selfcheck: ALL PASS") was replaced when the multi-source heartbeat
+// landed and this test had gone stale.
+test("Contract — --selfcheck passes (exit 0): red-window heartbeat FRESH, zero-output heartbeat STALE, PASS", () => {
   const r = spawnSync("bash", [SCRIPT, "--selfcheck"], { encoding: "utf8" });
   assert.equal(r.status, 0, `selfcheck must exit 0:\n${r.stdout}\n${r.stderr}`);
-  const count = r.stdout.match(/heartbeat_source_count=(\d+)/);
-  assert.ok(count && Number(count[1]) >= 3,
-    `heartbeat_source_count must be >= 3 (多源：提交/队列状态/tick-log 至少 3 源), got ${count && count[1]}:\n${r.stdout}`);
-  assert.match(r.stdout, /incident-handling heartbeat FRESH/,
-    `selfcheck must prove incident-handling keeps the heartbeat fresh (AC2 反向失效消除):\n${r.stdout}`);
-  assert.match(r.stdout, /no-output heartbeat STALE/,
-    `selfcheck must prove zero-output staleness (AC3 真阳性保留):\n${r.stdout}`);
-  assert.match(r.stdout, /selfcheck: ALL PASS/, `selfcheck must report ALL PASS:\n${r.stdout}`);
+  const fresh = r.stdout.match(/red-window-heartbeat_min=(\d+)/);
+  assert.ok(fresh, `selfcheck must report red-window-heartbeat_min:\n${r.stdout}`);
+  const stale = r.stdout.match(/zero-output-heartbeat_min=(\d+)/);
+  assert.ok(stale, `selfcheck must report zero-output-heartbeat_min:\n${r.stdout}`);
+  const overdue = r.stdout.match(/OVERDUE_MIN=(\d+)/);
+  assert.ok(overdue, `selfcheck must report OVERDUE_MIN:\n${r.stdout}`);
+  assert.ok(Number(fresh[1]) < Number(overdue[1]),
+    `incident handling must keep the heartbeat FRESH (AC2 反向失效消除): red-window ${fresh[1]} < OVERDUE_MIN ${overdue[1]}:\n${r.stdout}`);
+  assert.ok(Number(stale[1]) >= Number(overdue[1]),
+    `zero output must go STALE (AC3 真阳性保留): zero-output ${stale[1]} >= OVERDUE_MIN ${overdue[1]}:\n${r.stdout}`);
+  assert.match(r.stdout, /selfcheck: PASS/, `selfcheck must report PASS:\n${r.stdout}`);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

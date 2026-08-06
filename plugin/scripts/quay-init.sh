@@ -733,13 +733,13 @@ derive_loop_scripts() {
   bare_resolved_scripts "${mech_files[@]}" | sed 's#^plugin/scripts/##' >> "$out" || true
   # (c) explicit additions:
   #   tick-doc BARE-NAME mechanism files (no plugin/scripts/ prefix in the docs → not derivable):
-  #   inner-idle-log.ts, heavy-op-token.sh, it0-split-or-commit-check.ts, pipe-exit-code-check.sh;
+  #   inner-idle-log.ts, it0-split-or-commit-check.ts, pipe-exit-code-check.sh;
   #   transitive deps of the checkers (imported by them, not doc-referenced): gate-script-base.ts,
   #   workflow-event-schema.mjs, task-schema.ts, touches-parser.ts, wiring-coverage-check.ts;
   #   capability catalog (gap-eighty-two-shipped-checks-and-none-says-what-it-answers): ships with
   #   the loop so an installed project can see what each laid-down check answers. Deliberate
   #   explicit addition (no doc references it by path — the catalog is self-describing).
-  printf '%s\n' inner-idle-log.ts heavy-op-token.sh it0-split-or-commit-check.ts pipe-exit-code-check.sh \
+  printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh >> "$out"
   sort -u "$out" -o "$out"

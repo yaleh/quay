@@ -216,7 +216,7 @@ session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——
 （`pgrep -af 'suite-state-trigger.ts --monitor'`，有 node 活进程即可；按步骤 0 的自匹配纪律
 排除 pgrep 自己那一行——发起查询的命令行里含同样字符串）。
 
-**4c. 重挂后立即验证挂上了 —— 三判据自检**
+**4c. 重挂后立即验证挂上了 —— 两判据自检**
 
 重挂 Monitor 后立刻跑一次检查器，不靠「看起来挂上了」：
 
@@ -224,12 +224,12 @@ session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——
 bash plugin/scripts/monitor-mount-check.sh --json
 ```
 
-三判据缺一不可：`mounted=true`（挂上了）、`targetRoot` 等于本仓根（挂对了，`targetOk=true`）、
-`delivered=true`（AC9 起取代 `ownedByThisSession`——判据是「事件是否真的送达」共享事件文件，不是
-「是不是本会话挂的」；别的会话挂的、投递正常必须照样 PASS）。
+两判据缺一不可：`mounted=true`（挂上了）、`targetRoot` 等于本仓根（挂对了，`targetOk=true`）。
+2026-08-06 起 `delivered`（AC9 的共享事件文件判据）随共享 events.jsonl 移除——事件送达由挂载方
+自己的 Monitor 事件流承担（谁挂的谁拥有），不是检查器能读的跨观察者文件。
 任何一条不满足都按冷启动失败处理，不要直接进 tick。
-`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`：挂没挂/挂哪个仓库/事件有没有送达
-三条判据是**一条不是一条**——只查第一条会漏掉「进程活着、目标错」那次（管理者 18 小时挂错目标）。
+`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`：挂没挂/挂哪个仓库
+两条判据是**一条不是一条**——只查第一条会漏掉「进程活着、目标错」那次（管理者 18 小时挂错目标）。
 
 **5. 核对前置条件**
 
@@ -323,9 +323,9 @@ monitor，从外面看一模一样。**
 bash plugin/scripts/monitor-mount-check.sh --json
 ```
 
-三判据：`mounted`（挂没挂）/ `targetRoot` 是否等于本仓根（挂的哪个仓库副本）/
-`delivered`（事件有没有送达共享事件文件；AC9 起取代 `ownedByThisSession`——判据是「事件是否真的
-送达」，不是「是不是本会话挂的」）。挂载判据是 argv 前两 token 精确等于 `bash <绝对路径>`，
+两判据：`mounted`（挂没挂）/ `targetRoot` 是否等于本仓根（挂的哪个仓库副本，`targetOk`）。
+2026-08-06 起 `delivered` 随共享 events.jsonl 移除——事件送达由挂载方自己的 Monitor 流承担。
+挂载判据是 argv 前两 token 精确等于 `bash <绝对路径>`，
 **不是子串**——`pgrep -f` 会匹配到发起查询的命令自己（本节上文记的就是这个坑，检查器已绕开）。
 
 ### 0b. 事件式监测（Monitor）——补 tick 之间的盲区
@@ -334,7 +334,8 @@ bash plugin/scripts/monitor-mount-check.sh --json
 （SPEC-one-observer-two-surfaces.md，gap-retire-inner-state-one-observer-targets-by-parameter）。
 `inner-state.sh` 已退役——它不观测会话（`tmux` 命中 0），它的招牌信号 `.quay/inner-blocked.json`
 在三个项目里从未产生，包括我们撞上过的唯一一次真实事故（那 68 分钟也没有它）。挂成
-`persistent` Monitor，事件经共享事件文件送达（详细事件表见 0b2）：
+`persistent` Monitor，事件经观察者自己的 stdout 流送达挂载方（2026-08-06 起共享事件文件已移除；
+详细事件表见 0b2）：
 
 | 事件 | 含义 |
 |---|---|
@@ -1047,9 +1048,9 @@ tick 或 `/clear` 后的会话会重犯。
 - 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
   排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
-- Monitor 三判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
-  `targetRoot` 是否等于本仓根 / `delivered`）——挂没挂、挂的哪个仓库、事件有没有送达，三条一条都不能少
-  （AC9 起 `delivered` 取代 `ownedByThisSession`）
+- Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+  `targetRoot` 是否等于本仓根 / `targetOk`）——挂没挂、挂的哪个仓库
+  （2026-08-06 起 `delivered` 随共享 events.jsonl 移除；事件送达由挂载方自己的 Monitor 流承担）
 
 不要只说「内层在跑」——没有这些，分层是否有效无法判定。
 
