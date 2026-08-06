@@ -40,9 +40,11 @@ const makeTmp = (prefix = "heavy-op-token-") => fs.mkdtempSync(path.join(os.tmpd
 
 /** Run the REAL token script with a temp --root (never the real default dir). */
 function runToken(args, { root, env = {} } = {}) {
-  // Every acquire now lands a JSONL record (gap-token-wait-times-...); point --events-file at the
-  // temp root so a --root test cycle never writes the real workspace's .quay/heavy-op-token-events.jsonl
-  // (same isolation discipline as AC9's "never touch the real default token").
+  // Every acquire lands a JSONL record (gap-the-token-measures-the-wait-and-throws-it-away); the
+  // default events file is $QUAY_GLOBAL_DIR/heavy-op/events.jsonl — --root redirects it into the test
+  // root, and --events-file is still passed as belt-and-suspenders so a --root test cycle never
+  // touches the real default events file (same isolation discipline as AC9's "never touch the real
+  // default token").
   const fullArgs = root
     ? ["--root", root, "--events-file", path.join(root, "heavy-op-events.jsonl"), ...args]
     : args;

@@ -27,9 +27,9 @@
 #   bash plugin/scripts/heavy-op-token.sh --status
 #   bash plugin/scripts/heavy-op-token.sh --acquire <project> [--timeout <s>]
 #   bash plugin/scripts/heavy-op-token.sh --release <project>
-#   bash plugin/scripts/heavy-op-token.sh --report            # waited_ms distribution (count/median/p90/max)
+#   bash plugin/scripts/heavy-op-token.sh --report            # waited_ms distribution + minutes lost per project
 #   bash plugin/scripts/heavy-op-token.sh --root <dir> ...   # test seam: override the state-dir root
-#   bash plugin/scripts/heavy-op-token.sh --events-file <p> ... # test seam: override the events file (default ${PWD}/.quay/heavy-op-token-events.jsonl)
+#   bash plugin/scripts/heavy-op-token.sh --events-file <p> ... # test seam: override the events file (default $QUAY_GLOBAL_DIR/heavy-op/events.jsonl)
 #
 # Contract (from the task's ## Contract block):
 #   measure  holder   = `--status` 的 holder 字段
@@ -78,15 +78,17 @@ STALE_TIMEOUT_S="${HEAVY_OP_STALE_TIMEOUT_S:-30}"
 # branch so the FINAL failure line names the holder's real state instead of a generic "held".
 LAST_BLOCK=""
 
-# ── events landing (gap-token-wait-times-are-printed-once-and-never-landed) ─────────────────────────────
-# Every acquire appends one JSONL record to the workspace's `.quay/` runtime-state file — the same
-# shape / location / gitignore treatment as gate-events.jsonl (baseline for the concurrency-relaxation
-# experiment's third number: the real distribution of waited_ms). The landing is OBSERVATION ONLY:
-# a failed write must NEVER change the acquire's exit code (AC4 — the observation mechanism is not a
-# new single point of failure for the global single-flight token). Default resolves from the caller's
-# CWD (scripts/test.sh and the inner dispatch run from the workspace root); HEAVY_OP_EVENTS_FILE or
-# --events-file override it (test seam).
-EVENTS_FILE="${HEAVY_OP_EVENTS_FILE:-${PWD}/.quay/heavy-op-token-events.jsonl}"
+# ── events landing (gap-the-token-measures-the-wait-and-throws-it-away) ────────────────────────────────
+# Every acquire appends one JSONL record to the SHARED cross-project events file
+# $QUAY_GLOBAL_DIR/heavy-op/events.jsonl — the SAME dir the token itself lives in, so archguard /
+# meta-cc / quay all contribute to the one distribution (a per-workspace `.quay/` file could only see
+# quay's waits; the halt-or-not decision needs all three). Each record carries event="ACQUIRED" on
+# every acquire attempt — success AND failure — so the "minutes lost per hour waiting for the token"
+# question (the policy decision the header deferred at :61) is answerable from the file. The landing
+# is OBSERVATION ONLY: a failed write must NEVER change the acquire's exit code (AC4 — the observation
+# mechanism is not a new single point of failure for the global single-flight token). HEAVY_OP_EVENTS_FILE
+# or --events-file override it (test seam); --root redirects it into the test root.
+EVENTS_FILE="${HEAVY_OP_EVENTS_FILE:-}"
 # A distribution (median/p90/max) is only meaningful past this many samples; below it the report says
 # "样本 N 不足" instead of printing a pretty zero (gap-token-wait-times... AC6).
 MIN_EVENTS_FOR_DIST=10
@@ -102,7 +104,7 @@ jsonl_escape() {
 land_event() {
   local project="$1" waited_ms="$2" acquired="$3" outcome="$4" holder="$5"
   { mkdir -p "$(dirname "${EVENTS_FILE}")" \
-      && printf '{"ts":%s,"project":"%s","waited_ms":%s,"acquired":"%s","holder":"%s","outcome":"%s"}\n' \
+      && printf '{"ts":%s,"event":"ACQUIRED","project":"%s","waited_ms":%s,"acquired":"%s","holder":"%s","outcome":"%s"}\n' \
          "$(now_ms)" "$(jsonl_escape "${project}")" "$waited_ms" "$acquired" \
          "$(jsonl_escape "${holder}")" "$outcome" >> "${EVENTS_FILE}"; } 2>/dev/null || true
 }
@@ -145,6 +147,12 @@ while [ "$i" -lt "${#args[@]}" ]; do
   esac
   i=$((i+1))
 done
+
+# Resolve the default events file AFTER argument parsing so `--root` (which sets HEAVY_OP_DIR) redirects
+# it into the same test root; an explicit --events-file / HEAVY_OP_EVENTS_FILE wins over the default.
+if [ -z "${EVENTS_FILE}" ]; then
+  EVENTS_FILE="${HEAVY_OP_DIR}/events.jsonl"
+fi
 
 case "$cmd" in
   "")
@@ -353,15 +361,31 @@ do_release() {
   return 0
 }
 
-# ── events report (gap-token-wait-times-are-printed-once-and-never-landed AC6) ──────────────────────────
+# ── events report (gap-the-token-measures-the-wait-and-throws-it-away AC3 / AC6) ────────────────────────
+# One command answers the halt-or-not question the header deferred at :61: per project, how many
+# minutes were lost waiting for the token (sum(waited_ms)/60000). That per-project figure is printed
+# whenever there is >= 1 record; the distribution (median/p90/max) is still gated on the sample
+# threshold (refusing a "pretty 0" over too few samples).
 do_events_report() {
-  local file="${EVENTS_FILE}" count=0 vals
+  local file="${EVENTS_FILE}" count=0 vals total_min project_min
   if [ ! -f "${file}" ]; then
     printf 'heavy-op-token-events: no events file at %s (count 0)\n' "${file}"
     return 0
   fi
   count="$(grep -c '^{' "${file}" 2>/dev/null || echo 0)"
   case "$count" in ''|*[!0-9]*) count=0 ;; esac
+  if [ "$count" -gt 0 ]; then
+    # Contract wait_ms_per_hour: sum(waited_ms)/1000/60 minutes — globally AND per project (AC3).
+    # Best-effort like the landing: a line missing waited_ms (truncated/corrupt) must not crash the
+    # report — `|| true` keeps a no-match grep from tripping `set -euo pipefail`.
+    total_min="$(grep -o '"waited_ms":[0-9]*' "${file}" 2>/dev/null | sed 's/^"waited_ms"://' \
+      | awk '{ s += $1 } END { printf "%.2f", s / 60000 }' || true)"
+    project_min="$(grep -o '"project":"[^"]*","waited_ms":[0-9]*' "${file}" 2>/dev/null \
+      | sed 's/"project":"//; s/","waited_ms":/ /' \
+      | awk '{ sum[$1] += $2 } END { for (p in sum) printf "%s=%.2f ", p, sum[p] / 60000 }' || true)"
+    printf 'heavy-op-token-events: minutes_lost_total=%s over %s acquires\n' "${total_min}" "${count}"
+    printf 'heavy-op-token-events: minutes_lost by project: %s\n' "${project_min}"
+  fi
   if [ "$count" -lt "${MIN_EVENTS_FOR_DIST}" ]; then
     # Refusing a "pretty 0": a median/p90/max over too few samples is noise dressed as signal.
     printf 'heavy-op-token-events: count=%s — 样本 %s 不足 (need >= %s for a distribution); no median/p90/max printed\n' \
