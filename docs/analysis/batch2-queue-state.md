@@ -5292,3 +5292,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **bare-metal-bootstrap 合并**（`b8f132bc`）：`session-bootstrap.sh`（裸金属会话引导：命名布局 idempotent + 每窗 claude 进程 `/proc` 存活确认 + 按名 fail-closed + `quay-launch.sh` 启动约定）+ cold-start SKILL 接线。AC1–AC5 勾（9/9）。已并已清。
 - **在飞 0/5**（本批全落地：cold-start-outer-validation / os-anchor-launch / bare-metal-bootstrap + 前批）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T13:1xZ（内层，OVER90 假阳处置 + 派发 1/5）
+
+- **OVER90 假阳再处置**：--slots 8/8 reconcilable、0 real-in-flight，`--clear` 已清（wait 11.5s）。
+- **外层补池 5**（0026b8b9）：legacy-reclaim + manager-productization 晋 ready。
+- **派发 1/5**：`experiment-legacy-reclaim`（git-lens L_D/L_G/L_S 退休脚本回收 + touches 启发式重审）。补 self-touch + telemetry 已开。manager-productization deferred（与 legacy-reclaim 碰撞）。
+- 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
