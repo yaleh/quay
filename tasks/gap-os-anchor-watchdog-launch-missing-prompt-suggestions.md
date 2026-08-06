@@ -34,9 +34,25 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: watchdog launch-cmd 含 `--prompt-suggestions false`（grep 命中 ≥1），重启的会话无 ghost 占位符
-- [ ] AC2: launch-cmd 与 RUNBOOK §2 对齐（diff 无实质差异），消除二次漂移
-- [ ] AC3: 与 gap-crystallize-launch-config 交叉标注（启动配置结晶同源）
+- [x] AC1: watchdog launch-cmd 含 `--prompt-suggestions false`（grep 命中 ≥1），重启的会话无 ghost 占位符
+      invoke（contract）：`grep -c 'prompt-suggestions' ~/.config/quay/os-anchor/os-anchor-projects.conf` → `1`；
+      `grep -n 'launch-cmd\|prompt-suggestions' ~/.config/quay/os-anchor/os-anchor-projects.conf` → 第 3 行
+      launch-cmd = `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude-deepseek --model deepseek-v4-flash
+      --permission-mode bypassPermissions --prompt-suggestions false`（flag + env 双 REQUIRED 参数，restart-plan §8）。
+      重启的会话无 ghost 占位符由「watchdog 用该 launch-cmd 重拉会话」保证——flag 在源头关掉 ghost-suggestion
+      （gap-ghost-suggestion-eliminated-at-source AC1/AC2 已实测双向对照）。
+- [x] AC2: launch-cmd 与 RUNBOOK §2 对齐（diff 无实质差异），消除二次漂移
+      二次漂移消除：`plugin/scripts/os-anchor-install.sh` 原有**两处** launch 字符串
+      （`default_projects()` 与 `--add-project`）现单源化为一个共享常量 `LAUNCH_CMD`
+      （gap-crystallize-launch-config 任务 AC 里明确记过「os-anchor-install.sh（两处 launch 字符串）」），
+      两处都引用 `$LAUNCH_CMD`，不再各自维护；该常量携带 RUNBOOK/restart-plan §8 的 REQUIRED 参数
+      （`--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`），与 RUNBOOK §2 无实质差异。
+      机械防回归：`plugin/test/os-anchor-watchdog.test.mjs` 新增断言生成 config 的 launch-cmd 必带这两个参数
+      （`node --test plugin/test/os-anchor-watchdog.test.mjs` → pass 2 / fail 0）。
+- [x] AC3: 与 gap-crystallize-launch-config 交叉标注（启动配置结晶同源）
+      `tasks/gap-crystallize-launch-config-into-checked-in-settings-file.md` 的「与既有任务的关系」段
+      新增交叉标注：os-anchor watchdog 的 launch-cmd 消费同一启动配置，`os-anchor-install.sh` 的
+      `LAUNCH_CMD` 与 settings 文件/`quay-launch.sh` 同源（AC1/AC2 落地于 `os-anchor-watchdog.test.mjs` 机械断言）。
 
 ## Touches
 

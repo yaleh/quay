@@ -46,6 +46,13 @@ AC1 的负控制正是那次）。调研找到 5 项高相关，其中 3 项适�
 
 - `gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`（`--prompt-suggestions false`）
   与本任务的 settings 文件**落到同一个启动配置**——本任务落地时合并两者，启动规范一份。
+- **交叉标注（gap-os-anchor-watchdog-launch-missing-prompt-suggestions，2026-08-06，AC3）**：
+  os-anchor watchdog 的 launch-cmd 同样消费这份启动配置——`plugin/scripts/os-anchor-install.sh` 的
+  launch 字符串现已**单源化**（`LAUNCH_CMD` 共享常量，含 REQUIRED 冷启动参数
+  `--prompt-suggestions false` + `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`），
+  与 settings 文件/`quay-launch.sh` 的启动配置**同源**，消除两处 launch 字符串的二次漂移。
+  该任务 AC1/AC2 落地于 `plugin/test/os-anchor-watchdog.test.mjs`（机械断言生成 config 的
+  launch-cmd 必带该参数）。
 - 中等项 `--effort`（成本杠杆）与 `--tmux`（内置 worktree+tmux 配对，需先查兼容 `quay-worktrees/<slug>`
   命名）**记为本任务备注**，不立案。
 - **消费方交叉标注（gap-outer-self-checks-and-creates-inner-session，2026-08-05）**：外层冷启动第 3 步
