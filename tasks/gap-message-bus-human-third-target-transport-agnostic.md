@@ -51,21 +51,60 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: deliver/observe 传输层无关（transport 抽象，SaaS 换 transport 不重写）
-- [ ] AC2: 人作为第三 target 接入同一机制（与层间通信一套，不做两套）
-- [ ] AC3: delivered ≠ consciousness-received 分开建模（人不能被注入）
-- [ ] AC4: 消费者机械挂载点（manager-inbox 的消息被读，非只落盘）——优先于投递
-- [ ] AC5: AC12b 可测量性——每条人类消息带时间戳可计数
-- [ ] AC6: fail-safe——测量协议显式约束「人只走信道」（绕过信道则无干预区间失真）
+- [x] AC1: deliver/observe 传输层无关（transport 抽象，SaaS 换 transport 不重写）
+- [x] AC2: 人作为第三 target 接入同一机制（与层间通信一套，不做两套）
+- [x] AC3: delivered ≠ consciousness-received 分开建模（人不能被注入）
+- [x] AC4: 消费者机械挂载点（manager-inbox 的消息被读，非只落盘）——优先于投递
+- [x] AC5: AC12b 可测量性——每条人类消息带时间戳可计数
+- [x] AC6: fail-safe——测量协议显式约束「人只走信道」（绕过信道则无干预区间失真）
+
+## Invoke evidence (inner, 2026-08-06, worktree task/gap-message-bus-human-third-target-transport-agnostic)
+
+**Contract measure — delivered_vs_read = `bash <inbox-reader.sh> 2>&1 | grep -c 'read\|consumed'` (fixture inbox, 1 delivered message):**
+```
+$ bash plugin/scripts/inbox-reader.sh --inbox <tmp> 2>&1 | grep -c 'read\|consumed'
+1
+```
+band `delivered_vs_read >= 1` satisfied — the consumer mechanical mount point turns `delivered`
+into a `read`/`consumed` receipt. (Idempotent: re-run stays `1`, never double-writes. Empty inbox →
+`0`, so the band is only passable by real consumption.)
+
+**Contract invoke — `grep -n 'deliver\|observe\|transport' packages/quay/src/message-bus.ts` (non-empty):**
+```
+1:// message-bus.ts — the transport-agnostic message bus
+5://   * deliver(target, msg) / observe(target) are the SAME two narrow interfaces across every
+32:/** The three deliver()/observe() targets. Human is the THIRD target, same mechanism. */
+75:  const delivered = records.length;
+77:  const unread = delivered - consumed;
+113:    deliver(message) {
+116:      const deliveredAt = new Date().toISOString();
+...
+```
+
+**Scoped verification — `bash scripts/test.sh --for-task gap-message-bus-human-third-target-transport-agnostic --allow-thin`:**
+```
+ℹ tests 30
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+exit 0
+```
+(15 × message-bus.test.mjs AC1–AC6 incl. a deliver→inbox-reader end-to-end test + 7 ×
+inbox-reader.test.mjs AC4–AC6 + 8 × capability-catalog regression — catalog now 0 unclassified.)
+
+**Contract control (AC6 fail-safe):** `observe(human).measurement.valid` is `false` while
+`delivered > consumed` — the channel cannot confirm human reading, so any out-of-channel human
+communication distorts the unattended-interval estimate. The reader's protocol line states the
+constraint every run and contains neither `read` nor `consumed` (cannot inflate the measure).
 
 ## Touches
 - tasks/gap-message-bus-human-third-target-transport-agnostic.md（自身文件：勾 AC + 贴 invoke 证据授权）
-
-
-- packages/quay/src/（deliver/observe 传输抽象 + 人 target）
-- plugin/scripts/（消费者挂载点 / manager-inbox 读者）
+- packages/quay/src/message-bus.ts（deliver/observe 传输抽象 + 人 target）
+- plugin/scripts/inbox-reader.sh（消费者挂载点 / manager-inbox 读者）
+- plugin/scripts/capability-catalog.sh（声明 inbox-reader.sh；补声明 pre-existing 的 periodic-push-backup.sh）
+- packages/quay/test/message-bus.test.mjs（AC1–AC6 测试）
+- plugin/test/inbox-reader.test.mjs（挂载点测试）
 - docs/proposals/quay-message-bus-human-in-the-network.md（提案引用）
-- tasks/gap-web-action-buttons-unused-route-and-open-redirect-delete.md（次序 ①→② 交叉标注）
 
 ## Contract
 
