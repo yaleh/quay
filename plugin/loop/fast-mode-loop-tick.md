@@ -77,6 +77,13 @@ exp6 §9 把 loop 降级为**跨会话行为稳定层**。这份 tick 兑现那�
 | 会话 idle 时把停摆的队列推进一步 | 轮询后台 agent 是否完成 |
 | compact / `/clear` 后从队列文件恢复状态 | 决定任务优先级 |
 | 触发停止条件时停下并报告 | 替人做合并冲突/审查失败的判断 |
+| 执行就绪池派发的任务 | 周期性探针发现（routine 轨道，外层 step 1d 独占） |
+
+**探针发现（routine 轨道，`plugin/scripts/routine-scheduler.ts`）是外层的活**
+（`orchestrator-loop-tick.md` step 1d，`gap-probe-mechanism-dead-15-days-rewire-to-two-layer`）：
+architecture-analysis / self-validation / history-mining 等 pre-friction 探针由外层每 tick 检查 due 并
+派发，**内层不跑探针**——内层只执行任务。探针找到的发现以新任务文件落到 `tasks/`，随后经就绪池流程
+进入内层派发。
 
 **后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号，也是**派发触发源**（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`：实测派发=3 簇 tick 边界、槽位释放后 39 分钟不回填而池子 health，正是「并发打破外层瓶颈」设计的退化形态——瓶颈从外层搬到了 inner 自己的 tick）。**收到完成通知 = 槽位释放，必须立即重评估派发（「槽位释放回填」，见步骤 4），不等下一 tick。** 这个 tick 是**兜底心跳**，处理「会话 turn 结束了但队列还有活」的情况。因此间隔应长（20–30 分钟），不是快轮询——**派发节奏由完成事件驱动，不由 tick 间隔驱动**。
 

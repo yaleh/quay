@@ -802,6 +802,35 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
 **步骤 6 是重锚的观测端**：转发让 inner 有周期读文档的机会，审计验证这个机会**真的让 inner 的自述
 词汇收敛**了——机制与判据成对。
 
+### 1d. Routine 探针 due 检查（两层模式量触发——机制，不是散文）
+
+**探针轨道（`plugin/skills/routines/SKILL.md`）每 tick 检查一次 due**。这是 pre-friction 发现机制
+（在「被硌了才发现」之前主动查：architecture-analysis 用 archguard 的 L_D/L_G 仪器、self-validation、
+history-mining）。**它此前死了 15 天**（`gap-probe-mechanism-dead-15-days-rewire-to-two-layer`）：
+`routine-scheduler.ts` 的 `every(N)` 按经典管线**迭代号**触发——ADR-022 已删除那个迭代概念，两层模式
+没有迭代号，于是没人调用、`orchestrator-loop-tick.md` / `fast-mode-loop-tick.md` 引用 0 处、最后一次真
+跑停在 2026-07-15 Iteration 49/52。触发器已改为**两层模式实际量**：`every(N)` = 每 N 个外层 tick
+（本文件的 tick 计数），`on(<event>)` = 命名事件。**每 tick 跑一次 due 检查**：
+
+```bash
+cd "$REPO_ROOT"   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+# tick 计数 = tick-log 行数（每次 tick 追加一行；两层模式的推进量，不是经典管线迭代号）。
+# 缺文件时按 1 处理（首次冷启动），保证 every(1) 的 routine 在第一个 tick 就能 due。
+TICK_COUNT="$(wc -l < orchestration/tick-log.md 2>/dev/null | tr -d ' ')"
+TICK_COUNT="${TICK_COUNT:-1}"
+# 1. 把 routines 配置（.quay/config.yml loop.routines，旧 .quay/loop.yml 为回退）写成临时 JSON
+# 2. 跑 due 检查（--tick 传两层模式 tick 计数；--iteration 是已废弃别名）
+node --no-warnings --experimental-strip-types plugin/scripts/routine-scheduler.ts \
+  --tick "$TICK_COUNT" --event checkpoint \
+  --plugin-root "${CLAUDE_PLUGIN_ROOT}" /tmp/routines-"$TICK_COUNT".json
+# exit 0 = 有 DUE（逐行 DUE: <name> (<trigger>) → probe <name>）；exit 3 = 无 due
+```
+
+**有 DUE ⇒ 派发**：走 `quay:run-routines` skill 的完整管线（Schedule → Dispatch → Gate → Verify），
+把探针发现作为**新任务文件**落到 `<tasksDir>/`（FILE-ONLY 不变量：只新增任务文件，绝不改产品/方法代码）。
+**无 DUE ⇒ 本步 no-op**，不产生任何动作。**每个 tick 必报**：routine due 检查结果（DUE 了几条 / 无 due）。
+注意与 step 4 的队列补充区分：探针轨道是**周期性 pre-friction 发现**，不是从 `tasks/` 就绪池选任务派发。
+
 ### 2. 分类本 tick 的动作
 
 **必须**记录本 tick 属于哪一类——这是判断分层是否退化的唯一依据：

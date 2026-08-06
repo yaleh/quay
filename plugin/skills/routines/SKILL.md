@@ -13,7 +13,7 @@ due probes, dispatch them as background agents with instrument-awareness, gate
 their findings through the routine-file-gate, and verify the FILE-ONLY invariant
 (no product/method code touched).
 
-    λ(workspaceRoot, tasksDir, milestoneCounter=0) → {fired, filed, rejected, fileOnlyViolation}
+    λ(workspaceRoot, tasksDir, tickCounter=1) → {fired, filed, rejected, fileOnlyViolation}
 
     schedule  :: Config → [{name, probe, trigger?}]
     dispatch  :: [{name, probe}] → [{probe, candidates, filed}]
@@ -27,10 +27,15 @@ their findings through the routine-file-gate, and verify the FILE-ONLY invariant
 1. Read `routines:` from `.quay/config.yml` `loop:` section (legacy fallback: `.quay/loop.yml`).
 2. Write routines as a temporary JSON array (one object per routine with
    `{name, trigger, probe?, dispatch?}`).
-3. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts" --iteration
-   <milestone_counter> --event checkpoint --plugin-root "${CLAUDE_PLUGIN_ROOT}"
-   /tmp/routines-<counter>.json`. Exit 0 + lists DUE routines (one per line:
+3. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts" --tick
+   <tick-counter> --event checkpoint --plugin-root "${CLAUDE_PLUGIN_ROOT}"
+   /tmp/routines-<tick>.json`. Exit 0 + lists DUE routines (one per line:
    `DUE: <name> (<trigger>) -> probe <name>`); exit 3 = none due.
+   `<tick-counter>` is the two-layer outer-loop tick counter (the cron-driven tick,
+   `orchestrator-loop-tick.md` — its count is derivable from `orchestration/tick-log.md`
+   line count or a `.quay/` counter). `--iteration <n>` is a DEPRECATED alias for `--tick`,
+   kept so legacy callers keep working; the trigger logic itself never reads an iteration
+   concept (gap-probe-mechanism-dead-15-days-rewire-to-two-layer).
 4. If none due or no routines configured, return `{fired: 0}` — rest is no-op.
 
 ### Phase 2 — Dispatch
@@ -98,9 +103,12 @@ For each candidate finding file:
 - **Browser-explorer probe (DIR-069):** When `chrome-devtools` or `playwright`
   MCP is available, the `browser-explorer` probe can dispatch. When unavailable,
   it skips cleanly with `filed: 0`.
-- **Works with scheduler triggers:** `on-startup`, `interval:<N>m`,
-  `on-checkpoint`, `on-snapshot` — the scheduler evaluates trigger conditions;
-  the skill only fires what is DUE.
+- **Works with scheduler triggers (two-layer grammar):** `every(N)` — fires every
+  N outer-loop ticks (tick count; the outer cron tick is time-paced, so every(N) is an
+  N×tick-interval cadence) — and `on(<event>)` — fires on a named event (e.g.
+  `checkpoint`). The scheduler evaluates trigger conditions against the two-layer tick
+  counter / event; the skill only fires what is DUE. The retired classic-loop iteration
+  trigger was removed (gap-probe-mechanism-dead-15-days-rewire-to-two-layer).
 - **Gate quality/dedup/rate:** routine-file-gate enforces finding quality
   (actionable + evidence-backed), deduplication (no duplicate on the board),
   and rate capping (k files per window).
