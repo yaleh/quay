@@ -67,10 +67,13 @@
 #     显式设置的环境变量 SESSION_TARGETS 优先于该文件；generic 项目没有该文件 → 零配置默认。
 #   - 阈值（INTERVAL/STALL_MIN/LOOP_MIN/OVERDUE_MIN）含义与默认值见随包的两份 tick 文档（AC5）。
 #
-# 用法：  plugin/scripts/session-liveness.sh [--once] [--selfcheck] [--mask] [--api-errors <t>] [--last-input <t>]
+# 用法：  plugin/scripts/session-liveness.sh [--once] [--selfcheck] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>]
 #   --once   跑一轮，打印每个目标的 SESSION-STATUS 行，退出（冷启动/安装后自检接缝，AC7）。
 #   --selfcheck  诊断接缝：验证外层多源心跳判据（红窗处置保持新鲜 / 零产出报 OVERDUE），自包含，退出 0/1。
 #   --mask   测试接缝：从 stdin 读 pane 文本，打印屏蔽易变区后的内容（AC1 单测直接调用）。
+#   --pane-state  测试接缝（阶段四）：从 stdin 读 pane 文本，打印
+#                 { state, content_hash, contentEmpty } JSON——state = classifyPaneState 形状分类，
+#                 content_hash = 底部区域之外内容区的 md5（/clear to save 计数器被天然排除）。
 #   --api-errors <t>  测试接缝：打印 transcript <t> 最近 API_ERROR_WINDOW 条记录里
 #                     isApiErrorMessage 结构字段计数（AC9 单测）。
 #   --last-input <t>  测试接缝：打印 transcript <t> 最近 type=user 记录时间戳的 epoch（AC7 单测）。
@@ -146,6 +149,24 @@
 #     候选闲辅助」（AC7）；忙→闲后须见过忙轮（SEEN_BUSY）才报，避免监视器启动时把一直闲着的
 #     会话误报成「转入空闲」。
 #
+# 阶段四（gap-session-liveness-hashes-the-token-counter-as-if-it-were-work，外层裁定 D，
+# 2026-08-04/06）——重新实现，消费 classifyPaneState（底部区域 + 形状分类，非整屏哈希）：
+#   AC1 本任务的 chrome 行集合（用真实 pane 采样支持，逐条附「为什么它不代表活动」）：
+#     * `/clear to save NNN.Nk tokens`（状态行 token 计数）——停泊会话唯一会变的东西（archguard
+#       停泊 pane 实测 150.2k→151.2k，被判成一堆事件）。它是提示语行的 chrome，不是活动。
+#     * `✽ …（Ns · ↓N.Nk tokens）`（转圈耗时行）——活跃 spinner，每秒跳，「人不看的部分」。
+#     * `✻ …` 残留（`✻ Sautéed/Baked for …`）——上一次动作留在屏上的字，空闲会话也有，
+#       不能当忙的判据（外层实测：两个停泊 pane 各 2/1，而它们 esc=0）。
+#     这组 chrome 全部位于【底部区域】（输入框 + 状态行），而 classifyPaneState 只读底部区域、
+#     内容哈希只取底部区域之外 ⇒ chrome 被【天然排除】。不是按关键词 `tokens` 一刀切——
+#     subagent 任务行 `◯ general-purpose … ↓ N.Nk tokens` 在内容区内、是真活动（AC4 负控制）。
+#   AC3/AC4 判据：忙 = 分类器判 busy（esc to interrupt 存在性）或 permission-prompt，或
+#     内容区哈希有变化（保住非 TUI 探针 / subagent 输出）；闲 = 以上都没有。停泊会话只有
+#     token 计数变 ⇒ 形状仍 waiting-input + 内容哈希不变 ⇒ 零事件。
+#   AC5 防过滤：内容区为空 ⇒ 显式 WARN 一次（不静默判空闲）；busy_sem 仍独立判忙。
+#   AC7 响应速度：RESUMED 仍在忙转换的同一轮报出（不加去抖——去抖是「输入脏」前提下的补偿，
+#     而输入已洗干净；IDLE 的阶段三去抖 IDLE_DEBOUNCE_ROUNDS 保持不变）。
+#
 # 逐事件类别与阈值理由（AC5）：
 #   SESSION-GONE              不可自愈（无界）→ 无阈值，立即报（宁可误报）
 #   SESSION-IDLE              可自愈（上界=外层 20min tick）→ 从严：默认 LOOP_MIN=20
@@ -184,7 +205,7 @@ IDLE_DEBOUNCE_ROUNDS=${IDLE_DEBOUNCE_ROUNDS:-2}
 # 阈值——LOOP_MIN 可以被设成 0（管理者配置），而「预期周期 0 分钟」是文案 bug。两个含义拆开。
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_HASH PREV_IDLE PREV_HALTED UNHALT_TS \
-  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE IDLE_CONSEC SEEN_BUSY
+  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE IDLE_CONSEC SEEN_BUSY WARNED_EMPTY
 
 # ── L0（gap-tmux-isolation-cannot-depend-on-caller-remembering-to-unset-TMUX，AC3）──
 # 本监视器必须读【真实默认服务端】上的会话，所以不走 tmux-isolated.sh（那会指向一个没有真实
@@ -234,6 +255,37 @@ mask_pane() {
       *) printf '%s\n' "$line" ;;
     esac
   done
+}
+
+# ── 阶段四（gap-session-liveness-hashes-the-token-counter-as-if-it-were-work，外层裁定 D）──
+# classify_pane_state —— 消费 pane-state-classify.ts 的 classifyPaneState（纯函数：底部区域 +
+# 形状分类，非整屏哈希）。忙闲主判据从「整屏哈希是否变」改为【形状分类】——只读底部区域
+# （输入框 + 状态行），枚举五态（waiting-input / permission-prompt / busy / error-banner /
+# unknown）。输出两行：
+#   <state>\n<content-region>
+# 第二行 = 底部区域之外的内容区，供 mask_pane + md5sum 哈希——状态行 chrome（/clear to save
+# 计数器、✽ 转圈耗时、✻ 残留）位于底部区域内，被【天然排除】在内容哈希之外，这正是本任务
+# 要修的假阳性源（停泊会话只有 token 计数变 ⇒ 形状仍是 waiting-input + 内容哈希不变 ⇒ 零事件）。
+# agent 任务行 `◯ general-purpose … ↓ 57.3k tokens` 在内容区内 ⇒ 变化仍判忙（AC4 假阴性方向）。
+# 测试接缝：--pane-state 读 stdin 打印 { state, content_hash, contentEmpty } JSON。
+# 用 ${SCRIPT_DIR}/ 引用 pane-state-classify.ts——quay-init 的依赖闭包（derive_loop_scripts 的
+# (d) 步）按 ${SCRIPT_DIR}/ 前缀把 pane-state-classify.ts 一并铺进安装目标，否则装出去的监视器
+# 找不到分类器会静默丢忙信号（AC5 反过滤只兜内容区，兜不住依赖缺失）。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+classify_pane_state() {
+  local cls_ts
+  cls_ts="${SCRIPT_DIR}/pane-state-classify.ts"
+  node --experimental-strip-types --input-type=module -e '
+    import fs from "node:fs";
+    const mod = await import(process.argv[2]);
+    const text = fs.readFileSync(0, "utf8");
+    const cls = mod.classifyPaneState(text);
+    const { DEFAULT_BOTTOM_LINES } = mod;
+    const lines = text.split("\n");
+    while (lines.length && lines[lines.length-1].trim() === "") lines.pop();
+    const content = lines.slice(0, Math.max(0, lines.length - DEFAULT_BOTTOM_LINES)).join("\n");
+    process.stdout.write(cls.state + "\n" + content);
+  ' "pane-state-classify" "$cls_ts" 2>/dev/null
 }
 
 # transcript_api_error_count —— 最近 API_ERROR_WINDOW 条记录里「结构性」isApiErrorMessage 字段
@@ -478,6 +530,18 @@ case "${1:-}" in
   --once) ONE_SHOT=true ;;
   --selfcheck) selfcheck; exit $? ;;
   --mask) mask_pane; exit 0 ;;
+  --pane-state)
+    # 测试接缝：读 stdin pane 文本，打印 { state, content_hash, contentEmpty } JSON。
+    # state = classifyPaneState 的形状分类；content_hash = 底部区域之外内容区的 md5（mask_pane
+    # 剥离后的内容区哈希）；contentEmpty = 内容区是否为空（AC5 防过滤判据）。
+    _ps_out=$(classify_pane_state)
+    _ps_state=$(printf '%s\n' "$_ps_out" | sed -n '1p')
+    _ps_content=$(printf '%s\n' "$_ps_out" | tail -n +2)
+    _ps_masked=$(printf '%s' "$_ps_content" | mask_pane)
+    _ps_h=$(printf '%s' "$_ps_masked" | md5sum | cut -c1-16)
+    _ps_empty=$([ -z "$_ps_masked" ] && echo true || echo false)
+    printf '{"state":"%s","content_hash":"%s","contentEmpty":%s}\n' "$_ps_state" "$_ps_h" "$_ps_empty"
+    exit 0 ;;
   --api-errors)
     [ -n "${2:-}" ] || { echo "用法: $0 --api-errors <transcript>" >&2; exit 2; }
     transcript_api_error_count "$2"; exit 0 ;;
@@ -488,7 +552,7 @@ case "${1:-}" in
   --last-message-type)
     [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
     transcript_last_message_type "$2"; exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--selfcheck] [--mask] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -819,19 +883,34 @@ while true; do
     # 人 2026-08-03 指出：「我可以接受让 outer 等待，但应当是你及时知道发生了什么并决定让它等待。」
     # 原来的事件集只有滞后指标：会话跑完一次操作转入空闲时，进程活着、刚提交过，全部静默。
     #
-    # 判据（阶段二，AC1/规格 AC18）：屏幕信号改为【语义标志 + 屏蔽易变区】，不是整屏哈希。
-    #   忙 = `esc to interrupt` 存在（按【存在性】判，不按计数——实测管理者 4 次/内层 1 次，
-    #   计数无意义）或 屏蔽易变区后的内容区有变化（保住非 TUI 探针 / subagent 输出这类真活动）。
-    #   闲 = 两样都没有。易变区（转圈耗时 ✽ / token 计数 /clear to save / ✻ 残留）被 mask_pane
-    #   剥离，所以「停泊会话只有 token 计数器在变」不会判忙（姊妹任务的假阳性源在此吸收）。
+    # 判据（阶段四，gap-session-liveness-hashes-the-token-counter-as-if-it-were-work，外层裁定 D）：
+    # 屏幕信号从【整屏哈希】改为【形状分类】——消费 classifyPaneState（底部区域 + 形状，非整屏等值）。
+    #   忙 = 分类器判 busy（状态行 `esc to interrupt`，按【存在性】判）或 permission-prompt（弹框等
+    #   人），或 底部区域之外的内容区哈希有变化（保住非 TUI 探针 / subagent 输出这类真活动）。
+    #   闲 = 以上都没有。内容区 = 底部区域（输入框 + 状态行）之外的屏幕——状态行 chrome（/clear to
+    #   save 计数器、✽ 转圈耗时、✻ 残留）位于底部区域内被【天然排除】，所以「停泊会话只有 token
+    #   计数器在变」形状仍是 waiting-input 且内容哈希不变 ⇒ 零事件（本任务假阳性源在此吸收）。
+    #   agent 任务行 `◯ general-purpose … ↓ N.Nk tokens` 在内容区内 ⇒ 变化仍判忙（AC4 假阴性方向）。
+    # AC5 防过滤：内容区为空时显式告警一次（不静默判空闲）；busy_sem（分类器状态标志）仍独立判忙。
     # 不用 /proc CPU 增量：空闲的 Claude Code TUI 本身也在烧 CPU（实测 10 vs 132 jiffies，分离度太弱）。
     if [ "$alive" = "1" ]; then
       raw=$("${_sl_tmux[@]}" capture-pane -p -t "$target" 2>/dev/null)
-      busy_esc=$(printf '%s\n' "$raw" | grep -c 'esc to interrupt' 2>/dev/null || true)
-      [ -z "$busy_esc" ] && busy_esc=0
-      busy_sem=$([ "$busy_esc" -ge 1 ] 2>/dev/null && echo 1 || echo 0)
-      masked=$(printf '%s\n' "$raw" | mask_pane)
-      h=$(printf '%s' "$masked" | md5sum | cut -c1-16)
+      pane_out=$(printf '%s' "$raw" | classify_pane_state)
+      state=$(printf '%s\n' "$pane_out" | sed -n '1p')
+      content=$(printf '%s\n' "$pane_out" | tail -n +2)
+      [ -z "$state" ] && state="unknown"   # 分类器失败 → fail-closed：不判忙，靠内容哈希/transcript
+      case "$state" in
+        busy|permission-prompt) busy_sem=1 ;;
+        *) busy_sem=0 ;;
+      esac
+      masked_content=$(printf '%s' "$content" | mask_pane)
+      if [ -z "$masked_content" ] && [ "${WARNED_EMPTY[$name]:-0}" = "0" ]; then
+        # AC5 防过滤断言：剥离后内容区为空必须显式告警，不得静默判空闲（busy_sem 仍独立判忙，
+        # 但「内容区非空」这一结构性前提要守住——否则一次改坏剥离会把整屏吃光且不报错）。
+        echo "session-liveness: WARN $name 内容区为空（底部区域之外无内容可哈希）——忙判据只靠状态标志（classifyPaneState）" >&2
+        WARNED_EMPTY[$name]=1
+      fi
+      h=$(printf '%s' "$masked_content" | md5sum | cut -c1-16)
       if [ -n "${PREV_HASH[$name]:-}" ]; then
         content_changed=$([ "$h" = "${PREV_HASH[$name]}" ] && echo 0 || echo 1)
         pane_busy=$(( busy_sem || content_changed ))
@@ -865,8 +944,14 @@ while true; do
             # AC6/AC7：SESSION-RESUMED 带成因 payload（哪个标志/哪个区变了）+ 上次收到输入时刻。
             # 判据：收到事件后无需再采样即可判真假（原外层 3-4 次调用，改后 1 次）。
             cause_parts=()
-            [ "$busy_sem" = "1" ] && [ "${PREV_BUSY_SEM[$name]:-0}" = "0" ] && cause_parts+=("esc to interrupt 标志出现")
-            [ "$content_changed" = "1" ] && cause_parts+=("屏蔽易变区后的屏幕内容区变化")
+            if [ "$busy_sem" = "1" ] && [ "${PREV_BUSY_SEM[$name]:-0}" = "0" ]; then
+              if [ "$state" = "permission-prompt" ]; then
+                cause_parts+=("权限确认框出现")
+              else
+                cause_parts+=("esc to interrupt 标志出现")
+              fi
+            fi
+            [ "$content_changed" = "1" ] && cause_parts+=("底部区域之外的内容区变化")
             cause=""
             for part in "${cause_parts[@]:-}"; do
               [ -n "$part" ] || continue
