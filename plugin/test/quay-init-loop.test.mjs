@@ -808,6 +808,17 @@ function writeFakeBundles(src, coreContent, nativeContent) {
   fs.writeFileSync(path.join(src, 'vendor', 'quay-native', 'provider.yml'), 'id: native\nname: "quay-native"\n', 'utf8');
 }
 
+/** Read the version the vendored package.json declares (the AC4 version-freshness comparison
+ * target). The test tracks the ACTUAL vendored version — it was hardcoded 0.3.13 when written,
+ * and drifted when the vendored version advanced. */
+function readVendoredVersion(plugin) {
+  const pkg = path.join(plugin, 'vendor', 'quay', 'package.json');
+  const data = JSON.parse(fs.readFileSync(pkg, 'utf8'));
+  assert.ok(typeof data.version === 'string' && /^\d+\.\d+\.\d+$/.test(data.version),
+    `vendored package.json must declare a semver version (got ${JSON.stringify(data.version)})`);
+  return data.version;
+}
+
 // makePluginCopy: a plugin copy at <parent>/plugin whose SIBLING packages tree (<parent>/packages)
 // is PER-TEST unique — the AC1 stale check resolves $PLUGIN_ROOT/../packages relative to the
 // plugin root, so a shared sibling (plain /tmp) would leak a source tree between tests.
@@ -956,17 +967,21 @@ test('AC4 — a user-scope install cache (no packages/ source tree) whose dist e
   const { parent, plugin } = makePluginCopy();
   try {
     // The dist bundle is runnable and echoes an OLD core version; the vendored package.json
-    // (tracked in git, copied verbatim) declares 0.3.13 → version mismatch = stale. No packages/
-    // source tree exists here → the AC1 mtime check cannot fire, so the AC4 version check owns it.
-    writeFakeBundles(plugin, 'console.log("0.3.12")\n', '// native bundle\n');
+    // (tracked in git, copied verbatim) declares the real version → version mismatch = stale.
+    // No packages/ source tree exists here → the AC1 mtime check cannot fire, so the AC4 version
+    // check owns it. The declared version is read from the copied plugin's vendor/package.json so
+    // the test tracks the actual vendored version (was hardcoded 0.3.13; now 0.4.0).
+    const declared = readVendoredVersion(plugin);
+    writeFakeBundles(plugin, `console.log("${declared.replace(/\d+$/, (m) => String(Number(m) - 1))}")\n`, '// native bundle\n');
+    const embeddedStale = declared.replace(/\d+$/, (m) => String(Number(m) - 1));
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
         '--tmux-session', 'proj-0:0.0', '--plugin-root', plugin]);
       assert.equal(r.status, 0, 'a stale user-scope runtime is a PROMPT, not a fail-closed (no source tree to rebuild from — AC4)');
       assert.match(r.stderr, /STALE \(user-scope vendor runtime\)/, 'must flag the user-scope stale dist (AC4 negative control: pre-fix treated the 06:01 dist as fresh)');
-      assert.match(r.stderr, /0\.3\.12/, 'must name the embedded stale version');
-      assert.match(r.stderr, /0\.3\.13/, 'must name the declared vendored version');
+      assert.match(r.stderr, new RegExp(embeddedStale.replace(/\./g, '\\.')), 'must name the embedded stale version');
+      assert.match(r.stderr, new RegExp(declared.replace(/\./g, '\\.')), 'must name the declared vendored version');
     } finally { cleanup(ws); }
   } finally { cleanup(parent); }
 });
@@ -974,7 +989,8 @@ test('AC4 — a user-scope install cache (no packages/ source tree) whose dist e
 test('AC4 — a user-scope dist whose embedded version MATCHES the vendored package.json is NOT flagged stale', () => {
   const { parent, plugin } = makePluginCopy();
   try {
-    writeFakeBundles(plugin, 'console.log("0.3.13")\n', '// native bundle\n');
+    const declared = readVendoredVersion(plugin);
+    writeFakeBundles(plugin, `console.log("${declared}")\n`, '// native bundle\n');
     const ws = makeTmp();
     try {
       const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
