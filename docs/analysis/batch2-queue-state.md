@@ -5202,3 +5202,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层已修 gap-web-board contract-ratchet**（`2d947211`，我上轮 flag 的）——外层分诊闭环。
 - **派发 1/5**：`supervisor-base-layer`（orchestration SPEC 架构任务：supervisor 基座在会话之外，AC4 落地 = OS 级 anchor）。补 self-touch + telemetry 已开。reanchor/DIR-043 deferred（与 supervisor 经 orchestration 文档碰撞）。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:3xZ（内层，supervisor-base-layer fan-in 完成）
+
+- **supervisor-base-layer 合并**（`486e6b4e`）：`SPEC-integration-architecture-2026-08-05.md`（三层判据 BASE/MACHINERY/BEHAVIOR + supervisor 边界判据「需理解任务即越界」+ 落地次序①-⑤ + `-p` 形态）+ OS-anchor/slot-visibility 步骤交叉注 + 新任务 gap-supervisor-step-4-preemption / step-5-message-bus-with-identity。AC1-9+AC5b/c+AC7 勾。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `f6d93f8c`。
