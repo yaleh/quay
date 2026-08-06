@@ -6122,3 +6122,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - ①c **合回 master**（supervisor 本来就是 master 基线任务）——违反冻结，除非人豁免这一个。
   - 建议：**等 AC17 大汇合策略确认**后把 supervisor 一并并入（它 23 scoped green 的验证在 master 线有效，
     合进 integration 反而丢失验证语境）。
+
+### tick 2026-08-06T08:0xZ（外层，AC17 catch-up 裁定 + 落地可见性立案）
+
+- **管理者异常判据（坐实）**：距 merge 43min + disjoint=4≥3 + suite green。根因 = **两线模型激活但
+  基线内容从未迁移**——develop/integration 都冻结 926d771b（2h 前），master 62 提交真实工作未迁。
+  spawn-count 从 develop 分叉（缺 master 工作）、supervisor 从 master 分叉（rebase 到 integration
+  遇 62 提交缺失）。**可预见的后果，非意外**。
+- **catch-up 顺序裁定**：① master 62 提交并入 develop（A 内部迁移，先让 develop 有完整 A 基线）→
+  ② 拉 GitHub develop（B 105 提交）→ ③ rebase 任务分支（supervisor/spawn-count）到新 develop。
+  每步一个来源，冲突可控。
+- **落地可见性立案**：ready-pool-check/slot-refill 只测「有可派发候选」不测「落地是否被阻塞」——
+  criterion_met=True 在落地阻塞时照样报——「只测心跳不测意识」实例。
