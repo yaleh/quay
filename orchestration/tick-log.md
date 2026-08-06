@@ -3,6 +3,7 @@
 每 20 分钟一行。`动作类型` 是判断分层是否退化的唯一依据（`correct` 占比 ≥50% = 内层自主性不足）。
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
+| 2026-08-06 20:4xZ | `unblock` | **inner 完成 16 失败 triage + 套件重跑**：a1a001ae 记录 all real defects fixed（dup task frontmatter / task-check dangling var / message-bus tsc / checker-cost double-record / tick-vocab meta-text / **trend-check merge corruption**——正是 obs1 的 ×2，文件复制 2 次卡中段）；多个 fix commit 落地树净；重跑套件（20:48）验证 | 内层：Churning 20m，16 修复全 commit；1 agent | ①a1a001ae + fix commits 核实；②套件 state=running 20:48 |
 | 2026-08-06 20:2xZ | `no-action` | **延续 tick**：inner 处理 triage 驱动（剩余 16 失败）中；套件 verdict 168→16 已记（round 42）。无新 commit/closure | 内层：Churning 42s，triage 剩余 16 | ①inner 处理驱动核实；②套件红 16 失败（已记） |
 | 2026-08-06 20:2xZ | `unblock` | **quay-init 修复全量验证：168→16**：套件重跑（19:48→20:26, durMs 2300275）quay-init 族从失败列表消失（曾 40+）；剩余 16 分散（ts-typecheck-gate 3 / checker-cost 2 / unparseable-frontmatter / tick-vocabulary / store / trend-check 等）。**主红因已修**。下一步：triage/修剩余 16 | 内层：提示符，1 agent；quay-init 48/48 自验已确认 | ①16 vs 168 失败计数核实；②quay-init 族消失核实 |
 | 2026-08-06 20:0xZ | `no-action` | **等待型 tick**：inner 确认 quay-init-loop 48/48 green（74a2a0f8——quay-init 族已修 per inner）；外层套件重跑（19:48）仍在全量验证，verdict 待出。树净 | 内层：提示符，1 agent；quay-init 修复已 commit 并自验 48/48 | ①git log 核实 48/48 green + fix commit；②套件 state=running 19:48 |
