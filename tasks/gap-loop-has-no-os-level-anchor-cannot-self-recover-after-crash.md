@@ -48,6 +48,12 @@ extra:
 > 它把「崩溃 = 永久死亡」的锚点从 Claude 会话内搬到 OS 级 systemd 用户 timer，正是基座层
 > 「不随 agent 会话死」的第一条。supervisor 健康检查（supervisor-health.sh 的
 > `os_anchor_timer=active`）以此为存活证据。不另开重复任务。
+>
+> **Session 实体/pid 账本引用（2026-08-06，gap-supervisor-preemption）**：
+> 抢占原语（supervisor-preempt.sh 的 `preempt(target)`）的目标进程/会话 = SPEC-state-crystallization
+> §3 的 **Session 实体**（layer/pid/…）——supervisor 侧按层维护 pid 账本（session-liveness.sh 的
+> `session_pid` 已能按窗口名解析 pane 的 claude 子进程 pid），`preempt <pid>` 在 `-p` 迁移后直接
+> `kill <pid>`。本任务（OS 锚点）+ 抢占（任意点停止）互补：锚点管「死而复生」，抢占管「活而即停」。
 
 ## Proposal
 

@@ -33,6 +33,18 @@
 // AC5 (cap semantics unchanged): the cap is an INPUT (--cap, the effective_cap from cap-from-gate.sh
 // at the dispatch decision point) — mechanism/strategy separation, the helper never hardcodes a cap.
 //
+// AC8-PREEMPT (tasks/gap-supervisor-preemption — .halt mechanical mount point): `.halt` used to be
+// checked ONLY at the tick boundary (fast-mode-loop-tick.md step 0), and the continuous flow
+// bypassed step 0 (incident 7: after `.halt`, inner still dispatched 5 subagents). THIS helper is a
+// CODE mount point for the preemptive `.halt`: when <root>/.halt is present, should_refill is forced
+// false with no_refill_reason naming the halt — so EVERY dispatch-recommendation path that consumes
+// this helper (the event-driven refill AND the tick-heartbeat refill) is mechanically blocked
+// mid-flow, not just at a tick boundary. The sentinel read mirrors checkHalt() (select-preflight.ts):
+// ENOENT ⇒ not halted; any other read failure ⇒ FAIL-CLOSED halted (never fail open). The process-
+// level stop of already-in-flight agents is supervisor-preempt.sh preempt/preempt-all — this helper
+// stops NEW dispatch, that primitive stops RUNNING agents; together they are the preemption family
+// (SPEC-isolation-and-resource-governance §2: 限额/抢占都是「不可被绕过」族).
+//
 // Run:
 //   node --experimental-strip-types plugin/scripts/slot-refill.ts [--root <repo>]
 //       [--cap <n>] [--in-flight <id1,id2>] [--floor-mult <n>] [--json]
@@ -64,6 +76,26 @@ import { isDirectEntry } from "./gate-script-base.ts";
 /** Free dispatch slots = max(0, cap − in_flight). The one definition; never hardcoded. */
 export function computeSlotsFree(cap, inFlightCount) {
   return Math.max(0, cap - inFlightCount);
+}
+
+/**
+ * Read the `.halt` sentinel at workspace root — the preemptive-halt mount point.
+ * Mirrors checkHalt() in select-preflight.ts exactly (gap-halt-sentinel-path-mismatch:
+ * a fail-open shape on an unreadable sentinel caused a real safety miss):
+ *   ENOENT (no file)              → { halted: false }         — the common, expected state
+ *   file exists                   → { halted: true, reason }  — empty file still halts
+ *   any OTHER read failure        → { halted: true, reason }  — FAIL-CLOSED, never fail open
+ */
+export function checkHaltSentinel(root) {
+  const haltPath = path.join(root, ".halt");
+  try {
+    const content = fs.readFileSync(haltPath, "utf8").trim();
+    return { halted: true, reason: content || ".halt sentinel present (empty)" };
+  } catch (e) {
+    if (e && e.code === "ENOENT") return { halted: false, reason: "" };
+    // Fail closed: any read failure other than a clean absence is a halted state.
+    return { halted: true, reason: `FAIL-CLOSED: could not read .halt at ${haltPath}: ${e?.message || String(e)}` };
+  }
 }
 
 function readFrontField(frontmatterRaw, key) {
@@ -107,44 +139,58 @@ function buildStatusById(tasksDir) {
  *      criterion_met, should_refill, no_refill_reason, recommended, scanned }
  */
 export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [] }) {
+  // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
+  // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
+  // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
+  const halt = checkHaltSentinel(root);
   const pool = analyzeTasks({ tasksDir, root, cap, floorMult, inFlight });
   const slotsFree = computeSlotsFree(cap, inFlight.length);
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
   // dispatch checks (touches-resolve + deps-ready + disjoint-from-in-flight), capped at slots_free.
-  const sharedFiles = walkFiles(root);
-  const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
-  const statusById = buildStatusById(tasksDir);
-  const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
-  const candidates = [];
-  for (const id of pool.ready) {
-    const file = path.join(tasksDir, `${id}.md`);
-    if (!fs.existsSync(file)) continue;
-    const text = fs.readFileSync(file, "utf8");
-    // step-4 check 1: touches-resolve (majority-missing ⇒ not dispatchable).
-    if (checkTaskTouchesResolve(text, root).majorityMissing) continue;
-    // step-4 check 2: deps-ready (parent done).
-    const task = parseTask(text);
-    task.parent = readFrontField(task.frontmatterRaw, "parent");
-    if (!depsReadyFor(task, statusById)) continue;
-    // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent.
-    const parsed = parseTouches(text);
-    let blocked = false;
-    for (const inf of inFlightParsed) {
-      if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = true; break; }
+  // While halted, no candidate is recommended at all — the human's stop supersedes the pool.
+  // (Pool stats are still reported for visibility; the dispatch recommendation is empty.)
+  let recommended = [];
+  if (!halt.halted) {
+    const sharedFiles = walkFiles(root);
+    const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
+    const statusById = buildStatusById(tasksDir);
+    const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
+    const candidates = [];
+    for (const id of pool.ready) {
+      const file = path.join(tasksDir, `${id}.md`);
+      if (!fs.existsSync(file)) continue;
+      const text = fs.readFileSync(file, "utf8");
+      // step-4 check 1: touches-resolve (majority-missing ⇒ not dispatchable).
+      if (checkTaskTouchesResolve(text, root).majorityMissing) continue;
+      // step-4 check 2: deps-ready (parent done).
+      const task = parseTask(text);
+      task.parent = readFrontField(task.frontmatterRaw, "parent");
+      if (!depsReadyFor(task, statusById)) continue;
+      // step-4 check 3: concurrency eligibility — disjoint from every currently-running subagent.
+      const parsed = parseTouches(text);
+      let blocked = false;
+      for (const inf of inFlightParsed) {
+        if (!checkTouchesPair(parsed, inf.touches, expand).disjoint) { blocked = true; break; }
+      }
+      if (blocked) continue;
+      candidates.push(parseCandidate(id, text));
     }
-    if (blocked) continue;
-    candidates.push(parseCandidate(id, text));
+    const { batch } = assembleBatch(candidates, { expand });
+    recommended = batch.slice(0, slotsFree);
   }
-  const { batch } = assembleBatch(candidates, { expand });
-  const recommended = batch.slice(0, slotsFree);
 
   // should_refill — the event-driven go/no-go. Based on the RECOMMENDED set (candidates that pass
   // the step-4 checks AND are disjoint from in-flight), not the raw pool capacity: a pool whose
   // only member fails touches-resolve must not trigger a refill.
-  const shouldRefill = slotsFree > 0 && recommended.length >= 1;
+  let shouldRefill = slotsFree > 0 && recommended.length >= 1;
   let noRefillReason = null;
-  if (slotsFree <= 0) {
+  if (halt.halted) {
+    // Preemptive halt takes precedence over every other reason — the human's stop is the
+    // highest-priority gate (gap-supervisor-preemption: `.halt` is 任意点生效, not tick-boundary).
+    shouldRefill = false;
+    noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
+  } else if (slotsFree <= 0) {
     noRefillReason = "no free slots (in-flight >= cap)";
   } else if (recommended.length === 0) {
     noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight)";
@@ -159,6 +205,8 @@ export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAUL
     floor: pool.floor,
     dispatchable_disjoint: pool.dispatchable_disjoint,
     criterion_met: pool.criterion_met,
+    halted: halt.halted,
+    halt_reason: halt.halted ? halt.reason : null,
     should_refill: shouldRefill,
     no_refill_reason: noRefillReason,
     recommended,

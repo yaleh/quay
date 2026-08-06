@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# supervisor-preempt.sh — the supervisor base layer's PREEMPTION primitive
+# (tasks/gap-supervisor-preemption, 落地次序 step ④; SPEC-integration-architecture §4.4 #4).
+#
+# `.halt` is currently checked at the TICK BOUNDARY (tick step 0). Tonight's incident 7:
+# after `.halt` was placed, inner STILL dispatched 5 subagents and merged 4 times — the
+# continuous flow has no step 0, so the tick-boundary-only rule was bypassed
+# (SPEC-state-crystallization §2.1: ".halt 是『规则正确但缺机械挂载点』的实例").
+#
+# THIS SCRIPT IS THE MECHANICAL MOUNT POINT. It makes `.halt` PREEMPTIVE — it takes effect at
+# ANY execution point, not just the next tick boundary:
+#
+#   halt-check   — read the `.halt` sentinel (fail-closed). The Contract `measure` surface:
+#                  `bash <抢占原语> halt-check` stdout's `halted=` field. Any dispatch path /
+#                  any layer that wants to know "should I stop RIGHT NOW?" asks THIS, not a
+#                  prose step-0 rule. Grep-able, code-enforced, works mid-flow.
+#   preempt      — process-level stop signal against ONE target at ANY point. For the TUI form
+#                  (pre `claude -p`) the signal is a tmux C-c to the target pane (interrupts the
+#                  running agent wherever it is); for the `claude -p` form (AC4/AC5b) the signal
+#                  is `kill <pid>` — the OS IS the preemption primitive. The invariant: it does
+#                  NOT depend on the preemptee calling anything (不可被绕过 — same family as
+#                  resource limits, SPEC-isolation-and-resource-governance §2).
+#   preempt-all  — halt semantics: when `.halt` is present, signal EVERY in-flight layer
+#                  (all targets), so a human `.halt` stops further dispatch immediately.
+#
+# BASE-LAYER BOUNDARY (inherited from supervisor base layer): this script makes NO judgment,
+# reads NO task content, writes NO code. It only reads a sentinel file and signals target
+# processes/sessions. Any line that would need to "understand what a task is about" is overreach.
+#
+# Usage:
+#   supervisor-preempt.sh halt-check [--root <repo-root>]
+#       stdout: halted=true|false ; reason=<content-or-fail-closed-message>
+#       exit 0 (a check, not a gate)
+#   supervisor-preempt.sh preempt <target> [--method auto|tmux-c-c|kill] [--dry-run]
+#       <target>  a numeric PID   → `kill <pid>`            (-p form; AC4)
+#                 a tmux target   → `tmux send-keys C-c`    (TUI form)
+#       exit 0 = signal sent · 1 = target missing/failed · 2 = usage
+#   supervisor-preempt.sh preempt-all [--root <repo-root>]
+#                 [--target <layer>[,<layer>...]] [--pid <pid>[,<pid>...]] [--dry-run]
+#       when `.halt` present: signal all given targets (tmux C-c) and/or pids (kill).
+#       when `.halt` absent:  no-op, exit 0 (nothing to preempt — report "no-halt").
+#       if no target/pid given AND no ledger: exit 1 (cannot resolve in-flight layers) —
+#       fail loud, never pretend we preempted.
+#
+# Env seams (hermetic tests):
+#   SUPERVISOR_PREEMPT_ROOT        override workspace root (default: script's own repo root)
+#   SUPERVISOR_PREEMPT_TMUX        override tmux binary (default: tmux)
+#   SUPERVISOR_PREEMPT_KILL_CMD    override kill binary (default: kill)
+#   SUPERVISOR_PREEMPT_DRY_RUN=1   print the would-be signal instead of executing it
+#
+# Test: plugin/test/supervisor-preempt.test.mjs
+
+set -uo pipefail
+
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)"
+ROOT="${SUPERVISOR_PREEMPT_ROOT:-$(cd "$SELF_DIR/../.." 2>/dev/null && pwd || echo "$SELF_DIR/../..")}"
+TMUX_CMD="${SUPERVISOR_PREEMPT_TMUX:-tmux}"
+KILL_CMD="${SUPERVISOR_PREEMPT_KILL_CMD:-kill}"
+DRY_RUN="${SUPERVISOR_PREEMPT_DRY_RUN:-0}"
+
+# ── halt-check ─────────────────────────────────────────────────────────────────────────────────────
+# Read .halt at workspace root. Mirror checkHalt()'s semantics EXACTLY (select-preflight.ts):
+#   * ENOENT (no file)      → halted=false — the expected, common non-halted state.
+#   * file exists           → halted=true  (empty file still halts — the sentinel is the pause).
+#   * any OTHER read error  → FAIL-CLOSED halted=true with the reason naming the failure.
+#     (gap-halt-sentinel-path-mismatch: a fail-open shape on an unreadable sentinel already
+#      caused a real safety miss — never silently fall through to "not halted".)
+halt_check() {
+  local i=1 a
+  while [ "$i" -le "$#" ]; do
+    a="${!i}"
+    case "$a" in
+      --root) i=$(( i + 1 )); ROOT="${!i:-$ROOT}" ;;
+      *) echo "halt-check: unknown arg $a" >&2; return 2 ;;
+    esac
+    i=$(( i + 1 ))
+  done
+  local halt_path="$ROOT/.halt" content
+  if [ -f "$halt_path" ]; then
+    content="$(cat "$halt_path" 2>/dev/null && printf '\n')" || {
+      echo "halted=true"
+      echo "reason=FAIL-CLOSED: could not read .halt sentinel at $halt_path"
+      return 0
+    }
+    content="$(printf '%s' "$content" | sed -n '1p' | cut -c1-200)"
+    [ -n "$content" ] || content=".halt sentinel present (empty)"
+    echo "halted=true"
+    echo "reason=$content"
+    return 0
+  fi
+  # Not present: is it a plain ENOENT or a genuine failure (dir in the way, perm denied…)?
+  if [ ! -e "$halt_path" ]; then
+    echo "halted=false"
+    echo "reason="
+    return 0
+  fi
+  # Path exists but is not a regular file (or unreadable) → fail closed.
+  if [ ! -r "$halt_path" ]; then
+    echo "halted=true"
+    echo "reason=FAIL-CLOSED: .halt sentinel present but unreadable at $halt_path"
+    return 0
+  fi
+  echo "halted=true"
+  echo "reason=FAIL-CLOSED: .halt sentinel present but not a readable file at $halt_path"
+  return 0
+}
+
+# ── preempt one target ─────────────────────────────────────────────────────────────────────────────
+# <target> is a PID (numeric → kill) or a tmux target (anything else → tmux send-keys C-c).
+preempt_one() {
+  local target="$1" method="${2:-auto}"
+  if [ -z "$target" ]; then
+    echo "preempt: empty target" >&2
+    return 2
+  fi
+  # Numeric ⇒ PID ⇒ process-level kill (the `claude -p` form — the OS is the preemption primitive).
+  if [[ "$method" == "auto" || "$method" == "kill" ]] && [[ "$target" =~ ^[0-9]+$ ]]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "preempt: [dry-run] $KILL_CMD $target"
+      return 0
+    fi
+    if ! kill -0 "$target" 2>/dev/null; then
+      echo "preempt: target pid $target not alive" >&2
+      return 1
+    fi
+    # SIGINT first (graceful interrupt — lets the agent tee up state), the process's own exit
+    # then does the rest. For a stopped/hung agent, SIGINT is the documented stop at ANY point.
+    if ! $KILL_CMD -INT "$target" 2>/dev/null; then
+      echo "preempt: failed to signal pid $target" >&2
+      return 1
+    fi
+    echo "preempt: pid $target signaled (SIGINT)"
+    return 0
+  fi
+  # tmux target (a session/window/pane name) ⇒ TUI form: send C-c to interrupt the running agent.
+  if [[ "$method" == "auto" || "$method" == "tmux-c-c" ]]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "preempt: [dry-run] $TMUX_CMD send-keys -t $target C-c"
+      return 0
+    fi
+    if ! $TMUX_CMD has-session -t "$target" 2>/dev/null; then
+      # A window/pane target may not be a session; fall back to list-panes to confirm existence.
+      if ! $TMUX_CMD list-panes -t "$target" -F '#{pane_id}' >/dev/null 2>&1; then
+        echo "preempt: tmux target $target not found" >&2
+        return 1
+      fi
+    fi
+    if ! $TMUX_CMD send-keys -t "$target" C-c 2>/dev/null; then
+      echo "preempt: failed to send C-c to tmux target $target" >&2
+      return 1
+    fi
+    echo "preempt: tmux target $target signaled (C-c)"
+    return 0
+  fi
+  echo "preempt: unknown method $method" >&2
+  return 2
+}
+
+# ── dispatch ───────────────────────────────────────────────────────────────────────────────────────
+cmd_preempt() {
+  [ "$#" -ge 1 ] || { echo "用法: $0 preempt <target> [--method auto|tmux-c-c|kill] [--dry-run]" >&2; return 2; }
+  local target="$1" method="auto" i=2 a
+  while [ "$i" -le "$#" ]; do
+    a="${!i}"
+    case "$a" in
+      --method) i=$(( i + 1 )); method="${!i:-auto}" ;;
+      --dry-run) DRY_RUN=1 ;;
+      --root) i=$(( i + 1 )); ROOT="${!i:-$ROOT}" ;;
+      *) echo "preempt: unknown arg $a" >&2; return 2 ;;
+    esac
+    i=$(( i + 1 ))
+  done
+  preempt_one "$target" "$method"
+}
+
+cmd_preempt_all() {
+  local targets="" pids="" i=1 a
+  while [ "$i" -le "$#" ]; do
+    a="${!i}"
+    case "$a" in
+      --root) i=$(( i + 1 )); ROOT="${!i:-$ROOT}" ;;
+      --target) i=$(( i + 1 )); targets="${!i:-}" ;;
+      --pid) i=$(( i + 1 )); pids="${!i:-}" ;;
+      --dry-run) DRY_RUN=1 ;;
+      *) echo "preempt-all: unknown arg $a" >&2; return 2 ;;
+    esac
+    i=$(( i + 1 ))
+  done
+
+  local halt_path="$ROOT/.halt"
+  if [ ! -e "$halt_path" ]; then
+    echo "preempt-all: no-halt (nothing to preempt)"
+    return 0
+  fi
+  [ -f "$halt_path" ] || {
+    echo "preempt-all: FAIL-CLOSED .halt sentinel present but not a readable file" >&2
+    return 1
+  }
+
+  local -a signaled=() t p
+  local rc=0
+  for t in ${targets//,/ }; do
+    [ -n "$t" ] || continue
+    if preempt_one "$t" "tmux-c-c"; then signaled+=("$t"); else rc=1; fi
+  done
+  for p in ${pids//,/ }; do
+    [ -n "$p" ] || continue
+    if preempt_one "$p" "kill"; then signaled+=("$p"); else rc=1; fi
+  done
+
+  if [ "${#signaled[@]}" -eq 0 ]; then
+    echo "preempt-all: no targets/pids resolved to signal (fail loud — did not preempt)" >&2
+    return 1
+  fi
+  echo "preempt-all: halted — signaled ${#signaled[@]} in-flight layer(s): ${signaled[*]}"
+  return "$rc"
+}
+
+CMD="${1:-}"
+case "$CMD" in
+  halt-check)
+    shift
+    halt_check "$@"
+    exit $?
+    ;;
+  preempt)
+    shift
+    cmd_preempt "$@"
+    exit $?
+    ;;
+  preempt-all)
+    shift
+    cmd_preempt_all "$@"
+    exit $?
+    ;;
+  *)
+    echo "用法: $0 {halt-check [--root <根>] | preempt <target> [--method …] | preempt-all [--root <根>] [--target <层>…] [--pid <pid>…]}" >&2
+    exit 2
+    ;;
+esac

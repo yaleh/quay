@@ -525,6 +525,13 @@ rm <repo>/.halt
 所以在飞任务会算完但不落地，直到解除。**人已裁定接受这一点。**
 缓解只有一条纪律：**暂停不是终点，解除条件必须写在 `.halt` 内容里**。
 
+**抢占（`gap-supervisor-preemption`，2026-08-06）：`.halt` 现在是任意点生效，不只等下一 tick 边界。**
+机械挂载点三处（代码强制，`supervisor-preempt.sh` 基座层实现）：
+`bash plugin/scripts/supervisor-preempt.sh halt-check --root <根>`（读哨兵，fail-closed）、
+`preempt <target>`（对在飞层发停止信号：TUI 形态 tmux C-c；`-p` 迁移后 `kill <pid>`）、
+`preempt-all --root <根> --target <层>[,<层>] --pid <pid>[,<pid>]`（halt 时对全部在飞层发信号）。
+内层派发推荐（`slot-refill.ts`）在 `.halt` 存在时 `should_refill=false`——新派发被代码挡住。
+
 **外层每个 tick 必须报三个项目的 `.halt` 状态**——这是「暂停后忘了」的唯一防线：
 
 ```bash
