@@ -3,13 +3,13 @@ id: gap-session-liveness-hashes-the-token-counter-as-if-it-were-work
 title: session-liveness hashes the whole pane including the "/clear to save NNN.Nk
   tokens" counter, so a parked session emits a RESUMED/IDLE pair with zero work
 status: done
-status: ready
 labels:
   - gap
   - milestone-candidate
 extra:
   schema: v1
 ---
+
 
 > **SCOPE CHANGE (outer ruling D, 2026-08-04) — `orchestration/outer-rulings-2026-08-04-A-F.md`.**
 > Do NOT implement as "add more strip rules" to `mask_pane` — accumulating strip rules for each

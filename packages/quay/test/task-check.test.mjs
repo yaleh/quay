@@ -79,7 +79,10 @@ async function main() {
   const client = await connectProvider({
     command: "node",
     args: [nativeBin, "mcp"],
-    cwd: nativeProviderDir,
+    // QUAY_NATIVE_CLI is an absolute entry; run the MCP server from its package dir so any
+    // relative provider paths resolve (the A-layer spawn conversion dropped the old
+    // nativeProviderDir variable — path.dirname(nativeBin) is the equivalent).
+    cwd: path.dirname(nativeBin),
     env: { QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 

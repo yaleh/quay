@@ -1,9 +1,6 @@
 ---
 id: gap-the-token-watches-the-shell-that-asked-not-the-work-that-runs
 title: "The heavy-op token's liveness watches the shell that acquired it, not the work that is running — a retry loop makes the token reclaimable while the work continues"
-title: The heavy-op token's liveness watches the shell that acquired it, not the
-  work that is running — a retry loop makes the token reclaimable while the work
-  continues
 status: done
 labels:
   - gap
@@ -11,6 +8,7 @@ labels:
 extra:
   schema: v1
 ---
+
 
 **type:** execution
 
