@@ -6156,3 +6156,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - spawn-count 完成通知到达时：先 fan-in 或先 catch-up？按裁定顺序 catch-up 优先（①→②→③ 含 rebase
   任务分支），即完成通知后先执行 catch-up 的①②，再 rebase spawn-count 分支（③），然后按新 develop
   基线 fan-in。
+
+### tick 2026-08-06T08:0xZ（外层，人催 AC16）
+
+- **人催 AC16**：archguard backlog 已空（"待接续：quay 升级/新能力/凭据/发布"），在等能装的 release。
+  AC16 卡着 archguard 下一步没落点——不是排期可延。
+- **裁定：现在派**。AC16（gap-release-excludes-plugin-bundle）Touches = packages/quay/package.json +
+  scripts，与在飞 spawn-count（quay-native）+ catch-up（git 分支）disjoint。优先于 catch-up（AC16
+  小改动 + archguard 等）。四项机制决定：files 加 plugin/、develop 打 tag、SEA 继续、v0.4.0。
+- 已驱动 inner：spawn-count 完成后优先派发 AC16，再执行 catch-up。
