@@ -74,3 +74,18 @@ os-anchor-watchdog.sh`（criterion「OS 级周期锚点 systemd user timer」）
 lease-model 任务 122-140 行已裁定 watchdog 不是产品交付物**（4 次全灭全是实验室自伤、循环论证、
 默认不装不进 plugin/ 推荐路径）。⇒ L1 交付面检查在算一个已裁定不属产品的东西，且 systemd 是
 Linux-only 违反可移植性。修复：第 5 项移除 os-anchor 或改判据为「非产品交付」。
+
+## 追加两半（2026-08-06T09:4xZ，archguard 消费方验证 #133）
+
+**archguard 消费方侧独立验证，补全为三半（同一缺陷族，并入本任务）**：
+
+1. **布局硬编码到 quay**（已立案）：verify-delivery-surface 查 plugin/loop 等源布局，非消费者 laid 布局。
+2. **检查本身没交付**（archguard 确认）：0.3.13 实际铺设集**没有 verify-delivery-surface.ts**——源文件在
+   plugin/scripts/（外层核实存在）但**不在 quay-init 铺设集**（quay-init.sh 无引用）——消费方跑不了这个
+   检查，它之前跑的是 quay 的副本。0/6 有两半：布局 + 未交付。
+3. **laidFiles 记录残缺**（archguard 新发现，亲代查不出）：quay-init.sh:610-623 的 `laidFiles` **硬编码只记录
+   2 个 tick 文档**（`for rel in ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md"]`），
+   `laidCategories` 只加 `"loop"`——「铺设了什么」的记录只覆盖 loop 层，不含 scripts/skills/probes/vendor/agents
+   等实际铺设的绝大部分。**记录与交付不一致**——与 ADR-024（裁定与其机械化检查可追溯绑定）同 territory。
+
+**这是「子代发现亲代盲区」第三实例**（管理者先在亲代查出一半、子代补上另两半）——分工价值第二个实证。
