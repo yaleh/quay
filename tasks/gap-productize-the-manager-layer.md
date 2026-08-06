@@ -1,7 +1,7 @@
 ---
 id: gap-productize-the-manager-layer
 title: "the third layer exists in practice (three layers run) but only two ship — plugin/skills/manager* is absent, all manager mechanisms are quay-local in orchestration/ (manager-loop-tick.md / manager-phase-goal.md); ship the manager layer (cadence = daily review, three functions = planning/prioritization/trend, the two verified §1.5/§1.6 rules, cold-start AC8c stale-key fix, launch-config port) so gaps 1-3 have an owner — a cold-start on another machine currently gets a two-layer system that executes fast but never plans/prioritizes/trend-watches"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -83,6 +83,8 @@ manager 层从 `plugin/loop/`/`plugin/skills/manager*` 出货后，该类别即�
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-productize-the-manager-layer.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/skills/manager/SKILL.md (new)（或 plugin/loop/manager-loop-tick.md）
 - plugin/skills/cold-start/SKILL.md（AC8c 废键修复）

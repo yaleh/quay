@@ -1,7 +1,7 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing
 title: prepare-milestone applies uniform full Proposal+Plan synthesis to every task regardless of implementation scale
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -80,6 +80,8 @@ Standard inherited-core DoD clauses apply.
 2. Was this parent kept `todo` throughout, promoted only after all three are done?
 
 ## Touches
+- tasks/gap-prepare-milestone-no-size-aware-routing.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - `tasks/gap-prepare-milestone-no-size-aware-routing-A.md`
 - `tasks/gap-prepare-milestone-no-size-aware-routing-B.md`

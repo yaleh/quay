@@ -2,7 +2,7 @@
 id: gap-session-liveness-hashes-the-token-counter-as-if-it-were-work
 title: session-liveness hashes the whole pane including the "/clear to save NNN.Nk
   tokens" counter, so a parked session emits a RESUMED/IDLE pair with zero work
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -182,6 +182,8 @@ grep -oE 'SESSION-[A-Z]+' <monitor-output-file> | sort | uniq -c
       外层实测确认了具体机制（计数器在哈希区域内）——**成因确认后，去抖那条取舍不必做**
 
 ## Touches
+- tasks/gap-session-liveness-hashes-the-token-counter-as-if-it-were-work.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/session-liveness.sh
 - plugin/test/session-liveness.test.mjs

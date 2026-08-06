@@ -1,7 +1,7 @@
 ---
 id: gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round
 title: "\"batch\" now means two things (rolling dispatch vs batched verification/closure) — a future reader could misread it as dispatch-gating and drift the behavior back; split the vocabulary, R2-family risk in tick-log/commit wording"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -84,6 +84,8 @@ message。
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/loop/orchestrator-loop-tick.md

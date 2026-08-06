@@ -3,7 +3,7 @@ id: gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false
 title: ghost-suggestion (reliable-send fault 6) can be eliminated at source via
   --prompt-suggestions false / CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false — verify
   safely, then make it a required cold-start launch parameter
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -53,6 +53,8 @@ C-u/C-a+C-k 循环 N 次 pane 内容逐字不变）**可以从源头消除**，�
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - orchestration/restart-plan-2026-08-04-third.md（或当前生效的启动计划）
 - plugin/skills/cold-start/SKILL.md

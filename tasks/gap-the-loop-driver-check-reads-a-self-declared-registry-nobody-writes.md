@@ -3,7 +3,7 @@ id: gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes
 title: loop-driver-check reads a self-declared registry that the tick doc never
   writes — a correct cold start reports STALLED, and the doc's own remedy
   manufactures the double-trigger it exists to prevent
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -132,6 +132,8 @@ AC7 只改**打印的措辞**——把一个控制面的读数从状态断言改
       读代码不会发现，因为代码和文档各自都自洽
 
 ## Touches
+- tasks/gap-the-loop-driver-check-reads-a-self-declared-registry-nobody-writes.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/loop/orchestrator-loop-tick.md
 - plugin/skills/cold-start/SKILL.md

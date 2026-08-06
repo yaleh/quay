@@ -1,7 +1,7 @@
 ---
 id: gap-telemetry-brackets-vs-subagents-no-slot-visibility
 title: "telemetry in-flight brackets do NOT reflect real concurrency — 5 bracket-holders in-flight (cold-start-key4/ready-pool-floor/red-window/nbsp-fix/session-idle, startedAt 05:19-08:28, all stale red-window leftovers) while the inner actually runs 1 subagent (pane ← 1 agent), so '11 dispatchable slots idle vs 1 running' is INVISIBLE to both layers: the fast-mode-loop-tick state-self-check item ① reads telemetry inProgress[] ≤ 3 (cap) but brackets ≠ subagents (the orchestrator-tick 4b distinction is documented yet the self-check still uses brackets) — the check is DEAD for concurrency (5 brackets ≤ 3 false; even at cap, 5 > 3 would false-RED a healthy 1-agent state); manager measured: telemetry --report in-flight=0 (all outcome-closed) while pane shows ← 1 agent just fan-in'd nbsp-fix — the --task-start/--task-end pair is NOT called in the current dispatch path, telemetry degraded to a historical archive that no longer reflects current state; the only remaining view (batch2-queue-state.md) is hand-written narrative markdown not structural slot state; this is the FOURTH 'writer exists but nobody calls' instance tonight (loop-driver.jsonl no-writer / blocked-signal 90min unconsumed / verification-round.jsonl stopped 05:03), and the COSTLIEST — it directly gates throughput; fix direction: (a) confirm WHO calls --task-start/--task-end in the dispatch path and restore it; (b) self-check item ① is currently a VACUOUS check (in-flight always ≤ 3 trivially — either 0 or stale-brackets), worth its own note because it lets any future concurrency violation pass silently; AC10: +1 => 6->7, pre-friction (nothing hurting — no failure, suite running, inner working, telemetry command exits 0; found by asking the generator 'what range does this criterion quantify' → answer: HISTORY not CURRENT)"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -93,6 +93,8 @@ extra:
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
+- tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（自身文件：勾 AC + 贴 invoke 证据授权）
+
 
 - plugin/scripts/fast-mode-telemetry.ts（reconcile 红窗遗留 + 括号闭合 + 空槽信号）
 - plugin/loop/fast-mode-loop-tick.md（状态自检①：in-flight 从括号改为真实并发信号）
