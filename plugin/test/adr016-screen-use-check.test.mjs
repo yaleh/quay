@@ -149,10 +149,12 @@ test("AC2: the ADR enforcement: frontmatter points at the mechanical checker", (
 
 test("AC3/AC7: the checker itself is a shell-script scanner — the test file and ADR prose are .md/.mjs and never self-match", () => {
   // The real repo scan (the run_static_checks invocation) must stay within the band on the
-  // current tree: exactly one ACTIVE observer (session-liveness.sh) and the retired one.
+  // current tree. The ONE tolerated legacy whole-screen-hash observer — session-liveness.sh —
+  // was fixed by gap-session-liveness-hashes-the-token-counter-as-if-it-were-work (its busy
+  // judgment now consumes classifyPaneState; the capture-pane→md5sum flow is gone), so the repo
+  // is now at ZERO active violations. Only the retired send-keys-verified.sh occurrences remain.
   const { violations, retired } = scanForScreenHashViolations(repoRoot);
-  assert.equal(violations.length, 1, JSON.stringify(violations.map((v) => `${v.rel}:${v.line}`)));
-  assert.equal(violations[0].rel, "plugin/scripts/session-liveness.sh");
+  assert.equal(violations.length, 0, JSON.stringify(violations.map((v) => `${v.rel}:${v.line}`)));
   assert.ok(retired.length >= 1); // send-keys-verified.sh retired occurrences
 });
 
