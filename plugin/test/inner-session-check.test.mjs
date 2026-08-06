@@ -159,6 +159,14 @@ test("AC5 — the tick doc verifies the inner drive via the transcript (never as
   assert.match(tickSrc, /transcript-delivery-check|user 消息|user message|INNER-DRIVEN/, "the delivery verdict must be the transcript user message, never assumed");
 });
 
+// ── this task's AC2 — the cold-start --json consumer reads transcriptSource and alarms on discovery ──
+test("AC2 (fallback-silent) — the cold-start consumer reads transcriptSource and alarms on discovery (degraded)", () => {
+  assert.ok(tickSrc.includes("degraded"), "step 3 must name the degraded state (discovery fallback is fail-closed)");
+  assert.match(tickSrc, /transcriptSource/, "the cold-start --json consumer must read transcriptSource");
+  assert.match(tickSrc, /==discovery/, "the consumer must key its alarm on transcriptSource == discovery");
+  assert.match(tickSrc, /不得按 healthy 放行|按 degraded 处理/, "the consumer must reject/not-trust a discovery-sourced healthy");
+});
+
 // ── the mechanical three-state machine ──────────────────────────────────────────────────────────────
 test("state machine — healthy: window + claude child + transcript WITH a user message ⇒ healthy", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const h = newHermetic();
@@ -176,6 +184,9 @@ test("state machine — healthy: window + claude child + transcript WITH a user 
     assert.equal(j.process, true);
     assert.equal(j.transcriptFresh, false);
     assert.equal(j.state, "healthy");
+    assert.equal(j.transcriptSource, "arg", "explicit --transcript is the structural source, not discovery");
+    assert.doesNotMatch(r.stderr, /discovery|degraded|WARNING/i,
+      "Contract control: the healthy normal path must have zero alarm (no regression)");
   } finally { h.cleanup(); }
 });
 
@@ -248,6 +259,96 @@ test("state machine — fail-closed: no session config ⇒ exit 1 (never guess a
     assert.notEqual(r.status, 0, "missing session config must fail-closed (not guess)");
     assert.match(r.stderr, /never guesses|不猜|no tmux session/, "the failure must state it never guesses a session");
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// ── AC1 — TR_SOURCE=discovery (degraded fallback) is NOT silent ─────────────────────────────────────
+test("AC1 — TR_SOURCE=discovery alarms on stderr and marks state=degraded (never silent healthy/empty-shell)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // Hermetic degraded path: the inner claude child has no structurally-resolvable CLAUDE_CODE_SESSION_ID
+  // (its environ carries no sid mapping to a planted transcript), so structural discovery (discovery-pid)
+  // fails and the legacy heuristic fallback fires → TR_SOURCE=discovery. A copy of the script in a temp
+  // repo root + a hermetic $HOME make the discovery dir (`$HOME/.claude/projects/<temp-slug>/`) fully
+  // hermetic. SYSTEM_ONLY transcript = would-be empty-shell if the fallback were trusted — must be degraded.
+  const h = newHermetic("quay-isc-ac1-");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-isc-ac1root-"));
+  let homeTmp;
+  try {
+    h.newSession("isc-ac1", "bash");
+    h.newWindow("isc-ac1", "inner", "bash");
+    h.send("isc-ac1:inner", "exec -a claude-probe sleep 10000 &");
+    assert.ok(await waitForClaude(h.env, "isc-ac1:inner", 5000), "inner claude child must be alive");
+
+    const fakeScripts = path.join(tmp, "plugin", "scripts");
+    fs.mkdirSync(fakeScripts, { recursive: true });
+    fs.copyFileSync(SELF_CHECK, path.join(fakeScripts, "inner-session-check.sh"));
+    fs.copyFileSync(path.join(pluginDir, "scripts", "transcript-delivery-check.ts"),
+      path.join(fakeScripts, "transcript-delivery-check.ts"));
+
+    homeTmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-isc-ac1home-"));
+    const slug = tmp.replace(/\//g, "-");
+    const discoveryDir = path.join(homeTmp, ".claude", "projects", slug);
+    fs.mkdirSync(discoveryDir, { recursive: true });
+    fs.writeFileSync(path.join(discoveryDir, "not-my-session.jsonl"), SYSTEM_ONLY, "utf8");
+
+    const env = { ...h.env, HOME: homeTmp, CLAUDE_CODE_SESSION_ID: "my-session" };
+    const r = spawnSync("bash", [path.join(fakeScripts, "inner-session-check.sh"), "--session", "isc-ac1", "--json"],
+      { encoding: "utf8", env });
+    assert.equal(r.status, 0, `degraded is a completed determination, must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.window, true);
+    assert.equal(j.process, true);
+    assert.equal(j.transcriptSource, "discovery", "structural source unavailable ⇒ fallback source must be exposed as discovery");
+    assert.equal(j.state, "degraded", "discovery-sourced transcript must NOT report healthy/empty-shell — fail-closed degraded");
+    assert.match(r.stderr, /discovery|degraded|WARNING/, "the degraded path must alarm on stderr (not silent)");
+  } finally {
+    if (homeTmp) fs.rmSync(homeTmp, { recursive: true, force: true });
+    h.cleanup();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── AC3 — non-Linux / no-structural-source fallback is loud, never a silent healthy ──────────────────
+test("AC3 — a discovery-sourced USER_MSG transcript (would-be-healthy breeding shape) yields degraded + alarm, never healthy", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // The exact breeding shape from the gap: a degraded cold-start self-check that would have reported
+  // healthy on the misidentified transcript must now be loud + degraded (fail-closed). This is the state
+  // a non-Linux host / unreadable /proc environ lands in: structural discovery cannot resolve, the heuristic
+  // fallback fires — and it must NOT silently masquerade as healthy.
+  const h = newHermetic("quay-isc-ac3-");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-isc-ac3root-"));
+  let homeTmp;
+  try {
+    h.newSession("isc-ac3", "bash");
+    h.newWindow("isc-ac3", "inner", "bash");
+    h.send("isc-ac3:inner", "exec -a claude-probe sleep 10000 &");
+    assert.ok(await waitForClaude(h.env, "isc-ac3:inner", 5000), "inner claude child must be alive");
+
+    const fakeScripts = path.join(tmp, "plugin", "scripts");
+    fs.mkdirSync(fakeScripts, { recursive: true });
+    fs.copyFileSync(SELF_CHECK, path.join(fakeScripts, "inner-session-check.sh"));
+    fs.copyFileSync(path.join(pluginDir, "scripts", "transcript-delivery-check.ts"),
+      path.join(fakeScripts, "transcript-delivery-check.ts"));
+
+    homeTmp = fs.mkdtempSync(path.join(os.tmpdir(), "quay-isc-ac3home-"));
+    const slug = tmp.replace(/\//g, "-");
+    const discoveryDir = path.join(homeTmp, ".claude", "projects", slug);
+    fs.mkdirSync(discoveryDir, { recursive: true });
+    fs.writeFileSync(path.join(discoveryDir, "not-my-session.jsonl"), USER_MSG, "utf8");
+
+    const env = { ...h.env, HOME: homeTmp, CLAUDE_CODE_SESSION_ID: "my-session" };
+    const r = spawnSync("bash", [path.join(fakeScripts, "inner-session-check.sh"), "--session", "isc-ac3", "--json"],
+      { encoding: "utf8", env });
+    assert.equal(r.status, 0, `must exit 0:\n${r.stdout}\n${r.stderr}`);
+    const j = JSON.parse(r.stdout);
+    assert.equal(j.window, true);
+    assert.equal(j.process, true);
+    assert.equal(j.transcriptSource, "discovery");
+    assert.equal(j.state, "degraded", "would-be-healthy discovery transcript must NOT report healthy");
+    assert.notEqual(j.state, "healthy", "the silent-fallback-to-healthy shape is the bug being killed");
+    assert.match(r.stderr, /discovery|degraded|WARNING/, "the fallback must be loud on stderr");
+  } finally {
+    if (homeTmp) fs.rmSync(homeTmp, { recursive: true, force: true });
+    h.cleanup();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("factory — quay-topology.sh builds the two-window topology that the self-check reports healthy", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {

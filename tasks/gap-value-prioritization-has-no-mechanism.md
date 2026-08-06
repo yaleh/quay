@@ -1,6 +1,11 @@
 ---
 id: gap-value-prioritization-has-no-mechanism
 title: "which of the 54 todos matters most has no mechanical answer — every real priority decision tonight came from the human or ad-hoc outer/manager judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity (not relevance); add a relevance signal (strategic-question traceability + blocking + cost) as the manager layer's prioritization function"
+title: which of the 54 todos matters most has no mechanical answer — every real
+  priority decision tonight came from the human or ad-hoc outer/manager
+  judgment; ready-pool-check only has the gap>DIR tiebreak + AC-queue quantity
+  (not relevance); add a relevance signal (strategic-question traceability +
+  blocking + cost) as the manager layer's prioritization function
 status: done
 labels:
   - gap

@@ -672,3 +672,30 @@ test("AC7 — the three batch-eliminating blocks (a/b/c) are cross-annotated in 
     );
   }
 });
+
+// ── Contract invoke (gap-full-suite-runner-marks-test-sh-gate-wait-as-failed) ──────────
+// --wait-check is the ABORT-side twin of --fail-fast-check: it proves the gate-WAIT ⇒ aborted ⇒
+// NO-stop-dispatch chain end-to-end via a runnable CLI control (the Contract's `measure` surface).
+
+function runCli(script, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", script, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.once("error", reject);
+    child.once("exit", (code) => resolve({ code, out, err }));
+  });
+}
+
+test("AC1 Contract invoke — `full-suite-runner.ts --wait-check` proves: test.sh gate-WAIT => red reason=aborted => NO stopSignal", async () => {
+  const { code, out, err } = await runCli(RUNNER, ["--wait-check"]);
+  assert.equal(code, 0, `--wait-check exits 0 when the ABORT chain works; got ${code}\n${out}\n${err}`);
+  assert.match(out, /wait-check OK/, "verification line present");
+  assert.match(out, /reason=aborted/, "gate-WAIT is reason=aborted (no correctness conclusion)");
+  assert.match(out, /stopSignal=false/, "aborted-red must NOT stop dispatch (AC1)");
+  assert.match(out, /SUITE-RED/, "SUITE-RED event still recorded (red noticed, routed by reason)");
+});

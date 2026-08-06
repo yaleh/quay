@@ -2,6 +2,10 @@
 id: gap-the-token-measures-the-wait-and-throws-it-away
 title: "The token already computes waited_ms and prints it to stdout, where it evaporates — so the halt-or-not decision its own header deferred cannot be made"
 status: ready
+title: The token already computes waited_ms and prints it to stdout, where it
+  evaporates — so the halt-or-not decision its own header deferred cannot be
+  made
+status: done
 labels:
   - gap
   - milestone-candidate

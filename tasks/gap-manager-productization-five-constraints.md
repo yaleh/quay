@@ -17,7 +17,7 @@ title: "manager productization (C1-C5, SPEC-manager-productization-2026-08-05):
   'manager for cross-project'); split: manager-phase-goal.md product-behavior
   (axis-open/verification-first/boundary) → plugin/loop/manager-loop-tick.md,
   experiment state stays orchestration/"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -85,6 +85,7 @@ manager 手里出现 .sh/.ts 实现即越界信号。
 
 ## Touches
 
+- tasks/gap-manager-productization-five-constraints.md
 - plugin/scripts/（manager start/adopt 命令、quay-topology.sh 单飞锁、无-manager-tick-doc checker）
 - plugin/loop/manager-loop-tick.md（新建，产品侧 manager 行为）
 - orchestration/manager-phase-goal.md（切分）

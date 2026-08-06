@@ -69,6 +69,27 @@ node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts 
 1. **近窗口 gap-* 战略追溯**（3b 的结果）；
 2. **路线图是否过期**（3a 的结果 + `FINDING-roadmap-predates-ADR-022-retirement-2026-08-05.md`）。
 
+### 3d. 趋势判据——「比上次更贵了吗 / 离目标更近了吗」（点状之外的趋势检查）
+
+**任务**：`gap-quality-criteria-are-point-in-time-no-trend-criteria`。**性质**：被动判据——读已有
+指标历史，**不引入新调度**（AC5）。上述三项清单全是**点状判据**（这次绿了吗 / 这条契约合规吗 /
+这篇战略文档过期吗）；**没有一条问「比上次更贵了吗」**——0.251→0.464→0.321（净 +28%）恶化了一整天
+才被人肉问出来。趋势判据是新品类，每次复盘逐项跑：
+
+```bash
+# 读 verification-round.jsonl（套件 per-test 成本）+ checker-cost.jsonl（判据自身成本）+
+# suite-state-events.jsonl（早期 RED 检测延迟），对窗口内最近 N 点算 (最后−最先)/最先 变化率，
+# 恶化超阈值（默认 +10%，可配 --threshold）打标报出
+node --experimental-strip-types plugin/scripts/trend-check.ts --root . --window 3
+```
+
+- **判据**：趋势打标数组 `trend_flags`（stdout，Contract measure）。**打标 = 数据，不是错误**——
+  「比上次更贵了吗」有机械答案（窗口内净变化超阈值即打标），不再等人肉问出来。
+- **输出写进汇总**：`trend_flags`（打标数组）+ 被标系列清单（如 `suite.perTestMs` /
+  `checker:ready-pool-check.ms` / `suite.redDetectLatencyMs`）。
+- **归属**：看趋势是 manager 层三职能之一（`gap-productize-the-manager-layer` 的职能内容，AC6 交叉
+  标注）——复盘不只是「这次绿了吗」，还看「比上次更贵了吗 / 离目标更近了吗」。
+
 `orchestration/manager-phase-goal.md` 的复核记录由管理者**自己扩**（外层不代笔），加同一方向维度。
 
 ### 3d. 趋势判据——点状之外：「比上次更贵了吗 / 离目标更近了吗」

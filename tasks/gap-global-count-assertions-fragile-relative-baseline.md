@@ -128,6 +128,11 @@ plugin/test/select-tests-for-touches.test.mjs:  Relationship, not snapshot (tick
 > 非绝对快照）；本任务不修改该文件。其 6 个非嵌套 `--list-groups`/关系断言经 `--test-name-pattern` 单独验证
 > 全绿；3 个嵌套 `--group <fixture>` 测试因 master 上既有 task-contract 违规（done 任务缺 invoke-evidence，
 > 主仓库复现确认非本任务引入）在当前 master 红——见报告。
+## 交叉注（前置②执行确认，2026-08-06）
+
+`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md` AC4 引用本任务：
+「其 AC1–AC5 全绿后本 AC 视为满足」。本任务 `status: done`、AC1–AC5 全部勾上（见上方 Invoke
+evidence），前置②已落地——分支模型上线不被断言噪声遮蔽。
 
 ## Contract
 

@@ -5,7 +5,7 @@ title: "experiment legacy census & reclaim — 46 test files 70% unreferenced / 
   L_D/L_G/L_S (ADR-006/007 quant impls, feed architecture probe) +
   derive-touches-heuristic (## Touches missing mechanical extraction); delete
   impl-deleted tests (criterion: test without impl = remove)"
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -44,20 +44,43 @@ experiments 的 63 个。
 
 ## Acceptance Criteria
 
-- [ ] AC1: 四脚本回收进 plugin/scripts（git-lens L_D/L_G/L_S + derive-touches-heuristic），实测可用
-- [ ] AC2: git-lens 三脚本接入架构分析（补 probe-mechanism 的 AC3）
-- [ ] AC3: derive-touches-heuristic 接入派发（## Touches 缺时机械抽取）
+- [x] AC1: 四脚本回收进 plugin/scripts（git-lens L_D/L_G/L_S + derive-touches-heuristic），实测可用
+  - invoke: `ls plugin/scripts/git-lens-*.ts plugin/scripts/derive-touches-heuristic.ts | wc -l` ⇒ **4**（contract measure）。
+  - experiments/quay-perpetual-stream/scripts 四路径改为 → `../../../plugin/scripts/<name>.ts` 符号链接（mirror 约定）。
+  - 回收时修复 isDirect 守卫：四脚本改用 `gate-script-base.ts` 的 `isDirectEntry(import.meta)`（realpathSync），否则经符号链接调用时 `main()` 静默不跑（`symlink-mirror-invocation` 守卫的缺陷类）。
+  - 实测：`git-lens-selfcheck.sh` PASS（L_D/L_G/L_S 各 fixture 断言退出码）；`derive-touches-heuristic-selfcheck.sh` 24/24 pass；plugin/scripts 直接 `node --experimental-strip-types` 运行 L_D(exit1 prose-heavy)/L_G(exit1 cycle)/L_S(exit1 weak-module)/derive-touches(打印 ## Touches) 均正确。
+- [x] AC2: git-lens 三脚本接入架构分析（补 probe-mechanism 的 AC3）
+  - invoke: `grep -n 'fallback' plugin/probes/architecture-analysis.md` ⇒ `fallback: git-lens`；body 增补三脚本用法（L_D code:doc / L_G structural-drift / L_S behavior-variance），作为 archguard「No query scopes were persisted」已知缺口下的 fallback 探针。
+  - `tasks/gap-probe-mechanism-dead-15-days-rewire-to-two-layer.md` AC3 交叉标注回收部分已落地（其余接线归该任务）。
+- [x] AC3: derive-touches-heuristic 接入派发（## Touches 缺时机械抽取）
+  - `plugin/scripts/concurrent-batch-scheduler.ts`：`parseCandidate(id, charterText, repoRoot)` 在 `!touches.hasSection && repoRoot` 时调 `deriveTouches(charterText, repoRoot)`，抽出 globs 标记 `derived: true` 供 checkTouchesPair 判定（零 path 词元时保守不抽）。
+  - 实测：喂入无 ## Touches 的 task → `BATCH (1-wide): no-touches-test`（原为 conservative defer）；喂入无 path 词元 task → 仍 conservative defer。
+  - 回归：`concurrent-batch-scheduler.test.mjs` 43→45 tests 全绿（新增 AC3 派生/保守两断言）。
 - [ ] AC4: 15 个被测实现已删的测试文件移除（每轮空跑无信息），套件仍绿
-- [ ] AC5: 判据机械化——被测实现不存在的测试文件随实现删除（防再堆积）
+  - 诚实结果：机械普查（AC5 判据）在当前树 **0 个**被测实现不存在的测试文件——12 个经典管线测试（composite-*、milestone-preparation-check、milestone-worktree、prepare-milestone-*）已在 ADR-022（95033927）随实现删除，剩余 census 数无法复现；未删任何活测试。**本 AC 按现状不可满足，交外层裁定。**
+- [x] AC5: 判据机械化——被测实现不存在的测试文件随实现删除（防再堆积）
+  - 新增 `plugin/scripts/test-impl-census-check.ts`（+ mutation case）：扫描 canonical glob，凡测试文件 import `scripts/<name>` 目标在 plugin/scripts、experiments/scripts、repo scripts/、相邻 package scripts 均不存在 ⇒ FLAG，exit 1。
+  - 接入 `scripts/test.sh` run_static_checks（`@static-tier change` / `@static-object plugin/test/ packages/*/test/ experiments/*/test/`）；`checker-mutation-check --check` 13/13 PASS（0 uncovered）。
+  - 实测：`--selftest` PASS（impl-deleted 红 / live+mirror+no-impl 绿）；`--root .` 全库 census checked 226 · clean 226 · flagged 0。
 
 ## Touches
 
-- experiments/quay-perpetual-stream/scripts/git-lens-l-d-code-doc-ratio.ts（回收）
-- experiments/quay-perpetual-stream/scripts/git-lens-l-g-structural-drift.ts（回收）
-- experiments/quay-perpetual-stream/scripts/git-lens-l-s-behavior-variance.ts（回收）
-- experiments/quay-perpetual-stream/scripts/derive-touches-heuristic.ts（回收）
-- plugin/scripts/（回收落点）
-- 15 个被测实现已删的测试文件（删除）
+- tasks/gap-experiment-legacy-reclaim-and-touches-heuristic.md（任务文件自指）
+- experiments/quay-perpetual-stream/scripts/git-lens-l-d-code-doc-ratio.ts（回收 → plugin/scripts 符号链接）
+- experiments/quay-perpetual-stream/scripts/git-lens-l-g-structural-drift.ts（回收 → plugin/scripts 符号链接）
+- experiments/quay-perpetual-stream/scripts/git-lens-l-s-behavior-variance.ts（回收 → plugin/scripts 符号链接）
+- experiments/quay-perpetual-stream/scripts/derive-touches-heuristic.ts（回收 → plugin/scripts 符号链接）
+- plugin/scripts/git-lens-l-d-code-doc-ratio.ts（AC1 回收落点，isDirect 守卫修复）
+- plugin/scripts/git-lens-l-g-structural-drift.ts（AC1 回收落点，isDirect 守卫修复）
+- plugin/scripts/git-lens-l-s-behavior-variance.ts（AC1 回收落点，isDirect 守卫修复）
+- plugin/scripts/derive-touches-heuristic.ts（AC1 回收落点，isDirect 守卫修复）
+- plugin/scripts/concurrent-batch-scheduler.ts（AC3 接入 derive-touches-heuristic）
+- plugin/scripts/test-impl-census-check.ts（AC5 判据机械化——被测实现不存在的测试文件）
+- plugin/scripts/checker-mutation-cases/test-impl-census-check.sh（AC5 mutation case）
+- plugin/probes/architecture-analysis.md（AC2 git-lens 接入架构分析 fallback）
+- experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs（AC3 回归测试）
+- scripts/test.sh（AC5 接线静态检查）
+- 15 个被测实现已删的测试文件（删除——AC4 实测：当前树机械普查 0 个，12 个已于 ADR-022 删除）
 - tasks/gap-probe-mechanism-dead-15-days-rewire-to-two-layer.md（AC2 交叉标注）
 
 ## Contract

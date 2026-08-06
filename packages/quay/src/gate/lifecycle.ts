@@ -89,6 +89,10 @@ export interface LifecycleArgs {
   id: string;
   logPath: string;
   actor?: string;
+  /** criterion-cost meter (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): the workspace
+   *  root, threaded to runGate so lifecycle-driven gate executions also record their cost. Omitted
+   *  for in-process/test callers → the gate recorder skips (no synthetic rows). */
+  workspaceRoot?: string;
 }
 
 export interface RetreatArgs extends LifecycleArgs {
@@ -121,7 +125,7 @@ export interface RetreatResult {
  * status UNCHANGED. Not-`ready` → exit 1, no gate, no write (store.write does not
  * enforce edges and acceptance is status-independent — the guard is load-bearing).
  */
-export async function runComplete({ client, id, logPath, actor = "quay-cli" }: LifecycleArgs): Promise<LifecycleResult> {
+export async function runComplete({ client, id, logPath, actor = "quay-cli", workspaceRoot }: LifecycleArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   if (task.status !== "ready") {
@@ -133,7 +137,7 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli" }: L
     return { ok: false, reason, exitCode: 1 };
   }
 
-  const { ok, reason } = await runGate({ client, id, gate: "acceptance", logPath, actor });
+  const { ok, reason } = await runGate({ client, id, gate: "acceptance", logPath, actor, workspaceRoot });
   if (!ok) {
     console.log(`FAIL — ${reason}`);
     // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
@@ -180,19 +184,19 @@ export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" }:
  * delegates to runComplete (the single gate-guarded path to done); `todo→ready`
  * runs the `dod` author gate then writes. Illegal forward edge → throws.
  */
-export async function runPromote({ client, id, logPath, actor = "quay-cli" }: LifecycleArgs): Promise<PromoteResult> {
+export async function runPromote({ client, id, logPath, actor = "quay-cli", workspaceRoot }: LifecycleArgs): Promise<PromoteResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   assertTransition(task.status, "forward");
   const next = legalForward(task.status);
 
   if (task.status === "ready") {
-    const r = await runComplete({ client, id, logPath, actor });
+    const r = await runComplete({ client, id, logPath, actor, workspaceRoot });
     return { ...r, to: r.ok ? "done" : null };
   }
 
   // todo→ready: the author gate.
-  const { ok, reason } = await runGate({ client, id, gate: "dod", logPath, actor });
+  const { ok, reason } = await runGate({ client, id, gate: "dod", logPath, actor, workspaceRoot });
   if (!ok) {
     console.log(`FAIL — ${reason}`);
     // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should

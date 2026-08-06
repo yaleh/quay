@@ -71,6 +71,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseTask, extractSection } from "./task-schema.ts";
+// criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
+// criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
+// criterion got slower" into "n got bigger" vs "the machine got busier" (the 35.8→91.2→157.0
+// attribution case). Every CLI run appends ONE {name, ms, n: pool, load, at} row to
+// .quay/checker-cost.jsonl — pure append, zero judgment. CHECKER_COST_SKIP=1 disables it (a
+// hermetic test seam; the real loop always records).
+import { recordCheckerCost, getLoad1 } from "./checker-cost.ts";
 import {
   checkTaskTouchesResolve,
   findRepoRoot,
@@ -571,7 +578,11 @@ function main(argv) {
     if (!fs.existsSync(file)) continue; // advisory — a vanished in-flight id is not a failure
     inFlight.push({ id, body: fs.readFileSync(file, "utf8") });
   }
+  const t0 = Date.now();
   const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, topN });
+  if (process.env.CHECKER_COST_SKIP !== "1") {
+    recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
+  }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }
