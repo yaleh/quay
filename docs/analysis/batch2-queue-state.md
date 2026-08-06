@@ -5128,3 +5128,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **telemetry-brackets 合并**（`4a4017c2`）：`--report` 加 `reconcilable[]`/`realInFlight`（dry-run reconcile）+ 新 `--slots --cap N`（bracketsInFlight/reconcilable/realInFlight/slotsTotal/slotsRemaining）+ `inner-blocked-signal --escalate-stale`（>30min 无人消费自动归档）+ `detectTaskOver90m` reconcile 感知（merged/done 括号不触发假 over-90m）+ 两个 tick 模板自检①改读 realInFlight + 外层 step 1b 无条件 `--reconcile`。AC1–AC9 勾（slot-visibility 8/8 + scoped 79/79）。已并已清。
 - **--slots 实况**：brackets-in-flight 7 / reconcilable 5 / real-in-flight 2 / slots-remaining 3——**空槽机制终于机械可见**（第四起「写了没人调」关闭）。
 - **在飞 1/5**（仅 token-watches-shell）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。master `b6993f58`。
+
+### tick 2026-08-06T05:1xZ（内层，token-watches-shell fan-in 完成 —— 在飞清零）
+
+- **token-watches-shell 合并**（`aa942776`）：heavy-op-token 改**租约**（`lease_expires_ms` + `--renew`）——取锁 shell 死而活仍在跑（重试循环每次 timeout 杀自己的 shell）时，旁观者不能再靠「取锁 pid 死了」回收；租约由唯一知情者（重试循环）续，pid 死亡降级为加速释放。AC1–AC7 勾（含修复前可复现 AC1 + 不永久锁死 AC3 + pid 加速保留 AC4，28/28）。已并已清。
+- **在飞 0/5**（全部落定）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
