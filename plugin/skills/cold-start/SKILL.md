@@ -62,7 +62,7 @@ start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer — `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the single observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true`, `delivered=true` | the `--json` output (three criteria) |
 | 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `HEARTBEAT`, etc.). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
 | 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 | 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
@@ -125,10 +125,8 @@ would start the loop in a session that is visibly not the shipped topology.
 
 ### 3. Mount the monitor via the Monitor tool (AC5 — events to THIS session)
 
-Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md).
-`inner-state.sh` is retired — it never observed the session (tmux hits 0) and its signature signal
-(`.quay/inner-blocked.json`) never fired in any project. Mount `session-liveness-mount.sh` (the
-single-flight mount entry, which execs `session-liveness.sh`):
+Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md), mounted
+through a single-flight mount entry that execs it. Mount `session-liveness-mount.sh`:
 
 ```
 Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
