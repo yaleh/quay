@@ -5139,3 +5139,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **补晋 6**（todo→ready）：laydown-derivation / suite-state-reason-axis / no-criterion-cost / needs-human-black-hole / quality-criteria-trend / supervisor-base-layer。不晋：no-size-aware-routing（退休）、session-liveness-hashes-token（疑已落地）。
 - **派发 3/5**（disjoint batch）：`token-status-reports`（--status 死持有者不报 busy，stale/lease 评估）+ `laydown-derivation`（裸文件名正则 + verify 盲点 + 依赖闭包）+ `suite-state-reason-axis`（full-suite-state reason 枚举：早标 RED → aborted 非 failed，FALSE-RED 类根）。补 self-touch（3 缺已补）+ telemetry 已开。deferred 5（reanchor 等碰撞）。
 - 套件 green。在飞 3/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T05:4xZ（内层，token-status-reports fan-in 完成）
+
+- **token-status-reports 合并**（`d25e910b`）：`--status` 增 `holder_alive=yes|no`（同 `kill -0`）+ 死持有者如实说明「下一个 --acquire 会怎样」（可回收/保护期内）+ AC7「WAITING IS INVALID — 回收是拉取式，轮询等不到」+ 下一步命令。只读负控制（status 不碰令牌文件）。AC1–AC7 勾（25/25 + 兄弟 16/16）。已并已清。
+- **在飞 2/5**（laydown-derivation / suite-state-reason-axis）。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
