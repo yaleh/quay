@@ -53,7 +53,7 @@ slot-refill 修的是「派发评估」无人问，本条是「补晋评估」�
 ## Contract
 
 measure   pool_maintained = `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` stdout 的 pool 字段
-band      pool_maintained 不长期 < floor（补晋后 pool 回升；机械路径可触发）
+band      pool_maintained = 不长期 < floor（补晋后 pool 回升；机械路径可触发）
 invoke    `grep -n '3.6\|pool < floor\|补晋\|promotions' plugin/loop/fast-mode-loop-tick.md`
 control   pool<floor + promotions 非空 ⇒ 补晋落盘（AC1）；pool≥floor 不空转（AC3）
 resume    心跳接线与补晋分步提交，任一步完成即写盘
