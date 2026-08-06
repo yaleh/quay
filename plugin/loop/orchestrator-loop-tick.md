@@ -94,7 +94,15 @@ inner 会话的（例如 inner claude 进程启动时刻之后的），否则按
 ```
 CronCreate(cron="*/20 * * * *", prompt="执行 orchestrator-loop-tick.md 中的 tick 指令", recurring=true)
 CronList   # 确认它已被列出——没列出的 cron 不是报警，是静默空转
+mkdir -p <root>/.quay
+printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> <root>/.quay/loop-driver.jsonl
 ```
+
+**最后一行是写驱动注册表**：`CronCreate` 建的 cron 是**会话内的**，对 `loop-driver-check.sh` 本身
+不可见——检查器数的是**注册表** `.quay/loop-driver.jsonl`，一行 = 一个驱动。**建好却没写注册表的
+cron，对检查器等于不存在**（这正是「照文档冷启动必然报 STALLED」的根因：检查器没错，是注册动作
+不在文档里）。这一行与冷启动 skill（`plugin/skills/cold-start/SKILL.md` 步骤 5）**逐字同源**，
+两处必须保持同一条命令。
 
 **为什么选它（判据：无人值守时最不容易静默停摆）**：
 
@@ -124,14 +132,31 @@ CronList   # 确认它已被列出——没列出的 cron 不是报警，是静�
 5 行上下文，而它当时没有运行中的循环，恢复全靠外层手工简报。缺的是步骤 4 没做——cron 没重建——不是
 缺第二个驱动。
 
-**确认恰好一个触发源**：冷启动后跑
+**确认恰好一个触发源**：照上面建好 cron 并**写完注册表**之后跑
 
 ```bash
 bash plugin/scripts/loop-driver-check.sh
 ```
 
-必须报 `LIVE`。报 `DOUBLE-TRIGGER` = 有人多装了一个驱动（多半是照旧文档多起了一个 loop）——停下来
-处理；报 `STALLED` = 一个都没有——循环不会 tick，回步骤 4 重建 cron。
+必须报 `LIVE`（退出码 0，打印 `loop-driver: LIVE (1) …`）。报 `DOUBLE-TRIGGER`（退出码 4）=
+注册表 ≥2 行——有人多装了一个驱动（多半是照旧文档多起了一个 loop）——停下来处理，**不要再加装**。
+
+报 `STALLED`（退出码 3）= 注册表一行都没有——**先查注册表是否写过，再谈重建 cron**：
+
+**查注册表**（`ls <root>/.quay/loop-driver.jsonl`）。不存在或为空 ⇒ **注册动作没做**——不是
+「没装 cron」，是「装了但没写注册表」：回步骤 4，**把 `printf … loop-driver.jsonl` 那一行也做掉**，
+再跑 check。
+
+**注意：陈旧注册报的是 LIVE，不是 STALLED。** 上一会话写过注册表、但那个 cron 已随会话而死——
+注册表还躺着一行，check 报 LIVE（exit 0）。这是自述注册表的结构性极限（判据换成可观测来源是
+第二层的事，见任务 `gap-the-loop-driver-check-...` 的 AC3 处置）。重冷启动时若 pre-check 报 LIVE、
+但你知道那是上一会话的陈旧注册，先 `rm -f <root>/.quay/loop-driver.jsonl` 清掉再建——与冷启动 skill
+步骤 5 的处置逐字同源；不清就再建一个 cron = 制造出本检查要抓的双触发。
+
+**绝不要看到 `STALLED` 就只是再建一个 cron**：老文档这句话正是双触发生产机——重建一次多一个 cron、
+注册表还是空、check 还是 STALLED、于是再建一个……本检查存在的全部价值就是抓这种「从外面看装得好好的，
+实际不会 tick」。查注册表这一步把「没注册」（STALLED，补写注册表）和「注册了但死了」（LIVE-陈旧，
+清掉再建）分开，两个分支的补救不同。
 
 **4b. 重挂 Monitor —— 和 cron 一样是会话内的**
 
@@ -482,7 +507,7 @@ rm <repo>/.halt
 # 每个目标项目的根见各自 .quay/config.yml loop.repo_root（quay 自己的清单：quay/archguard/meta-cc）
 for d in <目标项目根清单>; do
   printf "%-12s %s\n" "$(basename $d)" \
-    "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 运行中)"
+    "$([ -f "$d/.halt" ] && echo "暂停: $(head -c 80 $d/.halt)" || echo 未暂停)"
 done
 ```
 
