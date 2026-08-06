@@ -5466,3 +5466,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **execute-milestone-fuse 标 needs-human**：touches 6/11 MAJORITY-MISSING（`.claude/workflows/execute-milestone.js` / `OUTER-LOOP.md` / `*build-admission*` 全指 ADR-022 已删文件）——外层补晋未过当前 master 的 touches-resolve 闸，交外层裁定重定范围或关闭。
 - **派发 1/5**：`gap-over-90m-false-signal-source-reads-telemetry-not-task-status`（唯一可派新候选；self-touch 已补）。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-07T02:5xZ（内层，over-90m-false-signal fan-in 完成 —— 在飞清零）
+
+- **over-90m-false-signal fan-in 完成**（merge task/gap-over-90m-false-signal...，5 文件 277 行）：`detectTaskOver90m` 增加任务 status 闸——遥测 bracket 只作「何时开始」来源，`taskStatusAllowsOver90` 读 `tasks/<id>.md` status：in-progress/missing/unparseable ⇒ keep（真超时不漏），ready/done/needs-human/todo ⇒ drop（phantom bracket 不再触发假 OVER90）。AC1–AC4 全勾（scoped 36/36 + slot-visibility 8/8 + fast-mode-telemetry 40/40 无回归）。留 ready。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
