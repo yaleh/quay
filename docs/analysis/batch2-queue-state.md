@@ -6582,3 +6582,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - 无 halt；套件 GREEN。在飞 1/3（single-flight-lock，brackets aligned，分支 0 提交——agent 工作中）。
 - 池 9/20 全陈旧（signal-gap），**无 promotions** ⇒ 无新派发。
 - 在飞 1/3。下一事件：single-flight-lock 完成 / ad-arm1 round-3 结果。
+
+### tick 2026-08-06T20:0xZ（single-flight-lock 前提撤回 + 任务缩窄）
+
+- **管理者自我更正**：原「锁分域」premise 撤回——archguard 被实时监视（共享文件 105 条 archguard 事件，
+  最新 4 分钟前）；`mounted=false/delivered=true` 是单持有者+共享文件设计的**正确状态**
+  （fast-mode-loop-tick.md:176-180 明写）；多目标配置在生效（REPO-STALL/SESSION-OVERDUE 为证）。
+  **唯一真盲区 = ad-arm1（quay-C）delivered=false**——新机器未进 manager 多目标配置，配置缺失非锁 bug。
+- **执行**：停掉在飞 agent（worktree 零改动）、清理 worktree/branch、bracket close（abandoned）、reconcile。
+  任务重写缩窄为「ad-arm1 配置缺失」（锁代码不修改）。AC1 已核实：ad-arm1 不在 config、
+  SESSION_TARGETS 已移出到显式 env 传参（管理者 2026-08-04 挂载约定）。
+- 在飞 0/3。
