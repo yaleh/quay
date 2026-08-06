@@ -6557,3 +6557,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **ad-arm1 不会自动跟随推送**——它「零代码改动、零冷启动步骤，等通知」，需要**人工/管理者显式触发**
   pull+重跑。推送 ≠ ad-arm1 已跑。估计 ad-arm1 进度时必须算入「显式通知」这个人工依赖。
+
+### tick 2026-08-06T18:4xZ（内层 cron + slot-refill，轻触）
+
+- 无 halt；套件 GREEN。在飞 0/3。池 8/20 全陈旧（landed/directive/merged），**无 promotions** ⇒ 无新派发。
+- 外层已推 50 develop 提交到 origin（7c190cd4，含 gate #1/#2/#3 修复 + 9 任务收口）——
+  ad-arm1 第 3 轮 pull 就绪；外层记 progress-dependency：ad-arm1 需显式 manager 通知才 pull+rerun（不自动跟随 push）。
+- develop 43f854ce。下一事件：ad-arm1 第 3 轮门禁结果 / 外层喂新任务。
