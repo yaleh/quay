@@ -5354,3 +5354,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool 复核**：pool 10 / dispatchable_disjoint 3（含 2 个已落地漏检灌水）；真实新可派 = 1（7 候选带宽 plugin/scripts/ 目录 touch 串行互撞）。
 - **派发 1/5**：`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`（scheduler 批次胜者 + 最高优先——直接 touch 两份 loop tick 文档；补 self-touch 后派发）。telemetry --task-start 已开。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T17:4xZ（内层，branch-model fan-in 完成 —— 在飞清零）
+
+- **branch-model fan-in 完成**（merge task/gap-branch-model...，3 新文件 + 两份 loop 文档 + 交叉标注）：两线模型——`develop`（已验证基线，独立任务分叉）+ `integration`（待验证汇入点，依赖任务分叉、全部合并落点）；`integration-branch-model.ts` 机械判分叉基线 + 批量合 integration→develop（`--is-ancestor develop integration` ff 守卫）；红窗停派结构性消除。AC1–AC7 全勾（scoped 11/11，task/drive-contract no violations）。**诚实备注**：charter Contract measure 的 arg 顺序与语义相反（`--is-ancestor <integration> <develop>`），实现在所有机械处用正确方向（`--is-ancestor develop integration`）。留 ready。SPEC 从 origin/develop 恢复（master 原本缺失）。在飞清零。
+- 套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
