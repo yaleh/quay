@@ -5921,3 +5921,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   无 fan-in、无新派发（cap 满）。套件 green、无 stop、无 block、Monitor 绿。
 - 外层 0b64ffdb：接受池 refill + DIR-124 拒绝；telemetry 3/3 real reflect=true。926d771b：branch-cutover
   计划裁定锁定（人 ruling 2026-08-06）。
+
+### tick 2026-08-06T06:0xZ（内层，value-prioritization fan-in — 真实现）
+
+- **value-prioritization fan-in 完成（真实现）**：ready-pool-check 每候选 relevance 信号
+  （strategic/blocking/cost/value，全机械）+ `--top N` CLI（manager 层 Prioritization 挂点）。
+  AC1-AC7、27/27（relevance 7 新测试）。DIR-124 blocking 6 children 排 relevance 第一（答「谁 next」——
+  超 gap>DIR tiebreak；但派发仍判 directive 父拒绝）。worktree/branch 已清。在飞 2/3。
+- 套件 green、无 stop、无 block、Monitor 绿。
