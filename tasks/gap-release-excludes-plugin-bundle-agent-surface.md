@@ -90,7 +90,7 @@ plugin/，但 **plugin/ 没进 npm files**——机制「在包外」部分解�
 ## Contract
 
 measure   bundle_in_pack = `npm pack --dry-run 2>&1 | grep -c 'plugin/'` stdout 数字段（或等价：pack 产物含 plugin/ 条目数）
-band      bundle_in_pack = > 0（release 含 plugin bundle）
+band      bundle_in_pack = 1（release 含 plugin bundle）
 invoke    `grep -n 'files\|plugin' packages/quay/package.json`
 control   从 release 资产安装 ⇒ quay-init --loop 铺出机制（AC2）；非 quay 项目端到端（AC3）
 resume    files 修改与 release 流程分步提交，任一步完成即写盘
