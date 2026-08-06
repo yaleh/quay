@@ -5219,3 +5219,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **reanchor 合并**（`b1746d2a`）：`self-report-vocab-check.ts` 自述措辞审计 + 收敛判据（连续 N 轮无 batch 式自述 ⇒ converged；非单调）——重锚有效性以语义收敛度量，非「重锚发生了」；tick 文档 1c 第 6 条接线。AC1–AC5 勾（16/16）。已并已清。
 - **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T08:0xZ（内层，池可派候选耗尽）
+
+- **reanchor fan-in 完成**（`b1746d2a`，自述措辞收敛判据）。在飞 0。
+- **池可派候选耗尽**：DIR-043 自述 `dirStatus: deferred`（M76/M77 裁定 + Resolution「still deferred as a standing loop routine」）——ready-pool-check 误读 frontmatter 才列入 promotion，我误晋已回退 todo。其余全为 hold/landed（3 already-landed + 5 ROUND-3 + delivery-surface + DIR-124 parent）。**无可派候选**——等外层清 held/landed、定 ROUND-3、或补新候选。
+- 套件 green。在飞 0/5。无停止条件、无 .halt、无 block、Monitor 绿。
