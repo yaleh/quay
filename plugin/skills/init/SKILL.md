@@ -134,9 +134,11 @@ source of truth — the same doc the human reads):
 <!-- reference-doc: orchestration/REVIEW-cadence.md -->
 <!-- reference-doc: orchestration/manager-loop-tick.md -->
 <!-- reference-doc: orchestration/manager-phase-goal.md -->
+<!-- reference-doc: orchestration/SPEC-branching-model-integration-branch-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
 <!-- reference-doc: orchestration/SPEC-complete-delivery-surface-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-instruments-behind-one-entry.md -->
+<!-- reference-doc: orchestration/SPEC-integration-architecture-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-methodology-as-a-deliverable.md -->
 <!-- reference-doc: orchestration/SPEC-no-text-substitution-at-install.md -->
