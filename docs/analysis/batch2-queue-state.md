@@ -5841,3 +5841,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   **执行依赖内层 tick 自觉走到**——最近 tick 全被等 agent/fan-in/修缺陷占满，机械路径没机会跑。
   根因 = 写成强制步骤但无机械保证（同 gap-slot-refill-only-triggered 形态）。待内层修完测试缺陷
   一并驱动补晋（suite red 中，stop-dispatch 优先）。
+
+### tick 2026-08-06T04:3xZ（内层，红窗三测试缺陷修复 — 外层分诊）
+
+- **外层红窗分诊承接**（8 fail / 2612，三类测试缺陷非产品回归）——已修：
+  ① **red-window-shared-gate AC1 断言放宽** `/暂缓[\s\S]*fan-in/`（inner 措辞「暂缓已完成 agent 的 fan-in」，
+     连续子串只 outer 有）——14/14 绿。
+  ② **capability-catalog catalogRows() retry**（并发瞬态 plugin/scripts 变更 flake，隔离 8/8）——8/8 绿。
+  ③ **runner-grouping KNOWN-LOAD-SENSITIVE 标记**（嵌套 `--group governance` >830s、并发下脆弱）——
+     判绿族隔离重跑。
+- **外层请重跑全量验证**（AC4 判据 suite green）。在飞 1/3（loop-driver-check 待 land）。
+- 套件 running（外层）、无 stop、无 block、Monitor 绿。
