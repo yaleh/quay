@@ -7361,3 +7361,18 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **无 fan-in**：无已完成 agent。send-keys-verified 分支为外层裁定 F 故意不合并（preserve-on-branch），非 fan-in 候选。
 - **池 21 ≥ floor 20**，dispatchable 10，无需补晋。cap=5（GO 档），load1 2.28。
 - **遥测**：tasksPerHour 1.21（window 103.9h）/ mean 65.4m / median 49.7m / 累计死时间 519.7min。Monitor `mounted:true / targetOk:true`。inbox unread=0。
+
+### 事件 18:4xZ–19:0xZ（外层静态链修复请求 + 套件 quay-init 族 root-cause 修复）
+
+- **外层请求**（18:47 fresh verdict 红，168 assertion fails，quay-init 族主导 ≈64）：root-cause 并修 quay-init 族使套件转绿。静态链已绿（adr016 打包副本修复，25196d9a）。
+- **root-cause 与修复（按根因归类，commit 序列）**：
+  1. **referenced⊆landed**：`SPEC-branching-model-integration-branch-2026-08-05.md` 被两个 loop tick doc 引用但未铺/未声明 → verify_referenced_landed 每轮 --loop 失败，卡住 install-config-driven-e2e + quay-init-loop 整族。修复：init/SKILL.md 声明 reference-doc（d0d0a368）。同一根因还命中 `SPEC-integration-architecture-2026-08-05.md`（manager SKILL 引用），补声明（ba833c14）。
+  2. **runtime 布局漂移**：f9414dd3 把落地从 `.quay/runtime/quay/` 移到 `.quay/runtime/bin/`，但 install-config-driven-e2e AC9 + runtime-landing AC4/AC9-upgrade/AC10 仍断言旧路径与旧消息格式（漂移报告:/runtime-gitignore:）。修复：对齐 bin/ 布局与 drift-report:/appended: 消息（d0d0a368）。
+  3. **upgrade-path drift before-report 空 LOOP_SCRIPTS**：derive_loop_scripts 填临时文件不填全局 → before-report derived-set 0。修复：before-report 前先填 LOOP_SCRIPTS（d0d0a368）。
+  4. **laydown-set-check.sh 丢 --json + exit-2**（8e2e49b9 merge 把 248e6b4f 的 JSON 版换成 human-only）：恢复 --list --json / --json deep-check / fail-closed 0-test red / exit 2；human 路径保持 syntax-only 快（--run-tests 才 deep）（d0d0a368）。
+  5. **loop-shipping**：pack-time 快照 packages/quay/plugin/ 被旧路径 + 单物理副本扫描误标 → 排除（3e7a845c）。
+  6. **manager-layer-shipping AC6**：manager SKILL 须索引每个 on-disk SPEC-*.md（补 branching-model + integration-architecture）；plugin.json commands[] 去重 manager（ba833c14）。
+  7. **quay-init-loop AC4 version-freshness 测试硬编码 0.3.13**：vendored 版已升 0.4.0 → readVendoredVersion() 动态读；stale fixture 降 minor（6b4d14f5 + 42cb31ee）。
+- **验证**：install-config-driven-e2e 10/10、runtime-landing 5/5、check-drift 4/4、drift-report 6/6、tmux-detection 6/6、laydown-set 7/7、loop-shipping 12/12、manager-layer 7/7、plugin-packaging 34/34、**quay-init-loop 47/48**（剩 1 个 AC4 stale fixture，已修，v3 复跑确认中）。静态链全程绿。
+- **外层已接走**：19:4x 外层确认 quay-init fix 落地，19:48 重跑套件验证（suite-state running）。
+- **非 quay-init 族残留**（不在外层 64 列表内）：checker-cost AC2/AC6、trend-check、tick-vocabulary AC4、cold-start-skill、session-liveness、capability-catalog、serve、store、task-check、unparseable-frontmatter、ts-typecheck-gate——独立问题，待单独处置。
