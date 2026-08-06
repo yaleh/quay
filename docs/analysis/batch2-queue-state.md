@@ -7471,3 +7471,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 成功**：cherry-pick 8d65dc86 → 冲突仅任务文件（integration 无该任务文件，develop 侧产物）；`git rm` 任务文件 + 保留 prefriction-count.sh 代码 → 1880c757。再补 f043a8d1（`([^-]|$)` 守卫让 "3 failing" 触发但 "fail-safe" 不触发）→ 2f95dd1f。**.sh 与 worktree 逐字节一致**，prefriction-count --json 在 integration 实跑 48 newly_filed / 37 dimensions。
 - **worktree 已清理**：prefriction-count worktree removed + branch 删除。
 - **状态**：prefriction 任务文件 AC1-5 全勾、status ready（等外层 verify 翻 done）。在飞剩 **residue-check**（1 真实在飞）；ac8 / shipped-ts / chart2-s2 三任务 needs-human 等外层对齐分支。
+
+### 事件 23:0xZ 续2（第三派发 + divergence 阻塞说明）
+
+- **新派发 3/3**：`DIR-121`（Codex Stage 1——AGENTS.md + repo Skills + project MCP + drift check；人导向 directive，dirStatus applied）。全闸过：resolve 1/8 missing 可派、self-touch ok、fork develop、与 residue-check disjoint；glob 目标目录（quay-task-operator/quay-directive 在 plugin/skills + .agents/skills）两分支全 0 差异 → fan-in 安全。worktree `quay-worktrees/dir-121`，task-start fm-DIR-121-...-kp00th。
+- **slot-refill 推荐冷启动（outer 执行型）+ no-post-merge（self-touch 已补，但 Touches 触碰 tick docs/quay-init.sh——ac8 冲突区）**。divergence 未对齐前，派 no-post-merge 有 4 连 stranding 风险，本 tick 不派，等外层对齐分支后回填。
+- **在飞 2/2**（真实）：residue-check + DIR-121。ac8/chart2-s2/shipped-ts needs-human 挂起等外层。
