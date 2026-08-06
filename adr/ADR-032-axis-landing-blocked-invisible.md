@@ -32,3 +32,21 @@ fan-in/合并状态**（grep 到的 `conflict` 是 touches 冲突图，用于判
 
 开放。已由外层立案 `gap-landing-blocked-invisible-to-dispatch-criteria`
 （本轴的第一个收敛候选——若该任务落地并证明判据可靠，本轴可转 accepted）。
+
+## 对照实例：派发侧有两级判据，落地侧一级都没有（2026-08-06 管理者实测）
+
+本轴的锋利之处，在一次**假的矛盾**里显现得最清楚。
+
+内层报告「pool exhausted」，而 `ready-pool-check` 同时报 `pool 9 / dispatchable_disjoint 4 /
+criterion_met: True`。看起来矛盾，实测后**不是**——两者量化的是不同范围：
+
+| 判据 | 量化什么 | 当时的答案 |
+|---|---|---|
+| `ready-pool-check.criterion_met` | **池子**本身健康吗（有没有 ≥cap 个互斥候选） | True |
+| `slot-refill.should_refill` | **此刻、给定在飞任务**，有没有能真派的 | **False**——`no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight)` |
+
+两者都对，各自范围清晰，且内层消费的是**正确的那一个**。
+
+**这正好反衬出本轴**：**派发能力有两级判据（池子级 + 槽位级），而落地能力一级都没有。**
+同一时刻，没有任何判据能回答"落地是不是被结构性阻塞了"——
+异常判据只能靠"距上次 merge 的时间"这个**外部**信号间接发现。
