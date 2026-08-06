@@ -5797,3 +5797,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   （`--all` 也不能覆盖 task/* claim marker——git 自身 non-fast-forward 保护）。worktree/branch 已清。
 - 在飞 1/3（web-action-buttons 2 提交推进）。优先② message-bus 仍被 web-action-buttons CONFLICT 阻塞。
 - 套件 green、无 stop、无 block、Monitor 绿。
+
+### tick 2026-08-06T04:0xZ（内层，web-action-buttons fan-in + 优先②派发）
+
+- **web-action-buttons fan-in 完成（真实现，人优先①）**：unused web action-buttons POST route + 2 form
+  renders 删除，**open-redirect 面消除**（weak ?from= guard 移除，GET 保留 isSafeRelativeRedirect 共享守卫）。
+  AC1-AC6、4/4 + 1 pre-existing skip（serve-github live）。负控制：365 gate-events 全 quay-cli、0 web。
+  worktree/branch 已清。**在飞 0/3 → 优先②接棒**。
+- **优先② message-bus 已派**（`fm-...-gr87vt`，human 第三目标 transport-agnostic）：web-action-buttons land 后
+  冲突清除，self-touch/resolve 过。**人优先队列 ①②③ 全落地或已派**。
+- 套件 green、无 stop、无 block、Monitor 绿。
