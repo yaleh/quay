@@ -5190,3 +5190,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层 develop-merge worktree 出现**（926d771b）：外层在做分支模型集成（branch-model 任务线）——我 held 的 ROUND-3 任务正由外层推进，不干预。
 - **派发 1/5**：`quality-criteria-trend`（点状判据 → 趋势判据，读 verification-round 历史打标 + REVIEW-cadence 趋势检查项；no-criterion-cost 的自然配对）。补 self-touch + telemetry 已开。池仍结构性串行。
 - 套件 green。在飞 1/5。无停止条件、无 .halt、无 block、Monitor 绿。
+
+### tick 2026-08-06T07:0xZ（内层，quality-criteria-trend fan-in 完成）
+
+- **quality-criteria-trend 合并**（`3219002a`）：`trend-check.ts` 被动趋势判据——读 verification-round（套件 perTestMs，schema 扩 tests/cancelled/perTestMs）+ checker-cost（判据自身成本系列）+ suite-state-events（早期 RED 检测延迟），窗口恶化超阈值（默认 +10%）打标；REVIEW-cadence 3d 趋势检查项。AC1–AC7+AC3b 勾（46/46）。已并已清。
+- **在飞 0/5**。套件 green。无停止条件、无 .halt、无 block、Monitor 绿。
