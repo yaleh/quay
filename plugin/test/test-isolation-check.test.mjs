@@ -381,20 +381,17 @@ test("AC5/clean-tree: the suite-after assertion fails on a dirty tree and passes
   }
 });
 
-// ── AC1/AC2 (gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion): the suite-after
-// assertion must distinguish KNOWN CONCURRENT WRITERS (the manager's tick-log append + .quay
-// control-plane scratch) from TEST RESIDUE — the former must PASS a green suite, the latter must
-// still flip it red ─────────────────────────────────────────────────────────────────────────────────
-test("AC1/AC2 clean-tree: known concurrent writers (manager tick-log / .quay scratch) pass; real residue still fails", () => {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-isolation-clean-tree-writers-"));
+// ── AC5 / suite-after DELTA: assert-clean-tree.sh's delta form ─────────────────────────────────────
+// gap-assert-clean-tree-premise-void-under-concurrent-writers: the absolute form assumed the
+// coordinator runs on a clean tree — a premise VOID under concurrent writers (manager tick-log,
+// outer worktree scaffolding, inner uncommitted change). The DELTA form (--snapshot before, --check
+// after) counts only items ABSENT from the before-run snapshot as this run's test products.
+test("AC5/clean-tree DELTA: pre-existing dirt is excluded; only newly-added items count", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-isolation-clean-tree-delta-"));
   const CLEAN_TREE_SH = path.join(REPO_ROOT, "plugin", "scripts", "assert-clean-tree.sh");
   try {
-    // A real git repo with the known concurrent-writer files TRACKED, plus a tracked source file.
-    fs.mkdirSync(path.join(scratch, "orchestration"), { recursive: true });
-    fs.mkdirSync(path.join(scratch, ".quay"), { recursive: true });
-    fs.writeFileSync(path.join(scratch, "orchestration", "manager-tick-log.md"), "tick\n", "utf8");
-    fs.writeFileSync(path.join(scratch, ".quay", "tracked-state.json"), "{}", "utf8");
-    fs.writeFileSync(path.join(scratch, "src.txt"), "x\n", "utf8");
+    // A real git repo with one committed file — a meaningful "clean" baseline.
+    fs.writeFileSync(path.join(scratch, "seed.txt"), "x", "utf8");
     const gitCmd = (args) => spawnSync("git", args, { cwd: scratch, encoding: "utf8" });
     gitCmd(["init", "-q"]);
     gitCmd(["config", "user.email", "test@example.com"]);
@@ -402,33 +399,80 @@ test("AC1/AC2 clean-tree: known concurrent writers (manager tick-log / .quay scr
     gitCmd(["add", "-A"]);
     gitCmd(["commit", "-q", "-m", "seed"]);
 
-    // AC1: the manager appends to its tracked tick-log mid-suite → the assertion must PASS.
-    fs.appendFileSync(path.join(scratch, "orchestration", "manager-tick-log.md"), "tick 2\n", "utf8");
-    let res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
-    assert.equal(res.status, 0, `manager tick-log append must PASS (AC1):\n${res.stdout}\n${res.stderr}`);
-    assert.match(res.stdout, /manager-tick-log/);
+    // Pre-existing dirt (a concurrent writer's uncommitted change): modify a tracked file.
+    fs.appendFileSync(path.join(scratch, "seed.txt"), "\ntick-log line", "utf8");
 
-    // AC1: the outer's .quay capture-pane scratch (untracked, under .quay/) → the assertion must PASS.
-    fs.writeFileSync(path.join(scratch, ".quay", "last-pane.txt"), "pane", "utf8");
-    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
-    assert.equal(res.status, 0, `.quay scratch must PASS (AC1):\n${res.stdout}\n${res.stderr}`);
-    assert.match(res.stdout, /\.quay/);
+    // DELTA GREEN: snapshot before the run; only pre-existing dirt present → check PASSES.
+    let res = spawnSync("bash", [CLEAN_TREE_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `snapshot must succeed:\n${res.stdout}\n${res.stderr}`);
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `pre-existing dirt must NOT trip the DELTA check:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /PASS: git status --porcelain gained no NEW items/);
 
-    // AC2 negative control: a real test residue (a root-level mkdtemp artifact) must STILL fail
-    // even when known writers are present.
-    fs.writeFileSync(path.join(scratch, ".quay-tmp-test-abc"), "leftover", "utf8");
-    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
-    assert.equal(res.status, 1, `a real test residue must STILL fail (AC2):\n${res.stdout}\n${res.stderr}`);
+    // DELTA RED (negative control): a NEW item written AFTER the snapshot IS a test product →
+    // check FAILS, listing the new item but NOT the pre-existing dirt.
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0);
+    fs.writeFileSync(path.join(scratch, "test-residue.txt"), "leak", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a NEW item after the snapshot must FAIL:\n${res.stdout}\n${res.stderr}`);
     assert.match(res.stderr, /DIRTY after the full suite/);
-    assert.match(res.stderr, /\.quay-tmp-test-abc/);
-    fs.rmSync(path.join(scratch, ".quay-tmp-test-abc"));
+    assert.match(res.stderr, /test-residue\.txt/);
+    assert.doesNotMatch(res.stderr, /seed\.txt/, "pre-existing dirt must not be listed as a NEW item");
 
-    // A tracked-file modification that is NOT a known writer (a test writing to src.txt) must FAIL.
-    fs.appendFileSync(path.join(scratch, "src.txt"), "leak\n", "utf8");
-    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
-    assert.equal(res.status, 1, `a non-known tracked modification must FAIL:\n${res.stdout}\n${res.stderr}`);
-    assert.match(res.stderr, /src\.txt/);
+    // DELTA GREEN restore: removing the new item restores PASS (pre-existing dirt still present).
+    fs.rmSync(path.join(scratch, "test-residue.txt"));
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `removing the new item must restore PASS:\n${res.stdout}\n${res.stderr}`);
+
+    // DELTA fail-closed: --check with no snapshot (the before-run baseline is unknown).
+    fs.rmSync(path.join(scratch, ".quay", "assert-clean-tree.snapshot"), { force: true });
+    res = spawnSync("bash", [CLEAN_TREE_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `--check without a snapshot must fail closed:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /no before-run snapshot/);
   } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// ── AC5 / suite-after DELTA: tmux-leak-scan.sh's delta form (same family) ───────────────────────────
+// gap-assert-clean-tree-premise-void-under-concurrent-writers: the outer layer legitimately runs
+// tmux sessions (send-keys remote-drive, skv- names) WHILE the suite runs — a pre-existing
+// concurrent-writer match is not this run's leak. The DELTA form excludes pre-existing matches.
+test("AC5/tmux-leak-scan DELTA: pre-existing matches are excluded; only NEW matches leak", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-tmux-leak-delta-"));
+  const SCAN_SH = path.join(REPO_ROOT, "plugin", "scripts", "tmux-leak-scan.sh");
+  const preDir = "/tmp/skv-delta-test-preexisting";
+  const newDir = "/tmp/skv-delta-test-newleak";
+  try {
+    // PASS: a pre-existing match is excluded (recorded in the before-run snapshot).
+    fs.mkdirSync(preDir, { recursive: true });
+    let res = spawnSync("bash", [SCAN_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `snapshot must succeed:\n${res.stdout}\n${res.stderr}`);
+    res = spawnSync("bash", [SCAN_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `a pre-existing match must not trip the DELTA check:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /no NEW residual test tmux servers\/dirs/);
+
+    // RED (negative control): a NEW match after the snapshot IS this run's leak → FAIL, listing
+    // the new match but NOT the pre-existing one.
+    res = spawnSync("bash", [SCAN_SH, "--snapshot", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0);
+    fs.mkdirSync(newDir, { recursive: true });
+    res = spawnSync("bash", [SCAN_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a NEW match after the snapshot must FAIL:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /NEW residual test tmux servers\/dirs/);
+    assert.match(res.stderr, /skv-delta-test-newleak/);
+    assert.doesNotMatch(res.stderr, /skv-delta-test-preexisting/, "pre-existing match must not be listed as NEW");
+
+    // fail-closed: --check with no snapshot.
+    fs.rmSync(path.join(scratch, ".quay", "tmux-leak-scan.snapshot"), { force: true });
+    res = spawnSync("bash", [SCAN_SH, "--check", scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `--check without a snapshot must fail closed:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /no before-run snapshot/);
+  } finally {
+    fs.rmSync(newDir, { recursive: true, force: true });
+    fs.rmSync(preDir, { recursive: true, force: true });
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });

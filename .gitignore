@@ -40,6 +40,13 @@ packages/quay/plugin/
 **/.quay-wtl*
 **/dist-sea/
 **/.quay/gate-events.jsonl
+# gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
+# porcelain snapshots for the suite-AFTER DELTA assertions (assert-clean-tree.sh --snapshot /
+# tmux-leak-scan.sh --snapshot). Same gitignored runtime-state family as gate-events.jsonl — a
+# snapshot is per-run transient state that must never appear in `git status --porcelain` (if it
+# did, the suite-AFTER check would see its own snapshot as NEW dirt).
+**/.quay/assert-clean-tree.snapshot
+**/.quay/tmux-leak-scan.snapshot
 # gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
 # cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
 # "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to

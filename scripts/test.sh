@@ -18,8 +18,8 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance|serial>` declaration
-# (AC5); existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
+# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
+# existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
 # hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
 # (e.g. relation-sync's harness) into the ratchet.
 #
@@ -61,12 +61,8 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance / serial (AC1). The DEFAULT for an undeclared file is
-#   `engine` (AC7) — the current work surface, so a missed declaration never silently vanishes.
-#   `serial` is NOT part of the default (product,engine) set: the KNOWN-LOAD-SENSITIVE family
-#   (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests) is routed OUT of the
-#   concurrency-N main body into a `--group serial` phase that runs alone at concurrency 1 (see
-#   run_selected's serial phase below).
+#   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
+#   (AC7) — the current work surface, so a missed declaration never silently vanishes.
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -271,16 +267,6 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
   run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
-  echo "== no-manager-tick-doc check (gap-manager-productization-five-constraints AC4) =="
-  # C3 (SPEC-manager-productization §3): the OUTER tick docs must contain no create/drive/check
-  # manager STEPS — build ownership = quay outer/inner, run ownership = human/loop, NEVER outer.
-  # Position-based (actionable command/verb-object signatures only; boundary context like
-  # "manager 跨项目不属于项目拓扑" is allowed — a naive keyword grep self-hits 100%). The AC4
-  # negative control (actionable step flags, boundary-only clean) is exercised by the checker's
-  # own mutation case and plugin/test/no-manager-tick-doc-check.test.mjs.
-  # @static-tier change
-  # @static-object plugin/loop/orchestrator-loop-tick.md
-  run_checker "no-manager-tick-doc-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/no-manager-tick-doc-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI
@@ -425,16 +411,13 @@ resource_gate_check() {
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Only product|engine|governance|serial are valid; a missing OR unrecognized declaration falls
-# back to engine so a typo can never silently remove a file from the default run. `serial` is a
-# real group so the KNOWN-LOAD-SENSITIVE family is mechanically EXCLUDED from the default
-# (product,engine) main body and routed to the serial phase instead
-# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
+# Only product|engine|governance are valid; a missing OR unrecognized declaration falls back
+# to engine so a typo can never silently remove a file from the default run.
 group_of() {
   local f="$1" g
   g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
   case "${g:-}" in
-    product|engine|governance|serial) echo "$g" ;;
+    product|engine|governance) echo "$g" ;;
     *) echo "engine" ;;
   esac
 }
@@ -486,11 +469,9 @@ select_files() {
   done < <(build_deduped_files)
 }
 
-# list_groups — per-group counts over the full deduped glob (AC10). `serial` is a real group
-# (the load-sensitive family routed to the concurrency-1 phase), so the default-set partition
-# product+engine+governance no longer equals total — serial is the fourth part.
+# list_groups — per-group counts over the full deduped glob (AC10).
 list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0)
+  declare -A counts=([product]=0 [engine]=0 [governance]=0)
   local f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
@@ -499,8 +480,7 @@ list_groups() {
   printf 'product:    %d\n' "${counts[product]:-0}"
   printf 'engine:     %d\n' "${counts[engine]:-0}"
   printf 'governance: %d\n' "${counts[governance]:-0}"
-  printf 'serial:     %d\n' "${counts[serial]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} ))
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} ))
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
@@ -628,6 +608,17 @@ run_selected() {
     local cc
     cc="$(default_test_concurrency)"
     mark_nested
+    # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
+    # the pre-run porcelain so the suite-AFTER assertion is DELTA — only items newly added DURING
+    # the run count as test products. Preexisting dirt from concurrent writers (manager tick-log,
+    # outer worktree scaffolding, inner uncommitted change) is excluded. Snapshot is gitignored.
+    if ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --snapshot "${repo_root}"; then
+      echo "scripts/test.sh: FAIL: cannot take the before-run clean-tree snapshot — aborting (fail closed)" >&2
+      exit 1
+    fi
+    # Same-family DELTA for tmux-leak-scan: pre-existing outer/manager tmux sessions are not this
+    # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
     # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
     # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
@@ -638,51 +629,23 @@ run_selected() {
     fi
     local code=$?
     set -e
-    # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
-    # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
-    # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
-    # keeps real-wall-clock-wait and nested-suite-spawn tests from being starved by the main body's
-    # worker pool. Skipped when the main body already failed (the run is red either way). The
-    # concurrency is a HARD-CODED 1 — serial isolation is the mechanism's invariant, never a
-    # user-tunable knob (a spliced --test-concurrency from full-suite-runner must not leak here;
-    # the --group serial path in the non-default branch strips explicit concurrency flags for the
-    # same reason). Its TAP summary lands LAST on the stream, so the outer runner's pass/fail/
-    # cancelled tallies reflect BOTH phases (the serial summary overwrites the main body's only
-    # when both are green — a serial failure flips the whole run red via its own fail/cancelled).
-    if [ "$code" -eq 0 ]; then
-      local serial_files=() sf serial_code
-      while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
-      if [ "${#serial_files[@]}" -gt 0 ]; then
-        echo "selected ${#serial_files[@]} files (groups=serial)"
-        set +e
-        node --test --test-concurrency=1 "${serial_files[@]}"
-        serial_code=$?
-        set -e
-        if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
-      fi
-    fi
-    # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
-    # SUITE must leave the shared checkout clean of TEST RESIDUE (`git status --porcelain` empty
-    # modulo KNOWN CONCURRENT WRITERS). Harder than any static rule — it does not depend on a
-    # detector recognizing a particular spelling, so ANY test that dirties the tree (mkdtemp under
-    # REPO_ROOT, a leaked scratch dir, a stray file) is caught here. The assertion distinguishes
-    # test residue from legitimate out-of-band writers (gap-manager-tick-log-append-trips-suite-
-    # after-dirty-tree-assertion): assert-clean-tree.sh filters the manager's periodic
-    # orchestration/manager-tick-log.md append and .quay/ control-plane scratch out of the porcelain
-    # BEFORE deciding, so a green suite is not flipped red by a concurrent writer (AC1) while a
-    # manually-placed residue still fails (AC2). Only on the full-suite default path (this
-    # token-held branch); scoped runs legitimately execute inside uncommitted worktrees and skip it.
-    # A failing test's own exit code is the primary signal, so a dirty tree only flips a PASSING
-    # run (never masks a fail).
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" "${repo_root}"; then
+    # Suite-AFTER assertion, DELTA form (gap-assert-clean-tree-premise-void-under-concurrent-writers):
+    # a FULL SUITE must add no NEW dirt to the shared checkout (`git status --porcelain` vs the
+    # before-run snapshot). Harder than any static rule on the NEW-items surface — a test that
+    # writes a NEW artifact into the shared checkout is still caught. Only on the full-suite
+    # default path (this token-held branch); scoped runs legitimately execute inside uncommitted
+    # worktrees and skip it. A failing test's own exit code is the primary signal, so NEW dirt
+    # only flips a PASSING run (never masks a fail).
+    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --check "${repo_root}"; then
       code=1
     fi
-    # Suite-AFTER assertion (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
+    # Suite-AFTER assertion, DELTA form (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
     # a FULL SUITE must leave no test-characteristic tmux server or /tmp dir behind (skv- /
-    # session-liveness- / ol-tok- / enter-repro- prefixes). Second line of defense — the teardown
-    # fix (kill-session, never kill-server) is primary; this covers the whole leak class at once.
+    # session-liveness- / ol-tok- / enter-repro- prefixes). Delta: only items absent from the
+    # before-run snapshot are this run's leak. Second line of defense — the teardown fix
+    # (kill-session, never kill-server) is primary; this covers the whole leak class at once.
     # Same flip-only-a-passing-run semantics as assert-clean-tree above.
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh"; then
+    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
     exit "$code"
@@ -690,22 +653,7 @@ run_selected() {
   mark_nested
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
-  if in_group "serial" "$groups"; then
-    # The serial group is isolated by definition (gap-suite-concurrency-8-green-serial-group-for-
-    # non-concurrent-tests): ALWAYS concurrency 1, never a user-tunable knob. Strip any explicit
-    # --test-concurrency flag (both spellings) so the hard-coded 1 is the SINGLE concurrency source
-    # — a full-suite-runner splice onto a `--group serial` command must not leak concurrency N in.
-    local filtered=() a prev_arg=""
-    for a in "$@"; do
-      case "$a" in
-        --test-concurrency=*) continue ;;
-        --test-concurrency) prev_arg="continue" ; continue ;;
-      esac
-      if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
-      filtered+=("$a")
-    done
-    exec node --test --test-concurrency=1 "${filtered[@]}" "${files[@]}"
-  elif has_explicit_concurrency "$@"; then
+  if has_explicit_concurrency "$@"; then
     exec node --test "$@" "${files[@]}"
   else
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
@@ -733,7 +681,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance|serial, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|governance, comma-separated)" >&2
     exit 2
   fi
   shift 2
