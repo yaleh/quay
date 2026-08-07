@@ -29,6 +29,16 @@ extra: {}
   runtime-landing 28.3 / quay-init-tmux-detection 20.8；其余 10 个共 72.0s。
 - 拆开后（211.4 → 3 份约 70s），下界回到摊平 196.6s，**那时提并发才有收益**。
 
+### ⚠️ 测量前置条件（管理者 2026-08-07 20:4x 时间敏感警告 + 外层裁定）
+
+**本任务测的是天花板基线（拆前/拆后），测量必须独占窗口**：曾与 gap-lowconc-tmux-session-name-collision-race
+（竞态复现）同时各跑整个 lowconc 组 @cc3，两边都在跑 session-liveness.test.mjs——**天花板数字被污染，
+不可用**（与 18:5x「两个全量套件互相污染成本基线」同一错误、降一层）。根因：单飞锁只覆盖 full-suite
+默认路径，任务级 scoped 运行不在其内。
+
+**裁定**：① 本任务拆前/拆后测量标「测量时无同组 cc3 并发」（独占窗口——竞态复现先跑、本任务基线后跑，
+或两者持 full-suite.lock 单飞锁串行）；② 被污染的基线作废，重取。
+
 ### 修复方向
 
 1. **拆 session-liveness.test.mjs**——211.4s 集中在 B 类真实墙钟等待测试（SESSION-GONE/BACK、
@@ -43,8 +53,9 @@ extra: {}
 
 ### 交叉
 
-- 本轮同相位另 2 条失败（AC4 断言陈旧 + AC3 cc3 并发）在 gap-lowconc-tmux-session-name-collision-race；
+- 本轮同相位另 2 条失败（AC4 断言回退 + AC3 cc3 并发）在 gap-lowconc-tmux-session-name-collision-race；
   两者让本拆分的负控制（lowconc 相位全绿）更难，但互不阻塞。
+- 竞态复现与本任务**共享独占测量窗口**（见上）。
 - reporter 接线（gap-install-suite-cost-instrument-reporter-not-wired）是本判据能触发的先决条件——已验证生效。
 
 ## Contract
@@ -53,30 +64,31 @@ measure split_done = `grep -rln "session-liveness" plugin/test/` stdout 文件�
 measure tail_cap_gone = `grep "__CEILING__" .quay/full-suite.log | tail -3` stdout 数字段（拆分后无 duration_ms>196600 的封顶者，或封顶者不再是 session-liveness 单文件）
 band tail_cap_gone = 0（lowconc 无尾部封顶者）
 invoke `bash scripts/test.sh --group lowconc --test-concurrency=3 2>&1 | tail -3`
-control 拆分后 lowconc 18→20+ 文件墙钟合计 <589.8s，wall-clock <793s 基线；并发 8 全量 fail 0 / cancelled 0
+control 独占窗口（无同组 cc3 并发）下拆分后 lowconc 18→20+ 文件墙钟合计 <589.8s，wall-clock <793s 基线；并发 8 全量 fail 0 / cancelled 0
 resume 若中断，先跑 measure 读拆分文件数 + 尾部封顶者现状
 
 ## Acceptance Criteria
 
 - [ ] AC1: **拆分落地**——session-liveness.test.mjs 拆成 ≥2 个文件，原断言族完整保留（无断言丢失/弱化）
 - [ ] AC2: **尾部封顶消除**——lowconc 无单一文件墙钟 > 摊平下界；reporter 不再标 `封顶者/该拆`
-- [ ] AC3: **省时实证**——lowconc 组墙钟合计显著低于 589.8s；全量 wall-clock 低于 793s 基线
+- [ ] AC3: **省时实证（独占窗口）**——独占窗口（无同组 cc3 并发）下 lowconc 组墙钟合计显著低于 589.8s；
+      全量 wall-clock 低于 793s 基线；证据标注「测量时无同组 cc3 并发」
 - [ ] AC4: 所有子文件 @test-group lowconc（hermetic 但负载敏感，不得降级）；隔离全过
-- [ ] AC5: 与 gap-lowconc-tmux-session-name-collision-race 交叉标注（同轮同相位）
+- [ ] AC5: 与 gap-lowconc-tmux-session-name-collision-race 交叉标注（同轮同相位、独占测量窗口共享）
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴进任务体（含拆分前后 __CEILING__ 对照、lowconc 墙钟对比、全量 wall-clock 对比）
+- [ ] AC1-AC4 实跑输出贴进任务体（含拆分前后 __CEILING__ 对照、独占窗口 lowconc 墙钟对比、全量 wall-clock 对比）
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
 
 ## Touches
 - plugin/test/session-liveness.test.mjs（拆分为多文件）
-- tasks/gap-lowconc-tmux-session-name-collision-race.md（AC5 交叉标注）
+- tasks/gap-lowconc-tmux-session-name-collision-race.md（AC5 交叉标注 + 独占测量窗口共享）
 - tasks/gap-install-suite-cost-instrument-reporter-not-wired.md（交叉标注：reporter 是本判据先决条件）
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-07T20:2xZ
-changed: 拆分裁定仪器坐实——session-liveness 211.4s 尾部封顶（>摊平下界 196.6s），lowconc 墙钟下不来。
-  拆成 3 份约 70s 后下界回到摊平，提并发才有效益。serial cc=1 不适用拆分判据（另两条路）。
+at: 2026-08-07T20:5xZ
+changed: 追加测量前置条件——管理者 20:4x 时间敏感警告：天花板基线曾与竞态复现并发 cc3、session-liveness
+  两处同跑，基线被污染不可用。裁定：独占窗口重取基线 + 证据标注「测量时无同组 cc3 并发」。
