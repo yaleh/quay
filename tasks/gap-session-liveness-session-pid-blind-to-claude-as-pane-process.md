@@ -2,7 +2,7 @@
 id: gap-session-liveness-session-pid-blind-to-claude-as-pane-process
 title: session-liveness session_pid is blind to claude-as-pane-process — outer
   monitor cannot see inner in the 3-window topology
-status: ready
+status: done
 labels:
   - gap
   - defect
