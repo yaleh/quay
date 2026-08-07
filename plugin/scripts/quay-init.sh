@@ -729,6 +729,18 @@ bare_resolved_scripts() {
       done || true
 }
 
+# consolidated_member_files — the 40→6 grouped entry points' member implementation files
+# (SPEC-instruments-behind-one-entry.md AC8/AC12). The docs/skills invoke members via the ENTRY
+# POINT (`quay-<group>.ts <member>` — a subcommand name, never a plugin/scripts/ path), so the
+# member files are INVISIBLE to (a)/(b) bare/path derivation but MUST ship for the entry point to
+# be able to dispatch to them (a cold-started project running `quay-session.ts monitor-mount-check`
+# would otherwise fail on a missing implementation). Derived from the MEMBERS declarations in each
+# quay-<group>.ts — never a hand-maintained list. Prints one member basename per line.
+consolidated_member_files() {
+  grep -hoE 'name: "[a-zA-Z0-9._-]+", file: "[a-zA-Z0-9._-]+"' "$PLUGIN_ROOT"/scripts/quay-*.ts 2>/dev/null \
+    | sed -E 's/.*file: "([^"]+)"/\1/' | sort -u
+}
+
 # derive_loop_scripts — prints the COMPLETE --loop script laydown set (one basename per line),
 # derived as (a)+(b)+(c)+(d) above.
 derive_loop_scripts() {
@@ -773,6 +785,16 @@ derive_loop_scripts() {
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
     inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts >> "$out"
+  # (c2) consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md AC8/AC12): the
+  #   docs invoke them via `quay-<group>.ts <member>` (a subcommand, never a plugin/scripts/ path),
+  #   so (a)/(b) cannot see them — but the entry point must dispatch to them, so they ship. Only
+  #   EXISTING members land here (a missing member is a plugin defect, surfaced by
+  #   verify_referenced_landed's unconditional member reference, not silently dropped from the set).
+  for f in $(consolidated_member_files); do
+    [ -f "$PLUGIN_ROOT/scripts/$f" ] || continue
+    case " $NEVER_LAYDOWN " in *" $f "*) continue ;; esac
+    printf '%s\n' "$f" >> "$out"
+  done
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0
@@ -849,8 +871,20 @@ verify_referenced_landed() {
   # MECHANISM corpus that resolve under plugin/scripts/ — the SAME derivation the laydown uses
   # (AC3: checker and checked can no longer share the same blind spot).
   mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
+  # consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md): EVERY member of a
+  # shipped quay-<group>.ts must land — the entry point dispatches to it. UNCONDITIONAL (a member
+  # absent from the plugin source is exactly the referenced-not-landed defect this check exists to
+  # catch — the AC2 live-specimens case: removing monitor-mount-check.sh / send-keys-reliable.sh
+  # must make the check name them, not silently pass because they no longer exist to resolve).
+  local consolidated_refs=""
+  local member
+  for member in $(consolidated_member_files); do
+    case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
+    consolidated_refs+="plugin/scripts/$member"$'\n'
+  done
   refs="$( ( grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
              printf '%s\n' "$mech_bare"
+             printf '%s' "$consolidated_refs"
            ) | sort -u || true )"
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:

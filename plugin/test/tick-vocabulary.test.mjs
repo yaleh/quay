@@ -59,7 +59,13 @@ const MISREAD_PATTERNS = ["同批", "批派发", "batch-N"];
 //   审计机制   reanchor-prompt.txt grep / self-report-vocab-audit / "Batch of N fully merged"
 const SAFE_SUBSTRINGS = [
   "concurrent-batch-scheduler.ts",
+  "concurrent-batch-scheduler",     // 40→6 consolidated dispatch (SPEC-instruments-behind-one-entry.md):
+                                    // the docs invoke it via `quay-dispatch.ts concurrent-batch-scheduler`
+                                    // (subcommand name, no `.ts` suffix) — same 机件真名 as the file form.
   "integration-batch-merge.sh",
+  "integration-batch-merge",        // 40→6 consolidated branch (SPEC-instruments-behind-one-entry.md):
+                                    // the docs invoke it via `quay-branch.ts integration-batch-merge`
+                                    // (subcommand name, no `.sh` suffix) — same 机件真名 as the file form.
   "gap-closure-sync-is-the-true-batch-boundary",
   "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
   "{ batch, deferred }",

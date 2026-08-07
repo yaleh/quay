@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @instrument "Which dispatch/concurrency instrument does the consolidated dispatch entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
 // plugin/scripts/quay-dispatch.ts — ③ 派发与并发 grouped instrument entry point
 // (SPEC-instruments-behind-one-entry.md AC8/AC12; tasks/gap-ac8-import-over-spawn-ticked-while-its-
 // own-evidence-says-not-in-effect AC2). Consolidates the dispatch/concurrency entry points behind one

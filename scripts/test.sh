@@ -279,7 +279,7 @@ run_static_checks() {
   # negative control (actionable step flags, boundary-only clean) is exercised by the checker's
   # own mutation case and plugin/test/no-manager-tick-doc-check.test.mjs.
   # @static-tier change
-  # @static-object plugin/loop/orchestrator-loop-tick.md orchestration/orchestrator-loop-tick.md
+  # @static-object plugin/loop/orchestrator-loop-tick.md
   run_checker "no-manager-tick-doc-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/no-manager-tick-doc-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is

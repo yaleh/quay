@@ -1,4 +1,8 @@
-// @test-group governance
+// @test-group serial
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group — the AC2 ready-pool-check 3x test asserts ms MONOTONICITY (400→800→1200ms delays)
+// that node-startup jitter under the concurrency-8 main body's load breaks (run1 pays JIT/module-load
+// cost run2 does not), so it must run alone at concurrency 1 to keep the delay-dominates signal.
 // checker-cost.test.mjs — tasks/gap-no-criterion-records-its-own-cost-checker-cost-jsonl.
 //
 // The ENABLING MECHANISM for the whole criterion-cost family: every criterion (static checker /
@@ -17,7 +21,7 @@
 //   AC6 — full-suite-runner appends {round, startedAt, durationMs, laneCount, pass, fail, load}
 //         to .quay/verification-round.jsonl (append-only sequence; the single-state
 //         full-suite-state.json is never overwritten away).
-//   AC7 — this file uses node:test and declares // @test-group governance.
+//   AC7 — this file uses node:test and declares // @test-group serial (load-sensitive AC2).
 //
 // Run:
 //   scripts/test.sh --for-task gap-no-criterion-records-its-own-cost-checker-cost-jsonl

@@ -1,3 +1,4 @@
+// @instrument "What is the shared dispatcher framework that the six grouped instrument entry points use to preserve each member's CLI byte-for-byte?"
 // quay-entry-base.ts — shared dispatcher framework for the 6 GROUPED instrument entry points
 // (gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect, AC2; SPEC-instruments-
 // behind-one-entry.md AC8/AC12). The 40 remembered-path/spawn entry points are consolidated behind

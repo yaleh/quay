@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @instrument "Which task/document validation instrument does the consolidated check entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
 // plugin/scripts/quay-check.ts — ⑥ 任务与文档校验 grouped instrument entry point
 // (SPEC-instruments-behind-one-entry.md AC8/AC12; tasks/gap-ac8-import-over-spawn-ticked-while-its-
 // own-evidence-says-not-in-effect AC2). Consolidates the task/document validation entry points behind

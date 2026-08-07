@@ -268,8 +268,11 @@ test("AC3 — mixed: a topology window that is a bare bash (no claude) ⇒ no-cl
 test("AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE + factory/check refs)", () => {
   const src = fs.readFileSync(COLD_START, "utf8");
   assert.match(src, /TOPOLOGY-IN-PLACE/, "the cold-start checklist must add the TOPOLOGY-IN-PLACE key");
-  assert.match(src, /quay-topology\.sh/, "cold-start must drive the topology factory (build by definition)");
-  assert.match(src, /topology-check\.sh/, "cold-start must verify the topology via topology-check");
+  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the factory/check via the
+  // grouped entry point — `quay-session.ts quay-topology` / `quay-session.ts topology-check`. The
+  // test asserts the SAME command name the skill uses (AC2: docs and tests must not each write their own).
+  assert.match(src, /quay-session\.ts quay-topology/, "cold-start must drive the topology factory (build by definition)");
+  assert.match(src, /quay-session\.ts topology-check/, "cold-start must verify the topology via topology-check");
   assert.match(src, /session-topology/, "cold-start must cross-annotate the session-topology skill");
 });
 

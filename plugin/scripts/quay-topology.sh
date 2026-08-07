@@ -111,6 +111,10 @@ LOCK_ACQUIRED=0
 
 acquire_lock() {
   local i=0 now lock_mtime
+  # The lock dir's PARENT must exist for the atomic `mkdir` to have anything to create in — a fresh
+  # /tmp (or a cleaned TMPDIR) has no quay-topology-locks/, so without this the atomic mkdir fails
+  # with ENOENT and the retry loop spins to timeout while the lock is actually free.
+  mkdir -p "$LOCK_BASE" 2>/dev/null || true
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
     if [ -d "$LOCK_DIR" ]; then
       lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
@@ -154,9 +158,19 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   if [ "$DRY_RUN" = 1 ]; then
     echo "would-create-session: tmux new-session -d -s $SESSION -n $FIRST \"$CMD\""
   else
-    echo "create-session: tmux new-session -d -s $SESSION -n $FIRST"
-    tmux new-session -d -s "$SESSION" -n "$FIRST" "$CMD"
-    echo "  launched: $SESSION:$FIRST"
+    # tmux new-session -d is async from a concurrent peer's view: a second single-flight creator
+    # that acquires the lock immediately after us can still see has-session as MISSING for a
+    # moment even though we created it (the AC6 dual-creator race). Make the create IDEMPOTENT:
+    # if new-session fails because the session already exists, treat it as in-place — the
+    # single-flight invariant is exactly-one-session, not exactly-one-create-command.
+    if tmux new-session -d -s "$SESSION" -n "$FIRST" "$CMD" 2>/dev/null; then
+      echo "create-session: tmux new-session -d -s $SESSION -n $FIRST"
+      echo "  launched: $SESSION:$FIRST"
+    else
+      echo "in-place: $SESSION:$FIRST (session appeared concurrently — single-flight preserved)"
+      SESSION_EXISTED=1
+      FIRST=""
+    fi
   fi
 fi
 

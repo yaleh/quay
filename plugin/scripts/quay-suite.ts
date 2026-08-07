@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @instrument "Which suite/gate instrument does the consolidated suite entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
 // plugin/scripts/quay-suite.ts — ⑤ 套件与门禁 grouped instrument entry point
 // (SPEC-instruments-behind-one-entry.md AC8/AC12; tasks/gap-ac8-import-over-spawn-ticked-while-its-
 // own-evidence-says-not-in-effect AC2). Consolidates the suite/gate entry points behind one importable

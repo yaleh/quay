@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @instrument "Which delivery/preempt instrument does the consolidated deliver entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
 // plugin/scripts/quay-deliver.ts — ② 送达与抢占 grouped instrument entry point
 // (SPEC-instruments-behind-one-entry.md AC8/AC12; tasks/gap-ac8-import-over-spawn-ticked-while-its-
 // own-evidence-says-not-in-effect AC2). Consolidates the send/deliver/preempt entry points behind one

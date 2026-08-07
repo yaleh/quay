@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @instrument "Which branch/claim instrument does the consolidated branch/claim entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
 // plugin/scripts/quay-branch.ts — ④ 分支与认领 grouped instrument entry point
 // (SPEC-instruments-behind-one-entry.md AC8/AC12; tasks/gap-ac8-import-over-spawn-ticked-while-its-
 // own-evidence-says-not-in-effect AC2). Consolidates the branch/claim entry points behind one

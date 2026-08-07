@@ -108,6 +108,16 @@ export function exclusionEntries(repoRoot, pluginDir) {
       reason: "defines the 5 old paths (oldPaths) + the AC1b patterns + this exclusion table — the reference point, not a live caller; mirrors loop-shipping.test.mjs's own self-exclusion",
     },
     {
+      rel: 'plugin/scripts/no-manager-tick-doc-check.ts',
+      target: path.join(pluginDir, 'scripts', 'no-manager-tick-doc-check.ts'),
+      reason: "the C3 manager-step checker SCANS the quay-local deployed outer tick doc at orchestration/orchestrator-loop-tick.md (its DEFAULT_DOCS pair is the shipped template + the quay-local landing — a real file that legitimately lives there), not a stale reference to a moved mechanism",
+    },
+    {
+      rel: 'plugin/test/no-manager-tick-doc-check.test.mjs',
+      target: path.join(pluginDir, 'test', 'no-manager-tick-doc-check.test.mjs'),
+      reason: "asserts the checker scans BOTH the shipped template and the quay-local deployed outer tick doc — target-layout reference, same class as the checker itself",
+    },
+    {
       rel: 'plugin/test/task-contract-check.test.mjs',
       target: path.join(pluginDir, 'test', 'task-contract-check.test.mjs'),
       reason: "fixtures test the invoke-entry-path criterion with OLD-path invoke commands (historical done tasks); data, not live refs",

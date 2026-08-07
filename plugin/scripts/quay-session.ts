@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @instrument "Which session/topology instrument does the consolidated session entry point dispatch to (grouped entry, byte-for-byte CLI preservation)?"
 // plugin/scripts/quay-session.ts — ① 会话与拓扑 grouped instrument entry point
 // (SPEC-instruments-behind-one-entry.md AC8/AC12; tasks/gap-ac8-import-over-spawn-ticked-while-its-
 // own-evidence-says-not-in-effect AC2). Consolidates the 9 remembered-path session/topology entry
