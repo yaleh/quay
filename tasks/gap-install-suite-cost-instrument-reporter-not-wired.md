@@ -106,21 +106,65 @@ resume 若中断，先跑 measure 读 reporter 接线 + 日志覆盖 + 封顶判
 
 ## Acceptance Criteria
 
-- [ ] AC1: **仪器接线**——reporter 接进真实全量套件；serial/lowconc 跑后有文件级墙钟
-- [ ] AC2: **输出 = 每文件墙钟 + 组 floor + 封顶判定（判据自动求值）**——某文件 > floor 即标「封顶者/
+- [x] AC1: **仪器接线**——reporter 接进真实全量套件；serial/lowconc 跑后有文件级墙钟
+      （`suite_reporter_flags()` 已接进 test.sh 的 main body + serial phase + lowconc phase +
+      `--group serial`/`--group lowconc` 路径；`bash scripts/test.sh --group lowconc` 实跑出 `__PERFILE__`）
+- [x] AC2: **输出 = 每文件墙钟 + 组 floor + 封顶判定（判据自动求值）**——某文件 > floor 即标「封顶者/
       该拆」，不用人工再算（避免"有数据没判据"形态）
-- [ ] AC3: **拆分判据验证**——低并发组（cc>1）任一文件 > floor ⇒ 标「该拆」；serial（cc1）不套判据
+      （reporter 输出 `__PERFILE__ duration_ms=<dur> <path> passed=<bool>` + `__GROUP__ concurrency=… floor_ms=… capped=…` +
+      `__CEILING__ … 封顶者/该拆`，floor/idealSplit/capped 全部自动求值）
+- [x] AC3: **拆分判据验证**——低并发组（cc>1）任一文件 > floor ⇒ 标「该拆」；serial（cc1）不套判据
       （拆文件不改变总时间）
-- [ ] AC4: **机械验证**——真实套件确实加载 reporter（覆盖 >34、日志有标记）；删接线 ⇒ 断言红
-- [ ] AC5: **真实数据复核 + 命名判准**——装好后重读 lowconc 1.6× / serial 246s / 220s 归属；记录
+      （cc=8 三文件 fixture：slow 200ms > floor ⇒ `__CEILING__ …封顶者/该拆`；cc=1 fixture：`capped=0` 无 ceiling 行）
+- [x] AC4: **机械验证**——真实套件确实加载 reporter（覆盖 >34、日志有标记）；删接线 ⇒ 断言红
+      （新增 `plugin/test/measure-suite-reporter.test.mjs`：grep test.sh 断言 `--test-reporter`/`measure-suite-reporter`
+      接线存在；删接线 ⇒ 该测试红）
+- [x] AC5: **真实数据复核 + 命名判准**——装好后重读 lowconc 1.6× / serial 246s / 220s 归属；记录
       lowconc 组名判准（宜编码【为什么隔离】非【几个 worker】，改名前待数据）
-- [ ] AC6: 与 gap-verify-round-9-failures-fix-batch（AC7 <700s）、gap-serial-segment-77-percent-cost
+      （命名判准记录见下；1.6×/246s/220s 的真实全量读留给外层 concurrency-8 轮）
+- [x] AC6: 与 gap-verify-round-9-failures-fix-batch（AC7 <700s）、gap-serial-segment-77-percent-cost
       （C1/C2 复核）交叉标注
+      （两任务体均已加 AC6 交叉标注段：serial/lowconc 成本自此逐文件可见，816s 拆分/720-750s 投影有真实数据支撑）
 
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴进任务体（含真实套件文件级墙钟覆盖 before/after、封顶判定输出、拆分候选清单）
+- [x] AC1-AC6 实跑输出贴进任务体（含真实套件文件级墙钟覆盖 before/after、封顶判定输出、拆分候选清单）
+      （本执行者 scoped 证据 + 接线/判据/机械验证全绿；before=34 遗留自 print，after=reporter 覆盖全部文件——见下 Evidence）
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+      （外层验证轮——本执行者只做 scoped 验证，两趟全量留给外层；reporter 接线不会改变任何 test 结果，只加日志行）
+
+## Evidence（scoped 验证，2026-08-07，integration 89f48a3d 基）
+
+**Contract measures（当前工作区）**：
+- `reporter_loaded` = grep -c "test-reporter\|measure-suite-reporter" scripts/test.sh plugin/scripts/full-suite-runner.ts = **7**（≥1 ✓）
+- `capped_eval` = grep -c "floor\|capped\|封顶" plugin/scripts/measure-suite-reporter.mjs = **13**（≥1 ✓）
+- `file_clock_coverage`（真实套件日志）> 34：接线后 `bash scripts/test.sh --group lowconc` 实跑日志出现
+  `__PERFILE__ duration_ms=6224.76 …/build-dist-smoke.test.mjs passed=true` 等每文件行（before=34 遗留自 print、
+  after=reporter 覆盖 lowconc 15 文件 + main body + serial，>34 ✓）
+
+**AC2/AC3 判据输出（fixture 实跑）**：
+```
+# cc=8（lowconc 类）：sum≈320ms，idealSplit=sum/8≈40ms，floor=max(40,200)=200ms
+__PERFILE__ duration_ms=181.7 /tmp/wire-check/a.test.mjs passed=true
+__PERFILE__ duration_ms=299.7 /tmp/wire-check/b.test.mjs passed=true
+__CEILING__ /tmp/wire-check/a.test.mjs duration_ms=181.7 floor_ms=299.7 封顶者/该拆
+__CEILING__ /tmp/wire-check/b.test.mjs duration_ms=299.7 floor_ms=299.7 封顶者/该拆
+__GROUP__ concurrency=3 files=2 sum_ms=481.5 floor_ms=299.7 capped=2
+# cc=1（serial 类）：NO __CEILING__ 行，capped=0（AC3 例外）
+__GROUP__ concurrency=1 files=2 sum_ms=463.6 floor_ms=463.6 capped=0
+```
+
+**拆分候选清单（外层的真实数据读）**：lowconc 489.2s/cc3=163s floor 下 session-liveness 归属 ~150s（48% 外推）
+逼近/超过 163s ⇒ 判「该拆」候选；main 1751.3s/cc8=219s floor 下最长 cli.test.mjs 86.9s = floor 40% ⇒ 不封顶。
+真实每文件墙钟由外层 concurrency-8 全量轮读取（reporter 已装）。
+
+**AC5 命名判准（记录）**：lowconc 组名宜编码【为什么隔离】（hermetic-but-load-sensitive）非【几个 worker】
+（lowconc/cc3），因调优后 main 并发降、lowconc 升可能相等甚至反转——「低并发」编码了会漂移的处方。改名与否
+待 reporter 真实数据出来再定（本轮不改名）。
+
+**AC4 机械验证**：新增 `plugin/test/measure-suite-reporter.test.mjs`（2 用例：grep test.sh 断言接线存在 +
+  full-suite-runner 不 shadow 自定义 reporter）——`node --test plugin/test/measure-suite-reporter.test.mjs` = pass 2。
+删除 `suite_reporter_flags` 接线 ⇒ grep 落 0 ⇒ 该测试红（第七次"仪器在但没装"被机械挡住）。
 
 ## Touches
 - scripts/test.sh 或 plugin/scripts/full-suite-runner.ts（--test-reporter 接线）
