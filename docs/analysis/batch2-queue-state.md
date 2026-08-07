@@ -7597,3 +7597,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 冲突（同位置 4b）**：cherry-pick bf6b42b2 → 1 冲突 `plugin/loop/fast-mode-loop-tick.md` 的 **step 4b**——integration 已有 cross-machine-verify 心跳（gap-no-post-merge，5674e0ea 已落），probe-mechanism 想在同一位置加 routine 检查。两个在飞任务都合法想要 4b。**doc：冲突 → needs-human，不 --skip/-X ours**。标 needs-human，worktree/branch 保留（bf6b42b2+9e4ffd45）。
 - **⚠️ cherry-pick abort 意外回退 integration**：`git cherry-pick --abort` 把 integration 从 578afc7c 退到 a09ddb56（丢失 ac8 merge 8d740326 + readme-source 578afc7c）。**已 `git reset --hard 578afc7c` 恢复**，验证全部 5 个 fan-in 在（readme-source/ac8-merge/manager-skill/prefriction×2），README quay.ts 修复恢复。integration 现在安全。
 - **在飞 2/2（真实）+ probe-mechanism 保留 bracket**：observer-registry + manager-layer。2 空槽。
+
+### 事件 01:3xZ（回填——split-batch 派发）
+
+- **split-batch 派发 3/5**：batch 词汇拆分（rolling dispatch vs verification-round-N）经 tick-vocabulary.test.mjs 机械锁定。probe-mechanism 释放 tick docs 后全 disjoint。worktree `quay-worktrees/split-batch`。
+- **在飞 3/5**（真实）：observer-registry + manager-layer + split-batch。probe-mechanism needs-human worktree 保留。
