@@ -56,8 +56,15 @@ extra: {}
    DoD 要求连跑 2 次全量全绿」。**这是新任务抄袭的源头，先改这里止血。**
 2. **存量 92 条**：`grep -l '完整套件' tasks/*.md`。**不建议批量改写**（会掩盖历史判据），
    建议：新任务不再写；存量在各自收尾时按新规则处理，任务体注明依据。
+   实测（2026-08-07，本任务执行时）：全任务体 grep 97 个文件（基线 92 有漂移），DoD 节内裸含
+   88 个，其中 **86 个是「连跑/绿」需求形**（`完整套件连跑 2 次全绿` 一族）。这 86 个文件已
+   **原样录入** `docs/analysis/dod-suite-line-baseline.md`（shrink-only 祖父清单，`baseline-count: 86`），
+   不批量改写；各自收尾时删掉 DoD 行并从清单删除该条目、递减计数。
 3. **防复发**：`plugin/scripts/task-contract-check.ts` 已消费任务体，可加一条检查——
-   新任务 DoD 出现「完整套件」⇒ 报出并指向本任务。
+   新任务 DoD 出现「完整套件」⇒ 报出并指向本任务。已落地：`checkDodSuiteLine` 对 **不在祖父清单**
+   且 DoD 含需求形（`完整套件…{0,40}(连跑|绿)`）的任务报 `dod-suite-line` 违规，指向本任务；清单
+   `baseline-count` 只减不增（ceiling breach ⇒ exit 1）。**负控制**：构造一条含「完整套件连跑 2 次
+   全绿」的新任务 ⇒ 必须报出（测试已钉）。
 
 ## 去掉之后，outer 跑套件发现问题怎么办（人的第二问，机制已存在）
 
@@ -83,16 +90,68 @@ resume 若中断，先跑两个 measure 读当前值，不要假设模板已改
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/loop/fast-mode-loop-tick.md:118-120` 改为「任务 DoD **不含**全量套件；全量套件是批量合边界的闸门」
-- [ ] AC2: 新任务的 DoD 不再出现「完整套件」——加机械检查（并入 `task-contract-check.ts`），**负控制**：构造一条含该行的新任务 ⇒ 必须报出
-- [ ] AC3: 存量 92 条的处置写进任务体（建议不批量改写，各自收尾时按新规则处理并注明依据）
-- [ ] AC4: **承重条**——按 `control` 证明 `$FORK_BASELINE` 保护强度**未变**：套件红时批量合仍被拒绝
-- [ ] AC5: 与 `SPEC-suite-speed.md` AC6、`SPEC-cut-the-waiting.md` AC4 交叉标注：**本任务不是放宽闸门，是移除重复**，两处「闸不动」继续有效
+- [x] AC1: `plugin/loop/fast-mode-loop-tick.md:118-120` 改为「任务 DoD **不含**全量套件；全量套件是批量合边界的闸门」
+  — 已改，新文在 L118-122：「任务 DoD 不含全量套件；全量套件是批量合边界的闸门（`gap-suite-green-gate-...`）」；
+  全量套件绿是**批量合边界**的闸门（外层验证轮只在 `state: green` 时把 `$MERGE_TARGET`→`$FORK_BASELINE` 批量合，
+  判绿三条件见下）；任务 DoD **不写**「完整套件连跑 2 次全绿」。`measure template_requires_suite`
+  （`grep -c '仍必须按 DoD 要求' plugin/loop/fast-mode-loop-tick.md`）= **0**（基线 1 → 应降为 0，达标）。
+- [x] AC2: 新任务的 DoD 不再出现「完整套件」——加机械检查（并入 `task-contract-check.ts`），**负控制**：构造一条含该行的新任务 ⇒ 必须报出
+  — `task-contract-check.ts` 新增 `checkDodSuiteLine`（需求形 `完整套件…{0,40}(连跑|绿)`，非裸词）：
+  不在 `docs/analysis/dod-suite-line-baseline.md`（shrink-only，86 条）的 DoD 需求 ⇒ `dod-suite-line` 违规并指向本任务。
+  **负控制已跑**：`task-contract-check.test.mjs`「AC2 negative control: a task whose DoD carries the full-suite demand and is NOT grandfathered → dod-suite-line」绿；
+  CLI 层「a new task with the DoD demand (no grandfather baseline) is REPORTED; ratchet growth → exit 1」绿。
+- [x] AC3: 存量 92 条的处置写进任务体（建议不批量改写，各自收尾时按新规则处理并注明依据）
+  — 见上「落实点」②：实测全任务体 grep 97（漂移），DoD 需求形 **86** 个，原样录入 shrink-only 祖父清单
+  `docs/analysis/dod-suite-line-baseline.md`（`baseline-count: 86`）；**不批量改写**，各自收尾删 DoD 行并从清单移除。
+- [x] AC4: **承重条**——按 `control` 证明 `$FORK_BASELINE` 保护强度**未变**：套件红时批量合仍被拒绝
+  — 见 Execution record §AC4：`suite-state-trigger.ts --once` 对 **red+failed** 套件状态 ⇒ `SUITE-RED … stopSignal=true`
+  （批量合 hold 信号在位），对 **green** ⇒ `stopSignal=false`。批量合闸门四件（`integration-batch-merge.sh` /
+  `fork-baseline.ts` / `suite-state-trigger.ts` / `integration-branch-model.ts`）`git diff` **均 UNTOUCHED**；
+  相关 41 测试（suite-state-trigger / integration-branch-model / branch-model / sync-lag-check）全绿。
+- [x] AC5: 与 `SPEC-suite-speed.md` AC6、`SPEC-cut-the-waiting.md` AC4 交叉标注：**本任务不是放宽闸门，是移除重复**，两处「闸不动」继续有效
+  — `orchestration/SPEC-suite-speed.md` AC6、`orchestration/SPEC-cut-the-waiting.md` AC4 各加 Cross-annotation：
+  闸是批量合边界的全量套件绿（红窗规则），**原封不动**；移除的是任务级 DoD 重复，**不是放宽**。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体
-- [ ] `--for-task` 选中集绿（**本任务自身不再要求完整套件——即以自身为首个应用**）
+- [x] AC1-AC5 实跑输出贴进任务体（见各 AC 勾注 + Execution record）
+- [x] `--for-task` 选中集绿（**本任务自身不再要求完整套件——即以自身为首个应用**）
+  — `scripts/test.sh --for-task gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge --allow-thin`
+  退出 0：50/50 测试绿（1 个 opt-in real-store skip）；scoped 静态层
+  `task-contract-check --strict-subset`（no violations）+ `strategic-doc-staleness-check` + `drive-contract-check` 全 PASS。
+
+## Execution record（2026-08-07，inner worktree `suite-green-gate`）
+
+**measures（Contract）**：
+- `dod_suite_lines` = `grep -l '完整套件' tasks/*.md | wc -l` ⇒ **97**（基线 92，随新任务落库漂移；趋势应下行）
+- `template_requires_suite` = `grep -c '仍必须按 DoD 要求' plugin/loop/fast-mode-loop-tick.md` ⇒ **0**（基线 1，达标）
+- `invoke`（`grep -c '仍必须按 DoD 要求' plugin/loop/fast-mode-loop-tick.md`）已实跑，输出 `0`。
+
+**AC4 承重条（control 实跑）**——构造套件红的树 ⇒ 批量合必须仍被拒绝：
+```bash
+# 合成 red 套件状态（reason=failed），读它的机械信号：
+$ node --no-warnings --experimental-strip-types plugin/scripts/suite-state-trigger.ts --once --root <tmp-red>
+SUITE-STATUS red
+SUITE-RED state=red early=false stopSignal=true at=… failures=1 sharedGate=0 specificTest=1
+stopSignal=true
+# 换成 green 再读：
+SUITE-STATUS green
+SUITE-GREEN state=green early=false stopSignal=false at=…
+stopSignal=false
+```
+`stopSignal=true`（red+failed）正是外层「suiteGreen=false ⇒ 不跑批量合」的机械信号——`$FORK_BASELINE` 只被
+验证过的树推进。**批量合闸门四件 `git diff` 均 UNTOUCHED**（`integration-batch-merge.sh` / `fork-baseline.ts` /
+`suite-state-trigger.ts` / `integration-branch-model.ts`），相关 41 测试全绿 ⇒ 保护强度未变。
+
+**scoped 验证（DoD，自身为首个应用——不自跑完整套件）**：
+`scripts/test.sh --for-task gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge --allow-thin` 退出 0：
+50/50 测试绿（task-contract-check 51 tests / 50 pass / 1 opt-in real-store skip）；
+scoped 静态层 `task-contract-check --strict-subset`（no violations）+ `strategic-doc-staleness-check` +
+`drive-contract-check` 全 PASS。
+
+**AC2 负控制输出摘录**（构造含「完整套件连跑 2 次全绿」的新任务 ⇒ 必须报出）：
+`task-contract-check.test.mjs` → `✔ AC2 negative control: … → dod-suite-line`；
+CLI → `✔ CLI AC2: a new task with the DoD demand … ratchet growth → exit 1`。
 
 ## Cross-annotation（2026-08-07）
 
