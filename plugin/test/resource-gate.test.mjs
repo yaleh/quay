@@ -230,6 +230,38 @@ test("AC7 — test.sh consults the gate on the full-suite default path and skips
   assert.ok(gateCallSites.length >= 1, "resource_gate_check must be called somewhere");
 });
 
+// ── single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) ──────────────────
+// AC1/AC4 — the full-suite default path takes a flock on <git-common-dir>/full-suite.lock held for
+// the ENTIRE run, so two concurrent cc8 suites can no longer both see GO and start. The lock is
+// COMPLEMENTARY to the resource gate (AC2): the gate prevents "starting into a busy machine", the
+// lock prevents "a second suite joining". Structural pin (the two-startup negative control is a live
+// harness recorded in the task body): the flock reference exists, the acquire is wired into the
+// is_default_set branch ahead of the gate, and the release fires before the full-suite exit.
+test("AC1/AC4 — the full-suite default path holds a single-flight flock (full-suite.lock, shared across worktrees)", () => {
+  const src = fs.readFileSync(TEST_SH, "utf8");
+  // flock(1) reference must exist in test.sh (Contract measure suite_lock ≥ 1).
+  assert.match(src, /\bflock\b/, "scripts/test.sh must use flock(1) for the single-flight lock");
+  assert.match(src, /full-suite\.lock/, "the lock file must be named full-suite.lock");
+  // SHARED across worktrees + the primary checkout via git's common dir (the 2026-08-07 incident
+  // was two DIFFERENT worktrees each running a cc8 suite — a per-checkout lock would NOT serialize).
+  assert.match(src, /git rev-parse --git-common-dir/, "the lock must resolve via git's common dir so all worktrees contend on the same file");
+  // The acquire is called in the SAME is_default_set branch that consults the resource gate
+  // (the default full-suite set only) — and BEFORE the gate (serialize first, then load-check).
+  // The regex targets the CALL site (full_suite_lock_acquire immediately followed by a newline),
+  // not the function definition (which is followed by `()`).
+  const callSite = src.match(/full_suite_lock_acquire\n([\s\S]*?)\n\s*fi/);
+  assert.ok(callSite, "full_suite_lock_acquire must be called inside an if/fi block (the full-suite default branch)");
+  const afterAcquire = callSite[1];
+  assert.match(afterAcquire, /resource_gate_check/, "the lock acquire must be followed by the resource gate check in the same block");
+  assert.doesNotMatch(afterAcquire, /full_suite_lock_release/, "acquire and release must not share a block");
+  // The release must fire before the full-suite exit (after the suite-AFTER assertions).
+  assert.match(src, /full_suite_lock_release\n\s*exit "\$code"/, "the lock must be released before the full-suite exit");
+  // Nested-runner escape hatches must skip the lock (a nested test.sh inside the running suite
+  // must not deadlock against the suite's own lock).
+  assert.match(src, /QUAY_TEST_SKIP_RESOURCE_GATE/, "nested-runner escape hatch must exist for the lock");
+  assert.match(src, /QUAY_TEST_NESTED/, "same-root nested guard must exist for the lock");
+});
+
 // ── --for full-suite arg validation ────────────────────────────────────────────────────────────────
 test("gate rejects an unknown --for target with exit 2 (usage)", () => {
   const r = runGate({}, ["--for", "bogus"]);

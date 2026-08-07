@@ -82,7 +82,7 @@ merge_mode=0
 tmp_wt=""
 # Known-shared files: written directly to develop by the inner/outer/manager; integration's copies
 # are stale — on conflict, develop is authoritative. Matched against conflicted paths via bash case.
-shared_patterns=('*tick-log.md' '*-tick.md' 'tasks/*.md' '*queue-state*')
+shared_patterns=('*tick-log.md' 'tasks/*.md' '*queue-state*')
 
 usage() {
   sed -n '2,70p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2

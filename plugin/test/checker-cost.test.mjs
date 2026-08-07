@@ -1,4 +1,11 @@
-// @test-group governance
+// @test-group lowconc
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
+// The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
+// sub-suites via `node --test` / test.sh --for-task). This file is NOT a nested runner — it needs
+// LOW LOAD, not serial exclusivity: AC2's ready-pool-check 3x test asserts ms MONOTONICITY
+// (400→800→1200ms delays) that node-startup jitter under the concurrency-8 main body's load breaks;
+// lowconc's concurrency-3 low load keeps the delay-dominates signal. Low-load/timing reasons go to
+// lowconc, not serial.
 // checker-cost.test.mjs — tasks/gap-no-criterion-records-its-own-cost-checker-cost-jsonl.
 //
 // The ENABLING MECHANISM for the whole criterion-cost family: every criterion (static checker /
@@ -17,7 +24,7 @@
 //   AC6 — full-suite-runner appends {round, startedAt, durationMs, laneCount, pass, fail, load}
 //         to .quay/verification-round.jsonl (append-only sequence; the single-state
 //         full-suite-state.json is never overwritten away).
-//   AC7 — this file uses node:test and declares // @test-group governance.
+//   AC7 — this file uses node:test and declares // @test-group lowconc (see GROUP NOTE above).
 //
 // Run:
 //   scripts/test.sh --for-task gap-no-criterion-records-its-own-cost-checker-cost-jsonl
@@ -285,7 +292,7 @@ test("AC6 — full-suite-runner appends {round, startedAt, durationMs, laneCount
 
 test("AC6 — appendVerificationRound/readLoadAvg helpers are deterministic on a hermetic root", () => {
   const root = makeTmpDir("cc-vrf-");
-  appendVerificationRound(root, {
+  appendVerificationRound(path.join(root, ".quay"), {
     round: 0,
     startedAt: "2026-08-05T07:00:00Z",
     durationMs: 872756,
@@ -297,7 +304,7 @@ test("AC6 — appendVerificationRound/readLoadAvg helpers are deterministic on a
     state: "green",
     runner: "outer",
   });
-  appendVerificationRound(root, {
+  appendVerificationRound(path.join(root, ".quay"), {
     round: 0,
     startedAt: "2026-08-05T07:16:00Z",
     durationMs: 900000,

@@ -607,7 +607,12 @@ tick 做一次收尾 pass。
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
      （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
-     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。`reason` 只在 red 时出现：
+     laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。当 `--root` 是被测 worktree / integration
+     checkout（如 `/tmp/quay-suite-int`）时**必须**同时传 `--state-dir "$REPO_ROOT/.quay"`（主 repo
+     闸门位置）——runner 把 state / log / verification-round 写进主 repo，并镜像回 worktree 自身，使闸门
+     （inner 停止条件 + suite-state-trigger，只读主 repo 的相对 `.quay/full-suite-state.json`）看到真实结果
+     （`gap-suite-state-split-across-worktree-and-gate`；不传则 state 只落 worktree，闸门永远看不到绿）。
+     `reason` 只在 red 时出现：
      `failed`（真实失败——stop-dispatch 信号）或 `aborted`（套件未完成、无正确性结论——**不触发
      停派**，`gap-full-suite-runner-concurrency-default-and-gate` AC5）。**起跑条件**：本轮收尾了 ≥1
      个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=

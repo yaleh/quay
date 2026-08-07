@@ -5,6 +5,13 @@
 
 import path from "node:path";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+
+function fsSyncExists(p) {
+  try { fsSync.accessSync(p); return true; } catch { return false; }
+}
 import { loadConfig, activeProvider } from "../src/config.ts";
 import { connectProvider } from "../src/provider-client.ts";
 import { composePayload, deliverTrigger } from "../src/action.ts";
@@ -344,7 +351,7 @@ function printHelp(sub) {
 
 Usage:
   quay --version | -V
-  quay init [--force] [--dry-run] [--root <path>]
+  quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
@@ -522,6 +529,12 @@ Description:
   Go) to suggest appropriate gate defaults.
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  This command only scaffolds a brand-new EMPTY task store. It does NOT lay
+  down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
+  canonical path for onboarding an existing project onto quay-driven
+  development is the /quay:init skill inside a Claude Code session:
+  /quay:init --all --loop. CLI init has no --loop flag; passing it is an error.
 `);
   } else if (sub === "config") {
     process.stdout.write(`quay config — validate workspace configuration
@@ -1201,7 +1214,39 @@ Description:
   Go) to suggest appropriate gate defaults.
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  This command only scaffolds a brand-new EMPTY task store. It does NOT lay
+  down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
+  canonical path for onboarding an existing project onto quay-driven
+  development is the /quay:init skill inside a Claude Code session:
+  /quay:init --all --loop. CLI init has no --loop flag; passing it is an error.
 `);
+      return;
+    }
+
+    // Collision guard (gap-cli-quay-init-collides-with-the-canonical-slash-quay-init).
+    // CLI `quay init` (DIR-098) scaffolds a brand-new EMPTY task store
+    // (.quay/config.yml + tasks/) — it does NOT lay down the loop mechanism.
+    // The full two-layer loop install (workflows, agents, gate scripts, tick
+    // docs) is the /quay:init skill — the human-ruled CANONICAL onboarding path.
+    // A real user on B ran `quay init --loop`; the flag was silently swallowed
+    // and exit 0 reported success while plugin/scripts=0 and orchestration/=0
+    // (nothing but the empty store was laid). Fail closed and point at the skill.
+    if (initFlags.loop) {
+      console.error(
+        "quay init: unrecognized option --loop.\n" +
+        "CLI `quay init` only scaffolds a brand-new EMPTY quay task store\n" +
+        "(.quay/config.yml + tasks/); it accepts only --force / --dry-run / --root.\n" +
+        "\n" +
+        "To lay the full quay loop mechanism into an existing project, the canonical\n" +
+        "path is the /quay:init skill inside a Claude Code session:\n" +
+        "\n" +
+        "    /quay:init --all --loop\n" +
+        "\n" +
+        "Run `quay init --help` for the CLI surface, or open Claude Code in this\n" +
+        "project and run /quay:init."
+      );
+      process.exitCode = 1;
       return;
     }
 
@@ -1604,8 +1649,104 @@ Description:
     return;
   }
 
+  // ── manager commands (C1-C5, gap-manager-productization-five-constraints) ─────────────────────────
+  // `quay manager start` / `quay manager adopt <root>`. The manager is a plugin-layer product
+  // component: the CLI locates the plugin scripts (plugin/scripts/manager-*.sh) relative to this
+  // package's own root (the plugin ships under the repo root's plugin/ dir, and the npm pack's
+  // `files` includes `plugin`). Dispatches to the plugin scripts — the manager implementation lives
+  // in plugin/, not in Core (build ownership = outer/inner; SPEC-manager-productization §3).
+  if (cmd === "manager") {
+    const { flags: mgrFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+
+    if (sub === "--help" || sub === "-h" || mgrFlags.help) {
+      process.stdout.write(`quay manager — start/adopt the manager layer (C4/C5)
+
+Usage:
+  quay manager start                 Start the manager independently (no project args; C5)
+  quay manager adopt <root>          Adopt a project (three-state: healthy/empty-shell/missing)
+  quay manager arm                   (re)arm the manager loop anchor (sentinel-idempotent; AC5/AC5c)
+
+Flags:
+  --dry-run    Print the plan without changing anything (start/adopt/arm)
+  --json       Machine-readable output
+
+The manager is CROSS-PROJECT (SPEC-manager-productization C2): its session (quay-manager), home
+(\$QUAY_GLOBAL_DIR/manager/) and loop anchor belong to no single project. 'start' and 'adopt' are
+separate commands on purpose (C5: two commands, not one parameterised command).
+`);
+      return;
+    }
+
+    // Locate the plugin scripts dir. Walk upward from this file looking for a dir that contains
+    // manager-start.sh — works in the dev tree (repo-root/plugin/scripts), the npm-pack root
+    // (plugin/ shipped under the pack root), and the vendored plugin bundle (plugin/scripts at the
+    // plugin root). Env override for hermetic tests.
+    const scriptsDir = (() => {
+      if (process.env.QUAY_MANAGER_SCRIPTS_DIR) return process.env.QUAY_MANAGER_SCRIPTS_DIR;
+      let dir = path.dirname(fileURLToPath(import.meta.url));
+      for (let i = 0; i < 6; i++) {
+        for (const rel of [path.join("plugin", "scripts"), "scripts"]) {
+          const cand = path.join(dir, rel);
+          if (fsSyncExists(path.join(cand, "manager-start.sh"))) return cand;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      return path.resolve(dir, "plugin", "scripts");
+    })();
+    const managerStart = path.join(scriptsDir, "manager-start.sh");
+    const managerAdopt = path.join(scriptsDir, "manager-adopt.sh");
+    const managerArm = path.join(scriptsDir, "manager-arm-loop.sh");
+
+    const runManagerScript = (script, args) => {
+      const r = spawnSync("bash", [script, ...args], { encoding: "utf8" });
+      if (r.stdout) process.stdout.write(r.stdout);
+      if (r.stderr) process.stderr.write(r.stderr);
+      return r.status;
+    };
+
+    if (sub === "start") {
+      // C5: start 与 adopt 分开——`quay manager start` 不接受任何项目参数。CLI 层即拒绝，
+      // 不把多余位置参数静默吞掉（脚本层也拒绝，双层防漏）。
+      if (positional.length > 0) {
+        console.error(`quay manager start: accepts NO project args (C5: 'start' ≠ 'adopt <root>') — unexpected: ${positional.join(" ")}`);
+        process.exitCode = 1;
+        return;
+      }
+      const args = [];
+      if (mgrFlags["dry-run"]) args.push("--dry-run");
+      if (mgrFlags.json) args.push("--json");
+      process.exitCode = runManagerScript(managerStart, args) ?? 1;
+      return;
+    }
+    if (sub === "adopt") {
+      const root = positional[0];
+      if (!root) {
+        console.error("quay manager adopt: missing required <root> (the project root to adopt)");
+        process.exitCode = 1;
+        return;
+      }
+      const args = [root];
+      if (mgrFlags["dry-run"]) args.push("--dry-run");
+      if (mgrFlags.json) args.push("--json");
+      process.exitCode = runManagerScript(managerAdopt, args) ?? 1;
+      return;
+    }
+    if (sub === "arm") {
+      const args = [];
+      if (mgrFlags["dry-run"]) args.push("--dry-run");
+      if (mgrFlags.json) args.push("--json");
+      process.exitCode = runManagerScript(managerArm, args) ?? 1;
+      return;
+    }
+    console.error(`unknown manager subcommand: ${sub} (try: start, adopt <root>, arm)`);
+    process.exitCode = 1;
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp|manager start|manager adopt> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 

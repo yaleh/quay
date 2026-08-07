@@ -59,14 +59,19 @@ const MISREAD_PATTERNS = ["同批", "批派发", "batch-N"];
 //   审计机制   reanchor-prompt.txt grep / self-report-vocab-audit / "Batch of N fully merged"
 const SAFE_SUBSTRINGS = [
   "concurrent-batch-scheduler.ts",
+  "concurrent-batch-scheduler",     // 40→6 consolidated dispatch (SPEC-instruments-behind-one-entry.md):
+                                    // the docs invoke it via `quay-dispatch.ts concurrent-batch-scheduler`
+                                    // (subcommand name, no `.ts` suffix) — same 机件真名 as the file form.
   "integration-batch-merge.sh",
-  // 40→6 entry-point forms (gap-ac8 2026-08-07): the docs invoke the SAME mechanisms through the
-  // quay-branch.ts / quay-dispatch.ts dispatcher (e.g. "quay-branch.ts integration-batch-merge",
-  // "quay-dispatch.ts concurrent-batch-scheduler"). Bare mechanism names cover both spellings.
-  "integration-batch-merge",
-  "concurrent-batch-scheduler",
+  "integration-batch-merge",        // 40→6 consolidated branch (SPEC-instruments-behind-one-entry.md):
+                                    // the docs invoke it via `quay-branch.ts integration-batch-merge`
+                                    // (subcommand name, no `.sh` suffix) — same 机件真名 as the file form.
   "gap-closure-sync-is-the-true-batch-boundary",
   "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+  "gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge",  // 任务 id (batch-merge boundary gate): the
+                                                                   // tick doc names the task that moved the
+                                                                   // full-suite gate to the batch-merge
+                                                                   // boundary — mechanism reference, not gating.
   "{ batch, deferred }",
   "batch, deferred",
   "batch ⇒",

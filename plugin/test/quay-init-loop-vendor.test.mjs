@@ -1,4 +1,8 @@
-// @test-group engine
+// @test-group lowconc
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (KNOWN-LOAD-SENSITIVE family — each --loop test spawns a real quay-init.sh →
+// python3 children) so it runs in the concurrency-1 serial phase, never competing with the
+// concurrency-8 main body's worker pool.
 // quay-init-loop-vendor.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync (each --loop test spawns a real quay-init.sh → python3 children), self-failing

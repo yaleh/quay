@@ -43,11 +43,20 @@ usage() {
 
 # current_files — the live set as sorted, deduped lines. Non-empty "$@" → explicit paths (fixture
 # mode); empty → the canonical `scripts/test.sh --list-files` output (single source of truth).
+#
+# D-class runtime-fixture exclusion (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-
+# tests, AC2): a test that creates a THROWAWAY `zz-*` fixture in the shared plugin/test dir (e.g.
+# runner-grouping AC7's zz-runner-grouping-undeclared.test.mjs, created then deleted in a finally)
+# must not poison the snapshot baseline. A snapshot taken while such a fixture exists records it as
+# a baseline file; the fixture's later deletion then reads as "baseline test file REMOVED" — a FALSE
+# regression. The `zz-` prefix is the repo's throwaway-fixture convention (git ls-files '*.test.mjs'
+# contains no real zz-* file), so canonical-mode snapshots skip them. Explicit fixture paths are the
+# caller's business and pass through verbatim.
 current_files() {
   if [ "$#" -gt 0 ]; then
     printf '%s\n' "$@"
   else
-    bash "${test_sh}" --list-files
+    bash "${test_sh}" --list-files | grep -vE '/zz-[^/]*$' || true
   fi
 }
 

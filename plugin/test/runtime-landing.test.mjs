@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group lowconc
 // runtime-landing.test.mjs — gap-the-runtime-has-nowhere-safe-to-land (AC3/AC4/AC10).
 //
 // The quay runtime used to land in `<target>/vendor/quay/dist/quay.js` — a RESERVED directory in
@@ -36,6 +36,12 @@ import { spawnSync } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, '..');
+
+// AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): the state-only
+// install tests below run from the shared READ-ONLY laydown template (one real quay-init --loop
+// per FILE process) instead of a fresh real install per test — the laid-down state is
+// byte-identical, so the git/gitignore/hook assertion surface is unchanged.
+import { laydownWorkspace } from './quay-init-loop-helpers.mjs';
 
 function makeTmp(prefix = 'runtime-landing-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -114,11 +120,9 @@ function commitAll(workspace, maxkb, message = 'add runtime') {
 // AC3 — positive: default 500KB hook, documented flow, commit succeeds, zero manual patches
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test('AC3 — a target with a default-threshold (500KB) large-file hook commits the runtime landing clean (zero manual patches)', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
     fs.writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ name: 'proj', scripts: { test: 'node --test' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-      '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
 
     // The runtime must be laid into .quay/runtime/ (the task's landing decision). f9414dd3
@@ -147,11 +151,9 @@ test('AC3 — a target with a default-threshold (500KB) large-file hook commits 
 // AC4 — negative: the hook genuinely rejects; threshold 1KB must FAIL, naming the runtime file
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test('AC4 — the large-file hook genuinely runs: threshold 1KB + force-staged runtime MUST FAIL, naming the 1.3MB file', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
     fs.writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ name: 'proj', scripts: { test: 'node --test' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-      '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
 
     git(ws, ['init', '-q']);
@@ -176,11 +178,9 @@ test('AC4 — the large-file hook genuinely runs: threshold 1KB + force-staged r
 // runtime is rejected there too. This closes the loop: AC3's green commit is green BECAUSE the
 // runtime is gitignored, not because the 500KB hook would have let a 1.3MB file through.
 test('AC4 companion — force-staging the runtime at the DEFAULT 500KB threshold is also rejected (the gitignore, not size, is what protects AC3)', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
     fs.writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ name: 'proj', scripts: { test: 'node --test' } }, null, 2));
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test',
-      '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
     assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
 
     git(ws, ['init', '-q']);
@@ -258,14 +258,14 @@ test('AC10 — quay-init writes the .quay/runtime/ gitignore entry; an already-p
     assert.equal(before.split('.quay/runtime/').length - 1, 1, 'the entry must appear exactly once');
   } finally { cleanup(ws2); }
 
-  // Case 3: no .gitignore → created with the entry.
-  const ws3 = makeTmp();
+  // Case 3: no .gitignore → created with the entry. Runs from the shared READ-ONLY laydown
+  // template (AC2, gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): the
+  // template's FIRST install created the .gitignore with the entry, so the copy carries it and the
+  // captured install output reports the append.
+  const { ws: ws3, install: r3 } = laydownWorkspace();
   try {
-    fs.writeFileSync(path.join(ws3, 'package.json'), JSON.stringify({ name: 'proj', scripts: { test: 'node --test' } }, null, 2));
-    const r = runInit(ws3, ['--loop', '--root', ws3, '--project', 'proj', '--test-command', 'node --test',
-      '--tmux-session', 'proj-0:0.0', '--plugin-root', pluginDir]);
-    assert.equal(r.status, 0, `quay-init must succeed:\n${r.stderr}`);
-    assert.match(r.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report the write');
+    assert.equal(r3.status, 0, `quay-init must succeed:\n${r3.stderr}`);
+    assert.match(r3.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report the write');
     assert.ok(fs.existsSync(path.join(ws3, '.gitignore')), '.gitignore must be created');
     assert.ok(fs.readFileSync(path.join(ws3, '.gitignore'), 'utf8').includes('.quay/runtime/'), 'the entry must be written');
   } finally { cleanup(ws3); }

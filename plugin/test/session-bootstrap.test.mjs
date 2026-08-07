@@ -71,6 +71,18 @@ function newHermetic(prefix = "quay-sb-") {
       return r.status === 0 ? (r.stdout.trim().split("\n")[0] || "") : "";
     },
     cleanup() {
+      // Kill EVERY session on this hermetic socket — not just the `started` set. The bootstrap
+      // script (--socket <this.sockPath>) creates sessions DIRECTLY on this socket, invisible to
+      // `started`; leaving them orphaned leaks the server (删目录 ≠ 杀进程 —
+      // gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause). The socket is private
+      // to this test (mkdtemp'd, explicit -S), so sweeping it cannot touch real sessions;
+      // per-session kill-session (never kill-server).
+      const ls = this.tmux(["list-sessions", "-F", "#{session_name}"]);
+      if (ls.status === 0 && ls.stdout.trim()) {
+        for (const name of ls.stdout.trim().split("\n").filter(Boolean)) {
+          this.tmux(["kill-session", "-t", name]);
+        }
+      }
       for (const name of this.started) {
         this.tmux(["kill-session", "-t", name]);
       }
@@ -221,7 +233,10 @@ test("AC5 — this file is node:test and declares // @test-group product", () =>
 
 test("AC5 — cold-start/SKILL.md wires session-bootstrap.sh in as the bare-metal step", () => {
   const src = fs.readFileSync(COLD_START, "utf8");
-  assert.match(src, /session-bootstrap\.sh/, "cold-start must reference the bootstrap script (the formalized bare-metal step)");
+  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the bootstrap via the
+  // grouped entry point — `quay-session.ts session-bootstrap`. The test asserts the SAME command
+  // name the skill uses (AC2: docs and tests must not each write their own).
+  assert.match(src, /quay-session\.ts session-bootstrap/, "cold-start must reference the bootstrap command (the formalized bare-metal step)");
   assert.match(src, /bare metal|裸机/i, "cold-start must name the bare-metal step it formalizes");
 });
 

@@ -300,3 +300,73 @@ test("edge: no project type yields generic test suggestions", () => {
     "no-package.json project should have generic test command"
   );
 });
+
+// ---------------------------------------------------------------------------
+// gap-cli-quay-init-collides-with-the-canonical-slash-quay-init (2026-08-07).
+// CLI `quay init` (DIR-098, empty task-store scaffold) collides in name with
+// the /quay:init skill (the canonical loop-laydown path). `quay init --loop`
+// used to silently swallow the flag and exit 0 reporting success while laying
+// down nothing but the empty store (reproduced live on B). The fix: fail closed
+// on --loop and point at /quay:init; disambiguate both help surfaces.
+// ---------------------------------------------------------------------------
+
+// AC1: quay init --loop must NOT silently succeed — fail closed, point at /quay:init.
+test("AC1-collision: quay init --loop fails closed and points at /quay:init", () => {
+  const dir = tmpDir("collision-ac1");
+  const out = runQuayAllowFail(["init", "--loop"], dir);
+  assert.notEqual(out.exitCode, 0, "quay init --loop must exit non-zero");
+  assert.ok(
+    out.stderr.includes("--loop") && out.stderr.includes("/quay:init"),
+    "error must mention the --loop flag and the /quay:init skill"
+  );
+  assert.ok(
+    !fs.existsSync(path.join(dir, ".quay", "config.yml")),
+    "quay init --loop must NOT write the empty-store scaffold (still the wrong action)"
+  );
+});
+
+// Contract measure: `quay init --loop --dry-run` must exit non-zero (baseline was 0).
+test("AC1-collision: quay init --loop --dry-run exits non-zero and writes nothing", () => {
+  const dir = tmpDir("collision-measure");
+  const out = runQuayAllowFail(["init", "--loop", "--dry-run"], dir);
+  assert.notEqual(out.exitCode, 0, "quay init --loop --dry-run must exit non-zero");
+  assert.ok(out.stderr.includes("/quay:init"), "error must point at /quay:init");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay")), "no .quay/ written");
+  assert.ok(!fs.existsSync(path.join(dir, "tasks")), "no tasks/ written");
+});
+
+// AC2: both help surfaces disambiguate init from the /quay:init skill.
+test("AC2-collision: quay init --help disambiguates from /quay:init", () => {
+  const dir = tmpDir("collision-ac2");
+  const out = runQuay(["init", "--help"], dir);
+  assert.ok(out.includes("/quay:init"), "init --help must point at /quay:init");
+  assert.ok(out.includes("--loop"), "init --help must state --loop is not a CLI init flag");
+  assert.ok(out.includes("EMPTY task store"), "init --help must say it scaffolds an EMPTY task store");
+});
+
+test("AC2-collision: top-level quay --help disambiguates init from /quay:init", () => {
+  const dir = tmpDir("collision-ac2b");
+  const out = runQuay(["--help"], dir);
+  assert.ok(out.includes("/quay:init"), "top-level --help must mention /quay:init");
+  assert.ok(out.includes("EMPTY task store"), "top-level --help must say init scaffolds an EMPTY task store");
+});
+
+// AC3 negative control: the legit empty-store flags still behave unchanged.
+test("AC3-collision negative control: quay init --force still succeeds", () => {
+  const dir = tmpDir("collision-ac3");
+  const first = runQuayAllowFail(["init"], dir);
+  assert.equal(first.exitCode, 0, "plain quay init still exits 0");
+  assert.ok(fs.existsSync(path.join(dir, ".quay", "config.yml")));
+  const forced = runQuayAllowFail(["init", "--force"], dir);
+  assert.equal(forced.exitCode, 0, "quay init --force still exits 0");
+  assert.ok(forced.stdout.includes("Created"), "--force still prints Created");
+});
+
+// quay-native shares the same silent-swallow defect — reject --loop there too.
+test("AC1-collision: quay-native init --loop fails closed and points at /quay:init", () => {
+  const dir = tmpDir("collision-native");
+  const out = runNativeAllowFail(["init", "--loop"], dir);
+  assert.notEqual(out.exitCode, 0, "quay-native init --loop must exit non-zero");
+  assert.ok(out.stderr.includes("/quay:init"), "native error must point at /quay:init");
+  assert.ok(!fs.existsSync(path.join(dir, ".quay")), "no .quay/ written");
+});

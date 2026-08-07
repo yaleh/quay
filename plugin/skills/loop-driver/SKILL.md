@@ -99,6 +99,8 @@ isolate :: Task → Worktree    ⊨ ¬on-master ; ⊨ deps-ready
 
 **`deps-ready` includes untracked-but-required files (DIR-049 B2).** A fresh worktree contains only tracked files; any UNTRACKED file the gate needs (a generated fixture, a local `.agents/skills/**` reference, an un-committed config) is absent, and the gate then fails on an environmental gap, not a real defect. After creating the worktree, copy the workspace's untracked-but-required files into it — `git -C <mainWorkspace> ls-files --others --exclude-standard` lists candidates; sync those the runner reads. The runner MUST work in the worktree without manual intervention: under `execution: dispatched` there is no human to copy a missing file per build, and a DIR-049 concurrent batch has N worktrees each hitting this.
 
+**Declared GITIGNORED files (`.worktreeinclude`).** The ad-hoc `ls-files --others --exclude-standard` pass above is for non-gitignored untracked files. A SEPARATE class is GITIGNORED-but-required files (`.quay/config.yml`, generated vendor bundles) — `git worktree add` never places them, `ls-files --others --exclude-standard` excludes them, and hand-copying misses (this repo's round-5 verification worktree lacked `.quay/config.yml` → "Error: Cannot find repo root: no .quay/config.yml found upward" ×15 → 72 file crashes). When the workspace declares a `.worktreeinclude` file (gitignore syntax listing the gitignored files every worktree needs), run its include entry point right after `git worktree add`: `bash scripts/worktree-include.sh <worktree-path>` (a mechanical copy of exactly the declared ∩ gitignored files from the primary checkout; see the script header for semantics). If the workspace has no `.worktreeinclude`, this step is a no-op.
+
 ### 4. Build
 ```
 build :: Task × Worktree → Diff    ⊨ behavior-preserving (TDD)
@@ -127,6 +129,22 @@ MCP `gate_run` with `{ id: <task.id>, gate: <params.gates[0]>, cwd: <worktree>, 
 record :: Diff × Gate → Evidence    ⊨ real-object (DIR-026) ≠ fixture
 ```
 Capture the gate output and any real diff/artefact. Evidence must be a real operated object (a real test run, a real diff), not a synthetic fixture.
+
+**Panel observation mechanism (state-transition expression).** When a panel shows agent lines
+(inner/outer subagent status like `Committing <task> task work 3h 5m 32s`), the observation view must
+distinguish an ENDED line (bracket closed — `--task-end` written — but the panel line still present)
+from a LIVE line (bracket open). A frozen dead line is visually indistinguishable from a live one
+without cross-time sampling; the mechanical observer `plugin/scripts/inner-panel-stale-check.ts`
+expresses the state transition by cross-referencing telemetry `inProgress` (bracket state) and by
+frozen-timer detection across two pane samples. Run it after a `--task-end` to confirm the line was
+cleared or marked:
+```bash
+tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
+node --no-warnings --experimental-strip-types "${CLAUDE_PLUGIN_ROOT}/scripts/inner-panel-stale-check.ts" \
+  --pane .quay/last-pane.txt --root <workspaceRoot>
+```
+Exit 1 = a stale/ended/frozen agent line remains (the misleading window is mechanically caught, not
+left to a human glance).
 
 ### 6b. Adversarial Audit
 ```

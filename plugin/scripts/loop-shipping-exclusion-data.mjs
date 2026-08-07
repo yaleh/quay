@@ -99,12 +99,23 @@ export function exclusionEntries(repoRoot, pluginDir) {
       rel: 'packages/quay/plugin',
       target: path.join(repoRoot, 'packages', 'quay', 'plugin'),
       reason: "gitignored pack-time snapshot of plugin/ (package.sh materializes it so the tarball carries the bundle); byte-identical to plugin/, which is excluded above — same old-path strings are target-layout documentation, not live references",
+      retainedNote: "kept despite currently inert: the target is a gitignored pack-time snapshot that does NOT exist in a fresh checkout, so the necessity scan sees 0 hits only because no pack has materialized it yet. When a pack IS made, the snapshot is byte-identical to plugin/ (excluded above) and carries the same target-layout old-path strings, so the entry must stay to keep the AC1b scan from flagging the snapshot as a live reference. (oldPaths shrank 6→5 when heavy-op-token.sh was retired 2026-08-06, which left the entry inert until the next pack.)",
     },
     { rel: 'plugin/test/loop-shipping.test.mjs', target: path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), reason: "this file's own regexes + AC1c snippet array define the old paths" },
     {
       rel: 'plugin/scripts/loop-shipping-exclusion-data.mjs',
       target: path.join(pluginDir, 'scripts', 'loop-shipping-exclusion-data.mjs'),
       reason: "defines the 5 old paths (oldPaths) + the AC1b patterns + this exclusion table — the reference point, not a live caller; mirrors loop-shipping.test.mjs's own self-exclusion",
+    },
+    {
+      rel: 'plugin/scripts/no-manager-tick-doc-check.ts',
+      target: path.join(pluginDir, 'scripts', 'no-manager-tick-doc-check.ts'),
+      reason: "the C3 manager-step checker SCANS the quay-local deployed outer tick doc at orchestration/orchestrator-loop-tick.md (its DEFAULT_DOCS pair is the shipped template + the quay-local landing — a real file that legitimately lives there), not a stale reference to a moved mechanism",
+    },
+    {
+      rel: 'plugin/test/no-manager-tick-doc-check.test.mjs',
+      target: path.join(pluginDir, 'test', 'no-manager-tick-doc-check.test.mjs'),
+      reason: "asserts the checker scans BOTH the shipped template and the quay-local deployed outer tick doc — target-layout reference, same class as the checker itself",
     },
     {
       rel: 'plugin/test/task-contract-check.test.mjs',

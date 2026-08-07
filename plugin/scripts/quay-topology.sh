@@ -96,6 +96,57 @@ has_claude_child() {
   return 1
 }
 
+# ── 单飞锁（AC6，gap-manager-productization-five-constraints）──────────────────────────────────────
+# 双创建者竞态（SPEC-manager-productization §7 裁定①：谁发现缺失谁创建，但创建必须走同一幂等入口+锁）：
+# 两个并发调 quay-topology.sh 都判「会话缺失」⇒ 不锁会双重创建（两个新会话、两套窗口）。
+# 锁保证「检查+创建」临界区单飞：先到者建，后到者等锁释放后再查（此时已 in-place，不再创建）。
+#
+# 锁原语：mkdir 原子创建（wx 语义）；获取失败 ⇒ 重试；超过存活窗口 ⇒ 陈旧回收（rmdir 后重试）。
+# 锁目录可经 TOPOLOGY_LOCK_DIR 覆盖（测试接缝：指向临时目录）；默认 <TMPDIR>/quay-topology-locks/。
+LOCK_BASE="${TOPOLOGY_LOCK_DIR:-${TMPDIR:-/tmp}/quay-topology-locks}"
+LOCK_DIR="${LOCK_BASE}/$(printf '%s' "$SESSION" | tr '/ ' '__').lock"
+LOCK_RETRIES="${TOPOLOGY_LOCK_RETRIES:-100}"       # 100 × 0.1s = 10s 上限
+LOCK_STALE="${TOPOLOGY_LOCK_STALE_SECONDS:-60}"    # 超过 60s 的锁视为陈旧（创建者崩溃，可回收）
+LOCK_ACQUIRED=0
+
+acquire_lock() {
+  local i=0 now lock_mtime
+  # The lock dir's PARENT must exist for the atomic `mkdir` to have anything to create in — a fresh
+  # /tmp (or a cleaned TMPDIR) has no quay-topology-locks/, so without this the atomic mkdir fails
+  # with ENOENT and the retry loop spins to timeout while the lock is actually free.
+  mkdir -p "$LOCK_BASE" 2>/dev/null || true
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [ -d "$LOCK_DIR" ]; then
+      lock_mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+      now="$(date +%s)"
+      if [ -n "$lock_mtime" ] && [ "$lock_mtime" -gt 0 ] && [ $((now - lock_mtime)) -gt "$LOCK_STALE" ]; then
+        # 陈旧回收：持有者崩溃遗留的锁（超时未释放），rmdir 后继续尝试获取。
+        rmdir "$LOCK_DIR" 2>/dev/null && continue
+      fi
+    fi
+    i=$((i + 1))
+    if [ "$i" -ge "$LOCK_RETRIES" ]; then
+      echo "ERROR: quay-topology: single-flight lock busy after ${LOCK_RETRIES} tries: $LOCK_DIR" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  LOCK_ACQUIRED=1
+  return 0
+}
+
+release_lock() {
+  if [ "$LOCK_ACQUIRED" = 1 ]; then
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+    LOCK_ACQUIRED=0
+  fi
+}
+
+if ! acquire_lock; then
+  exit 1
+fi
+trap 'release_lock' EXIT
+
 # 会话不存在 ⇒ 从零建：第一个角色（outer）即会话首窗（窗口 0）。
 # FIRST 初始化空串：会话已存在时保持空，循环里 `[ "$role" = "$FIRST" ]` 在 set -u 下安全。
 SESSION_EXISTED=1
@@ -107,9 +158,19 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   if [ "$DRY_RUN" = 1 ]; then
     echo "would-create-session: tmux new-session -d -s $SESSION -n $FIRST \"$CMD\""
   else
-    echo "create-session: tmux new-session -d -s $SESSION -n $FIRST"
-    tmux new-session -d -s "$SESSION" -n "$FIRST" "$CMD"
-    echo "  launched: $SESSION:$FIRST"
+    # tmux new-session -d is async from a concurrent peer's view: a second single-flight creator
+    # that acquires the lock immediately after us can still see has-session as MISSING for a
+    # moment even though we created it (the AC6 dual-creator race). Make the create IDEMPOTENT:
+    # if new-session fails because the session already exists, treat it as in-place — the
+    # single-flight invariant is exactly-one-session, not exactly-one-create-command.
+    if tmux new-session -d -s "$SESSION" -n "$FIRST" "$CMD" 2>/dev/null; then
+      echo "create-session: tmux new-session -d -s $SESSION -n $FIRST"
+      echo "  launched: $SESSION:$FIRST"
+    else
+      echo "in-place: $SESSION:$FIRST (session appeared concurrently — single-flight preserved)"
+      SESSION_EXISTED=1
+      FIRST=""
+    fi
   fi
 fi
 

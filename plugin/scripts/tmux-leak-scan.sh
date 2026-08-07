@@ -7,9 +7,17 @@
 # defense — the teardown fix (kill-session -t <name>, never kill-server) is primary; this scan
 # covers the whole leak class at once and makes "the leak is gone" mechanically checkable.
 #
-# Why these prefixes (task body 更正 2026-08-05 08:55Z): the leak sources observed on the manager
-# box were skv- (send-keys-verified), session-liveness- (session-liveness probes), ol-tok- (the
-# token-counter probe session), and enter-repro- (the enter-repro fixture).
+# DELTA form (gap-assert-clean-tree-premise-void-under-concurrent-writers, same family as
+# assert-clean-tree.sh): the outer layer legitimately runs tmux sessions (send-keys remote-drive,
+# skv- names) WHILE the suite runs — a pre-existing concurrent-writer tmux session is NOT this
+# run's leak. --snapshot records the matching servers/dirs BEFORE the run; --check only flags
+# items ABSENT from the snapshot. The absolute form (no flag) keeps the historical suite-tail
+# semantics: ANY matching tmux server/dir is a leak.
+#
+# Usage:
+#   tmux-leak-scan.sh --snapshot <workspace-root>   # record pre-existing matching servers/dirs
+#   tmux-leak-scan.sh --check <workspace-root>      # delta: only NEW matches are leaks
+#   tmux-leak-scan.sh                               # absolute (historical): any match is a leak
 #
 # Exit 0 = clean; exit 1 = residual leaks found (names printed to stderr). Never invokes `tmux`
 # (a client call could itself be the only tmux process alive); scans `pgrep`/`ls` snapshots only.
@@ -17,15 +25,66 @@ set -uo pipefail
 
 prefixes='skv-|session-liveness-|ol-tok-|enter-repro-'
 
-# 1. tmux server processes whose argv carries a test characteristic prefix. A tmux SERVER's argv
-#    (Linux) retains the creating command, so a leaked server appears as e.g.
-#    `tmux new-session -d -s skv-ok bash`.
+mode="absolute"
+root=""
+case "${1:-}" in
+  --snapshot) mode="snapshot"; shift ;;
+  --check)    mode="check";    shift ;;
+esac
+if [ "$mode" != "absolute" ]; then
+  if [ "$#" -lt 1 ]; then
+    echo "tmux-leak-scan: usage: $0 [--snapshot|--check] <workspace-root>" >&2
+    exit 2
+  fi
+  root="$1"
+fi
+
+snapshot="${root}/.quay/tmux-leak-scan.snapshot"
+
+# Normalized single sorted set of match lines (proc lines + dir lines), so `comm` is deterministic.
+scan_matches() {
+  local leaked_procs=""
+  if command -v pgrep >/dev/null 2>&1; then
+    leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -E "${prefixes}" || true)"
+  fi
+  local leaked_dirs=""
+  leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
+  {
+    [ -n "$leaked_procs" ] && printf '%s\n' "$leaked_procs"
+    [ -n "$leaked_dirs" ] && printf '%s\n' "$leaked_dirs"
+  } | grep -v '^$' | sort
+}
+
+if [ "$mode" = "snapshot" ]; then
+  mkdir -p "${root}/.quay"
+  scan_matches > "$snapshot"
+  echo "tmux-leak-scan: before-run snapshot recorded ($(wc -l < "$snapshot") pre-existing match line(s) in $snapshot)"
+  exit 0
+fi
+
+if [ "$mode" = "check" ]; then
+  if [ ! -f "$snapshot" ]; then
+    echo "tmux-leak-scan: FAIL — no before-run snapshot at $snapshot (run --snapshot before the suite; fail closed)" >&2
+    exit 1
+  fi
+  before="$(cat "$snapshot")"
+  after="$(scan_matches)"
+  new_matches="$(comm -13 <(printf '%s\n' "$before" | grep -v '^$' | sort) <(printf '%s\n' "$after" | grep -v '^$' | sort))"
+  rm -f "$snapshot"
+  if [ -n "$new_matches" ]; then
+    echo "tmux-leak-scan: FAIL — NEW residual test tmux servers/dirs after the run (delta vs the before-run snapshot; prefixes: skv-|session-liveness-|ol-tok-|enter-repro-):" >&2
+    printf '%s\n' "$new_matches" >&2
+    exit 1
+  fi
+  echo "tmux-leak-scan: clean — no NEW residual test tmux servers/dirs (delta vs the before-run snapshot)"
+  exit 0
+fi
+
+# absolute (historical) mode
 leaked_procs=""
 if command -v pgrep >/dev/null 2>&1; then
   leaked_procs="$(pgrep -a tmux 2>/dev/null | grep -E "${prefixes}" || true)"
 fi
-
-# 2. /tmp dirs carrying a test characteristic prefix (the socket dirs the leaks leave behind).
 leaked_dirs="$(ls -d /tmp/skv-* /tmp/session-liveness-* /tmp/ol-tok-* /tmp/enter-repro-* 2>/dev/null || true)"
 
 if [ -n "${leaked_procs}" ] || [ -n "${leaked_dirs}" ]; then

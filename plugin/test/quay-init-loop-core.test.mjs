@@ -1,4 +1,8 @@
-// @test-group engine
+// @test-group serial
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (KNOWN-LOAD-SENSITIVE family — each --loop test spawns a real quay-init.sh →
+// python3 children) so it runs in the concurrency-1 serial phase, never competing with the
+// concurrency-8 main body's worker pool.
 // quay-init-loop-core.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync (each --loop test spawns a real quay-init.sh → python3 children), self-failing
@@ -10,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // ── AC3: dry-run lists would-copy; real run lays down the full set ─────────────────────────────────
 test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanism', () => {
@@ -22,6 +26,8 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
     assert.match(r.stdout, /would-copy/, 'dry-run must report would-copy lines');
     assert.match(r.stdout, /orchestrator-loop-tick\.md/, 'dry-run must list the outer tick doc');
     assert.match(r.stdout, /fast-mode-loop-tick\.md/, 'dry-run must list the inner tick doc');
+    assert.match(r.stdout, /manager-loop-tick\.md/,
+      'dry-run must list the manager driver tick doc (gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver)');
     assert.match(r.stdout, /fast-mode-telemetry\.ts/, 'dry-run must list the telemetry checker');
     assert.match(r.stdout, /resource-gate\.sh/, 'dry-run must list the resource gate');
     assert.ok(!/heavy-op-token\.sh/.test(r.stdout),
@@ -33,14 +39,17 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
 });
 
 test('AC3 — a real --loop run lays down the full two-layer mechanism set', () => {
-  const ws = makeTmp();
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): runs from the
+  // shared READ-ONLY laydown template (one real quay-init --loop per FILE process) — the laid-down
+  // state is byte-identical, so the mechanism-set assertions are unchanged.
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    // 2 tick docs
+    // 3 tick docs (outer + inner + manager driver)
     assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'outer tick doc laid down');
     assert.ok(fs.existsSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md')), 'inner tick doc laid down');
+    assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'manager-loop-tick.md')),
+      'manager driver tick doc laid down (gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver)');
     // mechanism scripts (inner-state.sh is deliberately NOT here — retired,
     // gap-retire-inner-state-one-observer-targets-by-parameter AC3; observation ships as
     // session-liveness.sh via the separate session-liveness section below).
@@ -86,11 +95,15 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     // Byte-identical to the product (SPEC AC1) — the laid-down copy is VERBATIM.
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
     const inner = fs.readFileSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md'), 'utf8');
+    const manager = fs.readFileSync(path.join(ws, 'orchestration', 'manager-loop-tick.md'), 'utf8');
     const outerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'orchestrator-loop-tick.md'), 'utf8');
     const innerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'fast-mode-loop-tick.md'), 'utf8');
+    const managerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'manager-loop-tick.md'), 'utf8');
     assert.equal(outer, outerSrc, 'laid-down outer tick doc must be byte-identical to the product (AC1)');
     assert.equal(inner, innerSrc, 'laid-down inner tick doc must be byte-identical to the product (AC1)');
-    const all = outer + '\n' + inner;
+    assert.equal(manager, managerSrc,
+      'laid-down manager driver tick doc must be byte-identical to the product (AC1) — the manager DRIVER ships as a generic per-project template');
+    const all = outer + '\n' + inner + '\n' + manager;
 
     // No target values baked in (SPEC AC3 — config-driven, not text-substitution).
     assert.ok(!all.includes('npm test'), 'laid-down tick docs must NOT contain the target test command (AC3)');
@@ -109,7 +122,8 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     const klsLines = all.split('\n').filter((l) => l.includes('KNOWN-LOAD-SENSITIVE'));
     const familyCmdLines = all.split('\n')
       .filter((l) => l.includes('$TEST_COMMAND')
-        && l.includes('session-liveness.test.mjs') && l.includes('cold-start-skill.test.mjs'));
+        && (l.includes('session-liveness-events.test.mjs') || l.includes('session-liveness.test.mjs'))
+        && l.includes('cold-start-skill.test.mjs'));
     assert.ok(klsLines.length > 0,
       'the shipped tick doc must carry the KNOWN-LOAD-SENSITIVE marker (b53f7402)');
     assert.ok(familyCmdLines.length > 0,
@@ -234,10 +248,12 @@ test('AC2 — an explicit --test-command takes priority over detection', () => {
 // must NOT require a separate `git rm` step nor a --force flag. Localizable prose (tick docs) stays
 // preserve-mode: a local edit is a conflict, listed and left untouched (upgrade path, AC5).
 test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, and reported (no --force needed)', () => {
-  const ws = makeTmp();
+  // AC2: the copy starts from the shared READ-ONLY laydown template (already fully installed);
+  // pre-placing a stale product file and RE-RUNNING init exercises the residue-cleanup path
+  // (the re-run emits the cleaned-residue/backup report and the byte-identical verify).
+  const { ws } = laydownWorkspace();
   try {
     // Pre-place a stale copy of a product mechanism file (a hot-copy leftover) with different content.
-    fs.mkdirSync(path.join(ws, 'plugin', 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), '#!/bin/bash\necho stale-residue\n');
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must succeed after disposing of the residue:\n${r.stderr}`);
@@ -262,10 +278,9 @@ test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, 
 });
 
 test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edit survives without --force', () => {
-  const ws = makeTmp();
+  const { ws, install: r1 } = laydownWorkspace();
   try {
     const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
-    const r1 = runInit(ws, args);
     assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
     const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
     const firstContent = fs.readFileSync(outerPath, 'utf8');
@@ -284,10 +299,9 @@ test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edi
 
 // ── AC5: upgrade path — idempotent re-run; local edits not overwritten, conflict listed ─────────────
 test('AC5 — re-run is idempotent (skips identical), and a locally-edited tick doc is NOT overwritten; the conflict is listed', () => {
-  const ws = makeTmp();
+  const { ws, install: r1 } = laydownWorkspace();
   try {
     const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
-    const r1 = runInit(ws, args);
     assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
     const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
     const firstContent = fs.readFileSync(outerPath, 'utf8');

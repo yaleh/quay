@@ -115,3 +115,25 @@ B3-1 合并前 13 分钟，于是对**全局测试文件计数**的断言过期"
 ---
 
 **本文件不建 AC/DoD、不排优先级——那是外层的活。**
+
+---
+
+## 落地记录（2026-08-07，gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling）
+
+**§4 的「integration→develop 永远 FF」假设已被实证否证**（2026-08-06 23:48 反例），方向裁定改为
+真 merge。落地机制：
+
+- `plugin/scripts/integration-batch-merge.sh` 新增 **`--merge` 真 merge 模式**（默认仍 dry-run 安全）：
+  NOT-FF（真分歧）时不再一行 needs-human，而是（AC1）先报告分歧面（develop-only / integration-only
+  计数 + would-conflict 文件清单）；（AC2）已知共享文件（`*tick-log.md` / `tasks/*.md` / `*queue-state*`，
+  可用 `--shared-file` 追加）的冲突按 **develop-authoritative** 自动解（在一次性 temp worktree 内
+  `git merge --no-ff --no-commit` → 分类 → 解析 → `git update-ref` CAS 推进 develop，主 checkout 不动）；
+  （AC3 承重负控制）**真实代码冲突仍 fail-closed**——列出冲突文件清单、不盲 `--ours/--theirs`、不动 ref。
+- **默认（无 `--merge`）路径保持 fail-closed**：NOT-FF 时输出分歧面 + `NOT-FAST-FORWARD … needs a human`。
+- `git merge-base --is-ancestor integration develop`（已吸收）时 no-op 退出 0（measure=0）。
+- 测试：`plugin/test/integration-batch-merge.test.mjs`（8/8 绿），`plugin/test/branch-model.test.mjs`（9/9 绿）。
+
+**对两线模型操作者的指引**：外层 verification-round 的批量合在「integration 不是 develop 后代」时应
+**传 `--merge`**（每次量小，共享文件冲突自动解；真代码冲突仍停下来等人）。「勤合并维持 FF」不可行——
+develop 每分钟都可能被内层/外层/管理者直提。后续若要把 `--merge` 变成外层默认，需一并更新
+`orchestrator-loop-tick.md` 的批量合步骤（本任务 Touches 不含 loop 文档，未改）。

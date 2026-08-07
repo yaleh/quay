@@ -1,9 +1,12 @@
-// @test-group governance
+// @test-group lowconc
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — the rehearsal
 // test below runs a real quay-init --loop project + a real --task-start; it passes isolated under low
 // load but may fail under concurrent-suite load (gap-load-sensitive-session-family-confounds-step-three,
 // 2026-08-04). A full-suite failure here is NOT a real regression by default: re-run this file alone
 // (low load) before concluding anything.
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait — real quay-init --loop + --task-start) so it runs in
+// the concurrency-1 serial phase, never competing with the concurrency-8 main body.
 // cold-start-skill.test.mjs — gap-cold-start-needs-a-human-to-dictate-eight-steps, phase 2 (AC5 +
 // merged telemetry AC + AC8c observable-consequences checklist).
 //

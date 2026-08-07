@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group lowconc
 // npm-pack-e2e.test.mjs — M120 Stage 2.2 (DIR-060).
 //
 // End-to-end: run the REAL package.sh (build-dist.sh -> npm pack), install the
@@ -175,4 +175,95 @@ test("the tarball carries the ENTIRE plugin bundle (bundle_in_pack > 0 — AC16)
     fs.existsSync(path.join(installedPlugin, "vendor", "quay", "dist", "quay.js")),
     "installed plugin must carry the vendored self-contained Core runtime"
   );
+});
+
+test("the tarball ships the postinstall register script + the plugin's .claude-plugin manifests", () => {
+  // gap-npm-install-does-not-register-the-plugin-with-claude-code: the INSTALLED artifact
+  // must be a legal Claude Code directory marketplace and carry the hook that registers it.
+  // Without the script in the tarball the postinstall would ENOENT after `npm install -g`.
+  const tar = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" });
+  assert.ok(
+    tar.includes("package/scripts/register-plugin.mjs"),
+    "tarball must ship scripts/register-plugin.mjs (the postinstall registration hook)"
+  );
+  for (const rel of ["package/plugin/.claude-plugin/marketplace.json", "package/plugin/.claude-plugin/plugin.json"]) {
+    assert.ok(tar.includes(rel), `tarball must carry ${rel}`);
+  }
+});
+
+test("register-plugin (global-install mode, temp HOME) writes settings.json pointing at the INSTALLED plugin dir", () => {
+  // The task's Contract measure: plugin_registered = grep -c "$(npm root -g)/quay/plugin"
+  // ~/.claude/settings.json must be >= 1. Run the SHIPPED hook exactly as the postinstall
+  // would (npm_config_global=true) against the scratch-installed copy, into a temp HOME so
+  // this test never touches the developer's real ~/.claude.
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-home-"));
+  const register = path.join(scratch, "node_modules", "quay", "scripts", "register-plugin.mjs");
+  try {
+    // Pre-existing settings with an UNRELATED marketplace + a user field — must be preserved.
+    const existing = path.join(tempHome, ".claude", "settings.json");
+    fs.mkdirSync(path.dirname(existing), { recursive: true });
+    fs.writeFileSync(existing, JSON.stringify({ model: "sonnet", extraKnownMarketplaces: { other: { source: { source: "directory", path: "/x/other" } } } }, null, 2));
+    const out = execFileSync("node", [register], {
+      encoding: "utf8",
+      // QUAY_SKIP_PLUGIN_CLI=1 keeps this a pure settings.json assertion (the claude-CLI
+      // materialization path is proven separately in the task's manual AC evidence and is
+      // environment-heavy — no need to shell out to `claude` on every test run).
+      env: { ...process.env, HOME: tempHome, npm_config_global: "true", QUAY_SKIP_PLUGIN_CLI: "1" },
+    });
+    const settings = JSON.parse(fs.readFileSync(existing, "utf8"));
+    const installedPlugin = path.join(scratch, "node_modules", "quay", "plugin");
+    assert.equal(settings.model, "sonnet", "unrelated settings keys must be preserved");
+    assert.equal(settings.extraKnownMarketplaces.other.source.path, "/x/other", "other marketplaces must be preserved");
+    assert.equal(settings.extraKnownMarketplaces.quay.source.source, "directory");
+    assert.equal(settings.extraKnownMarketplaces.quay.source.path, installedPlugin, "marketplace must point at the INSTALLED plugin dir");
+    assert.equal(settings.enabledPlugins["quay@quay"], true, "plugin must be enabled");
+    assert.match(out, /Registered the installed quay plugin/, "hook must report success");
+  } finally {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test("register-plugin skips silently on a NON-global install (dev `npm install` must not touch ~/.claude)", () => {
+  // npm runs every workspace's postinstall during a monorepo `npm install`. Writing the
+  // user's ~/.claude/settings.json from there to a DEV-TREE path is exactly the historical
+  // residue this gap measured (machine B pointed at a deleted /home/yale/work/quay/plugin).
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-home-"));
+  const register = path.join(scratch, "node_modules", "quay", "scripts", "register-plugin.mjs");
+  try {
+    const out = execFileSync("node", [register], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: tempHome, npm_config_global: "false" },
+    });
+    assert.ok(!fs.existsSync(path.join(tempHome, ".claude", "settings.json")), "non-global install must NOT write settings.json");
+    assert.match(out, /not a global install/, "hook must explain why it skipped");
+  } finally {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test("register-plugin FAILS CLOSED when the installed plugin bundle is incomplete", () => {
+  // If the tarball ever ships without .claude-plugin/marketplace.json + plugin.json, the
+  // hook must refuse rather than register a broken marketplace (silent broken install).
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "quay-reg-home-"));
+  const register = path.join(scratch, "node_modules", "quay", "scripts", "register-plugin.mjs");
+  try {
+    const pluginDir = path.join(scratch, "node_modules", "quay", "plugin");
+    const backup = path.join(pluginDir, ".claude-plugin");
+    const renamed = path.join(pluginDir, ".claude-plugin-hidden-test");
+    fs.renameSync(backup, renamed);
+    let threw = false;
+    try {
+      execFileSync("node", [register], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: tempHome, npm_config_global: "true" },
+      });
+    } catch (err) {
+      threw = true;
+      assert.match(String(err.stderr), /incomplete/, "failure must cite the incomplete bundle");
+    }
+    fs.renameSync(renamed, backup);
+    assert.ok(threw, "register-plugin must exit non-zero when the bundle is incomplete");
+  } finally {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
 });

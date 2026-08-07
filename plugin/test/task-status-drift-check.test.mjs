@@ -1300,6 +1300,41 @@ status: ready
   }
 });
 
+test("git-history: the BATCHED index matches DIRECTORY-style Touches paths (git pathspec equivalence)", (t) => {
+  const repo = makeGitHistoryRepo("batch-dir");
+  try {
+    fs.mkdirSync(path.join(repo, "tasks"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "code"), { recursive: true });
+    // A task whose Touches declare a DIRECTORY path (`code/`) — the per-task `git log -- code/`
+    // pathspec matches every file under it. The batched index must reproduce that; before this
+    // fix the index only had exact-file keys and silently under-detected directory Touches
+    // (whole-store drift found on DIR-087/089/091's `…/scripts/`-style Touches: landed=true
+    // per-task but false via the index).
+    const dirId = "gap-dir-touch";
+    const dirTask = gitHistoryTask(dirId, "- code/");
+    fs.writeFileSync(path.join(repo, "tasks", `${dirId}.md`), dirTask);
+    // A never-dispatched sibling sharing the same directory Touch → must stay unlanded on BOTH
+    // paths (the merge does not reference it).
+    const neverId = "gap-dir-never";
+    const neverTask = gitHistoryTask(neverId, "- code/");
+    fs.writeFileSync(path.join(repo, "tasks", `${neverId}.md`), neverTask);
+    commitAndMerge(repo, "task/gap-dir-touch", "code/board.ts", "board\n",
+      "merge gap-dir-touch: directory-touch task lands a file under code/");
+
+    const index = buildGitHistoryIndex(repo);
+    assert.equal(gitHistoryLanded(dirTask, repo, { taskId: dirId }), true,
+      "per-task path fires for a directory-Touch task");
+    assert.equal(gitHistoryLanded(dirTask, repo, { taskId: dirId, gitIndex: index }), true,
+      "batched index fires for a directory-Touch task (prefix match)");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId }), false,
+      "per-task path stays negative for the never-dispatched sibling");
+    assert.equal(gitHistoryLanded(neverTask, repo, { taskId: neverId, gitIndex: index }), false,
+      "batched index stays negative for the never-dispatched sibling");
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("taskIdTokens: full id, stripped id, and ≥2-segment prefixes of both", () => {
   const toks = taskIdTokens("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have");
   assert.ok(toks.includes("gap-web-board-needs-an-inconsistency-verdict-it-does-not-have"), "full id");

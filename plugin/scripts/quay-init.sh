@@ -698,6 +698,14 @@ validate_worktree_root() {
 # Scripts that must NEVER auto-lay-down (a layer-retired delivery check + the installer itself):
 NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"
 
+# Cross-machine VERIFICATION mechanism (gap-no-post-merge-cross-machine-verification-detection-latency-is-luck):
+# `cross-machine-verify.sh` ships with the loop because the loop tick docs reference it by full path
+# (fast-mode 4b / orchestrator 3b+3d — the SAME derivation that puts sync-lag-check.sh in the set). It
+# needs NO explicit entry here: the derived (a) source over plugin/loop/*.md pulls it in, and its
+# sibling dependency `laydown-set-check.sh` (the default fast gate) is already in the set, so the
+# dependency-closure invariant (d) is satisfied. The mechanism's shared state rides git notes
+# (refs/notes/quay-cmv-*) — a notes ref, not a file, so nothing extra to lay down.
+
 # mechanism_corpus — the docs that describe how the LAID-DOWN mechanism operates (bare-filename
 # resolution scope for (b) above).
 mechanism_corpus() {
@@ -718,6 +726,18 @@ bare_resolved_scripts() {
         case " $NEVER_LAYDOWN " in *" $tok "*) continue ;; esac
         printf 'plugin/scripts/%s\n' "$tok"
       done || true
+}
+
+# consolidated_member_files — the 40→6 grouped entry points' member implementation files
+# (SPEC-instruments-behind-one-entry.md AC8/AC12). The docs/skills invoke members via the ENTRY
+# POINT (`quay-<group>.ts <member>` — a subcommand name, never a plugin/scripts/ path), so the
+# member files are INVISIBLE to (a)/(b) bare/path derivation but MUST ship for the entry point to
+# be able to dispatch to them (a cold-started project running `quay-session.ts monitor-mount-check`
+# would otherwise fail on a missing implementation). Derived from the MEMBERS declarations in each
+# quay-<group>.ts — never a hand-maintained list. Prints one member basename per line.
+consolidated_member_files() {
+  grep -hoE 'name: "[a-zA-Z0-9._-]+", file: "[a-zA-Z0-9._-]+"' "$PLUGIN_ROOT"/scripts/quay-*.ts 2>/dev/null \
+    | sed -E 's/.*file: "([^"]+)"/\1/' | sort -u
 }
 
 # derive_loop_scripts — prints the COMPLETE --loop script laydown set (one basename per line),
@@ -749,9 +769,31 @@ derive_loop_scripts() {
   #   ships with the loop so an installed project's manager can ask "is the loop actually running".
   #   Deliberate explicit addition — the SPEC §5 annotation is the cross-reference (not a shippable
   #   SKILL.md/loop-doc path reference, so (a)/(b) derivation would miss it).
+  #   inner-blocked-signal.ts + inner-forensics.mjs (gap-session-liveness-remove-shared-events-and-lock,
+  #   found by the quay-init-loop AC3 green requirement): the docs invoke them via the quay-deliver.ts
+  #   subcommand registry (`plugin/scripts/quay-deliver.ts inner-blocked-signal` / `... inner-forensics`),
+  #   so (a) derives quay-deliver.ts but not the implementation files — a cold-started project would run
+  #   the subcommand and fail on a missing implementation. Deliberate explicit additions so the registered
+  #   subcommands' implementations ship with the loop.
+  #   task-contract-check.ts + task-status-drift-check.ts + touches-orthogonality-check.ts (same finding):
+  #   the fast-mode gate checkers (## Contract / task-status drift / touch orthogonality) are invoked by
+  #   the tick docs WITHOUT a `plugin/scripts/` path and are not bare-resolved by the mechanism corpus, so
+  #   (a)/(b) derivation misses them — a cold-started project would run the gates and fail on missing
+  #   checkers. Deliberate explicit additions (same class as the other checker transitive deps above).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
-    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh >> "$out"
+    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
+    inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts >> "$out"
+  # (c2) consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md AC8/AC12): the
+  #   docs invoke them via `quay-<group>.ts <member>` (a subcommand, never a plugin/scripts/ path),
+  #   so (a)/(b) cannot see them — but the entry point must dispatch to them, so they ship. Only
+  #   EXISTING members land here (a missing member is a plugin defect, surfaced by
+  #   verify_referenced_landed's unconditional member reference, not silently dropped from the set).
+  for f in $(consolidated_member_files); do
+    [ -f "$PLUGIN_ROOT/scripts/$f" ] || continue
+    case " $NEVER_LAYDOWN " in *" $f "*) continue ;; esac
+    printf '%s\n' "$f" >> "$out"
+  done
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0
@@ -828,8 +870,20 @@ verify_referenced_landed() {
   # MECHANISM corpus that resolve under plugin/scripts/ — the SAME derivation the laydown uses
   # (AC3: checker and checked can no longer share the same blind spot).
   mech_bare="$(bare_resolved_scripts "${mech_files[@]}")"
+  # consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md): EVERY member of a
+  # shipped quay-<group>.ts must land — the entry point dispatches to it. UNCONDITIONAL (a member
+  # absent from the plugin source is exactly the referenced-not-landed defect this check exists to
+  # catch — the AC2 live-specimens case: removing monitor-mount-check.sh / send-keys-reliable.sh
+  # must make the check name them, not silently pass because they no longer exist to resolve).
+  local consolidated_refs=""
+  local member
+  for member in $(consolidated_member_files); do
+    case " $NEVER_LAYDOWN " in *" $member "*) continue ;; esac
+    consolidated_refs+="plugin/scripts/$member"$'\n'
+  done
   refs="$( ( grep -ohE '(plugin/scripts|orchestration|docs/analysis)/[a-zA-Z0-9._-]+' "$PLUGIN_ROOT/skills"/*/SKILL.md "$PLUGIN_ROOT"/loop/*.md 2>/dev/null
              printf '%s\n' "$mech_bare"
+             printf '%s' "$consolidated_refs"
            ) | sort -u || true )"
   # Machine-readable declarations live in the shipped init skill (single source of truth — the
   # same doc the human reads). Marker lines:
@@ -844,6 +898,22 @@ verify_referenced_landed() {
       continue   # declared self-create or reference-doc — not a defect
     fi
     if [ ! -e "$ws/$r" ]; then
+      # gap-lowconc-tmux-session-name-collision-race AC2: the declaration extraction above is a
+      # single grep read of init/SKILL.md; under concurrent load (lowconc cc3) that read can
+      # transiently return INCOMPLETE output, false-positiving a DECLARED reference-doc as
+      # not-declared (observed once at cc3: orchestration/SPEC-typed-axes-and-standing-dynamics.md —
+      # the install failed verify with a false positive while the declaration was present). Before
+      # failing, RE-READ the declaration sets once and re-check: a genuinely-undeclared ref fails
+      # on both reads (real drift never masked); a transiently-missed declaration passes the
+      # re-read and is not a defect. Keeps the check deterministic under load.
+      if ! printf '%s\n' "$selfcreate" "$refdoc" | grep -qxF "$r"; then
+        local fresh_selfcreate fresh_refdoc
+        fresh_selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+        fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+        if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
+          continue   # re-read confirms the declaration exists — the first read was transiently incomplete
+        fi
+      fi
       echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
       missing=1
     fi

@@ -27,8 +27,26 @@ packages/quay/plugin/
 
 # BAIME experiment throwaway checkouts / build output — never track
 **/worktrees/
+# gap-gitignore-worktree-scratch-dirs-kills-round4-false-red (2026-08-07): worktree-scratch
+# coordination dirs left at the repo root by the --loop quay-init worktree-root tests
+# (.quay-worktree-local/, .quay-worktree-local2/, .quay-wtl3/). Same gitignored family as
+# worktrees/ — untracked scratch, NOT test products; if left un-ignored they trip the suite-after
+# dirty-tree assertion (round-4 false red). First line of defense (git status never shows them);
+# complement to the assert-clean-tree exclusion, cross-annotated with
+# gap-assert-clean-tree-premise-void-under-concurrent-writers (AC3).
+# No trailing slash: `git check-ignore` must match these names even when absent
+# (the Contract measure counts 3 matches), not only when the scratch dirs exist.
+**/.quay-worktree-local*
+**/.quay-wtl*
 **/dist-sea/
 **/.quay/gate-events.jsonl
+# gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
+# porcelain snapshots for the suite-AFTER DELTA assertions (assert-clean-tree.sh --snapshot /
+# tmux-leak-scan.sh --snapshot). Same gitignored runtime-state family as gate-events.jsonl — a
+# snapshot is per-run transient state that must never appear in `git status --porcelain` (if it
+# did, the suite-AFTER check would see its own snapshot as NEW dirt).
+**/.quay/assert-clean-tree.snapshot
+**/.quay/tmux-leak-scan.snapshot
 # gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
 # cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
 # "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to
@@ -94,6 +112,11 @@ orchestration/inner-idle-log.jsonl
 **/.quay/full-suite.log
 **/.quay/suite-state-events.jsonl
 **/.quay/suite-state-last.json
+# gap-resource-gate-no-single-flight-lock-two-suite-overlap: the single-flight lock FALLBACK path
+# (<repo_root>/.quay/full-suite.lock) used only when git-common-dir is unavailable (a non-git copy).
+# The PRIMARY path is <git-common-dir>/full-suite.lock (inside .git/, invisible to git status). The
+# file must PERSIST (never unlink a flock'd file — classic flock+unlink race), so ignore it.
+**/.quay/full-suite.lock
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

@@ -200,11 +200,13 @@ would start the loop in a session that is visibly not the shipped topology.
 ### 3. Mount the monitor via the Monitor tool (AC5 — events to THIS session)
 
 Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md), mounted
-through a single-flight mount entry that execs it. Mount `session-liveness-mount.sh`:
+through a mount entry that execs it (who mounts owns its own stdout event stream — the "single-flight"
+mutual-exclusion semantics were retired 2026-08-06; parallel mounts of the same target are naturally
+conflict-free). Mount `session-liveness-mount.sh`:
 Observation has exactly ONE tool (`session-liveness.sh`, SPEC-one-observer-two-surfaces.md).
 The retired per-parameter observer never observed the session (tmux hits 0) and its signature signal
 (`.quay/inner-blocked.json`) never fired in any project. Mount `session-liveness-mount.sh` (the
-single-flight mount entry, which execs `session-liveness.sh`):
+mount entry, which execs `session-liveness.sh`):
 
 ```
 Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",

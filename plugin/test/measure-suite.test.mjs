@@ -1,6 +1,10 @@
-// @test-group engine
+// @test-group lowconc
 // measure-suite.test.mjs — validate the per-file duration reporter (AC1b/AC8 of
 // gap-suite-cost-model-is-wrong-optimizations-buy-nothing).
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait — spawns node --test subprocesses and waits on their
+// real durations) so it runs in the concurrency-1 serial phase, never competing with the
+// concurrency-8 main body.
 //
 // The full-suite measurement (measure-suite.mjs) depends on the custom reporter
 // (measure-suite-reporter.mjs) emitting a FILE-LEVEL duration for EVERY test file —
@@ -41,8 +45,8 @@ function runWithReporter(files) {
 function parsePerFile(stderr) {
   const out = new Map();
   for (const line of stderr.split("\n")) {
-    const m = line.match(/^__PERFILE__ (\S+) ([0-9.]+) (true|false)$/);
-    if (m) out.set(m[1], { durationMs: parseFloat(m[2]), passed: m[3] === "true" });
+    const m = line.match(/^__PERFILE__ duration_ms=([0-9.]+) (\S+) passed=(true|false)$/);
+    if (m) out.set(m[2], { durationMs: parseFloat(m[1]), passed: m[3] === "true" });
   // key = full path from the reporter
   }
   return out;
@@ -79,6 +83,99 @@ test("reporter captures file-level duration for node:test AND custom-harness fil
     assert.ok(perFile.has(customFile), "custom-harness file must get a file-level duration");
     assert.ok(perFile.get(customFile).durationMs > 0);
     assert.equal(perFile.get(customFile).passed, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reporter auto-evaluates group floor + ceiling (AC2/AC3 of gap-install-suite-cost-instrument-reporter-not-wired)", () => {
+  // AC2: output = per-file wall-clock + group floor (sum÷concurrency) + ceiling
+  // determination, auto-evaluated. AC3: a cc>1 group flags any file > floor as
+  // 封顶者/该拆; serial (cc=1) is the EXCEPTION — the criterion is NOT applied.
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-ceiling-"));
+  try {
+    // Three files: one fast (~20ms), one slow (~200ms), one in between (~100ms).
+    // runWithReporter uses --test-concurrency=8: sum ≈ 320ms, idealSplit = sum/8 ≈ 40ms,
+    // floor = max(40, longest=200) = 200ms. The 200ms file (> idealSplit) is the
+    // ceiling → flagged 封顶者/该拆; the others are not.
+    const files = [];
+    for (const [name, ms] of [
+      ["fast.test.mjs", 20],
+      ["slow.test.mjs", 200],
+      ["mid.test.mjs", 100],
+    ]) {
+      const p = path.join(dir, name);
+      writeFileSync(
+        p,
+        `import { test } from "node:test";\n` +
+          `import { setTimeout as sleep } from "node:timers/promises";\n` +
+          `test("x", async () => { await sleep(${ms}); });\n`
+      );
+      files.push(p);
+    }
+
+    const res = runWithReporter(files);
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+    const perFile = parsePerFile(res.stderr);
+    const group = res.stderr.match(/^__GROUP__ concurrency=(\d+) files=(\d+) sum_ms=([0-9.]+) floor_ms=([0-9.]+) capped=(\d+)$/m);
+    assert.ok(group, `__GROUP__ line must be emitted:\n${res.stderr}`);
+    const [, cc, n, sumMs, floorMs, capped] = group;
+    assert.equal(Number(cc), 8, "reporter must read --test-concurrency=8 from execArgv");
+    const sum = Number(sumMs);
+    assert.equal(Number(n), 3, "3 files captured");
+    assert.ok(sum > 0, "sum_ms positive");
+    const floor = Number(floorMs);
+    // floor = max(sum/8, longest); slow file (200ms) > sum/8, so it is the ceiling.
+    assert.ok(floor >= 200 - 10, "floor should be at least the slow file's wall-clock (tail cap)");
+    const ceilingLines = res.stderr.match(/^__CEILING__ \S+ duration_ms=([0-9.]+) floor_ms=[0-9.]+ 封顶者\/该拆$/gm);
+    assert.ok(ceilingLines, "at least one 封顶者/该拆 line must be emitted for a cc>1 group with a tail");
+    assert.equal(Number(capped), ceilingLines.length, "capped count matches ceiling lines");
+    // The slow file must be among the ceiling lines.
+    const slowPath = path.join(dir, "slow.test.mjs");
+    assert.ok(
+      ceilingLines.some((l) => l.startsWith(`__CEILING__ ${slowPath} `)),
+      "slow file (200ms) must be the ceiling/封顶者"
+    );
+    assert.ok(perFile.has(slowPath), "slow file captured per-file");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("serial (cc=1) does NOT apply the split criterion (AC3 exception)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "measure-suite-serial-"));
+  try {
+    const files = [];
+    for (const [name, ms] of [
+      ["a.test.mjs", 20],
+      ["b.test.mjs", 200],
+    ]) {
+      const p = path.join(dir, name);
+      writeFileSync(
+        p,
+        `import { test } from "node:test";\n` +
+          `import { setTimeout as sleep } from "node:timers/promises";\n` +
+          `test("x", async () => { await sleep(${ms}); });\n`
+      );
+      files.push(p);
+    }
+    // Serial: --test-concurrency=1 → criterion NOT applied → no __CEILING__ lines.
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    const res = spawnSync(
+      "node",
+      [
+        "--test",
+        "--test-concurrency=1",
+        `--test-reporter=${reporterPath}`,
+        "--test-reporter-destination=stderr",
+        ...files,
+      ],
+      { encoding: "utf8", env }
+    );
+    assert.equal(res.status, 0, `suite should pass; stderr tail: ${res.stderr.slice(-300)}`);
+    assert.doesNotMatch(res.stderr, /^__CEILING__/m, "serial (cc=1) must NOT emit 封顶者/该拆 — splitting a file does not change total time at cc1");
+    assert.match(res.stderr, /^__GROUP__ concurrency=1 /m, "serial group line still emitted (floor computed, criterion skipped)");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

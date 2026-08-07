@@ -115,10 +115,12 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 资源闸是**外层后台 runner 起跑前**要过的闸，不是 inner 的。inner 只保留 `--for-task` 选中集
 （秒级，走 scoped 路径，不触资源闸）。
 
-**DoD 的最后「连跑 2 次全绿」不因上述放宽（AC4 负控制，`gap-two-thirds-of-a-task-is-polling-a-suite-log`）**：
+**任务 DoD 不含全量套件；全量套件是批量合边界的闸门（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge`）**：
 `--for-task` 跳资源闸、只跑 `## Touches` 选中集，**对「这次改动有没有破坏别处」是无知的**——它只能用在
-迭代中途。任务收尾（外层异步）仍必须按 DoD 要求**连跑 2 次全量全绿**（`fail 0` 且 `cancelled 0`，判绿
-三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
+迭代中途。**全量套件绿是批量合边界的闸门**：外层验证轮只在 `state: green` 时把 `$MERGE_TARGET`→
+`$FORK_BASELINE` 批量合（判绿三条件见下）。任务自身的 DoD **不写**「完整套件连跑 2 次全绿」——移除的是
+任务级那份重复，批量合边界那道闸**原封不动**（保护总量不变、耦合消失）。把「少跑全量」当目标就是把方向 C
+做成方向 A。
 
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次（历史引用）
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a（**历史批名**，指旧的全量验证轮次，保留不改名）那次
@@ -146,7 +148,9 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 
 ## 已知负载敏感族（KNOWN-LOAD-SENSITIVE）——判绿/放宽判据必须排除，不得读成真回归
 
-**`plugin/test/session-liveness.test.mjs`、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
+**`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
+`session-liveness-signals.test.mjs`（原 `session-liveness.test.mjs` 拆分，
+`gap-session-liveness-tail-capped-split`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
 `--once` 同类）是一族已知负载敏感测试**（`gap-load-sensitive-session-family-confounds-step-three`，
 2026-08-04 立案）。它们用**真实进程 + tmux 时序**验证会话存活/冷启动挂载语义，机器负载一高就红——
 隔离下全绿、并发下红，**不是逻辑错误**。2026-08-04 全量套件 #6/#7 各挂一条不同但同族的测试，
@@ -154,7 +158,8 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 
 **判读规则（强制）**：
 1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
-   并发套件，= 负载翻倍）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
+   并发套件，= 负载翻倍——`heavy-op-token.sh` 已随 2026-08-06 人裁定整体退休，「一次只跑一个
+   重测试」约束退役，此放宽实验前提不再存在）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
 2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
    全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
@@ -163,8 +168,23 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
 grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
-全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
+全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
+
+## serial 组的显式判据（gap-serial-group-recompose-nested-runner-criterion，2026-08-07）
+
+**进 serial 的唯一理由 = 该文件 spawn 自己 worker 池的子套件（嵌套 runner）**——通过
+`$TEST_COMMAND` / `--for-task` 派生并发 N 的子套件（runner-grouping / select-tests-for-touches /
+quay-init-loop-core 属此类，见各文件头 `@test-group serial`）。serial 并发 1 是机制不变量——这类
+文件在并发 8 主套件下 = 8×N 进程互相放大，cc1 是正确答案不是保守。
+
+**其它理由一律走 lowconc，不走 serial**：
+- **低负载/时序敏感**（如 checker-cost 的 9 处单调性断言）——需要的是【机器有余量】不是【独占】；
+- **hermetic 但先前留串行**（如 session-topology 的私有 socket 自隔离）——隔离功课做完、分组没跟；
+- **串行只是验收标准文本、非技术必要**（如 install-config-driven-e2e）。
+
+判定新文件归组时读这条：能说清「不串行会怎样」才算 serial；否则进 lowconc（需低负载）或主套件。
+GROUP NOTE 必须与判据对齐——同一家族内，嵌套 runner 的留 serial，低负载/时序的走 lowconc。
 
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
 
@@ -457,6 +477,18 @@ worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层�
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
 node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
 ```
+
+**面板冻结行观测（`gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close`）**：同一
+`last-pane.txt` 再喂给 `inner-panel-stale-check.ts`（面板观测机制，状态转换表达）——括号关闭
+（`--task-end`）后该任务的 agent 行若仍残留且计时冻结，必须被机械检出（不是等人跨时间采样猜）：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/inner-panel-stale-check.ts \
+  --pane .quay/last-pane.txt --root "$REPO_ROOT" --json
+```
+
+exit 1 = 面板仍有「已结束/冻结」agent 行（括号已关但行未清）⇒ 检出该误导窗口；exit 0 = 干净。
+（`inner-session-check.sh` 判的是会话四态，本观测器判的是面板行状态——两件事，不混。）
 
 它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
 

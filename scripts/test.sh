@@ -18,10 +18,14 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
-# existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
-# hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
-# (e.g. relation-sync's harness) into the ratchet.
+# NEW files must also carry a `// @test-group <product|engine|governance|serial|lowconc>`
+# declaration (AC5); existing files may omit it and default to `engine`. `serial` is the
+# load-sensitive family routed to its own concurrency-1 phase
+# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests); `lowconc` is the
+# hermetic-but-load-sensitive family routed to its own concurrency-3 phase
+# (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). The check does NOT migrate the 34
+# legacy hand-rolled-harness files — it stops the 35th and turns each existing file's eventual
+# conversion (e.g. relation-sync's harness) into the ratchet.
 #
 # TEST-ISOLATION CONTRACT (gap-test-isolation-contract-is-unwritten, AC1-AC6): a test must never
 # touch something it does not exclusively own (fixed __dirname/.tmp-* paths, the SHARED build
@@ -61,8 +65,9 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
-#   (AC7) — the current work surface, so a missed declaration never silently vanishes.
+#   one of product / engine / governance / serial / lowconc (AC1). The DEFAULT for an undeclared
+#   file is `engine` (AC7) — the current work surface, so a missed declaration never silently
+#   vanishes.
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -72,6 +77,12 @@
 #                 tests under experiments/quay-perpetual-stream/test/)
 #   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
 #                 skip block makes it visible as `skipped` in default runs instead of absent)
+#   - serial      KNOWN-LOAD-SENSITIVE A/B-class family (nested-suite-spawn, real-wall-clock-wait)
+#                 routed OUT of the concurrency-N body into its own phase at concurrency 1
+#                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
+#   - lowconc     hermetic-but-load-sensitive B-class session-observation + install/quay-init
+#                 family (each mkdtemp workspace / private socket) — its own phase at concurrency 3
+#                 (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
 #
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
 #   44 previously-invisible files always appear in the output. Symlinks under that dir that
@@ -151,6 +162,25 @@ if mkdir -p "${node_compile_cache_dir}" 2>/dev/null; then
 else
   echo "scripts/test.sh: WARNING — could not create NODE_COMPILE_CACHE dir '${node_compile_cache_dir}'; running uncached (slow but correct, AC3 fail-open)" >&2
 fi
+
+# ── per-file duration reporter wiring (gap-install-suite-cost-instrument-reporter-not-wired) ───────
+# measure-suite-reporter.mjs EXISTS + is unit-tested, but the REAL full suite never loaded it (the
+# 34 file-level wall-clock lines in the log were LEGACY harness self-prints, not reporter output).
+# This helper produces the node --test reporter flags that load it into EVERY real-suite node --test
+# invocation (main body, serial phase, lowconc phase, and the --group serial/lowconc paths) so the
+# full-suite log carries per-file wall-clock for BOTH node:test files AND the 34 legacy harnesses
+# (>34 covered files). The flags are DUAL-REPORTER: spec keeps the normal spec/TAP summary on stdout
+# (the outer runner greps it for 判绿 markers), and measure-suite-reporter.mjs emits __PERFILE__ +
+# __GROUP__ + __CEILING__ (封顶者/该拆) lines to stderr, which full-suite-runner.ts tees into
+# .quay/full-suite.log. Mechanical anti-regression: plugin/test/measure-suite-reporter.test.mjs
+# asserts this wiring exists, so removing it flips the suite red (the 7th instance is prevented).
+suite_reporter_flags() {
+  printf '%s\n' \
+    "--test-reporter=spec" \
+    "--test-reporter=${repo_root}/plugin/scripts/measure-suite-reporter.mjs" \
+    "--test-reporter-destination=stdout" \
+    "--test-reporter-destination=stderr"
+}
 
 # run_static_checks — the repo-wide invariants that run on EVERY FULL-SUITE-mode test-running
 # invocation (the default, --group, flags-only, explicit files) AND on `--static-checks`.
@@ -408,18 +438,113 @@ resource_gate_check() {
   fi
 }
 
+# ── single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) ──────────────────
+# full_suite_lock — an exclusive flock on a SHARED lock file (default <git-common-dir>/full-suite.lock;
+# see the path resolution below), held for the ENTIRE full-suite run. COMPLEMENTARY to the resource
+# gate: the gate prevents "starting into a busy machine" (a load check at startup), the lock prevents
+# "a second suite joining" (mutual exclusion). Together they are complete — two full suites can no
+# longer both see GO in a low-load window and start (the 2026-08-07 incident: two cc8 suites ran
+# simultaneously in DIFFERENT worktrees, 16 workers + subprocesses on 4 cores, PSI cpu avg10 = 86.22).
+#
+# The lock is file-descriptor-based (flock(1) on FD 9): the FD is opened once and held open for the
+# whole run, so the lock releases automatically when this process exits — even on an error abort —
+# with no trap bookkeeping. A second concurrent full-suite startup BLOCKS on flock (WAIT/queue) for
+# up to FULL_SUITE_LOCK_TIMEOUT (default 600s), then FAILS CLOSED with a clear message — never both
+# GO, never an infinite hang.
+#
+# Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
+# they are the verification path that must stay usable while a full suite runs. Nested runners skip
+# via the SAME escape hatch the resource gate uses (QUAY_TEST_SKIP_RESOURCE_GATE=1) plus the
+# same-root QUAY_TEST_NESTED guard (a nested test.sh spawned inside the running suite must not
+# deadlock against the suite's own lock).
+# SHARED lock file: resolve via git's COMMON dir so every worktree of this repo AND the primary
+# checkout contend on the SAME lock — the 2026-08-07 incident was two DIFFERENT worktrees each
+# running a cc8 suite, and a per-checkout `.quay/full-suite.lock` would NOT have serialized them.
+# git-common-dir resolves to the main repo's `.git` from any worktree, so
+# `<git-common-dir>/full-suite.lock` is the same inode everywhere. Fall back to
+# `<repo_root>/.quay/full-suite.lock` when git is unavailable (a non-git copy).
+FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
+  FULL_SUITE_LOCK_DIR="${repo_root}/.git"
+fi
+FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.lock}"
+FULL_SUITE_LOCK_FD=9
+FULL_SUITE_LOCK_TIMEOUT="${FULL_SUITE_LOCK_TIMEOUT:-600}"
+
+# full_suite_lock_acquire — acquire the single-flight lock (blocking wait up to the timeout).
+full_suite_lock_acquire() {
+  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
+    return 0
+  fi
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
+    return 0
+  fi
+  mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
+  # Open the lock file on a dedicated FD (append mode: the file exists + is writable even if empty).
+  eval "exec ${FULL_SUITE_LOCK_FD}>${FULL_SUITE_LOCK_FILE}"
+  echo "== single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) =="
+  if ! flock -w "${FULL_SUITE_LOCK_TIMEOUT}" "${FULL_SUITE_LOCK_FD}"; then
+    echo "scripts/test.sh: another full suite holds ${FULL_SUITE_LOCK_FILE} — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when it finishes." >&2
+    exit 1
+  fi
+  echo "scripts/test.sh: acquired full-suite single-flight lock (${FULL_SUITE_LOCK_FILE}) — held for the entire run"
+}
+
+# full_suite_lock_release — release the single-flight lock (idempotent; also auto-released on exit).
+full_suite_lock_release() {
+  flock -u "${FULL_SUITE_LOCK_FD}" 2>/dev/null || true
+  eval "exec ${FULL_SUITE_LOCK_FD}>&-" 2>/dev/null || true
+}
+
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Only product|engine|governance are valid; a missing OR unrecognized declaration falls back
-# to engine so a typo can never silently remove a file from the default run.
+# Valid groups: product|engine|governance (the default-run body) + serial (the load-sensitive
+# concurrency-1 phase, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests) +
+# lowconc (the hermetic-but-load-sensitive concurrency-3 phase,
+# gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING declaration defaults to
+# engine (AC7). An UNRECOGNIZED group name is FAIL-CLOSED, never silently degraded to engine:
+# the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
+# from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
+# guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
 group_of() {
   local f="$1" g
   g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
   case "${g:-}" in
-    product|engine|governance) echo "$g" ;;
-    *) echo "engine" ;;
+    product|engine|governance|serial|lowconc) echo "$g" ;;
+    "")
+      # No declaration at all — intentional default to engine (AC7). The undeclared → engine path
+      # is a real rule, distinct from an unknown-group typo.
+      echo "engine" ;;
+    *)
+      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+      exit 3
+      ;;
   esac
+}
+
+# check_group_declarations — pre-flight fail-closed guard (gap-verify-round-9-failures-from-recent-
+# changes-fix-batch, AC0b): every test file's declared `// @test-group` must be one of the five
+# recognized groups. A file declaring an UNKNOWN group is a dropped/mis-typed group — the r10
+# regression (b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group from group_of's case)
+# silently folded serial/lowconc into the concurrency-N engine body and cancelled the isolation
+# guarantee WITHOUT going red. That must be a HARD failure, not a silent pass. group_of's own
+# `*)` branch is defense-in-depth (it runs inside a command substitution, so its exit cannot abort
+# the parent); this check runs directly in the dispatch path and exits the script.
+check_group_declarations() {
+  local f g
+  while IFS= read -r f; do
+    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+    case "${g:-}" in
+      ""|product|engine|governance|serial|lowconc) ;;
+      *)
+        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+        exit 3
+        ;;
+    esac
+  done < <(build_deduped_files)
 }
 
 # build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
@@ -469,9 +594,11 @@ select_files() {
   done < <(build_deduped_files)
 }
 
-# list_groups — per-group counts over the full deduped glob (AC10).
+# list_groups — per-group counts over the full deduped glob (AC10). `serial` and `lowconc` are real
+# groups (the load-sensitive families routed to their own phases), so the default-set partition
+# product+engine+governance no longer equals total — serial and lowconc are the 4th and 5th parts.
 list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0)
+  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0 [lowconc]=0)
   local f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
@@ -480,7 +607,9 @@ list_groups() {
   printf 'product:    %d\n' "${counts[product]:-0}"
   printf 'engine:     %d\n' "${counts[engine]:-0}"
   printf 'governance: %d\n' "${counts[governance]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} ))
+  printf 'serial:     %d\n' "${counts[serial]:-0}"
+  printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
@@ -575,11 +704,18 @@ mark_nested() {
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
 run_selected() {
   local groups="$1"; shift
+  # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
+  # degrade to engine — a dropped group cancels the isolation guarantee without going red.
+  check_group_declarations
   # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
   # subset run (e.g. --group governance) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
   # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
+    # Single-flight lock FIRST (serialize with any already-running full suite), then the resource
+    # gate (GO/WAIT on the machine's load at actual start time). Order matters: the lock queues the
+    # second suite, so the gate's verdict is computed AFTER serialization — never against stale load.
+    full_suite_lock_acquire
     resource_gate_check
   fi
   build_dist_once
@@ -598,9 +734,14 @@ run_selected() {
   # explicitly, so their selection is already visible. N here is exactly what `--list-files` prints
   # (the same select_files output), so AC4's "N == --list-files count" holds by construction.
   echo "selected ${#files[@]} files (groups=${groups})"
-  # FULL-SUITE default path: run node as a CHILD (not exec) so the suite-AFTER assertions
-  # (assert-clean-tree + tmux-leak-scan) fire after node finishes — an exec'd node would replace
-  # this shell and skip them. The concurrency flag is bound to a variable here because the literal
+  # FULL-SUITE default path: run node as a CHILD (not exec) so the suite-AFTER assertion
+  # (tmux-leak-scan) fires after node finishes — an exec'd node would replace this shell and skip
+  # it. The suite-after clean-tree assertion is DISABLED (human ruling 17:1x): its premise — the
+  # coordinator runs on a clean tree — is void under three concurrent writers, so it produced
+  # false reds (r4/r5/r6) and no longer participates in the red verdict. Re-enable when the
+  # verification worktree achieves runtime single-writer via `git worktree lock` (re-enable
+  # condition documented in the kept suite-after clean-tree script's header).
+  # The concurrency flag is bound to a variable here because the literal
   # `--test-concurrency="$(default_test_concurrency)"` spelling is pinned by
   # plugin/test/resource-gate.test.mjs AC5 (exactly 5 sites) and select-tests-for-touches.test.mjs
   # AC11 — the default-path branch must not add a sixth literal site.
@@ -608,41 +749,116 @@ run_selected() {
     local cc
     cc="$(default_test_concurrency)"
     mark_nested
+    # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
+    # the pre-run porcelain so a re-enabled suite-AFTER assertion is DELTA — only items newly added
+    # DURING the run count as test products. Preexisting dirt from concurrent writers (manager
+    # tick-log, outer worktree scaffolding, inner uncommitted change) is excluded. The snapshot is
+    # gitignored. NON-FATAL while the assertion is DISABLED (the clean-tree call itself stays
+    # disabled per the 17:1x ruling — restore fail-closed here when the assertion is re-enabled).
+    bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --snapshot "${repo_root}" || true
+    # Same-family DELTA for tmux-leak-scan: pre-existing outer/manager tmux sessions are not this
+    # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
     # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
     # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
     if has_explicit_concurrency "$@"; then
-      node --test "$@" "${files[@]}"
+      node --test $(suite_reporter_flags) "$@" "${files[@]}"
     else
-      node --test --test-concurrency="$cc" "$@" "${files[@]}"
+      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
     fi
     local code=$?
+    # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+    # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
+    # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
+    # keeps real-wall-clock-wait and nested-suite-spawn tests from being starved by the main body's
+    # worker pool. Skipped when the main body already failed (the run is red either way). The
+    # concurrency is a HARD-CODED 1 — serial isolation is the mechanism's invariant, never a
+    # user-tunable knob (the --group serial path in the non-default branch strips explicit
+    # concurrency flags for the same reason). Its TAP summary lands LAST on the stream, so the
+    # outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial summary overwrites
+    # the main body's only when both are green — a serial failure flips the whole run red via its
+    # own fail/cancelled).
+    if [ "$code" -eq 0 ]; then
+      local serial_files=() sf serial_code
+      while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+      if [ "${#serial_files[@]}" -gt 0 ]; then
+        echo "selected ${#serial_files[@]} files (groups=serial)"
+        node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
+        serial_code=$?
+        if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
+      fi
+    fi
+    # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
+    # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
+    # each mkdtemp workspace / private socket) run in their OWN phase at `--test-concurrency=3` —
+    # not the derived default and not 8 — so wait-type tests get timely scheduling. The phase runs
+    # even if the body failed (report all failures); its exit code merges into `code`. The
+    # hard-coded 3 is deliberate (AC4) and does NOT add a derived-concurrency literal site
+    # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
+    local lowconc_files=() lf
+    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    if [ "${#lowconc_files[@]}" -gt 0 ]; then
+      echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
+      node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
+      local lcode=$?
+      [ "$lcode" -eq 0 ] || code="$lcode"
+    fi
     set -e
-    # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
-    # SUITE must leave the shared checkout clean (`git status --porcelain` empty). Harder than any
-    # static rule — it does not depend on a detector recognizing a particular spelling, so ANY
-    # test that dirties the tree (mkdtemp under REPO_ROOT, a leaked scratch dir, a stray file) is
-    # caught here. Only on the full-suite default path (this token-held branch); scoped runs
-    # legitimately execute inside uncommitted worktrees and skip it. A failing test's own exit
-    # code is the primary signal, so a dirty tree only flips a PASSING run (never masks a fail).
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" "${repo_root}"; then
-      code=1
-    fi
-    # Suite-AFTER assertion (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
+    # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO
+    # LONGER RUNS here. Its premise — the coordinator runs on a clean tree — is VOID under three
+    # concurrent writers (manager tick-log append / outer worktree scaffolding / inner uncommitted
+    # change), which produced three false reds (r4/r5/r6) and a mis-cleaning config cascade. It
+    # cannot participate in the red verdict until the re-enable condition — the verification
+    # worktree achieves runtime SINGLE-WRITER via `git worktree lock` — is met. The kept script
+    # (not deleted, per the disable ruling) and the full re-enable condition + delta-form note live
+    # in the suite-after clean-tree script's header.
+    # KNOWN TRADE-OFF (AC4): catching a test that GENUINELY leaks into the verification tree is
+    # TEMPORARILY ABSENT while disabled; the tmux-leak-scan below still catches the tmux leak class.
+    # Suite-AFTER assertion, DELTA form (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
     # a FULL SUITE must leave no test-characteristic tmux server or /tmp dir behind (skv- /
-    # session-liveness- / ol-tok- / enter-repro- prefixes). Second line of defense — the teardown
-    # fix (kill-session, never kill-server) is primary; this covers the whole leak class at once.
+    # session-liveness- / ol-tok- / enter-repro- prefixes). Delta: only items absent from the
+    # before-run snapshot are this run's leak. Second line of defense — the teardown fix
+    # (kill-session, never kill-server) is primary; this covers the whole leak class at once.
     # Same flip-only-a-passing-run semantics as assert-clean-tree above.
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh"; then
+    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
+    full_suite_lock_release
     exit "$code"
   fi
   mark_nested
+  # SERIAL group run (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+  # the serial group is isolated by definition — ALWAYS concurrency 1, never a user-tunable knob.
+  # Strip any explicit --test-concurrency flag (both spellings) so the hard-coded 1 is the SINGLE
+  # concurrency source — a full-suite-runner splice onto a `--group serial` command must not leak
+  # concurrency N in.
+  if in_group "serial" "$groups"; then
+    local filtered=() a prev_arg=""
+    for a in "$@"; do
+      case "$a" in
+        --test-concurrency=*) continue ;;
+        --test-concurrency) prev_arg="continue" ; continue ;;
+      esac
+      if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
+      filtered+=("$a")
+    done
+    exec node --test --test-concurrency=1 $(suite_reporter_flags) "${filtered[@]}" "${files[@]}"
+  fi
+  # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
+  # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency 3 —
+  # not the derived default. An explicit user --test-concurrency flag still wins (single
+  # concurrency source, AC2). The hard-coded 3 adds no derived-concurrency literal site.
+  local lowconc_force=""
+  if in_group "lowconc" "$groups"; then
+    lowconc_force="--test-concurrency=3"
+  fi
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
   if has_explicit_concurrency "$@"; then
-    exec node --test "$@" "${files[@]}"
+    exec node --test $(suite_reporter_flags) "$@" "${files[@]}"
+  elif [ -n "$lowconc_force" ]; then
+    exec node --test "$lowconc_force" $(suite_reporter_flags) "$@" "${files[@]}"
   else
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
   fi
@@ -669,7 +885,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|governance|serial|lowconc, comma-separated)" >&2
     exit 2
   fi
   shift 2
@@ -678,15 +894,26 @@ fi
 if [ "${1:-}" = "--list-groups" ]; then
   # Metadata mode (AC10) — no test run, no split-or-commit scan. Always reports the FULL
   # deduped glob's per-group counts, independent of any --group.
+  check_group_declarations
   list_groups
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
-  # --group if given, else the default product,engine set.
+  # --group if given; else the DEFAULT RUN's full selection = the product,engine body (with
+  # governance self-skip passthrough) PLUS the lowconc phase files — a default `bash
+  # scripts/test.sh` executes BOTH (the concurrent body, then the serial phase, then the lowconc
+  # phase), so no-args --list-files reports the full reachable surface and keeps the
+  # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
+  # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
+  # default GROUP SET; it is in the default RUN (its own phase) — hence
+  # `--group product,engine --list-files` differs from no-args unless lowconc is named
+  # (runner-grouping AC6 pins `--group product,engine,lowconc --list-files == no-args --list-files`).
+  check_group_declarations
   if [ -n "${groups}" ]; then
     select_files "$groups"
   else
     select_files "$(effective_groups)"
+    select_files "lowconc"
   fi
   exit 0
 elif [ -n "${groups}" ]; then

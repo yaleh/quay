@@ -1,4 +1,8 @@
-// @test-group engine
+// @test-group lowconc
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (KNOWN-LOAD-SENSITIVE family — each --loop test spawns a real quay-init.sh →
+// python3 children) so it runs in the concurrency-1 serial phase, never competing with the
+// concurrency-8 main body's worker pool.
 // quay-init-loop-driver.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync, self-failing at ~167s with 'Promise resolution is still pending'. Each split
@@ -9,7 +13,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // gap-the-tick-doc-ships-three-contradictory-loop-drivers
 // 外层 tick 文档只声明一个循环驱动（CronCreate）；另外两个（ScheduleWakeup / /loop Nm）被显式处置。
@@ -34,14 +38,17 @@ test('AC1 — the outer tick doc declares exactly ONE loop-driving mechanism (Cr
 });
 
 test('AC1 (laid-down) — the rendered outer tick doc also declares exactly one driver after substitution', () => {
-  const ws = makeTmp();
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): this install
+  // test now runs from the shared READ-ONLY laydown template (one real quay-init --loop per file)
+  // instead of a fresh real install per test — the laid-down state is byte-identical, so the
+  // assertion surface is unchanged.
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
     assert.deepEqual([...distinctDriverMechanisms(outer)].sort(), ['CronCreate'],
       'the laid-down outer tick doc must also declare exactly one driver (the negative control survives shipping)');
-    assert.ok(outer.includes('loop-driver-check.sh'), 'the laid-down doc must reference the single-driver check');
+    assert.ok(outer.includes('quay-suite.ts loop-driver-check'), 'the laid-down doc must reference the single-driver check (40→6 consolidated command)');
   } finally { cleanup(ws); }
 });
 
@@ -50,7 +57,10 @@ test('AC1 (skill) — the cold-start skill\'s only driver is CronCreate and it e
   assert.ok(skill.includes('CronCreate'), 'the skill re-creates the cron via CronCreate');
   assert.ok(!skill.includes('ScheduleWakeup'), 'the skill must NOT instruct ScheduleWakeup (AC3 dispose)');
   assert.ok(!LOOP_NM_RE.test(skill), 'the skill must NOT instruct a /loop Nm invocation (AC3 dispose)');
-  assert.match(skill, /loop-driver-check\.sh/, 'the skill must run the single-driver check');
+  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the check via the grouped
+  // entry point — `quay-suite.ts loop-driver-check`. The test asserts the SAME command name the
+  // skill uses (AC2: docs and tests must not each write their own).
+  assert.match(skill, /quay-suite\.ts loop-driver-check/, 'the skill must run the single-driver check');
   assert.match(skill, /LIVE/, 'the skill must require the check to report LIVE');
   assert.match(skill, /double-trigger/i, 'the skill must name the double-trigger it prevents');
 });
@@ -67,20 +77,16 @@ function runDriverCheck(ws) {
 }
 
 test('AC4 — loop-driver-check.sh is laid down by quay-init --loop', () => {
-  const ws = makeTmp();
+  const { ws } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.ok(fs.existsSync(path.join(ws, 'plugin', 'scripts', 'loop-driver-check.sh')),
       'loop-driver-check.sh must be laid down with the loop mechanism');
   } finally { cleanup(ws); }
 });
 
 test('AC6 — zero drivers = STALLED (the loop will never tick), exit 3', () => {
-  const ws = makeTmp();
+  const { ws } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const c = runDriverCheck(ws);
     assert.equal(c.status, 3, `no driver must be STALLED (exit 3), got ${c.status}: ${c.stdout}`);
     assert.match(c.stdout, /STALLED/, 'must report STALLED, not "all normal"');
@@ -88,10 +94,8 @@ test('AC6 — zero drivers = STALLED (the loop will never tick), exit 3', () => 
 });
 
 test('AC4 — exactly one cron driver = LIVE, exit 0 (end-to-end: one trigger source)', () => {
-  const ws = makeTmp();
+  const { ws } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'cron');
     const c = runDriverCheck(ws);
     assert.equal(c.status, 0, `one cron driver must be LIVE (exit 0), got ${c.status}: ${c.stdout}`);
@@ -101,10 +105,8 @@ test('AC4 — exactly one cron driver = LIVE, exit 0 (end-to-end: one trigger so
 });
 
 test('AC5 — a second driver = DOUBLE-TRIGGER, exit 4 (double-trigger negative control)', () => {
-  const ws = makeTmp();
+  const { ws } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'cron');          // step 4: CronCreate
     writeDriver(ws, 'loop');          // §4a relapse: a second /loop driver
     const c = runDriverCheck(ws);
@@ -114,10 +116,8 @@ test('AC5 — a second driver = DOUBLE-TRIGGER, exit 4 (double-trigger negative 
 });
 
 test('AC6 (remove direction) — removing the only driver is detected as STALLED, not "all normal"', () => {
-  const ws = makeTmp();
+  const { ws } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'cron');
     assert.equal(runDriverCheck(ws).status, 0, 'precondition: one driver is LIVE');
     fs.rmSync(driverReg(ws), { force: true });
@@ -128,10 +128,8 @@ test('AC6 (remove direction) — removing the only driver is detected as STALLED
 });
 
 test('AC3 — a disposed mechanism cannot become the sole driver (BANNED-MECHANISM, exit 5)', () => {
-  const ws = makeTmp();
+  const { ws } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
-    assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     writeDriver(ws, 'wakeup');        // the disposed self-paced wakeup as the only driver
     const c = runDriverCheck(ws);
     assert.equal(c.status, 5, `a non-cron sole driver must be BANNED-MECHANISM (exit 5), got ${c.status}: ${c.stdout}`);
@@ -150,10 +148,11 @@ const INIT_LOOP_ARGS = ['--loop', '--root', 'WS', '--project', 'proj', '--test-c
 // tick docs exists in the target (missing_after_install = 0). The referenced set is non-empty —
 // a check that only ever sees the empty set is indistinguishable from one that sees nothing.
 test('AC1/AC4 — every plugin/scripts/* reference in the shipped skills/tick docs lands after --loop (missing_after_install = 0)', () => {
-  const ws = makeTmp();
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): runs from the
+  // shared READ-ONLY laydown template — install result is the template's captured stdout/stderr
+  // (rewritten to this copy's path), laid-down state is byte-identical to a fresh real install.
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
-    const r = runInit(ws, args);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /verify-referenced-landed: OK/, 'quay-init must run the referenced⊆landed check and report OK');
     const refs = extractRefs(pluginDir, 'plugin/scripts');
@@ -223,10 +222,8 @@ test('AC3 — bidirectional control: an unlanded script reference is reported; r
 // may be referenced yet unaccounted-for (that would be drift the two-hand-maintained-lists check
 // exists to catch).
 test('AC7 — every orchestration/* and docs/analysis/* reference is landed or declared (complete classification)', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
-    const r = runInit(ws, args);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const selfcreate = declaredSet(pluginDir, 'self-create');
     const refdoc = declaredSet(pluginDir, 'reference-doc');
@@ -245,10 +242,8 @@ test('AC7 — every orchestration/* and docs/analysis/* reference is landed or d
 // AC8 — local-state files are NOT shipped as empty factory copies (which would break the
 // byte-identical upgrade check), and are declared self-create in init/SKILL.md with a command.
 test('AC8 — local-state files are not shipped empty; they are declared self-create with a command', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const args = INIT_LOOP_ARGS.map((a) => (a === 'WS' ? ws : a));
-    const r = runInit(ws, args);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     // The local-state files must NOT be laid down by --loop (no empty factory copies).
     for (const f of ['orchestration/tick-log.md', 'orchestration/escalations.md',

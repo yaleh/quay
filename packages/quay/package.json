@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-dist.mjs"
+    "build": "node scripts/build-dist.mjs",
+    "postinstall": "node scripts/register-plugin.mjs"
   },
   "bin": {
     "quay": "./dist/quay.js"
@@ -24,7 +25,8 @@
     "bin",
     "src",
     "dist",
-    "plugin"
+    "plugin",
+    "scripts/register-plugin.mjs"
   ],
   "engines": {
     "node": ">=20.0.0"

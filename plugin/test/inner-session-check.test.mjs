@@ -80,8 +80,29 @@ function newHermetic(prefix = "quay-isc-") {
       return tmuxAt(sockPath, ["send-keys", "-t", sess, text, "Enter"], env);
     },
     cleanup() {
+      // Kill EVERY session on this hermetic socket — not just the `started` set. The factory
+      // (quay-topology.sh --session isc-factory/…) invoked with the hermetic env creates sessions
+      // DIRECTLY on this socket, invisible to `started`; leaving them orphaned leaks the server
+      // (删目录 ≠ 杀进程 — gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause).
+      // The socket is private to this test (mkdtemp'd, isolated TMUX_TMPDIR + explicit -S), so
+      // sweeping it cannot touch real sessions; per-session kill-session (never kill-server).
+      const ls = tmuxAt(sockPath, ["list-sessions", "-F", "#{session_name}"], env);
+      if (ls.status === 0 && ls.stdout.trim()) {
+        for (const name of ls.stdout.trim().split("\n").filter(Boolean)) {
+          tmuxAt(sockPath, ["kill-session", "-t", name], env);
+        }
+      }
       for (const name of started) {
         tmuxAt(sockPath, ["kill-session", "-t", name], env);
+      }
+      // TMUX_TMPDIR is NOT honored by tmux on this system (verified: a session spawned with
+      // TMUX_TMPDIR set still lands on /tmp/tmux-<uid>/default), so the factory scripts
+      // (quay-topology.sh --session topo-factory/topo-race/isc-factory) build on the DEFAULT
+      // socket — the hermetic sweep above cannot reach them. Kill the named factory sessions
+      // on the default socket explicitly (per-session kill-session, never kill-server). Scoped
+      // to the factory names this file creates so a real user session is never touched.
+      for (const fname of ["topo-factory", "topo-idem", "topo-race", "isc-factory"]) {
+        tmuxAt(null, ["kill-session", "-t", fname], process.env);
       }
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },

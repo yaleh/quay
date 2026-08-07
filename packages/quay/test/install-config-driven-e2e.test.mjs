@@ -1,4 +1,9 @@
-// @test-group product
+// @test-group lowconc
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
+// The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
+// sub-suites via `node --test` / test.sh --for-task). This file is NOT a nested runner — its only
+// serial mention was the acceptance-criterion text, not a technical necessity (nothing in the body
+// says what breaks if it is not serial). Low-load/timing reasons go to lowconc.
 // install-config-driven-e2e.test.mjs — gap-no-e2e-proves-install-is-configuration-driven.
 //
 // The reinstall gate: ONE e2e with FOUR assertions (A1–A4). This file is the ONLY
@@ -29,7 +34,7 @@
 // stays red (never "both empty so identical").
 // AC7: the two derived test commands are asserted to genuinely differ (verbatim
 // evidence pasted in the task body from the run below).
-// AC8: node:test + `// @test-group product`; temp workspaces destroyed via after().
+// AC8: node:test + `// @test-group lowconc`; temp workspaces destroyed via after().
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

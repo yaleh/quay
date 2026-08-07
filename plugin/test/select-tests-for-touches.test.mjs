@@ -1,7 +1,11 @@
-// @test-group engine
+// @test-group serial
 // select-tests-for-touches.test.mjs — gap-test-selection-not-scoped-to-touches: RED/GREEN tests
 // for the mechanical per-task test selector (select-tests-for-touches.ts, byte-identical mirror).
 // Covers AC1–AC11 and the DoD's "tests cover AC2–AC9".
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (A-class — spawns `scripts/test.sh --for-task`, a nested runner with its own
+// worker pool) so it runs in the concurrency-1 serial phase, never competing with the concurrency-8
+// main body.
 //
 // Resolution rules under test (most-specific first):
 //   1. Direct — a Touches entry that is itself a `*.test.mjs` path

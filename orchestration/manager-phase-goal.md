@@ -3,6 +3,13 @@
 **角色**：三项目（quay / archguard / meta-cc）管理者。**不是任何一个项目的外层。**
 **建立时间**：2026-08-03 11:5xZ ——人指出「你应该把自己这个阶段的 AC 明确列出来」。
 
+> **切分声明（2026-08-07，gap-manager-productization-five-constraints AC9 / SPEC-manager-
+> productization §6）**：本文件从 2026-08-07 起只装**本实验的阶段状态**——本阶段测什么、
+> B 机怎么用、archguard 排在哪、各 AC 的进度与判据数字。**「manager 这个角色该怎么做事」
+> 的产品行为（AC10 开轴、AC11 验证先被验证、角色边界纪律）已移入随包交付的
+> `plugin/loop/manager-loop-tick.md` §6**，本文件不再承载、也不再重复那些规则——manager tick
+> 时以 plugin 那份为准（动词留文本，名词留本层）。
+
 ---
 
 ## 目标
