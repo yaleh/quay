@@ -7654,3 +7654,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 冲突（同位置心跳）**：cherry-pick 69e517b3 → 2 冲突（fast-mode 4b + orchestrator 3d）——integration 已有 cross-machine-verify 心跳（gap-no-post-merge 的 05456e96 带入），observer-registry 想在同一 4b/3d 位置加 registry-audit 心跳。**与 probe-mechanism 完全同类**（都撞 cross-machine-verify 的 4b）。doc：冲突 → needs-human。标 needs-human，worktree/branch 保留 69e517b3。
 - **→ 两个 needs-human 共享同一裁定**：probe-mechanism + observer-registry 的 step-4b/3d 心跳合并/重排可一并由人裁决（cross-machine-verify + registry-audit 并存为 4b/4c + 3d/3e）。
 - **在飞 2/2（真实）**：liveness-saturation + tmux-leak。observer-registry worktree 保留。
+
+### 事件 03:1xZ（liveness-saturation 完成——fan-in + cross-machine-sync 回填）
+
+- **liveness-saturation 完成**（真实实现）：session-liveness.sh 补 SESSION-SATURATED 上下文饱和维度（cache_read_input_tokens ≥ 450k + 未应答输入）；AC1-6 + DoD 全勾。**fan-in 成功**：cherry-pick b57e3f7f → integration 97452de6（4 files 无冲突）。任务文件入 develop，worktree 清理。
+- **cross-machine-sync 回填 2/5**：核心机制（sync-lag-check.sh）已落地 develop（8 ACs 勾），指示 agent 验当前实现 + 补 DoD。与 tmux-leak disjoint。
+- **在飞 2/2**：tmux-leak（外层优先，编辑中）+ cross-machine-sync。observer-registry worktree 保留（needs-human）。
