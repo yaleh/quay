@@ -65,7 +65,12 @@ print('suite=%s/%s age=%smin'%(d['state'],d.get('reason'),int(time.time()-os.pat
 git rev-list --left-right --count develop...integration | awk '{print "diverge="$1"/"$2}'
 echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '^[0-9a-f]* manager:')"
 ps -eo args | grep -q '[q]uay-0:outer.0 -S -3' && echo mon_outer=alive || echo mon_outer=DEAD
-ps -eo args | grep -q '[s]uite-state-trigger' && echo mon_suite=alive || echo mon_suite=DEAD`
+ps -eo args | grep -qF 'SUITE-TERMINAL' && echo mon_suite=alive || echo mon_suite=DEAD
+# ^ 2026-08-07：我把 suite 监视器从 suite-state-trigger --monitor 换成了自记 prev 的轮询
+#   （原因：suite-state-trigger 用共享的 .quay/suite-state-last.json 做边沿触发，
+#    outer 也挂着一个实例，两者互偷事件——我那个挂了 1h45m 零事件）。
+#   换监视器时【这条检查一度还指着旧签名】，等于换完就失去覆盖而不自知——
+#   §1.4e 同型：换实现要同步换判据，否则"检查通过"检查的是一个已经不存在的东西。`
 
 // ══ 交还给主循环的指令 ②：该判什么 ══════════════════════════════════════════
 // 每一条都对应一次实测过的失效，不是设想。
