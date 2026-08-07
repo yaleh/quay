@@ -111,7 +111,7 @@ const CLOSING = `**收尾（三件，缺一不可）**
 
 const AUDIT_SCHEMA = {
   type: 'object',
-  required: ['violations', 'moltenActions'],
+  required: ['violations', 'undeclaredActions'],
   properties: {
     violations: {
       type: 'array',
