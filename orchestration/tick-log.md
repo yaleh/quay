@@ -665,3 +665,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 逐核哪个真失败再路由（非盲目全路由）。套件红（三轮 13:26，无新跑）。在飞 0（内层主会话审计中）。
 > 主检出有 M plugin/test/quay-init-check-drift.test.mjs（内层 in-progress，不碰——单一写入者）。
 > Monitor mounted+targetOk 真。等内层审计 + 路由完 → 并发 8 四轮。
+
+> **13:48Z 外层 tick（no-action——内层系统性 serial 路由完成，外层四轮验证启动）**：内层完成系统性
+> serial 路由（c4343421：5 个重 install 测试 → serial 22 文件：npm-pack-e2e / worktree-root-fs-check /
+> runtime-landing / capability-catalog / session-topology，均隔离通过 = 负载敏感类；capability-catalog
+> 自断言修复）。内层等外层四轮。外层更新 worktree 到 c4343421（.quay 软链重建，旧数据 → .quay-wtl3），
+> 启动并发 8 四轮。state=running (13:48:03)。若四轮 fail 0 / cancelled 0：并发 8 真绿达成（human
+> ruling）→ un-hold session-pid + done-flip 批次 + 分叉合并。
