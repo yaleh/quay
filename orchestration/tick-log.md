@@ -686,3 +686,15 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 文件（git checkout .quay，74 路径）、移走保留目录到 /tmp/quay-suite-wtl-backup、worktree 干净；
 > runner 改用 --state-file/--log-file 指主检出（不再用软链）。已重跑（state=running 14:13:09）。
 > 测试本身全绿 ⇒ 这次若 worktree 保持干净应真绿。
+
+> **14:20Z 外层 tick（correct-self——14:17 重跑 72 崩溃根因是我清理 worktree 时清掉 config.yml）**：
+> 管理者诊断（确认）：四轮（13:48）实为**全绿**（主体 2761 + serial 230 = 2991 用例零失败），红只来自
+> suite-after 脏树断言（脏的是外层自己的脚手架：.quay 软链 + .quay-worktree-*/.quay-wtl3，非测试写入）。
+> 我"修脏树"时用 `git checkout .quay` 恢复跟踪文件、但 config.yml 是 gitignored 不在分支——**把测试
+> 运行所需的 .quay/config.yml 一并清掉了**。五轮（14:13，284s）72 条全文件级失败、统一报
+> "Cannot find repo root: no .quay/config.yml found upward"——四轮红是"树脏"（代码绿）、五轮红是
+> "树残"（config 缺）。**修复**：复制主检出 config.yml 进 worktree（gitignored 不脏树）+ 内层已立
+> be0cca93（assert-clean-tree 排除协调 scratch 目录）+ 重跑（14:20:01，state=running，干净窗口）。
+> **管理者实测**：serial 段 1073s/230 用例/22 文件 = 整轮 77% 时间只跑 8% 用例（单用例 45 倍成本）；
+> runner-grouping 被路由非修复（300s flags-only 仍在 serial 里）——这两条是测量，跟进但不阻塞绿。
+> 等重跑结果：绿 → un-hold session-pid + done-flip + 分叉合并。
