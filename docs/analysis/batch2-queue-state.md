@@ -7950,3 +7950,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **静态层先行通过**：checker-mutation RESULT: PASS（每 checker 注入缺陷 RED / 恢复 GREEN，mutations_stayed_green=0）。
 - **预期**：21 条 integration-content 失败 + 7 条 load-sensitive 全消失 → `fail 0 / cancelled 0` 真绿。若绿 → session-pid（7647aaf8）held un-hold + 全量派发恢复。
 - **在飞 0/5**。held 1（session-pid）。monitor buqx5kny2 挂着等结果。
+
+### 事件 13:2xZ（并发 8 三轮前置——quay-init-check-drift 补 serial 路由）
+
+- **并发 8 二轮（13:08 run）：21 → 仅剩 1 条失败**。隔离验证 quay-init-check-drift.test.mjs **4/4 全过**（AC1/control 17s）——负载伪影（重 quay-init --loop 测试并发 8 下超时），非真内容缺陷。
+- **修法**：`quay-init-check-drift.test.mjs` 从 `@test-group governance` 改为 **`@test-group serial`**（同 fix-21 AC5 方向）。serial 成员 15→16。验证：并发 8 默认 body 中 **0 出现**（已排除）；serial 组 16 文件。commit 92d16611 → **integration 92d16611**（FF，b209f4fd→92d16611）。
+- **integration 现为并发 8 真绿候选**：serial 16 + 21-fix + 全部 fan-ins。**等外层并发 8 三轮验证**。
+- **held**：session-pid（7647aaf8）。在飞 0/5。
