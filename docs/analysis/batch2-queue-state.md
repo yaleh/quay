@@ -7529,3 +7529,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **full-suite-wait 完成**：机制本体 + `--wait-check` 已由 commit ac2506b6（本任务）+ f460d07b（merge）落地到 develop → **无代码 fan-in**。本 re-dispatch 修正 3 处陈旧证据行号（scripts/test.sh:387→:406、runner.ts:85-92→:97-98、trigger.ts:63-70→:82-83）+ 重验（--wait-check stopSignal=false / --fail-fast-check stopSignal=true / 24/24 / scoped exit 0）。任务文件已入 develop，worktree/branch 清理。
 - **在飞 3/5**：concurrency-derivation + observer-registry + manager-skill。
+
+### 事件 00:4xZ（dispatch 续——full-suite-wait 完成 + 再派 2）
+
+- **inner-session-check 派发 5/5**：discovery fallback 静默 → 退化路径 fail-closed + 负控制。与全部在飞 disjoint。worktree `quay-worktrees/inner-session-check`。
+- **tmux-leak 不可派**：Touches 含 overbroad glob `orchestration/**` → conservative deferral 对全部在飞（touch 声明问题，需先修 Touches）。
+- **在飞 4/5**：concurrency-derivation + observer-registry + manager-skill + inner-session-check。readme-source 仍等 concurrency-derivation（CLAUDE.md 撞）。
