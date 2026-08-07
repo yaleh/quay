@@ -7979,3 +7979,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **runner-grouping 3 失败为 pre-existing 负载/时序**（flags-only 摘要缺失等，此前 7 条 load-sensitive 族），非本路由引入（基线对比 backgrounded）。
 - **integration c4343421**（FF b280289e→c4343421）。等外层并发 8 四轮验证。
 - **held**：session-pid（7647aaf8）。在飞 0/5。
+
+### 事件 13:5xZ（并发 8 四轮验证 run——系统性 serial 路由后）
+
+- **13:48 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：HEAD=**c4343421**（系统性 serial 22 + 21-fix + 全部 fan-ins）。serial 路由就位（runtime-landing/session-topology 等均 serial）。
+- **预期**：重 install 测试全部进 serial → `fail 0 / cancelled 0` **真绿**。若绿 → session-pid（7647aaf8）un-hold + 全量派发恢复。
+- **在飞 0/5**。held 1（session-pid）。monitor b7xbnyuwx 挂着等结果。
