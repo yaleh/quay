@@ -154,8 +154,8 @@ $ bash scripts/test.sh plugin/test/batch-vocabulary-check.test.mjs
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上；AC4 的 grep 分类表逐字贴任务体
-- [ ] 一次真实使用：至少一条新 tick-log/commit 条目用 `verification-round-N` 词汇（记录）
+- [x] AC1–AC6 全部勾上；AC4 的 grep 分类表逐字贴任务体
+- [x] 一次真实使用：至少一条新 tick-log/commit 条目用 `verification-round-N` 词汇（记录）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
@@ -249,3 +249,50 @@ $ grep -rn '同批\|批派发\|batch-N' plugin/loop/fast-mode-loop-tick.md plugi
 ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0
 ```
 scoped 静态检查全过：test-framework-policy-check PASS、test-isolation-check PASS、task-contract-check（strict-subset 本任务）无违规、drive-contract-check PASS。
+
+## Finalize verification（2026-08-07，worktree split-batch 收尾实跑）
+
+**基线**：词汇拆分机制工作已由前序 agent 提交并合入 develop 谱系（`a8e8a0dc`/`3241b4fb`，原 `b67c49f3`）。
+本 worktree 分支已快进到当前 develop（`17318a82`）；本任务 commit 只含收尾：DoD 勾选 + 收尾证据，
+零代码/文档/测试变更。
+
+**Contract measure（band = 0，重跑）**：
+```bash
+$ grep -rn '同批\|批派发\|batch-N' plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md
+（无输出，exit 1 = 零命中）⇒ batch_misread_count = 0
+```
+
+**Contract invariant（重跑）**：`verification-round-N` 在 fast-mode-loop-tick.md ×10、
+orchestrator-loop-tick.md ×6；`不是分派门控` ×5/×2；`分派是滚动的` ×4/×2。
+
+**AC4 负控制（fresh，2026-08-07）**：构造「可同批派发 / 批派发门控：攒满 batch-N」⇒ grep 报出 2 行
+（exit 0 = 必被标记）；同文本改回新词汇（可并发/无触摸重叠，非门控分批；分派是滚动的，不叫批号）⇒
+零命中（exit 1）。证明白名单不是万能借口。
+
+**AC6 测试（focus）**：
+```
+$ bash scripts/test.sh plugin/test/tick-vocabulary.test.mjs
+✔ AC1/AC4 — measure: zero misreadable batch phrasing (同批/批派发/batch-N) in the tick docs
+✔ AC4 — negative control: a constructed 可同批/批派发/batch-N text MUST be flagged
+✔ AC4 — every `batch` line in the tick docs is classifiable (none is unclassified gate-reading prose)
+✔ AC2/AC5 — verification cadence is named verification-round-N with an explicit not-dispatch-gating annotation
+✔ AC6 — this file is node:test + // @test-group governance
+ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0
+```
+
+**scoped 静态 tier（`--for-task ... --allow-thin`）**：13/13 tests pass（batch-vocabulary-check 8 +
+tick-vocabulary 5），fail 0、cancelled 0；drive-contract-check PASS、test-framework-policy-check PASS、
+test-isolation-check PASS、checker-mutation-check PASS。
+
+**DoD #3（全量套件绿）——本 worktree 无法干净验证，如实留空**：全量套件在本 worktree 实跑约 45 分钟
+未绿。根因是**环境性**而非本任务回归：
+1. `.quay/config.yml` 是 gitignored 的本地工作区文件，worktree（新 checkout）缺它 ⇒ 依赖真实配置的
+   gate 测试（run-identity / cap-from-gate / gate-dispatch-coverage / resource-gate / ADR-001 等）因缺
+   配置失败；
+2. Node 26 高并发（~26 进程）下，一整批 plugin 测试报 `'Promise resolution is still pending but the
+   event loop has already resolved'`（node:test 环境性崩溃，非断言失败）——其中包含
+   `tick-vocabulary.test.mjs`，但它在隔离跑 5/5 pass、scoped 跑 13/13 pass，证明非真实回归。
+本任务 commit 只改任务文件，不可能让套件变红；套件绿的权威判据应看 develop 的外层 verification-round
+（驱动侧机制）。已把 `.quay/config.yml` 复制进 worktree（本地 gitignored，不入 commit），供后续重跑。
+
+**DoD「一次真实使用」**：本 commit message 用 `verification-round-N` 词汇（见提交信息）。
