@@ -372,3 +372,30 @@ gh workflow run publish-plugin-dist.yml   # 从 master 重建 dist-plugin，不�
 ```
 
 **这不是催促**——是把「那一次动作具体是什么、代价多大」测清楚放在这里，等人决定。
+
+## 2026-08-07 15:1xZ — 分支合并：integration→develop 分叉，batch-merge 工具只支持 FF、fail-closed needs-human
+
+**现象**：并发 8 真绿已达成（integration 71734885，state=green，human ruling「并发拿到真绿」兑现）。
+按裁定「merge waits for fast reliable concurrency-8 suite」，合并应可进行。但 `integration-batch-merge.sh
+--dry-run` 报 **NOT-FAST-FORWARD（develop 有 integration 缺的 commit，分叉）→ needs human**。
+
+**分叉构成**：develop 有书纪 commit（外层/管理者 tick-log 等）integration 缺；integration 有任务 commit
+（serial 机制 f062caf9 / fix-21 b209f4fd / 40→6 内容 / 系统性 serial 路由 c4343421 / tmux 修复 71734885）
+develop 缺。两线模型下 develop 只被批量合推进、任务只合 integration ⇒ 分叉是**预期形态**，但 batch-merge
+的 FF pre-check 不认识它（SPEC ruling 2026-08-06：FF premise falsified，实际需真 merge）。
+
+**已尝试**：dry-run 确认分叉 + needs-human；工具不移动 ref（fail-closed 安全）。
+
+**为什么超出授权**：真 merge integration→develop 可能冲突（develop 曾 revert 40→6 = 7642849a 删了
+quay-session.ts 等，integration 有 40→6 内容 ⇒ 冲突风险真实）。外层不盲 merge；batch-merge 工具只支持 FF。
+
+**建议选项**：
+1. **修 batch-merge 工具支持真 merge**（gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling
+   的 scope，该任务在 notYetFlipped、DoD 需连跑 2 次全绿）——让工具安全处理分叉合并；
+2. **人裁定直接真 merge**（手动作业或授权 inner 处理），承担 40→6 revert-vs-content 冲突的解决；
+3. **先同步书纪**：把 develop 的书纪 commit 合进 integration（让 integration 重新成为 develop 后代），
+   再走 FF 批量合——但这是反向合并，同样需处理。
+
+**关联**：gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling（notYetFlipped）；
+gap-forty-to-six-remerge-needs-tests-updated-first（40→6 内容已随 fix-21 在 integration 验证绿，remerge
+前提已满足）。
