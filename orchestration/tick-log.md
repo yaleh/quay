@@ -603,3 +603,12 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > topology 分类 / 追加重 laydown serial 路由 / 并发 8 真绿 / 交叉标注 40→6），已 send-keys 驱动内层
 > （delivered: true）。路径：内层修 21 条 → 外层并发 8 重跑 → 真绿 → 放行 done-flip 批次 + 处理分叉
 > 合并。serial 组任务（gap-suite-concurrency-8-green）DoD 要求并发 8 真绿，未达成前不翻 done。
+
+> **12:15Z 外层 tick（correct——纠偏内层 fix-21 worktree 基底）**：内层派发 fix-21 agent（读
+> capability-catalog.test.mjs），但其 task worktree 基底是 **develop（63ec847a）**——**错**。git 核证：
+> 40→6 合并 a4b1d9a9 + revert 7642849a 都在 develop（revert 删掉了 quay-session.ts 等整合脚本）；
+> **integration 有 40→6（f062caf9）+ serial 机制**。内层 d3b455ee 分析"integration-stale (missing
+> 40→6 refactor develop has)"**与事实相反**——21 条失败只在 integration 树存在（40→6 脚本破坏 catalog /
+> SKILL.md-测试名不一致），develop 树上 capability-catalog 会过（无 40→6 脚本）。已 send-keys 纠偏：
+> 任务分支应基于 integration（f062caf9）。agent 已转向正确诊断（Checking @instrument in quay-suite.ts）。
+> 内层在飞：fix-21 + serial 组（DoD 未达成）。套件红（11:39，无新跑）。等内层修 21 → 并发 8 重跑。
