@@ -115,10 +115,12 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 资源闸是**外层后台 runner 起跑前**要过的闸，不是 inner 的。inner 只保留 `--for-task` 选中集
 （秒级，走 scoped 路径，不触资源闸）。
 
-**DoD 的最后「连跑 2 次全绿」不因上述放宽（AC4 负控制，`gap-two-thirds-of-a-task-is-polling-a-suite-log`）**：
+**任务 DoD 不含全量套件；全量套件是批量合边界的闸门（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge`）**：
 `--for-task` 跳资源闸、只跑 `## Touches` 选中集，**对「这次改动有没有破坏别处」是无知的**——它只能用在
-迭代中途。任务收尾（外层异步）仍必须按 DoD 要求**连跑 2 次全量全绿**（`fail 0` 且 `cancelled 0`，判绿
-三条件见下）才算 done。砍的是迭代中间的跑法，不是闸——把「少跑全量」当目标就是把方向 C 做成方向 A。
+迭代中途。**全量套件绿是批量合边界的闸门**：外层验证轮只在 `state: green` 时把 `$MERGE_TARGET`→
+`$FORK_BASELINE` 批量合（判绿三条件见下）。任务自身的 DoD **不写**「完整套件连跑 2 次全绿」——移除的是
+任务级那份重复，批量合边界那道闸**原封不动**（保护总量不变、耦合消失）。把「少跑全量」当目标就是把方向 C
+做成方向 A。
 
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次（历史引用）
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a（**历史批名**，指旧的全量验证轮次，保留不改名）那次

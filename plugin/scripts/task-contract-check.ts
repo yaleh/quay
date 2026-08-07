@@ -218,11 +218,58 @@ export function checkTickedAcSelfAdmission(acSection) {
   return findings;
 }
 
+// ── Check 6: the DoD full-suite-demand line (gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge, AC2) ──
+// The full-suite-green criterion is correctly a BATCH-MERGE BOUNDARY gate (fast-mode-loop-tick.md
+// step 3 / 红窗规则: red blocks $MERGE_TARGET→$FORK_BASELINE); the TASK-level duplicate in `## Definition
+// of Done` ("完整套件连跑 2 次全绿") couples every task to a slow global signal it cannot control.
+// NEW tasks must not carry this demand. The 86 (measured 2026-08-07) legacy occurrences are
+// grandfathered in docs/analysis/dod-suite-line-baseline.md — a SHRINK-ONLY list, so a task NOT on
+// that list whose DoD carries the demand is a NEW occurrence ⇒ reported (and, over the full store,
+// a ratchet growth ⇒ exit 1).
+//
+// The demand is matched by the phrase family (完整套件 … 连跑|绿 within 40 chars) — NOT bare
+// 「完整套件」: a DoD that says 「本任务自身不再要求完整套件」 or 「完整套件待资源闸 GO 后在 fan-in 补跑」
+// is the NEW correct framing (the gate lives at the batch-merge boundary) and must NOT be flagged.
+const DOD_SUITE_LINE_DEMAND_RE = /完整套件[\s\S]{0,40}?(?:连跑|绿)/;
+export const DOD_SUITE_LINE_BASELINE_REL = "docs/analysis/dod-suite-line-baseline.md";
+
+/** Read the shrink-only grandfather list of task files whose DoD legitimately still carries the
+ * full-suite demand. Absent file ⇒ empty set (nothing grandfathered — every demand is reported). */
+export function readDodSuiteLineBaseline(root) {
+  const p = path.join(root, DOD_SUITE_LINE_BASELINE_REL);
+  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
+  const text = fs.readFileSync(p, "utf8");
+  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
+  const baseline = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    baseline.add(t);
+  }
+  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+}
+
+/** A task's `## Definition of Done` section carries the full-suite demand AND the file is not
+ * grandfathered ⇒ a new occurrence (AC2 negative control: a constructed task with the line is flagged). */
+export function checkDodSuiteLine(body, taskFileRel, grandfathered) {
+  const dod = extractSectionFenceAware(body, "Definition of Done");
+  if (dod === null) return [];
+  if (!DOD_SUITE_LINE_DEMAND_RE.test(dod)) return [];
+  if (grandfathered.has(taskFileRel)) return [];
+  return [{
+    code: "dod-suite-line",
+    what: "DoD 含「完整套件连跑 2 次全绿」——全量套件绿是批量合边界的闸门（fast-mode-loop-tick.md 红窗规则），任务 DoD 不含它；见 tasks/gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge.md (AC2)",
+  }];
+}
+
 // ── Per-task scan ────────────────────────────────────────────────────────────────────────────────────
 // Returns { taskId, violations: [{code, what}], info: [{code, what}] }.
 // `violations` feed the ratchet list; `info` is non-ratchet context (absent sections on tasks that
 // have not opted into the mechanism — the pre-ratchet baseline).
-export function scanTaskText(text, taskFileRel = "") {
+// `dodSuiteLineBaseline` (a Set of repo-root-relative task file paths) is the grandfather list for
+// the DoD full-suite-demand check (gap-suite-green-gate-..., AC2): files ON the list keep their
+// legacy DoD line; a file NOT on it with the demand is a NEW occurrence ⇒ violation.
+export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = new Set() } = {}) {
   const task = parseTask(text);
   const body = task.body;
   // parseTask does not surface `status`; read it from the raw frontmatter for the done-task
@@ -253,6 +300,10 @@ export function scanTaskText(text, taskFileRel = "") {
     if (f.code === "dispatch-review-missing" && !contract.present) info.push(f);
     else violations.push(f);
   }
+
+  // Check 6: DoD full-suite-demand line (gap-suite-green-gate-..., AC2) — a NEW occurrence (a file not
+  // on the shrink-only grandfather list whose DoD carries the demand) is a violation.
+  violations.push(...checkDodSuiteLine(body, taskFileRel, dodSuiteLineBaseline));
 
   const idMatch = task.frontmatterRaw.match(/^id:\s*(.+)$/m);
   const taskId = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : path.basename(taskFileRel || "task", ".md");
@@ -364,15 +415,24 @@ export function runCli(argv) {
   const allViolations = [];
   const allInfo = [];
   const perTask = [];
+  // Check 6 (dod-suite-line): the shrink-only grandfather list. Files on it keep their legacy DoD
+  // full-suite demand; a file NOT on it with the demand is a NEW occurrence. Ceiling breach (the list
+  // itself grew past its baseline-count header) is a ratchet violation independent of task violations.
+  const dodBaseline = readDodSuiteLineBaseline(wsRoot);
   for (const file of list) {
     const rel = path.relative(wsRoot, file);
     const text = fs.readFileSync(file, "utf8");
-    const res = scanTaskText(text, rel);
+    const res = scanTaskText(text, rel, { dodSuiteLineBaseline: dodBaseline.baseline });
     for (const v of res.violations) allViolations.push(`${rel}: ${v.code}`);
     allInfo.push(...res.info.map((i) => ({ file: rel, ...i })));
     if (res.violations.length > 0 || res.info.length > 0) {
       perTask.push({ file: rel, taskId: res.taskId, violations: res.violations, info: res.info });
     }
+  }
+  const dodCeilingBreach =
+    dodBaseline.baselineCount !== null && dodBaseline.baseline.size > dodBaseline.baselineCount;
+  if (dodCeilingBreach) {
+    console.error(`task-contract-check: dod-suite-line baseline CEILING BREACH — docs/analysis/dod-suite-line-baseline.md has ${dodBaseline.baseline.size} entries but baseline-count: ${dodBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-suite-green-gate-..., AC2)`);
   }
 
   const currentEntries = [...new Set(allViolations)].sort();
@@ -392,13 +452,13 @@ export function runCli(argv) {
   let writeOutcome = null;
   if (writeRatchetFlag && !growth && !subset) {
     writeOutcome = writeRatchet(wsRoot, currentEntries, { reset: resetBaseline });
-    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset });
+    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, dodCeilingBreach });
   }
 
-  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset });
+  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach });
 }
 
-function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false }) {
+function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false }) {
   if (json) {
     const report = {
       workspaceRoot: wsRoot,
@@ -413,6 +473,7 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
         resolved: resolved,
         growth,
       },
+      dodSuiteLineCeilingBreach: dodCeilingBreach,
       writeOutcome,
     };
     console.log(JSON.stringify(report, null, 2));
@@ -438,7 +499,8 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
   // is a failure — the touched task's Contract is change-relevant, so scoped MUST catch it (AC4-i).
   // The ratchet comparison stays skipped (unrelated tasks are not scanned, so nothing to compare).
   const strictFail = strictSubset && subset && perTask.some((t) => t.violations.length > 0);
-  process.exit(growth || strictFail ? 1 : 0);
+  if (dodCeilingBreach && !json) console.log("task-contract-check: DOD-SUITE-LINE BASELINE CEILING BREACH — grandfather list can only get SHORTER");
+  process.exit(growth || strictFail || dodCeilingBreach ? 1 : 0);
 }
 
 // Entry point when run directly (not imported).

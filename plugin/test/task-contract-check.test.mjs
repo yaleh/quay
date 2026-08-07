@@ -40,7 +40,10 @@ import {
   readRatchet,
   writeRatchet,
   invokeEntryPath,
+  checkDodSuiteLine,
+  readDodSuiteLineBaseline,
   DATA_FILE_REL,
+  DOD_SUITE_LINE_BASELINE_REL,
 } from "../scripts/task-contract-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,12 +53,13 @@ const CHECKER = path.join(REPO_ROOT, "plugin", "scripts", "task-contract-check.t
 const fm = (labels, extra = 'extra:\n  schema: "v1"') =>
   `---\nid: T\ntitle: t\nstatus: ${labels.status || "todo"}\nlabels:\n${(labels.list || []).map((l) => `  - ${l}`).join("\n")}\n${extra}\n---\n`;
 
-function taskBody({ labels = [], status = "todo", contract, dispatchReview, ac, extraBody = "" }) {
+function taskBody({ labels = [], status = "todo", contract, dispatchReview, ac, dod, extraBody = "" }) {
   const parts = [];
   parts.push("## Proposal\n\nproposal body\n\n");
   if (contract !== undefined) parts.push(`## Contract\n\n${contract}\n\n`);
   if (ac !== undefined) parts.push(`## Acceptance Criteria\n\n${ac}\n\n`);
   if (dispatchReview !== undefined) parts.push(`## Dispatch review\n\n${dispatchReview}\n\n`);
+  if (dod !== undefined) parts.push(`## Definition of Done\n\n${dod}\n\n`);
   if (extraBody) parts.push(extraBody);
   return fm({ list: labels, status }, `extra:\n  schema: "v1"`) + parts.join("");
 }
@@ -522,6 +526,85 @@ test("dispatch-review-missing is a ratchet violation only when a Contract exists
     ac: `- [ ] AC1: x`,
   });
   assert.ok(scanTaskText(withContract, "tasks/b.md").violations.some((v) => v.code === "dispatch-review-missing"));
+});
+
+// ── Check 6: DoD full-suite-demand line (gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge, AC2) ──
+
+const SUITE_DEMAND_DOD = "- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）";
+
+test("AC2 negative control: a task whose DoD carries the full-suite demand and is NOT grandfathered → dod-suite-line", () => {
+  const text = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  const { violations } = scanTaskText(text, "tasks/new-task.md");
+  const v = violations.find((x) => x.code === "dod-suite-line");
+  assert.ok(v, JSON.stringify(violations));
+  // points at the rule source task (AC2: 报出并指向本任务)
+  assert.match(v.what, /gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge/);
+});
+
+test("AC2: the same demand is NOT a violation when the file IS on the shrink-only grandfather list", () => {
+  const text = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  const grandfathered = new Set(["tasks/legacy-task.md"]);
+  const { violations } = scanTaskText(text, "tasks/legacy-task.md", { dodSuiteLineBaseline: grandfathered });
+  assert.ok(!violations.some((x) => x.code === "dod-suite-line"), JSON.stringify(violations));
+});
+
+test("AC2: a DoD mentioning 完整套件 WITHOUT the demand (new-correct framing) is NOT flagged", () => {
+  // 「本任务自身不再要求完整套件」is the NEW correct framing (the gate lives at the batch-merge
+  // boundary) — bare 完整套件 must not fire; only the demand phrase (连跑|绿) does.
+  const text = taskBody({ status: "todo", dod: "- [ ] `--for-task` 选中集绿（**本任务自身不再要求完整套件——即以自身为首个应用**）" });
+  const { violations } = scanTaskText(text, "tasks/gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge.md");
+  assert.ok(!violations.some((x) => x.code === "dod-suite-line"), JSON.stringify(violations));
+});
+
+test("checkDodSuiteLine: absent DoD section → []", () => {
+  assert.deepEqual(checkDodSuiteLine("## Proposal\nx", "tasks/x.md", new Set()), []);
+});
+
+test("readDodSuiteLineBaseline: absent file → empty set + null count", () => {
+  const root = makeGitRoot("dslbaseline-absent");
+  const { baseline, baselineCount } = readDodSuiteLineBaseline(root);
+  assert.equal(baseline.size, 0);
+  assert.equal(baselineCount, null);
+});
+
+test("CLI AC2: a new task with the DoD demand (no grandfather baseline) is REPORTED; ratchet growth → exit 1", () => {
+  const root = makeGitRoot("dslcli");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  // Establish the contract ratchet over a clean store (baseline-count 0).
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--write-ratchet"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // A NEW task with the DoD demand, NOT on the (absent) grandfather list → new violation → exit 1.
+  const demand = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  fs.writeFileSync(path.join(root, "tasks", "t-demand.md"), demand);
+  r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /dod-suite-line/);
+  assert.match(r.stdout, /new since baseline: 1/);
+});
+
+test("CLI AC2: with the file on the grandfather list, the same demand is NOT a violation (exit 0)", () => {
+  const root = makeGitRoot("dslgrandfather");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  // Write the dod-suite-line grandfather baseline listing the demand task as grandfathered.
+  fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+  fs.writeFileSync(path.join(root, DOD_SUITE_LINE_BASELINE_REL), `# baseline-count: 1\n\ntasks/t-demand.md\n`);
+  const demand = taskBody({ status: "todo", dod: SUITE_DEMAND_DOD });
+  fs.writeFileSync(path.join(root, "tasks", "t-demand.md"), demand);
+  let r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root, "--json"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.ok(!report.violations.some((v) => v.code === "dod-suite-line"), JSON.stringify(report.violations));
+});
+
+test("CLI AC2: the grandfather baseline itself is shrink-only — a ceiling breach exits 1", () => {
+  const root = makeGitRoot("dslceiling");
+  fs.writeFileSync(path.join(root, "tasks", "t-clean.md"), CLEAN_TASK);
+  // baseline-count says 1 but the file lists 2 entries → the list grew → breach.
+  fs.mkdirSync(path.join(root, "docs", "analysis"), { recursive: true });
+  fs.writeFileSync(path.join(root, DOD_SUITE_LINE_BASELINE_REL), `# baseline-count: 1\n\ntasks/a.md\ntasks/b.md\n`);
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", CHECKER, "--root", root], { encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /BASELINE CEILING BREACH/);
 });
 
 // ── hasThresholdMarker ──────────────────────────────────────────────────────────────────────────────
