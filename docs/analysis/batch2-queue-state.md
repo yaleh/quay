@@ -8018,3 +8018,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修**：session-topology/inner-session-check 的 helper cleanup 加**默认 socket 工厂会话显式 kill**（topo-factory/topo-idem/topo-race/isc-factory，per-session kill-session 绝不 kill-server）。实测：测试后 CLEAN + tmux-leak-scan 全过。integration **71734885**。
 - **integration 现为**：serial 22 + 21-fix + assert-clean-tree 扩展 + 工厂 tmux 清理。**所有 round 4-7 红源已修**。等外层 final run。
 - **held**：session-pid（7647aaf8）。在飞 0/5。
+
+### 事件 15:2xZ（human ruling 兑现——并发 8 真绿达成，un-hold + 恢复派发）
+
+- **真绿达成**：integration 71734885，`state=green`（15:11 SUITE-GREEN）。human ruling「并发拿到真绿」兑现。round-9 GREEN 管理者独立验证。
+- **session-pid un-hold**：代码**早已在 integration**（byte-identical 核对 session-liveness.sh + monitor-mount-check.sh）——无代码 fan-in；task 文件入 develop + status ready→**done**（AC+DoD 全勾带证据）。worktree 清理，遥测 reconcile。
+- **恢复完整派发**：suite GREEN → red hold 解除。pool 21≥floor 20。slot-refill 推荐多为 stale（done-held/deferred）——真实可派 = **gap-suite-green-gate**（AC=7，suite-gate 去重，task-contract-check 并入机械检查，self-first 应用自身规则）。已派发（worktree suite-green-gate，telemetry 记录）。
+- **在飞 1/5**：suite-green-gate。suite GREEN。
