@@ -7999,3 +7999,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修**：已把主仓 `.quay/config.yml` 复制进 `/tmp/quay-suite-int/.quay/`（gitignored，不提交）。**下一轮应正常**。
 - **教训**：验证检出（/tmp/quay-suite-int）是 gitignored 配置的独立副本——外层重建检出时须重新铺 config（同 worktree 模式）。
 - **integration be0cca93**（serial 22 + 21-fix + assert-clean-tree 扩展）。held 1（session-pid）。在飞 0/5。
+
+### 事件 14:2xZ（并发 8 六轮验证 run——config 修复后）
+
+- **14:19 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：HEAD=**be0cca93**（serial 22 + 21-fix + assert-clean-tree 扩展），config 已铺（14:18 复制）。round-4 已证测试 fail 0；round-5 72 fail 是缺 config 的基础设施问题（已修）。**本轮应真绿**。
+- **在飞 0/5**。held 1（session-pid）。monitor b7xbnyuwx 挂着等结果。
