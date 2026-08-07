@@ -7852,3 +7852,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层人直接指令**：09:04 abort 后**重跑 `--lane-count 8`**（并发 8，~8min）——10:51 起新 RUNNING（laneCount 8）。resource gate GO（18.49）。
 - **2 agent 在飞确认**：dirty-tree-assertion + session-pid-blind 的 worktree 均在磁盘（94b5ef6e base）、agent 进程活跃（7 procs 引用 quay-worktrees）。**telemetry reconcile 误关括号**（报 worktree-gone——实际是 claude subagent 的 cwd 在 worktree、argv 不含路径，reconcile 按进程 argv 查不到）——AC6 括号≠subagent，**会话自持在飞集合为准**：在飞={dirty-tree, session-pid}。
 - **套件 RUNNING**（09:10:51 起，laneCount 8）。在飞 2/5，3 空槽。
+
+### 事件 09:1xZ（dirty-tree 完成 fan-in——suite-after 断言修复）
+
+- **dirty-tree-assertion 完成**（commit 4b23b2f6，6 files +174/-18）：`plugin/scripts/assert-clean-tree.sh` suite-after 断言过滤已知并发写入者——`^.. \.quay/`（control-plane scratch 如 last-pane.txt + 协调状态）与 `^.. orchestration/manager-tick-log\.md$`（manager 套件期间合法追加）；余下测试残留仍 FAIL（AC2 负控制）。ASSERT_CLEAN_TREE_EXCLUDES 可扩展。端到端实证：manager-tick-log 追加 + .quay scratch → PASS；根级 mkdtemp 残留 / 非写入者修改 → FAIL。scoped 14/14 + 静态层全过。
+- **fan-in**：cherry-pick 4b23b2f6 → integration 0e4eff84（4 code + task 文件留 develop 侧）。DoD 全量 2 绿 defer 外层批量合闸（scoped-only 规则 + gap-suite-green-gate 交叉标注）。
+- **套件 RUNNING**（09:10:51 laneCount 8）。**在飞 1**：session-pid-blind。4 空槽。
