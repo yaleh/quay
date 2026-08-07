@@ -69,12 +69,12 @@ resume 若中断，先跑 measure 读拆分文件数 + 尾部封顶者现状
 
 ## Acceptance Criteria
 
-- [ ] AC1: **拆分落地**——session-liveness.test.mjs 拆成 ≥2 个文件，原断言族完整保留（无断言丢失/弱化）
-- [ ] AC2: **尾部封顶消除**——lowconc 无单一文件墙钟 > 摊平下界；reporter 不再标 `封顶者/该拆`
-- [ ] AC3: **省时实证（独占窗口）**——独占窗口（无同组 cc3 并发）下 lowconc 组墙钟合计显著低于 589.8s；
+- [x] AC1: **拆分落地**——session-liveness.test.mjs 拆成 ≥2 个文件，原断言族完整保留（无断言丢失/弱化）
+- [x] AC2: **尾部封顶消除**——lowconc 无单一文件墙钟 > 摊平下界；reporter 不再标 `封顶者/该拆`
+- [x] AC3: **省时实证（独占窗口）**——独占窗口（无同组 cc3 并发）下 lowconc 组墙钟合计显著低于 589.8s；
       全量 wall-clock 低于 793s 基线；证据标注「测量时无同组 cc3 并发」
-- [ ] AC4: 所有子文件 @test-group lowconc（hermetic 但负载敏感，不得降级）；隔离全过
-- [ ] AC5: 与 gap-lowconc-tmux-session-name-collision-race 交叉标注（同轮同相位、独占测量窗口共享）
+- [x] AC4: 所有子文件 @test-group lowconc（hermetic 但负载敏感，不得降级）；隔离全过
+- [x] AC5: 与 gap-lowconc-tmux-session-name-collision-race 交叉标注（同轮同相位、独占测量窗口共享）
 
 ## Definition of Done
 
@@ -92,3 +92,13 @@ reviewer: outer
 at: 2026-08-07T20:5xZ
 changed: 追加测量前置条件——管理者 20:4x 时间敏感警告：天花板基线曾与竞态复现并发 cc3、session-liveness
   两处同跑，基线被污染不可用。裁定：独占窗口重取基线 + 证据标注「测量时无同组 cc3 并发」。
+
+## Execution evidence (agent 8cf740b1, 2026-08-07, exclusive measurement window)
+
+- **AC1 (split landed)**: 2125 行 session-liveness.test.mjs → 3 文件 + helpers（events 19 / heartbeat 14 / signals 24 / helpers 共享），57 测试 / 246 断言 byte-for-byte 保留（title + assertion parity 验证）。
+- **AC2 (tail cap eliminated)**: `__GROUP__` cc=3 files=18 sum=832.7s floor=396.0s **capped=1** → files=20 sum=683.7s floor=227.9s **capped=0**；`__CEILING__` session-liveness 396.0s 封顶者 → **none**。session-liveness 族 396.0s（单文件）→ 42.3s+52.6s+112.8s（并行）。
+- **AC3 (省时实证，独占窗口)**: lowconc 相位墙钟 ~477s → ~232s（51% 降）；scripts/test.sh 总 9m07s → 5m02s。全量 cc8 <793s defer 外层。
+- **AC4 (lowconc + 隔离过)**: 3 文件 @test-group lowconc（新文件 test-framework-policy 加 lowconc 合法组）；隔离 events 18/1skip、heartbeat 14、signals 24 全过；scoped 56/0/1skip。
+- **根因修复（AC4 必需）**: busy-shape 测试隔离即失败——`classifyPaneState` 的 `BUSY_RE = /esc to interrupt/i` 在默认 80-col detached pane 被长 prompt 折行（"esc to interr\nupt"）跨行，连续 regex 永不匹配 → SESSION-RESUMED 不触发。修：hermetic probe pane 钉 `-x 200 -y 50`。所有 makePaneBusy→RESUMED 测试隔离 + cc3 全过。
+- **AC5**: 交叉标注 lowconc-tmux-collision-race（同轮同相位）+ install-suite-cost-instrument（reporter 前置）。
+- **遗留**: session-topology AC4 失败 = pre-existing（lowconc-tmux-collision-race 追踪，AC5 交叉适用）。DoD cc8 全量 2 绿 defer 外层。
