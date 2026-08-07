@@ -99,7 +99,8 @@ DUE: architecture-analysis (interval:1440m) → probe architecture-analysis
 DUE: history-mining (interval:1440m) → probe history-mining
 ```
 
-**实测 2（Contract measure）**：`git log --oneline -1 --all --grep='Iteration 4[0-9]\|probe\|routine' --since='2026-08-01' | wc -l` ⇒ 接线后 >1（含本任务 commit）。
+**实测 2（Contract measure）**：`git log --oneline -1 --all --grep='Iteration 4[0-9]\|probe\|routine' --since='2026-08-01' | wc -l` ⇒ 1（band ≥1 满足；measure 为 `-1 | wc -l` 二值）。接线证据看 Contract **invoke**：
+`grep -rn 'routine-scheduler\|run-routines' plugin/loop/ plugin/scripts/ --include='*.md' --include='*.ts'` ⇒ **21 处命中**，其中 tick 文档命中 7 处（orchestrator-loop-tick.md 4 + fast-mode-loop-tick.md 3）——死亡证据原为「两个 tick 文档各 0 引用」，现在每 tick 文档都有机械接线点。
 
 **测试**：`bash scripts/test.sh experiments/quay-perpetual-stream/test/routine-scheduler.test.mjs packages/quay/test/loop-params.test.mjs` ⇒ **exit 0，tests 58 / pass 58 / fail 0**；scoped 静态 tier
 `bash scripts/test.sh --for-task gap-probe-mechanism-dead-15-days-rewire-to-two-layer --allow-thin` ⇒
