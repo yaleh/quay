@@ -7748,3 +7748,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **pool refill**：19<floor 20，promote 3（inner-panel 17 / batch-merge-ff 16 / cross-machine-readonly 15，self-touch 补）。pool→19，dispatchable_disjoint 11。
 - **4 连派（全 pairwise disjoint）**：cli-quay-init-collision（DIR-098 quay init 与 /quay:init 撞名）+ inner-panel（面板冻结行/状态转换）+ batch-merge-ff（integration-batch-merge 真 merge 模式，SPEC 裁定已否证 FF）+ cross-machine-observe（supervisor-deliver 读方向对称）。
 - **在飞 4/5**。
+
+### 事件 06:6xZ（cli-collision 完成——真实 fan-in）
+
+- **cli-collision 完成**（真实修复）：CLI `quay init` 对 `--loop` fail-closed（报错点名 flag + 指向 /quay:init skill + exit 1），顶层 help 去 loop 暗示，README 加 disambiguation，6 新测试。**fan-in**：cherry-pick 53cd6988 → integration 4850e255（4 code + task 文件）。任务文件入 develop（AC1-4 勾）。
+- **在飞 3/3**：inner-panel + batch-merge-ff + cross-machine-observe。2 空槽。
