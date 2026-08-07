@@ -117,8 +117,12 @@ resume 若中断，先跑 measure 读 plugin_registered，不要假设已接线
    `files` 增加 `scripts/register-plugin.mjs`（否则 tarball 不 ship 钩子，装完即 ENOENT）。
 3. **`packages/quay/scripts/package.sh`** — 新增 **pack-time 版本同步门**：
    `plugin/.claude-plugin/{marketplace.json,plugin.json}` 的版本必须 == `package.json` 版本，
-   否则 `exit 1`（漂移会让用户看到 `0.3.13` 却装到 `0.4.0`）。
-4. **`plugin/.claude-plugin/marketplace.json`** — `plugins[].version` **0.3.13 → 0.4.0**（与 package.json 同步）。
+   否则 `exit 1`（**漂移会让用户看到与 package.json 不一致的版本**）。
+4. ~~**`plugin/.claude-plugin/marketplace.json`** — `plugins[].version` **0.3.13 → 0.4.0**~~
+   **【已删除，2026-08-07 管理者撤回】**：0.3.13 vs 0.4.0 是误读——真交付物
+   `plugin/.claude-plugin/plugin.json` = 0.4.0、`packages/quay/plugin/.claude-plugin/plugin.json` = 0.4.0，
+   与包一致，**无不一致**。0.3.13 来自 `milestones/M239/worktrees/iteration-0/`（2026-08-01 就停止更新的
+   陈旧 milestone worktree 副本），非可安装物。本条 fix 前提（存在 0.3.13 需同步）**不成立**。
 5. **`README.md`** — Option A 补「npm 装完自动注册」路径 + 新小节
    「Using the npm-installed quay with Claude Code (`/quay:init`)」：
    verify 命令、restart 提示、`QUAY_SKIP_PLUGIN_REGISTER` 逃生舱、claude 不在 PATH 时的两条 CLI 回退命令；
