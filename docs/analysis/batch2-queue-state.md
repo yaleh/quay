@@ -7630,3 +7630,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **no-post-merge 完成**：移植 integration 5674e0ea 先验实现 + 修 3 缺陷（--branch 单数别名、gate_name basename、pushed_branch 命令调用 bug）。AC1-6 实跑（d=0.01h ≪ 2.2h 盈亏点、AC3 负控制红+点名、AC4 verifier≠merger、AC5 pending 面、AC6 随包）。**fan-in**：cherry-pick b279b669 → 冲突 AA cross-machine-verify.sh + UU periodic-push-backup.sh（integration 有旧版 5674e0ea，任务版带修复）——同任务超期更新，取任务修复版 → 05456e96。5/5 测试。
 - **liveness-saturation 派发 2/5**：session-liveness 看不见上下文饱和（alive 但无法接输入）。全闸过 + 与 observer-registry disjoint。worktree `quay-worktrees/liveness-saturation`。
 - **在飞 2/2**：observer-registry + liveness-saturation。3 空槽。
+
+### 事件 02:3xZ（observer-registry 在全量套件中——非卡住）
+
+- **observer-registry 非卡住**：ps 确认在跑 `bash scripts/test.sh > /tmp/fullsuite-2.log`（02:00 起，~22min，~300 测试文件，--test-concurrency=1）。无 index.lock、无挂起 git op。是 DoD 全量验证。
+- **在飞 2/2**：observer-registry（全量中）+ liveness-saturation。3 空槽无候选（全撞在飞）。
