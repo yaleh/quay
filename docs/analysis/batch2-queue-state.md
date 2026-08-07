@@ -7798,3 +7798,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **验证**：AC1/AC3 干净机器两遍（fresh mktemp HOME + isolated prefix，postinstall code 0，AC3 负控制 0 文件→同结果）；AC2 真 claude -p 会话 settings.json marketplace 识别 + plugin list 显示 quay@quay 0.4.0 enabled + init skill 在列；AC4 全自动无手工编辑；AC5 交叉标注。scoped exit 0，npm-pack-e2e 9/9（含 4 新）。B/C 真机交互 /quay:init 显式 machine-gated（任务体写明留外层）。
 - **red-suite 暂缓**：真实代码需 fan-in，hold 第 4 个。status ready 未翻 done。
 - **在飞 1/5**：inner-panel。已 hold 4 worktree（cross-machine-observe / audit-findings / suite-cutoff / npm-install）待 re-green 一并 fan-in。
+
+### tick 08:3xZ（心跳——red hold 持续，reason-axis 修复在飞）
+
+- **停止条件**：无 .halt；detect-stop no block；suite-state `red+failed`+failures[] 空 ⇒ shouldDispatchOnRed fail-closed 阻挡新派发。**本 tick 零派发**。
+- **slot-refill 名义 recommended**（3 slots free, DIR-124/audit-findings/cli-collision）但被 red 停止条件覆盖——audit-findings/cli-collision 已 done-held、DIR-124 是 parent directive，均非真实新工作。
+- **外层 3d49edfc 确认 reason-axis 缺陷**（并入 suite-cutoff 任务体）：full-suite-runner.ts:564 `childKilledBySignal` 只查 exitCode===null，SIGKILL 以 exit 137（128+9）呈现被误判 failed（应 aborted，不触发 stop-dispatch）。**suite-cutoff agent 已 resume 实现修复**（改 childKilledBySignal 纳入 exit.signal，加 exit-137 测试 + AC5 同族）。修复落 + 重跑正确分类后，hold 方可解除。
+- **在飞 2**：inner-panel（真 agent，测试中）+ suite-cutoff（resume 修复）。hold 4 worktree 待 re-green。心跳回落。
