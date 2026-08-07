@@ -122,7 +122,8 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     const klsLines = all.split('\n').filter((l) => l.includes('KNOWN-LOAD-SENSITIVE'));
     const familyCmdLines = all.split('\n')
       .filter((l) => l.includes('$TEST_COMMAND')
-        && l.includes('session-liveness.test.mjs') && l.includes('cold-start-skill.test.mjs'));
+        && (l.includes('session-liveness-events.test.mjs') || l.includes('session-liveness.test.mjs'))
+        && l.includes('cold-start-skill.test.mjs'));
     assert.ok(klsLines.length > 0,
       'the shipped tick doc must carry the KNOWN-LOAD-SENSITIVE marker (b53f7402)');
     assert.ok(familyCmdLines.length > 0,
