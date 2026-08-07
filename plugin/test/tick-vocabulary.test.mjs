@@ -68,6 +68,10 @@ const SAFE_SUBSTRINGS = [
                                     // (subcommand name, no `.sh` suffix) — same 机件真名 as the file form.
   "gap-closure-sync-is-the-true-batch-boundary",
   "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+  "gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge",  // 任务 id (batch-merge boundary gate): the
+                                                                   // tick doc names the task that moved the
+                                                                   // full-suite gate to the batch-merge
+                                                                   // boundary — mechanism reference, not gating.
   "{ batch, deferred }",
   "batch, deferred",
   "batch ⇒",

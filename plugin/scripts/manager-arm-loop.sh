@@ -74,26 +74,37 @@ POINTER_PROMPT="Run the manager tick per <repo>/orchestration/manager-loop-tick.
 # ── AC5c --validate：哨兵/指针规则已在文档中（机械可查，不依赖会话）─────────────────────────
 if [ "$VALIDATE" = 1 ]; then
   TICK_DOC="${TICK_DOC:-$REPO_ROOT/plugin/loop/manager-loop-tick.md}"
-  missing=""
   if [ ! -f "$TICK_DOC" ]; then
     echo "ERROR: manager-arm-loop --validate: tick doc not found: $TICK_DOC" >&2
     exit 2
   fi
-  doc="$(cat "$TICK_DOC")"
-  # 规则 1：prompt 是指针（不含指令内容）——文档必须出现「指针 / 只携带指针」约定
-  if ! printf '%s' "$doc" | grep -q '指针\|只携带指针\|pointer-only\|prompt.*pointer'; then
-    missing="$missing pointer-rule"
-  fi
-  # 规则 2：哨兵清扫（按哨兵删除同名旧任务再建一个）——文档必须出现哨兵前缀约定
-  if ! printf '%s' "$doc" | grep -q "$SENTINEL"; then
-    missing="$missing sentinel"
-  fi
-  if [ -n "$missing" ]; then
-    echo "VALIDATE-FAIL: manager-loop-tick.md missing AC5c rules:$missing" >&2
-    exit 1
-  fi
-  echo "VALIDATE-OK: $TICK_DOC carries the sentinel + pointer-only arm contract"
-  exit 0
+  # Retry the doc read (up to 3 attempts, 50ms apart): a CONCURRENT writer (e.g. a quay-init
+  # laydown in another lane) can momentarily truncate the file between our stat and cat, and a
+  # transient empty read must not flip the validate red (round-4 suite flake,
+  # gap-verify-round-9-failures-from-recent-changes-fix-batch AC6). The sentinel is checked as a
+  # LITERAL (`grep -qF`), never as a regex — `[manager-tick]` is a bracket expression that
+  # trivially matches any real doc, which would make this check meaningless.
+  missing=""
+  for _attempt in 1 2 3; do
+    doc="$(cat "$TICK_DOC" 2>/dev/null)"
+    # 规则 1：prompt 是指针（不含指令内容）——文档必须出现「指针 / 只携带指针」约定
+    pointer_ok=0
+    printf '%s' "$doc" | grep -q '指针\|只携带指针\|pointer-only\|prompt.*pointer' && pointer_ok=1
+    # 规则 2：哨兵清扫（按哨兵删除同名旧任务再建一个）——文档必须出现哨兵前缀约定
+    sentinel_ok=0
+    printf '%s' "$doc" | grep -qF "$SENTINEL" && sentinel_ok=1
+    if [ "$pointer_ok" = 1 ] && [ "$sentinel_ok" = 1 ]; then
+      echo "VALIDATE-OK: $TICK_DOC carries the sentinel + pointer-only arm contract"
+      exit 0
+    fi
+    # A transient empty/partial read (a concurrent writer's window) is the round-4 flake; retry
+    # before declaring a real missing-rule failure.
+    sleep 0.05
+  done
+  if [ "$pointer_ok" != 1 ]; then missing="$missing pointer-rule"; fi
+  if [ "$sentinel_ok" != 1 ]; then missing="$missing sentinel"; fi
+  echo "VALIDATE-FAIL: manager-loop-tick.md missing AC5c rules:$missing" >&2
+  exit 1
 fi
 
 # ── 哨兵清扫（AC5c 武装步骤：CronList → 删除所有含哨兵者 → 恰好建一个）────────────────────

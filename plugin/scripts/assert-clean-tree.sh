@@ -46,8 +46,14 @@
 
 set -u
 
+mode="absolute"
+case "${1:-}" in
+  --snapshot) mode="snapshot"; shift ;;
+  --check)    mode="check";    shift ;;
+esac
+
 if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 <workspace-root>" >&2
+  echo "Usage: $0 [--snapshot|--check] <workspace-root>" >&2
   exit 2
 fi
 root="$1"
@@ -62,6 +68,44 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
+snapshot=".quay/assert-clean-tree.snapshot"
+
+# normalize porcelain: sorted, non-empty lines (so `comm` compares deterministically)
+porcelain_sorted() {
+  git status --porcelain | grep -v '^$' | sort
+}
+
+if [ "$mode" = "snapshot" ]; then
+  mkdir -p .quay
+  porcelain_sorted > "$snapshot"
+  echo "assert-clean-tree: before-run porcelain snapshot recorded ($(wc -l < "$snapshot") line(s) of pre-existing dirt in $snapshot)"
+  exit 0
+fi
+
+if [ "$mode" = "check" ]; then
+  if [ ! -f "$snapshot" ]; then
+    echo "FAIL: no before-run snapshot found at $snapshot — cannot assert a DELTA clean tree." >&2
+    echo "Run '$0 --snapshot <workspace-root>' before the suite (fail closed)." >&2
+    exit 1
+  fi
+  before="$(cat "$snapshot")"
+  after="$(git status --porcelain)"
+  # new_items = entries in AFTER that were NOT in the before-run snapshot.
+  new_items="$(comm -13 <(printf '%s\n' "$before" | grep -v '^$' | sort) <(printf '%s\n' "$after" | grep -v '^$' | sort))"
+  rm -f "$snapshot"
+  if [ -n "$new_items" ]; then
+    echo "FAIL: the working tree is DIRTY after the full suite — a test added NEW artifact(s) to the shared checkout (delta vs the before-run snapshot):" >&2
+    printf '%s\n' "$new_items" >&2
+    echo "This is the suite-after DELTA assertion (gap-assert-clean-tree-premise-void-under-concurrent-writers):" >&2
+    echo "only items not present in the before-run snapshot count as this run's test products; pre-existing dirt is excluded." >&2
+    echo "Fix the test (mkdtemp under os.tmpdir()), not the snapshot." >&2
+    exit 1
+  fi
+  echo "PASS: git status --porcelain gained no NEW items after the full suite (clean-tree DELTA assertion)"
+  exit 0
+fi
+
+# absolute (historical) mode — the pre-delta form, kept for standalone use and the capability catalog.
 dirty="$(git status --porcelain)"
 if [ -n "$dirty" ]; then
   echo "FAIL: the working tree is DIRTY after the full suite — a test left an artifact in the shared checkout:" >&2

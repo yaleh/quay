@@ -45,35 +45,39 @@ function runTestSh(...args) {
 // goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
 // rule "测试不得硬编码全局计数", all assertions here are RELATIONSHIPS over the live glob:
-//   product + engine + governance + serial == total (the deduped realpath partition), and
-//   --list-files count + serial == --list-groups total (the default --list-files EXCLUDES the
-//   serial group, which is routed to the concurrency-1 phase —
-//   gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests). New files change the
-//   numbers, not the invariants.
+//   product + engine + governance + serial + lowconc == total (the deduped realpath partition),
+//   and --list-files count + serial == --list-groups total (the default --list-files EXCLUDES the
+//   serial group, routed to the concurrency-1 phase —
+//   gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests — and INCLUDES the
+//   lowconc phase — gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). New files change
+//   the numbers, not the invariants.
 function parseGroups(out) {
   const parse = (label) => {
     const m = out.match(new RegExp(`^${label}:\\s+(\\d+)`, "m"));
     assert.ok(m, `--list-groups missing ${label}: ${out}`);
     return Number(m[1]);
   };
-  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), serial: parse("serial"), total: parse("total") };
+  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), serial: parse("serial"), lowconc: parse("lowconc"), total: parse("total") };
 }
 
 test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob", () => {
   const out = runTestSh("--list-groups");
   const g = parseGroups(out);
-  // Relationship, not snapshot: the FOUR groups partition the deduped realpath total (serial is
-  // the load-sensitive family's group — gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
-  assert.equal(g.product + g.engine + g.governance + g.serial, g.total);
+  // Relationship, not snapshot: the FIVE groups partition the deduped realpath total (serial is
+  // the load-sensitive family's group — gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests;
+  // lowconc is the hermetic-but-load-sensitive concurrency-3 phase —
+  // gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
+  assert.equal(g.product + g.engine + g.governance + g.serial + g.lowconc, g.total);
   // Structural sanity independent of absolute counts.
-  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0);
+  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0 && g.lowconc > 0);
 });
 
 test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
   const files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
   const g = parseGroups(runTestSh("--list-groups"));
-  // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase), so the
-  // dedup relationship is files + serial == total.
+  // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase) and
+  // INCLUDES the lowconc phase files (routed to the concurrency-3 phase), so the dedup
+  // relationship is files + serial == total.
   assert.equal(files.length + g.serial, g.total);
   // all paths are already realpaths (no duplicates by construction)
   assert.equal(new Set(files).size, files.length);
@@ -226,8 +230,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   //     any explicit --test-concurrency flag (a full-suite-runner splice must not leak lane N in).
   //   - list_groups counts serial (the 4th group in the partition).
   const src = readFileSync(testSh, "utf8");
-  assert.match(src, /product\|engine\|governance\|serial\) echo "\$g" ;;/,
-    "group_of must route serial as a real group (not fall back to engine)");
+  assert.match(src, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
+    "group_of must route serial AND lowconc as real groups (not fall back to engine)");
   assert.match(src, /local serial_files=\(\) sf serial_code/,
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
   assert.match(src, /selected \$\{#serial_files\[@\]\} files \(groups=serial\)/,
@@ -253,6 +257,31 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
   const serialSet = new Set(serialList);
   for (const f of defaultFiles) {
     assert.ok(!serialSet.has(f), `default --list-files must EXCLUDE serial member ${f}`);
+  }
+});
+
+test("AC0c (anti-stomp): group_of recognizes ALL FIVE groups in one case arm — a dropped group goes red, not silent", () => {
+  // The r10 regression (gap-verify-round-9-failures-from-recent-changes-fix-batch): four commits
+  // b209f4fd→174badc0→e92c54d8→c7176a37 each dropped one group from group_of's case, so serial/
+  // lowconc silently folded into the concurrency-N engine body and the isolation guarantee was
+  // cancelled WITHOUT going red. This pin fails the moment ANY of the five groups is dropped.
+  const src = readFileSync(testSh, "utf8");
+  assert.match(src, /product\|engine\|governance\|serial\|lowconc\) echo "\$g" ;;/,
+    "group_of must recognize ALL FIVE groups (product|engine|governance|serial|lowconc) in one case arm");
+  // Behavioral double-check: all five counts are non-zero, and an unknown-group declaration is
+  // FAIL-CLOSED (not silently degraded to engine — AC0b).
+  const g = parseGroups(runTestSh("--list-groups"));
+  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0 && g.lowconc > 0,
+    "all five groups must have non-zero membership in --list-groups");
+  const unknown = join(repoRoot, "plugin", "test", "zz-unknown-group-anti-stomp.test.mjs");
+  rmSync(unknown, { force: true });
+  try {
+    writeFileSync(unknown, '// @test-group bogus\nimport { test } from "node:test";\ntest("x", () => {});\n');
+    const r = spawnSync("bash", [testSh, "--list-groups"], { cwd: repoRoot, encoding: "utf8", timeout: 60000 });
+    assert.notEqual(r.status, 0, `an unknown @test-group must fail closed (not silently degrade):\n${r.stdout}`);
+    assert.match(r.stderr, /FAIL-CLOSED|unknown @test-group/, "the fail-closed message must name the unknown group");
+  } finally {
+    if (existsSync(unknown)) rmSync(unknown);
   }
 });
 
