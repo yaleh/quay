@@ -7985,3 +7985,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **13:48 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：HEAD=**c4343421**（系统性 serial 22 + 21-fix + 全部 fan-ins）。serial 路由就位（runtime-landing/session-topology 等均 serial）。
 - **预期**：重 install 测试全部进 serial → `fail 0 / cancelled 0` **真绿**。若绿 → session-pid（7647aaf8）un-hold + 全量派发恢复。
 - **在飞 0/5**。held 1（session-pid）。monitor b7xbnyuwx 挂着等结果。
+
+### 事件 14:2xZ（round-4 真绿判定 + assert-clean-tree 扩展）
+
+- **round-4（13:48 run，23min）**：**测试全过**——主体 tests 2761 / pass 2717 / fail 0，serial 230 / pass 229 / fail 0，cancelled 0。serial 路由系统性生效。**RED 仅因 suite-after 脏树断言**：`.quay-worktree-local/`/`.quay-worktree-local2/`/`.quay-wtl3/` 在共享检出（manager-inbox/prepare-epochs 协调态，与 .quay/ 同类，--loop worktree-root 测试遗留）。
+- **修**：assert-clean-tree exclude_regex 扩展覆盖 `.quay-worktree-[^/]*/` + `.quay-wtl[^/]*/`（协调态 scratch，非测试残留——内容已验证）。integration **be0cca93**。
+- **round-5（14:13 run）已启动**（/tmp/quay-suite-int @ c4343421，外层已清遗留 dirs）。等结果。
+- **held**：session-pid（7647aaf8）。在飞 0/5。
