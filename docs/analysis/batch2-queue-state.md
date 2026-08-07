@@ -7584,3 +7584,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **full-suite-red 完成**：结构化匹配修复早已在 develop（41e7591f）→ **无代码 fan-in**；验证 24/24 + 三个真-run 控制（vitest 假红→green、TAP not ok→red、vitest 结构化→red）全复现。DoD 5 项全勾。任务文件入 develop，worktree/branch 清理。
 - **1 空槽无干净候选**：split-batch 与 probe-mechanism/checksplit 撞；session-liveness-cannot-see 与 manager-layer/probe-mechanism 撞。等完成事件回填。
 - **在飞 4/5**：observer-registry + manager-layer + probe-mechanism + checksplit。
+
+### 事件 01:1xZ（checksplit 完成——mark-aspirational 裁定）
+
+- **checksplit 完成**：AC1 裁定 = **mark-aspirational（NOT wire-in）**——CLAUDE.md split 路由表标 reference/manual policy + 指向本任务（369fdac7 已入 develop）；DoD 补齐（82d45197，仅任务文件）。零调用 grep 复现、AC4 的 sibling recursive-guard 保持 needs-human 吻合。42/0 scoped + task-contract 干净。无代码 fan-in。
+- **2 空槽无干净候选**：split-batch / session-liveness-cannot-see / no-post-merge / complete-delivery-surface 全部与在飞 3 agent（observer-registry / manager-layer / probe-mechanism）撞核心文件（quay-init.sh / tick docs / session-liveness.sh）。等核心 agent 完成即解锁。
+- **在飞 3/5**：observer-registry + manager-layer + probe-mechanism（均活跃）。
