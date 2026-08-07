@@ -5,13 +5,29 @@ title: probe mechanism dead 15 days — routine-scheduler exists but no producti
   07-15 Iteration 49/52); 5th 'mechanism exists nobody calls' instance; rewire
   trigger to two-layer quantities (tick-count/time/event) + archguard L_D/L_G
   instrumentation
-status: ready
+status: needs-human
 labels:
   - gap
   - defect
 parent: null
 children: []
-extra: {}
+extra:
+  schema: v1
+  needs_human_reason: "fan-in conflict: cherry-pick bf6b42b2 onto integration → 1
+    conflict on plugin/loop/fast-mode-loop-tick.md step 4b. Integration already
+    has a step 4b (cross-machine-verify heartbeat from
+    gap-no-post-merge-cross-machine-verification-detection-latency-is-luck,
+    landed 5674e0ea); probe-mechanism adds its own step 4b (routine check). Both
+    are live heartbeat steps claiming the same doc position — a genuine
+    same-position two-task conflict, same class as ac8/shipped-ts. Per doc:
+    conflict → needs-human, never --skip/-X ours. Work fully implemented +
+    verified (58/0 tests, all ACs ticked). Worktree/branch
+    task/gap-probe-mechanism-dead-15-days-rewire-to-two-layer preserved at
+    bf6b42b2+9e4ffd45. Needs human to merge/renumber the two step-4b sections
+    (e.g. cross-machine as 4b + routine as 4c, or merge). NOTE: the cherry-pick
+    abort initially reset integration backward past the ac8 merge +
+    readme-source fan-in; I restored integration to 578afc7c (all fan-ins
+    verified present) — integration is safe."
 ---
 **type:** execution
 
