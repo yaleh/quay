@@ -575,3 +575,21 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > --lane-count 8 --sync`（state/log/events 经软链写回主检出，内层与触发者可见）。state=running
 > (11:30:01)，SUITE-RUNNING 已发。等 SUITE-GREEN/RED 决定后续：绿 → un-hold session-pid + 放行
 > done-flip 批次 + 处理分叉合并；红 → 分诊新失败。资源门 GO（cpu-some 4.79/40）。
+
+> **11:52Z 外层 tick（并发 8 首轮验证结果——serial 机制生效，21 新失败 = 完整候选树首次验证暴露待合
+> 内容自身问题）**：后台套件跑完（597s，比上轮 14.5 分钟更快），**red（21 失败）但失败集合全换**。
+> 分诊（独立验证）：
+> ① **serial 修复对目标批有效**——上轮 7 条（runner-grouping 嵌套 spawn / session-liveness noise-gate /
+>   test-file-snapshot 竞态）本轮一条不在；
+> ② **21 条新失败集中在三族**（capability-catalog 计数、quay-topology 工厂、cold-start/quay-init
+>   单驱动+laydown）——都是 integration 待合内容自带的测试（develop 从没跑过完整树）；
+> ③ **隔离验证（quay-init-loop 48 测仅 2 失败）**：AC1 (skill) **真失败**——根因：integration 树 SKILL.md
+>   用 `quay-suite.ts loop-driver-check`（40→6 整合指令），测试断言旧名 `loop-driver-check.sh`，测试与
+>   树不一致（40→6 合并 a4b1d9a9 在 integration 上的未对齐状态，develop 已 revert）；AC2 live specimens
+>   真失败（隔离复现）；**其余 quay-init-loop 失败隔离通过 = 负载伪影**（重的 laydown 测试未 serial 路由，
+>   并发 8 下超时）；
+> ④ capability-catalog.sh --json 直接跑 exit 0 正常——测试的 "catalog --json must exit 0" 是测试上下文
+>   问题，隔离验证中。
+> **判定**：不是 serial 修复失败；是**完整候选树首次验证**暴露待合内容自身问题（40→6 对齐 + 新增负载
+> 敏感测试未路由）。路径：内层修 21 条（真缺陷对齐 40→6 + 负载伪影补 serial 路由）→ 并发 8 重跑 → 真绿。
+> 等 capability-catalog 隔离结果后立任务驱动内层。
