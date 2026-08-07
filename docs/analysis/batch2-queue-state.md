@@ -7963,3 +7963,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **13:20 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：HEAD=**92d16611**（serial 16 + 21-fix + 全部 fan-ins，完整 integration 树）。serial 路由就位（quay-init-check-drift → serial）。
 - **预期**：1 条负载伪影失败已排除 → `fail 0 / cancelled 0` **真绿**。若绿 → session-pid（7647aaf8）un-hold + 全量派发恢复。
 - **在飞 0/5**。held 1（session-pid）。monitor buqx5kny2 挂着等结果。
+
+### 事件 13:3xZ（三轮验证 2 失败→install-config-driven 补 serial）
+
+- **并发 8 三轮（13:20 run）**：quay-init-check-drift 失败消失（serial 路由生效），但暴露 **install-config-driven-e2e.test.mjs A3+AC6**（product 组、隔离 10/10、并发 8 超时）——同负载伪影类。
+- **修法**：`install-config-driven-e2e.test.mjs` `@test-group product` → **serial**。验证：默认 body 0 出现、serial 组 1。commit → **integration b280289e**（FF，92d16611→b280289e）。
+- **integration 现为**：serial 17 + 21-fix + 全部 fan-ins。等外层并发 8 四轮验证。
+- **held**：session-pid（7647aaf8）。在飞 0/5。
