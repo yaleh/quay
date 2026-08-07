@@ -7516,3 +7516,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   3. `gap-full-suite-runner-marks-test-sh-gate-wait-as-failed`（WAIT 分类 aborted + --wait-check）
 - worktrees：audit-findings / concurrency-derivation / full-suite-wait。task-start 三记录。
 - **在飞 3/5**。
+
+### 事件 00:2xZ（恢复派发 续——audit-findings 完成 + observer-registry 派发）
+
+- **audit-findings 完成**：实现早已在 develop（6740d4fc 祖先）+ 全 AC 已勾 → **无 fan-in**；本 re-dispatch 验证 36/36 + scoped exit 0 + sync-vendor CLEAN。任务文件两分支 identical，worktree/branch 清理。AC5/DoD 诚实未勾（需未来真实 milestone）。
+- **pool refill**：17→20（≥floor 20），dispatchable_disjoint 10。promote 3：observer-registry / manager-skill / readme-source（self-touch 已补）。
+- **新派发 4/5**：`gap-observer-registry-target-decommission-and-criterion-invalidation`（4 消费者共享登记表 + 主动失效；与全部在飞 disjoint、无 retired refs）。worktree `quay-worktrees/observer-registry`。
+- **readme-source 与 concurrency-derivation 撞 CLAUDE.md** → deferred 等其完成。
+- **在飞 3/5**：concurrency-derivation + full-suite-wait + observer-registry。
