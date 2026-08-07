@@ -60,6 +60,11 @@ const MISREAD_PATTERNS = ["同批", "批派发", "batch-N"];
 const SAFE_SUBSTRINGS = [
   "concurrent-batch-scheduler.ts",
   "integration-batch-merge.sh",
+  // 40→6 entry-point forms (gap-ac8 2026-08-07): the docs invoke the SAME mechanisms through the
+  // quay-branch.ts / quay-dispatch.ts dispatcher (e.g. "quay-branch.ts integration-batch-merge",
+  // "quay-dispatch.ts concurrent-batch-scheduler"). Bare mechanism names cover both spellings.
+  "integration-batch-merge",
+  "concurrent-batch-scheduler",
   "gap-closure-sync-is-the-true-batch-boundary",
   "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
   "{ batch, deferred }",
