@@ -616,7 +616,8 @@ state["laidCategories"] = sorted(set(state.get("laidCategories", [])) | {"loop"}
 # byte-identical to the product, so the ONLY reason a managed file can differ on upgrade is
 # either a stale previous install or a user edit — and the hash tells them apart.
 laid = {}
-for rel in ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md"]:
+for rel in ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md",
+            "orchestration/manager-loop-tick.md"]:
     p = os.path.join(workspace_root, rel)
     if os.path.exists(p):
         with open(p, "rb") as f:
@@ -1370,9 +1371,17 @@ PYEOF
   # copy is byte-identical to the product (SPEC AC1/AC3). mode "managed" distinguishes a stale
   # install-managed copy (previous install laid it — replaced on upgrade, AC5) from a genuine user
   # edit (CONFLICT, AC6).
+  # gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver: the manager driver
+  # (plugin/loop/manager-loop-tick.md) is the THIRD tick doc. It lays into orchestration/ like the
+  # outer driver — a NEW HOST that runs `quay-init --loop` previously got an outer + an inner and NO
+  # manager driver (a network started no watcher for its outers). Form ruling (AC3): the manager ROLE
+  # is one per network/host, but the manager DRIVER ships per-project as a GENERIC template, identical
+  # to how outer/inner ship — the per-network identity is WHO starts the manager, not where the doc
+  # lands. mode "managed" tracks it on upgrade (AC5) like the other two tick docs.
   for pair in \
     "orchestrator-loop-tick.md:orchestration/orchestrator-loop-tick.md" \
-    "fast-mode-loop-tick.md:docs/analysis/fast-mode-loop-tick.md"; do
+    "fast-mode-loop-tick.md:docs/analysis/fast-mode-loop-tick.md" \
+    "manager-loop-tick.md:orchestration/manager-loop-tick.md"; do
     src_name="${pair%%:*}"
     dst_rel="${pair##*:}"
     src="$PLUGIN_ROOT/loop/$src_name"

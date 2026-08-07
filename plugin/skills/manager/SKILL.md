@@ -334,9 +334,14 @@ allowed-tools: Bash, Read, Monitor
 | `orchestration/SPEC-suite-speed.md` | 套件速度 |
 | `orchestration/SPEC-typed-axes-and-standing-dynamics.md` | 类型化轴与常设动态 |
 
-**引用约定**：本 SKILL 引用的 `orchestration/` 文件（REVIEW-cadence.md、manager-loop-tick.md、SPEC-*）
-是 quay 的参考文档，**不是 loop 机制交付物**——已在 `plugin/skills/init/SKILL.md` 声明为
-`reference-doc`（verify-referenced-landed 不变量：被引用的文件要么被铺设、要么被声明）。
+**引用约定**：本 SKILL 引用的 `orchestration/` 文件（REVIEW-cadence.md、SPEC-* 等）是 quay 的参考文档，
+**不是 loop 机制交付物**——已在 `plugin/skills/init/SKILL.md` 声明为 `reference-doc`
+（verify-referenced-landed 不变量：被引用的文件要么被铺设、要么被声明）。
+**例外（2026-08-07，`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`）**：
+`orchestration/manager-loop-tick.md`（本 SKILL 的 §1.5/§1.6 提取源、管理者的操作驱动）现在是**铺设的
+loop 交付物**——通用模板 `plugin/loop/manager-loop-tick.md` 随 `quay-init --loop` 铺到每个项目的
+`orchestration/manager-loop-tick.md`（与 outer/inner 两份 tick 文档同形态）。quay 自身网络特有的落地
+仍是 quay 仓库的 `orchestration/manager-loop-tick.md`（角色分工同外层 tick 文档）。
 
 ---
 

@@ -2,6 +2,13 @@
 
 **角色**：三个项目（quay / archguard / meta-cc）的管理者。**不是任何一个项目的外层。**
 
+> **角色分工（2026-08-07，`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`）**：
+> 本副本是 **quay 网络特有的管理者落地**（项目列表 / 仓库路径 / tmux 窗口是 quay 自己的三项目网络）。
+> **通用模板随 `quay-init --loop` 铺到新主机的 `orchestration/manager-loop-tick.md`**（`plugin/loop/
+> manager-loop-tick.md`，字节一致、配置驱动——与外层 tick 文档同形态）；本副本是该模板的 quay 网络
+> 消费版，两份角色分工同外层 tick 文档的模板/落地分工（`plugin/loop/orchestrator-loop-tick.md` 随包铺，
+> quay 网络特有落地在 `orchestration/`）。
+
 **这份文档存在的理由**：管理者的活和外层的活节奏不同、需要的上下文不同，
 挤在一个会话里两件事会互相排挤——要么细活把仲裁挤掉，要么反过来。
 2026-08-03 实测到这个冲突时，管理者会话已 **21 MB / 9672 条 / 跨度 43 小时**，
