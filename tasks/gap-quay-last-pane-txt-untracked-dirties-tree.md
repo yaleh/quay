@@ -51,6 +51,15 @@ extra: {}
 - [ ] `assert-clean-tree.sh` 不再因 last-pane.txt 假红
 - [ ] 完整套件绿
 
+## Cross-annotation（2026-08-07）
+
+`gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion`（已执行）把 `.quay/*` 未跟踪项列入
+**suite-after 断言（assert-clean-tree.sh）的已知并发写入者豁免**——对 last-pane.txt 这一具体类，两检查器已对齐：
+`assert-clean-tree.sh` 对 `?? .quay/last-pane.txt` 判 PASS（排除），`tree-hygiene-check.sh` 本就判 clean。
+本任务剩余工作收窄为：gitignore 补规则（last-pane.txt 及同类 tick 运行时产物）+ 可选「两检查器共享 KNOWN SCRATCH 单一来源」。
+参考本任务的实测：STEP 3（`?? .quay/last-pane.txt` 存在时 assert-clean-tree PASS）已在
+`tasks/gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion.md` 记录。
+
 ## Evidence
 
 - `git check-ignore .quay/last-pane.txt` = 未忽略；`git status --porcelain` 显示 `?? .quay/last-pane.txt`

@@ -94,6 +94,13 @@ resume 若中断，先跑两个 measure 读当前值，不要假设模板已改
 - [ ] AC1-AC5 实跑输出贴进任务体
 - [ ] `--for-task` 选中集绿（**本任务自身不再要求完整套件——即以自身为首个应用**）
 
+## Cross-annotation（2026-08-07）
+
+`gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion` 作为本裁定的**首个应用**之一：其 DoD 原含
+「完整套件连跑 2 次全绿」，执行时按外层执行规则 2（scoped-only，完整套件延后到外层）+ 本裁定（批量合边界才是完整套件
+绿闸门）**不自跑完整套件**，机制侧只做 scoped 验证；DoD 那条已注明延后到外层批量合闸门。即本任务没有新加「完整套件」到
+自身 DoD 的负担，存量该行按「各自收尾时按新规则处理并注明依据」处置。
+
 ## Touches
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/scripts/task-contract-check.ts
