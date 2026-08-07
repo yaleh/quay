@@ -5,7 +5,7 @@ title: "full-suite-runner FAILURE_PATTERNS matches bare ✖ glyph — vitest con
   test logs '✖ Diagram test failed' → suite green but stop-dispatch wrongly on;
   vitest 0 failed/exit 0); quay won't self-hit (node:test ✖ is structured),
   downstream verified fix; adopt structured matching + --maxWorkers doc split"
-status: ready
+status: done
 labels:
   - gap
   - defect
