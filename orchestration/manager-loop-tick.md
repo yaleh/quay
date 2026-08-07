@@ -49,6 +49,15 @@ python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('f
 
 # ③ 可用性：是否有「用 release 装出来的那份」在非 quay 项目跑通的证据
 #    注意：.quay/ 目录存在【不等于】用 release 装的——必须看安装来源，不得以目录存在判达成
+#
+#    ⚠️ 机器口径（2026-08-07 05:1xZ 更正，我上一轮查错了机器）：
+#    判据③的对象是【B(orangevps) / C(ad-arm1) 上从 GitHub clone 的 archguard 与 meta-cc】，
+#    **不是本机 A 的那两份**。目标文件 655-665 行原文：「B / C 各自从 GitHub clone
+#    archguard 与 meta-cc，分别用其中一个项目验证 quay 的产品化应用——即以『真实第三方
+#    项目』的身份做 AC16 的接受方」；且「C(ad-arm1) 的包安装验收提升为 AC16 主证据
+#    （它是唯一的全新机器，证据最干净）」。**A 机上的 archguard 会话已于 08-06 14:2xZ 停掉。**
+#    ⇒ 我 05:0xZ 查 /home/yale/work/archguard/.quay 得出「mcp_entry 为空」——读数为真，
+#      但**它不是判据③的对象**，证明不了 AC16③。跨机只读观测：git / tmux 只读 / 读取类。
 ```
 
 **为什么必须每轮实跑**：2026-08-07 04:5xZ 首次按此口径跑，**立刻查出目标文件两处已过期**——
@@ -57,8 +66,19 @@ python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('f
 正是 `manager-phase-goal.md` **AC18**（收口不看勾选、自己重跑 measure）要防的形态，
 而我把 AC18 用在了外层的任务上，**没用在自己的目标文件上**。
 
-**archguard/meta-cc 的新巡检问法**：不再问「它们在不在开发」，改问
-**「它们作为验证目标，有没有被 quay 装过、装的是不是 release 出来的那份」**（即 AC16 判据③）。
+**archguard/meta-cc 的新巡检问法（2026-08-07 05:1xZ 二次更正 —— 上一版仍不够准）**：
+不再问「它们在不在开发」；也不是笼统问「有没有被 quay 装过」，
+而是问 **「B / C 上从 GitHub clone 的那两份，有没有用 A 机 build 的包装成功」**（AC16 判据③）。
+
+**本机 A 的 archguard/meta-cc 不是判据对象**——其会话已停，且人裁定的接受方是 B/C。
+**它们在本阶段还承担第二个角色**：AC12（无真人干预区间）的**测量场所**——
+人 2026-08-05 明确纠正「**不在 quay 上测，在 archguard / meta-cc 上测**」，
+理由是「quay 是机制正在被建造的地方，人在那里的干预是**设计行为**不是缺陷信号；
+archguard / meta-cc 是**交付物的消费者**，人在那里的干预才是**缺陷信号**」。
+其中 **AC12b 已达成**（人 2026-08-06 裁定，archguard 511 分钟），不受 AC17 取消影响。
+
+⇒ **本阶段对这两个项目没有「开发目标」，只有两个测量角色**：
+一个在 B/C 上（AC16 接受方），一个是已达成的历史测量（AC12b）。
 
 ## 1. 每个 tick 必做的四件
 
