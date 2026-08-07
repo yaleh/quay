@@ -1,44 +1,53 @@
 export const meta = {
   name: 'manager-tick-readings',
-  description: '管理者 tick 的不可约核：独立自我审计（读数与判读都已移出到主循环）',
-  whenToUse: '每次 manager tick。主循环跑固定命令块取数(~1s)+自己判读，本 workflow 只做一件事：审计管理者自己',
-  phases: [{ title: 'Audit', detail: '用 meta-cc 独立审计管理者本轮行为，含"判准有没有真被应用"' }],
+  description: '管理者 tick 的持久化核：独立自我审计 + 把"该跑什么/该判什么"作为指令交还主循环',
+  whenToUse: '每次 manager tick 的第一步，也是主循环唯一需要记住的一条：调它，然后照它返回的指令做',
+  phases: [{ title: 'Audit', detail: '用 meta-cc 独立审计管理者本轮行为（含"判准有没有真被应用"）' }],
 }
 
-// ── 成本实测（三轮，逐轮把瓶颈往下推一层）─────────────────────────────────────
-//   轮1 探索式（agent 自己读文档找命令）：121 次工具调用，677s
-//   轮2 固定命令块下发给 agent：            12 次工具调用，334s
-//   轮3（本版）读数移出 workflow：          见下
+// ══ 本文件的设计（人 2026-08-07 提出，逐条都是对我前一个错误前提的纠正）══════════════
 //
-//   轮2 拆解暴露了两个真瓶颈，都不是"调用次数"：
-//   (a) **固定命令根本不该进 workflow**。同一批命令主循环直接跑 = 102ms～1.3s；
-//       包进 agent = 46s。命令本身 1.7s 就返回了，多出来的 44s 全是
-//       "读 prompt→决定跑什么→读结果→生成结构化输出"。固定命令不需要任何判断，
-//       把最便宜的部分放进了最贵的容器里。
-//   (b) **self-audit 的 222s 里，meta-cc 只占 27s，167s 是模型读完 14,715 字符
-//       结果后的纯推理**。⇒ 驱动量是【返回结果的体积】，不是调用次数、不是 meta-cc 慢。
-//       故本版对 meta-cc 查询强制 content_summary + 收紧 limit/preview_length。
+//  ① workflow 结晶的是【重复的 agent 行为序列】——"哪一步不许跳"，不是多智能体扇出。
+//  ② subagent 不缺上下文：meta-cc 索引着管理者会话历史，它可以自己查。
+//  ③ **tick workflow 本身就是快路径，职责是发现问题；深路径在 tick 里、workflow 外。**
+//  ④ args 分工：高频/结构化/我已有的 ⇒ args 传；低频/需探查/我不一定记得的 ⇒ 让它自己查。
+//  ⑤ **【本版核心】把"调用工具的要求"和"judge 的判准"放进本文件，但【不】发给 subagent，
+//     而是在 subagent 跑完后【贴在返回结果后面交还主循环】。**
+//     ⇒ 主循环的 tick 只需记住一条：**调这个 workflow，然后照它返回的指令做**。
+//     ⇒ 判准不再是"我记得应用"的散文，而是每轮作为数据出现在眼前的东西；
+//        且它活在磁盘上，**不依赖本会话上下文存活**（跨 clear/compact 稳定）。
 //
-// 人的框定（2026-08-07，三次纠正后定型）：
-//   · workflow 结晶的是重复的 agent 行为序列——"哪一步不许跳"。
-//   · subagent 不缺上下文：meta-cc 索引着管理者会话历史，它可以自己查。
-//   · **tick workflow 本身就是快路径，职责是发现问题；深路径在 tick 里、workflow 外。**
-//   · args 分工：高频/结构化/我已有的 ⇒ args 传；低频/需探查/我不一定记得的 ⇒ 让它自己查。
-//     ⇒ 读数正是"我已有的"，必须走 args，不该让 subagent 重新去取。
+//  这直接修掉一个实证缺陷：judge 从 workflow 移到主循环后，判准执行退化为"记得应用"，
+//  自审 agent 于 2026-08-07 12:2x 当场抓到——上一轮 tick-log 通篇没应用过任何一条判准。
+//
+// ── 成本实测（四轮，每轮把瓶颈往下推一层）─────────────────────────────────────
+//   轮1 探索式（agent 自己读文档找命令）  121 次工具调用 / 677s
+//   轮2 固定命令块下发给 agent             12 次 / 334s
+//   轮3 读数+judge 移出 workflow            1 agent 6 次 / 137s
+//   轮4（本版）指令回传，主循环只记一条    同上 + 主循环侧读数 ~1.2s
+//
+//   两个真瓶颈（都不是"调用次数"）：
+//   (a) 固定命令包进 agent 要 46s，主循环直接跑只要 102ms～1.3s——
+//       命令本身 1.7s 就返回，多出的 44s 全是"读 prompt→决定→读结果→生成结构化输出"。
+//   (b) 自审 222s 里 meta-cc 只占 27s，**167s 是模型读完 14,715 字符后的纯推理**
+//       ⇒ 驱动量是【返回体积】，故强制 content_summary + preview_length + limit。
+//
+// ── 脚本层能力边界（探针 wf_af76a6df-2c3 实测）───────────────────────────────
+//   globalThis 仅：log / phase / budget / setTimeout / clearTimeout /
+//                  agent / parallel / pipeline / workflow / args
+//   无 require / process / fetch；`import()` 在语法检查阶段即被拒；`export` 仅允许用于 meta。
+//   ⇒ 脚本层零 I/O，固定命令只能由主循环执行——这正是本版把它【回传】而非【执行】的原因。
 
 const MODEL = 'sonnet'
 const ROOT = '/home/yale/work/quay'
 const MGR_SESSION = 'b8dc91a6-64e8-4d70-a715-9ec8e16a4f11'
 
-// args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52），直接 args.x 会静默 undefined。
+// args 到达时是【字符串】不是对象（实测 wf_6f8cc053-f52）：直接 args.x 会静默 undefined。
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args ?? {}) } catch { return {} } })()
-const READINGS = A.readings || '(主循环未传入读数——这本身是缺陷，必须在提案里报出来)'
-const PRIOR = A.prior ? `\n\n**上一轮读数（只报差异，不重述未变项）**：\n${A.prior}` : ''
+const PRIOR = A.prior ? `\n上一轮读数（只报差异）：\n${A.prior}\n` : ''
 
-// 主循环该跑的固定命令块（单一来源；改判据改这里，主循环照抄）。
-// 本 workflow 不跑它——脚本层无 I/O 能力（探针 wf_af76a6df-2c3：globalThis 仅
-// log/phase/budget/setTimeout/clearTimeout/agent/parallel/pipeline/workflow/args），
-// 且即便能跑，包进 agent 也要 46s 而主循环只要 1.3s。
+// ══ 交还给主循环的指令 ①：该跑什么 ══════════════════════════════════════════
+// 判据的单一来源。改判据改这里，主循环照抄——它不需要记住任何一条命令。
 const READ_CMD = String.raw`cd /home/yale/work/quay
 echo "PC=$(git log --oneline --since='1 day ago' | wc -l)"
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
@@ -47,7 +56,8 @@ python3 -c "import json;print('manifest='+json.load(open('plugin/.claude-plugin/
 grep -o 'avg10=[0-9.]*' /proc/pressure/cpu | head -1; echo "load1=$(cut -d' ' -f1 /proc/loadavg) node=$(pgrep -c node)"
 for p in quay archguard meta-cc; do [ -f /home/yale/work/$p/.halt ] && echo "halt:$p"; done
 tmux list-panes -a -F '#{session_name}:#{window_name}=#{pane_current_command}' 2>/dev/null | grep quay-0 | tr '\n' ' '; echo
-tail -40 orchestration/tick-log.md | grep -oE '^> \*\*[0-9]{2}:[0-9]{2}Z[^*]*\*\*' | tail -1
+echo "outer_bq=$(tail -40 orchestration/tick-log.md | grep -oE '^> \*\*[0-9]{2}:[0-9]{2}Z' | tail -1)"
+echo "outer_tbl=$(grep -m1 '^| 2026' orchestration/tick-log.md | grep -oE '[0-9]{2}:[0-9]{2}Z')"
 python3 -c "
 import json,os,time
 d=json.load(open('.quay/full-suite-state.json'))
@@ -57,12 +67,50 @@ echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '
 ps -eo args | grep -q '[q]uay-0:outer.0 -S -3' && echo mon_outer=alive || echo mon_outer=DEAD
 ps -eo args | grep -q '[s]uite-state-trigger' && echo mon_suite=alive || echo mon_suite=DEAD`
 
+// ══ 交还给主循环的指令 ②：该判什么 ══════════════════════════════════════════
+// 每一条都对应一次实测过的失效，不是设想。
+const JUDGE_CRITERIA = `**判准（逐条应用，并把结论写进 tick-log 行——自审会检查你是否真做了）**
+
+① **PC 有效性**：\`PC\` 必须远大于 0。为 0 ⇒ 查询本身坏了，**后续所有时间窗读数不可信**。
+   （2026-08-07：\`--since='60 min ago'\` 静默返 0 而 \`'60 minutes ago'\` 返 13，
+    据此误报过一次"系统全停"并推向 §2 升级。**下"零推进"结论前必须先过这条。**）
+② **陈旧当现状**：\`suite age\` 很大却被当现状引用？状态文件的 \`failures:[]\` 是空数组，
+   **不能用来数失败**，失败清单要从 \`.quay/full-suite.log\` 的 \`✖\` 行取。
+③ **监视器**：\`mon_*=DEAD\`？注意"进程活着"≠"能报得出"——后者属深路径。
+④ **\`halt:\`**：出现在不该暂停的项目？（meta-cc 的 halt 已核实为 08-05 人为暂停、
+   解除条件未满足，合理在效——不要每轮重新当异常报。）
+⑤ **突变**：\`ahead\` / \`diverge\` / \`commits30m\` / \`avg10\` / \`load1\` 相对上一轮。
+   **负载升高要溯源到进程**再判异常与否——多数情况是人裁定要做的工作本身。
+⑥ **同一事实两种读法是否一致**：\`outer_bq\` vs \`outer_tbl\`。
+   不一致 ⇒ 其中一种读法已失效。（已知：表格读法 \`grep -m1 '^| 2026'\` 在
+    outer 把 tick 改成 blockquote 后恒返回 09:47Z 旧值；未修的是**其他消费者**。）
+
+**动作类四选一**：\`no-action\` / \`arbitrate\`（动了 \`.halt\` 或次序）/
+\`escalate\`（攒给人）/ \`correct\`（纠正外层的**做法**，不能是它的任务内容）。
+**自审 violations 非空 ⇒ \`correct\`**，对象是我自己。`
+
+// ══ 交还给主循环的指令 ③：收尾必做 ══════════════════════════════════════════
+const CLOSING = `**收尾（三件，缺一不可）**
+
+1. **向 \`orchestration/manager-tick-log.md\` 追加一行**，六列：
+   时刻 / 动作类 / 三项目一句话（含判准逐条结论）/ 仲裁了什么 / 升级项变化 /
+   **\`熔｜<动作名>,<动作名>\`**（本轮骨架之外的临时动作；无则 \`熔｜-\`）。
+   第六列是上浮规则的计数来源——**没有它，"连续 N 轮都在做"无法判定**。
+2. **提交**（追加后立即提交，别留未提交状态：套件收尾时的脏树断言会因此判红——
+   2026-08-07 实测，我的 tick-log 追加就是那次假阳性的两个成因之一）。
+   提交前确认分支是 \`develop\`。
+3. **哨兵清扫**：\`CronList\` → 删除所有 prompt 含 \`[manager-tick]\` 者 → 建一个。
+   **绝不靠记住的 ID。**
+
+**深挖不在 tick 的快路径里做**：判不准的记进第六列，在 workflow 外单独深挖。`
+
 const AUDIT_SCHEMA = {
   type: 'object',
   required: ['violations', 'moltenActions'],
   properties: {
     violations: {
       type: 'array',
+      description: '管理者本轮违反自己规则的实例；空数组=未发现',
       items: {
         type: 'object', required: ['rule', 'evidence'],
         properties: { rule: { type: 'string' }, evidence: { type: 'string' } },
@@ -72,36 +120,44 @@ const AUDIT_SCHEMA = {
   },
 }
 
-// READ_CMD 是主循环该跑的固定命令块的单一来源；这里打出它的指纹，
-// 让主循环能核对自己抄的那份有没有漂移（判据单一来源，不靠人记得同步）。
-log(`READ_CMD 行数=${READ_CMD.trim().split('\n').length}`)
-
 phase('Audit')
 const audit = await agent(
-    `你审计【管理者自己】最近这一轮的行为。用 meta-cc 查会话 \`${MGR_SESSION}\`
+  `你审计【管理者自己】最近这一轮的行为。用 meta-cc 查会话 \`${MGR_SESSION}\`
 （deferred 工具，先 ToolSearch 取 schema：\`mcp__meta-cc__query_session_content\`）
 加 \`git log --oneline --since='40 minutes ago' -- ${ROOT}\`。
 
-**⚠️ 硬性预算（2026-08-07 实测教训：上一版此 agent 耗 222s，其中 meta-cc 只占 27s，
+**⚠️ 硬性预算（实测教训：上一版此 agent 耗 222s，其中 meta-cc 只占 27s，
 167s 是模型读完 14,715 字符结果后的纯推理——驱动量是【返回体积】不是调用次数）**：
 - **最多 3 次工具调用**
 - **meta-cc 查询必须带 \`content_summary: true\`、\`preview_length: 120\`、\`limit: 15\`**，
-  绝不拉全文；宁可少看也不要把大段 transcript 读进来
+  绝不拉全文；宁可少看也不要把大段 transcript 读进来${PRIOR}
 
-只查这四条，逐条给证据（来自 meta-cc 或 git，不得是印象）：
-1. **§1.b2 工具使用**：跨会话发消息用的是 \`plugin/scripts/send-keys-reliable.sh\`，还是手搓裸 \`tmux send-keys\`？
+只查这五条，逐条给证据（来自 meta-cc 或 git，**不得是印象**）：
+1. **§1.b2 工具使用**：跨会话发消息用的是 \`plugin/scripts/send-keys-reliable.sh\`，
+   还是手搓裸 \`tmux send-keys\`？有没有"该有现成工具却没查就自己搓"的动作？
 2. **§1.5 该做却问人**：有没有把**自己已经有答案**的事推给人决定？
 3. **§0 边界回流**：有没有写任务体/AC/DoD、跑验证、替项目调试代码、直接改项目代码？
-4. **§4 已知失效**：把印象当测量 / 管道后读 \$? / 零命中当没发生 / \`--since='N min ago'\` 静默零 / 无条件 echo。
-5. **判准有没有被真的应用（本条 2026-08-07 新增，因为 judge 从 workflow 移到了主循环）**：
-   管理者本轮的 tick-log 行里，异常判准是否被逐条应用过——尤其
-   \`PC 有效性\` / \`suite age\` / \`mon_*=DEAD\` / \`同一事实两种读法是否一致\`。
-   **judge 在 workflow 里时判准是被强制执行的；移出后就变回"记得应用"，
-   而今晚已证明散文里的"强制"拦不住跳步** ⇒ 这条是那次移动的补偿性检查，不许略过。
+4. **§4 已知失效**：把印象当测量 / 管道后读 \$? / 零命中当没发生 /
+   \`--since='N min ago'\` 静默零 / 无条件 echo / 截断当全貌。
+5. **判准有没有被真的应用**：管理者上一轮的 tick-log 行里，六条判准（PC 有效性 /
+   陈旧当现状 / 监视器 / halt / 突变 / 两种读法一致性）是否**逐条出现过结论**。
+   **这条是补偿性检查**——judge 已从 workflow 移到主循环，执行点退化为"记得应用"，
+   而 2026-08-07 12:2x 首轮即命中（上一轮 tick-log 通篇没应用过任何一条）。不许略过。
 
 同时列出本轮 workflow 之外的临时动作短名（moltenActions，供 tick-log 第六列计数）。
 **没发现就返回空数组，不要凑数。**`,
-    { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
+  { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
 )
 
-return { audit }
+// ══ 把指令贴在结果后面交还主循环 ══════════════════════════════════════════════
+// 主循环的 tick 只需要记住一条：调这个 workflow，然后照下面返回的指令做。
+return {
+  audit,
+  指令: {
+    第一步_跑这个命令块拿读数: READ_CMD,
+    第二步_按这些判准逐条判读: JUDGE_CRITERIA,
+    第三步_收尾: CLOSING,
+    说明: '这三段由本 workflow 从磁盘上的 .js 交还给你，不依赖你的会话上下文——' +
+          '判准是数据不是记忆，跨 clear/compact 稳定。改判据请改 .claude/workflows/manager-tick-readings.js。',
+  },
+}
