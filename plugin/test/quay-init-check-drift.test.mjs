@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group serial
 // quay-init-check-drift.test.mjs — gap-delivery-surface-grows-but-target-freezes-no-upgrade.
 //
 // The delivery surface (the DERIVED loop-script set) GROWS as the plugin ships new mechanism
