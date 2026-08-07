@@ -565,3 +565,13 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 跑测试。套件仍红（09:25，等 serial 修复）。无新 merge 落地。管理者确认「ruling executing, my
 > A/B/D/C classification adopted; holding merge-order per human instruction」。Monitor
 > mounted+targetOk 真。独立核实：pane subagent 跑测试与「实现+验证」一致。等内层落地 → 并发 8 重跑。
+
+> **11:30Z 外层 tick（no-action——内层实现已落地，外层起并发 8 验证套件）**：内层完成 serial 组实现并
+> fan-in 到 integration（f062caf9：test.sh 两阶段——并发 8 主体 + serial 相位并发 1；11 个 A/B 类文件
+> 路由 `@test-group serial`；D 类快照排除 zz-* 夹具；policy-check 接受 serial；负控制 + 序列证据已在
+> 任务体）。修复在 integration（develop 分叉——书纪 commit 走 develop、任务 commit 走 integration，
+> 批量合被分叉挡住）。**外层验证**：建独立 worktree `/tmp/quay-suite-int`（分支 quay-suite-verify @
+> f062caf9，node_modules/.quay 软链复用主检出），后台起 `full-suite-runner --root /tmp/quay-suite-int
+> --lane-count 8 --sync`（state/log/events 经软链写回主检出，内层与触发者可见）。state=running
+> (11:30:01)，SUITE-RUNNING 已发。等 SUITE-GREEN/RED 决定后续：绿 → un-hold session-pid + 放行
+> done-flip 批次 + 处理分叉合并；红 → 分诊新失败。资源门 GO（cpu-some 4.79/40）。
