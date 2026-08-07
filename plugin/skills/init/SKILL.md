@@ -75,7 +75,7 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 ## Loop install: local-state files (self-create) and quay reference docs
 
 **Session topology lay-down (`gap-tmux-session-topology-no-factory-definition`):** the two-window
-session factory + check (`plugin/scripts/quay-topology.sh`, `plugin/scripts/topology-check.sh`) ship
+session factory + check (`plugin/scripts/quay-session.ts quay-topology`, `plugin/scripts/quay-session.ts topology-check`) ship
 with `--loop` because the shipped cold-start / session-topology skills reference them (referenced ⊆
 landed). The topology is `outer` + `inner`; manager is cross-project and NOT part of a project's
 topology (`gap-manager-baked-into-project-topology-factory`). The topology **definition** itself

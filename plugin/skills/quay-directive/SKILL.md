@@ -112,7 +112,7 @@ If nothing substantive was discussed, stop and say so instead of inventing conte
    The path is host-relative (thin adapter): when installed as a Claude plugin use
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts" <path-to-the-task-file>`; in a
    checkout (Claude repo skill or Codex `$quay-directive`) use the repo-relative
-   `node plugin/scripts/task-schema-check.ts <path-to-the-task-file>` (or the `.sh` wrapper
+   `node plugin/scripts/quay-check.ts task-schema-check <path-to-the-task-file>` (or the `.sh` wrapper
    alongside it). Require **exit 0** before committing. A `FAIL` means fix the TASK body (not the
    script); an `N/A legacy` line means the `extra.schema:"v1"` marker was forgotten in step 4 — add it.
 

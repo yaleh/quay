@@ -372,3 +372,26 @@ AC2「先集成再转测试」的**具体形态**;`.ts` bundle 与 `.sh` 交付�
 ⇒ **这条改动同时买到三样**:套件时间(每 spawn 省 ~220ms)、
 内核 CPU(fork 数下降)、**峰值内存(每并发 spawn 省 ~42MB)**。
 **三者里只有第一样会被 σ=297.6s 吃掉,后两样都可直接测。**
+
+---
+
+## 落地记录（2026-08-06，`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`）
+
+**AC9 因果的落地**：`tasks/gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point.md`（done）的 AC8
+被勾 `[x]` 而其自身证据文本自述「41:4 说明政策存在、未生效」——勾选的是「我核了数」不是「我做到了」。
+其 AC2 是真落地（脚本总数 205→207 记为失败信号 → 今日实测 `plugin/scripts` **142**），故**不得把整条任务说成假的**：
+这是单条 AC 的勾选标准问题。按本规格 AC9 的因果（集成是 import 取代 spawn 的前提），AC8 未真正生效反过来说明
+它依赖的「集成」步骤当时也没发生。
+
+**该集成已由 `gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect` 实现**（本规格 AC12 的
+40→6 分组方案）：
+
+| 判据 | 改前 → 改后 |
+|---|---|
+| `surface_entrypoints`（文档面操作入口数） | **40 → 6** |
+| `.sh` 独立入口（`sh_entrypoints_on_surface`） | **21 → 0** |
+| `pure_import_tests`（纯 import 零副作用测试） | **3 → 10** |
+| `spawn_ratio_ts`（spawn 型测试数） | **35 → 32** |
+
+6 个入口：`plugin/scripts/quay-{session,deliver,dispatch,branch,suite,check}.ts`（共享 `quay-entry-base.ts`
+派发器，可注入 exec）。`.sh` 留在入口内部薄实现，不再作为独立表面入口。
