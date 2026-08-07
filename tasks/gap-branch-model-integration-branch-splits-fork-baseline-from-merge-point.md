@@ -75,6 +75,15 @@ disjointness 排序在做）——**能并发的任务恰好就是不在乎基�
 > （基线快照 helper `plugin/scripts/test-file-snapshot.sh` + B3-2 场景 fixture `plugin/test/test-file-snapshot.test.mjs`，
 > scoped 5/5 绿）。模型轮次上线时无需再被断言噪声遮蔽。
 
+> **AC3 FF-only 假设否证交叉标注（2026-08-07，来自 `tasks/gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling.md`）**：
+> 本任务 AC3 的机制假设「integration→develop 永远 fast-forward（integration 永远是 develop 后代，
+> SPEC §4）」**已被 2026-08-06 23:48 实证否证**（develop 直提 271 次、对齐后一分钟内又领先 3 提交）。
+> 方向裁定：integration→develop 从 FF 改真 merge。`plugin/scripts/integration-batch-merge.sh` 因此新增
+> `--merge` 真 merge 模式（默认仍 dry-run 安全）：NOT-FF 报告分歧面 + 共享文件冲突 develop-authoritative
+> 自动解 + 真实代码冲突 fail-closed（不盲 --ours/--theirs）。本任务 AC3 的「真分歧负控制」语义保留——
+> 只是不再由「FF-only 脚本 exit 1」承载，而是由「`--merge` 的 fail-closed 分支」承载（落地详情与实跑输出
+> 见该 gap 任务体）。
+
 ## Acceptance Criteria
 
 - [x] AC1: **两线模型**——`develop`（已验证基线）+ `integration`（待验证汇入）；master 发布线角色空置
