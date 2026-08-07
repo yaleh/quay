@@ -257,6 +257,34 @@ git log -1 --format=%ct -- plugin/scripts/session-liveness.sh     # 该文件最
 - **任一项目的外层进程消失** —— 立即报，不等三次
 - **`.halt` 的解除条件已满足但没人解除** —— 提醒一次，不自行解除高优先级之外的
 
+## 2.5 我自己的锚（2026-08-07 人裁定"改进你自己的锚"）
+
+**缺口**：inner 的锚是**外部送来的固定常量**（`plugin/scripts/reanchor-prompt.txt`，577 字节，
+outer 步骤 1c 逐字 `cat` 转发），由 **grep 断言 + `reanchor-prompt.test.mjs`** 机械守护。
+**而 outer 和我都是自锚**——各自的 cron prompt 指向自己的文档，**没有任何人校验锚有没有漂**。
+我每轮重挂 cron 时是**从上下文重新粘**的，磁盘上没有对照物可 diff：上下文一漂，锚就跟着漂，
+而且**看不出来**。（outer 那层人裁定晚些处理，先修我这层。）
+
+**机制**：
+
+- 锚的正本 = `orchestration/manager-tick-prompt.txt`（纳入 git，改动可审阅）
+- **重挂 cron 必须 `cat` 这个文件**，把它的内容原样放进 `CronCreate`
+  ——**绝不从上下文里凭记忆重打**。这与"绝不靠记住的 ID"是同一条纪律的两半：
+  ID 不许记，**内容也不许记**。
+- 每轮由 `READ_CMD` 自动跑 `python3 orchestration/manager-anchor-check.py`，
+  读数里会出现 `anchor_check=OK` 或 `anchor_check=VIOLATED: …`
+
+**锚的不变量（脚本里固化，含负控制实测）**：锚必须是**纯指针**——
+① 指向三份文档 ② 含哨兵清扫规则 ③ **不得渗入状态**（ISO 日期 / 提交号 / 任务名）
+④ **不得携带本轮决策**（优先 / 先做 / 跳过 / 派发…）⑤ **不得有未提交改动**（漂移须经审阅）。
+
+**为什么③④是要害**：锚一旦带上状态或决策，它就从"锚"退化成**又一条散文驱动**——
+而散文驱动正是 inner 行为漂移的结构根（`gap-inner-has-no-periodic-anchor-prose-only-drives-drift`）。
+这是 inner 那条 `grep '派发|排序|batch|批' 期望 0 命中` 的同型断言。
+
+**负控制已实测**：注入「本轮重点」⇒ `VIOLATED: 含决策词`（exit 1）；
+追加未提交改动 ⇒ `VIOLATED: 锚有未提交改动`（exit 1）；还原 ⇒ `OK`。
+
 ## 3. 每个 tick 必写一行
 
 写进 `orchestration/manager-tick-log.md`，五列：
