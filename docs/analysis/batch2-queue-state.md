@@ -7916,3 +7916,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **serial 机制本身**：已机械证明（serial 成员移出主体 + serial 组单独绿 + D 修复）——22 fail 无一指向 serial 路由逻辑。
 - **给外层的裁定输入**：并发 8 验证应跑**完整同步的树**——或（a）40→6 re-merge 任务完成后再验证 integration，或（b）serial 修复 cherry-pick 到 develop 后跑 develop（与 reason-axis 21fa3db6 同法）。
 - **held**：session-pid（7647aaf8）继续 held，等真绿树验证。在飞 0/5。
+
+### 事件 12:1xZ（integration-content 21-fix 派发——human ruling 路径第二步）
+
+- **外层并发 8 首轮验证分诊（11:30 run）**：serial 机制**生效**（上轮 7 条已知失败全消失），但完整树暴露 **21 条新失败 = integration 待合内容自身问题**。已立 `gap-integration-content-fails-first-complete-tree-verification-fix-21`（ready，本 tick 派发）：
+  - **真缺陷 3 族**：① capability-catalog 7/8（40→6 整合脚本 quay-session/deliver/dispatch/branch/suite/check 未声明 @instrument ⇒ catalog 退出 1）；② quay-init-loop AC1 skill（SKILL.md 用 quay-suite.ts loop-driver-check、测试断言旧名 loop-driver-check.sh）；③ quay-init-loop AC2 live specimens + session-topology 工厂（先隔离分类）。
+  - **负载伪影**：重 quay-init --loop laydown 测试（隔离过、并发 8 超时）未 serial 路由 → 补进 serial 组（serial 成员 11→≥13）。
+- **本质**：40→6 instrument 整合在 integration 上（脚本已整合）但问题声明/SKILL.md/测试断言没统一——本任务 = 「修测试再合」的活，先暴露在 integration。
+- **在飞 1/5**：integration-content agent。held 1（session-pid 7647aaf8，等真绿）。套件 red+failed。
