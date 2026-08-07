@@ -80,6 +80,18 @@ function newHermetic(prefix = "quay-isc-") {
       return tmuxAt(sockPath, ["send-keys", "-t", sess, text, "Enter"], env);
     },
     cleanup() {
+      // Kill EVERY session on this hermetic socket — not just the `started` set. The factory
+      // (quay-topology.sh --session isc-factory/…) invoked with the hermetic env creates sessions
+      // DIRECTLY on this socket, invisible to `started`; leaving them orphaned leaks the server
+      // (删目录 ≠ 杀进程 — gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause).
+      // The socket is private to this test (mkdtemp'd, isolated TMUX_TMPDIR + explicit -S), so
+      // sweeping it cannot touch real sessions; per-session kill-session (never kill-server).
+      const ls = tmuxAt(sockPath, ["list-sessions", "-F", "#{session_name}"], env);
+      if (ls.status === 0 && ls.stdout.trim()) {
+        for (const name of ls.stdout.trim().split("\n").filter(Boolean)) {
+          tmuxAt(sockPath, ["kill-session", "-t", name], env);
+        }
+      }
       for (const name of started) {
         tmuxAt(sockPath, ["kill-session", "-t", name], env);
       }
