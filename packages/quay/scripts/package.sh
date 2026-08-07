@@ -72,6 +72,24 @@ if [ ! -d "${PLUGIN_SRC}" ]; then
   echo "ERROR: plugin bundle source not found: ${PLUGIN_SRC}" >&2
   exit 1
 fi
+
+# Version-sync gate (gap-npm-install-does-not-register-the-plugin-with-claude-code): the
+# Claude Code plugin manifest's version MUST track package.json's version. Claude Code
+# presents marketplace.json's `plugins[].version` to the user in `/plugin` listings — a
+# drift makes a freshly installed 0.4.0 package advertise itself as 0.3.13. Fail closed
+# instead of shipping a lying manifest. When bumping the package version, bump
+# plugin/.claude-plugin/marketplace.json AND plugin/.claude-plugin/plugin.json in the
+# same change.
+PKG_VERSION="$(node -p 'require(process.argv[1]).version' "${PACKAGE_DIR}/package.json")"
+MKT_VERSION="$(node -p 'require(process.argv[1]).plugins[0].version' "${PLUGIN_SRC}/.claude-plugin/marketplace.json")"
+PLUGIN_VERSION="$(node -p 'require(process.argv[1]).version' "${PLUGIN_SRC}/.claude-plugin/plugin.json")"
+if [ "${PKG_VERSION}" != "${MKT_VERSION}" ] || [ "${PKG_VERSION}" != "${PLUGIN_VERSION}" ]; then
+  echo "ERROR: plugin manifest version drift — package.json=${PKG_VERSION}, marketplace.json=${MKT_VERSION}, plugin.json=${PLUGIN_VERSION}" >&2
+  echo "       The Claude Code plugin lists marketplace.json's plugins[].version; a drift shows the wrong version to users." >&2
+  echo "       Fix: bump plugin/.claude-plugin/marketplace.json and plugin/.claude-plugin/plugin.json to ${PKG_VERSION} in the same change." >&2
+  exit 1
+fi
+echo "Plugin manifest version sync OK (marketplace.json + plugin.json = ${PKG_VERSION})"
 echo "Staging the plugin bundle (packages/quay/plugin/) from repo-root plugin/ before packing..."
 rm -rf "${PLUGIN_DEST}"
 mkdir -p "${PLUGIN_DEST}"

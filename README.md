@@ -77,12 +77,60 @@ kinds of artifact:
   quay --help
   ```
 
-  This installs the `quay` binary on your PATH.
+  This installs the `quay` binary on your PATH. **It also registers the quay
+  Claude Code plugin** (see
+  [Using the npm-installed quay with Claude Code](#using-the-npm-installed-quay-with-claude-code-quayinit)
+  below) — after a clean install, restart Claude Code and `/quay:init` is
+  available in any session.
 
 - **single-file executables** (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
   — no Node.js install required at all. See
   [Distribution: single-file executables (SEA)](#distribution-single-file-executables-sea)
   below.
+
+### Using the npm-installed quay with Claude Code (`/quay:init`)
+
+The canonical way to onboard a project onto quay-driven development is the
+`/quay:init` slash command in a Claude Code session (human ruling 2026-08-07).
+The `npm install -g quay-*.tgz` path **registers the plugin automatically**:
+
+- The package's `postinstall` hook (`packages/quay/scripts/register-plugin.mjs`)
+  adds the **installed** plugin directory (`$(npm root -g)/quay/plugin`, a legal
+  Claude Code *directory marketplace* containing `.claude-plugin/marketplace.json`
+  and `plugin.json`) to `~/.claude/settings.json` as `extraKnownMarketplaces.quay`
+  and enables it via `enabledPlugins["quay@quay"]`.
+- When the `claude` CLI is on `PATH`, the hook then runs
+  `claude plugin marketplace add <installed-plugin-dir>` and
+  `claude plugin install quay@quay`, which materializes the plugin into
+  `~/.claude/plugins/` so `/quay:init` is usable with **no manual step**.
+- **After installing, restart Claude Code**, then run `/quay:init` in a session.
+
+Verify the registration (the task's contract measure, must be `>= 1`):
+
+```sh
+grep -c "$(npm root -g)/quay/plugin" ~/.claude/settings.json
+# 1
+```
+
+If the `claude` CLI was not on your `PATH` at install time (or a later Claude
+Code version blocks install scripts), the hook still writes `~/.claude/settings.json`
+and prints what to run once — you can either restart Claude Code and run
+`/plugin install quay` in a session, or run:
+
+```sh
+claude plugin marketplace add "$(npm root -g)/quay/plugin"
+claude plugin install quay@quay
+```
+
+Opt-out (install the CLI without registering the plugin):
+
+```sh
+QUAY_SKIP_PLUGIN_REGISTER=1 npm install -g quay-0.3.5.tgz
+```
+
+This is the **only** supported way to install for the CLI alone. (Install scripts
+are what perform the registration; environments that set `--ignore-scripts` or an
+npm `allow-scripts` denylist will skip it — see the fallback above.)
 
 ### Option B — from source (for development or the latest unreleased changes)
 
@@ -118,6 +166,12 @@ separate `npm install` needed. The installed bytes come from the `dist-plugin`
 branch (a CI-built, self-contained bundle), not `master`; see
 [`plugin/README.md`](plugin/README.md#installation) for how that build/publish
 pipeline works (DIR-108/M172).
+
+This GitHub-source path is distinct from the npm path above: Option A's
+`npm install -g` registers the plugin bundle that ships **inside the npm
+artifact**, whereas Option C installs from the `dist-plugin` branch. Pick one —
+both land the same `/quay:init` entry point. If you installed quay via npm,
+Option C is not needed (and vice-versa).
 
 ## Updating quay
 
