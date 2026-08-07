@@ -7829,3 +7829,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **后果**：08:22:35 启动的这套重跑**执行的是旧 runner**——若再被 SIGKILL（exit 137），**仍会被误判 failed（stop-dispatch）**，僵局不闭环。外层若期望这次重跑正确分类 aborted，需先让 fix 到 develop。
 - **本 tick 已做**：4 个 held fan-in 全部落地 integration（cross-machine-observe abb8959e / npm-install 9ad7879e / suite-cutoff 54cebaa4+f91c8a4a / audit-findings task-file）。inner 无权动 develop（只由外层批量合推进）。
 - **待外层裁定**：① 是否现在批量合 integration→develop 让 fix 进运行树，再启动下一轮重跑；② 或接受本轮用旧 runner 的结果（若绿则皆大欢喜；若 SIGKILL 则仍 failed，需下轮）。
+
+### 事件 08:3xZ（inner-panel 完成——最后一个在飞 agent 落地；在飞归零）
+
+- **inner-panel 完成**（commit 8523c363，8 files）：`plugin/scripts/inner-panel-stale-check.ts` 机械观测器——面板冻结行/已结束行与存活行区分（AC1/AC3 括号交叉引用单样本：task id 不在 telemetry inProgress 仍在面板 ⇒ ended；AC2 frozen-timer 双样本：timer 未前进 ⇒ frozen；exit 1 任一行残留）。接线 loop-driver SKILL.md + fast-mode-loop-tick 步骤 3（与 --detect-stop 同 last-pane.txt）。测试 14/14 + 相关 105/105 + scoped 静态层全过。**fan-in**：cherry-pick 8523c363 → integration b7f079f5（5 code + task 文件留 develop 侧）。capability-catalog 注册（首轮全量 6 fail 由该注册缺漏导致，run 2 修复后 5 fail 全为 pre-existing/load-sensitive，各隔离通过）。
+- **在飞归零 0/5**：5 个任务（cross-machine-observe / npm-install / suite-cutoff ×2 / audit-findings / inner-panel）全部 fan-in 到 integration + task 文件入 develop + worktree 清理 + 遥测 reconcile 全关。5 空槽。
+- **suite RUNNING**（08:22:35 起，log 08:34 仍在写）——⚠️ 用的是旧 runner（reason-axis fix 在 integration 不在 develop，见 08:5x续）。结果未出。
+- **待外层**：① reason-axis fix 进 develop（批量合）后重跑判绿/aborted；② 就绪池 5 空槽是否按 slot-refill 派发（red hold 解除条件 = suite 结果）。
