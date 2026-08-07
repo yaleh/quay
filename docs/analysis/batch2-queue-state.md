@@ -7624,3 +7624,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **observer-registry 进度**：有 staged 改动（observer-registry.sh + .conf 新建、两 tick docs、capability-catalog 改）但未 commit——多文件实现中段。
 - **no-post-merge**：刚派发，agent 在读 integration 既有实现 5674e0ea。
 - **3 空槽无候选**：session-liveness-cannot-see / manager-productization / complete-delivery-surface 全撞在飞 2 agent 文件。等 observer-registry 或 no-post-merge 完成即解锁。
+
+### 事件 02:2xZ（no-post-merge 完成——真实 fan-in + liveness-saturation 派发）
+
+- **no-post-merge 完成**：移植 integration 5674e0ea 先验实现 + 修 3 缺陷（--branch 单数别名、gate_name basename、pushed_branch 命令调用 bug）。AC1-6 实跑（d=0.01h ≪ 2.2h 盈亏点、AC3 负控制红+点名、AC4 verifier≠merger、AC5 pending 面、AC6 随包）。**fan-in**：cherry-pick b279b669 → 冲突 AA cross-machine-verify.sh + UU periodic-push-backup.sh（integration 有旧版 5674e0ea，任务版带修复）——同任务超期更新，取任务修复版 → 05456e96。5/5 测试。
+- **liveness-saturation 派发 2/5**：session-liveness 看不见上下文饱和（alive 但无法接输入）。全闸过 + 与 observer-registry disjoint。worktree `quay-worktrees/liveness-saturation`。
+- **在飞 2/2**：observer-registry + liveness-saturation。3 空槽。
