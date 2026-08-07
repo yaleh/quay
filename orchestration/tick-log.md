@@ -640,3 +640,12 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > state=running (13:08:55)。管理者记 human ruling：「merge waits for a fast reliable concurrency-8
 > suite」——合并等并发 8 可靠绿。等二轮结果：绿 → un-hold session-pid + done-flip 批次 + 分叉合并；
 > 红 → 分诊新失败。
+
+> **13:20Z 外层 tick（no-action——内层自修最后一条，外层三轮验证启动）**：并发 8 二轮结果 **21→1 失败**
+> （fail 1 / pass 2764 / cancelled 0，377s）——fix-21 几乎全修好。仅剩 quay-init-check-drift.test.mjs
+> AC1/control：隔离 4/4 全过 ⇒ **负载伪影**（重 quay-init --loop 测试并发 8 超时），非真内容缺陷。
+> 内层已自落地修复（92d16611：quay-init-check-drift → serial 组，serial 组 16 文件；我 send-keys 时它
+> 已做完，送达失败但无影响）。外层更新 worktree 到 92d16611（.quay 软链经 reset 又被替换为真实目录，
+> 数据挪 .quay-worktree-local2 后重建软链），启动三轮并发 8。state=running (13:20:13)。
+> 若三轮绿：un-hold session-pid + done-flip 批次 + 分叉合并（merge waits for reliable c8 suite, human
+> ruling）。
