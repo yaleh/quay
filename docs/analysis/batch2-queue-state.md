@@ -8042,3 +8042,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **suite-green-gate 完成**（agent 4b1ebc0c，7 files）：task DoD 全量套件去重——fast-mode-loop-tick L118 改「任务 DoD 不含全量套件；全量套件是批量合边界闸门」；task-contract-check 加 `checkDodSuiteLine`（dod-suite-line 机械检查，shrink-only grandfather 表 docs/analysis/dod-suite-line-baseline.md 86 条）；负控制验证（构造含该行任务必报）；AC4 承重条证明 fork-baseline 保护强度未变（suite-state-trigger 红→stopSignal=true）；AC5 交叉标注。scoped 50/50。**fan-in**：integration **7147edf5**（task-contract-check 冲突手工合并——Check 5（ac8 自承认）+ Check 6（dod-suite-line）共存，node --check 过 + strict-subset 0 违规）。
 - **A1 完成**（agent abbf883c）：.gitignore 加 `**/.quay-worktree-local*` + `**/.quay-wtl*`（消第四轮假红首道防线）。check-ignore 3/3 + 负控制 + 真残留控制 + 双向交叉标注。**fan-in**：integration **7d410a50**（.gitignore +11）。
 - **在飞 2/5**：C（serial-segment，优先）+ B（clean-tree）。**A2（worktreeinclude）排队**——与 B 触碰重叠，等 B 完成。suite GREEN。
+
+### 事件 15:5xZ（B 完成 fan-in；A2 派发）
+
+- **B 完成**（agent ba131952）：assert-clean-tree 改 **DELTA**（--snapshot 跑前记 porcelain → --check 只数快照外新增；排除表 0e4eff84/be0cca93 被快照取代）+ tmux-leak-scan 同族 delta + scripts/test.sh 全量路径 snapshot/check 接线 + 2 新 delta 测试。15/15 + 三控制实测（pre-existing M seed.txt → green；+test-residue → red 只列新文件；clean+leak → red）。**fan-in**：integration **174badc0**（4 code 冲突——B delta 取代 integration 排除表，取 theirs 正确；task-contract-check Check 5+6 共存已验）。
+- **A1 最终确认**：.gitignore fix 已落 integration 7d410a50 + task file 6b04183a（check-ignore 3/3 复验）。其 DoD 全量 run 因 fan-in 删除 worktree 而 concurrent-teardown 失败（B 前提现场实证），DoD 全量归外层 suite-green-gate。
+- **A2 派发**（worktreeinclude，create-new-file 类——3/5 missing touches 均为新文件创建目标 .worktreeinclude/scripts/worktree-include.sh/文档）：B 完成释放触碰碰撞。telemetry 记录。
+- **在飞 2/5**：C（serial-segment，优先）+ A2（worktreeinclude）。suite GREEN。
