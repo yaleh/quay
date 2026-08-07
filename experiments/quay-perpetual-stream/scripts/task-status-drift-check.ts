@@ -384,7 +384,13 @@ export function gitHistoryLanded(rawTaskText, repoRoot, opts = {}) {
     const { commits, byPath } = opts.gitIndex;
     const seen = new Set();
     for (const p of paths) {
-      const hashes = byPath.get(p);
+      // git pathspec semantics: a Touches path names EITHER one exact file OR a directory whose
+      // contents all match (`git log -- <dir>/` and `git log -- <dir>` both match every file under
+      // the dir). The per-task path-limited log honors this; the in-memory index must too —
+      // otherwise a task whose Touches declare a DIRECTORY path (e.g. `packages/.../factories/`) is
+      // silently under-detected by the batched path while the per-task path fires (whole-store
+      // drift: DIR-087/089/091 were landed=true per-task but false via the index).
+      const hashes = _indexHashesForPath(byPath, p);
       if (!hashes) continue;
       for (const hash of hashes) {
         if (seen.has(hash)) continue;
@@ -471,6 +477,24 @@ export function buildGitHistoryIndex(repoRoot, opts = {}) {
     set.add(cur.hash);
   }
   return { commits, byPath };
+}
+
+/** Git-pathspec-equivalent in-memory lookup for the batched index: a Touches path `p` matches an
+ *  indexed FILE whose key is exactly `p`, OR any indexed file under the directory `p` names (with
+ *  or without a trailing slash — `plugin/test/` and `plugin/test` both match `plugin/test/foo.ts`)
+ *  — the SAME path set `git log --full-history -- <p>` returns (verified: `-- dir` and `-- dir/`
+ *  list the same commits). Returns null when nothing matched (fail-closed, identical to an empty
+ *  path-limited git log). This closes the directory-Touch under-detection gap where the per-task
+ *  path fired on a task declaring `…/scripts/`-style Touches but the index silently did not. */
+function _indexHashesForPath(byPath, p) {
+  const out = new Set();
+  const exact = byPath.get(p);
+  if (exact) for (const h of exact) out.add(h);
+  const prefix = p.endsWith("/") ? p : `${p}/`;
+  for (const [key, hs] of byPath) {
+    if (key.startsWith(prefix)) for (const h of hs) out.add(h);
+  }
+  return out.size ? out : null;
 }
 
 // Reusable "the task's declared work has landed on master" predicate — exported for reuse by

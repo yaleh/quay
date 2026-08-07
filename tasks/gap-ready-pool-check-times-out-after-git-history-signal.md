@@ -83,12 +83,36 @@ glob 展开 + MIS 子集算法的叠加）。
 - 新增 3 条 batch-index 路径等价测试（web-board 正向 + never-dispatched/shared-kernel/glob+(new)/overshoot
   负向，索引路径 == per-task 路径）。
 
+**Re-verification 2026-08-07（本会话实跑，4 核 load 3-7；基线 = 上一会话 2026-08-05 before 数据）**：
+- **before（复用任务体记录 + 本会话基准）**：per-task 聚合 `git log --full-history -- <paths>` ×27 ready 任务 =
+  **5.8s**（git-history 信号单项）；原池检查整体 >150s timeout（任务体 before 数据，EXIT=124 @25s）。
+- **after**：`time node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)"` =
+  **2.08–2.27s**（3 次：2.273s / 2.147s / 2.080s；load≈5-7，低于上一会话的 7.2–8.2s，仍 <10s band）。
+- Contract invoke：web-board `landed=true`（0.55s）、upgrade-channel `landed=true`（0.87s）、
+  measure-claude-p `landed=true`（0.84s）——AC2 判定不变。
+- **全仓 git-history 漂移核对（新增，本会话）**：295 个涉 git-history 任务，per-task 路径 vs 批量索引
+  **drift=0**。修复前 4 个 drift 全部为**目录型 Touches**：DIR-087/089/091（`…/scripts/` 型，per-task true /
+  索引 false——done 任务，池扫描不读）与 gap-user-scope（todo，per-task 短前缀误报；批量索引因目录未命中
+  恰好不误报）。
+- **新增修复（本会话）**：`buildGitHistoryIndex` 的 `--name-only` 索引只含**文件 key**，目录型 Touches 路径
+  （`packages/.../factories/`）在 per-task `git log -- <dir>/` 下命中但索引不命中 → `_indexHashesForPath()`
+  （`gitHistoryLanded` 批量分支）加**目录前缀匹配**：exact key 并集 + `key.startsWith(prefix)`（`-- dir` 与
+  `-- dir/` 输出相同提交，已实测；与 git pathspec 语义一致）。两镜像同步字节一致。per-task 路径不改。
+- **新增测试（本会话）**：`plugin/test/task-status-drift-check.test.mjs`「BATCHED index matches
+  DIRECTORY-style Touches paths (git pathspec equivalence)」——目录 Touch 正向两路径均 fire + 未派发兄弟
+  负向两路径均不 fire。
+- 变更后 scoped 套件：**78 tests, 77 pass, 0 fail, 0 cancelled**（1 skipped 为 opt-in 真实仓）；scoped 静态层
+  （`--for-task … --allow-thin`）EXIT=0，task-contract-check **no violations**。
+- 修复前后池输出逐字节一致：pool=15、dispatchable_disjoint=9、excluded/ready id 集不变（行为保持）。
+- 注：**全量套件**（DoD 第 4 项，23-37min @ concurrency 1）不在本会话跑——4 核 load 5-7，交给外层
+  verification-round 全量闸（scoped skip 按 CLAUDE.md 规则 DEFERRED 到全量闸，绝不丢弃）。
+
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC1 实跑输出贴任务体（pool check real 秒数 <10）
-- [ ] 性能修复落地：ready-pool-check 回到 <10s；150s timeout 不再触发
-- [ ] 判定回归不破（web-board/upgrade-channel/measure-claude-p landed 不变、排除集不变）
-- [ ] 全量套件绿（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+- [x] AC1–AC5 全部勾上；AC1 实跑输出贴任务体（pool check real 秒数 <10——2.08–2.27s）
+- [x] 性能修复落地：ready-pool-check 回到 <10s；150s timeout 不再触发
+- [x] 判定回归不破（web-board/upgrade-channel/measure-claude-p landed 不变、排除集不变）
+- [ ] 全量套件绿（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——本会话未跑，DEFERRED 到外层全量闸
 
 ## Touches
 
