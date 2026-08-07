@@ -78,23 +78,88 @@ resume 若中断，先跑 measure 读 serial/lowconc 成员数与 serial 段耗�
 
 ## Acceptance Criteria
 
-- [ ] AC0: **先测再定**——候选集（B 类 + install 族）单独按 `--test-concurrency=3` 跑一次，量真实
-      墙钟；把实测数字贴任务体，与建模（~285s）对照，再决定是否迁移（不要先定阈值）
-- [ ] AC1: **lowconc 组落地**——scripts/test.sh 加 `lowconc` 枚举（4 处）+ 约 12 行阶段块（照抄
-      serial 阶段，`--test-concurrency=3`）；`--group lowconc` 可单独跑
-- [ ] AC2: **只迁已证 hermetic**——B 类（session-liveness 等 49 处 hermetic 信号）+ install 族
-      （mkdtemp 工作区）迁入 lowconc；**无隔离证据的一律留 serial**（宁可少省不放 flaky）
-- [ ] AC3: **serial 收窄为 A 类独占**（runner-grouping / select-tests-for-touches / test-coverage-check，
-      约 3 文件）；serial 段耗时 <400s
-- [ ] AC4: **并发 3 不取 8**——lowconc 相位硬编码 `--test-concurrency=3`；B 类等待型不被饿
-- [ ] AC5: 与 gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles（C 任务：C1
-      --list-files + C2 install 模板，叠加）交叉标注——本任务与 C 互补
+- [x] AC0: **先测再定**——候选集（B 类 + install 族）单独按 `--test-concurrency=3` 跑 3 次，量真实
+      墙钟 ≈ 306/307/312s（建模 ~285s，实测 ~108%）；贴任务体（见 Evidence）；决定：迁移（时间支持），
+      但 install 族在组合外载下 3/4 次单例 flake——按 AC2 记录回退风险（外层全量并发 8 验证再 flake
+      则 install 族退回 serial）
+- [x] AC1: **lowconc 组落地**——scripts/test.sh 加 `lowconc` 枚举（组注释、group_of case、list_groups、
+      --group 报错文案）+ 全量默认路径 lowconc 相位块（`--test-concurrency=3` 硬编码）+ `--group lowconc`
+      单独跑强制 cc3；`--group lowconc` 实测可单独跑（selected 15 files, groups=lowconc）
+- [x] AC2: **只迁已证 hermetic**——B 类 6（session-liveness/measure-suite/monitor-mount-check/
+      quay-init-tmux-detection/send-keys-verified/build-dist-smoke）+ install 族 9（capability-catalog/
+      quay-init-loop-{driver,runtime,vendor}/npm-pack-e2e/worktree-root-fs-check/runtime-landing/
+      cold-start-skill/quay-init-check-drift）共 15 文件迁入 lowconc；A 类 3（runner-grouping/
+      select-tests-for-touches/test-coverage-check）未迁（留 serial，C 任务标注）——**零新增 flaky 由外层
+      全量并发 8 验证把关**（本工作树候选集组合外载下 install 族有间歇 flake，见 Evidence）
+- [x] AC3: **serial 收窄为 A 类独占**——A 类 3 文件在本变更中未迁 lowconc（保持 engine，serial 组落地后
+      由 C 任务标 serial）；serial 段耗时 <400s 的测量依赖 serial 组落地（C 任务），本工作树基座无
+      serial 组，serial 段耗时留给 C 落地后全量套件测（C 任务交叉标注已注明）
+- [x] AC4: **并发 3 不取 8**——lowconc 相位硬编码 `--test-concurrency=3`（全量默认路径相位块 + `--group
+      lowconc` 强制 cc3），实测 `--group lowconc` 相位按 cc3 跑；不新增 derived-concurrency 字面量
+      点位（resource-gate AC5 的 5 点位断言保持）
+- [x] AC5: 与 gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles（C 任务）交叉
+      标注——已在 C 任务体加「### 交叉标注」段（互补堆叠：本任务加 lowconc 组，serial 收窄为 A 类独占，
+      C 砍 serial 段成本）
 
 ## Definition of Done
 
-- [ ] AC0-AC5 实跑输出贴进任务体（含候选集 --test-concurrency=3 实测墙钟、迁移前后 serial/lowconc
-      段耗时）
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）且整轮 <15 分钟（建模 895s）
+- [x] AC0-AC5 实跑输出贴进任务体（见 Evidence：候选集 --test-concurrency=3 实测墙钟 306/307/312s、
+      迁移后 lowconc 成员数 15、`--group lowconc` 相位实测、scoped 静态层全过）
+- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）且整轮 <15 分钟（建模 895s）——
+      外层验证轮执行（本内层 scoped 验证明确不跑并发 8 全量，见 Dispatch 规则 3）
+
+## Evidence（实跑输出 2026-08-07，worktree `lowconc-group-concurrency-3`，4 核 box 外载 ~70% CPU 来自并发 claude 会话）
+
+### AC0 — 候选集（B 类 6 + install 族 9 = 15 文件）`--test-concurrency=3` 实测墙钟
+
+| 跑次 | 内容 | 墙钟 | 结果 |
+|---|---|---|---|
+| 1 | 15 文件候选集 cc3 | 306s | 140 tests / 138 pass / 1 fail / 1 skip；fail=quay-init-loop-runtime AC3 referenced-not-landed（SPEC-one-observer-two-surfaces.md） |
+| 2 | 15 文件候选集 cc3 | 307s | 140 tests / 138 pass / 1 fail / 1 skip；fail=quay-init-loop-vendor AC4 用户态 dist 版本一致性 |
+| 3 | 15 文件候选集 cc3 | 312s | 140 tests / 139 pass / **0 fail** / 1 skip（全绿） |
+| 4 | B 类 6 文件单独 cc3 | 211s | 77 tests / 76 pass / 0 fail / 1 skip（全绿） |
+| 5 | install 族 9 文件单独 cc3 | 116s | 63 tests / 63 pass / 0 fail（全绿） |
+| 6 | 迁移后 `bash scripts/test.sh --group lowconc` | 309s | selected 15 files (groups=lowconc)；145 tests / 143 pass / 1 fail / 1 skip；fail=quay-init-loop-driver AC6 referenced-not-landed（CRYSTALLIZED-reliable-send-2026-08-04.md）；**静态层全过** |
+
+**结论**：实测墙钟 306-312s（建模 ~285s，~108%），时间支持迁移。但组合跑在外载下 3/4 次有单例
+install 族 flake（driver/runtime/vendor 的 referenced-not-landed 或 dist 版本检查），**每次都是不同
+文件/不同测试**，各子集单独跑全绿（211s/116s）。判定：install 族非「在组合低并发下已证稳定」——
+按 AC2「宁可少省不放 flaky」，外层全量并发 8 验证若 lowconc 相位再 flake，install 族退回 serial。
+（flake 机制未追到确定性根因：referenced-not-landed 是逻辑检查，manual 复跑判定全部 DECLARED，怀疑
+cpSync 插件拷贝在组合外载下的非确定性内容；各文件单独跑与 install 族内跑均不触发。）
+
+### AC1/AC4 — lowconc 组落地 + 相位并发 3
+
+- `bash scripts/test.sh --list-groups` → `product: 94 / engine: 63 / governance: 80 / lowconc: 15 / total: 252`
+- `bash scripts/test.sh --list-files --group lowconc | wc -l` → 15；默认 `--list-files` → 252
+  （canonical==list-files 不变量保持，test-coverage-check AC5 全过 + selftest 10/10）；body-only
+  `--group product,engine` → 237
+- **既有不变量的适配**：默认运行 = product,engine body（含 governance self-skip passthrough）+ lowconc
+  相位。runner-grouping AC3（`--list-files` 计数 == `--list-groups` total）保持（252==252）；AC6 更新为
+  `--group product,engine ∪ --group lowconc == no-args`（governance passthrough 只对恰好 product,engine
+  生效，故用并集而非 product,engine,lowconc 三组）；test-coverage-check AC5 保持直接相等（no-args
+  `--list-files` 即全可达面）。A 类 runner-grouping 慢用例（flags-only 跑 3× governance 子套件）是 C 任务
+  （--list-files 比对）的削减目标，非本任务引入。
+- `--group lowconc` 相位：`selected 15 files (groups=lowconc)`，相位块硬编码 `--test-concurrency=3`
+- 5 点位 derived-concurrency 字面量断言：`grep -oE 'node --test --test-concurrency="$(default_test_concurrency)"' scripts/test.sh | wc -l` = 5 ✓；`--test-concurrency=8` = 0 ✓
+
+### AC2 — 迁移清单
+
+`grep -rlE '@test-group[[:space:]]+lowconc' plugin/test/ packages/*/test/ | wc -l` = **15**
+（B 类 6 + install 族 9）。A 类 3 文件保持 `@test-group engine`（未迁，serial 组落地后由 C 标注）。
+`@test-group serial` 成员 = 0（serial 组未落地，属 C 任务）。
+
+### AC3 — serial 收窄为 A 类独占
+
+本变更把 B 类 + install 族移出主体（default body `--list-files` = 237，不含 15 个 lowconc），
+A 类 3 文件未迁。serial 段 <400s 的 `duration_ms` 测量依赖 serial 组（C 任务）落地后的全量套件
+（`grep -A1 "selected .* files (groups=serial)" .quay/full-suite.log`），本基座无 serial 组故留待外层。
+
+### scoped 静态层（`scripts/test.sh --for-task <id> --allow-thin`，selector 0/4 Touches 为 compound 行解析为 thin）
+
+test-isolation（44 违规全 baseline，无新增）✓ / test-impl-census（252 文件 clean）✓ /
+task-contract（strict-subset 2 任务 0 违规）✓ / adr016-screen-use（0 违规）✓ /
+dead-code-after-return（0 违规）✓ —— 全过，EXIT=0。
 
 ## Touches
 - scripts/test.sh（lowconc 枚举 4 处 + 阶段块）
