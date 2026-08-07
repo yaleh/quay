@@ -72,7 +72,7 @@ test.sh 内部的 gate-WAIT 路径没接入原因轴。
 
 - **AC1（gate-WAIT ⇒ aborted + 不设 stop-dispatch）**：
   - `plugin/test/full-suite-runner.test.mjs` `"AC1/AC3 — an early-EXIT red (test.sh internal resource-gate WAIT fail-closed) is reason=aborted, NOT failed"` —— 构造 17:46 同形 fake suite（`resource gate says WAIT — not running the full suite ...` + exit 1）⇒ 断言 `s.reason === "aborted"` 且 `runOnce(root).stopSignal === false`。
-  - 新增 Contract invoke 控制：`node --experimental-strip-types plugin/scripts/full-suite-runner.ts --wait-check` ⇒ 输出 `wait-check OK: runner wrote state=red reason=aborted → trigger recorded SUITE-RED → stopSignal absent (no stop-dispatch)`（退出 0）。真实 test.sh 标记文本（`scripts/test.sh:387`）与 `ABORT_PATTERNS` 逐字匹配。
+  - 新增 Contract invoke 控制：`node --experimental-strip-types plugin/scripts/full-suite-runner.ts --wait-check` ⇒ 输出 `wait-check OK: runner wrote state=red reason=aborted → trigger recorded SUITE-RED → stopSignal absent (no stop-dispatch)`（退出 0）。真实 test.sh 标记文本（`scripts/test.sh:406`，2026-08-07 重验时实测行号）与 `ABORT_PATTERNS` 逐字匹配。
 - **AC2（真失败不回归 reason=failed + stop-dispatch）**：
   - `full-suite-runner.test.mjs` `"AC5 — a REAL failure after an abort marker is NOT downgraded"`（`resource gate says WAIT` 后 `not ok 1 - boom` ⇒ reason 仍 failed）；`"AC5 — a generic non-zero exit with NO failure/abort marker stays reason=failed"`（fail-closed catch-all）。
   - `--fail-fast-check`（已有）证明 failure suite ⇒ state=red reason=failed ⇒ stopSignal=true（`suite-state-trigger.test.mjs` Contract invoke 测试）。`--wait-check` 与 `--fail-fast-check` 在 stopSignal 上相反，证明两路正确分叉。
@@ -80,10 +80,15 @@ test.sh 内部的 gate-WAIT 路径没接入原因轴。
 - **AC4（交叉标注）**：原因轴三值枚举（failed|aborted|infra-error）的 schema + 路由是
   `gap-full-suite-runner-concurrency-default-and-gate`（done）**范围之外**的残余缺口，由
   `gap-suite-state-has-no-reason-axis-failed-aborted-infra` 落地（本任务核查并补 CLI 控制）。交叉标注见
-  `full-suite-runner.ts:85-92`（reason 轴注释同时引用两个任务 id）与 `suite-state-trigger.ts:63-70`。
+  `full-suite-runner.ts:97-98`（reason 轴注释同时引用两个任务 id）与 `suite-state-trigger.ts:82-83`（2026-08-07 重验时实测行号）。
 
 **Scoped test run**：`bash scripts/test.sh --for-task gap-full-suite-runner-marks-test-sh-gate-wait-as-failed`
 ⇒ 24 pass / 0 fail；scoped static checks（test-framework-policy-check、adr016-screen-use-check 等）PASS。
+
+**Re-verify 2026-08-07（本 dispatch）**：fresh `--wait-check` ⇒ `state=red reason=aborted stopSignal=false`（exit 0）；fresh
+`--fail-fast-check` ⇒ `state=red reason=failed stopSignal=true failures=1`（exit 0）；`bash scripts/test.sh plugin/test/full-suite-runner.test.mjs`
+⇒ 24 pass / 0 fail；`--for-task ... --allow-thin` scoped static tier（含 task-contract-check strict-subset on this task）EXIT=0。
+`scripts/test.sh` 相对 develop 零 diff（未改）。机制本体 + `--wait-check` 已由 commit `ac2506b6`（本任务）+ `f460d07b`（merge）落地。
 
 ## Touches
 
