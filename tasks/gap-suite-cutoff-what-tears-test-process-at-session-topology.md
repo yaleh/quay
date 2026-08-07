@@ -82,6 +82,17 @@ acceptance(161064ms) / version-consistency、08-03 workflow-event-schema / workf
   清理范围是否误伤 node --test，需确认）；②是否有其它外部脚本/进程在杀 node --test；
   ③timeout 包裹但退出码被吞。
 
+**已确认的机制缺陷（外层 2026-08-07 07:5x，管理者矛盾判定）——reason 轴漏掉 signal-kill**：
+07:08-07:21 运行日志末行 `scripts/test.sh: line 576: 720326 Killed`（SIGKILL），但状态文件
+`reason: "failed"` 非 aborted——AC5 明写 signal-kill ⇒ aborted。读码定位：
+- `full-suite-runner.ts:539` 捕获 child 的 `{code, signal}`，但 **`exit.signal` 从未在分类中使用**；
+- `full-suite-runner.ts:564` `childKilledBySignal = exitCode === null && spawnError === null`——
+  只查 exitCode null。SIGKILL 后 bash 报 exit **137**（128+9）⇒ exitCode=137 ≠ null ⇒
+  `childKilledBySignal=false` ⇒ reason=failed（fail-closed catch-all）。
+⇒ **reason 轴缺陷**：signal-kill 若以 128+signal 退出码呈现（非 null），被误判为 failed（stop-dispatch 信号），
+  而判绿三条件依赖 reason 轴。**修复方向**：`childKilledBySignal` 应包含 `exit.signal !== null`
+  （或 exitCode 匹配 128+signal 区间）。**管理者的 (b) 选项确认**。
+
 ### 为什么这个任务优先于分诊 101 失败
 
 红判决不可信 ⇒ 任何对 101 失败的分诊都是在对噪声分类。先查切断源，再重跑干净窗口拿真失败数。
