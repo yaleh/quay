@@ -7924,3 +7924,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - **负载伪影**：重 quay-init --loop laydown 测试（隔离过、并发 8 超时）未 serial 路由 → 补进 serial 组（serial 成员 11→≥13）。
 - **本质**：40→6 instrument 整合在 integration 上（脚本已整合）但问题声明/SKILL.md/测试断言没统一——本任务 = 「修测试再合」的活，先暴露在 integration。
 - **在飞 1/5**：integration-content agent。held 1（session-pid 7647aaf8，等真绿）。套件 red+failed。
+
+### 事件 12:2xZ（fix-21 worktree 基底纠偏——develop→integration）
+
+- **外层纠偏（git 事实已核）**：40→6 合并 a4b1d9a9 + revert 7642849a 都在 develop 上 → develop **没有** quay-session.ts 等整合脚本；integration（f062caf9）**有**（40→6 + serial 机制）。21 条失败只在 integration 树存在。
+- **原派发基底错误**：fix-21 worktree 用 develop 基底 → capability-catalog.test.mjs 在 develop 树上会过（无 40→6 脚本），agent 看假绿信号。已停原 agent（a093c9077a5a9f366，killed 于对比中途、无残留）、删错基底 worktree/分支、**重建于 integration f062caf9**（含全部 quay-*.ts 40→6 脚本 + serial 机制）、re-telemetry + 重新派发（ae4154e4b8a3b1541）。
+- **教训**：fork-baseline 规则（依赖 integration 未验证内容的从 integration 分叉）——本任务修 integration 树自身缺陷，**必须 integration 基底**。
+- **在飞 1/5**：integration-content agent（integration 基底）。held 1（session-pid）。套件 red+failed。
