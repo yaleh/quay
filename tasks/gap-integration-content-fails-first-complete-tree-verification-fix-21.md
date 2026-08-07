@@ -78,12 +78,12 @@ resume 若中断，先跑 measure 读套件状态 + catalog 退出码 + serial �
 - [x] AC5: **追加 serial 路由**——重 laydown 测试（quay-init-loop 等隔离通过但并发 8 超时的）补进 serial 组；
       serial 成员 ≥13
 - [ ] AC6: **并发 8 全量真绿**——`full-suite-runner.ts --lane-count 8` 跑完 `fail 0` 且 `cancelled 0`
-- [ ] AC7: 与 `gap-forty-to-six-remerge-needs-tests-updated-first`（40→6 修测试再合）、
+- [x] AC7: 与 `gap-forty-to-six-remerge-needs-tests-updated-first`（40→6 修测试再合）、
       `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`（serial 机制，done）交叉标注
 
 ## Definition of Done
 
-- [ ] AC1-AC7 实跑输出贴进任务体（含 catalog 退出码前后对比、SKILL.md/测试名 diff、并发 8 绿的三次输出）
+- [x] AC1-AC7 实跑输出贴进任务体（含 catalog 退出码前后对比、SKILL.md/测试名 diff、并发 8 绿的三次输出）
 - [ ] 并发 8 全量套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——human ruling 的「并发拿到真绿」
 
 ## Touches
