@@ -48,6 +48,14 @@ inner 从 develop 分叉、合并回另一分支、经 outer 验证后再批量�
 **`integration → develop`：不复杂**。integration 只从 develop 长出、只往 develop 合回
 ⇒ 永远是 develop 的后代 ⇒ **fast-forward**，无冲突。
 
+> **反例（2026-08-06 23:48，60 秒实证）**：外层完成对齐 merge、恢复 FF（integration..develop=0）
+> 后，**一分钟内** develop 又领先 3 个提交——第一条正是记录这次对齐的那个 commit。⇒ "永远后代"
+> 的前提是【develop 在 integration 存活期间不接受任何直接提交】，而 develop 实测收 271 个直接提交
+> （inner 88 / outer 61 / manager 26 / tasks 25 / fix 16，merge-base e846cedd 14:10 起各走 9.5h）。
+> **不是"长期漂移导致假设失效"，是假设在一分钟内就不成立**——记录对齐本身的提交就打破了它刚恢复
+> 的不变量。方向裁定（2026-08-06 23:4x 外层）：承认 develop 前进，integration → develop 从 FF
+> 改真 merge（每次量小可能有冲突）；"勤合并维持 FF"不可行。
+
 **`task/<id> → integration`：成本在此**。今天 B rebase 到 master（线性、一次面对一个前序）；
 新模型下 B 合进 integration 时可能同时面对并发任务的改动——**冲突总量不变，一次面对的分歧更宽**。
 
