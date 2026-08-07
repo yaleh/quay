@@ -101,13 +101,24 @@ vitest 结构化行 `❯ test/foo.test.ts (3 tests | 1 failed) 12ms` ⇒ 同 red
 **AC4 交叉标注**：Proposal 已引 archguard TASK-67（13:52 下游验证 3 文件 6 真失败、假阳性不复发）；
 runner FAILURE_PATTERNS 注释亦引 archguard TASK-67。直接采纳下游已验证修复。
 
+**复核 2026-08-07（worktree 重执行，代码未改动，结果一致）**：Contract invoke 确认 `✖` 只出现在
+注释（runner 第 121-122 行），FAILURE_PATTERNS（第 129 行起）为结构化形态、无裸 `/✖/`；
+Contract measure `node --test plugin/test/full-suite-runner.test.mjs 2>&1 | grep -c '✖'` = **0**
+（band false_red=0）。AC1/AC2 控制逐条复现（资源闸因 CPU 负载 WAIT，用 QUAY_TEST_SKIP_RESOURCE_GATE=1
+走轻量假 suite 验证）：AC1 vitest 假红负控制（`✖ Diagram test failed` console + 0 failed + exit 0）
+⇒ `FINAL state=green exit=0`；AC2 node:test `not ok 1 - boom` + exit 1 ⇒
+`FINAL state=red reason=failed exit=1`；vitest 结构化 `❯ test/foo.test.ts (3 tests | 1 failed) 12ms`
+⇒ 同 `state=red reason=failed`（early-red 保留）。scoped 全绿：`scripts/test.sh --for-task ... --allow-thin`
+= tests 24 / pass 24 / fail 0 / cancelled 0，`task-contract-check: no violations.`。driver 树全量套件绿
+（`full-suite-state.json` state=green；verification-round round 55-57 均 `suiteGreen:true`）。
+
 ## Definition of Done
 
-- [ ] AC1–AC4 全部勾上
-- [ ] vitest 假红负控制：通过测试打 `✖` console ⇒ 不 early-red（实跑输出贴任务体）
-- [ ] node:test 真失败（not ok / # fail）⇒ 仍 red（实跑输出贴任务体，不回归）
-- [ ] 文档已修正 vitest --maxWorkers 分叉
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC4 全部勾上
+- [x] vitest 假红负控制：通过测试打 `✖` console ⇒ 不 early-red（实跑输出贴任务体）
+- [x] node:test 真失败（not ok / # fail）⇒ 仍 red（实跑输出贴任务体，不回归）
+- [x] 文档已修正 vitest --maxWorkers 分叉
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
 ## Touches
 - tasks/gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red.md（自身文件：勾 AC + 贴 invoke 证据授权）
