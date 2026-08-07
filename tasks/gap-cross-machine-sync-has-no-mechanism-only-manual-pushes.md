@@ -178,6 +178,44 @@ capability-catalog: 128 scripts | 128 declared | 0 unclassified | 123 ship   # s
 本条 AC 全部测「**没有人工干预时它自己会不会发生**」：AC1 无人工推、AC2 同一轮内、AC4 摘掉触发源必红——
 每一项都直接钉「机制在跑」，不是「配置/指向对了」。
 
+### 复核记录（2026-08-07，re-verification，执行代理）
+
+复核执行于 worktree `cross-machine-sync2`（branch `task/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`），
+机制已在 develop 落地，未 re-implement；以下为对真实代码的复核证据：
+
+- **AC1/AC2/AC4**：`plugin/test/sync-lag-check.test.mjs` 实跑 7/7 全绿（fallback 触发源、事件驱动同轮、
+  负控制摘触发源必红——`before=1 → after=0`）。
+- **AC2**：`integration-batch-merge.sh --sync` 在同一轮内 push（`sync-push ok`，elapsed ≪ 1 tick）。
+- **AC3**：`sync-lag-check.sh --json` 实跑输出含 `unpushed`/`behind`/`leads`/`synced` 字段（sync_lag_visible=1）；
+  `--json`/`--dry-run` 均不改动 origin（负控制）。loop 文档调用的包装命令
+  `node --experimental-strip-types plugin/scripts/quay-branch.ts sync-lag-check --json --branch ... --root .`
+  实测可用（任务分支 `unpushed=4430`，只读）。
+- **AC5**：`sync-lag-check.test.mjs` 每次 makeWorld 都是全新裸库+克隆（任意克隆生效）。
+- **AC6**：`crontab -l` → `command not found`（本机无系统 crontab）；`quay-init.sh --check-dependency-closure`
+  实测 derived laydown set 含 `sync-lag-check.sh`/`periodic-push-backup.sh`/`integration-batch-merge.sh`，
+  `dependency_closure_gaps: 0`（机制经 bare-name 解析 + 依赖闭包进铺设集）。
+- **类级机制**：`uncalled-verifier-check.ts --json` 实测 `sync-lag-check.sh` callers =
+  `[plugin/scripts/integration-batch-merge.sh, plugin/scripts/quay-branch.ts]`、
+  `periodic-push-backup.sh` caller = `[plugin/scripts/sync-lag-check.sh]`——均不在 uncalled 清单。
+- **测试**：`scripts/test.sh plugin/test/sync-lag-check.test.mjs plugin/test/periodic-push-backup.test.mjs`
+  → 13/13 pass，fail 0 / cancelled 0。
+- **scoped static tier**（`--for-task ... --allow-thin`）：task-contract-check no violations、
+  drive-contract-check pass。21 个选中测试 14 pass / 7 fail——7 fail 全部在 `capability-catalog.test.mjs`：
+  1 个 Wiring 为已知环境性失败（worktree 无已构建 vendor runtime，需 `npm install`）；**6 个是 AC8
+  （2f6621ed）引入的回归**——`quay-branch.ts`/`quay-check.ts`/`quay-deliver.ts`/`quay-dispatch.ts`/
+  `quay-suite.ts`/`quay-session.ts`/`quay-entry-base.ts` 七个 quay-* 组仪器在 capability-catalog.sh 中
+  未声明 question（unclassified=7 → catalog exit 1）。**与本任务无关**：本任务对 capability-catalog.sh 的
+  贡献（`sync-lag-check.sh` 声明，行 179）存在且正确（catalog --json 中 `sync-lag-check.sh` 有 question、
+  ships:true）。该回归归外层 full-suite gate / AC8 任务。
+- **真实领先量（## Contract resume 实测）**：`git rev-list --count origin/develop..develop` = **251**
+  （origin/develop 停于 2026-08-06 17:28，本地 develop 至 2026-08-07 03:38，约 10h 未推）——实时 loop 的
+  tick 心跳（fast-mode 4a / orchestrator 3c）**当前未在推送**。机制本身由 AC1-AC4 证明可用；「loop 是否每
+  tick 真跑心跳」是外层 verification-round 的判定面。本执行代理**不推真实 develop**（251 笔推送是 loop 的
+  心跳动作，且 worktree 共享 .git，避免与主检出 loop 竞争）。**建议外层：确认 4a/3c 心跳在下个 tick 推平，
+  或人工 `sync-lag-check.sh --push --branch develop`。**
+- 复核未勾选任何 AC/DoD 新项（8 项已勾且经复核为真）；DoD「完整套件 2 次全绿」维持未勾（按 fast-mode-loop-tick.md
+  归外层后台异步 gate，inner 禁止跑全量）。
+
 ## Touches
 - tasks/gap-cross-machine-sync-has-no-mechanism-only-manual-pushes.md（自身文件）
 - plugin/scripts/periodic-push-backup.sh
