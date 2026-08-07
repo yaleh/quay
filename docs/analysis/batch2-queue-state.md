@@ -7642,3 +7642,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **前置修复**：收窄 Touches 两个 overbroad glob（`orchestration/**`→restart-plan-2026-08-04-third.md；`plugin/scripts/`→tmux-leak-scan.sh）——否则 concurrent-batch-scheduler 对一切 in-flight 保守串行化。收窄后 vs 全部在飞 disjoint。
 - **派发 3/5**：worktree `quay-worktrees/tmux-leak`。AC 部分先前已勾，指示 agent 逐条验当前代码（若被回退则重实现）。
 - **在飞 3/3（真实）**：observer-registry（全量中）+ liveness-saturation + tmux-leak。2 空槽。
+
+### 事件 02:6xZ（红窗修复——tick-vocabulary 白名单补入口形态）
+
+- **外层分诊**（03:08 full-suite 红）：根因 = 40→6 合并改 tick 文档指令形态（quay-branch.ts/quay-dispatch.ts 入口），但 tick-vocabulary.test.mjs 的 SAFE_SUBSTRINGS 只认旧形态（integration-batch-merge.sh/concurrent-batch-scheduler.ts）。3 处未分类：fast-mode:374（quay-branch.ts integration-batch-merge）、fast-mode:676（quay-dispatch.ts concurrent-batch-scheduler）、orch:728（quay-branch.ts integration-batch-merge）。
+- **修复**（按外层方向：补白名单，不改文档）：SAFE_SUBSTRINGS 加裸机制名 `integration-batch-merge` / `concurrent-batch-scheduler`（覆盖两种拼写）。tick-vocabulary.test.mjs 5/5 绿，scoped 5/5 绿。不回滚 40 提交。
