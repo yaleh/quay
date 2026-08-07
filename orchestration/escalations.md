@@ -399,3 +399,25 @@ quay-session.ts 等，integration 有 40→6 内容 ⇒ 冲突风险真实）。
 **关联**：gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling（notYetFlipped）；
 gap-forty-to-six-remerge-needs-tests-updated-first（40→6 内容已随 fix-21 在 integration 验证绿，remerge
 前提已满足）。
+
+## 2026-08-07 18:2xZ — 并发 8 真绿达成，人的门槛（可靠 + 高速验证）证据提交，请裁定是否开始处理 git branch
+
+**r11 终态**：green 848s（14.1 min）✔2720 ✖0，三趟：245 (product,engine) + 6 (serial) + 15 (lowconc) =
+266（正好 = r10 单趟文件数）。分组机制修复生效（fail-closed 守卫 + 反踩踏测试已保护）。
+
+**门槛两半的证据**：
+- **可靠 ✓（正面证据强）**：r11 三趟 fail=0；今晚两轮红（r10 九条）事后全部归因到真实缺陷、无一假红
+  （r9/r10 各趟测试段此前也多轮 fail 0）。
+- **高速（正面但有争议）**：1368s → 848s（省 38%），但高于 <700s 目标。三趟分解：理论 628s vs 实测
+  848s，220s 开销（进程启动/laydown/尾部效应——非静态检查，checker-mutation 只跑一次）。lowconc cc5
+  理论省 ~65s（848→~780s），仍 >700s；真正大头是 220s 开销。
+
+**选项（裁定归人）**：
+1. **门槛视为达成 → 开始处理 git branch**（24 块冲突面合并）——可靠半已定论，fast 半 38% 改善是实
+   质正面证据；cc5 实验（~30 分钟、省 ~65s）作为合并后精化；
+2. **先做 cc5 实验再判门槛**——绿窗已开、人此前裁定"并发调优等绿窗再做"；但 ~65s 省不跨 <700s，
+   门槛判据可能不变；
+3. **门槛未达成（fast 未到 <700s）→ 继续优化 fast**（220s 开销为首要目标，非 cc5）。
+
+**外层倾向**：选项 1——可靠半定论 + fast 38% 改善是实质正面证据；拖沓无收益（差全真内容、24 块冲突
+面在涨）。cc5 与开销优化作为合并后 follow-up。
