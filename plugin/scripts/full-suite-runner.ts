@@ -602,7 +602,19 @@ export async function run(argv: string[]): Promise<number> {
   //     (NO correctness conclusion — early-EXIT red is an abort, not a failure).
   //   - a generic non-zero exit with NEITHER marker ⇒ reason=failed (fail-closed catch-all: a
   //     failure we could not match a structured line for is still a failure conclusion).
-  const childKilledBySignal = exitCode === null && spawnError === null;
+  // AC5 reason-axis (gap-suite-cutoff-what-tears-test-process-at-session-topology, confirmed
+  // 2026-08-07): a signal-kill is an ABORT (NO correctness conclusion), never a failure — but the
+  // runner's child is `bash -c <test.sh>`, and when test.sh's own node --test CHILD is SIGKILL'd
+  // (07:08→07:21 suite: `scripts/test.sh: line 576: 720326 Killed node --test`), bash reports it as
+  // ITS OWN exit code 128+N (137 for SIGKILL, 143 for SIGTERM), so exit.code !== null AND
+  // exit.signal === null while still being a signal-kill. Detect all three shapes:
+  //   1. direct signal-kill: node reports code=null + signal=<sig>;           (pre-existing path)
+  //   2. the close event carried a signal (exit.signal captured at :539, never classified before);
+  //   3. shell 128+N convention (128+1..128+64, the signal range) — the bash-exits-137 case.
+  const childKilledBySignal =
+    (exitCode === null && spawnError === null) ||
+    exit.signal !== null ||
+    (exitCode !== null && exitCode > 128 && exitCode <= 192);
   const green = !redDetected && !abortDetected && spawnError === null && exitCode === 0;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
   // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) is never
