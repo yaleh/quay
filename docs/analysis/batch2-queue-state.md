@@ -7717,3 +7717,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **manager-tick-checks 完成**（真实实现，两条硬约束全守）：8 个散 bash 块并入 quay-session.ts 作单一只读命令 manager-tick-readings.ts（368 行，pane_pid+pane_current_command，无 pgrep -P）；AC1 tick_bash_blocks 8→4、AC2 destructive 2→2、AC5 surface 10→10 / sh 4→4。**fan-in**：cherry-pick a8a5b4ae → integration 49f8272b（5 code + task 文件）。任务文件入 develop。
 - **在飞 1/1**：session-liveness-remove。4 空槽——manager-tick-checks 释放后 delivery-surface 应解锁。
+
+### 事件 05:3xZ（session-liveness-remove 完成——fan-in；在飞归零）
+
+- **session-liveness-remove 完成**：核心实现早已落地（2f9d4575 shared-events/lock 移除 + heavy-op B-FULL-DELETE）；本 re-dispatch 补 doc 清理 + quay-init laydown 修复（ac8 40→6 集成遗留的 5 个机制未铺）+ loop-shipping retainedNote。AC1-5 + DoD 全勾。**fan-in**：cherry-pick 36e264ba → integration 1d2af642（7 files 无冲突，分歧文件 auto-merge）。
+- **在飞归零**：0 real in-flight，5 空槽。池子应全解锁。
+- **前置发现转外层**：capability-catalog 7 个未分类 quay-* 入口（ac8 集成遗留，pre-existing）；quay-init-loop 2 个既有失败（ac8 集成漂移）。
