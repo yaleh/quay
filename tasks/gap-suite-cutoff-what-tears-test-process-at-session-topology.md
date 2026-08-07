@@ -70,6 +70,18 @@ acceptance(161064ms) / version-consistency、08-03 workflow-event-schema / workf
 **次假设**：runner 自己的超时/清理逻辑把测试进程杀了；或某测试（如 session-topology 的 tmux 操作）
 与套件并发冲突。
 
+**证据收窄（管理者 2026-08-07 07:2x + 外层核实）**：
+- **OOM 决定性排除**：内核 dmesg 最近 oom-kill 是 7/31 与 8/1，**今天无 OOM 记录**；可用内存 10.4GB。
+- **test.sh 不杀**：`run_selected` 用 `exec node --test`（test.sh:645），无 kill/timeout 包裹——test.sh
+  自己不杀 node --test。
+- **runner 不杀**：full-suite-runner 无 kill 路径；signal-kill 应报 reason=aborted，但本次报 failed
+  （fail-closed catch-all：非零退出无 abort marker）。⇒ SIGKILL 来自**外部**，非 test.sh/runner。
+- **当前 SIGKILL 实例（07:08→07:21 套件）**：split 修复生效（30-37min→13.3min，✖=0、无汇总行、
+  拆分后 4 文件没轮到跑），node --test 进程（test.sh:576，pid 720326）被 SIGKILL（exit 137）。
+- **待查方向（不预设）**：①**tmux 清理**（180→112 确实有东西在批量清进程，时间窗与套件重叠——
+  清理范围是否误伤 node --test，需确认）；②是否有其它外部脚本/进程在杀 node --test；
+  ③timeout 包裹但退出码被吞。
+
 ### 为什么这个任务优先于分诊 101 失败
 
 红判决不可信 ⇒ 任何对 101 失败的分诊都是在对噪声分类。先查切断源，再重跑干净窗口拿真失败数。
