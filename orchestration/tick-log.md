@@ -745,3 +745,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > （delivered，C 优先=合并「高速」半）。**D 卫生已处理**：主仓冗余 M（quay-init-check-drift
 > governance→serial 与 integration 92d16611 一致）回退清树。等内层实现 → 并发 8 验证 → serial <600s
 > → 分支合并（fast 半成立）。
+
+> **15:35Z 外层 tick（no-action——内层实现 A1/B/C + suite-green-gate 中，A2 排队）**：内层已派发
+> 3 任务（inProgress: B assert-clean-tree + A1 gitignore + C serial-cost + suite-green-gate），3 个
+> subagent 在跑（C 的 runner-grouping before 测量、B 的 assert-clean-tree 语法检查、套件验证）。
+> 负载 22.82（内层跑 before 测量，正常）。session-pid 任务已 done（a90a90fa，un-hold 级联完成）。
+> suite-green-gate 任务（人早先裁定：DoD 重复门移除）也在实现（50dc5746）。套件绿（round-9）。
+> 等内层实现 A1/A2/B/C → 并发 8 验证 serial <600s → 分支合并 fast 半成立。
