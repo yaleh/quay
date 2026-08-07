@@ -8055,3 +8055,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **A2 完成**（agent f0b84f5b，6 files +205/-7）：`.worktreeinclude` 声明（gitignore 语法列 gitignored 文件）+ `scripts/worktree-include.sh`（git worktree list 找主仓、git check-ignore --stdin 匹配声明、只拷 declared∩gitignored、node_modules 恒排除、无 .worktreeinclude → exit 0）+ loop-driver SKILL.md step 3 接线。AC2/AC3 实证（fresh worktree 拷 config+vendor dists；/plugin/test 相对路径 REPO_ROOT 解析不再 crash）+ 4 控制全对。**fan-in**：integration **263c073c+498d1680**（.worktreeinclude + worktree-include.sh + SKILL 全落）。task 文件入 develop。
 - **4/4 任务处理完毕**：A1（gitignore 7d410a50）+ B（clean-tree DELTA 174badc0）+ A2（worktreeinclude 263c073c）+ suite-green-gate（7147edf5）。**仅剩 C（serial-cost 优先）在飞**。
 - **integration 累计**：71734885 真绿 + 全部 fan-ins。suite GREEN。
+
+### 事件 16:1xZ（人 15:5x 新提案派发——lowconc 组；管理者撤回 quay-init 缺陷结论）
+
+- **人 15:5x 新提案（新立 ready）**：`gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive`——加 **lowconc 组（并发 3）**，serial 原样护 A 类独占（runner-grouping/select-tests-for-touches/test-coverage-check），**B 类 + install 族迁入 lowconc**（hermetic 但负载敏感）。两条件：①只迁已证 hermetic（session-liveness 49 处 hermetic 信号、install 族 mkdtemp），无证据留 serial；②并发 3 不取 8。**AC0 先测再定**（候选集 --test-concurrency=3 实测墙钟再决定迁移）。与 C 任务叠加（互补）。
+- **派发**：lowconc（worktree lowconc-group-concurrency-3，telemetry 记录）。与 C 机械 disjoint（C touches 测试文件、lowconc touches scripts/test.sh 组结构——互补不冲突）。
+- **管理者撤回一条结论**：quay-init 错误路径**不是返回 0**——管道读 0 误读 cut；缺 --test-command 真实退出码=**2**、行为正确，**无此缺陷，别据此报**。
+- **在飞 3/5**：C（serial-cost 优先）+ lowconc（新）+ 1 空槽。suite GREEN。
