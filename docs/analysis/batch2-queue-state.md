@@ -7845,3 +7845,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - **gap-manager-tick-log-append**（外层新立案，todo→ready 补晋）——suite-after 断言区分「测试残留 vs 已知并发写入者」；AC1 排除 manager-tick-log/.quay scratch，AC2 负控制（人为放测试残留仍红）。
   - **gap-session-liveness-session-pid-blind**（AC=5 真开）——claude-as-pane-process 识别（沿用 manager-tick 的 pane_pid+pane_current_command 约束）。
 - **在飞 2/5**。3 空槽。套件 RUNNING（09:04 起）。
+
+### 事件 09:1xZ（reason-axis 修复实证 + 2 agent 在飞确认）
+
+- **reason-axis 修复实证成功**：09:04 套件 6.5min 被 abort（signal-kill），**正确分类 `aborted`（stopSignal=false）**——外层 09:10 确认「aborted 09:04 suite (correctly classified aborted via reason-axis fix, stopSignal=false — fix verified)」→ **不触发 stop-dispatch**。09:04→09:10 间 `shouldDispatchOnRed=false`、`shouldStopDispatch=false`。
+- **外层人直接指令**：09:04 abort 后**重跑 `--lane-count 8`**（并发 8，~8min）——10:51 起新 RUNNING（laneCount 8）。resource gate GO（18.49）。
+- **2 agent 在飞确认**：dirty-tree-assertion + session-pid-blind 的 worktree 均在磁盘（94b5ef6e base）、agent 进程活跃（7 procs 引用 quay-worktrees）。**telemetry reconcile 误关括号**（报 worktree-gone——实际是 claude subagent 的 cwd 在 worktree、argv 不含路径，reconcile 按进程 argv 查不到）——AC6 括号≠subagent，**会话自持在飞集合为准**：在飞={dirty-tree, session-pid}。
+- **套件 RUNNING**（09:10:51 起，laneCount 8）。在飞 2/5，3 空槽。
