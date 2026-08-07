@@ -67,15 +67,15 @@ resume 若中断，先跑 measure 读套件状态 + catalog 退出码 + serial �
 
 ## Acceptance Criteria
 
-- [ ] AC1: **capability-catalog 修复**——40→6 整合脚本（quay-session/quay-deliver/quay-dispatch/
+- [x] AC1: **capability-catalog 修复**——40→6 整合脚本（quay-session/quay-deliver/quay-dispatch/
       quay-branch/quay-suite/quay-check）声明 `@instrument` 问题；`capability-catalog.sh --json` 退出 0；
       capability-catalog.test.mjs 隔离 + 并发 8 全绿
-- [ ] AC2: **SKILL.md/测试名一致**——cold-start SKILL.md 与 quay-init-loop AC1 (skill) 断言引用同一指令名
+- [x] AC2: **SKILL.md/测试名一致**——cold-start SKILL.md 与 quay-init-loop AC1 (skill) 断言引用同一指令名
       （`quay-suite.ts loop-driver-check` 或等价），不再各写各的
-- [ ] AC3: **live specimens 修复**——quay-init-loop AC2 报出两个真实活标本在无法落地时（隔离复现通过）
-- [ ] AC4: **session-topology 工厂修复**——两窗拓扑构建 / --dry-run / 幂等测试隔离 + 并发 8 全绿
+- [x] AC3: **live specimens 修复**——quay-init-loop AC2 报出两个真实活标本在无法落地时（隔离复现通过）
+- [x] AC4: **session-topology 工厂修复**——两窗拓扑构建 / --dry-run / 幂等测试隔离 + 并发 8 全绿
       （若为真缺陷则修，若为负载则 serial 路由）
-- [ ] AC5: **追加 serial 路由**——重 laydown 测试（quay-init-loop 等隔离通过但并发 8 超时的）补进 serial 组；
+- [x] AC5: **追加 serial 路由**——重 laydown 测试（quay-init-loop 等隔离通过但并发 8 超时的）补进 serial 组；
       serial 成员 ≥13
 - [ ] AC6: **并发 8 全量真绿**——`full-suite-runner.ts --lane-count 8` 跑完 `fail 0` 且 `cancelled 0`
 - [ ] AC7: 与 `gap-forty-to-six-remerge-needs-tests-updated-first`（40→6 修测试再合）、
@@ -105,3 +105,31 @@ changed: 外层并发 8 首轮验证（integration worktree）：serial 机制�
   integration 待合内容自身问题。隔离分类：capability-catalog 7/8 真失败（40→6 脚本未声明 @instrument ⇒
   catalog 退出 1）+ quay-init-loop AC1 skill 真失败（SKILL.md 用整合指令名、测试断言旧名）+ 重 laydown
   测试负载伪影（未 serial 路由）。立任务修 21 条 → 并发 8 重跑 → 真绿。管理者方向已确认。
+
+## Execution evidence (2026-08-07, agent b209f4fd on integration base f062caf9)
+
+### AC1 — capability-catalog 修复
+- 14 脚本加入 QUESTION 表（`capability-catalog.sh`）；6 个整合入口（quay-session/deliver/dispatch/branch/suite/check.ts）+ quay-entry-base.ts 加 `@instrument` 头注。
+- `capability-catalog.sh --json` **exit 0**（修前 1）；capability-catalog.test.mjs **8/8**。
+
+### AC2 — SKILL.md/测试名一致
+- quay-init-loop AC1 (skill) 测试断言改为 `quay-suite.ts loop-driver-check`（docs 为准）；inner-blocked-signal AC3、session-topology AC4、session-bootstrap AC5 同步改整合指令名。
+
+### AC3 — live specimens 修复
+- `quay-init.sh` 加 `consolidated_member_files` helper（从入口 MEMBERS 声明推导成员文件），接入 `verify_referenced_landed`（无条件——抓住被删成员）+ `derive_loop_scripts`（铺下）。
+- AC2 两真实活标本（monitor-mount-check.sh / send-keys-reliable.sh）在无法落地时正确报出。
+
+### AC4 — session-topology 工厂
+- `quay-topology.sh` 锁 `mkdir -p "$LOCK_BASE"`（fresh /tmp ENOENT 修复）+ `new-session` 幂等（peer 会话出现按 in-place 处理，修 AC6 single-flight 竞态）。session-topology 10/10 ×3 稳定。
+
+### AC5 — 追加 serial 路由
+- 重 laydown 测试（quay-init-loop-driver/runtime/vendor + checker-cost）进 serial 组。**serial 成员 14**（要求 ≥13）。
+- **quay-init-loop 拆分补齐 integration**：integration 树上原是未拆 1294 行单文件（develop 拆分从未合入）——本任务完成拆分（core 12/driver 15/runtime 14/vendor 7 + helpers），scanHeavyFiles 不再报 at-risk。
+
+### 其他真缺陷
+- loop-shipping AC1b（新 no-manager-tick-doc-check checker 作为合法 target-layout ref 排除）；tick-vocabulary AC4（SAFE_SUBSTRINGS 加裸 `integration-batch-merge`/`concurrent-batch-scheduler`）；loop-driver-check AC2 对符号链接 .quay 稳健。
+
+### 验证
+- capability-catalog 8/8、checker-cost 8/8、inner-blocked-signal、loop-driver-check 8/8、loop-shipping 12/12、session-topology 10/10×3、session-bootstrap、tick-vocabulary 5/5、suite-cutoff-verdict 8/8、quay-init-loop 拆分 48/48。
+- `scripts/test.sh --static-checks`（完整静态层）**exit 0**——全部 15 checker 过 mutation cases。
+- **AC6（并发 8 全量真绿）留外层验证 run**——scoped 检查确认机制，未跑 8-lane 全量（外层 11:52 起的 /tmp/quay-suite-int 验证树）。
