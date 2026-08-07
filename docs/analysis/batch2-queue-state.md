@@ -7689,3 +7689,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **suite-state-reason 完成**：reason 轴实现早已在 develop（561388d9 跨机 merge）→ **无代码 fan-in**；re-verify 38/38 + --wait-check（aborted→no stop）/--fail-fast-check（failed→stop）+ scoped 绿。DoD 1/2 勾（3 全量留外层）。任务文件入 develop，worktree 清理。
 - **在飞 2/2**：ready-pool-perf + two-thirds-polling。3 空槽但 session-liveness-remove 仍撞 two-thirds；其余撞 ready-pool-perf。
+
+### 事件 04:1xZ（ready-pool-perf 完成——fan-in + manager-productization 回填）
+
+- **ready-pool-perf 完成**（真实修复）：batched git-history index 补 directory-path Touches 等价（key.startsWith(prefix)，复刻 git pathspec 语义）；perf >150s→2.2s、全仓 drift 4→0、pool 输出 byte-identical。**fan-in**：cherry-pick f4d115ec → integration 4229a7af（4 files 无冲突）。任务文件入 develop。
+- **manager-productization 回填 2/5**：C1-C5 约束实现。**注意**：delivery-surface 与其 Touches 撞（都含 broad plugin/scripts/ 类 touch）→ 不可并发，delivery-surface worktree 已撤、等 manager-productization 完成再派。
+- **在飞 2/2**：two-thirds-polling + manager-productization。
