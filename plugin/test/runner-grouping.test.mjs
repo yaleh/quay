@@ -1,8 +1,14 @@
-// @test-group engine
+// @test-group serial
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells
 // out to the REAL scripts/test.sh including `--group governance` (the grown governance sub-suite,
 // >830s isolated) — inherently heavy + fragile under full-suite concurrency (nested node --test
 // spawns; the outer reruns this family isolated per the 判绿 rules).
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (A-class nested full-suite spawn) so it runs in the concurrency-1 serial phase,
+// never competing with the concurrency-8 main body's worker pool. Its D-class AC7 fixture is kept
+// in the shared plugin/test dir (that is what makes the undeclared→engine assertion meaningful);
+// the collision with test-file-snapshot is fixed on the SNAPSHOT side (test-file-snapshot.sh
+// excludes transient zz-* runtime fixtures).
 // gap-test-suite-has-no-layer-grouping — tests for the layer-grouping mechanics in
 // scripts/test.sh: extended glob (AC2), realpath dedup (AC3), default groups product,engine
 // with governance self-skipping (AC4/AC6), --group (AC5), undeclared→engine (AC7), and
@@ -60,32 +66,38 @@ function parseTestCount(out) {
 // goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
 // rule "测试不得硬编码全局计数", all assertions here are RELATIONSHIPS over the live glob:
-//   product + engine + governance == total (the deduped realpath partition), and
-//   --list-files count == --list-groups total. New files change the numbers, not the invariants.
+//   product + engine + governance + serial == total (the deduped realpath partition), and
+//   --list-files count + serial == --list-groups total (the default --list-files EXCLUDES the
+//   serial group, which is routed to the concurrency-1 phase —
+//   gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests). New files change the
+//   numbers, not the invariants.
 function parseGroups(out) {
   const parse = (label) => {
     const m = out.match(new RegExp(`^${label}:\\s+(\\d+)`, "m"));
     assert.ok(m, `--list-groups missing ${label}: ${out}`);
     return Number(m[1]);
   };
-  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), total: parse("total") };
+  return { product: parse("product"), engine: parse("engine"), governance: parse("governance"), serial: parse("serial"), total: parse("total") };
 }
 
 test("AC10/AC2/AC3: --list-groups reports per-group counts of the deduped glob", () => {
   const out = runTestSh("--list-groups");
   const g = parseGroups(out);
-  // Relationship, not snapshot: the three groups partition the deduped realpath total.
-  assert.equal(g.product + g.engine + g.governance, g.total);
+  // Relationship, not snapshot: the FOUR groups partition the deduped realpath total (serial is
+  // the load-sensitive family's group — gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
+  assert.equal(g.product + g.engine + g.governance + g.serial, g.total);
   // Structural sanity independent of absolute counts.
-  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0);
+  assert.ok(g.product > 0 && g.engine > 0 && g.governance > 0 && g.serial > 0);
 });
 
-test("AC3: realpath dedup — --list-files count equals --list-groups total (12 symlinks not double-run)", () => {
+test("AC3: realpath dedup — --list-files count + serial equals --list-groups total (12 symlinks not double-run)", () => {
   const files = runTestSh("--list-files").trim().split("\n").filter(Boolean);
   const g = parseGroups(runTestSh("--list-groups"));
-  assert.equal(files.length, g.total);
+  // The default --list-files EXCLUDES the serial group (routed to the concurrency-1 phase), so the
+  // dedup relationship is files + serial == total.
+  assert.equal(files.length + g.serial, g.total);
   // all paths are already realpaths (no duplicates by construction)
-  assert.equal(new Set(files).size, g.total);
+  assert.equal(new Set(files).size, files.length);
 });
 
 test("AC6: --group product,engine selects the same files as no-args", () => {
@@ -207,3 +219,50 @@ test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes ext
   // The --group dispatch has the same flags-only branch, routing to the group's glob.
   assert.match(src, /run_selected "\$groups" "\$@"/, "group flags-only must route to the group glob");
 });
+
+test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests, AC1)", () => {
+  // The load-sensitive family (A/B classes + KNOWN-LOAD-SENSITIVE) is routed OUT of the
+  // concurrency-N main body into a `serial` group that runs alone at concurrency 1. Structural pin:
+  //   - group_of recognizes serial as a REAL group (so serial files are EXCLUDED from the default
+  //     product,engine selection, not silently re-defaulted to engine).
+  //   - the FULL-SUITE_DEFAULT branch runs a serial phase after the main body, hard-coded to
+  //     concurrency 1 (the mechanism's invariant, never a user-tunable knob).
+  //   - the non-default --group serial path detects the group and forces concurrency 1, stripping
+  //     any explicit --test-concurrency flag (a full-suite-runner splice must not leak lane N in).
+  //   - list_groups counts serial (the 4th group in the partition).
+  const src = readFileSync(testSh, "utf8");
+  assert.match(src, /product\|engine\|governance\|serial\) echo "\$g" ;;/,
+    "group_of must route serial as a real group (not fall back to engine)");
+  assert.match(src, /local serial_files=\(\) sf serial_code/,
+    "the FULL-SUITE-DEFAULT branch must declare a serial phase");
+  assert.match(src, /selected \$\{#serial_files\[@\]\} files \(groups=serial\)/,
+    "the serial phase must self-report its selection (AC4 self-report invariant)");
+  assert.match(src, /node --test --test-concurrency=1 "\$\{serial_files\[@\]\}"/,
+    "the serial phase must be HARD-CODED concurrency 1 (serial isolation is the invariant)");
+  assert.match(src, /in_group "serial" "\$groups"/,
+    "the non-default path must detect the serial group");
+  assert.match(src, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,
+    "list_groups must count the serial group");
+  // Behavioral: --group serial --list-files returns exactly the serial members and nothing else;
+  // the default --list-files EXCLUDES them (the concurrency-8 main body no longer pays their load).
+  const serialList = runTestSh("--group", "serial", "--list-files").trim().split("\n").filter(Boolean);
+  const g = parseGroups(runTestSh("--list-groups"));
+  assert.equal(serialList.length, g.serial, "--group serial must list exactly the serial group");
+  for (const f of serialList) {
+    const grp = groupOfFile(f);
+    assert.equal(grp, "serial", `--group serial listed ${f} but its group is ${grp}`);
+  }
+  const defaultFiles = runTestSh("--list-files").trim().split("\n").filter(Boolean);
+  // --list-files returns realpath-deduped paths (build_deduped_files), so a direct set comparison
+  // is sound — no re-realpath needed.
+  const serialSet = new Set(serialList);
+  for (const f of defaultFiles) {
+    assert.ok(!serialSet.has(f), `default --list-files must EXCLUDE serial member ${f}`);
+  }
+});
+
+// groupOfFile — mirror of scripts/test.sh's group_of (read a file's declared `// @test-group`).
+function groupOfFile(f) {
+  const m = readFileSync(f, "utf8").match(/@test-group[ \t]+([a-z]+)/);
+  return m ? m[1] : "engine";
+}

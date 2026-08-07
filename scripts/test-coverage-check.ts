@@ -376,7 +376,10 @@ function runSelftest(): number {
           }
         })
       );
-      const listOut = spawnSync("bash", ["scripts/test.sh", "--list-files"], { cwd: REPO_ROOT, encoding: "utf8" });
+      // serial group (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): the
+      // default --list-files (product,engine + governance passthrough) EXCLUDES the serial group,
+      // so the canonical-set comparison must enumerate ALL groups to stay single-source.
+      const listOut = spawnSync("bash", ["scripts/test.sh", "--group", "product,engine,governance,serial", "--list-files"], { cwd: REPO_ROOT, encoding: "utf8" });
       const listSet = new Set(listOut.status === 0 ? listOut.stdout.trim().split("\n").filter(Boolean) : []);
       ac5 =
         listOut.status === 0 && canonReal.size === listSet.size && [...canonReal].every((f) => listSet.has(f));

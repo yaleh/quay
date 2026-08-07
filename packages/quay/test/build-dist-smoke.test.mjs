@@ -1,4 +1,8 @@
-// @test-group product
+// @test-group serial
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait — spawns the built dist bundle across real surfaces
+// incl. serve + MCP round-trips) so it runs in the concurrency-1 serial phase, never competing with
+// the concurrency-8 main body.
 // build-dist-smoke.test.mjs — M120 Stage 1.2 (DIR-060).
 //
 // Proves the built ESM `dist/quay.js` bundle is STANDALONE-runnable: invoked by

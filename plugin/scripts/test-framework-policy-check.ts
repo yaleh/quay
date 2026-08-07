@@ -29,7 +29,7 @@
 //             nudge: relation-sync's harness is the first intended application.
 //     C2d     an entry that names a file OUTSIDE the canonical glob is meaningless → fail.
 //   C3 (AC5)  a NEW file (in the glob, not on the exemption list, and not present in the baseline
-//             file set at git HEAD) MUST carry a `// @test-group <product|engine|governance>`
+//             file set at git HEAD) MUST carry a `// @test-group <product|engine|governance|serial>`
 //             declaration. Existing files (in the list, or already at HEAD) may omit it and
 //             default to `engine` (存量缺省 engine — a missed declaration on a legacy/existing
 //             file never silently vanishes from the default run). Scope note: "new" is classified
@@ -216,9 +216,11 @@ export function hasNodeTestImport(source: string): boolean {
   return false;
 }
 
-/** Regex that matches a valid `// @test-group <product|engine|governance>` declaration. */
+/** Regex that matches a valid `// @test-group <product|engine|governance|serial>` declaration.
+ * `serial` is the KNOWN-LOAD-SENSITIVE family's group
+ * (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests) — a NEW file may declare it. */
 export function groupDeclRE(): RegExp {
-  return /@test-group\s+(product|engine|governance)/;
+  return /@test-group\s+(product|engine|governance|serial)/;
 }
 
 /** Parse the exemption data file: one repo-relative path per line, '#' comments and blanks

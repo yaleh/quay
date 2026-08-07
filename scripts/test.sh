@@ -18,8 +18,8 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
-# existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
+# NEW files must also carry a `// @test-group <product|engine|governance|serial>` declaration
+# (AC5); existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
 # hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
 # (e.g. relation-sync's harness) into the ratchet.
 #
@@ -61,8 +61,12 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
-#   (AC7) — the current work surface, so a missed declaration never silently vanishes.
+#   one of product / engine / governance / serial (AC1). The DEFAULT for an undeclared file is
+#   `engine` (AC7) — the current work surface, so a missed declaration never silently vanishes.
+#   `serial` is NOT part of the default (product,engine) set: the KNOWN-LOAD-SENSITIVE family
+#   (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests) is routed OUT of the
+#   concurrency-N main body into a `--group serial` phase that runs alone at concurrency 1 (see
+#   run_selected's serial phase below).
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -421,13 +425,16 @@ resource_gate_check() {
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Only product|engine|governance are valid; a missing OR unrecognized declaration falls back
-# to engine so a typo can never silently remove a file from the default run.
+# Only product|engine|governance|serial are valid; a missing OR unrecognized declaration falls
+# back to engine so a typo can never silently remove a file from the default run. `serial` is a
+# real group so the KNOWN-LOAD-SENSITIVE family is mechanically EXCLUDED from the default
+# (product,engine) main body and routed to the serial phase instead
+# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
 group_of() {
   local f="$1" g
   g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
   case "${g:-}" in
-    product|engine|governance) echo "$g" ;;
+    product|engine|governance|serial) echo "$g" ;;
     *) echo "engine" ;;
   esac
 }
@@ -479,9 +486,11 @@ select_files() {
   done < <(build_deduped_files)
 }
 
-# list_groups — per-group counts over the full deduped glob (AC10).
+# list_groups — per-group counts over the full deduped glob (AC10). `serial` is a real group
+# (the load-sensitive family routed to the concurrency-1 phase), so the default-set partition
+# product+engine+governance no longer equals total — serial is the fourth part.
 list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0)
+  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0)
   local f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
@@ -490,7 +499,8 @@ list_groups() {
   printf 'product:    %d\n' "${counts[product]:-0}"
   printf 'engine:     %d\n' "${counts[engine]:-0}"
   printf 'governance: %d\n' "${counts[governance]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} ))
+  printf 'serial:     %d\n' "${counts[serial]:-0}"
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} ))
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
@@ -628,6 +638,29 @@ run_selected() {
     fi
     local code=$?
     set -e
+    # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+    # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
+    # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
+    # keeps real-wall-clock-wait and nested-suite-spawn tests from being starved by the main body's
+    # worker pool. Skipped when the main body already failed (the run is red either way). The
+    # concurrency is a HARD-CODED 1 — serial isolation is the mechanism's invariant, never a
+    # user-tunable knob (a spliced --test-concurrency from full-suite-runner must not leak here;
+    # the --group serial path in the non-default branch strips explicit concurrency flags for the
+    # same reason). Its TAP summary lands LAST on the stream, so the outer runner's pass/fail/
+    # cancelled tallies reflect BOTH phases (the serial summary overwrites the main body's only
+    # when both are green — a serial failure flips the whole run red via its own fail/cancelled).
+    if [ "$code" -eq 0 ]; then
+      local serial_files=() sf serial_code
+      while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+      if [ "${#serial_files[@]}" -gt 0 ]; then
+        echo "selected ${#serial_files[@]} files (groups=serial)"
+        set +e
+        node --test --test-concurrency=1 "${serial_files[@]}"
+        serial_code=$?
+        set -e
+        if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
+      fi
+    fi
     # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
     # SUITE must leave the shared checkout clean of TEST RESIDUE (`git status --porcelain` empty
     # modulo KNOWN CONCURRENT WRITERS). Harder than any static rule — it does not depend on a
@@ -657,7 +690,22 @@ run_selected() {
   mark_nested
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
-  if has_explicit_concurrency "$@"; then
+  if in_group "serial" "$groups"; then
+    # The serial group is isolated by definition (gap-suite-concurrency-8-green-serial-group-for-
+    # non-concurrent-tests): ALWAYS concurrency 1, never a user-tunable knob. Strip any explicit
+    # --test-concurrency flag (both spellings) so the hard-coded 1 is the SINGLE concurrency source
+    # — a full-suite-runner splice onto a `--group serial` command must not leak concurrency N in.
+    local filtered=() a prev_arg=""
+    for a in "$@"; do
+      case "$a" in
+        --test-concurrency=*) continue ;;
+        --test-concurrency) prev_arg="continue" ; continue ;;
+      esac
+      if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
+      filtered+=("$a")
+    done
+    exec node --test --test-concurrency=1 "${filtered[@]}" "${files[@]}"
+  elif has_explicit_concurrency "$@"; then
     exec node --test "$@" "${files[@]}"
   else
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
@@ -685,7 +733,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|governance|serial, comma-separated)" >&2
     exit 2
   fi
   shift 2

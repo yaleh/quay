@@ -1,6 +1,10 @@
-// @test-group engine
+// @test-group serial
 // measure-suite.test.mjs — validate the per-file duration reporter (AC1b/AC8 of
 // gap-suite-cost-model-is-wrong-optimizations-buy-nothing).
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait — spawns node --test subprocesses and waits on their
+// real durations) so it runs in the concurrency-1 serial phase, never competing with the
+// concurrency-8 main body.
 //
 // The full-suite measurement (measure-suite.mjs) depends on the custom reporter
 // (measure-suite-reporter.mjs) emitting a FILE-LEVEL duration for EVERY test file —

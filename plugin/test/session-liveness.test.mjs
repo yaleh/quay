@@ -1,8 +1,11 @@
-// @test-group governance
+// @test-group serial
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file uses
 // real processes + tmux timing; it passes isolated under low load but may fail under concurrent-suite
 // load (gap-load-sensitive-session-family-confounds-step-three, 2026-08-04). A full-suite failure here
 // is NOT a real regression by default: re-run this file alone (low load) before concluding anything.
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait) so it runs in the concurrency-1 serial phase — its
+// sleep()/tmux waits get the real clock they need instead of a CPU-starved window.
 // session-liveness.test.mjs — automated positive controls for the cross-project session-liveness
 // monitor (plugin/scripts/session-liveness.sh; generalized + renamed from outer-liveness.sh per
 // SPEC-outer-liveness-productization.md AC10-13 — the process/pane/heartbeat logic holds for ANY

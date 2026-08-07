@@ -1,4 +1,7 @@
-// @test-group governance
+// @test-group serial
+// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
+// `serial` group (B-class real wall-clock wait — real tmux panes + delivery timing) so it runs in
+// the concurrency-1 serial phase, never competing with the concurrency-8 main body.
 // send-keys-verified.test.mjs — positive controls for the cross-project send-keys helper
 // (plugin/scripts/send-keys-verified.sh). The manager was doing the delivery confirmation BY HAND
 // every time it drove another session; this pins the mechanical version (orchestration/
