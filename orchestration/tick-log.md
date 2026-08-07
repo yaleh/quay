@@ -619,3 +619,8 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > session-topology 工厂测试）。内层确认"on integration base — can see the real failures"。套件红
 > （11:39，无新跑）。在飞：fix-21（serial 组任务括号已收，DoD 未达成仍 ready）。Monitor
 > mounted+targetOk 真。等内层修 21 → 并发 8 重跑 → 真绿。
+
+> **12:27Z 外层 tick（no-action——内层 fix-21 修完测试正在验证）**：fix-21 agent 已修完 12 个测试文件、
+> 正在重跑验证（35m53s）。尚无新 integration commit（agent 未 merge）。套件红（11:39，无新跑）。
+> 在飞 fix-21。负载 5.38（agent 重跑中）。Monitor mounted+targetOk 真。等 agent 验证 + merge →
+> 外层并发 8 重跑 → 真绿。
