@@ -2,7 +2,7 @@
 id: gap-lowconc-tmux-session-name-collision-race
 title: lowconc 相位 2 条失败：AC4 确定性断言陈旧（SKILL.md 折叠进 quay-session.ts 后 AC4 未跟上）；AC3
   真 cc3 并发失败（两测试均 hermetic 私有 socket，非会话名互撞，explicit --tmux-session 返 2，需复现定位）
-status: ready
+status: done
 labels:
   - gap
   - defect
