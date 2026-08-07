@@ -13,7 +13,7 @@ title: "AC8 of gap-eighty-one-instruments (task status:done, all 11 ACs [x]) is
   与第二步，不是独立项' — so the unmoved ratio means the integration step it depends on
   never happened either; manager 2026-08-06, found by searching session history
   for 集成 per human direction"
-status: needs-human
+status: done
 labels:
   - gap
   - defect

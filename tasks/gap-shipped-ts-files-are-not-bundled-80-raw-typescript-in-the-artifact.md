@@ -10,7 +10,7 @@ title: "the shipped artifact carries 80 RAW .ts files — plugin's TypeScript is
   Node must support that flag; the asymmetry is unexplained — the same artifact
   contains both a bundled Core and unbundled plugin TypeScript; manager
   2026-08-06 filed per human direction after inspecting the package contents"
-status: ready
+status: needs-human
 labels:
   - gap
   - milestone-candidate
@@ -18,6 +18,18 @@ parent: null
 children: []
 extra:
   schema: v1
+  needs_human_reason: "fan-in conflict: cherry-pick 99710897 onto integration → 7
+    modify/delete conflicts
+    (plugin/scripts/{checker-cost,derive-touches-heuristic,git-lens-l-d-code-do\
+    c-ratio,git-lens-l-g-structural-drift,git-lens-l-s-behavior-variance,self-r\
+    eport-vocab-check}.ts deleted on integration HEAD while shipped-ts modified
+    the .ts guards + packages/quay/scripts/package.sh). Integration already
+    restructured (checker-cost.ts→checker-cost.sh, git-lens-*.ts deleted) — the
+    task's guard refactor conflicts with that restructuring. Per doc: conflict →
+    needs-human, never --skip/-X ours. Worktree/branch
+    task/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact
+    preserved at commit 99710897. Needs integration/develop divergence
+    reconciliation first."
 ---
 **type:** execution
 
