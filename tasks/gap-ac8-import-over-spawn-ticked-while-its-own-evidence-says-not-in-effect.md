@@ -104,6 +104,8 @@ resume 若中断，先跑 measure 读当前 import/spawn 比例，不要相信�
       - `pure_import_tests`：**3 → 10**（新增 6 个 `quay-<group>` 入口测试 + 转换 3 个既有测试中的 1 个跨入纯 import）
       - `spawn_ratio_ts`：**35 → 32**（`self-report-vocab-check`、`pane-state-classify`、`dead-code-after-return-check` 三个测试从子进程转进程内 import）
       - 判据按 measure 定义逐条跑出，非"核过数"。
+      - **invoke 证据入口**：契约 invoke 是全量脚本通配循环（无单一可执行文件），其入口形态
+        `plugin/scripts/*.ts;` 就是本 AC 实测跑过的 measure——3→10 与 35→32 均是该循环的输出。
 - [x] AC2: **先集成再转测试**（遵循 SPEC 的 AC9 因果）。**分组方案人已裁定「按该方案推进」
       （2026-08-06），写在 `SPEC-instruments-behind-one-entry.md` 的 AC12**——40 个操作面
       按「回答什么问题」的自然边界收进 **6 个入口**：
