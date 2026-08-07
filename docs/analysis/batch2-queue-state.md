@@ -7957,3 +7957,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修法**：`quay-init-check-drift.test.mjs` 从 `@test-group governance` 改为 **`@test-group serial`**（同 fix-21 AC5 方向）。serial 成员 15→16。验证：并发 8 默认 body 中 **0 出现**（已排除）；serial 组 16 文件。commit 92d16611 → **integration 92d16611**（FF，b209f4fd→92d16611）。
 - **integration 现为并发 8 真绿候选**：serial 16 + 21-fix + 全部 fan-ins。**等外层并发 8 三轮验证**。
 - **held**：session-pid（7647aaf8）。在飞 0/5。
+
+### 事件 13:2xZ（并发 8 三轮验证 run——完整 integration 树）
+
+- **13:20 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：HEAD=**92d16611**（serial 16 + 21-fix + 全部 fan-ins，完整 integration 树）。serial 路由就位（quay-init-check-drift → serial）。
+- **预期**：1 条负载伪影失败已排除 → `fail 0 / cancelled 0` **真绿**。若绿 → session-pid（7647aaf8）un-hold + 全量派发恢复。
+- **在飞 0/5**。held 1（session-pid）。monitor buqx5kny2 挂着等结果。
