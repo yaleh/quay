@@ -154,6 +154,13 @@ providers:
 
 ## Creating a workspace
 
+> **`quay init` vs `/quay:init` — do not confuse them.** CLI `quay init` scaffolds
+> a brand-new **EMPTY** task store (`.quay/config.yml` + `tasks/`) — it does NOT
+> install the loop mechanism, and it has no `--loop` flag (passing `--loop` is an
+> error). To lay the full two-layer loop (workflows, agents, gate scripts, tick
+> docs) into an existing project, the canonical path is the **`/quay:init` skill**
+> inside a Claude Code session: `/quay:init --all --loop`.
+
 `quay init` scaffolds a new quay workspace in any directory. It generates a
 `.quay/config.yml` with all three sections (providers, gates, loop) and
 inline documentation for every supported field, plus a `tasks/` directory.

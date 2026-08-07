@@ -351,7 +351,7 @@ function printHelp(sub) {
 
 Usage:
   quay --version | -V
-  quay init [--force] [--dry-run] [--root <path>]
+  quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
@@ -529,6 +529,12 @@ Description:
   Go) to suggest appropriate gate defaults.
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  This command only scaffolds a brand-new EMPTY task store. It does NOT lay
+  down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
+  canonical path for onboarding an existing project onto quay-driven
+  development is the /quay:init skill inside a Claude Code session:
+  /quay:init --all --loop. CLI init has no --loop flag; passing it is an error.
 `);
   } else if (sub === "config") {
     process.stdout.write(`quay config — validate workspace configuration
@@ -1208,7 +1214,39 @@ Description:
   Go) to suggest appropriate gate defaults.
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
+
+  This command only scaffolds a brand-new EMPTY task store. It does NOT lay
+  down the loop mechanism (workflows, agents, gate scripts, tick docs) — the
+  canonical path for onboarding an existing project onto quay-driven
+  development is the /quay:init skill inside a Claude Code session:
+  /quay:init --all --loop. CLI init has no --loop flag; passing it is an error.
 `);
+      return;
+    }
+
+    // Collision guard (gap-cli-quay-init-collides-with-the-canonical-slash-quay-init).
+    // CLI `quay init` (DIR-098) scaffolds a brand-new EMPTY task store
+    // (.quay/config.yml + tasks/) — it does NOT lay down the loop mechanism.
+    // The full two-layer loop install (workflows, agents, gate scripts, tick
+    // docs) is the /quay:init skill — the human-ruled CANONICAL onboarding path.
+    // A real user on B ran `quay init --loop`; the flag was silently swallowed
+    // and exit 0 reported success while plugin/scripts=0 and orchestration/=0
+    // (nothing but the empty store was laid). Fail closed and point at the skill.
+    if (initFlags.loop) {
+      console.error(
+        "quay init: unrecognized option --loop.\n" +
+        "CLI `quay init` only scaffolds a brand-new EMPTY quay task store\n" +
+        "(.quay/config.yml + tasks/); it accepts only --force / --dry-run / --root.\n" +
+        "\n" +
+        "To lay the full quay loop mechanism into an existing project, the canonical\n" +
+        "path is the /quay:init skill inside a Claude Code session:\n" +
+        "\n" +
+        "    /quay:init --all --loop\n" +
+        "\n" +
+        "Run `quay init --help` for the CLI surface, or open Claude Code in this\n" +
+        "project and run /quay:init."
+      );
+      process.exitCode = 1;
       return;
     }
 
