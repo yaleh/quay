@@ -58,8 +58,7 @@ node 进程，可能耗尽内存触发 SIGKILL（SIGKILL ×2 符合 OOM 杀进�
 measure sigkill_events = `grep -c 'SIGKILL\|Killed' .quay/full-suite.log` stdout 数字段（当前 2）
 measure cancelled = `grep -c 'cancelled [1-9]' .quay/full-suite.log` stdout 数字段（当前 2）
 measure oom_evidence = `sudo dmesg 2>/dev/null | grep -c 'killed process.*node\|Out of memory'` stdout 数字段（0=无 OOM，>0=有）
-invariant full-suite 红判决必须先排除「进程被切断」（SIGKILL/cancelled/Promise-pending 级联）才能分诊失败；
-  切断存在时，失败落点不可信
+invariant full-suite 红判决必须先排除「进程被切断」（SIGKILL/cancelled/Promise-pending 级联）才能分诊失败；切断存在时，失败落点不可信
 invoke `grep -c 'Promise resolution is still pending' .quay/full-suite.log`
 control 人为 SIGKILL 一个测试进程 ⇒ 后续文件必须报 Promise-pending 级联（复现切断形态，证明切断是 SIGKILL 级联）
 resume 若中断，先跑 measure 读当前 SIGKILL/cancelled 数，再对照 dmesg 的 OOM 证据
