@@ -7760,3 +7760,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **就绪池分诊**：多个 ready 候选实为「已 fan-in 未翻 done」（tmux-leak/manager-tick-checks/cli-collision 等——代码已在 integration，仅 deferred full-suite DoD 未勾）→ 不重派。DIR-124 是 parent directive（门控 children A-E）→ 不派。
 - **3 连派（pairwise disjoint + 与在飞 2 不相交 + touches 全解析）**：gap-suite-cutoff（外层 07:27 点名 queued；切断源根因调查）+ gap-audit-findings（finding 未回传早期探测器；slot-refill 推荐）+ gap-npm-install（npm 安装未注册 plugin；真机复测尽量本地隔离做）。telemetry --task-start 3 条记录。
 - **在飞 5/5（满）**：inner-panel + cross-machine-observe + suite-cutoff + audit-findings + npm-install。0 空槽。
+
+### 事件 07:4xZ（suite-red 观察——SIGKILL 切断签名在 split 修复后仍存）
+
+- **suite-state red（07:21 run，failures[] 空）**：日志尾 `scripts/test.sh: line 576: Killed node --test` —— **SIGKILL 切断签名**（kill 产生 cancelled-not-fail，故 failures[] 空）。该 run **包含** quay-init-loop split 修复（e5d295b2 是 develop ancestor）→ **split 未治愈红，切断源仍在** —— 正是已派发的 gap-suite-cutoff 的调查对象。
+- **停止条件**：`inner-blocked-signal.ts --detect-stop` → no stop, no block；无 .halt；detect-stop pane_decision=waiting-input。
+- **过程偏差（诚实记录）**：3 连派（suite-cutoff/audit-findings/npm-install）在跑停止条件**之前**完成。按 red-suite 规则（failure-location conditional）：失败位置 = 测试进程 SIGKILL，**非**共享 run_static_checks 闸门 → dispatch-continues 成立，3 派发不撤回；但流程顺序应为 stop-checks→dispatch，下次纠正。
+- **batch-merge-ff fan-in 已在 suite-red 读取前落地**（integration 17a8ba69，非 develop——integration 是 pending-verify 累积目标，不并红树）。此后 completed-agent fan-in **暂缓**至外层 re-green（red-suite 规则）。
+- **在飞 5/5**：inner-panel + cross-machine-observe + suite-cutoff + audit-findings + npm-install。外层需低负载窗口重跑验证（suite-red 需外层 re-green）。
