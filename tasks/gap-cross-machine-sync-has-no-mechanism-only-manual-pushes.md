@@ -12,6 +12,13 @@ extra:
 ---
 **type:** execution
 
+## Cross-reference (class-level mechanism, 2026-08-06)
+
+本任务是本类（shipped-but-uncalled verifiers）的一个实例：`periodic-push-backup.sh` 曾 0 调用点，
+被本任务用 `sync-lag-check.sh` 接线。类级机制 `plugin/scripts/uncalled-verifier-check.ts`
+（`gap-shipped-verifiers-have-no-callers-and-mentions-defeat-the-check` AC6）确认它现在有执行调用点
+（`sync-lag-check.sh:54/115`），不再出现在 uncalled 清单里。
+
 ## Proposal
 
 **单机防丢：未推的提交在机器崩溃/被抹/忘记推时丢失，机制必须自动推。** 人 2026-08-06 裁定「仅保留 github 发布这一目标，取消跨机同项目协作开发这一目标」——本任务原跨机同步前提（A/B 两机协作）**已死**；**幸存内核正是人点名保留的：sync-lag-check 改为单机防丢判据**（提交不因崩溃/未推送而丢失）。机制（sync-lag-check.sh 自动推）保留，判据收窄为单机。下表的 A/B 数值是历史证据（原缺口成因），不再作为达成判据。
@@ -60,6 +67,12 @@ extra:
 **不得用系统 crontab**（人已裁定）：crontab 行不随包走（不在铺设集/bundle/升级通道）、
 在所有既有检查之外、是产品之外的第二个调度源、且结构性不可移植。
 机制必须活在 `plugin/loop/` + `plugin/scripts/` 里，随包走、走升级通道、被铺设集覆盖。
+
+**交叉标注（跨机验证复用同一双触发源模式）**：`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`
+用**完全相同的双触发源形态**做跨机验证——事件驱动（land 收口同一轮内 `cross-machine-verify.sh --record-merge`，
+即本条的 3b 事件驱动推送同一位）＋ tick 心跳兜底（每 tick 无条件 `--verify`，即本条的 4a/3c 心跳同一位），
+共享状态走 git notes（`refs/notes/quay-cmv-*`）而非文件。两条机制同根（跨机机制没有「只在一台机器上生效」），
+实现细节见那条任务。
 
 具体接哪个钩子、push 失败如何重试/降级、是否复用 `periodic-push-backup.sh` 本体，
 **留给执行时决定**（它已经参数化，大概率不用改代码，缺的是调用点）。

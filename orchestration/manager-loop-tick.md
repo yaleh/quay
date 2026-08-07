@@ -2,6 +2,13 @@
 
 **角色**：三个项目（quay / archguard / meta-cc）的管理者。**不是任何一个项目的外层。**
 
+> **角色分工（2026-08-07，`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`）**：
+> 本副本是 **quay 网络特有的管理者落地**（项目列表 / 仓库路径 / tmux 窗口是 quay 自己的三项目网络）。
+> **通用模板随 `quay-init --loop` 铺到新主机的 `orchestration/manager-loop-tick.md`**（`plugin/loop/
+> manager-loop-tick.md`，字节一致、配置驱动——与外层 tick 文档同形态）；本副本是该模板的 quay 网络
+> 消费版，两份角色分工同外层 tick 文档的模板/落地分工（`plugin/loop/orchestrator-loop-tick.md` 随包铺，
+> quay 网络特有落地在 `orchestration/`）。
+
 **这份文档存在的理由**：管理者的活和外层的活节奏不同、需要的上下文不同，
 挤在一个会话里两件事会互相排挤——要么细活把仲裁挤掉，要么反过来。
 2026-08-03 实测到这个冲突时，管理者会话已 **21 MB / 9672 条 / 跨度 43 小时**，
@@ -43,7 +50,7 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 
 ### b. 每个项目的外层是否还活着、是否在推进
 
-**已由常设监视器覆盖**（2026-08-03 补上）：`plugin/scripts/outer-liveness.sh`，
+**已由常设监视器覆盖**（2026-08-03 补上）：`plugin/scripts/quay-session.ts outer-liveness`，
 60 秒一轮，报三类事件——**消失 / 恢复 / 活着但超 45 分钟不推进**（未暂停的项目才判后者）。
 
 这条补的是一个真实缺口：2026-08-03 实测发现管理者挂着**两个看【内层】的监视器**
@@ -101,7 +108,7 @@ rm <repo>/.halt                                                  # 恢复
 
 跨项目重活（全量套件等）的串行化 **已退休**——`heavy-op-token.sh`（「一次只跑一个重测试」令牌）
 于 2026-08-06 被整删（人裁定，gap-session-liveness-remove-shared-events-and-lock）。资源压力改由
-`plugin/scripts/resource-gate.sh` 按单次运行负载门控（`scripts/test.sh` 全量路径仍 consult 它）。
+`plugin/scripts/quay-dispatch.ts resource-gate` 按单次运行负载门控（`scripts/test.sh` 全量路径仍 consult 它）。
 
 （旧的「令牌状态在哪看」一段随令牌退休而删除——`$QUAY_GLOBAL_DIR/heavy-op/token` 不再存在。）
 
@@ -115,8 +122,9 @@ rm <repo>/.halt                                                  # 恢复
 
 ```bash
 S=$(ps -o lstart= -p <监视器pid> | xargs -I{} date -d "{}" +%s)   # 我的实例启动时刻
-git log -1 --format=%ct -- plugin/scripts/session-liveness.sh     # 该文件最后一次改动
+git log -1 --format=%ct -- plugin/scripts/quay-session.ts     # 会话仪器入口（quay-session.ts）最后一次改动
 # 后者 > 前者 且已在 master ⇒ 我跑的是旧版，必须重挂
+# （40→6 集成后表面只暴露 6 个入口，不再出现 session-liveness.sh；入口文件的改动作为会话面的陈旧信号）
 ```
 
 **实例**：`9ba11c91` 于 14:46:15Z 落 master，而实例 14:41:14Z 启动——**晚 5 分钟**，

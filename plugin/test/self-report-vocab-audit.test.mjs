@@ -214,8 +214,8 @@ test("CLI — --git-log pulls recent commit subjects, honors --exclude-prefix, j
 test("wiring — orchestrator-loop-tick.md re-anchor step carries the audit + convergence criterion", () => {
   const tick = fs.readFileSync(OUTER_TICK, "utf8");
   assert.ok(
-    tick.includes("plugin/scripts/self-report-vocab-audit.ts"),
-    "outer tick must reference the self-report-vocab-audit script path",
+    tick.includes("plugin/scripts/quay-check.ts self-report-vocab-audit"),
+    "outer tick must invoke the audit via the quay-check entry point (40→6 integration, gap-ac8... AC2)",
   );
   assert.ok(
     tick.includes("inner_self_report_vocab"),

@@ -69,6 +69,27 @@ test('AC1/AC2 — plugin/skills/manager/SKILL.md exists (third_layer_shipped non
   assert.match(src, /1\.6|事件 triage|事件的分级处置/, 'manager SKILL must carry the §1.6 event-triage rule');
 });
 
+// ── AC1b: the manager DRIVER ships as a third loop doc (gap-the-manager-layer-does-not-propagate-
+// quay-init-lays-no-manager-driver) — the layer ships BOTH the skill (above) and the operational
+// driver. quay-init --loop lays plugin/loop/manager-loop-tick.md → orchestration/manager-loop-tick.md
+// per-project as a GENERIC template (form ruling AC3), so a new host gets an outer + an inner + a
+// manager driver (previously: outer + inner, NO watcher).
+test('AC1b — the manager DRIVER ships as plugin/loop/manager-loop-tick.md (a third loop tick doc)', () => {
+  const driver = path.join(pluginDir, 'loop', 'manager-loop-tick.md');
+  assert.ok(fs.existsSync(driver), 'plugin/loop/manager-loop-tick.md must exist (the manager driver template)');
+  const src = fs.readFileSync(driver, 'utf8');
+  assert.ok(src.trim().length > 500, 'the manager driver must carry real operational content, not a stub');
+  assert.match(src, /管理者|manager/i, 'the driver must be the manager operational tick doc');
+  // The shipped driver must be a GENERIC template: no quay-network hardcoded paths (config-driven,
+  // matching the outer/inner tick docs — a laid-down copy on a new host must not carry quay's paths).
+  assert.ok(!src.includes('/home/yale/work/quay'), 'the generic manager driver must NOT carry quay\'s dev-tree root');
+  assert.ok(!src.includes('quay-0:outer'), 'the generic manager driver must NOT carry quay\'s tmux window names');
+  // quay-init must lay it down to orchestration/manager-loop-tick.md (the destination-side measure).
+  const initSrc = fs.readFileSync(path.join(pluginDir, 'scripts', 'quay-init.sh'), 'utf8');
+  assert.match(initSrc, /manager-loop-tick\.md:orchestration\/manager-loop-tick\.md/,
+    'quay-init --loop must lay the manager driver to orchestration/manager-loop-tick.md');
+});
+
 // ── AC3: cold-start AC8c dead keys are gone ─────────────────────────────────────────────────────────
 test('AC3 — cold-start/SKILL.md AC8c has no dead-key references (inner-state.sh / send-keys pane-hash → 0 hits)', () => {
   const src = fs.readFileSync(COLD_START_SKILL, 'utf8');

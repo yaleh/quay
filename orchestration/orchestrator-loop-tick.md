@@ -51,8 +51,8 @@ cd "$REPO_ROOT"    # REPO_ROOT 见 .quay/config.yml loop.repo_root（或 git rev
 
 ```bash
 git log --oneline -10 && git status --short
-node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
-node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
+node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --report --json
+node --experimental-strip-types plugin/scripts/quay-check.ts task-status-drift-check
 ```
 
 **3. 自检内层会话（三态处理，gap-outer-self-checks-and-creates-inner-session）——不是「找到」，是「确保」**
@@ -68,7 +68,7 @@ transcript 有没有真实 user 消息（被驱动过）。三态判定与处理
 | **缺失** | inner 窗口不存在 **或** 无 claude 进程 | 调 `quay-topology.sh` 创建**两窗口**拓扑（outer+inner，manager 跨项目不属于项目拓扑）+ 起 inner claude（checked-in launch 命令），然后驱动 inner |
 
 ```bash
-bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
+node --experimental-strip-types plugin/scripts/quay-session.ts inner-session-check --json   # 三态自检：{state: healthy|empty-shell|missing, window, process, transcript, transcriptFresh}
 ```
 
 按 `state` 分派：
@@ -77,12 +77,12 @@ bash plugin/scripts/inner-session-check.sh --json   # 三态自检：{state: hea
   继续步骤 4（重建 cron）。
 - **`empty-shell`** ⇒ **驱动** inner（send-keys-reliable，transcript 验证送达，不假设成功）：
   ```bash
-  bash plugin/scripts/send-keys-reliable.sh "$TMUX_SESSION:inner" "执行 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <inner-transcript>
+  node --experimental-strip-types plugin/scripts/quay-deliver.ts send-keys-reliable "$TMUX_SESSION:inner" "执行 $REPO_ROOT/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <inner-transcript>
   ```
 - **`missing`** ⇒ 调**两窗口**工厂创建拓扑，验证在位，然后同样驱动 inner：
   ```bash
-  bash plugin/scripts/quay-topology.sh --session "$TMUX_SESSION"          # 两窗口工厂（outer+inner，幂等；manager 跨项目，不建）
-  bash plugin/scripts/topology-check.sh --session "$TMUX_SESSION" --json   # 验证：ok:true = 两窗口各有 claude 进程
+  node --experimental-strip-types plugin/scripts/quay-session.ts quay-topology --session "$TMUX_SESSION"          # 两窗口工厂（outer+inner，幂等；manager 跨项目，不建）
+  node --experimental-strip-types plugin/scripts/quay-session.ts topology-check --session "$TMUX_SESSION" --json   # 验证：ok:true = 两窗口各有 claude 进程
   ```
   创建后 **INNER-DRIVEN 验证送达**：transcript 出现真实 user 消息（send-keys-reliable 的
   `transcript-delivery-check.ts` 判据），不假设成功。**工厂失败/验证不过 ⇒ 升级给人**（step 5），
@@ -107,7 +107,7 @@ CronList   # 确认它已被列出——没列出的 cron 不是报警，是静�
 **为什么选它（判据：无人值守时最不容易静默停摆）**：
 
 - **可查验**：`CronList` 能列出它，装完能机械判定「恰好一个触发源在跑」——跑
-  `bash plugin/scripts/loop-driver-check.sh`，必须报 `LIVE`。
+  `node --experimental-strip-types plugin/scripts/quay-suite.ts loop-driver-check`，必须报 `LIVE`。
 - **固定间隔，无需每 tick 自排下一程**：建好就每 20 分钟自动触发，一次 tick 中断不会断掉整条链。
   自排程（动态 `/loop`，不带间隔）恰恰相反——每次 tick 结束都要记得排下一程，任何中断就静默断链，
   而且没有任何列出工具，无法在需要它之前知道它是否还活着。
@@ -135,7 +135,7 @@ CronList   # 确认它已被列出——没列出的 cron 不是报警，是静�
 **确认恰好一个触发源**：冷启动后跑
 
 ```bash
-bash plugin/scripts/loop-driver-check.sh
+node --experimental-strip-types plugin/scripts/quay-suite.ts loop-driver-check
 ```
 
 必须报 `LIVE`。报 `DOUBLE-TRIGGER` = 有人多装了一个驱动（多半是照旧文档多起了一个 loop）——停下来
@@ -148,7 +148,7 @@ bash plugin/scripts/loop-driver-check.sh
 `session-liveness-mount.sh` 挂载入口挂上——2026-08-06 起无锁，谁挂的谁拥有自己的 stdout 事件流）：
 
 ```
-Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+Monitor({command: "$REPO_ROOT/plugin/scripts/quay-session.ts session-liveness-mount",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
          description: "会话存活/活跃（SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT）",
          persistent: true, timeout_ms: 3600000})
 ```
@@ -162,7 +162,7 @@ Monitor({command: "$REPO_ROOT/plugin/scripts/session-liveness-mount.sh",   # REP
 「cron 才检查状态」改成「状态变化即触发」：
 
 ```
-Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/suite-state-trigger.ts --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
+Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plugin/scripts/quay-suite.ts suite-state-trigger --monitor",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
          description: "套件状态自动触发（SUITE-RED → 立即 RED 处置；SUITE-RUNNING → 乐观派发执行者）",
          persistent: true, timeout_ms: 3600000})
 ```
@@ -171,7 +171,7 @@ Monitor({command: "node --no-warnings --experimental-strip-types $REPO_ROOT/plug
 「红着无人处置 30 分钟」场景即被消灭）；出现 `SUITE-RUNNING` ⇒ 按「RUNNING 乐观派发执行者」驱动
 inner 照常派发。`SUITE-GREEN` / `SUITE-STATUS` 是平静基线，无需处置。挂载遗漏的代价同
 session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——所以 4c 的验证纪律对两者同样成立：
-跑 `bash plugin/scripts/monitor-mount-check.sh --json` 之外，还要确认套件触发者的 Monitor 已挂
+跑 `node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-check --json` 之外，还要确认套件触发者的 Monitor 已挂
 （`pgrep -af 'suite-state-trigger.ts --monitor'`，有 node 活进程即可；按步骤 0 的自匹配纪律
 排除 pgrep 自己那一行——发起查询的命令行里含同样字符串）。
 
@@ -180,7 +180,7 @@ session-liveness：退回纯 20 分钟轮询（正是本轮事故形态）——
 重挂 Monitor 后立刻跑一次检查器，不靠「看起来挂上了」：
 
 ```bash
-bash plugin/scripts/monitor-mount-check.sh --json
+node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-check --json
 ```
 
 两判据缺一不可：`mounted=true`（挂上了）、`targetRoot` 等于本仓根（挂对了，`targetOk=true`）。
@@ -262,7 +262,7 @@ tmux capture-pane -p -t "$TMUX_SESSION" | md5sum      # 两次相同 = 空闲
 **c) 外层的独立核实会和内层抢 CPU——这是机制不是散文。** 步骤 1 写着「只读」，但跑一次全量套件是
 **数分钟的满载**，足以把内层 `select-preflight` 那种 timeout 余量只有 8% 的测试压成 flaky。
 规则改为**机械执行**：跑全量套件前调用资源闸
-`bash plugin/scripts/resource-gate.sh --for full-suite`（`gap-no-resource-awareness-heavy-ops-run-blind`）——
+`node --experimental-strip-types plugin/scripts/quay-dispatch.ts resource-gate --for full-suite`（`gap-no-resource-awareness-heavy-ops-run-blind`）——
 退出码非 0 = WAIT，**此时不要跑全量**，改为核实便宜的声称（文件存在、grep 计数、单文件测试）。
 gate 读 `/proc/pressure/cpu` `some avg10`（结构信号，不是 load 代理）并输出数字与限值，把
 「现在能不能跑」变成一个可核对的数字。内层在飞时只核实便宜的声称；**全量只串行跑、跑完再叫醒内层**。
@@ -279,7 +279,7 @@ monitor，从外面看一模一样。**
 所以每个 tick 用一条命令自检，不靠人判断：
 
 ```bash
-bash plugin/scripts/monitor-mount-check.sh --json
+node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-check --json
 ```
 
 两判据：`mounted`（挂没挂）/ `targetRoot` 是否等于本仓根（挂的哪个仓库副本，`targetOk`）。
@@ -318,7 +318,7 @@ bash plugin/scripts/monitor-mount-check.sh --json
 | 有始无终 | **start without end** | 进 `inProgress[]`；**只在 90 分钟后以 `OVER90` 露头**，且与「一个真的很慢的任务」同形——信号上不可区分 |
 
 **崩溃遗留（幽灵）**：执行者被杀死后，`--task-end` 永远不会来，任务永久停在 `inProgress`。先用
-`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --reconcile --json` 关闭
+`node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --reconcile --json` 关闭
 「执行者确实不存在」的记录（判据是可观测的：分支已合并 / worktree 不存在 / 进程不存在，**不是时龄**），
 关闭后它才离开 `inProgress`、不再触发 `OVER90`。
 
@@ -441,7 +441,7 @@ OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
 `resume`；`n/a: <理由>` 合法、留白不是），并跑消费者检查器：
 
 ```bash
-node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <repo> --json
+node --experimental-strip-types plugin/scripts/quay-check.ts task-contract-check --root <repo> --json
 ```
 
 - 五条消费者判定（AC 阈值→measure/band 引用、measure 命令+字段、invoke 反引号命令+done 证据逐字、
@@ -506,11 +506,11 @@ tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt   # 内层在做�
 tmux capture-pane -p -t "$TMUX_SESSION" | tail -20              # 人读：底部 20 行
 git -C "$REPO_ROOT" log --oneline -10               # 落地了什么
 git -C "$REPO_ROOT" status --short                  # 树是否干净
-node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
-node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
-node --experimental-strip-types plugin/scripts/task-status-drift-check.ts --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
+node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --report --json
+node --experimental-strip-types plugin/scripts/quay-check.ts task-status-drift-check
+node --experimental-strip-types plugin/scripts/quay-check.ts task-status-drift-check --stranded   # stranded worktree branches (gap-stranded-...: silent fail-closed alarm)
 cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状态
-bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
+node --experimental-strip-types plugin/scripts/quay-deliver.ts supervisor-bus-identity inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
 ```
 
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
@@ -525,14 +525,14 @@ bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械
 
 ```bash
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
-node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --target inner --pane .quay/last-pane.txt
+node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inner-blocked-signal --detect-stop --target inner --pane .quay/last-pane.txt
 ```
 
 管理者盯外层（AC5，一次配置调用——外层等裁定 ⇒ 报出，busy ⇒ 不报）：
 
 ```bash
 tmux capture-pane -p -t "$OUTER_SESSION" > .quay/last-outer-pane.txt && \
-node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --target outer --pane .quay/last-outer-pane.txt
+node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inner-blocked-signal --detect-stop --target outer --pane .quay/last-outer-pane.txt
 ```
 
 `classifyPaneState` 只读**底部区域**（ADR-016 修订 boundary b——不做整屏哈希），连续 3 次
@@ -551,8 +551,8 @@ done 而 DoD 未勾。每个 tick 都要独立核实至少一项它声称完成�
 timeout 余量压成 flaky（步骤 0c）。查 transcript 是秒级、零干扰：
 
 ```bash
-node plugin/scripts/inner-forensics.mjs verify 全量套件 --since <上次 tick 的 ISO 时刻>
-node plugin/scripts/inner-forensics.mjs timecost --since <外层 loop 起点或本班次起点>
+node plugin/scripts/quay-deliver.ts inner-forensics verify 全量套件 --since <上次 tick 的 ISO 时刻>
+node plugin/scripts/quay-deliver.ts inner-forensics timecost --since <外层 loop 起点或本班次起点>
 ```
 
 `verify` 接**类别**（`全量套件` / `范围化测试` / `其它 Bash`，与 `timecost` 同源，不会分歧）
@@ -587,15 +587,15 @@ tick 做一次收尾 pass。
 
 1. **探测落地未翻任务**：
    ```bash
-   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$REPO_ROOT" --json
+   node --experimental-strip-types plugin/scripts/quay-dispatch.ts ready-pool-check --root "$REPO_ROOT" --json
    ```
    读 stdout 的 `excluded[]`：`reasons` 含 `not-yet-flipped` 的条目 = 工作已落地（`taskWorkLanded`
    为真）但 `status` 仍 `ready` 的任务——正是 inner 合并完成、等待收尾的任务集。**复用现有实现，
    不新建探测脚本。**
 2. **逐个收尾**，对每个 `not-yet-flipped` 任务：
-   - **关遥测括号**：先 `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts
+   - **关遥测括号**：先 `node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry
      --report --json` 拿 `inProgress[]` 里该 `taskId` 的 `runId`，再
-     `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-end
+     `node --no-warnings --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --task-end
      --taskId <id> --runId <r> --outcome done`。若 `inProgress[]` 里找不到该任务的 runId（无对应
      `--task-start`），跳过 `--task-end`，只翻 done。
    - **翻 done**：核对 AC/DoD 是否真实满足（与旧 inner fan-in 同一纪律：勾得上就勾、勾不上写理由
@@ -604,14 +604,14 @@ tick 做一次收尾 pass。
    - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
      已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
-   - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
+   - **后台跑**：全量 suite 由本层起 `plugin/scripts/quay-suite.ts full-suite-runner`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
      （`{state: running|green|red, reason?, runner: outer|inner, startedAt, finishedAt, durationMs,
      laneCount}`）并把套件输出 tee 到 `.quay/full-suite.log`。`reason` 只在 red 时出现：
      `failed`（真实失败——stop-dispatch 信号）或 `aborted`（套件未完成、无正确性结论——**不触发
      停派**，`gap-full-suite-runner-concurrency-default-and-gate` AC5）。**起跑条件**：本轮收尾了 ≥1
      个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=
-     running`）且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 =
+     running`）且资源闸放行（`node --experimental-strip-types plugin/scripts/quay-dispatch.ts resource-gate --for full-suite`，退出非 0 =
      WAIT，下一 tick 再起）。
    - **早期 RED（AC2）**：runner **一检测到失败立即把 state 标成 red**（非等全套跑完）——缩「变红到
      发现」窗口。判红模式 = 结构化失败形态，**不匹配裸字形**（`gap-full-suite-runner-red-pattern-
@@ -631,7 +631,7 @@ tick 做一次收尾 pass。
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
 3b. **批量合 integration→develop（两线模型 AC3，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
-   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop develop --integration integration` 把
+   **suiteGreen 为 true 时**，跑 `plugin/scripts/quay-branch.ts integration-batch-merge --root "$REPO_ROOT" --develop develop --integration integration` 把
    已验证的 integration 批量快进合回 develop——**integration 永远是 develop 后代 ⇒ fast-forward 无冲突**
    （develop 只被外层批量合推进，inner 任务只合 integration，见 `fast-mode-loop-tick.md` 步骤 2「两线
    分支模型」）。`integration-batch-merge.sh` 自带：
@@ -655,7 +655,7 @@ tick 做一次收尾 pass。
    - `state: red` ⇒ inner 停止派发 + 暂缓 fan-in，本层按「红窗分诊」处置（bisect 定位新引入还是既有；
      定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
 5. **落盘聚合**：本轮收尾后跑一次
-   `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
+   `node --no-warnings --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --snapshot`，
    否则被 git 跟踪的聚合文件不反映本批结果。
 
 **每 tick 必报**补一条：本轮收尾几条、`.quay/full-suite-state.json` 最新 `state`（green/red/running）
@@ -680,7 +680,7 @@ tick 做一次收尾 pass。
 的 `*/20` cron）；Monitor 是事件监测（同 session-liveness），不驱动任何 tick。事件日志只记事实，
 处置逻辑在文档/既有实现里——触发者不引入第二条决策链。冷启动即红（外层 `/clear` 后套件仍红）也触发
 `SUITE-RED`（第一眼即红），正是本轮「红着无人处置」形态的兜底。**触发链自检**（Contract invoke）：
-`node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts --fail-fast-check`
+`node --no-warnings --experimental-strip-types plugin/scripts/quay-suite.ts full-suite-runner --fail-fast-check`
 （构造失败 suite ⇒ state=red ⇒ SUITE-RED 事件 ⇒ stopSignal 在位，退出 0 = 链完好）。
 
 **红窗分诊（外层独占，AC4——只停派发不停在飞合并会让红树继续累积，故 RED 失败时 fan-in 一并暂缓）**：
@@ -737,7 +737,7 @@ drift，管理者实测 + 裁定）：inner 的 Cron 调用数 = 0、整晚 59 �
    重锚的有效性以**语义收敛**度量（`reanchor_effectiveness_is_convergence = 1`），不是「重锚发生了」
    ——锚点通道存在 ≠ 词汇收敛（inner 会把历史批措辞内化成自己的组织方式，doc 侧改不到）。每次重锚后
    对 inner 最近自述（commit subject / fan-in 注记 / 收尾汇报）跑
-   `node --experimental-strip-types plugin/scripts/self-report-vocab-audit.ts --git-log 15
+   `node --experimental-strip-types plugin/scripts/quay-check.ts self-report-vocab-audit --git-log 15
    --exclude-prefix outer: --window 3 --json`，读 stdout 的 `inner_self_report_vocab` 字段（连续 3 轮
    无 batch 式自述 = 收敛）与 `converged`。「Batch of N fully merged」式门控汇报 = 漂移（被审计标记）；
    verification-round-N / 滚动派发语义 = 合规。**每个 tick 必报**本轮 `inner_self_report_vocab` 与
@@ -796,19 +796,19 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
 
 - 候选：`status: todo` 或 `ready` 且带 `milestone-candidate` 标签
 - 依赖就绪：父任务 done、无未满足前置（`it0-split-or-commit-check.ts` 的 PARENT-DONE-IFF-CHILDREN）
-- 并发资格：`checkTouchesPair`（`plugin/scripts/touches-orthogonality-check.ts`）对**所有在飞任务
+- 并发资格：`checkTouchesPair`（`plugin/scripts/quay-dispatch.ts touches-orthogonality-check`）对**所有在飞任务
   和彼此**两两检查，重叠则不同批
 - 优先级：阻塞其它任务的优先；`gap-*` 缺陷类优先于 `DIR-*` 新能力
 - **跨机在飞（两机协作，`gap-two-machine-collaboration-git-branch-claiming`）**：两机协作时
   （`QUAY_CLAIM_REMOTE` 指向共享裸仓库），**另一台机器的在飞任务 = 共享仓库上存在的 `task/*` 分支**
   ——本层 telemetry 的 `inProgress` 只覆盖本机内层。候选与跨机在飞任务触摸相交（用内层同源
-  `plugin/scripts/claim-task.ts` / `checkTouchesPair`）或已被对方认领 ⇒ **不补进队列**（候选的认领状态
+  `plugin/scripts/quay-branch.ts claim-task` / `checkTouchesPair`）或已被对方认领 ⇒ **不补进队列**（候选的认领状态
   由内层派发前 `claim-task.sh` 机械判定；本层只需在**筛选候选**时把跨机在飞算进「所有在飞任务」）。
   单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 本条为 no-op，行为不变。
 
 **就绪池维持（todo→ready 晋级）不再靠外层自愿 AC-queue**（`gap-promotion-cadence-is-role-volition-
 not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先级是**产品机制**，由内层 tick
-`fast-mode-loop-tick.md` 步骤 3.6「就绪池维护」承载——内层跑 `plugin/scripts/ready-pool-check.ts`
+`fast-mode-loop-tick.md` 步骤 3.6「就绪池维护」承载——内层跑 `plugin/scripts/quay-dispatch.ts ready-pool-check`
 （读 stdout `pool` 字段；`pool < floor`（=cap×4，默认 12）按脚本推荐的顺序补晋；**判据是
 `dispatchable_disjoint ≥ cap`**，floor 只是手段）。**外层只引用它，不独立维护候选集构造规则**
 （旧 `outer-phase-goal.md` AC-queue 已降级为引用）。本步骤的 `gap-*` 优先顺序与内层 checker 的定义
@@ -931,7 +931,7 @@ tick 或 `/clear` 后的会话会重犯。
 - 套件状态触发者（4b2/步骤 1b）：Monitor 是否挂上（`pgrep -af 'suite-state-trigger.ts --monitor'`，
   排除 pgrep 自己那一行）、最近一次 `SUITE-*` 事件（`.quay/suite-state-events.jsonl` 尾部）与时刻
 - 累计动作类型分布（退化判据）
-- Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
+- Monitor 两判据（`node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-check --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `targetOk`）——挂没挂、挂的哪个仓库
   （2026-08-06 起 `delivered` 随共享事件文件移除；事件送达由挂载方自己的 Monitor 流承担）
 

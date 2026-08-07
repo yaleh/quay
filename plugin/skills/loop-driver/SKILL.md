@@ -61,7 +61,7 @@ Guardrails (all from DIR-044): conservative-default-serialize, learning-never-ba
 Each iterate, AFTER SELECT (or when idle), evaluate which routines are DUE with `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts" --iteration <n> [--event <e>] --plugin-root "${CLAUDE_PLUGIN_ROOT}" <routines.json>` (exit 0 + lists the due ones; exit 3 = none due). The output line format is: `DUE: <name> (<trigger>) → probe <name>` (probe path) or `DUE: <name> (<trigger>) → dispatch <action>` (dispatch path).
 
 **Probe path (new, DIR-056):** When the scheduler output line contains `→ probe <name>`:
-1. Call `readProbeSpec(name, CLAUDE_PLUGIN_ROOT)` from `plugin/scripts/read-probe-spec.ts` to get `{ instrument, fallback, output_routing, objective }`. Fail-closed: if `readProbeSpec` throws (`PROBE-SPEC FAIL-CLOSED: …`), skip this routine for this iteration (log the error; never crash the loop).
+1. Call `readProbeSpec(name, CLAUDE_PLUGIN_ROOT)` from `plugin/scripts/quay-check.ts` to get `{ instrument, fallback, output_routing, objective }`. Fail-closed: if `readProbeSpec` throws (`PROBE-SPEC FAIL-CLOSED: …`), skip this routine for this iteration (log the error; never crash the loop).
 2. **Instrument availability check.** If `instrument !== "none"`, verify the named MCP server (e.g. `meta-cc`, `archguard`) is available in the current session before dispatching. If unavailable and `fallback === "none"`, skip and log; the routine will fire again on its next trigger.
 3. **Objective parameterization.** Prepend `WORKSPACE: <workspaceRoot>\n` to `spec.objective` so the dispatched agent can resolve workspace-relative paths without hardcoding.
 4. **Dispatch** a fresh-context background agent (same `execution: dispatched` infra) with the combined objective prompt.

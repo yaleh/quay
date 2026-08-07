@@ -14,7 +14,7 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
 
 No `package.json` scripts and no build step (plain ESM Node ≥20; repo developed on Node 25). `npm install` at the root (npm workspaces, `packages/*`).
 
-- **Run the CLI:** `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` (Core), `node packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
+- **Run the CLI:** `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` (Core), `node --experimental-strip-types packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
 - **Tests** (Node's built-in runner, `.mjs` under each package's `test/`):
   - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
     file and `.github/workflows/ci.yml` invoke; it owns the test-file glob
@@ -135,7 +135,7 @@ Three packages, one ABI:
 Key cross-cutting facts (require reading several files to see):
 - **Core is written against the task view-model only**, never a specific backend. A task = `{id, title, status, role (primitive|compound), labels, parent/children, body}`; the `body` markdown carries `## Proposal / ## Plan / ## Acceptance Criteria / ## Definition of Done` sections. Providers translate to/from this shape.
 - **`.quay/config.yml`** (per-workspace) is the provider map: which provider is enabled, its `path`, `tasks_dir`, `mcp_entry`, `env`. `QUAY_NATIVE_TASKS_DIR` selects the native store's directory.
-- **Core CLI `task edit` is status-only in v1** (QN-024) for backward compat unless full flags are given — for a body/extra/labels write, prefer MCP `task_write` or the native provider's own richer `quay-native task edit`. (Full-field parity was later added — see `packages/quay/bin/quay.js` help; when in doubt check which surface you're on.)
+- **Core CLI `task edit` is status-only in v1** (QN-024) for backward compat unless full flags are given — for a body/extra/labels write, prefer MCP `task_write` or the native provider's own richer `quay-native task edit`. (Full-field parity was later added — see `packages/quay/bin/quay.ts` help; when in doubt check which surface you're on.)
 - **Gate engine ("QENG")** — `packages/quay/src/gate/{engine,registry,gate-event-store,gate-log,acceptance-runner,lifecycle,driver}.js`, exposed as verb-less CLI commands `gate` / `gate-log` / `complete` / `adjudicate` / `promote` / `retreat` / `run`. Gates evaluate a named check and append an immutable **GateEvent** to `<workspaceRoot>/.quay/gate-events.jsonl` (gitignored). `quay gate <task>` defaults to the `acceptance` gate (runs `task.extra.acceptance` as a shell command, fail-closed if unset); lifecycle transitions live in `lifecycle.ts` (`todo→ready→done`, terminal `needs-human`). "The meter is runnable, not asserted."
 
 ## Architecture — the methodology layer (`experiments/`, `tasks/`, `docs/`)

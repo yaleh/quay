@@ -154,9 +154,10 @@ $ bash scripts/test.sh plugin/test/batch-vocabulary-check.test.mjs
 
 ## Definition of Done
 
-- [x] AC1–AC6 全部勾上；AC4 的 grep 分类表逐字贴任务体
-- [x] 一次真实使用：至少一条新 tick-log/commit 条目用 `verification-round-N` 词汇（记录）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC6 全部勾上；AC4 的 grep 分类表逐字贴任务体（见下方「Execute evidence」与「Re-dispatch verification」两节的分类表）
+- [x] 一次真实使用：至少一条新 tick-log/commit 条目用 `verification-round-N` 词汇（记录）——commit `bfd66d94`（「split dispatch-rolling from verification-round vocabulary」）、`d4e4f330`（「verification-round recorded」）及本 re-dispatch commit（见提交信息）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**未达成（re-dispatch 2026-08-06）：全量路径的 task-contract-check 被 12 个与本任务无关的并发 filed 任务共 26 处违规（new since baseline 22）阻断**，非本任务 Touches 可修；scoped 子集绿（13/13）见下
+
 
 ## Touches
 - tasks/gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round.md（自身文件：勾 AC + 贴 invoke 证据授权）
@@ -249,6 +250,100 @@ $ grep -rn '同批\|批派发\|batch-N' plugin/loop/fast-mode-loop-tick.md plugi
 ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0
 ```
 scoped 静态检查全过：test-framework-policy-check PASS、test-isolation-check PASS、task-contract-check（strict-subset 本任务）无违规、drive-contract-check PASS。
+
+<<<<<<< HEAD
+## Finalize verification（2026-08-07，worktree split-batch 收尾实跑）
+
+**基线**：词汇拆分机制工作已由前序 agent 提交并合入 develop 谱系（`a8e8a0dc`/`3241b4fb`，原 `b67c49f3`）。
+本 worktree 分支已快进到当前 develop（`17318a82`）；本任务 commit 只## Re-dispatch verification（2026-08-06，worktree `task/split-batch` 实跑）
+
+re-dispatch 发现并修复一处 **AC6 测试白名单陈旧**：`plugin/test/tick-vocabulary.test.mjs` 的
+AC4 分类测试对当前 tick 文档是**红的**（4 行 `batch` 无法分类）：
+
+1. fast-mode-loop-tick.md:124/135/137 —— `batch4a`/`batch4b/4c` 标注为 **`历史批名`**（任务 AC4 分类表的
+   规范标注），但测试 SAFE_SUBSTRINGS 只含 `历史引用`；
+2. fast-mode-loop-tick.md:273 —— AC5 规范语句「任何 **`batch + 编号`** 的措辞都只能是历史…」，测试白名单
+   未覆盖。
+
+**修复**（Touches 内文件）：`tick-vocabulary.test.mjs` 的 SAFE_SUBSTRINGS 增加 `历史批名` 与 `batch + 编号`，
+并把头注释/分类注释同步为「历史批名」「AC5 规范语句（batch + 编号 的否认措辞『不叫批号』）」两类。文档（交付物）未动。
+
+**AC4 分类表（当前 grep 实跑，`grep -rn 'batch'`，散文零个门控语义）**：
+
+| 位置 | 出现 | 分类 |
+|---|---|---|
+| fast:65/66/195、orch:47/48/561/562/1062/1063 | `batch2-queue-state.md`（文件名历史引用） | 历史引用 |
+| fast:123/132/134 | `batch4a 那次 / batch4b/4c / batch4a 的 cancelled`（历史引用） | 历史引用 |
+| fast:124/135/137 | `batch4a`/`batch4b/4c`（**历史批名**，标注「保留不改名」） | 历史批名 |
+| fast:273 | 「任何 `batch + 编号` 的措辞都只能是历史」 | AC5 规范语句（否认批号） |
+| fast:272/325/578、orch:625/630 | `gap-split-batch-vocabulary-...`（本任务 id，词汇规范块） | 任务 id |
+| fast:401、orch:634/637/803 | `gap-closure-sync-is-the-true-batch-boundary-...`（任务 id） | 任务 id（白名单豁免） |
+| fast:535/608/615/616 | `concurrent-batch-scheduler.ts`（机件路径） | 机件真名 |
+| fast:580/616/617/622 | `{batch, deferred}` + `batch ⇒ disjoint`（机件输出字段） | 机件真名 |
+| fast:350/353、orch:717/720 | `integration-batch-merge.sh` | 机件真名 |
+| orch:635/639 | 「Close batch-…」（**历史引用**，旧收尾日志） | 历史引用 |
+| orch:827 | `grep -n '...batch...' reanchor-prompt.txt`（重锚检查） | 审计机制 |
+| orch:839 | 「Batch of N fully merged」式自述漂移（自述词汇审计） | 审计机制 |
+
+**Contract measure（band=0）实跑**：
+
+```bash
+$ grep -rn '同批\|批派发\|batch-N' plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md
+（无输出；exit 1 = 0 命中）
+```
+
+**AC4 负控制实跑**（白名单不是万能借口）：
+
+```bash
+$ printf '# 输出 { batch, deferred }。两者都在 batch ⇒ disjoint，可同批；\n重叠 → 不同批，等下一 tick。\n批派发需要门控。\n' > /tmp/neg-control-probe.md
+$ grep -rn '同批\|批派发\|batch-N' /tmp/neg-control-probe.md
+/tmp/neg-control-probe.md:1:# 输出 { batch, deferred }。两者都在 batch ⇒ disjoint，可同批；
+/tmp/neg-control-probe.md:2:重叠 → 不同批，等下一 tick。
+/tmp/neg-control-probe.md:3:批派发需要门控。
+```
+
+**AC6 测试实跑**（两个测试文件，修复后全绿）：
+
+```bash
+$ node --test plugin/test/tick-vocabulary.test.mjs
+ℹ tests 5   ℹ pass 5   ℹ fail 0   ℹ cancelled 0
+$ node --test plugin/test/batch-vocabulary-check.test.mjs
+ℹ tests 8   ℹ pass 8   ℹ fail 0   ℹ cancelled 0
+```
+
+**scoped 测试（AC6）实跑**——`bash scripts/test.sh --for-task gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round --allow-thin`：
+
+```
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  test-framework-policy-check: PASS — 242 glob file(s), 34 exemption(s)
+  test-isolation-check: PASS — 44 violation(s) all baselined
+  task-contract-check: strict-subset (本任务) — no violations
+  drive-contract-check: PASS — no drive-contract doc asserts a task order without its checkTouchesPair output
+✔ AC4/Contract — plugin/loop/fast-mode-loop-tick.md has ZERO 同批|批派发|batch-N (dispatch-gating prose)
+✔ AC5 — plugin/loop/fast-mode-loop-tick.md carries the normative vocabulary split (verification-round-N, 不是分派门控, 滚动)
+✔ AC4/Contract — plugin/loop/orchestrator-loop-tick.md has ZERO 同批|批派发|batch-N (dispatch-gating prose)
+✔ AC5 — plugin/loop/orchestrator-loop-tick.md carries the normative vocabulary split (verification-round-N, 不是分派门控, 滚动)
+✔ AC4 negative control — a prose '可同批/批派发' phrase MUST be flagged (+1)
+✔ AC4 negative control — the SAME phrase restored to the new vocabulary MUST be clean (back to 0)
+✔ AC4 — the mechanism true-name / task-id whitelist occurrences survive (concurrent-batch-scheduler.ts, {batch,deferred}, gap-closure-sync-...)
+✔ AC1 — the dispatch section no longer reads as 'dispatch is gated' (可同批/不同批 gone)
+✔ AC1/AC4 — measure: zero misreadable batch phrasing (同批/批派发/batch-N) in the tick docs
+✔ AC4 — negative control: a constructed 可同批/批派发/batch-N text MUST be flagged (whitelist is not a universal excuse)
+✔ AC4 — every `batch` line in the tick docs is classifiable (none is unclassified gate-reading prose)
+✔ AC2/AC5 — verification cadence is named verification-round-N with an explicit not-dispatch-gating annotation
+✔ AC6 — this file is node:test + // @test-group governance
+ℹ tests 13   ℹ pass 13   ℹ fail 0   ℹ cancelled 0
+```
+
+**DoD「一次真实使用」re-dispatch**：本 commit message 使用 `verification-round-N` 词汇（见提交信息）。
+
+**DoD「全量套件绿」未达成的原因（re-dispatch 2026-08-06）**：全量路径 `scripts/test.sh`（无 `--for-task`）跑
+**完整**静态检查集，其中 task-contract-check 是全仓扫描，当前被 **12 个与本任务 Touches 无关的并发 filed
+任务**（`gap-concurrency-derivation-reverted-...`、`gap-cross-machine-sync-...`、`gap-green-verdict-never-
+expires-...` 等）共 **26 处违规（new since baseline 22）** 阻断（ratchet ceiling 5）；这些任务文件不在本任务
+Touches 内，按范围纪律不得代改。scoped 子集绿（13/13）是 change-relevant 判据；全量绿需等并发任务各自
+落地/收敛后再跑。
+
 
 ## Finalize verification（2026-08-07，worktree split-batch 收尾实跑）
 

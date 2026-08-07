@@ -67,6 +67,7 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 | `agents/*.md` | `.claude/agents/` |
 | `loop/orchestrator-loop-tick.md` | `orchestration/orchestrator-loop-tick.md` (byte-identical, no substitution) |
 | `loop/fast-mode-loop-tick.md` | `docs/analysis/fast-mode-loop-tick.md` (byte-identical, no substitution) |
+| `loop/manager-loop-tick.md` | `orchestration/manager-loop-tick.md` (byte-identical, no substitution) — the manager DRIVER, the THIRD tick doc (gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver). The manager ROLE is one per network/host, but the DRIVER ships per-project as a GENERIC template (form ruling AC3) so a new host that runs `--loop` gets an outer + an inner + a watcher. |
 | `scripts/*` referenced by a shipped skill/tick doc (e.g. `fast-mode-telemetry.ts`, `monitor-mount-check.sh`, `send-keys-reliable.sh`, `session-liveness-mount.sh`, `ready-pool-check.ts`, `read-probe-spec.ts`, `task-schema-check.ts`, `quay-launch.sh`, `quay-topology.sh`, `topology-check.sh`, …) | `plugin/scripts/` |
 | `scripts/` bare-name mechanism files the docs call without a `plugin/scripts/` prefix (`inner-idle-log.ts`, `it0-split-or-commit-check.ts`, `pipe-exit-code-check.sh`; `heavy-op-token.sh` was retired 2026-08-06) | `plugin/scripts/` |
 | `scripts/gate-script-base.ts`, `workflow-event-schema.mjs`, `task-schema.ts`, `touches-parser.ts`, `wiring-coverage-check.ts` (transitive deps of the checkers — the laid-down mechanism must be functional) | `plugin/scripts/` |
@@ -75,7 +76,7 @@ mechanically by quay-init's `verify-referenced-landed` (see below).
 ## Loop install: local-state files (self-create) and quay reference docs
 
 **Session topology lay-down (`gap-tmux-session-topology-no-factory-definition`):** the two-window
-session factory + check (`plugin/scripts/quay-topology.sh`, `plugin/scripts/topology-check.sh`) ship
+session factory + check (`plugin/scripts/quay-session.ts quay-topology`, `plugin/scripts/quay-session.ts topology-check`) ship
 with `--loop` because the shipped cold-start / session-topology skills reference them (referenced ⊆
 landed). The topology is `outer` + `inner`; manager is cross-project and NOT part of a project's
 topology (`gap-manager-baked-into-project-topology-factory`). The topology **definition** itself
@@ -100,6 +101,7 @@ not count them as missing:
 | `orchestration/escalations.md` | `touch orchestration/escalations.md` (outer tick appends) |
 | `docs/analysis/batch2-queue-state.md` | `touch docs/analysis/batch2-queue-state.md` (inner tick writes queue state) |
 | `docs/analysis/contract-violations.md` | `touch docs/analysis/contract-violations.md` (task-contract-check.ts writes) |
+| `orchestration/manager-tick-log.md` | `touch orchestration/manager-tick-log.md` (manager tick appends — the manager driver's §3 five-column log) |
 
 **Quay-specific reference docs — referenced by the tick template but not loop deliverables.**
 The shipped tick template is quay-flavored prose and references quay's own experiment/analysis docs
@@ -116,7 +118,6 @@ documented reference from a genuine missing file:
 | `orchestration/outer-rulings-2026-08-04-A-F.md` | quay's outer rulings incl. ruling F (superseded-judgment provenance) — not a generic loop deliverable |
 | `orchestration/SPEC-cut-the-waiting.md` | quay's "cut the waiting" spec (referenced by fast-mode-loop-tick §4 dispatch form rationale) — not a generic loop deliverable |
 | `orchestration/REVIEW-cadence.md` | quay's daily-review cadence mechanism (referenced by the shipped manager skill as its cadence hook) — not a generic loop deliverable |
-| `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it) — not a generic loop deliverable |
 | `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
 | the manager skill's SPEC methodology-source index | the SPEC files the manager skill lists as an index (AC6) are each declared reference-doc below — referenced, not batch-crystallized, not shipped |
@@ -125,6 +126,7 @@ documented reference from a genuine missing file:
 <!-- self-create: orchestration/escalations.md -->
 <!-- self-create: docs/analysis/batch2-queue-state.md -->
 <!-- self-create: docs/analysis/contract-violations.md -->
+<!-- self-create: orchestration/manager-tick-log.md -->
 <!-- reference-doc: orchestration/exp6-phase1-sustained-unattended-operation.md -->
 <!-- reference-doc: orchestration/throughput-decomposition.md -->
 <!-- reference-doc: orchestration/outer-phase-goal.md -->
@@ -134,7 +136,6 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-cut-the-waiting.md -->
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
 <!-- reference-doc: orchestration/REVIEW-cadence.md -->
-<!-- reference-doc: orchestration/manager-loop-tick.md -->
 <!-- reference-doc: orchestration/SYNTHESIS-four-gaps-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->

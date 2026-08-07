@@ -35,7 +35,7 @@
 | `plugin/gate-scripts/` | 14 | 闸门（**RETIRED 2026-08-05**：经典管线 era 门，铺进目标项目但无调用方=死重；分层退役，文件留树、`quay-init` 不再铺、`sync.sh` 不再 sync） |
 | `plugin/probes/` | 4 | 探针 |
 | `plugin/vendor/` | 4 | **自包含运行时**（`quay/dist/quay.js`、`quay-native/dist/quay-native.js` + `provider.yml`） |
-| `plugin/loop/` | 2 | `fast-mode-loop-tick.md`（inner）、`orchestrator-loop-tick.md`（outer） |
+| `plugin/loop/` | 3 | `fast-mode-loop-tick.md`（inner）、`orchestrator-loop-tick.md`（outer）、`manager-loop-tick.md`（manager driver，2026-08-07，`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`） |
 | `plugin/workflows/` | 2 | |
 | `plugin/agents/` | 1 | |
 
@@ -52,7 +52,7 @@
 |---|---|---|---|
 | **启动命令 / 模型 / 环境变量** | `grep -rl "917000\|claude-deepseek" plugin/` ⇒ 无命中 | `claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS/AUTO_COMPACT_WINDOW=917000` + `AUTOCOMPACT_PCT_OVERRIDE=80` + `DISABLE_ALTERNATE_SCREEN/MOUSE=1` 是**部落知识**。管理者 2026-08-05 亲自起错过一次（误起成 Anthropic Opus），靠翻 `~/.bash_history` 才找回 | **已闭环**：`.claude/launch.settings.json` + `plugin/scripts/quay-launch.sh`（`gap-crystallize-launch-config-into-checked-in-settings-file`，done） |
 | **tmux 会话/窗口拓扑约定** | `plugin/loop/`、`plugin/skills/` 无 `:outer`/`:inner`/`:manager` 命名约定 | `<project>-N:outer` / `:inner` / `:manager` 这套三窗口结构没有出厂定义；人手工建的 `meta-cc-3`/`archguard-4` 实测**只有单个 `bash` 窗口、无 claude 进程** | **已闭环**：`plugin/skills/session-topology/SKILL.md` + `plugin/scripts/quay-topology.sh` + `topology-check.sh`（`gap-tmux-session-topology-no-factory-definition`，done；拓扑修正为两窗口 outer+inner，manager 跨项目另行启动） |
-| **manager 层全部机制** | `plugin/loop/manager*` 不存在；`orchestration/manager-loop-tick.md` 只在 quay 本地 | **交付的是双层、实跑的是三层**。§1.5 ask-vs-act、§1.6 事件 triage、跨项目仲裁、优先级转达全部不随包走 | **已闭环**：`plugin/skills/manager/SKILL.md`（`gap-productize-the-manager-layer`，done） |
+| **manager 层全部机制** | `plugin/loop/manager*` 不存在；`orchestration/manager-loop-tick.md` 只在 quay 本地 | **交付的是双层、实跑的是三层**。§1.5 ask-vs-act、§1.6 事件 triage、跨项目仲裁、优先级转达全部不随包走 | **已闭环**：`plugin/skills/manager/SKILL.md`（`gap-productize-the-manager-layer`，done）＋ **manager 驱动随包铺**：`plugin/loop/manager-loop-tick.md` → `orchestration/manager-loop-tick.md`（`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`，2026-08-07——第 2 类循环文档现为三份） |
 | **inner 的周期锚点** | inner `CronCreate` 调用数 = 0（整晚 59 次驱动全来自 outer 的 send-keys） | inner 唯一锚点是 outer 现写的散文 ⇒ 实测措辞漂移：outer 已停用「批」字后 inner 仍复读自己上下文里的 `Batch of N` | **机制已建但已排除出交付物**（人裁定 2026-08-06）：`plugin/scripts/os-anchor-install.sh` + `os-anchor-watchdog.sh` 是 quay 开发阶段工具，非交付物 build 的一部分，仅供人工显式使用（`gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`，done，但归属类目已改标「已排除」）+ 措辞收敛 `gap-reanchor-must-converge-inner-self-reported-vocabulary`（done） |
 | **升级通道** | meta-cc 缺的 8 个派生脚本里 **7 个是 08-03 之后造的** | 目标项目装完就冻结在那一刻。**漂移不是装错，是交付面自己长大了而目标没有升级路径** | **已立案**：`gap-upgrade-channel-cant-sync-build-artifacts-dist-stale` + `gap-delivery-surface-grows-but-target-freezes-no-upgrade` |
 
@@ -89,7 +89,7 @@
 | # | 类别 | 交付物 | 归属任务 | 校验判据 |
 |---|---|---|---|---|
 | 1 | **机件与运行时** | `plugin/scripts/quay-init.sh`、`sync-vendor.sh`、`verify-installed-executables.sh` | —（自足） | referenced-set ⊆ landed-set（verify_referenced_landed）+ 已铺可执行文件逐字节（verify-installed-executables）；vendor 运行时由 sync-vendor.sh 构建、quay-init 铺入目标 |
-| 2 | **循环文档** | `plugin/loop/fast-mode-loop-tick.md`（inner）、`plugin/loop/orchestrator-loop-tick.md`（outer） | `gap-productize-the-manager-layer` | outer+inner 两层 tick 文档随包，铺入 `docs/analysis/` + `orchestration/`；manager 层缺 → 归属该任务 |
+| 2 | **循环文档** | `plugin/loop/fast-mode-loop-tick.md`（inner）、`plugin/loop/orchestrator-loop-tick.md`（outer）、`plugin/loop/manager-loop-tick.md`（manager driver，2026-08-07） | `gap-productize-the-manager-layer` | 三层 tick 文档随包，目标落地铺入 `orchestration/`（outer + manager driver）与 `docs/analysis/`（inner）；manager driver 由 `gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver` 补齐（2026-08-07） |
 | 3 | **启动配置** | `.claude/launch.settings.json`、`plugin/scripts/quay-launch.sh` | `gap-crystallize-launch-config-into-checked-in-settings-file` | 启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 settings 文件；quay-launch.sh 读取并生成启动命令，不再靠手打一行 shell |
 | 4 | **会话拓扑** | `plugin/scripts/quay-topology.sh`、`topology-check.sh`、`plugin/skills/session-topology/SKILL.md` | `gap-tmux-session-topology-no-factory-definition` | 三窗口（outer/inner/manager）拓扑出厂定义：每层起什么命令、谁驱动谁（topology-check 钉住） |
 | 5 | **周期锚点（已排除，非交付物）** | （空——人裁定 2026-08-06：os-anchor-install.sh / os-anchor-watchdog.sh 是开发阶段工具，不进交付物 build，仅供人工显式使用） | `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash` | 恒 covered（deliverables 留空，vacuous）；机制文件仍在仓库，但不随 quay-init 铺设、不作为交付判据 |
@@ -187,7 +187,7 @@
 | # | 类别 | 交付物（现状） | 归属任务 | L1 校验判据 |
 |---|---|---|---|---|
 | 1 | **机件与运行时** | `plugin/scripts/`、`plugin/vendor/`（自包含运行时），`quay-init` 派生铺设已修好 | `gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down`（origin of verify-referenced-landed） | 机件 + 运行时在交付物里（目录存在）；`quay-init --loop` 的 referenced⊆landed 机械校验（verify_referenced_landed） |
-| 2 | **循环文档** | 两层 tick doc（`plugin/loop/fast-mode-loop-tick.md`、`orchestrator-loop-tick.md`）+ **manager 层**（`plugin/skills/manager/SKILL.md`） | `gap-productize-the-manager-layer`（done） | 两层 + manager 层文档在交付物里；目标落地后 tick doc 铺到 `orchestration/` 与 `docs/analysis/` |
+| 2 | **循环文档** | 三层 tick doc（`plugin/loop/fast-mode-loop-tick.md`、`orchestrator-loop-tick.md`、**`manager-loop-tick.md`**，2026-08-07）+ **manager 层**（`plugin/skills/manager/SKILL.md`） | `gap-productize-the-manager-layer`（done） | 三层 tick doc + manager 层技能在交付物里；目标落地后铺入 `orchestration/`（outer + manager driver）与 `docs/analysis/`（inner）（manager driver 由 `gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver` 补齐） |
 | 3 | **启动配置** | `.claude/launch.settings.json`（检查进仓库）+ `plugin/scripts/quay-launch.sh`（launcher） | `gap-crystallize-launch-config-into-checked-in-settings-file`（done） | settings 文件 + launcher 在交付物里；启动命令从文件物化，非手打一行 shell |
 | 4 | **会话拓扑** | `plugin/skills/session-topology/SKILL.md`（出厂定义）+ `plugin/scripts/quay-topology.sh`（工厂）+ `topology-check.sh`（在位校验） | `gap-tmux-session-topology-no-factory-definition`（done） | 拓扑定义 + 工厂 + 校验脚本在交付物里；冷启动按定义建窗口，不靠手工拼 |
 | 5 | **周期锚点（已排除，非交付物，人裁定 2026-08-06）** | `plugin/scripts/os-anchor-install.sh`（systemd user timer）+ `os-anchor-watchdog.sh`（看门狗）——机制存在、曾是"OS 级锚点为真实落点"（AC5 修正，2026-08-05），但**人已裁定改为开发阶段工具，不进交付物 build**，`quay-init.sh` 从不调用；systemd timer 本机已停用（2026-08-06 事故：absence-inference 复活了刚被人为下线的 archguard） | `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`（done，归属类目已改标排除）+ `gap-reanchor-must-converge-inner-self-reported-vocabulary`（done） | 不再是交付判据——`verify-delivery-surface.ts` 该类目 `deliverables: []`，恒 vacuously covered |
@@ -230,7 +230,7 @@
 > fixture，见 `plugin/test/l1-delivery-surface-check.test.mjs`）。
 
 <!-- l1-category: 1; name: mechanisms-runtime; deliverable: plugin/scripts; deliverable: plugin/vendor; task: gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down -->
-<!-- l1-category: 2; name: loop-docs; deliverable: plugin/loop/fast-mode-loop-tick.md; deliverable: plugin/loop/orchestrator-loop-tick.md; deliverable: plugin/skills/manager/SKILL.md; task: gap-productize-the-manager-layer -->
+<!-- l1-category: 2; name: loop-docs; deliverable: plugin/loop/fast-mode-loop-tick.md; deliverable: plugin/loop/orchestrator-loop-tick.md; deliverable: plugin/loop/manager-loop-tick.md; deliverable: plugin/skills/manager/SKILL.md; task: gap-productize-the-manager-layer -->
 <!-- l1-category: 3; name: launch-config; deliverable: .claude/launch.settings.json; deliverable: plugin/scripts/quay-launch.sh; task: gap-crystallize-launch-config-into-checked-in-settings-file -->
 <!-- l1-category: 4; name: session-topology; deliverable: plugin/skills/session-topology/SKILL.md; deliverable: plugin/scripts/quay-topology.sh; deliverable: plugin/scripts/topology-check.sh; task: gap-tmux-session-topology-no-factory-definition -->
 <!-- l1-category: 5; name: periodic-anchors; deliverable: plugin/scripts/os-anchor-install.sh; deliverable: plugin/scripts/os-anchor-watchdog.sh; task: gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash -->
