@@ -7729,3 +7729,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **delivery-surface 派发 1/5**：complete-delivery-surface SPEC 的 L1 六维验证补全。全闸过 + fork develop。worktree `quay-worktrees/delivery-surface`。
 - **就绪池已近耗尽**：其余 ready 候选多为 done 或 QENG-5-DEMO（验证/demo 类，非 inner 实现）。ac8/chart2-s2/shipped-ts/probe-mechanism/observer-registry needs-human 挂外层。
 - **在飞 1/1**：delivery-surface。
+
+### 事件 05:5xZ（delivery-surface 完成——no fan-in，status done；在飞归零）
+
+- **delivery-surface 完成**：六类 L1 交付面实现早已在 develop（a423b047/8f1ee67d）→ **无代码 fan-in**；re-verify 6/6 + scoped 15/15 + DoD 勾 + status ready→done。任务文件入 develop，worktree 清理。
+- **在飞归零**：0 real in-flight，5 空槽。**就绪池已基本派空**——inner 实现类任务全部处理完。
+- **待外层**：ac8/chart2-s2/shipped-ts/probe-mechanism/observer-registry needs-human（后两者共享 step-4b/3d 心跳裁定）；252-unpushed develop 推送；capability-catalog 7 未分类 quay-* 入口；quay-init laydown 补 task-contract-check 等机制；两轮全量绿验证。
