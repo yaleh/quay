@@ -8025,3 +8025,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **session-pid un-hold**：代码**早已在 integration**（byte-identical 核对 session-liveness.sh + monitor-mount-check.sh）——无代码 fan-in；task 文件入 develop + status ready→**done**（AC+DoD 全勾带证据）。worktree 清理，遥测 reconcile。
 - **恢复完整派发**：suite GREEN → red hold 解除。pool 21≥floor 20。slot-refill 推荐多为 stale（done-held/deferred）——真实可派 = **gap-suite-green-gate**（AC=7，suite-gate 去重，task-contract-check 并入机械检查，self-first 应用自身规则）。已派发（worktree suite-green-gate，telemetry 记录）。
 - **在飞 1/5**：suite-green-gate。suite GREEN。
+
+### 事件 15:3xZ（人 15:0x 裁定 4 任务——C 优先派发）
+
+- **人裁定（15:0x）**：第九轮跑完即发。已立 4 任务（ready，管理者实测证据）：
+  - **A1** gap-gitignore-worktree-scratch-dirs-kills-round4-false-red（一行 .gitignore 消第四轮假红）
+  - **A2** gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees（声明式复制 gitignored 配置进 worktree，防第五轮 72 崩溃）
+  - **B** gap-assert-clean-tree-premise-void-under-concurrent-writers（脏树断言改差量/单写入者，前提作废）
+  - **C** gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles（runner-grouping flags-only 295.6s 用 --list-files 降近零 + install 族共享模板）——**合并条件「高速」半，优先**（现 serial 1080s=77%，处理掉才 5 分钟一轮）
+  - 外层已处理 D 卫生（主仓冗余改动回退）。
+- **派发**：C（优先）+ A1 + B（3 连派，pairwise disjoint + 与在飞 suite-green-gate disjoint + touches 解析）。**A2 与 A1/B 触碰重叠 → 下一槽派发**。telemetry 3 条。
+- **在飞 4/5**：suite-green-gate + serial-segment(C) + gitignore(A1) + clean-tree(B)。1 空槽（A2 等）。suite GREEN。
