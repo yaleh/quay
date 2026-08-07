@@ -7700,3 +7700,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **two-thirds-polling 完成**：机制早已在 develop（afff7c9d）→ **无代码 fan-in**；验证 polling_forms=0、dod_full_runs=1、scoped 绿。AC3 勾、AC5 测（68%→60-63% 方向向下）、DoD 1/3 勾（2 全量不达，21 个既有失败）。**附带发现**：quay-init --loop 不铺 task-contract-check.ts（laydown 派生只见 quay-check.ts task-contract-check 子命令形态）——建议单独立案。
 - **在飞 1/1**：manager-productization（活跃编辑 quay-topology.sh/session-topology.test.mjs）。4 空槽但 session-liveness-remove / delivery-surface 都撞其 broad plugin/scripts/ touch。
+
+### 事件 04:4xZ（外层优先派发——manager-tick-checks）
+
+- **外层优先派发** gap-manager-tick-mechanical-checks（8 个机械检查散散文、连续 8 轮漂移；补齐立刻产出 archguard/meta-cc 停止态 + tmux 171）。**两条硬约束**已嵌入 agent prompt：①并入 quay-session.ts（不得新增第 7 个 .sh，AC5 surface_entrypoints≤10/sh≤4）；②tmux 只读（list-sessions/list-panes/capture-pane，禁 kill，AC2 destructive=2 保持，身份用 pane_pid+pane_current_command）。
+- **注意**：与 manager-productization 的 overlap 是后者 broad `plugin/scripts/` glob 的展开假阳性（在飞 agent 实际不碰 quay-session.ts，改的是 quay-topology.sh/quay.ts/manager-*.sh）——真实并发无碰撞，外层优先裁定派发。
+- **在飞 2/2**：manager-productization（多文件实现中）+ manager-tick-checks（外层优先）。
