@@ -283,7 +283,10 @@ test("factory — quay-topology.sh --dry-run emits the two-window plan; a real b
     for (const role of ["outer", "inner"]) {
       assert.match(dry.stdout, new RegExp(role), `dry-run must plan the ${role} window`);
     }
-    assert.ok(!/manager/.test(dry.stdout), `dry-run must NOT plan a manager window (got:\n${dry.stdout})`);
+    // Position-based (window name, not substring): the dry-run plan must not contain a `-n manager`
+    // window name or a `:manager` window address. A bare /manager/ substring would false-positive on
+    // any repo/worktree path containing "manager" (e.g. this task's worktree dir).
+    assert.ok(!/ -n manager(\s|")|:manager\b/.test(dry.stdout), `dry-run must NOT plan a manager window (got:\n${dry.stdout})`);
     // Real build with a harmless launch-command override (no real claude launched — the override
     // keeps the pane shell as the pane_pid so a claude-named child appears, mirroring the real
     // quay-launch.sh launch shape).
@@ -321,5 +324,48 @@ test("factory — idempotent on an EXISTING session (re-run must not error under
     // and the check still passes.
     const r = runCheck(h.env, ["--session", "topo-idem", "--json"]);
     assert.equal(r.status, 0, `idempotent-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
+  } finally { h.cleanup(); }
+});
+
+// ── AC6 — single-flight lock: dual-creator race must not double-create (gap-manager-productization-
+// five-constraints). Two CONCURRENT invocations against the same missing session both judge
+// "missing" — without the lock both would create (two sessions, two window sets). With the lock the
+// second waits, then sees the session already exists → in-place, not create. Atomic create test.
+test("AC6 — single-flight lock: two concurrent creators → exactly ONE create-session / one window set", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+  const h = newHermetic();
+  try {
+    // Isolated lock dir so the test never contends with real /tmp locks (same session name as the
+    // only shared key — both creators must resolve the SAME lock path to contend on it).
+    const lockDir = path.join(h.tmp, "locks");
+    fs.mkdirSync(lockDir, { recursive: true });
+    const env = {
+      ...h.env,
+      TOPOLOGY_LAUNCH_CMD: "bash -c 'exec -a claude-probe sleep 10000 & wait'",
+      TOPOLOGY_LOCK_DIR: lockDir,
+      TOPOLOGY_LOCK_RETRIES: "50",
+    };
+    // Two concurrent spawns, same session, fresh (missing). Both race to acquire the lock.
+    // Start both near-simultaneously via shell backgrounding so the race window is real.
+    const r = spawnSync("bash", [
+      "-c",
+      `"$0" --session topo-race >"$1" 2>&1 & "$0" --session topo-race >"$2" 2>&1 & wait`,
+      FACTORY, path.join(h.tmp, "a.out"), path.join(h.tmp, "b.out"),
+    ], { encoding: "utf8", env });
+    assert.equal(r.status, 0, `concurrent factory runs must both exit 0:\n${r.stderr}`);
+    const outA = fs.readFileSync(path.join(h.tmp, "a.out"), "utf8");
+    const outB = fs.readFileSync(path.join(h.tmp, "b.out"), "utf8");
+    const all = `${outA}\n${outB}`;
+    const createSessions = (all.match(/^create-session:/gm) || []).length;
+    const createWindows = (all.match(/^create-window:/gm) || []).length;
+    // Exactly one session create (the first to hold the lock); the second must NOT create a second.
+    assert.equal(createSessions, 1, `dual creators must create exactly ONE session (got ${createSessions}):\n${all}`);
+    // The only window create is inner (outer is the new session's first window). No duplicate.
+    assert.equal(createWindows, 1, `dual creators must create exactly ONE window (inner), got ${createWindows}:\n${all}`);
+    // AC6's core invariant is atomic creation: exactly one session + one window set, no duplicates.
+    // (A relaunch by the second creator — the window present but its claude child not yet spawned —
+    // is BENIGN idempotence, not a double-create: it re-sends the same launch command. The lock's
+    // job is preventing a second session/window, which the counts above pin.)
+    const names = h.windowNames("topo-race");
+    assert.deepEqual(names.filter((n) => n !== "topo-race"), ["outer", "inner"], "window set must be outer+inner, no duplicates");
   } finally { h.cleanup(); }
 });

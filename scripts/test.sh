@@ -267,6 +267,16 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
   run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
+  echo "== no-manager-tick-doc check (gap-manager-productization-five-constraints AC4) =="
+  # C3 (SPEC-manager-productization §3): the OUTER tick docs must contain no create/drive/check
+  # manager STEPS — build ownership = quay outer/inner, run ownership = human/loop, NEVER outer.
+  # Position-based (actionable command/verb-object signatures only; boundary context like
+  # "manager 跨项目不属于项目拓扑" is allowed — a naive keyword grep self-hits 100%). The AC4
+  # negative control (actionable step flags, boundary-only clean) is exercised by the checker's
+  # own mutation case and plugin/test/no-manager-tick-doc-check.test.mjs.
+  # @static-tier change
+  # @static-object plugin/loop/orchestrator-loop-tick.md orchestration/orchestrator-loop-tick.md
+  run_checker "no-manager-tick-doc-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/no-manager-tick-doc-check.ts" --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI

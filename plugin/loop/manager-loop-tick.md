@@ -233,3 +233,86 @@ case "$a0" in */session-liveness.sh) ... ;; esac
 本文件的规则结晶（§1.5 ask-vs-act、§1.6 事件 triage、三职能挂接点）在
 `plugin/skills/manager/SKILL.md`（随 plugin 安装，非 quay 本地）。管理者驱动文档是**操作指令**，
 技能是**规则结晶**——两者互补；tick 时以本文件为操作清单。
+
+## 6. 产品侧 manager 行为（AC9 切分：从 orchestration/manager-phase-goal.md 移入，SPEC §6）
+
+以下三条是 **manager 这个角色该怎么做事**——产品，随包交付；**本阶段测什么、B 机怎么用、
+archguard 排在哪**是**本实验的状态**，留在 `orchestration/manager-phase-goal.md`，不在此列。
+
+### 6.1 AC10 — 开轴判据（pre-friction）
+
+**判据**：新立案任务里，有几条在**立案时不存在**触发它的失败 / 告警 / 判据矛盾 / 卡顿。
+即「机器**在没被硌到之前**自己开的轴」的条数。开轴数是**派生量**——一根轴 = 一条
+`status: proposed` + `tag: axis` 的 ADR 记录（ADR-025）：
+
+```
+当前开着的轴 = `quay-native adr list --tag axis --status proposed` 的条数
+```
+
+**两个计数不是同一个量，不要混淆**：
+- **AC10 的 1** = 「机器在没被硌到之前自己开的轴」的条数（pre-friction，主判据）；
+- **`tag: axis` 的 7** = 「当前开着的轴」总数（含人给出的、post-friction 归纳出的）。
+前者是后者的子集。AC10 仍只数前者。
+
+**自省风险**：AC10 可能沦为「写在文件里但不在 tick 时被问」——它必须进每轮 tick 的 Step 0，
+与就绪池/派发间隔同级，否则本条按未达成计。
+
+### 6.2 AC11 — 验证先被验证（verification-first）
+
+**判据**：凡 manager 向外层/内层发出的、带「已验证 / verified / 实测」字样的断言，
+任务体或转达文本中必须同时给出：
+① 验证用的**具体命令或脚本**（不是「我查了」）；
+② 该验证的**负控制**——什么情况下它会失败，以及那个失败形态是否被真的触发过。
+缺任一条 ⇒ 措辞降级为「读码推断，未实测」，不得写 verified。
+
+**进程/文件计数的额外一款**：断言里出现进程或文件计数时，必须说明该计数如何排除了
+自身与同名他者（`pgrep -f` 自匹配族：数 `node --test` 数到自己、枚举监视器枚举到自己、
+grep 自己的命令行）。说不出 ⇒ 不得写 verified。
+
+**危险操作（kill / rm -rf / 批量进程操作）**：负控制必须在隔离环境中真跑过一次，
+且跑之前先写下「如果隔离失效，最坏会发生什么」。
+
+### 6.3 角色边界纪律（§0 的机械版）
+
+manager 手里出现 `.sh`/`.ts` **实现**即为越界信号（SPEC-manager-productization §5）——
+manager 若需要一个新的观测/判定能力，产出应是**转给外层的需求**，不是自己写脚本。
+**但调用现成的产品化 `.sh`/`.ts` 工具恰恰是本条要求的**——「禁止自己写，正因为应该用现成的」。
+落地挂载点：`plugin/skills/manager/SKILL.md` §9 工具复用强制挂载点（写任何新 `.sh`/`.ts`
+前先跑 `bash plugin/scripts/capability-catalog.sh | grep -i <关键词>`）。
+
+## 7. 调度锚点（AC5/AC5c，2026-08-06 人裁定收窄后）
+
+**唯一允许的调度锚点是 Claude Code 自己的 loop / cron**（`/loop` → `CronCreate`）。OS watchdog、
+OS cron、Desktop 定时任务全部禁用（人 2026-08-06 三条裁定）。本段是 AC5/AC5c 的可执行形态。
+
+### 7.1 武装步骤（零记忆可执行；AC5c）
+
+**哨兵 = `[manager-tick]`**——固定可推导前缀，**跨 `/clear`/`/compact` 的同一性来源**。
+武装前**无条件按哨兵清扫同名旧任务**，再建一个 ⇒ 幂等，且零记忆可执行：
+
+1. `CronList` —— 列出全部 cron；
+2. 删除所有含 `[manager-tick]` 前缀者（sweep by sentinel, never by remembered id）；
+3. `CronCreate` 恰好一个，prompt 为**指针**（见 7.2）。
+
+**判据**：
+- ① 在**不知道任何 cron ID** 的前提下连续执行两次武装步骤 ⇒ `CronList` 必须恰好一个 manager loop；
+- ② **负控制**：先人为建两个重复的 manager loop，再执行同一武装步骤 ⇒ 必须收敛回恰好一个。
+
+机械落地：`plugin/scripts/manager-arm-loop.sh`（文件接缝上做哨兵清扫，`--validate` 查本条规则）。
+
+### 7.2 prompt 是指针，不是指令内容（AC5c 规则 1）
+
+manager loop 的 prompt **不得携带指令内容，只得携带指针**：
+
+```
+Run the manager tick per <repo>/orchestration/manager-loop-tick.md
+```
+
+触发后的行为「现读」，不留在上下文里（`/clear`/`/compact` 会抹掉上下文——技能体只装「如何武装」，
+不装「触发后做什么」，manda 同款）。上下文被压缩也无从降级，因为本来就没指望上下文里有东西。
+
+### 7.3 每轮状态持久化（AC5b）
+
+每轮 tick 必须写一行进 `orchestration/manager-tick-log.md`（五列：时刻 / 动作类 / 各项目一句话 /
+仲裁了什么 / 升级项变化）。**机械挂载点**：`plugin/scripts/manager-tick-log-check.sh` 报出
+「上一轮 tick 没落行」（超时无新写入即红，负控制：跳过一轮不写 ⇒ 报红）。
