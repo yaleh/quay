@@ -3,6 +3,7 @@
 每 20 分钟一行。`动作类型` 是判断分层是否退化的唯一依据（`correct` 占比 ≥50% = 内层自主性不足）。
 
 | 时刻 | 动作类型 | 做了什么 | 内层状态 | 核实了哪一项 |
+| 2026-08-07 00:2xZ | `no-action` | **派发恢复健康**：inner 恢复派发（inner-session-check closed done, manager-skill fan-in'd 到 integration）；3 在飞年轻（concurrency-derivation 17.5 / observer-registry 12.7 / manager-layer 8.6 min）。套件 green | 内层：3 subagents | ①inProgress 3 条年轻核实；②inner 恢复派发核实 |
 | 2026-08-07 00:0xZ | `unblock` | **派发阻塞已清，驱动 inner 恢复**：分支对齐（f89fcdea）后 integration..develop=0（FF 恢复），inProgress 空；驱动 inner 恢复派发（delivered）。套件 green | 内层：提示符，1 agent；resume dispatch 驱动已收 | ①inProgress=0 核实；②驱动送达核实 |
 | 2026-08-06 23:4xZ | `unblock` | **分支对齐完成（方向 b 立即解阻）**：merge develop→integration（10 冲突解决：develop 为权威基线用于共享文件，tick-log=develop 全量）。**integration..develop=0，develop 是祖先（FF 恢复）**，inner fan-in 解锁。方向裁定：承认 develop 前进，integration→develop 改真 merge（规格 48-49 假定冻结不现实） | 内层：fan-in 解锁，1 subagent polling | ①merge-base is-ancestor develop integration=YES 核实；②integration..develop=0 核实 |
 | 2026-08-06 23:2xZ | `escalate` | **分支真分歧阻塞全派发**：develop 领先 integration **270**、integration 领先 develop **33**（双向非祖先）；batch merge NOT-FAST-FORWARD（needs human）；integration 在 worktree `/tmp/quay-intg2`。inner 0/8 fan-in-safe（a09735f6）——两线不变量被打破（develop 前进 270 而 integration 未同步）。对齐选项：merge develop→integration（需在 worktree 做）/ 人工裁定。**升级** | 内层：阻塞（0/8 fan-in-safe），1 subagent polling | ①merge-base 双向非祖先核实；②batch merge needs human 核实 |
