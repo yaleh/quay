@@ -419,6 +419,66 @@ resource_gate_check() {
   fi
 }
 
+# ── single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) ──────────────────
+# full_suite_lock — an exclusive flock on a SHARED lock file (default <git-common-dir>/full-suite.lock;
+# see the path resolution below), held for the ENTIRE full-suite run. COMPLEMENTARY to the resource
+# gate: the gate prevents "starting into a busy machine" (a load check at startup), the lock prevents
+# "a second suite joining" (mutual exclusion). Together they are complete — two full suites can no
+# longer both see GO in a low-load window and start (the 2026-08-07 incident: two cc8 suites ran
+# simultaneously in DIFFERENT worktrees, 16 workers + subprocesses on 4 cores, PSI cpu avg10 = 86.22).
+#
+# The lock is file-descriptor-based (flock(1) on FD 9): the FD is opened once and held open for the
+# whole run, so the lock releases automatically when this process exits — even on an error abort —
+# with no trap bookkeeping. A second concurrent full-suite startup BLOCKS on flock (WAIT/queue) for
+# up to FULL_SUITE_LOCK_TIMEOUT (default 600s), then FAILS CLOSED with a clear message — never both
+# GO, never an infinite hang.
+#
+# Scoped paths (--for-task, --scoped, --group <non-default>, explicit files) never take the lock —
+# they are the verification path that must stay usable while a full suite runs. Nested runners skip
+# via the SAME escape hatch the resource gate uses (QUAY_TEST_SKIP_RESOURCE_GATE=1) plus the
+# same-root QUAY_TEST_NESTED guard (a nested test.sh spawned inside the running suite must not
+# deadlock against the suite's own lock).
+# SHARED lock file: resolve via git's COMMON dir so every worktree of this repo AND the primary
+# checkout contend on the SAME lock — the 2026-08-07 incident was two DIFFERENT worktrees each
+# running a cc8 suite, and a per-checkout `.quay/full-suite.lock` would NOT have serialized them.
+# git-common-dir resolves to the main repo's `.git` from any worktree, so
+# `<git-common-dir>/full-suite.lock` is the same inode everywhere. Fall back to
+# `<repo_root>/.quay/full-suite.lock` when git is unavailable (a non-git copy).
+FULL_SUITE_LOCK_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -z "${FULL_SUITE_LOCK_DIR}" ]; then
+  FULL_SUITE_LOCK_DIR="${repo_root}/.git"
+fi
+FULL_SUITE_LOCK_FILE="${FULL_SUITE_LOCK_FILE:-${FULL_SUITE_LOCK_DIR}/full-suite.lock}"
+FULL_SUITE_LOCK_FD=9
+FULL_SUITE_LOCK_TIMEOUT="${FULL_SUITE_LOCK_TIMEOUT:-600}"
+
+# full_suite_lock_acquire — acquire the single-flight lock (blocking wait up to the timeout).
+full_suite_lock_acquire() {
+  if [ "${QUAY_TEST_SKIP_RESOURCE_GATE:-}" = "1" ]; then
+    echo "scripts/test.sh: QUAY_TEST_SKIP_RESOURCE_GATE=1 — skipping single-flight lock (nested runner)"
+    return 0
+  fi
+  if [ "${QUAY_TEST_NESTED:-}" = "1" ] && [ "${QUAY_TEST_NESTED_ROOT:-}" = "${repo_root}" ]; then
+    echo "scripts/test.sh: QUAY_TEST_NESTED=1 — skipping single-flight lock (nested invocation of the same suite)"
+    return 0
+  fi
+  mkdir -p "$(dirname "${FULL_SUITE_LOCK_FILE}")"
+  # Open the lock file on a dedicated FD (append mode: the file exists + is writable even if empty).
+  eval "exec ${FULL_SUITE_LOCK_FD}>${FULL_SUITE_LOCK_FILE}"
+  echo "== single-flight lock (gap-resource-gate-no-single-flight-lock-two-suite-overlap) =="
+  if ! flock -w "${FULL_SUITE_LOCK_TIMEOUT}" "${FULL_SUITE_LOCK_FD}"; then
+    echo "scripts/test.sh: another full suite holds ${FULL_SUITE_LOCK_FILE} — not starting (single-flight lock; waited ${FULL_SUITE_LOCK_TIMEOUT}s). Re-run when it finishes." >&2
+    exit 1
+  fi
+  echo "scripts/test.sh: acquired full-suite single-flight lock (${FULL_SUITE_LOCK_FILE}) — held for the entire run"
+}
+
+# full_suite_lock_release — release the single-flight lock (idempotent; also auto-released on exit).
+full_suite_lock_release() {
+  flock -u "${FULL_SUITE_LOCK_FD}" 2>/dev/null || true
+  eval "exec ${FULL_SUITE_LOCK_FD}>&-" 2>/dev/null || true
+}
+
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
@@ -633,6 +693,10 @@ run_selected() {
   # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
+    # Single-flight lock FIRST (serialize with any already-running full suite), then the resource
+    # gate (GO/WAIT on the machine's load at actual start time). Order matters: the lock queues the
+    # second suite, so the gate's verdict is computed AFTER serialization — never against stale load.
+    full_suite_lock_acquire
     resource_gate_check
   fi
   build_dist_once
@@ -741,6 +805,7 @@ run_selected() {
     if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
+    full_suite_lock_release
     exit "$code"
   fi
   mark_nested

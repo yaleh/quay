@@ -430,6 +430,12 @@ export async function run(argv: string[]): Promise<number> {
   // AC1 — write `running` the moment the runner starts (inner sees running => proceed).
   writeState(stateFile, { state: "running", ...base, finishedAt: null, durationMs: null });
 
+  // gap-resource-gate-no-single-flight-lock-two-suite-overlap: the SINGLE-FLIGHT mutual exclusion is
+  // enforced inside scripts/test.sh's full-suite default path (`full_suite_lock_acquire` on a flock
+  // over <git-common-dir>/full-suite.lock, held for the whole run) — a second concurrent full suite
+  // WAITs/queues instead of both-GO. The runner does NOT take its own lock: it spawns test.sh, which
+  // serializes the actual node --test workers. This runner's gate check (above) prevents "starting
+  // into a busy machine"; the spawned test.sh's flock prevents "a second suite joining".
   const child = spawn("bash", ["-c", command], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
