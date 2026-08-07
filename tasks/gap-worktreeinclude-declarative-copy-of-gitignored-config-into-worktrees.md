@@ -86,6 +86,12 @@ resume 若中断，先跑 measure 读 .worktreeinclude 是否存在
       "worktree 内缺 gitignored 文件"这一族的声明式根治
       **交叉标注已落地：** A1/B 任务体各加一行确认注记（见下方"交叉标注"）。B 任务体原有反向引用
       （"若验证移入 worktree，A2 的 .worktreeinclude 保证 config.yml 在位"）与本任务一致。
+      **2026-08-07 更新（B 被 disable，复原路径含 A2）：** 人 17:1x 裁定 B 前提作废、外层裁定 disable
+      非 delete——B 的调用已从全量套件路径摘掉，代码保留。**复原路径 = 单写入者 + A1 + A2 叠加**：
+      (1) 验证 worktree 运行期单写入者达成（`git worktree lock`）→ B 的前提恢复；(2) A1 的 .gitignore
+      （scratch 目录不假红）+ A2 的 .worktreeinclude（验证 worktree 内 config.yml 在位、repo root 可解析）
+      → worktree 环境前提齐备。三者叠加后重新接回 B。A2 的 `.worktreeinclude` + `worktree-include.sh`
+      继续保留，是复原环境的一部分。
 
 ## Definition of Done
 

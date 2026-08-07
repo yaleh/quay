@@ -22,91 +22,115 @@ extra: {}
 
 ## Proposal
 
-**assert-clean-tree.sh 的前提（协调者在干净树上跑）已作废——改差量而非绝对，或运行期单写入者。**
-管理者实测（2026-08-07 15:0x）：断言头部自述优点「不认拼法只认结果，比任何静态规则都硬」（当年
-R1/R7 都漏掉的 `.quay-tmp-test-` case 靠它抓到），但前提写死在注释里——「全量套件（协调者在干净树上
-跑）才是欠这个保证的地方」——**该前提在三层并发写入下已作废**：今晚三次假红分别由管理者的 tick-log
-追加、外层的 worktree 脚手架、inner 的未提交改动各贡献一次。
+**assert-clean-tree 的前提（协调者在干净树上跑）已作废——人 17:1x 裁定「修好困难就 disable/delete 它」，
+外层裁定：disable（非 delete），保留代码 + 差量版，写复原条件。**
 
-而 0e4eff84 / be0cca93 两次修补都是**加排除表**，恰恰削弱它唯一的优点：一旦列名单，它就退化成又
-一个只认已知拼法的静态规则——正是 R1/R7 已经失败过的形态。
+### 为什么修好困难（管理者实测，三条路都不便宜）
 
-### 两个正确方向（实现归内层定，选一或都做）
+①**按写入者归因**（只把「由测试进程创建的路径」算测试产物）——需进程级归因，不便宜。
+②**按路径归因**（排除 tasks/ orchestration/ docs/ adr/ 产品数据目录，各 836/53/160/32 个已跟踪文件）
+——**错**：R7 规则的存在理由正是「一个测试把 M-FAKE-*.md 写进真实的 tasks/」
+（gap-r1-cannot-see-tests-writing-into-the-live-task-store）。排除 tasks/ 等于让断言对 R7 那一整类
+**失明**，而 R7 正是它被扩展出来专门要抓的。
+③**运行期单写入者**（git worktree lock + 专用验证 worktree）——最干净但要改编排，不是改这个脚本。
 
-1. **差量而非绝对（止血且不需要任何名单）**：跑前拍一次 `git status --porcelain` 快照，跑后只把
-   **新增项**算作测试产物（此前已存在的脏项不算本轮测试的锅）。快照文件放 gitignored 位置。
-2. **运行期单写入者（根治）**：agent 运行期间 `git worktree lock` 住它的 worktree，并发清理动不了。
-   官方现成实现：git worktree lock。
+### 成本收益实测（悬殊）
+
+**今晚代价**：r4（1386s）2991 用例 fail 0，红【纯粹】来自脏树断言，整轮白跑；r5（284s）为消除 r4
+告警而清理、误删 .quay/config.yml 致 72 文件启动即挂（r5 的损坏是 r4 那次"修复"造成的）；r6 22s
+aborted。合计约 **28 分钟套件时间 + 三轮分诊**。**历史收益**：脚本头部记录在案的只有 1 次——2026-08-03
+抓到 `REPO_ROOT/.quay-tmp-test-`。
+
+### 人的更根本判断（管理者核实后同意）
+
+「之前一直在 develop 跑的 suite 根本没有保障任务执行的安全」——真：任务落在 integration，套件测的
+是 develop，integration 独有 28 条真内容从没被套件覆盖过。外层 13:20 后改跑 /tmp/quay-suite-int 才
+修正。分支合并前验证链条本身是断的，一条断言的得失不能与之相比。
+
+### 外层裁定：disable 而非 delete
+
+1. **从全量套件路径摘掉**（`run_selected` 里 assert-clean-tree 那一步），不再参与判红；
+2. **代码保留**（assert-clean-tree.sh + 差量版 174badc0 原样保留——它是复原后的正确形态之一）；
+3. **在原处写死复原条件**：「当验证 worktree 在运行期只有一个写入者时（git worktree lock 达成），
+   重新接回」。单写入者机制（③）成为**未来复原路径**，不是当前修复；
+4. 为什么不清 delete：它是唯一能抓【未知新形态】的网（不认拼法只认结果，R1/R7 两条静态规则当年都
+   漏掉了 .quay-tmp-test-）。删掉就要重写。一旦复原条件满足，它立刻重新正确且有价值。
 
 ## Contract
 
-measure assertion_delta = `grep -c "snapshot\|before_run\|porcelain.*before\|delta" plugin/scripts/assert-clean-tree.sh` stdout 数字段（差量实现后应 ≥1）
-band assertion_delta = ≥1（断言有差量/单写入者机制，非纯绝对 + 排除表）
-invoke `grep -n "snapshot\|before\|lock" plugin/scripts/assert-clean-tree.sh`
-control 人为在跑前就弄脏树（预存脏项）⇒ 跑后断言不因预存脏项红（差量只算新增）；人为跑中新写文件 ⇒ 断言红（新增项仍是测试产物）
-resume 若中断，先跑 measure 读断言当前实现形态
+measure assert_called = `grep -c "assert-clean-tree" scripts/test.sh` stdout 数字段（disable 后 run_selected 调用应为 0，脚本文件本身保留）
+measure assert_script_kept = `ls plugin/scripts/assert-clean-tree.sh 2>/dev/null | wc -l` stdout 数字段（应 = 1，代码保留）
+measure restore_condition = `grep -c "single.writer\|运行期单写入者\|worktree lock" scripts/test.sh plugin/scripts/assert-clean-tree.sh 2>/dev/null` stdout 数字段（复原条件写明后应 ≥1）
+band assert_called = 0 且 assert_script_kept = 1 且 restore_condition = ≥1（摘掉调用、保留代码、写复原条件）
+invoke `grep -n "assert-clean-tree\|单写入者\|worktree lock" scripts/test.sh plugin/scripts/assert-clean-tree.sh`
+control 全量套件路径不再因 assert-clean-tree 假红（摘掉调用）；脚本文件仍在（可复原）；复原条件写死在代码里
+resume 若中断，先跑 measure 读三字段（调用/保留/复原条件）
 
 ## Acceptance Criteria
 
-- [x] AC1: **断言改差量或单写入者**——`plugin/scripts/assert-clean-tree.sh` 改为差量：新增 `--snapshot`（跑前拍 `git status --porcelain` 到 gitignored `.quay/assert-clean-tree.snapshot`）与 `--check`（跑后只把快照里没有的新增项算测试产物）；同族 `tmux-leak-scan.sh` 一并差量化（`--snapshot`/`--check`）。不再需要排除表（旧 0e4eff84/be0cca93 名单被快照取代）。
-      scripts/test.sh 全量套件路径：跑前 `--snapshot`、跑后 `--check`。绝对形式保留为无 flag 的历史行为（standalone/能力目录）。
-- [x] AC2: **今晚三次假红不复现**——预存脏项（manager tick-log 未提交追加 / 外层 worktree 脚手架 / inner 未提交改动）在跑前快照里即存在，`--check` 只算快照外的新增项，故预存脏项不再红；新写入（快照后出现）仍触发红。实测：`M seed.txt` 预存 + `?? test-residue.txt` 新增 → 红且只列新增；移除新增 → 绿。
-- [x] AC3: **负控制**——真测试残留仍被抓到：快照干净后测试写 `.quay-tmp-test-dir/` → `--check` 红（差量不放过真泄漏）。
-- [x] AC4: 与 gap-gitignore-worktree-scratch-dirs-kills-round4-false-red（A1，gitignore 止血）、
-      gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees（A2，worktree 配置）交叉标注——
-      本任务是脏树断言机制形态的根治（B 类）。A1/A2 任务体已反向引用本任务（其 AC3/AC4）；本任务执行时在
-      A1/A2 任务体各加一行确认注记（见下方"交叉标注"）。gap-two-layer-dispatch-gate 未立，跳过。
-
-## 交叉标注
-
-- → gap-gitignore-worktree-scratch-dirs-kills-round4-false-red（A1）：本任务（B，断言差量化）已落地，
-  `.gitignore` 同时新增 `**/.quay/assert-clean-tree.snapshot` / `**/.quay/tmux-leak-scan.snapshot`（快照 gitignored 位置，A1 族类）。
-- → gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees（A2）：差量断言在共享检出（非 worktree）
-  上运行，`--snapshot` 快照文件放 gitignored `.quay/`；若验证移入 worktree，A2 的 .worktreeinclude 保证 config.yml 在位。
-
-## 执行记录 (inner 2026-08-07)
-
-**measure assertion_delta** = `grep -c "snapshot\|before_run\|porcelain.*before\|delta" plugin/scripts/assert-clean-tree.sh` → **21**（band ≥1 ✓）
-
-**三对照实跑**（临时 git 仓库直接跑 `plugin/scripts/assert-clean-tree.sh`）：
-
-预存脏项不红（快照含 `M seed.txt`，无新增 → `--check` 绿）：
-```
-PASS: git status --porcelain gained no NEW items after the full suite (clean-tree DELTA assertion)
-```
-新写入红（快照含 `M seed.txt`，后新增 `?? test-residue.txt` → `--check` 红，只列新增不列预存）：
-```
-FAIL: the working tree is DIRTY after the full suite — a test added NEW artifact(s) ...
-?? test-residue.txt
-OK: new file listed / OK: pre-existing NOT listed
-```
-真残留红（快照干净，测试写 `.quay-tmp-test-dir/` → `--check` 红）：
-```
-FAIL: the working tree is DIRTY after the full suite — a test added NEW artifact(s) ...
-?? .quay-tmp-test-dir/
-```
-
-**tmux-leak-scan 同族三对照**（`/tmp/skv-*`）：预存 match 不红；新增 match 红且只列新增；绝对形式仍红。环境实测含
-一处真实残留 `/tmp/session-liveness-Z05CAM`——预存进快照，`--check` 不误报。
-
-**测试**：`scripts/test.sh plugin/test/test-isolation-check.test.mjs` → 15/15 pass（新增
-`AC5/clean-tree DELTA` + `AC5/tmux-leak-scan DELTA`，原有绝对形式用例仍绿）。
+- [x] AC1: **从全量套件路径摘掉**——`run_selected` 不再调用 assert-clean-tree（不再参与判红）；
+      差量版（174badc0）留在代码里
+      **实跑（2026-08-07，worktree disable-assert-clean-tree）：**
+      `grep -c "assert-clean-tree" scripts/test.sh` → **0**。摘掉前：`run_selected` 全量路径在
+      `node --test` 后跑 `if [ "$code" -eq 0 ] && ! bash .../assert-clean-tree.sh ...`（绝对版，
+      脏树即 exit 1 → `code=1` 翻红）；摘掉后 scripts/test.sh 无任何 "assert-clean-tree" 引用。
+      脚本文件本身保留（见 AC2）。
+- [x] AC2: **代码保留 + 复原条件写死**——assert-clean-tree.sh 原样保留；在原处（scripts/test.sh 或
+      脚本头部）写复原条件「验证 worktree 运行期单写入者达成（git worktree lock）时重新接回」
+      **实跑：** `ls plugin/scripts/assert-clean-tree.sh | wc -l` → **1**（代码保留）。复原条件写死在
+      `plugin/scripts/assert-clean-tree.sh` 头部：
+      `# RE-ENABLE CONDITION: 当验证 worktree 运行期单写入者达成（git worktree lock）时重新接回。`
+      （含 RUNTIME SINGLE-WRITER / `git worktree lock` 原文；scripts/test.sh 摘掉处两处注释同记）。
+      `grep -c "single.writer\|运行期单写入者\|worktree lock" scripts/test.sh plugin/scripts/assert-clean-tree.sh`
+      → **scripts/test.sh:2 + plugin/scripts/assert-clean-tree.sh:2**（band ≥1 ✓）。
+- [x] AC3: **假红类消除**——r4/r5/r6 那类（脏树断言制造假红 + 误清 config 连锁）不再发生；全量套件
+      判红不再被 assert-clean-tree 主导
+      **摘掉前后判红对照：** 摘掉前，run_selected 在 node --test 后跑绝对版断言
+      （`git status --porcelain` 非空 → exit 1 → `code=1`）；协调者树上有任一并发写入者的未提交状态
+      （manager tick-log 追加 / 外层 worktree 脚手架 / inner 未提交改动）即把「通过」翻红（r4/r5/r6，
+      及 r5 为清 r4 告警而误删 .quay/config.yml 的连锁）。摘掉后该步不存在：
+      `grep -n "assert-clean-tree" scripts/test.sh` 无输出 → 脏树**不再能**翻红全量套件判红，误清连锁
+      无由发生。脚本若被人工调用仍按原行为工作（保留，见 AC2）。
+- [x] AC4: **负控制**——测试真写进验证树（泄漏）的抓取能力**暂缺**（已摘掉），记录为已知让渡：
+      复原条件达成前不靠此断言抓泄漏；tmux-leak-scan 仍抓 tmux 类
+      **让渡记录：** suite-after clean-tree 断言是唯一能抓【测试真写进验证树】的网（不认拼法只认结果，
+      当年 R1/R7 两条静态规则都漏掉 `.quay-tmp-test-` 靠它抓到）。disable 期间该负控制**暂缺**——
+      复原条件（AC2）达成前不靠此断言抓泄漏；`tmux-leak-scan.sh` 调用仍保留在 run_selected 全量路径
+      （`if [ "$code" -eq 0 ] && ! bash .../tmux-leak-scan.sh`），继续抓 tmux 类泄漏。
+- [x] AC5: 与 gap-r1-cannot-see-tests-writing-into-the-live-task-store（R7 来源）、
+      gap-gitignore-worktree-scratch-dirs-kills-round4-false-red（A1）、
+      gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees（A2）交叉标注——
+      复原路径（单写入者）+ A1/A2 三者叠加后重新接回
+      **实跑（交叉标注已落地）：** 三个任务体各加 2026-08-07 交叉标注段——gap-r1 新增
+      「## 交叉标注」段（指明 R7 来源、AC4 让渡、复原路径）；A1（gap-gitignore…）AC3 补
+      「2026-08-07 更新」段；A2（gap-worktreeinclude…）AC4 补「2026-08-07 更新」段——均写明：
+      **复原路径 = 运行期单写入者（git worktree lock）+ A1（.gitignore 止血）+ A2（.worktreeinclude
+      config 在位）三者叠加后重新接回。**
 
 ## Definition of Done
 
-- [x] AC1-AC4 实跑输出贴进任务体（含预存脏项不红、新写入红、真残留红的三个对照）——见"执行记录"
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）——按执行规则仅做 scoped 验证（`--for-task` + 直接跑断言），
-      全量套件 gate 留给协调者/外层；差量机制改动不影响 node 测试本身，全量 gate 走既有 full-suite 路径
+- [x] AC1-AC5 实跑输出贴进任务体（摘掉前后判红对照、复原条件文本）
+      **已贴：** 上方 AC1/AC2/AC3 内嵌 measure 输出（assert_called=0、assert_script_kept=1、
+      restore_condition=scripts/test.sh:2 + assert-clean-tree.sh:2）、摘掉前后判红对照（AC3）、
+      复原条件文本（AC2 引用脚本头部原文）。
+- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）——不再因脏树断言假红
+      ——**DEFERRED（内层 scoped 验证：`scripts/test.sh --for-task <id>`，非全量套件）**；全量套件绿门
+      归外层 verification-round gate（gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge）。
 
 ## Touches
-- plugin/scripts/assert-clean-tree.sh（差量快照或 worktree lock 逻辑）
-- plugin/scripts/tmux-leak-scan.sh（若同族，一并考虑差量）
-- tasks/gap-gitignore-worktree-scratch-dirs-kills-round4-false-red.md（AC4 交叉标注）
-- tasks/gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees.md（AC4 交叉标注）
+- scripts/test.sh（run_selected 摘掉 assert-clean-tree 调用 + 复原条件）
+- plugin/scripts/assert-clean-tree.sh（保留；可加复原条件注释）
+- tasks/gap-r1-cannot-see-tests-writing-into-the-live-task-store.md（AC5 交叉标注）
+- tasks/gap-gitignore-worktree-scratch-dirs-kills-round4-false-red.md（AC5 交叉标注）
+- tasks/gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees.md（AC5 交叉标注）
 
 ## Dispatch review
 
 reviewer: outer
 at: 2026-08-07T15:2xZ
-changed: 管理者 15:0x 裁定 + 实测：断言前提作废（三层并发写入、今晚三次假红各贡献一次）；排除表修补
-  削弱断言唯一优点（退化成静态规则）。方向：差量而非绝对 / 运行期单写入者（worktree lock）。
+changed: 管理者 15:0x 裁定 + 实测：断言前提作废（三层并发写入）；排除表修补削弱唯一优点。
+追加 2026-08-07 17:0x：人裁定「那这个断言就是错的。改了它或者删了它。」差量版单独不够。
+追加 2026-08-07 17:1x：人裁定「修好困难就 disable/delete」。管理者成本收益悬殊（今晚 28 分钟 + 三轮
+  分诊 vs 历史 1 次收益）+ 路径归因毁 R7 半边。**外层裁定：disable 非 delete**——摘掉全量套件路径调用、
+  保留代码 + 差量版、写复原条件（验证 worktree 运行期单写入者时重新接回）。单写入者（③）成为未来
+  复原路径。

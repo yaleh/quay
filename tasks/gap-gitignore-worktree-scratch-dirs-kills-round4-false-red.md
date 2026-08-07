@@ -66,6 +66,11 @@ resume 若中断，先跑 measure 读当前忽略状态
       的 AC4 已列出本任务（A1，gitignore 止血）。本侧确认：A1 的 .gitignore 一行已落地并实跑验证
       （AC1/AC2）；B 是断言机制形态的根治（差量快照或 worktree lock），A 不替代 B。B 文件已存在
       （status: ready），已在本任务 Touches 内交叉引用。
+      **2026-08-07 更新（B 被 disable，非根治）：** 人 17:1x 裁定 B 前提作废、外层裁定 disable 非 delete——
+      B 的调用已从全量套件路径摘掉（不再参与判红），代码保留。**复原路径 = 单写入者 + A1 + A2 叠加**：
+      (1) 验证 worktree 运行期单写入者达成（`git worktree lock`）——B 的前提恢复；(2) A1 的 .gitignore
+      止血（scratch 目录不再假红）+ A2 的 .worktreeinclude（config.yml 在位）——worktree 环境两个前提
+      齐备。三者叠加后重新接回 B。A1 的 .gitignore 行继续保留，是复原环境的一部分。
 
 ## Definition of Done
 
