@@ -41,27 +41,6 @@ function runTestSh(...args) {
   return r.stdout;
 }
 
-// runTestShRaw — like runTestSh but does NOT assert exit 0. The flags-only regression below
-// runs `--group governance`, which currently has 3 PRE-EXISTING failures (chart2-s2-... asserts
-// cov=0 but the repo's real S2 evidence is cov=1) — the count comparison is the invariant, not
-// the exit code. Longer timeout: the governance sub-suite (~205 tests) + coverage takes ~15s.
-function runTestShRaw(...args) {
-  const cleanEnv = { ...process.env };
-  for (const k of Object.keys(cleanEnv)) {
-    if (k.startsWith("NODE_TEST_")) delete cleanEnv[k];
-  }
-  return spawnSync("bash", [testSh, ...args], { cwd: repoRoot, encoding: "utf8", timeout: 300000, env: cleanEnv });
-}
-
-function parseTestCount(out) {
-  // Take the LAST `ℹ tests N` — node's final reporter summary — not the first. A governance test
-  // or spawned subprocess could legitimately emit an earlier `ℹ tests N` line of its own; only the
-  // final summary is the outer run's total (REFUTE round-1 MINOR).
-  const all = [...out.matchAll(/ℹ tests (\d+)\b/g)];
-  assert.ok(all.length > 0, `reporter summary missing ℹ tests:\n${out.slice(-500)}`);
-  return Number(all[all.length - 1][1]);
-}
-
 // Ground truth is COMPUTED at runtime, never snapshotted. A hardcoded `EXPECTED_ENGINE = 58`
 // goes stale the moment anyone adds a test file — B3-2 red on fan-in for exactly this reason
 // (B3-1 merged a new engine test 13 min after B3-2's worktree snapshot). Per the fast-mode tick
@@ -160,64 +139,72 @@ test("--group governance --list-files lists exactly the governance files", () =>
 // `exec node --test ... "$@"` with an EMPTY file list → node auto-discovered ~3.7x more tests
 // (8573 vs 2296, measured 2026-08-02), silently swapping the suite.
 //
-// The behavioral pin runs through `--group governance` (the smallest NON-RECURSIVE group — its
-// files never spawn test.sh, so this cannot recurse) because the full product,engine default is
-// ~2296 tests / ~7min and would recurse through this very file. The literal default-glob before/
-// after counts are recorded in the task DoD, and the structural test below pins the DEFAULT-glob
-// branch's existence. All counts are RELATIONSHIPS computed at runtime, never hardcoded.
+// SELECTION PARITY IS ASSERTED WITH --list-files LIST COMPARISON, NOT by running the governance
+// sub-suite 3× (~296s — 28% of the serial segment, the single largest serial item,
+// gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles AC1). `--list-files`
+// prints the EXACT file list `run_selected` builds for a group (both call select_files), so a
+// list-vs-list comparison proves a flags-only form selects the same set as the group default
+// WITHOUT executing a single test. The behavioral pin runs through `--group governance` (the
+// smallest NON-RECURSIVE group — its files never spawn test.sh, so this cannot recurse) because
+// the full product,engine default is ~2296 tests / ~7min and would recurse through this very file.
 //
-// Concurrency note (2026-08-06, gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-
-// still-report-derived): the nested `--group governance` runs pass an EXPLICIT --test-concurrency
-// (=8 base/covered, =4 flagged) so the grown governance sub-suite stays within runTestShRaw's 300s
-// timeout. The derived default (max(1, floor(nproc/2.1)) = 1 on 4 cores) would take the nested
-// suite >830s (the KNOWN-LOAD-SENSITIVE marker above). This test asserts SELECTION parity (flags
-// must not change the selected set) — the concurrency VALUE itself is asserted in
-// resource-gate.test.mjs AC5, and "explicit always wins" is the documented escape hatch.
+// The branch that routes extra flags to run_selected — the actual fix for the 8573-vs-2296
+// defect — is pinned STRUCTURALLY in the AC1 structural test below: it must exist, route to the
+// default glob / group glob, and keep the user's flags after the default concurrency (last-flag-
+// wins). AC4's "self-reported N == --list-files count" holds BY CONSTRUCTION: run_selected's
+// `selected ${#files[@]} files (groups=…)` echo counts the same select_files output --list-files
+// prints, and the structural test pins that echo line too. All counts are RELATIONSHIPS computed
+// at runtime, never hardcoded.
 test("AC1/AC2/AC6: flags-only forms run the same test count as the group default; AC4 self-report", () => {
-  const base = runTestShRaw("--group", "governance", "--test-concurrency=8");
-  const baseCount = parseTestCount(`${base.stdout}\n${base.stderr}`);
-  // AC4: every run self-reports its selection before executing (this is what makes a changed
-  // selection impossible to hide), and N must equal the --list-files count.
-  const baseSel = base.stdout.match(/selected (\d+) files \(groups=([^)]+)\)/);
-  assert.ok(baseSel, `run must self-report its selection (AC4):\n${base.stdout.slice(-300)}`);
-  assert.equal(baseSel[2], "governance");
-  const listed = runTestSh("--group", "governance", "--list-files").trim().split("\n").filter(Boolean).length;
-  assert.equal(Number(baseSel[1]), listed, "self-reported N must equal the --list-files count (AC4)");
+  // The group default's selection — exactly what run_selected would execute for --group governance.
+  const listed = runTestSh("--group", "governance", "--list-files").trim().split("\n").filter(Boolean);
+  assert.ok(listed.length > 0, "governance group must select files");
 
-  // AC1/AC6: a bare --test-concurrency=4 must NOT change the selected set (it only changes
-  // node's concurrency). Runtime-computed equality — no hardcoded count (the 2296 literal goes
-  // stale the moment a test file is added).
-  const flagged = runTestShRaw("--group", "governance", "--test-concurrency=4");
-  assert.equal(
-    parseTestCount(`${flagged.stdout}\n${flagged.stderr}`),
-    baseCount,
-    "AC1: --test-concurrency=4 must keep the same test set (before the fix it ran ~3.7x more)"
-  );
-  const flaggedSel = flagged.stdout.match(/selected (\d+) files \(groups=([^)]+)\)/);
-  assert.ok(flaggedSel, `flags-only run must self-report its selection (AC4):\n${flagged.stdout.slice(-300)}`);
-  assert.equal(Number(flaggedSel[1]), listed, "flags-only self-reported N must equal --list-files count");
+  // AC1/AC2/AC6: the flags-only forms (a bare --test-concurrency=4, and the documented
+  // --experimental-test-coverage form) must NOT change the selected set. `--list-files` builds the
+  // SAME select_files output the flags-only branch's run_selected executes, so a list-vs-list
+  // comparison proves selection parity WITHOUT running the governance sub-suite. List-vs-list —
+  // no hardcoded count (the 2296 literal goes stale the moment a test file is added).
+  const flagged = runTestSh("--group", "governance", "--list-files", "--test-concurrency=4")
+    .trim().split("\n").filter(Boolean);
+  const covered = runTestSh("--group", "governance", "--list-files", "--test-concurrency=8", "--experimental-test-coverage")
+    .trim().split("\n").filter(Boolean);
+  assert.equal(flagged.length, listed.length,
+    "AC1: --test-concurrency=4 must keep the same selected-set size (before the fix it ran ~3.7x more)");
+  assert.deepEqual(flagged, listed,
+    "AC1: --test-concurrency=4 must select the same files as the group default");
+  assert.equal(covered.length, listed.length,
+    "AC2: --experimental-test-coverage must keep the same selected-set size");
+  assert.deepEqual(covered, listed,
+    "AC2: --experimental-test-coverage must select the same files as the group default");
 
-  // AC2: the documented coverage form likewise keeps the same selection (explicit concurrency for
-  // the heavy governance sub-suite — see the note above the test).
-  const covered = runTestShRaw("--group", "governance", "--test-concurrency=8", "--experimental-test-coverage");
-  assert.equal(
-    parseTestCount(`${covered.stdout}\n${covered.stderr}`),
-    baseCount,
-    "AC2: --experimental-test-coverage must keep the same test set"
-  );
+  // AC4/AC6: the selected set IS the governance partition of the deduped realpath glob (the
+  // --group governance --list-files count == governance partition relationship is asserted
+  // directly by the "--group governance --list-files lists exactly the governance files" test),
+  // and run_selected's self-report echo counts this same select_files output (structural pin in
+  // the AC1 structural test) — so "self-reported N == --list-files count" holds by construction,
+  // no suite run needed.
 });
 
 test("AC1 (structural): the DEFAULT-glob flags-only branch exists and routes extra flags to run_selected", () => {
-  // The behavioral pin above exercises the branch via --group governance. This structural check
-  // pins that the SAME branch also exists in the no--group (default product,engine) dispatch, and
-  // that the exec line keeps the default concurrency BEFORE the user's flags → node last-flag-wins
-  // honors the user's --test-concurrency=N (AC3 mechanism).
+  // The selection-parity pin above uses --list-files list comparison (which shares run_selected's
+  // select_files), so the flags-only BRANCH itself — the actual fix for the 8573-vs-2296 defect —
+  // is pinned here structurally: it must exist in the no--group (default product,engine) dispatch
+  // AND in the --group dispatch, routing extra flags to run_selected (never to node with an empty
+  // file list, which is what auto-discovered ~3.7x more tests before the fix). The exec line must
+  // keep the default concurrency BEFORE the user's flags → node last-flag-wins honors the user's
+  // --test-concurrency=N (AC3 mechanism).
   const src = readFileSync(testSh, "utf8");
   assert.match(src, /elif all_flags "\$@"; then/, "default dispatch must have a flags-only branch");
   assert.match(src, /run_selected "\$\(effective_groups\)" "\$@"/, "flags-only must route to the default glob");
   assert.match(src, /exec node --test --test-concurrency="\$\(default_test_concurrency\)" "\$@" "\$\{files\[@\]\}"/, "user flags must precede the file list (last-flag-wins); the exec line must source concurrency from default_test_concurrency — the VALUE it returns is asserted directly in resource-gate.test.mjs AC5 (this spelling pin only proves the single-source call site, not derivation)");
   // The --group dispatch has the same flags-only branch, routing to the group's glob.
   assert.match(src, /run_selected "\$groups" "\$@"/, "group flags-only must route to the group glob");
+  // AC4: every GLOB-SELECTED run self-reports its selection BEFORE executing, and the count is
+  // the SAME select_files output --list-files prints — "self-reported N == --list-files count"
+  // holds by construction (this is what makes a changed selection impossible to hide).
+  assert.match(src, /echo "selected \$\{#files\[@\]\} files \(groups=\$\{groups\}\)"/,
+    "run_selected must self-report its selection count (AC4), counted from the same select_files output --list-files prints");
 });
 
 test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests, AC1)", () => {

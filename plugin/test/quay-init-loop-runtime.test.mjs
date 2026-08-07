@@ -14,15 +14,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // AC1/AC2 — session-liveness.sh is laid down VERBATIM (cp, not render_substitutions); the
 // per-project session is CONFIG, generated into orchestration/session-liveness.env.
 test('AC1/AC2 — session-liveness.sh is copied verbatim; the session is generated config, not a script rewrite', () => {
-  const ws = makeTmp();
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): runs from the
+  // shared READ-ONLY laydown template (one real quay-init --loop per file) — the laid-down state
+  // is byte-identical to a fresh real install, so the assertion surface is unchanged.
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const src = fs.readFileSync(path.join(pluginDir, 'scripts', 'session-liveness.sh'), 'utf8');
     const installed = fs.readFileSync(path.join(ws, 'plugin', 'scripts', 'session-liveness.sh'), 'utf8');
@@ -48,10 +49,8 @@ test('AC2 — quay-init.sh has no render_substitutions call targeting session-li
 
 // AC6 — the mechanical check runs as part of quay-init --loop and passes on a clean install.
 test('AC6 — verify-installed-executables.sh runs inside quay-init --loop and passes (byte-identical executables)', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /verify-installed-executables: OK/, 'quay-init must run the AC6 check and report OK');
     // Standalone re-run, matching what cold-start-e2e does.
@@ -65,10 +64,8 @@ test('AC6 — verify-installed-executables.sh runs inside quay-init --loop and p
 // AC4 — bidirectional negative control: flip one byte in an installed executable ⇒ the check FAILS
 // naming it; restore ⇒ the check PASSES again. A check that only ever reports "same" is the bug.
 test('AC4 — the check fails when an installed executable drifts by one byte, and passes after restore', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const installed = path.join(ws, 'plugin', 'scripts', 'session-liveness.sh');
     // fail direction: simulate a future render path rewriting the installed executable by one byte.
@@ -92,9 +89,8 @@ test('AC4 — the check fails when an installed executable drifts by one byte, a
 // gap-cold-start-...-eight-steps: the cold-started loop must NOT depend on the quay dev tree via
 // PATH symlinks (quay-native → /home/yale/work/quay/packages/quay-native/dist/).
 test('AC7b — --loop writes a .quay/config.yml whose provider mcp_entry is project-local absolute (never a PATH-resolved quay-native)', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     const cfg = path.join(ws, '.quay', 'config.yml');
     assert.ok(fs.existsSync(cfg), '--loop must write a .quay/config.yml for a config-less target (AC7b)');
@@ -227,9 +223,8 @@ test('AC10 — quay-init APPENDS the runtime gitignore entry when the target lac
 });
 
 test('AC10 — quay-init CREATES the .gitignore when the target has none, and the entry covers the whole .quay/runtime/ dir', () => {
-  const ws = makeTmp();
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     assert.match(r.stdout, /appended: \.quay\/runtime\/ to \.gitignore/, 'must report creating the entry');
     const gi = path.join(ws, '.gitignore');

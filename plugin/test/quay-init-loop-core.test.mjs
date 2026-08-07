@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir } from "./quay-init-loop-helpers.mjs";
+import { makeTmp, cleanup, diskWorktreeRoot, runInit, extractRefs, declaredSet, pluginDir, laydownWorkspace } from "./quay-init-loop-helpers.mjs";
 
 // ── AC3: dry-run lists would-copy; real run lays down the full set ─────────────────────────────────
 test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanism', () => {
@@ -39,10 +39,11 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
 });
 
 test('AC3 — a real --loop run lays down the full two-layer mechanism set', () => {
-  const ws = makeTmp();
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): runs from the
+  // shared READ-ONLY laydown template (one real quay-init --loop per FILE process) — the laid-down
+  // state is byte-identical, so the mechanism-set assertions are unchanged.
+  const { ws, install: r } = laydownWorkspace();
   try {
-    const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj',
-      '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
     // 3 tick docs (outer + inner + manager driver)
     assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'outer tick doc laid down');
@@ -246,10 +247,12 @@ test('AC2 — an explicit --test-command takes priority over detection', () => {
 // must NOT require a separate `git rm` step nor a --force flag. Localizable prose (tick docs) stays
 // preserve-mode: a local edit is a conflict, listed and left untouched (upgrade path, AC5).
 test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, and reported (no --force needed)', () => {
-  const ws = makeTmp();
+  // AC2: the copy starts from the shared READ-ONLY laydown template (already fully installed);
+  // pre-placing a stale product file and RE-RUNNING init exercises the residue-cleanup path
+  // (the re-run emits the cleaned-residue/backup report and the byte-identical verify).
+  const { ws } = laydownWorkspace();
   try {
     // Pre-place a stale copy of a product mechanism file (a hot-copy leftover) with different content.
-    fs.mkdirSync(path.join(ws, 'plugin', 'scripts'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'plugin', 'scripts', 'resource-gate.sh'), '#!/bin/bash\necho stale-residue\n');
     const r = runInit(ws, ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0']);
     assert.equal(r.status, 0, `init must succeed after disposing of the residue:\n${r.stderr}`);
@@ -274,10 +277,9 @@ test('AC4 — a stale same-name mechanism file is residue: backed up, replaced, 
 });
 
 test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edit survives without --force', () => {
-  const ws = makeTmp();
+  const { ws, install: r1 } = laydownWorkspace();
   try {
     const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
-    const r1 = runInit(ws, args);
     assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
     const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
     const firstContent = fs.readFileSync(outerPath, 'utf8');
@@ -296,10 +298,9 @@ test('AC4 — localizable files (tick docs) are NOT residue-cleaned: a local edi
 
 // ── AC5: upgrade path — idempotent re-run; local edits not overwritten, conflict listed ─────────────
 test('AC5 — re-run is idempotent (skips identical), and a locally-edited tick doc is NOT overwritten; the conflict is listed', () => {
-  const ws = makeTmp();
+  const { ws, install: r1 } = laydownWorkspace();
   try {
     const args = ['--loop', '--root', ws, '--project', 'proj', '--test-command', 'node --test', '--tmux-session', 'proj-0:0.0'];
-    const r1 = runInit(ws, args);
     assert.equal(r1.status, 0, `first init must exit 0:\n${r1.stderr}`);
     const outerPath = path.join(ws, 'orchestration', 'orchestrator-loop-tick.md');
     const firstContent = fs.readFileSync(outerPath, 'utf8');

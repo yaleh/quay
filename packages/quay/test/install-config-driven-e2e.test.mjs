@@ -39,6 +39,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createStore } from "../../quay-native/src/store.ts";
+// AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): the state-only
+// install tests below run from the shared READ-ONLY laydown template (one real quay-init --loop
+// per FILE process) instead of a fresh real install per test — the laid-down state is
+// byte-identical, so the byte-identity / runtime-path / worktree-root assertion surfaces are
+// unchanged.
+import { laydownWorkspace } from "../../../plugin/test/quay-init-loop-helpers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -305,9 +311,7 @@ test("A5 — a Go target still builds (go build ./...) after quay-init lands the
 // npm node_modules/, cargo/rust target/, make/cmake build/, bundler dist/). The check is by PATH
 // LITERAL segment, extensible — the list below is the current exclusion set, not an exhaustive one.
 test("AC9 — the laid-down runtime path contains no reserved directory segment (vendor/node_modules/target/build/dist)", () => {
-  const ws = makeWorkspace();
-  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "node --test" } }, null, 2));
-  const r = runInit(ws);
+  const { ws, install: r } = laydownWorkspace();
   assert.equal(r.status, 0, `install must succeed:\n${r.stderr}`);
   const RESERVED = ["vendor", "node_modules", "target", "build", "dist"];
   // f9414dd3 moved the landing layout to .quay/runtime/bin/ (keeps the native bundle's
@@ -332,10 +336,14 @@ test("AC9 — the laid-down runtime path contains no reserved directory segment 
 // A2 — byte-identical to product artifacts + idempotent re-install
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test("A2 — laid-down files are byte-identical to the product artifacts, and a second install changes ZERO product files", () => {
-  const ws = makeWorkspace();
+  // AC2 (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles): the FIRST
+  // install is the shared READ-ONLY laydown template (one real quay-init --loop per FILE
+  // process) — r1 is the template's captured install and the workspace is a cp -a copy, so the
+  // byte-identity assertions hold because the template's real install produced byte-identical
+  // files, and the "second install" below is a re-run on the fully-installed copy.
+  const { ws, install: r1 } = laydownWorkspace();
   fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
 
-  const r1 = runInit(ws);
   assert.equal(r1.status, 0, `install failed:\n${r1.stderr}`);
 
   // Artifact identity: every laid-down product file equals the plugin source.
@@ -523,9 +531,9 @@ test("AC6 — anti-pass-through: configs genuinely differ + laid-down count > 0;
 // one letter; a green "AC6" says nothing about this "A6".
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 test("A6 — a landed quay-init --loop writes a loop.worktree_root that is NOT on tmpfs (a tmpfs root is rejected)", () => {
-  const ws = makeWorkspace();
-  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
-  const r = runInit(ws);
+  // AC2: the copy's loop.worktree_root is rewritten to a FRESH disk root per copy (never the
+  // template's, never tmpfs), so the "not tmpfs" assertion holds without a fresh real install.
+  const { ws, install: r } = laydownWorkspace();
   assert.equal(r.status, 0, `install must succeed (precondition):\n${r.stderr}`);
 
   // The landed config must carry loop.worktree_root, and that root's filesystem type must NOT be

@@ -69,6 +69,94 @@ export function runInit(workspace, args = [], pluginRoot = pluginDir) {
     });
 }
 
+// ── Shared laydown template (gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles AC2) ──
+// Serial-segment analysis (2026-08-07): install/laydown is ~50% of the serial phase — every
+// install-family test ran a REAL `quay-init --loop` (~6s in-suite, ~34s cold) into a fresh temp
+// workspace. AC2: ONE real install per FILE process → a READ-ONLY template → each test `cp -a`
+// the template and does its own delta. Two hard requirements:
+//   ① `cp -a` preserves symlinks + permissions (so byte-identical assertions don't distort);
+//   ② the template is READ-ONLY (write bits stripped from the whole tree) so one test's pollution
+//      can never corrupt the shared template for every other test.
+// The template's captured install result is returned too: every family test uses the SAME standard
+// args (--project proj --test-command 'node --test' --tmux-session proj-0:0.0), so output-asserting
+// tests keep asserting against the template's stdout/stderr (with the template's absolute path
+// rewritten to the copy's) without a second real install.
+const STANDARD_INIT_ARGS = (ws) => [
+  "--loop", "--root", ws, "--project", "proj",
+  "--test-command", "node --test", "--tmux-session", "proj-0:0.0",
+];
+const _laydownTemplate = { ws: null, install: null, wtRoot: null };
+
+// laydownTemplate() — lazily builds the read-only template for THIS file process (per-file
+// isolation: the template lives in a module-level variable + an os.tmpdir() mkdtemp, never a
+// shared-checkout path, so the test-isolation R3/R8 ratchets stay green). FAILS LOUD: a template
+// install that does not exit 0 is a real product defect, not something to paper over.
+export function laydownTemplate() {
+  if (_laydownTemplate.ws) return _laydownTemplate;
+  const ws = makeTmp("laydown-tmpl-");
+  const wtRoot = diskWorktreeRoot();
+  const install = runInit(ws, [...STANDARD_INIT_ARGS(ws), "--worktree-root", wtRoot]);
+  if (install.status !== 0) {
+    cleanup(ws);
+    throw new Error(`laydown template install failed:\n${install.stderr}`);
+  }
+  // Read-only template (AC2 ②): strip WRITE bits from every dir + file; keep read + execute bits
+  // so laid-down executables stay runnable and the tree stays traversable. Symlinks are left
+  // untouched (permissions do not apply to a link itself; its target is walked normally).
+  const makeReadOnly = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isSymbolicLink()) continue;
+      const mode = fs.statSync(p).mode;
+      if (e.isDirectory()) { fs.chmodSync(p, mode & ~0o222); makeReadOnly(p); }
+      else { fs.chmodSync(p, mode & ~0o222); }
+    }
+  };
+  makeReadOnly(ws);
+  _laydownTemplate.ws = ws;
+  _laydownTemplate.install = install;
+  _laydownTemplate.wtRoot = wtRoot;
+  return _laydownTemplate;
+}
+
+// laydownWorkspace([prefix]) — a fresh WRITABLE copy of the read-only laydown template, with the
+// template's absolute workspace path rewritten to the copy's path in the config files that embed
+// it, and the loop.worktree_root pointed at a FRESH disk root (so two copies never share a
+// worktree root). Returns { ws, install } — install is the TEMPLATE's captured install result
+// (paths rewritten to the copy), so output-asserting tests keep their assertions without a second
+// real install.
+export function laydownWorkspace(prefix = "laydown-") {
+  const t = laydownTemplate();
+  const ws = makeTmp(prefix);
+  // cp -a preserves symlinks + permissions (AC2 ①). The source template is read-only, so the copy
+  // inherits read-only perms; restore write bits on the COPY so the test can do its own delta.
+  const cp = spawnSync("cp", ["-a", `${t.ws}/.`, ws], { encoding: "utf8" });
+  if (cp.status !== 0) {
+    cleanup(ws);
+    throw new Error(`laydown template cp -a failed:\n${cp.stderr}`);
+  }
+  spawnSync("chmod", ["-R", "u+w", ws]);
+  // Rewrite the template's absolute path → the copy's path where the installed tree embeds it
+  // (.quay/config.yml carries the provider path / tasks_dir / mcp_entry / repo_root), and give the
+  // copy a FRESH loop.worktree_root (never the template's, so copies never collide on worktrees).
+  const cfg = path.join(ws, ".quay", "config.yml");
+  if (fs.existsSync(cfg)) {
+    const freshWt = diskWorktreeRoot();
+    const rewritten = fs.readFileSync(cfg, "utf8")
+      .split(t.ws).join(ws)
+      .split("\n").map((line) =>
+        line.startsWith("  worktree_root:") ? `  worktree_root: ${freshWt}` : line)
+      .join("\n");
+    fs.writeFileSync(cfg, rewritten);
+  }
+  const install = {
+    status: t.install.status,
+    stdout: t.install.stdout.split(t.ws).join(ws),
+    stderr: t.install.stderr.split(t.ws).join(ws),
+  };
+  return { ws, install };
+}
+
 // extractRefs(pluginRoot, prefix): every `<prefix>/<file>` reference in the shipped skills + tick
 // docs — the SAME extraction quay-init.sh's verify_referenced_landed uses, so the test's landing
 // assertion and the installer's own check cannot disagree about what the referenced set is.
