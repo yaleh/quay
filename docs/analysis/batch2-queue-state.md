@@ -7565,3 +7565,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **last slot 候选排查**：session-liveness-cannot-see 与 manager-layer/cross-machine-sync 撞（DEFERRED）；DIR-119 虽全 disjoint + 机械闸过（7/23 非多数 missing），但 **Touches 引用 3 个已退役 workflow 文件**（execute-milestone.js ×2、plugin/workflows/select-preflight.js）——与 DIR-124 同类，派发会让 agent 触碰退役文件 → 不派。
 - **在飞 4/5**：observer-registry + manager-layer + readme-source + cross-machine-sync。1 空槽等完成事件回填。
+
+### 事件 00:7xZ 续（cross-machine-sync 完成 + 满 5/5）
+
+- **cross-machine-sync 完成**：实现早已在 develop（8548a671）→ **无 fan-in**；sync-lag-check 7/7 + scoped 21/0 + 22/0 三组绿。任务文件 identical（8 ACs 勾，status ready）。worktree/branch 清理。
+- **回填 2/2**：full-suite-red（FAILURE_PATTERNS 裸 ✖ 假红 → 结构化匹配）+ probe-mechanism（routine-scheduler 死 15 天 → 两层量接线）。均全 disjoint + 无退役 refs。
+- **在飞 5/5（满）**：observer-registry + manager-layer + readme-source + full-suite-red + probe-mechanism。
+- checksplit / split-batch 仍等 readme-source 释放（共享文档）。
