@@ -34,7 +34,7 @@ const PRIOR = A.prior ? `\n\n**上一轮读数（用于只报差异，不必重�
 // ── 固定命令块：这就是快路径的全部取数。改判据改这里，不改 prompt 叙述。 ──────────────
 const READ_CMD = String.raw`cd ${ROOT}
 echo "PC=$(git log --oneline --since='1 day ago' | wc -l)"
-lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count ${lat}..develop 2>/dev/null)"
+lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
 python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('plugin_in_files='+str('plugin' in d.get('files',[])))"
 python3 -c "import json;print('manifest='+json.load(open('plugin/.claude-plugin/plugin.json'))['version'])"
 grep -o 'avg10=[0-9.]*' /proc/pressure/cpu | head -1; echo "load1=$(cut -d' ' -f1 /proc/loadavg) node=$(pgrep -c node) mem=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
