@@ -7868,3 +7868,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **资源**：gate GO（47.74）。套件 8 lanes 是外层人直接指令（~8min 快跑）。
 - **red-suite 规则应用**：失败在**具体测试文件**（非共享 static gate）；session-pid touches（session-liveness.test.mjs）与失败文件**相交** ⇒ 该任务**已派发在飞不撤**（worktree 隔离、跑自己 scoped），但**完成 fan-in 暂缓至 re-green**。新派发：失败位置与候选无关才继续——先 hold 评估。
 - **在飞 1**：session-pid-blind。fan-in 暂缓（red）。
+
+### 事件 09:3xZ（session-pid 完成——fan-in 暂缓；外层确认 15 fail 全环境性）
+
+- **session-pid-blind 完成**（commit 7647aaf8，5 files +632/-55）：**真重实现**——2026-08-06 原修复（a09ddb56）随 40→6 合并被 revert（7642849a），当前代码仍是旧 blind session_pid。`session-liveness.sh` 的 session_pid() 现检测 claude-as-pane-foreground（pane_current_command + 三窗拓扑）+ 直接后代（/proc/pid/task/pid/children 一次读零子进程）；_is_claude_pid 按 comm/argv0 basename 匹配（杀 .claude 路径子串假阳性）；**无 pgrep -P**（沿用 manager-tick 身份约束）。monitor-mount-check.sh AC5 承重条：liveness + ok=mounted&&targetOk&&liveness===true（用挂载 monitor 自己的 --once 观测）。session-liveness 52/53+monitor-mount 13/13+scoped 78/79 EXIT=0 + 静态层全过。live 实证：quay-0:inner/outer 均 alive=1（修复前 outer alive=0）。
+- **fan-in 暂缓（red-suite 规则，touches 与失败文件相交）**：worktree/分支保留（7647aaf8）待 re-green。
+- **外层 653dcdf3/d1dfce9b 确认**：concurrency-8 套件 15 fail **全环境性**（A2 install 隔离 10/10；KNOWN-LOAD-SENSITIVE + 并行安装干扰）；**tree effectively green**；**red-window release 是人的裁定**（concurrency 8 结构性跑不出绿，load-sensitive 必失败）。
+- **在飞 0/5**。held 1（session-pid）。等：人裁定 red-window + 外层下一轮套件。
