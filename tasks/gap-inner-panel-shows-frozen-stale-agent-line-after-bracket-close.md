@@ -75,22 +75,94 @@ resume 若中断，先跑 measure 读当前面板残留行，再对照 inProgres
 
 ## Acceptance Criteria
 
-- [ ] AC1: **面板表达状态转换**——括号关闭后对应 agent 行被清除或打「已结束」标记（不再与存活行外观相同）
-- [ ] AC2: **计时冻结可分辨**——面板对计时 N 秒未动的行打标记（或等价机制），无需跨时间采样
-- [ ] AC3: **负控制**——人为构造「括号关、面板行留」场景，必须能机械检出该冻结行
-- [ ] AC4: 与 `gap-closed-bracket-leaves-live-agent-consuming-slots`（agent 活方向）、
+- [x] AC1: **面板表达状态转换**——括号关闭后对应 agent 行被清除或打「已结束」标记（不再与存活行外观相同）
+- [x] AC2: **计时冻结可分辨**——面板对计时 N 秒未动的行打标记（或等价机制），无需跨时间采样
+- [x] AC3: **负控制**——人为构造「括号关、面板行留」场景，必须能机械检出该冻结行
+- [x] AC4: 与 `gap-closed-bracket-leaves-live-agent-consuming-slots`（agent 活方向）、
       `gap-manager-instrument-failures-need-mechanical-detection-not-carefulness`（仪器无法区分相反状态族）
       交叉标注——本族两个方向
 
+## Implementation
+
+**观测机制（状态转换表达）**：`plugin/scripts/inner-panel-stale-check.ts` —— 把「已结束 vs 在运行」
+从「要跨时间采样猜」变成机械可读。两个信号：
+1. **括号交叉引用（AC1/AC3，单样本）**：行里解析出的 taskId 不在遥测 `inProgress`（括号已关）但行仍在
+   ⇒ 打 `ended` 标记；
+2. **计时冻结（AC2，两样本）**：同一行两样本计时秒数未前进 ⇒ 打 `frozen` 标记——脚本自己采两个样本，
+   人不需要跨时间采样。
+
+**接线**：`plugin/skills/loop-driver/SKILL.md`（Record 步新增面板观测机制段）+ `plugin/loop/
+fast-mode-loop-tick.md` 步骤 3（与 `--detect-stop` 同 `last-pane.txt`，每 tick 跑一次，exit 1 =
+残留已结束/冻结行）。`plugin/test/inner-panel-stale-check.test.mjs` 14 项全绿。
+
+### AC1 实跑（括号关、行留 → ended，exit 1）
+
+```
+$ node inner-panel-stale-check.ts --pane defect-pane.txt --report defect-report.json
+inner panel stale-check: STALE
+  agent lines: 3  live: 0  ended: 2  frozen: 0  stale: 2
+  [ended  ] observer-registry  Committing 11132s  Committing observer-registry task work 3h 5m 32s
+  [ended  ] manager-layer      Execute    8640s  Execute manager-layer task work 2h 24m
+  [unknown] (no-task)          Waiting    -s     Waiting for full suite run #3 to complete
+  STALE lines (bracket closed but line present / timer frozen):
+    Committing observer-registry task work 3h 5m 32s
+    Execute manager-layer task work 2h 24m
+exit=1
+```
+
+（`defect-report.json`：observer-registry 已完成 needs-human、manager-layer 已完成 done、inProgress 空——复现
+任务实测「observer-registry 括号已关、不在 inProgress、面板行仍在」。）
+
+### AC2 实跑（两样本计时冻结 → frozen）
+
+`defect-pane-after.txt` 与 before 完全相同（observer-registry 3h5m32s 一秒未动）；live-task 对照行
+1h6m3s→1h6m37s 正常前进。JSON 输出：
+
+```
+verdict: STALE
+ended:  ['Committing observer-registry task work 3h 5m 32s', 'Execute manager-layer task work 2h 24m']
+frozen: ['Committing observer-registry task work 3h 5m 32s', 'Execute manager-layer task work 2h 24m']
+live:   []
+exit=1
+```
+
+负控制（计时前进的 live 行不得误报 frozen）：`Execute live-task task 1h 6m 3s` → after `1h 6m 37s` ⇒
+`CLEAN`、exit 0（测试 `AC2 — a live line whose timer advanced...`）。
+
+### AC3 实跑（人为构造「括号关、面板行留」⇒ 机械检出）
+
+同 AC1 场景即 AC3 的构造：bracket 关（inProgress 空）而面板行留。观测器必须报 STALE、exit 1 —— 上面
+AC1 输出已示（exit=1）。对应测试：`AC3 — CLI exit 1 when the frozen/ended line is present` 与
+`AC3 — CLI JSON output carries the per-line state machine` 均绿。live 面板（quay-0:inner 实况，3 个
+在飞 subagent 计时正常）实跑 `verdict: CLEAN, exit 0` —— 正控制成立。
+
+### AC4 实跑（交叉标注）
+
+- `tasks/gap-closed-bracket-leaves-live-agent-consuming-slots.md`：Touches 增加本任务交叉标注
+  （同族反向：该任务是「括号关、agent 进程活」= 进程方向；本任务是「括号关、面板行冻结残留」= 显示方向，
+  由同一观测机制表达「括号关 ≠ agent 退出/结束」）。
+- `tasks/gap-manager-instrument-failures-need-mechanical-detection-not-carefulness.md`：Touches 增加
+  本任务交叉标注（同族：散文规则被证无效、需机械检出；ended-vs-running 方向交给
+  `inner-panel-stale-check.ts` 机械检出）。
+
+### 测试
+
+- `scripts/test.sh plugin/test/inner-panel-stale-check.test.mjs` → 14/14 绿，fail 0 cancelled 0。
+- `scripts/test.sh --for-task gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close --allow-thin`
+  → scoped 静态层绿（task-contract-check 0 violations），inner-session-check 13/13 绿。
+- 静态层独立验证：test-framework-policy / test-impl-census / test-isolation / drive-contract 全绿。
+
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴进任务体（含修复前后面板对照）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 未来 N 次收尾中，不再出现「括号关、面板行冻结残留」的误导（或被机械检出）
+- [x] AC1-AC4 实跑输出贴进任务体（含修复前后面板对照：冻结行 STALE exit 1 vs 实况 live 面板 CLEAN exit 0）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——留批量 fan-in 全量闸（本任务只跑 scoped + 相关文件）
+- [ ] 未来 N 次收尾中，不再出现「括号关、面板行冻结残留」的误导（或被机械检出）——观测器已接线，未观测
 
 ## Touches
-- plugin/skills/loop-driver/SKILL.md 或面板观测机制（状态转换表达）
-- plugin/scripts/inner-session-check.sh 或等价观测器（冻结行检出）
+- plugin/skills/loop-driver/SKILL.md（Record 步接线面板观测机制，状态转换表达）
+- plugin/scripts/inner-panel-stale-check.ts（新观测器：括号交叉引用 + 计时冻结检出）
+- plugin/test/inner-panel-stale-check.test.mjs（新测试：AC1-AC4 14 项）
+- plugin/loop/fast-mode-loop-tick.md（步骤 3 每 tick 面板冻结行观测）
 - tasks/gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close.md（自身文件）
 - tasks/gap-closed-bracket-leaves-live-agent-consuming-slots.md（交叉标注）
 - tasks/gap-manager-instrument-failures-need-mechanical-detection-not-carefulness.md（交叉标注）

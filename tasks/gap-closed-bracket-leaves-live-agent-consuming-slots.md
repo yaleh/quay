@@ -91,6 +91,9 @@ resume 若中断，先跑 measure 读当前 inProgress 与 pane 里的活 subage
 - tasks/gap-closed-bracket-leaves-live-agent-consuming-slots.md（自身文件）
 - tasks/gap-needs-human-routing-does-not-close-bracket.md（交叉标注）
 - tasks/gap-test-concurrency-cap-does-not-scope-nested-spawns.md（交叉标注）
+- tasks/gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close.md（交叉标注——同族反向：
+  本任务「括号关、agent 进程活」是进程方向；那任务「括号关、面板行冻结残留」是显示/观测方向。
+  两方向都由 `plugin/scripts/inner-panel-stale-check.ts` 观测机制表达「括号关 ≠ agent 退出/结束」）
 
 ## Dispatch review
 

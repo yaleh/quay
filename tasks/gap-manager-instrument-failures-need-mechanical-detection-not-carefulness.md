@@ -91,6 +91,9 @@ resume 若中断，先跑 measure 读当前可检出族数，再读 manager-loop
 - scripts/test.sh（静态 tier 接入）
 - orchestration/manager-loop-tick.md（§4 失效表标注"已机械检出"）
 - tasks/gap-manager-instrument-failures-need-mechanical-detection-not-carefulness.md（自身文件）
+- tasks/gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close.md（交叉标注——同族：
+  本任务「散文规则被证无效、需机械检出」的同一缺陷族；那任务把「仪器无法区分相反状态」的
+  ended-vs-running 方向交给 `plugin/scripts/inner-panel-stale-check.ts` 机械检出，非散文）
 
 ## Dispatch review
 
