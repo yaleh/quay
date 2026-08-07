@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T10:11:55.691Z",
+  "generatedAt": "2026-08-07T15:12:03.186Z",
   "since": null,
   "tasks": [
     {
@@ -678,11 +678,11 @@
   "inProgress": [],
   "meanMinutes": 66.76572428940567,
   "medianMinutes": 50.5096,
-  "tasksPerHour": 1.0776916146365634,
+  "tasksPerHour": 1.0344677895777397,
   "serialEquivalentPerHour": 0.8986647061585274,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-07T10:11:47.048Z",
-  "windowHours": 119.70029111111111,
+  "windowEnd": "2026-08-07T15:11:52.496Z",
+  "windowHours": 124.70180444444445,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1095,6 +1095,22 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-integration-content-fails-first-complete-tree-verification-fix-21",
+      "runId": "fm-gap-integration-content-fails-first-complete-tree-verification-fix-21-1786103334998-uphbr9",
+      "minutes": 2.4123666666666668,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-integration-content-fails-first-complete-tree-verification-fix-21",
+      "runId": "fm-gap-integration-content-fails-first-complete-tree-verification-fix-21-1786103494713-ephf52",
+      "minutes": 58.34446666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed",
       "runId": "fm-gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed-1785961925534-4l8wvq",
       "minutes": 32.72655,
@@ -1410,6 +1426,14 @@
       "taskId": "gap-stale-check-orchestration-arm-is-a-dead-glob",
       "runId": "fm-gap-stale-check-orchestration-arm-is-a-dead-glob-1785951354044-9xvjhu",
       "minutes": 8.944966666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests",
+      "runId": "fm-gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests-1786099382309-hhfcd9",
+      "minutes": 68.29065,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false

@@ -723,3 +723,13 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > （71734885）主体现 2717 pass **fail 0 / cancelled 0**，正在跑 serial 相位（22 文件，~18 分钟）。
 > 管理者 fcbfd833 分析 dirty-tree 断言前提（coordinator 在干净树上跑）在三并发写者下不成立。内层
 > 等在结果。等 serial 相位完成：绿 = 真绿 → un-hold session-pid + done-flip 批次 + 分叉合并。
+
+> **15:15Z 外层 tick（no-action——并发 8 真绿达成，human ruling「并发拿到真绿」兑现）**：最终验证
+> **state=green**（integration 71734885：主体现 2761/2717 fail 0 + serial 230/229 fail 0 + clean-tree
+> PASS + tmux-leak clean，exit 0）。**收尾 pass**：翻 done 2 个（gap-suite-state-no-reason-axis +
+> gap-ready-pool-check-times-out——DoD「全量套件绿」现由 round 85 满足，AC 全勾，落地证据核过）；
+> 其余 4 个 notYetFlipped 留 ready（DIR-119 AC 3/11；dispatch-evaluated AC3 需运行时复测；
+> batch-merge-ff + two-thirds DoD 需连跑 2 次全绿——现仅 1 次）。**分支合并**：integration-batch-merge
+> dry-run **NOT-FAST-FORWARD（develop 有 integration 缺的 commit，分叉）→ needs-human**——batch-merge
+> 只支持 FF、实际两线模型需真 merge（gap-integration-batch-merge-ff 任务的 scope）。已驱动内层
+> un-hold session-pid + 恢复派发（delivered）。verification-round 85 已记（修正 round 号）。

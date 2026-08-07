@@ -1,7 +1,12 @@
 ---
 id: gap-ready-pool-check-times-out-after-git-history-signal
-title: "ready-pool-check went from seconds to >150s (timeout) after the gitHistoryLanded signal landed — per-task taskWorkLanded --check is 0.8s, but the pool check aggregates ~30-50 taskWorkLanded calls each issuing `git log --full-history` per specific Touches path (O(history) each) → tick step 3.6 / outer pool maintenance hang; fix: batch git operations (one `git log` pass, match in memory) or memoize per-path results"
-status: ready
+title: "ready-pool-check went from seconds to >150s (timeout) after the
+  gitHistoryLanded signal landed — per-task taskWorkLanded --check is 0.8s, but
+  the pool check aggregates ~30-50 taskWorkLanded calls each issuing `git log
+  --full-history` per specific Touches path (O(history) each) → tick step 3.6 /
+  outer pool maintenance hang; fix: batch git operations (one `git log` pass,
+  match in memory) or memoize per-path results"
+status: done
 labels:
   - gap
   - defect
