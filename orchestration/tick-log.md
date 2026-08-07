@@ -526,3 +526,14 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > no-action 主导）。Monitor 两判据 mounted+targetOk 真，suite-state-trigger 挂载（pid 3255786）。
 > 不派发（stop-dispatch 在位）、不重启套件（red 期间等分诊修好）、不重锚（inner 等在 ruling 非空闲）。
 > 两线分支 develop/integration 无新 merge。
+
+> **10:28Z 外层 tick（no-action——全状态稳定，human ruling 仍 pending）**：套件仍红（09:25 并发 8，
+> durationMs 869907，7 失败全并发专用、已分诊已立任务）。内层状态不变（等在 ruling，1 agent 在等）。
+> **收尾 pass**：notYetFlipped 仍 6 个（DIR-119 / dispatch-evaluated / integration-batch-merge-ff /
+> ready-pool-check-times / suite-state-no-reason-axis / two-thirds-polling）——AC 未全勾或 DoD 依赖
+> 套件绿，全部留 ready（ruling 阻塞）。**批量合**：integration 领先 develop 5 commit（含 reason-axis
+> 修复 f91c8a4a、npm-install、suite-cutoff 等），但 suiteGreen=false ⇒ 门禁挡合（两线模型设计行为，
+> 红窗期 integration 照常接收、develop 不推进）。补提交上 tick 遗留（task flip + telemetry 快照，
+> 31b81009）。Monitor mounted+targetOk 真、suite-state-trigger 挂载（3255786）。负载 0.18 空闲。
+> 不派发（stop-dispatch）、不重启套件（red 期间等分诊修好）、不重锚（inner 等在 ruling）。等 human
+> 对红窗释放/并发策略的裁定。
