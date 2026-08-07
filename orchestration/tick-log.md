@@ -678,3 +678,11 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 并发 8 下全绿！正在跑 serial 相位（selected 22 files groups=serial，隔离并发 1）。若 serial 相位也
 > 绿 = **并发 8 真绿达成**（human ruling 目标）→ un-hold session-pid + done-flip 批次 + 分叉合并。
 > 等 serial 相位完成（后台任务 + SUITE-GREEN/RED 通知）。
+
+> **14:13Z 外层 tick（no-action——四轮实为测试全绿，假红来自外层 worktree 设置，清理后重跑）**：
+> 四轮（14:11 完成）两相位都 **fail 0 / cancelled 0**（主体现 2761/2717、serial 230/229），但 runner 报
+> red/failed——**假红**：suite-after 脏树断言抓到外层自己的 worktree 设置（`.quay` 软链 + 保留目录
+> .quay-worktree-local*/wtl3 未跟踪 + 挪动 .quay 跟踪文件致 D 状态）。修法：恢复 worktree .quay 跟踪
+> 文件（git checkout .quay，74 路径）、移走保留目录到 /tmp/quay-suite-wtl-backup、worktree 干净；
+> runner 改用 --state-file/--log-file 指主检出（不再用软链）。已重跑（state=running 14:13:09）。
+> 测试本身全绿 ⇒ 这次若 worktree 保持干净应真绿。
