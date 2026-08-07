@@ -7602,3 +7602,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **split-batch 派发 3/5**：batch 词汇拆分（rolling dispatch vs verification-round-N）经 tick-vocabulary.test.mjs 机械锁定。probe-mechanism 释放 tick docs 后全 disjoint。worktree `quay-worktrees/split-batch`。
 - **在飞 3/5**（真实）：observer-registry + manager-layer + split-batch。probe-mechanism needs-human worktree 保留。
+
+### 事件 01:5xZ（split-batch 完成——no fan-in；manager-layer 有真改动）
+
+- **split-batch 完成**：词汇拆分早已在 develop（a8e8a0dc/3241b4fb）→ **无代码 fan-in**；验证 5/5 + scoped 13/13 + 负控制。DoD finalize（1bb30644 仅任务文件）。任务文件入 develop（frontmatter ready），worktree/branch 清理。
+- **在飞 2/2（真实）**：observer-registry（活跃无 commit）+ manager-layer（**已 commit beaa68e7**——quay-init 铺 manager driver，真改动，fan-in 需走 cherry-pick）。3 空槽但无 disjoint 候选（全撞这两核心任务文件）。
+- **probe-mechanism / ac8 / shipped-ts / chart2-s2 needs-human** worktree 保留等外层。
