@@ -12,7 +12,7 @@ title: "Seventh 'mechanism-exists-guarantee-gone' instance: the resource gate
   'starting into a busy machine' but not 'becoming that busy machine'; fix:
   full-suite single-flight flock held for the whole run, complementary to the
   resource gate, re-measure both tasks' baselines in a clean single window"
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -9,7 +9,7 @@ title: "assert-clean-tree.sh's premise (coordinator runs on a clean tree) is
   (snapshot porcelain before the run, only newly-added items count as test
   products; no list needed) ②runtime single-writer (git worktree lock during
   agent runs — official existing implementation)"
-status: ready
+status: done
 labels:
   - gap
   - defect
