@@ -1,15 +1,18 @@
 ---
 id: gap-cross-machine-readonly-observation-orchestration-not-a-tool
-title: "the manager hand-assembles the SAME ssh+git+capture-pane+/proc combination every single
-  time it needs to read a cross-host target's state (B/orangevps, C/ad-arm1) — no shipped tool
-  exists for 'read this remote quay checkout's git/suite/session/process state read-only', so it
-  gets rebuilt ad-hoc per call all night, with real mistakes along the way (a stale remote-tracking
-  ref read without fetching first, HEAD-vs-branch comparison errors, pgrep/grep field-matching
-  errors repeated across hosts); this is the missing counterpart to supervisor-deliver.sh (which
-  crystallized the WRITE side — deliver(target,payload)) on the READ side: observe(target) ->
-  {git_state, suite_state, session_state, process_state}, read-only, ssh-transport-agnostic (same
-  shape for local vs remote); manager 2026-08-06, filed per human direction to transfer to outer"
-status: todo
+title: "the manager hand-assembles the SAME ssh+git+capture-pane+/proc
+  combination every single time it needs to read a cross-host target's state
+  (B/orangevps, C/ad-arm1) — no shipped tool exists for 'read this remote quay
+  checkout's git/suite/session/process state read-only', so it gets rebuilt
+  ad-hoc per call all night, with real mistakes along the way (a stale
+  remote-tracking ref read without fetching first, HEAD-vs-branch comparison
+  errors, pgrep/grep field-matching errors repeated across hosts); this is the
+  missing counterpart to supervisor-deliver.sh (which crystallized the WRITE
+  side — deliver(target,payload)) on the READ side: observe(target) ->
+  {git_state, suite_state, session_state, process_state}, read-only,
+  ssh-transport-agnostic (same shape for local vs remote); manager 2026-08-06,
+  filed per human direction to transfer to outer"
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -90,6 +93,7 @@ resume 若中断，先跑 measure 读当前实现覆盖了 observe() 的哪些�
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
 
 ## Touches
+- tasks/gap-cross-machine-readonly-observation-orchestration-not-a-tool.md
 - plugin/scripts/monitor-mount-check.sh
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/supervisor-deliver.sh（对称关系交叉标注）

@@ -3,7 +3,7 @@ id: gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling
 title: integration-batch-merge.sh is FF-only but the SPEC ruling (2026-08-06
   23:4x) directs real-merge on divergence — blocked twice tonight (develop
   advances via direct commits; batch merge exits needs-human each time)
-status: todo
+status: ready
 labels:
   - gap
   - defect

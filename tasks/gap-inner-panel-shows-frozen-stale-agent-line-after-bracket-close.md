@@ -1,7 +1,7 @@
 ---
 id: gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close
-title: inner panel shows a FROZEN stale agent line after the bracket closed —
-  a MISLEADING WINDOW before the panel self-cleans (NOT permanent — the panel
+title: inner panel shows a FROZEN stale agent line after the bracket closed — a
+  MISLEADING WINDOW before the panel self-cleans (NOT permanent — the panel
   cleared the observer-registry line by 03:37:32); observer-registry line read
   「Committing observer-registry task work 3h 5m 32s」 while the bracket was
   closed (d3fb2839, --task-end needs-human) and left inProgress at 03:22; in
@@ -9,7 +9,7 @@ title: inner panel shows a FROZEN stale agent line after the bracket closed —
   agent without cross-time sampling (timer advance), so anyone glancing reads
   「agent ran 3h unfinished」 — same family as tonight's recurring "instrument
   can't distinguish opposite states" (stuck-vs-running → ended-vs-running)
-status: todo
+status: ready
 labels:
   - gap
   - defect
