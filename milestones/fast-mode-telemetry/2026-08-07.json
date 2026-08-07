@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T01:12:42.416Z",
+  "generatedAt": "2026-08-07T02:12:20.576Z",
   "since": null,
   "tasks": [
     {
@@ -270,11 +270,6 @@
     {
       "taskId": "gap-no-inventory-of-what-the-two-layer-mode-actually-runs",
       "minutes": 92.78618333333333,
-      "outcome": "done"
-    },
-    {
-      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
-      "minutes": 149.27768333333333,
       "outcome": "done"
     },
     {
@@ -677,31 +672,25 @@
   ],
   "inProgress": [
     {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786068314098-uu1vih",
+      "startedAtMs": 1786068314110,
+      "startedAtMsUnreliable": true
+    },
+    {
       "taskId": "gap-observer-registry-target-decommission-and-criterion-invalidation",
       "runId": "fm-gap-observer-registry-target-decommission-and-criterion-invalidation-1786061714809-ujqan9",
       "startedAtMs": 1786061714820,
       "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-probe-mechanism-dead-15-days-rewire-to-two-layer",
-      "runId": "fm-gap-probe-mechanism-dead-15-days-rewire-to-two-layer-1786064124743-v6xkfo",
-      "startedAtMs": 1786064124755,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver",
-      "runId": "fm-gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver-1786061960395-dsfn4r",
-      "startedAtMs": 1786061960404,
-      "startedAtMsUnreliable": true
     }
   ],
-  "meanMinutes": 66.76572428940567,
-  "medianMinutes": 50.5096,
-  "tasksPerHour": 1.165189675428914,
-  "serialEquivalentPerHour": 0.8986647061585274,
+  "meanMinutes": 66.12109960937498,
+  "medianMinutes": 50.484475,
+  "tasksPerHour": 1.1458760886898345,
+  "serialEquivalentPerHour": 0.907425925377274,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-07T01:12:27.719Z",
-  "windowHours": 110.71158861111111,
+  "windowEnd": "2026-08-07T02:12:03.722Z",
+  "windowHours": 111.70492277777778,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1282,6 +1271,14 @@
       "startedAtMsUnreliable": true
     },
     {
+      "taskId": "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+      "runId": "fm-gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round-1786065345254-nxd6wr",
+      "minutes": 36.73348333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": true
+    },
+    {
       "taskId": "gap-stale-check-orchestration-arm-is-a-dead-glob",
       "runId": "fm-gap-stale-check-orchestration-arm-is-a-dead-glob-1785951354044-9xvjhu",
       "minutes": 8.944966666666666,
@@ -1325,6 +1322,14 @@
       "taskId": "gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause",
       "runId": "fm-gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause-1785925128561-d1niqc",
       "minutes": 43.05885,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver",
+      "runId": "fm-gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver-1786061960395-dsfn4r",
+      "minutes": 105.10196666666667,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1412,6 +1417,22 @@
       "startedAtMs": 1786051058808
     },
     {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786026436011-g19w0h",
+      "minutes": 149.27768333333333,
+      "outcome": "done",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786026436030
+    },
+    {
+      "taskId": "gap-probe-mechanism-dead-15-days-rewire-to-two-layer",
+      "runId": "fm-gap-probe-mechanism-dead-15-days-rewire-to-two-layer-1786064124743-v6xkfo",
+      "minutes": 33.1211,
+      "outcome": "needs-human",
+      "startedAtMsUnreliable": true,
+      "startedAtMs": 1786064124755
+    },
+    {
       "taskId": "gap-productize-the-manager-layer",
       "runId": "fm-gap-productize-the-manager-layer-1785984338411-2eurri",
       "minutes": 118.91688333333333,
@@ -1437,5 +1458,5 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 3
+  "realInFlight": 2
 }
