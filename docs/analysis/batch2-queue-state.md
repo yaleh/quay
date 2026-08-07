@@ -7776,3 +7776,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **空槽不回填**：cross-machine-observe 释放 1 槽，但 red 阻挡新派发（stop 条件命中）→ 不回填。在飞 5→4。
 - **诚实记录派发偏差**：3 连派（suite-cutoff/audit-findings/npm-install）发生在 suite-red 已确立（07:21）**之后**（07:38），违反 stop-checks-before-dispatch 顺序 + shouldDispatchOnRed fail-closed 应阻挡新派发。不杀已跑 agent（work 隔离在独立 worktree、fan-in 已暂缓、不污染红树），但本次教训记录：**先读 suite-state 再派发**。
 - **在飞 4/5**：inner-panel + suite-cutoff + audit-findings + npm-install。跨机观测验证器就绪待 re-green。
+
+### 事件 08:0xZ（audit-findings 完成——机制已在 develop，task-file 证据暂缓）
+
+- **audit-findings 完成**：机制（finding-backpropagate.ts + execution-policy.ts + 镜像 + 测试）**早已在 develop**（6740d4fc 是 develop ancestor）→ **无代码 fan-in**。agent 只加 task-file「Re-verification (2026-08-07)」证据块（commit 331f3331，48 插入，scoped 36/0 + 静态层全绿 + M208 proof-case 复现）。
+- **honest unchecked**：AC5（未来真实 milestone early-catch proof，不可现在供）、DoD1（deps DIR-124-D/DIR-118 todo）、DoD3（外层 fresh audit）——不假勾。
+- **red-suite 暂缓**：与 cross-machine-observe 同策略——worktree/分支保留，task-file 证据待 re-green 后一并落 develop。status 保持 ready（未翻 done，符合 DoD 未全闭合）。
+- **在飞 3/5**：inner-panel + suite-cutoff + npm-install。
