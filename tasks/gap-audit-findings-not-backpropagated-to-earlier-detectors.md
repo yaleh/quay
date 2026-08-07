@@ -187,8 +187,55 @@ METRICS: {"total":2,"generalizable":1,"promoted":1,"backPropagationRate":1,
   "token delta absent from canonical telemetry"]}
 ```
 
+**Re-verification (2026-08-07, inner-loop re-dispatch):** fresh scoped run in worktree
+`/home/yale/work/quay-worktrees/audit-findings-not-backpropagated-to-earlier-detectors`
+(HEAD b423f413, which already carries the 6740d4fc implementation) — `bash scripts/test.sh
+--for-task gap-audit-findings-not-backpropagated-to-earlier-detectors` exits 0:
+
+```text
+✔ mirror parity: finding-backpropagate.ts + execution-policy.ts byte-identical across experiments/plugin
+✔ AC2: the REAL M208 finding migrates via the canonical ledger adapter and classifies eligible for PlanCheck
+✔ AC1: runtime-only finding (M192 Build-null class) is REJECTED for promotion to PlanCheck
+✔ AC1: a finding with NO material input hashes (incomplete-input proof) is never promoted
+✔ AC2: RED/GREEN/ambiguous calibration passes with redHitRate=1 and falsePositiveRate=0
+✔ AC3: the originating observer cannot activate its own candidate; a policy-owner can
+✔ AC4: policy activation changes the policy hash and invalidates exactly the affected cached receipts
+✔ AC6: back-propagation is read-only on task/audit state — the later Acceptance/Wiring Audit stays enabled
+✔ AC7: metrics are reproducible from canonical receipts + DIR-126-D/E telemetry; missing cost inputs are explicit unknowns
+✔ AC8: a false-positive/reopened-finding control disables the candidate safely and records policy+receipt consequences
+PASS: every test file uses node:test ... new files declare @test-group.
+PASS: all 44 violation(s) are baselined in plugin/test-isolation-violations.txt
+task-contract-check: no violations.
+PASS: no NEW stale strategic doc beyond the KNOWN_STALE baseline
+ℹ tests 36
+ℹ pass 36
+ℹ fail 0
+ℹ duration_ms 3467.003453
+```
+
+Real-finding proof case re-reproduced from the checked-in canonical sources (exit 0):
+
+```text
+MIGRATED finding: 55016c0b | ac7-checklist-missing
+CLASSIFY: {"findingId":"55016c0b","recurrenceKey":"ac7-checklist-missing","observerStage":"Receipt",
+  "generalization":"profile","earliestDetectableStage":"PlanCheck","promotionAllowed":true,
+  "detectorCandidate":{"detectorId":"det-ac-coverage-citations","recurrenceKey":"ac7-checklist-missing",
+  "rule":"detectAcCoverageCitations","stage":"PlanCheck"}}
+CALIBRATION: {"ok":true,"redHitRate":1,"falsePositiveRate":0,"ambiguousValidRate":1}
+BACKPROP audit-attempt: false | authorizer-role-not-authorized: "Audit" cannot activate a detector (originating observers cannot self-authorize)
+BACKPROP authorized: true | back-propagated ac7-checklist-missing to PlanCheck; 1 affected receipt(s) invalidated
+METRICS: {"schemaVersion":"1","totalFindings":2,"generalizableFindings":1,"promotedFindings":1,
+  "backPropagationRate":1,"recurringFindings":1,
+  "recurrenceWasteAgentMinutes":{"value":null,"unknown":true},"tokenDelta":{"value":null,"unknown":true},
+  "unknownFields":["agent-minutes (contentAgentMs) absent from canonical telemetry",
+  "token delta absent from canonical telemetry"]}
+```
+
 **AC status:** AC1, AC2, AC3, AC4, AC6, AC7, AC8 satisfied with mechanical tests (36 scoped tests,
-0 fail). AC5 unchecked (requires a future real milestone). DoD unchecked per fast-mode discipline.
+0 fail). AC5 unchecked (requires a future real milestone). DoD unchecked per fast-mode discipline
+(DoD1 requires deps DIR-124-D / DIR-118 `todo` + a future milestone; DoD2's checked-in evidence is
+present and reproducible but agent-minutes/token cost inputs are explicit unknowns from canonical
+telemetry; DoD3 requires the outer's fresh independent audit).
 Dependency note: DIR-124-D (full execution-policy registry) and DIR-118 (post-Land observer) are
 `todo`; this task supplies the versioned policy-hash + authorized-activation substrate that
 DIR-124-D adopts, and wires the mechanism without depending on the unlanded post-Land observer.
