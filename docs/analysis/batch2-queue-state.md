@@ -7931,3 +7931,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **原派发基底错误**：fix-21 worktree 用 develop 基底 → capability-catalog.test.mjs 在 develop 树上会过（无 40→6 脚本），agent 看假绿信号。已停原 agent（a093c9077a5a9f366，killed 于对比中途、无残留）、删错基底 worktree/分支、**重建于 integration f062caf9**（含全部 quay-*.ts 40→6 脚本 + serial 机制）、re-telemetry + 重新派发（ae4154e4b8a3b1541）。
 - **教训**：fork-baseline 规则（依赖 integration 未验证内容的从 integration 分叉）——本任务修 integration 树自身缺陷，**必须 integration 基底**。
 - **在飞 1/5**：integration-content agent（integration 基底）。held 1（session-pid）。套件 red+failed。
+
+### 事件 12:5xZ（integration-content 21-fix 完成——integration 就绪待并发 8 重跑）
+
+- **integration-content 完成**（agent b209f4fd，integration 基底 f062caf9，24 files +1181/-1314）：21 条失败全修——
+  - **AC1 capability-catalog**：14 脚本进 QUESTION 表 + 6 整合入口 @instrument；catalog exit 0（修前 1）；8/8。
+  - **AC2** SKILL.md/测试名对齐整合指令（quay-suite.ts loop-driver-check）；AC3 live-specimens 经 consolidated_member_files helper 正确报出。
+  - **AC4** session-topology：quay-topology.sh 锁 mkdir -p（fresh /tmp ENOENT）+ new-session 幂等（AC6 竞态）；10/10×3。
+  - **AC5** serial 成员 **14**（≥13）；**quay-init-loop 拆分补齐 integration**（develop 拆分从未合入——本任务在 integration 上完成 core 12/driver 15/runtime 14/vendor 7 + helpers）。
+  - 其他：loop-shipping AC1b、tick-vocabulary AC4、loop-driver-check AC2、内层 inner-blocked-signal。static-checks 完整层 exit 0。
+- **fan-in**：fast-forward integration f062caf9 → b209f4fd（24 files 干净）。任务文件入 develop（AC1-5+AC7+证据勾，AC6/full-green 留外层）。
+- **integration 现含**：serial 机制（f062caf9）+ 21-fix（b209f4fd）——**待外层并发 8 重跑验证真绿**（/tmp/quay-suite-int 树）。
+- **held**：session-pid（7647aaf8）等真绿。在飞 0/5。
