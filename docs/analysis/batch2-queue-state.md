@@ -7836,3 +7836,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **在飞归零 0/5**：5 个任务（cross-machine-observe / npm-install / suite-cutoff ×2 / audit-findings / inner-panel）全部 fan-in 到 integration + task 文件入 develop + worktree 清理 + 遥测 reconcile 全关。5 空槽。
 - **suite RUNNING**（08:22:35 起，log 08:34 仍在写）——⚠️ 用的是旧 runner（reason-axis fix 在 integration 不在 develop，见 08:5x续）。结果未出。
 - **待外层**：① reason-axis fix 进 develop（批量合）后重跑判绿/aborted；② 就绪池 5 空槽是否按 slot-refill 派发（red hold 解除条件 = suite 结果）。
+
+### 事件 09:0xZ（suite false-positive 闭环 + 2 连派）
+
+- **套件真相（09:02 红）**：39.7min **0 测试失败**（✖=0/Promise-pending=0/cancelled=0）——split + reason-axis 修复有效，切断问题已解。红 = suite-after 脏树断言假阳性：`M orchestration/manager-tick-log.md`（manager 套件期间并发追加，合法）+ `?? .quay/last-pane.txt`（capture-pane scratch，未 gitignore）。**外层已确认假阳性**（9ed5b872 persist + ce1005a0 立案 `gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion`）——复发阻塞（manager tick ~20min < 套件 ~39min ⇒ 每套件必追加）。
+- **reason-axis 修复已入 develop**（21fa3db6，外层 cherry-pick）——09:04 重跑用**修复后 runner**：再 SIGKILL 会正确判 aborted（不 stop-dispatch）。
+- **2 连派（suite RUNNING ⇒ 照常，pairwise disjoint，touches 解析）**：
+  - **gap-manager-tick-log-append**（外层新立案，todo→ready 补晋）——suite-after 断言区分「测试残留 vs 已知并发写入者」；AC1 排除 manager-tick-log/.quay scratch，AC2 负控制（人为放测试残留仍红）。
+  - **gap-session-liveness-session-pid-blind**（AC=5 真开）——claude-as-pane-process 识别（沿用 manager-tick 的 pane_pid+pane_current_command 约束）。
+- **在飞 2/5**。3 空槽。套件 RUNNING（09:04 起）。
