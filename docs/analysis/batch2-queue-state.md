@@ -7647,3 +7647,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **外层分诊**（03:08 full-suite 红）：根因 = 40→6 合并改 tick 文档指令形态（quay-branch.ts/quay-dispatch.ts 入口），但 tick-vocabulary.test.mjs 的 SAFE_SUBSTRINGS 只认旧形态（integration-batch-merge.sh/concurrent-batch-scheduler.ts）。3 处未分类：fast-mode:374（quay-branch.ts integration-batch-merge）、fast-mode:676（quay-dispatch.ts concurrent-batch-scheduler）、orch:728（quay-branch.ts integration-batch-merge）。
 - **修复**（按外层方向：补白名单，不改文档）：SAFE_SUBSTRINGS 加裸机制名 `integration-batch-merge` / `concurrent-batch-scheduler`（覆盖两种拼写）。tick-vocabulary.test.mjs 5/5 绿，scoped 5/5 绿。不回滚 40 提交。
+
+### 事件 03:0xZ（observer-registry 完成 → fan-in 冲突 → needs-human）
+
+- **observer-registry 完成**（真实实现）：observer-registry.sh 单一登记表 + --audit AC3 负控制命令；4 消费者重接（os-anchor-watchdog/install、session-liveness、topology-check）。AC1-5 实跑 + 测试 5/5、相关 23/23、session-liveness 49/49、scoped 56/56；full-suite 3 次全 cancelled-0（仅 env load-flake）。commit 69e517b3（13 files +876/−10）。
+- **fan-in 冲突（同位置心跳）**：cherry-pick 69e517b3 → 2 冲突（fast-mode 4b + orchestrator 3d）——integration 已有 cross-machine-verify 心跳（gap-no-post-merge 的 05456e96 带入），observer-registry 想在同一 4b/3d 位置加 registry-audit 心跳。**与 probe-mechanism 完全同类**（都撞 cross-machine-verify 的 4b）。doc：冲突 → needs-human。标 needs-human，worktree/branch 保留 69e517b3。
+- **→ 两个 needs-human 共享同一裁定**：probe-mechanism + observer-registry 的 step-4b/3d 心跳合并/重排可一并由人裁决（cross-machine-verify + registry-audit 并存为 4b/4c + 3d/3e）。
+- **在飞 2/2（真实）**：liveness-saturation + tmux-leak。observer-registry worktree 保留。
