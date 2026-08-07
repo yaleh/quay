@@ -7572,3 +7572,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **回填 2/2**：full-suite-red（FAILURE_PATTERNS 裸 ✖ 假红 → 结构化匹配）+ probe-mechanism（routine-scheduler 死 15 天 → 两层量接线）。均全 disjoint + 无退役 refs。
 - **在飞 5/5（满）**：observer-registry + manager-layer + readme-source + full-suite-red + probe-mechanism。
 - checksplit / split-batch 仍等 readme-source 释放（共享文档）。
+
+### 事件 00:6xZ 续3（readme-source 完成——真实 fan-in + checksplit 回填）
+
+- **readme-source 完成**：修复 4 文档的 broken `quay.js`→`quay.ts` 命令（README / packages/quay/README / sample-workspace/README / CLAUDE.md），AC1-4 勾。**fan-in 成功**：cherry-pick 92f8ee18 → integration 578afc7c（5 files，无冲突；touched 文件两分支全一致）。任务文件入 develop，worktree/branch 清理。
+- **回填 1/1**：checksplit（checkSplitRecommendation 未接线 → 按 AC 决定 wire-in/校准/再裁定）。readme-source 释放共享文档后全 disjoint。Touches 的 `author/SKILL.md or equivalent` 是条件替代，非硬依赖。
+- **在飞 5/5（满）**：observer-registry + manager-layer + full-suite-red + probe-mechanism + checksplit。split-batch 仍等释放。
