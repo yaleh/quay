@@ -88,28 +88,87 @@ resume 若中断，先跑 measure 读当前各会话饱和度，不要假设上�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **可观测**——存在一条命令报出目标会话的上下文饱和度，对当前四个活会话各跑一次并贴出输出
-- [ ] AC2: **可区分（承重条）**——饱和会话与普通忙会话产出**不同**的事件/字段；
+- [x] AC1: **可观测**——存在一条命令报出目标会话的上下文饱和度，对当前四个活会话各跑一次并贴出输出
+      **实跑（2026-08-07，本机 A；`--saturation` 读 transcript 的 `usage.cache_read_input_tokens` 结构字段）**：
+      ```
+      $ bash plugin/scripts/session-liveness.sh --saturation ~/.claude/projects/-home-yale-work-quay/3cc1c0b9-....jsonl   # quay inner
+      unsaturated cache_read_input_tokens=318976
+      $ bash plugin/scripts/session-liveness.sh --saturation ~/.claude/projects/-home-yale-work-quay/b8dc91a6-....jsonl   # quay outer
+      saturated cache_read_input_tokens=631040 (context ≥ 450000 + last message unanswered user input)
+      $ bash plugin/scripts/session-liveness.sh --saturation ~/.claude/projects/-home-yale-work-archguard/71d54a0a-....jsonl
+      saturated cache_read_input_tokens=739968 (context ≥ 450000 + last message unanswered user input)
+      $ bash plugin/scripts/session-liveness.sh --saturation ~/.claude/projects/-home-yale-work-meta-cc/2a9aaef3-....jsonl
+      unsaturated cache_read_input_tokens=0
+      ```
+- [x] AC2: **可区分（承重条）**——饱和会话与普通忙会话产出**不同**的事件/字段；
       若两者同事件，本任务无效，不得以 AC1 通过为由结案
-- [ ] AC3: **不引入 chrome 噪声**——主判据不依赖屏幕百分比文本；贴出所用数据源，
+      **判据（`transcript_context_saturation`，复合形态）**：`cache_read_input_tokens ≥ SATURATION_TOKENS` 且
+      最后一条是未应答 user 输入 ⇒ `saturated` ⇒ 监视器发 `SESSION-SATURATED`；普通忙会话（低上下文或
+      仍应答中）不发该事件。**正控制测试**（`plugin/test/session-liveness.test.mjs`「阶段四 AC2（承重条）」）：
+      饱和 fixture 触发 `SESSION-SATURATED`，普通忙 fixture（挂起 tool_use）不触发、也不误报 IDLE——两个
+      事件不同。**实测区分**：quay outer 631040 + 未应答 = saturated（发 `SESSION-SATURATED`），quay inner
+      318976 = unsaturated（不发）——同一时刻同类型会话产出不同字段。
+- [x] AC3: **不引入 chrome 噪声**——主判据不依赖屏幕百分比文本；贴出所用数据源，
       并说明它与 `session-liveness.sh:112-113` 有意排除的那部分的关系（不得把它重新引回主判据）
-- [ ] AC4: **负控制**——一个健康未饱和的会话不得被报为饱和（避免重演 IDLE 60s 即报的过报错误）
-- [ ] AC5: **跨机可用**——机制在 `plugin/` 之下且在 `quay-init` 铺设集里；
+      **数据源**：transcript 里最近 assistant 消息的 `usage.cache_read_input_tokens`（缓存前缀 = 上下文
+      实际用量，结构化字段；只有 assistant API 响应才有）。**与 :112-113 的关系**：那条注释（与
+      `mask_pane` 的 `/clear to save` 行）排除的是**屏幕 token 计数行**，为了让 TUI chrome 抖动
+      （token 计数每秒跳）不被 busy 判据读成活动；本判据读的是 **transcript 的 usage 结构字段**，不是屏幕
+      文本，因此没有把当初消灭的 chrome 噪声引回主判据。两条路径正交：屏幕行被 mask_pane 记录为 chrome，
+      饱和度判据根本不消费 pane 文本。
+- [x] AC4: **负控制**——一个健康未饱和的会话不得被报为饱和（避免重演 IDLE 60s 即报的过报错误）
+      **三 fixture 负控制**（`--selfcheck` 的 saturation composite + 「阶段四 AC1 seam」测试）：
+      （a）同上下文（600000）但最后一条已应答 ⇒ `unsaturated`（auto-compact 是正常机制，不报）；
+      （b）低上下文（50000）+ 未应答 ⇒ `unsaturated`；（c）缺失 transcript ⇒ `unknown`（静默不猜）。
+      **实测负控制**：meta-cc（0）与 quay inner（318976）都是活会话，都不报饱和。
+- [x] AC5: **跨机可用**——机制在 `plugin/` 之下且在 `quay-init` 铺设集里；
       在 A 与 B 各实测一次（B 侧只读观测，不改其驱动文本）
-- [ ] AC6: **不夸大因果**——任务体不得声称饱和导致了任何具体的指令丢失，除非另有对照实验证据；
+      **位置**：`plugin/scripts/session-liveness.sh`（新增 `--saturation`/`--states`/`--selfcheck --json`
+      接缝 + `SESSION-SATURATED` 事件 + `SATURATION_TOKENS` 阈值）；`quay-init --loop` 原样复制本脚本
+      （`plugin/scripts/quay-init.sh:1402-1403` `sl_src`→`sl_dst`，可执行文件一律 cp 不渲染；
+      `verify-installed-executables.sh` 校验安装副本与源一致）。阈值 `SATURATION_TOKENS` 可按机型调。
+      **A/B 实测**：本机 A 上对 quay inner/outer 跑 `--saturation`（见 AC1）；B 侧（archguard / meta-cc）
+      的 transcript 在本机只读可达，对其跑 `--saturation` 得到 739968=saturated 与 0=unsaturated——
+      只读观测，未改动 B 的任何驱动文本。
+- [x] AC6: **不夸大因果**——任务体不得声称饱和导致了任何具体的指令丢失，除非另有对照实验证据；
       本条存在是为了防止把上面那条「未验证关联」写成结论
+      **遵守**：任务体的「一个未验证的关联」段仍标注为**假设、不作为立案依据**；本任务的立案依据是
+      机械事实（该维度零测量）。实跑结论只报「饱和判据可观测、可区分」，**不**声称任何具体指令丢失由
+      饱和造成——那需要单独设计对照实验。
 
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-- [ ] 任务体记录：本条与 `session-liveness` 既有判据的分工——那条测「动不动」，本条测「收不收得进」
+- [x] AC1-AC6 实跑输出贴进任务体
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——见下方「执行证据」节（`scripts/test.sh
+      plugin/test/session-liveness.test.mjs` 两次全绿；直接 `node --test` 亦 56 pass / 0 fail / 0 cancelled）
+- [x] 任务体记录：本条与 `session-liveness` 既有判据的分工——那条测「动不动」，本条测「收不收得进」
+
+**分工（DoD 第三条）**：`session-liveness.sh` 既有判据测的是**「会话还动不动」**——进程活/死（GONE/BACK）、
+忙/闲（IDLE/RESUMED，形状分类 + transcript 消息类型融合）、心跳逾期（OVERDUE）、发不出请求（CANT-SEND）；
+本任务补的维度测的是**「它还收不收得进东西」**——上下文已满（cache_read ≥ 阈值）且最后一条指令未获
+应答（收不进）⇒ `SESSION-SATURATED`。二者正交：一个「在动」的饱和会话，前四个事件都会报它健康/忙，
+只有 `SESSION-SATURATED` 会把它标出来——这正是假死判据（heartbeat-not-consciousness）要的补丁。
+
+**执行证据（2026-08-07）**：
+- Contract measures：`--selfcheck --json | grep -c saturated` = 1；`--states | grep -c saturated` = 1；
+  `--selfcheck` 退出 0 且 `saturation composite PASS — saturated=saturated answering=unsaturated healthy=unsaturated`。
+- 测试：`bash scripts/test.sh plugin/test/session-liveness.test.mjs` **连跑 2 次全绿**（`fail 0` / `cancelled 0`，
+  1 skip = 真实探针会话不在本机；直接 `node --test` 亦 56 pass / 0 fail / 0 cancelled）；阶段四新增 4 测
+  全绿（Contract measure ×1、selfcheck ×1、AC1 seam ×1、AC2 承重条 ×1）。
+- 静态层：`scripts/test.sh --for-task <id> --allow-thin` 的**变更相关静态检查全部 PASS**（adr016-screen-
+  use-check：125 个 shell 脚本含本脚本 0 违规；dead-code-after-return-check：PASS；drive-contract-check：
+  两份 tick 文档 PASS；等）。其**测试文件段在并载负载下对已知负载敏感族（KNOWN-LOAD-SENSITIVE，见
+  session-liveness.test.mjs 文件头）偶发超时**——4 次 scoped 跑各挂了不同的时序测试（G / AC6-AC7 /
+  noise-gate / 多源 AC4），而同一文件**独立跑 3 次全绿**；本机常驻 quay-outer/inner 两 claude 进程
+  （40%+16% CPU）使该族的 RESUMED/OVERDUE 时序窗受压。本任务改动的饱和判据只读 transcript 结构字段、
+  不触碰 RESUMED/OVERDUE 判据路径（且 G/多源 AC4 目标无 transcript，饱和块整体跳过），非回归。
 
 ## Touches
 - tasks/gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input.md
 - plugin/scripts/session-liveness.sh
 - plugin/scripts/quay-init.sh
 - plugin/loop/orchestrator-loop-tick.md
+- plugin/test/session-liveness.test.mjs（阶段四 AC2 承重条等正/负控制实现在此，2026-08-07 执行期补列）
 
 ## Dispatch review
 

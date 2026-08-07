@@ -200,7 +200,7 @@ node --experimental-strip-types plugin/scripts/quay-suite.ts loop-driver-check
 
 ```
 Monitor({command: "$REPO_ROOT/plugin/scripts/quay-session.ts session-liveness-mount",   # REPO_ROOT 见 .quay/config.yml loop.repo_root
-         description: "会话存活/活跃（SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT）",
+         description: "会话存活/活跃（SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/SATURATED/HEARTBEAT）",
          persistent: true, timeout_ms: 3600000})
 ```
 
@@ -353,6 +353,7 @@ node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-che
 | `REPO-STALL` | 仓库 ≥`STALL_MIN` 分钟无新提交（未暂停的项目）——仓库信号，不是会话面 |
 | `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 |
 | `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；在转换后一个轮询周期内报出 |
+| `SESSION-SATURATED` | 上下文已饱和且最后一条是未应答输入（alive but cannot take input）——区别于普通「忙」 |
 
 **它买什么、不买什么**（2026-08-02 实测得出，别搞混）：
 
@@ -459,6 +460,7 @@ trigger-is-dead-code-never-wired-into-any-tick）：步骤 1 的 `--detect-stop 
 | `REPO-STALL` | 活着但仓库 ≥`STALL_MIN` 分钟无新提交（未暂停的项目） | **仓库信号，不是会话面**（AC8，原 `SESSION-STALL`） |
 | `SESSION-OVERDUE` | 心跳源 mtime ≥`OVERDUE_MIN`（未暂停的项目）——会话可能已死 | 会话面（心跳源=transcript） |
 | `SESSION-IDLE` / `SESSION-RESUMED` | 相邻两轮 pane 哈希相同=空闲；**在转换后一个轮询周期内报出** | 会话面 |
+| `SESSION-SATURATED` | 上下文已饱和且最后一条是未应答输入（`cache_read_input_tokens ≥ SATURATION_TOKENS` + 最后一条未应答 user，阶段四复合判据）——活着但可能收不进新指令 | 会话面（transcript usage 结构字段，非屏幕百分比） |
 
 **外层挂一个监视器（AC12 已随 inner-state.sh 退役而收口）——它答「会话还在不在」：**
 
@@ -477,6 +479,7 @@ OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
 | `STALL_MIN` | `45` | 未暂停的项目超过这么久（分钟）无新提交 = 停滞（`REPO-STALL`，仓库信号） |
 | `LOOP_MIN` | `20` | **`SESSION-IDLE` 静默判据的边界**（抑制阈值）：空闲时心跳时距 `< LOOP_MIN` = 刚动过的正常收尾（静默）；`≥ LOOP_MIN` 或未知 = 「空闲了但没动」，报。OVERDUE 文案里的「预期周期」是固定常数 `EXPECTED_CYCLE_MIN`，与它拆开（LOOP_MIN 可设 0，文案不应打「预期周期 0 分钟」） |
 | `OVERDUE_MIN` | `30` | 心跳源 mtime 超过这么久（分钟）未更新 = 会话逾期（`SESSION-OVERDUE`）。**AC5（原 AC13）不可自愈类宁可误报：默认 45→30**——阶段一实测 transcript 心跳在长任务中的最大间隙 20.5 分钟，30 分钟早报 15 分钟且仍留 ≥9 分钟余量（漏报代价无界，误报只多一次廉价核查） |
+| `SATURATION_TOKENS` | `450000` | **`SESSION-SATURATED` 的上下文用量代理阈值**：最近 assistant 消息的 `usage.cache_read_input_tokens`（缓存前缀=上下文实际用量）≥ 此值 = 上下文接近/已满（**结构化源，非屏幕百分比**，阶段四 AC3）。复合判据：且最后一条是未应答 user 输入才报（饱和≠故障，auto-compact 是正常机制）。对 fleet 实测标定（外层 62.5 万仍在应答=未饱和、内层 31 万=未饱和、48.3 万且未应答=饱和），可按机型调 |
 
 **噪声标定（2026-08-03，管理者 3 个完整周期实测）**：健康循环 = `SESSION-RESUMED`（按周期活动）
 → 干活 → `SESSION-IDLE`（心跳 1 分钟前更新），每 20 分钟一对事件、三项目满载 18 次/小时。

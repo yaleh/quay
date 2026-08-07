@@ -2031,3 +2031,92 @@ test("AC9 — a known-continuous-work window reports SESSION-RESUMED at most ONC
     p.cleanup();
   }
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 阶段四（gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input，2026-08-07）：
+// 上下文饱和度——「活着但收不进新指令」的判据。AC1-AC6。
+// 结构化源 = transcript 的 usage.cache_read_input_tokens（缓存前缀=上下文用量），非屏幕百分比（AC3）。
+// 复合判据 = 高上下文（≥SATURATION_TOKENS）+ 最后一条未应答 user 输入（饱和≠故障，auto-compact 正常，
+// 只有「饱和且随后指令未被响应」才报，AC4）。事件 SESSION-SATURATED 区别于普通「忙」（AC2 承重条）。
+// ═════════════════════════════════════════════════════════════════════════════
+
+// assistantUsageRecord —— assistant 消息带 usage.cache_read_input_tokens（真实 Claude Code JSONL 顶层的
+// usage 结构字段，阶段四实测：内层 31.9 万、外层 62.5 万）。
+function assistantUsageRecord(ts, cacheRead) {
+  return JSON.stringify({ type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+    usage: { input_tokens: 89, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead, output_tokens: 111 },
+    timestamp: ts });
+}
+
+test("阶段四 Contract — --states 含 saturated（恰好一次）；--selfcheck --json 输出含 saturated 恰好一次（两个 measure 带）", () => {
+  const states = spawnSync("bash", [SCRIPT, "--states"], { encoding: "utf8" });
+  assert.equal(states.status, 0, `--states must exit 0:\n${states.stderr}`);
+  const statesCount = (states.stdout.match(/saturated/g) || []).length;
+  assert.equal(statesCount, 1,
+    `--states must mention saturated exactly once (Contract measure states_include_saturated band=1), got ${statesCount}:\n${states.stdout}`);
+
+  const json = spawnSync("bash", [SCRIPT, "--selfcheck", "--json"], { encoding: "utf8" });
+  assert.equal(json.status, 0, `--selfcheck --json must exit 0:\n${json.stdout}\n${json.stderr}`);
+  assert.match(json.stdout, /"saturation":"saturated"/,
+    `--selfcheck --json must carry saturation=saturated (measure saturation_observable):\n${json.stdout}`);
+  const jsonCount = (json.stdout.match(/saturated/g) || []).length;
+  assert.equal(jsonCount, 1,
+    `--selfcheck --json must mention saturated exactly once (measure grep -c = 1), got ${jsonCount}:\n${json.stdout}`);
+});
+
+test("阶段四 selfcheck — 饱和复合判据三 fixture（饱和正控制 / 同上下文已应答负控制 / 健康负控制）在普通 --selfcheck 里 PASS", () => {
+  const r = spawnSync("bash", [SCRIPT, "--selfcheck"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `--selfcheck must exit 0 (heartbeat AND saturation both pass):\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /saturation composite PASS — saturated=saturated answering=unsaturated healthy=unsaturated/,
+    `the plain selfcheck must validate the saturation composite criterion:\n${r.stdout}`);
+});
+
+test("阶段四 AC1 seam — --saturation 报出饱和/未饱和（高上下文+未应答=saturated；同上下文已应答=unsaturated；低上下文=unsaturated；缺失=unknown）", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sl-sat-"));
+  try {
+    const sat = path.join(tmp, "saturated.jsonl");
+    writeTranscript(sat, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))]);
+    const answering = path.join(tmp, "answering.jsonl");
+    writeTranscript(answering, [userInputRecord(isoAgo(0.2)), assistantUsageRecord(isoAgo(0.05), 600000)]);
+    const healthy = path.join(tmp, "healthy.jsonl");
+    writeTranscript(healthy, [assistantUsageRecord(isoAgo(0.1), 50000), userInputRecord(isoAgo(0.05))]);
+    const run = (f) => spawnSync("bash", [SCRIPT, "--saturation", f], { encoding: "utf8" }).stdout.trim();
+    assert.match(run(sat), /^saturated /, "high context + unanswered input ⇒ saturated (AC1 正控制)");
+    assert.match(run(answering), /^unsaturated /, "high context but still answering ⇒ unsaturated (auto-compact 是正常机制，AC4)");
+    assert.match(run(healthy), /^unsaturated /, "low context + unanswered ⇒ unsaturated (AC4 负控制)");
+    assert.match(run(path.join(tmp, "nope.jsonl")), /^unknown/, "missing transcript ⇒ unknown (静默不猜)");
+  } finally { cleanup(tmp); }
+});
+
+test("阶段四 AC2（承重条）— 饱和会话与普通忙会话产出不同事件：饱和 fixture 触发 SESSION-SATURATED，普通忙 fixture 不触发（且不误报 IDLE）", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-sat2");
+  const satX = path.join(p.tmp, "saturated.jsonl");
+  const busyX = path.join(p.tmp, "busy.jsonl");
+  try {
+    // 饱和 fixture：高上下文 + 最后一条未应答 user 输入。回拨 1 分钟 mtime 使 FRESH_SECS 的
+    // MARKER-STALE 交叉正控制不触发（那是一个既有事件，与本测试无关）。
+    writeTranscript(satX, [assistantUsageRecord(isoAgo(0.1), 600000), userInputRecord(isoAgo(0.05))], 1);
+    // 普通忙 fixture：低上下文 + 挂起 tool_use（回合进行中=忙），与饱和会话在「忙」维度同形。
+    writeTranscript(busyX, [assistantToolUseRecord(isoAgo(0.1))], 1);
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const monSat = spawnMonitor(p.env, `sat ${p.tmp} ${p.session}`, { transcripts: `sat ${satX}` });
+    const monBusy = spawnMonitor(p.env, `busy ${p.tmp} ${p.session}`, { transcripts: `busy ${busyX}` });
+    try {
+      assert.ok(await waitForOutput(monSat, /SESSION-SATURATED sat/, 8000),
+        `AC2: saturated fixture MUST fire SESSION-SATURATED:\n${monSat.output()}`);
+      await sleep(3500);
+      assert.ok(!/SESSION-SATURATED busy/.test(monBusy.output()),
+        `AC2: an ordinary busy fixture must NOT fire SESSION-SATURATED (different event):\n${monBusy.output()}`);
+      // 饱和 fixture 在「忙」维度也是 busy（最后一条 user → transcript_busy=1），但不得报 IDLE——
+      // 它报的是 SESSION-SATURATED，与普通忙可区分（AC2：同事件 = 维度仍未测量）。
+      assert.ok(!/SESSION-IDLE sat/.test(monSat.output()),
+        `AC2: the saturated target must not be misreported as idle (it is saturated, distinguishable):\n${monSat.output()}`);
+    } finally {
+      monSat.child.kill("SIGKILL"); monSat.cleanup();
+      monBusy.child.kill("SIGKILL"); monBusy.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});

@@ -171,6 +171,23 @@
 #     候选闲辅助」（AC7）；忙→闲后须见过忙轮（SEEN_BUSY）才报，避免监视器启动时把一直闲着的
 #     会话误报成「转入空闲」。
 #
+# 阶段四（gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input，2026-08-07）：
+# 上下文饱和度——「活着但收不进新指令」的判据。前三个阶段回答「会话还动不动」；本阶段补上
+# 「它还收不收得进东西」这一维。判据是复合形态（饱和且随后指令未被响应），不是一见高比率就告警：
+#   * 结构化源（AC3，不重引 chrome 噪声）：transcript 里最近 assistant 消息的 usage.cache_read_input_tokens
+#     （缓存前缀大小 = 上下文实际用量）。它与文件头里有意排除的「屏幕 token 计数行」无涉——那条排除
+#     （token 计数行 /clear to save，见 mask_pane 注释）是为了不让 TUI chrome 抖动读成活动；本判据读
+#     transcript 的 usage 结构字段，不是屏幕文本，不会把当初消灭的 chrome 噪声引回主判据。
+#   * 复合判据（AC4/任务约束 2）：saturated = cache_read_input_tokens ≥ SATURATION_TOKENS 且最后一条
+#     消息是未获回应的 user 输入（收到新指令但尚未应答 = 收不进）。饱和本身不是故障——auto-compact 是
+#     正常机制；只有「饱和且随后指令未被响应」的形态才报 SESSION-SATURATED（区别于普通「忙」）。
+#   * 事件：SESSION-SATURATED（会话面，边沿触发，见下节）。只在配置了 transcript（SESSION_TRANSCRIPTS）
+#     的目标上适用——tick 日志是 loop 写的，不是会话证据（同 AC9 的 CANT-SEND 适用面）。
+#   * 已知盲区：cache_read_input_tokens 只在 assistant API 响应里出现（工具回执/纯元数据记录没有）；
+#     取不到时饱和度判据静默（unknown），不猜。transcript 不携带模型上下文窗口大小，阈值
+#     SATURATION_TOKENS 是对 fleet 实测标定的默认（45 万：外层 62.5 万仍在应答=未饱和、内层 31 万=
+#     未饱和、48.3 万且未应答=饱和），跨机可用——机制随 quay-init 铺下，阈值可按机型调。
+#
 # 逐事件类别与阈值理由（AC5）：
 #   SESSION-GONE              不可自愈（无界）→ 无阈值，立即报（宁可误报）
 #   SESSION-IDLE              可自愈（上界=外层 20min tick）→ 从严：默认 LOOP_MIN=20
@@ -185,8 +202,9 @@
 #                             阶段一实测 transcript 最大间隙 20.5min，30min 早报 15min 且留余量
 #   SESSION-IDLE-CANT-SEND    不可自愈（发不出请求不会自愈）→ 宁可误报：见即报（AC9）
 #   SESSION-MARKER-STALE      检测类（标志失效）→ 无阈值、见即报，随事件流观察不一致率
+#   SESSION-SATURATED         检测类（上下文饱和，复合判据）→ 边沿触发；仅配置了 transcript 的目标适用
 #   REPO-STALL                仓库信号（非会话面，AC8 裁定承载）→ STALL_MIN=45 保持
-# 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN（阈值）
+# 环境：  INTERVAL / STALL_MIN / LOOP_MIN / OVERDUE_MIN / SATURATION_TOKENS（阈值）
 #         SESSION_TARGETS / SESSION_HEARTBEATS / SESSION_TRANSCRIPTS（多目标覆盖；每行 "<名字> <值>"）
 #         SESSION_ROOT（测试接缝：覆盖自定位的项目根）
 
@@ -205,11 +223,17 @@ API_ERROR_MIN=${API_ERROR_MIN:-1}          # AC9：窗口内 ≥ 此条即判「
 # 阶段三（2026-08-05）：候选闲去抖轮数。SESSION-IDLE 要求连续 IDLE_DEBOUNCE_ROUNDS 轮 fused-idle
 # 才报（AC2——2 轮 × INTERVAL 60s = 120s 结构下界）；单轮转换不报，只延迟 ≤1 轮询周期。
 IDLE_DEBOUNCE_ROUNDS=${IDLE_DEBOUNCE_ROUNDS:-2}
+# 阶段四新增阈值（2026-08-07）：上下文饱和度。SATURATION_TOKENS = 上下文用量代理（最近 assistant 消息
+# 的 usage.cache_read_input_tokens）≥ 此值即视为「上下文接近/已满」——结构化源，非屏幕百分比（AC3）。
+# 默认 45 万是对 fleet 实测的标定：外层 62.5 万仍在应答=未饱和、内层 31 万=未饱和、48.3 万且未应答输入=
+# 饱和（正控制）。SATURATION_TOKENS 可在环境变量/配置文件里按机型调（跨机可用，AC5）。
+SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
 # 文案常数（LOOP_MIN 含义拆分，2026-08-03）：OVERDUE 消息里的「预期周期」是固定描述，不是运行时
 # 阈值——LOOP_MIN 可以被设成 0（管理者配置），而「预期周期 0 分钟」是文案 bug。两个含义拆开。
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
-  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY
+  PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
+  PREV_SATURATED
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -354,6 +378,63 @@ last_user_input_epoch() {
   date -d "$ts" +%s 2>/dev/null || return 1
 }
 
+# ── 阶段四：上下文饱和度（gap-session-liveness-cannot-see-context-saturation-...，2026-08-07）──
+# 三个纯函数，全部读 transcript 的结构字段，不碰屏幕百分比文本（AC3）。
+
+# transcript_cache_read_tokens —— 最近 assistant API 响应的 usage.cache_read_input_tokens（缓存前缀
+# 大小 = 上下文实际用量）。结构化源：该字段只在 assistant 响应的 usage 对象里出现，工具回执/元数据
+# 记录没有。tail 界 1000 行提速（最近一次 usage 距文件尾很近）；无匹配再全扫兜底。返回 "unknown" =
+# 取不到（无 transcript / 无 usage 记录）。
+transcript_cache_read_tokens() {
+  local t=$1 line n
+  [ -e "$t" ] && [ -r "$t" ] || { echo "unknown"; return 1; }
+  line=$(tail -n 1000 "$t" 2>/dev/null | grep -oE '"cache_read_input_tokens":[0-9]+' | tail -1)
+  [ -n "$line" ] || line=$(grep -oE '"cache_read_input_tokens":[0-9]+' "$t" 2>/dev/null | tail -1)
+  [ -n "$line" ] || { echo "unknown"; return 1; }
+  n=${line##*:}
+  printf '%s\n' "$n"
+}
+
+# last_message_is_unanswered_input —— 最后一条【消息】是否未获回应的 user 输入（收到新指令但模型尚未
+# 应答）。复用 transcript_last_message_type 的消息定位（跳过 system/mode 等元数据）：最后一条是 user =
+# yes（收进了但没答出来）；最后一条是 assistant = no（还在应答/已应答）。
+last_message_is_unanswered_input() {
+  local t=$1 mtype
+  mtype=$(transcript_last_message_type "$t")
+  [ "$mtype" = "user-input" ] && echo "yes" || echo "no"
+}
+
+# transcript_context_saturation —— 上下文饱和度的复合判据（AC4/任务约束 2：饱和≠故障，见即报的是
+# 「饱和且随后指令未被响应」）：
+#   saturated   cache_read_input_tokens ≥ SATURATION_TOKENS 且最后一条是未应答 user 输入
+#   unsaturated 其它（上下文低，或上下文高但仍在应答——auto-compact 是正常机制，不报）
+#   unknown     取不到 transcript / 无 usage 记录（静默，不猜）
+transcript_context_saturation() {
+  local t=$1 cache last
+  cache=$(transcript_cache_read_tokens "$t")
+  [ "$cache" = "unknown" ] && { echo "unknown"; return 1; }
+  if [ "$cache" -ge "$SATURATION_TOKENS" ] 2>/dev/null; then
+    last=$(last_message_is_unanswered_input "$t")
+    if [ "$last" = "yes" ]; then echo "saturated"; else echo "unsaturated"; fi
+  else
+    echo "unsaturated"
+  fi
+}
+
+# transcript_saturation_report —— --saturation 接缝（AC1：一条命令报出目标会话的上下文饱和度）。
+# 打印判据 + 原始代理值，供观察者/测试直接读。
+transcript_saturation_report() {
+  local t=$1 cache sat
+  [ -e "$t" ] && [ -r "$t" ] || { echo "unknown (no readable transcript)"; return 1; }
+  cache=$(transcript_cache_read_tokens "$t")
+  sat=$(transcript_context_saturation "$t")
+  case "$sat" in
+    saturated)   echo "saturated cache_read_input_tokens=${cache} (context ≥ ${SATURATION_TOKENS} + last message unanswered user input)" ;;
+    unsaturated) echo "unsaturated cache_read_input_tokens=${cache}" ;;
+    *)           echo "unknown (no assistant usage record)" ;;
+  esac
+}
+
 # ── 外层多源心跳（gap-outer-heartbeat-source-inverts-under-incident-handling，2026-08-05）────────────
 # outer_heartbeat_mtime —— 默认外层心跳 = 多源 max mtime。红窗处置期间外层写 queue-state / 分析记录
 # + 提交但不写 tick-log；单源 tick-log 会把「越认真处理事故」读成「心跳越旧」（实测 71min 陈旧而 5 个
@@ -477,12 +558,16 @@ effective_heartbeat_mtime() {
   fi
 }
 
-# --selfcheck（本任务 ## Contract 的 invoke）—— 诊断接缝，验证外层多源心跳判据，自包含：
+# --selfcheck（本任务 ## Contract 的 invoke）—— 诊断接缝，验证外层多源心跳判据 + 上下文饱和度判据，
+# 自包含（临时目录，不碰真实仓库/会话）：
 #   1. 红窗处置（最近提交 + 新 queue-state + 旧 tick-log）⇒ 心跳新鲜（不报 OVERDUE，AC2）；
-#   2. 30 分钟零产出（旧提交 + 旧 tick-log + 无 queue-state）⇒ 心跳陈旧（真阳性保留，AC3）。
-# 用临时目录，不碰真实仓库/会话。
+#   2. 30 分钟零产出（旧提交 + 旧 tick-log + 无 queue-state）⇒ 心跳陈旧（真阳性保留，AC3）；
+#   3. 上下文饱和度复合判据（阶段四）：高 cache_read + 未应答输入 ⇒ saturated；同上下文但已应答 ⇒
+#      unsaturated（负控制：auto-compact 是正常机制）；低上下文 + 未应答 ⇒ unsaturated（负控制）。
+# --json 变体（$1=1）：只打一行 JSON（含 saturation 字段），供 Contract measure
+# `--selfcheck --json 2>&1 | grep -c 'saturated'` 读取。
 selfcheck() {
-  local tmp ws now fresh stale fmin smin rc=1
+  local tmp ws now fresh stale fmin smin rc=1 json=${1:-0} sat_dir sat_green sat_answering sat_healthy sat_ok=1 _now_iso
   tmp=$(mktemp -d 2>/dev/null) || { echo "session-liveness selfcheck: FAIL 无法创建临时目录" >&2; return 1; }
   # 控制 1（反向失效消除）：红窗处置 = 最近提交 + 新 queue-state + 旧 tick-log ⇒ 心跳新鲜
   ws="$tmp/fresh"
@@ -513,12 +598,49 @@ selfcheck() {
   now=$(date +%s)
   fmin=$(( (now - fresh) / 60 ))
   smin=$(( (now - stale) / 60 ))
+  # 控制 3（阶段四，AC2/AC4）：饱和复合判据三 fixture（饱和正控制 / 同上下文已应答负控制 / 健康负控制）
+  sat_dir="$tmp/sat"
+  mkdir -p "$sat_dir"
+  _now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '%s\n%s\n' \
+    "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"usage\":{\"input_tokens\":89,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":600000,\"output_tokens\":111},\"timestamp\":\"$_now_iso\"}" \
+    "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"new instruction\"},\"timestamp\":\"$_now_iso\"}" \
+    > "$sat_dir/saturated.jsonl"
+  printf '%s\n%s\n' \
+    "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"},\"timestamp\":\"$_now_iso\"}" \
+    "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"usage\":{\"input_tokens\":89,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":600000,\"output_tokens\":111},\"timestamp\":\"$_now_iso\"}" \
+    > "$sat_dir/answering.jsonl"
+  printf '%s\n%s\n' \
+    "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]},\"usage\":{\"input_tokens\":89,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":50000,\"output_tokens\":111},\"timestamp\":\"$_now_iso\"}" \
+    "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"new instruction\"},\"timestamp\":\"$_now_iso\"}" \
+    > "$sat_dir/healthy.jsonl"
+  sat_green=$(transcript_context_saturation "$sat_dir/saturated.jsonl")
+  sat_answering=$(transcript_context_saturation "$sat_dir/answering.jsonl")
+  sat_healthy=$(transcript_context_saturation "$sat_dir/healthy.jsonl")
+  [ "$sat_green" = "saturated" ] || sat_ok=0
+  [ "$sat_answering" = "unsaturated" ] || sat_ok=0
+  [ "$sat_healthy" = "unsaturated" ] || sat_ok=0
+
+  if [ "$json" = "1" ]; then
+    printf '{"red-window-heartbeat_min":%s,"zero-output-heartbeat_min":%s,"OVERDUE_MIN":%s,"saturation":"%s","saturation_ok":%s}\n' \
+      "$fmin" "$smin" "$OVERDUE_MIN" "$sat_green" "$sat_ok"
+    rm -rf "$tmp"
+    [ "$fmin" -lt "$OVERDUE_MIN" ] && [ "$smin" -ge "$OVERDUE_MIN" ] && [ "$sat_ok" = "1" ]
+    return $?
+  fi
+
   echo "session-liveness selfcheck: red-window-heartbeat_min=${fmin} zero-output-heartbeat_min=${smin} OVERDUE_MIN=${OVERDUE_MIN}"
   if [ "$fmin" -lt "$OVERDUE_MIN" ] && [ "$smin" -ge "$OVERDUE_MIN" ]; then
     echo "session-liveness selfcheck: PASS — 红窗处置（queue-state+提交）保持心跳新鲜；零产出触发 OVERDUE（真阳性保留）"
     rc=0
   else
     echo "session-liveness selfcheck: FAIL — fresh_min=${fmin} (<${OVERDUE_MIN} 应为真) stale_min=${smin} (≥${OVERDUE_MIN} 应为真)" >&2
+    rc=1
+  fi
+  if [ "$sat_ok" = "1" ]; then
+    echo "session-liveness selfcheck: saturation composite PASS — saturated=${sat_green} answering=${sat_answering} healthy=${sat_healthy}（饱和判据与普通忙/健康可区分）"
+  else
+    echo "session-liveness selfcheck: saturation FAIL — saturated=${sat_green} answering=${sat_answering} healthy=${sat_healthy}" >&2
     rc=1
   fi
   rm -rf "$tmp"
@@ -528,7 +650,25 @@ selfcheck() {
 ONE_SHOT=false
 case "${1:-}" in
   --once) ONE_SHOT=true ;;
-  --selfcheck) selfcheck; exit $? ;;
+  --selfcheck)
+    # Contract measure `--selfcheck --json 2>&1 | grep -c 'saturated'`（阶段四）：--json 变体只打一行
+    # JSON（含 saturation 字段）；无 --json = 原人类可读自检。
+    if [ "${2:-}" = "--json" ]; then selfcheck 1; exit $?; fi
+    selfcheck; exit $? ;;
+  --states)
+    # 状态词汇表（阶段四 Contract measure `--states | grep -c 'saturated'`）：含 saturated。
+    echo "SESSION-GONE / SESSION-BACK — 会话进程消失 / 恢复"
+    echo "SESSION-IDLE / SESSION-RESUMED — 转入空闲 / 恢复活动"
+    echo "SESSION-OVERDUE — 心跳逾期（会话可能已死）"
+    echo "SESSION-MARKER-STALE — 屏幕标志可能失效"
+    echo "SESSION-IDLE-CANT-SEND — 空闲且发不出请求"
+    echo "REPO-STALL — 仓库信号（非会话面）"
+    echo "SESSION-STATUS — --once 接缝状态行"
+    echo "SESSION-SATURATED — 上下文已饱和（saturated: alive but cannot take input）"
+    exit 0 ;;
+  --saturation)
+    [ -n "${2:-}" ] || { echo "用法: $0 --saturation <transcript>" >&2; exit 2; }
+    transcript_saturation_report "$2"; exit 0 ;;
   --mask) mask_pane; exit 0 ;;
   --pane-state)
     # 诊断接缝（AC4/AC5 单测直接调用）：从 stdin 读 pane 文本，跑与主循环相同的
@@ -546,7 +686,7 @@ case "${1:-}" in
   --last-message-type)
     [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
     transcript_last_message_type "$2"; exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--selfcheck] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -971,10 +1111,31 @@ while true; do
       fi
       PREV_STATE[$name]=$pane_state
       PREV_BUSY_SEM[$name]=$busy_sem
+
+      # 事件 6：SESSION-SATURATED（阶段四，gap-session-liveness-cannot-see-context-saturation-...）——
+      # 上下文饱和度。复合判据（结构化源，非屏幕百分比，AC3）：最近 assistant 消息的
+      # usage.cache_read_input_tokens（缓存前缀 = 上下文用量）≥ SATURATION_TOKENS 且最后一条消息是
+      # 未获回应的 user 输入（收到新指令但未应答 = 收不进）。与文件头有意排除的屏幕 token 计数行无涉；
+      # 饱和不是故障（auto-compact 是正常机制），只有「饱和且随后指令未被响应」的复合形态才报（AC4）。
+      # 区别于普通「忙」（AC2）：busy 会话若还在应答（最后一条是 assistant）不报 saturated。仅配置了
+      # transcript（SESSION_TRANSCRIPTS）的目标适用——tick 日志不是会话证据。边沿触发。
+      if [ -n "$tr_path" ] && [ -r "$tr_path" ]; then
+        sat=$(transcript_context_saturation "$tr_path")
+        if [ "$sat" = "saturated" ]; then
+          if [ "${PREV_SATURATED[$name]:-0}" = "0" ]; then
+            sl_emit "SESSION-SATURATED $name 的会话上下文已饱和（cache_read_input_tokens ≥ ${SATURATION_TOKENS} 且最后一条是未应答的用户输入）——活着但可能收不进新指令；区别于普通「忙」（AC2）"
+          fi
+          PREV_SATURATED[$name]=1
+        else
+          PREV_SATURATED[$name]=0
+        fi
+      else
+        PREV_SATURATED[$name]=0
+      fi
     else
       PREV_STATE[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
       PREV_PANE_EMPTY[$name]=0
-      IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0
+      IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0; PREV_SATURATED[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。
