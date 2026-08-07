@@ -7684,3 +7684,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **two-thirds-polling 派发 3/5**：64% inner 时间花在等 suite 日志——已文档化且已实现的去除机制未被使用；wire-in。与在飞 2 全 disjoint。
 - **session-liveness-remove-shared-events**：其 5 个 missing touches 是 heavy-op-token* 文件（人 B-FULL-DELETE 裁定要删的目标，`(delete)` 类，非 stale）——但当前与 two-thirds-polling deferral，等其完成再派。
 - **在飞 3/3**：ready-pool-perf + suite-state-reason + two-thirds-polling。2 空槽无 all-disjoint 候选（complete-delivery / manager-productization 撞在飞）。
+
+### 事件 03:6xZ（suite-state-reason 完成——no fan-in）
+
+- **suite-state-reason 完成**：reason 轴实现早已在 develop（561388d9 跨机 merge）→ **无代码 fan-in**；re-verify 38/38 + --wait-check（aborted→no stop）/--fail-fast-check（failed→stop）+ scoped 绿。DoD 1/2 勾（3 全量留外层）。任务文件入 develop，worktree 清理。
+- **在飞 2/2**：ready-pool-perf + two-thirds-polling。3 空槽但 session-liveness-remove 仍撞 two-thirds；其余撞 ready-pool-perf。
