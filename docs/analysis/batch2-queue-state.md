@@ -7712,3 +7712,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **manager-productization 完成**（真实实现，C1-C5）：quay manager start/adopt/arm CLI + manager-start/adopt/arm-loop/tick-log-check.sh + no-manager-tick-doc-check.ts + quay-topology.sh 单飞锁 + AC9 split。AC1-11 勾（AC2 systemd 条按 2026-08-06 人裁定让位）。**fan-in**：cherry-pick f01cc509 → integration 2c4a45d2（15 files 无冲突）。任务文件入 develop。
 - **session-liveness-remove 回填 2/5**：B-FULL-DELETE（heavy-op-token.sh + 4 测试文件 + 调用点清理）+ 共享 events/lock 移除。5 个 missing touches 是 delete 目标（正常）。与 manager-tick-checks disjoint。
 - **在飞 2/2**：manager-tick-checks（外层优先）+ session-liveness-remove。delivery-surface 仍撞两者（broad touches）。
+
+### 事件 04:6xZ（manager-tick-checks 完成——外层优先 fan-in）
+
+- **manager-tick-checks 完成**（真实实现，两条硬约束全守）：8 个散 bash 块并入 quay-session.ts 作单一只读命令 manager-tick-readings.ts（368 行，pane_pid+pane_current_command，无 pgrep -P）；AC1 tick_bash_blocks 8→4、AC2 destructive 2→2、AC5 surface 10→10 / sh 4→4。**fan-in**：cherry-pick a8a5b4ae → integration 49f8272b（5 code + task 文件）。任务文件入 develop。
+- **在飞 1/1**：session-liveness-remove。4 空槽——manager-tick-checks 释放后 delivery-surface 应解锁。
