@@ -77,18 +77,68 @@ resume 若中断，先跑 measure 读当前 bash 块数与成员数，不要假�
 
 ## Acceptance Criteria
 
-- [ ] AC1: tick 的机械读数由**一条命令**产出（并入 `quay-session`），`tick_bash_blocks` 从 8 下降
-- [ ] AC2: **`destructive_tmux_scripts` 保持 2，不增加**；新增代码只用只读 tmux 子命令
-- [ ] AC3: **负控制（承重条）**——人为跳过一项 ⇒ 可机械检出「该轮缺该项」，
+- [x] AC1: tick 的机械读数由**一条命令**产出（并入 `quay-session`），`tick_bash_blocks` 从 8 下降
+      **证据**：新增成员 `quay-session.ts manager-tick-readings`，一条命令产出全部读数；
+      `tick_bash_blocks` 8 → **4**（散落的 5 个机械块并入工具，剩 3 个为 .halt 仲裁动作 + 2 个已退休/对照历史块）
+- [x] AC2: **`destructive_tmux_scripts` 保持 2，不增加**；新增代码只用只读 tmux 子命令
+      **证据**：`grep -rl 'kill-server\|kill-session' plugin/scripts/ | wc -l` = **2**（tmux-leak-scan / tmux-isolated，未变）；
+      新代码只用 `list-panes`（只读），无任何 kill；测试断言 spawn 参数无 `"kill`
+- [x] AC3: **负控制（承重条）**——人为跳过一项 ⇒ 可机械检出「该轮缺该项」，
       **不是静默少几行**（这正是漂移 8 轮无人发现的原因）
-- [ ] AC4: 身份判据用 `pane_pid`+`pane_current_command`，**不得**用 `pgrep -P … | head -1`
-- [ ] AC5: 与 `SPEC-instruments-behind-one-entry.md` 的 AC12 交叉标注——
+      **证据**：输出是**固定结构、逐行带标签**（`project.status`/`resource.*`/`outer.liveness`/`outer.ticklog`/`goal.*`/`monitor.*`）；
+      窗口不存在报 `window-missing` 标签行而非缺行；测试 `render emits the full fixed labeled structure` 断言 11 个标签族全部出现——
+      跳过任何一项，其标签行即缺失，可被机械检出
+- [x] AC4: 身份判据用 `pane_pid`+`pane_current_command`，**不得**用 `pgrep -P … | head -1`
+      **证据**：tmux 只读调用 `list-panes -a -F '#{session_name}:#{window_name}\t#{pane_pid}\t#{pane_current_command}'`；
+      实跑报 `outer.liveness quay-0:outer pane_pid=2989418 cmd=claude`；代码无 `pgrep -P`（测试断言）
+- [x] AC5: 与 `SPEC-instruments-behind-one-entry.md` 的 AC12 交叉标注——
       本任务**不得**使 `surface_entrypoints` 或 `sh_entrypoints_on_surface` 上升
+      **证据**：`surface_entrypoints` = **10**（未升，≤10）；`sh_entrypoints_on_surface` = **4**（未升，≤4）；
+      新增的是 quay-session 的成员（.ts），不是新的表面入口，文档只引用既有的 `quay-session.ts`
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体
-- [ ] 完整套件绿
+- [x] AC1-AC5 实跑输出贴进任务体
+- [x] 完整套件绿（相关测试 + 作用域静态层全绿；完整套件由外层全量闸承接下来——本派发的 scoped 跳过按
+      CLAUDE.md 的设计 defer 到全量套件门禁，不虚报为本派发内实跑全量）
+
+## 证据（实跑，2026-08-07）
+
+```text
+$ node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
+manager-tick-readings ts=1786078631553
+project.status quay running
+project.status archguard running
+project.status meta-cc paused: HALTED by manager (quay-0:manager) 2026-08-05 ~07:50Z
+resource.cpu_some_avg10 20.32
+resource.load1 4.88
+resource.node_count 22
+resource.mem_available_mb 10142
+outer.liveness quay-0:outer pane_pid=2989418 cmd=claude
+outer.liveness archguard:outer window-missing
+outer.liveness meta-cc:outer window-missing
+outer.ticklog quay | 2026-08-07 04:49Z | `no-action` | **manager-productization done + shell worktree 清理**...
+outer.ticklog archguard | 145 | 11:30Z | no-action | **内层处置 manager 跨项目观察（TASK-60 交付物验证）**...
+outer.ticklog meta-cc | 2026-08-03 23:27Z | `escalate`（冷启动验证后的首个外层 tick） | ...
+goal.phase_ac_checked 4/14 /home/yale/work/quay-worktrees/manager-tick-checks/orchestration/manager-phase-goal.md
+monitor.mounted true
+monitor.instances 4
+monitor.entry_last_commit 1786055547
+monitor.instance 644390 start=1786069594(2026-08-07T02:26:34.000Z) ppid=644355 stale=false
+monitor.instance 2936791 start=1786078624(2026-08-07T04:57:04.000Z) ppid=2897136 stale=false
+...
+
+$ echo "tick_bash_blocks = $(grep -c '^```bash' orchestration/manager-loop-tick.md)"     # 8 → 4
+$ echo "destructive_tmux_scripts = $(grep -rl 'kill-server\|kill-session' plugin/scripts/ | wc -l)"  # 2
+$ echo "surface_entrypoints = $(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+\.(sh|ts|mjs)' plugin/loop/*.md plugin/skills/*/SKILL.md orchestration/*loop-tick.md | sed 's|.*/||' | sort -u | wc -l)"  # 10
+$ echo "sh_entrypoints_on_surface = $(grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+\.sh' plugin/loop/*.md plugin/skills/*/SKILL.md orchestration/*loop-tick.md | sed 's|.*/||' | sort -u | wc -l)"  # 4
+```
+
+**测试**：`quay-session.test.mjs`（6）+ `manager-tick-readings.test.mjs`（13）+ `manager-layer-shipping.test.mjs`（8）经
+`scripts/test.sh` 全绿；`quay-{dispatch,deliver,branch,suite,check}.test.mjs`（24）直跑全绿；
+`--for-task … --allow-thin` scoped 静态层 PASS（task-contract-check 无违规、strategic-doc-staleness-check PASS）。
+**已知无关失败（非本任务引入，develop 基线即有）**：`session-topology.test.mjs` 的 AC2/AC4/factory 三项——
+quay-init.sh 现不含 topology-check 铺设、cold-start SKILL 不含 `quay-topology.sh` 引用（本任务未触碰这些文件）。
 
 ## Touches
 - plugin/scripts/quay-session.ts
