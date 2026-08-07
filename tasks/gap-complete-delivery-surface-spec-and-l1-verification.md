@@ -10,7 +10,7 @@ title: "the human asked what a COMPLETE quay cold-start +
   only covers category 1; L2 continuous-health dynamic — all criteria are
   point-in-time); land the six-category spec as a checked-in live document +
   extend the L1 completeness check to all six categories"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -193,9 +193,26 @@ full-suite gate 的其余整仓 ratchet 由外层 verification round 跑，本 s
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上；AC2/AC4 实测输出贴任务体
-- [ ] 六类交付面有活文档 + L1 六类完整性检查可跑；每类 gap 可解析到任务
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上；AC2/AC4 实测输出贴任务体
+- [x] 六类交付面有活文档 + L1 六类完整性检查可跑；每类 gap 可解析到任务
+- [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——scoped 套件绿
+      （2026-08-07 复验：`l1-delivery-surface-check.test.mjs` 6/6 +
+      `verify-delivery-surface.test.mjs` 9/9 = 15/15，exit 0；四静态检查全 PASS）；
+      **full-suite 整仓 ratchet 按设计 DEFER 给外层 verification round**
+      （本 worktree 无 node_modules，任务体已注明 scoped 模式 DEFER 设计）。
+
+## Execution record（2026-08-07 复验，worktree `delivery-surface`）
+
+实现已由先前提交落地（`a423b047`/`8f1ee67d` 并入 develop）；本次复验 + 闭环：
+
+- `node --no-warnings --experimental-strip-types plugin/scripts/l1-delivery-surface-check.ts --surface`
+  → `surface-categories-covered: 6/6`，exit 0（六类逐类全 covered，含 AC4 归属任务逐项可解析）。
+- `node --no-warnings --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface`
+  → `surface_categories_covered=6/6`，`spec_is_live=1`（SPEC L1-MANIFEST 与可执行清单一致），exit 0。
+- `QUAY_TEST_SKIP_DIST_BUILD=1 bash scripts/test.sh --for-task gap-complete-delivery-surface-spec-and-l1-verification --allow-thin`
+  → `ℹ tests 15 · pass 15 · fail 0 · cancelled 0`；scoped 静态检查全 PASS
+  （test-framework-policy / test-isolation / test-impl-census / task-contract / strategic-doc-staleness）。
+- Contract control 已由测试逐类 fixture 覆盖：删任一类交付物 ⇒ L1 报 MISSING（<6/6）；删归属任务 ⇒ 报缺（AC4 无空洞）。
 
 ## Touches
 
