@@ -1,0 +1,1 @@
+[manager-tick] 执行管理者 tick。不要依赖上下文记忆——本 prompt 只是指针，内容现读：(1) 读 orchestration/manager-loop-tick.md 拿本轮步骤；(2) 读 orchestration/manager-tick-log.md 末尾拿上一轮状态；(3) 读 orchestration/manager-phase-goal.md 拿当前阶段目标与 AC。执行完必须向 manager-tick-log.md 追加一行。重新武装本 loop 时按哨兵清扫：CronList → 删除所有 prompt 含 [manager-tick] 者 → 建一个，绝不靠记住的 ID。
