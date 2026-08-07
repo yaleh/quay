@@ -169,6 +169,21 @@ grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 
+## serial 组的显式判据（gap-serial-group-recompose-nested-runner-criterion，2026-08-07）
+
+**进 serial 的唯一理由 = 该文件 spawn 自己 worker 池的子套件（嵌套 runner）**——通过
+`$TEST_COMMAND` / `--for-task` 派生并发 N 的子套件（runner-grouping / select-tests-for-touches /
+quay-init-loop-core 属此类，见各文件头 `@test-group serial`）。serial 并发 1 是机制不变量——这类
+文件在并发 8 主套件下 = 8×N 进程互相放大，cc1 是正确答案不是保守。
+
+**其它理由一律走 lowconc，不走 serial**：
+- **低负载/时序敏感**（如 checker-cost 的 9 处单调性断言）——需要的是【机器有余量】不是【独占】；
+- **hermetic 但先前留串行**（如 session-topology 的私有 socket 自隔离）——隔离功课做完、分组没跟；
+- **串行只是验收标准文本、非技术必要**（如 install-config-driven-e2e）。
+
+判定新文件归组时读这条：能说清「不串行会怎样」才算 serial；否则进 lowconc（需低负载）或主套件。
+GROUP NOTE 必须与判据对齐——同一家族内，嵌套 runner 的留 serial，低负载/时序的走 lowconc。
+
 ## 会话存活监视（`session-liveness.sh`）——看自己还在不在（AC13）
 
 **内层同样要挂 `session-liveness.sh`**（泛化后的会话存活监视，原 `outer-liveness.sh`）。
