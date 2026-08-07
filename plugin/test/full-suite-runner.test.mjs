@@ -543,6 +543,42 @@ test("AC5 — a child killed by a signal (SIGKILL) writes reason=aborted (no cor
   }
 });
 
+test("AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=aborted, NOT failed (the 07:08→07:21 shape)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-137-"));
+  // gap-suite-cutoff-what-tears-test-process-at-session-topology (confirmed 2026-08-07): in the real
+  // full-suite path test.sh runs `node --test` as a CHILD and bash reports a SIGKILL'd child as its
+  // OWN exit code 128+N (137 for SIGKILL). The runner's child is `bash -c <test.sh>`, so it sees
+  // exit.code=137, exit.signal=null — the pre-fix childKilledBySignal (`exitCode === null`) missed
+  // this and mislabelled it reason=failed (a stop-dispatch signal). Reproduce the bash shape:
+  //   bash runs a child, the child is SIGKILL'd externally, bash `wait`s it (→137) and exits 137.
+  const { f, dir } = fakeSuite(
+    'echo "simulating a SIGKILL\'d node --test child"\n' +
+      "sleep 30 &\n" +
+      "child=$!\n" +
+      "kill -9 \"$child\"\n" +
+      "wait \"$child\" 2>/dev/null\n" +
+      "code=$?\n" +
+      'echo "bash observed child killed, exiting $code"\n' +
+      "exit \"$code\"",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on an aborted suite");
+    const s = await poll(() => {
+      const cur = readState(root);
+      return cur && cur.state === "red" && cur.reason === "aborted" ? cur : null;
+    }, { timeoutMs: 5000 });
+    assert.ok(s, `bash-exits-137 signal-kill is final state=red reason=aborted (got ${JSON.stringify(readState(root))})`);
+    // And the stop-dispatch consumer (runOnce) reports NO stop signal for aborted-red (AC5).
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, false, "bash-137 aborted-red must NOT trigger stop-dispatch");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC5 — a generic non-zero exit with NO failure/abort marker stays reason=failed (fail-closed catch-all)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-catch-"));
   // The reason-axis boundary: an unmatched non-zero exit could be a real failure no structured line
