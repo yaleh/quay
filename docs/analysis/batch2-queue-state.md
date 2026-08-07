@@ -7541,3 +7541,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **manager-layer 派发 5/5**：quay-init 不铺 manager driver → 修复。与全部在飞 disjoint。worktree `quay-worktrees/manager-layer`。
 - **在飞 5/5（满）**：concurrency-derivation + observer-registry + manager-skill + inner-session-check + manager-layer。
 - **等释放再回填**：readme-source（等 concurrency-derivation）、tmux-leak（需先修 overbroad glob Touches）。
+
+### 事件 00:6xZ（manager-skill 完成——真实 fan-in）
+
+- **manager-skill 完成**：SKILL §9 强制挂载点（写任何 .sh/.ts 前必查 capability-catalog）+ 8 项复用清单 + SPEC §5 交叉标注。measures 全过（checklist=8、precheck=1、invariant 经 control 验证不漂移）。scoped static tier 绿。
+- **fan-in 成功**：cherry-pick db579c6f → integration 3382c42b（3 files，无冲突；SKILL.md/SPEC 两分支一致）。
+- **任务文件**：AC1-4 勾 + 证据入 develop。worktree/branch 清理。
+- **在飞 4/5**：concurrency-derivation + observer-registry + inner-session-check + manager-layer。readme-source 仍等 concurrency-derivation。
