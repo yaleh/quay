@@ -242,10 +242,10 @@ grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.m
 - plugin/test/quay-init-tmux-detection.test.mjs（AC2b：4 处 kill-server 改 kill-session -t）
 - plugin/test/heavy-op-token*.test.mjs（ol-tok 泄漏源，同族 teardown）
 - plugin/test/session-liveness.test.mjs（同族 teardown）
-- plugin/scripts/（套件尾部泄漏断言：skv-/session-liveness-/enter-repro- 前缀扫描）
+- plugin/scripts/tmux-leak-scan.sh（套件尾部泄漏断言工具；收窄自 plugin/scripts/ 以消除 overbroad glob 派发串行化）
 - scripts/test.sh（套件尾部挂泄漏断言，若并入）
 - tasks/gap-tests-never-clean-up-their-tmpdirs.md（AC5 交叉标注）
-- orchestration/（三次崩溃根因调查记录补 AC6 关联）
+- orchestration/restart-plan-2026-08-04-third.md（AC6 崩溃根因关联的具体文件；收窄自 orchestration/ 以消除 overbroad glob 派发串行化）
 
 ## 跨主机复现（管理者 2026-08-06 15:4xZ，B 机只读观测）
 
