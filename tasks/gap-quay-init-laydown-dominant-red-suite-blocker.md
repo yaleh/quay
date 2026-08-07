@@ -52,3 +52,13 @@ This is a development-class fix (quay-init laydown + its tests). It needs a Plan
 - `.quay/full-suite.log`: `grep -cE 'not ok|ERR_ASSERTION'` = 178; per-file: quay-init-loop 44 (top)
 - `git worktree list`: 4 worktrees beyond main checkout
 - resource-gate: `=> GO`
+
+## Root-cause verdict (inner, 2026-08-07 06:3x — verified, not inferred)
+
+**The 44-failure cluster root cause has TWO layers, both now understood:**
+
+1. **Laydown/referenced-not-landed gaps — ALREADY FIXED on current tree.** Verified: all 5 mechanisms (task-contract-check.ts, inner-blocked-signal.ts, inner-forensics.mjs, task-status-drift-check.ts, touches-orthogonality-check.ts) are laid down by a real `quay-init --loop`; `verify-referenced-landed: OK`; the previously-failing `AC4 — loop-driver-check.sh is laid down` test now passes (6.7s). The 05:37 suite's `referenced-not-landed: SPEC-branching-model...` was against a stale pre-fix tree.
+
+2. **quay-init-loop.test.mjs "90s timeout" = node:test worker event-loop exhaustion, NOT a test-logic failure.** The file has 54 tests, 37 of which each spawn a real `quay-init --loop` (~5.5s, each spawning python3 children). Full-file run self-fails at **167s** with `'Promise resolution is still pending but the event loop has already resolved'` (cancelled 1). Pattern-runs UNDER the exhaustion threshold pass: AC1+AC3 (19 tests) = 86s green; AC1 (12 tests) = 51s green; individual tests = 2-7s green. The "hang"/"timeout" is the node:test worker being torn down when its event loop empties mid-Promise under heavy blocking spawnSync — matching `gap-suite-cutoff-what-tears-test-process-at-session-topology.md`'s finding (same message ×35 in the 04:0x suite red).
+
+**Recommended fix (mechanical, aligns with gap-suite-cutoff):** split `quay-init-loop.test.mjs` (1286 lines) into 2-3 smaller files (each ~18 tests, ~80-90s, under the exhaustion threshold), extracting the shared helpers (`makeTmp`/`cleanup`/`diskWorktreeRoot`/`runInit`/`extractRefs`/`declaredSet`) into a `quay-init-loop-helpers.mjs` module. Each split file then runs green within the node:test worker's event-loop budget.
