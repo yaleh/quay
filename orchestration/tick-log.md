@@ -711,3 +711,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > leak-scan 验证 **exit 0**。至此环境阻塞全清：worktree 干净 + config.yml 在位 + 无 tmux 泄漏。重跑
 > 并发 8（14:45:17，state=running）。测试本身连续 4 轮 fail 0 / cancelled 0。若本轮绿 = 真绿（human
 > ruling）→ un-hold session-pid + done-flip 批次 + 分叉合并。
+
+> **14:48Z 外层 tick（no-action——更新 worktree 到含 tmux 修复的 integration HEAD 后最终重跑）**：
+> integration HEAD = 71734885（工厂 tmux 泄漏修复：TMUX_TMPDIR 本机无效、会话落默认 socket、显式
+> kill-session 工厂名）。更新 worktree 到 71734885（config 在位、干净、leak-scan exit 0），停掉此前
+> 用 be0cca93（无修复）的 run（运行中会新泄漏工厂会话）。最终重跑并发 8（14:48:34，state=running）。
+> 至此所有环境阻塞在 worktree 侧都处理：脏树（清）+ config（在位）+ tmux 泄漏（内层修复 + 外层清理）。
+> 等最终结果：fail 0 / cancelled 0 + suite-after 两断言（clean-tree + tmux-leak-scan）通过 = **真绿**。
