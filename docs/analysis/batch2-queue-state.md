@@ -8010,3 +8010,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **round-6（14:19）17s aborted（stopSignal=false）**：静态层 PASS 后立即中止——外层重搭验证检出脚手架。管理者确认 **round-4 全绿（2991 tests, 0 fail）**，红来自外层自己的 worktree scaffolding（缺 config / 协调态 dirs），非代码。
 - **integration be0cca93 已在测试维度验证绿**（round-4 实证 fail 0）。aborted 不触发 stop-dispatch。
 - **在飞 0/5**。held 1（session-pid）。等外层重搭后最终真绿 run。
+
+### 事件 14:4xZ（round-7 红源=工厂 tmux 泄漏——TMUX_TMPDIR 本机无效）
+
+- **round-7（14:20 run，23min）**：测试**全过**（主体 2761/2717/0，serial 230/229/0，fail 0 cancelled 0）——assert-clean-tree PASS。**RED 仅因 tmux-leak-scan**：残留 topo-factory/topo-race/isc-factory 服务器 + /tmp 目录。
+- **根因（实证）**：**TMUX_TMPDIR 在本机不被 tmux 3.6 遵守**（设 TMUX_TMPDIR/TMPDIR 后会话仍落 `/tmp/tmux-1000/default`）——hermetic 隔离失效，quay-topology.sh 工厂会话落默认 socket，hermetic cleanup 扫不到。
+- **修**：session-topology/inner-session-check 的 helper cleanup 加**默认 socket 工厂会话显式 kill**（topo-factory/topo-idem/topo-race/isc-factory，per-session kill-session 绝不 kill-server）。实测：测试后 CLEAN + tmux-leak-scan 全过。integration **71734885**。
+- **integration 现为**：serial 22 + 21-fix + assert-clean-tree 扩展 + 工厂 tmux 清理。**所有 round 4-7 红源已修**。等外层 final run。
+- **held**：session-pid（7647aaf8）。在飞 0/5。
