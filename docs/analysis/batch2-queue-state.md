@@ -7875,3 +7875,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 暂缓（red-suite 规则，touches 与失败文件相交）**：worktree/分支保留（7647aaf8）待 re-green。
 - **外层 653dcdf3/d1dfce9b 确认**：concurrency-8 套件 15 fail **全环境性**（A2 install 隔离 10/10；KNOWN-LOAD-SENSITIVE + 并行安装干扰）；**tree effectively green**；**red-window release 是人的裁定**（concurrency 8 结构性跑不出绿，load-sensitive 必失败）。
 - **在飞 0/5**。held 1（session-pid）。等：人裁定 red-window + 外层下一轮套件。
+
+### 事件 10:4xZ（人裁定落地派发——serial 组机制实现）
+
+- **人裁定（10:2x，方向已定）**：**并发 8 不降**。判断哪些测试不能并发跑 → 为它们应用机制 → 并发拿真绿。
+- **落地任务已派发** `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`（外层 10:36 unblock 立案 + 晋级 ready，本 tick 派发）：管理者分类 A/B/C/D——
+  - **A类嵌套整套件**（runner-grouping/select-tests-for-touches/test-coverage-check，R3 spawns-test-sh=3 已知违规豁免未修）→ serial 组
+  - **B类真实挂钟等待**（session-liveness/measure-suite/monitor-mount-check/quay-init-tmux-detection/send-keys-verified/build-dist-smoke）→ serial 组
+  - **C类独占 tmux**（已排除，勿碰）
+  - **D类共享目录竞态**（runner-grouping AC7 zz- fixture vs test-file-snapshot 全集扫描 → 'baseline file REMOVED'）→ **代码修复**（不与 A 同批）
+  - 落点：复用 `--group` 机制加 serial 组（主体并发 8，serial 单独串行跑）；D 类夹具移出共享目录。
+- **套件红窗状态**：red+failed（15 fail 全环境性，外层 09:27 确认 tree effectively green）——**本任务即红窗裁定解**：实现 → 并发 8 重跑 → 真绿。fan-in（session-pid 7647aaf8）仍 held，待真绿一并 un-hold。
+- **在飞 1/5**：serial-group agent。4 空槽。
