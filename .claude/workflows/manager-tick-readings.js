@@ -178,7 +178,7 @@ const audit = await agent(
 ⇒ **"本轮做了什么"只有主循环完整知道，该由它声明；你的活是【核验】不是【生成】。**
 
 所以：**不要列举主循环做了什么**。只在证据里发现【主循环没声明、但确实发生过】的动作时，
-把它放进 `undeclaredActions`（这是漏报检测）。看不到就返回空数组，**不要凑数**。`,
+把它放进 \`undeclaredActions\`（这是漏报检测）。看不到就返回空数组，**不要凑数**。`,
   { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
 )
 
