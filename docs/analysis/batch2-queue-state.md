@@ -7635,3 +7635,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **observer-registry 非卡住**：ps 确认在跑 `bash scripts/test.sh > /tmp/fullsuite-2.log`（02:00 起，~22min，~300 测试文件，--test-concurrency=1）。无 index.lock、无挂起 git op。是 DoD 全量验证。
 - **在飞 2/2**：observer-registry（全量中）+ liveness-saturation。3 空槽无候选（全撞在飞）。
+
+### 事件 02:5xZ（外层优先派发——tmux-leak 3/5）
+
+- **外层指示优先派发** gap-tests-leak-tmux-servers（156 个 tmux server 进程全 >2h 仍累积，曾致资源压力/崩溃；手动清理不解决，需代码修复）。管理 02:46 实测。
+- **前置修复**：收窄 Touches 两个 overbroad glob（`orchestration/**`→restart-plan-2026-08-04-third.md；`plugin/scripts/`→tmux-leak-scan.sh）——否则 concurrent-batch-scheduler 对一切 in-flight 保守串行化。收窄后 vs 全部在飞 disjoint。
+- **派发 3/5**：worktree `quay-worktrees/tmux-leak`。AC 部分先前已勾，指示 agent 逐条验当前代码（若被回退则重实现）。
+- **在飞 3/3（真实）**：observer-registry（全量中）+ liveness-saturation + tmux-leak。2 空槽。
