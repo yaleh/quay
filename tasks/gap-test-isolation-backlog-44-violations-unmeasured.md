@@ -75,6 +75,13 @@ subset），test-isolation 缺同款机制。
 - [ ] AC6: **AC7 夹具写法修正**——`zz-runner-grouping-undeclared.test.mjs` 移出真实 `plugin/test/`
       （或快照助手排除 zz-* 运行期夹具），消除与 test-file-snapshot 全套件快照的跨文件竞态
 
+> **交叉标注（2026-08-07，`gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 落地）**：
+> AC6 的竞态已由落地任务消除——runner-grouping 现声明 `@test-group serial`（serial 阶段在并发主体
+> 之后跑，与 test-file-snapshot 不再并行），且 `test-file-snapshot.sh` 的 `current_files()` 排除
+> `zz-*` 运行期夹具（快照侧消除撞车点，runner-grouping 的 AC7 夹具保留在共享目录以维持断言语义）。
+> 本任务的 A/D 类发现方向被落地任务收窄：A 类（runner-grouping 等嵌套 spawns）已 serial 化，
+> D 类（共享目录读写竞态）已由快照排除修复。AC1-AC4（基线 + 棘轮）不受影响，仍待本任务自身完成。
+
 ## Touches
 
 - plugin/scripts/test-isolation-check.ts（基线 + 棘轮逻辑）
@@ -90,8 +97,7 @@ measure   iso_violations = `bash plugin/scripts/test-isolation-check.ts` stdout 
 band      iso_violations <= 44（基线；shrink-only 棘轮：净增即红）
 measure   concurrency_triggered = `grep -c 'zz-runner-grouping-undeclared' plugin/test/runner-grouping.test.mjs plugin/test/test-file-snapshot.test.mjs` stdout 数字段（AC6 落地后应移除该夹具引用，归 0）
 invoke    `bash plugin/scripts/test-isolation-check.ts`
-control   既有 44 不阻塞（AC2）；新违规触发红（AC2）；并发 8 下 runner-grouping 与 test-file-snapshot
-          同跑不再互相干扰（AC6）
+control   既有 44 不阻塞（AC2）；新违规触发红（AC2）；并发 8 下 runner-grouping 与 test-file-snapshot 同跑不再互相干扰（AC6，serial+快照排除已落地）
 resume    基线与棘轮分步提交，任一步完成即写盘；先跑 measure 读当前违规数
 
 ## Dispatch review

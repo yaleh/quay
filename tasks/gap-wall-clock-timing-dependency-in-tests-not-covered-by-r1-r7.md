@@ -49,6 +49,15 @@ extra: {}
 须受控假时钟/事件）——serial 组是处理既有测试的机制，R8 是约束新测试的原则，两者互补。
 落地任务：`gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`。
 
+### 交叉标注（2026-08-07，serial 组已落地）
+
+`gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 已落地：6 个 B类文件
+（session-liveness / measure-suite / monitor-mount-check / quay-init-tmux-detection /
+send-keys-verified / build-dist-smoke）与 A 类、KNOWN-LOAD-SENSITIVE 族一起声明 `@test-group serial`，
+由 `scripts/test.sh` 的 serial 阶段在并发主体之后以 concurrency 1 单独串行跑——B类挂钟等待不再被
+并发主体 CPU 饥饿击穿（本任务 AC2 的"既有 B类经 serial 组隔离"已由落地任务完成）。本任务的 R8 规则
+（约束**新**测试不得依赖挂钟计时）仍是独立的后续工作。
+
 ## Contract
 
 ```

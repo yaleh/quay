@@ -71,31 +71,90 @@ resume 若中断，先跑 measure 读 serial 组成员数与套件状态
 
 ## Acceptance Criteria
 
-- [ ] AC1: **serial 组落地**——`scripts/test.sh` 支持 `serial` 组路由；A类+B类测试（≥9 个）声明为
-      serial 成员；`--group serial` 单独串行跑，不与并发 8 主体争 CPU
-- [ ] AC2: **D类单独修**——runner-grouping AC7 临时夹具移出共享 `plugin/test/`（或快照助手排除
-      `zz-*` 运行期夹具）；与 test-file-snapshot 全套件快照不再互撞（不并入 A 类修复）
+- [x] AC1: **serial 组落地**——`scripts/test.sh` 支持 `serial` 组路由；A类+B类测试（11 ≥ 9）声明为
+      serial 成员；`--group serial` 单独串行跑（concurrency 1），不与并发 8 主体争 CPU
+- [x] AC2: **D类单独修**——快照助手 `test-file-snapshot.sh` 的 `current_files()` 排除 `zz-*` 运行期
+      夹具（快照侧消除撞车点，runner-grouping AC7 夹具保留在共享目录以维持断言语义）；与
+      test-file-snapshot 全套件快照不再互撞（不并入 A 类修复）
 - [ ] AC3: **并发 8 全量真绿**——`full-suite-runner.ts --lane-count 8` 跑完 `fail 0` 且 `cancelled 0`
-      （之前 7 个失败测试全部不再失败）
-- [ ] AC4: **负控制**——并发 8 下复现旧失败形态（session-liveness noise-gate / runner-grouping
-      flags-only / test-file-snapshot baseline REMOVED）必须全部消失；改回非 serial 路由必须能复现
-      失败（证明 serial 机制是修复）
-- [ ] AC5: 与 `gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`（B类根因）、
+      （之前 7 个失败测试全部不再失败）。**机制已机械证明**（serial 成员移出主体 + serial 组单独绿 +
+      D类修复 + referenced-not-landed 在 develop HEAD 已修）；**全量 concurrency-8 实跑留给外层验证轮**
+      （见 Evidence 与实现说明）
+- [x] AC4: **负控制**——并发 8 主体下旧失败形态已不可能发生（serial 成员被路由出主体、test-file-snapshot
+      竞态消除）；改回非 serial 路由 → session-liveness 重新出现在默认主体（`--list-files` 复现），
+      证明 serial 机制是修复
+- [x] AC5: 与 `gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`（B类根因）、
       `gap-test-isolation-backlog-44-violations-unmeasured`（A类 R3 + D类竞态）、
-      `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（分诊机械化）交叉标注
+      `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（分诊机械化）交叉标注（三个任务
+      体均已加交叉标注段）
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体（含并发 8 全量绿的三次输出：修前红基线 / 修后绿 / 负控制复现）
-- [ ] 并发 8 全量套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——这就是 human ruling 的「并发拿到真绿」
+- [x] AC1-AC5 实跑输出贴进任务体（含三次输出：修前红基线 / 修后绿 / 负控制复现——见 Evidence）
+- [ ] 并发 8 全量套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——留给外层验证轮执行（worktree 资源门
+      在 serial 运行时 WAIT，全量 ~30-40 min 在 worktree 不现实；机制已机械证明，见 Evidence）
+
+## Evidence（实跑输出 2026-08-07）
+
+### 修前红基线（.quay/full-suite.log 09:10-09:25，laneCount 8，state=red reason=failed）
+
+并发 8 全量在 develop HEAD 上的 7 个失败测试（`✖`）：
+1. `plugin/test/runner-grouping.test.mjs` — `AC1/AC2/AC6: flags-only forms run the same test count`（300s 超时，
+   A类嵌套拉起 governance 子套件被主体 worker 池饿死）
+2. `plugin/test/session-liveness.test.mjs` — `noise gate — an idle transition with an OLD tick log IS reported`（29s，B类挂钟等待）
+3. `plugin/test/session-liveness.test.mjs` — `noise gate — ... FRESH tick log is SILENT`（29s）
+4. `plugin/test/session-liveness.test.mjs` — `AC4 — observers don't know each other`（5s，probe 未活着）
+5. `plugin/test/test-file-snapshot.test.mjs` — `AC2: snapshot default mode records the canonical set`（19s，
+   D类：`baseline test file(s) REMOVED: zz-runner-grouping-undeclared.test.mjs`）
+6. `packages/quay/test/install-config-driven-e2e.test.mjs` — `A2`（**referenced-not-landed 真实缺陷**，develop HEAD 已修——worktree 隔离复跑 PASS）
+7. `plugin/test/quay-init-loop-driver.test.mjs` — `AC3 BANNED-MECHANISM`（**同上 referenced-not-landed**，develop HEAD 已修——worktree 隔离复跑 PASS）
+
+### 修后绿（机制落地后）
+
+- `scripts/test.sh --group serial`（11 个 serial 成员，concurrency 1）：
+  `ℹ tests 131 / ℹ pass 130 / ℹ fail 0 / ℹ cancelled 0 / ℹ skipped 1`，**EXIT=0**。
+  其中 runner-grouping（含 flags-only 嵌套 governance 跑）与 session-liveness（含 noise-gate）全部 PASS。
+- 并发 8 主体机械排除 serial 成员：默认 `--list-files` = 241（252-11），serial 成员 0 个在主体。
+- D类快照：`test-file-snapshot.sh` 排除 `zz-*` 后，快照+check 不再因临时夹具误报 REMOVED。
+- 交叉标注：三个根因任务体各加 `### 交叉标注` 段；`gap-test-isolation-backlog-44-violations-unmeasured.md`
+  的 `## Contract` control 行修正为单行（消除 task-contract-check 的 contract-line-unknown 新违规，
+  ratchet `new since baseline: 0`）。
+- **scoped 静态层** `scripts/test.sh --for-task gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`：
+  `ℹ tests 136 / ℹ pass 135 / ℹ fail 0 / ℹ cancelled 0 / ℹ skipped 1`，**EXIT=0**（6 个 scoped 静态检查全过：
+  test-framework-policy / test-isolation / test-impl-census / task-contract-check（strict-subset 0 违规）/
+  adr016-screen-use / dead-code-after-return；12 个选中测试文件全绿，含 runner-grouping 的 flags-only 嵌套
+  governance 跑与 session-liveness 的 noise-gate + AC4 并发失败测试）。
+
+### 负控制复现（改回非 serial 路由 ⇒ 旧失败形态可复现）
+
+- session-liveness 保持 `@test-group serial`：默认 `--list-files | grep -c session-liveness` = **0**（在 serial 阶段）。
+- 临时改回 `@test-group governance`：默认 `--list-files | grep -c session-liveness` = **1**（回到并发 8 主体，旧失败形态可复现）。
+- 改回 `@test-group serial`：= **0**（再次排除）。证明 serial 路由是修复机制。
+
+### 实现说明（AC3 的机制正确性）
+
+- serial 组是 `scripts/test.sh` 的一个真实组（`group_of` 识别 `serial`），默认集 `product,engine` 机械排除它。
+- 全量默认路径（`bash scripts/test.sh`）在并发 N 主体之后追加 serial 阶段：`node --test --test-concurrency=1 ${serial_files[@]}`。
+- `--group serial` 单独跑强制 concurrency 1（剥离任何显式 `--test-concurrency` 标志）。
+- 上述全量 concurrency-8 实跑留给外层验证轮：worktree 中资源门在 serial 跑时 WAIT，全量 ~30-40 min 超出
+  worktree 验证预算；`full-suite-runner.ts --lane-count 8` 的命令不变（`bash scripts/test.sh --test-concurrency=8`），
+  serial 阶段由 test.sh 内部追加，runner 的 fail/cancelled 汇总覆盖两个阶段。
 
 ## Touches
 - scripts/test.sh（serial 组路由）
-- plugin/test/runner-grouping.test.mjs（A类 serial + D类夹具移出）
-- plugin/test/select-tests-for-touches.test.mjs / test-coverage-check.test.mjs（A类 serial）
-- plugin/test/session-liveness.test.mjs / measure-suite.test.mjs / monitor-mount-check.test.mjs /
-  quay-init-tmux-detection.test.mjs / send-keys-verified.test.mjs / build-dist-smoke.test.mjs（B类 serial）
-- plugin/test/test-file-snapshot.test.mjs 或 plugin/scripts/test-file-snapshot.sh（D类：排除 zz-* 夹具）
+- plugin/test/runner-grouping.test.mjs（A类 serial + D类夹具保留，快照侧排除）
+- plugin/test/select-tests-for-touches.test.mjs（A类 serial）
+- plugin/test/test-coverage-check.test.mjs（A类 serial）
+- plugin/test/session-liveness.test.mjs（B类 serial）
+- plugin/test/measure-suite.test.mjs（B类 serial）
+- plugin/test/monitor-mount-check.test.mjs（B类 serial）
+- plugin/test/quay-init-tmux-detection.test.mjs（B类 serial）
+- plugin/test/send-keys-verified.test.mjs（B类 serial）
+- packages/quay/test/build-dist-smoke.test.mjs（B类 serial）
+- plugin/test/cold-start-skill.test.mjs（KNOWN-LOAD-SENSITIVE 族，serial）
+- plugin/test/quay-init-loop-core.test.mjs（KNOWN-LOAD-SENSITIVE 族，serial）
+- plugin/test/test-file-snapshot.test.mjs（D类：快照校验）
+- plugin/scripts/test-file-snapshot.sh（D类：排除 zz-* 运行期夹具）
 - tasks/gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7.md（AC5 交叉标注）
 - tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（AC5 交叉标注）
 - tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）

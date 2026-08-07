@@ -61,6 +61,16 @@ extra: {}
 4. **非族失败禁止入桶**：not-in-family 失败默认视为真候选（test-file-snapshot 竞态这类，见 backlog
    任务 AC5/AC6），除非另有证据。
 
+### 交叉标注（2026-08-07，serial 组已落地——分诊机械化的中间态）
+
+`gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 已落地：KNOWN-LOAD-SENSITIVE 族
+（session-liveness / cold-start-skill / runner-grouping / quay-init-loop-core 及 A/B 类共 11 个文件）现
+统一声明 `@test-group serial`，由 `scripts/test.sh` 机械路由到并发主体之后的 concurrency-1 阶段。这
+是**分诊机械化的第一步**——族成员被**机械识别为 serial 成员**（`grep -rl '@test-group serial'` 即可
+列出全部），红窗分诊不再靠人记得 KNOWN-LOAD-SENSITIVE 注释。本任务设想的 `// @load-sensitive <kind>`
+清单 + 红窗自动分区 + 隔离重跑自动触发（AC1-AC6）仍是后续收尾：serial 组解决"这些测试不能并发跑"，
+kind 标注解决"为什么不能并发跑"（wall-clock vs nested-spawn），两者互补。
+
 ## Contract
 
 measure known_family_members = `node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list | wc -l` stdout 数字段（当前 ≥2：session-liveness、cold-start-skill；runner-grouping 待标注 kind）
