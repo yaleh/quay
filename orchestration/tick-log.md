@@ -550,3 +550,12 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > R8 任务更新（B类 6 文件走 serial，R8 规则保留约束新测试）。**红窗处置被裁定替换**：从「等人裁定
 > 红窗释放 vs 等真绿」变成「实现 serial 组 → 并发 8 重跑 → 真绿」——done-flip 批次与 integration→
 > develop 批量合仍等真绿。动作分布 no-action 198 / correct 92 / unblock 58 / escalate 7。
+
+> **10:48Z 外层 tick（no-action——内层实现 human-ruling 任务中，无新落地）**：`gap-suite-concurrency-
+> 8-green-serial-group-for-non-concurrent-tests` 在飞（inProgress 确认，0m）；subagent 在读
+> test-coverage-check.ts glob 解析（A类工作，4m22s）。内层已重挂套件状态 monitor（bg8jpis39），明示
+> 「外层等 serial 修复后重跑并发 8」。套件仍红（09:25，未重跑——符合「修好才重启」）。无新 merge
+> 落地（integration 未变）、无 notYetFlipped 新增（在飞任务未落地）。Monitor mounted+targetOk 真、
+> suite-state-trigger 挂载（3255786）。负载 1.81。.halt：quay/archguard 运行、meta-cc 暂停。
+> 独立核实：telemetry 确认任务在飞 + pane subagent 在读 A类文件，与「已派发」一致。等内层实现落地
+> → 外层并发 8 重跑 → 真绿。
