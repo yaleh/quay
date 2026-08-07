@@ -1,0 +1,97 @@
+---
+id: gap-suite-cutoff-what-tears-test-process-at-session-topology
+title: "full-suite red verdict is UNRELIABLE: the test process was torn down
+  mid-run (SIGKILL ×2, cancelled ×2, 'Promise resolution is still pending' ×35 →
+  ~50 files each failing exactly 2× wholesale, not 34 broken tests) — the 101
+  failures' landing points are meaningless; the real question is WHAT tore the
+  process (at ~session-topology, alphabetically); hypothesis: OOM killer from
+  the 160+ tmux-server leak consuming memory (same machine had a prior OOM);
+  triage by failure-count would \"fix\" innocent files"
+status: todo
+labels:
+  - gap
+  - defect
+  - milestone-candidate
+parent: null
+children: []
+extra: {}
+---
+**type:** execution
+
+## Proposal
+
+**full-suite 红判决的落点完全不可信——测试进程被整片切断，101 个失败不是 34 个测试坏了。**
+
+### 三项事实（管理者 2026-08-07 逐层核实，外层复验）
+
+1. **整片切断**：68 个文件级 ✖ 覆盖大量文件、**每个恰好 2×**（外层实测：50 个文件各 2×，51 distinct）；
+   失败区间按字母序从某点起**整片挂掉**（session-topology … worktree-root-fs-check），不是分散缺陷。
+2. **同一条运行时消息**：**'Promise resolution is still pending but the event loop has already resolved' ×35**——
+   事件循环已结束而 Promise 未决 = **测试进程被提前拆掉**，后续文件连带失败。
+3. **旁证**：同一日志 **SIGKILL ×2、cancelled ×2、timeout ×18**。
+
+### 判绿口径的直接影响
+
+`fast-mode-loop-tick.md` 判绿三条件明写「fail 0 ≠ 绿，崩溃的套件也可能报 fail 0」——这次是**同一问题的反向**：
+崩溃使几十个无辜文件报 fail，所以**红判决的落点完全不可信**。而 cancelled ×2 恰是那三条件点名的信号，
+它出现了 ⇒ 必须先处理「切断」，再谈失败分诊。
+
+### 真问题：什么在 ~session-topology 那一点把进程拆了
+
+**不是那 34-50 个文件。** 按失败数分诊会去修根本没坏的测试。
+
+**主假设（待验证）**：**OOM killer**——tmux 泄漏 160+ server（每 server 都是进程，占内存）+
+node 进程，可能耗尽内存触发 SIGKILL（SIGKILL ×2 符合 OOM 杀进程的特征）。**本机此前有整机 OOM 史**
+（2026-08-04 02:15Z 冷启动记录）。验证：`dmesg | grep -i 'killed process'` / OOM 事件时间戳与
+套件 SIGKILL 时刻对照。
+
+**次假设**：runner 自己的超时/清理逻辑把测试进程杀了；或某测试（如 session-topology 的 tmux 操作）
+与套件并发冲突。
+
+### 为什么这个任务优先于分诊 101 失败
+
+红判决不可信 ⇒ 任何对 101 失败的分诊都是在对噪声分类。先查切断源，再重跑干净窗口拿真失败数。
+
+## Contract
+
+```
+measure sigkill_events = `grep -c 'SIGKILL\|Killed' .quay/full-suite.log` stdout 数字段（当前 2）
+measure cancelled = `grep -c 'cancelled [1-9]' .quay/full-suite.log` stdout 数字段（当前 2）
+measure oom_evidence = `sudo dmesg 2>/dev/null | grep -c 'killed process.*node\|Out of memory'` stdout 数字段（0=无 OOM，>0=有）
+invariant full-suite 红判决必须先排除「进程被切断」（SIGKILL/cancelled/Promise-pending 级联）才能分诊失败；
+  切断存在时，失败落点不可信
+invoke `grep -c 'Promise resolution is still pending' .quay/full-suite.log`
+control 人为 SIGKILL 一个测试进程 ⇒ 后续文件必须报 Promise-pending 级联（复现切断形态，证明切断是 SIGKILL 级联）
+resume 若中断，先跑 measure 读当前 SIGKILL/cancelled 数，再对照 dmesg 的 OOM 证据
+```
+
+## Acceptance Criteria
+
+- [ ] AC1: **切断源定位**——查明什么在 ~session-topology 把测试进程拆了（OOM killer / runner 清理 /
+      测试冲突），贴出证据（dmesg OOM 时间戳 vs SIGKILL 时刻对照）
+- [ ] AC2: **修掉切断源**——修复后干净窗口重跑，Promise-pending 级联不再出现
+- [ ] AC3: **红判决可信恢复**——重跑后失败数显著下降（真失败 vs 级联噪声分离），且判绿三条件成立
+- [ ] AC4: 与 `gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`（tmux 泄漏——
+      若 OOM 假设成立，切断是泄漏的下游后果）、`gap-two-thirds-of-a-task-is-polling-a-suite-log`
+      （轮询套件任务的落地会砍掉「等 30 分钟拿不可信红」）交叉标注
+
+## Definition of Done
+
+- [ ] AC1-AC4 实跑输出贴进任务体（含 dmesg/SIGKILL 对照）
+- [ ] 干净窗口重跑 full-suite：Promise-pending 级联 0、真失败数可分诊
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+
+## Touches
+- plugin/scripts/full-suite-runner.ts（若切断源在 runner 的清理/超时逻辑）
+- scripts/test.sh（若测试进程生命周期管理需修）
+- plugin/test/session-topology.test.mjs 附近（若切断由该测试触发——只查不预设）
+- tasks/gap-suite-cutoff-what-tears-test-process-at-session-topology.md（自身文件）
+- tasks/gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause.md（交叉标注）
+- tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md（交叉标注）
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-07T04:1xZ
+changed: 管理者 2026-08-07 分诊证据（整片切断 + Promise-pending + SIGKILL/cancelled）→ 外层立案：
+  红判决落点不可信，真问题是切断源。主假设 OOM（tmux 泄漏下游），待验证。
