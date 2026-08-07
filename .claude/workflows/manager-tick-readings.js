@@ -95,6 +95,25 @@ const JUDGE_CRITERIA = `**判准（逐条应用，并把结论写进 tick-log �
 \`escalate\`（攒给人）/ \`correct\`（纠正外层的**做法**，不能是它的任务内容）。
 **自审 violations 非空 ⇒ \`correct\`**，对象是我自己。`
 
+// ══ 交还给主循环的指令 ④：跨会话发消息的正确形态（2026-08-07 三次实测教训）══════════
+const SENDING = `**给 outer / inner 发消息，三条都是踩过的**
+
+1. **用 \`plugin/scripts/send-keys-reliable.sh <目标> <文本> <目标会话 transcript.jsonl>\`**，
+   不要手搓裸 \`tmux send-keys\`——ADR-016 要求三次独立调用，合并会丢 Enter（2026-08-07 踩过）。
+2. **超时设 120 秒**：\`RELIABLE_DELIVERY_VERIFY_S=120 bash plugin/scripts/send-keys-reliable.sh …\`
+   （人 2026-08-07 裁定；脚本默认 60 秒，env 可覆盖，**不需要改产品脚本**）。
+3. **消息经文件传，不要内联**：\`MSG=$(cat <file>)\`。内联时文本里的单引号（如 \`fan-in'd\`）
+   会截断 shell 引用——2026-08-07 踩过两次。
+
+**报 FAIL 时先核实再重发（这条最要紧）**：该脚本已两次报**假阴性**——内容其实已进 transcript，
+只是有界轮询没等到。**照着 FAIL 重发会让 outer 收到两遍同样的长消息。**
+核实方式（带正控制）：
+\`\`\`bash
+grep -c '<本条的特征串>' <目标 transcript.jsonl>     # 本条在不在
+grep -c '<一条已知送达过的特征串>' <同一文件>          # 正控制：确认查询本身有效
+\`\`\`
+**人 2026-08-07 裁定：假阴性可接受，加长轮询即可，不必改脚本逻辑。**`
+
 // ══ 交还给主循环的指令 ③：收尾必做 ══════════════════════════════════════════
 const CLOSING = `**收尾（两件，顺序已在 2026-08-07 修正——见下）**
 
@@ -205,6 +224,7 @@ return {
     第一步_跑这个命令块拿读数: READ_CMD,
     第二步_按这些判准逐条判读: JUDGE_CRITERIA,
     第三步_收尾: CLOSING,
+    第四步_发消息时照这个: SENDING,
     说明: '这三段由本 workflow 从磁盘上的 .js 交还给你，不依赖你的会话上下文——' +
           '判准是数据不是记忆，跨 clear/compact 稳定。改判据请改 .claude/workflows/manager-tick-readings.js。',
   },
