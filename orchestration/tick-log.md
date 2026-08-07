@@ -514,3 +514,15 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（机器可读族清单 `@load-sensitive
 > <kind>` + 红窗分诊自动分区 + 隔离重跑自动触发），backlog 任务追加 AC5/AC6（并发触发实例基线化 +
 > AC7 夹具移出真实测试目录）。两任务均 todo（套件门禁 red，等待 human ruling，不派发）。
+
+> **10:12Z 外层 tick（no-action——收尾 pass 翻 1 done；human ruling 仍 pending）**：套件仍红（09:25
+> 并发 8，durationMs 869907，7 失败全部并发专用：6 KNOWN-LOAD-SENSITIVE + 1 test-file-snapshot 跨文件
+> 竞态——前 tick 已分诊、任务已立 R8 + KNOWN-LOAD-SENSITIVE 机械化 + backlog AC5/6）。内层健康、明示
+> 等在 human ruling（"Nothing for inner to do while the human decides"），1 agent 在等。**收尾 pass**：
+> `ready-pool-check` 报 7 个 notYetFlipped——逐一核 AC/DoD：6 个 AC 未全勾或 DoD 依赖套件绿（被 ruling
+> 阻塞）留 ready；**1 个翻 done**：`gap-session-liveness-remove-shared-events-and-lock`（DoD 4 项全
+> [x] 有证据、无套件绿依赖；核实 grep 0 / heavy-op-token.sh 已删 / commit 2f9d4575 在位）。verification-
+> round 80 已写、遥测快照已落。动作分布 no-action 198 / correct 92 / unblock 57 / escalate 7（分层健康，
+> no-action 主导）。Monitor 两判据 mounted+targetOk 真，suite-state-trigger 挂载（pid 3255786）。
+> 不派发（stop-dispatch 在位）、不重启套件（red 期间等分诊修好）、不重锚（inner 等在 ruling 非空闲）。
+> 两线分支 develop/integration 无新 merge。
