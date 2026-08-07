@@ -658,3 +658,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > runtime-landing / capability-catalog Wiring / session-topology），避免一轮追一条。已 send-keys 驱动
 > 内层（delivered）。serial 组现 16 文件（确认 @test-group serial 声明 19 处、dedup 16）。等内层路由
 > 完 → 并发 8 四轮。
+
+> **13:30Z 外层 tick（no-action——内层审计重 install 测试 serial 路由中）**：integration HEAD =
+> b280289e（install-config-driven-e2e → serial，三轮 delta 已解）。内层正在审计其余候选
+> （npm-pack-e2e / worktree-root-fs-check / runtime-landing / capability-catalog / session-topology），
+> 逐核哪个真失败再路由（非盲目全路由）。套件红（三轮 13:26，无新跑）。在飞 0（内层主会话审计中）。
+> 主检出有 M plugin/test/quay-init-check-drift.test.mjs（内层 in-progress，不碰——单一写入者）。
+> Monitor mounted+targetOk 真。等内层审计 + 路由完 → 并发 8 四轮。
