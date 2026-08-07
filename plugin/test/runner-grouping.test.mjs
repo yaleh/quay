@@ -236,8 +236,8 @@ test("serial group mechanism (gap-suite-concurrency-8-green-serial-group-for-non
     "the FULL-SUITE-DEFAULT branch must declare a serial phase");
   assert.match(src, /selected \$\{#serial_files\[@\]\} files \(groups=serial\)/,
     "the serial phase must self-report its selection (AC4 self-report invariant)");
-  assert.match(src, /node --test --test-concurrency=1 "\$\{serial_files\[@\]\}"/,
-    "the serial phase must be HARD-CODED concurrency 1 (serial isolation is the invariant)");
+  assert.match(src, /node --test --test-concurrency=1( \$\(suite_reporter_flags\))? "\$\{serial_files\[@\]\}"/,
+    "the serial phase must be HARD-CODED concurrency 1 (serial isolation is the invariant); the optional suite_reporter_flags splice is the gap-install-suite-cost-instrument-reporter-not-wired wiring");
   assert.match(src, /in_group "serial" "\$groups"/,
     "the non-default path must detect the serial group");
   assert.match(src, /printf 'serial:\s+%d\\n' "\$\{counts\[serial\]:-0\}"/,

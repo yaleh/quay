@@ -163,6 +163,25 @@ else
   echo "scripts/test.sh: WARNING — could not create NODE_COMPILE_CACHE dir '${node_compile_cache_dir}'; running uncached (slow but correct, AC3 fail-open)" >&2
 fi
 
+# ── per-file duration reporter wiring (gap-install-suite-cost-instrument-reporter-not-wired) ───────
+# measure-suite-reporter.mjs EXISTS + is unit-tested, but the REAL full suite never loaded it (the
+# 34 file-level wall-clock lines in the log were LEGACY harness self-prints, not reporter output).
+# This helper produces the node --test reporter flags that load it into EVERY real-suite node --test
+# invocation (main body, serial phase, lowconc phase, and the --group serial/lowconc paths) so the
+# full-suite log carries per-file wall-clock for BOTH node:test files AND the 34 legacy harnesses
+# (>34 covered files). The flags are DUAL-REPORTER: spec keeps the normal spec/TAP summary on stdout
+# (the outer runner greps it for 判绿 markers), and measure-suite-reporter.mjs emits __PERFILE__ +
+# __GROUP__ + __CEILING__ (封顶者/该拆) lines to stderr, which full-suite-runner.ts tees into
+# .quay/full-suite.log. Mechanical anti-regression: plugin/test/measure-suite-reporter-wired.test.mjs
+# asserts this wiring exists, so removing it flips the suite red (the 7th instance is prevented).
+suite_reporter_flags() {
+  printf '%s\n' \
+    "--test-reporter=spec" \
+    "--test-reporter=${repo_root}/plugin/scripts/measure-suite-reporter.mjs" \
+    "--test-reporter-destination=stdout" \
+    "--test-reporter-destination=stderr"
+}
+
 # run_static_checks — the repo-wide invariants that run on EVERY FULL-SUITE-mode test-running
 # invocation (the default, --group, flags-only, explicit files) AND on `--static-checks`.
 # independent of which test files were requested (fast; the metadata modes --list-groups/
@@ -744,9 +763,9 @@ run_selected() {
     # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
     # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
     if has_explicit_concurrency "$@"; then
-      node --test "$@" "${files[@]}"
+      node --test $(suite_reporter_flags) "$@" "${files[@]}"
     else
-      node --test --test-concurrency="$cc" "$@" "${files[@]}"
+      node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
     fi
     local code=$?
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
@@ -765,7 +784,7 @@ run_selected() {
       while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
       if [ "${#serial_files[@]}" -gt 0 ]; then
         echo "selected ${#serial_files[@]} files (groups=serial)"
-        node --test --test-concurrency=1 "${serial_files[@]}"
+        node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
         serial_code=$?
         if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
       fi
@@ -781,7 +800,7 @@ run_selected() {
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
     if [ "${#lowconc_files[@]}" -gt 0 ]; then
       echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
-      node --test --test-concurrency=3 "${lowconc_files[@]}"
+      node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
       local lcode=$?
       [ "$lcode" -eq 0 ] || code="$lcode"
     fi
@@ -824,7 +843,7 @@ run_selected() {
       if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
       filtered+=("$a")
     done
-    exec node --test --test-concurrency=1 "${filtered[@]}" "${files[@]}"
+    exec node --test --test-concurrency=1 $(suite_reporter_flags) "${filtered[@]}" "${files[@]}"
   fi
   # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
   # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency 3 —
@@ -837,9 +856,9 @@ run_selected() {
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
   if has_explicit_concurrency "$@"; then
-    exec node --test "$@" "${files[@]}"
+    exec node --test $(suite_reporter_flags) "$@" "${files[@]}"
   elif [ -n "$lowconc_force" ]; then
-    exec node --test "$lowconc_force" "$@" "${files[@]}"
+    exec node --test "$lowconc_force" $(suite_reporter_flags) "$@" "${files[@]}"
   else
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
   fi
