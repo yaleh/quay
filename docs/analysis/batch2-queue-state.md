@@ -8049,3 +8049,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **A1 最终确认**：.gitignore fix 已落 integration 7d410a50 + task file 6b04183a（check-ignore 3/3 复验）。其 DoD 全量 run 因 fan-in 删除 worktree 而 concurrent-teardown 失败（B 前提现场实证），DoD 全量归外层 suite-green-gate。
 - **A2 派发**（worktreeinclude，create-new-file 类——3/5 missing touches 均为新文件创建目标 .worktreeinclude/scripts/worktree-include.sh/文档）：B 完成释放触碰碰撞。telemetry 记录。
 - **在飞 2/5**：C（serial-segment，优先）+ A2（worktreeinclude）。suite GREEN。
+
+### 事件 15:6xZ（A2 完成 fan-in；仅剩 C 优先在飞）
+
+- **A2 完成**（agent f0b84f5b，6 files +205/-7）：`.worktreeinclude` 声明（gitignore 语法列 gitignored 文件）+ `scripts/worktree-include.sh`（git worktree list 找主仓、git check-ignore --stdin 匹配声明、只拷 declared∩gitignored、node_modules 恒排除、无 .worktreeinclude → exit 0）+ loop-driver SKILL.md step 3 接线。AC2/AC3 实证（fresh worktree 拷 config+vendor dists；/plugin/test 相对路径 REPO_ROOT 解析不再 crash）+ 4 控制全对。**fan-in**：integration **263c073c+498d1680**（.worktreeinclude + worktree-include.sh + SKILL 全落）。task 文件入 develop。
+- **4/4 任务处理完毕**：A1（gitignore 7d410a50）+ B（clean-tree DELTA 174badc0）+ A2（worktreeinclude 263c073c）+ suite-green-gate（7147edf5）。**仅剩 C（serial-cost 优先）在飞**。
+- **integration 累计**：71734885 真绿 + 全部 fan-ins。suite GREEN。
