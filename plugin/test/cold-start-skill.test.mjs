@@ -83,8 +83,8 @@ test('AC5 — the cold-start skill exists, is a Monitor-based agent skill, and i
 });
 
 test('AC5 — the skill mounts THE ONE monitor via the Monitor tool (session-liveness-mount.sh; inner-state.sh retired)', () => {
-  assert.match(skillSrc, /Monitor\(\{command:.*quay-session\.ts session-liveness-mount/s,
-    'the skill must instruct a Monitor for the observer mount entry via the quay-session entry point (40→6 integration, gap-ac8... AC2)');
+  assert.match(skillSrc, /Monitor\(\{command:.*session-liveness-mount\.sh/s,
+    'the skill must instruct a Monitor for the observer mount entry session-liveness-mount.sh (2026-08-06: no lock, who mounts owns its own stdout stream)');
   assert.ok(!/Monitor\(\{command:.*inner-state\.sh/.test(skillSrc),
     'the skill must NOT instruct a Monitor for inner-state.sh (retired, gap-retire-inner-state-one-observer-targets-by-parameter AC2)');
   assert.match(skillSrc, /persistent:\s*true/s,

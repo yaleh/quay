@@ -43,12 +43,11 @@
 //      — flash answers light questions in ~5s, so a short window would be missed by sparse
 //      sampling) → SESSION-RESUMED → back to idle → SESSION-IDLE. Skips when the probe session is
 //      absent (CI / other machines).
-//   B. SESSION-GONE/SESSION-BACK — pure process detection (session_pid: the pane's OWN foreground
-//      process OR any child of it whose NAME is claude — comm / argv[0] basename, NOT a whole-cmdline
-//      grep; gap-session-liveness-session-pid-blind-to-claude-as-pane-process). NOT redraw-dependent,
-//      so it runs hermetically on an ISOLATED tmux socket with a real `sleep` whose argv[0] is
-//      "claude-probe" as the claude-cmdline stand-in — no fake TUI involved, and it never touches the
-//      real projects.
+//   B. SESSION-GONE/SESSION-BACK — pure process detection (session_pid: first child of the pane
+//      shell whose /proc/<pid>/cmdline contains "claude"). NOT redraw-dependent, so it runs
+//      hermetically on an ISOLATED tmux socket with a real `sleep` whose argv[0] is "claude-probe"
+//      as the claude-cmdline stand-in — no fake TUI involved, and it never touches the real
+//      projects.
 //   C. REPO-STALL — alive + a git repo whose HEAD committer date is ≥STALL_MIN minutes old, not
 //      halted. Hermetic: isolated-socket stand-in + a temp repo with a backdated commit.
 //   F. transcript heartbeat (AC1/AC16) — a per-target transcript (via SESSION_TRANSCRIPTS, session-id
@@ -67,7 +66,7 @@
 //      advancing is expected); GONE is NOT suppressed. Hermetic.
 //
 // Process hygiene (handoff rules 2b/3): no pipelines feeding `$?`; no `pgrep -f` anywhere — the
-// probe is found via /proc/<pid>/comm + cmdline argv[0] exactly as session_pid() does it. Every
+// probe is found via /proc/<pid>/cmdline argv position exactly as session_pid() does it. Every
 // mkdtemp tmpdir is removed in a finally (test-isolation R6). Every hermetic tmux server lives on
 // its own socket (TMUX_TMPDIR) so the real quay-0/archguard-2/meta-cc-4 sessions are untouchable.
 //
@@ -123,39 +122,23 @@ function isolateTmuxEnv(sockDir) {
   return env;
 }
 
-// isClaudePid — replicate session_pid()'s claude test: a process IS claude by its NAME, not by a
-// whole-cmdline grep (which would match a ".claude" path substring in a non-claude child's args —
-// gap-session-liveness-session-pid-blind-to-claude-as-pane-process false-positive dimension).
-// Two name sources, matching the script's _is_claude_pid():
-//   1. /proc/<pid>/comm (process name) starts with "claude";
-//   2. argv[0] (first NUL field of cmdline)'s basename contains "claude" (covers `exec -a
-//      claude-probe sleep …` probes whose comm is "sleep"). Never greps the whole cmdline.
-function isClaudePid(pid) {
-  try {
-    const comm = fs.readFileSync(`/proc/${pid}/comm`, "utf8").trim();
-    if (comm.startsWith("claude")) return true;
-    const argv0 = (fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0] || "").trim();
-    const base = argv0.split("/").pop() || "";
-    if (base.includes("claude")) return true;
-  } catch {
-    /* /proc unreadable — not claude */
-  }
-  return false;
-}
-
-// paneHasClaudeChild — replicate session_pid(): the pane's OWN foreground process (pane_pid, the
-// claude-as-pane-process case) OR any direct child of it is a claude process. NOT `pgrep -f`
-// (handoff rule 3: it would match this very command).
+// paneHasClaudeChild — replicate session_pid(): the first child of the pane shell whose
+// /proc/<pid>/cmdline contains "claude". NOT `pgrep -f` (handoff rule 3: it would match this
+// very command).
 function paneHasClaudeChild(env, session) {
   const p = tmux(["list-panes", "-t", session, "-F", "#{pane_pid}"], env);
   if (p.status !== 0 || !p.stdout.trim()) return false;
-  const panePid = p.stdout.trim();
-  if (isClaudePid(panePid)) return true; // pane foreground process IS claude
-  const kids = spawnSync("pgrep", ["-P", panePid], { encoding: "utf8" });
-  for (const k of (kids.stdout ?? "").trim().split("\n").filter(Boolean)) {
-    if (isClaudePid(k)) return true;
+  const kids = spawnSync("pgrep", ["-P", p.stdout.trim()], { encoding: "utf8" });
+  const first = (kids.stdout ?? "").trim().split("\n").filter(Boolean)[0];
+  if (!first) return false;
+  try {
+    // read /proc/<pid>/cmdline directly and collapse the NUL argv separators to spaces — never
+    // pass a NUL through spawnSync argv (execve rejects it).
+    const cmd = fs.readFileSync(`/proc/${first}/cmdline`, "utf8").replace(/\0/g, " ");
+    return cmd.includes("claude");
+  } catch {
+    return false;
   }
-  return false;
 }
 
 async function waitForAlive(env, session, timeoutMs = 5000) {
@@ -190,92 +173,6 @@ function makeHermeticProbe(session) {
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
   };
-}
-
-// makePlainPane(session) — a private tmux server + a bare bash pane with NO claude process at all.
-// Used by the false-positive control (B3): a pane whose only child carries a ".claude" path in its
-// cmdline must NOT be reported as a claude session.
-function makePlainPane(session) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-"));
-  const sockDir = path.join(tmp, "sock");
-  fs.mkdirSync(sockDir, { recursive: true });
-  const env = isolateTmuxEnv(sockDir);
-  const newS = tmux(["new-session", "-d", "-s", session, "bash"], env);
-  assert.equal(newS.status, 0, `tmux new-session failed: ${newS.stderr}`);
-  return {
-    tmp,
-    env,
-    session,
-    cleanup() {
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
-  };
-}
-
-// makeClaudePaneProcess(session) — a pane whose FOREGROUND process (pane_pid) IS a claude process:
-// `exec -a claude-probe sleep 10000` REPLACES the pane's shell (no `&`, no child) — the exact
-// claude-as-pane-process shape of the 3-window topology (pane cmdline IS claude; its only children
-// would be MCP servers). The old session_pid grepped CHILDREN for "claude" and missed this shape →
-// alive=0 always (gap-session-liveness-session-pid-blind-to-claude-as-pane-process).
-function makeClaudePaneProcess(session) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-"));
-  const sockDir = path.join(tmp, "sock");
-  fs.mkdirSync(sockDir, { recursive: true });
-  const env = isolateTmuxEnv(sockDir);
-  const newS = tmux(["new-session", "-d", "-s", session, "bash"], env);
-  assert.equal(newS.status, 0, `tmux new-session failed: ${newS.stderr}`);
-  tmux(["send-keys", "-t", session, "exec -a claude-probe sleep 10000"], env);
-  tmux(["send-keys", "-t", session, "Enter"], env);
-  return {
-    tmp,
-    env,
-    session,
-    cleanup() {
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
-  };
-}
-
-// makeTwoWindowSession(session) — a private tmux server with named windows "outer" and "inner"
-// (the 3-window topology's role windows). Used by B4 to prove per-role target resolution: a
-// window-suffixed SESSION_TMUX_SESSION (quay-0:inner) must target THAT window, not the default
-// :outer window.
-function makeTwoWindowSession(session) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "session-liveness-"));
-  const sockDir = path.join(tmp, "sock");
-  fs.mkdirSync(sockDir, { recursive: true });
-  const env = isolateTmuxEnv(sockDir);
-  const newS = tmux(["new-session", "-d", "-s", session, "-n", "outer", "bash"], env);
-  assert.equal(newS.status, 0, `tmux new-session failed: ${newS.stderr}`);
-  const newW = tmux(["new-window", "-t", session, "-n", "inner", "bash"], env);
-  assert.equal(newW.status, 0, `tmux new-window failed: ${newW.stderr}`);
-  return {
-    tmp,
-    env,
-    session,
-    cleanup() {
-      tmux(["kill-session", "-t", session], env);
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
-    },
-  };
-}
-
-// paneSelfIsClaude — the pane's OWN foreground process (pane_pid) is a claude process.
-function paneSelfIsClaude(env, session) {
-  const p = tmux(["list-panes", "-t", session, "-F", "#{pane_pid}"], env);
-  if (p.status !== 0 || !p.stdout.trim()) return false;
-  return isClaudePid(p.stdout.trim());
-}
-
-async function waitForSelfClaude(env, session, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (paneSelfIsClaude(env, session)) return true;
-    await sleep(100);
-  }
-  return paneSelfIsClaude(env, session);
 }
 
 // spawnMonitor — run the REAL session-liveness.sh with a fast test interval and overridable targets.
@@ -481,112 +378,6 @@ test("SESSION-GONE then SESSION-BACK fire when the probe's claude process vanish
       mon.child.kill("SIGKILL");
     mon.cleanup();
     }
-  } finally {
-    p.cleanup();
-  }
-});
-
-// ── Test B2: claude-as-pane-process (the pane foreground process IS claude) ──────────────────────────
-// gap-session-liveness-session-pid-blind-to-claude-as-pane-process AC1/AC3: in the 3-window topology
-// pane_pid IS the claude process. Old session_pid only grepped pane_pid's CHILDREN for "claude" →
-// alive=0 always (SESSION-GONE never fires, the resident monitor is permanently silent).
-
-test("B2 — session_pid detects claude when it IS the pane foreground process (pane_pid self-check), not only as a child", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const p = makeClaudePaneProcess("ol-self");
-  try {
-    assert.ok(await waitForSelfClaude(p.env, p.session), "the pane's own foreground process must be the claude stand-in");
-    const panePid = tmux(["list-panes", "-t", p.session, "-F", "#{pane_pid}"], p.env).stdout.trim();
-    assert.ok(panePid && /^\d+$/.test(panePid), `pane_pid must be numeric, got ${panePid}`);
-    const once = spawnSync("bash", [SCRIPT, "--once"], {
-      encoding: "utf8",
-      env: { ...p.env, SESSION_TARGETS: `self ${p.tmp} ${p.session}` },
-    });
-    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
-    assert.match(once.stdout, /SESSION-STATUS self alive=1/,
-      `claude-as-pane-process must report alive=1 (old code only grepped children → alive=0):\n${once.stdout}`);
-    assert.ok(once.stdout.includes(`pid=${panePid}`),
-      `must report the pane_pid itself as the claude pid (expected ${panePid}):\n${once.stdout}`);
-  } finally {
-    p.cleanup();
-  }
-});
-
-// ── Test B3: false-positive control — a ".claude" cmdline substring in a NON-claude child ────────────
-// gap-session-liveness-session-pid-blind-to-claude-as-pane-process false-positive dimension: the old
-// whole-cmdline grep matched ".claude" in e.g. the full-suite-runner's bash wrapper cmdline
-// (/home/yale/.claude/shell-snapshots/...) and falsely reported SESSION-BACK. The fix matches by
-// process NAME (comm / argv[0] basename), so a bash wrapper is NOT claude.
-
-test("B3 — a child whose cmdline contains a .claude path substring but whose process name is NOT claude is NOT falsely reported (alive=0)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const p = makePlainPane("ol-dot");
-  try {
-    // give the pane a child whose FULL cmdline contains ".claude" (the shell-snapshot path shape of
-    // the full-suite-runner's bash wrapper) but whose process name is bash. `; true` keeps bash from
-    // exec-replacing itself with sleep (a single-command `bash -c 'sleep 10000'` would exec and lose
-    // the $0 path from argv, so the child cmdline would NOT carry ".claude").
-    tmux(["send-keys", "-t", p.session, "bash -c 'sleep 10000; true' /home/yale/.claude/shell-snapshots/abc/bash &"], p.env);
-    tmux(["send-keys", "-t", p.session, "Enter"], p.env);
-    const panePid = tmux(["list-panes", "-t", p.session, "-F", "#{pane_pid}"], p.env).stdout.trim();
-    const childCmdlines = () => {
-      const kids = spawnSync("pgrep", ["-P", panePid], { encoding: "utf8" });
-      return (kids.stdout ?? "").trim().split("\n").filter(Boolean).map((k) => {
-        try { return fs.readFileSync(`/proc/${k}/cmdline`, "utf8").replace(/\0/g, " "); } catch { return ""; }
-      });
-    };
-    const hasDotChild = () => childCmdlines().some((c) => c.includes(".claude"));
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && !hasDotChild()) await sleep(100);
-    assert.ok(hasDotChild(), `the .claude-path child must be present for the control to be real`);
-    // the CONTROL must be real: a child's full cmdline contains "claude" — the OLD grep matched it.
-    assert.ok(childCmdlines().some((c) => c.includes("claude")),
-      `control: a child cmdline must contain the claude substring (old code matched it):\n${childCmdlines().join("\n")}`);
-    // the new code matches by process NAME → the bash wrapper is NOT claude → alive=0.
-    const once = spawnSync("bash", [SCRIPT, "--once"], {
-      encoding: "utf8",
-      env: { ...p.env, SESSION_TARGETS: `dot ${p.tmp} ${p.session}` },
-    });
-    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
-    assert.match(once.stdout, /SESSION-STATUS dot alive=0/,
-      `a .claude-path child must NOT be reported as a claude session (process name is bash):\n${once.stdout}`);
-  } finally {
-    p.cleanup();
-  }
-});
-
-// ── Test B4: per-role target resolution (AC2/AC3/AC4) ──────────────────────────────────────────────
-// A window-suffixed SESSION_TMUX_SESSION (quay-0:inner) must target that NAMED window, not the
-// default :outer window. A bare session (quay-0) and a numeric pane suffix (quay-init's :0.0)
-// both resolve to <base>:outer (the zero-config default = this project's own outer).
-
-test("B4 — window-suffixed SESSION_TMUX_SESSION targets the named window (quay-0:inner); bare session and numeric pane suffix resolve to :outer", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
-  const p = makeTwoWindowSession("ol-role");
-  try {
-    // claude only in the INNER window (as the pane foreground process).
-    tmux(["send-keys", "-t", "ol-role:inner", "exec -a claude-probe sleep 10000"], p.env);
-    tmux(["send-keys", "-t", "ol-role:inner", "Enter"], p.env);
-    const innerPid = tmux(["list-panes", "-t", "ol-role:inner", "-F", "#{pane_pid}"], p.env).stdout.trim();
-    const outerPid = tmux(["list-panes", "-t", "ol-role:outer", "-F", "#{pane_pid}"], p.env).stdout.trim();
-    assert.ok(innerPid && outerPid && innerPid !== outerPid, "inner and outer must be distinct panes");
-    assert.ok(await waitForSelfClaude(p.env, "ol-role:inner"), "the inner pane must be the claude stand-in");
-    const runOnce = (sessVal) => spawnSync("bash", [SCRIPT, "--once"], {
-      encoding: "utf8",
-      env: { ...p.env, SESSION_ROOT: p.tmp, SESSION_TMUX_SESSION: sessVal },
-    });
-    // (1) named-window suffix → THAT window: alive=1 with the INNER pid.
-    let once = runOnce("ol-role:inner");
-    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
-    assert.match(once.stdout, /alive=1/,
-      `window-suffixed SESSION_TMUX_SESSION must target the named window:\n${once.stdout}`);
-    assert.ok(once.stdout.includes(`pid=${innerPid}`),
-      `must report the INNER window's pid (${innerPid}), not the outer's (${outerPid}):\n${once.stdout}`);
-    // (2) bare session → the :outer default window (outer has no claude → alive=0).
-    once = runOnce("ol-role");
-    assert.match(once.stdout, /alive=0/,
-      `bare session must target <base>:outer (no claude there):\n${once.stdout}`);
-    // (3) numeric pane suffix (quay-init's --tmux-session ol-cold:0.0 shape) → strip to :outer.
-    once = runOnce("ol-role:0.0");
-    assert.match(once.stdout, /alive=0/,
-      `numeric pane suffix must strip to <base>:outer (no claude there):\n${once.stdout}`);
   } finally {
     p.cleanup();
   }

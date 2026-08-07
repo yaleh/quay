@@ -52,7 +52,7 @@ isolation:
 
 ```sh
 cd packages/quay-native/examples/sample-workspace
-QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task list
+QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node ../../bin/quay-native.js task list
 ```
 
 See that directory's own `README.md` for the full walkthrough (including
@@ -101,9 +101,9 @@ which is how every example below is actually run (no global install step
 required):
 
 ```sh
-node --experimental-strip-types packages/quay/bin/quay.ts <command>
-node --experimental-strip-types packages/quay-native/bin/quay-native.ts <command>
-node --experimental-strip-types packages/quay-github/bin/quay-github.ts <command>
+node packages/quay/bin/quay.js <command>
+node packages/quay-native/bin/quay-native.js <command>
+node packages/quay-github/bin/quay-github.js <command>
 ```
 
 ### Option C — as a Claude Code plugin
@@ -140,14 +140,14 @@ providers:
     enabled: true
     path: "./packages/quay-native"
     tasks_dir: "./tasks"
-    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]
+    mcp_entry: ["node", "./bin/quay-native.js", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "./tasks"
 
   github:
     enabled: false                       # native is the default; select explicitly via --provider github
     path: "./packages/quay-github"
-    mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]
+    mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
     env:
       QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
 ```
@@ -230,9 +230,7 @@ copied out of the quay development tree):
   observation mechanism (`session-liveness.sh` — the ONE observer;
   `inner-state.sh` is retired, gap-retire-inner-state-one-observer-targets-by-
   parameter), plus their transitive dependencies.
-- `.quay/runtime/quay/quay.js` — the **built Core runtime artifact** (bundled by
-  quay-init — a `.js` bundle distinct from the dev-tree source `bin/quay.ts` that
-  the source-install commands above run), laid into the target's
+- `.quay/runtime/quay/quay.js` — the built Core runtime, laid into the target's
   **`.quay/runtime/`** (quay's own namespace — never `vendor/`, which Go reserves,
   nor a `dist/` segment) so its `.quay/config.yml` `mcp_entry` points at a
   **project-local copy**, never at a `quay-native` PATH symlink into the quay dev
@@ -290,7 +288,7 @@ List tasks through the active Provider (JSON form, truncated here for
 brevity — the real output is the full task list):
 
 ```
-$ node --experimental-strip-types packages/quay/bin/quay.ts task list --json
+$ node packages/quay/bin/quay.js task list --json
 quay-native mcp: serving tasks from /home/yale/work/quay/tasks
 [
   {
@@ -311,14 +309,14 @@ quay-native mcp: serving tasks from /home/yale/work/quay/tasks
 View a single task, and run its gate check:
 
 ```
-$ node --experimental-strip-types packages/quay/bin/quay.ts task view QN-001
+$ node packages/quay/bin/quay.js task view QN-001
 quay-native mcp: serving tasks from /home/yale/work/quay/tasks
 QN-001: Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics [done]
 
 ## Proposal
 ...
 
-$ node --experimental-strip-types packages/quay/bin/quay.ts task check QN-001
+$ node packages/quay/bin/quay.js task check QN-001
 quay-native mcp: serving tasks from /home/yale/work/quay/tasks
 QN-001: PASS — terminal
 ```
@@ -340,7 +338,7 @@ a single MCP endpoint for an agent (e.g. Claude Code) to register once.
 Skill-driven agents actually use):
 
 ```
-$ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task list
+$ node packages/quay-native/bin/quay-native.js task list
 QN-001	done	primitive	Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics
 QN-002	done	primitive	Build the GitHub Provider (second real backend, proves ABI)
 QN-003	done	primitive	Port quay:author orchestration Skill (retire authoring seed dependency)
@@ -348,7 +346,7 @@ QN-003	done	primitive	Port quay:author orchestration Skill (retire authoring see
 ```
 
 ```
-$ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task get QN-001
+$ node packages/quay-native/bin/quay-native.js task get QN-001
 QN-001: Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics [done]
 
 ## Proposal
@@ -356,7 +354,7 @@ QN-001: Wire task_write into quay-native CLI/MCP with full frontmatter patch sem
 ```
 
 ```
-$ node --experimental-strip-types packages/quay-native/bin/quay-native.ts manifest
+$ node packages/quay-native/bin/quay-native.js manifest
 {
   "id": "native",
   "name": "quay-native",
@@ -386,7 +384,7 @@ through the ABI).
 (`QUAY_GITHUB_REPO`, default `yaleh/quay`) onto the same task shape:
 
 ```
-$ node --experimental-strip-types packages/quay-github/bin/quay-github.ts task list
+$ node packages/quay-github/bin/quay-github.js task list
 gh-10	done	compound	[QN-037] Epic: live quay:execute Skill-driven compound-recursion end-to-end proof
 gh-9	done	primitive	[QN-037-fixture] Child B: primitive leaf under live quay:execute epic-drive test
 gh-8	done	primitive	[QN-037-fixture] Child A: primitive leaf under live quay:execute epic-drive test

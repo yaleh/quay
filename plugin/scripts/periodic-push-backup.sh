@@ -23,7 +23,6 @@
 # Usage:
 #   periodic-push-backup.sh [--remote <name|path>] [--branch <branch>] [--all]
 #                           [--root <repo>] [--dry-run] [--cron-line]
-#                           [--no-verify-hook] [--verify-branches "<b1> <b2>"]
 #
 #   (no args)     push the CURRENT branch to `origin`
 #   --remote      remote name OR filesystem path (default: origin; origin = GitHub on both machines)
@@ -34,18 +33,6 @@
 #   --cron-line   print the one-line cron (a literal `git push`) to install on B's crontab; the
 #                 branch is resolved at CRON TIME (`git branch --show-current`), so whatever is
 #                 checked out on B gets backed up
-#   --no-verify-hook   disable the post-push cross-machine-verify record hook (default: enabled)
-#   --verify-branches  which branches count as "merge landing on the shared baseline" for the verify
-#                 hook (default: "develop integration" — the FORK_BASELINE / MERGE_TARGET)
-#
-# CROSS-MACHINE VERIFICATION HOOK (gap-no-post-merge-cross-machine-verification-detection-latency-is-luck):
-#   After a SUCCESSFUL push of a branch in `--verify-branches`, the pushed tip IS a merge landing on the
-#   shared baseline → record it via cross-machine-verify.sh --record-merge (event-driven trigger of the
-#   cross-machine VERIFICATION mechanism; idempotent — a merge note that already exists is skipped). This
-#   makes the record robust: it fires at EVERY push boundary (the tick 3b land, the sync-lag-check
-#   heartbeat push, a manual push), not just the one land path. The hook is only about RECORDING the
-#   merge's identity; the actual VERIFY (a non-participating machine running the fast gate) is the loop
-#   tick heartbeat (fast-mode 4b / orchestrator 3d).
 #
 # Exit codes:
 #   0  push succeeded or everything up-to-date
@@ -60,8 +47,6 @@ branch=""
 all=0
 dry_run=0
 cron_line=0
-verify_hook=1
-verify_branches="develop integration"
 log_path="${QUAY_BACKUP_LOG:-$HOME/.quay/quay-backup.log}"
 
 while [ "$#" -gt 0 ]; do
@@ -72,8 +57,6 @@ while [ "$#" -gt 0 ]; do
     --root) repo_root="${2:-}"; shift 2 ;;
     --dry-run) dry_run=1; shift ;;
     --cron-line) cron_line=1; shift ;;
-    --no-verify-hook) verify_hook=0; shift ;;
-    --verify-branches) verify_branches="${2:-}"; shift 2 ;;
     --help|-h) sed -n 's/^# \{0,1\}//p' "$0" | grep -v '^!' ; exit 0 ;;
     *) echo "periodic-push-backup: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -148,34 +131,6 @@ if [ "${rc}" -eq 0 ]; then
     echo "backup-ok: up-to-date (${push_target} → ${remote}) — nothing new to back up"
   else
     echo "backup-ok: pushed (${push_target} → ${remote})"
-    # ── cross-machine verification record hook (event-driven trigger) ──────────────────────────
-    # A pushed branch in the tracked set IS a merge landing on the shared baseline → record it.
-    # Only on a REAL push (not up-to-date, not --dry-run). Idempotent.
-    if [ "${verify_hook}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
-      pushed_branch="" vb tip
-      if [ "${all}" -eq 1 ]; then
-        # --all pushed everything; record only the tracked branches that exist locally.
-        for vb in ${verify_branches}; do
-          if git -C "${repo_root}" show-ref --verify --quiet "refs/heads/${vb}"; then
-            tip="$(git -C "${repo_root}" rev-parse "refs/heads/${vb}" 2>/dev/null || true)"
-            [ -n "${tip}" ] || continue
-            echo "periodic-push-backup: verify-hook record merge ${vb}@${tip:0:12}"
-            bash "${SCRIPT_DIR}/cross-machine-verify.sh" --record-merge "${tip}" --branch "${vb}" --root "${repo_root}" >/dev/null 2>&1 || true
-          fi
-        done
-      else
-        pushed_branch="${branch:-$(git -C "${repo_root}" branch --show-current 2>/dev/null || true)}"
-        for vb in ${verify_branches}; do
-          if [ "${pushed_branch}" = "${vb}" ]; then
-            tip="$(git -C "${repo_root}" rev-parse "refs/heads/${vb}" 2>/dev/null || true)"
-            [ -n "${tip}" ] || break
-            echo "periodic-push-backup: verify-hook record merge ${vb}@${tip:0:12}"
-            bash "${SCRIPT_DIR}/cross-machine-verify.sh" --record-merge "${tip}" --branch "${vb}" --root "${repo_root}" >/dev/null 2>&1 || true
-            break
-          fi
-        done
-      fi
-    fi
   fi
   exit 0
 fi

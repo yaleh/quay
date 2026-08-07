@@ -5,10 +5,7 @@
 // Task: gap-full-suite-belongs-to-outer-background-above-3-min
 //   AC1 — result writes `.quay/full-suite-state.json` (well-known location):
 //         {state: running|green|red, runner: outer|inner, startedAt, finishedAt,
-//          durationMs, laneCount, verdictCommit?}
-//   verdictCommit? (gap-green-verdict-never-expires-...) — the git HEAD at run START, the tree this
-//         verdict covered; best-effort (absent in non-git roots). Consumers read the coverage via
-//         suite-state-trigger.ts --json (verdictAgeMin + verdictCommitDelta).
+//          durationMs, laneCount}
 //   AC2 — the runner marks state=red the MOMENT a failure line is detected on the
 //         suite's stream — NOT after the full run finishes — shrinking the
 //         "went red → discovered red" window.
@@ -96,15 +93,6 @@ export interface SuiteState {
   finishedAt: string | null; // ISO 8601; null while running
   durationMs: number | null; // finishedAt - startedAt; null while running
   laneCount: number;
-  /**
-   * The covered-commit anchor (gap-green-verdict-never-expires-411-minutes-and-187-commits-later-
-   * still-green): the git HEAD commit at the moment the suite STARTED — the tree this verdict
-   * actually tested. Best-effort: ABSENT when the workspace is not a git repo (hermetic test roots)
-   * or `git rev-parse HEAD` fails. Consumers read the verdict's covered scope from this field +
-   * finishedAt; the delta to the CURRENT tree is `git rev-list --count <verdictCommit>..HEAD`
-   * (reported by suite-state-trigger.ts --json as verdictCommitDelta). Absent = covered tree unknown.
-   */
-  verdictCommit?: string;
   /**
    * Present only on red (AC5 reason axis — gap-full-suite-runner-concurrency-default-and-gate AC5;
    * gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1). Three-value reason enum:
@@ -325,26 +313,6 @@ export function spliceConcurrency(cmd: string, laneCount: number): string {
   return `${stripped} --test-concurrency=${laneCount}`;
 }
 
-/**
- * gap-green-verdict-never-expires-411-minutes-and-187-commits-later-still-green — the covered-commit
- * anchor: the git HEAD at run START (the tree the suite actually tests). Best-effort — null when the
- * root is not a git repo (hermetic test roots) or git fails. Absent anchor = the verdict cannot say
- * which tree it covered; the consumer's verdictCommitDelta is then unreadable (reported as such).
- */
-export function gitHead(root: string): string | null {
-  try {
-    const out = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const sha = String(out).trim();
-    return sha ? sha : null;
-  } catch {
-    return null;
-  }
-}
-
 // ── AC3: resource-gate consultation before starting ──────────────────────────────────────────────────
 
 /**
@@ -416,16 +384,7 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   const startedAt = new Date().toISOString();
-  // gap-green-verdict-never-expires-... — record the covered-commit anchor at run START (the tree the
-  // suite actually tests; HEAD mid-run is NOT the tree being verified). Best-effort: absent in non-git
-  // roots, so every state write below (running / early-red / final) carries it via `...base`.
-  const verdictCommit = gitHead(root);
-  const base = {
-    runner: "outer" as const,
-    startedAt,
-    laneCount,
-    ...(verdictCommit ? { verdictCommit } : {}),
-  };
+  const base = { runner: "outer" as const, startedAt, laneCount };
 
   // AC1 — write `running` the moment the runner starts (inner sees running => proceed).
   writeState(stateFile, { state: "running", ...base, finishedAt: null, durationMs: null });

@@ -87,16 +87,16 @@ test('AC4 — the launch config 三件套 (deepseek-v4-flash + CLAUDE_CODE_MAX_C
   assert.equal(outer?.launcher, 'claude-deepseek', 'outer role must use claude-deepseek launcher (三件套 #2)');
   assert.equal(outer?.model, 'deepseek-v4-flash', 'outer role must pin deepseek-v4-flash (三件套 #3)');
   // The manager skill references the launch config for the manager's own start (tribal → installable).
-  assert.match(managerSkill, /quay-session\.ts quay-launch manager/s,
-    'the manager skill must teach launching the manager via the launch config through the quay-session entry point (40→6 integration)');
+  assert.match(managerSkill, /quay-launch\.sh manager/s,
+    'the manager skill must teach launching the manager via the launch config, not a hand-typed one-liner');
 });
 
 // ── AC5 — the planning function has a live roadmap/strategic counterpart ─────────────────────────────
 test('AC5 — the manager skill planning function carries a live roadmap/strategic-counterpart reference', () => {
   assert.match(managerSkill, /cross-project portability strategic question|portability/i,
     'the planning function must reference a live cross-project portability strategic counterpart');
-  assert.match(managerSkill, /quay-check\.ts strategic-doc-staleness-check/s,
-    'the planning/cadence function must reference the strategic-doc-staleness mechanism via the quay-check entry point (40→6 integration)');
+  assert.match(managerSkill, /strategic-doc-staleness-check\.ts/s,
+    'the planning/cadence function must reference the strategic-doc-staleness mechanism (the roadmap-staleness probe)');
   assert.match(managerSkill, /gap-fast-mode-cross-project-portability-strategic-question/,
     'the planning function must reference the live fast-mode strategic question task (AC5)');
 });

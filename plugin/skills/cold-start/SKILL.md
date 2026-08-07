@@ -30,19 +30,19 @@ All must hold before starting; if any fails, STOP and report which precondition 
 
 | Precondition | Path (root = the current working directory) |
 |---|---|
-| loop mechanism laid down | `<root>/plugin/scripts/quay-session.ts session-liveness`, `fast-mode-telemetry.ts` exist |
+| loop mechanism laid down | `<root>/plugin/scripts/session-liveness.sh`, `fast-mode-telemetry.ts` exist |
 | tick docs laid down | `<root>/orchestration/orchestrator-loop-tick.md` and `<root>/docs/analysis/fast-mode-loop-tick.md` exist |
 | inner session reachable | tmux session from `<root>/orchestration/session-liveness.env` (`SESSION_TMUX_SESSION=`), else `<project>-0:0.0`, exists (`tmux list-panes -t <session}`) |
-| derived laydown set green | the plugin's DERIVED laydown set is green — `node --experimental-strip-types <quay-source>/plugin/scripts/quay-suite.ts laydown-set-check` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
+| derived laydown set green | the plugin's DERIVED laydown set is green — `bash <quay-source>/plugin/scripts/laydown-set-check.sh` reports `laydown_set_green: green`. **Gate = the derived set (lay what you verify), NOT the whole suite** — an unrelated suite failure must NOT block the cold start (`gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite`; cross: `gap-red-window-dispatch-stop-should-be-shared-gate-conditional`, same scope axis, different mechanism) |
 
 **From bare metal to a session is ONE command (`gap-no-formalized-bare-metal-session-bootstrap`).**
 This skill runs inside an already-existing outer session — the step BEFORE that (bare metal → a
 tmux window layout with a Claude Code process live in each pane) is the formalized product
-`plugin/scripts/quay-session.ts session-bootstrap <root> <layout>`:
+`plugin/scripts/session-bootstrap.sh <root> <layout>`:
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-session.ts session-bootstrap <root> inner/outer        # project topology
-node --experimental-strip-types <root>/plugin/scripts/quay-session.ts session-bootstrap <root> manager/inner/outer # full quay-0-shaped layout
+bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer        # project topology
+bash <root>/plugin/scripts/session-bootstrap.sh <root> manager/inner/outer # full quay-0-shaped layout
 ```
 
 It creates each named window (idempotent — re-runs leave live windows alone), launches each
@@ -55,18 +55,18 @@ truly one command.
 
 **Launch config is checked-in, not remembered.** The correct per-role launch command lives in
 `<root>/.claude/launch.settings.json` (settings-schema keys + `_launchSpec` for flag-only params) and is
-materialized by `<root>/plugin/scripts/quay-session.ts quay-launch`. If a session must be (re)started during this
-skill, run `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-launch <role>` (roles `manager|outer|inner`) — never
+materialized by `<root>/plugin/scripts/quay-launch.sh`. If a session must be (re)started during this
+skill, run `bash <root>/plugin/scripts/quay-launch.sh <role>` (roles `manager|outer|inner`) — never
 hand-type a shell one-liner from memory (`gap-crystallize-launch-config-into-checked-in-settings-file`).
-Verify the command without starting anything: `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-launch <role> --dry-run`.
-For a one-shot verification session use `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-launch <role> --bare`
+Verify the command without starting anything: `bash <root>/plugin/scripts/quay-launch.sh <role> --dry-run`.
+For a one-shot verification session use `bash <root>/plugin/scripts/quay-launch.sh <role> --bare`
 (minimal mode, not long-lived).
 
 **Ghost-suggestion elimination is REQUIRED, not optional** (`gap-ghost-suggestion-eliminated-at-source-
 prompt-suggestions-false`, 人 2026-08-05 裁定): the launch config MUST carry `--prompt-suggestions false`
 (as `_launchSpec.promptSuggestions=false`, translated by `quay-launch.sh`) AND
 `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` (as the `env` key) — both routes, for every role. A cold
-start MUST confirm the materialized command contains the flag: `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-launch
+start MUST confirm the materialized command contains the flag: `bash <root>/plugin/scripts/quay-launch.sh
 <role> --dry-run` output includes `--prompt-suggestions false`. A fresh session launched without it shows
 gray ghost-suggestion text in the input box that the reliable-send / pane classifier can misread as a
 submitted action (fault 6/7).
@@ -105,7 +105,7 @@ grep -ohE 'plugin/scripts/[a-zA-Z0-9._-]+' <root>/plugin/skills/*/SKILL.md <root
 **Run the gate:**
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-suite.ts laydown-set-check   # → `laydown_set_green: green|red`
+bash <root>/plugin/scripts/laydown-set-check.sh   # → `laydown_set_green: green|red`
 ```
 
 `red` (a missing / non-parsing member, or a member's OWN test failing — the M3 class of logic
@@ -123,21 +123,21 @@ start did NOT complete.
 
 | # | Key | Checkable definition | Evidence |
 |---|---|---|---|
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/quay-session.ts session-liveness-mount` (an observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts monitor-mount-check --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
-| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/quay-session.ts session-liveness-mount` (the observer, per SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts monitor-mount-check --json` reports `mounted=true`, `targetOk=true` | the `--json` output (two criteria) |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (an observer — session observation has exactly ONE tool, SPEC-one-observer-two-surfaces.md); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` (2026-08-06: `delivered` retired with the shared events file — the mount check is mounted + targetOk) | the `--json` output (two criteria) |
+| 1 | `MONITORS-MOUNTED` | ONE Monitor-tool invocation exists for `<root>/plugin/scripts/session-liveness-mount.sh` (the observer, per SPEC-one-observer-two-surfaces.md; the retired per-parameter observer was removed by gap-retire-inner-state-one-observer-targets-by-parameter); `bash <root>/plugin/scripts/monitor-mount-check.sh --json` reports `mounted=true`, `targetOk=true` | the `--json` output (two criteria) |
 | 2 | `MONITORS-DELIVERING` | **At least one event line from the mounted monitor was delivered to THIS session** (a `SESSION-STATUS` line, a `SESSION-GONE`, a `SESSION-OVERDUE`, a `SESSION-IDLE`, etc. — each observer owns its own stdout stream, 2026-08-06). A running process is NOT evidence; a nohup log file is NOT evidence | the delivered event line(s), verbatim |
-| 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `node --experimental-strip-types <root>/plugin/scripts/quay-suite.ts loop-driver-check <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
+| 3 | `CRON-CREATED` | `CronCreate` `*/20 * * * *` succeeded, `CronList` lists it, AND `bash <root>/plugin/scripts/loop-driver-check.sh <root>` reports `LIVE` (exactly ONE driver — not STALLED, not DOUBLE-TRIGGER) | the check output (`loop-driver: LIVE (1) …`) |
 <!-- gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure (AC2/AC3): this
      bare-name reference to transcript-delivery-check.ts (no plugin/scripts/ prefix) is INTENTIONAL
      and mechanically caught — the dependency-closure pass reads send-keys-reliable.sh:41
      `${SCRIPT_DIR}/transcript-delivery-check.ts` (content-level, spelling-independent), and the
      verify check resolves tick-doc bare names. Do NOT "fix" it to a prefixed form. -->
-| 4 | `INNER-DRIVEN` | `node --experimental-strip-types <root>/plugin/scripts/quay-deliver.ts send-keys-reliable <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
+| 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts`, Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 
-| 4 | `INNER-DRIVEN` | `node --experimental-strip-types <root>/plugin/scripts/quay-deliver.ts send-keys-reliable <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
+| 4 | `INNER-DRIVEN` | `bash <root>/plugin/scripts/send-keys-reliable.sh <session> "<fast-mode tick instruction>" <target-transcript.jsonl>` exited 0 — the TARGET session's own transcript shows the drive text as a real user message (`transcript-delivery-check.ts` — a BARE-FILENAME reference, resolved by quay-init's laydown derivation under plugin/scripts/, gap-laydown-derivation-is-sensitive-to-reference-spelling; Fault 5; only the target transcript is a trustworthy delivery signal — the pane-hash criterion is superseded, outer ruling F, 3 false positives). Inner was EXPLICITLY started — not assumed as a side effect of outer guidance | send-keys-reliable output (`delivered: true` + matched transcript line) |
 | 5 | `TELEMETRY-RECORD` | `<root>/.workflow-events/` contains at least one `.jsonl` file carrying a `--task-start`-written record (the runId from the first `fast-mode-telemetry.ts --task-start --taskId <id> --root <root>`) | `ls <root>/.workflow-events/` + grep for the task-start record |
 | 6 | `FIRST-TASK` | At least one task is `ready`/`done` on the board and it has been dispatched — `fast-mode-telemetry.ts --report --json --root <root>` shows it in `inProgress` (or the task-start record in #5 references it) | the `--report --json` `inProgress` |
-| 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `node --experimental-strip-types <root>/plugin/scripts/quay-session.ts topology-check --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
+| 7 | `TOPOLOGY-IN-PLACE` | The two-window session topology is in place per the factory definition — `bash <root>/plugin/scripts/topology-check.sh --session <session> --json` reports `ok: true` (each of `<session>:outer/:inner` exists AND has a claude process, not a bare bash window). manager is cross-project and NOT part of this topology. A single-bash-window session (the meta-cc-3/archguard-4 failure shape) MUST report `ok: false` | the `--json` output (`ok: true` + both windows `ok`) |
 
 ## Steps
 
@@ -161,7 +161,7 @@ Run the check in the **quay SOURCE repo** (where `plugin/test/` lives — the ta
 the laid-down scripts, not the tests):
 
 ```bash
-node --experimental-strip-types <quay-source>/plugin/scripts/quay-suite.ts laydown-set-check
+bash <quay-source>/plugin/scripts/laydown-set-check.sh
 # laydown_set_green: green → proceed; red → STOP (a derived-set script's test is failing; laying it
 # would ship the regression — e.g. session-liveness.sh's test IS in the set, so the M3 wait was correct)
 ```
@@ -179,7 +179,7 @@ The session the loop lives in is built **by definition**, never hand-assembled
 project topology). The definition ships in the `quay-session-topology` skill; this step applies
 it. **Bare-metal entry (`gap-no-formalized-bare-metal-session-bootstrap`):** if the session does
 NOT exist yet (nothing to build on), first run
-`node --experimental-strip-types <root>/plugin/scripts/quay-session.ts session-bootstrap <root> inner/outer` — the formalized
+`bash <root>/plugin/scripts/session-bootstrap.sh <root> inner/outer` — the formalized
 from-bare-metal step that produces a session with live claude windows, after which this topology
 factory/check applies idempotently. **Cross-annotation
 (`gap-outer-self-checks-and-creates-inner-session`):** this step is the
@@ -189,8 +189,8 @@ states — healthy (window+process+user message) ⇒ untouched, empty-shell (win
 message) ⇒ driven not rebuilt, missing (no window or process) ⇒ calls this same factory.
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-session.ts quay-topology --session <session>        # build: outer/inner per definition (idempotent; manager is cross-project, not built here)
-node --experimental-strip-types <root>/plugin/scripts/quay-session.ts topology-check --session <session> --json # verify: each window exists AND has a claude process
+bash <root>/plugin/scripts/quay-topology.sh --session <session>        # build: outer/inner per definition (idempotent; manager is cross-project, not built here)
+bash <root>/plugin/scripts/topology-check.sh --session <session> --json # verify: each window exists AND has a claude process
 ```
 
 Require the check to report `ok: true`. A single-bash-window session (the meta-cc-3 / archguard-4
@@ -207,7 +207,7 @@ The retired per-parameter observer never observed the session (tmux hits 0) and 
 single-flight mount entry, which execs `session-liveness.sh`):
 
 ```
-Monitor({command: "<root>/plugin/scripts/quay-session.ts session-liveness-mount",
+Monitor({command: "<root>/plugin/scripts/session-liveness-mount.sh",
          description: "session alive/active (SESSION-GONE/BACK/IDLE/RESUMED/REPO-STALL/OVERDUE/HEARTBEAT)",
          persistent: true, timeout_ms: 3600000})
 ```
@@ -218,7 +218,7 @@ the target project (it self-locates, so it works from the laid-down copy).
 ### 4. Verify mount AND delivery — do not assume "looks mounted"
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-session.ts monitor-mount-check --json
+bash <root>/plugin/scripts/monitor-mount-check.sh --json
 ```
 
 Require `mounted=true` AND `targetOk=true` — the two criteria are two
@@ -238,13 +238,13 @@ the Monitor stream each round). If no event arrives within ~90s, the monitor is 
 `/loop` is the same cron mechanism — a second one is a double-trigger) and do NOT use the self-paced
 wakeup (`/loop` with no interval: it has no listing tool and must be re-chained every tick — the most
 likely to silently stall unattended). The single-driver invariant is enforced mechanically by
-`plugin/scripts/quay-suite.ts loop-driver-check`.
+`plugin/scripts/loop-driver-check.sh`.
 
 **Before creating the cron, run the driver check** — creating a second driver when one already exists is
 exactly the double-trigger this skill exists to prevent:
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-suite.ts loop-driver-check <root>
+bash <root>/plugin/scripts/loop-driver-check.sh <root>
 # exit 0 (LIVE) → a driver is already registered — STOP; creating another would double-trigger.
 # exit 4 (DOUBLE-TRIGGER) → already 2+ drivers — STOP and report.
 # exit 3 (STALLED) → no driver — proceed to create the cron below.
@@ -260,7 +260,7 @@ CronCreate(cron="*/20 * * * *",
 CronList   # confirm it is listed — an unlisted cron is not an alarm, it is a silent no-op
 mkdir -p <root>/.quay
 printf '%s\n' '{"mechanism":"cron","interval":"*/20 * * * *","source":"cold-start"}' >> <root>/.quay/loop-driver.jsonl
-node --experimental-strip-types <root>/plugin/scripts/quay-suite.ts loop-driver-check <root>   # MUST now report LIVE (exit 0)
+bash <root>/plugin/scripts/loop-driver-check.sh <root>   # MUST now report LIVE (exit 0)
 ```
 
 A check that does NOT report `LIVE` means the cold start did NOT reach exactly-one-driver — do not
@@ -278,7 +278,7 @@ trustworthy delivery signal. The previously-shipped whole-pane-hash exit-0 crite
 by outer ruling F (`orchestration/outer-rulings-2026-08-04-A-F.md`, 3 false positives) — do NOT use it.
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-deliver.ts send-keys-reliable <session> "执行 <root>/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <target-transcript.jsonl>
+bash <root>/plugin/scripts/send-keys-reliable.sh <session> "执行 <root>/docs/analysis/fast-mode-loop-tick.md 中的 tick 指令" <target-transcript.jsonl>
 ```
 
 (`<target-transcript.jsonl>` = the inner session's OWN transcript jsonl, e.g.
@@ -295,7 +295,7 @@ If no task is `ready`, promote the top `label:milestone-candidate` task to `read
 before inner's first tick lands, ensure a `--task-start` record exists:
 
 ```bash
-node --experimental-strip-types <root>/plugin/scripts/quay-suite.ts fast-mode-telemetry --task-start --taskId <firstTaskId> --root <root>
+node --experimental-strip-types <root>/plugin/scripts/fast-mode-telemetry.ts --task-start --taskId <firstTaskId> --root <root>
 ```
 
 (the runId printed here is what step 8 greps for). Only do this yourself if inner has not already

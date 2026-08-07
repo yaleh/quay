@@ -28,27 +28,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { flagBatchVocab, nextConvergenceState, runAudit } from "../scripts/self-report-vocab-check.ts";
+import { flagBatchVocab, nextConvergenceState } from "../scripts/self-report-vocab-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const OUTER_TICK = path.join(REPO_ROOT, "plugin/loop/orchestrator-loop-tick.md");
+const SCRIPT = path.join(REPO_ROOT, "plugin/scripts/self-report-vocab-check.ts");
+const NODE = process.execPath;
 
-/** Drive the full audit logic IN-PROCESS (import, not spawn — the "import over spawn" policy):
- *  build the parsed-args object the CLI would produce and call runAudit directly. */
-function audit(overrides = {}) {
-  return runAudit({
-    root: REPO_ROOT,
-    count: 40,
-    convergenceRounds: 3,
-    json: true,
-    state: null,
-    noState: false,
-    text: null,
-    stdin: false,
-    ...overrides,
+function runScript(args) {
+  return execFileSync(NODE, ["--experimental-strip-types", SCRIPT, ...args], {
+    encoding: "utf8",
+    cwd: REPO_ROOT,
   });
 }
 
@@ -145,13 +139,15 @@ test("AC2 — the invariant is convergence, not 're-anchor happened' (0 flagged 
 // ── AC2/AC4: CLI end-to-end ────────────────────────────────────────────────────────────────────────
 
 test("AC4 — CLI flags a constructed 'Batch of 3 fully merged' self-report (control)", () => {
-  const out = audit({ text: "inner: Batch of 3 fully merged", noState: true });
+  const out = JSON.parse(runScript(["--text", "inner: Batch of 3 fully merged", "--json", "--no-state"]));
   assert.ok(out.count >= 1, `expected >=1 flagged, got ${out.count}`);
   assert.ok(out.flagged.some((f) => f.pattern === "batch-of"));
 });
 
 test("AC4 — CLI is clean on a factory-vocabulary self-report (negative control, back to 0)", () => {
-  const out = audit({ text: "inner: verification-round-1 fan-in complete; 滚动派发", noState: true });
+  const out = JSON.parse(
+    runScript(["--text", "inner: verification-round-1 fan-in complete; 滚动派发", "--json", "--no-state"]),
+  );
   assert.equal(out.count, 0);
 });
 
@@ -160,10 +156,14 @@ test("AC2 — CLI convergence state persists across rounds via the state file (3
   const stateFile = path.join(tmp, "state.json");
   try {
     for (let i = 0; i < 2; i++) {
-      const out = audit({ text: "inner: verification-round-N fan-in; 滚动派发", state: stateFile });
+      const out = JSON.parse(
+        runScript(["--text", "inner: verification-round-N fan-in; 滚动派发", "--json", "--state", stateFile]),
+      );
       assert.equal(out.converged, false, `round ${i + 1} must not yet be converged`);
     }
-    const third = audit({ text: "inner: verification-round-N fan-in; 滚动派发", state: stateFile });
+    const third = JSON.parse(
+      runScript(["--text", "inner: verification-round-N fan-in; 滚动派发", "--json", "--state", stateFile]),
+    );
     assert.equal(third.roundsClean, 3);
     assert.equal(third.converged, true, "3rd consecutive clean round must converge");
     const persisted = JSON.parse(fs.readFileSync(stateFile, "utf8"));

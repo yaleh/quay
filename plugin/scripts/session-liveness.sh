@@ -556,14 +556,6 @@ if [ -z "$REPO_ROOT" ]; then
   REPO_ROOT="$(cd "$_sl_script_dir/../.." && pwd)"
 fi
 
-# ── 默认目标（零配置）的会话名优先级：env → 配置 → 默认值 ────────────────────────────────
-# 先钉住显式 env 值，再 source 配置文件（配置可能含 SESSION_TMUX_SESSION / SESSION_TARGETS），
-# 最后把钉住的 env 值放回——env > 配置。历史坑（2026-08-06 实踩）：窗格后缀值（<会话>:inner）
-# 必须在 source 之前捕获，否则配置文件里的 SESSION_TMUX_SESSION（<会话>）会把后缀盖掉
-# （gap-session-liveness-session-pid-blind-to-claude-as-pane-process AC3/AC4：
-# SESSION_TMUX_SESSION=<会话>:inner 曾被解析成 <会话>:outer）。
-_sl_session_env="${SESSION_TMUX_SESSION:-}"
-
 # ── 管理者的多目标配置（AC9）：orchestration/session-liveness.env 存在则 source。
 #    shell KEY=VALUE，不是 YAML。显式环境变量 SESSION_TARGETS 优先。 ───────────────────────
 if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
@@ -579,6 +571,15 @@ fi
 # 会话值（含 :/.）会变成参数展开语法静默产出垃圾目标；「是否已替换」的判据也不能用完整占位符做
 # 字面比较。2026-08-03 起脚本不再被 quay-init 改写（可执行文件原样复制、只生成配置），这两个坑
 # 随之失去存在前提——会话名一律经 env / orchestration/session-liveness.env / 默认值解析。
+# 环境变量显式设置优先（先钉住，避免被配置文件 source 覆盖）：env > 配置 > 默认值。
+_sl_session_env="${SESSION_TMUX_SESSION:-}"
+if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$REPO_ROOT/orchestration/session-liveness.env" \
+    || echo "session-liveness: WARN 无法解析 $REPO_ROOT/orchestration/session-liveness.env，回落到默认" >&2
+  set +a
+fi
 if [ -n "$_sl_session_env" ]; then
   SESSION_TMUX_SESSION="$_sl_session_env"
 fi
@@ -600,21 +601,7 @@ if [ -z "$_sl_session" ]; then
 else
   _sl_session_base="${_sl_session%%:*}"
 fi
-# 按角色解析目标窗口（AC2/AC3/AC4，gap-session-liveness-session-pid-blind-to-claude-as-pane-process）：
-#   SESSION_TMUX_SESSION 带【命名窗口】后缀（<会话>:inner / <会话>:outer）⇒ 直接用该窗口作为目标——
-#     外层监视器盯 inner、管理者盯 outer；会话名 env 值（<会话>）本就该配上角色窗口。
-#   带【数字 pane】后缀（quay-init 写的 ol-cold:0.0 是 pane 引用、指明会话）⇒ 剥到会话基名，
-#     走零配置默认的 <base>:outer（本项目自己的外层）。
-#   无后缀（quay-0）⇒ <base>:outer（零配置默认）。
-case "$_sl_session" in
-  *:*)
-    case "${_sl_session#*:}" in
-      *[!0-9.]*) DEFAULT_TARGET="$_sl_session" ;;      # 命名窗口后缀 → 直接作为目标
-      *) DEFAULT_TARGET="${_sl_session_base}:outer" ;; # 数字 pane 引用 → base:outer
-    esac
-    ;;
-  *) DEFAULT_TARGET="${_sl_session_base}:outer" ;;
-esac
+DEFAULT_TARGET="${_sl_session_base}:outer"
 
 # 可被 SESSION_TARGETS 覆盖——存在的理由是【可测】（handoff rule 2：不能靠「干跑没有输出」
 # 证明监视器会报，那与「它永远不报」同形）。用测试控制的探针 pane 做正控制，才是证据。
@@ -718,36 +705,17 @@ heartbeat_mtime_for() {
   outer_heartbeat_mtime "$root"
 }
 
-# _is_claude_pid —— 按进程【名字】判 claude（不是 grep 整个 cmdline——那会命中 cmdline 里的
-# .claude 路径子串，gap-session-liveness-session-pid-blind-to-claude-as-pane-process 假阳性维度：
-# full-suite-runner 的 bash wrapper cmdline 含 ~/.claude/shell-snapshots/...，曾被误报
-# SESSION-BACK）。判据两源（comm/argv[0]，任务 AC1 指定的「进程名字」匹配）：
-#   1. comm（/proc/<pid>/comm，进程名）是 claude*；
-#   2. argv[0]（cmdline 第一个 NUL 字段）的 basename 含 claude*（覆盖 exec -a claude-probe 这类
-#      argv[0] 改名探针；bash wrapper 的 argv[0]=bash、comm=bash ⇒ 不误命中 .claude 路径子串）。
-_is_claude_pid() {
-  local pid=$1 comm argv0 base
-  comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
-  case "$comm" in claude*) return 0 ;; esac
-  argv0=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -1)
-  [ -n "$argv0" ] || return 1
-  base="${argv0##*/}"
-  case "$base" in *claude*) return 0 ;; esac
-  return 1
-}
-
-session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或其任一子进程里的 claude 进程。
+session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane shell 的第一个 claude 子进程。
   local t=$1 ppid cpid
   ppid=$("${_sl_tmux[@]}" list-panes -t "$t" -F '#{pane_pid}' 2>/dev/null | head -1) || true
   [ -n "${ppid:-}" ] || { echo ""; return; }
-  # pane_pid 自身就是 claude（claude-as-pane-process：3 窗格拓扑里 pane 前台进程就是 claude）——
-  # 旧实现只查子进程，inner/outer 恒 alive=0（SESSION-GONE 永不触发，监视器永久沉默）。
-  if _is_claude_pid "$ppid"; then echo "$ppid"; return; fi
-  # 后代遍历（与 inner-session-check.sh 的 has_claude_child 同遍历）：找第一个 claude 后代。
-  for cpid in $(pgrep -P "$ppid" 2>/dev/null); do
-    if _is_claude_pid "$cpid"; then echo "$cpid"; return; fi
-  done
-  echo ""
+  cpid=$(pgrep -P "$ppid" 2>/dev/null | head -1) || true
+  # 只认 claude 进程，避免把 shell 当成会话本体
+  if [ -n "${cpid:-}" ] && tr '\0' ' ' < "/proc/$cpid/cmdline" 2>/dev/null | grep -q claude; then
+    echo "$cpid"
+  else
+    echo ""
+  fi
 }
 
 # ── 无挂载门（2026-08-06 人裁定：彻底去掉互斥锁）──────────────────────────────────────────

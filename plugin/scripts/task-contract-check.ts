@@ -164,60 +164,6 @@ function checkDefectControl(task, entries) {
   return [{ code: "defect-no-control", what: "task is labelled `defect` but ## Contract has no `control` key — declare the negative control that would expose a masking fix (e.g. dirty the artifact → the check must still fail)" }];
 }
 
-// Check 5 (AC5, gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect): a TICKED
-// AC item whose evidence text self-admits the mechanism it asserts is NOT in effect. The defect this
-// catches is the task's namesake: gap-eighty-one-instruments AC8 was ticked [x] while its OWN cited
-// evidence ended "41:4 说明政策存在、未生效" — the evidence literally states the policy is NOT in
-// effect, and the box was ticked anyway. This is the "invoke-evidence-missing" family: evidence
-// inconsistent with the checked box, but the contradiction is in the EVIDENCE TEXT, not the invoke path.
-//
-// Wording scoping (calibrated 2026-08-06 against the FULL task store, AC5's negative-control method):
-// the raw keyword set (未生效/未达成/尚未/仍然) is too ambiguous — bare `仍然` is overwhelmingly POSITIVE
-// ("仍然过闸"/"仍然装得对" are achievements, not admissions), and `尚未`/`未落地` routinely describe a
-// SUBORDINATE cause ("文件尚未创建" / "依赖未落地") rather than the AC's own status. All three produced
-// false positives on real done tasks. What distinguishes the genuine namesake case is a MECHANISM/
-// CONCLUSION noun near an unambiguous self-admission: "41:4 说明政策存在、未生效" (说明 + 政策 + 未生效).
-// The pattern below requires that window — a MECHANISM/CONCLUSION noun (政策/机制/方案/集成/入口/import/
-// spawn/比例/说明/表明/证明/意味着 — deliberately NOT generic nouns like 检查/工具/测试/证据 which appear
-// in DESCRIPTIONS of the very checks that list these keywords) within 40 chars before
-// `未生效|未达成|仍未生效|仍未达成`. It flags EXACTLY ONE task on the 2026-08-06 store: the namesake
-// gap-eighty-one-instruments AC8 itself (the smoking gun), and nothing else — including the AC5 item of
-// THIS task, which describes the check and lists the keywords (验证 0 误报).
-export const AC_SELF_ADMISSION_RE =
-  /(政策|机制|方案|集成|入口|import|spawn|比例|说明|表明|证明|意味着)[^。；;\n]{0,40}?(未生效|未达成|仍未生效|仍未达成)/;
-
-export function checkTickedAcSelfAdmission(acSection) {
-  if (!acSection) return [];
-  const findings = [];
-  const lines = acSection.split(/\r?\n/);
-  let current = null; // { text, lineNo } — the current ticked AC's accumulated evidence text
-  const flush = () => {
-    if (current && AC_SELF_ADMISSION_RE.test(current.text)) {
-      const snippet = current.text.trim().replace(/\s+/g, " ").slice(0, 140);
-      findings.push({
-        code: "ac-ticked-self-admission",
-        what: `ticked AC (line ${current.lineNo}) self-admits the mechanism is NOT in effect — evidence matches ${AC_SELF_ADMISSION_RE}: "${snippet}"; a [x] box asserts completion, self-admission wording contradicts it`,
-      });
-    }
-    current = null;
-  };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const item = line.match(/^\s*-\s*\[(x|X| )\]\s*(.*)$/);
-    if (item) {
-      flush();
-      if (item[1] === "x" || item[1] === "X") current = { text: item[2], lineNo: i + 1 };
-      continue;
-    }
-    // continuation line of the current ticked AC (absorb until the next item / heading).
-    if (current && line.trim() !== "" && !/^#{1,6}\s/.test(line)) {
-      current.text += " " + line.trim();
-    }
-  }
-  flush();
-  return findings;
-}
-
 // ── Per-task scan ────────────────────────────────────────────────────────────────────────────────────
 // Returns { taskId, violations: [{code, what}], info: [{code, what}] }.
 // `violations` feed the ratchet list; `info` is non-ratchet context (absent sections on tasks that
@@ -241,7 +187,6 @@ export function scanTaskText(text, taskFileRel = "") {
     violations.push(...checkMeasureCommandField(contract.entries));
     violations.push(...checkInvoke(contract.entries, body, contractSec, status));
     violations.push(...checkDefectControl(task, contract.entries));
-    violations.push(...checkTickedAcSelfAdmission(ac));
   } else {
     info.push({ code: "contract-absent", what: "no '## Contract' section (pre-ratchet baseline — not yet opted into the mechanism)" });
   }

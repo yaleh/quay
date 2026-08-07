@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import {
   classifyPaneState,
@@ -33,7 +34,6 @@ import {
   classifyInputResidueStatic,
   classifyResidueFromCaptures,
   RESIDUE_CLEAR_MAX_DEFAULT,
-  runCheckResidue,
 } from "../scripts/pane-state-classify.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -236,21 +236,17 @@ const RESIDUE_FIXTURES = {
 };
 
 function runResidueCli(args) {
-  // In-process drive of the CLI's --check-residue logic (import, not spawn — the "import over
-  // spawn" policy, SPEC AC7/AC9): runCheckResidue emits one JSON line on stdout and returns the
-  // exit code. Capturing stdout keeps the CLI-contract assertion identical to the spawn form.
-  const chunks = [];
-  const orig = process.stdout.write;
-  process.stdout.write = (chunk, ...rest) => {
-    chunks.push(String(chunk));
-    return true;
-  };
-  try {
-    const status = runCheckResidue(args);
-    return { stdout: chunks.join(""), status };
-  } finally {
-    process.stdout.write = orig;
-  }
+  const r = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      path.join(repoRoot, "plugin/scripts/pane-state-classify.ts"),
+      "--check-residue",
+      ...args,
+    ],
+    { encoding: "utf8" },
+  );
+  return { stdout: r.stdout, status: r.status };
 }
 
 test("AC1: --check-residue pure functions exist; a single snapshot yields only the static part", () => {

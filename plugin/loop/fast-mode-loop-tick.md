@@ -72,8 +72,8 @@
 
 ```bash
 git log --oneline -10 && git status --short
-node --experimental-strip-types plugin/scripts/quay-check.ts task-status-drift-check
-node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --report --json
+node --experimental-strip-types plugin/scripts/task-status-drift-check.ts
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --report --json
 ```
 
 ## 定位：看护，不是调度
@@ -100,7 +100,7 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 
 **跑全量前调用资源闸（机制，不是散文——`gap-no-resource-awareness-heavy-ops-run-blind`）**：
 目标项目的全量测试命令（`.quay/config.yml` `loop.test_command`，下称 `TEST_COMMAND`）已在默认
-全量路径接入 `node --experimental-strip-types plugin/scripts/quay-dispatch.ts resource-gate --for full-suite`——WAIT 时打印数字后退出非 0，
+全量路径接入 `bash plugin/scripts/resource-gate.sh --for full-suite`——WAIT 时打印数字后退出非 0，
 **不静默等待**。手动跑全量同样先调 gate：退出码 0=GO 才跑，非 0=WAIT 不跑。
 gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 CPU 的比例；load 是代理，
 claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
@@ -223,9 +223,9 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realInFlight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/quay-dispatch.ts ready-pool-check --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
+| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realInFlight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
 
@@ -249,8 +249,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 ### 槽位回填的机械判定（强制）
 
 ```bash
-effective_cap="$(node --experimental-strip-types plugin/scripts/quay-dispatch.ts cap-from-gate 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
-node --experimental-strip-types plugin/scripts/quay-dispatch.ts slot-refill --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <仍在跑的任务id逗号分隔>
+effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
+node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <仍在跑的任务id逗号分隔>
 ```
 
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。
@@ -289,7 +289,7 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts slot-refill --ro
 | `master` | 发布线角色**空置**（quay 无发布流程） | 等真有发布授权时再加，语义才实（裁定①） |
 
 - **分叉基线即依赖声明（AC2）**：独立 → develop；声明依赖 / touches 与 integration 未验证任务相交 →
-  integration。机械判定用 `plugin/scripts/quay-branch.ts integration-branch-model --fork-baseline`（见步骤 4）。
+  integration。机械判定用 `plugin/scripts/integration-branch-model.ts --fork-baseline`（见步骤 4）。
 - **合并机制（AC3）**：任务合回 integration（步骤 2，`git merge --no-ff task/<id>`）；外层
   verification-round 验证绿后批量合回 develop（`orchestrator-loop-tick.md` 步骤 1b，`--ff-only` 硬约束）。
 - **命名 = `integration`（AC6）**：gate（与 quay gate 概念打架）/ staging（暗示部署）/ next（表达不出
@@ -308,22 +308,22 @@ halt 后仍派发 5 个 subagent 的根因就是「连续流程绕过步骤 0」
 
 1. **新派发被代码挡**：`slot-refill.ts`（事件驱动回填 + tick 心跳回填的派发推荐）读
    `<root>/.halt` —— 存在 ⇒ `should_refill=false` + `no_refill_reason` 点名 halt（AC2 实测）。
-2. **在飞层被进程级停**：`plugin/scripts/quay-deliver.ts supervisor-preempt preempt <target>` 对目标
+2. **在飞层被进程级停**：`plugin/scripts/supervisor-preempt.sh preempt <target>` 对目标
    进程/会话发停止信号（TUI 形态 = tmux C-c；`-p` 迁移后 = `kill <pid>`，OS 就是抢占原语，
    AC4/AC5b）；`preempt-all --root <根> --target <层>[,<层>] --pid <pid>[,<pid>]` 在 halt 时对
    全部在飞层发信号。
-3. **读哨兵**：`node --experimental-strip-types plugin/scripts/quay-deliver.ts supervisor-preempt halt-check --root <根>` 输出
+3. **读哨兵**：`bash plugin/scripts/supervisor-preempt.sh halt-check --root <根>` 输出
    `halted=true|false` + `reason`（fail-closed——读失败 = 停，gap-halt-sentinel-path-mismatch）。
 
 本 tick 每步派发前（步骤 3/4 与槽位回填）都要先问 halt-check/slot-refill——halt 置位即停派，
 不等到下一 tick 边界。
 
 **Monitor 挂载自检**（`gap-nothing-checks-whether-the-monitor-is-mounted-or-aimed-right`）：外层靠
-`plugin/scripts/quay-session.ts session-liveness` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh`
+`plugin/scripts/session-liveness.sh` 的 Monitor 消费本层停止条件（观测只有一个工具；`inner-state.sh`
 已退役）——它没挂上/挂错目标/属于上个会话，本层停摆就没人发现。每个 tick 用一条命令核实，不靠人判断：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-check --json
+bash plugin/scripts/monitor-mount-check.sh --json
 ```
 
 两判据缺一不可：`mounted=true`、`targetRoot` 等于本仓根（`targetOk=true`）。2026-08-06 起
@@ -338,7 +338,7 @@ node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-che
 显式读 manager 收件箱，有 `unread:` 行 ⇒ 逐条进本轮决策（人/manager 的消息在决策时被调用，不是落盘即完）：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-deliver.ts supervisor-bus-identity inbox-summary
+bash plugin/scripts/supervisor-bus-identity.sh inbox-summary
 ```
 
 `delivered` = 投递成功（放进了收件箱），`consumed` = 已读回执（人读了）——两者分开（AC3），
@@ -367,11 +367,11 @@ unread = delivered − consumed。本步只读不写回执（消费是人的动�
 | `$MERGE_TARGET`（quay: integration） | 待验证汇入点（含未验证前序工作） | 声明依赖前序的任务 | 所有任务合并目标 |
 
 - **分叉基线即依赖声明**（AC2）：独立任务从 `$FORK_BASELINE` 分叉；声明依赖的从 `$MERGE_TARGET` 分叉——
-  机械判定 `plugin/scripts/quay-branch.ts fork-baseline`（`--develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`；
+  机械判定 `plugin/scripts/fork-baseline.ts`（`--develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`；
   touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒ `$MERGE_TARGET`）。
 - **合并机制**（AC3）：任务合回 `$MERGE_TARGET`（红窗期照常接收——结构性消除停派）；外层
   verification-round-N 批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（fast-forward 无冲突，
-  `plugin/scripts/quay-branch.ts integration-batch-merge --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`）。
+  `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`）。
 - **单线（默认）退化**：`$FORK_BASELINE == $MERGE_TARGET == master` 时本节退化为「独立任务从 master
   分叉、合回 master」——`fork-baseline.ts --develop master --integration master` 恒返回 master
   （`master..master` 空，无未验证任务），`integration-batch-merge.sh` 为无操作——与未做 branch cutover
@@ -416,7 +416,7 @@ worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层�
 
 **两机协作：合并后释放认领（`gap-two-machine-collaboration-git-branch-claiming`）**——若本任务派发时
 经认领协议认领过（`QUAY_CLAIM_REMOTE` 设置了共享裸仓库），合并进 `$MERGE_TARGET` 后**释放认领**：
-`node --experimental-strip-types plugin/scripts/quay-branch.ts release-task <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
+`bash plugin/scripts/release-task.sh <taskId> --remote "$QUAY_CLAIM_REMOTE"`（合并+删分支=释放，
 `merge + delete = release`）。释放只删共享仓库上的 `task/<id>` 认领标记，不碰已合并进 `$MERGE_TARGET`
 的工作——下台机可再认领该任务。未设置 `QUAY_CLAIM_REMOTE`（单机）⇒ 跳过，无行为变化。
 
@@ -455,7 +455,7 @@ worktree/分支——翻 done、写轮次记录、写 `--task-end` 都由外层�
 
 ```bash
 tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
-node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inner-blocked-signal --detect-stop --pane .quay/last-pane.txt
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --detect-stop --pane .quay/last-pane.txt
 ```
 
 它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
@@ -526,7 +526,7 @@ node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inn
 派发前对每个任务：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --task-start --taskId <id>
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --task-start --taskId <id>
 # 记下打印的 runId
 ```
 
@@ -550,7 +550,7 @@ subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时�
 
 **派发前先读一次空槽信号（AC2/AC5）**——「还剩几个并发槽」必须机械可见，不靠内层手写叙事：
 ```bash
-node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --slots --cap "${effective_cap:-3}"
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"
 # real-in-flight N / slots-remaining M；dispatchable_disjoint（步骤 3.6）− realInFlight = 槽位级闲置
 ```
 
@@ -573,13 +573,13 @@ node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry
 容器化硬限额上位解 `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`。
 
 ```bash
-effective_cap="$(node --experimental-strip-types plugin/scripts/quay-dispatch.ts cap-from-gate 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
+effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
 # Contract 的读取形态：`bash <cap-from-gate-helper> 2>&1 | grep -o '[0-9]'`（stdout 数字段）；
 # sed 提取是同一 stdout 的健壮写法（effective_cap= 行是末行）。空值 ⇒ 重跑一次看 stderr。
 ```
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-dispatch.ts ready-pool-check --root "$(pwd)" --cap "${effective_cap:-3}"
+node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"
 ```
 
 - stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
@@ -608,7 +608,7 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts ready-pool-check
 两者共用下面的并发上限、逐候选检查与派发形态。
 
 **tick 心跳必须无条件先跑 slot-refill**（`gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat`）：
-每 tick（含轻触）先跑 `node --experimental-strip-types plugin/scripts/quay-dispatch.ts slot-refill --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <本会话在飞集合>`——
+每 tick（含轻触）先跑 `node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --cap "${effective_cap:-3}" --in-flight <本会话在飞集合>`——
 `should_refill=true` 且 `recommended` 非空 ⇒ 按 `recommended` 逐候选走下面 1-6 检查后派发，**不等完成事件**；
 `should_refill=false` / `recommended` 空 ⇒ 本 tick 不派发（负控制，AC4）。步骤 3 停止条件仍优先——命中任一 ⇒ 不派发。
 
@@ -628,7 +628,7 @@ evaluated-only-at-inner-tick-boundary-not-slot-release`）**：任一在飞 suba
 GO 才走下方的候选资格（1-4）与派发：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-dispatch.ts slot-refill --root "$(pwd)"
+bash plugin/scripts/slot-refill.sh --root "$(pwd)"
 # REFILL GO: slots-remaining M, dispatchable_disjoint N  ⇒ 走下方候选资格后派发
 # REFILL NO-GO: <reason>（cap 已满 / 池空 / .halt / 空槽不可知）⇒ 不派发，本回合到此为止
 ```
@@ -651,7 +651,7 @@ GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT
 派发前对每个候选：
 
 1. **触摸可解析性**（gap-ready-queue-still-lists-eight-tasks-targeting-retired-pipeline-files，
-   AC2）：`checkTouchesResolve`（`plugin/scripts/quay-dispatch.ts touches-orthogonality-check` 的 `--resolve`
+   AC2）：`checkTouchesResolve`（`plugin/scripts/touches-orthogonality-check.ts` 的 `--resolve`
    模式）对每个 `status: ready` 候选检查其 `## Touches` 是否能在真实树中解析。ADR-022 删除了
    经典管线文件后，8/9 个 ready 任务的 Touches 整体指向不存在的文件，而 `checkTouchesPair`
    只查两两重叠、**不查文件存在性**——这就是这组任务漏过资格闸的原因。`(new)`/`(delete)`
@@ -660,7 +660,7 @@ GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT
    （exit 1 即不派发）：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogonality-check --resolve tasks/<id>.md --root "$(pwd)"
+node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --resolve tasks/<id>.md --root "$(pwd)"
 # 输出每条目 ok/MISSING；末行 RESOLVE ... MAJORITY-MISSING (NOT dispatchable) + exit 1 ⇒ 不派发
 ```
 
@@ -673,7 +673,7 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogon
    此前手写的 `expand`（`normalizePath` + 剥注解）已删除——直接用生产入口即可：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-dispatch.ts concurrent-batch-scheduler --root "$(pwd)" tasks/<A>.md tasks/<B>.md --json
+node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --root "$(pwd)" tasks/<A>.md tasks/<B>.md --json
 # 输出 { batch, deferred }（batch/deferred 是 concurrent-batch-scheduler.ts 的机件输出字段名）。
 # 两者都在 batch ⇒ disjoint，可并发/无触摸重叠，非门控分批；
 # deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
@@ -692,7 +692,7 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts concurrent-batch
    `$FORK_BASELINE`、声明依赖 → `$MERGE_TARGET`，机械可查；分支名**从配置代入，不字面写死**）：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-branch.ts fork-baseline --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"
+node --experimental-strip-types plugin/scripts/fork-baseline.ts --task tasks/<id>.md --root "$(pwd)" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"
 # stdout: $FORK_BASELINE（独立，从已验证基线分叉）或 $MERGE_TARGET（依赖未验证前序，从待验证汇入点分叉）
 ```
 
@@ -708,12 +708,12 @@ node --experimental-strip-types plugin/scripts/quay-branch.ts fork-baseline --ta
    资格仍由 checkTouchesPair 判：自身文件每任务唯一，A.md≠B.md ⇒ 仍 disjoint）：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogonality-check --self-touch tasks/<id>.md --root "$(pwd)"
+node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch tasks/<id>.md --root "$(pwd)"
 # 输出 SELF-TOUCH ... ok + exit 0 ⇒ 可派发；MISSING ... + exit 1 ⇒ 不派发
 ```
 
    就绪池整体核验用 `--self-touch-scan`（AC1 静态检查）：
-   `node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogonality-check --self-touch-scan --root "$(pwd)"`
+   `node --experimental-strip-types plugin/scripts/touches-orthogonality-check.ts --self-touch-scan --root "$(pwd)"`
    ——任一 ready 任务缺自身文件 ⇒ exit 1（先补，否则该任务不可派发）。
 
 6. **两机认领（跨主机互斥，`gap-two-machine-collaboration-git-branch-claiming`）**：两机协作时
@@ -721,7 +721,7 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogon
    **先认领**本任务：
 
    ```bash
-   node --experimental-strip-types plugin/scripts/quay-branch.ts claim-task <id> --remote "$QUAY_CLAIM_REMOTE" --check-touches
+   bash plugin/scripts/claim-task.sh <id> --remote "$QUAY_CLAIM_REMOTE" --check-touches
    # claimed            → 可派发（空 task/<id> 分支已推到共享裸仓库）
    # already-claimed    → 对方在飞，不派发本任务
    # touches-overlap    → 与对方在飞任务触摸相交，不派发本任务（AC2，换一个任务）
@@ -730,7 +730,7 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogon
    认领 = 把空 `task/<id>` 分支推到共享裸仓库：**git 是唯一真正跨主机共享的状态存储**（遥测
    inProgress 文件与 worktree 目录都是本机的，B 机看不到；`task/*` 分支双方 `git ls-remote` 都可见）。
    推送本身是**原子互斥**（同任务两机抢认领，一成一败——git 的非快进拒绝就是 CAS）。`--check-touches`
-   复用单一来源 `checkTouchesPair`（`plugin/scripts/quay-branch.ts claim-task`）与本机 `tasks/<peer>.md` 对共享仓库
+   复用单一来源 `checkTouchesPair`（`plugin/scripts/claim-task.ts`）与本机 `tasks/<peer>.md` 对共享仓库
    `task/*` 分支判触摸相交——**与单机串行是同一个约束，只是提前到认领时**。任务合并进 `$MERGE_TARGET`
    后由步骤 2 释放认领（`release-task.sh`）。**单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 认领步骤为 no-op，
    直接跳过**——现有单机派发零回归（claim-task.sh 无 remote 时 fail-closed 退出 2）。
@@ -744,9 +744,9 @@ node --experimental-strip-types plugin/scripts/quay-dispatch.ts touches-orthogon
 **分叉基线（两线模型，AC2——分叉基线即依赖声明；`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）**：
 subagent 用裸 `git worktree add` 自建 `$WORKTREE_ROOT/<slug>`（磁盘，不在 `/tmp`——tmpfs 是内存，
 `worktree_root` 见上）和 `task/<id>` 分支，**分叉点由
-`plugin/scripts/quay-branch.ts integration-branch-model` 的 `forkBaseline` 机械判定**：
+`plugin/scripts/integration-branch-model.ts` 的 `forkBaseline` 机械判定**：
 ```bash
-node --no-warnings --experimental-strip-types plugin/scripts/quay-branch.ts integration-branch-model \
+node --no-warnings --experimental-strip-types plugin/scripts/integration-branch-model.ts \
   --fork-baseline tasks/<id>.md --overlaps-unverified <integration 上未验证任务 id,...> --root "$(pwd)"
 # 输出 develop（独立，默认）或 integration（声明依赖 / touches 与未验证任务相交）
 ```
@@ -786,35 +786,16 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 
 ### 4a. 跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）
 
-**每个 tick（含轻触）无条件跑一次** `node --experimental-strip-types plugin/scripts/quay-branch.ts sync-lag-check --push --branch "$FORK_BASELINE" --root "$(pwd)"`——
+**每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$(pwd)"`——
 它问「本地 `$FORK_BASELINE`（quay: develop）是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
 `periodic-push-backup.sh` 本体），**不依赖任何完成事件**。这是双触发源（`slot-refill` 模式）的**兜底触发源**：
 外层 3b 的事件驱动路径在 land 收口同一轮内推送（加速），本步保证「即使事件驱动漏了 / 外层没跑 / 本机
 `$FORK_BASELINE` 悄悄积累」，每 tick 也会把本地领先推上 origin。**内层与外层同挂**——两机各层 tick 都是
 心跳（幂等，up-to-date 退出 0）。
 
-**同步落后量机械可读（AC3）**：`node --experimental-strip-types plugin/scripts/quay-branch.ts sync-lag-check --json --branch "$FORK_BASELINE" --root "$(pwd)"`
+**同步落后量机械可读（AC3）**：`bash plugin/scripts/sync-lag-check.sh --json --branch "$FORK_BASELINE" --root "$(pwd)"`
 输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」有测量。心跳跑 `--push` = 测 + 领先即推；
 push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试（fail-closed，绝不 force）。
-
-### 4b. 跨机验证心跳（`cross-machine-verify.sh`，兜底必跑——`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`）
-
-**每个 tick（含轻触）无条件跑一次** `bash plugin/scripts/cross-machine-verify.sh --verify --root "$(pwd)"`——
-它问「有没有本机**没参与**的合并还没被跨机验证？」。有就（按最旧优先）跑**快闸**（冷启动/冒烟级，默认
-`laydown-set-check.sh`——完整套件 38 分钟跑不进 `d` 预算）并把闸结论写成 git note（`refs/notes/quay-cmv-*`，
-随包机制，推 origin 共享）。**不依赖任何完成事件**——这是双触发源（`slot-refill` 模式）的**兜底触发源**：
-外层 3b 的 land 收口在**同一轮内**调 `--record-merge`（事件驱动，加速），本步保证「即使事件驱动漏了 /
-合并是在别的机器落的 / 本机悄悄落后」，每 tick 也会把该验的合并验了。**内层与外层同挂**——两机各层 tick
-都是心跳（幂等）。
-
-**结构约束（AC4，不是冗余）**：`--verify` 跳过 `merger_machine == 本机` 的合并——**亲代环境掩盖亲代缺陷**，
-做验证的环境不能正是产生缺陷的环境。无人记录的合并（`--record-merge` 漏了）被标 unattributed、**不验**（无法
-证明非参与 = fail-closed），绝不假设已验证。
-
-**检测延迟机械可读（AC2/AC5）**：`bash plugin/scripts/cross-machine-verify.sh --report --json --root "$(pwd)"`
-输出 `post_merge_latency_h`（合并提交时间 → 闸结论时间，pending 时 = 当前已等时长）与
-`verifier_machine` / `merger_machine`（`verifier_is_participant` band 0 = 验证方非参与方）。这就是 `d` 的测量，
-不再靠事后回忆。
 
 ### 5. 写回状态
 
@@ -869,20 +850,20 @@ push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试
 
 ```bash
 # 停下前（judgment 条件触发时——ruling-required / review-refuted / suite-red / queue-empty / needs-human 窗口）：
-node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inner-blocked-signal \
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts \
   --assert-blocked --taskId <当前任务/阶段> \
   --reason <合法值见 `--schema`；不要照抄到这里，代码是唯一真源> \
   --question <要外层裁定的问题> [--options '<json>'] [--evidence '<json>']
 
 # 恢复后（裁定下达、继续推进的那一刻）：
-node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inner-blocked-signal --clear
+node --no-warnings --experimental-strip-types plugin/scripts/inner-blocked-signal.ts --clear
 ```
 
 规则：
 
 - **文件存在 == 内层在等。** `--detect-stop` / `--assert-blocked` 写在停下的那一刻，`--clear` 删在恢复
   的那一刻。这是存在性信号，不是从缺席推断。外层在每个 tick 直接读该路径
-  （`plugin/scripts/quay-deliver.ts inner-blocked-signal --read --root <root>`）拿 `reason` + `question`，不必读屏就能
+  （`plugin/scripts/inner-blocked-signal.ts --read --root <root>`）拿 `reason` + `question`，不必读屏就能
   开始判断。旧的 `inner-state.sh` 曾用 inotifywait 监视它，现随 inner-state.sh 一起退役——阻塞信道是
   「内层主动写、外层主动读」的显式信道，不需要一个常驻轮询工具转达。
 - **`--detect-stop` 只清自己写的 auto 记录。** 手动（`--assert-blocked`，judgment）的阻塞只有显式
@@ -926,7 +907,7 @@ resume    每跑完一次即写盘                                              
 **派发前/关任务前**（外层）：跑消费者检查器，读**内容**不只验存在：
 
 ```bash
-node --experimental-strip-types plugin/scripts/quay-check.ts task-contract-check --root <repo> [--json]
+node --experimental-strip-types plugin/scripts/task-contract-check.ts --root <repo> [--json]
 ```
 
 - 五条消费者判定：AC 阈值必须引用已声明的 measure/band 名；measure 必须同时含命令与字段名；
@@ -997,7 +978,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
   vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）；核实并发读原始字段，不用 START
   事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
 - **槽位视角（`--slot-status`）**：`real_in_flight` / `stale_brackets` / `slots_free`
-  （`node --experimental-strip-types plugin/scripts/quay-suite.ts fast-mode-telemetry --slots --cap "${effective_cap:-3}"`）
+  （`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"`）
   ——「还剩几个并发槽」机械可见（AC2）；`stale_brackets > 0` 时调 `--reconcile` 闭合，别让红窗遗留
   括号污染后续判定
   事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）。**空槽数**（AC2/AC5）：`--slots --cap
@@ -1010,7 +991,7 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 阻塞信号状态（步骤 3 `--detect-stop` 的输出：命中了哪些停止条件、`.quay/inner-blocked.json`
   存在与否；存在则报 `reason` + `question`，以及 `fast-mode-telemetry --report` 的累计死时间/单次最长
   ——2026-08-03 起该数有基线）
-- Monitor 两判据（`node --experimental-strip-types plugin/scripts/quay-session.ts monitor-mount-check --json` 的 `mounted` /
+- Monitor 两判据（`bash plugin/scripts/monitor-mount-check.sh --json` 的 `mounted` /
   `targetRoot` 是否等于本仓根 / `targetOk`）——外层消费本层停止条件的那条命脉，挂没挂/挂哪个仓库
   （2026-08-06 起 `delivered` 随共享 events.jsonl 移除；事件送达由挂载方自己的 Monitor 流承担）
 
