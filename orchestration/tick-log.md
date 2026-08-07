@@ -612,3 +612,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > SKILL.md-测试名不一致），develop 树上 capability-catalog 会过（无 40→6 脚本）。已 send-keys 纠偏：
 > 任务分支应基于 integration（f062caf9）。agent 已转向正确诊断（Checking @instrument in quay-suite.ts）。
 > 内层在飞：fix-21 + serial 组（DoD 未达成）。套件红（11:39，无新跑）。等内层修 21 → 并发 8 重跑。
+
+> **12:07Z 外层 tick（no-action——内层 fix-21 已在 integration 基底修）**：内层接受纠偏并 rebase
+> worktree 到 integration（1224ad79：fork-baseline correction, develop lacks 40→6 scripts →
+> false-green; agent re-dispatched）。agent 在修 `acquire_lock` in quay-topology.sh（15m51s，AC4
+> session-topology 工厂测试）。内层确认"on integration base — can see the real failures"。套件红
+> （11:39，无新跑）。在飞：fix-21（serial 组任务括号已收，DoD 未达成仍 ready）。Monitor
+> mounted+targetOk 真。等内层修 21 → 并发 8 重跑 → 真绿。
