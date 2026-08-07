@@ -7673,3 +7673,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **⚠️ 重要发现（转外层）**：**develop 有 252 笔未推送提交**（origin/develop 停在 2026-08-06 17:28，本地跑到 08-07 03:38，~10h 无推送、无 .halt）——tick 心跳（fast-mode 4a / orchestrator 3c）文档在但实跑未推，正是该任务幸存内核（单机防丢）针对的风险。**推送本身是外层 verification-round 动作**（工作树与主 checkout 共享 .git，inner 不直接推 develop）。
 - **另一发现**：capability-catalog.test.mjs 6 个失败是 **AC8 回归**（2f6621ed 的 quay-* 分组入口无 question 声明，unclassified=7）——属 AC8 任务/外层全量门，非本条。
 - **在飞 0/0**：5 空槽，池子应已解锁。
+
+### 事件 03:4xZ（pool 解锁——ready-pool-perf + suite-state-reason 派发）
+
+- **池子解锁后新派发 2/5**：gap-ready-pool-check-times-out（taskWorkLanded 聚合 git log O(history) 各路径 → >150s；修批量化/记忆化，行为保持）+ gap-suite-state-reason-axis（state=red 无 WHY；补 failed|aborted|infra-error 枚举，trigger 按 reason 路由——aborted 不停代码风险派发，交 resource-gate GO/WAIT）。全闸过 + 两两 disjoint。
+- **在飞 2/2**：ready-pool-perf + suite-state-reason。3 空槽。
