@@ -81,15 +81,15 @@ resume 若中断，先跑 measure 复核 --loop 当前是否仍被静默接受
 
 ## Acceptance Criteria
 
-- [ ] AC1: `quay init --loop` 不再静默成功——报错并指出正确路径，或产出与「已铺设」相符的实际结果
-- [ ] AC2: `quay --help` 顶层的 `init` 说明不再可能被误读为「能铺 loop 机制」
-- [ ] AC3: **负控制**——`quay init --force`（合法既有用法）行为不受本次修复影响
-- [ ] AC4: 与 DIR-098 交叉标注——CLI `init`「创建全新空仓库」这个合法用途本身不被取消，只堵住误用入口
+- [x] AC1: `quay init --loop` 不再静默成功——报错并指出正确路径，或产出与「已铺设」相符的实际结果 — [exec 2026-08-07] measure `cd <tmp-empty-dir> && quay init --loop --dry-run 2>&1; echo EXIT=$?` → **EXIT=1**（基线 0——已翻转）；stderr 报「unrecognized option --loop」并指向 `/quay:init --all --loop`；等价真实第三方项目复测（`.git` 在、`.quay/` 无）exit 1 且 plugin/scripts、orchestration、.quay 均不产生；tests `AC1-collision` ×2 pass
+- [x] AC2: `quay --help` 顶层的 `init` 说明不再可能被误读为「能铺 loop 机制」 — [exec 2026-08-07] 顶层 Usage 行已改为 `quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)`；`quay init --help` 同样加注；tests `AC2-collision` ×2 pass
+- [x] AC3: **负控制**——`quay init --force`（合法既有用法）行为不受本次修复影响 — [exec 2026-08-07] `quay init`/`quay init --force`/`quay init --dry-run` 均 exit 0 且照常创建 config+tasks；test `AC3-collision negative control` pass；DIR-098 原有 AC3/AC3b（拒绝覆盖 + --force 覆盖）原测试仍绿
+- [x] AC4: 与 DIR-098 交叉标注——CLI `init`「创建全新空仓库」这个合法用途本身不被取消，只堵住误用入口 — [exec 2026-08-07] quay.ts guard 注释标注 DIR-098 + 本 gap 任务；README「Creating a workspace」新增 `quay init` vs `/quay:init` 区分块；DIR-098 全部原 AC 测试（AC1-AC8/AC10-AC10e）仍绿；只拦 `--loop`，`--force/--dry-run/--root` 照常
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴进任务体（含在 B 机或等价真实第三方项目上的复测）
-- [ ] 完整套件绿
+- [x] AC1-AC4 实跑输出贴进任务体（含在 B 机或等价真实第三方项目上的复测） — 见下「实跑证据」
+- [ ] 完整套件绿 — **无法诚实勾选**。全量 `bash scripts/test.sh` 在 worktree 里 **exit 137（OOM kill，252 文件 + 默认并发超环境内存）**，且日志含 **49 个与 init 无关的既有失败**：门接线测试（dir022-remaining-gates / dir032-audit-independence 等）报 `gate(...) is not a function`——本 worktree 的 `listGates()` 只有 `[dod, acceptance, doc-quay-directive-skill]`，测试引用的 `vmeta-lag/dogfood-evidence/delivery-standalone-smoke/audit-independence/adr-001` 未在当前 config 接线。**基线本已红**：develop git log 明确「suite final red (95 fail)」（2cb14bb9）。本次改动**直接测试面全绿**（init.test.mjs 23/23、cli.test.mjs PASS、scoped 静态检查 task-contract-check no violations、全量静态检查 checker-mutation/test-framework-policy/test-isolation 全 PASS），**未引入任何新失败**；完整套件绿需由外层先清基线红（门接线）再验证。
 
 ## Touches
 - packages/quay/bin/quay.ts
@@ -129,3 +129,63 @@ changed: 人 2026-08-07 裁定「/quay:init 是唯一规范路径」后，管理
 
 **与 40→6 结晶的关系**：同一原则的两种应用——那边把 40 个内部工具收进 6 个入口，
 这边把 3 个入口收成 1 个（一个变私有、一个报错改道）。**都是缩小暴露面。**
+
+## 实跑证据（2026-08-07，执行完成）
+
+### Contract measure（loop_flag_rejected，band: EXIT != 0）
+
+```console
+$ cd $(mktemp -d) && quay init --loop --dry-run 2>&1; echo EXIT=$?
+quay init: unrecognized option --loop.
+CLI `quay init` only scaffolds a brand-new EMPTY quay task store
+(.quay/config.yml + tasks/); it accepts only --force / --dry-run / --root.
+
+To lay the full quay loop mechanism into an existing project, the canonical
+path is the /quay:init skill inside a Claude Code session:
+
+    /quay:init --all --loop
+
+Run `quay init --help` for the CLI surface, or open Claude Code in this
+project and run /quay:init.
+EXIT=1
+```
+
+**基线（修复前）：** EXIT=0，打印 dry-run 配置、无任何警告——`--loop` 被静默吞掉。**修复后：** EXIT=1，报错改道。✓
+
+### Contract invariant（`quay --help` 顶层 init 说明不再可误读）
+
+```console
+$ quay --help | grep "quay init"
+  quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
+```
+
+`quay init --help` 同样加注：「This command only scaffolds a brand-new EMPTY task store. It does NOT lay down the loop mechanism … the canonical path … is the /quay:init skill … /quay:init --all --loop. CLI init has no --loop flag; passing it is an error.」✓
+
+### Contract control（传合法 flag ⇒ 行为不变，负控制）
+
+```console
+$ cd $(mktemp -d) && quay init            # EXIT=0, Created .quay/config.yml + tasks/
+$ quay init --force                       # EXIT=0, Created（覆盖）
+$ quay init --dry-run                     # EXIT=0
+```
+
+### 等价真实第三方项目复测（B 机 orangevps 不可达，用等价 shape：`.git` 在、`.quay/` 无）
+
+```console
+$ git init -q && echo "# third-party" > README.md && echo '{"name":"tp"}' > package.json
+$ quay init --loop ; echo EXIT=$?
+EXIT=1
+$ ls plugin/scripts  # No such file or directory（修复前：报成功但 0 文件）
+$ ls orchestration   # No such file or directory
+$ ls .quay           # No such file or directory（不再铺任何东西）
+```
+
+**修复前（B 机实测，任务立项依据）：** `quay init --loop` exit 0、报「Workspace ready」，
+但 plugin/scripts=0、orchestration/=0。**修复后：** exit 1 且不产生任何误导性产物。✓
+
+### 测试
+
+- `bash scripts/test.sh packages/quay/test/init.test.mjs` → **23/23 pass**（新增 6 个 collision 测试：AC1 ×2、AC2 ×2、AC3 负控制、native AC1）
+- `bash scripts/test.sh packages/quay/test/cli.test.mjs` → **pass**（顶层 --help Usage synopsis 断言不回归）
+- `bash scripts/test.sh --for-task gap-cli-quay-init-collides-with-the-canonical-slash-quay-init --allow-thin` → task-contract-check: **no violations**
+- `bash scripts/test.sh` 全量 → **exit 137（OOM kill）+ 49 个既有门接线失败**（`gate(...) is not a function`，registry 缺 vmeta-lag/dogfood-evidence 等）；本次改动未引入新失败，见 DoD2
