@@ -18,10 +18,14 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
-# existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
-# hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
-# (e.g. relation-sync's harness) into the ratchet.
+# NEW files must also carry a `// @test-group <product|engine|governance|serial|lowconc>`
+# declaration (AC5); existing files may omit it and default to `engine`. `serial` is the
+# load-sensitive family routed to its own concurrency-1 phase
+# (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests); `lowconc` is the
+# hermetic-but-load-sensitive family routed to its own concurrency-3 phase
+# (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). The check does NOT migrate the 34
+# legacy hand-rolled-harness files — it stops the 35th and turns each existing file's eventual
+# conversion (e.g. relation-sync's harness) into the ratchet.
 #
 # TEST-ISOLATION CONTRACT (gap-test-isolation-contract-is-unwritten, AC1-AC6): a test must never
 # touch something it does not exclusively own (fixed __dirname/.tmp-* paths, the SHARED build
@@ -61,8 +65,9 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
-#   (AC7) — the current work surface, so a missed declaration never silently vanishes.
+#   one of product / engine / governance / serial / lowconc (AC1). The DEFAULT for an undeclared
+#   file is `engine` (AC7) — the current work surface, so a missed declaration never silently
+#   vanishes.
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -72,6 +77,12 @@
 #                 tests under experiments/quay-perpetual-stream/test/)
 #   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
 #                 skip block makes it visible as `skipped` in default runs instead of absent)
+#   - serial      KNOWN-LOAD-SENSITIVE A/B-class family (nested-suite-spawn, real-wall-clock-wait)
+#                 routed OUT of the concurrency-N body into its own phase at concurrency 1
+#                 (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests).
+#   - lowconc     hermetic-but-load-sensitive B-class session-observation + install/quay-init
+#                 family (each mkdtemp workspace / private socket) — its own phase at concurrency 3
+#                 (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
 #
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
 #   44 previously-invisible files always appear in the output. Symlinks under that dir that
@@ -411,15 +422,50 @@ resource_gate_check() {
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Only product|engine|governance are valid; a missing OR unrecognized declaration falls back
-# to engine so a typo can never silently remove a file from the default run.
+# Valid groups: product|engine|governance (the default-run body) + serial (the load-sensitive
+# concurrency-1 phase, gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests) +
+# lowconc (the hermetic-but-load-sensitive concurrency-3 phase,
+# gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive). A MISSING declaration defaults to
+# engine (AC7). An UNRECOGNIZED group name is FAIL-CLOSED, never silently degraded to engine:
+# the r10 regression (four commits b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group
+# from this case, so serial/lowconc silently folded into the concurrency-N body and the isolation
+# guarantee was cancelled WITHOUT going red) must be a hard failure, not a silent pass.
 group_of() {
   local f="$1" g
   g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
   case "${g:-}" in
-    product|engine|governance) echo "$g" ;;
-    *) echo "engine" ;;
+    product|engine|governance|serial|lowconc) echo "$g" ;;
+    "")
+      # No declaration at all — intentional default to engine (AC7). The undeclared → engine path
+      # is a real rule, distinct from an unknown-group typo.
+      echo "engine" ;;
+    *)
+      echo "scripts/test.sh: group_of: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+      exit 3
+      ;;
   esac
+}
+
+# check_group_declarations — pre-flight fail-closed guard (gap-verify-round-9-failures-from-recent-
+# changes-fix-batch, AC0b): every test file's declared `// @test-group` must be one of the five
+# recognized groups. A file declaring an UNKNOWN group is a dropped/mis-typed group — the r10
+# regression (b209f4fd→174badc0→e92c54d8→c7176a37 each dropping one group from group_of's case)
+# silently folded serial/lowconc into the concurrency-N engine body and cancelled the isolation
+# guarantee WITHOUT going red. That must be a HARD failure, not a silent pass. group_of's own
+# `*)` branch is defense-in-depth (it runs inside a command substitution, so its exit cannot abort
+# the parent); this check runs directly in the dispatch path and exits the script.
+check_group_declarations() {
+  local f g
+  while IFS= read -r f; do
+    g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
+    case "${g:-}" in
+      ""|product|engine|governance|serial|lowconc) ;;
+      *)
+        echo "scripts/test.sh: FAIL-CLOSED: '$f' declares unknown @test-group '$g' — a group was dropped or mis-typed (recognized: product|engine|governance|serial|lowconc); refusing to silently degrade it to engine" >&2
+        exit 3
+        ;;
+    esac
+  done < <(build_deduped_files)
 }
 
 # build_deduped_files — echo the union glob, deduped by realpath (AC3). One file per line.
@@ -469,9 +515,11 @@ select_files() {
   done < <(build_deduped_files)
 }
 
-# list_groups — per-group counts over the full deduped glob (AC10).
+# list_groups — per-group counts over the full deduped glob (AC10). `serial` and `lowconc` are real
+# groups (the load-sensitive families routed to their own phases), so the default-set partition
+# product+engine+governance no longer equals total — serial and lowconc are the 4th and 5th parts.
 list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0)
+  declare -A counts=([product]=0 [engine]=0 [governance]=0 [serial]=0 [lowconc]=0)
   local f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
@@ -480,7 +528,9 @@ list_groups() {
   printf 'product:    %d\n' "${counts[product]:-0}"
   printf 'engine:     %d\n' "${counts[engine]:-0}"
   printf 'governance: %d\n' "${counts[governance]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} ))
+  printf 'serial:     %d\n' "${counts[serial]:-0}"
+  printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[serial]:-0} + ${counts[lowconc]:-0} ))
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
@@ -575,6 +625,9 @@ mark_nested() {
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
 run_selected() {
   local groups="$1"; shift
+  # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
+  # degrade to engine — a dropped group cancels the isolation guarantee without going red.
+  check_group_declarations
   # The resource gate guards the FULL-SUITE default (product,engine). A non-default --group is a
   # subset run (e.g. --group governance) — scoped, skip it (QUAY_TEST_SKIP_RESOURCE_GATE=1 is
   # honored inside resource_gate_check for nested runners).
@@ -613,6 +666,16 @@ run_selected() {
     local cc
     cc="$(default_test_concurrency)"
     mark_nested
+    # Suite-BEFORE snapshot (gap-assert-clean-tree-premise-void-under-concurrent-writers): capture
+    # the pre-run porcelain so a re-enabled suite-AFTER assertion is DELTA — only items newly added
+    # DURING the run count as test products. Preexisting dirt from concurrent writers (manager
+    # tick-log, outer worktree scaffolding, inner uncommitted change) is excluded. The snapshot is
+    # gitignored. NON-FATAL while the assertion is DISABLED (the clean-tree call itself stays
+    # disabled per the 17:1x ruling — restore fail-closed here when the assertion is re-enabled).
+    bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" --snapshot "${repo_root}" || true
+    # Same-family DELTA for tmux-leak-scan: pre-existing outer/manager tmux sessions are not this
+    # run's leak. Snapshot failure is non-fatal (the absolute suite-tail check still runs after).
+    bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --snapshot "${repo_root}" || true
     set +e
     # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency
     # source — skip the default prepend (gap-full-suite-runner-concurrency-default-and-gate AC2).
@@ -622,6 +685,42 @@ run_selected() {
       node --test --test-concurrency="$cc" "$@" "${files[@]}"
     fi
     local code=$?
+    # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+    # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
+    # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
+    # keeps real-wall-clock-wait and nested-suite-spawn tests from being starved by the main body's
+    # worker pool. Skipped when the main body already failed (the run is red either way). The
+    # concurrency is a HARD-CODED 1 — serial isolation is the mechanism's invariant, never a
+    # user-tunable knob (the --group serial path in the non-default branch strips explicit
+    # concurrency flags for the same reason). Its TAP summary lands LAST on the stream, so the
+    # outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial summary overwrites
+    # the main body's only when both are green — a serial failure flips the whole run red via its
+    # own fail/cancelled).
+    if [ "$code" -eq 0 ]; then
+      local serial_files=() sf serial_code
+      while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+      if [ "${#serial_files[@]}" -gt 0 ]; then
+        echo "selected ${#serial_files[@]} files (groups=serial)"
+        node --test --test-concurrency=1 "${serial_files[@]}"
+        serial_code=$?
+        if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
+      fi
+    fi
+    # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
+    # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
+    # each mkdtemp workspace / private socket) run in their OWN phase at `--test-concurrency=3` —
+    # not the derived default and not 8 — so wait-type tests get timely scheduling. The phase runs
+    # even if the body failed (report all failures); its exit code merges into `code`. The
+    # hard-coded 3 is deliberate (AC4) and does NOT add a derived-concurrency literal site
+    # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
+    local lowconc_files=() lf
+    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    if [ "${#lowconc_files[@]}" -gt 0 ]; then
+      echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
+      node --test --test-concurrency=3 "${lowconc_files[@]}"
+      local lcode=$?
+      [ "$lcode" -eq 0 ] || code="$lcode"
+    fi
     set -e
     # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO
     # LONGER RUNS here. Its premise — the coordinator runs on a clean tree — is VOID under three
@@ -633,21 +732,49 @@ run_selected() {
     # in the suite-after clean-tree script's header.
     # KNOWN TRADE-OFF (AC4): catching a test that GENUINELY leaks into the verification tree is
     # TEMPORARILY ABSENT while disabled; the tmux-leak-scan below still catches the tmux leak class.
-    # Suite-AFTER assertion (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
+    # Suite-AFTER assertion, DELTA form (AC1, gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause):
     # a FULL SUITE must leave no test-characteristic tmux server or /tmp dir behind (skv- /
-    # session-liveness- / ol-tok- / enter-repro- prefixes). Second line of defense — the teardown
-    # fix (kill-session, never kill-server) is primary; this covers the whole leak class at once.
-    # Same flip-only-a-passing-run semantics as the suite-after assertion above.
-    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh"; then
+    # session-liveness- / ol-tok- / enter-repro- prefixes). Delta: only items absent from the
+    # before-run snapshot are this run's leak. Second line of defense — the teardown fix
+    # (kill-session, never kill-server) is primary; this covers the whole leak class at once.
+    # Same flip-only-a-passing-run semantics as assert-clean-tree above.
+    if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/tmux-leak-scan.sh" --check "${repo_root}"; then
       code=1
     fi
     exit "$code"
   fi
   mark_nested
+  # SERIAL group run (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
+  # the serial group is isolated by definition — ALWAYS concurrency 1, never a user-tunable knob.
+  # Strip any explicit --test-concurrency flag (both spellings) so the hard-coded 1 is the SINGLE
+  # concurrency source — a full-suite-runner splice onto a `--group serial` command must not leak
+  # concurrency N in.
+  if in_group "serial" "$groups"; then
+    local filtered=() a prev_arg=""
+    for a in "$@"; do
+      case "$a" in
+        --test-concurrency=*) continue ;;
+        --test-concurrency) prev_arg="continue" ; continue ;;
+      esac
+      if [ "$prev_arg" = "continue" ]; then prev_arg=""; continue; fi
+      filtered+=("$a")
+    done
+    exec node --test --test-concurrency=1 "${filtered[@]}" "${files[@]}"
+  fi
+  # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
+  # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency 3 —
+  # not the derived default. An explicit user --test-concurrency flag still wins (single
+  # concurrency source, AC2). The hard-coded 3 adds no derived-concurrency literal site.
+  local lowconc_force=""
+  if in_group "lowconc" "$groups"; then
+    lowconc_force="--test-concurrency=3"
+  fi
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
   if has_explicit_concurrency "$@"; then
     exec node --test "$@" "${files[@]}"
+  elif [ -n "$lowconc_force" ]; then
+    exec node --test "$lowconc_force" "$@" "${files[@]}"
   else
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
   fi
@@ -674,7 +801,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|governance|serial|lowconc, comma-separated)" >&2
     exit 2
   fi
   shift 2
@@ -683,15 +810,26 @@ fi
 if [ "${1:-}" = "--list-groups" ]; then
   # Metadata mode (AC10) — no test run, no split-or-commit scan. Always reports the FULL
   # deduped glob's per-group counts, independent of any --group.
+  check_group_declarations
   list_groups
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
-  # --group if given, else the default product,engine set.
+  # --group if given; else the DEFAULT RUN's full selection = the product,engine body (with
+  # governance self-skip passthrough) PLUS the lowconc phase files — a default `bash
+  # scripts/test.sh` executes BOTH (the concurrent body, then the serial phase, then the lowconc
+  # phase), so no-args --list-files reports the full reachable surface and keeps the
+  # runner-grouping AC3 invariant (`--list-files count + serial == --list-groups total`) and the
+  # test-coverage-check AC5 canonical-coverage invariant. A serial/lowconc file is NOT in the
+  # default GROUP SET; it is in the default RUN (its own phase) — hence
+  # `--group product,engine --list-files` differs from no-args unless lowconc is named
+  # (runner-grouping AC6 pins `--group product,engine,lowconc --list-files == no-args --list-files`).
+  check_group_declarations
   if [ -n "${groups}" ]; then
     select_files "$groups"
   else
     select_files "$(effective_groups)"
+    select_files "lowconc"
   fi
   exit 0
 elif [ -n "${groups}" ]; then
