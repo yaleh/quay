@@ -78,19 +78,106 @@ resume 若中断，先读 SKILL 现有边界章节，不要重写已经写对的
 
 ## Acceptance Criteria
 
-- [ ] AC1: `plugin/skills/manager/SKILL.md` 新增工具复用清单一节，含本任务表格列出的 8 项，
+- [x] AC1: `plugin/skills/manager/SKILL.md` 新增工具复用清单一节，含本任务表格列出的 8 项，
       贴出改动后的文件片段
-- [ ] AC2: 新增强制挂载点——manager 写任何新 `.sh`/`.ts` 之前必须先查
+
+      **改动文件片段**（`plugin/skills/manager/SKILL.md` §9，2026-08-07 执行）：
+      ```markdown
+      ## 9. 工具复用强制挂载点（capability-catalog 前置检查，AC2）
+
+      **这一节是 §4「越界的机械信号」的可执行落地**（`orchestration/SPEC-manager-productization-2026-08-05.md`
+      §5）——该节作为散文规则被证明无效：2026-08-06 晚，同一个读过该节的会话仍手写 8 个已有能力的替代品
+      （证据见 `tasks/gap-manager-skill-missing-mandatory-tool-reuse-checklist.md` AC4）。从本行起，这不是提醒，是步骤。
+
+      **硬规则（Step 0 前置检查，写脚本前必做）**：任何 `.sh`/`.ts` 写入（哪怕是一次性诊断脚本）都必须先执行
+      `bash plugin/scripts/capability-catalog.sh | grep -i <关键词>`，确认没有既有能力。找不到对应既有工具才允许写；
+      找到则必须复用（调用产品化工具，而不是再造一个劣质版本）。这条是**前置检查动作**，不是自觉提醒。
+
+      **8 项已知复用对照（2026-08-06 实测；速查，非完备清单）**：权威来源是上面命令查出的能力目录本身（以文件系统
+      派生、随包更新，本 SKILL 不维护完备性）——下表是本次已确认的「手工做过 → 已有工具」映射，下一位 manager
+      （或换了上下文的同一位）直接查这里：
+
+      | 想手工做的事（越界信号） | 已有工具（用这个） |
+      |---|---|
+      | 肉眼读 `capture-pane` 判断忙/闲 | `pane-state-classify.ts` |
+      | 拼进程 CPU + git log 判断循环死活 | `dead-loop-check.sh` |
+      | 每轮 tick 手工数 AC10 | `prefriction-count.sh` |
+      | 每轮 tick 手工问生成器问句 | `axis-generator.ts --criteria` |
+      | 手写 tmux 泄漏扫描逻辑 | `tmux-leak-scan.sh` |
+      | 手写 `git rev-list --left-right` 判断落后/领先 | `sync-lag-check.sh` |
+      | 裸 `tmux send-keys` 三步 | `send-keys-reliable.sh` |
+      | 用 `send-keys-reliable.sh` 而非窄接口 | `supervisor-deliver.sh` |
+      ```
+- [x] AC2: 新增强制挂载点——manager 写任何新 `.sh`/`.ts` 之前必须先查
       `capability-catalog.sh` 的具体步骤，写成可执行的检查动作而非散文提醒
-- [ ] AC3: 与 `orchestration/SPEC-manager-productization-2026-08-05.md` §5 交叉标注——
+
+      **实跑输出**（Contract measure `precheck_mounting_point_exists`，band=1）：
+      ```
+      $ grep -c "写脚本前\|before writing\|查目录\|check the catalog" plugin/skills/manager/SKILL.md
+      1
+      $ grep -n "写脚本前\|before writing\|查目录\|check the catalog" plugin/skills/manager/SKILL.md
+      365:**硬规则（Step 0 前置检查，写脚本前必做）**：任何 `.sh`/`.ts` 写入（哪怕是一次性诊断脚本）都必须先执行
+      ```
+      Invoke measure `capability-catalog` count = 2（挂载点命令行 + 章节标题各一处）。
+- [x] AC3: 与 `orchestration/SPEC-manager-productization-2026-08-05.md` §5 交叉标注——
       本任务是那条规则"从文档走向可执行"的落地
-- [ ] AC4: 任务体记录：为什么"规则写在文档里"不够（今晚的反例——同一会话读过规则仍违反 8 次），
+
+      **交叉标注**：SPEC §5「2026-08-06 的实证」段后新增「落地状态（2026-08-07）」：
+      > **落地状态（2026-08-07，`gap-manager-skill-missing-mandatory-tool-reuse-checklist` 执行后）**：
+      > 本节的「从文档走向可执行」已随包落在 `plugin/skills/manager/SKILL.md` §9「工具复用强制挂载点」——manager
+      > 在写任何新 `.sh`/`.ts` 前必须先跑 `bash plugin/scripts/capability-catalog.sh | grep -i <关键词>` 作为
+      > Step 0 前置检查（AC2）；8 项复用对照表随 SKILL 铺设（AC1）……
+      且 SKILL §9 首段反向引用该 SPEC §5。两个方向都已钉住。
+- [x] AC4: 任务体记录：为什么"规则写在文档里"不够（今晚的反例——同一会话读过规则仍违反 8 次），
       不得省略这条自我批判性证据
+
+      **自我批判性证据**在本任务 Proposal「性质」一节（原文保留）：
+      > **规则存在于文档里，不等于规则会被执行。** 我在同一个会话里读过这份 SPEC（今晚早些时候查过
+      > manager 的边界职能），却仍然在几小时后手写了 8 个已有能力的劣质替代品。这不是"没读到规则"，
+      > 是"读到了规则，但没有一个强制的挂载点让我在动手前先查目录"。
+      以及 8 项「我手工做的 → 已有工具」对照表（Proposal 首表）。SKILL §9 也把这条反例写进了章节首段
+      （"同一个读过该节的会话仍手写 8 个已有能力的替代品"），使"散文不够"这一结论随包固化。
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出/文件片段贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] AC1-AC4 实跑输出/文件片段贴进任务体（见上；measures + control + scoped tier 输出见下）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——按 fast-mode 作用域语义推迟到外层验证轮
+      （本次执行按派发指令跑作用域静态层 `scripts/test.sh --for-task ... --allow-thin`；0 个测试文件被选中，
+      完整套件由外层验证轮在 fan-in 处跑，见下方「实跑输出」）
+
+## Execution evidence（2026-08-07）
+
+**Contract measures**（对 `plugin/skills/manager/SKILL.md`，工作树内实跑）：
+```
+$ grep -c "capability-catalog\|dead-loop-check\|prefriction-count\|axis-generator\|tmux-leak-scan\|sync-lag-check\|supervisor-deliver" plugin/skills/manager/SKILL.md
+8                          # tool_reuse_checklist_present（band=8）✓
+$ grep -c "写脚本前\|before writing\|查目录\|check the catalog" plugin/skills/manager/SKILL.md
+1                          # precheck_mounting_point_exists（band=1）✓
+$ grep -c "capability-catalog" plugin/skills/manager/SKILL.md
+2                          # invoke ✓
+```
+
+**invariant（清单与目录一致，不写死漂移静态清单）**：8 个表格基名逐一在
+`plugin/scripts/capability-catalog.sh` 的 QUESTION 表有声明（`pane-state-classify.ts` / `dead-loop-check.sh` /
+`prefriction-count.sh` / `axis-generator.ts` / `tmux-leak-scan.sh` / `sync-lag-check.sh` / `send-keys-reliable.sh` /
+`supervisor-deliver.sh` 全部 OK）。SKILL 明确「非完备清单 + 权威来源 = 目录本身」，未声称覆盖目录之外条目。
+
+**control（往目录注入虚构能力 `fictional-scan.sh`，temp 副本，不落盘）**：
+```
+fictional-scan.sh appears in catalog --json: 1        # 活目录查询能机械看到新增，静态清单不会假装覆盖
+SKILL does not reference fictional-scan -> no false 'covered' claim (invariant holds)
+```
+
+**scoped static tier**（`bash scripts/test.sh --for-task gap-manager-skill-missing-mandatory-tool-reuse-checklist --allow-thin`）：
+```
+task-contract-check: no violations.
+strategic-doc-staleness-check — 100 strategic doc(s) scanned; stale_refs_found (new): 0
+PASS: no NEW stale strategic doc beyond the KNOWN_STALE baseline
+scripts/test.sh: --for-task ... — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in
+```
+
+**改动文件**：`plugin/skills/manager/SKILL.md`（+§9 工具复用强制挂载点）、
+`orchestration/SPEC-manager-productization-2026-08-05.md`（§5 交叉标注「落地状态」）、本任务体（AC/DoD/证据）。
 
 ## Touches
 - plugin/skills/manager/SKILL.md
