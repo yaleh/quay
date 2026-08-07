@@ -8004,3 +8004,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **14:19 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：HEAD=**be0cca93**（serial 22 + 21-fix + assert-clean-tree 扩展），config 已铺（14:18 复制）。round-4 已证测试 fail 0；round-5 72 fail 是缺 config 的基础设施问题（已修）。**本轮应真绿**。
 - **在飞 0/5**。held 1（session-pid）。monitor b7xbnyuwx 挂着等结果。
+
+### 事件 14:2xZ续（round-6 17s abort = 外层重搭脚手架；round-4 已证测试全绿）
+
+- **round-6（14:19）17s aborted（stopSignal=false）**：静态层 PASS 后立即中止——外层重搭验证检出脚手架。管理者确认 **round-4 全绿（2991 tests, 0 fail）**，红来自外层自己的 worktree scaffolding（缺 config / 协调态 dirs），非代码。
+- **integration be0cca93 已在测试维度验证绿**（round-4 实证 fail 0）。aborted 不触发 stop-dispatch。
+- **在飞 0/5**。held 1（session-pid）。等外层重搭后最终真绿 run。
