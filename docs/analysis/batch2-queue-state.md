@@ -7678,3 +7678,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **池子解锁后新派发 2/5**：gap-ready-pool-check-times-out（taskWorkLanded 聚合 git log O(history) 各路径 → >150s；修批量化/记忆化，行为保持）+ gap-suite-state-reason-axis（state=red 无 WHY；补 failed|aborted|infra-error 枚举，trigger 按 reason 路由——aborted 不停代码风险派发，交 resource-gate GO/WAIT）。全闸过 + 两两 disjoint。
 - **在飞 2/2**：ready-pool-perf + suite-state-reason。3 空槽。
+
+### 事件 03:5xZ（two-thirds-polling 派发 + 空槽说明）
+
+- **two-thirds-polling 派发 3/5**：64% inner 时间花在等 suite 日志——已文档化且已实现的去除机制未被使用；wire-in。与在飞 2 全 disjoint。
+- **session-liveness-remove-shared-events**：其 5 个 missing touches 是 heavy-op-token* 文件（人 B-FULL-DELETE 裁定要删的目标，`(delete)` 类，非 stale）——但当前与 two-thirds-polling deferral，等其完成再派。
+- **在飞 3/3**：ready-pool-perf + suite-state-reason + two-thirds-polling。2 空槽无 all-disjoint 候选（complete-delivery / manager-productization 撞在飞）。
