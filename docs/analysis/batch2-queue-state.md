@@ -7791,3 +7791,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **残余 blocker**：~13min 外部 SIGKILL（test.sh:576 pid 720326 exit 137），OOM 已排除（dmesg 无今日 oom-kill，mem 10.4GB）。**新发现**：tmux-leak-scan.sh 白名单漏掉实际泄漏前缀（ol-*/isc-*/topo-*/sb-*；现场 105 server）——交叉标注给泄漏任务，本任务不修。
 - **red-suite 暂缓**：真实代码（工具+测试）需 fan-in，hold 与 cross-machine-observe/audit-findings 同批次待 re-green。AC3+DoD 干净窗口重跑 defer 外层。status 未翻 done。
 - **在飞 2/5**：inner-panel + npm-install。已 hold 3 worktree（cross-machine-observe / audit-findings / suite-cutoff）待 re-green 一并 fan-in。
+
+### 事件 08:2xZ（npm-install 完成——postinstall 注册钩子，真实 7 文件修复）
+
+- **npm-install 完成**（commit 4ba54d4e，7 files +480/-11）：根因 = npm install -g 落包 + plugin/ bundle 进 `$(npm root -g)/quay`，但**缺注册一步**（settings.json 0/0 引用）。修复：`packages/quay/scripts/register-plugin.mjs`（postinstall 钩子，仅 global install 跑——monorepo dev install 不重写 ~/.claude/settings.json 到 dev-tree 路径，正是 B 机 bug）；写 installed 目录进 extraKnownMarketplaces.quay + enabledPlugins["quay@quay"]（原子写、保留其他键、缺 bundle fail-closed）+ best-effort `claude plugin add/install`（/quay:init 零手工步骤）；escape hatch QUAY_SKIP_PLUGIN_REGISTER/CLI。package.json postinstall + files[]；package.sh pack 时版本同步 gate（drift → exit 1）；marketplace.json 0.3.13→0.4.0 修 manifest drift。
+- **验证**：AC1/AC3 干净机器两遍（fresh mktemp HOME + isolated prefix，postinstall code 0，AC3 负控制 0 文件→同结果）；AC2 真 claude -p 会话 settings.json marketplace 识别 + plugin list 显示 quay@quay 0.4.0 enabled + init skill 在列；AC4 全自动无手工编辑；AC5 交叉标注。scoped exit 0，npm-pack-e2e 9/9（含 4 新）。B/C 真机交互 /quay:init 显式 machine-gated（任务体写明留外层）。
+- **red-suite 暂缓**：真实代码需 fan-in，hold 第 4 个。status ready 未翻 done。
+- **在飞 1/5**：inner-panel。已 hold 4 worktree（cross-machine-observe / audit-findings / suite-cutoff / npm-install）待 re-green 一并 fan-in。
