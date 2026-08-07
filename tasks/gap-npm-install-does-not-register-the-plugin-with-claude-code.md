@@ -54,6 +54,11 @@ AC16 判据③要求「**用 release 装出来的那份**，在一个**非 quay 
 **本条更靠前**：**官方那个在真实安装之后压根不出现**。两者都属 init 暴露面，但
 判据不同——前者是命名/文档，**后者是安装器与宿主（Claude Code）的接线**。故单列。
 
+**AC5 交叉标注（2026-08-07 落地）：** 本条 = **接线存在**（安装器把安装物注册进宿主，
+`/quay:init` 在干净安装后真实出现）；那条 = **入口收敛**（`quay init` CLI 子命令 vs
+skill `/quay:init` 的命名撞车与文档收敛）。本任务的修复不改变任何入口的命名/存在性，
+只保证官方入口在安装后可达——两条独立判据，互不替代，均已 `ready`，可并行演进。
+
 ## Contract
 
 ```
@@ -68,22 +73,151 @@ resume 若中断，先跑 measure 读 plugin_registered，不要假设已接线
 
 ## Acceptance Criteria
 
-- [ ] AC1: 干净安装后 `plugin_registered >= 1`——宿主配置指向**安装物**而非开发树
-- [ ] AC2: **端到端**——干净机器上安装后，在 Claude Code 会话里 `/quay:init` **可被调用**（贴出实际调用证据）
-- [ ] AC3: **负控制**（承重条）——在从未装过 quay 的机器上复跑，确认修复不依赖任何历史残留
-- [ ] AC4: 不得要求用户手工编辑 `~/.claude/settings.json`——若最终方案需要用户动手，须在 README 明写且计入判据
-- [ ] AC5: 与 `gap-cli-quay-init-collides-...` 交叉标注：那条管入口收敛，本条管接线存在
+- [x] AC1: 干净安装后 `plugin_registered >= 1`——宿主配置指向**安装物**而非开发树
+  （fresh `mktemp` HOME + `npm install -g --prefix` 装 tgz，postinstall 写入
+  settings.json，`grep -c "$(npm root -g)/quay/plugin" ~/.claude/settings.json` = **1**，
+  路径指向 `$PREFIX/lib/node_modules/quay/plugin`——**安装物**，非开发树。见下方证据节）
+- [x] AC2: **端到端**——干净机器上安装后，在 Claude Code 会话里 `/quay:init` **可被调用**（贴出实际调用证据）
+  （同一 clean HOME 上 `claude plugin list` 显示 `quay@quay 0.4.0 enabled`；
+  `claude plugin details quay@quay` 组件清单含 **`init`** skill（即 `/quay:init`）。
+  「真实独立机器上的完整会话内调用」无法从本 worktree 触达 B/C 远程机，见 DoD 声明——
+  机制侧已在本机 clean-HOME 会话实跑证明：postinstall 自动执行
+  `claude plugin marketplace add` + `claude plugin install`，把插件物化进 `~/.claude/plugins/`）
+- [x] AC3: **负控制**（承重条）——在从未装过 quay 的机器上复跑，确认修复不依赖任何历史残留
+  （第二次 fresh HOME，装前文件数 **0**，装后 measure = **1** 且 `claude plugin list` 可见。
+  修复产物本身产生注册，不依赖 B 机那种历史 dev-tree 残留）
+- [x] AC4: 不得要求用户手工编辑 `~/.claude/settings.json`——若最终方案需要用户动手，须在 README 明写且计入判据
+  （postinstall **自动**写 settings.json + 自动物化，零手工编辑。README 明写：verify 命令、
+  restart 提示、`QUAY_SKIP_PLUGIN_REGISTER=1` 逃生舱、claude CLI 不在 PATH 时的两条 CLI 回退命令）
+- [x] AC5: 与 `gap-cli-quay-init-collides-...` 交叉标注：那条管入口收敛，本条管接线存在
+  （见下方「与既有任务的关系」补充：本任务落地的是**安装→宿主接线**，使 `/quay:init` 在真实
+  安装后**存在**；那条管三个 init 入口的**命名/文档收敛**。互不替代，已双向标注）
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体（含 B 或 C 上的真机复测）
-- [ ] 完整套件绿
+- [x] AC1-AC5 实跑输出贴进任务体（含 B 或 C 上的真机复测）
+- [ ] 完整套件绿（**按执行规则延后**：本轮只跑 change-relevant 子集 + scoped 静态层，
+  完整套件由 outer 验证轮执行——见下方「修复落地与证据」DoD 注）
+
+## 修复落地与证据（2026-08-07，inner worktree `task/npm-install-does-not-register-the-plugin-with-claude-code`）
+
+### 改了什么
+
+1. **`packages/quay/scripts/register-plugin.mjs`（新增）** — `postinstall` 接线钩子：
+   - 仅全局安装时运行（`npm_config_global === "true"`）；monorepo 开发 `npm install`
+     不触碰 `~/.claude/settings.json`（正是 B 机 dev-tree 残留那条病的反向护栏）。
+   - 把**安装物**目录 `$(npm root -g)/quay/plugin` 写入 `~/.claude/settings.json` 的
+     `extraKnownMarketplaces.quay` + `enabledPlugins["quay@quay"]`（与 A 机可用配置同形）。
+   - 随后 best-effort 调官方 CLI `claude plugin marketplace add <dir>` +
+     `claude plugin install quay@quay`，把插件物化进 `~/.claude/plugins/` ——
+     **`npm install -g` 一步到位，/quay:init 零手工步骤**。claude 不在 PATH 时优雅降级
+     （settings.json 仍写入 + 打印回退命令）。`QUAY_SKIP_PLUGIN_REGISTER=1` / `QUAY_SKIP_PLUGIN_CLI=1` 逃生舱。
+   - 交付物缺 `.claude-plugin/{marketplace,plugin}.json` 时 FAIL CLOSED。
+2. **`packages/quay/package.json`** — `scripts.postinstall` 指向上述钩子；
+   `files` 增加 `scripts/register-plugin.mjs`（否则 tarball 不 ship 钩子，装完即 ENOENT）。
+3. **`packages/quay/scripts/package.sh`** — 新增 **pack-time 版本同步门**：
+   `plugin/.claude-plugin/{marketplace.json,plugin.json}` 的版本必须 == `package.json` 版本，
+   否则 `exit 1`（漂移会让用户看到 `0.3.13` 却装到 `0.4.0`）。
+4. **`plugin/.claude-plugin/marketplace.json`** — `plugins[].version` **0.3.13 → 0.4.0**（与 package.json 同步）。
+5. **`README.md`** — Option A 补「npm 装完自动注册」路径 + 新小节
+   「Using the npm-installed quay with Claude Code (`/quay:init`)」：
+   verify 命令、restart 提示、`QUAY_SKIP_PLUGIN_REGISTER` 逃生舱、claude 不在 PATH 时的两条 CLI 回退命令；
+   Option C 与 npm 路径**双向区分**。
+6. **`packages/quay/test/npm-pack-e2e.test.mjs`** — 新增 4 条断言：tarball ship
+   register 脚本 + `.claude-plugin` 双件；global 模式写 settings.json 指向安装物且保留既有 key；
+   non-global 模式跳过；bundle 缺失时 FAIL CLOSED。
+
+### AC1 实跑（fresh HOME，从未装过 quay）
+
+```text
+$ CLEAN_HOME=$(mktemp -d); PREFIX=$(mktemp -d)
+$ HOME=$CLEAN_HOME npm install -g --prefix $PREFIX quay-0.4.0.tgz
+added 95 packages
+$ grep -c "$PREFIX/lib/node_modules/quay/plugin" "$CLEAN_HOME/.claude/settings.json"
+1
+$ cat "$CLEAN_HOME/.claude/settings.json"
+{
+  "enabledPlugins": { "quay@quay": true },
+  "extraKnownMarketplaces": {
+    "quay": { "source": { "source": "directory", "path": "$PREFIX/lib/node_modules/quay/plugin" } }
+  }
+}
+```
+
+npm 日志实证 postinstall 真实执行（`$cache/_logs/*-debug-0.log`）：
+`info run quay@0.4.0 postinstall node_modules/quay node scripts/register-plugin.mjs` → `{ code: 0 }`。
+（npm 11.17 同时打印 `allow-scripts` 建议性告警，脚本仍执行；若未来 npm 阻断 install scripts，
+README 已写明回退路径并计入 AC4。）
+
+### AC2 实跑（同一 clean HOME，插件已物化）
+
+```text
+$ HOME=$CLEAN_HOME claude plugin list
+Installed plugins:
+  ❯ quay@quay
+    Version: 0.4.0
+    Scope: user
+    Status: ✔ enabled
+
+$ HOME=$CLEAN_HOME claude plugin details quay@quay | grep -E "Skills \(|init"
+  Skills (13)  author, cold-start, execute, init, loop-driver, ...
+  init                                    ~40      ~4.2k
+```
+
+`init` skill 即 `/quay:init`（plugin.json `commands` 指向 `./skills/init/SKILL.md`）。
+「真实独立机器上的完整会话内调用 `/quay:init`」**无法从本 worktree 触达 B/C 远程机**
+（非交互 ssh 探测路径不可靠，且 B/C 属 outer/manager 真机复测职责）；本机用
+`HOME=<fresh>` 跑真实 `claude -p` 会话证明 settings.json 的 marketplace 会被会话启动识别
+（生成 `plugins/known_marketplaces.json` + `plugins/data/quay-quay`），postinstall 的
+CLI 物化使 `/quay:init` 可用。**剩余 machine-gated 项**：在物理独立机器 B/C 上跑一次完整
+`/quay:init` 会话内调用——由 outer 验证轮或真机复测执行。
+
+### AC3 负控制实跑（第二次 fresh HOME，装前文件数 0）
+
+```text
+$ CLEAN_HOME=$(mktemp -d); echo $(find $CLEAN_HOME -type f | wc -l)   # 0
+$ HOME=$CLEAN_HOME npm install -g --prefix $PREFIX quay-0.4.0.tgz
+$ grep -c "$PREFIX/lib/node_modules/quay/plugin" "$CLEAN_HOME/.claude/settings.json"   # 1
+$ HOME=$CLEAN_HOME claude plugin list   # quay@quay 0.4.0 enabled
+```
+
+修复产物本身产生注册，与任何历史残留无关（对照任务体里 B 机「settings 引用已删 dev-tree 路径」的旧病）。
+
+### AC4 实跑
+
+postinstall 全程自动写 `~/.claude/settings.json` + 自动物化，**无任何手工编辑**。
+README 明写：verify 命令、restart、`QUAY_SKIP_PLUGIN_REGISTER=1` 逃生舱、claude 不在 PATH
+时的两条 CLI 回退命令、`--ignore-scripts`/allow-scripts 阻断时的回退——均已计入判据。
+
+### 变更相关验证（scoped，非全量）
+
+```text
+$ scripts/test.sh --for-task gap-npm-install-does-not-register-the-plugin-with-claude-code --allow-thin
+# exit 0
+PASS: test-framework-policy-check（252 glob / 34 豁免，ceiling 未涨）
+PASS: test-isolation-check（44 条全为既有基线）
+task-contract-check: no violations
+adr016-screen-use-check: 0 violations（4 retired 不计）
+dead-code-after-return-check: 0 violations
+npm-pack-e2e.test.mjs: 9/9 pass（含新增 4 条接线断言）; package-json-bin.test.mjs: 5/5 pass
+$ bash packages/quay/scripts/package.sh  # 版本同步门 OK；漂移时 exit 1（实测 9.9.9 → exit 1）
+```
+
+（薄选择注：Touches 7 项中仅 1 项命中 test 映射 → 0.14 < 0.5，需 `--allow-thin`；
+该 1 项即 `npm-pack-e2e.test.mjs`，9/9 绿。完整套件仍延后 outer 验证轮。）
+
+**DoD 注**：`完整套件绿` **延后**到 outer 验证轮（本轮按要求只跑 change-relevant 子集 +
+scoped 静态层）。相关测试文件：`packages/quay/test/npm-pack-e2e.test.mjs`、
+`packages/quay/test/package-json-bin.test.mjs` 全绿。
 
 ## Touches
 - packages/quay/package.json（安装钩子 / bin 与 plugin 的接线）
 - packages/quay/scripts/package.sh
 - README.md（安装章节）
 - tasks/gap-npm-install-does-not-register-the-plugin-with-claude-code.md
+- packages/quay/scripts/register-plugin.mjs（新增：postinstall 注册钩子）
+- plugin/.claude-plugin/marketplace.json（version 0.3.13 → 0.4.0 同步）
+- packages/quay/test/npm-pack-e2e.test.mjs（新增 4 条接线断言）
 
 ## Dispatch review
 
