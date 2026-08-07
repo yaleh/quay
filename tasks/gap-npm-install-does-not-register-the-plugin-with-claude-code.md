@@ -90,3 +90,61 @@ resume 若中断，先跑 measure 读 plugin_registered，不要假设已接线
 reviewer: none
 at: 2026-08-07T06:2xZ
 changed: 管理者在 B/C 真机执行 AC16 前置链时实测发现；两台互为对照排除了「B 历史残留」这一解释
+
+
+## 补充实证（2026-08-07 06:3xZ，人指示检查「基于目录的 marketplace」后查清，把「缺一步」细化为「缺哪一步」）
+
+### 机制（从 A 机**可用**配置反推的实证样本，非文档推断）
+
+```json
+"extraKnownMarketplaces": {
+  "quay": { "source": { "source": "directory", "path": "/home/yale/.local/share/quay-plugin" } }
+},
+"enabledPlugins": { "quay@quay": true }
+```
+被指向的目录必须含 **`.claude-plugin/marketplace.json`**（`name` / `plugins[].source` / `version`）+ `plugin.json`。
+
+### 交付物侧：**正确，机制齐备**（推翻「交付物缺东西」这一可能解释）
+
+| 检查 | 结果 |
+|---|---|
+| 本仓 `plugin/.claude-plugin/` | ✅ `marketplace.json` + `plugin.json` |
+| 是否打进 tgz | ✅ 2 个文件都在 |
+| **B 机 npm 装出来的那份** | ✅ **两个都在**（`~/.nvm/.../lib/node_modules/quay/plugin/.claude-plugin/`） |
+
+⇒ **`npm install -g` 装出来的目录本身就是一个合法的 directory marketplace，只差被注册。**
+
+### 文档侧：**这里才是缺口，而且是两条路被混讲**
+
+README 仅有 **Option C**：
+```
+/plugin marketplace add yaleh/quay
+/plugin install quay
+```
+**但这是从 GitHub 装，不是从刚 npm 装的那份装**——同段还明写「**no separate `npm install` needed**」、
+字节来自 `dist-plugin` 分支。⇒ **README 没有「我用 npm 装了包，怎么让 Claude Code 用上它」这条路径**，
+用户走完 npm 那条，文档就断了。**这正是 B/C 两台 `settings.json` 引用数均为 0 的直接原因。**
+
+### 附带查出：清单版本漂移
+
+| 文件 | version |
+|---|---|
+| `plugin/.claude-plugin/marketplace.json` | **0.3.13** |
+| `packages/quay/package.json` | **0.4.0** |
+
+marketplace 按 `plugins[].version` 呈现 ⇒ **用户装 0.4.0，插件系统会显示 0.3.13**。
+
+### 由此细化的修法方向（三条，均可验证）
+
+1. **注册那一步**：安装后把 `$(npm root -g)/quay/plugin` 作为 directory marketplace 加入
+   （形态与 A 机一致）——由安装钩子做，或 README 明写命令（若靠用户手工，按本任务 AC4 须计入判据）。
+2. **清单版本同步**：`marketplace.json` 的 `plugins[].version` 必须随 `package.json` 走，
+   建议做成打包时校验（版本不一致即 fail）。
+3. **README 补 npm 路径**：Option C 只覆盖 GitHub 装法；需补「npm 装完之后如何注册」，
+   否则 npm 路径在文档上是断的。
+
+### 一处方法自记
+
+首次探测 B 的安装物时我用非交互 ssh，`npm root -g` 解析到 `/usr/local/lib/node_modules`（错误路径），
+得出「安装物缺 `.claude-plugin`」的**假阴性**；改用登录 shell（`bash -lc`）取到真实 nvm 路径后推翻。
+⇒ **跨机探测必须用登录 shell，否则 PATH/npm 前缀与用户实际环境不一致**——今晚同族第 11 次。
