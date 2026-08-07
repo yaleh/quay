@@ -7618,3 +7618,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **no-post-merge 派发 2/5**：注意——cross-machine-verify.sh 已在 integration（5674e0ea，先前执行落地但任务未闭合、AC 0 勾）；本派发指示 agent 先验 integration 既有实现，移植或重写后闭合 AC。worktree `quay-worktrees/no-post-merge`。
 - **在飞 2/2**：observer-registry + no-post-merge。3 空槽。
+
+### 事件 02:1xZ 续（pool held——observer-registry mid-impl）
+
+- **observer-registry 进度**：有 staged 改动（observer-registry.sh + .conf 新建、两 tick docs、capability-catalog 改）但未 commit——多文件实现中段。
+- **no-post-merge**：刚派发，agent 在读 integration 既有实现 5674e0ea。
+- **3 空槽无候选**：session-liveness-cannot-see / manager-productization / complete-delivery-surface 全撞在飞 2 agent 文件。等 observer-registry 或 no-post-merge 完成即解锁。
