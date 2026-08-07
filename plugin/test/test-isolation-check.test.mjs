@@ -381,6 +381,58 @@ test("AC5/clean-tree: the suite-after assertion fails on a dirty tree and passes
   }
 });
 
+// ── AC1/AC2 (gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion): the suite-after
+// assertion must distinguish KNOWN CONCURRENT WRITERS (the manager's tick-log append + .quay
+// control-plane scratch) from TEST RESIDUE — the former must PASS a green suite, the latter must
+// still flip it red ─────────────────────────────────────────────────────────────────────────────────
+test("AC1/AC2 clean-tree: known concurrent writers (manager tick-log / .quay scratch) pass; real residue still fails", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "test-isolation-clean-tree-writers-"));
+  const CLEAN_TREE_SH = path.join(REPO_ROOT, "plugin", "scripts", "assert-clean-tree.sh");
+  try {
+    // A real git repo with the known concurrent-writer files TRACKED, plus a tracked source file.
+    fs.mkdirSync(path.join(scratch, "orchestration"), { recursive: true });
+    fs.mkdirSync(path.join(scratch, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "orchestration", "manager-tick-log.md"), "tick\n", "utf8");
+    fs.writeFileSync(path.join(scratch, ".quay", "tracked-state.json"), "{}", "utf8");
+    fs.writeFileSync(path.join(scratch, "src.txt"), "x\n", "utf8");
+    const gitCmd = (args) => spawnSync("git", args, { cwd: scratch, encoding: "utf8" });
+    gitCmd(["init", "-q"]);
+    gitCmd(["config", "user.email", "test@example.com"]);
+    gitCmd(["config", "user.name", "test"]);
+    gitCmd(["add", "-A"]);
+    gitCmd(["commit", "-q", "-m", "seed"]);
+
+    // AC1: the manager appends to its tracked tick-log mid-suite → the assertion must PASS.
+    fs.appendFileSync(path.join(scratch, "orchestration", "manager-tick-log.md"), "tick 2\n", "utf8");
+    let res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `manager tick-log append must PASS (AC1):\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /manager-tick-log/);
+
+    // AC1: the outer's .quay capture-pane scratch (untracked, under .quay/) → the assertion must PASS.
+    fs.writeFileSync(path.join(scratch, ".quay", "last-pane.txt"), "pane", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 0, `.quay scratch must PASS (AC1):\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, /\.quay/);
+
+    // AC2 negative control: a real test residue (a root-level mkdtemp artifact) must STILL fail
+    // even when known writers are present.
+    fs.writeFileSync(path.join(scratch, ".quay-tmp-test-abc"), "leftover", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a real test residue must STILL fail (AC2):\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /DIRTY after the full suite/);
+    assert.match(res.stderr, /\.quay-tmp-test-abc/);
+    fs.rmSync(path.join(scratch, ".quay-tmp-test-abc"));
+
+    // A tracked-file modification that is NOT a known writer (a test writing to src.txt) must FAIL.
+    fs.appendFileSync(path.join(scratch, "src.txt"), "leak\n", "utf8");
+    res = spawnSync("bash", [CLEAN_TREE_SH, scratch], { encoding: "utf8", timeout: 30_000 });
+    assert.equal(res.status, 1, `a non-known tracked modification must FAIL:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stderr, /src\.txt/);
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // ── the ratchet (runIsolationChecks, AC5) ───────────────────────────────────────────────────────────
 test("AC5 ratchet: current==data file passes; new/grown/stale/malformed entries fail", () => {
   const entries = ["a.test.mjs:fixed-path-write", "b.test.mjs:process-exit-1"];

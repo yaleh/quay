@@ -629,12 +629,18 @@ run_selected() {
     local code=$?
     set -e
     # Suite-AFTER assertion (gap-mkdtemp-rooted-in-the-shared-checkout-dirties-the-tree): a FULL
-    # SUITE must leave the shared checkout clean (`git status --porcelain` empty). Harder than any
-    # static rule — it does not depend on a detector recognizing a particular spelling, so ANY
-    # test that dirties the tree (mkdtemp under REPO_ROOT, a leaked scratch dir, a stray file) is
-    # caught here. Only on the full-suite default path (this token-held branch); scoped runs
-    # legitimately execute inside uncommitted worktrees and skip it. A failing test's own exit
-    # code is the primary signal, so a dirty tree only flips a PASSING run (never masks a fail).
+    # SUITE must leave the shared checkout clean of TEST RESIDUE (`git status --porcelain` empty
+    # modulo KNOWN CONCURRENT WRITERS). Harder than any static rule — it does not depend on a
+    # detector recognizing a particular spelling, so ANY test that dirties the tree (mkdtemp under
+    # REPO_ROOT, a leaked scratch dir, a stray file) is caught here. The assertion distinguishes
+    # test residue from legitimate out-of-band writers (gap-manager-tick-log-append-trips-suite-
+    # after-dirty-tree-assertion): assert-clean-tree.sh filters the manager's periodic
+    # orchestration/manager-tick-log.md append and .quay/ control-plane scratch out of the porcelain
+    # BEFORE deciding, so a green suite is not flipped red by a concurrent writer (AC1) while a
+    # manually-placed residue still fails (AC2). Only on the full-suite default path (this
+    # token-held branch); scoped runs legitimately execute inside uncommitted worktrees and skip it.
+    # A failing test's own exit code is the primary signal, so a dirty tree only flips a PASSING
+    # run (never masks a fail).
     if [ "$code" -eq 0 ] && ! bash "${repo_root}/plugin/scripts/assert-clean-tree.sh" "${repo_root}"; then
       code=1
     fi
