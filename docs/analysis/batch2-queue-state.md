@@ -7723,3 +7723,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **session-liveness-remove 完成**：核心实现早已落地（2f9d4575 shared-events/lock 移除 + heavy-op B-FULL-DELETE）；本 re-dispatch 补 doc 清理 + quay-init laydown 修复（ac8 40→6 集成遗留的 5 个机制未铺）+ loop-shipping retainedNote。AC1-5 + DoD 全勾。**fan-in**：cherry-pick 36e264ba → integration 1d2af642（7 files 无冲突，分歧文件 auto-merge）。
 - **在飞归零**：0 real in-flight，5 空槽。池子应全解锁。
 - **前置发现转外层**：capability-catalog 7 个未分类 quay-* 入口（ac8 集成遗留，pre-existing）；quay-init-loop 2 个既有失败（ac8 集成漂移）。
+
+### 事件 05:4xZ（delivery-surface 派发——池子最后就绪候选）
+
+- **delivery-surface 派发 1/5**：complete-delivery-surface SPEC 的 L1 六维验证补全。全闸过 + fork develop。worktree `quay-worktrees/delivery-surface`。
+- **就绪池已近耗尽**：其余 ready 候选多为 done 或 QENG-5-DEMO（验证/demo 类，非 inner 实现）。ac8/chart2-s2/shipped-ts/probe-mechanism/observer-registry needs-human 挂外层。
+- **在飞 1/1**：delivery-surface。
