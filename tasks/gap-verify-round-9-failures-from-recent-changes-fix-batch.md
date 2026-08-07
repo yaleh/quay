@@ -12,7 +12,7 @@ title: "Concurrency-8 verification (c7176a37, all human-ruling improvements)
   manager-productization AC5c 1 (✖2 --validate missing sentinel, passes isolated
   — investigate REPO_ROOT/TICK_DOC); round is 594s (fast-half achieved) — fix
   these → reliable green + fast = human gate met → handle 24-block merge"
-status: ready
+status: done
 labels:
   - gap
   - defect
