@@ -7613,3 +7613,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **manager-layer 完成**：quay-init --loop 铺设 manager driver（plugin/loop/manager-loop-tick.md 通用模板 → orchestration/）。AC1-5 目的地侧实测全过（负控制 ABSENT→PRESENT、cmp 字节一致、L1 6/6）。**fan-in 成功**：cherry-pick beaa68e7+d6989a9b → integration 83d7971f+e414a42c（9+1 files 无冲突）。任务文件入 develop。DoD 全量诚实未勾（worktree 名含 manager 致 session-topology 假阳性 + 缺 config，环境性非改动）。
 - **在飞 1/1**：observer-registry（活跃）。4 空槽——manager-layer 释放后 no-post-merge/session-liveness-cannot-see 应解锁。
+
+### 事件 02:1xZ（回填——no-post-merge 派发）
+
+- **no-post-merge 派发 2/5**：注意——cross-machine-verify.sh 已在 integration（5674e0ea，先前执行落地但任务未闭合、AC 0 勾）；本派发指示 agent 先验 integration 既有实现，移植或重写后闭合 AC。worktree `quay-worktrees/no-post-merge`。
+- **在飞 2/2**：observer-registry + no-post-merge。3 空槽。
