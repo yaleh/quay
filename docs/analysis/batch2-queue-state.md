@@ -7753,3 +7753,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 
 - **cli-collision 完成**（真实修复）：CLI `quay init` 对 `--loop` fail-closed（报错点名 flag + 指向 /quay:init skill + exit 1），顶层 help 去 loop 暗示，README 加 disambiguation，6 新测试。**fan-in**：cherry-pick 53cd6988 → integration 4850e255（4 code + task 文件）。任务文件入 develop（AC1-4 勾）。
 - **在飞 3/3**：inner-panel + batch-merge-ff + cross-machine-observe。2 空槽。
+
+### 事件 07:3xZ（batch-merge-ff 完成 fan-in + 3 连派填满 5 槽）
+
+- **batch-merge-ff 完成**（真实实现）：integration-batch-merge.sh 加 `--merge` 真 merge 模式（SPEC 裁定否证 FF-only）。冲突在 throwaway worktree 处理、known-shared 文件 develop-authoritative、真实代码冲突 fail-closed（负控制承重条）；8/8 新测试 + 17/17 相关测试绿；scoped 静态层全过。**fan-in**：cherry-pick 62c1e700 → integration 17a8ba69（4 code + task 文件留 develop 侧 b423f413）。worktree/分支清理，遥测括号 reconcile 关闭。
+- **就绪池分诊**：多个 ready 候选实为「已 fan-in 未翻 done」（tmux-leak/manager-tick-checks/cli-collision 等——代码已在 integration，仅 deferred full-suite DoD 未勾）→ 不重派。DIR-124 是 parent directive（门控 children A-E）→ 不派。
+- **3 连派（pairwise disjoint + 与在飞 2 不相交 + touches 全解析）**：gap-suite-cutoff（外层 07:27 点名 queued；切断源根因调查）+ gap-audit-findings（finding 未回传早期探测器；slot-refill 推荐）+ gap-npm-install（npm 安装未注册 plugin；真机复测尽量本地隔离做）。telemetry --task-start 3 条记录。
+- **在飞 5/5（满）**：inner-panel + cross-machine-observe + suite-cutoff + audit-findings + npm-install。0 空槽。
