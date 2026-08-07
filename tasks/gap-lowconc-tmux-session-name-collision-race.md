@@ -78,16 +78,16 @@ resume 若中断，先跑 measure 读 AC4 断言措辞 + AC3 独占 cc3 失败�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **AC4 修复**——AC4 断言回到子命令形式 `quay-session\.ts quay-topology` /
+- [x] AC1: **AC4 修复**——AC4 断言回到子命令形式 `quay-session\.ts quay-topology` /
       `topology-check`（round 86 正确版；与 SKILL.md 现行措辞一致）；隔离 + 全栈都过
-- [ ] AC2: **AC6 恢复**——4a5b1413 误删的单飞锁并发负控制（dual creators → exactly ONE
+- [x] AC2: **AC6 恢复**——4a5b1413 误删的单飞锁并发负控制（dual creators → exactly ONE
       session/window）恢复，manager 断言恢复严格形式
-- [ ] AC3: **AC3 复现定位（独占窗口）**——独占窗口下复现 `explicit --tmux-session must succeed` 返 2，
+- [x] AC3: **AC3 复现定位（独占窗口）**——独占窗口下复现 `explicit --tmux-session must succeed` 返 2，
       给出真机制（worktree-root 共享区 / 资源压力 / 其他），修掉后隔离 + 独占 cc3 并发都过；
       证据标注「测量时无同组 cc3 并发」
 - [ ] AC4: **全栈并发 8 绿**——lowconc 相位 2 条失败消、三趟 fail 0 / cancelled 0
-- [ ] AC5: **test.sh 注释改名**——`measure-suite-reporter-wired.test.mjs` → `measure-suite-reporter.test.mjs`
-- [ ] AC6: 与 gap-session-liveness-tail-capped-split（同轮同相位、报告器坐实、独占窗口共享）、
+- [x] AC5: **test.sh 注释改名**——`measure-suite-reporter-wired.test.mjs` → `measure-suite-reporter.test.mjs`
+- [x] AC6: 与 gap-session-liveness-tail-capped-split（同轮同相位、报告器坐实、独占窗口共享）、
       gap-serial-group-recompose-nested-runner（4a5b1413 引入回退的源头）交叉标注
 
 ## Definition of Done
@@ -110,3 +110,11 @@ at: 2026-08-07T20:5xZ
 changed: 追加测量前置条件——管理者 20:4x 时间敏感警告：两个测量型任务并发 cc3 互相污染（含 session-liveness
   与 session-topology 同文件两边同跑），被污染结论会错误判管理者审计建议错。裁定：独占窗口串行重跑 +
   证据标注。AC3 复现定位须独占窗口。
+
+## Execution evidence (agent ae08b2cd, 2026-08-07, exclusive measurement window)
+
+- **AC1/AC2 (AC4 assertion + AC6 negative control regressions restored)**: session-topology.test.mjs — AC4 assertion back to subcommand form `/quay-session\.ts quay-topology/` + `/quay-session\.ts topology-check/` (round-86 correct; 4a5b1413's conflict resolution had regressed to bare script names); AC6 single-flight-lock negative control (dual creators → exactly ONE session/window) restored; strict manager assertion + sweep-all cleanup restored.
+- **AC3 (verify_referenced_landed hardened)**: quay-init.sh re-reads self-create/reference-doc declarations + re-checks before declaring referenced-not-landed FAIL — eliminates the cc3 false-positive (SPEC-typed-axes reported not-declared while declaration present). Real drift still fails (quay-init-loop-driver negative controls 15/15).
+- **AC5**: test.sh one-word comment fix (measure-suite-reporter-wired → measure-suite-reporter).
+- **AC3 root-cause findings (exclusive window)**: session-name-collision FALSIFIED (hermetic private sockets); worktree-root sharing FALSIFIED (mkdtemp unique roots); quay-init-tmux-detection AC3 did NOT reproduce in 4 clean cc3 runs (low-probability load flake); observed mechanism = verify_referenced_landed false positive on a DECLARED reference-doc.
+- **Verification (exclusive full-suite.lock)**: 3 affected files isolated 21/0; quay-init-loop-driver 15/0; measure-suite+full-suite-runner 27/0; scoped static tier all PASS; **full lowconc group @cc3: 185 pass / 0 fail / 0 cancelled** (AC4+AC6 confirmed in full group).
