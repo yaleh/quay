@@ -718,3 +718,8 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 用 be0cca93（无修复）的 run（运行中会新泄漏工厂会话）。最终重跑并发 8（14:48:34，state=running）。
 > 至此所有环境阻塞在 worktree 侧都处理：脏树（清）+ config（在位）+ tmux 泄漏（内层修复 + 外层清理）。
 > 等最终结果：fail 0 / cancelled 0 + suite-after 两断言（clean-tree + tmux-leak-scan）通过 = **真绿**。
+
+> **14:58Z 外层 tick（no-action——最终轮主体现 fail 0 / cancelled 0，serial 相位进行中）**：最终轮
+> （71734885）主体现 2717 pass **fail 0 / cancelled 0**，正在跑 serial 相位（22 文件，~18 分钟）。
+> 管理者 fcbfd833 分析 dirty-tree 断言前提（coordinator 在干净树上跑）在三并发写者下不成立。内层
+> 等在结果。等 serial 相位完成：绿 = 真绿 → un-hold session-pid + done-flip 批次 + 分叉合并。
