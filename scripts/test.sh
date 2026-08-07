@@ -172,7 +172,7 @@ fi
 # (>34 covered files). The flags are DUAL-REPORTER: spec keeps the normal spec/TAP summary on stdout
 # (the outer runner greps it for 判绿 markers), and measure-suite-reporter.mjs emits __PERFILE__ +
 # __GROUP__ + __CEILING__ (封顶者/该拆) lines to stderr, which full-suite-runner.ts tees into
-# .quay/full-suite.log. Mechanical anti-regression: plugin/test/measure-suite-reporter-wired.test.mjs
+# .quay/full-suite.log. Mechanical anti-regression: plugin/test/measure-suite-reporter.test.mjs
 # asserts this wiring exists, so removing it flips the suite red (the 7th instance is prevented).
 suite_reporter_flags() {
   printf '%s\n' \

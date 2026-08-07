@@ -124,8 +124,29 @@ function newHermetic(prefix = "quay-topo-") {
       return r.stdout.trim().split("\n").filter(Boolean);
     },
     cleanup() {
+      // Kill EVERY session on this hermetic socket — not just the `started` set. Factory scripts
+      // (quay-topology.sh --session topo-factory/topo-idem/…) invoked with the hermetic env create
+      // sessions DIRECTLY on this socket, invisible to `started`; leaving them orphaned leaks the
+      // server (删目录 ≠ 杀进程 — gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause).
+      // The socket is private to this test (mkdtemp'd, isolated TMUX_TMPDIR + explicit -S), so
+      // sweeping it cannot touch real sessions; per-session kill-session (never kill-server).
+      const ls = tmuxAt(sockPath, ["list-sessions", "-F", "#{session_name}"], env);
+      if (ls.status === 0 && ls.stdout.trim()) {
+        for (const name of ls.stdout.trim().split("\n").filter(Boolean)) {
+          tmuxAt(sockPath, ["kill-session", "-t", name], env);
+        }
+      }
       for (const name of started) {
         tmuxAt(sockPath, ["kill-session", "-t", name], env);
+      }
+      // TMUX_TMPDIR is NOT honored by tmux on this system (verified: a session spawned with
+      // TMUX_TMPDIR set still lands on /tmp/tmux-<uid>/default), so the factory scripts
+      // (quay-topology.sh --session topo-factory/topo-race/isc-factory) build on the DEFAULT
+      // socket — the hermetic sweep above cannot reach them. Kill the named factory sessions
+      // on the default socket explicitly (per-session kill-session, never kill-server). Scoped
+      // to the factory names this file creates so a real user session is never touched.
+      for (const fname of ["topo-factory", "topo-idem", "topo-race", "isc-factory"]) {
+        tmuxAt(null, ["kill-session", "-t", fname], process.env);
       }
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
     },
@@ -263,8 +284,11 @@ test("AC3 — mixed: a topology window that is a bare bash (no claude) ⇒ no-cl
 test("AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE + factory/check refs)", () => {
   const src = fs.readFileSync(COLD_START, "utf8");
   assert.match(src, /TOPOLOGY-IN-PLACE/, "the cold-start checklist must add the TOPOLOGY-IN-PLACE key");
-  assert.match(src, /quay-topology\.sh/, "cold-start must drive the topology factory (build by definition)");
-  assert.match(src, /topology-check\.sh/, "cold-start must verify the topology via topology-check");
+  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the factory/check via the
+  // grouped entry point — `quay-session.ts quay-topology` / `quay-session.ts topology-check`. The
+  // test asserts the SAME command name the skill uses (AC2: docs and tests must not each write their own).
+  assert.match(src, /quay-session\.ts quay-topology/, "cold-start must drive the topology factory (build by definition)");
+  assert.match(src, /quay-session\.ts topology-check/, "cold-start must verify the topology via topology-check");
   assert.match(src, /session-topology/, "cold-start must cross-annotate the session-topology skill");
 });
 
@@ -278,7 +302,10 @@ test("factory — quay-topology.sh --dry-run emits the two-window plan; a real b
     for (const role of ["outer", "inner"]) {
       assert.match(dry.stdout, new RegExp(role), `dry-run must plan the ${role} window`);
     }
-    assert.ok(!/manager/.test(dry.stdout), `dry-run must NOT plan a manager window (got:\n${dry.stdout})`);
+    // Position-based (window name, not substring): the dry-run plan must not contain a `-n manager`
+    // window name or a `:manager` window address. A bare /manager/ substring would false-positive on
+    // any repo/worktree path containing "manager" (e.g. this task's worktree dir).
+    assert.ok(!/ -n manager(\s|")|:manager\b/.test(dry.stdout), `dry-run must NOT plan a manager window (got:\n${dry.stdout})`);
     // Real build with a harmless launch-command override (no real claude launched — the override
     // keeps the pane shell as the pane_pid so a claude-named child appears, mirroring the real
     // quay-launch.sh launch shape).
@@ -316,5 +343,48 @@ test("factory — idempotent on an EXISTING session (re-run must not error under
     // and the check still passes.
     const r = runCheck(h.env, ["--session", "topo-idem", "--json"]);
     assert.equal(r.status, 0, `idempotent-built topology must pass the check:\n${r.stdout}\n${r.stderr}`);
+  } finally { h.cleanup(); }
+});
+
+// ── AC6 — single-flight lock: dual-creator race must not double-create (gap-manager-productization-
+// five-constraints). Two CONCURRENT invocations against the same missing session both judge
+// "missing" — without the lock both would create (two sessions, two window sets). With the lock the
+// second waits, then sees the session already exists → in-place, not create. Atomic create test.
+test("AC6 — single-flight lock: two concurrent creators → exactly ONE create-session / one window set", { skip: tmuxAvailable ? false : "tmux not installed" }, () => {
+  const h = newHermetic();
+  try {
+    // Isolated lock dir so the test never contends with real /tmp locks (same session name as the
+    // only shared key — both creators must resolve the SAME lock path to contend on it).
+    const lockDir = path.join(h.tmp, "locks");
+    fs.mkdirSync(lockDir, { recursive: true });
+    const env = {
+      ...h.env,
+      TOPOLOGY_LAUNCH_CMD: "bash -c 'exec -a claude-probe sleep 10000 & wait'",
+      TOPOLOGY_LOCK_DIR: lockDir,
+      TOPOLOGY_LOCK_RETRIES: "50",
+    };
+    // Two concurrent spawns, same session, fresh (missing). Both race to acquire the lock.
+    // Start both near-simultaneously via shell backgrounding so the race window is real.
+    const r = spawnSync("bash", [
+      "-c",
+      `"$0" --session topo-race >"$1" 2>&1 & "$0" --session topo-race >"$2" 2>&1 & wait`,
+      FACTORY, path.join(h.tmp, "a.out"), path.join(h.tmp, "b.out"),
+    ], { encoding: "utf8", env });
+    assert.equal(r.status, 0, `concurrent factory runs must both exit 0:\n${r.stderr}`);
+    const outA = fs.readFileSync(path.join(h.tmp, "a.out"), "utf8");
+    const outB = fs.readFileSync(path.join(h.tmp, "b.out"), "utf8");
+    const all = `${outA}\n${outB}`;
+    const createSessions = (all.match(/^create-session:/gm) || []).length;
+    const createWindows = (all.match(/^create-window:/gm) || []).length;
+    // Exactly one session create (the first to hold the lock); the second must NOT create a second.
+    assert.equal(createSessions, 1, `dual creators must create exactly ONE session (got ${createSessions}):\n${all}`);
+    // The only window create is inner (outer is the new session's first window). No duplicate.
+    assert.equal(createWindows, 1, `dual creators must create exactly ONE window (inner), got ${createWindows}:\n${all}`);
+    // AC6's core invariant is atomic creation: exactly one session + one window set, no duplicates.
+    // (A relaunch by the second creator — the window present but its claude child not yet spawned —
+    // is BENIGN idempotence, not a double-create: it re-sends the same launch command. The lock's
+    // job is preventing a second session/window, which the counts above pin.)
+    const names = h.windowNames("topo-race");
+    assert.deepEqual(names.filter((n) => n !== "topo-race"), ["outer", "inner"], "window set must be outer+inner, no duplicates");
   } finally { h.cleanup(); }
 });

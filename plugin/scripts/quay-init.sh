@@ -899,6 +899,22 @@ verify_referenced_landed() {
       continue   # declared self-create or reference-doc — not a defect
     fi
     if [ ! -e "$ws/$r" ]; then
+      # gap-lowconc-tmux-session-name-collision-race AC2: the declaration extraction above is a
+      # single grep read of init/SKILL.md; under concurrent load (lowconc cc3) that read can
+      # transiently return INCOMPLETE output, false-positiving a DECLARED reference-doc as
+      # not-declared (observed once at cc3: orchestration/SPEC-typed-axes-and-standing-dynamics.md —
+      # the install failed verify with a false positive while the declaration was present). Before
+      # failing, RE-READ the declaration sets once and re-check: a genuinely-undeclared ref fails
+      # on both reads (real drift never masked); a transiently-missed declaration passes the
+      # re-read and is not a defect. Keeps the check deterministic under load.
+      if ! printf '%s\n' "$selfcreate" "$refdoc" | grep -qxF "$r"; then
+        local fresh_selfcreate fresh_refdoc
+        fresh_selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+        fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+        if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
+          continue   # re-read confirms the declaration exists — the first read was transiently incomplete
+        fi
+      fi
       echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
       missing=1
     fi
