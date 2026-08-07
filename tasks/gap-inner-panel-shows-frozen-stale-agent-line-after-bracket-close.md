@@ -1,10 +1,11 @@
 ---
 id: gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close
 title: inner panel shows a FROZEN stale agent line after the bracket closed —
-  observer-registry line still reads 「Committing observer-registry task work 3h
-  5m 32s」 while the bracket was closed (d3fb2839, --task-end needs-human) and
-  the task left inProgress at 03:22; same entity, panel and telemetry give
-  OPPOSITE states; the frozen line is visually INDISTINGUISHABLE from a live
+  a MISLEADING WINDOW before the panel self-cleans (NOT permanent — the panel
+  cleared the observer-registry line by 03:37:32); observer-registry line read
+  「Committing observer-registry task work 3h 5m 32s」 while the bracket was
+  closed (d3fb2839, --task-end needs-human) and left inProgress at 03:22; in
+  that window the frozen dead line is visually INDISTINGUISHABLE from a live
   agent without cross-time sampling (timer advance), so anyone glancing reads
   「agent ran 3h unfinished」 — same family as tonight's recurring "instrument
   can't distinguish opposite states" (stuck-vs-running → ended-vs-running)
@@ -30,11 +31,16 @@ extra: {}
 - **计时器 3h5m32s 一秒未动**，同屏其它 agent 计时正常前进（1h6m3s→1h6m37s、21m7s→21m41s）。
 - 算术对得上：括号 ~00:14 开始，agent 跑 3h5m32s ⇒ ~03:22 结束，任务正是 **03:22:02 转 needs-human**。
 
-### 危害
+### 危害（2026-08-07 03:3x 更正——不是永久留存，是清理前的误导窗口）
 
-**已死行与存活行外观完全相同**——唯一区别是计时是否前进，而它需要跨时间两次采样才能分辨。
-任何人扫一眼面板都会读成「有个 agent 已跑 3 小时还没完」——实际它已结束十余分钟、括号已闭。
-**冻结时长永久留在面板上误导后来者**（人正是因此发问）。
+**在已死行【被清理之前】的那段窗口里，它与存活行外观完全相同**——唯一区别是计时是否前进，
+而这需要跨时间两次采样才能分辨。三次采样（03:28:16 / 03:28:25 / 03:31:03）证实其计时器一秒未动、
+同屏其它 agent 正常前进——在那段窗口内，区分「已结束」与「在运行」的唯一信号是计时前进，
+而它需要跨时间采样。人正是在那段窗口里看到它并发问的。
+
+**更正**：面板【会】自行清理已结束的 agent——observer-registry 行 03:37:32 已消失（面板只剩两个活跃
+agent）。**不是「冻结时长永久留在面板上」**，而是【已死行在被清理前存在一段可观测的误导窗口】。
+窗口长度未测（至少覆盖 03:28→03:31，到 03:37 前已清理；要精确需专门观测，不编造数字）。
 
 ### 与今晚反复出现的一族同形
 
