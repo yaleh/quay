@@ -28,6 +28,38 @@ gap-session-liveness-remove-shared-events-and-lock。）
 `orchestration/manager-phase-goal.md` —— 本阶段的目标与 8 条 AC。
 复核：**有没有 AC 已达成而没勾、或已失效而没改**。一份不更新的 AC 清单，和没有 AC 是一回事。
 
+## 1-AC16. 巡检项必须由当前阶段 AC 导出（人 2026-08-07 裁定）
+
+**人的原话**：「这些巡检项应根据本阶段目标和 AC 调整。」
+
+**被替换掉的旧项与理由**：§1.a 原来每轮问「archguard/meta-cc 提交了几次、会话在不在」——
+那是**上一阶段**（三项目并行开发）的问法。人已裁定本阶段**仅保留 GitHub 发布目标**，
+且 archguard/meta-cc 的角色变为**「被 quay 安装/验证的目标项目」**，不是自己在开发的项目。
+⇒ **连报 5 轮「会话数 0」，没有一次改变过任何判断——纯噪声。**
+
+**本阶段（AC16 = GitHub 上有完整且可用的 release）的三条巡检项，每轮实跑，不读文件里的旧数字**：
+
+```bash
+# ① 新鲜度：最新 release 与 develop 的提交差
+lat=$(gh release view --json tagName -q .tagName 2>/dev/null)
+[ -n "$lat" ] && echo "release=$lat  develop 领先=$(git rev-list --count ${lat}..develop 2>/dev/null)"
+
+# ② 完整性：可安装物是否含 plugin bundle
+python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('files 含 plugin:', 'plugin' in d.get('files',[]))"
+
+# ③ 可用性：是否有「用 release 装出来的那份」在非 quay 项目跑通的证据
+#    注意：.quay/ 目录存在【不等于】用 release 装的——必须看安装来源，不得以目录存在判达成
+```
+
+**为什么必须每轮实跑**：2026-08-07 04:5xZ 首次按此口径跑，**立刻查出目标文件两处已过期**——
+①记「落后 2461 提交」，实测 **v0.4.0、落后 568**；②记「`files` 不含 `plugin/`」，实测**已含**。
+⇒ **我此前连报数轮「AC16 三条无变化」，是在读文件里的旧数字而非重跑判据**——
+正是 `manager-phase-goal.md` **AC18**（收口不看勾选、自己重跑 measure）要防的形态，
+而我把 AC18 用在了外层的任务上，**没用在自己的目标文件上**。
+
+**archguard/meta-cc 的新巡检问法**：不再问「它们在不在开发」，改问
+**「它们作为验证目标，有没有被 quay 装过、装的是不是 release 出来的那份」**（即 AC16 判据③）。
+
 ## 1. 每个 tick 必做的四件
 
 ### a. 三项目状态（一次读，不逐个深挖）
