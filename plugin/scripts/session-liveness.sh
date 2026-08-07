@@ -729,6 +729,19 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane shell 的�
 while true; do
   while read -r name root target; do
     [ -n "${name:-}" ] || continue
+    # observer-registry (gap-observer-registry-target-decommission-and-criterion-invalidation):
+    # a target registered OFFLINE is deliberately decommissioned — its criteria ("is the session
+    # alive? / is it stalled? / is it being watched?") are INVALID. Report "decommissioned" and
+    # evaluate NO events for it (no SESSION-GONE / REPO-STALL / SESSION-OVERDUE / SESSION-IDLE).
+    # This is the class-level fix for consumers #2/#3 (git-staleness kept reporting REPO-STALL and
+    # session-liveness-coverage kept reporting NOT-WATCHED for decommissioned targets).
+    _sl_reg="${_sl_pane_dir}/observer-registry.sh"
+    if [ -x "$_sl_reg" ] && "$_sl_reg" --is-offline "$name" >/dev/null 2>&1; then
+      if [ "$ONE_SHOT" = true ]; then
+        echo "SESSION-STATUS $name decommissioned (offline per observer-registry)"
+      fi
+      continue
+    fi
     pid=$(session_pid "$target")
     alive=$([ -n "$pid" ] && echo 1 || echo 0)
     halted=$([ -f "$root/.halt" ] && echo 1 || echo 0)

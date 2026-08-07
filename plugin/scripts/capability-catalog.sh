@@ -130,6 +130,7 @@ declare -A QUESTION=(
   [monitor-mount-check.sh]="Is the loop monitor actually mounted and aimed at the right target (mounted + targetOk, per-observer streams — delivery is the owner's own Monitor stream)?"
   [monitor-mount-check.sh]="Is the loop monitor actually mounted, on the right target, and delivering events?"
   [needs-human-recheck.ts]="Is the needs-human measurement/aliveness axis live and accurate (the black-hole-human-dependency instrument)?"
+  [observer-registry.sh]="Is an observed target still alive/intentional — registered active/offline ONCE in the single observer-registry, and do all consumers (os-anchor-watchdog / session-liveness git-staleness + coverage / topology-check) reflect a decommission on their next read (class-level decommission + criterion invalidation)?"
   [os-anchor-install.sh]="Is the OS-level loop watchdog timer installed, active, and removable (the anchor that outlives any Claude session)?"
   [os-anchor-watchdog.sh]="Is the loop's OS-level anchor present for each project — session alive, and if not, re-spawned + driven with the cold-start text?"
   [pane-state-classify.ts]="What state is a Claude Code pane in (busy/idle/blocked)?"

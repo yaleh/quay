@@ -45,6 +45,18 @@ extra:
 > 不必重新发现。**但不得派发**（`status: superseded`）。
 >
 > 完整裁定记录见 `tasks/gap-manager-productization-five-constraints.md` 的 AC5/AC5b/AC5c。
+>
+> **【交叉标注 — 2026-08-06 类级机制，`gap-observer-registry-target-decommission-and-criterion-invalidation`】**：
+> 本条是本类（「观测者的目标是否仍存活/有意，判据是否仍有效」）的**第一个实例**——它诊断的是
+> **os-anchor-watchdog 的 absence-inference**（无法区分「崩溃」与「有意停掉」）。但同晚还有另外三个
+> 消费者各自撞到同一形状（manager 的 git-staleness Monitor 持续报 REPO-STALL / session-liveness-coverage
+> Monitor 报 NOT-WATCHED / session-topology Monitor 报陈旧缓存），都不是 absence-inference 的问题
+> （案例 4 是缓存陈旧）。类级机制 = 单一观测者注册表（`plugin/scripts/observer-registry.sh` +
+> `orchestration/observer-registry.conf`）：被下线的目标登记一次，所有观测者从同一处读；
+> 下线登记走显式读取类操作（`--register-offline`），观测者从不自行猜。os-anchor-watchdog 已接
+> 注册表（`watch_project` 先查 `--is-offline`，已下线 → `decommissioned`、绝不 re-spawn）。本条的
+> 租约方向（显式声明替代缺席推断）与注册表方向一致且互补：租约回答「我要它跑到 X」，
+> 注册表回答「它已被有意下线」——两者都是把「意图」从「缺席推断」翻转为「显式记录」。
 **type:** execution
 
 ## Proposal
