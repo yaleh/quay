@@ -578,6 +578,17 @@ cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状�
 node --experimental-strip-types plugin/scripts/quay-deliver.ts supervisor-bus-identity inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
 ```
 
+**跨主机只读观测的唯一入口（`gap-cross-machine-readonly-observation-orchestration-not-a-tool`，
+`supervisor-observe.sh`，读方向对 `supervisor-deliver.sh` 的对称实现）**：
+任何「读一个远程 quay checkout 的 git/suite/session/process 状态」一律走这一个实现，禁止手工拼
+`ssh + git + capture-pane + /proc`（那四类错误——陈旧 remote-tracking ref 不先 fetch 就比、
+HEAD-vs-branch 比错对象、Monitor 陈旧缓存值、pgrep/grep 字段匹配错——全部封进负控制）：
+
+```bash
+bash plugin/scripts/supervisor-observe.sh observe --host <local|主机> --root <根> \
+  [--branch <分支>] [--comm <进程模式>] [--json]   # 只读；--host 决定是否套 ssh，本地/远程同形
+```
+
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
 `--transcript` 从未进过任何生产调用，是死代码；现在 `ruling-required` 的主判据是**屏幕形状分类**。
 外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`。**通用化观测原语

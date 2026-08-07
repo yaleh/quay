@@ -173,6 +173,7 @@ declare -A QUESTION=(
   [suite-state-trigger.ts]="Has the full-suite state changed to red or running, and has the outer been notified (the red-window auto-executor)?"
   [supervisor-bus-identity.sh]="Can a message's claimed sender identity be mechanically verified (an agent claiming from:human is REJECTED) and is the manager-inbox's delivered/consumed/unread visible to the tick?"
   [supervisor-deliver.sh]="Did a payload get delivered to a target Claude session, by intent, via the single hardened delivery implementation (deliver(target,payload) -> delivered|failed)?"
+  [supervisor-observe.sh]="What is a target quay checkout's git/suite/session/process state right now, read-only and ssh-transport-agnostic (observe(target) -> {git_state, suite_state, session_state, process_state}, local/remote same shape)?"
   [supervisor-health.sh]="Is the supervisor base layer alive outside any Claude session (os-anchor timer + delivery/observe adapters + session liveness)?"
   [supervisor-preempt.sh]="Is the loop stopped at ANY point (preemptive .halt — process-level preempt(target) enforced in code, not just at a tick boundary)?"
   [cross-machine-verify.sh]="Has every merge that landed on the tracked branches been cross-machine verified by a NON-participating machine, and what is the detection latency d (post_merge_latency_h) of the ones that have?"
