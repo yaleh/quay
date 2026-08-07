@@ -704,3 +704,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 内层称此轮为 final true-green verification（config 在位、checkout be0cca93、无泄漏协调目录）。
 > 若 serial 相位也绿 = **并发 8 真绿**（human ruling 达成）→ un-hold session-pid + done-flip 批次 +
 > 分叉合并。Monitor mounted+targetOk 真。等 serial 相位完成。
+
+> **14:45Z 外层 tick（no-action——预存 tmux 泄漏清理后重跑，环境阻塞全清）**：round-7 假红根因 =
+> **tmux-leak-scan 无基线，扫到 88 个预存泄漏 tmux server 进程**（ol-* 前缀，01:44-01:48 启动，今早
+> 遗留，非今晚套件泄漏）+ /tmp 泄漏目录。清理：杀 88 泄漏进程（保护内层 quay-0）、rm /tmp 泄漏目录、
+> leak-scan 验证 **exit 0**。至此环境阻塞全清：worktree 干净 + config.yml 在位 + 无 tmux 泄漏。重跑
+> 并发 8（14:45:17，state=running）。测试本身连续 4 轮 fail 0 / cancelled 0。若本轮绿 = 真绿（human
+> ruling）→ un-hold session-pid + done-flip 批次 + 分叉合并。
