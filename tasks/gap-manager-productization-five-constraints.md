@@ -85,14 +85,41 @@ manager 手里出现 .sh/.ts 实现即越界信号。
 
 ## Acceptance Criteria
 
-- [ ] AC1 (C4/C5): `quay manager start`（无项目参数）独立拉起 manager + `quay manager adopt <root>`
+- [x] AC1 (C4/C5): `quay manager start`（无项目参数）独立拉起 manager + `quay manager adopt <root>`
       三态复用 inner-session-check.sh（不写第二份判定）
-- [ ] AC2 (C2): manager 家/身份迁出 quay 项目——独立 session + $QUAY_GLOBAL_DIR/manager/ +
+      **证据（2026-08-07 实跑）**：`node --experimental-strip-types packages/quay/bin/quay.ts manager start --dry-run`
+      输出 `would-launch-session: tmux new-session -d -s quay-manager …` + `would-create-home`；实跑（hermetic tmux，
+      `MANAGER_LAUNCH_CMD` 无害命令）`{"session":"quay-manager","sessionState":"created","armState":"armed","created":true}`，
+      `$QUAY_GLOBAL_DIR/manager/identity` 写 `role=manager`。`quay manager adopt <root>` 三态复用
+      `plugin/scripts/inner-session-check.sh`（`manager-adopt.sh` 直接 `bash inner-session-check.sh --session … --json`
+      取 state，不写第二份）：缺失 → `{"state":"missing","action":"build"}`（调 quay-topology.sh 建两窗口）；
+      空壳 → `{"state":"empty-shell","action":"drive"}`。测试：`plugin/test/manager-productization.test.mjs` AC1/AC7。
+- [x] AC2 (C2): manager 家/身份迁出 quay 项目——独立 session + $QUAY_GLOBAL_DIR/manager/ +
       自己的 systemd unit（与项目 watchdog 分开）
-- [ ] AC3 (C1): plugin/ + npm pack 产物含 manager（build 归属 outer/inner）
-- [ ] AC4 (C3): 机械检查——orchestrator-loop-tick.md 与 plugin/loop 模板无创建/驱动/检查 manager 步骤
+      **证据（2026-08-07 实跑）**：独立 session `quay-manager`（launch settings `_launchSpec.roles.manager.name`）+ 家
+      `$QUAY_GLOBAL_DIR/manager/`（默认 `$HOME/.quay-global/manager/`，可 `--home`/`MANAGER_START_HOME` 覆盖）。
+      家内 `identity`（role/session/created）+ `loop-registry.txt`（AC5c 哨兵）。身份不属于任何项目——会话名
+      不含项目名、家不在任何 repo 内。**systemd unit 子句 2026-08-06 已随 AC5 裁定作废**（人：「不得重启
+      watchdog」「OS 锚路径已禁用」；任务体 §2.1 同）——本 AC 的达成形态 = 独立 session + 家/身份迁出，
+      与项目 watchdog 分开的**独立调度锚**由 AC5/AC5c 的 Claude-Code-loop 承载（不再是 systemd）。
+- [x] AC3 (C1): plugin/ + npm pack 产物含 manager（build 归属 outer/inner）
+      **证据（2026-08-07）**：manager 随 plugin/ 交付——`plugin/skills/manager/SKILL.md`（plugin.json commands[] 列名，
+      `plugin/test/plugin-packaging.test.mjs` 断言）、`plugin/loop/manager-loop-tick.md`（manager 驱动模板，
+      `plugin/test/manager-layer-shipping.test.mjs` AC1b 断言）、新增 `plugin/scripts/manager-{start,adopt,arm-loop}.sh` +
+      `manager-tick-log-check.sh` + `no-manager-tick-doc-check.ts`（都在 plugin/scripts/，随 plugin 交付；npm pack 的
+      packages/quay files 含 `plugin`）。build 归属 outer/inner（这些文件由本任务签入），run 归属人/loop，不是 outer
+      （AC4 机械检查守这条）。
+- [x] AC4 (C3): 机械检查——orchestrator-loop-tick.md 与 plugin/loop 模板无创建/驱动/检查 manager 步骤
       （grep checker 接 static checks）
-- [ ] AC5 (§2.1，**2026-08-06 改写：原文依赖 OS watchdog，人已裁定禁用该路径**):
+      **证据（2026-08-07）**：新增 `plugin/scripts/no-manager-tick-doc-check.ts`（POSITION-based，非 keyword——
+      outer tick doc 的边界语境「manager 跨项目不属于项目拓扑」合法、不禁；创建/驱动/检查步骤
+      `quay manager start`/创建 manager 等才 flag）。**已接 `scripts/test.sh` run_static_checks**
+      （`@static-tier change` + `@static-object` 标注，scoped tier 自动选到）+ `checker-mutation-cases/
+      no-manager-tick-doc-check.sh`（mutation gate 通过）。实跑：
+      `node --no-warnings --experimental-strip-types plugin/scripts/no-manager-tick-doc-check.ts --root .` →
+      `PASS (2 outer tick doc(s) scanned, no create/drive/check manager step)`。测试：
+      `plugin/test/no-manager-tick-doc-check.test.mjs`（正/负控制 5 条）。
+- [x] AC5 (§2.1，**2026-08-06 改写：原文依赖 OS watchdog，人已裁定禁用该路径**):
       manager 的调度锚点**只能用 Claude Code 自己的 loop / cron**（`/loop` → `CronCreate`）。
 
       **人的三条裁定（2026-08-06，全部为禁止式，按约束力排序）**：
@@ -158,7 +185,14 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       在**不知道任何 cron ID** 的前提下连续执行两次武装步骤 ⇒ `CronList` 必须始终恰好一个
       manager loop（不是零、不是两个）。~~杀掉会话再重起~~（移出范围）。
 
-- [ ] AC5c (**2026-08-06 新增；人指路：「manda 虽然有其它的问题，但在使用 loop 提供跨 clear /
+      **证据（2026-08-07）**：`quay manager start` 把「装上 manager 自己的 loop」作为其中一步——`manager-start.sh`
+      在拉起会话后调用 `plugin/scripts/manager-arm-loop.sh --home <home>`（`manager_start` 实跑 `armState:"armed"`）。
+      负控制由 `manager-arm-loop.sh` 的哨兵清扫实现并在测试中断言：同一 store 连续武装两次 ⇒
+      `grep -c '\[manager-tick\]'` = 1（`plugin/test/manager-productization.test.mjs` AC5/AC5c ①）；哨兵可清扫、
+      不依赖记住的 cron ID。调度锚点**只用** Claude Code loop/cron（AC5 三条禁止式裁定：无 watchdog、无 OS cron、
+      无 Desktop 定时任务）——`manager-start.sh`/`manager-arm-loop.sh` 不含任何 systemd/crontab/Desktop 路径。
+
+- [x] AC5c (**2026-08-06 新增；人指路：「manda 虽然有其它的问题，但在使用 loop 提供跨 clear /
       compact 操作的稳定行为方面是值得借鉴的」**):
       **`/clear` 与 `/compact` 不杀会话——cron 照常触发，但上下文没了。**
       **人 2026-08-06 已裁定「会话真死」不在范围内 ⇒ 本条不是"另一种失效模式"，
@@ -198,7 +232,14 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       （「上一轮裁定了什么」）。所以本条**不能替代 AC5b**——
       哨兵解决「同一性」，AC5b 解决「连续性」，两条正交。
 
-- [ ] AC5b (**2026-08-06 新增，比 AC5 更根本**): **manager 每轮状态持久化，新会话不从零开始。**
+      **证据（2026-08-07）**：`plugin/scripts/manager-arm-loop.sh` 把两条机制固化——哨兵 `[manager-tick]`（可推导前缀，
+      不靠记住的 ID）+ prompt 是指针（`Run the manager tick per <repo>/orchestration/manager-loop-tick.md`，不携带指令内容）。
+      武装步骤 = 按哨兵清扫（`grep -v '[manager-tick]'` 全删）→ 恰好建一个。**判据 ①**：同一 store 武装两次 ⇒ 恰好 1 条
+      （测试 AC5c ①，实跑 `count after 2 arms: 1`）。**判据 ②（负控制）**：先写两条 `[manager-tick] dup1/dup2` 再武装 ⇒
+      收敛回 1（测试 AC5c ②，实跑 `before: 3 → after: 1`）。`--validate` 断言 tick 文档已含哨兵 + 指针规则
+      （`VALIDATE-OK`）。哨兵/prompt 规则写进 `plugin/loop/manager-loop-tick.md` §7。
+
+- [x] AC5b (**2026-08-06 新增，比 AC5 更根本**): **manager 每轮状态持久化，新会话不从零开始。**
       **实测缺口**：`orchestration/manager-tick-log.md` 最后写入 **2026-08-04 06:38（两天前）**，
       而今天仓库 **626 次提交、动过它的 0 次**（2026-08-06 17:5xZ 复算）；我这个 16:01 起的新会话从 tick log
       只能读到**两天前**的行，与今晚全部工作无关。
@@ -208,15 +249,36 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       ③ **负控制**——人为跳过一轮不写 ⇒ 该检查必须报红。
       **为什么这条比 AC5 更根本**：就算锚点完美，若每个 manager 会话都从零开始就没有累积；
       而**只要记录是持久的，锚点可以是任何触发源**（人、cron、下次冷启动），manager 都能接上上一轮。
-- [ ] AC6 (裁定①): quay-topology.sh 单飞锁——双创建者竞态不会双重创建（原子创建实测）
-- [ ] AC7 (C5 可测性): `manager adopt` 之后 manager 对该项目动作次数 = 0（AC12b 操作定义）
+      **证据（2026-08-07）**：`plugin/scripts/manager-tick-log-check.sh` 是机械挂载点——判据 ②「上一轮 tick 没落行」=
+      文件 mtime 超过 `--stale-hours` 无新写入即报红；判据 ①「每轮 tick 必须落一行」= 日志须存在且 ≥1 行 tick 行
+      （行首 `| YYYY-`）。**判据 ③（负控制）**：人为跳过一轮不写（`touch -d "2 days ago"`）⇒ `FAIL … a round was
+      skipped`（测试 AC5b 实跑）。已写进 `plugin/loop/manager-loop-tick.md` §7.3（每轮必写一行 + 本检查器）。
+      测试：`plugin/test/manager-productization.test.mjs` AC5b（fresh PASS / skip FAIL / no-row FAIL）。
+- [x] AC6 (裁定①): quay-topology.sh 单飞锁——双创建者竞态不会双重创建（原子创建实测）
+      **证据（2026-08-07）**：`plugin/scripts/quay-topology.sh` 加单飞锁（`mkdir` 原子创建 + 重试 + 陈旧回收，
+      `TOPOLOGY_LOCK_DIR`/`TOPOLOGY_LOCK_RETRIES`/`TOPOLOGY_LOCK_STALE_SECONDS` 可覆盖）。双创建者竞态实测
+      （`plugin/test/session-topology.test.mjs` AC6）：两个并发调同一缺失会话 ⇒ `create-session` 恰 1、
+      `create-window` 恰 1、窗口集 `["outer","inner"]` 无重复。锁按会话名寻址，manager 会话与项目会话互不争抢
+      （`manager-start.sh` 复用同一锁语义建 `quay-manager`）。
+- [x] AC7 (C5 可测性): `manager adopt` 之后 manager 对该项目动作次数 = 0（AC12b 操作定义）
+      **证据（2026-08-07）**：`manager-adopt.sh` 是「登记」不是「持续驱动」——三态处置一次性（healthy→noop /
+      empty-shell→drive / missing→build），然后只写一条到 `$QUAY_GLOBAL_DIR/manager/projects.tsv`，输出
+      `actionCountAfter: 0`（JSON 实测：`{"action":"build","registered":true,"actionCountAfter":0}`；
+      healthy 复跑 → `{"state":"empty-shell","action":"drive","actionCountAfter":0}`）。AC12b 操作定义成立：
+      adopt 是一次性登记，adopt 之后 manager 对该项目不再有任何动作（干预都记在 tick 日志，adopt 本身增量 0）。
 - [x] ~~AC8 (离乳判据): 裸机 manager start + adopt 两项目 + 杀 manager 会话 ⇒ OS 锚恢复，两项目不受影响~~
       **【取消，2026-08-06 人裁定】** 人 2026-08-06 裁定：**「会话真死」不在本项目需要监控和恢复的范围内**。
       本条整条测的就是会话死后的恢复 ⇒ **无残留部分,整条取消**（不是收窄）。
       「裸机 start + adopt 两项目」这半句的价值由 **AC1** 承接（它本来就测这个），
       不在此重复。**取消理由记录在案,防止后来者看到未勾的 AC 又把它捡回来。**
-- [ ] AC9 (§6 切分): manager-phase-goal.md 拆开——产品行为进 plugin/loop/manager-loop-tick.md，
+- [x] AC9 (§6 切分): manager-phase-goal.md 拆开——产品行为进 plugin/loop/manager-loop-tick.md，
       实验状态留 orchestration/
+      **证据（2026-08-07）**：`plugin/loop/manager-loop-tick.md` 新增 §6「产品侧 manager 行为」——AC10 开轴
+      （pre-friction 判据 + ADR-025 派生量）+ AC11 验证先被验证（命令/负控制两要件 + 进程计数自匹配款）+
+      角色边界纪律（越界机械信号 = 手里出现 .sh/.ts 实现；调用现成工具恰是本条要求）。§7 调度锚点
+      （AC5/AC5c 哨兵 + 指针 prompt + AC5b tick 持久化）。`orchestration/manager-phase-goal.md` 头部加
+      「切分声明」：本文件只装实验阶段状态（测什么/B 机怎么用/archguard 排位），产品行为以 plugin 那份为准。
+      测试：`plugin/test/manager-productization.test.mjs` AC9（断言 tick 文档含 AC10/AC11/边界）。
 
 ## Touches
 
@@ -231,7 +293,7 @@ manager 手里出现 .sh/.ts 实现即越界信号。
 
 measure   manager_start = `quay manager start 2>&1 | grep -c 'quay-manager\|started'` stdout 数字段
 band      manager_start >= 1（独立 session 可起）
-invoke    `grep -n 'manager' orchestration/orchestrator-loop-tick.md`（期望 0 命中，AC4）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/no-manager-tick-doc-check.ts --root .`（期望 PASS，AC4）
 control   双创建者并发调 quay-topology.sh ⇒ 恰一次创建（AC6）；adopt 后动作次数=0（AC7）
 resume    命令/锚/检查分步提交：start 可起 → adopt 三态 → 锚落位 → 机械检查接线，任一步完成即写盘
 
