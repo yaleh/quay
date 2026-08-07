@@ -1,4 +1,4 @@
-// @test-group product
+// @test-group serial
 // install-config-driven-e2e.test.mjs — gap-no-e2e-proves-install-is-configuration-driven.
 //
 // The reinstall gate: ONE e2e with FOUR assertions (A1–A4). This file is the ONLY
@@ -29,7 +29,7 @@
 // stays red (never "both empty so identical").
 // AC7: the two derived test commands are asserted to genuinely differ (verbatim
 // evidence pasted in the task body from the run below).
-// AC8: node:test + `// @test-group product`; temp workspaces destroyed via after().
+// AC8: node:test + `// @test-group serial`; temp workspaces destroyed via after().
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
