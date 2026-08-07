@@ -8036,3 +8036,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - 外层已处理 D 卫生（主仓冗余改动回退）。
 - **派发**：C（优先）+ A1 + B（3 连派，pairwise disjoint + 与在飞 suite-green-gate disjoint + touches 解析）。**A2 与 A1/B 触碰重叠 → 下一槽派发**。telemetry 3 条。
 - **在飞 4/5**：suite-green-gate + serial-segment(C) + gitignore(A1) + clean-tree(B)。1 空槽（A2 等）。suite GREEN。
+
+### 事件 15:4xZ（suite-green-gate + A1 完成 fan-in；C/B 在飞，A2 排队）
+
+- **suite-green-gate 完成**（agent 4b1ebc0c，7 files）：task DoD 全量套件去重——fast-mode-loop-tick L118 改「任务 DoD 不含全量套件；全量套件是批量合边界闸门」；task-contract-check 加 `checkDodSuiteLine`（dod-suite-line 机械检查，shrink-only grandfather 表 docs/analysis/dod-suite-line-baseline.md 86 条）；负控制验证（构造含该行任务必报）；AC4 承重条证明 fork-baseline 保护强度未变（suite-state-trigger 红→stopSignal=true）；AC5 交叉标注。scoped 50/50。**fan-in**：integration **7147edf5**（task-contract-check 冲突手工合并——Check 5（ac8 自承认）+ Check 6（dod-suite-line）共存，node --check 过 + strict-subset 0 违规）。
+- **A1 完成**（agent abbf883c）：.gitignore 加 `**/.quay-worktree-local*` + `**/.quay-wtl*`（消第四轮假红首道防线）。check-ignore 3/3 + 负控制 + 真残留控制 + 双向交叉标注。**fan-in**：integration **7d410a50**（.gitignore +11）。
+- **在飞 2/5**：C（serial-segment，优先）+ B（clean-tree）。**A2（worktreeinclude）排队**——与 B 触碰重叠，等 B 完成。suite GREEN。
