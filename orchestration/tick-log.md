@@ -649,3 +649,12 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 数据挪 .quay-worktree-local2 后重建软链），启动三轮并发 8。state=running (13:20:13)。
 > 若三轮绿：un-hold session-pid + done-flip 批次 + 分叉合并（merge waits for reliable c8 suite, human
 > ruling）。
+
+> **13:35Z 外层 tick（no-action——三轮结果 2 失败全负载伪影，驱动内层系统性 serial 路由）**：并发 8
+> 三轮：2 失败全在 packages/quay/test/install-config-driven-e2e.test.mjs（A3 + AC6），隔离 10/10 全过
+> ⇒ 负载伪影（重 install 测试并发 8 下 referenced-not-landed 误触发——每轮不同 .md 文件 = 中断 install
+> 的伪信号）。该文件 product 组、非 serial。**系统性修**：审计所有 spawn quay-init --loop 的重 install
+> 测试一次性 serial 路由（候选：install-config-driven-e2e / npm-pack-e2e / worktree-root-fs-check /
+> runtime-landing / capability-catalog Wiring / session-topology），避免一轮追一条。已 send-keys 驱动
+> 内层（delivered）。serial 组现 16 文件（确认 @test-group serial 声明 19 处、dedup 16）。等内层路由
+> 完 → 并发 8 四轮。
