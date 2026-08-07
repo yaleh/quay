@@ -698,3 +698,9 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > **管理者实测**：serial 段 1073s/230 用例/22 文件 = 整轮 77% 时间只跑 8% 用例（单用例 45 倍成本）；
 > runner-grouping 被路由非修复（300s flags-only 仍在 serial 里）——这两条是测量，跟进但不阻塞绿。
 > 等重跑结果：绿 → un-hold session-pid + done-flip + 分叉合并。
+
+> **14:27Z 外层 tick（no-action——重跑主体现 fail 0 / cancelled 0，serial 相位进行中）**：config 修复
+> 后重跑：主体现 2717 pass **fail 0 / cancelled 0**，正在跑 serial 相位（22 文件，约 18 分钟）。
+> 内层称此轮为 final true-green verification（config 在位、checkout be0cca93、无泄漏协调目录）。
+> 若 serial 相位也绿 = **并发 8 真绿**（human ruling 达成）→ un-hold session-pid + done-flip 批次 +
+> 分叉合并。Monitor mounted+targetOk 真。等 serial 相位完成。
