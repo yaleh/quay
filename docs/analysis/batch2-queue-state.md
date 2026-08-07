@@ -7741,3 +7741,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **Root cause（已验证，非推断）**：quay-init-loop.test.mjs（54 测试 / 1286 行）超载 node:test worker 事件循环——37 个 --loop 测试各 spawn 真实 quay-init.sh（再 spawn python3 子进程）。整文件跑 167s 自败，报 `'Promise resolution is still pending but the event loop has already resolved'`（cancelled 1）。**判别**：耗时几十分钟才报 = 真悬空（与并发无关）；模式子集 19 测试 = 86s 通过 → 确认是 worker 耗尽非测试逻辑。laydown/referenced-not-landed 缺口**已修复**（5 机制全铺 + verify-referenced-landed OK）。
 - **修复**：拆成 4 文件 + 共享 helpers（quay-init-loop-helpers.mjs）——core 12/runtime 14/vendor 7/driver 15，各 <19 测试、在耗尽阈值下。4 文件并行 **48/48 pass, 0 cancelled, 113s**；test-framework-policy + census 干净。原 1286 行文件删除（e5d295b2）。
 - **遗留**：quay-init-tmux-detection.test.mjs（8 测试 9 spawn）在 7 文件家族并行时也报 Promise-pending（单独 6/6 通过）——跨文件负载聚合，独立既有问题，非本次拆分引入。
+
+### 事件 06:5xZ（tick——pool refill + 4 连派）
+
+- **suite 仍红**（05:37 state，早于 quay-init-loop 拆分修复 06:4x）——外层需低负载窗口重跑验证。
+- **pool refill**：19<floor 20，promote 3（inner-panel 17 / batch-merge-ff 16 / cross-machine-readonly 15，self-touch 补）。pool→19，dispatchable_disjoint 11。
+- **4 连派（全 pairwise disjoint）**：cli-quay-init-collision（DIR-098 quay init 与 /quay:init 撞名）+ inner-panel（面板冻结行/状态转换）+ batch-merge-ff（integration-batch-merge 真 merge 模式，SPEC 裁定已否证 FF）+ cross-machine-observe（supervisor-deliver 读方向对称）。
+- **在飞 4/5**。
