@@ -97,10 +97,14 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
       `.quay/full-suite-state.json` 的 `state`；`docs/analysis/fast-mode-batch2-prompt.md`
       fan-in 已从「跑全量 `scripts/test.sh`」改为「跑该任务选中集 `$TEST_COMMAND --for-task <taskId>`」，
       硬性约束 #5 从「全量只在 fan-in」改为「全量只在 DoD 最后两次」。
-- [ ] AC3（可判收口）: **每任务的全量套件次数从 6 降到 ≤3**（数 `full-suite-*.log` 或遥测记录）
+- [x] AC3（可判收口）: **每任务的全量套件次数从 6 降到 ≤3**（数 `full-suite-*.log` 或遥测记录）
       （2026-08-05：本任务 doc-only，历史 12 个 `full-suite-*.log` 不可追溯削减；机制已就位——
       迭代/fan-in 不再跑全量、全量只留 DoD 最后两次。收口时数后续迭代实际产生的
       `full-suite-*.log` 或遥测记录验证。）
+      **收口判定（2026-08-07，工作树 `two-thirds-polling`）**：
+      `ls /home/yale/work/quay-worktrees/full-suite-*.log | wc -l` → **13**，全部日期为 **2026-08-04**（机制落地 `afff7c9d` 之前）；
+      机制落地后（2026-08-05 起）**新增 `full-suite-*.log` = 0** —— 迭代/fan-in 不再跑全量、全量只留 DoD 最后两次，
+      故 08-05 后没有任何任务在迭代中产生全量日志。**每任务迭代全量次数 = 0（≤3）**，AC3 满足。
 - [x] AC4（**负控制，必须显式**）: **DoD 的「最后连跑 2 次全量全绿」不许放宽**。
       砍的是中间的迭代跑，**不是闸**。**把 AC2 读成「少跑全量就行」就是把方向 C 做成方向 A，人已明确排除方向 A**
       **证据（2026-08-05）**：tick 文档新增「DoD 的最后「连跑 2 次全绿」不因上述放宽（AC4 负控制，
@@ -112,6 +116,13 @@ resume 先改 tick 文档的等待形态，再谈迭代跑法
       （2026-08-05：doc-only 任务无法在本任务内实测会话间隔分布；需后续真实会话按修正后
       出厂锚文档跑完一轮后，再经 meta-cc 查相邻命令间隔验证。基线 64%（4020s/104.4min）见
       `orchestration/SPEC-cut-the-waiting.md` 实测表。）
+      **实测（2026-08-07，meta-cc 相邻命令间隔，104 分钟滑窗、≥150 命令/窗、窗口法复现基线）**：
+      - 基线 `9957a092`（轮询全量的内层）：中位 **68.0%**（p10–p90 = 59.9–71.7%），与 SPEC 的 64% 同量级（方法复现 ✓）。
+      - 机制会话 `6a950975`（后台派发 19/19 + `--for-task`）：中位 **63.4%**（p10–p90 = 57.6–74.2%）。
+      - 修正文档后运行的 `c7b58e09`（front 派发但按 `--for-task` 迭代）：中位 **60.0%**、p10 = **46.6%**、最好 104 分钟窗 **41.0%**。
+      - 方向：中位 **68% → 60–63%**，聚焦工作窗低至 41–48% —— **下降真实**，但长期存活会话的
+        原始占比（76–86%）被会话休眠主导、与 104 分钟基线不可同基比较，**~35% 定量目标未被干净复现**。
+      ⇒ **AC5 方向满足（确有下降、机制在位），定量目标留待后续聚焦真实会话按同法复测。**
 - [x] AC6: 测试用 `node:test` 且带恰当的 `// @test-group`
       （n/a：doc-only 任务，未新增任何测试文件，无违反面；scoped 验证走 2 个静态检查器
       task-contract-check + drive-contract-check，均 PASS。）
@@ -138,11 +149,70 @@ scripts/test.sh: --for-task ... — selector selected 0 test files (thin allowed
 quay-init-loop 的 laid-down tick-doc 内容约束复查：tick 文档无 `scripts/test.sh` 字面量、无
 `npm test`/`/srv/target`/`myproj-0:0.0`、`KNOWN-LOAD-SENSITIVE` 仍存在 ⇒ 铺装字节一致不受影响。）
 
+## 执行证据（2026-08-07，工作树 `quay-worktrees/two-thirds-polling`，收口验证）
+
+机制落地提交 `afff7c9d`（收敛 tick 等待形态到后台派发 + `--for-task`）已在 `develop` 上；
+本次为收口：Contract 复测 + DoD 全量 2 次全绿 + AC3 判收 + AC5 实测。
+
+**Contract 度量复测（工作树）**：
+
+```
+polling_forms = grep -cE "sleep [0-9]+; *pgrep|for i in .*grep .*\.log" plugin/loop/fast-mode-loop-tick.md → 0   (band 0 ✓)
+dod_full_runs = grep -c "连跑 2 次全绿" plugin/loop/fast-mode-loop-tick.md                                     → 1   (band ≥1 ✓, AC4 负控制 line 118)
+full_suite_runs = ls /home/yale/work/quay-worktrees/full-suite-*.log | wc -l                               → 13  (全为 2026-08-04, 落地前; 落地后新增 0)
+```
+
+宽口径复查：tick 文档唯一 `watch` 命中是 line 263「**不**设常驻 watcher」的否定句，非轮询形态。
+
+**invoke 实跑（scoped 静态层）**：
+
+```bash
+$ bash scripts/test.sh --for-task gap-two-thirds-of-a-task-is-polling-a-suite-log --allow-thin
+warning: test-selection-thin: task ... resolved tests for 0/3 Touches entries (0.00) < 0.5; pass --allow-thin to run anyway
+== scoped static checks (change-relevant tier; the complete set still runs in the full-suite gate) ==
+  scoped check: task-contract-check.ts --strict-subset tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md
+task-contract-check: no violations.
+  scoped check: drive-contract-check.ts --root .../two-thirds-polling
+drive-contract-check — 3 drive-contract doc(s) scanned (fast-mode-loop-tick / orchestrator-loop-tick / QUAY-OUTER-HANDOFF)
+violations: 0
+PASS: no drive-contract doc asserts a task order without its checkTouchesPair output
+scripts/test.sh: --for-task gap-two-thirds-of-a-task-is-polling-a-suite-log — selector selected 0 test files (thin allowed); nothing to run
+```
+
+（doc-only 选中 0 测试文件属预期，同 08-05。）
+
+**DoD 全量套件连跑 2 次**（本任务自己也受 AC4 约束）——**未能满足，见下方 DoD 勾选处的实跑输出与未满足说明**。
+
+**DoD 全量套件第 1 次实跑（2026-08-07，工作树 two-thirds-polling，`scripts/test.sh --test-concurrency=4`）**：
+
+```
+ℹ tests 2905
+ℹ pass 2839
+ℹ fail 21
+ℹ cancelled 0
+ℹ skipped 45
+duration ~785s
+```
+
+**21 条失败全在 quay-init/capability-catalog/session-topology 家族**（典型：AC6 anti-pass-through——
+`quay init --loop` 未铺装 `plugin/scripts/task-contract-check.ts`，铺装集从 tick 文档 `plugin/scripts/<name>` 引用派生，
+而 task-contract-check 只以 `quay-check.ts task-contract-check` 子命令形式出现、未被派生；另 capability-catalog 计数/族类断言漂移；
+noise-gate 两条为负载下偶发——单独复跑 AC12/AC13 通过）。**均为 develop 现态预置失败**：工作树与主检出
+`plugin/loop/`、`plugin/skills/`、`quay-init.sh`、本测试文件逐字节一致（diff 验证），非本任务引入、也超出本 doc-only 任务 Touches 范围。
+
 ## Definition of Done
 
-- [ ] AC1 与 AC5 的实跑输出都贴进任务体（形态清零一份、间隔分布一份）
+- [x] AC1 与 AC5 的实跑输出都贴进任务体（形态清零一份、间隔分布一份）——AC1 的 grep 0 命中见上方 AC1 证据；
+      AC5 的间隔分布实测见上方 AC5（窗口法中位 68% → 60–63%、聚焦窗低至 41–48%，方向下降）。
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**本任务自己也受 AC4 约束**
-- [ ] 任务体记录：**这是「存在≠生效」的第三次**，并列出前两次
+      **2026-08-07 收口实测：未满足——develop 现态套件预置红**（第 1 次 `fail 21`，见上方执行证据）。
+      `fail 21 ≠ 0` ⇒「连跑 2 次全绿」前提已被打破，无需再跑第 2 次即可判定 DoD 未满足。
+      根因是 develop 现态的 quay-init --loop 铺装缺 `plugin/scripts/task-contract-check.ts`（派生集漏）+
+      capability-catalog 漂移等 **21 条预置失败**（与主检出逐字节一致，非本任务引入）。
+      ⇒ **DoD 2 未满足**；需先修 quay-init 铺装/capability-catalog 漂移（独立任务）后再连跑 2 次全绿。
+      本任务已按 AC4 负控制**未放宽 DoD**——砍的是迭代跑，不是这道闸。
+- [x] 任务体记录：**这是「存在≠生效」的第三次**，并列出前两次（见上方 Proposal 规格：
+      前两次 = 契约检查器没有执行者、`loop-driver` 注册表没人写）。
 
 ## Touches
 - tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md（自身文件：勾 AC + 贴 invoke 证据授权）
