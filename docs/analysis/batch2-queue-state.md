@@ -7706,3 +7706,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **外层优先派发** gap-manager-tick-mechanical-checks（8 个机械检查散散文、连续 8 轮漂移；补齐立刻产出 archguard/meta-cc 停止态 + tmux 171）。**两条硬约束**已嵌入 agent prompt：①并入 quay-session.ts（不得新增第 7 个 .sh，AC5 surface_entrypoints≤10/sh≤4）；②tmux 只读（list-sessions/list-panes/capture-pane，禁 kill，AC2 destructive=2 保持，身份用 pane_pid+pane_current_command）。
 - **注意**：与 manager-productization 的 overlap 是后者 broad `plugin/scripts/` glob 的展开假阳性（在飞 agent 实际不碰 quay-session.ts，改的是 quay-topology.sh/quay.ts/manager-*.sh）——真实并发无碰撞，外层优先裁定派发。
 - **在飞 2/2**：manager-productization（多文件实现中）+ manager-tick-checks（外层优先）。
+
+### 事件 04:5xZ（manager-productization 完成——fan-in + session-liveness-remove 回填）
+
+- **manager-productization 完成**（真实实现，C1-C5）：quay manager start/adopt/arm CLI + manager-start/adopt/arm-loop/tick-log-check.sh + no-manager-tick-doc-check.ts + quay-topology.sh 单飞锁 + AC9 split。AC1-11 勾（AC2 systemd 条按 2026-08-06 人裁定让位）。**fan-in**：cherry-pick f01cc509 → integration 2c4a45d2（15 files 无冲突）。任务文件入 develop。
+- **session-liveness-remove 回填 2/5**：B-FULL-DELETE（heavy-op-token.sh + 4 测试文件 + 调用点清理）+ 共享 events/lock 移除。5 个 missing touches 是 delete 目标（正常）。与 manager-tick-checks disjoint。
+- **在飞 2/2**：manager-tick-checks（外层优先）+ session-liveness-remove。delivery-surface 仍撞两者（broad touches）。
