@@ -141,3 +141,10 @@ milestones/M997/
 # 与 .quay/gate-events.jsonl、milestones/fast-mode-telemetry/*.json 同类。
 # 历史保留在 git 里（155 个提交），从此不再新增。
 orchestration/manager-tick-log.md
+
+# 外层 + 内层 tick 记账（人 2026-08-07 16:1x 裁定「outer 和 inner 也进 gitignore」）
+# 同管理者：运行时遥测非代码，tick-log 可丢失（人明确接受的代价），历史 commit 不动。
+# 实测：develop 独有 341 条里 328 条（96%）是三层 tick 记账，只有 8 条真内容。
+# 自审/收尾必须读磁盘文件（tail），不读 git（文件可丢失）。
+orchestration/tick-log.md
+docs/analysis/batch2-queue-state.md
