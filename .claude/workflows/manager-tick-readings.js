@@ -66,6 +66,7 @@ git rev-list --left-right --count develop...integration | awk '{print "diverge="
 echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '^[0-9a-f]* manager:')"
 ps -eo args | grep -q '[q]uay-0:outer.0 -S -3' && echo mon_outer=alive || echo mon_outer=DEAD
 ps -eo args | grep -qF 'SUITE-TERMINAL' && echo mon_suite=alive || echo mon_suite=DEAD
+python3 orchestration/manager-anchor-check.py
 # ^ 2026-08-07：我把 suite 监视器从 suite-state-trigger --monitor 换成了自记 prev 的轮询
 #   （原因：suite-state-trigger 用共享的 .quay/suite-state-last.json 做边沿触发，
 #    outer 也挂着一个实例，两者互偷事件——我那个挂了 1h45m 零事件）。
