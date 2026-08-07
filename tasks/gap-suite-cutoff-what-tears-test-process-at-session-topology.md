@@ -45,6 +45,15 @@ node 进程，可能耗尽内存触发 SIGKILL（SIGKILL ×2 符合 OOM 杀进�
 （2026-08-04 02:15Z 冷启动记录）。验证：`dmesg | grep -i 'killed process'` / OOM 事件时间戳与
 套件 SIGKILL 时刻对照。
 
+**关键证据更新（管理者 2026-08-07 06:3x）——主假设方向可能反了**：`quay-init-loop.test.mjs` detach 跑
+（/tmp/qil-detach.log 06:31:48）**自己跑 167s 后主动失败**，报 **'Promise resolution is still pending
+but the event loop has already resolved'**——**未 await 的悬空 Promise**（事件循环耗尽时 node:test
+判失败，只整文件跑触发，需足够多测试把事件循环推到耗尽）。⇒ 34 文件截断报**同一条消息**，很可能
+**不是"被外部杀死导致报这条"，而是这个悬空 Promise 模式导致整批失败**，SIGKILL ×2 / cancelled ×2
+是后果或巧合。**若成立**：34 文件不是"无辜受害"，是**同一产品级缺陷的批量表现**，与并发/资源无关
+（OOM 假设降级）。**验证**：在重测试文件里找未 await 的异步调用（mkdtemp/spawn/quay-init 调用），
+找到一处用"加 await 后整文件跑通"确认。
+
 **次假设**：runner 自己的超时/清理逻辑把测试进程杀了；或某测试（如 session-topology 的 tmux 操作）
 与套件并发冲突。
 
