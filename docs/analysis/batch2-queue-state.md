@@ -7943,3 +7943,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in**：fast-forward integration f062caf9 → b209f4fd（24 files 干净）。任务文件入 develop（AC1-5+AC7+证据勾，AC6/full-green 留外层）。
 - **integration 现含**：serial 机制（f062caf9）+ 21-fix（b209f4fd）——**待外层并发 8 重跑验证真绿**（/tmp/quay-suite-int 树）。
 - **held**：session-pid（7647aaf8）等真绿。在飞 0/5。
+
+### 事件 13:1xZ（并发 8 真绿验证 run——外层在修复后 integration 上跑）
+
+- **13:08 suite RUNNING（laneCount 8，/tmp/quay-suite-int）**：验证树 HEAD=**b209f4fd**（integration-content 21-fix 后完整修复树，含 serial 机制 f062caf9 + 21-fix + 全部 prior fan-ins）。**配置正确**。
+- **静态层先行通过**：checker-mutation RESULT: PASS（每 checker 注入缺陷 RED / 恢复 GREEN，mutations_stayed_green=0）。
+- **预期**：21 条 integration-content 失败 + 7 条 load-sensitive 全消失 → `fail 0 / cancelled 0` 真绿。若绿 → session-pid（7647aaf8）held un-hold + 全量派发恢复。
+- **在飞 0/5**。held 1（session-pid）。monitor buqx5kny2 挂着等结果。
