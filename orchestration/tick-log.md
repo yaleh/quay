@@ -759,3 +759,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 23s）。管理者撤回已记录（quay-init 错误路径无缺陷：管道读 $? 误读 cut，缺 --test-command 真实退出
 > 码=2 正确）。内层在飞：C（runner-grouping logs 28m）+ develop/integration 验证（15m）+ lowconc
 > （23s）。等 C + lowconc 完成 → 并发 8 验证 serial <600s → 分支合并 fast 半成立。
+
+> **16:15Z 外层 tick（no-action——A1/A2/B/green-gate 全 done 落地 integration，C+lowconc 在飞）**：
+> 内层完成并 fan-in：A1 gitignore（7d410a50）、B assert-clean-tree DELTA（174badc0，跑前快照只算新增）、
+> A2 .worktreeinclude + worktree-include.sh（263c073c+498d1680）、suite-green-gate（7147edf5）——全部
+> 确认在 integration。C（serial-cost，agent 在加证据 30m）+ lowconc（subagent 读 session-liveness skip
+> 逻辑 2m28s）在飞。套件绿。假红类（脏树/config/tmux）的机制修复已全部落地。等 C+lowconc 完成 →
+> 并发 8 验证 serial <600s + 整轮 <15min（fast 半成立）→ 分支合并。
