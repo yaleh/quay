@@ -7905,3 +7905,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **11:30 suite RUNNING（laneCount 8）**：外层用 **`--root /tmp/quay-suite-int`**（integration 检出，HEAD=f062caf9 = serial 修复 + 全部 fan-in）跑 `full-suite-runner.ts --lane-count 8 --sync`——**正确配置**：验证的正是 serial 机制。与之前 develop 旧树跑不同（serial 修复只在 integration）。
 - **预期**：A/B 类 11 文件被 serial 组排除出并发 8 主体 → load-sensitive 失败形态（noise-gate/test-file-snapshot/flags-only/observers）应消失；D 类 snapshot 修复消 zz- fixture 竞态。若绿 → 真绿达成，session-pid held fan-in un-hold。
 - **在飞 0/5**。held 1（session-pid 7647aaf8）。monitor bg8jpis39 挂着等结果。
+
+### 事件 11:4xZ（⚠️ 并发 8 验证 run 的 22 fail 是 integration-stale 分歧，非 serial 机制失败）
+
+- **11:30 run（/tmp/quay-suite-int，integration，f062caf9，laneCount 8）红 22 fail**——分诊为 **integration-stale-vs-develop 分歧**，非 serial 机制失效：
+  - `loop-shipping` AC1b：integration 的 `no-manager-tick-doc-check.ts`/`scripts/test.sh` 仍引用旧路径 `/orchestration/orchestrator-loop-tick.md`（develop 已 40→6 迁到 `plugin/loop/`，0 旧引用；integration 仍 1 处）。
+  - `tick-vocabulary` AC4：integration 的 whitelist 是旧版（缺 bare-name 条目），develop 已含。
+  - capability-catalog / cold-start / topology-factory 簇：同为 integration 缺 40→6 迁移。
+- **根因**：develop 252 commits 领先 integration（40→6 全量 refactor + 后续），integration 16 领先 develop（我的 fan-ins）。`gap-forty-to-six-remerge-needs-tests-updated-first`（todo）是已知的 re-merge 前置。**外层拿 integration 检出做并发 8 验证 = 验证了一个缺 40→6 的不一致树**。
+- **serial 机制本身**：已机械证明（serial 成员移出主体 + serial 组单独绿 + D 修复）——22 fail 无一指向 serial 路由逻辑。
+- **给外层的裁定输入**：并发 8 验证应跑**完整同步的树**——或（a）40→6 re-merge 任务完成后再验证 integration，或（b）serial 修复 cherry-pick 到 develop 后跑 develop（与 reason-axis 21fa3db6 同法）。
+- **held**：session-pid（7647aaf8）继续 held，等真绿树验证。在飞 0/5。
