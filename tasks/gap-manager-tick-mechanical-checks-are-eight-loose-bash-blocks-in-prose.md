@@ -6,11 +6,11 @@ title: "the manager tick's mechanical half lives as 8 loose bash blocks embedded
   1/8, the monitor-version check 0/8 and the goal review 2/8, and restoring them
   immediately surfaced two facts invisible for 7 ticks (archguard/meta-cc tmux
   session count = 0, and the tmux leak at an all-time high 171); MUST be
-  integrated INTO the existing quay-session entry point (which already owns the 9
-  session/topology instruments), NOT filed as a 7th loose .sh — human ruling
+  integrated INTO the existing quay-session entry point (which already owns the
+  9 session/topology instruments), NOT filed as a 7th loose .sh — human ruling
   2026-08-07: beware .sh danger especially around tmux, actively integrate to
   control the exposed surface"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
