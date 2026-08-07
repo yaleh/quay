@@ -7887,3 +7887,15 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - 落点：复用 `--group` 机制加 serial 组（主体并发 8，serial 单独串行跑）；D 类夹具移出共享目录。
 - **套件红窗状态**：red+failed（15 fail 全环境性，外层 09:27 确认 tree effectively green）——**本任务即红窗裁定解**：实现 → 并发 8 重跑 → 真绿。fan-in（session-pid 7647aaf8）仍 held，待真绿一并 un-hold。
 - **在飞 1/5**：serial-group agent。4 空槽。
+
+### 事件 10:5xZ（serial-group 完成 fan-in——human ruling 实现落地 integration）
+
+- **serial-group 完成**（commit f2a5be8b，19 files +307/-60）：human ruling 实现全落地——
+  - **AC1 serial 组**：`group_of`/`list_groups` 识别 serial；11 个 A/B 类 KNOWN-LOAD-SENSITIVE 文件（任务列 9 + cold-start-skill/quay-init-loop-core）声明 `@test-group serial` → **机械排除出 product,engine 并发 8 主体**；默认全量路径在并发 N 主体后加 **serial phase（硬编码并发 1）**；`--group serial` 强制并发 1 并剥离 --test-concurrency。
+  - **AC2 D类代码修复**（独立于 A）：`test-file-snapshot.sh` 排除 `zz-*` 运行期夹具 → runner-grouping AC7 共享目录夹具不再产生假 'baseline file REMOVED'。
+  - **验证**：--group serial 131/130/0/0 EXIT=0（含并发 8 失败形态全过）；scoped 136/135/0/0；负控制（session-liveness 改回 governance → 回并发 8 主体；改回 serial → 排除）。
+  - **2/7 基线失败非 load 敏感**：install-config-driven-e2e A2 + quay-init-loop-driver AC3 是 referenced-not-landed quay-init 缺陷，**develop HEAD 已修**（隔离重跑验证）——不属本任务机制。
+  - **AC3 全量并发 8 连跑 2 绿留外层**（worktree 资源闸 WAIT + ~30-40min 不可行）；机制已机械证明（serial 成员移出主体 + serial 组单独绿 + D 修复）。
+- **fan-in**：cherry-pick f2a5be8b → integration f062caf9（15 code + task 文件留 develop 侧）。
+- **held 仍 1**：session-pid（7647aaf8）——等外层并发 8 真绿确认后 un-hold（serial 机制应消除 15 fail 中 load-sensitive 族）。
+- **在飞 0/5**。套件 red+failed（待外层用新机制重跑并发 8）。
