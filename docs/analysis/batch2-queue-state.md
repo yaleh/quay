@@ -7899,3 +7899,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in**：cherry-pick f2a5be8b → integration f062caf9（15 code + task 文件留 develop 侧）。
 - **held 仍 1**：session-pid（7647aaf8）——等外层并发 8 真绿确认后 un-hold（serial 机制应消除 15 fail 中 load-sensitive 族）。
 - **在飞 0/5**。套件 red+failed（待外层用新机制重跑并发 8）。
+
+### 事件 11:3xZ（并发 8 真绿验证 run——外层在 integration 上跑）
+
+- **11:30 suite RUNNING（laneCount 8）**：外层用 **`--root /tmp/quay-suite-int`**（integration 检出，HEAD=f062caf9 = serial 修复 + 全部 fan-in）跑 `full-suite-runner.ts --lane-count 8 --sync`——**正确配置**：验证的正是 serial 机制。与之前 develop 旧树跑不同（serial 修复只在 integration）。
+- **预期**：A/B 类 11 文件被 serial 组排除出并发 8 主体 → load-sensitive 失败形态（noise-gate/test-file-snapshot/flags-only/observers）应消失；D 类 snapshot 修复消 zz- fixture 竞态。若绿 → 真绿达成，session-pid held fan-in un-hold。
+- **在飞 0/5**。held 1（session-pid 7647aaf8）。monitor bg8jpis39 挂着等结果。
