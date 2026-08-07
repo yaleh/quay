@@ -631,3 +631,12 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 解耦，同 e5d295b2 模式）+ 若干测试更新 + scripts/test.sh。正在验证拆分文件通过（55m51s，明确推进，
 > 未卡）。套件红（11:39，无新跑）。在飞 fix-21。Monitor mounted+targetOk 真。等 agent 验证 + merge →
 > 并发 8 重跑 → 真绿。
+
+> **13:08Z 外层 tick（no-action——fix-21 fan-in 完成，外层并发 8 二轮验证启动）**：内层 fan-in  fix-21
+> 到 integration（b209f4fd：catalog exit 0、serial 14、quay-init-loop 拆分完成，in-flight 0/5），
+> integration 现在带完整并发 8 绿栈（serial + 21-fix + reason-axis + dirty-tree）。内层明示等外层
+> 重跑。外层更新 /tmp/quay-suite-int 到 b209f4fd（软链 node_modules/.quay 复用，worktree 本地
+> manager-inbox/prepare-epochs 数据挪到 .quay-worktree-local 保留），后台起并发 8 全量。
+> state=running (13:08:55)。管理者记 human ruling：「merge waits for a fast reliable concurrency-8
+> suite」——合并等并发 8 可靠绿。等二轮结果：绿 → un-hold session-pid + done-flip 批次 + 分叉合并；
+> 红 → 分诊新失败。
