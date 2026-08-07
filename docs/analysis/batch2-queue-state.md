@@ -7548,3 +7548,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **fan-in 成功**：cherry-pick db579c6f → integration 3382c42b（3 files，无冲突；SKILL.md/SPEC 两分支一致）。
 - **任务文件**：AC1-4 勾 + 证据入 develop。worktree/branch 清理。
 - **在飞 4/5**：concurrency-derivation + observer-registry + inner-session-check + manager-layer。readme-source 仍等 concurrency-derivation。
+
+### 事件 00:6xZ 续（inner-session-check 完成——closed done）
+
+- **inner-session-check 完成**：实现早已在 develop（3936f715/e6a3ead5）→ **无代码 fan-in**；本 re-dispatch 验证 13/13 + scoped 绿 + 3 个 fallback-silent 负控制全过 → 标 done（正常完成路径）。任务文件入 develop，worktree/branch 清理。
+- **在飞 3/5**：concurrency-derivation（仍在长验证，无 task commit 但活跃）+ observer-registry + manager-layer。
+- **2 空槽无候选**：readme-source / checksplit / cross-machine-sync / split-batch-vocabulary 全部因触碰 tick docs/skills 与 concurrency-derivation deferral；等其释放后回填。
