@@ -29,6 +29,11 @@ packages/quay/plugin/
 **/worktrees/
 **/dist-sea/
 **/.quay/gate-events.jsonl
+# gap-probe-mechanism-dead-15-days-rewire-to-two-layer (2026-08-07): the routine track's per-routine
+# last-run epoch-ms map (written by the run-routines skill after each probe fires, read by
+# routine-scheduler.ts's interval:<N>m triggers every tick). Same gitignored runtime-state family as
+# gate-events.jsonl — live scheduling state (advances on every fire), never committed.
+**/.quay/routine-last-run.json
 # gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
 # cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
 # "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to

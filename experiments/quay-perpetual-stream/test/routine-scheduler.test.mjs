@@ -8,11 +8,19 @@ import os from "node:os";
 import path from "node:path";
 import { parseTrigger, isDue, dueRoutines, resolveRoutineAction, main } from "../scripts/routine-scheduler.ts";
 
-test("parseTrigger: every(N) and on(event); malformed throws", () => {
+test("parseTrigger: every(N), interval:<N>m, and on(event); malformed throws", () => {
   assert.deepEqual(parseTrigger("every(5)"), { kind: "every", n: 5 });
+  assert.deepEqual(parseTrigger("interval:60m"), { kind: "interval", minutes: 60 });
+  assert.deepEqual(parseTrigger(" interval: 5 m "), { kind: "interval", minutes: 5 });
   assert.deepEqual(parseTrigger("on(checkpoint)"), { kind: "on", event: "checkpoint" });
   assert.deepEqual(parseTrigger(" every( 3 ) "), { kind: "every", n: 3 });
   assert.throws(() => parseTrigger("every(0)"), /N>=1/);
+  assert.throws(() => parseTrigger("interval:0m"), /N>=1/);
+  assert.throws(() => parseTrigger("interval:-1m"), /invalid trigger/); // -1 not \d+ → unparseable form
+  assert.throws(() => parseTrigger("interval:2.5m"), /invalid trigger/);
+  assert.throws(() => parseTrigger("interval:60h"), /invalid trigger/);
+  assert.throws(() => parseTrigger("interval:60"), /invalid trigger/);
+  assert.throws(() => parseTrigger("interval:m"), /invalid trigger/);
   assert.throws(() => parseTrigger("weekly"), /invalid trigger/);
   assert.throws(() => parseTrigger("on()"), /invalid trigger/);
 });
@@ -23,6 +31,39 @@ test("isDue: every(N) fires on multiples > 0; not on 0", () => {
   assert.equal(isDue("every(5)", { iteration: 7 }), false);
   assert.equal(isDue("every(5)", { iteration: 0 }), false); // never fire at iteration 0
   assert.equal(isDue("every(1)", { iteration: 3 }), true);
+});
+
+test("isDue: interval:<N>m is a TIME-based two-layer trigger (gap-probe-mechanism-dead-15-days-rewire-to-two-layer)", () => {
+  const HR = 3_600_000; // 1 hour in ms
+  // never ran (no lastRun / lastRun 0) → due (the track starts instead of waiting forever)
+  assert.equal(isDue("interval:60m", { now: 10 * HR }), true);
+  assert.equal(isDue("interval:60m", { now: 10 * HR, lastRun: 0 }), true);
+  // within the interval → NOT due
+  assert.equal(isDue("interval:60m", { now: 10 * HR, lastRun: 10 * HR - 30 * 60_000 }), false); // 30m ago
+  // at/past the interval → due
+  assert.equal(isDue("interval:60m", { now: 10 * HR, lastRun: 10 * HR - 60 * 60_000 }), true);  // 60m ago
+  assert.equal(isDue("interval:60m", { now: 10 * HR, lastRun: 10 * HR - 90 * 60_000 }), true);  // 90m ago
+  // a different N
+  assert.equal(isDue("interval:1440m", { now: 10 * HR, lastRun: 5 * HR }), false);             // 5h < 24h
+  assert.equal(isDue("interval:1440m", { now: 30 * HR, lastRun: 5 * HR }), true);              // 25h >= 24h
+});
+
+test("dueRoutines: interval:<N>m uses the per-routine lastRun map", () => {
+  const routines = [
+    { name: "self-validation", trigger: "interval:60m", probe: "self-validation" },
+    { name: "architecture-analysis", trigger: "interval:1440m", probe: "architecture-analysis" },
+    { name: "on-routine", trigger: "on(checkpoint)", probe: "x" },
+  ];
+  const HR = 3_600_000;
+  // self-validation last ran 2h ago (>1h → due); arch last ran 5h ago (<24h → NOT due); on() needs event
+  const due = dueRoutines(routines, { now: 10 * HR, lastRun: { "self-validation": 8 * HR, "architecture-analysis": 5 * HR } });
+  assert.deepEqual(due.map((r) => r.name), ["self-validation"]);
+  // nothing due when all within their intervals
+  const dueNone = dueRoutines(routines, { now: 10 * HR, lastRun: { "self-validation": 9.5 * HR, "architecture-analysis": 9 * HR } });
+  assert.deepEqual(dueNone.map((r) => r.name), []);
+  // never-ran routines are due (first fire)
+  const dueFresh = dueRoutines(routines, { now: 10 * HR, lastRun: {} });
+  assert.deepEqual(dueFresh.map((r) => r.name), ["self-validation", "architecture-analysis"]);
 });
 
 test("isDue: on(event) fires only on the matching event", () => {
@@ -55,6 +96,23 @@ test("main: due routines → exit 0; none due → exit 3; missing file → exit 
   assert.equal(await main(["node", "s", "--iteration", "10", f]), 0);
   assert.equal(await main(["node", "s", "--iteration", "7", f]), 3);
   assert.equal(await main(["node", "s", "--iteration", "10", path.join(dir, "nope.json")]), 2);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("main: interval:<N>m fires via --now + --last-run (two-layer TIME trigger)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "routine-interval-"));
+  const f = path.join(dir, "routines.json");
+  const lr = path.join(dir, "last-run.json");
+  const HR = 3_600_000;
+  fs.writeFileSync(f, JSON.stringify([{ name: "sv", trigger: "interval:60m", probe: "self-validation" }]));
+  // never ran (no --last-run) → due
+  assert.equal(await main(["node", "s", "--now", String(10 * HR), "--plugin-root", dir, f]), 0);
+  // ran 30m ago (< 60m) → NOT due (exit 3)
+  fs.writeFileSync(lr, JSON.stringify({ sv: 10 * HR - 30 * 60_000 }));
+  assert.equal(await main(["node", "s", "--now", String(10 * HR), "--last-run", lr, "--plugin-root", dir, f]), 3);
+  // ran 90m ago (>= 60m) → due (exit 0)
+  fs.writeFileSync(lr, JSON.stringify({ sv: 10 * HR - 90 * 60_000 }));
+  assert.equal(await main(["node", "s", "--now", String(10 * HR), "--last-run", lr, "--plugin-root", dir, f]), 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

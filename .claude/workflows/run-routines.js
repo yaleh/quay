@@ -26,7 +26,7 @@ Pipeline (from plugin/skills/routines/SKILL.md):
 ### Phase 1 — Schedule
 1. Read \`routines:\` from \`.quay/config.yml\` \`loop:\` section (legacy fallback: \`.quay/loop.yml\`). Default [] = no routines — return {fired: 0} immediately.
 2. Write routines as a temporary JSON array.
-3. Run \`node experiments/quay-perpetual-stream/scripts/routine-scheduler.ts --iteration <counter> --event checkpoint --plugin-root . /tmp/routines-<counter>.json\`. Exit 0 = DUE list; exit 3 = none due.
+3. Run \`node experiments/quay-perpetual-stream/scripts/routine-scheduler.ts --now "$(($(date +%s) * 1000))" --last-run <workspaceRoot>/.quay/routine-last-run.json --event checkpoint --plugin-root . /tmp/routines-<counter>.json\`. Exit 0 = DUE list; exit 3 = none due. (Two-layer TIME triggers — interval:<N>m — consult --last-run; the retired iteration counter no longer exists, see gap-probe-mechanism-dead-15-days-rewire-to-two-layer.) After firing, write each fired routine's last-run epoch-ms back into .quay/routine-last-run.json.
 4. If none due, return {fired: 0}.
 
 ### Phase 2 — Dispatch

@@ -184,10 +184,13 @@ export function readLoopParams(workspaceRoot) {
   // 12. Optional: routines — a standing routine track (DIR-051/DIR-056). Array of
   //     { name, trigger, dispatch?, probe? } fired on a cadence/condition independent of the
   //     ready-queue SELECT; DEFAULT [] (no routines = today's behavior). Each entry validated
-  //     fail-closed: name (non-empty string), trigger ("every(N)" with N>=1 | "on(<word>)"),
-  //     and at least one of: dispatch (non-empty string, legacy) OR probe (non-empty string,
-  //     DIR-056 probe-spec name). The scheduler logic lives in routine-scheduler.mjs
-  //     (parseTrigger/isDue/resolveRoutineAction); this only validates shape.
+  //     fail-closed: name (non-empty string), trigger ("every(N)" with N>=1 LEGACY iteration-based |
+  //     "interval:<N>m" with N>=1 TIME-based two-layer quantity | "on(<word>)" event-based), and at
+  //     least one of: dispatch (non-empty string, legacy) OR probe (non-empty string, DIR-056
+  //     probe-spec name). The scheduler logic lives in routine-scheduler.ts
+  //     (parseTrigger/isDue/resolveRoutineAction); this only validates shape. interval:<N>m is the
+  //     two-layer form (ADR-022 retired the iteration counter; see
+  //     gap-probe-mechanism-dead-15-days-rewire-to-two-layer).
   const routines = (p?.routines ?? []) as unknown[];
   if (!Array.isArray(routines)) {
     throw new Error(`FAIL-CLOSED: ${src} field 'routines' must be an array (got ${typeof routines})`);
@@ -196,12 +199,16 @@ export function readLoopParams(workspaceRoot) {
     if (!r || typeof r.name !== "string" || !(r.name as string).trim()) {
       throw new Error(`FAIL-CLOSED: ${src} routines[${i}] needs a non-empty string 'name'`);
     }
-    if (typeof r.trigger !== "string" || !/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/.test((r.trigger as string).trim())) {
-      throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "${r.trigger}" is invalid — must be "every(N)" (N>=1) or "on(<event>)"`);
+    if (typeof r.trigger !== "string" || !/^(every\(\s*\d+\s*\)|interval:\s*\d+\s*m|on\(\s*[\w-]+\s*\))$/.test((r.trigger as string).trim())) {
+      throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "${r.trigger}" is invalid — must be "every(N)" (N>=1, LEGACY iteration), "interval:<N>m" (N>=1, two-layer time), or "on(<event>)"`);
     }
-    const m = (r.trigger as string).trim().match(/^every\(\s*(\d+)\s*\)$/);
-    if (m && Number(m[1]) < 1) {
-      throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "every(${m[1]})" invalid — N must be >= 1`);
+    const everyMatch = (r.trigger as string).trim().match(/^every\(\s*(\d+)\s*\)$/);
+    if (everyMatch && Number(everyMatch[1]) < 1) {
+      throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "every(${everyMatch[1]})" invalid — N must be >= 1`);
+    }
+    const intervalMatch = (r.trigger as string).trim().match(/^interval:\s*(\d+)\s*m$/);
+    if (intervalMatch && Number(intervalMatch[1]) < 1) {
+      throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "interval:${intervalMatch[1]}m" invalid — N must be >= 1`);
     }
     // DIR-056: must have at least one of dispatch (legacy) or probe (new).
     const hasDispatch = typeof r.dispatch === "string" && (r.dispatch as string).trim();
