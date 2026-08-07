@@ -118,6 +118,16 @@ resume 若中断，先在目的地跑 measure，不要假设上次铺过了
 
 - [x] AC1-AC5 实跑输出贴进任务体（见下方实跑输出段）
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+      → **未达成（环境性阻塞，非本条改动所致）**。本 worktree（`/home/yale/work/quay-worktrees/manager-layer`，
+      名字含 `manager`）跑全量套件：`tests 2867 / pass 2757 / fail 65 / cancelled 0`，其中
+      (1) ~40+ 条 M39/M43/M44/M52 门测试 + config-wiring 在本 worktree 缺 `.quay/config.yml`
+      `gates:` 段时失败——补全配置后该批转绿（`dir022-remaining-gates` 49/0、`delivery-standalone-smoke-gate`
+      7/0、`config-wiring-check` 7/0）；(2) `session-topology.test.mjs` factory 测试断言输出不含 `/manager/`，
+      而本 worktree 路径含 `manager-layer` ⇒ **工作区名误报**，与本条改动无关、无法在本工作区消除；
+      (3) `runner-grouping.test.mjs` 需连跑整套件（5 分钟级），主机并发满载下超时。develop 基线本身即红
+      （外层 tick-log 记录「suite final red (95 fail)」）。本条改动自身的测试全绿：`quay-init-loop` 48/0、
+      `manager-layer-shipping + manager-layer-skill + l1 + verify-delivery-surface + cold-start-skill` 41/0、
+      `loop-shipping + necessity` 15/0、`quay-init drift/closure + laydown-set` 22/0。
 
 ## 实跑输出（2026-08-07，worktree `task/gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`）
 
