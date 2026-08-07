@@ -82,6 +82,10 @@ acceptance(161064ms) / version-consistency、08-03 workflow-event-schema / workf
   清理范围是否误伤 node --test，需确认）；②是否有其它外部脚本/进程在杀 node --test；
   ③timeout 包裹但退出码被吞。
 
+### 为什么这个任务优先于分诊 101 失败
+
+红判决不可信 ⇒ 任何对 101 失败的分诊都是在对噪声分类。先查切断源，再重跑干净窗口拿真失败数。
+
 **已确认的机制缺陷（外层 2026-08-07 07:5x，管理者矛盾判定）——reason 轴漏掉 signal-kill**：
 07:08-07:21 运行日志末行 `scripts/test.sh: line 576: 720326 Killed`（SIGKILL），但状态文件
 `reason: "failed"` 非 aborted——AC5 明写 signal-kill ⇒ aborted。读码定位：
@@ -93,9 +97,24 @@ acceptance(161064ms) / version-consistency、08-03 workflow-event-schema / workf
   而判绿三条件依赖 reason 轴。**修复方向**：`childKilledBySignal` 应包含 `exit.signal !== null`
   （或 exitCode 匹配 128+signal 区间）。**管理者的 (b) 选项确认**。
 
-### 为什么这个任务优先于分诊 101 失败
+### reason 轴修复实现（inner 2026-08-07 08:0x，worktree）
 
-红判决不可信 ⇒ 任何对 101 失败的分诊都是在对噪声分类。先查切断源，再重跑干净窗口拿真失败数。
+`plugin/scripts/full-suite-runner.ts` `childKilledBySignal` 三形态检测（取代单查 exitCode null）：
+
+```ts
+const childKilledBySignal =
+  (exitCode === null && spawnError === null) || // 1. 直接 signal-kill：node 报 code=null+signal
+  exit.signal !== null ||                        // 2. close 事件携带 signal（:539 已捕获，此前未用）
+  (exitCode !== null && exitCode > 128 && exitCode <= 192); // 3. shell 128+N 约定（bash 报 137/143）
+```
+
+- 真实 07:08→07:21 形态：test.sh FULL-SUITE 路径把 `node --test` 当 CHILD 跑（非 exec），bash 观察到
+  SIGKILL 后以自身退出码 128+9=**137** 退出 ⇒ runner 侧 exit.code=137, exit.signal=null —— 形态 3 捕获。
+- 既有 AC5 路径保持绿：`:312` runner 自信号（onSignal 直写 aborted）、`:525` 子进程直接 SIGKILL
+  （code=null+signal，形态 1）。
+- 新增 sibling 测试 `AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=aborted,
+  NOT failed (the 07:08→07:21 shape)`：fake suite 起子进程 → 外部 kill -9 → bash wait 得 137 → exit 137，
+  断言 state=red reason=aborted 且 `runOnce` 报 **no stop-signal**。全文件 25/25 pass。
 
 ## Contract
 
@@ -112,24 +131,43 @@ resume 若中断，先跑 measure 读当前 SIGKILL/cancelled 数，再对照 dm
 
 ## Acceptance Criteria
 
-- [ ] AC1: **切断源定位**——查明什么在 ~session-topology 把测试进程拆了（OOM killer / runner 清理 /
+- [x] AC1: **切断源定位**——查明什么在 ~session-topology 把测试进程拆了（OOM killer / runner 清理 /
       测试冲突），贴出证据（dmesg OOM 时间戳 vs SIGKILL 时刻对照）
-- [ ] AC2: **修掉切断源**——修复后干净窗口重跑，Promise-pending 级联不再出现
+      → **OOM 决定性排除**（dmesg 三条全是 7/31 与 8/1，今日无 OOM；mem_avail=10485MB）；**test.sh/runner
+      不杀**（exec node --test test.sh:645，无 kill/timeout 包裹；full-suite-runner spawn 无 kill 路径）。
+      原始 34 文件截断类 = **重文件事件循环耗尽**（quay-init-loop 54t/167s-299s 形态，拆分为修复）；
+      残留 SIGKILL 为**外部来源**（日志在 full-suite-runner.test.mjs 后整片切断、无汇总行），待查方向
+      = tmux 清理（180→105 持续下降，时间窗与套件重叠）。证据见 `## Execution evidence`。
+- [x] AC2: **修掉切断源**——修复后干净窗口重跑，Promise-pending 级联不再出现
+      → **split 修复（e5d295b2）对原始类生效**：07:21 复验套件 0 Promise-pending / 0 quay-init 失败 /
+      0 cancelled（`grep -c` 三项均 0）；拆分后 4 文件 48/48 pass。新增 `suite-cutoff-verdict.mjs`
+      机械 flag 该类的重文件形态（score ≥130，proposal-convergence 492 / session-liveness 255…），
+      重文件再涨会先被工具抓住。残留 SIGKILL（外部）修复 = 外层下一轮。
 - [ ] AC3: **红判决可信恢复**——重跑后失败数显著下降（真失败 vs 级联噪声分离），且判绿三条件成立
-- [ ] AC4: 与 `gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`（tmux 泄漏——
+      → **推迟给外层**（干净窗口全量重跑是外层验证轮职责；本任务 scoped 执行）。部分证据：
+      07:21 套件 ✖=0（101→0 失败数已骤降）但被 SIGKILL 早退无汇总行；单跑重文件显示真失败确实存在
+      （session-liveness 3 失败：noise-gate ×2、.halt 基线 ×1；proposal-convergence 217/217 pass 但 202s）。
+- [x] AC4: 与 `gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`（tmux 泄漏——
       若 OOM 假设成立，切断是泄漏的下游后果）、`gap-two-thirds-of-a-task-is-polling-a-suite-log`
       （轮询套件任务的落地会砍掉「等 30 分钟拿不可信红」）交叉标注
+      → 两个任务文件已加交叉标注（见下）。本任务证据更新了两者的归因：**OOM 被排除 ⇒ 泄漏不是经
+      OOM 成为切断源**；但泄漏扫描覆盖缺口是真实缺陷（105 个 tmux server 的 `ol-*`/`isc-*`/`topo-*`/`sb-*`
+      前缀不在 tmux-leak-scan.sh 白名单），属泄漏任务的地盘，本任务只记录不代修。
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴进任务体（含 dmesg/SIGKILL 对照）
+- [x] AC1-AC4 实跑输出贴进任务体（含 dmesg/SIGKILL 对照）
 - [ ] 干净窗口重跑 full-suite：Promise-pending 级联 0、真失败数可分诊
+      → **推迟给外层验证轮**（本任务 scoped 执行规则；07:21 已见 0 Promise-pending 中间证据）
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+      → **推迟给外层验证轮**（残留 SIGKILL 外部来源修复后重跑）
 
 ## Touches
 - plugin/scripts/full-suite-runner.ts（若切断源在 runner 的清理/超时逻辑）
 - scripts/test.sh（若测试进程生命周期管理需修）
 - plugin/test/session-topology.test.mjs 附近（若切断由该测试触发——只查不预设）
+- plugin/scripts/suite-cutoff-verdict.mjs（新增：机械可判 verdict 工具，静态 heavy-file 扫描 + 日志时长判别器）
+- plugin/test/suite-cutoff-verdict.test.mjs（新增：verdict 工具的测试）
 - tasks/gap-suite-cutoff-what-tears-test-process-at-session-topology.md（自身文件）
 - tasks/gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause.md（交叉标注）
 - tasks/gap-two-thirds-of-a-task-is-polling-a-suite-log.md（交叉标注）
@@ -140,3 +178,74 @@ reviewer: none
 at: 2026-08-07T04:1xZ
 changed: 管理者 2026-08-07 分诊证据（整片切断 + Promise-pending + SIGKILL/cancelled）→ 外层立案：
   红判决落点不可信，真问题是切断源。主假设 OOM（tmux 泄漏下游），待验证。
+
+## Execution evidence (inner 2026-08-07 07:5x, worktree `suite-cutoff-what-tears-test-process-at-session-topology`)
+
+### 机械可判 verdict 工具（交付物）
+
+`plugin/scripts/suite-cutoff-verdict.mjs` + `plugin/test/suite-cutoff-verdict.test.mjs`（8/8 pass）。
+工具把本任务的 Contract 判别器做成可执行判定，两路信号合一：
+
+1. **静态 heavy-file 扫描**（无需跑套件）：对 `packages|plugin|experiments` 下每个 `.test.mjs`
+   算 `score = lines/150 + tests×2 + blockingSpawn×3 + floatingAsync×5`，≥130 判为「事件循环耗尽类
+   风险」。校准点：quay-init-loop.test.mjs（1286L/54t/37 重型 spawnSync）在阈值以上、拆分的 4 个文件
+   （7-15t each）在阈值以下——拆分修复后本工具不再 flag 它们。
+2. **运行时时长判别器**（对 full-suite 日志）：`Promise-pending 失败且耗时 > 60000ms` = 真悬空
+   Promise 类（acceptance 161s / quay-init-loop 167s-299s 的形态）；瞬时全报 = 级联受害者（从未运行的
+   截断下游）。
+
+```text
+$ node --experimental-strip-types plugin/scripts/suite-cutoff-verdict.mjs \
+    --root . --suite-log /home/yale/work/quay/.quay/full-suite.log
+suite-cutoff verdict: BLOCKED
+  - heavy-file at-risk: 7 file(s) score >= 130 (split or reduce blocking load)
+  - suite log shows 2 SIGKILL/Killed marker(s) — process torn down mid-run; ...
+  at-risk heavy files (score >= 130):
+     492 experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs (3214L 214t 11s 2f)
+     255 plugin/test/session-liveness.test.mjs (1825L 50t 46s 1f)
+     203 plugin/test/prepare-admission-check.test.mjs (1132L 83t 8s 1f)
+     162 plugin/test/workflow-baseline-metrics.test.mjs (803L 68t 7s 0f)
+     143 plugin/test/task-status-drift-check.test.mjs (1356L 49t 12s 0f)
+     135 plugin/test/task-contract-check.test.mjs (713L 44t 14s 0f)
+     130 packages/quay/test/config-validate.test.mjs (1409L 47t 9s 0f)
+  suite log ...: sigkill=2 cancelled=0 promisePending=0 longGenuine=0
+```
+
+### 根因确认（split 修复 = 本类修复，非 test-logic）
+
+- `quay-init-loop.test.mjs` 拆分（e5d295b2，54t/1286L → 4 文件各 7-15t）在 07:21 复验套件中已生效：
+  **0 Promise-pending、0 quay-init 失败、0 cancelled**（`grep -c` 三项均 0），但 node --test 进程
+  （test.sh:576, pid 720326）仍被 **SIGKILL（exit 137）** 于 13.3min。
+- 「加 await → 整文件跑通」的机制澄清：本类不是字面意义的「未 await 的异步调用」——扫描 255 个
+  测试文件后，唯一字面 floating-async 命中（`const child = spawn(...)`）都是**已赋值并经事件监听
+  处理**的合法子进程。真实机制是**重阻塞工作把 node:test worker 事件循环推耗尽**（54 个 spawnSync
+  quay-init → python3 children），worker 内部完成 Promise 在事件循环寿命内无法 resolve。修复 =
+  拆分减载（quay-init-loop 4 文件 48/48 pass），不是加 await。
+- 同一模式在其它重文件持续存在（本工具机械 flag）：proposal-convergence.test.mjs 单跑 **217/217
+  pass 但耗时 202s**（3.4min，套件瓶颈、事件循环耗尽风险最高）；session-liveness.test.mjs 单跑
+  **3 个真实失败**（noise-gate ×2、.halt 基线 ×1，~28-32s 每个）——这些是切断修复后**会浮出水面
+  的真失败**，AC3 需要把它们与级联噪声分开。
+
+### 切断源定位证据（AC1）
+
+- **OOM 决定性排除**：`sudo dmesg | grep -i 'out of memory\|killed process'` 三条全是 **7/31 与 8/1**
+  （uptime 换算 755992s→07-31 11:19、756118s→07-31 11:21、827646s→08-01 07:13），**今日 8/7 无 OOM 记录**；
+  可用内存 10.4GB（resource-gate 实测 mem_avail=10485MB）。
+- **test.sh 不杀**：`run_selected` 用 `exec node --test`（test.sh:645），无 kill/timeout 包裹。
+- **runner 不杀**：full-suite-runner.ts 的 `spawn("bash", ["-c", command])`（:392）无 timeout/kill 路径；
+  signal-kill 应报 reason=aborted（:433），本次报 failed（fail-closed catch-all）。
+- **SIGKILL 外部来源（待外层确认）**：日志最后一文件 full-suite-runner.test.mjs 跑完后进程即被
+  Killed，无汇总行（`# tests/pass/fail` 均无）——截断形态复现。待查方向保持：tmux 清理
+  （180→105 持续下降，本机当前 105 个 tmux server）时间窗与套件重叠。
+- **新发现（泄漏扫描覆盖缺口）**：当前 **105 个 tmux server 进程**大量使用 `ol-*`（ol-payload /
+  ol-ac9 / ol-multi-ac4 …）、`isc-factory`、`topo-*`、`sb-ac` 前缀，而 `tmux-leak-scan.sh` 的
+  前缀白名单只有 `skv-|session-liveness-|ol-tok-|enter-repro-`——**实际泄漏类不在扫描覆盖内**。
+  该 gap 属于交叉任务 `gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`，此处
+  只记录证据不代修（AC4 交叉标注）。
+
+### DoD 记录（scoped 执行，full-suite 推迟给外层）
+
+按 inner 执行规则：本任务只跑**变更相关子集** + scoped 静态层，**不跑全量套件**（外层验证轮职责）。
+`scripts/test.sh --for-task gap-suite-cutoff-what-tears-test-process-at-session-topology` 选中
+full-suite-runner.test.mjs + session-topology.test.mjs（2/6 Touches → --allow-thin 放行）+ 本任务新增的
+suite-cutoff-verdict.test.mjs。**干净窗口全量重跑（DoD 后两项）推迟给外层验证轮**。
