@@ -133,3 +133,11 @@ milestones/M9[0-9][0-9][0-9][0-9][0-9]/
 docs/plans/M997-*.md
 milestones/M997/
 /.quay/config.yml
+
+# 管理者 tick 记账（人 2026-08-07 裁定「记账进 gitignore」）
+# 理由：tick-log 是【运行时遥测】不是代码——没有任何测试或检查依赖它的版本与代码版本对齐，
+# 把它绑在分支模型上是白付合并成本。实测：develop 独有的 338 条里 328 条（97%）是三层的
+# tick 记账，只有 8 条是真内容；它们让批量合从 FF 变成真合并，且是脏树断言的写入者之一。
+# 与 .quay/gate-events.jsonl、milestones/fast-mode-telemetry/*.json 同类。
+# 历史保留在 git 里（155 个提交），从此不再新增。
+orchestration/manager-tick-log.md
