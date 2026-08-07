@@ -96,10 +96,20 @@ extra:
 
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC4/AC5 实跑输出贴任务体
-- [ ] state 有原因轴（failed/aborted/infra-error 可区分）；trigger 按 reason 路由（aborted 由资源门
+- [x] AC1–AC7 全部勾上；AC4/AC5 实跑输出贴任务体
+- [x] state 有原因轴（failed/aborted/infra-error 可区分）；trigger 按 reason 路由（aborted 由资源门
       决定恢复）；note 逃生舱收编
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）—— 内层 scoped 面绿
+      （`plugin/test/suite-state-trigger.test.mjs` + `plugin/test/full-suite-runner.test.mjs`：
+      38/38 pass、fail 0、cancelled 0，2026-08-07 重验）；全量门由外层 verification round 运行
+      （最近 round 71/72 因无关的 tick-vocabulary.test.mjs AC4 为 red，非本条所致，未在本条内跑全量）。
+
+执行证据（2026-08-07 重验，与 AC4/AC5 同场景）：
+- Contract measure `reason_routes`：`grep -c "aborted\|infra-error\|failed" plugin/scripts/suite-state-trigger.ts` = **22**（band ≥2 满足）。
+- Contract invoke：两文件 `reason\|aborted` 均命中（`SuiteStateReason` 枚举同源、`routeRed()` 按 reason 路由、runner 早标 RED 写 failed / ABORT 标记写 aborted）。
+- 实跑 `--wait-check`（ABORT 场景，gate-WAIT 早退）：`state=red reason=aborted` → `stopSignal=false`（不按代码风险停派）。
+- 实跑 `--fail-fast-check`（FAILURE 场景）：`state=red reason=failed` → `stopSignal=true`（红窗照旧停派 + failureLocation 携带）。
+- 测试：两测试文件 38/38 pass、fail 0、cancelled 0；scoped static tier（`--for-task ... --allow-thin`）test-framework-policy / test-isolation / task-contract strict-subset 全 PASS。
 
 ## Touches
 - tasks/gap-suite-state-has-no-reason-axis-failed-aborted-infra.md（自身文件：勾 AC + 贴 invoke 证据授权）
