@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T15:12:03.186Z",
+  "generatedAt": "2026-08-07T18:07:23.714Z",
   "since": null,
   "tasks": [
     {
@@ -678,11 +678,11 @@
   "inProgress": [],
   "meanMinutes": 66.76572428940567,
   "medianMinutes": 50.5096,
-  "tasksPerHour": 1.0344677895777397,
+  "tasksPerHour": 1.0107821199590474,
   "serialEquivalentPerHour": 0.8986647061585274,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-07T15:11:52.496Z",
-  "windowHours": 124.70180444444445,
+  "windowEnd": "2026-08-07T18:07:12.196Z",
+  "windowHours": 127.62394333333333,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -850,6 +850,22 @@
       "taskId": "gap-adaptive-concurrency-cap-tied-to-resource-gate",
       "runId": "fm-gap-adaptive-concurrency-cap-tied-to-resource-gate-1785943154691-z0r1jc",
       "minutes": 51.31915,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-assert-clean-tree-premise-void-under-concurrent-writers",
+      "runId": "fm-gap-assert-clean-tree-premise-void-under-concurrent-writers-1786115835184-6rr7dv",
+      "minutes": 11.30045,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-assert-clean-tree-premise-void-under-concurrent-writers",
+      "runId": "fm-gap-assert-clean-tree-premise-void-under-concurrent-writers-1786121255146-mn9617",
+      "minutes": 9.462616666666667,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1063,6 +1079,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-gitignore-worktree-scratch-dirs-kills-round4-false-red",
+      "runId": "fm-gap-gitignore-worktree-scratch-dirs-kills-round4-false-red-1786115833737-v8ybwy",
+      "minutes": 11.32545,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-global-count-assertions-fragile-relative-baseline",
       "runId": "fm-gap-global-count-assertions-fragile-relative-baseline-1785969052322-kfcwog",
       "minutes": 53.95445,
@@ -1114,6 +1138,14 @@
       "taskId": "gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed",
       "runId": "fm-gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed-1785961925534-4l8wvq",
       "minutes": 32.72655,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive",
+      "runId": "fm-gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive-1786117501596-3raiyp",
+      "minutes": 4.7772,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1343,6 +1375,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles",
+      "runId": "fm-gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles-1786115832318-x8j8j9",
+      "minutes": 11.350533333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-session-idle-true-idle-via-transcript-fusion-and-debounce",
       "runId": "fm-gap-session-idle-true-idle-via-transcript-fusion-and-debounce-1785906317909-9mw2lf",
       "minutes": 296.25326666666666,
@@ -1442,6 +1482,14 @@
       "taskId": "gap-suite-cutoff-what-tears-test-process-at-session-topology",
       "runId": "fm-gap-suite-cutoff-what-tears-test-process-at-session-topology-1786088311497-gt3giu",
       "minutes": 47.45263333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge",
+      "runId": "fm-gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge-1786115696538-rxd6zu",
+      "minutes": 13.61415,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1567,6 +1615,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-verify-round-9-failures-from-recent-changes-fix-batch",
+      "runId": "fm-gap-verify-round-9-failures-from-recent-changes-fix-batch-1786122760293-epg82r",
+      "minutes": 35.86625,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have",
       "runId": "fm-gap-web-board-needs-an-inconsistency-verdict-it-does-not-have-1785928144348-qw5qbk",
       "minutes": 301.49358333333333,
@@ -1578,6 +1634,14 @@
       "taskId": "gap-web-board-needs-an-inconsistency-verdict-it-does-not-have",
       "runId": "fm-gap-web-board-needs-an-inconsistency-verdict-it-does-not-have-1785949997950-doaxoi",
       "minutes": 31.547133333333335,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees",
+      "runId": "fm-gap-worktreeinclude-declarative-copy-of-gitignored-config-into-worktrees-1786116822757-lihh7j",
+      "minutes": 10.3868,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
