@@ -27,6 +27,17 @@ packages/quay/plugin/
 
 # BAIME experiment throwaway checkouts / build output — never track
 **/worktrees/
+# gap-gitignore-worktree-scratch-dirs-kills-round4-false-red (2026-08-07): worktree-scratch
+# coordination dirs left at the repo root by the --loop quay-init worktree-root tests
+# (.quay-worktree-local/, .quay-worktree-local2/, .quay-wtl3/). Same gitignored family as
+# worktrees/ — untracked scratch, NOT test products; if left un-ignored they trip the suite-after
+# dirty-tree assertion (round-4 false red). First line of defense (git status never shows them);
+# complement to the assert-clean-tree exclusion, cross-annotated with
+# gap-assert-clean-tree-premise-void-under-concurrent-writers (AC3).
+# No trailing slash: `git check-ignore` must match these names even when absent
+# (the Contract measure counts 3 matches), not only when the scratch dirs exist.
+**/.quay-worktree-local*
+**/.quay-wtl*
 **/dist-sea/
 **/.quay/gate-events.jsonl
 # gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
