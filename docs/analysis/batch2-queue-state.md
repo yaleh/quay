@@ -7608,3 +7608,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **split-batch 完成**：词汇拆分早已在 develop（a8e8a0dc/3241b4fb）→ **无代码 fan-in**；验证 5/5 + scoped 13/13 + 负控制。DoD finalize（1bb30644 仅任务文件）。任务文件入 develop（frontmatter ready），worktree/branch 清理。
 - **在飞 2/2（真实）**：observer-registry（活跃无 commit）+ manager-layer（**已 commit beaa68e7**——quay-init 铺 manager driver，真改动，fan-in 需走 cherry-pick）。3 空槽但无 disjoint 候选（全撞这两核心任务文件）。
 - **probe-mechanism / ac8 / shipped-ts / chart2-s2 needs-human** worktree 保留等外层。
+
+### 事件 02:0xZ（manager-layer 完成——真实 fan-in）
+
+- **manager-layer 完成**：quay-init --loop 铺设 manager driver（plugin/loop/manager-loop-tick.md 通用模板 → orchestration/）。AC1-5 目的地侧实测全过（负控制 ABSENT→PRESENT、cmp 字节一致、L1 6/6）。**fan-in 成功**：cherry-pick beaa68e7+d6989a9b → integration 83d7971f+e414a42c（9+1 files 无冲突）。任务文件入 develop。DoD 全量诚实未勾（worktree 名含 manager 致 session-topology 假阳性 + 缺 config，环境性非改动）。
+- **在飞 1/1**：observer-registry（活跃）。4 空槽——manager-layer 释放后 no-post-merge/session-liveness-cannot-see 应解锁。
