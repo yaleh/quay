@@ -3,7 +3,7 @@ id: gap-suite-state-split-across-worktree-and-gate
 title: runner --root <worktree> 使 suite-state 写进 worktree，而闸门（inner +
   suite-state-trigger）读主 repo state——自 13:20 改跑 worktree 后闸门永不看到 integration
   绿，批量合在闸门 red 时仍启动（管理者实测 123 分钟空窗）
-status: ready
+status: done
 labels: []
 parent: null
 children: []
