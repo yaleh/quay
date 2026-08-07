@@ -7695,3 +7695,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **ready-pool-perf 完成**（真实修复）：batched git-history index 补 directory-path Touches 等价（key.startsWith(prefix)，复刻 git pathspec 语义）；perf >150s→2.2s、全仓 drift 4→0、pool 输出 byte-identical。**fan-in**：cherry-pick f4d115ec → integration 4229a7af（4 files 无冲突）。任务文件入 develop。
 - **manager-productization 回填 2/5**：C1-C5 约束实现。**注意**：delivery-surface 与其 Touches 撞（都含 broad plugin/scripts/ 类 touch）→ 不可并发，delivery-surface worktree 已撤、等 manager-productization 完成再派。
 - **在飞 2/2**：two-thirds-polling + manager-productization。
+
+### 事件 04:2xZ（two-thirds-polling 完成——no fan-in）
+
+- **two-thirds-polling 完成**：机制早已在 develop（afff7c9d）→ **无代码 fan-in**；验证 polling_forms=0、dod_full_runs=1、scoped 绿。AC3 勾、AC5 测（68%→60-63% 方向向下）、DoD 1/3 勾（2 全量不达，21 个既有失败）。**附带发现**：quay-init --loop 不铺 task-contract-check.ts（laydown 派生只见 quay-check.ts task-contract-check 子命令形态）——建议单独立案。
+- **在飞 1/1**：manager-productization（活跃编辑 quay-topology.sh/session-topology.test.mjs）。4 空槽但 session-liveness-remove / delivery-surface 都撞其 broad plugin/scripts/ touch。
