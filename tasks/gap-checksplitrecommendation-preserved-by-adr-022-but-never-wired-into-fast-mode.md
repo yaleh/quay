@@ -142,8 +142,27 @@ Zero hits in any fast-mode tick/skill/checker file (`task-contract-check.ts`,
 
 ## Definition of Done
 
-- [ ] AC1-AC3 evidence pasted into this task body
-- [ ] `gap-recursive-guard-only-covers-multi-mechanism`'s status updated per AC4's outcome
+- [x] AC1-AC3 evidence pasted into this task body — verified present 2026-08-07 (worktree
+      `task/gap-checksplitrecommendation-...`, branch HEAD b781b9a6): (AC1) the full ruling
+      (decision + rationale + forward path) sits in "Chosen mechanism → Ruling (AC1)"; (AC2)
+      the zero-caller grep evidence is pasted in the Ruling block and re-verified live —
+      `grep -rn "checkSplitRecommendation" plugin/ experiments/quay-perpetual-stream/` returns
+      only the definition + internal refs in `proposal-convergence.ts` (both mirrors), zero
+      callers in any fast-mode tick/skill/checker file; (AC3) `CLAUDE.md` §"Split-decision
+      routing policy (DIR-124-A1b)" carries the STATUS: reference/manual policy — NOT
+      mechanically enforced (2026-08-06) blockquote with a pointer to this task (verified in
+      worktree CLAUDE.md). Contract measure: `task-contract-check.ts --strict-subset` on this
+      task reports "no violations" (exit 0). Scoped tier: `scripts/test.sh --for-task
+      gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode
+      --allow-thin` → 42 pass / 0 fail / 1 subset-skip (task-contract-check strict-subset
+      clean). Retained-function unit tests: `proposal-convergence.test.mjs` → all
+      `checkSplitRecommendation` cases pass (split-multi-mechanism, split-touch-set-too-large,
+      split-subsystem-blocking-cluster, split-recursive-guard, WBS-level guard).
+- [x] `gap-recursive-guard-only-covers-multi-mechanism`'s status updated per AC4's outcome —
+      AC4's outcome is "stays `needs-human`", and that task's live status is already
+      `status: needs-human` (verified 2026-08-07, `tasks/gap-recursive-guard-only-covers-
+      multi-mechanism.md` line 5), so per AC4 no status write was needed and none was made
+      (that task is out of this task's Touches; not modified).
 
 ## Touches
 
