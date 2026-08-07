@@ -79,8 +79,8 @@ observer-registry(106m)/manager-layer(102m) 越线是**实测事实**（都经�
 ## Contract
 
 ```
-measure suite_wall_8 = 并发 8 下全量套件墙钟（秒）——基线 460-570（test.sh:342-347 注释记录）
-measure suite_wall_1 = 并发 1 下全量套件墙钟（秒）——基线 ~3300（同注释）
+measure suite_wall_8 = `python3 -c "import json; print(round(json.load(open('.quay/full-suite-state.json'))['durationMs']/1000))"` stdout 数字段（并发 8 档实跑时；基线 460-570 test.sh:342-347）
+measure suite_wall_1 = `python3 -c "import json; print(round(json.load(open('.quay/full-suite-state.json'))['durationMs']/1000))"` stdout 数字段（并发 1 档实跑时；基线 ~3300 同注释）
 measure cancel_count = `grep -c 'cancelled [1-9]' .quay/full-suite.log` stdout 数字段（并发 4/8 实跑时）
 invariant 降并发（1）的代价是确定的 ~7×；「避免 cancel」的收益是 unproven——在代价侧实验前，不得把并发 1 当最优
 invoke `grep -n 'REVERT HISTORY' scripts/test.sh | head -2`
