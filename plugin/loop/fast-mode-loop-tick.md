@@ -459,6 +459,18 @@ tmux capture-pane -p -t "$TMUX_SESSION" > .quay/last-pane.txt && \
 node --no-warnings --experimental-strip-types plugin/scripts/quay-deliver.ts inner-blocked-signal --detect-stop --pane .quay/last-pane.txt
 ```
 
+**面板冻结行观测（`gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close`）**：同一
+`last-pane.txt` 再喂给 `inner-panel-stale-check.ts`（面板观测机制，状态转换表达）——括号关闭
+（`--task-end`）后该任务的 agent 行若仍残留且计时冻结，必须被机械检出（不是等人跨时间采样猜）：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/inner-panel-stale-check.ts \
+  --pane .quay/last-pane.txt --root "$REPO_ROOT" --json
+```
+
+exit 1 = 面板仍有「已结束/冻结」agent 行（括号已关但行未清）⇒ 检出该误导窗口；exit 0 = 干净。
+（`inner-session-check.sh` 判的是会话四态，本观测器判的是面板行状态——两件事，不混。）
+
 它做什么（gap-the-blocked-channel-has-a-writer-nobody-calls——触发是**后果**，不是「记得再跑一条命令」）：
 
 - **机械检测**可判定条件：**合并冲突**（git 有未解决路径）、**任务超 90 分钟**（遥测
