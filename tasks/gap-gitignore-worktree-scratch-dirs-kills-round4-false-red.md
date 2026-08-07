@@ -40,13 +40,39 @@ resume 若中断，先跑 measure 读当前忽略状态
 
 ## Acceptance Criteria
 
-- [ ] AC1: `.gitignore` 加一行覆盖 `.quay-worktree-local*` / `.quay-wtl*`（模式如 `**/.quay-worktree-local*/` 与 `**/.quay-wtl*/` 或合并写法），`git check-ignore` 三者全过
-- [ ] AC2: 负控制——在 worktree 建这些目录，`git status --porcelain` 不显示它们（不再触发 suite-after 脏树断言）
-- [ ] AC3: 与 gap-assert-clean-tree-premise-void-under-concurrent-writers（B 类任务）交叉标注——本任务是止血（gitignore），B 是根治（断言改差量/单写入者）
+- [x] AC1: `.gitignore` 加一行覆盖 `.quay-worktree-local*` / `.quay-wtl*`（模式如 `**/.quay-worktree-local*/` 与 `**/.quay-wtl*/` 或合并写法），`git check-ignore` 三者全过
+      **实跑（2026-08-07，内层 worktree 执行）：** `.gitignore` 新增
+      `**/.quay-worktree-local*` 与 `**/.quay-wtl*`（无尾斜杠——`git check-ignore` 需在
+      路径不存在时也匹配，Contract measure 才算 3；尾斜杠目录限定形式在路径缺失时返回 0）。
+      `git check-ignore -v .quay-worktree-local .quay-worktree-local2 .quay-wtl3` 输出：
+      ```
+      .gitignore:39:**/.quay-worktree-local*	.quay-worktree-local
+      .gitignore:39:**/.quay-worktree-local*	.quay-worktree-local2
+      .gitignore:40:**/.quay-wtl*	.quay-wtl3
+      ```
+      `| wc -l` = 3（三目录全部被忽略）。已验证无已跟踪文件匹配该模式（`git ls-files | grep -E
+      "\.quay-worktree-local|\.quay-wtl"` 为空）。
+- [x] AC2: 负控制——在 worktree 建这些目录，`git status --porcelain` 不显示它们（不再触发 suite-after 脏树断言）
+      **实跑（2026-08-07）：**
+      ```
+      $ mkdir -p .quay-worktree-local .quay-worktree-local2 .quay-wtl3 && touch .quay-worktree-local/marker .quay-worktree-local2/marker .quay-wtl3/marker
+      $ git status --porcelain
+       M .gitignore        # 仅预期改动；三个 scratch 目录均不出现
+      ```
+      真残留负控制：`touch .stray-residue-xyz` ⇒ `git status --porcelain` 仍显示
+      `?? .stray-residue-xyz`（gitignore 不误吞真实残留）。
+- [x] AC3: 与 gap-assert-clean-tree-premise-void-under-concurrent-writers（B 类任务）交叉标注——本任务是止血（gitignore），B 是根治（断言改差量/单写入者）
+      **交叉标注（双向）：** B 侧 `gap-assert-clean-tree-premise-void-under-concurrent-writers.md`
+      的 AC4 已列出本任务（A1，gitignore 止血）。本侧确认：A1 的 .gitignore 一行已落地并实跑验证
+      （AC1/AC2）；B 是断言机制形态的根治（差量快照或 worktree lock），A 不替代 B。B 文件已存在
+      （status: ready），已在本任务 Touches 内交叉引用。
 
 ## Definition of Done
 
-- [ ] AC1-AC3 实跑输出贴进任务体（check-ignore 输出 + git status 负控制）
+- [x] AC1-AC3 实跑输出贴进任务体（check-ignore 输出 + git status 负控制）
+      **已贴：** AC1/AC2 内嵌 `git check-ignore -v` 输出（3 行，count=3）与负控制
+      `git status --porcelain`（仅 ` M .gitignore`，scratch 目录不出现）；真残留负控制
+      `?? .stray-residue-xyz` 仍显示。
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
 
 ## Touches
