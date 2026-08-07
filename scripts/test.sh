@@ -18,7 +18,10 @@
 # the test-framework-policy static check below (AC6): every file in the glob must either import
 # node:test or be on the legacy exemption list (`plugin/test-framework-policy-exemptions.txt`,
 # currently 34 files — the shrink-only ratchet of AC4, it can only get shorter, never longer).
-# NEW files must also carry a `// @test-group <product|engine|governance>` declaration (AC5);
+# NEW files must also carry a `// @test-group <product|engine|governance|lowconc>` declaration (AC5);
+#   `lowconc` is the hermetic-but-load-sensitive group (B-class session-observation + install/quay-init
+#   family, each mkdtemp/private-socket): it runs in its OWN phase at `--test-concurrency=3` so wait-type
+#   tests get timely scheduling (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive AC1/AC4).
 # existing files may omit it and default to `engine`. The check does NOT migrate the 34 legacy
 # hand-rolled-harness files — it stops the 35th and turns each existing file's eventual conversion
 # (e.g. relation-sync's harness) into the ratchet.
@@ -61,8 +64,8 @@
 #
 # Layer grouping (gap-test-suite-has-no-layer-grouping):
 #   Every test file declares its layer at the very top: `// @test-group <name>` where name is
-#   one of product / engine / governance (AC1). The DEFAULT for an undeclared file is `engine`
-#   (AC7) — the current work surface, so a missed declaration never silently vanishes.
+#   one of product / engine / governance / lowconc (AC1). The DEFAULT for an undeclared file is
+#   `engine` (AC7) — the current work surface, so a missed declaration never silently vanishes.
 #
 #   - product     packages/*/test/ — Core CLI, Provider ABI, gate engine, web UI; plus
 #                 plugin/test/plugin-packaging.test.mjs — plugin-packaging (incl. M136's
@@ -72,6 +75,10 @@
 #                 tests under experiments/quay-perpetual-stream/test/)
 #   - governance  exp5 metering (PARKED but not deleted — exp6 phase-2 needs it; the in-file
 #                 skip block makes it visible as `skipped` in default runs instead of absent)
+#   - lowconc     hermetic-but-load-sensitive (B-class session-observation + install/quay-init
+#                 family, each mkdtemp workspace / private socket) — runs in its OWN full-suite
+#                 phase at `--test-concurrency=3`, never in the concurrent body, so wait-type
+#                 tests get timely scheduling (gap-lowconc-group-concurrency-3-..., AC1/AC2/AC4).
 #
 #   The glob now ALSO includes experiments/quay-perpetual-stream/test/*.test.mjs (AC2), so the
 #   44 previously-invisible files always appear in the output. Symlinks under that dir that
@@ -411,13 +418,15 @@ resource_gate_check() {
 # ── group resolution helpers (gap-test-suite-has-no-layer-grouping) ──────────────────────────────
 
 # group_of <file> — echo the declared `// @test-group <name>` (default: engine, AC7).
-# Only product|engine|governance are valid; a missing OR unrecognized declaration falls back
-# to engine so a typo can never silently remove a file from the default run.
+# Valid groups: product|engine|governance (the default-run body) + lowconc (the concurrency-3
+# hermetic-but-load-sensitive phase, gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive).
+# A missing OR unrecognized declaration falls back to engine so a typo can never silently remove
+# a file from the default run.
 group_of() {
   local f="$1" g
   g="$(grep -m1 -oE '@test-group[[:space:]]+[a-z]+' "$f" 2>/dev/null | awk '{print $2}' || true)"
   case "${g:-}" in
-    product|engine|governance) echo "$g" ;;
+    product|engine|governance|lowconc) echo "$g" ;;
     *) echo "engine" ;;
   esac
 }
@@ -471,7 +480,7 @@ select_files() {
 
 # list_groups — per-group counts over the full deduped glob (AC10).
 list_groups() {
-  declare -A counts=([product]=0 [engine]=0 [governance]=0)
+  declare -A counts=([product]=0 [engine]=0 [governance]=0 [lowconc]=0)
   local f g
   while IFS= read -r f; do
     g="$(group_of "$f")"
@@ -480,7 +489,8 @@ list_groups() {
   printf 'product:    %d\n' "${counts[product]:-0}"
   printf 'engine:     %d\n' "${counts[engine]:-0}"
   printf 'governance: %d\n' "${counts[governance]:-0}"
-  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} ))
+  printf 'lowconc:    %d\n' "${counts[lowconc]:-0}"
+  local total=$(( ${counts[product]:-0} + ${counts[engine]:-0} + ${counts[governance]:-0} + ${counts[lowconc]:-0} ))
   printf 'total:      %d (deduped by realpath)\n' "$total"
 }
 
@@ -628,6 +638,22 @@ run_selected() {
       node --test --test-concurrency="$cc" "$@" "${files[@]}"
     fi
     local code=$?
+    # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
+    # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
+    # each mkdtemp workspace / private socket) run in their OWN phase at `--test-concurrency=3` —
+    # not the derived default and not 8 — so wait-type tests get timely scheduling. The phase runs
+    # even if the body failed (report all failures); its exit code merges into `code`. The hard-coded
+    # 3 is deliberate (AC4) and does NOT add a derived-concurrency literal site (resource-gate AC5
+    # pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites; `--test-concurrency=3`
+    # is a distinct hard-coded literal that matches neither the 5-site regex nor the banned 8).
+    local lowconc_files=() lf
+    while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    if [ "${#lowconc_files[@]}" -gt 0 ]; then
+      echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
+      node --test --test-concurrency=3 "${lowconc_files[@]}"
+      local lcode=$?
+      [ "$lcode" -eq 0 ] || code="$lcode"
+    fi
     set -e
     # Suite-AFTER assertion, DELTA form (gap-assert-clean-tree-premise-void-under-concurrent-writers):
     # a FULL SUITE must add no NEW dirt to the shared checkout (`git status --porcelain` vs the
@@ -651,10 +677,21 @@ run_selected() {
     exit "$code"
   fi
   mark_nested
+  # LOWCONC group run (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4):
+  # `--group lowconc` runs the hermetic-but-load-sensitive phase ALONE at its own concurrency 3 —
+  # not the derived default. An explicit user --test-concurrency flag still wins (single
+  # concurrency source, AC2). The hard-coded 3 adds no derived-concurrency literal site (see the
+  # FULL_SUITE_DEFAULT lowconc phase comment).
+  local lowconc_force=""
+  if in_group "lowconc" "$groups"; then
+    lowconc_force="--test-concurrency=3"
+  fi
   # has_explicit_concurrency: an explicit --test-concurrency flag is the SINGLE concurrency source
   # (gap-full-suite-runner-concurrency-default-and-gate AC2) — skip the default prepend.
   if has_explicit_concurrency "$@"; then
     exec node --test "$@" "${files[@]}"
+  elif [ -n "$lowconc_force" ]; then
+    exec node --test "$lowconc_force" "$@" "${files[@]}"
   else
     exec node --test --test-concurrency="$(default_test_concurrency)" "$@" "${files[@]}"
   fi
@@ -681,7 +718,7 @@ groups=""
 if [ "${1:-}" = "--group" ]; then
   groups="${2:-}"
   if [ -z "${groups}" ]; then
-    echo "scripts/test.sh: --group requires a group name (product|engine|governance, comma-separated)" >&2
+    echo "scripts/test.sh: --group requires a group name (product|engine|governance|lowconc, comma-separated)" >&2
     exit 2
   fi
   shift 2
@@ -694,11 +731,20 @@ if [ "${1:-}" = "--list-groups" ]; then
   exit 0
 elif [ "${1:-}" = "--list-files" ]; then
   # Metadata mode (test support / AC6) — print the selected file list, one per line. Respects
-  # --group if given, else the default product,engine set.
+  # --group if given; else the DEFAULT RUN's full selection = the product,engine body (with
+  # governance self-skip passthrough) PLUS the lowconc phase files — a default `bash
+  # scripts/test.sh` executes BOTH (the concurrent body then the lowconc phase), so no-args
+  # --list-files reports the full 252-file reachable surface and keeps the runner-grouping AC3
+  # invariant (`--list-files count == --list-groups total`) and the test-coverage-check AC5
+  # canonical-coverage invariant. A lowconc file is NOT in the default GROUP SET; it is in the
+  # default RUN (its own phase) — hence `--group product,engine --list-files` (237) differs from
+  # no-args (252) unless lowconc is named (runner-grouping AC6 pins `--group product,engine,lowconc
+  # --list-files == no-args --list-files`).
   if [ -n "${groups}" ]; then
     select_files "$groups"
   else
     select_files "$(effective_groups)"
+    select_files "lowconc"
   fi
   exit 0
 elif [ -n "${groups}" ]; then

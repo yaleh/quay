@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group lowconc
 // capability-catalog.test.mjs — gap-eighty-two-shipped-checks-and-none-says-what-it-answers.
 // Tests for plugin/scripts/capability-catalog.sh — the catalog that makes every shipped
 // check declare what QUESTION it makes askable (capability was never missing, visibility was).

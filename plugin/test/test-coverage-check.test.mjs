@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group engine
 // test-coverage-check.test.mjs — gap-test-coverage-check-parses-stale-files-variable: RED/GREEN
 // tests for scripts/test-coverage-check.ts, locking in the parser fix so the DIR-110 / ADR-019
 // check can never silently lose its single-source glob again.

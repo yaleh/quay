@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group lowconc
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (B-class real wall-clock wait — exercises a HERMETIC tmux server and real tmux
 // has-session round-trips) so it runs in the concurrency-1 serial phase, never competing with the

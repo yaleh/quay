@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group lowconc
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file uses
 // real processes + tmux timing; it passes isolated under low load but may fail under concurrent-suite
 // load (gap-load-sensitive-session-family-confounds-step-three, 2026-08-04). A full-suite failure here

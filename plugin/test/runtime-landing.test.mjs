@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group lowconc
 // runtime-landing.test.mjs — gap-the-runtime-has-nowhere-safe-to-land (AC3/AC4/AC10).
 //
 // The quay runtime used to land in `<target>/vendor/quay/dist/quay.js` — a RESERVED directory in

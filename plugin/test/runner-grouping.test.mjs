@@ -79,10 +79,18 @@ test("AC3: realpath dedup — --list-files count + serial equals --list-groups t
   assert.equal(new Set(files).size, files.length);
 });
 
-test("AC6: --group product,engine selects the same files as no-args", () => {
+test("AC6: --group product,engine ∪ --group lowconc selects the same files as no-args", () => {
+  // The default run = the product,engine body (with governance self-skip passthrough) PLUS the
+  // lowconc phase (concurrency-3 hermetic-but-load-sensitive files). The governance passthrough
+  // only applies to exactly `product,engine` (is_default_set), so the no-args selection is the
+  // concatenation of `--group product,engine --list-files` and `--group lowconc --list-files`
+  // (same build_deduped_files order). gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive.
   const noArgs = runTestSh("--list-files");
-  const withGroup = runTestSh("--group", "product,engine", "--list-files");
-  assert.equal(withGroup, noArgs);
+  const body = runTestSh("--group", "product,engine", "--list-files");
+  const low = runTestSh("--group", "lowconc", "--list-files");
+  // body ends with a trailing newline after its last file; splice body's trailing newline and
+  // append low directly so the concatenation is byte-identical to no-args.
+  assert.equal(body.replace(/\n$/, "") + "\n" + low, noArgs);
 });
 
 test("AC5/AC8: --group governance runs a governance fixture's real tests; --group product self-skips it", () => {

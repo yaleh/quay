@@ -360,9 +360,12 @@ function runSelftest(): number {
   }
 
   // ── AC5: canonical set == scripts/test.sh's OWN default selection (--list-files), both
-  // realpath-deduped (matching build_deduped_files). If the two ever diverge, the check is
-  // failing its ADR-004 single-source purpose. Wrapped so a throw from canonicalTestFiles
-  // (broken test.sh) surfaces as a FAIL, not an uncaught stack trace (REFUTE round-1 MINOR). ──
+  // realpath-deduped (matching build_deduped_files). no-args --list-files reports the FULL
+  // reachable surface = the product,engine body + the lowconc phase (the default run executes
+  // both — gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive), so this stays a direct
+  // equality. If the two ever diverge, the check is failing its ADR-004 single-source purpose.
+  // Wrapped so a throw from canonicalTestFiles (broken test.sh) surfaces as a FAIL, not an
+  // uncaught stack trace (REFUTE round-1 MINOR). ──
   {
     let ac5 = false;
     let detail = "";

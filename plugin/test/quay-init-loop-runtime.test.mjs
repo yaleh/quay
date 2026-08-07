@@ -1,4 +1,4 @@
-// @test-group serial
+// @test-group lowconc
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (KNOWN-LOAD-SENSITIVE family — each --loop test spawns a real quay-init.sh →
 // python3 children) so it runs in the concurrency-1 serial phase, never competing with the
