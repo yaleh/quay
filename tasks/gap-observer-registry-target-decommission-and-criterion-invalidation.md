@@ -15,7 +15,7 @@ title: "no mechanism answers 'is this observer's target still alive/intentional,
   consumer was individually hand-diagnosed and hand-fixed by the manager tonight
   (stop, rescope, restart), with NO shared mechanism; manager 2026-08-06, filed
   per human direction to transfer to outer for class-level design"
-status: ready
+status: needs-human
 labels:
   - gap
   - milestone-candidate
@@ -23,6 +23,24 @@ parent: null
 children: []
 extra:
   schema: v1
+  needs_human_reason: "fan-in conflict: cherry-pick 69e517b3 onto integration → 2
+    conflicts, both same-position heartbeat steps. Integration already has
+    cross-machine-verify heartbeat at fast-mode 4b + orchestrator 3d (from
+    gap-no-post-merge's fan-in 05456e96); observer-registry adds its own
+    registry-audit heartbeat at the SAME 4b/3d positions. Two live heartbeat
+    tasks claiming identical doc positions — genuine two-task conflict, same
+    class as probe-mechanism
+    (gap-probe-mechanism-dead-15-days-rewire-to-two-layer, also needs-human for
+    the same step-4b clash). Per doc: conflict → needs-human, never --skip/-X
+    ours. Work fully implemented + verified (observer-registry 5/5,
+    os-anchor/session-liveness/sync-lag 23/23, session-liveness 49/49, scoped
+    56/56; full-suite 3 runs all cancelled-0 with only env load-flakes).
+    Worktree/branch
+    task/gap-observer-registry-target-decommission-and-criterion-invalidation
+    preserved at 69e517b3. Needs human to merge/renumber the heartbeat steps
+    (cross-machine-verify + observer-registry at 4b/4c and 3d/3e, or merge into
+    one heartbeat section) — this is the SAME adjudication as probe-mechanism's
+    step-4b, can be resolved together."
 ---
 **type:** execution
 
