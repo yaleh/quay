@@ -7535,3 +7535,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **inner-session-check 派发 5/5**：discovery fallback 静默 → 退化路径 fail-closed + 负控制。与全部在飞 disjoint。worktree `quay-worktrees/inner-session-check`。
 - **tmux-leak 不可派**：Touches 含 overbroad glob `orchestration/**` → conservative deferral 对全部在飞（touch 声明问题，需先修 Touches）。
 - **在飞 4/5**：concurrency-derivation + observer-registry + manager-skill + inner-session-check。readme-source 仍等 concurrency-derivation（CLAUDE.md 撞）。
+
+### 事件 00:5xZ（dispatch 满 5/5）
+
+- **manager-layer 派发 5/5**：quay-init 不铺 manager driver → 修复。与全部在飞 disjoint。worktree `quay-worktrees/manager-layer`。
+- **在飞 5/5（满）**：concurrency-derivation + observer-registry + manager-skill + inner-session-check + manager-layer。
+- **等释放再回填**：readme-source（等 concurrency-derivation）、tmux-leak（需先修 overbroad glob Touches）。
