@@ -7735,3 +7735,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **delivery-surface 完成**：六类 L1 交付面实现早已在 develop（a423b047/8f1ee67d）→ **无代码 fan-in**；re-verify 6/6 + scoped 15/15 + DoD 勾 + status ready→done。任务文件入 develop，worktree 清理。
 - **在飞归零**：0 real in-flight，5 空槽。**就绪池已基本派空**——inner 实现类任务全部处理完。
 - **待外层**：ac8/chart2-s2/shipped-ts/probe-mechanism/observer-registry needs-human（后两者共享 step-4b/3d 心跳裁定）；252-unpushed develop 推送；capability-catalog 7 未分类 quay-* 入口；quay-init laydown 补 task-contract-check 等机制；两轮全量绿验证。
+
+### 事件 06:4xZ（红窗修复——quay-init-loop 拆分）
+
+- **Root cause（已验证，非推断）**：quay-init-loop.test.mjs（54 测试 / 1286 行）超载 node:test worker 事件循环——37 个 --loop 测试各 spawn 真实 quay-init.sh（再 spawn python3 子进程）。整文件跑 167s 自败，报 `'Promise resolution is still pending but the event loop has already resolved'`（cancelled 1）。**判别**：耗时几十分钟才报 = 真悬空（与并发无关）；模式子集 19 测试 = 86s 通过 → 确认是 worker 耗尽非测试逻辑。laydown/referenced-not-landed 缺口**已修复**（5 机制全铺 + verify-referenced-landed OK）。
+- **修复**：拆成 4 文件 + 共享 helpers（quay-init-loop-helpers.mjs）——core 12/runtime 14/vendor 7/driver 15，各 <19 测试、在耗尽阈值下。4 文件并行 **48/48 pass, 0 cancelled, 113s**；test-framework-policy + census 干净。原 1286 行文件删除（e5d295b2）。
+- **遗留**：quay-init-tmux-detection.test.mjs（8 测试 9 spawn）在 7 文件家族并行时也报 Promise-pending（单独 6/6 通过）——跨文件负载聚合，独立既有问题，非本次拆分引入。
