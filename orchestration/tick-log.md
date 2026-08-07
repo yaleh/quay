@@ -752,3 +752,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 负载 22.82（内层跑 before 测量，正常）。session-pid 任务已 done（a90a90fa，un-hold 级联完成）。
 > suite-green-gate 任务（人早先裁定：DoD 重复门移除）也在实现（50dc5746）。套件绿（round-9）。
 > 等内层实现 A1/A2/B/C → 并发 8 验证 serial <600s → 分支合并 fast 半成立。
+
+> **16:05Z 外层 tick（no-action——内层已自行派发 lowconc 任务）**：人 15:5x 新提案立为
+> gap-lowconc-group-concurrency-3（ready）+ 驱动内层，send-keys 失败（内层忙）但**内层已从 ready 池
+> 自行取走派发**（pane 确认 "lowconc proposal is dispatched" + subagent "Execute lowconc-group task"
+> 23s）。管理者撤回已记录（quay-init 错误路径无缺陷：管道读 $? 误读 cut，缺 --test-command 真实退出
+> 码=2 正确）。内层在飞：C（runner-grouping logs 28m）+ develop/integration 验证（15m）+ lowconc
+> （23s）。等 C + lowconc 完成 → 并发 8 验证 serial <600s → 分支合并 fast 半成立。
