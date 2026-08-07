@@ -499,3 +499,5 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 差异小但口径必须对（correct-self 是外层自我修正，与内层能力无关）。
 
 > **11:35Z 注**：内层正在 merge integration→develop（MERGE_HEAD 活跃，解 queue-state 冲突）。外层 tick-log 记录待 merge 完成后 commit（merge 中不干扰）。
+
+> **09:51 外层 tick**（R8 立案 + backlog 追加证据提交）：① `gap-test-isolation-backlog-44-violations-unmeasured` 追加并发 8 R3 证据（runner-grouping 嵌套 spawns-test-sh 计数漂移首次触发成真实失败）；② 裁定 **R8 值得立案**——挂钟依赖是负载敏感族根因（session-liveness noise-gate 真 sleep(2500)+10-25s 窗口）、R1-R7 未覆盖的新类别、阻塞并发 8 策略，立 `gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`（todo，AC1-AC4，Touches 含 test-isolation-contract.md + 4 个测试文件）。待 commit。awaiting human ruling on red-window/concurrency。

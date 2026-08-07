@@ -21,6 +21,13 @@ process-exit-1=7 / mkdtemp-no-cleanup=21 / live-data-dir-write=0 / shared-root-m
 需判断「本轮 merge 引入还是既有积压」——**对比 rotated-out 的 round1 日志（192 glob）才发现同样 44 个**
 （既有），靠手工 diff 两个日志文件，没有任何机械基线。
 
+**【追加证据 2026-08-07 09:4x——欠账第一次被并发 8 触发成真实失败】**：`runner-grouping.test.mjs`
+（spawns-test-sh 类别之一）**内部三次嵌套调 scripts/test.sh 比对计数**，并发 8 负载下计数漂移致断言
+失败——**该欠账从"常驻噪音"升级为"负载下真实失败"**。管理者定位：同类 R3（spawns-test-sh）还有
+`select-tests-for-touches.test.mjs`、`test-coverage-check.test.mjs`，但今晚未失败（无跨嵌套计数比较，
+不敏感）。**此证据支持本任务"需要基线/棘轮"的立论**——欠账一旦被负载触发，就是真实红，而它仍在
+44 个"已知噪音"里不可区分。
+
 **【根因】**：test-isolation-check **报数但不设基线/棘轮**——44 个 red 是「已知噪音」，每次全量都红，
 新违规混在里面不可区分。对比 test-framework-policy（有 shrink-only 棘轮 + ceiling + git-HEAD strict-
 subset），test-isolation 缺同款机制。
