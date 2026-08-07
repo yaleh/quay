@@ -7822,3 +7822,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
   - audit-findings → task-file only（机制 6740d4fc 已在 develop；re-verify + M208 proof-case 证据入 develop）
 - **task 文件全部入 develop**（develop 侧 source-of-truth）：cross-machine-observe/npm-install/suite-cutoff(+2 交叉标注)/audit-findings。worktree/分支全部清理。遥测 reconcile 关闭 4 括号。
 - **在飞 1**：inner-panel（测试中）。套件 RUNNING 待结果：绿 → 全部 done；aborted → 不 stop-dispatch。
+
+### 事件 08:5xZ续（⚠️ 关键歧义：08:22 重跑用的仍是旧 runner——reason-axis 修复不在运行树）
+
+- **外层 08:22 tick-log 声称「reason-axis 修复已入树」**，但事实核查：**develop 的 committed + working-tree 的 full-suite-runner.ts 都仍是旧检查**（`childKilledBySignal = exitCode === null`，:564）；修复（43cc3ba0/f91c8a4a）**只在 integration**（08:28 由我 cherry-pick 落地）。fix 到达运行树（develop）需外层批量合 integration→develop。
+- **后果**：08:22:35 启动的这套重跑**执行的是旧 runner**——若再被 SIGKILL（exit 137），**仍会被误判 failed（stop-dispatch）**，僵局不闭环。外层若期望这次重跑正确分类 aborted，需先让 fix 到 develop。
+- **本 tick 已做**：4 个 held fan-in 全部落地 integration（cross-machine-observe abb8959e / npm-install 9ad7879e / suite-cutoff 54cebaa4+f91c8a4a / audit-findings task-file）。inner 无权动 develop（只由外层批量合推进）。
+- **待外层裁定**：① 是否现在批量合 integration→develop 让 fix 进运行树，再启动下一轮重跑；② 或接受本轮用旧 runner 的结果（若绿则皆大欢喜；若 SIGKILL 则仍 failed，需下轮）。
