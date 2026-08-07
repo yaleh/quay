@@ -152,7 +152,8 @@ if [ "${rc}" -eq 0 ]; then
     # A pushed branch in the tracked set IS a merge landing on the shared baseline → record it.
     # Only on a REAL push (not up-to-date, not --dry-run). Idempotent.
     if [ "${verify_hook}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
-      pushed_branch="" vb tip
+      # (vb/tip are assigned inside the loops below; a bare `vb tip` here would run as a command)
+      pushed_branch=""
       if [ "${all}" -eq 1 ]; then
         # --all pushed everything; record only the tracked branches that exist locally.
         for vb in ${verify_branches}; do

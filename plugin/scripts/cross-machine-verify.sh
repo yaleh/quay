@@ -103,6 +103,7 @@ while [ "$#" -gt 0 ]; do
     --root) repo_root="${2:-}"; shift 2 ;;
     --remote) remote="${2:-}"; shift 2 ;;
     --branches) branches="${2:-}"; shift 2 ;;
+    --branch) branches="${2:-}"; shift 2 ;;   # singular alias — the wiring (orchestrator 3b / periodic-push-backup hook) passes one branch
     --machine) machine="${2:-}"; shift 2 ;;
     --no-push) no_push=1; shift ;;
     --json) json=1; shift ;;
@@ -241,7 +242,11 @@ run_gate() {
   else
     cmd="bash ${SCRIPT_DIR}/laydown-set-check.sh --root ${repo_root}"
   fi
-  local gate_name="$(printf '%s' "${cmd}" | awk '{print $NF}')"
+  # The gate name = basename of the LAST token that looks like a script path (default cmd's last
+  # token is --root <repo>; an override like `bash /path/gate.sh` has the gate path as the last
+  # path-like token). basename so the verdict note records a stable, short gate id.
+  local gate_name="$(printf '%s' "${cmd}" | awk '{for(i=1;i<=NF;i++) if ($i ~ /\.(sh|ts|mjs|tsx)$/) g=$i} END{print g}' | xargs -r basename 2>/dev/null)"
+  [ -n "${gate_name}" ] || gate_name="gate"
   local out rc
   out="$(cd "${repo_root}" && bash -c "${cmd}" 2>&1)"
   rc=$?

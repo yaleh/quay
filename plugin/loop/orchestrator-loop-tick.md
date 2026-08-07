@@ -742,6 +742,11 @@ tick 做一次收尾 pass。
    suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 `$MERGE_TARGET` 照常接收任务合并，
    只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；`$FORK_BASELINE` 永不从未验证树推进）。
    **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。
+   **事件驱动跨机验证记录（`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`）**：
+   批量合快进 `$FORK_BASELINE` 后**同一轮内**调
+   `bash plugin/scripts/cross-machine-verify.sh --record-merge "$(git -C "$REPO_ROOT" rev-parse "$FORK_BASELINE")" --branch "$FORK_BASELINE" --root "$REPO_ROOT"`
+   ——把这次落地的合并记成 `merger_machine = 本机`（唯一知道谁执行合并的机器就是执行合并的机器）。这是
+   跨机验证双触发源的事件驱动源（加速）：3d 的心跳负责兜底。
 3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：
    每个 tick（含轻触）**无条件**跑一次 `node --experimental-strip-types plugin/scripts/quay-branch.ts sync-lag-check --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
    它问「本地 `$FORK_BASELINE` 是否领先 `origin/$FORK_BASELINE`」，领先即 push（复用非强推/幂等的
@@ -751,6 +756,17 @@ tick 做一次收尾 pass。
    输出 `unpushed` / `behind` / `leads` 字段——「本地领先 origin 几笔」从此有测量，不再靠人 `git log`。
    心跳读 `--json` 的 `leads` 或直接跑 `--push` 均等价（`--push` = 测 + 领先即推）。push 失败（非快进 =
    真分歧）只报告、不覆写、下一 tick 重试——正是 fail-closed 兜底。
+3d. **跨机验证心跳（`cross-machine-verify.sh`，兜底必跑——`gap-no-post-merge-cross-machine-verification-detection-latency-is-luck`）**：
+   每个 tick（含轻触）**无条件**跑一次
+   `bash plugin/scripts/cross-machine-verify.sh --verify --root "$REPO_ROOT"`——
+   它问「有没有本机**没参与**的合并还没被跨机验证？」，有就（最旧优先）跑**快闸**（冷启动/冒烟级，默认
+   `laydown-set-check.sh`，完整套件 38 分钟跑不进 `d` 预算）并把结论写成 git note（`refs/notes/quay-cmv-*`）。
+   这是兜底触发源：3b 的事件驱动记录负责「land 收口同一轮内记下合并」的加速，本步负责「万一事件驱动漏了 /
+   合并是在别的机器落的 / 本机悄悄落后」的必跑保底。**结构约束（AC4）**：`--verify` 跳过 `merger_machine == 本机`
+   的合并（亲代环境掩盖亲代缺陷——验证方必须未参与该合并）；无人记录的合并标 unattributed、不验（fail-closed）。
+   **检测延迟机械可读（AC2/AC5）**：`bash plugin/scripts/cross-machine-verify.sh --report --json --root "$REPO_ROOT"`
+   输出 `post_merge_latency_h` 与 `verifier_machine` / `merger_machine`（`verifier_is_participant` band 0）——
+   `d` 从此有测量，不再靠事后回忆。
 3.5 **批量合回 develop（两线模型的合并机制，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point` AC3）**：
     integration 只从 develop 长出、只往 develop 合回 ⇒ 永远是 develop 后代 ⇒ **fast-forward 无冲突**
     （`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）。`suiteGreen` 为 true 时，

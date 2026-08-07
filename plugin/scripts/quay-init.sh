@@ -699,6 +699,14 @@ validate_worktree_root() {
 # Scripts that must NEVER auto-lay-down (a layer-retired delivery check + the installer itself):
 NEVER_LAYDOWN="send-keys-verified.sh quay-init.sh"
 
+# Cross-machine VERIFICATION mechanism (gap-no-post-merge-cross-machine-verification-detection-latency-is-luck):
+# `cross-machine-verify.sh` ships with the loop because the loop tick docs reference it by full path
+# (fast-mode 4b / orchestrator 3b+3d — the SAME derivation that puts sync-lag-check.sh in the set). It
+# needs NO explicit entry here: the derived (a) source over plugin/loop/*.md pulls it in, and its
+# sibling dependency `laydown-set-check.sh` (the default fast gate) is already in the set, so the
+# dependency-closure invariant (d) is satisfied. The mechanism's shared state rides git notes
+# (refs/notes/quay-cmv-*) — a notes ref, not a file, so nothing extra to lay down.
+
 # mechanism_corpus — the docs that describe how the LAID-DOWN mechanism operates (bare-filename
 # resolution scope for (b) above).
 mechanism_corpus() {
