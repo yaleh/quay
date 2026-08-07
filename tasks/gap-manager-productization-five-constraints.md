@@ -2,28 +2,28 @@
 id: gap-manager-productization-five-constraints
 title: "manager productization (C1-C5, SPEC-manager-productization-2026-08-05):
   C1 plugin/ + npm pack must contain manager; C2 manager's home/state/identity
-  must NOT belong to any single project (current instance lives in quay-0:manager
-  cwd=/home/yale/work/quay — violates C2/C3); C3 outer NEVER creates/drives/
-  checks manager (mechanical grep check, currently 0 mentions in tick doc);
-  C4 independent cold start (quay manager start, accepts NO project args);
-  C5 two commands separated (manager start ≠ manager adopt; AC12b testability:
-  'adopt 之后 manager 对该项目动作次数=0'); SCHEDULING SCOPE NARROWED 2026-08-06
-  (human): session DEATH is explicitly OUT of scope — no monitoring, no recovery;
-  the original 'sharpest gap' (manager absent from os-anchor-projects.conf, 4
-  crashes needing human restart) is therefore VOID, as are OS watchdog, OS cron
-  and Desktop scheduled tasks (all three banned by ruling); the only anchor is
-  Claude Code loop/cron, and the only failure mode still in scope is /clear +
-  /compact wiping context while cron keeps firing (AC5c, borrowing manda's
-  derivable-sentinel + read-fresh-at-fire-time pattern) plus cross-tick state
-  durability (AC5b: tick-log went 2 days unwritten, 626 commits, 0 touching it);
-  RULED: dual-creator conflict = option ① whoever
-  finds missing inner creates via SAME idempotent entry (quay-topology.sh +
+  must NOT belong to any single project (current instance lives in
+  quay-0:manager cwd=/home/yale/work/quay — violates C2/C3); C3 outer NEVER
+  creates/drives/ checks manager (mechanical grep check, currently 0 mentions in
+  tick doc); C4 independent cold start (quay manager start, accepts NO project
+  args); C5 two commands separated (manager start ≠ manager adopt; AC12b
+  testability: 'adopt 之后 manager 对该项目动作次数=0'); SCHEDULING SCOPE NARROWED
+  2026-08-06 (human): session DEATH is explicitly OUT of scope — no monitoring,
+  no recovery; the original 'sharpest gap' (manager absent from
+  os-anchor-projects.conf, 4 crashes needing human restart) is therefore VOID,
+  as are OS watchdog, OS cron and Desktop scheduled tasks (all three banned by
+  ruling); the only anchor is Claude Code loop/cron, and the only failure mode
+  still in scope is /clear + /compact wiping context while cron keeps firing
+  (AC5c, borrowing manda's derivable-sentinel + read-fresh-at-fire-time pattern)
+  plus cross-tick state durability (AC5b: tick-log went 2 days unwritten, 626
+  commits, 0 touching it); RULED: dual-creator conflict = option ① whoever finds
+  missing inner creates via SAME idempotent entry (quay-topology.sh +
   single-flight lock), NOT centralized to manager — shipped quay = outer+inner,
   manager optional, centralizing kills single-project self-healing (contradicts
   'manager for cross-project'); split: manager-phase-goal.md product-behavior
   (axis-open/verification-first/boundary) → plugin/loop/manager-loop-tick.md,
   experiment state stays orchestration/"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
