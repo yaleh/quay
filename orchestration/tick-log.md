@@ -624,3 +624,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 正在重跑验证（35m53s）。尚无新 integration commit（agent 未 merge）。套件红（11:39，无新跑）。
 > 在飞 fix-21。负载 5.38（agent 重跑中）。Monitor mounted+targetOk 真。等 agent 验证 + merge →
 > 外层并发 8 重跑 → 真绿。
+
+> **12:47Z 外层 tick（no-action——fix-21 agent 已 commit b209f4fd 正在验证拆分）**：agent commit
+> b209f4fd（fix 21 条）：quay-topology.sh acquire_lock 修 + 重 quay-init-loop.test.mjs（1294 行）
+> **拆分**为 quay-init-loop-{driver,runtime,vendor}.test.mjs + helpers（拆分 = 重 laydown 测试的
+> 解耦，同 e5d295b2 模式）+ 若干测试更新 + scripts/test.sh。正在验证拆分文件通过（55m51s，明确推进，
+> 未卡）。套件红（11:39，无新跑）。在飞 fix-21。Monitor mounted+targetOk 真。等 agent 验证 + merge →
+> 并发 8 重跑 → 真绿。
