@@ -1,8 +1,8 @@
 ---
 id: gap-test-concurrency-cap-does-not-scope-nested-spawns
-title: --test-concurrency cap only constrains top-level workers —
-  quay-init/session tests spawn nested node --test (15 of 19), bypassing the cap
-  → 2.5x oversubscription on 4 cores
+title: "CONSOLIDATED (manager 2026-08-07): 并发上限只管单层——跨 worktree 无协调(A) +
+  cap-from-gate 槽位帽(B) + test.sh worker 数(C) 三者叠加，5 槽位 × 各自嵌套派生 = 17-19
+  进程总量不变（load 18.70 实测）；共同根因是【没有跨层总预算】；勿拆分修（每处局部正确但总量不动）"
 status: todo
 labels:
   - gap
@@ -12,132 +12,98 @@ parent: null
 children: []
 extra: {}
 ---
-## Finding
+**type:** execution
 
-并发上限的作用域**不含嵌套派生**：`scripts/test.sh` 的 `--test-concurrency` 只约束**顶层 worker 数**，而 quay-init 族 / 会话族测试（`quay-init-check-drift` / `quay-init-drift-report` / `quay-init-laydown-closure` / `session-liveness` / `session-topology` / `runtime-usage-inventory`）内部再 spawn `node --test`——**嵌套派生绕过上限**。
+## Proposal
 
-## 实测（2026-08-06 21:16Z，套件 running 中）
+**并发上限的作用域不含嵌套派生，且问题跨三层——合并为一条根因任务（管理者 2026-08-07 裁定，勿拆开修）。**
 
-管理者同一轮内三次读数（外层复核 load 一致）：
+### 共同根因：没有跨层总预算
 
-| 项 | 值 |
-|---|---|
-| nproc | **4** |
-| load1 | 6.14 → 7.99 → **10.05**（持续上升） |
-| cpu some avg10 | 80.48 → 84.31 → 83.41 |
-| `node --test` 进程 | **19** |
-| 其中父进程也是 `node --test` | **15**（嵌套派生） |
+三个面各自"局部正确"，但**没有任何一层知道全仓一共在跑多少个 node --test 进程**。
+5 槽位 × 每槽位各自派生 = **17-19 进程**，总量与并发配置无关地恒定超订。
 
-即顶层 `--test-concurrency=1`（1 个 worker），实际并发达 **19 进程 = 4 核上 2.5× 超订**。外层复核（21:1x）：load 9.89，嵌套间歇出现（压力随 quay-init/session 族测试进入而升）。
+**判据（你们自己的标准）**：`CLAUDE.md` 明写 17 进程 = 4.25× 超订（4 核，gap-concurrency-derivation 的结论），
+而新配置实测 **17-19 进程、load 18.70**——同一数字，超订没被任何一层消解。
 
-## 为什么值得修
+### 三个面（同一条，不拆）
 
-CLAUDE.md 记载并发推导 `max(1, floor(nproc/2.1))` 正是为避免超订（"硬编码 8 在 4 核 = 4.25× 超订——8 workers + spawned subprocesses = 17 进程"）。本轮实测说明：**推导只约束顶层，嵌套派生绕过它**——那条推导修好的是一半问题。且这正是 `gap-no-resource-awareness-heavy-ops-run-blind` AC5（并发推导）与 `gap-tests-leak-tmux-servers-...`（泄漏）**都不覆盖**的形状。
+**(A) 跨 worktree 无协调**：并发任务各在自己的 worktree 跑套件（如 2026-08-06 晚 manager-layer worktree
+跑 full-suite、observer-registry 跑自己套件），**worktree 之间没有共享进程预算**——每个 worktree 都当自己
+独占整机。`resource-gate.sh` 是外层起全套件前的单机检查，不协调多 worktree 并发。
 
-## 性质（改写，2026-08-07；原「嵌套测试合法派生」归因已撤回）
+**(B) cap-from-gate 槽位帽**（新增面，2026-08-07 立案）：`cap-from-gate` 读 .quay/gate 决定并发槽位，
+但**它只约束派发槽位数，不约束每槽位内部再派生多少进程**。且实测其状态**僵死 223 分钟**：2 次同向的
+滞后要求遇上 WAIT/GO 交替输入永远凑不满（要求 e846cedd 滞后，输入在 WAIT/GO 间抖动，缺口的符号不收敛），
+整个观察期它等价于固定值 5——槽位帽既没动态生效，也没约束嵌套。
 
-既不是"推导写错了"（单次调用内部的推导是对的），也不是"进程泄漏"或"测试嵌套递归"——
-是**并发推导的作用域止于单次 `scripts/test.sh` 调用，不含跨 worktree 协调**。
-`node:test` 自身的每文件隔离子进程是正常架构，不是本缺口的成因。
+**(C) test.sh worker 数**：`scripts/test.sh` 的 `--test-concurrency` 只约束**顶层 worker 数**，quay-init 族 /
+会话族测试（`quay-init-check-drift` / `quay-init-drift-report` / `quay-init-laydown-closure` /
+`session-liveness` / `session-topology` / `runtime-usage-inventory`）内部再 spawn `node --test`——
+**嵌套派生绕过上限**（2026-08-06 21:16Z 实测：15/19 进程是嵌套派生）。
 
-## 修复方向（改写，接法留执行时）
+### 为什么合并而不是拆开修
 
-1. 给跨 worktree 的重活加**共享令牌/预算**（`resource-gate.sh` 已有单次运行负载门控，
-   缺的是跨调用协调——本仓 08-06 才整删了 `heavy-op-token.sh`，方向需要与那次裁定的
-   理由对齐，不是简单复活）；
-2. 或 `quay-init` 派生的 worktree 测试在派发前查询"当前有几个 worktree 在跑套件"，
-   动态降低自己的 `--test-concurrency`；
-3. **不采用**原方向 3（"嵌套测试改 import"）——追查证明这里没有真嵌套，那个方向对错误
-   的机制无的放矢。
+拆开修，每个面都"局部正确"：
+- 修 C（test.sh 顶层 worker）→ 顶层 1，但嵌套仍起 17 个；
+- 修 B（槽位帽动态化）→ 槽位数字对了，但每槽位派生的总量不变；
+- 修 A（worktree 协调）→ 各自知道对方了，但总预算仍无定义。
 
-## AC（draft，改写）
+**总量 17-19 进程、load 18.70 一点不动。** 共同根因只有一个：**没有一层持有「全仓在跑多少进程」的总预算，
+也就没有层能在超订时收口。** 修法必须落在「跨层总预算」这一层（例如一个共享的进程预算文件/闸，
+或 test.sh 面向全仓的嵌套感知 worker 推导）。
 
-- [ ] 两个 worktree 同时跑全量套件时，总进程数/load 有可观测的协调信号（不是各自盲跑）
-- [ ] 负控制：单 worktree 跑套件 ⇒ 行为不变（不因协调机制引入单跑场景的回归）
-- [ ] 与 `gap-no-resource-awareness-heavy-ops-run-blind` AC5 交叉标注
+### 选定机制（方向，接法留执行时）
 
-## DoD（draft，改写）
+1. **定义总预算**：全仓并发 node --test 进程数的单一权威（如 `nproc` 相关的上限，写入共享状态）；
+2. **各层消费它**：test.sh 顶层 worker（C）、cap-from-gate 槽位帽（B）、worktree 调度（A）都读同一预算，
+   而非各自推导；
+3. **僵死修复**：cap-from-gate 的状态机对「同向滞后要求 + WAIT/GO 交替」必须收敛（例如绝对值变化才更新，
+   或改用 .quay 文件的时间戳而非交替计数）——223 分钟僵死是 B 面的独立可复现缺陷；
+4. **验证判据**：任何配置下，全仓实测 node --test 进程数 ≤ 预算，load 不再 18.70。
 
-- [ ] 2 个 worktree 并发跑全量套件时，`cpu some avg10` 峰值有实测降低（相对本任务记录的基线 61.28/83.41）
-- [ ] 完整套件绿
+## Contract
 
-## Evidence
+```
+measure node_test_procs = `ps -e -o comm= | grep -cx node-MainThread` stdout 数字段（实测基线 17-19，load 18.70 同刻）
+band node_test_procs = 小于等于总预算（预算定义见机制 1；不改动时 17-19 就是现状基线）
+measure cap_from_gate_lag_min = `stat -c %Y .quay/gate 2>/dev/null` 与 cap-from-gate 输出的差值（分钟）stdout 数字段
+band cap_from_gate_lag_min = 收敛（不再出现 223 分钟僵死；阈值由执行时定）
+invariant 全仓并发 node --test 进程数必须有一个跨层总预算权威；任何一层单独修都不得声称解决了超订
+invoke `bash scripts/test.sh --test-concurrency=1 2>&1 | tail -1 && ps -e -o comm= | grep -cx node-MainThread`
+control 把 --test-concurrency 从 5 降到 1 ⇒ 全仓进程数必须显著下降；若不变（嵌套主导），说明修复没碰总量
+resume 若中断，先跑 measure 读当前全仓进程数，再读 CLAUDE.md 的 17 进程判据
+```
 
-- 21:16Z 三次读数：load1 6.14→7.99→10.05；cpu avg10 80.48→84.31→83.41；19 `node --test`、15 嵌套
-- 嵌套目标：quay-init 族（check-drift/drift-report/laydown-closure）+ 会话族（session-liveness/session-topology/runtime-usage-inventory）
-- 外层复核（21:1x）：load 9.89，嵌套间歇
+## Acceptance Criteria
 
-## 更正（2026-08-07 00:5xZ，管理者追查父子进程链后自我更正）
+- [ ] AC1: **跨层总预算定义并落地**——存在单一权威（共享文件/闸），test.sh 顶层 worker（C）、
+      cap-from-gate（B）、worktree 调度（A）都读它；不再各自推导
+- [ ] AC2: **总量下降**——任一配置下全仓 node --test 进程数显著低于 17-19（对照 CLAUDE.md 4.25× 超订判据），
+      贴出改前/改后实测
+- [ ] AC3: **cap-from-gate 僵死修复（负控制）**——构造「2 次同向滞后要求 + WAIT/GO 交替」场景，
+      状态必须收敛（不再 223 分钟僵死）；修复前该场景可复现僵死
+- [ ] AC4: **嵌套派生纳入预算**——quay-init 族/会话族测试的内部 spawn 计入总预算（不再绕过），
+      用 `ps` 实测证明嵌套进程数随预算收口
+- [ ] AC5: **勿拆**——本任务不得拆成三个子任务单独修；每个面的修复都要能证明「总量」变化，
+      不是「本面局部正确」
 
-**「性质」一节的机制归因是错的，已被逐层追查推翻——不是嵌套测试递归吃自己。**
+## Definition of Done
 
-实测的数字（19 进程、15 个父也是 `node --test`）仍然真实，**但下面这句话不成立**：
-「quay-init/session 族测试 spawn 嵌套 `node --test`，绕过并发上限」。逐层追查（追到进程退出、
-读了脚本源码，不是猜）：
+- [ ] AC1-AC5 实跑输出贴进任务体（含 17-19 → 修后 的数字对比）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [ ] 交叉标注：CLAUDE.md 的 17 进程判据段、`gap-concurrency-derivation-reverted`（派生默认的历史）
 
-1. **命令行上那些 `--test-coverage-functions=0`/`--experimental-addon-modules`/
-   `--inspect-publish-uid` 等标志是 Node 自己加的**，不是被测脚本传的。这是
-   `node:test` **固有架构**——即使 `--test-concurrency=1`，Node 也会为每个测试文件
-   派生一个隔离子进程。**这本来就在发生，不是缺陷，也不是"绕过"**。
-2. 唯一一条真被 ps 抓到的疑似嵌套链——某测试子进程 fork 出
-   `bash quay-init.sh --worktree-root ...`——追查后是无害的：`quay-init.sh` 的
-   `detect_test_command` **只 `echo` 探测到的命令给人确认，代码里没有 `eval`/执行**；
-   该进程 5 秒后退出，**退出时没有任何子进程**。它是一次真实但短暂的 e2e 调用，
-   没有引爆一次全量套件。
+## Touches
+- scripts/test.sh（worker 推导改读总预算）
+- plugin/scripts/cap-from-gate.sh（槽位帽收敛修复）
+- plugin/scripts/resource-gate.sh（或新共享预算闸）
+- plugin/loop/fast-mode-loop-tick.md（并发规则引用总预算）
+- tasks/gap-test-concurrency-cap-does-not-scope-nested-spawns.md（自身文件）
 
-**真正在推高进程数的**：实测同一时刻**有 2 个不同 worktree**（`quay-worktrees/manager-layer`、
-`quay-worktrees/observer-registry`）**在同时各自跑 `scripts/test.sh`**。每个都按
-`max(1, floor(nproc/2.1))` 算出自己"合法"的并发，**但这个推导只管一次调用内部，
-不知道另一个 worktree 同时也在跑** ⇒ 4 核机器上两个独立正确的并发套件叠加，
-足以把 load 推到 10——**不需要任何一方越界**。
+## Dispatch review
 
-**⇒ 缺口的真实形状是「并发推导的作用域是单次调用，不含跨 worktree 协调」，
-不是「测试递归吃自己」。下面「性质」「修复方向」「AC/DoD」三节据此改写，原测量数据保留。**
-
-
-## 合并说明（2026-08-07 02:1xZ，管理者裁定：这是一个缺陷的三个面，不是三个缺陷）
-
-**共同根因：没有跨层的总资源预算。** 三处各自"局部正确"，而它们相乘作用在同一个 4 核 CPU 上：
-
-| 面 | 机制 | 局部假设 | 当前值 |
-|---|---|---|---|
-| **A（本任务）** | 跨 worktree 无协调 | 每次 `scripts/test.sh` 假定**自己独占机器** | 实测 2–3 个 worktree 同时跑 |
-| **B** | `cap-from-gate.ts` 槽位帽 | 假定**每槽位开销有界且已知** | 压力低时 `cap=5` |
-| **C** | `scripts/test.sh` worker 数 | 只读 `nproc`，**完全不读负载** | 4 核 ⇒ **1** |
-
-**两个假设互相否定**：A/C 要求独占，B 一次给出 5 份。
-
-### 实测证据：用它自己的判据检验，矛盾已经显形
-
-`CLAUDE.md:23` 判定**不可接受**的旧状态是「8 workers + spawned subprocesses = **17 processes**，
-4 核 4.25 倍超订」。而**新配置下实测**（2026-08-06/07 管理者多轮记录）：
-
-- `node --test` 进程峰值 **19 个**、`load1` 峰值 **18.70**、`cpu some avg10` 峰值 **94.47**
-- 某一瞬时全部 node 进程 **17 个**——**正好等于那个被判定为不可接受的数字**
-
-⇒ **为避免 17 个进程而做的修改，实际运行在 17–19 个进程上。慢换来了，超订没换来。**
-
-### 面 B 的补充实测（原未立案，本次并入）
-
-`cap-from-gate` 设计上动态（`avg300<40→cap=5` / `<70→2` / `≥70→1`，滞后 2 次同向确认），
-**但实测状态僵死**：`.quay/concurrency-cap-state.json` 停在
-`{"band":"GO","consecutive":0,"decided_at":"2026-08-06T22:16:39Z"}`，**223 分钟未重新决策**，
-而同期 `avg300` 实测序列 `41.67→28.84→49.60→33.84→52.30→32.34` **至少 5 次穿越 40 边界**。
-
-**原因是滞后设计遇上振荡输入的必然结果**：切档要求**连续 2 次同向**，而 WAIT/GO 交替出现，
-`consecutive` 每次被打回 0 ⇒ **这个"自适应"上限在整个观察期等价于固定值 5**。
-（非 bug，是设计取舍的后果；但意味着**这条反馈不能替代总预算**。）
-
-### 为什么必须合并而不是分开修
-
-**分开修的后果可以预见**：每处都会被"局部正确"地修好，
-而 `5 槽位 × 各自派生` = 17–19 进程这个**总量一点不变**。
-⇒ 修复必须落在**跨层总预算**上，不在任何单层。
-
-### 与既有任务的关系
-
-- `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`（`ready`）
-  是**面 C 的历史成因**（公式长期不可达、`echo 8; return 0`），**不作废**——它管"代码是否做它声称的事"，
-  与本任务的"总预算"是不同问题，但结论互相依赖：**面 C 修好之后才暴露出总预算缺失**。
-- `gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible`（新立）
-  是**本矛盾的下游后果**：并发降到 1 使单次套件 37.5 分钟，进而使 DoD 吃掉 OVER90 预算 83%。
+reviewer: none
+at: 2026-08-07T02:1xZ
+changed: 管理者 2026-08-07 裁定合并为单根因任务（原 C 面 + 新 B 面 cap-from-gate 僵死 + A 面跨 worktree），
+  勿拆开修；已重写任务体。
