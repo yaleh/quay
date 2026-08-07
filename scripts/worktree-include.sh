@@ -15,10 +15,11 @@
 #   the mechanical copy. Declarative does not miss; hand-copying does.
 #
 # SEMANTICS (each is mechanically enforced):
-#   - A file is copied ONLY if it is BOTH declared in the primary checkout's
-#     .worktreeinclude AND actually gitignored in the primary checkout AND
-#     present on disk. A tracked file (already in the worktree via git) is never
-#     copied even if declared. A gitignored file not declared is never copied.
+#   - A file is copied ONLY if it is BOTH declared in the worktree's (or the
+#     primary's) .worktreeinclude AND actually gitignored in the primary
+#     checkout AND present on disk. A tracked file (already in the worktree via
+#     git) is never copied even if declared. A gitignored file not declared is
+#     never copied.
 #   - node_modules/** is always excluded (the build step symlinks/installs it).
 #   - No .worktreeinclude => nothing to copy (exit 0). A missing/invalid
 #     worktree argument => exit 2.
