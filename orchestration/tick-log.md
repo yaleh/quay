@@ -733,3 +733,15 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > dry-run **NOT-FAST-FORWARD（develop 有 integration 缺的 commit，分叉）→ needs-human**——batch-merge
 > 只支持 FF、实际两线模型需真 merge（gap-integration-batch-merge-ff 任务的 scope）。已驱动内层
 > un-hold session-pid + 恢复派发（delivered）。verification-round 85 已记（修正 round 号）。
+
+> **15:25Z 外层 tick（no-action——人 15:0x 裁定已消化：round-9 真绿 + 4 建议任务已立已派）**：人 15:0x
+> 裁定「第九轮跑完即发」——处理第九轮结果 + 已实测建议。管理者已独立核实第九轮 green（state=green
+> dur=1368s lanes=8；主体 2761 fail 0 + serial 230 fail 0 + ✖ 0 + clean-tree PASS）。**口径**：人的合并
+> 条件是「c8 可靠 且 高速验证」——可靠已达成（r4/r7/r9 三轮完整跑测试段全 fail 0）；高速只一半
+> （serial 1080s=77%，C 项处理掉才成立）。**已立 4 任务**（含管理者实测证据）：A1 gitignore 一行
+> （.quay-worktree-local* 未忽略致 r4 假红）、A2 .worktreeinclude（config.yml 没进 worktree 致 r5
+> 72 崩溃）、B assert-clean-tree 差量/单写入者（前提作废、排除表削弱优点）、C serial 77% 削减
+> （runner-grouping flags-only 295.6s 用 --list-files + install 族共享模板）。已晋级 ready + 驱动内层
+> （delivered，C 优先=合并「高速」半）。**D 卫生已处理**：主仓冗余 M（quay-init-check-drift
+> governance→serial 与 integration 92d16611 一致）回退清树。等内层实现 → 并发 8 验证 → serial <600s
+> → 分支合并（fast 半成立）。

@@ -1,0 +1,61 @@
+---
+id: gap-gitignore-worktree-scratch-dirs-kills-round4-false-red
+title: "One-line .gitignore fix: .quay-worktree-local* / .quay-wtl* are NOT
+  gitignored (git check-ignore confirms all three un-ignored while
+  .claude/worktrees is ignored) — round-4's 2991 tests fail 0 red was ENTIRELY
+  these untracked dirs tripping the suite-after dirty-tree assertion; Claude
+  Code official worktree requirement is exactly 'Add .claude/worktrees/ to your
+  .gitignore'; add one gitignore line, no more exclusion-table entries (B task
+  fixes the assertion mechanism shape)"
+status: ready
+labels:
+  - gap
+  - defect
+  - milestone-candidate
+parent: null
+children: []
+extra: {}
+---
+**type:** execution
+
+## Proposal
+
+**一行 .gitignore，消掉第四轮那次假红。** 管理者实测（2026-08-07 15:0x）：`.quay-worktree-local` /
+`.quay-worktree-local2` / `.quay-wtl3` **未被 gitignore**（`git check-ignore` 三者均"未忽略"，而
+`.claude/worktrees` 已忽略）。第四轮 2991 用例 fail 0，红的全部原因就是这几个未跟踪目录触发 suite-after
+脏树断言。Claude Code 官方文档对 worktree 的唯一配套要求正是：「Add `.claude/worktrees/` to your
+.gitignore so worktree contents don't appear as untracked files in your main checkout」——同款加
+.gitignore 一行即可，**不需要再往排除表（assert-clean-tree）里加条目**（B 类任务另修断言机制形状）。
+
+这些目录是本仓验证/收尾在 worktree 内保存协调脚手架时产生的（外层建 worktree 时把 .quay 换软链、旧
+数据挪到 .quay-worktree-*）；它们不是测试产物，不该让 suite-after 脏树断言背锅。
+
+## Contract
+
+measure worktree_scratch_ignored = `git check-ignore -v .quay-worktree-local .quay-worktree-local2 .quay-wtl3 2>/dev/null | wc -l` stdout 数字段（应 = 3，三者都忽略）
+band worktree_scratch_ignored = 3（三目录全部被 gitignore）
+invoke `git check-ignore -v .quay-worktree-local .quay-worktree-local2 .quay-wtl3`
+control 人为在 worktree 建 .quay-worktree-local 目录 ⇒ git status 不再显示为 ??（被忽略）；suite-after 脏树断言不再因它们红
+resume 若中断，先跑 measure 读当前忽略状态
+
+## Acceptance Criteria
+
+- [ ] AC1: `.gitignore` 加一行覆盖 `.quay-worktree-local*` / `.quay-wtl*`（模式如 `**/.quay-worktree-local*/` 与 `**/.quay-wtl*/` 或合并写法），`git check-ignore` 三者全过
+- [ ] AC2: 负控制——在 worktree 建这些目录，`git status --porcelain` 不显示它们（不再触发 suite-after 脏树断言）
+- [ ] AC3: 与 gap-assert-clean-tree-premise-void-under-concurrent-writers（B 类任务）交叉标注——本任务是止血（gitignore），B 是根治（断言改差量/单写入者）
+
+## Definition of Done
+
+- [ ] AC1-AC3 实跑输出贴进任务体（check-ignore 输出 + git status 负控制）
+- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+
+## Touches
+- .gitignore（加 worktree 脚手架忽略行）
+- tasks/gap-assert-clean-tree-premise-void-under-concurrent-writers.md（AC3 交叉标注，若已立）
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-07T15:2xZ
+changed: 管理者 15:0x 裁定 + 实测：.quay-worktree-local* 未忽略致第四轮假红。官方 worktree 配套要求
+  （.gitignore 忽略 worktree 内容）。一行止血，B 类任务根治断言机制。
