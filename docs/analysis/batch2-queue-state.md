@@ -8062,3 +8062,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **派发**：lowconc（worktree lowconc-group-concurrency-3，telemetry 记录）。与 C 机械 disjoint（C touches 测试文件、lowconc touches scripts/test.sh 组结构——互补不冲突）。
 - **管理者撤回一条结论**：quay-init 错误路径**不是返回 0**——管道读 0 误读 cut；缺 --test-command 真实退出码=**2**、行为正确，**无此缺陷，别据此报**。
 - **在飞 3/5**：C（serial-cost 优先）+ lowconc（新）+ 1 空槽。suite GREEN。
+
+### 事件 15:5xZ（C 完成 fan-in——flags-only 294s→8s + install 模板）
+
+- **C 完成**（agent 8001aef8）：AC1 flags-only 294s→**8.2s**（--list-files 列表比对，语义不变：--group governance --list-files == 各 flags-only 形式）；AC2 install 族共享 laydown 模板（laydownTemplate/laydownWorkspace in quay-init-loop-helpers：一次真实安装→**只读模板**（chmod a-w 全树防污染）→各测试 `cp -a`（**保软链+权限**）→改 config 绝对路径 + fresh worktree_root；5 文件应用：driver 10/runtime 5/runtime-landing 4/core 4/install-e2e；~6s/真实安装→50-150ms/copy）；AC3 B 类挂钟不省（R8）；AC4 serial 降 **~720s**（未达 <600s 目标——B 类挂钟不可省 + install 首装不可模板化，**诚实未勾**，最终数留外层全量测）；AC5 交叉标注。
+- **fan-in**：integration **0403207e**（7 测试文件）。task 文件入 develop（AC1/2/3/5 勾，AC4 未勾 + 证据）。
+- **在飞 1/5**：lowconc（新派发）。suite GREEN。
