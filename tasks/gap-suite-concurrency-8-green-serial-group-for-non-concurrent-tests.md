@@ -1,0 +1,109 @@
+---
+id: gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests
+title: "HUMAN RULING 2026-08-07: concurrency 8 stays — identify tests that
+  cannot run concurrently, apply a mechanism for them, get TRUE green at
+  concurrency. Manager taxonomy: A类 nested-full-suite-spawn
+  (runner-grouping/select-tests-for-touches/test-coverage-check, R3
+  spawns-test-sh=3 exempted-never-fixed), B类 real-wall-clock-wait
+  (session-liveness/measure-suite/monitor-mount-check/quay-init-tmux-detection/\
+  send-keys-verified/build-dist-smoke), D类 shared-dir read-write race
+  (runner-grouping AC7 zz- fixture in plugin/test/ vs test-file-snapshot
+  full-set scan → 'baseline test file REMOVED' — A and D hit the same file but
+  different mechanisms, not one-class fix), C类 exclusive-tmux EXCLUDED
+  (positive-control verified safe). Landing suggestion (not ruling): reuse
+  scripts/test.sh --group mechanism — add a serial group, main body stays
+  concurrency 8, serial group runs alone; D fixed by code (fixture out of shared
+  dir)"
+status: todo
+labels:
+  - gap
+  - defect
+  - milestone-candidate
+parent: null
+children: []
+extra: {}
+---
+**type:** execution
+
+## Proposal
+
+**人裁定（2026-08-07 10:2x，方向已定）：并发 8 不降。判断哪些测试不能并发跑，为它们应用相应机制，
+并发拿到真绿。原话：「并发运行测试时必须的。需要判断的是：是不是所有测试都可以并发跑？有没有一些
+测试不能并发跑？如果有，就应当为这些测试应用相应机制。把并发运行测试搞定，并发拿到真绿。」**
+
+### 机械识别（管理者 2026-08-07 10:2x，给出可执行输入）
+
+| 类 | 机制 | 测试文件 |
+|---|---|---|
+| **A类 嵌套拉起整套件** | 内部再起 test.sh 自带 worker 池，与外层争 CPU——正是 test-isolation-check 的 `spawns-test-sh=3` 已知违规，**R3 早已禁止、一直豁免未修** | runner-grouping / select-tests-for-touches / test-coverage-check |
+| **B类 真实挂钟等待** | sleep() + 有限窗口，CPU 饥饿下窗口不够 | session-liveness / measure-suite / monitor-mount-check / quay-init-tmux-detection / send-keys-verified / build-dist-smoke |
+| **D类 共享目录读写竞争** | 新发现、因果链最干净：runner-grouping.test.mjs:113 在共享 `plugin/test/` 临时造 `zz-runner-grouping-undeclared.test.mjs` 再删；test-file-snapshot.test.mjs 的工作正是扫全仓测试清单比基线——并发下 snapshot 先看见该临时文件计入基线、再看时已删 ⇒ 报 `baseline test file REMOVED (real count regression)`。**两个测试都没错，是共享目录读写撞车** | runner-grouping（AC7）× test-file-snapshot |
+| **C类 独占 tmux** | **已排除，不要浪费时间**——管理者正控制核实：session-topology / inner-session-check 明写 HERMETIC server on a private socket，send-keys-reliable 从不 invoke tmux，supervisor-deliver 用唯一 session 名且从不 kill-server | — |
+
+**注意（管理者强调）**：A 与 D 撞的是同一个文件 `runner-grouping.test.mjs` 但机制不同
+（A=嵌套 worker 池争 CPU，D=共享目录写临时夹具），**不能当一类修**。
+
+### 选定机制（管理者落点建议，不定案——实现由外层+内层定）
+
+`scripts/test.sh` 已有 `--group` 机制（`// @test-group <product|engine|governance>` 声明，`--group`
+可单独跑）——**加一个 `serial` 组**：主体仍并发 8，该组单独串行跑，是最贴合现有架构的做法，
+不需要发明新机制。A类+B类测试声明为 serial 路由，与并发 8 主体隔离。
+
+**D类单独修**（代码修复，不与 A 同批）：runner-grouping AC7 的临时夹具移出共享目录（mkdtemp 或
+快照助手排除 `zz-*` 运行期夹具）——两个测试本身没错，消除撞车点即可。
+
+### 与既有任务的关系
+
+- 本任务是 human ruling 的**直接落地**（并发 8 真绿）；`gap-wall-clock-timing-dependency-in-tests-
+  not-covered-by-r1-r7`（B类发现）与 `gap-test-isolation-backlog-44-violations-unmeasured`（A/D类发现）
+  是根因任务，本任务落地后它们的 AC 方向被此裁定覆盖/收窄。
+- `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（分诊机械化）是后续收尾——serial
+  组落地后 KNOWN-LOAD-SENSITIVE 族被机械识别为 serial 成员，分诊不再人工判。
+
+## Contract
+
+measure serial_members = `grep -rlE '@test-group[[:space:]]+serial' plugin/test/ packages/*/test/ 2>/dev/null | wc -l` stdout 数字段（A/B 类成员数，≥9）
+measure suite_state = `python3 -c "import json;d=json.load(open('.quay/full-suite-state.json'));print(d.get('state'),d.get('reason'),len(d.get('failures',[])))"` stdout 两段（目标：green none 0）
+band suite_state = green 开头（并发 8 全量真绿）
+invoke `scripts/test.sh --group serial`
+control A/B 类测试在并发 8 主体下不再被 CPU 饥饿击穿（serial 组隔离生效）；D 类两个测试并发下不再互撞
+resume 若中断，先跑 measure 读 serial 组成员数与套件状态
+
+## Acceptance Criteria
+
+- [ ] AC1: **serial 组落地**——`scripts/test.sh` 支持 `serial` 组路由；A类+B类测试（≥9 个）声明为
+      serial 成员；`--group serial` 单独串行跑，不与并发 8 主体争 CPU
+- [ ] AC2: **D类单独修**——runner-grouping AC7 临时夹具移出共享 `plugin/test/`（或快照助手排除
+      `zz-*` 运行期夹具）；与 test-file-snapshot 全套件快照不再互撞（不并入 A 类修复）
+- [ ] AC3: **并发 8 全量真绿**——`full-suite-runner.ts --lane-count 8` 跑完 `fail 0` 且 `cancelled 0`
+      （之前 7 个失败测试全部不再失败）
+- [ ] AC4: **负控制**——并发 8 下复现旧失败形态（session-liveness noise-gate / runner-grouping
+      flags-only / test-file-snapshot baseline REMOVED）必须全部消失；改回非 serial 路由必须能复现
+      失败（证明 serial 机制是修复）
+- [ ] AC5: 与 `gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`（B类根因）、
+      `gap-test-isolation-backlog-44-violations-unmeasured`（A类 R3 + D类竞态）、
+      `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（分诊机械化）交叉标注
+
+## Definition of Done
+
+- [ ] AC1-AC5 实跑输出贴进任务体（含并发 8 全量绿的三次输出：修前红基线 / 修后绿 / 负控制复现）
+- [ ] 并发 8 全量套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——这就是 human ruling 的「并发拿到真绿」
+
+## Touches
+- scripts/test.sh（serial 组路由）
+- plugin/test/runner-grouping.test.mjs（A类 serial + D类夹具移出）
+- plugin/test/select-tests-for-touches.test.mjs / test-coverage-check.test.mjs（A类 serial）
+- plugin/test/session-liveness.test.mjs / measure-suite.test.mjs / monitor-mount-check.test.mjs /
+  quay-init-tmux-detection.test.mjs / send-keys-verified.test.mjs / build-dist-smoke.test.mjs（B类 serial）
+- plugin/test/test-file-snapshot.test.mjs 或 plugin/scripts/test-file-snapshot.sh（D类：排除 zz-* 夹具）
+- tasks/gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7.md（AC5 交叉标注）
+- tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（AC5 交叉标注）
+- tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-07T10:3xZ
+changed: 人裁定（2026-08-07 10:2x，方向已定）：并发 8 不降 + 为不能并发跑的测试应用机制 + 并发拿真绿。
+  管理者机械识别给 A/B/C/D 四类（C 已排除）。落点 = serial 组（复用 --group 机制）+ D类代码修复。
+  实现细节外层+内层定。本任务是 human ruling 的直接落地，套件红窗被此裁定替换为「实现→重跑→真绿」。

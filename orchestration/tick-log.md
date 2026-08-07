@@ -537,3 +537,16 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 31b81009）。Monitor mounted+targetOk 真、suite-state-trigger 挂载（3255786）。负载 0.18 空闲。
 > 不派发（stop-dispatch）、不重启套件（red 期间等分诊修好）、不重锚（inner 等在 ruling）。等 human
 > 对红窗释放/并发策略的裁定。
+
+> **10:36Z 外层 tick（unblock——人裁定送达，内层停等被消解）**：**人裁定（2026-08-07 10:2x，方向已
+> 定）：并发 8 不降。判断哪些测试不能并发跑、为它们应用相应机制、并发拿到真绿。** 管理者机械识别给
+> A/B/C/D 四类：A类嵌套整套件（runner-grouping/select-tests-for-touches/test-coverage-check，R3
+> spawns-test-sh=3 豁免未修）、B类真实挂钟等待（session-liveness/measure-suite/monitor-mount-check/
+> quay-init-tmux-detection/send-keys-verified/build-dist-smoke 共 6）、D类共享目录读写竞态（runner-
+> grouping AC7 zz- 夹具 vs test-file-snapshot 快照——新发现、因果最干净、两测试都没错）、C类独占 tmux
+> **已排除**（正控制核实安全，不浪费时间）。A 与 D 撞同一文件但机制不同、不能当一类修。落点建议：
+> 复用 --group 机制加 serial 组（主体并发 8、该组串行）、D 代码修复（夹具移出共享目录）。
+> **已立落地任务** `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`（AC1-AC5），
+> R8 任务更新（B类 6 文件走 serial，R8 规则保留约束新测试）。**红窗处置被裁定替换**：从「等人裁定
+> 红窗释放 vs 等真绿」变成「实现 serial 组 → 并发 8 重跑 → 真绿」——done-flip 批次与 integration→
+> develop 批量合仍等真绿。动作分布 no-action 198 / correct 92 / unblock 58 / escalate 7。
