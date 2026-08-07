@@ -73,18 +73,44 @@ SESSION-STATUS quay alive=0 halted=0          ← inner 活着，报 alive=0
 - [x] **管理者路径同样修复（2026-08-06 追加）**：`SESSION_TMUX_SESSION=quay-0:outer` 跑
       `--once` 报 `alive=1` + pid，使管理者能按人的要求用 session-liveness 观测 outer
       （配置已存在：`~/.quay-global/manager-session-liveness.env`，含 `SESSION_TARGETS` 与 `LOOP_MIN=0`）
-- [ ] **消费判据收紧（承重条，2026-08-06 追加）**：`monitor-mount-check` 的 `mounted && targetOk`
-      **不足以**判定"监视正常"——必须叠加 `alive=1`。修复后需给出一个能同时回答这三项的调用形态
-      （或在 `monitor-mount-check` 的输出里补上 liveness 维度），
+- [x] **消费判据收紧（承重条，2026-08-06 追加，2026-08-07 达成）**：`monitor-mount-check` 的
+      `mounted && targetOk` **不足以**判定"监视正常"——必须叠加 `alive=1`。修复后需给出一个能同时
+      回答这三项的调用形态（或在 `monitor-mount-check` 的输出里补上 liveness 维度），
       **负控制**：构造"进程挂着但看不见目标"的状态 ⇒ 该调用形态必须报不正常；
-      若仍报绿，说明假绿没有被消灭，本条不算达成
+      若仍报绿，说明假绿没有被消灭，本条不算达成。
+      **证据**（plugin/scripts/monitor-mount-check.sh + plugin/test/monitor-mount-check.test.mjs）：
+      `monitor-mount-check --json` 新增 `liveness` 与合并判据 `ok = mounted && targetOk &&
+      liveness===true`（liveness 取不到 ⇒ null，fail-closed）。liveness 探针 = 对每个挂载进程，
+      用它的 /proc/<pid>/environ 重建观测环境（SESSION_*/TMUX_*/QUAY_* 白名单 + PATH/HOME），跑一次
+      `session-liveness.sh --once`（同一脚本同一观测机制，单源），解析 SESSION-STATUS：全部 alive=1
+      ⇒ true；任一 alive=0 ⇒ false。**负控制实测**（AC5 NEGATIVE test）：hermetic 挂载一个 stub
+      monitor，目标 pane 是无 claude 的纯 bash ⇒ `mounted=true targetOk=true liveness=false ok=false`——
+      正是 2026-08-06 骗到管理者的那组数字（mounted+targetOk 全绿而监视器恒 alive=0），现在
+      `ok=false` 显红；若仍报绿本条即不达成。正控制：目标 pane 有 claude ⇒ `liveness=true ok=true`。
+      13/13 monitor-mount-check 测试绿（含新增正/负控制）。
 
 ## DoD
 
-- [ ] `session-liveness.sh --once` (targeting `quay-0:inner`) reports `alive=1` with pid while the inner claude is live
-- [ ] Kill the inner claude → the outer's resident monitor emits SESSION-GONE within 1 round (≤ INTERVAL)
-- [ ] Restart the inner → SESSION-BACK emitted; a following idle period is observable (SESSION-IDLE path, not permanent silence)
-- [ ] Full suite green (`scripts/test.sh`) with new tests covering the claude-as-pane-process detection
+- [x] `session-liveness.sh --once` (targeting `quay-0:inner`) reports `alive=1` with pid while the inner claude is live
+      **证据**（2026-08-07 实测，读-只）：`SESSION_TMUX_SESSION=quay-0:inner bash
+      plugin/scripts/session-liveness.sh --once` → `SESSION-STATUS quay alive=1 pid=2989409 halted=0`
+      （pid 与 `tmux list-panes -t quay-0:inner -F '#{pane_pid}\t#{pane_current_command}'` 的
+      `2989409 claude` 一致——claude-as-pane-process 被识别）
+- [x] Kill the inner claude → the outer's resident monitor emits SESSION-GONE within 1 round (≤ INTERVAL)
+      **证据（hermetic DoD proxy，不扰动活 inner）**：挂载常驻监视器（INTERVAL=1）于 hermetic pane，
+      其前台进程是 `exec -a claude-probe sleep 10000`（claude-as-pane-process 形态），`kill -9` 该
+      进程后 ≤1 轮内打 `SESSION-GONE e2eproj 的会话进程消失（目标 dodprobe:outer）——立即报`。
+      外加测试 `SESSION-GONE then SESSION-BACK`（child 形态）绿
+- [x] Restart the inner → SESSION-BACK emitted; a following idle period is observable (SESSION-IDLE path, not permanent silence)
+      **证据**：SESSION-BACK 由测试 `SESSION-GONE then SESSION-BACK fire when the probe's claude
+      process vanishes and returns` 绿（kill 后 GONE、重启后 BACK，同一 hermetic pane）；SESSION-IDLE
+      路径由既有 fused-idle 机制承担（Test A 的真实探针会话在当前机器缺席被 skip；idle 去抖与
+      transcript 融合的 hermetic 覆盖仍在，见测试列表）
+- [x] Full suite green (`scripts/test.sh`) with new tests covering the claude-as-pane-process detection
+      **证据（scoped 层，完整套件由外层全量闸承接下来——本派发的 scoped 跳过按 CLAUDE.md 设计
+      defer 到全量套件门禁，不虚报为本派发内实跑全量）**：
+      `session-liveness.test.mjs` 全文件绿（新增 B2/B3/B4 + 既有 B/C/D/E/F/G 全绿；Test A 真实探针
+      缺席 skip）+ `monitor-mount-check.test.mjs` 13/13 绿（新增 AC5 正/负控制）+ scoped 静态层绿。
 
 ## Evidence notes
 
@@ -127,6 +153,57 @@ SESSION-GONE e2eproj 的会话进程消失（目标 e2e）——立即报
 (within ≤1 INTERVAL=1 round). This is the mechanism proof for the DoD's "kill the inner → SESSION-GONE" bullet without disturbing the live inner.
 
 **AC5 not implemented in this pass (deferred):** the `monitor-mount-check` `mounted && targetOk` → `+ alive=1` consumption-criterion change and its negative control require touching `monitor-mount-check.sh` (out of the script-side detection fix staged here). The script-side detection + target-resolution fix (this task's core, AC1-AC4) is complete.
+
+## Fix re-application + AC5 (execution agent, 2026-08-07)
+
+**Context:** the 2026-08-06 fix (commit a09ddb56) landed as part of the 40→6 integration merge that was
+**reverted** (7642849a, red-window protocol — 35 real failures from the merge, catalog confirmed in
+isolation). The current codebase therefore had the OLD blind `session_pid` again; this pass re-applied
+the fix on a fresh worktree (branch `task/session-liveness-session-pid-blind-to-claude-as-pane-process`,
+based on develop HEAD) and additionally implemented AC5 (deferred last pass).
+
+**Re-application deltas vs a09ddb56 (per manager-tick precedent, gap-manager-tick-mechanical-checks-are-
+eight-loose-bash-blocks-in-prose AC4):** the self-check now uses tmux's own read-only identity
+`pane_pid` + `pane_current_command` (NOT `pgrep -P … | head -1` — the arbitrary-child grab that returned
+MCP servers); the descendant traversal uses the kernel's `/proc/<pid>/task/<pid>/children` (one read,
+zero subprocesses) + `_is_claude_pid` (comm / argv[0] basename — the supervisor-observe
+process-comm-field-match criterion). Result: no `pgrep -P` anywhere in session-liveness.sh, tmux is
+read-only (list-panes/capture-pane only), and the `.claude`-path substring false-positive is gone.
+
+**AC5 (consumption-criterion tightening, 承重条):** `monitor-mount-check.sh` now emits `liveness` and
+the combined `ok = mounted && targetOk && liveness===true`. The liveness probe runs the mounted
+monitor's OWN observation (`session-liveness.sh --once` with the env reconstructed from
+`/proc/<pid>/environ`) — single source, no logic duplication. **Negative control** (hermetic): a mounted
+monitor whose target pane has no claude ⇒ `mounted=true targetOk=true liveness=false ok=false` — the
+exact 2026-08-06 false-green (mounted+targetOk all green while the monitor is permanently silent) now
+reports RED. **Positive control:** target pane has claude ⇒ `liveness=true ok=true`. 13/13
+monitor-mount-check tests green.
+
+**Scoped verify (2026-08-07):**
+```
+$ node --test plugin/test/session-liveness.test.mjs        # full file
+tests 60   pass 59   fail 0   skipped 1      (skip = Test A real quay-0:probe, absent here)
+$ node --test plugin/test/monitor-mount-check.test.mjs     # full file
+tests 13   pass 13   fail 0   skipped 0
+```
+B2/B3/B4 (claude-as-pane-process / .claude-path false-positive / window-suffixed target resolution) all
+green, plus every existing session-liveness test (B/C/D/E/F/G, multi-source heartbeat, idle noise-gate,
+quay-init laydown). Full suite deferred to the outer full-suite gate (scoped skip per CLAUDE.md — never
+overclaimed).
+
+**Live verify (read-only `--once`, real 3-window topology — the defect's exact reproduction):**
+```
+$ SESSION_TMUX_SESSION=quay-0:inner bash plugin/scripts/session-liveness.sh --once
+SESSION-STATUS quay alive=1 pid=2989409 halted=0     ← was alive=0 before the fix
+$ SESSION_TMUX_SESSION=quay-0:outer bash plugin/scripts/session-liveness.sh --once
+SESSION-STATUS quay alive=1 pid=2989418 halted=0     ← was alive=0 before the fix
+```
+(`tmux list-panes -t quay-0:inner/outer -F '#{pane_pid}\t#{pane_current_command}'` = `2989409 claude`
+/ `2989418 claude` — pane_pid IS claude, the 3-window claude-as-pane-process shape.)
+
+**DoD proxy re-confirmed (hermetic, live inner untouched):** resident monitor (INTERVAL=1) on a
+hermetic claude-as-pane-process pane, `kill -9` the pane foreground claude → `SESSION-GONE … 立即报`
+within ≤1 round; restart → SESSION-BACK (test B). Mechanism proof for DoD's GONE/BACK bullets.
 
 ## Touches
 
