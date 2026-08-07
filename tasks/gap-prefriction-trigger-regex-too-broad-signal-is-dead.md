@@ -1,21 +1,25 @@
 ---
 id: gap-prefriction-trigger-regex-too-broad-signal-is-dead
-title: "prefriction-count.sh's POST_FRICTION_RE matches on virtually every gap task — 64 newly-filed
-  tasks (24h window), only 6 marked untriggered (90.6% triggered=true); the word list includes bare
-  '今晚' (tonight — a pure temporal reference with zero friction meaning, matches any task filed
-  during this session regardless of content) alongside generic defect-description vocabulary
-  (missing/无法/broken/error/不一致) that appears in nearly any well-written gap task body BY
-  CONSTRUCTION (describing a defect requires saying what's missing/wrong); verified on 5 of my own
-  tonight's filings that I judged pre-friction by manual reasoning (no prior alarm/failure at
-  discovery time, found via a mandated usage-lens probe) — ALL 5 show triggered=true on this
-  checker, each via a trivial word hit (missing/fail/今晚), not a genuine prior-friction signal;
-  the script's own header states the design intent is deliberately liberal to avoid false
-  pre-friction>0, but the word list has overshot that intent to the point the trend criterion for
-  the human's own stated PRIMARY goal (self-evolution — 'did the mechanism open a dimension before
-  it hurt') is now structurally near-zero for any task written in ordinary defect-description
-  prose, independent of whether real friction existed; manager 2026-08-06, adopting the shipped
-  tool per human's explicit direction and finding it broken on first real use"
-status: ready
+title: prefriction-count.sh's POST_FRICTION_RE matches on virtually every gap
+  task — 64 newly-filed tasks (24h window), only 6 marked untriggered (90.6%
+  triggered=true); the word list includes bare '今晚' (tonight — a pure temporal
+  reference with zero friction meaning, matches any task filed during this
+  session regardless of content) alongside generic defect-description vocabulary
+  (missing/无法/broken/error/不一致) that appears in nearly any well-written gap task
+  body BY CONSTRUCTION (describing a defect requires saying what's
+  missing/wrong); verified on 5 of my own tonight's filings that I judged
+  pre-friction by manual reasoning (no prior alarm/failure at discovery time,
+  found via a mandated usage-lens probe) — ALL 5 show triggered=true on this
+  checker, each via a trivial word hit (missing/fail/今晚), not a genuine
+  prior-friction signal; the script's own header states the design intent is
+  deliberately liberal to avoid false pre-friction>0, but the word list has
+  overshot that intent to the point the trend criterion for the human's own
+  stated PRIMARY goal (self-evolution — 'did the mechanism open a dimension
+  before it hurt') is now structurally near-zero for any task written in
+  ordinary defect-description prose, independent of whether real friction
+  existed; manager 2026-08-06, adopting the shipped tool per human's explicit
+  direction and finding it broken on first real use
+status: done
 labels:
   - gap
   - defect
