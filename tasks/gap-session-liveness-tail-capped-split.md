@@ -2,7 +2,7 @@
 id: gap-session-liveness-tail-capped-split
 title: 拆分裁定坐实：session-liveness.test.mjs 尾部封顶（211.4s > 摊平下界 196.6s），lowconc
   墙钟下不来——拆成 3 份约 70s 后下界才回到摊平值，那时提并发才有收益
-status: ready
+status: done
 labels:
   - gap
   - defect
