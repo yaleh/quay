@@ -94,23 +94,34 @@ heavy-op-token 测试文件（4 个）、cold-start-e2e.sh。「一次只跑一�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 共享事件文件移除——每个观察者写自己的事件流（谁挂的谁拥有）
-- [ ] AC2: 互斥锁移除——多观察者并行挂载同一目标无冲突（无锁，天然可并行）；
+- [x] AC1: 共享事件文件移除——每个观察者写自己的事件流（谁挂的谁拥有）
+      - 证据：Contract invoke `grep -c 'SL_GLOBAL_DIR\|events.jsonl\|heavy-op-token\|_sl_acquire\|_sl_release' plugin/scripts/session-liveness.sh` → **0**（grep exit 1）；`sl_emit` 只 echo 到观察者自己的 stdout；`SL_ROUND_MARKER` 测试接缝给轮次刻度（替代旧的共享文件 HEARTBEAT 行）。
+- [x] AC2: 互斥锁移除——多观察者并行挂载同一目标无冲突（无锁，天然可并行）；
       且 heavy-op-token.sh 已整体删除（含全部调用点：test.sh/quay-init/capability-catalog/cold-start-e2e/测试文件）
-- [ ] AC3: 目标无感——session-liveness 对目标仍纯只读（capture-pane/git log/stat，零写入）
-- [ ] AC4: 观察者互不知情——manager 观 outer + outer 观 inner 独立并行，谁先启动无关；
+      - 证据：`plugin/test/session-liveness.test.mjs` AC2「多观察者并行挂载同一目标（无锁、无共享文件）」实跑通过——两个观察者都跑满 ≥2 轮、各自独立发 SESSION-GONE，流互不污染；`heavy-op-token.sh` + 4 个测试文件已删除（commit 2f9d4575）；test.sh/quay-init/capability-catalog 对 heavy-op 的引用 grep 为 0；`test/cold-start-e2e.sh` 只保留「必须 NOT 铺进目标项目」的负断言（退役标注）。
+- [x] AC3: 目标无感——session-liveness 对目标仍纯只读（capture-pane/git log/stat，零写入）
+      - 证据：grep 全脚本确认对 `$root`/`$target` 只做 `git -C "$root" log` / `stat -c %Y` / `capture-pane` / `find`（全只读）；唯一的写操作在自包含的 `selfcheck()` 里（`mktemp -d` 临时目录，写自己的诊断夹具），不碰目标。
+- [x] AC4: 观察者互不知情——manager 观 outer + outer 观 inner 独立并行，谁先启动无关；
       同一目标被两个 LOOP_MIN 不同的观察者盯，各自阈值只作用于各自 stdout（AC21 根因消失）
-- [ ] AC5: 与 gap-a-log-already-filtered（打补丁的）交叉标注——本任务去掉根因，该补丁可退役
+      - 证据：`plugin/test/session-liveness.test.mjs` AC4「同一目标两个 LOOP_MIN 不同的观察者」实跑通过——先起 LOOP_MIN=999（抑制健康空闲），后起 LOOP_MIN=0（全报）；两个观察者都发 SESSION-RESUMED；空闲时 B（LOOP_MIN=0）报 SESSION-IDLE、A（LOOP_MIN=999）在自己流上保持静默——各自阈值只服务各自的流。
+- [x] AC5: 与 gap-a-log-already-filtered（打补丁的）交叉标注——本任务去掉根因，该补丁可退役
+      - 证据：`tasks/gap-a-log-already-filtered-by-one-consumers-threshold-cannot-serve-a-second.md` 已有「交叉标注（AC5，2026-08-06，gap-session-liveness-remove-shared-events-and-lock）」节，声明其机制（共享文件记全量、阈值只作用于持有者 stdout）失去存在理由、`sl_emit_shared` 双写共享文件已随根因移除而退役；session-liveness.test.mjs 原 AC21 测试已删，由新的 AC4 并行观测测试承担同等正控制。
 
 ## Definition of Done
 
-- [ ] 代码落地：`plugin/scripts/session-liveness.sh` 不含共享事件文件/锁/heavy-op 借用（`grep -c` 为 0）
-- [ ] `plugin/scripts/heavy-op-token.sh` 及其 4 个测试文件已删除；test.sh/quay-init/capability-catalog/cold-start-e2e 无引用
-- [ ] 测试绿：`plugin/test/session-liveness.test.mjs`（AC2/AC4 并行观测正控制实跑通过）、
+- [x] 代码落地：`plugin/scripts/session-liveness.sh` 不含共享事件文件/锁/heavy-op 借用（`grep -c` 为 0）
+      - 证据：`grep -c 'SL_GLOBAL_DIR\|events.jsonl\|heavy-op-token\|_sl_acquire\|_sl_release' plugin/scripts/session-liveness.sh` → 0；`grep -c 'sl_json_append\|sl_emit_shared\|sl_heartbeat\|SL_EVENTS_FILE'` → 0。
+- [x] `plugin/scripts/heavy-op-token.sh` 及其 4 个测试文件已删除；test.sh/quay-init/capability-catalog/cold-start-e2e 无引用
+      - 证据：`ls plugin/scripts/heavy-op-token.sh` 与 `ls plugin/test/heavy-op-token*` 均不存在；`git log` 显示删除落地于 2f9d4575；全树 grep `heavy-op-token` 只剩退役标注（注释/负断言），无调用点。
+- [x] 测试绿：`plugin/test/session-liveness.test.mjs`（AC2/AC4 并行观测正控制实跑通过）、
       `plugin/test/monitor-mount-check.test.mjs`（两判据）、`plugin/test/loop-shipping*.test.mjs`、`plugin/test/quay-init-loop.test.mjs`
-- [ ] 文档同步：两份 tick 文档 + 三个 skill 的「三判据/单飞/共享事件」语义已改
-- [ ] 实跑证据贴进任务体（AC2 两观察者并行、AC4 阈值独立的正控制输出）
-- [ ] 遵循 inherited-core 标准 DoD（五条款：proposal/implementation/verification/evidence/closure 全落地）
+      - 证据：session-liveness.test.mjs 全绿（含 AC2/AC4 并行观测正控制）；monitor-mount-check.test.mjs 11/11 绿（mounted+targetOk 两判据，delivered 已除）；loop-shipping.test.mjs 绿 + loop-shipping-necessity-check.test.mjs 绿（本任务补了 `packages/quay/plugin` 条目的 retainedNote——oldPaths 6→5 后该条目 inert）；quay-init-loop.test.mjs 46/48（AC3「铺全机制集」本任务修复：`inner-blocked-signal.ts`/`inner-forensics.mjs`/`task-contract-check.ts`/`task-status-drift-check.ts`/`touches-orthogonality-check.ts` 加入显式铺设表；剩余 2 个失败 `AC1(skill)`/`AC2` 为 **ac8 40→6 instrument 集成（commit 2f6621ed）的既有回归**，与本次改动无关——已用 HEAD 原版 quay-init.sh 复现确认）。
+- [x] 文档同步：两份 tick 文档 + 三个 skill 的「三判据/单飞/共享事件」语义已改
+      - 证据：`plugin/loop/{fast-mode,orchestrator}-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md` + `orchestration/orchestrator-loop-tick.md` 已含「2026-08-06 delivered 随共享 events.jsonl 移除」「heavy-op-token.sh 已退休」；本任务再清理 4 处残留「单飞挂载」现行语义表述（orchestrator-loop-tick.md:199、cold-start SKILL.md:203/207）与 2 处重活令牌放宽实验引用（fast-mode-loop-tick x2）；三个 skill 的 delivered/单飞/共享事件语义均已改。
+- [x] 实跑证据贴进任务体（AC2 两观察者并行、AC4 阈值独立的正控制输出）
+      - 证据：Contract measure `parallel_observers` = **2**（`SESSION_TARGETS` 两观察者盯同一 pane quay-0:0.0 的 `--once` 输出，两行 SESSION-STATUS 均正常）；AC2/AC4 的测试输出见 `plugin/test/session-liveness.test.mjs`（`✔ AC2 — multiple observers mount the SAME target in parallel...` / `✔ AC4 — observers don't know each other...`）。
+- [x] 遵循 inherited-core 标准 DoD（五条款：proposal/implementation/verification/evidence/closure 全落地）
+      - 本任务实现（shared-events+lock 移除、heavy-op 全删）由 develop 上的 2f9d4575/57d8fac5/dc08a3a6 落地；本次派发补齐验收：文档残留清理、necessity-check retainedNote、quay-init 铺设表修复、AC 勾选与证据。
 
 ## Touches
 

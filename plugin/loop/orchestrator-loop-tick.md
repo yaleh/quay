@@ -196,7 +196,8 @@ node --experimental-strip-types plugin/scripts/quay-suite.ts loop-driver-check
 
 `Monitor` 与 `CronCreate` 同样活不过会话。新会话必须重挂，否则外层退回纯 20 分钟轮询。
 观测只有一个工具（SPEC-one-observer-two-surfaces.md）：`session-liveness.sh`（经
-`session-liveness-mount.sh` 单飞挂载入口挂上）：
+`session-liveness-mount.sh` 挂载入口挂上——谁挂的谁拥有自己的 stdout 事件流；「单飞」互斥语义已随
+2026-08-06 人裁定退休，多观察者并行挂载天然无冲突）：
 
 ```
 Monitor({command: "$REPO_ROOT/plugin/scripts/quay-session.ts session-liveness-mount",   # REPO_ROOT 见 .quay/config.yml loop.repo_root

@@ -99,6 +99,7 @@ export function exclusionEntries(repoRoot, pluginDir) {
       rel: 'packages/quay/plugin',
       target: path.join(repoRoot, 'packages', 'quay', 'plugin'),
       reason: "gitignored pack-time snapshot of plugin/ (package.sh materializes it so the tarball carries the bundle); byte-identical to plugin/, which is excluded above — same old-path strings are target-layout documentation, not live references",
+      retainedNote: "kept despite currently inert: the target is a gitignored pack-time snapshot that does NOT exist in a fresh checkout, so the necessity scan sees 0 hits only because no pack has materialized it yet. When a pack IS made, the snapshot is byte-identical to plugin/ (excluded above) and carries the same target-layout old-path strings, so the entry must stay to keep the AC1b scan from flagging the snapshot as a live reference. (oldPaths shrank 6→5 when heavy-op-token.sh was retired 2026-08-06, which left the entry inert until the next pack.)",
     },
     { rel: 'plugin/test/loop-shipping.test.mjs', target: path.join(pluginDir, 'test', 'loop-shipping.test.mjs'), reason: "this file's own regexes + AC1c snippet array define the old paths" },
     {

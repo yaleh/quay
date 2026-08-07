@@ -758,9 +758,21 @@ derive_loop_scripts() {
   #   ships with the loop so an installed project's manager can ask "is the loop actually running".
   #   Deliberate explicit addition — the SPEC §5 annotation is the cross-reference (not a shippable
   #   SKILL.md/loop-doc path reference, so (a)/(b) derivation would miss it).
+  #   inner-blocked-signal.ts + inner-forensics.mjs (gap-session-liveness-remove-shared-events-and-lock,
+  #   found by the quay-init-loop AC3 green requirement): the docs invoke them via the quay-deliver.ts
+  #   subcommand registry (`plugin/scripts/quay-deliver.ts inner-blocked-signal` / `... inner-forensics`),
+  #   so (a) derives quay-deliver.ts but not the implementation files — a cold-started project would run
+  #   the subcommand and fail on a missing implementation. Deliberate explicit additions so the registered
+  #   subcommands' implementations ship with the loop.
+  #   task-contract-check.ts + task-status-drift-check.ts + touches-orthogonality-check.ts (same finding):
+  #   the fast-mode gate checkers (## Contract / task-status drift / touch orthogonality) are invoked by
+  #   the tick docs WITHOUT a `plugin/scripts/` path and are not bare-resolved by the mechanism corpus, so
+  #   (a)/(b) derivation misses them — a cold-started project would run the gates and fail on missing
+  #   checkers. Deliberate explicit additions (same class as the other checker transitive deps above).
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
-    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh >> "$out"
+    capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
+    inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts >> "$out"
   sort -u "$out" -o "$out"
   # (d) dependency closure — repeat until fixpoint
   changed=1; round=0
