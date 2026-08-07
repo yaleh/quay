@@ -7666,3 +7666,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **tmux-leak 完成**（外层优先，真实修复）：3 个跨主机复现测试文件（session-topology / inner-session-check / session-bootstrap）的 factory-session 泄漏——`cleanup()` 只杀 `started` 集合，factory/bootstrap 脚本经 spawnSync 直接在私有 socket 建会话不可见 → rmSync 删目录≠杀进程。修：`list-sessions` 清扫私有 socket 全会话 + `started` 兜底；tmux-leak-scan.sh 扩前缀（topo-/isc-/sb-/ol-）。多轮稳定零累积 + 负控制（~158 既有孤儿正确报红）。**fan-in**：cherry-pick 811be6ce → 代码 4 文件无冲突 + 任务文件留 develop 侧 → integration commit。任务文件 AC1-7 + DoD 入 develop。
 - **说明**：~158 个既有孤儿是历史遗留（并发 observer-registry worktree 的旧 cleanup 仍泄漏），清理留给 manager/外层（code-fix 框架）；observer-registry 需同样 list-sessions 修复（其 worktree 已在 needs-human）。
 - **在飞 1/1**：cross-machine-sync（验已落地实现）。4 空槽但池子等它完成解锁。
+
+### 事件 03:3xZ（cross-machine-sync 完成——no fan-in；全池清空）
+
+- **cross-machine-sync 完成**：8 ACs 已落地实现验真（sync-lag-check.sh + periodic-push-backup + integration-batch-merge --sync + quay-branch.ts 子命令全接线；13/13 测试；laydown 闭包 0 gap；无 crontab）。无代码 fan-in，仅 re-verify 注（7f09ba16 → 任务文件入 develop）。worktree 清理。
+- **⚠️ 重要发现（转外层）**：**develop 有 252 笔未推送提交**（origin/develop 停在 2026-08-06 17:28，本地跑到 08-07 03:38，~10h 无推送、无 .halt）——tick 心跳（fast-mode 4a / orchestrator 3c）文档在但实跑未推，正是该任务幸存内核（单机防丢）针对的风险。**推送本身是外层 verification-round 动作**（工作树与主 checkout 共享 .git，inner 不直接推 develop）。
+- **另一发现**：capability-catalog.test.mjs 6 个失败是 **AC8 回归**（2f6621ed 的 quay-* 分组入口无 question 声明，unclassified=7）——属 AC8 任务/外层全量门，非本条。
+- **在飞 0/0**：5 空槽，池子应已解锁。
