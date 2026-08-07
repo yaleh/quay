@@ -7992,3 +7992,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修**：assert-clean-tree exclude_regex 扩展覆盖 `.quay-worktree-[^/]*/` + `.quay-wtl[^/]*/`（协调态 scratch，非测试残留——内容已验证）。integration **be0cca93**。
 - **round-5（14:13 run）已启动**（/tmp/quay-suite-int @ c4343421，外层已清遗留 dirs）。等结果。
 - **held**：session-pid（7647aaf8）。在飞 0/5。
+
+### 事件 14:2xZ（round-5 72 fail = 验证检出缺 .quay/config.yml 基础设施问题）
+
+- **round-5（14:13 run）72 fail / 4.6min**：非代码回归——**`/tmp/quay-suite-int` 缺 `.quay/config.yml`**（gitignored，检出刷新被 drop）。41× "Cannot find repo root: no .quay/config.yml" + 41× "gate() not a function"（config 缺失 → 大量测试文件级失败）。round-4（13:48）有 config（2991 测试跑完）；round-5 检出重建后丢失。
+- **修**：已把主仓 `.quay/config.yml` 复制进 `/tmp/quay-suite-int/.quay/`（gitignored，不提交）。**下一轮应正常**。
+- **教训**：验证检出（/tmp/quay-suite-int）是 gitignored 配置的独立副本——外层重建检出时须重新铺 config（同 worktree 模式）。
+- **integration be0cca93**（serial 22 + 21-fix + assert-clean-tree 扩展）。held 1（session-pid）。在飞 0/5。
