@@ -7560,3 +7560,8 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **concurrency-derivation 完成**：实现早已在 develop（e846cedd/911a83cd）→ **无 fan-in**；验证全过（effective 1 == CLAUDE.md == AC5、AC4 负控制双红、dead-code-after-return 124/0、静态集 PASS）。任务文件 identical，无新 commit。worktree/branch 清理。
 - **回填 2/3**：readme-source（concurrency-derivation 释放 CLAUDE.md 后解锁）+ cross-machine-sync（periodic-push-backup 单机防丢）。
 - **在飞 4/5**：observer-registry + manager-layer + readme-source + cross-machine-sync。checksplit/split-batch 与 readme-source 撞文档。
+
+### 事件 00:7xZ（last slot held——DIR-119 退役文件类不派）
+
+- **last slot 候选排查**：session-liveness-cannot-see 与 manager-layer/cross-machine-sync 撞（DEFERRED）；DIR-119 虽全 disjoint + 机械闸过（7/23 非多数 missing），但 **Touches 引用 3 个已退役 workflow 文件**（execute-milestone.js ×2、plugin/workflows/select-preflight.js）——与 DIR-124 同类，派发会让 agent 触碰退役文件 → 不派。
+- **在飞 4/5**：observer-registry + manager-layer + readme-source + cross-machine-sync。1 空槽等完成事件回填。
