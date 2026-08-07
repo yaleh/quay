@@ -766,3 +766,10 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > 确认在 integration。C（serial-cost，agent 在加证据 30m）+ lowconc（subagent 读 session-liveness skip
 > 逻辑 2m28s）在飞。套件绿。假红类（脏树/config/tmux）的机制修复已全部落地。等 C+lowconc 完成 →
 > 并发 8 验证 serial <600s + 整轮 <15min（fast 半成立）→ 分支合并。
+
+> **16:25Z 外层 tick（no-action——C 已 fan-in，lowconc 在做 AC0 先测再定）**：C（serial-cost）
+> fan-in（0403207e）：runner-grouping flags-only **294s→8s**（C1 用 --list-files 达成）+ install 模板
+> 落地（C2）；AC4 serial 减到 **720s**（未达 <600s）诚实延到外层并发 8 测量。A1/A2/B/C 全 done，
+> **仅 lowconc 在飞**（subagent "Timing the B-class subset at concurrency 3" 22m——正是人要求的 AC0
+> 先测再定）。管理者 untrack 自己的 tick-log（human ruling：运行时遥测非代码）。套件绿、负载 1.99。
+> 等 lowconc 落地 → 外层并发 8 验证 serial 段（期望 720s 以下，fast 半更近）→ 分支合并。
