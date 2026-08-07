@@ -121,7 +121,10 @@ const AUDIT_SCHEMA = {
         properties: { rule: { type: 'string' }, evidence: { type: 'string' } },
       },
     },
-    moltenActions: { type: 'array', items: { type: 'string' } },
+    undeclaredActions: {
+      type: 'array', items: { type: 'string' },
+      description: '你在证据里看到、但主循环【没有】声明的动作（漏报检测）；看不到就返回空',
+    },
   },
 }
 
@@ -166,8 +169,16 @@ const audit = await agent(
    **这条是补偿性检查**——judge 已从 workflow 移到主循环，执行点退化为"记得应用"，
    而 2026-08-07 12:2x 首轮即命中（上一轮 tick-log 通篇没应用过任何一条）。不许略过。
 
-同时列出本轮 workflow 之外的临时动作短名（moltenActions，供 tick-log 第六列计数）。
-**没发现就返回空数组，不要凑数。**`,
+**关于熔态动作（2026-08-07 修正分工，别再生成它）**：
+上一版让你列 moltenActions，实测返回空数组，而本轮明明有三件（换 suite 监视器、
+修 READ_CMD 陈旧判据、答"355 秒是否少跑"）。**根因是结构性的，不是你失职**：
+① 你与主循环**并行**跑，本轮提交常落在你之后（实测 4a25e589 在你运行中途、65d2e98f 在你结束后）；
+② **多数熔态动作根本不进 git**——换监视器是 TaskStop+Monitor 两次工具调用、答疑是几条只读 Bash，零提交；
+③ 你的 meta-cc 被限成 preview_length=120，只够看片段，不足以识别"他换了监视器"。
+⇒ **"本轮做了什么"只有主循环完整知道，该由它声明；你的活是【核验】不是【生成】。**
+
+所以：**不要列举主循环做了什么**。只在证据里发现【主循环没声明、但确实发生过】的动作时，
+把它放进 `undeclaredActions`（这是漏报检测）。看不到就返回空数组，**不要凑数**。`,
   { label: 'self-audit', phase: 'Audit', schema: AUDIT_SCHEMA, model: MODEL }
 )
 
