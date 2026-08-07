@@ -54,6 +54,19 @@ but the event loop has already resolved'**——**未 await 的悬空 Promise**�
 （OOM 假设降级）。**验证**：在重测试文件里找未 await 的异步调用（mkdtemp/spawn/quay-init 调用），
 找到一处用"加 await 后整文件跑通"确认。
 
+**历史证据（管理者 meta-cc 2026-08-07 06:4x）——这不是新现象**：同一条 'Promise resolution is
+still pending' 最早 **2026-08-02** 出现，零星落在不同重文件：08-02 workflow-invariant-ownership /
+acceptance(161064ms) / version-consistency、08-03 workflow-event-schema / workflow-metadata-conformance、
+08-06 19:04 quay-init-loop(**299901ms**) 且当时记录"how far did quay-init-loop run before cancel?"——
+**昨天已查过一轮**、08-07 06:31 quay-init-loop(167330ms)。`fast-mode-loop-tick.md` 判绿三条件 08-03 就
+写死此现象（batch4a cancelled 2），当时归因崩溃/cancelled。
+
+**归因更正（以本条为准）**：不是"34 文件都是同一产品级缺陷"（管理者上轮猜测过度）。**两种成因都真实，
+用耗时判别**：
+- **跑了几分钟才报**（acceptance 161s、quay-init-loop 299s/167s）= **真悬空 Promise**，与并发无关；
+- **瞬时全报、按字母序连续**（34 文件截断）= **排在截断点之后根本没跑的级联受害者**。
+⇒ 判别标准是**耗时阈值**，比"看有没有 SIGKILL"可靠（可写进 Contract）。
+
 **次假设**：runner 自己的超时/清理逻辑把测试进程杀了；或某测试（如 session-topology 的 tmux 操作）
 与套件并发冲突。
 
@@ -67,6 +80,7 @@ but the event loop has already resolved'**——**未 await 的悬空 Promise**�
 measure sigkill_events = `grep -c 'SIGKILL\|Killed' .quay/full-suite.log` stdout 数字段（当前 2）
 measure cancelled = `grep -c 'cancelled [1-9]' .quay/full-suite.log` stdout 数字段（当前 2）
 measure oom_evidence = `sudo dmesg 2>/dev/null | grep -c 'killed process.*node\|Out of memory'` stdout 数字段（0=无 OOM，>0=有）
+measure long_fail_duration_ms = `grep -B1 'Promise resolution is still pending' .quay/full-suite.log 2>/dev/null | grep -oE '[0-9]+ms' | sed 's/ms//' | awk '$1 > 60000' | wc -l` stdout 数字段（判别器：分钟级=真悬空 Promise，瞬时=级联受害；当前 quay-init-loop 167s/299s 属真悬空）
 invariant full-suite 红判决必须先排除「进程被切断」（SIGKILL/cancelled/Promise-pending 级联）才能分诊失败；切断存在时，失败落点不可信
 invoke `grep -c 'Promise resolution is still pending' .quay/full-suite.log`
 control 人为 SIGKILL 一个测试进程 ⇒ 后续文件必须报 Promise-pending 级联（复现切断形态，证明切断是 SIGKILL 级联）
