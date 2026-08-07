@@ -7783,3 +7783,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **honest unchecked**：AC5（未来真实 milestone early-catch proof，不可现在供）、DoD1（deps DIR-124-D/DIR-118 todo）、DoD3（外层 fresh audit）——不假勾。
 - **red-suite 暂缓**：与 cross-machine-observe 同策略——worktree/分支保留，task-file 证据待 re-green 后一并落 develop。status 保持 ready（未翻 done，符合 DoD 未全闭合）。
 - **在飞 3/5**：inner-panel + suite-cutoff + npm-install。
+
+### 事件 08:1xZ（suite-cutoff 完成——机械判定工具 + 根因裁定）
+
+- **suite-cutoff 完成**（commit 43897ef3，5 files +496/-4）：`plugin/scripts/suite-cutoff-verdict.mjs`（242 行，静态重型文件扫描 + 全量日志时长判别器，≥130 at-risk，split 后的 quay-init 家族已降到阈值下；proposal-convergence 202s 套件瓶颈 + session-liveness 3 个真实独立失败被识别） + 8 测试全绿。scoped 41/0/0 + 静态层全过。
+- **根因裁定（机械可查）**：两种成因按耗时区分——① 真悬空/事件循环耗尽（重文件跑几分钟自败，修复=拆文件；**07:21 重跑已 0 Promise-pending、0 quay-init 失败、0 cancelled ⇒ split 修复有效**）；② 级联受害者（截断点后没跑、瞬时按字母序失败）。'add await' 假设被否（全 255 文件无字面未 await async；真机制是重 blocking spawnSync 下的 worker 事件循环耗尽）。
+- **残余 blocker**：~13min 外部 SIGKILL（test.sh:576 pid 720326 exit 137），OOM 已排除（dmesg 无今日 oom-kill，mem 10.4GB）。**新发现**：tmux-leak-scan.sh 白名单漏掉实际泄漏前缀（ol-*/isc-*/topo-*/sb-*；现场 105 server）——交叉标注给泄漏任务，本任务不修。
+- **red-suite 暂缓**：真实代码（工具+测试）需 fan-in，hold 与 cross-machine-observe/audit-findings 同批次待 re-green。AC3+DoD 干净窗口重跑 defer 外层。status 未翻 done。
+- **在飞 2/5**：inner-panel + npm-install。已 hold 3 worktree（cross-machine-observe / audit-findings / suite-cutoff）待 re-green 一并 fan-in。
