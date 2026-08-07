@@ -7858,3 +7858,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **dirty-tree-assertion 完成**（commit 4b23b2f6，6 files +174/-18）：`plugin/scripts/assert-clean-tree.sh` suite-after 断言过滤已知并发写入者——`^.. \.quay/`（control-plane scratch 如 last-pane.txt + 协调状态）与 `^.. orchestration/manager-tick-log\.md$`（manager 套件期间合法追加）；余下测试残留仍 FAIL（AC2 负控制）。ASSERT_CLEAN_TREE_EXCLUDES 可扩展。端到端实证：manager-tick-log 追加 + .quay scratch → PASS；根级 mkdtemp 残留 / 非写入者修改 → FAIL。scoped 14/14 + 静态层全过。
 - **fan-in**：cherry-pick 4b23b2f6 → integration 0e4eff84（4 code + task 文件留 develop 侧）。DoD 全量 2 绿 defer 外层批量合闸（scoped-only 规则 + gap-suite-green-gate 交叉标注）。
 - **套件 RUNNING**（09:10:51 laneCount 8）。**在飞 1**：session-pid-blind。4 空槽。
+
+### 事件 09:2xZ（laneCount-8 套件红——真实失败但多为 load/race 敏感）
+
+- **09:10:51 套件 red+failed（15 fail，8 并发 lanes 跑 4 核）**：非 SIGKILL、非脏树——真实失败但**大多 load/race 敏感**：
+  - `test-file-snapshot` AC2（zz-runner-grouping-undeclared 被删）：**隔离 5/5 绿** —— laneCount 8 下 runner-grouping AC7 fixture 与 snapshot self-check 竞态（fixture snapshot 时存在、finally 删除、check 见 removal）。并发产物非真回归。
+  - `session-liveness` AC4 observers / `noise-gate` ×2：隔离通过，29s+ 时窗敏感。
+  - `npm-pack-e2e` A2：~19s pack/install，load 敏感。
+- **资源**：gate GO（47.74）。套件 8 lanes 是外层人直接指令（~8min 快跑）。
+- **red-suite 规则应用**：失败在**具体测试文件**（非共享 static gate）；session-pid touches（session-liveness.test.mjs）与失败文件**相交** ⇒ 该任务**已派发在飞不撤**（worktree 隔离、跑自己 scoped），但**完成 fan-in 暂缓至 re-green**。新派发：失败位置与候选无关才继续——先 hold 评估。
+- **在飞 1**：session-pid-blind。fan-in 暂缓（red）。
