@@ -593,3 +593,13 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > **判定**：不是 serial 修复失败；是**完整候选树首次验证**暴露待合内容自身问题（40→6 对齐 + 新增负载
 > 敏感测试未路由）。路径：内层修 21 条（真缺陷对齐 40→6 + 负载伪影补 serial 路由）→ 并发 8 重跑 → 真绿。
 > 等 capability-catalog 隔离结果后立任务驱动内层。
+
+> **12:02Z 外层 tick（no-action——验证→分诊→立任务→驱动内层，serial 机制确认生效）**：capability-catalog
+> 隔离跑完成：**7/8 真失败**——根因确认：integration 树上 40→6 整合脚本（quay-session/quay-deliver/
+> quay-dispatch/quay-branch/quay-suite/quay-check .ts）**未声明 @instrument 问题** ⇒ catalog 真实退出
+> 1（此前直接跑 exit 0 是 head 管道码误读）。quay-init-loop 隔离 48 测仅 2 失败（AC1 skill + AC2 live
+> specimens 真失败，其余负载伪影）。**已立并晋级 ready** `gap-integration-content-fails-first-complete-
+> tree-verification-fix-21`（AC1-AC7：catalog 声明修复 / SKILL.md-测试名一致 / live specimens / session-
+> topology 分类 / 追加重 laydown serial 路由 / 并发 8 真绿 / 交叉标注 40→6），已 send-keys 驱动内层
+> （delivered: true）。路径：内层修 21 条 → 外层并发 8 重跑 → 真绿 → 放行 done-flip 批次 + 处理分叉
+> 合并。serial 组任务（gap-suite-concurrency-8-green）DoD 要求并发 8 真绿，未达成前不翻 done。
