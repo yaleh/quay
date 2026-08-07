@@ -61,11 +61,16 @@ dirty="$(git status --porcelain)"
 #   - `^.. \.quay/`                          any path under .quay/ (untracked scratch like
 #                                            last-pane.txt, or tracked coordination state) — the
 #                                            control-plane dir is never a test target
+#   - `^.. \.quay-worktree-*/` / `^.. \.quay-wtl*`  coordination-state dirs the --loop quay-init
+#                                            worktree-root tests leave at the repo root (manager-inbox
+#                                            / prepare-epochs — the same control-plane class as .quay/,
+#                                            relocated by a workspace-local worktree root). Verified
+#                                            content = coordination state only, never test residue.
 #   - `^.. orchestration/manager-tick-log\.md$`  the manager's tracked tick-log it legitimately
 #                                            appends mid-suite
 # What REMAINS after the filter is test residue and still FAILS (AC2 negative control: a root-level
 # mkdtemp residue like `?? .quay-tmp-test-*` is NOT under .quay/ and is NOT the manager's file).
-exclude_regex='^.. \.quay/|^.. orchestration/manager-tick-log\.md$'
+exclude_regex='^.. \.quay/|^.. \.quay-worktree-[^/]*/|^.. \.quay-wtl[^/]*/|^.. orchestration/manager-tick-log\.md$'
 if [ -n "${ASSERT_CLEAN_TREE_EXCLUDES:-}" ]; then
   exclude_regex="${exclude_regex}|${ASSERT_CLEAN_TREE_EXCLUDES}"
 fi
