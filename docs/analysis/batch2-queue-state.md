@@ -7811,3 +7811,14 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修复落地**（commit 43cc3ba0，branch 累计 2 commits：43897ef3 判定工具 + 43cc3ba0 reason-axis 修复）：`childKilledBySignal` 现识别全部三种 signal-kill 形态——① exitCode===null（原有）；② `exit.signal !== null`（:539 捕获的 signal 字段此前未用）；③ bash 128+N 约定（exitCode>128 且 ≤192，SIGKILL 报 137）。真实 07:08→07:21 形态（test.sh 子进程被 SIGKILL → bash 报 137）现在正确分类为 **aborted**（不触发 stop-dispatch），redDetected 仍主导（真失败行不降级）。新 AC5 同族测试（kill -9 子进程 → bash wait → exit 137 → reason=aborted + stopSignal=false）。scoped 42/0/0 + 静态层全过；standalone full-suite-runner 25/25。
 - **hold 语义**：state 文件仍是旧 runner 写的 `red+failed`（failures[] 空）→ `shouldDispatchOnRed` fail-closed 阻挡——**机械上继续 hold**。修复只影响未来重跑的分类：外层用新 runner 重跑后，若再 SIGKILL 会正确报 aborted（不 stop-dispatch）或绿。state 文件是 runner 的数据（runner: outer），inner 不擅自改写分类。
 - **在飞 1**：inner-panel。hold 4 worktree（cross-machine-observe / audit-findings / suite-cutoff / npm-install）待外层重跑。
+
+### 事件 08:5xZ（re-green 前置解锁——4 个 held fan-in 全部落地 integration）
+
+- **suite 08:22 重跑（RUNNING）**：外层用 reason-axis 修复后重跑主仓套件（08:22:35 起）——若再 SIGKILL 将正确判 aborted（不触发 stop-dispatch）。**僵局闭环（外层 ba67da94 记）**。
+- **4 个 held fan-in 全部落地**（suite RUNNING ⇒ 照常，两线模型任务合 integration 不受红窗阻挡）：
+  - cross-machine-observe → **abb8959e**（supervisor-observe.sh 415 行 + 9 测试；AC1-5 勾 + 证据）
+  - npm-install → **9ad7879e**（register-plugin.mjs postinstall 钩子 + 4 新测试；AC1-5 勾；B/C 真机项 machine-gated 写明）
+  - suite-cutoff → **54cebaa4**（suite-cutoff-verdict.mjs 判定工具 + 8 测试）+ **f91c8a4a**（reason-axis SIGKILL-137→aborted 修复 + 新 AC5 测试）
+  - audit-findings → task-file only（机制 6740d4fc 已在 develop；re-verify + M208 proof-case 证据入 develop）
+- **task 文件全部入 develop**（develop 侧 source-of-truth）：cross-machine-observe/npm-install/suite-cutoff(+2 交叉标注)/audit-findings。worktree/分支全部清理。遥测 reconcile 关闭 4 括号。
+- **在飞 1**：inner-panel（测试中）。套件 RUNNING 待结果：绿 → 全部 done；aborted → 不 stop-dispatch。
