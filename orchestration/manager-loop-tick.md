@@ -37,15 +37,14 @@ gap-session-liveness-remove-shared-events-and-lock。）
 
 ## 1. 每个 tick 必做的四件
 
-### a. 三项目状态（一次读，不逐个深挖）
+### a. 三项目状态 + 资源读数（一条命令产出，不再散落）
+
+**机械读数已并入会话入口**（2026-08-07，gap-manager-tick-mechanical-checks-are-eight-loose-bash-blocks-in-prose）：
+三项目 `.halt` 状态、cpu/load/node/mem、外层存活与 tick 日志、监视器版本比对，全部由**一条命令**产出，
+每行带标签——跳过任何一项，那几行标签就缺失，可被机械检出（不是静默少几行）：
 
 ```bash
-for p in quay archguard meta-cc; do
-  d=/home/yale/work/$p
-  printf "%-10s %s\n" "$p" "$([ -f "$d/.halt" ] && echo "已暂停: $(head -1 $d/.halt | cut -c1-60)" || echo 运行中)"
-done
-awk '/^some/{split($2,a,"=");print "cpu some avg10: "a[2]}' /proc/pressure/cpu | head -1
-echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)MB"
+node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings
 ```
 
 ### b. 每个项目的外层是否还活着、是否在推进
@@ -60,29 +59,21 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 
 **tick 里仍要看一眼**（监视器只报变化，看不到「一直没起来」这种稳态）：
 
-**按窗口名寻址，不按 pane 索引**（索引会漂）：
+**按窗口名寻址，不按 pane 索引**（索引会漂）——**并入 §1.a 的同一条命令**：
+它按窗口名寻址，每行报 `pane_pid` + `pane_current_command`（`cmd=claude` 才算认出会话；
+窗口不存在单独报 `window-missing`，不报成「活着」——§1.4b 缺陷一/三的判据已进工具）。
 
-```bash
-for t in quay-0:outer archguard-2:outer meta-cc-4:outer; do
-  ppid=$(tmux list-panes -t $t -F '#{pane_pid}' 2>/dev/null | head -1)
-  if [ -z "$ppid" ]; then printf "%-18s %s\n" "$t" "窗口不存在"; continue; fi   # 见下方「两个仪器缺陷」
-  cpid=$(pgrep -P "$ppid" 2>/dev/null | head -1)
-  if [ -n "$cpid" ]; then printf "%-18s 活着 pid=%s\n" "$t" "$cpid"; else printf "%-18s %s\n" "$t" "窗口在但无子进程"; fi
-done
-```
-
-**必读：各外层最新的那一行 tick 日志**（2026-08-03 补，代价已付过一次）。
+**必读：各外层最新的那一行 tick 日志**（2026-08-03 补，代价已付过一次）——**同一条命令的 `outer.ticklog <项目>` 行**。
+它兼容 quay/meta-cc 的 `| 2026-…` 格式与 archguard 的 `| N | …` 表格格式
+（散文里的 `grep -m1 '^| 2026'` 对 archguard 恒零命中——§4「零命中当没发生」的实例）。
 
 只看 tick 日志的 **mtime** 只能知道「它跑了」，知不到「它跑出了什么」。
 2026-08-03 管理者连着几轮向人报「健康、不介入」，而同期 quay 外层的 tick 行写的是
 **「我把 fan-in 套件搞红了，且差点用一份陈旧日志报成绿」**——
 **监视器推的是状态转换，转换不携带仓库是否被弄红。**
+读到的内容见上面 `outer.ticklog` 行（截断到 200 字符，看动作类与它自报的问题）。
 
-```bash
-grep -m1 '^| 2026' <项目>/orchestration/tick-log.md      # 最新一行，看动作类与它自报的问题
-```
-
-**同时记下当时的 `cpu some avg10`**——AC4 的判据是「连续两次 tick 超 80」，
+**同时记下当时的 `resource.cpu_some_avg10`**（同一条命令的读数字段）——AC4 的判据是「连续两次 tick 超 80」，
 而先前几行 tick 没记这个数，导致「算不算连续」变成了可争论的事而不是可判定的事。
 
 **推进的判据不是 TUI，是文件系统**（`CLAUDE.md:151`：never parse the TUI）：
@@ -120,12 +111,11 @@ rm <repo>/.halt                                                  # 恢复
 
 **今天第 5 次「陈旧句柄」，前 4 次都是被人问出来的，这次是机制抓到的。**
 
-```bash
-S=$(ps -o lstart= -p <监视器pid> | xargs -I{} date -d "{}" +%s)   # 我的实例启动时刻
-git log -1 --format=%ct -- plugin/scripts/quay-session.ts     # 会话仪器入口（quay-session.ts）最后一次改动
-# 后者 > 前者 且已在 master ⇒ 我跑的是旧版，必须重挂
-# （40→6 集成后表面只暴露 6 个入口，不再出现 session-liveness.sh；入口文件的改动作为会话面的陈旧信号）
-```
+**判据已并入 §1.a 的同一条命令**（`monitor.*` 行）：
+- `monitor.mounted` / `monitor.instances` —— 先问「有没有」（§1.4d：OOM 后实例归零，版本检查没有比较对象），再问「新不新」。
+- 每个实例一行 `monitor.instance <pid> start=<epoch>(<iso>) ppid=<ppid> stale=<bool>` ——
+  `stale=true` = `quay-session.ts` 最后一次改动（`monitor.entry_last_commit`）晚于该实例启动时刻 ⇒ 旧版，必须重挂。
+- 枚举按 **argv[0..1]**（`bash …/session-liveness.sh`，§1.4c），不 grep 整条 cmdline；`ppid` 用于判归属（§1.4b 缺陷二）。
 
 **实例**：`9ba11c91` 于 14:46:15Z 落 master，而实例 14:41:14Z 启动——**晚 5 分钟**，
 我跑了约 50 分钟的旧版本。**从外部完全看不出来**：旧版进程与新版进程同形。
@@ -245,12 +235,8 @@ meta-cc 的 MCP 服务器进程，不是 outer 会话。** 报错的不是"活�
 今晚这类自匹配发生了**三次,三种形状**:`pgrep -f` 杀掉自己的 shell、
 数 `node --test` 数到自己、枚举监视器枚举到自己。
 
-**判据修正**:匹配 **argv[0]**(第一个 `\0` 之前的部分),不匹配整条 cmdline:
-
-```bash
-a0=$(tr '\0' '\n' < /proc/$pid/cmdline 2>/dev/null | head -1)   # argv[0] 而非全文
-case "$a0" in */session-liveness.sh) ... ;; esac
-```
+**判据修正**:匹配 **argv[0..1]**(第一个 `\0` 之前的部分 + 脚本路径),不匹配整条 cmdline——**已进工具**
+（`manager-tick-readings` 的监视器枚举按 argv[1] basename == `session-liveness.sh`，与 monitor-mount-check 同一谓词）。
 
 **更一般的形态**:**用「文本里出现某字符串」判断「进程是某程序」,永远会把谈论它的人算进去。**
 这与「grep 命令位置而非裸子串」是同一条(runtime-usage-inventory 的 AC2 早就写过),

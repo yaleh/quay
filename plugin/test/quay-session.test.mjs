@@ -13,9 +13,10 @@ test("quay-session: GROUP is quay-session and the SPEC AC12 member set is regist
   const want = [
     "session-liveness", "session-liveness-mount", "monitor-mount-check", "topology-check",
     "quay-topology", "session-bootstrap", "inner-session-check", "quay-launch", "outer-liveness",
+    "manager-tick-readings",
   ];
   assert.ok(assertMembers(MEMBERS, want), `members=${MEMBERS.map((m) => m.name).join(",")}`);
-  assert.equal(list().length, 9);
+  assert.equal(list().length, 10);
 });
 
 test("quay-session: every member declares what question it answers (admission contract, SPEC AC4)", () => {

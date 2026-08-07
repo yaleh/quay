@@ -26,6 +26,7 @@ export const MEMBERS: InstrumentSpec[] = [
   { name: "inner-session-check", file: "inner-session-check.sh", kind: "bash", description: "内层会话存活检查" },
   { name: "quay-launch", file: "quay-launch.sh", kind: "bash", description: "启动 quay 会话" },
   { name: "outer-liveness", file: "session-liveness.sh", kind: "bash", description: "外层存活（已泛化更名为 session-liveness，别名保留）" },
+  { name: "manager-tick-readings", file: "manager-tick-readings.ts", kind: "ts", description: "管理者 tick 机械读数（三项目状态/资源/外层存活/tick日志/监视器版本，单命令产出）" },
 ];
 
 const entry = createEntryPoint(GROUP, MEMBERS);
