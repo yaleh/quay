@@ -7506,3 +7506,13 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **无安全派发**：divergence（integration 33 / develop 272）结构性阻塞全池。外层已升级（d8f9eb75），manager 在诊结构因（8da06396："26 个 commit 是我的"）。
 - **保留 worktree**：ac8 / chart2-s2 / shipped-ts（needs-human）；manager-productization / resource-aware（历史遗留）。
 - **本 tick 不派发**。下一解锁动作 = 外层对齐分支。
+
+### 事件 00:1xZ（分支对齐后恢复派发——3 连派）
+
+- **外层对齐完成**：42581411 merge develop→integration（10 conflicts 以 develop 为权威），integration..develop 从 282 gap → 0，派发阻塞清除。
+- **恢复派发 1/3**：dispatch 3 条（全过闸 + 两两 disjoint）：
+  1. `gap-audit-findings-not-backpropagated-to-earlier-detectors`（finding-backpropagate/execution-policy mirror 对）
+  2. `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`（scripts/test.sh + CLAUDE.md 现实/声明一致化）
+  3. `gap-full-suite-runner-marks-test-sh-gate-wait-as-failed`（WAIT 分类 aborted + --wait-check）
+- worktrees：audit-findings / concurrency-derivation / full-suite-wait。task-start 三记录。
+- **在飞 3/5**。
