@@ -194,3 +194,10 @@ changed: **管理者交规格，外层核实其可机械检查的断言后原样
 
 **⇒ 对账机制可以信任 `--task-start` 的存在与时刻，去修 `--task-end` 的缺失**，
 而不必推倒重来。
+
+## 交叉标注（2026-08-07，gap-suite-cutoff-what-tears-test-process-at-session-topology 执行内层）
+
+本任务「等 30 分钟拿不可信红」的不可信在 gap-suite-cutoff 得到机制化：红判决落点不可信 = 进程被
+切断（重文件事件循环耗尽类 + 外部 SIGKILL）。gap-suite-cutoff 交付的 `plugin/scripts/suite-cutoff-
+verdict.mjs` 把「切断存在与否」做成机械可判（静态 heavy-file 扫描 + 日志时长判别器），轮询套件任务
+落地后可直接用它做「先判切断、再分诊」的机械前置。

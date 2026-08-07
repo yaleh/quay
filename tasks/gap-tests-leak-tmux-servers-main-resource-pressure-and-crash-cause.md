@@ -286,3 +286,12 @@ changed: 外层受管理者资源泄漏发现裁定立案（最高优先级测�
 (3) **残留 9 个留内层判断**——挂载观察者 pid 2598198 可能用其一，先确认再清；
 (4) **崩溃根因关联**——三次崩溃获具体机制（随轮数累积 → 崩溃前负载飙升）。
 status: todo——测试泄漏主因；最高优先，与 OS-anchor / laneCount 并列前排。
+
+## 交叉标注（2026-08-07，gap-suite-cutoff-what-tears-test-process-at-session-topology 执行内层）
+
+本任务原假设「泄漏经 OOM 成为切断源」**已被 gap-suite-cutoff 决定性排除**（dmesg 今日无 OOM；
+mem_avail=10.4GB）。泄漏仍是资源压力与崩溃史的真源，但**不是当前 8/7 SIGKILL 的机制**。
+gap-suite-cutoff 执行内层另发现**泄漏扫描覆盖缺口**（本任务地盘，记录不代修）：当前 105 个
+tmux server 进程的前缀大量是 `ol-*`（ol-payload / ol-ac9 / ol-multi-ac4 …）、`isc-factory`、
+`topo-*`、`sb-ac`，而 `tmux-leak-scan.sh` 白名单只有 `skv-|session-liveness-|ol-tok-|enter-repro-`
+——实际泄漏类不在扫描内。建议本任务把白名单扩到实测泄漏前缀，或改为按「进程数回落断言」覆盖全类。
