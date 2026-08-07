@@ -39,7 +39,7 @@ const PRIOR = A.prior ? `\n\n**上一轮读数（只报差异，不重述未变�
 // 本 workflow 不跑它——脚本层无 I/O 能力（探针 wf_af76a6df-2c3：globalThis 仅
 // log/phase/budget/setTimeout/clearTimeout/agent/parallel/pipeline/workflow/args），
 // 且即便能跑，包进 agent 也要 46s 而主循环只要 1.3s。
-export const READ_CMD = String.raw`cd /home/yale/work/quay
+const READ_CMD = String.raw`cd /home/yale/work/quay
 echo "PC=$(git log --oneline --since='1 day ago' | wc -l)"
 lat=$(gh release view --json tagName -q .tagName 2>/dev/null); echo "release=$lat ahead=$(git rev-list --count $lat..develop 2>/dev/null)"
 python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('plugin_in_files='+str('plugin' in d.get('files',[])))"
@@ -71,6 +71,10 @@ const AUDIT_SCHEMA = {
     moltenActions: { type: 'array', items: { type: 'string' } },
   },
 }
+
+// READ_CMD 是主循环该跑的固定命令块的单一来源；这里打出它的指纹，
+// 让主循环能核对自己抄的那份有没有漂移（判据单一来源，不靠人记得同步）。
+log(`READ_CMD 行数=${READ_CMD.trim().split('\n').length}`)
 
 phase('Audit')
 const audit = await agent(
