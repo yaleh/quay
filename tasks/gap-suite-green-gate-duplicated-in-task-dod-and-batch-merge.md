@@ -160,6 +160,12 @@ CLI → `✔ CLI AC2: a new task with the DoD demand … ratchet growth → exit
 绿闸门）**不自跑完整套件**，机制侧只做 scoped 验证；DoD 那条已注明延后到外层批量合闸门。即本任务没有新加「完整套件」到
 自身 DoD 的负担，存量该行按「各自收尾时按新规则处理并注明依据」处置。
 
+`gap-suite-state-split-across-worktree-and-gate`（runner `--root` 使 suite-state 写进 worktree、闸门读主 repo）——
+**本条闸门=批量合边界的「主 repo state 读真实结果」依赖它的 `--state-dir` 同步桥**：批量合只在 `suiteGreen`（主 repo
+`.quay/full-suite-state.json` = green）时启动；若 worktree 全量的绿写不进主 repo（本轮修复前 123 分钟空窗），批量合就
+会跨一个「它看不到已变绿」的闸。该条已让 runner 在 `--root <worktree>` 时把 state 写进 `--state-dir`（主 repo）并镜像回
+worktree，两条线合并后批量合闸门读到与 runner 实际结果一致的状态。
+
 ## Touches
 - plugin/loop/fast-mode-loop-tick.md
 - plugin/scripts/task-contract-check.ts

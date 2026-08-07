@@ -45,17 +45,31 @@ resume 若中断，先跑 measure 读两 state 是否同结果
 
 ## Acceptance Criteria
 
-- [ ] AC1: **runner 语义修正**——`--root`（被测 checkout）与 state/log 写入位置解耦或加同步桥；跑
+- [x] AC1: **runner 语义修正**——`--root`（被测 checkout）与 state/log 写入位置解耦或加同步桥；跑
       worktree 全量后主 repo state 反映真实结果
-- [ ] AC2: **闸门不再分裂**——worktree 全量绿后，主 repo state=green（inner + suite-state-trigger 读到同一结果）
-- [ ] AC3: **负控制**——worktree 全量 red 时主 repo state 也是 red（不误报绿）；批量合只在真绿启动
-- [ ] AC4: 与 gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge（闸门=批量合边界）交叉标注
-- [ ] AC5: 与 gap-red-window-has-no-automatic-executor（suite-state-trigger 的 SUITE-GREEN/RED 事件流）交叉标注
+      — `full-suite-runner.ts` 新增 `--state-dir`（`.quay` state/log 目录，默认 `<root>/.quay`，向后兼容）；
+      `--root` 只测代码，`--state-dir` 指闸门位置。另加**同步桥**：每次 state 转变写入
+      `--state-dir/full-suite-state.json`（主 repo 闸门位置）**并镜像**到 `<root>/.quay/full-suite-state.json`
+      （被测 worktree 自身），两者字节一致（Contract band `cmp -s` = same）。`full-suite.log` 与
+      `verification-round.jsonl` 也落 `--state-dir`。实跑见下 RUN 1-3。
+- [x] AC2: **闸门不再分裂**——worktree 全量绿后，主 repo state=green（inner + suite-state-trigger 读到同一结果）
+      — RUN 1/3 实跑：`--root /tmp/quay-suite-int --state-dir /home/yale/work/quay/.quay` 绿 ⇒
+      `cmp -s <worktree-state> <main-state>` = same、主 repo `gate_sees=green`、`suite-state-trigger --once`
+      读主 repo → `SUITE-STATUS green` + `SUITE-GREEN` 触发、`stopSignal=false`。
+- [x] AC3: **负控制**——worktree 全量 red 时主 repo state 也是 red（不误报绿）；批量合只在真绿启动
+      — RUN 2 实跑：red 假套件 ⇒ `cmp` = same、主 repo `gate_sees=red reason=failed`（stop-dispatch 信号在位）、
+      worktree 同步 red；无任何 false green。
+- [x] AC4: 与 gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge（闸门=批量合边界）交叉标注
+      — 见该任务「Cross-annotation」；反向标注也已写入（见任务体末尾）。
+- [x] AC5: 与 gap-red-window-has-no-automatic-executor（suite-state-trigger 的 SUITE-GREEN/RED 事件流）交叉标注
+      — 见该任务「Cross-annotation」；反向标注也已写入（见任务体末尾）。
 
 ## Definition of Done
 
-- [ ] AC1-AC3 实跑输出贴任务体（跑 worktree 全量前后，主 repo vs worktree state 对照）
-- [ ] 连续 2 次 worktree 全量后，主 repo state 与 worktree 一致（green/green 或 red/red）
+- [x] AC1-AC3 实跑输出贴任务体（跑 worktree 全量前后，主 repo vs worktree state 对照）
+      — 见任务体末尾「落地证据（2026-08-07，worktree `suite-state-split-fix`）」的 RUN 1/2/3 输出。
+- [x] 连续 2 次 worktree 全量后，主 repo state 与 worktree 一致（green/green 或 red/red）
+      — RUN 1（green/green）→ RUN 2（red/red）→ RUN 3（green/green）：三次全部 `state_synced=same`。
 
 ## Touches
 - plugin/scripts/full-suite-runner.ts（--root 语义拆开 / 同步桥）
@@ -70,3 +84,50 @@ at: 2026-08-07T22:0xZ
 changed: 管理者 22:0x 时间敏感——闸门（主 repo state）123 分钟无新绿、批量合在跨未绿的闸。外层核实：
   21:48 轮 green 写进 worktree（--root /tmp/quay-suite-int），主 repo state 仍 20:01 red。止血：cp 同步
   worktree green 到主 repo，SUITE-GREEN 触发。立案：runner --root 语义拆开（测代码 vs 写 state）。
+
+## 落地证据（2026-08-07，worktree `task/suite-state-split-fix`）
+
+**机制落地（`full-suite-runner.ts`）**：
+- 新增 `--state-dir <path>`：`.quay` state/log 写入目录（默认 `<root>/.quay`，向后兼容）。`--root` 只决定
+  被测 checkout（spawn cwd + verdictCommit 锚点）；`--state-dir` 决定 `full-suite-state.json`、
+  `full-suite.log`、`verification-round.jsonl` 的写入位置。
+- **同步桥**：每次 state 转变经 `writeSuiteState()` 写入 `--state-dir/full-suite-state.json`（闸门位置）
+  **并镜像**到 `<root>/.quay/full-suite-state.json`（worktree 自身）——两个文件字节一致
+  （Contract `cmp -s` = same），闸门与 worktree 不再分裂。
+- `appendVerificationRound` 首参语义改为 `.quay` state 目录（`checker-cost.test.mjs` 两处调用同步更新）。
+- 单测：`plugin/test/full-suite-runner.test.mjs` 新增 AC1/AC2（--state-dir 拆开 + 同步镜像 + 闸门读绿）与
+  AC3（负控制 red 镜像）；**27/27 绿**。相邻回归 `checker-cost.test.mjs` + `trend-check.test.mjs` **21/21 绿**、
+  `suite-state-trigger.test.mjs` + `quay-suite.test.mjs` + `measure-suite-reporter.test.mjs` **21/21 绿**。
+
+**实跑对照（跑 worktree 全量前后，主 repo vs worktree state）**——用真实路径
+`--root /tmp/quay-suite-int`（被测 worktree）+ `--state-dir /home/yale/work/quay/.quay`（主 repo 闸门位置），
+轻量假套件（green/red），跑完即恢复真实 state（止血遗留状态），不留假绿污染：
+
+```
+RUN 1 (GREEN):  full-suite-runner: FINAL state=green durationMs=51 exit=0
+  state_synced = cmp -s /tmp/quay-suite-int/.quay/full-suite-state.json /home/yale/work/quay/.quay/full-suite-state.json => same
+  gate_sees    = python3 -c ".../home/yale/work/quay/.quay/full-suite-state.json print state" => green
+  worktree_state = green runner=outer laneCount=1
+
+RUN 2 (RED, AC3 负控制):
+  full-suite-runner: FINAL state=red reason=failed durationMs=49 exit=1
+  state_synced = same
+  gate_sees    = red reason=failed   (stop-dispatch 信号在位，无 false green)
+
+RUN 3 (GREEN, 连续第 2 次一致):
+  full-suite-runner: FINAL state=green durationMs=49 exit=0
+  state_synced = same
+  gate_sees    = green
+  suite-state-trigger --once --root /home/yale/work/quay  => SUITE-STATUS green / SUITE-GREEN stopSignal=false
+```
+
+连续 2 次 worktree 全量后主 repo state 与 worktree 一致：RUN 1 green/green → RUN 2 red/red → RUN 3 green/green，
+三次全部 `state_synced=same`（DoD）。
+
+**AC4/AC5 交叉标注**：
+- `tasks/gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge.md`（闸门=批量合边界）——Cross-annotation
+  指向本条：批量合边界的「主 repo state 读真实结果」依赖本条 `--state-dir` 同步桥，否则 worktree 跑的绿
+  写不进主 repo、批量合跨未绿闸。
+- `tasks/gap-red-window-has-no-automatic-executor.md`（suite-state-trigger 的 SUITE-GREEN/RED 事件流）——
+  Cross-annotation 指向本条：trigger 只读主 repo 相对 `.quay/full-suite-state.json`，本条保证 worktree 跑
+  的 state 落主 repo，trigger 的事件流才接到真实结果。
