@@ -7768,3 +7768,11 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **过程偏差（诚实记录）**：3 连派（suite-cutoff/audit-findings/npm-install）在跑停止条件**之前**完成。按 red-suite 规则（failure-location conditional）：失败位置 = 测试进程 SIGKILL，**非**共享 run_static_checks 闸门 → dispatch-continues 成立，3 派发不撤回；但流程顺序应为 stop-checks→dispatch，下次纠正。
 - **batch-merge-ff fan-in 已在 suite-red 读取前落地**（integration 17a8ba69，非 develop——integration 是 pending-verify 累积目标，不并红树）。此后 completed-agent fan-in **暂缓**至外层 re-green（red-suite 规则）。
 - **在飞 5/5**：inner-panel + cross-machine-observe + suite-cutoff + audit-findings + npm-install。外层需低负载窗口重跑验证（suite-red 需外层 re-green）。
+
+### 事件 07:5xZ（cross-machine-observe 完成——fan-in 因 suite-red 暂缓）
+
+- **cross-machine-observe 完成**（commit c0ece253，5 files +887/-9）：`plugin/scripts/supervisor-observe.sh`（415 行，supervisor-deliver 读方向对称实现）——observe(target) → {git_state, suite_state, session_state, process_state}，只读、ssh-transport-agnostic（--host local 本地 / --host <hostname> 自传输）。4 类晚上真实错误全部内置 + 各自负控制（9 测试）：fetch-before-compare / HEAD-vs-branch / monitor-cache-stale / process-comm-field-match。capability-catalog 注册 +1，orchestrator-loop-tick 引用 → quay-init laydown 41 scripts。测试 24 pass + scoped 85 pass/1 skip 全绿。
+- **fan-in 暂缓（red-suite 规则，ALWAYS hold）**：suite-state `red+failed` + failures[] 空（SIGKILL 切断签名，kill 产生 cancelled-not-fail）⇒ `shouldDispatchOnRed` fail-closed 返回 true ⇒ **已完成的 fan-in 一律暂缓至外层 re-green**。cross-machine-observe worktree/分支完整保留（不清理、不合并），待 re-green 后 fan-in。
+- **空槽不回填**：cross-machine-observe 释放 1 槽，但 red 阻挡新派发（stop 条件命中）→ 不回填。在飞 5→4。
+- **诚实记录派发偏差**：3 连派（suite-cutoff/audit-findings/npm-install）发生在 suite-red 已确立（07:21）**之后**（07:38），违反 stop-checks-before-dispatch 顺序 + shouldDispatchOnRed fail-closed 应阻挡新派发。不杀已跑 agent（work 隔离在独立 worktree、fan-in 已暂缓、不污染红树），但本次教训记录：**先读 suite-state 再派发**。
+- **在飞 4/5**：inner-panel + suite-cutoff + audit-findings + npm-install。跨机观测验证器就绪待 re-green。
