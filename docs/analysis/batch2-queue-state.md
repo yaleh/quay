@@ -7590,3 +7590,10 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **checksplit 完成**：AC1 裁定 = **mark-aspirational（NOT wire-in）**——CLAUDE.md split 路由表标 reference/manual policy + 指向本任务（369fdac7 已入 develop）；DoD 补齐（82d45197，仅任务文件）。零调用 grep 复现、AC4 的 sibling recursive-guard 保持 needs-human 吻合。42/0 scoped + task-contract 干净。无代码 fan-in。
 - **2 空槽无干净候选**：split-batch / session-liveness-cannot-see / no-post-merge / complete-delivery-surface 全部与在飞 3 agent（observer-registry / manager-layer / probe-mechanism）撞核心文件（quay-init.sh / tick docs / session-liveness.sh）。等核心 agent 完成即解锁。
 - **在飞 3/5**：observer-registry + manager-layer + probe-mechanism（均活跃）。
+
+### 事件 01:2xZ（probe-mechanism 完成 → fan-in 冲突 → needs-human + integration restore）
+
+- **probe-mechanism 完成**（真实实现）：routine-scheduler 触发器改两层量（interval:Nm），接线两个 tick loop + run-routines skill + .gitignore；58/0 测试 + scoped 绿 + 自验证 PASS。commit bf6b42b2 + 9e4ffd45。
+- **fan-in 冲突（同位置 4b）**：cherry-pick bf6b42b2 → 1 冲突 `plugin/loop/fast-mode-loop-tick.md` 的 **step 4b**——integration 已有 cross-machine-verify 心跳（gap-no-post-merge，5674e0ea 已落），probe-mechanism 想在同一位置加 routine 检查。两个在飞任务都合法想要 4b。**doc：冲突 → needs-human，不 --skip/-X ours**。标 needs-human，worktree/branch 保留（bf6b42b2+9e4ffd45）。
+- **⚠️ cherry-pick abort 意外回退 integration**：`git cherry-pick --abort` 把 integration 从 578afc7c 退到 a09ddb56（丢失 ac8 merge 8d740326 + readme-source 578afc7c）。**已 `git reset --hard 578afc7c` 恢复**，验证全部 5 个 fan-in 在（readme-source/ac8-merge/manager-skill/prefriction×2），README quay.ts 修复恢复。integration 现在安全。
+- **在飞 2/2（真实）+ probe-mechanism 保留 bracket**：observer-registry + manager-layer。2 空槽。
