@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group serial
 // session-topology.test.mjs — gap-tmux-session-topology-no-factory-definition, AC1–AC5;
 // two-window correction pinned by gap-manager-baked-into-project-topology-factory (manager is
 // CROSS-PROJECT, NOT part of a project's topology).
@@ -21,7 +21,7 @@
 //   AC4 — cold-start/SKILL.md cross-annotates the session topology (TOPOLOGY-IN-PLACE key + the
 //         factory/check references) — SKILL teaches the loop start, this task teaches the session
 //         topology; together they are 装得上.
-//   AC5 — this file is node:test + // @test-group governance.
+//   AC5 — this file is node:test + // @test-group serial.
 // Plus: the factory's --dry-run emits the two-window plan; a real build creates the windows.
 //
 // All tmux work is on a HERMETIC server on a private socket (TMUX_TMPDIR + explicit -S argv),

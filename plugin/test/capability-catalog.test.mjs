@@ -1,4 +1,4 @@
-// @test-group governance
+// @test-group serial
 // capability-catalog.test.mjs — gap-eighty-two-shipped-checks-and-none-says-what-it-answers.
 // Tests for plugin/scripts/capability-catalog.sh — the catalog that makes every shipped
 // check declare what QUESTION it makes askable (capability was never missing, visibility was).
@@ -15,7 +15,7 @@
 //          (do not ship with the artifact) — and quay-init actually does not lay them down.
 //   AC5  — negative control: a random sample of 5 delivered checks each answers a SPECIFIC
 //          question (never the generic "checks correctness" — a catalog of empties is no catalog).
-//   AC6  — this file uses node:test and declares // @test-group governance.
+//   AC6  — this file uses node:test and declares // @test-group serial.
 //   Wiring — capability-catalog.sh is in quay-init.sh's shipped script set and lands in a real
 //          `quay-init --loop` target, where it passes (self-declared, installed subset declared).
 //
@@ -219,7 +219,7 @@ test("AC6 — this test file is node:test with a governance @test-group", () => 
   const src = fs.readFileSync(new URL(import.meta.url), "utf8");
   assert.match(src, /from "node:test"/, "imports node:test");
   assert.match(src, /\bimport \{[^}]*\btest\b[^}]*\}/, "imports test from node:test");
-  assert.match(src, /^\/\/ @test-group governance/m, "declares @test-group governance");
+  assert.match(src, /^\/\/ @test-group serial/m, "declares @test-group serial");
 });
 
 // diskWorktreeRoot: a real (non-tmpfs) directory for quay-init's --worktree-root, which
