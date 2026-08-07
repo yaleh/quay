@@ -501,3 +501,16 @@ correct-self 行) = 34.4%`——**低于 50%，分层健康**。若把 correct-s
 > **11:35Z 注**：内层正在 merge integration→develop（MERGE_HEAD 活跃，解 queue-state 冲突）。外层 tick-log 记录待 merge 完成后 commit（merge 中不干扰）。
 
 > **09:51 外层 tick**（R8 立案 + backlog 追加证据提交）：① `gap-test-isolation-backlog-44-violations-unmeasured` 追加并发 8 R3 证据（runner-grouping 嵌套 spawns-test-sh 计数漂移首次触发成真实失败）；② 裁定 **R8 值得立案**——挂钟依赖是负载敏感族根因（session-liveness noise-gate 真 sleep(2500)+10-25s 窗口）、R1-R7 未覆盖的新类别、阻塞并发 8 策略，立 `gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`（todo，AC1-AC4，Touches 含 test-isolation-contract.md + 4 个测试文件）。待 commit。awaiting human ruling on red-window/concurrency。
+
+> **09:55 外层 tick（correct-self：09:25 分诊有误 + 管理者发现核实 + 机械化裁定）**：管理者指出 KNOWN-LOAD-
+> SENSITIVE 判读规则零代码实现、同标记盖两种根因、且我的环境分类不可追溯。**复验全部成立，并发现
+> 第三处误判**：(a) `grep plugin/scripts/*.ts` 对 KNOWN-LOAD-SENSITIVE **零命中**——规则只在
+> fast-mode-loop-tick.md 散文 + 文件头注释；(b) 09:25 运行实为 **7 个失败不是 15**（误把 ✖ 行重复计
+> 成失败），6 个落族（cold-start-skill ×2、session-liveness noise-gate ×2+AC4 ×1、runner-grouping ×1），
+> 但 **第 7 个 test-file-snapshot「baseline REMOVED」是跨文件竞态不是环境失败**——runner-grouping AC7
+> 在真实 plugin/test/ 写临时夹具 zz-runner-grouping-undeclared.test.mjs（finally 删），test-file-snapshot
+> 全套件快照恰好扫到、夹具随后被删 ⇒ 假「回归」；串行无竞态、并发 8 必现；(c) 我没执行文档要求的
+> 族内隔离重跑，验证步骤不可追溯。**裁定机械化**：立
+> `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（机器可读族清单 `@load-sensitive
+> <kind>` + 红窗分诊自动分区 + 隔离重跑自动触发），backlog 任务追加 AC5/AC6（并发触发实例基线化 +
+> AC7 夹具移出真实测试目录）。两任务均 todo（套件门禁 red，等待 human ruling，不派发）。

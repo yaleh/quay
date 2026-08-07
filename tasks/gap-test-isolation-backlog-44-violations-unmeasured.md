@@ -1,6 +1,13 @@
 ---
 id: gap-test-isolation-backlog-44-violations-unmeasured
-title: "test-isolation contract check has 44 standing violations (fixed-path-write=12 process-exit-1=7 mkdtemp-no-cleanup=21 ...) that pre-date tonight's merges — confirmed identical count in round1 log (192 glob vs 219 now, same 44) — the check runs but its backlog is UNMEASURED: no baseline/ratchet, so 44 reds are just 'existing noise' and new violations are indistinguishable from old (red-window triage had to diff against a rotated-out round1 log by hand); fix: baseline the 44, add a shrink-only ratchet or per-category count like the test-framework-policy list"
+title: "test-isolation contract check has 44 standing violations
+  (fixed-path-write=12 process-exit-1=7 mkdtemp-no-cleanup=21 ...) that pre-date
+  tonight's merges — confirmed identical count in round1 log (192 glob vs 219
+  now, same 44) — the check runs but its backlog is UNMEASURED: no
+  baseline/ratchet, so 44 reds are just 'existing noise' and new violations are
+  indistinguishable from old (red-window triage had to diff against a
+  rotated-out round1 log by hand); fix: baseline the 44, add a shrink-only
+  ratchet or per-category count like the test-framework-policy list"
 status: todo
 labels:
   - gap
@@ -28,6 +35,16 @@ process-exit-1=7 / mkdtemp-no-cleanup=21 / live-data-dir-write=0 / shared-root-m
 不敏感）。**此证据支持本任务"需要基线/棘轮"的立论**——欠账一旦被负载触发，就是真实红，而它仍在
 44 个"已知噪音"里不可区分。
 
+**【追加证据 2026-08-07 09:5x——第二个并发触发实例：跨文件竞态，fixed-path-write 类别】**
+`runner-grouping.test.mjs` AC7（`--list-groups` 未声明文件测试，行 112-127）在**真实 `plugin/test/`
+目录**写临时夹具 `zz-runner-grouping-undeclared.test.mjs`（非 mkdtemp——R3/fixed-path-write 类别），
+finally 里删除。并发 8 下：该夹具存在期间，`test-file-snapshot.test.mjs` AC2（行 37-53）的全套件
+快照恰好把它扫进基线，随后夹具被 finally 删除 ⇒ 快照对检报 `baseline test file(s) REMOVED (real count
+regression): zz-runner-grouping-undeclared.test.mjs`，`1 !== 0`。**同一实例的两个测试文件共享真实
+测试目录互相干扰**——行 114 注释只防了"泄漏污染 +1 基线/策略检查器"，没防"另一测试的全集快照
+扫到它"。串行下两测试不同时跑、无竞态；并发 8 下必现。**此证据同样支持基线/棘轮立论，且指向
+AC7 的夹具写法本身**（临时文件应放 mkdtemp 或快照助手应排除 zz-* 运行期夹具）。
+
 **【根因】**：test-isolation-check **报数但不设基线/棘轮**——44 个 red 是「已知噪音」，每次全量都红，
 新违规混在里面不可区分。对比 test-framework-policy（有 shrink-only 棘轮 + ceiling + git-HEAD strict-
 subset），test-isolation 缺同款机制。
@@ -42,6 +59,10 @@ subset），test-isolation 缺同款机制。
 2. **加 shrink-only 棘轮**：新违规可被报出但不得增加净数（或按类别计数，如 mkdtemp-no-cleanup 单独
    一条清理线）
 3. 清理方向：mkdtemp-no-cleanup=21（占一半）是最高杠杆——批量加 cleanup
+4. **并发触发实例（2026-08-07 追加）纳入基线账**：runner-grouping 的 spawns-test-sh 嵌套 + AC7
+   fixed-path-write 夹具都已在 44 基线账里被负载触发成真实红——基线后这些是"已知并发红"，须连同
+   KNOWN-LOAD-SENSITIVE 机械化（见 gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage）
+   一起在红窗分诊里被机械识别，而不是每夜手工重判
 
 ## Acceptance Criteria
 
@@ -49,20 +70,29 @@ subset），test-isolation 缺同款机制。
 - [ ] AC2: shrink-only 棘轮——新违规触发检查红，既有积压不阻塞（除非净增）
 - [ ] AC3: 与 gap-test-framework-policy（done）交叉标注——同款棘轮机制的第二个消费者
 - [ ] AC4: 与 gap-test-isolation-contract-is-unwritten 交叉标注（检查器来源任务）
+- [ ] AC5: **并发触发实例基线化**——runner-grouping 的 spawns-test-sh 嵌套 + AC7 夹具竞态在红窗
+      分诊里被机械识别为已知并发红（串通 gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage）
+- [ ] AC6: **AC7 夹具写法修正**——`zz-runner-grouping-undeclared.test.mjs` 移出真实 `plugin/test/`
+      （或快照助手排除 zz-* 运行期夹具），消除与 test-file-snapshot 全套件快照的跨文件竞态
 
 ## Touches
 
 - plugin/scripts/test-isolation-check.ts（基线 + 棘轮逻辑）
 - plugin/test-framework-policy-exemptions.txt 或等价基线文件（模式复用）
+- plugin/test/runner-grouping.test.mjs（AC7 夹具写法）
+- plugin/test/test-file-snapshot.test.mjs 或 plugin/scripts/test-file-snapshot.sh（排除 zz-* 夹具）
 - tasks/gap-test-framework-policy-for-new-tests.md（AC3 交叉标注）
+- tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）
 
 ## Contract
 
 measure   iso_violations = `bash plugin/scripts/test-isolation-check.ts` stdout 的 violation 总数
 band      iso_violations <= 44（基线；shrink-only 棘轮：净增即红）
+measure   concurrency_triggered = `grep -c 'zz-runner-grouping-undeclared' plugin/test/runner-grouping.test.mjs plugin/test/test-file-snapshot.test.mjs` stdout 数字段（AC6 落地后应移除该夹具引用，归 0）
 invoke    `bash plugin/scripts/test-isolation-check.ts`
-control   既有 44 不阻塞（AC2）；新违规触发红（AC2）
-resume    基线与棘轮分步提交，任一步完成即写盘
+control   既有 44 不阻塞（AC2）；新违规触发红（AC2）；并发 8 下 runner-grouping 与 test-file-snapshot
+          同跑不再互相干扰（AC6）
+resume    基线与棘轮分步提交，任一步完成即写盘；先跑 measure 读当前违规数
 
 ## Dispatch review
 
@@ -70,3 +100,5 @@ reviewer: outer
 at: 2026-08-06T03:1xZ
 changed: 红窗分诊立案——test-isolation 44 违规无基线，全量每次启动即红（static-check 层），
 靠手工 diff round1 日志确认既有。管理者可确认后派发。
+追加 2026-08-07 09:5x：并发 8 两次触发（runner-grouping 嵌套 spawns 计数漂移 + AC7 夹具 vs
+test-file-snapshot 快照竞态），支持基线/棘轮立论，加 AC5/AC6。

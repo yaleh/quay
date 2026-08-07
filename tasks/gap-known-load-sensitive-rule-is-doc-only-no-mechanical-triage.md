@@ -1,0 +1,110 @@
+---
+id: gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage
+title: "KNOWN-LOAD-SENSITIVE interpretive rule (fast-mode-loop-tick.md 已知负载敏感族 —
+  \"only this family red ⇒ isolate-rerun before concluding\") has ZERO code
+  implementation: grep plugin/scripts/*.ts = 0 hits, pure doc convention relying
+  on the triaging human/agent to remember; cost demonstrated 2026-08-07:
+  isolate-rerun silently skipped, a non-family cross-file race
+  (test-file-snapshot baseline REMOVED vs runner-grouping AC7 zz- fixture) got
+  swept into the 'environmental' bucket, and the family marker conflates two
+  root causes (session-liveness wall-clock vs runner-grouping nested-spawn);
+  mechanize as machine-readable family manifest (per-file @load-sensitive <kind>
+  annotation) + red-window triage auto-partition + auto isolate-rerun"
+status: todo
+labels:
+  - gap
+  - defect
+  - milestone-candidate
+parent: null
+children: []
+extra: {}
+---
+**type:** execution
+
+## Proposal
+
+**「已知负载敏感族」判读规则只有文档、零代码实现——红窗分诊靠人/agent 每次记得做隔离重跑，
+且同一标记盖了两种根因。机械化为「机器可读族清单 + 红窗分诊自动分区 + 隔离重跑自动触发」.**
+
+### 实测（管理者 2026-08-07 09:5x + 外层复验）
+
+1. **规则零实现**：`grep plugin/scripts/*.ts` 对 `KNOWN-LOAD-SENSITIVE` **零命中**。规则只存在于
+   `plugin/loop/fast-mode-loop-tick.md:147-167` 的散文（判读规则"强制"：fail 落在这族 ⇒ 单独重跑该族、
+   绿 ⇒ 已知时序敏感被放大，非真回归）+ 各测试文件头注释。
+2. **同一标记盖两种根因**：`session-liveness.test.mjs` 的标记声称「真实进程 + tmux 时序」（挂钟依赖，
+   见 gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7）；`runner-grouping.test.mjs` 的
+   标记声称「嵌套 node --test spawns」（R3 嵌套计数，见 gap-test-isolation-backlog-44-violations-
+   unmeasured）。**同一个 KNOWN-LOAD-SENSITIVE 标签、同一条"隔离重跑→绿⇒非真回归"动作，判读时不分根因**。
+3. **无隔离重跑的可追溯记录**：09:25 并发 8 运行红，7 个失败（cold-start-skill ×2 + session-liveness
+   noise-gate ×2 + AC4 ×1 + runner-grouping ×1 落族，**另 1 个 test-file-snapshot 是跨文件竞态、不在族
+   上**），外层分诊称"环境失败"但**没有执行文档要求的族内隔离重跑**，验证步骤不可追溯。
+4. **误并入**：test-file-snapshot 的 `baseline test file(s) REMOVED` 是 runner-grouping AC7 临时夹具
+   与全套件快照的**跨文件竞态**（并发专用），被一并扫进"环境失败"桶——**非族失败被同桶淹没**。
+
+### 为什么机械化（裁定：是）
+
+- 纯文档规则的代价今晚已实证：隔离重跑静默跳过、非族失败被同桶淹没、计数错（15→实际 7）。
+- 与 R1-R7 同构：**规则没被机械执行 = 靠人记得**，而人/agent 在红窗高压下会漏（今晚就是）。
+- 红窗分诊是高频、高成本动作——每个 tick 都可能发生，机械化一次、用很多次。
+
+### 选定机制
+
+1. **机器可读族清单（单一来源）**：在各测试文件头把 KNOWN-LOAD-SENSITIVE 注释升级为机器可解析的
+   `// @load-sensitive <kind>` 标注（kind ∈ wall-clock | nested-spawn | heavy | ...），
+   `plugin/scripts/known-load-sensitive.ts` 解析之生成清单（模式复用 select-static-checks-for-touches.ts
+   解析 `@static-tier`）。**族文件 + 根因 kind 都在清单里，机械可查、判读不混根因**。
+2. **红窗分诊自动分区**：全量红时，分诊助手把失败文件分区为 in-family（命中清单）vs not-in-family；
+   分区写入 full-suite-state.json（当前 `failures: []` 是空的——runner 报了 state=red 但没写失败，
+   分诊无从机械化）。
+3. **隔离重跑自动触发**：in-family 失败 ⇒ 助手产出**精确隔离重跑命令**（仅该族文件 + 低负载），
+   外层执行后把裁决写回套件状态（隔离绿 ⇒ 记 environmental + 根因 kind；隔离红 ⇒ 非环境、升级）。
+4. **非族失败禁止入桶**：not-in-family 失败默认视为真候选（test-file-snapshot 竞态这类，见 backlog
+   任务 AC5/AC6），除非另有证据。
+
+## Contract
+
+measure known_family_members = `node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list | wc -l` stdout 数字段（当前 ≥2：session-liveness、cold-start-skill；runner-grouping 待标注 kind）
+measure family_failures_unverified = `python3 -c "import json;d=json.load(open('.quay/full-suite-state.json'));print(len([f for f in d.get('failures',[]) if f.get('in_family') and not f.get('isolate_rerun')]))"` stdout 数字段（当前 0——failures 为空，正好是缺陷）
+band family_failures_unverified = 0（红窗分诊后，每个 in-family 失败必须有隔离重跑裁决才可标环境）
+invariant 族文件必须有机器可解析的 `@load-sensitive <kind>` 标注；同一根因一个 kind，不同根因不同 kind，判读不得混用
+invoke `node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list`
+control 人为让一个非族失败混入红 ⇒ 分诊必须报 not-in-family、不自动隔离重跑；人为让族失败无隔离重跑 ⇒ band 必须红
+resume 若中断，先跑 measure 读族成员数 + 未验证族失败数
+
+## Acceptance Criteria
+
+- [ ] AC1: **族清单机械可读**——`known-load-sensitive.ts` 从各文件 `// @load-sensitive <kind>` 解析生成
+      清单（文件 + kind），fast-mode-loop-tick.md 的散文族段改为引用清单（单一来源，消灭双源）
+- [ ] AC2: **kind 标注完成**——session-liveness/cold-start-skill 标 `wall-clock`，runner-grouping 标
+      `nested-spawn`（不再同标签不分根因）；grep 全仓无未标注的 KNOWN-LOAD-SENSITIVE 注释
+- [ ] AC3: **分诊分区 + 隔离重跑自动触发**——红窗分诊产出 in-family/not-in-family 分区，in-family
+      自动给隔离重跑命令，裁决写回套件状态（含 kind），全程可追溯
+- [ ] AC4: **非族失败不自动入桶**——负控制：test-file-snapshot 竞态这类 not-in-family 失败必须被报为
+      真候选，除非有独立证据
+- [ ] AC5: 与 gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7（wall-clock kind 的修复）、
+      gap-test-isolation-backlog-44-violations-unmeasured（nested-spawn kind + AC7 竞态）交叉标注
+- [ ] AC6: 红窗分诊不再依赖人记得——未来 N 次红窗中，隔离重跑触发 + 裁决记录全程机械可查
+
+## Definition of Done
+
+- [ ] AC1-AC6 实跑输出贴进任务体（含一次真实红窗的分区 + 隔离重跑裁决记录）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+
+## Touches
+- plugin/loop/fast-mode-loop-tick.md（散文族段改为引用清单，单一来源）
+- plugin/scripts/known-load-sensitive.ts（新建：解析 `@load-sensitive` 标注生成清单）
+- plugin/scripts/full-suite-runner.ts（red 时把失败分区写入 full-suite-state.json）
+- plugin/test/session-liveness.test.mjs / cold-start-skill.test.mjs / runner-grouping.test.mjs
+  （注释升级为 `@load-sensitive <kind>`）
+- plugin/scripts/red-window-triage.ts（新建或扩展现有分诊：分区 + 隔离重跑命令 + 裁决写回）
+- tasks/gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7.md（AC5 交叉标注）
+- tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（AC5 交叉标注）
+- tasks/gap-load-sensitive-session-family-confounds-step-three.md（族来源任务）
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-07T09:5xZ
+changed: 管理者发现（KNOWN-LOAD-SENSITIVE 判读规则零代码实现 + 同标记盖两种根因）→ 外层复验：
+  零命中成立、双根因成立、并发现第三次误判（test-file-snapshot 跨文件竞态被扫进环境桶 + 计数错）。
+  裁定机械化：机器可读族清单 + 红窗分诊自动分区 + 隔离重跑自动触发。待套件门禁释放后派发。
