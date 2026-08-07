@@ -58,6 +58,14 @@ python3 -c "import json;d=json.load(open('packages/quay/package.json'));print('f
 #    （它是唯一的全新机器，证据最干净）」。**A 机上的 archguard 会话已于 08-06 14:2xZ 停掉。**
 #    ⇒ 我 05:0xZ 查 /home/yale/work/archguard/.quay 得出「mcp_entry 为空」——读数为真，
 #      但**它不是判据③的对象**，证明不了 AC16③。跨机只读观测：git / tmux 只读 / 读取类。
+#
+#    ✅ B/C 的真实主机名（2026-08-07 05:2xZ 经 meta-cc 查会话历史确认，写死防再错）：
+#         B = orangevps.wan.hwang.men
+#         C = ad-arm1.wan.hwang.men
+#    **不需要 ~/.ssh/config**（实测为空），直接用 FQDN 即可 —— 本会话早前对这两台跑过
+#    数十条 ssh 命令全部如此。我 05:1xZ 用短名 `orangevps`/`ad-arm1` 探测失败后断言
+#    「本会话结构上无法观测 B/C」，**该结论已撤回**：通道一直存在，是我用错了名字。
+#    ⇒ 教训：**探测失败先怀疑自己的参数，再怀疑通道不存在**（今晚同族第 10 次）。
 ```
 
 **为什么必须每轮实跑**：2026-08-07 04:5xZ 首次按此口径跑，**立刻查出目标文件两处已过期**——
