@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-07T02:12:20.576Z",
+  "generatedAt": "2026-08-07T10:11:55.691Z",
   "since": null,
   "tasks": [
     {
@@ -270,6 +270,11 @@
     {
       "taskId": "gap-no-inventory-of-what-the-two-layer-mode-actually-runs",
       "minutes": 92.78618333333333,
+      "outcome": "done"
+    },
+    {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "minutes": 149.27768333333333,
       "outcome": "done"
     },
     {
@@ -670,27 +675,14 @@
       "outcome": "done"
     }
   ],
-  "inProgress": [
-    {
-      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
-      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786068314098-uu1vih",
-      "startedAtMs": 1786068314110,
-      "startedAtMsUnreliable": true
-    },
-    {
-      "taskId": "gap-observer-registry-target-decommission-and-criterion-invalidation",
-      "runId": "fm-gap-observer-registry-target-decommission-and-criterion-invalidation-1786061714809-ujqan9",
-      "startedAtMs": 1786061714820,
-      "startedAtMsUnreliable": true
-    }
-  ],
-  "meanMinutes": 66.12109960937498,
-  "medianMinutes": 50.484475,
-  "tasksPerHour": 1.1458760886898345,
-  "serialEquivalentPerHour": 0.907425925377274,
+  "inProgress": [],
+  "meanMinutes": 66.76572428940567,
+  "medianMinutes": 50.5096,
+  "tasksPerHour": 1.0776916146365634,
+  "serialEquivalentPerHour": 0.8986647061585274,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-07T02:12:03.722Z",
-  "windowHours": 111.70492277777778,
+  "windowEnd": "2026-08-07T10:11:47.048Z",
+  "windowHours": 119.70029111111111,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -871,6 +863,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-audit-findings-not-backpropagated-to-earlier-detectors",
+      "runId": "fm-gap-audit-findings-not-backpropagated-to-earlier-detectors-1786088311772-2ke36t",
+      "minutes": 47.4472,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-axis-generator-question-what-range-every-standing-criterion",
       "runId": "fm-gap-axis-generator-question-what-range-every-standing-criterion-1785935223569-sj8mjj",
       "minutes": 183.5048,
@@ -911,6 +911,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-cli-quay-init-collides-with-the-canonical-slash-quay-init",
+      "runId": "fm-gap-cli-quay-init-collides-with-the-canonical-slash-quay-init-1786086385875-au88ra",
+      "minutes": 19.6039,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite",
       "runId": "fm-gap-cold-start-gate-should-be-derived-laydown-set-green-not-whole-suite-1785966770435-n10coc",
       "minutes": 31.922183333333333,
@@ -922,6 +930,22 @@
       "taskId": "gap-complete-delivery-surface-spec-and-l1-verification",
       "runId": "fm-gap-complete-delivery-surface-spec-and-l1-verification-1785976262385-mc8zqn",
       "minutes": 33.899966666666664,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-complete-delivery-surface-spec-and-l1-verification",
+      "runId": "fm-gap-complete-delivery-surface-spec-and-l1-verification-1786075336736-r12gxw",
+      "minutes": 0.6018,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-complete-delivery-surface-spec-and-l1-verification",
+      "runId": "fm-gap-complete-delivery-surface-spec-and-l1-verification-1786081331174-n4x5g1",
+      "minutes": 4.7866333333333335,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -943,9 +967,25 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-cross-machine-readonly-observation-orchestration-not-a-tool",
+      "runId": "fm-gap-cross-machine-readonly-observation-orchestration-not-a-tool-1786086390520-89ijgy",
+      "minutes": 79.46815,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-cross-machine-sync-has-no-mechanism-only-manual-pushes",
       "runId": "fm-gap-cross-machine-sync-has-no-mechanism-only-manual-pushes-1786063658201-gyyg22",
       "minutes": 6.232866666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-cross-machine-sync-has-no-mechanism-only-manual-pushes",
+      "runId": "fm-gap-cross-machine-sync-has-no-mechanism-only-manual-pushes-1786073591165-7m726w",
+      "minutes": 10.4293,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1031,9 +1071,25 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close",
+      "runId": "fm-gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close-1786086387429-3v5t80",
+      "minutes": 88.34191666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-inner-session-check-discovery-fallback-silent",
       "runId": "fm-gap-inner-session-check-discovery-fallback-silent-1786061927117-dvn12o",
       "minutes": 6.515066666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling",
+      "runId": "fm-gap-integration-batch-merge-ff-only-contradicts-real-merge-ruling-1786086388960-5rlztu",
+      "minutes": 29.338616666666667,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1055,9 +1111,33 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-manager-productization-five-constraints",
+      "runId": "fm-gap-manager-productization-five-constraints-1786075335084-92ttqn",
+      "minutes": 42.145783333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-manager-skill-missing-mandatory-tool-reuse-checklist",
       "runId": "fm-gap-manager-skill-missing-mandatory-tool-reuse-checklist-1786061747903-cm33tm",
       "minutes": 5.772166666666666,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion",
+      "runId": "fm-gap-manager-tick-log-append-trips-suite-after-dirty-tree-assertion-1786093642465-oskvl2",
+      "minutes": 4.32365,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-manager-tick-mechanical-checks-are-eight-loose-bash-blocks-in-prose",
+      "runId": "fm-gap-manager-tick-mechanical-checks-are-eight-loose-bash-blocks-in-prose-1786077596333-fm4w4l",
+      "minutes": 21.637083333333333,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1074,6 +1154,22 @@
       "taskId": "gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics",
       "runId": "fm-gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics-1785950807577-0y228f",
       "minutes": 18.051966666666665,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
+      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786068314098-uu1vih",
+      "minutes": 15.269533333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-npm-install-does-not-register-the-plugin-with-claude-code",
+      "runId": "fm-gap-npm-install-does-not-register-the-plugin-with-claude-code-1786088312119-ayfsdh",
+      "minutes": 47.44193333333333,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1122,6 +1218,14 @@
       "taskId": "gap-ready-pool-check-times-out-after-git-history-signal",
       "runId": "fm-gap-ready-pool-check-times-out-after-git-history-signal-1785958779323-f3qjjw",
       "minutes": 45.3386,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-ready-pool-check-times-out-after-git-history-signal",
+      "runId": "fm-gap-ready-pool-check-times-out-after-git-history-signal-1786074303420-4lb7j4",
+      "minutes": 15.776983333333334,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1239,9 +1343,33 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input",
+      "runId": "fm-gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input-1786069300675-o5hef0",
+      "minutes": 70.10903333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-remove-shared-events-and-lock",
+      "runId": "fm-gap-session-liveness-remove-shared-events-and-lock-1786077914768-ya9hg7",
+      "minutes": 55.53913333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-session-liveness-session-pid-blind-to-claude-as-pane-process",
       "runId": "fm-gap-session-liveness-session-pid-blind-to-claude-as-pane-process-1786051655647-m7iuvd",
       "minutes": 67.97743333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-session-liveness-session-pid-blind-to-claude-as-pane-process",
+      "runId": "fm-gap-session-liveness-session-pid-blind-to-claude-as-pane-process-1786093642748-vc3scm",
+      "minutes": 4.319116666666667,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1287,6 +1415,22 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-suite-cutoff-what-tears-test-process-at-session-topology",
+      "runId": "fm-gap-suite-cutoff-what-tears-test-process-at-session-topology-1786088311497-gt3giu",
+      "minutes": 47.45263333333333,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-suite-state-has-no-reason-axis-failed-aborted-infra",
+      "runId": "fm-gap-suite-state-has-no-reason-axis-failed-aborted-infra-1786074304812-s70ikb",
+      "minutes": 7.260416666666667,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-supervisor-base-layer-outside-sessions-architecture",
       "runId": "fm-gap-supervisor-base-layer-outside-sessions-architecture-1786000383161-kxnp8f",
       "minutes": 39.68423333333333,
@@ -1327,6 +1471,14 @@
       "startedAtMsUnreliable": false
     },
     {
+      "taskId": "gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause",
+      "runId": "fm-gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause-1786071987405-nle657",
+      "minutes": 27.907333333333334,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
       "taskId": "gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver",
       "runId": "fm-gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver-1786061960395-dsfn4r",
       "minutes": 105.10196666666667,
@@ -1362,6 +1514,14 @@
       "taskId": "gap-two-thirds-of-a-task-is-polling-a-suite-log",
       "runId": "fm-gap-two-thirds-of-a-task-is-polling-a-suite-log-1785935224309-bphra4",
       "minutes": 183.49385,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process",
+      "startedAtMsUnreliable": false
+    },
+    {
+      "taskId": "gap-two-thirds-of-a-task-is-polling-a-suite-log",
+      "runId": "fm-gap-two-thirds-of-a-task-is-polling-a-suite-log-1786074370706-pnelds",
+      "minutes": 36.9163,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
       "startedAtMsUnreliable": false
@@ -1417,12 +1577,12 @@
       "startedAtMs": 1786051058808
     },
     {
-      "taskId": "gap-no-post-merge-cross-machine-verification-detection-latency-is-luck",
-      "runId": "fm-gap-no-post-merge-cross-machine-verification-detection-latency-is-luck-1786026436011-g19w0h",
-      "minutes": 149.27768333333333,
-      "outcome": "done",
+      "taskId": "gap-observer-registry-target-decommission-and-criterion-invalidation",
+      "runId": "fm-gap-observer-registry-target-decommission-and-criterion-invalidation-1786061714809-ujqan9",
+      "minutes": 193.20131666666666,
+      "outcome": "needs-human",
       "startedAtMsUnreliable": true,
-      "startedAtMs": 1786026436030
+      "startedAtMs": 1786061714820
     },
     {
       "taskId": "gap-probe-mechanism-dead-15-days-rewire-to-two-layer",
@@ -1458,5 +1618,5 @@
     }
   ],
   "reconcilable": [],
-  "realInFlight": 2
+  "realInFlight": 0
 }

@@ -18,7 +18,7 @@ title: "REMOVE the shared events file + the mutual-exclusion lock from
   cost one extra capture-pane per cycle; AC20's 'single-flight resource' premise
   is WRONG (observing is not a single-flight resource), introduced by an earlier
   manager session not by outer/inner"
-status: ready
+status: done
 labels:
   - gap
   - defect
