@@ -7660,3 +7660,9 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **liveness-saturation 完成**（真实实现）：session-liveness.sh 补 SESSION-SATURATED 上下文饱和维度（cache_read_input_tokens ≥ 450k + 未应答输入）；AC1-6 + DoD 全勾。**fan-in 成功**：cherry-pick b57e3f7f → integration 97452de6（4 files 无冲突）。任务文件入 develop，worktree 清理。
 - **cross-machine-sync 回填 2/5**：核心机制（sync-lag-check.sh）已落地 develop（8 ACs 勾），指示 agent 验当前实现 + 补 DoD。与 tmux-leak disjoint。
 - **在飞 2/2**：tmux-leak（外层优先，编辑中）+ cross-machine-sync。observer-registry worktree 保留（needs-human）。
+
+### 事件 03:2xZ（tmux-leak 完成——外层优先任务 fan-in）
+
+- **tmux-leak 完成**（外层优先，真实修复）：3 个跨主机复现测试文件（session-topology / inner-session-check / session-bootstrap）的 factory-session 泄漏——`cleanup()` 只杀 `started` 集合，factory/bootstrap 脚本经 spawnSync 直接在私有 socket 建会话不可见 → rmSync 删目录≠杀进程。修：`list-sessions` 清扫私有 socket 全会话 + `started` 兜底；tmux-leak-scan.sh 扩前缀（topo-/isc-/sb-/ol-）。多轮稳定零累积 + 负控制（~158 既有孤儿正确报红）。**fan-in**：cherry-pick 811be6ce → 代码 4 文件无冲突 + 任务文件留 develop 侧 → integration commit。任务文件 AC1-7 + DoD 入 develop。
+- **说明**：~158 个既有孤儿是历史遗留（并发 observer-registry worktree 的旧 cleanup 仍泄漏），清理留给 manager/外层（code-fix 框架）；observer-registry 需同样 list-sessions 修复（其 worktree 已在 needs-human）。
+- **在飞 1/1**：cross-machine-sync（验已落地实现）。4 空槽但池子等它完成解锁。
