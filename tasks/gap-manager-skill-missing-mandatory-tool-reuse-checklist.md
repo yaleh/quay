@@ -1,17 +1,19 @@
 ---
 id: gap-manager-skill-missing-mandatory-tool-reuse-checklist
-title: "plugin/skills/manager/SKILL.md documents the manager's boundary rule ('manager 手里出现
-  .sh/.ts 实现即为越界信号', already crystallized in orchestration/SPEC-manager-productization-
-  2026-08-05.md §5, with 4 prior violations recorded) but has NO mounting point that makes a
-  manager session actually check the capability catalog BEFORE hand-rolling — tonight's manager,
-  running in the SAME session that had already internalized this exact rule, still hand-rolled at
-  least 8 detection/counting mechanisms (pane busy/idle classification, dead-loop detection, AC10
-  pre-friction counting, generator-question axis enumeration, tmux-leak scanning, sync-lag
-  computation, raw tmux send-keys instead of supervisor-deliver.sh) before discovering each one
-  already shipped in plugin/scripts/ — the rule existing in prose is not sufficient, as proven by
-  its own author violating it in the same session that read it; manager 2026-08-06, filed per
-  human direction to transfer to outer"
-status: todo
+title: plugin/skills/manager/SKILL.md documents the manager's boundary rule
+  ('manager 手里出现 .sh/.ts 实现即为越界信号', already crystallized in
+  orchestration/SPEC-manager-productization- 2026-08-05.md §5, with 4 prior
+  violations recorded) but has NO mounting point that makes a manager session
+  actually check the capability catalog BEFORE hand-rolling — tonight's manager,
+  running in the SAME session that had already internalized this exact rule,
+  still hand-rolled at least 8 detection/counting mechanisms (pane busy/idle
+  classification, dead-loop detection, AC10 pre-friction counting,
+  generator-question axis enumeration, tmux-leak scanning, sync-lag computation,
+  raw tmux send-keys instead of supervisor-deliver.sh) before discovering each
+  one already shipped in plugin/scripts/ — the rule existing in prose is not
+  sufficient, as proven by its own author violating it in the same session that
+  read it; manager 2026-08-06, filed per human direction to transfer to outer
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -93,6 +95,7 @@ resume 若中断，先读 SKILL 现有边界章节，不要重写已经写对的
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
 
 ## Touches
+- tasks/gap-manager-skill-missing-mandatory-tool-reuse-checklist.md
 - plugin/skills/manager/SKILL.md
 - orchestration/SPEC-manager-productization-2026-08-05.md（交叉标注）
 

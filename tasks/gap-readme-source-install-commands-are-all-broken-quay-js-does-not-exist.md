@@ -1,15 +1,17 @@
 ---
 id: gap-readme-source-install-commands-are-all-broken-quay-js-does-not-exist
-title: "README Option B ('from source... no global install step required') and every worked example
-  under it (task list/view/check) instruct `node packages/quay/bin/quay.js <command>` — this file
-  DOES NOT EXIST, only bin/quay.ts does; reproduced verbatim: `Error: Cannot find module
-  '.../packages/quay/bin/quay.js'`; no build step bridges .ts to .js (grep for it in root/package
-  package.json = 0); CLAUDE.md:17 documents the CORRECT invocation
-  (`node --experimental-strip-types packages/quay/bin/quay.ts <cmd>`) — the two checked-in docs
-  disagree on the literal command and only one of them runs; same break repeats for quay-native.js
-  and quay-github.js; a fresh git-clone adopter following README's own recommended dev path hits
-  ENOENT on the FIRST copy-pasted command; doc-vs-code lens, manager 2026-08-06"
-status: todo
+title: "README Option B ('from source... no global install step required') and
+  every worked example under it (task list/view/check) instruct `node
+  packages/quay/bin/quay.js <command>` — this file DOES NOT EXIST, only
+  bin/quay.ts does; reproduced verbatim: `Error: Cannot find module
+  '.../packages/quay/bin/quay.js'`; no build step bridges .ts to .js (grep for
+  it in root/package package.json = 0); CLAUDE.md:17 documents the CORRECT
+  invocation (`node --experimental-strip-types packages/quay/bin/quay.ts <cmd>`)
+  — the two checked-in docs disagree on the literal command and only one of them
+  runs; same break repeats for quay-native.js and quay-github.js; a fresh
+  git-clone adopter following README's own recommended dev path hits ENOENT on
+  the FIRST copy-pasted command; doc-vs-code lens, manager 2026-08-06"
+status: ready
 labels:
   - gap
   - defect
@@ -85,6 +87,7 @@ resume 若中断，先跑 measure 确认当前 README 的字面命令是否已�
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
 
 ## Touches
+- tasks/gap-readme-source-install-commands-are-all-broken-quay-js-does-not-exist.md
 - README.md
 - CLAUDE.md（若采用"以 CLAUDE.md 为权威"方案）
 

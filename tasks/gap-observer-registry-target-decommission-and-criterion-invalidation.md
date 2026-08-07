@@ -1,18 +1,21 @@
 ---
 id: gap-observer-registry-target-decommission-and-criterion-invalidation
-title: "no mechanism answers 'is this observer's target still alive/intentional, and is this
-  observer's own criterion still valid' — FOUR independent consumers hit this exact shape in one
-  night: (1) os-anchor-watchdog revived a deliberately-decommissioned archguard session
-  (absence-inference cannot distinguish crashed from intentionally-stopped, already diagnosed in
-  gap-os-anchor-watchdog-lease-model-instead-of-absence-inference but scoped to that ONE
-  consumer); (2) a manager git-staleness Monitor kept reporting growing STALL_Nm for the same
-  decommissioned archguard; (3) a session-liveness-coverage Monitor reported NOT-WATCHED for a
-  decommissioned B machine; (4) a session-topology Monitor reported a stale cached
-  quay-b:outer=claude value 5 minutes after B's tmux server had cleanly terminated (confirmed via
-  no server running + zero claude processes) — each consumer was individually hand-diagnosed and
-  hand-fixed by the manager tonight (stop, rescope, restart), with NO shared mechanism; manager
-  2026-08-06, filed per human direction to transfer to outer for class-level design"
-status: todo
+title: "no mechanism answers 'is this observer's target still alive/intentional,
+  and is this observer's own criterion still valid' — FOUR independent consumers
+  hit this exact shape in one night: (1) os-anchor-watchdog revived a
+  deliberately-decommissioned archguard session (absence-inference cannot
+  distinguish crashed from intentionally-stopped, already diagnosed in
+  gap-os-anchor-watchdog-lease-model-instead-of-absence-inference but scoped to
+  that ONE consumer); (2) a manager git-staleness Monitor kept reporting growing
+  STALL_Nm for the same decommissioned archguard; (3) a
+  session-liveness-coverage Monitor reported NOT-WATCHED for a decommissioned B
+  machine; (4) a session-topology Monitor reported a stale cached
+  quay-b:outer=claude value 5 minutes after B's tmux server had cleanly
+  terminated (confirmed via no server running + zero claude processes) — each
+  consumer was individually hand-diagnosed and hand-fixed by the manager tonight
+  (stop, rescope, restart), with NO shared mechanism; manager 2026-08-06, filed
+  per human direction to transfer to outer for class-level design"
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -88,6 +91,7 @@ resume 若中断，先跑 measure 读当前登记表与各消费者的一致性�
 - [ ] 任务体记录本类今晚的全部 4 个已知实例，作为该类的登记册
 
 ## Touches
+- tasks/gap-observer-registry-target-decommission-and-criterion-invalidation.md
 - plugin/scripts/os-anchor-watchdog.sh
 - plugin/scripts/os-anchor-install.sh
 - tasks/gap-os-anchor-watchdog-lease-model-instead-of-absence-inference.md（交叉标注）
