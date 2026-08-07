@@ -7970,3 +7970,12 @@ manager 是出厂定义错误（每繁殖复制一次），topology-check 是正
 - **修法**：`install-config-driven-e2e.test.mjs` `@test-group product` → **serial**。验证：默认 body 0 出现、serial 组 1。commit → **integration b280289e**（FF，92d16611→b280289e）。
 - **integration 现为**：serial 17 + 21-fix + 全部 fan-ins。等外层并发 8 四轮验证。
 - **held**：session-pid（7647aaf8）。在飞 0/5。
+
+### 事件 13:4xZ（系统性 serial 路由——7 个重 install 测试一次全路由）
+
+- **并发 8 三轮（13:20 run）**：2 失败全在 install-config-driven-e2e（A3/AC6，隔离 10/10）——重 install 测试负载伪影。外层指令：**系统性修（别一轮追一条）**——审计所有 spawn quay-init --loop 的重 install 测试，一次全路由进 serial。
+- **审计确认**（spawn 计数）：install-config-driven-e2e(21，已路由)、npm-pack-e2e(2)、worktree-root-fs-check(9)、runtime-landing(23)、capability-catalog(13，governance)、session-topology(9，governance 工厂测试——C 类 hermetic 会话仍安全，工厂构建是重的)。
+- **一次路由 5 个**（install-config 上轮已做）→ **serial 22**：npm-pack-e2e / worktree-root-fs-check / runtime-landing / capability-catalog / session-topology。修复 capability-catalog 自断言（AC6 断言 @test-group governance → serial）。group-partition 健康：governance=81（非空，g.governance>0 断言成立）、serial=22、total=266。
+- **runner-grouping 3 失败为 pre-existing 负载/时序**（flags-only 摘要缺失等，此前 7 条 load-sensitive 族），非本路由引入（基线对比 backgrounded）。
+- **integration c4343421**（FF b280289e→c4343421）。等外层并发 8 四轮验证。
+- **held**：session-pid（7647aaf8）。在飞 0/5。
