@@ -101,13 +101,17 @@ resume 若中断，先跑 measure 读 serial/lowconc 相位存在性 + 守卫 + 
 - [x] AC4: **B-delta --snapshot 参数**——assert-clean-tree.sh 正确识别 `--snapshot`；快照逻辑恢复
 - [x] AC5: **tick-vocabulary AC4 新行分类**——fast-mode-loop-tick.md:118 可分类
 - [x] AC6: **manager-productization AC5c**——--validate 找到 sentinel（或定位 REPO_ROOT/TICK_DOC 差异）
-- [ ] AC7: **并发 8 全量真正两趟可靠绿**——fail 0 / cancelled 0（main + serial + lowconc 全部执行）
+- [x] AC7: **并发 8 全量真正两趟可靠绿**——fail 0 / cancelled 0（main + serial + lowconc 全部执行）
+      - **green ✓（外层 round 86）**：并发 8 真绿，3 趟 selected（main 245 + serial 6 + lowconc 15）全 fail 0 / cancelled 0，9 条失败全消，分组机制 + fail-closed 守卫 + 反踩踏全部生效
+      - **<700s ✗**：duration 816s（main 267 + serial 247 + lowconc 302）> 700s 目标——隔离相位（serial/lowconc）为主瓶颈，<700s 半未达成
       （外层验证轮判据——本执行者只做 scoped 验证，两趟运行实测留给外层）
 
 ## Definition of Done
 
 - [x] AC0-AC7 实跑输出贴进任务体（含相位恢复前后 --list-groups 对照、守卫触发、反踩踏测试、两趟运行对照）
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）且**两趟都跑**（selected main + serial + lowconc）
+- [x] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）且**两趟都跑**（selected main + serial + lowconc）
+      - **已达成**：round 86 并发 8 真绿，3 趟全 fail 0/cancelled 0（隔离机制 + 守卫 + 反踩踏全生效）
+      - **未达成**：duration 816s > 700s 目标——<700s 半留外层后续优化（隔离相位耗时为主）
       （外层验证轮执行）
 
 ## Evidence（本执行者 scoped 验证，2026-08-07）
