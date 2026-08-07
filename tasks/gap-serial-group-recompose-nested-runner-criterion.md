@@ -24,6 +24,18 @@ extra: {}
 ---
 **type:** execution
 
+> **Cross-annotation (2026-08-07) — baselines VOIDED by concurrency pollution (AC3/AC5 of
+> `gap-resource-gate-no-single-flight-lock-two-suite-overlap`):** this task's serial-group
+> baselines (serial 246s, per-file 86.4s/61.7s/27.8s, the ~37s saving) were measured during the
+> 2026-08-07 window when TWO cc8 full suites ran concurrently (this task's worktree +
+> `task/wire-suite-cost-reporter`), 3x+ oversubscription on 4 cores (PSI cpu some avg10 = 86.22,
+> gate limit 40) — serial was being re-measured UNDER another cc8's load, the exact failure mode
+> the serial group exists to avoid. Those numbers are **silently-wrong baselines** and must NOT be
+> written into ACs/evidence as the reference. **Action: after the single-flight lock
+> (`gap-resource-gate-no-single-flight-lock-two-suite-overlap`) lands, re-measure the serial
+> recompose (before/after) in a clean single window (one cc8 suite alone).** Until the lock lands,
+> treat this task's serial elapsed-time numbers as untrustworthy.
+
 ## Proposal
 
 **serial 组混了两种理由——按管理者审计重编：必留 serial 的只有 3 个（嵌套 runner），移走 2 个 +

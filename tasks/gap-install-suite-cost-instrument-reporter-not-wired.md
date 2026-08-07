@@ -24,6 +24,18 @@ extra: {}
 ---
 **type:** execution
 
+> **Cross-annotation (2026-08-07) — baselines VOIDED by concurrency pollution (AC3/AC5 of
+> `gap-resource-gate-no-single-flight-lock-two-suite-overlap`):** this task's cost baselines
+> (the 458s table / C1 294s→8s / lowconc AC0 / serial 246s / per-file attribution numbers) were
+> measured during the 2026-08-07 window when TWO cc8 full suites ran concurrently (this task's
+> worktree + `task/serial-recompose-nested-runner`), 3x+ oversubscription on 4 cores (PSI cpu
+> some avg10 = 86.22, gate limit 40). Numbers taken under that load are **silently-wrong
+> baselines** — they are LOWER BOUNDS polluted by contention and must NOT be written into ACs or
+> evidence as the reference. **Action: after the single-flight lock
+> (`gap-resource-gate-no-single-flight-lock-two-suite-overlap`) lands, re-measure this task's
+> baselines in a clean single window (one cc8 suite alone) before tuning/conclusions.** Until the
+> lock lands, treat all this task's elapsed-time numbers as untrustworthy.
+
 ## Proposal
 
 **套件成本结构的仪器（measure-suite-reporter.mjs）存在、有单测、通过、但真实全量套件从不加载——装上它，
