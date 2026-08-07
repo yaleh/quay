@@ -142,8 +142,9 @@ Bash 调用，`export ISO_TMPDIR=...` 在第二次调用里已丢失（工具本
 
 ## Acceptance Criteria
 
-- [x] AC1: **套件尾部断言**——测试跑完后无 `skv-` / `session-liveness-` / `ol-tok-` / `enter-repro-`
-      前缀的 tmux server 或 /tmp 目录残留（机械检查，一次覆盖全类）
+- [x] AC1: **套件尾部断言**——测试跑完后无测试特征前缀的 tmux server 或 /tmp 目录残留（机械检查，一次覆盖全类）。
+      前缀 = session 名锚定 `skv-|ol-|topo-|isc-|sb-|enter-repro-`（进程）+ /tmp `skv-|session-liveness-|ol-prod-|
+      enter-repro-|quay-sb-|quay-topo-|quay-isc-|quay-init-tmux-`（目录）——2026-08-07 扩展覆盖跨主机族（见执行证据 ⑦）
       → `plugin/scripts/tmux-leak-scan.sh`（`pgrep -a tmux` + `ls -d /tmp/<前缀>*` 快照扫描，绝不调用 tmux）
       已接入 `scripts/test.sh` 的全量套件尾部（heavy-op 分支，assert-clean-tree 后）——与 assert-clean-tree
       同一模式：只在串行化的全量默认路径跑（scoped 并行 worktree 的瞬态 fixture 会造成跨 worktree 假阳性，
@@ -229,11 +230,54 @@ grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.m
 → cleanup() 在 rmSync 前逐个 `tmuxAt(sockPath, ["kill-session","-t", name], env)`；全文件零 `kill-server` 调用
 （仅注释说明为何不用）。
 
+**⑦ 2026-08-07 重验（outer priority dispatch —— 现场仍有 156+ 泄漏 server）**
+
+现场（本机）实测仍有 156–158 个泄漏 tmux server（topo-factory/topo-idem/isc-factory/sb-*/ol-*），
+大部分来自**跨主机复现发现的工厂/引导脚本直建会话**：`quay-topology.sh --session topo-factory`、
+`--session isc-factory`、session-bootstrap `--socket <sock>` 建的 `sb-*`，均由 spawnSync 直建在
+hermetic socket 上，**不在 helper 的 `started` 集合里** → 原 cleanup 只杀 `started`，rmSync 删目录后
+server 变孤儿（删目录 ≠ 杀进程，正是本任务标题的机制）。**这是 2026-08-06 跨主机复现发现的 3 个新文件的
+残余泄漏点**，本次补修：
+
+- `session-topology.test.mjs` / `inner-session-check.test.mjs` / `session-bootstrap.test.mjs` 的 hermetic
+  cleanup 改为 **`list-sessions` 全扫 + 逐个 `kill-session -t`**（socket 是本测试私有 mkdtemp，全扫不可能碰
+  真实会话；仍保留 `started` 集合兜底），绝不用 kill-server。
+- `tmux-leak-scan.sh` 前缀扩展：进程扫描改 **session 名锚定** `-s skv-|ol-|topo-|isc-|sb-|enter-repro-`
+  （裸 `ol-`/`sb-` 会误报 `/tmp/tmuxisol-*` 含 "sol-"）；/tmp glob 加 `ol-prod-`/`quay-sb-`/`quay-topo-`/
+  `quay-isc-`/`quay-init-tmux-`。一次覆盖全类（AC1）。
+
+**修复前泄漏实跑（证明残余点真实）**：`session-topology` 一轮 topo 40→43（+3，工厂会话未被回收）；
+`inner-session-check` isc 22→23（+1）；`session-bootstrap` sb 30→35（+5）。**修复后重跑零新增**：
+topo 42→41、isc 恒 23、sb 恒 35。`session-liveness` 完整跑 52 pass / 0 fail / 1 skip，ol 恒 63
+（本文件 makeHermeticProbe cleanup 本就正确，正常完成不泄漏；现场 ol-* 均为历史中断跑残留）。
+
+**AC4 重验（3 轮，修复后，泄漏前缀计数不随轮数累积）**：
+```
+BASELINE: topo=35 isc=22 sb=35 ol=65
+ROUND 1: before=[topo=35 isc=22 sb=35 ol=65] after=[topo=35 isc=22 sb=35 ol=65]
+ROUND 2: before=[topo=35 isc=22 sb=35 ol=65] after=[topo=35 isc=21 sb=35 ol=64]
+ROUND 3: before=[topo=35 isc=21 sb=35 ol=64] after=[topo=35 isc=21 sb=35 ol=64]
+```
+每轮 42 tests / 39 pass / 3 fail——3 fail 均为**既有漂移**（session-topology AC2/AC4 断言旧脚本名
+`topology-check.sh`/`quay-topology.sh`、session-bootstrap AC5 断言 `session-bootstrap.sh`；SKILL.md 已改为
+`quay-session.ts` 命令，primary develop 同源一致），**与本任务泄漏修复无关**，非本任务引入。
+
+**负控制（AC1 判据，扫描抓住真实残留）**：`tmux-leak-scan.sh` 对现场 156+ 孤儿完整报出（topo-factory/
+ol-*/isc-factory/sb-*），exit 1。现场残留为**历史 + 并发 worktree 累积**（观察者 worktree 无本次 list-sessions
+修复、其全量跑仍在泄漏）；本任务修复后我方每轮跑零新增。残留清理须按 AC3 流程人工逐一 kill-session（禁
+kill-server），且须避开并发 worktree 的活动 fixture。
+
 ## Definition of Done
 
-- [ ] AC1–AC7 全部勾上；AC4 实跑输出贴任务体（多轮后 server 数稳定）
-- [ ] 测试起外部进程/服务器必在 teardown 回收；套件尾部断言在；泄漏不再累积
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC7 全部勾上；AC4 实跑输出贴任务体（多轮后 server 数稳定）——2026-08-07 重验，AC4 3 轮实测见执行证据 ⑦
+- [x] 测试起外部进程/服务器必在 teardown 回收；套件尾部断言在；泄漏不再累积——send-keys-verified +
+      quay-init-tmux-detection + 跨主机族 3 文件（session-topology/inner-session-check/session-bootstrap）
+      cleanup 均 kill-session 回收（list-sessions 全扫兜底）；tmux-leak-scan.sh 接入全量尾部；AC4 3 轮泄漏前缀
+      计数稳定不累积
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**未勾**：develop 现有 3 个既有漂移失败
+      （session-topology AC2/AC4、session-bootstrap AC5，断言旧脚本名 `topology-check.sh`/`quay-topology.sh`/
+      `session-bootstrap.sh`，SKILL.md 已改 `quay-session.ts` 命令），与本任务泄漏修复无关，非本任务引入；
+      primary develop 同源一致。本任务相关文件自身 39/42 pass，3 fail 全部为该漂移
 
 ## Touches
 
@@ -242,7 +286,10 @@ grep -n "kill\|teardown\|TMUX_TMPDIR\|skv" plugin/test/send-keys-verified.test.m
 - plugin/test/quay-init-tmux-detection.test.mjs（AC2b：4 处 kill-server 改 kill-session -t）
 - plugin/test/heavy-op-token*.test.mjs（ol-tok 泄漏源，同族 teardown）
 - plugin/test/session-liveness.test.mjs（同族 teardown）
-- plugin/scripts/tmux-leak-scan.sh（套件尾部泄漏断言工具；收窄自 plugin/scripts/ 以消除 overbroad glob 派发串行化）
+- plugin/test/session-topology.test.mjs（2026-08-07 跨主机族：hermetic cleanup 改 list-sessions 全扫，杀工厂建的 topo-factory/topo-idem —— 见执行证据 ⑦）
+- plugin/test/inner-session-check.test.mjs（2026-08-07 跨主机族：同上，isc-factory）
+- plugin/test/session-bootstrap.test.mjs（2026-08-07 跨主机族：同上，sb-*）
+- plugin/scripts/tmux-leak-scan.sh（套件尾部泄漏断言工具；2026-08-07 前缀扩展覆盖跨主机族：session 名锚定 skv-|ol-|topo-|isc-|sb-|enter-repro- + /tmp 目录 glob；收窄自 plugin/scripts/ 以消除 overbroad glob 派发串行化）
 - scripts/test.sh（套件尾部挂泄漏断言，若并入）
 - tasks/gap-tests-never-clean-up-their-tmpdirs.md（AC5 交叉标注）
 - orchestration/restart-plan-2026-08-04-third.md（AC6 崩溃根因关联的具体文件；收窄自 orchestration/ 以消除 overbroad glob 派发串行化）
