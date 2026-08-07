@@ -292,7 +292,7 @@ test("AC6 — full-suite-runner appends {round, startedAt, durationMs, laneCount
 
 test("AC6 — appendVerificationRound/readLoadAvg helpers are deterministic on a hermetic root", () => {
   const root = makeTmpDir("cc-vrf-");
-  appendVerificationRound(root, {
+  appendVerificationRound(path.join(root, ".quay"), {
     round: 0,
     startedAt: "2026-08-05T07:00:00Z",
     durationMs: 872756,
@@ -304,7 +304,7 @@ test("AC6 — appendVerificationRound/readLoadAvg helpers are deterministic on a
     state: "green",
     runner: "outer",
   });
-  appendVerificationRound(root, {
+  appendVerificationRound(path.join(root, ".quay"), {
     round: 0,
     startedAt: "2026-08-05T07:16:00Z",
     durationMs: 900000,

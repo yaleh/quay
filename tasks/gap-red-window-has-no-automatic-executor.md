@@ -117,6 +117,10 @@ status: todo——(a) 块的执行者补全；排当前 RED 分诊后，高优�
     Contract invoke；红窗分诊 intro 注明由 `SUITE-RED` 触发、信号即 state=red；
   - 相关文件表 + 每 tick 必报补 suite-state-events.jsonl / 触发者挂载状态。
 - `tasks/gap-full-suite-belongs-to-outer-background-above-3-min.md`——交叉标注：本条是其执行者层。
+- `tasks/gap-suite-state-split-across-worktree-and-gate.md`——交叉标注：**本条 trigger 只读主 repo 相对路径
+  `.quay/full-suite-state.json`**；该条保证 runner 跑 worktree（`--root <worktree>`）时经 `--state-dir` 把 state
+  写进主 repo 并镜像回 worktree，trigger 的 SUITE-GREEN/RED 事件流才接到真实结果（否则 worktree 跑的绿写不进主 repo，
+  事件流接到的是 stale red / 永不触发）。
 - `.gitignore`——`full-suite-state.json` / `full-suite.log` / `suite-state-events.jsonl` /
   `suite-state-last.json`（运行时态，同 gate-events 族）。
 

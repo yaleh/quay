@@ -75,8 +75,9 @@ function fakeSuite(scriptBody) {
 }
 
 /** Spawn the runner against a temp root with a fake command. */
-function runRunner({ root, command, laneCount, env = {} }) {
+function runRunner({ root, command, laneCount, stateDir, env = {} }) {
   const args = ["--no-warnings", "--experimental-strip-types", RUNNER, "--root", root];
+  if (stateDir) args.push("--state-dir", stateDir);
   if (command) args.push("--command", command);
   if (laneCount !== undefined && laneCount !== null) args.push("--lane-count", String(laneCount));
   const mergedEnv = { ...process.env, ...env };
@@ -157,6 +158,78 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
     assert.ok(s.durationMs >= 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── gap-suite-state-split-across-worktree-and-gate: AC1/AC2/AC3 (--state-dir split) ────────────────
+
+test("AC1/AC2 — --state-dir decouples the state/log write location from --root (the tested checkout)", async () => {
+  // A worktree full-suite run passes `--root <worktree> --state-dir <main-repo>/.quay` so the gate
+  // (inner stop conditions + suite-state-trigger, which read ONLY the main repo's relative
+  // .quay/full-suite-state.json) sees the runner's REAL result instead of the stale main-repo red
+  // the split left behind (the 123-minute blind window).
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-split-"));
+  const mainRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-main-"));
+  const gateDir = path.join(mainRoot, ".quay");
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    const child = runRunner({ root: worktree, command: `bash ${f}`, laneCount: 8, stateDir: gateDir });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
+
+    const s = readState(mainRoot);
+    assert.ok(s, "the main-repo (gate) state file was written");
+    assert.equal(s.state, "green", "the gate-dir state reflects the real green result (AC1)");
+    assert.equal(s.laneCount, 8);
+    // the sync bridge: the worktree's OWN state is mirrored to the same bytes — the Contract band
+    // `cmp -s <worktree-state> <main-repo-state>` = same after a worktree run
+    const wt = readState(worktree);
+    assert.ok(wt, "the worktree's own state is mirrored");
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(worktree, ".quay", "full-suite-state.json"), "utf8")),
+      JSON.parse(fs.readFileSync(path.join(mainRoot, ".quay", "full-suite-state.json"), "utf8")),
+      "worktree state byte-identical to the main-repo (gate) state (state_synced = same)",
+    );
+    // the suite log + verification-round ledger land in the gate dir too (same split)
+    assert.ok(fs.existsSync(path.join(gateDir, "full-suite.log")), "log written to --state-dir");
+    assert.ok(fs.existsSync(path.join(gateDir, "verification-round.jsonl")), "verification-round written to --state-dir");
+    // AC2 — the gate read (suite-state-trigger against the MAIN repo) sees green, no stop signal
+    const res = runOnce(mainRoot);
+    assert.equal(res.status, "green", "the gate reads the same green result (AC2)");
+    assert.equal(res.stopSignal, false, "green must not stop dispatch");
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(mainRoot, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — negative control: a red worktree run writes red to --state-dir (no false green in the gate)", async () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-splitred-"));
+  const mainRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-mainred-"));
+  const gateDir = path.join(mainRoot, ".quay");
+  const { f, dir } = fakeSuite('echo "not ok 1 - boom"\nexit 1');
+  try {
+    const child = runRunner({ root: worktree, command: `bash ${f}`, stateDir: gateDir });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on red");
+    const s = readState(mainRoot);
+    assert.ok(s, "the main-repo (gate) state file was written");
+    assert.equal(s.state, "red", "the gate-dir state reflects the real red result (AC3)");
+    assert.equal(s.reason, "failed", "a real failure is reason=failed (stop-dispatch signal)");
+    // the sync bridge mirrors red to the worktree too — both red, no false green anywhere
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(worktree, ".quay", "full-suite-state.json"), "utf8")),
+      JSON.parse(fs.readFileSync(path.join(mainRoot, ".quay", "full-suite-state.json"), "utf8")),
+      "worktree state byte-identical to the main-repo (gate) state on red too",
+    );
+    const res = runOnce(mainRoot);
+    assert.equal(res.status, "red");
+    assert.equal(res.stopSignal, true, "red+failed must stop dispatch (batch merge only on true green)");
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    fs.rmSync(mainRoot, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

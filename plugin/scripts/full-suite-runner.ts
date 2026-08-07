@@ -46,10 +46,18 @@
 // run_in_background:true so the tick is not blocked):
 //   node --no-warnings --experimental-strip-types plugin/scripts/full-suite-runner.ts \
 //     [--command "<test command>"]   # default: bash scripts/test.sh (canonical full suite)
-//     [--state-file <path>]          # default: .quay/full-suite-state.json
-//     [--log-file <path>]            # default: .quay/full-suite.log
+//     [--root <path>]                # the TESTED CHECKOUT (spawn cwd + git HEAD anchor; default repo root)
+//     [--state-dir <path>]           # the .quay STATE/LOG directory (gate write location);
+//                                    #   default: <root>/.quay (backward compatible single-location)
+//                                    #   gap-suite-state-split-across-worktree-and-gate: when --root is
+//                                    #   a WORKTREE, pass --state-dir <main-repo>/.quay so the gate
+//                                    #   (inner stop conditions + suite-state-trigger, which read ONLY
+//                                    #   the main repo's relative .quay/full-suite-state.json) sees the
+//                                    #   SAME result — full-suite-state.json, full-suite.log and
+//                                    #   verification-round.jsonl all land in <state-dir>.
+//     [--state-file <path>]          # default: <state-dir>/full-suite-state.json
+//     [--log-file <path>]            # default: <state-dir>/full-suite.log
 //     [--lane-count <n>]             # default: max(1, floor(nproc/2.1)) (nproc-derived, AC1)
-//     [--root <path>]                # workspace root (test-hermetic; default repo root)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
 // Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
@@ -219,10 +227,15 @@ export interface SuiteRoundRecord {
   reason?: SuiteStateReason | null;
 }
 
-/** Append one suite-round record to <root>/.quay/verification-round.jsonl (round = prior lines + 1). */
-export function appendVerificationRound(root: string, rec: SuiteRoundRecord): void {
+/**
+ * Append one suite-round record to <stateDir>/verification-round.jsonl (round = prior lines + 1).
+ * `stateDir` is the .quay STATE directory — the state/log/ledger write location, decoupled from the
+ * TESTED CHECKOUT by --state-dir (gap-suite-state-split-across-worktree-and-gate). Pre-split callers
+ * passed a workspace root; the equivalent stateDir is `<root>/.quay`.
+ */
+export function appendVerificationRound(stateDir: string, rec: SuiteRoundRecord): void {
   try {
-    const file = path.join(root, ".quay", "verification-round.jsonl");
+    const file = path.join(stateDir, "verification-round.jsonl");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     let prior = 0;
     if (fs.existsSync(file)) {
@@ -394,8 +407,16 @@ export async function run(argv: string[]): Promise<number> {
       ? spliceConcurrency(baseCommand, laneCount)
       : baseCommand;
 
-  const stateFile = path.resolve(root, parseArg(argv, "--state-file") ?? ".quay/full-suite-state.json");
-  const logFile = path.resolve(root, parseArg(argv, "--log-file") ?? ".quay/full-suite.log");
+  // gap-suite-state-split-across-worktree-and-gate: the STATE/LOG write location is decoupled from
+  // --root (the TESTED CHECKOUT). --state-dir is the .quay state directory the gate reads; when a
+  // worktree full-suite run passes `--root <worktree> --state-dir <main-repo>/.quay`, the runner
+  // writes full-suite-state.json + full-suite.log + verification-round.jsonl into the MAIN repo, so
+  // the inner stop conditions + suite-state-trigger (which read only the main repo's relative
+  // .quay/full-suite-state.json) see the SAME result the runner produced. Default <root>/.quay is
+  // the historical single-location behavior (fully backward compatible).
+  const stateDir = path.resolve(parseArg(argv, "--state-dir") ?? path.join(root, ".quay"));
+  const stateFile = path.resolve(parseArg(argv, "--state-file") ?? path.join(stateDir, "full-suite-state.json"));
+  const logFile = path.resolve(parseArg(argv, "--log-file") ?? path.join(stateDir, "full-suite.log"));
 
   // AC3 — the resource gate MUST be consulted BEFORE the suite starts (state=running is written
   // AFTER the gate, so a WAIT leaves the previous state — running/green — untouched). --fail-fast-check
@@ -427,8 +448,20 @@ export async function run(argv: string[]): Promise<number> {
     ...(verdictCommit ? { verdictCommit } : {}),
   };
 
+  // gap-suite-state-split-across-worktree-and-gate — SYNC BRIDGE: every state transition is written
+  // to the gate location (--state-dir, the main repo) AND mirrored to the tested checkout's own
+  // `<root>/.quay/full-suite-state.json`. The gate (inner + suite-state-trigger) reads the main repo;
+  // the mirror keeps the worktree's own state byte-identical so the two never diverge (the Contract
+  // band: cmp -s <worktree-state> <main-repo-state> = same). When --state-dir defaults to <root>/.quay
+  // the two paths coincide and the mirror is a no-op (single write, backward compatible).
+  const mirrorStateFile = path.resolve(root, ".quay", "full-suite-state.json");
+  const writeSuiteState = (state: SuiteState): void => {
+    writeState(stateFile, state);
+    if (mirrorStateFile !== stateFile) writeState(mirrorStateFile, state);
+  };
+
   // AC1 — write `running` the moment the runner starts (inner sees running => proceed).
-  writeState(stateFile, { state: "running", ...base, finishedAt: null, durationMs: null });
+  writeSuiteState({ state: "running", ...base, finishedAt: null, durationMs: null });
 
   // gap-resource-gate-no-single-flight-lock-two-suite-overlap: the SINGLE-FLIGHT mutual exclusion is
   // enforced inside scripts/test.sh's full-suite default path (`full_suite_lock_acquire` on a flock
@@ -469,7 +502,7 @@ export async function run(argv: string[]): Promise<number> {
   const onSignal = (sig: string) => {
     if (runDone || redDetected) return;
     const at = new Date().toISOString();
-    writeState(stateFile, {
+    writeSuiteState({
       state: "red",
       reason: "aborted",
       ...base,
@@ -512,7 +545,7 @@ export async function run(argv: string[]): Promise<number> {
         if (f) {
           pendingFailure.file = f;
           // file found — re-write state so the SUITE-RED event carries it (idempotent).
-          writeState(stateFile, { state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures });
+          writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures });
         }
       }
       if (detailRemaining <= 0) pendingFailure = null;
@@ -537,7 +570,7 @@ export async function run(argv: string[]): Promise<number> {
       redFailures.push(failure);
       pendingFailure = failure;
       detailRemaining = 15;
-      writeState(stateFile, {
+      writeSuiteState({
         state: "red",
         reason: "failed",
         ...base,
@@ -555,7 +588,7 @@ export async function run(argv: string[]): Promise<number> {
       // NOT failed. A real failure line is never downgraded (the `!redDetected` guard). A later real
       // failure line still upgrades to failed (the first branch checks redDetected, not abortDetected).
       abortDetected = true;
-      writeState(stateFile, { state: "red", reason: "aborted", ...base, finishedAt: null, durationMs: null });
+      writeSuiteState({ state: "red", reason: "aborted", ...base, finishedAt: null, durationMs: null });
       process.stderr.write(
         `full-suite-runner: ABORT marker detected on stream -> state=red reason=aborted (no correctness conclusion)\n  ${line}\n`
       );
@@ -572,7 +605,7 @@ export async function run(argv: string[]): Promise<number> {
     spawnError = err;
     redDetected = true;
     // AC5 (reason axis) — a spawn error means the suite never ran: NO correctness conclusion.
-    writeState(stateFile, {
+    writeSuiteState({
       state: "red",
       reason: "aborted",
       ...base,
@@ -638,7 +671,7 @@ export async function run(argv: string[]): Promise<number> {
         // carry the failure location(s) — the SUITE-RED event's failureLocation source
         ...(spawnError === null ? { failures: redFailures } : {}),
       };
-  writeState(stateFile, finalState);
+  writeSuiteState(finalState);
   // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
   // The full-suite-state.json's durationMs is this run's point value; verification-round.jsonl keeps
   // the history so the sequence survives rounds (gap-no-criterion-records-its-own-cost AC6).
@@ -647,7 +680,7 @@ export async function run(argv: string[]): Promise<number> {
   // comparable across rounds of different sizes. `tests` = pass+fail+cancelled; per_test_ms =
   // durationMs/tests (0 when no tests ran — a no-test run says nothing about per-test cost).
   const tapTests = tapPass + tapFail + tapCancelled;
-  appendVerificationRound(root, {
+  appendVerificationRound(stateDir, {
     round: 0, // computed from prior line count inside appendVerificationRound
     startedAt,
     durationMs,
