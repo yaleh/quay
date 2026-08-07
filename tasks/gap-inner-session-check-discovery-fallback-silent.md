@@ -13,7 +13,7 @@ title: "inner-session-check discovery-pid fix has a SILENT degraded fallback —
   next adopter); fix direction: fail-closed OR loud alarm on
   TR_SOURCE=discovery (stderr + state marked degraded/unknown), consumer reads
   transcriptSource and alarms"
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -143,3 +143,11 @@ plugin/loop/orchestrator-loop-tick.md:96:**本步（--json 消费者）必须读
 = **2**（WARNING 行 + `"transcriptSource": "discovery"` 行）≥ band 1。healthy 正常路径（--transcript）stderr
 零告警（Contract control 不回归）。范围化套件 `scripts/test.sh --for-task ...` 全绿：13/13 tests pass，
 task-contract-check / drive-contract-check / adr016 全部 PASS。
+
+**复核（2026-08-07，独立执行工作区验证）**：本任务实现已在 develop 落地（commit 3936f715，merge
+e6a3ead5），本次复核重跑全部验证确认 AC 仍成立——`scripts/test.sh plugin/test/inner-session-check.test.mjs`
+13/13 pass；`--for-task` 范围化静态层（task-contract-check strict-subset / drive-contract-check /
+adr016-screen-use-check）全 PASS；强制退化实测（hermetic tmux + 植入候选 transcript，结构性
+discovery-pid 不可用）⇒ `degraded_alarm=2`（WARNING 行 + `"transcriptSource": "discovery"` 行）、
+`state=degraded`、`transcriptSource=discovery`、stderr 报警——绝不静默 healthy；healthy 正常路径
+（--transcript）stderr 零告警（Contract control 不回归）。status 由 ready 置为 done 收口。
