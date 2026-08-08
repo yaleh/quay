@@ -718,7 +718,7 @@ _oh_emit() { # _oh_emit <label> <start_ms> <end_ms>  → __OVERHEAD__ label_ms=N
 
 run_selected() {
   local groups="$1"; shift
-  local oh_t0 oh_t1 oh_t2 oh_t3 oh_t4 oh_t5 oh_t6 oh_t7
+  local oh_t0 oh_t1 oh_t2 oh_t3 oh_t4 oh_t5 oh_t5b oh_t6 oh_t6b oh_t7
   local oh_full=0
   # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
   # degrade to engine — a dropped group cancels the isolation guarantee without going red.
@@ -806,6 +806,7 @@ run_selected() {
     # round 95 skipped serial when main was red, so serial failures were invisible).
     local serial_files=() sf serial_code
     while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+    [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
     if [ "${#serial_files[@]}" -gt 0 ]; then
       echo "selected ${#serial_files[@]} files (groups=serial)"
       node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
@@ -822,6 +823,7 @@ run_selected() {
     # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
     local lowconc_files=() lf
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
     if [ "${#lowconc_files[@]}" -gt 0 ]; then
       echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
       node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
@@ -831,19 +833,20 @@ run_selected() {
     [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
     # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
     # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
-    # unlike wall-clock diffs inside the 17–63s noise band. The "gap" segments (main→serial and
-    # serial→lowconc) are the inter-phase serial transitions.
+    # unlike wall-clock diffs inside the 17–63s noise band. The "gap" segments are the inter-phase
+    # serial transitions (select/echo between phases, oh_t5→oh_t5b and oh_t6→oh_t6b); the phase
+    # segments (main/serial/lowconc) are the node --test runs themselves. Label tokens deliberately
+    # match the task's measure grep (`build_dist|run_static|resource_gate|gap_ms`).
     if [ "$oh_full" -eq 1 ]; then
-      local oh_t8
-      oh_t8=$(_oh_mark)
-      _oh_emit "lock"          "$oh_t0" "$oh_t1"
-      _oh_emit "resource_gate" "$oh_t1" "$oh_t2"
-      _oh_emit "build_dist"    "$oh_t2" "$oh_t3"
-      _oh_emit "static_checks" "$oh_t3" "$oh_t4"
-      _oh_emit "main_phase"    "$oh_t4" "$oh_t5"
-      _oh_emit "gap_main_to_serial" "$oh_t5" "$oh_t6"
-      _oh_emit "serial_phase"  "$oh_t6" "$oh_t7"
-      _oh_emit "gap_serial_to_lowconc" "$oh_t7" "$oh_t8"
+      _oh_emit "lock_overhead"      "$oh_t0" "$oh_t1"
+      _oh_emit "resource_gate"      "$oh_t1" "$oh_t2"
+      _oh_emit "build_dist"         "$oh_t2" "$oh_t3"
+      _oh_emit "run_static_checks"  "$oh_t3" "$oh_t4"
+      _oh_emit "main_phase"         "$oh_t4" "$oh_t5"
+      _oh_emit "gap_ms_main_to_serial"  "$oh_t5" "$oh_t5b"
+      _oh_emit "serial_phase"       "$oh_t5b" "$oh_t6"
+      _oh_emit "gap_ms_serial_to_lowconc" "$oh_t6" "$oh_t6b"
+      _oh_emit "lowconc_phase"      "$oh_t6b" "$oh_t7"
     fi
     set -e
     # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO
