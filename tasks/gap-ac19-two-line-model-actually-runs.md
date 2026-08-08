@@ -49,8 +49,7 @@ measure integration_lead = `git rev-list --count develop..integration` stdout �
 measure direction_ok = `git log --oneline integration -3 | grep -cE "task/|fan-in.*integration"` stdout 数字段（任务 fan-in 合 integration 后 ≥1）
 band integration_lead = > 0 且 direction_ok = ≥1（至少一次真实合并走声明方向 + integration 领先窗口）
 invoke `bash scripts/test.sh --for-task gap-ac19-two-line-model-actually-runs 2>&1 | tail -3`
-control 制造 integration 领先 develop 窗口后：fork_baseline 可分辨（integration 有 develop 没有的提交）；
-  批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
+control 制造 integration 领先 develop 窗口后 fork_baseline 可分辨（integration 有 develop 没有的提交）；批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
 resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
 
 ## Acceptance Criteria
@@ -79,6 +78,7 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
       integration 领先窗口 + fork_baseline 可分辨验证 + 批量合回，全是真实 git 行为，无凑数任务；分支模型
       判据未放宽（同 AC19 判据 ③ 两条禁止：不为窗口造空转、不为达成放宽）。40→6 重合并仍卡 AC2 全量绿，
       待绿后推进（不因本 AC 达成而推进）。
+      **scoped 验证（entry path 在场）**：`bash scripts/test.sh --for-task gap-ac19-two-line-model-actually-runs`
 
 ## Definition of Done
 
