@@ -37,9 +37,15 @@
 #   bash plugin/scripts/capability-catalog.sh --json     # machine-readable JSON array
 #   bash plugin/scripts/capability-catalog.sh --table    # explicit human table
 #   bash plugin/scripts/capability-catalog.sh --summary  # one summary line only
+#   bash plugin/scripts/capability-catalog.sh --entry-surface [--summary|--json]
+#                                                        # .sh delivery-form gate (AC3):
+#                                                        #   every consumer-doc-referenced .sh must be
+#                                                        #   declared public; exit 1 on a violation
 #
-# Exit status: 0 when every shipped check declares its question (unclassified == 0);
-# 1 when any check is unclassified (AC1c gate). The `--json` mode uses the same gate.
+# Exit status: 0 when every shipped check declares its question (unclassified == 0)
+# AND (in --entry-surface mode) no internal .sh is referenced by consumer-facing docs;
+# 1 when any check is unclassified (AC1c gate) or the delivery-form gate fails (AC3).
+# The `--json` mode uses the same AC1c gate.
 #
 # Output shape (--json): a top-level JSON array of
 #   {"file": "<basename>", "question": "<question>" | null, "ships": true|false}
@@ -146,6 +152,7 @@ declare -A QUESTION=(
   [monitor-mount-check.sh]="Is the loop monitor actually mounted and aimed at the right target (mounted + targetOk, per-observer streams — delivery is the owner's own Monitor stream)?"
   [monitor-mount-check.sh]="Is the loop monitor actually mounted, on the right target, and delivering events?"
   [needs-human-recheck.ts]="Is the needs-human measurement/aliveness axis live and accurate (the black-hole-human-dependency instrument)?"
+  [observer-registry-check.sh]="Is every registered session-liveness observer still alive (registry vs /proc — the observer-kill must have an observer death detector)?"
   [os-anchor-install.sh]="Is the OS-level loop watchdog timer installed, active, and removable (the anchor that outlives any Claude session)?"
   [os-anchor-watchdog.sh]="Is the loop's OS-level anchor present for each project — session alive, and if not, re-spawned + driven with the cold-start text?"
   [pane-state-classify.ts]="What state is a Claude Code pane in (busy/idle/blocked)?"
@@ -248,6 +255,57 @@ declare -A NOT_SHIPPED=(
   [audit-independence-check.ts]="exp5 legacy — canonical implementation of the audit-independence gate"
 )
 
+# ── delivery-form declaration (gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form) ──
+# The shipped artifact's delivery FORM for the plugin's bash tools was 86 loose .sh files — every
+# one an independently-invocable surface, with NO argued decision about the entry count (Core ships
+# as ONE bundled dist/quay.js; the plugin shipped as 86 loose scripts — asymmetry unargued).
+# Human ruling 2026-08-06: the user should get a SMALL number of executable files. bash cannot be
+# bundled into a single executable (unlike .ts via esbuild — the sibling task
+# gap-shipped-ts-files-are-not-bundled-* owns that axis), so the .sh reachable form is
+# "few entry points + internal parts not exposed": the CONSUMER-FACING set below is the ARGUED
+# public .sh entry surface — the tools the shipped docs/skills (plugin/loop/*.md +
+# plugin/skills/*/SKILL.md) tell a consumer/agent to invoke directly. EVERY other shipped .sh is an
+# INTERNAL part: it exists to be called by other scripts/skills, never by a consumer, and it MUST
+# NOT appear in consumer-facing operation docs.
+#
+# AC3 negative control (load-bearing): a .sh that appears in consumer-facing docs but is NOT
+# declared here is an UNARGUED consumer-facing surface — the catalog exits non-zero and names it
+# (`--entry-surface`). This is the mechanical "demotion is not verbal" check: an internal script
+# that still shows up in consumer docs is a lie. The declared set is the argument; the doc-referenced
+# set is the reality; the invariant is doc-referenced(.sh) ⊆ declared.
+#
+# Baseline (measured 2026-08-08 on the fresh 0.4.0 build): 94 loose .sh staged (64 scripts/ +
+# 17 scripts/checker-mutation-cases/ fixtures + 12 gate-scripts/ + 1 sync.sh), of which the 23
+# below are consumer-facing. Shrinking this set (converging toward the single `quay-tool <name>`
+# dispatcher) is the intended direction; the gate enforces that the surface stays ARGUED (no
+# undeclared growth — the 2026-08-06→08-08 drift 86→94 without any argued decision is the failure
+# this gate exists to stop).
+declare -A PUBLIC_ENTRYPOINTS=(
+  [cap-from-gate.sh]="consumer-facing: the adaptive-cap gate invocation documented in the tick docs"
+  [capability-catalog.sh]="consumer-facing: the visibility catalog itself — 'what does each installed check answer'"
+  [claim-task.sh]="consumer-facing: the claim protocol command documented in the tick docs"
+  [inner-session-check.sh]="consumer-facing: the three-state cold-start self-check invoked by the loop docs"
+  [integration-batch-merge.sh]="consumer-facing: the integration→develop batch-merge command in the branch-model docs"
+  [laydown-set-check.sh]="consumer-facing: the cold-start lay-what-you-verify gate invoked by the cold-start skill"
+  [loop-driver-check.sh]="consumer-facing: the exactly-one-driver liveness check documented in the tick docs"
+  [manager-arm-loop.sh]="consumer-facing: the manager scheduling-anchor command documented in the manager tick docs"
+  [manager-tick-log-check.sh]="consumer-facing: the manager's last-tick-did-log detector in the manager tick docs"
+  [monitor-mount-check.sh]="consumer-facing: the loop-monitor mount/aim check in the tick docs"
+  [quay-launch.sh]="consumer-facing today: the per-role launch command in 4 skill docs (demotion to skill-internal tracked by gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal)"
+  [quay-topology.sh]="consumer-facing: the two-window topology factory in the tick docs"
+  [release-task.sh]="consumer-facing: the claim-release command documented in the tick docs"
+  [resource-gate.sh]="consumer-facing: the resource-safety gate invoked by the tick docs before heavy ops"
+  [send-keys-reliable.sh]="consumer-facing: the reliable send-keys sequence used by ADR-016 remote-drive"
+  [session-bootstrap.sh]="consumer-facing: the bare-machine tmux bootstrap in the session-topology skill"
+  [session-liveness-mount.sh]="consumer-facing: the per-observer session-liveness mount command in the tick docs"
+  [session-liveness.sh]="consumer-facing: the session-alive/busy/heartbeat observer invoked by the tick docs"
+  [slot-refill.sh]="consumer-facing: the event-driven slot-refill evaluator in the tick docs"
+  [supervisor-bus-identity.sh]="consumer-facing: the sender-identity verification command in the manager docs"
+  [supervisor-preempt.sh]="consumer-facing: the process-level preempt (.halt) command in the supervisor docs"
+  [sync-lag-check.sh]="consumer-facing: the cross-machine sync heartbeat in the tick docs"
+  [topology-check.sh]="consumer-facing: the three-window topology gate in the tick docs"
+)
+
 # ── derive the check set from the filesystem (never a hardcoded count) ────────────
 SCRIPTS=()
 for f in "$SELF_DIR"/*.sh "$SELF_DIR"/*.ts "$SELF_DIR"/*.mjs; do
@@ -258,10 +316,20 @@ mapfile -t SCRIPTS < <(printf '%s\n' "${SCRIPTS[@]}" | sort)
 
 # ── mode selection ─────────────────────────────────────────────────────────────────
 MODE=table
+ENTRY_SURFACE_SUBMODE=""   # --entry-surface [--summary|--json]
 case "${1:-}" in
   --json) MODE=json ;;
   --table) MODE=table ;;
   --summary) MODE=summary ;;
+  --entry-surface)
+    MODE=entry-surface
+    case "${2:-}" in
+      --json) ENTRY_SURFACE_SUBMODE=json ;;
+      --summary) ENTRY_SURFACE_SUBMODE=summary ;;
+      "") ;;
+      *) echo "ERROR: unknown --entry-surface sub-argument: $2 (expected --json | --summary)" >&2; exit 2 ;;
+    esac
+    ;;
   --help|-h)
     sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
@@ -269,7 +337,7 @@ case "${1:-}" in
   "")
     ;;
   *)
-    echo "ERROR: unknown argument: $1 (expected --json | --table | --summary)" >&2
+    echo "ERROR: unknown argument: $1 (expected --json | --table | --summary | --entry-surface)" >&2
     exit 2
     ;;
 esac
@@ -293,8 +361,55 @@ for b in "${SCRIPTS[@]}"; do
   else
     SHIPPED=$((SHIPPED + 1))
   fi
-  ROWS+="$b	$q	$ships"$'\n'
+  # delivery-form surface (AC3): .sh in PUBLIC_ENTRYPOINTS is consumer-facing (public);
+  # every other shipped .sh is an internal part. Non-.sh (.ts/.mjs) are a DIFFERENT axis
+  # owned by gap-shipped-ts-files-are-not-bundled-* → surface null here.
+  surface=null
+  if [[ "$b" == *.sh ]]; then
+    if [ -n "${PUBLIC_ENTRYPOINTS[$b]:-}" ]; then
+      surface=public
+    else
+      surface=internal
+    fi
+  fi
+  ROWS+="$b	$q	$ships	$surface"$'\n'
 done
+
+# ── delivery-form computation (AC3): which .sh do the consumer-facing docs reference? ──
+# Self-locating: works in the repo AND in the staged package copy (package.sh runs this on the
+# staged plugin). Consumer-facing operation docs = plugin/loop/*.md + plugin/skills/*/SKILL.md —
+# the SAME surface the task contract's `consumer_facing_entrypoints` measure scans.
+PLUGIN_ROOT="$(cd "${SELF_DIR}/.." 2>/dev/null && pwd || true)"
+DOC_REFERENCED_SH=""
+if [ -n "${PLUGIN_ROOT}" ] && [ -d "${PLUGIN_ROOT}/loop" ] && [ -d "${PLUGIN_ROOT}/skills" ]; then
+  DOC_REFERENCED_SH="$(grep -ohE "plugin/scripts/[a-zA-Z0-9._-]+\.sh" \
+    "${PLUGIN_ROOT}"/loop/*.md "${PLUGIN_ROOT}"/skills/*/SKILL.md 2>/dev/null \
+    | sed 's|.*/||' | sort -u || true)"
+fi
+
+# Violations = doc-referenced .sh NOT declared public (an unargued consumer-facing surface).
+VIOLATIONS=""
+if [ -n "${DOC_REFERENCED_SH}" ]; then
+  while IFS= read -r b; do
+    [ -z "$b" ] && continue
+    if [ -z "${PUBLIC_ENTRYPOINTS[$b]:-}" ]; then
+      VIOLATIONS+="$b"$'\n'
+    fi
+  done <<<"${DOC_REFERENCED_SH}"
+fi
+
+SH_SHIPPED=0
+PUBLIC_SH=0
+INTERNAL_SH=0
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  IFS=$'\t' read -r b q ships surface <<<"$line"
+  if [ "$surface" = "public" ]; then PUBLIC_SH=$((PUBLIC_SH + 1)); fi
+  if [ "$surface" = "internal" ]; then INTERNAL_SH=$((INTERNAL_SH + 1)); fi
+  if [[ "$b" == *.sh ]]; then SH_SHIPPED=$((SH_SHIPPED + 1)); fi
+done <<<"$ROWS"
+DOC_REFERENCED_SH_COUNT=$(printf '%s\n' "${DOC_REFERENCED_SH}" | sed '/^$/d' | wc -l | tr -d ' ')
+VIOLATION_COUNT=$(printf '%s\n' "${VIOLATIONS}" | sed '/^$/d' | wc -l | tr -d ' ')
 
 # ── output ──────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "json" ]; then
@@ -306,15 +421,42 @@ for line in rows:
     if not line:
         continue
     parts = line.split("\t")
-    fname, q, ships = parts[0], parts[1], parts[2]
+    fname, q, ships, surface = parts[0], parts[1], parts[2], parts[3]
     entries.append({
         "file": fname,
         "question": q if q else None,
         "ships": ships == "true",
+        "surface": surface if surface != "null" else None,
     })
 json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PYEOF
+elif [ "$MODE" = "entry-surface" ]; then
+  if [ "$ENTRY_SURFACE_SUBMODE" = "json" ]; then
+    python3 - "${SH_SHIPPED}" "${PUBLIC_SH}" "${INTERNAL_SH}" "${DOC_REFERENCED_SH_COUNT}" "${VIOLATIONS}" <<'PYEOF'
+import json, sys
+sh_shipped, public_sh, internal_sh = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+doc_ref_count, violations = int(sys.argv[4]), [v for v in sys.argv[5].splitlines() if v]
+print(json.dumps({
+    "sh_shipped": sh_shipped,
+    "public_sh": public_sh,
+    "internal_sh": internal_sh,
+    "doc_referenced_sh": doc_ref_count,
+    "violations": violations,
+    "ok": len(violations) == 0,
+}, indent=2))
+PYEOF
+  else
+    echo "delivery form (.sh): ${SH_SHIPPED} shipped | ${PUBLIC_SH} declared consumer-facing | ${INTERNAL_SH} internal"
+    echo "consumer-facing docs reference ${DOC_REFERENCED_SH_COUNT} distinct .sh"
+    if [ "$VIOLATION_COUNT" -gt 0 ]; then
+      echo "FAIL (AC3): ${VIOLATION_COUNT} internal .sh script(s) are referenced by consumer-facing docs — the demotion is verbal, not real:" >&2
+      printf '%s\n' "${VIOLATIONS}" | sed '/^$/d' | sed 's/^/  /' >&2
+      echo "  Declare each in PUBLIC_ENTRYPOINTS (capability-catalog.sh) OR remove the doc reference." >&2
+    else
+      echo "AC3 gate: every consumer-doc-referenced .sh is a declared public entry point → PASS"
+    fi
+  fi
 elif [ "$MODE" = "summary" ]; then
   echo "capability-catalog: ${TOTAL} scripts | ${DECLARED} declared | ${UNCLASSIFIED} unclassified | ${SHIPPED} ship"
 elif [ "$MODE" = "table" ]; then
@@ -339,6 +481,15 @@ fi
 
 # ── AC1c gate: unclassified > 0 ⇒ exit non-zero ────────────────────────────────────
 if [ "$UNCLASSIFIED" -gt 0 ]; then
+  exit 1
+fi
+
+# ── AC3 gate (delivery form): an internal .sh referenced by consumer-facing docs ⇒ exit 1 ──
+# This is the load-bearing negative control: "demoted" must be real, not verbal. A .sh NOT
+# declared public (PUBLIC_ENTRYPOINTS) that still appears in plugin/loop/*.md or
+# plugin/skills/*/SKILL.md is an UNARGUED consumer-facing surface — the exact state this task
+# exists to stop (86 loose scripts with no argued entry decision).
+if [ "$MODE" = "entry-surface" ] && [ "$VIOLATION_COUNT" -gt 0 ]; then
   exit 1
 fi
 exit 0
