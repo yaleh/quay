@@ -141,6 +141,42 @@ start did NOT complete.
 
 ## Steps
 
+### 0. Running-state branch — installed-and-RUNNING vs installed-but-STOPPED (the 已停转 branch)
+
+The seven-key checklist measures **"was the instrument laid down" (L1)** — NONE of the keys answers
+**"is the loop actually RUNNING right now" (L2 continuous health)**. A cold-start that previously
+succeeded can leave the loop installed-but-stopped, and a re-run then reports "complete" while the loop
+sits idle (measured 2026-08-06: archguard 11:40 cold-start → 8.5h autonomous → #102 stopped at its
+completion point, six keys five-true-one-false, then idle — genuinely human-needed/backlog-bottom, NOT
+a defect, but the report said "complete"). The **L2 dead-loop criterion** (`dead-loop-check.sh`, cross:
+`tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed`) tests **EXACTLY the
+running state** (transcript no new user message + git no recent commit). **Call it FIRST, before
+touching anything:**
+
+```bash
+bash <root>/plugin/scripts/dead-loop-check.sh --check-running --root <root>
+```
+
+This prints `cold_start_state=running|stopped` and, when stopped, `stopped_reason` + an **EXECUTABLE
+`next_step`**. A stopped loop is reported "installed but stopped" with that next step — **never
+"complete"**. Branch on it:
+
+| `cold_start_state` | `stopped_reason` | `next_step` | action |
+|---|---|---|---|
+| `running` | none | `none` | loop is live — skip the full cold-start; verify the seven keys are still true and report `ALREADY-RUNNING`. |
+| `stopped` | `never-started` | `restart` | installed but never started — proceed with the full cold-start below (a first start, not a resume). |
+| `stopped` | `queue-empty` | `backlog-empty` | started before but the backlog is bottom — do NOT report "complete"; tell the human: add new direction/tasks, then restart. |
+| `stopped` | `waiting-human` | `human-needed` | started before but blocked on human — do NOT report "complete"; tell the human: resolve the needs-human items / give direction, then restart. |
+| `stopped` | `unknown` | `restart` | started before, work available, but the driver died — restart the loop (re-create the cron, re-drive inner). |
+
+The stopped branch **reuses the L2 criterion** instead of inventing a new liveness signal — the dead-loop
+check's `liveness_independent_of_backlog` invariant keeps queue-empty (healthy idle) separate from
+nobody-driving (dead-loop), and this branch additionally reads the target project's own started-marker
+(`.quay/loop-driver.jsonl` / `.workflow-events/` task-start record) + backlog status (`needs-human` /
+`ready` / `todo`) to pick the executable next step. Cross-annotation (AC4): the L2 criterion task
+`tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md` records this branch
+as its first cold-start consumer.
+
 ### 1. Locate root, project, session
 
 - `root = $(pwd)` (this skill runs inside the target project's outer session).
@@ -320,6 +356,19 @@ Print all seven keys (`MONITORS-MOUNTED`, `MONITORS-DELIVERING`, `CRON-CREATED`,
 `TELEMETRY-RECORD`, `FIRST-TASK`, `TOPOLOGY-IN-PLACE`) with `true|false` and the one-line evidence
 each. This is the deliverable — the user's whole cold start is this command, and this list is how
 they (and a future model) know it actually took.
+
+**The seven keys alone are NOT a "complete" verdict** — they measure installed (L1), not running (L2).
+Re-run the step-0 check and include it in the report:
+
+```bash
+bash <root>/plugin/scripts/dead-loop-check.sh --check-running --root <root>
+```
+
+Report `LOOP-STATE: <cold_start_state>` plus, when stopped, `STOPPED-REASON: <stopped_reason>` and
+`NEXT-STEP: <next_step>` (restart / human-needed / backlog-empty). **A stopped loop is reported
+"installed but stopped" with the executable next step — never "complete".** Only a loop whose
+`cold_start_state=running` (or a stopped loop you actually restarted to running) may be reported
+`COMPLETE`.
 
 ## Non-goals
 

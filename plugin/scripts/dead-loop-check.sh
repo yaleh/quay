@@ -51,6 +51,7 @@ _dlc_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="${DEAD_LOOP_ROOT:-}"
 window_min="${DEAD_LOOP_WINDOW_MIN:-30}"
 json=0
+check_running=0
 transcript_dir="${DEAD_LOOP_TRANSCRIPT_DIR:-}"
 
 while [ $# -gt 0 ]; do
@@ -62,6 +63,7 @@ while [ $# -gt 0 ]; do
     --transcript-dir) transcript_dir="$2"; shift 2 ;;
     --transcript-dir=*) transcript_dir="${1#--transcript-dir=}"; shift ;;
     --json) json=1; shift ;;
+    --check-running) check_running=1; shift ;;
     -h|--help)
       sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -150,6 +152,61 @@ if [ "$has_transcript" = "1" ] || [ "$has_commit" = "1" ]; then
   loop_alive=alive
 else
   loop_alive=dead
+fi
+
+# ── --check-running 模式（cold-start 已停转分支，AC1-AC4）─────────────────────────────────────
+# 回答「循环现在在不在转」，不是「装没装好」——L1（六键/可观测后果）测铺没铺，本分支补 L2（在不在转）。
+# 停转时给【可执行下一步】（restart / human-needed / backlog-empty），绝不报「已完成」。
+# 输出字段（Contract measure：cold_start_state / stopped_reason / next_step 可解析）：
+#   cold_start_state=running|stopped
+#   stopped_reason=never-started|queue-empty|waiting-human|unknown   （仅 stopped 时）
+#   next_step=none|restart|human-needed|backlog-empty
+# 复用本脚本的 L2 判据（transcript user 消息 + git 提交时间窗）——不新造 liveness 信号。
+# 交叉标注：tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（AC4）。
+if [ "$check_running" = "1" ]; then
+  if [ "$loop_alive" = "alive" ]; then
+    # running 不输出 stopped_reason —— 保证 Contract measure `grep -c 'stopped\|dead-loop\|已停'`
+    # 只在 stopped 时 >= 1（running 时 0），band「已停转被识别」不因字段名被平凡满足。
+    echo "cold_start_state=running"
+    echo "next_step=none"
+  else
+    # 已停转——区分「从未启动」vs「启动过但停了」，并给可执行下一步。
+    # has_start：这个循环启动过吗？证据 = cold-start step 5 写的 driver 注册 + inner 派发写的 task-start 遥测。
+    has_start=0
+    if [ -f "$root/.quay/loop-driver.jsonl" ]; then has_start=1; fi
+    if ls "$root"/.workflow-events/*.jsonl >/dev/null 2>&1; then
+      if grep -l 'task-start\|"task-start"' "$root"/.workflow-events/*.jsonl >/dev/null 2>&1; then has_start=1; fi
+    fi
+    if [ "$has_start" = "0" ]; then
+      # 从未启动：装好了但从没真正起过——下一步是【起起来】（对 cold-start 而言是首次启动，非 resume）。
+      echo "cold_start_state=stopped"
+      echo "stopped_reason=never-started"
+      echo "next_step=restart"
+    else
+      # 启动过但停了——按 backlog 状态分类为什么停。
+      needs_human=$(grep -lE '^status:[[:space:]]*needs-human' "$root"/tasks/*.md 2>/dev/null | wc -l | tr -d ' ')
+      has_work=$(grep -lE '^status:[[:space:]]*(ready|todo)' "$root"/tasks/*.md 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$needs_human" -gt 0 ]; then
+        # 等人：卡在 needs-human / 等人给方向（archguard backlog 见底 + TASK-49 凭据/方向，真需要人）。
+        echo "cold_start_state=stopped"
+        echo "stopped_reason=waiting-human"
+        echo "next_step=human-needed"
+      elif [ "$has_work" -eq 0 ]; then
+        # 队列空：backlog 见底，没活可干——不是「已完成」，要人给新方向/新任务。
+        echo "cold_start_state=stopped"
+        echo "stopped_reason=queue-empty"
+        echo "next_step=backlog-empty"
+      else
+        # 有活但没人驱动：driver（cron/session）死了——重启循环。
+        echo "cold_start_state=stopped"
+        echo "stopped_reason=unknown"
+        echo "next_step=restart"
+      fi
+    fi
+  fi
+  # 供 Contract measure 识别「已停转」的信号词：cold_start_state=stopped 与 stopped_reason 已含 stopped。
+  # 不再落到下方旧输出（第二个实现体），避免字段串扰。
+  exit 0
 fi
 
 # ── 输出（Contract measure：loop_alive 字段可解析）──────────────────────────────────────────────
