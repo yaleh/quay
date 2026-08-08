@@ -32,6 +32,17 @@ extra: {}
 
 inner 面板 40→6 重合并卡在自己的 AC2（干净窗口全量绿）——最后一次无争议绿 02:50-03:02(718.2s)，之后几轮 red 是受控测量仪器噪声（node --test 全 fail 0），非真回归。
 
+### 执行前读数（内层 2026-08-08，本任务开工时）
+
+- `integration..develop` = 62（develop 领先 integration 62，方向倒置的直接读数）；
+- `develop..integration` = 0（integration 从未领先，fork_baseline 不可观测）；
+- `git merge-base --is-ancestor integration develop` → YES（integration 是 develop 的严格祖先）；
+- 本任务 fan-in 目标 = **integration**（`.quay/config.yml:116-117` `fork_baseline: develop / merge_target: integration`）；
+- 内层近期 task 提交（d6633082/b30d739e/b5de2467）直合 develop → 方向倒置的实锤（文档要求 fan-in 合 integration，执行没跟上）。
+
+**本任务执行 = 纯 git 行为**（fan-in 合 integration + 批量合回），无代码改动；`plugin/loop/fast-mode-loop-tick.md:400/426-427` 已明文
+「fan-in 合到 `$MERGE_TARGET`，不合并到 `$FORK_BASELINE`」「合回 integration，不直接合 develop」——文档正确，缺的是执行。
+
 ## Contract
 
 measure integration_lead = `git rev-list --count develop..integration` stdout 数字段（制造窗口后应 > 0——integration 领先 develop 成立）
