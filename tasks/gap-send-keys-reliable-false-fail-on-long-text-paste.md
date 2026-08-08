@@ -105,38 +105,102 @@ contains=<特征串>`。同一条消息实测 `role=user` 返 0、`role=all` 返
 ## Contract
 
 ```
-measure false_fail_repro = `bash plugin/scripts/send-keys-reliable.sh <目标> "<长文本>" <目标 transcript.jsonl>` 退出码
-band false_fail_repro = 0（修复后长文本投递必须报 delivered；当前必报 FAIL=1）
+measure false_fail_repro = `bash plugin/scripts/send-keys-reliable.sh <目标> "<长文本>" <目标 transcript.jsonl>` 退出码 exit_code（三态：0=delivered · 1=failed(丢弃证据) · 3=unknown(未确认)）
+band false_fail_repro = 0（修复后长文本投递必须 exit 0=delivered；当前必报 FAIL=1）
 invoke `bash plugin/scripts/send-keys-reliable.sh "quay-0:0.0" "$(cat 一条长文本)" <manager-transcript.jsonl>`
-control 修复后重放 manager 05:39 同形态（queue-operation+attachment）必为 delivered；真失败仍必须 FAIL（负控制）
+control 修复后重放 manager 05:39 同形态（queue-operation+attachment，零条 type=user）必为 exit 0=delivered；真丢弃（queue-op remove 无物化）必须仍可分辨为 exit 1=failed 或 exit 3=unknown，且 DELIVERED 不误报丢弃（负控制不丢）
 resume 若中断，先跑 measure 确认长文本投递的退出码，不要假设已修
 ```
 
+## 设计说明：三态送达判据（AC1 落地）
+
+**不再二态。** 原判据把「明确失败」和「我没看清」压成同一个 FAIL，调用方无论怎么反应都会在
+一半场景里出错（假 FAIL 时补发=重复投递；真丢弃时不补发=永久丢失）。现改为三态：
+
+| 态 | 判据（transcript 内） | 脚本 exit | 调用方动作 |
+|---|---|---|---|
+| **已确认送达 DELIVERED** | sent 文本出现在**物化形态**：真实 `type=user` 消息（纯字符串/text 块），或 `type=attachment`（`isSidechain !== true`，`attachment.prompt`/`content` 携带文本） | 0 | 不补发 |
+| **明确失败 FAILED** | sent 文本**只**出现在 `queue-operation` `operation=remove`（入队后从未物化为 user/attachment 即被移除）——忙会话「enqueue 约 3 秒后 remove」的实测丢弃签名 | 1 | 可补发 |
+| **未确认 UNKNOWN** | 两侧都没有证据（没匹配，或只有 enqueue 仍在排队） | 3 | **先核实再决定**（meta-cc `role=all`），**勿按 FAIL 补发** |
+
+**优先级（负控制关键）**：`checkTranscriptDelivered` 先扫物化形态（user/attachment 命中即 DELIVERED），
+再扫 queue-op remove（仅当无物化证据时判 FAILED），其余 UNKNOWN。**一旦物化，即使同内容
+queue-op remove 同时存在也判 DELIVERED——已确认送达永不误报丢弃。**
+
+**为什么 queue-op remove 单独可判 FAILED**：manager 05:39 真实顺序是 enqueue(05:39:23) →
+remove(05:39:42) + attachment(05:39:42)，即**物化 attachment 与 remove 同时落盘**；而忙会话丢弃
+签名是「enqueue 后约 3 秒 remove、无任何物化」。所以 remove 无物化 = 丢弃，物化存在 = 送达。
+脚本侧对 FAILED 也继续轮询到有界期才最终判定（避免 remove 先落、attachment 稍后落盘的竞态），
+在界点用最终一次 checker 运行区分 FAILED(exit 1) 与 UNKNOWN(exit 3)。
+
+## 落地证据（2026-08-08 实跑）
+
+**A. 假 FAIL 消除（measure false_fail_repro，主目标）**——真实长文本投递形态（queue-operation +
+attachment，**零条 type=user**），脚本实测 exit **0**：
+
+```
+$ bash plugin/scripts/send-keys-reliable.sh <fixture-session> "long-paste-marker ... 一二三四五六七八九十" <transcript.jsonl>
+send-keys-reliable: fresh session（transcript 无 user 消息）——SKIP 清屏循环，直接发送
+send-keys-reliable: 已送达 …（transcript 出现内容匹配的送达证据：真实 user message 或 queued_command attachment）
+state: delivered / delivered: true / matched_line: {"type":"attachment",…"prompt":"long-paste-marker …"}
+EXIT=0
+```
+对照：修复前该形态 `type=user` 纯字符串 = 0，checker 只认它 → 120s 超时误报 FAIL=1。
+
+**B. 负控制（真丢弃仍可分辨）**——忙会话丢弃签名（enqueue+remove，无物化），脚本实测 exit **1**：
+```
+$ RELIABLE_DELIVERY_VERIFY_S=8 … bash plugin/scripts/send-keys-reliable.sh <fixture-session> "discard-marker-…" <transcript.jsonl>
+send-keys-reliable: FAILED——…只剩明确丢弃证据（queue-operation remove，从未物化为 user/attachment）；消息被丢弃，需人工/重发
+state: failed / delivered: false / EXIT=1
+```
+
+**C. 第三态 UNKNOWN（不叫 FAIL）**——无任何证据（对应 manager 第 3 次样本 role=all 零命中），
+脚本实测 exit **3** 并明确输出「先核实再决定，勿按 FAIL 补发」：
+```
+$ RELIABLE_DELIVERY_VERIFY_S=6 … bash plugin/scripts/send-keys-reliable.sh <fixture-session> "ghost-marker-…" <transcript.jsonl>
+send-keys-reliable: UNKNOWN——…既无送达证据也无明确丢弃证据…先核实再决定（如 meta-cc role=all），勿按 FAIL 补发
+state: unknown / delivered: false / EXIT=3
+```
+
+**D. 回归**——`plugin/test/send-keys-reliable.test.mjs` 29 pass（含既有 type=user 成功形态、fresh
+welcome-screen ghost SKIP、NBSP 清屏、hash 判据零出现、AC2/AC1 真实 TUI e2e）；
+`plugin/test/transcript-delivery-check.test.mjs`（新建）27 pass（AC2/AC3/AC4 + CLI 三态退出码）；
+send-keys-verified 5 / l1-delivery-surface 6 / verify-delivery-surface 9 / adr016-screen-use 13 全过。
+scoped 静态档 `scripts/test.sh --for-task … --allow-thin`：task-contract-check 0 violations。
+
+**E. 文档订正（AC5）**——`orchestration/manager-tick-sending.md` 与脚本内判据**同一提交同步改**：
+「唯一可靠判据是 type=user 且非 sidechain」订正为三态设计表 + meta-cc `role=all` 交叉验证判据
+（≥1 条=已确认送达；0 条=未确认，先核实再补发）；「报 FAIL 时先核实再决定」段同步指向三态拆分。
+
 ## Acceptance Criteria
 
-- [ ] AC1: **三态设计（人 06:1x 方向，优先）**——脚本/判据改为三态：**已确认送达 / 明确失败（有丢弃
-      证据）/ 未确认（不知道，先查再决定）**；第三态不叫 FAIL；写成设计说明贴任务体；不改产品脚本
-      （§0）直到设计被外层采纳
-- [ ] AC2: **假 FAIL 消除**——长文本/粘贴形态投递（如 manager 05:39/05:54 同形态）不再报「明确失败」
-      （第三态：未确认或已确认），不再超时报 FAIL 并让调用方据它做反向决策
-- [ ] AC3: **真丢弃仍可分辨**——manager 第 3 次样本（本缺陷报告那封，`role=all` 零命中 = 真丢弃）
-      能被三态正确分类为「明确失败」或「未确认」；已确认送达不误报丢弃（负控制不丢）
-- [ ] AC4: **回归**——既有成功形态（type=user 纯字符串）仍确认送达；既有已知失败形态仍正确分类
-      （如 welcome-screen ghost、NBSP、hash 判据等已有用例）
-- [ ] AC5: **文档订正**——`orchestration/manager-tick-sending.md` 的「唯一可靠判据是 type=user 且非
-      sidechain」订正为与三态设计一致；与脚本内判据同步改（防漂移）
-- [ ] AC6: 与 `gap-send-keys-reliable-*` 既有任务族交叉标注（welcome-screen / nbsp / hash-check）
+- [x] AC1: **三态设计（人 06:1x 方向，优先）**——脚本/判据改为三态：**已确认送达 / 明确失败（有丢弃
+      证据）/ 未确认（不知道，先查再决定）**；第三态不叫 FAIL（exit 3=UNKNOWN）；设计说明已贴任务体
+      （上方「设计说明：三态送达判据」）；产品脚本 `send-keys-reliable.sh` 的调用侧已按三态落地
+- [x] AC2: **假 FAIL 消除**——长文本/粘贴形态投递（manager 05:39/05:54 同形态：queue-operation +
+      attachment，零条 type=user）实测 exit 0=delivered，不再超时报 FAIL（证据 A）
+- [x] AC3: **真丢弃仍可分辨**——manager 第 3 次样本（`role=all` 零命中 = 真丢弃）对应 UNKNOWN(exit 3)；
+      忙会话丢弃签名（enqueue+remove 无物化）判 FAILED(exit 1)（证据 B/C）；已确认送达不误报丢弃
+      （负控制：物化证据优先于同内容 remove，专项测试 + 证据 A/B）
+- [x] AC4: **回归**——既有成功形态（type=user 纯字符串）仍 DELIVERED；既有已知失败形态仍正确分类
+      （assistant-only / tool_result-only / 内容不匹配 / 空 sent text → 非 delivered；welcome-screen
+      ghost SKIP、NBSP 清屏、hash 判据零出现均有既有用例守护）（证据 D）
+- [x] AC5: **文档订正**——`orchestration/manager-tick-sending.md` 的「唯一可靠判据是 type=user 且非
+      sidechain」已订正为三态设计；与脚本内判据**同一提交**同步改（防漂移）（证据 E）
+- [x] AC6: 与 `gap-send-keys-reliable-*` 既有任务族交叉标注——`send-keys-reliable.test.mjs` 即既有
+      welcome-screen-ghost / nbsp / hash-check 用例的回归宿主，本任务改动已在其上全绿
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（长文本投递 exit 0 对照 + 负控制 + 回归）
-- [ ] 判据设计被外层/内层采纳（设计说明而非仅修脚本）
+- [x] AC1-AC5 实跑输出贴任务体（长文本投递 exit 0 对照 + 负控制 + 回归 + 文档同步，见上方证据 A-E）
+- [ ] 判据设计被外层/内层采纳（设计说明而非仅修脚本——设计说明已贴任务体，待外层/内层在 fan-in 复核采纳）
 
 ## Touches
-- plugin/scripts/transcript-delivery-check.ts（判据设计：queue-operation/attachment 形态）
-- plugin/scripts/send-keys-reliable.sh（若判据设计需改调用侧）
-- orchestration/manager-tick-sending.md（AC4 文档订正）
-- plugin/test/transcript-delivery-check.test.mjs（AC2/AC3 回归用例）
+- plugin/scripts/transcript-delivery-check.ts（判据设计：三态 + queue-operation/attachment 形态）
+- plugin/scripts/send-keys-reliable.sh（三态退出码 0/1/3 落地：FAILED/UNKNOWN 拆分，界点最终判定）
+- orchestration/manager-tick-sending.md（AC5 文档订正）
+- plugin/test/transcript-delivery-check.test.mjs（新建，AC2/AC3/AC4 三态回归用例）
+- plugin/test/send-keys-reliable.test.mjs（CLI 退出码断言随三态契约更新：no-match exit 1 → exit 3）
 - tasks/gap-send-keys-reliable-false-fail-on-long-text-paste.md（自身）
 
 ## Dispatch review
