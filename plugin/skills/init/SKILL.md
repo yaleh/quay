@@ -117,6 +117,7 @@ documented reference from a genuine missing file:
 | `orchestration/SPEC-cut-the-waiting.md` | quay's "cut the waiting" spec (referenced by fast-mode-loop-tick §4 dispatch form rationale) — not a generic loop deliverable |
 | `orchestration/REVIEW-cadence.md` | quay's daily-review cadence mechanism (referenced by the shipped manager skill as its cadence hook) — not a generic loop deliverable |
 | `orchestration/manager-loop-tick.md` | quay's manager operational tick doc (the shipped manager skill's §1.5/§1.6 rules are extracted from it) — not a generic loop deliverable |
+| `orchestration/manager-tick-log.md` | quay's manager tick log — gitignored runtime telemetry the manager appends each tick (see `gap-manager-tick-mechanical-checks...`); referenced by the shipped manager-loop-tick template but NOT a loop deliverable — declared so referenced ⊆ landed holds |
 | `orchestration/SYNTHESIS-four-gaps-2026-08-05.md` | quay's four-gap synthesis that motivated shipping the manager layer — not a generic loop deliverable |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | quay's manager productization SPEC (C1–C5 constraints, build-vs-run ownership) — not a generic loop deliverable |
 | the manager skill's SPEC methodology-source index | the SPEC files the manager skill lists as an index (AC6) are each declared reference-doc below — referenced, not batch-crystallized, not shipped |
@@ -135,6 +136,7 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md -->
 <!-- reference-doc: orchestration/REVIEW-cadence.md -->
 <!-- reference-doc: orchestration/manager-loop-tick.md -->
+<!-- reference-doc: orchestration/manager-tick-log.md -->
 <!-- reference-doc: orchestration/SYNTHESIS-four-gaps-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-manager-productization-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-cold-start-one-liner.md -->
