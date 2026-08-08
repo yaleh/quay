@@ -698,7 +698,9 @@ tick 做一次收尾 pass。
      `node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slot-status --cap "${effective_cap:-3}" --root "$REPO_ROOT" --json`
      对账——`brackets_reflect_subagents: false` 且 `stale_brackets > 0` ⇒ 还有 `--task-end` 没调齐的
      陈旧括号，跑 `--reconcile` 闭合（`--task-end` 是收尾路径的活；`--reconcile` 兜底执行者已消失的）。
-     `--slot-status` 是纯读，观测轮询不会弄脏工作树。
+     `--slot-status` 是纯读，观测轮询不会弄脏工作树。**反向维度（`gap-closed-bracket-leaves-live-agent-
+     consuming-slots`：括号关 ≠ 进程退）**：`closed_but_live_agents > 0` ⇒ 有已关括号的 agent 进程仍
+     存在（worktree 未清 / 进程未退）——这些槽不是真空闲，收尾时不把它们当空槽。
    - **关红窗遗留括号（AC4/AC8，`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：每次收尾
      pass 无条件跑一次 `--reconcile`，用可观测证据（分支已 merge / worktree 已消失 / 进程已死）关掉
      executor 已消失的未闭合括号——让遥测 `inProgress` 反映**真实在飞**而非红窗遗留：

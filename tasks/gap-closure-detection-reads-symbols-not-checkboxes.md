@@ -67,17 +67,60 @@ resume 若中断，先跑 measure 读 AC 全勾 ready 任务数，不要假设�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **并列信号**——`notYetFlipped` 加 `all_acs_checked && status==ready`（与 taskWorkLanded 并集）；
-      实测 17 个 AC 全勾 ready 任务被移出 dispatchable
-- [ ] AC2: **不替换**——taskWorkLanded 语义保留（落地未勾仍被抓）；勾了但工作未落地的任务不被误翻转
-      （负控制：构造一个 AC 全勾但 Touches 文件不存在/符号不解析的任务 ⇒ 不报 not-yet-flipped）
-- [ ] AC3: **池清空后**——dispatchable 数从 17+ 回落到真实可派发数（约 4-5）
-- [ ] AC4: 与 gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool、gap-targeted-promotion
-      交叉标注（同一池机制族：收尾信号/退回排除/定向晋级）
+- [x] AC1: **并列信号**——`notYetFlipped` 加 `all_acs_checked && status==ready`（与 taskWorkLanded 并集）；
+      实测 17 个 AC 全勾 ready 任务被移出 dispatchable（实跑：17/17 全被 not-yet-flipped 抓到；
+      其中 12 个原先在 dispatchable 池，pool 20→8、dispatchable_disjoint 9→6；见 DoD 对照）
+- [x] AC2: **不替换**——taskWorkLanded 语义保留（落地未勾仍被抓）；勾了但工作未落地的任务不被误翻转
+      （负控制：构造一个 AC 全勾但 Touches 文件不存在/符号不解析的任务 ⇒ taskWorkLanded 不报
+      not-yet-flipped——work-landed 信号保持纯「工作已落地」，不被勾选框污染；并集层 AC 信号才报。
+      落地未勾仍被抓：`landed-unchecked` 测试断言 notYetFlipped=true。partial(2/4)/zero-checkbox/
+      todo-status 负控制均不报。AC1/AC2 张力裁决：外层裁定「并集不替换」为主——AC 全勾 + ready 即收尾
+      候选，无论 work-landed 证据是否可见（正是散文 AC 任务的病根））
+- [x] AC3: **池清空后**——dispatchable 数从 17+ 回落到真实可派发数（约 4-5）
+      （实跑 `--cap 5 --json`：pool 20→8、dispatchable_disjoint 9→6、deficit 0→12；not-yet-flipped
+      排除 10→22，新增 12 条全为 AC 全勾未翻转）
+- [x] AC4: 与 gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool、gap-targeted-promotion
+      交叉标注（同一池机制族：收尾信号/退回排除/定向晋级）——已在本任务体 Cross-references 与
+      `tasks/gap-targeted-promotion-operation-does-not-exist.md` 各加交叉标注
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴任务体（17→回落对照 + 负控制 + 并集不替换）
+- [x] AC1-AC4 实跑输出贴任务体（17→回落对照 + 负控制 + 并集不替换）——见下
+
+### 实跑证据（2026-08-08，`--root $(pwd) --cap 5 --json`）
+
+**17→回落对照（AC1/AC3）**：
+
+```
+修复前（workLanded only）      修复后（并集 workLanded || all_acs_checked&&ready）
+pool: 20                       pool: 8
+dispatchable_disjoint: 9       dispatchable_disjoint: 6
+deficit: 0                     deficit: 12
+not-yet-flipped 排除: 10        not-yet-flipped 排除: 22（+12，全为 AC 全勾未翻转）
+```
+
+AC 全勾（countAcCheckboxes checked==total>0）ready 任务实取 **17 个**（gap-cold-start-outer-validation-runs
+4/4、gap-full-suite-runner-marks-test-sh-gate-wait-as-failed 4/4、gap-concurrency-derivation-... 14/14、
+gap-tests-leak 10/10 等）——修复后 **17/17 全被 not-yet-flipped 抓到**，其中 12 个原先在 dispatchable 池
+（workLanded 漏掉的散文 AC 完成态），5 个修复前已被 workLanded 抓到。池内 AC 全勾残留 = **0**。
+
+**负控制 + 并集不替换（AC2）**：`plugin/test/ready-pool-check.test.mjs` 新增 2 测（tests 30/pass 30）：
+- AC-complete-not-flipped（全勾 + Touches 不存在）⇒ 报 not-yet-flipped，移出池；genuinely-pending（未勾 +
+  未落地）⇒ 留池（AC1 正控制）
+- `taskWorkLanded(AC 全勾 + Touches 不存在) === false`（work-landed 信号保持纯，不被勾选框污染——AC2 负控制）
+- landed-unchecked ⇒ 仍排除（并集不替换）；partial(2/4)/zero-checkbox/todo-status ⇒ 均不报
+
+## Cross-references（AC4 交叉标注——同一池机制族：收尾信号/退回排除/定向晋级）
+
+> **与 `gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool`（done）互为镜像**：那条把判据从
+> 「AC 全勾」改为「工作已落 master」（内层合并不勾 AC），本条把「工作已落」的信号改回并集补上
+> 「AC 全勾」——两条并集后 = 收尾信号完整覆盖（勾了没落地 + 落地没勾全 + 全勾 ready 三态都被排除）。
+> `taskWorkLanded` 语义原样保留（并集不替换），只是不再唯一。
+>
+> **与 `gap-targeted-promotion-operation-does-not-exist`（todo）同族**：ready-pool 池机制三件套——
+> 收尾信号（本条）/ 退回排除 rejected（那条 AC6b）/ 定向晋级 targeted（那条 AC1-AC2）。本条移出
+> AC 全勾未翻转，那条移出被退回任务，池子的「真实可派发」口径由两者共同收窄。
+> 已在该任务体加对应交叉标注。
 
 ## Touches
 - plugin/scripts/ready-pool-check.ts（notYetFlipped 加并列信号）

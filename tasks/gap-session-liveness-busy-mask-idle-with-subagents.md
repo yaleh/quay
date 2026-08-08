@@ -104,45 +104,39 @@ esc to interrupt」被证伪，外层该根因结论撤回。
 若仍不发，才是真缺陷；若发了，则现有实现无缺陷，缺的是「pane-only 配置对一个正在被上层频繁驱动的
 目标不适用」这条边界说明。**
 
-**真根因（外层 15:3x 按 manager 判据复测找到）——LOOP_MIN 静默闸 + pane-only 默认心跳被上层刷新**：
+**真根因（外层 15:3x 按 manager 判据复测找到，2026-08-08）——LOOP_MIN 静默闸 + pane-only 默认心跳
+被上层刷新**：
 - **观测 inner（外层不驱动）+ pane-only，LOOP_MIN=1**：IDLE_CONSEC 单调 1→7、IDLE_REPORTED 0→1
   （闸通过），**但 SESSION-IDLE 没打出**（LOOP_MIN 静默）。
 - **同配置 LOOP_MIN=0**：**SESSION-IDLE 报出**（`心跳 1 分钟前更新`）。
 - **机制**：pane-only（SESSION_TRANSCRIPTS 空）→ `heartbeat_for` 回退默认心跳 =
-  `<root>/orchestration/tick-log.md`（heartbeat_for:841）。tick-log 被外层/内层每个 tick 追加刷新
-  → hmin 恒 ≈0-2min < LOOP_MIN=20 → **IDLE 永久静默**。LOOP_MIN=0 破除静默 → IDLE 正常报。
-- **含义**：manager 实环境（看 outer + pane-only）0 条 IDLE 的根因 = **默认心跳（tick-log）被上层活动
-  持续刷新 → hmin 恒新鲜 → LOOP_MIN 静默闸吞掉所有 IDLE**。这不是 D5 的 IDLE_CONSEC 问题，也不是
-  pane 判 busy（inner 观测里 pane_state=waiting-input 正常）。
+  `<root>/orchestration/tick-log.md`。tick-log 被外层/内层每个 tick 追加刷新 → hmin 恒 ≈0-2min
+  < LOOP_MIN=20 → **IDLE 永久静默**。LOOP_MIN=0 破除静默 → IDLE 正常报。
+- **含义**：manager 实环境（看 outer + pane-only）0 条 IDLE 的根因 = **默认心跳（tick-log）被上层
+  活动持续刷新 → hmin 恒新鲜 → LOOP_MIN 静默闸吞掉所有 IDLE**。不是 D5 的 IDLE_CONSEC 问题，也不是
+  pane 判 busy（inner 观测里 pane_state=waiting-input 正常）。「bypass 模式常驻 esc to interrupt」
+  假说已被证伪（见上），**classifyPaneState 的 busy 判据不改**。
 - **按 manager 判据框架**：IDLE 在正确配置（LOOP_MIN=0）下**发了** ⇒ 现有实现**无缺陷**，缺的是
-  **「pane-only 配置对一个正在被上层频繁驱动的目标不适用」的边界说明**——pane-only 的回退心跳（tick-log）
-  对「被上层频繁写 tick 的目标」永远新鲜，LOOP_MIN 静默闸必须按此调整（或 pane-only 需显式心跳源）。
+  **「pane-only 配置对一个正在被上层频繁驱动的目标不适用」的边界说明**——pane-only 的回退心跳
+  （tick-log）对「被上层频繁写 tick 的目标」永远新鲜，LOOP_MIN 静默闸必须按此调整（或 pane-only
+  需显式心跳源）。
+
+**本轮实现（2026-08-08 本任务执行，fork 基线 = develop 32c85b20）——边界说明 + 启动 WARN + 边界测试**：
+1. **classifyPaneState 不改忙闲判据**（防假阴性回退）：真根因不是 esc 分类。pane-state-classify.ts
+   只加文档注释（为什么 esc-in-status-area 判 busy 是对的 + 证伪证据），行为不变。
+2. **边界说明**写进 session-liveness.sh 头部「两种信号」节：pane-only + 默认心跳（tick-log）不适合
+   观测被上层驱动的目标；pane-only 观测要么配显式心跳源（SESSION_HEARTBEATS / SESSION_TRANSCRIPTS）
+   要么设 LOOP_MIN=0。
+3. **启动 WARN（_sl_audit_pane_only_gate）**：对「pane-only + 默认心跳 + LOOP_MIN>0」的目标在启动时
+   WARN 一次（stderr）——宁可启动响一声，不要运行期静默半盲（同 _sl_audit_config_wiring 原则）。
+4. **边界测试**（session-liveness-signals.test.mjs 新增 AC-boundary）：pane-only + 默认心跳（新鲜
+   tick-log）+ LOOP_MIN=1 ⇒ SESSION-IDLE 静默（证实掩蔽）；同配置 LOOP_MIN=0 ⇒ SESSION-IDLE 报出
+   （收口机制）；且 LOOP_MIN>0 时启动 WARN 出现、LOOP_MIN=0 时无 WARN。
 
 **收口判据（manager 已定，不变）**：D5 的收口 = **实环境报出一次 SESSION-IDLE**，不是「修复已合入
-develop」，也不是注入 pane 的负控制通过。**本真根因下，收口 = 对 pane-only 目标按 LOOP_MIN=0（或显式
-心跳源）观测并报出 IDLE。**
-
-### LOOP_MIN 假说调和 manager 的「三件矛盾事实」（外层 15:49 验证，实现无缺陷）
-
-**manager 定量矛盾（15:4x）**：修复版挂 80 分钟，SESSION-RESUMED 6 条、SESSION-IDLE 0 条。RESUMED 触发
-条件 = PREV_IDLE==1 ⇒ 6 次 RESUMED ⇒ pane 被判过 idle 至少 6 次。且 15:15:10–15:17:58 连续 168 秒判
-waiting-input（60 样本）⇒ 本应第 2 个连续 idle 轮报出，实收 0。**①②③ 看似矛盾**。
-
-**LOOP_MIN 假说调和**（外层按 manager 判据复测，观测 inner + pane-only）：
-
-| manager 事实 | LOOP_MIN 假说解释 |
-|---|---|
-| ① 注入恒定 idle pane round 4 报出 | 注入测试无心跳文件 → `hmin="?"` → `[ "$hmin" = "?" ]` 分支**报出**（session-liveness.sh:1137） |
-| ② 实环境 168s 判 idle 不报 | pane-only 默认心跳 = tick-log，tick-log 被上层 tick 刷新 → `hmin < LOOP_MIN=20` → **静默分支**（:1142 `:`） |
-| ③ RESUMED 发 | **RESUMED 不静默**（注释明说「保留不静默，它便宜且是唯一正向信号」） |
-
-**验证**（观测 inner + pane-only + 默认 LOOP_MIN=20）：DIAG round=4 `IDLE_REPORTED=1`（闸通过）但
-SESSION-IDLE 静默；tick-log age=10min < LOOP_MIN=20。**LOOP_MIN=0 时 IDLE 报出**（上轮已验证）。
-
-**结论**：**实现无缺陷**——LOOP_MIN 静默闸按设计把 `hmin < LOOP_MIN` 的空闲当「正常收尾」静默
-（AC21 噪声闸门，注释明说）。pane-only 配置无显式心跳源 → 默认心跳 tick-log → 被上层活动刷新 →
-hmin 恒 < LOOP_MIN → 对该目标的 IDLE 永久静默。**缺的是边界说明**：pane-only 对一个被上层频繁驱动的
-目标不适用，需显式心跳源（SESSION_TRANSCRIPTS）或 LOOP_MIN=0。
+develop」，也不是注入 pane 的负控制通过。**真根因下，收口 = 对 pane-only 目标按 LOOP_MIN=0（或显式
+心跳源）观测并报出 IDLE——需一个空闲窗口；本实现的边界测试已在注入 fixture 上证明机制（pane-only +
+LOOP_MIN=0 → SESSION-IDLE），真实环境的收口观测待一个 idle 窗口。**
 
 **测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
 - from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。

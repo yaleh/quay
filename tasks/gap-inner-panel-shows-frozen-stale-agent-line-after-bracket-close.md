@@ -197,3 +197,11 @@ reviewer: none
 at: 2026-08-07T03:3xZ
 changed: 管理者 2026-08-07 观测发现（面板冻结行与遥测相反），请外层判断 → 裁定立案：同族（仪器无法区分
   相反状态）第二个方向 + 显示/观测缺陷，证据充分（3 采样计时冻结 + 算术核对 + 复验）。
+
+## 交叉标注（2026-08-08，`gap-closed-bracket-leaves-live-agent-consuming-slots`）
+
+**同族反向的两条：本任务「括号关、面板行冻结残留」是显示/观测方向；`gap-closed-bracket-leaves-live-
+agent-consuming-slots`「括号关、agent 进程活」是进程方向。** 两方向都由「括号关 ≠ agent 退出/结束」
+这个事实驱动：本任务的行冻结 = 已结束（进程退、计时停）；反向任务的 pane 行仍 ↑ 输出 = 进程还活着。
+槽位记账的反向修复（`fast-mode-telemetry.ts --slots` 的 `closedButLive` / `occupied_slots`）是进程面
+的机械检出，本任务的 `inner-panel-stale-check.ts` 是显示面的机械检出——同一记账/观测面、两个方向。

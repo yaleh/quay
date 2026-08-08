@@ -45,6 +45,7 @@ import {
   BLOCKING_WEIGHT,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
+import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -76,8 +77,10 @@ function writeTask(root, id, { status = "todo", labels = [], parent = null, chil
 }
 
 // A minimal contract-shape body carrying the four artifacts (Proposal / Contract / AC / DoD).
-function fourArtifactBody({ acBoxes = 4, touches = "", extra = "" } = {}) {
-  const acLines = Array.from({ length: acBoxes }, () => "- [ ] an AC item that is long enough");
+// `checkedAc` marks the first N AC boxes `- [x]` (default 0 — all unchecked, the fan-in merge shape).
+function fourArtifactBody({ acBoxes = 4, touches = "", extra = "", checkedAc = 0 } = {}) {
+  const acLines = Array.from({ length: acBoxes }, (_, i) =>
+    i < checkedAc ? "- [x] an AC item that is long enough" : "- [ ] an AC item that is long enough");
   return [
     "**type:** execution",
     "## Proposal",
@@ -286,6 +289,84 @@ test("isFixture / isParked / notYetFlipped unit behavior", (t) => {
   // status is part of the predicate: a `done` task is never the not-yet-flipped state.
   const doneTask = { status: "done", body: "## Acceptance Criteria\n- [ ] whatever\n## Touches\n- code/landed.ts\n" };
   assert.equal(notYetFlipped(doneTask, root), false, "done status is not the not-yet-flipped state");
+});
+
+// ── AC-complete-not-flipped union signal (gap-closure-detection-reads-symbols-not-checkboxes) ──────
+// The ready-pool closure signal (`notYetFlipped`) read WORK-LANDED evidence (symbol resolution /
+// `(new)` touches / git history) — never AC checkboxes — so a prose-AC COMPLETED task (all ACs
+// checked, but no resolvable symbols / no `(new)` touches / no git reference) stayed in the
+// dispatchable pool and got re-dispatched (measured 2026-08-08: 17/21 ready tasks were
+// AC-complete-not-flipped). Fix: the not-yet-flipped signal is a UNION — taskWorkLanded (the
+// merged-but-unchecked half, preserved) OR all_acs_checked && status==ready (the COMPLETION state,
+// independent of writing style). AC1 positive control (AC-complete-but-not-flipped is surfaced) +
+// AC2 union-not-replace (taskWorkLanded stays pure / landed-but-unchecked still excluded) + negative
+// controls (partial / zero-checkbox / non-ready are NOT surfaced).
+
+test("AC-complete-not-flipped ready task is surfaced; genuinely-pending is not (AC1 union positive control)", (t) => {
+  const root = makeWorkspace("ac-complete");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // AC-complete-but-not-flipped: all 4 ACs checked, but NO work-landing evidence — the Touches file
+  // does not exist, no resolvable symbols, no git history. taskWorkLanded alone would MISS this
+  // (the prose-AC completed shape); the AC-checkbox union signal must surface it.
+  writeTask(root, "gap-ac-complete", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ checkedAc: 4, touches: ["- code/never-landed.ts"] }),
+  });
+  // A genuinely-pending ready task: ACs unchecked, work not landed → stays in the pool.
+  writeTask(root, "gap-pending", {
+    status: "ready",
+    labels: ["gap"],
+    body: fourArtifactBody({ touches: ["- code/never-landed-2.ts"] }),
+  });
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root });
+  const byId = Object.fromEntries(r.excluded.map((e) => [e.id, e.reasons]));
+  assert.ok(
+    byId["gap-ac-complete"]?.includes("not-yet-flipped"),
+    "AC-complete-but-not-flipped ready task must be surfaced (AC1)",
+  );
+  assert.equal(r.ready.includes("gap-ac-complete"), false, "AC-complete task NOT in the dispatchable pool");
+  assert.equal(r.ready.includes("gap-pending"), true, "genuinely-pending task stays in the pool");
+  assert.deepEqual(r.ready, ["gap-pending"]);
+});
+
+test("AC-complete signal is a UNION not a replace: partial/zero/non-ready NOT surfaced, landed-unchecked STILL excluded (AC2)", (t) => {
+  const root = makeWorkspace("ac-union");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Partial ACs (2/4) + work not landed → NOT not-yet-flipped (the AC signal requires ALL checked).
+  const partial = { status: "ready", body: fourArtifactBody({ checkedAc: 2, touches: ["- code/missing.ts"] }) };
+  assert.equal(notYetFlipped(partial, root), false, "partial-AC ready task is not a closure candidate (AC2)");
+
+  // Zero AC checkboxes (total 0) → NOT not-yet-flipped (total > 0 guard — 0/0 must not vacuous-true).
+  const zeroAc = {
+    status: "ready",
+    body: "## Acceptance Criteria\nno checkboxes at all\n## Touches\n- code/missing.ts\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(zeroAc, root), false, "zero-checkbox ready task is not a closure candidate (AC2)");
+
+  // Non-ready status (todo) with all ACs checked → NOT not-yet-flipped (status guard).
+  const todoChecked = { status: "todo", body: fourArtifactBody({ checkedAc: 4, touches: ["- code/missing.ts"] }) };
+  assert.equal(notYetFlipped(todoChecked, root), false, "todo-status task is not the not-yet-flipped state (AC2)");
+
+  // union-not-replace / taskWorkLanded pure: an AC-all-checked + work-NOT-landed task must NOT be
+  // judged landed by taskWorkLanded itself (the work-landed signal stays independent of checkbox
+  // state) — only the union's AC signal surfaces it.
+  fs.writeFileSync(path.join(root, "code", "landed.ts"), "export const landed = 1;\n");
+  const acCompleteNotLanded = { status: "ready", body: fourArtifactBody({ checkedAc: 4, touches: ["- code/never.ts"] }) };
+  assert.equal(taskWorkLanded(acCompleteNotLanded.body, root), false, "taskWorkLanded stays a pure work-landed signal (AC2)");
+  assert.equal(notYetFlipped(acCompleteNotLanded, root), true, "union catches it via the AC-complete signal (AC1)");
+
+  // taskWorkLanded semantics preserved: a work-landed-but-AC-unchecked ready task is STILL excluded.
+  const landedUnchecked = {
+    status: "ready",
+    body: "## Acceptance Criteria\n- [ ] unchecked\n## Touches\n- code/landed.ts (new)\n## Definition of Done\nstandard",
+  };
+  assert.equal(notYetFlipped(landedUnchecked, root), true, "landed-but-unchecked ready task still excluded (union-not-replace)");
+
+  // Neither signal fires → stays in the pool.
+  const pending = { status: "ready", body: fourArtifactBody({ touches: ["- code/never.ts"] }) };
+  assert.equal(notYetFlipped(pending, root), false, "neither signal fires → stays in the pool");
 });
 
 test("artifactsComplete is shape-aware and content-gated", () => {
@@ -531,6 +612,35 @@ test("promotion ranks touch-disjointness first (vs pool + in-flight), kind as se
   const idxInfD = r.candidates.findIndex((c) => c.id === "gap-inf-disjoint");
   const idxInfC = r.candidates.findIndex((c) => c.id === "ARCH-colliding-inf");
   assert.ok(idxInfD < idxInfC, "disjoint-from-in-flight ranks before colliding-with-in-flight");
+});
+
+// ── REVERSE DIRECTION (gap-closed-bracket-leaves-live-agent-consuming-slots): closed-but-live agents
+//    rank in the in-flight disjointness set — a new dispatch must not collide with their touches even
+//    though their telemetry bracket already closed (bracket-close ≠ agent-exit) ─────────────────────
+
+test("AC4 reverse — closedButLive agents rank in the in-flight disjointness set", (t) => {
+  const root = makeWorkspace("cbl-rank");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const f of ["code/pool.ts", "code/other.ts", "code/ghost.ts"]) {
+    fs.writeFileSync(path.join(root, f), "export const x = 1;\n");
+  }
+  // Pool: 1 ready task touching code/pool.ts.
+  writeTask(root, "gap-pool", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) });
+  // Candidates (all eligible; disjointScore vs pool(1) + closed-but-live(1)):
+  writeTask(root, "gap-ghost-colliding", gapTask("gap-ghost-colliding", { body: fourArtifactBody({ touches: ["- code/ghost.ts"] }) })); // collides closed-but-live → 1
+  writeTask(root, "gap-free", gapTask("gap-free", { body: fourArtifactBody({ touches: ["- code/other.ts"] }) })); // disjoint both → 2
+
+  const closedButLive = [{ id: "gap-ghost", body: fourArtifactBody({ touches: ["- code/ghost.ts"] }) }];
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, closedButLive });
+  assert.equal(r.closed_but_live[0], "gap-ghost", "the closed-but-live set is surfaced in the output");
+  assert.ok(r.candidates.find((c) => c.id === "gap-free"), "gap-free candidate present");
+  assert.ok(r.candidates.find((c) => c.id === "gap-ghost-colliding"), "ghost-colliding candidate present");
+  const idxFree = r.candidates.findIndex((c) => c.id === "gap-free");
+  const idxGhost = r.candidates.findIndex((c) => c.id === "gap-ghost-colliding");
+  assert.ok(idxFree < idxGhost, "disjoint-from-closed-but-live ranks before colliding-with-closed-but-live");
+  // The closed-but-live id is excluded from ready_relevance (it is NOT dispatchable room).
+  const readyRel = r.ready_relevance.map((x) => x.id);
+  assert.ok(!readyRel.includes("gap-ghost"), "closed-but-live id excluded from ready relevance");
 });
 
 // ── AC4/AC5: hard-cap floor constant is what the ticks use ────────────────────────────────────────

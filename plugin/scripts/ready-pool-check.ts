@@ -94,7 +94,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
 // git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
 // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex } from "./task-status-drift-check.ts";
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes } from "./task-status-drift-check.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -216,16 +216,30 @@ export function kindOrder(kind) {
 
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
  *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file / git-history
- *  evidence) but `status` is still `ready` (fan-in has not flipped it). Deliberately does NOT depend
- *  on AC checkbox state: the inner's fan-in merges WITHOUT ticking AC boxes, so all-checked is not
- *  the closeout signal (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). taskId is
- *  passed through so the git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-
- *  merged-tasks) can anchor on the task's own id without depending on the self-touch Touches entry. */
+ *  evidence) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of two
+ *  INDEPENDENT closure indicators:
+ *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
+ *       catches the "merged-but-AC-unchecked" half (the inner's fan-in merges WITHOUT ticking AC
+ *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). Does NOT depend on
+ *       AC checkbox state.
+ *   (2) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
+ *       COMPLETION state as written by the checkboxes, independent of AC writing style
+ *       (gap-closure-detection-reads-symbols-not-checkboxes). A prose-AC completed task whose work
+ *       landed but shows no resolvable symbols / `(new)` touches / git-history reference is invisible
+ *       to (1) yet IS a closure candidate — this second signal surfaces it. Complements, never
+ *       replaces, taskWorkLanded (the union, not an either/or).
+ *  A task is excluded from the dispatchable pool when EITHER fires. `taskId` is passed through so the
+ *  git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor
+ *  on the task's own id without depending on the self-touch Touches entry. */
 export function notYetFlipped(task, repoRoot, gitIndex) {
   if (task.status !== "ready") return false;
   const opts = { taskId: task.id };
   if (gitIndex) opts.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
-  return taskWorkLanded(task.body, repoRoot, opts);
+  const workLanded = taskWorkLanded(task.body, repoRoot, opts);
+  const ac = extractSection(task.body, "Acceptance Criteria");
+  const { total, checked } = countAcCheckboxes(ac);
+  const allAcsChecked = total > 0 && checked === total;
+  return workLanded || allAcsChecked;
 }
 
 export function isFixture(task) {
@@ -383,12 +397,16 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
 
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
- *  scanned, top_relevance, ready_relevance }. `root` is the repo root used to resolve `## Touches`
- *  existence claims; `tasksDir` defaults to `<root>/tasks`; `cap`/`floorMult` derive the floor
- *  (default 3×4 ⇒ 12); `inFlight` is an optional array of `{ id, body }` for currently in-flight
- *  tasks (ranked against); `topN` is the value-prioritization query size — when > 0 the `top_relevance`
- *  array (the highest-value N todo tasks + reasons, the AC2 "which matters most" answer) is produced. */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], topN = 0 }) {
+ *  scanned, top_relevance, ready_relevance, closed_but_live }. `root` is the repo root used to
+ *  resolve `## Touches` existence claims; `tasksDir` defaults to `<root>/tasks`; `cap`/`floorMult`
+ *  derive the floor (default 3×4 ⇒ 12); `inFlight` is an optional array of `{ id, body }` for
+ *  currently in-flight tasks (ranked against); `closedButLive` is an optional array of `{ id, body }`
+ *  for tasks whose telemetry bracket CLOSED but whose executor is still observably present
+ *  (gap-closed-bracket-leaves-live-agent-consuming-slots) — they rank in the in-flight disjointness
+ *  set and are excluded from ready_relevance; `topN` is the value-prioritization query size — when
+ *  > 0 the `top_relevance` array (the highest-value N todo tasks + reasons, the AC2 "which matters
+ *  most" answer) is produced. */
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], topN = 0 }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -446,8 +464,10 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     .map((t) => relevanceOf(t.id))
     .sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
   // ready_relevance ranks the ready pool by value — the "who to dispatch next" answer. In-flight ids
-  // (the --in-flight param) are excluded so the ranking reflects the actually-dispatchable set.
-  const inFlightIds = new Set((inFlight || []).map((t) => t.id));
+  // (the --in-flight param) AND closed-bracket-but-live ids (gap-closed-bracket-leaves-live-agent-
+  // consuming-slots — a closed bracket whose executor is still present is NOT dispatchable room) are
+  // excluded so the ranking reflects the actually-dispatchable set.
+  const inFlightIds = new Set([...(inFlight || []), ...(closedButLive || [])].map((t) => t.id));
   const readyRelevance = ready
     .filter((id) => !inFlightIds.has(id))
     .map(relevanceOf)
@@ -467,7 +487,10 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   const sharedFiles = walkFiles(root);
   const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
   const poolParsed = ready.map((id) => ({ id, touches: parseTouches(allTasks.get(id).body) }));
-  const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
+  // In-flight ranking includes closed-bracket-but-live agents (gap-closed-bracket-leaves-live-agent-
+  // consuming-slots): a new dispatch must be pairwise-disjoint from a still-present executor's touches
+  // even if its telemetry bracket already closed — bracket-close ≠ agent-exit.
+  const inFlightParsed = [...(inFlight || []), ...(closedButLive || [])].map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
   const dispatchableDisjoint = maxMutuallyDisjointSubset(poolParsed.map((p) => p.touches), expand);
 
   const criterionMet = dispatchableDisjoint >= cap;
@@ -551,6 +574,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     scanned: allTasks.size,
     top_relevance: topRelevance,
     ready_relevance: readyRelevance,
+    closed_but_live: (closedButLive || []).map((t) => t.id),
   };
 }
 
@@ -559,6 +583,7 @@ function main(argv) {
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
+  let closedButLiveIds = [];
   let topN = 0;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
@@ -569,17 +594,24 @@ function main(argv) {
     else if (args[i] === "--top") topN = Number(args[++i]); // value-prioritization query: top-N todos by relevance
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === "--closed-but-live") {
+      closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     }
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
-  const inFlight = [];
-  for (const id of inFlightIds) {
-    const file = path.join(rootDir, "tasks", `${id}.md`);
-    if (!fs.existsSync(file)) continue; // advisory — a vanished in-flight id is not a failure
-    inFlight.push({ id, body: fs.readFileSync(file, "utf8") });
-  }
+  const readTasks = (ids) => {
+    const out = [];
+    for (const id of ids) {
+      const file = path.join(rootDir, "tasks", `${id}.md`);
+      if (!fs.existsSync(file)) continue; // advisory — a vanished id is not a failure
+      out.push({ id, body: fs.readFileSync(file, "utf8") });
+    }
+    return out;
+  };
+  const inFlight = readTasks(inFlightIds);
+  const closedButLive = readTasks(closedButLiveIds);
   const t0 = Date.now();
-  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, topN });
+  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

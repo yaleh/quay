@@ -15,6 +15,12 @@ extra: {}
 
 **「定向晋级」不是一个操作——阶段目标要的任务无法离开 todo。**
 
+> **AC 交叉标注（2026-08-08，`gap-closure-detection-reads-symbols-not-checkboxes` 落地时写）**：
+> ready-pool 池机制三件套——**收尾信号 / 退回排除 / 定向晋级**。本条 = 退回排除（AC6b）+ 定向晋级
+> （AC1-AC2）；收尾信号那条 = 池子里 AC 全勾未翻转被误当可派发（ready 池 61% 空转）。两条共同收窄
+> 「真实可派发」口径：本条把被退回任务移出池、把阶段目标任务从 todo 定向提出来；那条把已完成未翻转的
+> 任务从 ready 移到收尾。互不重叠、同属 ready-pool-check 机制族。
+
 ### 人的裁定（2026-08-08 10:1xZ，职责切分）
 
 > 「inner 不应该知道 AC19 → AC16 ∥ reporter 这样的要求。这样的要求应仅作用于 outer 选择 todo 任务。」
@@ -53,7 +59,7 @@ extra: {}
 measure targeted_promote_path = `grep -cE "定向晋级|--targeted|targeted.*promote" plugin/scripts/ready-pool-check.ts plugin/loop/fast-mode-loop-tick.md orchestration/orchestrator-loop-tick.md` stdout 数字段
 band targeted_promote_path = ≥1（修复后存在定向晋级路径；当前=0）
 measure floor_independent = `grep -c "pool < floor" plugin/scripts/ready-pool-check.ts` 是否只约束补充不约束定向（判定：定向晋级不走 pool<floor 门）
-invoke 对某个 todo 任务（阶段目标第 2 位要的）执行定向晋级 → status 变 ready
+invoke 对某个 todo 任务（阶段目标第 2 位要的）执行定向晋级 → status 变 ready（`quay promote <id>`，不受 pool<floor 门约束）
 control 负控制：pool ≥ floor 时（当前 24>20，floor 用生产 cap=5 计算），定向晋级仍能发生（不受补充门约束）
 resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，不要假设已修
 ```

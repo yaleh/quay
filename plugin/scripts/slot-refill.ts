@@ -129,22 +129,37 @@ function buildStatusById(tasksDir) {
 
 /** The slot-refill decision. Pure: reads the store, never writes, never dispatches.
  *
+ *  REVERSE-DIRECTION DIMENSION (gap-closed-bracket-leaves-live-agent-consuming-slots): a slot is
+ *  released only when the executor PROCESS is gone, not when the telemetry bracket closes. A task
+ *  whose bracket closed (`--task-end` written) but whose agent is STILL observably present (open
+ *  worktree / live process) is passed as `closedButLive` — it occupies a slot even though it is not
+ *  in the running `inFlight` set. `slots_free = max(0, cap − (inFlight.length + closedButLive.length))`
+ *  so a new dispatch is never recommended into a slot an actually-busy process still holds (AC3).
+ *  It also ranks in the ready-pool disjointness + the step-4 concurrency-eligibility check, so a new
+ *  dispatch cannot collide with a closed-but-live agent's touches.
+ *
  *  @param {object} o
  *  @param {string} o.tasksDir   the store's tasks dir (<root>/tasks)
  *  @param {string} o.root       repo root (touches-resolution + git signals)
  *  @param {number} [o.cap]      effective concurrency cap (from cap-from-gate.sh); default 3
  *  @param {number} [o.floorMult] pool floor multiplier; default 4
  *  @param {Array<{id:string, body:string}>} [o.inFlight] currently-RUNNING subagent tasks
- *  @returns {object} { cap, in_flight_count, slots_free, pool, floor, dispatchable_disjoint,
- *      criterion_met, should_refill, no_refill_reason, recommended, scanned }
+ *  @param {Array<{id:string, body:string}>} [o.closedButLive] tasks whose bracket CLOSED but whose
+ *      executor is still observably present (from fast-mode-telemetry --slots closedButLive) — their
+ *      slots are NOT free.
+ *  @returns {object} { cap, in_flight_count, closed_but_live_count, occupied_slots, slots_free,
+ *      pool, floor, dispatchable_disjoint, criterion_met, should_refill, no_refill_reason,
+ *      recommended, scanned }
  */
-export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [] }) {
+export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [] }) {
   // PREEMPTIVE HALT (gap-supervisor-preemption AC2): the `.halt` sentinel is a CODE mount point,
   // not a tick-step-0 prose rule. When halted, dispatch is blocked no matter how many slots/candidates
   // exist — the human's stop takes effect at ANY dispatch-recommendation point, mid-flow.
   const halt = checkHaltSentinel(root);
-  const pool = analyzeTasks({ tasksDir, root, cap, floorMult, inFlight });
-  const slotsFree = computeSlotsFree(cap, inFlight.length);
+  const pool = analyzeTasks({ tasksDir, root, cap, floorMult, inFlight, closedButLive });
+  // A slot is free only when neither a running subagent NOR a closed-bracket-but-live agent holds it.
+  const occupied = inFlight.length + closedButLive.length;
+  const slotsFree = computeSlotsFree(cap, occupied);
 
   // recommended — the production disjoint batch over the ready pool, filtered by the SAME step-4
   // dispatch checks (touches-resolve + deps-ready + disjoint-from-in-flight), capped at slots_free.
@@ -155,7 +170,9 @@ export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAUL
     const sharedFiles = walkFiles(root);
     const expand = (globs) => expandDeclaredTouches(globs, root, sharedFiles);
     const statusById = buildStatusById(tasksDir);
-    const inFlightParsed = (inFlight || []).map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
+    // Concurrency eligibility must also respect closed-bracket-but-live agents' touches — a closed
+    // bracket does NOT free the touches a still-live agent is working on.
+    const inFlightParsed = [...(inFlight || []), ...(closedButLive || [])].map((t) => ({ id: t.id, touches: parseTouches(t.body) }));
     const candidates = [];
     for (const id of pool.ready) {
       const file = path.join(tasksDir, `${id}.md`);
@@ -191,7 +208,7 @@ export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAUL
     shouldRefill = false;
     noRefillReason = `halted (preemption: .halt present — ${halt.reason}; check with supervisor-preempt.sh halt-check)`;
   } else if (slotsFree <= 0) {
-    noRefillReason = "no free slots (in-flight >= cap)";
+    noRefillReason = `no free slots (in-flight ${inFlight.length} + closed-but-live ${closedButLive.length} >= cap ${cap})`;
   } else if (recommended.length === 0) {
     noRefillReason = "no dispatchable candidate passes step-4 checks (touches-resolve / deps-ready / disjoint-from-in-flight)";
   }
@@ -200,6 +217,8 @@ export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAUL
     cap,
     floor_mult: floorMult,
     in_flight_count: inFlight.length,
+    closed_but_live_count: closedButLive.length,
+    occupied_slots: occupied,
     slots_free: slotsFree,
     pool: pool.pool,
     floor: pool.floor,
@@ -219,6 +238,7 @@ function main(argv) {
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
+  let closedButLiveIds = [];
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
@@ -227,16 +247,23 @@ function main(argv) {
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === "--closed-but-live") {
+      closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     }
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
-  const inFlight = [];
-  for (const id of inFlightIds) {
-    const file = path.join(rootDir, "tasks", `${id}.md`);
-    if (!fs.existsSync(file)) continue; // advisory — a vanished in-flight id is not a failure
-    inFlight.push({ id, body: fs.readFileSync(file, "utf8") });
-  }
-  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight });
+  const readTasks = (ids) => {
+    const out = [];
+    for (const id of ids) {
+      const file = path.join(rootDir, "tasks", `${id}.md`);
+      if (!fs.existsSync(file)) continue; // advisory — a vanished id is not a failure
+      out.push({ id, body: fs.readFileSync(file, "utf8") });
+    }
+    return out;
+  };
+  const inFlight = readTasks(inFlightIds);
+  const closedButLive = readTasks(closedButLiveIds);
+  const result = analyzeSlotRefill({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }
