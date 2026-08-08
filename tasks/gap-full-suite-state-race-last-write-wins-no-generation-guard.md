@@ -55,6 +55,7 @@ suite-state 出现 stale red（finishedAt 06:32:22 = 旧 runner 残留），覆�
 - [ ] scoped 门 `scripts/test.sh --for-task gap-full-suite-state-race-last-write-wins-no-generation-guard` 绿
 
 ## Touches
+- tasks/gap-full-suite-state-race-last-write-wins-no-generation-guard.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/full-suite-runner.ts（writeState 加 run-id/generation 校验）
 - plugin/test/full-suite-runner.test.mjs（AC1 竞态测试）
