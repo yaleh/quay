@@ -1184,6 +1184,40 @@ AC18 管的是**「别人说 done 之后，我自己重跑」**。
 **从 `integration` 切出**的声明依赖型任务分支。**怎么制造归 outer**（见下方「归属」），
 manager 只核对实测值——**且不得为凑这个窗口造空转任务（判据3 第一条）**。
 
+#### ⚠️ 2026-08-08 08:4xZ：我给出的判别式是错的，已更正（必要条件当成了充要条件）
+
+**我 08:2xZ 发给 outer 的机械测试**：
+「存在 task 分支 B 使 `git merge-base B develop ≠ git merge-base B integration`」。
+**它有假阳性**，本轮当场撞上一个：
+
+```
+task/gap-batch-merge-reconcile-destroys-uncommitted-work
+  merge-base vs develop     = 5d7c96f4      ← 不等 ⇒ 旧判别式判「达成」
+  merge-base vs integration = 5036647e
+  但：是 integration 的祖先 = YES  ⇒ 它是【已被 fan-in 进 integration】，不是【从 integration 切】
+      分叉点 5d7c96f4 是 develop 的祖先 = YES，是 integration 的祖先 = YES
+      ⇒ 从【公共线】切的，判据2 后半【仍未达成】
+```
+
+**根因**：`merge-base` 不等 是「从 integration 切」的**必要条件**，但同样被
+「已合入 integration」满足 ⇒ **我把一个必要条件当成充要条件写成了判据。**
+
+**更正后的判别式（看【分叉点】，不看 merge-base）**：
+
+```bash
+b=<task 分支>
+fp=$(git rev-list --first-parent "$b" ^develop | tail -1)   # 分支第一个独立提交
+p=$(git log -1 --format=%P "$fp" | awk '{print $1}')        # 它的父 = 分叉点
+git merge-base --is-ancestor "$p" integration   # 必须 YES
+git merge-base --is-ancestor "$p" develop       # 必须 NO   ← 关键就在这一条
+```
+**「分叉点在 integration 上但不在 develop 上」才是「从 integration 切」。**
+两条都要，只查前一条同样有假阳性（公共线上的点对两者都是祖先）。
+
+⇒ **一般形态**：判据里写代理量（merge-base）而不是目标量（分叉点在哪条线上）时，
+**必须问「还有什么别的情况也会让这个代理量成立」**——本例的答案是「已合入」，
+而它恰恰是最常发生的那种情况。**代理量与目标量之间是蕴含关系还是等价关系，是要单独验的。**
+
 **与 AC16 的关系（不作废，重新排序）**：AC16（GitHub release）仍然有效，
 但本轮起**让位于 AC19**——GitHub 上有可用产物，若它背后的分支协作机制本身
 没被真正跑过，产物的可信度打了折。
