@@ -66,8 +66,7 @@ CLAUDE.md 记的 Land 锁串行化的是【共享检出的变更次序】。
 measure reconcile_hard_reset = `grep -cE "git reset --hard" <批量合调用日志/脚本>` stdout 数字段
 band reconcile_hard_reset = 0（修复后批量合对账不用 --hard；当前=1：inner 08:08:24）
 invoke `git reset --mixed HEAD`（对账正确形态，只刷新 index 不碰工作区）
-control 负控制：--mixed 对账不丢工作区未提交内容；--hard 丢（已实测）；确需 --hard 时前置
-  git status --porcelain 为空断言
+control 负控制：--mixed 对账不丢工作区未提交内容；--hard 丢（已实测）；确需 --hard 时前置 git status --porcelain 为空断言
 resume 若中断，先跑 measure 确认当前对账步骤是否含 --hard，不要假设已修
 ```
 
