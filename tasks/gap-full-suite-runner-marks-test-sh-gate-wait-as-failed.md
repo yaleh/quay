@@ -1,15 +1,15 @@
 ---
 id: gap-full-suite-runner-marks-test-sh-gate-wait-as-failed
-title: "full-suite-runner marks scripts/test.sh's INTERNAL resource-gate WAIT
-  as reason=failed (false RED / spurious stop-dispatch) instead of aborted:
-  measured 17:46Z — runner's own gate said GO at start, test.sh's internal
-  gate check seconds later saw PSI some avg10=45.15 (>40 limit) → test.sh
-  fail-closed exit 1 (NEVER ran tests) → runner reason=failed; the reason
-  axis (failed|aborted, runner line 34/74) exists but does NOT detect
-  test.sh's 'resource gate says WAIT — not running' marker in the output;
-  fix: detect the marker → reason=aborted (no correctness conclusion), so a
-  run that produced ZERO tests never sets the stop-dispatch signal"
-status: ready
+title: "full-suite-runner marks scripts/test.sh's INTERNAL resource-gate WAIT as
+  reason=failed (false RED / spurious stop-dispatch) instead of aborted:
+  measured 17:46Z — runner's own gate said GO at start, test.sh's internal gate
+  check seconds later saw PSI some avg10=45.15 (>40 limit) → test.sh fail-closed
+  exit 1 (NEVER ran tests) → runner reason=failed; the reason axis
+  (failed|aborted, runner line 34/74) exists but does NOT detect test.sh's
+  'resource gate says WAIT — not running' marker in the output; fix: detect the
+  marker → reason=aborted (no correctness conclusion), so a run that produced
+  ZERO tests never sets the stop-dispatch signal"
+status: done
 labels:
   - gap
   - defect
