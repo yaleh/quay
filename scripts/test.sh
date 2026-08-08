@@ -710,9 +710,16 @@ mark_nested() {
 # at each serial boundary and emit a per-segment breakdown to stderr on the FULL-SUITE default path.
 # Only the default (product,engine) full-suite path emits it — scoped --group runs skip (their fixed
 # overhead is not the object of measurement). Output lines: `__OVERHEAD__ <segment>_ms=<N>`.
-_oh_mark() { date +%s%3N; }
+_oh_mark() { date +%s%N | cut -c1-13; }
 _oh_emit() { # _oh_emit <label> <start_ms> <end_ms>  → __OVERHEAD__ label_ms=N
+  # uutils date doesn't truncate %3N (returns epoch+full-9-digit-ns), so we slice epoch-ms
+  # from +%s%N. Guard: an empty/absent mark emits 0 rather than garbage (a mark capture that
+  # raced a subshell must not corrupt the whole breakdown).
   local label="$1" s="$2" e="$3"
+  if [ -z "$s" ] || [ -z "$e" ] || ! [[ "$s" =~ ^[0-9]+$ ]] || ! [[ "$e" =~ ^[0-9]+$ ]]; then
+    echo "__OVERHEAD__ ${label}_ms=ERR-UNSET" >&2
+    return
+  fi
   echo "__OVERHEAD__ ${label}_ms=$((e - s))" >&2
 }
 
