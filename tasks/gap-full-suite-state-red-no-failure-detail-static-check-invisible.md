@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-state-red-no-failure-detail-static-check-invisible
 title: "full-suite-state.json 静态检查违规时 state=red / reason=failed / failures=[] 空——红窗成因不可读，消费方只能翻日志"
-status: todo
+status: ready
 labels:
   - gap
   - defect
