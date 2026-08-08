@@ -42,11 +42,11 @@ review-cadence AC8 控制存在却被绕过，是「机制造了检测、检测�
 
 ## Acceptance Criteria
 
-- [ ] AC1: ready-pool-check 补晋前调 `strategic-doc-staleness-check --pool-candidate <id>`，FAIL 不补晋
-- [ ] AC2: `gap-prepare-milestone-no-size-aware-routing` 不再被补晋（retired-mechanism 拦截）
-- [ ] AC3: 本会话其余 7 个 clean 候选（productize-manager/split-batch-vocab 等）仍正常补晋（负控制不误伤）
-- [ ] AC4: 拦截理由机械记录（不晋 = 有痕迹，非静默跳过）
-- [ ] AC5: 测试 `node:test` + `// @test-group governance`
+- [x] AC1: ready-pool-check 补晋前调 `strategic-doc-staleness-check --pool-candidate <id>`，FAIL 不补晋
+- [x] AC2: `gap-prepare-milestone-no-size-aware-routing` 不再被补晋（retired-mechanism 拦截）
+- [x] AC3: 本会话其余 7 个 clean 候选（productize-manager/split-batch-vocab 等）仍正常补晋（负控制不误伤）
+- [x] AC4: 拦截理由机械记录（不晋 = 有痕迹，非静默跳过）
+- [x] AC5: 测试 `node:test` + `// @test-group governance`
 
 ## Definition of Done
 
@@ -70,6 +70,34 @@ band      retired_filter = 1（retired 候选不晋）
 invoke    `node --experimental-strip-types plugin/scripts/strategic-doc-staleness-check.ts --pool-candidate gap-prepare-milestone-no-size-aware-routing`
 control   clean 候选（productize-manager 等）仍晋（AC3）；prepare-milestone 不晋（AC2）
 resume    接线与负控制分两步提交，任一步完成即写盘
+
+## Execution evidence
+
+**Invoke（Contract / AC2）** — `strategic-doc-staleness-check.ts --pool-candidate gap-prepare-milestone-no-size-aware-routing`（2026-08-08 实跑，exit 1）：
+```
+FLAGGED: 2 stale reference(s) to deleted classic-pipeline scripts (unannotated)
+  tasks/gap-prepare-milestone-no-size-aware-routing.md:25  [prepare-milestone.js]  ...
+  tasks/gap-prepare-milestone-no-size-aware-routing.md:28  [execute-milestone.js]  ...
+FAIL: candidate references a retired mechanism
+```
+
+**Measure（Contract / AC1-AC4）** — `ready-pool-check.ts --root "$(pwd)"`（real store）：
+- `promotions` 含 7 个 clean 候选（gap-dod-two-green-runs… / gap-quay-launch-sh… /
+  gap-targeted-promotion-operation… / gap-test-concurrency… / gap-batch-merge… /
+  gap-closed-bracket… / gap-known-load-sensitive…），**不含** prepare-milestone-no-size-aware-routing（AC2/AC3）。
+- `intercepted` 数组机械记录 retired-mechanism 拦截（AC4，reason: retired-mechanism + refs）：
+  DIR-119-C / DIR-119-D / DIR-124-A / gap-prepare-milestone-no-size-aware-routing-A/B/C / DIR-118 /
+  DIR-124-B* / DIR-124-C / DIR-124-F* / DIR-124-D / DIR-124-A1 等 todo 候选——不晋 = 有痕迹，非静默跳过。
+
+**接线（AC1/AC4）** — `plugin/scripts/ready-pool-check.ts`：
+- `buildCandidate` 补晋前调 `judgePoolCandidate(root, id)`（`--pool-candidate` CLI 的同源函数），
+  `retiredMechanism` ⇒ `eligible: false` + `retiredRefs`。
+- bulk promotion 循环把拦截写进 `intercepted` 输出；`buildTargetedPromotion`（`--targeted`）同样拦截。
+
+**测试（AC5）** — `scripts/test.sh plugin/test/ready-pool-check.test.mjs` → 42 pass / 0 fail
+（新增 5 条 retired-mechanism 拦截测试，node:test + `// @test-group governance`）；
+scoped 门 `scripts/test.sh --for-task gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check --allow-thin`
+→ exit 0，52 pass / 0 fail。
 
 ## Dispatch review
 

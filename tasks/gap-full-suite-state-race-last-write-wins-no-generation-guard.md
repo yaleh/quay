@@ -41,12 +41,18 @@ suite-state 出现 stale red（finishedAt 06:32:22 = 旧 runner 残留），覆�
 
 ## Acceptance Criteria
 
-- [ ] AC1: writeState 带 run-id/generation 校验——旧 runner 的写不覆盖新 runner 的状态（实测构造
+- [x] AC1: writeState 带 run-id/generation 校验——旧 runner 的写不覆盖新 runner 的状态（实测构造
        双 runner 竞态）
-- [ ] AC2: suite-state 能分辨「这条 red/green 是否当前轮」（读取侧可验证）
-- [ ] AC3: 与 gap-verification-round-record-skipped（记账缺口）交叉标注——同为「状态文件完整性」
+- [x] AC2: suite-state 能分辨「这条 red/green 是否当前轮」（读取侧可验证）
+- [x] AC3: 与 gap-verification-round-record-skipped（记账缺口）交叉标注——同为「状态文件完整性」
        但机制不同（竞态 vs 未落盘）
-- [ ] AC4: 负控制——单 runner 正常写不受影响（无 run-id 冲突时行为不变）
+- [x] AC4: 负控制——单 runner 正常写不受影响（无 run-id 冲突时行为不变）
+
+## Definition of Done
+
+- [x] AC1-AC4 全勾（writeState 带 run-id/generation 校验防旧 runner 覆盖；suite-state 可分辨当前轮；与 gap-verification-round-record-skipped 交叉标注；负控制单 runner 行为不变）
+- [x] 双 runner 竞态实测构造：旧 runner 写不覆盖新 runner 状态
+- [x] scoped 门 `scripts/test.sh --for-task gap-full-suite-state-race-last-write-wins-no-generation-guard` 绿
 
 ## Definition of Done
 
@@ -57,6 +63,7 @@ suite-state 出现 stale red（finishedAt 06:32:22 = 旧 runner 残留），覆�
 ## Touches
 - tasks/gap-full-suite-state-race-last-write-wins-no-generation-guard.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
+- tasks/gap-full-suite-state-race-last-write-wins-no-generation-guard.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/full-suite-runner.ts（writeState 加 run-id/generation 校验）
 - plugin/test/full-suite-runner.test.mjs（AC1 竞态测试）
 - tasks/gap-verification-round-record-skipped-for-five-closures.md（AC3 交叉标注）
@@ -68,6 +75,27 @@ band      state_writer = 非空（运行中状态带 run-id；终态写入前校
 invoke    `grep -n 'writeState\|runId\|generation\|writeFileSync' plugin/scripts/full-suite-runner.ts`
 control   双 runner 竞态 ⇒ 旧 runner 不覆盖（AC1）；单 runner 正常（AC4）
 resume    run-id 与校验分步提交，任一步完成即写盘
+
+## Evidence
+
+- **AC1（双 runner 竞态实测构造）**：`plugin/test/full-suite-runner.test.mjs` 新增
+  `AC1 — real two-runner race: a stale runner finishing red does NOT overwrite the newer runner's green`——
+  真实 spawn 两个 runner：旧 runner A 先起、写 running（runId=A）并跑一个 3s 后红的假套件；新 runner B
+  后起、写 running（runId=B）并快速绿。A 的 red 终态在 B 的 green 之后落盘 ⇒ 被 generation guard 拒绝，
+  最终 `.quay/full-suite-state.json` 保持 B 的 green（runId=B）。不加 guard 时此测试会红（A 的 red 覆盖
+  B 的 green）。另有确定性 unit 测试 `AC1 unit — the generation guard rejects a stale runner's write`
+  直接验证 writeStateGuarded 对 stale runId 的拒绝。
+- **AC2（读取侧可分辨当前轮）**：`readStateRunId(file)` 读取状态文件的 runId；`AC2 — the read side can
+  tell 'is this red/green the current round' by its runId` 证明读取侧能把 stale 轮的 red 与当前轮的
+  green/running 区分开（stale 写被拒后 runId 恒为当前轮）。
+- **AC3（交叉标注）**：与 `tasks/gap-verification-round-record-skipped-for-five-closures.md` 双向交叉标注
+  ——同属「状态文件完整性」家族，但机制不同：本任务 = 写路径的**竞态覆盖**（last-write-wins），
+  verification-round 任务 = **该写没发生**（未落盘记账缺口）。两处都补了互相引用。
+- **AC4（负控制）**：`AC4 — negative control: a single runner's normal writes are unaffected by the guard`
+  （单 runner 终态正常落盘、read-side 同一 generation）+ `AC4 — a write over a legacy state (no runId on
+  disk) is NOT blocked`（legacy 无 runId 不构成冲突，fail-open 不阻塞）。
+- **scoped 门**：`bash scripts/test.sh --for-task gap-full-suite-state-race-last-write-wins-no-generation-guard --allow-thin` 绿
+  （`plugin/test/full-suite-runner.test.mjs` 全 36 条通过，含新增 5 条 generation-guard 测试）。
 
 ## Dispatch review
 

@@ -37,6 +37,7 @@ import {
   BATCH_FLAG_PATTERNS,
   CONVERGED_MARKERS,
   DEFAULT_WINDOW,
+  STOPPED_MARKERS,
 } from "../scripts/self-report-vocab-audit.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -117,9 +118,50 @@ test("AC2 — fail-closed: fewer than `window` reports cannot claim convergence"
   const r = auditSelfReports(["inner: verification-round-1 green", "inner: verification-round-2 green"], 3);
   assert.equal(r.converged, false, "2 clean reports < window 3 ⇒ can't claim 3 consecutive clean rounds");
   assert.equal(r.recent_clean, 2);
+  assert.equal(r.stopped_in_window, false);
   const r2 = auditSelfReports([], 3);
   assert.equal(r2.converged, false);
   assert.equal(r2.inner_self_report_vocab, 0);
+});
+
+test("AC1 — a STOPPED-state self-report (idle/paused/awaiting) is CONVERGED even when reports < window (real specimen)", () => {
+  // gap-self-report-vocab-misfires-on-stopped-state: a stopped loop emits few self-reports
+  // (< `window`) precisely because it is NOT actively dispatching — honest non-drift, not drift.
+  const r = auditSelfReports(["inner: idle heartbeat, paused awaiting manager"], 3);
+  assert.equal(r.reports_total, 1);
+  assert.ok(r.reports_total < r.window, "stopped-state fixture must be below the window to exercise the exemption");
+  assert.equal(r.stopped_in_window, true);
+  assert.equal(r.converged, true, "stopped state is honest non-drift ⇒ converged despite reports < window");
+  assert.equal(r.inner_self_report_vocab, 0);
+  assert.equal(r.stopped_reports, 1);
+});
+
+test("AC1 — multiple stopped-state reports below the window are CONVERGED", () => {
+  const r = auditSelfReports(
+    ["paused awaiting manager, no dispatch", "idle heartbeat", "inner: halted via .halt, no batch reports"],
+    5,
+  );
+  assert.ok(r.reports_total < r.window);
+  assert.equal(r.stopped_in_window, true);
+  assert.equal(r.converged, true);
+  assert.equal(r.inner_self_report_vocab, 0);
+});
+
+test("AC1/AC2 — a batch-style report inside the window is STILL flagged/not-converged even in stopped state", () => {
+  // The stopped-state exemption waives only the WINDOW-FULL requirement; the ALL-CLEAN requirement
+  // is unaffected — a batch-style self-report is drift whether the loop is active or stopped.
+  const r = auditSelfReports(["Batch of 3 fully merged", "idle, paused awaiting manager"], 3);
+  assert.equal(r.stopped_in_window, true, "the window does carry a stopped-state marker");
+  assert.equal(r.converged, false, "batch-style report in window ⇒ NOT converged even with stopped marker");
+  assert.equal(r.inner_self_report_vocab, 1);
+  assert.equal(r.recent_clean, 1);
+});
+
+test("AC2 — active loop (no stopped marker) with < window clean reports stays fail-closed NOT converged (no regression)", () => {
+  const r = auditSelfReports(["inner: verification-round-1 green", "inner: verification-round-2 green"], 3);
+  assert.equal(r.stopped_in_window, false);
+  assert.equal(r.converged, false, "active loop below window keeps the fail-closed judgment");
+  assert.equal(r.inner_self_report_vocab, 0);
 });
 
 test("Contract measure — inner_self_report_vocab counts FLAGGED REPORTS (grep -c parity), not total matches", () => {
@@ -161,6 +203,7 @@ test("AC5 — flag/compliant vocabulary is exported and non-empty", () => {
   assert.ok(Array.isArray(BATCH_FLAG_PATTERNS) && BATCH_FLAG_PATTERNS.length >= 3);
   assert.ok(Array.isArray(CONVERGED_MARKERS) && CONVERGED_MARKERS.length >= 2);
   assert.equal(DEFAULT_WINDOW, 3);
+  assert.ok(Array.isArray(STOPPED_MARKERS) && STOPPED_MARKERS.length >= 3);
 });
 
 test("CLI — --count-only prints just the measure number (grep -c parity)", () => {

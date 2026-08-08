@@ -28,6 +28,14 @@
 //      not. Only candidates with deps ready + four artifacts complete + touches resolve + not fixture
 //      + not PARKED are eligible (合格). The touchesResolve guard is KEPT (AC5 — ADR-022 lesson: a big
 //      pool only promotes cleanly, never pollutes).
+//   4. RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check,
+//      AC1/AC2/AC4): a candidate that references an ADR-022-deleted classic-pipeline script
+//      (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation is a
+//      premise-void todo (promoting it wastes an agent round). Before ANY promotion (bulk pool<floor
+//      OR --targeted) the candidate is judged by the SAME pool-candidate stale check the
+//      strategic-doc-staleness-check CLI exposes (--pool-candidate <id>, review-cadence AC8) — flagged
+//      ⇒ never eligible, and the intercept is MECHANICALLY recorded in the `intercepted` output
+//      (reason + refs) so a no-promotion is a traceable decision, not a silent skip.
 //
 // COST ASYMMETRY (AC6 — why the floor biases toward OVER-promotion): over-promotion (promoting a
 // candidate the current tick doesn't dispatch) is FRONT-LOADED, not wasted — the pool is deeper and
@@ -114,6 +122,13 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
 // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
 import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes } from "./task-status-drift-check.ts";
+// RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
+// promotion must NOT advance a candidate that references an ADR-022-deleted classic-pipeline script
+// (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — a todo
+// pointing at a RETIRED pipeline mechanism is premise-void (dispatching it wastes a whole agent round).
+// Reuse the SAME pool-candidate judge the strategic-doc-staleness-check CLI exposes (--pool-candidate
+// <id>, review-cadence AC8) — single source, no parallel copy.
+import { judgePoolCandidate } from "./strategic-doc-staleness-check.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -381,6 +396,15 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   const depsReady = depsReadyFor(task, allTasks);
   const four = artifactsComplete(task.body);
   const parsed = parseTouches(task.body);
+  // RETIRED-MECHANISM INTERCEPT (AC1/AC2 — gap-ready-pool-promotion-ignores-retired-mechanism-
+  // candidate-check): before a todo candidate is promotion-eligible, judge it with the same
+  // pool-candidate stale check the strategic-doc-staleness-check CLI exposes (--pool-candidate <id>,
+  // review-cadence AC8). An unannotated reference to an ADR-022-deleted classic-pipeline script
+  // (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) ⇒ the candidate targets a
+  // RETIRED mechanism ⇒ never eligible (AC2: gap-prepare-milestone-no-size-aware-routing must be
+  // intercepted, not promoted).
+  const staleRefs = judgePoolCandidate(root, id); // null when tasks/<id>.md is missing — not a live candidate
+  const retiredMechanism = staleRefs !== null && staleRefs.length > 0;
   // Touch-disjointness score: how many of the already-pooled ready tasks + in-flight tasks this
   // candidate is pairwise touches-DISJOINT from (checkTouchesPair, the real dispatch judge). Higher
   // = promotes into a pool that stays dispatchable-disjoint (AC4 — disjointness ranks FIRST).
@@ -399,8 +423,14 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
     // AC1 (gap-value-prioritization-has-no-mechanism): every candidate carries the relevance signal —
     // strategic traceability (grep) + blocking (parent/children fields) + cost (touches parsed scale).
     relevance: computeRelevance(id, task, childrenByTask, parentRefCount),
+    // AC1/AC2: the retired-mechanism guard — a candidate that references an ADR-022-deleted script
+    // is never eligible (the intercept reason is mechanically carried for the `intercepted` output).
+    retiredMechanism,
+    retiredRefs: staleRefs !== null ? staleRefs : [],
     // AC5: the touchesResolve guard is KEPT — majority-missing candidates are never eligible.
-    eligible: depsReady && four.complete && touchesResolve,
+    // AC1: the retired-mechanism guard is ADDED — a candidate targeting a retired pipeline mechanism
+    // is never eligible either.
+    eligible: depsReady && four.complete && touchesResolve && !retiredMechanism,
   };
 }
 
@@ -430,6 +460,22 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   if (isParked(task)) {
     return { id, found: true, status: task.status, eligible: false, floor_independent: true, reason: "parked" };
   }
+  // RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check):
+  // the same pool-candidate stale check gates TARGETED promotion too — an outer stage-goal selection
+  // must not promote a candidate that references an ADR-022-deleted classic-pipeline script.
+  const staleRefs = judgePoolCandidate(root, id);
+  if (staleRefs !== null && staleRefs.length > 0) {
+    const hits = staleRefs.map((r) => r.hit).join(", ");
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `retired-mechanism: ${id} references ADR-022-deleted script(s) ${hits} — not promotable`,
+      checks: { retiredMechanism: true, retiredRefs: staleRefs },
+    };
+  }
   const four = artifactsComplete(task.body);
   const depsReady = depsReadyFor(task, allTasks);
   const touches = checkTaskTouchesResolve(task.body, root);
@@ -442,6 +488,7 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
     touchesResolve,
     notFixture: true,
     notParked: true,
+    retiredMechanism: false,
   };
   return {
     id,
@@ -579,6 +626,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // the candidate scan is skipped entirely (keeps the real-store output small).
   const candidates = [];
   const promotions = [];
+  const intercepted = [];
   if (deficit > 0) {
     for (const [id, t] of allTasks) {
       if (t.status !== "todo") continue;
@@ -593,6 +641,15 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
         a.kindOrder - b.kindOrder ||
         (a.touchesResolve === b.touchesResolve ? 0 : a.touchesResolve ? -1 : 1),
     );
+    // AC4 (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check): the FULL
+    // retired-mechanism intercept set is mechanically recorded — every candidate that references an
+    // ADR-022-deleted script is listed with reason + refs (not only the ones that happen to sort
+    // inside the promotion window). A no-promotion is a traceable decision, never a silent skip.
+    for (const c of candidates) {
+      if (c.retiredMechanism) {
+        intercepted.push({ id: c.id, reason: "retired-mechanism", refs: c.retiredRefs });
+      }
+    }
     for (const c of candidates) {
       if (promotions.length >= deficit) break;
       if (!c.eligible) continue;
@@ -654,6 +711,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     excluded,
     candidates,
     promotions,
+    intercepted,
     top_relevance,
     scanned: allTasks.size,
     top_relevance: topRelevance,

@@ -133,6 +133,13 @@ resume    检查器与节奏文档分两步提交，任一步完成即写盘
      tasks/gap-prepare-milestone-no-size-aware-routing.md:28  [execute-milestone.js]  ...
    FAIL: candidate references a retired mechanism
    ```
+   **消费端已接线（2026-08-08，gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check）**：
+   AC8 的 `--pool-candidate` 检查此前存在但未接线到补晋路径（`ready-pool-check` 的 promotion 排序只做
+   touch-disjointness + gap>DIR + touchesResolve）——本会话实测 `gap-prepare-milestone-no-size-aware-routing`
+   被补晋后派发才发现目标机制已删。现在 `ready-pool-check.ts` 在 todo→ready 补晋（bulk pool<floor 与
+   `--targeted`）前对每个候选跑同一 `judgePoolCandidate`（`--pool-candidate` 的 CLI 同源函数），FAIL ⇒
+   不补晋 + 机械记录到 `intercepted` 输出（reason: retired-mechanism + refs）——AC8 回归控制不再
+   「检测造了、消费端没接」。
 2. **清单 3b gap-* 可追溯性**——见上方 AC4 输出。
 3. **清单 3c 方向漂移**——**路线图过期**（`docs/proposals/quay-harness-crystallization-roadmap.md` 07-31
    整篇建立在 ADR-022 已废除的经典 milestone 管线上，Phase 0–4 指向已删代码，KNOWN_STALE 检出，sibling

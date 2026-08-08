@@ -44,7 +44,9 @@ verification-round.jsonl**——closure-sync AC3 把它从 inner 读取面撤下
        1（追加前 assert last+1；失败即 tick 异常非静默）
 - [ ] AC2: 负控制——无收尾的 tick 不要求写 jsonl（round 不前进不报警，避免把「无收尾」当异常）
 - [ ] AC3: 与 gap-closure-sync-is-the-true-batch-boundary（done）交叉标注——本任务是它落地后的
-       记账完整性问题，不是重开
+       记账完整性问题，不是重开；并与 gap-full-suite-state-race-last-write-wins-no-generation-guard
+       交叉标注（同「状态文件完整性」家族、机制不同：本任务 = 写路径未执行/未落盘，race 任务 = 写路径
+       竞态覆盖——full-suite-state.json 的 last-write-wins 无 generation guard）
 - [ ] AC4: 本轮补记 round 14-18 已由外层执行（2026-08-06 02:0xZ），jsonl 现在 round 连续 1-18
 
 ## Definition of Done

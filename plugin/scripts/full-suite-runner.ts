@@ -83,6 +83,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import readline from "node:readline";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { runOnce } from "./suite-state-trigger.ts";
@@ -119,6 +120,16 @@ export interface SuiteFailure {
 
 export interface SuiteState {
   state: SuiteStateValue;
+  /**
+   * GENERATION GUARD (gap-full-suite-state-race-last-write-wins-no-generation-guard): a per-run
+   * unique id carried by EVERY state write. The first `running` write of a run ESTABLISHES the
+   * generation (unconditional); every later write (in-progress red, terminal green/red, signal
+   * abort) is checked against the CURRENT on-disk runId — a stale runner whose runId no longer
+   * matches is REFUSED, so an older runner's terminal state can never clobber a newer runner's
+   * state (the 2026-08-06 06:27 v5 / 06:28 v6 double-launch stale-red-overwrote-running incident).
+   * Absent on legacy states (pre-fix) ⇒ a newer run's `running` write overwrites them.
+   */
+  runId?: string;
   runner: "outer" | "inner";
   /**
    * gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: which checkout produced this
@@ -191,8 +202,47 @@ function parseArg(argv: string[], name: string): string | undefined {
   return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
 }
 
-function writeState(file: string, state: SuiteState): void {
+/**
+ * Read the runId (generation token) currently on disk at `file`, or undefined when absent /
+ * unparseable (legacy state, missing file, or a concurrent mid-write). A legacy/missing file has
+ * no generation to protect, so the caller treats undefined as "no guard active" (fail-open).
+ */
+export function readStateRunId(file: string): string | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return typeof parsed?.runId === "string" && parsed.runId ? parsed.runId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * GENERATION GUARD — write `state` to `file`, but when `opts.guard` is set the write is REFUSED
+ * (silently dropped) if a DIFFERENT run currently owns the file. Without the guard every write was
+ * last-write-wins: if two runners overlap briefly (even a superseded runner still finishing its
+ * cleanup), the older runner's red terminal state could land AFTER the newer runner's `running`
+ * write and silently clobber it — no mechanism could distinguish "is this red from the current
+ * round" (gap-full-suite-state-race-last-write-wins-no-generation-guard). Guard semantics:
+ *   - the run's INITIAL `running` write is UNGUARDED (opts.establish in run()) — it establishes
+ *     the generation; a newer run taking over MUST be able to overwrite an older run's state.
+ *   - every later write (in-progress red, terminal green/red, signal abort) is GUARDED — it only
+ *     succeeds while the writer is still the current generation.
+ *   - a state without runId, or an unreadable/legacy on-disk file, never blocks a write (fail-open).
+ */
+export function writeStateGuarded(file: string, state: SuiteState): void {
+  writeState(file, state, { guard: true });
+}
+
+function writeState(file: string, state: SuiteState, opts?: { guard?: boolean }): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (opts?.guard && state.runId) {
+    const current = readStateRunId(file);
+    if (current !== undefined && current !== state.runId) {
+      // A NEWER run owns the file — this writer is stale; its write would clobber the current
+      // round's state. Drop it (the current runner's state stays authoritative).
+      return;
+    }
+  }
   fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
@@ -474,7 +524,12 @@ export async function run(argv: string[]): Promise<number> {
   // producing checkout's scope so waiters can distinguish a worktree-origin suite (deferrable — its
   // completion updates nothing anyone waits on) from the main-repo suite (the signal being waited for).
   const scope = isGitWorktree(root) ? ("worktree" as const) : ("main" as const);
-  const base = { runner: "outer" as const, startedAt, laneCount, scope };
+  // GENERATION GUARD — this run's unique id, carried by EVERY state write. The initial `running`
+  // write establishes it (the newest runner owns the file from then on); every later write must
+  // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
+  // generation-guard AC1/AC4).
+  const runId = randomUUID();
+  const base = { runner: "outer" as const, startedAt, laneCount, scope, runId };
 
   // KNOWN-LOAD-SENSITIVE family manifest (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
   // triage AC3): scanned ONCE at run start against the repo root so red-time failures can carry the
@@ -495,13 +550,19 @@ export async function run(argv: string[]): Promise<number> {
   // band: cmp -s <worktree-state> <main-repo-state> = same). When --state-dir defaults to <root>/.quay
   // the two paths coincide and the mirror is a no-op (single write, backward compatible).
   const mirrorStateFile = path.resolve(root, ".quay", "full-suite-state.json");
-  const writeSuiteState = (state: SuiteState): void => {
-    writeState(stateFile, state);
-    if (mirrorStateFile !== stateFile) writeState(mirrorStateFile, state);
+  const writeSuiteState = (state: SuiteState, opts?: { establish?: boolean }): void => {
+    // GENERATION GUARD: the initial `running` write is UNGUARDED (establishes the generation); every
+    // later write is GUARDED (rejected once a newer run owns the file). Both the gate location and
+    // the worktree mirror get the same guard so the two never diverge on staleness.
+    const guard = opts?.establish ? undefined : { guard: true };
+    writeState(stateFile, state, guard);
+    if (mirrorStateFile !== stateFile) writeState(mirrorStateFile, state, guard);
   };
 
   // AC1 — write `running` the moment the runner starts (inner sees running => proceed).
-  writeSuiteState({ state: "running", ...base, finishedAt: null, durationMs: null });
+  // establish: this running write is UNGUARDED — it (re)establishes the generation, so a newer
+  // runner can always take over from a stale/legacy state.
+  writeSuiteState({ state: "running", ...base, finishedAt: null, durationMs: null }, { establish: true });
 
   // gap-resource-gate-no-single-flight-lock-two-suite-overlap: the SINGLE-FLIGHT mutual exclusion is
   // enforced inside scripts/test.sh's full-suite default path (`full_suite_lock_acquire` on a flock

@@ -53,10 +53,33 @@ TASK-49 凭据 / TASK-31-35 发布）——真需要人。archguard 目前**不�
 
 ## Acceptance Criteria
 
-- [ ] AC1: cold-start 区分「已装好+在转」vs「已装好+已停」（调用 dead-loop-check，实测）
-- [ ] AC2: 停转时给可执行下一步（restart / human-needed / backlog-empty），非「已完成」
-- [ ] AC3: 「队列空 / 等人 / 从未启动」三态不再全部报「完成」（区分可执行）
-- [ ] AC4: 与 gap-l2-continuous-health-dead-loop-criterion 交叉标注（复用 L2 判据）
+- [x] AC1: cold-start 区分「已装好+在转」vs「已装好+已停」（调用 dead-loop-check，实测）
+      **证据**：`plugin/scripts/dead-loop-check.sh` 新增 `--check-running` 模式（复用 L2 判据：transcript
+      user 消息 + git 提交时间窗）——`cold_start_state=running|stopped`。`plugin/skills/cold-start/SKILL.md`
+      新增「### 0. Running-state branch（已停转分支）」：冷启动**先调用**
+      `bash <root>/plugin/scripts/dead-loop-check.sh --check-running --root <root>` 再分支；running ⇒
+      `ALREADY-RUNNING`，stopped ⇒ 报「已装好但已停」+ 可执行下一步。实测（`plugin/test/
+      cold-start-check-running.test.mjs`）：新鲜提交项目 ⇒ `cold_start_state=running`；旧提交无启动标记 ⇒
+      `stopped_reason=never-started`。`dead-loop-check.sh --selfcheck` 仍 PASS（既有 AC1/AC2 双向可控未回归）。
+- [x] AC2: 停转时给可执行下一步（restart / human-needed / backlog-empty），非「已完成」
+      **证据**：`dead-loop-check.sh --check-running` 在 stopped 时输出 `next_step` 三分类——queue-empty ⇒
+      `backlog-empty`、waiting-human ⇒ `human-needed`、never-started/unknown ⇒ `restart`；SKILL.md step 9
+      报告新增 `LOOP-STATE` / `STOPPED-REASON` / `NEXT-STEP` 三行，**停转时明令报「installed but stopped」+
+      下一步，绝不报 COMPLETE**。实测：三 fixture 各给出对应 `next_step`，且输出不含 `complete`/`已完成`。
+- [x] AC3: 「队列空 / 等人 / 从未启动」三态不再全部报「完成」（区分可执行）
+      **证据**：`cold-start-check-running.test.mjs`「AC3」断言三 fixture 产出三个**不同** `stopped_reason`
+      （never-started / queue-empty / waiting-human）且 `next_step` 两两不同（restart / backlog-empty /
+      human-needed）——三态从前同形（全报「完成」），现在各自可区分可执行。
+- [x] AC4: 与 gap-l2-continuous-health-dead-loop-criterion 交叉标注（复用 L2 判据）
+      **证据**：`tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md` 新增
+      「## 交叉标注（AC4 消费者）」块——点名本任务为 L2 判据首个 cold-start 消费者 + `--check-running`
+      复用；SKILL.md「### 0」节交叉引用该 L2 任务。测试断言 L2 任务文件含本任务 id 与 `--check-running`。
+
+## Definition of Done
+
+- [x] AC1-AC4 全勾（cold-start 区分「已装好+在转」vs「已装好+已停」调用 dead-loop-check；停转给可执行下一步；三态不再全报「完成」；与 gap-l2-continuous-health-dead-loop-criterion 交叉标注）
+- [x] 三态区分实测（队列空/等人/从未启动分别给出不同判定）
+- [x] scoped 门 `scripts/test.sh --for-task gap-cold-start-six-keys-measure-installed-not-running --allow-thin` 绿
 
 ## Definition of Done
 
@@ -71,6 +94,10 @@ TASK-49 凭据 / TASK-31-35 发布）——真需要人。archguard 目前**不�
 - plugin/scripts/dead-loop-check.sh（cold-start 调用）
 - tasks/gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed.md（AC4 交叉标注）
 
+## Test-Files
+
+- plugin/test/cold-start-check-running.test.mjs
+
 ## Contract
 
 measure   stopped_detected = `bash <cold-start> --check-running 2>&1 | grep -c 'stopped\|dead-loop\|已停'` stdout 数字段
@@ -78,6 +105,27 @@ band      stopped_detected >= 1（已停转被识别，非「已完成」）
 invoke    `grep -n 'dead-loop\|stopped\|已停' plugin/skills/cold-start/SKILL.md`
 control   三态（队列空/等人/从未启动）可区分（AC3）
 resume    分支与复用分步提交，任一步完成即写盘
+
+## Evidence（scoped 实跑，2026-08-08）
+
+`bash scripts/test.sh --for-task gap-cold-start-six-keys-measure-installed-not-running --allow-thin` → **exit 0**
+（`plugin/test/dead-loop-check.test.mjs` pass 8 / fail 0 / cancelled 0 + `plugin/test/
+cold-start-check-running.test.mjs` pass 8 / fail 0 / cancelled 0；scoped static checks 全过：task-contract-check
+no violations / adr016 0 / dead-code 0；dist 构建成功）。`--check-running` 三态实测（fixture）：
+
+```
+# 从未启动（无 driver 注册 / 无 task-start 遥测 / 旧提交）
+cold_start_state=stopped / stopped_reason=never-started / next_step=restart
+# 队列空（启动过，backlog 全 done）
+cold_start_state=stopped / stopped_reason=queue-empty / next_step=backlog-empty
+# 等人（启动过，needs-human 任务在）
+cold_start_state=stopped / stopped_reason=waiting-human / next_step=human-needed
+# 在转（新鲜提交）——running 不输出 stopped_reason，保证 Contract grep 只在 stopped 时命中
+cold_start_state=running / next_step=none
+```
+
+注：scoped 门在 worktree 内需 node_modules 工作区链接（develop-merge 先例）——否则 native dist 构建报
+`Could not resolve "quay/…"`（与 `gap-l2-continuous-health-dead-loop-criterion` 任务同前例）。
 
 ## Dispatch review
 
