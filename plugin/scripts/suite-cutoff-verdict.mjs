@@ -49,8 +49,15 @@ export const SUITE_LOG_LONG_MS = 60000;
 // The exact node:test runtime message that marks the class (global flag so .match() counts ALL
 // occurrences — a non-global regex returns only the first).
 export const PROMISE_PENDING_RE = /Promise resolution is still pending but the event loop has already resolved/g;
-// Shell diagnostic when test.sh's node --test child is SIGKILL'd: `scripts/test.sh: line N: PID Killed node --test`
-export const KILLED_RE = /Killed\s+node --test|exit 137|SIGKILL/;
+// Process-teardown marker: bash's job-status diagnostic when test.sh's node --test CHILD is SIGKILL'd —
+// `scripts/test.sh: line 576: 720326 Killed node --test` (07:08→07:21 evidence). This is the ONLY
+// reliable teardown marker in a suite log. A BROAD regex (`SIGKILL|Killed|exit 137`) is NOT reliable:
+// those tokens appear in PASSING test names (full-suite-runner AC5 signal-kill tests) and in THIS
+// tool's own embedded output when suite-cutoff-verdict.test.mjs runs inside the suite — observed
+// 2026-08-08: a GREEN 2792-test log reported "5 SIGKILL/Killed markers, torn down mid-run" (all 5
+// matches were test names/self-output). Precise shape only:
+//   `: line <N>: <pid> Killed` (bash job-status) or the combined `Killed node --test` line.
+export const KILLED_RE = /: line \d+: \d+ Killed|Killed\s+node --test/g;
 
 // ── static heavy-file scan ─────────────────────────────────────────────────────────────────────────
 const TEST_GLOB_ROOTS = ["packages", "plugin", "experiments"];
@@ -127,8 +134,11 @@ export function scanHeavyFiles(root) {
 
 // ── runtime duration discriminator over a full-suite log ───────────────────────────────────────────
 export function analyzeSuiteLog(logPath) {
+  if (!fs.existsSync(logPath)) {
+    return { sigkill: 0, cancelled: 0, promisePending: 0, longGenuine: [], missing: true, path: logPath };
+  }
   const text = fs.readFileSync(logPath, "utf8");
-  const sigkill = (text.match(/SIGKILL|Killed\s+node --test|exit 137/g) || []).length;
+  const sigkill = (text.match(KILLED_RE) || []).length;
   const cancelled = (text.match(/cancelled [1-9]/g) || []).length;
   const promisePending = (text.match(PROMISE_PENDING_RE) || []).length;
 
@@ -169,10 +179,14 @@ export function computeVerdict({ log, root, json }) {
     issues.push(`heavy-file at-risk: ${heavy.atRisk.length} file(s) score >= ${HEAVY_SCORE_THRESHOLD} (split or reduce blocking load)`);
   }
   if (logResult) {
-    if (logResult.sigkill > 0) issues.push(`suite log shows ${logResult.sigkill} SIGKILL/Killed marker(s) — process torn down mid-run; red verdict landing points UNRELIABLE until the teardown source is fixed`);
-    if (logResult.longGenuine.length > 0) issues.push(`genuine dangling-Promise class: ${logResult.longGenuine.length} file(s) took > ${SUITE_LOG_LONG_MS}ms before Promise-pending (e.g. ${logResult.longGenuine.map((g) => `${g.file}@${g.durationMs}ms`).slice(0, 5).join(", ")})`);
-    if (logResult.promisePending > 0 && logResult.longGenuine.length === 0) issues.push(`Promise-pending present but ALL instant (< ${SUITE_LOG_LONG_MS}ms) — cascade victims of a cutoff, not genuine defects`);
-    if (logResult.cancelled > 0) issues.push(`suite log shows ${logResult.cancelled} cancelled test(s)`);
+    if (logResult.missing) {
+      issues.push(`suite log ${log} not found — duration discriminator skipped (static heavy-file scan still applies)`);
+    } else {
+      if (logResult.sigkill > 0) issues.push(`suite log shows ${logResult.sigkill} SIGKILL/Killed marker(s) — process torn down mid-run; red verdict landing points UNRELIABLE until the teardown source is fixed`);
+      if (logResult.longGenuine.length > 0) issues.push(`genuine dangling-Promise class: ${logResult.longGenuine.length} file(s) took > ${SUITE_LOG_LONG_MS}ms before Promise-pending (e.g. ${logResult.longGenuine.map((g) => `${g.file}@${g.durationMs}ms`).slice(0, 5).join(", ")})`);
+      if (logResult.promisePending > 0 && logResult.longGenuine.length === 0) issues.push(`Promise-pending present but ALL instant (< ${SUITE_LOG_LONG_MS}ms) — cascade victims of a cutoff, not genuine defects`);
+      if (logResult.cancelled > 0) issues.push(`suite log shows ${logResult.cancelled} cancelled test(s)`);
+    }
   }
 
   const verdict = {
@@ -192,6 +206,7 @@ export function computeVerdict({ log, root, json }) {
           path: log, sigkill: logResult.sigkill, cancelled: logResult.cancelled,
           promisePending: logResult.promisePending,
           longGenuine: logResult.longGenuine,
+          missing: logResult.missing ?? false,
         }
       : null,
   };

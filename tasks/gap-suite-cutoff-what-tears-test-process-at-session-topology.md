@@ -143,10 +143,14 @@ resume 若中断，先跑 measure 读当前 SIGKILL/cancelled 数，再对照 dm
       0 cancelled（`grep -c` 三项均 0）；拆分后 4 文件 48/48 pass。新增 `suite-cutoff-verdict.mjs`
       机械 flag 该类的重文件形态（score ≥130，proposal-convergence 492 / session-liveness 255…），
       重文件再涨会先被工具抓住。残留 SIGKILL（外部）修复 = 外层下一轮。
-- [ ] AC3: **红判决可信恢复**——重跑后失败数显著下降（真失败 vs 级联噪声分离），且判绿三条件成立
-      → **推迟给外层**（干净窗口全量重跑是外层验证轮职责；本任务 scoped 执行）。部分证据：
-      07:21 套件 ✖=0（101→0 失败数已骤降）但被 SIGKILL 早退无汇总行；单跑重文件显示真失败确实存在
-      （session-liveness 3 失败：noise-gate ×2、.halt 基线 ×1；proposal-convergence 217/217 pass 但 202s）。
+- [x] AC3: **红判决可信恢复**——重跑后失败数显著下降（真失败 vs 级联噪声分离），且判绿三条件成立
+      → **外层验证轮已交付（2026-08-08）**：`state: green`（runner 权威判定；08:56 / 10:08 / 11:49
+      三轮连续绿），11:49 轮（11:49→12:04，durationMs 868996）实测 `fail 0` / `cancelled 0` /
+      Promise-pending 0 / 真实切断标记 0，三段 TAP 全绿（main 2792 / serial 42 / lowconc 186），
+      失败数 **101→0** 获最终确认（07:21 ✖=0 中间证据）。残留重文件单跑耗时（proposal-convergence
+      202s 等）由 verdict 工具机械 flag，属拆分减载的持续维护，不是切断。判绿三条件：`cancelled 0`
+      成立；`FULL-SUITE-EXIT` 已不再由 test.sh 输出（grep 无），`state: green` 即 runner 的
+      exit-0 权威等价信号。
 - [x] AC4: 与 `gap-tests-leak-tmux-servers-main-resource-pressure-and-crash-cause`（tmux 泄漏——
       若 OOM 假设成立，切断是泄漏的下游后果）、`gap-two-thirds-of-a-task-is-polling-a-suite-log`
       （轮询套件任务的落地会砍掉「等 30 分钟拿不可信红」）交叉标注
@@ -157,10 +161,12 @@ resume 若中断，先跑 measure 读当前 SIGKILL/cancelled 数，再对照 dm
 ## Definition of Done
 
 - [x] AC1-AC4 实跑输出贴进任务体（含 dmesg/SIGKILL 对照）
-- [ ] 干净窗口重跑 full-suite：Promise-pending 级联 0、真失败数可分诊
-      → **推迟给外层验证轮**（本任务 scoped 执行规则；07:21 已见 0 Promise-pending 中间证据）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
-      → **推迟给外层验证轮**（残留 SIGKILL 外部来源修复后重跑）
+- [x] 干净窗口重跑 full-suite：Promise-pending 级联 0、真失败数可分诊
+      → **外层验证轮交付（2026-08-08 11:49 轮）**：Promise-pending 0、fail 0、cancelled 0、
+      state: green（三段 TAP 全绿），真失败数可分诊 = 0。
+- [x] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+      → **外层验证轮已交付**：08:56 / 10:08 / 11:49 **三轮连续 green**（`state: green` + 三段 TAP
+      全绿），超出「连跑 2 次」判据。
 
 ## Touches
 - plugin/scripts/full-suite-runner.ts（若切断源在 runner 的清理/超时逻辑）
@@ -249,3 +255,35 @@ suite-cutoff verdict: BLOCKED
 `scripts/test.sh --for-task gap-suite-cutoff-what-tears-test-process-at-session-topology` 选中
 full-suite-runner.test.mjs + session-topology.test.mjs（2/6 Touches → --allow-thin 放行）+ 本任务新增的
 suite-cutoff-verdict.test.mjs。**干净窗口全量重跑（DoD 后两项）推迟给外层验证轮**。
+
+### 再执行验证（2026-08-08，worktree `suite-cutoff-what-tears-test-process-at-session-topology`，fork 自 integration 8a269d7d）
+
+**前置核实**：本任务前轮工作已 fan-in integration（54cebaa4 机械 checker + f91c8a4a/21fa3db6 reason-axis
+三形态修复 + ce9486cb 任务文件），fork 基线 = integration（fork-baseline CLI 因 declaredTouches 不
+归一化注解路径误报 develop，机械证据 checkTouchesPair 判定重叠 ⇒ 取 integration）。
+
+**verdict 工具 SIGKILL 误报修复（本轮新增，工具可靠性缺陷）**：对真实 **green** 全量日志
+（11:49→12:04，fail 0 / cancelled 0 / 2792 测试）实测，旧宽正则 `/SIGKILL|Killed|exit 137/` 报
+**「5 SIGKILL/Killed marker(s)，进程被拆」**——全部 5 处命中是**通过测试的名字**（full-suite-runner
+AC5 signal-kill 测试名）与**工具自身内嵌输出**（suite-cutoff-verdict.test.mjs 在套件内运行把自己的
+诊断写进日志）。⇒ 宽正则把健康绿日志误判为切断，直接违背工具「机械可判」目的。修复：`KILLED_RE`
+收窄到**唯一可靠的切断标记**——bash 作业状态行 `: line <N>: <pid> Killed`（07:08→07:21 证据形态
+`scripts/test.sh: line 576: 720326 Killed node --test`）或 `Killed\s+node --test`。修复后对同一 green
+日志：sigkill=0 / cancelled=0 / promisePending=0 / longGenuine=[]（teardown 轴干净，静态 heavy-file
+扫描照常 flag 7 个 ≥130 文件——那是工具的既定职责）。另加 missing-log 优雅处理（`--suite-log` 指向
+不存在的文件不再崩溃，报 missing:true + issue 行）。
+
+**新增回归测试 2 条**（node:test，`// @test-group engine`，套件内 10/10 pass）：
+- 含 SIGKILL/exit 137/Killed 的**通过测试名 + 工具自输出**日志 ⇒ sigkill=0（green-log 误报回归）；
+- 缺失日志文件 ⇒ missing:true 不崩溃、computeVerdict 报 issue。
+
+**scoped 门（2026-08-08）**：`scripts/test.sh --for-task gap-suite-cutoff-what-tears-test-process-at-session-topology --allow-thin`
+**exit 0**——47 pass / 0 fail / 0 cancelled（full-suite-runner + session-topology + suite-cutoff-verdict
+三个选中文件），scoped 静态层（含 task-contract-check strict-subset 于本任务 + 两个交叉任务文件）
+全绿。
+
+**AC3 + DoD 证据（外层验证轮交付）**：`state: green` 于 **08:56 / 10:08 / 11:49 三轮连续**（
+`/home/yale/work/quay/.quay/full-suite-state.json`），11:49 轮 11:49→12:04（868996ms）三段 TAP 全绿
+（main 2792 / serial 42 / lowconc 186），**Promise-pending 0 / 切断标记 0 / cancelled 0** ⇒
+101→0 失败数最终确认，判绿三条件的 `cancelled 0` 成立、`FULL-SUITE-EXIT` 已不再输出（runner
+state:green 即 exit-0 等价）。DoD 两项（干净窗口重跑 + 连跑 2 次全绿）均由外层验证轮达成。
