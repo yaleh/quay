@@ -741,7 +741,21 @@ if [ -z "$_sl_session" ]; then
 else
   _sl_session_base="${_sl_session%%:*}"
 fi
-DEFAULT_TARGET="${_sl_session_base}:outer"
+# 按角色解析目标窗口（AC2/AC3/AC4，gap-session-liveness-session-pid-blind-to-claude-as-pane-process）：
+#   SESSION_TMUX_SESSION 带【命名窗口】后缀（<会话>:inner / <会话>:outer）⇒ 直接用该窗口作为目标——
+#     外层监视器盯 inner、管理者盯 outer；会话名 env 值（<会话>）本就该配上角色窗口。
+#   带【数字 pane】后缀（quay-init 写的 ol-cold:0.0 是 pane 引用、指明会话）⇒ 剥到会话基名，
+#     走零配置默认的 <base>:outer（本项目自己的外层）。
+#   无后缀（quay-0）⇒ <base>:outer（零配置默认）。
+case "$_sl_session" in
+  *:*)
+    case "${_sl_session#*:}" in
+      *[!0-9.]*) DEFAULT_TARGET="$_sl_session" ;;      # 命名窗口后缀 → 直接作为目标
+      *) DEFAULT_TARGET="${_sl_session_base}:outer" ;; # 数字 pane 引用 → base:outer
+    esac
+    ;;
+  *) DEFAULT_TARGET="${_sl_session_base}:outer" ;;
+esac
 
 # 可被 SESSION_TARGETS 覆盖——存在的理由是【可测】（handoff rule 2：不能靠「干跑没有输出」
 # 证明监视器会报，那与「它永远不报」同形）。用测试控制的探针 pane 做正控制，才是证据。
@@ -845,17 +859,29 @@ heartbeat_mtime_for() {
   outer_heartbeat_mtime "$root"
 }
 
-session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane shell 的第一个 claude 子进程。
+_is_claude_pid() {
+  local pid=$1 comm argv0 base
+  comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+  case "$comm" in claude*) return 0 ;; esac
+  argv0=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -1)
+  [ -n "$argv0" ] || return 1
+  base="${argv0##*/}"
+  case "$base" in *claude*) return 0 ;; esac
+  return 1
+}
+
+session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或其任一子进程里的 claude 进程。
   local t=$1 ppid cpid
   ppid=$("${_sl_tmux[@]}" list-panes -t "$t" -F '#{pane_pid}' 2>/dev/null | head -1) || true
   [ -n "${ppid:-}" ] || { echo ""; return; }
-  cpid=$(pgrep -P "$ppid" 2>/dev/null | head -1) || true
-  # 只认 claude 进程，避免把 shell 当成会话本体
-  if [ -n "${cpid:-}" ] && tr '\0' ' ' < "/proc/$cpid/cmdline" 2>/dev/null | grep -q claude; then
-    echo "$cpid"
-  else
-    echo ""
-  fi
+  # pane_pid 自身就是 claude（claude-as-pane-process：3 窗格拓扑里 pane 前台进程就是 claude）——
+  # 旧实现只查子进程，inner/outer 恒 alive=0（SESSION-GONE 永不触发，监视器永久沉默）。
+  if _is_claude_pid "$ppid"; then echo "$ppid"; return; fi
+  # 后代遍历（与 inner-session-check.sh 的 has_claude_child 同遍历）：找第一个 claude 后代。
+  for cpid in $(pgrep -P "$ppid" 2>/dev/null); do
+    if _is_claude_pid "$cpid"; then echo "$cpid"; return; fi
+  done
+  echo ""
 }
 
 # ── 无挂载门（2026-08-06 人裁定：彻底去掉互斥锁）──────────────────────────────────────────
