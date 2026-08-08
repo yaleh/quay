@@ -42,8 +42,17 @@
 #   RESOURCE_GATE_TEST_NODE_PROCS   — override the pgrep count (integer)
 #   RESOURCE_GATE_TEST_ORPHANS      — override the orphan list ("pid:cwd" semicolon-separated)
 #   RESOURCE_GATE_TEST_NPROC        — override nproc (integer; also used for the invariant check)
+#
+# CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1, the A face):
+# the gate REPORTS the same shared total-process-budget authority
+# (plugin/scripts/process-budget.sh — total_budget = nproc, in_use = node-MainThread procs across
+# ALL worktrees) that scripts/test.sh's default_concurrency_formula and cap-from-gate.ts consume.
+# A worktree's full-suite caller and the outer runner therefore see the shared budget numbers, not a
+# per-layer read. Fail-open: an unreadable authority prints `unreadable` rather than wedging the gate.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="report"        # report | full-suite
 CPU_LIMIT="${RESOURCE_GATE_CPU_LIMIT:-40}"
@@ -270,6 +279,16 @@ printf 'mem_avail=%sMB             [limit %s] %s\n' \
   "$mem_avail_mb" "$MEM_LIMIT_MB" "$([ "$mem_wait" = 1 ] && echo WAIT || echo ok)"
 printf 'nproc=%s  node_procs=%s  %s  [nproc-invariant %s]\n' \
   "$nproc_before" "$node_procs" "$swap_label" "$nproc_invariant"
+# AC1 (gap-test-concurrency-cap-does-not-scope-nested-spawns) — the CROSS-LAYER total budget line
+# from the shared authority (process-budget.sh, same script test.sh/cap-from-gate read). A worktree
+# caller sees total_budget / budget_in_use / budget_available — the numbers that bound EVERY layer's
+# concurrency — instead of this gate's single-machine node_procs read alone.
+budget_report="$(bash "${SCRIPT_DIR}/process-budget.sh" 2>/dev/null || true)"
+budget_total="$(printf '%s\n' "${budget_report}" | sed -n 's/^total_budget=//p')"
+budget_in_use="$(printf '%s\n' "${budget_report}" | sed -n 's/^in_use=//p')"
+budget_available="$(printf '%s\n' "${budget_report}" | sed -n 's/^available=//p')"
+printf 'total_budget=%s  budget_in_use=%s  budget_available=%s  [cross-layer budget authority: process-budget.sh]\n' \
+  "${budget_total:-unreadable}" "${budget_in_use:-unreadable}" "${budget_available:-unreadable}"
 # AC1 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) — the observable worktree
 # signal: how many node --test processes are running from linked worktrees right now + who is asking.
 # Report mode always prints this; waiters read it instead of guessing why the machine is loaded.

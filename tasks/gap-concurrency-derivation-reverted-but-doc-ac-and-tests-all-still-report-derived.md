@@ -26,6 +26,14 @@ extra:
 
 **type:** execution
 
+## 交叉标注（2026-08-08，`gap-test-concurrency-cap-does-not-scope-nested-spawns`）
+
+本任务的 17 进程 4.25× 超订判据（CLAUDE.md）被合并任务 `gap-test-concurrency-cap-does-not-scope-
+nested-spawns` 用作 AC2 的对照基线：worker 推导现为**预算感知**（`default = max(1, floor((nproc −
+in_use) / 1.0))`，`in_use` = 全仓 node-MainThread 数，单一权威 `plugin/scripts/process-budget.sh`），
+嵌套派生（quay-init 族 / 会话族）不再绕过上限；cap-from-gate 槽位帽与 resource-gate 都读同一预算。
+本任务恢复的推导公式即该预算感知公式的前身——「17 进程」基线由那边负责收敛。
+
 ## Proposal
 
 **推导被回退了，但文档、AC、测试三层全都还在报告「已推导」——三层同时报绿，实际行为是当初要消灭的那个缺陷。**
