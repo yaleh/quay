@@ -16,30 +16,53 @@
 // semantic content check, NOT md5(capture-pane) / whole-screen equality — the hash family F
 // ruled dead stays dead (AC7: the script/test files contain zero md5sum|sha1sum|cksum).
 //
-// What counts as a delivered message:
-//   - the JSONL record is a USER message (`type === "user"` AND `message.role === "user"`);
-//   - its `message.content` is either a string, or an array whose `text` blocks are extracted
-//     (a user message whose content array holds ONLY tool_result/tool_use blocks is injected
-//     context, NOT typed input, and must never count — fault 5's "real user message");
-//   - one of those extracted texts CONTAINS the trimmed sent text (the CRYSTALLIZED doc's
-//     "匹配（或包含）").
+// What counts as a delivered message — THREE-STATE verdict (人 06:1x direction,
+// gap-send-keys-reliable-false-fail-on-long-text-paste):
+//   DELIVERED — the sent text appears in a MATERIALIZED form:
+//     - a real USER message (`type === "user"` AND `message.role === "user"`), string or text
+//       blocks (a user message whose content array holds ONLY tool_result/tool_use blocks is
+//       injected context, NOT typed input — fault 5's "real user message"); OR
+//     - an `type === "attachment"` record whose `attachment.prompt`/`content` carries the text
+//       and `isSidechain !== true` — the form a long-text/paste delivery ACTUALLY lands as
+//       (manager's 05:39/05:54 samples: ZERO type=user pure-string records, only
+//       queue-operation + attachment).
+//   FAILED — the sent text appears ONLY in a `type === "queue-operation"` `operation === "remove"`
+//     record (enqueued then removed without ever being materialized) — the measured discard
+//     signature (busy session: enqueue then ~3s remove, never materialized).
+//   UNKNOWN — no evidence either way (nothing matches, or only an enqueue still pending).
+//     The third state is NOT a bare FAIL — callers must check first, never resend blindly.
 //
 // CLI (the ## Contract `measure` path):
 //   node --experimental-strip-types plugin/scripts/transcript-delivery-check.ts \
 //       --check <transcript.jsonl> [--start <byte-offset>] --text <sent-text>
-//   stdout: `delivered: true|false` (+ `matched_line: …` when delivered)
-//   exit: 0 = delivered · 1 = not delivered · 2 = usage / IO error (fail-loud)
+//   stdout: `state: delivered|failed|unknown` + `delivered: true|false` (+ `matched_line: …`)
+//   exit: 0 = delivered · 1 = failed (clear discard evidence) · 2 = usage / IO error (fail-loud)
+//         3 = unknown (no evidence — check first, NEVER a bare FAIL)
 //   `--start <bytes>` restricts the scan to content appended after that byte offset, so a
-//   delivery poll confirms a NEW user message (the send that just happened), never an old
+//   delivery poll confirms a NEW delivery (the send that just happened), never an old
 //   identical one (CRYSTALLIZED fault 4's "新增" requirement).
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+export type DeliveryState = "delivered" | "failed" | "unknown";
+
 export interface DeliveryVerdict {
+  /** Three-state delivery verdict (人 06:1x direction — see
+   * tasks/gap-send-keys-reliable-false-fail-on-long-text-paste): "delivered" = content-matching
+   * evidence in a materialized form; "failed" = CLEAR discard evidence (enqueued then removed
+   * without ever being materialized); "unknown" = no evidence either way — DON'T know, check
+   * first. The third state MUST NOT be read as a bare FAIL (every past downstream error came from
+   * reading "unknown" as "delivered-failed"). */
+  state: DeliveryState;
+  /** Backward-compatible: true iff state === "delivered". */
   delivered: boolean;
-  /** The matched JSONL line, trimmed, when delivered (diagnostics only — never used in the
+  /** true iff state === "failed" (clear discard evidence — resend is safe/appropriate). */
+  failed: boolean;
+  /** true iff state === "unknown" (no evidence either way — check first, do NOT resend blindly). */
+  unknown: boolean;
+  /** The matched JSONL line, trimmed, when delivered/failed (diagnostics only — never used in the
    * verdict). */
   matchedLine?: string;
 }
@@ -81,18 +104,135 @@ export function extractUserTextCandidates(transcriptFragment: string): Array<{ t
   return out;
 }
 
-/** PURE delivery verdict: true iff the fragment contains a real USER message whose content
- * contains the (trimmed) sent text. No tmux, no file access, no side effects. */
-export function checkTranscriptDelivered(transcriptFragment: string, sentText: string): DeliveryVerdict {
-  const needle = (sentText ?? "").trim();
-  if (!needle) return { delivered: false }; // empty send text can never be "delivered"
-  for (const { text, line } of extractUserTextCandidates(transcriptFragment)) {
-    if (text.includes(needle)) {
-      const trimmedLine = line.length > MAX_MATCHED_LINE ? line.slice(0, MAX_MATCHED_LINE) + "…" : line;
-      return { delivered: true, matchedLine: trimmedLine };
+/** Extract plain-text candidates from a Claude Code message.content value: a bare string, or the
+ * `.text` of `text`-type blocks in an array. tool_result/tool_use blocks never contribute (they
+ * are injected context, not typed input / not the sent text). */
+function textFromContent(content: unknown): string[] {
+  const texts: string[] = [];
+  if (typeof content === "string") {
+    texts.push(content);
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block && typeof block === "object") {
+        const b = block as { type?: unknown; text?: unknown };
+        if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
+      }
     }
   }
-  return { delivered: false };
+  return texts;
+}
+
+export type DeliveryEvidenceSource =
+  | "user"
+  | "attachment"
+  | "queue-operation-enqueue"
+  | "queue-operation-remove";
+
+export interface DeliveryEvidence {
+  source: DeliveryEvidenceSource;
+  text: string;
+  line: string;
+}
+
+function trimmedLine(line: string): string {
+  return line.length > MAX_MATCHED_LINE ? line.slice(0, MAX_MATCHED_LINE) + "…" : line;
+}
+
+/** Extract delivery-relevant text evidence from a transcript fragment, tagging each piece with
+ * the record form that carried it. A long-text / paste delivery does NOT land as a `type=user`
+ * pure-string record — the manager's real 05:39/05:54 samples landed as ZERO type=user records,
+ * only `type=queue-operation` (enqueue/remove) plus a `type=attachment` (queued_command,
+ * isSidechain=false) record, all carrying the full content. The materialized forms (user message,
+ * attachment) are DELIVERED evidence; a queue-operation remove WITHOUT materialization is the
+ * measured DISCARD signature (busy session: enqueue then ~3s remove, never materialized). */
+export function extractDeliveryEvidence(transcriptFragment: string): DeliveryEvidence[] {
+  const out: DeliveryEvidence[] = [];
+  for (const rawLine of transcriptFragment.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue; // malformed JSONL line — skip, never crash the poll
+    }
+    if (typeof parsed !== "object" || parsed === null) continue;
+    const rec = parsed as Record<string, unknown>;
+
+    // 1. A REAL user message (typed input): string content or text-block content.
+    if (rec.type === "user") {
+      const msg = rec.message as { role?: unknown; content?: unknown } | undefined;
+      if (msg?.role === "user") {
+        for (const t of textFromContent(msg.content)) {
+          if (t) out.push({ source: "user", text: t, line });
+        }
+      }
+      continue;
+    }
+
+    // 2. An attachment record — the long-text/paste materialization form. isSidechain=true
+    //    records are a sidechain (subagent) context, NOT the main session receiving the sent
+    //    text, and must never count (the manager's "非 sidechain" criterion).
+    if (rec.type === "attachment") {
+      if (rec.isSidechain === true) continue;
+      const att = rec.attachment as { prompt?: unknown; content?: unknown } | undefined;
+      if (att && typeof att === "object") {
+        const texts: string[] = [];
+        if (typeof att.prompt === "string") texts.push(att.prompt);
+        else if (att.prompt !== undefined) texts.push(...textFromContent(att.prompt));
+        texts.push(...textFromContent(att.content));
+        for (const t of texts) {
+          if (t) out.push({ source: "attachment", text: t, line });
+        }
+      }
+      continue;
+    }
+
+    // 3. A queue-operation record: a long-text paste is enqueued, then either materialized as an
+    //    attachment (delivered) or removed without materialization (discarded). Both carry the
+    //    full content.
+    if (rec.type === "queue-operation") {
+      const op = rec.operation;
+      if (op !== "enqueue" && op !== "remove") continue;
+      if (typeof rec.content === "string" && rec.content.length > 0) {
+        out.push({
+          source: op === "enqueue" ? "queue-operation-enqueue" : "queue-operation-remove",
+          text: rec.content,
+          line,
+        });
+      }
+      continue;
+    }
+  }
+  return out;
+}
+
+/** PURE three-state delivery verdict over a transcript fragment. No tmux, no file access, no
+ * side effects. Priority:
+ *   1. DELIVERED — the sent text appears in a MATERIALIZED form (a real user message, or a
+ *      queued_command attachment). Once materialized it is delivered even if a matching
+ *      queue-operation remove also exists (negative control: DELIVERED is never misreported as
+ *      discard).
+ *   2. FAILED — the sent text appears ONLY in a queue-operation remove (enqueued then removed
+ *      without ever being materialized): the measured discard signature.
+ *   3. UNKNOWN — no evidence either way (nothing matching, or only an enqueue still pending). */
+export function checkTranscriptDelivered(transcriptFragment: string, sentText: string): DeliveryVerdict {
+  const needle = (sentText ?? "").trim();
+  const unconfirmed = (): DeliveryVerdict => ({ state: "unknown", delivered: false, failed: false, unknown: true });
+  if (!needle) return unconfirmed(); // empty send text can never be "delivered"
+  const evidence = extractDeliveryEvidence(transcriptFragment);
+
+  for (const e of evidence) {
+    if ((e.source === "user" || e.source === "attachment") && e.text.includes(needle)) {
+      return { state: "delivered", delivered: true, failed: false, unknown: false, matchedLine: trimmedLine(e.line) };
+    }
+  }
+  for (const e of evidence) {
+    if (e.source === "queue-operation-remove" && e.text.includes(needle)) {
+      return { state: "failed", delivered: false, failed: true, unknown: false, matchedLine: trimmedLine(e.line) };
+    }
+  }
+  return unconfirmed();
 }
 
 /** A session is FRESH when its transcript contains NO real user message yet — a brand-new
@@ -126,7 +266,7 @@ function usageError(message: string): number {
   console.error(`transcript-delivery-check: ${message}`);
   console.error("usage: transcript-delivery-check.ts --check <transcript.jsonl> [--start <bytes>] --text <sent-text>");
   console.error("       transcript-delivery-check.ts --is-fresh <transcript.jsonl>");
-  console.error("exit: 0 = delivered / fresh · 1 = not delivered / not fresh · 2 = usage/IO error");
+  console.error("exit: 0 = delivered / fresh · 1 = failed (clear discard evidence) · 2 = usage/IO error · 3 = unknown (no evidence — check first)");
   return 2;
 }
 
@@ -196,13 +336,12 @@ export function main(argv: string[]): number {
   }
 
   const verdict = checkTranscriptDelivered(read.fragment, sentText);
-  if (verdict.delivered) {
-    console.log(`delivered: true`);
-    if (verdict.matchedLine) console.log(`matched_line: ${verdict.matchedLine}`);
-    return 0;
-  }
-  console.log(`delivered: false`);
-  return 1;
+  console.log(`state: ${verdict.state}`);
+  console.log(`delivered: ${verdict.delivered}`);
+  if (verdict.matchedLine) console.log(`matched_line: ${verdict.matchedLine}`);
+  if (verdict.state === "delivered") return 0;
+  if (verdict.state === "failed") return 1;
+  return 3; // unknown — distinct third state, NEVER a bare FAIL (callers must not read it as "delivered-failed")
 }
 
 // ── in-file selfcheck (ADR-018: prove BOTH the RED and GREEN paths without the test runner) ───────
@@ -219,11 +358,29 @@ export function selfcheck(): boolean {
   };
 
   const green = `{"type":"user","message":{"role":"user","content":"send-keys-marker-123 hello"}}\n{"type":"assistant","message":{"role":"assistant","content":"ok"}}\n`;
-  check("green-string-content", checkTranscriptDelivered(green, "send-keys-marker-123").delivered === true);
+  check("green-string-content", checkTranscriptDelivered(green, "send-keys-marker-123").state === "delivered");
   check("green-matched-line", (checkTranscriptDelivered(green, "send-keys-marker-123").matchedLine ?? "").includes("send-keys-marker-123"));
 
   const greenArray = `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"echo hello"}]}}\n`;
-  check("green-array-text-block", checkTranscriptDelivered(greenArray, "echo hello").delivered === true);
+  check("green-array-text-block", checkTranscriptDelivered(greenArray, "echo hello").state === "delivered");
+
+  // long-text/paste delivery: ZERO type=user records — queue-operation + attachment (manager 05:39 shape)
+  const greenQueueAttach = [
+    `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-08T05:39:23.157Z","sessionId":"s","content":"[管理者→外层] 两条我自己的错 long-paste-marker-901"}`,
+    `{"type":"queue-operation","operation":"remove","timestamp":"2026-08-08T05:39:42.590Z","sessionId":"s","content":"[管理者→外层] 两条我自己的错 long-paste-marker-901"}`,
+    `{"type":"attachment","isSidechain":false,"attachment":{"type":"queued_command","prompt":"[管理者→外层] 两条我自己的错 long-paste-marker-901","commandMode":"task-notification","timestamp":"2026-08-08T05:39:42.726Z"},"type":"attachment"}`,
+  ].join("\n");
+  check("green-queue-operation+attachment", checkTranscriptDelivered(greenQueueAttach, "long-paste-marker-901").state === "delivered");
+
+  // discard signature: queue-operation remove WITHOUT materialization → FAILED
+  const redDiscard = `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-08T05:50:01.000Z","sessionId":"s","content":"discard-marker-777"}\n{"type":"queue-operation","operation":"remove","timestamp":"2026-08-08T05:50:04.000Z","sessionId":"s","content":"discard-marker-777"}\n`;
+  const redDiscardV = checkTranscriptDelivered(redDiscard, "discard-marker-777");
+  check("red-discard-remove-without-materialization-is-failed", redDiscardV.state === "failed" && redDiscardV.failed === true);
+
+  // enqueue-only (still pending) → UNKNOWN, not FAILED, not delivered
+  const pendingEnqueue = `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-08T05:50:01.000Z","sessionId":"s","content":"pending-marker-555"}\n`;
+  const pendingV = checkTranscriptDelivered(pendingEnqueue, "pending-marker-555");
+  check("enqueue-only-is-unknown-not-failed", pendingV.state === "unknown" && pendingV.failed === false);
 
   const redEmpty = "";
   check("red-empty", checkTranscriptDelivered(redEmpty, "anything").delivered === false);

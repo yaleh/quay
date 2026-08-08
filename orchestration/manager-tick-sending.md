@@ -33,10 +33,13 @@ tmux capture-pane -p -t <目标> -S -3 | grep -q 'esc to interrupt' && echo 忙 
 退出即通知），空闲了再发。**不要挂持久监视器盯"转闲"——那个触发条件与"有没有事发生"无关，
 今晚已因噪声退役过一次。**
 
-**报 FAIL 时先核实再决定（这条最要紧，2026-08-07 17:1x 已改写）**：
-该脚本的 FAIL **是歧义的**，它自己分不开这两种情况——今天两种都发生过：
+**报 FAIL 时先核实再决定（这条最要紧；2026-08-08 gap-send-keys-reliable-false-fail-on-long-text-paste
+已把脚本的 FAIL 拆成三态，本段与脚本内判据同步改，防漂移）**：
+该脚本的 FAIL 曾经**是歧义的**，它自己分不开这两种情况——今天两种都发生过：
   (a) **真假阴性**：消息已进 transcript，只是有界轮询没等到 ⇒ **重发会让对方收到两遍**；
   (b) **真失败**：消息 `enqueue` 后 3 秒被 `remove`，**被丢弃了** ⇒ **不重发 = 发现永久丢失**。
+**现在脚本把这两种拆开了**（见下方三态设计）：(a) 落在**未确认 UNKNOWN**（exit 3）→ **先核实再决定，
+别补发**（补发 = 重复投递）；(b) 落在**明确失败 FAILED**（exit 1，有丢弃证据）→ **可以补发**。
 **`加长轮询修不了 (b)`**——丢弃的消息等再久也不会出现。今天 120s 那次就是 (b)。
 **（这推翻了人 16:5x「假阴性可接受，加长轮询到 2 分钟」的前提：那个裁定假设失败形态是迟到。）**
 
@@ -54,17 +57,36 @@ type=attachment       ts=05:39:23.157Z  isSidechain=False
 ⇒ **长文本/粘贴形态的投递，成功后就是落成 `queue-operation` + `attachment`。**
 把它们排除 ⇒ 成功投递被判成 FAIL。
 
-**正确判据（当前认知，随实测更新）**：核实送达要**在原始 transcript jsonl 里按内容特征串搜全部
-记录类型**，`type=user` / `queue-operation` / `attachment` 任一命中即为已送达：
-```bash
-grep -c '<本条特征串>' ~/.claude/projects/-home-yale-work-quay/<目标会话id>.jsonl
-# ≥1 ⇒ 已送达，不要重发；0 ⇒ 再等（投递可能仍在进行），别急着补发
-```
-**`mcp__meta-cc__query_session_content role=user` 对这个问题不完备**（②b 的实例）——
-它只回 `type=user`，查不到 queue-operation/attachment，会把成功投递报成 0 条。
-读会话历史的其它用途仍优先用 meta-cc；**只有"这条消息送到没有"这一问要直读 jsonl。**
+**脚本判据已改为三态（`transcript-delivery-check.ts` + `send-keys-reliable.sh`，
+gap-send-keys-reliable-false-fail-on-long-text-paste 落地；本文件与脚本内判据同步改，防漂移）**：
+- **已确认送达（DELIVERED，exit 0）**——sent 文本出现在**物化形态**：真实 `type=user` 消息
+  （纯字符串或 text 块），或 `type=attachment`（`isSidechain !== true`，
+  `attachment.prompt`/`content` 携带文本）。**`queue-operation` 的 enqueue/remove 记录本身不是
+  送达证据，但它们携带全文**，是下方 FAILED/UNKNOWN 判定的事实基础；
+- **明确失败（FAILED，exit 1）**——sent 文本**只**出现在 `queue-operation` `operation=remove`
+  记录里（入队后从未物化为 user/attachment 即被移除）——忙会话「enqueue 约 3 秒后 remove」
+  的实测丢弃签名；
+- **未确认（UNKNOWN，exit 3）**——两侧都没有证据（没匹配，或只有 enqueue 仍在排队）。
+  **第三态不叫 FAIL**：今天所有下游错误决策都源于把第三态读成第一种含义；调用方必须
+  **先核实再决定**（meta-cc `role=all` 交叉验证），**勿按 FAIL 补发**（补发 = 重复投递）。
 
-**⚠️ 脚本的 FAIL 是自述，不是结论（②e）**：`send-keys-reliable.sh` 报 FAIL 只说明
-**它没确认到**，不说明**没送到**——这两个是不同命题。**假 FAIL 比真 FAIL 更贵**：
-我曾据一次假 FAIL 推翻了自己一条正确的等待策略、写了一条基于错误前提的判准（②g，已撤回）、
-还在 tick-log 记了一条并不存在的违规。**收到 FAIL 时先自己查原始文件，再决定要不要补发。**
+**人工交叉验证判据（2026-08-08 06:0x 实测确定）——仍然用 meta-cc，改的是 `role` 参数，不是换工具**：
+```
+mcp__meta-cc__query_session_content  role=all  session_id=<目标会话id>  contains=<本条特征串>
+```
+**`role=user` 是错的，`role=all` 是对的**：投递落成的记录类型是 `queue-operation` / `attachment`，
+`role=user` 覆盖不到，`role=all` 覆盖得到（实测：同一条消息 `role=user` 返 0、`role=all` 返 7）。
+**≥1 条 ⇒ 已确认送达，不要重发；0 条 ⇒ 对应三态里的「未确认 UNKNOWN」——先核实再决定，别急着补发。**
+
+**⚠️ 我在这一条上连犯三次，全部同源，写在这里防第四次：**
+1. **信脚本的 FAIL**（②e：工具自报结果是自述，"没确认到"≠"没发生"）；
+2. **断定"meta-cc 答不了"**——实际是我用错 `role` 参数。**"我用这个工具没查到"≠"这个工具查不到"**，
+   这是 ②b 的实例，而我把它误判成了工具能力边界；
+3. **据此把纪律从"用 meta-cc"改成了"手搓 grep jsonl"**——**把一条正确的规矩改成了错的**，
+   而这份文件里原本就写着「用 meta-cc，不要手搓 python 解析 jsonl」（2026-08-07 我犯过一次才加的）。
+   **修一条判准时把它修反了，比一开始就没有它更糟。**
+**⇒ 通则：判定"现成工具不够用"之前，先穷举它的参数空间。** 换工具是最后一步，不是第一步。
+
+**代价（已实际发生，量化记下）**：一次假 FAIL + 一次错误的"工具不行"判定 ⇒
+①重复投递一次同样内容 ②写了一条基于错误前提的判准（②g，已撤回）
+③在 tick-log 记了一条不存在的违规 ④把送达纪律改坏了一版。

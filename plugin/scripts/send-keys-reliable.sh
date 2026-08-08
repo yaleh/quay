@@ -21,9 +21,13 @@
 #      plugin/scripts/transcript-delivery-check.ts (AC4) — no tmux, no hash, unit-testable.
 #
 # Usage:  plugin/scripts/send-keys-reliable.sh <tmux目标> <文本> <目标会话 transcript.jsonl>
-# Exit:   0 = delivered (a real user message matching <文本> appeared in the transcript)
-#         1 = failed, fail loud (undelivered after bounded retries — needs human)
+# Exit:   0 = DELIVERED (content-matching evidence in a materialized form: a real user message
+#             or a queued_command attachment — the shape long-text/paste lands as)
+#         1 = FAILED (clear discard evidence: enqueued then removed without ever being
+#             materialized — resend is appropriate)
 #         2 = usage error
+#         3 = UNKNOWN (no evidence either way after bounded polling — check first, NEVER a bare
+#             FAIL that callers read as "delivered-failed")
 # Env:    RELIABLE_CLEAR_MAX          step-1 C-u cap                 (default 50)
 #         RELIABLE_STABLE_TIMEOUT_S   step-3 stability bound         (default 10)
 #         RELIABLE_DELIVERY_FIRST_S   first poll window before the retry Enter (default 15)
@@ -60,7 +64,7 @@ DELIVERY_POLL_S="${RELIABLE_DELIVERY_POLL_S:-5}"
 
 usage() {
   echo "用法: $0 <tmux目标> <文本> <目标会话 transcript.jsonl 路径>" >&2
-  echo "退出码: 0=已送达 · 1=未送达(已尽力,需人工) · 2=用法错误" >&2
+  echo "退出码: 0=已确认送达 · 1=明确失败(丢弃证据) · 2=用法错误 · 3=未确认(先核实再决定,勿按FAIL补发)" >&2
 }
 
 [ -n "$TARGET" ] || { usage; exit 2; }
@@ -183,36 +187,47 @@ fi
 # Step 4 (fault 2, part 3): submit.
 tmux send-keys -t "$TARGET" Enter
 
-# run_checker — one delivery-verification attempt. exit 0 = delivered; 1 = not yet; 2 = IO/usage
-# (a 2 is an environment failure: fail loud immediately, never poll a broken transcript). The
-# checker is a PURE function (transcript-delivery-check.ts); no tmux, no hash, no fake TUI.
+# run_checker — one delivery-verification attempt. exit 0 = delivered; 1 = failed (clear discard
+# evidence: enqueued then removed without materialization); 3 = unknown (no evidence either way —
+# keep polling); 2 = IO/usage (an environment failure: fail loud immediately, never poll a broken
+# transcript). The checker is a PURE function (transcript-delivery-check.ts); no tmux, no hash, no
+# fake TUI. `out=$(node ...)` (NOT a pipeline) — the exit status is the checker's own, captured
+# via $? (rule 2b: no pipeline feeding $?).
 run_checker() {
-  if out=$(node --experimental-strip-types "$CHECKER" --check "$TARGET_JSONL" --start "$baseline_bytes" --text "$TEXT" 2>&1); then
-    return 0
-  fi
+  out=$(node --experimental-strip-types "$CHECKER" --check "$TARGET_JSONL" --start "$baseline_bytes" --text "$TEXT" 2>&1)
   local code=$?
   if [ "$code" -eq 2 ]; then
     printf '%s\n' "$out" >&2 2>/dev/null || true
     echo "send-keys-reliable: transcript 校验失败（exit 2）——fail loud" >&2
     exit 1
   fi
-  return 1
+  return "$code"
 }
 
-# Step 5 (faults 3/4/5): BOUNDED poll of the target transcript until a real user message
-# matching TEXT appears (fault 4: a ~30s queuing delay is real — poll, never single-check). If
-# the first window (DELIVERY_FIRST_S) expires with no match, send ONE independent Enter (fault
-# 3's fix — a committed Enter can still fail to submit) and keep polling; if the OVERALL bound
-# expires with no match → fail loud (needs human, never pretend success).
+# Step 5 (faults 3/4/5 + THREE-STATE verdict): BOUNDED poll of the target transcript.
+#   DELIVERED  → break, exit 0 (materialized evidence: real user message or queued_command
+#                attachment — the long-text/paste delivery shape).
+#   FAILED     → the checker found clear discard evidence (enqueued then removed without ever
+#                being materialized). We KEEP polling through the bound rather than exiting at the
+#                first sighting, because the real delivered shape writes remove BEFORE attachment
+#                (same timestamp) — a grace poll lets a just-materialized attachment land and flip
+#                the verdict to DELIVERED. At the bound, discard evidence that persisted ⇒ exit 1.
+#   UNKNOWN    → no evidence either way; keep polling (message may still be in transit). At the
+#                bound with no evidence ⇒ exit 3 (distinct third state — check first, never a bare
+#                FAIL that callers read as "delivered-failed").
+# If the first window (DELIVERY_FIRST_S) expires with an unknown verdict, send ONE independent
+# Enter (fault 3's fix — a committed Enter can still fail to submit) and keep polling.
 now=$(date +%s)
 deadline_first=$(( now + DELIVERY_FIRST_S ))
 deadline_total=$(( now + DELIVERY_VERIFY_S ))
 phase=1
 delivered=0
 while [ "$(date +%s)" -lt "$deadline_total" ]; do
-  if run_checker; then
+  run_checker
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
     delivered=1
-    echo "send-keys-reliable: 已送达 $TARGET（transcript 出现内容匹配的真实 user message）"
+    echo "send-keys-reliable: 已送达 $TARGET（transcript 出现内容匹配的送达证据：真实 user message 或 queued_command attachment）"
     [ -n "${out:-}" ] && printf '%s\n' "$out"
     break
   fi
@@ -225,8 +240,23 @@ while [ "$(date +%s)" -lt "$deadline_total" ]; do
 done
 
 if [ "$delivered" -ne 1 ]; then
-  echo "send-keys-reliable: FAIL——${DELIVERY_VERIFY_S}s 有界轮询后 transcript 仍未出现内容匹配的真实 user message（已含一次独立 Enter 补发）；需要人工，不假装成功" >&2
-  exit 1
+  # Bounded poll expired — one final authoritative checker run decides the tail state. A
+  # just-landed DELIVERED (evidence arrived between the last loop poll and now) must still win.
+  run_checker
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "send-keys-reliable: 已送达 $TARGET（界点前最后确认：transcript 出现内容匹配的送达证据）"
+    [ -n "${out:-}" ] && printf '%s\n' "$out"
+    exit 0
+  fi
+  if [ "$rc" -eq 1 ]; then
+    echo "send-keys-reliable: FAILED——${DELIVERY_VERIFY_S}s 有界轮询后 transcript 只剩明确丢弃证据（queue-operation remove，从未物化为 user/attachment）；消息被丢弃，需人工/重发" >&2
+    [ -n "${out:-}" ] && printf '%s\n' "$out" >&2 2>/dev/null || true
+    exit 1
+  fi
+  echo "send-keys-reliable: UNKNOWN——${DELIVERY_VERIFY_S}s 有界轮询后既无送达证据也无明确丢弃证据（已含一次独立 Enter 补发）；不能断定已送达也不能断定已丢弃——先核实再决定（如 meta-cc role=all），勿按 FAIL 补发" >&2
+  [ -n "${out:-}" ] && printf '%s\n' "$out" >&2 2>/dev/null || true
+  exit 3
 fi
 
 exit 0

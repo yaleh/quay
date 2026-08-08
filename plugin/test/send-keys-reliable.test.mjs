@@ -194,10 +194,11 @@ test("CLI measure: a matching real user message → stdout delivered: true, exit
   });
 });
 
-test("CLI measure: no matching user message → stdout delivered: false, exit 1", () => {
+test("CLI measure: no matching evidence → stdout state: unknown, exit 3 (three-state contract — NOT a bare FAIL)", () => {
   withTempJsonl(userStringLine("hello") + "\n", (file) => {
     const r = runCli(["--check", file, "--text", "absent-marker-999"]);
-    assert.equal(r.status, 1, `exit 1 expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.equal(r.status, 3, `exit 3 (unknown) expected, got ${r.status}\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /state: unknown/);
     assert.match(r.stdout, /delivered: false/);
   });
 });
