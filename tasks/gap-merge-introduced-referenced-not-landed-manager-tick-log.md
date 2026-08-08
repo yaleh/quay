@@ -93,6 +93,7 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
 - plugin/scripts/quay-init.sh（若需要）
 - tasks/gap-merge-exposed-contract-violations-in-done-tasks.md（AC4 交叉标注）
 - tasks/gap-suite-state-split-across-worktree-and-gate.md（AC4 交叉标注）
+- tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md（self-touch）
 
 ## Dispatch review
 
