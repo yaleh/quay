@@ -1,4 +1,9 @@
 // @test-group product
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file binds
+// ephemeral HTTP ports, spawns real quay-native CLI processes (execFileSync), and chdirs across
+// isolated workspaces; it passes isolated under low load but failed under full-suite cc8 concurrency
+// (2026-08-08 07:06:49, 1/0 in isolation both primary and integration worktrees). Predeclared marker so
+// its isolation-pass can legitimately release the red window (gap-load-sensitive-requires-predeclared-marker).
 // QN-031 (iteration 21): regression test for serve.js's HTTP list/detail/
 // action-button loop and action.js's composePayload() — the literal running
 // code behind the `skeleton` V_instance factor (protocol §5.1: "the v0 loop

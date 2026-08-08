@@ -156,6 +156,24 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 3. **不要删/降级/改 skip 这族**——它们抓的是真问题（挂载单飞、laid-down 实跑、`--once` 接缝），
    只是天生负载敏感。
 
+**红窗释放准入（事前声明，非事后追认——`gap-load-sensitive-requires-predeclared-marker`，管理者 2026-08-08 裁定）**：
+用「隔离重跑通过」来释放红窗（suite red → 隔离单跑该文件绿 → 视为可继续批量合）的文件，**必须带
+`KNOWN-LOAD-SENSITIVE` 事前标记**——标记是红窗释放的**准入条件**，不是隔离通过后的追认形容。两条路径：
+- **有标记（Path A：直接释放）**——文件头已声明 `KNOWN-LOAD-SENSITIVE` ⇒ 隔离通过可放行本轮红窗
+  （标记 = 事前声明「它天生负载敏感」，隔离绿恰好证实这个分类，不是用结果反推分类）。
+- **无标记（Path B：只能申请，不能释放）**——文件未声明 ⇒ 隔离通过**只能用来申请加标记**（连同
+  证据贴任务体/文件头，下次生效），**本轮红窗不因它释放**——先走标记申请，标记落地后下轮才可用。
+  （实实例：`packages/quay/test/serve.test.mjs` 07:06:49 失败、隔离 1/0 通过后 07:07:49 直接批量合
+  ——无标记隔离通过被当放行依据，正是本裁定修掉的形态；处置见该任务 AC4：补标记。）
+
+**机械校验（红窗释放前跑，`plugin/scripts/load-sensitive-release-check.ts`）**：
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/load-sensitive-release-check.ts <被释放文件...>
+# exit 0 = 全部带 KNOWN-LOAD-SENSITIVE 标记 ⇒ 释放成立（Path A）
+# exit 1 = 有未标记文件（列出）⇒ 释放不成立，走 Path B 申请加标记
+# exit 2 = 用法/环境错（缺文件 / 文件不可读）——fail-closed，永不静默释放
+```
+
 **机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
 跑批协议 grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals.test.mjs plugin/test/cold-start-skill.test.mjs`）；

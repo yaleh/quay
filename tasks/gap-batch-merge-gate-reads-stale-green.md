@@ -87,6 +87,15 @@ resume 若中断，先跑 measure 确认 finishedAt 距今秒数，不要假设�
 - 实际执行是自判门：suite red（07:06:49）→ inner 隔离重跑通过 → 07:07:49 批量合（红后 1 分钟）。
 - **文档说机械、实际是自判——差距本身就是缺口**，与本任务（闸门只读 state 不读新鲜度）同类。
 
+## 交叉标注（gap-load-sensitive-requires-predeclared-marker，2026-08-08 dispatch）
+
+本任务 AC5 交叉标注：**「红窗释放」也是同一个「闸门自判 vs 机械」族**——suite red 07:06:49 → inner
+隔离重跑 serve.test.mjs 通过 → 07:07:49 批量合（红后 1 分钟），释放判据是 inner 自判（隔离通过即
+放行），无机械准入。`gap-load-sensitive-requires-predeclared-marker` 已修：红窗释放改为**事前声明
+KNOWN-LOAD-SENSITIVE 标记准入**（`docs/analysis/fast-mode-loop-tick.md`「红窗释放准入」两条路径 +
+`plugin/scripts/load-sensitive-release-check.ts` 机械校验）。与本任务（批量合闸门读 state 不读
+新鲜度）是同族缺口的两面：批量合「何时合」要机械判，红窗释放「凭什么放行」也要机械判。
+
 ## Dispatch review
 
 reviewer: none
