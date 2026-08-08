@@ -772,22 +772,22 @@ run_selected() {
     # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
     # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
     # keeps real-wall-clock-wait and nested-suite-spawn tests from being starved by the main body's
-    # worker pool. Skipped when the main body already failed (the run is red either way). The
-    # concurrency is a HARD-CODED 1 — serial isolation is the mechanism's invariant, never a
-    # user-tunable knob (the --group serial path in the non-default branch strips explicit
-    # concurrency flags for the same reason). Its TAP summary lands LAST on the stream, so the
-    # outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial summary overwrites
-    # the main body's only when both are green — a serial failure flips the whole run red via its
-    # own fail/cancelled).
-    if [ "$code" -eq 0 ]; then
-      local serial_files=() sf serial_code
-      while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
-      if [ "${#serial_files[@]}" -gt 0 ]; then
-        echo "selected ${#serial_files[@]} files (groups=serial)"
-        node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
-        serial_code=$?
-        if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
-      fi
+    # worker pool. The concurrency is a HARD-CODED 1 — serial isolation is the mechanism's
+    # invariant, never a user-tunable knob (the --group serial path in the non-default branch
+    # strips explicit concurrency flags for the same reason). Its TAP summary lands LAST on the
+    # stream, so the outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial
+    # summary overwrites the main body's only when both are green — a serial failure flips the
+    # whole run red via its own fail/cancelled). The phase runs EVEN IF the main body failed
+    # (report all failures; the serial exit code merges into `code`) — a red main must not leave
+    # the serial 3 files' verdict unknown (gap-post-merge-verification-failure-batch AC3:
+    # round 95 skipped serial when main was red, so serial failures were invisible).
+    local serial_files=() sf serial_code
+    while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+    if [ "${#serial_files[@]}" -gt 0 ]; then
+      echo "selected ${#serial_files[@]} files (groups=serial)"
+      node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
+      serial_code=$?
+      [ "$serial_code" -eq 0 ] || code="$serial_code"
     fi
     # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
     # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
