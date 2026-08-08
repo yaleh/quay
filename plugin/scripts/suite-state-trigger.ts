@@ -52,7 +52,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
-export type SuiteStateReason = "failed" | "aborted" | "infra-error";
+// gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — a FOURTH reason value:
+// "static-check" (a run_static_checks checker failed — task-contract / test-framework-policy /
+// test-isolation ratchet — NOT a test failure). Consumers can distinguish a static-check red from a
+// test-failure red: both stop dispatch (static checks ARE the shared gate), but the triage differs
+// (static-check red ⇒ fix the contract, not roll back code).
+export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check";
 
 /**
  * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
@@ -62,6 +67,22 @@ export type SuiteStateReason = "failed" | "aborted" | "infra-error";
 export interface SuiteFailure {
   line: string;
   file?: string;
+  /**
+   * True when this entry is a STATIC-CHECK violation (a run_static_checks checker failed), not a
+   * test failure (gap-full-suite-state-red-no-failure-detail-static-check-invisible AC4 candidate B).
+   * classifyFailure reads this marker to classify the failure as a SHARED-GATE failure (static
+   * checks pollute every scoped run ⇒ stop dispatch). Absent/undefined on real test failures.
+   */
+  staticCheck?: boolean;
+}
+
+/** Machine-readable static-check red detail (AC2) — mirrors full-suite-runner.ts's shape. */
+export interface SuiteStateStaticCheck {
+  violations?: number | null;
+  taskCount?: number | null;
+  ceiling?: number | null;
+  newSinceBaseline?: number | null;
+  details?: unknown[];
 }
 
 /** Where a suite failure landed, for the shared-gate-vs-specific-test dispatch conditional. */
@@ -99,6 +120,13 @@ export interface SuiteState {
    * continues). Absent (legacy red) ⇒ fail-closed toward stopping.
    */
   failures?: SuiteFailure[];
+  /**
+   * Present on red+static-check (gap-full-suite-state-red-no-failure-detail-static-check-invisible
+   * AC2): machine-readable violation counts when the red was caused by a run_static_checks checker
+   * (not a test failure). Consumers read reason === "static-check" + this field to triage a static-
+   * check red (fix the contract) without hand-digging the log.
+   */
+  staticCheck?: SuiteStateStaticCheck;
 }
 
 /** The AC2 reason-axis route a red state takes (gap-suite-state-has-no-reason-axis-failed-aborted-infra). */
@@ -109,6 +137,10 @@ export type RedRoute = "red-window-triage" | "resource-gate" | "proceed";
  * rule's CODE-RISK stop; it fires ONLY when the red carries a real failure conclusion:
  *   - red + reason=failed (or legacy red, missing reason — fail-closed) ⇒ "red-window-triage":
  *     STOP dispatch + red-window triage (定位肇事 merge).
+ *   - red + reason=static-check (a run_static_checks checker failed — gap-full-suite-state-red-no-
+ *     failure-detail-static-check-invisible AC3) ⇒ "red-window-triage" too: static checks ARE the
+ *     shared gate every scoped run pays, so a static-check red STOPS dispatch. The reason value
+ *     still lets the triage distinguish "fix the contract" from "roll back code".
  *   - red + reason=aborted (NO correctness conclusion — signal kill / spawn error / early gate-WAIT
  *     exit) ⇒ "resource-gate": do NOT stop on code risk; recovery is decided by resource-gate.sh's
  *     GO/WAIT (the "现在能不能压" criterion) — the coincidence where a lingering abort-red keeps
@@ -189,6 +221,12 @@ export function classifyFailure(input: SuiteFailure | string): FailureLocation {
   const line = typeof input === "string" ? input : input.line;
   const file = typeof input === "string" ? undefined : input.file;
   const haystack = [file, line].filter(Boolean).join("\n");
+
+  // 0. a STATIC-CHECK violation marker (gap-full-suite-state-red-no-failure-detail-static-check-
+  //    invisible AC4 candidate B — full-suite-runner fills failures[] with staticCheck:true entries
+  //    when run_static_checks failed) ⇒ SHARED GATE: static checks are run_static_checks — every
+  //    scoped run pays them, so a static-check red ALWAYS stops dispatch (the shared-gate rule).
+  if (typeof input !== "string" && input.staticCheck) return { kind: "shared-gate", line };
 
   // 1. a static-check checker is named (checker path / checker name / run_static_checks) ⇒ shared gate
   const checkerPath = file && SHARED_GATE_CHECKER_RE.test(file);
