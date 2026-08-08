@@ -5,7 +5,7 @@ title: C3（outer NEVER creates/drives/checks manager）只有文档层机械检
   ≠ 运行时没做；运行时实际去 capture-pane/读 transcript/查 manager 记录不被任何判据覆盖； 08-07 09:03 外层
   task_write 分析 manager 行为立案属 C3 越界（已成立），暴露文档层 AC 管不住运行时行为； 同族：声明在（AC
   勾了）、保证没了（实际行为不受约束）——本仓反复出现的形状
-status: ready
+status: done
 labels:
   - gap
   - defect

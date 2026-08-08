@@ -8,7 +8,7 @@ title: "quay task list --root <path> does NOT resolve config from --root — it
   --root is meant to scope the workspace but config resolution ignores it;
   fix: pass --root into discoverWorkspaceRoot for workspace-scoped commands,
   or fail cleanly when no config under --root"
-status: ready
+status: done
 labels:
   - gap
   - defect
