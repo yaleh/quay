@@ -1037,6 +1037,32 @@ test("AC1/AC2/AC4 — a candidate referencing an ADR-022-deleted script is NOT p
   assert.equal(c.eligible, false, "retired-mechanism candidate is not eligible");
 });
 
+test("AC3 — clean candidates still promote; only the retired-mechanism candidate is intercepted (negative control)", (t) => {
+  const root = makeWorkspace("retired-clean");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // A clean candidate (one of the incident's 7 clean candidates — productize-manager) must still promote.
+  writeTask(root, "productize-manager", gapTask("productize-manager"));
+  // The retired-mechanism candidate.
+  writeTask(root, "gap-prepare-milestone-no-size-aware-routing", gapTask("gap-prepare-milestone-no-size-aware-routing", {
+    body: fourArtifactBody({ extra: "\nTarget mechanism: prepare-milestone.js (live).\n" }),
+  }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.ok(
+    r.promotions.some((p) => p.id === "productize-manager"),
+    "clean candidate still promoted (AC3 negative control)",
+  );
+  assert.ok(
+    !r.promotions.some((p) => p.id === "gap-prepare-milestone-no-size-aware-routing"),
+    "retired candidate is NOT promoted",
+  );
+  assert.ok(
+    r.intercepted.some((x) => x.id === "gap-prepare-milestone-no-size-aware-routing"),
+    "retired candidate is intercepted (recorded)",
+  );
+});
+
 test("--targeted: a retired-mechanism target is not promotable (retired-mechanism reason)", (t) => {
   const root = makeWorkspace("retired-targeted");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
