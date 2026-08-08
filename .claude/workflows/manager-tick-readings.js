@@ -71,14 +71,22 @@ d=json.load(open('.quay/full-suite-state.json'))
 print('suite=%s/%s age=%smin'%(d['state'],d.get('reason'),int(time.time()-os.path.getmtime('.quay/full-suite-state.json'))//60))"
 git rev-list --left-right --count develop...integration | awk '{print "diverge="$1"/"$2}'
 echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '^[0-9a-f]* manager:')"
-ps -eo args | grep -q '[q]uay-0:outer.0 -S -3' && echo mon_outer=alive || echo mon_outer=DEAD
-ps -eo args | grep -qF 'SUITE-TERMINAL' && echo mon_suite=alive || echo mon_suite=DEAD
+echo "mon_procs=$(ps -eo args | grep -cE 'SUITE-TERMINAL|full-suite-state\.json' | tr -d ' ') （枚举而非布尔——见下方注释）"
+ps -eo pid,etime,args | grep -E 'SUITE-TERMINAL|full-suite-state\.json' | grep -v grep | sed 's/^\(.\{110\}\).*/\1…/'
 python3 orchestration/manager-anchor-check.py
 # ^ 2026-08-07：我把 suite 监视器从 suite-state-trigger --monitor 换成了自记 prev 的轮询
 #   （原因：suite-state-trigger 用共享的 .quay/suite-state-last.json 做边沿触发，
 #    outer 也挂着一个实例，两者互偷事件——我那个挂了 1h45m 零事件）。
 #   换监视器时【这条检查一度还指着旧签名】，等于换完就失去覆盖而不自知——
-#   §1.4e 同型：换实现要同步换判据，否则"检查通过"检查的是一个已经不存在的东西。`
+#   §1.4e 同型：换实现要同步换判据，否则"检查通过"检查的是一个已经不存在的东西。
+# ^ 2026-08-08 01:2x：上面那句预言的事真的发生了，而且是在我自己的仪表盘上。
+#   原来两行是【硬编码签名 → 布尔】：mon_outer 的签名 'quay-0:outer.0 -S -3' 已匹配零进程，
+#   于是它每轮恒返回 DEAD——与已退休的 ⑥ 同型：答案恒定的判准携带零信息。
+#   更糟的是我连续三轮把它写成"mon_suite/mon_commit 双 alive"，而本命令块【从不输出 mon_commit】，
+#   实测也不存在任何 commit 监视器进程、TaskList 为空。**读数与记录不一致：报了一个没有来源的读数。**
+#   ⇒ 改为【枚举实际进程】而不是"按名字问在不在"：少了一个监视器会表现为少一行，
+#   而不是一个我可以照抄成 alive 的布尔。一般形态：**布尔化的存在性检查会把"对象没了"伪装成"检查失败"，
+#   而枚举把两者区分开。**`
 
 // ══ 交还给主循环的指令 ②：该判什么 ══════════════════════════════════════════
 // 每一条都对应一次实测过的失效，不是设想。
@@ -117,7 +125,11 @@ const JUDGE_CRITERIA = `**判准（逐条应用，并把结论写进 tick-log �
 ②c **不对称是线索，不是噪声**：若"预期该坏的没坏、不相干的坏了"，通常说明**坏的是机制本身**，
    被保护对象只是碰巧幸存。r10 即此：失败全是"检查分组机制"的用例，而受隔离保护的测试全过
    ——根因是 \`group_of()\` 把未识别组名静默降级 engine，不是那些测试变坏了。
-③ **监视器**：\`mon_*=DEAD\`？注意"进程活着"≠"能报得出"——后者属深路径。
+③ **监视器（2026-08-08 改为枚举式）**：\`mon_procs=N\` + 逐行进程清单。
+   **判读方式变了**：不是"某个名字在不在"，而是"这一轮实际有哪几个监视器进程"。
+   写进 tick-log 时**必须写出条数和它们是什么**，不许写成一个 alive/DEAD 布尔——
+   本判准就是因为布尔化才失效的（我照抄了一个从不存在的 \`mon_commit=alive\`）。
+   注意"进程活着"≠"能报得出"——后者属深路径。
 ④ **\`halt:\`**：出现在不该暂停的项目？（meta-cc 的 halt 已核实为 08-05 人为暂停、
    解除条件未满足，合理在效——不要每轮重新当异常报。）
 ⑤ **突变**：\`ahead\` / \`diverge\` / \`commits30m\` / \`avg10\` / \`load1\` 相对上一轮。
