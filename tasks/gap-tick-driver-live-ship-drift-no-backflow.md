@@ -12,70 +12,58 @@ extra: {}
 
 ## Proposal
 
-**三层 tick 驱动的【在跑副本】与【出厂件】全部漂移，无任何同步纪律。manager 层是极端案例——其出厂件实质弃养（30 天只碰 2 次，在跑改了 32 次）。这与已有的 `gap-the-manager-layer-does-not-propagate-...`（管铺设）【不是同一件事】：本任务管【回流】（在跑副本的演化回到出厂件），铺设任务管【铺设】（quay-init --loop 铺不铺 manager 驱动）。**
+**【前提撤回重写，2026-08-08 管理者紧急更正】三层 tick 驱动"在跑/出厂全部漂移"原判断撤回——manager 层出厂件是通用模板（`plugin/loop/manager-loop-tick.md` 第 1 行 `# 管理者 tick 指令（通用模板）` + "随 quay-init --loop 铺设"），在跑副本是 quay 网络实例落地（33 处实例特有 vs 出厂 16 处）——字节差与低同提交率是【设计非缺陷】。orchestrator/fast-mode 的出厂/在跑不含实例特有（0），模板-vs-实例关系未确认，管理者一并撤回"三层全部漂移"结论。重写为窄版本：通用改进是否回流到出厂模板。**
 
-### 实测（管理者 04:5x，近 30 天同提交同步率）
+### 原前提为何错（管理者自省 + 外层核实）
 
-| 层 | 在跑改动 | 出厂改动 | 同提交 | 同步率 |
-|---|---|---|---|---|
-| manager-loop-tick.md | 32 | 2 | 1 | **3%** |
-| orchestrator-loop-tick.md | 42 | 53 | 11 | **26%** |
-| fast-mode-loop-tick.md | 37 | 71 | 7 | **18%** |
+- 比较两个对象前没确认它们【是否应当相等】——manager 出厂（通用模板）与在跑（实例）本来就不该相等；
+- 同型于今晚噪声带错误（把两个不同样本极差拼成一条带），两小时内第二次；
+- 内层报的矛盾真实且部分源于措辞：任务体"只立测量与归类"与 AC1"回流机制落地"、band"同步率上升"自相矛盾。
 
-- 最好的一层也只有 26%；**manager 出厂件 30 天只被碰 2 次、在跑改了 32 次**；
-- **字节差方向不同**：manager 出厂 18,855B / 在跑 31,809B（在跑更大 → 演化只在本仓未回流）；orchestrator 出厂 91,490B / 在跑 72,599B（出厂更大 → 出厂件被独立维护）；fast-mode 同向。
-- **outer/inner 出厂件是活的、只是不同步；manager 出厂件是死的**。
+### 窄版本（仍可能成立，管理者供判）
 
-### 与已有任务的区别（本任务存在的理由）
+管理者今晚往判准加的四项——枚举式监视器判据 / 自审 violation 的 status 必填枚举 / 跨会话投递工具名必须入记录 / 跳过六判准须声明豁免理由——**全部是通用的，不含任何 quay 网络特有内容**。问题变成：**通用改进有没有进模板？**
 
-`gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver`（ready）管**铺设**（quay-init --loop 不铺 manager 驱动）。本任务管**回流**（在跑副本演化不回到出厂件）。两者独立：即便铺设修好、byte-identity 断言（93bd3737/2dc55ba9 合法停用的那两条）恢复，它断的也是【出厂件 ↔ 新工作区的铺设结果】，**断不到【本仓在跑副本 ↔ 出厂件】这条边**——后者才是演化实际发生的地方。
+判据**不能是原始同提交率**（被"模板 vs 实例"结构污染）。需要不含实例内容的判据：如"出厂模板是否含通用改进的关键词/机制名"（grep 出厂件 vs 在跑副本的通用机制，排除实例特有路径）。
 
-**实锤**：今晚 2 小时管理者往判准加的四项（枚举式监视器判据、自审 violation 的 status 必填枚举、跨会话投递工具名必须入记录、跳过六判准须声明豁免理由）**全部只活在本仓在跑副本里，新工作区一个都拿不到**。
+### 边界
 
-### 为什么这条压过提速类议题
-
-阶段目标原话：「产品化的判据是装得上跑得起来（静态）；自举演进的判据是不在场时仍在开新维度（动态、趋势型）」。**一层演化出的机制若不回流到出厂件，它就只在这一个仓里演进过一次，下一个工作区从零开始**——那不是"演进慢"，是"演进不累积"。
-
-### 判据（趋势型，一行可测）
-
-同提交同步率 = `comm -12 <(git log --format=%H --since=30.days -- <live>|sort) <(git log --format=%H --since=30.days -- <ship>|sort) | wc -l` ÷ 在跑改动次数。符合阶段目标对自举演进的要求，不是一次性静态检查。
-
-### 边界（管理者声明）
-
-**不改法**：要不要强制同提交、要不要把在跑副本改成出厂件的软链/生成物、要不要只对 manager 层做——设计选择，越过停点。本任务只立测量与归类，改法由内层/外层后续裁。
+- **不判定 manager 字节差/低同提交率为缺陷**（是设计）；
+- **改法留给执行**（要不要强制同提交、软链/生成物，设计选择）；
+- orchestrator/fast-mode 的模板-vs-实例关系未确认——若确认是同类，同样不能用同提交率。
 
 ## Contract
 
-measure sync_rate = `python3 -c "import subprocess; l=subprocess.run(['git','log','--format=%H','--since=30.days','--','orchestration/manager-loop-tick.md'],capture_output=True,text=True).stdout.split(); s=subprocess.run(['git','log','--format=%H','--since=30.days','--','plugin/loop/manager-loop-tick.md'],capture_output=True,text=True).stdout.split(); c=len(set(l)&set(s)); print(f'{c}/{len(l)}={round(c*100/len(l),1)}%' if l else '0')"` stdout 数字段（回流机制落地后 manager 同步率显著高于 3%）
-measure all_layers = `for p in "orchestration/manager-loop-tick.md plugin/loop/manager-loop-tick.md" "orchestration/orchestrator-loop-tick.md plugin/loop/orchestrator-loop-tick.md" "docs/analysis/fast-mode-loop-tick.md plugin/loop/fast-mode-loop-tick.md"; do set -- $p; l=$(git log --format=%H --since=30.days -- "$1"|wc -l); s=$(git log --format=%H --since=30.days -- "$2"|wc -l); c=$(comm -12 <(git log --format=%H --since=30.days -- "$1"|sort) <(git log --format=%H --since=30.days -- "$2"|sort)|wc -l); echo "$1/$2=$c/$l"; done` stdout 数字段（三层同步率）
-band sync_rate = 显著 > 3%（回流机制落地后）且 all_layers = 三层都有同提交
-invoke `python3 -c "import subprocess; l=subprocess.run(['git','log','--format=%H','--since=30.days','--','orchestration/manager-loop-tick.md'],capture_output=True,text=True).stdout.split(); s=subprocess.run(['git','log','--format=%H','--since=30.days','--','plugin/loop/manager-loop-tick.md'],capture_output=True,text=True).stdout.split(); print(len(set(l)&set(s)), '/', len(l))"`
-control 回流机制落地后，任一层的在跑改动应出现在出厂件（同提交数上升）；出厂件不再是死件（manager 出厂 30 天 >2 次改动）
-resume 若中断，先跑 measure 读三层同步率现状
+measure gen_improve_in_ship = `for f in plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md; do echo "$f: $(grep -cE '枚举式监视器|status 必填|投递工具名|跳过六判准|enum.*判据|豁免理由' $f 2>/dev/null)"; done` stdout 数字段（通用改进回流后，出厂模板含相应机制名，≥1/层）
+measure instance_specific = `grep -cE 'home/yale|yaleh|quay-0|work/quay' plugin/loop/manager-loop-tick.md` stdout 数字段（出厂模板应【不含】实例特有内容，=0 为健康）
+band gen_improve_in_ship = 每层出厂模板含通用改进（≥1/层）且 instance_specific = 0（出厂模板干净、无实例特有）
+invoke `grep -cE '枚举式监视器|status 必填|投递工具名|跳过六判准' plugin/loop/*.md`
+control 通用改进（如枚举式判据）写入在跑副本后，回流到出厂模板（grep 出厂件命中）；出厂模板不含实例特有路径
+resume 若中断，先跑 measure 读各层出厂模板通用改进数 + 实例特有数
 
 ## Acceptance Criteria
 
-- [ ] AC1: **回流机制落地**——在跑副本的演化回流到出厂件（软链/生成物/同步纪律之一，设计选择留给执行）
-- [ ] AC2: **manager 出厂件复活**——manager-loop-tick.md 出厂件不再 30 天 2 次改动；同步率显著上升
-- [ ] AC3: **三层同步率上升**——orchestrator/fast-mode 同步率从 26%/18% 显著提升
-- [ ] AC4: **趋势型判据**——同提交同步率作为持续判据（非一次性），符合自举演进要求
+- [ ] AC1: **前提确认**——manager 出厂=通用模板、在跑=实例落地是设计非缺陷（不修字节差/同提交率）
+- [ ] AC2: **通用改进回流**——管理者四项（枚举式判据/status 必填/投递工具名/豁免理由）等通用改进写入在跑副本后回流到出厂模板（grep 出厂件命中）
+- [ ] AC3: **判据不含实例污染**——不使用原始同提交率（模板-vs-实例结构污染）；用不含实例内容的判据（通用机制名 grep 出厂件）
+- [ ] AC4: **orchestrator/fast-mode 关系确认**——确认它们出厂/在跑是否模板-vs-实例（若是同样不能用同提交率）
 - [ ] AC5: 与 gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver（铺设，独立）、
       gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them（铺装改写）交叉标注
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴任务体（回流机制 + 三层同步率前后对照）
-- [ ] 回流机制接入出厂件发布路径（quay-init 铺装时在跑副本与出厂件一致）
+- [ ] AC1-AC4 实跑输出贴任务体（出厂模板通用改进数、实例特有数、orchestrator/fast-mode 关系确认）
+- [ ] 通用改进回流机制接入（在跑副本通用机制写入出厂模板）
 
 ## Touches
-- plugin/loop/manager-loop-tick.md（或回流机制：软链/生成物）
-- plugin/loop/orchestrator-loop-tick.md / plugin/loop/fast-mode-loop-tick.md（同机制）
+- plugin/loop/manager-loop-tick.md / orchestrator-loop-tick.md / fast-mode-loop-tick.md（通用改进回流）
 - tasks/gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver.md（AC5 交叉标注）
 - tasks/gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them.md（AC5 交叉标注）
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-08T05:0xZ
-changed: 人 04:5x 指示提任务。实测确认三层同步率：manager 3%/orchestrator 26%/fast-mode 18%——manager
-  出厂件弃养。与铺设任务独立（本任务管回流：在跑演化回出厂件）。判据趋势型一行可测。改法留给执行。
+at: 2026-08-08T05:2xZ
+changed: 管理者紧急更正撤回原前提：manager 出厂=通用模板、在跑=实例落地是设计非缺陷（模板-vs-实例）。
+  原任务（三层同步率判据）作废——被结构污染。重写为窄版本：通用改进是否回流到出厂模板，
+  判据用不含实例内容的通用机制名 grep 出厂件。内层已紧急暂停原任务。
