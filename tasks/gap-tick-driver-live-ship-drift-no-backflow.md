@@ -12,58 +12,65 @@ extra: {}
 
 ## Proposal
 
-**【前提撤回重写，2026-08-08 管理者紧急更正】三层 tick 驱动"在跑/出厂全部漂移"原判断撤回——manager 层出厂件是通用模板（`plugin/loop/manager-loop-tick.md` 第 1 行 `# 管理者 tick 指令（通用模板）` + "随 quay-init --loop 铺设"），在跑副本是 quay 网络实例落地（33 处实例特有 vs 出厂 16 处）——字节差与低同提交率是【设计非缺陷】。orchestrator/fast-mode 的出厂/在跑不含实例特有（0），模板-vs-实例关系未确认，管理者一并撤回"三层全部漂移"结论。重写为窄版本：通用改进是否回流到出厂模板。**
+**【人 05:2x 裁定重写（非退回）】三层 tick 驱动"在跑/出厂漂移"重写为精确窄版：三项目通用判准（枚举式监视器判据 / 自审 violation 的 status 必填枚举 / 跨会话投递工具名必须入记录）在跑副本有、出厂模板零命中——通用改进未回流出厂。范围比原判断窄得多，但缺口真实。**
 
-### 原前提为何错（管理者自省 + 外层核实）
+### 已实测前提（管理者 05:2x，可复核）
 
-- 比较两个对象前没确认它们【是否应当相等】——manager 出厂（通用模板）与在跑（实例）本来就不该相等；
-- 同型于今晚噪声带错误（把两个不同样本极差拼成一条带），两小时内第二次；
-- 内层报的矛盾真实且部分源于措辞：任务体"只立测量与归类"与 AC1"回流机制落地"、band"同步率上升"自相矛盾。
+| 通用判准 | 在跑副本 | 出厂模板 .md |
+|---|---|---|
+| 枚举式监视器判据（枚举而非布尔） | 有 | **0** |
+| 自审 violation 的 status 必填枚举 | 有 | **0** |
+| 跨会话投递工具名必须入记录 | 有 | **0** |
 
-### 窄版本（仍可能成立，管理者供判）
+- `plugin/scripts/manager-tick-readings.ts` 最后改动 2026-08-07T23:08Z，13,922 B；在跑副本（.claude/workflows/manager-tick-readings.js）36,037 B，含枚举式判据；
+- **关键论证**：这三项【不含任何 quay 网络特有内容】（枚举进程 / 给违规分类 / 记录投递工具，任何装了 quay 的主机都适用）。**"通用模板"豁免的是项目列表、仓库路径、tmux 窗口名，豁免不到通用判准。** 所以缺口是真的，只是范围窄。
 
-管理者今晚往判准加的四项——枚举式监视器判据 / 自审 violation 的 status 必填枚举 / 跨会话投递工具名必须入记录 / 跳过六判准须声明豁免理由——**全部是通用的，不含任何 quay 网络特有内容**。问题变成：**通用改进有没有进模板？**
+### 必须删除的错误前提（管理者已撤回）
 
-判据**不能是原始同提交率**（被"模板 vs 实例"结构污染）。需要不含实例内容的判据：如"出厂模板是否含通用改进的关键词/机制名"（grep 出厂件 vs 在跑副本的通用机制，排除实例特有路径）。
+1. **"manager 出厂件弃养"**——错。`plugin/loop/manager-loop-tick.md:1`「（通用模板）」+ 裁定 `gap-the-manager-layer-does-not-propagate-...` 第 208 行：管理者驱动按项目铺设、内容为网络通用模板。**出厂与在跑本就不该相等，字节差是设计**；
+2. **"三层全部漂移、无同步纪律"**——未验证，撤回（orchestrator/fast-mode 是否模板-vs-实例未查）；
+3. **同提交同步率判据作废**——被"模板 vs 实例"结构污染，测不出要测的东西。原 Contract 的 sync_rate measure 与 band **整条删除**。
 
-### 边界
+### 不写进去的（无证据）
 
-- **不判定 manager 字节差/低同提交率为缺陷**（是设计）；
-- **改法留给执行**（要不要强制同提交、软链/生成物，设计选择）；
-- orchestrator/fast-mode 的模板-vs-实例关系未确认——若确认是同类，同样不能用同提交率。
+第四项「跳过六判准须声明豁免理由」——活在 tick-log 写作惯例里，不在 .js，grep 在跑副本 0 命中，**不能当证据**。只用上面三项。
+
+### 本任务定位：纯测量（二选一，不两者并存）
+
+**纯测量**：AC 只要求产出「哪些通用判准未回流到出厂」的清单（含每项在跑/出厂命中数），**不含回流机制落地**（机制形态——强制同提交/生成物/单源+覆盖层——是设计选择，越过停点，留给后续裁）。
 
 ## Contract
 
-measure gen_improve_in_ship = `for f in plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md; do echo "$f: $(grep -cE '枚举式监视器|status 必填|投递工具名|跳过六判准|enum.*判据|豁免理由' $f 2>/dev/null)"; done` stdout 数字段（通用改进回流后，出厂模板含相应机制名，≥1/层）
-measure instance_specific = `grep -cE 'home/yale|yaleh|quay-0|work/quay' plugin/loop/manager-loop-tick.md` stdout 数字段（出厂模板应【不含】实例特有内容，=0 为健康）
-band gen_improve_in_ship = 每层出厂模板含通用改进（≥1/层）且 instance_specific = 0（出厂模板干净、无实例特有）
-invoke `grep -cE '枚举式监视器|status 必填|投递工具名|跳过六判准' plugin/loop/*.md`
-control 通用改进（如枚举式判据）写入在跑副本后，回流到出厂模板（grep 出厂件命中）；出厂模板不含实例特有路径
-resume 若中断，先跑 measure 读各层出厂模板通用改进数 + 实例特有数
+measure generic_in_ship = `for f in plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md; do echo "$f: 枚举=$(grep -cE '枚举式|枚举' $f 2>/dev/null) status必填=$(grep -cE 'status.*必填|必填.*status' $f 2>/dev/null) 投递工具=$(grep -cE '投递工具' $f 2>/dev/null)"; done` stdout 数字段（纯测量：出厂模板三判准命中数，当前应全 0）
+measure live_has = `grep -cE '枚举|status.*必填|投递工具' plugin/scripts/manager-tick-readings.ts .claude/workflows/manager-tick-readings.js 2>/dev/null | paste -sd+ -` stdout 数字段（在跑副本三判准命中总数，>0 为缺口存在）
+band generic_in_ship = 全 0（出厂模板无三判准）且 live_has > 0（在跑有）——纯测量记录缺口，不要求落地
+invoke `grep -cE '枚举式|status 必填|投递工具' plugin/loop/*.md`
+control 清单产出后，任一通用判准仍在跑有、出厂无（缺口记录准确）；不引入回流机制（纯测量）
+resume 若中断，先跑 measure 读出厂模板三判准命中 + 在跑副本命中
 
 ## Acceptance Criteria
 
-- [ ] AC1: **前提确认**——manager 出厂=通用模板、在跑=实例落地是设计非缺陷（不修字节差/同提交率）
-- [ ] AC2: **通用改进回流**——管理者四项（枚举式判据/status 必填/投递工具名/豁免理由）等通用改进写入在跑副本后回流到出厂模板（grep 出厂件命中）
-- [ ] AC3: **判据不含实例污染**——不使用原始同提交率（模板-vs-实例结构污染）；用不含实例内容的判据（通用机制名 grep 出厂件）
-- [ ] AC4: **orchestrator/fast-mode 关系确认**——确认它们出厂/在跑是否模板-vs-实例（若是同样不能用同提交率）
+- [ ] AC1: **前提确认**——manager 出厂=通用模板、在跑=实例落地是设计非缺陷（不修字节差）；"三层全部漂移"撤回
+- [ ] AC2: **三判准缺口记录**——枚举式判据 / status 必填枚举 / 投递工具名，各列出在跑命中 vs 出厂模板命中（纯测量清单）
+- [ ] AC3: **不含实例污染判据**——不用同提交率（模板-vs-实例结构污染作废）；用通用机制名 grep 出厂件
+- [ ] AC4: **第四项排除**——「跳过六判准须声明豁免理由」无证据（tick-log 惯例非 .js），不写入
 - [ ] AC5: 与 gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver（铺设，独立）、
       gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them（铺装改写）交叉标注
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴任务体（出厂模板通用改进数、实例特有数、orchestrator/fast-mode 关系确认）
-- [ ] 通用改进回流机制接入（在跑副本通用机制写入出厂模板）
+- [ ] AC1-AC4 实跑输出贴任务体（三判准在跑/出厂命中清单 + 前提确认）
+- [ ] 纯测量定位——不引入回流机制（机制形态留后续裁）
 
 ## Touches
-- plugin/loop/manager-loop-tick.md / orchestrator-loop-tick.md / fast-mode-loop-tick.md（通用改进回流）
+- plugin/loop/manager-loop-tick.md / orchestrator-loop-tick.md / fast-mode-loop-tick.md（只读测量，不改）
+- plugin/scripts/manager-tick-readings.ts / .claude/workflows/manager-tick-readings.js（只读测量）
 - tasks/gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver.md（AC5 交叉标注）
-- tasks/gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them.md（AC5 交叉标注）
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-08T05:2xZ
-changed: 管理者紧急更正撤回原前提：manager 出厂=通用模板、在跑=实例落地是设计非缺陷（模板-vs-实例）。
-  原任务（三层同步率判据）作废——被结构污染。重写为窄版本：通用改进是否回流到出厂模板，
-  判据用不含实例内容的通用机制名 grep 出厂件。内层已紧急暂停原任务。
+at: 2026-08-08T05:3xZ
+changed: 人 05:2x 裁定重写（非退回）。删 3 错误前提（manager 弃养/三层漂移/同提交率判据）+ 第 4 项无证据
+  排除。站 3 项通用判准在跑有/出厂 0 的窄缺口。定位=纯测量（产出缺口清单，不引入回流机制——形态
+  留后续裁）。内层已收到重写版。
