@@ -78,7 +78,21 @@ resume 若中断，先跑 measure 读当前忽略状态
       **已贴：** AC1/AC2 内嵌 `git check-ignore -v` 输出（3 行，count=3）与负控制
       `git status --porcelain`（仅 ` M .gitignore`，scratch 目录不出现）；真残留负控制
       `?? .stray-residue-xyz` 仍显示。
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+- [x] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+      **证据（2026-08-08）：** 外层验证 round 120/123/125 连跑绿——laneCount 8、canonical
+      全量套件闸，full-suite.log 三阶段 TAP 均 fail 0 / cancelled 0（main 2792 / serial 42 /
+      lowconc 186，总 3020 tests，skipped 45）。gitignore 修复（7d410a50b，2026-08-07）
+      在这些 round 全程生效，scratch 目录不再触发 suite-after 脏树假红。
+      **本任务 worktree 复验（`gitignore-scratch`，scratch 目录 `.quay-worktree-local/`
+      `.quay-worktree-local2/` `.quay-wtl3/` 在位）：** `git check-ignore -v` count=3；
+      `git status --porcelain` 全程干净；真残留 `.stray-residue-xyz` 仍显示 `??`。
+      scoped gate（`bash scripts/test.sh --for-task gap-gitignore-worktree-scratch-dirs-kills-round4-false-red
+      --allow-thin`）EXIT=0，task-contract-check strict-subset 对两个 touched 任务文件 0 violation。
+      **环境约束（如实记录，为什么不用任务 worktree 自身的全量跑作 DoD 证据）：** 裸 worktree
+      fork develop 缺少 gitignored 运行时态（`.quay/config.yml` 等），gate 类测试
+      `Error: no .quay/config.yml found` 失败（实测并发-8 主相 73 fail / cancelled 0）——这是
+      worktree 环境局限（非 gitignore 缺陷，与 scratch 目录无关）；canonical 全量套件闸由外层
+      验证 round 在 integration checkout（运行时态齐备）上执行并保持绿。
 
 ## Touches
 - .gitignore（加 worktree 脚手架忽略行）
