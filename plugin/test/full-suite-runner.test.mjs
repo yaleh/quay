@@ -1047,18 +1047,18 @@ test("AC1 — a real git-worktree run writes scope=worktree to its OWN .quay/ful
   }
 });
 
-test("AC2 — for a MAIN-scope root the runner passes --main-repo-priority: the gate lets the main-repo suite proceed over worktree load (cpu=50 would normally WAIT)", async () => {
+test("AC2 — for a MAIN-scope root the runner passes --main-repo-priority: the gate lets the main-repo suite proceed over worktree load (cpu=70 would normally WAIT)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2p-"));
   const { argsLog } = fakeTestShRecordingArgs(root);
   try {
-    // cpu=50 is above the base limit (40) ⇒ WAIT normally. caller_scope=main + worktree_node_tests=6
+    // cpu=70 is above the base limit (60) ⇒ WAIT normally. caller_scope=main + worktree_node_tests=6
     // ⇒ the AC2 priority override fires ONLY IF the runner passed --main-repo-priority (it does for a
     // non-worktree root). If the flag were absent the gate would WAIT and the suite would never spawn.
     const child = runRunner({
       root,
       env: {
         QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "50",
+        RESOURCE_GATE_TEST_CPU_AVG10: "70",
         RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
         RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
         RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
@@ -1082,7 +1082,7 @@ test("AC2 negative control — a WORKTREE-scope caller is NOT let through the WA
       root,
       env: {
         QUAY_TEST_SKIP_RESOURCE_GATE: "0",
-        RESOURCE_GATE_TEST_CPU_AVG10: "50",
+        RESOURCE_GATE_TEST_CPU_AVG10: "70",
         RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
         RESOURCE_GATE_TEST_CALLER_SCOPE: "worktree",
         RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",

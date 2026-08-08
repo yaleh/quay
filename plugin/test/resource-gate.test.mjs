@@ -27,6 +27,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execSync } from "node:child_process";
 
+// The cross-gate threshold authority (gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate AC2):
+// cap-from-gate.ts owns the mechanism constant WAIT_THRESHOLD (=60) that the full-suite gate's
+// CPU_LIMIT default must equal — the drift-invariant test below imports the authority so the
+// two thresholds cannot silently diverge again.
+import { WAIT_THRESHOLD } from "../scripts/cap-from-gate.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function _findRepoRoot(startDir) {
@@ -48,6 +54,14 @@ function runGate(envOverrides = {}, args = []) {
   const env = { ...process.env, ...envOverrides };
   const res = spawnSync("bash", [GATE, ...args], { cwd: REPO_ROOT, encoding: "utf8", env });
   return { status: res.status, stdout: `${res.stdout}\n${res.stderr}` };
+}
+
+/** The gate's DEFAULT CPU_LIMIT (the env-seam spelling, e.g. `${RESOURCE_GATE_CPU_LIMIT:-60}`). */
+function defaultCpuLimit() {
+  const src = fs.readFileSync(GATE, "utf8");
+  const m = src.match(/CPU_LIMIT="\$\{RESOURCE_GATE_CPU_LIMIT:-(\d+)\}"/);
+  assert.ok(m, "resource-gate.sh must define CPU_LIMIT with the RESOURCE_GATE_CPU_LIMIT env-seam spelling");
+  return Number(m[1]);
 }
 
 /** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams.
@@ -93,7 +107,7 @@ test("AC2 — gate reads /proc/pressure/cpu `some avg10` (structural), not load 
   const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
   assert.match(src, /\/proc\/pressure\/cpu/, "gate must read /proc/pressure/cpu");
   assert.match(src, /avg10=/, "gate must parse the some avg10 field");
-  assert.match(src, /some avg10 < 40|CPU_LIMIT/, "gate must carry the some avg10 < 40 band");
+  assert.match(src, /some avg10 < 60|CPU_LIMIT/, "gate must carry the some avg10 < 60 band (unified with cap-from-gate's WAIT_THRESHOLD)");
   assert.doesNotMatch(code, /load average/, "gate must NOT use load average as the verdict basis");
   assert.doesNotMatch(code, /\/proc\/loadavg/, "gate must NOT read /proc/loadavg");
 });
@@ -123,25 +137,59 @@ test("AC4 — gate counts `pgrep -xc node-MainThread` (exact comm), never `pgrep
 });
 
 // ── AC3: GO ↔ WAIT both directions via deterministic seams ─────────────────────────────────────────
-test("AC3 — gate returns GO (exit 0) when cpu some avg10 < 40 and mem ok", () => {
+test("AC3 — gate returns GO (exit 0) when cpu some avg10 < 60 and mem ok", () => {
   const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
   assert.equal(r.status, 0, `expected GO (exit 0), got ${r.status}\n${r.stdout}`);
   assert.match(r.stdout, /=> GO/);
-  assert.match(r.stdout, /cpu_stall\(some avg10\)=10\.00  \[limit 40\]   ok/);
+  assert.match(r.stdout, /cpu_stall\(some avg10\)=10\.00  \[limit 60\]   ok/);
   assert.match(r.stdout, /mem_avail=4000MB             \[limit 2048\] ok/);
 });
 
-test("AC3 — gate returns WAIT (exit 1) when cpu some avg10 >= 40 (busy-loop control is the live form)", () => {
+test("AC3 — gate returns WAIT (exit 1) when cpu some avg10 >= 60 (busy-loop control is the live form)", () => {
   const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "84.77", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
   assert.equal(r.status, 1, `expected WAIT (exit 1), got ${r.status}\n${r.stdout}`);
   assert.match(r.stdout, /=> WAIT: CPU 饥饿/);
-  assert.match(r.stdout, /cpu_stall\(some avg10\)=84\.77  \[limit 40\]   WAIT/);
+  assert.match(r.stdout, /cpu_stall\(some avg10\)=84\.77  \[limit 60\]   WAIT/);
 });
 
 test("AC3 — report mode always exits 0 even under a WAIT verdict (scoped operator can always read)", () => {
   const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "84.77" }, []);
   assert.equal(r.status, 0, `report mode must exit 0, got ${r.status}\n${r.stdout}`);
   assert.match(r.stdout, /=> WAIT: CPU 饥饿/);
+});
+
+// ── gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate: AC2/AC4 threshold alignment ─────────
+test("AC2 — the full-suite gate's CPU_LIMIT default is UNIFIED with cap-from-gate's WAIT_THRESHOLD (drift invariant)", () => {
+  // cap-from-gate.ts owns the mechanism constant (WAIT_THRESHOLD = 60, the GO/WAIT boundary).
+  // resource-gate.sh's binary full-suite gate must refuse a suite EXACTLY when dispatch leaves the
+  // GO band — a load in the old 40-60 dead-zone made the suite WAIT (limit 40) while dispatch kept
+  // GO, the "suite refuses + dispatch continues" loop risk. This import-time invariant makes the two
+  // thresholds unable to silently diverge again.
+  assert.equal(defaultCpuLimit(), WAIT_THRESHOLD,
+    `resource-gate CPU_LIMIT (${defaultCpuLimit()}) must equal cap-from-gate WAIT_THRESHOLD (${WAIT_THRESHOLD})`);
+});
+
+test("AC4 — the 40-60 problem region is aligned: avg10=49.56 ⇒ both gates GO; avg10=70 ⇒ both non-GO", () => {
+  // The manager's observed dead-zone sample (avg10=49.56): test.sh's gate used to WAIT (limit 40)
+  // while cap-from-gate stayed GO — the load-peak imbalance. After unification the full-suite gate
+  // returns GO here (no suite-refusal while dispatch continues).
+  const suite49 = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "49.56", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
+  assert.equal(suite49.status, 0, `avg10=49.56 must be GO (exit 0), got ${suite49.status}\n${suite49.stdout}`);
+  assert.match(suite49.stdout, /\[limit 60\]   ok/);
+  // Above the unified threshold (avg10=70) the suite refuses — cap-from-gate is simultaneously
+  // WAIT (computeDesiredBand(68..70) = WAIT), so neither layer keeps dispatching into the refused load.
+  const suite70 = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "70", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000" }, ["--for", "full-suite"]);
+  assert.equal(suite70.status, 1, `avg10=70 must be WAIT (exit 1), got ${suite70.status}\n${suite70.stdout}`);
+  assert.match(suite70.stdout, /\[limit 60\]   WAIT/);
+});
+
+// ── gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate: AC5 budget same-source ──────────────
+test("AC5 — the gate's report reads total_budget/in_use/available from process-budget.sh (the shared cross-layer authority)", () => {
+  // The ## Contract invoke's observable: the full-suite gate reports the SAME budget numbers
+  // (process-budget.sh — total_budget = nproc) that test.sh's worker derivation and cap-from-gate's
+  // slot cap consume, so under load the "total budget" cannot drift per-layer.
+  const r = runGate({ RESOURCE_GATE_TEST_CPU_AVG10: "10", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_NODE_PROCS: "2", RESOURCE_GATE_TEST_NPROC: "4" });
+  assert.match(r.stdout, /total_budget=4\s+budget_in_use=2\s+budget_available=2\s+\[cross-layer budget authority: process-budget\.sh\]/);
 });
 
 // ── fail-closed on an unmeasurable signal (no quiet lying) ────────────────────────────────────────
@@ -436,10 +484,10 @@ test("AC1 — auto-detection: the gate reports caller_scope=worktree when invoke
   }
 });
 
-test("AC2 — main-repo priority: --main-repo-priority lets the main-repo full suite proceed over worktree scoped load (WAIT->GO at cpu=50)", () => {
+test("AC2 — main-repo priority: --main-repo-priority lets the main-repo full suite proceed over worktree scoped load (WAIT->GO at cpu=70)", () => {
   const r = runGate(
     {
-      RESOURCE_GATE_TEST_CPU_AVG10: "50",
+      RESOURCE_GATE_TEST_CPU_AVG10: "70",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
@@ -454,7 +502,7 @@ test("AC2 — main-repo priority: --main-repo-priority lets the main-repo full s
 test("AC2 negative — the SAME load WITHOUT --main-repo-priority stays WAIT (the override is opt-in)", () => {
   const r = runGate(
     {
-      RESOURCE_GATE_TEST_CPU_AVG10: "50",
+      RESOURCE_GATE_TEST_CPU_AVG10: "70",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
@@ -468,7 +516,7 @@ test("AC2 negative — the SAME load WITHOUT --main-repo-priority stays WAIT (th
 test("AC2 negative — a WORKTREE caller passing --main-repo-priority stays WAIT (a worktree full-suite is itself deferrable)", () => {
   const r = runGate(
     {
-      RESOURCE_GATE_TEST_CPU_AVG10: "50",
+      RESOURCE_GATE_TEST_CPU_AVG10: "70",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "worktree",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
@@ -494,7 +542,7 @@ test("AC2 negative — CPU above the priority ceiling (>=85) stays WAIT even wit
 test("AC2 negative — worktree load below the min threshold (4) does NOT trigger the override", () => {
   const r = runGate(
     {
-      RESOURCE_GATE_TEST_CPU_AVG10: "50",
+      RESOURCE_GATE_TEST_CPU_AVG10: "70",
       RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
       RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
       RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "2",

@@ -134,7 +134,7 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 2436（05:30）→ **retire 删除 18 个测试文件 = 2034**（05:45，155 files）→ **+stranded +parser = 2052**
 （07:15，156 files）→ **+tmpdirs 测试隔离 R6 = 2054（08:40）→ **+token 重操令牌 = 2065**（09:05，token fan-in 套件实测）
 参考值以最近一次全量绿的 tests 数为准。**注意 starvation 是单套件稳态（4 核跑 c8 = 4 倍过订，
-压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 40 才 GO），但套件自身跑起来压力必然 >40，
+压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 60 才 GO，与 cap-from-gate 的 GO 带统一——gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate），但套件自身跑起来压力必然 >60，
 那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/1.0))=4（4 核）；全量验证用
 --test-concurrency=8（外层 runner 实跑 13+ 轮全零 cancelled）或默认 4 lanes**。
 
