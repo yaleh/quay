@@ -1,7 +1,7 @@
 ---
 id: gap-inner-tick-log-timestamp-drift-no-date-u-rule
 title: "inner 层 tick-log 时刻漂移复现——fast-mode-loop-tick.md 缺「必须 date -u 读钟」规则（manager 层 08:04Z 已修同类，inner 层没有）"
-status: done
+status: ready
 labels:
   - gap
   - defect
