@@ -287,3 +287,14 @@ AC5 signal-kill 测试名）与**工具自身内嵌输出**（suite-cutoff-verdi
 （main 2792 / serial 42 / lowconc 186），**Promise-pending 0 / 切断标记 0 / cancelled 0** ⇒
 101→0 失败数最终确认，判绿三条件的 `cancelled 0` 成立、`FULL-SUITE-EXIT` 已不再输出（runner
 state:green 即 exit-0 等价）。DoD 两项（干净窗口重跑 + 连跑 2 次全绿）均由外层验证轮达成。
+
+## 交叉标注（AC4，2026-08-08，`gap-worktree-scoped-runs-consume-resources-but-produce-no-signal`）
+
+**套件信号的「来源可信度」与「存在性」是两个正交轴。** 本任务（suite-cutoff）修的是**信号可信度**——
+红判决的落点不可信（进程被切断/级联）；`gap-worktree-scoped-runs-consume-resources-but-produce-no-signal`
+修的是**信号存在性**——worktree 的重 scoped 验证**根本不产生**任何可等的信号（无自己的
+`full-suite-state.json`），同时吃满机器把主仓套件挡在资源闸外。两者合起来是「等信号」问题的两面：
+等的人既需要信号**存在**（那边 AC1：worktree 状态文件带 `scope: worktree` + gate 报
+`worktree_node_tests` 实况），也需要信号**可信**（本任务：判绿三条件 + reason 轴 + suite-cutoff-verdict
+机械判别）。那边的 runner 状态文件新增 `scope: main|worktree` 字段——等待者能分辨信号来自主仓（要等的）
+还是 worktree（可延后），正是本任务「信号可判读」判据在来源维度上的机械化。

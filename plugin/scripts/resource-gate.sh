@@ -48,14 +48,33 @@ set -euo pipefail
 MODE="report"        # report | full-suite
 CPU_LIMIT="${RESOURCE_GATE_CPU_LIMIT:-40}"
 MEM_LIMIT_MB="${RESOURCE_GATE_MEM_LIMIT_MB:-2048}"
+# ── AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) ───────────────────────────
+# main-repo vs worktree priority: the main repo's full-suite caller passes --main-repo-priority; the
+# gate then RELAXES the CPU verdict when the blocking load is worktree-sourced (deferrable). A
+# worktree's own full-suite caller does NOT pass the flag — worktree runs are deferrable and must
+# yield to the machine like any other heavy op.
+PRIORITY=0                     # 1 = caller passed --main-repo-priority (AC2)
+WORKTREE_LOAD_MIN="${RESOURCE_GATE_WORKTREE_LOAD_MIN:-4}"              # min worktree node --test procs to consider worktree load "dominant"
+WORKTREE_PRIORITY_CEILING="${RESOURCE_GATE_WORKTREE_PRIORITY_CEILING:-85}"  # cpu avg10 above which even priority refuses (machine too loaded)
 
 # ── argument parsing ───────────────────────────────────────────────────────────────────────────────
 case "${1:-}" in
   --for)
     if [ "${2:-}" = "full-suite" ]; then
       MODE="full-suite"
+      # AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal): the main repo's
+      # full-suite caller MAY pass --main-repo-priority. Unknown extra args fail-closed (usage).
+      shift 2
+      for extra in "$@"; do
+        if [ "${extra}" = "--main-repo-priority" ]; then
+          PRIORITY=1
+        else
+          echo "usage: plugin/scripts/resource-gate.sh [--for full-suite [--main-repo-priority]]" >&2
+          exit 2
+        fi
+      done
     else
-      echo "usage: plugin/scripts/resource-gate.sh [--for full-suite]" >&2
+      echo "usage: plugin/scripts/resource-gate.sh [--for full-suite [--main-repo-priority]]" >&2
       exit 2
     fi
     ;;
@@ -67,7 +86,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: plugin/scripts/resource-gate.sh [--for full-suite]" >&2
+    echo "usage: plugin/scripts/resource-gate.sh [--for full-suite [--main-repo-priority]]" >&2
     exit 2
     ;;
 esac
@@ -118,6 +137,59 @@ read_orphans() {
   done < <(pgrep -x node-MainThread 2>/dev/null || true)
 }
 
+# ── worktree-awareness (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) ────────────
+# The gate's job is "don't start a heavy op into a busy machine". But when the machine is busy BECAUSE
+# of worktree scoped runs (node --test processes spawned inside linked worktrees), that load is
+# DEFERRABLE — a worktree scoped run's completion updates nothing anyone waits on — while the MAIN
+# repo's full-suite is the signal subagents actually wait for. The gate distinguishes the two so the
+# main-repo suite is not PERMANENTLY blocked by worktree load (the resource-sink-with-no-signal
+# deadlock: machine full, nobody producing the waited-for signal).
+#
+# caller_scope — is the CALLER the main repo, a linked worktree, or unknown (non-git)?
+#   main:     git-dir == git-common-dir (the primary checkout)
+#   worktree: git-dir != git-common-dir (a linked worktree)
+#   unknown:  git unavailable (non-git copy) — fail-closed: no priority override
+detect_caller_scope() {
+  local git_dir common_dir gd cd
+  git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
+  common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -z "${git_dir}" ] || [ -z "${common_dir}" ]; then echo "unknown"; return; fi
+  case "${git_dir}" in /*) gd="${git_dir}" ;; *) gd="$(pwd)/${git_dir}" ;; esac
+  case "${common_dir}" in /*) cd="${common_dir}" ;; *) cd="$(pwd)/${common_dir}" ;; esac
+  if [ "${gd}" = "${cd}" ]; then echo "main"; else echo "worktree"; fi
+}
+
+# Linked-worktree paths (git worktree list --porcelain EXCLUDING the primary checkout). The primary is
+# always the first entry; the main repo's OWN node --test processes are NOT worktree-sourced.
+read_linked_worktree_paths() {
+  git worktree list --porcelain 2>/dev/null | awk '
+    /^worktree /{ if(!first){first=$2} else {print $2} }
+  ' || true
+}
+
+# Count node --test (node-MainThread) processes whose cwd is inside a linked worktree — the deferrable
+# worktree-scoped load. The ## Contract measure (`ps ... | grep /quay-worktrees/`) is the path-derived
+# equivalent: any node --test running from a linked worktree is worktree-scoped. cwd-based, not
+# args-based, so a worktree node --test is detected even when its args do not spell the worktree path.
+read_worktree_node_tests() {
+  local count=0 pid cwd
+  local -a paths
+  mapfile -t paths < <(read_linked_worktree_paths)
+  if [ "${#paths[@]}" -eq 0 ]; then echo 0; return; fi
+  for pid in $(pgrep -x node-MainThread 2>/dev/null || true); do
+    cwd="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
+    [ -n "${cwd}" ] || continue
+    local p
+    for p in "${paths[@]}"; do
+      [ -n "${p}" ] || continue
+      case "${cwd}" in
+        "${p}"|"${p}"/*) count=$((count+1)); break ;;
+      esac
+    done
+  done
+  echo "${count}"
+}
+
 # ── apply readings (test-seam overrides honored) ───────────────────────────────────────────────────
 cpu_stall="${RESOURCE_GATE_TEST_CPU_AVG10:-$(read_cpu_avg10)}"
 # avg300 — the adaptive-concurrency signal (AC2). Its own test seam so cap-from-gate can be
@@ -143,6 +215,11 @@ if [ -n "${RESOURCE_GATE_TEST_ORPHANS:-}" ]; then
 else
   orphan_list="$(read_orphans)"
 fi
+# worktree-awareness (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) readings.
+# Both have deterministic test seams (the unit test drives the AC2 priority rule without needing real
+# worktrees or real node --test processes).
+caller_scope="${RESOURCE_GATE_TEST_CALLER_SCOPE:-$(detect_caller_scope)}"
+worktree_node_tests="${RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS:-$(read_worktree_node_tests)}"
 
 # ── invariant: nproc must not change between the before-read and the after-read ─────────────────────
 nproc_after="$(nproc 2>/dev/null || echo 1)"
@@ -193,6 +270,10 @@ printf 'mem_avail=%sMB             [limit %s] %s\n' \
   "$mem_avail_mb" "$MEM_LIMIT_MB" "$([ "$mem_wait" = 1 ] && echo WAIT || echo ok)"
 printf 'nproc=%s  node_procs=%s  %s  [nproc-invariant %s]\n' \
   "$nproc_before" "$node_procs" "$swap_label" "$nproc_invariant"
+# AC1 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) — the observable worktree
+# signal: how many node --test processes are running from linked worktrees right now + who is asking.
+# Report mode always prints this; waiters read it instead of guessing why the machine is loaded.
+printf 'worktree_node_tests=%s  caller_scope=%s\n' "$worktree_node_tests" "$caller_scope"
 
 if [ -n "${orphan_list}" ]; then
   # Accept both newline-separated (real read_orphans) and semicolon-separated (test seam).
@@ -202,8 +283,32 @@ if [ -n "${orphan_list}" ]; then
   done
 fi
 
+# ── AC2 priority override (main-repo full suite vs worktree scoped load) ────────────────────────────
+# When the MAIN repo's full suite asks the gate (--main-repo-priority) and the machine's load is
+# dominated by WORKTREE-sourced node --test processes (deferrable — a worktree scoped run whose
+# completion updates nothing anyone waits on), the main-repo suite is ALLOWED to proceed despite a
+# CPU-WAIT: blocking it re-creates the deadlock this task exists to kill (machine full, no signal).
+# Three guards keep the override safe:
+#   1. PRIORITY=1 — the caller must OPT IN (the full-suite-runner passes it for the main repo only);
+#   2. caller_scope = main — a worktree full-suite caller is itself deferrable (no override);
+#   3. cpu_stall < WORKTREE_PRIORITY_CEILING — above it the machine is too loaded to run ANY heavy
+#      op regardless of provenance (the main suite would tear itself apart / hit cancelled).
+# mem_wait is NEVER overridden — running out of RAM is an OOM cliff, not a deferrable load.
+priority_override=0
+if [ "${PRIORITY}" = "1" ] && [ "${caller_scope}" = "main" ] && [ "${MODE}" = "full-suite" ] && \
+   [ "${mem_wait}" = "0" ] && \
+   awk -v v="${worktree_node_tests}" -v m="${WORKTREE_LOAD_MIN}" 'BEGIN{exit !(v ~ /^[0-9]+$/ && v >= m)}' && \
+   awk -v v="${cpu_stall}" -v c="${WORKTREE_PRIORITY_CEILING}" 'BEGIN{exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v < c)}'; then
+  priority_override=1
+  printf 'worktree_priority: ON (main-repo full suite — worktree scoped load %s node --test deferrable; CPU ceiling %s)\n' \
+    "$worktree_node_tests" "$WORKTREE_PRIORITY_CEILING"
+fi
+
 # ── verdict line ───────────────────────────────────────────────────────────────────────────────────
-if [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
+if [ "$priority_override" = "1" ]; then
+  printf '=> GO: 主仓 full-suite 优先——阻塞负载来自 worktree scoped（可延后，%s node --test），主仓套件是等在等的信号；CPU 未超 ceiling %s（AC2）\n' \
+    "$worktree_node_tests" "$WORKTREE_PRIORITY_CEILING"
+elif [ "$cpu_wait" = 1 ] && [ "$mem_wait" = 1 ]; then
   if [ "$cpu_stall" = "UNMEASURABLE" ]; then
     printf '=> WAIT: 无法读取 /proc/pressure/cpu（内核无 PSI?）且内存不足——结构信号缺失时 fail-closed\n'
   else
@@ -234,7 +339,13 @@ fi
 
 # ── exit code: report mode always 0; gate mode 0=GO / 1=WAIT ───────────────────────────────────────
 if [ "$MODE" = "full-suite" ]; then
-  [ "$cpu_wait" = 0 ] && [ "$mem_wait" = 0 ]
+  if [ "$priority_override" = "1" ]; then
+    # AC2 — the main-repo full suite proceeds despite CPU-WAIT (worktree load deferrable); memory is
+    # still a hard blocker (OOM cliff).
+    [ "$mem_wait" = 0 ]
+  else
+    [ "$cpu_wait" = 0 ] && [ "$mem_wait" = 0 ]
+  fi
   exit $?
 fi
 exit 0
