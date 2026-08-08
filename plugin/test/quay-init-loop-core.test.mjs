@@ -26,8 +26,10 @@ test('AC3 — --loop --dry-run lists would-copy items for the full loop mechanis
     assert.match(r.stdout, /would-copy/, 'dry-run must report would-copy lines');
     assert.match(r.stdout, /orchestrator-loop-tick\.md/, 'dry-run must list the outer tick doc');
     assert.match(r.stdout, /fast-mode-loop-tick\.md/, 'dry-run must list the inner tick doc');
-    assert.match(r.stdout, /manager-loop-tick\.md/,
-      'dry-run must list the manager driver tick doc (gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver)');
+    // The manager driver tick doc (orchestration/manager-loop-tick.md) is NOT laid down by the
+    // current quay-init — the manager-layer propagation (gap-the-manager-layer-does-not-propagate-
+    // quay-init-lays-no-manager-driver, status: ready) is a PENDING task; the rolled-back merge
+    // (7642849a) briefly had it. Re-instate this assertion when that task lands.
     assert.match(r.stdout, /fast-mode-telemetry\.ts/, 'dry-run must list the telemetry checker');
     assert.match(r.stdout, /resource-gate\.sh/, 'dry-run must list the resource gate');
     assert.ok(!/heavy-op-token\.sh/.test(r.stdout),
@@ -45,11 +47,13 @@ test('AC3 — a real --loop run lays down the full two-layer mechanism set', () 
   const { ws, install: r } = laydownWorkspace();
   try {
     assert.equal(r.status, 0, `init must exit 0:\n${r.stderr}`);
-    // 3 tick docs (outer + inner + manager driver)
+    // 2 tick docs (outer + inner). The manager driver tick doc (orchestration/manager-loop-tick.md)
+    // is NOT laid down by the current quay-init — the manager-layer propagation
+    // (gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver, status: ready) is a
+    // PENDING task; the rolled-back merge (7642849a) briefly had it. Re-instate the 3rd assertion when
+    // that task lands.
     assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md')), 'outer tick doc laid down');
     assert.ok(fs.existsSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md')), 'inner tick doc laid down');
-    assert.ok(fs.existsSync(path.join(ws, 'orchestration', 'manager-loop-tick.md')),
-      'manager driver tick doc laid down (gap-the-manager-layer-does-not-propagate-quay-init-lays-no-manager-driver)');
     // mechanism scripts (inner-state.sh is deliberately NOT here — retired,
     // gap-retire-inner-state-one-observer-targets-by-parameter AC3; observation ships as
     // session-liveness.sh via the separate session-liveness section below).
