@@ -1001,3 +1001,105 @@ test("CLI smoke: --targeted <id> emits targeted_promotion with promote_cmd (AC1 
   assert.equal(parsed.targeted_promotion.floor_independent, true);
   assert.equal(typeof parsed.targeted_promotion.checks, "object");
 });
+
+// ── RETIRED-MECHANISM INTERCEPT (gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check) ──
+// Promotion must not advance a todo that references an ADR-022-deleted classic-pipeline script
+// (prepare-milestone.js / execute-milestone.js / milestone-worktree.ts) without annotation — such a
+// candidate targets a RETIRED pipeline mechanism (premise-void; dispatching it wastes an agent round).
+// AC1 promotion runs the same pool-candidate stale check the strategic-doc-staleness-check CLI exposes
+// (--pool-candidate <id>, review-cadence AC8) before todo→ready · AC2 gap-prepare-milestone-no-size-
+// aware-routing is intercepted · AC3 clean candidates (productize-manager etc.) still promote (negative
+// control) · AC4 the intercept reason is mechanically recorded (never a silent skip).
+
+test("AC1/AC2/AC4 — a candidate referencing an ADR-022-deleted script is NOT promoted and IS intercepted", (t) => {
+  const root = makeWorkspace("retired");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Pool below floor (cap 3, floorMult 1 ⇒ floor 3; one ready task ⇒ deficit 2).
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // The retired-mechanism candidate: references prepare-milestone.js (ADR-022-deleted) unannotated.
+  writeTask(root, "gap-prepare-milestone-no-size-aware-routing", gapTask("gap-prepare-milestone-no-size-aware-routing", {
+    body: fourArtifactBody({ extra: "\nTarget mechanism: prepare-milestone.js (live).\n" }),
+  }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.ok(r.deficit > 0, "promotion pressure exists");
+  assert.deepEqual(r.promotions, [], "the retired-mechanism candidate must NOT be promoted (AC1/AC2)");
+  // AC4: the intercept is mechanically recorded, never silently skipped.
+  assert.equal(r.intercepted.length, 1, "the intercept is recorded in the output");
+  assert.equal(r.intercepted[0].id, "gap-prepare-milestone-no-size-aware-routing");
+  assert.equal(r.intercepted[0].reason, "retired-mechanism");
+  assert.ok(
+    r.intercepted[0].refs.some((ref) => ref.hit === "prepare-milestone.js"),
+    "the recorded ref names the deleted script",
+  );
+  const c = r.candidates.find((x) => x.id === "gap-prepare-milestone-no-size-aware-routing");
+  assert.equal(c.retiredMechanism, true, "candidate carries the retiredMechanism flag");
+  assert.equal(c.eligible, false, "retired-mechanism candidate is not eligible");
+});
+
+test("AC3 — clean candidates still promote; only the retired-mechanism candidate is intercepted (negative control)", (t) => {
+  const root = makeWorkspace("retired-clean");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // A clean candidate (one of the incident's 7 clean candidates — productize-manager) must still promote.
+  writeTask(root, "productize-manager", gapTask("productize-manager"));
+  // The retired-mechanism candidate.
+  writeTask(root, "gap-prepare-milestone-no-size-aware-routing", gapTask("gap-prepare-milestone-no-size-aware-routing", {
+    body: fourArtifactBody({ extra: "\nTarget mechanism: prepare-milestone.js (live).\n" }),
+  }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  assert.ok(
+    r.promotions.some((p) => p.id === "productize-manager"),
+    "clean candidate still promoted (AC3 negative control)",
+  );
+  assert.ok(
+    !r.promotions.some((p) => p.id === "gap-prepare-milestone-no-size-aware-routing"),
+    "retired candidate is NOT promoted",
+  );
+  assert.ok(
+    r.intercepted.some((x) => x.id === "gap-prepare-milestone-no-size-aware-routing"),
+    "retired candidate is intercepted (recorded)",
+  );
+});
+
+test("--targeted: a retired-mechanism target is not promotable (retired-mechanism reason)", (t) => {
+  const root = makeWorkspace("retired-targeted");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-prepare-milestone-no-size-aware-routing", gapTask("gap-prepare-milestone-no-size-aware-routing", {
+    body: fourArtifactBody({ extra: "\nTarget mechanism: prepare-milestone.js (live).\n" }),
+  }));
+
+  const r = analyzeTasks({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    targetedId: "gap-prepare-milestone-no-size-aware-routing",
+  });
+  assert.equal(r.targeted_promotion.eligible, false, "retired-mechanism target is not promotable");
+  assert.match(r.targeted_promotion.reason, /retired-mechanism/);
+  assert.equal(r.targeted_promotion.checks.retiredMechanism, true, "the check records retiredMechanism: true");
+  assert.ok(
+    r.targeted_promotion.checks.retiredRefs.some((ref) => ref.hit === "prepare-milestone.js"),
+    "the recorded ref names the deleted script",
+  );
+});
+
+test("--targeted: a clean target stays promotable (retiredMechanism false in checks)", (t) => {
+  const root = makeWorkspace("retired-targeted-clean");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-clean-target", gapTask("gap-clean-target"));
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-clean-target" });
+  assert.equal(r.targeted_promotion.eligible, true, "clean target is promotable");
+  assert.equal(r.targeted_promotion.checks.retiredMechanism, false, "clean target reports retiredMechanism: false");
+});
+
+test("CLI smoke: --root emits the intercepted array (empty when no retired candidate)", (t) => {
+  const root = makeWorkspace("cli-retired");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(process.execPath, ["--experimental-strip-types", script, "--root", root], { encoding: "utf8" });
+  const parsed = JSON.parse(out);
+  assert.ok(Array.isArray(parsed.intercepted), "intercepted is an array in the CLI output");
+  assert.deepEqual(parsed.intercepted, [], "no retired candidate ⇒ empty intercepted array");
+});
