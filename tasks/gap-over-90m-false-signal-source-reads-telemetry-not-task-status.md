@@ -99,6 +99,15 @@ cancelled 0（新增 4 条全绿，原 31 条无回归）。
 （AC4——reconcile 判据缺陷：worktree 存在 ≠ mid-flight，应有 mtime/进程佐证；报告侧判据修正留作后续）；
 `tasks/gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash.md`（AC3——92min-eaten 同型案例）。
 
+## Cross-annotation 2026-08-08 — supervisor 步骤④ 抢占（`gap-supervisor-step-4-preemption`）
+
+本任务的 `taskStatusAllowsOver90m()` 闸（任务 status 仍 in-progress 才允许超时信号）被步骤④的
+**抢占判据**直接复用——`supervisor-preempt-candidates.ts` 的 `listPreemptible()` 用同一闸判「无真实
+推进」：遥测 bracket 超 90min + 任务 status 仍在 in-progress + 未落地 ⇒ 确定性可抢占。步骤④把「报告
+信号」推进到「确定性操作」：`preempt-task <taskId>` kill 该任务 runId 进程组 + 关 bracket + ledger 记
+事件——超时任务不再只能靠人手动 kill。假信号形态（status=ready + 陈旧 bracket）在抢占判据下同样
+`preemptible: 0`（不误判，同本任务 AC1 负控制）。
+
 ## Dispatch review
 
 reviewer: none
