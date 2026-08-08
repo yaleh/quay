@@ -146,6 +146,13 @@ resume 若中断，先跑 measure 读当前 import/spawn 比例，不要相信�
       **实测**：交叉标注已写入该任务 AC8 证据段（2026-08-06）：明确写「AC2 是真落地
       （plugin/scripts 205→207 记为失败信号 → 今日 142），AC8 只核数；不得把整条任务说成假的」，
       并指向本任务实现的 40→6 集成作为 AC8 依赖的「集成」步骤的落地。
+- [x] AC7（2026-08-08 交叉标注，来自
+      `gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms`）：**40→6 集成改了文档形态却没同步测试白名单**——
+      ac8 把 tick 文档的指令从旧直调脚本（`integration-batch-merge.sh` / `concurrent-batch-scheduler.ts`）改成新入口派发形态
+      （`quay-branch.ts integration-batch-merge` / `quay-dispatch.ts concurrent-batch-scheduler`），
+      但 `tick-vocabulary.test.mjs` 的 SAFE_SUBSTRINGS 未同步 ⇒ 3 处引用被判「未分类」⇒ full-suite 红
+      （fail-closed catch-all 第一失败）。这是 AC8 同族缺陷的又一实例：**集成落地 ≠ 测试白名单同步**。
+      由 `gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms`（done）修白名单后绿。
 
 ## Definition of Done
 
