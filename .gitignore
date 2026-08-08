@@ -40,6 +40,7 @@ packages/quay/plugin/
 **/.quay-wtl*
 **/dist-sea/
 **/.quay/gate-events.jsonl
+**/.quay/supervisor-bus-ledger.jsonl
 # gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
 # porcelain snapshots for the suite-AFTER DELTA assertions (assert-clean-tree.sh --snapshot /
 # tmux-leak-scan.sh --snapshot). Same gitignored runtime-state family as gate-events.jsonl — a

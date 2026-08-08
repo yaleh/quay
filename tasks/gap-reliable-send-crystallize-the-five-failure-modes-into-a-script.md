@@ -167,3 +167,12 @@ changed: done→ready——第六种送达失败模式（fresh welcome 屏 place
 `RELIABLE_CLEAR_MAX=2` 证明 clear 快速退出、transcript 核实送达）。**本任务的 AC9（fresh-session 分支）
 与 AC10（终止条件修正）仍独立待执行；NBSP 修复不替代它们**——fresh-session 分支是「跳过清屏直接发」，
 NBSP 修复是「已用会话的清屏判空正确」，二者正交。
+
+## Cross-annotation 2026-08-08 — supervisor 步骤⑤ 消息总线带身份（`gap-supervisor-step-5-message-bus-with-identity`）
+
+本任务是 supervisor 基座层落地次序**步骤③**（投递实现），已 done；步骤⑤（消息总线带身份）在本任务之上
+收编「跨会话投递」为一条带身份通道：`plugin/scripts/supervisor-bus.sh --send --from <layer> --to <target>
+--payload <msg>`，投递实现**复用本任务的可靠五步**（send-keys-reliable.sh）+ `transcript-delivery-check.ts`
+（唯一可信送达信号），ledger 记谁→谁→何时→是否送达。步骤⑤ 的 AC3 真 TUI e2e 的 fixture 渲染
+`❯`+NBSP 空输入框——正是本任务判空修复的同一场景；步骤⑤ 是**消费者收编**（一处硬化接口），本任务是
+**底层投递/判空机制**，二者分层。

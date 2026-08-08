@@ -103,6 +103,7 @@ line shapes 喂 checkTranscriptDelivered）。**它从不起一个带真实 Clau
 - plugin/scripts/send-keys-verified.sh（AC5 排查，若同款一并修）
 - orchestration/CRYSTALLIZED-reliable-send-2026-08-04.md（故障 8 段：任何输入框的 NBSP 误判）
 - tasks/gap-reliable-send-crystallize-the-five-failure-modes-into-a-script.md（并列交叉标注）
+- tasks/gap-supervisor-step-5-message-bus-with-identity.md（步骤⑤ 消息总线带身份交叉：总线的真 TUI e2e 复用本判空场景——fixture 渲染 ❯+NBSP 空输入框；本任务是判空修复，步骤⑤ 是消费者收编）
 
 ## Contract
 

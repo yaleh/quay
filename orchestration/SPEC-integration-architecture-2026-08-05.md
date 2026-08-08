@@ -370,7 +370,7 @@ NBSP 这类缺陷会在合并时被测试拦住，而不是让 3 个消费者在
 | **② 槽位账本 + 会话状态** | 「几个在飞」单一答案；六实体唯一写入者 | `tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md` | ready | 会话状态 + 槽位账本（Session/Slot 实体） |
 | **③ 投递集中化 + 真 TUI e2e** | 唯一不可靠操作一处硬化 + 真 TUI 端到端测试 | `tasks/gap-reliable-send-crystallize-the-five-failure-modes-into-a-script.md` + `tasks/gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box.md` | done | 唯一投递实现 + 投递校验 |
 | **④ 抢占** | 确定性抢占（超时/资源争抢/高优先派发时 kill 子进程树） | `tasks/gap-supervisor-step-4-preemption.md`（本规格立案） | todo | 抢占 |
-| **⑤ 消息总线带身份** | 每条消息携带发送者身份（哪层/哪项目） | `tasks/gap-supervisor-step-5-message-bus-with-identity.md`（本规格立案） | todo | 消息总线 + 发送者身份 |
+| **⑤ 消息总线带身份** | 每条消息携带发送者身份（哪层/哪项目） | `tasks/gap-supervisor-step-5-message-bus-with-identity.md`（本规格立案） | done（2026-08-08 `supervisor-bus.sh --send --from <layer> --to <target> --payload <msg>`，ledger 记谁→谁→何时→是否送达） | 消息总线 + 发送者身份 |
 
 **AC4 标注**：① = `gap-loop-has-no-os-level-anchor`（OS-anchor），② = `gap-telemetry-brackets-vs-subagents-no-slot-visibility`
 （slot-visibility）——已在各自任务体标注为 supervisor 步骤（见两任务体的 `## Supervisor step` 交叉注）。
@@ -469,6 +469,6 @@ AC10 计数保持 **7**（`gap-axis-generator-question-what-range-every-standing
 - `tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md` —— 步骤②（ready）
 - `tasks/gap-reliable-send-crystallize-the-five-failure-modes-into-a-script.md` + `tasks/gap-send-keys-reliable-nbsp-empty-check-is-broken-for-any-input-box.md` —— 步骤③（done）
 - `tasks/gap-supervisor-step-4-preemption.md` —— 步骤④（本规格立案，todo）
-- `tasks/gap-supervisor-step-5-message-bus-with-identity.md` —— 步骤⑤（本规格立案，todo）
+- `tasks/gap-supervisor-step-5-message-bus-with-identity.md` —— 步骤⑤（本规格立案，done 2026-08-08）
 - `tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md` —— AC9 前置（todo）
 - `tasks/gap-axis-generator-question-what-range-every-standing-criterion.md` —— AC10 记账引用（AC6）
