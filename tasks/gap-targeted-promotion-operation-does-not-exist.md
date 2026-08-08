@@ -65,10 +65,18 @@ resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，�
       晋级节；修正 :985-986 的「外层只引用」表述
 - [ ] AC5: 与 gap-promotion-cadence-is-role-volition-not-product-mechanism（done）交叉标注——那条要
       「机制默认存在」，本条补被超额执行砍掉的「外层提供优先级输入」职责
+- [ ] AC6: **生命周期池机制三件套（manager 2026-08-08 11:0x 提案，外层裁定支持）**——
+      (a) **「作废」终态**：生命周期加 `voided`（前提已失效的任务如实标记，标 done 说谎且 AC18 空跑——
+      DIR-124 现成实例：touch 指 ADR-022 已退役的 execute-milestone.js）；
+      (b) **ready-pool-check 加 `rejected` 排除理由**：被退回的任务不得原样留可派发集待再派
+      （reporter 那次是外层当场兜住非机制兜住）——**移出池子的机制不能依赖会忘的一方**
+      （inner 不写任务状态 ⇒ 它写非状态退回记录、pool-check 读，最省落点）；
+      (c) **判据写「同一任务不得被退回两次」而非「退回次数为零」**——退回本身是发现
+      （reporter 退回产出了真实 per-file 计时数据），压制的是重复不是退回
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（pool≥floor 时定向晋级成功 + 内层不含阶段目标 + 职责边界落文档）
+- [ ] AC1-AC6 实跑输出贴任务体（pool≥floor 时定向晋级成功 + 内层不含阶段目标 + 职责边界落文档 + 池机制三件套）
 
 ## Touches
 - plugin/scripts/ready-pool-check.ts（若加 --targeted 入口；补充逻辑不动）
