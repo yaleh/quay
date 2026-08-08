@@ -88,6 +88,29 @@ resume 若中断，先跑 measure 读当前套件/ catalog 状态，再读 Rever
 - [ ] 40→6 重合并后套件连跑 2 次全绿
 - [ ] Revert 7642849a 撤销（重合并后 develop 含 40→6）
 
+## Carries
+
+from: gap-laydown-set-check-ac4-stale-after-split
+acs: AC4
+
+## Carries
+
+from: gap-post-merge-verification-failure-batch
+acs: AC5
+
+## Carries
+
+from: gap-session-liveness-original-file-residue-post-split
+acs: AC3
+
+## Carries
+
+from: gap-verify-referenced-landed-concurrency-hardening
+acs: AC3
+
+本任务 AC2（干净窗口全量绿）就是这些 done 任务「全量三趟绿」AC 的唯一闸门——40→6 家族
+测试未更新重合并前，全量套件必红，这些 AC 无法勾选。重合并 + 全量绿后由外层勾选。
+
 ## Touches
 - plugin/test/capability-catalog.test.mjs（catalog 期望更新）
 - plugin/test/（install/doc-asserting 族测试更新，具体范围由 AC1 决定）
