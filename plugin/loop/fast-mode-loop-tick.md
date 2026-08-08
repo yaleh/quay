@@ -682,6 +682,15 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
   ≥ cap` 才是「池够用」**——池 5 条全不冲突就够了；池 30 条全撞（`pool ≥ floor` 但
   `dispatchable_disjoint < cap`）机制自报 `POOL BIG BUT ALL COLLIDING`，仍要补晋/排障。floor 是手段、
   `dispatchable_disjoint` 是结果。
+- **落地可见性轴（`gap-landing-blocked-invisible-to-dispatch-criteria`，`criterion_met` 之外）**：
+  `criterion_met` 只测**派发能力**（≥cap 互斥候选），**不测落地能力**——落地被结构阻塞时（AC17
+  catch-up 未完成）它照样 True =「只测心跳不测意识」。脚本同报 **`landing_blocked`** /
+  **`landing_blocked_reason`**（report 串带小写 `landing-blocked` 字面量）：develop 落后 master ≥1
+  （默认阈值 `--landing-behind-threshold` 可调）**且**合并目标 integration 冻结超窗（默认 2h，
+  `--landing-staleness-ms` 可调）时 ⇒ **落地被阻塞明确报出**，绝不读成「有候选=健康」。**这是信号不是
+  闸门**（AC4：落地正常 = integration 在推进 ⇒ 不误报；`landing_blocked` 不打断派发——本步骤补晋与
+  步骤 4 并发资格、slot-refill 的 `should_refill` 都不读它，只把可见性摆出来给外层/人看）。缺
+  develop/integration ref（单线下游）⇒ fail-safe 不报。
 - **`pool < floor` ⇒ 按 `promotions` 数组补晋**（数组顺序就是定义好的顺序：**触摸不相交排最前**——
   与池内已有候选 + 在飞任务两两 `checkTouchesPair` 不相交者优先；`gap-*` 缺陷 > `DIR-*` 新能力作次
   tiebreak；同类里 touches resolve 的排前）。对每个候选：**缺四件套的先补齐**（`missingArtifacts`

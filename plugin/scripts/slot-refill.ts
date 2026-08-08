@@ -224,6 +224,12 @@ export function analyzeSlotRefill({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAUL
     floor: pool.floor,
     dispatchable_disjoint: pool.dispatchable_disjoint,
     criterion_met: pool.criterion_met,
+    // LANDING-BLOCKED (gap-landing-blocked-invisible-to-dispatch-criteria): surfaced so the event-
+    // driven/tick refill path sees the landing visibility axis too. SIGNAL, NOT a gate — should_refill
+    // stays criterion/slot-driven (AC4: normal landing never false-reports, and a blocked landing is
+    // reported without interrupting dispatch).
+    landing_blocked: pool.landing_blocked,
+    landing_blocked_reason: pool.landing_blocked_reason,
     halted: halt.halted,
     halt_reason: halt.halted ? halt.reason : null,
     should_refill: shouldRefill,
