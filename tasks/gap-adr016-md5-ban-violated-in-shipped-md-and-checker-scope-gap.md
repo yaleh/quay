@@ -88,6 +88,7 @@ resume 若中断，先跑 measure 确认当前违规数，不要假设已修
 - [ ] AC1-AC5 实跑输出贴任务体（违规改前后对照 + 检查器作用域 + drift 同步）
 
 ## Touches
+- tasks/gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap.md（自身文件：self-touch，2026-08-08 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/loop/orchestrator-loop-tick.md（:309-310 改合规形态）
 - plugin/loop/manager-loop-tick.md（:85 改合规形态 + drift 同步）
 - plugin/scripts/adr016-screen-use-check.ts（AC2/AC3：.ts 作用域 + .md 指令块判定）

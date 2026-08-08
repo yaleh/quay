@@ -79,6 +79,7 @@ resume 若中断，先跑 measure 读 slots 报告 + 实际 subagent 进程数
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
 
 ## Touches
+- tasks/gap-telemetry-underreport-nontask-subagents-not-counted-in-slots.md（自身文件：self-touch，2026-08-08 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/fast-mode-telemetry.ts（`--slots`/`--slot-status` 增 subagentsInFlight）
 - plugin/loop/fast-mode-loop-tick.md（状态自检①改真实并发 = 括号 + 非任务 subagent）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC4 交叉标注，done）
