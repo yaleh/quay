@@ -78,10 +78,11 @@ failed 才知道，manager 靠重挂才回来——**「观测者被杀」这件
 
 ## Touches
 
-- plugin/test/session-liveness-helpers.mjs 或相关测试清理逻辑（sweepTmp 等，若泄漏清理在其中）
-- plugin/scripts/ 下任何含 `pkill -f` / 清理 session-liveness 的脚本（grep 定位）
-- plugin/test/session-liveness-events/signals/heartbeat.test.mjs（AC3/AC4 测试）
-- 若做候选 D：session-liveness.sh + 外层/manager 检测侧
+- plugin/test/session-liveness-helpers.mjs（sweepTmp 清理逻辑）
+- plugin/test/session-liveness-signals.test.mjs（AC3/AC4 测试）
+- plugin/test/session-liveness-events.test.mjs（AC3/AC4 测试）
+- plugin/test/session-liveness-heartbeat.test.mjs（AC3/AC4 测试）
+- plugin/scripts/session-liveness.sh（候选 D：观测层注册）
 - tasks/gap-sweeptmp-pkill-kills-live-observers-two-layer-blind.md（自身：勾 AC + 贴证据）
 
 ## 实跑证据（外层取证，2026-08-08 14:1x-14:3xZ）
