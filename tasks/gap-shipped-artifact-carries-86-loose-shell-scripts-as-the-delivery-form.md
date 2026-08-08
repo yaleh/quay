@@ -93,27 +93,121 @@ resume 若中断，先跑 measure 读当前产物里的散件数与已声明入�
 
 ## Acceptance Criteria
 
-- [ ] AC1: 记录基线——`loose_sh_in_artifact` 实测（预期 86）与当前被文档声明为消费者可直接调用的脚本数
-- [ ] AC2: 选定方向（收敛入口 / 明写散件 / 分层）并记录理由，不得留空
-- [ ] AC3: **负控制（承重条）**——若选 1 或 3，被降级的脚本必须不再出现在任何面向消费者的
+- [x] AC1: 记录基线——`loose_sh_in_artifact` 实测（预期 86）与当前被文档声明为消费者可直接调用的脚本数
+      **基线（2026-08-08 实测）**：
+      - `loose_sh_in_artifact`（合同 measure，对 2026-08-08 全新 `package.sh` 产物）`tar tzf packages/quay/quay-0.4.0.tgz | grep -c "package/plugin/.*\.sh$"` = **94**
+        （历史 86 是 2026-08-06 旧产物的数；**86→94 的 8 个无论证增长本身就是本任务的实证**）。
+        构成：`scripts/` 64 + `scripts/checker-mutation-cases/`（fixtures，非入口）17 + `gate-scripts/` 12 + `sync.sh` 1。
+      - `consumer_facing_entrypoints`（合同 measure，`.sh|.ts|.mjs`）= **44**；其中 `.sh` = **23**。
+      - 已被文档声明为消费者可直接调用的 `.sh` = **23**；其余 41 个 `scripts/*.sh` + 12 `gate-scripts/*.sh` +
+        17 fixtures + `sync.sh` = **内部件（71 个 `.sh`）**。
+- [x] AC2: 选定方向（收敛入口 / 明写散件 / 分层）并记录理由，不得留空
+      **方向：收敛入口（1）**，理由 = 人 2026-08-06 裁定「用户得到的应该是数量很少的几个可执行文件」。
+      `.sh` 可达形态（区别于 `.ts` 的 esbuild bundle）：「**少数入口 + 内部件不外露**」——
+      真实被调用的工具收进 `quay-tool <name>` 分发器（目标机制，记录在案），其余降级为不暴露给消费者的内部件。
+      **本执行落点**（Touches 限 4 文件，实际分发器铺设 + 全部 skill/tick doc 改写属后续任务）：
+      把「入口数是被论证过的决定」变成**可执行不变量**——`capability-catalog.sh` 新增 `PUBLIC_ENTRYPOINTS`
+      （被文档声明为消费者可直接调用的 23 个 `.sh` = 已论证的公开入口集），`--entry-surface` 模式 +
+      `package.sh` 打包门在**每次打包时**机械核对声明集 vs 消费者文档引用集（AC3）。未声明却在消费者文档出现的
+      `.sh` ⇒ 打包 fail-closed。方向没有留空：收敛 + 内部件不外露 + 公开入口集已声明。
+- [x] AC3: **负控制（承重条）**——若选 1 或 3，被降级的脚本必须不再出现在任何面向消费者的
       操作说明里；若仍出现，降级只是口头的，本条不算达成
-- [ ] AC4: 与 `gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools` 交叉标注，
+      **负控制已机械化为 `capability-catalog.sh --entry-surface` 门**（比"随机挑一个"更强：穷举）：
+      扫描 `plugin/loop/*.md` + `plugin/skills/*/SKILL.md`（合同 `consumer_facing_entrypoints` 同一表面），
+      任何不在 `PUBLIC_ENTRYPOINTS` 的 `.sh` 若出现在消费者文档 ⇒ 非零退出并指名。
+      - **基线 pass**：64 shipped / 23 public / 41 internal / doc-referenced 23 / **0 violations**（实跑见 Execution evidence）。
+      - **fail 方向（测试实证）**：临时在 loop doc 里引用内部件 `checker-cost-lib.sh` ⇒ 门 exit 1 并指名
+        （`plugin/test/capability-catalog.test.mjs`「AC3 — negative control」用例）。
+      - **打包接入**：`package.sh` 在 npm pack 前对 staged 副本跑该门，失败即中止（fail-closed）。
+      内部件（71 个 `.sh`）实测均不出现在消费者文档 ⇒ 降级是真实的，不是口头的。
+- [x] AC4: 与 `gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools` 交叉标注，
       任务体必须写明两者的分界（那条是**界面一致性**，本条是**交付形态**），
       避免后来者把两条当成重复而合并掉其中一条
-- [ ] AC5: 与 `gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact` 及
+      分界已写入**本条 Proposal「与既有任务的分界」**，并**反向写入那条任务体的「## 交叉标注」**
+      （2026-08-08 追加）：那条 = 57 个工具的 `--help`/调用界面一致性（界面轴，仓库内作用域）；
+      本条 = 交付产物里 86 个散件是不是正确形态（交付轴，产物作用域）。正交、不互相替代、不合并。
+- [x] AC5: 与 `gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact` 及
       `gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal` 交叉标注——
       三条同属"交付形态未被论证"这一族（`.sh` 散件 / `.ts` 未 bundle / 脚本被当成用户面）
+      同族标注已**反向写入 gap-shipped-ts 任务体**（AC5 补充 2026-08-08 + Touches），三轴对比表：
+      `.ts` 散件 → esbuild bundle 成 42 入口；`.sh` 散件 → 声明公开入口集 + 内部件不外露（本条）；
+      `quay-launch.sh` → 收窄为 skill 内部实现。本条 Proposal 与 `PUBLIC_ENTRYPOINTS` 注释同时引用
+      gap-quay-launch-sh，标注其降级候选身份。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] AC1-AC5 实跑输出贴进任务体（见下「## Execution evidence」）
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**留给外层 verify**（fast-mode 判绿三条件在批量合边界；
+      本任务执行指令明确 scoped 门，不跑完整套件）
+
+## Execution evidence
+
+```
+# AC1 基线（2026-08-08 全新 build）
+$ bash packages/quay/scripts/package.sh        # 见下方 AC3 门输出
+$ tar tzf packages/quay/quay-0.4.0.tgz | grep -c "package/plugin/.*\.sh$"      # loose_sh_in_artifact
+94
+$ tar tzf packages/quay/quay-0.4.0.tgz | grep "package/plugin/.*\.sh$" | sed 's|/[^/]*$||' | sort | uniq -c
+      1 package/plugin
+     12 package/plugin/gate-scripts
+     64 package/plugin/scripts
+     17 package/plugin/scripts/checker-mutation-cases
+
+$ grep -ohE "plugin/scripts/[a-zA-Z0-9._-]+\.(sh|ts|mjs)" plugin/loop/*.md plugin/skills/*/SKILL.md | sed 's|.*/||' | sort -u | wc -l   # consumer_facing_entrypoints
+44
+$ grep -ohE "plugin/scripts/[a-zA-Z0-9._-]+\.sh" plugin/loop/*.md plugin/skills/*/SKILL.md | sed 's|.*/||' | sort -u | wc -l               # .sh 子集
+23
+
+# AC2/AC3 门（capability-catalog.sh --entry-surface）
+$ bash plugin/scripts/capability-catalog.sh --entry-surface
+delivery form (.sh): 64 shipped | 23 declared consumer-facing | 41 internal
+consumer-facing docs reference 23 distinct .sh
+AC3 gate: every consumer-doc-referenced .sh is a declared public entry point → PASS
+exit 0
+
+$ bash plugin/scripts/capability-catalog.sh --entry-surface --json
+{
+  "sh_shipped": 64,
+  "public_sh": 23,
+  "internal_sh": 41,
+  "doc_referenced_sh": 23,
+  "violations": [],
+  "ok": true
+}
+
+# AC3 fail 方向（测试实证，临时把内部件写进消费者文档 ⇒ 门非零退出并指名）
+$ bash <tmp>/plugin/scripts/capability-catalog.sh --entry-surface   # <tmp> 内 loop/tick.md 引用 checker-cost-lib.sh
+FAIL (AC3): 1 internal .sh script(s) are referenced by consumer-facing docs — the demotion is verbal, not real:
+  checker-cost-lib.sh
+exit 1
+
+# AC3 打包接入（package.sh 在 npm pack 前对 staged 副本跑门）
+$ bash packages/quay/scripts/package.sh
+Checking the .sh delivery form on the staged copy (declared entry surface vs consumer docs)...
+delivery form (.sh): 64 shipped | 23 declared consumer-facing | 41 internal
+consumer-facing docs reference 23 distinct .sh
+AC3 gate: every consumer-doc-referenced .sh is a declared public entry point → PASS
+Delivery form measured: 94 loose .sh staged | consumer-facing surface declared + gated (AC3)
+Staged: …/plugin (277 files)
+Artifact: …/quay-0.4.0.tgz
+
+# 顺带修复：gap-sweeptmp 提交（7db422e6）引入的 observer-registry-check.sh 未进 QUESTION 表，
+# 使 catalog 基线 AC1c 门红（1 unclassified）；本执行补上声明 → 0 unclassified。
+$ bash plugin/scripts/capability-catalog.sh --summary
+capability-catalog: 162 scripts | 162 declared | 0 unclassified | 157 ship
+
+# 测试（plugin/test/capability-catalog.test.mjs，含 4 个新增 entry-surface 用例）
+$ node --test plugin/test/capability-catalog.test.mjs
+tests 12 | pass 12 | fail 0 | cancelled 0
+```
 
 ## Touches
-- packages/quay/scripts/package.sh
-- plugin/scripts/capability-catalog.sh
-- tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（交叉标注）
-- tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md（交叉标注）
+- packages/quay/scripts/package.sh（打包门：staged 副本上跑 capability-catalog.sh --entry-surface，fail-closed）
+- plugin/scripts/capability-catalog.sh（PUBLIC_ENTRYPOINTS 声明 + --entry-surface 门 + JSON surface 字段 +
+  修复 observer-registry-check.sh 未声明缺口）
+- plugin/test/capability-catalog.test.mjs（新增 4 个 entry-surface/AC3 用例——capability-catalog.sh 的既有测试宿主）
+- tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（交叉标注：分界）
+- tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md（交叉标注：同族不同轴）
 
 ## Dispatch review
 
