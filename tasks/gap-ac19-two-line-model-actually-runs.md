@@ -67,11 +67,14 @@ inner 面板 40→6 重合并卡在自己的 AC2（干净窗口全量绿）—�
 
 measure integration_lead = `git rev-list --count develop..integration` stdout 数字段（制造窗口后应 > 0——integration 领先 develop 成立）
 measure direction_ok = `git log --oneline integration -3 | grep -cE "task/|fan-in.*integration"` stdout 数字段（任务 fan-in 合 integration 后 ≥1）
-measure fork_point_ok = 对候选 task 分支 b 跑更正判别式（见下）`git merge-base --is-ancestor "$p" integration` YES 且 `git merge-base --is-ancestor "$p" develop` NO（p=分支第一个独立提交 fp 的父）stdout 数字段
-band integration_lead = > 0 且 direction_ok = ≥1 且 fork_point_ok = 至少一个分支 YES/NO（至少一次真实合并走声明方向 + integration 领先窗口 + 窗口内分叉基线可机械区分）
+measure integration_lead = `git rev-list --count develop..integration` stdout 数字段（制造窗口后应 > 0——integration 领先 develop 成立）
+measure direction_ok = `git log --oneline integration -3 | grep -cE "task/|fan-in.*integration"` stdout 数字段（任务 fan-in 合 integration 后 ≥1）
+measure fork_baseline_called = `grep -c "integration-branch-model.ts --fork-baseline" <内层派发会话 transcript>` stdout 数字段（≥1：每次派发都调用 fork-baseline 判定）
+measure fork_baseline_not_always_false = `grep -c "overlaps-unverified \"\"" <内层派发会话 transcript>` stdout 数字段（**= 0**：不得恒传空串使 overlapsUnverifiedIntegration 恒 false）
+band integration_lead = > 0 且 direction_ok = ≥1 且 fork_baseline_called = ≥1 且 fork_baseline_not_always_false = 0（每次派发实际调用判定 + 传入参数不得使任一判定路径恒为假）
 invoke `bash scripts/test.sh --for-task gap-ac19-two-line-model-actually-runs 2>&1 | tail -3`
-control 更正判别式（2026-08-08 08:5x 管理者更正）：**merge-base 不等是必要非充分**（「已合入 integration」同样满足它，必撞假阳性——reconcile 分支 merge-base 不等但已合入、分叉点在公共线上）；正确看**分叉点**：`fp=$(git rev-list --first-parent "$b" ^develop | tail -1)` → `p=$(git log -1 --format=%P "$fp" | awk '{print $1}')` → p 必须是 integration 祖先（YES）且 develop 祖先（NO）。两条都要；只查前一条同样有假阳性。批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
-resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + fork_point_ok 候选分支数
+control 2026-08-08 人裁定改判据测法：判据2 后半从「必须出现一次从 integration 切的分支」改为 (i) 每次派发都实际调用 fork-baseline 判定且结果与配置一致 + (ii) 传入参数不得使任一判定路径恒为假。**实测缺口（manager 09:3x 定位，外层复核成立）**：dispatch 调用 `--overlaps-unverified ""`（空串，5 次），`integration-branch-model.ts:47` 的 `overlapsUnverifiedIntegration` 路径恒不生效——机制半死：被调用但参数使一条路径恒假。取值来源：`git log --oneline develop..integration` 里 fan-in 的未验证任务 id（脚本 :139 Contract invoke 正是这条命令）。批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
+resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + fork_baseline_called/not_always_false
 
 ## Acceptance Criteria
 
@@ -84,17 +87,16 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + for
       **证据**：fan-in 后 `git rev-list --count develop..integration` = **2**（integration 领先 develop 2 提交），
       `git rev-list --count integration..develop` = 0（develop 无 integration 缺的提交），
       `git merge-base --is-ancestor integration develop` → **NO**（integration 不再是 develop 祖先，真实窗口）。
-- [ ] AC3: **fork_baseline 可分辨**——窗口内验证分叉基线可分辨（从 integration 切出的声明依赖任务，分叉点
-      = integration 祖先 + 非 develop 祖先，机械可区分）
-      **旧证据作废（判别式假阳性，2026-08-08 08:5x 管理者更正）**：原证据用「merge-base 不等」判定，
-      但 merge-base 不等是**必要非充分**——「已合入 integration」同样满足它。reconcile 分支
-      （task/gap-batch-merge-reconcile-*）merge-base 不等（5d7c96f4 vs 5036647e）但**已合入
-      integration**、分叉点 5d7c96f4 是公共线（develop 祖先 YES + integration 祖先 YES）⇒ 假阳性。
-      本任务自己的分支 `git rev-list --first-parent ^develop` 为空（已合入 develop）⇒ 同样从公共线切。
-      **更正判别式**：`fp=$(git rev-list --first-parent "$b" ^develop | tail -1)` →
-      `p=$(git log -1 --format=%P "$fp" | awk '{print $1}')` → p 必须 integration 祖先(YES) +
-      develop 祖先(NO)。两条都要。当前全部 task/* 分支按此判别式**无一满足**（都从公共线切）⇒
-      AC3 未达成。
+- [ ] AC3: **fork-baseline 判定活着**——(i) 每次派发都实际调用 fork-baseline 判定且结果与配置一致；
+      (ii) 传入参数不得使任一判定路径恒为假（2026-08-08 09:3x 人裁定改判据测法）
+      **实测（manager 09:3x 定位，外层复核成立）**：dispatch 5 次调用 `integration-branch-model.ts
+      --fork-baseline tasks/<id>.md --overlaps-unverified ""`——空串 ⇒ `integration-branch-model.ts:47`
+      的 `overlapsUnverifiedIntegration` 分支恒不生效 ⇒ (ii) 不成立：机制半死（被调用但一条路径永远假）。
+      **修法方向（归外层机制决定）**：调用方把 `--overlaps-unverified` 从空串改为
+      `git log --oneline develop..integration` 里的 fan-in 未验证任务 id（脚本 :139 Contract invoke
+      正是这条命令）；修后复测 `fork_baseline_called ≥1` + `fork_baseline_not_always_false = 0`。
+      **旧判别式（08:5x 分叉点法）并入 (i) 的结果一致性**：从 integration 切的任务分支分叉点 =
+      integration 祖先 + 非 develop 祖先，仍须成立，但不再作为唯一判据。
 - [x] AC4: **批量合回**——窗口后批量合回 develop（integration 重新成为 develop 祖先）
       **证据**：`integration-batch-merge.sh --root /home/yale/work/quay --sync` → `integration-batch-merge: OK —
       develop fast-forwarded to integration`（ref-level FF，develop 从 c230780b → 6911d6d1），
