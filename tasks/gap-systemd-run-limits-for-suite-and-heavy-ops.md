@@ -5,7 +5,7 @@ title: "systemd-run cgroup limits for suite + heavy ops — cgroup v2 available
   calls in runner at ABORT#5, 8-way concurrency in WAIT state); suite in
   MemoryMax/CPUQuota/TasksMax scope, blocks
   tmux-leak(217)/concurrency-8/ugrep-8.8GB classes, comms unchanged"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -57,6 +57,12 @@ cgroup 限额（每项目 scope）天然解决此问题。
 - [ ] AC4: 通信通道零改动（同机 tmux/file，实测驱动/送达正常）
 - [ ] AC5: 与 gap-no-resource-awareness-heavy-ops-run-blind + SPEC-isolation 交叉标注
 - [ ] AC6: **跨项目隔离实锤**——资源门因其它项目活动报 WAIT 时，本机 cgroup 限额下 quay 自身套件不受影响（实测：archguard 高负载时 quay 套件在自身 scope 内正常跑）
+
+## Definition of Done
+
+- [ ] AC1-AC6 全勾（套件在 systemd-run 限额下跑 cgroup 生效；PID 爆 TasksMax 挡住；内存爆 MemoryMax 杀单进程；通信通道零改动；与 no-resource-awareness + SPEC-isolation 交叉标注；跨项目隔离实锤 archguard 高负载时 quay 套件自身 scope 正常）
+- [ ] 两个负控制实测（PID 爆不影响机器其他进程；内存爆不进全机 swap）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-systemd-run-limits-for-suite-and-heavy-ops` 绿
 
 ## Touches
 

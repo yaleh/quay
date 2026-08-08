@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check
 title: "ready-pool promotion promoted a task referencing a RETIRED mechanism (gap-prepare-milestone-no-size-aware-routing → prepare-milestone.js deleted under ADR-022) — the strategic-doc-staleness-check --pool-candidate control (review-cadence AC8) flags it, but ready-pool-check's promotion path doesn't consult it; fix: promotion runs the pool-candidate stale check before status todo→ready"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -47,6 +47,12 @@ review-cadence AC8 控制存在却被绕过，是「机制造了检测、检测�
 - [ ] AC3: 本会话其余 7 个 clean 候选（productize-manager/split-batch-vocab 等）仍正常补晋（负控制不误伤）
 - [ ] AC4: 拦截理由机械记录（不晋 = 有痕迹，非静默跳过）
 - [ ] AC5: 测试 `node:test` + `// @test-group governance`
+
+## Definition of Done
+
+- [ ] AC1-AC5 全勾（补晋前调 strategic-doc-staleness-check --pool-candidate，FAIL 不补晋；gap-prepare-milestone-no-size-aware-routing 被拦截；其余 clean 候选正常补晋负控制；拦截理由机械记录；测试 node:test + @test-group governance）
+- [ ] retired-mechanism 候选被拦截实测 + clean 候选不误伤
+- [ ] scoped 门 `scripts/test.sh --for-task gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check` 绿
 
 ## Touches
 
