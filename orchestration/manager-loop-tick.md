@@ -53,7 +53,48 @@ outer 要给我的东西写进那里（或它的 tick-log，我也每轮读）�
 **代价是延迟从秒级变成 ≤20 分钟一个 tick——这是刻意的**：我们之间没有需要秒级响应的事，
 **认证比延迟重要**。紧急项在 escalations.md 里标 `URGENT`，我每轮先扫。
 
-**替代通道已核实存在（我说「现成的」之前先查了，否则就是本文档批了五次的同一形态）**：
+**⚠️ 2026-08-08 08:3xZ 更正：替代通道选错了，正解是【消息总线】不是 escalations.md。**
+
+人指出「manager→outer 应有异步通道，不用等会话状态」后查出：`packages/quay/src/message-bus.ts`
+**早就是带身份的总线**，`from ∈ {human, manager, inner, outer}`，且 `checkIdentityClaim` **fail-closed**。
+实跑闸门：
+
+```
+$ bash plugin/scripts/supervisor-bus-identity.sh claim-human-test
+identity_rejected=true  reason=identity rejected: 'human' is not a claimable sender identity
+                        for this channel (served: inner, outer, manager)
+exit=0
+```
+
+而 `supervisor-bus-identity.sh` 头部原文写的**就是今晚这次事故**：
+「the incident: an agent message entered a session as `userType:external`,
+**indistinguishable from the real human**」。
+`gap-supervisor-message-bus-with-identity` = **done**；
+`gap-ruling-required-only-covers-outer-to-inner-not-manager-to-outer` = **done**。
+
+⇒ **问题不是没机制，是我和 outer 都用裸 tmux 从总线旁边绕过去了，于是丢掉了 `from` 字段。**
+⇒ **替代通道更正为：outer→manager 走总线（带 `from: outer`），`escalations.md` 降为备份。**
+   escalations.md 没有 `from`、没有冒充闸门、`delivered`/`consumed` 不分——比总线差。
+   **禁止裸 tmux 那条不变，理由反而更强：裸 tmux 绕过的正是身份层。**
+
+**异步方向同理，缺的只是一行注册**（`message-bus.ts:317`）：
+
+```js
+registerTransport("human", createFileInboxTransport({ inboxDir: managerInboxDir(root) }));  // 异步
+registerTransport("inner", createSessionTransport());   // tmux，要等会话
+registerTransport("outer", createSessionTransport());   // ← manager→outer 每次都要等，就是这行
+```
+文件 transport 现成、已测、human 那条在用；**outer 只是没被注册成它**。修法归 outer（产品代码）。
+
+**一个读数**：`inbox-summary` = `delivered=0 consumed=0 unread=0`——
+**总线自建成以来零流量**，而它已被 outer 的 tick 第 574 行挂载。
+**一个 done、有测试、已挂载的机制，实际使用为零，两侧都在手搓。**
+
+⇒ **一般形态（今晚第六次，且方向是反的）**：前五次是「判据指向的对象不存在／不是那个意思」，
+这次是**对象存在得好好的，我没去找就手搓了一个**。
+**动手造之前先搜一遍「这件事是不是已经有人做过了」，成本是一次 grep。**
+
+**（以下为更正前的原方案，保留作记录）替代通道已核实存在**：
 三个项目的 `orchestration/escalations.md` 均存在、均被 git 跟踪
 （quay 423 行 / archguard 93 行 / meta-cc 68 行）。
 **但它是休眠的**——quay 那份最后写入 `2026-08-07T18:09Z`，即禁令下达时已 14 小时未动，
