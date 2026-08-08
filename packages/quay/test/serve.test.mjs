@@ -1,5 +1,5 @@
 // @test-group product
-// KNOWN-LOAD-SENSITIVE (see docs/analysis/fast-mode-loop-tick.md "已知负载敏感族") — this file binds
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file binds
 // ephemeral HTTP ports, spawns real quay-native CLI processes (execFileSync), and chdirs across
 // isolated workspaces; it passes isolated under low load but failed under full-suite cc8 concurrency
 // (2026-08-08 07:06:49, 1/0 in isolation both primary and integration worktrees). Predeclared marker so

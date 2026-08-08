@@ -4,7 +4,7 @@
 //
 // A red window may be released via an isolation-pass ONLY for files that carry the predeclared
 // KNOWN-LOAD-SENSITIVE marker (file-header comment, grep-detectable per
-// docs/analysis/fast-mode-loop-tick.md "已知负载敏感族"). An UNMARKED file's isolation-pass is ONLY
+// plugin/loop/fast-mode-loop-tick.md "已知负载敏感族"). An UNMARKED file's isolation-pass is ONLY
 // grounds to APPLY for the marker (with evidence) — never grounds to release the red window directly.
 //
 // This helper is the MECHANICAL admission check the inner consults at the red-window-release decision

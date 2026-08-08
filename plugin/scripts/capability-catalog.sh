@@ -138,6 +138,7 @@ declare -A QUESTION=(
   [laydown-set-check.sh]="Are all scripts in the derived cold-start laydown set present, syntactically valid, and green (gate = lay what you verify)?"
   [loadbearing-test-gate.sh]="Is the load-bearing test present and passing before the milestone may land?"
   [loadbearing-test-gate.ts]="Is the load-bearing test gate satisfied (canonical implementation)?"
+  [load-sensitive-release-check.ts]="Is every file being released from a red-window isolation-pass carrying the predeclared KNOWN-LOAD-SENSITIVE marker (predeclared load-sensitivity, not post-hoc isolation-pass release)?"
   [loop-driver-check.sh]="Is exactly one loop driver running, and is it the sanctioned cron?"
   [loop-shipping-exclusion-data.mjs]="What are the single-source old-path and exclusion entries that the loop-shipping scan and its inert-entry necessity check must not disagree on?"
   [measure-suite-reporter.mjs]="What is each test file's wall-clock duration (custom node:test reporter)?"
