@@ -42,6 +42,8 @@ import { fileURLToPath } from "node:url";
 import {
   isFailureLine,
   isAbortLine,
+  isStaticCheckFailureLine,
+  extractStaticCheckDetail,
   isGitWorktree,
   readStateRunId,
   writeStateGuarded,
@@ -50,7 +52,7 @@ import {
   parseSystemdRunLimits,
   systemdRunAvailable,
 } from "../scripts/full-suite-runner.ts";
-import { runOnce } from "../scripts/suite-state-trigger.ts";
+import { runOnce, classifyFailure, routeRed, shouldStopDispatch } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -577,6 +579,140 @@ test("AC5 unit — isAbortLine matches the early-EXIT gate-WAIT shape, never a f
   }
 });
 
+// ── gap-full-suite-state-red-no-failure-detail-static-check-invisible: AC1-AC5 ─────────────────────
+// When run_static_checks fails (task-contract-check ratchet growth / test-framework-policy /
+// test-isolation violations / a ceiling breach), test.sh aborts under `set -e` BEFORE the node --test
+// phase: the stream shows the checker's violation output and a non-zero exit, but NONE of the
+// FAILURE_PATTERNS. The pre-fix runner labelled this reason=failed with failures=[] empty — the
+// 20:48Z readability gap (state=red + reason=failed + failures=[] looks like an interrupted run, the
+// real cause only in the log). These tests pin the fix: reason="static-check" + machine-readable
+// counts + violations fill failures[].
+
+test("AC2 unit — isStaticCheckFailureLine matches static-check failure markers, never a passing summary or a test-failure line", () => {
+  // FAILURE markers (a PASSING run never emits them):
+  for (const line of [
+    "ratchet ceiling: 6; new since baseline: 6 (tasks/a.md: V1, tasks/b.md: V2)", // the 20:48Z 真因 — K>0 = growth
+    "ratchet ceiling: 6; new since baseline: 1",
+    "task-contract-check: current violations (11) exceed the ratchet ceiling (6) — the list can only get SHORTER",
+    "task-contract-check: DOD-SUITE-LINE BASELINE CEILING BREACH — grandfather list can only get SHORTER",
+    "test-framework-policy-check: FAIL: 2 violation(s):",
+    "test-isolation-check: FAIL: 3 ratchet violation(s):",
+  ]) {
+    assert.equal(isStaticCheckFailureLine(line), true, `should flag static-check failure: ${line}`);
+  }
+  // Passing-run / test-failure lines must NOT flag:
+  for (const line of [
+    "violations: 0 unique across 0 task(s); info findings ...", // passing summary (N=0)
+    "violations: 11 unique across 9 task(s); info findings ...", // violations listed but K=0 below — passing
+    "ratchet ceiling: 6; new since baseline: 0; resolved: 0", // K=0 — no growth, passing
+    "VIOLATION: tasks/baselined.md — V1: what", // baselined violation on a passing run
+    "not ok 1 - boom", // test failure
+    "# fail 2",
+    "FULL-SUITE-EXIT=1",
+    " ❯ test/foo.test.ts (3 tests | 1 failed) 12ms",
+    "FAIL: some legacy assertion message", // legacy harness console noise
+  ]) {
+    assert.equal(isStaticCheckFailureLine(line), false, `should NOT flag: ${line}`);
+  }
+});
+
+test("AC2 unit — extractStaticCheckDetail parses the VIOLATION/summary/ratchet lines into machine-readable fields", () => {
+  const v = extractStaticCheckDetail(
+    "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line",
+  );
+  assert.deepEqual(v, {
+    violation: {
+      file: "tasks/gap-foo.md",
+      code: "V1",
+      what: "Contract block missing invariant line",
+      line: "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line",
+    },
+  });
+  const s = extractStaticCheckDetail("violations: 11 unique across 9 task(s); info findings ...");
+  assert.equal(s.violations, 11);
+  assert.equal(s.taskCount, 9);
+  const r = extractStaticCheckDetail("ratchet ceiling: 6; new since baseline: 6 (tasks/a.md: V1)");
+  assert.equal(r.ceiling, 6);
+  assert.equal(r.newSinceBaseline, 6);
+  assert.equal(extractStaticCheckDetail("not ok 1 - boom"), null);
+  assert.equal(extractStaticCheckDetail("# tests 2239"), null);
+});
+
+test("AC2/AC3/AC4 — a static-check-red run writes reason=static-check + machine-readable counts; violations fill failures[]", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-scre-"));
+  // The 2026-08-08 20:48Z shape: task-contract-check ratchet violations — the suite aborts
+  // (set -e) before tests, so the stream shows VIOLATION/summary/ratchet lines + exit 1, no TAP.
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "VIOLATION: tasks/gap-bar.md — V2: band value out of range"\n' +
+      'echo "violations: 11 unique across 9 task(s); info findings (non-ratchet, pre-opt-in baseline): 0 — see --json for details"\n' +
+      'echo "ratchet ceiling: 6; new since baseline: 6 (tasks/gap-foo.md: V1, tasks/gap-bar.md: V2); resolved: 0"\n' +
+      "exit 1",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1, "runner exits 1 on a static-check red");
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "static-check", "static-check red is reason=static-check, NOT failed (AC3)");
+    assert.ok(s.staticCheck, "machine-readable staticCheck field present (AC2)");
+    assert.equal(s.staticCheck.violations, 11, "violation count (AC2)");
+    assert.equal(s.staticCheck.taskCount, 9, "task count");
+    assert.equal(s.staticCheck.ceiling, 6, "ratchet ceiling (AC2)");
+    assert.equal(s.staticCheck.newSinceBaseline, 6, "new-since-baseline (AC2)");
+    assert.ok(
+      Array.isArray(s.staticCheck.details) && s.staticCheck.details.length === 2,
+      "both VIOLATION details captured",
+    );
+    assert.equal(s.staticCheck.details[0].file, "tasks/gap-foo.md", "detail carries the violated task file");
+    assert.ok(s.failures && s.failures.length === 2, "failures[] carries the static-check violation details (AC4 candidate B)");
+    assert.equal(s.failures[0].staticCheck, true, "failures entries are marked static-check");
+    assert.equal(s.failures[0].file, "tasks/gap-foo.md", "failure file = the violated task file");
+    // Consumers can distinguish + route correctly (AC3):
+    assert.equal(shouldStopDispatch(s), true, "static-check red stops dispatch (shared-gate failure)");
+    assert.equal(routeRed(s), "red-window-triage", "routeRed routes static-check red to red-window-triage (a real failure)");
+    const loc = classifyFailure(s.failures[0]);
+    assert.equal(loc.kind, "shared-gate", "classifyFailure classifies the static-check failure as shared-gate");
+    const res = runOnce(root);
+    assert.equal(res.stopSignal, true, "runOnce reports stopSignal for static-check red");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC5 — a real test failure dominates a static-check marker: reason stays failed, failures[] carries the test failure", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sc-dom-"));
+  const { f, dir } = fakeSuite(
+    'echo "VIOLATION: tasks/gap-foo.md — V1: something"\n' +
+      'echo "ratchet ceiling: 6; new since baseline: 6"\n' +
+      'echo "not ok 1 - boom"\nexit 1',
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 1);
+    const s = readState(root);
+    assert.equal(s.state, "red");
+    assert.equal(s.reason, "failed", "a real test failure is reason=failed, never downgraded to static-check (AC5)");
+    assert.ok(s.failures && s.failures.length >= 1, "failures[] carries failures");
+    assert.equal(s.failures[0].staticCheck, undefined, "failures[] carries the REAL test failure (not a static-check entry)");
+    assert.ok(s.staticCheck, "the staticCheck field is still recorded alongside (both facts present)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — routeRed/shouldStopDispatch distinguish static-check red (stops) from aborted/infra-error red (does not stop)", () => {
+  assert.equal(routeRed({ state: "red", reason: "static-check" }), "red-window-triage", "static-check red → red-window-triage");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "static-check" }), true, "static-check red stops dispatch");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "failed" }), true, "test-failure red stops dispatch (unchanged, AC5)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "aborted" }), false, "aborted red does NOT stop (unchanged)");
+  assert.equal(shouldStopDispatch({ state: "red", reason: "infra-error" }), false, "infra-error red does NOT stop (unchanged)");
+});
+
 test("AC1/AC3 — an early-EXIT red (test.sh internal resource-gate WAIT fail-closed) is reason=aborted, NOT failed", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-abort-"));
   // The concrete shape from today's FALSE-RED incidents: test.sh's INTERNAL resource-gate fail-closed
@@ -836,6 +972,24 @@ test("AC1 Contract invoke — `full-suite-runner.ts --wait-check` proves: test.s
   assert.match(out, /reason=aborted/, "gate-WAIT is reason=aborted (no correctness conclusion)");
   assert.match(out, /stopSignal=false/, "aborted-red must NOT stop dispatch (AC1)");
   assert.match(out, /SUITE-RED/, "SUITE-RED event still recorded (red noticed, routed by reason)");
+});
+
+// ── gap-full-suite-state-red-no-failure-detail-static-check-invisible Contract invoke ───────────────
+// --static-check-check is the STATIC-CHECK-side twin of --fail-fast-check (test-failure chain) and
+// --wait-check (abort chain): it proves the 20:48Z shape (task-contract-check ratchet violations ⇒
+// the suite aborts before tests with violations=N / ceiling=C / newSinceBaseline=K in the log) now
+// lands in the state file as machine-readable fields consumers read WITHOUT hand-digging the log.
+
+test("AC2 Contract invoke — `full-suite-runner.ts --static-check-check` proves: static-check violations => red reason=static-check => machine-readable counts + failures[] => stopSignal", async () => {
+  const { code, out, err } = await runCli(RUNNER, ["--static-check-check"]);
+  assert.equal(code, 0, `--static-check-check exits 0 when the static-check chain works; got ${code}\n${out}\n${err}`);
+  assert.match(out, /static-check-check OK/, "verification line present");
+  assert.match(out, /reason=static-check/, "reason is static-check (AC3, distinguishable from failed)");
+  assert.match(out, /violations=11/, "violation count recorded (AC2)");
+  assert.match(out, /ceiling=6/, "ceiling recorded (AC2)");
+  assert.match(out, /newSinceBaseline=6/, "new-since-baseline recorded (AC2)");
+  assert.match(out, /failures=2/, "failures[] carries the two violation details (AC4 candidate B)");
+  assert.match(out, /stopSignal=true/, "static-check red stops dispatch (shared-gate failure)");
 });
 
 // ── gap-worktree-scoped-runs-consume-resources-but-produce-no-signal: AC1 scope + AC2 priority ──────
