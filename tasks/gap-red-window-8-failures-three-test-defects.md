@@ -40,19 +40,21 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: red-window-shared-gate AC1 断言修正——inner 模板措辞（暂缓已完成 agent 的 fan-in）被接受，
+- [x] AC1: red-window-shared-gate AC1 断言修正——inner 模板措辞（暂缓已完成 agent 的 fan-in）被接受，
        14/14 绿
-- [ ] AC2: capability-catalog 并发 flake 根因定位（隔离 8/8 绿 vs 全量 5 fail 的竞争源）或标记
+- [x] AC2: capability-catalog 并发 flake 根因定位（隔离 8/8 绿 vs 全量 5 fail 的竞争源）或标记
        KNOWN-LOAD-SENSITIVE 入豁免
-- [ ] AC3: runner-grouping 处置——隔离可跑完（非永久超时）或标记慢测试
-- [ ] AC4: 全量套件重归 green（fail 0）
+- [x] AC3: runner-grouping 处置——隔离可跑完（非永久超时）或标记慢测试
+- [x] AC4: 全量套件重归 green（fail 0）
 
 ## Touches
 
+- tasks/gap-red-window-8-failures-three-test-defects.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/test/red-window-shared-gate.test.mjs（AC1 断言修正）
 - plugin/test/capability-catalog.test.mjs（flake 定位/豁免）
 - plugin/test/runner-grouping.test.mjs（重测试处置）
-- plugin/scripts/test.sh 或 test-grouping 配置（慢测试组，若采用）
+- plugin/scripts/capability-catalog.sh（并发 flake 基线根因：4 个新 shipped 脚本未声明 question + dead-loop-check 消费面声明）
+- plugin/skills/init/SKILL.md（SPEC-inbox-service reference-doc 声明——Wiring 测试所依赖）
 
 ## Contract
 
@@ -61,6 +63,35 @@ band      suite_green = green（重跑后）
 invoke    `grep -n '暂缓 fan-in\|暂缓已完成 agent 的 fan-in' plugin/test/red-window-shared-gate.test.mjs plugin/loop/fast-mode-loop-tick.md`
 control   AC1 断言修后 14/14 绿（AC1）；capability 隔离 8/8 绿（AC2）
 resume    断言修正与 flake 定位分步提交，任一步完成即写盘
+
+## Evidence
+
+- **AC1 — red-window-shared-gate AC1 断言修正**（9838a473 落地，本任务复核）：断言由连续
+  `includes("暂缓 fan-in")` 放宽为 `/暂缓[\s\S]*fan-in/`——inner 模板措辞「暂缓已完成 agent 的
+  fan-in」（fast-mode-loop-tick.md 行 904）与 outer 措辞均被接受。隔离跑 **14/14 绿**。Contract
+  invoke 的 grep 在 test 文件与 inner tick 文档均命中。
+- **AC2 — capability-catalog 并发 flake 根因**：`catalogRows()` 重试（9838a473，对只读 catalog 在
+  瞬时并发变更下重试至多 3 次，隔离 8/8 绿）之外，本次 scoped 门实测暴露**真正的基线根因**——
+  integration 上 3 个新任务（f9d3e30e / 4d4e0591 / e023ccff）落了 4 个新 shipped 脚本
+  （instrument-failure-check.ts / known-load-sensitive.ts / manager-observation-runtime-check.ts /
+  red-window-triage.ts）但未在 capability-catalog.sh 的 QUESTION 表声明 → AC1c 门 fail-closed
+  （catalog --json exit 1，隔离也红，非并发敏感）。本次补 4 条 question 声明 → --json **0
+  unclassified（166 全声明）**。另修复同族集成漂移：dead-loop-check.sh 被 cold-start/manager skill
+  文档以消费面引用但未入 PUBLIC_ENTRYPOINTS → 补入（--entry-surface PASS，24 distinct .sh）。
+- **AC3 — runner-grouping 处置（双重）**：①serial-segment 修复（0403207e）把 flags-only 校验从嵌套
+  跑 `--group governance` 3×（>830s）降为 `--list-files` 列表对比（秒级）；②文件头
+  KNOWN-LOAD-SENSITIVE + `@load-sensitive nested-spawn` + `@test-group serial`（9838a473 +
+  4d4e0591 + c4343421）——归入 serial 组（concurrency 1）。隔离跑 **11/11 绿、跑完非永久超时**。
+- **AC4 — 全量套件重归 green**：外层实测 `.quay/full-suite-state.json` state=green（2026-08-08
+  11:49-12:04，fail 0）。scoped 门 `scripts/test.sh --for-task gap-red-window-8-failures-three-test-defects`
+  绿（fail 0 / cancelled 0）。
+- **Wiring 测试附带修复（同一测试文件，scoped 门所依赖）**：quay-init --loop referenced-not-landed
+  因 manager SKILL 引用 `orchestration/SPEC-inbox-service-2026-08-08.md`（该 doc 只在 develop、不在
+  integration）且未在 init/SKILL.md 声明 reference-doc → 补 `<!-- reference-doc:
+  orchestration/SPEC-inbox-service-2026-08-08.md -->`（与其余 SPEC 的 reference-doc 声明同式）。
+- **未采用「慢测试组/test.sh 配置」方案**——AC3 处置为 KNOWN-LOAD-SENSITIVE 标记 + serial 组 +
+  listfiles 修复，故 Touches 中原 `plugin/scripts/test.sh 或 test-grouping 配置（慢测试组，若采用）`
+  条件触发行移除（该方案未落地，无法解析）。
 
 ## Dispatch review
 
