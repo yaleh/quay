@@ -54,6 +54,7 @@ extra:
 - [ ] scoped 门 `scripts/test.sh --for-task gap-red-window-8-failures-three-test-defects` 绿
 
 ## Touches
+- tasks/gap-red-window-8-failures-three-test-defects.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/test/red-window-shared-gate.test.mjs（AC1 断言修正）
 - plugin/test/capability-catalog.test.mjs（flake 定位/豁免）
