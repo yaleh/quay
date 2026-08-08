@@ -432,6 +432,35 @@ OVERDUE/REPO-STALL（协调方 2026-08-03 样本）。
 `SESSION-IDLE` 在心跳时距小于 `LOOP_MIN` 时静默——那是正常收尾；`SESSION-RESUMED`
 **保留不静默**（它便宜，且是唯一能确认会话还在按期活动的正向信号）。
 
+### 0b3. 层间 tick 间隔检查——量自驱心跳，不量最后活动（人 2026-08-08 10:5xZ 裁定，外层半）
+
+**人的原话**：「manager 和 outer 的 tick 中应当检查【下一层】的最近 tick 记录，并在时间超长时报警。」
+manager 查 outer（manager 侧已落地 b8d7746e）；**outer 查 inner（本条，外层半）**。
+
+**为什么此前两层都没有**：读 inner 产出时只读【内容】不问【间隔】——内容在就判「在动」。
+今晚代价：inner 自驱心跳 09:31 起零次响应，但外部事件（外层 send-keys / 子代理完成通知）恰好
+填补空档，从 transcript 看「一直在动」；管理者与我都据此连判错两轮。
+
+**判读关键：量【自驱心跳】的间隔，不量【最后活动】。**
+- 最后活动会被外部事件填满（send-keys、`<task-notification>`）——看起来在动，自己的脉搏早停了。
+- **有外部输入时，二者在 transcript 里无法区分**（外层 send 与 inner `/loop 25m` 触发都是
+  「执行 fast-mode-loop-tick.md 中的 tick 指令」，字面同形）。
+- ⇒ 可机械判的是 **transcript 心跳源 mtime 间隔的下界**：任何活动都没有（含外部事件）超过阈值 =
+  **肯定**没自驱。这比「判自驱心跳」保守（宁松勿紧——人裁误报≈秒级、漏报≤20min 空转），
+  但不把外部事件当自驱脉搏。
+
+```bash
+# 层间 tick 间隔检查（每轮必跑，成本≈0）：inner transcript 心跳源 mtime 间隔
+INNER_TX=$(cat orchestration/session-liveness.env | grep SESSION_TRANSCRIPTS | cut -d= -f2-)
+[ -z "$INNER_TX" ] && INNER_TX="$(ls -t ~/.claude/projects/-home-yale-work-quay/*.jsonl | grep -v "$CLAUDE_CODE_SESSION_ID" | head -1)"
+age_min=$(( ($(date +%s) - $(stat -c%Y "$INNER_TX")) / 60 ))
+echo "  inner 心跳源间隔=${age_min}min  阈值=30min（/loop 1200-1800s 上界）"
+[ "$age_min" -gt 30 ] && echo "  ⚠️ ALARM: inner 无任何活动 >30min —— 需驱动它 / 重挂它的 /loop"
+```
+
+**阈值 = 该层申报周期的上界，不是 2 倍**（人已裁）：inner = `/loop 25m` 上界 30min
+（fast-mode-loop-tick.md:262 的 1200–1800s）。报警后动作归外层机制决定（驱动它 / 重挂 /loop / 只记录）。
+
 ### 0c. 派发闸口的清单与留痕：`## Contract` + `## Dispatch review`（外层，gap-dispatch-gate-has-no-checklist-and-no-trace）
 
 外层对派发任务的审查此前是**惯例**——四次介入里两次靠外层碰巧拥有的上下文（`=` 拼写、`duration_ms`
