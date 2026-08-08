@@ -697,7 +697,16 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 
 # ── 管理者的多目标配置（AC9）：orchestration/session-liveness.env 存在则 source。
-#    shell KEY=VALUE，不是 YAML。显式环境变量 SESSION_TARGETS 优先。 ───────────────────────
+#    shell KEY=VALUE，不是 YAML。显式环境变量优先——SESSION_TARGETS 经 source 守卫、
+#    SESSION_TMUX_SESSION / SESSION_TRANSCRIPTS / SESSION_HEARTBEATS 经先钉后回。
+#    gap-session-liveness-ignores-unknown-transcript-names：管理者挂载时显式传
+#    SESSION_TRANSCRIPTS="outer <outer transcript>" 但未设 SESSION_TARGETS，env 文件的
+#    SESSION_TRANSCRIPTS（"quay …"）会把「outer」静默覆盖 ⇒ 配置接线审计
+#    （_sl_audit_config_wiring）看不到调用方的名字 ⇒ 名字不匹配目标表零告警、盯错对象
+#    （outer 216s 无人观测）。先钉后回让调用方显式值存活，审计才能对「不在目标表的名字」告警。 ──
+_sl_transcripts_env="${SESSION_TRANSCRIPTS:-}"
+_sl_heartbeats_env="${SESSION_HEARTBEATS:-}"
+_sl_session_env="${SESSION_TMUX_SESSION:-}"
 if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -712,16 +721,18 @@ fi
 # 字面比较。2026-08-03 起脚本不再被 quay-init 改写（可执行文件原样复制、只生成配置），这两个坑
 # 随之失去存在前提——会话名一律经 env / orchestration/session-liveness.env / 默认值解析。
 # 环境变量显式设置优先（先钉住，避免被配置文件 source 覆盖）：env > 配置 > 默认值。
-_sl_session_env="${SESSION_TMUX_SESSION:-}"
-if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$REPO_ROOT/orchestration/session-liveness.env" \
-    || echo "session-liveness: WARN 无法解析 $REPO_ROOT/orchestration/session-liveness.env，回落到默认" >&2
-  set +a
-fi
+# 钉住动作在第一个 source 块前完成（上面的 _sl_*_env）；这里做回写。
 if [ -n "$_sl_session_env" ]; then
   SESSION_TMUX_SESSION="$_sl_session_env"
+fi
+# 先钉后回（与 SESSION_TMUX_SESSION 同模式）：调用方显式设的 SESSION_TRANSCRIPTS /
+# SESSION_HEARTBEATS 在 env 文件 source 后回写——显式值存活，_sl_audit_config_wiring 才能对
+# 不在目标表的名字告警（gap-session-liveness-ignores-unknown-transcript-names）。
+if [ -n "$_sl_transcripts_env" ]; then
+  SESSION_TRANSCRIPTS="$_sl_transcripts_env"
+fi
+if [ -n "$_sl_heartbeats_env" ]; then
+  SESSION_HEARTBEATS="$_sl_heartbeats_env"
 fi
 _sl_session="${SESSION_TMUX_SESSION:-}"
 if [ -z "$_sl_session" ]; then
