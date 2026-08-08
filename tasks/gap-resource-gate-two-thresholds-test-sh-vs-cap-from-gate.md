@@ -71,7 +71,7 @@ extra: {}
 
 ## Contract
 
-measure   gate_verdicts_aligned = avg10 40-60 区间时 test.sh 闸与 cap-from-gate 判定一致
+measure   gate_verdicts_aligned = `bash plugin/scripts/resource-gate.sh --for full-suite 2>&1 | grep -cE 'WAIT|GO'` 与 `bash plugin/scripts/cap-from-gate.sh 2>&1 | grep -o 'band: GO\|band: WAIT'` 两者判定一致（同 GO 或同 WAIT，avg10 40-60 区间）
 band      gate_verdicts_aligned = 1（两闸同 GO 或同 WAIT，无失衡）
 invariant aborted_does_not_block_dispatch = 1（aborted 套件不挡派发，reason 区分）
 invariant budget_total_same_source = 1（test.sh 与 cap-from-gate 的 total_budget 同源）
