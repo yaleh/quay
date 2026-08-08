@@ -168,8 +168,24 @@
 #   * 去抖（AC2）：候选闲（fused idle）要求【连续 2 轮】都为闲才报 SESSION-IDLE（IDLE_CONSEC
 #     计数，2 轮 = 2×INTERVAL，默认 120s）。单轮转换不报——只延迟 ≤1 轮询周期（真空闲下一轮
 #     还是闲，不造成漏报），远在 20 分钟 cron 兜底之内。pane 哈希从「唯一判据」降级为「去抖的
-#     候选闲辅助」（AC7）；忙→闲后须见过忙轮（SEEN_BUSY）才报，避免监视器启动时把一直闲着的
-#     会话误报成「转入空闲」。
+#     候选闲辅助」（AC7）。
+#
+# 阶段三 D5 锐化（gap-session-liveness-busy-mask-idle-with-subagents，2026-08-08）：
+# 带后台任务的停摆结构性失明的根因 = 旧报告门 `-eq N && SEEN_BUSY==1`：
+#   * -eq 而非 -ge ⇒ 每段停摆只有【一次】触发机会（IDLE_CONSEC 恰好等于 2 的那一轮）。若那一轮
+#     SEEN_BUSY 恰为 0（刚启动、或上一轮 alive=0 分支清掉），这次机会被消耗且永不重来（计数器
+#     涨到 3、4…14 都不再匹配 -eq 2）——不是延迟上报，是【永久销毁该段停摆的上报权】。随后转忙
+#     ⇒ SEEN_BUSY=1、IDLE_CONSEC=0、RESUMED 照常发 ⇒ 「N 条 RESUMED / 0 条 IDLE」不对称。
+#   * SEEN_BUSY==1 门（「未见过忙就永不报」的防启动误报）把【挂载时已在进行的停摆】整类静默掉——
+#     挂载即停在提示符的会话（inner 16 窗口 100% 漏报的形态）永远等不到第一个忙轮。
+#   修法（人裁定 2026-08-08 13:2x，D5 锐化形式）：
+#     1. -eq → -ge：计数器到达阈值后继续匹配（不再只匹配等于 N 的那一轮）。
+#     2. per-spell 已报标志（IDLE_REPORTED）做边沿：每段空闲只报一次；忙轮清掉 → 新段可再报。
+#        -ge 不再需要「每轮重报」的代价——边沿由 IDLE_REPORTED 承担。
+#     3. SEEN_BUSY 的「防启动误报」意图改为「启动首轮不报」（ROUNDS 计数）而非「未见过忙就永不
+#        报」——前者只丢一轮，后者丢整段。挂载时已在进行的停摆也必须可报（AC6）。
+#     4. 首轮不报：监视器第 1 轮不报 IDLE/RESUMED（预热）；后续轮正常。SEEN_BUSY 保留为「已见过
+#        忙段」的状态记录（busy 侧/外部诊断可查），不再进报告门。
 #
 # 阶段四（gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input，2026-08-07）：
 # 上下文饱和度——「活着但收不进新指令」的判据。前三个阶段回答「会话还动不动」；本阶段补上
@@ -233,7 +249,7 @@ SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
-  PREV_SATURATED
+  PREV_SATURATED IDLE_REPORTED ROUNDS
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -933,6 +949,10 @@ _sl_audit_config_wiring
 while true; do
   while read -r name root target; do
     [ -n "${name:-}" ] || continue
+    # 首轮预热（D5 锐化，2026-08-08）：该目标被观察的轮数。启动第 1 轮不报 IDLE/RESUMED
+    # （原 SEEN_BUSY「未见过忙就永不报」的防启动误报意图改由它承担——前者只丢一轮，后者丢
+    # 整段）。alive=0 分支把它清 0，会话恢复后重新预热一轮。
+    ROUNDS[$name]=$(( ${ROUNDS[$name]:-0} + 1 ))
     pid=$(session_pid "$target")
     alive=$([ -n "$pid" ] && echo 1 || echo 0)
     halted=$([ -f "$root/.halt" ] && echo 1 || echo 0)
@@ -1039,8 +1059,11 @@ while true; do
         else
           IDLE_CONSEC[$name]=0
           SEEN_BUSY[$name]=1
+          # per-spell 边沿（D5 锐化）：忙轮开启新段 → 该段空闲尚未报过，允许再报一次。
+          IDLE_REPORTED[$name]=0
         fi
-        if [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
+        # 首轮预热（D5 锐化）：第 1 轮不报 RESUMED（PREV_IDLE 未置位已兜底；ROUNDS 门显式化）。
+        if [ "${ROUNDS[$name]:-0}" -gt 1 ] && [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
           if [ "$idle" = "1" ]; then
             # 忙→闲【单轮转换不报】——去抖（AC2）持有：只延迟 ≤1 轮询周期（真空闲下一轮还是闲，
             # 不造成漏报），远在 20 分钟 cron 兜底之内。真正的 SESSION-IDLE 由下面 counter 分支报。
@@ -1076,9 +1099,18 @@ while true; do
           fi
         fi
         PREV_IDLE[$name]=$idle
-        # 去抖后的 SESSION-IDLE 报告（AC2）：连续 IDLE_DEBOUNCE_ROUNDS 轮 fused-idle 且此前见过
-        # 忙轮（SEEN_BUSY，防启动误报）才报。单轮转换不报（上面）；counter==N 精确触发一次。
-        if [ "$idle" = "1" ] && [ "${IDLE_CONSEC[$name]:-0}" -eq "$IDLE_DEBOUNCE_ROUNDS" ] && [ "${SEEN_BUSY[$name]:-0}" = "1" ]; then
+        # 去抖后的 SESSION-IDLE 报告（AC2 + D5 锐化，2026-08-08）：连续 ≥IDLE_DEBOUNCE_ROUNDS
+        # 轮 fused-idle 且本段未报过（IDLE_REPORTED 边沿）且非启动首轮（ROUNDS 预热）才报。
+        #   * -ge 而非 -eq：计数器越过阈值后继续匹配——每段停摆不再只有「等于 2 的那一轮」一次
+        #     触发机会（-eq 会把 SEEN_BUSY=0 那一轮的失配变成永久销毁，见文件头 D5 注释）。
+        #   * IDLE_REPORTED：-ge 的边沿由它承担，每段空闲只报一次；忙轮清掉 → 新段可再报。
+        #   * ROUNDS>1：原 SEEN_BUSY「防启动误报」意图（启动首轮不报），挂载时已在进行的停摆
+        #     不再被「未见过忙就永不报」静默掉（AC6）。
+        if [ "$idle" = "1" ] \
+           && [ "${IDLE_CONSEC[$name]:-0}" -ge "$IDLE_DEBOUNCE_ROUNDS" ] \
+           && [ "${IDLE_REPORTED[$name]:-0}" = "0" ] \
+           && [ "${ROUNDS[$name]:-0}" -gt 1 ]; then
+          IDLE_REPORTED[$name]=1
           hmin="?"
           hmod=$(heartbeat_mtime_for "$name" "$root")
           hb=$(heartbeat_for "$name" "$root"); hmin="?"
@@ -1168,6 +1200,7 @@ while true; do
       PREV_STATE[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
       PREV_PANE_EMPTY[$name]=0
       IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0; PREV_SATURATED[$name]=0
+      IDLE_REPORTED[$name]=0; ROUNDS[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。

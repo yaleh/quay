@@ -105,11 +105,16 @@ test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes bu
     const idle = await waitForOutput(mon, /SESSION-IDLE probe/, 15000);
     assert.ok(idle, `SESSION-IDLE must fire when the probe returns idle:\n${mon.output()}`);
 
-    // 6. ordering: the busy transition precedes the idle transition.
+    // 6. ordering: the busy transition precedes the TRANSITION idle. D5 fix 2026-08-08
+    //    (gap-session-liveness-busy-mask-idle-with-subagents): with /nonexistent heartbeat +
+    //    idle-at-mount, a MOUNT-TIME SESSION-IDLE now fires (correct for an unknown-heartbeat
+    //    stall — the SEEN_BUSY gate no longer suppresses it), so the FIRST SESSION-IDLE may precede
+    //    the RESUMED. The assertion must target the FRESH idle of the post-busy spell: the LAST
+    //    SESSION-IDLE must postdate the RESUMED (per-spell edge re-arms IDLE on the busy spell).
     const out = mon.output();
     const rIdx = out.indexOf("SESSION-RESUMED");
-    const iIdx = out.indexOf("SESSION-IDLE");
-    assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `SESSION-RESUMED must precede SESSION-IDLE:\n${out}`);
+    const iIdx = out.lastIndexOf("SESSION-IDLE");
+    assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `SESSION-RESUMED must precede the post-busy SESSION-IDLE:\n${out}`);
   } finally {
     mon.child.kill("SIGKILL");
     mon.cleanup();
