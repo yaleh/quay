@@ -42,6 +42,7 @@ import {
   invokeEntryPath,
   checkDodSuiteLine,
   readDodSuiteLineBaseline,
+  readBareDirTouchesBaseline,
   DATA_FILE_REL,
   DOD_SUITE_LINE_BASELINE_REL,
 } from "../scripts/task-contract-check.ts";
@@ -785,9 +786,13 @@ test("AC6 real-store: backfilled case tasks + this task are violation-free", { s
     "tasks/gap-dispatch-gate-has-no-checklist-and-no-trace.md",
   ];
   // NOTE: runCli process-exits (it IS the CLI), so the real-store assertions scan directly.
+  // gap-suite-concurrency-4-vs-8-measurement.md carries a pre-rule bare-dir Touches entry
+  // (`measurements/（若复用 measure-suite 工具）`), grandfathered in the bare-dir-touches baseline —
+  // so the scan passes the real baseline to stay change-relevant-aware (bare-dir-touches-check, AC1).
+  const { baseline } = readBareDirTouchesBaseline(root);
   for (const f of files) {
     const text = fs.readFileSync(path.join(root, f), "utf8");
-    const { violations } = scanTaskText(text, f);
+    const { violations } = scanTaskText(text, f, { bareDirTouchesBaseline: baseline, root });
     assert.deepEqual(violations, [], `expected ${f} to have zero violations, got: ${JSON.stringify(violations)}`);
   }
 });

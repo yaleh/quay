@@ -225,6 +225,13 @@ violations: 0
       合 develop；红窗停派结构性消除；历史分支已清；全局断言已修
 - [x] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
 
+> **Touches 收窄交叉标注（2026-08-08，来自 `tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool.md`）**：
+> 本任务 `## Touches` 的裸目录 + 不确定声明（`plugin/scripts/（分支模型 helper：...，若成脚本）`）已在
+> 2026-08-06 收窄为具体路径（`fork-baseline.ts` / `integration-batch-merge.sh` / `integration-branch-model.ts` 等）。
+> 收窄裁定：Touches 禁裸目录 + '若成脚本'/'或等价'/'可能' 类不确定声明——声明具体路径或先占明确候选路径
+> （如 `plugin/scripts/branch-helper.sh`）。机械检查见该任务 AC1（`bare-dir-uncertain-touch` 于
+> task-contract-check.ts，shrink-only baseline `docs/analysis/bare-dir-touches-baseline.md`）。
+
 ## Touches
 
 - tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（自身文件：勾 AC + 贴 invoke 证据授权）

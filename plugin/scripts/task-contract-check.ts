@@ -43,6 +43,9 @@ import {
   checkDispatchReview,
   CONTRACT_KEYS,
 } from "./task-schema.ts";
+// The ONE Touches parser (single-source) — the bare-dir + uncertain-annotation flag it exposes is the
+// mechanical rule from tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool (AC1).
+import { extractTouchesSection, flagBareDirUncertainTouches } from "./touches-parser.ts";
 
 // ── Workspace-root discovery ─────────────────────────────────────────────────────────────────────────
 export function findWorkspaceRoot(startDir = path.dirname(fileURLToPath(import.meta.url))) {
@@ -262,6 +265,50 @@ export function checkDodSuiteLine(body, taskFileRel, grandfathered) {
   }];
 }
 
+// ── Check 7: bare-directory + uncertain-annotation Touches (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1) ──
+// A Touches entry must NOT declare a BARE DIRECTORY with an UNCERTAIN annotation ('若成脚本' /
+// '或等价' / '可能'). A bare dir expands to everything under it — a speculative broad declaration
+// that drags the whole ready pool into conservative serialization (measured: branch-model's
+// `plugin/scripts/（…，若成脚本）` expanded to 100+ files and sank 5/6 pool candidates). Rule: declare a
+// CONCRETE path, or PRE-CLAIM an explicit candidate path (e.g. `plugin/scripts/branch-helper.sh`).
+// Like checkDodSuiteLine, the legacy occurrences are grandfathered in a SHRINK-ONLY baseline — a task
+// file NOT on the list whose Touches carries the pattern is a NEW occurrence ⇒ violation.
+export const BARE_DIR_TOUCHES_BASELINE_REL = "docs/analysis/bare-dir-touches-baseline.md";
+
+/** Read the shrink-only grandfather list of task files that legitimately still carry the bare-dir +
+ *  uncertain-annotation Touches pattern (pre-rule debt). Absent file ⇒ empty set (nothing grandfathered). */
+export function readBareDirTouchesBaseline(root) {
+  const p = path.join(root, BARE_DIR_TOUCHES_BASELINE_REL);
+  if (!fs.existsSync(p)) return { baseline: new Set(), baselineCount: null };
+  const text = fs.readFileSync(p, "utf8");
+  const countMatch = text.match(/^# baseline-count:\s*(\d+)/m);
+  const baseline = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    baseline.add(t);
+  }
+  return { baseline, baselineCount: countMatch ? Number(countMatch[1]) : null };
+}
+
+/** A task's `## Touches` carries the bare-dir + uncertain-annotation pattern AND the file is not
+ *  grandfathered ⇒ a NEW occurrence. `root` is the repo root (fs-confirms bare directories). */
+export function checkBareDirUncertainTouches(body, taskFileRel, root, grandfathered) {
+  if (grandfathered.has(taskFileRel)) return [];
+  const { hasSection, section } = extractTouchesSection(body);
+  if (!hasSection) return [];
+  const flagged = flagBareDirUncertainTouches(section, root);
+  if (flagged.length === 0) return [];
+  const entries = flagged.map((f) => `\`${f.raw}\``).join(" · ");
+  return [{
+    code: "bare-dir-uncertain-touch",
+    what:
+      `## Touches 含裸目录 + 不确定标注（tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool 规则：` +
+      `Touches 禁裸目录 + '若成脚本'/'或等价'/'可能' 类不确定声明——声明具体路径或先占明确候选路径，如 ` +
+      `plugin/scripts/branch-helper.sh）：${entries}`,
+  }];
+}
+
 // ── Per-task scan ────────────────────────────────────────────────────────────────────────────────────
 // Returns { taskId, violations: [{code, what}], info: [{code, what}] }.
 // `violations` feed the ratchet list; `info` is non-ratchet context (absent sections on tasks that
@@ -269,7 +316,7 @@ export function checkDodSuiteLine(body, taskFileRel, grandfathered) {
 // `dodSuiteLineBaseline` (a Set of repo-root-relative task file paths) is the grandfather list for
 // the DoD full-suite-demand check (gap-suite-green-gate-..., AC2): files ON the list keep their
 // legacy DoD line; a file NOT on it with the demand is a NEW occurrence ⇒ violation.
-export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = new Set() } = {}) {
+export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = new Set(), bareDirTouchesBaseline = new Set(), root = null } = {}) {
   const task = parseTask(text);
   const body = task.body;
   // parseTask does not surface `status`; read it from the raw frontmatter for the done-task
@@ -304,6 +351,12 @@ export function scanTaskText(text, taskFileRel = "", { dodSuiteLineBaseline = ne
   // Check 6: DoD full-suite-demand line (gap-suite-green-gate-..., AC2) — a NEW occurrence (a file not
   // on the shrink-only grandfather list whose DoD carries the demand) is a violation.
   violations.push(...checkDodSuiteLine(body, taskFileRel, dodSuiteLineBaseline));
+
+  // Check 7: bare-directory + uncertain-annotation Touches (gap-touches-bare-dir-uncertain-declaration-
+  // drags-the-pool, AC1) — a NEW occurrence (a file not on the shrink-only grandfather list whose
+  // Touches carries the bare-dir + uncertain pattern) is a violation. Runs regardless of whether the
+  // task has a ## Contract (it is a ## Touches rule, not a Contract rule).
+  violations.push(...checkBareDirUncertainTouches(body, taskFileRel, root, bareDirTouchesBaseline));
 
   const idMatch = task.frontmatterRaw.match(/^id:\s*(.+)$/m);
   const taskId = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : path.basename(taskFileRel || "task", ".md");
@@ -419,10 +472,17 @@ export function runCli(argv) {
   // full-suite demand; a file NOT on it with the demand is a NEW occurrence. Ceiling breach (the list
   // itself grew past its baseline-count header) is a ratchet violation independent of task violations.
   const dodBaseline = readDodSuiteLineBaseline(wsRoot);
+  // Check 7 (bare-dir-uncertain-touch): the shrink-only grandfather list for the bare-directory +
+  // uncertain-annotation Touches pattern (gap-touches-bare-dir-uncertain-declaration-drags-the-pool).
+  const bareDirBaseline = readBareDirTouchesBaseline(wsRoot);
   for (const file of list) {
     const rel = path.relative(wsRoot, file);
     const text = fs.readFileSync(file, "utf8");
-    const res = scanTaskText(text, rel, { dodSuiteLineBaseline: dodBaseline.baseline });
+    const res = scanTaskText(text, rel, {
+      dodSuiteLineBaseline: dodBaseline.baseline,
+      bareDirTouchesBaseline: bareDirBaseline.baseline,
+      root: wsRoot,
+    });
     for (const v of res.violations) allViolations.push(`${rel}: ${v.code}`);
     allInfo.push(...res.info.map((i) => ({ file: rel, ...i })));
     if (res.violations.length > 0 || res.info.length > 0) {
@@ -433,6 +493,11 @@ export function runCli(argv) {
     dodBaseline.baselineCount !== null && dodBaseline.baseline.size > dodBaseline.baselineCount;
   if (dodCeilingBreach) {
     console.error(`task-contract-check: dod-suite-line baseline CEILING BREACH — docs/analysis/dod-suite-line-baseline.md has ${dodBaseline.baseline.size} entries but baseline-count: ${dodBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-suite-green-gate-..., AC2)`);
+  }
+  const bareDirCeilingBreach =
+    bareDirBaseline.baselineCount !== null && bareDirBaseline.baseline.size > bareDirBaseline.baselineCount;
+  if (bareDirCeilingBreach) {
+    console.error(`task-contract-check: bare-dir-touches baseline CEILING BREACH — docs/analysis/bare-dir-touches-baseline.md has ${bareDirBaseline.baseline.size} entries but baseline-count: ${bareDirBaseline.baselineCount}; the grandfather list can only get SHORTER (gap-touches-bare-dir-uncertain-declaration-drags-the-pool, AC1)`);
   }
 
   const currentEntries = [...new Set(allViolations)].sort();
@@ -452,13 +517,13 @@ export function runCli(argv) {
   let writeOutcome = null;
   if (writeRatchetFlag && !growth && !subset) {
     writeOutcome = writeRatchet(wsRoot, currentEntries, { reset: resetBaseline });
-    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, dodCeilingBreach });
+    if (!writeOutcome.ok) return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth: true, writeOutcome, wsRoot, subset, dodCeilingBreach, bareDirCeilingBreach });
   }
 
-  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach });
+  return finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset, dodCeilingBreach, bareDirCeilingBreach });
 }
 
-function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false }) {
+function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, baselineCount, growth, writeOutcome, wsRoot, subset, strictSubset = false, dodCeilingBreach = false, bareDirCeilingBreach = false }) {
   if (json) {
     const report = {
       workspaceRoot: wsRoot,
@@ -474,6 +539,7 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
         growth,
       },
       dodSuiteLineCeilingBreach: dodCeilingBreach,
+      bareDirTouchesCeilingBreach: bareDirCeilingBreach,
       writeOutcome,
     };
     console.log(JSON.stringify(report, null, 2));
@@ -500,7 +566,8 @@ function finish({ json, perTask, allInfo, currentEntries, newOnes, resolved, bas
   // The ratchet comparison stays skipped (unrelated tasks are not scanned, so nothing to compare).
   const strictFail = strictSubset && subset && perTask.some((t) => t.violations.length > 0);
   if (dodCeilingBreach && !json) console.log("task-contract-check: DOD-SUITE-LINE BASELINE CEILING BREACH — grandfather list can only get SHORTER");
-  process.exit(growth || strictFail || dodCeilingBreach ? 1 : 0);
+  if (bareDirCeilingBreach && !json) console.log("task-contract-check: BARE-DIR-TOUCHES BASELINE CEILING BREACH — grandfather list can only get SHORTER");
+  process.exit(growth || strictFail || dodCeilingBreach || bareDirCeilingBreach ? 1 : 0);
 }
 
 // Entry point when run directly (not imported).

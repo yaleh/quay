@@ -1,4 +1,6 @@
 // touches-parser.ts — the ONE `## Touches` bullet-parser implementation (ADR-004 single-source).
+import fs from "node:fs";
+import path from "node:path";
 import { isDirectEntry } from "./gate-script-base.ts";
 //
 // Root cause this module exists to close (gap-task-body-has-n-parsers-and-no-authority):
@@ -95,6 +97,63 @@ export function parseTouchEntriesWithTags(touchesSection) {
     const path = cleaned.replace(/^\.\//, "").trim(); // leading "./"
     if (!path) continue;
     out.push({ path, tag });
+  }
+  return out;
+}
+
+// ── Bare-directory + uncertain-annotation detection ───────────────────────────────────────────────────
+// (tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool) — a Touches entry must NOT declare
+// a bare-directory glob with an uncertain annotation ('若成脚本' / '或等价' / '可能'). A bare directory
+// expands to EVERYTHING under it (a SPECULATIVE broad declaration that collides with every other task
+// touching that dir — measured: branch-model's `plugin/scripts/（…，若成脚本）` expanded to 100+ files and
+// sank 5/6 pool candidates). Rule: declare a CONCRETE path, or PRE-CLAIM an explicit candidate path
+// (e.g. `plugin/scripts/branch-helper.sh`), never a bare dir with '若成脚本'-style uncertainty.
+// This module provides the MECHANICAL flag; the consumer check (task-contract-check.ts
+// `bare-dir-uncertain-touch`) wires it to the task store + a shrink-only baseline.
+export const UNCERTAIN_TOUCH_ANNOTATION_RE = /若成|若作|若|或等价|或|可能|也许|待定|暂定|拟|说不定|未定/;
+
+/** True when a (post-annotation-strip) Touches path is a BARE DIRECTORY declaration:
+ *  - empty (the annotation IS the whole entry — no concrete path at all);
+ *  - a trailing `/` (an explicit directory);
+ *  - an existing directory on disk (when `root` is given);
+ *  - directory-shaped (no wildcard and the last segment carries no `.` extension marker) — a path
+ *    that is neither an existing file nor an existing directory and names no concrete file.
+ *  A concrete file path (`plugin/scripts/fork-baseline.ts`, `plugin/VERSION`) is NOT bare.
+ *  `root` is optional; when given it fs-confirms existing files (so an extension-less concrete file
+ *  like `plugin/VERSION` is not mistaken for a directory). */
+export function isBareDirectoryTouch(p, root) {
+  const s = String(p ?? "").replace(/^\.\//, "").trim();
+  if (!s) return true;                // empty declaration
+  if (s.endsWith("/")) return true;   // trailing slash = directory
+  if (/[*?]/.test(s)) return false;   // a wildcard is a glob, judged by the overbroad rules
+  if (root) {
+    try {
+      const st = fs.statSync(path.join(root, s));
+      if (st.isDirectory()) return true;
+      if (st.isFile()) return false;  // an existing file (even extension-less) is concrete
+    } catch { /* not on disk — fall through to the shape heuristic */ }
+  }
+  return !s.split("/").pop().includes("."); // directory-shaped: no file-extension in the last segment
+}
+
+/** Flag Touches entries that combine a BARE-DIRECTORY path with an UNCERTAIN annotation
+ *  ('若成脚本' / '或等价' / '可能' family). Returns [{ raw, path, annotation }] — `raw` is the bullet
+ *  text after the `- ` marker, `path` is the post-annotation-strip path, `annotation` is the trailing
+ *  （…）/(…) content. `root` is optional (fs-confirms existing directories/files). */
+export function flagBareDirUncertainTouches(touchesSection, root) {
+  if (!touchesSection) return [];
+  const out = [];
+  for (const raw of String(touchesSection).split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = line.match(/^[-*]\s+(.+)$/);
+    if (!m) continue;
+    const entry = m[1].trim();
+    const annM = entry.match(/(?:（([^）]*)）|\(([^)]*)\))\s*$/);
+    if (!annM) continue;
+    const annotation = (annM[1] ?? annM[2] ?? "").trim();
+    if (!annotation || !UNCERTAIN_TOUCH_ANNOTATION_RE.test(annotation)) continue;
+    const p = stripTouchAnnotation(entry);
+    if (isBareDirectoryTouch(p, root)) out.push({ raw: entry, path: p, annotation });
   }
   return out;
 }
