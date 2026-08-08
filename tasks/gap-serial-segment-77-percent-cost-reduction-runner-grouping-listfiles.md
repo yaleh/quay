@@ -133,6 +133,7 @@ resume 若中断，先跑 measure 读 serial 段当前耗时
   （flags-only 不再嵌套跑 3× governance，嵌套成本归零，serial 路由保留）。
 
 ## Touches
+- tasks/gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/test/runner-grouping.test.mjs（flags-only 用例改 --list-files 比对）
 - plugin/scripts/test-file-snapshot.sh 或 install 族测试（共享 laydown 模板）
 - plugin/test/capability-catalog.test.mjs / quay-init-loop-*.test.mjs / npm-pack-e2e.test.mjs（install 族）
