@@ -93,6 +93,14 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
       makePaneIdle(p.env, p.session); // clear the input → back to the idle shape
       assert.ok(await waitForOutput(mon, /SESSION-IDLE esc/, 8000),
         `IDLE must fire once the semantic flag disappears:\n${mon.output()}`);
+      // D5 fix (2026-08-08): /nonexistent heartbeat + idle-at-mount now fires a MOUNT-TIME IDLE
+      // (correct for an unknown-heartbeat stall — SEEN_BUSY gate removed). The assertion must be
+      // the TRANSITION IDLE, not that mount-time one: a fresh IDLE must fire after the busy, i.e.
+      // the LAST SESSION-IDLE must postdate the SESSION-RESUMED (per-spell edge: IDLE reports once
+      // per idle spell, and the busy spell re-arms it).
+      const out2 = mon.output();
+      assert.ok(out2.indexOf("SESSION-RESUMED esc") < out2.lastIndexOf("SESSION-IDLE esc"),
+        `a FRESH IDLE must fire after the busy transition (the mount-time idle is not the one under test):\n${out2}`);
     } finally {
       mon.child.kill("SIGKILL");
     mon.cleanup();
@@ -113,9 +121,14 @@ test("AC1 — a pane whose ONLY change is the /clear to save token counter stays
     tmux(["send-keys", "-t", p.session, "for i in $(seq 1 40); do printf \"/clear to save %s.%sk tokens\\r\" $i $i; sleep 0.4; done &"], p.env);
     tmux(["send-keys", "-t", p.session, "Enter"], p.env);
     await sleep(2500); // let the job notice land and the loop start
-    // tickLogs /nonexistent isolates the heartbeat so OVERDUE (from the real worktree tick-log)
-    // can't fire and pollute the event stream; we assert zero RESUMED/IDLE.
-    const mon = spawnMonitor(p.env, `tok ${p.tmp} ${p.session}`, { tickLogs: `tok /nonexistent` });
+    // A FRESH tick keeps hmin≈0 (not "?"): the D5 fix (2026-08-08) makes a mount-time idle WITH an
+    // unknown heartbeat report SESSION-IDLE (SEEN_BUSY gate removed) — that mount-time idle is
+    // correct behavior for a stall, but it is UNRELATED to chrome. A fresh tick pins hmin≈0 so the
+    // mount-time idle is suppressed by the LOOP_MIN noise gate and this test asserts what it is
+    // actually about: chrome must not read as work (zero RESUMED / zero IDLE PAIR).
+    const tick = path.join(p.tmp, "tick.md");
+    fs.writeFileSync(tick, "# tick\n");
+    const mon = spawnMonitor(p.env, `tok ${p.tmp} ${p.session}`, { tickLogs: `tok ${tick}` });
     try {
       await sleep(5000); // several rounds while the token number keeps changing
       const out = mon.output();
@@ -421,13 +434,15 @@ test("AC1 seam — --last-message-type classifies pending-tool-use / pure-text /
 test("AC3 — a pure-text round with no new tool calls (stale transcript) reports SESSION-IDLE after the 2-round debounce (true idle detected, not a gap misjudged)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-trueidle");
   const x = path.join(p.tmp, "session.jsonl");
-  writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // busy phase first (SEEN_BUSY=1)
+  writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 1); // busy phase first (was working)
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
     const mon = spawnMonitor(p.env, `ac3 ${p.tmp} ${p.session}`,
       { transcripts: `ac3 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
     try {
-      // busy phase: ≥2 rounds so SEEN_BUSY=1 (the debounce never fires on a never-busy session).
+      // busy phase: ≥2 rounds establish the "was working" baseline (D5 note 2026-08-08: SEEN_BUSY
+      // is no longer REQUIRED to report IDLE — a session stalled from mount reports too; the busy
+      // phase here models the measured "worked, then froze" scenario, not a report precondition).
       assert.ok(await waitForRounds(mon, 2, 15000), `monitor must run ≥2 busy rounds:\n${mon.output()}`);
       // true idle: pure-text round, 8 minutes no new tool calls (the manager's measured scenario).
       writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
@@ -453,7 +468,8 @@ test("AC4 — a pure-text blip lasting exactly ONE monitor round between two too
     const mon = spawnMonitor(p.env, `gap4 ${p.tmp} ${p.session}`,
       { transcripts: `gap4 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
     try {
-      // phase 1: ≥2 busy rounds (SEEN_BUSY=1); HEARTBEAT lines give the round cadence.
+      // phase 1: ≥2 busy rounds establish the "was working" baseline (D5 note 2026-08-08: SEEN_BUSY
+      // no longer gates IDLE reporting; the busy phase models the measured "worked, then froze" shape).
       assert.ok(await waitForRounds(mon, 2, 15000), `monitor must run ≥2 rounds:\n${mon.output()}`);
       // phase 2: the GAP — exactly one round of pure-text, then back to busy before the 2nd idle round.
       writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 1); // the gap: transcript pure-text, pane static
@@ -492,6 +508,109 @@ test("AC5 — a pending tool_use in the transcript (round in progress) NEVER rep
       writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
       assert.ok(await waitForOutput(mon, /SESSION-IDLE ac5/, 15000),
         `AC5 control: after the pending tool_use clears, a persistent pure-text idle MUST fire (proves the busy suppression is the pending tool_use):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC6/D5 — a session stalled FROM MOUNT (never observed busy, stale pure-text transcript) reports SESSION-IDLE after the debounce; the SEEN_BUSY gate must not permanently destroy the stall's report right", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // Reproduction of gap-session-liveness-busy-mask-idle-with-subagents: inner 16 windows were
+  // 100% missed because the old report gate `-eq N && SEEN_BUSY==1` gave each stall ONE trigger
+  // opportunity — the IDLE_CONSEC==2 round — and when SEEN_BUSY was 0 there (mount-in-progress
+  // stall / a prior alive=0 branch cleared it), the trigger was consumed and NEVER re-armed
+  // (counter passed 2, `-eq 2` never matched again). The busy flag had NOTHING to do with it:
+  // the stall was waiting-input the whole way. The D5 fix: `-ge` + per-spell IDLE_REPORTED edge
+  // + ROUNDS first-round warmup replaces the SEEN_BUSY requirement.
+  const p = makeHermeticProbe("ol-d5mount");
+  const x = path.join(p.tmp, "session.jsonl");
+  // Stalled from mount: last message pure-text (candidate idle), file mtime 8 min back (hmin≈8 ≥
+  // loopMin=1 → noise gate open). Never a busy round → SEEN_BUSY=0 the whole way.
+  writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `d5 ${p.tmp} ${p.session}`,
+      { transcripts: `d5 ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    try {
+      const idle = await waitForOutput(mon, /SESSION-IDLE d5/, 20000);
+      assert.ok(idle, `AC6/D5: a session stalled from mount (never busy) MUST report SESSION-IDLE after the debounce:\n${mon.output()}`);
+      assert.ok(/心跳 \d+ 分钟前更新/.test(mon.output()),
+        `AC6/D5: the IDLE must carry the heartbeat staleness (true stall, not a gap):\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC6/D5 — the per-spell edge: SESSION-IDLE fires ONCE per idle spell (the -ge threshold must not spam); a busy spell re-arms the edge so the NEXT idle spell reports again", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-d5edge");
+  const x = path.join(p.tmp, "session.jsonl");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // Spells are driven by the TRANSCRIPT's last-message type (the pane stays a static bash
+    // prompt): busy = pending-tool-use (tool_use block); idle = pure-text. Each spell is
+    // backdated 8 min so hmin≥loopMin=1 → IDLE reports (noise gate open).
+    const mon = spawnMonitor(p.env, `de ${p.tmp} ${p.session}`,
+      { transcripts: `de ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    try {
+      // Spell 1: busy (was working) for ≥2 rounds.
+      writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 8);
+      assert.ok(await waitForRounds(mon, 2, 15000), `spell-1 busy rounds:\n${mon.output()}`);
+      // Spell 1: idle → IDLE reports exactly once.
+      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
+      assert.ok(await waitForOutput(mon, /SESSION-IDLE de/, 20000), `spell-1 idle must report IDLE:\n${mon.output()}`);
+      // Hold spell-1 idle several more rounds — the -ge threshold is long past, but the per-spell
+      // edge (IDLE_REPORTED) must NOT re-report every round.
+      assert.ok(await waitForRounds(mon, 5, 15000), `hold idle rounds:\n${mon.output()}`);
+      await sleep(500);
+      let c = (mon.output().match(/SESSION-IDLE de/g) || []).length;
+      assert.equal(c, 1, `per-spell edge: one idle spell must report SESSION-IDLE exactly once (-ge must not spam), got ${c}:\n${mon.output()}`);
+      // Spell 2: busy → the edge re-arms (and RESUMED fires on the transition).
+      writeTranscript(x, [assistantToolUseRecord(isoAgo(0.1))], 8);
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED de/, 20000), `spell-2 busy must fire RESUMED:\n${mon.output()}`);
+      // Spell 2: idle → a SECOND IDLE fires (new spell, edge re-armed).
+      writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline && (mon.output().match(/SESSION-IDLE de/g) || []).length < 2) await sleep(200);
+      c = (mon.output().match(/SESSION-IDLE de/g) || []).length;
+      assert.equal(c, 2, `per-spell edge: two idle spells must report IDLE exactly twice, got ${c}:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC6/D5 — the first launch round reports nothing (warmup): no SESSION-IDLE and no SESSION-RESUMED before the second round", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-d5warm");
+  const x = path.join(p.tmp, "session.jsonl");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // Stalled-from-mount transcript (pure-text, 8 min stale) — the exact shape that would fire
+    // IDLE as soon as the debounce allows. The ROUNDS>1 warmup (which replaced the old SEEN_BUSY
+    // "never report until busy seen" startup guard) must hold back round 1.
+    writeTranscript(x, [assistantTextRecord(isoAgo(0.1))], 8);
+    const mon = spawnMonitor(p.env, `wr ${p.tmp} ${p.session}`,
+      { transcripts: `wr ${x}`, overdueMin: 999, loopMin: 1, interval: 1 });
+    try {
+      // After ONE complete round (the `# ROUND` marker prints after the per-target loop, so all
+      // round-1 event output is already captured): nothing may be reported.
+      assert.ok(await waitForRounds(mon, 1, 15000), `monitor must run round 1:\n${mon.output()}`);
+      await sleep(300); // grace for a spurious round-1 report to land in the stream
+      const out1 = mon.output();
+      assert.ok(!/SESSION-IDLE wr/.test(out1), `first round must not report IDLE (warmup):\n${out1}`);
+      assert.ok(!/SESSION-RESUMED wr/.test(out1), `first round must not report RESUMED (warmup):\n${out1}`);
+      // From round 2 on, the stalled session reports IDLE after the 2-round debounce.
+      assert.ok(await waitForOutput(mon, /SESSION-IDLE wr/, 20000),
+        `after the warmup round the stall must report IDLE:\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
       mon.cleanup();
@@ -551,7 +670,13 @@ test("AC4 — a pane whose ONLY real change is the agent task line (↓ NN.Nk to
       assert.ok(cls.stdout.includes("general-purpose") && cls.stdout.includes("tokens"),
         `AC4: the agent task line must be preserved in the classifier region:\n${cls.stdout}`);
     }
-    const mon = spawnMonitor(p.env, `ac4 ${p.tmp} ${p.session}`, { tickLogs: `ac4 /nonexistent` });
+    // A FRESH tick (not /nonexistent) pins hmin≈0 so the D5-fix mount-time idle (a correct report
+    // for an unknown-heartbeat stall, gap-session-liveness-busy-mask-idle-with-subagents) is
+    // suppressed by the LOOP_MIN noise gate — this test is about the advancing agent line during
+    // real work, not about the mount-time baseline.
+    const tick = path.join(p.tmp, "tick.md");
+    fs.writeFileSync(tick, "# tick\n");
+    const mon = spawnMonitor(p.env, `ac4 ${p.tmp} ${p.session}`, { tickLogs: `ac4 ${tick}` });
     try {
       await sleep(2500); // idle baseline
       // real work in a Claude Code pane: the agent task line is visible (printed) AND the busy
@@ -588,7 +713,11 @@ test("AC9 — a known-continuous-work window reports SESSION-RESUMED at most ONC
   const p = makeHermeticProbe("ol-ac9");
   try {
     assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
-    const mon = spawnMonitor(p.env, `ac9 ${p.tmp} ${p.session}`, { tickLogs: `ac9 /nonexistent` });
+    // A FRESH tick pins hmin≈0 (D5-fix mount-time idle suppressed by LOOP_MIN) — see the AC4 test
+    // for the same rationale; this test is about continuous busy work, not the mount baseline.
+    const tick = path.join(p.tmp, "tick.md");
+    fs.writeFileSync(tick, "# tick\n");
+    const mon = spawnMonitor(p.env, `ac9 ${p.tmp} ${p.session}`, { tickLogs: `ac9 ${tick}` });
     try {
       await sleep(2500); // idle baseline
       // continuous work = the busy shape (esc typed) held across several rounds. With the busy
