@@ -74,18 +74,35 @@ resume 若中断，先跑 measure 读当前套件/ catalog 状态，再读 Rever
       - 恢复合并丢的 `quay-entry-test-helpers.mjs`（quay-session.test.mjs 纯 import 依赖）。
       隔离实跑（develop 主 checkout）：quay-session 6/0 · session-topology 10/0 · session-bootstrap
       9/0 · inner-blocked-signal 31/0 · loop-shipping 3/0 · quay-init-loop-driver 15/0 · serial 组 42/0。
-- [ ] AC2: **干净窗口全量绿**——`suite_green`=1（重合并前置判据）
+- [x] AC2: **干净窗口全量绿**——`suite_green`=1（重合并前置判据）
+      **实测（执行子代理 2026-08-08，fork 基线 develop HEAD c4669fa0）**：
+      - 契约 measure：`.quay/full-suite-state.json` = `{"state":"green", ... finishedAt
+        2026-08-08T10:29:40Z}` → **suite_green=1**（外层干净窗口跑，AC1 落点后无测试改动，仍有效）；
+      - 契约 invoke：`node --no-warnings --experimental-strip-types --test
+        plugin/test/capability-catalog.test.mjs` → **pass 8 / fail 0（catalog_fail=0）**；
+      - 受影响测试隔离复验（develop 主 checkout）：capability-catalog 8/0 · quay-session 6/0 ·
+        session-topology 10/0 · session-bootstrap 9/0 · inner-blocked-signal 31/0 ·
+        quay-init-loop-driver 15/0 · quay-init-loop-core 12/0 · tick-vocabulary 5/0 ·
+        loop-shipping 族 15/0。
+      **注**：worktree 内 capability-catalog 隔离红（ERR_ASSERTION 2 vs 0，quay-init --loop exit 2）
+      是 gitignored vendor 运行时缺失（`plugin/vendor/quay/dist/quay.js` 未铺装，
+      sync-vendor.sh 失败），非 40→6 回归——主 checkout（有 vendor dist）8/0 绿。
 - [ ] AC3: **重合并 + 复验**——integration→develop 真 merge，重跑套件绿；surface_entrypoints 回 8-10、
-      sh_entrypoints 回 2-4（40→6 生效）
-- [ ] AC4: **无回归**——重合并后的套件失败数 ≤ 回滚前基线（不引入新问题）
+      sh_entrypoints 回 2-4（40→6 生效）。**外层动作**。重合并时必须同步恢复测试注释里
+      「Re-instate … when 40→6 is re-merged」标记的入口形断言（quay-suite.ts / quay-deliver.ts /
+      quay-session.ts，见 session-topology/session-bootstrap/inner-blocked-signal/quay-init-loop-driver
+      测试内注释），否则 40→6 树复红。
+- [ ] AC4: **无回归**——重合并后的套件失败数 ≤ 回滚前基线（不引入新问题）。**外层动作**（随 AC3）。
 - [ ] AC5: 与 `gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms`（whitelist 是第一个
       实例）、`gap-ac8-import-over-spawn-ticked-while-its-own-evidence-says-not-in-effect`（40→6 本体）
-      交叉标注
+      交叉标注。**延后到外层重合并时做**：两目标任务文件正被并发重构——ac8 分支
+      （`task/gap-ac8-…`，HEAD 2f6621ed）删除 tick-vocabulary 任务文件并重开 ac8（status done→ready、
+      AC1/AC2 重新开箱），现在写交叉标注会撞并发；本任务侧的关系说明已记录于 Proposal/Dispatch review。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体
-- [ ] 40→6 重合并后套件连跑 2 次全绿
+- [x] AC1-AC5 实跑输出贴进任务体（AC1 证据 develop 2163c4c3+2dc55ba9；AC2 证据见上；AC5 延后原因见上）
+- [ ] 40→6 重合并后套件连跑 2 次全绿（外层 AC3 后执行）
 - [ ] Revert 7642849a 撤销（重合并后 develop 含 40→6）
 
 ## Carries
