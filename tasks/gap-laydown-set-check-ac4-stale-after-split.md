@@ -54,6 +54,7 @@ resume 若中断，先跑 measure 读 AC4 fail 数
       配对判据迁就拆分产物而非反向。
 - [x] AC3: **隔离过**——laydown-set-check.test.mjs 隔离 fail 0
       **证据**：`node --test plugin/test/laydown-set-check.test.mjs` → **7 pass / 0 fail**（AC4 更新后全绿）。
+      **scoped 验证（entry path 在场）**：`bash scripts/test.sh --for-task gap-laydown-set-check-ac4-stale-after-split`
 - [ ] AC4: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0
       **状态**：AC4 断言已修复（本轮唯一失败），全量三趟待外层验证轮。
 - [x] AC5: 与 gap-laydown-derivation-is-sensitive-to-reference-spelling-dependency-closure（同族）、

@@ -51,6 +51,7 @@ resume 若中断，先跑 measure 读原文件存在 + 新文件数 + 套件状�
       **证据**：3 文件共 **19+14+24 = 57** 测试声明（与裁定书"57 = 50+7"一致）。隔离实跑（develop）：
       events **18 pass / 0 fail**、heartbeat **14 pass / 0 fail**、signals **24 pass / 0 fail**
       （heartbeat 首次 13/1 为 KNOWN-LOAD-SENSITIVE 时序 flake，隔离重跑 14/0）。
+      **scoped 验证（entry path 在场）**：`bash scripts/test.sh --for-task gap-session-liveness-original-file-residue-post-split`
 - [ ] AC3: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0（session-liveness OVERDUE flake 消失）
       **状态**：残留删除后 OVERDUE flake 的载体已移除；全量三趟待外层验证轮。
 - [x] AC4: 与 gap-session-liveness-tail-capped-split（拆分 DoD 缺口：没删原文件）、

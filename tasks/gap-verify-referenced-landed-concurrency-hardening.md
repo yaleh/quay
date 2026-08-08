@@ -50,6 +50,7 @@ resume 若中断，先跑 measure 读两文件 fail 数
       **证据**：develop 03e32d1e（`_read_declarations` 3 次递增重试，完整性哨兵 = 常驻的
       `orchestration/tick-log.md` self-create + `orchestration/manager-tick-log.md` reference-doc，
       缺失即重读）+ per-reference 路径额外一次 fresh re-read。确定性重跑：声明齐全 → exit 0 无误报。
+      **scoped 验证（entry path 在场）**：`bash scripts/test.sh --for-task gap-verify-referenced-landed-concurrency-hardening`
 - [x] AC2: **负控制**——真实未声明文件仍 fail（不 mask 真 drift）
       **证据**：在拷贝的 fast-mode-loop-tick.md 末尾加 `docs/analysis/never-declared-file.md` 引用 →
       `FAIL (referenced-not-landed): docs/analysis/never-declared-file.md`，exit 2（真 drift 不被重试吞掉）。
