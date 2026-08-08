@@ -114,7 +114,7 @@ test("AC2 — the full decision reads cpu some avg10, NOT avg300: churn-only hig
     repoRoot: REPO_ROOT,
     stateFile: s1,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "53", RESOURCE_GATE_TEST_CPU_AVG300: "54.5" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "53", RESOURCE_GATE_TEST_CPU_AVG300: "54.5", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(r1.band, "GO", "avg10 (not avg300) decides the band — session churn alone must not cap");
   assert.equal(r1.effective_cap, TEST_BANDS.go, `GO band must equal the injected hermetic value, got ${r1.effective_cap}`);
@@ -125,7 +125,7 @@ test("AC2 — the full decision reads cpu some avg10, NOT avg300: churn-only hig
     repoRoot: REPO_ROOT,
     stateFile: s2,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_CPU_AVG300: "53.7" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_CPU_AVG300: "53.7", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(r2.band, "WAIT", "high avg10 (real overload) must downgrade even though avg300 is unchanged");
   assert.equal(r2.effective_cap, TEST_BANDS.wait);
@@ -138,7 +138,7 @@ test("AC5 — resources empty (low avg10) ⇒ GO band ⇒ cap equals the configu
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(r.band, "GO");
   assert.equal(r.effective_cap, TEST_BANDS.go, `GO cap must equal the injected hermetic value, got ${r.effective_cap}`);
@@ -154,7 +154,7 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(cold.band, "GO");
   assert.equal(cold.effective_cap, TEST_BANDS.go);
@@ -163,7 +163,7 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
   const first = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(first.band, "GO", "single sample must NOT switch (hysteresis)");
   assert.equal(first.consecutive, 1);
@@ -172,7 +172,7 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(second.band, "WAIT", "two consecutive same-direction samples switch");
   assert.equal(second.effective_cap, TEST_BANDS.wait, "WAIT cap is the injected hermetic value");
@@ -182,7 +182,7 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(third.band, "WAIT", "single EXTREME sample must not skip WAIT (hysteresis)");
   assert.equal(third.consecutive, 1);
@@ -190,7 +190,7 @@ test("AC6 — high avg10 (host saturated by another project) ⇒ WAIT then EXTRE
     repoRoot: REPO_ROOT,
     stateFile: state,
     bands: TEST_BANDS,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(fourth.band, "EXTREME", "sustained heavy overload escalates to EXTREME");
   assert.equal(fourth.effective_cap, TEST_BANDS.extreme_wait);
@@ -230,12 +230,12 @@ test("AC3 — avg10 jitter below WAIT stays GO; a single above-threshold sample 
   const r1 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "39", RESOURCE_GATE_TEST_CPU_AVG300: "54" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "39", RESOURCE_GATE_TEST_CPU_AVG300: "54", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   const r2 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "41", RESOURCE_GATE_TEST_CPU_AVG300: "54" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "41", RESOURCE_GATE_TEST_CPU_AVG300: "54", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(r1.band, "GO");
   assert.equal(r2.band, "GO", "avg10 jitter (39→41) below WAIT=60 must NOT flip the band");
@@ -245,10 +245,141 @@ test("AC3 — avg10 jitter below WAIT stays GO; a single above-threshold sample 
   const r3 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: state,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
   });
   assert.equal(r3.band, "GO", "single above-threshold sample must NOT switch (hysteresis)");
   assert.equal(r3.consecutive, 1, "one WAIT-ward sample accumulates to consecutive=1");
+});
+
+// ── AC3b: STALL CONVERGENCE (gap-test-concurrency-cap-does-not-scope-nested-spawns AC3) ─────────────
+// The 223-min stall was exactly ONE alternating same-band sample hard-resetting the `consecutive`
+// counter: under WAIT/GO alternation the counter bounced 0/1 forever, so a sustained EXTREME peak
+// (avg10=88, load1=18 at 07:51Z) was never adopted and the cap stayed GO=5 through the peak. The fix
+// makes the counter ACCUMULATE across alternation (a confirmation sample does NOT zero it) and only
+// zeroes it when the last divergence is stale (HYSTERESIS_RECOVERY_MS — the load recovered). The
+// single-sample negative control (AC3) is preserved: one away-sample still does not switch.
+test("AC3b — WAIT/GO alternation CONVERGES to the load band after 2 same-direction samples (the 223-min stall fix)", (t) => {
+  const state = tmpState("stall");
+  // Establish GO with a cold-start decision, then drive samples at 25-min dispatch ticks with the
+  // load alternating across the WAIT=60 threshold — the exact oscillation that used to stall.
+  const base = Date.now();
+  const stepMs = 25 * 60 * 1000;
+  const first = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "45", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base,
+  });
+  assert.equal(first.band, "GO", "cold start below WAIT establishes GO");
+  // Alternation: WAIT (68) → GO (45, confirmation) → WAIT (68). Pre-fix, the GO confirmation
+  // reset `consecutive` to 0, so this sequence never reached 2 and the cap stayed GO forever.
+  const r1 = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base + stepMs,
+  });
+  assert.equal(r1.band, "GO", "single WAIT sample must NOT switch (AC3 negative control)");
+  assert.equal(r1.consecutive, 1, "one away-sample accumulates to consecutive=1");
+  const r2 = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "45", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base + 2 * stepMs,
+  });
+  assert.equal(r2.band, "GO", "a confirmation (GO) does NOT flip back to a fresh state mid-alternation");
+  assert.equal(r2.consecutive, 1, "the confirmation must NOT hard-reset the counter (pre-fix it reset to 0 → stall)");
+  const r3 = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base + 3 * stepMs,
+  });
+  assert.equal(r3.band, "WAIT", "the 2nd same-direction sample across the alternation switches — converged, no stall");
+  assert.equal(r3.effective_cap, TEST_BANDS.wait, "WAIT band cap is the injected hermetic value");
+});
+
+test("AC3b — a STALE divergence (load genuinely recovered) DOES reset the counter, so an isolated blip fades", (t) => {
+  const state = tmpState("stale");
+  const base = Date.now();
+  const stepMs = 25 * 60 * 1000;
+  // Establish GO, then a single WAIT blip (away-sample → consecutive=1), then confirmations held
+  // LONGER than HYSTERESIS_RECOVERY_MS — the blip must fade (counter reset to 0) so a second
+  // isolated blip much later does NOT combine with the stale one to switch.
+  computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "45", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base,
+  });
+  computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base + stepMs,
+  });
+  // 4 confirmations spaced beyond the recovery window → the divergence is stale → counter resets.
+  for (let i = 2; i <= 5; i++) {
+    computeEffectiveCap({
+      repoRoot: REPO_ROOT,
+      stateFile: state,
+      bands: TEST_BANDS,
+      env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "45", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+      now: base + i * (stepMs * 2), // 50-min spacing → beyond the 90-min recovery by the 4th
+    });
+  }
+  const late = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "68", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+    now: base + 6 * (stepMs * 2),
+  });
+  assert.equal(late.band, "GO", "the stale blip faded — a lone later WAIT sample must NOT switch");
+  assert.equal(late.consecutive, 1, "the later WAIT sample restarts the accumulation at 1");
+});
+
+// ── CROSS-LAYER TOTAL BUDGET bound (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/AC4) ──
+// The B face (dispatch slot cap) reads the SAME total process budget as test.sh's worker derivation
+// and resource-gate.sh (process-budget.sh — single authority). The effective cap is bounded by how
+// many node --test processes the whole repo may still start: budget exhausted → cap drops to its
+// floor (1), so a saturated host dispatches nothing more.
+test("BUDGET — the effective cap is bounded by the cross-layer total process budget (available)", (t) => {
+  const state = tmpState("budget");
+  // GO band with an IDLE budget (in_use=0 → available=nproc=4): cap = min(GO_band, 4).
+  const idle = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS, // go=3, wait=2, extreme=1
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
+  });
+  assert.equal(idle.band, "GO");
+  assert.equal(idle.effective_cap, TEST_BANDS.go, "GO cap = the injected hermetic value when budget has room");
+  assert.equal(idle.budget_available, 4, "available = nproc - in_use = 4 - 0");
+  // Budget EXHAUSTED (in_use=20 on a 4-core box → available=0): GO band cap must drop to the floor 1.
+  const saturated = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "20" },
+  });
+  assert.equal(saturated.band, "GO", "cpu pressure still says GO");
+  assert.equal(saturated.effective_cap, 1, "budget exhausted ⇒ cap drops to the floor (1) — nested spawns can no longer multiply beyond the budget");
+  assert.equal(saturated.budget_available, 0);
+  // Budget constrained (available=1): cap is bounded to 1, below the GO band value.
+  const constrained = computeEffectiveCap({
+    repoRoot: REPO_ROOT,
+    stateFile: state,
+    bands: TEST_BANDS,
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "3" },
+  });
+  assert.equal(constrained.effective_cap, 1, "available=1 ⇒ cap bounded to 1");
 });
 
 // ── AC4: configurable bands ────────────────────────────────────────────────────────────────────────
@@ -282,7 +413,7 @@ test("AC4 — the effective cap follows an injected band config (mechanism share
   const r = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: s1,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "90", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
     bands: { go: 4, wait: 2, extreme_wait: 1 },
   });
   assert.equal(r.band, "EXTREME");
@@ -292,7 +423,7 @@ test("AC4 — the effective cap follows an injected band config (mechanism share
   const r2 = computeEffectiveCap({
     repoRoot: REPO_ROOT,
     stateFile: s2,
-    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12" },
+    env: { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" },
     bands: { go: 4, wait: 2, extreme_wait: 1 },
   });
   assert.equal(r2.band, "GO");
@@ -322,7 +453,7 @@ test("AC8 — cross-references: resource-gate + concurrent-batch-scheduler + SPE
 // ── CLI smoke: bash wrapper prints a last effective_cap=N line (the Contract measure) ──────────────
 test("CLI smoke — `bash cap-from-gate.sh` prints a trailing effective_cap=<digit> line; env seam drives it", (t) => {
   const state = tmpState("cli");
-  const env = { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12" };
+  const env = { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "12", RESOURCE_GATE_TEST_NODE_PROCS: "0" };
   const res = spawnSync("bash", [CAP_SCRIPT, "--state", state], { cwd: REPO_ROOT, encoding: "utf8", env });
   assert.equal(res.status, 0, `cap-from-gate.sh must exit 0\n${res.stdout}${res.stderr}`);
   const capLine = res.stdout.split("\n").filter((l) => l.startsWith("effective_cap=")).pop();

@@ -26,7 +26,12 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     the old hardcoded 8 was a 4.25× oversubscription on 4 cores — 8 workers + spawned subprocesses
     = 17 processes; see `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
     for the 2026-08-03 TEMPORARY pin to 8 and its 2026-08-06 revert to the derived form — the
-    dead-code-after-return static check bans that pin shape from returning). An explicit
+    dead-code-after-return static check bans that pin shape from returning). The 17-process
+    oversubscription number is the cross-annotation baseline of
+    `gap-test-concurrency-cap-does-not-scope-nested-spawns`: the derivation is now BUDGET-AWARE —
+    default = `max(1, floor((nproc − in_use) / 1.0))` where `in_use` = node-MainThread processes
+    already running across ALL worktrees (single authority `plugin/scripts/process-budget.sh`,
+    total_budget = nproc), so nested spawns can no longer multiply beyond the total budget. An explicit
     `--test-concurrency=N` always overrides (ci.yml pins it for the 10-minute budget). The full-suite default path
     also consults the shared resource gate (`plugin/scripts/resource-gate.sh --for full-suite`) and exits
     non-0 on WAIT. Do not hand-write a new copy of the glob or an exclusion list elsewhere — edit the script.

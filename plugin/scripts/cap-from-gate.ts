@@ -37,12 +37,25 @@
 //       structurally dead — see above). avg10's 10s window is safe because hysteresis + the
 //       dispatch-point sampling (25-min ticks) damp it into a slow switch.
 // AC3 — hysteresis (negative control): one avg10 sample pointing to a new band does NOT switch;
-//       only `samples` consecutive same-direction readings do.
+//       only `samples` same-direction readings (accumulating, not strictly consecutive) do.
+// AC3b — STALL CONVERGENCE (gap-test-concurrency-cap-does-not-scope-nested-spawns AC3): the
+//       "223-minute stall" was exactly one alternating same-band sample hard-resetting the
+//       `consecutive` counter, so the state machine never accumulated 2 same-direction readings
+//       under WAIT/GO alternation and the cap stayed GO through EXTREME load. The counter now
+//       ACCUMULATES across alternation (a confirmation sample does NOT zero it) and is only
+//       zeroed when the last divergence is STALE (last_away_at older than HYSTERESIS_RECOVERY_MS —
+//       the load genuinely recovered). A sustained peak therefore converges to the load band.
 // AC4 — bands configurable; numbers from config, defaults 5/2/1; config change takes effect.
 // AC5 — resources empty (low avg10) => GO band => cap >= 3 (throughput above the old fixed 3).
 // AC6 — high avg10 (e.g. another project saturating the host) => WAIT/EXTREME band => cap drops.
 // AC8 — cross-referenced with resource-gate.sh (the signal) + concurrent-batch-scheduler.ts (the
 //       disjointness gate that runs at the same decision point) + SPEC-isolation-and-resource-governance.
+//
+// CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1, the B face):
+// the effective cap is ALSO bounded by the shared total process budget (process-budget.sh — the same
+// authority scripts/test.sh's default_concurrency_formula and resource-gate.sh read). If the whole
+// repo's node --test budget is exhausted (available = 0), the cap drops to its floor (1) so a
+// saturated host dispatches nothing more.
 //
 // Fail-closed: an unmeasurable signal (kernel without PSI) => EXTREME band (lowest cap) — a cap that
 // silently stays high when its signal is unmeasurable is a quietly-lying instrument.
@@ -76,17 +89,33 @@ export const DEFAULT_BANDS = { go: 5, wait: 2, extreme_wait: 1 };
 export const WAIT_THRESHOLD = 60;
 export const EXTREME_THRESHOLD = 85;
 
-/** Hysteresis width: consecutive same-direction readings required to switch bands. A single sample
+/** Hysteresis width: same-direction readings required to switch bands. A single sample
  *  (still jittery near a threshold) must NOT flip the cap — the negative control (AC3). With the
  *  signal now `some avg10` (10s window), this is what keeps the decision slow: samples are taken at
- *  dispatch points (25-min ticks), so 2 same-direction readings = sustained load, not a transient. */
+ *  dispatch points (25-min ticks), so 2 same-direction readings = sustained load, not a transient.
+ *  NB the counter ACCUMULATES across alternation (a confirmation sample does not hard-zero it —
+ *  AC3b stall convergence) rather than requiring strictly consecutive readings. */
 export const HYSTERESIS_SAMPLES_DEFAULT = 2;
+
+/** Stale-divergence recovery window: a divergence sample older than this (last_away_at) is treated
+ *  as a recovered load, so an isolated blip fades instead of counting forever; a RECENT alternation
+ *  keeps its accumulated away-samples and converges to the load band (gap-test-concurrency-cap-does-
+ *  not-scope-nested-spawns AC3 — the 223-min stall fix). Default 90 min ≈ 3-4 dispatch ticks. */
+export const HYSTERESIS_RECOVERY_MS = 90 * 60 * 1000;
 
 export const STATE_FILE_NAME = "concurrency-cap-state.json";
 
 export type BandName = "GO" | "WAIT" | "EXTREME";
 export interface BandConfig { go: number; wait: number; extreme_wait: number; }
-export interface CapState { band: BandName; consecutive: number; decided_at: string; }
+export interface CapState {
+  band: BandName;
+  consecutive: number;
+  decided_at: string;
+  /** ISO time of the last sample where desired pointed AWAY from the current band. Used by
+   *  applyHysteresis's stale-confirmation recovery (AC3b). null when no divergence is pending. */
+  last_away_at?: string | null;
+}
+export interface BudgetSnapshot { total_budget: number; in_use: number; available: number; }
 
 function findRepoRoot(startDir: string): string {
   let dir = path.resolve(startDir);
@@ -131,19 +160,33 @@ export function computeDesiredBand(cpuStall: number | null): BandName {
 }
 
 /** Apply hysteresis. Given the current state and the raw desired band, return the EFFECTIVE band
- *  (current unless `samples` consecutive same-direction readings toward the desired band) plus the
- *  new consecutive count and whether the band switched. */
+ *  (current unless `samples` same-direction readings toward the desired band) plus the new
+ *  consecutive count and whether the band switched.
+ *
+ *  AC3b stall convergence (gap-test-concurrency-cap-does-not-scope-nested-spawns): the counter
+ *  ACCUMULATES across WAIT/GO alternation instead of hard-resetting on a confirmation sample —
+ *  the 223-min stall was exactly one alternating same-band sample zeroing `consecutive`, so the
+ *  state machine never accumulated 2 same-direction readings under alternation. A confirmation
+ *  only zeroes the counter when the last divergence is STALE (last_away_at older than
+ *  HYSTERESIS_RECOVERY_MS — the load genuinely recovered); a RECENT alternation keeps its
+ *  accumulated away-samples so a sustained peak converges to the load band. The single-sample
+ *  negative control (AC3) is preserved: one away-sample still does not switch. */
 export function applyHysteresis(
   state: CapState | null,
   desired: BandName,
   samples: number,
+  now: number = Date.now(),
 ): { band: BandName; consecutive: number; switched: boolean } {
   // Cold start (no prior decision): adopt the raw reading immediately — there is no history to be
   // consistent against. First decision, so `consecutive` starts at 0.
   if (!state) return { band: desired, consecutive: 0, switched: false };
   if (desired === state.band) {
-    // Consistent with current band — reset the opposite-direction counter.
-    return { band: state.band, consecutive: 0, switched: false };
+    // Consistent with current band. NOT a hard reset (AC3b): a confirmation only zeroes the
+    // counter when the last divergence is stale (recovered load); a recent alternation keeps its
+    // accumulated away-samples so the state machine converges to the load band under oscillation.
+    const lastAway = state.last_away_at ? Date.parse(state.last_away_at) : Number.NaN;
+    const stale = !Number.isNaN(lastAway) && now - lastAway >= HYSTERESIS_RECOVERY_MS;
+    return { band: state.band, consecutive: stale ? 0 : (state.consecutive || 0), switched: false };
   }
   const consecutive = (state.consecutive || 0) + 1;
   if (consecutive >= samples) {
@@ -167,6 +210,7 @@ export function loadState(file: string): CapState | null {
       band,
       consecutive: Number.isInteger(raw.consecutive) ? raw.consecutive : 0,
       decided_at: typeof raw.decided_at === "string" ? raw.decided_at : "",
+      last_away_at: typeof raw.last_away_at === "string" ? raw.last_away_at : null,
     };
   } catch {
     // Corrupt/partial state file → treat as no state (cold start). Never wedge dispatch on state I/O.
@@ -177,6 +221,25 @@ export function loadState(file: string): CapState | null {
 export function saveState(file: string, state: CapState): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+}
+
+/** Read the CROSS-LAYER TOTAL PROCESS BUDGET from process-budget.sh (the SINGLE authority —
+ *  gap-test-concurrency-cap-does-not-scope-nested-spawns AC1). Reads env seams through `env` so
+ *  tests drive it deterministically. Returns null when the authority is unreadable (fail-open: the
+ *  cpu-pressure band cap still applies, just without the budget bound). */
+export function readBudgetFromGate(
+  repoRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+): BudgetSnapshot | null {
+  const budgetScript = path.join(repoRoot, "plugin", "scripts", "process-budget.sh");
+  const res = spawnSync("bash", [budgetScript], { cwd: repoRoot, encoding: "utf8", env });
+  if (res.status !== 0) return null;
+  const out = `${res.stdout}\n${res.stderr}`;
+  const total = Number((out.match(/total_budget=([0-9]+)/) || [])[1]);
+  const inUse = Number((out.match(/in_use=([0-9]+)/) || [])[1]);
+  const avail = Number((out.match(/available=([0-9]+)/) || [])[1]);
+  if (!Number.isFinite(total) || !Number.isFinite(inUse) || !Number.isFinite(avail)) return null;
+  return { total_budget: total, in_use: inUse, available: avail };
 }
 
 /** Read the cpu `some avg10` signal from resource-gate.sh REPORT mode (single source — the gate
@@ -197,13 +260,15 @@ export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = 
 }
 
 /** The full adaptive-cap decision. Returns the effective cap + the reasoning fields the tick/operator
- *  can print. `stateFile` defaults to <root>/.quay/concurrency-cap-state.json. */
+ *  can print. `stateFile` defaults to <root>/.quay/concurrency-cap-state.json. `now` is a test seam
+ *  for the hysteresis time-decay (AC3b stall convergence). */
 export function computeEffectiveCap(opts: {
   repoRoot: string;
   env?: NodeJS.ProcessEnv;
   stateFile?: string;
   samples?: number;
   bands?: BandConfig;
+  now?: number;
 }): {
   effective_cap: number;
   band: BandName;
@@ -212,25 +277,45 @@ export function computeEffectiveCap(opts: {
   switched: boolean;
   cpu_stall: number | null;
   stateFile: string;
+  budget_available: number | null;
+  budget_total: number | null;
+  budget_in_use: number | null;
 } {
   const repoRoot = opts.repoRoot;
   const env = opts.env ?? process.env;
   const stateFile = opts.stateFile ?? path.join(repoRoot, ".quay", STATE_FILE_NAME);
   const samples = opts.samples ?? HYSTERESIS_SAMPLES_DEFAULT;
   const bands = opts.bands ?? readBandsFromConfig(path.join(repoRoot, ".quay", "config.yml"));
+  const now = opts.now ?? Date.now();
   const cpuStall = readCpuStallFromGate(repoRoot, env);
   const desired = computeDesiredBand(cpuStall);
-  const state = loadState(stateFile);
-  const { band, consecutive, switched } = applyHysteresis(state, desired, samples);
-  saveState(stateFile, { band, consecutive, decided_at: new Date().toISOString() });
+  const loaded = loadState(stateFile);
+  const { band, consecutive, switched } = applyHysteresis(loaded, desired, samples, now);
+  // last_away_at — the last sample where desired pointed away from the current band (the divergence
+  // the counter accumulates). Set on a divergence sample, kept through confirmations for the stale
+  // recovery check, cleared on a switch (the divergence was consumed).
+  let last_away_at = loaded?.last_away_at ?? null;
+  if (loaded && desired !== loaded.band) last_away_at = new Date(now).toISOString();
+  if (switched) last_away_at = null;
+  saveState(stateFile, { band, consecutive, decided_at: new Date(now).toISOString(), last_away_at });
+  const bandCap = capForBand(bands, band);
+  // The B face reads the CROSS-LAYER TOTAL BUDGET too (AC1): the dispatch slot cap is bounded by how
+  // many node --test processes the whole repo may still start (process-budget.sh — the single
+  // authority). If the budget is exhausted (available = 0) the cap drops to its floor (1), so a
+  // saturated host (another worktree's suite, nested spawns) dispatches nothing more.
+  const budget = readBudgetFromGate(repoRoot, env);
+  const effective_cap = budget !== null ? Math.min(bandCap, Math.max(1, budget.available)) : bandCap;
   return {
-    effective_cap: capForBand(bands, band),
+    effective_cap,
     band,
     desired,
     consecutive,
     switched,
     cpu_stall: cpuStall,
     stateFile,
+    budget_available: budget?.available ?? null,
+    budget_total: budget?.total_budget ?? null,
+    budget_in_use: budget?.in_use ?? null,
   };
 }
 
@@ -261,6 +346,9 @@ function main(argv: string[]): number {
   );
   console.log(
     `band: ${result.band}  desired=${result.desired}  consecutive=${result.consecutive}/${samples}  switched=${result.switched ? "yes" : "no"}`,
+  );
+  console.log(
+    `budget: total=${result.budget_total ?? "unreadable"}  in_use=${result.budget_in_use ?? "?"}  available=${result.budget_available ?? "?"}`,
   );
   console.log(`effective_cap=${result.effective_cap}`);
   return 0;

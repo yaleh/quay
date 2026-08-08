@@ -50,15 +50,17 @@ function runGate(envOverrides = {}, args = []) {
   return { status: res.status, stdout: `${res.stdout}\n${res.stderr}` };
 }
 
-/** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams. */
-function derivedConcurrency(nproc, amplification) {
+/** Extract the REAL default_concurrency_formula from scripts/test.sh and run it with seams.
+ *  `in_use` (default 0) is the RESOURCE_GATE_TEST_NODE_PROCS seam — the budget-aware derivation
+ *  subtracts it from nproc (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1). */
+function derivedConcurrency(nproc, amplification, in_use = 0) {
   const src = fs.readFileSync(TEST_SH, "utf8");
   // The formula lives in default_concurrency_formula; default_test_concurrency CALLS it (the
   // 2026-08-03 TEMPORARY pin to 8 was reverted by
   // gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived).
   const fnMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(fnMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nprintf '%s' "$(default_concurrency_formula)"\n`;
+  const script = `${fnMatch[0]}\nRESOURCE_GATE_NPROC=${nproc}\nRESOURCE_GATE_AMPLIFICATION=${amplification}\nRESOURCE_GATE_TEST_NODE_PROCS=${in_use}\nprintf '%s' "$(default_concurrency_formula)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `derivedConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -67,7 +69,9 @@ function derivedConcurrency(nproc, amplification) {
 /** Directly EXECUTE default_test_concurrency (the real effective default) and return its value.
  *  This is the AC1/AC3 "test the real value, not the spelling" seam: it runs the actual function
  *  the exec lines call, so a function that returns a constant instead of the derived formula is
- *  caught HERE, not by a call-site-spelling assertion. */
+ *  caught HERE, not by a call-site-spelling assertion. `in_use` defaults to 0 — the idle-host
+ *  default (the budget-aware subtraction is asserted separately via derivedConcurrency's in_use
+ *  seam, so the real-host idle default stays nproc deterministically). */
 function currentDefaultConcurrency() {
   const src = fs.readFileSync(TEST_SH, "utf8");
   const fnMatch = src.match(/default_test_concurrency\(\) \{[^]*?\n\}/);
@@ -76,7 +80,7 @@ function currentDefaultConcurrency() {
   // isolated subshell is self-contained (matches the ## Contract effective_concurrency measure).
   const formulaMatch = src.match(/default_concurrency_formula\(\) \{[^]*?\n\}/);
   assert.ok(formulaMatch, "scripts/test.sh must define default_concurrency_formula()");
-  const script = `${formulaMatch[0]}\n${fnMatch[0]}\nprintf '%s' "$(default_test_concurrency)"\n`;
+  const script = `${formulaMatch[0]}\n${fnMatch[0]}\nRESOURCE_GATE_TEST_NODE_PROCS=0\nprintf '%s' "$(default_test_concurrency)"\n`;
   const res = spawnSync("bash", ["-c", script], { encoding: "utf8" });
   assert.equal(res.status, 0, `currentDefaultConcurrency subshell failed: ${res.stderr}`);
   return Number(res.stdout.trim());
@@ -211,6 +215,29 @@ test("AC5 — formula derives max(1, floor(nproc/amp)); the DEFAULT executes tha
     derivedConcurrency(realNproc, 1.0),
     "default_test_concurrency must return the derived value max(1, floor(nproc/1.0)) = nproc on the real host (cost-side-verified 2026-08-08 — see the REVERT HISTORY entry)"
   );
+});
+
+test("AC5b — the derivation is BUDGET-AWARE: in_use node processes subtract from nproc (cross-layer total budget, AC1)", () => {
+  // gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/AC4: the worker derivation reads the
+  // shared total-process budget (process-budget.sh) — total_budget = nproc, and in_use (node-MainThread
+  // procs ALREADY running across all worktrees) is subtracted, so nested spawns can no longer multiply
+  // beyond the cap. The old per-layer derivation ignored in_use entirely (each worker derived nproc,
+  // so N nested runners on 4 cores = N×4 procs = the 17-19 / load 18.70 defect).
+  assert.equal(derivedConcurrency(4, 1.0, 0), 4, "idle (in_use=0) → nproc, the cost-side sweet spot");
+  assert.equal(derivedConcurrency(4, 1.0, 2), 2, "2 node procs already running → 4-2 = 2");
+  assert.equal(derivedConcurrency(4, 1.0, 3), 1, "3 running → 4-3 = 1");
+  assert.equal(derivedConcurrency(4, 1.0, 8), 1, "budget exhausted (in_use ≥ budget) → clamp at 1, never 0/negative");
+  assert.equal(derivedConcurrency(16, 1.0, 12), 4, "16 cores, 12 running → 4");
+  // The shared authority (plugin/scripts/process-budget.sh) reports the same total_budget/in_use/
+  // available that the formula consumes (single source).
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  assert.ok(fs.existsSync(budgetScript), "the shared total-budget authority must exist");
+  const seam = { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_NODE_PROCS: "3" };
+  const b = spawnSync("bash", [budgetScript], { cwd: REPO_ROOT, encoding: "utf8", env: seam });
+  assert.equal(b.status, 0, `process-budget.sh must exit 0\n${b.stderr}`);
+  assert.match(b.stdout, /total_budget=4/, "total_budget = nproc (the single authority)");
+  assert.match(b.stdout, /in_use=3/, "in_use = the running node-MainThread count");
+  assert.match(b.stdout, /available=1/, "available = max(0, total_budget - in_use)");
 });
 
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
