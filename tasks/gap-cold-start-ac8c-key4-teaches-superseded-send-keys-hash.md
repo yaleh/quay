@@ -102,6 +102,15 @@ invoke    `grep -n 'send-keys-verified\|pane hash' plugin/skills/cold-start/SKIL
 control   哈希判据出现 ⇒ 必须为 0 命中（AC2）；可靠发送机制引用 ⇒ ≥1（AC1）
 resume    判据替换与交叉标注分两步提交，任一步完成即写盘
 
+## Cross-annotation (2026-08-08, from [[gap-over-90m-false-signal-source-reads-telemetry-not-task-status]])
+
+**同型案例（AC3 交叉标注）**：本任务提到的「92min eaten」与 2026-08-05 的假 OVER90 复发是同一
+phantom-in-flight bracket 类——fan-in 落地后 `--task-end` 未写，陈旧 bracket 让 `detectTaskOver90m`
+（它读遥测 `inProgress.startedAtMs`，从不读任务自身 status）判出假 over-90m，冻结 inner 44 分钟。
+修复已从 over-90m 信号侧落地（task-status 闸：status=ready/done/needs-human 的陈旧 bracket 不再触发；
+只有 status 真 `in-progress` 或任务文件缺失才触发）。本条（key4 哈希判据替换）是同类「交付物传播已知
+缺陷」的另一个方向（信号判据不可信），交叉标注以供关联检索。
+
 ## Dispatch review
 
 reviewer: outer
