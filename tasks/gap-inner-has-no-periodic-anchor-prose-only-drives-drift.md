@@ -6,7 +6,7 @@ title: the inner's ONLY anchor is outer prose (its Cron count is 0; all 59
   re-anchor to the shipped doc, as a FIXED relay (single cadence), with a strict
   conformance-check-only wake contract so the cron never becomes a second
   dispatch source
-status: done
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -60,6 +60,11 @@ extra:
 
 ## Acceptance Criteria
 
+- [ ] **AC0（2026-08-08 11:2x 追加——标题缺陷 (a) 的独立 AC，此前无主人）**：**inner 有自身周期锚，
+      不依赖 outer 转发**——inner 自带周期触发（`/loop 25m` 或等效），醒来即重读出厂文档 + 状态自检，
+      即使 outer 宕机/停摆也保持锚点。**判据**：inner transcript 存在自驱唤醒记录（非 outer send-keys、
+      非 `<task-notification>`），且间隔 ≤ 申报周期上界。**这是标题「inner's ONLY anchor is outer prose」
+      的另一半**——AC1-AC7 只覆盖了 (b) 转发机制，没覆盖 (a) 自驱锚。
 - [x] AC1: 外层 tick（`orchestrator-loop-tick.md`）新增**重锚步**——inner 空闲时转发**固定重锚 prompt**
       （check-in 常量/脚本，每次原样），指向重读出厂 `fast-mode-loop-tick.md`；忙时不转发
 - [x] AC2: 重锚 prompt 的**唤醒契约 = 一致性核对**——重读出厂文档 + 核对当前状态是否符合（在飞/
@@ -96,8 +101,9 @@ extra:
 
 ## Contract
 
-measure   reanchor_cycles = `grep -c '重锚转发' orchestration/tick-log.md` count   # count 字段：tick-log 中重锚转发记录条数（最近窗口 inner 重读出厂文档的周期数）
-band      reanchor_cycles >= 1（生效期间至少一个重锚周期）
+measure   inner_self_anchor = `grep -cE "CronCreate|/loop 25m|64b5612c" <inner transcript>` stdout 数字段（≥1：inner 有自驱周期锚，非 outer 转发）
+measure   reanchor_cycles = `grep -c '重锚转发\|重锚 #' orchestration/tick-log.md` stdout 数字段（重锚转发记录条数）
+band      inner_self_anchor = ≥1 且 reanchor_cycles = ≥1（inner 自驱锚存在 + 重锚周期发生）
 invariant reanchor_has_no_dispatch_language = 1（重锚 prompt 零「派发/排序/batch」措辞）
 invoke    `grep -n '派发\|排序\|batch\|批' plugin/scripts/reanchor-prompt.txt`
 control   构造一次带偏差的驱动文本 ⇒ 下周期重锚必须触发 inner 重读出厂文档并向文档对齐（自我对齐演示）
