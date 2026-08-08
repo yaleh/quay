@@ -1,15 +1,15 @@
 ---
 id: gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge
-title: "the full-suite green gate exists TWICE at two granularities — correctly at
-  the batch-merge boundary (fast-mode-loop-tick.md:499: red blocks
-  $MERGE_TARGET->$FORK_BASELINE, task merges to $MERGE_TARGET are NOT blocked) and
-  redundantly in 92 of 825 task DoDs ('完整套件连跑 2 次全绿'); the duplicate couples
+title: "the full-suite green gate exists TWICE at two granularities — correctly
+  at the batch-merge boundary (fast-mode-loop-tick.md:499: red blocks
+  $MERGE_TARGET->$FORK_BASELINE, task merges to $MERGE_TARGET are NOT blocked)
+  and redundantly in 92 of 825 task DoDs ('完整套件连跑 2 次全绿'); the duplicate couples
   every task to a slow global signal it cannot control — measured 2026-08-07: 5
   tasks held for a red caused by a SIGKILL misclassification unrelated to any of
   them, a subagent waiting 1h6m on a re-run nobody would start, and 64% of inner
   time polling suite logs (gap-two-thirds-...); human ruled 2026-08-07 to remove
   the duplicate, NOT to weaken the gate"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
