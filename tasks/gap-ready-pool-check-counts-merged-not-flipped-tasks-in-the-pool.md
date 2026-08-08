@@ -82,6 +82,12 @@ resume    判据修改与测试补样分两步提交，任一步完成即写盘
 > 两条并集后收尾信号完整覆盖三态：勾了没落地（workLanded 纯信号不报、AC 信号报收尾）、落地没勾全
 > （workLanded 报）、全勾 ready（AC 信号报）。`taskWorkLanded` 语义原样保留，只是不再唯一。
 
+> **只测心跳的补充（AC3，`gap-landing-blocked-invisible-to-dispatch-criteria`，2026-08-08 落地时写）**：
+> 本条 + `taskWorkLanded` 家族测的是**池成员是不是「已做完未翻 done」**（收尾/心跳维度）；
+> 那条补的是**落地可见性轴**——`criterion_met` 之外新增 `landing_blocked` 信号（develop 落后 master 且
+> integration 冻结时明确报，AC17 catch-up 场景可观测）。两者正交：本条保证池里**没有假满的已落地任务**，
+> 那条保证**落地被结构阻塞时就绪池不再误读成健康**。互补不重叠。
+
 ## Dispatch review
 
 reviewer: outer

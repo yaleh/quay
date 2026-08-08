@@ -43,6 +43,10 @@ import {
   STRATEGIC_REF_RE,
   STRATEGIC_WEIGHT,
   BLOCKING_WEIGHT,
+  computeLandingBlocked,
+  detectLandingBlocked,
+  LANDING_STALENESS_MS_DEFAULT,
+  LANDING_BEHIND_THRESHOLD_DEFAULT,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -1102,4 +1106,191 @@ test("CLI smoke: --root emits the intercepted array (empty when no retired candi
   const parsed = JSON.parse(out);
   assert.ok(Array.isArray(parsed.intercepted), "intercepted is an array in the CLI output");
   assert.deepEqual(parsed.intercepted, [], "no retired candidate ⇒ empty intercepted array");
+});
+
+// ── LANDING-BLOCKED signal (gap-landing-blocked-invisible-to-dispatch-criteria) ─────────────────────
+// criterion_met answers "are there ≥cap mutually-disjoint candidates" (touches-conflict graph only —
+// grep-verified: ready-pool-check reads NO merge/landing state). slot-refill only measures slot
+// release. So criterion_met=True stays True when landing is STRUCTURALLY blocked (AC17 catch-up:
+// develop/integration frozen at a stale commit while master has un-migrated commits) — "dispatchable
+// visible, landable invisible" (the heartbeat-vs-consciousness instance: the criterion has no basis
+// yet still answers). This axis adds landing VISIBILITY: develop behind master ≥ threshold AND the
+// merge target (integration) frozen ⇒ reported explicitly, never "has candidates = healthy". AC1
+// beyond criterion_met · AC2 the AC17 catch-up scenario observable · AC3 complements
+// gap-ready-pool-check-counts-merged (whose notYetFlipped is the "merged-but-not-flipped" heartbeat) ·
+// AC4 negative control (normal landing never false-reports). Pure decision (computeLandingBlocked) +
+// git-backed (detectLandingBlocked, fail-safe on missing refs).
+
+test("computeLandingBlocked: develop behind master + frozen integration ⇒ landing-blocked (AC2)", () => {
+  const stalenessMs = LANDING_STALENESS_MS_DEFAULT;
+  const r = computeLandingBlocked({
+    developBehindMaster: 62, // the AC17 scenario's un-migrated master commits
+    integrationStalenessMs: stalenessMs + 5_000, // frozen beyond the window
+    now: 1_000_000,
+    stalenessMs,
+    behindThreshold: LANDING_BEHIND_THRESHOLD_DEFAULT,
+  });
+  assert.equal(r.landing_blocked, true, "AC2: catch-up incomplete ⇒ landing-blocked reported");
+  assert.match(r.reason, /landing-blocked/);
+  assert.match(r.reason, /62 commit/);
+  assert.match(r.reason, /catch-up incomplete/);
+});
+
+test("computeLandingBlocked: AC4 negative controls — normal landing never false-reports", () => {
+  const stalenessMs = LANDING_STALENESS_MS_DEFAULT;
+  // develop NOT behind master (master's release role is empty / up-to-date) + stale integration ⇒ NOT blocked.
+  assert.equal(
+    computeLandingBlocked({ developBehindMaster: 0, integrationStalenessMs: stalenessMs + 1, now: 1_000_000, stalenessMs }).landing_blocked,
+    false,
+    "develop not behind master ⇒ not blocked",
+  );
+  // Behind master but integration FRESH (tasks landing on the merge target) ⇒ NOT blocked — landing is
+  // not structurally blocked even though catch-up is pending.
+  assert.equal(
+    computeLandingBlocked({ developBehindMaster: 62, integrationStalenessMs: 60_000, now: 1_000_000, stalenessMs }).landing_blocked,
+    false,
+    "integration fresh (within window) ⇒ not blocked",
+  );
+  // Behind below the threshold ⇒ NOT blocked (a single stray master commit is not a catch-up backlog).
+  assert.equal(
+    computeLandingBlocked({ developBehindMaster: 0, integrationStalenessMs: stalenessMs + 1, now: 1_000_000, stalenessMs, behindThreshold: 1 }).landing_blocked,
+    false,
+    "below threshold ⇒ not blocked",
+  );
+  // integrationStalenessMs null (no integration ref — single-line downstream) ⇒ NOT blocked (fail-safe).
+  assert.equal(
+    computeLandingBlocked({ developBehindMaster: 62, integrationStalenessMs: null, now: 1_000_000, stalenessMs }).landing_blocked,
+    false,
+    "null staleness (no integration ref) ⇒ not blocked (fail-safe)",
+  );
+});
+
+test("detectLandingBlocked is fail-safe on a non-git root (no false report, no throw)", (t) => {
+  const root = makeWorkspace("lb-nongit");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const r = detectLandingBlocked(root);
+  assert.deepEqual(r, { landing_blocked: false, reason: null });
+});
+
+// Real-git AC17 catch-up scenario: master advances with un-migrated commits while develop/integration
+// stay frozen at the base ⇒ analyzeTasks reports landing_blocked even while criterion_met is True (the
+// "dispatchable visible, landable invisible" shape the task is about).
+
+test("analyzeTasks: AC17 catch-up — criterion_met True AND landing_blocked True reported explicitly (AC1/AC2)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-lb-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "base");
+  const baseEpochSec = Number(git("log", "-1", "--format=%ct"));
+  git("checkout", "-q", "-b", "develop");
+  git("checkout", "-q", "-b", "integration");
+  git("checkout", "-q", "master");
+  // master advances with un-migrated commits (the AC17 catch-up backlog) — develop/integration frozen.
+  for (let i = 0; i < 3; i++) {
+    fs.writeFileSync(path.join(root, `m${i}.txt`), `m${i}\n`);
+    git("add", ".");
+    git("commit", "-q", "-m", `master commit ${i}`);
+  }
+  // Three pairwise-disjoint ready tasks ⇒ dispatchable_disjoint ≥ cap ⇒ criterion_met True (the
+  // "dispatchable visible" half) — yet landing is structurally blocked.
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/b.ts"] }) });
+  writeTask(root, "gap-r3", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/c.ts"] }) });
+
+  const r = analyzeTasks({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 3,
+    floorMult: 1, // floor 3 — pool 3 ≥ floor, no promotion noise
+    now: baseEpochSec * 1000 + 3 * 60 * 60 * 1000, // 3h after base — integration frozen past the 2h window
+    landingStalenessMs: LANDING_STALENESS_MS_DEFAULT, // 2h
+    landingBehindThreshold: LANDING_BEHIND_THRESHOLD_DEFAULT,
+  });
+  assert.equal(r.criterion_met, true, "dispatchable candidates exist (the old visibility)");
+  assert.equal(r.landing_blocked, true, "AC2: catch-up incomplete ⇒ landing-blocked reported");
+  assert.match(r.report, /landing-blocked/);
+  assert.match(r.landing_blocked_reason, /3 commit/);
+});
+
+test("analyzeTasks: AC4 negative — normal landing (integration advancing) ⇒ no landing-blocked false report", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-lbn-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "base");
+  const baseEpochSec = Number(git("log", "-1", "--format=%ct"));
+  git("checkout", "-q", "-b", "develop");
+  git("checkout", "-q", "-b", "integration");
+  git("checkout", "-q", "master");
+  for (let i = 0; i < 3; i++) {
+    fs.writeFileSync(path.join(root, `m${i}.txt`), `m${i}\n`);
+    git("add", ".");
+    git("commit", "-q", "-m", `master commit ${i}`);
+  }
+  // integration keeps advancing — a task lands on it (normal landing, NOT structurally blocked).
+  git("checkout", "-q", "integration");
+  fs.writeFileSync(path.join(root, "task.txt"), "task\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "Merge branch 'task/gap-r1'");
+  const intEpochSec = Number(git("log", "-1", "--format=%ct"));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/b.ts"] }) });
+  writeTask(root, "gap-r3", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/c.ts"] }) });
+
+  const r = analyzeTasks({
+    tasksDir: path.join(root, "tasks"),
+    root,
+    cap: 3,
+    floorMult: 1,
+    now: intEpochSec * 1000 + 30 * 60 * 1000, // 30 min after the last integration commit — NOT frozen
+    landingStalenessMs: LANDING_STALENESS_MS_DEFAULT, // 2h window
+    landingBehindThreshold: LANDING_BEHIND_THRESHOLD_DEFAULT,
+  });
+  assert.equal(r.criterion_met, true, "dispatch still healthy");
+  assert.equal(r.landing_blocked, false, "AC4: normal landing (integration fresh) ⇒ no false report");
+  assert.doesNotMatch(r.report, /landing-blocked/);
+});
+
+test("CLI Contract measure surface: blocked stdout carries the 'landing-blocked' literal (measure)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `ready-pool-lbc-${Date.now()}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "tasks"), { recursive: true });
+  fs.mkdirSync(path.join(root, "code"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "-b", "master", "-q", ".");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(root, ".gitkeep"), "base\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "base");
+  git("checkout", "-q", "-b", "develop");
+  git("checkout", "-q", "-b", "integration");
+  git("checkout", "-q", "master");
+  fs.writeFileSync(path.join(root, "m.txt"), "m\n");
+  git("add", ".");
+  git("commit", "-q", "-m", "master commit");
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/a.ts"] }) });
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  // A 1ms staleness window makes the just-made base commit "frozen" deterministically (no --now on the CLI).
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--landing-staleness-ms", "1", "--landing-behind-threshold", "1"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.landing_blocked, true, "CLI reports landing_blocked in the JSON");
+  assert.match(out, /landing-blocked/, "Contract measure: stdout carries the 'landing-blocked' literal (grep surface)");
 });
