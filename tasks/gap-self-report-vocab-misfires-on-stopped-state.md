@@ -50,6 +50,7 @@ fail-closed **NOT-CONVERGED**——即使每条自报都干净（无 batch 词�
 - [ ] scoped 门 `scripts/test.sh --for-task gap-self-report-vocab-misfires-on-stopped-state` 绿
 
 ## Touches
+- tasks/gap-self-report-vocab-misfires-on-stopped-state.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/self-report-vocab-audit.ts（停止态豁免）
 - plugin/test/self-report-vocab-audit.test.mjs（AC1/AC2 测试）

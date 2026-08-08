@@ -54,6 +54,7 @@ verification-round.jsonl**——closure-sync AC3 把它从 inner 读取面撤下
 - [ ] scoped 门 `scripts/test.sh --for-task gap-verification-round-record-skipped-for-five-closures` 绿
 
 ## Touches
+- tasks/gap-verification-round-record-skipped-for-five-closures.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - orchestration/orchestrator-loop-tick.md（步骤 1b 步骤 4：追加前 assert last+1）
 - .quay/verification-round.jsonl（AC4 补记证据——gitignored 运行时态，不回测）

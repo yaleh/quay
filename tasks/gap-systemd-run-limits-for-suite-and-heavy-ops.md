@@ -65,6 +65,7 @@ cgroup 限额（每项目 scope）天然解决此问题。
 - [ ] scoped 门 `scripts/test.sh --for-task gap-systemd-run-limits-for-suite-and-heavy-ops` 绿
 
 ## Touches
+- tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/full-suite-runner.ts（套件包限额）
 - plugin/test/full-suite-runner.test.mjs（AC1-AC3 测试）

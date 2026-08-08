@@ -82,6 +82,7 @@ plugin/，但 **plugin/ 没进 npm files**——机制「在包外」部分解�
 - [ ] scoped 门 `scripts/test.sh --for-task gap-release-excludes-plugin-bundle-agent-surface` 绿
 
 ## Touches
+- tasks/gap-release-excludes-plugin-bundle-agent-surface.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - packages/quay/package.json（files 加 plugin/，version 0.4.0）
 - packages/quay/scripts/（release 流程：从 develop 打 tag + plugin 快照进包）

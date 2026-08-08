@@ -61,6 +61,7 @@ extra: {}
 - [ ] scoped 门 `scripts/test.sh --for-task gap-scoped-selection-blind-to-packaging-state-diff` 绿
 
 ## Touches
+- tasks/gap-scoped-selection-blind-to-packaging-state-diff.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/skills/author/SKILL.md（任务模板 AC 默认跨切检查清单）
 - plugin/scripts/select-tests-for-touches.ts（跨切标记）

@@ -52,6 +52,7 @@ orchestration/SPEC-*」），而**消费者 laid 布局是 orchestration/ + docs
 - [ ] scoped 门 `scripts/test.sh --for-task gap-verify-delivery-surface-checks-source-layout-not-consumer-laid` 绿
 
 ## Touches
+- tasks/gap-verify-delivery-surface-checks-source-layout-not-consumer-laid.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/verify-delivery-surface.ts（laid 布局模式）
 - tasks/gap-release-excludes-plugin-bundle-agent-surface.md（AC3 交叉标注）
