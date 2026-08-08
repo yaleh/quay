@@ -421,3 +421,52 @@ gap-forty-to-six-remerge-needs-tests-updated-first（40→6 内容已随 fix-21 
 
 **外层倾向**：选项 1——可靠半定论 + fast 38% 改善是实质正面证据；拖沓无收益（差全真内容、24 块冲突
 面在涨）。cc5 与开销优化作为合并后 follow-up。
+
+---
+
+## 2026-08-08 14:1xZ — integration→develop 真 merge fail-closed：session-liveness.env 归边反向，batch-merge 工具只支持 develop-authoritative
+
+**背景**：AC27（6b6e985d）裁定合并由 tick 驱动，四条前置全成立即执行。manager 已裁定「现在就合」，
+外层执行 `integration-batch-merge.sh --merge --reconcile`。
+
+**实测（外层执行，REF-LEVEL fail-closed 触发）**：
+
+```
+REAL-MERGE FAIL-CLOSED — code conflicts need a human; nothing moved
+  code conflict files: orchestration/session-liveness.env
+  (shared files would auto-resolve develop-authoritative):
+     tasks/gap-session-liveness-ignores-unknown-transcript-names.md
+     tasks/gap-session-liveness-monitor-watches-self-not-inner.md
+```
+
+**为什么前置③（dry-run 无真实代码冲突）在 real-merge 下为假**：dry-run 报 3 个 would-conflict 全被当
+共享文件；real-merge 实际执行发现 `orchestration/session-liveness.env` 是**双方都改的真代码冲突**——
+它不在 batch-merge 默认 shared-file 清单（`*tick-log.md, tasks/*.md, *queue-state*`）里。
+
+**冲突归边实测（核心新事实）**：
+
+| 侧 | SESSION_TRANSCRIPTS 值 | 判定 |
+|---|---|---|
+| develop（ba0c1968 12:26Z） | `"inner /path"` | **缺陷版**——名字与目标表不一致（monitor-watches-self 任务体明说「12:2x 误用 inner」） |
+| integration（40a67514 13:01Z） | `"quay /path"` | **修复版**——monitor-watches-self 的产物，名字与 SESSION_TARGETS 目标名一致 |
+
+**正确归边 = integration-authoritative（"quay"）**，而 batch-merge 工具只支持 develop-authoritative
+（`resolve_as_ours`，`--shared-file` 只会加进 develop 优先清单）。**工具无法表达这个归边。**
+
+**外层已尝试**：执行 AC27 授权的 merge；fail-closed 正确触发（ref 未动、树干净）；核对冲突两侧内容 +
+git blame（40a67514 改名）确定归边方向。
+
+**为什么超出授权**：修 batch-merge 工具支持 integration-authoritative 归边 = 改工具语义（范围级）；
+手动 merge 该文件 = 外层不直接改代码/不自己 merge。AC27 管「触发权归 tick」，不管「归边方向」——
+当正确的归边与工具默认相反时，是机制缺口，不是外层能自行扩的。
+
+**选项**：
+1. **（建议）修 batch-merge 支持 integration-authoritative 归边**——如 `--integration-authoritative <glob>`，
+   冲突时取 integration 侧。理由：两线模型下「任务改的运行时配置」天然 integration 侧更新、develop 滞后，
+   develop-authoritative 对这类文件是错的（本案例即证明）。
+2. **（最小）把 orchestration/session-liveness.env 加进 shared-file 清单但改归边为 integration**——需
+   工具加反向开关，或外层在 merge 前手动把 develop 版 env 更新为 integration 版（等于把修复手工带上
+   develop，再用 develop-authoritative 合——但「手工带上」需内层执行，外层不手改）。
+3. **单文件单独处理**：外层/内层把 integration 版 env 的修复（"quay" 名字）直接 commit 到 develop，
+   再重跑 merge（此时 env 无冲突，仅 2 任务体 shared 自动消解）。最轻，但属「手工搬运修复」而非机制。
+
