@@ -1,6 +1,6 @@
 ---
 id: gap-session-liveness-busy-mask-idle-with-subagents
-title: "session-liveness 忙标志假阳性静默掉整类最需上报的停摆——停在提示符但有 subagent/monitor 在跑 ⇒ 恒判 busy ⇒ SESSION-IDLE 永不触发（实测 outer 12 窗口漏 67%、inner 16 窗口 100% 漏报）；pane-state-classify.ts:344 green-busy fixture 就是「空输入框+esc to interrupt+1 agent⇒busy」；D3 去抖不对称 RESUMED 单轮即报而 IDLE 要连续 2 轮；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后须查 inner 槽位是否满——AC25/AC22 一直卡住的机制原因"
+title: "session-liveness 对带后台任务的停摆结构性失明（inner 16 窗口 100% IDLE 漏报）——压制源 = pane_busy 抖动（成因无证据不猜修；D2「有 subagent⇒忙」已撤）；D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）硬事实；D5 SEEN_BUSY 起始门吞掉挂载时已进行的停摆；D4 CANT-SEND 无时效无限重发；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后查 inner 槽位——AC25/AC22 一直卡住的机制原因"
 status: todo
 labels:
   - gap
@@ -84,10 +84,21 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
 - [ ] AC4: **覆盖率改善**——inner 停摆从 0/16 报出到 ≥ 大部分报出（对照实测）
 - [ ] AC5: 与 gap-session-liveness-monitor-watches-self-not-inner、ignores-unknown-transcript-names
       交叉标注（观察家族：目标/名字/忙判定）
+- [ ] AC6: **D5 修复（SEEN_BUSY 起始门）**——挂载时已在进行的停摆也必须可报：
+      IDLE 闸不能要求「挂载后见过忙轮」（:1043 SEEN_BUSY==1 是 :1003 忙分支才置）——
+      **每次重挂监视器都会把当时正在进行的那次停摆整段吞掉**（重挂恰发生在「发现坏了」=停摆进行时）。
+      复现（manager）：INTERVAL=10 对可证空闲的 inner（屏幕 waiting-input、transcript 静止 3min+、
+      subagent 跑 3m35s）跑满 6 轮，**SESSION-IDLE 零条**；同期照常发 SATURATED/MARKER-STALE
+      ⇒ 监视器在跑，是起始门吞了停摆。
+- [ ] AC7: **D4 修复（CANT-SEND 无限重发）**——API_ERROR_WINDOW 判据须加时效：
+      该错误记录须**晚于本段空闲起点**（不能只是「最近 200 条含 ≥1 isApiErrorMessage」），
+      且同一段空闲内**边沿触发一次**。复现（manager 三次）：13:04:47 API Error 恢复后 13:08:47
+      正常应答，但记录仍在 200 条窗口内（12:43→13:09=26min），13:06/13:09/13:11 连收三条
+      「不可自愈类立即升级给人」⇒ **一次瞬时网络错误把此后 26 分钟的每次空闲都升级成叫人告警**。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（带 subagent 停摆报 IDLE 对照 + 去抖同阶 + 覆盖率前后）
+- [ ] AC1-AC7 实跑输出贴任务体（带 subagent 停摆报 IDLE 对照 + 去抖同阶 + 覆盖率前后 + D5 起始门 + D4 时效）
 
 ## Touches
 - plugin/scripts/session-liveness.sh（每轮 pane_state 记日志先观测 + D3 同阶去抖 + 人裁定落地）
