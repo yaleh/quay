@@ -36,10 +36,11 @@ extra: {}
 - [ ] AC3: **reason 区分**——静态检查红与测试失败红 `reason` 分离，消费方（suite-state-trigger / inner）能区分
 - [ ] AC4: **failures 填充（若选候选 B）**——静态违规明细（任务 + 类型）填进 failures[]
 - [ ] AC5: **不破坏测试失败路径**——真实测试失败仍写 failures[] + reason:"failed"（既有行为保留）
+- [ ] AC6: **runner 异常终止也写终态**（manager 2026-08-08 23:4x 伴生缺口）——runner 被 kill / 子进程挂死后收尾失败时，state 不能停在 `running` 永不写终态；须写一条终态（哪怕 `reason:"crashed"`），使「跑着」与「死了」在 state 上可区分（与 aborted/failed 同族，缺的是「根本没写」）。**实测**：proposal-convergence 死锁被 kill 后 state 停 `running` mtime=23:16 从未写终态（消费方一直以为在跑）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上（按选定候选）
+- [ ] AC1–AC6 全部勾上（按选定候选）
 - [ ] 修后实跑：静态检查违规时 state 含机器可读字段（reason 区分 + 计数 + ceiling），贴任务体
 - [ ] 既有 full-suite-runner 测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
