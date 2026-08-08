@@ -1,7 +1,8 @@
 // @test-group serial
 // select-tests-for-touches.test.mjs — gap-test-selection-not-scoped-to-touches: RED/GREEN tests
 // for the mechanical per-task test selector (select-tests-for-touches.ts, byte-identical mirror).
-// Covers AC1–AC11 and the DoD's "tests cover AC2–AC9".
+// Covers AC1–AC11 and the DoD's "tests cover AC2–AC9", plus the cross-cut marker AC2–AC6 of
+// gap-scoped-selection-blind-to-packaging-state-diff (packaging-state / check-adr / lint).
 // GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
 // `serial` group (A-class — spawns `scripts/test.sh --for-task`, a nested runner with its own
 // worker pool) so it runs in the concurrency-1 serial phase, never competing with the concurrency-8
@@ -321,6 +322,128 @@ test("AC9 — --allow-thin downgrades AC8 to a warning and exits 0", () => {
   }
 });
 
+// ── AC2–AC6: cross-cut marker (gap-scoped-selection-blind-to-packaging-state-diff) ────────────────────
+//
+// A `packages/*/src` / new-MCP-tool change can break the packaged artifact (npm-pack-e2e /
+// build-dist / plugin-packaging), ADR conformance (check-adr), or lint while every src unit test
+// stays green — basename pairing never selects those cross-cut tests. The cross-cut registry
+// (CROSSCUT_CHECKS in select-tests-for-touches.ts) forces them into the scoped selection when a
+// touch triggers the surface, and pure plugin/doc tasks fire nothing (AC6, no bloat).
+
+const CROSSCUT_FILES = {
+  "packages/quay/test/npm-pack-e2e.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/build-dist.test.mjs": TEST_FILE_CONTENT,
+  "plugin/test/plugin-packaging.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/adr-gate.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/cli-adr.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/mcp-adr.test.mjs": TEST_FILE_CONTENT,
+  "packages/quay/test/adr-store.test.mjs": TEST_FILE_CONTENT,
+};
+
+test("AC2 — a src-touching task selects cross-cut tests it never basename-pairs to", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    "packages/quay/test/foo.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t2c", "## Touches\n- packages/quay/src/foo.ts\n");
+    const j = runCli(root, "--task", "t2c", "--json");
+    assert.equal(j.status, 0, j.stderr);
+    const out = JSON.parse(j.stdout);
+    // basename pairing still selects foo.test.mjs; the cross-cut marker adds packaging-state and
+    // check-adr regardless of basename.
+    assert.ok(out.selected.includes("packages/quay/test/foo.test.mjs"), "basename pair still selected");
+    assert.ok(out.selected.includes("packages/quay/test/npm-pack-e2e.test.mjs"), `packaging-state cross-cut in: ${out.selected}`);
+    assert.ok(out.selected.includes("packages/quay/test/build-dist.test.mjs"), "packaging-state cross-cut");
+    assert.ok(out.selected.includes("plugin/test/plugin-packaging.test.mjs"), "packaging-state cross-cut");
+    assert.ok(out.selected.includes("packages/quay/test/adr-gate.test.mjs"), "check-adr cross-cut");
+    assert.ok(out.selected.includes("packages/quay/test/mcp-adr.test.mjs"), "check-adr cross-cut");
+    // The default output carries the cross-cut marker names (Contract `invoke` grep surface).
+    const r = runCli(root, "--task", "t2c");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*packaging-state/);
+    assert.match(r.stdout, /crosscut: .*check-adr/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC3 — src-touching task selects ≥1 packaging-state test", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    "packages/quay/test/engine.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t3c", "## Touches\n- packages/quay/src/gate/engine.ts\n");
+    const j = runCli(root, "--task", "t3c", "--json");
+    assert.equal(j.status, 0, j.stderr);
+    const out = JSON.parse(j.stdout);
+    const packaging = [
+      "packages/quay/test/npm-pack-e2e.test.mjs",
+      "packages/quay/test/build-dist.test.mjs",
+      "plugin/test/plugin-packaging.test.mjs",
+    ];
+    assert.ok(packaging.some((p) => out.selected.includes(p)), `≥1 packaging-state test in scoped: ${out.selected}`);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC4 — src / new-MCP-tool task selects check-adr (ADR cross-cut)", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+    "packages/quay/test/mcp-server.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t4c", "## Touches\n- packages/quay/src/mcp-server.ts\n");
+    const r = runCli(root, "--task", "t4c");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*check-adr/, "default output names the check-adr cross-cut");
+    const j = runCli(root, "--task", "t4c", "--json");
+    const out = JSON.parse(j.stdout);
+    assert.ok(out.selected.includes("packages/quay/test/mcp-adr.test.mjs"));
+    assert.ok(out.selected.includes("packages/quay/test/cli-adr.test.mjs"));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC5 — code-touching task's selection names the lint cross-cut (in-task leg via SKILL.md)", () => {
+  const root = makeWorkspace({
+    "plugin/test/foo.test.mjs": TEST_FILE_CONTENT,
+  });
+  try {
+    writeTask(root, "t5c", "## Touches\n- plugin/scripts/foo.ts\n");
+    const r = runCli(root, "--task", "t5c");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /crosscut: .*lint/, "default output names the lint cross-cut");
+    // In-task leg of AC5: the author SKILL.md task template defaults new-code ACs to a lint-clean
+    // item (the archguard 14-error shape is caught because the author must run lint to tick it).
+    const skill = fs.readFileSync(path.join(REPO_ROOT, "plugin", "skills", "author", "SKILL.md"), "utf8");
+    assert.match(skill, /lint-clean/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("AC6 — a pure plugin/doc task selects NO cross-cut tests (no bloat)", () => {
+  const root = makeWorkspace({
+    ...CROSSCUT_FILES,
+  });
+  try {
+    writeTask(root, "t6c", "## Touches\n- plugin/skills/author/SKILL.md\n- CLAUDE.md\n");
+    const r = runCli(root, "--task", "t6c", "--paths-only", "--allow-thin");
+    assert.equal(r.status, 0, `--allow-thin pure doc must exit 0, got ${r.status} stderr: ${r.stderr}`);
+    for (const p of Object.keys(CROSSCUT_FILES)) {
+      assert.ok(!r.stdout.includes(p), `pure plugin/doc task must not select cross-cut ${p}: ${r.stdout}`);
+    }
+    const d = runCli(root, "--task", "t6c", "--allow-thin");
+    assert.doesNotMatch(d.stdout, /crosscut:/, "pure plugin/doc task emits no cross-cut marker");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── AC1: byte-identical mirrors ───────────────────────────────────────────────────────────────────────
 
 test("AC1 — experiments and plugin mirrors are byte-identical", () => {
@@ -345,8 +468,12 @@ test("AC10 — scripts/test.sh --for-task <id> runs exactly the selected set (re
     .trim().split("\n").filter(Boolean);
   assert.ok(sel.length >= 1, `selector must select ≥1 file for ${taskId}, got ${sel.length}: ${sel.join(",")}`);
   // Run test.sh --for-task pinned to a single non-recursive AC so each selected file contributes
-  // exactly one subprocess test (the AC2 pattern; avoids infinite recursion through this file).
-  const res = spawnTestSh(["--for-task", taskId, "--test-name-pattern", "AC2"]);
+  // exactly one subprocess test (avoids infinite recursion through this file). The pattern names
+  // the ORIGINAL AC2 test exactly — the cross-cut AC2 test added by
+  // gap-scoped-selection-blind-to-packaging-state-diff also begins with "AC2", so a bare "AC2"
+  // pin would now match two tests in this file and break the one-test-per-selected-file
+  // relationship below.
+  const res = spawnTestSh(["--for-task", taskId, "--test-name-pattern", "direct.*Touches entry resolves to that file"]);
   assert.equal(res.status, 0, `test.sh --for-task must exit 0, got ${res.status}\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
   const combined = `${res.stdout}\n${res.stderr}`;
   // The pinned AC must have run in the subprocess (plumbing proof).

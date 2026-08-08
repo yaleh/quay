@@ -42,6 +42,15 @@ extra: {}
 3. verify 增加「被引用文件确实存在」检查（不只检查铺设集）
 4. 验证：fresh-clone + quay-init ⇒ MCP 入口指向的运行时存在，provider ABI 可用
 
+**Cross-annotation (2026-08-08, `gap-scoped-selection-blind-to-packaging-state-diff` AC7):** 本任务是
+「打包态/源码态跨切失明」族在 quay 的最贴近实例——fresh-clone 采用者的 MCP 入口坏在 verify 看不见，
+因为被引用的运行时从不在铺设集里（「判据存在但绕过了真正重要的东西」）。`gap-scoped-selection-blind-
+to-packaging-state-diff` 的 scoped 跨切标记（`select-tests-for-touches.ts` 的 CROSSCUT_CHECKS）让
+打包态一致性成为触碰 `packages/*/src` 任务的 scoped 可测项；本任务 AC3 的「verify 被引用运行时存在」
+是同一跨切判据的**安装时**腿。交叉标注：archguard TASK-62/64/65/66（同模式三项目三检查）+
+CLAUDE.md packaging e2e（DIR-111，`dist-verify-node-floor` 是打包态的最终判据）+ 自适应并发
+（`cap-from-gate.sh`，机制一次下游复用）。
+
 ## Acceptance Criteria
 
 - [x] AC1: quay-init 遇 vendor 运行时缺失 ⇒ fail-closed（报错退出非 0，不报 complete；负控制——当前 WARN 照报成功）
