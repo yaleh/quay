@@ -399,6 +399,13 @@ unread = delivered − consumed。本步只读不写回执（消费是人的动�
   `git status --porcelain` 为空，非空即失败退出并报出属主；合后 `git reset --mixed <新 tip>` 刷新 index，
   **绝不用 --hard**（`--mixed` 只刷新 index 不碰工作区，未提交内容保留）。**Land 锁边界**：锁防交错不防销毁，
   拿到锁≠能动工作区——共享主检出对账不得覆盖共存会话的未提交内容。
+- **对象闸门（`integration-batch-merge.sh` 自带，`gap-batch-merge-gate-validates-tip-not-merge-result`）**：
+  批量合前校验**合并结果**不是只验 tip——套件测的是 `$MERGE_TARGET` tip，批量合放行的是
+  `$MERGE_TARGET` ⊕ `$FORK_BASELINE` 的合并结果，两者只在 `$FORK_BASELINE` 侧无新提交时才等价。three-dot
+  `git diff --name-only <merge-base> <$FORK_BASELINE>`（即 `$FORK_BASELINE` 侧自分歧点起的变更）含代码文件
+  （.ts/.js/.mjs/.sh）⇒ **fail-closed 不移动任何 ref、报出文件清单**（该代码从未进过被测树，合并结果会带上
+  未测代码）；纯 .md/tasks 文件放行（2026-08-08 报告那 5 个文件）。`$FORK_BASELINE` 侧有代码提交需先
+  fan-in 到 `$MERGE_TARGET` 补测再批量合。与 stale-green 不同轴（时间轴 vs 对象轴）。
 - **单线（默认）退化**：`$FORK_BASELINE == $MERGE_TARGET == master` 时本节退化为「独立任务从 master
   分叉、合回 master」——`fork-baseline.ts --develop master --integration master` 恒返回 master
   （`master..master` 空，无未验证任务），`integration-batch-merge.sh` 为无操作——与未做 branch cutover

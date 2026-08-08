@@ -105,11 +105,16 @@ test("SESSION-RESUMED then SESSION-IDLE fire when the real probe session goes bu
     const idle = await waitForOutput(mon, /SESSION-IDLE probe/, 15000);
     assert.ok(idle, `SESSION-IDLE must fire when the probe returns idle:\n${mon.output()}`);
 
-    // 6. ordering: the busy transition precedes the idle transition.
+    // 6. ordering: the busy transition precedes the TRANSITION idle. D5 fix 2026-08-08
+    //    (gap-session-liveness-busy-mask-idle-with-subagents): with /nonexistent heartbeat +
+    //    idle-at-mount, a MOUNT-TIME SESSION-IDLE now fires (correct for an unknown-heartbeat
+    //    stall — the SEEN_BUSY gate no longer suppresses it), so the FIRST SESSION-IDLE may precede
+    //    the RESUMED. The assertion must target the FRESH idle of the post-busy spell: the LAST
+    //    SESSION-IDLE must postdate the RESUMED (per-spell edge re-arms IDLE on the busy spell).
     const out = mon.output();
     const rIdx = out.indexOf("SESSION-RESUMED");
-    const iIdx = out.indexOf("SESSION-IDLE");
-    assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `SESSION-RESUMED must precede SESSION-IDLE:\n${out}`);
+    const iIdx = out.lastIndexOf("SESSION-IDLE");
+    assert.ok(rIdx !== -1 && iIdx !== -1 && rIdx < iIdx, `SESSION-RESUMED must precede the post-busy SESSION-IDLE:\n${out}`);
   } finally {
     mon.child.kill("SIGKILL");
     mon.cleanup();
@@ -443,12 +448,18 @@ test("AC6 — no tick log: SESSION-OVERDUE stays silent, other events work, no c
   }
 });
 
-test("AC9 — orchestration/session-liveness.env is the ZERO-CONFIG default (manager config moved out 2026-08-04 c1489b6a); an env file IS sourced when SESSION_TARGETS is unset", async () => {
+test("AC9 — orchestration/session-liveness.env is the OUTER's OWN config (manager's 3-project config moved out 2026-08-04 c1489b6a); it may carry a SINGLE SESSION_TARGETS aimed at the inner role window, but never the manager topology nor the :outer self-watch default; an env file IS sourced when SESSION_TARGETS is unset", async () => {
   const realEnv = fs.readFileSync(path.resolve(__dirname, "..", "..", "orchestration", "session-liveness.env"), "utf8");
-  assert.ok(!realEnv.includes("SESSION_TARGETS="),
-    "orchestration/session-liveness.env must be the zero-config default — the manager's 3-project config was moved out to ~/.quay-global/manager-session-liveness.env (c1489b6a: it was being read by a session it was not meant for)");
-  assert.ok(!realEnv.includes("quay-0:outer"),
-    "the env file must NOT carry the three-project topology anymore");
+  // The manager's THREE-project config was moved out to ~/.quay-global/manager-session-liveness.env
+  // (c1489b6a: it was being read by a session it was not meant for). The env file may legitimately
+  // carry the OUTER's own single-target SESSION_TARGETS (gap-session-liveness-monitor-watches-self-
+  // not-inner aims the monitor at the inner role window), but must NEVER carry the manager topology
+  // or target the :outer default that left the monitor watching ITSELF. Only ACTIVE config lines
+  // matter here — the file's COMMENT block may mention the old manager topology as history.
+  assert.ok(!/^SESSION_TARGETS=[^\n]*(archguard|meta-cc)/m.test(realEnv),
+    "no ACTIVE SESSION_TARGETS line may carry the manager's 3-project topology (archguard/meta-cc — moved out 2026-08-04 c1489b6a)");
+  assert.ok(!/^SESSION_TARGETS=[^\n]*quay-0:outer/m.test(realEnv),
+    "the env file's SESSION_TARGETS must NOT target the :outer window (the self-watch defect — it must name a role window like quay-0:inner)");
   assert.ok(!fs.readFileSync(SCRIPT, "utf8").includes("quay-0:"), "the script must NOT carry the topology (moved out)");
 
   const ws = makeTmp();

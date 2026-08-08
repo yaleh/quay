@@ -154,6 +154,11 @@ discovery 认错 transcript）。
 `tasks/gap-manager-skill-missing-mandatory-tool-reuse-checklist.md`（强制挂载点，写脚本前先查目录）
 与 `tasks/gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe.md` AC3/AC9（机械静态检查）。
 
+> **落地状态（2026-08-07，`gap-manager-skill-missing-mandatory-tool-reuse-checklist` 执行后）**：
+> 本节的「从文档走向可执行」已随包落在 `plugin/skills/manager/SKILL.md` §9「工具复用强制挂载点」——manager
+> 在写任何新 `.sh`/`.ts` 前必须先跑 `bash plugin/scripts/capability-catalog.sh | grep -i <关键词>` 作为
+> Step 0 前置检查（AC2）；8 项复用对照表随 SKILL 铺设（AC1）……
+
 今晚的对照数据支持这条：我手工造的观测判据，**连续四次**都不如已有机制严谨
 （pane 哈希、heartbeat、`pgrep -f` 自匹配、`grep -c` 自匹配）。
 

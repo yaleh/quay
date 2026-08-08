@@ -113,6 +113,17 @@ resume 若中断，先跑 measure 确认当前无标记文件的释放行为，�
 - plugin/test/load-sensitive-release-check.test.mjs（new）（机械校验的测试）
 - tasks/gap-batch-merge-gate-reads-stale-green.md（AC5 交叉标注）
 
+## 交叉标注（gap-batch-merge-gate-validates-tip-not-merge-result，2026-08-08 dispatch）
+
+本任务 AC6 交叉标注：**批量合家族三件套成文——闸门（`gap-batch-merge-gate-reads-stale-green`，何时合）/
+对象（`gap-batch-merge-gate-validates-tip-not-merge-result`，合什么）/ 对账（
+`gap-batch-merge-reconcile-destroys-uncommitted-work`，合完主检出怎么办）**。对象任务已修：
+`integration-batch-merge.sh` 新增 `check_object_gate()`——批量合前校验 develop 侧代码文件
+（.ts/.js/.mjs/.sh）是否进过被测树（three-dot `git diff --name-only <merge-base> <develop>`），
+含代码文件即 fail-closed 不移动任何 ref，纯 .md/tasks 放行；与 stale-green（时间轴）同族不同轴。本任务
+（红窗释放「负载敏感」须事前声明）与对象任务同为「闸门自判 vs 机械」族：本任务把红窗释放改成标记准入，
+对象任务把批量合从「只验 tip」改成「验合并结果」——都是把自判放行换成机械校验。
+
 ## Dispatch review
 
 reviewer: none

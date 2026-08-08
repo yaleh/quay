@@ -168,8 +168,24 @@
 #   * 去抖（AC2）：候选闲（fused idle）要求【连续 2 轮】都为闲才报 SESSION-IDLE（IDLE_CONSEC
 #     计数，2 轮 = 2×INTERVAL，默认 120s）。单轮转换不报——只延迟 ≤1 轮询周期（真空闲下一轮
 #     还是闲，不造成漏报），远在 20 分钟 cron 兜底之内。pane 哈希从「唯一判据」降级为「去抖的
-#     候选闲辅助」（AC7）；忙→闲后须见过忙轮（SEEN_BUSY）才报，避免监视器启动时把一直闲着的
-#     会话误报成「转入空闲」。
+#     候选闲辅助」（AC7）。
+#
+# 阶段三 D5 锐化（gap-session-liveness-busy-mask-idle-with-subagents，2026-08-08）：
+# 带后台任务的停摆结构性失明的根因 = 旧报告门 `-eq N && SEEN_BUSY==1`：
+#   * -eq 而非 -ge ⇒ 每段停摆只有【一次】触发机会（IDLE_CONSEC 恰好等于 2 的那一轮）。若那一轮
+#     SEEN_BUSY 恰为 0（刚启动、或上一轮 alive=0 分支清掉），这次机会被消耗且永不重来（计数器
+#     涨到 3、4…14 都不再匹配 -eq 2）——不是延迟上报，是【永久销毁该段停摆的上报权】。随后转忙
+#     ⇒ SEEN_BUSY=1、IDLE_CONSEC=0、RESUMED 照常发 ⇒ 「N 条 RESUMED / 0 条 IDLE」不对称。
+#   * SEEN_BUSY==1 门（「未见过忙就永不报」的防启动误报）把【挂载时已在进行的停摆】整类静默掉——
+#     挂载即停在提示符的会话（inner 16 窗口 100% 漏报的形态）永远等不到第一个忙轮。
+#   修法（人裁定 2026-08-08 13:2x，D5 锐化形式）：
+#     1. -eq → -ge：计数器到达阈值后继续匹配（不再只匹配等于 N 的那一轮）。
+#     2. per-spell 已报标志（IDLE_REPORTED）做边沿：每段空闲只报一次；忙轮清掉 → 新段可再报。
+#        -ge 不再需要「每轮重报」的代价——边沿由 IDLE_REPORTED 承担。
+#     3. SEEN_BUSY 的「防启动误报」意图改为「启动首轮不报」（ROUNDS 计数）而非「未见过忙就永不
+#        报」——前者只丢一轮，后者丢整段。挂载时已在进行的停摆也必须可报（AC6）。
+#     4. 首轮不报：监视器第 1 轮不报 IDLE/RESUMED（预热）；后续轮正常。SEEN_BUSY 保留为「已见过
+#        忙段」的状态记录（busy 侧/外部诊断可查），不再进报告门。
 #
 # 阶段四（gap-session-liveness-cannot-see-context-saturation-alive-but-cannot-take-input，2026-08-07）：
 # 上下文饱和度——「活着但收不进新指令」的判据。前三个阶段回答「会话还动不动」；本阶段补上
@@ -233,7 +249,7 @@ SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
-  PREV_SATURATED
+  PREV_SATURATED IDLE_REPORTED ROUNDS
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -697,7 +713,16 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 
 # ── 管理者的多目标配置（AC9）：orchestration/session-liveness.env 存在则 source。
-#    shell KEY=VALUE，不是 YAML。显式环境变量 SESSION_TARGETS 优先。 ───────────────────────
+#    shell KEY=VALUE，不是 YAML。显式环境变量优先——SESSION_TARGETS 经 source 守卫、
+#    SESSION_TMUX_SESSION / SESSION_TRANSCRIPTS / SESSION_HEARTBEATS 经先钉后回。
+#    gap-session-liveness-ignores-unknown-transcript-names：管理者挂载时显式传
+#    SESSION_TRANSCRIPTS="outer <outer transcript>" 但未设 SESSION_TARGETS，env 文件的
+#    SESSION_TRANSCRIPTS（"quay …"）会把「outer」静默覆盖 ⇒ 配置接线审计
+#    （_sl_audit_config_wiring）看不到调用方的名字 ⇒ 名字不匹配目标表零告警、盯错对象
+#    （outer 216s 无人观测）。先钉后回让调用方显式值存活，审计才能对「不在目标表的名字」告警。 ──
+_sl_transcripts_env="${SESSION_TRANSCRIPTS:-}"
+_sl_heartbeats_env="${SESSION_HEARTBEATS:-}"
+_sl_session_env="${SESSION_TMUX_SESSION:-}"
 if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -712,16 +737,18 @@ fi
 # 字面比较。2026-08-03 起脚本不再被 quay-init 改写（可执行文件原样复制、只生成配置），这两个坑
 # 随之失去存在前提——会话名一律经 env / orchestration/session-liveness.env / 默认值解析。
 # 环境变量显式设置优先（先钉住，避免被配置文件 source 覆盖）：env > 配置 > 默认值。
-_sl_session_env="${SESSION_TMUX_SESSION:-}"
-if [ -z "${SESSION_TARGETS:-}" ] && [ -f "$REPO_ROOT/orchestration/session-liveness.env" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$REPO_ROOT/orchestration/session-liveness.env" \
-    || echo "session-liveness: WARN 无法解析 $REPO_ROOT/orchestration/session-liveness.env，回落到默认" >&2
-  set +a
-fi
+# 钉住动作在第一个 source 块前完成（上面的 _sl_*_env）；这里做回写。
 if [ -n "$_sl_session_env" ]; then
   SESSION_TMUX_SESSION="$_sl_session_env"
+fi
+# 先钉后回（与 SESSION_TMUX_SESSION 同模式）：调用方显式设的 SESSION_TRANSCRIPTS /
+# SESSION_HEARTBEATS 在 env 文件 source 后回写——显式值存活，_sl_audit_config_wiring 才能对
+# 不在目标表的名字告警（gap-session-liveness-ignores-unknown-transcript-names）。
+if [ -n "$_sl_transcripts_env" ]; then
+  SESSION_TRANSCRIPTS="$_sl_transcripts_env"
+fi
+if [ -n "$_sl_heartbeats_env" ]; then
+  SESSION_HEARTBEATS="$_sl_heartbeats_env"
 fi
 _sl_session="${SESSION_TMUX_SESSION:-}"
 if [ -z "$_sl_session" ]; then
@@ -892,9 +919,40 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或�
 # 多观察者并行挂载天然无冲突。谁先启动无关——每个观察者的状态完全是进程内的（PREV_* 关联数组），
 # 观察者之间互不知情、不共享任何写点。
 
+# ── 配置接线审计（gap-session-liveness-monitor-watches-self-not-inner，2026-08-08）────────────
+# 失败形态：SESSION_TRANSCRIPTS / SESSION_HEARTBEATS 的名字与 SESSION_TARGETS 的目标名不一致 ⇒
+# transcript_for 按名匹配不到 ⇒ tr_path 静默为空 ⇒ 该目标的心跳回落默认外层多源心跳——以为配了
+# transcript 实际没有，transcript 相关判据（MARKER-STALE / CANT-SEND / SATURATED /
+# OVERDUE-on-transcript）全部不生效：监视器「看内层进程、按外层心跳判」的静默半盲。这就是
+# 12:2x 版本把 SESSION_TRANSCRIPTS 写成 "inner"（目标名却是 "quay"）时发生的事。启动时对每个
+# 配置的 transcript/heartbeat 名字，若不属于任一 SESSION_TARGETS 目标名，WARN 一次（每名字一次，
+# stderr）——宁可启动时响一声，不要运行期静默半盲。
+_sl_audit_config_wiring() {
+  [ -n "${SESSION_TRANSCRIPTS:-${SESSION_HEARTBEATS:-}}" ] || return 0
+  local -A target_names=()
+  local name root target n v src
+  while read -r name root target; do
+    [ -n "${name:-}" ] || continue
+    target_names["$name"]=1
+  done < <(targets)
+  for src in SESSION_TRANSCRIPTS SESSION_HEARTBEATS; do
+    [ -n "${!src:-}" ] || continue
+    while read -r n v; do
+      [ -n "${n:-}" ] || continue
+      [ "${target_names[$n]:-0}" = "1" ] || \
+        echo "session-liveness: WARN ${src} 的名字「${n}」不匹配任何 SESSION_TARGETS 目标名（targets: ${!target_names[*]}）——transcript_for 按名匹配会找不到它，该目标的心跳不会用这个源；名字必须与 SESSION_TARGETS 的目标名一致" >&2
+    done <<< "${!src}"
+  done
+}
+_sl_audit_config_wiring
+
 while true; do
   while read -r name root target; do
     [ -n "${name:-}" ] || continue
+    # 首轮预热（D5 锐化，2026-08-08）：该目标被观察的轮数。启动第 1 轮不报 IDLE/RESUMED
+    # （原 SEEN_BUSY「未见过忙就永不报」的防启动误报意图改由它承担——前者只丢一轮，后者丢
+    # 整段）。alive=0 分支把它清 0，会话恢复后重新预热一轮。
+    ROUNDS[$name]=$(( ${ROUNDS[$name]:-0} + 1 ))
     pid=$(session_pid "$target")
     alive=$([ -n "$pid" ] && echo 1 || echo 0)
     halted=$([ -f "$root/.halt" ] && echo 1 || echo 0)
@@ -1001,8 +1059,11 @@ while true; do
         else
           IDLE_CONSEC[$name]=0
           SEEN_BUSY[$name]=1
+          # per-spell 边沿（D5 锐化）：忙轮开启新段 → 该段空闲尚未报过，允许再报一次。
+          IDLE_REPORTED[$name]=0
         fi
-        if [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
+        # 首轮预热（D5 锐化）：第 1 轮不报 RESUMED（PREV_IDLE 未置位已兜底；ROUNDS 门显式化）。
+        if [ "${ROUNDS[$name]:-0}" -gt 1 ] && [ "${PREV_IDLE[$name]:-unset}" != "unset" ] && [ "${PREV_IDLE[$name]}" != "$idle" ]; then
           if [ "$idle" = "1" ]; then
             # 忙→闲【单轮转换不报】——去抖（AC2）持有：只延迟 ≤1 轮询周期（真空闲下一轮还是闲，
             # 不造成漏报），远在 20 分钟 cron 兜底之内。真正的 SESSION-IDLE 由下面 counter 分支报。
@@ -1038,9 +1099,18 @@ while true; do
           fi
         fi
         PREV_IDLE[$name]=$idle
-        # 去抖后的 SESSION-IDLE 报告（AC2）：连续 IDLE_DEBOUNCE_ROUNDS 轮 fused-idle 且此前见过
-        # 忙轮（SEEN_BUSY，防启动误报）才报。单轮转换不报（上面）；counter==N 精确触发一次。
-        if [ "$idle" = "1" ] && [ "${IDLE_CONSEC[$name]:-0}" -eq "$IDLE_DEBOUNCE_ROUNDS" ] && [ "${SEEN_BUSY[$name]:-0}" = "1" ]; then
+        # 去抖后的 SESSION-IDLE 报告（AC2 + D5 锐化，2026-08-08）：连续 ≥IDLE_DEBOUNCE_ROUNDS
+        # 轮 fused-idle 且本段未报过（IDLE_REPORTED 边沿）且非启动首轮（ROUNDS 预热）才报。
+        #   * -ge 而非 -eq：计数器越过阈值后继续匹配——每段停摆不再只有「等于 2 的那一轮」一次
+        #     触发机会（-eq 会把 SEEN_BUSY=0 那一轮的失配变成永久销毁，见文件头 D5 注释）。
+        #   * IDLE_REPORTED：-ge 的边沿由它承担，每段空闲只报一次；忙轮清掉 → 新段可再报。
+        #   * ROUNDS>1：原 SEEN_BUSY「防启动误报」意图（启动首轮不报），挂载时已在进行的停摆
+        #     不再被「未见过忙就永不报」静默掉（AC6）。
+        if [ "$idle" = "1" ] \
+           && [ "${IDLE_CONSEC[$name]:-0}" -ge "$IDLE_DEBOUNCE_ROUNDS" ] \
+           && [ "${IDLE_REPORTED[$name]:-0}" = "0" ] \
+           && [ "${ROUNDS[$name]:-0}" -gt 1 ]; then
+          IDLE_REPORTED[$name]=1
           hmin="?"
           hmod=$(heartbeat_mtime_for "$name" "$root")
           hb=$(heartbeat_for "$name" "$root"); hmin="?"
@@ -1130,6 +1200,7 @@ while true; do
       PREV_STATE[$name]=""; PREV_IDLE[$name]="unset"; PREV_API_BLOCKED[$name]=0; PREV_MARKER_STALE[$name]=0
       PREV_PANE_EMPTY[$name]=0
       IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0; PREV_SATURATED[$name]=0
+      IDLE_REPORTED[$name]=0; ROUNDS[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。

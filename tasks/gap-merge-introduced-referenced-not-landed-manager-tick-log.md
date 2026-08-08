@@ -56,9 +56,24 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
       （cold-start SKILL.md 须引用 40→6 合并入口 `quay-suite.ts loop-driver-check`，现用裸 `loop-driver-check.sh`）——
       develop~1 即缺（test 2 断言 / SKILL.md 0 命中），**非本任务 referenced-not-landed 根因**，属 ac8 40→6
       集成未收口（`gap-integration-content-fails-first-complete-tree-verification-fix-21` 一族），上报外层另行处置。
+      **2026-08-08 子代理复核（worktree task/gap-merge-introduced-referenced-not-landed-manager-tick-log @
+      develop 4e956457，含 7f43fc78）**：fix 在场且承重测试全绿（合计 42 tests / fail 0）——
+      `quay-init-loop-core.test.mjs`（真实 quay-init --loop 铺装，端到端走 verify_referenced_landed）→
+      tests 12 / pass 12 / fail 0；`worktree-root-fs-check.test.mjs` → tests 2 / pass 2 / fail 0；
+      `quay-init-check-drift` + `quay-init-drift-report` + `quay-init-loop-vendor` +
+      `quay-init-tmux-detection` → tests 23 / pass 23 / fail 0；`quay-init-laydown-closure.test.mjs`
+      （referenced ⊆ landed 正负控制）→ tests 5 / pass 5 / fail 0。referenced_landed measure：
+      `grep -c "manager-tick-log" plugin/skills/init/SKILL.md plugin/scripts/quay-init.sh` → 2 / 2
+      （声明在场 ≥1）。
 - [ ] AC3: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0
       **状态**：静态门绿 + 本根因（referenced-not-landed）清除；但 40→6 入口断言（上 AC2 注）仍红，
       且全量套件当前耗时 ~13min/趟、资源闸负载敏感——三趟全绿须在 40→6 收口后重跑，未勾。
+      **DEFERRED → 外层验证轮（2026-08-08 子代理按任务指示记录，不勾）**：全量三趟 fail 0 属外层
+      并发-8 验证面，单任务子代理不作全量套件跑（不编造）。本树复核补充：scoped 门
+      `scripts/test.sh --for-task <id> --allow-thin` 静态子集全绿（task-contract-check /
+      adr016-screen-use-check / dead-code-after-return-check，0 tests 选中即 thin）；低并发组
+      measure（`--group lowconc`，Contract loop_green）在 180s 窗口内 SIGTERM——该组 ~90s+ 单文件、
+      整体远超窗口，属全量族，并入外层 AC3 一起验证。
 - [x] AC4: 与 gap-merge-exposed-contract-violations-in-done-tasks（合并后首次完整验证暴露）、
       a862c914 merge 交叉标注
       **证据**：本任务 Proposal 记录 a862c914 merge → 完整验证暴露 → referenced-not-landed 根因；
@@ -70,6 +85,8 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
 - [x] AC1/AC2/AC4 实跑输出贴任务体（声明前后、--loop 家族对照）——见各 AC 证据
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）——静态门绿 + 本根因清除，但 40→6
       入口断言（预存、独立）仍红，须其收口后全量三趟重跑
+      **DEFERRED → 外层验证轮（2026-08-08）**：与 AC3 同款——全量三趟属外层并发-8 验证面，本子代理
+      不跑全量，AC3 的 DEFERRED 记录即 DoD 该项的顺延记录；外层在 40→6 收口后重跑并勾此项。
 
 ## Touches
 - plugin/skills/init/SKILL.md 或对应铺装声明文件（manager-tick-log.md reference-doc 声明）

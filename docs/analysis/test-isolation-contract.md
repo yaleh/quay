@@ -191,6 +191,33 @@
 后删掉。`# baseline-count` 封顶永久不变（51）。这是**同一形态的第四次**（R1 看不见 `process.cwd()` → R6 文件级
 存在性 → R7 不含仓库根 → 本条）：**规则名覆盖类、实现覆盖标本**。
 
+### R9 · 不得依赖挂钟计时判定时序（时序判定须受控假时钟/事件）（2026-08-08 补）
+
+> 来源：`tasks/gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7.md`——并发 8 恒红的根因
+> （管理者 2026-08-07 实测）：`session-liveness.test.mjs` 的 noise-gate 测试用真 `sleep(2500)` +
+> 10-25 秒等待窗口判定一个真实轮询进程翻转状态；负载下调度延迟超过等待窗口 ⇒ 断言失败。**R1-R7 全部
+> 关于文件系统/进程隔离**（mkdtemp 位置、进程生命周期、共享检出写入等），**没有一条覆盖「挂钟计时依赖」**——
+> 这是一个现有规则机制上无法捕获的新类别。同款写法（真 sleep + 有限等待窗口）当时还有
+> `send-keys-verified` / `monitor-mount-check` / `measure-suite`（B 类共 6 文件）。
+
+**规则**：测试**不得依赖挂钟计时判定时序**——不得用「真 sleep 推进 N 轮 + 固定等待窗口」断言一个
+异步/轮询行为在窗口内翻转，因为结果会取决于机器速度与调度负载。时序判定必须用**受控假时钟/事件**
+（fake timers / `mock.timers` / 注入事件或回调 / 确定性轮询步进），使结果只取决于输入、不取决于
+机器速度或负载。**不变式：一个测试的结果不得因负载（CPU 饥饿 / 调度延迟）而翻转。**
+
+**扫描信号**（R9 `real-wall-clock-wait`，与 R1-R8 并列的新一类）：
+- 测试代码里 `sleep(N)`（`setTimeout` / `node:timers/promises`）且 **N ≥ 2000ms** 的长等待
+  （机械判据即任务 Contract 的 measure：`grep -rlE 'sleep\(2[0-9]{3}|sleep\([0-9]{4,}' plugin/test/ packages/*/test/`）；
+- `Date.now()` / `performance.now()` 直接参与时序断言（未受控时钟源的单调流逝断言）。
+
+**既有测试的处置（2026-08-07 人裁定覆盖「逐文件假时钟重写」方向）**：B 类 6 个挂钟依赖文件
+（session-liveness / measure-suite / monitor-mount-check / quay-init-tmux-detection / send-keys-verified /
+build-dist-smoke，后者已删）**不逐文件重写**——经 `@test-group lowconc`/`serial` 隔离路由
+（见 `tasks/gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 与
+`tasks/gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive`），从并发主体移出、单独低并发跑，
+消除 CPU 饥饿击穿。**本规则约束的是新测试**：新测试不得再引入真挂钟等待判定时序；`wall_clock_tests`
+measure 计数不得因新测试上升（当前 3，session-liveness 拆分后的三文件，全部在 `lowconc` 组）。
+
 ## 扫描与棘轮（AC2–AC6）
 
 `plugin/scripts/test-isolation-check.ts` 对 `scripts/test.sh --list-files` 的每个文件做七条判定，

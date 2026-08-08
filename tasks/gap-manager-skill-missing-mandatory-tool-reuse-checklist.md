@@ -181,6 +181,40 @@ scripts/test.sh: --for-task ... — selector selected 0 test files (thin allowed
 **改动文件**：`plugin/skills/manager/SKILL.md`（+§9 工具复用强制挂载点）、
 `orchestration/SPEC-manager-productization-2026-08-05.md`（§5 交叉标注「落地状态」）、本任务体（AC/DoD/证据）。
 
+### 2026-08-08 落地复核（task subagent 在 worktree 内实落，非仅预案）
+
+上面 2026-08-07 的证据描述的是预期改动；本次派发复核确认该改动此前**未落入树内**
+（`develop` 上 `grep -c "capability-catalog..." plugin/skills/manager/SKILL.md` = 0），
+因此在 `task/gap-manager-skill-missing-mandatory-tool-reuse-checklist` worktree 内实际落地并复测：
+
+```
+$ grep -c "capability-catalog\|dead-loop-check\|prefriction-count\|axis-generator\|tmux-leak-scan\|sync-lag-check\|supervisor-deliver" plugin/skills/manager/SKILL.md
+8                          # tool_reuse_checklist_present（band=8）✓ 实落
+$ grep -c "写脚本前\|before writing\|查目录\|check the catalog" plugin/skills/manager/SKILL.md
+1                          # precheck_mounting_point_exists（band=1）✓ 实落
+$ grep -c "capability-catalog" plugin/skills/manager/SKILL.md
+2                          # invoke ✓
+```
+
+**invariant 复核**：8 个基名逐一确认在 `plugin/scripts/capability-catalog.sh` 的 `declare -A QUESTION=` 表内
+（172 个 key 中逐一命中 `pane-state-classify`/`dead-loop-check`/`prefriction-count`/`axis-generator`/
+`tmux-leak-scan`/`sync-lag-check`/`send-keys-reliable`/`supervisor-deliver`）。
+
+**control 复核**（isolated temp dir：`/tmp/cc-control/` 内放物理 `fictional-scan.sh` + 注入 QUESTION 表，
+`SELF_DIR` 派生自脚本自身位置，不污染真实目录）：
+```
+fictional-scan.sh appears in catalog --json: 1        # 活目录查询能机械看到新增，静态清单不会假装覆盖
+SKILL references fictional-scan: 0                    # 无 false 'covered' claim（invariant holds）
+```
+
+**scoped static tier 实跑**（`bash scripts/test.sh --for-task gap-manager-skill-missing-mandatory-tool-reuse-checklist --allow-thin`）：
+```
+task-contract-check: no violations.
+strategic-doc-staleness-check — 102 strategic doc(s) scanned; stale_refs_found (new): 0
+PASS: no NEW stale strategic doc beyond the KNOWN_STALE baseline
+scripts/test.sh: --for-task ... — selector selected 0 test files (thin allowed); nothing to run, full suite still runs at fan-in
+```
+
 ## Touches
 - tasks/gap-manager-skill-missing-mandatory-tool-reuse-checklist.md
 - plugin/skills/manager/SKILL.md

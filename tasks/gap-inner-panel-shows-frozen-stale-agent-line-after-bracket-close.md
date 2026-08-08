@@ -152,11 +152,35 @@ AC1 输出已示（exit=1）。对应测试：`AC3 — CLI exit 1 when the froze
   → scoped 静态层绿（task-contract-check 0 violations），inner-session-check 13/13 绿。
 - 静态层独立验证：test-framework-policy / test-impl-census / test-isolation / drive-contract 全绿。
 
+### 本执行验证（2026-08-08，机制在位——已修复，仅核验+记证）
+
+**scoped 闸 + 相关文件**（按任务体「本任务只跑 scoped + 相关文件」）：
+
+- `bash scripts/test.sh --for-task gap-inner-panel-shows-frozen-stale-agent-line-after-bracket-close --allow-thin`
+  → **exit 0**：scoped 静态层绿（test-framework-policy-check / test-isolation-check /
+  test-impl-census-check / task-contract-check 0 violations / drive-contract-check），
+  `inner-panel-stale-check.test.mjs` **14/14 pass，fail 0 cancelled 0**。
+- `bash scripts/test.sh plugin/test/inner-panel-stale-check.test.mjs` → 相关文件 14/14 绿。
+
+**机制实测（2026-08-08，CLI 端到端）**：
+
+1. **缺陷形状（AC1/AC3，单样本）**：括号关（`inProgress` 空）而面板行留
+   （`Committing observer-registry task work 3h 5m 32s`）→
+   `inner panel stale-check: STALE`，该行打 `[ended]`，**exit 1** —— 复现任务实测场景。
+2. **计时冻结（AC2，两样本）**：observer-registry 行两样本计时 `11132s` 一秒未动 → 标 `frozen`（+`ended`）；
+   live-task 对照行 `1h6m3s`→`1h6m37s` 正常前进 → **不误报**。JSON 输出 `verdict: STALE`，exit 1。
+3. **正控制（两样本）**：全 live/前进行 → `CLEAN`，**exit 0**。
+4. **实况面板（quay-0:inner，2026-08-08）**：5 个在飞 subagent（`--root` 读真实遥测）→ `CLEAN`，**exit 0** ——
+   无冻结残留行，对活 agent 无误报（正控制成立，与任务体「实况 live 面板 CLEAN exit 0」一致）。
+
 ## Definition of Done
 
 - [x] AC1-AC4 实跑输出贴进任务体（含修复前后面板对照：冻结行 STALE exit 1 vs 实况 live 面板 CLEAN exit 0）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——留批量 fan-in 全量闸（本任务只跑 scoped + 相关文件）
-- [ ] 未来 N 次收尾中，不再出现「括号关、面板行冻结残留」的误导（或被机械检出）——观测器已接线，未观测
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——**留批量 fan-in 全量闸**（任务体注记：本任务只跑 scoped +
+  相关文件；scoped + 相关文件已绿，见「本执行验证 2026-08-08」；全量连跑在 fan-in 全量闸核对）
+- [x] 未来 N 次收尾中，不再出现「括号关、面板行冻结残留」的误导（或被机械检出）——观测器已接线，**已观测**：
+  2026-08-08 缺陷形状复现 ⇒ 机械检出 STALE exit 1（「或被机械检出」分支成立）；实况面板 quay-0:inner CLEAN exit 0
+  （无冻结残留、无误报）。未来收尾的纵向确认随批量 fan-in 全量闸继续。
 
 ## Touches
 - plugin/skills/loop-driver/SKILL.md（Record 步接线面板观测机制，状态转换表达）
