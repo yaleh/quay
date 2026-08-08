@@ -62,8 +62,18 @@ resume 若中断，先跑 measure 读当前套件/ catalog 状态，再读 Rever
 
 ## Acceptance Criteria
 
-- [ ] AC1: **受影响测试全部更新**——catalog（capability-catalog.test.mjs）、install（AC6 anti-pass-through
+- [x] AC1: **受影响测试全部更新**——catalog（capability-catalog.test.mjs）、install（AC6 anti-pass-through
       族）、doc-asserting（tick 文档结构族）逐文件更新为匹配 40→6 行为，隔离跑全绿
+      **证据**：develop 2163c4c3 + 2dc55ba9（7 文件）：
+      - doc-asserting：session-topology AC4 / session-bootstrap AC5 / inner-blocked-signal AC3 /
+        quay-init-loop-driver AC1 断言改回裸脚本形（quay-topology.sh / session-bootstrap.sh /
+        inner-blocked-signal.ts / loop-driver-check.sh），注释标注 40→6 重合并后恢复入口形；
+      - install：quay-init-loop-core AC3/AC4 去掉 manager-loop-tick 铺装断言（gap-the-manager-layer
+        是 pending 任务，revert 7642849a 已移除铺装）；
+      - catalog：capability-catalog.test.mjs 8 pass / 0 fail（隔离）；
+      - 恢复合并丢的 `quay-entry-test-helpers.mjs`（quay-session.test.mjs 纯 import 依赖）。
+      隔离实跑（develop 主 checkout）：quay-session 6/0 · session-topology 10/0 · session-bootstrap
+      9/0 · inner-blocked-signal 31/0 · loop-shipping 3/0 · quay-init-loop-driver 15/0 · serial 组 42/0。
 - [ ] AC2: **干净窗口全量绿**——`suite_green`=1（重合并前置判据）
 - [ ] AC3: **重合并 + 复验**——integration→develop 真 merge，重跑套件绿；surface_entrypoints 回 8-10、
       sh_entrypoints 回 2-4（40→6 生效）
