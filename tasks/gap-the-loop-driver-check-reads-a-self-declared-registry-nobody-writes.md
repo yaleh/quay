@@ -210,6 +210,13 @@ tick 文档正确地建 cron，**缺的是没有人把两者接起来**，而这
 `plugin/test/loop-driver-check.test.mjs` 的最后一个测试把「层 1 只交付文档级补救」pin 住，
 未来第二层改动须同步更新该测试。
 
+**AC3 交叉标注（2026-08-08，第二层已解决）**：本任务 AC3 已由
+`gap-loop-driver-check-ac3-layer2-cron-observability`（第二层，done）承载并解决——该任务实测回答了
+前置问题（bash 检查器看不到会话内 cron 列表；可观测的是驱动每次 tick 写的 last-alive 证据），把
+`loop-driver-check.sh` 的 LIVE 判据换成可观测来源：构造「注册表一行、驱动已死」（注册表 mtime 2 天前 +
+无可观测活动）⇒ 报 **DEAD**（exit 6），不再报 LIVE；`stale_registry_exit`（grep 计数）band = 0。
+本任务「## AC3 处置」的「未解决」结论被该第二层任务正式解除。
+
 ## 实跑证据（2026-08-06 inner 派发）
 
 **AC1 — 照 tick 文档步骤 4 逐字冷启动 ⇒ LIVE（正向）**（干净仓 + 文档写注册表两行 + 跑 check）：
