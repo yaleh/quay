@@ -37,14 +37,68 @@ let probeTmpPrefix = "session-liveness-";
 export function setProbeTmpPrefix(p) { probeTmpPrefix = p; }
 export function probeTmpPrefixOf() { return probeTmpPrefix; }
 
+// ── sweepTmp / dirHasLiveOwner — CLEANUP is OWNER-LIVENESS-based, never name-based (AC2/AC3/AC4
+//    of gap-sweeptmp-pkill-kills-live-observers-two-layer-blind) ───────────────────────────────────
+//
+// 2026-08-08 incident: a cleanup ran a process-name batch kill of the session-liveness monitor
+// processes (outer + manager) and killed them all — the two layers went blind simultaneously and
+// the observers' own deaths had no observer. Root cause: the cleanup distinguished "leak residue"
+// from "in-use instance" by PROCESS-NAME/PATH matching instead of OWNER-SESSION LIVENESS. A
+// session-liveness process whose owner session is alive is IN-USE, not residue; name-based batch
+// kills necessarily kill live monitors.
+//
+// THE RULES ENFORCED HERE (pinned by the AC2/AC4 sweep tests in session-liveness-sweep.test.mjs):
+//   * sweepTmp NEVER kills processes — it only removes /tmp DIRECTORIES under the caller's own
+//     test prefixes, and only those with NO live owner.
+//   * A name-based batch kill of the session-liveness monitor (process-name `pkill` / `killall`)
+//     is FORBIDDEN in the cleanup path (invariant no_pkill_by_name_on_live = 1 — the sweep test
+//     scans the executable bodies for it).
+//   * The residue-vs-in-use criterion is OWNER LIVENESS (dirHasLiveOwner), NOT name/path prefix.
+export function dirHasLiveOwner(dir) {
+  // A live tmux server holds a unix socket under <dir>/sock (a hermetic probe started it with
+  // TMUX_TMPDIR=<dir>/sock). /proc/net/unix lists only sockets bound by LIVE processes, so a stale
+  // socket FILE with no live holder does NOT count as an owner.
+  let abs;
+  try { abs = fs.realpathSync(dir); } catch { return false; } // gone → not "alive"
+  try {
+    const netUnix = fs.readFileSync("/proc/net/unix", "utf8");
+    for (const line of netUnix.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 8) { // num: ref protocol flags type st inode path
+        const sock = parts.slice(7).join(" ");
+        if (sock.startsWith(abs + "/")) return true;
+      }
+    }
+  } catch { /* /proc/net/unix unreadable — fall through to the environ check */ }
+  try {
+    const procs = fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n));
+    for (const p of procs) {
+      try {
+        const environ = fs.readFileSync(`/proc/${p}/environ`, "utf8");
+        for (const kv of environ.split("\0")) {
+          if (kv.startsWith("TMUX_TMPDIR=") && kv.slice("TMUX_TMPDIR=".length).startsWith(abs + "/")) return true;
+        }
+      } catch { /* pid exited mid-scan */ }
+    }
+  } catch { /* /proc unreadable */ }
+  return false;
+}
+
 // sweepTmp(...prefixes) — remove leftover /tmp dirs under the given prefixes (the suite-tail
 // tmux-leak-scan's /tmp class). Each split test file's after() calls this with its OWN prefixes.
+// OWNER-LIVENESS GUARD (gap-sweeptmp-...): a dir with a LIVE owner (a tmux server holding a socket
+// under it = an in-use hermetic probe) is SKIPPED — only owner-dead residue is removed. NEVER kills
+// processes; NEVER pkill by name.
 export function sweepTmp(...prefixes) {
   let entries = [];
   try { entries = fs.readdirSync(os.tmpdir()); } catch { return; }
   for (const name of entries) {
     if (!prefixes.some((p) => name.startsWith(p))) continue;
-    try { fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true }); } catch { /* best-effort */ }
+    const abs = path.join(os.tmpdir(), name);
+    let isDir = false;
+    try { isDir = fs.statSync(abs).isDirectory(); } catch { continue; }
+    if (isDir && dirHasLiveOwner(abs)) continue; // owner session ALIVE → in-use, never clean
+    try { fs.rmSync(abs, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 }
 
@@ -246,7 +300,7 @@ export async function waitForSelfClaude(env, session, timeoutMs = 5000) {
 // isolate and a spawned monitor can never collide with another mount. SL_ROUND_MARKER=1 (default in
 // tests) prints one `# ROUND` per loop iteration as a deterministic round cadence (the old shared-file
 // HEARTBEAT was the previous cadence carrier). cleanup() is a no-op keep-alive for the old call sites.
-export function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin, roundMarker = true } = {}) {
+export function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcripts, stallMin = 1, overdueMin = 1, interval = 1, loopMin, roundMarker = true, register = false } = {}) {
   const monEnv = {
     ...env,
     SESSION_TARGETS: targets,
@@ -262,6 +316,11 @@ export function spawnMonitor(env, targets, { script = SCRIPT, tickLogs, transcri
   if (tickLogs) monEnv.SESSION_HEARTBEATS = tickLogs;
   if (transcripts) monEnv.SESSION_TRANSCRIPTS = transcripts;
   if (loopMin !== undefined) monEnv.LOOP_MIN = String(loopMin);
+  // Candidate-D self-registration (gap-sweeptmp-... AC5): tests OPT OUT by default so a spawned
+  // monitor never writes a registry file into the REAL repo's .quay (spawnMonitor's env does not
+  // set SESSION_ROOT, so the script's REPO_ROOT would resolve to the quay repo). Pass
+  // register:true AND SESSION_ROOT:<tmp> to exercise the registration path hermetically.
+  if (!register) monEnv.SL_NO_REGISTER = "1";
   const child = spawn("bash", [script], { env: monEnv });
   let out = "";
   child.stdout.on("data", (d) => { out += d; });

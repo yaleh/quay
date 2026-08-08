@@ -47,6 +47,10 @@ packages/quay/plugin/
 # did, the suite-AFTER check would see its own snapshot as NEW dirt).
 **/.quay/assert-clean-tree.snapshot
 **/.quay/tmux-leak-scan.snapshot
+# gap-sweeptmp-pkill-kills-live-observers-two-layer-blind (2026-08-08): the observer self-registry
+# files session-liveness.sh writes on resident start (candidate-D death detection). Per-pid
+# runtime state — must never appear in `git status --porcelain` (same family as gate-events.jsonl).
+**/.quay/session-liveness.*.json
 # gap-node-compile-cache-is-never-enabled-and-every-spawn-reparses (2026-08-04): the Node compile
 # cache (NODE_COMPILE_CACHE) — same gitignored runtime-state family as gate-events.jsonl (DoD:
 # "与 gate-events.jsonl 同形"). On DISK by construction: scripts/test.sh pins it to

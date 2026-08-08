@@ -91,16 +91,18 @@ test("AC1/AC3/AC6/AC7 — esc to interrupt PRESENCE drives busy/idle; RESUMED ca
       assert.ok(/上次收到输入：取不到/.test(out),
         `RESUMED must say 取不到 when no transcript is configured (AC7 — 不得省略该字段):\n${out}`);
       makePaneIdle(p.env, p.session); // clear the input → back to the idle shape
-      assert.ok(await waitForOutput(mon, /SESSION-IDLE esc/, 8000),
-        `IDLE must fire once the semantic flag disappears:\n${mon.output()}`);
       // D5 fix (2026-08-08): /nonexistent heartbeat + idle-at-mount now fires a MOUNT-TIME IDLE
       // (correct for an unknown-heartbeat stall — SEEN_BUSY gate removed). The assertion must be
       // the TRANSITION IDLE, not that mount-time one: a fresh IDLE must fire after the busy, i.e.
-      // the LAST SESSION-IDLE must postdate the SESSION-RESUMED (per-spell edge: IDLE reports once
-      // per idle spell, and the busy spell re-arms it).
-      const out2 = mon.output();
-      assert.ok(out2.indexOf("SESSION-RESUMED esc") < out2.lastIndexOf("SESSION-IDLE esc"),
-        `a FRESH IDLE must fire after the busy transition (the mount-time idle is not the one under test):\n${out2}`);
+      // a SESSION-IDLE must POSTDATE the SESSION-RESUMED (per-spell edge: IDLE reports once per idle
+      // spell, and the busy spell re-arms it). 2026-08-08 load-robustness (same family as
+      // gap-load-sensitive-session-family-confounds-step-three): wait for the RESUMED→IDLE PAIR as a
+      // single pattern over the GROWING output — waiting for a bare `/SESSION-IDLE esc/` would match
+      // the mount-time idle INSTANTLY and truncate the wait window to ~0s, so under concurrent-suite
+      // load (a sibling agent hammering the same family on a shared box) the fresh transition IDLE
+      // never had time to fire. The pair pattern gives it the full 8s window.
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED esc[\s\S]*SESSION-IDLE esc/, 8000),
+        `a FRESH IDLE must fire after the busy transition (the mount-time idle is not the one under test):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
     mon.cleanup();
