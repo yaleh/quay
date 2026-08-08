@@ -6,23 +6,33 @@
 // so a verbatim tick-doc cold start reports STALLED (exit 3), and the doc's STALLED remedy ("rebuild
 // the cron") manufactures the very double-trigger the check exists to catch.
 //
-// Layer-1 fix (this task):
+// Layer-1 fix (the parent task):
 //   1. the tick doc's step 4 now WRITES the registry, verbatim same-source as the cold-start skill;
 //   2. the .gitignore covers the registry (already in master, f263f12fb) — verified, not re-added;
 //   3. the STALLED disposition now checks the registry before telling the human to rebuild the cron;
 //   4. the .halt print is a control-plane reading (未暂停), not a state assertion (运行中).
-// Layer-2 (recorded in the task body, NOT implemented here): the registry is self-declared — a bash
-// checker cannot tell a dead cron's leftover registration from a live one, so AC3's "stale registry
-// must not report LIVE" is NOT solvable in layer 1. No test asserts the checker CAN distinguish; the
-// task body records it honestly as unsolved + written into layer 2.
+// Layer-2 (THIS task — gap-loop-driver-check-ac3-layer2-cron-observability): the LIVE verdict is
+// now based on an OBSERVABLE source, not just registry-line count. The pre-question was answered by
+// experiment: a bash checker CANNOT see the session-internal cron list (CronList output lives in the
+// session process; the only disk traces are historical transcript logs — grep-able for a DEAD
+// session's CronCreate, which would be a false positive). What bash CAN see is the driver's
+// last-alive evidence: git HEAD commit time, orchestration/tick-log.md mtime, .quay/verification-
+// round.jsonl mtime, docs/analysis/*.md mtime (the same multi-source heartbeat session-liveness.sh
+// uses). So a registry line whose driver has produced NO fresh observable activity (and whose
+// registry is itself stale) now reports DEAD (exit 6), never LIVE — AC3's stale_registry_exit=0.
+// A freshly-installed driver (registry just written, first tick not yet fired) still reports LIVE
+// (cold-start grace: clean_start_exit=0 contract); a genuinely-alive driver (fresh observable
+// activity) reports LIVE.
 //
 // Contract measures pinned here:
-//   doc_registers     — grep -c "loop-driver.jsonl" plugin/loop/orchestrator-loop-tick.md >= 1
-//   clean_start_exit  — executing the tick-doc step-4 write lines in a clean repo ⇒ check exit 0 (LIVE)
-//   registry_ignored  — git check-ignore -v .quay/loop-driver.jsonl ⇒ exit 0, `**/.quay/...` shape
-//   invoke            — bash scripts/test.sh plugin/test/loop-driver-check.test.mjs
-//   control           — two registry lines ⇒ DOUBLE-TRIGGER exit 4 (no regression)
-//   invariant         — zero-driver repo (fresh clone, registry absent) ⇒ STALLED, never LIVE
+//   doc_registers      — grep -c "loop-driver.jsonl" plugin/loop/orchestrator-loop-tick.md >= 1
+//   clean_start_exit   — executing the tick-doc step-4 write lines in a clean repo ⇒ check exit 0 (LIVE)
+//   registry_ignored   — git check-ignore -v .quay/loop-driver.jsonl ⇒ exit 0, `**/.quay/...` shape
+//   stale_registry_exit — stale construction (registry line + old registry mtime + no observable
+//                        activity) ⇒ `bash loop-driver-check.sh --check 2>&1 | grep -c 'LIVE\|STALLED'` = 0
+//   invoke             — grep -n 'CronList\|会话内\|可观测\|cron' plugin/scripts/loop-driver-check.sh
+//   control            — two registry lines ⇒ DOUBLE-TRIGGER exit 4 (no regression)
+//   invariant          — zero-driver repo (fresh clone, registry absent) ⇒ STALLED, never LIVE
 //
 // Run:
 //   scripts/test.sh plugin/test/loop-driver-check.test.mjs
@@ -64,8 +74,27 @@ function writeRegistryPerDoc(root) {
   }
 }
 
-function runCheck(root) {
-  return spawnSync('bash', [CHECKER, root], { encoding: 'utf8' });
+function runCheck(root, args = []) {
+  return spawnSync('bash', [CHECKER, ...args, root], { encoding: 'utf8' });
+}
+
+// The layer-2 stale construction: exactly one registry line (a cron driver that registered),
+// but the registry itself is OLD and there is NO fresh observable last-alive evidence (no git
+// repo / old commit, no tick-log, no verification-round, no docs/analysis). This is the
+// "registry has a row but the driver died long ago" shape the parent task's AC3 describes.
+function makeStaleRegistry(root, regAgeDays = 2) {
+  writeRegistryPerDoc(root);                     // one registry line
+  const reg = path.join(root, '.quay', 'loop-driver.jsonl');
+  const past = Math.floor(Date.now() / 1000) - regAgeDays * 24 * 3600;
+  fs.utimesSync(reg, past, past);                // registry itself stale (install long ago)
+}
+
+// The layer-2 fresh-observable-activity fixture: one registry line PLUS a fresh tick-log the
+// driver writes every cycle — a genuinely-alive driver.
+function makeAliveDriver(root) {
+  writeRegistryPerDoc(root);
+  fs.mkdirSync(path.join(root, 'orchestration'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'orchestration', 'tick-log.md'), `# tick ${Date.now()}\n`);
 }
 
 // ── AC1/AC5: the tick doc registers the driver, verbatim same-source as the cold-start skill ──────────
@@ -166,16 +195,63 @@ test('AC1/invariant — a zero-driver repo (fresh clone, registry absent) report
   } finally { cleanup(ws); }
 });
 
-// ── Invariant: a stale registry's live/dead is structurally indistinguishable in layer 1 ─────────────
-test('AC3 (layer-1 limit, pinned) — a registry written but whose cron died is indistinguishable from LIVE at the checker level; the DOC-level remedy is what layer 1 ships', () => {
-  // Layer 1 cannot make the checker distinguish a dead cron's leftover registration from a live one
-  // (the cron is session-internal; a bash checker cannot observe it — the layer-2 open question).
-  // What layer 1 DOES ship is the doc-level remedy: both the tick doc and the cold-start skill
-  // instruct clearing the stale registry before a re-cold-start. Pin that here so a future layer-2
-  // change that makes the checker stale-aware updates this test's contract.
+// ── AC3 (layer-2): the stale construction must NOT report LIVE ────────────────────────────────────
+test('AC3 (layer-2) — a registry line whose driver died reports DEAD (exit 6); the Contract measure stale_registry_exit = 0', () => {
+  const ws = makeTmp();
+  try {
+    makeStaleRegistry(ws);                       // one line, registry 2 days old, no observable activity
+    const c = runCheck(ws, ['--check']);         // the Contract measure's invocation
+    assert.equal(c.status, 6, `stale registration must be DEAD (exit 6), got ${c.status}: ${c.stdout}${c.stderr}`);
+    assert.match(c.stdout, /DEAD/, 'must report DEAD');
+    // Contract band stale_registry_exit = 0: the output must contain NEITHER LIVE NOR STALLED.
+    assert.doesNotMatch(c.stdout, /LIVE/, 'a stale registration must NOT report LIVE (AC3)');
+    assert.doesNotMatch(c.stdout, /STALLED/, 'a stale registration must NOT report STALLED');
+    const matches = (c.stdout.match(/LIVE|STALLED/g) || []).length;
+    assert.equal(matches, 0, `stale_registry_exit must be 0, got ${matches}: ${c.stdout}`);
+    // The positional form must agree with --check (same criterion).
+    const cp = runCheck(ws);
+    assert.equal(cp.status, 6, `positional form must also be DEAD, got ${cp.status}: ${cp.stdout}`);
+    assert.doesNotMatch(cp.stdout, /LIVE|STALLED/, 'positional form must not report LIVE/STALLED either');
+  } finally { cleanup(ws); }
+});
+
+// ── AC2 (layer-2): the criterion source is visible in the script (invoke) ─────────────────────────
+test('invoke — the criterion source (CronList / 会话内 / 可观测 / cron) is visible in the script', () => {
+  const src = fs.readFileSync(CHECKER, 'utf8');
+  for (const kw of ['CronList', '会话内', '可观测', 'cron']) {
+    assert.ok(src.includes(kw), `script must carry the criterion-source keyword '${kw}' (invoke contract)`);
+  }
+});
+
+// ── AC2 (layer-2): a genuinely-alive driver still reports LIVE ────────────────────────────────────
+test('AC2 (layer-2) — a genuinely-alive driver (registry line + fresh observable activity) reports LIVE (exit 0)', () => {
+  const ws = makeTmp();
+  try {
+    makeAliveDriver(ws);                         // registry line + fresh tick-log
+    const c = runCheck(ws, ['--check']);
+    assert.equal(c.status, 0, `live driver must be LIVE (exit 0), got ${c.status}: ${c.stdout}${c.stderr}`);
+    assert.match(c.stdout, /loop-driver: LIVE \(1\)/, 'must print the LIVE (1) line');
+  } finally { cleanup(ws); }
+});
+
+// ── AC2 (layer-2): a fresh install (no tick yet) still reports LIVE (cold-start grace) ────────────
+test('AC2 (layer-2) — a freshly-installed driver (registry just written, first tick not yet fired) still reports LIVE (cold-start grace)', () => {
+  const ws = makeTmp();
+  try {
+    writeRegistryPerDoc(ws);                     // registry just written, NO observable activity yet
+    const c = runCheck(ws, ['--check']);
+    assert.equal(c.status, 0, `fresh install must be LIVE (exit 0), got ${c.status}: ${c.stdout}${c.stderr}`);
+    assert.match(c.stdout, /loop-driver: LIVE \(1\)/, 'must print the LIVE (1) line');
+  } finally { cleanup(ws); }
+});
+
+// ── AC3 (layer-2, doc-level): the doc-level stale-clear remedy is retained for operators ───────────
+test('AC3 (layer-2) — the DOC-level stale-clear remedy is retained alongside the mechanical DEAD verdict', () => {
+  // The tick doc and cold-start skill still instruct `rm -f <root>/.quay/loop-driver.jsonl` before a
+  // re-cold-start — the operator-side cleanup. The mechanical stale detection is now the checker's
+  // DEAD verdict (above); the doc remedy remains for the operator who must clear the old line.
   const tick = fs.readFileSync(TICK_DOC, 'utf8');
   const skill = fs.readFileSync(COLD_START, 'utf8');
   assert.match(skill, /rm -f <root>\/\.quay\/loop-driver\.jsonl/, 'cold-start skill must clear the stale registry');
   assert.match(tick, /rm -f <root>\/\.quay\/loop-driver\.jsonl/, 'tick doc must clear the stale registry before rebuild');
-  // The stale-state construction is real (one line, no live cron); the layer-1 outcome is recorded
 });
