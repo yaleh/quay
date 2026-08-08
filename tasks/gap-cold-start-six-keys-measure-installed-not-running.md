@@ -65,6 +65,7 @@ TASK-49 凭据 / TASK-31-35 发布）——真需要人。archguard 目前**不�
 - [ ] scoped 门 `scripts/test.sh --for-task gap-cold-start-six-keys-measure-installed-not-running` 绿
 
 ## Touches
+- tasks/gap-cold-start-six-keys-measure-installed-not-running.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/skills/cold-start/SKILL.md（加「已停转」分支）
 - plugin/scripts/dead-loop-check.sh（cold-start 调用）
