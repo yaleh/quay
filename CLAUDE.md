@@ -14,7 +14,16 @@ an autonomous loop under `experiments/`. Both layers coexist — the `packages/`
 
 No `package.json` scripts and no build step (plain ESM Node ≥20; repo developed on Node 25). `npm install` at the root (npm workspaces, `packages/*`).
 
-- **Run the CLI:** `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` (Core), `node --experimental-strip-types packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
+- **Node floor (source execution):** the source CLI runs via `node --experimental-strip-types`,
+  which requires **Node ≥ 22.6** (gap-no-active-node-version-check-users-cant-tell-upgrade). The
+  pure-JS entry `packages/quay/bin/quay.js` probes `process.versions.node` and fails with a clear
+  upgrade message on older Node (instead of node's bare `bad option`); it then spawns the real TS
+  CLI under `--experimental-strip-types`. The shipped npm bin (`dist/quay.js`) is a bundle that runs
+  on the **dist floor (Node 20, `dist-verify-node-floor` CI)** — the source and dist floors are
+  judged separately.
+- **Run the CLI:** `node packages/quay/bin/quay.js <cmd>` (Core, version-probing entry), or
+  `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` on Node ≥ 22.6,
+  `node --experimental-strip-types packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
 - **Tests** (Node's built-in runner, `.mjs` under each package's `test/`):
   - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
     file and `.github/workflows/ci.yml` invoke; it owns the test-file glob

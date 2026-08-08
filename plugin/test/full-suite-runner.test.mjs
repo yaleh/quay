@@ -177,7 +177,10 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
     assert.equal(s.laneCount, 8);
     assert.ok(s.runId && typeof s.runId === "string", "every state write carries a runId generation token");
     assert.ok(!Number.isNaN(Date.parse(s.startedAt)), "startedAt is ISO");
-    assert.ok(!Number.isNaN(Date.parse(s.finishedAt)), "finishedAt is ISO");
+    // gap-batch-merge-gate-reads-stale-green: finishedAt is EPOCH SECONDS (the batch-merge freshness
+    // gate's Contract measure `int(time.time() - finishedAt)` needs epoch, not ISO).
+    assert.equal(typeof s.finishedAt, "number", "finishedAt is epoch seconds (suite_freshness measure)");
+    assert.ok(s.finishedAt > 0, "finishedAt epoch seconds is positive");
     assert.equal(typeof s.durationMs, "number", "durationMs is the AC5 measurement hook");
     assert.ok(s.durationMs >= 0);
   } finally {

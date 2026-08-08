@@ -55,6 +55,15 @@ function run(args, opts = {}) {
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
+// The merge-mechanics tests below PREDATE the freshness gate (gap-batch-merge-gate-reads-stale-green)
+// — they exercise the object / reconcile / real-merge-conflict gates in isolation and their fixtures
+// have no `.quay/full-suite-state.json`. The freshness gate is ON by default (mechanical, not
+// self-judged); these tests opt out EXPLICITLY via --skip-freshness-gate so the OTHER gates stay
+// reachable. The freshness-gate tests at the bottom run WITHOUT the opt-out.
+function runMerge(args, opts = {}) {
+  return run([batchMerge, "--skip-freshness-gate", ...args], opts);
+}
+
 function makeTmp(prefix) {
   return mkdtempSync(join(tmpdir(), `ibm-${prefix}-`));
 }
@@ -222,7 +231,7 @@ test("AC1: TRUE divergence (no --merge) reports the divergence surface AND fails
   const dir = divergedRepo("ac1");
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir]);
+    const r = runMerge(["--root", dir]);
     assert.notEqual(r.status, 0, "a true divergence must fail closed without --merge");
     // AC1: the divergence surface, not a one-line "needs human".
     assert.match(r.stdout, /DIVERGENCE/);
@@ -246,7 +255,7 @@ test("AC1 --dry-run on divergence reports the surface WITHOUT moving any ref", (
   const dir = divergedRepo("ac1dry");
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    const r = runMerge(["--root", dir, "--dry-run"]);
     assert.notEqual(r.status, 0, "dry-run on divergence exits non-zero (not a clean FF)");
     assert.match(r.stdout, /DIVERGENCE/);
     assert.match(r.stdout, /develop-only commits:/);
@@ -264,7 +273,7 @@ test("AC2: --merge auto-resolves shared-file conflicts develop-authoritative and
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const integ = gitCmd(dir, "rev-parse", "integration").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.equal(r.status, 0, `--merge should succeed: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /auto-resolving shared-file conflicts develop-authoritative/);
     assert.match(r.stdout, /orchestration\/tick-log\.md/);
@@ -305,7 +314,7 @@ test("AC3 (load-bearing negative control): --merge on a REAL code conflict fails
   const dir = divergedRepo("ac3", { withCodeConflict: true });
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.notEqual(r.status, 0, "a real code conflict must fail closed even with --merge");
     // The object gate does NOT flag .json (it is not a develop-side untested .ts/.js/.mjs/.sh file).
     assert.match(r.stdout, /measure unmerged_develop_files=0/);
@@ -337,7 +346,7 @@ test("AC4: full real-merge run (divergence) absorbs integration (develop..integr
   try {
     assert.notEqual(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "0",
       "pre: integration has pending commits develop lacks (the merge gap)");
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.equal(r.status, 0, r.stderr);
     // Pending absorbed: integration's commits are all in develop now (the Contract's measure,
     // `pending_commits = git rev-list --count develop..integration` → 0).
@@ -359,7 +368,7 @@ test("--dry-run --merge reports the divergence surface AND the shared/code class
   const dir = divergedRepo("drymerge", { withCodeConflict: true });
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--dry-run", "--merge"]);
+    const r = runMerge(["--root", dir, "--dry-run", "--merge"]);
     assert.notEqual(r.status, 0, "dry-run on divergence exits non-zero (not a clean FF)");
     // The object gate runs in dry-run too: code.json is not a gate extension ⇒ measure 0, no would-block.
     assert.match(r.stdout, /measure unmerged_develop_files=0/);
@@ -393,7 +402,7 @@ test("already-absorbed (integration is an ancestor of develop) is a clean no-op 
     assert.equal(gitCmd(dir, "merge", "-q", "--no-ff", "integration", "-m", "Merge integration").status, 0);
 
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.equal(r.status, 0);
     assert.match(r.stdout, /already an ancestor of develop \(nothing pending\)/);
     assert.match(r.stdout, /measure integration_ff_merges=0/);
@@ -424,7 +433,7 @@ test("--merge: develop deletes a shared file, integration modifies it ⇒ kept d
     writeFileSync(join(dir, "orchestration", "tick-log.md"), "int newest\n", "utf8");
     commitAll(dir, "integration modifies tick-log");
 
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.equal(r.status, 0, `--merge should resolve the shared delete/modify as develop-authoritative: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /auto-resolving shared-file conflicts develop-authoritative/);
     // develop-authoritative = the file stays deleted on develop.
@@ -474,7 +483,7 @@ test("--reconcile: clean primary checkout → guard passes, FF advances develop,
     const intTip = gitCmd(dir, "rev-parse", "integration").stdout.trim();
     assert.notEqual(intTip, devBefore);
 
-    const r = run([batchMerge, "--root", dir, "--reconcile"]);
+    const r = runMerge(["--root", dir, "--reconcile"]);
     assert.equal(r.status, 0, `--reconcile should succeed on a clean tree: ${r.stdout}${r.stderr}`);
     // Guard passed (porcelain empty) and the post-merge reconcile is a --mixed reset.
     assert.match(r.stdout, /reconcile: primary checkout clean \(porcelain empty\)/);
@@ -509,7 +518,7 @@ test("--reconcile: uncommitted primary-checkout edit → FAIL CLOSED before any 
     writeFileSync(join(dir, "orchestration", "manager-phase-goal.md"), "manager base\nMANAGER EDIT\n", "utf8");
     assert.equal(gitCmd(dir, "status", "--porcelain").stdout.trim(), "M orchestration/manager-phase-goal.md");
 
-    const r = run([batchMerge, "--root", dir, "--reconcile"]);
+    const r = runMerge(["--root", dir, "--reconcile"]);
     assert.notEqual(r.status, 0, "--reconcile must fail closed on uncommitted work");
     // Fail-closed verdict + the owner (file) surface reported.
     assert.match(r.stderr, /reconcile FAIL-CLOSED/);
@@ -530,7 +539,7 @@ test("--reconcile: primary checkout NOT on the advanced branch → reconcile is 
   // NOT stale its index, so --reconcile must skip the guard/reset yet still perform the real merge.
   const dir = divergedRepo("reconcilenop");
   try {
-    const r = run([batchMerge, "--root", dir, "--merge", "--reconcile"]);
+    const r = runMerge(["--root", dir, "--merge", "--reconcile"]);
     assert.equal(r.status, 0, `--reconcile --merge on a non-develop checkout should still merge: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /not 'develop'\) — index refresh not needed/);
     assert.match(r.stdout, /measure integration_ff_merges=0/);
@@ -552,7 +561,7 @@ test("OBJECT GATE (AC1/AC2): develop-side .ts code never entered the tested tree
   const dir = developCodeRepo("objgateblock");
   try {
     const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.notEqual(r.status, 0, "develop-side untested code must fail closed even with --merge");
     assert.match(r.stdout, /measure unmerged_develop_files=1/);
     // The offending file is reported (the develop-side code that the suite never saw).
@@ -574,7 +583,7 @@ test("OBJECT GATE (AC1 negative control): develop-side pure .md/tasks files PASS
   // tasks/*.md) — the gate must NOT block and the real merge must absorb integration.
   const dir = developCodeRepo("objgatemd", { pureMd: true });
   try {
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.equal(r.status, 0, `pure-md develop-side changes must pass the object gate: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /measure unmerged_develop_files=0/);
     assert.match(r.stdout, /measure integration_ff_merges=0/);
@@ -606,7 +615,7 @@ test("OBJECT GATE (AC1 negative control): a fast-forward of TESTED code (integra
     writeFileSync(join(dir, "feature.ts"), "feature v1\n", "utf8");
     commitAll(dir, "integration feature (tested)");
 
-    const r = run([batchMerge, "--root", dir]);
+    const r = runMerge(["--root", dir]);
     assert.equal(r.status, 0, `FF of tested code must pass the object gate: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /measure unmerged_develop_files=0/);
     assert.match(r.stdout, /fast-forwarded to integration/);
@@ -621,7 +630,7 @@ test("OBJECT GATE: dry-run reports the would-block measure and the offending fil
   const dir = developCodeRepo("objgatedry");
   try {
     const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--dry-run", "--merge"]);
+    const r = runMerge(["--root", dir, "--dry-run", "--merge"]);
     // Dry-run on divergence exits non-zero regardless (NOT a clean FF) — but the object gate reports
     // the would-block without a fail-closed verdict of its own.
     assert.notEqual(r.status, 0);
@@ -653,7 +662,7 @@ test("REVERSE-EDGE AC2: --integration-authoritative + content criterion resolves
     const criterion = writeSessionCriterion(dir);
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const integ = gitCmd(dir, "rev-parse", "integration").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge",
+    const r = runMerge(["--root", dir, "--merge",
       "--integration-authoritative", "orchestration/session-liveness.env",
       "--reverse-edge-criterion", criterion]);
     assert.equal(r.status, 0, `reverse-edge merge should succeed: ${r.stdout}${r.stderr}`);
@@ -685,7 +694,7 @@ test("REVERSE-EDGE AC2 (fixed-direction form): --integration-authoritative WITHO
   // content-criterion form (above) is the RECOMMENDED backing; this form is the direct expression.
   const dir = reverseEdgeRepo("re2");
   try {
-    const r = run([batchMerge, "--root", dir, "--merge",
+    const r = runMerge(["--root", dir, "--merge",
       "--integration-authoritative", "orchestration/session-liveness.env"]);
     assert.equal(r.status, 0, `fixed-direction reverse-edge merge should succeed: ${r.stdout}${r.stderr}`);
     const env = gitCmd(dir, "show", "develop:orchestration/session-liveness.env").stdout;
@@ -704,7 +713,7 @@ test("REVERSE-EDGE AC4 (negative control): WITHOUT a reverse-edge declaration, t
   const dir = reverseEdgeRepo("re3");
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge"]);
+    const r = runMerge(["--root", dir, "--merge"]);
     assert.notEqual(r.status, 0, "an undeclared env conflict must fail closed");
     assert.match(r.stdout, /measure unmerged_develop_files=0/, "object gate must NOT be the blocker (.env)");
     assert.match(r.stderr, /REAL-MERGE FAIL-CLOSED/);
@@ -732,7 +741,7 @@ test("REVERSE-EDGE AC4 (negative control): declared reverse-edge but the integra
   try {
     const criterion = writeSessionCriterion(dir);
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge",
+    const r = runMerge(["--root", dir, "--merge",
       "--integration-authoritative", "orchestration/session-liveness.env",
       "--reverse-edge-criterion", criterion]);
     assert.notEqual(r.status, 0, "a criterion-failing reverse-edge candidate must fail closed");
@@ -753,7 +762,7 @@ test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orches
   const dir = reverseEdgeRepo("re5");
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--merge", "--dry-run",
+    const r = runMerge(["--root", dir, "--merge", "--dry-run",
       "--integration-authoritative", "orchestration/session-liveness.env"]);
     assert.notEqual(r.status, 0, "dry-run on divergence exits non-zero (NOT a clean FF)");
     assert.match(r.stdout, /DIVERGENCE/);
@@ -768,6 +777,208 @@ test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orches
     // No ref moved.
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before);
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ────────────────────────────────────────
+//
+// The batch-merge gate previously read ONLY `state == green` and treated a 3-hour-old green — measuring
+// a COMPLETELY DIFFERENT batch of commits — as a pass for THIS tree (7b1ac3a1, 2026-08-08: merge at
+// 06:07:22, state file green from 02:50→03:02, zero suites in between). The freshness gate adds two
+// dimensions, both required before any ref moves:
+//   1. AGE — `finishedAt` within `--freshness-window` (default 3600s) of now.
+//   2. COVERAGE — the suite STARTED at/after the most recent integration fan-in commit time (a fan-in
+//      that landed after the suite ran means the green did not test the pending tip).
+// Fail-closed on: absent state file, state != green, missing/unparseable finishedAt, age > window,
+// or suite-started-before-last-fan-in. `--dry-run` reports the would-block without failing.
+//
+// These tests run the batch-merge script WITHOUT --skip-freshness-gate (the opt-out the merge-mechanics
+// tests above use) — the freshness gate is the gate under test.
+
+// Build an FF-able two-line repo (develop at base, integration = base + one fan-in committed at a
+// CONTROLLED epoch) so the freshness gate's COVERAGE axis is deterministic (git commit dates are
+// otherwise "now" and would race the suite times the test writes).
+function freshnessRepo(prefix, fanInEpochSec) {
+  const dir = makeTmp(prefix);
+  initGitRepo(dir);
+  mkdirSync(join(dir, "orchestration"), { recursive: true });
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick base\n", "utf8");
+  commitAll(dir, "base");
+  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "checkout", "-q", "-b", "develop");
+  gitCmd(dir, "checkout", "-q", "-b", "integration");
+  writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_DATE: new Date(fanInEpochSec * 1000).toISOString(),
+    GIT_COMMITTER_DATE: new Date(fanInEpochSec * 1000).toISOString(),
+  };
+  gitCmd(dir, "add", "-A");
+  const res = spawnSync("git", ["-C", dir, "commit", "-q", "-m", "fan-in (controlled time)"], { encoding: "utf8", env });
+  assert.equal(res.status, 0, `fan-in commit failed: ${res.stderr}`);
+  gitCmd(dir, "checkout", "-q", "develop");
+  return dir;
+}
+
+// Write a suite-state file (finishedAt EPOCH SECONDS — the format the runner now writes, and the
+// format the freshness gate's Contract measure `int(time.time() - finishedAt)` consumes).
+function writeSuiteStateFile(dir, { state = "green", finishedAtEpoch, startedAtIso } = {}) {
+  const stateDir = join(dir, ".quay");
+  mkdirSync(stateDir, { recursive: true });
+  const data = {
+    state,
+    runner: "outer",
+    startedAt: startedAtIso ?? new Date().toISOString(),
+    finishedAt: finishedAtEpoch ?? Math.floor(Date.now() / 1000),
+    durationMs: 1000,
+    laneCount: 8,
+  };
+  const file = join(stateDir, "full-suite-state.json");
+  writeFileSync(file, JSON.stringify(data), "utf8");
+  return file;
+}
+
+test("FRESHNESS GATE (AC2, 7b1ac3a1 scenario): a 3-hour-old green + a fan-in that landed after the suite ⇒ batch merge BLOCKED, nothing moved", () => {
+  const now = Math.floor(Date.now() / 1000);
+  // The 7b1ac3a1 shape: suite finished 03:02 (3h ago); the last fan-in landed at ~06:0x (1h ago) —
+  // AFTER the suite finished, so the green measured a completely different batch of commits.
+  const dir = freshnessRepo("fsa1", now - 3600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      finishedAtEpoch: now - 10800,
+      startedAtIso: new Date((now - 11400) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "stale green + new fan-in must block the batch merge");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /STALE|fan-in landed on integration after the suite started/);
+    assert.match(r.stdout, /measure suite_freshness=1080\d/, "age ≈ 3h (10800s, ±drift for test clock time)");
+    // Nothing moved: develop unchanged, integration NOT absorbed.
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (AC2 negative control): a fresh green that tested the current tip ⇒ batch merge ALLOWED (develop fast-forwards)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fsa2", now - 600); // last fan-in 10m ago — BEFORE the suite ran
+  try {
+    // Suite just finished: started 2m ago, finished 30s ago (well within the 3600s window, after the fan-in).
+    writeSuiteStateFile(dir, {
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `fresh green must allow the batch merge: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /freshness-gate OK/);
+    assert.match(r.stdout, /measure suite_freshness=\d+/);
+    assert.match(r.stdout, /fast-forwarded to integration/);
+    // Develop advanced to the integration tip; integration absorbed.
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "0");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (coverage axis): a fresh green (within window) that did NOT test the current tip (fan-in landed after the suite started) ⇒ BLOCKED", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fsa3", now - 60); // fan-in 1m ago — AFTER the suite started 2m ago
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      finishedAtEpoch: now - 30, // within window — the AGE axis would pass
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "a green that predates the current tip must block even when fresh");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /a fan-in landed on integration after the suite started/);
+    assert.match(r.stdout, /measure suite_freshness=3\d/, "age ≈ 30s, within the window — the coverage axis is what blocks");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE: absent suite-state file ⇒ BLOCKED (no valid green — the '缺 state 同路径：不批量合' rule)", () => {
+  const dir = freshnessRepo("fsa4", Math.floor(Date.now() / 1000) - 60);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "no suite-state file = no valid green = no batch merge");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /suite-state file not found/);
+    assert.match(r.stdout, /measure suite_freshness=unknown/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE: state=running (no completed green) ⇒ BLOCKED", () => {
+  const dir = freshnessRepo("fsa5", Math.floor(Date.now() / 1000) - 60);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, { state: "running", finishedAtEpoch: Math.floor(Date.now() / 1000) });
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "a running suite has produced no completed green — no batch merge");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /state='running'/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE: --dry-run with a stale green reports the would-block measure WITHOUT failing (no ref moved)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fsa6", now - 3600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      finishedAtEpoch: now - 10800,
+      startedAtIso: new Date((now - 11400) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    // Dry-run does NOT fail even when the gate would block — it reports the would-block (mirrors the
+    // object gate's dry-run contract). No ref moved.
+    assert.equal(r.status, 0, "dry-run must not fail even when the freshness gate would block");
+    assert.match(r.stdout, /DRY-RUN — freshness gate WOULD fail closed/);
+    assert.match(r.stdout, /measure suite_freshness=1080\d/, "age ≈ 3h (10800s, ±drift)");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE: legacy ISO finishedAt (pre-normalization state file) is parsed correctly and a fresh green is allowed", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fsa7", now - 600);
+  try {
+    // Legacy state files (written before the 2026-08-08 epoch normalization) carry finishedAt as ISO 8601.
+    const stateDir = join(dir, ".quay");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "full-suite-state.json"), JSON.stringify({
+      state: "green",
+      runner: "outer",
+      startedAt: new Date((now - 120) * 1000).toISOString(),
+      finishedAt: new Date((now - 30) * 1000).toISOString(),
+      durationMs: 90000,
+      laneCount: 8,
+    }), "utf8");
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `legacy ISO finishedAt must parse as fresh: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /freshness-gate OK/);
+    assert.match(r.stdout, /measure suite_freshness=\d+/);
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
   } finally {
     cleanup(dir);
   }

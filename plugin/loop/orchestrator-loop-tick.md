@@ -772,6 +772,12 @@ tick 做一次收尾 pass。
    - **本轮的 suiteGreen**：读 `.quay/full-suite-state.json` 的 `state`——`green` ⇒ true；`running`
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
+   - **批量合的新鲜度（`gap-batch-merge-gate-reads-stale-green`，与 fast-mode-loop-tick.md 同源防漂移）**：
+     上面的 suiteGreen 是**派发/合并推进**的读法（running 不等套件、缺文件不阻塞）；**批量合（步骤 3b）
+     另加新鲜度维度**——批量合只在一个**有效新绿**下进行：`state == green` 且 `finishedAt` 距今 ≤ 窗口
+     （默认 3600s）且 suite 开始晚于最近一次 integration fan-in。机械判定 = `integration-batch-merge.sh`
+     自带的 **freshness gate**（默认开启，非自判——文档说机械、执行就是机械）；缺 state / 非 green /
+     旧绿 ⇒ 「无有效绿」，不批量合（7b1ac3a1：3 小时前绿 + 期间新 fan-in ⇒ 被拦）。
 3b. **批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（两线模型 AC3，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
    **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync --reconcile` 把
    已验证的 `$MERGE_TARGET` 批量快进合回 `$FORK_BASELINE`——**`$MERGE_TARGET` 永远是 `$FORK_BASELINE`
@@ -795,6 +801,13 @@ tick 做一次收尾 pass。
      从未进过被测树，合并结果会带上未测代码；纯 .md/tasks 文件放行（2026-08-08 报告那 5 个文件）。与
      stale-green 不同轴：那是时间轴（绿旧/树旧），这是对象轴（被测对象 ≠ 被放行对象）。`$FORK_BASELINE`
      侧有代码提交需先 fan-in 到 `$MERGE_TARGET` 补测再批量合。
+   - **新鲜度闸门（`integration-batch-merge.sh` 自带，`gap-batch-merge-gate-reads-stale-green`）**：
+     批量合前校验绿是**新鲜绿**，不是只读 `state==green`——7b1ac3a1（2026-08-08 06:07:22）在前后零次
+     suite 的情况下拿 02:50→03:02 的三小时前旧绿当通行证，测的是完全不同的一批提交。两维都要求：
+     **age**（`finishedAt` 距今 ≤ `--freshness-window`，默认 3600s）且 **coverage**（suite 开始时间 ≥
+     最近一次 integration fan-in 的 commit time——fan-in 在 suite 之后落地说明绿没测过当前待合 tip）。
+     任一违反 / state 非 green / 缺 state 文件 ⇒ **fail-closed 不移动任何 ref**（「无有效绿」）。
+     与对象闸门不同轴：本闸门是**时间轴**（绿旧/树旧），对象闸门是**对象轴**（被测对象 ≠ 被放行对象）。
    - **`integration-batch-merge.sh --reconcile`（主检出对账步骤由脚本提供，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
      REF-LEVEL（update-ref CAS，「主检出从不被脚本触碰」）——当主检出正检出的分支就是被推进的
      `$FORK_BASELINE` 时，ref 被从底下换掉后 HEAD/index 变陈旧。**对账步骤由脚本自己提供，调用方不得各自发明**
@@ -803,8 +816,9 @@ tick 做一次收尾 pass。
      `git reset --mixed <新 tip>` 刷新 index，**绝不用 --hard**（`--mixed` 默认即刷新 index 不碰工作区；
      `--hard` 额外覆盖工作区 = 唯一有害那件，对账不需要它）。**Land 锁边界**：锁防交错不防销毁——
      「拿到锁≠能动工作区」；共享主检出对账不得覆盖共存会话的未提交内容。
-   suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 `$MERGE_TARGET` 照常接收任务合并，
-   只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；`$FORK_BASELINE` 永不从未验证树推进）。
+   suiteGreen 为 false（red/aborted/缺 state）**或绿不新鲜（stale-green，见上 freshness gate）** ⇒ **不跑批量合**——
+   红窗期 `$MERGE_TARGET` 照常接收任务合并，只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；
+   `$FORK_BASELINE` 永不从未验证树推进）。旧绿（7b1ac3a1 场景：3 小时前）同样不是有效绿——不批量合。
    **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。
 3c. **跨机同步心跳（`sync-lag-check.sh`，兜底必跑——`gap-cross-machine-sync-has-no-mechanism-only-manual-pushes`）**：
    每个 tick（含轻触）**无条件**跑一次 `bash plugin/scripts/sync-lag-check.sh --push --branch "$FORK_BASELINE" --root "$REPO_ROOT"`——
@@ -1198,7 +1212,7 @@ tick 或 `/clear` 后的会话会重犯。
 | `docs/analysis/batch2-queue-state.md` | 队列状态（内层写，外层读+补）。**历史名「batch2」**（旧批模型队列快照，保留不改名） |
 | `orchestration/escalations.md` | 攒给人的非常规项 |
 | `orchestration/tick-log.md` | 每 tick 记录 |
-| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
+| `.quay/full-suite-state.json` | 外层后台全量 suite 的状态（`{state, reason?, failures?, runner, startedAt, finishedAt, durationMs, laneCount}`；**inner 停止条件读它**——`red` + `reason: failed` 即 stop-dispatch 信号，`reason: aborted` 不触发停派，`failures` = 失败位置（失败行 + 文件上下文，供共享闸门 vs 具体测试的派发条件化判定）；**`finishedAt` = epoch 秒**（`gap-batch-merge-gate-reads-stale-green`：批量合新鲜度闸门的 Contract measure `int(time.time()-finishedAt)` 需要 epoch；`startedAt` 仍 ISO）；gitignored 运行时态，步骤 1b 由 full-suite-runner 写） |
 | `.quay/suite-state-events.jsonl` | 套件状态转变事件日志（append-only；`SUITE-RED/RUNNING/GREEN` + `at` + `stopSignal` + `failureLocation`（SUITE-RED 携带，供派发决策）；gitignored 运行时态，`suite-state-trigger.ts` 写） |
 | `.quay/suite-state-last.json` | 套件状态触发者的记忆文件（上次观测的 state；gitignored 运行时态，`suite-state-trigger.ts` 写——跨重启保持转变检测，冷启动即红也能触发） |
 | `.quay/verification-round.jsonl` | 外层异步收尾的轮次记录（`closed` 清单 + `suiteGreen`；gitignored 运行时态，步骤 1b 写） |

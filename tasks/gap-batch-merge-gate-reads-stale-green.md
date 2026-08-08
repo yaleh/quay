@@ -5,7 +5,7 @@ title: 批量合闸门只读 .quay/full-suite-state.json 的
   三小时前、测完全不同一批提交的绿当通行证； state 文件 mtime 04:49:29 远早于 merge；按
   orchestrator-loop-tick.md:638-649 批量合硬前置是 suiteGreen==true，闸门满足但新鲜度为零——管理者判准
   ②「陈旧当现状」长在批量合闸门上
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -61,23 +61,41 @@ resume 若中断，先跑 measure 确认 finishedAt 距今秒数，不要假设�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **新鲜度闸门**——`suiteGreen` 判定加入新鲜度（`finishedAt` 距今 ≤ 窗口 且 晚于最近
+- [x] AC1: **新鲜度闸门**——`suiteGreen` 判定加入新鲜度（`finishedAt` 距今 ≤ 窗口 且 晚于最近
       fan-in），旧绿不再当通行证
-- [ ] AC2: **7b1ac3a1 场景复测**——3 小时前绿 + 期间有新 fan-in ⇒ 批量合被拦（不跑
+      — `integration-batch-merge.sh` 新增 `check_freshness_gate()`（默认开启，非自判——文档说机械、
+      执行就是机械）：批量合前校验 `state == green` 且 `finishedAt` 距今 ≤ `--freshness-window`（默认
+      3600s）且 suite **开始**晚于最近一次 integration fan-in（coverage 轴：fan-in 在 suite 之后落地
+      说明绿没测过当前待合 tip）；缺 state / 非 green / 旧绿 ⇒ fail-closed 不移动任何 ref（「无有效绿」）。
+      `full-suite-runner.ts` 把 `finishedAt` 规范化为 epoch 秒（Contract measure
+      `int(time.time()-finishedAt)` 需要 epoch；`startedAt` 仍 ISO）。实跑见 Evidence RUN 1-7。
+- [x] AC2: **7b1ac3a1 场景复测**——3 小时前绿 + 期间有新 fan-in ⇒ 批量合被拦（不跑
       integration-batch-merge.sh）；新绿 ⇒ 放行
-- [ ] AC3: 两份文档同步——`fast-mode-loop-tick.md` 与 `orchestrator-loop-tick.md` 的 suiteGreen
+      — 复测两方向都覆盖：3 小时前绿 + fan-in 落在 suite 之后 ⇒ `FRESHNESS-GATE FAIL-CLOSED`、
+      `measure suite_freshness=1080x`、ref 未动（RUN 1）；新绿（finishedAt 距今 30s、suite 晚于 fan-in）
+      ⇒ `freshness-gate OK` + `fast-forwarded to integration`（RUN 2）。coverage 轴单独拦截也测了
+      （RUN 3：窗内新绿但 fan-in 在 suite 之后 ⇒ 拦）。缺 state / running 同路径拦截（RUN 4/5）。
+- [x] AC3: 两份文档同步——`fast-mode-loop-tick.md` 与 `orchestrator-loop-tick.md` 的 suiteGreen
       定义一致（同源防漂移）
-- [ ] AC4: 与 gap-suite-state-split-across-worktree-and-gate、gap-batch-merge-bypassed-* 交叉标注
+      — 两文档都写明批量合需要**有效新绿**（state==green 且 finishedAt 距今 ≤ 窗口且 suite 晚于最近
+      fan-in），机械判定都指向 `integration-batch-merge.sh` 自带的 freshness gate；orchestrator 文档
+      步骤 3/3b 与 fast-mode 文档「全量套件是批量合边界闸门」+ 步骤 2 对象闸门旁的「新鲜度闸门」同步。
+- [x] AC4: 与 gap-suite-state-split-across-worktree-and-gate、gap-batch-merge-bypassed-* 交叉标注
+      — 两任务体已加交叉标注（见下方两处 `## 交叉标注`），把本任务（时间轴闸门）与 suite-state-split
+      （state 写哪/读哪）和 batch-merge-bypassed（谁以什么路径执行批量合）连成批量合家族。
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴任务体（新旧绿对照 + 拦截/放行）
+- [x] AC1-AC4 实跑输出贴任务体（新旧绿对照 + 拦截/放行）
+      — 见下方 Evidence（RUN 1-7 实跑 + scoped gate 结果 + 提交 hash）。
 
 ## Touches
-- tasks/gap-batch-merge-gate-reads-stale-green.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
+- tasks/gap-batch-merge-gate-reads-stale-green.md（自身文件——self-touch，任务代理勾 AC/贴证据的授权）
 - plugin/loop/orchestrator-loop-tick.md（suiteGreen 定义：加新鲜度）
 - plugin/loop/fast-mode-loop-tick.md（同步 suiteGreen 定义）
-- plugin/scripts/full-suite-runner.ts（若需要写 finishedAt 的规范化）
+- plugin/scripts/full-suite-runner.ts（finishedAt 规范化为 epoch 秒——批量合新鲜度 measure 需要）
+- plugin/scripts/integration-batch-merge.sh（新鲜度闸门本体：check_freshness_gate()，默认开启，批量合脚本自带）
+- plugin/scripts/suite-state-trigger.ts（finishedAt 类型兼容 epoch 秒，number | string | null）
 - tasks/gap-suite-state-split-across-worktree-and-gate.md（AC4 交叉标注）
 - tasks/gap-batch-merge-bypassed-integration-batch-merge-script.md（AC4 交叉标注）
 
@@ -125,3 +143,60 @@ changed: 管理者 2026-08-08 报告（7b1ac3a1 前后 0 次 suite、state 是 0
   闸门代码 orchestrator-loop-tick.md:724 只读 state 字段——根因确认。
   **2026-08-08 07:1x 管理者确认**：文档机械门 vs 实际自判门的差距是真实缺口（serve.test.mjs
   07:06:49 红 → 隔离通过 → 07:07:49 批量合），与本任务同类。
+
+## Evidence（2026-08-08 内层实现，freshness gate 实跑 + scoped gate）
+
+### RUN 1 — 7b1ac3a1 场景复刻：3 小时前绿 + 期间新 fan-in ⇒ 批量合被拦（AC2 正向）
+
+```text
+integration-batch-merge: measure unmerged_develop_files=0
+integration-batch-merge: measure suite_freshness=1080x          # 3 小时前（10800s 量级）的旧绿
+integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — suite green finished ...s ago (> window 3600s) — STALE; nothing moved
+# develop ref 未动；integration 未并入（git merge-base --is-ancestor integration develop 非 0）
+```
+
+### RUN 2 — 新绿（fresh green）⇒ 放行（AC2 负向）
+
+```text
+integration-batch-merge: freshness-gate OK — fresh green (finished ~30s ago, window 3600s; suite start ... ≥ last fan-in ...)
+integration-batch-merge: measure suite_freshness=3x
+integration-batch-merge: OK — develop fast-forwarded to integration
+# develop 前进到 integration tip；integration 并入
+```
+
+### RUN 3 — coverage 轴单独拦截：窗内新绿但 fan-in 在 suite 之后 ⇒ 拦
+
+```text
+integration-batch-merge: measure suite_freshness=3x            # 30s 内，age 轴会过
+integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — a fan-in landed on integration after the suite started ...
+```
+
+### RUN 4/5 — 缺 state / state=running ⇒ 拦（同路径「无有效绿」）
+
+```text
+FRESHNESS-GATE FAIL-CLOSED — suite-state file not found ... (no valid green); nothing moved
+FRESHNESS-GATE FAIL-CLOSED — suite-state state='running' (batch merge requires state==green); nothing moved
+```
+
+### RUN 6 — dry-run：旧绿报 would-block 但不失败、不移动 ref
+
+```text
+DRY-RUN — freshness gate WOULD fail closed: suite green finished 1080x s ago (> window 3600s) — STALE
+measure suite_freshness=1080x
+```
+
+### RUN 7 — 测试套件
+
+- `node --test plugin/test/integration-batch-merge.test.mjs` → **27 pass / 0 fail**（含 7 条 freshness-gate 新测试：
+  7b1ac3a1 拦截、新绿放行、coverage 轴拦截、缺 state、running、dry-run、legacy ISO finishedAt 兼容）。
+- `node --test plugin/test/full-suite-runner.test.mjs` → **44 pass / 0 fail**（finishedAt epoch 规范化后全绿）。
+- `node --test plugin/test/suite-state-trigger.test.mjs` → **14 pass / 0 fail**（finishedAt 类型兼容）。
+
+### 变更文件
+
+- `plugin/scripts/integration-batch-merge.sh` — `check_freshness_gate()`（默认开启）+ `--skip-freshness-gate`
+  / `--freshness-window` / `--suite-state-file`。
+- `plugin/scripts/full-suite-runner.ts` — `finishedAt` 写 epoch 秒（`toEpochSeconds`），`startedAt` 仍 ISO。
+- `plugin/scripts/suite-state-trigger.ts` — `finishedAt` 类型 `number | string | null`。
+- `plugin/loop/orchestrator-loop-tick.md` + `plugin/loop/fast-mode-loop-tick.md` — suiteGreen 定义加新鲜度（同源防漂移）。
+- `plugin/test/integration-batch-merge.test.mjs` / `plugin/test/full-suite-runner.test.mjs` — 新测试 + 断言更新。
