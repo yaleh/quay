@@ -47,6 +47,8 @@ import {
   detectLandingBlocked,
   LANDING_STALENESS_MS_DEFAULT,
   LANDING_BEHIND_THRESHOLD_DEFAULT,
+  setTaskStatus,
+  applyPromotions,
 } from "../scripts/ready-pool-check.ts";
 import { parseTask } from "../scripts/task-schema.ts";
 import { taskWorkLanded } from "../scripts/task-status-drift-check.ts";
@@ -1293,4 +1295,142 @@ test("CLI Contract measure surface: blocked stdout carries the 'landing-blocked'
   const parsed = JSON.parse(out);
   assert.equal(parsed.landing_blocked, true, "CLI reports landing_blocked in the JSON");
   assert.match(out, /landing-blocked/, "Contract measure: stdout carries the 'landing-blocked' literal (grep surface)");
+});
+
+// ── HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill) ───────────────────────────
+// The tick heartbeat must UNCONDITIONALLY run ready-pool-check and — when pool < floor AND
+// promotions non-empty — land the promotion ON DISK (status todo → ready), no volition. Same root
+// cause as slot-refill-only-triggered-on-completion-not-tick-heartbeat (a detector answers, nothing
+// mechanically guarantees it is asked). AC1 applies; AC3 is the negative control (pool ≥ floor OR
+// promotions empty ⇒ zero writes); the default (no --apply) stays a pure detector.
+
+test("--apply heartbeat: pool < floor + eligible todo ⇒ promotion lands on disk (AC1)", (t) => {
+  const root = makeWorkspace("apply-ac1");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate")); // eligible: four-artifacts + deps + touches-resolve
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 2
+  const before = analyzeTasks(opts);
+  assert.equal(before.pool, 2);
+  assert.equal(before.deficit, 1);
+  assert.equal(before.promotions.length, 1);
+
+  const r = applyPromotions(opts);
+  assert.equal(r.should_apply, true, "AC1: pool<floor + promotions non-empty ⇒ should_apply");
+  assert.equal(r.applied_promotions.length, 1);
+  assert.equal(r.applied_promotions[0].id, "gap-candidate");
+  assert.equal(r.applied_promotions[0].ok, true);
+
+  // The status actually landed on disk.
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "frontmatter status must be ready on disk");
+
+  // Re-analyze: the pool has recovered to floor (candidate now ready) — AC4 "恢复 pool 到 floor".
+  const after = analyzeTasks(opts);
+  assert.equal(after.pool, 3, "pool recovered to floor after mechanical promotion (AC4)");
+});
+
+test("--apply heartbeat negative control: pool >= floor ⇒ zero writes (AC3)", (t) => {
+  const root = makeWorkspace("apply-neg-pool");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r3", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate")); // an eligible todo that must NOT be touched
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // floor 3, pool 3
+  const r = applyPromotions(opts);
+  assert.equal(r.deficit, 0, "pool at floor");
+  assert.equal(r.should_apply, false, "AC3: pool ≥ floor ⇒ no apply");
+  assert.deepEqual(r.applied_promotions, [], "zero writes");
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "candidate must remain todo — no busy-work");
+});
+
+test("--apply heartbeat negative control: promotions empty ⇒ zero writes (AC3)", (t) => {
+  const root = makeWorkspace("apply-neg-empty");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // Candidate ineligible: missing DoD (four-artifacts incomplete) ⇒ never in `promotions`.
+  writeTask(root, "gap-no-dod", gapTask("gap-no-dod", { body: fourArtifactBody().replace("## Definition of Done", "## Resolution") }));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 }; // pool 2 < floor 3, deficit 1
+  const r = applyPromotions(opts);
+  assert.equal(r.deficit, 1, "pool below floor");
+  assert.equal(r.promotions.length, 0, "no qualified candidate");
+  assert.equal(r.should_apply, false, "AC3: promotions empty ⇒ no apply");
+  assert.deepEqual(r.applied_promotions, []);
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-no-dod.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*todo$/m, "ineligible candidate must remain todo");
+});
+
+test("setTaskStatus patches frontmatter todo→ready and preserves the body (AC1 mechanism)", (t) => {
+  const root = makeWorkspace("sts");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const body = "**type:** execution\n\n## Proposal\nA real proposal paragraph long enough to be counted.\n\n## Plan\nA real plan paragraph long enough to be counted.\n";
+  writeTask(root, "gap-a", { status: "todo", labels: ["gap"], body });
+
+  const out = setTaskStatus(root, "gap-a", "ready");
+  assert.equal(out.ok, true);
+  assert.equal(out.from, "todo");
+  assert.equal(out.to, "ready");
+
+  const raw = fs.readFileSync(path.join(root, "tasks", "gap-a.md"), "utf8");
+  assert.match(raw, /^status:\s*ready$/m, "status line rewritten");
+  assert.ok(raw.includes("## Proposal"), "body preserved");
+  assert.match(raw, /^id: gap-a$/m, "other frontmatter preserved");
+});
+
+test("setTaskStatus no-ops on non-todo and on missing files (no clobber / idempotent)", (t) => {
+  const root = makeWorkspace("sts-neg");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-done", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+
+  assert.equal(setTaskStatus(root, "gap-ready", "ready").ok, false, "already ready ⇒ not a todo ⇒ no-op");
+  assert.equal(setTaskStatus(root, "gap-done", "ready").ok, false, "done task must not be clobbered");
+  assert.equal(setTaskStatus(root, "gap-missing", "ready").ok, false, "missing file ⇒ ok:false");
+  assert.equal(setTaskStatus(root, "gap-ready", "ready").reason, "not-todo");
+
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-ready.md"), "utf8"), /^status:\s*ready$/m);
+  assert.match(fs.readFileSync(path.join(root, "tasks", "gap-done.md"), "utf8"), /^status:\s*done$/m);
+});
+
+test("default analyzeTasks never writes tasks/ (pure detector preserved — no --apply = byte-unchanged)", (t) => {
+  const root = makeWorkspace("pure");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
+
+  const opts = { tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 };
+  const before = fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8");
+  const r = analyzeTasks(opts);
+  assert.equal(r.promotions.length, 1, "read mode still recommends the candidate");
+  const after = fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8");
+  assert.equal(after, before, "no writes without --apply");
+  assert.equal(Object.hasOwn(r, "should_apply"), false, "read mode has no apply fields");
+  assert.equal(Object.hasOwn(r, "applied_promotions"), false);
+});
+
+test("CLI --apply smoke: --root/--cap/--floor-mult/--apply lands promotions + emits JSON (exit 0)", (t) => {
+  const root = makeWorkspace("apply-cli");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
+
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--cap", "3", "--floor-mult", "1", "--apply"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.should_apply, true);
+  assert.equal(parsed.applied_promotions.length, 1);
+  const task = parseTask(fs.readFileSync(path.join(root, "tasks", "gap-candidate.md"), "utf8"));
+  assert.match(task.frontmatterRaw, /^status:\s*ready$/m, "CLI --apply lands the promotion on disk");
 });

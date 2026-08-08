@@ -84,6 +84,12 @@ no_refill_reason=null, recommended=[gap-full-suite-runner-red-pattern..., gap-pr
        模式参数）；新增 plugin/test/slot-refill-heartbeat.test.mjs（`node:test` + `// @test-group
        governance`）钉文档契约
 
+> **第二实例（2026-08-08，gap-ready-pool-promotion-same-class-as-slot-refill）**：就绪池补晋
+> （fast-mode-loop-tick.md 步骤 3.6「pool < floor ⇒ 本 tick 补晋」）是同一个「tick 心跳无机械保证」根因的
+> **第二个实例**——写成强制步骤但执行依赖内层自觉，3 小时未机械补晋（pool=5<floor，ready-pool-check
+> recommends 7 但无人问）。修法复用同一保证形态：tick 心跳必跑 `ready-pool-check.ts --apply`（补晋落盘）。
+> 本条 = 第一个实例（派发评估 slot-refill 无人问）；该条 = 第二个实例（补晋评估 ready-pool-check 无人问）。
+
 ## Touches
 - tasks/gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat.md（自身文件：勾 AC + 贴 invoke 证据授权）
 - plugin/loop/fast-mode-loop-tick.md（行 83 措辞修正 + 心跳必跑 slot-refill）
