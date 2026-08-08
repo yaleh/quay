@@ -1,7 +1,8 @@
 ---
 id: gap-tick-driver-live-ship-drift-no-backflow
-title: 三层 tick 驱动在跑副本与出厂件全部漂移（manager 同步率 3% 出厂件弃养、orchestrator 26%、fast-mode
-  18%）——回流机制缺失（在跑演化不回出厂件），与铺设任务独立，判据趋势型一行可测
+title: 3 项通用判准（枚举式判据 / status 必填枚举 /
+  投递工具名）在跑副本有、出厂模板零命中——通用改进未回流出厂（纯测量：产出缺口清单，不含回流机制；manager
+  出厂=通用模板为设计，字节差/同提交率非缺陷）
 status: ready
 labels: []
 parent: null
