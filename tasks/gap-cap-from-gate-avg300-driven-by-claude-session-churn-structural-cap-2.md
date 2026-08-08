@@ -1,7 +1,7 @@
 ---
 id: gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2
 title: "cap-from-gate 的 avg300 信号被 claude 会话常驻 churn 主导——结构性锁死 cap=2，节流派发无效（外层 2026-08-08 实测对照）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
