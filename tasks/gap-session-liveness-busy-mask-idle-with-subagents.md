@@ -122,6 +122,28 @@ esc to interrupt」被证伪，外层该根因结论撤回。
 develop」，也不是注入 pane 的负控制通过。**本真根因下，收口 = 对 pane-only 目标按 LOOP_MIN=0（或显式
 心跳源）观测并报出 IDLE。**
 
+### LOOP_MIN 假说调和 manager 的「三件矛盾事实」（外层 15:49 验证，实现无缺陷）
+
+**manager 定量矛盾（15:4x）**：修复版挂 80 分钟，SESSION-RESUMED 6 条、SESSION-IDLE 0 条。RESUMED 触发
+条件 = PREV_IDLE==1 ⇒ 6 次 RESUMED ⇒ pane 被判过 idle 至少 6 次。且 15:15:10–15:17:58 连续 168 秒判
+waiting-input（60 样本）⇒ 本应第 2 个连续 idle 轮报出，实收 0。**①②③ 看似矛盾**。
+
+**LOOP_MIN 假说调和**（外层按 manager 判据复测，观测 inner + pane-only）：
+
+| manager 事实 | LOOP_MIN 假说解释 |
+|---|---|
+| ① 注入恒定 idle pane round 4 报出 | 注入测试无心跳文件 → `hmin="?"` → `[ "$hmin" = "?" ]` 分支**报出**（session-liveness.sh:1137） |
+| ② 实环境 168s 判 idle 不报 | pane-only 默认心跳 = tick-log，tick-log 被上层 tick 刷新 → `hmin < LOOP_MIN=20` → **静默分支**（:1142 `:`） |
+| ③ RESUMED 发 | **RESUMED 不静默**（注释明说「保留不静默，它便宜且是唯一正向信号」） |
+
+**验证**（观测 inner + pane-only + 默认 LOOP_MIN=20）：DIAG round=4 `IDLE_REPORTED=1`（闸通过）但
+SESSION-IDLE 静默；tick-log age=10min < LOOP_MIN=20。**LOOP_MIN=0 时 IDLE 报出**（上轮已验证）。
+
+**结论**：**实现无缺陷**——LOOP_MIN 静默闸按设计把 `hmin < LOOP_MIN` 的空闲当「正常收尾」静默
+（AC21 噪声闸门，注释明说）。pane-only 配置无显式心跳源 → 默认心跳 tick-log → 被上层活动刷新 →
+hmin 恒 < LOOP_MIN → 对该目标的 IDLE 永久静默。**缺的是边界说明**：pane-only 对一个被上层频繁驱动的
+目标不适用，需显式心跳源（SESSION_TRANSCRIPTS）或 LOOP_MIN=0。
+
 **测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
 - from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。
 - per-spell edge：一段空闲只报一次，忙段再武装 → 新段再报。
