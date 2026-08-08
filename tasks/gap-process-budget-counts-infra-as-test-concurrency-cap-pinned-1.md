@@ -1,7 +1,7 @@
 ---
 id: gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1
 title: "process-budget 的 in_use 把 MCP server / serve / 监视器算成测试并发——total=4 被 17 个基础设施进程钉死，effective_cap 结构性=1"
-status: ready
+status: done
 labels:
   - gap
   - defect
