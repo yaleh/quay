@@ -94,7 +94,7 @@ import { isDirectEntry } from "./gate-script-base.ts";
 // buildGitHistoryIndex is the BATCHED git-history source (gap-ready-pool-check-times-out-after-
 // git-history-signal): ONE `git log` over all of master, matched in memory per task, instead of
 // ~30-50 per-task `git log -- <paths>` calls (each O(history) — the >150s pool-check timeout).
-import { taskWorkLanded, buildGitHistoryIndex } from "./task-status-drift-check.ts";
+import { taskWorkLanded, buildGitHistoryIndex, countAcCheckboxes } from "./task-status-drift-check.ts";
 
 /** Default concurrency cap (max in-flight subagents) — CONSERVATIVE FALLBACK for manual runs with
  *  no --cap. The tick's dispatch decision point passes the ADAPTIVE cap from cap-from-gate.sh
@@ -216,16 +216,30 @@ export function kindOrder(kind) {
 
 /** True when the task is in the "this batch done, not yet flipped to done" state — the declared
  *  work has landed on master (task-status-drift-check's symbol-resolution / touch-file / git-history
- *  evidence) but `status` is still `ready` (fan-in has not flipped it). Deliberately does NOT depend
- *  on AC checkbox state: the inner's fan-in merges WITHOUT ticking AC boxes, so all-checked is not
- *  the closeout signal (gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). taskId is
- *  passed through so the git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-
- *  merged-tasks) can anchor on the task's own id without depending on the self-touch Touches entry. */
+ *  evidence) but `status` is still `ready` (fan-in has not flipped it). The signal is a UNION of two
+ *  INDEPENDENT closure indicators:
+ *   (1) taskWorkLanded — work-landed evidence (symbol-resolution / touch-file / git-history) that
+ *       catches the "merged-but-AC-unchecked" half (the inner's fan-in merges WITHOUT ticking AC
+ *       boxes; gap-ready-pool-check-counts-merged-not-flipped-tasks-in-the-pool). Does NOT depend on
+ *       AC checkbox state.
+ *   (2) AC-complete — `all_acs_checked && status == ready` (countAcCheckboxes, total > 0): the
+ *       COMPLETION state as written by the checkboxes, independent of AC writing style
+ *       (gap-closure-detection-reads-symbols-not-checkboxes). A prose-AC completed task whose work
+ *       landed but shows no resolvable symbols / `(new)` touches / git-history reference is invisible
+ *       to (1) yet IS a closure candidate — this second signal surfaces it. Complements, never
+ *       replaces, taskWorkLanded (the union, not an either/or).
+ *  A task is excluded from the dispatchable pool when EITHER fires. `taskId` is passed through so the
+ *  git-history signal (gap-ready-pool-taskworklanded-underdetects-prose-ac-merged-tasks) can anchor
+ *  on the task's own id without depending on the self-touch Touches entry. */
 export function notYetFlipped(task, repoRoot, gitIndex) {
   if (task.status !== "ready") return false;
   const opts = { taskId: task.id };
   if (gitIndex) opts.gitIndex = gitIndex; // batched git-history index (see buildGitHistoryIndex)
-  return taskWorkLanded(task.body, repoRoot, opts);
+  const workLanded = taskWorkLanded(task.body, repoRoot, opts);
+  const ac = extractSection(task.body, "Acceptance Criteria");
+  const { total, checked } = countAcCheckboxes(ac);
+  const allAcsChecked = total > 0 && checked === total;
+  return workLanded || allAcsChecked;
 }
 
 export function isFixture(task) {
