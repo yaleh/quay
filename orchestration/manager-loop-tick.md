@@ -95,8 +95,15 @@ archguard / meta-cc 是**交付物的消费者**，人在那里的干预才是**
 ```bash
 for p in quay archguard meta-cc; do
   d=/home/yale/work/$p
-  printf "%-10s %s\n" "$p" "$([ -f "$d/.halt" ] && echo "已暂停: $(head -1 $d/.halt | cut -c1-60)" || echo 运行中)"
+  # ⚠️ 2026-08-08 08:0xZ 修：`.halt` 缺席 ≠ 运行中。实测 archguard 无 .halt、
+  #    被本块报成「运行中」，而它的会话 archguard-2 根本不存在、最后提交在【42 小时前】。
+  #    与 §1.4b 缺陷一同族：把「没有暂停标记」当成「在跑」，是用【一个否定证据】冒充【肯定证据】。
+  halt=$([ -f "$d/.halt" ] && echo "已暂停" || echo "无.halt")
+  last=$(git -C "$d" log -1 --format=%cr 2>/dev/null || echo "?")
+  printf "%-10s %-8s 最后提交=%s\n" "$p" "$halt" "$last"
 done
+# 判读：「无.halt」只说明没人按下暂停键。**是否在跑要看最后提交 + 会话是否存在（§1.b）**，
+#       三者对不上时（如 无.halt + 会话不存在 + 提交停在两天前）报【已停但未标记】，不报运行中。
 awk '/^some/{split($2,a,"=");print "cpu some avg10: "a[2]}' /proc/pressure/cpu | head -1
 echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)MB"
 ```
@@ -172,13 +179,25 @@ outer 若是闲的就立刻报一次，而那正是最该派活的时点。
 
 **按窗口名寻址，不按 pane 索引**（索引会漂）：
 
+> ⚠️ **2026-08-08 08:0xZ 查出：本代码块与 §1.4b 的「判据修正」直接矛盾，且矛盾已存在多轮。**
+> §1.4b 缺陷三明写「**不再用 `pgrep -P … | head -1` 作为身份来源**」（实测它取到的是
+> meta-cc 的 MCP 服务器，不是 claude 会话，我据此连报 8 轮错身份），并给了订正判据
+> 「身份报 `pane_pid` 并同时报 `pane_current_command`，`cmd=claude` 才算认出会话」。
+> **但 §1.b 的代码块从没跟着改**——于是每轮 tick 照着 §1.b 跑的仍是那个已退休的形态，
+> 本轮我又跑了一次才发现。
+> ⇒ **一般形态（与 §1.4e「换监视器必须同步换判准」同型，这是它在文档内部的版本）：
+> 把「判据修正」写在【复盘小节】里，而【每轮真正执行的代码块】不动，
+> 等于修了个没人执行的副本。修正必须落在执行点上。**
+
 ```bash
+# 订正后的形态（§1.4b 缺陷一/三，2026-08-08 落到执行点）
 for t in quay-0:outer archguard-2:outer meta-cc-4:outer; do
-  ppid=$(tmux list-panes -t $t -F '#{pane_pid}' 2>/dev/null | head -1)
-  if [ -z "$ppid" ]; then printf "%-18s %s\n" "$t" "窗口不存在"; continue; fi   # 见下方「两个仪器缺陷」
-  cpid=$(pgrep -P "$ppid" 2>/dev/null | head -1)
-  if [ -n "$cpid" ]; then printf "%-18s 活着 pid=%s\n" "$t" "$cpid"; else printf "%-18s %s\n" "$t" "窗口在但无子进程"; fi
+  r=$(tmux list-panes -t "$t" -F 'pane_pid=#{pane_pid} cmd=#{pane_current_command}' 2>&1 | head -1)
+  printf '%-18s %s\n' "$t" "$r"     # 会话/窗口不存在时原样打出 tmux 的错误，不伪装成「活着」
 done
+# 判读：只有 cmd=claude 才算认出会话；"can't find session" / "window not found" 都是【不存在】，
+#       与「窗口在但 cmd 不是 claude」是两种情况，不许压成一类。
+# 忙闲另测（§1.4c）：capture-pane | tail -3 | grep 'esc to interrupt'
 ```
 
 **必读：各外层最新的那一行 tick 日志**（2026-08-03 补，代价已付过一次）。
@@ -361,6 +380,24 @@ outer 步骤 1c 逐字 `cat` 转发），由 **grep 断言 + `reanchor-prompt.te
 
 写进 `orchestration/manager-tick-log.md`，五列：
 时刻 / 动作类 / 三项目一句话 / 仲裁了什么 / 升级项变化。
+
+> ⚠️ **第一列必须 `date -u` 读钟，不许估（2026-08-08 08:0xZ 实测，②h 抓到的）。**
+> 用各行**点名的提交**做锚，比对标签与真实 UTC：
+> ```
+> 标签 07:2xZ ← f35fb380 真实 05:11:42Z   +128 分
+> 标签 08:0xZ ← 19f8b76e 真实 05:29:42Z   +150 分
+> 标签 08:5xZ ← 9c26b12c 真实 06:05:13Z   +165 分
+> 标签 09:5xZ ← bf2a861e 真实 06:34:45Z   +195 分
+> 标签 10:3xZ ← a52bb4e9 真实 07:18:03Z   +192 分（该行 mtime 07:19:23Z，偏移 +191 分）
+> ```
+> **单调累积，不是固定时区差**——每轮在上一轮标签上加约 20 分钟，而真实间隔约 12 分钟，
+> 于是标签以 ~1.6× 速度跑赢现实，累计到 3 小时以上、**标签跑进了未来**。
+> 危害不止记错时刻：**所有 `age=NN分钟` 类判断都以这条时间轴为基准**
+> （"绿了 39 分钟" / "陈旧 108 分钟" / "红了 4 分钟"），基准是假的，那些量也不可信。
+> ⇒ **一般形态：一个每轮自增的量，若从不与外部基准对表，漂移是必然而不是意外。
+> ②h 说"指针型读数跨轮复用前要重取"，时刻就是最典型的指针型读数。**
+> 本文件的 `.md` 已 gitignore（`46ba6360` 按人裁定改为运行时遥测），
+> **所以没有 git 时间戳兜底，读钟是唯一来源。**
 
 动作类只有四种：`no-action` / `arbitrate`（动了 `.halt` 或次序）/
 `escalate`（攒给人）/ `correct`（纠正某个外层的做法）。
