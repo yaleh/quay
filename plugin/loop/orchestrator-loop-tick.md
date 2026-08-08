@@ -284,6 +284,35 @@ bash plugin/scripts/monitor-mount-check.sh --json
 
 人在，但不需要被打扰：**常规自行处理，非常规攒起来**等人有空看。
 
+**C3 运行时约束（`gap-c3-has-no-runtime-constraint`）——本层对 manager 的观测/检查动作必须为零。**
+文档层检查（`no-manager-tick-doc-check.ts`）只证明「tick 文档没写越界步骤」，**不证明运行时没做
+越界动作**——「文档里没写 ≠ 运行时没做」。本步补的是**运行时约束**：每 tick 扫描本层会话 transcript，
+机械检出本层实际对 manager 的观测/检查动作（`manager-observation-runtime-check.ts`；四类判据——
+PANE=读 manager 窗口 pane、TICKLOG=读/动 manager tick-log、TRANSCRIPT=读 manager transcript、
+ANALYZE=task_write 分析 manager 行为——逐类判据见该任务的 AC1 设计说明）。**每 tick 必跑一次本层
+自审**，扫**自上次审计时刻起**的新窗口（`--since`；历史窗口的存量违规是审计面，不是每 tick 的面）：
+
+```bash
+node --no-warnings --experimental-strip-types plugin/scripts/manager-observation-runtime-check.ts \
+  --transcript "$HOME/.claude/projects/<root-slug>/<本层会话id>.jsonl" \
+  --since <上次审计的 ISO 时刻> --json
+```
+
+- **会话目标显式，不猜**（`--self` 只作多会话并存时的回退，打印被选会话、须人工核对；找不到/不唯一
+  就显式传 `--transcript` 本层会话 jsonl——**绝不猜**）。manager 的会话 id 用 `--config`/环境变量
+  `MANAGER_SESSION_ID` 给出，否则 `--self` 可能把 manager 当外层。
+- **违规报出（AC2）**：任何 PANE/TICKLOG/TRANSCRIPT/ANALYZE 命中 ⇒ 退出码 1、打印违规行；本 tick
+  停止后续动作，按「授权边界」升级给人（step 5）。**违反即停**——运行时约束不是建议。
+- **负控制（AC3，不误报）**：指向 inner 的 capture-pane（`-t "$TMUX_SESSION"` / `quay-0:inner`）
+  不计数；**manager→outer 的发布不计数**（`supervisor-bus-identity.sh inbox-summary`、读 manager 的
+  inbox/bus——那是 manager 向本层交付，不属于 C3 的 outer→manager 方向）；基于转述的指控（本层
+  transcript 里散文提到 manager）不被当作证据——**只数真实 tool 调用**。
+- **独立审计（方向合法）**：manager 对本层跑同一检查器（manager→outer 观测是合法方向，不受 C3
+  约束）——`node --no-warnings --experimental-strip-types <repo>/plugin/scripts/manager-observation-runtime-check.ts --root <repo> --session <本层会话id> --json`。
+- **交叉标注（AC4）**：本步是 `gap-manager-productization-five-constraints` AC4 文档层检查的**补充，
+  不是替换**——文档层管「tick 文档不得含创建/驱动/检查 manager 的步骤」，运行时约束管「运行时实际
+  观测/检查动作为零」，两条正交、都要。
+
 ## Tick 步骤
 
 ### 0. 三个已经害过我们的失败模式

@@ -119,6 +119,11 @@ manager 手里出现 .sh/.ts 实现即越界信号。
       `node --no-warnings --experimental-strip-types plugin/scripts/no-manager-tick-doc-check.ts --root .` →
       `PASS (2 outer tick doc(s) scanned, no create/drive/check manager step)`。测试：
       `plugin/test/no-manager-tick-doc-check.test.mjs`（正/负控制 5 条）。
+      **运行时补充（2026-08-08，`gap-c3-has-no-runtime-constraint`）**：本 AC 是**文档层**检查——
+      只证明「tick 文档没写越界步骤」，不证明「运行时没做越界动作」。运行时约束
+      （`plugin/scripts/manager-observation-runtime-check.ts`，PANE/TICKLOG/TRANSCRIPT/ANALYZE 四类）
+      是它的**补充，不是替换**——两条正交、都要。运行时自审路径已接
+      `plugin/loop/orchestrator-loop-tick.md`「C3 运行时约束」节。
 - [x] AC5 (§2.1，**2026-08-06 改写：原文依赖 OS watchdog，人已裁定禁用该路径**):
       manager 的调度锚点**只能用 Claude Code 自己的 loop / cron**（`/loop` → `CronCreate`）。
 
