@@ -1413,7 +1413,13 @@ integration 工作树，不是 develop 主检出。** 所以它的「已验证�
 (i)  每次任务派发都实际调用了 fork-baseline 判定，且结果与配置声明一致
      取证：meta-cc 查派发会话的 tool_use，contains="--fork-baseline"
 (ii) 【新增，manager 补】传入的参数不得使任一判定路径【恒为假】
-     取证：检查 --overlaps-unverified 的实参不为空
+     ⚠️ 2026-08-08 10:3xZ 二次修正：取证不能看【值】，必须看【来源】。
+     批量合后 integration 被清空 ⇒ `git log develop..integration` 为空
+     ⇒ `UNVERIFIED_IDS` 合法地等于空串。**此刻的空是正确的，不是缺陷。**
+     而「写死 ""」与「计算得 ""」**在派发那一刻长得完全一样**。
+     ⇒ 正确取证两条：
+        (ii-a) 实参是【计算表达式】而非字面量  —— `grep '"$UNVERIFIED_IDS"'`，且无字面 `""`
+        (ii-b) 该来源在 integration 非空时确实产出非空 —— 需一次非空时刻的实测
 ```
 
 **(ii) 是我在新判据第一次实测时当场加的，因为第一次实测就暴露了 (i) 单独不够**：
