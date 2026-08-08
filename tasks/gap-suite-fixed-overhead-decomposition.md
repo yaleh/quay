@@ -3,7 +3,7 @@ id: gap-suite-fixed-overhead-decomposition
 title: 固定开销从未被拆解过：152s
   不属于任何一趟测试（build_dist_once/run_static_checks/resource-gate/三趟间隙）——直接测确定性串行段打点拆解，不用墙钟差（17–63s
   噪声带内不可判定）；顺手修 CLAUDE.md 103 行指向 done 任务要数据的误导
-status: ready
+status: done
 labels: []
 parent: null
 children: []
@@ -48,18 +48,47 @@ resume 若中断，先跑 measure 读打点输出 + 受控跑次数 + CLAUDE.md 
 
 ## Acceptance Criteria
 
-- [ ] AC1: **确定性串行段打点**——build_dist_once / run_static_checks / resource-gate / 三趟之间间隙各打点，输出每段耗时
-- [ ] AC2: **固定开销拆解（受控）**——受控窗口完整套件 ≥3 次，152s 拆成"每段多少" + 极差与 σ
-- [ ] AC3: **受控测量前置**——测量在资源门 GO + inner/outer 空闲的受控窗口进行；同一 commit 连跑 ≥3 次报极差与 σ（不把非受控离散当噪声带）
-- [ ] AC4: **CLAUDE.md 修正**——103 行不再指向 gap-suite-cost-model 要成本数据（该任务已 done，产出=不可判定）
-- [ ] AC5: 与 gap-suite-cost-model-is-wrong-optimizations-buy-nothing（σ≈9.8s 受控口径）、
+- [x] AC1: **确定性串行段打点**——build_dist_once / run_static_checks / resource-gate / 三趟之间间隙各打点，输出每段耗时
+      **证据**：develop 289d69ed + e33daf1d + 86676305。`_oh_mark`/`_oh_emit` 打点 build_dist /
+      run_static_checks / resource_gate / lock / 三趟之间间隙（oh_t5b/oh_t6b 修正相位标记），全量默认路径
+      输出 9 段 `__OVERHEAD__ <label>_ms=N`。86676305 修 uutils date 量纲 bug（`date +%s%3N` 返回 19 位
+      epoch+全纳秒，实测本机 uutils 0.8.0 不截断）——改 `date +%s%N | cut -c1-13` 得真 epoch-ms，加
+      ERR-UNSET 空值守卫。实测 3 跑各 9 段，数值为毫秒量级（非 ns 量纲）。
+- [x] AC2: **固定开销拆解（受控）**——受控窗口完整套件 ≥3 次，152s 拆成"每段多少" + 极差与 σ
+      **证据**（受控窗口 3 跑，commit b30d739e，`--lane-count 8`，runner state 各 red reason=failed
+      ——审计独立性测试族红，非打点仪器问题；`__OVERHEAD__` 9 段全出）：
+      - 固定开销构成（3 跑 mean/min/max/range/σ）：
+        - lock_overhead: mean **0.03s**（range 0.00）
+        - resource_gate: mean **0.84s**（range 0.21，σ 0.11）
+        - build_dist: mean **1.05s**（range 0.40，σ 0.21）
+        - run_static_checks: mean **20.02s**（range 1.88，σ 0.94）
+        - gap_ms_main_to_serial: mean **3.18s**（range 0.99，σ 0.50）
+        - gap_ms_serial_to_lowconc: mean **2.50s**（range 0.07，σ 0.04）
+        - 固定开销合计 ≈ **27.6s**（3.6% 墙钟）
+      - 三趟测试（对照，非固定开销）：main 310.0s（σ 19.2）/ serial 161.8s（σ 6.2）/ lowconc 254.6s（σ 6.3），
+        合计 726.4s（96% 墙钟）
+      - **结论：152s 固定开销估算不成立**——实际确定性串行固定开销仅 ~27.6s，最大段 run_static_checks
+        20s；墙钟主要成本是三趟测试本身（并行度下不叠加到固定开销）。原始 152s 估算的组成已拆解为
+        "每段多少"，优化优先级：run_static_checks 是唯一 >10s 的固定段。
+- [x] AC3: **受控测量前置**——测量在资源门 GO + inner/outer 空闲的受控窗口进行；同一 commit 连跑 ≥3 次报极差与 σ（不把非受控离散当噪声带）
+      **证据**：3 跑前资源门 GO（cpu-some avg10≈6.6）、load 2.3、无并发套件；3 跑同一 commit b30d739e
+      （中途外层动 manager-tick docs，非测试对象）；各段报 range + σ（见 AC2）。受控 σ 下各固定段
+      完全可判定（run_static_checks σ≈0.9s = 4.7%）。
+- [x] AC4: **CLAUDE.md 修正**——103 行不再指向 gap-suite-cost-model 要成本数据（该任务已 done，产出=不可判定）
+      **证据**：845ae4a7 改 CLAUDE.md 103-105 行——"gap-suite-cost-model-is-wrong-optimizations-buy-nothing
+      is done and its measured output is that wall-clock diff is INDETERMINATE within the 17–63s noise
+      band — it produced no usable cost numbers to wait on"。`doc_fixed` measure 实测 0 命中。
+- [x] AC5: 与 gap-suite-cost-model-is-wrong-optimizations-buy-nothing（σ≈9.8s 受控口径）、
       gap-suite-sigma-distribution-stale-after-retirement（±10s 到 ±33s）、
       gap-install-suite-cost-instrument-reporter-not-wired（reporter 仪器）交叉标注
+      **证据**：本任务 Proposal 正确口径引用 cost-model AC3 受控 σ≈9.8s(2.1%)；sigma-distribution
+      （±10s 1σ 到 ±33s 含污染）为噪声口径来源；本任务打点输出经 measure-suite-reporter 的
+      __PERFILE__ 通道（install-suite-cost-instrument）同文件流输出。
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴任务体（打点输出、受控拆解 + 极差 σ、CLAUDE.md diff）
-- [ ] 打点机制接入 test.sh 全量默认路径（每次全量跑自动输出固定开销构成）
+- [x] AC1-AC4 实跑输出贴任务体（打点输出、受控拆解 + 极差 σ、CLAUDE.md diff）——见各 AC 证据
+- [x] 打点机制接入 test.sh 全量默认路径（每次全量跑自动输出固定开销构成）——289d69ed/e33daf1d/86676305 落地
 
 ## Touches
 - scripts/test.sh 或 plugin/scripts/full-suite-runner.ts（确定性串行段打点）
