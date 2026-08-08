@@ -889,8 +889,33 @@ verify_referenced_landed() {
   # same doc the human reads). Marker lines:
   #   <!-- self-create: <path> -->       local state, first run creates it (AC8)
   #   <!-- reference-doc: <path> -->     quay-specific reference doc, not a loop deliverable
-  selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-  refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+  # gap-verify-referenced-landed-concurrency-hardening AC1: read the declaration sets ONCE, with
+  # multi-level retry. gap-lowconc AC3's single re-read proved insufficient under cc3 load — the
+  # concurrent --loop installs' reads of init/SKILL.md transiently return INCOMPLETE output, so a
+  # DECLARED reference-doc is false-positived as not-declared (4 files in one run). Retry up to 3
+  # times with the SAME stable snapshot until the read is complete; a genuinely-undeclared ref
+  # never satisfies any read, so real drift still fails (negative control unchanged).
+  _read_declarations() {
+    local attempt=1 s r
+    for attempt in 1 2 3; do
+      s="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+      r="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+      # Completeness sentinel: orchestration/tick-log.md is ALWAYS a self-create and
+      # orchestration/manager-tick-log.md is ALWAYS a reference-doc in the shipped init skill.
+      # If a read misses either, it was transiently incomplete — retry. (A genuinely-missing
+      # declaration file never passes this check.)
+      if printf '%s\n' "$s" | grep -qxF 'orchestration/tick-log.md' \
+        && printf '%s\n' "$r" | grep -qxF 'orchestration/manager-tick-log.md'; then
+        selfcreate="$s"; refdoc="$r"; return 0
+      fi
+      [ "$attempt" -lt 3 ] && sleep 0.2
+    done
+    # All 3 reads incomplete — keep the LAST snapshot; the per-reference loop below will fail on a
+    # genuine miss (real drift is never masked by retries).
+    selfcreate="$s"; refdoc="$r"; return 1
+  }
+  selfcreate="" refdoc=""
+  _read_declarations
   for r in $refs; do
     # exact-line membership in the declared sets (newline-separated — a `case` pattern would
     # need spaces the multi-line variable does not have)
@@ -898,21 +923,14 @@ verify_referenced_landed() {
       continue   # declared self-create or reference-doc — not a defect
     fi
     if [ ! -e "$ws/$r" ]; then
-      # gap-lowconc-tmux-session-name-collision-race AC2: the declaration extraction above is a
-      # single grep read of init/SKILL.md; under concurrent load (lowconc cc3) that read can
-      # transiently return INCOMPLETE output, false-positiving a DECLARED reference-doc as
-      # not-declared (observed once at cc3: orchestration/SPEC-typed-axes-and-standing-dynamics.md —
-      # the install failed verify with a false positive while the declaration was present). Before
-      # failing, RE-READ the declaration sets once and re-check: a genuinely-undeclared ref fails
-      # on both reads (real drift never masked); a transiently-missed declaration passes the
-      # re-read and is not a defect. Keeps the check deterministic under load.
-      if ! printf '%s\n' "$selfcreate" "$refdoc" | grep -qxF "$r"; then
-        local fresh_selfcreate fresh_refdoc
-        fresh_selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
-        fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
-        if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
-          continue   # re-read confirms the declaration exists — the first read was transiently incomplete
-        fi
+      # last line of defense: re-read ONCE more (the up-front read already retried 3x; a single
+      # extra read covers the rare case where the whole snapshot was taken mid-write). A genuinely-
+      # undeclared ref fails here too, so drift is never masked.
+      local fresh_selfcreate fresh_refdoc
+      fresh_selfcreate="$(grep -oE '<!-- self-create: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- self-create: //; s/ -->//' | sort -u || true)"
+      fresh_refdoc="$(grep -oE '<!-- reference-doc: [a-zA-Z0-9._/-]+ -->' "$PLUGIN_ROOT/skills/init/SKILL.md" 2>/dev/null | sed -E 's/<!-- reference-doc: //; s/ -->//' | sort -u || true)"
+      if printf '%s\n' "$fresh_selfcreate" "$fresh_refdoc" | grep -qxF "$r"; then
+        continue   # fresh read confirms the declaration exists — the snapshot was transiently incomplete
       fi
       echo "  FAIL (referenced-not-landed): $r — referenced by a shipped skill/tick doc but not laid down and not declared in init/SKILL.md" >&2
       missing=1
