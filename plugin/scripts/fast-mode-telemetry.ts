@@ -603,7 +603,7 @@ export function computeHaltedMs(haltEvents, windowStartMs, windowEndMs) {
  *                 `startedAtMsUnreliable` (a backfilled/distorted start) and EXCLUDED from the
  *                 throughput numerator AND denominator. Absent/null ⇒ no annotation (byte-identical
  *                 to pre-fix behavior).
- * @returns {{tasks: Array<{taskId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
+ * @returns {{tasks: Array<{taskId:string,runId:string,minutes:number,outcome:string|null}>, orphaned: Array<{taskId:string,runId:string,outcome:string|null}>, inProgress: Array<{taskId:string,runId:string,startedAtMs:number,startedAtMsUnreliable:boolean}>, reconciled: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,reconcileReason:string,startedAtMsUnreliable:boolean}>, unreliable: Array<{taskId:string,runId:string,minutes:number,outcome:string|null,startedAtMsUnreliable:boolean,startedAtMs:number}>, meanMinutes:number, medianMinutes:number, tasksPerHour:number, serialEquivalentPerHour:number, windowStart:string|null, windowEnd:string|null, windowHours:number, haltedHours:number, halted:Array<{startMs:number,endMs:number}>, blocked: Array<{taskId:string,reason:string|null,sinceMs:number|null,clearedAtMs:number|null,durationMs:number}>, totalBlockedMs:number, longestBlockedMs:number}}
  */
 export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = null, firstKnownCommitMsByTask = null } = {}) {
   const fastEvents = events.filter((e) => e && e.stage === FAST_MODE_STAGE);
@@ -672,7 +672,9 @@ export function aggregate(events, { sinceMs = null, nowMs = null, haltEvents = n
         // commit) asserts a wall-clock that did not happen — excluded from throughput (AC7).
         unreliable.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome, startedAtMsUnreliable: true, startedAtMs });
       } else {
-        tasks.push({ taskId: rec.taskId, minutes, outcome: end.outcome });
+        // runId carried on completed pairs so the reverse-direction slot detector
+        // (gap-closed-bracket-leaves-live-agent-consuming-slots) can probe the executor process.
+        tasks.push({ taskId: rec.taskId, runId: rec.runId, minutes, outcome: end.outcome });
       }
     } else if (end && !rec.start) {
       if (sinceMs != null && end.recordedAtMs < sinceMs) continue;
@@ -835,6 +837,70 @@ export function makeDefaultExecutorGone(root) {
   };
 }
 
+// ── Closed-bracket-but-live executor detection (gap-closed-bracket-leaves-live-agent-consuming-slots) ──
+//
+// REVERSE-direction bracket-lifecycle defect. The known four bracket defects are "bracket should
+// close but didn't" (a `--task-end` never written leaves a stale `inProgress` entry — handled by
+// `--reconcile`, which closes a bracket only when the executor is observably gone). THIS direction is
+// the OPPOSITE: the bracket CLOSED (`--task-end` written, the record left `inProgress`) but the
+// executor PROCESS is still observably present (open worktree / live process) — the agent is still
+// running (or not yet reaped) while slot accounting already reads the slot as free. Bracket-close ≠
+// agent-exit; the two are independent. A closed-bracket-but-live agent consumes a concurrency slot
+// INVISIBLY — a new dispatch could land in a slot that is actually busy.
+//
+// The detector scans CLOSED brackets (completed start+end pairs) with the SAME observable-presence
+// signals `--reconcile` uses on OPEN brackets (worktree open / process alive). Any closed-bracket
+// task whose executor is still observably present is a "closed bracket but live agent" — its slot is
+// NOT free and must be counted as occupied (AC2/AC3).
+
+/**
+ * Detect closed-bracket-but-live agents: completed (start+end) telemetry records whose executor is
+ * STILL observably present. PURE: all observable facts arrive via the injected `executorPresent`
+ * probe — this function never runs git/ps, so tests inject deterministic verdicts.
+ * @param {Array<{taskId:string, runId?:string|null}>} completed — closed-bracket records (the
+ *   report's tasks + reconciled + unreliable arrays — start+end pairs that left `inProgress`).
+ * @param {object} [opts]
+ * @param {(rec: {taskId:string, runId?:string|null}) => {present:boolean, reason?:string|null}} [opts.executorPresent]
+ *   — observable-executor presence probe. Default: { present:false, reason:"no-executor-present-probe" }
+ *   — never flag a closed bracket as occupied without evidence (fail-closed toward free only on
+ *   verified absence).
+ * @returns {Array<{taskId:string, runId:string|null, reason:string}>}
+ */
+export function detectClosedButLive(completed, { executorPresent } = {}) {
+  const out = [];
+  for (const rec of completed ?? []) {
+    if (!rec || !rec.taskId) continue;
+    const verdict = executorPresent ? executorPresent(rec) : { present: false, reason: "no-executor-present-probe" };
+    if (verdict.present) {
+      out.push({ taskId: rec.taskId, runId: rec.runId ?? null, reason: verdict.reason ?? "executor-present" });
+    }
+  }
+  out.sort((a, b) => a.taskId.localeCompare(b.taskId) || (a.runId ?? "").localeCompare(b.runId ?? ""));
+  return out;
+}
+
+/**
+ * The production observable-presence probe for closed-bracket detection (wired by the
+ * `--slot-status` / `--slots` / `--report` CLIs). Same presence signals `--reconcile` uses on OPEN
+ * brackets, applied to CLOSED brackets:
+ *   1. worktree open   → PRESENT (dispatch environment still on disk — the agent is still working or
+ *                        not yet reaped; the slot must NOT be treated as free)
+ *   2. process alive   → PRESENT (a live process still carries this runId)
+ *   3. neither         → not present (bracket closed AND dispatch environment gone ⇒ slot genuinely
+ *                        free)
+ * Absence of a positive signal is NEVER treated as "present" — fail-closed toward reporting the slot
+ * as busy while any evidence of occupancy remains.
+ * @param {string} root
+ * @returns {(rec: {taskId:string, runId?:string|null}) => {present:boolean, reason:string}}
+ */
+export function makeDefaultExecutorPresent(root) {
+  return (rec) => {
+    if (rec.taskId && worktreeExists(root, rec.taskId)) return { present: true, reason: "worktree-present" };
+    if (rec.runId && processAlive(rec.runId)) return { present: true, reason: "process-alive" };
+    return { present: false, reason: "no-present-signal" };
+  };
+}
+
 // ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ─────────────────────────────
 //
 // `--slot-status` exposes the CONCURRENCY-SLOT view of the telemetry store as a PURE READ (like
@@ -875,29 +941,49 @@ export const SLOT_STATUS_CAP_DEFAULT = 3;
  * deterministic verdicts without faking processes/git. Reuses `reconcileInFlight` — the same
  * classification `--reconcile` would write, but computed without writing anything.
  *
+ * REVERSE-DIRECTION DIMENSION (gap-closed-bracket-leaves-live-agent-consuming-slots): the forward
+ * reconcile pass (`executorGone`) only sees OPEN brackets. A CLOSED bracket (`--task-end` written)
+ * whose executor is still observably present is invisible to it — the slot would read free while a
+ * live agent burns CPU. `completed` + `executorPresent` close that gap: every closed-bracket record
+ * whose executor is still present counts toward `occupied_slots`, so `slots_free` never offers a
+ * slot that an actually-busy process still holds (AC3 negative control). With no `completed` array
+ * the reverse dimension is a no-op (byte-identical to the pre-fix forward-only view).
+ *
  * @param {Array<{taskId:string, runId:string, startedAtMs:number}>} inProgress — from aggregate()
  * @param {object} [opts]
  * @param {number} [opts.cap] — concurrency cap (effective_cap from cap-from-gate.sh); default
  *   SLOT_STATUS_CAP_DEFAULT.
  * @param {(rec: {taskId:string, runId:string, startedAtMs:number}) => {gone:boolean, reason?:string|null}} [opts.executorGone]
- *   — observable-executor probe, same contract as reconcileInFlight.
+ *   — observable-executor probe, same contract as reconcileInFlight (FORWARD: open brackets).
+ * @param {Array<{taskId:string, runId?:string|null}>} [opts.completed] — closed-bracket records
+ *   (report tasks + reconciled + unreliable — start+end pairs that left inProgress). Absent/empty ⇒
+ *   the reverse dimension contributes nothing (pre-fix behavior).
+ * @param {(rec: {taskId:string, runId?:string|null}) => {present:boolean, reason?:string|null}} [opts.executorPresent]
+ *   — closed-bracket executor-presence probe (REVERSE). Default: no-executor-present-probe — never
+ *   flag a closed bracket as occupied without evidence.
  * @param {(taskId:string) => number|null} [opts.firstKnownCommitMs] — AC7 annotation probe.
  * @returns {{cap:number, in_progress_total:number, stale_brackets:number, real_in_flight:number,
- *   slots_free:number, slot_state:"free"|"full", brackets_reflect_subagents:boolean,
- *   closed:Array<object>, kept:Array<object>}}
+ *   closed_but_live_agents:Array<object>, occupied_slots:number, slots_free:number,
+ *   slot_state:"free"|"full", brackets_reflect_subagents:boolean,
+ *   closed_brackets_reflect_processes:boolean, closed:Array<object>, kept:Array<object>}}
  */
-export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, firstKnownCommitMs = null } = {}) {
+export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null } = {}) {
   const { closed, kept } = reconcileInFlight(inProgress ?? [], { executorGone, firstKnownCommitMs });
   const realInFlight = kept.length;
-  const slotsFree = Math.max(0, cap - realInFlight);
+  const closedButLive = detectClosedButLive(completed, { executorPresent });
+  const occupiedSlots = realInFlight + closedButLive.length;
+  const slotsFree = Math.max(0, cap - occupiedSlots);
   return {
     cap,
     in_progress_total: (inProgress ?? []).length,
     stale_brackets: closed.length,
     real_in_flight: realInFlight,
+    closed_but_live_agents: closedButLive,
+    occupied_slots: occupiedSlots,
     slots_free: slotsFree,
     slot_state: slotsFree > 0 ? "free" : "full",
     brackets_reflect_subagents: (inProgress ?? []).length === realInFlight,
+    closed_brackets_reflect_processes: closedButLive.length === 0,
     closed,
     kept,
   };
@@ -911,9 +997,17 @@ function printHumanSlotStatus(slot) {
   console.log(`  cap: ${slot.cap}`);
   console.log(`  in-progress brackets (raw --report inProgress): ${slot.in_progress_total}`);
   console.log(`  stale brackets (reconcile would close, executor observably gone): ${slot.stale_brackets}`);
-  console.log(`  real in-flight (executor still present): ${slot.real_in_flight}`);
+  console.log(`  real in-flight (open-bracket executor still present): ${slot.real_in_flight}`);
+  console.log(`  closed-bracket-but-live agents (bracket closed, executor still present): ${slot.closed_but_live_agents.length}`);
+  for (const c of slot.closed_but_live_agents) {
+    console.log(`    ${c.taskId} (${c.reason})`);
+  }
+  console.log(`  occupied slots (real in-flight + closed-but-live): ${slot.occupied_slots}`);
   console.log(`  slots free: ${slot.slots_free} (slot_state ${slot.slot_state})`);
   console.log(`  brackets reflect subagents: ${slot.brackets_reflect_subagents ? "YES" : "NO (stale brackets or missing --task-end)"}`);
+  if (slot.closed_but_live_agents.length > 0) {
+    console.log(`  closed brackets reflect processes: NO — ${slot.closed_but_live_agents.length} closed-bracket agent(s) still present (bracket-close ≠ agent-exit); their slots are NOT free`);
+  }
   if (!slot.brackets_reflect_subagents) {
     console.log(`  run '--reconcile' to close the ${slot.stale_brackets} stale bracket(s); if a real in-flight task has NO bracket, its --task-start was never called (AC4)`);
   }
@@ -970,6 +1064,17 @@ function printHumanReport(report, aggFile) {
   // the raw bracket count does NOT reflect real concurrency (stale red-window brackets); realInFlight
   // = brackets whose executor is observably present. This is the number the state self-check ① reads.
   console.log(`real in-flight (reconcile-aware, executor present): ${report.realInFlight ?? report.inProgress.length} of ${report.inProgress.length} brackets`);
+  // Closed-bracket-but-live agents (gap-closed-bracket-leaves-live-agent-consuming-slots): a CLOSED
+  // bracket whose executor is still observably present (worktree open / process alive) occupies a
+  // slot invisibly — bracket-close ≠ agent-exit. These are the reverse-direction phantom: the slot
+  // view must NOT read them as free.
+  if ((report.closedButLive ?? []).length) {
+    console.log(`closed-bracket-but-live agents (bracket closed, executor still present): ${report.closedButLive.length}`);
+    for (const c of report.closedButLive) console.log(`  ${c.taskId} (runId ${c.runId ?? "?"}, ${c.reason})`);
+  }
+  if (typeof report.occupiedSlots === "number") {
+    console.log(`occupied slots (real in-flight + closed-but-live): ${report.occupiedSlots}`);
+  }
   // Reconcile-closed phantom records (gap-a-crash-leaves-phantom-in-flight-tasks...): real events
   // preserved, but never counted as completed tasks.
   if ((report.reconciled ?? []).length) {
@@ -1003,10 +1108,10 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
-  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight vs stale brackets vs slots free)
-  node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes; carries reconcilable/realInFlight)
+  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight vs stale brackets vs closed-but-live agents vs slots free)
+  node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes; carries reconcilable/realInFlight/closedButLive/occupiedSlots)
   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)
-  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight)
+  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight vs closed-but-live)
   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRTES an end event per close)`;
 
 function getArgValue(args, name) {
@@ -1059,6 +1164,22 @@ async function loadAndAggregate(root, sinceArg) {
     reconcilable = [];
     realInFlight = report.inProgress.length;
   }
+  // REVERSE-DIRECTION DIMENSION (gap-closed-bracket-leaves-live-agent-consuming-slots): CLOSED
+  // brackets (completed start+end pairs) whose executor is STILL observably present are invisible to
+  // the forward reconcile pass above (which only sees OPEN brackets). They still occupy a slot — a
+  // closed bracket does NOT mean the agent process exited. Fail-closed: a probe failure leaves the
+  // reverse dimension empty (the report degrades to the forward-only view, never a false occupied).
+  let closedButLive = [];
+  try {
+    const completed = [
+      ...(report.tasks ?? []),
+      ...(report.reconciled ?? []),
+      ...(report.unreliable ?? []),
+    ];
+    closedButLive = detectClosedButLive(completed, { executorPresent: makeDefaultExecutorPresent(root) });
+  } catch (_) {
+    closedButLive = [];
+  }
   return {
     report: {
       generatedAt: new Date().toISOString(),
@@ -1066,6 +1187,8 @@ async function loadAndAggregate(root, sinceArg) {
       ...report,
       reconcilable,
       realInFlight,
+      closedButLive,
+      occupiedSlots: realInFlight + closedButLive.length,
     },
   };
 }
@@ -1228,6 +1351,12 @@ export async function main(argv) {
     const slot = analyzeSlotStatus(reportWithMeta.inProgress, {
       cap,
       executorGone: makeDefaultExecutorGone(root),
+      completed: [
+        ...(reportWithMeta.tasks ?? []),
+        ...(reportWithMeta.reconciled ?? []),
+        ...(reportWithMeta.unreliable ?? []),
+      ],
+      executorPresent: makeDefaultExecutorPresent(root),
       firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
     });
     if (args.includes("--json")) {
@@ -1291,11 +1420,20 @@ export async function main(argv) {
       return 1;
     }
     const slotsTotal = cap != null ? cap : null;
-    const slotsRemaining = cap != null ? Math.max(0, cap - reportWithMeta.realInFlight) : null;
+    // Reverse-direction dimension (gap-closed-bracket-leaves-live-agent-consuming-slots): a CLOSED
+    // bracket whose executor is still observably present (worktree open / process alive) occupies a
+    // slot even though it is not in `inProgress`. `occupiedSlots` = real in-flight (open brackets
+    // with a live executor) + closed-but-live agents — the number `slots-remaining` must subtract
+    // from the cap so a new dispatch is never recommended into an actually-busy slot (AC3).
+    const closedButLive = reportWithMeta.closedButLive ?? [];
+    const occupiedSlots = reportWithMeta.occupiedSlots ?? reportWithMeta.realInFlight;
+    const slotsRemaining = cap != null ? Math.max(0, cap - occupiedSlots) : null;
     const out = {
       bracketsInFlight: reportWithMeta.inProgress.length,
       reconcilable: reportWithMeta.reconcilable.length,
       realInFlight: reportWithMeta.realInFlight,
+      closedButLive,
+      occupiedSlots,
       slotsTotal,
       slotsRemaining,
     };
@@ -1303,8 +1441,9 @@ export async function main(argv) {
       console.log(JSON.stringify(out, null, 2));
     } else {
       const capPart = cap != null ? `, slots-total ${out.slotsTotal}, slots-remaining ${out.slotsRemaining}` : "";
+      const closedPart = out.closedButLive.length > 0 ? `, closed-but-live ${out.closedButLive.map((c) => c.taskId).join(",")}` : "";
       console.log(
-        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}${capPart}`,
+        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}${closedPart}, occupied ${out.occupiedSlots}${capPart}`,
       );
     }
     return 0;

@@ -533,6 +533,35 @@ test("promotion ranks touch-disjointness first (vs pool + in-flight), kind as se
   assert.ok(idxInfD < idxInfC, "disjoint-from-in-flight ranks before colliding-with-in-flight");
 });
 
+// ── REVERSE DIRECTION (gap-closed-bracket-leaves-live-agent-consuming-slots): closed-but-live agents
+//    rank in the in-flight disjointness set — a new dispatch must not collide with their touches even
+//    though their telemetry bracket already closed (bracket-close ≠ agent-exit) ─────────────────────
+
+test("AC4 reverse — closedButLive agents rank in the in-flight disjointness set", (t) => {
+  const root = makeWorkspace("cbl-rank");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const f of ["code/pool.ts", "code/other.ts", "code/ghost.ts"]) {
+    fs.writeFileSync(path.join(root, f), "export const x = 1;\n");
+  }
+  // Pool: 1 ready task touching code/pool.ts.
+  writeTask(root, "gap-pool", { status: "ready", labels: ["gap"], body: fourArtifactBody({ touches: ["- code/pool.ts"] }) });
+  // Candidates (all eligible; disjointScore vs pool(1) + closed-but-live(1)):
+  writeTask(root, "gap-ghost-colliding", gapTask("gap-ghost-colliding", { body: fourArtifactBody({ touches: ["- code/ghost.ts"] }) })); // collides closed-but-live → 1
+  writeTask(root, "gap-free", gapTask("gap-free", { body: fourArtifactBody({ touches: ["- code/other.ts"] }) })); // disjoint both → 2
+
+  const closedButLive = [{ id: "gap-ghost", body: fourArtifactBody({ touches: ["- code/ghost.ts"] }) }];
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, closedButLive });
+  assert.equal(r.closed_but_live[0], "gap-ghost", "the closed-but-live set is surfaced in the output");
+  assert.ok(r.candidates.find((c) => c.id === "gap-free"), "gap-free candidate present");
+  assert.ok(r.candidates.find((c) => c.id === "gap-ghost-colliding"), "ghost-colliding candidate present");
+  const idxFree = r.candidates.findIndex((c) => c.id === "gap-free");
+  const idxGhost = r.candidates.findIndex((c) => c.id === "gap-ghost-colliding");
+  assert.ok(idxFree < idxGhost, "disjoint-from-closed-but-live ranks before colliding-with-closed-but-live");
+  // The closed-but-live id is excluded from ready_relevance (it is NOT dispatchable room).
+  const readyRel = r.ready_relevance.map((x) => x.id);
+  assert.ok(!readyRel.includes("gap-ghost"), "closed-but-live id excluded from ready relevance");
+});
+
 // ── AC4/AC5: hard-cap floor constant is what the ticks use ────────────────────────────────────────
 
 test("analyzeTasks derives floor from cap × floorMult (configurable, single source)", (t) => {

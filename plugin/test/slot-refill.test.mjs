@@ -156,6 +156,68 @@ test("cap is an INPUT — a smaller cap reduces free slots (AC5 mechanism/strate
   assert.equal(r2.should_refill, true);
 });
 
+// ── REVERSE DIRECTION (gap-closed-bracket-leaves-live-agent-consuming-slots): a CLOSED bracket whose
+//    executor is still present occupies a slot — slots_free must not read it as free ─────────────────
+
+test("closedButLive occupies a slot: slots_free reduced, can flip should_refill (AC3 reverse)", (t) => {
+  const root = makeWorkspace("cbl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  // cap 1; 1 running + 1 closed-but-live ⇒ occupied 2 ⇒ 0 free ⇒ no refill into a busy slot.
+  const inFlight = [inFlightTask("gap-run", ["- code/run.ts (new)"])];
+  const closedButLive = [inFlightTask("gap-ghost", ["- code/ghost.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 1, inFlight, closedButLive });
+  assert.equal(r.in_flight_count, 1);
+  assert.equal(r.closed_but_live_count, 1);
+  assert.equal(r.occupied_slots, 2);
+  assert.equal(r.slots_free, 0);
+  assert.equal(r.should_refill, false);
+  assert.match(r.no_refill_reason, /closed-but-live 1/);
+  assert.deepEqual(r.recommended, []);
+});
+
+test("closedButLive absent ⇒ byte-compatible forward-only slot arithmetic", (t) => {
+  const root = makeWorkspace("cbl-absent");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  const inFlight = [inFlightTask("gap-run", ["- code/run.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 2, inFlight });
+  assert.equal(r.closed_but_live_count, 0);
+  assert.equal(r.occupied_slots, 1);
+  assert.equal(r.slots_free, 1);
+  assert.equal(r.should_refill, true);
+});
+
+test("a candidate colliding with a closedButLive agent's touches is not recommended (concurrency eligibility)", (t) => {
+  const root = makeWorkspace("cbl-collide");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-free", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/free.ts (new)"]) });
+  writeTask(root, "gap-blocked", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ghost.ts (new)"]) });
+  const closedButLive = [inFlightTask("gap-ghost", ["- code/ghost.ts (new)"])];
+  const r = analyzeSlotRefill({ tasksDir: path.join(root, "tasks"), root, cap: 2, closedButLive });
+  assert.equal(r.slots_free, 1, "cap 2 − 1 closed-but-live = 1");
+  assert.ok(r.recommended.includes("gap-free"), "disjoint-from-closed-but-live candidate recommended");
+  assert.ok(!r.recommended.includes("gap-blocked"), "candidate colliding with a closed-but-live agent's touches is NOT recommended");
+});
+
+test("CLI --closed-but-live: closed-bracket-but-live ids reduce slots_free (AC3 reverse)", (t) => {
+  const root = makeWorkspace("cli-cbl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-a", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/a.ts (new)"]) });
+  writeTask(root, "gap-ghost", { status: "ready", labels: ["gap"], body: dispatchableBody(["- code/ghost.ts (new)"]) });
+  const script = path.resolve(__dirname, "..", "scripts", "slot-refill.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--cap", "1", "--closed-but-live", "gap-ghost"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.closed_but_live_count, 1);
+  assert.equal(parsed.occupied_slots, 1);
+  assert.equal(parsed.slots_free, 0);
+  assert.equal(parsed.should_refill, false);
+});
+
 // ── AC4: negative control — no dispatchable candidate ⇒ no refill ──────────────────────────────────
 
 test("empty ready pool ⇒ should_refill=false with a named reason (AC4)", (t) => {
