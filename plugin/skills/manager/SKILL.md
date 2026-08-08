@@ -353,3 +353,30 @@ allowed-tools: Bash, Read, Monitor
 
 **停下叫人的条件**：连续 3 个 tick 无任何项目推进任务状态（附三次各自看到了什么）；任一项目外层进程
 消失（立即报，不等三次）；`.halt` 解除条件已满足但没人解除（提醒一次，不自行解除高优先级之外）。
+
+---
+
+## 9. 工具复用强制挂载点（capability-catalog 前置检查，AC2）
+
+**这一节是 §4「越界的机械信号」的可执行落地**（`orchestration/SPEC-manager-productization-2026-08-05.md`
+§5）——该节作为散文规则被证明无效：2026-08-06 晚，同一个读过该节的会话仍手写 8 个已有能力的替代品
+（证据见 `tasks/gap-manager-skill-missing-mandatory-tool-reuse-checklist.md` AC4）。从本行起，这不是提醒，是步骤。
+
+**硬规则（Step 0 前置检查，写脚本前必做）**：任何 `.sh`/`.ts` 写入（哪怕是一次性诊断脚本）都必须先执行
+`bash plugin/scripts/capability-catalog.sh | grep -i <关键词>`，确认没有既有能力。找不到对应既有工具才允许写；
+找到则必须复用（调用产品化工具，而不是再造一个劣质版本）。这条是**前置检查动作**，不是自觉提醒。
+
+**8 项已知复用对照（2026-08-06 实测；速查，非完备清单）**：权威来源是上面命令查出的能力目录本身（以文件系统
+派生、随包更新，本 SKILL 不维护完备性）——下表是本次已确认的「手工做过 → 已有工具」映射，下一位 manager
+（或换了上下文的同一位）直接查这里：
+
+| 想手工做的事（越界信号） | 已有工具（用这个） |
+|---|---|
+| 肉眼读 `capture-pane` 判断忙/闲 | `pane-state-classify.ts` |
+| 拼进程 CPU + git log 判断循环死活 | `dead-loop-check.sh` |
+| 每轮 tick 手工数 AC10 | `prefriction-count.sh` |
+| 每轮 tick 手工问生成器问句 | `axis-generator.ts --criteria` |
+| 手写 tmux 泄漏扫描逻辑 | `tmux-leak-scan.sh` |
+| 手写 `git rev-list --left-right` 判断落后/领先 | `sync-lag-check.sh` |
+| 裸 `tmux send-keys` 三步 | `send-keys-reliable.sh` |
+| 用 `send-keys-reliable.sh` 而非窄接口 | `supervisor-deliver.sh` |
