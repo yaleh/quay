@@ -1,7 +1,7 @@
 ---
 id: gap-sweeptmp-pkill-kills-live-observers-two-layer-blind
 title: "session-liveness 清理用 pkill -f 按名批量杀，杀掉在用监视器——两层观测同时失明且无观测者（外层+manager 2026-08-08 取证）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
