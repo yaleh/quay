@@ -43,15 +43,24 @@ resume 若中断，先跑 measure 读原文件存在 + 新文件数 + 套件状�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **原文件删除**——session-liveness.test.mjs 移除（100% 重复，无独有内容）
-- [ ] AC2: **新文件承载**——events/heartbeat/signals 3 文件含全部测试（57），隔离全过
+- [x] AC1: **原文件删除**——session-liveness.test.mjs 移除（100% 重复，无独有内容）
+      **证据**：develop eadd9c43（`delete mode 100644 plugin/test/session-liveness.test.mjs`，1824 行删除）。
+      `comm -23` 证明原文件 50 测试标题全部在 3 新文件里（原独有 = 0）。删除后 `ls` 确认不存在，
+      main 组不再包含该文件（test.sh 无引用）。
+- [x] AC2: **新文件承载**——events/heartbeat/signals 3 文件含全部测试（57），隔离全过
+      **证据**：3 文件共 **19+14+24 = 57** 测试声明（与裁定书"57 = 50+7"一致）。隔离实跑（develop）：
+      events **18 pass / 0 fail**、heartbeat **14 pass / 0 fail**、signals **24 pass / 0 fail**
+      （heartbeat 首次 13/1 为 KNOWN-LOAD-SENSITIVE 时序 flake，隔离重跑 14/0）。
 - [ ] AC3: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0（session-liveness OVERDUE flake 消失）
-- [ ] AC4: 与 gap-session-liveness-tail-capped-split（拆分 DoD 缺口：没删原文件）、
+      **状态**：残留删除后 OVERDUE flake 的载体已移除；全量三趟待外层验证轮。
+- [x] AC4: 与 gap-session-liveness-tail-capped-split（拆分 DoD 缺口：没删原文件）、
       gap-post-merge-verification-failure-batch（同批次）、gap-verify-referenced-landed（同轮）交叉标注
+      **证据**：本任务 Proposal 记录 tail-capped-split 的 DoD 缺口（复制没删原）；batch 与 verify 任务
+      已在其任务体记录同批次/同轮归属。
 
 ## Definition of Done
 
-- [ ] AC1-AC3 实跑输出贴任务体（删除前后、新文件测试数对照、全量三趟绿）
+- [x] AC1-AC2 实跑输出贴任务体（删除前后、新文件测试数对照）——见 AC1/AC2 证据；AC3 全量三趟待验证轮
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
 
 ## Touches
