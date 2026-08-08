@@ -5,7 +5,7 @@ title: 红窗释放的「负载敏感」判定须是事前声明而非事后追�
   bug」（并发全量套件存在的理由被白跑）； ② 无标记=没人事前声明它是负载敏感，事后用一次通过追认分类=用结果反推分类（管理者 2026-08-08
   裁定， 今晚已栽过同形状）；③ 但禁 inner 判断也不对——真负载敏感族存在，机械拦会变硬阻塞；实例如
   serve.test.mjs（@test-group product、无标记）07:06:49 失败、隔离通过后红窗释放
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -98,7 +98,10 @@ resume 若中断，先跑 measure 确认当前无标记文件的释放行为，�
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（标记文件放行 / 无标记申请 / serve.test.mjs 处置对照）
+- [x] AC1-AC5 实跑输出贴任务体（标记文件放行 / 无标记申请 / serve.test.mjs 处置对照——
+      外层 2026-08-08 确认：5/5 AC 证据在任务体；serve.test.mjs 已补 KNOWN-LOAD-SENSITIVE 头注释
+      （packages/quay/test/serve.test.mjs:2）；全量套件 green 08:07:44、serve.test.mjs passed=true
+      33.6s——补标记处置经 full 并发验证）
 
 ## Touches
 - tasks/gap-load-sensitive-requires-predeclared-marker.md（self）

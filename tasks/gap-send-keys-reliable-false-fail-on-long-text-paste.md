@@ -4,7 +4,7 @@ title: send-keys-reliable.sh 的送达确认把成功的长文本/粘贴投递�
   type=queue-operation + type=attachment（零条 type=user 纯字符串），checker 只认
   type=user+message.role=user 的纯字符串形态；假 FAIL 比真 FAIL 更贵（上游据它做反向决策）—— 管理者 05:39
   实测踩到，判据设计（是否纳入 queue-operation/attachment）是外层+内层设计决定
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -193,7 +193,9 @@ scoped 静态档 `scripts/test.sh --for-task … --allow-thin`：task-contract-c
 ## Definition of Done
 
 - [x] AC1-AC5 实跑输出贴任务体（长文本投递 exit 0 对照 + 负控制 + 回归 + 文档同步，见上方证据 A-E）
-- [ ] 判据设计被外层/内层采纳（设计说明而非仅修脚本——设计说明已贴任务体，待外层/内层在 fan-in 复核采纳）
+- [x] 判据设计被外层/内层采纳（设计说明而非仅修脚本——设计说明已贴任务体；三态实现 live on develop
+      `send-keys-reliable.sh` exit 3 / `transcript-delivery-check.ts` state: delivered|failed|unknown；
+      管理者 2026-08-08 裁定确认 tool_result 为可靠来源；外层 2026-08-08 复核采纳）
 
 ## Touches
 - plugin/scripts/transcript-delivery-check.ts（判据设计：三态 + queue-operation/attachment 形态）

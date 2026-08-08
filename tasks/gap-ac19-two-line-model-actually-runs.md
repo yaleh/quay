@@ -2,7 +2,7 @@
 id: gap-ac19-two-line-model-actually-runs
 title: AC19：两线模型机制已装但从未真正跑过——方向倒置（task fan-in 直合 develop 而非 integration）+
   integration 领先恒 0（fork_baseline 结构性不可观测）；让任务真正合 integration 制造领先窗口验证可分辨
-status: done
+status: ready
 labels: []
 parent: null
 children: []
@@ -23,6 +23,23 @@ extra: {}
 ### AC19 判据（已写入 orchestration/manager-phase-goal.md）
 
 ① 至少一次**真实合并走声明方向**（task → integration）；② 至少一次 **integration 领先 develop 的真实窗口**，且窗口内验证分叉基线可分辨；③ 不为凑数造空转任务、不为达成放宽分支模型判据。
+
+### 管理者更正（2026-08-08 08:2x，任务从 done 退回 ready）
+
+判据2 有两半，此前只验了前半（真实窗口），后半未达成：
+- **判据2 后半原文**：「【且】该窗口内有新任务的分叉基线被验证过——声明依赖的任务从 integration 切、
+  独立任务从 develop 切，两者的分叉点可被机械区分」。
+- **实测后半未达成**：
+  - 现存 9 个 task/* 分支，【每一个】对 develop 与 integration 的 merge-base 都相同 ⇒ 不可区分
+    （gap-ac19 / gap-ac8-import / gap-chart2-s2 / gap-no-resource / gap-observer-registry /
+    gap-probe-mechanism / gap-send-keys-verified / gap-shipped-ts / serial-recompose，mb_dev==mb_int 全同）；
+  - 窗口期 07:38–08:08 的 reflog 内【零条】新建分支；
+  - 连 ff469248 那条 fan-in 的分支头 640af5a8 也是从两者共同点切的。
+- ⇒ 判据1 成立、判据2 成立一半 ⇒ **AC19 整条未达成**，退回 ready。
+
+**缺口（可执行）**：需要一次在 integration 领先 develop 的窗口内、从 integration 切出的
+声明依赖型任务分支。制造方式归外层（判据原文：「怎么制造这个窗口、要不要主动排一个声明依赖的
+任务去触发它 ＝ outer 的机制决定」）。**判据3 第一条同时约束：不得为凑窗口造空转任务。**
 
 ### 机制决定（外层）
 

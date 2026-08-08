@@ -725,7 +725,7 @@ tick 做一次收尾 pass。
      ⇒ true（RUNNING 还没失败，proceed，这正是消除同步点的关键）；`red` ⇒ false；**缺文件 ⇒ true**
      （外层还没跑第一轮，不阻塞）。
 3b. **批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（两线模型 AC3，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
-   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync` 把
+   **suiteGreen 为 true 时**，跑 `plugin/scripts/integration-batch-merge.sh --root "$REPO_ROOT" --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync --reconcile` 把
    已验证的 `$MERGE_TARGET` 批量快进合回 `$FORK_BASELINE`——**`$MERGE_TARGET` 永远是 `$FORK_BASELINE`
    后代 ⇒ fast-forward 无冲突**（`$FORK_BASELINE` 只被外层批量合推进，inner 任务只合 `$MERGE_TARGET`，
    见 `fast-mode-loop-tick.md` 步骤 2「两线分支模型」；单线下两者同为 master ⇒ 无操作）。
@@ -739,6 +739,14 @@ tick 做一次收尾 pass。
      `$MERGE_TARGET` 的提交已全部并入 `$FORK_BASELINE`）；
    - **invoke**：`git log --oneline $FORK_BASELINE..$MERGE_TARGET`（红窗期不空——`$MERGE_TARGET` 照常接收，
      直到本轮 suiteGreen 才批量合）。
+   - **`--reconcile`（主检出对账，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
+     REF-LEVEL（update-ref CAS，「主检出从不被脚本触碰」）——当主检出正检出的分支就是被推进的
+     `$FORK_BASELINE` 时，ref 被从底下换掉后 HEAD/index 变陈旧。**对账步骤由脚本自己提供，调用方不得各自发明**
+     （inner 曾发明 `git reset --hard HEAD`，2026-08-08 08:08:24 销毁了 manager 未提交编辑，真实数据丢失一次）：
+     ref 移动前先断言 `git status --porcelain` 为空，非空即失败退出并报出属主（不静默毁数据）；合后
+     `git reset --mixed <新 tip>` 刷新 index，**绝不用 --hard**（`--mixed` 默认即刷新 index 不碰工作区；
+     `--hard` 额外覆盖工作区 = 唯一有害那件，对账不需要它）。**Land 锁边界**：锁防交错不防销毁——
+     「拿到锁≠能动工作区」；共享主检出对账不得覆盖共存会话的未提交内容。
    suiteGreen 为 false（red/aborted/缺 state）⇒ **不跑批量合**——红窗期 `$MERGE_TARGET` 照常接收任务合并，
    只是 `$FORK_BASELINE` 不推进（结构性消除「红窗必须停派发」；`$FORK_BASELINE` 永不从未验证树推进）。
    **`--dry-run` 先跑**核对 pre-check 与 pending 面，再实跑。

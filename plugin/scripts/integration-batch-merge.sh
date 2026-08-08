@@ -22,6 +22,15 @@
 #     develop) are auto-resolved develop-authoritative; any REAL code conflict FAILS CLOSED (needs a
 #     human, nothing moved, conflict file list reported) — never blind --ours/--theirs on code.
 #     Fast-forward when possible (no gratuitous merge commits).
+#   --reconcile — after a successful batch merge (ff or real), reconcile the PRIMARY checkout (the
+#     checkout the outer loop lives in; the advanced <develop> branch may be checked out there). The
+#     ref-level update-ref moves <develop> UNDER the checkout, leaving its HEAD/index STALE (git status
+#     shows the old-vs-new tree as staged changes). The reconcile is provided HERE so callers don't
+#     invent it: (1) BEFORE any ref moves, a porcelain-empty guard on the primary checkout FAILS CLOSED
+#     if there is uncommitted/untracked work — a caller-invented `git reset --hard HEAD` destroyed an
+#     uncommitted manager edit on 2026-08-08 08:08:24 (real data loss); (2) after the merge, the index
+#     is refreshed with `git reset --mixed <new develop tip>` — index ONLY, never --hard, working tree
+#     untouched.
 #
 # Contract (task body):
 #   measure   integration_ff_merges = `git merge-base --is-ancestor <integration> <develop>` exit code
@@ -61,6 +70,9 @@
 #                 The merge is the primary outcome; a push failure (non-fast-forward = a real
 #                 cross-machine divergence) is REPORTED and does not roll the ref back — the
 #                 every-tick heartbeat retries it.
+#   --reconcile  after a successful batch merge, reconcile the primary checkout's stale index: run a
+#                porcelain-empty guard first (fail-closed on uncommitted/untracked work, owners
+#                reported), then `git reset --mixed <new develop tip>` — index only, never --hard.
 #
 # Exit codes:
 #   0  merge performed (ff or real) OR nothing pending (integration already absorbed into develop);
@@ -77,6 +89,7 @@ integration_ref="integration"
 dry_run=0
 sync=0
 merge_mode=0
+reconcile=0
 # Global for the real-merge temp worktree path (must outlive real_merge() so the EXIT trap can
 # clean it up even under `set -u`).
 tmp_wt=""
@@ -85,7 +98,7 @@ tmp_wt=""
 shared_patterns=('*tick-log.md' 'tasks/*.md' '*queue-state*')
 
 usage() {
-  sed -n '2,70p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2
+  sed -n '2,82p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2
   exit 2
 }
 
@@ -98,6 +111,7 @@ while [ "$#" -gt 0 ]; do
     --merge) merge_mode=1; shift ;;
     --shared-file) shared_patterns+=("$2"); shift 2 ;;
     --sync) sync=1; shift ;;
+    --reconcile) reconcile=1; shift ;;
     *) usage ;;
   esac
 done
@@ -213,6 +227,74 @@ do_sync() {
   return 0
 }
 
+# ── --reconcile: primary-checkout guard + index refresh (gap-batch-merge-reconcile-destroys- ────────
+# ── uncommitted-work) ────────────────────────────────────────────────────────────────────────────────
+#
+# The batch merge is REF-LEVEL (`git update-ref` with a CAS on the develop tip) and never touches the
+# primary checkout's working tree. But when the primary checkout has <develop> checked out, moving the
+# ref UNDER it leaves HEAD/index STALE: git status then shows the old-vs-new tree as staged changes.
+# Callers historically invented a reconcile — the inner used `git reset --hard HEAD`, which OVERWROTE
+# the working tree and DESTROYED an uncommitted manager edit (2026-08-08 08:08:24, real data loss).
+# This script now provides the reconcile itself so callers don't invent it:
+#
+#   reconcile_guard()   porcelain-empty guard — runs BEFORE any ref moves. After the ref moves the
+#                       stale index ITSELF shows up as porcelain entries, so it can no longer be told
+#                       apart from real uncommitted work; the guard must therefore run while the index
+#                       still matches the old HEAD. Non-empty porcelain ⇒ FAIL CLOSED (nothing moved,
+#                       owners reported). No-op when the primary checkout is not on the advanced branch.
+#   reconcile_index()   post-merge `git reset --mixed <new develop tip>` — refreshes the index to the
+#                       new tip WITHOUT touching working-tree files. NEVER --hard (the one harmful
+#                       extra action). Land lock serializes mutation ORDER; it does not prevent
+#                       destruction — "I hold the lock" ≠ "safe to clobber the working tree".
+
+# Is the primary checkout on the branch this run will advance (develop_ref)? Only then does a ref-level
+# merge leave its HEAD/index stale and does the reconcile apply.
+reconcile_applies() {
+  local branch
+  branch="$(git -C "${repo_root}" branch --show-current 2>/dev/null || true)"
+  [ "${branch}" = "${develop_ref}" ]
+}
+
+# Fail-closed porcelain guard (run BEFORE the ref moves). Returns 1 on uncommitted/untracked work.
+reconcile_guard() {
+  local branch porcelain
+  if ! reconcile_applies; then
+    branch="$(git -C "${repo_root}" branch --show-current 2>/dev/null || echo "<detached>")"
+    echo "integration-batch-merge: reconcile: primary checkout on '${branch}' (not '${develop_ref}') — index refresh not needed"
+    return 0
+  fi
+  porcelain="$(git -C "${repo_root}" status --porcelain 2>/dev/null || true)"
+  if [ -n "${porcelain}" ]; then
+    echo "integration-batch-merge: reconcile FAIL-CLOSED — primary checkout has uncommitted/untracked changes; NOT moving any ref" >&2
+    echo "integration-batch-merge:   primary checkout: ${repo_root}" >&2
+    echo "integration-batch-merge:   branch: ${develop_ref}" >&2
+    echo "integration-batch-merge:   porcelain (resolve these file owners before re-running --reconcile):" >&2
+    printf '%s\n' "${porcelain}" | sed 's/^/integration-batch-merge:     /' >&2
+    return 1
+  fi
+  echo "integration-batch-merge: reconcile: primary checkout clean (porcelain empty) — safe to proceed"
+  return 0
+}
+
+# Post-merge index refresh: `git reset --mixed <new_tip>` — index only, never --hard.
+reconcile_index() {
+  local new_tip="$1" branch rc
+  if ! reconcile_applies; then
+    branch="$(git -C "${repo_root}" branch --show-current 2>/dev/null || echo "<detached>")"
+    echo "integration-batch-merge: reconcile: primary checkout on '${branch}' (not '${develop_ref}') — index refresh not needed"
+    return 0
+  fi
+  echo "integration-batch-merge: reconcile: git reset --mixed ${new_tip} (refresh index only; NEVER --hard; working-tree files untouched)"
+  git -C "${repo_root}" reset --mixed "${new_tip}" >/dev/null 2>&1
+  rc=$?
+  if [ "${rc}" -ne 0 ]; then
+    echo "integration-batch-merge: reconcile: git reset --mixed FAILED (exit ${rc}); index NOT refreshed — needs human" >&2
+    return 1
+  fi
+  echo "integration-batch-merge: reconcile: index refreshed to develop tip ${new_tip}; working-tree files untouched"
+  return 0
+}
+
 # Real merge of `integration` into `develop` (merge commit) in a throwaway temp worktree, then advance
 # develop with a CAS on the old tip. Shared-file conflicts auto-resolve develop-authoritative; a real
 # code conflict fails closed (nothing moved). Returns 0 on success, 1 on fail-closed.
@@ -298,6 +380,9 @@ real_merge() {
     echo "integration-batch-merge: OK — develop real-merged to integration (merge commit ${merge_commit})"
     echo "integration-batch-merge: measure integration_ff_merges=0"
     do_sync
+    if [ "${reconcile}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
+      reconcile_index "${merge_commit}" || return 1
+    fi
     return 0
   else
     echo "integration-batch-merge: post-measure FAILED — integration not ancestor of develop after real merge; needs human" >&2
@@ -316,6 +401,23 @@ if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}
   echo "integration-batch-merge: OK — integration is already an ancestor of develop (nothing pending)"
   echo "integration-batch-merge: measure integration_ff_merges=0"
   exit 0
+fi
+
+# ── --reconcile: porcelain-empty guard BEFORE any ref moves ──────────────────────────────────────────
+# The guard must run while the index still matches the old HEAD — after the ref moves, the stale index
+# shows up as porcelain entries and can no longer be told apart from real uncommitted work.
+if [ "${reconcile}" -eq 1 ]; then
+  if [ "${dry_run}" -eq 1 ]; then
+    if reconcile_applies; then
+      porcelain="$(git -C "${repo_root}" status --porcelain 2>/dev/null || true)"
+      echo "integration-batch-merge: DRY-RUN --reconcile: primary checkout (on ${develop_ref}) porcelain would-be-empty: $([ -z "${porcelain}" ] && echo yes || echo NO)"
+      [ -z "${porcelain}" ] && echo "integration-batch-merge: DRY-RUN --reconcile: guard would PASS; post-merge reconcile = git reset --mixed <new develop tip> (index only)"
+    else
+      echo "integration-batch-merge: DRY-RUN --reconcile: primary checkout not on ${develop_ref} — reconcile not needed"
+    fi
+  else
+    reconcile_guard || exit 1
+  fi
 fi
 
 # PRE-state: is develop an ancestor of integration (integration a descendant ⇒ fast-forward)?
@@ -366,6 +468,9 @@ if [ "${ff_possible}" -eq 1 ]; then
     echo "integration-batch-merge: measure integration_ff_merges=0"
     echo "integration-batch-merge: develop=${integration_tip}"
     do_sync
+    if [ "${reconcile}" -eq 1 ] && [ "${dry_run}" -eq 0 ]; then
+      reconcile_index "${integration_tip}" || exit 1
+    fi
   else
     echo "integration-batch-merge: post-measure FAILED — integration not ancestor of develop after ff; needs human" >&2
     exit 1
