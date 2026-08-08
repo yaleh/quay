@@ -111,14 +111,23 @@ per-target 收件箱）→ ② 建消费侧（轮询 + 推送）→ ③ 才收�
 原因是这个。佐证：inbox-reader.sh 注释「without it the inbox degenerates back to "3 messages on
 disk, nobody reads"」——**它防住了「有人写没人读」，没防住「有人读没人能写」。**
 
-### 修法方向（设计归外层+内层，产品代码）——两半
+### 修法方向（**已被 SPEC 取代**——设计归 manager 已定稿的 SPEC，实现归外层）
 
-缺陷成立，但根因是两半，修法不同：
-1. **前半：transport 注册**——`installDefaultTransports` 里 outer 那行从 `createSessionTransport()`
-   改为文件收件箱（如 `.quay/outer-inbox/`，复用 `createFileInboxTransport`）。这样 manager 向
-   outer 投递走文件（异步、带 from），不依赖 outer 会话状态。
-2. **后半：写侧入口**——只补 transport 注册三方仍发不了。需加一个发送入口（CLI 子命令或 shell
-   脚本）让 agent（bash 驱动）能调用 deliver()。**这是 bus 能用的前提——写侧零入口是根因的另一半。**
+**2026-08-08 09:1x：manager 落 SPEC `orchestration/SPEC-inbox-service-2026-08-08.md`（eacc557c）**，
+「draft，待 outer 实现」。**本任务的修法方向以该 SPEC 为准，下面旧的两半方向保留为根因记录、不再
+是修法**：
+- SPEC **D6**：承载形态 = **每项目一个后台服务**（不是文件目录）——原「文件收件箱」方案被否决。
+- SPEC **D4**：**不做 resolved 层**——收件箱是通信信道不是工作流引擎。两层：delivered（进队列）/
+  consumed（inbox_read 调过）；「对方受理没有」归 manager 巡检 + 不对称原则（证明失职的证据不能由
+  该方提供），不归本信道。
+- SPEC **D7**：消息注入端点**不得复用 web UI listener**（独立端口 + 每会话 token）。
+- SPEC 架构：寻址 = `<project>:<role>` 逻辑名，身份 = `CLAUDE_CODE_SESSION_ID` → 注册表（token）。
+  三面：`inbox_send`/`inbox_read` 走 MCP（身份），`quay inbox watch` 走 CLI（进程）。
+  **CLI 不提供 send**（bash 能设任何环境变量 ⇒ 身份退回自述）。
+- SPEC **D8** 顺序：① 写侧 → ② 消费侧 → ③ 才收紧 tmux（AC-8 生效）。
+- 旧 `.quay/manager-inbox/` 分四类处理（SPEC §7）：6 archguard 删；读侧重指向；catalog 改描述；
+  历史保留。
+- 实施顺序见 SPEC §10；**待 SPEC 定稿**（P1 端口分配 / P2 token 形态 2 条待人拍板）后才开工。
 
 ## Contract
 
@@ -144,13 +153,15 @@ resume 若中断，先跑 measure 确认 outer 当前注册形态，不要假设
 - [ ] AC5: 文档同步——manager-loop-tick / fast-mode-loop-tick 的投递通道说明从「escalations.md
       降级备份」更正为「总线优先，escalations.md 降级」
 - [ ] AC6: **实现前阻塞（2026-08-08 人裁定）**——本任务**不 promote、不派发，等 manager 的 SPEC
-      定稿**（SPEC 定义要什么 + 判据 + 分层，不写实现）；实现必须对齐人已确认的五点：ACK 判据在
-      task_list/task_get 上（非 git log）、三层语义 delivered/consumed/resolved 接口分开、
-      from 由 MCP server 盖章、quay inbox watch 走轮询输出 stdout、旧 .quay/manager-inbox/ 四类废弃
+      定稿**（`orchestration/SPEC-inbox-service-2026-08-08.md`，eacc557c 已落；P1 端口分配 / P2 token
+      形态 2 条待人拍板后才定稿）。实现以 SPEC 为准：D4 **不做 resolved 层**（两层 delivered/consumed，
+      「受理没有」归 manager 巡检 + 不对称原则）、D6 每项目后台服务（非文件目录）、D7 独立监听面、
+      `from` 由 MCP server 按 token 盖章（CLI 不提供 send）、`quay inbox watch` 走进程输出 stdout、
+      旧 `.quay/manager-inbox/` 按 §7 四类处理
 
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴任务体（注册前后对照 + 总线投递带 from + 回归 + SPEC 对齐）
+- [ ] AC1-AC6 实跑输出贴任务体（写侧+消费侧按 SPEC §10 顺序落地 + 身份闸门 + 监听面分离 + 回归 + SPEC 对齐）
 
 ## Touches
 - packages/quay/src/message-bus.ts（installDefaultTransports：outer 注册为文件收件箱）
