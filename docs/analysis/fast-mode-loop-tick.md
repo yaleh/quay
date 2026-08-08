@@ -505,6 +505,10 @@ inner 只写 `--task-start`。**`--task-end`（关遥测括号）由外层异步
 （`orchestration/outer-phase-goal.md` 的旧 AC-queue）——角色自觉，换会话/模型就丢。**现在是 tick 调用的
 子机制**（`gap-promotion-cadence-is-role-volition-not-product-mechanism`），任何未来冷启动本项目的会话
 都会继承它。**顺序由脚本承载，不是散文。**
+**tick 心跳必跑：每 tick（含轻触）无条件跑 `ready-pool-check.ts --apply`**
+（`gap-ready-pool-promotion-same-class-as-slot-refill`——本步曾写成「强制步骤」但执行依赖内层自觉，与
+`gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat` 同一个「tick 心跳无机械保证」根因的
+**第二个实例**；修法 = 同一保证形态：补晋落盘不依赖任何完成事件/自觉。）
 
 **前置：先算自适应并发上限（`gap-adaptive-concurrency-cap-tied-to-resource-gate`）——派发决策点的资源读取，
 每 tick 只算一次，本步（floor）与步骤 4（派发上限）共用。** cap 不再是固定 3，而是
@@ -524,7 +528,12 @@ effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^e
 ```
 
 ```bash
-node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"
+# tick 心跳必跑（gap-ready-pool-promotion-same-class-as-slot-refill——与 slot-refill 同一根因的第二个
+# 实例：强制步骤+执行靠自觉，修法=同一保证形态「心跳必跑」）：`--apply` 心跳模式——pool < floor 且
+# promotions 非空 ⇒ 补晋机械落盘（status: todo → ready），不靠自觉；pool ≥ floor 或 promotions 空 ⇒
+# 零写入（负控制 AC3，不空转）。stdout 的 applied_promotions 列出本次落盘的候选；pool / dispatchable_disjoint
+# 字段仍同既有（Contract measure 读取形态不变）。
+node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}" --apply
 ```
 
 - stdout 是 JSON。**`pool` 字段 = 真实就绪池**：`status: ready` 且排除三类
@@ -538,9 +547,9 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
   `dispatchable_disjoint` 是结果。
 - **`pool < floor` ⇒ 按 `promotions` 数组补晋**（数组顺序就是定义好的顺序：**触摸不相交排最前**——
   与池内已有候选 + 在飞任务两两 `checkTouchesPair` 不相交者优先；`gap-*` 缺陷 > `DIR-*` 新能力作次
-  tiebreak；同类里 touches resolve 的排前）。对每个候选：**缺四件套的先补齐**（`missingArtifacts`
-  字段点名缺哪个），再 `status: todo → ready`。`touchesResolve: false` 的候选**不派发、不补晋**
-  （解析不了的候选踢出，大池只白晋级不污染——ADR-022 教训）。
+  tiebreak；同类里 touches resolve 的排前）。**落盘由上面命令的 `--apply` 心跳模式机械完成**——候选
+  仅含四件套齐全者（`missingArtifacts` 非空的不在 `promotions` 里，不落盘）；`touchesResolve: false` 的
+  候选**不派发、不补晋**（解析不了的候选踢出，大池只白晋级不污染——ADR-022 教训）。
 - 补晋落盘后，步骤 4 就用这份就绪池派发——不再重复判定 promotion 顺序，只需做步骤 4 自己的并发资格
   （`checkTouchesPair`）与触摸可解析性复核。
 - **成本不对称（AC6，偏向过量）**：过量晋级 = 前移非浪费（池更深，下个 tick 直接派）；欠量 = 空槽纯浪费

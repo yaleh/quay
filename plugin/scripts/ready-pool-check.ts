@@ -77,7 +77,21 @@
 //   node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>]
 //       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>]
 //       [--targeted <id>] [--develop <ref>] [--integration <ref>] [--master <ref>]
-//       [--landing-staleness-ms <n>] [--landing-behind-threshold <n>] [--json]
+//       [--landing-staleness-ms <n>] [--landing-behind-threshold <n>] [--apply] [--json]
+//   --apply              HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill): the
+//                        tick heartbeat (fast-mode-loop-tick.md step 3.6) runs ready-pool-check
+//                        unconditionally each tick. The detector/recommender above answers "which
+//                        todo→ready promotions would reach the floor" but the ACTUAL status write
+//                        used to depend on the inner's volition (manually running `quay promote`
+//                        per candidate) — a forced doc step with no mechanical guarantee, the SAME
+//                        root cause as gap-slot-refill-only-triggered-on-completion-not-tick-
+//                        heartbeat (slot-refill only answered, nobody asked). `--apply` closes the
+//                        loop: pool < floor AND promotions non-empty ⇒ the recommended promotions
+//                        LAND ON DISK (frontmatter `status: todo → ready` in tasks/<id>.md),
+//                        no volition (AC1); pool ≥ floor OR promotions empty ⇒ ZERO writes
+//                        (AC3 negative control — no busy-work). Output is the analyzeTasks JSON
+//                        plus `should_apply` and `applied_promotions`. Default (no `--apply`) is
+//                        UNCHANGED: a pure detector/recommender that never writes tasks/**.
 //   --cap / --floor-mult   override the derived floor (default cap=3, floor-mult=4 ⇒ floor 12)
 //   --in-flight            task ids of currently in-flight subagents (ranked against for disjointness)
 //   --top <n>              VALUE-PRIORITIZATION QUERY (gap-value-prioritization-has-no-mechanism):
@@ -844,8 +858,56 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   };
 }
 
+// ── HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill) ────────────────────────────
+// The tick doc's step 3.6 ("就绪池 < floor ⇒ 本 tick 补晋") was a FORCED prose step whose actual
+// execution depended on the inner's volition — the same root cause as slot-refill-only-triggered-on-
+// completion-not-tick-heartbeat (a detector that answers, with nothing mechanical guaranteed to ask
+// it). `--apply` closes the loop: when pool < floor AND promotions non-empty, the recommended
+// promotions land on disk (status todo → ready) as a side effect of the unconditional tick-heartbeat
+// invocation — no volition (AC1). The negative control (AC3) is structural: `promotions` is only
+// computed when deficit > 0, so pool ≥ floor OR an empty promotions array ⇒ zero writes.
+
+/** Patch ONE task file's frontmatter `status` line. Only rewrites when the current status is `todo`
+ *  (a concurrently-flipped task is left alone — no clobbering a `ready`/`done` written by another
+ *  writer). Returns { id, ok, from, to, reason }.
+ *  @param {string} root  repo root (tasks/<id>.md lives here)
+ *  @param {string} id    task id
+ *  @param {string} newStatus  target status (ready)
+ */
+export function setTaskStatus(root, id, newStatus) {
+  const file = path.join(root, "tasks", `${id}.md`);
+  if (!fs.existsSync(file)) return { id, ok: false, reason: "missing" };
+  const raw = fs.readFileSync(file, "utf8");
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(raw);
+  if (!m) return { id, ok: false, reason: "no-frontmatter" };
+  const [, open, fm, close] = m;
+  const statusLine = /^status:\s*todo\s*$/m.exec(fm);
+  if (!statusLine) return { id, ok: false, reason: "not-todo" };
+  const newFm = fm.replace(/^status:\s*todo\s*$/m, `status: ${newStatus}`);
+  fs.writeFileSync(file, `${open}${newFm}${close}${raw.slice(m[0].length)}`);
+  return { id, ok: true, from: "todo", to: newStatus };
+}
+
+/** HEARTBEAT MODE entry: run the same analysis as `analyzeTasks` (all options pass through) and —
+ *  when pool < floor AND promotions non-empty — land the recommended promotions on disk. Returns the
+ *  full analyzeTasks result plus `should_apply` (the AC1 condition) and `applied_promotions` (the
+ *  per-candidate setTaskStatus outcome). Purely additive: the default (non-`--apply`) output is
+ *  byte-unchanged for existing consumers. */
+export function applyPromotions(opts) {
+  const result = analyzeTasks(opts);
+  const shouldApply = result.deficit > 0 && result.promotions.length > 0;
+  const applied = [];
+  if (shouldApply) {
+    for (const p of result.promotions) {
+      applied.push(setTaskStatus(opts.root, p.id, "ready"));
+    }
+  }
+  return { ...result, should_apply: shouldApply, applied_promotions: applied };
+}
+
 function main(argv) {
   let root = null;
+  let apply = false;
   let cap = CONCURRENCY_CAP_DEFAULT;
   let floorMult = POOL_FLOOR_MULT_DEFAULT;
   let inFlightIds = [];
@@ -861,6 +923,7 @@ function main(argv) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
     else if (args[i] === "--json") { /* output is always JSON — accepted for Contract parity */ }
+    else if (args[i] === "--apply") { apply = true; } // heartbeat mode: land the promotions on disk
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--top") topN = Number(args[++i]); // value-prioritization query: top-N todos by relevance
@@ -889,7 +952,11 @@ function main(argv) {
   const inFlight = readTasks(inFlightIds);
   const closedButLive = readTasks(closedButLiveIds);
   const t0 = Date.now();
-  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold });
+  const base = { tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold };
+  // HEARTBEAT MODE (gap-ready-pool-promotion-same-class-as-slot-refill): with `--apply`, pool < floor
+  // && promotions non-empty ⇒ the recommended promotions are written to disk (status todo → ready) as
+  // a side effect of the unconditional tick-heartbeat run. Without it, this stays a pure detector.
+  const result = apply ? applyPromotions(base) : analyzeTasks(base);
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }
