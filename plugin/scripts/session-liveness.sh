@@ -256,12 +256,19 @@ IDLE_DEBOUNCE_ROUNDS=${IDLE_DEBOUNCE_ROUNDS:-2}
 # 默认 45 万是对 fleet 实测的标定：外层 62.5 万仍在应答=未饱和、内层 31 万=未饱和、48.3 万且未应答输入=
 # 饱和（正控制）。SATURATION_TOKENS 可在环境变量/配置文件里按机型调（跨机可用，AC5）。
 SATURATION_TOKENS=${SATURATION_TOKENS:-450000}
+# 候选 B（gap-permission-prompt-vs-dismissable-prompt-classifier AC4，2026-08-08）：
+# permission-prompt 持续 ≥PERM_PROMPT_WARN_ROUNDS 轮且 transcript 最近 PERM_PROMPT_TX_WINDOW 秒未写入
+# ⇒ 报一次 WARN（不无限静默）。兜底判据：分类器候选 A 只排除已知可忽略提示（问卷带 (optional)/Dismiss）；
+# 若出现新的可忽略提示变体漏网，假的 permission-prompt 会永久钉住 busy=1 ⇒ SESSION-IDLE 永不触发
+# （D5 同族沉默）。WARN 只去观察者自己的 stderr，绝不改动忙闲判据（真权限框保持忙）。
+PERM_PROMPT_WARN_ROUNDS=${PERM_PROMPT_WARN_ROUNDS:-3}   # 连续几轮 permission-prompt 才 WARN
+PERM_PROMPT_TX_WINDOW=${PERM_PROMPT_TX_WINDOW:-60}       # transcript 最近写入窗口（秒）；窗口内有写=会话确实在动
 # 文案常数（LOOP_MIN 含义拆分，2026-08-03）：OVERDUE 消息里的「预期周期」是固定描述，不是运行时
 # 阈值——LOOP_MIN 可以被设成 0（管理者配置），而「预期周期 0 分钟」是文案 bug。两个含义拆开。
 EXPECTED_CYCLE_MIN=20
 declare -A PREV_ALIVE PREV_STALL PREV_OVERDUE PREV_STATE PREV_IDLE PREV_HALTED UNHALT_TS \
   PREV_BUSY_SEM PREV_API_BLOCKED PREV_MARKER_STALE PREV_PANE_EMPTY IDLE_CONSEC SEEN_BUSY \
-  PREV_SATURATED IDLE_REPORTED ROUNDS
+  PREV_SATURATED IDLE_REPORTED ROUNDS PERM_CONSEC PREV_PERM_WARNED
 
 # ── classifyPaneState 消费者（ADR-016 Amendment 2026-08-04 / 裁定 D）───────────────────────────
 # 忙闲判据读 pane 的【底部区域形状】（纯函数 pane-state-classify.ts），不是整屏哈希。SL_CLASSIFY /
@@ -349,6 +356,27 @@ _sl_pane_verdict() {
     *) _sl_pane_busy=0 ;;   # waiting-input / unknown → 闲；unknown 的歧义由 transcript 融合兜底
   esac
   [ -z "$_sl_pane_region" ] && _sl_pane_busy=1
+}
+
+# _sl_perm_prompt_warn_verdict —— 候选 B 的【纯判据】（gap-permission-prompt-vs-dismissable-prompt-
+# classifier AC4）：permission-prompt 持续 N 轮且 transcript 未写入 ⇒ 报 WARN（不无限静默）。
+# 入参：$1 = 连续 permission-prompt 轮数（≥1）；$2 = transcript 最近写入距今秒数；-1 = 无 transcript。
+# 输出：warn（N ≥ PERM_PROMPT_WARN_ROUNDS 且 transcript 陈旧/不可用）| ok（否则）。
+#   交叉正控制：transcript 最近写入 ≤ PERM_PROMPT_TX_WINDOW ⇒ 会话确定在动，不 WARN（真忙）。
+#   无 transcript 配置 ⇒ 交叉控制无从确认，不 WARN（pane-only 观察者已有 D5 pane-only 审计 WARN）。
+_sl_perm_prompt_warn_verdict() {
+  local rounds=$1 tx_age=$2
+  if [ "$rounds" -ge "${PERM_PROMPT_WARN_ROUNDS:-3}" ] 2>/dev/null; then
+    if [ "$tx_age" -lt 0 ]; then
+      echo "ok"   # 无 transcript 可交叉核对——不报（条件未确认，绝不因「无法确认」而报）
+    elif [ "$tx_age" -gt "${PERM_PROMPT_TX_WINDOW:-60}" ]; then
+      echo "warn"
+    else
+      echo "ok"   # transcript 刚写过——会话确实在动，不是卡死的假 permission-prompt
+    fi
+  else
+    echo "ok"
+  fi
 }
 
 # transcript_api_error_count —— 最近 API_ERROR_WINDOW 条记录里「结构性」isApiErrorMessage 字段
@@ -704,6 +732,11 @@ case "${1:-}" in
     _sl_pane_verdict "$(cat)"
     echo "state=$_sl_pane_state busy=$_sl_pane_busy"
     exit 0 ;;
+  --perm-warn-verdict)
+    # 候选 B 纯判据接缝（gap-permission-prompt-vs-dismissable-prompt-classifier AC4 单测直接调用）：
+    # 打印 _sl_perm_prompt_warn_verdict 的输出（warn|ok）。入参 <连续轮数> <transcript 陈旧秒数|-1>。
+    [ $# -ge 3 ] || { echo "用法: $0 --perm-warn-verdict <rounds> <tx_age_secs|-1>" >&2; exit 2; }
+    _sl_perm_prompt_warn_verdict "$2" "$3"; exit 0 ;;
   --api-errors)
     [ -n "${2:-}" ] || { echo "用法: $0 --api-errors <transcript>" >&2; exit 2; }
     transcript_api_error_count "$2"; exit 0 ;;
@@ -714,7 +747,7 @@ case "${1:-}" in
   --last-message-type)
     [ -n "${2:-}" ] || { echo "用法: $0 --last-message-type <transcript>" >&2; exit 2; }
     transcript_last_message_type "$2"; exit 0 ;;
-  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>]"; exit 0 ;;
+  -h|--help) echo "用法: $0 [--once] [--selfcheck [--json]] [--states] [--saturation <t>] [--mask] [--pane-state] [--api-errors <t>] [--last-input <t>] [--last-message-type <t>] [--perm-warn-verdict <rounds> <tx_age>]"; exit 0 ;;
 esac
 
 # ── 本项目根：自定位（同 inner-state.sh）。SESSION_ROOT 是测试接缝，生产不设。 ──────────────
@@ -1230,6 +1263,30 @@ while true; do
       PREV_STATE[$name]=$pane_state
       PREV_BUSY_SEM[$name]=$busy_sem
 
+      # 候选 B（gap-permission-prompt-vs-dismissable-prompt-classifier AC4）：permission-prompt 持续
+      # ≥PERM_PROMPT_WARN_ROUNDS 轮且 transcript 最近 PERM_PROMPT_TX_WINDOW 秒未写入 ⇒ 报一次 WARN
+      # （不无限静默）。兜底：分类器候选 A 只排除已知可忽略提示（问卷带 (optional)/Dismiss）；新变体
+      # 漏网时，假的 permission-prompt 永久钉住 busy ⇒ SESSION-IDLE 永不触发（D5 同族沉默）。WARN 只去
+      # stderr、每段一次（PREV_PERM_WARNED 边沿），绝不改动忙闲判据（真权限框保持忙）。
+      if [ "$pane_state" = "permission-prompt" ]; then
+        PERM_CONSEC[$name]=$(( ${PERM_CONSEC[$name]:-0} + 1 ))
+      else
+        PERM_CONSEC[$name]=0
+        PREV_PERM_WARNED[$name]=0
+      fi
+      if [ "${PERM_CONSEC[$name]:-0}" -ge "$PERM_PROMPT_WARN_ROUNDS" ] \
+         && [ "${PREV_PERM_WARNED[$name]:-0}" = "0" ]; then
+        perm_tx_age=-1
+        if [ -n "$tr_path" ] && [ -e "$tr_path" ]; then
+          perm_hmt=$(heartbeat_mtime "$tr_path")
+          [ "$perm_hmt" != "0" ] && perm_tx_age=$(( $(date +%s) - perm_hmt ))
+        fi
+        if [ "$(_sl_perm_prompt_warn_verdict "${PERM_CONSEC[$name]}" "$perm_tx_age")" = "warn" ]; then
+          echo "session-liveness: WARN $name 的 pane 连续 ${PERM_CONSEC[$name]} 轮 permission-prompt 且 transcript 最近 ${perm_tx_age}s 未写入（窗口 ${PERM_PROMPT_TX_WINDOW}s）——可能是可忽略提示（问卷）被误判，SESSION-IDLE 被阻断；若属实应改判非忙（AC4 兜底，不无限静默）" >&2
+          PREV_PERM_WARNED[$name]=1
+        fi
+      fi
+
       # 事件 6：SESSION-SATURATED（阶段四，gap-session-liveness-cannot-see-context-saturation-...）——
       # 上下文饱和度。复合判据（结构化源，非屏幕百分比，AC3）：最近 assistant 消息的
       # usage.cache_read_input_tokens（缓存前缀 = 上下文用量）≥ SATURATION_TOKENS 且最后一条消息是
@@ -1255,6 +1312,7 @@ while true; do
       PREV_PANE_EMPTY[$name]=0
       IDLE_CONSEC[$name]=0; SEEN_BUSY[$name]=0; PREV_SATURATED[$name]=0
       IDLE_REPORTED[$name]=0; ROUNDS[$name]=0
+      PERM_CONSEC[$name]=0; PREV_PERM_WARNED[$name]=0
     fi
 
     # 事件 4：心跳逾期——会话活着、项目未暂停，但心跳源超过 OVERDUE_MIN 未被更新。
