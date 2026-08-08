@@ -70,6 +70,20 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     involved; and **browser/agent-driven e2e** — a milestone-cadence, MCP-tool-driven manual/agent
     process (Playwright/chrome-devtools), `status: proposed` in `adr/ADR-010-scheduled-milestone-
     e2e-incl-browser-tests.md`. A green `scripts/test.sh` run is evidence for neither category.
+  - **Cross-cut scoped selection (gap-scoped-selection-blind-to-packaging-state-diff):** scoped
+    selection (`scripts/test.sh --for-task <id>`) is blind to packaging-vs-source diffs — a task
+    touching `packages/*/src` resolves its own unit tests but NOT the packaging-state tests
+    (`npm-pack-e2e`/`build-dist`/`plugin-packaging`), the ADR-conformance check (`check-adr`), or a
+    lint check, so a src-touching task can be scoped-green and still break the packaged artifact
+    (archguard TASK-62/64/65/66 — the same three-project, three-check pattern). The selector
+    (`plugin/scripts/select-tests-for-touches.ts`) carries a **cross-cut marker** (AC2): cross-cut
+    checkers enter the `--for-task` selection whenever a touch triggers the registry, regardless of
+    basename pairing; the author SKILL.md task template defaults new-code ACs to a cross-cut checklist
+    (lint-clean + check-adr 0 violations + packaging-state by task type — AC1/AC5). Pure plugin/doc
+    tasks get no cross-cut tests (AC6 — scoped stays sub-second). The cross-cut packaging tests are a
+    **proxy**, not the floor proof — the real Node-floor artifact still needs the `dist-verify-node-floor`
+    CI job above (DIR-111). Cross-annotated with adaptive concurrency (`cap-from-gate.sh` +
+    `concurrent-batch-scheduler.ts`, same mechanism-once-reused-downstream principle).
   - **Test-framework policy (gap-no-test-framework-policy-for-new-tests, AC1):** NEW test files
     MUST use `node:test` (`import { test } from "node:test"`). Enforced mechanically by
     `plugin/scripts/test-framework-policy-check.ts` (wired into `scripts/test.sh` via
