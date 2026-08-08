@@ -740,6 +740,58 @@ test("AC9 — a known-continuous-work window reports SESSION-RESUMED at most ONC
   }
 });
 
+test("AC-boundary (true root cause, outer 2c1d0c7c) — pane-only + default heartbeat (tick-log) is refreshed by upper-layer ticks, so the LOOP_MIN gate silently swallows SESSION-IDLE; LOOP_MIN=0 (or an explicit heartbeat source) breaks the silence", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  // Confirmed mechanism (2026-08-08, outer 2c1d0c7c): a pane-only target (no SESSION_HEARTBEATS /
+  // SESSION_TRANSCRIPTS) falls back to the DEFAULT heartbeat <root>/orchestration/tick-log.md.
+  // tick-log is appended by every outer/inner tick → its mtime is perpetually fresh → hmin≈0-2min
+  // < LOOP_MIN → the IDLE noise gate silently suppresses SESSION-IDLE even for a genuinely idle
+  // pane. Measured: pane-only + LOOP_MIN=1 → IDLE_CONSEC monotonic but SESSION-IDLE silent;
+  // LOOP_MIN=0 → SESSION-IDLE emitted. This test locks the boundary + the startup WARN:
+  //   * the pane-only + default-heartbeat + LOOP_MIN>0 target emits the WARN (fail-loud startup,
+  //     not silent run-time blindness) and keeps SESSION-IDLE silent while the pane is idle;
+  //   * the SAME pane-only target with LOOP_MIN=0 emits SESSION-IDLE (the closure criterion).
+  const p = makeHermeticProbe("ol-bnd2");
+  const root = p.tmp;
+  // Fresh default heartbeat: simulate the upper layer's tick-log being written (perpetually fresh
+  // mtime) — the exact shape that makes hmin < LOOP_MIN on every round.
+  fs.mkdirSync(path.join(root, "orchestration"), { recursive: true });
+  fs.writeFileSync(path.join(root, "orchestration", "tick-log.md"), "# tick\n");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // Pane-only target (no explicit heartbeat/transcript), LOOP_MIN=1 (the gate is ON).
+    const monGated = spawnMonitor(p.env, `gb ${p.tmp} ${p.session}`, { interval: 1, loopMin: 1 });
+    try {
+      // The pane is idle from round 1 (bash prompt → unknown → busy=0). The default heartbeat is
+      // fresh, so hmin≈0 < LOOP_MIN=1 → the noise gate holds SESSION-IDLE silent across rounds.
+      assert.ok(await waitForRounds(monGated, 5, 15000), `gated monitor must run rounds:\n${monGated.output()}`);
+      await sleep(300); // grace for a spurious IDLE to land
+      assert.ok(/session-liveness: WARN 目标「gb」是 pane-only/.test(monGated.output()),
+        `the pane-only + default-heartbeat + LOOP_MIN>0 target must WARN at startup (fail-loud, not silent blindness):\n${monGated.output()}`);
+      assert.ok(!/SESSION-IDLE gb/.test(monGated.output()),
+        `AC-boundary: pane-only + default heartbeat (fresh tick-log) + LOOP_MIN>0 must keep SESSION-IDLE silent (the confirmed masking):\n${monGated.output()}`);
+    } finally {
+      monGated.child.kill("SIGKILL");
+      monGated.cleanup();
+    }
+    // LOOP_MIN=0: the SAME pane-only target now reports SESSION-IDLE (the closure criterion —
+    // IDLE fires under the correct config).
+    const monOpen = spawnMonitor(p.env, `gb ${p.tmp} ${p.session}`, { interval: 1, loopMin: 0 });
+    try {
+      assert.ok(await waitForOutput(monOpen, /SESSION-IDLE gb/, 15000),
+        `AC-boundary control: pane-only + LOOP_MIN=0 MUST report SESSION-IDLE (the closure criterion):\n${monOpen.output()}`);
+      assert.ok(/心跳 \d+ 分钟前更新/.test(monOpen.output()),
+        `the IDLE must carry the heartbeat staleness:\n${monOpen.output()}`);
+      assert.ok(!/session-liveness: WARN/.test(monOpen.output()),
+        `LOOP_MIN=0 must not WARN (the gate is off):\n${monOpen.output()}`);
+    } finally {
+      monOpen.child.kill("SIGKILL");
+      monOpen.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
 test("阶段四 Contract — --states 含 saturated（恰好一次）；--selfcheck --json 输出含 saturated 恰好一次（两个 measure 带）", () => {
   const states = spawnSync("bash", [SCRIPT, "--states"], { encoding: "utf8" });
   assert.equal(states.status, 0, `--states must exit 0:\n${states.stderr}`);
