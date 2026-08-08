@@ -3,16 +3,16 @@ id: gap-cli-quay-init-collides-with-the-canonical-slash-quay-init
 title: "CLI subcommand `quay init` (DIR-098, 07-23, workspace scaffolding — a
   legitimately different operation: create a brand-new empty quay task store)
   collides in name with the skill `/quay:init --all --loop` that is the
-  CANONICAL path for onboarding an existing project onto quay-driven
-  development (human ruling 2026-08-07); `quay init --loop` silently swallows
-  the unrecognized --loop flag and exits 0 reporting success, laying down
-  nothing but .quay/config.yml + tasks/ — reproduced live on B
-  (orangevps.wan.hwang.men/~/work/meta-cc): plugin/scripts=0,
-  orchestration/=0 after a reported-successful run; `quay --help` advertises
-  `quay init` as a first-class top-level command (line 347), so a real
-  third-party user trying to start quay-driven development is more likely to
-  find and run the wrong one first"
-status: ready
+  CANONICAL path for onboarding an existing project onto quay-driven development
+  (human ruling 2026-08-07); `quay init --loop` silently swallows the
+  unrecognized --loop flag and exits 0 reporting success, laying down nothing
+  but .quay/config.yml + tasks/ — reproduced live on B
+  (orangevps.wan.hwang.men/~/work/meta-cc): plugin/scripts=0, orchestration/=0
+  after a reported-successful run; `quay --help` advertises `quay init` as a
+  first-class top-level command (line 347), so a real third-party user trying to
+  start quay-driven development is more likely to find and run the wrong one
+  first"
+status: done
 labels:
   - gap
   - defect
