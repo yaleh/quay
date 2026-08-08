@@ -4,7 +4,7 @@ title: detectTaskOver90m reads telemetry bracket start (never task status) — 3
   false OVER90 tonight (phantom in-flight from crash, worktree 0-commit dead,
   process gone); add task-status gate (ready/done never triggers) + reconcile
   criterion fix (worktree existence ≠ mid-flight)
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -49,12 +49,19 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: `detectTaskOver90m` 对 status=ready 的超时 bracket 不触发（负控制，复现今晚形态）
-- [ ] AC2: status=in-progress（或任务文件缺失）的超时 bracket 仍触发（正控制，真超时不漏）
-- [ ] AC3: 测试覆盖两种形态 + 今晚复发案例（os-anchor 的 ready+超时 bracket）
-- [ ] AC4: 与 `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards` 交叉标注（reconcile 判据缺陷——worktree 存在不等于 mid-flight，应有 mtime/进程佐证）
+- [x] AC1: `detectTaskOver90m` 对 status=ready 的超时 bracket 不触发（负控制，复现今晚形态）
+- [x] AC2: status=in-progress（或任务文件缺失）的超时 bracket 仍触发（正控制，真超时不漏）
+- [x] AC3: 测试覆盖两种形态 + 今晚复发案例（os-anchor 的 ready+超时 bracket）
+- [x] AC4: 与 `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards` 交叉标注（reconcile 判据缺陷——worktree 存在不等于 mid-flight，应有 mtime/进程佐证）
+
+## Definition of Done
+
+- [x] AC1-AC4 全勾（detectTaskOver90m 对 status=ready 超时 bracket 不触发负控制；status=in-progress 仍触发正控制；测试覆盖两形态 + os-anchor 复发案例；与 phantom-in-flight 任务交叉标注）
+- [x] 复现 os-anchor ready+超时 bracket 形态不再报 false over-90m；真超时仍报
+- [x] scoped 门 `scripts/test.sh --for-task gap-over-90m-false-signal-source-reads-telemetry-not-task-status` 绿
 
 ## Touches
+- tasks/gap-over-90m-false-signal-source-reads-telemetry-not-task-status.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/inner-blocked-signal.ts
 - plugin/test/inner-blocked-signal.test.mjs
@@ -68,6 +75,30 @@ band      false_over90 = 0（负控制不误触发后无失败）
 invoke    `node --test plugin/test/inner-blocked-signal.test.mjs`
 control   构造 status=ready + 超 90min bracket ⇒ 不触发（AC1）；status=in-progress ⇒ 触发（AC2）
 resume    判据源改动与测试分两步提交，任一步完成即写盘
+
+## Evidence
+
+**实现（判据源）**：`plugin/scripts/inner-blocked-signal.ts` 新增 `readTaskStatus(root, taskId)`
+（读 `tasks/<id>.md` 的 YAML frontmatter `status` 字段）与 `taskStatusAllowsOver90m(root, taskId)`
+闸：任务文件 status 为 `in-progress` 或文件缺失才允许 over-90m 触发；status 为
+`ready`/`done`/`needs-human` 等非 in-progress 值一律跳过。`detectTaskOver90m` 在 reconcile 过滤后
+叠加该闸（`nowMs - p.startedAtMs > TASK_OVER_90M_MS && taskStatusAllowsOver90m(root, p.taskId)`），
+evidence 文本更新为 `(reconcile-aware + task-status gate)`。
+
+**测试（`plugin/test/inner-blocked-signal.test.mjs`，node:test + `// @test-group governance`）**：
+- AC1 负控制：`status=ready` + 91min 陈旧 bracket ⇒ `--detect-stop` 不写 block（`gap-os-anchor` 今晚形态）
+- AC2 正控制：`status=in-progress` + 91min bracket ⇒ 写 block，`reason: task-over-90m`
+- AC2 正控制（文件缺失）：无 `tasks/<id>.md` + 91min bracket ⇒ 仍写 block（bracket 唯一信号，fail-closed 朝触发）
+- AC3 复发案例并排：`status=ready` 陈旧 bracket 与 `status=in-progress` 真超时同场 ⇒ 只对 in-progress 触发
+  （block `taskId` 为 `gap-real-over`，非 os-anchor）
+
+**实跑**：`node --test plugin/test/inner-blocked-signal.test.mjs` → tests 35 / pass 35 / fail 0 /
+cancelled 0（新增 4 条全绿，原 31 条无回归）。
+
+**交叉标注**：`tasks/gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards.md`
+（AC4——reconcile 判据缺陷：worktree 存在 ≠ mid-flight，应有 mtime/进程佐证；报告侧判据修正留作后续）；
+`tasks/gap-cold-start-ac8c-key4-teaches-superseded-send-keys-hash.md`（AC3——92min-eaten 同型案例）。
+
 ## Dispatch review
 
 reviewer: none

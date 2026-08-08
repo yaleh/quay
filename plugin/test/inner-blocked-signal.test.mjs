@@ -392,6 +392,25 @@ async function writeBackdatedStartEvent(tmp, taskId, msAgo) {
   telemetry.writeEvent(ev, tmp);
 }
 
+/**
+ * Write a task file (`tasks/<id>.md`) with the given `status` into the temp workspace, so
+ * `detectTaskOver90m`'s task-status gate can observe the task's OWN status (the gate reads the
+ * `status` frontmatter field — a telemetry bracket alone is not enough, see
+ * gap-over-90m-false-signal-source-reads-telemetry-not-task-status).
+ * @param {string} tmp
+ * @param {string} taskId
+ * @param {string} status
+ */
+function writeTaskFile(tmp, taskId, status) {
+  const dir = path.join(tmp, "tasks");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${taskId}.md`),
+    `---\nid: ${taskId}\nstatus: ${status}\n---\n**type:** execution\n`,
+    "utf8",
+  );
+}
+
 // ── gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger: the composite
 // "ruling-required" trace (transcript stale + task in-progress + clean working tree) ───────────────
 //
@@ -681,6 +700,76 @@ test("AC1/AC2/AC6 — --detect-stop writes the block for a task-over-90m (real t
     assert.match(rec.question, /90m/, "question must carry the budget fact");
     assert.match(rec.question, /rule on abort vs continue/, "AC2: actionable — what the outer must decide");
     assert.ok(rec.evidence.length > 0, "evidence carries the supporting observation");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// gap-over-90m-false-signal-source-reads-telemetry-not-task-status: detectTaskOver90m reads the
+// telemetry bracket's startedAtMs (never the task's OWN status), so a crash-leftover bracket on a
+// task whose file says status: ready/done fires a FALSE over-90m (3 recurrences in one night:
+// 48m + 27m + os-anchor; all phantom in-flight — dead process, 0-commit worktree). The fix gates
+// the bracket by the task file's `status` frontmatter: only a genuine in-progress task (or a task
+// with no file) fires.
+
+test("AC1 — over-90m does NOT fire for a status=ready task with a stale >90m bracket (negative control; reproduces tonight's os-anchor shape)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-os-anchor", 91 * 60 * 1000);
+    writeTaskFile(tmp, "gap-os-anchor", "ready");
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(!fs.existsSync(BLOCKED_PATH(tmp)), "status=ready + stale >90m bracket ⇒ NO over-90m block");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC2 — over-90m still fires for a status=in-progress task with a >90m bracket (positive control)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-real-over", 91 * 60 * 1000);
+    writeTaskFile(tmp, "gap-real-over", "in-progress");
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "status=in-progress + >90m bracket ⇒ over-90m block fires");
+    const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
+    assert.equal(rec.reason, "task-over-90m");
+    assert.equal(rec.taskId, "gap-real-over");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC2 — over-90m still fires when the task file is MISSING (bracket is the only signal; fail-closed toward fire)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    await writeBackdatedStartEvent(tmp, "gap-no-file", 91 * 60 * 1000);
+    // No tasks/gap-no-file.md written — the bracket is the only signal, so over-90m must still fire.
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "missing task file ⇒ over-90m block still fires (bracket-only fail-closed)");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("AC3 — os-anchor recurrence case side by side: status=ready stale bracket is skipped, the genuine in-progress one fires", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    // Tonight's recurrence shape: os-anchor's bracket is stale >90m but its task file says status: ready.
+    await writeBackdatedStartEvent(tmp, "gap-os-anchor", 92 * 60 * 1000);
+    writeTaskFile(tmp, "gap-os-anchor", "ready");
+    // Genuine shape: an in-progress task genuinely over budget — must still fire.
+    await writeBackdatedStartEvent(tmp, "gap-real-over", 91 * 60 * 1000);
+    writeTaskFile(tmp, "gap-real-over", "in-progress");
+
+    const res = runCli(tmp, "--detect-stop");
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(fs.existsSync(BLOCKED_PATH(tmp)), "the genuine in-progress task must still produce an over-90m block");
+    const rec = JSON.parse(fs.readFileSync(BLOCKED_PATH(tmp), "utf8"));
+    assert.equal(rec.reason, "task-over-90m");
+    assert.equal(rec.taskId, "gap-real-over", "the fired task must be the genuine in-progress one, never the ready os-anchor");
   } finally {
     cleanup(tmp);
   }

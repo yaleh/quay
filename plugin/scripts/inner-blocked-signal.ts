@@ -123,7 +123,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { isDirectEntry } from "./gate-script-base.ts";
+import { isDirectEntry, readFrontmatter } from "./gate-script-base.ts";
 import { SCHEMA_VERSION, validateEvent, emitEvent } from "./workflow-event-schema.mjs";
 import {
   FAST_MODE_STAGE,
@@ -803,6 +803,49 @@ export function makeOver90ExecutorGone(root) {
 }
 
 /**
+ * Read the task file's `status` frontmatter field for a task id, under `<root>/tasks/<id>.md`.
+ * A task file is `---` YAML frontmatter + markdown body; `status` is a scalar line
+ * (e.g. `status: in-progress`). Returns null when the task file is absent or has no status.
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {string | null}
+ */
+export function readTaskStatus(root, taskId) {
+  try {
+    const fm = readFrontmatter(path.join(root, "tasks", `${taskId}.md`));
+    return fm?.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The task-status gate for over-90m (gap-over-90m-false-signal-source-reads-telemetry-not-task-status).
+ *
+ * `detectTaskOver90m` reads TELEMETRY brackets (a `--task-start` without `--task-end`), never the
+ * task's OWN status. A crash leaves the bracket permanently open, so a task whose executor is long
+ * gone keeps showing in-progress and fires a FALSE over-90m — the manager measured three in one night
+ * (48m/27m/this one, all phantom in-flight: dead process, 0-commit worktree, status=ready). The
+ * bracket says WHEN it started; only the task's real status says WHETHER it is running.
+ *
+ * This gate lets over-90m fire ONLY when the task file's status is genuinely `in-progress`. A task
+ * whose file says `ready` / `done` / `needs-human` (or any non-in-progress value) is NOT mid-flight
+ * and must not trigger — that is tonight's false-signal class (os-anchor: status=ready + stale
+ * timeout bracket). A MISSING task file returns TRUE (fire): the bracket is then the only signal, and
+ * over-90m is the designed safety net for a genuinely orphaned in-progress task (fail-closed toward
+ * KEEP/fire — AC2, "任务文件缺失时按 bracket 继续").
+ *
+ * @param {string} root
+ * @param {string} taskId
+ * @returns {boolean} true ⇒ over-90m may fire; false ⇒ the task's own status says it is not in-progress.
+ */
+export function taskStatusAllowsOver90m(root, taskId) {
+  const status = readTaskStatus(root, taskId);
+  if (status === null) return true; // no task file ⇒ bracket is the only signal (fail-closed toward fire)
+  return status === "in-progress";
+}
+
+/**
  * Detect a task in-progress over the 90-minute budget (reason "task-over-90m").
  *
  * Mechanical: reads the SAME `.workflow-events/` store the tick's own `--task-start`/`--task-end`
@@ -817,6 +860,15 @@ export function makeOver90ExecutorGone(root) {
  * fake over-90m block froze inner 44 min). The probe is deliberately conservative (only positive
  * merge evidence closes) so a genuinely slow task with a live executor still fires.
  *
+ * TASK-STATUS GATE (gap-over-90m-false-signal-source-reads-telemetry-not-task-status, the 3rd false
+ * OVER90 on 2026-08-05): telemetry brackets are written by the executor's `--task-start`/`--task-end`;
+ * a crash never writes `--task-end`, leaving the bracket open forever. A bracket being open does NOT
+ * mean the task is running — the task's own status does. After the reconcile filter, every over-budget
+ * candidate is further gated by `taskStatusAllowsOver90m`: only a task file whose status is genuinely
+ * `in-progress` (or a task with no file at all) fires. A `status: ready`/`done`/`needs-human` task with
+ * a stale timeout bracket is a FALSE signal and is skipped (AC1 negative control; reproduces the
+ * os-anchor shape).
+ *
  * @param {string} root
  * @param {{executorGone?: (rec: {taskId: string}) => {gone: boolean, reason: string}}} [opts]
  * @returns {Promise<{taskId: string, reason: "task-over-90m", question: string, evidence: string[]} | null>}
@@ -829,7 +881,9 @@ export async function detectTaskOver90m(root, opts = {}) {
   if (rep.inProgress.length === 0) return null;
   const executorGone = opts.executorGone ?? makeOver90ExecutorGone(root);
   const { kept } = reconcileInFlight(rep.inProgress, { executorGone });
-  const over = kept.filter((p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS);
+  const over = kept.filter(
+    (p) => nowMs - p.startedAtMs > TASK_OVER_90M_MS && taskStatusAllowsOver90m(root, p.taskId),
+  );
   if (over.length === 0) return null;
   const p = over[0];
   const mins = ((nowMs - p.startedAtMs) / 60_000).toFixed(1);
@@ -837,7 +891,7 @@ export async function detectTaskOver90m(root, opts = {}) {
     taskId: p.taskId,
     reason: "task-over-90m",
     question: `task ${p.taskId} has been in-progress ${mins}m (>90m) — rule on abort vs continue (no inner retry), then run --clear`,
-    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `real in-flight ${over.length} task(s) over budget (reconcile-aware)`],
+    evidence: [`${p.taskId} started ${new Date(p.startedAtMs).toISOString()}`, `real in-flight ${over.length} task(s) over budget (reconcile-aware + task-status gate)`],
   };
 }
 
