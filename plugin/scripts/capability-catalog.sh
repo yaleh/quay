@@ -216,6 +216,7 @@ declare -A QUESTION=(
   [topology-check.sh]="Does the target tmux session have all three topology windows in place, each with a claude process (not a bare bash window)?"
   [touches-orthogonality-check.ts]="Do two milestones' ## Touches overlap?"
   [touches-parser.ts]="What files does this task's ## Touches declare?"
+  [unverified-integration-task-ids.ts]="Which unverified task ids are pending on integration (develop..integration fan-in merges) to feed --overlaps-unverified (fixing the permanently-false overlap path)?"
   [trend-check.ts]="Is any quality axis trending worse than last time (suite per-test cost, early-RED detection latency, per-checker cost) over a window — even while each point is individually green (the point-in-time blind spot)?"
   [transcript-delivery-check.ts]="Did the reliable-send procedure deliver the transcript (delivery verdict)?"
   [tree-hygiene-check.sh]="Is the repo tree hygienic for the loop (no stray files or commits)?"

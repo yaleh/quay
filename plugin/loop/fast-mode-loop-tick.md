@@ -785,13 +785,19 @@ subagent 用裸 `git worktree add` 自建 `$WORKTREE_ROOT/<slug>`（磁盘，不
 `worktree_root` 见上）和 `task/<id>` 分支，**分叉点由
 `plugin/scripts/integration-branch-model.ts` 的 `forkBaseline` 机械判定**：
 ```bash
+UNVERIFIED_IDS=$(node --experimental-strip-types plugin/scripts/unverified-integration-task-ids.ts --root "$(pwd)")
 node --no-warnings --experimental-strip-types plugin/scripts/integration-branch-model.ts \
-  --fork-baseline tasks/<id>.md --overlaps-unverified <integration 上未验证任务 id,...> --root "$(pwd)"
+  --fork-baseline tasks/<id>.md --overlaps-unverified "$UNVERIFIED_IDS" --root "$(pwd)"
 # 输出 develop（独立，默认）或 integration（声明依赖 / touches 与未验证任务相交）
 ```
+  `--overlaps-unverified` **不得传空串**（`gap-ac19-two-line-model-actually-runs` AC3：空串使
+  `integration-branch-model.ts:47` 的 `overlapsUnverifiedIntegration` 路径恒假——机制半死）；未验证任务 id 由
+  `unverified-integration-task-ids.ts` 从 `git log --oneline develop..integration`（fan-in 合并信息）
+  机械提取——即 `integration-branch-model.ts:139` 的 Contract invoke，内层无需记忆来源。
 - **独立任务（默认）→ 从 `develop` 分叉**（已验证基线，绿）
 - **声明依赖前序任务 / touches 与 integration 上某未验证任务相交 → 从 `integration` 分叉**
-  （含未验证前序；`--overlaps-unverified` 传 integration 上未验证任务的 id，helper 做 touches 交集）
+  （含未验证前序；`--overlaps-unverified` 传 `unverified-integration-task-ids.ts` 提取的未验证任务 id，
+  helper 做 touches 交集）
 - **develop 永不从未验证树分叉 ⇒ 红窗停派结构性消除**（AC3）；「基线陈旧只对触摸集相交的任务造成
   麻烦，而相交任务本来就该串行」——与 checkTouchesPair + disjointness 排序是同一个约束（SPEC §3）。
 - worktree 建立后内部起独立对抗审查（硬上限 2 轮），**只提交不合并**。
