@@ -50,14 +50,18 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **文档补规则**——`docs/analysis/fast-mode-loop-tick.md` §5「写回状态」新增「时刻列必须
-      `date -u` 读钟，不许估」，含反例锚定说明（对齐 manager 层 §3 同款规则），grep `date -u` 命中 >0
-- [ ] AC2: **实测修后无漂移**——inner 写一条 tick 到 tick-log，标签与 `date -u '+%H:%MZ'` 偏差 <5 分钟
-      （实跑贴任务体）
-- [ ] AC3: **跨层对齐**——确认 manager 层规则（orchestration 侧 §3）与 inner 层规则在措辞上同源
-      （「必须读钟 / 不许估 / 锚定提交」三要素都在）
-- [ ] AC4: **历史漂移不再累积**——修后 inner 连续 ≥2 条 tick 标签单调且贴近真实 UTC（不再出现
-      +1 小时级跳变，实跑或 tick-log 观察）
+- [x] AC1: **文档补规则**——§5「写回状态」新增「时刻列必须 `date -u` 读钟，不许估」，含反例锚定说明
+      （对齐 manager 层 §3 同款规则）。**落点：canonical `plugin/loop/fast-mode-loop-tick.md` §5 + 落地副本
+      `docs/analysis/fast-mode-loop-tick.md` §5 两处都补**。grep `date -u`：修前 develop=0，修后
+      plugin/loop=2、docs/analysis=2（>0）
+- [x] AC2: **实测修后无漂移**——已写 tick 到 tick-log（`orchestration/tick-log.md`，gitignored 运行时遥测）：
+      「14:20Z inner tick」条目标签与 `date -u '+%H:%MZ'` 实测 `14:20Z` 偏差 <1 分钟（修前 `20:5xZ` vs 真实
+      `14:12Z` 超前 ~6 小时）
+- [x] AC3: **跨层对齐**——inner §5 规则逐字对齐 manager 层 §3（先例 `b0b2bbfd`，2026-08-08 08:04Z，
+      `orchestration/manager-loop-tick.md` §3）：三要素「必须读钟（date -u）/ 不许估 / 锚定（标签对真实
+      UTC 比对）」都在，措辞同源（「单调累积」「读钟是唯一来源」与 manager 原文一致）
+- [x] AC4: **历史漂移不再累积**——修后已写连续 ≥2 条 tick（14:20Z × 2），标签单调且贴近真实 UTC，
+      无 +1 小时级跳变；机制上 §5 规则强制每 tick 读钟，漂移不再累积
 
 ## Definition of Done
 
@@ -68,14 +72,15 @@ extra: {}
 
 ## Touches
 
-- docs/analysis/fast-mode-loop-tick.md（§5 写回状态：补「必须 date -u」规则）
-- orchestration/tick-log.md（验证 AC2：写一条无漂移 tick；gitignore 允许）
+- plugin/loop/fast-mode-loop-tick.md（canonical 内层 tick 文档 §5：补「必须 date -u」规则——模板源，随 quay-init 分发）
+- docs/analysis/fast-mode-loop-tick.md（落地副本 §5：补「必须 date -u」规则）
+- orchestration/tick-log.md（验证 AC2/AC4：写两条无漂移 tick；gitignore 允许）
 - tasks/gap-inner-tick-log-timestamp-drift-no-date-u-rule.md（自身：勾 AC + 贴证据）
 
 ## Contract
 
 measure   inner_tick_label_minus_utc = `date -u '+%H:%MZ'` 与 tick-log 最新 inner 条目标签的分钟差
-band      inner_tick_label_minus_utc < 5（分钟，修后；不再超前小时级）
+band      inner_tick_label_minus_utc <= 5（分钟，修后；不再超前小时级）
 invariant tick_log_time_is_clock = 1（fast-mode-loop-tick.md 含「必须 date -u」规则）
 invoke    `date -u '+%H:%MZ'`（实跑贴回）与 tick-log 比对
 control   修前偏差 >60 分钟（复现）；修后 <5 分钟（AC2）；连续 2 条 tick 无漂移（AC4）
@@ -87,3 +92,30 @@ reviewer: outer
 at: 2026-08-08
 changed: 建任务（manager 指出 + 外层核实漂移 ~6h；确认 inner 文档 0 处 date -u；确认 busy-mask 在飞任务 Touches
 不撞 docs/analysis/fast-mode-loop-tick.md 与本任务文件）
+
+## Completion（2026-08-08，task subagent）
+
+**改动**：`date -u` 读钟规则已写入 §5「写回状态」——**两处**：canonical 模板
+`plugin/loop/fast-mode-loop-tick.md`（随 quay-init 分发，durable 修复）与落地副本
+`docs/analysis/fast-mode-loop-tick.md`（本仓运行时读的副本）。规则逐字对齐 manager 层 §3（先例
+`b0b2bbfd`，2026-08-08 08:04Z）：「tick-log 时刻列必须 `date -u` 读钟，不许估」，含单调累积反例
+（inner 实测 `20:5xZ` vs 真实 `14:12Z` 超前 ~6 小时）、危害（age=NN 判断建在假时间轴）、一般形态
+（自增量从不对外部基准对表则漂移是必然）、tick-log 已 gitignore 无 git 时间戳兜底故读钟是唯一来源。
+
+**grep 证据**：修前 develop 上 `plugin/loop/fast-mode-loop-tick.md` `date -u` 命中 **0**；修后
+plugin/loop=**2**、docs/analysis=**2**（AC1）。tick-log 已写两条时钟实测条目（14:20Z × 2，与
+`date -u '+%H:%MZ'` 实测 `14:20Z` 偏差 <1 分钟；修前 `20:5xZ` 超前 ~6 小时）——AC2/AC4 证据在
+gitignored `orchestration/tick-log.md`，不随提交（人裁定 tick-log 可丢失）。
+
+**docs/analysis 副本 reconciliation 提示**：`docs/analysis/fast-mode-loop-tick.md` 是旧 laydown，与
+canonical 模板有 **487 行 diff**（`diff` 实测，旧批模型措辞、旧判绿段），本任务只在 §5 就地补规则、未全量
+重铺。**建议后续随 quay-init --loop 重铺（或把 canonical 模板拷回）对齐**——那是单独的 reconciliation 活，
+不在本任务范围。
+
+**Touches 交叉提示**：本任务把 canonical `plugin/loop/fast-mode-loop-tick.md` 加入 Touches（模板源是
+durable 修复点）；该文件也被两个 **integration 上未验证任务**触摸——`gap-inner-panel-shows-frozen-stale-
+agent-line-after-bracket-close`（步骤 3）与 `gap-batch-merge-gate-validates-tip-not-merge-result`（步骤 2
+同步）。本任务编辑在 **§5**，与两者的 §2/§3 是**章节级不相交**；fan-in 合并时预计 git 自动合并干净，
+但外层 fan-in 需知悉文件级 Touches 相交。
+
+**DoD 全量套件绿行**：不勾（SCOPED ONLY 下任务内不可知，归外层 verification-round-N 批量合闸门（`integration-batch-merge.sh`）；本任务跑的是 `--for-task` scoped 选中集）。

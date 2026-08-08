@@ -1,33 +1,50 @@
 #!/usr/bin/env node
-// plugin/scripts/cap-from-gate.ts — the ADAPTIVE concurrency cap (gap-adaptive-concurrency-cap-tied-to-resource-gate).
+// plugin/scripts/cap-from-gate.ts — the ADAPTIVE concurrency cap
+// (gap-adaptive-concurrency-cap-tied-to-resource-gate →
+//  gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2).
 //
 // The dispatch decision point (fast-mode-loop-tick.md step 4) calls this to compute the effective
-// concurrency cap instead of a fixed number. The task's core constraint: signal and actuator time
-// scales differ by 1-2 orders of magnitude (cpu pressure avg10 = 10s window vs a dispatch decision
-// every 25-min tick / 15-90-min subagent), so a fixed cap or an avg10-reactive cap both mismatch the
-// actuator. The correct shape: read `some avg300` (5-min window) AT the dispatch point (reuse the
-// existing decision point — NO new polling), keep hysteresis so a single sample cannot flip the band.
+// concurrency cap instead of a fixed number. Mechanism: read cpu pressure AT the dispatch point
+// (via resource-gate.sh report mode — single source), map to a band, keep hysteresis so a single
+// sample cannot flip the band, and cap at the band's configured number.
+//
+// SIGNAL SEMANTICS (changed 2026-08-08 by gap-cap-from-gate-avg300-driven-by-claude-session-churn-
+// structural-cap-2): the signal is `some avg10`, NOT `some avg300`. The outer layer measured that
+// `some avg300` (5-min window) is dominated by the claude session's resident churn — stable 50-55,
+// always above the old WAIT=40 threshold — and barely responds to dispatch-class load (a 4-core
+// full-load injection moved avg300 only +1.5pt while avg10 moved +26pt). An avg300-driven cap was
+// therefore structurally pinned to WAIT (cap=2) and dispatch throttling could never lift it. `some
+// avg10` is the responsive signal (measured +26pt under a 4-core injection). `full avg300` stays 0
+// even under full saturation (the kernel's CPU full counter never increments on this system) and was
+// REJECTED for losing overload protection. The churn baseline is excluded by RAISING the thresholds
+// (WAIT=60 > measured baseline 42-54; EXTREME=85), not by subtracting a fixed number (the baseline
+// drifts as sessions start/stop). Hysteresis (`samples` consecutive same-direction readings at the
+// dispatch point, default 2) turns avg10's 10-second window into a slow-switching decision: the
+// dispatch actuator is 25-min ticks / 15-90-min subagents, and 2 same-direction readings across
+// dispatch points means sustained load, not a transient burst.
 //
 // MECHANISM / STRATEGY separation (manager correction 2026-08-05):
 //   MECHANISM (this file — quay-shipped, downstream adopts via the upgrade channel, never re-invented):
-//     - read cpu `some avg300` at the dispatch point (via resource-gate.sh report mode — single source)
-//     - band thresholds (GO < 40, WAIT < 70, EXTREME >= 70) — mechanism constants
+//     - read cpu `some avg10` at the dispatch point (via resource-gate.sh report mode — single source)
+//     - band thresholds (GO < 60, WAIT < 85, EXTREME >= 85) — mechanism constants
 //     - hysteresis — `samples` consecutive same-direction readings before a switch (default 2)
 //     - the band NUMBERS come from per-project config (below)
 //   STRATEGY (per-project): `.quay/config.yml` `loop: concurrency_bands: {go, wait, extreme_wait}` —
 //     quay default 5/2/1; archguard may set 4/2/1. Same mechanism, project-defined numbers.
 //
 // AC1 — read at the dispatch decision point (the tick doc calls this in step 4; no polling added).
-// AC2 — reads avg300 (5-min window), not avg10 — same order of magnitude as the dispatch rhythm.
-// AC3 — hysteresis (negative control): one avg300 sample pointing to a new band does NOT switch;
+// AC2 — reads cpu `some avg10` (responsive to real overload; the churn-dominated avg300 was measured
+//       structurally dead — see above). avg10's 10s window is safe because hysteresis + the
+//       dispatch-point sampling (25-min ticks) damp it into a slow switch.
+// AC3 — hysteresis (negative control): one avg10 sample pointing to a new band does NOT switch;
 //       only `samples` consecutive same-direction readings do.
 // AC4 — bands configurable; numbers from config, defaults 5/2/1; config change takes effect.
-// AC5 — resources empty (low avg300) => GO band => cap >= 3 (throughput above the old fixed 3).
-// AC6 — high avg300 (e.g. another project saturating the host) => WAIT/EXTREME band => cap drops.
+// AC5 — resources empty (low avg10) => GO band => cap >= 3 (throughput above the old fixed 3).
+// AC6 — high avg10 (e.g. another project saturating the host) => WAIT/EXTREME band => cap drops.
 // AC8 — cross-referenced with resource-gate.sh (the signal) + concurrent-batch-scheduler.ts (the
 //       disjointness gate that runs at the same decision point) + SPEC-isolation-and-resource-governance.
 //
-// Fail-closed: an unmeasurable avg300 (kernel without PSI) => EXTREME band (lowest cap) — a cap that
+// Fail-closed: an unmeasurable signal (kernel without PSI) => EXTREME band (lowest cap) — a cap that
 // silently stays high when its signal is unmeasurable is a quietly-lying instrument.
 //
 // Usage:
@@ -49,13 +66,20 @@ import { isDirectEntry } from "./gate-script-base.ts";
  *  a project overrides in `.quay/config.yml` `loop:concurrency_bands` (e.g. archguard 4/2/1). */
 export const DEFAULT_BANDS = { go: 5, wait: 2, extreme_wait: 1 };
 
-/** Band thresholds on cpu `some avg300` (mechanism constants — the GO/WAIT gate's own CPU_LIMIT=40
- *  is the GO/WAIT boundary; EXTREME = the heavy-saturation regime). */
-export const WAIT_THRESHOLD = 40;
-export const EXTREME_THRESHOLD = 70;
+/** Band thresholds on cpu `some avg10` (mechanism constants). WAIT=60 sits ABOVE the measured
+ *  claude-session churn baseline (some avg10 42-54, 2026-08-08 outer measurement) and BELOW the
+ *  measured real-overload reading (a 4-core full-load injection pushed avg10 to 68) — that
+ *  separation is what lets the signal distinguish "session churn" (GO) from "real overload" (WAIT).
+ *  EXTREME=85 is the heavy-saturation regime. The original avg300 thresholds (40/70) were tuned to a
+ *  signal that is structurally dead in this environment (gap-cap-from-gate-avg300-driven-by-claude-
+ *  session-churn-structural-cap-2): avg300 stays 50-55 regardless of dispatch load. */
+export const WAIT_THRESHOLD = 60;
+export const EXTREME_THRESHOLD = 85;
 
-/** Hysteresis width: consecutive same-direction readings required to switch bands. A single avg300
- *  sample (still jittery near a threshold) must NOT flip the cap — the negative control (AC3). */
+/** Hysteresis width: consecutive same-direction readings required to switch bands. A single sample
+ *  (still jittery near a threshold) must NOT flip the cap — the negative control (AC3). With the
+ *  signal now `some avg10` (10s window), this is what keeps the decision slow: samples are taken at
+ *  dispatch points (25-min ticks), so 2 same-direction readings = sustained load, not a transient. */
 export const HYSTERESIS_SAMPLES_DEFAULT = 2;
 
 export const STATE_FILE_NAME = "concurrency-cap-state.json";
@@ -98,11 +122,11 @@ export function readBandsFromConfig(configPath: string): BandConfig {
   };
 }
 
-/** Map an avg300 reading (number) to the desired band. Unmeasurable => EXTREME (fail-closed). */
-export function computeDesiredBand(avg300: number | null): BandName {
-  if (avg300 === null) return "EXTREME";
-  if (avg300 < WAIT_THRESHOLD) return "GO";
-  if (avg300 < EXTREME_THRESHOLD) return "WAIT";
+/** Map a cpu stall reading (number) to the desired band. Unmeasurable => EXTREME (fail-closed). */
+export function computeDesiredBand(cpuStall: number | null): BandName {
+  if (cpuStall === null) return "EXTREME";
+  if (cpuStall < WAIT_THRESHOLD) return "GO";
+  if (cpuStall < EXTREME_THRESHOLD) return "WAIT";
   return "EXTREME";
 }
 
@@ -155,16 +179,18 @@ export function saveState(file: string, state: CapState): void {
   fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
 }
 
-/** Read the cpu `some avg300` signal from resource-gate.sh REPORT mode (single source — the gate
- *  owns the /proc/pressure/cpu read + its test seams). Returns null when UNMEASURABLE. */
-export function readAvg300FromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
+/** Read the cpu `some avg10` signal from resource-gate.sh REPORT mode (single source — the gate
+ *  owns the /proc/pressure/cpu read + its test seams). Returns null when UNMEASURABLE.
+ *  NB: reads `some avg10`, NOT `some avg300` — the avg300 field is churn-dominated and structurally
+ *  dead (see header comment, gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2). */
+export function readCpuStallFromGate(repoRoot: string, env: NodeJS.ProcessEnv = process.env): number | null {
   const gate = path.join(repoRoot, "plugin", "scripts", "resource-gate.sh");
   const res = spawnSync("bash", [gate], { cwd: repoRoot, encoding: "utf8", env });
   if (res.status !== 0) {
     // report mode always exits 0 — a non-zero means the script itself is broken; fail closed.
     return null;
   }
-  const m = `${res.stdout}\n${res.stderr}`.match(/cpu_stall\(some avg300\)=([0-9.]+|UNMEASURABLE)/);
+  const m = `${res.stdout}\n${res.stderr}`.match(/cpu_stall\(some avg10\)=([0-9.]+|UNMEASURABLE)/);
   if (!m || m[1] === "UNMEASURABLE") return null;
   const v = Number(m[1]);
   return Number.isFinite(v) ? v : null;
@@ -184,7 +210,7 @@ export function computeEffectiveCap(opts: {
   desired: BandName;
   consecutive: number;
   switched: boolean;
-  avg300: number | null;
+  cpu_stall: number | null;
   stateFile: string;
 } {
   const repoRoot = opts.repoRoot;
@@ -192,8 +218,8 @@ export function computeEffectiveCap(opts: {
   const stateFile = opts.stateFile ?? path.join(repoRoot, ".quay", STATE_FILE_NAME);
   const samples = opts.samples ?? HYSTERESIS_SAMPLES_DEFAULT;
   const bands = opts.bands ?? readBandsFromConfig(path.join(repoRoot, ".quay", "config.yml"));
-  const avg300 = readAvg300FromGate(repoRoot, env);
-  const desired = computeDesiredBand(avg300);
+  const cpuStall = readCpuStallFromGate(repoRoot, env);
+  const desired = computeDesiredBand(cpuStall);
   const state = loadState(stateFile);
   const { band, consecutive, switched } = applyHysteresis(state, desired, samples);
   saveState(stateFile, { band, consecutive, decided_at: new Date().toISOString() });
@@ -203,7 +229,7 @@ export function computeEffectiveCap(opts: {
     desired,
     consecutive,
     switched,
-    avg300,
+    cpu_stall: cpuStall,
     stateFile,
   };
 }
@@ -229,9 +255,9 @@ function main(argv: string[]): number {
     stateFile: stateFile ?? undefined,
     samples,
   });
-  const avg = result.avg300 === null ? "UNMEASURABLE" : result.avg300.toFixed(2);
+  const avg = result.cpu_stall === null ? "UNMEASURABLE" : result.cpu_stall.toFixed(2);
   console.log(
-    `signal: cpu_stall(some avg300)=${avg}  bands(go<${WAIT_THRESHOLD}, wait<${EXTREME_THRESHOLD}, extreme>=${EXTREME_THRESHOLD})`,
+    `signal: cpu_stall(some avg10)=${avg}  bands(go<${WAIT_THRESHOLD}, wait<${EXTREME_THRESHOLD}, extreme>=${EXTREME_THRESHOLD})`,
   );
   console.log(
     `band: ${result.band}  desired=${result.desired}  consecutive=${result.consecutive}/${samples}  switched=${result.switched ? "yes" : "no"}`,

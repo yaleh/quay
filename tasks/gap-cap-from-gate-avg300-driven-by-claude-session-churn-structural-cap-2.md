@@ -63,26 +63,26 @@ GO 带（cap≥3），而非当前恒 2；并保留对真实饱和（注入 4 �
 
 ## Acceptance Criteria
 
-- [ ] AC1: **实测复现**——本任务实现前先复现缺陷：会话数不变时 cap-from-gate 报 effective_cap=2，
+- [x] AC1: **实测复现**——本任务实现前先复现缺陷：会话数不变时 cap-from-gate 报 effective_cap=2，
       且注入/撤去 node --test 类负载 avg300 位移 <3pt（对照实验证据贴任务体）
-- [ ] AC2: **信号修正落地**——cap-from-gate 改用候选 A/B/C/D 之一（或组合），实现+测试，说明为何所选
+- [x] AC2: **信号修正落地**——cap-from-gate 改用候选 A/B/C/D 之一（或组合），实现+测试，说明为何所选
       方案能区分「会话常驻 churn」与「真实过载」
-- [ ] AC3: **GO 带恢复**——会话数不变、无真实过载时 `bash plugin/scripts/cap-from-gate.sh` 报
+- [x] AC3: **GO 带恢复**——会话数不变、无真实过载时 `bash plugin/scripts/cap-from-gate.sh` 报
       GO 带 effective_cap≥3（不再结构性锁 2），实跑输出贴任务体
-- [ ] AC4: **过载保护保留**——注入 4 核满载（模拟真实饱和）时有效降档（WAIT/EXTREME），实跑输出贴任务体
-- [ ] AC5: **滞回与档位配置保留**——`applyHysteresis` 与 `concurrency_bands` 配置面不改坏
+- [x] AC4: **过载保护保留**——注入 4 核满载（模拟真实饱和）时有效降档（WAIT/EXTREME），实跑输出贴任务体
+- [x] AC5: **滞回与档位配置保留**——`applyHysteresis` 与 `concurrency_bands` 配置面不改坏
       （既有 cap-from-gate 测试全绿）
-- [ ] AC6: **文档同步**——`fast-mode-loop-tick.md` 步骤 3.6 前置块 / cap-from-gate.ts 头注释更新信号
+- [x] AC6: **文档同步**——`fast-mode-loop-tick.md` 步骤 3.6 前置块 / cap-from-gate.ts 头注释更新信号
       语义（说明 avg300 被会话 churn 主导 + 新信号为什么能区分），不再宣传「archguard 高负载自动回落」的
       原假设（除非新信号仍支持它）
 
 ## Definition of Done
 
-- [ ] AC1–AC6 全部勾上
-- [ ] 修后实跑：会话数不变 + 资源空 ⇒ GO 带（cap≥3）；注入满载 ⇒ 降档（两方向实跑输出贴任务体）
-- [ ] 既有 cap-from-gate 测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC6 全部勾上
+- [x] 修后实跑：会话数不变 + 资源空 ⇒ GO 带（cap≥3）；注入满载 ⇒ 降档（两方向实跑输出贴任务体）
+- [x] 既有 cap-from-gate 测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
-- [ ] 不新建固定 cap——保留自适应形态（gap-adaptive-concurrency-cap-tied-to-resource-gate 的裁定不被推翻）
+- [x] 不新建固定 cap——保留自适应形态（gap-adaptive-concurrency-cap-tied-to-resource-gate 的裁定不被推翻）
 
 ## Touches
 
@@ -105,9 +105,49 @@ cpu_stall(some avg300)=54.51 … effective_cap=2
 # 对照：/proc/pressure/cpu full avg300=0.00（full 恒 0，可作候选 B 信号）
 ```
 
+## 修后实跑证据（内层 2026-08-08，worktree task/gap-cap-from-gate-avg300-driven-by-claude-session-churn-structural-cap-2）
+
+**所选修法（A+B+D 组合）**：信号改用 `some avg10`（唯一对真实过载响应的信号——候选 B「换信号」的实测选型；
+`full avg300` 实测连 4 核满载都恒 0，弃用），阈值抬高到 GO<60 / WAIT<85 / EXTREME≥85（候选 D「阈值与信号
+匹配」+ 候选 A「剔 churn」：60 高于实测 churn 基线 avg10 42-54、低于实测真实过载读数 68；不选固定减法，
+基线随会话启停漂移）。avg10 的快窗由既有滞回（连续 2 次同向才切档，采样点在派发时刻）压成慢切换，AC5
+（滞回 + `concurrency_bands` 配置面）原封不动。
+
+**AC3 — 无真实过载（会话数不变）⇒ GO 带，cap=5**（注意同刻 `some avg300=49.33` 仍 > 旧 WAIT=40——旧信号
+在此刻仍会判 WAIT，正是本任务修的缺陷）：
+
+```bash
+$ cat /proc/pressure/cpu
+some avg10=24.46 avg60=32.81 avg300=49.33 total=335310509328
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+$ bash plugin/scripts/cap-from-gate.sh
+signal: cpu_stall(some avg10)=24.46  bands(go<60, wait<85, extreme>=85)
+band: GO  desired=GO  consecutive=0/2  switched=no
+effective_cap=5
+```
+
+**AC4 — 注入 4 核满载（45s busy loop）⇒ 降档 WAIT，cap=2**（注入期间 `some avg300=50.89` 几乎不动，
+`full avg300=0.00`——两者都证明不是可用信号）：
+
+```bash
+$ cat /proc/pressure/cpu   # 注入 18s 后
+some avg10=71.76 avg60=45.52 avg300=50.89 total=335328993333
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+$ bash plugin/scripts/cap-from-gate.sh --state /tmp/ac4-state.json
+signal: cpu_stall(some avg10)=73.25  bands(go<60, wait<85, extreme>=85)
+band: WAIT  desired=WAIT  consecutive=0/2  switched=no
+effective_cap=2
+```
+
+**AC5 — 既有 + 新增测试全绿**：`bash scripts/test.sh --for-task gap-cap-from-gate-avg300-driven-by-claude-
+session-churn-structural-cap-2 --allow-thin` ⇒ exit 0，29/29 pass（13 cap-from-gate + 16 resource-gate），
+scoped 静态检查全 PASS（test-framework-policy / test-isolation / test-impl-census / task-contract-check:
+no violations / adr016-screen-use / dead-code-after-return / drive-contract）。`applyHysteresis` 与
+`concurrency_bands` 配置面未改坏（既有 AC3/AC4 测试原样通过）。
+
 ## Contract
 
-measure   effective_cap_after_fix = `bash plugin/scripts/cap-from-gate.sh 2>&1 | grep -o 'effective_cap=[0-9]'` 会话数不变时是否 ≥3
+measure   effective_cap_after_fix = `bash plugin/scripts/cap-from-gate.sh 2>&1 | grep -o 'effective_cap=[0-9]'` 的 effective_cap 字段 会话数不变时是否 ≥3
 band      effective_cap_after_fix = 5（GO 带，无真实过载时不再结构性 2）
 invariant cap_still_adaptive = 1（保留自适应形态，不新建固定 cap）
 invariant churn_distinguishable = 1（信号能区分会话常驻 churn 与真实过载——AC4 注入满载必降档）
