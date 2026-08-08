@@ -165,6 +165,7 @@ rules* but does not re-implement each SPEC. Index (under `orchestration/` in the
 - `orchestration/SPEC-cold-start-one-liner.md` — cold-start one-liner (delivery surface)
 - `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` — the complete delivery surface (six classes; this skill is the loop-documentation class-2 owner)
 - `orchestration/SPEC-cut-the-waiting.md` — waiting / dispatch-form rationale
+- `orchestration/SPEC-inbox-service-2026-08-08.md` — the inbox service (agent-to-agent communication channel: manager/outer/inner via a per-project background service, tmux demoted to emergency control)
 - `orchestration/SPEC-instruments-behind-one-entry.md` — instrument discovery behind one entry
 - `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` — isolation + resource governance
 - `orchestration/SPEC-methodology-as-a-deliverable.md` — methodology as a deliverable
@@ -315,14 +316,17 @@ allowed-tools: Bash, Read, Monitor
 
 ## 7. 方法论来源（AC6）——SPEC-*.md 索引，不批量结晶
 
-以下 14 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：
+以下 17 份 SPEC（均在 `orchestration/` 目录下）是方法论来源，**逐个按需结晶，不批量**。本 SKILL 只列索引，不复制其内容：
 
 | 文件 | 主题 |
 |---|---|
+| `orchestration/SPEC-branching-model-integration-branch-2026-08-05.md` | 双线分支模型（已验证基线 + 待验证汇入点） |
 | `orchestration/SPEC-cold-start-one-liner.md` | 冷启动一条命令 |
 | `orchestration/SPEC-complete-delivery-surface-2026-08-05.md` | 完整交付面 |
 | `orchestration/SPEC-cut-the-waiting.md` | 削减等待 |
+| `orchestration/SPEC-inbox-service-2026-08-08.md` | 收件箱服务（agent 间通信信道） |
 | `orchestration/SPEC-instruments-behind-one-entry.md` | 仪器统一入口 |
+| `orchestration/SPEC-integration-architecture-2026-08-05.md` | 集成架构（汇入点 / 批量合并） |
 | `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md` | 隔离与资源治理 |
 | `orchestration/SPEC-manager-productization-2026-08-05.md` | manager 产品化（五约束 + 建造/运行归属） |
 | `orchestration/SPEC-methodology-as-a-deliverable.md` | 方法论作为交付物 |
