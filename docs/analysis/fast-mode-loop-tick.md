@@ -97,8 +97,10 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 CPU 的比例；load 是代理，
 claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
 ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，测试命令的默认并发已改为
-**推导值 `max(1, floor(nproc / 2.1)) = 1`**（不再写死 8——8 worker + 子进程 = 17 进程、4.25× 超订，
-是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先（**分叉**：这是
+**推导值 `max(1, floor(nproc / 1.0)) = 4`**（AC5 代价侧实验 2026-08-08 实测：
+`gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible`——同一选中集在并发
+1/4/8 下全零 cancelled，nproc 是墙钟甜点；旧的 2.1 放大系数使默认=1，其「avoid cancel」理由从未被
+实验证实，现已被否定），`--test-concurrency=N` 显式传入永远优先（**分叉**：这是
 node:test/test.sh 项目的旋钮；**vitest 项目真实文件级并行 flag 是 `--maxWorkers`**，archguard 用
 `--maxWorkers=8` 跑通全量——同一份文档服务两种测试框架，`gap-full-suite-runner-red-pattern-matches-
 bare-x-vitest-false-red` AC3）。两层绝不同时跑全量套件。
@@ -133,8 +135,8 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 （07:15，156 files）→ **+tmpdirs 测试隔离 R6 = 2054（08:40）→ **+token 重操令牌 = 2065**（09:05，token fan-in 套件实测）
 参考值以最近一次全量绿的 tests 数为准。**注意 starvation 是单套件稳态（4 核跑 c8 = 4 倍过订，
 压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 40 才 GO），但套件自身跑起来压力必然 >40，
-那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/2.1))=1（4 核）；全量验证需显式
---test-concurrency=8，否则小时级**。
+那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/1.0))=4（4 核）；全量验证用
+--test-concurrency=8（外层 runner 实跑 13+ 轮全零 cancelled）或默认 4 lanes**。
 
 ## 已知负载敏感族（KNOWN-LOAD-SENSITIVE）——判绿/放宽判据必须排除，不得读成真回归
 

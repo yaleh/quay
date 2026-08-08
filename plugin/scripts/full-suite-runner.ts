@@ -20,8 +20,12 @@
 //         completed-agent fan-in until the outer re-greens.
 //
 // Task: gap-full-suite-runner-concurrency-default-and-gate (2026-08-05, ABORT #5)
-//   AC1 — the default laneCount is NPROC-DERIVED (max(1, floor(nproc / 2.1)) — the SAME
-//         derivation as test.sh's AC5), NOT the hardcoded 8. On this box nproc=4 ⇒ 1.
+//   AC1 — the default laneCount is NPROC-DERIVED (max(1, floor(nproc / AMPLIFICATION)),
+//         AMPLIFICATION = 1.0 since the AC5 cost-side experiment ran
+//         (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08:
+//         zero cancelled at concurrency 4 AND 8 on the same selected set; nproc is the wall-clock
+//         sweet spot) — the SAME derivation as test.sh's AC5, NOT the hardcoded 8. On this box
+//         nproc=4 ⇒ 4.
 //   AC2 — the --test-concurrency splice is a REPLACE, not an append: any existing
 //         --test-concurrency=* (both `=` and space spellings) is stripped from the command
 //         before the effective value is spliced, so the spawned process shows EXACTLY ONE
@@ -54,7 +58,7 @@
 //                                    #   verification-round.jsonl all land in <state-dir>.
 //     [--state-file <path>]          # default: <state-dir>/full-suite-state.json
 //     [--log-file <path>]            # default: <state-dir>/full-suite.log
-//     [--lane-count <n>]             # default: max(1, floor(nproc/2.1)) (nproc-derived, AC1)
+//     [--lane-count <n>]             # default: max(1, floor(nproc/1.0)) = nproc (AC1, cost-side-verified)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
 // Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
@@ -284,18 +288,23 @@ export function isAbortLine(line: string): boolean {
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
- * derivation: max(1, floor(nproc / 2.1)). The old hardcoded 8 was a 4.25× oversubscription on a
- * 4-core box (8 workers + spawned subprocesses = 17 processes, PSI 88 — the crash family behind
- * ABORT #1/#3/#4/#5). RESOURCE_GATE_NPROC / RESOURCE_GATE_AMPLIFICATION are the deterministic test
- * seams (the same env test.sh's default_concurrency_formula reads).
+ * derivation: max(1, floor(nproc / AMPLIFICATION)), AMPLIFICATION = 1.0. The 2.1 value (measured
+ * process amplification 17/8 ≈ 2.125) was an unproven-conservative guard against oversubscription:
+ * the AC5 cost-side experiment (gap-dod-two-green-runs-and-over90-budget-are-mathematically-
+ * incompatible, 2026-08-08) ran the same selected set at concurrency 1/4/8 — ZERO cancelled at
+ * every level, and nproc was the wall-clock sweet spot (24s vs 57.5s at 1, 27.3s at 8 on a 4-core
+ * box). The outer's own full-suite verification rounds at laneCount 8 (13+ runs, all cancelled 0)
+ * corroborate that the oversubscription cost side never materialized. RESOURCE_GATE_NPROC /
+ * RESOURCE_GATE_AMPLIFICATION are the deterministic test seams (the same env test.sh's
+ * default_concurrency_formula reads).
  */
 export function defaultLaneCount(): number {
   const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
     typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
   );
   const ncpu = Number(ncpuRaw);
-  const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "2.1");
-  const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 2.1;
+  const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "1.0");
+  const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 1.0;
   return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp));
 }
 

@@ -141,3 +141,13 @@ consuming-slots`（反向括号缺陷）的根因是「槽位记账读括号（�
 **进程数不会因括号关而变**——同一个「已关括号但仍活」的进程既被总预算计数（资源面），槽位记账也不必只
 信括号（`fast-mode-telemetry.ts --slots` 的 `closedButLive` / `occupied_slots` 即进程级维度）。两者是
 同一资源记账面的两面：本任务给「全仓进程总量」下界，反向缺陷给「单槽进程占用」判据。
+
+## 交叉标注（AC4/AC5，2026-08-08，`gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible`）
+
+**「同一解法的两面」交叉标注**（管理者 2026-08-07 裁定）：本任务与 `gap-dod-two-green-runs-and-
+over90-budget-are-mathematically-incompatible` 共享同一个「跨层总预算」解法——那一边落「并发层默认」
+（test.sh/full-suite-runner 的 AMPLIFICATION 2.1→1.0，2026-08-08 已落地，AC5 代价侧实验实测并发
+1/4/8 全零 cancelled、nproc 为墙钟甜点），**本任务落「跨层总预算权威」**（槽位帽 B + 顶层 worker C +
+worktree A 都读同一预算）。**勿拆开修**：那一边只改单层默认，不声称解决超订总量；总量收敛是这一边的
+判据（AC2「全仓进程数显著低于 17-19」）。两边各自落地后，`cap=2 × 并发4`（预算从槽位移到并发）才是
+可验证的最终形态。

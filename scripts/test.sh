@@ -91,12 +91,18 @@
 #   does not pay the governance load cost. Default (no --group) = product,engine (AC4).
 #
 # --test-concurrency default is now DERIVED (gap-no-resource-awareness-heavy-ops-run-blind, AC5):
-#   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION ≈ 2.1 (measured, see
-#   default_test_concurrency below). The old hardcoded 8 was measured 10.3% faster than the runtime
-#   default by ADR-019 — but that was measured WITHOUT a second layer running concurrently; on a
-#   4-core box, 8 workers + spawned subprocesses = 17 processes = a 4.25× oversubscription, the
-#   measured steady state of a single full suite. A later --test-concurrency=N on the command line
-#   overrides the derived default (node --test is last-flag-wins).
+#   default = max(1, floor(nproc / AMPLIFICATION))   with AMPLIFICATION = 1.0 (see
+#   default_test_concurrency below). AMPLIFICATION was 2.1 (2026-08-03 measured process
+#   amplification 17/8 ≈ 2.125) until the AC5 cost-side experiment finally ran
+#   (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08):
+#   the same selected set at concurrency 1/4/8 produced ZERO cancelled at every level, and
+#   concurrency = nproc was the wall-clock sweet spot (24s vs 57.5s at 1, 27.3s at 8 on this
+#   4-core box). "Lower concurrency to avoid cancel" was refuted; the derived default is now
+#   nproc (4 on this box). The old hardcoded 8 was a 4.25× oversubscription (17 processes on
+#   4 cores), but the cost side of that oversubscription was never shown to cancel/fail —
+#   the outer's own full-suite verification rounds at laneCount 8 (13+ runs, 2026-08-08) all
+#   show cancelled 0. A later --test-concurrency=N on the command line overrides the derived
+#   default (node --test is last-flag-wins).
 #
 # gap-test-sh-flags-only-form-silently-runs-a-different-suite: the flags-only form
 # (scripts/test.sh --test-concurrency=4, --experimental-test-coverage, ...) MUST keep the default
@@ -361,11 +367,16 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # node --test with concurrency N actually runs ~N × AMPLIFICATION node processes: each worker
 # spawns its own subprocesses. Measured 2026-08-03: a full suite at concurrency 8 peaked at
 # 17 node processes ⇒ ratio ≈ 2.125; a scoped concurrency-2 run of subprocess-heavy plugin tests
-# re-measured 3.0 per worker. The old hardcoded 8 on a 4-core box was a 4.25× oversubscription —
-# the measured steady state of a SINGLE full suite, not a product of concurrency. The default is
-# now derived:
+# re-measured 3.0 per worker. The derived default:
 #   default = max(1, floor(nproc / AMPLIFICATION))
-# which on this box gives floor(4 / 2.1) = 1 (~3 processes, under 4 cores).
+# AMPLIFICATION = 1.0 since the AC5 cost-side experiment finally ran
+# (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08): the same
+# selected set (6 subprocess-heavy plugin test files, 86 tests) at concurrency 1/4/8 gave
+#   c1: 57.5s wall, 0 cancelled · c4: 24.1s, 0 cancelled · c8: 27.3s, 0 cancelled
+# — concurrency = nproc is the wall-clock sweet spot and "lower concurrency to avoid cancel" is
+# refuted (zero cancelled at 4 AND 8). The old 2.1 amplification (which on this box gave 1, a
+# definite ~2.4× wall-clock penalty) was an unproven-conservative guard against oversubscription;
+# the cost side was never measured until now. On this box the default is now floor(4/1.0) = 4.
 #
 # REVERT HISTORY (single source of truth — gap-concurrency-derivation-reverted-but-doc-ac-and-tests-
 # all-still-report-derived): the derived default was TEMPORARILY pinned back to 8 and then restored.
@@ -385,6 +396,15 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 #     escape hatch (`--test-concurrency=N`, pinned there for the 10-min budget), so the derived
 #     default only governs LOCAL default runs, and full-suite-runner.ts already derives laneCount
 #     from nproc.
+#   - 2026-08-08 (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible AC1/AC3):
+#     the AC5 cost-side experiment ran (see above) — zero cancelled at concurrency 4 AND 8, so the
+#     "avoid cancel" guard that justified AMPLIFICATION=2.1 (default 1 on 4 cores) is refuted.
+#     AMPLIFICATION lowered 2.1 → 1.0: the derived default is now nproc (4 on this box). The outer
+#     full-suite runner already verified at laneCount 8 with cancelled 0 across 13+ rounds
+#     (2026-08-08, .quay/verification-round.jsonl) — the oversubscription cost side never produced
+#     a cancelled/fail. The cross-layer TOTAL process budget is the responsibility of
+#     gap-test-concurrency-cap-does-not-scope-nested-spawns (AC4 cross-annotation), NOT this
+#     single-layer default.
 # An EXPLICIT --test-concurrency=N on the command line ALWAYS overrides (node --test is
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
@@ -393,7 +413,7 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 default_concurrency_formula() {
   local ncpu amp
   ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
-  amp="${RESOURCE_GATE_AMPLIFICATION:-2.1}"
+  amp="${RESOURCE_GATE_AMPLIFICATION:-1.0}"
   awk -v n="$ncpu" -v a="$amp" 'BEGIN { c = int(n / a); if (c < 1) c = 1; print c }'
 }
 
