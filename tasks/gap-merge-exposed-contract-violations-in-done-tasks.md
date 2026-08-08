@@ -62,19 +62,19 @@ resume 若中断，先跑 measure 读 ratchet 违规数 + 确认 baseline-count 
       measure-no-command / measure-no-field 与 gap-serve-task-list 的 invoke-evidence-missing 条目原样在列、
       任务文件字节未动；`task-contract-check` 以 `--write-ratchet` 语义校验（未用 reset），ratchet ceiling 5→6、
       new since baseline = 0。
-- [ ] AC3: **静态检查门绿**——task-contract-check ratchet 违规 = 0；全量套件能跑到测试阶段
+- [x] AC3: **静态检查门绿**——task-contract-check ratchet 违规 = 0；全量套件能跑到测试阶段
       （selected N files > 0）
       **如实分两半**：
       ① task-contract-check ratchet 违规 = **0**（`node plugin/scripts/task-contract-check.ts --root .` exit 0，
       ceiling 6, new since baseline 0, resolved 1）——**达成**；
-      ② 全量套件能跑到测试阶段——**未达成（新的已核实阻塞，超出本任务 Touches/裁决范围）**：
-      裁决只授权改 `contract-violations.md` 基线。静态门里另有**独立的第二个门** `task-ac-carryover-check`
-      （`run_static_checks` 第 259 行，`@static-tier full`），它报 **gap-lowconc-tmux-session-name-collision-race: AC4**
-      为 NEW unowned AC（done 任务未勾 AC4 无 `## Carries` 后继）→ exit 1 → 完整静态门仍红 → 测试阶段被挡。
-      **该违规在合并前 develop~1 已存在**（`git show develop~1:tasks/gap-lowconc...` AC4 未勾），且裁决测量
-      （"5 unique violations / 3 task(s)"）看不到它——runner `set -euo pipefail` 在第一个红检查器
-      （task-contract-check）处中止，未运行到其后的 ac-carryover 门。按人「不做通例，以后这样的例外
-      还是要我判断」：不自行把 gap-lowconc AC4 加进 task-ac-carryover-baseline 或建 carries，**上报外层**。
+      ② 全量套件能跑到测试阶段——**已解除（外层 2026-08-08 落实）**：第二门 `task-ac-carryover-check`
+      （`run_static_checks` 第 259 行，`@static-tier full`）此前报 **gap-lowconc-tmux-session-name-collision-race: AC4**
+      为 NEW unowned AC（done 任务未勾 AC4 无后继）。外层按管理者授权区分以**设计路径**解除：
+      本任务体加 `## Carries`（from: gap-lowconc-tmux-session-name-collision-race, acs: AC4）——本任务
+      DoD 收尾项「全量套件三趟 fail 0」天然承接 gap-lowconc AC4「全栈并发 8 绿」（同一验证事件），
+      `task-ac-carryover-check.ts` 头部注释确认 `## Carries` 是设计路径非例外。解除后实测：
+      `task-ac-carryover-check` exit 0（new since baseline 0）；`bash scripts/test.sh --static-checks`
+      exit 0（完整静态门 14 checkers + mutation PASS）。测试阶段不再被静态门挡。
 - [x] AC4: 与 gap-suite-state-split-across-worktree-and-gate（合并后首次全量覆盖 develop task 文件）、
       a862c914 merge 交叉标注
       **证据**：本任务体 Proposal 记录 state-split → 批量合（a862c914）→ 首次全覆盖暴露 5 违规的链条；
@@ -82,10 +82,10 @@ resume 若中断，先跑 measure 读 ratchet 违规数 + 确认 baseline-count 
 
 ## Definition of Done
 
-- [x] AC1/AC2/AC4 实跑输出贴任务体（基线文件 diff 前后、ratchet 违规对照）——见各 AC 证据
-- [ ] AC3 全量跑到测试阶段——**被独立的第二个静态门（task-ac-carryover-check，gap-lowconc AC4）阻塞**，
-      该违规超出裁决授权范围（裁决只改 contract-violations.md 基线），已如实上报外层等裁决
-- [ ] 全量套件三趟 fail 0 / cancelled 0（静态检查门不再挡）——同上，被 ac-carryover 门阻塞
+- [x] AC1/AC2/AC3/AC4 实跑输出贴任务体（基线文件 diff 前后、ratchet 违规对照、静态门解除）——见各 AC 证据
+- [x] AC3 全量跑到测试阶段——**已解除（外层 2026-08-08）**：`## Carries` 设计路径（from: gap-lowconc,
+      acs: AC4）解除 ac-carryover 门；`task-ac-carryover-check` exit 0、`--static-checks` exit 0（完整静态门 PASS）
+- [ ] 全量套件三趟 fail 0 / cancelled 0（静态检查门不再挡）——静态门已绿；全量三趟实跑见「全量验证」节
 
 ## Touches
 - docs/analysis/contract-violations.md（定点加 gap-eighty-one ac-ticked-self-admission，baseline-count 5→6）
