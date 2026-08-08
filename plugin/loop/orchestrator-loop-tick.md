@@ -739,7 +739,7 @@ tick 做一次收尾 pass。
      `$MERGE_TARGET` 的提交已全部并入 `$FORK_BASELINE`）；
    - **invoke**：`git log --oneline $FORK_BASELINE..$MERGE_TARGET`（红窗期不空——`$MERGE_TARGET` 照常接收，
      直到本轮 suiteGreen 才批量合）。
-   - **`--reconcile`（主检出对账，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
+   - **`integration-batch-merge.sh --reconcile`（主检出对账步骤由脚本提供，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
      REF-LEVEL（update-ref CAS，「主检出从不被脚本触碰」）——当主检出正检出的分支就是被推进的
      `$FORK_BASELINE` 时，ref 被从底下换掉后 HEAD/index 变陈旧。**对账步骤由脚本自己提供，调用方不得各自发明**
      （inner 曾发明 `git reset --hard HEAD`，2026-08-08 08:08:24 销毁了 manager 未提交编辑，真实数据丢失一次）：

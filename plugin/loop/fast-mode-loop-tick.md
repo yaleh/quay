@@ -392,7 +392,7 @@ unread = delivered − consumed。本步只读不写回执（消费是人的动�
 - **合并机制**（AC3）：任务合回 `$MERGE_TARGET`（红窗期照常接收——结构性消除停派）；外层
   verification-round-N 批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（fast-forward 无冲突，
   `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync --reconcile`）。
-- **批量合后的主检出对账由脚本提供（`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
+- **`integration-batch-merge.sh --reconcile`（主检出对账步骤由脚本提供，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
   REF-LEVEL（update-ref CAS），主检出正检出的分支若就是被推进的 `$FORK_BASELINE`，ref 被从底下换掉后
   HEAD/index 变陈旧。**对账步骤由 `integration-batch-merge.sh --reconcile` 自己提供，调用方不得各自发明**
   （inner 曾发明 `git reset --hard HEAD`，2026-08-08 08:08:24 销毁了 manager 未提交编辑）：ref 移动前先断言
