@@ -58,6 +58,7 @@ vs `verify-delivery-surface.ts`（能力分类）。**没有任何机械绑定**
 - [ ] scoped 门 `scripts/test.sh --for-task gap-delivery-outline-vs-verify-surface-single-source` 绿
 
 ## Touches
+- tasks/gap-delivery-outline-vs-verify-surface-single-source.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - docs/proposals/quay-product-outline.md（§6 改为派生）
 - plugin/scripts/verify-delivery-surface.ts（单一源 + 漂移检测）

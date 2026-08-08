@@ -56,6 +56,7 @@ extra: {}
 - [ ] scoped 门 `scripts/test.sh --for-task gap-user-scope-install-reinstall-criterion-and-version` 绿
 
 ## Touches
+- tasks/gap-user-scope-install-reinstall-criterion-and-version.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/VERSION（新增，或 git describe 派生）
 - plugin/sync.sh（plugin→user-scope 安装段）或 quay-init（比对检查）

@@ -74,6 +74,7 @@ resume 若中断，先跑 measure 确认 finishedAt 距今秒数，不要假设�
 - [ ] AC1-AC4 实跑输出贴任务体（新旧绿对照 + 拦截/放行）
 
 ## Touches
+- tasks/gap-batch-merge-gate-reads-stale-green.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/loop/orchestrator-loop-tick.md（suiteGreen 定义：加新鲜度）
 - plugin/loop/fast-mode-loop-tick.md（同步 suiteGreen 定义）
 - plugin/scripts/full-suite-runner.ts（若需要写 finishedAt 的规范化）

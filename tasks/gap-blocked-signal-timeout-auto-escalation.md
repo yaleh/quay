@@ -47,6 +47,7 @@ extra:
 - [ ] scoped 门 `scripts/test.sh --for-task gap-blocked-signal-timeout-auto-escalation` 绿
 
 ## Touches
+- tasks/gap-blocked-signal-timeout-auto-escalation.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/inner-blocked-signal.ts（消费超时/自动升级）
 - plugin/test/（AC1/AC2 fixture）

@@ -101,6 +101,7 @@ subset），test-isolation 缺同款机制。
 - [ ] scoped 门 `scripts/test.sh --for-task gap-test-isolation-backlog-44-violations-unmeasured` 绿
 
 ## Touches
+- tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/test-isolation-check.ts（基线 + 棘轮逻辑）
 - plugin/test-framework-policy-exemptions.txt 或等价基线文件（模式复用）

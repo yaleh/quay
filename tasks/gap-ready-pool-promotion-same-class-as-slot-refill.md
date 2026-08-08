@@ -50,6 +50,7 @@ slot-refill 修的是「派发评估」无人问，本条是「补晋评估」�
 - [ ] scoped 门 `scripts/test.sh --for-task gap-ready-pool-promotion-same-class-as-slot-refill` 绿
 
 ## Touches
+- tasks/gap-ready-pool-promotion-same-class-as-slot-refill.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/loop/fast-mode-loop-tick.md（步骤 3.6 无条件执行措辞）
 - docs/analysis/fast-mode-loop-tick.md（部署副本同步）
