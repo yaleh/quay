@@ -42,6 +42,15 @@
 #   control   a task merged into integration during a red window does NOT block; a touch-declaration
 #             imprecision shows up as a task→integration merge conflict, never a silent overwrite.
 #
+#   measure   unmerged_develop_files = `git diff --name-only <merge-base(integration,develop)> <develop>`
+#             | grep -cE '\.(ts|js|mjs|sh)$' stdout 数字段 (three-dot semantics: develop-side code files
+#             that never entered the tested tree; the raw two-dot also counts integration's OWN tested files)
+#   band      unmerged_develop_files = 0 (POST-state: a batch merge may only proceed when the develop-side
+#             code files have been verified together with the integration content; pure .md/tasks pass)
+#   invoke    `git diff --name-only <merge-base> <develop>` (the develop-only surface the suite never saw)
+#   control   negative: develop-side pure .md/tasks files (the 5 files in the 2026-08-08 report) PASS;
+#             develop-side code files (.ts/.js/.mjs/.sh) BLOCK before any ref moves.
+#
 # The helper performs a REF-LEVEL fast-forward (`git update-ref` with a CAS on the old develop tip)
 # or a REF-LEVEL real merge (temp worktree → merge → CAS update-ref), so it never touches the primary
 # working tree and never needs `integration`/`develop` checked out. It exits non-zero — WITHOUT
@@ -74,11 +83,23 @@
 #                porcelain-empty guard first (fail-closed on uncommitted/untracked work, owners
 #                reported), then `git reset --mixed <new develop tip>` — index only, never --hard.
 #
+#   OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result): before ANY merge (ff or real),
+#                the helper validates the MERGE RESULT, not just the integration tip. The suite tested
+#                the INTEGRATION TIP; the batch merge produces integration ⊕ develop. develop-only
+#                changes since the divergence point never entered the tested tree — if any are code
+#                files (.ts/.js/.mjs/.sh), the merge result would ship untested code and the helper
+#                FAILS CLOSED (nothing moved, the offending files reported). Pure .md/tasks files on
+#                the develop side PASS (e.g. the 5 files in the 2026-08-08 report). The gate uses
+#                three-dot semantics (`git diff --name-only <merge-base> <develop>`), NOT the raw
+#                two-dot `git diff integration develop` — the two-dot also lists integration's OWN
+#                tested files, a false positive the gate must avoid.
+#
 # Exit codes:
 #   0  merge performed (ff or real) OR nothing pending (integration already absorbed into develop);
 #      with --dry-run, the ff-ability / divergence surface was reported without moving any ref
 #   1  NOT a fast-forward and no --merge (needs a human), OR a real code conflict in --merge mode
-#      (fail-closed, nothing moved)
+#      (fail-closed, nothing moved), OR the object gate blocked (develop-side code files outside the
+#      tested tree — fail-closed, nothing moved)
 #   2  usage / missing ref
 set -uo pipefail
 
@@ -295,6 +316,44 @@ reconcile_index() {
   return 0
 }
 
+# ── OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result) ───────────────────────────────
+# The suite tested the INTEGRATION TIP; the batch merge produces integration ⊕ develop (the MERGE
+# RESULT). develop-only changes since the divergence point never entered the tested tree — if any are
+# code files, the merge result would ship code that was never verified together with the integration
+# content. This gate FAILS CLOSED (nothing moved) unless unmerged_develop_files = 0.
+#
+# The measure uses THREE-DOT semantics: `git diff --name-only <merge-base(integration,develop)> <develop>`
+# isolates the develop-only surface. The raw two-dot `git diff integration develop` ALSO lists
+# integration's OWN tested files (a file the suite verified would appear as differing) — a false
+# positive this gate must avoid: the defect is develop-side untested code, not integration's tested code.
+check_object_gate() {
+  local mb code_files count
+  mb="$(git -C "${repo_root}" merge-base "refs/heads/${integration_ref}" "refs/heads/${develop_ref}" 2>/dev/null || true)"
+  if [ -z "${mb}" ]; then
+    echo "integration-batch-merge: object-gate: no merge-base between ${integration_ref} and ${develop_ref} — unrelated histories, skipping gate (downstream will fail closed)" >&2
+    echo "integration-batch-merge: measure unmerged_develop_files=0"
+    return 0
+  fi
+  # develop-only changes since the divergence point (the surface the suite never saw).
+  code_files="$(git -C "${repo_root}" diff --name-only "${mb}" "refs/heads/${develop_ref}" 2>/dev/null | grep -E '\.(ts|js|mjs|sh)$' || true)"
+  if [ -z "${code_files}" ]; then
+    echo "integration-batch-merge: measure unmerged_develop_files=0"
+    return 0
+  fi
+  count="$(printf '%s\n' "${code_files}" | grep -c . || true)"
+  echo "integration-batch-merge: measure unmerged_develop_files=${count}"
+  echo "integration-batch-merge:   develop-side code files that never entered the tested tree (${integration_ref} tip):"
+  printf '%s\n' "${code_files}" | sed 's/^/integration-batch-merge:     /'
+  if [ "${dry_run}" -eq 1 ]; then
+    echo "integration-batch-merge: DRY-RUN — object gate WOULD fail closed (no ref moved in dry-run)"
+    return 0
+  fi
+  echo "integration-batch-merge: OBJECT-GATE FAIL-CLOSED — the MERGE RESULT (${integration_ref} ⊕ ${develop_ref}) would ship untested code; nothing moved" >&2
+  echo "integration-batch-merge:   tested tree = ${integration_ref} tip (${integration_tip})" >&2
+  echo "integration-batch-merge:   fix: fan-in the ${develop_ref}-side commit into ${integration_ref} (re-test the merged tree), then re-run" >&2
+  return 1
+}
+
 # Real merge of `integration` into `develop` (merge commit) in a throwaway temp worktree, then advance
 # develop with a CAS on the old tip. Shared-file conflicts auto-resolve develop-authoritative; a real
 # code conflict fails closed (nothing moved). Returns 0 on success, 1 on fail-closed.
@@ -402,6 +461,13 @@ if git -C "${repo_root}" merge-base --is-ancestor "refs/heads/${integration_ref}
   echo "integration-batch-merge: measure integration_ff_merges=0"
   exit 0
 fi
+
+# ── OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result) ────────────────────────────────
+# Validate the MERGE RESULT, not just the integration tip, BEFORE any ref moves. The suite tested the
+# integration tip; the merge produces integration ⊕ develop. develop-side code files that never entered
+# the tested tree ⇒ the merge result would ship untested code ⇒ fail closed (nothing moved). In
+# --dry-run this reports the would-block measure without failing.
+check_object_gate || exit 1
 
 # ── --reconcile: porcelain-empty guard BEFORE any ref moves ──────────────────────────────────────────
 # The guard must run while the index still matches the old HEAD — after the ref moves, the stale index

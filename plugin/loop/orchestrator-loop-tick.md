@@ -739,6 +739,14 @@ tick 做一次收尾 pass。
      `$MERGE_TARGET` 的提交已全部并入 `$FORK_BASELINE`）；
    - **invoke**：`git log --oneline $FORK_BASELINE..$MERGE_TARGET`（红窗期不空——`$MERGE_TARGET` 照常接收，
      直到本轮 suiteGreen 才批量合）。
+   - **对象闸门（`integration-batch-merge.sh` 自带，`gap-batch-merge-gate-validates-tip-not-merge-result`）**：
+     批量合前校验**合并结果**，不是只验 tip——套件测的是 `$MERGE_TARGET` tip，批量合放行的是
+     `$MERGE_TARGET` ⊕ `$FORK_BASELINE` 的合并结果，两者只在 `$FORK_BASELINE` 侧无新提交时才等价。
+     three-dot 判定（`git diff --name-only <merge-base> <$FORK_BASELINE>` 即 `$FORK_BASELINE` 侧自分歧点
+     起的变更）：含代码文件（.ts/.js/.mjs/.sh）⇒ **fail-closed 不移动任何 ref、报出文件清单**——该代码
+     从未进过被测树，合并结果会带上未测代码；纯 .md/tasks 文件放行（2026-08-08 报告那 5 个文件）。与
+     stale-green 不同轴：那是时间轴（绿旧/树旧），这是对象轴（被测对象 ≠ 被放行对象）。`$FORK_BASELINE`
+     侧有代码提交需先 fan-in 到 `$MERGE_TARGET` 补测再批量合。
    - **`integration-batch-merge.sh --reconcile`（主检出对账步骤由脚本提供，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
      REF-LEVEL（update-ref CAS，「主检出从不被脚本触碰」）——当主检出正检出的分支就是被推进的
      `$FORK_BASELINE` 时，ref 被从底下换掉后 HEAD/index 变陈旧。**对账步骤由脚本自己提供，调用方不得各自发明**

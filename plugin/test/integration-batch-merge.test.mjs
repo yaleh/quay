@@ -67,8 +67,10 @@ function commitAll(dir, message) {
   assert.equal(res.status, 0, `commit "${message}" failed: ${res.stderr}`);
 }
 
-// Build a diverged two-line repo. `withCodeConflict` makes BOTH sides touch `code.ts` (a real code
-// conflict); otherwise only known-shared files conflict.
+// Build a diverged two-line repo. `withCodeConflict` makes BOTH sides touch `code.json` (a real code
+// conflict — deliberately NOT one of the object gate's .ts/.js/.mjs/.sh extensions, so the REAL-MERGE
+// code-conflict backstop stays reachable past the object gate, AC3); otherwise only known-shared files
+// conflict.
 function divergedRepo(prefix, { withCodeConflict = false } = {}) {
   const dir = makeTmp(prefix);
   initGitRepo(dir);
@@ -77,7 +79,7 @@ function divergedRepo(prefix, { withCodeConflict = false } = {}) {
   writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick line 1\n", "utf8");
   writeFileSync(join(dir, "orchestration", "queue-state.md"), "queue 1\n", "utf8");
   writeFileSync(join(dir, "tasks", "one.md"), "task 1\n", "utf8");
-  if (withCodeConflict) writeFileSync(join(dir, "code.ts"), "v1\n", "utf8");
+  if (withCodeConflict) writeFileSync(join(dir, "code.json"), "v1\n", "utf8");
   commitAll(dir, "base");
   gitCmd(dir, "branch", "-M", "master");
   gitCmd(dir, "checkout", "-q", "-b", "develop");
@@ -88,7 +90,7 @@ function divergedRepo(prefix, { withCodeConflict = false } = {}) {
   writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick dev\n", "utf8");
   writeFileSync(join(dir, "orchestration", "queue-state.md"), "queue dev\n", "utf8");
   writeFileSync(join(dir, "tasks", "one.md"), "task dev\n", "utf8");
-  if (withCodeConflict) writeFileSync(join(dir, "code.ts"), "dev v2\n", "utf8");
+  if (withCodeConflict) writeFileSync(join(dir, "code.json"), "dev v2\n", "utf8");
   writeFileSync(join(dir, "dev-only.txt"), "dev only\n", "utf8");
   commitAll(dir, "develop direct commit");
 
@@ -96,7 +98,40 @@ function divergedRepo(prefix, { withCodeConflict = false } = {}) {
   gitCmd(dir, "checkout", "-q", "integration");
   writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick int\n", "utf8");
   writeFileSync(join(dir, "tasks", "one.md"), "task int\n", "utf8");
-  if (withCodeConflict) writeFileSync(join(dir, "code.ts"), "int v2\n", "utf8");
+  if (withCodeConflict) writeFileSync(join(dir, "code.json"), "int v2\n", "utf8");
+  writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
+  commitAll(dir, "integration task merge");
+
+  return dir;
+}
+
+// Build a diverged repo where DEVELOP adds a code file (a .ts — one of the object gate's tracked
+// extensions) that INTEGRATION never touches: the exact object-problem shape — develop-side code that
+// never entered the tested tree (the integration tip). The merge would be a real merge; the object gate
+// must fail closed BEFORE any ref moves. `pureMd` instead gives develop ONLY .md/tasks changes (the
+// 2026-08-08 report's 5 files) — the gate must PASS and the real merge proceed.
+function developCodeRepo(prefix, { pureMd = false } = {}) {
+  const dir = makeTmp(prefix);
+  initGitRepo(dir);
+  mkdirSync(join(dir, "orchestration"), { recursive: true });
+  mkdirSync(join(dir, "tasks"), { recursive: true });
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick line\n", "utf8");
+  writeFileSync(join(dir, "tasks", "one.md"), "task 1\n", "utf8");
+  commitAll(dir, "base");
+  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "checkout", "-q", "-b", "develop");
+  gitCmd(dir, "checkout", "-q", "-b", "integration");
+
+  // develop advances: a manager tick (md) AND, unless pureMd, a code file.
+  gitCmd(dir, "checkout", "-q", "develop");
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick dev\n", "utf8");
+  writeFileSync(join(dir, "orchestration", "manager-tick.md"), "manager md\n", "utf8");
+  if (!pureMd) writeFileSync(join(dir, "src-new-code.ts"), "dev code\n", "utf8");
+  commitAll(dir, "develop manager commit");
+
+  // integration receives a task merge (never touches the develop-side code file).
+  gitCmd(dir, "checkout", "-q", "integration");
+  writeFileSync(join(dir, "tasks", "one.md"), "task int\n", "utf8");
   writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
   commitAll(dir, "integration task merge");
 
@@ -187,24 +222,28 @@ test("AC2: --merge auto-resolves shared-file conflicts develop-authoritative and
 // ── AC3 (load-bearing): real code conflicts FAIL CLOSED even with --merge ──────────────────────────
 
 test("AC3 (load-bearing negative control): --merge on a REAL code conflict fails closed, nothing moved", () => {
+  // code.json is a REAL code file but NOT one of the object gate's tracked extensions (.ts/.js/.mjs/.sh),
+  // so the object gate passes (measure 0) and the REAL-MERGE code-conflict backstop is what blocks.
   const dir = divergedRepo("ac3", { withCodeConflict: true });
   try {
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const r = run([batchMerge, "--root", dir, "--merge"]);
     assert.notEqual(r.status, 0, "a real code conflict must fail closed even with --merge");
+    // The object gate does NOT flag .json (it is not a develop-side untested .ts/.js/.mjs/.sh file).
+    assert.match(r.stdout, /measure unmerged_develop_files=0/);
     assert.match(r.stdout, /DIVERGENCE/);
     assert.match(r.stderr, /REAL-MERGE FAIL-CLOSED/);
     // The code-conflict file list is reported.
     assert.match(r.stderr, /code conflict files:/);
-    assert.match(r.stderr, /code\.ts/);
+    assert.match(r.stderr, /code\.json/);
     // The shared conflict is NOT silently overwritten either — it is reported as blocked.
     assert.match(r.stderr, /would auto-resolve develop-authoritative/);
     assert.match(r.stderr, /orchestration\/tick-log\.md/);
     // Nothing moved — develop unchanged, integration NOT absorbed.
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before);
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
-    // No blind --ours/--theirs: develop's code.ts is still develop's version.
-    assert.equal(gitCmd(dir, "show", "develop:code.ts").stdout, "dev v2\n");
+    // No blind --ours/--theirs: develop's code.json is still develop's version.
+    assert.equal(gitCmd(dir, "show", "develop:code.json").stdout, "dev v2\n");
     // No temp worktree leak.
     const wl = gitCmd(dir, "worktree", "list").stdout;
     assert.ok(!/integration-batch-merge\./.test(wl), "temp worktree must be cleaned up after fail-closed");
@@ -244,12 +283,14 @@ test("--dry-run --merge reports the divergence surface AND the shared/code class
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
     const r = run([batchMerge, "--root", dir, "--dry-run", "--merge"]);
     assert.notEqual(r.status, 0, "dry-run on divergence exits non-zero (not a clean FF)");
+    // The object gate runs in dry-run too: code.json is not a gate extension ⇒ measure 0, no would-block.
+    assert.match(r.stdout, /measure unmerged_develop_files=0/);
     assert.match(r.stdout, /DIVERGENCE/);
     assert.match(r.stdout, /conflict classification:/);
     assert.match(r.stdout, /shared \(auto-resolve develop-authoritative\): 2/);
     assert.match(r.stdout, /code \(fail-closed, needs human\):\s+1/);
     assert.match(r.stdout, /orchestration\/tick-log\.md/);
-    assert.match(r.stdout, /code\.ts/);
+    assert.match(r.stdout, /code\.json/);
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), before);
   } finally {
     cleanup(dir);
@@ -416,6 +457,101 @@ test("--reconcile: primary checkout NOT on the advanced branch → reconcile is 
     assert.match(r.stdout, /not 'develop'\) — index refresh not needed/);
     assert.match(r.stdout, /measure integration_ff_merges=0/);
     assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── OBJECT GATE (gap-batch-merge-gate-validates-tip-not-merge-result) ──────────────────────────────
+//
+// The suite tested the INTEGRATION TIP; the batch merge produces integration ⊕ develop (the MERGE
+// RESULT). develop-only changes since the divergence point never entered the tested tree — if any are
+// code files (.ts/.js/.mjs/.sh), the gate fails closed BEFORE any ref moves. Three-dot semantics
+// (`git diff <merge-base> <develop>`) isolate the develop side; the raw two-dot `git diff integration
+// develop` also lists integration's OWN tested files (a false positive this gate must avoid).
+
+test("OBJECT GATE (AC1/AC2): develop-side .ts code never entered the tested tree ⇒ FAIL-CLOSED before any ref moves", () => {
+  const dir = developCodeRepo("objgateblock");
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir, "--merge"]);
+    assert.notEqual(r.status, 0, "develop-side untested code must fail closed even with --merge");
+    assert.match(r.stdout, /measure unmerged_develop_files=1/);
+    // The offending file is reported (the develop-side code that the suite never saw).
+    assert.match(r.stdout, /src-new-code\.ts/);
+    assert.match(r.stderr, /OBJECT-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /tested tree = integration tip/);
+    // Nothing moved: develop unchanged, integration NOT absorbed.
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    // The develop-side code file is untouched on develop.
+    assert.equal(gitCmd(dir, "show", "develop:src-new-code.ts").stdout, "dev code\n");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("OBJECT GATE (AC1 negative control): develop-side pure .md/tasks files PASS and the real merge proceeds", () => {
+  // The 2026-08-08 report's shape: develop advanced with .md/tasks only (orchestration/manager-*.md +
+  // tasks/*.md) — the gate must NOT block and the real merge must absorb integration.
+  const dir = developCodeRepo("objgatemd", { pureMd: true });
+  try {
+    const r = run([batchMerge, "--root", dir, "--merge"]);
+    assert.equal(r.status, 0, `pure-md develop-side changes must pass the object gate: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /measure unmerged_develop_files=0/);
+    assert.match(r.stdout, /measure integration_ff_merges=0/);
+    // Integration absorbed; the merge produced a real merge commit (develop-only .md survives).
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "0");
+    assert.equal(gitCmd(dir, "show", "develop:orchestration/manager-tick.md").stdout, "manager md\n");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("OBJECT GATE (AC1 negative control): a fast-forward of TESTED code (integration's own .ts) is NOT a false positive", () => {
+  // integration is a descendant of develop (FF): the three-dot develop-side surface is EMPTY, so a
+  // code file that integration itself added (and the suite tested on the integration tip) must NOT be
+  // flagged — the gate is about develop-side untested code, not integration's tested code.
+  const dir = makeTmp("objgateff");
+  try {
+    initGitRepo(dir);
+    mkdirSync(join(dir, "orchestration"), { recursive: true });
+    writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick base\n", "utf8");
+    commitAll(dir, "base");
+    gitCmd(dir, "branch", "-M", "master");
+    gitCmd(dir, "checkout", "-q", "-b", "develop");
+    writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick dev\n", "utf8");
+    commitAll(dir, "dev-1");
+    gitCmd(dir, "checkout", "-q", "-b", "integration");
+    // integration adds TESTED code.
+    writeFileSync(join(dir, "feature.ts"), "feature v1\n", "utf8");
+    commitAll(dir, "integration feature (tested)");
+
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `FF of tested code must pass the object gate: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /measure unmerged_develop_files=0/);
+    assert.match(r.stdout, /fast-forwarded to integration/);
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "show", "develop:feature.ts").stdout, "feature v1\n");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("OBJECT GATE: dry-run reports the would-block measure and the offending file WITHOUT failing (no ref moved)", () => {
+  const dir = developCodeRepo("objgatedry");
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const r = run([batchMerge, "--root", dir, "--dry-run", "--merge"]);
+    // Dry-run on divergence exits non-zero regardless (NOT a clean FF) — but the object gate reports
+    // the would-block without a fail-closed verdict of its own.
+    assert.notEqual(r.status, 0);
+    assert.match(r.stdout, /measure unmerged_develop_files=1/);
+    assert.match(r.stdout, /src-new-code\.ts/);
+    assert.match(r.stdout, /object gate WOULD fail closed/);
+    assert.ok(!/OBJECT-GATE FAIL-CLOSED/.test(r.stderr), "dry-run must not emit the fail-closed verdict");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
   } finally {
     cleanup(dir);
   }
