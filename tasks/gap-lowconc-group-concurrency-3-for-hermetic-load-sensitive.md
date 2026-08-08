@@ -168,6 +168,7 @@ dead-code-after-return（0 违规）✓ —— 全过，EXIT=0。
 - plugin/test/capability-catalog / quay-init-loop-{driver,runtime,vendor} / npm-pack-e2e /
   worktree-root-fs-check / runtime-landing / cold-start-skill / quay-init-check-drift（install 族 → lowconc）
 - tasks/gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles.md（AC5 交叉标注）
+- tasks/gap-serial-group-recompose-nested-runner-criterion.md（AC5 交叉标注——lowconc 组成员确认：checker-cost/session-topology/install-config-driven-e2e 依嵌套 runner 判据归入 lowconc）
 
 ## Dispatch review
 
