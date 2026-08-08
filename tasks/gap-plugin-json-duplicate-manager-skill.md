@@ -28,9 +28,30 @@ plugin bundle）/ 58927990（merge）。重复条目大概率是 AC16 添加 man
 
 ## Acceptance Criteria
 
-- [ ] AC1: plugin.json commands[] 恰好 13 个 skill 路径，无重复
-- [ ] AC2: plugin-packaging.test.mjs 隔离跑绿
-- [ ] AC3: commands[] 与磁盘 skill 目录精确一致（deepEqual）
+- [x] AC1: plugin.json commands[] 恰好 13 个 skill 路径，无重复
+- [x] AC2: plugin-packaging.test.mjs 隔离跑绿
+- [x] AC3: commands[] 与磁盘 skill 目录精确一致（deepEqual）
+
+## Definition of Done
+
+- [x] AC1-AC3 全勾（plugin.json commands[] 恰好 13 个 skill 路径无重复；plugin-packaging.test.mjs 隔离绿；commands[] 与磁盘 skill 目录精确一致 deepEqual）
+- [x] 修后 invoke 实测 14/13 → 13/13（`python3 -c` len==len(set)==13）
+- [x] scoped 门 `scripts/test.sh --for-task gap-plugin-json-duplicate-manager-skill` 绿（fail 0 / cancelled 0）
+
+## Evidence（2026-08-08，task subagent，worktree plugin-json）
+
+重复 manager/SKILL.md 条目已在 develop HEAD（含 ba833c14 "dedup plugin.json manager skill entry"）去重，
+本任务分叉基线 develop 已含修复——故无需再改 plugin.json（`git diff` 空），逐项实测如下：
+
+- invoke：`python3 -c "..."` → `skills count: 13 unique: 13`（14/13 → 13/13，Contract control 命中）
+- AC2 隔离：`node --test plugin/test/plugin-packaging.test.mjs` → `tests 34 / pass 34 / fail 0 / cancelled 0`
+  （工作树需 node_modules 符号链接 + sync-vendor.sh 产出 gitignore 的 vendored dist 包 + 复制 gitignore 的
+  `.quay/config.yml`——均为本地环境，非提交物）
+- AC3 deepEqual：测试 "plugin.json is valid JSON and declares the 13 bundled skills" 的
+  `assert.deepEqual(listedSkills, diskSkills)` 绿（13 磁盘 skill 目录 == commands[] 13 条唯一路径）
+- scoped 门：`bash scripts/test.sh --for-task gap-plugin-json-duplicate-manager-skill --allow-thin` →
+  exit 0，task-contract-check: no violations；selector 对本任务 Touches（plugin.json + 任务自身文件）解析 0 个
+  测试文件（thin，--allow-thin 放行），scoped 静态检查全绿
 
 ## Definition of Done
 

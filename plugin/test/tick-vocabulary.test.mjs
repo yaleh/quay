@@ -62,10 +62,18 @@ const SAFE_SUBSTRINGS = [
   "concurrent-batch-scheduler",     // 40→6 consolidated dispatch (SPEC-instruments-behind-one-entry.md):
                                     // the docs invoke it via `quay-dispatch.ts concurrent-batch-scheduler`
                                     // (subcommand name, no `.ts` suffix) — same 机件真名 as the file form.
+  "quay-dispatch.ts",               // 40→6 consolidated dispatch ENTRY POINT (SPEC-instruments-behind-one-entry.md):
+                                    // the docs reference the 6 grouped entry points (`quay-dispatch.ts`,
+                                    // `quay-branch.ts`, …) as the surface form — entry-point reference is the
+                                    // correct 机件真名, not gating prose (gap-tick-vocabulary-whitelist-stale).
   "integration-batch-merge.sh",
   "integration-batch-merge",        // 40→6 consolidated branch (SPEC-instruments-behind-one-entry.md):
                                     // the docs invoke it via `quay-branch.ts integration-batch-merge`
                                     // (subcommand name, no `.sh` suffix) — same 机件真名 as the file form.
+  "quay-branch.ts",                 // 40→6 consolidated branch ENTRY POINT (SPEC-instruments-behind-one-entry.md):
+                                    // the docs reference the 6 grouped entry points as the surface form —
+                                    // entry-point reference is the correct 机件真名, not gating prose
+                                    // (gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms).
   "gap-closure-sync-is-the-true-batch-boundary",
   "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
   "gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge",  // 任务 id (batch-merge boundary gate): the

@@ -85,6 +85,14 @@ subset），test-isolation 缺同款机制。
 > **B类挂钟依赖是并发红的另一半根因**（`gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`，
 > 2026-08-08 已落地 R9 规则）：session-liveness 等 B类文件经 `@test-group lowconc` 隔离路由，与本任务的
 > A/D 类修复方向不同、同源并发 8 恒红。
+>
+> **交叉标注（2026-08-07，`gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles` 落地）**：
+> **R3 嵌套 spawn 欠账（spawns-test-sh）成本收掉**——runner-grouping 的 flags-only 用例原本在 serial 段
+> **嵌套跑 3× 完整 governance 子套件**（每次 81 文件）只为比较用例计数（295.6s，serial 段 28%）。该任务
+> 把它改成 `--list-files` 列表比对（不跑任何测试），**嵌套 spawn 成本归零**（293.9s → 8.2s），serial 路由
+> 保留（`@test-group serial` 不动）。本任务基线账里 runner-grouping 的 spawns-test-sh=1 嵌套实例因此从
+> 「负载下真实红」降为「已消除的嵌套成本」——剩余 spawns-test-sh 实例（select-tests-for-touches /
+> test-coverage-check）不在本任务 Touches 内，仍待基线化。
 
 ## Touches
 

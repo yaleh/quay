@@ -31,9 +31,37 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: manager SKILL 索引全部 16 个 on-disk SPEC-*.md
-- [ ] AC2: manager-layer-shipping.test.mjs AC6 隔离跑绿
-- [ ] AC3: 索引格式与现有条目对齐（一行一个，带说明）
+- [x] AC1: manager SKILL 索引全部 on-disk SPEC-*.md（实测 on-disk 现为 **17** 份——任务填报时 16，08-08 新增 `SPEC-inbox-service-2026-08-08.md`；AC6 测试机械要求索引每个 on-disk SPEC，故索引补全至 17 份全覆盖）
+- [x] AC2: manager-layer-shipping.test.mjs AC6 隔离跑绿
+- [x] AC3: 索引格式与现有条目对齐（一行一个，带说明）
+
+## Definition of Done
+
+- [x] AC1-AC3 全勾（manager SKILL 索引全部 17 个 on-disk SPEC-*.md；manager-layer-shipping.test.mjs AC6 隔离绿；索引格式与现有条目对齐）
+- [x] 修后 invoke 实测 MISSING → 0（`for f in orchestration/SPEC-*.md; do grep -q "$(basename $f)" plugin/skills/manager/SKILL.md || echo MISSING; done` 无输出）
+- [x] scoped 门 `scripts/test.sh --for-task gap-manager-skill-index-missing-new-specs` 绿（fail 0 / cancelled 0）
+
+### 完成证据（2026-08-08 内层执行）
+
+**DoD invoke（修后，无 MISSING 输出）**：
+```
+$ for f in orchestration/SPEC-*.md; do grep -q "$(basename $f)" plugin/skills/manager/SKILL.md || echo "MISSING $(basename $f)"; done
+（无输出 = 17/17 全部索引）
+```
+
+**AC6 隔离跑（pass 7 / fail 0 / cancelled 0）**：
+```
+$ node --test plugin/test/manager-layer-shipping.test.mjs
+✔ AC6 — the manager SKILL indexes every on-disk orchestration/SPEC-*.md (index only, no batch crystallization) (2.258384ms)
+ℹ tests 7  ℹ pass 7  ℹ fail 0  ℹ cancelled 0
+```
+
+**改动**：`plugin/skills/manager/SKILL.md` — ①「Methodology sources」索引清单补
+`SPEC-inbox-service-2026-08-08.md`（17/17）；② §7「方法论来源（AC6）」索引表补 3 行
+（`SPEC-branching-model-integration-branch-2026-08-05.md` / `SPEC-integration-architecture-2026-08-05.md`
+/ `SPEC-inbox-service-2026-08-08.md`），计数 "14 份" → "17 份"。原 2 个缺失 SPEC
+（branching-model / integration-architecture）已在 `ba833c14`（2026-08-06）进过 Methodology sources
+清单但未进 §7 索引表；本次补全 §7 表使其与 on-disk 全量对齐。
 
 ## Definition of Done
 
@@ -48,7 +76,7 @@ extra:
 
 ## Contract
 
-measure   spec_index_ok = `node --test plugin/test/manager-layer-shipping.test.mjs 2>&1 | grep -c '# pass'` stdout 数字段
+measure   spec_index_ok = `node --test plugin/test/manager-layer-shipping.test.mjs 2>&1 | grep -c 'pass [0-9]'` stdout 数字段（2026-08-08 内层更正：原 `# pass` 是 TAP reporter 形态，node 25 默认 spec reporter 输出 `ℹ pass N`——`# pass` 恒 0；改 `pass [0-9]` 匹配 `ℹ pass 7`，实测 1）
 band      spec_index_ok >= 1（AC6 隔离跑绿）
 invoke    `for f in orchestration/SPEC-*.md; do grep -q "$(basename $f)" plugin/skills/manager/SKILL.md || echo "MISSING $(basename $f)"; done`
 control   当前 MISSING 2 个；修后 0

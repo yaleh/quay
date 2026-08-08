@@ -140,6 +140,17 @@ resume 若中断，先跑 measure 读 serial 组成员数与套件状态
   worktree 验证预算；`full-suite-runner.ts --lane-count 8` 的命令不变（`bash scripts/test.sh --test-concurrency=8`），
   serial 阶段由 test.sh 内部追加，runner 的 fail/cancelled 汇总覆盖两个阶段。
 
+### 交叉标注（2026-08-07，`gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles` 落地）
+
+serial 路由是**机制不是修复**——`runner-grouping.test.mjs` 的 flags-only 用例被路由到 serial 段后，
+它仍在串行阶段**跑 3× 完整 governance 子套件**（每次 81 文件）只为比较用例计数，占 serial 段 295.6s
+（28%）。`gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles` 把这条「路由非修复」的
+成本收掉：flags-only 用例改用 `--list-files` **列表比列表**（不跑任何测试），**293.9s → 8.2s**（36×）；
+install 族（quay-init-loop-* / runtime-landing / install-config-driven-e2e）共享只读 laydown 模板
+（一次真实安装 → `cp -a` → 各测试只做自己的 delta，单测试 ~6s → ~50-150ms）；B 类挂钟（session-liveness
+等）**未缩短任何等待窗口**（R8 原则，serial 隔离保留）。serial 段投影从 1080s 降到 ~720-750s（-32~35%），
+≥45% 目标的残余大头是 B 类挂钟与需真实首装的 install 测试——均超出本任务 Touches。
+
 ## Touches
 - scripts/test.sh（serial 组路由）
 - plugin/test/runner-grouping.test.mjs（A类 serial + D类夹具保留，快照侧排除）

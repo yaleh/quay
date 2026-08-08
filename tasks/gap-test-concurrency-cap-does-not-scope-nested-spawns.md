@@ -151,3 +151,18 @@ over90-budget-are-mathematically-incompatible` 共享同一个「跨层总预算
 worktree A 都读同一预算）。**勿拆开修**：那一边只改单层默认，不声称解决超订总量；总量收敛是这一边的
 判据（AC2「全仓进程数显著低于 17-19」）。两边各自落地后，`cap=2 × 并发4`（预算从槽位移到并发）才是
 可验证的最终形态。
+
+## 交叉标注（AC4，2026-08-08，`gap-worktree-scoped-runs-consume-resources-but-produce-no-signal`）
+
+**资源治理的两个正交轴——本任务落「总预算」，那边落「优先级」。** 2026-08-07 实测的僵局（inner-panel
+worktree 16 个 node --test 吃满机器、主仓套件被资源闸 WAIT 挡 56 分钟、worktree 自身无状态文件）有
+两个可修面，分属两个任务：
+
+| 轴 | 归属 | 机制 |
+|---|---|---|
+| **跨层总预算**（总量：worktree 不该起 16 个 node --test） | 本任务（concurrency-cap） | 共享进程预算权威，各层都读它（AC1/AC2） |
+| **主仓 vs worktree 优先级**（总量暂时降不下来时，主仓套件不被 worktree 负载永久挡） | `gap-worktree-scoped-runs-consume-resources-but-produce-no-signal` | 资源闸 `--main-repo-priority`：worktree scoped 负载（可延后）存在时放行主仓全量（信号）；gate 报告 `worktree_node_tests` 让 worktree 负载可见 |
+
+两边是互补的：**预算轴**从根上防止「一 Worktree 独占 4 核」；**优先级轴**在预算轴尚未落地（或总量
+仍超订）时，保证「在等的信号」不被卡死。本任务 AC2 判据（全仓进程数 < 17-19）与那边的 AC3 负控制
+（主仓套件在 worktree 重负载下仍能跑）各自独立成立，合起来覆盖「资源黑洞 + 无信号输出」的完整形态。
