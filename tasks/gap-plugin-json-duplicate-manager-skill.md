@@ -77,3 +77,7 @@ resume    修完先跑 plugin-packaging 隔离，再进全量
 reviewer: outer
 at: 2026-08-06T14:4xZ
 changed: 全量 suite 分诊确认的真实缺陷（merge 暴露非引入）——分别: nativeProviderDir 未定义(98e23f5b 删定义留使用)、plugin.json 重复 manager/SKILL.md、manager SKILL 缺 2 个 SPEC 索引。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`d=json.load(open('plugin/.claude-plugin/plugin.json'));`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

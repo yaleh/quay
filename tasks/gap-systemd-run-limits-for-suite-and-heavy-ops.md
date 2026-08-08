@@ -176,3 +176,7 @@ changed: 任务从 integration 分叉实现并提交（fork baseline = integrati
   systemdRun 字段，cgroup 属性证据落盘 suite-cgroup-evidence.txt；AC1-AC6 全勾（见 Evidence）。Contract
   measure 由 `systemctl --user status` 改为 `systemctl --user show`（status 视图不含属性字面量，show 视图
   含 MemoryMax/CPUQuotaPerSecUSec/TasksMax）。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`systemd-run --user --scope -p MemoryMax=4G -p CPUQuota=200% -p TasksMax=200 bash -c 'echo ok'`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

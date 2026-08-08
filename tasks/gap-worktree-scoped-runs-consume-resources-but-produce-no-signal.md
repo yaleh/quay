@@ -162,3 +162,7 @@ resource-gate 两个测试文件（2/6 Touches → --allow-thin 放行）。
 
 **活系统快照**：当前 `worktree_node_tests=4`（/tmp/quay-suite-int 的 4 个 node --test 属 linked worktree）、
 `caller_scope=worktree`（本 worktree 内调用）——与 `ps` 实测一致（cwd 判定比 args grep 更全：args 版只捕 3）。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`'/quay-worktrees/'`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

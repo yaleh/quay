@@ -189,3 +189,7 @@ $ ls .quay           # No such file or directory（不再铺任何东西）
 - `bash scripts/test.sh packages/quay/test/cli.test.mjs` → **pass**（顶层 --help Usage synopsis 断言不回归）
 - `bash scripts/test.sh --for-task gap-cli-quay-init-collides-with-the-canonical-slash-quay-init --allow-thin` → task-contract-check: **no violations**
 - `bash scripts/test.sh` 全量 → **exit 137（OOM kill）+ 49 个既有门接线失败**（`gate(...) is not a function`，registry 缺 vmeta-lag/dogfood-evidence 等）；本次改动未引入新失败，见 DoD2
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`cd <tmp> && quay init --loop --dry-run; echo $?`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

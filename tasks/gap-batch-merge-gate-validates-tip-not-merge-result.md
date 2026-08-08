@@ -183,3 +183,7 @@ changed: 管理者 2026-08-08 实测报告（7094ba88 双亲 = develop tip + int
   本次全 .md 无害但结构性缺口成立；与 stale-green 不同轴、不同判据形态）。外层独立复核：
   git diff --name-only e8cc87de..develop 非空（5 文件，含 2 个已收尾任务）；integration tip ==
   被测点 e8cc87de；绿 fresh（31s 间隔）——发现成立，独立立案。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`git diff --name-only <integration tip>..develop`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）

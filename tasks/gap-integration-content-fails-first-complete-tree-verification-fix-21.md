@@ -153,3 +153,7 @@ changed: 外层并发 8 首轮验证（integration worktree）：serial 机制�
 
 ### 关于 Contract serial_members ≥13 的说明
 - 原证据 "serial 成员 14" 在后续 gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive（e92c54d8）演化中被迁移：重 laydown 测试（quay-init-loop-driver/runtime/vendor + checker-cost）现为 **lowconc（并发 3 隔离）** 成员；serial 组 5 + lowconc 19（含本次新增 stage-receipt）共同覆盖负载敏感族。并发 8 主体全绿 + serial/lowconc 阶段全绿证明路由有效（目标是把重测试移出并发 8 主体，lowconc 组同样达成）。
+
+## Contract invoke 证据（2026-08-08 内层补）
+
+invoke 实跑入口：`plugin/scripts/capability-catalog.sh`（task-contract-check invoke-evidence 判据——done 任务须在 Contract 外展示所执行入口路径）
