@@ -72,19 +72,30 @@ resume 若中断，先跑 measure 确认当前对账步骤是否含 --hard，不
 
 ## Acceptance Criteria
 
-- [ ] AC1: **对账步骤由脚本提供**——`integration-batch-merge.sh`（或其后置）提供主检出对账步骤，
-      不再让调用方各自发明
-- [ ] AC2: **不用 --hard**——对账用 `--mixed`（刷新 index 不碰工作区）；工作区未提交内容保留
-- [ ] AC3: **确需 --hard 的前置断言**——若某路径确需 --hard，前置 `git status --porcelain` 为空，
-      非空即失败退出并报出属主（不静默毁数据）
-- [ ] AC4: **Land 锁边界**——文档明确「锁防交错不防销毁，拿到锁≠能动工作区」；共享主检出对账
-      不得覆盖共存会话的未提交内容
-- [ ] AC5: 与 gap-batch-merge-gate-reads-stale-green / gap-batch-merge-gate-validates-tip-not-merge-result
-      交叉标注（批量合家族：闸门/对象/对账）
+- [x] AC1: **对账步骤由脚本提供**——`integration-batch-merge.sh` 新增 `--reconcile`（`reconcile_guard()` +
+      `reconcile_index()`，REF-LEVEL 批量合后主检出 HEAD/index 对账），调用方不再各自发明。
+      实跑：`integration-batch-merge.sh --root <repo> --reconcile` 在干净主检出上 guard 通过 → FF →
+      `git reset --mixed <新 tip>`，index 刷新（`git diff --cached` 空）；测试
+      `plugin/test/integration-batch-merge.test.mjs` 3 条新用例（clean / fail-closed / non-develop
+      checkout no-op）全绿。
+- [x] AC2: **不用 --hard**——对账用 `git reset --mixed <新 tip>`（只刷新 index 不碰工作区）；工作区
+      未提交内容保留。实跑负控制对照：`--mixed` 后未提交编辑仍在（grep 命中 1），`--hard` 后丢失
+      （命中 0）；测试断言 --reconcile 输出/stderr 绝不含 `reset --hard`。
+- [x] AC3: **确需 --hard 的前置断言**——`reconcile_guard()` 在 ref 移动前断言
+      `git status --porcelain` 为空，非空即失败退出（exit 1）、报出 porcelain 属主、不移动任何 ref。
+      实跑：未提交 manager 编辑（`orchestration/manager-phase-goal.md`）→ FAIL-CLOSED，develop 未动、
+      编辑保留、porcelain 属主上报。
+- [x] AC4: **Land 锁边界**——`plugin/loop/orchestrator-loop-tick.md` 步骤 3b + `plugin/loop/
+      fast-mode-loop-tick.md` 合并机制两处文档明确「锁防交错不防销毁——拿到锁≠能动工作区；共享主检出
+      对账不得覆盖共存会话的未提交内容」。
+- [x] AC5: 与 gap-batch-merge-gate-reads-stale-green / gap-batch-merge-gate-validates-tip-not-merge-result
+      交叉标注（批量合家族：闸门/对象/对账）——已在两任务体加「交叉标注（gap-batch-merge-reconcile-…）」
+      节。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（--mixed 对账保留未提交 + 前置断言非空拦截对照）
+- [x] AC1-AC5 实跑输出贴任务体（--mixed 对账保留未提交 + 前置断言非空拦截对照）——见各 AC 实跑注；
+      另见测试 `plugin/test/integration-batch-merge.test.mjs`（11 用例全绿，含 3 条 --reconcile 新用例）。
 
 ## Touches
 - plugin/scripts/integration-batch-merge.sh（提供对账步骤 / 后置命令）

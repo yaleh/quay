@@ -28,7 +28,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -311,6 +311,110 @@ test("--merge: develop deletes a shared file, integration modifies it ⇒ kept d
     // develop-authoritative = the file stays deleted on develop.
     const ls = gitCmd(dir, "ls-tree", "--name-only", "develop", "orchestration/").stdout;
     assert.ok(!ls.includes("tick-log.md"), "tick-log.md must stay deleted on develop (develop-authoritative)");
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── --reconcile: primary-checkout reconcile (gap-batch-merge-reconcile-destroys-uncommitted-work) ──
+//
+// The batch merge is REF-LEVEL (update-ref CAS); when the primary checkout has the advanced branch
+// checked out, its HEAD/index go STALE after the merge. The reconcile is provided by the script
+// (`--reconcile`): a porcelain-empty guard runs BEFORE any ref moves (fail-closed on uncommitted/
+// untracked work — the guard that would have caught the 2026-08-08 08:08:24 `git reset --hard`
+// incident), and the post-merge reconcile is `git reset --mixed <new tip>` (index only, never --hard,
+// working tree untouched).
+//
+// Build a repo where the primary checkout ends ON develop (the branch the batch merge advances),
+// with integration a fast-forwardable descendant — the exact stale-index scenario --reconcile handles.
+function ffRepoOnDevelop(prefix) {
+  const dir = makeTmp(prefix);
+  initGitRepo(dir);
+  mkdirSync(join(dir, "orchestration"), { recursive: true });
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick dev\n", "utf8");
+  writeFileSync(join(dir, "orchestration", "manager-phase-goal.md"), "manager base\n", "utf8");
+  commitAll(dir, "base");
+  gitCmd(dir, "branch", "-M", "master");
+  gitCmd(dir, "checkout", "-q", "-b", "develop");
+  writeFileSync(join(dir, "dev-only.txt"), "dev only\n", "utf8");
+  commitAll(dir, "dev-1");
+  gitCmd(dir, "checkout", "-q", "-b", "integration");
+  writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick int\n", "utf8");
+  writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
+  commitAll(dir, "int-1");
+  // Primary checkout ends on develop at dev-1 (clean, index in sync with the OLD HEAD).
+  gitCmd(dir, "checkout", "-q", "develop");
+  return dir;
+}
+
+test("--reconcile: clean primary checkout → guard passes, FF advances develop, `git reset --mixed` refreshes the index and leaves the working tree untouched", () => {
+  const dir = ffRepoOnDevelop("reconcileclean");
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    const intTip = gitCmd(dir, "rev-parse", "integration").stdout.trim();
+    assert.notEqual(intTip, devBefore);
+
+    const r = run([batchMerge, "--root", dir, "--reconcile"]);
+    assert.equal(r.status, 0, `--reconcile should succeed on a clean tree: ${r.stdout}${r.stderr}`);
+    // Guard passed (porcelain empty) and the post-merge reconcile is a --mixed reset.
+    assert.match(r.stdout, /reconcile: primary checkout clean \(porcelain empty\)/);
+    assert.match(r.stdout, /reconcile: git reset --mixed/);
+    assert.match(r.stdout, /reconcile: index refreshed to develop tip/);
+    // NEVER --hard anywhere in the reconcile path.
+    assert.ok(!/reset --hard/.test(r.stdout + r.stderr), "--reconcile must never invoke git reset --hard");
+
+    // develop advanced to the integration tip (FF), and integration absorbed.
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), intTip);
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+
+    // Index refreshed: no staged changes vs the new HEAD (the stale old-vs-new tree is gone).
+    assert.equal(gitCmd(dir, "diff", "--cached").stdout.trim(), "", "index must match the new develop tip after --mixed");
+
+    // Working tree UNTOUCHED: tick-log.md still holds the OLD develop content (dev-1), not int-1.
+    assert.equal(readFileSync(join(dir, "orchestration", "tick-log.md"), "utf8"), "tick dev\n",
+      "--mixed must not overwrite working-tree files");
+    // The honest old-vs-new diff surfaces as unstaged changes, NOT staged ones.
+    const porcelain = gitCmd(dir, "status", "--porcelain").stdout;
+    assert.ok(!/^[^ ] /.test(porcelain), "no staged (index-vs-HEAD) entries should remain: ${porcelain}");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("--reconcile: uncommitted primary-checkout edit → FAIL CLOSED before any ref moves, edit preserved, owners reported", () => {
+  const dir = ffRepoOnDevelop("reconcilefail");
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    // The incident: a manager's uncommitted edit to manager-phase-goal.md.
+    writeFileSync(join(dir, "orchestration", "manager-phase-goal.md"), "manager base\nMANAGER EDIT\n", "utf8");
+    assert.equal(gitCmd(dir, "status", "--porcelain").stdout.trim(), "M orchestration/manager-phase-goal.md");
+
+    const r = run([batchMerge, "--root", dir, "--reconcile"]);
+    assert.notEqual(r.status, 0, "--reconcile must fail closed on uncommitted work");
+    // Fail-closed verdict + the owner (file) surface reported.
+    assert.match(r.stderr, /reconcile FAIL-CLOSED/);
+    assert.match(r.stderr, /orchestration\/manager-phase-goal\.md/);
+    assert.match(r.stderr, /NOT moving any ref/);
+    // Nothing moved: develop unchanged, integration NOT absorbed.
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    // The edit is preserved on disk.
+    assert.match(readFileSync(join(dir, "orchestration", "manager-phase-goal.md"), "utf8"), /MANAGER EDIT/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("--reconcile: primary checkout NOT on the advanced branch → reconcile is a no-op (guard skipped), the merge still proceeds", () => {
+  // The divergedRepo fixture leaves the primary checkout on `integration`; advancing `develop` does
+  // NOT stale its index, so --reconcile must skip the guard/reset yet still perform the real merge.
+  const dir = divergedRepo("reconcilenop");
+  try {
+    const r = run([batchMerge, "--root", dir, "--merge", "--reconcile"]);
+    assert.equal(r.status, 0, `--reconcile --merge on a non-develop checkout should still merge: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /not 'develop'\) — index refresh not needed/);
+    assert.match(r.stdout, /measure integration_ff_merges=0/);
     assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
   } finally {
     cleanup(dir);

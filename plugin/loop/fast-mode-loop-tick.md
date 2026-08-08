@@ -391,7 +391,14 @@ unread = delivered − consumed。本步只读不写回执（消费是人的动�
   touches 与 `$MERGE_TARGET` 上未验证任务相交 ⇒ `$MERGE_TARGET`）。
 - **合并机制**（AC3）：任务合回 `$MERGE_TARGET`（红窗期照常接收——结构性消除停派）；外层
   verification-round-N 批量合 `$MERGE_TARGET`→`$FORK_BASELINE`（fast-forward 无冲突，
-  `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET"`）。
+  `plugin/scripts/integration-batch-merge.sh --develop "$FORK_BASELINE" --integration "$MERGE_TARGET" --sync --reconcile`）。
+- **`integration-batch-merge.sh --reconcile`（主检出对账步骤由脚本提供，`gap-batch-merge-reconcile-destroys-uncommitted-work`）**：批量合是
+  REF-LEVEL（update-ref CAS），主检出正检出的分支若就是被推进的 `$FORK_BASELINE`，ref 被从底下换掉后
+  HEAD/index 变陈旧。**对账步骤由 `integration-batch-merge.sh --reconcile` 自己提供，调用方不得各自发明**
+  （inner 曾发明 `git reset --hard HEAD`，2026-08-08 08:08:24 销毁了 manager 未提交编辑）：ref 移动前先断言
+  `git status --porcelain` 为空，非空即失败退出并报出属主；合后 `git reset --mixed <新 tip>` 刷新 index，
+  **绝不用 --hard**（`--mixed` 只刷新 index 不碰工作区，未提交内容保留）。**Land 锁边界**：锁防交错不防销毁，
+  拿到锁≠能动工作区——共享主检出对账不得覆盖共存会话的未提交内容。
 - **单线（默认）退化**：`$FORK_BASELINE == $MERGE_TARGET == master` 时本节退化为「独立任务从 master
   分叉、合回 master」——`fork-baseline.ts --develop master --integration master` 恒返回 master
   （`master..master` 空，无未验证任务），`integration-batch-merge.sh` 为无操作——与未做 branch cutover
