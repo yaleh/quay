@@ -68,6 +68,17 @@
 # REPO_ROOT/tmp, relying on the gitignored tmp/ dir). 47 -> 44: ALL THREE were FIXED to os.tmpdir()
 # roots, so no R8 entry remains. The `# baseline-count` ceiling is permanent and unchanged at 51.
 #
+# Backlog measurement (2026-08-08, gap-test-isolation-backlog-44-violations-unmeasured AC1/AC2): the
+# 44-entry backlog was MEASURED and confirmed against the live scan — `test-isolation-check.ts --list`
+# reports exactly these 44 (fixed-path-write=12 / shared-build-artifact-write=1 / spawns-test-sh=3 /
+# process-exit-1=7 / mkdtemp-no-cleanup=21 / live-data-dir-write=0 / shared-root-mkdtemp=0), the same
+# count the 2026-08-06 red-window triage hand-diffed from a rotated-out round1 log. The shrink-only
+# ratchet was empirically re-verified: a NEW violation (a temporary zz-* fixture added to the glob)
+# makes the check exit 1 with the "no entry" C1 failure; the existing 44 backlog keeps the check at
+# exit 0. runner-grouping.test.mjs:spawns-test-sh is the nested-spawn concurrent-trigger instance,
+# recognized as KNOWN-LOAD-SENSITIVE (kind nested-spawn) in red-window triage (cross-annotated with
+# gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage, AC5).
+#
 # The scanner (plugin/scripts/test-isolation-check.ts) REPORTS every current violation on every
 # scripts/test.sh run but does NOT block on the ones listed here (AC6, "报出而不阻断"). This list
 # is the SHRINK-ONLY known-violation baseline (AC5): the check FAILS if

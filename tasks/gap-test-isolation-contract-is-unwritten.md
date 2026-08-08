@@ -169,6 +169,16 @@ PASS: all 2 violation(s) are baselined ...
 共享目录、或整个 runner 本身。契约的作用是让第四次在**写下时就被拦住**（新违规 → 棘轮失败），而不是在
 套件红了之后花三轮去找。
 
+## 交叉标注（2026-08-08，gap-test-isolation-backlog-44-violations-unmeasured AC4）
+
+**本任务是检查器的来源任务；积压任务把它产出的检查器从「报数无基线」补成「有基线 + 棘轮」。**
+`gap-test-isolation-backlog-44-violations-unmeasured` 确认：检查器启动即红的那 **44 个常驻违规**
+（fixed-path-write=12 / process-exit-1=7 / mkdtemp-no-cleanup=21 / spawns-test-sh=3 /
+shared-build-artifact-write=1）正是本任务 AC3 实测清单的演化态——数据文件 `plugin/test-isolation-
+violations.txt` 的 44 条与该任务实测的 44 条逐条对应，`--list` 输出一致。本任务的「报出而不阻断 +
+shrink-only 棘轮」（AC5/AC6）即该积压任务的基线机制：既有 44 不红、新违规即红。交叉标注成立（AC4，
+检查器来源任务）。
+
 ## Touches
 
 - plugin/scripts/test-isolation-check.ts

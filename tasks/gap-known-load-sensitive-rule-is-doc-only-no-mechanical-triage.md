@@ -168,6 +168,12 @@ state.failures[0] = { file: "plugin/test/runner-grouping.test.mjs", in_family: t
 - `tasks/gap-test-isolation-backlog-44-violations-unmeasured.md`（nested-spawn kind + AC7 竞态）
 - `tasks/gap-load-sensitive-session-family-confounds-step-three.md`（族来源任务，补交叉标注段）
 
+**反向交叉标注（2026-08-08，backlog 任务 AC5）**：`plugin/test/runner-grouping.test.mjs:spawns-test-sh`
+作为嵌套 spawn 并发触发实例已被基线进 `plugin/test-isolation-violations.txt`（44 条基线之一），
+红窗分诊经 `known-load-sensitive.ts --list` 机械识别其为 `nested-spawn` 族成员（in-family）——
+「已知并发红」的机械识别由此与基线账接通：基线里的该条目不会因负载触发而误判为净增，红窗分诊里
+该族失败走隔离重跑裁决而非真回归。
+
 ### Scoped 门禁（`scripts/test.sh --for-task ... --allow-thin`）
 
 ```
