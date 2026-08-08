@@ -1,0 +1,299 @@
+// @test-group engine
+// measure-trend-check.test.mjs — AC1/AC2/AC3 of
+// gap-single-file-test-duration-trend-unwatched: the append-only per-file duration
+// history (.quay/measure-history.jsonl) that makes single-file duration GROWTH watchable
+// round over round, instead of "can measure but doesn't watch".
+//
+// The mechanism REUSES measure-suite-reporter.mjs's `__PERFILE__` output (AC3 — no new
+// measurer): scripts/test.sh already loads the reporter into every real-suite node --test
+// run and full-suite-runner.ts tees the suite output to .quay/full-suite.log, so the
+// trend-check only PARSES the reporter's lines that are already in the log.
+//
+// Coverage:
+//   AC1 — landMeasureHistory appends one {file, duration_ms} record per test file as a new
+//         append-only round, and is IDEMPOTENT (a second land over the same log is a no-op —
+//         no duplicated round).
+//   AC2 — compareLastTwoRounds reports a single file whose duration grew past baseline
+//         (relative >2× OR absolute >+30 s) with the file + growth amount; NO growth ⇒ NO
+//         report (no false positive).
+//   AC3 — the history is built from measure-suite-reporter's __PERFILE__ lines (the parser
+//         regex matches the reporter's exact line shape); no separate measurer is built.
+//   Wiring — full-suite-runner.ts lands the history after a suite that emitted __PERFILE__
+//         lines (an e2e fake-suite proof that the "套件后接 measure-history" touch is live).
+//
+// Run:
+//   scripts/test.sh plugin/test/measure-trend-check.test.mjs
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync, spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  parsePerFileLines,
+  computeLogDigest,
+  readHistoryRounds,
+  landMeasureHistory,
+  compareLastTwoRounds,
+  DEFAULT_RELATIVE_FACTOR,
+  DEFAULT_ABSOLUTE_MS,
+} from "../scripts/measure-trend-check.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const TREND_CHECK = path.join(REPO_ROOT, "plugin", "scripts", "measure-trend-check.ts");
+const RUNNER = path.join(REPO_ROOT, "plugin", "scripts", "full-suite-runner.ts");
+
+/** Synthetic measure-suite-reporter log text (the EXACT __PERFILE__ line shape). */
+function fakeLog(entries) {
+  return entries
+    .map(([file, durationMs, passed = true]) => `__PERFILE__ duration_ms=${durationMs} ${file} passed=${passed}`)
+    .join("\n") + "\n";
+}
+
+function waitExit(child) {
+  return new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+}
+
+test("AC3 — parsePerFileLines matches measure-suite-reporter's __PERFILE__ line shape only", () => {
+  const log =
+    "__PERFILE__ duration_ms=275.156896 /repo/a.test.mjs passed=true\n" +
+    "__PERFILE__ duration_ms=1000.5 /repo/b.test.mjs passed=false\n" +
+    "not ok 1 - a normal failure line is not a duration record\n" +
+    "# tests 5\n";
+  const recs = parsePerFileLines(log);
+  assert.equal(recs.length, 2, "only the two __PERFILE__ lines parse as records");
+  assert.deepEqual(recs[0], { file: "/repo/a.test.mjs", durationMs: 275.156896, passed: true });
+  assert.deepEqual(recs[1], { file: "/repo/b.test.mjs", durationMs: 1000.5, passed: false });
+  // Duration must be > 0 (a crashed/0-ms file is not a comparable measurement).
+  assert.equal(parsePerFileLines("__PERFILE__ duration_ms=0 /repo/x.test.mjs passed=false\n").length, 0);
+});
+
+test("AC3 — computeLogDigest is order-independent and content-sensitive", () => {
+  const a = [
+    { file: "/b.test.mjs", durationMs: 10, passed: true },
+    { file: "/a.test.mjs", durationMs: 20, passed: true },
+  ];
+  const b = [
+    { file: "/a.test.mjs", durationMs: 20, passed: true },
+    { file: "/b.test.mjs", durationMs: 10, passed: true },
+  ];
+  assert.equal(computeLogDigest(a), computeLogDigest(b), "same set ⇒ same digest regardless of order");
+  const c = [
+    { file: "/a.test.mjs", durationMs: 20, passed: true },
+    { file: "/b.test.mjs", durationMs: 11, passed: true },
+  ];
+  assert.notEqual(computeLogDigest(a), computeLogDigest(c), "a duration change ⇒ a different digest");
+});
+
+test("AC1 — landMeasureHistory appends an append-only round and is idempotent over the same log", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-land-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    const log = fakeLog([
+      ["/a.test.mjs", 100.5],
+      ["/b.test.mjs", 250],
+    ]);
+    writeFileSync(logFile, log, "utf8");
+
+    const first = landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:00.000Z" });
+    assert.equal(first.landed, true, "first land appends a round");
+    assert.equal(first.round, 1);
+    assert.equal(first.files, 2);
+
+    const second = landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:01.000Z" });
+    assert.equal(second.landed, false, "same log ⇒ idempotent no-op");
+    assert.equal(second.reason, "duplicate-log");
+
+    const lines = readFileSync(historyFile, "utf8").trim().split("\n");
+    assert.equal(lines.length, 2, "exactly 2 lines (one per file), never duplicated");
+    const rounds = readHistoryRounds(historyFile);
+    assert.equal(rounds.length, 1, "one round after one distinct log");
+
+    // A DIFFERENT log (durations changed) lands as round 2 — the append-only trend source.
+    const log2 = fakeLog([
+      ["/a.test.mjs", 100.5],
+      ["/b.test.mjs", 999],
+    ]);
+    writeFileSync(logFile, log2, "utf8");
+    const third = landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:02.000Z" });
+    assert.equal(third.landed, true, "a changed log lands the NEXT round");
+    assert.equal(third.round, 2);
+    assert.equal(readHistoryRounds(historyFile).length, 2, "two rounds total");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — landMeasureHistory skips a log with no __PERFILE__ lines (no empty round)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-empty-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    writeFileSync(logFile, "# tests 1\n# pass 1\n", "utf8");
+    const res = landMeasureHistory({ historyFile, logFile });
+    assert.equal(res.landed, false);
+    assert.equal(res.reason, "no-perfile-lines");
+    assert.equal(existsSync(historyFile), false, "no history file written for an empty log");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — compareLastTwoRounds reports a single-file duration doubling (file + growth amount)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-cmp-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    // round 1: a.test = 100ms (small), b.test = 100s (large)
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 100], ["/b.test.mjs", 100_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:00.000Z" });
+    // round 2: a.test grows 100→300ms (3× relative, still small absolute); b.test grows
+    //          100s→140s (+40 s, 1.4× absolute); c.test is NEW (no baseline ⇒ not compared).
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 300], ["/b.test.mjs", 140_000], ["/c.test.mjs", 5]]), "utf8");
+    landMeasureHistory({ historyFile, logFile, laneCount: 8, runAt: "2026-08-08T00:00:01.000Z" });
+
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 2, "a.test (3× relative) and b.test (+40s absolute) both reported");
+    const byFile = new Map(growth.map((g) => [g.file, g]));
+
+    const a = byFile.get("/a.test.mjs");
+    assert.ok(a, "a.test reported");
+    assert.equal(a.prevMs, 100);
+    assert.equal(a.currMs, 300);
+    assert.equal(a.growthMs, 200);
+    assert.equal(a.reason, "relative", "3× relative > 2× ⇒ relative threshold");
+    assert.ok(Math.abs(a.ratio - 3) < 1e-9);
+
+    const b = byFile.get("/b.test.mjs");
+    assert.ok(b, "b.test reported");
+    assert.equal(b.growthMs, 40_000);
+    assert.equal(b.reason, "absolute", "+40s > +30s ⇒ absolute threshold");
+    assert.ok(!byFile.has("/c.test.mjs"), "new file with no baseline is not compared");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/Control — an EXACT doubling (2.0×) is reported (单文件耗时翻倍 ⇒ 报出)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-double-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    // A small file that exactly doubles: 100ms -> 200ms (ratio == 2.0, growth +100ms which is
+    // FAR below the +30s absolute threshold). The relative trigger must catch it (>= 2×), or the
+    // Contract control "翻倍 ⇒ 报出" is violated.
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 100]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 200]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 1, "exact doubling must be reported");
+    assert.equal(growth[0].file, "/a.test.mjs");
+    assert.equal(growth[0].reason, "relative");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — NO growth ⇒ NO report (no false positive)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-nogrowth-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 1000], ["/b.test.mjs", 50_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    // round 2: a.test shrinks, b.test flat, plus a tiny 1% jitter on a third file.
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 900], ["/b.test.mjs", 50_000], ["/d.test.mjs", 100_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    // round 3: everything within noise (d.test +5%, far below 2× and +30s).
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 910], ["/b.test.mjs", 50_500], ["/d.test.mjs", 105_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 0, "shrink/flat/sub-threshold jitter must NOT be reported as growth");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2/Contract — the CLI --json output carries one 'growth' line per slow file (grep -c)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-cli-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 100], ["/b.test.mjs", 100_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 300], ["/b.test.mjs", 140_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+
+    const res = spawnSync(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", TREND_CHECK, "--history", historyFile, "--json", "--no-land"],
+      { encoding: "utf8" },
+    );
+    assert.equal(res.status, 0, `CLI exit 0; stderr: ${res.stderr}`);
+    const growthLines = res.stdout.split("\n").filter((l) => l.includes("growth"));
+    assert.equal(growthLines.length, 2, "one growth line per slow file (a.test + b.test)");
+    for (const line of growthLines) {
+      const parsed = JSON.parse(line);
+      assert.equal(parsed.type, "growth");
+      assert.ok(parsed.growthMs > 0, "growth amount present");
+    }
+    // The exact Contract measure shape: grep -c 'growth' over stdout counts the slow files.
+    const grep = spawnSync("grep", ["-c", "growth"], { input: res.stdout, encoding: "utf8" });
+    assert.equal(Number(grep.stdout.trim()), 2, "grep -c 'growth' == number of slow files");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Wiring — full-suite-runner lands the measure-history after a suite that emitted __PERFILE__ lines", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "mtc-wire-"));
+  const suite = path.join(root, "fake-suite.sh");
+  try {
+    const perFileLine = `__PERFILE__ duration_ms=123.5 ${path.join(root, "suite.test.mjs")} passed=true`;
+    writeFileSync(
+      suite,
+      "#!/usr/bin/env bash\necho '" + perFileLine + "'\necho \"# tests 1\"\necho \"# pass 1\"\necho \"# fail 0\"\necho \"# cancelled 0\"\nexit 0\n",
+      { mode: 0o755 },
+    );
+    const child = spawn(
+      process.execPath,
+      [
+        "--no-warnings",
+        "--experimental-strip-types",
+        RUNNER,
+        "--root",
+        root,
+        "--command",
+        `bash ${suite}`,
+        "--lane-count",
+        "4",
+      ],
+      {
+        env: {
+          ...process.env,
+          QUAY_TEST_SKIP_RESOURCE_GATE: "1",
+          QUAY_TEST_SKIP_SYSTEMD_RUN: "1",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.on("data", () => {});
+    child.stderr.on("data", () => {});
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "fake green suite exits 0");
+
+    const historyFile = path.join(root, ".quay", "measure-history.jsonl");
+    assert.ok(existsSync(historyFile), "AC1 wiring — .quay/measure-history.jsonl lands after the suite");
+    const text = readFileSync(historyFile, "utf8");
+    assert.match(text, /suite\.test\.mjs/, "the per-file record from the reporter line is in the history");
+    assert.match(text, /123\.5/, "the duration_ms from the reporter line is preserved");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
