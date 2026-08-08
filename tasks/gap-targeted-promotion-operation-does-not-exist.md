@@ -1,7 +1,7 @@
 ---
 id: gap-targeted-promotion-operation-does-not-exist
 title: "定向晋级（targeted promotion）操作不存在——2026-08-04 裁定被超额执行：外层候选集构造规则整体搬进 ready-pool-check.ts（kind 排序 gap→DIR→other，无阶段目标输入），且 pool<floor（=cap×4）门把阶段目标要的任务挡在 todo；补充 refill（维持数量）与定向晋级 targeted（维持对齐）是两个操作，后者必须不受 floor 约束、由外层选择；实测 gap-ac16c3-... 永远停在 todo（pool=24>floor=20，生产值 cap=5）"
-status: todo
+status: ready
 labels:
   - gap
   - defect

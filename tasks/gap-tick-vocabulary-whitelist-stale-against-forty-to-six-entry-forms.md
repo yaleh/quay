@@ -8,7 +8,7 @@ title: tick-vocabulary.test.mjs SAFE_SUBSTRINGS whitelist is stale against the
   `integration-batch-merge.sh` / `concurrent-batch-scheduler.ts` old forms)
   doesn't classify → full-suite red (fail-closed catch-all, first failure the
   suite hit)
-status: todo
+status: ready
 labels:
   - gap
   - defect

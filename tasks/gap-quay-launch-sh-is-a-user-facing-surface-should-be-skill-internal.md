@@ -10,7 +10,7 @@ title: "quay-launch.sh is documented in 4 SKILL.md files (init/manager/cold-star
   is the interface users are accustomed to, and this wrapper script must become that skill's OWN
   inner implementation, not the thing pointed at directly; manager 2026-08-06, filed per human
   direction to transfer to outer"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

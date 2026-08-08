@@ -14,7 +14,7 @@ title: "plugin/scripts/ has 57 .sh files (107 total incl. .ts) with ZERO uniform
   must consume via capability-catalog.sh not hand-roll, per §5 of manager-productization) but neither
   addresses INTERFACE consistency across the 57+ existing crystallized tools themselves; manager
   2026-08-06, filed per human direction ('即使是这些 .sh 也依然太散，应进一步结晶')"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate

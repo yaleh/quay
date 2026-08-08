@@ -10,7 +10,7 @@ title: "the shipped artifact's delivery FORM is 86 loose .sh files — measured 
   separate shell entry points each of which is an independently-invocable surface; the same
   artifact ships Core as a single bundled dist/quay.js, so the asymmetry is unargued; manager
   2026-08-06 filed per human direction after inspecting package contents"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
