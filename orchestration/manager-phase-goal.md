@@ -1367,6 +1367,41 @@ integration 领先时，develop 的 tip 是 integration 的祖先
 **若依赖型任务从不出现，两线模型在行为上等价于只用 develop**，integration 只是中转站。
 **这不是「AC 没达成」，是「该模型在当前工作模式下未被用到」——本身是个结论，不是失败。**
 
+#### 【AC18 独立核实结果 2026-08-08 10:2xZ】——不采信 inner 自述，四条逐条重跑
+
+inner 10:06:45 自报「AC19 内层执行完成，四条判据全过」。**按 AC18 我自己重跑，得到一个它自述里没有的结论。**
+
+| 判据 | 独立核实 | 结果 |
+|---|---|---|
+| 1 方向 | `8f762607` 双亲之一是 `task/*`（**拓扑事实**，不看提交信息措辞） | **✓** |
+| 2 前半 窗口 | integration 领先 2 | **✓** |
+| 2 后半 (i) 调用 | 六次派发均有 `--fork-baseline` 调用记录 | **✓** |
+| 2 后半 (ii) 实参非空 | **见下——分支不同，结论不同** | **⚠️ 尚未在生效路径上成立** |
+| 3 两条禁止 | 未见违反 | ✓ |
+
+**(ii) 的关键发现——修复在 `integration`，而派发跑在 `develop`：**
+
+```
+integration:plugin/loop/fast-mode-loop-tick.md:790
+    --overlaps-unverified "$UNVERIFIED_IDS"          ← 已修
+    unverified-integration-task-ids.ts               ← 存在
+develop（inner 实际派发时用的主检出）:789
+    --overlaps-unverified <integration 上未验证任务 id,...>   ← 仍是占位符
+    unverified-integration-task-ids.ts               ← 不存在（我实跑时 MODULE_NOT_FOUND）
+integration 领先 develop = 2  ⇒ 修复尚未批量合回
+```
+
+**且 inner 10:06 的那次重测，命令里用的是 `/tmp/quay-intg2/plugin/scripts/…`——
+integration 工作树，不是 develop 主检出。** 所以它的「已验证」是真的，
+**但验的是修复所在的树，不是派发实际执行的树。**
+
+⇒ **(ii) 现在的准确状态：机制正确、已被验证、但【在生效路径上尚未落地】，
+等这次批量合（套件已于 10:29:45Z 绿，被测点即 integration tip）。**
+**这不是 inner 报错，是「验证树 ≠ 执行树」这个区别没被任何一方说出来。**
+
+⇒ **一般形态（今晚新的一类）：两线模型下，「已验证」和「已生效」分处两条分支，
+中间隔着一次批量合。说「已达成」之前必须问一句：验的是哪棵树，跑的是哪棵树。**
+
 #### ✅ 2026-08-08 09:3xZ 人已裁定：同意改测法。判据2后半的新形态如下
 
 **人的原话**：「同意改判据的测法。」（此前 manager 已明说这是弱化、且是否算「放宽分支模型
