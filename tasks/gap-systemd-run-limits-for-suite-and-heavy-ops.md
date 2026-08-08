@@ -5,7 +5,7 @@ title: "systemd-run cgroup limits for suite + heavy ops — cgroup v2 available
   calls in runner at ABORT#5, 8-way concurrency in WAIT state); suite in
   MemoryMax/CPUQuota/TasksMax scope, blocks
   tmux-leak(217)/concurrency-8/ugrep-8.8GB classes, comms unchanged"
-status: ready
+status: done
 labels:
   - gap
   - defect

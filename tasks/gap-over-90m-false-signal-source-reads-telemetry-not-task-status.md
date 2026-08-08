@@ -4,7 +4,7 @@ title: detectTaskOver90m reads telemetry bracket start (never task status) — 3
   false OVER90 tonight (phantom in-flight from crash, worktree 0-commit dead,
   process gone); add task-status gate (ready/done never triggers) + reconcile
   criterion fix (worktree existence ≠ mid-flight)
-status: ready
+status: done
 labels:
   - gap
   - defect

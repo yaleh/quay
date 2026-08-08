@@ -1,7 +1,7 @@
 ---
 id: gap-verification-round-record-skipped-for-five-closures
 title: "outer closure bookkeeping: 5 closures (rounds 14-18) landed + flipped done but verification-round.jsonl was NOT appended for any of them (last record round 13 @00:25Z, next write 02:0xZ backfill) — the closure-sync AC2 routine wrote the narrative queue-state but the machine-readable round record silently fell off; nobody notices because nothing READS the round record for closure completeness (inner reads suite-state, not verification-round); '存在≠生效' recurrence on the outer's own bookkeeping; fix: a per-tick assertion or the tick itself must check verification-round.jsonl tail round == number of merged closures"
-status: ready
+status: done
 labels:
   - gap
   - defect

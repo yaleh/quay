@@ -5,7 +5,7 @@ title: "scoped selection blind to packaging-vs-source diff (manager usage-view
   never matches packaging tests (npm-pack-e2e/build-dist/...), src-touching task
   scoped-green can still break packaged; fix: src-touching task forces ≥1
   packaging test in selection"
-status: ready
+status: done
 labels:
   - gap
   - defect

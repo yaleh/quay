@@ -1,7 +1,7 @@
 ---
 id: gap-red-window-8-failures-three-test-defects
 title: "full-suite red (8 fail / 2612 tests): capability-catalog 5 ACs = CONCURRENCY FLAKE (isolated 8/8 green twice), red-window-shared-gate AC1 = OVER-STRICT assertion (inner template says '暂缓已完成 agent 的 fan-in', test asserts contiguous '暂缓 fan-in' which only outer doc has — semantic equivalent, test introduced 21:12 never ran a full suite until now), runner-grouping = HEAVY test (nested test.sh --group governance, isolated >830s) fragile under concurrency (reporter summary missing) — none are this batch's product regressions; triage 2026-08-06 03:43 SUITE-RED"
-status: ready
+status: done
 labels:
   - gap
   - defect
