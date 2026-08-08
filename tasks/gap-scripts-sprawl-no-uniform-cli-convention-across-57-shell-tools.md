@@ -105,6 +105,20 @@ resume 若中断，先跑 measure 读当前基线，不要假设已经统一
 - [ ] AC1-AC5 实跑输出贴进任务体
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
 
+## 交叉标注（AC5 族，2026-08-08 由 gap-shipped-artifact-carries-86-loose-shell-scripts 追加）
+
+> **本条 ≠ gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form（分界）**：
+> 本条问「这些 `.sh` 的 `--help`/调用界面一不一致」——**界面一致性**，作用域是仓库内 57 个工具；
+> 那条问「86 个散件是不是正确的交付形态」——**交付形态**，作用域是交付产物。两条正交：即使本条把
+> 57 个 `--help` 全部统一，消费者仍然收到 86 个独立 shell 入口；反之即使那条把交付面收敛成
+> 「少数入口 + 内部件不外露」，本条要修的 `--help` 不一致仍然存在。**不要合并，也不互相替代。**
+>
+> 协同：本条 AC2 的候选方案 2「共享入口壳 `quay-tool <name>`」与那条选定的「少数入口」收敛方向
+> 是同一个机制的两面——那条把真实被调用的工具收进 `quay-tool <name>` 分发器并声明为
+> `capability-catalog.sh` 的 `PUBLIC_ENTRYPOINTS`，本条把分发器统一处理 `--help`/参数解析。若本条
+> 选该方案，直接消费那条声明的公开入口集作为被分发工具；若选「最小公分母」，则逐工具在源码上补
+> `--help`，交付面保持散件但界面一致（那条的 AC3 负控制条仍会把它标记为内部件不该被消费者直调）。
+
 ## Touches
 - plugin/scripts/*.sh（57 个文件，具体改动范围由 AC2 选定机制决定）
 - plugin/scripts/capability-catalog.sh
@@ -112,6 +126,7 @@ resume 若中断，先跑 measure 读当前基线，不要假设已经统一
   的交付形态——bundle 成 42 个可执行入口、删 80 个 raw `.ts`；本条管 `.sh` 的界面一致性。两者都是
   「交付面结晶程度不够」的实例，且本条若选「共享入口壳 `quay-tool <name>`」方案，将直接消费那条
   bundled 出的 `plugin/scripts/dist/*.js` 作为被分发的工具）
+- tasks/gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form.md（分界交叉标注，见上）
 
 ## Dispatch review
 

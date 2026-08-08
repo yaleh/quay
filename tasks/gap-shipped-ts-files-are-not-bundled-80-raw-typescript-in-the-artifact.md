@@ -136,6 +136,17 @@ resume 若中断，先跑 measure 读当前产物里的 raw .ts 数，不要假�
       其任务体追加交叉引用（见其 `## Touches`）。本条管 `.ts` 的交付形态（bundle 成可执行文件）、那条管
       `.sh` 的界面一致性（`--help` 统一 + 候选 `quay-tool <name>` 分发器），两者都是「交付面结晶程度不够」；
       本条把 `.ts` 交付面从 80 个散件结晶成 42 个可执行入口，那条把 `.sh` 的调用界面结晶成统一形式。
+- [x] AC5（补充 2026-08-08，交叉标注由 gap-shipped-artifact-carries-86-loose-shell-scripts 追加）：
+      与 `gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form` 及
+      `gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal` 同属「交付形态未被论证」这一族，
+      但各自负责不同的形态轴：
+      | 任务 | 轴 | 可达形态 |
+      |---|---|---|
+      | 本条（gap-shipped-ts） | `.ts`/`.mjs` 交付物散成 80 个 raw 文件 | esbuild bundle 成 42 个可执行入口，raw `.ts` → 0 |
+      | gap-shipped-artifact-…-86-loose-shell-scripts | `.sh` 交付物散成 86 个松散入口 | bash 无法 bundle；「少数入口 + 内部件不外露」——声明 `capability-catalog.sh` `PUBLIC_ENTRYPOINTS` + AC3 负控制（内部件不得出现在消费者文档） |
+      | gap-quay-launch-sh-… | 单个脚本被文档化成用户面 | 收窄为 skill 内部实现 |
+      三者不互相替代；本条 merge 时若与 `gap-shipped-artifact` 的 `PUBLIC_ENTRYPOINTS` 声明面相交
+      （被 bundle 的 `.ts` 入口 vs 被声明的 `.sh` 入口），以 capability-catalog.sh 的声明为单一事实源。
 
 ## Execution evidence
 
@@ -197,6 +208,7 @@ task-contract-check: no violations. / adr016-screen-use-check: violations 0 / de
 - plugin/scripts/*.ts + plugin/scripts/*.mjs（~43 个文件的 CLI 守卫改为 bundler 友好 basename 校验）
 - experiments/quay-perpetual-stream/scripts/*（8 个非 symlink 镜像同步，保持 sync-vendor byte-identity）
 - tasks/gap-scripts-sprawl-no-uniform-cli-convention-across-57-shell-tools.md（AC5 交叉标注）
+- tasks/gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form.md（AC5 交叉标注：同族不同轴）
 - tasks/gap-shipped-ts-files-are-not-bundled-80-raw-typescript-in-the-artifact.md（本条自触）
 - packages/quay/package.json（**未改动**——仓库无 npm scripts 惯例；构建经 package.sh 接入，无需 package.json 变更）
 

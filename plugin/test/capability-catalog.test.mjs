@@ -147,6 +147,75 @@ test("AC1c — a new script without a declared question is unclassified and the 
   }
 });
 
+// ── AC1/AC3: delivery-form entry surface (gap-shipped-artifact-carries-86-loose-shell-scripts-as-the-delivery-form) ──
+test("AC1/AC3 — --entry-surface passes at baseline: every consumer-doc-referenced .sh is a declared public entry point", () => {
+  const r = runCatalog(["--entry-surface"]);
+  assert.equal(r.status, 0, `entry-surface gate must pass at baseline:\n${r.stderr}\n${r.stdout}`);
+  assert.match(r.stdout,
+    /AC3 gate: every consumer-doc-referenced \.sh is a declared public entry point/);
+  // The classification is exhaustive: shipped = public + internal (every plugin/scripts .sh is one or the other).
+  const m = r.stdout.match(/delivery form \(\.sh\): (\d+) shipped \| (\d+) declared consumer-facing \| (\d+) internal/);
+  assert.ok(m, "summary line reports shipped/public/internal");
+  const shipped = parseInt(m[1], 10);
+  const pub = parseInt(m[2], 10);
+  const internal = parseInt(m[3], 10);
+  assert.equal(shipped, pub + internal, "shipped = public + internal (every shipped .sh is classified)");
+  assert.ok(pub >= 20, `the argued consumer-facing .sh set is declared and non-trivial (${pub})`);
+});
+
+test("AC1/AC3 — --json rows carry the surface field: .sh classified public/internal, non-.sh null", () => {
+  const rows = catalogRows();
+  for (const r of rows) {
+    if (r.file.endsWith(".sh")) {
+      assert.ok(r.surface === "public" || r.surface === "internal",
+        `every shipped .sh is classified public/internal: ${r.file} → ${r.surface}`);
+    } else {
+      assert.equal(r.surface, null, `non-.sh surface is null (the .ts/.mjs axis is the sibling task's): ${r.file}`);
+    }
+  }
+  const publicSh = rows.filter((r) => r.surface === "public");
+  assert.ok(publicSh.length >= 20, `the argued consumer-facing .sh set is declared (${publicSh.length})`);
+});
+
+test("AC3 — negative control: an internal .sh referenced by a consumer-facing doc makes the gate exit non-zero", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cap-entry-surface-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "plugin", "scripts"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "plugin", "loop"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "plugin", "skills", "demo"), { recursive: true });
+    for (const f of derivedScripts()) {
+      fs.copyFileSync(path.join(SCRIPTS_DIR, f), path.join(tmp, "plugin", "scripts", f));
+    }
+    // Fail direction: a consumer-facing doc references an INTERNAL script (one not in PUBLIC_ENTRYPOINTS).
+    fs.writeFileSync(path.join(tmp, "plugin", "loop", "tick.md"),
+      "run: bash plugin/scripts/checker-cost-lib.sh --record\n");
+    const fail = spawnSync("bash", [path.join(tmp, "plugin", "scripts", "capability-catalog.sh"), "--entry-surface"],
+      { encoding: "utf8" });
+    assert.notEqual(fail.status, 0, "an internal .sh referenced in consumer docs must fail the AC3 gate");
+    assert.match(fail.stderr, /checker-cost-lib\.sh/, "the gate names the violating internal script");
+    // Pass direction: once the reference is removed, the gate passes again.
+    fs.rmSync(path.join(tmp, "plugin", "loop", "tick.md"));
+    const pass = spawnSync("bash", [path.join(tmp, "plugin", "scripts", "capability-catalog.sh"), "--entry-surface"],
+      { encoding: "utf8" });
+    assert.equal(pass.status, 0, `without the stray reference the gate passes again:\n${pass.stderr}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("AC1/AC3 — --entry-surface --json is machine-readable and reports ok:true at baseline", () => {
+  const r = runCatalog(["--entry-surface", "--json"]);
+  assert.equal(r.status, 0, `--entry-surface --json must exit 0 at baseline:\n${r.stderr}`);
+  const obj = JSON.parse(r.stdout);
+  assert.equal(typeof obj.sh_shipped, "number");
+  assert.equal(typeof obj.public_sh, "number");
+  assert.equal(typeof obj.internal_sh, "number");
+  assert.ok(Array.isArray(obj.violations));
+  assert.equal(obj.violations.length, 0);
+  assert.equal(obj.ok, true);
+  assert.equal(obj.sh_shipped, obj.public_sh + obj.internal_sh);
+});
+
 // ── AC2: the three named exp5-legacy families are judged NOT shipped ──
 test("AC2 — the three named exp5-legacy families are ships:false (do not ship with the artifact)", () => {
   const rows = catalogRows();

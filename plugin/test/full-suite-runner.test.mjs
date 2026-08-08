@@ -264,19 +264,21 @@ test("AC16 — --lane-count N propagates --test-concurrency=N into the spawned t
 
 // ── gap-full-suite-runner-concurrency-default-and-gate: AC1/AC2/AC3/AC4 ─────────────────────────────
 
-test("AC1 — default laneCount is NPROC-derived (nproc=4 → 1); spawned command carries ONE --test-concurrency=1", async () => {
+test("AC1 — default laneCount is NPROC-derived (nproc=4 → 4); spawned command carries ONE --test-concurrency=4", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac1-"));
   const { argsLog } = fakeTestShRecordingArgs(root);
   try {
     // NO --lane-count, NO --command → default path; RESOURCE_GATE_NPROC=4 forces the derivation.
+    // AMPLIFICATION = 1.0 (AC5 cost-side-verified 2026-08-08 — zero cancelled at c4/c8, nproc is
+    // the wall-clock sweet spot), so 4 cores → 4 lanes.
     const child = runRunner({ root, env: { RESOURCE_GATE_NPROC: "4" } });
     const { code } = await waitExit(child);
     assert.equal(code, 0, `runner exits 0 on green, got ${code}`);
     const s = readState(root);
-    assert.equal(s.laneCount, 1, "derived default laneCount = max(1, floor(4/2.1)) = 1 (was hardcoded 8)");
+    assert.equal(s.laneCount, 4, "derived default laneCount = max(1, floor(4/1.0)) = 4 (cost-side-verified, was 1 under the 2.1 guard)");
     await poll(() => fs.existsSync(argsLog));
     const args = fs.readFileSync(argsLog, "utf8").trim();
-    assert.equal(args, "--test-concurrency=1", `exactly ONE --test-concurrency=<derived> spliced, got: ${args}`);
+    assert.equal(args, "--test-concurrency=4", `exactly ONE --test-concurrency=<derived> spliced, got: ${args}`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -298,7 +300,7 @@ test("AC2 — the splice is REPLACE: an existing --test-concurrency=8 (= and spa
       const args = fs.readFileSync(argsLog, "utf8").trim();
       assert.equal(
         args,
-        "--test-concurrency=1",
+        "--test-concurrency=4",
         `existing '${existing}' must be REPLACED by the derived value (single flag), got: ${args}`,
       );
     } finally {

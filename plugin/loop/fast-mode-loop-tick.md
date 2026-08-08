@@ -105,8 +105,10 @@ cat /proc/loadavg                # load1 < 1 = 无实质负载
 gate 读 `/proc/pressure/cpu` **`some avg10`**（结构信号：有任务在等 CPU 的比例；load 是代理，
 claude 会话常驻使 load 永不降）、`free -m` available、`pgrep -xc node-MainThread`，并单列
 ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=4，测试命令的默认并发已改为
-**推导值 `max(1, floor(nproc / 2.1)) = 1`**（不再写死 8——8 worker + 子进程 = 17 进程、4.25× 超订，
-是单套件的稳态不是并发的产物），`--test-concurrency=N` 显式传入永远优先（**分叉**：这是
+**推导值 `max(1, floor(nproc / 1.0)) = 4`**（AC5 代价侧实验 2026-08-08 实测：
+`gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible`——同一选中集在并发
+1/4/8 下全零 cancelled，nproc 是墙钟甜点；旧的 2.1 放大系数使默认=1，其「avoid cancel」理由从未被
+实验证实，现已被否定），`--test-concurrency=N` 显式传入永远优先（**分叉**：这是
 node:test/test.sh 项目的旋钮；**vitest 项目真实文件级并行 flag 是 `--maxWorkers`**，archguard 用
 `--maxWorkers=8` 跑通全量——同一份文档服务两种测试框架，`gap-full-suite-runner-red-pattern-matches-
 bare-x-vitest-false-red` AC3）。两层绝不同时跑全量套件。
@@ -143,31 +145,39 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 （07:15，156 files）→ **+tmpdirs 测试隔离 R6 = 2054（08:40）→ **+token 重操令牌 = 2065**（09:05，token fan-in 套件实测）
 参考值以最近一次全量绿的 tests 数为准。**注意 starvation 是单套件稳态（4 核跑 c8 = 4 倍过订，
 压力 ~87）：全量只串行跑、起跑前调用资源闸（some avg10 < 40 才 GO），但套件自身跑起来压力必然 >40，
-那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/2.1))=1（4 核）；全量验证需显式
---test-concurrency=8，否则小时级**。
+那是设计性超订不是异常。默认并发已改为推导值 max(1,floor(nproc/1.0))=4（4 核）；全量验证用
+--test-concurrency=8（外层 runner 实跑 13+ 轮全零 cancelled）或默认 4 lanes**。
 
 ## 已知负载敏感族（KNOWN-LOAD-SENSITIVE）——判绿/放宽判据必须排除，不得读成真回归
 
-**`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
+**这族测试的权威清单是机器可读的**：`plugin/scripts/known-load-sensitive.ts --list`（解析各测试文件头
+的 `// @load-sensitive <kind>` 标注，`gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`
+AC1/AC2）。本散文只讲判读规则，**不再手列族文件**——文件清单以该脚本输出为准（单一来源，消灭双源）。
+代表成员（示意，非清单）：`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
 `session-liveness-signals.test.mjs`（原 `session-liveness.test.mjs` 拆分，
 `gap-session-liveness-tail-capped-split`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
-`--once` 同类）是一族已知负载敏感测试**（`gap-load-sensitive-session-family-confounds-step-three`，
-2026-08-04 立案）。它们用**真实进程 + tmux 时序**验证会话存活/冷启动挂载语义，机器负载一高就红——
+`--once` 同类）、`plugin/test/runner-grouping.test.mjs`（`nested-spawn` kind）——它们用**真实进程 + tmux 时序**
+或**嵌套 node --test spawn** 验证会话存活/冷启动/分组语义，机器负载一高就红——
 隔离下全绿、并发下红，**不是逻辑错误**。2026-08-04 全量套件 #6/#7 各挂一条不同但同族的测试，
-隔离单跑全过，确认并发敏感。
+隔离单跑全过，确认并发敏感。**两种根因、两个 kind，判读不得混用**（`wall-clock` = 真实进程 + tmux 时序；
+`nested-spawn` = 嵌套 runner）。
 
 **判读规则（强制）**：
 1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
    并发套件，= 负载翻倍——`heavy-op-token.sh` 已随 2026-08-06 人裁定整体退休，「一次只跑一个
-   重测试」约束退役，此放宽实验前提不再存在）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
+   重测试」约束退役，此放宽实验前提不再存在）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族
+   （机械判定：`red-window-triage.ts --partition` 把失败分区为 in-family / not-in-family），
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
 2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
-   全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
+   全量套件中若只有这族红，先按第 1 条单独重跑再下结论。隔离重跑命令由 `red-window-triage.ts --partition`
+   自动产出并写回套件状态（`isolate_rerun`），裁决 `isolate_rerun_result` 绿 ⇒ 记 environmental + kind、
+   红 ⇒ 非环境升级——全程机械可查（AC3/AC6）。
 3. **不要删/降级/改 skip 这族**——它们抓的是真问题（并行观测、laid-down 实跑、`--once` 接缝），
    只是天生负载敏感。
 
-**机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
-grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
+**机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**：`// @load-sensitive <kind>`
+（机器可解析，`known-load-sensitive.ts` 读取）+ `KNOWN-LOAD-SENSITIVE` 散文标记（人读）。`known-load-sensitive.ts --check`
+强制「有 KNOWN-LOAD-SENSITIVE 头声明 ⇒ 必有 `@load-sensitive`」，无标注的声明机械拒绝（AC2）。低负载基线实测：单套件连跑 2 次
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 

@@ -20,8 +20,12 @@
 //         completed-agent fan-in until the outer re-greens.
 //
 // Task: gap-full-suite-runner-concurrency-default-and-gate (2026-08-05, ABORT #5)
-//   AC1 — the default laneCount is NPROC-DERIVED (max(1, floor(nproc / 2.1)) — the SAME
-//         derivation as test.sh's AC5), NOT the hardcoded 8. On this box nproc=4 ⇒ 1.
+//   AC1 — the default laneCount is NPROC-DERIVED (max(1, floor(nproc / AMPLIFICATION)),
+//         AMPLIFICATION = 1.0 since the AC5 cost-side experiment ran
+//         (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08:
+//         zero cancelled at concurrency 4 AND 8 on the same selected set; nproc is the wall-clock
+//         sweet spot) — the SAME derivation as test.sh's AC5, NOT the hardcoded 8. On this box
+//         nproc=4 ⇒ 4.
 //   AC2 — the --test-concurrency splice is a REPLACE, not an append: any existing
 //         --test-concurrency=* (both `=` and space spellings) is stripped from the command
 //         before the effective value is spliced, so the spawned process shows EXACTLY ONE
@@ -54,7 +58,7 @@
 //                                    #   verification-round.jsonl all land in <state-dir>.
 //     [--state-file <path>]          # default: <state-dir>/full-suite-state.json
 //     [--log-file <path>]            # default: <state-dir>/full-suite.log
-//     [--lane-count <n>]             # default: max(1, floor(nproc/2.1)) (nproc-derived, AC1)
+//     [--lane-count <n>]             # default: max(1, floor(nproc/1.0)) = nproc (AC1, cost-side-verified)
 //     [--sync]                       # wait for the suite to finish before exiting
 //
 // Concurrency knob FORK (gap-full-suite-runner-red-pattern-matches-bare-x-vitest-false-red AC3):
@@ -75,6 +79,7 @@ import { fileURLToPath } from "node:url";
 
 import { runOnce } from "./suite-state-trigger.ts";
 import { getLoad1 } from "./checker-cost.ts";
+import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -92,6 +97,16 @@ export type SuiteStateReason = "failed" | "aborted" | "infra-error";
 export interface SuiteFailure {
   line: string;
   file?: string;
+  /**
+   * The KNOWN-LOAD-SENSITIVE partition (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
+   * triage AC3): true when the failing file is a family member (machine-readable manifest from
+   * known-load-sensitive.ts). Written by the runner at red time so the red-window triage can
+   * auto-partition WITHOUT re-deriving it — the state carries the partition, not the triaging
+   * human/agent's memory.
+   */
+  in_family?: boolean;
+  /** The family kind (wall-clock | nested-spawn | heavy | ...) — one root cause = one kind. */
+  kind?: string;
 }
 
 export interface SuiteState {
@@ -284,18 +299,23 @@ export function isAbortLine(line: string): boolean {
 
 /**
  * AC1 — the DEFAULT laneCount is nproc-derived, using the SAME formula as test.sh's AC5
- * derivation: max(1, floor(nproc / 2.1)). The old hardcoded 8 was a 4.25× oversubscription on a
- * 4-core box (8 workers + spawned subprocesses = 17 processes, PSI 88 — the crash family behind
- * ABORT #1/#3/#4/#5). RESOURCE_GATE_NPROC / RESOURCE_GATE_AMPLIFICATION are the deterministic test
- * seams (the same env test.sh's default_concurrency_formula reads).
+ * derivation: max(1, floor(nproc / AMPLIFICATION)), AMPLIFICATION = 1.0. The 2.1 value (measured
+ * process amplification 17/8 ≈ 2.125) was an unproven-conservative guard against oversubscription:
+ * the AC5 cost-side experiment (gap-dod-two-green-runs-and-over90-budget-are-mathematically-
+ * incompatible, 2026-08-08) ran the same selected set at concurrency 1/4/8 — ZERO cancelled at
+ * every level, and nproc was the wall-clock sweet spot (24s vs 57.5s at 1, 27.3s at 8 on a 4-core
+ * box). The outer's own full-suite verification rounds at laneCount 8 (13+ runs, all cancelled 0)
+ * corroborate that the oversubscription cost side never materialized. RESOURCE_GATE_NPROC /
+ * RESOURCE_GATE_AMPLIFICATION are the deterministic test seams (the same env test.sh's
+ * default_concurrency_formula reads).
  */
 export function defaultLaneCount(): number {
   const ncpuRaw = process.env.RESOURCE_GATE_NPROC ?? String(
     typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length,
   );
   const ncpu = Number(ncpuRaw);
-  const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "2.1");
-  const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 2.1;
+  const ampRaw = Number(process.env.RESOURCE_GATE_AMPLIFICATION ?? "1.0");
+  const amp = Number.isFinite(ampRaw) && ampRaw > 0 ? ampRaw : 1.0;
   return Math.max(1, Math.floor((Number.isFinite(ncpu) && ncpu >= 1 ? ncpu : 1) / amp));
 }
 
@@ -407,6 +427,18 @@ export async function run(argv: string[]): Promise<number> {
   const startedAt = new Date().toISOString();
   const base = { runner: "outer" as const, startedAt, laneCount };
 
+  // KNOWN-LOAD-SENSITIVE family manifest (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
+  // triage AC3): scanned ONCE at run start against the repo root so red-time failures can carry the
+  // in-family/kind partition into full-suite-state.json — the triage reads it, never re-derives it.
+  const family = scanFamily(REPO_ROOT);
+  /** Enrich a failure with its family partition (in_family + kind) — no-op when not a member. */
+  const enrichFailure = (f: SuiteFailure): SuiteFailure => {
+    if (!f.file) return f;
+    const kind = kindForFile(family, f.file);
+    if (kind === undefined) return f;
+    return { ...f, in_family: true, kind };
+  };
+
   // gap-suite-state-split-across-worktree-and-gate — SYNC BRIDGE: every state transition is written
   // to the gate location (--state-dir, the main repo) AND mirrored to the tested checkout's own
   // `<root>/.quay/full-suite-state.json`. The gate (inner + suite-state-trigger) reads the main repo;
@@ -502,7 +534,12 @@ export async function run(argv: string[]): Promise<number> {
       if (!pendingFailure.file) {
         const f = extractFailureFile(line, root);
         if (f) {
+          // Enrich with the KNOWN-LOAD-SENSITIVE partition once the file context resolves, and
+          // update the failure in redFailures in place so the state carries it (AC3).
+          const enriched = enrichFailure({ ...pendingFailure, file: f });
           pendingFailure.file = f;
+          const idx = redFailures.indexOf(pendingFailure);
+          if (idx !== -1) redFailures[idx] = enriched;
           // file found — re-write state so the SUITE-RED event carries it (idempotent).
           writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures });
         }
@@ -525,7 +562,7 @@ export async function run(argv: string[]): Promise<number> {
       // which test failed is already known) + open a short detail lookahead for the file context.
       // A file on the failure line itself (vitest `❯ <file>` / `test at <file>`) is captured now;
       // TAP detail-block files are captured by the lookahead.
-      const failure: SuiteFailure = { line, file: extractFailureFile(line, root) };
+      const failure: SuiteFailure = enrichFailure({ line, file: extractFailureFile(line, root) });
       redFailures.push(failure);
       pendingFailure = failure;
       detailRemaining = 15;

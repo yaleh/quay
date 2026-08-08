@@ -1,4 +1,5 @@
 // @test-group lowconc
+// @load-sensitive wall-clock
 // session-liveness-signals.test.mjs — screen semantic signals, payload, saturation, debounce, parallel observation (stage 2/3/4)
 //
 // PART OF THE session-liveness test family (gap-session-liveness-tail-capped-split, 2026-08-07).
