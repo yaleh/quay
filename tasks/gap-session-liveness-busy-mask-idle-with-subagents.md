@@ -1,6 +1,6 @@
 ---
 id: gap-session-liveness-busy-mask-idle-with-subagents
-title: "session-liveness 对带后台任务的停摆结构性失明（inner 16 窗口 100% IDLE 漏报）——压制源 = pane_busy 抖动（成因无证据不猜修；D2「有 subagent⇒忙」已撤）；D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）硬事实；D5 SEEN_BUSY 起始门吞掉挂载时已进行的停摆；D4 CANT-SEND 无时效无限重发；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后查 inner 槽位——AC25/AC22 一直卡住的机制原因"
+title: "session-liveness 对带后台任务的停摆结构性失明（inner 16 窗口 100% IDLE 漏报）——根因 = D5（:1043 -eq 2 + SEEN_BUSY 起始门：每段停摆只有一次触发机会且可被永久销毁；pane 抖动假说已撤 13:2x）；D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）硬事实；D4 CANT-SEND 无时效无限重发；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后查 inner 槽位——AC25/AC22 一直卡住的机制原因"
 status: todo
 labels:
   - gap
@@ -36,10 +36,12 @@ RESUMED 单轮沿即报（:199），IDLE 要连续 2 轮（:168/1000-1002）—�
 是 12:26 ba0c1968 才写进 env，之前 bdc5e5fw2 盯的是 outer 自己；对着 outer 时间线 11:54:24 与
 12:23:53 都是合法的，分别紧跟 11:53:43 和 12:22:54 的复活。②i-B 类——拿一个序列解释另一个对象。）
 
-**撤掉错证据后抖动反而被更干净地证明（这条是硬的）**：outer 12:08:52→12:22:54 窗口 = 842s ≈ 14 轮
-（INTERVAL=60），窗口内 SESSION-IDLE 零条 ⇒ IDLE_CONSEC 从未到 2；窗口结束 12:23:53 发出 RESUMED，
-其触发条件 PREV_IDLE==1 ⇒ idle 曾为 1。**两者合起来：连续 14 轮里 idle 反复 1,0,1,0…，从未连着两轮
-为 1**。会话这 14 分钟零 transcript 记录，所以**抖动源只在 pane 侧**。
+**（2026-08-08 13:2x 更正——原「14 轮 idle 反复 1,0,1,0 抖动」推断撤回）**：只读采样 5s×72=6min
+对齐 pane 分类与 transcript mtime，inner 72/72 全 waiting-input 状态零翻转、outer 2 次翻转对应真实
+活动、「静止>120s 却判 busy」0 样本 ⇒ **分类器稳，无 pane 抖动**。D5 锐化形式（-eq 2 + SEEN_BUSY
+起始门）是唯一解释：outer 842s 窗口 IDLE 零条 + 窗口结束发 RESUMED（PREV_IDLE==1）不是「idle
+1,0,1,0 抖动」，是 **IDLE_CONSEC 到 2 那一轮 SEEN_BUSY=0 ⇒ 触发机会被永久销毁**，随后转忙置
+SEEN_BUSY=1 才发出 RESUMED。见 AC6。
 
 ### 覆盖率账
 
@@ -55,7 +57,7 @@ outer 只有 2 次翻转且对应真实活动；「transcript 静止>120s 却判
 
 **inner 停下时即使有若干 subagent 在跑，也必须报 IDLE 事件；外层收到后必须去查 inner 的槽位是不是满。**
 
-### 修法方向（实现归外层/内层，判据建议）——压制源在 pane_busy 抖动，成因无证据不猜
+### 修法方向（实现归外层/内层，判据建议）——根因 = D5（-eq 2 + SEEN_BUSY 起始门），非抖动
 
 **manager 2026-08-08 13:1x 更正后的硬事实**：transcript 侧判闲不是压制源（outer 12/12、inner 14/16
 窗口起点都是 pure-text）；报告闸 -eq 边沿语义正确不是压制源；**压制源确定在 pane_busy 的抖动上，
