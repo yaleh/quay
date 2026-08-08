@@ -12,63 +12,68 @@ extra: {}
 
 ## Proposal
 
-**合并 integration→develop（a862c914）后的完整验证暴露多根因失败批次（8 文件）。manager-tick-log referenced-not-landed 已修（7f43fc78）；剩余是合并首次把 integration 代码带进 develop 后，配套声明/引用/拆分未同步的确定性失败（非 flake，隔离复现）。**
+**合并 integration→develop（a862c914）后的完整验证暴露失败批次。经红窗归因（管理者 2026-08-08 提示），本任务收窄为【独立项】——doc-asserting/install 家族已归 40→6 任务（gap-forty-to-six-remerge-needs-tests-updated-first，已升级 ready）持有根因，避免重复修同一根因。**
 
-### 实测（合并后第 2 轮全量 850s red，真实失败 8 文件）
+### 归因（本轮 8 失败文件分两类）
 
-| 失败文件 | 根因 | 隔离复现 |
-|---|---|---|
-| capability-catalog | **cross-machine-verify.sh 缺 QUESTION 声明**：integration(354be03e) catalog 表含它（grep=1），develop(7f43fc78) 不含（grep=0）——合并丢了 integration 的 catalog 条目 | 是（catalog exit 1, unclassified=cross-machine-verify） |
-| session-liveness-events | B2/B3/B4 claude-as-pane alive=0——session-liveness 拆分后检测测试确定性失败 | 是（隔离 fail 3） |
-| quay-session / session-topology / cold-start / session-bootstrap | 文档断言：cold-start must reference bootstrap command / single-driver check / 拓扑工厂——引用未同步 | 待逐个确认 |
-| inner-blocked-signal / loop-shipping-necessity | inert FILE-level exclusion 缺 retainedNote / tick assert-before-stop | 待确认 |
-| quay-init-loop-driver | laid-down driver 断言 | 隔离 pass 13/fail 2 |
+**A. 40→6 家族（doc-asserting/install——归 40→6 任务，本任务不碰）**
+- inner-blocked-signal（tick must reference the CLI）
+- loop-shipping-necessity（inert exclusion retainedNote）
+- quay-session / session-topology / cold-start / session-bootstrap（bootstrap command / single-driver / 拓扑工厂引用）
+- quay-init-loop-driver（laid-down driver）
+
+这些断言期望 40→6 新行为，但 40→6 被回滚（7642849a）、实现是旧的。由 gap-forty-to-six-remerge 统一修测试再重合并。
+
+**B. 独立项（本任务）**
+1. **capability-catalog**：`unclassified: cross-machine-verify.sh`——合并丢 QUESTION 条目。该脚本来自独立任务 gap-no-post-merge（5674e0ea/05456e96，非 40→6 内容）；integration(354be03e) catalog 表含它（grep=1）、develop(7f43fc78) 不含（grep=0）。修：QUESTION 表补 cross-machine-verify 一行（从 integration 版本找回 question 文本）。
+2. **session-liveness-events B2/B3/B4**：claude-as-pane alive=0，隔离 fail 3——session-liveness 拆 3 文件后检测测试断（helpers 的 pane_pid 检测可能被动）。查 session-liveness-helpers.mjs。
+
+**C. serial 趟未跑（新现象，需调查）**
+本轮日志只有 product,engine + lowconc 两趟 selected，**无 serial 3 files**。前几轮（r7/r9）red 也跑两趟 ⇒ 非既有行为。查 test.sh 主趟红后为何跳过 serial 趟（退出路径）。
 
 ### 处置方向
 
-1. **capability-catalog**：capability-catalog.sh 的 QUESTION 表补 cross-machine-verify 一行（从 integration 354be03e 版本找回 question 文本）；
-2. **session-liveness-events B2/B3/B4**：拆分后 helpers/环境变化导致 claude-as-pane 检测 fail——查 session-liveness-helpers.mjs 的 pane_pid 检测逻辑（拆分可能动了它）；
-3. **文档断言（bootstrap/single-driver/拓扑工厂）**：合并引入新引用但文档没同步——逐个对齐（可能仍是 reference-doc 声明或文档措辞）；
-4. **inert exclusion / tick assert-before-stop**：loop-shipping-exclusion-data.mjs 补 retainedNote 或移除 inert 项；
-5. **quay-init-loop-driver**：laid-down driver 断言对齐。
+1. **catalog**：capability-catalog.sh 的 QUESTION 表补 cross-machine-verify（从 integration 354be03e 找回）；
+2. **session-liveness B2-B4**：查 helpers 的 pane_pid 检测，拆分引入的问题修复；
+3. **serial 未跑**：查 test.sh 主趟 fail 后的退出路径为何跳 serial（可能 set -e / 主趟红即退出），修复让 serial 趟照常跑。
 
-**逐个验证**：每个根因修完隔离重跑对应文件 pass 0 fail；全部修完全量三趟 fail 0 / cancelled 0。
+**验证**：每项隔离 0-fail；serial 趟恢复跑；全量三趟 fail 0 / cancelled 0（与 40→6 修复后合并验证）。
 
 ## Contract
 
 measure catalog_green = `cd /tmp/quay-suite-int && bash plugin/scripts/capability-catalog.sh --json >/dev/null 2>&1; echo $?` stdout 数字段（修复后 catalog exit 0）
 measure liveness_events = `cd /tmp/quay-suite-int && timeout 90 node --test plugin/test/session-liveness-events.test.mjs 2>&1 | grep -E "^ℹ fail"` stdout 数字段（修复后 fail 0）
-band catalog_green = 0 且 liveness_events = fail 0
+measure serial_runs = `grep -c "selected 3 files (groups=serial)" .quay/full-suite.log` stdout 数字段（修复后 serial 趟在场，≥1）
+band catalog_green = 0 且 liveness_events = fail 0 且 serial_runs = ≥1
 invoke `bash scripts/test.sh --for-task gap-post-merge-verification-failure-batch 2>&1 | tail -3`
-control 每个根因隔离重跑 pass 0 fail；全量三趟 fail 0 / cancelled 0
-resume 若中断，先跑 measure 读 catalog exit + liveness fail 数
+control 每项隔离 0-fail；serial 趟恢复；全量三趟 fail 0 / cancelled 0（与 40→6 修复合并验证）
+resume 若中断，先跑 measure 读 catalog exit + liveness fail + serial 趟数
 
 ## Acceptance Criteria
 
-- [ ] AC1: **capability-catalog**——QUESTION 表补 cross-machine-verify（从 integration 版本找回）；catalog exit 0
-- [ ] AC2: **session-liveness-events B2/B3/B4**——拆分后检测测试恢复（claude-as-pane alive=1）
-- [ ] AC3: **文档断言**——cold-start bootstrap command / single-driver / 拓扑工厂引用对齐（各文件隔离过）
-- [ ] AC4: **inert exclusion / tick assert-before-stop**——loop-shipping-exclusion-data 补 retainedNote 或移除；tick 文档补引用
-- [ ] AC5: **quay-init-loop-driver**——laid-down driver 断言恢复
-- [ ] AC6: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0
+- [ ] AC1: **catalog QUESTION 表**——补 cross-machine-verify（从 integration 找回）；catalog exit 0
+- [ ] AC2: **session-liveness B2/B3/B4**——拆分后检测测试恢复（claude-as-pane alive=1）
+- [ ] AC3: **serial 趟恢复**——test.sh 主趟红后不再跳过 serial；serial 3 文件照常跑
+- [ ] AC4: 与 gap-forty-to-six-remerge（doc-asserting/install 家族归它）、
+      gap-merge-introduced-referenced-not-landed-manager-tick-log（同批次合并问题）交叉标注
+- [ ] AC5: **全栈并发 8 绿**——与 40→6 修复合并后，全量三趟 fail 0 / cancelled 0
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（每个根因修复前后隔离对照）
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+- [ ] AC1-AC3 实跑输出贴任务体（每项修复前后隔离对照、serial 趟恢复前后）
+- [ ] 与 40→6 重合并合并验证后，全量三趟 fail 0 / cancelled 0
 
 ## Touches
 - plugin/scripts/capability-catalog.sh（QUESTION 表补 cross-machine-verify）
 - plugin/test/session-liveness-events.test.mjs 或 plugin/test/session-liveness-helpers.mjs（B2/B3/B4）
-- plugin/skills/cold-start/SKILL.md 或相关文档（bootstrap/single-driver/拓扑工厂引用）
-- plugin/scripts/loop-shipping-exclusion-data.mjs（retainedNote）
-- 相关 tick 文档（assert-before-stop）
-- tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md（AC6 交叉标注：同批次）
+- scripts/test.sh（serial 趟未跑调查——主趟红后退出路径）
+- tasks/gap-forty-to-six-remerge-needs-tests-updated-first.md（AC4 交叉标注）
+- tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md（AC4 交叉标注）
 
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-08T00:5xZ
-changed: 合并后第 2 轮全量 red（8 文件，非 flake 隔离复现）。根因：合并首次把 integration 代码带进 develop，
-  配套声明/引用/拆分未同步——catalog QUESTION 表丢 cross-machine-verify（integration 有、develop 无）、
-  session-liveness 拆分后 B2/B3/B4 断、文档断言未同步等。manager-tick-log 已单独修。建批次任务逐个修。
+at: 2026-08-08T01:0xZ
+changed: 收窄批次任务（管理者 2026-08-08 红窗归因）：doc-asserting/install 家族归 40→6 任务（已升级 ready）
+  持有根因，本任务只留独立项（catalog QUESTION 表补 cross-machine-verify、session-liveness B2-B4）
+  + 新增 serial 趟未跑调查（本轮缺 serial 趟，管理者第一点）。避免同一根因修多次。
