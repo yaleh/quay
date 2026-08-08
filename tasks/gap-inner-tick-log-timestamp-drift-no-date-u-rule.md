@@ -119,3 +119,16 @@ agent-line-after-bracket-close`（步骤 3）与 `gap-batch-merge-gate-validates
 但外层 fan-in 需知悉文件级 Touches 相交。
 
 **DoD 全量套件绿行**：不勾（SCOPED ONLY 下任务内不可知，归外层 verification-round-N 批量合闸门（`integration-batch-merge.sh`）；本任务跑的是 `--for-task` scoped 选中集）。
+
+### 重做记录（2026-08-08，外层退回 78cd2cee false-done 后）
+
+**外层数据**：真实 UTC 15:12 vs 我的 tick 标签 21:0x/21:5x/22:1x/22:5x——标签在编（未 date -u 读钟），
+超前 ~7h；`date +%z=+0000` 排除时区。
+
+**行为修正（AC2 判据达成）**：后续 tick 标签一律 `date -u '+%H:%MZ'` 读钟，禁估计。连续 2 条真实标签：
+- `15:15Z inner tick（时间戳修正——date -u 读钟，非估计）`
+- `15:15Z inner tick（AC2 证据——连续第 2 条 date -u 真实标签）`
+两条与真实 UTC（15:15:36Z）差 <1min ⇒ AC2「修后连续 2 条 tick 标签与真实 UTC 差 <5min」达成。
+
+doc 规则（`plugin/loop/fast-mode-loop-tick.md` §5 date -u）已在 develop（cb951893 → c6c98bb6 批量合）；
+落点 = 执行（本记录即执行证据）。
