@@ -5,7 +5,7 @@ title: 批量合 integration→develop 绕过了
   06:08:19 reset 完成的，而脚本头部自述 REF-LEVEL（git update-ref CAS / 临时 worktree
   merge），绝不碰主检出工作树；绕过路径丢掉脚本全部保护：CAS、共享文件冲突自动解、 真代码冲突
   fail-closed（author/committer 同 Yale Huang，三个 agent 同身份无法区分，不猜是谁）
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
@@ -82,9 +82,25 @@ resume 若中断，先跑 measure 确认 reflog 形态，不要假设已修
 - plugin/loop/orchestrator-loop-tick.md（3b 批量合步骤：加"走脚本"断言）
 - tasks/gap-merge-exposed-contract-violations-in-done-tasks.md（AC3 交叉标注）
 
+## Withdrawal (2026-08-08 07:1x)
+
+**前提不成立，撤回。** 管理者 2026-08-08 实测复核后撤回原判定：
+- reflog 的「空动作名 + reset: moving to HEAD」是脚本 REF-LEVEL 路径的**合法副作用**——脚本 291/358 行
+  `git update-ref refs/heads/develop <new> <old>`（CAS 直接改 ref），而主检出正 checkout 在 develop 上，
+  ref 被从下面换掉 → 主检出 HEAD 指向随之改变 → reset 是收拾动作。**不是手工 merge 的签名。**
+- 脚本注释「never touches the primary checkout」说的是**不在主检出里执行 merge 操作**，不是
+  ref 变动不会波及主检出 HEAD——之前把「不会在主检出执行」读成了「主检出不会有任何痕迹」。
+- 批量合实际**走的就是脚本**（d8b35747 经 integration-batch-merge.sh --sync REF-LEVEL 完成，
+  integration 重新成为 develop 祖先，与脚本路径一致）。
+
+**结论：本任务前提（绕过脚本）不成立。** 若需保留，应改写为「reflog 形态的判定判据」类任务
+（如何从 reflog 区分 REF-LEVEL 副作用 vs 真绕过），而非「绕过已发生」。
+
 ## Dispatch review
 
 reviewer: none
 at: 2026-08-08T06:2xZ
 changed: 管理者 2026-08-08 报告（7b1ac3a1 非脚本做的，主检出 merge+reset）；外层独立复核 reflog
-  （HEAD@{0}=reset / HEAD@{1}=merge）与脚本头部 REF-LEVEL 自述——绕过证据成立。
+  （HEAD@{0}=reset / HEAD@{1}=merge）与脚本头部 REF-LEVEL 自述——初判绕过证据成立。
+  **2026-08-08 07:1x 撤回**：管理者实测复核推翻（reflog 形态 = update-ref 副作用非绕过），
+  外层二次核实 reflog（develop@{1} 空动作名 + HEAD reset）与脚本 291/358 行 update-ref——撤回成立。

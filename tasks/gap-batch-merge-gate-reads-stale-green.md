@@ -80,6 +80,13 @@ resume 若中断，先跑 measure 确认 finishedAt 距今秒数，不要假设�
 - tasks/gap-suite-state-split-across-worktree-and-gate.md（AC4 交叉标注）
 - tasks/gap-batch-merge-bypassed-integration-batch-merge-script.md（AC4 交叉标注）
 
+## Confirmed by manager (2026-08-08 07:1x)
+
+管理者确认：判据 ④ 的**文档形态与实际形态不一致**是可测事实（非意见）——
+- `orchestrator-loop-tick.md:649` 写机械门：`suiteGreen == false（red/aborted/缺 state）⇒ 不跑批量合`；
+- 实际执行是自判门：suite red（07:06:49）→ inner 隔离重跑通过 → 07:07:49 批量合（红后 1 分钟）。
+- **文档说机械、实际是自判——差距本身就是缺口**，与本任务（闸门只读 state 不读新鲜度）同类。
+
 ## Dispatch review
 
 reviewer: none
@@ -87,3 +94,5 @@ at: 2026-08-08T06:2xZ
 changed: 管理者 2026-08-08 报告（7b1ac3a1 前后 0 次 suite、state 是 02:50-03:02 旧绿、mtime 04:49）；
   外层独立复核：state 文件 finishedAt=03:02:26、merge 06:07:22、期间零 runner——陈旧绿证据成立；
   闸门代码 orchestrator-loop-tick.md:724 只读 state 字段——根因确认。
+  **2026-08-08 07:1x 管理者确认**：文档机械门 vs 实际自判门的差距是真实缺口（serve.test.mjs
+  07:06:49 红 → 隔离通过 → 07:07:49 批量合），与本任务同类。
