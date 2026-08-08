@@ -140,9 +140,36 @@ WORKSPACE_ROOT="$(cd "$WORKSPACE_ROOT" && pwd)"
 # stay reserved-name-free.
 RUNTIME_BASE="$WORKSPACE_ROOT/.quay/runtime"
 
-# Defaults for loop params.
+# read_existing_loop_value <key> — the config-preserving upgrade's source of truth
+# (gap-quay-init-config-preserving-incremental-upgrade). An EXISTING consumer's `.quay/config.yml`
+# `loop:` section carries values the project already chose (repo_root / test_command / tmux_session /
+# worktree_root — the fast-mode keys — AND board / gates / stop / policy / concurrency_bands /
+# fork_baseline / merge_target / routines — the loop-driver + fast-mode keys). The upgrade must KEEP
+# those values, never re-detect/re-derive them: an explicit CLI flag wins, otherwise the existing
+# config value wins, otherwise the fresh-install default/detection applies. Reads ONE key from an
+# existing config (empty when the config is absent or the key is unset).
+read_existing_loop_value() {
+  local key="$1"
+  [ -f "$WORKSPACE_ROOT/.quay/config.yml" ] || { echo ""; return; }
+  python3 - "$WORKSPACE_ROOT/.quay/config.yml" "$key" <<'PYEOF'
+import sys, yaml
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        d = yaml.safe_load(f) or {}
+    print((d.get("loop") or {}).get(sys.argv[2]) or "")
+except Exception:
+    pass
+PYEOF
+}
+
+# Defaults for loop params. repo_root defaults to the workspace root on a FRESH install; on an
+# EXISTING consumer the config-preserving upgrade keeps the consumer's recorded loop.repo_root
+# (explicit --repo-root always wins).
 if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$(basename "$WORKSPACE_ROOT")"; fi
-if [ -z "$REPO_ROOT" ]; then REPO_ROOT="$WORKSPACE_ROOT"; fi
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(read_existing_loop_value repo_root)"
+  if [ -z "$REPO_ROOT" ]; then REPO_ROOT="$WORKSPACE_ROOT"; fi
+fi
 # NOTE: TMUX_SESSION is deliberately NOT defaulted here. The old default was a guessed
 # "<project>-0:0.0" (gap-init-guesses-the-tmux-session): it only worked for the project it was
 # written for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
@@ -409,18 +436,24 @@ detect_tmux_session() {
 # config already exists, the project owns it — just note the AC7b requirement
 # (a future --force could patch it; not silently rewritten).
 # ensure_loop_config: add/update the `loop:` section in an EXISTING `.quay/config.yml` with the
-# three target-project values (repo_root / test_command / tmux_session — SPEC AC2, the single
-# config source for the loop). Laid-down scripts and tick docs READ these at runtime instead of
-# having them baked in at install (SPEC AC3), so two installs of the same product are byte-identical
-# except this config (AC4). A pre-existing config's other keys (providers, credentials) are
-# preserved; only the loop section is added/updated. Used only when the config already exists — a
-# config-less target gets the loop section from write_provider_config's heredoc (which preserves
-# the inline `["node", ...]` mcp_entry the AC7b test pins). Uses python3 + yaml so the values are
-# always valid YAML scalars regardless of their content.
+# four fast-mode target-project values (repo_root / test_command / tmux_session / worktree_root —
+# SPEC AC2, the single config source for the loop). Laid-down scripts and tick docs READ these at
+# runtime instead of having them baked in at install (SPEC AC3), so two installs of the same product
+# are byte-identical except this config (AC4). A pre-existing config's other keys (providers,
+# credentials) are preserved; only the loop section is added/updated. Used only when the config
+# already exists — a config-less target gets the loop section from write_provider_config's heredoc
+# (which preserves the inline `["node", ...]` mcp_entry the AC7b test pins). Uses python3 + yaml so
+# the values are always valid YAML scalars regardless of their content.
+# CONFIG-PRESERVING UPGRADE (gap-quay-init-config-preserving-incremental-upgrade, AC1): the loop
+# section is MERGED, never replaced. `data["loop"] = {...}` (the pre-fix form) DESTROYED every
+# non-fast-mode key the consumer owned — the loop-driver schema (board / gates / stop / policy) and
+# the fast-mode schema's extras (concurrency_bands / fork_baseline / merge_target / routines) were
+# silently dropped on upgrade. The fix updates ONLY the four fast-mode keys and leaves every other
+# loop: key byte-for-byte intact (the consumer's loop values survive the upgrade unchanged).
 ensure_loop_config() {
   local cfg="$WORKSPACE_ROOT/.quay/config.yml"
   if [ "$DRY_RUN" = true ]; then
-    echo "  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root — SPEC AC2)"
+    echo "  would-write: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)"
     return
   fi
   if [ ! -f "$cfg" ]; then return; fi
@@ -429,10 +462,17 @@ import sys, yaml
 cfg, repo, test, tmux, wtroot = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 with open(cfg, encoding="utf-8") as f:
     data = yaml.safe_load(f) or {}
-data["loop"] = {"repo_root": repo, "test_command": test, "tmux_session": tmux, "worktree_root": wtroot}
+loop = data.get("loop")
+if not isinstance(loop, dict):
+    loop = {}
+loop["repo_root"] = repo
+loop["test_command"] = test
+loop["tmux_session"] = tmux
+loop["worktree_root"] = wtroot
+data["loop"] = loop
 with open(cfg, "w", encoding="utf-8") as f:
     yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-print(f"  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root — SPEC AC2)")
+print(f"  wrote: .quay/config.yml loop: (repo_root/test_command/tmux_session/worktree_root updated; 其余 loop 键保留 — config 保留 增量升级)")
 PYEOF
 }
 
@@ -549,6 +589,35 @@ ensure_runtime_gitignore() {
     printf '%s\n' "$entry"
   } >> "$gi"
   echo "  appended: $entry to .gitignore"
+}
+
+# backup_config — gap-quay-init-config-preserving-incremental-upgrade AC2 (config backup before
+# upgrade). The --loop upgrade MODIFIES an existing consumer's `.quay/config.yml` (migrate_stale_
+# mcp_entry + ensure_loop_config). Before ANY modification, the pre-upgrade config is backed up to
+# the SAME per-run backup dir as the residue cleanup (<workspace>/.quay/quay-init-backups/<ts>/), so
+# "backup 在哪" stays one line. Prints the backup path on stdout (empty when there was nothing to
+# back up — a config-less fresh install has nothing to preserve).
+backup_config() {
+  local cfg="$WORKSPACE_ROOT/.quay/config.yml"
+  if [ "$DRY_RUN" = true ] || [ ! -f "$cfg" ]; then echo ""; return; fi
+  local backup_dir="$WORKSPACE_ROOT/.quay/quay-init-backups/$BACKUP_TS"
+  mkdir -p "$backup_dir"
+  cp "$cfg" "$backup_dir/config.yml"
+  echo "$backup_dir/config.yml"
+}
+
+# rollback_config_on_exit — gap-quay-init-config-preserving-incremental-upgrade AC2 (rollback config
+# unchanged on failure). Wired as an EXIT trap while the upgrade's config write is armed; if the
+# --loop run fails for ANY reason before the config is disarmed (a config write that aborts, a
+# post-config verification that fails closed), the pre-upgrade config is restored from the backup —
+# the consumer's config is byte-for-byte unchanged by a failed upgrade. Disarmed by clearing
+# CONFIG_BACKUP once the config is in its final good state (a later auto-commit failure is a git
+# failure, not a config failure — rolling back the config then would be wrong).
+rollback_config_on_exit() {
+  if [ -n "${CONFIG_BACKUP:-}" ] && [ -f "$CONFIG_BACKUP" ]; then
+    cp "$CONFIG_BACKUP" "$WORKSPACE_ROOT/.quay/config.yml"
+    echo "  rolled back .quay/config.yml from backup (upgrade did not complete — config unchanged)" >&2
+  fi
 }
 
 write_provider_config() {
@@ -1417,6 +1486,17 @@ if [ "$DO_LOOP" = true ]; then
   # tests=N) needs a concrete command, and a guessed default is exactly what the negative control
   # forbids (no leaking the quay-specific scripts/test.sh into a laid-down copy that doesn't use it).
   if [ -z "$TEST_COMMAND" ]; then
+    # Config-preserving upgrade (gap-quay-init-config-preserving-incremental-upgrade AC1): an
+    # existing consumer's recorded loop.test_command is KEPT — never re-detected/re-derived. An
+    # explicit --test-command on the upgrade command line overrides it.
+    TEST_COMMAND="$(read_existing_loop_value test_command)"
+    if [ -n "$TEST_COMMAND" ]; then
+      echo "  using existing config loop.test_command: $TEST_COMMAND (config-preserving upgrade — explicit --test-command overrides)"
+    fi
+  else
+    echo "  using explicit --test-command: $TEST_COMMAND"
+  fi
+  if [ -z "$TEST_COMMAND" ]; then
     if DETECTED="$(detect_test_command "$WORKSPACE_ROOT")"; then
       TEST_COMMAND="$DETECTED"
       echo "  detected test command: $TEST_COMMAND (from the target project — confirm this is correct)"
@@ -1431,8 +1511,6 @@ if [ "$DO_LOOP" = true ]; then
       echo "       Pass --test-command <cmd> explicitly to set the target's test command." >&2
       exit 2
     fi
-  else
-    echo "  using explicit --test-command: $TEST_COMMAND"
   fi
 
   # AC1/AC2/AC3 (gap-init-guesses-the-tmux-session): the target project's tmux session is
@@ -1442,6 +1520,18 @@ if [ "$DO_LOOP" = true ]; then
   # CLOSED (AC2) — the old "<project>-0:0.0" default only worked for the project it was written
   # for, and a monitor aimed at a nonexistent session reports a LIVE inner as GONE (the
   # false-negative this task exists to kill). Never write a guessed value into the monitor config.
+  if [ -z "$TMUX_SESSION" ]; then
+    # Config-preserving upgrade (gap-quay-init-config-preserving-incremental-upgrade AC1): an
+    # existing consumer's recorded loop.tmux_session is KEPT — the upgrade must not re-detect (and
+    # possibly fail closed on) a session that is not running RIGHT NOW. An explicit --tmux-session
+    # on the upgrade command line overrides it.
+    TMUX_SESSION="$(read_existing_loop_value tmux_session)"
+    if [ -n "$TMUX_SESSION" ]; then
+      echo "  using existing config loop.tmux_session: $TMUX_SESSION (config-preserving upgrade — explicit --tmux-session overrides)"
+    fi
+  else
+    echo "  using explicit --tmux-session: $TMUX_SESSION"
+  fi
   if [ -z "$TMUX_SESSION" ]; then
     # set -euo pipefail would terminate the script the instant detect_tmux_session returns
     # non-zero, so a bare `DETECT_RC=$?` on the next line never ran — the exit code was
@@ -1465,8 +1555,6 @@ if [ "$DO_LOOP" = true ]; then
       echo "       Pass --tmux-session <sess> explicitly (e.g. 'tmux list-sessions' to see the real sessions)." >&2
       exit 2
     fi
-  else
-    echo "  using explicit --tmux-session: $TMUX_SESSION"
   fi
 
   # worktree_root (gap-the-shipped-tick-doc-teaches-every-project-to-put-worktrees-in-tmpfs AC2):
@@ -1495,6 +1583,16 @@ PYEOF
   mkdir -p "$WORKSPACE_ROOT/plugin/scripts"
   mkdir -p "$WORKSPACE_ROOT/orchestration"
   mkdir -p "$WORKSPACE_ROOT/docs/analysis"
+
+  # Config-preserving upgrade (gap-quay-init-config-preserving-incremental-upgrade AC2): back up the
+  # consumer's .quay/config.yml BEFORE the upgrade modifies it, and arm the EXIT-trap rollback so a
+  # failed upgrade restores the config byte-for-byte unchanged. Disarmed below once the config is in
+  # its final good state (after the post-laydown verifications). A config-less fresh install gets an
+  # empty CONFIG_BACKUP → the trap is a no-op → AC3 (fresh install path unaffected) holds.
+  CONFIG_BACKUP="$(backup_config)"
+  if [ -n "$CONFIG_BACKUP" ]; then
+    trap rollback_config_on_exit EXIT
+  fi
 
   # Mechanism scripts (checkers + gate + token + observation) → <workspace>/plugin/scripts/.
   # gap-init-ships-a-skill-that-calls-files-it-does-not-lay-down, Chosen-mechanism (a): the landing
@@ -1680,6 +1778,12 @@ PYEOF
       echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
     fi
   fi
+
+  # Config-preserving upgrade (AC2): the config is now in its final good state — DISARM the
+  # rollback. A later auto-commit failure is a git failure, not a config failure; rolling back the
+  # config then would discard a valid upgrade.
+  CONFIG_BACKUP=""
+  trap - EXIT
 fi
 
 # gap-quay-init-never-commits-broken-committed-state AC1/AC2/AC3: after ANY real laydown category,

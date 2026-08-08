@@ -225,3 +225,11 @@ tell-who-changed-them` 补「**铺设**」环（配置驱动安装，落地字�
 改动」）；`gap-quay-init-never-commits-broken-committed-state` 补「**提交**」环（quay-init 铺完机制自动
 commit `chore(quay-init):` 前缀，consumer 仓库 committed 态自洽——机制不再活在未提交工作树里）。三环合
 成完整交付契约；「版本标记」环（无 VERSION/package.json）仍是欠账。交叉不合并——三条任务各修契约的一环。
+
+## 交叉标注（AC4，gap-quay-init-config-preserving-incremental-upgrade，2026-08-08）
+
+本条交付**漂移检测的「报」**（漂移/缺失/一致 = L2 升级正确性判据）；`gap-quay-init-config-preserving-
+incremental-upgrade` 是**「报之后怎么办」**——已有下游消费者 `quay init --loop`（不加 --force）曾要么停在
+config-conflict、要么 --force 覆盖 config 丢掉 loop 值（archguard 实跑 2026-08-06 tick #114）。后继任务补上
+config-preserving 增量升级入口（备份 config → 铺机制文件 → 保留 config 值 + 失败回滚）。同根：升级通道的正确性，
+不只是「检测出漂移」，还要「安全地应用升级」。交叉不合并——本条交付漂移报告，后继任务交付报后动作。

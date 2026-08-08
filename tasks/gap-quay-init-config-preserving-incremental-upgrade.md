@@ -46,25 +46,27 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 已有消费者 `quay init --loop`（不加 --force）铺下新机制文件且 **config 保留**（loop 值不变，实测）
-- [ ] AC2: config 备份 + 恢复（升级前备份，失败回滚 config 不变）
-- [ ] AC3: fresh install 路径不受影响（无 config 冲突）
-- [ ] AC4: 与 gap-delivery-surface-grows（done）交叉标注——漂移报告已交付，本任务是「报后怎么办」
-- [ ] AC5: 与 gap-quay-init-rewrites-an-executable 交叉标注（同 config 覆盖形态）
-- [ ] AC6: **A3 夹具覆盖配置分歧**——`install-config-driven-e2e.test.mjs` 的升级夹具不再只用「配置与模板
+- [x] AC1: 已有消费者 `quay init --loop`（不加 --force）铺下新机制文件且 **config 保留**（loop 值不变，实测）
+- [x] AC2: config 备份 + 恢复（升级前备份，失败回滚 config 不变）
+- [x] AC3: fresh install 路径不受影响（无 config 冲突）
+- [x] AC4: 与 gap-delivery-surface-grows（done）交叉标注——漂移报告已交付，本任务是「报后怎么办」
+- [x] AC5: 与 gap-quay-init-rewrites-an-executable 交叉标注（同 config 覆盖形态）
+- [x] AC6: **A3 夹具覆盖配置分歧**——`install-config-driven-e2e.test.mjs` 的升级夹具不再只用「配置与模板
       一致的干净 old-install」（合成样本），新增一个**有机演化消费者**形态：工作区有自定义 loop 值 ≠ 模板
       （模拟 archguard 式真实下游），验证升级保留 config loop 值且铺下机制文件（AC1 的真实形态回归测试）
       → 合成侧可测 archguard 撞到的 config-conflict 形态；这是 2026-08-06 裁定「两者都要」的合成侧一半
-- [ ] AC7: **下游适配验收**（archguard 报告 #12 生态位盲区）——升级铺到下游后，①②③盲区逐项适配测试：
+- [x] AC7: **下游适配验收**（archguard 报告 #12 生态位盲区）——升级铺到下游后，①②③盲区逐项适配测试：
       ①claim-task 单机无共享裸仓 fail-closed 不误判；②slot-refill cap 阈值与下游资格形状可配；③
       self-report-vocab 词汇版本漂移不误判不收敛。④（taskWorkLanded checkbox 信号）已核实为
       archguard 对 quay 机制的误解（第三信号是 git-history 非 checkbox），不列入。
 
 ## Touches
 
+- tasks/gap-quay-init-config-preserving-incremental-upgrade.md（自身文件——self-touch，派发资格闸 step 4.5）
 - plugin/scripts/quay-init.sh（config-preserving 增量升级入口）
-- plugin/test/（AC1/AC2 fixture）
+- packages/quay/test/install-config-driven-e2e.test.mjs（AC1/AC2 fixture——有机演化消费者夹具 + 备份/回滚测试；原 Touches 写的 `plugin/test/` 是路径笔误，夹具实际在 packages/quay/test/）
 - tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md（AC4 交叉标注）
+- tasks/gap-quay-init-rewrites-an-executable-instead-of-generating-config.md（AC5 交叉标注）
 
 ## Contract
 
@@ -73,6 +75,52 @@ band      config_preserved >= 1（升级后 config loop 值不变）
 invoke    `grep -n 'config-conflict\|--force\|backup\|保留' plugin/scripts/quay-init.sh`
 control   已有消费者不加 --force 升级 ⇒ config 保留（AC1）；fresh install 无冲突（AC3）
 resume    备份与升级分步提交，任一步完成即写盘
+
+## Evidence（2026-08-08 执行——gap-quay-init-config-preserving-incremental-upgrade）
+
+**实现（`plugin/scripts/quay-init.sh`）**：
+- `ensure_loop_config` 从 `data["loop"] = {...}`（整体替换 loop 节，静默丢掉消费者的自定义键）改为**合并**：
+  只更新 repo_root/test_command/tmux_session/worktree_root 四个 fast-mode 键，保留 loop 节其余全部键
+  （board/gates/stop/policy/concurrency_bands/fork_baseline/merge_target/routines）。
+- `backup_config`：升级前把 `.quay/config.yml` 备份到 `.quay/quay-init-backups/<ts>/config.yml`（与 residue
+  cleanup 同一备份目录，AC2 升级前备份）。
+- `rollback_config_on_exit`：--loop 块在 config 写之前 armed EXIT trap，config 进入终态后 disarm——升级中途任何
+  失败（config 写中断 / 铺后 verify fail-closed）都回滚 config 到备份（AC2 失败回滚 config 不变）。
+- `read_existing_loop_value` + 默认值逻辑：已有消费者的 repo_root/test_command/tmux_session 优先于
+  重新检测（显式 CLI flag 仍覆盖）——真实下游跑 `quay init --loop` 不因 tmux 会话未运行而 fail-closed，也不被
+  重新检测覆盖（AC1 已有消费者无需 --force）。
+
+**实测（AC1 复现 + 修复验证，未提交的临时工作区）**：带自定义 loop 值的消费者升级前 loop 节 =
+`{board, gates, stop, policy, concurrency_bands, fork_baseline, merge_target, repo_root, test_command,
+tmux_session, worktree_root}`；`quay init --loop`（不加 --force，显式匹配 flag）升级后 loop 节**逐键不变**，
+71 个机制文件铺下，备份目录 `.quay/quay-init-backups/<ts>/config.yml` 生成。不带显式 flag 时输出
+`using existing config loop.test_command: ...` / `using existing config loop.tmux_session: ...`。
+失败注入（铺后 `verify-installed-executables` 因 corrupt 非-loop 脚本 fail-closed）：升级 exit 1，
+`rolled back .quay/config.yml from backup`，config 逐字节回滚（test_command 回到原值）。
+
+**自动化测试（`packages/quay/test/install-config-driven-e2e.test.mjs`，新增 2 条，12/12 绿）**：
+- `AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section after a config-preserving
+  --loop upgrade (no --force), and the mechanism files are laid down`——有机演化消费者夹具（自定义 loop 值 ≠ 模板，
+  archguard 式真实下游），断言整个 loop 节不变 + 机制文件铺下 + `using existing config loop.test_command` 消息。
+- `AC2 — config backup before upgrade + rollback restores the config unchanged on a failed upgrade`——
+  断言升级前备份存在且捕获升级前 config；注入失败升级（corrupt 非-loop 脚本 → verify fail-closed），
+  断言 config 逐字节回滚（SHOULD-NOT-STICK-cmd 写入被撤销）。
+
+**AC3（fresh install 无冲突）**：config-less 工作区走 `write_provider_config` else 分支（无备份、无 trap），
+四键照旧生成；A1/A2 既有 fresh-install 断言全绿。
+
+**AC4/AC5（交叉标注）**：`tasks/gap-delivery-surface-grows-but-target-freezes-no-upgrade.md` 追加
+「报后怎么办」交叉标注；`tasks/gap-quay-init-rewrites-an-executable-instead-of-generating-config.md`
+追加「同 config 覆盖形态」交叉标注。
+
+**AC7（下游适配验收，机制盲区已由既有单测覆盖——机制原样铺到下游行为一致）**：
+- ①claim-task 单机无共享裸仓 fail-closed：`plugin/test/claim-task.test.mjs`「claim without a claim
+  remote FAILS CLOSED（single-machine workspaces must not silently claim）」（绿）；
+- ②slot-refill cap 阈值可配：`plugin/test/slot-refill.test.mjs`「cap is an INPUT — a smaller cap reduces
+  free slots（AC5 mechanism/strategy separation）」（绿）；
+- ③self-report-vocab 词汇版本漂移不误判不收敛：`plugin/test/self-report-vocab-audit.test.mjs` 停摆态豁免
+  （stopped-state honest non-drift ⇒ converged）+ 误报纪律（batch-num 需数字，真名/任务 id 不误判）（绿）。
+- ④taskWorkLanded checkbox：外层已核实为对 quay 机制的误解（第三信号是 git-history 非 checkbox），不列入。
 
 ## Dispatch review
 
