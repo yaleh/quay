@@ -1586,6 +1586,20 @@ inner 自驱心跳次数           = 0（今晚 6 次唤醒：会话续接 1 / �
 「同时空闲」= 五条**同时**成立：outer pane idle **且** inner pane idle **且**
 `in-flight = 0` **且** `dispatchable_disjoint > 0` **且** 无 `.halt`、无 suite 在跑。
 
+> **⚠️ 2026-08-08 13:5xZ 实测更正：第三条 `in-flight` 的取法，我连报数轮取错了。**
+> **`slot-refill.sh` 的 `in_flight_count` 不是测量值，是调用方传入的参数**（`slot-refill.ts:15`
+> 原文：*The caller passes the CURRENTLY-RUNNING*；不传 `--in-flight` ⇒ 默认 `[]` ⇒ 恒为 0）。
+> 我不传就报 `in_flight=0`，**而同一时刻 outer 实测 `real in-flight=2/effective_cap=2 满`**
+> （busy-mask-idle + integration-content 两个 agent 在飞）。
+> **根因不止是我少传参数**：那两个 agent 在 **worktree** 里，**主仓遥测结构上看不见**
+> （outer 原文：「worktree bracket 主仓不可见——telemetry slots 0/2 是盲区，real 满」，
+> 同轮 `遥测 inProgress=0`）。
+> ⇒ **`in-flight` 必须取【真正在跑的 agent】**——inner 的 pane 任务列表 / 其 agent 会话文件，
+> **不得取 `slot-refill` 或 telemetry 的默认/派生值**。
+> ⇒ **这是 ②i-F 的第二次**（第一次是 `ready-pool-check` 的回退 `cap=3`），
+> **而 ②i-F 这个类别正是我从第一次立的**——**立了判准，换个工具又犯一次。**
+> **连带影响：此前几轮记为「五条全成立」的采样，第三条也是假的**（不只是 runner 那一条）。
+
 - **阈值不是我拍的**：取 outer 的 tick 周期（20 min）——**空闲超过一个周期意味着
   连兜底的 tick 都没把它救回来**，那才是机制问题而非节奏问题。
 - **取证（2026-08-08 12:3xZ 修正——原方法测不出它要测的东西）**：
@@ -1754,6 +1768,20 @@ outer **看见了并且诊断接得完整**（`aac97a8f` 的提交信息自己�
 3. **读的是占用率不是新鲜度**：判读时看它取的量——
    `mtime` / 「transcript is fresh」/「最后活动」**一律不算**，
    这三个在 inner 有子代理或被上层唤醒时都会为真而占用率为空。
+   **2026-08-08 13:5xZ 追加两条不算**：`slot-refill` 的 `in_flight_count`（**是入参不是测量**，
+   不传 `--in-flight` 恒为 0）与 telemetry 的 `inProgress`（**worktree 里的 agent 主仓不可见**）
+   **一律不算**——占用率必须取【真正在跑的 agent】。**这一条是 outer 测对、我测错之后补的。**
+
+**【S1/S2/S3 结果 —— 2026-08-08 13:58Z，人授权的 `/clear` 实验，三条全 PASS】**
+实验设计见 `manager-tick-log.md` 13:27Z 的**预登记**（评分标准在清除前写死）。
+- **S1 PASS**：对 outer 连发两次 `/clear` 后，cron `c0ac1607` 仍在，并于 `13:47:32` **准点自驱**
+  （班次 :07/:27/:47）。⇒ **「`/clear` 杀驱动」的推断被推翻**，三份文档已改（`b43f97d9`）。
+- **S2 PASS**：其 13:58Z tick-log 行含**两个具体读数**——`real in-flight=2/effective_cap=2 满`
+  与「inner 最近自报 = busy-mask + integration-content 在飞、无派发」。
+- **S3 PASS（反方向成立）**：槽 **未空**（2/2）+ 资源闸 WAIT ⇒ **正确行为就是不派发**，
+  且它**写明了理由**。AC25 的触发条件本轮不成立，不是「记录后结束」。
+⇒ **在空上下文下，机制由文件驱动跑完了一整轮**——这是本阶段目标（人不在场仍能运转）
+的第一份正面证据。**同轮唯一测错的一层是我自己。**
 
 **⚠️ 明写不覆盖什么**：本条**不**要求 outer 派发（可能确实无可派发，那是 AC25 的事）；
 只要求**它知道 inner 现在是什么状态**。**不知道就一定不会响应，知道了才谈得上处置。**
