@@ -1,7 +1,7 @@
 ---
 id: gap-targeted-promotion-operation-does-not-exist
 title: "定向晋级（targeted promotion）操作不存在——2026-08-04 裁定被超额执行：外层候选集构造规则整体搬进 ready-pool-check.ts（kind 排序 gap→DIR→other，无阶段目标输入），且 pool<floor（=cap×4）门把阶段目标要的任务挡在 todo；补充 refill（维持数量）与定向晋级 targeted（维持对齐）是两个操作，后者必须不受 floor 约束、由外层选择；实测 gap-ac16c3-... 永远停在 todo（pool=24>floor=20，生产值 cap=5）"
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -66,12 +66,12 @@ resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **定向晋级路径存在**——外层按阶段目标 promote todo→ready 有机械承载（非临时手动作）
-- [ ] AC2: **不受 floor 约束**——pool ≥ floor 时定向晋级仍能发生（与补充 refill 解耦）
-- [ ] AC3: **内层不改**——ready-pool-check 仍只按机械判据（touches/cap/停止条件），不掺阶段目标
-- [ ] AC4: **职责边界落文档**——晋级（选择）= 外层、派发（机械）= 内层，写进 orchestrator-loop-tick 的
+- [x] AC1: **定向晋级路径存在**——外层按阶段目标 promote todo→ready 有机械承载（非临时手动作）
+- [x] AC2: **不受 floor 约束**——pool ≥ floor 时定向晋级仍能发生（与补充 refill 解耦）
+- [x] AC3: **内层不改**——ready-pool-check 仍只按机械判据（touches/cap/停止条件），不掺阶段目标
+- [x] AC4: **职责边界落文档**——晋级（选择）= 外层、派发（机械）= 内层，写进 orchestrator-loop-tick 的
       晋级节；修正 :985-986 的「外层只引用」表述
-- [ ] AC5: 与 gap-promotion-cadence-is-role-volition-not-product-mechanism（done）交叉标注——那条要
+- [x] AC5: 与 gap-promotion-cadence-is-role-volition-not-product-mechanism（done）交叉标注——那条要
       「机制默认存在」，本条补被超额执行砍掉的「外层提供优先级输入」职责
 - [ ] AC6: **生命周期池机制三件套（manager 2026-08-08 11:0x 提案，外层裁定支持）**——
       (a) **「作废」终态**：生命周期加 `voided`（前提已失效的任务如实标记，标 done 说谎且 AC18 空跑——
@@ -82,17 +82,61 @@ resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，�
       (c) **判据写「同一任务不得被退回两次」而非「退回次数为零」**——退回本身是发现
       （reporter 退回产出了真实 per-file 计时数据），压制的是重复不是退回
 
+> **AC6 推迟（2026-08-08 落地时定）**：AC6 三件套不在本条 ## Touches 范围——(a) 加 `voided` 终态改
+> `packages/quay/src/gate/lifecycle.ts`（Touches 未列，且违反「内层不改/批量行为不动」约束）；(b)(c)
+> 需要一个**尚不存在的非状态退回记录写入方**（「inner 写非状态退回记录、pool-check 读」的写入端没人
+> 实现），且加 `rejected` 排除理由会改变池计算（批量行为）。本条落地范围 = AC1-AC5（定向晋级 + 文档 +
+> 交叉标注）；AC6 单独立项（`gap-` 池机制三件套），不改本条的 `--targeted` 补充逻辑。
+
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴任务体（pool≥floor 时定向晋级成功 + 内层不含阶段目标 + 职责边界落文档 + 池机制三件套）
+- [x] AC1-AC5 实跑输出贴任务体（pool≥floor 时定向晋级成功 + 内层不含阶段目标 + 职责边界落文档）
+- [ ] AC6 池机制三件套（推迟——见 AC6 注）
+
+### invoke 实跑证据（2026-08-08 落地，`gap-targeted-promotion-operation-does-not-exist` 执行）
+
+**AC1/AC2 实跑（pool ≥ floor 仍定向晋级成功）**——本任务自身为 todo 且四件套齐、依赖就绪、触摸可解析：
+```
+$ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root . --cap 5 --targeted gap-targeted-promotion-operation-does-not-exist
+targeted_promotion: {
+  "id": "gap-targeted-promotion-operation-does-not-exist",
+  "found": true, "status": "todo", "eligible": true, "floor_independent": true,
+  "promote_cmd": "quay promote gap-targeted-promotion-operation-does-not-exist",
+  "pool": 5, "floor": 20, "cap": 5   // pool < floor 时eligible —— 补充路径存在
+}
+```
+**AC2 负控制（pool ≥ floor 仍发生）**——构造 cap=2/floorMult=1 ⇒ floor=2，两个 ready（pool=2≥floor），
+`--targeted gap-target`（todo 合格候选）⇒ `targeted_promotion.eligible = true`、`floor_independent = true`、
+`promote_cmd = "quay promote gap-target"`，同时 `promotions = []`（批量路径因 deficit=0 不推荐）——
+定向晋级与补充 refill 解耦（`plugin/test/ready-pool-check.test.mjs` `--targeted: pool ≥ floor …` 用例）。
+
+**AC3（内层不改 / 批量不动）**——`--targeted` 不改变 `promotions`/`candidates` 输出（测试
+`--targeted: bulk promotions/candidates output is unchanged (AC3)` 断言与不带 `--targeted` 时
+deepEqual）；批量 `pool<floor` 路径的代码未动。checker 仍不含阶段目标输入——目标 id 由外层传入。
+
+**AC4（职责边界落文档）**——`orchestration/orchestrator-loop-tick.md` 晋级节改为两操作表（补充
+refill=内层机械、定向晋级 targeted=外层选择），明确「晋级（选择，需要阶段目标）= 外层；派发（机械）=
+内层」，并把「外层只引用它，不独立维护候选集构造规则」修正为「外层不再独立维护候选集构造规则（旧
+AC-queue 已降级为引用），但定向晋级由外层选择」。`plugin/loop/fast-mode-loop-tick.md` 3.6 同步加
+「定向晋级 --targeted 是外层工具，内层不用」。
+
+**AC5（交叉标注）**——`tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism.md` 加
+交叉标注块（超额执行核对 + 定向晋级 = 外层优先级输入的操作落位）。现场受害例
+`gap-ac16c3-bc-release-install-verification-not-done.md` **不在 integration 分叉基线**（该文件只在
+develop），无法在本条 worktree 内写注——见提交说明。
+
+**测试**——`scripts/test.sh plugin/test/ready-pool-check.test.mjs` ⇒ tests 37 / pass 37 / fail 0
+（新增 6 条 `--targeted` 用例，`node:test` + 既有 `// @test-group governance`）。
 
 ## Touches
 - tasks/gap-targeted-promotion-operation-does-not-exist.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
-- plugin/scripts/ready-pool-check.ts（若加 --targeted 入口；补充逻辑不动）
+- plugin/scripts/ready-pool-check.ts（加 --targeted 入口；补充逻辑不动）
 - orchestration/orchestrator-loop-tick.md（晋级节：职责边界 + 修正 :985-986 表述）
 - plugin/loop/fast-mode-loop-tick.md（同步）
-- tasks/gap-ac16c3-bc-release-install-verification-not-done.md（AC5 交叉标注——本条的现场受害例）
 - tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism.md（AC5 交叉标注）
+  （`tasks/gap-ac16c3-bc-release-install-verification-not-done.md` 交叉标注目标**不在 integration 分叉
+  基线**——该文件只在 develop，本任务 worktree 自 integration 分叉故无法写注；现场受害例已在正文
+  Proposal 描述，AC5 证据已记录此情况）
 
 ## Dispatch review
 

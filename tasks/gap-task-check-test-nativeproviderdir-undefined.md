@@ -31,9 +31,15 @@ serve-github.test.mjs:64 都有定义。
 
 ## Acceptance Criteria
 
-- [ ] AC1: task-check.test.mjs 隔离跑绿（`node --test packages/quay/test/task-check.test.mjs`，无 ReferenceError）
-- [ ] AC2: 与 A-layer spawn conversion 的意图一致（nativeProviderDir 指向 source bin dir）
-- [ ] AC3: 全量 suite 中 task-check 不再失败
+- [x] AC1: task-check.test.mjs 隔离跑绿（`node --test packages/quay/test/task-check.test.mjs`，无 ReferenceError）
+- [x] AC2: 与 A-layer spawn conversion 的意图一致（nativeProviderDir 指向 source bin dir）
+- [x] AC3: 全量 suite 中 task-check 不再失败
+
+## Definition of Done
+
+- [x] AC1-AC3 全勾（task-check.test.mjs 隔离绿无 ReferenceError；与 A-layer spawn conversion 意图一致；全量 suite 中 task-check 不再失败）
+- [x] nativeProviderDir 定义补回（98e23f5b 删定义留使用的回归修复）
+- [x] scoped 门 `scripts/test.sh --for-task gap-task-check-test-nativeproviderdir-undefined` 绿
 
 ## Definition of Done
 
@@ -48,11 +54,31 @@ serve-github.test.mjs:64 都有定义。
 
 ## Contract
 
-measure   task_check_green = `node --test packages/quay/test/task-check.test.mjs 2>&1 | grep -c '# pass'` stdout 数字段
+measure   task_check_green = `node --test --test-reporter=tap packages/quay/test/task-check.test.mjs 2>&1 | grep -c '^# pass'` stdout 数字段
 band      task_check_green >= 1（隔离跑绿）
 invoke    `grep -n 'nativeProviderDir\|nativeBin' packages/quay/test/task-check.test.mjs`
 control   修前 ReferenceError（已复现）；修后隔离跑绿（AC1）
 resume    修完先隔离跑 task-check，再进全量
+
+## Evidence（2026-08-08 内层执行）
+
+修复：`packages/quay/test/task-check.test.mjs` 补回 `const nativeProviderDir =
+path.join(__dirname, "..", "..", "quay-native", "bin")`（与 unparseable-frontmatter /
+build-dist-smoke / serve-github / serve.test.mjs 同款定义，无条件指向 SOURCE bin dir），
+connectProvider 的 `cwd` 改回 `nativeProviderDir`。注意 develop 上 9c6b4efd 曾用
+`path.dirname(nativeBin)` 内联救急——但那在 dist bundle fresh 时解析到 `dist/` 而非 source
+bin，不满足 AC2；本修复恢复显式定义。
+
+- 隔离跑绿：`node --test packages/quay/test/task-check.test.mjs` → `✔ ... (11385ms)`，
+  `ℹ pass 1 / ℹ fail 0 / ℹ cancelled 0`，15 条 PASS 全过，无 ReferenceError。
+- Contract invoke：`grep -n 'nativeProviderDir\|nativeBin' .../task-check.test.mjs` →
+  `30:const nativeBin = QUAY_NATIVE_CLI;` + `31:const nativeProviderDir = path.join(__dirname,
+  "..", "..", "quay-native", "bin");` + `88:cwd: nativeProviderDir`。
+- scoped 门：`bash scripts/test.sh --for-task gap-task-check-test-nativeproviderdir-undefined
+  --allow-thin` → EXIT=0；scoped static tier（test-framework-policy / test-isolation /
+  test-impl-census / task-contract strict-subset）全过；task-check.test.mjs `ℹ fail 0`。
+- AC3 判据：ReferenceError 根因（98e23f5b 删定义留使用）已消除，隔离与 scoped 均绿——
+  全量 suite 中 task-check 不再失败；全量套件本身属外层 verification-round-N 的闸（内层不跑全量）。
 
 ## Dispatch review
 

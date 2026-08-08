@@ -885,3 +885,119 @@ test("relevance blocking works end-to-end — a parent task with a child reports
   const child = parsed.top_relevance.find((e) => e.id === "CHILD-1");
   assert.equal(child.blocking, false, "child without children reports blocking=false");
 });
+
+// ── TARGETED PROMOTION (gap-targeted-promotion-operation-does-not-exist) ───────────────────────────
+// The pool<floor refill is the BULK path (inner mechanical, AC3). A stage-goal task the bulk path
+// leaves in todo (pool ≥ floor blocks refill) needs a SECOND, floor-INDEPENDENT operation: the
+// OUTER picks the target per stage goal and `ready-pool-check --targeted <id>` MECHANICALLY
+// validates it + emits the promote command. AC1 mechanical carrier (not a temporary manual op) ·
+// AC2 floor-independent (pool ≥ floor still eligible) · AC3 bulk path byte-unchanged · the target's
+// identity is the outer's stage-goal choice, never an input the checker reads.
+
+test("--targeted: pool ≥ floor still promotes a mechanically-eligible todo (AC2 floor-independent)", (t) => {
+  const root = makeWorkspace("targeted-floor");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Pool ≥ floor: cap 2, floorMult 1 ⇒ floor 2; two ready tasks ⇒ pool 2, deficit 0.
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  // The stage-goal target sits in todo — the bulk refill (deficit 0) would never recommend it.
+  writeTask(root, "gap-target", gapTask("gap-target"));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 2, floorMult: 1, targetedId: "gap-target" });
+  assert.equal(r.pool, 2);
+  assert.equal(r.floor, 2);
+  assert.ok(r.pool >= r.floor, "pool is at/above the floor");
+  assert.equal(r.deficit, 0);
+  assert.deepEqual(r.promotions, [], "bulk refill recommends nothing (pool ≥ floor)");
+  assert.equal(r.targeted_promotion.eligible, true, "targeted promotion still eligible at pool ≥ floor (AC2)");
+  assert.equal(r.targeted_promotion.floor_independent, true, "targeted path is marked floor-independent");
+  assert.equal(r.targeted_promotion.promote_cmd, "quay promote gap-target", "the mechanical promote command (AC1)");
+  assert.equal(r.targeted_promotion.found, true);
+  assert.equal(r.targeted_promotion.checks.fourArtifacts, true);
+  assert.equal(r.targeted_promotion.checks.depsReady, true);
+});
+
+test("--targeted: status guards — done/ready tasks and missing ids are not promotable", (t) => {
+  const root = makeWorkspace("targeted-status");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-ready", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-done", { status: "done", labels: ["gap"], body: fourArtifactBody() });
+
+  const ready = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-ready" });
+  assert.equal(ready.targeted_promotion.eligible, false);
+  assert.equal(ready.targeted_promotion.reason, "status-ready");
+
+  const done = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-done" });
+  assert.equal(done.targeted_promotion.eligible, false);
+  assert.equal(done.targeted_promotion.reason, "status-done");
+
+  const missing = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-ghost" });
+  assert.equal(missing.targeted_promotion.found, false);
+  assert.equal(missing.targeted_promotion.eligible, false);
+  assert.equal(missing.targeted_promotion.reason, "task-not-found");
+});
+
+test("--targeted: fixture and PARKED todo targets are not promotable", (t) => {
+  const root = makeWorkspace("targeted-excl");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "QENG-DEMO", { status: "todo", labels: ["fixture"], body: fourArtifactBody() });
+  writeTask(root, "gap-parked", {
+    status: "todo",
+    labels: ["gap"],
+    body: "> **PARKED (outer ruling, 2026-08-04) — execution suspended.**\n\n" + fourArtifactBody(),
+  });
+
+  const fixture = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "QENG-DEMO" });
+  assert.equal(fixture.targeted_promotion.eligible, false);
+  assert.equal(fixture.targeted_promotion.reason, "fixture");
+
+  const parked = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-parked" });
+  assert.equal(parked.targeted_promotion.eligible, false);
+  assert.equal(parked.targeted_promotion.reason, "parked");
+});
+
+test("--targeted: ineligible target (missing four-artifacts) reports a concrete reason", (t) => {
+  const root = makeWorkspace("targeted-ineligible");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-target", gapTask("gap-target", {
+    body: fourArtifactBody().replace("## Definition of Done", "## Resolution"),
+  }));
+
+  const r = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, targetedId: "gap-target" });
+  assert.equal(r.targeted_promotion.eligible, false);
+  assert.match(r.targeted_promotion.reason, /four-artifacts/);
+  assert.match(r.targeted_promotion.reason, /missing dod/);
+  assert.equal(r.targeted_promotion.checks.fourArtifacts, false);
+});
+
+test("--targeted: bulk promotions/candidates output is unchanged by the targeted query (AC3)", (t) => {
+  const root = makeWorkspace("targeted-bulk");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-r1", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-r2", { status: "ready", labels: ["gap"], body: fourArtifactBody() });
+  writeTask(root, "gap-candidate", gapTask("gap-candidate"));
+
+  const plain = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1 });
+  const withTargeted = analyzeTasks({ tasksDir: path.join(root, "tasks"), root, cap: 3, floorMult: 1, targetedId: "gap-candidate" });
+  assert.deepEqual(plain.promotions, withTargeted.promotions, "bulk promotions unchanged");
+  assert.deepEqual(plain.candidates, withTargeted.candidates, "bulk candidates unchanged");
+  assert.equal(plain.targeted_promotion, null, "no targeted query ⇒ targeted_promotion is null");
+  assert.ok(withTargeted.targeted_promotion, "targeted query ⇒ targeted_promotion present");
+});
+
+test("CLI smoke: --targeted <id> emits targeted_promotion with promote_cmd (AC1 mechanical carrier)", (t) => {
+  const root = makeWorkspace("cli-targeted");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeTask(root, "gap-target", gapTask("gap-target"));
+  const script = path.resolve(__dirname, "..", "scripts", "ready-pool-check.ts");
+  const out = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--targeted", "gap-target"],
+    { encoding: "utf8" },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.targeted_promotion.eligible, true);
+  assert.equal(parsed.targeted_promotion.promote_cmd, "quay promote gap-target");
+  assert.equal(parsed.targeted_promotion.floor_independent, true);
+  assert.equal(typeof parsed.targeted_promotion.checks, "object");
+});

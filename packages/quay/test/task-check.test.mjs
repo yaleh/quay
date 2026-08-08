@@ -28,6 +28,12 @@ import { QUAY_NATIVE_CLI } from "./helpers/cli-entry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = QUAY_NATIVE_CLI;
+// Pinned to the SOURCE bin dir (not path.dirname(nativeBin), which resolves to dist/ when
+// the prebuilt bundle is fresh) — same definition as unparseable-frontmatter /
+// build-dist-smoke / serve-github / serve.test.mjs. 98e23f5b deleted this definition while
+// leaving the `cwd: nativeProviderDir` usage below, producing a ReferenceError in the full
+// suite; restored here per gap-task-check-test-nativeproviderdir-undefined.
+const nativeProviderDir = path.join(__dirname, "..", "..", "quay-native", "bin");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -79,10 +85,9 @@ async function main() {
   const client = await connectProvider({
     command: "node",
     args: [nativeBin, "mcp"],
-    // QUAY_NATIVE_CLI is an absolute entry; run the MCP server from its package dir so any
-    // relative provider paths resolve (the A-layer spawn conversion dropped the old
-    // nativeProviderDir variable — path.dirname(nativeBin) is the equivalent).
-    cwd: path.dirname(nativeBin),
+    // Run the MCP server from the source bin dir so any relative provider paths resolve
+    // (A-layer spawn conversion intent — nativeProviderDir is pinned to the SOURCE bin dir).
+    cwd: nativeProviderDir,
     env: { QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 

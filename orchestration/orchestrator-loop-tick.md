@@ -878,15 +878,36 @@ A2/A5「从未落地」（实际在分支上）、分类器漏掉多行 import�
   由内层派发前 `claim-task.sh` 机械判定；本层只需在**筛选候选**时把跨机在飞算进「所有在飞任务」）。
   单机（未设置 `QUAY_CLAIM_REMOTE`）⇒ 本条为 no-op，行为不变。
 
-**就绪池维持（todo→ready 晋级）不再靠外层自愿 AC-queue**（`gap-promotion-cadence-is-role-volition-
-not-product-mechanism`，2026-08-04 人方向裁定）：晋级节奏与优先级是**产品机制**，由内层 tick
-`fast-mode-loop-tick.md` 步骤 3.6「就绪池维护」承载——内层跑 `plugin/scripts/ready-pool-check.ts`
-（读 stdout `pool` 字段；`pool < floor`（=cap×4，默认 12）按脚本推荐的顺序补晋；**判据是
-`dispatchable_disjoint ≥ cap`**，floor 只是手段）。**外层只引用它，不独立维护候选集构造规则**
-（旧 `outer-phase-goal.md` AC-queue 已降级为引用）。本步骤的 `gap-*` 优先顺序与内层 checker 的定义
-顺序同源，不再各写一份。
+**就绪池维持分两个操作，职责切分**（`gap-targeted-promotion-operation-does-not-exist`，2026-08-08
+人裁定：晋级 todo→ready（选择，需要阶段目标）= **外层**；派发 ready→in-flight（机械，只需
+touches/cap/停止条件）= **内层**）：
 
-把补充结果写进队列状态文件，指示内层派发。
+| 操作 | 判据 | 职责 |
+|---|---|---|
+| **补充 refill**（维持数量） | `pool < floor`（=cap×4） | **内层** tick 步骤 3.6 的机械产品机制 |
+| **定向晋级 targeted**（维持对齐） | 阶段目标要它 | **外层**选择（`ready-pool-check.ts --targeted <id>` 机械校验 + `quay promote <id>`） |
+
+**内层不知道阶段目标，这是对的**——它只按机械判据运行（touches/cap/停止条件）。
+
+- **补充 refill（内层机械，`gap-promotion-cadence-is-role-volition-not-product-mechanism`）**：
+  晋级节奏与优先级是**产品机制**，由内层 tick `fast-mode-loop-tick.md` 步骤 3.6「就绪池维护」承载——
+  内层跑 `plugin/scripts/ready-pool-check.ts`（读 stdout `pool` 字段；`pool < floor`（=cap×4，默认
+  12）按脚本推荐的顺序补晋；**判据是 `dispatchable_disjoint ≥ cap`**，floor 只是手段）。本步骤的
+  `gap-*` 优先顺序与内层 checker 的定义顺序同源，不再各写一份。把补充结果写进队列状态文件，指示
+  内层派发。**外层不再独立维护候选集构造规则**（旧 `outer-phase-goal.md` AC-queue 已降级为引用）。
+- **定向晋级 targeted（外层选择，`gap-targeted-promotion-operation-does-not-exist`）**：阶段目标要的
+  任务在 todo 里，但 `pool < floor` 这道补充门把它挡在外面（实测 pool=24>floor=20，阶段目标第 2 位的
+  任务永远停在 todo）。**定向晋级是独立操作，不受 `pool<floor` 约束**——外层按阶段目标挑出任务后，
+  用机械承载校验并提升：
+  ```bash
+  node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$REPO_ROOT" --targeted <id>
+  # 读 stdout `targeted_promotion`：eligible=true ⇒ 机械校验通过（四件套/依赖/触摸可解析），再
+  quay promote <id>   # 不受 pool<floor 门约束（AC2 负控制：pool ≥ floor 时仍能发生）
+  ```
+  外层只决定【挑哪个任务】（阶段目标）；`--targeted` 入口是检查器贡献的机械部分，不含阶段目标输入。
+  **2026-08-04 裁定「外层不得提供优先级输入」是超额执行**——`gap-promotion-cadence` 那条只要求「机制
+  默认存在、不靠角色自愿」，不该连「外层提供优先级输入」职责一起砍；定向晋级就是这个职责的机制落位
+  （交叉标注见 `tasks/gap-promotion-cadence-is-role-volition-not-product-mechanism.md`）。
 
 ### 4a. 驱动文本只携带数据，不复述行为（外层裁定 R2 — gap-drive-text-carries-data-not-behavior-outer-inner-handoff，AC2）
 

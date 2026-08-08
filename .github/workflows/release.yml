@@ -128,7 +128,7 @@ jobs:
         shell: bash
         run: bash packages/quay-native/scripts/build-sea.sh
 
-      - name: Assemble release bundle (both binaries + packaged .quay/config.yml)
+      - name: Assemble release bundle (both binaries + packaged .quay/config.yml + plugin sidecar)
         shell: bash
         run: |
           set -euo pipefail
@@ -143,6 +143,18 @@ jobs:
             cp packages/quay/dist-sea/quay "${BUNDLE_DIR}/quay"
             cp packages/quay-native/dist-sea/quay-native "${BUNDLE_DIR}/quay-native"
             MCP_ENTRY='["./quay-native", "mcp"]'
+          fi
+          # gap-release-sea-bundle-excludes-plugin-tree (AC16 产物层): the SEA archive is
+          # the RECOMMENDED distribution — it must carry the plugin SIDECAR (the agent
+          # surface that IS the self-evolving loop), staged by the Core build-sea.sh into
+          # packages/quay/dist-sea/plugin/. Fail closed if it is missing (AC1: the release
+          # artifact must contain plugin/).
+          if [ -d "packages/quay/dist-sea/plugin" ]; then
+            cp -R packages/quay/dist-sea/plugin "${BUNDLE_DIR}/plugin"
+            echo "Included plugin sidecar: ${BUNDLE_DIR}/plugin ($(find "${BUNDLE_DIR}/plugin" -type f | wc -l | tr -d ' ') files)"
+          else
+            echo "ERROR: packages/quay/dist-sea/plugin not found — the SEA archive would ship without the plugin bundle (AC1 unmet)." >&2
+            exit 1
           fi
           cat > "${BUNDLE_DIR}/.quay/config.yml" <<EOF
           # Packaged config for the SEA/single-file-executable distribution
@@ -189,14 +201,23 @@ jobs:
             ## quay ${{ github.ref_name }} — single-file executables (Node SEA)
 
             Platform-specific archives (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
-            contain two single-file executables (`quay`, `quay-native`) plus a
-            packaged `.quay/config.yml` wiring them together — no separately
-            installed Node.js runtime required. Extract the archive and run:
+            are the **recommended distribution**: two single-file executables (`quay`,
+            `quay-native`) plus a packaged `.quay/config.yml` wiring them together, AND
+            the full `plugin/` sidecar (the agent surface that IS the self-evolving
+            loop) — no separately installed Node.js runtime required. Extract the
+            archive and run:
 
             ```sh
             ./quay --help
             ./quay serve
             ```
+
+            Architecture decision (gap-release-sea-bundle-excludes-plugin-tree AC3):
+            the plugin ships as a **sidecar directory inside the same archive** (not
+            embedded into the SEA single-file binary — the plugin is a tree of
+            .sh/.ts/markdown that needs Node+shell at runtime, so embedding would force
+            a runtime unpack with no benefit). `quay-init --loop` (in `plugin/scripts/`)
+            lays the plugin's mechanisms into a target workspace.
 
   # Independent verification job (M01-dist Done-when clause 4, it0
   # domain-misfit audit-channel): downloads the Linux SEA archive this same
