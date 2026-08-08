@@ -6,7 +6,7 @@ title: "user-scope install when-to-reinstall — no VERSION + no staleness
   reinstall criterion by capability-boundary not time: ①new capability
   ②security/crash fix ③hereditary-defect fix trigger immediate, rest batching;
   add VERSION + compare check"
-status: ready
+status: done
 labels:
   - gap
   - defect

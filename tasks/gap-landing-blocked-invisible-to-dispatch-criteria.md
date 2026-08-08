@@ -1,7 +1,7 @@
 ---
 id: gap-landing-blocked-invisible-to-dispatch-criteria
 title: "LANDING-BLOCKED is invisible to dispatch criteria — ready-pool-check criterion_met=True answers 'are there >=cap mutually-disjoint candidates' (touches-conflict graph only, grep-verified: no merge/land/landing state read) and slot-refill only measures slot-release; when landing is STRUCTURALLY blocked (e.g. AC17 catch-up: task branches can't rebase because develop/integration frozen 2h at 926d771b while master has 62 commits, B pushed 105 to GitHub develop), criterion_met still reports True — 'dispatchable visible, landable invisible' = heartbeat-vs-consciousness instance; manager usage-perspective probe 2026-08-06: criterion has no basis yet still answers"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate
