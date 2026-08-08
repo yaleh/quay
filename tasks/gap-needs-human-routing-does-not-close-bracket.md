@@ -65,3 +65,12 @@ needs-human 是终态、完成也是终态——**任何终态路径都应在路
 - shipped-ts needs-human ~23:0x，外层自发现手动关
 - **residue-check 完成（10/10 AC）但任务留 ready、括号 76.5min 未闭合，外层 00:0x 手动 `--task-end done` + 翻 done**
 - `--task-end` 已存在于 fast-mode-telemetry.ts（接线问题）
+
+## 交叉标注（AC4，2026-08-08，`gap-closed-bracket-leaves-live-agent-consuming-slots`）
+
+**本任务是「括号该关没关」（正向，括号滞留 inProgress）——同一族的方向另一面是「括号关了但 agent
+进程还活着」（反向，`gap-closed-bracket-leaves-live-agent-consuming-slots`）**。两方向共享同一个根：
+**括号闭合 ≠ agent 退出，两个可观测独立**。本任务正向 = 括号滞留 inProgress（OVER90）；反向 = 括号已关
+但进程仍占槽（槽位记账读括号判空 ⇒ 可能派新任务进实际忙的槽）。槽位记账的修复（`fast-mode-telemetry.ts`
+`--slots` 的 `closedButLive` / `occupied_slots`、`slot-refill.ts` 的 `--closed-but-live`）与正向的
+`--reconcile` 是同一记账面的两个方向。

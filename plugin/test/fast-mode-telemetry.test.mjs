@@ -1103,4 +1103,129 @@ test("SLOT-STATUS — human output names the stale/reconcile hint when the invar
   }
 });
 
+test("SLOT-STATUS — closed bracket + live executor is NOT a free slot (reverse direction, AC2/AC3)", async () => {
+  const cli = await importCli();
+  // 1 OPEN bracket (real in-flight) + 2 CLOSED brackets: one whose executor is STILL present
+  // (the defect shape — bracket closed, agent alive) and one whose executor is gone.
+  const inProgress = [{ taskId: "running-a", runId: "fm-running-a-1", startedAtMs: 1000 }];
+  const completed = [
+    { taskId: "ghost-live", runId: "fm-ghost-live-1" }, // bracket closed, but executor present
+    { taskId: "ghost-done", runId: "fm-ghost-done-1" }, // bracket closed, executor gone
+  ];
+  const executorGone = () => ({ gone: false, reason: "worktree-present" });
+  const executorPresent = (rec) =>
+    rec.taskId === "ghost-live"
+      ? { present: true, reason: "worktree-present" }
+      : { present: false, reason: "no-present-signal" };
+  const s = cli.analyzeSlotStatus(inProgress, { cap: 3, executorGone, completed, executorPresent });
+  assert.equal(s.in_progress_total, 1, "1 raw open bracket");
+  assert.equal(s.real_in_flight, 1, "open-bracket executor still present");
+  assert.equal(s.closed_but_live_agents.length, 1, "the closed-bracket-but-live agent is detected");
+  assert.equal(s.closed_but_live_agents[0].taskId, "ghost-live");
+  assert.equal(s.closed_but_live_agents[0].reason, "worktree-present");
+  assert.equal(s.occupied_slots, 2, "1 real + 1 closed-but-live = 2 occupied");
+  assert.equal(s.slots_free, 1, "cap 3 − occupied 2 ⇒ 1 slot free (NOT 2 — the closed-but-live slot must not read free)");
+  assert.equal(s.slot_state, "free");
+  assert.equal(s.closed_brackets_reflect_processes, false, "a closed bracket whose executor is present violates the reverse invariant");
+});
+
+test("SLOT-STATUS — closed-but-live agents can push the slot view to FULL (AC3 negative control)", async () => {
+  const cli = await importCli();
+  // cap 2, 1 real in-flight + 1 closed-but-live ⇒ 0 free — a new dispatch must NOT be recommended.
+  const inProgress = [{ taskId: "running-a", runId: "fm-running-a-1", startedAtMs: 1000 }];
+  const completed = [{ taskId: "ghost-live", runId: "fm-ghost-live-1" }];
+  const s = cli.analyzeSlotStatus(inProgress, {
+    cap: 2,
+    executorGone: () => ({ gone: false, reason: "worktree-present" }),
+    completed,
+    executorPresent: () => ({ present: true, reason: "worktree-present" }),
+  });
+  assert.equal(s.real_in_flight, 1);
+  assert.equal(s.closed_but_live_agents.length, 1);
+  assert.equal(s.occupied_slots, 2);
+  assert.equal(s.slots_free, 0);
+  assert.equal(s.slot_state, "full", "a closed-bracket-but-live agent consumes the last free slot");
+});
+
+test("SLOT-STATUS — no completed records ⇒ reverse dimension is a no-op (byte-compatible forward view)", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus(
+    [{ taskId: "running-a", runId: "fm-running-a-1", startedAtMs: 1000 }],
+    { cap: 3, executorGone: () => ({ gone: false, reason: "worktree-present" }) },
+  );
+  assert.equal(s.closed_but_live_agents.length, 0, "absent completed array contributes nothing");
+  assert.equal(s.occupied_slots, 1, "occupied = real in-flight only");
+  assert.equal(s.slots_free, 2);
+  assert.equal(s.closed_brackets_reflect_processes, true, "no closed-but-live ⇒ invariant holds");
+});
+
+test("SLOT-STATUS CLI — real git: closed bracket + OPEN worktree reads as occupied, not free (AC2/AC3)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "closed-live.md"), "---\nid: closed-live\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // CLOSED bracket (start + end pair) whose branch is STILL checked out in an open worktree —
+    // the defect shape: bracket closed, agent (dispatch environment) still present.
+    assert.equal(gitCmd(tmp, "worktree", "add", "-b", "task/closed-live", path.join(tmp, "wt-closed-live")).status, 0);
+    const runId = cli.generateRunId("closed-live");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "closed-live", runId }), tmp);
+    cli.writeEvent(cli.buildEndEvent({ taskId: "closed-live", runId, outcome: "done" }), tmp);
+
+    const slots = runCli(tmp, "--slots", "--cap", "1", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.bracketsInFlight, 0, "the bracket is CLOSED — not in inProgress");
+    assert.equal(out.realInFlight, 0, "no open brackets");
+    assert.equal(out.closedButLive.length, 1, "the closed-bracket agent is mechanically detected as still present");
+    assert.equal(out.closedButLive[0].taskId, "closed-live");
+    assert.equal(out.occupiedSlots, 1, "a closed bracket does NOT free the slot while the worktree is open");
+    assert.equal(out.slotsRemaining, 0, "cap 1 − occupied 1 ⇒ 0 slots remaining — a new dispatch must not land here");
+
+    const rep = runCli(tmp, "--report", "--json");
+    assert.equal(rep.status, 0, rep.stderr);
+    const repObj = JSON.parse(rep.stdout);
+    assert.equal(repObj.inProgress.length, 0, "closed bracket not in inProgress");
+    assert.equal(repObj.closedButLive.length, 1, "--report surfaces the closed-but-live agent");
+    assert.equal(repObj.occupiedSlots, 1);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS CLI — real git: closed bracket + worktree REMOVED reads as genuinely free (clean case)", async () => {
+  const cli = await importCli();
+  const tmp = makeTmpWorkspace();
+  try {
+    fs.writeFileSync(path.join(tmp, ".gitignore"), ".workflow-events/\n", "utf8");
+    fs.mkdirSync(path.join(tmp, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "tasks", "closed-clean.md"), "---\nid: closed-clean\n---\n", "utf8");
+    gitCmd(tmp, "init", "-q");
+    gitCmd(tmp, "config", "user.email", "test@example.com");
+    gitCmd(tmp, "config", "user.name", "test");
+    assert.equal(gitCmd(tmp, "add", "-A").status, 0);
+    assert.equal(gitCmd(tmp, "commit", "-m", "seed").status, 0);
+    // Closed bracket whose executor is OBSERVABLY gone — no branch, no worktree (fully cleaned up).
+    const runId = cli.generateRunId("closed-clean");
+    cli.writeEvent(cli.buildStartEvent({ taskId: "closed-clean", runId }), tmp);
+    cli.writeEvent(cli.buildEndEvent({ taskId: "closed-clean", runId, outcome: "done" }), tmp);
+
+    const slots = runCli(tmp, "--slots", "--cap", "1", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.bracketsInFlight, 0);
+    assert.equal(out.closedButLive.length, 0, "executor observably gone ⇒ NOT closed-but-live");
+    assert.equal(out.occupiedSlots, 0);
+    assert.equal(out.slotsRemaining, 1, "the fully-gone closed bracket leaves its slot genuinely free");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
 } // ── end governance self-skip (AC6) ──
