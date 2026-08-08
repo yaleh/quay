@@ -473,3 +473,19 @@ test("resource-gate.sh reports BOTH avg10 and avg300 lines (single source for th
   assert.match(r.stdout, /cpu_stall\(some avg10\)=12\.34/, "report mode must print the avg10 line (cap-from-gate reads this)");
   assert.match(r.stdout, /cpu_stall\(some avg300\)=54\.50/, "report mode must print the avg300 line (kept for the record)");
 });
+
+// ── gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate: AC4 cross-gate alignment ────────────
+test("AC4 — the suite gate and the dispatch cap AGREE in the old 40-60 dead-zone (avg10=49.56 ⇒ both GO)", () => {
+  // The manager's observed load-peak imbalance (2026-08-08 21:1xZ): at avg10=49.56 the full-suite
+  // gate WAITed (limit 40 — suite refused) while the dispatch cap stayed GO (< 60 — dispatch
+  // continued). After the threshold unification the suite gate's limit IS the cap's GO/WAIT
+  // boundary, so this exact sample must be GO on BOTH layers — no "suite refuses + dispatch
+  // continues" imbalance.
+  const env = { ...process.env, RESOURCE_GATE_TEST_CPU_AVG10: "49.56", RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000", RESOURCE_GATE_TEST_NODE_PROCS: "2" };
+  // Dispatch side: cap-from-gate's desired band is GO (below WAIT_THRESHOLD=60).
+  assert.equal(computeDesiredBand(49.56), "GO", "avg10=49.56 must be in the dispatch GO band");
+  // Suite side: the full-suite gate must report GO too (exit 0) at the same sample.
+  const suite = spawnSync("bash", [GATE, "--for", "full-suite"], { cwd: REPO_ROOT, encoding: "utf8", env });
+  assert.equal(suite.status, 0, `avg10=49.56 must be GO (exit 0), got ${suite.status}\n${suite.stdout}\n${suite.stderr}`);
+  assert.match(suite.stdout, /\[limit 60\]   ok/, "the full-suite gate reports GO under the unified limit");
+});

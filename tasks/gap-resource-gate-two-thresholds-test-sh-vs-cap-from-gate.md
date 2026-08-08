@@ -35,18 +35,18 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 manager 实测（avg10=49.56 时 test.sh WAIT vs cap GO）+ 外层复核（当前回落一致）——两套阈值确认（本任务 Proposal 已含）
-- [ ] AC2: **阈值统一或对齐**——test.sh 闸阈值与 cap-from-gate 一致（或明确两闸语义分工），avg10 任意值时两闸判定一致
-- [ ] AC3: **aborted 与 failed 消费区分**——消费方（inner/红窗/触发者）读 reason 区分 aborted（不挡派发）与 failed（stop-dispatch），state 或事件语义修正
-- [ ] AC4: **成环风险消除**——负载高峰时不再「套件拒跑 + 派发继续」失衡（验证：注入 avg10 40-60 负载，两闸一致）
-- [ ] AC5: **预算总额一致**——test.sh 与 cap-from-gate 的 total_budget 同源（process-budget.sh），负载时不漂
+- [x] AC1: **复现固化**——任务体记录 manager 实测（avg10=49.56 时 test.sh WAIT vs cap GO）+ 外层复核（当前回落一致）——两套阈值确认（本任务 Proposal 已含；内层在 worktree 复现：`cpu_stall(some avg10)=49.56 [limit 40] WAIT` exit=1 vs `cap-from-gate: band GO desired=GO`——见 Evidence）
+- [x] AC2: **阈值统一或对齐**——test.sh 闸阈值与 cap-from-gate 一致（或明确两闸语义分工），avg10 任意值时两闸判定一致（resource-gate.sh CPU_LIMIT 默认 40→60，与 cap-from-gate WAIT_THRESHOLD 统一；drift-invariant 测试钉死两常量相等——见 Evidence）
+- [x] AC3: **aborted 与 failed 消费区分**——消费方（inner/红窗/触发者）读 reason 区分 aborted（不挡派发）与 failed（stop-dispatch），state 或事件语义修正（integration 已含该语义：suite-state-trigger.ts shouldStopDispatch/shouldDispatchOnRed/routeRed 按 reason 区分 + full-suite-runner.ts 写 reason=aborted；测试钉死——见 Evidence）
+- [x] AC4: **成环风险消除**——负载高峰时不再「套件拒跑 + 派发继续」失衡（验证：注入 avg10 40-60 负载，两闸一致）（新测试：avg10=49.56 两闸同 GO、avg10=70 两闸同非-GO——见 Evidence）
+- [x] AC5: **预算总额一致**——test.sh 与 cap-from-gate 的 total_budget 同源（process-budget.sh），负载时不漂（test.sh default_concurrency_formula / cap-from-gate readBudgetFromGate / resource-gate budget_report 三者都读 process-budget.sh；新测试钉死 gate 报告——见 Evidence）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：avg10 40-60 区间两闸一致；aborted 不挡派发（实跑贴任务体）
-- [ ] 既有 resource-gate / cap-from-gate / test.sh 测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：avg10 40-60 区间两闸一致；aborted 不挡派发（实跑贴任务体）
+- [x] 既有 resource-gate / cap-from-gate / test.sh 测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round-N 的批量合边界闸门（gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge），非本任务内层自跑；内层已跑 `--for-task` scoped 绿
 
 ## Touches
 
@@ -71,13 +71,45 @@ extra: {}
 
 ## Contract
 
-measure   gate_verdicts_aligned = `bash plugin/scripts/resource-gate.sh --for full-suite 2>&1 | grep -cE 'WAIT|GO'` 与 `bash plugin/scripts/cap-from-gate.sh 2>&1 | grep -o 'band: GO\|band: WAIT'` 两者判定一致（同 GO 或同 WAIT，avg10 40-60 区间）
+measure   gate_verdicts_aligned = avg10 40-60 区间 \`bash plugin/scripts/resource-gate.sh --for full-suite\` 与 \`node --experimental-strip-types plugin/scripts/cap-from-gate.ts\` 判定一致的 band（GO/WAIT）
 band      gate_verdicts_aligned = 1（两闸同 GO 或同 WAIT，无失衡）
 invariant aborted_does_not_block_dispatch = 1（aborted 套件不挡派发，reason 区分）
 invariant budget_total_same_source = 1（test.sh 与 cap-from-gate 的 total_budget 同源）
 invoke    `bash plugin/scripts/resource-gate.sh --for full-suite`（实跑贴回）
-control   avg10<40 ⇒ 两闸 GO；40-60 ⇒ 两闸一致；>60 ⇒ 两闸 WAIT
+control   avg10<60 ⇒ 两闸同 GO；≥60 ⇒ 两闸同 WAIT（无 40-60 死区）
 resume    阈值对齐 + aborted 语义 + 测试分步提交，任一步完成即写盘
+
+## Evidence（2026-08-08 内层实现）
+
+**复现（worktree，avg10=49.56 注入）**：
+```bash
+# 修前（integration tip d9ce3942）：
+#   resource-gate.sh --for full-suite: cpu_stall(some avg10)=49.56 [limit 40] WAIT, exit=1  ← 套件拒跑
+#   cap-from-gate.ts:                  signal 49.56 bands(go<60,wait<85) band: GO desired=GO  ← 派发照常
+# ⇒ 同一量、两套阈值：40-60 死区 = 套件拒跑 + 派发继续（成环）
+```
+
+**修后实跑（同一注入）**：
+```bash
+# avg10=49.56: resource-gate: cpu_stall(some avg10)=49.56 [limit 60] ok, => GO, exit=0
+#              cap-from-gate: band: GO desired=GO  ⇒ 两闸一致（GO）
+# avg10=70:    resource-gate: cpu_stall(some avg10)=70.00 [limit 60] WAIT, => WAIT, exit=1
+#              cap-from-gate: band: WAIT desired=WAIT  ⇒ 两闸一致（都非 GO）
+```
+
+**改动文件**：
+- `plugin/scripts/resource-gate.sh`——CPU_LIMIT 默认 40→60（与 cap-from-gate WAIT_THRESHOLD 统一；Contract band 同步 `< 60`）。
+- `plugin/test/resource-gate.test.mjs`——更新 `[limit 40]` 断言为 `[limit 60]`；worktree-priority 测试 avg10=50→70（新阈值下 50 已 GO）；新增 drift-invariant（CPU_LIMIT==WAIT_THRESHOLD）+ AC4 死区对齐测试 + AC5 budget 同源测试。
+- `plugin/test/cap-from-gate.test.mjs`——新增 AC4 跨闸对齐测试（avg10=49.56 两闸同 GO）。
+- `plugin/test/full-suite-runner.test.mjs`——AC2 worktree-priority 测试 avg10=50→70。
+- `plugin/loop/fast-mode-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`——全量闸阈值叙事 `< 40`→`< 60`（模板 + 落地副本同步）。
+- `tasks/gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate.md`（本文件）——勾 AC + 贴证据。
+
+**AC3（aborted vs failed 消费区分）已在 integration 实现，本任务验证并固化**：suite-state-trigger.ts 的 `routeRed`（failed/legacy→red-window-triage，aborted/infra-error→resource-gate）、`shouldStopDispatch`（aborted→false）、`shouldDispatchOnRed`（aborted→false，不挡派发）；full-suite-runner.ts 在 gate-WAIT/signal-kill/spawn-error 时写 `reason=aborted`。测试钉死：suite-state-trigger.test.mjs AC5/AC2/runOnce stopSignal + full-suite-runner.test.mjs AC5/AC1-AC3/wait-check/fail-fast-check。无消费方把 aborted 当 failed。
+
+**AC5（预算同源）已在 integration 实现，本任务测试钉死**：test.sh `default_concurrency_formula`（C 面）、cap-from-gate `readBudgetFromGate`（B 面）、resource-gate `budget_report`（A 面）都读 `process-budget.sh`（total_budget=nproc）。新测试断言 gate 报告 `total_budget=4 budget_in_use=2 budget_available=2 [cross-layer budget authority: process-budget.sh]`。
+
+**scoped gate**：`bash scripts/test.sh --for-task gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate --allow-thin` → EXIT=0（详见提交说明）。
 
 ## Dispatch review
 

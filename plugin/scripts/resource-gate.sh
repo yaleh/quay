@@ -22,7 +22,7 @@
 #   measure   cpu_stall   = /proc/pressure/cpu 的 some avg10 字段
 #   measure   mem_avail   = free -m 的 available 列 (MB)
 #   measure   heavy_procs = pgrep -xc node-MainThread 的计数
-#   band      cpu_ok      = some avg10 < 40
+#   band      cpu_ok      = some avg10 < 60
 #   invariant nproc 在判定前后一致
 #   invoke    `plugin/scripts/resource-gate.sh --for full-suite`
 #   control   人为把 cpu some avg10 压高（起 N 个 busy loop）⇒ gate 必须返回 WAIT
@@ -55,7 +55,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="report"        # report | full-suite
-CPU_LIMIT="${RESOURCE_GATE_CPU_LIMIT:-40}"
+# CPU_LIMIT — the binary full-suite gate's WAIT threshold on cpu `some avg10`. UNIFIED with
+# cap-from-gate.ts's WAIT_THRESHOLD (60, the mechanism constant; see
+# gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate): the full-suite gate refuses a suite
+# EXACTLY when the dispatch cap would leave the GO band — a load in the 40-60 region used to make
+# the suite WAIT (old limit 40) while dispatch kept GO (cap go<60), the "suite refuses + dispatch
+# continues" imbalance that can form a red-window loop. The drift invariant is pinned mechanically
+# in plugin/test/resource-gate.test.mjs (CPU_LIMIT default == cap-from-gate WAIT_THRESHOLD).
+CPU_LIMIT="${RESOURCE_GATE_CPU_LIMIT:-60}"
 MEM_LIMIT_MB="${RESOURCE_GATE_MEM_LIMIT_MB:-2048}"
 # ── AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal) ───────────────────────────
 # main-repo vs worktree priority: the main repo's full-suite caller passes --main-repo-priority; the
