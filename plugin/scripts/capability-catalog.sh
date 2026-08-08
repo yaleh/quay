@@ -204,6 +204,7 @@ declare -A QUESTION=(
   [supervisor-observe.sh]="What is a target quay checkout's git/suite/session/process state right now, read-only and ssh-transport-agnostic (observe(target) -> {git_state, suite_state, session_state, process_state}, local/remote same shape)?"
   [supervisor-health.sh]="Is the supervisor base layer alive outside any Claude session (os-anchor timer + delivery/observe adapters + session liveness)?"
   [supervisor-preempt.sh]="Is the loop stopped at ANY point (preemptive .halt — process-level preempt(target) enforced in code, not just at a tick boundary)?"
+  [supervisor-preempt-candidates.ts]="Is a task deterministically preemptible right now (queryable facts only: telemetry duration >90m + task status in-progress + not landed), and can it be preempted as a deterministic action (kill its subprocess tree + close its bracket + record a ledger event)?"
   [cross-machine-verify.sh]="Has every merge that landed on the tracked branches been cross-machine verified by a NON-participating machine, and what is the detection latency d (post_merge_latency_h) of the ones that have?"
   [sync-lag-check.sh]="Is local <fork-baseline> (develop) leading origin/<fork-baseline>, and has it been pushed (the cross-machine sync heartbeat + the event-driven push after a land closure)?"
   [sync-vendor.sh]="Is the plugin's vendored runtime in sync with the product build?"
