@@ -1,8 +1,10 @@
 // @test-group lowconc
-// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
-// `serial` group (KNOWN-LOAD-SENSITIVE family — each --loop test spawns a real quay-init.sh →
-// python3 children) so it runs in the concurrency-1 serial phase, never competing with the
-// concurrency-8 main body's worker pool.
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to `lowconc`, NOT `serial`.
+// The serial group's ONLY criterion is nested-runner (a file that spawns its own worker-pool
+// sub-suites via `node --test` / test.sh --for-task, see fast-mode-loop-tick.md). This file is
+// load-sensitive (each --loop test spawns a real quay-init.sh → python3 children) but is NOT a
+// nested runner — it does not spawn its own worker-pool sub-suite. Low-load/timing reasons go to
+// lowconc, not serial.
 // quay-init-loop-driver.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync, self-failing at ~167s with 'Promise resolution is still pending'. Each split
