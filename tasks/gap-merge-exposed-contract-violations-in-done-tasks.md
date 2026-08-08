@@ -3,7 +3,7 @@ id: gap-merge-exposed-contract-violations-in-done-tasks
 title: 合并后完整 runner 静态检查首次覆盖 develop task 文件，暴露 3 个 done 任务的 5 个 Contract
   违规（gap-eighty-one AC8 自认未生效却勾 [x]；gap-no-inventory 3 格式违规；gap-serve-task-list
   invoke 证据缺）——静态检查门红，测试跑不到，修掉解阻塞
-status: ready
+status: done
 labels: []
 parent: null
 children: []
