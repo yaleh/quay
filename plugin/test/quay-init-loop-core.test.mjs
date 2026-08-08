@@ -1,4 +1,5 @@
 // @test-group serial
+// @load-sensitive nested-spawn
 // GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to the `serial` group
 // because it IS a nested runner — each --loop test spawns a real quay-init.sh → `$TEST_COMMAND`
 // (node --test) worker-pool sub-suite, which derives its own concurrency N (18 nested-runner

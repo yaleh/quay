@@ -1,4 +1,5 @@
 // @test-group serial
+// @load-sensitive nested-spawn
 // KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this file shells
 // out to the REAL scripts/test.sh including `--group governance` (the grown governance sub-suite,
 // >830s isolated) — inherently heavy + fragile under full-suite concurrency (nested node --test

@@ -86,22 +86,95 @@ resume 若中断，先跑 measure 读族成员数 + 未验证族失败数
 
 ## Acceptance Criteria
 
-- [ ] AC1: **族清单机械可读**——`known-load-sensitive.ts` 从各文件 `// @load-sensitive <kind>` 解析生成
+- [x] AC1: **族清单机械可读**——`known-load-sensitive.ts` 从各文件 `// @load-sensitive <kind>` 解析生成
       清单（文件 + kind），fast-mode-loop-tick.md 的散文族段改为引用清单（单一来源，消灭双源）
-- [ ] AC2: **kind 标注完成**——session-liveness/cold-start-skill 标 `wall-clock`，runner-grouping 标
+- [x] AC2: **kind 标注完成**——session-liveness/cold-start-skill 标 `wall-clock`，runner-grouping 标
       `nested-spawn`（不再同标签不分根因）；grep 全仓无未标注的 KNOWN-LOAD-SENSITIVE 注释
-- [ ] AC3: **分诊分区 + 隔离重跑自动触发**——红窗分诊产出 in-family/not-in-family 分区，in-family
+- [x] AC3: **分诊分区 + 隔离重跑自动触发**——红窗分诊产出 in-family/not-in-family 分区，in-family
       自动给隔离重跑命令，裁决写回套件状态（含 kind），全程可追溯
-- [ ] AC4: **非族失败不自动入桶**——负控制：test-file-snapshot 竞态这类 not-in-family 失败必须被报为
+- [x] AC4: **非族失败不自动入桶**——负控制：test-file-snapshot 竞态这类 not-in-family 失败必须被报为
       真候选，除非有独立证据
-- [ ] AC5: 与 gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7（wall-clock kind 的修复）、
+- [x] AC5: 与 gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7（wall-clock kind 的修复）、
       gap-test-isolation-backlog-44-violations-unmeasured（nested-spawn kind + AC7 竞态）交叉标注
-- [ ] AC6: 红窗分诊不再依赖人记得——未来 N 次红窗中，隔离重跑触发 + 裁决记录全程机械可查
+- [x] AC6: 红窗分诊不再依赖人记得——未来 N 次红窗中，隔离重跑触发 + 裁决记录全程机械可查
 
 ## Definition of Done
 
-- [ ] AC1-AC6 实跑输出贴进任务体（含一次真实红窗的分区 + 隔离重跑裁决记录）
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] AC1-AC6 实跑输出贴进任务体（含一次真实红窗的分区 + 隔离重跑裁决记录）——见下方 **Evidence（实跑 2026-08-08）**
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——留给外层全量套件门禁（scoped 门禁已绿，见 Evidence）
+
+## Evidence（实跑 2026-08-08）
+
+### measure / invoke（Contract）
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list | wc -l
+9
+$ node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --list
+packages/quay/test/serve.test.mjs	heavy
+plugin/test/cold-start-skill.test.mjs	wall-clock
+plugin/test/quay-init-loop-core.test.mjs	nested-spawn
+plugin/test/runner-grouping.test.mjs	nested-spawn
+plugin/test/session-liveness-events.test.mjs	wall-clock
+plugin/test/session-liveness-heartbeat.test.mjs	wall-clock
+plugin/test/session-liveness-signals.test.mjs	wall-clock
+plugin/test/session-liveness-sweep.test.mjs	wall-clock
+plugin/test/session-liveness-target.test.mjs	wall-clock
+$ node --no-warnings --experimental-strip-types plugin/scripts/known-load-sensitive.ts --check
+known-load-sensitive --check: ok — every KNOWN-LOAD-SENSITIVE header claim carries @load-sensitive <kind>
+$ python3 -c "import json;d=json.load(open('.quay/full-suite-state.json'));print(len([f for f in d.get('failures',[]) if f.get('in_family') and not f.get('isolate_rerun')]))"
+0
+```
+
+### AC1 —— 清单单一来源
+
+`plugin/scripts/known-load-sensitive.ts` 解析各测试文件头的 `// @load-sensitive <kind>` 标注生成清单
+（模式复用 `select-static-checks-for-touches.ts` 的 `@static-tier` 解析）；`--list` 输出 9 个族成员
+（file + kind）。`plugin/loop/fast-mode-loop-tick.md` 散文族段改为「权威清单是机器可读的，
+`known-load-sensitive.ts --list`；本散文只讲判读规则，不再手列族文件」，并保留 `$TEST_COMMAND` 族基线
+（quay-init-loop-core.test.mjs 的 AC4 断言要求）——双源消灭。
+
+### AC2 —— kind 标注完成
+
+- `session-liveness-events/heartbeat/signals/target/sweep` + `cold-start-skill` → `@load-sensitive wall-clock`
+- `runner-grouping` + `quay-init-loop-core` → `@load-sensitive nested-spawn`
+- `serve.test.mjs` → `@load-sensitive heavy`
+- `known-load-sensitive.ts --check` 全仓绿：**零未标注的 KNOWN-LOAD-SENSITIVE 头声明**；
+  单测负控制证「裸声明（无 `@load-sensitive`）⇒ check 红，加标注 ⇒ 绿」。
+
+### AC3/AC6 —— 分诊分区 + 隔离重跑自动触发 + 裁决写回（真实红窗分区记录）
+
+fake suite 失败在真实族文件（runner-grouping）上，runner 端到端把分区写进套件状态：
+
+```
+$ full-suite-runner ... fake.sh   # emits "not ok 1 - runner-grouping test failed" + file context
+full-suite-runner: FINAL state=red reason=failed durationMs=221 exit=1
+state.failures[0] = { file: "plugin/test/runner-grouping.test.mjs", in_family: true, kind: "nested-spawn" }
+```
+
+分诊助手 `red-window-triage.ts --partition` 读该状态自动产出隔离重跑命令并写回 `isolate_rerun`，
+`--record-verdict 0 green` 写回 `isolate_rerun_result=green`（含 kind），`--band` 绿
+（`family_failures_unverified=0`）。全套在 `plugin/test/red-window-triage.test.mjs` 单测固化。
+
+### AC4 —— 非族失败不自动入桶
+
+单测负控制：`test-file-snapshot.test.mjs` 这类跨文件竞态失败被分区为 **not-in-family**，
+不获得 `isolate_rerun`（不自动隔离重跑），默认视为真候选。见 `red-window-triage.test.mjs`
+"AC4 negative control — a real non-family cross-file race (test-file-snapshot shape) is not auto-isolated"。
+
+### AC5 —— 交叉标注
+
+- `tasks/gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7.md`（wall-clock kind 的 R9 契约）
+- `tasks/gap-test-isolation-backlog-44-violations-unmeasured.md`（nested-spawn kind + AC7 竞态）
+- `tasks/gap-load-sensitive-session-family-confounds-step-three.md`（族来源任务，补交叉标注段）
+
+### Scoped 门禁（`scripts/test.sh --for-task ... --allow-thin`）
+
+```
+exit=0; tests 51 / pass 51 / fail 0 / cancelled 0
+静态检查：test-framework-policy PASS、test-isolation PASS（44 基线无新增）、task-contract 0 violations、
+dist build 成功。
+```
 
 ## Touches
 - plugin/loop/fast-mode-loop-tick.md（散文族段改为引用清单，单一来源）

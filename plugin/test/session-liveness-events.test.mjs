@@ -1,4 +1,5 @@
 // @test-group lowconc
+// @load-sensitive wall-clock
 // session-liveness-events.test.mjs — SESSION-GONE/BACK, REPO-STALL, SESSION-OVERDUE, .halt gating, real-probe idle/resumed + productization/laydown
 //
 // PART OF THE session-liveness test family (gap-session-liveness-tail-capped-split, 2026-08-07).
