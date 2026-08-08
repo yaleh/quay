@@ -99,15 +99,15 @@ test('AC4 — laid-down tick docs are byte-identical to the product and carry NO
     // Byte-identical to the product (SPEC AC1) — the laid-down copy is VERBATIM.
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
     const inner = fs.readFileSync(path.join(ws, 'docs', 'analysis', 'fast-mode-loop-tick.md'), 'utf8');
-    const manager = fs.readFileSync(path.join(ws, 'orchestration', 'manager-loop-tick.md'), 'utf8');
     const outerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'orchestrator-loop-tick.md'), 'utf8');
     const innerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'fast-mode-loop-tick.md'), 'utf8');
-    const managerSrc = fs.readFileSync(path.join(pluginDir, 'loop', 'manager-loop-tick.md'), 'utf8');
     assert.equal(outer, outerSrc, 'laid-down outer tick doc must be byte-identical to the product (AC1)');
     assert.equal(inner, innerSrc, 'laid-down inner tick doc must be byte-identical to the product (AC1)');
-    assert.equal(manager, managerSrc,
-      'laid-down manager driver tick doc must be byte-identical to the product (AC1) — the manager DRIVER ships as a generic per-project template');
-    const all = outer + '\n' + inner + '\n' + manager;
+    // The manager driver tick doc (orchestration/manager-loop-tick.md) is NOT laid down by the
+    // current quay-init — the manager-layer propagation (gap-the-manager-layer-does-not-propagate-
+    // quay-init-lays-no-manager-driver, status: ready) is a PENDING task; the rolled-back merge
+    // (7642849a) briefly had it. Re-instate the manager byte-identity assertion when that task lands.
+    const all = outer + '\n' + inner;
 
     // No target values baked in (SPEC AC3 — config-driven, not text-substitution).
     assert.ok(!all.includes('npm test'), 'laid-down tick docs must NOT contain the target test command (AC3)');
