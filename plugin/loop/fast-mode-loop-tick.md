@@ -669,6 +669,11 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
   （`checkTouchesPair`）与触摸可解析性复核。
 - **成本不对称（AC6，偏向过量）**：过量晋级 = 前移非浪费（池更深，下个 tick 直接派）；欠量 = 空槽纯浪费
   （当 tick 无人可补）。floor 取 cap×4 已留这一档余量。
+- **定向晋级 `--targeted` 是外层工具，内层不用**（`gap-targeted-promotion-operation-does-not-exist`）：
+  `ready-pool-check.ts --targeted <id>` 是外层按阶段目标挑选 todo 任务的机械承载——**不受 `pool<floor`
+  约束**（阶段目标要的任务被补充门挡在 todo 时，外层用这条路径把它提出来，`quay promote <id>`）。
+  **内层不知道阶段目标**：本步只做机械补充（`pool < floor` 的 `promotions[]`），不调用 `--targeted`。
+  职责切分：晋级（选择，需要阶段目标）= 外层；派发（机械，只需 touches/cap/停止条件）= 内层。
 
 ### 4. 派发就绪任务（并发）
 
