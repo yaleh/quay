@@ -122,6 +122,11 @@ orchestration/inner-idle-log.jsonl
 # The PRIMARY path is <git-common-dir>/full-suite.lock (inside .git/, invisible to git status). The
 # file must PERSIST (never unlink a flock'd file — classic flock+unlink race), so ignore it.
 **/.quay/full-suite.lock
+# gap-single-file-test-duration-trend-unwatched (AC1): the append-only per-file duration history
+# (one line {round, runAt, file, durationMs, passed, laneCount, logDigest} per test file per round,
+# written by full-suite-runner.ts after every suite via measure-trend-check.ts). Same live
+# runtime-state family as verification-round.jsonl / full-suite.log; never committed.
+**/.quay/measure-history.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

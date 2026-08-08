@@ -738,6 +738,14 @@ tick 做一次收尾 pass。
      个任务（或自上次完成的全量 suite 起有新的 merge 落地）且当前没有在跑的 suite（`state !=
      running`）且资源闸放行（`bash plugin/scripts/resource-gate.sh --for full-suite`，退出非 0 =
      WAIT，下一 tick 再起）。
+   - **单文件耗时趋势落历史（`gap-single-file-test-duration-trend-unwatched` AC1/AC2）**：runner
+     套件跑完自动把**每文件 `{file, duration_ms}`** 追加到 `.quay/measure-history.jsonl`
+     （append-only，复用 measure-suite-reporter 已 tee 进 `.quay/full-suite.log` 的 `__PERFILE__`
+     行，不新造测量器）并对比上一轮——单文件耗时增长超基线（相对 ≥2× 或绝对 >+30s，外层裁定阈值；
+     Contract control「翻倍 ⇒ 报出」把书面 ">2×" 收窄为 "≥2×"）
+     以 `measure-trend growth <file> <prev> -> <curr> ms (+<增幅>, <ratio>x)` 报出（**报告不阻断**，
+     套件墙钟噪声 ±17–63s，单次观测是信息不是判定）。手动重跑对比：
+     `node --experimental-strip-types plugin/scripts/measure-trend-check.ts --history .quay/measure-history.jsonl --json`。
    - **早期 RED（AC2）**：runner **一检测到失败立即把 state 标成 red**（非等全套跑完）——缩「变红到
      发现」窗口。判红模式 = 结构化失败形态，**不匹配裸字形**（`gap-full-suite-runner-red-pattern-
      matches-bare-x-vitest-false-red`，archguard TASK-67 实证裸 `✖` 误伤 vitest 假红）：

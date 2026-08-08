@@ -270,6 +270,16 @@ extra:
 一个失败更可能是负载抖动。判据必须先过资源闸（`scripts/resource-gate.sh --for full-suite` 报 GO）
 再谈代码。这也是本任务 run-to-run 噪声（17–63s 极差）里未被分解的一部分。
 
+## Cross-annotation（AC4，2026-08-08，`gap-single-file-test-duration-trend-unwatched`）
+
+**本任务加「趋势」维度，与「成本结构」同方向、不同时轴。** 本任务测的是**单次**成本结构
+（每文件 `duration_ms` 分布 + Σ/墙钟 + 噪声带宽 17–63s），测量工具 `measure-suite-reporter.mjs`
+（`__PERFILE__` 行）已由后续任务 `gap-single-file-test-duration-trend-unwatched` 复用：它把每次
+全量套件的每文件耗时 append 进 `.quay/measure-history.jsonl`（append-only 历史）并**逐轮对比**——
+单文件耗时增长超基线（相对 >2× 或绝对 >+30s）报出文件 + 增幅。本任务的噪声结论（±17–63s 极差、
+单次观测不可判定）正是趋势任务**不把单次增长当判定**的依据：增长报告是「信息」不是「门」，
+多轮才成信号。测量器复用同源（`measure-suite-reporter.mjs`），趋势任务不新造测量器（其 AC3）。
+
 ## Touches
 
 - scripts/test.sh
@@ -281,3 +291,4 @@ extra:
 - tasks/gap-tests-spawn-cli-from-ts-source.md
 - tasks/gap-tests-use-cli-where-module-import-suffices.md
 - tasks/gap-test-suite-has-no-layer-grouping.md
+- tasks/gap-single-file-test-duration-trend-unwatched.md（AC4 交叉标注，2026-08-08）

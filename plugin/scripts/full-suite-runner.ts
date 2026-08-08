@@ -93,6 +93,12 @@ import { fileURLToPath } from "node:url";
 import { runOnce } from "./suite-state-trigger.ts";
 import { getLoad1 } from "./checker-cost.ts";
 import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
+// gap-single-file-test-duration-trend-unwatched AC1/AC2 — after the suite, land the
+// append-only per-file duration history (reusing measure-suite-reporter's __PERFILE__ lines
+// already tee'd into the log) and report single-file duration growth against the previous
+// round. The trend dimension: the suite-cost task measured the one-shot distribution; this
+// makes the per-file durations WATCHED round over round.
+import { landMeasureHistory, compareLastTwoRounds } from "./measure-trend-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -1256,6 +1262,38 @@ export async function run(argv: string[]): Promise<number> {
   // run — 2 runs produced 4 lines and AC6's "pure append, one per run" assertion failed. The
   // appendVerificationRound record is the canonical shape (state/pass/fail/round); the other
   // function is retained as an exported helper only (no live callers).
+
+  // gap-single-file-test-duration-trend-unwatched AC1/AC2 — land the per-file duration history
+  // (the suite's __PERFILE__ lines are already in the log; this only PARSES them — AC3 reuses
+  // measure-suite-reporter, no new measurer) and report single-file growth against the last
+  // round. Best-effort (same fail-open family as appendVerificationRound): a history/compare
+  // failure must never fail the suite verdict. The growth report is a WATCH signal (surfaced to
+  // the loop), never a gate — the suite-cost model measured ±17–63 s run-to-run wall noise, so a
+  // single observation is informational; the trend becomes a signal over multiple rounds.
+  try {
+    const historyFile = path.join(stateDir, "measure-history.jsonl");
+    const landed = landMeasureHistory({
+      historyFile,
+      logFile,
+      laneCount,
+      runAt: finishedAtIso,
+      repoRoot: root,
+    });
+    if (landed.landed) {
+      process.stderr.write(
+        `full-suite-runner: landed per-file duration history round ${landed.round} (${landed.files} files) -> ${historyFile}\n`
+      );
+    }
+    const growth = compareLastTwoRounds(historyFile);
+    for (const g of growth) {
+      process.stderr.write(
+        `full-suite-runner: measure-trend growth ${g.file} ${g.prevMs} -> ${g.currMs} ms (+${g.growthMs} ms, ${g.ratio.toFixed(2)}x, ${g.reason})\n`
+      );
+    }
+  } catch {
+    // best-effort — a measure-history failure never fails the suite verdict
+  }
+
   process.stderr.write(
     `full-suite-runner: FINAL state=${finalState.state}${finalState.reason ? ` reason=${finalState.reason}` : ""} durationMs=${durationMs} exit=${exitCode}\n`
   );
