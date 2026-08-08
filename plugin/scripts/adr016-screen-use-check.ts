@@ -54,11 +54,15 @@ const CAPTURE_PANE_RE = /capture-pane/;
 
 /** Subdirectories never scanned. check-mutation cases deliberately embed the anti-pattern (their
  * heredocs write `capture-pane | md5sum`) to prove the checker catches it — scanning them would
- * self-match. milestones/ holds classic-loop worktree archives, not live code. */
+ * self-match. milestones/ holds classic-loop worktree archives, not live code. dist/ and dist-sea/
+ * are gitignored build outputs (esbuild bundle / SEA sidecar snapshot) whose .sh files are
+ * generated copies of plugin/, never live code — scanning them would double-count every pattern
+ * the real plugin/ scripts carry (gap-release-sea-bundle-excludes-plugin-tree). */
 const SKIP_DIRS = new Set([
   ".git",
   "node_modules",
   "dist",
+  "dist-sea",
   "checker-mutation-cases",
   "milestones",
   "worktrees",
