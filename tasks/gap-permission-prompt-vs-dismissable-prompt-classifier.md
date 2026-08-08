@@ -1,7 +1,7 @@
 ---
 id: gap-permission-prompt-vs-dismissable-prompt-classifier
 title: "classifyPaneState 把可忽略式提示/问卷当阻塞式 permission-prompt——恒判忙 ⇒ SESSION-IDLE 永不触发（manager 19:35Z 实测 + 外层核实）"
-status: todo
+status: ready
 labels:
   - gap
   - defect
