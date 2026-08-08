@@ -655,6 +655,55 @@ test("AC5 — an empty pane capture / empty region is NOT silently judged idle: 
   assert.match(idle.stdout, /state=waiting-input busy=0/, `a real idle shape must stay idle:\n${idle.stdout}`);
 });
 
+test("AC4 (candidate B) — the pure verdict: a permission-prompt persisting ≥N rounds with a stale/no-transcript read is 'warn'; fresh transcript or sub-threshold rounds is 'ok' (no-infinite-silence fallback)", () => {
+  const verdict = (rounds, txAge, env = {}) => spawnSync("bash", [SCRIPT, "--perm-warn-verdict", String(rounds), String(txAge)], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  }).stdout.trim();
+  // stale transcript (120s > 60s window) at the threshold ⇒ warn.
+  assert.equal(verdict(3, 120), "warn");
+  // fresh transcript (10s ≤ 60s window) ⇒ ok — the session is genuinely active (cross positive control).
+  assert.equal(verdict(3, 10), "ok");
+  // below the consecutive-rounds threshold ⇒ ok.
+  assert.equal(verdict(2, 120), "ok");
+  // no transcript configured (-1) ⇒ ok — the "no transcript write" cross-check cannot be confirmed
+  // (pane-only observers already get the D5 pane-only audit WARN; AC4 does not invent a WARN).
+  assert.equal(verdict(3, -1), "ok");
+  // the threshold is a knob: PERM_PROMPT_WARN_ROUNDS=2 makes the same 2-round stale read warn.
+  assert.equal(verdict(2, 120, { PERM_PROMPT_WARN_ROUNDS: "2" }), "warn");
+});
+
+test("AC4 (candidate B) — main-loop wiring: a permission-prompt pane persisting N rounds with a stale transcript emits the no-infinite-silence WARN to the observer's own stderr", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-permwarn");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    // Make the probe pane show a blocking permission-prompt SHAPE (typed, no Enter — the pane's last
+    // content line carries the "Quick safety check"/"Enter to confirm" signature, so the classifier
+    // reads permission-prompt and _sl_pane_verdict pins busy=1).
+    tmux(["send-keys", "-t", p.session, "C-u"], p.env);
+    tmux(["send-keys", "-t", p.session, "Quick safety check: Is this a project you created or one you trust? | Enter to confirm"], p.env);
+    // A STALE transcript (backdated 10 min ⇒ > PERM_PROMPT_TX_WINDOW 60s): the cross-check confirms
+    // "no transcript write" ⇒ the WARN must fire (candidate B). Without a transcript the WARN is
+    // correctly suppressed, so this test pins a transcript to exercise the firing branch.
+    const tx = path.join(p.tmp, "transcript.jsonl");
+    writeTranscript(tx, [userRecord(isoAgo(10))], 10);
+    const mon = spawnMonitor(p.env, `permwarn ${p.tmp} ${p.session}`, {
+      transcripts: `permwarn ${tx}`,
+      interval: 1,
+    });
+    try {
+      assert.ok(await waitForOutput(mon, /WARN permwarn 的 pane 连续 [0-9]+ 轮 permission-prompt/, 20000),
+        `candidate-B WARN must fire once the permission-prompt persists with a stale transcript:\n${mon.output()}`);
+      // Sanity: the pane is STILL busy (the WARN never changes the busy verdict — a real prompt stays busy).
+      assert.ok(await waitForOutput(mon, /permission-prompt/, 5000), `pane stays permission-prompt:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
 test("AC4 — a pane whose ONLY real change is the agent task line (↓ NN.Nk tokens) while the busy shape persists stays BUSY (no false idle); the idle→busy transition RESUMEs within one polling cycle and the agent line is NOT filtered", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
   const p = makeHermeticProbe("ol-ac4");
   try {

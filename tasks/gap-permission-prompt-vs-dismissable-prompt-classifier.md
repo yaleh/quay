@@ -36,18 +36,18 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 manager 实测（19:35Z 问卷屏 → permission-prompt）+ 外层核实（当前问卷在底部区域外判 waiting-input；PERMISSION_PROMPT_RE 不含问卷字样）——确认位置依赖是误判来源（本任务 Proposal 已含）
-- [ ] AC2: **可忽略提示不判忙**——问卷/可忽略提示（`(optional)` / `Dismiss`）出现时 classifyPaneState 判非 permission-prompt，实跑验证
-- [ ] AC3: **真权限确认仍判忙**——阻塞式权限确认框（Allow/Deny/Yn）仍判 permission-prompt（负控制），既有 pane-state 测试全绿
-- [ ] AC4: **退一步 WARN（若选候选 B）**——permission-prompt 持续 N 轮无 transcript 写入 ⇒ 报 WARN，不无限静默
-- [ ] AC5: **位置无关（若选候选 C）**——问卷在屏上任意位置都识别为可忽略
+- [x] AC1: **复现固化**——任务体记录 manager 实测（19:35Z 问卷屏 → permission-prompt）+ 外层核实（当前问卷在底部区域外判 waiting-input；PERMISSION_PROMPT_RE 不含问卷字样）——确认位置依赖是误判来源（本任务 Proposal 已含）；内层补一份构造复现 fixture（questionnaire-dismissable-1.txt）并确认误判源是问卷自己的 `Enter to confirm` 键位 chrome 触发 PERMISSION_PROMPT_RE（见 Evidence）
+- [x] AC2: **可忽略提示不判忙**——问卷/可忽略提示（`(optional)` / `Dismiss`）出现时 classifyPaneState 判非 permission-prompt（waiting-input），实跑验证（见 Evidence）
+- [x] AC3: **真权限确认仍判忙**——阻塞式权限确认框（Allow/Deny/Yn）仍判 permission-prompt（负控制），既有 pane-state 测试全绿（20/20，见 Evidence）
+- [x] AC4: **退一步 WARN（候选 B 已选）**——permission-prompt 持续 N 轮无 transcript 写入 ⇒ 报 WARN（`_sl_perm_prompt_warn_verdict` + 主循环接线，不无限静默），纯判据 + 主循环实跑测试（见 Evidence）
+- [ ] AC5: **位置无关（候选 C 未选）**——未选候选 C；位置依赖已由候选 A 在误判发生面（问卷在底部区域时）消除：同屏问卷在/不在底部区域都判非 permission-prompt（AC1/AC2 测试覆盖），不整屏扫描（ADR-016 boundary b）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上（按选定的候选）
-- [ ] 修后实跑：inner 显示问卷时 classifyPaneState 判非 permission-prompt；真权限框判 permission-prompt（两方向实跑贴任务体）
-- [ ] 既有 pane-state-classify 测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+- [x] AC1–AC5 全部勾上（按选定的候选：A+B 选定；AC5 属候选 C 未选——见 AC5 说明）
+- [x] 修后实跑：inner 显示问卷时 classifyPaneState 判非 permission-prompt（waiting-input）；真权限框判 permission-prompt（两方向实跑贴任务体，见 Evidence）
+- [x] 既有 pane-state-classify 测试 + 新增测试全绿（`--for-task` scoped，见 Evidence）
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——批量合边界闸门（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge`）：内层任务只跑 `--for-task` 选中集，全量套件由外层异步 verification-round 验证（见 Evidence）
 
 ## Touches
 
@@ -65,6 +65,36 @@ extra: {}
 #   confirm|Grant access|Allow|Deny|Y\/n\b/i 不含问卷字样（How is Claude / optional / Dismiss）。
 # ⇒ 位置依赖：问卷滚到底部区域时误判 permission-prompt（manager 实测），底部区域外时正常（外层核实）。
 ```
+
+## Evidence（内层实现 2026-08-08）
+
+**候选选定**：A（扩展 PERMISSION_PROMPT_RE 排除可忽略提示）+ B（permission-prompt 持续 N 轮无 transcript 写入 ⇒ WARN）。C 未选（整屏扫描违反 ADR-016 boundary b；位置依赖已在误判发生面由 A 消除）。
+
+**AC1 复现固化**：补 fixture `plugin/test/fixtures/pane-states/questionnaire-dismissable-1.txt`（构造复现——fleet 无问卷 overlay 的字节级实录，按 manager 19:35Z 记录 + Claude Code 问卷自己的键位 chrome 重建）。误判源确认：问卷 footer 的 `↑/↓ navigate · Enter to confirm · Esc to cancel` 中 **`Enter to confirm` 命中 PERMISSION_PROMPT_RE**——修前同屏问卷在底部区域判 `permission-prompt`（busy），滚动出底部区域判 `waiting-input`（position dependence）；修后两种位置都判 `waiting-input`。实测：
+
+```bash
+# 修前（permission-prompt 误判——问卷在底部区域，Enter to confirm 命中）
+echo '<问卷屏>' | node pane-state-classify.ts --classify | head -1   # permission-prompt
+# 修后
+node --no-warnings --experimental-strip-types plugin/scripts/pane-state-classify.ts --selfcheck   # 19 passed, 0 failed
+```
+
+**AC2/AC3 实跑（两方向）**：
+
+```bash
+$ bash plugin/scripts/session-liveness.sh --pane-state < questionnaire屏     # state=waiting-input busy=0
+$ bash plugin/scripts/session-liveness.sh --pane-state < 真权限确认框屏       # state=permission-prompt busy=1
+```
+
+**AC4（候选 B）**：`session-liveness.sh` 新增 `PERM_PROMPT_WARN_ROUNDS`（默认 3）/ `PERM_PROMPT_TX_WINDOW`（默认 60s）+ 纯判据 `_sl_perm_prompt_warn_verdict` + 主循环每目标接线（`PERM_CONSEC` / `PREV_PERM_WARNED`，WARN 只去 stderr、每段一次、不改忙闲判据）+ `--perm-warn-verdict` 接缝。纯判据：`3 轮 + transcript 陈旧 120s` ⇒ warn；`3 轮 + 新鲜 10s` ⇒ ok（交叉正控制）；`2 轮` ⇒ ok；`无 transcript(-1)` ⇒ ok。主循环实跑：probe pane 显示 permission-prompt + 陈旧 transcript，3 轮后 stderr 报 `WARN … 连续 3 轮 permission-prompt 且 transcript 最近 Ns 未写入`。
+
+**测试结果**：
+- `plugin/test/pane-state-classify.test.mjs`：**20/20 绿**（含新增 AC1 复现/位置依赖、AC2 可忽略提示、AC3 负控制三测试 + questionnaire fixture）。
+- `plugin/test/session-liveness-signals.test.mjs`：**30/30 绿**（含新增候选 B 纯判据 + 主循环接线两测试）。
+- 既有 pane-state 相关测试（`blocked-signal-parameterized` / `ruling-required-wiring` 的 permission-prompt 断言）：不受影响——真权限框 fixture 无 dismissable 标记，仍判 permission-prompt。
+- `--for-task gap-permission-prompt-vs-dismissable-prompt-classifier` scoped 门：见下方。
+
+**DoD 全量套件说明**：全量套件是批量合边界闸门（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge`），由外层异步 verification-round 验证（`FULL-SUITE-EXIT=0` / `cancelled 0`）；内层任务按 fast-mode-loop-tick 只跑 `--for-task` 选中集，不跑全量。此 DoD 项留待外层批量合闸门，非本任务 scoped 范围。
 
 ## Contract
 

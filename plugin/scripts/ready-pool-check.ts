@@ -66,10 +66,18 @@
 // ONLY the mechanical eligibility checks (four artifacts / deps / touches-resolve / not fixture /
 // not PARKED) — it does not itself decide "which task" (AC3 — no stage-goal input in the checker).
 //
+// LANDING-BLOCKED AXIS (gap-landing-blocked-invisible-to-dispatch-criteria): beyond criterion_met the
+// output carries `landing_blocked` / `landing_blocked_reason` (and the report string appends a
+// lowercase `landing-blocked` literal) — develop behind master ≥ threshold AND the merge target frozen
+// (AC17 catch-up incomplete) is reported EXPLICITLY, never "has candidates = healthy". Fail-safe: a
+// missing ref / non-git root is NOT blocked. A SIGNAL, not a gate (AC4: normal landing never
+// false-reports; the dispatch decision stays criterion-driven).
+//
 // Run:
 //   node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>]
 //       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>]
-//       [--targeted <id>] [--json]
+//       [--targeted <id>] [--develop <ref>] [--integration <ref>] [--master <ref>]
+//       [--landing-staleness-ms <n>] [--landing-behind-threshold <n>] [--json]
 //   --cap / --floor-mult   override the derived floor (default cap=3, floor-mult=4 ⇒ floor 12)
 //   --in-flight            task ids of currently in-flight subagents (ranked against for disjointness)
 //   --top <n>              VALUE-PRIORITIZATION QUERY (gap-value-prioritization-has-no-mechanism):
@@ -97,6 +105,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { parseTask, extractSection } from "./task-schema.ts";
 // criterion-cost self-record (gap-no-criterion-records-its-own-cost-checker-cost-jsonl): this
 // criterion KNOWS its input size n (the ready pool count) — the ONLY field that splits "the
@@ -156,6 +165,101 @@ export const MIN_SECTION_CHARS = 40;
 /** Task-level PARKED marker: a bold `**PARKED` in the body. Plain-text "PARKED" in AC prose
  *  (e.g. this very task's exclusion-rule description) is NOT a marker — matched only when bolded. */
 export const PARKED_MARKER_RE = /\*\*PARKED\b/i;
+
+// ── LANDING-BLOCKED signal (tasks/gap-landing-blocked-invisible-to-dispatch-criteria) ───────────────
+// The dispatch criterion (`dispatchable_disjoint >= cap`) answers ONLY "are there ≥cap mutually-
+// disjoint candidates" (the touches-conflict graph, grep-verified: it reads NO merge/landing state).
+// slot-refill measures slot release. So criterion_met=True stays True when landing is STRUCTURALLY
+// blocked (AC17 catch-up: develop/integration frozen ~2h at a stale commit while master has un-migrated
+// commits) — "dispatchable visible, landable invisible" (the heartbeat-vs-consciousness instance:
+// the criterion has no basis yet still answers). This axis adds landing VISIBILITY next to
+// criterion_met: when develop is behind master by ≥ behindThreshold AND the merge target (integration)
+// has been frozen (no commit for > stalenessMs), it reports landing_blocked:true with a reason — the
+// ready pool then says "dispatchable candidates exist, BUT landing is blocked", never "has candidates
+// = healthy". It is a SIGNAL, not a gate: landing_blocked does NOT stop dispatch (AC4 negative control
+// = normal landing never false-reports); the dispatch decision stays criterion-driven.
+
+/** Landing-blocked staleness window: the merge target (integration) is "frozen" when it has received
+ *  no commit within this window. Matches the AC17 catch-up scenario (develop/integration frozen ~2h
+ *  at a stale commit). The 20-25 min tick cadence leaves ample headroom — normal operation (tasks
+ *  landing on integration) never reaches it. */
+export const LANDING_STALENESS_MS_DEFAULT = 2 * 60 * 60 * 1000; // 2h
+
+/** How far develop must be behind master before a landing-block is flagged. master's release role is
+ *  EMPTY in quay (no release flow) — ANY commit on master that develop lacks is an un-migrated
+ *  anomaly, so the default is 1. Exposed for single-line downstreams where master may legitimately
+ *  diverge (pass a higher threshold / master==develop to disable). */
+export const LANDING_BEHIND_THRESHOLD_DEFAULT = 1;
+
+/** Pure landing-blocked decision — unit-tested, no git. All inputs mechanical:
+ *  @param {object} i
+ *  @param {number} i.developBehindMaster   commits reachable from master but not develop
+ *                                         (`git rev-list --count develop..master`); 0 when unknown
+ *  @param {number|null} i.integrationStalenessMs ms since the last commit on integration; null when
+ *                                         the ref does not exist (single-line downstream ⇒ never frozen)
+ *  @param {number} i.now                   epoch ms (injected for testability)
+ *  @param {number} [i.stalenessMs]         freeze window (default LANDING_STALENESS_MS_DEFAULT)
+ *  @param {number} [i.behindThreshold]     min behind-master commits (default 1)
+ *  @returns {{ landing_blocked: boolean, reason: string|null }}
+ */
+export function computeLandingBlocked({ developBehindMaster, integrationStalenessMs, now, stalenessMs = LANDING_STALENESS_MS_DEFAULT, behindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT }) {
+  const behind = developBehindMaster >= behindThreshold;
+  const frozen = integrationStalenessMs !== null && integrationStalenessMs > stalenessMs;
+  if (behind && frozen) {
+    return {
+      landing_blocked: true,
+      reason:
+        `landing-blocked: develop is ${developBehindMaster} commit(s) behind master and integration ` +
+        `has had no commit for ${Math.round(integrationStalenessMs / 1000)}s (frozen) — AC17 catch-up incomplete`,
+    };
+  }
+  return { landing_blocked: false, reason: null };
+}
+
+/** FAIL-SAFE git read: `git rev-list --count <range>` → count, or null when the refs don't exist /
+ *  root isn't a git repo (a missing ref / non-git test workspace is NOT landing-blocked). */
+export function readGitRevCount(root, range) {
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-list", "--count", range], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const n = Number.parseInt(out.trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** FAIL-SAFE git read: epoch-ms of the last commit on `ref` (`git log -1 --format=%ct`), or null when
+ *  the ref doesn't exist / root isn't a git repo. null ⇒ staleness unknown ⇒ NOT frozen (fail-safe: a
+ *  single-line downstream without an integration ref never reports landing-blocked). */
+export function readLastCommitMs(root, ref) {
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "-1", "--format=%ct", ref], {
+      encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const sec = Number.parseInt(out.trim(), 10);
+    return Number.isFinite(sec) ? sec * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Detect landing-blocked from the two-line branch model's git state (fail-safe: any missing ref /
+ *  non-git root ⇒ not blocked). `develop` / `integration` / `master` are the CONFIGURED ref names —
+ *  a single-line downstream passes master/master/master and this never fires (develop..master is
+ *  empty). */
+export function detectLandingBlocked(root, { develop = "develop", integration = "integration", master = "master", stalenessMs = LANDING_STALENESS_MS_DEFAULT, behindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, now = Date.now() } = {}) {
+  const developBehindMaster = readGitRevCount(root, `${develop}..${master}`);
+  const lastIntegrationCommitMs = readLastCommitMs(root, integration);
+  return computeLandingBlocked({
+    developBehindMaster: developBehindMaster ?? 0,
+    integrationStalenessMs: lastIntegrationCommitMs === null ? null : now - lastIntegrationCommitMs,
+    now,
+    stalenessMs,
+    behindThreshold,
+  });
+}
 
 // ── Value-prioritization relevance signal (tasks/gap-value-prioritization-has-no-mechanism) ─────────
 // The "which of the N todos matters most" question gets a MECHANICAL answer (no human scoring, AC3).
@@ -505,12 +609,16 @@ export function buildTargetedPromotion(id, task, root, allTasks) {
   };
 }
 
-function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit }) {
+function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit, landingBlocked, landingReason }) {
   let s = `pool ${pool}/${floor} (floor = cap(${cap}) × ${floorMult}) · dispatchable_disjoint ${dispatchableDisjoint}/${cap}`;
   s += criterionMet
     ? " — criterion met (≥cap mutually-disjoint candidates)"
     : " — criterion NOT met (<cap mutually-disjoint candidates)";
   if (poolBigAllColliding) s += " · POOL BIG BUT ALL COLLIDING (pool ≥ floor yet dispatchable_disjoint < cap)";
+  // LANDING-BLOCKED (gap-landing-blocked-invisible-to-dispatch-criteria): the landing visibility axis
+  // beyond criterion_met — a blocked landing is reported explicitly, never "has candidates = healthy".
+  // The lowercase `landing-blocked` literal is the Contract measure's grep surface.
+  if (landingBlocked) s += ` · landing-blocked (${landingReason})`;
   if (deficit > 0) s += ` · deficit ${deficit}`;
   return s;
 }
@@ -529,7 +637,7 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
  *  TARGETED-PROMOTION query (gap-targeted-promotion-operation-does-not-exist) — when set, a
  *  `targeted_promotion` result for that one id is produced (floor-INDEPENDENT, AC2), supplemental
  *  to and never altering the bulk `promotions` path (AC3). */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], topN = 0, targetedId = null }) {
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], topN = 0, targetedId = null, develop = "develop", integration = "integration", master = "master", landingStalenessMs = LANDING_STALENESS_MS_DEFAULT, landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT, now = Date.now() }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -621,6 +729,19 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
   // says so. The inverse (pool < floor but criterion already met) must NOT be reported.
   const poolBigAllColliding = pool >= floor && dispatchableDisjoint < cap;
 
+  // LANDING-BLOCKED (gap-landing-blocked-invisible-to-dispatch-criteria): the landing VISIBILITY axis
+  // next to criterion_met. criterion_met answers "≥cap mutually-disjoint candidates" (dispatchable);
+  // detectLandingBlocked answers "can that work actually land?" — develop behind master AND the merge
+  // target frozen (AC17 catch-up incomplete). Reported, never gating (AC4: normal landing ⇒ false).
+  const landing = detectLandingBlocked(root, {
+    develop,
+    integration,
+    master,
+    stalenessMs: landingStalenessMs,
+    behindThreshold: landingBehindThreshold,
+    now,
+  });
+
   // Candidates are only meaningful when promotion pressure exists (pool < floor) — the script's
   // whole job is "recommend promotions to reach the floor". When the pool is already at/above floor
   // the candidate scan is skipped entirely (keeps the real-store output small).
@@ -706,7 +827,9 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     dispatchable_disjoint: dispatchableDisjoint,
     criterion_met: criterionMet,
     pool_big_all_colliding: poolBigAllColliding,
-    report: buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit }),
+    landing_blocked: landing.landing_blocked,
+    landing_blocked_reason: landing.reason,
+    report: buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit, landingBlocked: landing.landing_blocked, landingReason: landing.reason }),
     ready,
     excluded,
     candidates,
@@ -729,6 +852,11 @@ function main(argv) {
   let closedButLiveIds = [];
   let topN = 0;
   let targetedId = null;
+  let develop = "develop";
+  let integration = "integration";
+  let master = "master";
+  let landingStalenessMs = LANDING_STALENESS_MS_DEFAULT;
+  let landingBehindThreshold = LANDING_BEHIND_THRESHOLD_DEFAULT;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
@@ -737,6 +865,11 @@ function main(argv) {
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--top") topN = Number(args[++i]); // value-prioritization query: top-N todos by relevance
     else if (args[i] === "--targeted") targetedId = String(args[++i] || "").trim() || null; // targeted-promotion query
+    else if (args[i] === "--develop") develop = String(args[++i] || "develop");
+    else if (args[i] === "--integration") integration = String(args[++i] || "integration");
+    else if (args[i] === "--master") master = String(args[++i] || "master");
+    else if (args[i] === "--landing-staleness-ms") landingStalenessMs = Number(args[++i]);
+    else if (args[i] === "--landing-behind-threshold") landingBehindThreshold = Number(args[++i]);
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--closed-but-live") {
@@ -756,7 +889,7 @@ function main(argv) {
   const inFlight = readTasks(inFlightIds);
   const closedButLive = readTasks(closedButLiveIds);
   const t0 = Date.now();
-  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN, targetedId });
+  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN, targetedId, develop, integration, master, landingStalenessMs, landingBehindThreshold });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

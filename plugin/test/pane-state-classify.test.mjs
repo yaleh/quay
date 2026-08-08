@@ -63,6 +63,16 @@ const FIXTURE_EXPECTATIONS = {
   // quay-0:manager — the same pane actively processing again (status line carries "esc to
   // interrupt", verified), captured automatically, 15:01:14 local. Second real busy recording.
   "busy-manager-2.txt": "busy",
+  // REPRODUCTION (not a byte-exact capture — no recording of the Claude Code questionnaire overlay
+  // exists in this fleet): the dismissable feedback questionnaire the manager measured 2026-08-08
+  // 19:35Z on the inner pane — "● How is Claude doing this session? (optional) / 1: Bad 2: Fine 3:
+  // Good 0: Dismiss". Reconstructed with the overlay's OWN keybinding chrome ("↑/↓ navigate · Enter
+  // to confirm · Esc to cancel") — that chrome is the exact PERMISSION_PROMPT_RE trip source that
+  // made the pre-fix classifier return permission-prompt (busy) whenever the overlay scrolled into
+  // the bottom region, while the same screen scrolled out read waiting-input (the position
+  // dependence, tasks/gap-permission-prompt-vs-dismissable-prompt-classifier). The `(optional)` +
+  // `0: Dismiss` markers are the distinguishing feature the fix keys on (candidate A).
+  "questionnaire-dismissable-1.txt": "waiting-input",
 };
 
 function readFixture(name) {
@@ -130,6 +140,75 @@ test("busy false-positive guard: a content line QUOTING the busy phrase inside t
     "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
   ].join("\n");
   assert.equal(classifyPaneState(quotedButIdle).state, "waiting-input");
+});
+
+test("AC1 (reproduce) — the dismissable questionnaire (with its own 'Enter to confirm' chrome) is NOT a permission-prompt; the same screen reads waiting-input regardless of whether the overlay is in the bottom region", () => {
+  // The reproduction fixture: the Claude Code questionnaire overlay with its keybinding chrome.
+  // Its "Enter to confirm" chrome is the exact PERMISSION_PROMPT_RE trip source (the pre-fix
+  // classifier returned permission-prompt whenever the overlay scrolled into the bottom region).
+  const r = classifyPaneState(readFixture("questionnaire-dismissable-1.txt"));
+  assert.equal(r.state, "waiting-input", `questionnaire must read as waiting-input, got ${r.state}`);
+
+  // Position dependence (AC1): the SAME questionnaire scrolled such that the overlay (footer +
+  // options) is OUT of the bottom region must give the SAME non-busy verdict. Before the fix these
+  // two screens diverged (with-overlay → permission-prompt, overlay-out → waiting-input) purely by
+  // scroll position.
+  const scrolledOut = [
+    "── (scrolled content above; the questionnaire overlay is no longer in the bottom region) ──",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  assert.equal(classifyPaneState(scrolledOut).state, "waiting-input");
+  assert.equal(
+    classifyPaneState(readFixture("questionnaire-dismissable-1.txt")).state,
+    classifyPaneState(scrolledOut).state,
+    "same questionnaire screen must give the same verdict regardless of scroll position (position dependence eliminated)",
+  );
+});
+
+test("AC2 — dismissable prompts ((optional) / Dismiss / How is Claude doing) never classify as permission-prompt", () => {
+  const status = [
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  const variants = [
+    // The exact manager-reported questionnaire, including a permission-signature chrome line.
+    [
+      "● How is Claude doing this session? (optional)",
+      "  1: Bad 2: Fine 3: Good 0: Dismiss",
+      "  Enter to confirm · Esc to cancel",
+    ].join("\n") + "\n" + status,
+    // A different dismissable prompt family: "(optional)" alone + a permission signature.
+    ["Enable this feature? (optional)", "Do you want to proceed?", "Dismiss"].join("\n") + "\n" + status,
+    // Dismiss option present next to a permission signature.
+    ["Grant access to this folder?", "Allow  ·  Deny  ·  Dismiss"].join("\n") + "\n" + status,
+  ];
+  for (const [i, v] of variants.entries()) {
+    const r = classifyPaneState(v);
+    assert.notEqual(r.state, "permission-prompt", `variant ${i} must not be a blocking permission prompt, got ${r.state}`);
+    assert.equal(r.state, "waiting-input", `variant ${i} must read as waiting-input (non-busy), got ${r.state}`);
+  }
+});
+
+test("AC3 (negative control) — a genuine blocking permission confirmation with NO dismissable marker still classifies as permission-prompt", () => {
+  // The recorded trust-check family: "Enter to confirm" with NO (optional)/Dismiss marker.
+  const genuine = [
+    "Quick safety check: Is this a project you created or one you trust?",
+    "❯ 1. Yes, I trust this folder ✔",
+    "  2. No, exit",
+    "Enter to confirm · Esc to cancel",
+  ].join("\n");
+  assert.equal(classifyPaneState(genuine).state, "permission-prompt");
+  // Tool-approval family (Allow/Deny/Yn), no dismiss branch.
+  const approve = [
+    "Do you want to proceed?",
+    "Allow  ·  Deny  ·  Y/n",
+  ].join("\n");
+  assert.equal(classifyPaneState(approve).state, "permission-prompt");
 });
 
 test("AC6: region negative control — same bottom region + different upper content ⇒ same verdict; different bottom + same upper ⇒ different", () => {
