@@ -33,7 +33,7 @@ title: "THE structural blocker to the primary goal (self-evolution without a
   all three layers missing because all session-scoped). AC10: does NOT score
   (axis opened by the 29h stall, post-friction), count stays 6; priority is
   independent of pre/post-friction"
-status: done
+status: ready
 labels:
   - gap
   - milestone-candidate
