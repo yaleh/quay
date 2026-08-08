@@ -164,7 +164,36 @@ git log --since='<禁令时刻>' --format='%h %s' | grep -v '^.\{8\} manager:'  
 且 archguard/meta-cc 的角色变为**「被 quay 安装/验证的目标项目」**，不是自己在开发的项目。
 ⇒ **连报 5 轮「会话数 0」，没有一次改变过任何判断——纯噪声。**
 
-**本阶段（AC16 = GitHub 上有完整且可用的 release）的三条巡检项，每轮实跑，不读文件里的旧数字**：
+> **⚠️ 2026-08-08 09:4xZ：本节的巡检项【自己就违反了本节的规则】，已更正。**
+> 本节标题写着「巡检项必须由**当前阶段** AC 导出」，而下面那三条是 **AC16** 导出的——
+> 可 **AC19 已于 2026-08-08 覆盖排序、优先于 AC16**（`manager-phase-goal.md` 那节原文：
+> 「AC16 仍然有效，但本轮起**让位于 AC19**」），**巡检项从未跟着换**。
+> 人 09:4xZ 又明确「**持续优先推进 AC19**」。
+> ⇒ **AC19 的四条巡检项升为第一组（下方 §1-AC19），AC16 三条降为第二组。**
+> **一般形态**：排序变了而巡检项没变，等于**每轮都在测上一个阶段的目标**——
+> 与 §1.b 那次「§1.4b 判据修正没落到执行点」同型，这次发生在**优先级**上而不是**判据**上。
+
+### §1-AC19（第一组，每轮实跑）—— 人 2026-08-08 09:4xZ「持续优先推进 AC19」
+
+```bash
+# a 方向核实：最近一次 task/* → integration 的真合并（判据1）
+git log integration --merges -3 --format='  %h %cI %s' | grep -i 'fan-in' | head -1
+
+# b 窗口：integration 是否领先 develop（判据2 前半）
+echo "integration 领先=$(git rev-list --count develop..integration)  develop 领先=$(git rev-list --count integration..develop)"
+
+# c(i) 每次派发都调用 fork-baseline 判定 —— 用 meta-cc 查派发会话的 tool_use
+#      contains="--fork-baseline"，一次派发应有一条
+# c(ii) 【关键，②i-E 类】实参不得为空：看 --overlaps-unverified 后面是不是 ""
+#      2026-08-08 09:3xZ 实测：五次派发全部传空串 ⇒ 该判定路径被调用而永远不生效
+#      ⇒ 判据2 后半仍未达成，缺口 = 把 integration 上未验证任务的 id 真的传进去
+
+# d 判据3：有没有为凑窗口造空转任务 —— 看新任务是否有真实缺陷来源
+```
+**判读**：c(ii) 一旦变为非空且 c(i) 仍成立 ⇒ **判据2 后半达成**，AC19 只剩判据3 的负向确认。
+**归属**：修法归 outer。manager 只报实测值与它在 AC 里的位置，**不代排、不写任务体**。
+
+### §1-AC16（第二组，降级但不作废）：**三条巡检项，每轮实跑，不读文件里的旧数字**：
 
 ```bash
 # ① 新鲜度：最新 release 与 develop 的提交差
