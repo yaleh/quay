@@ -151,6 +151,17 @@ L1（交付完整性）全绿，L2（持续健康）根本不存在。这正是 
 - tasks/gap-complete-delivery-surface-spec-and-l1-verification.md（L2 补「循环在转」）
 - tasks/gap-axis-generator-question-what-range-every-standing-criterion.md（AC5 记账引用）
 
+## 交叉标注（AC4 消费者，2026-08-08）
+
+**cold-start 已停转分支（首个 L2 判据消费者）**：`tasks/gap-cold-start-six-keys-measure-installed-not-running`
+（AC1-AC4）把本判据接入 cold-start——六键/可观测后果测「装没装好」（L1），不测「在不在转」（L2）；
+cold-start 现在 **先调用 `dead-loop-check.sh --check-running`**（新增模式）区分 running vs stopped，
+停转时给可执行下一步（restart / human-needed / backlog-empty）而非报「已完成」。`--check-running`
+复用本判据的 liveness 信号（transcript user 消息 + git 提交时间窗），再加目标项目自身的 started 标记
+（`.quay/loop-driver.jsonl` / `.workflow-events/` task-start 记录）+ backlog 状态（needs-human /
+ready / todo）分类停转原因。本判据的 `liveness_independent_of_backlog` 不变式正是 cold-start 能区分
+「队列空（健康空闲）」与「没人驱动（dead-loop）」的基础。
+
 ## Contract
 
 measure   loop_alive = `bash plugin/scripts/dead-loop-check.sh --root <project> --json` stdout 的 alive/dead 字段
