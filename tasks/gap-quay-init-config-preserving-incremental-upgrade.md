@@ -67,6 +67,7 @@ extra:
 - [ ] scoped 门 `scripts/test.sh --for-task gap-quay-init-config-preserving-incremental-upgrade` 绿
 
 ## Touches
+- tasks/gap-quay-init-config-preserving-incremental-upgrade.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/quay-init.sh（config-preserving 增量升级入口）
 - plugin/test/（AC1/AC2 fixture）

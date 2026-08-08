@@ -47,6 +47,7 @@ extra:
 - [ ] scoped 门 `scripts/test.sh --for-task gap-single-file-test-duration-trend-unwatched` 绿
 
 ## Touches
+- tasks/gap-single-file-test-duration-trend-unwatched.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/（history 落盘 + 对比脚本，复用 measure-suite-reporter）
 - plugin/loop/orchestrator-loop-tick.md 或 full-suite-runner.ts（套件后接 measure-history）

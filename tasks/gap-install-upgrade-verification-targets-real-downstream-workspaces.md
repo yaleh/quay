@@ -58,6 +58,7 @@ loop 值 ≠ 模板）。**冲突来自「这个项目真的用过、真的改�
 - [ ] scoped 门 `scripts/test.sh --for-task gap-install-upgrade-verification-targets-real-downstream-workspaces` 绿
 
 ## Touches
+- tasks/gap-install-upgrade-verification-targets-real-downstream-workspaces.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/（真实目标验证机制脚本）
 - plugin/loop/orchestrator-loop-tick.md（验证轮里加真实目标验证步骤 / 频率）
