@@ -33,13 +33,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isFailureLine, isAbortLine } from "../scripts/full-suite-runner.ts";
+import { isFailureLine, isAbortLine, isGitWorktree } from "../scripts/full-suite-runner.ts";
 import { runOnce } from "../scripts/suite-state-trigger.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -146,8 +146,8 @@ test("AC1 — a green run writes the exact suite-state shape to .quay/full-suite
     assert.ok(s, "state file written");
     assert.deepEqual(
       Object.keys(s).sort(),
-      ["durationMs", "finishedAt", "laneCount", "runner", "startedAt", "state"],
-      "exact suite-state shape (AC1)",
+      ["durationMs", "finishedAt", "laneCount", "runner", "scope", "startedAt", "state"],
+      "exact suite-state shape (AC1 + gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1 scope)",
     );
     assert.equal(s.state, "green");
     assert.equal(s.runner, "outer");
@@ -809,4 +809,108 @@ test("AC1 Contract invoke — `full-suite-runner.ts --wait-check` proves: test.s
   assert.match(out, /reason=aborted/, "gate-WAIT is reason=aborted (no correctness conclusion)");
   assert.match(out, /stopSignal=false/, "aborted-red must NOT stop dispatch (AC1)");
   assert.match(out, /SUITE-RED/, "SUITE-RED event still recorded (red noticed, routed by reason)");
+});
+
+// ── gap-worktree-scoped-runs-consume-resources-but-produce-no-signal: AC1 scope + AC2 priority ──────
+
+test("AC1 unit — isGitWorktree distinguishes the main repo (false) from a linked worktree (true)", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-wtrepo-u-"));
+  const worktree = path.join(os.tmpdir(), `fsr-wt-u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  try {
+    execSync("git init -b main", { cwd: repo, stdio: "ignore" });
+    execSync("git config user.email t@example.com", { cwd: repo, stdio: "ignore" });
+    execSync("git config user.name t", { cwd: repo, stdio: "ignore" });
+    fs.writeFileSync(path.join(repo, "a.txt"), "x");
+    execSync("git add a.txt && git commit -m init", { cwd: repo, stdio: "ignore" });
+    assert.equal(isGitWorktree(repo), false, "the primary checkout is NOT a worktree");
+    assert.equal(isGitWorktree(path.join(repo, "does-not-exist")), false, "a non-git dir is NOT a worktree");
+    execSync(`git worktree add -b feature ${worktree}`, { cwd: repo, stdio: "ignore" });
+    assert.equal(isGitWorktree(worktree), true, "a linked worktree IS a worktree");
+  } finally {
+    try {
+      execSync(`git worktree remove --force ${worktree}`, { cwd: repo, stdio: "ignore" });
+    } catch {
+      // worktree may not exist if the test failed early
+    }
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("AC1 — a real git-worktree run writes scope=worktree to its OWN .quay/full-suite-state.json (the observable signal)", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-wtrepo-"));
+  const worktree = path.join(os.tmpdir(), `fsr-wt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const { f, dir } = fakeSuite(GREEN_SUITE);
+  try {
+    execSync("git init -b main", { cwd: repo, stdio: "ignore" });
+    execSync("git config user.email t@example.com", { cwd: repo, stdio: "ignore" });
+    execSync("git config user.name t", { cwd: repo, stdio: "ignore" });
+    fs.writeFileSync(path.join(repo, "a.txt"), "x");
+    execSync("git add a.txt && git commit -m init", { cwd: repo, stdio: "ignore" });
+    execSync(`git worktree add -b feature ${worktree}`, { cwd: repo, stdio: "ignore" });
+
+    const child = runRunner({ root: worktree, command: `bash ${f}`, laneCount: 8 });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `runner exits 0 on green in a worktree, got ${code}`);
+    const s = readState(worktree);
+    assert.ok(s, "the worktree's own state file is written (AC1 signal — waiters can read it)");
+    assert.equal(s.scope, "worktree", "scope tags the worktree-origin suite (deferrable, not the main signal)");
+    assert.equal(s.state, "green");
+  } finally {
+    try {
+      execSync(`git worktree remove --force ${worktree}`, { cwd: repo, stdio: "ignore" });
+    } catch {
+      // worktree may not exist if the test failed early
+    }
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC2 — for a MAIN-scope root the runner passes --main-repo-priority: the gate lets the main-repo suite proceed over worktree load (cpu=50 would normally WAIT)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2p-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  try {
+    // cpu=50 is above the base limit (40) ⇒ WAIT normally. caller_scope=main + worktree_node_tests=6
+    // ⇒ the AC2 priority override fires ONLY IF the runner passed --main-repo-priority (it does for a
+    // non-worktree root). If the flag were absent the gate would WAIT and the suite would never spawn.
+    const child = runRunner({
+      root,
+      env: {
+        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
+        RESOURCE_GATE_TEST_CPU_AVG10: "50",
+        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+        RESOURCE_GATE_TEST_CALLER_SCOPE: "main",
+        RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, `AC2 priority: main-repo suite proceeds over worktree load; got ${code}`);
+    assert.equal(readState(root).state, "green");
+    assert.ok(fs.existsSync(argsLog), "the suite WAS spawned (priority override let it through)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AC2 negative control — a WORKTREE-scope caller is NOT let through the WAIT even when the runner passes the flag (worktree full-suite is deferrable)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-ac2n-"));
+  const { argsLog } = fakeTestShRecordingArgs(root);
+  try {
+    // Same seams but caller_scope=worktree ⇒ the override requires caller_scope=main ⇒ WAIT stands.
+    const child = runRunner({
+      root,
+      env: {
+        QUAY_TEST_SKIP_RESOURCE_GATE: "0",
+        RESOURCE_GATE_TEST_CPU_AVG10: "50",
+        RESOURCE_GATE_TEST_MEM_AVAIL_MB: "4000",
+        RESOURCE_GATE_TEST_CALLER_SCOPE: "worktree",
+        RESOURCE_GATE_TEST_WORKTREE_NODE_TESTS: "6",
+      },
+    });
+    const { code } = await waitExit(child);
+    assert.notEqual(code, 0, "worktree-scope caller stays WAIT (deferrable — no priority override)");
+    assert.ok(!fs.existsSync(argsLog), "the suite was NOT spawned (worktree full-suite yields to the machine)");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

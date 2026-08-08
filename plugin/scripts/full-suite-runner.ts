@@ -56,6 +56,14 @@
 //                                    #   the main repo's relative .quay/full-suite-state.json) sees the
 //                                    #   SAME result — full-suite-state.json, full-suite.log and
 //                                    #   verification-round.jsonl all land in <state-dir>.
+//     [scope]                        # gap-worktree-scoped-runs-consume-resources-but-produce-no-signal:
+//                                    #   every state carries `scope: main|worktree` (which checkout
+//                                    #   produced it), and the resource gate is asked with
+//                                    #   --main-repo-priority ONLY when --root is the MAIN repo — so the
+//                                    #   main-repo full suite (the signal subagents wait for) is not
+//                                    #   PERMANENTLY blocked by worktree scoped load (deferrable). A
+//                                    #   worktree's own full-suite run gets NO priority (it is itself
+//                                    #   deferrable).
 //     [--state-file <path>]          # default: <state-dir>/full-suite-state.json
 //     [--log-file <path>]            # default: <state-dir>/full-suite.log
 //     [--lane-count <n>]             # default: max(1, floor(nproc/1.0)) = nproc (AC1, cost-side-verified)
@@ -112,6 +120,14 @@ export interface SuiteFailure {
 export interface SuiteState {
   state: SuiteStateValue;
   runner: "outer" | "inner";
+  /**
+   * gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: which checkout produced this
+   * state — "main" (the primary repo; the signal subagents wait for) or "worktree" (a linked worktree;
+   * deferrable). Waiters reading a worktree's own `.quay/full-suite-state.json` can tell a worktree-
+   * origin run from the main-repo suite at a glance, and the resource gate's main-repo-vs-worktree
+   * priority rule keys on the same distinction. Absent (legacy states) ⇒ treat as main (fail-open).
+   */
+  scope?: "main" | "worktree";
   startedAt: string; // ISO 8601
   finishedAt: string | null; // ISO 8601; null while running
   durationMs: number | null; // finishedAt - startedAt; null while running
@@ -212,6 +228,9 @@ export interface SuiteRoundRecord {
   load: number;
   state: string;
   runner: string;
+  // gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: main|worktree — which
+  // checkout produced this round (the same `scope` the state file carries). Absent on legacy rows.
+  scope?: "main" | "worktree";
   // trend-criteria extension (gap-quality-criteria-are-point-in-time-no-trend-criteria AC1/AC3b):
   //   tests       = pass + fail + cancelled (the suite's total test count, so per_test_ms is
   //                 comparable across rounds of different sizes)
@@ -349,16 +368,42 @@ export function spliceConcurrency(cmd: string, laneCount: number): string {
 // ── AC3: resource-gate consultation before starting ──────────────────────────────────────────────────
 
 /**
+ * gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1/AC2 — whether a checkout is a
+ * LINKED git worktree (git-dir != git-common-dir). The main repo is NOT a worktree; a temp non-git
+ * dir (a hermetic test root) is NOT a worktree. Used to (a) tag the suite state with `scope` so
+ * waiters can tell a worktree-origin suite from the main-repo suite (AC1), and (b) pass
+ * --main-repo-priority to the resource gate only when the tested checkout is the main repo (AC2).
+ */
+export function isGitWorktree(root: string): boolean {
+  try {
+    const gitDir = execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, encoding: "utf8" }).trim();
+    const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
+    const abs = (p: string): string => (path.isAbsolute(p) ? p : path.resolve(root, p));
+    return abs(gitDir) !== abs(commonDir);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * AC3 — consult the shared resource gate BEFORE starting the full suite. WAIT (non-zero exit) ⇒
  * the runner must NOT start; the state file is left untouched (still running/green), and the runner
  * exits non-zero so the caller re-ticks. The gate is the REAL plugin/scripts/resource-gate.sh (its
  * RESOURCE_GATE_TEST_* env seams flow through for deterministic tests). QUAY_TEST_SKIP_RESOURCE_GATE=1
  * is the test escape hatch (same env test.sh honors).
+ *
+ * AC2 (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal): when the TESTED CHECKOUT is
+ * the MAIN repo, pass --main-repo-priority so the gate lets the main-repo full suite proceed even over
+ * worktree scoped load (deferrable — its completion updates nothing anyone waits on). When --root is a
+ * linked worktree, NO priority flag: a worktree full-suite caller is itself deferrable and must yield
+ * to the machine.
  */
 export function checkResourceGate(root: string): { ok: boolean; output: string } {
   const gate = path.join(__dirname, "resource-gate.sh");
+  const gateArgs = ["--for", "full-suite"];
+  if (!isGitWorktree(root)) gateArgs.push("--main-repo-priority");
   try {
-    const output = execFileSync("bash", [gate, "--for", "full-suite"], {
+    const output = execFileSync("bash", [gate, ...gateArgs], {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -425,7 +470,11 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   const startedAt = new Date().toISOString();
-  const base = { runner: "outer" as const, startedAt, laneCount };
+  // gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1: tag every state with the
+  // producing checkout's scope so waiters can distinguish a worktree-origin suite (deferrable — its
+  // completion updates nothing anyone waits on) from the main-repo suite (the signal being waited for).
+  const scope = isGitWorktree(root) ? ("worktree" as const) : ("main" as const);
+  const base = { runner: "outer" as const, startedAt, laneCount, scope };
 
   // KNOWN-LOAD-SENSITIVE family manifest (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
   // triage AC3): scanned ONCE at run start against the repo root so red-time failures can carry the
@@ -691,6 +740,7 @@ export async function run(argv: string[]): Promise<number> {
     state: finalState.state,
     reason: finalState.reason ?? null,
     runner: base.runner,
+    scope,
   });
   // NOTE: appendVerificationRound above is the ONE suite-duration append per run (the
   // checker-cost.test.mjs AC6 contract: two runs ⇒ exactly two verification-round.jsonl lines).
