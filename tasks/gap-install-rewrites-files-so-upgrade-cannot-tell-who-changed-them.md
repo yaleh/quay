@@ -273,3 +273,12 @@ AC7 来自管理者提醒的那个坑——占位符 `/home/yale/work/quay` **�
 所以残留检测**必须按字面量而非可解析性**，且负控制要求**在本机也能报出残留**。
 **并预先堵死最省事的错误修法**：不许把 `--force` 当成解决冲突的手段。
 **AC8 保留人的要求**：不中止 meta-cc 冷启动，用它产出「升级时会被跳过的文件数」这个具体数字。
+
+## 交叉标注（AC4，gap-quay-init-never-commits-broken-committed-state，2026-08-08）
+
+同根：**交付契约 铺设 → 版本标记 → 提交 → 可升级**。本条补「**铺设**」环（配置驱动安装：落地字节
+相同，CONFLICT 只剩「使用者真的改了」一个含义，升级能分辨 stale install vs 用户改动）；`gap-delivery-
+surface-grows-but-target-freezes-no-upgrade` 补「**可升级**」环（重跑检测 + 更新派生脚本 + 漂移报告）；
+`gap-quay-init-never-commits-broken-committed-state` 补「**提交**」环（quay-init 铺完机制自动 commit
+`chore(quay-init):` 前缀，consumer 仓库 committed 态自洽）。「版本标记」环仍是欠账。交叉不合并——三条
+任务各修契约的一环。

@@ -83,6 +83,11 @@ DO_LOOP=false
 DO_CHECK_DRIFT=false
 DO_CHECK_DEPENDENCY_CLOSURE=false
 ANY_CATEGORY=false
+# gap-quay-init-never-commits-broken-committed-state AC3: how the auto-commit prompt resolves when
+# the consumer repo already carries uncommitted changes. "prompt" (default) = interactive read when
+# stdin is a TTY, fail-closed decline when not; "yes" = commit anyway (only quay-init's laid-down
+# paths staged); "no" = skip the commit.
+AUTO_COMMIT_CONFIRM=prompt
 
 # ── parse args ─────────────────────────────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -95,6 +100,8 @@ while [ $# -gt 0 ]; do
     --all) DO_WORKFLOWS=true; DO_AGENTS=true; ANY_CATEGORY=true; shift ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --auto-commit-confirm) AUTO_COMMIT_CONFIRM=yes; shift ;;
+    --auto-commit-skip) AUTO_COMMIT_CONFIRM=no; shift ;;
     --check-drift) DO_CHECK_DRIFT=true; shift ;;
     --root) WORKSPACE_ROOT="$2"; shift 2 ;;
     --project) PROJECT_NAME="$2"; shift 2 ;;
@@ -1301,6 +1308,91 @@ record_category() {
   echo "  $label: copied=$((COPIED - base_copied)) skipped=$((SKIPPED - base_skipped)) conflicted=$((CONFLICTED - base_conflicted))"
 }
 
+# ── pre-existing uncommitted changes snapshot (gap-quay-init-never-commits-broken-committed-state) ──
+# Captured BEFORE any category lays files down: the consumer repo's uncommitted working-tree delta
+# (vs HEAD) that quay-init did NOT produce. AC3: quay-init must never silently sweep these into its
+# auto-commit — it stages ONLY its own laid-down paths, and it prompts when these exist. Empty when
+# the workspace is not a git repo (auto-commit is then a no-op) or the tree is clean.
+PRE_EXISTING_CHANGES=""
+if [ "$DRY_RUN" != true ] && git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  PRE_EXISTING_CHANGES="$(git -C "$WORKSPACE_ROOT" status --porcelain 2>/dev/null || true)"
+fi
+
+# auto_commit_laid_down — gap-quay-init-never-commits-broken-committed-state AC1/AC2/AC3.
+# quay-init 铺文件但从不 commit ⇒ consumer 仓库的机制默认活在未提交工作树里，committed 态是否自洽纯属
+# 运气（archguard 实测：提交了 ready-pool-check 却没提交它的三个 helper ⇒ fresh-clone broken）。
+# 铺完机制后自动 commit（固定 `chore(quay-init):` 前缀）⇒ committed 态自洽、git log 直接回答「装的是
+# 哪一版机制」（补齐交付契约 铺设→版本→提交→升级 的「提交」环）。
+#   AC1/AC2 — 自动提交：non-git 工作区跳过（没有 commit 的目标）；工作树无变化跳过；否则 stage 本机件
+#              铺设的路径并 `git commit`。
+#   AC3 — 已有未提交改动时 不静默覆盖：检测（PRE_EXISTING_CHANGES）+ 提示 + 待确认。默认只在 TTY 上
+#         交互确认；非交互（脚本/测试/CI）没有显式 --auto-commit-confirm 时 fail-closed 不提交（提示后
+#         退出 0——安装本身成功了，只是 delivery 的提交环节被用户/调用方搁置）。提交只 stage 本机件铺设
+#         的路径（.gitignore / .quay/config.yml / .quay/quay-init-state.json / plugin/scripts /
+#         orchestration / docs/analysis / .claude/{workflows,agents} / tasks），绝不 `git add -A` ——
+#         使用者的未提交改动留在工作树里，不被卷进 quay-init 的提交。
+# `.quay/runtime/`（安装产物 bundle，AC10）已由 ensure_runtime_gitignore 写进 .gitignore，不在提交面。
+auto_commit_laid_down() {
+  local changes p n
+  if ! git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "  auto-commit: SKIP (not a git repository — the laid-down files are not committed; init a repo or commit manually)"
+    return 0
+  fi
+  changes="$(git -C "$WORKSPACE_ROOT" status --porcelain 2>/dev/null || true)"
+  if [ -z "$changes" ]; then
+    echo "  auto-commit: nothing to commit (working tree clean)"
+    return 0
+  fi
+  local do_commit=1
+  if [ -n "$PRE_EXISTING_CHANGES" ]; then
+    echo "  auto-commit: WARNING — the consumer repo already had uncommitted change(s) BEFORE quay-init ran; they are NOT silently swept into the commit:" >&2
+    printf '%s\n' "$PRE_EXISTING_CHANGES" | sed 's/^/    /' >&2
+    echo "  auto-commit will stage ONLY quay-init's laid-down paths; the pre-existing change(s) stay uncommitted." >&2
+    case "$AUTO_COMMIT_CONFIRM" in
+      yes) do_commit=1 ;;
+      no)  do_commit=0 ;;
+      *)
+        if [ -t 0 ]; then
+          local resp=""
+          read -r -p "  Proceed with auto-commit? (only quay-init's laid-down files are staged; pre-existing changes stay uncommitted) [y/N] " resp
+          case "$resp" in
+            [yY]|[yY][eE][sS]) do_commit=1 ;;
+            *) do_commit=0 ;;
+          esac
+        else
+          echo "  auto-commit: DECLINED (non-interactive — pass --auto-commit-confirm to commit, or --auto-commit-skip to skip). Laid-down files remain uncommitted." >&2
+          do_commit=0
+        fi
+        ;;
+    esac
+  fi
+  if [ "$do_commit" = 0 ]; then
+    echo "  auto-commit: skipped as chosen — the laid-down files remain uncommitted in the working tree" >&2
+    return 0
+  fi
+  # Stage ONLY the paths quay-init owns/lays down (never `git add -A` when the repo may carry
+  # unrelated uncommitted work — AC3). Missing paths are skipped; gitignored runtime bundles never
+  # reach the stage. Runs in a subshell at the workspace root so the literal `git add` / `git commit`
+  # (the Contract invoke's surface) are the real operations, not prose.
+  for p in .gitignore .quay/config.yml .quay/quay-init-state.json plugin/scripts orchestration docs/analysis .claude/workflows .claude/agents tasks; do
+    if [ -e "$WORKSPACE_ROOT/$p" ]; then
+      ( cd "$WORKSPACE_ROOT" && git add -- "$p" ) 2>/dev/null || true
+    fi
+  done
+  if [ -z "$(git -C "$WORKSPACE_ROOT" diff --cached --name-only 2>/dev/null || true)" ]; then
+    echo "  auto-commit: nothing staged (all laid-down files are gitignored or already committed)"
+    return 0
+  fi
+  n="$(git -C "$WORKSPACE_ROOT" diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')"
+  if ( cd "$WORKSPACE_ROOT" && git commit -q -m "chore(quay-init): lay down quay plugin mechanism files (v${PLUGIN_VERSION})" ); then
+    echo "  auto-commit: committed ${n} file(s) as chore(quay-init) (plugin v${PLUGIN_VERSION})"
+  else
+    echo "ERROR: auto-commit failed (git commit returned non-zero). The laydown is complete but the delivery contract's 提交 环节 was not met." >&2
+    echo "       Configure the repo's git identity (user.name/user.email), then re-run quay-init (idempotent) to commit." >&2
+    exit 2
+  fi
+}
+
 if [ "$DO_WORKFLOWS" = true ]; then
   local_base_copied="$COPIED"; local_base_skipped="$SKIPPED"; local_base_conflicted="$CONFLICTED"
   echo "  workflows:"
@@ -1570,6 +1662,17 @@ PYEOF
       echo "  delivery-surface-l1: SKIP (repo-level SPEC not found at $spec_file — bare plugin copy; referenced⊆landed still guards the mechanism axis)"
     fi
   fi
+fi
+
+# gap-quay-init-never-commits-broken-committed-state AC1/AC2/AC3: after ANY real laydown category,
+# auto-commit the laid-down mechanism files (chore(quay-init): prefix) so the consumer repo's
+# committed state is self-consistent (fresh-clone + quay-init ⇒ 机制完整, no broken committed state).
+# Never in --dry-run (nothing was written); the read-only report modes (--check-drift /
+# --check-dependency-closure) already exited above.
+if [ "$DRY_RUN" = true ]; then
+  echo "  auto-commit: SKIP (--dry-run — nothing was written, nothing to commit)"
+else
+  auto_commit_laid_down
 fi
 
 # ── summary ─────────────────────────────────────────────────────────────────────────────────────────

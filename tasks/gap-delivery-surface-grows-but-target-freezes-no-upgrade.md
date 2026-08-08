@@ -216,3 +216,12 @@ status: todo——升级通道；排 delivery-surface umbrella 后。
 是**构建产物轴上的同族**：源码同步但构建产物不跟随（git pull 新 src + stale dist），verify 只查存在不查
 新鲜度。两条升级通道缺陷同一根因：「安装物没有新鲜度判据」——本任务补静态交付面判据，dist-stale 任务补
 构建产物新鲜度判据（`dist_stale` mtime + user-scope 版本一致性）。
+
+## 交叉标注（AC4，gap-quay-init-never-commits-broken-committed-state，2026-08-08）
+
+同根：**交付契约 铺设 → 版本标记 → 提交 → 可升级**。本条（delivery-surface）补「**可升级**」环
+（重跑检测 + 更新派生脚本 + 漂移报告 漂移/缺失/一致）；`gap-install-rewrites-files-so-upgrade-cannot-
+tell-who-changed-them` 补「**铺设**」环（配置驱动安装，落地字节相同，升级能分辨「stale install」vs「用户
+改动」）；`gap-quay-init-never-commits-broken-committed-state` 补「**提交**」环（quay-init 铺完机制自动
+commit `chore(quay-init):` 前缀，consumer 仓库 committed 态自洽——机制不再活在未提交工作树里）。三环合
+成完整交付契约；「版本标记」环（无 VERSION/package.json）仍是欠账。交叉不合并——三条任务各修契约的一环。
