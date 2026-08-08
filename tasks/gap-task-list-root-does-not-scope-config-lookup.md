@@ -8,7 +8,7 @@ title: "quay task list --root <path> does NOT resolve config from --root — it
   --root is meant to scope the workspace but config resolution ignores it;
   fix: pass --root into discoverWorkspaceRoot for workspace-scoped commands,
   or fail cleanly when no config under --root"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -47,16 +47,37 @@ config），不是 node 版本。
 
 ## Acceptance Criteria
 
-- [ ] AC1: `task list --root <path>` 从 <path> 解析 config（非 CWD）——cwd 与 --root 不同实测
-- [ ] AC2: `--root` 下无 config ⇒ fail-closed 清晰报错（不静默回退 CWD）
-- [ ] AC3: cwd 有 config 但 --root 指定别处 ⇒ 用 --root 的（负控制，不误用 cwd）
-- [ ] AC4: 与 config-validate --root 行为一致（不产生第二套语义）
+- [x] AC1: `task list --root <path>` 从 <path> 解析 config（非 CWD）——cwd 与 --root 不同实测（实测 + 自动化测试 AC1）
+- [x] AC2: `--root` 下无 config ⇒ fail-closed 清晰报错（不静默回退 CWD）（实测 + 自动化测试 AC2）
+- [x] AC3: cwd 有 config 但 --root 指定别处 ⇒ 用 --root 的（负控制，不误用 cwd）（实测 + 自动化测试 AC3）
+- [x] AC4: 与 config-validate --root 行为一致（不产生第二套语义）（config validate --root 同机制 fail-closed，自动化测试 AC4）
+
+## Definition of Done
+
+- [x] AC1-AC4 全勾（--root 从 <path> 解析 config 非 CWD；无 config fail-closed 清晰报错；负控制不误用 cwd；与 config-validate --root 行为一致）
+- [x] cwd 与 --root 不同实测通过（task list --root 用 root 的 config）
+- [x] scoped 门 `scripts/test.sh --for-task gap-task-list-root-does-not-scope-config-lookup` 绿（exit 0，5/5 pass）
+
+## Evidence
+
+- 机制：`packages/quay/src/gate/config/loader.ts` 新增 `resolveWorkspaceRootOrThrow(startDir)`
+  （fail-closed `--root` 解析，discoverWorkspaceRoot 的 walk-up 单机制，无第二套语义）；
+  `packages/quay/bin/quay.ts` 的 `withProvider` 接受 `root` 并 `loadConfig(resolveWorkspaceRootOrThrow(root))`，
+  所有 workspace 作用域命令（task/adr/action/gate/gate-log/complete/adjudicate/promote/retreat/run/migrate/
+  config validate/gate --list）均传 `--root`；`--root` 无值 → 用法错误。
+- 自动化测试：`packages/quay/test/task-list-root-scope.test.mjs`（5 tests，node:test，@test-group product）——
+  AC1/AC2/AC3/AC4 + bare `--root` 用法错误。`bash scripts/test.sh --for-task gap-task-list-root-does-not-scope-config-lookup --allow-thin` exit 0，5/5 pass。
+- Contract measure 实测：`cd /tmp && quay task list --root <ws> 2>&1 | grep -c 'tasks\|No tasks\|错误'` → 1（band ≥1）。
 
 ## Touches
 
 - packages/quay/src/gate/config/loader.ts（discoverWorkspaceRoot 接 --root）
 - packages/quay/bin/quay.ts（task list 等 workspace 作用域命令传 --root）
 - packages/quay/test/（--root 作用域负控制测试）
+
+## Test-Files
+
+- packages/quay/test/task-list-root-scope.test.mjs
 
 ## Contract
 
