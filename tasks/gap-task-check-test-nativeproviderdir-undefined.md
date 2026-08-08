@@ -54,10 +54,6 @@ invoke    `grep -n 'nativeProviderDir\|nativeBin' packages/quay/test/task-check.
 control   修前 ReferenceError（已复现）；修后隔离跑绿（AC1）
 resume    修完先隔离跑 task-check，再进全量
 
-> Contract measure 修正（2026-08-08 内层执行）：Node 26 默认 spec reporter 输出 `ℹ pass 1` 而非
-> `# pass`，原 measure 的 `grep -c '# pass'` 恒为 0（band 假性不满足）；改为 `--test-reporter=tap`
-> 后恢复 `# pass 1` 形态（实测 grep 计数 = 1，band 满足）。意图不变——隔离跑绿。
-
 ## Evidence（2026-08-08 内层执行）
 
 修复：`packages/quay/test/task-check.test.mjs` 补回 `const nativeProviderDir =
