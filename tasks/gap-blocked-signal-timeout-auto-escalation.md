@@ -6,7 +6,7 @@ title: "blocked signal must AUTO-ESCALATE on timeout — a signal nobody consume
   independent mechanism in inner-blocked-signal.ts (consumption timeout /
   auto-upgrade); scoped out of gap-telemetry-brackets AC9 (distinct mechanism,
   noted for outer 2026-08-06)"
-status: ready
+status: done
 labels:
   - gap
   - defect

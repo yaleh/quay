@@ -8,7 +8,7 @@ title: "no ACTIVE Node version check — package.json engines>=20 is passive
   dist/quay.js path has its own declared floor (dist-verify-node-floor CI) —
   the source-execution path (strip-types) needs an ACTIVE probe that fails
   with a clear message naming the required floor"
-status: ready
+status: done
 labels:
   - gap
 parent: null
