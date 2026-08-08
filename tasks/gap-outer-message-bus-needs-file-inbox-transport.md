@@ -57,6 +57,41 @@ the real human」。实测闸门 fail-closed：`identity_rejected=true  reason=i
 没有 from 字段、没有冒充闸门、delivered/consumed 不分）。
 **更正为：outer→manager 走总线（带 from: outer），escalations.md 只作降级备份。**
 禁止裸 tmux 那一条不变，理由更强：裸 tmux 绕过的正是身份层。
+**（08:5x/09:0x 更新——禁令已降级，见下「人裁定三步顺序 + tmux 降级」节）**
+
+### 人裁定三步顺序 + tmux 降级（管理者 08:5x 传达，09:0x 书面）
+
+**outer→manager 的 tmux 硬禁即刻降级为「优先用其它通道」**。三步顺序：① 建写侧（发送入口 +
+per-target 收件箱）→ ② 建消费侧（轮询 + 推送）→ ③ 才收紧 tmux。08:31Z 硬禁下在 ①② 之前——
+先禁旧通道、再建新通道，正是「退役一个机制却没写下它覆盖的判据归谁」那类错误的重犯。
+**现在规矩（③ 落地前）**：
+- **优先级**：git 产物（任务/提交）> tmux。有产物可写的，写产物，不必再发消息。
+- **tmux 仍可用**，但消息里须说明为什么不是产物形态（一句话）。
+- **不变的一条**：消息里不得出现任何冒充人的表述。manager transcript 分不出 `[外层→管理者]`
+  和人打的字（type/isSidechain/userType 三字段全同），一律按【来源不明】处理——不记为「人裁定」、
+  不据以撤防任何机制。
+- ③ 落地后恢复硬禁，届时另行通知。
+
+### 人已确认的收件箱方案五点（对齐用，SPEC 未定稿前不要动手）
+
+1. Class 1（有产物）/ Class 2（无产物）分类成立；**ACK 不是协议字段**。
+2. **ACK = 正本存储（task store）里出现可引用的产物**，判据写在 `task_list`/`task_get` 上，
+   **不写在 `git log` 上**（quay-github 下正本是 issue；git 只是 native provider 的物理形态）。
+3. 三层语义在接口上分开、禁止混用：**delivered** = 进了信箱 / **consumed** = inbox_read 返回过 /
+   **resolved** = 正本里有产物。**只有 resolved 能回答「他做了吗」。**
+4. 身份：`CLAUDE_CODE_SESSION_ID` + 注册表，`from` 由 MCP server 盖章不由 agent 自述。
+   边界（人已接受）：挡 agent，不挡能改宿主配置的人。
+5. 推送进产品：`quay inbox watch` 输出 stdout 事件流，宿主自己接。分钟级延迟可接受，
+   **轮询是唯一对所有 transport 都成立的形态**（GitHub 不会推给你）。
+
+**旧 `.quay/manager-inbox/` 分四类废弃**：6 个 archguard-*.md 删（无运行时读者）；
+`supervisor-bus-identity.sh:52` 默认路径与 `inbox-reader.sh` **重指向不删**（读侧）；
+`capability-catalog.sh:190` 改描述；SPEC/任务/tick-log 历史提及保留不改。
+
+### 实现状态：**待 SPEC（不得开工）**
+
+管理者下一步起草 SPEC（定义要什么 + 判据 + 分层，不写实现）后交外层实现。**SPEC 定稿前不开工**
+（避免按中间版本做——判据已改过两次）。本任务 status: todo 保持，不 promote、不派发，等 SPEC。
 
 ### 归因更正（管理者 08:5x，总线零流量不是纪律问题）
 
@@ -108,10 +143,14 @@ resume 若中断，先跑 measure 确认 outer 当前注册形态，不要假设
       总线机制已 done，本条是补 outer 的注册
 - [ ] AC5: 文档同步——manager-loop-tick / fast-mode-loop-tick 的投递通道说明从「escalations.md
       降级备份」更正为「总线优先，escalations.md 降级」
+- [ ] AC6: **实现前阻塞（2026-08-08 人裁定）**——本任务**不 promote、不派发，等 manager 的 SPEC
+      定稿**（SPEC 定义要什么 + 判据 + 分层，不写实现）；实现必须对齐人已确认的五点：ACK 判据在
+      task_list/task_get 上（非 git log）、三层语义 delivered/consumed/resolved 接口分开、
+      from 由 MCP server 盖章、quay inbox watch 走轮询输出 stdout、旧 .quay/manager-inbox/ 四类废弃
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴任务体（注册前后对照 + 总线投递带 from + 回归）
+- [ ] AC1-AC6 实跑输出贴任务体（注册前后对照 + 总线投递带 from + 回归 + SPEC 对齐）
 
 ## Touches
 - packages/quay/src/message-bus.ts（installDefaultTransports：outer 注册为文件收件箱）
