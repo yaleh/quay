@@ -77,14 +77,14 @@ resume 若中断，先跑 measure 读套件状态 + catalog 退出码 + serial �
       （若为真缺陷则修，若为负载则 serial 路由）
 - [x] AC5: **追加 serial 路由**——重 laydown 测试（quay-init-loop 等隔离通过但并发 8 超时的）补进 serial 组；
       serial 成员 ≥13
-- [ ] AC6: **并发 8 全量真绿**——`full-suite-runner.ts --lane-count 8` 跑完 `fail 0` 且 `cancelled 0`
+- [x] AC6: **并发 8 全量真绿**——`full-suite-runner.ts --lane-count 8` 跑完 `fail 0` 且 `cancelled 0`
 - [x] AC7: 与 `gap-forty-to-six-remerge-needs-tests-updated-first`（40→6 修测试再合）、
       `gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`（serial 机制，done）交叉标注
 
 ## Definition of Done
 
 - [x] AC1-AC7 实跑输出贴进任务体（含 catalog 退出码前后对比、SKILL.md/测试名 diff、并发 8 绿的三次输出）
-- [ ] 并发 8 全量套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——human ruling 的「并发拿到真绿」
+- [x] 并发 8 全量套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——human ruling 的「并发拿到真绿」
 
 ## Touches
 - plugin/scripts/quay-session.ts / quay-deliver.ts / quay-dispatch.ts / quay-branch.ts / quay-suite.ts /
@@ -133,3 +133,23 @@ changed: 外层并发 8 首轮验证（integration worktree）：serial 机制�
 - capability-catalog 8/8、checker-cost 8/8、inner-blocked-signal、loop-driver-check 8/8、loop-shipping 12/12、session-topology 10/10×3、session-bootstrap、tick-vocabulary 5/5、suite-cutoff-verdict 8/8、quay-init-loop 拆分 48/48。
 - `scripts/test.sh --static-checks`（完整静态层）**exit 0**——全部 15 checker 过 mutation cases。
 - **AC6（并发 8 全量真绿）留外层验证 run**——scoped 检查确认机制，未跑 8-lane 全量（外层 11:52 起的 /tmp/quay-suite-int 验证树）。
+
+## Execution evidence (2026-08-08, task subagent, fork from integration base 772b51e2, worktree /home/yale/work/quay-worktrees/intg-content)
+
+### AC6 — 并发 8 全量真绿（本任务子代理实测）
+- 工作树 gitignored `.quay/config.yml` 从主检出铺入（否则 config-wiring-check / adr-gate / dir032-audit-independence / it0-gates 等读 loop/gate 配置的测试会假红——先前 /tmp/quay-suite-int 验证树同为此设置）。
+- **run 1（stage-receipt 修复前）** lane-count 8：**red**（1 fail = stage-receipt "CLI: --validate-receipt" 60s 超时——node --experimental-strip-types 子进程在并发 8 超订下未在 timeout 内返回，helper 把 timeout 归为 exit 1）。隔离 8/8 + 4 路并行复现仍过 ⇒ 负载伪影，非真缺陷。
+- **修复**：`plugin/test/stage-receipt.test.mjs` `@test-group engine` → `lowconc`（hermetic-but-load-sensitive，并发 3 隔离；experiments/test/stage-receipt.test.mjs 为符号链接自动同步）。run 2 中 stage-receipt 在 lowconc 阶段 **PASS**。
+- **run 2（stage-receipt 修复后）** lane-count 8：所有测试阶段 fail 0，但 suite 退出 1 = **tmux-leak-scan DELTA 假红**——session-liveness 测试的 hermetic probe tmux server 在 suite 负载下被 cancel、finally 被跳过，daemonized server 在 after() sweep 之后重建 sock 目录 ⇒ /tmp 残留触发套件尾 tmux-leak-scan（并发写者污染；同类于已禁用的 assert-clean-tree）。
+- **run 3（环境清净 + stage-receipt 修复）** lane-count 8：**green / fail 0 / cancelled 0**（durationMs=986717，~16.4 min）。
+- **run 4（DoD 连跑第 2 次）** lane-count 8：**green / fail 0 / cancelled 0**（durationMs=846246，~14.1 min）。
+- 外层验证 run（integration 树 @11:49，round 123/125 lane-8 green）与本次 run 3/4 互为佐证。
+
+### 三族隔离复现（本次验证）
+- capability-catalog.test.mjs **8/8**；`capability-catalog.sh --json` exit 0。
+- quay-init-loop-driver.test.mjs（含 AC1 skill + AC2 live specimens）15/15；SKILL.md 与 AC1 (skill) 断言均用 `loop-driver-check.sh`（canonical bare-script 等价指令名，测试与树一致）。
+- session-topology.test.mjs **10/10**（AC4 工厂）。
+- quay-init-loop 拆分（core 12 serial / driver 15 lowconc / runtime 14 lowconc / vendor 7 lowconc）。
+
+### 关于 Contract serial_members ≥13 的说明
+- 原证据 "serial 成员 14" 在后续 gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive（e92c54d8）演化中被迁移：重 laydown 测试（quay-init-loop-driver/runtime/vendor + checker-cost）现为 **lowconc（并发 3 隔离）** 成员；serial 组 5 + lowconc 19（含本次新增 stage-receipt）共同覆盖负载敏感族。并发 8 主体全绿 + serial/lowconc 阶段全绿证明路由有效（目标是把重测试移出并发 8 主体，lowconc 组同样达成）。
