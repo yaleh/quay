@@ -142,3 +142,54 @@ test("T3 — SESSION_TRANSCRIPTS is wired BY NAME: a matched name makes the tran
     p.cleanup();
   }
 });
+
+test("T4 — AC1: a caller's explicit unknown SESSION_TRANSCRIPTS name SURVIVES the env-file source and is WARNed (the manager 12:5x 'outer vs quay' silent-clobber shape) — gap-session-liveness-ignores-unknown-transcript-names", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("tgt-caller-unknown");
+  const xscript = path.join(p.tmp, "session.jsonl");
+  try {
+    fs.writeFileSync(xscript, "{}\n");
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    // env file carries a VALID target name + a MATCHING transcript name — the exact shape that
+    // would silently clobber the caller's explicit SESSION_TRANSCRIPTS WITHOUT the pin-restore
+    // (the env-file source runs before the audit, so the caller's name never reached it).
+    fs.mkdirSync(path.join(p.tmp, "orchestration"), { recursive: true });
+    fs.writeFileSync(path.join(p.tmp, "orchestration", "session-liveness.env"),
+      `SESSION_TARGETS="quay ${p.tmp} ${p.session}"\n` +
+      `SESSION_TRANSCRIPTS="quay ${xscript}"\n`);
+    // Caller passes an UNKNOWN transcript name and does NOT set SESSION_TARGETS → the env file
+    // sources. The caller's "outer" must SURVIVE the source (pin-restore) and be WARNed by the
+    // startup config-wiring audit — NOT silently clobbered by the env file's matching "quay".
+    const env = { ...p.env, SESSION_ROOT: p.tmp, SESSION_TRANSCRIPTS: `outer ${xscript}` };
+    delete env.SESSION_TARGETS;
+    const once = spawnSync("bash", [SCRIPT, "--once"], { encoding: "utf8", env });
+    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
+    assert.match(once.stderr, /WARN SESSION_TRANSCRIPTS 的名字「outer」不匹配任何 SESSION_TARGETS 目标名/,
+      `a caller-provided unknown transcript name must survive the env-file source and be WARNed (silent-clobber shape):\n${once.stderr}`);
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("T5 — AC2 negative control: transcript/heartbeat names that MATCH a target name produce ZERO WARN (legal config not harmed)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("tgt-matched-names");
+  const xscript = path.join(p.tmp, "session.jsonl");
+  try {
+    fs.writeFileSync(xscript, "{}\n");
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive first");
+    const once = spawnSync("bash", [SCRIPT, "--once"], {
+      encoding: "utf8",
+      env: {
+        ...p.env,
+        SESSION_ROOT: p.tmp,
+        SESSION_TARGETS: `quay ${p.tmp} ${p.session}`,
+        SESSION_TRANSCRIPTS: `quay ${xscript}`,
+        SESSION_HEARTBEATS: `quay ${xscript}`,
+      },
+    });
+    assert.equal(once.status, 0, `--once must exit 0:\n${once.stderr}`);
+    assert.doesNotMatch(once.stderr, /WARN/,
+      `all transcript/heartbeat names match a target name → must NOT warn (AC2 negative control):\n${once.stderr}`);
+  } finally {
+    p.cleanup();
+  }
+});
