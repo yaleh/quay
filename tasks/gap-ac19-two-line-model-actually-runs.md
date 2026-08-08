@@ -64,10 +64,11 @@ inner 面板 40→6 重合并卡在自己的 AC2（干净窗口全量绿）—�
 
 measure integration_lead = `git rev-list --count develop..integration` stdout 数字段（制造窗口后应 > 0——integration 领先 develop 成立）
 measure direction_ok = `git log --oneline integration -3 | grep -cE "task/|fan-in.*integration"` stdout 数字段（任务 fan-in 合 integration 后 ≥1）
-band integration_lead = > 0 且 direction_ok = ≥1（至少一次真实合并走声明方向 + integration 领先窗口）
+measure fork_point_ok = 对候选 task 分支 b 跑更正判别式（见下）`git merge-base --is-ancestor "$p" integration` YES 且 `git merge-base --is-ancestor "$p" develop` NO（p=分支第一个独立提交 fp 的父）stdout 数字段
+band integration_lead = > 0 且 direction_ok = ≥1 且 fork_point_ok = 至少一个分支 YES/NO（至少一次真实合并走声明方向 + integration 领先窗口 + 窗口内分叉基线可机械区分）
 invoke `bash scripts/test.sh --for-task gap-ac19-two-line-model-actually-runs 2>&1 | tail -3`
-control 制造 integration 领先 develop 窗口后 fork_baseline 可分辨（integration 有 develop 没有的提交）；批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
-resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
+control 更正判别式（2026-08-08 08:5x 管理者更正）：**merge-base 不等是必要非充分**（「已合入 integration」同样满足它，必撞假阳性——reconcile 分支 merge-base 不等但已合入、分叉点在公共线上）；正确看**分叉点**：`fp=$(git rev-list --first-parent "$b" ^develop | tail -1)` → `p=$(git log -1 --format=%P "$fp" | awk '{print $1}')` → p 必须是 integration 祖先（YES）且 develop 祖先（NO）。两条都要；只查前一条同样有假阳性。批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
+resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + fork_point_ok 候选分支数
 
 ## Acceptance Criteria
 
@@ -80,10 +81,17 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
       **证据**：fan-in 后 `git rev-list --count develop..integration` = **2**（integration 领先 develop 2 提交），
       `git rev-list --count integration..develop` = 0（develop 无 integration 缺的提交），
       `git merge-base --is-ancestor integration develop` → **NO**（integration 不再是 develop 祖先，真实窗口）。
-- [x] AC3: **fork_baseline 可分辨**——窗口内验证分叉基线可分辨（integration 有 develop 没有的提交）
-      **证据**：窗口内 `git rev-list develop..integration` = 2 个 AC19 提交（4a98e54c 任务工作 + f35fb380
-      fan-in merge）——integration 有 develop 没有的提交，分叉基线可分辨；`git rev-list --count
-      develop..task/gap-ac19-two-line-model-actually-runs` = 1（任务工作从 develop 分叉，可机械区分）。
+- [ ] AC3: **fork_baseline 可分辨**——窗口内验证分叉基线可分辨（从 integration 切出的声明依赖任务，分叉点
+      = integration 祖先 + 非 develop 祖先，机械可区分）
+      **旧证据作废（判别式假阳性，2026-08-08 08:5x 管理者更正）**：原证据用「merge-base 不等」判定，
+      但 merge-base 不等是**必要非充分**——「已合入 integration」同样满足它。reconcile 分支
+      （task/gap-batch-merge-reconcile-*）merge-base 不等（5d7c96f4 vs 5036647e）但**已合入
+      integration**、分叉点 5d7c96f4 是公共线（develop 祖先 YES + integration 祖先 YES）⇒ 假阳性。
+      本任务自己的分支 `git rev-list --first-parent ^develop` 为空（已合入 develop）⇒ 同样从公共线切。
+      **更正判别式**：`fp=$(git rev-list --first-parent "$b" ^develop | tail -1)` →
+      `p=$(git log -1 --format=%P "$fp" | awk '{print $1}')` → p 必须 integration 祖先(YES) +
+      develop 祖先(NO)。两条都要。当前全部 task/* 分支按此判别式**无一满足**（都从公共线切）⇒
+      AC3 未达成。
 - [x] AC4: **批量合回**——窗口后批量合回 develop（integration 重新成为 develop 祖先）
       **证据**：`integration-batch-merge.sh --root /home/yale/work/quay --sync` → `integration-batch-merge: OK —
       develop fast-forwarded to integration`（ref-level FF，develop 从 c230780b → 6911d6d1），
@@ -99,9 +107,11 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
 
 ## Definition of Done
 
-- [x] AC1-AC4 实跑输出贴任务体（方向修正前后、integration 领先窗口、fork_baseline 可分辨验证、批量合回）——见各 AC 证据
-- [x] 两线模型真正跑起来（任务合 integration → 批量合回 develop 的完整循环 ≥1 次）——本任务完成完整循环
-      （task branch → fan-in integration → integration 领先 develop 窗口 → batch-merge 回 develop → push）
+- [ ] AC1-AC4 实跑输出贴任务体（方向修正前后、integration 领先窗口、fork_baseline 可分辨验证、批量合回）——见各 AC 证据
+      **注意**：AC1/AC2/AC4/AC5 的旧证据按更正判别式复核后仍成立（方向修正、窗口、批量合回、不凑数——
+      这些与判别式无关）；**AC3 证据作废**（假阳性判别式），需按更正判别式重验
+- [ ] 两线模型真正跑起来（任务合 integration → 批量合回 develop 的完整循环 ≥1 次 + 窗口内分叉基线可分辨
+      ——按更正判别式：存在任务分支 p 为 integration 祖先且非 develop 祖先）
 
 ## Touches
 - 内层 fan-in 行为（任务合 integration 而非 develop——执行，非代码）
