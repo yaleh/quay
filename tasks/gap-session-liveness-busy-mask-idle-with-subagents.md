@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-busy-mask-idle-with-subagents
 title: "session-liveness 对带后台任务的停摆结构性失明（inner 16 窗口 100% IDLE 漏报）——根因 = D5（:1043 -eq 2 + SEEN_BUSY 起始门：每段停摆只有一次触发机会且可被永久销毁；pane 抖动假说已撤 13:2x）；D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）硬事实；D4 CANT-SEND 无时效无限重发；人裁定：inner 停下即使有 subagent 也必须报 IDLE，收到后查 inner 槽位——AC25/AC22 一直卡住的机制原因"
-status: todo
+status: ready
 labels:
   - gap
   - defect
