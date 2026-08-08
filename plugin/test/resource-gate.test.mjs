@@ -240,6 +240,92 @@ test("AC5b — the derivation is BUDGET-AWARE: in_use node processes subtract fr
   assert.match(b.stdout, /available=1/, "available = max(0, total_budget - in_use)");
 });
 
+// ── COUNTING SCOPE (gap-process-budget-counts-infra-as-test-concurrency-cap-pinned-1, AC2/AC3/AC4) ──
+// The old `in_use = pgrep -xc node-MainThread` counted EVERY node main process as a test worker. On
+// this box that was 17 processes — 14 MCP + 2 web serve + 1 suite-state monitor + 0 test workers —
+// so on a 4-core box (total_budget=4) available=0 and effective_cap was structurally pinned at 1
+// even in the GO band. in_use now counts ONLY throttle-able TEST processes: a node cmdline carrying
+// `--test` (node --test runner AND its child workers, whose flags are --test-concurrency /
+// --test-coverage-* / --test-name-pattern / --test-isolation / --test-timeout) or a direct test-file
+// run (…test.mjs / …test.ts / …_test.mjs). Resident infrastructure (quay.js mcp / quay.ts mcp /
+// quay-native mcp / quay serve / suite-state-trigger.ts --monitor) is a CONSTANT, not throttle-able.
+//
+// The RESOURCE_GATE_TEST_PROC_CMDLINES seam feeds a cmdline list (newline- or semicolon-separated)
+// to the SAME classifier process-budget.sh runs over /proc, so the classification is pinned
+// deterministically without needing real node --test processes.
+test("AC2 — process-budget in_use classifies by cmdline: infra (mcp/serve/monitor) is NOT counted, test workers ARE", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  // The measured 2026-08-08 19:1xZ host classification: 17 node-MainThread, of which 14 MCP + 2
+  // serve + 1 monitor are INFRA (never throttle-able) and 0 are test workers. Excluding infra must
+  // give in_use=0, available=4 on a 4-core box — the GO band restored (AC3).
+  const infraCmds = [
+    "node /home/yale/.local/share/quay-plugin//vendor/quay/dist/quay.js mcp",
+    "node packages/quay/bin/quay.ts mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay-native mcp",
+    "node /home/yale/.nvm/versions/node/v26.5.0/bin/quay serve --host 100.87.141.82 --port 4174",
+    "node --experimental-strip-types packages/quay/bin/quay.ts serve --host 100.87.141.82 --port 4173",
+    "node --no-warnings --experimental-strip-types /home/yale/work/quay/plugin/scripts/suite-state-trigger.ts --monitor",
+  ];
+  const infraOnly = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: infraCmds.join(";") },
+  });
+  assert.equal(infraOnly.status, 0, `process-budget.sh must exit 0\n${infraOnly.stderr}`);
+  assert.match(infraOnly.stdout, /in_use=0/, "infra cmdlines (mcp/serve/monitor) must NOT count against the test budget");
+  assert.match(infraOnly.stdout, /available=4/, "4-core GO band with no test workers → available=4 (no longer pinned to 0)");
+  assert.match(infraOnly.stdout, /verdict=GO/, "no throttle-able test workers ⇒ GO, cap NOT pinned to 1");
+
+  // Real node --test workers (top-level runner + child worker, measured 2026-08-08) ARE counted.
+  const testCmds = [
+    "node --test --test-concurrency=2 /tmp/budget-control.mjs",                                    // top-level runner
+    "/home/yale/.nvm/versions/node/v26.5.0/bin/node --test-coverage-functions=0 --test-concurrency=1 --test-isolation=process /tmp/budget-control.mjs", // child worker
+    "node --test --test-name-pattern=flag /tmp/budget-control.mjs",
+    "node --experimental-strip-types packages/quay/test/foo.test.mjs",                             // direct test-file run
+  ];
+  const testsRunning = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: testCmds.join(";") },
+  });
+  assert.equal(testsRunning.status, 0, `process-budget.sh must exit 0\n${testsRunning.stderr}`);
+  assert.match(testsRunning.stdout, /in_use=4/, "all 4 test-worker cmdlines must count against the budget");
+  assert.match(testsRunning.stdout, /available=0/, "4 test workers on 4 cores → available=0");
+});
+
+test("AC4 — overload protection RETAINED: injecting test workers drops available and flips verdict to WAIT", () => {
+  const budgetScript = path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh");
+  const worker = "node --test --test-concurrency=1 /tmp/spawn-test.mjs";
+  // nproc=4. 1 worker → available=3, still GO (throttled but not exhausted).
+  const one = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: worker },
+  });
+  assert.equal(one.status, 0);
+  assert.match(one.stdout, /in_use=1/);
+  assert.match(one.stdout, /available=3/);
+  assert.match(one.stdout, /verdict=GO/);
+  // 5 workers (one more than nproc) → available=0, WAIT — the budget still prevents over-subscription.
+  const five = spawnSync("bash", [budgetScript], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: { ...process.env, RESOURCE_GATE_TEST_NPROC: "4", RESOURCE_GATE_TEST_PROC_CMDLINES: Array(5).fill(worker).join(";") },
+  });
+  assert.equal(five.status, 0);
+  assert.match(five.stdout, /in_use=5/);
+  assert.match(five.stdout, /available=0/);
+  assert.match(five.stdout, /verdict=WAIT/);
+});
+
+test("AC5 — process-budget.sh header documents the counting scope (test procs only; infra is a resident constant)", () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, "plugin", "scripts", "process-budget.sh"), "utf8");
+  assert.match(src, /COUNTING SCOPE/, "the header must carry a COUNTING SCOPE section (AC5)");
+  assert.match(src, /THROTTLE-ABLE TEST processes|node --test worker|throttle-able/, "the header must state that in_use counts test processes only");
+  assert.match(src, /MUST NOT count|NOT counted against the test budget/, "the header must state infra is excluded from the budget");
+  assert.match(src, /OVERLOAD PROTECTION RETAINED|RESOURCE_GATE_TEST_PROC_CMDLINES/, "the header must document the retained overload protection / new seam");
+});
+
 test("AC5 — scripts/test.sh uses the derived default in its exec lines (no hardcoded 8)", () => {
   const src = fs.readFileSync(TEST_SH, "utf8");
   // All FIVE invocation sites must use the derived default: 4 `exec node --test ...` lines
