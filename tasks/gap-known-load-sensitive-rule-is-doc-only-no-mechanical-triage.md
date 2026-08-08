@@ -70,6 +70,9 @@ extra: {}
 列出全部），红窗分诊不再靠人记得 KNOWN-LOAD-SENSITIVE 注释。本任务设想的 `// @load-sensitive <kind>`
 清单 + 红窗自动分区 + 隔离重跑自动触发（AC1-AC6）仍是后续收尾：serial 组解决"这些测试不能并发跑"，
 kind 标注解决"为什么不能并发跑"（wall-clock vs nested-spawn），两者互补。
+**wall-clock kind 的契约规则已落地**（`gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`
+2026-08-08：`test-isolation-contract.md` 新增 R9）——本任务设想的 `@load-sensitive wall-clock` 标注此后
+有契约规则支撑（真挂钟等待判定时序 = R9 违规），不只是 KNOWN-LOAD-SENSITIVE 散文。
 
 ## Contract
 

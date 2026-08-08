@@ -81,6 +81,10 @@ subset），test-isolation 缺同款机制。
 > `zz-*` 运行期夹具（快照侧消除撞车点，runner-grouping 的 AC7 夹具保留在共享目录以维持断言语义）。
 > 本任务的 A/D 类发现方向被落地任务收窄：A 类（runner-grouping 等嵌套 spawns）已 serial 化，
 > D 类（共享目录读写竞态）已由快照排除修复。AC1-AC4（基线 + 棘轮）不受影响，仍待本任务自身完成。
+>
+> **B类挂钟依赖是并发红的另一半根因**（`gap-wall-clock-timing-dependency-in-tests-not-covered-by-r1-r7`，
+> 2026-08-08 已落地 R9 规则）：session-liveness 等 B类文件经 `@test-group lowconc` 隔离路由，与本任务的
+> A/D 类修复方向不同、同源并发 8 恒红。
 
 ## Touches
 
