@@ -152,12 +152,14 @@ resume 若中断，先跑 measure 确认 outer 当前注册形态，不要假设
       总线机制已 done，本条是补 outer 的注册
 - [ ] AC5: 文档同步——manager-loop-tick / fast-mode-loop-tick 的投递通道说明从「escalations.md
       降级备份」更正为「总线优先，escalations.md 降级」
-- [ ] AC6: **实现前阻塞（2026-08-08 人裁定）**——本任务**不 promote、不派发，等 manager 的 SPEC
-      定稿**（`orchestration/SPEC-inbox-service-2026-08-08.md`，eacc557c 已落；P1 端口分配 / P2 token
-      形态 2 条待人拍板后才定稿）。实现以 SPEC 为准：D4 **不做 resolved 层**（两层 delivered/consumed，
-      「受理没有」归 manager 巡检 + 不对称原则）、D6 每项目后台服务（非文件目录）、D7 独立监听面、
-      `from` 由 MCP server 按 token 盖章（CLI 不提供 send）、`quay inbox watch` 走进程输出 stdout、
-      旧 `.quay/manager-inbox/` 按 §7 四类处理
+- [ ] AC6: **实现前阻塞（2026-08-08 人裁定，排序第 3）**——本任务**不 promote、不派发**。
+      **2026-08-08 09:5x 状态更正**：SPEC 已**定稿**（D1–D13 零待定），但人明确**「现在不用向 outer
+      提」**——held 的原因从「等 SPEC」变为「排序让位」（人排序：① AC19 ② AC16 ③ 收件箱 SPEC，SPEC
+      定稿待命、不派发）。**不需要我读 SPEC 或做任何准备**，等排到再说。实现以 SPEC 为准（已定稿，
+      `orchestration/SPEC-inbox-service-2026-08-08.md`）：D4 **不做 resolved 层**（两层
+      delivered/consumed，「受理没有」归 manager 巡检 + 不对称原则）、D6 每项目后台服务（非文件
+      目录）、D7 独立监听面、`from` 由 MCP server 按 token 盖章（CLI 不提供 send）、`quay inbox watch`
+      走进程输出 stdout、旧 `.quay/manager-inbox/` 按 §7 四类处理
 
 ## Definition of Done
 
