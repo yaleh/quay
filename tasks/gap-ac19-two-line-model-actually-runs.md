@@ -35,6 +35,9 @@ extra: {}
     gap-probe-mechanism / gap-send-keys-verified / gap-shipped-ts / serial-recompose，mb_dev==mb_int 全同）；
   - 窗口期 07:38–08:08 的 reflog 内【零条】新建分支；
   - 连 ff469248 那条 fan-in 的分支头 640af5a8 也是从两者共同点切的。
+  - **（2026-08-08 08:5x 判别式更正——上面这条 merge-base 判定被替换，见 AC3/Contract）**：
+    merge-base 不等是必要非充分，「已合入 integration」同样满足；判「从 integration 切」须看分叉点
+    （p=分支首个独立提交的父，integration 祖先 + 非 develop 祖先）。按更正判别式现存分支仍【无一满足】。
 - ⇒ 判据1 成立、判据2 成立一半 ⇒ **AC19 整条未达成**，退回 ready。
 
 **缺口（可执行）**：需要一次在 integration 领先 develop 的窗口内、从 integration 切出的
