@@ -45,6 +45,11 @@ RESUMED 单轮沿即报（:199），IDLE 要连续 2 轮（:168/1000-1002）—�
 
 现机制对「主循环空转且无后台任务」可报（4/8 命中），对「停在提示符但有后台任务」**结构性零覆盖
 （0/16）**。inner 几乎总有 subagent ⇒ **inner 的停摆对上层永远不可见。**
+**（2026-08-08 13:2x 更正——「pane 抖动」假说撤回，D5 是唯一解释）**：只读采样 5s×72=6min 对齐
+pane 分类与 transcript mtime：inner 72/72 全 waiting-input 状态零翻转（主循环空闲、subagent 在跑）；
+outer 只有 2 次翻转且对应真实活动；「transcript 静止>120s 却判 busy」样本 0 个 ⇒ **分类器是稳的，
+无 pane 抖动**。原「14 轮 idle 反复 1,0,1,0」推断错误。完整机制 = D5 锐化形式（-eq 2 + SEEN_BUSY
+门，见 AC6）。
 
 ### 人裁定（本轮）
 
@@ -84,12 +89,16 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
 - [ ] AC4: **覆盖率改善**——inner 停摆从 0/16 报出到 ≥ 大部分报出（对照实测）
 - [ ] AC5: 与 gap-session-liveness-monitor-watches-self-not-inner、ignores-unknown-transcript-names
       交叉标注（观察家族：目标/名字/忙判定）
-- [ ] AC6: **D5 修复（SEEN_BUSY 起始门）**——挂载时已在进行的停摆也必须可报：
-      IDLE 闸不能要求「挂载后见过忙轮」（:1043 SEEN_BUSY==1 是 :1003 忙分支才置）——
-      **每次重挂监视器都会把当时正在进行的那次停摆整段吞掉**（重挂恰发生在「发现坏了」=停摆进行时）。
-      复现（manager）：INTERVAL=10 对可证空闲的 inner（屏幕 waiting-input、transcript 静止 3min+、
-      subagent 跑 3m35s）跑满 6 轮，**SESSION-IDLE 零条**；同期照常发 SATURATED/MARKER-STALE
-      ⇒ 监视器在跑，是起始门吞了停摆。
+- [ ] AC6: **D5 修复（SEEN_BUSY 起始门，锐化形式）**——挂载时已在进行的停摆也必须可报。
+      **锐化机制（2026-08-08 13:2x 管理者更正，「pane 抖动」假说撤回，D5 唯一解释）**：
+      :1043 是 `idle==1 && IDLE_CONSEC -eq 2 && SEEN_BUSY==1`——**-eq 而非 -ge** ⇒ 每段停摆只有
+      【一次】触发机会（计数器等于 2 的那一轮）。若那一轮 SEEN_BUSY 恰为 0（刚启动、或上一轮
+      alive=0 分支在 :1132 清掉），**这次机会被消耗且永不重来**（计数器涨到 3、4…14 都不再匹配
+      -eq 2）。**不是延迟上报，是永久销毁该段停摆的上报权**。随后转忙 ⇒ SEEN_BUSY=1、IDLE_CONSEC=0、
+      RESUMED 照常发 ⇒ **这就是「3 条 RESUMED / 0 条 IDLE」不对称的完整成因，不需要抖动假说**。
+      一并解释全部实测：outer 12 窗只报 4、inner 16 窗报 0、12:35 重挂后对 12:43 失明、6 轮探针零 IDLE。
+      **修法**：-eq 改 -ge + per-spell 已报标志做边沿；SEEN_BUSY 的「防启动误报」意图改「启动首轮
+      不报」而非「未见过忙就永不报」——前者只丢一轮，后者丢整段。
 - [ ] AC7: **D4 修复（CANT-SEND 无限重发）**——API_ERROR_WINDOW 判据须加时效：
       该错误记录须**晚于本段空闲起点**（不能只是「最近 200 条含 ≥1 isApiErrorMessage」），
       且同一段空闲内**边沿触发一次**。复现（manager 三次）：13:04:47 API Error 恢复后 13:08:47
