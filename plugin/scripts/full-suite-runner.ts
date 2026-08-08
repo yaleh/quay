@@ -98,7 +98,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 export type SuiteStateValue = "running" | "green" | "red";
-export type SuiteStateReason = "failed" | "aborted" | "infra-error";
+// gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — a FOURTH reason value:
+// "static-check" (a run_static_checks checker failed — task-contract / test-framework-policy /
+// test-isolation ratchet — NOT a test failure). Consumers (suite-state-trigger's routeRed /
+// shouldDispatchOnRed, the inner stop-condition) can distinguish a static-check red from a
+// test-failure red: both stop dispatch (static checks ARE the shared gate), but the triage differs
+// (static-check red ⇒ fix the contract, not roll back code).
+export type SuiteStateReason = "failed" | "aborted" | "infra-error" | "static-check";
 
 /**
  * One detected suite failure — the FAILURE LOCATION for the red-window dispatch decision
@@ -120,6 +126,45 @@ export interface SuiteFailure {
   in_family?: boolean;
   /** The family kind (wall-clock | nested-spawn | heavy | ...) — one root cause = one kind. */
   kind?: string;
+  /**
+   * True when this entry is a STATIC-CHECK violation (a run_static_checks checker failed), not a
+   * test failure (gap-full-suite-state-red-no-failure-detail-static-check-invisible AC4 — candidate
+   * B). suite-state-trigger's classifyFailure reads this marker to classify the failure as a SHARED-
+   * GATE failure (static checks pollute every scoped run ⇒ stop dispatch). Absent/undefined on real
+   * test failures.
+   */
+  staticCheck?: boolean;
+}
+
+/**
+ * One static-check violation captured from the suite stream — the `VIOLATION: <file> — <code>: <what>`
+ * lines task-contract-check prints (AC4 candidate B: task + type fill failures[]). `file` is the
+ * violated object (repo-relative task file), `code` the violation code/type, `what` the description.
+ * Best-effort: a line that does not parse into file/code/what still carries `line` (the raw stream
+ * line) so nothing is lost.
+ */
+export interface StaticCheckViolation {
+  file: string;
+  code?: string;
+  what?: string;
+  line: string;
+}
+
+/**
+ * Machine-readable static-check red detail (gap-full-suite-state-red-no-failure-detail-static-check-
+ * invisible AC2): written when the suite went red because a run_static_checks checker failed, NOT a
+ * test failure. `violations`/`taskCount` come from task-contract-check's summary line
+ * (`violations: N unique across M task(s)`); `ceiling`/`newSinceBaseline` from the ratchet line
+ * (`ratchet ceiling: C; new since baseline: K` — K>0 IS the ratchet-growth failure signal, the
+ * 20:48Z 真因). `details` are the parsed `VIOLATION:` lines. Consumers read these fields to triage a
+ * static-check red (fix the contract) WITHOUT hand-digging the log.
+ */
+export interface SuiteStateStaticCheck {
+  violations: number | null;
+  taskCount: number | null;
+  ceiling: number | null;
+  newSinceBaseline: number | null;
+  details: StaticCheckViolation[];
 }
 
 export interface SuiteState {
@@ -178,6 +223,13 @@ export interface SuiteState {
    * unrelated specific test).
    */
   failures?: SuiteFailure[];
+  /**
+   * Present on red+static-check (gap-full-suite-state-red-no-failure-detail-static-check-invisible
+   * AC2): machine-readable violation counts when the red was caused by a run_static_checks checker
+   * (not a test failure). Absent on test-failure red, aborted red, green. `failures[]` ALSO carries
+   * the static-check violation details (AC4 candidate B), each marked `staticCheck: true`.
+   */
+  staticCheck?: SuiteStateStaticCheck;
 }
 
 // AC2 — failure markers that flip state to red the MOMENT they appear on the suite's
@@ -211,6 +263,65 @@ const ABORT_PATTERNS: RegExp[] = [
   /resource gate says WAIT/, // test.sh internal gate fail-closed — the suite never ran tests
   /not running the full suite/, // same gate-WAIT message (both halves of the canonical line)
 ];
+
+// ── static-check red detection (gap-full-suite-state-red-no-failure-detail-static-check-invisible) ──
+// When run_static_checks fails (task-contract-check ratchet growth / test-framework-policy /
+// test-isolation violations / a ceiling breach), test.sh aborts under `set -e` BEFORE the node --test
+// phase, so the suite stream shows the checker's violation output and a non-zero exit — but NONE of
+// the FAILURE_PATTERNS (no `not ok`, no `# fail`, no FULL-SUITE-EXIT marker). The runner previously
+// classified this as the fail-closed catch-all reason="failed" with failures=[] empty — the 20:48Z
+// readability gap (state=red + reason=failed + failures=[] looks like an interrupted run, the real
+// cause only in the log). The patterns below separate "the red came from a STATIC CHECK" from
+// "the red came from a TEST FAILURE".
+//
+// FAILURE markers (a PASSING run never emits these — they are the exit-1 signals):
+const STATIC_CHECK_FAILURE_PATTERNS: RegExp[] = [
+  /new since baseline:\s*[1-9]\d*/, // task-contract ratchet GROWTH (K>0) — the 20:48Z 真因
+  /(?:over|exceed(?:s|ed)?) the ratchet ceiling/, // any shrink-only ratchet ceiling breach (test-framework-policy / test-isolation say "over"; task-contract says "exceed")
+  /ceiling was RAISED/, // shrink-only ceiling raised (task-framework-policy / test-isolation / task-contract)
+  /CEILING BREACH/, // dod-suite-line grandfather-list ceiling breach
+  /\bFAIL:\s*\d+\s+(?:ratchet\s+)?violation/, // test-framework-policy (`FAIL: N violation(s):`) / test-isolation (`FAIL: N ratchet violation(s):`)
+];
+// DETAIL lines (appear on passing runs too — baselined violations are listed; only failure-relevant
+// when a FAILURE marker above is present):
+const STATIC_CHECK_VIOLATION_RE = /^VIOLATION:\s*(\S+)\s*[—\-]\s*([^:]+):\s*(.*)$/;
+const STATIC_CHECK_SUMMARY_RE = /^violations:\s*(\d+)\s+unique across\s*(\d+)\s+task/;
+const STATIC_CHECK_RATCHET_RE = /^ratchet ceiling:\s*(\d+);\s*new since baseline:\s*(\d+)/;
+
+/** Does a stream line carry a STATIC-CHECK FAILURE signal (a passing run never emits it)? */
+export function isStaticCheckFailureLine(line: string): boolean {
+  return STATIC_CHECK_FAILURE_PATTERNS.some((re) => re.test(line));
+}
+
+/**
+ * Parse ONE static-check detail line (best-effort; returns null when the line is not a static-check
+ * detail). The three shapes are task-contract-check's `VIOLATION:` / summary / ratchet lines; each
+ * carries a different subset of the machine-readable fields the state needs.
+ */
+export function extractStaticCheckDetail(line: string): {
+  violation?: StaticCheckViolation;
+  violations?: number;
+  taskCount?: number;
+  ceiling?: number;
+  newSinceBaseline?: number;
+} | null {
+  const violationM = STATIC_CHECK_VIOLATION_RE.exec(line);
+  if (violationM) {
+    return {
+      violation: {
+        file: violationM[1],
+        code: violationM[2].trim(),
+        what: violationM[3].trim(),
+        line,
+      },
+    };
+  }
+  const summaryM = STATIC_CHECK_SUMMARY_RE.exec(line);
+  if (summaryM) return { violations: Number(summaryM[1]), taskCount: Number(summaryM[2]) };
+  const ratchetM = STATIC_CHECK_RATCHET_RE.exec(line);
+  if (ratchetM) return { ceiling: Number(ratchetM[1]), newSinceBaseline: Number(ratchetM[2]) };
+  return null;
+}
 
 function parseArg(argv: string[], name: string): string | undefined {
   const idx = argv.indexOf(name);
@@ -685,6 +796,7 @@ export async function run(argv: string[]): Promise<number> {
   const skipGate =
     process.env.QUAY_TEST_SKIP_RESOURCE_GATE === "1" ||
     argv.includes("--fail-fast-check") ||
+    argv.includes("--static-check-check") ||
     argv.includes("--wait-check");
   if (!skipGate) {
     const gate = checkResourceGate(root);
@@ -720,6 +832,7 @@ export async function run(argv: string[]): Promise<number> {
     process.env.QUAY_TEST_SKIP_SYSTEMD_RUN === "1" ||
     argv.includes("--no-systemd-run") ||
     argv.includes("--fail-fast-check") ||
+    argv.includes("--static-check-check") ||
     argv.includes("--wait-check");
   const systemdLimits = parseSystemdRunLimits(process.env.QUAY_TEST_SYSTEMD_RUN_LIMITS);
   const sdAvailable = systemdRunAvailable();
@@ -821,6 +934,18 @@ export async function run(argv: string[]): Promise<number> {
   // conclusion — red + reason=aborted, NOT failed.
   let redDetected = false;
   let abortDetected = false;
+  // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — static-check red
+  // accumulation: set when a STATIC_CHECK_FAILURE_PATTERN line appears (a run_static_checks checker
+  // failed); the machine-readable counts + violation details are captured from the stream as they
+  // come (VIOLATION/summary/ratchet lines). `staticCheckDetected` + `testsSeen === 0` at exit ⇒ the
+  // red came from the PRE-TEST static-check phase (test.sh aborts under set -e before running tests),
+  // NOT a test failure.
+  let staticCheckDetected = false;
+  const staticCheckDetails: StaticCheckViolation[] = [];
+  let staticCheckViolations: number | null = null;
+  let staticCheckTaskCount: number | null = null;
+  let staticCheckCeiling: number | null = null;
+  let staticCheckNewSinceBaseline: number | null = null;
   let runDone = false;
   // AC3b (gap-quality-criteria-are-point-in-time-no-trend-criteria): the ISO time the FIRST real
   // failure line flipped state to red — carried into the verification-round record so the early-RED
@@ -874,6 +999,19 @@ export async function run(argv: string[]): Promise<number> {
     if (failM) tapFail = Number(failM[1]);
     const cancelledM = line.match(/^#\s*cancelled\s+(\d+)/);
     if (cancelledM) tapCancelled = Number(cancelledM[1]);
+    // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — accumulate
+    // static-check detail lines on EVERY line (the `VIOLATION:` / summary / ratchet lines appear
+    // even on passing runs; they only become failure-relevant when a STATIC_CHECK_FAILURE_PATTERN
+    // line fires below). The machine-readable counts are captured here so the state write at red
+    // time carries them without re-reading the log.
+    const staticDetail = extractStaticCheckDetail(line);
+    if (staticDetail) {
+      if (staticDetail.violation) staticCheckDetails.push(staticDetail.violation);
+      if (staticDetail.violations !== undefined) staticCheckViolations = staticDetail.violations;
+      if (staticDetail.taskCount !== undefined) staticCheckTaskCount = staticDetail.taskCount;
+      if (staticDetail.ceiling !== undefined) staticCheckCeiling = staticDetail.ceiling;
+      if (staticDetail.newSinceBaseline !== undefined) staticCheckNewSinceBaseline = staticDetail.newSinceBaseline;
+    }
     // Enrich a pending failure with its file context (TAP detail block / stack frames follow the
     // `not ok` line; the file is NOT on the failure line itself). Best-effort, bounded lookahead.
     if (pendingFailure && detailRemaining > 0) {
@@ -923,6 +1061,37 @@ export async function run(argv: string[]): Promise<number> {
       });
       process.stderr.write(
         `full-suite-runner: FAILURE detected on stream -> state=red reason=failed (run still in progress)\n  ${line}\n`
+      );
+    } else if (!redDetected && !staticCheckDetected && testsSeen === 0 && isStaticCheckFailureLine(line)) {
+      // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC3/AC4 — a STATIC-
+      // CHECK failure (run_static_checks aborted the suite before the test phase): write red +
+      // reason=static-check EARLY (same early-red property test failures get), with the machine-
+      // readable counts + ceiling + violation details already accumulated. A real test failure line
+      // is never downgraded (the isFailureLine branch above wins); `testsSeen === 0` guards that
+      // this is genuinely the pre-test static-check phase, not test output shaped like a checker.
+      staticCheckDetected = true;
+      const staticFailures: SuiteFailure[] = staticCheckDetails.map((d) => ({
+        line: d.line,
+        file: d.file,
+        staticCheck: true,
+      }));
+      writeSuiteState({
+        state: "red",
+        reason: "static-check",
+        ...base,
+        finishedAt: null,
+        durationMs: null,
+        staticCheck: {
+          violations: staticCheckViolations,
+          taskCount: staticCheckTaskCount,
+          ceiling: staticCheckCeiling,
+          newSinceBaseline: staticCheckNewSinceBaseline,
+          details: staticCheckDetails,
+        },
+        failures: staticFailures,
+      });
+      process.stderr.write(
+        `full-suite-runner: STATIC-CHECK violation detected on stream -> state=red reason=static-check (run still in progress)\n  ${line}\n`
       );
     } else if (!redDetected && !abortDetected && isAbortLine(line)) {
       // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3): an ABORT
@@ -1001,22 +1170,59 @@ export async function run(argv: string[]): Promise<number> {
     (exitCode === null && spawnError === null) ||
     exit.signal !== null ||
     (exitCode !== null && exitCode > 128 && exitCode <= 192);
-  const green = !redDetected && !abortDetected && spawnError === null && exitCode === 0;
+  // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC3 — reason precedence at the
+  // terminal verdict:
+  //   1. a REAL test failure (redDetected) ⇒ reason="failed"   (existing behavior, AC5 — never
+  //      downgraded by a static-check marker);
+  //   2. a STATIC-CHECK failure with NO test run (testsSeen === 0 — test.sh aborted under set -e
+  //      before the node --test phase) ⇒ reason="static-check" (AC2/AC3 — distinguishable);
+  //   3. no correctness conclusion (abort marker / signal kill / spawn error) ⇒ reason="aborted";
+  //   4. everything else ⇒ fail-closed "failed" (the pre-existing catch-all).
+  const green =
+    !redDetected && !staticCheckDetected && !abortDetected && spawnError === null && exitCode === 0;
   // No correctness conclusion (abort) iff: an abort marker was seen, OR the child was killed by a
-  // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) is never
-  // downgraded by an earlier abort marker — redDetected dominates (AC5: failure conclusion stands).
+  // signal (code null), OR it never spawned. A REAL failure conclusion (redDetected) — and now a
+  // static-check conclusion (staticCheckDetected) — is never downgraded by an earlier abort marker:
+  // both dominate (AC5: the failure conclusion stands).
   const noCorrectnessConclusion =
-    !redDetected && (abortDetected || childKilledBySignal || spawnError !== null);
+    !redDetected && !staticCheckDetected && (abortDetected || childKilledBySignal || spawnError !== null);
+  const reason: SuiteStateReason = redDetected
+    ? "failed"
+    : staticCheckDetected && testsSeen === 0
+      ? "static-check"
+      : noCorrectnessConclusion
+        ? "aborted"
+        : "failed";
+  // AC4 candidate B — on a static-check red, failures[] carries the violation details (task + type),
+  // each marked staticCheck:true so suite-state-trigger's classifyFailure routes them to the shared
+  // gate. On a test-failure red, failures[] carries the real test failures (unchanged, AC5).
+  const staticCheckFailures: SuiteFailure[] = staticCheckDetails.map((d) => ({
+    line: d.line,
+    file: d.file,
+    staticCheck: true,
+  }));
+  const finalFailures: SuiteFailure[] = redDetected ? redFailures : staticCheckDetected ? staticCheckFailures : redFailures;
   const finalState: SuiteState = green
     ? { state: "green", ...base, finishedAt, durationMs }
     : {
         state: "red",
-        reason: noCorrectnessConclusion ? "aborted" : "failed",
+        reason,
         ...base,
         finishedAt,
         durationMs,
         // carry the failure location(s) — the SUITE-RED event's failureLocation source
-        ...(spawnError === null ? { failures: redFailures } : {}),
+        ...(spawnError === null ? { failures: finalFailures } : {}),
+        ...(staticCheckDetected
+          ? {
+              staticCheck: {
+                violations: staticCheckViolations,
+                taskCount: staticCheckTaskCount,
+                ceiling: staticCheckCeiling,
+                newSinceBaseline: staticCheckNewSinceBaseline,
+                details: staticCheckDetails,
+              },
+            }
+          : {}),
       };
   writeSuiteState(finalState);
   // AC6 — append the run to the suite-duration SEQUENCE (never overwrite the single-state file).
@@ -1242,13 +1448,96 @@ async function waitCheck(): Promise<number> {
   }
 }
 
+/**
+ * --static-check-check（gap-full-suite-state-red-no-failure-detail-static-check-invisible Contract
+ * invoke）：构造一次 STATIC-CHECK 违规 suite ⇒ 验证 STATIC-CHECK 链端到端：
+ *   runner 写 state=red reason=static-check + 机器可读字段（violations/ceiling/newSinceBaseline）
+ *   + failures[] 填充违规明细（候选 B）→ suite-state-trigger 的 runOnce 检测到转变 →
+ *   记 SUITE-RED 事件 → stopSignal 在位（static-check 红是共享闸门失败 ⇒ 停派发）。
+ * 用临时根（hermetic），不触碰真实 `.quay/full-suite-state.json`。退出 0 = 链验证通过；
+ * 退出非 0 = 链某环断裂（静态检查红仍不可读——本任务要消灭的缺口）。
+ */
+async function staticCheckCheck(): Promise<number> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-scc-"));
+  try {
+    // The 2026-08-08 20:48Z shape: task-contract-check ratchet violations — test.sh aborts (set -e)
+    // BEFORE running tests, so the stream shows the VIOLATION/summary/ratchet lines and a non-zero
+    // exit, NO TAP summary, NO FULL-SUITE-EXIT marker. The pre-fix runner labelled this reason=failed
+    // with failures=[] empty — the readability gap this task closes.
+    const fakeCommand =
+      'echo "VIOLATION: tasks/gap-foo.md — V1: Contract block missing invariant line"\n' +
+      'echo "VIOLATION: tasks/gap-bar.md — V2: band value out of range"\n' +
+      'echo "violations: 11 unique across 9 task(s); info findings (non-ratchet, pre-opt-in baseline): 0 — see --json for details"\n' +
+      'echo "ratchet ceiling: 6; new since baseline: 6 (tasks/gap-foo.md: V1, tasks/gap-bar.md: V2); resolved: 0"\n' +
+      "exit 1";
+    // --static-check-check is a lightweight hermetic control (NOT a heavy full-suite op) — it must
+    // skip the resource gate (run() checks argv for the marker), like its fail-fast / wait siblings.
+    const code = await run(["--root", tmp, "--command", fakeCommand, "--static-check-check"]);
+    const { status, events, stopSignal } = runOnce(tmp);
+    const redEv = events.find((e) => e.event === "SUITE-RED") ?? null;
+    const s = redEv?.state ?? null;
+    console.log(
+      `static-check-check: suite exit=${code} state=${status} reason=${s?.reason ?? "?"} stopSignal=${stopSignal} ` +
+        `violations=${s?.staticCheck?.violations ?? "?"} ceiling=${s?.staticCheck?.ceiling ?? "?"} ` +
+        `newSinceBaseline=${s?.staticCheck?.newSinceBaseline ?? "?"} failures=${s?.failures?.length ?? 0} ` +
+        `suiteRedEvent=${redEv ? `recorded early=${redEv.early}` : "MISSING"} events=${events.length}`,
+    );
+    if (code !== 1) {
+      console.error("static-check-check FAIL: expected the fake static-check suite to exit 1 (red)");
+      return 1;
+    }
+    if (status !== "red") {
+      console.error(`static-check-check FAIL: expected state=red, got ${status}`);
+      return 1;
+    }
+    if (s?.reason !== "static-check") {
+      console.error(`static-check-check FAIL: expected reason=static-check (AC3 — distinguishable from test-failure failed), got ${s?.reason}`);
+      return 1;
+    }
+    if (s?.staticCheck?.violations !== 11) {
+      console.error(`static-check-check FAIL: expected staticCheck.violations=11 (AC2 machine-readable count), got ${s?.staticCheck?.violations}`);
+      return 1;
+    }
+    if (s?.staticCheck?.ceiling !== 6) {
+      console.error(`static-check-check FAIL: expected staticCheck.ceiling=6 (AC2), got ${s?.staticCheck?.ceiling}`);
+      return 1;
+    }
+    if (s?.staticCheck?.newSinceBaseline !== 6) {
+      console.error(`static-check-check FAIL: expected staticCheck.newSinceBaseline=6 (AC2), got ${s?.staticCheck?.newSinceBaseline}`);
+      return 1;
+    }
+    if (!stopSignal) {
+      console.error("static-check-check FAIL: expected stopSignal (static-check red IS a shared-gate failure ⇒ stop dispatch)");
+      return 1;
+    }
+    if (!s?.failures || s.failures.length === 0) {
+      console.error("static-check-check FAIL: expected failures[] to carry the static-check violation details (AC4 candidate B)");
+      return 1;
+    }
+    if (!redEv) {
+      console.error("static-check-check FAIL: expected a SUITE-RED event recorded by suite-state-trigger");
+      return 1;
+    }
+    if (redEv.state?.reason !== "static-check") {
+      console.error(`static-check-check FAIL: expected the SUITE-RED event state reason=static-check, got ${redEv.state?.reason}`);
+      return 1;
+    }
+    console.log("static-check-check OK: runner wrote state=red reason=static-check + machine-readable counts → trigger recorded SUITE-RED → stopSignal in place + failures[] carry violation details");
+    return 0;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirect) {
   const argv = process.argv.slice(2);
   const exitCode = argv.includes("--fail-fast-check")
     ? await failFastCheck()
-    : argv.includes("--wait-check")
-      ? await waitCheck()
-      : await run(argv);
+    : argv.includes("--static-check-check")
+      ? await staticCheckCheck()
+      : argv.includes("--wait-check")
+        ? await waitCheck()
+        : await run(argv);
   process.exit(exitCode);
 }
