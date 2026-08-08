@@ -40,6 +40,12 @@ extra:
 - [x] AC3: 复用 measure-suite-reporter（不新造测量器）
 - [x] AC4: 与 gap-suite-cost-model-is-wrong（done）交叉标注——同「成本数据」方向，本任务加趋势维度
 
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（全量后落 measure-history 每文件 duration append-only；下次对比上次单文件增长超基线报出；复用 measure-suite-reporter 不新造；与 suite-cost-model-is-wrong 交叉标注——加趋势维度）
+- [ ] measure-history 落盘 + 趋势报出实测
+- [ ] scoped 门 `scripts/test.sh --for-task gap-single-file-test-duration-trend-unwatched` 绿
+
 ## Touches
 
 - plugin/scripts/（history 落盘 + 对比脚本，复用 measure-suite-reporter）
