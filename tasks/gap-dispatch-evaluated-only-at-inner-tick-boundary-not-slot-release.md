@@ -64,7 +64,7 @@ extra:
 
 - [x] AC1: 实测确认当前形态——派发仅发生在 inner tick 边界（派发时间戳簇 + 槽位空置期）— 诊断即本任务 Proposal 的 meta-cc 实测（3 簇派发时间戳 + 39/30/18/33/50min 空槽）；fix 把「完成事件」设为第二个派发触发源
 - [x] AC2: 事件驱动接线——任一 subagent 完成通知触发派发步骤重评估（非等下一 tick）— fast-mode-loop-tick.md 新增「事件驱动派发（槽位回填）」节（步骤 4 注明双触发源）+ plugin/scripts/slot-refill.ts helper（机械承载）
-- [ ] AC3: 复测：槽位释放后 <5 分钟内有新派发（对比现状的 39 分钟），池子 health 时有货可派 — 需实跑 loop 的派发时间戳复测（运行时验证，scoped 内不可得），留给外层/下一轮；机制已接：完成通知触发回填、slot-refill 给出 go/no-go
+- [ ] AC3: 复测：槽位释放后 <5 分钟内有新派发（对比现状的 39 分钟），池子 health 时有货可派 — 需实跑 loop 的派发时间戳复测（运行时验证，scoped 内不可得），留给外层/下一轮；机制已接：完成通知触发回填、slot-refill 给出 go/no-go **RUNTIME-PENDING（2026-08-08 复核）：机制已机械验证接线（见「机制复核（AC3 runtime-pending）」节 grep 证据）——完成通知→slot-refill→步骤 4 派发闸链路完整、slot-refill 纯读不派发；但「完成→下一次派发 gap_min < 5 分钟」的 live 测量须在真实 loop 中观测 inner 会话派发时间戳，scoped worktree 内不可得——本复核未虚构测量，归外层下一轮实跑**
 - [x] AC4: 负控制——无完成事件时零派发（不引入新轮询源/双驱动）— slot-refill.ts 是纯状态读取器（exit 0 恒、零写入、零派发）；tick 文档明令不建第二个 /loop、不改 ScheduleWakeup 成快轮询、无常驻 watcher；测试覆盖「无候选 ⇒ should_refill=false」 **交叉标注（2026-08-06，gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat）**：本 AC4 的负控制正是该任务的反面形态——「无完成事件即零派发」把长任务霸占期间的空槽写成了正确行为，实为缺陷（实测 in_flight=1/slots_free=2/should_refill=true 却 34 分钟零派发）。该任务另立（不重开本任务），把负控制修正为「无完成事件、且 tick 心跳没到」才零派发：tick 心跳每 tick 无条件跑 slot-refill（兜底必跑触发源），完成事件只是加速源
 - [x] AC5: 并发上限语义不变（cap=3 仍在，机制/策略分离，档位配置可调）— cap 是输入（cap-from-gate.sh 的 effective_cap），slot-refill 不硬编码；测试覆盖 in-flight≥cap ⇒ no refill、cap 可调
 - [x] AC6: 与 gap-telemetry-brackets-vs-subagents（括号≠子代理）交叉标注——事件驱动依赖准确的完成感知 — 回填用 `<task-notification>` 真实完成信号、不读遥测括号；tick 文档「事件驱动派发（槽位回填）」节与本任务 Proposal 均交叉引用 gap-telemetry-brackets-vs-subagents-no-slot-visibility
@@ -197,6 +197,32 @@ tests: 7 pass / 0 fail（slot-refill.test.mjs: AC2 GO / AC4 halt / AC5 cap-reach
 **Contract measure 复核**（当前形态确认，AC1）：transcript 仍见排程唤醒
 `Next wakeup scheduled for 15:53 / 07:26 / 07:32` —— inner 依赖 tick 边界，非事件驱动派发；
 live `gap_min < 5` 的「完成→下一次派发」复测归外层 verification-round（本任务在隔离 worktree 内不观测 inner 会话）。
+
+## 机制复核（AC3 runtime-pending，2026-08-08）
+
+AC3（「槽位释放后 <5 分钟内有新派发」）是**运行时复测**，须在真实 loop 中观测 inner 会话的派发时间戳，
+scoped worktree 内不可得——**本复核不虚构测量**，只机械验证机制已接线（AC2 的产物在 develop 上原封不动）。
+
+**Contract invoke 实跑**（`grep -n '完成通知\|task-notification\|事件驱动\|slot-refill\|槽位释放\|槽位回填' plugin/loop/fast-mode-loop-tick.md`，命中节选）：
+
+```text
+89:  **后台 agent 完成时会自动触发 `<task-notification>` 重新唤起会话**——那是主要的推进信号，也是**派发触发源**…**收到完成通知 = 槽位释放，必须立即重评估派发（「槽位释放回填」，见步骤 4），不等下一 tick。** …
+91:  **派发评估有两个触发源，且都机械接线**：① 完成事件（加速源）——被 `<task-notification>` 唤起…立即按「事件驱动派发（槽位回填）」评估回填空槽，不等下一 tick；② tick 心跳（兜底必跑）——每 tick 无条件跑 slot-refill…
+257: ## 事件驱动派发（槽位回填）——完成即重评估，不等下一 tick
+283: **完成事件加速回填，tick 心跳兜底必跑 slot-refill**…**不引入新轮询源**…
+646: 任一在飞 subagent 完成释放槽位时，由「事件驱动派发（槽位回填）」节触发，**立即**重评估（不等下一 tick）
+659: **槽位释放回填（slot-release refill）——派发是事件驱动的，不是 tick 边界驱动的**…完成通知就是派发触发器；tick 心跳只是兜底…
+```
+
+**slot-refill.ts 纯状态读取器负控制**（`grep -n 'writeFileSync\|appendFileSync\|mkdirSync\|spawnSync\|execSync\|setTimeout\|setInterval\|createServer' plugin/scripts/slot-refill.ts`）：**零命中**——
+helper 无任何写入/子进程派发/自排程原语；`process.exitCode = main(...)` 仅取 main 的 `return 0`（exit 0 恒）。
+`analyzeSlotRefill` 是纯函数（同输入同输出，零 store 变异）；派发动作在 tick 步骤 4（消费 `should_refill`/`recommended` 后 spawn Agent），不在 helper 内——**AC4 负控制成立**。
+
+**词汇规范（AC5）**：tick 文档用「滚动派发」（line 298「描述派发用滚动派发」）、「不叫批号」（line 295/655），
+`concurrent-batch-scheduler.ts` 输出的 `{batch, deferred}` 是机件字段名非分派门控（line 656）——无 batch-numbering 派发词汇。
+
+**AC3 状态**：`- [ ]`（未勾）——live「完成→下一次派发 gap_min < 5 分钟」测量留给外层在真实 loop 中
+复测（对比现状 39 分钟）；机制已接，本次未虚构运行时数据。
 
 ## Contract
 
