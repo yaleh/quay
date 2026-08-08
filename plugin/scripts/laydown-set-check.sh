@@ -119,34 +119,49 @@ red=0
 # relative forms (`j.test_files_run.includes('plugin/test/fake-a.test.mjs')`). The `node --test`
 # invocation below resolves them relative to cwd (the gate runs from $ROOT).
 resolve_tests() {
-  local s base tb f rel
+  local s base stem tb f rel
   for s in "$@"; do
     base="${s##*/}"
     case "$base" in
-      *.sh|*.ts|*.mjs|*.js) tb="${base%.*}.test.mjs" ;;
+      *.sh|*.ts|*.mjs|*.js) stem="${base%.*}" ;;
       *) continue ;;
     esac
+    # Exact basename-pair first: <script>.test.mjs (the pre-split convention).
+    tb="${stem}.test.mjs"
     for f in "$ROOT"/plugin/test/"$tb" "$ROOT"/packages/*/test/"$tb"; do
       if [ -f "$f" ]; then
         rel="${f#"$ROOT"/}"
         echo "$rel"
       fi
     done
+    # Split-prefix fallback (gap-laydown-set-check-ac4-stale-after-split): when a script's direct test
+    # was SPLIT into <script>-<suffix>.test.mjs files (session-liveness.sh → events/heartbeat/signals),
+    # the exact basename-pair is gone but the M3 regression must stay gate-visible. Resolve every
+    # `<stem>-*.test.mjs` in the test dirs. Exact-pair hits are NOT re-emitted (dedup via sort -u at
+    # the call site); a split script resolves to all its fragments, not zero.
+    for f in "$ROOT"/plugin/test/"${stem}"-*.test.mjs "$ROOT"/packages/*/test/"${stem}"-*.test.mjs; do
+      [ -f "$f" ] || continue
+      rel="${f#"$ROOT"/}"
+      echo "$rel"
+    done
   done
 }
 mapfile -t TESTS < <(resolve_tests "${SET[@]}" | sort -u)
 
 # The derived members that resolved to NO direct test file (reported, not gating — AC1/AC4).
+# A script whose test was SPLIT into `<stem>-<suffix>.test.mjs` files is NOT "no test" — the
+# split-prefix fallback in resolve_tests covers it (gap-laydown-set-check-ac4-stale-after-split).
 NO_TEST=()
 for s in "${SET[@]}"; do
   base="${s##*/}"
   case "$base" in
-    *.sh|*.ts|*.mjs|*.js) tb="${base%.*}.test.mjs" ;;
-    *) tb="" ;;
+    *.sh|*.ts|*.mjs|*.js) stem="${base%.*}" ;;
+    *) stem="" ;;
   esac
-  if [ -n "$tb" ]; then
+  if [ -n "$stem" ]; then
     found=0
-    for f in "$ROOT"/plugin/test/"$tb" "$ROOT"/packages/*/test/"$tb"; do
+    for f in "$ROOT"/plugin/test/"${stem}".test.mjs "$ROOT"/packages/*/test/"${stem}".test.mjs \
+             "$ROOT"/plugin/test/"${stem}"-*.test.mjs "$ROOT"/packages/*/test/"${stem}"-*.test.mjs; do
       [ -f "$f" ] && found=1 && break
     done
     [ "$found" -eq 0 ] && NO_TEST+=("$s")
