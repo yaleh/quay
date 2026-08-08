@@ -1,7 +1,7 @@
 ---
 id: gap-delivery-outline-vs-verify-surface-single-source
 title: "TWO independent deliverable manifests with NO mechanical binding — docs/proposals/quay-product-outline.md §6 (directory counts: scripts 97/skills 11/gate-scripts 14/probes 4/loop 2/workflows 2/agents 1/vendor 2) vs plugin/scripts/verify-delivery-surface.ts (capability categories: 机件与运行时/循环文档/启动配置/会话拓扑/周期锚点/观测与校验, concrete files) — editing one never warns the other; human ruling 2026-08-06: KEEP ONLY ONE (which is source, how the other retires/derives = outer ruling); ALSO: outline counts STALE (scripts 97→actual 120, skills 11→13), probes NOT laid by quay-init (grep 0) yet human ruled probes ARE deliverables, routine-scheduler's only live callers are retired loop-driver SKILL (live tick docs 0 hits), prerequisites class missing from outline (Node floor / .quay/config.yml shape / tmux cold-start-only); ADR-024 applies (ruling↔mechanized check traceability) but the original case covered only the check side, not outline-vs-check pair"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -50,6 +50,12 @@ vs `verify-delivery-surface.ts`（能力分类）。**没有任何机械绑定**
 - [ ] AC3: probes 三缺陷修——铺设（quay-init）+ 调用方（活文档）+ 死配置检测（routines 无人读报出）
 - [ ] AC4: 前置条件补轮廓——Node 下限 / config 完整形状 / tmux cold-start 前置标注
 - [ ] AC5: 与 ADR-024 交叉标注（裁定↔机械检查绑定，本案覆盖 outline-vs-check 对）
+
+## Definition of Done
+
+- [ ] AC1-AC5 全勾（verify-delivery-surface 为交付物清单单一事实源，outline 派生；轮廓漂移机械兜住；probes 三缺陷修——铺设/调用方/死配置检测；前置条件补轮廓；与 ADR-024 交叉标注）
+- [ ] 单一事实源实测：verify-delivery-surface 计数与磁盘一致，脚本漂移报出
+- [ ] scoped 门 `scripts/test.sh --for-task gap-delivery-outline-vs-verify-surface-single-source` 绿
 
 ## Touches
 

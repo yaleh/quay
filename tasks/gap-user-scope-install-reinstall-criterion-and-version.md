@@ -6,7 +6,7 @@ title: "user-scope install when-to-reinstall — no VERSION + no staleness
   reinstall criterion by capability-boundary not time: ①new capability
   ②security/crash fix ③hereditary-defect fix trigger immediate, rest batching;
   add VERSION + compare check"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -48,6 +48,12 @@ extra: {}
 - [ ] AC2: 检查比对该版本——落后则报出「你装的这份落后了」（负控制：当前无机制）
 - [ ] AC3: 重装判据按能力边界——能力新增/安全修复/遗传缺陷三类触发立即重装，其余可攒
 - [ ] AC4: 与 dist-follow（新鲜度判据）+ 升级通道两种形态交叉标注
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（VERSION/git describe 标记 plugin 版本；落后则报出「你装的这份落后了」；重装判据按能力边界三类触发立即重装；与 dist-follow + 升级通道交叉标注）
+- [ ] 版本比对实测：落后报出；重装判据三分类落地
+- [ ] scoped 门 `scripts/test.sh --for-task gap-user-scope-install-reinstall-criterion-and-version` 绿
 
 ## Touches
 

@@ -6,7 +6,7 @@ title: "blocked signal must AUTO-ESCALATE on timeout — a signal nobody consume
   independent mechanism in inner-blocked-signal.ts (consumption timeout /
   auto-upgrade); scoped out of gap-telemetry-brackets AC9 (distinct mechanism,
   noted for outer 2026-08-06)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -39,6 +39,12 @@ extra:
 - [ ] AC1: 阻塞信号写后 N 分钟无人消费 ⇒ 自动升级/归档（inner 不再无限冻结，实测）
 - [ ] AC2: 今晚 92 分钟假阻塞形态消除（同类场景不再冻 inner）
 - [ ] AC3: 与 gap-telemetry-brackets（AC9 carry）交叉标注——括号闭合后假信号源消除
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（阻塞信号 N 分钟无人消费自动升级/归档；92 分钟假阻塞形态消除；与 telemetry-brackets AC9 交叉标注）
+- [ ] 超时自动升级实测；假阻塞形态不再冻 inner
+- [ ] scoped 门 `scripts/test.sh --for-task gap-blocked-signal-timeout-auto-escalation` 绿
 
 ## Touches
 

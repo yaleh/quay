@@ -8,7 +8,7 @@ title: "no ACTIVE Node version check — package.json engines>=20 is passive
   dist/quay.js path has its own declared floor (dist-verify-node-floor CI) —
   the source-execution path (strip-types) needs an ACTIVE probe that fails
   with a clear message naming the required floor"
-status: todo
+status: ready
 labels:
   - gap
 parent: null
@@ -57,6 +57,12 @@ nvm 管理 node，管理者的**非交互 ssh 调用绕过了 nvm.sh**（~/.bash
 - [ ] AC2: Node ≥22.6 正常路径零影响（探针不挡正常使用）
 - [ ] AC3: 探针纯 JS 可在老 node 上执行（不依赖 strip-types）
 - [ ] AC4: 与 dist-follow/upgrade-channel（在飞）交叉标注——dist 路径 floor 单独判断
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（Node 18.x 清晰报错命名所需版本+升级提示；Node ≥22.6 零影响；探针纯 JS 老 node 可执行；与 dist-follow/upgrade-channel 交叉标注）
+- [ ] Node 18 实测清晰报错（非裸 bad option）；≥22.6 正常
+- [ ] scoped 门 `scripts/test.sh --for-task gap-no-active-node-version-check-users-cant-tell-upgrade` 绿
 
 ## Touches
 

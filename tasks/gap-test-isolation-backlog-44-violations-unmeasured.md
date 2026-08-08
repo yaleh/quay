@@ -8,7 +8,7 @@ title: "test-isolation contract check has 44 standing violations
   indistinguishable from old (red-window triage had to diff against a
   rotated-out round1 log by hand); fix: baseline the 44, add a shrink-only
   ratchet or per-category count like the test-framework-policy list"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -93,6 +93,12 @@ subset），test-isolation 缺同款机制。
 > 保留（`@test-group serial` 不动）。本任务基线账里 runner-grouping 的 spawns-test-sh=1 嵌套实例因此从
 > 「负载下真实红」降为「已消除的嵌套成本」——剩余 spawns-test-sh 实例（select-tests-for-touches /
 > test-coverage-check）不在本任务 Touches 内，仍待基线化。
+
+## Definition of Done
+
+- [ ] AC1-AC6 全勾（44 违规机械基线；shrink-only 棘轮；与 test-framework-policy 交叉标注；与 test-isolation-contract 交叉标注；并发触发实例基线化；AC7 夹具 zz-runner-grouping-undeclared 移出真实 plugin/test/）
+- [ ] 棘轮实测：新违规红、既有积压不阻塞；夹具移动完成
+- [ ] scoped 门 `scripts/test.sh --for-task gap-test-isolation-backlog-44-violations-unmeasured` 绿
 
 ## Touches
 
