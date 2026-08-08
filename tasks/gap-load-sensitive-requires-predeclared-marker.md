@@ -77,6 +77,8 @@ resume 若中断，先跑 measure 确认当前无标记文件的释放行为，�
       不再接受无标记文件的事后隔离通过作为放行依据
       （证据：docs/analysis/fast-mode-loop-tick.md「红窗释放准入」成文：有标记 = Path A 直接释放；
       无标记 = Path B 只能申请；机械校验 `load-sensitive-release-check.ts` exit 0/1 二分）
+      **scoped 验证（entry path 在场）**：`grep -lE "KNOWN-LOAD-SENSITIVE" plugin/test/*.mjs`（Contract invoke
+      的 entry path = `plugin/test/*.mjs`，此处为实际执行的 grep 位置）
 - [x] AC2: **无标记路径**——无标记文件隔离通过时，只能申请加标记（含证据），本轮红窗不因它释放
       （证据：同上一节的 Path B 条款——`UNMARKED <file> (release NOT permitted — apply-for-marker path)`；
       `load-sensitive-release-check.ts` 对未标记文件 exit 1，释放不成立）

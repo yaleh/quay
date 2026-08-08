@@ -58,11 +58,32 @@ the real human」。实测闸门 fail-closed：`identity_rejected=true  reason=i
 **更正为：outer→manager 走总线（带 from: outer），escalations.md 只作降级备份。**
 禁止裸 tmux 那一条不变，理由更强：裸 tmux 绕过的正是身份层。
 
-### 修法方向（设计归外层+内层，产品代码）
+### 归因更正（管理者 08:5x，总线零流量不是纪律问题）
 
-给 outer 一个文件收件箱 transport（如 `.quay/outer-inbox/`），或复用 `createFileInboxTransport`
-注册 outer 目标——`installDefaultTransports` 里 outer 那行从 `createSessionTransport()` 改为
-文件收件箱。这样 manager 向 outer 投递走文件（异步、带 from），不依赖 outer 会话状态。
+原说「总线零流量，是我们用裸 tmux 从旁边绕过去了」——**归错因。不是我们绕过它，是写侧没有可绕
+的路。** 实测（人问「manager/outer/inner 都在用吗」后查）：
+- 总线的非测试引用方全仓只有三处：message-bus.ts（自己）、supervisor-bus-identity.sh（只做
+  inbox-summary 读 + claim-human-test 自测）、inbox-reader.sh（只做 delivered→consumed 读+回执）。
+- 真正调用 deliver() 的文件全是测试（message-bus.test.mjs / message-bus-identity.test.mjs /
+  supervisor-deliver.test.mjs）。
+- `supervisor-bus-identity.sh:73` 那句 `bus.deliver("inner", …, "human")` 是【自测】——故意投一条
+  假冒消息证明它被拒，不是真流量。
+- `quay` CLI 无任何 message/send/inbox 命令（CLI 里唯一的 deliver 是 action.ts 的 deliverTrigger，
+  那是 action 触发器，另一套）。
+
+⇒ **结构**：读侧两个 shell 挂载点（inbox-summary、inbox-reader.sh，tick 第 574 行已挂）；
+写侧【零个】——deliver() 只是一个 JS 函数，agent 靠 bash 驱动，谁都发不了。delivered=0 的真实
+原因是这个。佐证：inbox-reader.sh 注释「without it the inbox degenerates back to "3 messages on
+disk, nobody reads"」——**它防住了「有人写没人读」，没防住「有人读没人能写」。**
+
+### 修法方向（设计归外层+内层，产品代码）——两半
+
+缺陷成立，但根因是两半，修法不同：
+1. **前半：transport 注册**——`installDefaultTransports` 里 outer 那行从 `createSessionTransport()`
+   改为文件收件箱（如 `.quay/outer-inbox/`，复用 `createFileInboxTransport`）。这样 manager 向
+   outer 投递走文件（异步、带 from），不依赖 outer 会话状态。
+2. **后半：写侧入口**——只补 transport 注册三方仍发不了。需加一个发送入口（CLI 子命令或 shell
+   脚本）让 agent（bash 驱动）能调用 deliver()。**这是 bus 能用的前提——写侧零入口是根因的另一半。**
 
 ## Contract
 
