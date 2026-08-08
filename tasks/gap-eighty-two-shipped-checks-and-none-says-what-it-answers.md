@@ -100,6 +100,14 @@ resume 先建目录与字段，再筛选，最后才新增能力
 **可选的约定等于没有约定**，今天新增的 8 个脚本就是证据；
 不在 AC1 完成前动 AC3（**事件落盘本身也要有它的声明字段**，否则它成为第 83 个无声明脚本）。
 
+**交叉标注（2026-08-08, gap-capability-catalog-declarations-not-enforced-at-script-creation）**：
+AC1c 的「新脚本进入产物必须带声明字段」入口闸此前只在全量验证轮强制——scoped 静态层
+（`select-static-checks-for-touches`）不选它，所以一个创建 `plugin/scripts/*` 新文件的任务
+scoped 绿、catalog 到 fan-in 才红（本会话两波 14 个脚本未声明进入产物即此因）。该 gap 任务
+把 capability-catalog 加进 scoped 静态层：任务 `## Touches` 含 `plugin/scripts/*` 新建文件
+（`(new)` 标注或 git 未跟踪）⇒ scoped 跑含本 catalog 的 AC1c 检查，未声明的新脚本在创建时
+即红。
+
 ## Acceptance Criteria
 
 - [x] AC1a: **机器可读字段**——每个交付检查一行声明「它让什么问题可被提问」，

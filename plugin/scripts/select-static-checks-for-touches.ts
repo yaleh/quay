@@ -42,7 +42,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractSection } from "./task-schema.ts";
-import { parseTouchEntries } from "./touches-parser.ts";
+import { parseTouchEntriesWithTags } from "./touches-parser.ts";
 import { isDirectEntry } from "./gate-script-base.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────
@@ -53,6 +53,31 @@ export const DEFAULT_TIER = "full";
 const TIERS = new Set(["always", "change", "full"]);
 /** The single source for the checker registry: scripts/test.sh's `run_static_checks()` body. */
 export const TEST_SH_REL = "scripts/test.sh";
+
+/**
+ * The capability-catalog AC1c ENTRY-POINT gate (gap-eighty-two-shipped-checks-and-none-says-what-it-
+ * answers): every shipped plugin/scripts check must declare what QUESTION it makes askable — a NEW
+ * script that enters the artifact without a declaration line is `unclassified` and the catalog exits
+ * non-zero. That gate is a whole-artifact scan, so it only ever ran at the full-suite verification
+ * round; a task that CREATES a new plugin/scripts file shipped scoped-green and the catalog turned
+ * red only at fan-in (the 14-script regression this task closes —
+ * gap-capability-catalog-declarations-not-enforced-at-script-creation).
+ *
+ * This scoped-only VIRTUAL checker is the fix: when a task's `## Touches` declare a NEW
+ * plugin/scripts file (`(new)` tag, or git-untracked at selection time), the capability-catalog AC1c
+ * gate enters the change-relevant static set, so an undeclared new script turns the SCOPED gate red
+ * at creation time. The command line mirrors run_static_checks' invocation shape
+ * (`run_checker "<name>" …`, with `${repo_root}` resolved by buildCommand like every registry
+ * command line), and `--json` is the catalog's machine-readable AC1c mode (exits 1 on
+ * unclassified > 0, matching the source task's `## Contract` invoke).
+ */
+export const CAPABILITY_CATALOG_CHECKER = {
+  name: "capability-catalog",
+  tier: "change",
+  objects: [],
+  scopedMode: null,
+  commandLine: 'run_checker "capability-catalog" bash "${repo_root}/plugin/scripts/capability-catalog.sh" --json',
+};
 
 // ── Repo-root detection (mirrors select-tests-for-touches.ts) ─────────────────────────────────────────
 
@@ -123,6 +148,30 @@ export function matchesObject(object, touch) {
   }
   if (o.endsWith("/")) return t.startsWith(o);
   return t === o || t.startsWith(`${o}/`);
+}
+
+/**
+ * True iff `relPath` is a NEW file at selection time: it exists on disk under `root` AND git does
+ * not track it (the task created it but has not yet committed it — the AC4 "not-yet-tracked"
+ * signal of gap-capability-catalog-declarations-not-enforced-at-script-creation). Requires a git
+ * repo at `root` (`.git` present — a worktree's `.git` is a FILE pointing at the gitdir, which
+ * existsSync also sees); a non-git workspace (hermetic temp fixture) returns false — there the
+ * `(new)` Touches tag is the signal. A glob or a non-existent path is never "new" by this check
+ * (there is nothing to scan).
+ */
+export function isGitUntracked(root, relPath) {
+  const normalized = normalizeRel(relPath);
+  if (!normalized || /[*?]/.test(normalized)) return false;
+  if (!fs.existsSync(path.join(root, ".git"))) return false;
+  if (!fs.existsSync(path.join(root, normalized))) return false;
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", normalized], {
+      cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000,
+    });
+    return false; // tracked — an existing script already in the artifact
+  } catch {
+    return true; // untracked — a file the task created that git does not know yet
+  }
 }
 
 // ── Registry parsing (single source: scripts/test.sh's run_static_checks body) ───────────────────────
@@ -203,12 +252,22 @@ export function parseStaticCheckRegistry(bodySrc) {
  * Compute the scoped static-check subset for a set of repo-relative touches.
  * Rule (AC1/AC3): always ∪ { change whose object ∩ touches ≠ ∅ } − full.
  * Also returns the touched task files (for the subset-touched mode) and the deferred (skipped) set.
+ *
+ * `opts.newTouches` (optional, backward-compatible) is the set of touches that are NEW files — the
+ * `(new)`-tagged and/or git-untracked plugin/scripts paths a task declares it CREATES
+ * (gap-capability-catalog-declarations-not-enforced-at-script-creation). When a new plugin/scripts
+ * file is touched, the capability-catalog AC1c entry-point gate is added to the change-relevant set
+ * (scoped-only VIRTUAL checker — not a run_static_checks registry entry), so an undeclared new
+ * script turns the scoped gate red at creation time. Existing scripts are never rescanned (AC3/AC4
+ * negative controls: only NEW files trigger, the artifact is not re-scanned whole).
+ *
  * @param {string[]} touches
  * @param {{name:string, tier:string, objects:string[], scopedMode:string|null, commandLine:string}[]} registry
+ * @param {{newTouches?: string[]}} [opts]
  * @returns {{selected:{name:string, commandLine:string, touchedTasks:string[]}[],
  *            deferred:string[]}}
  */
-export function selectStaticChecksForTouches(touches, registry) {
+export function selectStaticChecksForTouches(touches, registry, opts = {}) {
   const touchedTasks = [...new Set(
     touches
       .map(normalizeRel)
@@ -235,6 +294,14 @@ export function selectStaticChecksForTouches(touches, registry) {
     const relevant = c.objects.some((o) => touches.some((t) => matchesObject(o, t)));
     if (relevant) selected.push({ name: c.name, commandLine: c.commandLine, touchedTasks: [] });
     else deferred.push(c.name);
+  }
+  // AC1 (gap-capability-catalog-declarations-not-enforced-at-script-creation): a NEW plugin/scripts
+  // file in this change pulls the capability-catalog AC1c entry-point gate into the scoped tier.
+  const newTouches = opts && opts.newTouches ? opts.newTouches : [];
+  const newPluginScript = [...new Set(newTouches.map(normalizeRel))]
+    .some((t) => matchesObject("plugin/scripts/", t));
+  if (newPluginScript) {
+    selected.push(CAPABILITY_CATALOG_CHECKER);
   }
   return { selected, deferred };
 }
@@ -276,6 +343,9 @@ Usage:
 Selection rule (AC1/AC3, parsed mechanically from scripts/test.sh's run_static_checks body):
   scoped = { tier=always } ∪ { tier=change whose object ∩ touches } − { tier=full }
   tier annotations live in scripts/test.sh (never hand-listed here).
+  PLUS: a NEW plugin/scripts file in the touches ((new) tag or git-untracked) adds the
+  capability-catalog AC1c entry-point gate to the scoped set
+  (gap-capability-catalog-declarations-not-enforced-at-script-creation).
 
 Output modes:
   --commands (default) — concrete shell commands for the selected checkers (one per line)
@@ -306,14 +376,23 @@ export function stripTrailingAnnotation(touch) {
     .trim();
 }
 
-/** Read a task body's `## Touches` bullet list (reuses the ONE shared touches parser — AC3). */
+/**
+ * Read a task body's `## Touches` bullet list (reuses the ONE shared touches parser — AC3), plus
+ * the NEW-file subset: touches tagged `(new)` are the authoritative "this task CREATES this file"
+ * declaration (gap-capability-catalog-declarations-not-enforced-at-script-creation). The tag-aware
+ * parser's path extraction is BYTE-IDENTICAL to the plain one (touches-parser parity contract), so
+ * change-relevance matching is unchanged — only the `(new)` tag is additionally surfaced.
+ * @returns {{paths:string[], newPaths:string[]}|null}
+ */
 function touchesFromTask(root, taskId) {
   const taskFile = path.join(root, "tasks", `${taskId}.md`);
   if (!fs.existsSync(taskFile)) return null;
   const text = fs.readFileSync(taskFile, "utf8");
   const sec = extractSection(text, "Touches");
-  const parsed = sec ? parseTouchEntries(sec) : [];
-  return parsed.map(stripTrailingAnnotation).filter(Boolean);
+  const parsed = sec ? parseTouchEntriesWithTags(sec) : [];
+  const paths = parsed.map((e) => e.path).filter(Boolean);
+  const newPaths = parsed.filter((e) => e.tag === "new").map((e) => e.path).filter(Boolean);
+  return { paths, newPaths };
 }
 
 export function main(argv) {
@@ -344,24 +423,40 @@ export function main(argv) {
   }
 
   let touches;
+  let newTouches = [];
   if (touchesArg !== undefined) {
     touches = touchesArg.split(",").map((s) => stripTrailingAnnotation(s)).filter(Boolean);
+    // `--touches` mode carries no `(new)` tags — a plugin/scripts touch that is git-untracked at
+    // selection time is the new-file signal (a file the task created but has not yet committed).
+    for (const t of touches) {
+      if (matchesObject("plugin/scripts/", t) && isGitUntracked(root, t)) newTouches.push(t);
+    }
   } else if (taskId) {
-    touches = touchesFromTask(root, taskId);
-    if (touches === null) {
+    const taskTouches = touchesFromTask(root, taskId);
+    if (taskTouches === null) {
       process.stderr.write(`select-static-checks-for-touches: task file not found: tasks/${taskId}.md\n`);
       return 2;
     }
+    touches = [...taskTouches.paths];
+    newTouches = [...taskTouches.newPaths];
     // AC4-i: the change IS this task, so its OWN file is always a touched task — the ## Contract
     // consumer must scan it even when the task's `## Touches` omits the self-touch (pre-convention
     // tasks). Deduped in selectStaticChecksForTouches.
     touches.push(`tasks/${taskId}.md`);
+    // git-untracked fallback (AC4): a plugin/scripts touch NOT marked `(new)` that is nonetheless
+    // not yet tracked is still a NEW file (the task created it but omitted the marker — the exact
+    // regression class this gate exists to catch at creation time).
+    for (const t of touches) {
+      if (matchesObject("plugin/scripts/", t) && !newTouches.includes(t) && isGitUntracked(root, t)) {
+        newTouches.push(t);
+      }
+    }
   } else {
     process.stderr.write(`${usage}\n`);
     return 2;
   }
 
-  const { selected, deferred } = selectStaticChecksForTouches(touches, registry);
+  const { selected, deferred } = selectStaticChecksForTouches(touches, registry, { newTouches });
 
   if (asJson) {
     process.stdout.write(JSON.stringify({
