@@ -470,3 +470,29 @@ git blame（40a67514 改名）确定归边方向。
 3. **单文件单独处理**：外层/内层把 integration 版 env 的修复（"quay" 名字）直接 commit 到 develop，
    再重跑 merge（此时 env 无冲突，仅 2 任务体 shared 自动消解）。最轻，但属「手工搬运修复」而非机制。
 
+---
+
+## 2026-08-08 16:48Z — 内层求助：4 个 needs-human worktree 占槽阻塞派发，需裁定复活 or 清理
+
+**现象**：内层报「Needs outer attention (blocking dispatch)——4 parked needs-human worktrees with
+unmerged branches occupy slots (executor processes exited, worktrees persist → AC6 counts them)」。
+列名：gap-chart2-s2-test-assertions、gap-shipped-ts-files-are-not-bundled、serial-recompose-nested-runner、
+resource-aware。
+
+**外层核实**：chart2-s2（1 提交未合并）、shipped-ts（1 提交未合并）均领先 develop、未并入 integration、
+任务 status=needs-human。工作（分支 commit）未合并但任务已 needs-human。
+
+**内层诉求**：这些 worktree 的残留（进程退出但目录在）被 AC6 计为占用槽位，阻塞派发。需裁定「复活 or
+授权 worktree 清理」——needs-human 任务去留是范围决定，外层不自行处理。
+
+**选项**：
+1. **授权清理残留 worktree**（保留分支）——`git worktree remove` 释放槽位，分支/task 保留供 needs-human
+   裁定后续合并。最轻，不丢工作。
+2. **逐任务裁定去留**——复活并合并（若工作仍要）、或确认作废（若随新模式放弃）。与 escalations #N+1
+   的「坚决应用新模式」裁定衔接。
+3. **维持现状**——4 槽被占，内层只能派发 2 候选（dod-over90/load-sensitive），其余 3 候选等槽。
+
+**外层倾向选项 1**：清理残留 worktree（进程已退出、非在飞工作）释放槽位，分支保留待 needs-human 裁定；
+不碰分支本身（去留仍归人）。这是解阻塞不是范围改变。
+
+
