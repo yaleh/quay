@@ -79,6 +79,7 @@ import { fileURLToPath } from "node:url";
 
 import { runOnce } from "./suite-state-trigger.ts";
 import { getLoad1 } from "./checker-cost.ts";
+import { scanFamily, kindForFile } from "./known-load-sensitive.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -96,6 +97,16 @@ export type SuiteStateReason = "failed" | "aborted" | "infra-error";
 export interface SuiteFailure {
   line: string;
   file?: string;
+  /**
+   * The KNOWN-LOAD-SENSITIVE partition (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
+   * triage AC3): true when the failing file is a family member (machine-readable manifest from
+   * known-load-sensitive.ts). Written by the runner at red time so the red-window triage can
+   * auto-partition WITHOUT re-deriving it — the state carries the partition, not the triaging
+   * human/agent's memory.
+   */
+  in_family?: boolean;
+  /** The family kind (wall-clock | nested-spawn | heavy | ...) — one root cause = one kind. */
+  kind?: string;
 }
 
 export interface SuiteState {
@@ -416,6 +427,18 @@ export async function run(argv: string[]): Promise<number> {
   const startedAt = new Date().toISOString();
   const base = { runner: "outer" as const, startedAt, laneCount };
 
+  // KNOWN-LOAD-SENSITIVE family manifest (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
+  // triage AC3): scanned ONCE at run start against the repo root so red-time failures can carry the
+  // in-family/kind partition into full-suite-state.json — the triage reads it, never re-derives it.
+  const family = scanFamily(REPO_ROOT);
+  /** Enrich a failure with its family partition (in_family + kind) — no-op when not a member. */
+  const enrichFailure = (f: SuiteFailure): SuiteFailure => {
+    if (!f.file) return f;
+    const kind = kindForFile(family, f.file);
+    if (kind === undefined) return f;
+    return { ...f, in_family: true, kind };
+  };
+
   // gap-suite-state-split-across-worktree-and-gate — SYNC BRIDGE: every state transition is written
   // to the gate location (--state-dir, the main repo) AND mirrored to the tested checkout's own
   // `<root>/.quay/full-suite-state.json`. The gate (inner + suite-state-trigger) reads the main repo;
@@ -511,7 +534,12 @@ export async function run(argv: string[]): Promise<number> {
       if (!pendingFailure.file) {
         const f = extractFailureFile(line, root);
         if (f) {
+          // Enrich with the KNOWN-LOAD-SENSITIVE partition once the file context resolves, and
+          // update the failure in redFailures in place so the state carries it (AC3).
+          const enriched = enrichFailure({ ...pendingFailure, file: f });
           pendingFailure.file = f;
+          const idx = redFailures.indexOf(pendingFailure);
+          if (idx !== -1) redFailures[idx] = enriched;
           // file found — re-write state so the SUITE-RED event carries it (idempotent).
           writeSuiteState({ state: "red", reason: "failed", ...base, finishedAt: null, durationMs: null, failures: redFailures });
         }
@@ -534,7 +562,7 @@ export async function run(argv: string[]): Promise<number> {
       // which test failed is already known) + open a short detail lookahead for the file context.
       // A file on the failure line itself (vitest `❯ <file>` / `test at <file>`) is captured now;
       // TAP detail-block files are captured by the lookahead.
-      const failure: SuiteFailure = { line, file: extractFailureFile(line, root) };
+      const failure: SuiteFailure = enrichFailure({ line, file: extractFailureFile(line, root) });
       redFailures.push(failure);
       pendingFailure = failure;
       detailRemaining = 15;

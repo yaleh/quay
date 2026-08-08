@@ -150,26 +150,34 @@ grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+
 
 ## 已知负载敏感族（KNOWN-LOAD-SENSITIVE）——判绿/放宽判据必须排除，不得读成真回归
 
-**`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
+**这族测试的权威清单是机器可读的**：`plugin/scripts/known-load-sensitive.ts --list`（解析各测试文件头
+的 `// @load-sensitive <kind>` 标注，`gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`
+AC1/AC2）。本散文只讲判读规则，**不再手列族文件**——文件清单以该脚本输出为准（单一来源，消灭双源）。
+代表成员（示意，非清单）：`plugin/test/session-liveness-events.test.mjs`、`session-liveness-heartbeat.test.mjs`、
 `session-liveness-signals.test.mjs`（原 `session-liveness.test.mjs` 拆分，
 `gap-session-liveness-tail-capped-split`）、`plugin/test/cold-start-skill.test.mjs`（及其演练/laid-down
-`--once` 同类）是一族已知负载敏感测试**（`gap-load-sensitive-session-family-confounds-step-three`，
-2026-08-04 立案）。它们用**真实进程 + tmux 时序**验证会话存活/冷启动挂载语义，机器负载一高就红——
+`--once` 同类）、`plugin/test/runner-grouping.test.mjs`（`nested-spawn` kind）——它们用**真实进程 + tmux 时序**
+或**嵌套 node --test spawn** 验证会话存活/冷启动/分组语义，机器负载一高就红——
 隔离下全绿、并发下红，**不是逻辑错误**。2026-08-04 全量套件 #6/#7 各挂一条不同但同族的测试，
-隔离单跑全过，确认并发敏感。
+隔离单跑全过，确认并发敏感。**两种根因、两个 kind，判读不得混用**（`wall-clock` = 真实进程 + tmux 时序；
+`nested-spawn` = 嵌套 runner）。
 
 **判读规则（强制）**：
 1. **这一族的 fail 在并发/高负载下不算真回归**。放宽实验（第三步：把重活令牌从单飞放宽到两个
    并发套件，= 负载翻倍——`heavy-op-token.sh` 已随 2026-08-06 人裁定整体退休，「一次只跑一个
-   重测试」约束退役，此放宽实验前提不再存在）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族，
+   重测试」约束退役，此放宽实验前提不再存在）的判据**明确排除**这族的 fail——判定时先看 fail 是否落在这族
+   （机械判定：`red-window-triage.ts --partition` 把失败分区为 in-family / not-in-family），
    落在 ⇒ 单独重跑该族（隔离、低负载），绿 ⇒ 是「已知时序敏感被放大」，不是「并发放宽暴露了真问题」。
 2. **这族永远单独跑全量或低负载判读**。判绿三条件（上面）里的 `fail 0` 判据对这族不适用；
-   全量套件中若只有这族红，先按第 1 条单独重跑再下结论。
+   全量套件中若只有这族红，先按第 1 条单独重跑再下结论。隔离重跑命令由 `red-window-triage.ts --partition`
+   自动产出并写回套件状态（`isolate_rerun`），裁决 `isolate_rerun_result` 绿 ⇒ 记 environmental + kind、
+   红 ⇒ 非环境升级——全程机械可查（AC3/AC6）。
 3. **不要删/降级/改 skip 这族**——它们抓的是真问题（并行观测、laid-down 实跑、`--once` 接缝），
    只是天生负载敏感。
 
-**机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**，便于
-grep 定位（见各文件头 `KNOWN-LOAD-SENSITIVE` 标记）。低负载基线实测：单套件连跑 2 次
+**机制标记**：这族测试文件头部带 `// @test-group governance` 之外的**显式负载敏感注释**：`// @load-sensitive <kind>`
+（机器可解析，`known-load-sensitive.ts` 读取）+ `KNOWN-LOAD-SENSITIVE` 散文标记（人读）。`known-load-sensitive.ts --check`
+强制「有 KNOWN-LOAD-SENSITIVE 头声明 ⇒ 必有 `@load-sensitive`」，无标注的声明机械拒绝（AC2）。低负载基线实测：单套件连跑 2 次
 全绿（fail 0 / cancelled 0，`$TEST_COMMAND plugin/test/session-liveness-events.test.mjs plugin/test/session-liveness-heartbeat.test.mjs plugin/test/session-liveness-signals.test.mjs plugin/test/cold-start-skill.test.mjs`）；
 人为负载（并发放量套件）下确实变红 ⇒ 敏感是真实的，标注不是伪装的借口。
 

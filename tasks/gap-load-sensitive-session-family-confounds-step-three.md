@@ -136,6 +136,13 @@ agent quiet-window 46 tests / 45 pass / 0 fail / 1 skip（skip 是 `quay-0:probe
 - plugin/test/cold-start-skill.test.mjs
 - plugin/loop/fast-mode-loop-tick.md（或等价跑批协议，标记已知负载敏感）
 
+### 交叉标注（2026-08-08，族分诊机械化落地）
+
+`gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（族分诊机械化）落地后，本任务的
+「标注 + 单独跑」方向从散文升级为机器可读：族文件头声明 `// @load-sensitive <kind>`，
+`plugin/scripts/known-load-sensitive.ts --list` 输出权威族清单，红窗分诊由 `red-window-triage.ts`
+自动分区 + 自动隔离重跑。本任务是最初立案（2026-08-04）；机械化的具体机制见该任务。
+
 ## Dispatch review
 
 reviewer: inner
