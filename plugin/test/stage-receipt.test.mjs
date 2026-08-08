@@ -1,4 +1,4 @@
-// @test-group engine
+// @test-group lowconc
 // stage-receipt.test.mjs — DIR-124-B2 (M254): RED/GREEN fixture tests for stage-receipt.ts
 // (the versioned stage-receipt contract module, experiments + plugin mirrors).
 //
