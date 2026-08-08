@@ -3,7 +3,7 @@ id: gap-test-concurrency-cap-does-not-scope-nested-spawns
 title: "CONSOLIDATED (manager 2026-08-07): 并发上限只管单层——跨 worktree 无协调(A) +
   cap-from-gate 槽位帽(B) + test.sh worker 数(C) 三者叠加，5 槽位 × 各自嵌套派生 = 17-19
   进程总量不变（load 18.70 实测）；共同根因是【没有跨层总预算】；勿拆分修（每处局部正确但总量不动）"
-status: ready
+status: done
 labels:
   - gap
   - defect
