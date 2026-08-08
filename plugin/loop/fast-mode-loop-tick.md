@@ -267,8 +267,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realInFlight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realInFlight` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | 遥测 **`realConcurrency`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。**`realConcurrency`（`--slots` 输出）= `realInFlight` + `subagentsInFlight`**——真实并发 = 括号真实在飞 + 非任务 subagent 进程（调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`：只读 realInFlight 会把 1 个在跑调查型 subagent 漏算成 0/3 空槽，空派 3 个任务）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-concurrency` 字段（或 `realInFlight + subagentsInFlight` 之和）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -614,8 +614,10 @@ subagents-no-slot-visibility` AC4）——本步的 `--task-start` 是派发时�
 **括号 ≠ subagent（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`）**：`--report` 的
 `inProgress` 是括号视角——红窗遗留的未闭合 start 会让它虚高。要看**真实并发/空槽**，用
 `--slots --cap "${effective_cap:-3}"`（纯读，不写盘）：`real_in_flight` 是执行者仍存活的括号数，
-`stale_brackets` 是 `--reconcile` 会闭合的幽灵括号数，`slots_free = max(0, cap − real_in_flight)`
-——「还剩几个并发槽」机械可见（AC2）。
+`stale_brackets` 是 `--reconcile` 会闭合的幽灵括号数，`subagentsInFlight` 是非任务 subagent 进程数
+（调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`），
+`realConcurrency = realInFlight + subagentsInFlight` 是真实并发，`slots_free = max(0, cap −
+occupied_slots)`（occupied 含非任务 subagent 与 closed-but-live）——「还剩几个并发槽」机械可见（AC2）。
 
 **括号关 ≠ 进程退（`gap-closed-bracket-leaves-live-agent-consuming-slots`，反向维度）**：`--task-end`
 写了（括号关）只证「记账上不在飞」，**不证 agent 进程退没退**——两者独立。`--slots` 的 `closedButLive`
@@ -632,7 +634,8 @@ occupied_slots)`。**别把已关括号的槽当空**——executor 仍在就不
 **派发前先读一次空槽信号（AC2/AC5）**——「还剩几个并发槽」必须机械可见，不靠内层手写叙事：
 ```bash
 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"
-# real-in-flight N / slots-remaining M；dispatchable_disjoint（步骤 3.6）− realInFlight = 槽位级闲置
+# real-in-flight N / subagents-in-flight M / real-concurrency N+M / slots-remaining K；
+# dispatchable_disjoint（步骤 3.6）− realConcurrency = 槽位级闲置
 ```
 
 ### 3.6 就绪池维护（晋级节奏是机制，不是角色自觉——强制）
@@ -1122,14 +1125,15 @@ clause-14 降为 advisory、既有失败记在已 done 的任务体里）。
 - 本 tick 合并了什么、派发了什么
 - 在飞任务及其已运行时长——**「在飞」按 AC7 拆三种含义分别标注**：遥测括号在飞（`--task-start` 未闭合）、
   **真实在飞**（reconcile 感知 `realInFlight`——括号数扣减 executor 已消失者，`--slots` 的 real-in-flight）
-  vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）；核实并发读原始字段，不用 START
-  事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
-- **槽位视角（`--slot-status`）**：`real_in_flight` / `stale_brackets` / `slots_free`
-  （`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"`）
-  ——「还剩几个并发槽」机械可见（AC2）；`stale_brackets > 0` 时调 `--reconcile` 闭合，别让红窗遗留
-  括号污染后续判定
+  vs subagent 在飞（原始 Agent 调用 `input.run_in_background: true`）+ **非任务 subagent 在飞**
+  （`--slots` 的 `subagentsInFlight`，调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）；
+  核实并发读原始字段，不用 START 事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）
+- **槽位视角（`--slot-status`）**：`real_in_flight` / `subagents_in_flight` / `real_concurrency` /
+  `stale_brackets` / `slots_free`（`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts
+  --slots --cap "${effective_cap:-3}"`）——「还剩几个并发槽」机械可见（AC2）；`stale_brackets > 0` 时调
+  `--reconcile` 闭合，别让红窗遗留括号污染后续判定
   事件或 pane 文字（见 `orchestrator-loop-tick.md` 步骤 4b）。**空槽数**（AC2/AC5）：`--slots --cap
-  ${effective_cap}` 的 slots-remaining + `dispatchable_disjoint − realInFlight` 的槽位级闲置
+  ${effective_cap}` 的 slots-remaining + `dispatchable_disjoint − realConcurrency` 的槽位级闲置
 - 停止条件是否触发、触发了哪条
 - 计量表当前行数与均值
 - 遥测吞吐：`tasksPerHour`（= `--task-end` 闭合任务数 / 墙钟窗口小时，报 `windowStart`/`windowEnd`/

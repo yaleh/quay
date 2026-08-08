@@ -56,6 +56,19 @@ function cleanup(tmpRoot) {
 function runCli(tmpRoot, ...args) {
   const res = spawnSync("node", ["--experimental-strip-types", CLI, "--root", tmpRoot, ...args], {
     encoding: "utf8",
+    // Deterministic slot arithmetic: --slots/--slot-status scan the LIVE machine for non-task
+    // subagent processes (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots). Tests
+    // pin QUAY_TELEMETRY_SUBAGENTS=0 so exact occupied/slots_free assertions never depend on what
+    // else happens to be running during the suite; the subagent-counting tests override it.
+    env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: process.env.QUAY_TELEMETRY_SUBAGENTS ?? "0" },
+  });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+function runCliEnv(tmpRoot, env, ...args) {
+  const res = spawnSync("node", ["--experimental-strip-types", CLI, "--root", tmpRoot, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
   });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
@@ -1223,6 +1236,105 @@ test("SLOT-STATUS CLI — real git: closed bracket + worktree REMOVED reads as g
     assert.equal(out.closedButLive.length, 0, "executor observably gone ⇒ NOT closed-but-live");
     assert.equal(out.occupiedSlots, 0);
     assert.equal(out.slotsRemaining, 1, "the fully-gone closed bracket leaves its slot genuinely free");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+// ── Non-task subagents in-flight (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots) ──
+// The UNDER-REPORT direction: an investigation-type subagent (general-purpose / Explore / Plan) has
+// NO --task-start bracket, so the bracket-based real_in_flight read 0 while the subagent burned CPU —
+// `--slots` reported 0/3 empty slots and the inner state self-check ① judged 3 free slots (real
+// concurrency was 4, not 3). The fix counts non-task subagent PROCESSES separately; real concurrency =
+// real_in_flight + subagents_in_flight is what the self-check ① must read.
+
+test("SLOT-STATUS — a non-task subagent (no bracket) is counted toward real concurrency (AC1 under-report fix)", async () => {
+  const cli = await importCli();
+  // Empty bracket store + 1 non-task subagent process (investigation, no --task-start bracket).
+  const s = cli.analyzeSlotStatus([], {
+    cap: 3,
+    executorGone: () => ({ gone: false, reason: "worktree-present" }),
+    subagentsInFlight: 1,
+  });
+  assert.equal(s.real_in_flight, 0, "no brackets ⇒ 0 bracket-based real in-flight");
+  assert.equal(s.subagents_in_flight, 1, "the non-task subagent is counted separately");
+  assert.equal(s.real_concurrency, 1, "real concurrency = brackets + non-task subagents — NO LONGER 0/3");
+  assert.equal(s.occupied_slots, 1, "a non-task subagent occupies a slot");
+  assert.equal(s.slots_free, 2, "cap 3 − 1 occupied ⇒ 2 slots free (NOT 3 — a bare subagent must not read as an empty slot)");
+});
+
+test("SLOT-STATUS — real task in flight + non-task subagent SUM, never double-count (AC3 negative control)", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus(
+    [{ taskId: "task-a", runId: "fm-task-a-1", startedAtMs: 1000 }],
+    { cap: 3, executorGone: () => ({ gone: false, reason: "worktree-present" }), subagentsInFlight: 1 },
+  );
+  assert.equal(s.real_in_flight, 1, "bracket-based real in-flight unchanged");
+  assert.equal(s.subagents_in_flight, 1);
+  assert.equal(s.real_concurrency, 2, "real concurrency = bracket(1) + subagent(1) = 2 (each occupies its own slot)");
+  assert.equal(s.occupied_slots, 2);
+  assert.equal(s.slots_free, 1, "cap 3 − 2 ⇒ 1 free — a real task and a subagent share the budget");
+});
+
+test("SLOT-STATUS — zero in-flight (no brackets, no subagents) still reports 0 (AC3 negative control)", async () => {
+  const cli = await importCli();
+  const s = cli.analyzeSlotStatus([], {
+    cap: 3,
+    executorGone: () => ({ gone: false, reason: "worktree-present" }),
+    subagentsInFlight: 0,
+  });
+  assert.equal(s.real_concurrency, 0);
+  assert.equal(s.occupied_slots, 0);
+  assert.equal(s.slots_free, 3);
+  assert.equal(s.slot_state, "free");
+});
+
+test("countNonTaskSubagents — Contract pgrep pattern; excludes pgrep/bash -c wrappers and the telemetry CLI's own process", async () => {
+  const cli = await importCli();
+  assert.equal(cli.countNonTaskSubagents([]), 0);
+  assert.equal(cli.countNonTaskSubagents(["node general-purpose run"]), 1);
+  assert.equal(cli.countNonTaskSubagents(["node Explore agent", "node Plan agent"]), 2);
+  assert.equal(
+    cli.countNonTaskSubagents([
+      "node general-purpose run",
+      "pgrep -af general-purpose", // the Contract's grep -v pgrep leg
+      "bash -c node general-purpose", // the Contract's grep -v "bash -c" leg
+      "node --experimental-strip-types fast-mode-telemetry.ts --slots", // the meter must not count itself
+    ]),
+    1,
+    "pgrep/bash -c wrappers and the telemetry CLI's own process must not count",
+  );
+  // Case-sensitive Contract pattern: a lowercase "plan" in a path must NOT match.
+  assert.equal(cli.countNonTaskSubagents(["node scripts/plan-workflow.ts"]), 0);
+});
+
+test("SLOT-STATUS CLI — an in-flight non-task subagent reports realInFlight + subagentsInFlight ≥ 1 (AC1 shape, no more 0/3)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const slots = runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "2" }, "--slots", "--cap", "3", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.realInFlight, 0, "empty bracket store ⇒ 0 bracket-based in-flight");
+    assert.equal(out.subagentsInFlight, 2, "the 2 non-task subagent processes are reported");
+    assert.ok(out.realInFlight + out.subagentsInFlight >= 1, "bare subagents must NOT read as 0/3 empty slots");
+    assert.equal(out.realConcurrency, 2, "real concurrency = brackets + non-task subagents");
+    assert.equal(out.occupiedSlots, 2, "subagents occupy slots");
+    assert.equal(out.slotsRemaining, 1, "cap 3 − occupied 2 ⇒ 1 remaining, NOT 3");
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test("SLOT-STATUS CLI — --slot-status carries subagents_in_flight / real_concurrency (slot-status surface)", async () => {
+  const tmp = makeTmpWorkspace();
+  try {
+    const slots = runCliEnv(tmp, { QUAY_TELEMETRY_SUBAGENTS: "1" }, "--slot-status", "--cap", "3", "--json");
+    assert.equal(slots.status, 0, slots.stderr);
+    const out = JSON.parse(slots.stdout);
+    assert.equal(out.subagents_in_flight, 1);
+    assert.equal(out.real_concurrency, 1);
+    assert.equal(out.occupied_slots, 1);
+    assert.equal(out.slots_free, 2);
   } finally {
     cleanup(tmp);
   }

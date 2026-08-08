@@ -901,6 +901,89 @@ export function makeDefaultExecutorPresent(root) {
   };
 }
 
+// ── Non-task subagent in-flight count (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots) ──
+//
+// The UNDER-REPORT direction of the brackets-vs-subagents defect. The slot view above counts brackets
+// whose executor is observably present — but an INVESTIGATION-type subagent (a `general-purpose` /
+// `Explore` / `Plan` dispatch with no --task-start bracket) never enters the bracket store at all, so
+// `real_in_flight` reads 0 while an actual subagent burns CPU. The inner's state self-check ① read
+// `realInFlight ≤ cap` and judged free slots that were not free (real concurrency was brackets + the
+// running investigation subagent).
+//
+// The fix does NOT put investigation subagents into task brackets (wrong semantics — they are not
+// tasks). Instead `--slots`/`--slot-status` report a separate `subagentsInFlight` count of non-task
+// subagent PROCESSES, and the REAL concurrency is `realInFlight + subagentsInFlight` — which is what
+// the state self-check ① must compare against the cap. The classification follows the Contract's
+// measure: `pgrep -af "general-purpose|Explore|Plan" | grep -v pgrep | grep -v "bash -c" | wc -l`.
+
+/** A process cmdline that identifies a non-task subagent (Contract measure pattern). Case-sensitive: a lowercase "plan" in a path must not match. */
+export const SUBAGENT_CMDLINE_RE = /general-purpose|Explore|Plan/;
+
+/**
+ * Marker substrings in the telemetry CLI's own cmdline that must never be counted as a subagent
+ * (the `pgrep -f` self-match trap CLAUDE.md documents). The meter must not count itself as measured.
+ */
+export const TELEMETRY_SELF_CMDLINE_MARKERS = ["fast-mode-telemetry.ts", "--slots", "--slot-status"];
+
+/**
+ * Count non-task subagent processes from a list of process cmdlines. PURE: takes the process list,
+ * so tests inject deterministic payloads instead of scanning the live machine.
+ *
+ * Exclusions mirror the Contract's pipeline:
+ *   - `pgrep`-matching lines and `bash -c` wrapper lines are skipped (the `grep -v` legs);
+ *   - the telemetry CLI's own processes are skipped (never count the meter as the measured);
+ *   - any cmdline carrying a subagent role token (general-purpose / Explore / Plan) counts.
+ *
+ * @param {Array<string>} cmdlines — each process's cmdline (NUL-joined /proc/<pid>/cmdline, or
+ *   pgrep -af output lines). Absent/null ⇒ 0.
+ * @returns {number}
+ */
+export function countNonTaskSubagents(cmdlines) {
+  let n = 0;
+  for (const cmd of cmdlines ?? []) {
+    if (typeof cmd !== "string" || cmd === "") continue;
+    if (cmd.includes("pgrep") || cmd.includes("bash -c")) continue;
+    if (TELEMETRY_SELF_CMDLINE_MARKERS.some((m) => cmd.includes(m))) continue;
+    if (SUBAGENT_CMDLINE_RE.test(cmd)) n++;
+  }
+  return n;
+}
+
+/**
+ * Scan /proc for live non-task subagent processes. Best-effort: a per-pid read failure is skipped;
+ * /proc unavailable (non-Linux, sandbox) → 0 (never a positive count from an unavailable source).
+ * @returns {number}
+ */
+export function scanNonTaskSubagents() {
+  const cmdlines = [];
+  try {
+    const procs = fs.readdirSync("/proc").filter((d) => /^\d+$/.test(d));
+    for (const pid of procs) {
+      try {
+        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+        cmdlines.push(cmd);
+      } catch (_) { /* pid exited mid-scan; skip */ }
+    }
+  } catch (_) { /* /proc unavailable (non-Linux, sandbox) → no count */ }
+  return countNonTaskSubagents(cmdlines);
+}
+
+/**
+ * The subagent in-flight count the --slots/--slot-status CLIs report. `QUAY_TELEMETRY_SUBAGENTS`
+ * (a non-negative integer) OVERRIDES the live /proc scan — the deterministic injection the scoped
+ * tests use so slot arithmetic never depends on what else happens to be running on the machine at
+ * test time. Unset ⇒ real scan.
+ * @returns {number}
+ */
+export function readSubagentsInFlight() {
+  const envVal = process.env.QUAY_TELEMETRY_SUBAGENTS;
+  if (envVal !== undefined && envVal !== "") {
+    const n = Number(envVal);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+  return scanNonTaskSubagents();
+}
+
 // ── Slot status (gap-telemetry-brackets-vs-subagents-no-slot-visibility) ─────────────────────────────
 //
 // `--slot-status` exposes the CONCURRENCY-SLOT view of the telemetry store as a PURE READ (like
@@ -962,22 +1045,32 @@ export const SLOT_STATUS_CAP_DEFAULT = 3;
  *   — closed-bracket executor-presence probe (REVERSE). Default: no-executor-present-probe — never
  *   flag a closed bracket as occupied without evidence.
  * @param {(taskId:string) => number|null} [opts.firstKnownCommitMs] — AC7 annotation probe.
+ * @param {number} [opts.subagentsInFlight] — non-task subagent PROCESSES in flight (no bracket —
+ *   investigation-type subagents, gap-telemetry-underreport-nontask-subagents-not-counted-in-slots).
+ *   Default 0. These are NOT brackets and are counted on top of real_in_flight: real concurrency =
+ *   real_in_flight + subagents_in_flight, and they occupy slots (slots_free must never offer a slot
+ *   an actually-busy investigation subagent holds).
  * @returns {{cap:number, in_progress_total:number, stale_brackets:number, real_in_flight:number,
- *   closed_but_live_agents:Array<object>, occupied_slots:number, slots_free:number,
- *   slot_state:"free"|"full", brackets_reflect_subagents:boolean,
- *   closed_brackets_reflect_processes:boolean, closed:Array<object>, kept:Array<object>}}
+ *   subagents_in_flight:number, real_concurrency:number, closed_but_live_agents:Array<object>,
+ *   occupied_slots:number, slots_free:number, slot_state:"free"|"full",
+ *   brackets_reflect_subagents:boolean, closed_brackets_reflect_processes:boolean,
+ *   closed:Array<object>, kept:Array<object>}}
  */
-export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null } = {}) {
+export function analyzeSlotStatus(inProgress, { cap = SLOT_STATUS_CAP_DEFAULT, executorGone, completed = [], executorPresent, firstKnownCommitMs = null, subagentsInFlight = 0 } = {}) {
   const { closed, kept } = reconcileInFlight(inProgress ?? [], { executorGone, firstKnownCommitMs });
   const realInFlight = kept.length;
   const closedButLive = detectClosedButLive(completed, { executorPresent });
-  const occupiedSlots = realInFlight + closedButLive.length;
+  const nonTaskSubagents = Number.isFinite(subagentsInFlight) && subagentsInFlight > 0 ? Math.floor(subagentsInFlight) : 0;
+  const realConcurrency = realInFlight + nonTaskSubagents;
+  const occupiedSlots = realConcurrency + closedButLive.length;
   const slotsFree = Math.max(0, cap - occupiedSlots);
   return {
     cap,
     in_progress_total: (inProgress ?? []).length,
     stale_brackets: closed.length,
     real_in_flight: realInFlight,
+    subagents_in_flight: nonTaskSubagents,
+    real_concurrency: realConcurrency,
     closed_but_live_agents: closedButLive,
     occupied_slots: occupiedSlots,
     slots_free: slotsFree,
@@ -998,11 +1091,13 @@ function printHumanSlotStatus(slot) {
   console.log(`  in-progress brackets (raw --report inProgress): ${slot.in_progress_total}`);
   console.log(`  stale brackets (reconcile would close, executor observably gone): ${slot.stale_brackets}`);
   console.log(`  real in-flight (open-bracket executor still present): ${slot.real_in_flight}`);
+  console.log(`  non-task subagents in-flight (no bracket — investigation subagents, Contract pgrep): ${slot.subagents_in_flight}`);
+  console.log(`  real concurrency (real in-flight + non-task subagents): ${slot.real_concurrency}`);
   console.log(`  closed-bracket-but-live agents (bracket closed, executor still present): ${slot.closed_but_live_agents.length}`);
   for (const c of slot.closed_but_live_agents) {
     console.log(`    ${c.taskId} (${c.reason})`);
   }
-  console.log(`  occupied slots (real in-flight + closed-but-live): ${slot.occupied_slots}`);
+  console.log(`  occupied slots (real concurrency + closed-but-live): ${slot.occupied_slots}`);
   console.log(`  slots free: ${slot.slots_free} (slot_state ${slot.slot_state})`);
   console.log(`  brackets reflect subagents: ${slot.brackets_reflect_subagents ? "YES" : "NO (stale brackets or missing --task-end)"}`);
   if (slot.closed_but_live_agents.length > 0) {
@@ -1108,10 +1203,10 @@ Usage:
   node --experimental-strip-types fast-mode-telemetry.ts --halt-start [--atMs <iso>] [--reason <str>] [--root <dir>]   (record a .halt placement)
   node --experimental-strip-types fast-mode-telemetry.ts --halt-end   [--atMs <iso>] [--root <dir>]                    (record a .halt removal)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes)
-  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight vs stale brackets vs closed-but-live agents vs slots free)
+  node --experimental-strip-types fast-mode-telemetry.ts --slot-status [--cap <n>] [--json] [--root <dir>] (PURE READ — slot view: real in-flight + non-task subagents vs stale brackets vs closed-but-live agents vs slots free)
   node --experimental-strip-types fast-mode-telemetry.ts --report [--since <iso>] [--json] [--root <dir>]   (PURE READ — never writes; carries reconcilable/realInFlight/closedButLive/occupiedSlots)
   node --experimental-strip-types fast-mode-telemetry.ts --snapshot [--since <iso>] [--json] [--root <dir>] (writes the committed aggregate)
-  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight vs closed-but-live)
+  node --experimental-strip-types fast-mode-telemetry.ts --slots [--cap N] [--json] [--root <dir>]          (PURE READ slot visibility: brackets vs real in-flight + non-task subagents vs closed-but-live)
   node --experimental-strip-types fast-mode-telemetry.ts --reconcile [--json] [--root <dir>]  (close in-flight records whose executor is observably gone — WRTES an end event per close)`;
 
 function getArgValue(args, name) {
@@ -1348,6 +1443,11 @@ export async function main(argv) {
       return 1;
     }
     const firstKnownCommitMsByTask = makeFirstKnownCommitMsByTask(root);
+    // Non-task subagent in-flight (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots):
+    // investigation-type subagents carry no bracket, so the bracket-based real_in_flight alone
+    // UNDER-reports real concurrency (0/3 slots while a general-purpose subagent burns CPU). The
+    // real count adds the live non-task subagent PROCESSES; real_concurrency = real_in_flight +
+    // subagents_in_flight is what the state self-check ① must compare against the cap.
     const slot = analyzeSlotStatus(reportWithMeta.inProgress, {
       cap,
       executorGone: makeDefaultExecutorGone(root),
@@ -1358,6 +1458,7 @@ export async function main(argv) {
       ],
       executorPresent: makeDefaultExecutorPresent(root),
       firstKnownCommitMs: (taskId) => firstKnownCommitMsByTask(taskId),
+      subagentsInFlight: readSubagentsInFlight(),
     });
     if (args.includes("--json")) {
       console.log(JSON.stringify(slot, null, 2));
@@ -1399,9 +1500,13 @@ export async function main(argv) {
   // slot visibility — how many real concurrency slots are in flight vs remaining. PURE READ (never
   // writes). `bracketsInFlight` is the raw start-without-end count; `reconcilable` is the subset
   // whose executor is OBSERVABLY gone (would be closed by --reconcile); `realInFlight` = brackets
-  // whose executor is still present — the REAL concurrency signal the state self-check ① must read
-  // instead of the raw bracket count. `--cap` supplies the concurrency cap (the tick passes its
-  // `effective_cap` from cap-from-gate.sh); when omitted, slotsTotal/slotsRemaining are null.
+  // whose executor is still present. `subagentsInFlight` = non-task subagent PROCESSES (no bracket —
+  // investigation-type subagents, gap-telemetry-underreport-nontask-subagents-not-counted-in-slots);
+  // `realConcurrency` = realInFlight + subagentsInFlight is the REAL concurrency signal the state
+  // self-check ① must read instead of the raw bracket count (a bare investigation subagent read as
+  // 0/3 empty slots is exactly the UNDER-report this fixes). `--cap` supplies the concurrency cap
+  // (the tick passes its `effective_cap` from cap-from-gate.sh); when omitted, slotsTotal/
+  // slotsRemaining are null.
   if (args.includes("--slots")) {
     const capArg = getArgValue(args, "--cap");
     let cap = null;
@@ -1422,16 +1527,22 @@ export async function main(argv) {
     const slotsTotal = cap != null ? cap : null;
     // Reverse-direction dimension (gap-closed-bracket-leaves-live-agent-consuming-slots): a CLOSED
     // bracket whose executor is still observably present (worktree open / process alive) occupies a
-    // slot even though it is not in `inProgress`. `occupiedSlots` = real in-flight (open brackets
-    // with a live executor) + closed-but-live agents — the number `slots-remaining` must subtract
-    // from the cap so a new dispatch is never recommended into an actually-busy slot (AC3).
+    // slot even though it is not in `inProgress`. Plus the UNDER-report direction: non-task
+    // subagent processes occupy slots even though they carry NO bracket. `occupiedSlots` = real
+    // in-flight (open brackets with a live executor) + non-task subagents + closed-but-live agents
+    // — the number `slots-remaining` must subtract from the cap so a new dispatch is never
+    // recommended into an actually-busy slot (AC3).
+    const subagentsInFlight = readSubagentsInFlight();
+    const realConcurrency = reportWithMeta.realInFlight + subagentsInFlight;
     const closedButLive = reportWithMeta.closedButLive ?? [];
-    const occupiedSlots = reportWithMeta.occupiedSlots ?? reportWithMeta.realInFlight;
+    const occupiedSlots = realConcurrency + closedButLive.length;
     const slotsRemaining = cap != null ? Math.max(0, cap - occupiedSlots) : null;
     const out = {
       bracketsInFlight: reportWithMeta.inProgress.length,
       reconcilable: reportWithMeta.reconcilable.length,
       realInFlight: reportWithMeta.realInFlight,
+      subagentsInFlight,
+      realConcurrency,
       closedButLive,
       occupiedSlots,
       slotsTotal,
@@ -1442,8 +1553,9 @@ export async function main(argv) {
     } else {
       const capPart = cap != null ? `, slots-total ${out.slotsTotal}, slots-remaining ${out.slotsRemaining}` : "";
       const closedPart = out.closedButLive.length > 0 ? `, closed-but-live ${out.closedButLive.map((c) => c.taskId).join(",")}` : "";
+      const subPart = out.subagentsInFlight > 0 ? `, non-task subagents ${out.subagentsInFlight}` : "";
       console.log(
-        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}${closedPart}, occupied ${out.occupiedSlots}${capPart}`,
+        `slot visibility: brackets-in-flight ${out.bracketsInFlight}, reconcilable ${out.reconcilable}, real-in-flight ${out.realInFlight}, real-concurrency ${out.realConcurrency}${subPart}${closedPart}, occupied ${out.occupiedSlots}${capPart}`,
       );
     }
     return 0;
