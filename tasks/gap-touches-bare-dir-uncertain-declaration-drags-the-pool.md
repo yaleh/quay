@@ -11,7 +11,7 @@ title: "Touches must NOT declare bare-directory globs with uncertain
   plugin/scripts/branch-helper.sh) — not a bare dir with 'if it becomes a
   script'; enforcement: mechanical check (flag bare-dir + uncertain-annotation
   Touches at filing) or template AC + reviewer discipline"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -53,6 +53,12 @@ extra:
 - [ ] AC1: 规则落地——filing 时裸目录 + 不确定标注 Touches 被 flag（机械或模板 AC）
 - [ ] AC2: branch-model 的 Touches 收窄（'若成脚本' → 明确候选路径或删）；池恢复可并行
 - [ ] AC3: 复测：池候选 disjointness 正常（不再 5/6 被裸目录拖垮）
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（裸目录+不确定标注 Touches 被 flag——机械或模板 AC；branch-model Touches 收窄——'若成脚本'改明确候选路径或删；复测池候选 disjointness 正常不再被裸目录拖垮）
+- [ ] 裸目录 flag 实测 + 池 disjointness 复测正常
+- [ ] scoped 门 `scripts/test.sh --for-task gap-touches-bare-dir-uncertain-declaration-drags-the-pool` 绿
 
 ## Touches
 

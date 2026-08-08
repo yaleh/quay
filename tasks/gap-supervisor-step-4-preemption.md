@@ -1,7 +1,7 @@
 ---
 id: gap-supervisor-step-4-preemption
 title: "supervisor 基座步骤④：抢占（preemption）——把「暂停/停止一个在飞任务」从屏幕抓取/文件轮询伪造（.halt 挡不住连续流程）收编为会话外进程的确定性操作；机制：任务超时/资源争抢/更高优先派发时 kill 子进程树（复用 kill-session 能力），只读可查询事实（进程在不在、跑多久、槽位空不空）不读任务语义；越界判据（任何一行需理解任务在讲什么 = 越界）在代码评审可查"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -49,6 +49,12 @@ extra:
 - [ ] AC5: **复用已验证能力**——kill 动作复用 `kill-session`/os-anchor-watchdog re-spawn 机制，零新发明
 - [ ] AC6: **与既有基座任务交叉标注**——`SPEC-integration-architecture` 步骤④ + `gap-over-90m`（超时判据源）
       + `gap-supervisor-step-5-message-bus-with-identity`（抢占事件经总线带身份广播）
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（抢占判据由可查询事实驱动——只读进程/时长/槽位/资源不解析任务语义，代码评审可查；超时任务确定性抢占——>90min 无推进 ⇒ 子进程树被杀/bracket 关/ledger 记事件；正常任务不被误杀——活跃推进任务调用抢占被拒）
+- [ ] 超时抢占负控制实跑 + 正常任务正控制实跑
+- [ ] scoped 门 `scripts/test.sh --for-task gap-supervisor-step-4-preemption` 绿
 
 ## Touches
 

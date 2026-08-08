@@ -10,7 +10,7 @@ title: "quay-init --loop upgrade for EXISTING downstream consumers either STOPS
   posture (same as the bare-✖ shape); config confirmed intact (stopped before
   writing); fix: config-PRESERVING incremental upgrade entry (backup config,
   apply mechanism files, keep config values)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -59,6 +59,12 @@ extra:
       ①claim-task 单机无共享裸仓 fail-closed 不误判；②slot-refill cap 阈值与下游资格形状可配；③
       self-report-vocab 词汇版本漂移不误判不收敛。④（taskWorkLanded checkbox 信号）已核实为
       archguard 对 quay 机制的误解（第三信号是 git-history 非 checkbox），不列入。
+
+## Definition of Done
+
+- [ ] AC1-AC5 全勾（已有消费者 quay init --loop 铺新机制且 config 保留；config 备份+恢复失败回滚；fresh install 无冲突；与 delivery-surface-grows 交叉标注——报后怎么办；与 quay-init-rewrites-an-executable 交叉标注）
+- [ ] config 保留实测（loop 值不变）+ 备份恢复实测
+- [ ] scoped 门 `scripts/test.sh --for-task gap-quay-init-config-preserving-incremental-upgrade` 绿
 
 ## Touches
 

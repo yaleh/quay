@@ -1,7 +1,7 @@
 ---
 id: gap-supervisor-step-5-message-bus-with-identity
 title: "supervisor 基座步骤⑤：消息总线带发送者身份（message bus with sender identity）——把「跨会话投递」从各会话裸 send-keys（无身份、无法归因）收编为会话外进程的一条带身份消息通道；每条消息携带发送者身份（哪层/哪项目），送达校验用 transcript（唯一可信信号）；越界判据（任何一行需理解任务在讲什么 = 越界）在代码评审可查"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -49,6 +49,12 @@ send-keys 序列，**无身份、无法归因**。
 - [ ] AC5: **与既有基座任务交叉标注**——`SPEC-integration-architecture` 步骤⑤ + `gap-reliable-send`
       （投递实现）+ `gap-send-keys-reliable-nbsp`（判空修复）+ `gap-supervisor-step-4-preemption`
       （抢占事件经总线带身份广播）
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（消息带身份——sender layer+project，送达校验记录谁→谁→何时→是否送达可归因；一处硬化投递——所有跨会话投递走 send-keys-reliable 模式；真 TUI 端到端——真实目标会话送达 + transcript 校验，NBSP 反例结构性解）
+- [ ] 真 TUI 端到端实跑 + 身份归因记录
+- [ ] scoped 门 `scripts/test.sh --for-task gap-supervisor-step-5-message-bus-with-identity` 绿
 
 ## Touches
 

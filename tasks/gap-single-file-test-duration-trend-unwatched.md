@@ -1,7 +1,7 @@
 ---
 id: gap-single-file-test-duration-trend-unwatched
 title: "single-file test duration GROWTH is not tracked — measure-suite.mjs + measure-suite-reporter.mjs have precise per-file duration capture (__PERFILE__ <basename> <duration_ms> <passed>) but are one-shot manual tools: no history persistence, no trend comparison, not wired into any decision path (only capability-catalog lists them as tools; scripts/test.sh static layer has no duration check; CI has only coarse job-level timeout 10-15min that kills the whole job without naming the slow file); 'can measure but doesn't watch' — same class as writer-exists-nobody-calls / existence-not-effect recurring tonight; trigger: session-liveness.test.mjs 2016 lines slow (>30s wait, manager spent time diagnosing whether it hung); human-approved usage-perspective probe 2026-08-06, ruling requested on thresholds/storage/立案"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -39,6 +39,12 @@ extra:
 - [ ] AC2: 下次对比上次——单文件耗时增长超基线报出（文件 + 增幅）
 - [ ] AC3: 复用 measure-suite-reporter（不新造测量器）
 - [ ] AC4: 与 gap-suite-cost-model-is-wrong（done）交叉标注——同「成本数据」方向，本任务加趋势维度
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（全量后落 measure-history 每文件 duration append-only；下次对比上次单文件增长超基线报出；复用 measure-suite-reporter 不新造；与 suite-cost-model-is-wrong 交叉标注——加趋势维度）
+- [ ] measure-history 落盘 + 趋势报出实测
+- [ ] scoped 门 `scripts/test.sh --for-task gap-single-file-test-duration-trend-unwatched` 绿
 
 ## Touches
 

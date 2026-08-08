@@ -1,7 +1,7 @@
 ---
 id: gap-install-upgrade-verification-targets-real-downstream-workspaces
 title: "install/upgrade verification must target REAL downstream workspaces (archguard/meta-cc/B), not just the mkdtemp fixture — A3 green on synthetic while archguard's real config-conflict went uncaught; range-not-frequency (human: AC12b achieved, verify install/upgrade/cold-start more frequently; manager: '只提高频率不改验证对象，跑一万次也撞不到那个状态' — 裁定：两者都要)"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -50,6 +50,12 @@ loop 值 ≠ 模板）。**冲突来自「这个项目真的用过、真的改�
 - [ ] AC5: 与 AC12b 判据承载任务（`gap-send-keys-reliable-welcome-screen-ghost-drive-fails.md`，AC12b 产品
        主判据、两层无人干预区间的唯一硬阻塞）交叉标注——本任务是把「AC12b 达成后（人方向）可更频繁
        验证安装/升级/冷启动」落实成机制
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（真实下游工作区成验证目标——机制脚本对真实工作区跑 quay init --loop 并报结论，与合成夹具分开标注；频率机制落地——从 milestone 边界提高到可定期；合成夹具与真实目标分线——synthetic green 不当作真实下游 green 证据）
+- [ ] 真实下游验证实跑（archguard/meta-cc/B 机任一）+ 分线标注
+- [ ] scoped 门 `scripts/test.sh --for-task gap-install-upgrade-verification-targets-real-downstream-workspaces` 绿
 
 ## Touches
 
