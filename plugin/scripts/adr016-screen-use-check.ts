@@ -13,11 +13,14 @@
 //   (c) whole-screen equality/HASH of capture-pane output (the `md5(capture-pane)` family) is
 //       FORBIDDEN, with or without prior masking.
 //
-// Detection is by CODE POSITION, not keyword. We scan SHELL SCRIPTS (.sh/.bash) only — the ADR's
-// own prose (.md) is never scanned, so the words "md5(capture-pane)" written in the Amendment can
-// never self-match (this repo has recorded 6 keyword-checker false positives of exactly that
-// shape). Within a shell script a file is flagged only when a `tmux capture-pane` result actually
-// FLOWS into a hash tool (md5sum / sha1sum / cksum):
+// Detection is by CODE POSITION, not keyword. We scan SHELL SCRIPTS (.sh/.bash) EVERYWHERE plus
+// the fenced ```bash INSTRUCTION blocks inside the shipped/live tick docs (MD_TICK_DOCS — the same
+// doc set instrument-failure-check scans; gap-adr016-md5-ban-...-scope-gap AC3); the ADR's own
+// prose (.md) is never scanned, so the words "md5(capture-pane)" written in the Amendment can never
+// self-match (this repo has recorded 6 keyword-checker false positives of exactly that shape).
+// `.ts` is also NOT scanned — decision record in the SHELL_EXT comment (AC2). Within a shell script
+// a file is flagged only when a `tmux capture-pane` result actually FLOWS into a hash tool
+// (md5sum / sha1sum / cksum):
 //   - same command: `tmux capture-pane -p -t x | md5sum` on one line;
 //   - variable taint: `raw=$(tmux capture-pane …)` → `masked=$(… "$raw" …)` → `… | md5sum`
 //     (the session-liveness.sh shape — capture, mask, hash across separate commands).
@@ -79,8 +82,28 @@ export const RETIRED_FILES = new Set([
   "packages/quay/plugin/scripts/send-keys-verified.sh",
 ]);
 
-/** Shell script extensions scanned (the pattern lives in shell commands, not .md prose). */
+/** Shell script extensions scanned. `.ts` is deliberately NOT scanned (decision record, NOT a
+ * silent omission — gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap AC2):
+ * stripShellComments models only SHELL comments (`#`); a TS file's `//`-comments and string
+ * literals would self-match the pattern in this very checker (its selftest embeds the flow),
+ * and no EXECUTABLE .ts instance of the whole-screen-hash flow exists in the repo
+ * (grep-verified 2026-08-08). If a .ts ever carries the flow, add a TS-aware comment/string
+ * stripper first — code-position detection keeps the band honest. */
 const SHELL_EXT = new Set([".sh", ".bash"]);
+
+/** Shipped/live tick docs whose fenced ```bash blocks are INSTRUCTIONS, not prose — same weight
+ * as a .sh file (gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap AC3). The ADR's
+ * own prose (adr/ADR-016*.md) and every other .md stay exempt: only this allowlist is scanned,
+ * and within each doc only the fenced BASH blocks (never the surrounding prose), so the words
+ * "md5(capture-pane)" written in a sentence can never self-match. Same doc set
+ * instrument-failure-check.ts scans. */
+const MD_TICK_DOCS = new Set([
+  "plugin/loop/fast-mode-loop-tick.md",
+  "plugin/loop/manager-loop-tick.md",
+  "plugin/loop/orchestrator-loop-tick.md",
+  "orchestration/manager-loop-tick.md",
+  "orchestration/orchestrator-loop-tick.md",
+]);
 
 export interface Violation {
   rel: string;
@@ -221,17 +244,62 @@ export function detectFileViolations(rel: string, source: string): Violation[] {
   return out;
 }
 
-/** Scan a tree for whole-screen-hash violations. Pure + fs: the caller picks the root. */
+/** Extract language-tagged fenced code blocks (` ```bash ` / ` ```sh ` / ` ```shell `) from a
+ * markdown doc. A fenced bash block in a tick doc is an INSTRUCTION (same weight as a .sh file),
+ * unlike the surrounding prose — so the whole-screen-hash ban applies inside it. Returns
+ * { startLine (1-based), code } per block so violations can be offset back to the .md line. */
+export function extractBashBlocks(source: string): Array<{ startLine: number; code: string }> {
+  const blocks: Array<{ startLine: number; code: string }> = [];
+  const lines = source.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*```(bash|sh|shell)\s*$/);
+    if (!m) continue;
+    const startLine = i + 1;
+    const codeLines: string[] = [];
+    i++;
+    while (i < lines.length && !/^\s*```/.test(lines[i])) {
+      codeLines.push(lines[i]);
+      i++;
+    }
+    blocks.push({ startLine, code: codeLines.join("\n") });
+    if (i < lines.length) i++; // skip the closing fence
+  }
+  return blocks;
+}
+
+/** Scan ONE tick doc's fenced bash blocks for whole-screen-hash violations. Reuses the shell
+ * detector (block content IS shell) and offsets reported line numbers back to the .md file
+ * (the first content line sits one line below the opening fence, so the offset is `+ startLine`). */
+export function detectTickDocViolations(rel: string, source: string): Violation[] {
+  const out: Violation[] = [];
+  for (const { startLine, code } of extractBashBlocks(source)) {
+    for (const v of detectFileViolations(rel, code)) {
+      out.push({ ...v, line: v.line + startLine });
+    }
+  }
+  return out;
+}
+
+/** Scan a tree for whole-screen-hash violations. Pure + fs: the caller picks the root. Shell
+ * scripts everywhere (.sh/.bash); shipped/live tick docs' fenced BASH blocks (MD_TICK_DOCS). */
 export function scanForScreenHashViolations(root: string): ScanResult {
   const files = collectShellScripts(root);
   const violations: Violation[] = [];
   const retired: Violation[] = [];
-  for (const rel of files) {
-    const source = fs.readFileSync(path.join(root, rel), "utf8");
-    const found = detectFileViolations(rel, source);
+  const absorb = (rel: string, found: Violation[]) => {
     for (const v of found) {
       if (RETIRED_FILES.has(v.rel)) retired.push(v);
       else violations.push(v);
+    }
+  };
+  for (const rel of files) {
+    absorb(rel, detectFileViolations(rel, fs.readFileSync(path.join(root, rel), "utf8")));
+  }
+  for (const rel of MD_TICK_DOCS) {
+    const full = path.join(root, rel);
+    if (fs.existsSync(full)) {
+      files.push(rel);
+      absorb(rel, detectTickDocViolations(rel, fs.readFileSync(full, "utf8")));
     }
   }
   return { violations, retired, files };
@@ -269,6 +337,27 @@ export function selftest(): boolean {
   // GREEN: md5 without any capture-pane (hashing a file) is not a violation.
   check("green-hash-no-pane", detectFileViolations("d.sh", 'md5sum data.txt\n').length === 0);
 
+  // RED (tick-doc bash block): a fenced ```bash instruction block carrying the flow is a violation
+  // even though the file is .md — shipped bash blocks are instructions, not prose (AC3).
+  const mdEvil = [
+    "# heading prose is never scanned",
+    "```bash",
+    "tmux capture-pane -p -t x | md5sum",
+    "```",
+    "tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle", // compliant — no hash
+  ].join("\n");
+  vs = detectTickDocViolations("plugin/loop/t.md", mdEvil);
+  check("red-md-bash-block", vs.length === 1 && vs[0].reason === "same-command" && vs[0].line === 3, JSON.stringify(vs));
+
+  // GREEN (tick-doc prose): the same flow written as prose (not in a fenced bash block) is NOT a
+  // violation — prose is exempt so a correction note can never self-match.
+  const mdProse = "judge idle: capture-pane result flows into md5sum — but prose never self-matches\n";
+  check("green-md-prose", detectTickDocViolations("plugin/loop/t.md", mdProse).length === 0);
+
+  // GREEN (tick-doc compliant block): the `tail -3 | grep 'esc to interrupt'` shape has no hash.
+  const mdCompliant = ["```bash", "tmux capture-pane -p -t x | tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle", "```"].join("\n");
+  check("green-md-compliant-block", detectTickDocViolations("plugin/loop/t.md", mdCompliant).length === 0);
+
   console.log(`\nadr016-screen-use-check --selftest: ${pass} passed, ${fail} failed`);
   return fail === 0;
 }
@@ -302,7 +391,7 @@ export function main(argv: string[]): number {
   if (asJson) {
     console.log(JSON.stringify({ ok: inBand, violations: active, active: violations, retired, files_scanned: files.length }, null, 2));
   } else {
-    console.log(`adr016-screen-use-check — ${files.length} shell script(s) scanned`);
+    console.log(`adr016-screen-use-check — ${files.length} file(s) scanned (shell scripts + tick-doc bash blocks)`);
     if (active === 0) console.log("violations: 0");
     else {
       console.log(`violations: ${active}`);

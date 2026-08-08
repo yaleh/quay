@@ -82,7 +82,11 @@ grep -m1 '^| 2026' <项目>/orchestration/tick-log.md      # 最新一行，看�
 
 **推进的判据不是 TUI，是文件系统**（`CLAUDE.md`：never parse the TUI）：
 每个项目的 `git log --since='<上次 tick>'` 与其 `orchestration/tick-log.md` 行数增长。
-capture-pane 只用于确认 send-keys 送达、判忙闲（两次 md5sum 相同 = 空闲）。
+**capture-pane 只用于确认 send-keys 送达、判忙闲。** 忙闲只取 pane 底部 3 行 + 枚举态：
+`tmux capture-pane -p -t "<pane>" | tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle`
+（**绝不用整屏哈希**——`md5(capture-pane)` 一族已被 ADR-016 `## Amendment 2026-08-04` 明令禁止、
+`adr016-screen-use-check.ts` 机械拦截；2026-08-08 与 orchestration/manager-loop-tick.md 的更正同步。
+注意别写成 `-S -3`——`-S` 是【起始行】不是行数，负值进历史缓冲取不到状态行。）
 
 ### c. 聚合升级项
 

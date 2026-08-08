@@ -4,10 +4,12 @@
 //
 // AC1 Amendment 2026-08-04 present with the three pinned boundaries (enumerated states / bottom
 // region / no whole-screen hash) · AC2 enforcement: points at this checker · AC3 detection by CODE
-// POSITION (capture-pane flows into md5sum/sha1sum/cksum in shell scripts) — a .md naming the
-// pattern must never self-match, and a comment mentioning it must not satisfy the detector ·
-// AC4 band 0..1 (one active legacy observer tolerated; a second goes RED) · AC5 negative control
-// both directions (present → reported; removed → not) · AC7 @test-group governance.
+// POSITION (capture-pane flows into md5sum/sha1sum/cksum in shell scripts + the fenced ```bash
+// INSTRUCTION blocks of the shipped/live tick docs — gap-adr016-md5-ban-violated-in-shipped-md-
+// and-checker-scope-gap AC3) — a .md naming the pattern in PROSE must never self-match, and a
+// comment mentioning it must not satisfy the detector · AC4 band 0..1 (one active legacy observer
+// tolerated; a second goes RED) · AC5 negative control both directions (present → reported; removed
+// → not) · AC7 @test-group governance.
 //
 // Run: scripts/test.sh plugin/test/adr016-screen-use-check.test.mjs
 
@@ -20,6 +22,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   detectFileViolations,
+  detectTickDocViolations,
   scanForScreenHashViolations,
   stripShellComments,
   RETIRED_FILES,
@@ -147,15 +150,44 @@ test("AC2: the ADR enforcement: frontmatter points at the mechanical checker", (
   assert.match(adr, /adr016-screen-use-check\.ts/);
 });
 
-test("AC3/AC7: the checker itself is a shell-script scanner — the test file and ADR prose are .md/.mjs and never self-match", () => {
+test("AC3/AC7: the checker scans shell scripts + tick-doc bash blocks — .md prose and the test/ADR files never self-match", () => {
   // The real repo scan (the run_static_checks invocation) must stay within the band on the
   // current tree. The ONE tolerated legacy whole-screen-hash observer — session-liveness.sh —
   // was fixed by gap-session-liveness-hashes-the-token-counter-as-if-it-were-work (its busy
-  // judgment now consumes classifyPaneState; the capture-pane→md5sum flow is gone), so the repo
-  // is now at ZERO active violations. Only the retired send-keys-verified.sh occurrences remain.
+  // judgment now consumes classifyPaneState; the capture-pane→md5sum flow is gone). The shipped
+  // tick docs' md5(capture-pane) blocks were fixed by gap-adr016-md5-ban-violated-in-shipped-md-
+  // and-checker-scope-gap (AC1), so the repo is now at ZERO active violations. Only the retired
+  // send-keys-verified.sh occurrences remain.
   const { violations, retired } = scanForScreenHashViolations(repoRoot);
   assert.equal(violations.length, 0, JSON.stringify(violations.map((v) => `${v.rel}:${v.line}`)));
   assert.ok(retired.length >= 1); // send-keys-verified.sh retired occurrences
+});
+
+test("AC3: a fenced ```bash INSTRUCTION block in a tick doc is a violation (shipped bash blocks are not prose)", () => {
+  const src = [
+    "# prose heading — never scanned",
+    "```bash",
+    "tmux capture-pane -p -t \"$TMUX_SESSION\" | md5sum; sleep 25",
+    "tmux capture-pane -p -t \"$TMUX_SESSION\" | md5sum      # 两次相同 = 空闲",
+    "```",
+  ].join("\n");
+  const vs = detectTickDocViolations("plugin/loop/orchestrator-loop-tick.md", src);
+  assert.equal(vs.length, 2);
+  assert.equal(vs[0].reason, "same-command");
+  assert.equal(vs[0].line, 3); // offset back to the .md line, not the block-relative line
+  assert.equal(vs[1].line, 4);
+});
+
+test("AC3: prose in a tick doc naming the flow is NOT a violation (prose exempt — a correction note can never self-match)", () => {
+  const src = "judge idle: a capture-pane result flowing into md5sum was the old shape — prose is exempt\n";
+  const vs = detectTickDocViolations("plugin/loop/manager-loop-tick.md", src);
+  assert.equal(vs.length, 0);
+});
+
+test("AC3: the compliant alternative (`tail -3 | grep 'esc to interrupt'`) in a tick-doc bash block is NOT a violation", () => {
+  const src = ["```bash", "tmux capture-pane -p -t \"$TMUX_SESSION\" | tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle", "```"].join("\n");
+  const vs = detectTickDocViolations("plugin/loop/orchestrator-loop-tick.md", src);
+  assert.equal(vs.length, 0);
 });
 
 test("stripShellComments: comments are stripped but string literals preserved", () => {
