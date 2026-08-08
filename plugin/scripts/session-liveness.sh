@@ -979,6 +979,26 @@ _sl_audit_pane_only_gate() {
   done < <(targets)
 }
 _sl_audit_pane_only_gate
+# ── 观测者自注册（gap-sweeptmp-pkill-kills-live-observers-two-layer-blind 候选 D / AC5）─────────
+# 「观测者被杀」要有观测者：常驻监视器启动时在 $REPO_ROOT/.quay/ 写一个 pid 注册文件、退出时移除
+# （trap），让外层/manager 能发现「本该在跑的实例没了」——不靠「Monitor 报 failed」这种被动、且会
+# 随会话一起死的通道。文件按 pid 唯一（.quay/session-liveness.<pid>.json），多实例互不冲突；
+# 检查器（plugin/scripts/observer-registry-check.sh）读注册表 + 对照 /proc，发现已注册但进程已
+# 消失的实例。SIGKILL 无法 trap ⇒ 被杀时注册文件留下 = 死亡可被检测（这正是事故要的可观测性）。
+# SL_NO_REGISTER=1 关闭（测试接缝：spawnMonitor 默认关，防测试污染真实 .quay）。
+if [ "${SL_NO_REGISTER:-0}" != "1" ]; then
+  _sl_reg_dir="$REPO_ROOT/.quay"
+  mkdir -p "$_sl_reg_dir" 2>/dev/null || true
+  _sl_reg_file="$_sl_reg_dir/session-liveness.$BASHPID.json"
+  if [ -w "$_sl_reg_dir" ] || [ -w "$REPO_ROOT" ]; then
+    printf '{"pid":%d,"started":"%s","root":"%s","targets":"%s"}\n' \
+      "$BASHPID" "$(date -Is 2>/dev/null || date +%Y-%m-%dT%H:%M:%SZ)" \
+      "$REPO_ROOT" "${SESSION_TARGETS:-${SESSION_TMUX_SESSION:-}}" \
+      > "$_sl_reg_file" 2>/dev/null || true
+    _sl_unregister() { rm -f "$_sl_reg_file" 2>/dev/null || true; }
+    trap _sl_unregister EXIT INT TERM
+  fi
+fi
 
 while true; do
   while read -r name root target; do
