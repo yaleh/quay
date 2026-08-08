@@ -119,6 +119,7 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + for
       ——按更正判别式：存在任务分支 p 为 integration 祖先且非 develop 祖先）
 
 ## Touches
+- tasks/gap-ac19-two-line-model-actually-runs.md（self——派发授权）
 - 内层 fan-in 行为（任务合 integration 而非 develop——执行，非代码）
 - plugin/loop/fast-mode-loop-tick.md（若需强化 fan-in 合 integration 的执行纪律）
 - orchestration/manager-phase-goal.md（AC19 判据，交叉标注）
