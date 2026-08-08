@@ -443,12 +443,18 @@ test("AC6 — no tick log: SESSION-OVERDUE stays silent, other events work, no c
   }
 });
 
-test("AC9 — orchestration/session-liveness.env is the ZERO-CONFIG default (manager config moved out 2026-08-04 c1489b6a); an env file IS sourced when SESSION_TARGETS is unset", async () => {
+test("AC9 — orchestration/session-liveness.env is the OUTER's OWN config (manager's 3-project config moved out 2026-08-04 c1489b6a); it may carry a SINGLE SESSION_TARGETS aimed at the inner role window, but never the manager topology nor the :outer self-watch default; an env file IS sourced when SESSION_TARGETS is unset", async () => {
   const realEnv = fs.readFileSync(path.resolve(__dirname, "..", "..", "orchestration", "session-liveness.env"), "utf8");
-  assert.ok(!realEnv.includes("SESSION_TARGETS="),
-    "orchestration/session-liveness.env must be the zero-config default — the manager's 3-project config was moved out to ~/.quay-global/manager-session-liveness.env (c1489b6a: it was being read by a session it was not meant for)");
-  assert.ok(!realEnv.includes("quay-0:outer"),
-    "the env file must NOT carry the three-project topology anymore");
+  // The manager's THREE-project config was moved out to ~/.quay-global/manager-session-liveness.env
+  // (c1489b6a: it was being read by a session it was not meant for). The env file may legitimately
+  // carry the OUTER's own single-target SESSION_TARGETS (gap-session-liveness-monitor-watches-self-
+  // not-inner aims the monitor at the inner role window), but must NEVER carry the manager topology
+  // or target the :outer default that left the monitor watching ITSELF. Only ACTIVE config lines
+  // matter here — the file's COMMENT block may mention the old manager topology as history.
+  assert.ok(!/^SESSION_TARGETS=[^\n]*(archguard|meta-cc)/m.test(realEnv),
+    "no ACTIVE SESSION_TARGETS line may carry the manager's 3-project topology (archguard/meta-cc — moved out 2026-08-04 c1489b6a)");
+  assert.ok(!/^SESSION_TARGETS=[^\n]*quay-0:outer/m.test(realEnv),
+    "the env file's SESSION_TARGETS must NOT target the :outer window (the self-watch defect — it must name a role window like quay-0:inner)");
   assert.ok(!fs.readFileSync(SCRIPT, "utf8").includes("quay-0:"), "the script must NOT carry the topology (moved out)");
 
   const ws = makeTmp();

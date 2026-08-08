@@ -892,6 +892,33 @@ session_pid() {  # 按窗口名寻址；pane 索引会漂。找 pane 本体或�
 # 多观察者并行挂载天然无冲突。谁先启动无关——每个观察者的状态完全是进程内的（PREV_* 关联数组），
 # 观察者之间互不知情、不共享任何写点。
 
+# ── 配置接线审计（gap-session-liveness-monitor-watches-self-not-inner，2026-08-08）────────────
+# 失败形态：SESSION_TRANSCRIPTS / SESSION_HEARTBEATS 的名字与 SESSION_TARGETS 的目标名不一致 ⇒
+# transcript_for 按名匹配不到 ⇒ tr_path 静默为空 ⇒ 该目标的心跳回落默认外层多源心跳——以为配了
+# transcript 实际没有，transcript 相关判据（MARKER-STALE / CANT-SEND / SATURATED /
+# OVERDUE-on-transcript）全部不生效：监视器「看内层进程、按外层心跳判」的静默半盲。这就是
+# 12:2x 版本把 SESSION_TRANSCRIPTS 写成 "inner"（目标名却是 "quay"）时发生的事。启动时对每个
+# 配置的 transcript/heartbeat 名字，若不属于任一 SESSION_TARGETS 目标名，WARN 一次（每名字一次，
+# stderr）——宁可启动时响一声，不要运行期静默半盲。
+_sl_audit_config_wiring() {
+  [ -n "${SESSION_TRANSCRIPTS:-${SESSION_HEARTBEATS:-}}" ] || return 0
+  local -A target_names=()
+  local name root target n v src
+  while read -r name root target; do
+    [ -n "${name:-}" ] || continue
+    target_names["$name"]=1
+  done < <(targets)
+  for src in SESSION_TRANSCRIPTS SESSION_HEARTBEATS; do
+    [ -n "${!src:-}" ] || continue
+    while read -r n v; do
+      [ -n "${n:-}" ] || continue
+      [ "${target_names[$n]:-0}" = "1" ] || \
+        echo "session-liveness: WARN ${src} 的名字「${n}」不匹配任何 SESSION_TARGETS 目标名（targets: ${!target_names[*]}）——transcript_for 按名匹配会找不到它，该目标的心跳不会用这个源；名字必须与 SESSION_TARGETS 的目标名一致" >&2
+    done <<< "${!src}"
+  done
+}
+_sl_audit_config_wiring
+
 while true; do
   while read -r name root target; do
     [ -n "${name:-}" ] || continue
