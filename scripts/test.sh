@@ -303,6 +303,23 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/loop/fast-mode-loop-tick.md plugin/loop/orchestrator-loop-tick.md orchestration/QUAY-OUTER-HANDOFF.md
   run_checker "drive-contract-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/drive-contract-check.ts" --root "${repo_root}"
+  echo "== instrument-failure check (gap-manager-instrument-failures-need-mechanical-detection-not-carefulness, AC3) =="
+  # The manager instrument-failure five-family detector (FAMILY-1..5 in the checker header). The
+  # manager's instrument failures recurred 7× in one night across five families already documented
+  # in manager-loop-tick.md §4 — prose rules provably don't work, so the five families get a
+  # MECHANICAL detection path (the ## Contract's `detected_families ≥ 5` band as an executable
+  # invariant, AC5: §4 prose → scan surface). Gate semantics (exit 1 = red):
+  #   band        — every family must fire ≥1 time on the default tick-doc surface; a §4 family
+  #                 that is no longer mechanically detectable red-lights the commit.
+  #   shrink-only — every family's hit count must stay ≤ FAMILY_BASELINE[n]; a NEW failure-form
+  #                 instance beyond the documented baseline red-lights (prose can't silently add
+  #                 another un-detected failure shape).
+  # The AC2 per-family positive/negative controls live in
+  # plugin/test/instrument-failure-check.test.mjs + the mutation case (correct form 0 hits, error
+  # form must report).
+  # @static-tier change
+  # @static-object orchestration/manager-loop-tick.md orchestration/orchestrator-loop-tick.md plugin/loop/fast-mode-loop-tick.md plugin/loop/manager-loop-tick.md plugin/loop/orchestrator-loop-tick.md
+  run_checker "instrument-failure-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/instrument-failure-check.ts" --gate --root "${repo_root}"
   echo "== checker-mutation check (gap-checkers-have-never-been-shown-to-fail, AC1-AC6) =="
   # The L_S instrument: mutation-test the checkers THEMSELVES, not product code. The manifest is
   # parsed from THIS function + CI (never hand-written), so a checker added here (or to a CI

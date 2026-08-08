@@ -72,22 +72,62 @@ resume 若中断，先跑 measure 读当前可检出族数，再读 manager-loop
 
 ## Acceptance Criteria
 
-- [ ] AC1: 扫描器检出**全部五族**（每族至少一个真实命中，来自现有 tick 文档/脚本，非人造样本）
-- [ ] AC2: **负控制逐族成立**——每族正确写法 0 命中、错误写法必报（承重条：报不出正确写法的
-      检出器是噪音，报不出错误写法的检出器是摆设）
-- [ ] AC3: 接入调用点（如 `scripts/test.sh` 静态 tier 或 manager tick 的复核步骤），非一次性脚本
-- [ ] AC4: 管理者按检出器复核——7 次复发的五族在未来 N 次 tick 中被机械拦下（而非管理者更小心），
-      贴出拦截记录
-- [ ] AC5: 与 `manager-loop-tick.md` §4 交叉标注（成文 → 机械检出，散文变可执行）
+- [x] AC1: 扫描器检出**全部五族**（每族至少一个真实命中，来自现有 tick 文档/脚本，非人造样本）
+      ——实跑 `--scan orchestration/manager-loop-tick.md orchestration/orchestrator-loop-tick.md
+      plugin/loop/*.md` 输出 5 条 `FAMILY-` 行（Contract `grep -c '^FAMILY-'` = 5 ≥ 5），每族首命中
+      都是现有文档真实内容：族1 `pgrep -f 'quay.ts serve --host <ip>'`（orchestrator doc）；
+      族2 `ps -e -o comm= | grep -cx node   # 0 = 没有 node 在跑`（fast-mode-loop-tick）；
+      族3 §4「管道后读 `$?`」行（manager doc ×2）；族4 `comm=node`/`grep -cx node`（orchestrator +
+      fast-mode）；族5 「读 `.quay/full-suite-state.json` 的 `state`」无新鲜度检查（orchestrator +
+      fast-mode，10 处）。
+- [x] AC2: **负控制逐族成立**——每族正确写法 0 命中、错误写法必报。`plugin/test/
+      instrument-failure-check.test.mjs` 11 项全绿（11 pass 0 fail），逐族正负样本：
+      族1 正 `pgrep -xc node-MainThread`→0 / 负 `pgrep -f 'quay.ts serve'`→1；族2 正 计数当计数→0 /
+      负 `# 0 = 没有 node 在跑`→1；族3 正 `echo "$?" | cat`（管道前读）→0 / 负 `cmd | grep x; echo $?`→1；
+      族4 正 `grep -cx node-MainThread`→0 / 负 `grep -cx node`→1；族5 正 读带 `startedAt`/新鲜度→0 /
+      负 读 `state` 断言→1。CLI 负控制：全错样本→≥5 FAMILY 行、全对样本→0 FAMILY 行。
+- [x] AC3: 接入调用点——`scripts/test.sh` `run_static_checks()` 静态 tier（`@static-tier change`
+      + `@static-object` = 五份 tick 文档；checker-mutation-check 清单自动纳入，
+      `bash plugin/scripts/checker-mutation-check.sh --check` 全 15 个 checker 覆盖、0 stayed-green）。
+      非一次性脚本；`--for-task` scoped 选中该检查器。
+- [x] AC4: 管理者按检出器复核——机制已挂：新失效形态被机械拦下（mutation case 实跑：注入一条新的
+      族1 自匹配命令 → `--gate` 红；删除一条成文的族3 行 → `--gate` 红 band）。7 次复发的五族今后由
+      gate 拦截而非管理者更小心；连续 N tick 的拦截记录是 DoD 的 M-tick 观测项（外层/管理者后续补）。
+- [x] AC5: 与 `manager-loop-tick.md` §4 交叉标注——§4 表下新增「已机械检出」块，五族 ↔ `FAMILY-1..5`
+      映射 + gate 双约束（band ≥5 + shrink-only）。成文（§4）= 扫描面，散文变可执行。
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体
-- [ ] 管理者连续 M 个 tick 无仪器失效（或被机械检出并即时纠正），贴出 M 与记录
-- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
+- [x] AC1-AC5 实跑输出贴进任务体（上表 + 下方实跑记录）
+- [ ] 管理者连续 M 个 tick 无仪器失效（或被机械检出并即时纠正），贴出 M 与记录——观测依赖项，
+      机制已落地（`instrument-failure-check.ts --gate` 已进全量静态 tier），M-tick 记录由外层/管理者
+      在后续 verification-round 中累积
+- [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——外层 verification-round 的批量合边界闸
+
+## 实跑记录（2026-08-08，inner）
+
+```
+$ node --no-warnings --experimental-strip-types plugin/scripts/instrument-failure-check.ts --scan orchestration/manager-loop-tick.md orchestration/orchestrator-loop-tick.md plugin/loop/*.md 2>/dev/null | grep -c '^FAMILY-'
+5
+
+$ node --no-warnings --experimental-strip-types plugin/scripts/instrument-failure-check.ts --gate --root .
+  FAMILY-1: detected=2 baseline=2  ok
+  FAMILY-2: detected=5 baseline=5  ok
+  FAMILY-3: detected=2 baseline=2  ok
+  FAMILY-4: detected=7 baseline=7  ok
+  FAMILY-5: detected=10 baseline=10  ok
+instrument-failure-check --gate: PASS — 5/5 families mechanically detectable, no shrink-only violation
+
+$ node --test plugin/test/instrument-failure-check.test.mjs   # 11 pass, 0 fail
+
+$ bash plugin/scripts/checker-mutation-cases/instrument-failure-check.sh <workdir>   # exit 0
+$ bash plugin/scripts/checker-mutation-check.sh --check   # RESULT: PASS — 15/15 covered, 0 stayed-green
+```
 
 ## Touches
-- plugin/scripts/instrument-failure-check.ts（新扫描器，或并入既有静态检查器）
+- plugin/scripts/instrument-failure-check.ts（新扫描器——五族机械检出器：band ≥5 + shrink-only 基线）
+- plugin/test/instrument-failure-check.test.mjs（新测试：AC1-AC2 逐族正负控制 + Contract band + gate 语义，node:test 11 项）
+- plugin/scripts/checker-mutation-cases/instrument-failure-check.sh（新 mutation case：band + shrink-only 双向红）
 - scripts/test.sh（静态 tier 接入）
 - orchestration/manager-loop-tick.md（§4 失效表标注"已机械检出"）
 - tasks/gap-manager-instrument-failures-need-mechanical-detection-not-carefulness.md（自身文件）

@@ -115,6 +115,39 @@ test("analyzeSuiteLog: long-duration Promise-pending = GENUINE; instant = cascad
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// False-positive regression (observed 2026-08-08 on a REAL green 2792-test run): the old broad
+// regex /SIGKILL|Killed|exit 137/ matched PASSING test names and the tool's OWN embedded output
+// (suite-cutoff-verdict.test.mjs runs inside the suite) — a green log reported "5 SIGKILL/Killed
+// markers, torn down mid-run". Only the bash job-status diagnostic is a real teardown marker.
+test("analyzeSuiteLog: test names / self-output mentioning SIGKILL must NOT count as a teardown (green-log false-positive regression)", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "svc-fp-"));
+  const log = path.join(tmp, "green.log");
+  fs.writeFileSync(log, [
+    "✔ A2: runAcceptance('sleep 30', timeoutMs:200) -> killed { timedOut:true, signal:SIGKILL, code:null } (212ms)",
+    "✔ AC5 — a child killed by a signal (SIGKILL) writes reason=aborted (323ms)",
+    "✔ AC5 — a SIGKILL'd node --test reported by bash as exit 137 is reason=aborted, NOT failed (508ms)",
+    "  - suite log shows 1 SIGKILL/Killed marker(s) — process torn down mid-run",
+    "✔ analyzeSuiteLog: long-duration Promise-pending = GENUINE; instant = cascade victim; Killed detected (4ms)",
+    "ℹ tests 2792\nℹ fail 0\nℹ cancelled 0",
+  ].join("\n"));
+  const r = analyzeSuiteLog(log);
+  assert.equal(r.sigkill, 0, `a green log with SIGKILL-NAMED passing tests must report 0 teardown markers (got ${r.sigkill})`);
+  assert.equal(r.cancelled, 0);
+  assert.equal(r.promisePending, 0);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("analyzeSuiteLog: a missing log file is reported (missing:true), never crashes", () => {
+  const r = analyzeSuiteLog("/nonexistent/definitely-missing/full-suite.log");
+  assert.equal(r.missing, true);
+  assert.equal(r.sigkill, 0);
+  assert.equal(r.promisePending, 0);
+  assert.equal(r.longGenuine.length, 0);
+  // computeVerdict must not crash either and must surface the missing-log issue.
+  const v = computeVerdict({ log: "/nonexistent/definitely-missing/full-suite.log", root: repoRoot, json: false });
+  assert.ok(v.issues.some((i) => i.includes("not found")), `missing-log issue must be reported (got: ${v.issues})`);
+});
+
 test("computeVerdict: a log with genuine long-duration Promise-pending is BLOCKED; a clean one is clean", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "svc-vd-"));
   const badLog = path.join(tmp, "bad.log");
