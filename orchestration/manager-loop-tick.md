@@ -603,6 +603,42 @@ git log -1 --format=%ct -- plugin/scripts/session-liveness.sh     # 该文件最
 `contains` 是字面子串不是正则，需要正则时**用 meta-cc 取语料、本地只做过滤**，
 **不要退回自己解 jsonl**。
 
+#### 三个会话类读数的 meta-cc 形态（2026-08-08 11:5xZ 落实，不再手搓）
+
+**⚠️ 立规矩不落实 = 又一条「规则存在而从未生效」**（今晚已数过三例：`reanchor_cycles=0`、
+`avg10` 每轮记却不判、①新鲜度涨 75 从不触发）。所以这里直接写成可照抄的调用。
+
+**(1) ⑧ 问句计数** —— 我自己的会话，取语料后本地正则：
+```
+mcp__meta-cc__query_session_content
+  role=assistant  scope=session  since=<上一轮 tick 的 ISO 时刻>
+  content_summary=false
+⇒ 本地对返回的 text 块跑句式正则（meta-cc 的 contains 是字面子串，做不了）
+```
+
+**(2) AC21 自驱心跳** —— **两个会话都要查，这是 v1/v2 失效的根因**：
+```
+① inner 侧：query_session_content role=user session_id=<inner>
+             contains="fast-mode-loop-tick"  since=<今日 00:00>
+   ⇒ 取逐字相同者 + 算间隔（判据 (a)(b)）
+② outer 侧：query_session_content role=tool block_type=tool_use session_id=<outer>
+             contains="send-keys"  since=<同窗口>
+   ⇒ 判据 (c)：那些时刻【没有】对应的上层投递
+```
+**(c) 只能从 outer 侧取，而手搓解 inner 的 jsonl 永远拿不到它** ——
+这就是同一个判别式两版失效的全部原因。
+
+**(3) 投递是否到达** —— 已有先例，沿用：
+```
+query_session_content role=all session_id=<目标会话> contains=<本条特征串>
+⇒ role=user 覆盖不到（投递落成 queue-operation / attachment），role=all 才行
+   （2026-08-08 06:0x 实测：同一条消息 role=user 返 0、role=all 返 7）
+```
+
+**⚠️ 会话 id 不许写死**：inner 的会话 09:10 续接过一次。
+每轮先取 id（`tr '\0' '\n' < /proc/<pane 子进程>/environ | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p'`），
+再喂给 meta-cc 的 `session_id`。**把 id 写进脚本 = 下一次续接后静默读空。**
+
 ### ⑧ 每 tick 机械计数：我把多少「本可自判」的问题抛给了人（人 2026-08-08 11:4xZ 要求）
 
 **人的原话**：「为什么又在问我？阶段目标和 AC 能判断就不要问我。**在你的 tick 中持续检查这一行为。**」
