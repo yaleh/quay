@@ -106,6 +106,15 @@ KNOWN-LOAD-SENSITIVE 标记准入**（`docs/analysis/fast-mode-loop-tick.md`「�
 为空断言 + 合后 `git reset --mixed`，绝不用 `--hard`——inner 曾用 `--hard` 销毁 manager 未提交编辑，
 2026-08-08 08:08:24）。本任务管「批量合闸门判绿」，「合完后主检出状态」是同族第三面（对账）。
 
+## 交叉标注（gap-batch-merge-gate-validates-tip-not-merge-result，2026-08-08 dispatch）
+
+本任务 AC6 交叉标注：**两轴独立，不混淆**——本任务（stale-green）是**时间轴**问题（绿旧/被测树旧，
+判据 = 查 `finishedAt` 距今秒数 / 是否晚于最近 fan-in），`gap-batch-merge-gate-validates-tip-not-merge-result`
+是**对象轴**问题（被测对象 ≠ 被放行对象，判据 = 查 `git diff --name-only <merge-base> <develop>` 是否含
+代码文件）。各自 Contract measure 不同：本任务 = `suite_freshness`，对象任务 = `unmerged_develop_files`。
+`integration-batch-merge.sh` 已为对象任务新增 `check_object_gate()`（three-dot 语义），与本任务要加的新鲜度
+维度是同一脚本上互补的两道闸——「何时合」看新鲜度、「合什么」看对象。
+
 ## Dispatch review
 
 reviewer: none
