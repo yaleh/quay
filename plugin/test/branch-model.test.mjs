@@ -102,7 +102,7 @@ test("AC3: batch-merge fast-forwards develop to integration when integration is 
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
 
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir]);
+    const r = run([batchMerge, "--skip-freshness-gate", "--root", dir]);
     assert.equal(r.status, 0, `batch-merge failed: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /measure integration_ff_merges=0/);
     assert.match(r.stdout, /fast-forwarded to integration/);
@@ -145,7 +145,7 @@ test("AC3 negative control: a TRUE divergence (develop has commits integration l
     commitAll(dir, "develop-only work");
 
     const before = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir]);
+    const r = run([batchMerge, "--skip-freshness-gate", "--root", dir]);
     assert.notEqual(r.status, 0, "a true divergence must fail closed");
     assert.match(r.stderr, /NOT-FAST-FORWARD/);
     assert.match(r.stderr, /needs a human|Needs a human/i);
@@ -174,7 +174,7 @@ test("AC3 --dry-run reports ff-ability and the pending surface WITHOUT moving an
     gitCmd(dir, "merge", "--no-ff", "-q", "task/alpha", "-m", "Merge branch 'task/alpha'");
 
     const beforeDev = gitCmd(dir, "rev-parse", "develop").stdout.trim();
-    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    const r = run([batchMerge, "--skip-freshness-gate", "--root", dir, "--dry-run"]);
     assert.equal(r.status, 0, `dry-run should succeed: ${r.stdout}${r.stderr}`);
     assert.match(r.stdout, /FF-OK/);
     assert.match(r.stdout, /measure integration_ff_merges=1/, "dry-run BEFORE the merge reports measure=1 (not yet absorbed)");

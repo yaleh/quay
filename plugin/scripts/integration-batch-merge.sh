@@ -131,12 +131,24 @@
 #                two-dot `git diff integration develop` — the two-dot also lists integration's OWN
 #                tested files, a false positive the gate must avoid.
 #
+#   FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green): before ANY merge (ff or real), the helper
+#                requires a FRESH suite green — the batch-merge gate previously read ONLY
+#                `state == green` and treated a 3-hour-old green (measuring a DIFFERENT batch of
+#                commits) as a pass for THIS tree (7b1ac3a1, 2026-08-08). Two dimensions, both required:
+#                  state == green (not running/red; a missing state file FAILS CLOSED — no valid green)
+#                  finishedAt within --freshness-window (default 3600s) of now  — the AGE axis
+#                  suite startedAt >= most-recent integration fan-in commit time — the COVERAGE axis
+#                FAILS CLOSED (nothing moved) on any violation. `--skip-freshness-gate` is the explicit
+#                opt-out for callers exercising OTHER gates in isolation; the real orchestrator
+#                invocation never passes it (the gate is ON by default — mechanical, not self-judged).
+#
 # Exit codes:
 #   0  merge performed (ff or real) OR nothing pending (integration already absorbed into develop);
 #      with --dry-run, the ff-ability / divergence surface was reported without moving any ref
 #   1  NOT a fast-forward and no --merge (needs a human), OR a real code conflict in --merge mode
 #      (fail-closed, nothing moved), OR the object gate blocked (develop-side code files outside the
-#      tested tree — fail-closed, nothing moved)
+#      tested tree — fail-closed, nothing moved), OR the freshness gate blocked (no valid fresh green —
+#      stale/missing/running suite state — fail-closed, nothing moved)
 #   2  usage / missing ref
 set -uo pipefail
 
@@ -148,6 +160,15 @@ dry_run=0
 sync=0
 merge_mode=0
 reconcile=0
+# ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
+# The batch merge may only proceed when the suite green is a FRESH green that actually verified the
+# CURRENT integration tip. Defaults: gate ON (mechanical — the outer's suiteGreen rule and the script's
+# own check are the SAME gate, no "document says mechanical, actual is self-judged" gap), window 3600s,
+# state file at <repo_root>/.quay/full-suite-state.json. `--skip-freshness-gate` is the explicit
+# opt-out for callers exercising OTHER gates (object / reconcile / real-merge conflict) in isolation.
+skip_freshness_gate=0
+freshness_window=3600
+suite_state_file=""
 # Global for the real-merge temp worktree path (must outlive real_merge() so the EXIT trap can
 # clean it up even under `set -u`).
 tmp_wt=""
@@ -185,6 +206,9 @@ while [ "$#" -gt 0 ]; do
     --reverse-edge-criterion) reverse_edge_criterion="$2"; shift 2 ;;
     --sync) sync=1; shift ;;
     --reconcile) reconcile=1; shift ;;
+    --skip-freshness-gate) skip_freshness_gate=1; shift ;;
+    --freshness-window) freshness_window="$2"; shift 2 ;;
+    --suite-state-file) suite_state_file="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -451,6 +475,130 @@ check_object_gate() {
   return 1
 }
 
+# ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
+# The batch merge may only proceed when the suite green is a FRESH green that actually verified the
+# CURRENT integration tip. Root cause (7b1ac3a1, 2026-08-08): the gate read ONLY `state == green` and
+# treated a 3-hour-old green — measuring a COMPLETELY DIFFERENT batch of commits — as a pass for THIS
+# tree. Freshness has two dimensions:
+#   1. AGE — `finishedAt` within `--freshness-window` of now (default 3600s). An old green with NO new
+#      fan-in is still stale: a 3-hour-old green did not test today's tree.
+#   2. COVERAGE — the suite STARTED at/after the most recent integration fan-in (`git log -1 --format=%ct
+#      <integration>`). A fan-in that landed after the suite ran means the green did NOT test the pending
+#      content. (Started-at, not finished-at, is the coverage basis — a suite cannot have tested a fan-in
+#      that landed after it started; startedAt is the runner's ISO marker, finishedAt is epoch.)
+# Fail-closed conditions (all mean "no valid green" ⇒ nothing moved): state != green, finishedAt
+# missing/unparseable, age > window, suite started before the most recent fan-in, OR the state file is
+# absent. This is the TIME-AXIS gate, complementary to the OBJECT gate's MERGE-RESULT axis
+# (gap-batch-merge-gate-validates-tip-not-merge-result); both run before any ref moves.
+# In --dry-run this reports the would-block measure without failing (mirrors check_object_gate).
+check_freshness_gate() {
+  if [ "${skip_freshness_gate}" -eq 1 ]; then
+    echo "integration-batch-merge: freshness-gate SKIPPED (--skip-freshness-gate)"
+    return 0
+  fi
+  local state_file="${suite_state_file:-${repo_root}/.quay/full-suite-state.json}"
+  local state=""
+  local parsed=""
+  local finished_epoch="" started_epoch="" age=""
+  local last_fanin="" verdict=""
+
+  # Absent state file ⇒ no valid green ⇒ fail-closed (a missing file is NOT a pass — the 7b1ac3a1
+  # "缺 state 同路径：不批量合" rule).
+  if [ ! -f "${state_file}" ]; then
+    verdict="suite-state file not found at ${state_file} (no valid green)"
+    echo "integration-batch-merge: measure suite_freshness=unknown"
+    if [ "${dry_run}" -eq 1 ]; then
+      echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+      return 0
+    fi
+    echo "integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+    return 1
+  fi
+
+  state="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('state',''))" "${state_file}" 2>/dev/null || true)"
+  if [ "${state}" != "green" ]; then
+    verdict="suite-state state='${state:-<missing>}' (batch merge requires state==green)"
+    echo "integration-batch-merge: measure suite_freshness=unknown"
+    if [ "${dry_run}" -eq 1 ]; then
+      echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+      return 0
+    fi
+    echo "integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+    return 1
+  fi
+
+  # Parse finishedAt (epoch since the 2026-08-08 normalization; ISO for legacy states) and startedAt
+  # (ISO) into epoch seconds; stdout = "<finished_epoch> <started_epoch> <age>".
+  parsed="$(python3 -c "
+import json,sys,time,datetime
+try:
+    d=json.load(open(sys.argv[1]))
+except Exception:
+    print('unparseable unparseable unparseable'); sys.exit(4)
+f=d.get('finishedAt')
+if f is None:
+    print('missing missing missing'); sys.exit(2)
+if isinstance(f,(int,float)):
+    ts=float(f)
+else:
+    try:
+        ts=datetime.datetime.fromisoformat(str(f).replace('Z','+00:00')).timestamp()
+    except Exception:
+        print('unparseable unparseable unparseable'); sys.exit(3)
+s=d.get('startedAt')
+if isinstance(s,(int,float)):
+    st=float(s)
+else:
+    try:
+        st=datetime.datetime.fromisoformat(str(s).replace('Z','+00:00')).timestamp() if s else ts
+    except Exception:
+        st=ts
+print(int(ts), int(st), int(time.time()-ts))
+" "${state_file}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  read -r finished_epoch started_epoch age <<<"${parsed}"
+
+  if [ -z "${age}" ] || [ "${age}" = "missing" ] || [ "${age}" = "unparseable" ]; then
+    verdict="suite-state finishedAt missing/unparseable (no valid green)"
+    echo "integration-batch-merge: measure suite_freshness=unknown"
+    if [ "${dry_run}" -eq 1 ]; then
+      echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+      return 0
+    fi
+    echo "integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+    return 1
+  fi
+
+  # AGE dimension — the Contract measure (suite_freshness) is exactly this age in seconds.
+  if [ "${age}" -gt "${freshness_window}" ]; then
+    verdict="suite green finished ${age}s ago (> window ${freshness_window}s) — STALE"
+    echo "integration-batch-merge: measure suite_freshness=${age}"
+    if [ "${dry_run}" -eq 1 ]; then
+      echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+      return 0
+    fi
+    echo "integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+    return 1
+  fi
+
+  # COVERAGE dimension — the suite must have STARTED at/after the most recent integration fan-in.
+  last_fanin="$(git -C "${repo_root}" log -1 --format=%ct "refs/heads/${integration_ref}" 2>/dev/null || true)"
+  if [ -n "${last_fanin}" ] && [ "${started_epoch}" -lt "${last_fanin}" ]; then
+    verdict="a fan-in landed on ${integration_ref} after the suite started (last fan-in ${last_fanin}s epoch > suite start ${started_epoch}s) — the green did NOT test the pending tip"
+    echo "integration-batch-merge: measure suite_freshness=${age}"
+    if [ "${dry_run}" -eq 1 ]; then
+      echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+      return 0
+    fi
+    echo "integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+    return 1
+  fi
+
+  echo "integration-batch-merge: freshness-gate OK — fresh green (finished ${age}s ago, window ${freshness_window}s; suite start ${started_epoch}s ≥ last fan-in ${last_fanin:-<none>})"
+  echo "integration-batch-merge: measure suite_freshness=${age}"
+  return 0
+}
+
 # Real merge of `integration` into `develop` (merge commit) in a throwaway temp worktree, then advance
 # develop with a CAS on the old tip. Shared-file conflicts auto-resolve develop-authoritative; a real
 # code conflict fails closed (nothing moved). Returns 0 on success, 1 on fail-closed.
@@ -606,6 +754,12 @@ fi
 # the tested tree ⇒ the merge result would ship untested code ⇒ fail closed (nothing moved). In
 # --dry-run this reports the would-block measure without failing.
 check_object_gate || exit 1
+
+# ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ─────────────────────────────────────────
+# The batch merge may only proceed when the suite green is a FRESH green (finishedAt within the window
+# AND the suite started after the most recent integration fan-in). This is the TIME-AXIS gate, run
+# before any ref moves. In --dry-run this reports the would-block measure without failing.
+check_freshness_gate || exit 1
 
 # ── --reconcile: porcelain-empty guard BEFORE any ref moves ──────────────────────────────────────────
 # The guard must run while the index still matches the old HEAD — after the ref moves, the stale index

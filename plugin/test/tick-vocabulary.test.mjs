@@ -76,6 +76,9 @@ const SAFE_SUBSTRINGS = [
                                     // (gap-tick-vocabulary-whitelist-stale-against-forty-to-six-entry-forms).
   "gap-closure-sync-is-the-true-batch-boundary",
   "gap-split-batch-vocabulary-dispatch-rolling-vs-verification-round",
+  "gap-batch-merge-gate-reads-stale-green",  // 任务 id (batch-merge freshness gate): the tick docs name
+                                             // the task that added the freshness dimension to the
+                                             // batch-merge gate — mechanism reference, not gating prose.
   "gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge",  // 任务 id (batch-merge boundary gate): the
                                                                    // tick doc names the task that moved the
                                                                    // full-suite gate to the batch-merge

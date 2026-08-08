@@ -6,6 +6,10 @@
 //   AC1 — result writes `.quay/full-suite-state.json` (well-known location):
 //         {state: running|green|red, runner: outer|inner, startedAt, finishedAt,
 //          durationMs, laneCount}
+//   NOTE (gap-batch-merge-gate-reads-stale-green, 2026-08-08): `finishedAt` is written as EPOCH
+//         SECONDS (integer), NOT ISO 8601 — the batch-merge freshness gate's Contract measure is
+//         `python3 -c "... int(time.time()-d.get('finishedAt', 0))"`, which needs epoch. `startedAt`
+//         stays ISO 8601 (human-readable run-start marker; the freshness gate parses BOTH forms).
 //   AC2 — the runner marks state=red the MOMENT a failure line is detected on the
 //         suite's stream — NOT after the full run finishes — shrinking the
 //         "went red → discovered red" window.
@@ -149,7 +153,9 @@ export interface SuiteState {
    */
   systemdRun?: { applied: true; memoryMax: string; cpuQuota: string; tasksMax: string };
   startedAt: string; // ISO 8601
-  finishedAt: string | null; // ISO 8601; null while running
+  // gap-batch-merge-gate-reads-stale-green: finishedAt is EPOCH SECONDS (integer) — the batch-merge
+  // freshness gate's Contract measure (`int(time.time() - finishedAt)`) needs epoch. null while running.
+  finishedAt: number | null; // epoch seconds; null while running
   durationMs: number | null; // finishedAt - startedAt; null while running
   laneCount: number;
   /**
@@ -209,6 +215,12 @@ const ABORT_PATTERNS: RegExp[] = [
 function parseArg(argv: string[], name: string): string | undefined {
   const idx = argv.indexOf(name);
   return idx !== -1 && argv[idx + 1] ? argv[idx + 1] : undefined;
+}
+
+// gap-batch-merge-gate-reads-stale-green: normalize an ISO 8601 timestamp to EPOCH SECONDS for the
+// batch-merge freshness gate's Contract measure (`suite_freshness = int(time.time() - finishedAt)`).
+function toEpochSeconds(iso: string): number {
+  return Math.floor(Date.parse(iso) / 1000);
 }
 
 /**
@@ -832,7 +844,7 @@ export async function run(argv: string[]): Promise<number> {
       state: "red",
       reason: "aborted",
       ...base,
-      finishedAt: at,
+      finishedAt: toEpochSeconds(at),
       durationMs: Date.parse(at) - Date.parse(startedAt),
     });
     process.stderr.write(
@@ -961,8 +973,12 @@ export async function run(argv: string[]): Promise<number> {
   // Flush the log stream before writing the final verdict.
   await new Promise<void>((resolve) => logStream.end(resolve));
 
-  const finishedAt = new Date().toISOString();
-  const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
+  const finishedAtIso = new Date().toISOString();
+  const durationMs = Date.parse(finishedAtIso) - Date.parse(startedAt);
+  // gap-batch-merge-gate-reads-stale-green: finishedAt is written as EPOCH SECONDS (the batch-merge
+  // freshness gate's Contract measure `int(time.time() - finishedAt)`); durationMs stays computed
+  // from the ISO forms (finishedAt - startedAt).
+  const finishedAt = toEpochSeconds(finishedAtIso);
 
   // AC1/判绿 — green ONLY if no failure/abort marker was detected, no spawn error, and the suite
   // exited 0. Red carries the three-value reason axis (AC5, gap-suite-state-has-no-reason-axis-

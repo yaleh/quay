@@ -139,3 +139,7 @@ RUN 3 (GREEN, 连续第 2 次一致):
 - `tasks/gap-red-window-has-no-automatic-executor.md`（suite-state-trigger 的 SUITE-GREEN/RED 事件流）——
   Cross-annotation 指向本条：trigger 只读主 repo 相对 `.quay/full-suite-state.json`，本条保证 worktree 跑
   的 state 落主 repo，trigger 的事件流才接到真实结果。
+- `tasks/gap-batch-merge-gate-reads-stale-green.md`（批量合闸门读绿不读新鲜度，2026-08-08）——
+  Cross-annotation 指向本条：本条解决「绿写哪 / 闸门读哪」（state 分裂），stale-green 解决「绿旧不新鲜」
+  （时间轴）。批量合要放行必须两条都满足：主 repo state 是真实结果（本条）+ 是新鲜绿（stale-green 的
+  `integration-batch-merge.sh` freshness gate）。

@@ -96,6 +96,15 @@ resume 若中断，先跑 measure 确认 reflog 形态，不要假设已修
 **结论：本任务前提（绕过脚本）不成立。** 若需保留，应改写为「reflog 形态的判定判据」类任务
 （如何从 reflog 区分 REF-LEVEL 副作用 vs 真绕过），而非「绕过已发生」。
 
+## 交叉标注（gap-batch-merge-gate-reads-stale-green，2026-08-08）
+
+本任务（batch-merge-bypassed，已撤回——reflog 形态是 update-ref 副作用非绕过）与 stale-green 是批量合
+家族两面：bypassed 管「批量合是否走脚本」（执行者识别，撤回后归 reflog 判据），stale-green 管「批量合
+闸门判绿是否新鲜」（时间轴）。批量合的机械保护三件套：**闸门**（`gap-batch-merge-gate-reads-stale-green`，
+何时合——新鲜度）/ **对象**（`gap-batch-merge-gate-validates-tip-not-merge-result`，合什么——合并结果）/
+**执行路径**（本条，怎么合——走脚本 REF-LEVEL）。`integration-batch-merge.sh` 同时承载前两件（
+`check_freshness_gate()` + `check_object_gate()`），执行路径由脚本 REF-LEVEL 语义保证。
+
 ## Dispatch review
 
 reviewer: none
