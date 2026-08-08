@@ -296,3 +296,58 @@ AC-9 旧收件箱：§7 四类各自处理完毕；`git ls-files .quay/manager-i
 **本裁定的前提（写明，因为前提变了结论才需要重看，而不是因为有人想换技术）**：
 依据 1 建立在**每小时约 20 条**这个实测量级上；依据 2 的「存活变差」建立在
 **身份必须由 MCP 盖章**（D5）之上。**这两个前提本身没变时，本条不重开。**
+
+---
+
+## 12. 修订 —— 2026-08-08 14:5xZ 之后的实测输入（本节由 manager 追加，均为**实测**，非推断）
+
+### 12.1 D5 的身份根**会随 `/clear` 变**（这条使 D5 在当前形态下不成立）
+
+实测：对 outer 连发两次 `/clear`，其会话 id 依次为 `3cc1c0b9 → fcf04ca2 → 7795bb75`；
+**清后由它派生的进程带的 `CLAUDE_CODE_SESSION_ID` 正是新 id**（`pid=2883208` 实读）。
+⇒ D5 把身份绑在该变量上、D11 又规定「未登记的端点不可寻址（fail closed）」，
+两者合起来意味着 **每清一次上下文，该 role 就失去发信能力，直到重新注册**。
+**SPEC 写于 08:3x，那时还没做过 `/clear` 实验** ⇒ 必须补再注册路径，或改绑一个不随 `/clear` 变的量。
+（附带实测：`CLAUDE_CODE_SESSION_ID` **不在 claude pane 进程自身的环境里**，
+只注入它派生的工具/MCP 进程 —— 身份来源是「派生时注入」，不是「进程属性」。）
+
+### 12.2 消费侧的 Monitor 进程会被清理器扫掉（§6.2 追加一条实测失效）
+
+实测：`sweepTmp` 的 `pkill -f` 一次杀光**两层**的 `session-liveness` 观测者
+（已立案 `682ee526`；当时全机 4–5 个实例只剩 1 个 etime=4s 的新进程）。
+**`quay inbox watch` 是同一进程形态，继承同一暴露面。**
+⇒ §6.2 增列：**清理器按进程名/路径匹配杀进程时，无法区分「泄漏残留」与「在用实例」**；
+判据应为**属主会话是否存活**，不是名字匹配。**「观测者被杀」这件事本身没有观测者。**
+
+### 12.3 tmux 作为主信道的摩擦是可量的（支持 D3，不是理由的重复）
+
+本轮实测：manager→outer 的每条长消息都撞 `paste again to expand`，**每次都要回读目标 transcript 才能确认送达**。
+⇒ D3「tmux 仅用于紧急控制」的依据从"设计偏好"变成"每次投递都在付的成本"。
+
+### 12.4 **`manda` 可能已经提供了本 SPEC 要建的东西**（今晚第七次「对象存在，我没去找」）
+
+`.manda/config.yml` **已在本仓**，且已含：`channels: ["inbox-*"]`、`manda send <target> <json>`、
+`reply_to` 约定、`cap-requests-{name}` / `cap-results` 双向信道、`manda-dispatch cross-session` 适配器、
+`mcp_adapters`（`manda-dispatch mcp` / `manda-tools mcp --self {name}`，带 `allow` 白名单）、
+`audit` 与 `monitor` 两段。源码树在 `/home/yale/work/manda`。
+本仓 `docs/references/geometry-as-llm-architecture-interface.md:38` 记的架构反转是
+**「`manda watch` 进程即 server」** —— **正是本 SPEC D13 与 `quay inbox watch` 那一面的形状**。
+
+**身份模型的关键差异（这条改变结论，不只是补充）**：
+```
+SPEC   身份根 = CLAUDE_CODE_SESSION_ID（D5）+ 硬性注册表（D11）
+manda  身份根 = 「port-is-identity」(TASK-6)：no instance registry
+       docs/dispatch-addressing.md:20 / docs/extensions.md:345
+```
+⇒ **manda 的身份模型免疫 12.1 的失效**（进程不退、端口不变，`/clear` 影响不到它），
+且用**少一个机制**（不要注册表）达到同样的 fail-closed —— 与 D11 拒绝自动分配的理由同源。
+
+**诚实的限度（不得据此直接采用）**：
+1. `port-is-identity` 我读的是**它的文档**；`internal/dispatch` / `internal/caps` 里 `Sender|From` **grep 零命中**，
+   **没有读到实际盖章的代码路径** ⇒ 采用前必须先验证「发送方身份由服务端确定，调用方改不了」。
+2. **manda 不在 PATH、本机零进程、本会话无 `mcp__manda__*` 工具** ⇒ 现状是「结构上能」，不是「现在就能」。
+3. **采用与否是范围决定，归人**（§1.5：改变 AC 本身 ⇒ 问人）。manager 只给实测与判据形态。
+
+**⇒ 建议的下一步（若采用）**：先做一次**最小可证伪实验**——两个会话各起一个 manda daemon，
+A 用 `manda send` 发给 B，B 在**不信任发送方自述**的前提下确认 `from` 与端口绑定；
+**该实验失败 ⇒ manda 不满足 D5，本 SPEC 按原路走**。
