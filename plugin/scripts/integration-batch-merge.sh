@@ -19,9 +19,30 @@
 #     commit, built in a throwaway temp git worktree; the primary checkout is never touched).
 #     Conflicts on KNOWN SHARED files (defaults: *tick-log.md, tasks/*.md, *queue-state* — files
 #     written directly to develop by the inner/outer/manager, whose authoritative version lives on
-#     develop) are auto-resolved develop-authoritative; any REAL code conflict FAILS CLOSED (needs a
-#     human, nothing moved, conflict file list reported) — never blind --ours/--theirs on code.
-#     Fast-forward when possible (no gratuitous merge commits).
+#     develop) are auto-resolved develop-authoritative; conflicts on REVERSE-EDGE files
+#     (--integration-authoritative — RUNTIME CONFIG files that tasks edit on INTEGRATION, where
+#     develop's copy can be the STALE/DEFECTIVE one; see the reverse-edge section below) are
+#     auto-resolved integration-authoritative, gated on a content criterion when one is supplied;
+#     any REAL code conflict FAILS CLOSED (needs a human, nothing moved, conflict file list
+#     reported) — never blind --ours/--theirs on code. Fast-forward when possible (no gratuitous
+#     merge commits).
+#
+# REVERSE EDGE (gap-batch-merge-authoritative-direction-hardcoded-develop, 2026-08-08):
+#   The conflict resolution direction is NOT a fixed "develop always wins". Empirical anchor
+#   (2026-08-08 14:1xZ, integration→develop real merge): orchestration/session-liveness.env was a
+#   genuine code conflict (not shared). The two sides:
+#     develop     SESSION_TRANSCRIPTS="inner /path"   DEFECTIVE — name NOT in SESSION_TARGETS table
+#                                                      (transcript silently ignored, monitor blind)
+#     integration SESSION_TRANSCRIPTS="quay /path"    FIXED — name IN the SESSION_TARGETS table
+#   The CORRECT resolution is integration-authoritative, decided by a CONTENT criterion ("the
+#   SESSION_TRANSCRIPTS name must be in the SESSION_TARGETS table"), not a fixed direction. The
+#   tool had no way to express that (only develop-authoritative resolve_as_ours existed), so the
+#   outer manual-bypassed the tool. This task adds the reverse edge so the tool CAN express it.
+#   Direction semantics: a REVERSE-EDGE candidate resolves to the integration side ONLY IF the
+#   integration side satisfies the content criterion (--reverse-edge-criterion); a candidate whose
+#   integration side FAILS the criterion (or no criterion was supplied AND the caller chose the
+#   fixed-direction form) is resolved by whatever was declared. Without any reverse-edge
+#   declaration a non-shared conflict stays fail-closed (AC4 preserved).
 #   --reconcile — after a successful batch merge (ff or real), reconcile the PRIMARY checkout (the
 #     checkout the outer loop lives in; the advanced <develop> branch may be checked out there). The
 #     ref-level update-ref moves <develop> UNDER the checkout, leaving its HEAD/index STALE (git status
@@ -72,6 +93,22 @@
 #                 (never blind --ours/--theirs). Fast-forward when possible.
 #   --shared-file <glob>  add a path glob treated as a KNOWN SHARED file (develop-authoritative on
 #                 conflict). Repeatable; defaults: *tick-log.md, tasks/*.md, *queue-state*.
+#   --integration-authoritative <glob>
+#                 add a path glob treated as a REVERSE-EDGE file: on conflict the path resolves to the
+#                 INTEGRATION side (`checkout --theirs`). Repeatable. This is the escape hatch for
+#                 RUNTIME CONFIG files (env/config) that tasks edit on INTEGRATION, where develop's copy
+#                 can be the STALE/DEFECTIVE one (2026-08-08 session-liveness.env: develop "inner"
+#                 name-not-in-table vs integration "quay" name-in-table). The direction SHOULD be backed
+#                 by a content criterion (--reverse-edge-criterion): the integration side is then taken
+#                 only when IT satisfies the criterion; otherwise the file fails closed (never
+#                 blind-choose).
+#   --reverse-edge-criterion <script>
+#                 a content-criterion script gating reverse-edge resolution. Interface: `bash <script>
+#                 <path>` with the INTEGRATION-side version of the conflicted file on stdin; exit 0 =
+#                 criterion satisfied (integration authoritative → take theirs); any non-zero = NOT
+#                 satisfied → the reverse-edge candidate becomes a genuine conflict (fail-closed, needs
+#                 a human). When omitted, --integration-authoritative files resolve integration-side
+#                 unconditionally (the fixed-direction form).
 #   --sync        (gap-cross-machine-sync-has-no-mechanism-only-manual-pushes) after a successful
 #                 merge (ff or real), IMMEDIATELY push the advanced <develop> ref to origin via
 #                 sync-lag-check.sh (the event-driven trigger of the cross-machine sync mechanism —
@@ -117,9 +154,22 @@ tmp_wt=""
 # Known-shared files: written directly to develop by the inner/outer/manager; integration's copies
 # are stale — on conflict, develop is authoritative. Matched against conflicted paths via bash case.
 shared_patterns=('*tick-log.md' 'tasks/*.md' '*queue-state*')
+# REVERSE-EDGE (integration-authoritative) files: RUNTIME CONFIG files (env/config) that tasks edit
+# on INTEGRATION — develop's copy lags and can be the DEFECTIVE one (2026-08-08 session-liveness.env:
+# develop "inner" name-not-in-table vs integration "quay" name-in-table). On conflict these resolve to
+# the INTEGRATION side (`checkout --theirs`) instead of develop. Checked BEFORE shared_patterns (an
+# explicit reverse-edge declaration overrides the develop-authoritative default for that path).
+# Direction is CONTENT-criterion-driven when reverse_edge_criterion is set: integration is taken ONLY
+# IF its side satisfies the criterion; otherwise the candidate fails closed (never blind-choose).
+int_authoritative_patterns=()
+reverse_edge_criterion=""
 
 usage() {
-  sed -n '2,82p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2
+  local last_comment
+  # Print the header comment block (line 2 .. the last `#` comment line) as the usage text. The end is
+  # derived, not hardcoded, so header edits (e.g. the reverse-edge section) don't truncate usage.
+  last_comment="$(awk '/^[^#]/{print NR-1; exit}' "${BASH_SOURCE[0]}")"
+  sed -n "2,${last_comment}p" "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p' >&2
   exit 2
 }
 
@@ -131,6 +181,8 @@ while [ "$#" -gt 0 ]; do
     --dry-run) dry_run=1; shift ;;
     --merge) merge_mode=1; shift ;;
     --shared-file) shared_patterns+=("$2"); shift 2 ;;
+    --integration-authoritative) int_authoritative_patterns+=("$2"); shift 2 ;;
+    --reverse-edge-criterion) reverse_edge_criterion="$2"; shift 2 ;;
     --sync) sync=1; shift ;;
     --reconcile) reconcile=1; shift ;;
     *) usage ;;
@@ -164,6 +216,29 @@ is_shared_file() {
   return 1
 }
 
+# Is a conflicted path a REVERSE-EDGE (integration-authoritative) file? Checked BEFORE shared_patterns —
+# an explicit --integration-authoritative declaration overrides the develop-authoritative default.
+is_integration_authoritative_file() {
+  local path="$1" p
+  for p in "${int_authoritative_patterns[@]}"; do
+    case "${path}" in
+      ${p}) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Run the content-criterion script against the INTEGRATION (theirs) side of a conflicted path.
+# Interface: `bash <script> <path>` with the integration-side file content on stdin. Exit 0 = criterion
+# satisfied (integration is authoritative → take theirs). Any non-zero = NOT satisfied — the reverse-edge
+# candidate has NO mechanical basis to take integration, so it becomes a genuine conflict (fail-closed;
+# never blind-choose either side).
+criterion_satisfied() {
+  local wt="$1" path="$2" content
+  content="$(git -C "${wt}" show ":3:${path}" 2>/dev/null || true)"
+  printf '%s\n' "${content}" | bash "${reverse_edge_criterion}" "${path}"
+}
+
 # Resolve one conflicted path to the develop side ("ours" — we merge integration INTO develop).
 # Covers modify/modify, add/add, theirs-deleted (checkout --ours) and ours-deleted (git rm).
 resolve_as_ours() {
@@ -172,6 +247,19 @@ resolve_as_ours() {
     git -C "${wt}" add -- "${path}" >/dev/null 2>&1 || true
   else
     # ours (develop) DELETED the path — develop-authoritative = keep it deleted.
+    git -C "${wt}" rm -q -- "${path}" >/dev/null 2>&1 || true
+  fi
+}
+
+# Resolve one conflicted path to the integration side ("theirs" — the reverse edge). Reverse of
+# resolve_as_ours: modify/modify and add/add take the integration version (checkout --theirs); a
+# theirs-deleted case (ours modified, integration deleted) keeps it deleted (git rm).
+resolve_as_theirs() {
+  local wt="$1" path="$2"
+  if git -C "${wt}" checkout --theirs -- "${path}" >/dev/null 2>&1; then
+    git -C "${wt}" add -- "${path}" >/dev/null 2>&1 || true
+  else
+    # theirs (integration) DELETED the path — integration-authoritative = keep it deleted.
     git -C "${wt}" rm -q -- "${path}" >/dev/null 2>&1 || true
   fi
 }
@@ -206,18 +294,27 @@ report_divergence() {
   fi
 }
 
-# Report the conflict classification (shared vs code) for the GIVEN path list (args).
+# Report the conflict classification (shared / integration-authoritative / code) for the GIVEN path
+# list (args). Shared = auto-resolve develop-authoritative; integration-authoritative = reverse-edge,
+# auto-resolve to the INTEGRATION side (criterion-gated in --merge); code = fail-closed, needs human.
 report_conflict_classification() {
-  local -a shared code
+  local -a shared int_auth code
   shared=()
+  int_auth=()
   code=()
   local p
   for p in "$@"; do
-    if is_shared_file "${p}"; then shared+=("${p}"); else code+=("${p}"); fi
+    if is_integration_authoritative_file "${p}"; then int_auth+=("${p}")
+    elif is_shared_file "${p}"; then shared+=("${p}")
+    else code+=("${p}"); fi
   done
   echo "integration-batch-merge:   conflict classification:"
   echo "integration-batch-merge:     shared (auto-resolve develop-authoritative): ${#shared[@]}"
   for p in "${shared[@]}"; do
+    echo "integration-batch-merge:       ${p}"
+  done
+  echo "integration-batch-merge:     integration-authoritative (reverse-edge, integration side): ${#int_auth[@]}"
+  for p in "${int_auth[@]}"; do
     echo "integration-batch-merge:       ${p}"
   done
   echo "integration-batch-merge:     code (fail-closed, needs human):             ${#code[@]}"
@@ -387,16 +484,40 @@ real_merge() {
       return 1
     fi
 
-    # Classify the ACTUAL conflicts.
+    # Classify the ACTUAL conflicts into three buckets: shared (develop-authoritative default),
+    # reverse-edge (integration-authoritative — resolves to the INTEGRATION side), or code (fail-closed).
     shared_conflicts=()
+    int_auth_conflicts=()
     code_conflicts=()
     local p
     for p in "${conflicts[@]}"; do
-      if is_shared_file "${p}"; then shared_conflicts+=("${p}"); else code_conflicts+=("${p}"); fi
+      if is_integration_authoritative_file "${p}"; then int_auth_conflicts+=("${p}")
+      elif is_shared_file "${p}"; then shared_conflicts+=("${p}")
+      else code_conflicts+=("${p}"); fi
     done
 
+    # Gate reverse-edge candidates on the content criterion (when supplied): the integration side is
+    # authoritative ONLY IF it satisfies the criterion. A candidate whose integration side FAILS the
+    # criterion has no mechanical basis to be trusted → it becomes a genuine conflict (fail-closed,
+    # never blind-choose either side — AC4 preserved even for declared reverse-edge files).
+    if [ "${#int_auth_conflicts[@]}" -gt 0 ] && [ -n "${reverse_edge_criterion}" ]; then
+      local -a still_int_auth
+      still_int_auth=()
+      for p in "${int_auth_conflicts[@]}"; do
+        if criterion_satisfied "${tmp_wt}" "${p}"; then
+          echo "integration-batch-merge:   content criterion satisfied for ${p} → integration-authoritative"
+          still_int_auth+=("${p}")
+        else
+          echo "integration-batch-merge:   content criterion NOT satisfied for ${p} → genuine conflict (FAIL-CLOSED, needs a human)" >&2
+          code_conflicts+=("${p}")
+        fi
+      done
+      int_auth_conflicts=("${still_int_auth[@]}")
+    fi
+
     if [ "${#code_conflicts[@]}" -gt 0 ]; then
-      # AC3 load-bearing: a REAL code conflict fails closed — never blind --ours/--theirs, no ref moved.
+      # AC3/AC4 load-bearing: a REAL (or criterion-rejected) conflict fails closed — never blind
+      # --ours/--theirs, no ref moved.
       echo "integration-batch-merge: REAL-MERGE FAIL-CLOSED — code conflicts need a human; nothing moved" >&2
       echo "integration-batch-merge:   code conflict files:" >&2
       for p in "${code_conflicts[@]}"; do
@@ -408,16 +529,33 @@ real_merge() {
           echo "integration-batch-merge:     ${p}" >&2
         done
       fi
+      if [ "${#int_auth_conflicts[@]}" -gt 0 ]; then
+        echo "integration-batch-merge:   (reverse-edge files would resolve to the integration side, but code conflicts block):" >&2
+        for p in "${int_auth_conflicts[@]}"; do
+          echo "integration-batch-merge:     ${p}" >&2
+        done
+      fi
       git -C "${tmp_wt}" merge --abort >/dev/null 2>&1 || true
       return 1
     fi
 
-    # Only shared-file conflicts → auto-resolve develop-authoritative (AC2).
-    echo "integration-batch-merge: auto-resolving shared-file conflicts develop-authoritative (${#shared_conflicts[@]}):"
-    for p in "${shared_conflicts[@]}"; do
-      echo "integration-batch-merge:   ${p}"
-      resolve_as_ours "${tmp_wt}" "${p}"
-    done
+    # Reverse-edge conflicts → auto-resolve integration-authoritative (integration side).
+    if [ "${#int_auth_conflicts[@]}" -gt 0 ]; then
+      echo "integration-batch-merge: resolving integration-authoritative conflicts (integration side, ${#int_auth_conflicts[@]}):"
+      for p in "${int_auth_conflicts[@]}"; do
+        echo "integration-batch-merge:   ${p}"
+        resolve_as_theirs "${tmp_wt}" "${p}"
+      done
+    fi
+
+    # Shared-file conflicts → auto-resolve develop-authoritative (AC2).
+    if [ "${#shared_conflicts[@]}" -gt 0 ]; then
+      echo "integration-batch-merge: auto-resolving shared-file conflicts develop-authoritative (${#shared_conflicts[@]}):"
+      for p in "${shared_conflicts[@]}"; do
+        echo "integration-batch-merge:   ${p}"
+        resolve_as_ours "${tmp_wt}" "${p}"
+      done
+    fi
   fi
 
   # Commit the merge (uses git's prepared MERGE_MSG from the --no-commit merge).
@@ -508,7 +646,7 @@ if [ "${dry_run}" -eq 1 ]; then
     if [ "${merge_mode}" -eq 1 ]; then
       report_conflict_classification "${would_conflicts[@]}"
     fi
-    echo "integration-batch-merge: NOT-FAST-FORWARD — integration is not a descendant of develop; needs a human (pass --merge to real-merge auto-resolving shared files develop-authoritative)" >&2
+    echo "integration-batch-merge: NOT-FAST-FORWARD — integration is not a descendant of develop; needs a human (pass --merge to real-merge auto-resolving shared files develop-authoritative and reverse-edge files integration-authoritative)" >&2
     exit 1
   fi
   # Post-state measure (would-be): `git merge-base --is-ancestor <integration> <develop>`.
@@ -548,7 +686,7 @@ fi
 # real-merge (--merge).
 report_divergence
 if [ "${merge_mode}" -eq 0 ]; then
-  echo "integration-batch-merge: NOT-FAST-FORWARD — integration is not a descendant of develop; needs a human (pass --merge to real-merge auto-resolving shared files develop-authoritative)" >&2
+  echo "integration-batch-merge: NOT-FAST-FORWARD — integration is not a descendant of develop; needs a human (pass --merge to real-merge auto-resolving shared files develop-authoritative and reverse-edge files integration-authoritative)" >&2
   exit 1
 fi
 
