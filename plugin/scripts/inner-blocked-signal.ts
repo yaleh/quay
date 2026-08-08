@@ -49,6 +49,8 @@
 //   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--pane <pane.txt>]   (MECHANICAL trigger — see below)
 //   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
 //   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
+//   node --experimental-strip-types inner-blocked-signal.ts --timeout [--max-age-ms N] [--root <dir>] [--target <name>]   (CONSUMPTION TIMEOUT / auto-upgrade — alias of --escalate-stale; a consumed-by-nobody block older than N minutes is auto-archived (升级/归档), so inner never freezes on a stale signal)
+//   node --experimental-strip-types inner-blocked-signal.ts --escalate-stale [--max-age-ms N] [--root <dir>] [--target <name>]   (AC9/back-compat alias of --timeout)
 //   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>] [--target <name>]     (prints the record, exit 1 if absent)
 //   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>] [--target <name>]  ("blocked <reason>" | "clear")
 //   node --experimental-strip-types inner-blocked-signal.ts --schema                  (schema + valid reasons)
@@ -226,13 +228,20 @@ export const BLOCKED_RECORD_SCHEMA = Object.freeze({
 /** runId for a blocked-wait telemetry event is used verbatim as a path component — must be safe. */
 const RUN_ID_SAFE_RE = /^[A-Za-z0-9._-]+$/;
 
-// ── Blocked-signal timeout escalation (gap-telemetry-brackets-vs-subagents-no-slot-visibility, AC9) ──
+// ── Blocked-signal timeout escalation — task gap-blocked-signal-timeout-auto-escalation
+//    (independent mechanism; carried from gap-telemetry-brackets-vs-subagents-no-slot-visibility
+//    AC9, AC3 cross-annotation) ────────────────────────────────────────────────────────────────
 // A blocked signal nobody consumes must not let inner wait forever (the 92-minute false-block class
-// tonight). `--escalate-stale` bounds each blocking episode: a block older than the threshold is
-// auto-archived — the wait duration is recorded into telemetry and an escalation line appended to
-// `.quay/blocked-escalations.jsonl` — so the block file cannot persist indefinitely. The underlying
-// stop condition is untouched: if it genuinely persists, the next `--detect-stop` writes a FRESH
-// block with a fresh `since`, re-validating the wait rather than freezing on a stale one.
+// tonight: fake OVER90 / red-window leftover brackets wrote a block the outer never consumed).
+// `--timeout` (alias `--escalate-stale`) bounds each blocking episode: a block older than the
+// threshold (default 30m) is auto-archived — 升级/归档 — the wait duration is recorded into
+// telemetry and an escalation line appended to `.quay/blocked-escalations.jsonl` — so the block
+// file cannot persist indefinitely. The underlying stop condition is untouched: if it genuinely
+// persists, the next `--detect-stop` writes a FRESH block with a fresh `since`, re-validating the
+// wait rather than freezing on a stale one. The false-signal SOURCE is removed separately by the
+// reconcile-aware over-90m gate + task-status gate (detectTaskOver90m, gap-telemetry-brackets AC8 /
+// gap-over-90m-false-signal-source-reads-telemetry-not-task-status) — this mechanism is the
+// consumption-timeout safety net ON TOP of that source removal.
 
 /** Default block-age threshold beyond which a block is auto-escalated (30 minutes). */
 export const DEFAULT_BLOCKED_ESCALATION_MS = 30 * 60 * 1000;
@@ -1123,7 +1132,8 @@ Usage:
   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--transcript <path>] [--pane <path>]
   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
-  node --experimental-strip-types inner-blocked-signal.ts --escalate-stale [--max-age-ms N] [--root <dir>] [--target <name>]   (AC9: archive a consumed-by-nobody stale block)
+  node --experimental-strip-types inner-blocked-signal.ts --timeout [--max-age-ms N] [--root <dir>] [--target <name>]   (consumption-timeout auto-upgrade: archive a consumed-by-nobody stale block — 升级/归档)
+  node --experimental-strip-types inner-blocked-signal.ts --escalate-stale [--max-age-ms N] [--root <dir>] [--target <name>]   (AC9/back-compat alias of --timeout)
   node --experimental-strip-types inner-blocked-signal.ts --read [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --status [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --schema
@@ -1405,13 +1415,17 @@ export async function main(argv) {
     }
   }
 
-  // --escalate-stale (gap-telemetry-brackets-vs-subagents-no-slot-visibility, AC9): a blocked
+  // --timeout / --escalate-stale (independent mechanism — gap-blocked-signal-timeout-auto-
+  // escalation, carried from gap-telemetry-brackets-vs-subagents-no-slot-visibility AC9): a blocked
   // signal nobody consumed must not let inner wait forever. If a block is older than the escalation
   // threshold, record the wait duration into telemetry, append an escalation line to
   // .quay/blocked-escalations.jsonl, and remove the block file (bounded episode — the underlying
   // condition, if it persists, writes a FRESH block on the next --detect-stop). The OUTER runs this
-  // as a safety net in its async cleanup (orchestrator-loop-tick.md step 1b).
-  if (args.includes("--escalate-stale")) {
+  // as a safety net in its async cleanup (orchestrator-loop-tick.md step 1b); the Contract measure
+  // invokes it via `bash plugin/scripts/blocked-signal-check.sh --timeout`. --timeout is the primary
+  // name (matches the contract invoke grep); --escalate-stale is kept as the AC9 back-compat alias
+  // (existing docs/tests name it).
+  if (args.includes("--escalate-stale") || args.includes("--timeout")) {
     const maxAgeArg = getArgValue(args, "--max-age-ms");
     let thresholdMs = DEFAULT_BLOCKED_ESCALATION_MS;
     if (maxAgeArg !== undefined) {
@@ -1426,7 +1440,7 @@ export async function main(argv) {
       const res = escalateStaleBlock(root, target, { thresholdMs });
       if (res.escalated) {
         console.log(
-          `inner-blocked-signal: ESCALATED stale block (${res.record.taskId}, ${res.record.reason}) — waited ${(res.durationMs / 60_000).toFixed(1)}m ≥ ${(res.thresholdMs / 60_000).toFixed(0)}m; archived; telemetry ${res.telemetryPath}`,
+          `inner-blocked-signal: ESCALATED (升级/归档) stale block (${res.record.taskId}, ${res.record.reason}) — waited ${(res.durationMs / 60_000).toFixed(1)}m >= ${(res.thresholdMs / 60_000).toFixed(0)}m; archived; telemetry ${res.telemetryPath}`,
         );
         return 0;
       }
