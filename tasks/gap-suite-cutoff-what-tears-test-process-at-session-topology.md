@@ -7,7 +7,7 @@ title: "full-suite red verdict is UNRELIABLE: the test process was torn down
   process (at ~session-topology, alphabetically); hypothesis: OOM killer from
   the 160+ tmux-server leak consuming memory (same machine had a prior OOM);
   triage by failure-count would \"fix\" innocent files"
-status: ready
+status: done
 labels:
   - gap
   - defect
