@@ -1,7 +1,9 @@
 ---
 id: gap-ac16c3-bc-release-install-verification-not-done
-title: "AC16③ stage 判据未达成：3 个阻塞任务代码已 done（npm-install/cli-init/readme），但 B/C 上「release 装出来的那份、非 quay 项目跑通一次」从未实跑——本机无法触达 B/C（ssh 不可解析），剩余缺口 = 跨机真机复测；3 任务 done 不等于 AC16③ 达成"
-status: todo
+title: AC16③ stage 判据未达成：3 个阻塞任务代码已 done（npm-install/cli-init/readme），但 B/C
+  上「release 装出来的那份、非 quay 项目跑通一次」从未实跑——本机无法触达 B/C（ssh 不可解析），剩余缺口 = 跨机真机复测；3 任务
+  done 不等于 AC16③ 达成
+status: ready
 labels:
   - gap
   - defect
