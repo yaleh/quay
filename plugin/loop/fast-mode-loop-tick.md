@@ -243,8 +243,8 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 
 | # | 核对项 | 机械判据 |
 |---|---|---|
-| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realInFlight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 avg300 算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realInFlight` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）。**`real_in_flight > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
+| ① | 在飞 agent 是否符合文档 | 遥测 **`realInFlight`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-in-flight`，或 `--report --json` 的 `realInFlight` 字段（reconcile 感知：括号数扣减 executor 已消失者）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -276,7 +276,7 @@ node --experimental-strip-types plugin/scripts/slot-refill.ts --root "$(pwd)" --
 - stdout 是 JSON。**`slots_free` = 空槽数**（`max(0, cap − 在飞数)`；在飞数由**本会话自己维护的集合**给出，不是遥测——AC6 括号≠subagent，遥测括号会把已完成任务多算在飞）。
 - **`should_refill` = 事件驱动 go/no-go**：`slots_free > 0` 且 `recommended` 非空（有候选通过步骤 4 的触摸可解析/依赖就绪/并发资格三道检查）。
 - **`recommended` = 建议立即派发的候选**（至多 `slots_free` 个，生产 disjoint 批，与在飞两两不相交）。用它做派发候选，仍需跑步骤 4 自己的逐候选检查（触摸可解析、依赖就绪、并发资格）。
-- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 avg300 + 滞回 + 档位配置的产物）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
+- **`no_refill_reason` 非空 = 不派发**：`in-flight ≥ cap`（并发上限语义不变，AC5；cap 仍是 `cap-from-gate.sh` 读 cpu 压力（some avg10）+ 滞回 + 档位配置的产物）、`.halt` 存在（**抢占挂载**，`gap-supervisor-preemption` AC2——代码强制点，任意点生效）或无可派发候选（负控制）。
 
 ### 规则
 
@@ -609,12 +609,19 @@ node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --
 
 **前置：先算自适应并发上限（`gap-adaptive-concurrency-cap-tied-to-resource-gate`）——派发决策点的资源读取，
 每 tick 只算一次，本步（floor）与步骤 4（派发上限）共用。** cap 不再是固定 3，而是
-`cap = f(resource-gate)`：在派发时刻读 `/proc/pressure/cpu` **`some avg300`**（5 分钟窗口——avg10 是
-10 秒窗口，比派发节奏（25 分钟 tick / 15-90 分钟 subagent）快 1-2 个数量级，直接响应 avg10 会把阈值抖动
-放大成派发抖动），带**滞回**（连续 2 次同向才切档，单次采样不触发——负控制），档位数字由项目配置
+`cap = f(resource-gate)`：在派发时刻读 `/proc/pressure/cpu` **`some avg10`**（10 秒窗口——信号语义见下），
+带**滞回**（连续 2 次同向才切档，单次采样不触发——负控制；采样点在派发时刻、间隔 25 分钟量级，所以
+avg10 的快窗被滞回压成慢切换——2 次同向 = 持续负载，不是瞬时抖动），档位数字由项目配置
 `.quay/config.yml` `loop:concurrency_bands` 给出（quay 默认 GO=5 / WAIT=2 / EXTREME=1，下游可覆盖如
-4/2/1；机制共用、数字各项目定）。avg300 < 40 → GO；40..70 → WAIT；≥70 → EXTREME。信号不可测
-（内核无 PSI）⇒ 落到最低档（fail-closed，绝不静默维持高并发）。**交叉标注（AC8）**：信号源
+4/2/1；机制共用、数字各项目定）。**信号语义（`gap-cap-from-gate-avg300-driven-by-claude-session-churn-
+structural-cap-2`，2026-08-08 外层实测）**：`some avg300`（5 分钟窗）被 claude 会话常驻 churn 主导——
+稳定 50-55、恒 > 旧 WAIT=40，且对派发类负载不跟随（4 核满载注入 30s：avg300 只 +1.5pt、avg10 +26pt；
+撤载后 avg300 几乎不动）——avg300 驱动的 cap 结构性锁 WAIT=2，节流派发无法缓解。因此**信号改用 `some
+avg10`（对真实过载响应），阈值抬高以剔 churn 基线**：avg10 < 60 → GO；60..85 → WAIT；≥85 → EXTREME。
+60 高于实测 churn 基线（avg10 42-54）、低于实测真实过载读数（4 核注入 avg10=68）——阈值抬升即「剔 churn」
+（候选 A 思想），avg10 即「对真实过载响应的信号」（候选 B 换信号的实测选型；`full avg300` 实测恒 0、
+连满载都不响应，弃用——不选固定减法，churn 基线随会话启停漂移）。信号不可测（内核无 PSI）⇒ 落到最低档
+（fail-closed，绝不静默维持高并发）。**交叉标注（AC8）**：信号源
 `resource-gate.sh`、同决策点的触摸不相交判定 `concurrent-batch-scheduler.ts`（步骤 4 并发资格）、
 容器化硬限额上位解 `orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`。
 
@@ -689,10 +696,12 @@ subagent**，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3/AC6，
 `effective_cap` 个在飞 subagent」，只是让派发发生得更早。
 
 **并发上限 = 步骤 3.6 前置块算出的 `effective_cap`（自适应，非固定 3）**：`cap-from-gate.sh` 在派发
-决策点读 `some avg300`（5 分钟窗口）+ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时
-GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），高负载自动回落 WAIT/EXTREME 档（不加重，AC6）。本 tick 只派发
-**至多 `effective_cap` 个在飞 subagent**。并发是打破「外层变瓶颈」的手段——串行时外层的 20 分钟 tick
-频率会和任务完成频率同量级，分层退化成单层加延迟。
+决策点读 `some avg10`（10 秒窗口；avg300 已被实测为 churn 主导的死信号，弃用——见步骤 3.6 前置块信号语义）
++ 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时 GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），
+高负载（avg10 ≥60，实测真实过载读数）自动回落 WAIT/EXTREME 档（不加重，AC6）。**churn 剔除靠阈值抬升
+不靠固定减法**——avg10 的实测 churn 基线 42-54 落在 GO 带内，不再像 avg300 那样把 cap 结构性锁在 WAIT=2。
+本 tick 只派发**至多 `effective_cap` 个在飞 subagent**。并发是打破「外层变瓶颈」的手段——串行时外层的
+20 分钟 tick 频率会和任务完成频率同量级，分层退化成单层加延迟。
 
 派发前对每个候选：
 
@@ -832,7 +841,7 @@ A-D: {"disjoint":true,"overlaps":[],"reason":"disjoint file-sets"}   # 合规：
 
 **内层 fail-safe 子句（机械承载，不是自觉）**：收到与本节派发契约**矛盾**的驱动文本——如「按 A→D→B
 顺序」且同文无任何 `checkTouchesPair` 输出（2026-08-04 实锤的静默串行形态；对比上面的合规形态），或与
-「并发上限 = effective_cap（cap-from-gate 读 avg300 + 滞回 + 档位配置）」冲突（如指令写死固定 3）——
+「并发上限 = effective_cap（cap-from-gate 读 cpu 压力 + 滞回 + 档位配置）」冲突（如指令写死固定 3）——
 **以本节为准执行，并向外层标注矛盾**，不静默服从散文。产品不被散文覆盖的机械承载
 是这一句，不是「指望外层永远记得不复述」。
 
