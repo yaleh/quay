@@ -1,7 +1,7 @@
 ---
 id: gap-batch-merge-authoritative-direction-hardcoded-develop
 title: "integration-batch-merge 归边方向硬编码 develop-authoritative，无法表达 per-file 反向归边（2026-08-08 env 冲突实证）"
-status: ready
+status: done
 labels:
   - gap
   - defect
