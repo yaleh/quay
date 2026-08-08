@@ -285,10 +285,12 @@ test("AC7 — empty report: blocked metrics default to 0, never undefined", asyn
 
 test("AC3 — the tick file requires assert-before-stop and clear-after-recovery", () => {
   const tick = fs.readFileSync(path.join(REPO_ROOT, "plugin", "loop", "fast-mode-loop-tick.md"), "utf8");
-  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the checker via the
-  // grouped entry point — `quay-deliver.ts inner-blocked-signal`. The test asserts the SAME command
-  // name the tick doc uses (AC2: docs and tests must not each write their own).
-  assert.match(tick, /quay-deliver\.ts inner-blocked-signal/, "tick must reference the CLI");
+  // 40→6 consolidation (SPEC-instruments-behind-one-entry.md) was reverted (7642849a,
+  // gap-forty-to-six-remerge-needs-tests-updated-first): the tick doc references the canonical bare
+  // script `plugin/scripts/inner-blocked-signal.ts` (NOT the grouped entry `quay-deliver.ts
+  // inner-blocked-signal`). The test asserts the SAME command name the tick doc uses (AC2: docs and
+  // tests must not each write their own). Re-instate the `quay-deliver.ts` form when 40→6 is re-merged.
+  assert.match(tick, /inner-blocked-signal\.ts/, "tick must reference the CLI");
   assert.match(tick, /--assert-blocked/, "tick must require writing the block before stopping");
   assert.match(tick, /--clear/, "tick must require clearing after recovery");
 });

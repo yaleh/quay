@@ -1059,6 +1059,47 @@ AC11 管的是**「我说 verified 之前，先验证我的验证方式」**（�
 AC18 管的是**「别人说 done 之后，我自己重跑」**。
 **两条方向相反、互补**：前者防我自己的假阳性，后者防执行层的假阴性。
 
+## 【当前阶段目标 — 2026-08-08 人直接给出，覆盖排序】
+
+人的原话：「我们需要调整它为以分支策略跑起来为主。」
+
+**背景（本轮实测，与这句指示一起构成本次调整的依据）**：
+`SPEC-branching-model-integration-branch-2026-08-05` 的两线模型（`develop`=FORK_BASELINE、
+`integration`=MERGE_TARGET）已落地为可执行状态——`.quay/config.yml:116-117` 声明
+`fork_baseline: develop` / `merge_target: integration`，`integration-branch-model.ts` +
+`branch-model.test.mjs` / `integration-branch-model.test.mjs` 已随本轮绿套件通过（passed=true）。
+**但机制装上了不等于策略在真的跑**，实测两处缺口：
+
+1. **方向缺口**：`merge_target` 声明的是 `integration`，但实际执行方向是
+   `task/* → develop`，再 `develop → integration`（FF）——**与声明方向相反**，
+   且 `integration` 从未真正接收过一次 task 分支合并（`develop 领先 58 / integration 领先 0`，
+   本轮观测窗口内持续为 0）。
+2. **不可观测缺口**：`fork_baseline` 在当前拓扑下结构性测不出来——因为 `integration`
+   从未领先过 `develop`，"从 develop 切"与"从 integration 切"产生**完全相同的历史**，
+   无法从外部分辨策略有没有被真正执行过。
+
+### AC19：分支策略真正在跑（对应人本轮指示）
+
+**判据（可机械核对，具体数字/形态由 outer 定，manager 不代定）**：
+
+1. **方向核实**：至少一次真实合并走的是 `merge_target` 声明的方向（task 分支真正
+   merge 进 `integration`），不是全程只靠 `develop → integration` 的 FF 单向推进。
+2. **可观测窗口**：至少存在一次 `integration` 领先 `develop` 的真实窗口（不是 0/0），
+   且该窗口内有新任务的分叉基线被验证过——声明依赖的任务从 `integration` 切、
+   独立任务从 `develop` 切，两者的分叉点可被机械区分（判别式：
+   `git rev-list develop..<branch>` 与 `git rev-list develop..master`〔或当前基线〕的
+   交集大小，见 `gap-dispatch-fork-does-not-read-config-fork-baseline` 已验证过的方法）。
+3. **两条禁止**：不得为了制造条件 2 的窗口而人为构造一个空转任务去凑数；
+   也不得为了让本 AC 达成而放宽分支模型本身的判据——同今晚已定的两条纪律
+   （不为绿放宽断言、不在还没验证时推进批量合）。
+
+**与 AC16 的关系（不作废，重新排序）**：AC16（GitHub release）仍然有效，
+但本轮起**让位于 AC19**——GitHub 上有可用产物，若它背后的分支协作机制本身
+没被真正跑过，产物的可信度打了折。
+
+**归属**：怎么制造这个窗口、要不要主动排一个声明依赖的任务去触发它 ＝ outer 的机制决定；
+manager 只核对上面三条判据的实测值，不代其设计派发策略。
+
 ## 维护归属（2026-08-03 人指出后调整）
 
 | 东西 | 归属 | 依据 |

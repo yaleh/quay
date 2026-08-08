@@ -702,8 +702,31 @@ mark_nested() {
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
+# ── Fixed-overhead instrumentation (gap-suite-fixed-overhead-decomposition, AC1/AC2) ───────────────
+# The ~152s fixed overhead (build_dist_once / run_static_checks / resource-gate / inter-phase gaps)
+# was never decomposed. These segments are DETERMINISTIC SERIAL — no concurrency jitter — so direct
+# per-segment timestamps give a decidable number (unlike wall-clock diffs, which sit inside the
+# 17–63s noise band per gap-suite-cost-model-is-wrong-optimizations-buy-nothing). We record epoch-ms
+# at each serial boundary and emit a per-segment breakdown to stderr on the FULL-SUITE default path.
+# Only the default (product,engine) full-suite path emits it — scoped --group runs skip (their fixed
+# overhead is not the object of measurement). Output lines: `__OVERHEAD__ <segment>_ms=<N>`.
+_oh_mark() { date +%s%N | cut -c1-13; }
+_oh_emit() { # _oh_emit <label> <start_ms> <end_ms>  → __OVERHEAD__ label_ms=N
+  # uutils date doesn't truncate %3N (returns epoch+full-9-digit-ns), so we slice epoch-ms
+  # from +%s%N. Guard: an empty/absent mark emits 0 rather than garbage (a mark capture that
+  # raced a subshell must not corrupt the whole breakdown).
+  local label="$1" s="$2" e="$3"
+  if [ -z "$s" ] || [ -z "$e" ] || ! [[ "$s" =~ ^[0-9]+$ ]] || ! [[ "$e" =~ ^[0-9]+$ ]]; then
+    echo "__OVERHEAD__ ${label}_ms=ERR-UNSET" >&2
+    return
+  fi
+  echo "__OVERHEAD__ ${label}_ms=$((e - s))" >&2
+}
+
 run_selected() {
   local groups="$1"; shift
+  local oh_t0 oh_t1 oh_t2 oh_t3 oh_t4 oh_t5 oh_t5b oh_t6 oh_t6b oh_t7
+  local oh_full=0
   # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
   # degrade to engine — a dropped group cancels the isolation guarantee without going red.
   check_group_declarations
@@ -712,14 +735,20 @@ run_selected() {
   # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
+    oh_full=1
+    oh_t0=$(_oh_mark)
     # Single-flight lock FIRST (serialize with any already-running full suite), then the resource
     # gate (GO/WAIT on the machine's load at actual start time). Order matters: the lock queues the
     # second suite, so the gate's verdict is computed AFTER serialization — never against stale load.
     full_suite_lock_acquire
+    oh_t1=$(_oh_mark)
     resource_gate_check
+    oh_t2=$(_oh_mark)
   fi
   build_dist_once
+  oh_t3=$(_oh_mark)
   run_static_checks
+  oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
   while IFS= read -r f; do files+=("$f"); done < <(select_files "$groups")
@@ -768,27 +797,30 @@ run_selected() {
       node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
     fi
     local code=$?
+    [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
     # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
     # keeps real-wall-clock-wait and nested-suite-spawn tests from being starved by the main body's
-    # worker pool. Skipped when the main body already failed (the run is red either way). The
-    # concurrency is a HARD-CODED 1 — serial isolation is the mechanism's invariant, never a
-    # user-tunable knob (the --group serial path in the non-default branch strips explicit
-    # concurrency flags for the same reason). Its TAP summary lands LAST on the stream, so the
-    # outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial summary overwrites
-    # the main body's only when both are green — a serial failure flips the whole run red via its
-    # own fail/cancelled).
-    if [ "$code" -eq 0 ]; then
-      local serial_files=() sf serial_code
-      while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
-      if [ "${#serial_files[@]}" -gt 0 ]; then
-        echo "selected ${#serial_files[@]} files (groups=serial)"
-        node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
-        serial_code=$?
-        if [ "$serial_code" -ne 0 ]; then code="$serial_code"; fi
-      fi
+    # worker pool. The concurrency is a HARD-CODED 1 — serial isolation is the mechanism's
+    # invariant, never a user-tunable knob (the --group serial path in the non-default branch
+    # strips explicit concurrency flags for the same reason). Its TAP summary lands LAST on the
+    # stream, so the outer runner's pass/fail/cancelled tallies reflect BOTH phases (the serial
+    # summary overwrites the main body's only when both are green — a serial failure flips the
+    # whole run red via its own fail/cancelled). The phase runs EVEN IF the main body failed
+    # (report all failures; the serial exit code merges into `code`) — a red main must not leave
+    # the serial 3 files' verdict unknown (gap-post-merge-verification-failure-batch AC3:
+    # round 95 skipped serial when main was red, so serial failures were invisible).
+    local serial_files=() sf serial_code
+    while IFS= read -r sf; do serial_files+=("$sf"); done < <(select_files "serial")
+    [ "$oh_full" -eq 1 ] && oh_t5b=$(_oh_mark)
+    if [ "${#serial_files[@]}" -gt 0 ]; then
+      echo "selected ${#serial_files[@]} files (groups=serial)"
+      node --test --test-concurrency=1 $(suite_reporter_flags) "${serial_files[@]}"
+      serial_code=$?
+      [ "$serial_code" -eq 0 ] || code="$serial_code"
     fi
+    [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
     # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
     # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
     # each mkdtemp workspace / private socket) run in their OWN phase at `--test-concurrency=3` —
@@ -798,11 +830,30 @@ run_selected() {
     # (resource-gate AC5 pins exactly 5 `--test-concurrency="$(default_test_concurrency)"` sites).
     local lowconc_files=() lf
     while IFS= read -r lf; do lowconc_files+=("$lf"); done < <(select_files "lowconc")
+    [ "$oh_full" -eq 1 ] && oh_t6b=$(_oh_mark)
     if [ "${#lowconc_files[@]}" -gt 0 ]; then
       echo "selected ${#lowconc_files[@]} files (groups=lowconc)"
       node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
       local lcode=$?
       [ "$lcode" -eq 0 ] || code="$lcode"
+    fi
+    [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
+    # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
+    # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
+    # unlike wall-clock diffs inside the 17–63s noise band. The "gap" segments are the inter-phase
+    # serial transitions (select/echo between phases, oh_t5→oh_t5b and oh_t6→oh_t6b); the phase
+    # segments (main/serial/lowconc) are the node --test runs themselves. Label tokens deliberately
+    # match the task's measure grep (`build_dist|run_static|resource_gate|gap_ms`).
+    if [ "$oh_full" -eq 1 ]; then
+      _oh_emit "lock_overhead"      "$oh_t0" "$oh_t1"
+      _oh_emit "resource_gate"      "$oh_t1" "$oh_t2"
+      _oh_emit "build_dist"         "$oh_t2" "$oh_t3"
+      _oh_emit "run_static_checks"  "$oh_t3" "$oh_t4"
+      _oh_emit "main_phase"         "$oh_t4" "$oh_t5"
+      _oh_emit "gap_ms_main_to_serial"  "$oh_t5" "$oh_t5b"
+      _oh_emit "serial_phase"       "$oh_t5b" "$oh_t6"
+      _oh_emit "gap_ms_serial_to_lowconc" "$oh_t6" "$oh_t6b"
+      _oh_emit "lowconc_phase"      "$oh_t6b" "$oh_t7"
     fi
     set -e
     # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO

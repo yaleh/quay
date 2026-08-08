@@ -1,0 +1,81 @@
+---
+id: gap-ac19-two-line-model-actually-runs
+title: AC19：两线模型机制已装但从未真正跑过——方向倒置（task fan-in 直合 develop 而非 integration）+
+  integration 领先恒 0（fork_baseline 结构性不可观测）；让任务真正合 integration 制造领先窗口验证可分辨
+status: ready
+labels: []
+parent: null
+children: []
+extra: {}
+---
+**type:** execution
+
+## Proposal
+
+**AC19（人 2026-08-08「以分支策略跑起来为主」）：两线模型机制已装但从未真正跑过——方向倒置 + 结构性不可观测。立案：让任务真正走声明方向（fan-in 合 integration），制造 integration 领先 develop 的真实窗口，验证 fork_baseline 可分辨。**
+
+### 实测（管理者正式发出 + 外层核实）
+
+- config 声明 `fork_baseline: develop / merge_target: integration`（.quay/config.yml:116-117）；
+- **缺口①（方向倒置）**：文档明确「fan-in 合到 `$MERGE_TARGET`（integration），不合并到 `$FORK_BASELINE`（develop）；`$FORK_BASELINE` 只由外层批量合推进」（fast-mode-loop-tick.md:400/414/426）——**机制正确，但内层 fan-in 没执行**：d6633082/b30d739e 等 task fan-in 直合 develop，再 develop→integration(FF)；
+- **缺口②（结构性不可观测）**：integration 领先 develop 持续 = 0（当前 develop 领先 61），integration 从未真正接收 task 合并 → fork_baseline 的"分叉基线即依赖声明"机制携带零信息（拓扑从没让它起作用）。
+
+### AC19 判据（已写入 orchestration/manager-phase-goal.md）
+
+① 至少一次**真实合并走声明方向**（task → integration）；② 至少一次 **integration 领先 develop 的真实窗口**，且窗口内验证分叉基线可分辨；③ 不为凑数造空转任务、不为达成放宽分支模型判据。
+
+### 机制决定（外层）
+
+**不改 config 方向**（声明正确——task 应合 integration、develop 只被批量合推进）。修复 = **内层 fan-in 严格遵守文档**：下一批任务合到 integration（MERGE_TARGET），形成 integration 领先 develop 的窗口，窗口内验证 fork_baseline 可分辨，再批量合回 develop。这是让已装机制真正跑起来，非新机制。
+
+### 现状读数（管理者）
+
+inner 面板 40→6 重合并卡在自己的 AC2（干净窗口全量绿）——最后一次无争议绿 02:50-03:02(718.2s)，之后几轮 red 是受控测量仪器噪声（node --test 全 fail 0），非真回归。
+
+### 执行前读数（内层 2026-08-08，本任务开工时）
+
+- `integration..develop` = 62（develop 领先 integration 62，方向倒置的直接读数）；
+- `develop..integration` = 0（integration 从未领先，fork_baseline 不可观测）；
+- `git merge-base --is-ancestor integration develop` → YES（integration 是 develop 的严格祖先）；
+- 本任务 fan-in 目标 = **integration**（`.quay/config.yml:116-117` `fork_baseline: develop / merge_target: integration`）；
+- 内层近期 task 提交（d6633082/b30d739e/b5de2467）直合 develop → 方向倒置的实锤（文档要求 fan-in 合 integration，执行没跟上）。
+
+**本任务执行 = 纯 git 行为**（fan-in 合 integration + 批量合回），无代码改动；`plugin/loop/fast-mode-loop-tick.md:400/426-427` 已明文
+「fan-in 合到 `$MERGE_TARGET`，不合并到 `$FORK_BASELINE`」「合回 integration，不直接合 develop」——文档正确，缺的是执行。
+
+## Contract
+
+measure integration_lead = `git rev-list --count develop..integration` stdout 数字段（制造窗口后应 > 0——integration 领先 develop 成立）
+measure direction_ok = `git log --oneline integration -3 | grep -cE "task/|fan-in.*integration"` stdout 数字段（任务 fan-in 合 integration 后 ≥1）
+band integration_lead = > 0 且 direction_ok = ≥1（至少一次真实合并走声明方向 + integration 领先窗口）
+invoke `bash scripts/test.sh --for-task gap-ac19-two-line-model-actually-runs 2>&1 | tail -3`
+control 制造 integration 领先 develop 窗口后：fork_baseline 可分辨（integration 有 develop 没有的提交）；
+  批量合回 develop（integration 重新成为 develop 祖先）；不造空转任务、不放宽判据
+resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
+
+## Acceptance Criteria
+
+- [ ] AC1: **方向修正**——内层 fan-in 合 integration（MERGE_TARGET），不再直合 develop；至少一次真实合并走声明方向
+- [ ] AC2: **integration 领先窗口**——integration 领先 develop > 0（真实窗口，非 0）
+- [ ] AC3: **fork_baseline 可分辨**——窗口内验证分叉基线可分辨（integration 有 develop 没有的提交）
+- [ ] AC4: **批量合回**——窗口后批量合回 develop（integration 重新成为 develop 祖先）
+- [ ] AC5: **不凑数**——不造空转任务、不为达成放宽分支模型判据；40→6 AC2 全量绿后推进重合并
+
+## Definition of Done
+
+- [ ] AC1-AC4 实跑输出贴任务体（方向修正前后、integration 领先窗口、fork_baseline 可分辨验证、批量合回）
+- [ ] 两线模型真正跑起来（任务合 integration → 批量合回 develop 的完整循环 ≥1 次）
+
+## Touches
+- 内层 fan-in 行为（任务合 integration 而非 develop——执行，非代码）
+- plugin/loop/fast-mode-loop-tick.md（若需强化 fan-in 合 integration 的执行纪律）
+- orchestration/manager-phase-goal.md（AC19 判据，交叉标注）
+
+## Dispatch review
+
+reviewer: outer
+at: 2026-08-08T05:0xZ
+changed: AC19（人「以分支策略跑起来为主」）两条缺口核实：方向倒置（机制对、内层 fan-in 没执行——
+  直合 develop 而非 integration）+ integration 领先恒 0（fork_baseline 不可观测）。机制决定：
+  不改 config（声明正确），让内层按文档 fan-in 合 integration，制造 integration 领先窗口验证
+  fork_baseline 可分辨。AC19 判据 ①②③ 见任务体。
