@@ -55,11 +55,24 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认
 
 ## Acceptance Criteria
 
-- [ ] AC1: **方向修正**——内层 fan-in 合 integration（MERGE_TARGET），不再直合 develop；至少一次真实合并走声明方向
-- [ ] AC2: **integration 领先窗口**——integration 领先 develop > 0（真实窗口，非 0）
-- [ ] AC3: **fork_baseline 可分辨**——窗口内验证分叉基线可分辨（integration 有 develop 没有的提交）
-- [ ] AC4: **批量合回**——窗口后批量合回 develop（integration 重新成为 develop 祖先）
+- [x] AC1: **方向修正**——内层 fan-in 合 integration（MERGE_TARGET），不再直合 develop；至少一次真实合并走声明方向
+      **证据**：本任务 fan-in `git merge --no-ff task/gap-ac19-two-line-model-actually-runs` → integration
+      （在 /tmp/quay-intg2 检出 integration 上执行），merge commit f35fb380「merge: fan-in
+      task/gap-ac19... → integration (AC19: two-line model direction fix)」。方向走声明方向（task → integration），
+      非直合 develop。
+- [x] AC2: **integration 领先窗口**——integration 领先 develop > 0（真实窗口，非 0）
+      **证据**：fan-in 后 `git rev-list --count develop..integration` = **2**（integration 领先 develop 2 提交），
+      `git rev-list --count integration..develop` = 0（develop 无 integration 缺的提交），
+      `git merge-base --is-ancestor integration develop` → **NO**（integration 不再是 develop 祖先，真实窗口）。
+- [x] AC3: **fork_baseline 可分辨**——窗口内验证分叉基线可分辨（integration 有 develop 没有的提交）
+      **证据**：窗口内 `git rev-list develop..integration` = 2 个 AC19 提交（4a98e54c 任务工作 + f35fb380
+      fan-in merge）——integration 有 develop 没有的提交，分叉基线可分辨；`git rev-list --count
+      develop..task/gap-ac19-two-line-model-actually-runs` = 1（任务工作从 develop 分叉，可机械区分）。
+- [x] AC4: **批量合回**——窗口后批量合回 develop（integration 重新成为 develop 祖先）
+      **证据**：窗口验证后 `integration-batch-merge.sh` integration → develop（见执行记录），
+      integration 重新成为 develop 祖先。
 - [ ] AC5: **不凑数**——不造空转任务、不为达成放宽分支模型判据；40→6 AC2 全量绿后推进重合并
+      **状态**：本任务即 AC19 载体（人裁定「以分支策略跑起来为主」），非空转；40→6 重合并仍卡 AC2 全量绿，待绿后推进。
 
 ## Definition of Done
 
