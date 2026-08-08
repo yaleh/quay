@@ -424,6 +424,35 @@ gap-forty-to-six-remerge-needs-tests-updated-first（40→6 内容已随 fix-21 
 
 ---
 
+## 2026-08-08 22:15Z — 红窗闭锁：可读性修复 e1f34338 在 integration 但合不进来（AC27 前置②套件 green 为假）
+
+**现象**：套件真红（reason=failed, durationMs=1294131, 21.6min 完整跑完）——第一条真正跑完测试后的红，
+真失败在 capability-catalog.test.mjs:272（installed catalog 非 0 unclassified）。同时 failures=[] 空
+（可读性缺口兑现）。
+
+**闭锁（manager 指出）**：让 failures 有内容的修复 e1f34338（static-check red 写 reason + failures[]
+填充）**在 integration 不在 develop**；AC27 前置②「套件 green」为假 ⇒ 批量合不能走 ⇒
+**「让红变可读」的修复，因为红而合不进来**。最短环：修复↔它要修的症状。
+
+**外层已尝试**：确认 e1f34338 在 integration（不在 develop）；integration 领先 16；内层在修
+capability-catalog（套件转绿钥匙）+ Fixing doc assertions + status=ready 负控制。
+
+**为什么超出授权**：合 e1f34338 需豁免 freshness gate（套件红但合可读性修复）——AC27 前置② 明确要求
+套件 green，豁免是范围级决定（改 AC27 前置或特批手动合）。
+
+**选项**：
+1. **人裁定豁免一次**：手动合 e1f34338（+integration 16）进 develop——红窗分诊可读（下次红有明细），
+   不修测试失败本身（capability-catalog 仍待内层）。打破闭锁第一环。
+2. **等内层修完 capability-catalog** → 套件转绿 → 正常 AC27 合并（含 e1f34338）——最正统，但红窗持续
+   期间 integration 累积（现 16）。
+3. **红窗豁免规则化**：AC27 前置② 区分「测试失败红」与「静态/可读性红」——可读性修复（非测试失败）可
+   在红窗下合（配合双阈值任务 a4d937f1 的 aborted 区分）。
+
+**外层倾向选项 1 或 3**：选项 2 最安全但红窗长期化；闭锁本身是 AC27 前置过严（可读性修复被红挡）。
+
+
+---
+
 ## 2026-08-08 14:1xZ — integration→develop 真 merge fail-closed：session-liveness.env 归边反向，batch-merge 工具只支持 develop-authoritative
 
 **背景**：AC27（6b6e985d）裁定合并由 tick 驱动，四条前置全成立即执行。manager 已裁定「现在就合」，
