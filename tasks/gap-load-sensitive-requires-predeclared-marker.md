@@ -51,6 +51,16 @@ extra: {}
 批跑协议 grep 定位）。本任务的差距是：**标记只用于判绿排除，没有被用于「红窗释放的准入」**——
 无标记文件的隔离通过仍被 inner 用于放行（07:06:49 serve.test.mjs 实例）。
 
+**已修（2026-08-08，dispatch gap-load-sensitive-requires-predeclared-marker）**：
+- `docs/analysis/fast-mode-loop-tick.md` 已知负载敏感族一节新增「红窗释放准入」判据：**有标记 =
+  Path A 直接释放；无标记 = Path B 只能申请加标记（连同证据）、本轮不释放**——两条路径成文。
+- 新增机械校验 `plugin/scripts/load-sensitive-release-check.ts`（+ 测试
+  `plugin/test/load-sensitive-release-check.test.mjs`）：给定被释放文件集，exit 0 = 全部带标记
+  （释放成立）/ exit 1 = 有未标记文件（释放不成立、走 Path B）/ exit 2 = fail-closed。
+- 实实例处置（AC4）：`packages/quay/test/serve.test.mjs` 判定为**真负载敏感**（HTTP 服务器 + 绑
+  端口 + spawn 真实 CLI + 多工作区 chdir），**补 KNOWN-LOAD-SENSITIVE 头注释**（隔离 1/0 通过
+  为证据），不是真缺陷。
+
 ## Contract
 
 ```
@@ -63,23 +73,39 @@ resume 若中断，先跑 measure 确认当前无标记文件的释放行为，�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **事前声明机制**——红窗释放的「负载敏感」判定只看 KNOWN-LOAD-SENSITIVE 事前标记，
+- [x] AC1: **事前声明机制**——红窗释放的「负载敏感」判定只看 KNOWN-LOAD-SENSITIVE 事前标记，
       不再接受无标记文件的事后隔离通过作为放行依据
-- [ ] AC2: **无标记路径**——无标记文件隔离通过时，只能申请加标记（含证据），本轮红窗不因它释放
-- [ ] AC3: **标记申请流程**——申请加标记有记录（证据贴任务体/文件），下次生效，非一次性豁免
-- [ ] AC4: **serve.test.mjs 处置**——判定它该补标记（连同隔离通过证据）还是真缺陷；若补标记则落
+      （证据：docs/analysis/fast-mode-loop-tick.md「红窗释放准入」成文：有标记 = Path A 直接释放；
+      无标记 = Path B 只能申请；机械校验 `load-sensitive-release-check.ts` exit 0/1 二分）
+- [x] AC2: **无标记路径**——无标记文件隔离通过时，只能申请加标记（含证据），本轮红窗不因它释放
+      （证据：同上一节的 Path B 条款——`UNMARKED <file> (release NOT permitted — apply-for-marker path)`；
+      `load-sensitive-release-check.ts` 对未标记文件 exit 1，释放不成立）
+- [x] AC3: **标记申请流程**——申请加标记有记录（证据贴任务体/文件），下次生效，非一次性豁免
+      （证据：本任务体即申请记录载体——AC4 的 serve.test.mjs 处置贴隔离 1/0 证据并落
+      KNOWN-LOAD-SENSITIVE 头注释，标记随代码持久化，下次 grep 即生效；无一次性豁免）
+- [x] AC4: **serve.test.mjs 处置**——判定它该补标记（连同隔离通过证据）还是真缺陷；若补标记则落
       KNOWN-LOAD-SENSITIVE 头注释，若是真缺陷则修它
-- [ ] AC5: 与 gap-batch-merge-gate-reads-stale-green（闸门未机械执行）、判据 ④ 文档 vs 实际
+      （证据：**判定 = 补标记（真负载敏感，非真缺陷）**——HTTP 服务器 + 绑端口 + spawn 真实
+      quay-native CLI（execFileSync）+ 多工作区 chdir，隔离下天然通过、cc8 并发下失败；隔离实跑
+      `node --experimental-strip-types --test packages/quay/test/serve.test.mjs` = **1 pass / 0 fail
+      / 23.9s**（dispatch 工作树）；标记已落 `packages/quay/test/serve.test.mjs` 文件头
+      `KNOWN-LOAD-SENSITIVE`，`grep -l "KNOWN-LOAD-SENSITIVE" packages/quay/test/serve.test.mjs` 命中）
+- [x] AC5: 与 gap-batch-merge-gate-reads-stale-green（闸门未机械执行）、判据 ④ 文档 vs 实际
       交叉标注——同类「闸门自判 vs 机械」族
+      （证据：`tasks/gap-batch-merge-gate-reads-stale-green.md` 追加交叉标注——本任务把「红窗释放」
+      从 inner 自判（隔离通过即放行）改成机械准入（标记 + `load-sensitive-release-check.ts` 校验），
+      与批量合闸门从「只读 state 不读新鲜度」改成机械判定的缺口是同一个「闸门自判 vs 机械」族）
 
 ## Definition of Done
 
 - [ ] AC1-AC5 实跑输出贴任务体（标记文件放行 / 无标记申请 / serve.test.mjs 处置对照）
 
 ## Touches
-- docs/analysis/fast-mode-loop-tick.md（红窗释放判据：标记准入）
-- plugin/test/serve.test.mjs（AC4：补 KNOWN-LOAD-SENSITIVE 标记或修缺陷）
-- plugin/scripts/（若需批量合侧校验标记）
+- tasks/gap-load-sensitive-requires-predeclared-marker.md（self）
+- docs/analysis/fast-mode-loop-tick.md（红窗释放判据：标记准入，两条路径 + 机械校验命令）
+- packages/quay/test/serve.test.mjs（AC4：补 KNOWN-LOAD-SENSITIVE 标记；实际路径在 packages/quay/test/ 而非 plugin/test/）
+- plugin/scripts/load-sensitive-release-check.ts（new）（红窗释放准入机械校验）
+- plugin/test/load-sensitive-release-check.test.mjs（new）（机械校验的测试）
 - tasks/gap-batch-merge-gate-reads-stale-green.md（AC5 交叉标注）
 
 ## Dispatch review
