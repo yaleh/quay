@@ -100,10 +100,41 @@ export function emitDiagnostic(severity: DiagnosticSeverity, message: string): v
 // Workspace root discovery
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the workspace root, starting the `.quay/config.yml` search at
+ * `startDir` and walking up as needed (single mechanism for BOTH the default
+ * process.cwd() case and the explicit `--root <path>` case —
+ * gap-task-list-root-does-not-scope-config-lookup AC4: no second semantics).
+ *
+ * Returns null when no config is discoverable from `startDir` upward — the
+ * caller decides whether to fail closed or fall back. The CLI's `--root`
+ * surface uses {@link resolveWorkspaceRootOrThrow} so it NEVER silently falls
+ * back to process.cwd() (AC2).
+ */
 export function discoverWorkspaceRoot(startDir: string = process.cwd()): string | null {
   const configPath = findConfig(startDir);
   if (!configPath) return null;
   return path.dirname(path.dirname(configPath));
+}
+
+/**
+ * Fail-closed workspace-root resolution for the CLI's `--root <path>` surface
+ * (gap-task-list-root-does-not-scope-config-lookup AC2): resolves the workspace
+ * root by starting the config search at `startDir` (walk-up, same findConfig
+ * mechanism discoverWorkspaceRoot/loadConfig use everywhere), and THROWS a
+ * clear error instead of returning null — so a `--root` that points at a
+ * directory with no `.quay/config.yml` produces a clean failure rather than a
+ * silent fallback to process.cwd().
+ */
+export function resolveWorkspaceRootOrThrow(startDir: string): string {
+  const root = discoverWorkspaceRoot(startDir);
+  if (!root) {
+    throw new Error(
+      `no .quay/config.yml found under --root "${startDir}" (searched from there upward). ` +
+        `Point --root at a quay workspace root (a directory containing .quay/config.yml).`
+    );
+  }
+  return root;
 }
 
 // ---------------------------------------------------------------------------

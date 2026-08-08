@@ -13,6 +13,12 @@ function fsSyncExists(p) {
   try { fsSync.accessSync(p); return true; } catch { return false; }
 }
 import { loadConfig, activeProvider } from "../src/config.ts";
+// gap-task-list-root-does-not-scope-config-lookup: the fail-closed `--root`
+// workspace-root resolver — the same findConfig mechanism loadConfig uses
+// everywhere (config-validate, serve, mcp-server), so `--root <path>` on any
+// workspace-scoped command resolves config the same way (AC4: no second
+// semantics) and never silently falls back to process.cwd() (AC2).
+import { resolveWorkspaceRootOrThrow } from "../src/gate/config/loader.ts";
 import { connectProvider } from "../src/provider-client.ts";
 import { composePayload, deliverTrigger } from "../src/action.ts";
 import { resolveProviderEnv } from "../src/provider-env.ts";
@@ -274,8 +280,32 @@ function pinAcceptanceEnv({ workspaceRoot, cwd, timeout, envFile }) {
   // (unset by default); a pre-set env var wins — never clobber.
 }
 
-async function withProvider(fn, { providerId } = {}) {
-  const cfg = loadConfig();
+async function withProvider(fn, { providerId, root } = {}) {
+  // gap-task-list-root-does-not-scope-config-lookup: `--root <path>` scopes
+  // config discovery to <path> — the start of the .quay/config.yml search is
+  // moved from process.cwd() to <path> (walk-up), and a --root with no config
+  // FAILS CLOSED with a clear error (AC2), never silently falling back to the
+  // process cwd's config. A bare `--root` (parseFlags sets boolean true) is a
+  // usage error, not a config path.
+  if (root !== undefined && typeof root !== "string") {
+    console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+    process.exitCode = 1;
+    return;
+  }
+  let cfg;
+  try {
+    cfg = root ? loadConfig(resolveWorkspaceRootOrThrow(root)) : loadConfig();
+  } catch (err) {
+    if (root) {
+      // Fail-closed (AC2): the error is already a clear message (from
+      // resolveWorkspaceRootOrThrow) — print it cleanly, no stack, and do not
+      // silently retry from process.cwd().
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
   const provider = activeProvider(cfg, providerId);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
   const [command, ...args] = provider.mcp_entry;
@@ -352,7 +382,7 @@ function printHelp(sub) {
 Usage:
   quay --version | -V
   quay init [--force] [--dry-run] [--root <path>]   (scaffold an EMPTY task store; the loop install is the /quay:init skill, NOT this command)
-  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
+  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--root <path>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
   quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
@@ -378,6 +408,11 @@ Options for task list:
   --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
   --search <query>    Filter by title/body content (case-insensitive)
   --page-size <n>     Limit output to the first <n> tasks (must be a positive integer)
+  --root <path>       Scope the workspace to <path>: resolve .quay/config.yml from
+                      <path> (not the process cwd). Fails closed when <path> has no
+                      config (no silent cwd fallback). Workspace-scoped commands
+                      (task/adr/action/gate/gate-log/complete/adjudicate/promote/
+                      retreat/run/migrate/config validate) all accept --root.
   --json              Output as JSON
   --format json       Alias for --json (any other --format value is a usage error)
 
@@ -540,8 +575,8 @@ Description:
     process.stdout.write(`quay config — validate workspace configuration
 
 Usage:
-  quay config validate [--json|--format json] [--check-files]
-  quay config check [--json|--format json] [--check-files]
+  quay config validate [--json|--format json] [--check-files] [--root <path>]
+  quay config check [--json|--format json] [--check-files] [--root <path>]
 
 Description:
   Validates .quay/config.yml (or legacy .quay/gates.yml + .quay/loop.yml) for
@@ -551,11 +586,18 @@ Description:
 
   'check' is an alias for 'validate'.
 
+  --root <path> resolves the workspace from <path> (not the process cwd),
+  with the same semantics every workspace-scoped command uses — so
+  "task list --root <path>" and "config validate --root <path>" agree on
+  which config is in scope (no second semantics).
+
 Options:
   --json          Output issues as a JSON array (empty on valid).
   --format json   Alias for --json.
   --check-files   Also verify that gate script/command paths reference files
                   that exist on disk.
+  --root <path>   Scope the workspace to <path> (fail-closed when <path> has
+                  no .quay/config.yml).
 `);
   } else if (sub === "gate") {
     process.stdout.write(`quay gate — run a named gate check against a task
@@ -658,7 +700,7 @@ async function main() {
         if (wantsJson) printJson(adrs);
         else if (adrs.length === 0) console.log("(no ADRs)");
         else for (const a of adrs) console.log(`${a.id}\t${a.status}\t${a.title}`);
-      }, { providerId: flags.provider });
+      }, { providerId: flags.provider, root: flags.root });
       return;
     }
     if (sub === "show" || sub === "view") {
@@ -673,7 +715,7 @@ async function main() {
           if (a.supersededBy?.length) console.log(`superseded-by: ${a.supersededBy.join(", ")}`);
           console.log(a.body);
         }
-      }, { providerId: flags.provider });
+      }, { providerId: flags.provider, root: flags.root });
       return;
     }
     if (sub === "new") {
@@ -694,7 +736,7 @@ async function main() {
         if (body !== undefined) patch.body = body;
         const a = await client.adrWrite(patch);
         if (wantsJson) printJson(a); else console.log(`created ${id}`);
-      }, { providerId: flags.provider });
+      }, { providerId: flags.provider, root: flags.root });
       return;
     }
     if (["accept", "deprecate", "reject"].includes(sub)) {
@@ -704,7 +746,7 @@ async function main() {
       await withProvider(async (client) => {
         const a = await client.adrWrite({ id, status: statusMap[sub] });
         if (wantsJson) printJson(a); else console.log(`${id} → ${statusMap[sub]}`);
-      }, { providerId: flags.provider });
+      }, { providerId: flags.provider, root: flags.root });
       return;
     }
     if (sub === "supersede") {
@@ -718,7 +760,7 @@ async function main() {
         await client.adrWrite({ id: by, supersedes });
         if (wantsJson) printJson({ id, status: "superseded", superseded_by: [by] });
         else console.log(`${id} superseded by ${by}`);
-      }, { providerId: flags.provider });
+      }, { providerId: flags.provider, root: flags.root });
       return;
     }
     console.error(`unknown adr subcommand: ${sub} (try: list, show, new, accept, deprecate, reject, supersede)`);
@@ -863,7 +905,7 @@ async function main() {
           console.log("No tasks found.");
         }
       }
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     return;
   }
 
@@ -881,7 +923,7 @@ async function main() {
         console.log(`${t.id}: ${t.title} [${t.status}]`);
         console.log(t.body);
       }
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     return;
   }
 
@@ -923,7 +965,7 @@ async function main() {
       const t = await client.taskWrite({ id, ...patch });
       if (wantsJson) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}]`);
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     return;
   }
 
@@ -1097,7 +1139,7 @@ async function main() {
       const t = await client.taskWrite({ id, ...patch });
       if (wantsJson) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}]`);
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     return;
   }
 
@@ -1111,7 +1153,7 @@ async function main() {
     let result;
     await withProvider(async (client) => {
       result = await client.taskCheck(id);
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     if (wantsJson) {
       printJson(result);
     } else {
@@ -1136,7 +1178,7 @@ async function main() {
       );
       if (wantsJson) printJson(buttons);
       else for (const b of buttons) console.log(`${b.id}\t${b.label}`);
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     return;
   }
 
@@ -1160,7 +1202,7 @@ async function main() {
       const mockLogPath = process.env.QUAY_ACTION_MOCK_LOG || undefined;
       const result = await deliverTrigger({ root: cfg.workspaceRoot, channel, payloadObj, mockLogPath });
       printJson({ ...payloadObj, channel, ...result });
-    }, { providerId: flags.provider });
+    }, { providerId: flags.provider, root: flags.root });
     return;
   }
 
@@ -1286,10 +1328,18 @@ Description:
 
   // DIR-099-A: config validate — structural validation pass over workspace config.
   // Does NOT require a provider connection (pure static analysis of config files).
+  // gap-task-list-root-does-not-scope-config-lookup AC4: `--root <path>` is
+  // supported with the SAME semantics as every workspace-scoped command —
+  // config discovery starts at <path> (walk-up), fail-closed when no config.
   if (cmd === "config" && (sub === "validate" || sub === "check")) {
+    if (flags.root !== undefined && typeof flags.root !== "string") {
+      console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+      process.exitCode = 1;
+      return;
+    }
     let cfg;
     try {
-      cfg = loadConfig();
+      cfg = flags.root ? loadConfig(resolveWorkspaceRootOrThrow(flags.root)) : loadConfig();
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;
@@ -1352,7 +1402,21 @@ Description:
     // (listGates()'s own default), same as before this change.
     let workspaceRoot;
     try {
-      workspaceRoot = loadConfig().workspaceRoot;
+      // gap-task-list-root-does-not-scope-config-lookup: honor `--root` the
+      // same way every workspace-scoped command does — start config discovery
+      // at <path> (walk-up), fail-closed when no config. The lenient
+      // no-config fallback (workspaceRoot = undefined → built-ins only) is
+      // preserved for the no-`--root` case.
+      if (listFlags.root !== undefined) {
+        if (typeof listFlags.root !== "string") {
+          console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+          process.exitCode = 1;
+          return;
+        }
+        workspaceRoot = loadConfig(resolveWorkspaceRootOrThrow(listFlags.root)).workspaceRoot;
+      } else {
+        workspaceRoot = loadConfig().workspaceRoot;
+      }
     } catch {
       workspaceRoot = undefined;
     }
@@ -1461,7 +1525,7 @@ Description:
         console.log(ok ? "PASS" : `FAIL — ${reason}`);
         process.exitCode = ok ? 0 : 1;
       });
-    }, { providerId: vf.provider });
+    }, { providerId: vf.provider, root: vf.root });
     return;
   }
 
@@ -1484,7 +1548,7 @@ Description:
       });
       if (vf.json) printJson(events);
       else events.forEach((e) => console.log(`${e.timestamp} ${e.gate} ${e.verdict}`));
-    }, { providerId: vf.provider });
+    }, { providerId: vf.provider, root: vf.root });
     return;
   }
 
@@ -1505,7 +1569,7 @@ Description:
       await withGuardedErrors(async () => {
         await runComplete({ client, id, logPath, workspaceRoot: cfg.workspaceRoot });
       });
-    }, { providerId: vf.provider });
+    }, { providerId: vf.provider, root: vf.root });
     return;
   }
 
@@ -1518,7 +1582,7 @@ Description:
       await withGuardedErrors(async () => {
         await runAdjudicate({ client, id, logPath });
       });
-    }, { providerId: vf.provider });
+    }, { providerId: vf.provider, root: vf.root });
     return;
   }
 
@@ -1535,7 +1599,7 @@ Description:
       await withGuardedErrors(async () => {
         await runPromote({ client, id, logPath, workspaceRoot: cfg.workspaceRoot });
       });
-    }, { providerId: vf.provider });
+    }, { providerId: vf.provider, root: vf.root });
     return;
   }
 
@@ -1549,7 +1613,7 @@ Description:
       await withGuardedErrors(async () => {
         await runRetreat({ client, id, reason: vf.reason, logPath });
       });
-    }, { providerId: vf.provider });
+    }, { providerId: vf.provider, root: vf.root });
     return;
   }
 
@@ -1594,7 +1658,7 @@ Description:
         // safety `cap` ceiling is a real driver-level failure and maps to exit 1.
         process.exitCode = r.stopped === "cap" ? 1 : 0;
       }
-    }, { providerId: runFlags.provider });
+    }, { providerId: runFlags.provider, root: runFlags.root });
     return;
   }
 
@@ -1620,7 +1684,22 @@ Description:
       process.exitCode = 1;
       return;
     }
-    const cfg = loadConfig();
+    // gap-task-list-root-does-not-scope-config-lookup: honor `--root` the same
+    // way every workspace-scoped command does (start config discovery at
+    // <path>, walk-up, fail-closed when no config).
+    if (mf.root !== undefined && typeof mf.root !== "string") {
+      console.error("Error: --root requires a value (e.g., --root /path/to/workspace)");
+      process.exitCode = 1;
+      return;
+    }
+    let cfg;
+    try {
+      cfg = mf.root ? loadConfig(resolveWorkspaceRootOrThrow(mf.root)) : loadConfig();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+      return;
+    }
     const { client: source } = await connectNamedProvider(cfg, mf.from);
     try {
       const { client: target } = await connectNamedProvider(cfg, mf.to);
