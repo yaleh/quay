@@ -175,6 +175,26 @@ const JUDGE_CRITERIA = `**判准（逐条应用，并把结论写进 tick-log �
          且该轮测的就是这个点（验证树 HEAD == 该点）；跑完后仍无新分歧引入冲突面。
    **任一不成立就继续等，并把"卡在哪一条"写进当轮 tick-log**——不要因为等太久就降格发出。
 
+**⑩ 条件触发（人 2026-08-08 02:0x 同意并指示"等它处理完当前的问题就发"）：FF 假设四处矛盾**
+   **人已裁定放下"develop 在批量合前不变"这一假设**（实测反驳：今天 develop 105 条直提中
+   ①纯任务文本 31 / ②任务文本+编排记账 39 / **③含代码 35（33%）**——含代码的不止管理者，
+   \`3e849401 fix: declare manager-tick-log.md as reference-doc\`、\`79ee8293 inner: batch-merge shared-file glob\`
+   都是 outer/inner 直提 develop 的代码；今晚那次 red 正是该假设不成立的实证代价）。
+   **触发条件**：\`tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md\` 的 \`status: done\`
+   （= outer 处理完当前问题）。**未 done 就继续等，并把"卡在哪"写进当轮 tick-log。**
+   **待发内容（四处矛盾，人已看过，条件成立即发，不必再问）**：
+     ① \`plugin/loop/orchestrator-loop-tick.md:755\`「永远是 develop 后代 ⇒ fast-forward 无冲突」（出厂模板）
+     ② \`orchestration/orchestrator-loop-tick.md:640\` 同上，括号里「develop 只被外层批量合推进」即被放下的假设
+     ③ \`plugin/scripts/capability-catalog.sh:129\` 只描述 FF 路径，\`--merge\` 真合模式不在描述里
+     ④ \`plugin/test/branch-model.test.mjs\` AC3 三条：FF-when-descendant / **TRUE divergence FAILS closed** / --dry-run
+   **要点不是"这些检查错了"，是【默认值反了】**：\`integration-batch-merge.sh\` 的 \`--merge\` 真合模式
+   （共享文件自动解 + 真代码冲突 fail-closed）机制是全的，但**默认路径是 FF-only**；
+   人裁定后 NOT-FF 从【例外】变【常态】⇒ 默认每次 fail-closed，④ 那条负控制会拦住每一次正常批量合。
+   **SPEC 自己已预告此缺口**（\`SPEC-branching-model-integration-branch-2026-08-05.md:138-139\`）：
+   「develop 每分钟都可能被内层/外层/管理者直提。后续若要把 \`--merge\` 变成外层默认，
+     需一并更新 \`orchestrator-loop-tick.md\` 的批量合步骤（本任务 Touches 不含 loop 文档，未改）。」
+   ⇒ 当时是待办，人今日裁定后变成必须。**改法（哪几行、--merge 是否成默认、④ 断言怎么调）是 outer/inner 的活，不代写。**
+
 **动作类四选一**：\`no-action\` / \`arbitrate\`（动了 \`.halt\` 或次序）/
 \`escalate\`（攒给人）/ \`correct\`（纠正外层的**做法**，不能是它的任务内容）。
 **自审 violations 非空 ⇒ \`correct\`**，对象是我自己。
