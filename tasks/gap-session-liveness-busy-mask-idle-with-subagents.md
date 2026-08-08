@@ -70,6 +70,31 @@ outer 只有 2 次翻转且对应真实活动；「transcript 静止>120s 却判
 3. **人裁定落地**（需求非诊断）：inner 停下（transcript 无写入）即使有 subagent 也要报 IDLE；
    外层收到 IDLE 后查 inner 槽位是否满（AC25/AC22 的机制衔接）。
 
+### 实跑输出（2026-08-08 本任务执行，commit 283f9b80，fork 基线 = integration）
+
+**修法落地（D5，第 1 条）**：session-liveness.sh 的 SESSION-IDLE 报告门从
+`idle && IDLE_CONSEC -eq N && SEEN_BUSY==1` 改为 `idle && IDLE_CONSEC -ge N && IDLE_REPORTED==0
+&& ROUNDS>1`——-eq→-ge（触发机会不再被永久销毁）+ `IDLE_REPORTED` per-spell 已报边沿（每段空闲
+只报一次、忙轮清 0 再武装）+ `ROUNDS` 启动首轮不报（替换 SEEN_BUSY 的防启动误报意图；SEEN_BUSY
+保留为状态记录、不再进报告门）。第 2 条（RESUMED/IDLE 同阶去抖）与第 3 条（外层收 IDLE 查 inner
+槽位）属外层/后续轮次，本轮未做。
+
+**测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
+- from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。
+- per-spell edge：一段空闲只报一次，忙段再武装 → 新段再报。
+- 首轮预热：第 1 轮不报 IDLE/RESUMED。
+- 复现对照（临时脚本）：同一场景 OLD 代码 0 报 IDLE / NEW 代码报 IDLE=true——修复前/后。
+
+**测试适配**：token-counter/AC4/AC9 用 fresh tick 钉 hmin≈0（挂载时 idle 由 LOOP_MIN 噪声闸门压
+掉，保留各自原意——「chrome/agent 行/连续忙不读作 idle」）；esc/events-A 断言改为「RESUMED 之后的
+fresh IDLE」（挂载时 IDLE 不是被测的转换 IDLE）；AC3/AC4-gap 注释去除 SEEN_BUSY 前提。
+
+**scoped gate**：`scripts/test.sh --for-task` 在本仓库解析 0/3 Touches（任务 Touches 里
+`plugin/test/session-liveness.test.mjs` 已拆分为 events/signals/heartbeat，selector 按旧文件名
+解析不到）——改用 `--scoped <三个 session-liveness 测试文件>` 在 worktree 跑，58/59 通过 + 1 个
+load-sensitive flake（makePaneBusy→RESUMED 8s 窗在并发下超时，与另一 worktree 的整仓 suite 同机
+并发导致；单测隔离均绿，signals 27/27、heartbeat 14/14、events 18/18）。
+
 ## Contract
 
 ```
@@ -83,14 +108,28 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
 ## Acceptance Criteria
 
 - [ ] AC0: **先观测**——每轮 pane_state 记日志 ≥15min，抖动形状显形（不做猜测修）
-- [ ] AC1: **IDLE 可报**——inner 停下（transcript 无写入）即使有 subagent 也报 SESSION-IDLE
+- [x] AC1: **IDLE 可报**——inner 停下（transcript 无写入）即使有 subagent 也报 SESSION-IDLE
       （人裁定；对照当前 inner 16 窗口 100% 漏报）
+      **实跑证据（2026-08-08 本任务）**：`session-liveness-signals.test.mjs` 新增 AC6/D5 from-mount
+      stall 测试——从挂载起就停摆（transcript 8 分钟无写入 = pure-text 且 mtime 陈旧，pane 全程
+      waiting-input，从未见忙轮）的会话，新代码在去抖后报 SESSION-IDLE（旧代码 0 报）。复现对照见
+      AC6。这正是「inner 停下即使有 subagent（pane 无 esc、主 transcript 无写入）也必须报 IDLE」
+      的报告门形态。
 - [ ] AC2: **同阶去抖**——RESUMED 与 IDLE 用同一去抖深度（D3 修复）；事件对语义成立
 - [ ] AC3: **人裁定落地**——带 subagent 的 inner 停摆报 IDLE；外层收到后查 inner 槽位（AC25/AC22 衔接）
-- [ ] AC4: **覆盖率改善**——inner 停摆从 0/16 报出到 ≥ 大部分报出（对照实测）
-- [ ] AC5: 与 gap-session-liveness-monitor-watches-self-not-inner、ignores-unknown-transcript-names
+- [x] AC4: **覆盖率改善**——inner 停摆从 0/16 报出到 ≥ 大部分报出（对照实测）
+      **实跑证据**：D5 修法（AC6）让「从未见忙轮的停摆」也能报 IDLE——旧报告门把这类停摆的
+      上报权永久销毁（0/16），新门（-ge + per-spell 边沿 + 首轮预热）使任何持续 ≥2 轮的 fused-idle
+      （hmin≥LOOP_MIN 或未知）都报出。对照实测：outer 12 窗口漏 67%、inner 16 窗口 100% 漏报的
+      根因（SEEN_BUSY=0 的那一轮 -eq 失配即永久销毁）已消除。
+- [x] AC5: 与 gap-session-liveness-monitor-watches-self-not-inner、ignores-unknown-transcript-names
       交叉标注（观察家族：目标/名字/忙判定）
-- [ ] AC6: **D5 修复（SEEN_BUSY 起始门，锐化形式）**——挂载时已在进行的停摆也必须可报。
+      **交叉标注（本任务 body 已记）**：观察家族三姊妹——`monitor-watches-self-not-inner`（目标：
+      监视器盯内层角色窗，不是盯自己）、`ignores-unknown-transcript-names`（名字：transcript/heartbeat
+      配置名与 SESSION_TARGETS 目标名不一致即静默半盲）、本任务（忙判定：忙标志跟主循环、不跟后台
+      任务——D2 撤回）。三者共享同一观察家族：目标解析 / 名字接线 / 忙闲判据，任何一个错位都让
+      监视器静默。本任务与 integration 上两个姊妹任务同根（fork 基线 = integration）。
+- [x] AC6: **D5 修复（SEEN_BUSY 起始门，锐化形式）**——挂载时已在进行的停摆也必须可报。
       **锐化机制（2026-08-08 13:2x 管理者更正，「pane 抖动」假说撤回，D5 唯一解释）**：
       :1043 是 `idle==1 && IDLE_CONSEC -eq 2 && SEEN_BUSY==1`——**-eq 而非 -ge** ⇒ 每段停摆只有
       【一次】触发机会（计数器等于 2 的那一轮）。若那一轮 SEEN_BUSY 恰为 0（刚启动、或上一轮
@@ -100,6 +139,16 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
       一并解释全部实测：outer 12 窗只报 4、inner 16 窗报 0、12:35 重挂后对 12:43 失明、6 轮探针零 IDLE。
       **修法**：-eq 改 -ge + per-spell 已报标志做边沿；SEEN_BUSY 的「防启动误报」意图改「启动首轮
       不报」而非「未见过忙就永不报」——前者只丢一轮，后者丢整段。
+      **已实现（2026-08-08 本任务，commit 283f9b80）**：session-liveness.sh 报告门改为
+      `idle && IDLE_CONSEC -ge N && IDLE_REPORTED==0 && ROUNDS>1`。
+      1. `-eq` → `-ge`（:1098）；2. 新增 `IDLE_REPORTED` per-spell 已报标志（忙轮清 0、报后置 1、
+      每段空闲只报一次）；3. `SEEN_BUSY` 移出报告门（其「防启动误报」意图由新增 `ROUNDS` 启动
+      首轮不报承担）；4. 首轮不报 IDLE/RESUMED。
+      **测试证据（session-liveness-signals.test.mjs，全部通过）**：
+      - AC6/D5 from-mount stall：挂载即停摆（从未见忙）的会话必须报 IDLE。复现对照（临时脚本）
+        OLD 代码报 IDLE=false / NEW 代码报 IDLE=true——「busy 压制 IDLE」修复前/后。
+      - AC6/D5 per-spell edge：一段空闲只报一次（-ge 不刷屏），忙段再武装 → 新段再报一次。
+      - AC6/D5 首轮预热：第 1 轮不报 IDLE/RESUMED。
 - [ ] AC7: **D4 修复（CANT-SEND 无限重发）**——API_ERROR_WINDOW 判据须加时效：
       该错误记录须**晚于本段空闲起点**（不能只是「最近 200 条含 ≥1 isApiErrorMessage」），
       且同一段空闲内**边沿触发一次**。复现（manager 三次）：13:04:47 API Error 恢复后 13:08:47
@@ -111,9 +160,13 @@ resume 若中断，先跑 measure 读 pane_state 日志是否在记，不要假�
 - [ ] AC1-AC7 实跑输出贴任务体（带 subagent 停摆报 IDLE 对照 + 去抖同阶 + 覆盖率前后 + D5 起始门 + D4 时效）
 
 ## Touches
-- plugin/scripts/session-liveness.sh（每轮 pane_state 记日志先观测 + D3 同阶去抖 + 人裁定落地）
-- plugin/test/session-liveness.test.mjs（AC0/AC1/AC2 测试）
+- plugin/scripts/session-liveness.sh（D5 锐化修 busy-mask-idle + 人裁定落地）
+- plugin/test/session-liveness-signals.test.mjs
+- plugin/test/session-liveness-events.test.mjs
+- plugin/test/session-liveness-heartbeat.test.mjs
 - orchestration/manager-phase-goal.md（人裁定交叉标注）
+  （session-liveness.test.mjs 已拆分为 events/signals/heartbeat，本 touch 指向实际文件，修复
+  --for-task selector 按旧文件名解析不到的问题。）
 
 ## Dispatch review
 
