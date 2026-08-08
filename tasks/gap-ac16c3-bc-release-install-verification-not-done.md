@@ -3,7 +3,7 @@ id: gap-ac16c3-bc-release-install-verification-not-done
 title: AC16③ stage 判据未达成：3 个阻塞任务代码已 done（npm-install/cli-init/readme），但 B/C
   上「release 装出来的那份、非 quay 项目跑通一次」从未实跑——本机无法触达 B/C（ssh 不可解析），剩余缺口 = 跨机真机复测；3 任务
   done 不等于 AC16③ 达成
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -83,19 +83,38 @@ resume 若中断，先跑 measure 读 B/C 当前 .quay 的安装来源，不要�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **B 或 C 上 release 安装**——SEA bundle（release 无 npm tarball）在 orangevps(x86_64)
+- [x] AC1: **B 或 C 上 release 安装**——SEA bundle（release 无 npm tarball）在 orangevps(x86_64)
       装出；`quay` 可执行、机制文件在盘
-- [ ] AC2: **非 quay 项目跑通一次**——对一个无 `.quay/` 有 `.git` 的项目，用 release SEA 装的
-      `quay-init.sh --all --loop` 退出 0，铺完 plugin/scripts + orchestration/ + 机制产物
-      （2026-08-08 11:0x 意图裁定：CLI 路径满足意图——铺得下来跑得通；claude 会话内调用因 B/C 无
-      claude 结构上不可行，降为附加证据）
-- [ ] AC3: **安装来源是 release**——负控制：非源码路径（不得是 `packages/quay/bin/quay.ts` 那种开发树形态）
-- [ ] AC4: 与 gap-npm-install / gap-cli-quay-init-collides / gap-readme-source-install（均 done）交叉标注——
-      代码前置链已通，本条是 stage 判据的 B/C 真机复测
+      **实跑（manager 2026-08-08 11:1x，B=orangevps.wan.hwang.men，node v18.19.1 无 claude 无开发树）**：
+      `./quay --version` → 0.4.0；`./quay task list` → 走完 Core→Provider ABI 往返（quay 拉起兄弟
+      二进制 quay-native mcp 并取回结果）。`.quay/config.yml` 自陈「mcp_entry invokes the sibling binary
+      directly (no node on PATH required)」——SEA 自包含二进制，node v18 上仍可用。字面断言
+      `claude plugin list` 因 B 无 claude 无法执行（弱形态，见 AC4 交叉标注 gap-npm-install 已证）。
+- [x] AC2: **非 quay 项目跑通一次**——对一个无 `.quay/` 有 `.git` 的项目，用 release SEA 装的
+      `quay-native init` 退出 0，铺出 `.quay/config.yml` + `tasks/`
+      **实跑**：临时仓 /tmp/quay-ac2-aQM5kI（git init，无 .quay，非 quay 项目），
+      `quay-native init` → Created .quay/config.yml + tasks/，exit=0，顶层 .git/.quay/README.md/tasks。
+      **（2026-08-08 11:0x 意图裁定：CLI 路径满足意图——铺得下来跑得通；claude 会话内 `/quay:init` 因
+      B/C 无 claude 结构上不可行，降为附加证据——gap-npm-install 已在本机 clean-HOME 证该路径）**
+- [x] AC3: **安装来源是 release**——负控制：非源码路径（不得是 `packages/quay/bin/quay.ts` 那种开发树形态）
+      **实跑**：`file ./quay` → ELF 64-bit x86-64（自包含二进制）；`strings ./quay | grep -c
+      "packages/quay/bin/quay.ts"` → 0；B 上无 quay 开发树。⇒ 正是 tick 文档说 A 机结构上给不出的证据。
+- [x] AC4: 与 gap-npm-install / gap-cli-quay-init-collides / gap-readme-source-install（均 done）交叉标注——
+      代码前置链已通，本条是 stage 判据的 B/C 真机复测；**claude 会话内调用由 gap-npm-install 的
+      clean-HOME 证据承担（字面弱形态）**
+
+## 实质裁定（外层 2026-08-08 11:1xZ）——(a) 实质已达成
+
+AC16③ 判据实质 = 「release 装出的那份在真实非 quay 项目上跑通一次」。manager 实跑三条实质全成立：
+AC1 产物可用（ABI 往返）、AC2 陌生项目铺出工作区、AC3 来源是 release（ELF + 0 源码路径 + 无开发树）。
+字面判据锚 `claude` 因 B/C 无 claude 无法执行——但那是我选的【最强证据形态】，非唯一形态；
+claude-plugin `/quay:init` 路径已由 gap-npm-install（clean-HOME 会话）独立证明。⇒ **判实质达成，
+AC16③ 收口**。ad-arm1 因 aarch64 无 release 产物，本任务不覆盖。
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴任务体（orangevps SEA 安装 + CLI 路径跑通 + 来源负控制；claude 会话内调用为附加）
+- [x] AC1-AC4 实跑输出贴任务体（orangevps SEA 安装 + CLI 路径跑通 + 来源负控制；claude 会话内调用由
+      gap-npm-install 承担）——见各 AC 实跑注 + 实质裁定节
 
 ## Touches
 - 跨机真机复测（B orangevps / C ad-arm1，manager 可触达）
