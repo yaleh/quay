@@ -93,6 +93,35 @@ gap-session-liveness-remove-shared-events-and-lock。）
 | **取证脚本预写结论行** | 三次写死 `echo`，判定与实际值相反 | **状态词必须由依据推出；不得先写状态词再找依据** |
 
 
+## 0.53 配置类修复有三个状态，不是两个（2026-08-08 12:2xZ 实测）
+
+```
+写了      ← git 里可见
+生效了    ← 要看【进程何时启动】：env 是启动时读的，改文件不影响已在跑的
+被验证过  ← 要看【信号真的来了】
+```
+
+**实例**：outer `62b10877`（11:33:15Z）修好了「session-liveness 盯自己不盯 inner」，
+把 inner 的 transcript 显式写进 `orchestration/session-liveness.env`，0b3 检查也加了 pid 断言。
+**但两个运行中的实例都早于修复启动**（644390 早 33 小时、522110 早 85 分钟）
+⇒ **修了没生效**，`SESSION-IDLE = 0 次` 就是直接证据。
+**这与今晚那两条 false-done 任务同形**：`62b10877` 会以「已修复」的形态存活很久而 inner 依旧无人观测。
+
+**我自己在这条链上先错了一次**：我搜「有没有【任务】覆盖它」⇒ 4 条全 done ⇒ 断言「没有主人」，
+**而没搜「有没有【被修】」**——outer 36 分钟前就修了，还在提交标题里标注了是我的上游定位。
+⇒ **又一次用代理量替目标量**（「有没有任务」≠「有没有被修」），今晚同族第三次
+（前两次：`merge-base` 不等 ≠ 从 integration 切；`recommended=3` ≠ `cap=3`）。
+
+**重启时的具体坑（我差点踩）**：那份 env 现在指向 **inner**——对 outer 的用途是正确的，
+**但 manager 的实例该盯 outer**。若直接重启会继承 inner 当目标，**反而不再盯 outer**。
+env 注释自己写着「管理者挂载时**显式传** `SESSION_TARGETS`（显式环境变量优先于本文件）」。
+⇒ **manager 重挂时必须显式传自己的目标**：
+`SESSION_TRANSCRIPTS="outer <outer 会话 transcript 绝对路径>" LOOP_MIN=0 bash …/session-liveness-mount.sh`
+**并在重挂后立刻取证**：`/proc/<pid>/environ` 里的 `SESSION_TRANSCRIPTS` 指向 outer 的会话 id。
+
+⇒ **一般形态：共享配置文件被上一层按【它的】用途改对之后，对【我的】用途可能正好改错。
+读到「配置已修好」时，要问的是「按谁的用途修好」。**
+
 ## 0.52 跨主机约束：仅黑名单，白名单已废（人 2026-08-08 11:0xZ 裁定）
 
 **人的原话**：「白名单是错的。仅保留黑名单。」
