@@ -548,6 +548,21 @@ cat docs/analysis/batch2-queue-state.md             # 内层自报的队列状�
 bash plugin/scripts/supervisor-bus-identity.sh inbox-summary   # 收件箱机械挂载点（gap-supervisor-message-bus-with-identity AC4）：unread 逐条进决策，delivered≠consumed
 ```
 
+**1a. 内层占用率（AC26，强制——量【占用率】不是【新鲜度】）**：每 tick 必须取两个读数并写进本行
+tick-log，不是写进任务体：
+```bash
+# ① in-flight / effective_cap（占用率；cap 来自 cap-from-gate.sh，不用回退 3）
+cap=$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')
+node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${cap:-5}" --root "$REPO_ROOT" --json
+# ② inner 最近一次【自己的报告】（tick-log 里 inner 的最近一条，不是外层观察）
+#    ——三个不算：mtime / "transcript is fresh" / "最后活动"（在 inner 有子代理或被上层唤醒时都会为真而占用率为空）
+```
+**判据（AC26）**：① 该编号步骤产出 `in-flight/effective_cap` 与「inner 最近一次自己的报告」两个读数；
+② 每轮 tick-log 行能读到这两个读数的具体值；③ 取的是占用率——mtime/「transcript is fresh」/「最后
+活动」一律不算。**槽未满（in-flight < cap）且上游已通 ⇒ 当轮驱动派发，不得记录后结束。**
+（人 13:2x 原话：「outer 在处理 tick 时没有看 inner 槽位，也没有看 inner 的 transcript/屏幕，根本没
+有了解 inner 的状态，当然也就不会响应 inner 关于任务的需求」——AC26 前置 AC25。）
+
 **`ruling-required` 屏幕观察者（外层是主轮询方，`gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick`）**：
 `--transcript` 从未进过任何生产调用，是死代码；现在 `ruling-required` 的主判据是**屏幕形状分类**。
 外层按分钟（60s）轮询内层 pane，把捕获喂给 `--detect-stop --pane`。**通用化观测原语
