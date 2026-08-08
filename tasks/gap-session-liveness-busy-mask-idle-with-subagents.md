@@ -253,3 +253,14 @@ at: 2026-08-08T13:0xZ
 changed: 管理者两小时全量对账（outer 12 窗口漏 67%、inner 16 窗口 100% 漏报）+ D2 忙假阳性（green-busy
   fixture = 空输入+esc+agent⇒busy，inner 实时屏幕同形态）+ D3 去抖不对称（RESUMED 单轮/IDLE 2 轮）
   + 人裁定（带 subagent 的停摆必须报 IDLE）。外层复核 pane-state-classify.ts:344 + inner 屏幕——成立。
+
+### 收口证据（2026-08-08 16:24Z，实环境 SESSION-IDLE）
+
+**LOOP_MIN=0 observer（pid 4166382，目标 quay-0:inner）捕获真实 SESSION-IDLE**：
+```
+SESSION-IDLE quay 的会话转入空闲等输入；心跳 1 分钟前更新
+```
+- 判据「实环境报出一次 SESSION-IDLE」达成（非「已合入 develop」）。
+- 前提（证据链闭环 0e055336）：LOOP_MIN=0 报出 / 默认 LOOP_MIN=20 静默（pane-only 默认心跳 tick-log
+  被上层刷新 → hmin<LOOP_MIN → 静默）；边界修复（1a351335）正确。
+- 收口：空闲窗口内 LOOP_MIN=0 observer 报出 IDLE ⇒ busy-mask-idle 机制在真实环境生效。
