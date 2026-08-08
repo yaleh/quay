@@ -451,8 +451,14 @@ manager 查 outer（manager 侧已落地 b8d7746e）；**outer 查 inner（本�
 
 ```bash
 # 层间 tick 间隔检查（每轮必跑，成本≈0）：inner transcript 心跳源 mtime 间隔
-INNER_TX=$(cat orchestration/session-liveness.env | grep SESSION_TRANSCRIPTS | cut -d= -f2-)
-[ -z "$INNER_TX" ] && INNER_TX="$(ls -t ~/.claude/projects/-home-yale-work-quay/*.jsonl | grep -v "$CLAUDE_CODE_SESSION_ID" | head -1)"
+# ⚠️ 目标解析必须验【pid 匹配 inner pane】，不是发现启发式（2026-08-08 11:4x 管理者上游定位：
+#    默认目标解析看的是 outer 自己 2989418；发现启发式会挑到 b8dc91a6（manager 会话）——
+#    两个都不是 inner 728a4610）。SESSION_TRANSCRIPTS 必须显式写 inner 的 transcript 路径。
+INNER_TX=$(grep '^SESSION_TRANSCRIPTS' orchestration/session-liveness.env | head -1 | cut -d= -f2- | tr -d '"' | awk '{print $2}')
+[ -z "$INNER_TX" ] && INNER_TX="/home/yale/.claude/projects/-home-yale-work-quay/728a4610-46b5-4c4a-84ea-6ed01667c433.jsonl"
+# 取证必须含 pid 断言：该 transcript 的会话 == quay-0:inner 的 pane_pid（不是 alive=1 就算）
+INNER_PANE=$(tmux list-panes -t "quay-0:inner" -F '#{pane_pid}' 2>/dev/null)
+echo "  inner transcript=${INNER_TX} pane_pid=${INNER_PANE}（取证：查的是 inner 不是 outer/自己）"
 age_min=$(( ($(date +%s) - $(stat -c%Y "$INNER_TX")) / 60 ))
 echo "  inner 心跳源间隔=${age_min}min  阈值=30min（/loop 1200-1800s 上界）"
 [ "$age_min" -gt 30 ] && echo "  ⚠️ ALARM: inner 无任何活动 >30min —— 需驱动它 / 重挂它的 /loop"
