@@ -39,6 +39,7 @@ plugin bundle）/ 58927990（merge）。重复条目大概率是 AC16 添加 man
 - [ ] scoped 门 `scripts/test.sh --for-task gap-plugin-json-duplicate-manager-skill` 绿（fail 0 / cancelled 0）
 
 ## Touches
+- tasks/gap-plugin-json-duplicate-manager-skill.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/.claude-plugin/plugin.json
 

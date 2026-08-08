@@ -75,6 +75,7 @@ resume 若中断，先跑 measure 确认当前运行时越界动作数，不要�
 - [ ] AC1-AC4 实跑输出贴任务体（判据定义 + 检测样例 + 负控制）
 
 ## Touches
+- tasks/gap-c3-has-no-runtime-constraint.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/no-manager-tick-doc-check.ts（或新增运行时检查器）
 - plugin/loop/orchestrator-loop-tick.md（运行时约束的触发/报出路径）
 - tasks/gap-manager-productization-five-constraints.md（AC4 交叉标注）
