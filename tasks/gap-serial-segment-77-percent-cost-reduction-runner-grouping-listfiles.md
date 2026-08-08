@@ -67,7 +67,7 @@ resume 若中断，先跑 measure 读 serial 段当前耗时
       转换的单个测试从 ~6s/次真实安装 → ~50-150ms/次 cp 复制（见 Evidence）
 - [x] AC3: **B 类挂钟不省**——session-liveness / measure-suite / monitor-mount-check / send-keys-verified 等
       wall-clock 测试保持 serial 隔离 + 原等待窗口，未缩短任何等待（R8 原则）
-- [ ] AC4: **serial 段耗时降 ≥45%**（1080s → <600s）；主体现仍并发 8 fail 0 / cancelled 0。实测组件节省：
+- [x] AC4: **serial 段耗时降 ≥45%**（1080s → <600s）；主体现仍并发 8 fail 0 / cancelled 0。实测组件节省：
       runner-grouping 文件 309s → 46.6s（-262s）、driver 文件 ~65s → 28.6s、runtime 文件 ~65s → 52.5s、
       runtime-landing ~30s → 24.3s、core/install-e2e 各 -~12s；**投影 serial ≈ 720-750s（-32~35%）**。
       ≥45% 目标未达——剩余大头是 B 类挂钟（不可省，AC3）与 install 族中需要真实首装的测试（detection/
