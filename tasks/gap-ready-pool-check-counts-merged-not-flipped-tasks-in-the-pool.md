@@ -75,6 +75,13 @@ invoke    `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --
 control   负控制：merged 但 AC 全未勾 ⇒ 排除；正控制：未开始 ⇒ 留在池（AC2/AC3）
 resume    判据修改与测试补样分两步提交，任一步完成即写盘
 
+## Cross-references（AC 交叉标注，2026-08-08，`gap-closure-detection-reads-symbols-not-checkboxes` 落地时写）
+
+> **互为镜像**：本条把判据从「AC 全勾」改为「工作已落 master」（内层合并不勾 AC，全勾不是收尾信号）；
+> 那条把 `taskWorkLanded` 改成**并集**补上「AC 全勾」信号（散文 AC 完成态 17 个被 workLanded 漏掉）。
+> 两条并集后收尾信号完整覆盖三态：勾了没落地（workLanded 纯信号不报、AC 信号报收尾）、落地没勾全
+> （workLanded 报）、全勾 ready（AC 信号报）。`taskWorkLanded` 语义原样保留，只是不再唯一。
+
 ## Dispatch review
 
 reviewer: outer
