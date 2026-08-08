@@ -4,7 +4,7 @@ title: detectTaskOver90m reads telemetry bracket start (never task status) — 3
   false OVER90 tonight (phantom in-flight from crash, worktree 0-commit dead,
   process gone); add task-status gate (ready/done never triggers) + reconcile
   criterion fix (worktree existence ≠ mid-flight)
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -53,6 +53,12 @@ extra: {}
 - [ ] AC2: status=in-progress（或任务文件缺失）的超时 bracket 仍触发（正控制，真超时不漏）
 - [ ] AC3: 测试覆盖两种形态 + 今晚复发案例（os-anchor 的 ready+超时 bracket）
 - [ ] AC4: 与 `gap-a-crash-leaves-phantom-in-flight-tasks-and-the-one-signal-that-fires-is-documented-backwards` 交叉标注（reconcile 判据缺陷——worktree 存在不等于 mid-flight，应有 mtime/进程佐证）
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（detectTaskOver90m 对 status=ready 超时 bracket 不触发负控制；status=in-progress 仍触发正控制；测试覆盖两形态 + os-anchor 复发案例；与 phantom-in-flight 任务交叉标注）
+- [ ] 复现 os-anchor ready+超时 bracket 形态不再报 false over-90m；真超时仍报
+- [ ] scoped 门 `scripts/test.sh --for-task gap-over-90m-false-signal-source-reads-telemetry-not-task-status` 绿
 
 ## Touches
 

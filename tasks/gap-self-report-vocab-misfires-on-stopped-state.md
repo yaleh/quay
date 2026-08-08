@@ -1,7 +1,7 @@
 ---
 id: gap-self-report-vocab-misfires-on-stopped-state
 title: "self-report-vocab-audit judges a STOPPED inner's self-report as NON-CONVERGED — its convergence window (reports.length >= window && recentClean === inWindow, self-report-vocab-audit.ts:134-135) assumes an ACTIVE rolling-dispatch loop, so an honest 'idle heartbeat, paused awaiting manager' reads as vocabulary drift (few reports < window → fail-closed NOT-CONVERGED); stopped state is honest, not drift — false alarm (archguard da0b2cbf 2026-08-06); observation-only (not a gate) so lower priority"
-status: todo
+status: ready
 labels:
   - gap
   - milestone-candidate
@@ -42,6 +42,12 @@ fail-closed **NOT-CONVERGED**——即使每条自报都干净（无 batch 词�
 - [ ] AC1: 停止态自报（idle/paused/awaiting）不被判非收敛——即使 reports < window（实跑）
 - [ ] AC2: 活跃态收敛语义不变——活跃循环无 batch 词汇仍 converged，有 batch 仍 flagged（无回归）
 - [ ] AC3: 与 gap-reanchor-must-converge（done）交叉标注——停止态误判干扰重锚有效性判断
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（停止态自报 idle/paused/awaiting 不被判非收敛；活跃态收敛语义不变无回归；与 gap-reanchor-must-converge 交叉标注）
+- [ ] 停止态实跑不被判非收敛；活跃态 batch 词汇仍被 flag
+- [ ] scoped 门 `scripts/test.sh --for-task gap-self-report-vocab-misfires-on-stopped-state` 绿
 
 ## Touches
 

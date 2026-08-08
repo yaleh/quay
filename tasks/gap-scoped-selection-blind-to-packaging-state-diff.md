@@ -5,7 +5,7 @@ title: "scoped selection blind to packaging-vs-source diff (manager usage-view
   never matches packaging tests (npm-pack-e2e/build-dist/...), src-touching task
   scoped-green can still break packaged; fix: src-touching task forces ≥1
   packaging test in selection"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -53,6 +53,12 @@ extra: {}
 - [ ] AC5: 新代码 lint 检查进任务内（scoped 跑 lint 或任务 AC 含 lint-clean，实测 14-error 形态被抓）
 - [ ] AC6: 纯 plugin/文档任务不含跨切测试（不误加，scoped 保持秒级）
 - [ ] AC7: 与 archguard TASK-62/64/65/66 + CLAUDE.md packaging e2e + 自适应并发（机制一次下游复用）交叉标注
+
+## Definition of Done
+
+- [ ] AC1-AC7 全勾（author SKILL 模板含跨切检查清单；select-tests-for-touches 加跨切标记；触碰 packages/*/src 含打包态测试；触碰 src/MCP tool 含 check-adr；新代码 lint 检查进任务内；纯 plugin/文档不含跨切测试；与 archguard TASK-62/64/65/66 + packaging e2e + 自适应并发交叉标注）
+- [ ] 跨切判据实测：打包态/ADR/lint 检查器无论 touches 进 scoped 选中集
+- [ ] scoped 门 `scripts/test.sh --for-task gap-scoped-selection-blind-to-packaging-state-diff` 绿
 
 ## Touches
 

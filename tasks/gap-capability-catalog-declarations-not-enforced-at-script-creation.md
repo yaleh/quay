@@ -1,7 +1,7 @@
 ---
 id: gap-capability-catalog-declarations-not-enforced-at-script-creation
 title: "capability-catalog regressed twice this session (14 scripts entered artifact undeclared) — the AC1c gate exits 1 but the scoped static-tier defers it to full-suite, so a task creating plugin/scripts/* ships green and the catalog turns red only at the outer's verification round; fix: include capability-catalog in the scoped tier for tasks whose Touches create plugin/scripts/* files, or a creation-time check"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -26,7 +26,13 @@ extra: {}
 1. **scoped 静态层不强制它**——`select-static-checks-for-touches` 只选「change-relevant」checkers；
    capability-catalog 的对象是 `plugin/scripts/*`（glob），但新脚本任务的 scoped 跑通常不含它 ⇒ 任务绿、
    catalog 红，到外层全量验证才暴露。
-2. **建任务/派发时不查**——任务的 ## Touches 声明 `plugin/scripts/xxx.sh（新建）` 时不检查该 basename
+2. **建任务/派发时不查**——任务的 ## Definition of Done
+
+- [ ] AC1-AC5 全勾（任务 Touches 含 plugin/scripts/* 新建 ⇒ scoped 静态层含 capability-catalog 检查；未声明新脚本 ⇒ scoped 红；已声明 ⇒ 绿不误伤；负控制只查新脚本不重扫全 artifact；测试 node:test + @test-group governance）
+- [ ] 创建时暴露实测：新脚本未声明 catalog ⇒ scoped 门红（非全量时）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-capability-catalog-declarations-not-enforced-at-script-creation` 绿
+
+## Touches 声明 `plugin/scripts/xxx.sh（新建）` 时不检查该 basename
    是否已在 catalog 声明。
 
 **为什么重要**：catalog 是「每个 check 声明它答什么问题」的可见性机制。新脚本不声明 ⇒ 可见性回归，
