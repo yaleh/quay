@@ -8,7 +8,7 @@ title: 批量合闸门验的是 integration tip 的绿，放行的是 integratio
   闸门会在从未被一起测过的状态上放行，而所有时间戳都是新鲜的；与 stale-green（时间轴问题）不同： 本条是【被测对象 ≠
   被放行对象】的对象问题，判据形态也不同（查 git diff <被测点>..<合并目标> 非空） ——管理者 2026-08-08
   实测报告，建议独立立案不并入 stale-green
-status: ready
+status: done
 labels:
   - gap
   - defect
