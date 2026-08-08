@@ -332,12 +332,19 @@ node --no-warnings --experimental-strip-types plugin/scripts/manager-observation
   **`C-u` → 文本 → `Enter` 三次分开调用**（合并会丢 Enter）。发完 `capture-pane` 确认出现了新的
   `⏺` 输出——未确认送达的指令等于没发。
 
-**b) 判断内层是否停摆要看「屏幕是否在变」，不是看最后一行。**
+**b) 判断内层是否停摆要看「底部区域状态行」，不是看最后一行。**
 
 ```bash
-tmux capture-pane -p -t "$TMUX_SESSION" | md5sum; sleep 25
-tmux capture-pane -p -t "$TMUX_SESSION" | md5sum      # 两次相同 = 空闲
+tmux capture-pane -p -t "$TMUX_SESSION" | tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle
 ```
+
+> ⚠️ **2026-08-08 更正（gap-adr016-md5-ban-violated-in-shipped-md-and-checker-scope-gap）**：
+> 上一版这里是整屏哈希 `md5(capture-pane)` 两次相同 = 空闲——正是 ADR-016
+> `## Amendment 2026-08-04` 明令禁止、`adr016-screen-use-check.ts` 机械拦截的
+> `md5(capture-pane)` 形态，且它是【指令】不是散文，外层照做即违规。**正确形态**只取
+> pane 底部 3 行、只判 busy/idle 两个枚举态（底部区域 + 枚举态，Amendment 允许）。注意别写成
+> `-S -3`——`-S` 是【起始行】不是行数，负值进历史缓冲，取的是「历史往前 3 行 → 屏幕底部」
+> 一大段，取不到状态行。
 
 **c) 外层的独立核实会和内层抢 CPU——这是机制不是散文。** 步骤 1 写着「只读」，但跑一次全量套件是
 **数分钟的满载**，足以把内层 `select-preflight` 那种 timeout 余量只有 8% 的测试压成 flaky。

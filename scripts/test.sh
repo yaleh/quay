@@ -266,10 +266,13 @@ run_static_checks() {
   echo "== ADR-016 screen-use check (gap-adr-016-carve-out-permits-the-whole-screen-hash, AC3) =="
   # ADR-016 Amendment 2026-08-04 boundary (c): whole-screen equality/hash of capture-pane is
   # forbidden. Code-position detection (a capture-pane result flowing into md5sum/sha1sum/cksum in
-  # a shell script), band 0..1 (the ONE active legacy observer — session-liveness.sh — is carried
-  # by the sibling task; a NEW active violation red-lights the commit).
+  # a shell script OR a fenced ```bash instruction block of a shipped/live tick doc), band 0..1
+  # (the ONE active legacy observer — session-liveness.sh — is carried by the sibling task; a NEW
+  # active violation red-lights the commit). Tick docs are scanned for their bash blocks because
+  # shipped .md instruction blocks are same-weight as .sh (gap-adr016-md5-ban-violated-in-shipped-
+  # md-and-checker-scope-gap AC3).
   # @static-tier change
-  # @static-object **/*.sh **/*.bash
+  # @static-object **/*.sh **/*.bash plugin/loop/*-loop-tick.md orchestration/*-loop-tick.md plugin/scripts/adr016-screen-use-check.ts plugin/test/adr016-screen-use-check.test.mjs
   run_checker "adr016-screen-use-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/adr016-screen-use-check.ts" --root "${repo_root}"
   echo "== dead-code-after-return check (gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived, AC6) =="
   # The 2026-08-03 TEMPORARY pin shape (`echo 8; return 0; <formula>` — a statement after a top-level
