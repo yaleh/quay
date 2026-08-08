@@ -92,10 +92,21 @@ resume 若中断，先跑 measure 读 ratchet 违规数 + 确认 baseline-count 
 - tasks/gap-eighty-one-instruments-behind-remembered-paths-and-no-entry-point.md（若需标注人裁决）
 - tasks/gap-suite-state-split-across-worktree-and-gate.md（AC4 交叉标注）
 
+## Carries
+
+from: gap-lowconc-tmux-session-name-collision-race
+acs: AC4
+
+> 本任务承接 gap-lowconc 的 AC4（「全栈并发 8 绿——三趟 fail 0 / cancelled 0」）——与
+> 本任务 DoD 收尾项「全量套件三趟 fail 0 / cancelled 0」是同一件事（管理者 2026-08-08 指出，
+> `task-ac-carryover-check.ts` 头部注释确认 `## Carries` 是设计路径非例外；gap-lowconc
+> 已 done、其 AC4 未勾、由本任务承接）。
+
 ## Dispatch review
 
 reviewer: outer
-at: 2026-08-08T00:0xZ
-changed: 人裁决（原话）：「可以勾上。不做通例，以后这样的例外还是要我判断。」AC8 勾保留、done 保持、
-  一次性例外。落实风险：禁止整体 --reset-baseline（会把未裁决的 4 条一并收编）。定点加 gap-eighty-one
-  一条进基线（baseline-count 5→6），其余 4 条基线内维持现状。
+at: 2026-08-08T00:1xZ
+changed: 追加人裁决落实（AC1/AC2 done）+ 解除 ac-carryover 阻塞：按管理者 2026-08-08 授权区分——
+  `## Carries` 是 task-ac-carryover-check.ts 的设计路径（检查器头部注释原文），非例外、不需人批；
+  本任务收尾项天然承接 gap-lowconc AC4（同一验证事件）。AC3 第②半的解阻塞由此成立。
+  原「上报外层等裁决」作废。
