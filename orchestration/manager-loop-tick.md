@@ -103,13 +103,53 @@ echo "load1: $(cut -d' ' -f1 /proc/loadavg)  node: $(pgrep -c node)  mem: $(awk 
 
 ### b. 每个项目的外层是否还活着、是否在推进
 
-**已由常设监视器覆盖**（2026-08-03 补上）：`plugin/scripts/outer-liveness.sh`，
-60 秒一轮，报三类事件——**消失 / 恢复 / 活着但超 45 分钟不推进**（未暂停的项目才判后者）。
-
 这条补的是一个真实缺口：2026-08-03 实测发现管理者挂着**两个看【内层】的监视器**
 （18h / 7.6h，是当 quay 外层时挂的），而 quay 外层自己也挂了一个看内层的——
 **内层被看两遍，三个外层没人看**，而 §2 明写「外层进程消失要立即报」。
 30 分钟一次的 tick 做不到「立即」。两个内层监视器已停（内层归 quay 外层看）。
+
+#### 覆盖矩阵（2026-08-08 07:5xZ 实测重建 —— 上一版这里写的三行全是错的）
+
+**上一版原文**：「**已由常设监视器覆盖**：`plugin/scripts/outer-liveness.sh`，60 秒一轮，
+报三类事件——消失 / 恢复 / 活着但超 45 分钟不推进」。**三处错，逐条实测**：
+
+1. **`outer-liveness.sh` 这个文件不存在**——它在 `d6af0112` 被**改名**为
+   `session-liveness.sh`（纯改名，0 行改动）。判据指向了一个已不存在的对象，
+   而**写死路径的读法不会报错，只会安静地返回「看起来没问题」**（同 §1.b 的 grep 教训）。
+2. **「已覆盖」对管理者为假**。全机只有一个实例 pid=644390，其
+   `CLAUDE_CODE_SESSION_ID=3cc1c0b9…` = **quay 外层**；管理者自己**零个实例**。
+   ⇒ §2「外层进程消失要立即报」当时处于**无机制状态**，而这行字给这个缺口盖了「已覆盖」的章。
+3. **45 分钟阈值对调度信号太钝**。今晚实测 9 次 >15 分钟的提交间隔里**只有 1 次超过 45 分钟**
+   ⇒ 该阈值能抓「进程死了」，抓不到「闲下来该派活了」。**两类目标不同的事件挂在同一个阈值上。**
+
+| 要覆盖的 | 机制 | 归属 | 现状 |
+|---|---|---|---|
+| quay outer/inner **转闲**（调度信号） | manager 侧 `Monitor` idle-watch（2026-08-08 挂） | **管理者** | 已挂，阈值 6 分钟 |
+| quay 外层**进程消失/恢复** | `plugin/scripts/session-liveness.sh` | **quay 外层**（非管理者） | 运行中 pid=644390 |
+| archguard / meta-cc 外层存活 | **无监视器** | —— | **只靠下面这段 tick 巡检**——这是唯一机制，不能省 |
+
+**每轮必查：矩阵里那两个机制【现在还活着吗】**（这是第三类失效「该响的时候不响」的唯一防线——
+**零事件是"没发生"还是"没收到"，看不出来**；不查就等于默认它活着）：
+
+```bash
+# ① manager 自己的 idle-watch：查【进程】，不查 TaskList
+#    ⚠️ 上一版这里写"TaskList 里应有 running 的 idle 监视器"——【错的仪器】：
+#      TaskList 是待办清单工具，不是后台监视器清单；实跑返回 "No tasks found"。
+#      写下来 3 分钟就踩了自己刚写的"判据指向已不存在的对象"那一条。
+pgrep -af 'idle-watch\.sh' | grep -v ' grep '   # 无输出 ⇒ 监视器已死，当轮重挂
+# ② quay 外层的 session-liveness：进程在不在，且【属主是不是外层】
+pgrep -af 'plugin/scripts/session-liveness\.sh' | while read -r pid _; do
+  sid=$(tr '\0' '\n' < /proc/$pid/environ 2>/dev/null | sed -n 's/^CLAUDE_CODE_SESSION_ID=//p')
+  echo "session-liveness pid=$pid session=${sid:0:8}"     # 3cc1c0b9=外层，b8dc91a6=管理者
+done
+```
+**判读**：② 一个实例都没有 ⇒ §2「外层进程消失要立即报」重新回到无机制状态，**当轮升级**，
+不要像 08-03..08-08 那样让它无声地空着五天。
+
+**idle-watch 的设计口径**（人 2026-08-08 裁定：「目标函数是吞吐率，不是信号纯度」）：
+误报 = 管理者几个工具调用（秒级）；漏报 = 最多退化回等 tick（20 分钟空转）。
+**两者差两个数量级 ⇒ 阈值宁松勿紧。** 从源头去掉最大一类误报：
+**套件在跑时不触发**（那是正常忙碌）、**backlog 为空时不触发**（转闲不可行动）。
 
 **tick 里仍要看一眼**（监视器只报变化，看不到「一直没起来」这种稳态）：
 
@@ -150,7 +190,22 @@ grep -m1 '^| 2026' <项目>/orchestration/tick-log.md
 
 **推进的判据不是 TUI，是文件系统**（`CLAUDE.md:151`：never parse the TUI）：
 每个项目的 `git log --since='<上次 tick>'` 与其 `orchestration/tick-log.md` 行数增长。
-**capture-pane 只用于确认 send-keys 送达、判忙闲（两次 md5sum 相同 = 空闲）。**
+**capture-pane 只用于确认 send-keys 送达、判忙闲。**
+
+> ⚠️ **2026-08-08 更正：上一版这里写的是「两次 md5sum 相同 = 空闲」——那正是
+> ADR-016 `## Amendment 2026-08-04` 明令禁止、且 `adr016-screen-use-check.ts` 机械拦截的
+> `md5(capture-pane)` 形态**（检查器注释 (c)：「whole-screen equality/HASH of capture-pane
+> output (the `md5(capture-pane)` family)」）。它能在我自己的 tick 文档里活这么久，
+> 是因为**检查器只扫 `.sh`/`.ts`，从不扫 `.md` 散文**（检查器注释第 17 行明写这一点）。
+> ⇒ 一般形态：**机械检查器的作用域边界，就是同一条规则的散文副本能安静违规的地方。**
+>
+> **正确形态**（idle-watch 用的、已实测）：只取 **pane 底部 3 行**，只判 **busy/idle 两个枚举态**：
+> ```bash
+> tmux capture-pane -p -t "quay-0:<w>.0" | tail -3 | grep -q 'esc to interrupt' && echo busy || echo idle
+> ```
+> 实测（08-08 07:5xZ）：inner 命中=1（busy）、outer 命中=0（idle）——判别力真实存在。
+> **注意 `-S -3` 不是「最后 3 行」**：`-S` 是起始行，负值进历史缓冲，`-S -3` 取的是
+> 「历史往前 3 行 → 屏幕底部」的一大段。我起初就写错了这个参数。
 
 ### b2. 工具使用自查（2026-08-07 加；§4「手搓代替现成工具」原本只是表格里的一行，实测连续多轮
 一次都没被执行——写下来 ≠ 会被执行，所以提升为 tick 步骤）
