@@ -268,3 +268,13 @@ AC6（第三条路径 dist-plugin）无代码改动——机制已存在（publi
 
 **后续**：SEA 打包流程单独立案（gap-release-sea-bundle-excludes-plugin-tree），AC16 保持未达成直到
 SEA 产物含 plugin（或架构改为 release 同时发 SEA + plugin bundle 目录）。
+
+## Cross-annotation (gap-release-sea-bundle-excludes-plugin-tree)
+
+**已落地（2026-08-08）**：`gap-release-sea-bundle-excludes-plugin-tree` 是上述「AC16 改判未达成」
+的产物层修复。架构决定（AC3）= **sidecar bundle**：`build-sea.sh` step [6/6]
+`stage_plugin_sidecar()` 把 repo-root `plugin/`（去 `plugin/test/`）stage 进 `dist-sea/plugin/`；
+`release.yml` 组装步骤把该 sidecar 拷进 `dist-sea-release/plugin/`（缺失 fail-closed）；新增
+回归测试 `packages/quay/test/sea-bundle-plugin-sidecar.test.mjs` 断言 6 个新机制名在产物可反查 +
+Contract measure `sea_has_plugin > 0`。**AC16 现在在 npm tgz（本任务）+ SEA archive（sidecar）
+两条分发路径的产物层都含 plugin。**
