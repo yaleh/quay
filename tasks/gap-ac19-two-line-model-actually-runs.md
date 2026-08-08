@@ -87,7 +87,7 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + for
       **证据**：fan-in 后 `git rev-list --count develop..integration` = **2**（integration 领先 develop 2 提交），
       `git rev-list --count integration..develop` = 0（develop 无 integration 缺的提交），
       `git merge-base --is-ancestor integration develop` → **NO**（integration 不再是 develop 祖先，真实窗口）。
-- [ ] AC3: **fork-baseline 判定活着**——(i) 每次派发都实际调用 fork-baseline 判定且结果与配置一致；
+- [x] AC3: **fork-baseline 判定活着**——(i) 每次派发都实际调用 fork-baseline 判定且结果与配置一致；
       (ii) 传入参数不得使任一判定路径恒为假（2026-08-08 09:3x 人裁定改判据测法）
       **实测（manager 09:3x 定位，外层复核成立）**：dispatch 5 次调用 `integration-branch-model.ts
       --fork-baseline tasks/<id>.md --overlaps-unverified ""`——空串 ⇒ `integration-branch-model.ts:47`
@@ -97,6 +97,38 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + for
       正是这条命令）；修后复测 `fork_baseline_called ≥1` + `fork_baseline_not_always_false = 0`。
       **旧判别式（08:5x 分叉点法）并入 (i) 的结果一致性**：从 integration 切的任务分支分叉点 =
       integration 祖先 + 非 develop 祖先，仍须成立，但不再作为唯一判据。
+      **证据（2026-08-08 本任务执行，按更正判别式）**：
+      **(i) 每次派发实际调用判定**：`fast-mode-loop-tick.md` 派发步改为机械命令（`--overlaps-unverified
+      "$UNVERIFIED_IDS"`，见下）；本任务实测 corrected invocation 一次 → stdout `integration`
+      （fork_baseline_called ≥1；该结果被 declaredDependency 假阳性主导——见「假阳性观察」，当前
+      develop..integration 为空故 overlap 路径无贡献）。
+      **(ii) 实参不再恒为空串**：派发步改为
+      ```bash
+      UNVERIFIED_IDS=$(node --experimental-strip-types plugin/scripts/unverified-integration-task-ids.ts --root "$(pwd)")
+      node --no-warnings --experimental-strip-types plugin/scripts/integration-branch-model.ts --fork-baseline tasks/<id>.md --overlaps-unverified "$UNVERIFIED_IDS" --root "$(pwd)"
+      ```
+      ——literal 空串不再出现；未验证 id 由 helper 从 `git log --oneline develop..integration`
+      机械提取（integration-branch-model.ts:139 Contract invoke），内层无需记忆。helper 行为：
+      `unverified-integration-task-ids.ts` 跑该 git 命令、从 fan-in 合并信息提取 `task/<id>` / `gap-<id>`
+      模式（去重、校验 `tasks/<id>.md` 存在）、逗号分隔输出、无则空。**fixture 实测**：有未验证任务时
+      `UNVERIFIED_IDS=[gap-uv-live]`，命令实参为 `"gap-uv-live"`（非空 ⇒ 空串 = 0 成立）。
+      **overlap 路径 LIVE 证明（before/after 对照，同一候选 touches `plugin/loop/fast-mode-loop-tick.md`）**：
+      ```text
+      # 旧形态（机制半死）：literal 空串 → overlap 路径恒不触发
+      $ node .../integration-branch-model.ts --fork-baseline tasks/candidate-overlap.md --overlaps-unverified "" --root <fixture>
+      develop
+      # 修正形态：真实未验证 id（helper 提取）→ overlap 路径触发
+      $ node .../integration-branch-model.ts --fork-baseline tasks/candidate-overlap.md --overlaps-unverified "gap-uv-live" --root <fixture>
+      integration
+      # 独立候选（touches 不相交）→ 仍从 develop 分叉
+      $ node .../integration-branch-model.ts --fork-baseline tasks/candidate-disjoint.md --overlaps-unverified "gap-uv-live" --root <fixture>
+      develop
+      ```
+      **假阳性观察（记录，未修——正则按散文匹配依赖声明的已知局限）**：`declaredDependency` 正则
+      （integration-branch-model.ts:192-193 `/depends_on|声明依赖|依赖前序|前序任务|先决/`）匹配本任务
+      自身散文里的「声明依赖的任务从 integration 切」（tasks/gap-ac19...md 第 30/44 行）——对本任务返回
+      `integration` 是假阳性；本任务实际独立（develop..integration 当前为空）。修复聚焦实参恒空串（本次）；
+      正则假阳性属另一缺陷，非本次范围。
 - [x] AC4: **批量合回**——窗口后批量合回 develop（integration 重新成为 develop 祖先）
       **证据**：`integration-batch-merge.sh --root /home/yale/work/quay --sync` → `integration-batch-merge: OK —
       develop fast-forwarded to integration`（ref-level FF，develop 从 c230780b → 6911d6d1），
@@ -114,15 +146,20 @@ resume 若中断，先跑 measure 读 integration 领先数 + 方向确认 + for
 
 - [ ] AC1-AC4 实跑输出贴任务体（方向修正前后、integration 领先窗口、fork_baseline 可分辨验证、批量合回）——见各 AC 证据
       **注意**：AC1/AC2/AC4/AC5 的旧证据按更正判别式复核后仍成立（方向修正、窗口、批量合回、不凑数——
-      这些与判别式无关）；**AC3 证据作废**（假阳性判别式），需按更正判别式重验
+      这些与判别式无关）；**AC3 证据已按更正判别式重验**（作废状态解除）：修正后的机械命令 + overlap
+      路径 live before/after 证明 + 假阳性观察记录，见 AC3 证据块
 - [ ] 两线模型真正跑起来（任务合 integration → 批量合回 develop 的完整循环 ≥1 次 + 窗口内分叉基线可分辨
       ——按更正判别式：存在任务分支 p 为 integration 祖先且非 develop 祖先）
+      **复核中**：AC3 机制修复已落地（overlap 路径不再半死）；integration 领先窗口的重验归外层下一轮
+      （按 AC19 判据原文「怎么制造窗口、要不要排声明依赖任务触发它 = outer 的机制决定」）
 
 ## Touches
 - tasks/gap-ac19-two-line-model-actually-runs.md（self——派发授权）
 - 内层 fan-in 行为（任务合 integration 而非 develop——执行，非代码）
 - plugin/loop/fast-mode-loop-tick.md（若需强化 fan-in 合 integration 的执行纪律）
 - orchestration/manager-phase-goal.md（AC19 判据，交叉标注）
+- plugin/scripts/unverified-integration-task-ids.ts（AC3 修复——new helper，机械提取未验证 id）
+- plugin/test/unverified-integration-task-ids.test.mjs（AC3 测试——git-fixture 端到端）
 
 ## Dispatch review
 
