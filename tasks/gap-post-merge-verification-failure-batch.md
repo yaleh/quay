@@ -2,7 +2,7 @@
 id: gap-post-merge-verification-failure-batch
 title: 合并后完整验证暴露多根因失败批次（8 文件，非 flake）：catalog QUESTION 表丢 cross-machine-verify /
   session-liveness 拆分后 B2-B4 断 / 文档断言未同步 / inert exclusion / loop-driver——逐个修
-status: ready
+status: done
 labels: []
 parent: null
 children: []

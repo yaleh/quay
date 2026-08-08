@@ -3,7 +3,7 @@ id: gap-session-liveness-original-file-residue-post-split
 title: session-liveness 拆分后原文件残留：session-liveness.test.mjs（governance/main）100%
   重复 3 新文件（50 测试原独有 0）却仍 tracked 跑 207.5s + OVERDUE 并发 flake——拆分 DoD
   缺口（复制没删原），删原文件修拆分残留
-status: ready
+status: done
 labels: []
 parent: null
 children: []

@@ -2,7 +2,7 @@
 id: gap-verify-referenced-landed-concurrency-hardening
 title: verify_referenced_landed 并发假阳性（gap-lowconc AC3 声称已加固但单次重试不足）：合并后验证 4
   文件全误报已声明 reference-doc（隔离全过），cc3 高负载下多 --loop 并发读 init/SKILL.md 不完整
-status: ready
+status: done
 labels: []
 parent: null
 children: []

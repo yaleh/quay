@@ -2,7 +2,7 @@
 id: gap-laydown-set-check-ac4-stale-after-split
 title: laydown-set-check.test.mjs AC4 过期（删除拆分残留后）：硬编码期望已删的
   session-liveness.test.mjs，应改为期望拆分后 3 文件（events/heartbeat/signals）——全量最后 1 失败
-status: ready
+status: done
 labels: []
 parent: null
 children: []
