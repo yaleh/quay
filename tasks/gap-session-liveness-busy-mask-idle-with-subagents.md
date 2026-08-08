@@ -79,6 +79,27 @@ outer 只有 2 次翻转且对应真实活动；「transcript 静止>120s 却判
 保留为状态记录、不再进报告门）。第 2 条（RESUMED/IDLE 同阶去抖）与第 3 条（外层收 IDLE 查 inner
 槽位）属外层/后续轮次，本轮未做。
 
+### D5 修复后实环境仍 0 IDLE——根因追加（外层 2026-08-08 15:2x 仪器化取证）
+
+**manager 15:12Z 实测**：修复版监视器（md5=19d04af5、IDLE_REPORTED×9）挂 44+ 分钟，target=quay-0:outer，
+SESSION-IDLE 仍 0 条、只有 RESUMED。manager 60 样本实验证伪两个候选（capture 空 0 次、分类器翻转
+1 次可解释）⇒ 要求外层仪器化四个值。
+
+**外层仪器化（临时副本 /tmp/sl-diag.sh 加每轮 DIAG，不改 repo 原文件）**：
+- **恒定 idle pane（注入 claude-probe + 测试 tmux）**：IDLE_CONSEC 单调 1→8、IDLE_REPORTED 0→1、
+  **SESSION-IDLE round 4 报出** ⇒ **脚本 idle 逻辑完全正常**。
+- **完全复刻 manager 配置（target=quay-0:outer + pane-only）**：每轮 `pane_state=busy idle=0
+  IDLE_CONSEC=0`——**从不累积**。负控制：去掉状态区 `esc to interrupt` → 判 unknown busy=0。
+
+**根因（本任务原判据的适用边界）**：D5 修的是「busy/idle 会翻转」场景（IDLE_CONSEC 到阈值那轮
+SEEN_BUSY=0 触发机会被销毁）。但 **manager 实环境的 busy 是恒定的**——outer pane 状态区在
+`⏵⏵ bypass permissions` 模式下**常驻 `esc to interrupt`**，classifyPaneState 的 BUSY_RE 匹配底部
+两行 → **恒判 busy → IDLE_CONSEC 从不累积**。D5 修不到这个（它假设 busy 会转 idle）。
+
+**收口判据（manager 已定）**：D5 的收口 = **实环境报出一次 SESSION-IDLE**，不是「修复已合入 develop」。
+在恒 busy 的 pane-only 场景下，需要 classifyPaneState 区分「bypass 模式常驻 esc to interrupt」与
+「真有可打断动作」——前者不应判 busy（或 pane-only 配置需要别的忙信号）。
+
 **测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
 - from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。
 - per-spell edge：一段空闲只报一次，忙段再武装 → 新段再报。
