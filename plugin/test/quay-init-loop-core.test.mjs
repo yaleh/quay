@@ -1,8 +1,10 @@
 // @test-group serial
-// GROUP NOTE (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests): routed to the
-// `serial` group (KNOWN-LOAD-SENSITIVE family — each --loop test spawns a real quay-init.sh →
-// python3 children) so it runs in the concurrency-1 serial phase, never competing with the
-// concurrency-8 main body's worker pool.
+// GROUP NOTE (gap-serial-group-recompose-nested-runner-criterion): routed to the `serial` group
+// because it IS a nested runner — each --loop test spawns a real quay-init.sh → `$TEST_COMMAND`
+// (node --test) worker-pool sub-suite, which derives its own concurrency N (18 nested-runner
+// matches, per the manager audit). Per the explicit serial criterion (fast-mode-loop-tick.md), the
+// ONLY reason to enter serial is spawning your own worker-pool sub-suite; this file runs in the
+// concurrency-1 serial phase, never competing with the concurrency-8 main body's worker pool.
 // quay-init-loop-core.test.mjs — split out of quay-init-loop.test.mjs (2026-08-07 inner red-window
 // fix). The original 54-test single file exhausted the node:test worker event loop under heavy
 // blocking spawnSync (each --loop test spawns a real quay-init.sh → python3 children), self-failing

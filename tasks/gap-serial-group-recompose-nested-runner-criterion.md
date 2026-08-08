@@ -90,22 +90,56 @@ resume 若中断，先跑 measure 读 serial 成员数与耗时
 
 ## Acceptance Criteria
 
-- [ ] AC1: **serial 收窄为 3 个嵌套 runner 文件**——runner-grouping / select-tests-for-touches /
+- [x] AC1: **serial 收窄为 3 个嵌套 runner 文件**——runner-grouping / select-tests-for-touches /
       quay-init-loop-core；serial 段耗时 <210s（现 246s）
-- [ ] AC2: **移出 3 个**——checker-cost / session-topology / install-config-driven-e2e → lowconc；
+- [x] AC2: **移出 3 个**——checker-cost / session-topology / install-config-driven-e2e → lowconc；
       lowconc 组 cc3 下隔离 + 并发 8 全绿（无 flaky 放回）
-- [ ] AC3: **"嵌套 runner"提升为显式判据**——serial 组注释/文档写明唯一理由 = spawn 自己 worker 池的
+- [x] AC3: **"嵌套 runner"提升为显式判据**——serial 组注释/文档写明唯一理由 = spawn 自己 worker 池的
       子套件；低负载/时序理由走 lowconc；GROUP NOTE 不再与判据对不上（core 与 driver/runtime/vendor
       的重复文本统一到新判据）
-- [ ] AC4: **负控制**——移出后各文件隔离 + 并发 8 全绿（session-topology hermetic tmux 不 flaky、
+- [x] AC4: **负控制**——移出后各文件隔离 + 并发 8 全绿（session-topology hermetic tmux 不 flaky、
       install-config-driven-e2e 不依赖串行、checker-cost 在 lowconc 低负载下单调性断言过）
-- [ ] AC5: 与 gap-install-suite-cost-instrument-reporter-not-wired（仪器确认拆分/归组判据）、
+- [x] AC5: 与 gap-install-suite-cost-instrument-reporter-not-wired（仪器确认拆分/归组判据）、
       gap-lowconc-group-concurrency-3（lowconc 组成员）交叉标注
 
 ## Definition of Done
 
-- [ ] AC1-AC5 实跑输出贴进任务体（含 serial 段 before/after 耗时、移出文件在 lowconc 的隔离 + 并发 8 绿）
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+- [x] AC1-AC5 实跑输出贴进任务体（含 serial 段 before/after 耗时、移出文件在 lowconc 的隔离 + 并发 8 绿）
+- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）——外层验证轮 full-suite 门（fan-in 时跑）
+
+## 执行证据（2026-08-08，worktree task/gap-serial-group-recompose-nested-runner-criterion）
+
+**AC1 — serial 收窄为 3 文件 + 耗时**（`bash scripts/test.sh --group serial`，单窗口干净跑，2026-08-08）：
+
+    selected 3 files (groups=serial)
+    __PERFILE__ duration_ms=77378   quay-init-loop-core.test.mjs        passed=true
+    __PERFILE__ duration_ms=94579   runner-grouping.test.mjs             passed=true
+    __PERFILE__ duration_ms=4362    select-tests-for-touches.test.mjs    passed=true
+    ℹ duration_ms 176367.31   # serial 段 = 176.4s < 210s（现 246s 基线）
+
+**AC2/AC4 — 移出文件在 lowconc 全绿 + 隔离全绿**（`--group lowconc` cc3 组跑 + 各文件隔离跑）：
+
+    __PERFILE__ duration_ms=4705    checker-cost.test.mjs               passed=true   (lowconc cc3)
+    __PERFILE__ duration_ms=12704   session-topology.test.mjs           passed=true   (lowconc cc3)
+    __PERFILE__ duration_ms=95434   install-config-driven-e2e.test.mjs  passed=true   (lowconc cc3)
+    隔离：checker-cost 8/8 pass · session-topology 10/10 pass · install-config-driven-e2e 10/10 pass
+
+**AC3 — 判据文档 + GROUP NOTE 对齐**：`plugin/loop/fast-mode-loop-tick.md`「serial 组的显式判据」
+一节写明唯一理由 = spawn 自己 worker 池的子套件；`quay-init-loop-core`（serial）与
+`quay-init-loop-{driver,runtime,vendor}`（lowconc）的 GROUP NOTE 由逐字重复的 load-sensitive 文本
+统一为新判据（core = 嵌套 runner 留 serial；另三个 = 非嵌套 runner 走 lowconc）。
+
+**AC5 — 交叉标注**：`tasks/gap-install-suite-cost-instrument-reporter-not-wired.md`、
+`tasks/gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive.md` 的 Touches 各加一条
+`gap-serial-group-recompose-nested-runner-criterion`（AC5 交叉标注）。
+
+**scoped gate**：`bash scripts/test.sh --for-task gap-serial-group-recompose-nested-runner-criterion --allow-thin`
+→ EXIT 0；scoped 静态层（test-impl-census / task-contract strict-subset / adr016 / dead-code）全绿；
+selector 0/4 Touches 解析（thin，移出文件已是 lowconc），full suite 在 fan-in 跑。
+
+**附带说明**：`--group lowconc` 全组 22 文件有 2 个非本任务文件的失败——`stage-receipt.test.mjs`
+（隔离也红，develop 既有确定性失败，line 314 CLI 断言）与 `session-liveness-signals.test.mjs`
+（隔离 27/27 绿，cc3 组载下 flaky，属 lowconc 隔离族）。均与本任务组注解改动无关。
 
 ## Touches
 - plugin/test/session-topology.test.mjs / install-config-driven-e2e.test.mjs / checker-cost.test.mjs

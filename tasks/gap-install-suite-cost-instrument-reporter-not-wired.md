@@ -172,6 +172,7 @@ __GROUP__ concurrency=1 files=2 sum_ms=463.6 floor_ms=463.6 capped=0
 - plugin/test/measure-suite-reporter.test.mjs（真实加载 + 封顶判定验证）
 - tasks/gap-verify-round-9-failures-from-recent-changes-fix-batch.md（AC6 交叉标注）
 - tasks/gap-serial-segment-77-percent-cost-reduction-runner-grouping-listfiles.md（AC6 交叉标注）
+- tasks/gap-serial-group-recompose-nested-runner-criterion.md（AC5 交叉标注——serial 组按嵌套 runner 显式判据收窄为 3 文件，确认拆分/归组判据口径）
 
 ## Dispatch review
 
