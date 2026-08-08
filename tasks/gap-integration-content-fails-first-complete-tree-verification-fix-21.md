@@ -11,7 +11,7 @@ title: "First complete-tree concurrency-8 verification exposed 21
   PLUS load artifacts (heavy quay-init --loop laydown tests pass isolated but
   time out under concurrency 8 — not serial-routed); fix real defects (40→6
   alignment) + route the extra load-sensitive tests → concurrency-8 true green"
-status: ready
+status: done
 labels:
   - gap
   - defect
