@@ -59,6 +59,18 @@ export function bottomRegion(paneText: string, lines = DEFAULT_BOTTOM_LINES): st
 const PERMISSION_PROMPT_RE =
   /Do you want to proceed|Quick safety check|trust this folder|Enter to confirm|Grant access|Allow|Deny|Y\/n\b/i;
 
+/** Dismissable / ignorable prompt markers — the distinguishing feature that tells a blocking
+ * permission confirmation apart from a feedback questionnaire (tasks/gap-permission-prompt-vs-
+ * dismissable-prompt-classifier, manager 2026-08-08 19:35Z). The Claude Code "How is Claude doing
+ * this session?" questionnaire carries `(optional)` in its title and a `Dismiss` option; a REAL
+ * blocking permission confirmation has NO dismiss branch. The questionnaire's OWN keybinding chrome
+ * ("↑/↓ navigate · Enter to confirm · Esc to cancel") trips PERMISSION_PROMPT_RE when the overlay
+ * is scrolled into the bottom region — that is the position-dependent false-busy (the same screen
+ * classifies waiting-input once the overlay is out of the region). A region carrying BOTH a
+ * permission signature AND a dismissable marker is a questionnaire, not a blocking dialog — it must
+ * NOT count as busy (AC2). */
+const DISMISSABLE_PROMPT_RE = /\(optional\)|Dismiss|How is Claude doing this session/i;
+
 /** Active processing: the definitive "esc to interrupt" status flag (the SAME signal
  * session-liveness.sh already uses to mean busy). It lives in the STATUS LINE (the last one or two
  * lines of the bottom region), NOT in scrolled content — the manager's analysis text has been
@@ -110,7 +122,14 @@ export interface ClassifyResult {
  * Tier-1 checks run most-specific-first; anything unmatched falls to tier-2 (unknown + raw). */
 export function classifyPaneState(paneText: string, opts: { lines?: number } = {}): ClassifyResult {
   const region = bottomRegion(paneText, opts.lines ?? DEFAULT_BOTTOM_LINES);
-  if (PERMISSION_PROMPT_RE.test(region)) {
+  // A dismissable questionnaire (candidate A, gap-permission-prompt-vs-dismissable-prompt-classifier):
+  // when the region carries BOTH a permission signature AND a dismissable marker, the prompt is
+  // ignorable (a feedback questionnaire, e.g. "How is Claude doing this session? (optional)" with a
+  // "0: Dismiss" option) — NOT a blocking permission confirmation. Real permission dialogs have no
+  // dismiss branch, so the exclusion never weakens a genuine grant/deny prompt (AC3 negative
+  // control). Falling through lets the questionnaire read as waiting-input (when the ❯ prompt is
+  // present) or unknown — both non-busy in _sl_pane_verdict, so SESSION-IDLE is not blocked.
+  if (PERMISSION_PROMPT_RE.test(region) && !DISMISSABLE_PROMPT_RE.test(region)) {
     return { state: "permission-prompt", confidence: 0.85, region, raw: region };
   }
   if (BUSY_RE.test(statusArea(region))) {
@@ -368,6 +387,28 @@ export function selfcheck(): boolean {
     "Enter to confirm · Esc to cancel",
   ].join("\n");
   check("green-permission-prompt", classifyPaneState(prompt).state === "permission-prompt");
+
+  // GREEN (candidate A, gap-permission-prompt-vs-dismissable-prompt-classifier): a dismissable
+  // feedback questionnaire. Its own keybinding chrome ("Enter to confirm") trips PERMISSION_PROMPT_RE
+  // when the overlay is in the bottom region, but the `(optional)` / `Dismiss` markers prove it is
+  // ignorable — it must NOT read as permission-prompt (AC2), and reads as waiting-input (non-busy).
+  const questionnaire = [
+    "● How is Claude doing this session? (optional)",
+    "  1: Bad",
+    "  2: Fine",
+    "  3: Good",
+    "  0: Dismiss",
+    "  ↑/↓ navigate · Enter to confirm · Esc to cancel",
+    "───────────────────────────────",
+    "❯ ",
+    "───────────────────────────────",
+    "  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage",
+  ].join("\n");
+  check("green-questionnaire-waiting-input", classifyPaneState(questionnaire).state === "waiting-input");
+  // RED relabel: the questionnaire must NEVER read as a blocking permission prompt (busy-mask-idle).
+  check("questionnaire-red-not-permission", classifyPaneState(questionnaire).state !== "permission-prompt");
+  // AC3 negative control: the genuine permission dialog is UNCHANGED by the dismissable exclusion.
+  check("green-real-permission-still-prompt", classifyPaneState(prompt).state === "permission-prompt");
 
   // tier-2 GREEN: an unmatched screen → unknown, with the region passed through verbatim in raw.
   const weird = "a vim help screen\n~ ~ ~\n~ ~ ~\n(1 of 12)   help.txt";
