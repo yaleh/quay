@@ -424,7 +424,7 @@ gap-forty-to-six-remerge-needs-tests-updated-first（40→6 内容已随 fix-21 
 
 ---
 
-## 2026-08-08 22:15Z — 红窗闭锁：可读性修复 e1f34338 在 integration 但合不进来（AC27 前置②套件 green 为假）
+## 2026-08-08 22:15Z — 红窗闭锁（**manager 已裁定 23:1x：不豁免，维持 AC27 前置②——可读性修复是便利非阻塞；豁免会连带 22 条未验证提交进 develop。正解=修绿套件；逃生口=红窗连续 3 次全量重跑仍不绿时窄 cherry-pick e1f34338（只改 gitignored 运行时产物），届时 manager 直接给，不再上升。本条结案，移出待裁队列**）：可读性修复 e1f34338 在 integration 但合不进来（AC27 前置②套件 green 为假）
 
 **现象**：套件真红（reason=failed, durationMs=1294131, 21.6min 完整跑完）——第一条真正跑完测试后的红，
 真失败在 capability-catalog.test.mjs:272（installed catalog 非 0 unclassified）。同时 failures=[] 空
