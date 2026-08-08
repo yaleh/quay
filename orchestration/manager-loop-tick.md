@@ -851,6 +851,24 @@ PYEOF
 - **任一项目的外层进程消失** —— 立即报，不等三次
 - **`.halt` 的解除条件已满足但没人解除** —— 提醒一次，不自行解除高优先级之外的
 
+## 2.4b 取压力/预算/cap 的固定形态（2026-08-08 20:2xZ，付过两次代价后固定）
+
+**同一 tick 内 `cap` 只取一次并复用；`floor` 必须与该 `cap` 出自同一次 `slot-refill` 调用。**
+
+```bash
+GATE=$(bash plugin/scripts/cap-from-gate.sh)
+CAP=$(printf '%s\n' "$GATE" | sed -n 's/^effective_cap=//p')
+printf '%s\n' "$GATE" | head -4          # signal / band / budget / effective_cap
+bash plugin/scripts/slot-refill.sh --cap "$CAP"   # cap/floor 与上面同源
+```
+
+**为什么固定成命令而不是写成纪律**：20:02 我记下这条修法，**20:21 的下一轮就没执行**——
+仍旧调用了两次 `cap-from-gate.sh`，读数里再次出现 `effective_cap=3` 与 `slot-refill cap=4` 不一致
+（预算在两次调用之间变了）。**间隔 19 分钟。**
+⇒ **「记下修法」与「改掉命令」是两个动作，我一直只做前一个就当作完成。**
+**一般形态：一个读数被打印两次而中间重新取过值，那两个数就不再属于同一观测时刻——
+行内自洽不只是可读性问题，是正确性问题。**
+
 ## 2.5 我自己的锚（2026-08-07 人裁定"改进你自己的锚"）
 
 **缺口**：inner 的锚是**外部送来的固定常量**（`plugin/scripts/reanchor-prompt.txt`，577 字节，
