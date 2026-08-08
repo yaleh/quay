@@ -144,6 +144,18 @@
 #     读结构不读字节，chrome 的抖动不会再被判成活动（姊妹任务确认的假阳性源在此吸收）。
 #     仍依赖 tmux，且 TUI 布局/文案一改标志就失效——失效形态是【静默】；AC5 兜住
 #     「捕获为空/区域为空」不让它静默判闲。
+#     边界说明（gap-session-liveness-busy-mask-idle-with-subagents，2026-08-08 真根因 2c1d0c7c）：
+#     【pane-only 配置 + 默认心跳（tick-log）不适合观测一个被上层驱动的目标】。pane-only
+#     （无 SESSION_HEARTBEATS / SESSION_TRANSCRIPTS）时 heartbeat_for 回落默认外层心跳
+#     = <root>/orchestration/tick-log.md（heartbeat_for:841，多源 max mtime）。tick-log 被
+#     【每一个 outer/inner tick】追加 ⇒ mtime 恒新鲜 ⇒ hmin≈0-2min < LOOP_MIN ⇒ SESSION-IDLE
+#     噪声闸门（:1131-1137）把停摆静默吞掉。实测（outer 2c1d0c7c）：pane-only + LOOP_MIN=1 →
+#     IDLE_CONSEC 单调 1→7、IDLE_REPORTED 0→1（闸通过）但 SESSION-IDLE 零条；同配置 LOOP_MIN=0
+#     → SESSION-IDLE 正常发出。忙闲分类（classifyPaneState）与 D5 报告门均无缺陷——「bypass 模式
+#     常驻 esc to interrupt」假说也已被证伪（32c85b20：60 样本只前 9 busy 后 51 waiting-input）。
+#     ⇒ pane-only 观测要么配显式心跳源（SESSION_HEARTBEATS / SESSION_TRANSCRIPTS，让心跳反映
+#     目标会话自身活动），要么设 LOOP_MIN=0（管理者对 pane-only 观测的既有做法）。启动审计
+#     （_sl_audit_pane_only_gate）对 pane-only + 默认心跳 + LOOP_MIN>0 的目标 WARN 一次。
 #   - transcript（~/.claude/projects/<slug>/<id>.jsonl）：不依赖 tmux、不受重绘影响、stat 便宜；
 #     但只在【工具调用】时写（读代码/纯思考/等 subagent 时主 transcript 不写——subagent 写
 #     在 <id>/subagents/，heartbeat_mtime 并上），且 pid→文件映射受 /clear 与 --resume 解耦，
@@ -945,6 +957,28 @@ _sl_audit_config_wiring() {
   done
 }
 _sl_audit_config_wiring
+
+# ── pane-only 默认心跳闸门审计（gap-session-liveness-busy-mask-idle-with-subagents，2026-08-08）──
+# 真根因（outer 2c1d0c7c）：pane-only 目标（无显式 SESSION_HEARTBEATS / SESSION_TRANSCRIPTS）的
+# 心跳回落默认外层多源（tick-log 等），而 tick-log 被【每一个 outer/inner tick】追加 ⇒ mtime 恒
+# 新鲜 ⇒ hmin < LOOP_MIN ⇒ SESSION-IDLE 噪声闸门把停摆静默吞掉（实测：pane-only + LOOP_MIN=1 →
+# IDLE_CONSEC 单调但 IDLE 零条；LOOP_MIN=0 → IDLE 正常发出）。忙闲分类与 D5 报告门均无缺陷——
+# 缺的是边界认识 + 显式心跳源/LOOP_MIN 调整。启动时对每个「pane-only + 默认心跳 + LOOP_MIN>0」
+# 的目标 WARN 一次（stderr）——宁可启动时响一声，不要运行期静默半盲（同 _sl_audit_config_wiring
+# 的同一原则）。pane-only 观测要么配显式心跳源，要么设 LOOP_MIN=0。
+_sl_audit_pane_only_gate() {
+  [ "${LOOP_MIN:-0}" -gt 0 ] 2>/dev/null || return 0
+  local name root target hb
+  while read -r name root target; do
+    [ -n "${name:-}" ] || continue
+    hb=$(heartbeat_for "$name" "$root")
+    [ -n "$hb" ] || continue
+    if heartbeat_is_outer_default "$name" "$root" "$hb"; then
+      echo "session-liveness: WARN 目标「${name}」是 pane-only（无显式 SESSION_HEARTBEATS / SESSION_TRANSCRIPTS），心跳回落默认外层多源（tick-log 等）。默认心跳由【主循环 tick】刷新、不反映该目标会话自身活动——若该目标正被上层驱动，LOOP_MIN=${LOOP_MIN} 的噪声闸门会把 SESSION-IDLE 静默吞掉（停摆失明）。pane-only 观测请设 LOOP_MIN=0 或配显式心跳/transcript。" >&2
+    fi
+  done < <(targets)
+}
+_sl_audit_pane_only_gate
 
 while true; do
   while read -r name root target; do

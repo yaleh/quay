@@ -64,7 +64,22 @@ const PERMISSION_PROMPT_RE =
  * lines of the bottom region), NOT in scrolled content — the manager's analysis text has been
  * observed QUOTING the phrase "esc to interrupt" inside the bottom 10 lines while the session was
  * actually idle (real capture waiting-input-manager-3). Restricting the match to the last two
- * lines makes a quoted mention in content unable to fake a busy verdict. */
+ * lines makes a quoted mention in content unable to fake a busy verdict.
+ *
+ * WHY esc-in-status-area ALONE means busy is CORRECT (no bypass-mode exception — do NOT re-add one):
+ * tasks/gap-session-liveness-busy-mask-idle-with-subagents proposed a "constant bypass-mode esc"
+ * distinction (an `esc to interrupt` in the status line with NO co-occurring active-processing
+ * signal should read as idle). The manager FALSIFIED the premise 2026-08-08 15:2x (commit
+ * 32c85b20 on develop): (1) a 13:05 idle capture of the real outer pane showed NO `esc to
+ * interrupt` under the same bypass-permissions + monitors + agent conditions, and (2) a 60-sample
+ * run was busy for only the first 9 samples then 51 consecutive waiting-input — impossible if the
+ * esc were a constant mode indicator. The original replication was SELF-REFERENTIAL: it observed
+ * the outer's own pane while the outer was running the instrumentation, so the pane was busy by
+ * construction (observer-can't-observe-itself, the pgrep-self-match family). Real busy-ness
+ * (an interruptible action in flight) is exactly when the TUI renders `esc to interrupt`; an idle
+ * bypass-mode pane does not. A "co-occurring active signal" requirement would only add a
+ * false-IDLE path (a busy pane whose work line is scrolled out of the bottom region would read
+ * idle). The closure criterion is one real SESSION-IDLE, not a classifier heuristic. */
 const BUSY_RE = /esc to interrupt/i;
 
 /** The status area = the last up-to-two non-blank lines of the bottom region (the status line and
