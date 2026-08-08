@@ -81,7 +81,7 @@ resume 若中断，先跑 measure 确认当前 README 的字面命令是否已�
 - [x] AC4: 复查文档里其余 `quay.js`/`quay-native.js`/`quay-github.js` 字面出现处，
       区分「开发树源码路径」与「quay-init 铺设产物路径」两类语境，逐条标注不得混淆（见下「AC4 审计」）
 
-## AC1 实跑证据（worktree 内逐条实跑，2026-08-07）
+## AC1 实跑证据（worktree 内逐条实跑，2026-08-08 —— 重放，非旧 2026-08-07 证据）
 
 改前（`git show develop:README.md` 的 Option B 命令逐字复现）：
 
@@ -91,20 +91,29 @@ node:internal/modules/cjs/loader:1573
   throw err;
   ^
 Error: Cannot find module '/home/yale/work/quay-worktrees/readme-source/packages/quay/bin/quay.js'
-    code: 'MODULE_NOT_FOUND'
-exit code: 1
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1569:15)
+    ...
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+Node.js v26.5.0
+exit=1
 ```
 
 改后（README 现记录的字面命令逐条实跑，`cwd`=worktree 根）：
 
 ```
 $ node --experimental-strip-types packages/quay/bin/quay.ts --help        → exit 0（打印 usage）
-$ node --experimental-strip-types packages/quay-native/bin/quay-native.ts --help → 不 ENOENT（usage，exit 1 因 --help 非合法动词）
-$ node --experimental-strip-types packages/quay-github/bin/quay-github.ts --help → 不 ENOENT（usage，exit 1 同理）
+$ node --experimental-strip-types packages/quay/bin/quay.ts --version     → exit 0（0.4.0）
+$ node --experimental-strip-types packages/quay/bin/quay.ts -V            → exit 0（0.4.0）
 
-$ node --experimental-strip-types packages/quay/bin/quay.ts task list --json   → exit 0（输出完整任务 JSON）
+$ node --experimental-strip-types packages/quay/bin/quay.ts task list --json   → exit 0（输出完整任务 JSON，9MB）
+$ node --experimental-strip-types packages/quay/bin/quay.ts task list --prefix QX --page-size 2 → exit 0（QX-001/QX-002）
 $ node --experimental-strip-types packages/quay/bin/quay.ts task view QN-001   → exit 0（QN-001 详情）
 $ node --experimental-strip-types packages/quay/bin/quay.ts task check QN-001  → exit 0（QN-001: PASS — terminal）
+$ node --experimental-strip-types packages/quay/bin/quay.ts action list QN-001  → exit 0
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate --list          → exit 0（21 个 gate）
+$ node --experimental-strip-types packages/quay/bin/quay.ts gate-log QN-001      → exit 0
+$ node --experimental-strip-types packages/quay/bin/quay.ts run --once           → exit 0（QENG-5-DEMO-FAIL: FAIL acceptance，left ready）
 $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task list    → exit 0
 $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts task get QN-001 → exit 0
 $ node --experimental-strip-types packages/quay-native/bin/quay-native.ts manifest      → exit 0
@@ -113,15 +122,14 @@ $ node --experimental-strip-types packages/quay-github/bin/quay-github.ts task l
 $ cd packages/quay-native/examples/sample-workspace
 $ QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task list      → exit 0（SAMPLE-*）
 $ QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task get SAMPLE-1 → exit 0
-$ QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task check SAMPLE-1 → exit 0
+$ QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node --experimental-strip-types ../../bin/quay-native.ts task check SAMPLE-1 → exit 1（SAMPLE-1: FAIL — 1/2 AC —— 与 sample-workspace README 自述一致：SAMPLE-1B 未 done 前 check 为 ok:false，命令本身正常运行无 ENOENT）
 $ node --experimental-strip-types ../../../quay/bin/quay.ts task list        → exit 0（SAMPLE-*，走 sample-workspace 自带 .quay/config.yml）
 $ node --experimental-strip-types ../../../quay/bin/quay.ts task view SAMPLE-1A → exit 0
 $ node --experimental-strip-types ../../../quay/bin/quay.ts gate SAMPLE-1A     → exit 0（PASS）
 ```
 
-覆盖范围：根 `README.md`（Option B 三命令 + task list/view/check + native 三例 + github 例 +
-sample-workspace 一行）+ `packages/quay/README.md`（Option B + --version/-V + task list/view/edit/check +
-action list/run + gate/gate-log + complete/retreat/promote + run --once 全部命令）+ 
+覆盖范围：根 `README.md`（Option B 三命令 + sample-workspace 一行 + task list/view/check + native 三例 + github 例）+
+`packages/quay/README.md`（Option B + --version/-V + task list/view/check + action list + gate --list + gate-log + run --once）+
 `packages/quay-native/examples/sample-workspace/README.md`（六条命令）。全部实跑成功，无 ENOENT。
 
 ## AC2 —— README 与 CLAUDE.md 字面一致
@@ -131,7 +139,7 @@ action list/run + gate/gate-log + complete/retreat/promote + run --once 全部�
 > **Run the CLI:** `node --experimental-strip-types packages/quay/bin/quay.ts <cmd>` (Core), `node --experimental-strip-types packages/quay-native/bin/quay-native.ts <cmd>` (native provider directly).
 
 - 根 README Option B 三命令 = CLAUDE.md:17 的 Core/native 形式 + 同形 github 形式（`node --experimental-strip-types packages/quay-github/bin/quay-github.ts`），**逐字一致**。
-- 为此把 CLAUDE.md:17 的 native 形式也统一补上 `--experimental-strip-types`（原为无 flag，与 Core 不一致；现统一为 floor-safe 拼写），并修复 CLAUDE.md:138 指向不存在文件 `packages/quay/bin/quay.js` → `packages/quay/bin/quay.ts`。
+- 为此把 CLAUDE.md:17 的 native 形式也统一补上 `--experimental-strip-types`（原为无 flag，与 Core 不一致；现统一为 floor-safe 拼写），并修复 CLAUDE.md:140（重放时的实际行号）指向不存在文件 `packages/quay/bin/quay.js` → `packages/quay/bin/quay.ts`。
 - 配置块 `mcp_entry` 例子的 `.js`→`.ts`（与真实仓库 `.quay/config.yml` 及 sample-workspace `.quay/config.yml` 的 `./bin/quay-native.ts` 一致），这是 Core spawn 的 config 条目，非 CLI 直跑命令。
 
 两份文档不再对同一动作给出分叉命令：唯一字面命令集合已收敛到 CLAUDE.md:17。
