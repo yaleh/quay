@@ -92,6 +92,16 @@ resume 若中断，先跑 measure 确认 develop 侧未进被测树的代码文�
 - tasks/gap-batch-merge-gate-reads-stale-green.md（AC3 交叉标注）
 - tasks/gap-load-sensitive-requires-predeclared-marker.md（AC4 交叉标注）
 
+## 交叉标注（gap-batch-merge-reconcile-destroys-uncommitted-work，2026-08-08 dispatch）
+
+本任务 AC4 交叉标注：**批量合家族三件套——闸门（`gap-batch-merge-gate-reads-stale-green`，何时合）/
+对象（本任务，合什么）/ 对账（`gap-batch-merge-reconcile-destroys-uncommitted-work`，合完主检出
+HEAD/index 怎么办）**。`gap-batch-merge-reconcile-destroys-uncommitted-work` 已修：批量合是
+REF-LEVEL（update-ref CAS），对账步骤由 `integration-batch-merge.sh --reconcile` 自己提供（ref
+移动前 `git status --porcelain` 为空断言 + 合后 `git reset --mixed`，绝不用 `--hard`——inner 曾用
+`--hard` 销毁 manager 未提交编辑，2026-08-08 08:08:24）。本任务管「批量合对象校验（代码文件不得进）」
+，「合完后主检出状态」是同族第三面（对账）。
+
 ## Dispatch review
 
 reviewer: none

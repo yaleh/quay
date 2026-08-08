@@ -96,6 +96,16 @@ KNOWN-LOAD-SENSITIVE 标记准入**（`docs/analysis/fast-mode-loop-tick.md`「�
 `plugin/scripts/load-sensitive-release-check.ts` 机械校验）。与本任务（批量合闸门读 state 不读
 新鲜度）是同族缺口的两面：批量合「何时合」要机械判，红窗释放「凭什么放行」也要机械判。
 
+## 交叉标注（gap-batch-merge-reconcile-destroys-uncommitted-work，2026-08-08 dispatch）
+
+本任务 AC5 交叉标注：**批量合家族三件套——闸门（本任务，何时合）/ 对象（
+`gap-batch-merge-gate-validates-tip-not-merge-result`，合什么）/ 对账（
+`gap-batch-merge-reconcile-destroys-uncommitted-work`，合完主检出 HEAD/index 怎么办）**。
+`gap-batch-merge-reconcile-destroys-uncommitted-work` 已修：批量合是 REF-LEVEL（update-ref CAS），
+对账步骤由 `integration-batch-merge.sh --reconcile` 自己提供（ref 移动前 `git status --porcelain`
+为空断言 + 合后 `git reset --mixed`，绝不用 `--hard`——inner 曾用 `--hard` 销毁 manager 未提交编辑，
+2026-08-08 08:08:24）。本任务管「批量合闸门判绿」，「合完后主检出状态」是同族第三面（对账）。
+
 ## Dispatch review
 
 reviewer: none
