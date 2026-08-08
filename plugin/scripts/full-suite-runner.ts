@@ -139,6 +139,15 @@ export interface SuiteState {
    * priority rule keys on the same distinction. Absent (legacy states) ⇒ treat as main (fail-open).
    */
   scope?: "main" | "worktree";
+  /**
+   * gap-systemd-run-limits-for-suite-and-heavy-ops: the suite ran inside a systemd-run --user --scope
+   * cgroup scope with these limits (MemoryMax/CPUQuota/TasksMax). Absent on legacy states and on
+   * hosts with no systemd user session (the runner falls back with a WARNING — a limit that only
+   * works when someone remembers to call it is no limit at all, so the absence is visible). The
+   * AC1 cgroup evidence (the `systemctl --user show` attribute dump) is written to
+   * `<state-dir>/suite-cgroup-evidence.txt` by the same path.
+   */
+  systemdRun?: { applied: true; memoryMax: string; cpuQuota: string; tasksMax: string };
   startedAt: string; // ISO 8601
   finishedAt: string | null; // ISO 8601; null while running
   durationMs: number | null; // finishedAt - startedAt; null while running
@@ -468,6 +477,163 @@ export function checkResourceGate(root: string): { ok: boolean; output: string }
   }
 }
 
+// ── gap-systemd-run-limits-for-suite-and-heavy-ops ──────────────────────────────────────────────────
+// The suite + heavy ops run WITHOUT cgroup limits today: a PID explosion (tmux leak, 217 procs) or a
+// memory blowout (ugrep 8.8GB regex catastrophe) can take down the WHOLE MACHINE, not just the suite.
+// The resource gate (plugin/scripts/resource-gate.sh) is the design-correct, behavior-correct guard —
+// and it was bypassed (ABORT #5: 0 calls in this runner; 8-way concurrency in WAIT state, load 31.7).
+// "A limit that only works when someone remembers to call it is no limit at all." cgroup limits
+// (systemd-run --user --scope) CANNOT be forgotten to call: they are enforced by the kernel for the
+// lifetime of the scope, and they bound ONE process group — other projects on the machine are
+// untouched (SPEC-isolation-and-resource-governance-2026-08-05.md §2/§4). The runner wraps the
+// spawned suite in such a scope (MemoryMax/CPUQuota/TasksMax) when systemd-run is available, and
+// records the cgroup attributes as durable evidence (suite-cgroup-evidence.txt) — the AC1 observable.
+
+export interface SystemdRunLimits {
+  memoryMax: string; // -p MemoryMax=4G
+  cpuQuota: string; //  -p CPUQuota=200%
+  tasksMax: string; //  -p TasksMax=200
+}
+
+/** The suite's default cgroup scope limits (the Contract invoke's exact values). */
+export const DEFAULT_SYSTEMD_RUN_LIMITS: SystemdRunLimits = {
+  memoryMax: "4G",
+  cpuQuota: "200%",
+  tasksMax: "200",
+};
+
+/**
+ * Parse a `MemoryMax=4G CPUQuota=200% TasksMax=200` override string (the QUAY_TEST_SYSTEMD_RUN_LIMITS
+ * test seam) into a limits object. Unknown / malformed keys fall back to the defaults (fail-safe —
+ * a bad seam value must never produce an unparseable scope property).
+ */
+export function parseSystemdRunLimits(raw?: string): SystemdRunLimits {
+  const limits = { ...DEFAULT_SYSTEMD_RUN_LIMITS };
+  if (!raw) return limits;
+  for (const part of raw.trim().split(/\s+/)) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const [key, value] = [part.slice(0, eq), part.slice(eq + 1)];
+    if (key === "MemoryMax") limits.memoryMax = value;
+    else if (key === "CPUQuota") limits.cpuQuota = value;
+    else if (key === "TasksMax") limits.tasksMax = value;
+  }
+  return limits;
+}
+
+let _systemdRunAvailable: boolean | null = null;
+
+/**
+ * Whether `systemd-run --user --scope` works on this host (memoized). The probe runs a real no-op
+ * scope (`true`) — a transient scope is the ONLY reliable test that the user manager accepts
+ * `--scope` + properties (binaries present is not enough; there must be a user session / D-Bus).
+ * Seams: QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1 forces the answer for hermetic tests.
+ */
+export function systemdRunAvailable(): boolean {
+  if (_systemdRunAvailable !== null) return _systemdRunAvailable;
+  const forced = process.env.QUAY_TEST_SYSTEMD_RUN_AVAILABLE;
+  if (forced === "0") return (_systemdRunAvailable = false);
+  if (forced === "1") return (_systemdRunAvailable = true);
+  try {
+    execFileSync("systemd-run", ["--user", "--scope", "--quiet", "-p", "TasksMax=100", "true"], {
+      stdio: "ignore",
+      timeout: 10_000,
+    });
+    _systemdRunAvailable = true;
+  } catch {
+    _systemdRunAvailable = false;
+  }
+  return _systemdRunAvailable;
+}
+
+/**
+ * Build the argv that wraps `command` in `systemd-run --user --scope` with the limit properties.
+ * `--quiet` suppresses systemd's "Running as unit: …" stdout line (it would be teed into the suite
+ * log and pollute the failure-pattern matcher). `bash -c <command>` keeps the exact same command
+ * string the un-limited path spawns (the --test-concurrency splice etc. are untouched).
+ */
+export function buildSystemdRunArgv(command: string, limits: SystemdRunLimits = DEFAULT_SYSTEMD_RUN_LIMITS): string[] {
+  return [
+    "systemd-run",
+    "--user",
+    "--scope",
+    "--quiet",
+    "-p",
+    `MemoryMax=${limits.memoryMax}`,
+    "-p",
+    `CPUQuota=${limits.cpuQuota}`,
+    "-p",
+    `TasksMax=${limits.tasksMax}`,
+    "bash",
+    "-c",
+    command,
+  ];
+}
+
+/**
+ * Find the transient scope unit a spawned `systemd-run --scope` registered. The unit name is
+ * `run-p<pid>-<invocation>.scope` where <pid> is the spawned systemd-run process's pid (verified on
+ * this host). Polls `systemctl --user list-units` (the scope appears a moment after spawn); returns
+ * the unit name or null after `timeoutMs`.
+ */
+export async function findSuiteScopeUnit(pid: number, timeoutMs = 8_000): Promise<string | null> {
+  const prefix = `run-p${pid}-`;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const out = execFileSync("systemctl", ["--user", "list-units", "--type=scope", "--no-legend"], {
+        encoding: "utf8",
+        timeout: 2_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      for (const line of out.split("\n")) {
+        const unit = line.trim().split(/\s+/)[0] ?? "";
+        if (unit.startsWith(prefix)) return unit;
+      }
+    } catch {
+      // transient manager unreadiness — retry
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+}
+
+/**
+ * Record the AC1 cgroup evidence for a running suite scope: the scope unit name + the limit
+ * properties systemd actually applied (`systemctl --user show <unit>` → MemoryMax/CPUQuotaPerSecUSec/
+ * TasksMax/Effective*), written to `<stateDir>/suite-cgroup-evidence.txt`. Best-effort — evidence
+ * capture must never fail the run.
+ */
+export function recordSystemdRunEvidence(stateDir: string, scopeUnit: string, limits: SystemdRunLimits): void {
+  try {
+    const props = execFileSync("systemctl", ["--user", "show", scopeUnit], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const relevant = props
+      .split("\n")
+      .filter((l) =>
+        /^(MemoryMax|EffectiveMemoryMax|CPUQuotaPerSecUSec|TasksMax|EffectiveTasksMax|ControlGroup)=/.test(l),
+      )
+      .join("\n");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "suite-cgroup-evidence.txt"),
+      [
+        `scope_unit=${scopeUnit}`,
+        `limits_applied=1 memoryMax=${limits.memoryMax} cpuQuota=${limits.cpuQuota} tasksMax=${limits.tasksMax}`,
+        `recorded_at=${new Date().toISOString()}`,
+        relevant,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  } catch {
+    // best-effort — never let evidence capture fail the run
+  }
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export async function run(argv: string[]): Promise<number> {
@@ -529,7 +695,41 @@ export async function run(argv: string[]): Promise<number> {
   // still own the generation or it is dropped (gap-full-suite-state-race-last-write-wins-no-
   // generation-guard AC1/AC4).
   const runId = randomUUID();
-  const base = { runner: "outer" as const, startedAt, laneCount, scope, runId };
+
+  // gap-systemd-run-limits-for-suite-and-heavy-ops — wrap the spawned suite in a systemd-run --user
+  // --scope cgroup scope. The limit is kernel-enforced for the scope's lifetime and bounds ONE
+  // process group, so a PID/memory blowout inside the suite kills the SUITE's scope, never the
+  // machine (SPEC-isolation-and-resource-governance-2026-08-05.md §2: "a limit that only works when
+  // someone remembers to call it is no limit at all"). Env seams for hermetic tests:
+  //   QUAY_TEST_SKIP_SYSTEMD_RUN=1               — force the un-limited path (hermetic default)
+  //   QUAY_TEST_SYSTEMD_RUN_AVAILABLE=0|1        — force the availability probe
+  //   QUAY_TEST_SYSTEMD_RUN_LIMITS="…"           — override the limit properties
+  const skipSystemdRun =
+    process.env.QUAY_TEST_SKIP_SYSTEMD_RUN === "1" ||
+    argv.includes("--no-systemd-run") ||
+    argv.includes("--fail-fast-check") ||
+    argv.includes("--wait-check");
+  const systemdLimits = parseSystemdRunLimits(process.env.QUAY_TEST_SYSTEMD_RUN_LIMITS);
+  const sdAvailable = systemdRunAvailable();
+  const useSystemdRun = !skipSystemdRun && sdAvailable;
+  if (!skipSystemdRun && !sdAvailable) {
+    // Fail-OPEN fallback with a visible warning: no user systemd session ⇒ no cgroup scope is
+    // possible; the absence is logged so the "limits can't be forgotten" property is checkable.
+    process.stderr.write(
+      "full-suite-runner: WARNING systemd-run --user --scope unavailable — running WITHOUT cgroup " +
+        "limits (MemoryMax/CPUQuota/TasksMax). The suite is not machine-isolated on this host.\n",
+    );
+  }
+  const base = {
+    runner: "outer" as const,
+    startedAt,
+    laneCount,
+    scope,
+    runId,
+    ...(useSystemdRun
+      ? { systemdRun: { applied: true as const, memoryMax: systemdLimits.memoryMax, cpuQuota: systemdLimits.cpuQuota, tasksMax: systemdLimits.tasksMax } }
+      : {}),
+  };
 
   // KNOWN-LOAD-SENSITIVE family manifest (gap-known-load-sensitive-rule-is-doc-only-no-mechanical-
   // triage AC3): scanned ONCE at run start against the repo root so red-time failures can carry the
@@ -570,11 +770,36 @@ export async function run(argv: string[]): Promise<number> {
   // WAITs/queues instead of both-GO. The runner does NOT take its own lock: it spawns test.sh, which
   // serializes the actual node --test workers. This runner's gate check (above) prevents "starting
   // into a busy machine"; the spawned test.sh's flock prevents "a second suite joining".
-  const child = spawn("bash", ["-c", command], {
-    cwd: root,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
-  });
+  // gap-systemd-run-limits-for-suite-and-heavy-ops — spawn the suite inside the cgroup scope when
+  // available (otherwise the exact same bash -c <command> as before). systemd-run --scope runs the
+  // command synchronously in the foreground and propagates its exit code, so the close-event /
+  // signal / exit-code handling below is byte-for-behavior identical.
+  let child: import("node:child_process").ChildProcess;
+  if (useSystemdRun) {
+    const sdArgv = buildSystemdRunArgv(command, systemdLimits);
+    process.stderr.write(
+      `full-suite-runner: wrapping suite in systemd-run scope (MemoryMax=${systemdLimits.memoryMax} CPUQuota=${systemdLimits.cpuQuota} TasksMax=${systemdLimits.tasksMax})\n`,
+    );
+    child = spawn(sdArgv[0], sdArgv.slice(1), {
+      cwd: root,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    });
+    // AC1 evidence — fire-and-forget: find the scope unit and dump its applied cgroup properties to
+    // <state-dir>/suite-cgroup-evidence.txt (best-effort; never fails the run).
+    const evidenceStateDir = stateDir;
+    const evidenceLimits = systemdLimits;
+    void (async () => {
+      const unit = await findSuiteScopeUnit(child.pid);
+      if (unit) recordSystemdRunEvidence(evidenceStateDir, unit, evidenceLimits);
+    })();
+  } else {
+    child = spawn("bash", ["-c", command], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    });
+  }
 
   // AC5 (reason axis) — a signal-kill ⇒ red + reason=aborted (NO correctness conclusion), so the
   // inner's stop-dispatch does NOT fire on an abort. A previously-detected real failure (redDetected)

@@ -46,13 +46,51 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: 任务模板（author SKILL.md）AC 默认含「跨切检查清单」——新代码 lint-clean + check-adr 0 violations + 打包态一致性（按任务类型，实测模板生成含）
-- [ ] AC2: select-tests-for-touches 加「跨切」标记——跨切判据测试（打包态/ADR/lint 检查器）无论 touches 进 scoped 选中集（实测）
-- [ ] AC3: 触碰 packages/*/src 的任务 scoped 含至少一个打包态测试（实测，原打包态 AC 保留）
-- [ ] AC4: 触碰 src 或新增 MCP tool 的任务 scoped 含 check-adr（ADR 跨切检查，实测）
-- [ ] AC5: 新代码 lint 检查进任务内（scoped 跑 lint 或任务 AC 含 lint-clean，实测 14-error 形态被抓）
-- [ ] AC6: 纯 plugin/文档任务不含跨切测试（不误加，scoped 保持秒级）
-- [ ] AC7: 与 archguard TASK-62/64/65/66 + CLAUDE.md packaging e2e + 自适应并发（机制一次下游复用）交叉标注
+- [x] AC1: 任务模板（author SKILL.md）AC 默认含「跨切检查清单」——新代码 lint-clean + check-adr 0 violations + 打包态一致性（按任务类型，实测模板生成含）
+      —— `plugin/skills/author/SKILL.md` step 4（review-plan）新增「Cross-cut AC checklist」：
+      ① new code is lint-clean ② check-adr 0 ADR-conformance violations ③ packaging-state consistency
+      （纯 plugin/doc 任务不携带）。实测模板生成含：SKILL.md `grep -n 'lint-clean'` 命中；
+      Contract `invariant task_template_has_crosscut = 1` 成立。
+- [x] AC2: select-tests-for-touches 加「跨切」标记——跨切判据测试（打包态/ADR/lint 检查器）无论 touches 进 scoped 选中集（实测）
+      —— `plugin/scripts/select-tests-for-touches.ts` 新增 `CROSSCUT_CHECKS` 注册表 + `applyCrosscut()`，
+      src/MCP-tool 触碰触发 packaging-state / check-adr / lint 进 `selected`；默认输出打 `crosscut:` 标记行。
+      实测（测试「AC2 — a src-touching task selects cross-cut tests it never basename-pairs to」绿）：
+      `packages/quay/src/foo.ts` 任务选中 npm-pack-e2e/build-dist/plugin-packaging/adr-gate/mcp-adr，
+      输出含 `crosscut: packaging-state, check-adr, lint`。
+- [x] AC3: 触碰 packages/*/src 的任务 scoped 含至少一个打包态测试（实测，原打包态 AC 保留）
+      —— 测试「AC3 — src-touching task selects ≥1 packaging-state test」绿：`packages/quay/src/gate/engine.ts`
+      任务选中 npm-pack-e2e/build-dist/plugin-packaging（≥1 成立）。
+- [x] AC4: 触碰 src 或新增 MCP tool 的任务 scoped 含 check-adr（ADR 跨切检查，实测）
+      —— 测试「AC4 — src / new-MCP-tool task selects check-adr (ADR cross-cut)」绿：`packages/quay/src/mcp-server.ts`
+      任务输出含 `crosscut: ... check-adr`，选中 mcp-adr/cli-adr 测试。
+- [x] AC5: 新代码 lint 检查进任务内（scoped 跑 lint 或任务 AC 含 lint-clean，实测 14-error 形态被抓）
+      —— 双腿落地：scoped 腿（CROSSCUT_CHECKS 的 `lint` 条目，代码触碰触发 `crosscut: lint` 标记，测试
+      「AC5 — ...names the lint cross-cut...」绿）+ 任务内腿（SKILL.md 模板 AC 含 lint-clean——author 勾选
+      前必须跑 lint，archguard TASK-66 的 14-error 形态即被抓）。
+- [x] AC6: 纯 plugin/文档任务不含跨切测试（不误加，scoped 保持秒级）
+      —— 测试「AC6 — a pure plugin/doc task selects NO cross-cut tests (no bloat)」绿：`plugin/skills/author/SKILL.md`
+      + `CLAUDE.md` 任务选中集为空、无 `crosscut:` 标记（CROSSCUT_FILES 全部未入选）。
+- [x] AC7: 与 archguard TASK-62/64/65/66 + CLAUDE.md packaging e2e + 自适应并发（机制一次下游复用）交叉标注
+      —— `CLAUDE.md` 新增「Cross-cut scoped selection」段（点 TASK-62/64/65/66、DIR-111 dist-verify-node-floor、
+      cap-from-gate.sh）；`tasks/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry.md` 新增
+      Cross-annotation 段（本族 quay 最贴近实例，其 AC3 为同一跨切判据的安装时腿）。
+
+## Definition of Done
+
+- [x] AC1-AC7 全勾（author SKILL 模板含跨切检查清单；select-tests-for-touches 加跨切标记；触碰 packages/*/src 含打包态测试；触碰 src/MCP tool 含 check-adr；新代码 lint 检查进任务内；纯 plugin/文档不含跨切测试；与 archguard TASK-62/64/65/66 + packaging e2e + 自适应并发交叉标注）
+      —— 上列各 AC 证据见各 AC 行。
+- [x] 跨切判据实测：打包态/ADR/lint 检查器无论 touches 进 scoped 选中集
+      —— `node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task gap-both-gates-read-one-signal-so-done-costs-nothing 2>&1 | grep -c 'npm-pack-e2e\|build-dist\|check-adr\|lint'` = **3**（band ≥1）；
+      AC2/AC3/AC4/AC5/AC6 五条测试全绿。
+- [x] scoped 门 `scripts/test.sh --for-task gap-scoped-selection-blind-to-packaging-state-diff` 绿（2026-08-08 实跑，见 Evidence）
+
+## Evidence
+
+**scoped 门实跑（2026-08-08）**：`bash scripts/test.sh --for-task gap-scoped-selection-blind-to-packaging-state-diff --allow-thin` → 退出 0，选中集 = `plugin/test/select-tests-for-touches.test.mjs`（本任务 touches 仅触发 `lint` 跨切条目，其 tests 为空 → 无跨切测试误加，scoped 保持秒级）；静态检查（task-contract-check 等）绿。
+
+**跨切判据实测**：`node --experimental-strip-types plugin/scripts/select-tests-for-touches.ts --task gap-both-gates-read-one-signal-so-done-costs-nothing 2>&1 | grep -c 'npm-pack-e2e\|build-dist\|check-adr\|lint'` = **3**；`plugin/test/select-tests-for-touches.test.mjs` 24 条全绿（含新增 AC2/AC3/AC4/AC5/AC6 五条跨切测试）。
+
+**变更文件**：`plugin/scripts/select-tests-for-touches.ts`（CROSSCUT_CHECKS + applyCrosscut + 默认输出 crosscut 标记行）；`plugin/skills/author/SKILL.md`（review-plan 步 Cross-cut AC checklist）；`plugin/test/select-tests-for-touches.test.mjs`（AC2-AC6 五条测试 + AC10 pin 精确化）；`CLAUDE.md`（Cross-cut scoped selection 段）；`tasks/gap-vendor-runtime-not-in-git-clone-broken-mcp-entry.md`（Cross-annotation 段）。
 
 ## Definition of Done
 
@@ -63,7 +101,8 @@ extra: {}
 ## Touches
 - tasks/gap-scoped-selection-blind-to-packaging-state-diff.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
-- plugin/skills/author/SKILL.md（任务模板 AC 默认跨切检查清单）
+- plugin/skills/author/SKILL.md（任务模板 AC 默认跨切检查清单——plugin 捆绑，byte-identical 镜像）
+- packages/quay-native/skills/author/SKILL.md（author skill canonical 单一来源；plugin-packaging 断言 plugin/skills/author/SKILL.md 与之 byte-identical，模板改动必须双写）
 - plugin/scripts/select-tests-for-touches.ts（跨切标记）
 - plugin/test/select-tests-for-touches.test.mjs（AC2-AC6 测试）
 - CLAUDE.md（packaging e2e 边界 + 跨切判据说明）

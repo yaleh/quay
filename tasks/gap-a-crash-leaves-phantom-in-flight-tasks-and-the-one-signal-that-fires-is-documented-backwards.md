@@ -151,6 +151,19 @@ task-contract-check 的 invoke-evidence 检查消费）。
 - plugin/scripts/fast-mode-telemetry.ts
 - plugin/test/fast-mode-telemetry.test.mjs
 
+## Cross-annotation (2026-08-08, from [[gap-over-90m-false-signal-source-reads-telemetry-not-task-status]])
+
+**对账判据缺陷确认（AC4 交叉标注）**：`makeDefaultExecutorGone`（`plugin/scripts/fast-mode-telemetry.ts`）
+把「worktree 存在」当作 mid-flight 的 KEEP 信号（reason `worktree-present`），但 **worktree 存在 ≠
+mid-flight**。2026-08-05 的 phantom in-flight（`gap-loop-has-no-os-level-anchor` / `gap-web-board`）
+正是 **0-commit 死 worktree + 进程已死**：对账因 worktree 存在而保留 phantom，`inProgress` 永不收敛。
+**应有 mtime/进程佐证**：worktree 存在仅当其最近 mtime 新鲜（或相关进程存活）才应作 KEEP；一个
+0-commit、mtime 数小时前、无进程的 worktree 不是 mid-flight。
+
+本条（over-90m 信号侧止血）已用 task-status 闸消除 status=ready 陈旧 bracket 的假 OVER90；但
+`--reconcile` 报告侧的判据缺陷仍在——`inProgress` 仍会把死 worktree 计入，reconcile 仍会保留它。
+worktree 存在 ≠ mid-flight 的判据修正（mtime/进程佐证）超出本条 `## Touches`，留作后续任务。
+
 ## Dispatch review
 
 reviewer: outer

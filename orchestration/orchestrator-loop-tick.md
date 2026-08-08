@@ -726,6 +726,13 @@ tick 做一次收尾 pass。
    - 缺 suite-state ⇒ inner 不阻塞（外层还没跑第一轮）；
    - `state: red` ⇒ inner 停止派发 + 暂缓 fan-in，本层按「红窗分诊」处置（bisect 定位新引入还是既有；
      定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
+   **收尾记账的机械判据（AC1/AC2，`gap-verification-round-record-skipped-for-five-closures`——5 轮
+   收尾未写 jsonl 的防再犯；`gap-closure-sync-is-the-true-batch-boundary` 落地后的记账完整性补强，
+   非重开）**：本轮 `closed` 非空（≥1 收尾）⇒ **追加前**读 `.quay/verification-round.jsonl` 尾部
+   round 得 `last`，断言 `N == last+1`；**追加后**再断言尾部 round == `N`（本轮必须前进 1）。任一
+   断言失败（尾部 round 没前进）即**本轮 tick 异常**，不得静默跳过——补一行记录或按「红窗分诊」
+   needs-human 处置，并把异常记进本轮报告。本轮 `closed` 为空（无收尾）⇒ **不要求写 jsonl**：
+   round 不前进、不报警（负控制，AC2）——「无收尾」不是异常。
 5. **落盘聚合**：本轮收尾后跑一次
    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
    否则被 git 跟踪的聚合文件不反映本批结果。

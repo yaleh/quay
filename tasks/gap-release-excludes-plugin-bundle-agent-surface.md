@@ -77,11 +77,15 @@ plugin/，但 **plugin/ 没进 npm files**——机制「在包外」部分解�
 
 ## Definition of Done
 
-- [ ] AC1-AC3 已勾（npm pack 产物含 plugin bundle 352 条；release 装出真实两层循环；非 quay 项目装出可用性）
-- [ ] 本任务 AC16 files+plugin 侧达成；产物层未达成部分已移交 gap-release-sea-bundle-excludes-plugin-tree（AC16 保持未达成直至 SEA 产物含 plugin）
-- [ ] scoped 门 `scripts/test.sh --for-task gap-release-excludes-plugin-bundle-agent-surface` 绿
+- [x] AC1-AC3 已勾（npm pack 产物含 plugin bundle；release 装出真实两层循环；非 quay 项目装出可用性）
+- [x] 本任务 AC16 files+plugin 侧达成；产物层 SEA 缺口由 gap-release-sea-bundle-excludes-plugin-tree
+      （sidecar，fan-in integration 96076d12）修复——AC16 现已在 npm tgz + SEA archive 两条分发路径
+      产物层都含 plugin（见下方 Cross-annotation）
+- [x] scoped 门 `scripts/test.sh --for-task gap-release-excludes-plugin-bundle-agent-surface --allow-thin`
+      绿（exit 0，thin：1/10 Touches 解析到测试）
 
 ## Touches
+
 - tasks/gap-release-excludes-plugin-bundle-agent-surface.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - packages/quay/package.json（files 加 plugin/，version 0.4.0）
@@ -285,3 +289,59 @@ SEA 产物含 plugin（或架构改为 release 同时发 SEA + plugin bundle 目
 回归测试 `packages/quay/test/sea-bundle-plugin-sidecar.test.mjs` 断言 6 个新机制名在产物可反查 +
 Contract measure `sea_has_plugin > 0`。**AC16 现在在 npm tgz（本任务）+ SEA archive（sidecar）
 两条分发路径的产物层都含 plugin。**
+
+## 执行记录（2026-08-08 二次执行：integration fork 验证——AC 已达成，verify-not-implement）
+
+**背景**：本任务 AC1-AC6 已由首次执行（commit 7adb6307，fan-in 8cca89d5）达成并勾选；SEA 产物层缺口
+由 gap-release-sea-bundle-excludes-plugin-tree（sidecar，commit 96076d12）修复并已 fan-in integration。
+本二次执行在 integration fork 上验证已勾证据在当前树仍成立，**无新增实现**（thin task：scoped 测试
+解析 1/10 Touches，0.1 < 0.5）。
+
+**验证基线**：fork from `integration`（cde88f54 前），非 develop——本任务 Touches 与已 fan-in 的
+shipped-artifact / release-sea-bundle 打包工作重叠，integration 是正确基线（本任务 Touches 的
+package.json / build-sea.sh / npm-pack-e2e.test.mjs 已含 fan-in 后的形态）。
+
+**AC1（bundle_in_pack > 0）实测**：
+```
+$ bash packages/quay/scripts/package.sh
+    # 完整打包：build-dist + sync-vendor 检查（vendored 运行时缺失时 fail-closed + auto-build）+
+    # version-sync 闸（package.json=marketplace.json=plugin.json）+ capability-catalog --entry-surface
+    # （.sh 交付形态闸）+ 快照 repo-root plugin/ → packages/quay/plugin/ + npm pack
+$ tar -tzf packages/quay/quay-0.4.0.tgz | grep -c 'plugin/'
+283
+```
+Tarball 总 332 文件；分类：plugin/scripts 186 · gate-scripts 14 · skills 22 · probes 4 · loop 3 ·
+agents 1 · workflows 2 · vendor 4（含 vendored 运行时 quay.js + quay-native.js）。
+`bundle_in_pack = 283 > 0`（Contract measure 达标，band 即「release 含 plugin bundle」）。与首次执行
+记录的 352 差异根因：human ruling 剔除 `plugin/test/` + shipped-artifact 交付形态闸（capability-catalog
+PUBLIC_ENTRYPOINTS 声明）——文件数减少，机制面（scripts/gate-scripts/skills/probes/loop/vendor/agents/
+workflows）不受影响，vendored 自包含运行时在包内。
+
+**AC16 回归测试**（`packages/quay/test/npm-pack-e2e.test.mjs`，node:test 9 用例）：
+```
+9/9 PASS：tarball 含完整 plugin bundle（bundle_in_pack>0 + 子面存在性）· 安装后 bin 解析 dist/quay.js ·
+--help · --version · quay task list 真 provider 往返 · 注册 manifest · register-plugin 三态
+```
+
+**AC4（version 0.4.0 同步）**：`packages/quay/package.json` = `plugin/.claude-plugin/plugin.json` =
+`plugin/vendor/quay/package.json` = `plugin/.claude-plugin/marketplace.json` = 0.4.0（root npm install
+postinstall → sync-vendor 已把 vendor 镜像同步到 0.4.0）。
+
+**AC5（交叉标注）**：`tasks/exp5-DEFECT-DELIVERY-MANIFEST-INCOMPLETE-RELEASE.md` §Cross-annotation
+(gap-release-excludes-plugin-bundle-agent-surface) 与 `tasks/gap-loop-mechanism-lives-outside-the-
+package-and-cannot-ship.md` 同名小节均在。
+
+**AC6（dist-plugin 第三条路径）**：`plugin/scripts/publish-dist-branch.sh` + `.github/workflows/
+publish-plugin-dist.yml` + `marketplace.json` plugins[0].version=0.4.0（source 指向 `.`）均就位；机制
+未变（本地 orphan 分支重建非本二次执行范围，首次执行已实跑 cc53c820）。
+
+**SEA sidecar（已 fan-in）**：`build-sea.sh` `stage_plugin_sidecar()`（`--stage-plugin-only` 快速路径）+
+`packages/quay/test/sea-bundle-plugin-sidecar.test.mjs` 在树；AC16 在 npm tgz + SEA archive 两条分发
+路径产物层都含 plugin。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-release-excludes-plugin-bundle-agent-surface --allow-thin`
+→ exit 0。
+
+**改动清单（本二次执行）**：仅任务文件本体 self-edit（status todo→ready 与开发侧派发预备对齐、补 DoD
+勾选、补 self-touch Touches 条目、本验证记录）。无代码改动——实现已在 integration 上（fan-in 7adb6307 +
+96076d12）。
