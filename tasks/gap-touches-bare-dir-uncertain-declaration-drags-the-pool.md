@@ -11,7 +11,7 @@ title: "Touches must NOT declare bare-directory globs with uncertain
   plugin/scripts/branch-helper.sh) — not a bare dir with 'if it becomes a
   script'; enforcement: mechanical check (flag bare-dir + uncertain-annotation
   Touches at filing) or template AC + reviewer discipline"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -50,21 +50,33 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: 规则落地——filing 时裸目录 + 不确定标注 Touches 被 flag（机械或模板 AC）
-- [ ] AC2: branch-model 的 Touches 收窄（'若成脚本' → 明确候选路径或删）；池恢复可并行
-- [ ] AC3: 复测：池候选 disjointness 正常（不再 5/6 被裸目录拖垮）
+- [x] AC1: 规则落地——filing 时裸目录 + 不确定标注 Touches 被 flag（机械或模板 AC）
+- [x] AC2: branch-model 的 Touches 收窄（'若成脚本' → 明确候选路径或删）；池恢复可并行
+- [x] AC3: 复测：池候选 disjointness 正常（不再 5/6 被裸目录拖垮）
+
+## Definition of Done
+
+- [x] AC1-AC3 全勾（裸目录+不确定标注 Touches 被 flag——机械；branch-model Touches 收窄——已收窄为具体路径；复测池候选 disjointness 正常不再被裸目录拖垮）
+- [x] 裸目录 flag 实测 + 池 disjointness 复测正常
+- [x] scoped 门 `scripts/test.sh --for-task gap-touches-bare-dir-uncertain-declaration-drags-the-pool` 绿
 
 ## Touches
 
-- plugin/scripts/（机械检查，若成脚本）
-- plugin/loop/fast-mode-loop-tick.md / orchestrator-loop-tick.md（若文档引用）
-- tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC2 交叉标注）
+- tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
+- plugin/scripts/touches-parser.ts（裸目录 + 不确定标注检测 flagBareDirUncertainTouches，AC1 机械检查）
+- plugin/scripts/task-contract-check.ts（consumer 检查 bare-dir-uncertain-touch + shrink-only baseline，AC1）
+- docs/analysis/bare-dir-touches-baseline.md（新增 shrink-only 祖父清单，AC1）
+- plugin/test/bare-dir-touches-check.test.mjs（新增 node:test——检测 + 规则落地，AC1）
+- plugin/test/task-contract-check.test.mjs（real-store 期望随新检查更新，AC1）
+- plugin/test/touches-parser-parity.test.mjs（touches-parser 变更的相关测试）
+- tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md（AC2 交叉标注：Touches 已收窄）
 
 ## Contract
 
 measure   pool_disjoint = `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root /home/yale/work/quay --json` stdout 的 dispatchable_disjoint 数字段
 band      pool_disjoint >= 3（branch-model 收窄后池恢复）
-invoke    `grep -n '若成脚本\|plugin/scripts/（' tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md`
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/task-contract-check.ts --root /home/yale/work/quay --strict-subset tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md`
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/task-contract-check.ts --root /home/yale/work/quay --strict-subset tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool.md`
 control   branch-model 收窄前 5/6 撞（基线）；收窄后 ≥3 可并行
 resume    规则与收窄分步提交，任一步完成即写盘
 
@@ -74,3 +86,53 @@ reviewer: outer
 at: 2026-08-06T00:0xZ
 changed: 管理者生产链实测立案——branch-model 投机性裸目录 Touches 拖垮 5/6 池候选。裁定规则
 （具体路径或明确候选，禁裸目录+不确定）+ 机械检查方向 + 立即收窄 branch-model。
+
+## Evidence
+
+**AC1（规则落地——机械检查 + 本任务 Touches 自身收窄）**：新增 `bare-dir-uncertain-touch` consumer
+检查于 `plugin/scripts/task-contract-check.ts`（检测在单一来源 `plugin/scripts/touches-parser.ts` 的
+`flagBareDirUncertainTouches`；pre-rule 遗留进 shrink-only 祖父清单 `docs/analysis/bare-dir-touches-baseline.md`）。
+新测试 `plugin/test/bare-dir-touches-check.test.mjs` 15/15 绿（`fail 0` / `cancelled 0`）：
+```
+✔ flag: bare-directory + '若成脚本' annotation is flagged
+✔ flag: bare-directory + '或等价' / '可能' / '待定' annotations are flagged
+✔ flag: an entry that is ONLY an annotation (no path) is flagged
+✔ flag AC1-negative: a CONCRETE file path with an uncertain annotation is NOT flagged
+✔ flag AC1-negative: a bare directory WITHOUT an uncertain annotation is NOT flagged
+✔ flag AC1-negative: an existing extension-less file (plugin/VERSION) is NOT a bare directory
+✔ flag: no-annotation / (new) / (delete) entries are never flagged
+✔ consumer: a NON-grandfathered task with the pattern → bare-dir-uncertain-touch violation
+✔ consumer: the SAME pattern is NOT a violation when the file IS on the shrink-only grandfather list
+✔ consumer: no ## Touches section → no finding
+✔ readBareDirTouchesBaseline: absent file → empty set + null count
+✔ CLI AC1: a NEW task with the pattern (no baseline) is REPORTED; ratchet growth → exit 1
+✔ CLI AC1: with the file on the grandfather list, the same pattern is NOT a violation (exit 0)
+✔ CLI AC1: the grandfather baseline itself is shrink-only — a ceiling breach exits 1
+✔ CLI AC1 strict-subset: a touched task carrying the pattern FAILS the scoped run (filing-time flag)
+ℹ tests 15  ℹ pass 15  ℹ fail 0  ℹ cancelled 0
+```
+filing-time flag（scoped tier，task-contract-check `--strict-subset` 是本任务触达时运行的静态检查）：
+`plugin/scripts/task-contract-check.ts --strict-subset tasks/gap-touches-bare-dir-uncertain-declaration-drags-the-pool.md`
+→ `task-contract-check: no violations.`（本任务自身 Touches 从裸目录 `plugin/scripts/（机械检查，若成脚本）`
+收窄为具体路径——本任务就是规则的第一个标本）。全量 store 扫描 `new since baseline: 0`（pre-rule 遗留
+14 文件在 `bare-dir-touches-baseline.md` 祖父清单内，不再新增）。
+
+**AC2（branch-model Touches 收窄）**：branch-model 的 `## Touches` 已在 integration 上收窄为具体路径
+（`plugin/scripts/fork-baseline.ts` / `integration-batch-merge.sh` / `integration-branch-model.ts` 等，
+2026-08-06 `9e2ae728` outer closure round 14「Touches narrowed per ruling」）。机械验证（本任务 Contract
+invoke）：
+```
+plugin/scripts/task-contract-check.ts --strict-subset tasks/gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point.md
+→ task-contract-check: no violations.   （branch-model 无 bare-dir-uncertain-touch 违规 = Touches 已收窄）
+```
+交叉标注已双向写入 branch-model 任务体。
+
+**AC3（池 disjointness 复测）**：`ready-pool-check.ts` 生产链实测（Contract measure 同一命令）：
+```
+node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root /home/yale/work/quay --json
+  "pool": 16,
+  "dispatchable_disjoint": 5,
+  "criterion_met": true,
+  "report": "pool 16/12 (floor = cap(3) × 4) · dispatchable_disjoint 5/3 — criterion met (≥cap mutually-disjoint candidates)"
+```
+`dispatchable_disjoint = 5 ≥ 3`（band 满足）——池恢复可并行，不再被裸目录拖垮（基线：branch-model 收窄前 5/6 撞）。
