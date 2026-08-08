@@ -264,3 +264,12 @@ changed: 管理者移交该脚本并附一个已确认缺陷，**外层逐条复
 当它需要解析结构化配置或维护非平凡状态时再改——**写下来是为了让它可判定，不必每次重新争论**。
 **派发时机**：在飞 2（cold-start-e2e / r1），**与 cold-start-e2e 在 `test/cold-start-e2e.sh` 上重叠**，
 必须等它收尾后再派。
+
+## 交叉标注（AC5，gap-quay-init-config-preserving-incremental-upgrade，2026-08-08）
+
+同 config 覆盖形态：本条钉住「**可执行文件一律原样复制，只生成配置**」（session-liveness.sh 不再被改写，
+安装副本与源逐字节相同，`verify-installed-executables.sh` 机械断言）。后继任务撞到**同形态的 config 侧**：
+`ensure_loop_config` 曾 `data["loop"] = {...}` **整体替换** loop 节——已有消费者的自定义 loop 值
+（board/gates/stop/policy/concurrency_bands/fork_baseline/merge_target）被静默丢掉（archguard 实跑
+2026-08-06）。该任务补 config-preserving 合并（只更新四个 fast-mode 键、保留其余 loop 键）+ 升级前备份 +
+失败回滚。同根：quay-init 升级不得覆盖消费者自有状态——可执行文件与 config 各守一侧，形态相同、对象互补。

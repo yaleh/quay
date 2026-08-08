@@ -43,6 +43,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import YAML from "yaml";
 import { createStore } from "../../quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -417,6 +418,114 @@ test("A3 — an old-install workspace upgrades to all-new product files, and exi
     `${eventLine}\n`,
     "A3: gate events must survive the upgrade readable and unchanged"
   );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// AC6 / AC1 — config-divergence fixture (gap-quay-init-config-preserving-incremental-upgrade):
+// an ORGANICALLY EVOLVED consumer. The pre-fix A3 only used a self-made clean old-install
+// ("config == template" — a synthetic sample); the real downstream (archguard) has custom
+// loop values ≠ the template, and the pre-fix upgrade either stopped at config-conflict or
+// --force-clobbered them. This fixture creates the organic shape (custom board/gates/stop/policy/
+// concurrency_bands/fork_baseline/merge_target + the four fast-mode values) and asserts the
+// config-preserving upgrade keeps the ENTIRE loop section unchanged while laying down the mechanism.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+function writeEvolvedConsumerConfig(ws) {
+  fs.mkdirSync(path.join(ws, ".quay"), { recursive: true });
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    "    path: /srv/proj/.quay/runtime",
+    "    tasks_dir: /srv/proj/tasks",
+    '    mcp_entry: ["node", "/srv/proj/.quay/runtime/bin/quay-native.js", "mcp"]',
+    "loop:",
+    "  board: native",
+    "  gates: [acceptance]",
+    "  stop: until(.halt)",
+    "  policy: value-typed-ledger",
+    "  concurrency_bands:",
+    "    go: 5",
+    "    wait: 2",
+    "  fork_baseline: develop",
+    "  merge_target: integration",
+    "  repo_root: /srv/proj",
+    "  test_command: custom-test-cmd",
+    "  tmux_session: proj-session",
+    "  worktree_root: /srv/proj-worktrees",
+    "",
+  ].join("\n"));
+}
+
+test("AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section after a config-preserving --loop upgrade (no --force), and the mechanism files are laid down", () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
+  writeEvolvedConsumerConfig(ws);
+  const cfgPath = path.join(ws, ".quay", "config.yml");
+  const loopBefore = YAML.parse(fs.readFileSync(cfgPath, "utf8")).loop;
+
+  // Config-preserving upgrade WITHOUT --force (AC1). The test command is deliberately NOT passed:
+  // the prefer-existing path must keep the consumer's recorded loop.test_command (a real
+  // downstream run of `quay init --loop` has no fresh detection clobbering it).
+  const r = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session" });
+  assert.equal(r.status, 0, `config-preserving upgrade must succeed:\n${r.stderr}`);
+
+  // AC1 first half: mechanism files ARE laid down.
+  assert.ok(fs.existsSync(path.join(ws, "plugin", "scripts", "session-liveness.sh")),
+    "AC1: mechanism files must be laid down on the existing consumer");
+  const laid = laidDownProductFiles(ws);
+  assert.ok(laid.length >= 20, `AC1: laid-down product count must be >= 20; got ${laid.length}`);
+
+  // AC1 second half: config PRESERVED — the ENTIRE loop section (custom keys + the four
+  // fast-mode values) is unchanged. The pre-fix `data["loop"] = {...}` replacement dropped
+  // board/gates/stop/policy/concurrency_bands/fork_baseline/merge_target here.
+  const loopAfter = YAML.parse(fs.readFileSync(cfgPath, "utf8")).loop;
+  assert.deepEqual(loopAfter, loopBefore,
+    `AC1: the config-preserving upgrade must keep every loop key (loop values unchanged); got ${JSON.stringify(loopAfter)}`);
+
+  // The prefer-existing message is emitted (transparency that the consumer's value won over detection).
+  assert.match(r.stdout, /using existing config loop\.test_command: custom-test-cmd/,
+    "the upgrade must report it kept the consumer's existing loop.test_command");
+});
+
+test("AC2 — config backup before upgrade + rollback restores the config unchanged on a failed upgrade", () => {
+  const ws = makeWorkspace();
+  fs.writeFileSync(path.join(ws, "package.json"), JSON.stringify({ name: "proj", scripts: { test: "vitest run" } }, null, 2));
+  writeEvolvedConsumerConfig(ws);
+  const cfgPath = path.join(ws, ".quay", "config.yml");
+  // The pre-upgrade config captured BEFORE the baseline install — a backup taken by an upgrade
+  // must capture exactly this (the config as it was on disk before that upgrade wrote it).
+  const originalConfig = fs.readFileSync(cfgPath, "utf8");
+
+  // Baseline install (mechanism present, config written by quay-init).
+  const r0 = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session", testCommand: "original-test-cmd" });
+  assert.equal(r0.status, 0, `baseline install must succeed:\n${r0.stderr}`);
+  const beforeUpgrade = fs.readFileSync(cfgPath, "utf8");
+
+  // AC2 first half: a config backup must exist after an upgrade (backup before upgrade), and it
+  // must capture the PRE-upgrade config (what was on disk before that run modified it).
+  const backups = listFiles(path.join(ws, ".quay", "quay-init-backups")).filter((rel) => rel.endsWith("config.yml"));
+  assert.ok(backups.length >= 1, `AC2: a config backup must be created before the upgrade; got ${JSON.stringify(backups)}`);
+  const backupContent = fs.readFileSync(path.join(ws, ".quay", "quay-init-backups", backups[0]), "utf8");
+  assert.equal(backupContent, originalConfig,
+    "AC2: the first backup must capture the pre-upgrade config exactly (backup before upgrade)");
+
+  // Force a FAILED upgrade AFTER the config write: a corrupted NON-loop installed script
+  // (send-keys-verified.sh is NEVER_LAYDOWN — the lay-down does not replace it, so
+  // verify-installed-executables fails closed). The upgrade passes a DIFFERENT test_command,
+  // which ensure_loop_config writes into the config — proving the rollback must undo it.
+  fs.mkdirSync(path.join(ws, "plugin", "scripts"), { recursive: true });
+  fs.writeFileSync(path.join(ws, "plugin", "scripts", "send-keys-verified.sh"),
+    "#!/usr/bin/env bash\n# corrupted non-loop residue — never replaced by the lay-down\n");
+  const rUp = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session", testCommand: "SHOULD-NOT-STICK-cmd" });
+  assert.notEqual(rUp.status, 0,
+    "precondition: a corrupted non-loop installed script must fail the upgrade (verify-installed-executables fail-closed)");
+  assert.match(rUp.stdout + rUp.stderr, /rolled back .*config.*unchanged/,
+    "AC2: the failed upgrade must report the config rollback");
+
+  // AC2 second half: the failed upgrade restored the config byte-for-byte (rollback unchanged).
+  const afterFailed = fs.readFileSync(cfgPath, "utf8");
+  assert.equal(afterFailed, beforeUpgrade,
+    "AC2: a failed upgrade must restore the config unchanged (rollback); the SHOULD-NOT-STICK-cmd write must be undone");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
