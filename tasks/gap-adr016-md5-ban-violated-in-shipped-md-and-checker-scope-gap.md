@@ -8,7 +8,7 @@ title: ADR-016 的 md5(capture-pane) 禁令在出货的 plugin/loop/*.md 里被�
   orchestration/manager-loop-tick.md（527 行） 同文档两副本分叉（CLAUDE.md 点名的 drift 形态）；管理者
   2026-08-08 实测报告（7c1ef5f3 只改了 orchestration/ 那份，plugin/ 归外层）；一般形态：机械检查器作用域边界 =
   同规则散文副本能安静违规处， 出货 .md 的 bash 块是【指令】与 .sh 同权，不该按散文豁免
-status: todo
+status: ready
 labels:
   - gap
   - defect
