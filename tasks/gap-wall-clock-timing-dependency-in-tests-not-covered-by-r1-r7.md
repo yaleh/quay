@@ -10,7 +10,7 @@ title: "NEW uncovered category: tests depend on real wall-clock timing for
   sequencing (use controlled fake-clock/events); this is the root cause of the
   KNOWN-LOAD-SENSITIVE family's persistent concurrency failures (blocks the
   concurrency-8 strategy)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
