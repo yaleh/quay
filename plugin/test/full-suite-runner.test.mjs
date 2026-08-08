@@ -45,6 +45,10 @@ import {
   isGitWorktree,
   readStateRunId,
   writeStateGuarded,
+  buildSystemdRunArgv,
+  DEFAULT_SYSTEMD_RUN_LIMITS,
+  parseSystemdRunLimits,
+  systemdRunAvailable,
 } from "../scripts/full-suite-runner.ts";
 import { runOnce } from "../scripts/suite-state-trigger.ts";
 
@@ -90,6 +94,10 @@ function runRunner({ root, command, laneCount, stateDir, env = {} }) {
   // AC3 seam — hermetic tests skip the REAL resource gate by default; the AC3 tests override it
   // (QUAY_TEST_SKIP_RESOURCE_GATE != "1") and force GO/WAIT via the gate's RESOURCE_GATE_TEST_* seams.
   if (!("QUAY_TEST_SKIP_RESOURCE_GATE" in mergedEnv)) mergedEnv.QUAY_TEST_SKIP_RESOURCE_GATE = "1";
+  // gap-systemd-run-limits-for-suite-and-heavy-ops seam — hermetic tests skip the REAL systemd-run
+  // cgroup-scope wrapper by default (a temp-root fake suite needs no user systemd session); the
+  // AC1-AC6 tests below opt in via QUAY_TEST_SYSTEMD_RUN_AVAILABLE=1 / QUAY_TEST_SKIP_SYSTEMD_RUN=0.
+  if (!("QUAY_TEST_SKIP_SYSTEMD_RUN" in mergedEnv)) mergedEnv.QUAY_TEST_SKIP_SYSTEMD_RUN = "1";
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "pipe"], env: mergedEnv });
   // Drain pipes so a chatty fake suite cannot block the child.
   child.stdout.on("data", () => {});
@@ -1107,3 +1115,259 @@ test("AC4 — a write over a legacy state (no runId on disk) is NOT blocked (fai
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── gap-systemd-run-limits-for-suite-and-heavy-ops: AC1-AC6 ────────────────────────────────────────
+// The suite + heavy ops run WITHOUT cgroup limits today: a PID explosion (tmux leak, 217 procs) or a
+// memory blowout (ugrep 8.8GB regex catastrophe) can take down the WHOLE MACHINE. The resource gate
+// was bypassed (ABORT #5) because "a limit that only works when someone remembers to call it is no
+// limit at all" (SPEC-isolation-and-resource-governance-2026-08-05.md §2). This task wraps the suite
+// in a systemd-run --user --scope cgroup scope (MemoryMax/CPUQuota/TasksMax) — kernel-enforced,
+// impossible to "forget to call", and bounded to ONE process group (the negative controls AC2/AC3
+// prove the rest of the machine is untouched).
+
+/** Spawn an arbitrary command, collect stdout/stderr, resolve on exit. */
+function spawnCmd(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(args[0], args.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve({ code, signal, out, err }));
+  });
+}
+
+/** Machine-wide process count (the "other processes unaffected" baseline). */
+function machineProcCount() {
+  return Number(execSync("ps -e --no-headers | wc -l", { encoding: "utf8" }).trim());
+}
+
+/** Machine available memory in MB (the "no whole-machine swap" baseline). */
+function memAvailMb() {
+  return Number(execSync("free -m | awk 'NR==2{print $7}'", { encoding: "utf8" }).trim());
+}
+
+test("AC1 unit — buildSystemdRunArgv wraps a command in systemd-run --user --scope with the exact limit properties", () => {
+  const argv = buildSystemdRunArgv("bash scripts/test.sh", DEFAULT_SYSTEMD_RUN_LIMITS);
+  assert.deepEqual(argv, [
+    "systemd-run",
+    "--user",
+    "--scope",
+    "--quiet",
+    "-p",
+    "MemoryMax=4G",
+    "-p",
+    "CPUQuota=200%",
+    "-p",
+    "TasksMax=200",
+    "bash",
+    "-c",
+    "bash scripts/test.sh",
+  ]);
+  // a custom limit set flows through
+  const custom = buildSystemdRunArgv("true", { memoryMax: "64M", cpuQuota: "100%", tasksMax: "20" });
+  assert.ok(custom.includes("-p") && custom.includes("MemoryMax=64M"));
+  assert.ok(custom.includes("CPUQuota=100%") && custom.includes("TasksMax=20"));
+});
+
+test("AC1 unit — parseSystemdRunLimits merges a seam override over the defaults; unknown keys fall back", () => {
+  const l = parseSystemdRunLimits("MemoryMax=64M TasksMax=20");
+  assert.equal(l.memoryMax, "64M");
+  assert.equal(l.tasksMax, "20");
+  assert.equal(l.cpuQuota, "200%", "an unchanged key keeps the default");
+  assert.deepEqual(parseSystemdRunLimits(undefined), DEFAULT_SYSTEMD_RUN_LIMITS);
+  // an unknown key is ignored (fail-safe — never produce an unparseable scope property)
+  assert.deepEqual(parseSystemdRunLimits("MemoryMax=64M Bogus=1"), { ...DEFAULT_SYSTEMD_RUN_LIMITS, memoryMax: "64M" });
+});
+
+test(
+  "AC1 — the runner wraps the suite in a systemd-run cgroup scope; the applied limits are visible as durable evidence (real systemd)",
+  { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sd1-"));
+    // The suite must outlive the evidence capture (the scope is queryable only while it runs).
+    const { f, dir } = fakeSuite(
+      'echo "# tests 3"\nsleep 3\necho "# pass 3"\necho "# fail 0"\necho "# cancelled 0"\nexit 0',
+    );
+    try {
+      const child = runRunner({
+        root,
+        command: `bash ${f}`,
+        laneCount: 2,
+        env: { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" },
+      });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 on green inside the cgroup scope, got ${code}`);
+      const s = readState(root);
+      assert.equal(s.state, "green");
+      assert.ok(s.systemdRun, "the state carries the systemdRun limits (suite ran inside a cgroup scope)");
+      assert.equal(s.systemdRun.memoryMax, "4G");
+      assert.equal(s.systemdRun.cpuQuota, "200%");
+      assert.equal(s.systemdRun.tasksMax, "200");
+      // AC1 observable — the applied cgroup attributes (systemctl --user show) land in the state dir
+      const evidence = path.join(root, ".quay", "suite-cgroup-evidence.txt");
+      await poll(() => fs.existsSync(evidence), { timeoutMs: 10_000 });
+      const txt = fs.readFileSync(evidence, "utf8");
+      assert.match(txt, /scope_unit=run-p\d+-/, "the transient scope unit name is recorded");
+      assert.match(txt, /MemoryMax=4294967296/, "MemoryMax=4G applied (bytes)");
+      assert.match(txt, /EffectiveTasksMax=200/, "TasksMax=200 applied (effective)");
+      assert.match(txt, /CPUQuotaPerSecUSec=2s/, "CPUQuota=200% applied");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "AC2 — negative control: TasksMax blocks a PID blowout (simulated tmux leak) inside the scope; the rest of the machine is untouched",
+  { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
+  async () => {
+    const before = machineProcCount();
+    // Simulate the tmux leak: fork long-lived children until the cgroup's TasksMax blocks us.
+    // Python's os.fork() surfaces EAGAIN directly (bash retries and obscures the count).
+    const py = `
+import os, time, sys
+children = []
+count = 0
+for i in range(200):
+    try:
+        pid = os.fork()
+        if pid == 0:
+            time.sleep(60)
+            os._exit(0)
+        children.append(pid)
+        count += 1
+    except OSError as e:
+        sys.stderr.write('fork blocked at i=%d: %s\\n' % (i, e))
+        break
+sys.stdout.write('successful_forks=%d\\n' % count)
+sys.stdout.flush()
+for pid in children:
+    try: os.kill(pid, 9)
+    except OSError: pass
+`;
+    const { code, out, err } = await spawnCmd([
+      "systemd-run", "--user", "--scope", "--quiet", "-p", "TasksMax=20", "python3", "-c", py,
+    ]);
+    const m = /successful_forks=(\d+)/.exec(out);
+    assert.ok(m, `the scope reported its fork count (got stdout: ${out} stderr: ${err})`);
+    const spawned = Number(m[1]);
+    assert.ok(spawned < 200, `the PID blowout was blocked — not all 200 forked (got ${spawned})`);
+    assert.ok(spawned <= 20, `TasksMax=20 bounded the concurrent process count (got ${spawned})`);
+    assert.match(err, /fork blocked at i=/, "the cgroup TasksMax produced a fork EAGAIN (Resource temporarily unavailable)");
+    const after = machineProcCount();
+    assert.ok(after - before < 100, `other processes unaffected: machine proc count before=${before} after=${after} (blowout did NOT add ~200)`);
+    // the negative control's other half: a fresh fork OUTSIDE the scope still works
+    const { code: ctl } = await spawnCmd(["python3", "-c", "import os; p=os.fork(); (os._exit(0) if p==0 else os.waitpid(p,0)); print('outside-fork-ok')"]);
+    assert.equal(ctl, 0, "a process outside the scope still forks normally");
+    assert.equal(code, 0, "the scoped script itself exits 0 (it cleaned up; the BLOCK happened inside the cgroup)");
+  },
+);
+
+test(
+  "AC3 — negative control: MemoryMax OOM-kills a single memory hog (simulated ugrep catastrophe); no whole-machine swap",
+  { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
+  async () => {
+    const freeBefore = memAvailMb();
+    // Simulate the ugrep 8.8GB regex-backtracking blowout: allocate committed memory until the
+    // cgroup's MemoryMax kills the process. MemorySwapMax=0 prevents the scope from escaping into
+    // swap (the whole-machine swap collapse is exactly what AC3 must prove does NOT happen).
+    const py = `
+bufs = []
+for i in range(4000):
+    bufs.append(bytearray(1024 * 1024))
+print('SURVIVED all allocations', flush=True)
+`;
+    const { code, out, err } = await spawnCmd([
+      "systemd-run", "--user", "--scope", "--quiet",
+      "-p", "MemoryMax=64M", "-p", "MemorySwapMax=0", "python3", "-c", py,
+    ]);
+    const freeAfter = memAvailMb();
+    assert.ok(!out.includes("SURVIVED"), `the memory hog was killed before completing (got: ${out}${err})`);
+    assert.notEqual(code, 0, `the scoped hog exited non-zero (killed by the cgroup), got ${code}`);
+    assert.ok(
+      freeAfter >= freeBefore - 2048,
+      `no whole-machine swap collapse — machine available memory before=${freeBefore}MB after=${freeAfter}MB`,
+    );
+  },
+);
+
+test(
+  "AC4 — the cgroup scope is a process boundary, not a comm-channel change: the suite's stdout/stderr still stream to the same log (file delivery unchanged)",
+  { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
+  async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sd4-"));
+    const { f, dir } = fakeSuite('echo "comm-channel-marker"\necho "# tests 1"\necho "# pass 1"\necho "# fail 0"\necho "# cancelled 0"\nexit 0');
+    try {
+      const child = runRunner({
+        root,
+        command: `bash ${f}`,
+        env: { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" },
+      });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `suite exits 0 under the cgroup scope, got ${code}`);
+      // the suite's output reached the SAME full-suite.log the un-limited path writes — the
+      // observation/file-delivery channel is unchanged (only the child's cgroup boundary moved).
+      const log = read(path.join(root, ".quay", "full-suite.log"));
+      assert.match(log, /comm-channel-marker/, "the suite's stdout still reaches the shared log under the cgroup scope");
+      assert.equal(readState(root).state, "green");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("AC5 — cross-annotation: the SPEC + no-resource-awareness task reference THIS task, and this task references both", () => {
+  const spec = read(path.join(REPO_ROOT, "orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md"));
+  assert.match(
+    spec,
+    /gap-systemd-run-limits-for-suite-and-heavy-ops/,
+    "the SPEC must name this task as the concrete systemd-run limits integration (AC5)",
+  );
+  const noRes = read(path.join(REPO_ROOT, "tasks/gap-no-resource-awareness-heavy-ops-run-blind.md"));
+  assert.match(
+    noRes,
+    /gap-systemd-run-limits-for-suite-and-heavy-ops/,
+    "gap-no-resource-awareness-heavy-ops-run-blind must cross-annotate this task (AC5)",
+  );
+  const self = read(path.join(REPO_ROOT, "tasks/gap-systemd-run-limits-for-suite-and-heavy-ops.md"));
+  assert.match(self, /gap-no-resource-awareness-heavy-ops-run-blind/, "this task cross-annotates the no-resource-awareness task");
+  assert.match(self, /SPEC-isolation-and-resource-governance-2026-08-05/, "this task cross-annotates the SPEC");
+});
+
+test(
+  "AC6 — cross-project isolation: a suite inside its own cgroup scope completes while another scope burns CPU (the machine-wide gate would WAIT)",
+  { skip: systemdRunAvailable() ? false : "systemd-run --user --scope not available on this host" },
+  async () => {
+    // Scope A = "another project" (e.g. archguard) burning a core inside its OWN cgroup quota.
+    // Scope B = the quay suite inside its own cgroup quota. The machine-wide resource gate reads
+    // /proc/pressure/cpu without project boundaries — under A's load it would say WAIT — but B does
+    // not need the whole machine: it runs inside its own scope. This is the SPEC §4 cross-project
+    // isolation claim, exercised for real with two concurrent scopes.
+    const burner = spawnCmd([
+      "systemd-run", "--user", "--scope", "--quiet", "-p", "CPUQuota=100%",
+      "timeout", "3", "bash", "-c", "while :; do :; done",
+    ]);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sd6-"));
+    const { f, dir } = fakeSuite('echo "# tests 3"\necho "# pass 3"\necho "# fail 0"\necho "# cancelled 0"\nexit 0');
+    try {
+      const child = runRunner({
+        root,
+        command: `bash ${f}`,
+        env: { QUAY_TEST_SYSTEMD_RUN_AVAILABLE: "1", QUAY_TEST_SKIP_SYSTEMD_RUN: "0" },
+      });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `the suite completes inside its own cgroup scope despite the other-scope CPU burner, got ${code}`);
+      const s = readState(root);
+      assert.equal(s.state, "green");
+      assert.ok(s.systemdRun, "the suite ran in its own cgroup scope (isolation), not the burner's");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+      await burner; // let the CPU burner finish its 3s budget
+    }
+  },
+);

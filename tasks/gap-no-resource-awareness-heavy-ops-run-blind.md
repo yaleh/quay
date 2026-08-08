@@ -480,5 +480,14 @@ laneCount 覆盖。`default_test_concurrency()` 恢复为直接调用 `default_c
 **交叉标注**：本任务 ↔ `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
 （回退与恢复的完整记录；新增 `dead-code-after-return-check` 静态检查禁止该形态复发）。
 
+**交叉标注（AC5，`gap-systemd-run-limits-for-suite-and-heavy-ops`，2026-08-08）**：本任务把资源感知
+做成「必须被主动调用才生效」的 gate（AC7/AC13）——而 ABORT #5 实证它被绕过（full-suite-runner 0 次
+调用）。`gap-systemd-run-limits-for-suite-and-heavy-ops` 是**同源的 cgroup 硬限额上位解**：套件 runner
+起跑时包 `systemd-run --user --scope`（MemoryMax/CPUQuota/TasksMax），限额由内核强制、无法被「忘记
+调用」，且只作用于该套件的进程组——PID 爆（tmux 泄漏类）被 TasksMax 挡、内存爆（ugrep 类）被
+MemoryMax 杀单进程不进全机 swap（AC2/AC3 负控制实测）。两者同源于
+`orchestration/SPEC-isolation-and-resource-governance-2026-08-05.md`：gate 补「调用纪律」、
+cgroup 限额补「不可被绕过」。
+
 ## Touches 增补（Addendum 2026-08-06）
 - tasks/gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived.md（新增，恢复与防复发）

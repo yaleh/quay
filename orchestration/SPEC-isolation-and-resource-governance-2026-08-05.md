@@ -96,6 +96,13 @@ systemd-run --user --scope \
 如果连 `systemd-run` 限额都没人记得加，那么容器化同样会被绕过
 （例如以 `--privileged` 或超大限额启动）。
 
+**落地任务（`tasks/gap-systemd-run-limits-for-suite-and-heavy-ops`，2026-08-08 内层实现）**：
+本条中间步已由 `full-suite-runner.ts` 落地——套件起跑时包 `systemd-run --user --scope`
+（MemoryMax/CPUQuota/TasksMax），限额由内核强制、不可能「忘记调用」（对照 ABORT #5：
+resource-gate 0 次调用被绕过），且只作用于该套件的进程组（AC1 实测 `systemctl --user show` 可见
+cgroup 属性）。PID 爆 / 内存爆两个负控制实测通过：TasksMax 挡住 tmux 泄漏类（fork EAGAIN、机器其它
+进程不受影响），MemoryMax 杀单进程、不进全机 swap。通信通道零改动（AC4：同机同 tmux 同文件系统）。
+
 ---
 
 ## 5. 容器化真正落地时的边界划分
@@ -123,6 +130,10 @@ observe(target)          -> {busy, idle, blocked, last_at}
 
 - `gap-no-resource-awareness-heavy-ops-run-blind`（AC5/AC16）——本规格是它的**上位解**：
   与其继续修「谁该调用资源门」，不如让限额不依赖调用。
+- `gap-systemd-run-limits-for-suite-and-heavy-ops`——本规格 §4 中间步的**落地任务**：套件 runner
+  已包 systemd-run cgroup 限额（AC1 实测 cgroup 生效；AC2/AC3 负控制：PID 爆被 TasksMax 挡、内存爆
+  MemoryMax 杀单进程不进全机 swap）；通信通道零改动（AC4）。本规格的「限额不可被绕过」论据正是该
+  任务的核心（cgroup 限额由内核强制，无法被「忘记调用」）。
 - `gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash`——watchdog 已 active，
   容器化后它必须**移到宿主**，否则回到「与被看护对象一起死」的老问题。
 - `gap-measure-claude-p-headless-third-party-roundtrip-and-exit-semantics`——
