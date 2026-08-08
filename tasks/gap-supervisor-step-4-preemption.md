@@ -55,7 +55,9 @@ extra:
 - plugin/scripts/（supervisor-preempt 若成：基座层实现）
 - orchestration/SPEC-integration-architecture-2026-08-05.md（来源，步骤④）
 - tasks/gap-over-90m-false-signal-source-reads-telemetry-not-task-status.md（超时判据交叉）
-- tasks/gap-supervisor-step-5-message-bus-with-identity.md（事件广播交叉）
+- tasks/gap-supervisor-step-5-message-bus-with-identity.md（事件广播交叉——步骤⑤ 已落地 2026-08-08：
+  抢占事件经 `supervisor-bus.sh --send --from <layer> --to <target> --payload <msg>` 带身份广播，
+  ledger 记谁→谁→何时→是否送达）
 
 ## Contract
 
