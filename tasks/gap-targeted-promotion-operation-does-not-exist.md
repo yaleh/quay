@@ -87,6 +87,7 @@ resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，�
 - [ ] AC1-AC6 实跑输出贴任务体（pool≥floor 时定向晋级成功 + 内层不含阶段目标 + 职责边界落文档 + 池机制三件套）
 
 ## Touches
+- tasks/gap-targeted-promotion-operation-does-not-exist.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/ready-pool-check.ts（若加 --targeted 入口；补充逻辑不动）
 - orchestration/orchestrator-loop-tick.md（晋级节：职责边界 + 修正 :985-986 表述）
 - plugin/loop/fast-mode-loop-tick.md（同步）

@@ -54,6 +54,7 @@ quay-sea-*.tar.gz **没修**。AC16 改判未达成（2395a05f）。
 - [ ] scoped 门 `scripts/test.sh --for-task gap-release-sea-bundle-excludes-plugin-tree` 绿
 
 ## Touches
+- tasks/gap-release-sea-bundle-excludes-plugin-tree.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - packages/quay/scripts/build-sea.sh（SEA 内嵌 assets 或 sidecar 逻辑）
 - packages/quay/scripts/esbuild-sea.mjs（若内嵌）

@@ -42,6 +42,7 @@ serve-github.test.mjs:64 都有定义。
 - [ ] scoped 门 `scripts/test.sh --for-task gap-task-check-test-nativeproviderdir-undefined` 绿
 
 ## Touches
+- tasks/gap-task-check-test-nativeproviderdir-undefined.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - packages/quay/test/task-check.test.mjs
 
