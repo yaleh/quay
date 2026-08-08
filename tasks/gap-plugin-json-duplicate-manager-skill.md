@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-json-duplicate-manager-skill
 title: "plugin/.claude-plugin/plugin.json commands[] has DUPLICATE './skills/manager/SKILL.md' (14 entries, 13 unique = on-disk skill dirs) — plugin-packaging.test.mjs:89-92 assert.deepEqual(listedSkills, diskSkills) fails because listedSkills contains manager twice; the 14th entry was likely appended during the AC16 plugin-bundle ship (7adb6307) or merge (58927990) without dedup; fix = remove the duplicate manager entry (keep exactly the 13 on-disk skill dirs)"
-status: ready
+status: done
 labels:
   - gap
   - defect

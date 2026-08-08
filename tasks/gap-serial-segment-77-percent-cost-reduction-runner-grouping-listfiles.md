@@ -10,7 +10,7 @@ title: "Serial segment 1080s = 77% of round for 8% of cases (45x per-case cost)
   read-only or one pollution corrupts all); B-class wall-clock 166.2s has no
   safe savings (shortening waits makes them fragile under load — R8); target:
   serial <600s so 'fast verification' (human 5-min/round vs 23-min) holds"
-status: ready
+status: done
 labels:
   - gap
   - defect

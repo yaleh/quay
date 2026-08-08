@@ -8,7 +8,7 @@ title: a worktree's heavy scoped verification consumes the machine but produces
   cross-layer no-total-budget (concurrency-cap task) + worktree-no-state = a
   resource sink with no signal output — the coordination root of tonight's
   deadlock (subagent waited 1h6m for a signal no one produced)
-status: ready
+status: done
 labels:
   - gap
   - defect

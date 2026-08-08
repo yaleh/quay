@@ -1,7 +1,7 @@
 ---
 id: gap-manager-skill-index-missing-new-specs
 title: "manager SKILL (plugin/skills/manager/SKILL.md) indexes only 14 of 16 on-disk orchestration/SPEC-*.md — missing SPEC-branching-model-integration-branch-2026-08-05.md and SPEC-integration-architecture-2026-08-05.md (both added 08-05); manager-layer-shipping.test.mjs AC6 requires the SKILL to index EVERY on-disk SPEC file (readdir + includes assert); the two new SPECs (branching model / integration architecture) were filed 2026-08-05 but never added to the manager SKILL's methodology index — documentation drift, the same 'added file without updating its index' class; fix = add the two missing SPEC filenames to manager SKILL.md's index section"
-status: ready
+status: done
 labels:
   - gap
   - defect
