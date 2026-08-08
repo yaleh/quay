@@ -63,15 +63,55 @@ resume 若中断，先跑 measure 读 slots 报告 + 实际 subagent 进程数
 
 ## Acceptance Criteria
 
-- [ ] AC1: **`--slots`/`--slot-status` 增非任务 subagent 计数**——调查型 subagent（无括号）在跑时，
+- [x] AC1: **`--slots`/`--slot-status` 增非任务 subagent 计数**——调查型 subagent（无括号）在跑时，
       slots 报告 `realInFlight + subagentsInFlight ≥ 1`（不再 0/3 空槽）
-- [ ] AC2: **inner 状态自检①用真实并发**——自检读括号真实在飞 + 非任务 subagent 之和；真实并发 > cap
+      → `fast-mode-telemetry.ts` 增 `countNonTaskSubagents`（Contract pgrep 模式
+      `general-purpose|Explore|Plan`，排除 pgrep / bash -c / telemetry 自身进程）+ `scanNonTaskSubagents`
+      （/proc 实扫）+ `readSubagentsInFlight`（`QUAY_TELEMETRY_SUBAGENTS` 测试覆盖）。`--slots` 输出新增
+      `subagentsInFlight` / `realConcurrency`（= `realInFlight` + `subagentsInFlight`）；
+      `--slot-status` 输出新增 `subagents_in_flight` / `real_concurrency`。scoped 测试
+      `SLOT-STATUS — a non-task subagent (no bracket) is counted toward real concurrency` 与
+      `SLOT-STATUS CLI — an in-flight non-task subagent reports realInFlight + subagentsInFlight ≥ 1` 全绿。
+- [x] AC2: **inner 状态自检①用真实并发**——自检读括号真实在飞 + 非任务 subagent 之和；真实并发 > cap
       可判违规；非任务 subagent 占并发预算（不再空派）
-- [ ] AC3: **负控制**——真实任务在飞时（有括号）计数不变（不重复计）；无任何在飞时 slots 仍报 0
-- [ ] AC4: 与 gap-telemetry-brackets-vs-subagents-no-slot-visibility（done，高报方向）交叉标注——同族
+      → `fast-mode-loop-tick.md` 状态自检①判据从「`realInFlight` ≤ cap」改为「`realConcurrency`
+      （= `realInFlight` + `subagentsInFlight`）≤ cap」——真实并发 = 括号 + 非任务 subagent；两处重复行、
+      「3.5 计量」与「每个 tick 必报」同步更新。
+- [x] AC3: **负控制**——真实任务在飞时（有括号）计数不变（不重复计）；无任何在飞时 slots 仍报 0
+      → scoped 测试 `SLOT-STATUS — real task in flight + non-task subagent SUM, never double-count` 与
+      `SLOT-STATUS — zero in-flight (no brackets, no subagents) still reports 0` 全绿。
+- [x] AC4: 与 gap-telemetry-brackets-vs-subagents-no-slot-visibility（done，高报方向）交叉标注——同族
       两面：高报（括号多实际少）已修，低报（实际多括号零）本任务
-- [ ] AC5: 与 gap-suite-concurrency-8-green-serial-group（serial 负载敏感）交叉标注——低报在
+      → done 任务体已加「交叉标注（低报方向）」段。
+- [x] AC5: 与 gap-suite-concurrency-8-green-serial-group（serial 负载敏感）交叉标注——低报在
       并发收紧时直接威胁 B 类挂钟稳定性
+      → 该任务体「与既有任务的关系」已加双向交叉标注段。
+
+### 实跑证据（invoke evidence，2026-08-08 内层实跑）
+
+构造调查型 subagent（无括号）在跑的对照——`QUAY_TELEMETRY_SUBAGENTS=2` 注入 2 个非任务 subagent
+进程（与 Contract measure `pgrep -af "general-purpose|Explore|Plan"` 同口径）：
+
+```
+$ QUAY_TELEMETRY_SUBAGENTS=2 node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --root <ws> --slots --cap 3 --json
+{
+  "bracketsInFlight": 0,
+  "reconcilable": 0,
+  "realInFlight": 0,
+  "subagentsInFlight": 2,
+  "realConcurrency": 2,
+  "closedButLive": [],
+  "occupiedSlots": 2,
+  "slotsTotal": 3,
+  "slotsRemaining": 1
+}
+```
+
+修复前后对照：**修复前**（只读 realInFlight）`0/3` 空槽、`slotsRemaining 3` ⇒ 自检①误判 3 个空槽；
+**修复后** `realInFlight 0 + subagentsInFlight 2 = realConcurrency 2`、`slotsRemaining 1` —— 非任务
+subagent 被计入并发预算，不再空派。负控制：真实任务在飞（有括号）+ 非任务 subagent 各占一槽、不重复计
+（`real_in_flight 1 + subagents_in_flight 1 = real_concurrency 2`，scoped 测试覆盖）；无任何在飞时
+slots 仍报 0。
 
 ## Definition of Done
 
@@ -81,8 +121,10 @@ resume 若中断，先跑 measure 读 slots 报告 + 实际 subagent 进程数
 ## Touches
 - plugin/scripts/fast-mode-telemetry.ts（`--slots`/`--slot-status` 增 subagentsInFlight）
 - plugin/loop/fast-mode-loop-tick.md（状态自检①改真实并发 = 括号 + 非任务 subagent）
+- plugin/test/slot-visibility.test.mjs（runCli 钉 QUAY_TELEMETRY_SUBAGENTS=0 保持确定性）
 - tasks/gap-telemetry-brackets-vs-subagents-no-slot-visibility.md（AC4 交叉标注，done）
 - tasks/gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests.md（AC5 交叉标注）
+- tasks/gap-telemetry-underreport-nontask-subagents-not-counted-in-slots.md（自身文件，AC/证据自勾）
 
 ## Dispatch review
 

@@ -59,6 +59,12 @@ extra: {}
   是根因任务，本任务落地后它们的 AC 方向被此裁定覆盖/收窄。
 - `gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage`（分诊机械化）是后续收尾——serial
   组落地后 KNOWN-LOAD-SENSITIVE 族被机械识别为 serial 成员，分诊不再人工判。
+- **交叉标注（`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`，AC5 双向）**：
+  遥测低报（调查型 subagent 不进括号，`--slots` realInFlight 恒 0 ⇒ 内层自检①误判空槽、空派 3 任务、
+  真实并发 4）在并发收紧时**直接威胁 B 类挂钟稳定性**——多一路不被计入的重负载打 serial/低负载组的
+  真实挂钟窗口，正是本任务要隔离的那族测试。低报修复后（`realConcurrency = realInFlight +
+  subagentsInFlight`，自检①读真实并发），槽位判据不再给「实际在跑的 subagent」让出空槽。两任务同族：
+  一个管套件并发形态（serial 隔离），一个管派发并发计数（不低报）。
 
 ## Contract
 

@@ -126,6 +126,15 @@ extra:
       → **未实现**——独立机制（`inner-blocked-signal.ts` 的消费超时/自动升级），不在本任务 DoD（AC1–AC7）
       与 Contract（slot_visibility）范围内；留待专门任务/外层裁定。
 
+### 交叉标注（低报方向，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）
+
+本任务判据 `brackets_reflect_subagents` 只覆盖**高报方向**：括号多、实际少（红窗遗留未闭合 start
+把健康态误判成满负荷）。同族**低报方向**由新任务
+`tasks/gap-telemetry-underreport-nontask-subagents-not-counted-in-slots.md` 覆盖：调查型 subagent 不
+进括号，`--slots` 的 `realInFlight` 恒 0 而实际 1 个 subagent 在跑（0/3 空槽误判，真实并发 4 不是 3）——
+修法是 `--slots`/`--slot-status` 增 `subagentsInFlight` 计数（非任务 subagent 进程），
+`realConcurrency = realInFlight + subagentsInFlight`，状态自检①改读真实并发。两面合起来才是
+「括号 ⇄ 真实 subagent」的完整对账。
 
 ### AC5 实跑输出（invoke evidence，2026-08-06 内层实跑）
 

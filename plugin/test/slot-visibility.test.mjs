@@ -56,6 +56,10 @@ function cleanup(tmpRoot) {
 function runCli(tmpRoot, ...args) {
   const res = spawnSync("node", ["--experimental-strip-types", CLI, "--root", tmpRoot, ...args], {
     encoding: "utf8",
+    // Deterministic slot arithmetic: --slots scans the LIVE machine for non-task subagent processes
+    // (gap-telemetry-underreport-nontask-subagents-not-counted-in-slots). Pin the count to 0 so the
+    // exact slotsRemaining/realInFlight assertions never depend on a subagent running during the suite.
+    env: { ...process.env, QUAY_TELEMETRY_SUBAGENTS: process.env.QUAY_TELEMETRY_SUBAGENTS ?? "0" },
   });
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
