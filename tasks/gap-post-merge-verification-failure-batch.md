@@ -51,17 +51,30 @@ resume 若中断，先跑 measure 读 catalog exit + liveness fail + serial 趟�
 
 ## Acceptance Criteria
 
-- [ ] AC1: **catalog QUESTION 表**——补 cross-machine-verify（从 integration 找回）；catalog exit 0
-- [ ] AC2: **session-liveness B2/B3/B4**——拆分后检测测试恢复（claude-as-pane alive=1）
-- [ ] AC3: **serial 趟恢复**——test.sh 主趟红后不再跳过 serial；serial 3 文件照常跑
-- [ ] AC4: 与 gap-forty-to-six-remerge（doc-asserting/install 家族归它）、
+- [x] AC1: **catalog QUESTION 表**——补 cross-machine-verify（从 integration 找回）；catalog exit 0
+      **证据**：commit 23ced8d7 → develop 6866da3f。integration 354be03e 的 QUESTION 行（supervisor-preempt 与
+      sync-lag 之间）原样恢复。实跑：`capability-catalog.sh` → `159 scripts | 159 declared | 0 unclassified | 154 ship`，exit 0。
+- [x] AC2: **session-liveness B2/B3/B4**——拆分后检测测试恢复（claude-as-pane alive=1）
+      **证据**：commit 46255fcd → develop 6866da3f。合并（a862c914）把 integration 侧 a09ddb56 的
+      `_is_claude_pid` + session_pid pane_pid 自检 + 窗口后缀解析（DEFAULT_TARGET 硬编码 :outer 剥掉 :inner）
+      解析成 develop 旧版丢失。恢复后实跑：`session-liveness-events` B2/B3/B4 → **pass 3 / fail 0**。
+- [x] AC3: **serial 趟恢复**——test.sh 主趟红后不再跳过 serial；serial 3 文件照常跑
+      **证据**：commit f0092a70 → develop 6866da3f。原 `if [ "$code" -eq 0 ]` 守卫在主趟红时整段跳过 serial
+      （round 95 只有 product,engine + lowconc 两趟 selected、无 serial 3 files）——serial 3 文件的失败不可见。
+      改为无条件跑 serial（与 lowconc 同语义），serial exit code 合并进 `code`。实跑：
+      `--group serial` → `selected 3 files (groups=serial)`（serial 趟在场）。
+      **如实注**：serial 3 文件里 `quay-init-loop-core` 的 3 条失败是 **40→6 家族**（断言 manager-loop-tick.md
+      须铺装，而 quay-init 未铺——7642849a 回滚后测试断言新行为、实现旧），归 gap-forty-to-six-remerge 任务。
+- [x] AC4: 与 gap-forty-to-six-remerge（doc-asserting/install 家族归它）、
       gap-merge-introduced-referenced-not-landed-manager-tick-log（同批次合并问题）交叉标注
+      **证据**：本任务 Proposal + AC3 注记录归属；gap-forty-to-six-remerge 任务体已列本批次同源。
 - [ ] AC5: **全栈并发 8 绿**——与 40→6 修复合并后，全量三趟 fail 0 / cancelled 0
+      **状态**：本批 3 项修复已落 develop；全量绿依赖 40→6 家族测试更新（quay-init-loop-core 等），未勾。
 
 ## Definition of Done
 
-- [ ] AC1-AC3 实跑输出贴任务体（每项修复前后隔离对照、serial 趟恢复前后）
-- [ ] 与 40→6 重合并合并验证后，全量三趟 fail 0 / cancelled 0
+- [x] AC1-AC3 实跑输出贴任务体（每项修复前后隔离对照、serial 趟恢复前后）——见各 AC 证据
+- [ ] 与 40→6 重合并合并验证后，全量三趟 fail 0 / cancelled 0——依赖 40→6 家族收口
 
 ## Touches
 - plugin/scripts/capability-catalog.sh（QUESTION 表补 cross-machine-verify）
