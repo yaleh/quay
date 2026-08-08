@@ -1,7 +1,7 @@
 ---
 id: gap-resource-gate-two-thresholds-test-sh-vs-cap-from-gate
 title: "两个资源闸阈值不一致——test.sh limit 40 vs cap-from-gate go<60；负载高峰时「套件拒跑」与「派发继续」失衡，可能成环"
-status: todo
+status: ready
 labels:
   - gap
   - defect
