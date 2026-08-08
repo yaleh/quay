@@ -131,6 +131,10 @@ resume 若中断，先跑 measure 读 serial 段当前耗时
   把「路由非修复」的成本收掉（flags-only 294s → 8s、install 族共享模板、B 类不省）。
 - `tasks/gap-test-isolation-backlog-44-violations-unmeasured.md`：加交叉标注段——R3 嵌套 spawn 欠账收掉
   （flags-only 不再嵌套跑 3× governance，嵌套成本归零，serial 路由保留）。
+- **2026-08-08 重执行修正**：首轮落地（0403207e）在 fan-in 冲突消解时把上述两处交叉标注段丢掉了
+  （commit message `# Conflicts:` 含两个根因任务体）——AC5 勾选与 Evidence 声称已加，但文件里实际没有。
+  本轮重执行已补回两处交叉标注段（`gap-suite-concurrency-8-green-...` 加 `### 交叉标注` 节、
+  `gap-test-isolation-backlog-44-...` 加块引用段），AC5 的落盘交付物与勾选/Evidence 现在一致。
 
 ## Touches
 - plugin/test/runner-grouping.test.mjs（flags-only 用例改 --list-files 比对）
