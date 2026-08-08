@@ -1,7 +1,7 @@
 ---
 id: gap-plugin-json-duplicate-manager-skill
 title: "plugin/.claude-plugin/plugin.json commands[] has DUPLICATE './skills/manager/SKILL.md' (14 entries, 13 unique = on-disk skill dirs) — plugin-packaging.test.mjs:89-92 assert.deepEqual(listedSkills, diskSkills) fails because listedSkills contains manager twice; the 14th entry was likely appended during the AC16 plugin-bundle ship (7adb6307) or merge (58927990) without dedup; fix = remove the duplicate manager entry (keep exactly the 13 on-disk skill dirs)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -31,6 +31,12 @@ plugin bundle）/ 58927990（merge）。重复条目大概率是 AC16 添加 man
 - [ ] AC1: plugin.json commands[] 恰好 13 个 skill 路径，无重复
 - [ ] AC2: plugin-packaging.test.mjs 隔离跑绿
 - [ ] AC3: commands[] 与磁盘 skill 目录精确一致（deepEqual）
+
+## Definition of Done
+
+- [ ] AC1-AC3 全勾（plugin.json commands[] 恰好 13 个 skill 路径无重复；plugin-packaging.test.mjs 隔离绿；commands[] 与磁盘 skill 目录精确一致 deepEqual）
+- [ ] 修后 invoke 实测 14/13 → 13/13（`python3 -c` len==len(set)==13）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-plugin-json-duplicate-manager-skill` 绿（fail 0 / cancelled 0）
 
 ## Touches
 

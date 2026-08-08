@@ -1,7 +1,7 @@
 ---
 id: gap-release-sea-bundle-excludes-plugin-tree
 title: "SEA (--experimental-sea-config) bundle structurally EXCLUDES the plugin dir-tree — esbuild-sea.mjs bundles only bin/quay.ts (Core CLI), sea-config.json has no plugin assets, so quay-sea-0.4.0-*.tar.gz (the RECOMMENDED release distribution) contains ./quay ./quay-native ./tasks/ ./.quay/config.yml but NO plugin/ (archguard string-scan + manager tar tzf double-confirmed 2026-08-06); package.json.files affects npm tgz only — two independent mechanisms, AC16's files+plugin fix never touched the SEA distribution; SEA single-binary vs plugin dir-tree is a STRUCTURAL conflict needing an architecture decision (embed? sidecar bundle? make npm the recommended distribution?)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -46,6 +46,12 @@ quay-sea-*.tar.gz **没修**。AC16 改判未达成（2395a05f）。
 - [ ] AC2: 与 gap-release-excludes-plugin-bundle（AC16）交叉标注——本任务是其产物层未达成的修复
 - [ ] AC3: 推荐分发方式明确——SEA 内嵌 / sidecar / npm tgz 之一（架构决定）
 - [ ] AC4: B 机验收（分工轴）——从 release 产物装出含 plugin 的完整机制
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（SEA tarball 或 sidecar bundle 含 plugin/，6 个新机制名可反查；交叉标注完成；推荐分发方式明确——架构决定；B 机从 release 产物装出含 plugin 完整机制）
+- [ ] 架构决定落地（SEA 内嵌 / sidecar / npm tgz 推荐分发之一）+ release 产物实测含 plugin
+- [ ] scoped 门 `scripts/test.sh --for-task gap-release-sea-bundle-excludes-plugin-tree` 绿
 
 ## Touches
 

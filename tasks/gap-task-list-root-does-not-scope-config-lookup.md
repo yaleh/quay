@@ -8,7 +8,7 @@ title: "quay task list --root <path> does NOT resolve config from --root — it
   --root is meant to scope the workspace but config resolution ignores it;
   fix: pass --root into discoverWorkspaceRoot for workspace-scoped commands,
   or fail cleanly when no config under --root"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -51,6 +51,12 @@ config），不是 node 版本。
 - [ ] AC2: `--root` 下无 config ⇒ fail-closed 清晰报错（不静默回退 CWD）
 - [ ] AC3: cwd 有 config 但 --root 指定别处 ⇒ 用 --root 的（负控制，不误用 cwd）
 - [ ] AC4: 与 config-validate --root 行为一致（不产生第二套语义）
+
+## Definition of Done
+
+- [ ] AC1-AC4 全勾（--root 从 <path> 解析 config 非 CWD；无 config fail-closed 清晰报错；负控制不误用 cwd；与 config-validate --root 行为一致）
+- [ ] cwd 与 --root 不同实测通过（task list --root 用 root 的 config）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-task-list-root-does-not-scope-config-lookup` 绿
 
 ## Touches
 

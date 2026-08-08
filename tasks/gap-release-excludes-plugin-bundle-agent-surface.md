@@ -1,7 +1,7 @@
 ---
 id: gap-release-excludes-plugin-bundle-agent-surface
 title: "release v0.3.13 excludes the ENTIRE plugin bundle (the agent surface that IS the self-evolving mechanism) — packages/quay/package.json files=[README,CHANGELOG,LICENSE,bin,src,dist] has NO plugin/, so a GitHub install yields a task-board CLI, NOT the evolving loop (product outline §6 delivery main body = plugin scripts 119 + gate-scripts 14 + skills 13 + probes 4 + loop 2 + vendor + agents); AC16 core gap, manager measured 2026-08-06 (v0.3.13 2026-07-24, master ahead 2463 commits); human phase-goal: deliver complete usable release on GitHub; outer rulings: files add plugin/, tag from develop (post-cutover), SEA continues (self-contained runtime for AC16 criterion 3), version v0.4.0 (plugin bundle first-in-package = major delivery-surface extension)"
-status: todo
+status: ready
 labels:
   - gap
   - defect
@@ -74,6 +74,12 @@ plugin/，但 **plugin/ 没进 npm files**——机制「在包外」部分解�
        cc53c820 含完整 plugin 树（352 文件，`.claude-plugin/plugin.json` version 0.4.0，
        vendor/quay/dist/quay.js + vendor/quay-native/dist/quay-native.js 自包含运行时在列）。真实
        `--push` 由 release 的 publish-plugin-dist.yml（v* tag）或手动 `--push` 执行——本执行未 push。**
+
+## Definition of Done
+
+- [ ] AC1-AC3 已勾（npm pack 产物含 plugin bundle 352 条；release 装出真实两层循环；非 quay 项目装出可用性）
+- [ ] 本任务 AC16 files+plugin 侧达成；产物层未达成部分已移交 gap-release-sea-bundle-excludes-plugin-tree（AC16 保持未达成直至 SEA 产物含 plugin）
+- [ ] scoped 门 `scripts/test.sh --for-task gap-release-excludes-plugin-bundle-agent-surface` 绿
 
 ## Touches
 
