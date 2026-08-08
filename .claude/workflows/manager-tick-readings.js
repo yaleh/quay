@@ -68,7 +68,12 @@ echo "outer_tbl=$(grep -m1 '^| 2026' orchestration/tick-log.md | grep -oE '[0-9]
 python3 -c "
 import json,os,time
 d=json.load(open('.quay/full-suite-state.json'))
-print('suite=%s/%s age=%smin'%(d['state'],d.get('reason'),int(time.time()-os.path.getmtime('.quay/full-suite-state.json'))//60))"
+ms=d.get('durationMs')
+print('suite=%s/%s dur=%s age=%smin'%(d['state'],d.get('reason'),('%.1fs'%(ms/1000)) if ms else '跑着呢(无终态时长)',int(time.time()-os.path.getmtime('.quay/full-suite-state.json'))//60))"
+# ^ 2026-08-08 03:1x：durationMs 在 running 态是 null，早前我手打的变体直接 ms/1000 → TypeError，
+#   **整条 suite 读数当轮丢失，而丢失的恰恰是"正在跑"这个最该看的状态**。
+#   两个教训：(a) ⑥′(a) 原型——我执行的命令块与 workflow 交还的不一致，加字段加出了崩溃；
+#   (b) 同族形状——**读数在它最有价值的那个状态下不可用**，与"闸门只在没事时才绿"同构。
 git rev-list --left-right --count develop...integration | awk '{print "diverge="$1"/"$2}'
 echo "commits30m=$(git log --oneline --all --since='30 minutes ago' | grep -vc '^[0-9a-f]* manager:')"
 echo "mon_procs=$(ps -eo args | grep -cE 'SUITE-TERMINAL|full-suite-state\.json' | tr -d ' ') （枚举而非布尔——见下方注释）"
