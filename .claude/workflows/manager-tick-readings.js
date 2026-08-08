@@ -277,8 +277,16 @@ const AUDIT_SCHEMA = {
       type: 'array',
       description: '管理者本轮违反自己规则的实例；空数组=未发现',
       items: {
-        type: 'object', required: ['rule', 'evidence'],
-        properties: { rule: { type: 'string' }, evidence: { type: 'string' } },
+        type: 'object', required: ['rule', 'evidence', 'status'],
+        properties: {
+          rule: { type: 'string' },
+          evidence: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['新发生', '已入账', '判准已退休'],
+            description: '新发生=本轮首次且 tick-log violations 列里没有；已入账=已在某一行的 violations 列（evidence 里必须引出那一行的时刻列）；判准已退休=该判准已被明文退休，本条不成立',
+          },
+        },
       },
     },
     undeclaredActions: {
@@ -295,6 +303,17 @@ const audit = await agent(
 加 \`git log --oneline --since='40 minutes ago' -- ${ROOT}\`。
 
 **⚠️ 第一纪律：读证据，不许从标题猜（人 2026-08-07 裁定）。**
+
+**⚠️ 第二纪律：每条 violation 必须给 \`status\`，这是【计数正确性】的要求（2026-08-08 02:2x）。**
+上一轮你返回 4 条，其中 **3 条早已在 tick-log 的 violations 列里入账**（01:2xZ / 01:4xZ / 01:5xZ），
+**第 4 条断的是判准 ⑥ 缺席，而 ⑥ 已于 2026-08-07 20:1x 明文退休**（答案恒定 ⇒ 零信息，
+被 ⑥′ 取代）——你比对的样本是 08-07 16:5x，早于退休。
+**危害是机械的**：第六列是「连续 N 轮都在做」的唯一计数来源，
+**把旧账当新账重报，会让计数虚高、阈值失真**——与 ⑦「承认即须入账」同一个计数面，方向相反。
+⇒ 逐条标 \`新发生\` / \`已入账\`（evidence 里引出那一行的时刻列）/ \`判准已退休\`。
+**检测照旧要做，不要因为怕重复就不报**——分类是你的活，抑制不是。
+**另**：你上一轮自己写了「因 8 次工具调用预算已用尽，未能读更多行确认」——
+**预算用尽就说不知道，不要把"没读到"写成 violation**（这正是 ②b：来源不完备 ≠ 不存在）。
 
 上一版给了 3 次工具调用的硬预算，结果它只读到 commit **subject line** 就下结论，
 一轮产出 **1 条假阳性 + 1 条无法证实**：把"管理者记录【接受上一轮违规】的那条提交"
