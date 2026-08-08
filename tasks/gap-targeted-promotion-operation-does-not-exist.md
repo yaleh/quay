@@ -1,6 +1,6 @@
 ---
 id: gap-targeted-promotion-operation-does-not-exist
-title: "定向晋级（targeted promotion）操作不存在——2026-08-04 裁定被超额执行：外层候选集构造规则整体搬进 ready-pool-check.ts（kind 排序 gap→DIR→other，无阶段目标输入），且 pool<floor（=cap×4）门把阶段目标要的任务挡在 todo；补充 refill（维持数量）与定向晋级 targeted（维持对齐）是两个操作，后者必须不受 floor 约束、由外层选择；实测 gap-ac16c3-... 永远停在 todo（pool=24>floor=12）"
+title: "定向晋级（targeted promotion）操作不存在——2026-08-04 裁定被超额执行：外层候选集构造规则整体搬进 ready-pool-check.ts（kind 排序 gap→DIR→other，无阶段目标输入），且 pool<floor（=cap×4）门把阶段目标要的任务挡在 todo；补充 refill（维持数量）与定向晋级 targeted（维持对齐）是两个操作，后者必须不受 floor 约束、由外层选择；实测 gap-ac16c3-... 永远停在 todo（pool=24>floor=20，生产值 cap=5）"
 status: todo
 labels:
   - gap
@@ -34,11 +34,13 @@ extra: {}
 
 | 操作 | 判据 | 目标 |
 |---|---|---|
-| 补充 refill | pool < floor（=cap×4，默认 12） | 维持【数量】 |
+| 补充 refill | pool < floor（=cap×4；**cap 资源自适应 5/2/1，floor 随之 20/8/4**——见下更正） | 维持【数量】 |
 | **定向晋级 targeted** | **阶段目标要它** | 维持【对齐】 |
 
-实测：pool=24 > floor=12 ⇒ 补充永不触发 ⇒ `gap-ac16c3-bc-release-install-verification-not-done` 永远停在 todo ⇒ 池子里 24 个 ready 一个都不是阶段目标第 2 位要的那个。
+实测：pool=24 > floor=20 ⇒ 补充永不触发 ⇒ `gap-ac16c3-bc-release-install-verification-not-done` 永远停在 todo ⇒ 池子里 24 个 ready 一个都不是阶段目标第 2 位要的那个。
 **即使给 checker 加一个优先级输入也不够——`pool < floor` 这道门先把它挡在外面。定向晋级必须是不受 floor 约束的独立操作。**
+
+**2026-08-08 11:5x 数值更正（manager 更正供给）**：cap=3/floor=12 是 **ready-pool-check 手动跑的兜底默认**（`CONCURRENCY_CAP_DEFAULT=3`，注释「manual runs」），**非生产值**。生产 cap 来自 `cap-from-gate.sh`（avg300 bands go<40/wait<70/extreme≥70 ⇒ 5/2/1，当前 GO ⇒ 5），floor=cap×4=20。**引用 floor 判据时必须先跑 cap-from-gate 拿 effective_cap 再作 --cap 传入**（ready-pool-check 的 tick 调用形态）。结论不变（24>20），余量比 12 小。
 
 ### 修法方向（机制决定归外层，设计不预设）
 
@@ -52,7 +54,7 @@ measure targeted_promote_path = `grep -cE "定向晋级|--targeted|targeted.*pro
 band targeted_promote_path = ≥1（修复后存在定向晋级路径；当前=0）
 measure floor_independent = `grep -c "pool < floor" plugin/scripts/ready-pool-check.ts` 是否只约束补充不约束定向（判定：定向晋级不走 pool<floor 门）
 invoke 对某个 todo 任务（阶段目标第 2 位要的）执行定向晋级 → status 变 ready
-control 负控制：pool ≥ floor 时（当前 24>12），定向晋级仍能发生（不受补充门约束）
+control 负控制：pool ≥ floor 时（当前 24>20，floor 用生产 cap=5 计算），定向晋级仍能发生（不受补充门约束）
 resume 若中断，先跑 measure 确认当前定向晋级路径是否存在，不要假设已修
 ```
 
@@ -91,5 +93,5 @@ reviewer: none
 at: 2026-08-08T10:1xZ
 changed: 管理者 2026-08-08 定位（定向晋级操作不存在；2026-08-04 裁定被超额执行——外层候选集规则整体搬进
   kind-only checker，pool<floor 门挡阶段目标任务）+ 人裁定职责切分（晋级=外层选择、派发=内层机械）。
-  外层独立复核：ready-pool-check 排序 = kindOrder（gap→DIR→other，无阶段目标）、pool=24>floor=12、
+  外层独立复核：ready-pool-check 排序 = kindOrder（gap→DIR→other，无阶段目标）、pool=24>floor=20（生产 cap=5）、
   gap-ac16c3-... 停在 todo、orchestrator-loop-tick:985-986「外层只引用」——成立，立案。
