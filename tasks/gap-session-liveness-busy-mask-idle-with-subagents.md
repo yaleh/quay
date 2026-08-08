@@ -104,8 +104,23 @@ esc to interrupt」被证伪，外层该根因结论撤回。
 若仍不发，才是真缺陷；若发了，则现有实现无缺陷，缺的是「pane-only 配置对一个正在被上层频繁驱动的
 目标不适用」这条边界说明。**
 
+**真根因（外层 15:3x 按 manager 判据复测找到）——LOOP_MIN 静默闸 + pane-only 默认心跳被上层刷新**：
+- **观测 inner（外层不驱动）+ pane-only，LOOP_MIN=1**：IDLE_CONSEC 单调 1→7、IDLE_REPORTED 0→1
+  （闸通过），**但 SESSION-IDLE 没打出**（LOOP_MIN 静默）。
+- **同配置 LOOP_MIN=0**：**SESSION-IDLE 报出**（`心跳 1 分钟前更新`）。
+- **机制**：pane-only（SESSION_TRANSCRIPTS 空）→ `heartbeat_for` 回退默认心跳 =
+  `<root>/orchestration/tick-log.md`（heartbeat_for:841）。tick-log 被外层/内层每个 tick 追加刷新
+  → hmin 恒 ≈0-2min < LOOP_MIN=20 → **IDLE 永久静默**。LOOP_MIN=0 破除静默 → IDLE 正常报。
+- **含义**：manager 实环境（看 outer + pane-only）0 条 IDLE 的根因 = **默认心跳（tick-log）被上层活动
+  持续刷新 → hmin 恒新鲜 → LOOP_MIN 静默闸吞掉所有 IDLE**。这不是 D5 的 IDLE_CONSEC 问题，也不是
+  pane 判 busy（inner 观测里 pane_state=waiting-input 正常）。
+- **按 manager 判据框架**：IDLE 在正确配置（LOOP_MIN=0）下**发了** ⇒ 现有实现**无缺陷**，缺的是
+  **「pane-only 配置对一个正在被上层频繁驱动的目标不适用」的边界说明**——pane-only 的回退心跳（tick-log）
+  对「被上层频繁写 tick 的目标」永远新鲜，LOOP_MIN 静默闸必须按此调整（或 pane-only 需显式心跳源）。
+
 **收口判据（manager 已定，不变）**：D5 的收口 = **实环境报出一次 SESSION-IDLE**，不是「修复已合入
-develop」，也不是注入 pane 的负控制通过。
+develop」，也不是注入 pane 的负控制通过。**本真根因下，收口 = 对 pane-only 目标按 LOOP_MIN=0（或显式
+心跳源）观测并报出 IDLE。**
 
 **测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
 - from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。
