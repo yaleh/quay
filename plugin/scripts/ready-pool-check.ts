@@ -46,9 +46,22 @@
 // with a reason each (NOT the pool<floor promotion list; that keeps its existing gap>DIR order, AC4).
 // Priority query:   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --top 5
 //
+// TARGETED PROMOTION (gap-targeted-promotion-operation-does-not-exist): the pool<floor refill above
+// is the BULK path (inner's mechanical product mechanism, AC3 — keep byte-unchanged). A stage-goal
+// task the bulk path leaves in todo (pool<floor gate blocks it, e.g. pool=24>floor=20) needs a SECOND,
+// floor-INDEPENDENT operation: TARGETED promotion — the OUTER picks a specific task per stage goal
+// (selection = outer; dispatch = inner), and this checker MECHANICALLY validates it + emits the
+// promote command:
+//   node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root <repo> --targeted <id>
+// reads stdout `targeted_promotion`: eligible=true ⇒ run `quay promote <id>` (never gated on
+// `pool < floor`). The target's identity is the outer's stage-goal choice; this checker contributes
+// ONLY the mechanical eligibility checks (four artifacts / deps / touches-resolve / not fixture /
+// not PARKED) — it does not itself decide "which task" (AC3 — no stage-goal input in the checker).
+//
 // Run:
 //   node --experimental-strip-types plugin/scripts/ready-pool-check.ts [--root <repo>]
-//       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>] [--json]
+//       [--cap <n>] [--floor-mult <n>] [--in-flight <id1,id2>] [--top <n>]
+//       [--targeted <id>] [--json]
 //   --cap / --floor-mult   override the derived floor (default cap=3, floor-mult=4 ⇒ floor 12)
 //   --in-flight            task ids of currently in-flight subagents (ranked against for disjointness)
 //   --top <n>              VALUE-PRIORITIZATION QUERY (gap-value-prioritization-has-no-mechanism):
@@ -58,6 +71,12 @@
 //                          answer) is always emitted. Sources are mechanical: strategic traceability
 //                          (body references FINDING-*/SYNTHESIS-*/SPEC-*/REVIEW-cadence), blocking
 //                          (parent/children fields), cost (touches scale). No human scoring.
+//   --targeted <id>        TARGETED-PROMOTION QUERY (gap-targeted-promotion-operation-does-not-exist):
+//                          emit `targeted_promotion` for ONE task id — the OUTER's stage-goal
+//                          selection mechanically validated (four artifacts / deps / touches-resolve /
+//                          not fixture / not PARKED) + the `quay promote <id>` command. NOT gated on
+//                          `pool < floor` (AC2 — decoupled from the bulk refill). Bulk `promotions`
+//                          output is unchanged (AC3).
 //   --json                 accepted for Contract parity; output is always JSON
 //
 // ADAPTIVE CAP (gap-adaptive-concurrency-cap-tied-to-resource-gate): at dispatch time the tick calls
@@ -385,6 +404,60 @@ function buildCandidate(id, task, root, allTasks, poolParsed, inFlightParsed, ex
   };
 }
 
+/** TARGETED PROMOTION (gap-targeted-promotion-operation-does-not-exist): the OUTER picks a task per
+ *  stage goal; this function MECHANICALLY validates it and emits the promote command. It is the
+ *  floor-INDEPENDENT second operation — NEVER gated on `pool < floor` (AC2). The identity of the
+ *  target is the outer's selection (the checker carries no stage-goal input, AC3); the checker only
+ *  answers "is this task mechanically promotable, and what command promotes it". `task` is
+ *  `undefined` when the id is not in the store → found:false. */
+export function buildTargetedPromotion(id, task, root, allTasks) {
+  if (!task) {
+    return { id, found: false, eligible: false, floor_independent: true, reason: "task-not-found" };
+  }
+  if (task.status !== "todo") {
+    return {
+      id,
+      found: true,
+      status: task.status,
+      eligible: false,
+      floor_independent: true,
+      reason: `status-${task.status}`, // already at/above ready — nothing to promote
+    };
+  }
+  if (isFixture(task)) {
+    return { id, found: true, status: task.status, eligible: false, floor_independent: true, reason: "fixture" };
+  }
+  if (isParked(task)) {
+    return { id, found: true, status: task.status, eligible: false, floor_independent: true, reason: "parked" };
+  }
+  const four = artifactsComplete(task.body);
+  const depsReady = depsReadyFor(task, allTasks);
+  const touches = checkTaskTouchesResolve(task.body, root);
+  const touchesResolve = !touches.majorityMissing;
+  const eligible = four.complete && depsReady && touchesResolve;
+  const checks = {
+    fourArtifacts: four.complete,
+    missingArtifacts: four.missing,
+    depsReady,
+    touchesResolve,
+    notFixture: true,
+    notParked: true,
+  };
+  return {
+    id,
+    found: true,
+    status: task.status,
+    eligible,
+    floor_independent: true, // targeted promotion never walks the pool<floor gate (AC2)
+    checks,
+    promote_cmd: `quay promote ${id}`,
+    reason: eligible
+      ? `${id}: targeted promotion (outer stage-goal selection) — mechanically eligible; run \`quay promote ${id}\``
+      : `${id}: not eligible · four-artifacts ${four.complete ? "complete" : `missing ${four.missing.join(",")}`} · ` +
+        `deps ${depsReady ? "ready" : "NOT-ready"} · touches ${touchesResolve ? "resolve" : "MISSING"}`,
+  };
+}
+
 function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criterionMet, poolBigAllColliding, deficit }) {
   let s = `pool ${pool}/${floor} (floor = cap(${cap}) × ${floorMult}) · dispatchable_disjoint ${dispatchableDisjoint}/${cap}`;
   s += criterionMet
@@ -397,16 +470,19 @@ function buildReport({ pool, floor, cap, floorMult, dispatchableDisjoint, criter
 
 /** Analyze a task store. Returns { pool, floor, cap, floorMult, deficit, dispatchable_disjoint,
  *  criterion_met, pool_big_all_colliding, report, ready, excluded, candidates, promotions,
- *  scanned, top_relevance, ready_relevance, closed_but_live }. `root` is the repo root used to
- *  resolve `## Touches` existence claims; `tasksDir` defaults to `<root>/tasks`; `cap`/`floorMult`
- *  derive the floor (default 3×4 ⇒ 12); `inFlight` is an optional array of `{ id, body }` for
- *  currently in-flight tasks (ranked against); `closedButLive` is an optional array of `{ id, body }`
- *  for tasks whose telemetry bracket CLOSED but whose executor is still observably present
- *  (gap-closed-bracket-leaves-live-agent-consuming-slots) — they rank in the in-flight disjointness
- *  set and are excluded from ready_relevance; `topN` is the value-prioritization query size — when
- *  > 0 the `top_relevance` array (the highest-value N todo tasks + reasons, the AC2 "which matters
- *  most" answer) is produced. */
-export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], topN = 0 }) {
+ *  scanned, top_relevance, ready_relevance, closed_but_live, targeted_promotion }. `root` is the repo
+ *  root used to resolve `## Touches` existence claims; `tasksDir` defaults to `<root>/tasks`;
+ *  `cap`/`floorMult` derive the floor (default 3×4 ⇒ 12); `inFlight` is an optional array of
+ *  `{ id, body }` for currently in-flight tasks (ranked against); `closedButLive` is an optional
+ *  array of `{ id, body }` for tasks whose telemetry bracket CLOSED but whose executor is still
+ *  observably present (gap-closed-bracket-leaves-live-agent-consuming-slots) — they rank in the
+ *  in-flight disjointness set and are excluded from ready_relevance; `topN` is the
+ *  value-prioritization query size — when > 0 the `top_relevance` array (the highest-value N todo
+ *  tasks + reasons, the AC2 "which matters most" answer) is produced; `targetedId` is the
+ *  TARGETED-PROMOTION query (gap-targeted-promotion-operation-does-not-exist) — when set, a
+ *  `targeted_promotion` result for that one id is produced (floor-INDEPENDENT, AC2), supplemental
+ *  to and never altering the bulk `promotions` path (AC3). */
+export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, floorMult = POOL_FLOOR_MULT_DEFAULT, inFlight = [], closedButLive = [], topN = 0, targetedId = null }) {
   const allTasks = new Map();
   const fileNames = fs.existsSync(tasksDir)
     ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"))
@@ -556,6 +632,14 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     top_relevance.push(...ranked.slice(0, topN));
   }
 
+  // TARGETED PROMOTION (gap-targeted-promotion-operation-does-not-exist): the outer's stage-goal
+  // selection, mechanically validated. NOT gated on `deficit > 0` / `pool < floor` (AC2) — the
+  // targeted op is a SEPARATE operation from the bulk refill. Supplemental only: bulk `promotions`
+  // and the rest of the output are computed exactly as before (AC3).
+  const targeted_promotion = targetedId
+    ? { ...buildTargetedPromotion(targetedId, allTasks.get(targetedId), root, allTasks), pool, floor, cap }
+    : null;
+
   return {
     pool,
     floor,
@@ -575,6 +659,7 @@ export function analyzeTasks({ tasksDir, root, cap = CONCURRENCY_CAP_DEFAULT, fl
     top_relevance: topRelevance,
     ready_relevance: readyRelevance,
     closed_but_live: (closedButLive || []).map((t) => t.id),
+    targeted_promotion,
   };
 }
 
@@ -585,6 +670,7 @@ function main(argv) {
   let inFlightIds = [];
   let closedButLiveIds = [];
   let topN = 0;
+  let targetedId = null;
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") root = args[++i];
@@ -592,6 +678,7 @@ function main(argv) {
     else if (args[i] === "--cap") cap = Number(args[++i]);
     else if (args[i] === "--floor-mult") floorMult = Number(args[++i]);
     else if (args[i] === "--top") topN = Number(args[++i]); // value-prioritization query: top-N todos by relevance
+    else if (args[i] === "--targeted") targetedId = String(args[++i] || "").trim() || null; // targeted-promotion query
     else if (args[i] === "--in-flight") {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--closed-but-live") {
@@ -611,7 +698,7 @@ function main(argv) {
   const inFlight = readTasks(inFlightIds);
   const closedButLive = readTasks(closedButLiveIds);
   const t0 = Date.now();
-  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN });
+  const result = analyzeTasks({ tasksDir: path.join(rootDir, "tasks"), root: rootDir, cap, floorMult, inFlight, closedButLive, topN, targetedId });
   if (process.env.CHECKER_COST_SKIP !== "1") {
     recordCheckerCost({ root: rootDir, name: "ready-pool-check", ms: Date.now() - t0, n: result.pool, load: getLoad1() });
   }

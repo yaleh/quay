@@ -42,6 +42,14 @@ extra:
    跑 `ready-pool-check.ts`；`pool < 3` ⇒ 按推荐补晋（缺四件套的先补齐，再 `status: todo → ready`）。
 3. **外层自愿 AC-queue 降级为引用**：机制由 tick 文档承载，外层 AC 只引用它，不再独立维护。
 
+> **交叉标注（2026-08-08，`gap-targeted-promotion-operation-does-not-exist` 落地时写）**：本条裁定在
+> 补条的落地中被核对出**超额执行**——把「外层候选集构造规则整体搬进内层 checker（kind 排序
+> gap→DIR→other，无阶段目标输入）」时，连「外层提供优先级输入」职责一起砍了。那个职责是**另一项
+> 操作**：**定向晋级 targeted**（外层按阶段目标挑选 todo 任务，机械承载 = `ready-pool-check.ts
+> --targeted <id>` + `quay promote <id>`，**不受 `pool<floor` 约束**——阶段目标任务被补充门挡在 todo
+> 时由它提出来）。本条 = 机制默认存在（AC1-AC3 已落）；补条 = 外层优先级输入的操作落位（AC1-AC5）。
+> 两条不重叠、同属 ready-pool-check 机制族；补条不改本条已有的 `pool<floor` 批量补充路径。
+
 ## Acceptance Criteria
 
 - [x] AC1: `plugin/scripts/ready-pool-check.ts` 存在——计算真实就绪池（排除本批未翻 / fixture /
