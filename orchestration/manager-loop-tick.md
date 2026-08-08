@@ -28,6 +28,24 @@ gap-session-liveness-remove-shared-events-and-lock。）
 `orchestration/manager-phase-goal.md` —— 本阶段的目标与 8 条 AC。
 复核：**有没有 AC 已达成而没勾、或已失效而没改**。一份不更新的 AC 清单，和没有 AC 是一回事。
 
+## 0.6 共享主检出上：改完立刻提交，不留未提交状态（2026-08-08 08:0xZ，付过真实代价后立）
+
+**代价**：我在 `manager-phase-goal.md` 上做了两处实质编辑（AC4 判据失效更正、AC5 自报违反），
+未提交；08:08:24 inner 为「对账」批量合后的主检出跑了 `git reset --hard HEAD`，
+**两处编辑被抹掉，`git fsck` 救不回——从未 `git add` 的内容根本不在对象库里**。
+这次能救回，唯一原因是**正文还在我的上下文里**，不是任何机制。
+
+**规则**：在 `/home/yale/work/quay` 这个**共享**检出里，**编辑 → 立刻 `git add` + `commit`**。
+不攒着、不等「这一轮做完一起提」。提交粒度难看无所谓，**未提交的内容没有任何人为你负责**。
+
+**不要把这条理解成「等那个 `--hard` 缺陷修好就不用了」**
+（缺陷已立案 `gap-batch-merge-reconcile-destroys-uncommitted-work`，todo）。
+共享检出上销毁未提交内容的路径**不止一条**——`reset --hard`、`checkout -- .`、`clean -fd`、
+`worktree remove`、以及任何把 ref 从底下换掉之后的「对账」发明。
+**修掉其中一条，不等于其余的不会发生。**
+
+⇒ **一般形态：在一个多方共存的可变工作区里，「未提交」不是一个中间状态，是一个赌注。**
+
 ## 1-AC16. 巡检项必须由当前阶段 AC 导出（人 2026-08-07 裁定）
 
 **人的原话**：「这些巡检项应根据本阶段目标和 AC 调整。」
