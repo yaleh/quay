@@ -1,7 +1,7 @@
 ---
 id: gap-session-liveness-ignores-unknown-transcript-names
 title: "session-liveness 静默忽略不在 SESSION_TARGETS 表里的 transcript/heartbeat 名字——零告警盯错对象（实测：manager 用 SESSION_TRANSCRIPTS=\"outer <outer transcript>\" 挂载但未设 SESSION_TARGETS，目标表来自 env（ba0c1968 quay→quay-0:inner），--once 报 pid=2989409（inner）非 2989418（outer）；outer 216s 空闲窗口无人观测——不是去抖漏报是从未观测；判据建议：启动时任一 transcript/heartbeat 名字不在目标表 ⇒ WARN 或 fail-closed，与 env 自述「归属靠位置隐式决定而位置是巧合」同族"
-status: todo
+status: ready
 labels:
   - gap
   - defect
