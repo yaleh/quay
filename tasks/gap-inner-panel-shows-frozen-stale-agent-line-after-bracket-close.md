@@ -144,6 +144,10 @@ AC1 输出已示（exit=1）。对应测试：`AC3 — CLI exit 1 when the froze
 - `tasks/gap-manager-instrument-failures-need-mechanical-detection-not-carefulness.md`：Touches 增加
   本任务交叉标注（同族：散文规则被证无效、需机械检出；ended-vs-running 方向交给
   `inner-panel-stale-check.ts` 机械检出）。
+- **反向已落地（2026-08-08，由本任务转达的缺口立案）**：同族的「管理者仪器失效五族」已由
+  `plugin/scripts/instrument-failure-check.ts --gate` 机械检出（band ≥5 + shrink-only，已接入
+  `scripts/test.sh` 静态 tier）——五族任何一族失去检出路径或新增失效形态都会使 gate 红。
+  与 `inner-panel-stale-check.ts` 是同一设计族（观测失效 → 机械检出，而非散文规则）。
 
 ### 测试
 
