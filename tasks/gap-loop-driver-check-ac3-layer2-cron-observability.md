@@ -180,9 +180,28 @@ $ grep -n 'CronList\|会话内\|可观测\|cron' plugin/scripts/loop-driver-chec
     判据换成可观测 last-alive 证据、窗口 LOOP_DRIVER_LIVENESS_MIN；正文 DEAD/LIVE/BANNED-MECHANISM 分支）
 ```
 
-### 4. AC4——层 1 pin 测试同步更新
+### 4. AC4——层 1 pin 测试同步更新 + scoped 门
 
-`plugin/test/loop-driver-check.test.mjs` 单跑 12/12 绿（`node --test`）；scoped 门
-`bash scripts/test.sh --for-task gap-loop-driver-check-ac3-layer2-cron-observability` 结果见文末（实跑
-由执行者贴）。新增/更新的测试：AC3 陈旧 ⇒ DEAD + `stale_registry_exit=0`（位置参数与 `--check` 一致）、
-invoke 契约、活驱动仍 LIVE、冷启动宽限仍 LIVE、层 1 文档级 `rm -f` 处置保留。
+`plugin/test/loop-driver-check.test.mjs` 单跑 12/12 绿（`node --test`）。新增/更新的测试：AC3 陈旧 ⇒
+DEAD + `stale_registry_exit=0`（位置参数与 `--check` 一致）、invoke 契约、活驱动仍 LIVE、冷启动宽限仍
+LIVE、层 1 文档级 `rm -f` 处置保留。
+
+scoped 门（执行者实跑）：
+
+```text
+$ bash scripts/test.sh --for-task gap-loop-driver-check-ac3-layer2-cron-observability
+... scoped static checks: task-contract-check no violations; adr016 PASS; dead-code-after-return PASS ...
+✔ AC3 (layer-2) — a registry line whose driver died reports DEAD (exit 6); the Contract measure stale_registry_exit = 0
+✔ invoke — the criterion source (CronList / 会话内 / 可观测 / cron) is visible in the script
+✔ AC2 (layer-2) — a genuinely-alive driver (registry line + fresh observable activity) reports LIVE (exit 0)
+✔ AC2 (layer-2) — a freshly-installed driver (registry just written, first tick not yet fired) still reports LIVE (cold-start grace)
+ℹ tests 12
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+EXIT=0
+```
+
+另跑 `quay-init-loop-driver.test.mjs` 的驱动行为测试（laid-down 端到端，5/5 绿）：零驱动 STALLED、恰一个
+cron 驱动 LIVE（端到端：一个触发源）、第二个驱动 DOUBLE-TRIGGER、删除唯一驱动 STALLED、被废弃机制
+BANNED-MECHANISM——新判据未破坏任何既有驱动行为。
