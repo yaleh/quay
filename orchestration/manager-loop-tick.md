@@ -177,7 +177,12 @@ git log --since='<禁令时刻>' --format='%h %s' | grep -v '^.\{8\} manager:'  
 
 ```bash
 # a 方向核实：最近一次 task/* → integration 的真合并（判据1）
-git log integration --merges -3 --format='  %h %cI %s' | grep -i 'fan-in' | head -1
+#   ⚠️ 2026-08-08 10:1xZ 修：原写法 grep 字面量 'fan-in'，而 10:03 那次真合并的标题是
+#   "Merge branch 'task/gap-ac19-…' into integration"（git 默认信息，无 fan-in 二字）
+#   ⇒ 判据当场漏报，返回空。**判据不该匹配【提交信息的措辞】，该匹配【拓扑事实】。**
+#   正确形态：找双亲之一是 task/* 分支的合并——用 --merges 且 subject 含 task/ 或直接看双亲
+git log integration --merges -5 --format='%h %cI %P %s' \
+  | awk '$0 ~ /task\// {print "  "$0; exit}' | cut -c1-110
 
 # b 窗口：integration 是否领先 develop（判据2 前半）
 echo "integration 领先=$(git rev-list --count develop..integration)  develop 领先=$(git rev-list --count integration..develop)"
