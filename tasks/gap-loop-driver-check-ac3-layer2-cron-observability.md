@@ -205,3 +205,14 @@ EXIT=0
 另跑 `quay-init-loop-driver.test.mjs` 的驱动行为测试（laid-down 端到端，5/5 绿）：零驱动 STALLED、恰一个
 cron 驱动 LIVE（端到端：一个触发源）、第二个驱动 DOUBLE-TRIGGER、删除唯一驱动 STALLED、被废弃机制
 BANNED-MECHANISM——新判据未破坏任何既有驱动行为。
+
+### 5. 已知后续（文档漂移，超出本任务 Touches，不在此改）
+
+判据换成可观测来源后，两处文档措辞已不再准确（本任务 Touches 不含它们，留作后续任务）：
+
+- `plugin/loop/orchestrator-loop-tick.md` 步骤 4 的「注意：陈旧注册报的是 LIVE，不是 STALLED。……
+  这是自述注册表的结构性极限（判据换成可观测来源是第二层的事）」——第二层已实现，陈旧注册现在报
+  **DEAD**（exit 6），该句应更新。
+- `plugin/skills/cold-start/SKILL.md` 步骤 5 的 pre-check 退出码分支（exit 0 ⇒ STOP / exit 3 ⇒ 建 cron）
+  未覆盖新退出码 6（DEAD）；其后的「stale registration … clear the stale registry」措辞仍以「pre-check
+  报 LIVE」为前提。DEAD 分支应显式指示先 `rm -f <root>/.quay/loop-driver.jsonl` 再建 cron。
