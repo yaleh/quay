@@ -580,6 +580,12 @@ outer 步骤 1c 逐字 `cat` 转发），由 **grep 断言 + `reanchor-prompt.te
 
 **这一行本身就是缺口的证据**：截至 2026-08-07，除了这张表，**没有任何机制会在动作前提醒我"先查有没有现成工具"**——本行是靠人当场指出补上的，不是巡检查出来的，与本表其余四行同源。
 
+**已机械检出（2026-08-08，gap-manager-instrument-failures-need-mechanical-detection-not-carefulness）**：
+本表五族已被 `plugin/scripts/instrument-failure-check.ts --gate` 机械检出——「写下来」不再是防法，
+成文（§4）就是扫描面，散文变可执行。五族 ↔ 检出器：族1 自匹配 → `FAMILY-1`；族2 计数零误读为无 →
+`FAMILY-2`；族3 管道后读退出码 → `FAMILY-3`；族4 片段当进程名 → `FAMILY-4`；族5 读派生视图断言实时 →
+`FAMILY-5`。gate 双约束：五族全部可检出（band）+ 每族检出数不超基线（shrink-only，新增失效形态即红）。
+
 ## §1.6 监视器事件的分级处置（2026-08-03，被外层当面纠正后写死）
 
 **背景**：我在 20 分钟内为 4 条 `SESSION-RESUMED`/`SESSION-IDLE` 各花了一次调用去查，
