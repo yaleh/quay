@@ -233,10 +233,12 @@ test("AC5 — this file is node:test and declares // @test-group product", () =>
 
 test("AC5 — cold-start/SKILL.md wires session-bootstrap.sh in as the bare-metal step", () => {
   const src = fs.readFileSync(COLD_START, "utf8");
-  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the bootstrap via the
-  // grouped entry point — `quay-session.ts session-bootstrap`. The test asserts the SAME command
-  // name the skill uses (AC2: docs and tests must not each write their own).
-  assert.match(src, /quay-session\.ts session-bootstrap/, "cold-start must reference the bootstrap command (the formalized bare-metal step)");
+  // 40→6 consolidation (SPEC-instruments-behind-one-entry.md) was reverted (7642849a,
+  // gap-forty-to-six-remerge-needs-tests-updated-first): the cold-start skill references the
+  // canonical bare script `session-bootstrap.sh` (NOT the grouped entry `quay-session.ts
+  // session-bootstrap`). The test asserts the SAME command name the skill uses (AC2: docs and tests
+  // must not each write their own). Re-instate the `quay-session.ts` form when 40→6 is re-merged.
+  assert.match(src, /session-bootstrap\.sh/, "cold-start must reference the bootstrap command (the formalized bare-metal step)");
   assert.match(src, /bare metal|裸机/i, "cold-start must name the bare-metal step it formalizes");
 });
 

@@ -48,7 +48,7 @@ test('AC1 (laid-down) — the rendered outer tick doc also declares exactly one 
     const outer = fs.readFileSync(path.join(ws, 'orchestration', 'orchestrator-loop-tick.md'), 'utf8');
     assert.deepEqual([...distinctDriverMechanisms(outer)].sort(), ['CronCreate'],
       'the laid-down outer tick doc must also declare exactly one driver (the negative control survives shipping)');
-    assert.ok(outer.includes('quay-suite.ts loop-driver-check'), 'the laid-down doc must reference the single-driver check (40→6 consolidated command)');
+    assert.ok(outer.includes('loop-driver-check.sh'), 'the laid-down doc must reference the single-driver check (canonical bare script; 40→6 reverted — re-instate quay-suite.ts on re-merge)');
   } finally { cleanup(ws); }
 });
 
@@ -57,10 +57,12 @@ test('AC1 (skill) — the cold-start skill\'s only driver is CronCreate and it e
   assert.ok(skill.includes('CronCreate'), 'the skill re-creates the cron via CronCreate');
   assert.ok(!skill.includes('ScheduleWakeup'), 'the skill must NOT instruct ScheduleWakeup (AC3 dispose)');
   assert.ok(!LOOP_NM_RE.test(skill), 'the skill must NOT instruct a /loop Nm invocation (AC3 dispose)');
-  // The 40→6 consolidation (SPEC-instruments-behind-one-entry.md) invokes the check via the grouped
-  // entry point — `quay-suite.ts loop-driver-check`. The test asserts the SAME command name the
-  // skill uses (AC2: docs and tests must not each write their own).
-  assert.match(skill, /quay-suite\.ts loop-driver-check/, 'the skill must run the single-driver check');
+  // 40→6 consolidation (SPEC-instruments-behind-one-entry.md) was reverted (7642849a,
+  // gap-forty-to-six-remerge-needs-tests-updated-first): the skill invokes the check via the
+  // canonical bare script `loop-driver-check.sh` (NOT the grouped entry `quay-suite.ts
+  // loop-driver-check`). The test asserts the SAME command name the skill uses (AC2: docs and tests
+  // must not each write their own). Re-instate the `quay-suite.ts` form when 40→6 is re-merged.
+  assert.match(skill, /loop-driver-check\.sh/, 'the skill must run the single-driver check');
   assert.match(skill, /LIVE/, 'the skill must require the check to report LIVE');
   assert.match(skill, /double-trigger/i, 'the skill must name the double-trigger it prevents');
 });
