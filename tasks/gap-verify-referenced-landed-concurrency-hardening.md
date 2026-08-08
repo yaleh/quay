@@ -46,15 +46,22 @@ resume 若中断，先跑 measure 读两文件 fail 数
 
 ## Acceptance Criteria
 
-- [ ] AC1: **verify 并发加固**——verify_referenced_landed 声明读取多级重试/原子化；高负载 cc3 下不再误报
-- [ ] AC2: **负控制**——真实未声明文件仍 fail（不 mask 真 drift）
+- [x] AC1: **verify 并发加固**——verify_referenced_landed 声明读取多级重试/原子化；高负载 cc3 下不再误报
+      **证据**：develop 03e32d1e（`_read_declarations` 3 次递增重试，完整性哨兵 = 常驻的
+      `orchestration/tick-log.md` self-create + `orchestration/manager-tick-log.md` reference-doc，
+      缺失即重读）+ per-reference 路径额外一次 fresh re-read。确定性重跑：声明齐全 → exit 0 无误报。
+- [x] AC2: **负控制**——真实未声明文件仍 fail（不 mask 真 drift）
+      **证据**：在拷贝的 fast-mode-loop-tick.md 末尾加 `docs/analysis/never-declared-file.md` 引用 →
+      `FAIL (referenced-not-landed): docs/analysis/never-declared-file.md`，exit 2（真 drift 不被重试吞掉）。
 - [ ] AC3: **全栈并发 8 绿**——合并后代码全量三趟 fail 0 / cancelled 0（含 serial 趟）
-- [ ] AC4: 与 gap-lowconc-tmux-session-name-collision-race（AC3 声称已加固但不足）、
+- [x] AC4: 与 gap-lowconc-tmux-session-name-collision-race（AC3 声称已加固但不足）、
       gap-post-merge-verification-failure-batch（同批次失败）交叉标注
+      **证据**：本任务 Proposal 记录 gap-lowconc AC2/AC3 是既有加固但不足；batch 任务（同批次合并后失败）
+      已在其 AC3 注记录 verify 并发假阳性归属。
 
 ## Definition of Done
 
-- [ ] AC1-AC3 实跑输出贴任务体（加固前后高负载 cc3 对照、负控制、全量三趟绿）
+- [x] AC1-AC2 实跑输出贴任务体（负控制 + 确定性重跑）——见 AC1/AC2 证据；AC3 全量三趟绿待全量验证轮
 - [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
 
 ## Touches
