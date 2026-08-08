@@ -688,6 +688,26 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
   **内层不知道阶段目标**：本步只做机械补充（`pool < floor` 的 `promotions[]`），不调用 `--targeted`。
   职责切分：晋级（选择，需要阶段目标）= 外层；派发（机械，只需 touches/cap/停止条件）= 内层。
 
+### 3.7 例常例行（routine track）——周期探针发现（AC3，gap-delivery-outline-vs-verify-surface-single-source）
+
+**这是产品里唯一「主动去找缺陷并建议任务」的机制（pre-friction 发现）**。判据见
+`docs/proposals/quay-product-outline.md` §3.5。**接线状态（2026-08-08 修复）**：routine-scheduler.ts
+的唯一调用方曾是退休的 loop-driver SKILL（活 tick 文档零命中）——本步骤把 routine track 接回活文档。
+
+1. **读例常配置**：`.quay/config.yml` `loop.routines:`（`readLoopParams` 校验；`config-wiring-check.ts`
+   钉「有配置必有人读」）。默认 `[]` = 无例行 → 本步空转。
+2. **调度**：把 routines 写成临时 JSON，跑
+   `node --no-warnings --experimental-strip-types routine-scheduler.ts --iteration <tick 计数> --event checkpoint --plugin-root "$CLAUDE_PLUGIN_ROOT" /tmp/routines-<tick>.json`
+   ——exit 0 = 有 DUE；exit 3 = 无 DUE（`every(N)` 的 N 以 tick 计数计，不再用退休管线的「迭代号」）。
+3. **派发**：对每条 DUE routine，用 `read-probe-spec.ts` 读 `<plugin-root>/probes/<name>.md` 的 spec
+   （instrument / fallback / objective）；instrument 可用才派后台 subagent，不可用且 `fallback: none` 则跳过。
+4. **闸门 + FILE-ONLY**：findings 走 `routine-file-gate.ts`（新颖性 / 去重 / 限流）；只产新任务文件
+   （`tasks/`），改任何产品/方法代码 = 违规丢弃。
+
+`quay:run-routines` skill（`plugin/skills/routines/SKILL.md`）是这条 track 的操作化承载——本步调度它
+即可，不必手抄流水线；routine-scheduler.ts / read-probe-spec.ts / routine-file-gate.ts 随 --loop 铺入目标
+（机制语料裸名解析，见 quay-init.sh 的 derive_loop_scripts）。
+
 ### 4. 派发就绪任务（并发）
 
 **派发评估有两个触发源，走同一步、同一道闸**：① tick 边界（本步随 Tick 步骤执行）；② 完成事件——

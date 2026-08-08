@@ -251,4 +251,76 @@ test("Contract measure — --json emits surface_categories_covered + spec_is_liv
   assert.equal(json.categories.length, 6, "all six categories present in json output");
 });
 
+// ── AC1/AC2 (gap-delivery-outline-vs-verify-surface-single-source): delivery inventory ─────────────
+// AC1 — verify-delivery-surface is the SINGLE SOURCE for the plugin-bundle directory counts; the
+//       outline §6 carries a derived snapshot that `--inventory` validates. AC2 — outline drift is
+//       mechanically caught: a snapshot that disagrees with disk ⇒ inventory_drift reported + exit 1.
+
+test("AC1/AC2 — the real bundle inventory matches the outline §6 snapshot (--inventory exits 0)", async () => {
+  const m = await mod();
+  assert.ok(Array.isArray(m.DELIVERY_INVENTORY) && m.DELIVERY_INVENTORY.length >= 8,
+    "the delivery inventory must cover the eight plugin-bundle directories");
+  const r = runScript(["--inventory", "--root", REPO_ROOT]);
+  assert.equal(r.status, 0, `bundle inventory must be consistent:\n${r.stdout}`);
+  assert.match(r.stdout, /inventory_snapshot=present/, "outline §6 must carry the derived snapshot block");
+  assert.match(r.stdout, /inventory_drift=0/, "no inventory drift on the bundle root (AC2)");
+});
+
+test("AC2 control — a drifted outline snapshot is reported (--inventory exits 1, names the drifted dir)", async () => {
+  const m = await mod();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-drift-"));
+  try {
+    for (const e of m.DELIVERY_INVENTORY) {
+      const p = path.join(base, e.dir);
+      fs.mkdirSync(p, { recursive: true });
+      fs.writeFileSync(path.join(p, "a.txt"), "");
+      fs.writeFileSync(path.join(p, "b.txt"), "");
+    }
+    // A snapshot block that claims scripts=999 while disk has 2 → drift on the scripts entry.
+    const outline = `# x\n\n${m.INV_BEGIN_MARKER}\nscripts=999 · skills=2\n${m.INV_END_MARKER}\n`;
+    const outlineFile = path.join(base, "docs", "proposals", "quay-product-outline.md");
+    fs.mkdirSync(path.dirname(outlineFile), { recursive: true });
+    fs.writeFileSync(outlineFile, outline);
+    const r = runScript(["--inventory", "--root", base]);
+    assert.equal(r.status, 1, "a drifted outline snapshot must fail --inventory");
+    assert.match(r.stdout, /inventory_drift=1/, "drift count must be reported");
+    assert.match(r.stdout, /\[DRIFT\] scripts/, "the drifted dir must be named");
+  } finally { rmrf(base); }
+});
+
+test("AC2 negative — --inventory fails closed when the outline §6 snapshot block is absent", async () => {
+  const m = await mod();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-missing-"));
+  try {
+    for (const e of m.DELIVERY_INVENTORY) {
+      fs.mkdirSync(path.join(base, e.dir), { recursive: true });
+      fs.writeFileSync(path.join(base, e.dir, "a.txt"), "");
+    }
+    // No outline at all → the derived snapshot is absent → AC1 violated → fail-closed.
+    const r = runScript(["--inventory", "--root", base]);
+    assert.equal(r.status, 1, "missing outline snapshot block must fail --inventory (AC1: outline must derive)");
+    assert.match(r.stdout, /inventory_snapshot=missing/, "must report the snapshot as missing");
+  } finally { rmrf(base); }
+});
+
+test("AC1 generation — --write-inventory regenerates the outline snapshot to match disk", async () => {
+  const m = await mod();
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-inv-write-"));
+  try {
+    for (const e of m.DELIVERY_INVENTORY) {
+      fs.mkdirSync(path.join(base, e.dir), { recursive: true });
+      fs.writeFileSync(path.join(base, e.dir, "a.txt"), "");
+    }
+    const outline = `# x\n\n${m.INV_BEGIN_MARKER}\nscripts=999\n${m.INV_END_MARKER}\n`;
+    const outlineFile = path.join(base, "docs", "proposals", "quay-product-outline.md");
+    fs.mkdirSync(path.dirname(outlineFile), { recursive: true });
+    fs.writeFileSync(outlineFile, outline);
+    const r = runScript(["--write-inventory", "--root", base]);
+    assert.equal(r.status, 0, "--write-inventory must exit 0");
+    assert.match(r.stdout, /inventory_drift=0/, "after regeneration the snapshot must match disk");
+    const after = fs.readFileSync(outlineFile, "utf8");
+    assert.match(after, /scripts=1/, "the regenerated snapshot must carry the disk count");
+  } finally { rmrf(base); }
+});
+
 // ── AC5: this file uses node:test with a governance group declaration (checked by policy) ─────────
