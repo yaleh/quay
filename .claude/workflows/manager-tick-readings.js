@@ -149,51 +149,16 @@ const JUDGE_CRITERIA = `**判准（逐条应用，并把结论写进 tick-log �
 **新增检查项挤掉了既有检查项：加覆盖反而减了覆盖。**
 每轮先把 ①-⑤/⑥′ 写完，再写当轮触发的 ⑦/⑧。）
 
-**⑧ 条件触发动作：inner 与 outer 【都】停下来时，同步系统时间（人 2026-08-07 23:4x 指示）**
-   触发条件：\`tmux capture-pane\` 判定 inner 与 outer **同时**处于闲（无 \`esc to interrupt\`）。
-   **先查再动**：\`timedatectl\`——若 \`System clock synchronized: yes\` 且 \`NTP service: active\`，
-   **没有可同步的东西，据实报告，不做空操作、不假装做了**（2026-08-07 23:47 首次检查即此情形：
-   local=UTC=RTC=23:47:14，无偏移）。
-   **别把这条和另一个现象混为一谈**：曾观测到 outer 的 **tick-log 标签**比真实 UTC 快约 42 分钟
-   （17:43 时标 \`18:25Z\`；另有 \`23:29ZZ\` 这种双 Z 笔误）——**那是它的标签生成，不是机器时钟**，
-   要修也是改 outer 的标签，不是动系统时间。
-
-**⑨ 条件触发（人 2026-08-08 01:0x 指示）：耗时分解任务，等两个条件【都】成立再发 outer**
-   待发内容已备：**耗时分解 + 三个杠杆**（见下），人已看过，等条件成立即发，不必再问。
-     理论墙钟下界 551.0s = main 195.4（165 文件 1563.0s @cc8）+ serial 161.7（cc1 求和）
-       + lowconc 193.9（20 文件 581.7s @cc3）；实测 703s ⇒ 固定开销+并行损失 152.0s（22%）。
-     **500s 靠调参达不到——下界已 551s，必须动结构。**
-     杠杆①：lowconc cc3→cc5 ≈ -78s（下界 193.9→116.3）——**拆分后才可行**，此前尾部 211.4s 封顶；
-     杠杆②：serial 161.7s 最多 -78s，但 cc1 是它的定义，要省只能"让测试变快"或"移出 serial"，
-             而那 3 个文件正是嵌套 runner（21/18/23）——移出即毁掉今晚刚修好的隔离，**代价最高**；
-     杠杆③：**固定开销 152s 未拆解**——今晚八项优化没有一项碰过它，全都在优化"测试跑多久"，
-             没人量过"跑测试之前花了多久"。**这是下一个该量的**。
-   **条件（两个都要成立，逐条机械判定，不许凭印象）**：
-     (a) **八项合并改动首次获得完整验证背书**：本轮全量套件 green + 三趟 selected 齐全
-         （product,engine / serial / lowconc）+ fail 0 + cancelled 0 + 日志证据完整（非只有 state）；
-     (b) **批量合汇合点被证明稳定**：\`git rev-parse develop\` == \`git rev-parse integration\`
-         且该轮测的就是这个点（验证树 HEAD == 该点）；跑完后仍无新分歧引入冲突面。
-   **任一不成立就继续等，并把"卡在哪一条"写进当轮 tick-log**——不要因为等太久就降格发出。
-
-**⑩ 条件触发（人 2026-08-08 02:0x 同意并指示"等它处理完当前的问题就发"）：FF 假设四处矛盾**
-   **人已裁定放下"develop 在批量合前不变"这一假设**（实测反驳：今天 develop 105 条直提中
-   ①纯任务文本 31 / ②任务文本+编排记账 39 / **③含代码 35（33%）**——含代码的不止管理者，
-   \`3e849401 fix: declare manager-tick-log.md as reference-doc\`、\`79ee8293 inner: batch-merge shared-file glob\`
-   都是 outer/inner 直提 develop 的代码；今晚那次 red 正是该假设不成立的实证代价）。
-   **触发条件**：\`tasks/gap-merge-introduced-referenced-not-landed-manager-tick-log.md\` 的 \`status: done\`
-   （= outer 处理完当前问题）。**未 done 就继续等，并把"卡在哪"写进当轮 tick-log。**
-   **待发内容（四处矛盾，人已看过，条件成立即发，不必再问）**：
-     ① \`plugin/loop/orchestrator-loop-tick.md:755\`「永远是 develop 后代 ⇒ fast-forward 无冲突」（出厂模板）
-     ② \`orchestration/orchestrator-loop-tick.md:640\` 同上，括号里「develop 只被外层批量合推进」即被放下的假设
-     ③ \`plugin/scripts/capability-catalog.sh:129\` 只描述 FF 路径，\`--merge\` 真合模式不在描述里
-     ④ \`plugin/test/branch-model.test.mjs\` AC3 三条：FF-when-descendant / **TRUE divergence FAILS closed** / --dry-run
-   **要点不是"这些检查错了"，是【默认值反了】**：\`integration-batch-merge.sh\` 的 \`--merge\` 真合模式
-   （共享文件自动解 + 真代码冲突 fail-closed）机制是全的，但**默认路径是 FF-only**；
-   人裁定后 NOT-FF 从【例外】变【常态】⇒ 默认每次 fail-closed，④ 那条负控制会拦住每一次正常批量合。
-   **SPEC 自己已预告此缺口**（\`SPEC-branching-model-integration-branch-2026-08-05.md:138-139\`）：
-   「develop 每分钟都可能被内层/外层/管理者直提。后续若要把 \`--merge\` 变成外层默认，
-     需一并更新 \`orchestrator-loop-tick.md\` 的批量合步骤（本任务 Touches 不含 loop 文档，未改）。」
-   ⇒ 当时是待办，人今日裁定后变成必须。**改法（哪几行、--merge 是否成默认、④ 断言怎么调）是 outer/inner 的活，不代写。**
+**⑧⑨⑩… 条件触发项：读 \`orchestration/manager-pending.md\`，不在本文件里**
+（人 2026-08-08 02:2x 指出：短期 memo 不该硬编码进判准文件。**本脚本层零 I/O**
+ ——探针 wf_af76a6df-2c3 实测 globalThis 只有 log/phase/budget/setTimeout/agent/parallel/
+ pipeline/workflow/args，无 require/process/fetch——但**主循环有完整 I/O**，
+ 所以本文件只负责"叫你去读"，内容在那边维护。）
+**每轮 tick：读该文件，逐条判触发条件；成立就执行并【把该条从文件里删掉】**——
+它是待办队列不是历史，历史留在 tick-log 的熔态列。
+**分工**：本文件放**持久判准**（①-⑦、§0 停点、发送纪律），\`manager-pending.md\` 放**一次性条件触发**。
+**理由（踩过）**：我曾把 memo 写进本文件时用了未转义反引号，**当场弄坏 tick 的核心机制**
+（\`node --check\` 还通过了，Workflow 解析器报 Unexpected token）。数据文件没有这个风险。
 
 **动作类四选一**：\`no-action\` / \`arbitrate\`（动了 \`.halt\` 或次序）/
 \`escalate\`（攒给人）/ \`correct\`（纠正外层的**做法**，不能是它的任务内容）。
