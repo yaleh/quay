@@ -87,18 +87,25 @@ SESSION-IDLE 仍 0 条、只有 RESUMED。manager 60 样本实验证伪两个候
 
 **外层仪器化（临时副本 /tmp/sl-diag.sh 加每轮 DIAG，不改 repo 原文件）**：
 - **恒定 idle pane（注入 claude-probe + 测试 tmux）**：IDLE_CONSEC 单调 1→8、IDLE_REPORTED 0→1、
-  **SESSION-IDLE round 4 报出** ⇒ **脚本 idle 逻辑完全正常**。
-- **完全复刻 manager 配置（target=quay-0:outer + pane-only）**：每轮 `pane_state=busy idle=0
-  IDLE_CONSEC=0`——**从不累积**。负控制：去掉状态区 `esc to interrupt` → 判 unknown busy=0。
+  **SESSION-IDLE round 4 报出** ⇒ **脚本 idle 逻辑完全正常**（manager 采信此负控制）。
+- **复刻 manager 配置（target=quay-0:outer + pane-only）**：每轮 `pane_state=busy idle=0
+  IDLE_CONSEC=0`。**⚠️ 自指测量——该结论已撤回（manager 15:2x）**：复刻跑时外层自己正在执行仪器化，
+  观测对象就是自己 ⇒ pane 当然是 busy。「我做测量时我是忙的」不是发现（与 pgrep 自匹配同族：
+  观测者不能用自己当被观测对象）。
 
-**根因（本任务原判据的适用边界）**：D5 修的是「busy/idle 会翻转」场景（IDLE_CONSEC 到阈值那轮
-SEEN_BUSY=0 触发机会被销毁）。但 **manager 实环境的 busy 是恒定的**——outer pane 状态区在
-`⏵⏵ bypass permissions` 模式下**常驻 `esc to interrupt`**，classifyPaneState 的 BUSY_RE 匹配底部
-两行 → **恒判 busy → IDLE_CONSEC 从不累积**。D5 修不到这个（它假设 busy 会转 idle）。
+**manager 对「常驻 esc to interrupt」的证伪（两份独立证据）**：⑴ 13:05 实录 outer idle 时底部行
+`⏵⏵ bypass permissions on · 2 monitors · ← 1 agent`——**无 esc to interrupt**，同 bypass 模式同挂载
+条件；⑵ 15:14:39–15:17:58 的 60 样本，busy 只前 9 个（15:14:39–15:15:06），后 51 个连续
+waiting-input（transcript 静止 2→170s）。**若常驻成立，这 51 个不可能出现。** ⇒ 「outer pane 常驻
+esc to interrupt」被证伪，外层该根因结论撤回。
 
-**收口判据（manager 已定）**：D5 的收口 = **实环境报出一次 SESSION-IDLE**，不是「修复已合入 develop」。
-在恒 busy 的 pane-only 场景下，需要 classifyPaneState 区分「bypass 模式常驻 esc to interrupt」与
-「真有可打断动作」——前者不应判 busy（或 pane-only 配置需要别的忙信号）。
+**manager 判据（只给判据，成因归外层/内层）**：复刻须**观测一个外层不在驱动的目标**——例如从 inner
+侧观测 outer，或由外层观测 inner——并要求该目标观测窗口内 transcript 静止 >180s。**那种配置下 IDLE
+若仍不发，才是真缺陷；若发了，则现有实现无缺陷，缺的是「pane-only 配置对一个正在被上层频繁驱动的
+目标不适用」这条边界说明。**
+
+**收口判据（manager 已定，不变）**：D5 的收口 = **实环境报出一次 SESSION-IDLE**，不是「修复已合入
+develop」，也不是注入 pane 的负控制通过。
 
 **测试**（`plugin/test/session-liveness-signals.test.mjs`，node:test，全部通过）：
 - from-mount stall：挂载即停摆（从未见忙、transcript 8 分钟无写入）的会话报 SESSION-IDLE。
