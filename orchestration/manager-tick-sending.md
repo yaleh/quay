@@ -40,11 +40,31 @@ tmux capture-pane -p -t <目标> -S -3 | grep -q 'esc to interrupt' && echo 忙 
 **`加长轮询修不了 (b)`**——丢弃的消息等再久也不会出现。今天 120s 那次就是 (b)。
 **（这推翻了人 16:5x「假阴性可接受，加长轮询到 2 分钟」的前提：那个裁定假设失败形态是迟到。）**
 
-**唯一可靠的判据是 `type=user` 且非 sidechain**（`queue-operation` / `attachment` 都不算送达）：
+~~**唯一可靠的判据是 `type=user` 且非 sidechain**（`queue-operation` / `attachment` 都不算送达）~~
+**⚠️ 上面这句是错的，2026-08-08 05:5x 实测推翻——它把两种真实送达形态排除了。**
+
+**实测（05:39 那封"两条我自己的错"）**：脚本报 `FAIL——120s 轮询后 transcript 仍未出现内容匹配的
+真实 user`，**但消息确实送到了**，outer 随后在处理它。查原始 jsonl，该内容落成：
 ```
-mcp__meta-cc__query_session_content  role=user  session_id=<目标会话id>  contains=<本条特征串>
+type=queue-operation  ts=05:39:23.157Z
+type=queue-operation  ts=05:39:42.590Z
+type=attachment       ts=05:39:23.157Z  isSidechain=False
+零条 type=user 纯字符串记录
 ```
-**用 meta-cc，不要手搓 python 解析 jsonl**（2026-08-07 我手搓了一遍，犯了自己 §4 列的
-「手搓代替现成工具」；meta-cc 按 role 直接筛，更短更准，还顺手能做跨消息审计）。
-**返回 0 条 ⇒ 真丢了，补发；返回 ≥1 条 ⇒ 已送达，不要重发。**
-**通则：凡要读会话历史，先问一句「meta-cc 能不能答」。**
+⇒ **长文本/粘贴形态的投递，成功后就是落成 `queue-operation` + `attachment`。**
+把它们排除 ⇒ 成功投递被判成 FAIL。
+
+**正确判据（当前认知，随实测更新）**：核实送达要**在原始 transcript jsonl 里按内容特征串搜全部
+记录类型**，`type=user` / `queue-operation` / `attachment` 任一命中即为已送达：
+```bash
+grep -c '<本条特征串>' ~/.claude/projects/-home-yale-work-quay/<目标会话id>.jsonl
+# ≥1 ⇒ 已送达，不要重发；0 ⇒ 再等（投递可能仍在进行），别急着补发
+```
+**`mcp__meta-cc__query_session_content role=user` 对这个问题不完备**（②b 的实例）——
+它只回 `type=user`，查不到 queue-operation/attachment，会把成功投递报成 0 条。
+读会话历史的其它用途仍优先用 meta-cc；**只有"这条消息送到没有"这一问要直读 jsonl。**
+
+**⚠️ 脚本的 FAIL 是自述，不是结论（②e）**：`send-keys-reliable.sh` 报 FAIL 只说明
+**它没确认到**，不说明**没送到**——这两个是不同命题。**假 FAIL 比真 FAIL 更贵**：
+我曾据一次假 FAIL 推翻了自己一条正确的等待策略、写了一条基于错误前提的判准（②g，已撤回）、
+还在 tick-log 记了一条并不存在的违规。**收到 FAIL 时先自己查原始文件，再决定要不要补发。**
