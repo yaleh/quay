@@ -119,6 +119,13 @@ inner 的自述措辞与出厂语义一致」**。本任务补这个判据。
 > `gap-inner-has-no-periodic-anchor-prose-only-drives-drift`（done）在 tick 文档 1c 已被本判据引用为
 > 「通道提供方」——双向标注齐全，无需改 done 任务。
 
+> **交叉标注（2026-08-08，`gap-self-report-vocab-misfires-on-stopped-state`）**：本任务的收敛判据
+> （`reanchor_effectiveness_is_convergence` 读 `converged`）原假设活跃派发循环，会把停止态自报
+> （idle/paused/awaiting manager，reports < window）误判为非收敛——停止态误判干扰重锚有效性判断
+> （误以为重锚无效而加密重锚频率）。`gap-self-report-vocab-misfires-on-stopped-state` 为同一判据加
+> 「停止态豁免」：窗口内含停止标记 ⇒ 免除 window 满要求（all-clean 不变）。修复后停止态判收敛，
+> 重锚有效性不被停止态压低。此处只加不改，不改本任务 status/AC。
+
 ## Test-Files
 
 - plugin/test/self-report-vocab-check.test.mjs

@@ -18,6 +18,14 @@
 //      Re-anchor effectiveness IS semantic convergence (`reanchor_effectiveness_is_convergence`),
 //      not "a re-anchor was forwarded".
 //
+// Stopped-state exemption (gap-self-report-vocab-misfires-on-stopped-state, AC1/AC2): the
+// convergence criterion used to assume an ACTIVE rolling-dispatch loop — `converged` required
+// reports_total >= window (fail-closed). A STOPPED loop ("idle heartbeat, paused awaiting
+// manager") emits few self-reports (< window) precisely because it is NOT actively dispatching —
+// that is HONEST non-drift, not vocabulary drift. When a window report carries a stopped-state
+// marker (`STOPPED_MARKERS`), the window-full requirement is WAIVED; the all-clean requirement is
+// unaffected, so a batch-style report in stopped state is still drift (AC2 no regression).
+//
 // False-alarm discipline (adversarial review, 2026-08-05):
 //  * Mechanism real names / task ids containing "batch" are NOT flagged: the batch-num pattern
 //    requires a DIGIT after the separator, so "concurrent-batch-scheduler.ts",
@@ -26,8 +34,9 @@
 //  * Layer-meta commits that QUOTE the phenomenon (e.g. an "outer:" commit quoting "Batch of 3")
 //    are caller-excluded via `--exclude-prefix outer:` — the audit targets the INNER's self-
 //    reports, and the outer is already re-anchored every 20 min.
-//  * The convergence window is fail-closed: `converged` requires reports_total >= window (can't
-//    claim "N consecutive clean rounds" from fewer than N reports).
+//  * The convergence window is fail-closed for an ACTIVE loop: `converged` requires reports_total
+//    >= window (can't claim "N consecutive clean rounds" from fewer than N reports) UNLESS a
+//    stopped-state marker is present in the window (a stopped loop is honest, not drifting).
 //
 // Run:
 //   node --experimental-strip-types plugin/scripts/self-report-vocab-audit.ts <file>... [opts]
@@ -77,6 +86,23 @@ export const CONVERGED_MARKERS: { id: string; re: RegExp }[] = [
   { id: "rolling-dispatch", re: /滚动派发|rolling[\s-]?dispatch/i },
 ];
 
+/** Stopped-state self-report signatures (idle / paused / awaiting manager). A stopped loop is
+ *  HONEST non-drift, not vocabulary drift — it emits few self-reports (< `--window`) precisely
+ *  because it is not actively dispatching. When a window report carries one of these markers the
+ *  convergence criterion waives the window-full requirement (AC1) — but the ALL-CLEAN requirement
+ *  is UNAFFECTED: a batch-style report in stopped state is still drift and still fails convergence
+ *  (AC2 no regression). Real specimen (archguard 2026-08-06): "idle heartbeat, paused awaiting
+ *  manager" — the `paused` word is the same one manager-tick-readings.ts emits for `.halt`. */
+export const STOPPED_MARKERS: { id: string; re: RegExp }[] = [
+  { id: "idle", re: /\bidle\b/i },
+  { id: "paused", re: /\bpaused?\b/i },
+  { id: "awaiting", re: /\bawait\w*/i },
+  { id: "halted", re: /\bhalt\w*/i },
+  { id: "stopped", re: /\bstopped?\b/i },
+  { id: "parked", re: /\bparked?\b/i },
+  { id: "suspended", re: /\bsuspended?\b/i },
+];
+
 export interface FlaggedReport {
   index: number;
   text: string;
@@ -92,6 +118,10 @@ export interface AuditResult {
   recent_clean: number;
   flagged: FlaggedReport[];
   compliant_markers: string[];
+  /** Any report inside the convergence window carried a stopped-state marker (idle/paused/…). */
+  stopped_in_window: boolean;
+  /** Total number of reports (full history) carrying a stopped-state marker. */
+  stopped_reports: number;
 }
 
 /** Consecutive clean self-reports required for convergence (AC2's "连续 N 轮"). Default 3 —
@@ -107,7 +137,9 @@ export function auditSelfReports(reports: string[], window = DEFAULT_WINDOW): Au
     Number.isFinite(window) && window >= 1 ? Math.floor(window) : DEFAULT_WINDOW;
   const flagged: FlaggedReport[] = [];
   const clean = new Array(reports.length).fill(true);
+  const stopped = new Array(reports.length).fill(false);
   let total_matches = 0;
+  let stoppedReports = 0;
   const compliantMarkers = new Set<string>();
   reports.forEach((text, i) => {
     const line = String(text);
@@ -125,14 +157,30 @@ export function auditSelfReports(reports: string[], window = DEFAULT_WINDOW): Au
     for (const m of CONVERGED_MARKERS) {
       if (m.re.test(line)) compliantMarkers.add(m.id);
     }
+    for (const m of STOPPED_MARKERS) {
+      if (m.re.test(line)) {
+        stopped[i] = true;
+        stoppedReports++;
+        break;
+      }
+    }
   });
   const start = Math.max(0, reports.length - win);
   let recentClean = 0;
-  for (let i = start; i < reports.length; i++) if (clean[i]) recentClean++;
+  let stoppedInWindow = false;
+  for (let i = start; i < reports.length; i++) {
+    if (clean[i]) recentClean++;
+    if (stopped[i]) stoppedInWindow = true;
+  }
   const inWindow = reports.length - start;
-  // Fail-closed: can only claim "N consecutive clean rounds" from >= N reports. With fewer than
-  // `window` reports there is no evidence of `window` consecutive clean rounds ⇒ NOT converged.
-  const converged = reports.length >= win && recentClean === inWindow;
+  // Fail-closed for an ACTIVE loop: can only claim "N consecutive clean rounds" from >= N reports
+  // — with fewer than `window` reports there is no evidence of `window` consecutive clean rounds.
+  // A STOPPED loop (idle/paused/awaiting manager) emits few self-reports (< `window`) precisely
+  // because it is NOT actively dispatching — that IS honest non-drift evidence, so a stopped-state
+  // marker inside the window WAIVES the window-full requirement (gap-self-report-vocab-misfires-
+  // on-stopped-state AC1). The all-clean requirement is UNAFFECTED (AC2): a batch-style report in
+  // stopped state is still drift and still fails convergence.
+  const converged = (stoppedInWindow || reports.length >= win) && recentClean === inWindow;
   return {
     inner_self_report_vocab: flagged.length,
     total_matches,
@@ -142,6 +190,8 @@ export function auditSelfReports(reports: string[], window = DEFAULT_WINDOW): Au
     recent_clean: recentClean,
     flagged,
     compliant_markers: [...compliantMarkers].sort(),
+    stopped_in_window: stoppedInWindow,
+    stopped_reports: stoppedReports,
   };
 }
 
@@ -201,8 +251,9 @@ export function main(argv: string[]): number {
     const newest = Math.min(result.window, result.reports_total);
     process.stdout.write(
       `inner_self_report_vocab=${result.inner_self_report_vocab} · ${state} ` +
-        `(window ${result.window}, recent_clean ${result.recent_clean}/${newest} of newest) · ` +
-        `reports_total ${result.reports_total}\n`,
+        `(window ${result.window}, recent_clean ${result.recent_clean}/${newest} of newest, ` +
+        `stopped_in_window ${result.stopped_in_window ? "yes" : "no"}) · ` +
+        `reports_total ${result.reports_total} · stopped_reports ${result.stopped_reports}\n`,
     );
     if (result.flagged.length > 0) {
       process.stdout.write(`  flagged (${result.flagged.length}):\n`);
