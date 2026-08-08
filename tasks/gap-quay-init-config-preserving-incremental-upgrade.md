@@ -147,6 +147,12 @@ changed: archguard 实跑（子代发现）立案——升级对已有消费者�
 
 **只提高频率不改验证对象 = 跑一万次也撞不到那个状态。**
 
+**交叉标注（AC4，2026-08-08——`gap-install-upgrade-verification-targets-real-downstream-workspaces`）**：
+本任务的 **AC6（合成侧扩 A3 夹具覆盖配置分歧）** 与真实侧已分头落地：合成侧 = 本任务 `install-config-driven-e2e.test.mjs`
+新增的有机演化消费者夹具（AC6 已勾）；**真实侧 = `tasks/gap-install-upgrade-verification-targets-real-downstream-workspaces.md`
+（本任务的验证对象已从合成夹具扩展到真实下游，`plugin/scripts/real-target-verify.sh` 对 archguard/meta-cc 跑只读
+`quay init --loop --dry-run` 并分线标注，synthetic 绿不再当作真实下游绿证据）**。两条合起来才是「两者都要」裁定的完整落地。
+
 ## archguard 生态位盲区裁定（2026-08-06 04:3xZ，管理者转达 archguard 报告 #12）
 
 **archguard 对 8 个新机制做静态判据×生态位矩阵，报 4 个盲区。外层逐项核实：**
