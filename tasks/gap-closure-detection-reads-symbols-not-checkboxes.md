@@ -1,11 +1,12 @@
 ---
 id: gap-closure-detection-reads-symbols-not-checkboxes
-title: "收尾信号耦合在「任务写法」不耦合在「完成状态」——ready-pool 61% 是 AC 全勾未翻转（实测 17/21）；
-  taskWorkLanded（task-status-drift-check.ts:519）只读 symbolResolved||touchLanded||gitHistory，
-  三条都不读 AC 勾选框；AC 写散文的任务无论完成与否都不可见（gap-cold-start 4/4、concurrency-derivation
-  14/14 等）；修法 = not-yet-flipped 加并列信号 all_acs_checked && status==ready（与 taskWorkLanded 并集，
-  不替换）"
-status: todo
+title: 收尾信号耦合在「任务写法」不耦合在「完成状态」——ready-pool 61% 是 AC 全勾未翻转（实测 17/21）；
+  taskWorkLanded（task-status-drift-check.ts:519）只读
+  symbolResolved||touchLanded||gitHistory， 三条都不读 AC 勾选框；AC
+  写散文的任务无论完成与否都不可见（gap-cold-start 4/4、concurrency-derivation 14/14 等）；修法 =
+  not-yet-flipped 加并列信号 all_acs_checked && status==ready（与 taskWorkLanded 并集，
+  不替换）
+status: ready
 labels:
   - gap
   - defect
