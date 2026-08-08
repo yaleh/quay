@@ -702,8 +702,24 @@ mark_nested() {
 # --test. Runs the split-or-commit whole-store scan first (same invariant as the default/no-args
 # path). Extra flags (from the flags-only form) are PREPENDED to the file list; node --test is
 # last-flag-wins, so a user --test-concurrency=N still overrides the derived default.
+# ── Fixed-overhead instrumentation (gap-suite-fixed-overhead-decomposition, AC1/AC2) ───────────────
+# The ~152s fixed overhead (build_dist_once / run_static_checks / resource-gate / inter-phase gaps)
+# was never decomposed. These segments are DETERMINISTIC SERIAL — no concurrency jitter — so direct
+# per-segment timestamps give a decidable number (unlike wall-clock diffs, which sit inside the
+# 17–63s noise band per gap-suite-cost-model-is-wrong-optimizations-buy-nothing). We record epoch-ms
+# at each serial boundary and emit a per-segment breakdown to stderr on the FULL-SUITE default path.
+# Only the default (product,engine) full-suite path emits it — scoped --group runs skip (their fixed
+# overhead is not the object of measurement). Output lines: `__OVERHEAD__ <segment>_ms=<N>`.
+_oh_mark() { date +%s%3N; }
+_oh_emit() { # _oh_emit <label> <start_ms> <end_ms>  → __OVERHEAD__ label_ms=N
+  local label="$1" s="$2" e="$3"
+  echo "__OVERHEAD__ ${label}_ms=$((e - s))" >&2
+}
+
 run_selected() {
   local groups="$1"; shift
+  local oh_t0 oh_t1 oh_t2 oh_t3 oh_t4 oh_t5 oh_t6 oh_t7
+  local oh_full=0
   # Fail-closed pre-flight (AC0b): an unknown @test-group declaration must abort, not silently
   # degrade to engine — a dropped group cancels the isolation guarantee without going red.
   check_group_declarations
@@ -712,14 +728,20 @@ run_selected() {
   # honored inside resource_gate_check for nested runners).
   if is_default_set "$groups"; then
     FULL_SUITE_DEFAULT=1
+    oh_full=1
+    oh_t0=$(_oh_mark)
     # Single-flight lock FIRST (serialize with any already-running full suite), then the resource
     # gate (GO/WAIT on the machine's load at actual start time). Order matters: the lock queues the
     # second suite, so the gate's verdict is computed AFTER serialization — never against stale load.
     full_suite_lock_acquire
+    oh_t1=$(_oh_mark)
     resource_gate_check
+    oh_t2=$(_oh_mark)
   fi
   build_dist_once
+  oh_t3=$(_oh_mark)
   run_static_checks
+  oh_t4=$(_oh_mark)
   export QUAY_TEST_GROUPS="$groups"
   local files=() f
   while IFS= read -r f; do files+=("$f"); done < <(select_files "$groups")
@@ -768,6 +790,7 @@ run_selected() {
       node --test --test-concurrency="$cc" $(suite_reporter_flags) "$@" "${files[@]}"
     fi
     local code=$?
+    [ "$oh_full" -eq 1 ] && oh_t5=$(_oh_mark)
     # SERIAL GROUP phase (gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests):
     # the A/B-class KNOWN-LOAD-SENSITIVE family is routed OUT of the concurrency-N main body into
     # a `serial` group that runs AFTER it, ALONE, at concurrency 1 — the mechanical isolation that
@@ -789,6 +812,7 @@ run_selected() {
       serial_code=$?
       [ "$serial_code" -eq 0 ] || code="$serial_code"
     fi
+    [ "$oh_full" -eq 1 ] && oh_t6=$(_oh_mark)
     # LOWCONC phase (gap-lowconc-group-concurrency-3-for-hermetic-load-sensitive, AC1/AC4): the
     # hermetic-but-load-sensitive files (B-class session-observation + install/quay-init family,
     # each mkdtemp workspace / private socket) run in their OWN phase at `--test-concurrency=3` —
@@ -803,6 +827,23 @@ run_selected() {
       node --test --test-concurrency=3 $(suite_reporter_flags) "${lowconc_files[@]}"
       local lcode=$?
       [ "$lcode" -eq 0 ] || code="$lcode"
+    fi
+    [ "$oh_full" -eq 1 ] && oh_t7=$(_oh_mark)
+    # Fixed-overhead breakdown (gap-suite-fixed-overhead-decomposition AC2): emit the deterministic
+    # serial-segment durations. Each is a DIRECT measurement of one sequential step — decidable,
+    # unlike wall-clock diffs inside the 17–63s noise band. The "gap" segments (main→serial and
+    # serial→lowconc) are the inter-phase serial transitions.
+    if [ "$oh_full" -eq 1 ]; then
+      local oh_t8
+      oh_t8=$(_oh_mark)
+      _oh_emit "lock"          "$oh_t0" "$oh_t1"
+      _oh_emit "resource_gate" "$oh_t1" "$oh_t2"
+      _oh_emit "build_dist"    "$oh_t2" "$oh_t3"
+      _oh_emit "static_checks" "$oh_t3" "$oh_t4"
+      _oh_emit "main_phase"    "$oh_t4" "$oh_t5"
+      _oh_emit "gap_main_to_serial" "$oh_t5" "$oh_t6"
+      _oh_emit "serial_phase"  "$oh_t6" "$oh_t7"
+      _oh_emit "gap_serial_to_lowconc" "$oh_t7" "$oh_t8"
     fi
     set -e
     # DISABLED (human ruling 17:1x, disable-not-delete): the suite-after clean-tree assertion NO

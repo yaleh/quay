@@ -100,9 +100,11 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     `planCheckNextAction`, `checkTouchesPair`, …) → direct `import` unit tests — a failed CLI
     assertion only says "output lacks X", not which branch is wrong; (3) **internal implementation
     details** → **do not test** (testing them prepays refactor cost: behavior unchanged, test goes
-    red). No numeric thresholds — that waits for `gap-suite-cost-model-is-wrong-optimizations-
-    buy-nothing`'s cost data (setting a threshold before the cost structure is known is the AC9/416s
-    mistake; do not repeat it).
+    red). No numeric thresholds — setting a threshold before the cost structure is known is the AC9/416s
+    mistake; do not repeat it. (`gap-suite-cost-model-is-wrong-optimizations-buy-nothing` is done and its
+    measured output is that wall-clock diff is INDETERMINATE within the 17–63s noise band — it produced
+    no usable cost numbers to wait on; the fixed-overhead breakdown is instrumented per run as
+    `gap-suite-fixed-overhead-decomposition`.)
   - **Coverage is NOT a goal (AC7b):** three reasons. (1) It has never been measured — 
     `scripts/test.sh --experimental-test-coverage` exists and CLAUDE.md documents it, but there is
     no CI job and no recorded number, and setting a target for an unmeasured quantity is the 416s
