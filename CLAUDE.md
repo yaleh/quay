@@ -19,9 +19,12 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
   - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
     file and `.github/workflows/ci.yml` invoke; it owns the test-file glob
     (`packages/*/test/*.test.mjs plugin/test/*.test.mjs`) and derives its default concurrency
-    from `max(1, floor(nproc / 2.1))` (gap-no-resource-awareness-heavy-ops-run-blind AC5; the old
-    hardcoded 8 was a 4.25× oversubscription on 4 cores — 8 workers + spawned subprocesses = 17
-    processes; see `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
+    from `max(1, floor(nproc / 1.0))` = nproc (gap-no-resource-awareness-heavy-ops-run-blind AC5;
+    AMPLIFICATION was 2.1 until the cost-side experiment ran 2026-08-08 —
+    `gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible` AC1/AC3: zero
+    cancelled at concurrency 4 AND 8, nproc is the wall-clock sweet spot, "avoid cancel" refuted;
+    the old hardcoded 8 was a 4.25× oversubscription on 4 cores — 8 workers + spawned subprocesses
+    = 17 processes; see `gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived`
     for the 2026-08-03 TEMPORARY pin to 8 and its 2026-08-06 revert to the derived form — the
     dead-code-after-return static check bans that pin shape from returning). An explicit
     `--test-concurrency=N` always overrides (ci.yml pins it for the 10-minute budget). The full-suite default path

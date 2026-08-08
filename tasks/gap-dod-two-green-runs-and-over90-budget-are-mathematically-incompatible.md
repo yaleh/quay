@@ -103,16 +103,41 @@ red 23.0min；02:35:36→02:35:43 red 0.1min；02:36:49 第 3 次仍在跑。**D
 **对人推论的支持**：提高测试并发直接缩短的正是这段等待（OVER90 的主要成分），槽位数对它毫无作用。
 `cap=2 × 并发4` 让单任务 ~8-15min 且等待更短；`cap=5 × 并发1` 让等待拉长到 ~37-55min/次。
 
+## 执行记录（2026-08-08，AC1/AC3 实跑证据）
+
+**AC1 代价侧实验**：同一选中集在并发 1/4/8 各跑一次。选中集 = 6 个 subprocess-heavy plugin 测试文件
+（`plugin/test/resource-gate.test.mjs` `cap-from-gate.test.mjs` `full-suite-runner.test.mjs`
+`adr016-screen-use-check.test.mjs` `claim-task.test.mjs` `checker-cost.test.mjs`，86 tests），
+用 `node --experimental-strip-types --test --test-concurrency=N <set>` 直接跑（隔离并发变量，不含静态检查）。
+
+| 并发 | 墙钟（duration_ms） | tests | pass | fail | cancelled |
+|---|---|---|---|---|---|
+| 1 | **57.5s** | 86 | 86 | 0 | **0** |
+| 4 | **24.1s** | 86 | 86 | 0 | **0** |
+| 8 | **27.3s** | 86 | 86 | 0 | **0** |
+
+**结论**：nproc（4）是墙钟甜点（2.4× 于并发 1）；并发 8 过订（比 4 慢 13%）但**不产生 cancelled**。
+「避免 cancel」理由**证伪**（AC3 负控制：零 cancelled）。
+
+**外层全量佐证**（`.quay/verification-round.jsonl`，2026-08-08）：round 112-125 共 13 轮
+`laneCount 8` 全零 `cancelled`；round 124 `laneCount 1` = 1255s vs round 125 `laneCount 8` = 869s
+（1.45×）。外层 runner 已在 8 lanes 下实跑全量且绿，说明单套件过订不产生 cancelled/fail。
+
+**落地（AC2）**：`scripts/test.sh` + `plugin/scripts/full-suite-runner.ts` 的 `AMPLIFICATION`
+2.1→1.0（默认并发 `floor(nproc/2.1)=1` → `floor(nproc/1.0)=4`）；测试、CLAUDE.md、loop-tick 文档
+同步更新。改前默认 1 并发 → 选中集 57.5s；改后默认 4 并发 → 24.1s。全量验证仍可用
+`--test-concurrency=8`（外层 runner 实跑 13+ 轮全零 cancelled）取最快墙钟。
+
 ## Contract
 
 ```
-measure suite_wall_8 = `python3 -c "import json; print(round(json.load(open('.quay/full-suite-state.json'))['durationMs']/1000))"` stdout 数字段（并发 8 档实跑时；基线 460-570 test.sh:342-347）
-measure suite_wall_1 = `python3 -c "import json; print(round(json.load(open('.quay/full-suite-state.json'))['durationMs']/1000))"` stdout 数字段（并发 1 档实跑时；基线 ~3300 同注释）
-measure cancel_count = `grep -c 'cancelled [1-9]' .quay/full-suite.log` stdout 数字段（并发 4/8 实跑时）
-invariant 降并发（1）的代价是确定的 ~7×；「避免 cancel」的收益是 unproven——在代价侧实验前，不得把并发 1 当最优
+measure suite_wall_8 = `python3 -c "import json; print(round(json.load(open('.quay/full-suite-state.json'))['durationMs']/1000))"` stdout 数字段（并发 8 档实跑时；2026-08-08 实测 868s round 125）
+measure suite_wall_1 = `python3 -c "import json; print(round(json.load(open('.quay/full-suite-state.json'))['durationMs']/1000))"` stdout 数字段（并发 1 档实跑时；2026-08-08 实测 1255s round 124）
+measure cancel_count = `grep -c 'cancelled [1-9]' .quay/full-suite.log` stdout 数字段（并发 4/8 实跑时；2026-08-08 全 0）
+invariant 代价侧已实测：同选中集并发 1/4/8 全零 cancelled，nproc 是墙钟甜点（24s vs 57.5s@1 / 27.3s@8）——「避免 cancel」理由已证伪，AMPLIFICATION 2.1→1.0 落地（默认=nproc）
 invoke `grep -n 'REVERT HISTORY' scripts/test.sh | head -2`
-control 同一选中集在并发 1/4/8 各跑一次 ⇒ 并发 8 若零 cancelled，则「avoid cancel」理由不成立；若 cancelled>0，贴出是哪条
-resume 若中断，先跑 measure 读当前并发默认与套件墙钟，再读 test.sh:342-347 的 REVERT HISTORY 原文
+control 同一选中集在并发 1/4/8 各跑一次 ⇒ 并发 8 若零 cancelled，则「avoid cancel」理由不成立；若 cancelled>0，贴出是哪条（2026-08-08 实测：零 cancelled，理由不成立）
+resume 若中断，先跑 measure 读当前并发默认与套件墙钟，再读 test.sh 的 REVERT HISTORY 原文
 ```
 
 ## Acceptance Criteria
@@ -122,13 +147,25 @@ resume 若中断，先跑 measure 读当前并发默认与套件墙钟，再读 
       observer-registry 的 2h31m = 「Waiting for full suite run #3」（纯等待非执行）。manager-layer
       侧同机制。**不预设归因于 DoD 的修正版**：83% 算式（全量在括号内）仍错，但结构性越线以正确机制
       成立（等待在括号内）
-- [ ] AC1: **代价侧实验（本任务最关键）**——同一选中集在并发 1/4/8 各跑一次，贴出 cancelled 计数 + 墙钟
-      （验证 test.sh:342-347 的 unproven 声明）
-- [ ] AC2: **方向落地**——把同一份 CPU 预算从槽位层挪到并发层（与 concurrency-cap 跨层总预算同一解法），
-      贴出 cap/并发配置前后对比（吞吐 + 单任务墙钟）
-- [ ] AC3: **负控制**——若并发 4/8 出现 cancelled，必须点名文件与计数；若零 cancelled，记录「avoid cancel
-      理由不成立」，作为恢复并发 8 的依据
-- [ ] AC4: 与 `gap-test-concurrency-cap-does-not-scope-nested-spawns` 交叉标注（同一解法两面）
+- [x] AC1: **代价侧实验（本任务最关键）**——同一选中集在并发 1/4/8 各跑一次，贴出 cancelled 计数 + 墙钟
+      （验证 test.sh:342-347 的 unproven 声明）。**2026-08-08 实跑**（选中集 = 6 个 subprocess-heavy
+      plugin 测试文件，86 tests；见任务体「执行记录」表）：
+      c1=57.5s / c4=24.1s / c8=27.3s，三档**全零 cancelled**。nproc（4）是墙钟甜点；并发 8 过订
+      （27.3s > 24.1s）但**不产生 cancelled**。外层 13+ 轮 laneCount 8 全量（verification-round.jsonl
+      round 112-125）也全零 cancelled，佐证同一结论
+- [x] AC2: **方向落地**——把同一份 CPU 预算从槽位层挪到并发层（与 concurrency-cap 跨层总预算同一解法），
+      贴出 cap/并发配置前后对比（吞吐 + 单任务墙钟）。**2026-08-08 落地**：AMPLIFICATION 2.1→1.0
+      （`scripts/test.sh` + `plugin/scripts/full-suite-runner.ts`），默认并发从 `floor(nproc/2.1)=1` 变
+      `floor(nproc/1.0)=4`。**改前**：默认 1 并发 → 选中集 57.5s、全量 round 124=1255s(21min)。
+      **改后**：默认 4 并发 → 选中集 24.1s（**2.4× 提升**）、全量用 8 并发 round 125=868s(14.5min)。
+      槽位帽（cap-from-gate）不在此任务改——跨层总预算归 `gap-test-concurrency-cap`（AC4），不拆开修
+- [x] AC3: **负控制**——若并发 4/8 出现 cancelled，必须点名文件与计数；若零 cancelled，记录「avoid cancel
+      理由不成立」，作为恢复并发 8 的依据。**2026-08-08 实测：并发 4/8 全零 cancelled**（86/86 pass，
+      0 fail），「avoid cancel」理由**不成立**——降并发是纯损失（2.4× 墙钟代价，零收益）。据此把默认
+      恢复回 nproc 档
+- [x] AC4: 与 `gap-test-concurrency-cap-does-not-scope-nested-spawns` 交叉标注（同一解法两面）。
+      **2026-08-08**：双向交叉标注已写入对方任务体「交叉标注（AC4/AC5）」节；本任务 REVERT HISTORY
+      与 CLAUDE.md 均指名跨层总预算归对方任务，不在此任务声称解决超订总量
 
 ## Definition of Done
 
@@ -137,11 +174,14 @@ resume 若中断，先跑 measure 读当前并发默认与套件墙钟，再读 
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）——按最终并发配置
 
 ## Touches
-- scripts/test.sh（并发推导：实验结论后不再 pin 1；REVERT HISTORY 注释更新）
-- plugin/scripts/cap-from-gate.sh（若并发档位与槽位联动）
-- docs/analysis/fast-mode-loop-tick.md / orchestration/orchestrator-loop-tick.md（并发/预算判据段）
+- scripts/test.sh（AMPLIFICATION 2.1→1.0，默认并发不再 pin 1；REVERT HISTORY 注释更新）
+- plugin/scripts/full-suite-runner.ts（defaultLaneCount AMPLIFICATION 2.1→1.0，AC1 文档更新）
+- plugin/test/resource-gate.test.mjs / plugin/test/full-suite-runner.test.mjs（派生断言随新默认更新）
+- docs/analysis/fast-mode-loop-tick.md / plugin/loop/fast-mode-loop-tick.md（并发/预算判据段）
+- CLAUDE.md（并发推导引用段）
 - tasks/gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible.md（自身文件）
 - tasks/gap-test-concurrency-cap-does-not-scope-nested-spawns.md（交叉标注）
+- plugin/scripts/cap-from-gate.sh（**未改**——槽位帽归 concurrency-cap 跨层总预算任务，不拆开修）
 
 ## Dispatch review
 

@@ -189,11 +189,16 @@ test("AC10 — orphaned node procs (ppid=1, cwd deleted) are listed on their own
 // ── AC5/AC1/AC3: derived default concurrency = max(1, floor(nproc / amplification)) ────────────────
 test("AC5 — formula derives max(1, floor(nproc/amp)); the DEFAULT executes that formula (not a constant)", () => {
   // The REAL formula from scripts/test.sh (default_concurrency_formula), run with test seams.
-  assert.equal(derivedConcurrency(4, 2.1), 1, "4 cores / 2.1 → 1 (the oversubscription fix)");
-  assert.equal(derivedConcurrency(16, 2.1), 7, "16 cores / 2.1 → 7");
-  assert.equal(derivedConcurrency(4, 1), 4, "amplification 1 → nproc (no subprocess amplification)");
-  assert.equal(derivedConcurrency(1, 2.1), 1, "floor(nproc/amp) must clamp at 1 (max(1, ...))");
-  assert.equal(derivedConcurrency(8, 2.1), 3, "8 cores / 2.1 → 3");
+  // AMPLIFICATION = 1.0 since the AC5 cost-side experiment ran
+  // (gap-dod-two-green-runs-and-over90-budget-are-mathematically-incompatible, 2026-08-08):
+  // zero cancelled at concurrency 4 AND 8 on the same selected set; nproc is the wall-clock sweet
+  // spot. The old 2.1 guard is now reachable only via the explicit seam (it remains valid to prove
+  // the formula shape). Default on 4 cores = nproc = 4 (no longer 1).
+  assert.equal(derivedConcurrency(4, 1.0), 4, "4 cores / 1.0 → nproc (the cost-side-verified default)");
+  assert.equal(derivedConcurrency(16, 1.0), 16, "16 cores / 1.0 → 16");
+  assert.equal(derivedConcurrency(4, 2.1), 1, "4 cores / 2.1 → 1 (the old unproven-conservative guard)");
+  assert.equal(derivedConcurrency(1, 1.0), 1, "floor(nproc/amp) must clamp at 1 (max(1, ...))");
+  assert.equal(derivedConcurrency(8, 1.0), 8, "8 cores / 1.0 → 8");
   // AC1/AC3 of gap-concurrency-derivation-reverted-but-doc-ac-and-tests-all-still-report-derived:
   // the EFFECTIVE default (default_test_concurrency) must equal the derived formula on the REAL host
   // — the 2026-08-03 TEMPORARY pin to 8 was reverted (that drift: docs/tests said derived while the
@@ -202,8 +207,8 @@ test("AC5 — formula derives max(1, floor(nproc/amp)); the DEFAULT executes tha
   const realNproc = Number(execSync("nproc").toString().trim());
   assert.equal(
     currentDefaultConcurrency(),
-    derivedConcurrency(realNproc, 2.1),
-    "default_test_concurrency must return the derived value max(1, floor(nproc/2.1)) on the real host (was temporarily pinned to 8 — see the revert record)"
+    derivedConcurrency(realNproc, 1.0),
+    "default_test_concurrency must return the derived value max(1, floor(nproc/1.0)) = nproc on the real host (cost-side-verified 2026-08-08 — see the REVERT HISTORY entry)"
   );
 });
 
