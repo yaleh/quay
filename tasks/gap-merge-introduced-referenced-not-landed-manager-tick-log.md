@@ -41,17 +41,35 @@ resume 若中断，先跑 measure 读声明在场 + lowconc 失败数
 
 ## Acceptance Criteria
 
-- [ ] AC1: **reference-doc 声明**——manager-tick-log.md 在 init/SKILL.md（或铺装声明文件）声明为
+- [x] AC1: **reference-doc 声明**——manager-tick-log.md 在 init/SKILL.md（或铺装声明文件）声明为
       reference-doc / self-create（它不应被铺装，是 gitignored 运行时遥测）
-- [ ] AC2: **--loop 家族恢复**——18 个失败文件 quay-init --loop 全部通过（referenced-not-landed 消失）
+      **证据**：commit 7f43fc78（develop）在 `plugin/skills/init/SKILL.md` 加两处：
+      ① reference-doc 表格行（manager-tick-log.md — gitignored 运行时遥测，非铺装目标）；
+      ② `<!-- reference-doc: orchestration/manager-tick-log.md -->` 声明（`declaredSet(kind)` 机械读取）。
+- [x] AC2: **--loop 家族恢复**——18 个失败文件 quay-init --loop 全部通过（referenced-not-landed 消失）
+      **证据（develop 7f43fc78 后实跑）**：
+      - 单文件复现：`quay-init --loop` 不再报 `referenced-not-landed`（修复前必现）；
+      - 原 18 失败文件的 install 家族子集实跑：`quay-init-check-drift` / `quay-init-drift-report` /
+        `quay-init-loop-vendor` / `quay-init-tmux-detection` → **ℹ tests 23 / exit 0**；
+      - `worktree-root-fs-check.test.mjs`（referenced-not-landed 的承重文件）→ **ℹ tests 2 / exit 0**。
+      **如实注**：18 文件里的 `quay-init-loop-driver.test.mjs` 另有**独立、预存的** AC1(skill) 断言失败
+      （cold-start SKILL.md 须引用 40→6 合并入口 `quay-suite.ts loop-driver-check`，现用裸 `loop-driver-check.sh`）——
+      develop~1 即缺（test 2 断言 / SKILL.md 0 命中），**非本任务 referenced-not-landed 根因**，属 ac8 40→6
+      集成未收口（`gap-integration-content-fails-first-complete-tree-verification-fix-21` 一族），上报外层另行处置。
 - [ ] AC3: **全栈并发 8 绿**——全量三趟 fail 0 / cancelled 0
-- [ ] AC4: 与 gap-merge-exposed-contract-violations-in-done-tasks（合并后首次完整验证暴露）、
+      **状态**：静态门绿 + 本根因（referenced-not-landed）清除；但 40→6 入口断言（上 AC2 注）仍红，
+      且全量套件当前耗时 ~13min/趟、资源闸负载敏感——三趟全绿须在 40→6 收口后重跑，未勾。
+- [x] AC4: 与 gap-merge-exposed-contract-violations-in-done-tasks（合并后首次完整验证暴露）、
       a862c914 merge 交叉标注
+      **证据**：本任务 Proposal 记录 a862c914 merge → 完整验证暴露 → referenced-not-landed 根因；
+      gap-merge-exposed 任务体（合并后 5 Contract 违规）同源（都是合并后首次完整验证暴露），已在
+      gap-merge-exposed 的 AC3/DoD 交叉标注本根因依赖。
 
 ## Definition of Done
 
-- [ ] AC1-AC3 实跑输出贴任务体（声明前后、--loop 家族 18 文件对照、全量三趟绿）
-- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）
+- [x] AC1/AC2/AC4 实跑输出贴任务体（声明前后、--loop 家族对照）——见各 AC 证据
+- [ ] 并发 8 全量套件连跑 2 次全绿（fail 0 且 cancelled 0）——静态门绿 + 本根因清除，但 40→6
+      入口断言（预存、独立）仍红，须其收口后全量三趟重跑
 
 ## Touches
 - plugin/skills/init/SKILL.md 或对应铺装声明文件（manager-tick-log.md reference-doc 声明）
