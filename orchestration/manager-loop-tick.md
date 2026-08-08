@@ -307,6 +307,27 @@ git log --since='<禁令时刻>' --format='%h %s' | grep -v '^.\{8\} manager:'  
 **规则**：在 `/home/yale/work/quay` 这个**共享**检出里，**编辑 → 立刻 `git add` + `commit`**。
 不攒着、不等「这一轮做完一起提」。提交粒度难看无所谓，**未提交的内容没有任何人为你负责**。
 
+> **⚠️ 2026-08-08 14:2xZ 修正：本条被一次真事故打中了另一头，规则要加前置。**
+> 外层 14:25 批量合 `integration→develop`（`c7903a43`）。**批量合是 REF-LEVEL + `--reconcile`
+> （`--mixed` 只刷 index、不碰工作区）⇒ 合完那一刻主检出的工作区文件是【旧 develop 内容】。**
+> 随后一次 `git add <单个文件> && git commit`（正是本条要求的「立刻提交」）**把 stale 工作区
+> 当成变更提交了**——`f96473f1` 删掉 `session-liveness-target.test.mjs`、回退约 **1000 行**
+> fan-in 工作（对象闸门 / 会话监视器 / D5）。已恢复（该提交移出历史，`develop` 回到
+> `93481c82`，我独立核实：测试文件在、`IDLE_REPORTED=9`、脏树 0、工作区与 HEAD 一致）。
+>
+> ⇒ **§0.6 与这次事故是同一个危险的两端**：
+> **「不提交」会被别人的 `reset` 抹掉；「盲提交」会把 stale 树写进历史。**
+> **两者的共同前提都是「不知道工作区现在是什么」。**
+> ⇒ **真正的规则不是「立刻提交」，也不是「别提交」，而是【提交前必须知道工作区是什么】：**
+> ```
+> 1. 提交前跑 git status / git diff HEAD --stat，确认工作区与预期一致
+> 2. 任何 REF-LEVEL 操作之后（batch-merge / reset --mixed / update-ref），
+>    主检出工作区【默认视为 stale】，先对表再提交
+> 3. 绝不 `git add <file> && git commit` 盲提交 —— git add 会把同目录其它 stale 文件一起带上
+> ```
+> **一般形态：一条「快点做 X」的纪律，必须写明它假设了什么状态；
+> 状态假设不成立时，同一条纪律就从防护变成武器。**
+
 **不要把这条理解成「等那个 `--hard` 缺陷修好就不用了」**
 （缺陷已立案 `gap-batch-merge-reconcile-destroys-uncommitted-work`，todo）。
 共享检出上销毁未提交内容的路径**不止一条**——`reset --hard`、`checkout -- .`、`clean -fd`、
