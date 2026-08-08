@@ -171,3 +171,8 @@ orchestration/manager-tick-log.md
 # 自审/收尾必须读磁盘文件（tail），不读 git（文件可丢失）。
 orchestration/tick-log.md
 docs/analysis/batch2-queue-state.md
+
+# 管理者的待办队列（条件触发项）——运行时状态不是代码，人 2026-08-08 02:3x 裁定：
+# 不进 git，manager 重启后丢失可接受。内容全部可从仓库重新推导（分析可重跑、grep 可重搜），
+# 丢的只是"待办意图"。同 tick-log 的理由：运行时状态不是代码。
+orchestration/manager-pending.md
