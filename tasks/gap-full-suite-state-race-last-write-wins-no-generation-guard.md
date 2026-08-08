@@ -1,7 +1,7 @@
 ---
 id: gap-full-suite-state-race-last-write-wins-no-generation-guard
 title: "full-suite-runner writeState() is LAST-WRITE-WINS with NO generation/run-id guard — fs.writeFileSync unconditional overwrite (full-suite-runner.ts:139-141), all call sites write directly; if two runners overlap briefly (even a superseded one still finishing its cleanup), the older runner's red terminal state can land AFTER the newer runner's running write and silently clobber it — no mechanism distinguishes 'is this red from the current round'; CONFIRMED 2026-08-06 06:35 (manager verified the code; outer's 06:27 v5 + 06:28 v6 double-launch produced exactly this: stale red from prior runner overwrote, mis-synced as running); affects the stop-dispatch signal reliability (inner reads suite-state state:red)"
-status: ready
+status: done
 labels:
   - gap
   - defect

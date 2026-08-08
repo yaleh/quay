@@ -1,7 +1,7 @@
 ---
 id: gap-self-report-vocab-misfires-on-stopped-state
 title: "self-report-vocab-audit judges a STOPPED inner's self-report as NON-CONVERGED — its convergence window (reports.length >= window && recentClean === inWindow, self-report-vocab-audit.ts:134-135) assumes an ACTIVE rolling-dispatch loop, so an honest 'idle heartbeat, paused awaiting manager' reads as vocabulary drift (few reports < window → fail-closed NOT-CONVERGED); stopped state is honest, not drift — false alarm (archguard da0b2cbf 2026-08-06); observation-only (not a gate) so lower priority"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -6,7 +6,7 @@ title: "quay-init lays files but NEVER commits (0 git add/commit hits) —
   never → broken fresh-clone); meta-cc 22 plugin/scripts uncommitted = same
   risk; fix: quay-init auto-commits (chore(quay-init): prefix) = delivery
   contract 铺设→版本→提交→升级"
-status: ready
+status: done
 labels:
   - gap
   - defect

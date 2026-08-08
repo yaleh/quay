@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-promotion-ignores-retired-mechanism-candidate-check
 title: "ready-pool promotion promoted a task referencing a RETIRED mechanism (gap-prepare-milestone-no-size-aware-routing → prepare-milestone.js deleted under ADR-022) — the strategic-doc-staleness-check --pool-candidate control (review-cadence AC8) flags it, but ready-pool-check's promotion path doesn't consult it; fix: promotion runs the pool-candidate stale check before status todo→ready"
-status: ready
+status: done
 labels:
   - gap
   - defect

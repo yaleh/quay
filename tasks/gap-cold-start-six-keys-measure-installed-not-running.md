@@ -14,7 +14,7 @@ title: "cold-start six keys measure 'installed' not 'running' — 'queue-empty /
   archguard's real stop was backlog-bottom (needs human direction: capability
   direction/TASK-49 creds/TASK-31-35 release), genuinely human-needed, NOT a
   defect; archguard NOT suitable for AC12b second timing line (no work)"
-status: ready
+status: done
 labels:
   - gap
   - defect
