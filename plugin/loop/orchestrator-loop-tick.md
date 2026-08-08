@@ -837,7 +837,28 @@ tick 做一次收尾 pass。
    - 缺 suite-state ⇒ inner 不阻塞（外层还没跑第一轮）；
    - `state: red` ⇒ inner 停止派发 + 暂缓 fan-in，本层按「红窗分诊」处置（bisect 定位新引入还是既有；
      定位到本轮 merge 引入就回退该 merge + 回退对应翻 done）。
-5. **落盘聚合**：本轮收尾后跑一次
+5. **真实下游安装/升级/冷启动验证（real-target verification，`gap-install-upgrade-verification-targets-real-downstream-workspaces`）**：
+   安装/升级/冷启动验证不再只跑 mkdtemp 合成夹具（`install-config-driven-e2e.test.mjs` 是 **synthetic** 线）——
+   每个验证轮对**真实下游**（archguard / meta-cc，见 §1 的 `<目标项目根清单>`）跑一次**只读**升级检查，报结论：
+   ```bash
+   for t in /home/yale/work/archguard /home/yale/work/meta-cc; do
+     bash plugin/scripts/real-target-verify.sh --target "$t"
+   done
+   ```
+   - **只读（AC1）**：脚本对真实工作区跑 `quay init --loop --dry-run`（同一升级面，写全为 `would-*`），
+     报 `real_target_verified: verified|conflict|fail`；**synthetic 绿不再当作真实下游也绿的证据**（AC3——
+     archguard 真实 config-conflict 撞墙而合成 A3 绿正是混线后果）。结论行前缀 `[real-target]`，与
+     synthetic 线分开标注；真实目标清单是各工作区自己的策略（`QUAY_REAL_TARGETS`），机制是通用的。
+   - **频率（AC2）**：每个验证轮都跑（不再是「只在里程碑边界」）。**AC12b 已达成、archguard 干净区间
+     约束解除**（`gap-send-keys-reliable-welcome-screen-ghost-drive-fails` AC12b 是两层无人干预区间的唯一
+     硬阻塞，已修）——真实目标验证可定期触发，不再等重装窗口。
+   - **落盘**：每条结论追加一行到 `.quay/real-target-verification.jsonl`：
+     ```json
+     {"at": "<ISO 来自 date -u>", "target": "<路径>", "real_target_verified": "verified|conflict|fail", "would_copy": <N>}
+     ```
+   - **结论不是闸门**：真实目标验证是**有机状态探测器**（抓合成夹具造不出的演化分歧），结果进轮次记录
+     与 tick 报告，不阻断派发/合并——它报警（conflict/fail）时不静默，升给外层处置。
+6. **落盘聚合**：本轮收尾后跑一次
    `node --no-warnings --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --snapshot`，
    否则被 git 跟踪的聚合文件不反映本轮结果。
 

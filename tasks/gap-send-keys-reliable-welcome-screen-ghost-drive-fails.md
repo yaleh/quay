@@ -34,6 +34,12 @@ ghost 文本」。11:46 同步 NBSP 修复版过去**没有修好这个**。
 B 机（orangevps）是唯一干净测量场，但 fresh-session 分支命中 0，welcome 屏缺陷原封不动，cold-start
 INNER-DRIVEN 用它驱动内层。**排在任何其它任务之前**。
 
+**交叉标注（AC5，2026-08-08——`gap-install-upgrade-verification-targets-real-downstream-workspaces`）**：
+AC12b 已达成后（人方向）可更频繁验证安装/升级/冷启动——本任务 AC12b 是「两层无人干预区间」的唯一硬阻塞；
+`gap-install-upgrade-verification-targets-real-downstream-workspaces` **AC2（频率机制）正是把「AC12b 达成后
+可更频繁验证」落实成机制**：真实目标验证从「只在里程碑边界」提高到每个验证轮（`orchestrator-loop-tick.md`
+验证轮步骤 5），archguard 干净区间约束解除。
+
 **AC11 一族**：管理者 11:46 说「已同步并校验一致」是真的，但隐含断言「问题已解决」没验证。
 
 ### 选定机制
