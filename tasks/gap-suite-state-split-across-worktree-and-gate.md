@@ -85,6 +85,14 @@ changed: 管理者 22:0x 时间敏感——闸门（主 repo state）123 分钟�
   21:48 轮 green 写进 worktree（--root /tmp/quay-suite-int），主 repo state 仍 20:01 red。止血：cp 同步
   worktree green 到主 repo，SUITE-GREEN 触发。立案：runner --root 语义拆开（测代码 vs 写 state）。
 
+## 交叉标注（2026-08-08，gap-merge-exposed-contract-violations-in-done-tasks AC4）
+
+本任务是「合并后首次全量覆盖 develop task 文件」链条的第一环：state-split 修复让批量合（a862c914）
+得以完成，合并把 develop 的 task 文件首次带进完整 runner 的静态检查覆盖 → 暴露 3 个 done 任务的
+5 个 Contract 违规（既有债务，非 merge 引入回归）→ 人裁决 gap-eighty-one AC8 勾保留（一次性例外），
+定点加进 `contract-violations.md` 基线（5→6）。交叉标注：本任务（state-split）+ a862c914 merge 是
+这条链的两个上游。
+
 ## 落地证据（2026-08-07，worktree `task/suite-state-split-fix`）
 
 **机制落地（`full-suite-runner.ts`）**：
