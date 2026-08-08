@@ -129,8 +129,12 @@ inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json
 
 **任务 DoD 不含全量套件；全量套件是批量合边界的闸门（`gap-suite-green-gate-duplicated-in-task-dod-and-batch-merge`）**：
 `--for-task` 跳资源闸、只跑 `## Touches` 选中集，**对「这次改动有没有破坏别处」是无知的**——它只能用在
-迭代中途。**全量套件绿是批量合边界的闸门**：外层验证轮只在 `state: green` 时把 `$MERGE_TARGET`→
-`$FORK_BASELINE` 批量合（判绿三条件见下）。任务自身的 DoD **不写**「完整套件连跑 2 次全绿」——移除的是
+迭代中途。**全量套件绿是批量合边界的闸门（有效新绿，`gap-batch-merge-gate-reads-stale-green`，与
+orchestrator-loop-tick.md 同源防漂移）**：外层验证轮只在 `state: green` **且绿是新鲜绿**时把
+`$MERGE_TARGET`→`$FORK_BASELINE` 批量合——新鲜绿 = `finishedAt` 距今 ≤ 窗口（默认 3600s）且 suite
+开始晚于最近一次 integration fan-in；机械判定 = `integration-batch-merge.sh` 自带的 freshness gate
+（默认开启，非自判）。7b1ac3a1（2026-08-08）就是只读 `state==green` 不读新鲜度的实例：3 小时前旧绿
+当通行证、前后零次 suite。任务自身的 DoD **不写**「完整套件连跑 2 次全绿」——移除的是
 任务级那份重复，批量合边界那道闸**原封不动**（保护总量不变、耦合消失）。把「少跑全量」当目标就是把方向 C
 做成方向 A。
 
@@ -426,6 +430,11 @@ unread = delivered − consumed。本步只读不写回执（消费是人的动�
   （.ts/.js/.mjs/.sh）⇒ **fail-closed 不移动任何 ref、报出文件清单**（该代码从未进过被测树，合并结果会带上
   未测代码）；纯 .md/tasks 文件放行（2026-08-08 报告那 5 个文件）。`$FORK_BASELINE` 侧有代码提交需先
   fan-in 到 `$MERGE_TARGET` 补测再批量合。与 stale-green 不同轴（时间轴 vs 对象轴）。
+- **新鲜度闸门（`integration-batch-merge.sh` 自带，`gap-batch-merge-gate-reads-stale-green`，同源防漂移）**：
+  批量合只在一个**有效新绿**下进行——`state == green` 且 `finishedAt` 距今 ≤ 窗口（默认 3600s）且 suite
+  开始晚于最近一次 integration fan-in。机械判定在脚本里（默认开启，非自判）；缺 state / 非 green / 旧绿
+  ⇒ 「无有效绿」，不批量合。7b1ac3a1（2026-08-08 06:07:22）：三小时前旧绿（02:50→03:02）+ 期间新 fan-in，
+  前后零次 suite —— 只读 `state==green` 把它当通行证；本闸门把这种旧绿按「无有效绿」拦截。
 - **单线（默认）退化**：`$FORK_BASELINE == $MERGE_TARGET == master` 时本节退化为「独立任务从 master
   分叉、合回 master」——`fork-baseline.ts --develop master --integration master` 恒返回 master
   （`master..master` 空，无未验证任务），`integration-batch-merge.sh` 为无操作——与未做 branch cutover

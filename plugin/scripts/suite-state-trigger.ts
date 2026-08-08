@@ -75,7 +75,9 @@ export interface SuiteState {
   state: SuiteStateValue;
   runner?: string;
   startedAt?: string;
-  finishedAt?: string | null;
+  // gap-batch-merge-gate-reads-stale-green: finishedAt is written as EPOCH SECONDS by the runner
+  // (the freshness gate's Contract measure needs epoch); ISO legacy states are still read (number|string).
+  finishedAt?: number | string | null;
   durationMs?: number | null;
   laneCount?: number;
   /**
