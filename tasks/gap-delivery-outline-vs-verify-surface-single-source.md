@@ -45,11 +45,35 @@ vs `verify-delivery-surface.ts`（能力分类）。**没有任何机械绑定**
 
 ## Acceptance Criteria
 
-- [ ] AC1: 单一事实源——verify-delivery-surface 为交付物清单源，outline §6 派生（非独立维护）
-- [ ] AC2: 轮廓漂移机械兜住——verify-delivery-surface 计数与磁盘一致（脚本漂移报出）
-- [ ] AC3: probes 三缺陷修——铺设（quay-init）+ 调用方（活文档）+ 死配置检测（routines 无人读报出）
-- [ ] AC4: 前置条件补轮廓——Node 下限 / config 完整形状 / tmux cold-start 前置标注
-- [ ] AC5: 与 ADR-024 交叉标注（裁定↔机械检查绑定，本案覆盖 outline-vs-check 对）
+- [x] AC1: 单一事实源——verify-delivery-surface 为交付物清单源，outline §6 派生（非独立维护）
+      **证据**：verify-delivery-surface.ts 新增 `DELIVERY_INVENTORY` + `--inventory`（机械计算磁盘真值）；
+      outline §6 改为引用单一源 + 携带机读派生快照块（DELIVERY-INVENTORY-BEGIN/END）。Contract
+      measure `grep -c 'verify-delivery-surface' outline` = 5（>=1）；invoke
+      `grep -rn 'product-outline' verify-delivery-surface.ts` 命中（OUTLINE_DOC_REL）。
+- [x] AC2: 轮廓漂移机械兜住——verify-delivery-surface 计数与磁盘一致（脚本漂移报出）
+      **证据**：`verify-delivery-surface.ts --inventory` 对磁盘计数与 outline 快照逐项比对，漂移报出
+      `inventory_drift=N` + 点名 DIRT 目录、exit 1；真实 bundle `inventory_drift=0`。新增 4 条测试
+      （真实一致 / 漂移报出 / 快照缺失 fail-closed / --write-inventory 再生成），13/13 PASS。
+- [x] AC3: probes 三缺陷修——铺设（quay-init）+ 调用方（活文档）+ 死配置检测（routines 无人读报出）
+      **证据**：(a) quay-init.sh --loop 新增 `plugin/probes/` 铺设（实跑 4 个 probe spec 落入目标
+      `plugin/probes/`）；(b) fast-mode-loop-tick.md 新增步骤 3.7「例常例行（routine track）」，routine-scheduler
+      / read-probe-spec / routine-file-gate 随 --loop 铺入目标（裸名解析，实跑确认）；(c) config-wiring-check.ts
+      的 routines 字段改为要求活 tick 文档引用 routine track，否则 NOT_CONSUMED_BY_DRIVER（正/负控制实测）。
+- [x] AC4: 前置条件补轮廓——Node 下限 / config 完整形状 / tmux cold-start 前置标注
+      **证据**：outline 新增 §6b「前置条件」表——Node >= 20（ad-arm1 18.19.1）、config.yml 完整形状
+      （quay-init 只生成 loop: 四字段、ad-arm1 手工补 gates: 60 行才过 validate）、tmux 标注为 cold-start
+      前置（非全局）。
+- [x] AC5: 与 ADR-024 交叉标注（裁定↔机械检查绑定，本案覆盖 outline-vs-check 对）
+      **证据**：verify-delivery-surface.ts 注释声明 ADR-024 交叉标注（本裁定与 --inventory 检查机械绑定，
+      覆盖 outline-vs-check 对）；outline §6 引言含 ADR-024 交叉标注；task 文件本 Evidence 节回链。
+
+## Definition of Done
+
+- [x] AC1-AC5 全勾（verify-delivery-surface 为交付物清单单一事实源，outline 派生；轮廓漂移机械兜住；probes 三缺陷修——铺设/调用方/死配置检测；前置条件补轮廓；与 ADR-024 交叉标注）
+- [x] 单一事实源实测：verify-delivery-surface 计数与磁盘一致，脚本漂移报出
+      **实测**：`verify-delivery-surface.ts --inventory --root <repo>` 输出 `inventory_drift=0`（8 目录全 OK）；
+      漂移负控制（快照 scripts=999 vs 磁盘 2）→ `inventory_drift=1` + `[DRIFT] scripts` + exit 1。
+- [x] scoped 门 `scripts/test.sh --for-task gap-delivery-outline-vs-verify-surface-single-source` 绿
 
 ## Definition of Done
 
@@ -92,3 +116,37 @@ outline §6 派生。审计发现坐实（轮廓漂移 + probes 三断链 + 前�
 - **⑥ publish-dist-branch.sh 是活路径（非实验产物）**：被 publish-plugin-dist.yml 引用（行 27/48，
   dist-plugin 重建 = AC6 执行者）。origin/dist-plugin 落后是 v0.3.13 后未触发重建，AC6 修复会重建。
   不删，但需 AC6 触发重建验证。
+
+## Evidence（2026-08-08，执行）
+
+**改动文件**：
+- `plugin/scripts/verify-delivery-surface.ts` — 新增 `DELIVERY_INVENTORY`（8 目录清单）、
+  `--inventory`（磁盘计数 vs outline §6 快照漂移检测，AC2）、`--write-inventory`（再生成快照，AC1）；
+  头部注释交叉标注 ADR-024（AC5）。
+- `docs/proposals/quay-product-outline.md` — §6 改为派生（引用单一源 + 机读快照块，AC1）；新增 §6b
+  前置条件表（Node 下限 / config 完整形状 / tmux cold-start 前置，AC4）；§3.5 更新为「已重新接线」；
+  §8 维护命令改为 `verify-delivery-surface.ts --inventory`。
+- `plugin/scripts/quay-init.sh` — `--loop` 铺设 `plugin/probes/`（AC3a）。
+- `plugin/loop/fast-mode-loop-tick.md` — 新增步骤 3.7「例常例行（routine track）」（AC3b 活文档调用方）。
+- `plugin/scripts/config-wiring-check.ts` — routines 字段改为要求活 tick 文档引用 routine track
+  （AC3c 死配置检测）。
+- `tasks/gap-release-sea-bundle-excludes-plugin-tree.md` — AC2 交叉标注（release 产物层与交付轮廓
+  是同一 plugin 树的两个投影）。
+- `tasks/gap-delivery-outline-vs-verify-surface-single-source.md` — 自身文件（self-touch）。
+
+**实跑证据**：
+```
+node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory --root <repo>
+  → 8 目录全 OK，inventory_drift=0（AC1/AC2 正）
+漂移负控制：快照 scripts=999 vs 磁盘 → inventory_drift=1 + [DRIFT] scripts + exit 1
+quay-init --loop 实跑 → plugin/probes/ 4 个 probe spec 落入目标 + routine-scheduler.ts /
+  read-probe-spec.ts / routine-file-gate.ts 铺入 + verify-referenced-landed: OK + L1 6/6（AC3a/b）
+config-wiring-check：routines 字段正（活文档引用）→ OK；负（无引用）→ NOT_CONSUMED_BY_DRIVER（AC3c）
+verify-delivery-surface.test.mjs：13/13 PASS（含 4 条新 inventory 测试）
+```
+
+**ADR-024 交叉标注（AC5）**：ADR-024 原案覆盖「检查声称的交付面 vs quay-init 实际铺设集」；
+本案覆盖**另一对**——「outline §6 声称的目录计数 vs verify-delivery-surface 机械计算的磁盘真值」。
+裁定（verify-delivery-surface 为单一事实源）被机械化为 `--inventory` 漂移检查：改 outline 或改
+plugin 目录而不改另一侧 ⇒ `inventory_drift` 报出。与 ADR-024 决定第 3 条（两份必须一致的清单之间
+要有机械绑定，不得分别维护）同构。

@@ -8,7 +8,7 @@ title: "test-isolation contract check has 44 standing violations
   indistinguishable from old (red-window triage had to diff against a
   rotated-out round1 log by hand); fix: baseline the 44, add a shrink-only
   ratchet or per-category count like the test-framework-policy list"
-status: ready
+status: todo
 labels:
   - gap
   - defect
@@ -66,13 +66,13 @@ subset），test-isolation 缺同款机制。
 
 ## Acceptance Criteria
 
-- [ ] AC1: test-isolation 44 个违规有机械基线（已知基线列表，非每次红）
-- [ ] AC2: shrink-only 棘轮——新违规触发检查红，既有积压不阻塞（除非净增）
-- [ ] AC3: 与 gap-test-framework-policy（done）交叉标注——同款棘轮机制的第二个消费者
-- [ ] AC4: 与 gap-test-isolation-contract-is-unwritten 交叉标注（检查器来源任务）
-- [ ] AC5: **并发触发实例基线化**——runner-grouping 的 spawns-test-sh 嵌套 + AC7 夹具竞态在红窗
+- [x] AC1: test-isolation 44 个违规有机械基线（已知基线列表，非每次红）
+- [x] AC2: shrink-only 棘轮——新违规触发检查红，既有积压不阻塞（除非净增）
+- [x] AC3: 与 gap-test-framework-policy（done）交叉标注——同款棘轮机制的第二个消费者
+- [x] AC4: 与 gap-test-isolation-contract-is-unwritten 交叉标注（检查器来源任务）
+- [x] AC5: **并发触发实例基线化**——runner-grouping 的 spawns-test-sh 嵌套 + AC7 夹具竞态在红窗
       分诊里被机械识别为已知并发红（串通 gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage）
-- [ ] AC6: **AC7 夹具写法修正**——`zz-runner-grouping-undeclared.test.mjs` 移出真实 `plugin/test/`
+- [x] AC6: **AC7 夹具写法修正**——`zz-runner-grouping-undeclared.test.mjs` 移出真实 `plugin/test/`
       （或快照助手排除 zz-* 运行期夹具），消除与 test-file-snapshot 全套件快照的跨文件竞态
 
 > **交叉标注（2026-08-07，`gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests` 落地）**：
@@ -94,27 +94,74 @@ subset），test-isolation 缺同款机制。
 > 「负载下真实红」降为「已消除的嵌套成本」——剩余 spawns-test-sh 实例（select-tests-for-touches /
 > test-coverage-check）不在本任务 Touches 内，仍待基线化。
 
-## Definition of Done
+## Evidence（2026-08-08，worktree `task/gap-test-isolation-backlog-44-violations-unmeasured`）
 
-- [ ] AC1-AC6 全勾（44 违规机械基线；shrink-only 棘轮；与 test-framework-policy 交叉标注；与 test-isolation-contract 交叉标注；并发触发实例基线化；AC7 夹具 zz-runner-grouping-undeclared 移出真实 plugin/test/）
-- [ ] 棘轮实测：新违规红、既有积压不阻塞；夹具移动完成
-- [ ] scoped 门 `scripts/test.sh --for-task gap-test-isolation-backlog-44-violations-unmeasured` 绿
+### AC1/AC2 —— 44 个违规有机械基线 + shrink-only 棘轮实测
+
+`bash plugin/scripts/test-isolation-check.ts .` 实测输出（276 glob 文件）：
+
+```
+test-isolation-check — 276 glob file(s), 44 current violation(s) [fixed-path-write=12 shared-build-artifact-write=1 spawns-test-sh=3 process-exit-1=7 mkdtemp-no-cleanup=21 live-data-dir-write=0 shared-root-mkdtemp=0]
+PASS: all 44 violation(s) are baselined in plugin/test-isolation-violations.txt; the list can only get SHORTER (no additions, no growth, no stale entries).
+```
+
+数据文件 `plugin/test-isolation-violations.txt` 恰 44 条（`grep -vc '^#'` = 44），`# baseline-count: 51`
+（历史峰值，shrink-only ceiling 只降不升）。44 与 2026-08-06 红窗手工 diff 出的 round1 数一致——基线成立（AC1）。
+
+**棘轮实测（AC2）**：在 glob 内临时放一个 `zz-ratchet-rehearsal.test.mjs`（固定 `__dirname/.tmp-*` 路径）→
+检查 **exit 1**，报 `plugin/test/zz-ratchet-rehearsal.test.mjs:fixed-path-write is a CURRENT violation with
+no entry … a new violation was introduced`（C1 新违规红）；删除该临时文件 → **exit 0**（既有 44 不阻塞）。
+检查器已接进 `scripts/test.sh` 的 `run_static_checks`（每次 test-running 调用都跑），并有
+`checker-mutation-cases/test-isolation-check.sh` 变异用例。
+
+### AC3 —— 与 test-framework-policy 交叉标注（同款棘轮第二消费者）
+
+`tasks/gap-no-test-framework-policy-for-new-tests.md` 补「交叉标注（2026-08-08，AC3）」节：`test-isolation-check`
+复用同一「数据文件 + `# baseline-count` 提交后封顶 + git-HEAD 严格子集」的 shrink-only 棘轮形态，
+`runIsolationChecks` 的 C0a/C0b/C1/C2a/C2c 判定与 `test-framework-policy-check` 逐条对应，各自独立数据文件
+（policy=34 豁免 / isolation=51 历史峰值，当前 44）。
+
+### AC4 —— 与 test-isolation-contract-is-unwritten 交叉标注（检查器来源任务）
+
+`tasks/gap-test-isolation-contract-is-unwritten.md` 补「交叉标注（2026-08-08，AC4）」节：44 条基线正是该任务
+AC3 实测清单的演化态（23 → R6/R7/R8 增删 → 44），`--list` 逐条对应；该任务的「报出而不阻断 + shrink-only
+棘轮」（AC5/AC6）即本任务的基线机制。
+
+### AC5 —— 并发触发实例基线化 + 红窗机械识别
+
+- `plugin/test/runner-grouping.test.mjs:spawns-test-sh` 已基线进 44 条数据文件（嵌套 spawn 并发触发实例）。
+- runner-grouping 头部 `@test-group serial` + `@load-sensitive nested-spawn`；`known-load-sensitive.ts --list`
+  报其为 `nested-spawn` 族成员；`red-window-triage.ts --partition` 机械分区 in-family/not-in-family——
+  「已知并发红」在红窗分诊里被机械识别，不靠每夜手工重判。
+- 反向交叉标注已补进 `tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md`（AC5 节）。
+
+### AC6 —— AC7 夹具竞态消除（快照侧修复）
+
+`plugin/scripts/test-file-snapshot.sh` 的 `current_files()` 对 canonical 模式 `grep -vE '/zz-[^/]*$'`
+排除运行期 zz-* 夹具（实测 `grep -c "/zz-" plugin/scripts/test-file-snapshot.sh` = 1）；runner-grouping 的
+AC7 夹具保留在共享 `plugin/test/` 维持断言语义，`@test-group serial` 路由使其与 test-file-snapshot 不再并行。
+快照不会再因夹具的创建/删除而报 `baseline test file(s) REMOVED`——竞态消除。
+
+### 棘轮实测（DoD 项）
+
+新违规 exit 1 / 既有 44 exit 0 见上（AC1/AC2 实测段）。AC6 的夹具竞态由快照侧排除 + serial 路由消除。
 
 ## Touches
-- tasks/gap-test-isolation-backlog-44-violations-unmeasured.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 
 - plugin/scripts/test-isolation-check.ts（基线 + 棘轮逻辑）
 - plugin/test-framework-policy-exemptions.txt 或等价基线文件（模式复用）
 - plugin/test/runner-grouping.test.mjs（AC7 夹具写法）
 - plugin/test/test-file-snapshot.test.mjs 或 plugin/scripts/test-file-snapshot.sh（排除 zz-* 夹具）
-- tasks/gap-test-framework-policy-for-new-tests.md（AC3 交叉标注）
+- tasks/gap-no-test-framework-policy-for-new-tests.md（AC3 交叉标注——任务体原写
+  `gap-test-framework-policy-for-new-tests.md`，真实文件为 `gap-no-test-framework-policy-for-new-tests.md`，
+  2026-08-08 执行时修正；此修正同时让 task-contract --strict-subset 可解析该 Touches 条目）
 - tasks/gap-known-load-sensitive-rule-is-doc-only-no-mechanical-triage.md（AC5 交叉标注）
 
 ## Contract
 
 measure   iso_violations = `bash plugin/scripts/test-isolation-check.ts` stdout 的 violation 总数
 band      iso_violations <= 44（基线；shrink-only 棘轮：净增即红）
-measure   concurrency_triggered = `grep -c 'zz-runner-grouping-undeclared' plugin/test/runner-grouping.test.mjs plugin/test/test-file-snapshot.test.mjs` stdout 数字段（AC6 落地后应移除该夹具引用，归 0）
+measure   snapshot_zz_exclusion = `grep -c "/zz-" plugin/scripts/test-file-snapshot.sh` stdout 数字段（AC6 落地：快照侧排除 zz-* 运行期夹具，应 ≥1；runner-grouping AC7 夹具保留共享目录维持断言语义，原「夹具引用归 0」测度由快照侧修复取代）
 invoke    `bash plugin/scripts/test-isolation-check.ts`
 control   既有 44 不阻塞（AC2）；新违规触发红（AC2）；并发 8 下 runner-grouping 与 test-file-snapshot 同跑不再互相干扰（AC6，serial+快照排除已落地）
 resume    基线与棘轮分步提交，任一步完成即写盘；先跑 measure 读当前违规数

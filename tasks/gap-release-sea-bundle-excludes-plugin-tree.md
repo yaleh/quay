@@ -129,6 +129,12 @@ AC1）；release 页 body 已更新声明「plugin sidecar + 推荐分发」。
   `package.json.files` 不影响它——SEA archive 仍不含 plugin。本任务在 SEA 侧补上 sidecar。
 - 前任任务「AC16 改判未达成」节（2026-08-06T10:4xZ）已预言「SEA 打包流程单独立案
   （gap-release-sea-bundle-excludes-plugin-tree）」——本任务即该立案的落地。
+- **AC2 交叉标注（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source`）**：本任务的
+  sidecar bundle（`dist-sea/plugin/`）与交付物清单单一事实源
+  `verify-delivery-surface.ts --inventory` 是「同一份 plugin 树」的两个投影——release 产物层要含
+  plugin（本任务），交付轮廓的目录计数由 verify-delivery-surface 机械计算（
+  `docs/proposals/quay-product-outline.md` §6 派生）。两者都归 `quay-init --loop` 铺设；SEA 二进制
+  仍是 CLI-only，plugin 目录树（含 probes）走 sidecar + quay-init 铺设。
 
 ## 执行记录（2026-08-08，sidecar 落地）
 

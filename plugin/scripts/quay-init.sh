@@ -1543,6 +1543,24 @@ PYEOF
   echo "  drift report (after upgrade):"
   compute_drift_report "$WORKSPACE_ROOT"
 
+  # Probes (routine-track probe specs — DIR-056) → <workspace>/plugin/probes/.
+  # AC3 (gap-delivery-outline-vs-verify-surface-single-source): probes are a DELIVERABLE
+  # (human ruling 2026-08-06) but quay-init never laid them down (grep 0) — a cold-started
+  # target had no probe specs on disk for the routine track's readProbeSpec("<probe>", pluginRoot)
+  # to resolve against the target's own plugin/ tree (self-contained runtime, same as the laid
+  # plugin/scripts/). Lay them VERBATIM — product-owned .md, mode "clean" (a stale same-name
+  # target is residue, backed up + replaced like the mechanism executables).
+  if [ -d "$PLUGIN_ROOT/probes" ]; then
+    mkdir -p "$WORKSPACE_ROOT/plugin/probes"
+    for pprobe in "$PLUGIN_ROOT"/probes/*; do
+      [ -f "$pprobe" ] || continue
+      copy_one "$pprobe" "$WORKSPACE_ROOT/plugin/probes/$(basename "$pprobe")" clean
+    done
+    echo "  probes: copied from plugin/probes/ (routine-track probe specs — DIR-056)"
+  else
+    echo "  WARN: probe specs missing from plugin: $PLUGIN_ROOT/probes" >&2
+  fi
+
   # Tick docs → <workspace>/orchestration/ and <workspace>/docs/analysis/ (mirroring the quay repo's
   # own layout so the docs' internal relative references resolve), laid down VERBATIM — no text
   # substitution (gap-install-rewrites-files-so-upgrade-cannot-tell-who-changed-them). The target

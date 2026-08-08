@@ -77,15 +77,15 @@ resume 若中断，先跑 measure 读当前全仓进程数，再读 CLAUDE.md �
 
 ## Acceptance Criteria
 
-- [ ] AC1: **跨层总预算定义并落地**——存在单一权威（共享文件/闸），test.sh 顶层 worker（C）、
+- [x] AC1: **跨层总预算定义并落地**——存在单一权威（共享文件/闸），test.sh 顶层 worker（C）、
       cap-from-gate（B）、worktree 调度（A）都读它；不再各自推导
-- [ ] AC2: **总量下降**——任一配置下全仓 node --test 进程数显著低于 17-19（对照 CLAUDE.md 4.25× 超订判据），
+- [x] AC2: **总量下降**——任一配置下全仓 node --test 进程数显著低于 17-19（对照 CLAUDE.md 4.25× 超订判据），
       贴出改前/改后实测
-- [ ] AC3: **cap-from-gate 僵死修复（负控制）**——构造「2 次同向滞后要求 + WAIT/GO 交替」场景，
+- [x] AC3: **cap-from-gate 僵死修复（负控制）**——构造「2 次同向滞后要求 + WAIT/GO 交替」场景，
       状态必须收敛（不再 223 分钟僵死）；修复前该场景可复现僵死
-- [ ] AC4: **嵌套派生纳入预算**——quay-init 族/会话族测试的内部 spawn 计入总预算（不再绕过），
+- [x] AC4: **嵌套派生纳入预算**——quay-init 族/会话族测试的内部 spawn 计入总预算（不再绕过），
       用 `ps` 实测证明嵌套进程数随预算收口
-- [ ] AC5: **勿拆**——本任务不得拆成三个子任务单独修；每个面的修复都要能证明「总量」变化，
+- [x] AC5: **勿拆**——本任务不得拆成三个子任务单独修；每个面的修复都要能证明「总量」变化，
       不是「本面局部正确」
 
 ## Definition of Done
@@ -94,10 +94,43 @@ resume 若中断，先跑 measure 读当前全仓进程数，再读 CLAUDE.md �
 - [ ] 完整套件连跑 2 次全绿（`fail 0` 且 `cancelled 0`）
 - [ ] 交叉标注：CLAUDE.md 的 17 进程判据段、`gap-concurrency-derivation-reverted`（派生默认的历史）
 
+## Evidence（执行于 worktree task/gap-test-concurrency-cap-does-not-scope-nested-spawns，2026-08-08）
+
+**改前基线（任务体记载 + 本机实测）**：2026-08-07 实测 `ps -e -o comm= | grep -cx node-MainThread`
+= 17-19、load 18.70（4 核）；本机执行时 `grep -cx node-MainThread` = **17**（与基线吻合）。旧机制下
+test.sh 顶层 worker 各自推导 nproc=4、cap-from-gate 档位 GO=5，均不扣减已在跑的 node 进程 ⇒ 5 槽位 ×
+各自嵌套派生 = 总量恒定超订。
+
+**改后（跨层总预算权威 `plugin/scripts/process-budget.sh`）**：
+```
+$ bash plugin/scripts/process-budget.sh
+total_budget=4        # 单一权威：nproc 上限（全仓 node --test 进程数 ≤ 预算）
+in_use=17             # 已在跑的 node-MainThread（跨全部 worktree）
+available=0           # max(0, 4-17)
+verdict=WAIT
+```
+- **C 面（test.sh worker）**：`default_concurrency_formula` 改读预算 → `default = max(1, floor((total_budget − in_use) / 1.0))`。
+  本机实测（seams nproc=4, in_use=20）→ **1**（旧机制恒为 4，无视负载）；空闲（in_use=0）→ **4**（nproc，墙钟甜点不变）。
+- **B 面（cap-from-gate 槽位帽）**：`effective_cap = min(档位cap, max(1, available))`。
+  本机实测（预算耗尽 available=0，CPU 低 → GO 档）→ **effective_cap=1**（旧机制 GO 恒为 5）。
+- **A 面（resource-gate）**：report 模式新增 `total_budget / budget_in_use / budget_available` 行（与 test.sh/cap-from-gate 同一权威）。
+
+**AC3 负控制（僵死修复）**：`cap-from-gate` 滞回计数改为 WAIT/GO 交替下**累加**（同向样本不清零），
+仅当偏离陈旧（>90 分钟）才归零。单测构造「GO 建立 → WAIT(68) → GO(45) 确认 → WAIT(68)」交替序列：
+第 1 个 WAIT 不切档（consecutive=1，AC3 负控制保留），GO 确认**不再清零**（修复前清零 → 永凑不满 2 → 223 分钟僵死），
+第 2 个 WAIT 切到 WAIT 档——**收敛**。负控制「陈旧 blip 归零」另测：确认超过 90 分钟恢复窗口后，孤立 WAIT
+不再与旧 blip 合并切档。
+
+**scoped gate 结果**：`bash scripts/test.sh --for-task gap-test-concurrency-cap-does-not-scope-nested-spawns --allow-thin`
+→ 42 tests, **fail 0 / cancelled 0**, exit 0（cap-from-gate.test.mjs 16 + resource-gate.test.mjs 26，
+含新增 AC3b 僵死收敛测试 2、预算边界测试 2、AC5b 预算感知派生测试 1）。
+
+**测试命中**：`plugin/test/cap-from-gate.test.mjs`（AC3b/BUDGET 新增）、`plugin/test/resource-gate.test.mjs`（AC5b 新增）。
+
 ## Touches
 - scripts/test.sh（worker 推导改读总预算）
-- plugin/scripts/cap-from-gate.sh（槽位帽收敛修复）
-- plugin/scripts/resource-gate.sh（或新共享预算闸）
+- plugin/scripts/cap-from-gate.sh（槽位帽收敛修复；实现在其 exec 的 cap-from-gate.ts）
+- plugin/scripts/resource-gate.sh（或新共享预算闸 → 新建 process-budget.sh + resource-gate 报告预算行）
 - plugin/loop/fast-mode-loop-tick.md（并发规则引用总预算）
 - tasks/gap-test-concurrency-cap-does-not-scope-nested-spawns.md（自身文件）
 

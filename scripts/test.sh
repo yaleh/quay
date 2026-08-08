@@ -395,6 +395,15 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # definite ~2.4× wall-clock penalty) was an unproven-conservative guard against oversubscription;
 # the cost side was never measured until now. On this box the default is now floor(4/1.0) = 4.
 #
+# CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/AC4): the
+# derivation is budget-aware — default = max(1, floor((total_budget − in_use) / AMPLIFICATION)),
+# where total_budget = nproc (the cross-layer authority, plugin/scripts/process-budget.sh) and
+# in_use = node-MainThread processes ALREADY running across all worktrees. When the machine is idle
+# (in_use = 0) this is exactly the nproc sweet spot above. When another worktree / a nested spawn is
+# already consuming node processes, this worker derives a SMALLER concurrency so the TOTAL across all
+# layers stays ≤ total_budget — nested spawns (quay-init family / session family) can no longer
+# multiply beyond the cap (the 17-19 procs / load 18.70 defect).
+#
 # REVERT HISTORY (single source of truth — gap-concurrency-derivation-reverted-but-doc-ac-and-tests-
 # all-still-report-derived): the derived default was TEMPORARILY pinned back to 8 and then restored.
 #   - 2026-08-03 (623d662b, outer urgent correction): pinned default_test_concurrency back to 8. The
@@ -426,12 +435,36 @@ run_scoped_static_checks_touches() { run_scoped_static_checks_sel --touches "$1"
 # last-flag-wins, and the user's flag is passed AFTER the default in the exec line).
 #
 # Test seams (unit test in plugin/test/resource-gate.test.mjs): RESOURCE_GATE_NPROC /
-# RESOURCE_GATE_AMPLIFICATION override the derivation inputs deterministically.
+# RESOURCE_GATE_AMPLIFICATION / RESOURCE_GATE_TEST_NODE_PROCS override the derivation inputs
+# deterministically (the last is the budget `in_use` — the cross-layer total-budget subtraction).
 default_concurrency_formula() {
-  local ncpu amp
-  ncpu="${RESOURCE_GATE_NPROC:-$(nproc 2>/dev/null || echo 1)}"
+  local total_budget in_use amp
   amp="${RESOURCE_GATE_AMPLIFICATION:-1.0}"
-  awk -v n="$ncpu" -v a="$amp" 'BEGIN { c = int(n / a); if (c < 1) c = 1; print c }'
+  # CROSS-LAYER TOTAL BUDGET (gap-test-concurrency-cap-does-not-scope-nested-spawns AC1): the
+  # worker derivation reads the SHARED budget authority (process-budget.sh — the same gate
+  # cap-from-gate.ts and resource-gate.sh read), not a per-layer nproc derivation. The budget is
+  # `nproc` total node --test processes across ALL worktrees; `in_use` = node-MainThread procs
+  # already running. default = max(1, floor((total_budget − in_use) / AMPLIFICATION)) so nested
+  # spawns (quay-init / session family) count against the SAME total instead of each worker
+  # deriving its own cap and multiplying beyond it (the 17-19 procs / load 18.70 defect).
+  # The RESOURCE_GATE_NPROC / RESOURCE_GATE_TEST_NODE_PROCS seams override the read
+  # deterministically in tests (resource-gate.test.mjs extracts this function body and runs it
+  # standalone, so the shell-out must be skippable when both seams are set).
+  total_budget="${RESOURCE_GATE_NPROC:-}"
+  in_use="${RESOURCE_GATE_TEST_NODE_PROCS:-}"
+  if [ -z "${total_budget}" ] || [ -z "${in_use}" ]; then
+    local budget_out
+    budget_out="$(bash "${repo_root}/plugin/scripts/process-budget.sh" 2>/dev/null || true)"
+    if [ -z "${total_budget}" ]; then
+      total_budget="$(printf '%s\n' "${budget_out}" | sed -n 's/^total_budget=//p')"
+    fi
+    if [ -z "${in_use}" ]; then
+      in_use="$(printf '%s\n' "${budget_out}" | sed -n 's/^in_use=//p')"
+    fi
+  fi
+  total_budget="${total_budget:-$(nproc 2>/dev/null || echo 1)}"
+  in_use="${in_use:-0}"
+  awk -v b="${total_budget}" -v u="${in_use}" -v a="${amp}" 'BEGIN { c = int((b - u) / a); if (c < 1) c = 1; print c }'
 }
 
 default_test_concurrency() {

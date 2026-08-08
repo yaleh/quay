@@ -112,6 +112,16 @@ ppid=1 且 cwd 已删除的孤儿 node 进程（AC10）。参考：本机 nproc=
 node:test/test.sh 项目的旋钮；**vitest 项目真实文件级并行 flag 是 `--maxWorkers`**，archguard 用
 `--maxWorkers=8` 跑通全量——同一份文档服务两种测试框架，`gap-full-suite-runner-red-pattern-matches-
 bare-x-vitest-false-red` AC3）。两层绝不同时跑全量套件。
+**跨层总预算（`gap-test-concurrency-cap-does-not-scope-nested-spawns` AC1/AC4，机制不是散文）**：
+全仓并发 node --test 进程数由**单一权威** `plugin/scripts/process-budget.sh` 定义——
+`total_budget = nproc`、`in_use = pgrep -xc node-MainThread`（跨全部 worktree 计数）、
+`available = max(0, total_budget − in_use)`。test.sh 的 worker 推导（C 面）、cap-from-gate 的
+槽位帽（B 面）、本节的资源闸/外层调度（A 面）**都读这同一预算，不各自推导**：
+- **worker 数**：test.sh 默认并发 = `max(1, floor((total_budget − in_use) / 1.0))`——空闲时 = nproc（墙钟甜点），
+  已有嵌套派生（quay-init 族 / 会话族内部 spawn）在跑时自动收口，**嵌套不再绕过上限**（17-19 进程 / load 18.70 的根因）；
+- **槽位帽**：`effective_cap = min(档位cap, max(1, available))`——预算耗尽（available=0）时槽位帽落到 1，饱和主机不再派发；
+- **资源闸**：report 模式输出 `total_budget / budget_in_use / budget_available`（与 test.sh/cap-from-gate 同一权威）。
+验证判据：任何配置下 `ps -e -o comm= | grep -cx node-MainThread` ≤ total_budget。
 **全量套件本身已移到外层后台**（`gap-full-suite-belongs-to-outer-background-above-3-min`，AC1/AC3）：
 inner 不跑全量（默认无参路径），只读 `.quay/full-suite-state.json` 的 `state`（见步骤 3）——上面这条
 资源闸是**外层后台 runner 起跑前**要过的闸，不是 inner 的。inner 只保留 `--for-task` 选中集
@@ -645,6 +655,9 @@ avg10`（对真实过载响应），阈值抬高以剔 churn 基线**：avg10 < 
 effective_cap="$(bash plugin/scripts/cap-from-gate.sh 2>/dev/null | sed -n 's/^effective_cap=\([0-9]*\)$/\1/p')"
 # Contract 的读取形态：`bash <cap-from-gate-helper> 2>&1 | grep -o '[0-9]'`（stdout 数字段）；
 # sed 提取是同一 stdout 的健壮写法（effective_cap= 行是末行）。空值 ⇒ 重跑一次看 stderr。
+# 槽位帽已接跨层总预算（gap-test-concurrency-cap-does-not-scope-nested-spawns AC1/B 面）：
+# effective_cap = min(档位cap, max(1, available))——available 来自 process-budget.sh（全仓
+# node --test 进程预算 = nproc，减去已在跑的 node-MainThread 数）。预算耗尽 ⇒ 落到 1。
 ```
 
 ```bash
@@ -674,6 +687,26 @@ node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd
   约束**（阶段目标要的任务被补充门挡在 todo 时，外层用这条路径把它提出来，`quay promote <id>`）。
   **内层不知道阶段目标**：本步只做机械补充（`pool < floor` 的 `promotions[]`），不调用 `--targeted`。
   职责切分：晋级（选择，需要阶段目标）= 外层；派发（机械，只需 touches/cap/停止条件）= 内层。
+
+### 3.7 例常例行（routine track）——周期探针发现（AC3，gap-delivery-outline-vs-verify-surface-single-source）
+
+**这是产品里唯一「主动去找缺陷并建议任务」的机制（pre-friction 发现）**。判据见
+`docs/proposals/quay-product-outline.md` §3.5。**接线状态（2026-08-08 修复）**：routine-scheduler.ts
+的唯一调用方曾是退休的 loop-driver SKILL（活 tick 文档零命中）——本步骤把 routine track 接回活文档。
+
+1. **读例常配置**：`.quay/config.yml` `loop.routines:`（`readLoopParams` 校验；`config-wiring-check.ts`
+   钉「有配置必有人读」）。默认 `[]` = 无例行 → 本步空转。
+2. **调度**：把 routines 写成临时 JSON，跑
+   `node --no-warnings --experimental-strip-types routine-scheduler.ts --iteration <tick 计数> --event checkpoint --plugin-root "$CLAUDE_PLUGIN_ROOT" /tmp/routines-<tick>.json`
+   ——exit 0 = 有 DUE；exit 3 = 无 DUE（`every(N)` 的 N 以 tick 计数计，不再用退休管线的「迭代号」）。
+3. **派发**：对每条 DUE routine，用 `read-probe-spec.ts` 读 `<plugin-root>/probes/<name>.md` 的 spec
+   （instrument / fallback / objective）；instrument 可用才派后台 subagent，不可用且 `fallback: none` 则跳过。
+4. **闸门 + FILE-ONLY**：findings 走 `routine-file-gate.ts`（新颖性 / 去重 / 限流）；只产新任务文件
+   （`tasks/`），改任何产品/方法代码 = 违规丢弃。
+
+`quay:run-routines` skill（`plugin/skills/routines/SKILL.md`）是这条 track 的操作化承载——本步调度它
+即可，不必手抄流水线；routine-scheduler.ts / read-probe-spec.ts / routine-file-gate.ts 随 --loop 铺入目标
+（机制语料裸名解析，见 quay-init.sh 的 derive_loop_scripts）。
 
 ### 4. 派发就绪任务（并发）
 
@@ -721,6 +754,11 @@ subagent**，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3/AC6，
 + 滞回 + 档位配置（GO=5/WAIT=2/EXTREME=1，可配置），资源空时 GO 档 ≥3（吞吐较固定 cap=3 提高，AC5），
 高负载（avg10 ≥60，实测真实过载读数）自动回落 WAIT/EXTREME 档（不加重，AC6）。**churn 剔除靠阈值抬升
 不靠固定减法**——avg10 的实测 churn 基线 42-54 落在 GO 带内，不再像 avg300 那样把 cap 结构性锁在 WAIT=2。
+**槽位帽再受跨层总预算钳制（`gap-test-concurrency-cap-does-not-scope-nested-spawns` AC1/B 面）**：
+`effective_cap = min(档位cap, max(1, available))`——available 来自 `process-budget.sh`
+（全仓 node --test 进程预算 = nproc，减去已在跑的 node-MainThread 数）；预算耗尽 ⇒ 槽位帽落到 1，
+饱和主机不再派发。**滞回已修僵死（AC3）**：consecutive 计数在 WAIT/GO 交替下**累加而非被同向样本清零**，
+且仅在偏离陈旧（>90 分钟）时归零——223 分钟僵死（cap 停在 GO 穿过 EXTREME 峰值）不再复现。
 本 tick 只派发**至多 `effective_cap` 个在飞 subagent**。并发是打破「外层变瓶颈」的手段——串行时外层的
 20 分钟 tick 频率会和任务完成频率同量级，分层退化成单层加延迟。
 

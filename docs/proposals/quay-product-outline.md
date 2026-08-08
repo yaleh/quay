@@ -112,12 +112,20 @@ body 里承载 ## Proposal / ## Plan / ## Acceptance Criteria / ## Definition of
 | 配置 | `.quay/config.yml` 的 `loop.routines:`，`trigger: every(5)` / `every(10)` |
 | 产出 | findings → 候选任务文件（FILE-ONLY 不变式） |
 
-**⚠️ 现状：机制完整，但已死 15 天（2026-08-05 实测）**
+**⚠️ 现状：机制曾完整，但死了 15 天（2026-08-05 实测）；已重新接线（2026-08-08，AC3）**
 
-- **两层循环文档对探针的引用：`orchestrator-loop-tick.md` 0 处、`fast-mode-loop-tick.md` 0 处**
-- 触发器 `every(N)` 按**迭代计数**触发，而「迭代」是 ADR-022（2026-08-03）退休掉的
-  经典管线的概念——两层快速模式**没有迭代号**，也没有任何地方调用 `routine-scheduler`
-- 最后一次真跑：2026-07-15（提交信息里的 `Iteration 49/52`），彼时经典管线尚在
+- **死因**：两层循环文档对探针的引用 `orchestrator-loop-tick.md` 0 处、`fast-mode-loop-tick.md` 0 处；
+  触发器 `every(N)` 按**迭代计数**触发，而「迭代」是 ADR-022（2026-08-03）退休掉的经典管线的
+  概念——两层快速模式没有迭代号，也没有任何地方调用 `routine-scheduler`。最后一次真跑：
+  2026-07-15（提交信息里的 `Iteration 49/52`）。
+- **修复（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source` AC3）**：
+  - **铺设**：`quay-init --loop` 现在把 `plugin/probes/`（4 个 probe spec）铺进目标的
+    `plugin/probes/`（此前 grep 0——目标项目磁盘上不出现探针）；
+  - **调用方（活文档）**：`fast-mode-loop-tick.md` 新增步骤 3.7「例常例行（routine track）」——
+    读 `loop.routines:` → `routine-scheduler.ts`（tick 计数替代迭代号）→ `read-probe-spec.ts`
+    派发 → `routine-file-gate.ts` 过闸 + FILE-ONLY；routine 脚本随 --loop 铺入目标（机制语料裸名解析）；
+  - **死配置检测**：`config-wiring-check.ts` 的 routines 字段现在要求**活 tick 文档引用 routine track**，
+    否则报 NOT_CONSUMED_BY_DRIVER（config-validate 只校验语法，不校验「这段配置会不会被谁读」）。
 
 **为什么这条比它看起来重要**：2026-08-05 实测，机器自己开出的 7 根新维度**全部是
 post-friction**（被硌了才发现）。而探针**本来就是设计来做 pre-friction 发现的**。
@@ -126,7 +134,7 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 （前四：`loop-driver.jsonl` 无写入者、遥测括号从没被调用、`human-steered` 标签消费者
 全在退休管线、`strategic-doc-staleness` 的 orchestration 臂是死 glob）。
 
-**重新接线的方向**：触发器从「迭代计数」改为两层模式实际拥有的量（tick 计数 / 时间 / 事件）。
+**接线已落地**：触发器已从「迭代计数」改为两层模式实际拥有的量（tick 计数），见 `fast-mode-loop-tick.md` 步骤 3.7。
 
 ---
 
@@ -184,11 +192,30 @@ post-friction**（被硌了才发现）。而探针**本来就是设计来做 pr
 
 ## 6. 交付
 
+> **单一事实源（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source`，人裁定）**：
+> plugin bundle 的目录计数不再是本节的独立散文——单一事实源是
+> `plugin/scripts/verify-delivery-surface.ts --inventory`（机械计算磁盘真值）。本节下方的
+> **机读快照是派生副本**，由该检查逐项校验（改一份不提醒另一份 = 漂移被 `inventory_drift` 报出）。
+> 交叉标注：ADR-024（裁定↔机械检查可追溯绑定）——本裁定（verify-delivery-surface 为交付物清单源）
+> 与 `--inventory` 漂移检查机械绑定，覆盖了 ADR-024 原案未覆盖的 outline-vs-check 对。
+
 | 项 | 内容 |
 |---|---|
-| plugin bundle | `scripts` 97 · `gate-scripts` 14 · `skills` 11 · `probes` 4 · `loop` 2 · `workflows` 2 · `agents` 1 · `vendor` 2（自包含运行时） |
+| plugin bundle | 目录计数由 `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory` 派生（单一事实源）；当前快照见下方机读块（**非独立维护**——漂移会被机械报出）。向 `plugin/` 加/删文件后跑 `verify-delivery-surface.ts --write-inventory` 再生成快照（`--inventory` 报 `inventory_drift>0` 即提示该做） |
 | 铺设 | `quay-init`（幂等），铺设集由文档引用**派生**而非硬编码 |
 | 升级通道 | `quay-init` 内有 upgrade 逻辑，但目标项目实测仍会冻结在安装那一刻——**交付面自己在长大，目标没有跟上的路径**（已立案未闭） |
+
+<!-- DELIVERY-INVENTORY-BEGIN -->
+scripts=168 · gate-scripts=14 · skills=13 · probes=4 · loop=3 · workflows=2 · agents=1 · vendor=2
+<!-- DELIVERY-INVENTORY-END -->
+
+### 6b. 前置条件（2026-08-08，`gap-delivery-outline-vs-verify-surface-single-source` AC4）
+
+| 前置 | 值 | 说明 |
+|---|---|---|
+| **Node 下限** | `>= 20`（`package.json` `engines`；ad-arm1 实测系统 18.19.1） | 低于 20 无法跑 `--experimental-strip-types` 的 TS 脚本/检查 |
+| **config.yml 完整形状** | 完整 `providers:` / `gates:` / `loop:`（DIR-050）；`quay-init --loop` 只生成 `loop:` 四字段（repo_root/test_command/tmux_session/worktree_root），ad-arm1 手工补 `gates:` 60 行才过 validate | 完整形状是交付前提——缺 `gates:` 段 validate 会失败；quay-init 的 loop 生成不构成完整 config |
+| **tmux 拓扑** | **cold-start 前置（非全局）**——三窗口拓扑只在 cold-start 真正需要 | 铺设期不强制 tmux 会话存在；`quay-init --loop` 的 tmux 强制检测应移到 cold-start（见任务追加发现④，实现问题） |
 
 ---
 
@@ -216,9 +243,8 @@ inner     每项目一个，执行、派发 subagent、合并
 # CLI 名词面
 node --experimental-strip-types packages/quay/bin/quay.ts --help | grep -c '^  quay '
 
-# 交付构成
-for d in scripts gate-scripts skills probes loop workflows agents vendor; do
-  echo "$d $(ls plugin/$d | wc -l)"; done
+# 交付构成（单一事实源 = verify-delivery-surface --inventory；本命令即其机械核对，漂移报出）
+node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --inventory
 
 # provider 数
 ls -d packages/quay-* | wc -l
