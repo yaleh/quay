@@ -121,6 +121,14 @@ control   src 更新后不重建 ⇒ dist 陈旧（AC1 负控制）；重建后 
   `node --experimental-strip-types bin/quay.ts` 需要 **Node ≥ 22.6**（那任务的探针判据）。两条 floor
   **分开判断**：探针只挂在源码执行路径的纯 JS 入口 `bin/quay.js` 上，不进 dist bundle——dist 在 Node 20
   照常跑，不被 22.6 探针挡住（AC4）。
+- **gap-user-scope-install-reinstall-criterion-and-version（AC4 交叉标注，2026-08-08）**：本任务管的是
+  **dist 安装物的新鲜度**（mtime 与源码一致 / 嵌入版本与 vendored package.json 一致——`dist_fresh`
+  + `vendor_runtime_user_scope_stale_check`）；那任务管的是**user-scope 插件安装物本身的版本判据**
+  （`plugin/VERSION` + `plugin/sync.sh --check-user-scope` 比对 + `--reinstall-criterion` 能力边界
+  重装判据）。同一根因的两层落点：**「安装物没有新鲜度判据」**——本任务在**构建产物轴**（dist 跟随源码），
+  那任务在**整包安装物轴**（user-scope 安装跟随插件版本）。dist-follow 判据（mtime/版本一致）是那任务
+  的 VERSION 比对判据的**前置同族**：两者都是「落后则报出」的负控制补丁（修复前无任何机制报陈旧）。
+  `plugin/VERSION` 与 vendored package.json 版本的一致性由 user-scope-reinstall 测试断言（单一来源防漂移）。
 
 ## Dispatch review
 
