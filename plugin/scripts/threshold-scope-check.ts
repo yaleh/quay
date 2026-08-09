@@ -168,7 +168,11 @@ export function buildFileIndex(root: string): FileIndex {
     }
     for (const e of entries) {
       if (e.isDirectory()) {
-        if (e.name.startsWith(".") || e.name === "node_modules") continue;
+        // Exclude hidden / node_modules / TEST-ARTIFACT + WORKTREE dirs: a basename found only in
+        // `tmp/` or `milestones/*/worktrees/` (e.g. a run-identity fixture copy of a retired script)
+        // must not falsely resolve a genuinely stale reference in the scanned docs.
+        if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "tmp"
+          || e.name === "worktrees" || e.name === "milestones") continue;
         walk(path.join(dir, e.name));
         continue;
       }
