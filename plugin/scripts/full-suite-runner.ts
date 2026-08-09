@@ -262,13 +262,13 @@ const FAILURE_PATTERNS: RegExp[] = [
   /^not ok\b/, // node:test / TAP per-test failure
   /^[#ℹ]\s*fail\s+[1-9]/, // TAP + spec-reporter summary: # fail 1+ / ℹ fail 1+
   /^[#ℹ]\s*cancelled\s+[1-9]/, // TAP + spec-reporter summary: # cancelled 1+ / ℹ cancelled 1+ (cancelled is a failure even when fail 0)
-  /❯\s+\S+\s+\(\d+\s+tests?\s*\|\s*[1-9]\d*\s+failed(?:[^)]*)\)/, // vitest per-file: ❯ <file> (N tests | M failed [| K skipped])
-  /Test Files\s+[1-9]\d*\s+failed/, // vitest summary: Test Files <N> failed
-  /FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero
+  /^ ?❯\s+\S+\s+\(\d+\s+tests?\s*\|\s*[1-9]\d*\s+failed(?:[^)]*)\)/, // vitest per-file: ❯ <file> (N tests | M failed [| K skipped]) — ^ ? anchored: a REAL spec-reporter line is ` ❯ <file> ...` (one optional leading space, fixture-pinned); a PASSING test whose NAME quotes the `❯ <file> (N tests | M failed)` shape is `✔`-prefixed and must not match — same self-match family as the ^✖ fix (c83ce4be)
+  /^Test Files\s+[1-9]\d*\s+failed/, // vitest summary: Test Files <N> failed — ^ anchored: a REAL summary line starts column-0; a PASSING test whose NAME quotes the `Test Files <N> failed` shape is `✔`-prefixed and must not match — same family
+  /^FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero — ^ anchored: the REAL marker starts column-0 (test.sh appends it); a PASSING test whose NAME quotes `FULL-SUITE-EXIT=1` is `✔`-prefixed and must not match — same family
   /^✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms) — ^ anchored: a REAL reporter failure starts the line; a PASSING test whose NAME quotes the `✖ <name> (Nms)` shape (runner-failure-patterns' own e2e names) is `✔`-prefixed and must not match
   /^✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed) — ^ anchored, same reasoning
   /^__PERFILE__\s+duration_ms=.*\s+passed=false\b/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false — ^ anchored + FULL reporter shape (candidate B, gap-runner-perfile-pattern-unnchored-self-match-phantom-red): a REAL reporter line starts column-0 with `__PERFILE__ duration_ms=...`; a PASSING test whose NAME quotes the shape (the runner's own e2e test names) is `✔`-prefixed and must not match — same family as the ^✖ fix (c83ce4be)
-  /tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C)
+  /^tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C) — ^ anchored: a REAL leak-scan residual starts column-0 with `tmux-leak-scan: FAIL`; a PASSING test whose NAME quotes the shape (the runner's own AC5 e2e name, gap-tmux-leak-scan-pattern-unnchored-self-match-phantom-red) is `✔`-prefixed and must not match — same self-match family as the ^✖ fix (c83ce4be) and ^__PERFILE__ (a1b78104)
 ];
 
 // AC5 reason axis (gap-suite-state-has-no-reason-axis-failed-aborted-infra AC1/AC3) — ABORT markers

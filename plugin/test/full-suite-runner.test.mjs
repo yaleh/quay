@@ -590,6 +590,15 @@ test("AC2 unit — FAILURE_PATTERNS recognize the reporter info-glyph + per-file
     // a PASSING test whose NAME quotes the `__PERFILE__ ... passed=false` shape (the runner's own
     // e2e name) is `✔`-prefixed, so the ^-anchored + full-shape pattern must NOT flag it:
     "✔ AC2/AC3 e2e — a `__PERFILE__ duration_ms=336 /home/yale/work/quay/plugin/test/foo.test.mjs passed=false` per-file line flips red and carries the failed file in failures[] (336.35913ms)",
+    // gap-tmux-leak-scan-pattern-unnchored-self-match-phantom-red AC3: the round-167 phantom-red —
+    // the same family, `✔`-prefixed passing test NAME quoting the `tmux-leak-scan: FAIL` shape —
+    // must NOT flag with the ^-anchored pattern:
+    "✔ AC5 e2e — a `tmux-leak-scan: FAIL` residual line (candidate C) flips red with failures non-empty (leak is a real residual) (396.686255ms)",
+    // ... and the OTHER newly-^ anchored shapes must equally resist a `✔`-prefixed passing NAME
+    // quoting them (family #4/#5 prevention — the full-table audit, gap-tmux-leak-scan ... AC4):
+    "✔ AC1 e2e — a `❯ test/foo.test.ts (3 tests | 1 failed)` vitest line flips red early (12ms)",
+    "✔ AC2 e2e — a `Test Files 1 failed | 10 passed` summary line flips red (3.4ms)",
+    "✔ AC3 e2e — a `FULL-SUITE-EXIT=1` marker flips red (2.1ms)",
     "# fail 0",
     "# cancelled 0",
   ]) {
