@@ -62,6 +62,7 @@ resume 若中断，先跑 measure 读当前未知名字是否被静默忽略，�
 - [ ] AC1-AC4 实跑输出贴任务体（未知名字 WARN 对照 + 合法名字零告警 + pid 匹配）
 
 ## Touches
+- tasks/gap-session-liveness-ignores-unknown-transcript-names.md（自身文件：self-touch，2026-08-09 内层补——缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/session-liveness.sh（启动校验：transcript/heartbeat 名字 vs SESSION_TARGETS 表）
 - plugin/test/session-liveness.test.mjs（AC1/AC2 测试）
 - orchestration/session-liveness.env（若需格式注释）
