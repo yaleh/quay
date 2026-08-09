@@ -21,7 +21,7 @@
 | A2 | `GATE=$(bash plugin/scripts/cap-from-gate.sh)` → 从中取 `CAP` → `slot-refill.sh --cap "$CAP"` | **同一 tick 内 cap 只取一次**;`floor` 必须与该 cap 同源(§2.4b) |
 | A3 | in-flight = `tmux capture-pane -t quay-0:inner \| grep -cE '^\s+◯ '` | **不用 `slot-refill` 的 `in_flight_count`——那是入参不是测量** |
 | A4 | 两层忙闲 = pane 尾部 `esc to interrupt` | pane-only;`LOOP_MIN=0` 才看得到全部事件 |
-| A5 | 三项目 `.halt` 存在性 | quay / archguard / meta-cc |
+| A5 | 三项目 `.halt` 存在性 **+ 最后提交时距** | quay / archguard / meta-cc。**判据是组合,不是单读**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级。**只读不判会稳定产生「看见但没发现」**——实证:我每轮都打印 `archguard 无.halt`,而它已 2 天无提交,连续多轮未升级(2026-08-09 06:4xZ 补报) |
 | A6 | `git merge-base --is-ancestor develop integration` + 两方向 `rev-list --count` | AC27 |
 | A7 | 套件末轮:读 `.quay/verification-round.jsonl`,**先按 `startedAt` 非空过滤再取末条** | ①单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」(它每轮覆盖);②**该 jsonl 是异构日志,两种记录混写**:套件轮次 `{startedAt,durationMs,state,reason,…}` 与收尾轮次 `{at,suiteGreen,closed:[…]}`(实测 75/150 是后者)。**直接取末行会在末行恰为收尾记录时报 `state=None`,看起来像"空记录/记录缺陷",实则是我取错了类型**(2026-08-09 06:3xZ 亲历并误报过一次) |
 | A8 | `git status --porcelain \| wc -l` | 脏树 |
