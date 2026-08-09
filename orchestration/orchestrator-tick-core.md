@@ -24,11 +24,11 @@ checklist 执行。
 | A3 | 三项目 `.halt` 存在性 + 内容 + **最后提交时距**(quay / archguard / meta-cc) | 每 tick 必报——「暂停后忘了」的唯一防线 (src:555)。**组合判据(SPEC 2.8)**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级——只读不判会稳定产生「看见但没发现」(与 manager A5 同形) |
 | A4 | 观察块:`capture-pane` → `.quay/last-pane.txt`、`git log -10`、`git status --short`、`fast-mode-telemetry --report --json`、`task-status-drift-check`(含 `--stranded`)、`batch2-queue-state.md` | 只读不动手 (src:569) |
 | A5 | `supervisor-bus-identity.sh inbox-summary` | unread 逐条进决策;**delivered ≠ consumed** (src:580) |
-| A6 | **占用率(AC26,强制)**:`cap-from-gate.sh` 取 cap → `fast-mode-telemetry --slots --cap <cap>`;再取「inner 最近一次**自己的**报告」 | 量占用率不量新鲜度——mtime /「transcript is fresh」/「最后活动」一律不算;**槽未满且上游已通 ⇒ 当轮驱动派发,不得记录后结束** (src:583) |
+| A6 | **占用率(AC26,强制)**:`cap-from-gate.sh` 取 cap → `fast-mode-telemetry --slots --cap <cap>`;再取「inner 最近一次**自己的**报告」 | 量占用率不量新鲜度——mtime /「transcript is fresh」/「最后活动」一律不算;**槽未满且上游已通 ⇒ 当轮驱动派发,不得记录后结束**。**inner 的 `N/4 in-flight` 是数字不是标签:求值 `in_flight < cap` ⇒ slots_free=cap−in_flight;slots_free>0 且上游通 ⇒ 本 tick 派发(可补的候选查 A9/A12 的 recommended),不是把 `1/4` 抄成状态然后 no-action** (src:583) |
 | A7 | `inner-blocked-signal.ts --detect-stop --target inner --pane .quay/last-pane.txt` | 连续 3 次 `waiting-input`/`permission-prompt` 才写块;状态区有「← N agent」或有在飞 bracket = 良性空闲 (src:598) |
 | A8 | **层间 tick 间隔检查(每轮必跑)**:inner transcript mtime age,阈值 30min | 目标解析必须**验 pid 匹配 inner pane**,不用发现启发式;量自驱心跳不量最后活动 (src:485) |
-| A9 | `ready-pool-check.ts --root "$REPO_ROOT" --json` → `excluded[]` 里 `not-yet-flipped` | 探测用 `taskWorkLanded`,不用 `status: done` (src:675) |
-| A10 | `bash plugin/scripts/closure-lag-check.sh` | 退出非 0 ⇒ 本 tick **报 WARN 进 tick-log + 报告**,不静默;信号是报告不是门控 (src:701) |
+| A9 | `ready-pool-check.ts --root "$REPO_ROOT" --json` → `excluded[]` 里 `not-yet-flipped` | 探测用 `taskWorkLanded`,不用 `status: done`。**判据(不只读计数):not-yet-flipped 数 ≥ floor/2 ⇒ 本 tick 报「done-flip 积压」并逐个核 AC——AC 全勾且 work 落地即翻 done,AC 未满的 workLanded 任务是上游堵塞(该修 probe 或补判据),不是「正常 backlog」** (src:675) |
+| A10 | `bash plugin/scripts/closure-lag-check.sh` | 退出非 0 ⇒ 本 tick **报 WARN 进 tick-log + 报告**,不静默;信号是报告不是门控。**判据:读 `not_yet_flipped` 数字后自己求值 `not_yet_flipped ≥ threshold(30) ⇒ 升级`——但脚本默认阈值 30 是松的,17 条积压被它判「正常」;外层自己定更严判据(如 ≥10 即报「done-flip 积压偏多」并逐个核),不要只抄 `overdue: False` 当结论** (src:701) |
 | A11 | 读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs` | `green`⇒suiteGreen;`running`⇒true(proceed);`red`⇒false;**缺文件⇒true**。`reason: aborted` **不**触发停派 (src:738) |
 | A12 | 独立核实内层至少一项声称:`inner-forensics.mjs verify <类别> --since <上次 tick ISO>` / `timecost` | 以 git 和实测为准,不以内层自述为准;零命中 ≠ 没做过(先用类别形式复核);见 `⚠ 更早会话未被包含` 即窗口不完整 (src:630) |
 | A13 | `self-report-vocab-audit.ts --git-log 15 --exclude-prefix outer: --window 3 --json` | 读 `inner_self_report_vocab` + `converged`;连续 3 轮无 batch 式自述 = 收敛 (src:851) |
@@ -43,12 +43,12 @@ checklist 执行。
 - **B5 轮次记录**:`closed` 非空 ⇒ 追加 `.quay/verification-round.jsonl` 一行,**追加前**断言 `N == last+1`、**追加后**断言尾部 round == `N`;断言失败即本轮 tick 异常,不得静默跳过。`closed` 为空 ⇒ 不写、不报警 (src:755, 765)
 - **B6 落盘聚合**:`fast-mode-telemetry.ts --snapshot` (src:772)
 - **B7 重锚转发(1c,强制)**:**判空闲才转发**(pane 两次相同 + 无在飞 bracket + 非 ruling-required)→ `cat plugin/scripts/reanchor-prompt.txt` **逐字原样**发,不现写散文 (src:825, 834, 837)
-- **B8 动作分类**:`no-action` / `unblock` / `correct` / `escalate` 记一个——判断分层是否退化的唯一依据 (src:865)
+- **B8 动作分类**:`no-action` / `unblock` / `correct` / `escalate` 记一个——判断分层是否退化的唯一依据。**`no-action` 唯一合法条件 = 五条不等式全为假**(见 B13 五条清单);任一为真则 B8 必须是 `unblock`/`correct`/`escalate` 之一,记 `no-action` 即违 (src:865)
 - **B9 队列**:队列空 ⇒ 按候选/依赖/`checkTouchesPair`/优先级补充(含跨机 `task/*` 分支在飞);阶段目标要的任务 ⇒ `ready-pool-check.ts --targeted <id>` 校验 + `quay promote <id>`(不受 `pool<floor` 约束) (src:908, 941)
 - **B10 学习**:问「这一轮是否改变了对目标或方法的理解」,是则改对应文件并**写明什么证据推翻了原判断** (src:1013, 1027)
 - **B11 升级**:同一失败再现 / 需改方向范围 / 外层停止条件触发 ⇒ 写 `orchestration/escalations.md`,含现象+已试+为何超权+≥2 选项 (src:1003)
 - **B12 自身停止条件自查**:连续 3 个 tick 没有推进任何任务状态 ⇒ 停 loop、叫人、附三次 tick 各看到什么 (src:1029)
-- **B13 tick-log 追加一行**:时刻(`date -u '+%H:%MZ'`)、动作类型、做了什么、内层状态快照。**写完验证读磁盘文件(`tail -3`),不读 git**;累计分布**从行数重算**不手工加减;**tick-log 已 untrack+gitignore,「提交 tick-log」这一步作废** (src:1045, 1051, 1057)
+- **B13 tick-log 追加一行**:时刻(`date -u '+%H:%MZ'`)、动作类型、做了什么、内层状态快照。**写完验证读磁盘文件(`tail -3`),不读 git**;累计分布**从行数重算**不手工加减;**tick-log 已 untrack+gitignore,「提交 tick-log」这一步作废**。**no-action 是需举证的判词,不是零成本标签(manager 2026-08-09 已核实:14:08-15:08 5 次 no-action 全不合法):tick-log 行写 `no-action` 必须同时携带五条不等式读数且全为假——①in_flight<cap 且 recommended 非空?②pool<floor?③nyf>0 且 work 落地?④integration 领先 develop 且 suite 绿?⑤suite red?——任何一条为真则 no-action 不合法,该行必须有对应动作或硬理由** (src:1045, 1051, 1057)
 - **B14 每个 tick 必报**(缺任一条则分层是否有效无法判定):动作类型 / 独立核实了哪一项及结果 / 内层在飞任务数与各自时长 / 遥测任务数·均耗时·`tasksPerHour` / 本轮收尾几条 + suite `state` + `durationMs` / 套件触发者是否挂上 + 最近 `SUITE-*` 事件与时刻 / 累计动作类型分布 / Monitor 两判据 / 本轮是否转发重锚 + 空闲判据 / `inner_self_report_vocab` 与收敛状态 (src:1063, 850, 858, 776)
 
 ## C. 硬约束(每条都已付过代价,理由见档案)
