@@ -47,9 +47,9 @@ extra: {}
 
 ## Touches
 
-- plugin/scripts/（closure-lag 信号脚本，若候选 A/B）
+- plugin/scripts/closure-lag-check.sh（closure-lag 信号脚本——候选路径，实现时落地，具体文件名以实现为准）
 - orchestration/orchestrator-loop-tick.md + plugin/loop/orchestrator-loop-tick.md（1b 文档：不随红窗停 + 留痕要求）
-- plugin/loop/fast-mode-loop-tick.md（若收尾语义涉及）
+- plugin/loop/fast-mode-loop-tick.md（收尾语义涉及时）
 - tasks/gap-closure-pass-has-no-lag-signal.md（自身：勾 AC + 贴证据）
 
 ## Contract
