@@ -474,6 +474,15 @@ export function makePaneBusy(env, session) {
 export function makePaneIdle(env, session) {
   tmux(["send-keys", "-t", session, "C-u"], env);   // clear the input line → shape back to idle
 }
+// makePanePermissionPrompt(env, session) — type a blocking permission-confirmation SHAPE into the
+// pane (no Enter — the pane's last content line carries the "Quick safety check" / "Enter to
+// confirm" signature, so classifyPaneState reads permission-prompt and _sl_pane_verdict pins
+// busy=0 intervention=1). gap-permission-prompt-merged-into-busy helper: same typing shape the
+// candidate-B main-loop test already used inline, extracted for the intervention tests.
+export function makePanePermissionPrompt(env, session) {
+  tmux(["send-keys", "-t", session, "C-u"], env);   // clear any prior typed input
+  tmux(["send-keys", "-t", session, "Quick safety check: Is this a project you created or one you trust? | Enter to confirm"], env);
+}
 
 // startTouchLoop — simulate a live session writing to its transcript: touch <file> every 0.5s.
 export function startTouchLoop(file) {

@@ -37,7 +37,7 @@ import {
   setProbeTmpPrefix, sweepTmp, tmux, isolateTmuxEnv, isClaudePid,
   paneHasClaudeChild, waitForAlive, makeHermeticProbe,
   spawnMonitor, waitForOutput, waitForRounds, countRounds,
-  makePaneBusy, makePaneIdle, startTouchLoop, cleanup,
+  makePaneBusy, makePaneIdle, makePanePermissionPrompt, startTouchLoop, cleanup,
   userRecord, assistantRecord, apiErrorRecord, isoAgo,
   assistantToolUseRecord, assistantTextRecord, userInputRecord, writeTranscript,
   assistantUsageRecord,
@@ -1043,6 +1043,96 @@ test("AC0（先观测）— SL_PANE_STATE_LOG=1 时每轮打 pane_state=<state> 
       const paneStateLines = (mon.output().match(/pane_state=\S+/g) || []).length;
       assert.ok(paneStateLines >= 3,
         `AC0: SL_PANE_STATE_LOG must emit a pane_state=<state> line per round (≥3 for 3 rounds), got ${paneStateLines}:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC1/AC2 — a permission-prompt pane is NOT busy: --pane-state reads state=permission-prompt busy=0 intervention=1 (pre-fix it read busy=1 — 卡权限框与在干活同形)", () => {
+  const perm = "Quick safety check: Is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder ✔\n  2. No, exit\nEnter to confirm · Esc to cancel";
+  const r = spawnSync("bash", [SCRIPT, "--pane-state"], { input: perm, encoding: "utf8" });
+  assert.equal(r.status, 0, `--pane-state must exit 0:\n${r.stderr}`);
+  assert.match(r.stdout, /state=permission-prompt busy=0 intervention=1/,
+    `permission-prompt must be non-busy and intervention-flagged (the pre-fix reading was busy=1):\n${r.stdout}`);
+});
+
+test("AC4 — normal busy is NOT intervention-flagged (negative control): --pane-state on a busy pane reads busy=1 intervention=0; waiting-input reads busy=0 intervention=0", () => {
+  const busy = "───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · esc to interrupt · ← 1 agent · ↓ to manage";
+  const rb = spawnSync("bash", [SCRIPT, "--pane-state"], { input: busy, encoding: "utf8" });
+  assert.equal(rb.status, 0, `--pane-state must exit 0:\n${rb.stderr}`);
+  assert.match(rb.stdout, /state=busy busy=1 intervention=0/,
+    `true busy must stay busy with NO intervention (正常忙碌不误报):\n${rb.stdout}`);
+  const idle = "───────────────────────────────\n❯ \n───────────────────────────────\n  ⏵⏵ bypass permissions on · 1 monitor · ← 1 agent · ↓ to manage";
+  const ri = spawnSync("bash", [SCRIPT, "--pane-state"], { input: idle, encoding: "utf8" });
+  assert.match(ri.stdout, /state=waiting-input busy=0 intervention=0/,
+    `waiting-input must stay idle with NO intervention:\n${ri.stdout}`);
+});
+
+test("## Contract — --check exits 0 and reports permission_prompt_class=intervention-required + busy_true_work_not_flagged=1 + intervention_triggered=1 (the three contract bands)", () => {
+  const r = spawnSync("bash", [SCRIPT, "--check"], { encoding: "utf8" });
+  assert.equal(r.status, 0, `--check must exit 0 (all contract bands hold):\n${r.stdout}\n${r.stderr}`);
+  assert.match(r.stdout, /permission_prompt_class=intervention-required/,
+    `--check must report the new non-busy state (measure permission_prompt_class band=非 busy):\n${r.stdout}`);
+  assert.match(r.stdout, /busy_true_work_not_flagged=1/,
+    `--check must report busy-not-flagged (invariant busy_true_work_not_flagged=1, AC4 negative control):\n${r.stdout}`);
+  assert.match(r.stdout, /intervention_triggered=1/,
+    `--check must report intervention triggered (invariant intervention_triggered=1, AC3):\n${r.stdout}`);
+});
+
+test("AC3 — a permission-prompt pane emits SESSION-INTERVENTION-REQUIRED immediately (edge-triggered once per spell); leaving permission-prompt re-arms the edge", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-intv");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `intv ${p.tmp} ${p.session}`, { interval: 1 });
+    try {
+      await sleep(2000); // idle baseline (bash prompt → unknown → busy=0)
+      makePanePermissionPrompt(p.env, p.session);
+      // Fires IMMEDIATELY (not waiting for PERM_PROMPT_WARN_ROUNDS busy rounds or transcript
+      // staleness) — the AC3 requirement: permission-prompt 出现即触发 escalate/报告.
+      assert.ok(await waitForOutput(mon, /SESSION-INTERVENTION-REQUIRED intv/, 8000),
+        `permission-prompt must fire SESSION-INTERVENTION-REQUIRED immediately:\n${mon.output()}`);
+      // hold the permission-prompt a few more rounds → the edge must NOT re-fire every round.
+      await sleep(2500);
+      let c = (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length;
+      assert.equal(c, 1, `the intervention event must be edge-triggered (once per spell), got ${c}:\n${mon.output()}`);
+      // leaving permission-prompt (back to idle) re-arms the edge → a new permission-prompt fires again.
+      makePaneIdle(p.env, p.session);
+      await sleep(2000);
+      makePanePermissionPrompt(p.env, p.session);
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline && (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length < 2) await sleep(200);
+      c = (mon.output().match(/SESSION-INTERVENTION-REQUIRED intv/g) || []).length;
+      assert.equal(c, 2, `a new permission-prompt spell must re-fire SESSION-INTERVENTION-REQUIRED (edge re-armed), got ${c}:\n${mon.output()}`);
+    } finally {
+      mon.child.kill("SIGKILL");
+      mon.cleanup();
+    }
+  } finally {
+    p.cleanup();
+  }
+});
+
+test("AC4 — normal busy (esc to interrupt) does NOT fire SESSION-INTERVENTION-REQUIRED (negative control)", { skip: tmuxAvailable ? false : "tmux not installed" }, async () => {
+  const p = makeHermeticProbe("ol-intvbusy");
+  try {
+    assert.ok(await waitForAlive(p.env, p.session), "probe must be alive");
+    const mon = spawnMonitor(p.env, `intvb ${p.tmp} ${p.session}`, { interval: 1 });
+    try {
+      // Idle baseline MUST establish ≥2 rounds so PREV_IDLE=1 is armed BEFORE the busy transition —
+      // the SESSION-RESUMED edge (idle→busy) requires a prior idle round; a 2s sleep can be as few
+      // as one slow round (classifier subprocess latency) and the edge would never arm.
+      assert.ok(await waitForRounds(mon, 2, 15000), `idle baseline must establish 2 rounds:\n${mon.output()}`);
+      makePaneBusy(p.env, p.session); // real work shape: esc to interrupt
+      // busy semantics preserved: the busy transition still fires SESSION-RESUMED.
+      assert.ok(await waitForOutput(mon, /SESSION-RESUMED intvb/, 15000),
+        `busy must still fire SESSION-RESUMED (busy semantics preserved):\n${mon.output()}`);
+      await sleep(3500); // several busy rounds
+      assert.ok(!/SESSION-INTERVENTION-REQUIRED intvb/.test(mon.output()),
+        `normal busy must NOT fire SESSION-INTERVENTION-REQUIRED (AC4 negative control):\n${mon.output()}`);
     } finally {
       mon.child.kill("SIGKILL");
       mon.cleanup();
