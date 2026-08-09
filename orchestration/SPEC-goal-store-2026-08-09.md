@@ -224,3 +224,21 @@ AC-NNN      criterion 记录，每条带 phase: PHASE-NNN
 2. **编号方案要一次定死**。AC 编号今天是 `AC20`…`AC35` 的散文序号;
    迁移后若与 `GOAL-001` 双轨,会再造一次「同一件事两个名字」。
 3. **本规格的判据来自 n=1 的一晚**,阈值与字段集是待标定值,不是定论。
+
+---
+
+## 8. 验收贴回（2026-08-09，内层落地，任务 gap-spec-goal-store-third-sibling-kind）
+
+| # | 判据 | 核法 | 结果 |
+|---|---|---|---|
+| AC1 | 新 kind 复用 frontmatter-store-base，不复制机制 | 读 `packages/quay/src/goal-store.ts` 头部 import | ✅ 读 import（parseFrontmatter/serializeFrontmatter/withFileLock/fileNameForId/slugify），无 FRONTMATTER_RE 重实现 |
+| AC2 | criterion 未设 ⇒ gate 判红不判绿 | `node packages/quay/src/goal-store.ts gate AC-020`（空 criterion） | ✅ verdict=fail，reason=…fail-closed…，exit 1 |
+| AC3 | gate 执行在 gate-events.jsonl 留 verdict+timestamp 事件 | `tail -1 .quay/gate-events.jsonl` | ✅ `{"verdict":"pass","timestamp":"2026-08-09T09:19:36.637Z","item_id":"AC-028"}` |
+| AC4 | 活跃集可由 phase 推导 | 换 phase 值后 `listActive()` | ✅ PHASE-001 active → [AC-020,AC-028]；superseded 后 → [] |
+| AC5 | web 有路由，显示最近 verdict 与时刻 | `curl /goal` | ✅ `/goal`+`/goal/<id>` 照 `/adr` 形状，含 recent verdict 列；`/doc` 一并落地（原 grep -c document = 0） |
+| AC6 | origin 空写不进 | 负控制 `write --origin ""` | ✅ Error: origin is required for AC-300 |
+| AC7 | gate 账本检查 | `bash plugin/scripts/gate-staleness-check.sh --json` | ✅ stale → exit 1 报出；fresh → exit 0 安静 |
+
+**实现载体**：`packages/quay/src/goal-store.ts`（PHASE-NNN/AC-NNN，I1 原子切换 + I2 推导 + origin 强制）；`packages/quay/src/gate/factories/goal.ts`（criterion 复用 acceptance-runner）；`plugin/scripts/gate-staleness-check.{ts,sh}`；`serve-handlers.ts` 的 `/goal`+`/doc` 路由。
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-spec-goal-store-third-sibling-kind --allow-thin` → EXIT 0，110 pass / 0 fail / 0 cancelled。

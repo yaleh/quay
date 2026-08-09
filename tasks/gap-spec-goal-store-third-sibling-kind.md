@@ -61,33 +61,42 @@ extra:
 
 ## Acceptance Criteria
 
-- [ ] AC1: **goal-store kind 落地**——复用 `frontmatter-store-base.ts`（读 import，不复制机制），schema 含 criterion/status(含 achieved)/phase/origin/evidence
-- [ ] AC2: **criterion 空判红**——建空 criterion 记录跑 gate ⇒ 判红不判绿（fail-closed）
-- [ ] AC3: **账本事件**——一条记录 gate 执行在 `.quay/gate-events.jsonl` 留下 verdict+timestamp 事件
-- [ ] AC4: **phase 可推导活跃集**——换 phase 值，活跃集随之变（不靠手工清单）
-- [ ] AC5: **web 路由**——`/goal` 路由照 `/adr` 形状（含 `/doc` 一并），页面显示最近 verdict 与时刻
-- [ ] AC6: **origin 空写不进**——负控制：空 origin 记录被拒
-- [ ] AC7: **gate 自身账本检查**（SPEC §7 风险 1）——gate-events 最近执行时刻 vs 声称周期；超时未跑 ⇒ 报出（防 AC 在静默 gate 上集体显绿）
-- [ ] AC8: **既有机制不回归**——`--for-task` scoped 门绿（frontmatter-store-base / adr-store / document-store / serve 相关契约检查）
-- [ ] AC9: **PHASE-NNN 命名 + phase/goal 合一**——纯序号 id（`PHASE-NNN` / `AC-NNN`，title 独立），PHASE 无 criterion 字段（判据=其 AC 合取）
-- [ ] AC10: **I1 原子阶段切换 fail-closed**——已有 active phase 时拒绝创建第二条，除非同一次调用给出旧 phase 处置（achieved/superseded-by）；不给处置写不进
-- [ ] AC11: **I2 推导**——PHASE 达成 ⟺ 其所有活跃 AC 达成（评估时推导，永不存储）；「恰好一条 active phase」checker 进各层 tick A 段
+- [x] AC1: **goal-store kind 落地**——复用 `frontmatter-store-base.ts`（读 import，不复制机制），schema 含 criterion/status(含 achieved)/phase/origin/evidence
+- [x] AC2: **criterion 空判红**——建空 criterion 记录跑 gate ⇒ 判红不判绿（fail-closed）
+- [x] AC3: **账本事件**——一条记录 gate 执行在 `.quay/gate-events.jsonl` 留下 verdict+timestamp 事件
+- [x] AC4: **phase 可推导活跃集**——换 phase 值，活跃集随之变（不靠手工清单）
+- [x] AC5: **web 路由**——`/goal` 路由照 `/adr` 形状（含 `/doc` 一并），页面显示最近 verdict 与时刻
+- [x] AC6: **origin 空写不进**——负控制：空 origin 记录被拒
+- [x] AC7: **gate 自身账本检查**（SPEC §7 风险 1）——gate-events 最近执行时刻 vs 声称周期；超时未跑 ⇒ 报出（防 AC 在静默 gate 上集体显绿）
+- [x] AC8: **既有机制不回归**——`--for-task` scoped 门绿（frontmatter-store-base / adr-store / document-store / serve 相关契约检查）
+- [x] AC9: **PHASE-NNN 命名 + phase/goal 合一**——纯序号 id（`PHASE-NNN` / `AC-NNN`，title 独立），PHASE 无 criterion 字段（判据=其 AC 合取）
+- [x] AC10: **I1 原子阶段切换 fail-closed**——已有 active phase 时拒绝创建第二条，除非同一次调用给出旧 phase 处置（achieved/superseded-by）；不给处置写不进
+- [x] AC11: **I2 推导**——PHASE 达成 ⟺ 其所有活跃 AC 达成（评估时推导，永不存储）；「恰好一条 active phase」checker 进各层 tick A 段
 
 ## Definition of Done
 
-- [ ] AC1–AC8 全部勾上
-- [ ] 修后实跑：空 criterion 判红、gate 事件带 verdict+timestamp、phase 换值活跃集变、origin 空被拒（贴任务体）；gate 账本检查报出
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC8 全部勾上
+- [x] 修后实跑：空 criterion 判红、gate 事件带 verdict+timestamp、phase 换值活跃集变、origin 空被拒（贴任务体）；gate 账本检查报出
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
 
-- packages/quay/src/goal-store.ts（候选路径——第三个 sibling kind，实现时落地，具体文件名以实现为准）
-- packages/quay/src/frontmatter-store-base.ts（复用机制，仅确认不复制）
-- packages/quay/src/gate/acceptance-runner.ts（criterion 执行复用）
+- packages/quay/src/goal-store.ts（第三个 sibling kind，已落地——PHASE-NNN/AC-NNN 记录 + CLI 入口）
+- packages/quay/src/frontmatter-store-base.ts（复用机制，仅确认不复制——读 import 不修改）
+- packages/quay/src/gate/acceptance-runner.ts（criterion 执行复用——读 import 不修改）
+- packages/quay/src/gate/factories/goal.ts（新增——makeGoalGate 工厂）
+- packages/quay/src/gate/registry.ts（registerGoalGate 注册）
+- packages/quay/src/gate/factories/index.ts（makeGoalGate 导出）
 - packages/quay/src/serve-handlers.ts（`/goal` + `/doc` 路由，照 `/adr` 形状）
-- plugin/scripts/gate-staleness-check.ts（候选路径——gate 账本检查，SPEC §7 风险 1，实现时落地）
-- orchestration/manager-phase-goal.md（AC20-35 迁移后降级为理由档案；落地前保留「活跃 AC 判据命令」节）
+- plugin/scripts/gate-staleness-check.ts（gate 账本检查，SPEC §7 风险 1，已落地）
+- plugin/scripts/gate-staleness-check.sh（bash 包装，Contract invoke 入口）
+- plugin/scripts/capability-catalog.sh（声明新脚本 question/public entry）
+- packages/quay/test/goal-store.test.mjs（新增测试）
+- packages/quay/test/goal-gate.test.mjs（新增测试）
+- packages/quay/test/serve-goal-doc.test.mjs（新增测试，AC5 web 路由）
+- plugin/test/gate-staleness-check.test.mjs（新增测试，AC7）
+- orchestration/manager-phase-goal.md（降级为理由档案；落地前保留「活跃 AC 判据命令」节）
 - orchestration/SPEC-goal-store-2026-08-09.md（验收贴回）
 - tasks/gap-spec-goal-store-third-sibling-kind.md（自身：勾 AC + 贴证据）
 
@@ -107,3 +116,52 @@ resume    分步提交：goal-store kind + criterion runner + gate 账本 + web 
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（manager 定义 SPEC-goal-store 第三个 sibling kind——三种现有载体都要说谎；四独有字段 criterion/status(achieved)/phase/origin；机制复用 frontmatter-store-base + acceptance-runner + gate-events；web `/goal`+`/doc`；风险 1 = gate 引擎空闲 ~24h 需自检（outer 核实 370 行 tail 08-08T08:22）；落地前不迁。实现归内层）
+
+## 实现证据（2026-08-09，内层落地）
+
+**新增文件**（第三个 sibling kind）：
+- `packages/quay/src/goal-store.ts` — PHASE-NNN / AC-NNN 记录，复用 `frontmatter-store-base.ts`（parse/serialize/lock/fileNameForId，读 import 不复制），schema 含 criterion/status(含 achieved)/phase/origin/evidence；PHASE 记录无 criterion 字段（AC9）；`listActive()` 由 phase 推导活跃集（AC4）；`isPhaseAchieved()` I2 评估时推导（AC11）；`write()` 强制 origin 非空（AC6）且 I1 原子阶段切换 fail-closed（AC10）。CLI 入口：`node packages/quay/src/goal-store.ts {list|get|write|gate|check}`。
+- `packages/quay/src/gate/factories/goal.ts` — `makeGoalGate`（criterion 经 `acceptance-runner.ts` runAcceptance 执行，空 criterion 判红 fail-closed，AC2）。
+- `plugin/scripts/gate-staleness-check.ts` + `.sh` — gate 账本检查（AC7，SPEC §7 风险 1）：读 `.quay/gate-events.jsonl` 最近执行时刻 vs 声称周期，超时/缺失报出。
+
+**改**：`packages/quay/src/serve-handlers.ts` — `/goal` + `/doc` 路由照 `/adr` 形状（AC5，含最近 verdict+时刻 列）；`packages/quay/src/gate/registry.ts` + `factories/index.ts` — 注册 `registerGoalGate`/`makeGoalGate`；`plugin/scripts/capability-catalog.sh` — 声明新脚本。
+
+**Contract 实跑（invoke 两行）**：
+
+`node packages/quay/src/goal-store.ts`（tmp 工作区 `/tmp/goal-evidence`）：
+```
+# AC2 空 criterion 判红（fail-closed，exit 1）：
+node ... goal-store.ts gate AC-020 --root /tmp/goal-evidence
+  → verdict: fail
+  → reason: AC-020 has no criterion defined (fail-closed — an unenforceable AC must never silently pass)
+
+# AC3 账本事件带 verdict+timestamp（.quay/gate-events.jsonl tail）：
+node ... goal-store.ts gate AC-028 --root /tmp/goal-evidence
+  → tail event: verdict: pass | timestamp: 2026-08-09T09:19:36.637Z | item: AC-028
+
+# AC4 phase 换值活跃集变（listActive 由 phase 推导）：
+active set (PHASE-001 active): AC-020, AC-028
+write PHASE-002 --dispose-old PHASE-001 --dispose-to superseded
+active set (listActive): []   # PHASE-001 superseded → 旧 AC 自动退场
+
+# AC6 origin 空写不进（负控制）：
+write AC-300 --origin ""
+  → Error: origin is required for AC-300 — an AC/goal without an empirical basis is cargo cult
+
+# AC10/AC11 I1 + I2：
+write PHASE-002 active（无处置）→ Error: cannot activate PHASE-002: PHASE-001 is already active ...
+goal-store.ts check → { ok: true, count: 1, active: ["PHASE-002"] }
+isPhaseAchieved(PHASE-002) → false（0 个 AC）
+```
+
+`bash plugin/scripts/gate-staleness-check.sh --json`：
+```
+--root /tmp/goal-evidence --timeout 1 --json
+  → {"last_gate_event_at":"2026-08-09T09:19:36.637Z","age_seconds":8,"gate_stale":true,"signal":true}  exit 1（超时报出）
+--root /tmp/goal-evidence --timeout 3600 --json
+  → {"last_gate_event_at":"2026-08-09T09:19:36.637Z","gate_stale":false,"signal":false}                 exit 0（周期内安静）
+```
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-spec-goal-store-third-sibling-kind --allow-thin` → **EXIT 0，110 pass / 0 fail / 0 cancelled，task-contract-check violations: 0**。
+
+**未做**：AC1-19 迁移（只迁活跃集 AC20-35 的机制已就绪，具体迁移处置归人——SPEC §5 落地前不迁）；`manager-phase-goal.md` 已降级为理由档案（goal 记录指回它）；全量套件绿 = 外层 verification-round 验证（DoD 未勾）。
