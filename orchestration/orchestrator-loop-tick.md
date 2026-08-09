@@ -20,6 +20,14 @@
 > `.quay/config.yml` `loop:` 节的 `fork_baseline` / `merge_target`。所有含分支操作的命令代入这两个值，
 > 不要字面写死。共享模板 `plugin/loop/orchestrator-loop-tick.md` 的工作分支名**可配置**（默认单线，
 > 供未做 cutover 的下游经升级通道消费），本副本是 quay 自己的两线落地——两者角色分工见任务体 AC5。
+> **⚠️ 2026-08-09 结构性修正（外层的 WORKING CHECKOUT 切到 integration）**：此前的故障链是「立项/记账
+> 提交落 develop ⇒ 不变式被破（develop-only 累积）⇒ ff 前需并回 integration ⇒ 验证期 tip 被记账推走 ⇒
+> 绿过期」——冻结窗口只是手段不是机制。长效解法：**外层工作 checkout = integration**，develop 只经 ff
+> （batch-merge）前进。`git checkout integration`（如需临时 worktree 已占用 integration，先 `git worktree
+> remove` 它）。此后外层的一切提交（立项/记账/红窗修复）都落 integration；develop 保持 ff-only、无
+> develop-only 提交、不变式（`is-ancestor develop integration`）持久成立；验证跑在 integration（= ff
+> 目标），绿与 ff 树天然对齐。含分支操作的命令仍代入 `fork_baseline`/`merge_target` 两个值（develop /
+> integration），只是「当前 checkout 是哪个」变了。
 
 **启动方式**（在编排会话，即本会话或 `/clear` 后的新会话）：按下方「冷启动」步骤操作——**循环驱动
 只有一个**：步骤 4 的 `CronCreate`（20 分钟 cron）。Monitor 是事件监测，不是驱动。两个都做完再进
