@@ -20,7 +20,7 @@
 | A1 | `python3 orchestration/manager-anchor-check.py` | 校的是**文件**,不是活 cron |
 | A0 | `node --experimental-strip-types plugin/scripts/quay-session.ts manager-tick-readings` | **优先用这条,不再逐条手打**(2026-08-09 10:3x 查出:该脚本已存在,08-07 建成,覆盖 A1/A4/A5/A9-A11 且多出 `resource.*`(CPU/load/内存,此前从未读)与三项目 `outer.ticklog`(此前只读 quay 自己的);18 处 `catch{}` 静默吞错,读数为空时不代表"无异常",仅代表"读取失败") |
 | A2 | `GATE=$(bash plugin/scripts/cap-from-gate.sh)` → 从中取 `CAP` → `slot-refill.sh --cap "$CAP"` | **同一 tick 内 cap 只取一次**;`floor` 必须与该 cap 同源(§2.4b) |
-| A3 | in-flight = `tmux capture-pane -t quay-0:inner \| grep -cE '^\s+◯ '` | **不用 `slot-refill` 的 `in_flight_count`——那是入参不是测量** |
+| A3 | in-flight = `tmux capture-pane -t quay-0:inner \| grep -cE '^\s+◯ '` **并当场与 A2 的 `cap` / `slots_free` / `recommended` 对齐** | **不用 `slot-refill` 的 `in_flight_count`——那是入参不是测量**。**判据是组合,不是单读**:`in-flight < cap` **且** `recommended` 非空 ⇒ **空槽**,必须升级,不许记成「稳态」。实证 2026-08-09 15:0x:outer 一小时内查了 8 次 inner,每次都是 `capture-pane \| grep -E '◯\|●\|✻' \| head -4`——那是**忙/闲二值探针**,「在飞 1 空 3」与「在飞 4 空 0」经它读出来一模一样,于是它把「无新派发」如实记成 `no-action(稳态)`,全时段零次 `slot-refill` 调用。**我的 A3 原本是同一个洞**:也只数 `◯`、不比 cap、不看 `recommended`;这次是人问才发现,不是我自己发现的 |
 | A4 | 两层忙闲 = pane 尾部 `esc to interrupt` | pane-only;`LOOP_MIN=0` 才看得到全部事件 |
 | A5 | 三项目 `.halt` 存在性 **+ 最后提交时距** | quay / archguard / meta-cc。**判据是组合,不是单读**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级。**只读不判会稳定产生「看见但没发现」**——实证:我每轮都打印 `archguard 无.halt`,而它已 2 天无提交,连续多轮未升级(2026-08-09 06:4xZ 补报) |
 | A6 | `git merge-base --is-ancestor develop integration` + 两方向 `rev-list --count` | AC27 |
