@@ -1,4 +1,14 @@
-// @test-group product
+// @test-group serial
+// @load-sensitive heavy
+// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族") — this test spawns a
+// REAL quay-github MCP server subprocess over stdio and drives a full task_write CREATE+EDIT roundtrip
+// (~11 synchronous gh-api subprocess spawns inside the server). It passed solo / --test-concurrency=8 /
+// 4-busy-loop CPU burn but FAILED under full-suite concurrency (round-188 2026-08-09: 9.9s file
+// duration, failing subtest 3.9s) — suite-level subprocess spawn contention, NOT CPU load
+// (gap-create-mcp-suite-context-flake-after-speedup-rework). Routed OUT of the concurrent main body to
+// the concurrency-1 serial phase (same real-subprocess family as npm-pack-e2e / install-config-driven-e2e)
+// and carries the machine-readable `heavy` family marker. The MCP roundtrip assertions are UNCHANGED —
+// only the subprocess stderr is now piped for failure diagnosis (AC3).
 // DIR-041 (M57): RED->GREEN regression test for the MCP-level CREATE
 // routing -- confirms `task_write` with `id: CREATE_SENTINEL_ID` ("gh-new")
 // actually reaches client.create() (not client.setStatus/writeFields, which
@@ -133,24 +143,42 @@ process.exit(1);
 test("DIR-041 GREEN: task_write with id:'gh-new' over the real MCP transport creates a real issue (stubbed gh) and returns its REAL id", async () => {
   const fakeBinDir = makeFakeGhBin({ nextNumber: 900 });
   const nodeDir = dirname(process.execPath);
+  const stderrChunks = [];
+  const serverStderr = () => stderrChunks.join("").trim();
   const transport = new StdioClientTransport({
     command: "node",
     args: [bin, "mcp"],
     cwd: __dirname,
+    // gap-create-mcp-suite-context-flake-after-speedup-rework (AC3 diagnosis): pipe the MCP server
+    // subprocess's stderr instead of inheriting it, so a suite-context failure reports the server's
+    // own stderr (crash stack / task_write error) instead of only a bare SDK timeout.
+    stderr: "pipe",
     env: {
       ...process.env,
       QUAY_GITHUB_REPO: "o/r",
       PATH: `${fakeBinDir}:${nodeDir}`,
     },
   });
+  transport.stderr?.on("data", (chunk) => stderrChunks.push(chunk.toString()));
   const client = new Client({ name: "test-agent-create", version: "0.0.1" });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (err) {
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    assert.fail(
+      `MCP connect failed: ${err.message}\n--- quay-github mcp server stderr ---\n${serverStderr() || "(no stderr captured)"}`
+    );
+  }
   try {
     const r = await client.callTool({
       name: "task_write",
       arguments: { id: "gh-new", title: "created via mcp task_write", body: "probe body" },
     });
-    assert.equal(r.isError, undefined, `task_write create call did not error (got: ${JSON.stringify(r).slice(0, 300)})`);
+    assert.equal(
+      r.isError,
+      undefined,
+      `task_write create call did not error (got: ${JSON.stringify(r).slice(0, 300)})\n--- quay-github mcp server stderr ---\n${serverStderr() || "(no stderr captured)"}`
+    );
     const task = r.structuredContent?.task;
     assert.equal(task?.id, "gh-900", "task_write with id:'gh-new' returns the REAL GitHub-assigned id, not the sentinel");
     assert.equal(task?.title, "created via mcp task_write");
@@ -163,7 +191,11 @@ test("DIR-041 GREEN: task_write with id:'gh-new' over the real MCP transport cre
       name: "task_write",
       arguments: { id: task.id, status: "done" },
     });
-    assert.equal(edited.isError, undefined, "follow-up task_write status edit against the real created id succeeds");
+    assert.equal(
+      edited.isError,
+      undefined,
+      `follow-up task_write status edit against the real created id succeeds (got: ${JSON.stringify(edited).slice(0, 300)})\n--- quay-github mcp server stderr ---\n${serverStderr() || "(no stderr captured)"}`
+    );
     assert.equal(edited.structuredContent?.task?.status, "done");
   } finally {
     await client.close();
@@ -174,24 +206,40 @@ test("DIR-041 GREEN: task_write with id:'gh-new' over the real MCP transport cre
 test("DIR-041 GREEN: task_write id:'gh-new' with NO title returns isError:true (create()'s fail-closed guard surfaces through the MCP layer, not a crash)", async () => {
   const fakeBinDir = makeFakeGhBin({ nextNumber: 1000 });
   const nodeDir = dirname(process.execPath);
+  const stderrChunks = [];
+  const serverStderr = () => stderrChunks.join("").trim();
   const transport = new StdioClientTransport({
     command: "node",
     args: [bin, "mcp"],
     cwd: __dirname,
+    // AC3 diagnosis — see the sibling test: pipe stderr so a suite-context failure reports it.
+    stderr: "pipe",
     env: {
       ...process.env,
       QUAY_GITHUB_REPO: "o/r",
       PATH: `${fakeBinDir}:${nodeDir}`,
     },
   });
+  transport.stderr?.on("data", (chunk) => stderrChunks.push(chunk.toString()));
   const client = new Client({ name: "test-agent-create-notitle", version: "0.0.1" });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (err) {
+    rmSync(fakeBinDir, { recursive: true, force: true });
+    assert.fail(
+      `MCP connect failed: ${err.message}\n--- quay-github mcp server stderr ---\n${serverStderr() || "(no stderr captured)"}`
+    );
+  }
   try {
     const r = await client.callTool({
       name: "task_write",
       arguments: { id: "gh-new", status: "ready" },
     });
-    assert.equal(r.isError, true, "task_write id:'gh-new' with no title is a clear isError, not a crash or silent success");
+    assert.equal(
+      r.isError,
+      true,
+      `task_write id:'gh-new' with no title is a clear isError, not a crash or silent success (got: ${JSON.stringify(r).slice(0, 300)})\n--- quay-github mcp server stderr ---\n${serverStderr() || "(no stderr captured)"}`
+    );
   } finally {
     await client.close();
     rmSync(fakeBinDir, { recursive: true, force: true });

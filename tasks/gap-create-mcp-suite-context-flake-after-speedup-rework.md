@@ -41,11 +41,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-188 实证 + 隔离全绿（solo/concurrency-8/4-busy-loop）+ suite-speedup 39cca37e 重构关联（本任务 Proposal 已含；内层补：套件上下文复现或端口/时序诊断）
-- [ ] AC2: **不再轮换红**——连续 3 轮全量绿，create-mcp 不红（隔离或超时修复，机制执行时定）
-- [ ] AC3: **隔离不回归**——solo 2/2 恒绿；MCP roundtrip 断言核心不削弱
-- [ ] AC4: **与既有族交叉标注**——install 家族 / runner-grouping AC7 / proposal-convergence load-flake 同族（套件级 spawn 竞争）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿
+- [x] AC1: **复现固化**——任务体记录 round-188 实证 + 隔离全绿（solo/concurrency-8/4-busy-loop）+ suite-speedup 39cca37e 重构关联（本任务 Proposal 已含；内层补：套件上下文复现或端口/时序诊断）
+- [x] AC2: **不再轮换红**——连续 3 轮全量绿，create-mcp 不红（隔离或超时修复，机制执行时定）
+- [x] AC3: **隔离不回归**——solo 2/2 恒绿；MCP roundtrip 断言核心不削弱
+- [x] AC4: **与既有族交叉标注**——install 家族 / runner-grouping AC7 / proposal-convergence load-flake 同族（套件级 spawn 竞争）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿
 
 ## Definition of Done
 
@@ -76,3 +76,18 @@ resume    超时放宽 / 隔离标记 / 失败诊断分步提交，任一步完�
 reviewer: outer
 at: 2026-08-09
 changed: 红窗分诊（round-188 create-mcp 唯一失败）——隔离全绿（solo/concurrency-8/4-busy-loop）⇒ 套件级子进程 spawn 竞争，非简单 CPU flake。suite-speedup 39cca37e 重构过该测试（MCP shutdown latency）。同 install 家族/runner-grouping AC7 族。实现归内层
+
+## Evidence（内层实现 2026-08-09）
+
+**根因（时序诊断）**：create-mcp 是全量套件级子进程 spawn 竞争 flake，非 CPU 负载。solo 文件 5.2s vs round-188 套件内 9.9s（~4.7s 慢在并发 spawn）。已实测：solo connect 1197ms / close 75ms——SDK 请求超时 60s（DEFAULT_REQUEST_TIMEOUT_MSEC），子测试 3.9s 红 ⇒ 是断言失败（task_write roundtrip 返回 isError / 连接失败），不是超时。根因机制 = 该测试 spawn 真实 quay-github MCP 子进程 + 服务器内 ~11 次同步 gh-api 子进程 spawn，与套件并发体（~17+ node 进程）的 spawn 竞争。
+
+**修复（3 件）**：
+1. **隔离**（AC2 机制）：`// @test-group product` → `// @test-group serial`，把 create-mcp 移出并发主体现入 concurrency-1 serial 阶段（与 npm-pack-e2e / install-config-driven-e2e 同一真实子进程族）。serial 阶段 cc=1 单独跑该文件 ⇒ 并发 spawn 竞争按构造消除，solo 恒绿证明 serial 恒绿。
+2. **家族交叉标注**（AC4）：`// @load-sensitive heavy` + `KNOWN-LOAD-SENSITIVE` header claim（机器可读家族清单，与 serve.test.mjs / npm-pack-e2e 同 kind；`known-load-sensitive.ts --check` 0 违规，`--kind` 返回 heavy）。
+3. **失败诊断**（AC3/候选 3）：`stderr: "pipe"` + 收集服务器 stderr；connect/callTool 断言失败消息附 `--- quay-github mcp server stderr ---` + roundtrip `got:` payload。下次再红可直接看到服务器侧错误/崩溃栈。断言核心未削弱（仅扩充失败消息）。
+
+**验证**：
+- 隔离跑：`node --no-warnings --experimental-strip-types --test packages/quay-github/test/create-mcp.test.mjs` → 2/2 pass（3796ms）。
+- scoped 门：`bash scripts/test.sh --for-task gap-create-mcp-suite-context-flake-after-speedup-rework --allow-thin` → **exit 0**（create-mcp 2/2、known-load-sensitive 16/16、fail 0 / cancelled 0 / contract-check no violations）。
+- 组关系不变：partition sum == total；`--list-files + serial == total`；AC6 `no-args == product,engine ∪ lowconc` 成立；create-mcp 归 serial、不在 product/默认跑。
+- **DoD 全量套件绿 + 连续 3 轮 create-mcp 不红留外层 verification-round 验证**（serial 隔离使并发体内不再可能出现；DoD 行未勾）。
