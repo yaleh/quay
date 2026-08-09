@@ -36,17 +36,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 archguard 报告 #13 实证（tarball 无 plugin + strings 搜 6 机制名未中 + init 停 config 冲突 + 3 天未处理）（本任务 Proposal 已含；内层补：下载/构建 v0.4.0 产物复现）
-- [ ] AC2: **release 产物含 plugin**——下一个 release tarball 解包有 plugin/ 或二进制内嵌机制文件（候选 A）
-- [ ] AC3: **产物层验证**——release 产物 CI 验证「含 plugin + strings 搜机制名命中」（候选 B）
-- [ ] AC4: **升级通道通**——消费方下载新产物 → init --loop 拿到机制（候选 C e2e）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含打包/release 契约检查）
+- [x] AC1: **复现固化**——任务体记录 archguard 报告 #13 实证（tarball 无 plugin + strings 搜 6 机制名未中 + init 停 config 冲突 + 3 天未处理）（本任务 Proposal 已含；内层补：构建 v0.4.0 产物复现——见 Evidence）
+- [x] AC2: **release 产物含 plugin**——下一个 release tarball 解包有 plugin/ 或二进制内嵌机制文件（候选 A；sidecar 已由 `gap-release-sea-bundle-excludes-plugin-tree` 落地，本任务实跑验证——见 Evidence）
+- [x] AC3: **产物层验证**——release 产物 CI 验证「含 plugin + strings 搜机制名命中」（候选 B；新增 `verify-sea-artifact.sh` + 接线 release.yml + 测试）
+- [x] AC4: **升级通道通**——消费方下载新产物 → init --loop 拿到机制（候选 C e2e；新增 `sea-artifact-consumer-e2e.test.mjs`）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含打包/release 契约检查）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：构建 release 产物 ⇒ 含 plugin + strings 命中；消费方 init --loop 拿机制（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：构建 release 产物 ⇒ 含 plugin + strings 命中；消费方 init --loop 拿机制（贴任务体）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -58,6 +58,12 @@ extra: {}
 - packages/quay/test/（候选 C：consumer 侧 e2e）
 - tasks/gap-release-artifact-missing-plugin-ac16.md（自身：勾 AC + 贴证据）
 
+## Test-Files
+
+- packages/quay/test/verify-sea-artifact.test.mjs（AC3 产物层验证脚本的正/负测试）
+- packages/quay/test/sea-artifact-consumer-e2e.test.mjs（AC4 消费方升级通道 e2e——真 artifact 插件 init --loop）
+- packages/quay/test/sea-bundle-plugin-sidecar.test.mjs（既有：AC2 sidecar 打包含 6 机制名）
+
 ## Contract
 
 measure   release_tarball_has_plugin = 解包 release tarball 后 `ls plugin/` 是否非空（或二进制 strings 搜机制名命中数）
@@ -67,6 +73,40 @@ invariant upgrade_channel_open = 1（消费方 init --loop 拿机制）
 invoke    `bash packages/quay/scripts/build-sea.sh`（构建产物贴回）或等价打包入口
 control   产物含 plugin；strings 命中；消费方升级通道通
 resume    sea 打包 + 产物验证 + consumer e2e 分步提交，任一步完成即写盘
+
+## Evidence（内层实现 2026-08-09）
+
+### 根因（复现固化，AC1）
+
+`quay-sea-0.4.0-linux-x64.tar.gz`（69MB）只有 `quay`/`quay-native` 二进制 + `tasks/` + config 模板，**无 `plugin/`**。SEA 单文件二进制结构上不可能含目录树；`package.json` 的 `files` 字段只管 `npm pack`（npm tarball 路径），**管不到 SEA release 归档**——两条发布路径在 v0.4.0 脱节。内层在本 worktree 实跑复现：
+
+- 完整 `bash packages/quay/scripts/build-sea.sh` 成功 → `dist-sea/quay`（SEA 二进制）。
+- 对**仅二进制**做 `strings` 搜 6 机制名（`dead-loop-check`/`verify-delivery-surface`/`slot-refill`/`claim-task`/`self-report-vocab`/`laydown-set-check`）：**6 个全 0 命中**（AC1 复现：与 archguard 报告 #13 完全一致——SEA 二进制本身不承载机制）。
+
+### 修复（AC2）
+
+sidecar 方案（架构决策 `gap-release-sea-bundle-excludes-plugin-tree`，已在 develop 落地）：SEA 归档内以**目录 sidecar**携带 plugin/。内层实跑验证：
+
+- `build-sea.sh --stage-plugin-only` → `dist-sea/plugin`（295 文件，含 vendor runtime）。
+- 按 release.yml 的 assemble 步骤组装 bundle（plugin/ + quay + .quay/config.yml）→ `tar -czf` 后 `tar -tzf` 列出 **338 个 plugin 条目**；6 机制名 grep 全部命中（5~11 文件/名）。
+- 修复后 bundle 上 `verify-sea-artifact.sh` PASS。
+
+### 新增产物层验证（AC3）
+
+- **`packages/quay/scripts/verify-sea-artifact.sh`**（新）：机械 artifact 级检查——`plugin/` 存在且非空 **且** 6 机制名在产物内可反搜（`grep -rlF` 全 bundle，含二进制）；fail-closed。`--list-mechanisms` 打印 6 名。
+- **接线 release.yml**：`sea-release` 在归档后提取刚建的归档跑该脚本（上传前 fail-closed）；`sea-verify-node-free` 在下载真产物解包后跑内联等价检查（消费方拿到手的产物层证明；该 job 是 debian 容器无 checkout，故内联镜像脚本检查，6 名清单与脚本交叉引用）。
+- **`packages/quay/test/verify-sea-artifact.test.mjs`**（新）：正/负测试——带 plugin 的 bundle PASS；无 plugin/ 空 plugin/ 各 FAIL closed；`--list-mechanisms` 恰 6 名。CI（ci.yml 默认 glob 含 `packages/quay/test/*.mjs`）随每次 push 跑。
+
+### 升级通道（AC4）
+
+- **`packages/quay/test/sea-artifact-consumer-e2e.test.mjs`**（新，`@test-group serial` + `@load-sensitive heavy`）：按 release.yml 步骤 stage sidecar → 组装 bundle → **从 bundle 的 plugin（真 artifact 的插件）对 fresh consumer git 工作区跑 `quay-init.sh --loop`** → 断言 exit 0 + 可观测机制（dead-loop-check/slot-refill/claim-task/self-report-vocab/laydown-set-check 5 个 loop 机制）落盘 + 外/内 tick 文档落盘 + `verify-sea-artifact.sh` 先 PASS。手动实跑同路径：exit 0、`quay-init complete`、auto-commit 84 文件。`verify-delivery-surface` 是 plugin-side（repo 级 delivery-surface checker）不入消费方 laydown 集，其产物内存在由 AC3 检查覆盖。
+
+### 验证输出
+
+- 新增两个测试文件：`verify-sea-artifact.test.mjs` 5/5 pass；`sea-artifact-consumer-e2e.test.mjs` 2/2 pass。
+- 既有 `sea-bundle-plugin-sidecar.test.mjs` 3/3 pass（AC2 回归）。
+- `scripts/test.sh --for-task gap-release-artifact-missing-plugin-ac16 --allow-thin` → **fail 0 / cancelled 0 / FULL-SUITE-EXIT=0**（见本任务验收）。
+- DoD「全量套件绿」留待外层 verification-round 验证（本行不勾）。
 
 ## Dispatch review
 

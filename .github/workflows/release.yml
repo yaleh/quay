@@ -193,6 +193,25 @@ jobs:
             echo "ARCHIVE_PATH=${ARCHIVE_NAME}.tar.gz" >> "$GITHUB_ENV"
           fi
 
+      # gap-release-artifact-missing-plugin-ac16 (AC3 产物层验证): extract the archive THIS job just
+      # built and run the mechanical artifact-level check (verify-sea-artifact.sh) — plugin/ sidecar
+      # present and non-empty AND all 6 mechanism names (dead-loop-check/verify-delivery-surface/
+      # slot-refill/claim-task/self-report-vocab/laydown-set-check) reverse-searchable in the
+      # artifact. This is the exact check archguard report #13 ran against v0.4.0 and found failing
+      # (strings of the 6 names: 0 hits; no plugin/ in the archive). Fail-closed BEFORE upload: a
+      # release artifact that would regress AC16 (artifact-level delivery) never reaches consumers.
+      - name: Verify the release archive carries the plugin sidecar (AC3)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p archive-check
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z x "${ARCHIVE_PATH}" -oarchive-check >/dev/null
+          else
+            tar -xzf "${ARCHIVE_PATH}" -C archive-check
+          fi
+          bash packages/quay/scripts/verify-sea-artifact.sh archive-check
+
       - name: Upload SEA archive to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -277,6 +296,26 @@ jobs:
             -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
           mkdir -p extracted
           tar -xzf "${ASSET_NAME}" -C extracted
+      # gap-release-artifact-missing-plugin-ac16 (AC3): the DOWNLOADED consumer-facing asset must
+      # carry the plugin sidecar + all 6 mechanism names — the exact regression archguard #13 found
+      # (v0.4.0 archive had only quay/quay-native binaries, no plugin/). This container has no repo
+      # checkout, so the canonical verify-sea-artifact.sh is not available; this is an inline mirror
+      # of its checks (keep the 6-name list in sync with packages/quay/scripts/verify-sea-artifact.sh).
+      - name: Verify the downloaded archive carries the plugin sidecar (AC3)
+        run: |
+          set -euo pipefail
+          cd extracted
+          if [ ! -d plugin ] || [ -z "$(find plugin -type f 2>/dev/null | head -1)" ]; then
+            echo "ERROR: downloaded SEA archive has no non-empty plugin/ (AC16 regression)." >&2
+            exit 1
+          fi
+          for m in dead-loop-check verify-delivery-surface slot-refill claim-task self-report-vocab laydown-set-check; do
+            if ! grep -rlF -- "$m" . 2>/dev/null | grep -q .; then
+              echo "ERROR: mechanism '$m' not reverse-searchable in the downloaded artifact." >&2
+              exit 1
+            fi
+          done
+          echo "OK: downloaded SEA archive carries plugin/ + all 6 mechanism names (AC3)"
       - name: Run quay --help (no Node on PATH)
         run: |
           cd extracted

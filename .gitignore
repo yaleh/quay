@@ -39,6 +39,7 @@ packages/quay/plugin/
 **/.quay-worktree-local*
 **/.quay-wtl*
 **/dist-sea/
+**/dist-sea-release/
 **/.quay/gate-events.jsonl
 **/.quay/supervisor-bus-ledger.jsonl
 # gap-assert-clean-tree-premise-void-under-concurrent-writers (2026-08-07): the before-run
