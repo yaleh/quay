@@ -665,6 +665,11 @@ tick 做一次收尾 pass。
 `status: done` 字段——所以 inner 的就绪池计算不受收尾异步化影响，外层延迟翻 done 不会导致任务被重复
 派发。
 
+**1b 不随红窗停（AC4，`gap-closure-pass-has-no-lag-signal`）**：收尾 pass **不受套件状态门控**——
+`state: red` / `reason: failed` 停的是派发与合并推进（见步骤 3/3b），**不停收尾**。红窗期间照常跑
+收尾例程（探测 not-yet-flipped → 翻 done → 写轮次记录 → 写 closure-pass 留痕）；「dirty-tree 顾虑」
+不构成延后收尾的理由（本层只写 `tasks/` + `.quay/`，不碰代码树）。
+
 **每 tick 执行：**
 
 1. **探测落地未翻任务**：
@@ -685,6 +690,22 @@ tick 做一次收尾 pass。
    - 记进本轮 `closed` 清单。
    - `needs-human` 任务不在 `not-yet-flipped` 里（工作没落地）；其遥测括号由 `--reconcile`（执行者
      已消失）或本层手动 `--task-end --outcome needs-human` 闭合，别让它滞留 `inProgress` 触发 OVER90。
+   - **留痕（AC3，`gap-closure-pass-has-no-lag-signal`）**：本轮收尾 pass 结束（含零收尾）后跑
+     ```bash
+     bash plugin/scripts/closure-lag-check.sh --record --flipped <N>
+     ```
+     `<N>` = 本轮翻转 done 的任务数（零收尾写 0）——每次执行把**时间戳 + 翻转数**写进
+     `.quay/closure-pass-last-run.json`（gitignored 运行时态）。这是 Contract invariant
+     `closure_pass_leaves_trace`：消费方（下面这条 lag 检查 / monitor）据它对比间隔——closure-pass
+     每次执行都留痕，「执行可验证」不靠外层叙事。
+   - **closure-lag 信号（AC2，`gap-closure-pass-has-no-lag-signal`）**：每个 tick 跑
+     ```bash
+     bash plugin/scripts/closure-lag-check.sh
+     ```
+     退出非 0（not-yet-flipped 超阈值 **或** closure-pass 超时未跑）⇒ 本 tick **报 WARN/事件**（写进
+     tick-log + 本轮报告），不静默；退出 0 ⇒ 静默。信号是**报告不是门控**——不阻塞派发、不阻塞
+     tick。「强制步骤静默停跑 8.5h 无机械信号」正是它要消灭的缺陷类（AC23 只验 tick 心跳、不验 tick
+     内步骤）。
 3. **全量 suite = 外层后台异步验证 gate（非 inner 同步点、非本 tick 阻塞点）**：
    - **后台跑**：全量 suite 由本层起 `plugin/scripts/full-suite-runner.ts`（后台 subagent /
      `run_in_background:true`，不阻塞本 tick、不堵 inner），runner 写 `.quay/full-suite-state.json`
