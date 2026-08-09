@@ -60,7 +60,7 @@ extra: {}
 
 ## Touches
 
-- orchestration/（verification-round 义务集推导 + 台账——outer 第一个适用对象）
+- .quay/verification-round.jsonl（verification-round 义务集推导 + 台账——outer 第一个适用对象；gitignored 运行态文件，义务集进记录形状）
 - plugin/scripts/obligation-ledger.ts（年龄/排序/阶梯 JS 确定性部分，或扩 manager-obligation-ledger 机制）
 - plugin/scripts/（「已处置」语义 agent——带 schema，同 no-action-check agent 族）
 - scripts/test.sh（顶层审计接进静态检查——机械核对台账完整性）
