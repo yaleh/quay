@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T17:17:39.468Z",
+  "generatedAt": "2026-08-09T18:22:30.530Z",
   "since": null,
   "tasks": [
     {
@@ -875,7 +875,7 @@
       "taskId": "gap-last-pane-txt-has-no-writer",
       "runId": "fm-gap-last-pane-txt-has-no-writer-1786292741044-qulp3x",
       "startedAtMs": 1786292741061,
-      "startedAtMsUnreliable": true
+      "startedAtMsUnreliable": false
     },
     {
       "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
@@ -893,7 +893,7 @@
       "taskId": "gap-ready-pool-worklanded-traps-stuck-work",
       "runId": "fm-gap-ready-pool-worklanded-traps-stuck-work-1786292743310-cw436c",
       "startedAtMs": 1786292743327,
-      "startedAtMsUnreliable": true
+      "startedAtMsUnreliable": false
     },
     {
       "taskId": "gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load",
@@ -916,11 +916,11 @@
   ],
   "meanMinutes": 91.36545206812654,
   "medianMinutes": 56.31883333333333,
-  "tasksPerHour": 0.7837944926438416,
+  "tasksPerHour": 0.7789698729926896,
   "serialEquivalentPerHour": 0.6567033669932598,
   "windowStart": "2026-08-02T10:29:46.000Z",
-  "windowEnd": "2026-08-09T17:17:12.575Z",
-  "windowHours": 174.79071527777776,
+  "windowEnd": "2026-08-09T18:22:09.870Z",
+  "windowHours": 175.87329722222222,
   "haltedHours": 0,
   "halted": [],
   "blocked": [
@@ -1369,7 +1369,7 @@
       "minutes": 750.52545,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process",
-      "startedAtMsUnreliable": false
+      "startedAtMsUnreliable": true
     },
     {
       "taskId": "gap-gate-scripts-laid-down-but-dead-and-not-mutation-checked",
@@ -2312,6 +2312,14 @@
       "reconcileReason": "worktree-gone-and-no-process"
     },
     {
+      "taskId": "gap-last-pane-txt-has-no-writer",
+      "runId": "fm-gap-last-pane-txt-has-no-writer-1786292741044-qulp3x",
+      "startedAtMs": 1786292741061,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
       "taskId": "gap-merge-introduced-referenced-not-landed-manager-tick-log",
       "runId": "fm-gap-merge-introduced-referenced-not-landed-manager-tick-log-1786276079248-twp3n8",
       "startedAtMs": 1786276079261,
@@ -2323,6 +2331,14 @@
       "taskId": "gap-proposal-convergence-load-flake-20-child-concurrency",
       "runId": "fm-gap-proposal-convergence-load-flake-20-child-concurrency-1786281235151-3yj8qk",
       "startedAtMs": 1786281235170,
+      "startedAtMsUnreliable": false,
+      "outcome": "abandoned",
+      "reconcileReason": "worktree-gone-and-no-process"
+    },
+    {
+      "taskId": "gap-ready-pool-worklanded-traps-stuck-work",
+      "runId": "fm-gap-ready-pool-worklanded-traps-stuck-work-1786292743310-cw436c",
+      "startedAtMs": 1786292743327,
       "startedAtMsUnreliable": false,
       "outcome": "abandoned",
       "reconcileReason": "worktree-gone-and-no-process"
@@ -2352,7 +2368,13 @@
       "reconcileReason": "worktree-gone-and-no-process"
     }
   ],
-  "realInFlight": 2,
-  "closedButLive": [],
-  "occupiedSlots": 2
+  "realInFlight": 0,
+  "closedButLive": [
+    {
+      "taskId": "gap-full-suite-state-red-no-failure-detail-static-check-invisible",
+      "runId": "fm-gap-full-suite-state-red-no-failure-detail-static-check-invisible-1786222786048-7x65d8",
+      "reason": "worktree-present"
+    }
+  ],
+  "occupiedSlots": 1
 }
