@@ -39,11 +39,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实证（85 分钟 Bash 162/Edit 41/Agent 2 + 41 Edit 全主线程改产品脚本 + 三类区分）（本任务 Proposal 已含；内层补：meta-cc 复现工具分布）
-- [ ] AC2: **机械可核判据**——每轮 tick 报「主线程 Edit 产品文件数 / Agent 派发数」；前者远大于后者且非红窗 ⇒ 违反（候选 A）
-- [ ] AC3: **红窗快修不误报**——红窗即时修复的主线程 Edit 不判违（候选 B 白名单）
-- [ ] AC4: **常规实现走 Agent**——常规 ready 任务实现有 Agent 派发记录（非主线程 Edit）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 tick 文档 / loop 契约检查）
+- [x] AC1: **复现固化**——任务体记录实证（85 分钟 Bash 162/Edit 41/Agent 2 + 41 Edit 全主线程改产品脚本 + 三类区分）（本任务 Proposal 已含；内层补：meta-cc 复现工具分布）
+- [x] AC2: **机械可核判据**——每轮 tick 报「主线程 Edit 产品文件数 / Agent 派发数」；前者远大于后者且非红窗 ⇒ 违反（候选 A）
+- [x] AC3: **红窗快修不误报**——红窗即时修复的主线程 Edit 不判违（候选 B 白名单）
+- [x] AC4: **常规实现走 Agent**——常规 ready 任务实现有 Agent 派发记录（非主线程 Edit）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 tick 文档 / loop 契约检查）
 
 ## Definition of Done
 
@@ -56,6 +56,7 @@ extra: {}
 
 - plugin/loop/fast-mode-loop-tick.md（A 段/步骤：每轮报「主线程 Edit 产品文件数 / Agent 派发数」）
 - plugin/scripts/（候选 A：两数采集的机械 helper——主线程 Edit 数 = meta-cc 会话内 Edit 产品文件数，Agent 数 = 会话内 Agent tool 调用数）
+- plugin/scripts/inner-exec-mode-report.ts（新 helper——本任务创建：两数采集器 + capability-catalog 声明 + 测试配对）
 - orchestration/manager-loop-tick.md（交叉标注——OB-SLOT 测错对象作废重立）
 - tasks/gap-inner-serial-main-thread-not-dispatch.md（自身：勾 AC + 贴证据）
 
@@ -74,3 +75,47 @@ resume    两数采集 + 判据 + 白名单分步提交，任一步完成即写�
 reviewer: outer
 at: 2026-08-09
 changed: 建任务（manager meta-cc 核实：inner 主线程串行做实现非派发——85 分钟 Edit 41/Agent 2，吞吐恒 1、槽位账假（OB-SLOT 测错对象）；三类区分（红窗快修/立案主线程对，常规实现须派 subagent）。机械判据=每轮报两数。实现归内层）
+
+## Evidence（内层实现 2026-08-09）
+
+**AC1 复现固化（meta-cc 复现工具分布）**：meta-cc `query_session_content role=tool` 在 15:30–16:53Z
+窗口（`since 2026-08-09T15:30:00Z until 2026-08-09T16:53:00Z`）：
+- `tool_name=Edit`：total 81（跨 3 会话：728a4610 = 73、b8dc91a6 = 6、7795bb75 = 2）。
+- `tool_name=Agent`：total 2（均在 728a4610 的 16:26:13/16:26:17）。
+- 直读 728a4610 transcript 窗口内：Edit tool_use = 40、Agent = 2 —— 与任务体「Edit 41 / Agent 2」
+  同量级，复现「主线程串行做实现非派发」。三类区分（红窗快修/立案主线程对、常规实现须派 subagent）
+  见任务体 Proposal。
+
+**AC2 机械可核判据（helper + tick 接线）**：
+- 新 helper `plugin/scripts/inner-exec-mode-report.ts`：读会话 transcript JSONL，数两数——
+  `main_thread_edits`（tool_use `Edit` 且 `input.file_path` 指向产品文件
+  `plugin/scripts/|plugin/test/|packages/`）+ `agent_dispatches`（tool_use `Agent`）。
+  `--session <path>` / `--since <ISO>` / `--repo-root <dir>` / `--json`；缺省自动检测
+  `~/.claude/projects/` 下最新匹配仓库 slug 或 cwd 的会话。畸形行容忍跳过；Edit 无 file_path
+  单列 `edits_no_file_path`（不跳过、不计入产品数）。
+- 实跑（Contract invoke 形态，对真实会话 728a4610 + `--repo-root /home/yale/work/quay`）：
+  `{ "main_thread_edits": 103, "agent_dispatches": 162, "session": "...728a4610...jsonl" }`
+  （全时；`--since 2026-08-09T15:30:00Z` 窗口化 = 27/6——since 无上界，含窗口后到现在的派发）。
+- tick 接线：`plugin/loop/fast-mode-loop-tick.md`「## 每个 tick 必报」新增执行模式两数 bullet +
+  「## 执行模式两数判据与红窗白名单」新节；`orchestration/fast-mode-tick-core.md` A23 行 + B2 必报项。
+
+**AC3 红窗快修白名单（不误报）**：白名单文档化在
+`plugin/loop/fast-mode-loop-tick.md`「执行模式两数判据与红窗白名单」节——①红窗即时修复
+（suite-red 分诊即刻修复）、②任务立案/编排（`tasks/*.md`）、③tick/编排文档编辑
+（`plugin/loop/*.md`、`orchestration/*.md`）。②③在**计数源头**排除（`tasks/`、`docs/` 非产品文件），
+测试 `plugin/test/inner-exec-mode-report.test.mjs` 用 fixture 钉住：task/doc Edit 不计入
+`main_thread_edits` ⇒ 白名单类结构性不误报。
+
+**AC4 常规实现走 Agent**：判据已机械化 —— 常规轮次 `agent_dispatches ≥ 1`（或非红窗时
+`main_thread_edits` 不大幅 > `agent_dispatches`）；helper 复现问题会话（728a4610 窗口内
+Edit 40 / Agent 2）证明此前「主线程串行、无派发」确实可被两数抓出。tick-log 每轮报两数，
+`main_thread_edits` 大且 `agent_dispatches == 0` 且非红窗 ⇒ 显式写「执行模式违规候选」。
+
+**AC5 scoped 门绿**：`bash scripts/test.sh --for-task gap-inner-serial-main-thread-not-dispatch --allow-thin`
+退出 0 —— `ℹ pass 8 fail 0 cancelled 0`（新增测试 8 条全绿）；scoped 静态检查
+（task-contract / adr016 / strategic-doc-staleness / drive-contract / instrument-failure /
+capability-catalog）全 PASS，0 violations。`capability-catalog.sh` 已为新脚本加声明
+（unclassified = 0）。test-framework-policy + test-isolation 无新增违规。
+
+**DoD 说明**：全量套件行未勾（外层 verification-round 的活，scoped-only 下任务内不可知）；
+`status: ready` 不变。
