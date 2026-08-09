@@ -34,6 +34,7 @@ extra: {}
 - [x] AC3: **solo 不回归**——proposal-convergence.test.mjs 218/218 绿（inner a551dd5f 已验）
 - [x] AC4: **TOCTOU 断言核心不削弱**——ceiling 不超 + ok:true 有持久记录 保留（a551dd5f 修互斥，断言未弱化）
 - [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含实验侧测试契约检查）
+- [x] AC6: **KNOWN-LOAD-SENSITIVE 标注**——proposal-convergence.test.mjs 头部加 `// KNOWN-LOAD-SENSITIVE` + `// @load-sensitive heavy`（20-concurrency 子进程重型），runner 的 load-sensitive 分区把它隔离（serial 相位或并发 1），消除全量套件下轮换红（对照 install 家族 AC 收编，gap-install-family-tests-rotate-flakes-under-full-suite）
 
 ## Definition of Done
 
@@ -74,6 +75,7 @@ changed: 建任务时判「负载 flake」；inner 10:42 根因定位升格为�
   - 测试：`experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` 218 pass / 0 fail / 0 cancelled（duration 30894ms）。
   - 20-并发 child 子测试两跳全绿：`20 genuinely concurrent --new-epoch child processes against a shared epoch (maxNewEpochResetCount:3) never exceed the hard ceiling`（1612ms）与 `--override-budget` 同型测试（1534ms）；stale-reclaim（crashed + corrupt）+ deterministic 真互斥 5/5 亦绿。
 - **AC2/AC3/AC4 承接**：子测试 5/5 不再轮换失败、solo 218/218、TOCTOU 核心断言（ceiling 不超 + ok:true 持久记录）均已在 scoped 门内再验（inner a551dd5f 原始验证）。DoD 全量套件绿留外层 verification-round。
+- **AC6 已实现（2026-08-09）**：proposal-convergence.test.mjs 头部由 `// @test-group engine` 改为 `// @test-group serial`，并加 `// @load-sensitive heavy` + 规范 `// KNOWN-LOAD-SENSITIVE (see plugin/loop/fast-mode-loop-tick.md "已知负载敏感族")` 声明（附 20-concurrency 子进程全量下轮换红 164/186/193/204 vs solo 218/218 恒绿的理由），与 install 家族 12 文件同形。runner 的 load-sensitive 分区将本文件路由到 serial 相位，消除全量套件下轮换红。测试逻辑/断言零改动。
 
 ## 补充发现（outer 2026-08-09 18:56，round-186/193 两轮同子测试红后定位）
 
