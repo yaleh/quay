@@ -77,7 +77,7 @@ AssertionError: GO band must equal the injected hermetic value, got 2
 
 **scoped gate**：`bash scripts/test.sh --for-task gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load --allow-thin` 通过（见提交报告的 violations 计数）。
 
-**内层独立复验（2026-08-09，本轮 dispatch）**：工作树重跑 scoped gate —— `tests 268 / pass 268 / fail 0 / cancelled 0 / skipped 0`，exit 0（含静态检查，task-contract-check no violations）。定向复验簇 B：`--test-name-pattern="SEAM|BUDGET" plugin/test/cap-from-gate.test.mjs` → `tests 2 / pass 2 / fail 0`（SEAM 注入非环境 nproc 端到端获胜；BUDGET 全层预算有界）。簇 A 两 REGRESSION（20 并发 --new-epoch / --override-budget）+ kill-timeout 确定性测试同轮全绿。实现代码已含于 d39706d0（本工作树 HEAD=fc681f52=develop 已并入），本轮无新增代码改动，仅补独立复验记录。
+**内层独立复验（2026-08-09，本轮 dispatch，二次复验）**：工作树在 develop（HEAD=2e7ccc5a）重新 provisioned，实现代码已在 develop 内（d39706d0/698a142a 经 fan-in 并入）。本轮无新增代码改动，重跑 scoped gate —— `tests 268 / pass 268 / fail 0 / cancelled 0 / skipped 0`，exit 0（含静态检查：test-framework-policy-check / test-isolation-check / test-impl-census / task-contract-check no violations / adr016-screen-use-check / dead-code-after-return-check 全过）。定向复验簇 B：`--test-name-pattern="SEAM|BUDGET" plugin/test/cap-from-gate.test.mjs` → `tests 2 / pass 2 / fail 0`（SEAM 注入非环境 nproc 端到端获胜；BUDGET 全层预算有界）。簇 A 两 REGRESSION（20 并发 --new-epoch / --override-budget）+ kill-timeout 确定性测试同轮全绿。
 
 ## Touches
 
