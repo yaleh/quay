@@ -65,6 +65,7 @@
 | C6 | 任何「某机制会导致 X」的断言,发出前引用实现里的一行;引不出来只报现象 |
 | C7 | 跨文件/跨分支的数字,用之前先确认它出自**哪一份**副本 |
 | C8 | 已核实的事实直接发外层,**不问「要不要发」**;决定归外层的,给事实 + 意见 + 明说裁定权在它 |
+| C16 | **绕过不是罪,不留痕才是。** 撞上本项目工具的缺陷 ⇒ **最低线是立案**(复现命令 + 期望输出 + 实际输出),然后可以继续绕过把手上的活干完;**不立案就绕过 = 缺陷永久化**。CLAUDE.md 对 archguard/meta-cc 已有同形原则(「report/fix issues rather than working around them」),对**本仓库自己的工具只会更强——没有别人会修**。实证 2026-08-09 16:1x:outer 说 `ready-pool-check --promote` 「output is unclear」后绕过,实测 `--promote` **这个 flag 根本不存在**(grep 全文只在注释里),且传臆造 flag `--this-flag-does-not-exist-xyz` 同样输出正常 JSON + **exit=0** ⇒ 未知 flag 静默忽略并报成功,是「看起来做了、其实没做」的通用制造机。**今晚三笔旧账都是「当时绕过、没留痕」的直接后果**:`slot-refill.in_flight_count` 是入参不是测量(绕过去自己数 pane ⇒ in_flight 至今无可信来源)、`.quay/last-pane.txt` 无写入者(绕过用 capture-pane ⇒ A7 死判据留到今天)、`FAILURE_PATTERNS` 前两次只修触发的那条(第三次复发) |
 | C10 | **发指令前必须 `C-u`;`C-u` → 文本 → `Enter` 三次分开调用**(合并会丢 Enter);发完 `capture-pane` 确认。**我今晚每次发消息都这么做,但它从来只在我记忆里** — 借自 outer C1 |
 | C11 | **写任何时刻前先跑 `date -u`,不许估。** 今晚两次班次时间算错(`--since` 用了未来时刻返回空;写「已过点」而其实没到) — 借自 outer C10 |
 | C12 | 核实「修好了没有」看**行为**或**读 diff**,**不要 grep 关键词**——描述缺陷的词必然出现在修复里。今晚 grep 到 `ERROR:`/`ANTI-DRIFT HARD FAIL` 差点当失败报,查紧邻行才知是 fixture 负向输出 — 借自 outer C5 |
