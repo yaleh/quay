@@ -1,7 +1,7 @@
 ---
 id: gap-closure-pass-has-no-lag-signal
 title: "1b 异步收尾「强制/每 tick」静默停跑 8.5h 无机械信号——AC23 只验 tick 响不响，不验 tick 内强制步骤跑没跑"
-status: ready
+status: done
 labels:
   - gap
   - defect
