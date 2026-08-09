@@ -21,7 +21,7 @@ checklist 执行。
 |---|---|---|
 | A1 | `bash plugin/scripts/monitor-mount-check.sh --json` | 两判据缺一不可:`mounted` + `targetRoot`==本仓根(`targetOk`);挂错目标与挂对了从外面一模一样 (src:311) |
 | A2 | `pgrep -af 'suite-state-trigger.ts --monitor'` | 套件触发者 Monitor 在不在;排除 pgrep 自己那一行 (src:1072) |
-| A3 | 三项目 `.halt` 存在性 + 内容(quay / archguard / meta-cc) | 每 tick 必报——「暂停后忘了」的唯一防线 (src:555) |
+| A3 | 三项目 `.halt` 存在性 + 内容 + **最后提交时距**(quay / archguard / meta-cc) | 每 tick 必报——「暂停后忘了」的唯一防线 (src:555)。**组合判据(SPEC 2.8)**:`无 .halt` **且** 长期无产出(>24h)⇒ **未标记的停摆**,必须升级——只读不判会稳定产生「看见但没发现」(与 manager A5 同形) |
 | A4 | 观察块:`capture-pane` → `.quay/last-pane.txt`、`git log -10`、`git status --short`、`fast-mode-telemetry --report --json`、`task-status-drift-check`(含 `--stranded`)、`batch2-queue-state.md` | 只读不动手 (src:569) |
 | A5 | `supervisor-bus-identity.sh inbox-summary` | unread 逐条进决策;**delivered ≠ consumed** (src:580) |
 | A6 | **占用率(AC26,强制)**:`cap-from-gate.sh` 取 cap → `fast-mode-telemetry --slots --cap <cap>`;再取「inner 最近一次**自己的**报告」 | 量占用率不量新鲜度——mtime /「transcript is fresh」/「最后活动」一律不算;**槽未满且上游已通 ⇒ 当轮驱动派发,不得记录后结束** (src:583) |
