@@ -1007,11 +1007,15 @@ export async function run(argv: string[]): Promise<number> {
 
   const onLine = (line: string) => {
     logStream.write(line + "\n");
-    const passM = line.match(/^#\s*pass\s+(\d+)/);
+    // NOTE (# vs ℹ): this repo's measure-suite-reporter emits the info-glyph forms `ℹ pass N` /
+    // `ℹ fail N` / `ℹ cancelled N`, NOT the TAP `# pass N` forms — so the old `#`-only regexes
+    // never matched and verification-round.jsonl recorded tests/pass/fail=0 for every round (green
+    // AND red). Same family as the testsSeen `# tests` fix (42aad5fe); accept both prefixes.
+    const passM = line.match(/^[#ℹ]\s*pass\s+(\d+)/);
     if (passM) tapPass = Number(passM[1]);
-    const failM = line.match(/^#\s*fail\s+(\d+)/);
+    const failM = line.match(/^[#ℹ]\s*fail\s+(\d+)/);
     if (failM) tapFail = Number(failM[1]);
-    const cancelledM = line.match(/^#\s*cancelled\s+(\d+)/);
+    const cancelledM = line.match(/^[#ℹ]\s*cancelled\s+(\d+)/);
     if (cancelledM) tapCancelled = Number(cancelledM[1]);
     // gap-full-suite-state-red-no-failure-detail-static-check-invisible AC2/AC4 — accumulate
     // static-check detail lines on EVERY line (the `VIOLATION:` / summary / ratchet lines appear
@@ -1055,7 +1059,7 @@ export async function run(argv: string[]): Promise<number> {
     // phase ⇒ the static-check patterns below must not fire (test fixtures can legitimately print
     // "FAIL: N violation(s)" — candidate-contracts.test.mjs's ANTI-DRIFT hard-fail fixtures).
     if (/^selected \d+ files?\b/.test(line) || testsSeen > 0) testPhaseStarted = true;
-    const cancelledMatch = /^#\s*cancelled\s+(\d+)/.exec(line);
+    const cancelledMatch = /^[#ℹ]\s*cancelled\s+(\d+)/.exec(line);
     if (cancelledMatch) cancelledSeen = Number(cancelledMatch[1]);
     if (!redDetected && isFailureLine(line)) {
       redDetected = true;
