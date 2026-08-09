@@ -1,7 +1,7 @@
 ---
 id: gap-ready-pool-promotion-same-class-as-slot-refill
 title: "ready-pool auto-promotion (step 3.6: pool < floor ⇒ 本 tick 补晋) written as a FORCED step but execution depends on inner tick volition — pool=5 < floor=20 sustained ~3h, 121 todo / 33 ready, last MECHANICAL promote bbf85ea9 00:53, two promotes since were human-directive/event-driven (0361893d/0aeaef38), ready-pool-check currently recommends 7 promotions (manager measurement 2026-08-06 04:0xZ + outer git-verified); SAME CLASS as gap-slot-refill-only-triggered-on-completion-not-tick-heartbeat — a forced step in the tick doc with no mechanical guarantee it runs; fix: tick doc step 3.6 must run ready-pool-check + apply promotions unconditionally each tick (like slot-refill's heartbeat-must-run), or fold into the same heartbeat guarantee"
-status: ready
+status: done
 labels:
   - gap
   - defect

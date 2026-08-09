@@ -1,7 +1,7 @@
 ---
 id: gap-supervisor-step-4-preemption
 title: "supervisor 基座步骤④：抢占（preemption）——把「暂停/停止一个在飞任务」从屏幕抓取/文件轮询伪造（.halt 挡不住连续流程）收编为会话外进程的确定性操作；机制：任务超时/资源争抢/更高优先派发时 kill 子进程树（复用 kill-session 能力），只读可查询事实（进程在不在、跑多久、槽位空不空）不读任务语义；越界判据（任何一行需理解任务在讲什么 = 越界）在代码评审可查"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

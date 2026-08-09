@@ -11,7 +11,7 @@ title: "Touches must NOT declare bare-directory globs with uncertain
   plugin/scripts/branch-helper.sh) — not a bare dir with 'if it becomes a
   script'; enforcement: mechanical check (flag bare-dir + uncertain-annotation
   Touches at filing) or template AC + reviewer discipline"
-status: ready
+status: done
 labels:
   - gap
   - defect

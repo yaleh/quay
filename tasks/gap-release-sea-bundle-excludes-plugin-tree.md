@@ -1,7 +1,7 @@
 ---
 id: gap-release-sea-bundle-excludes-plugin-tree
 title: "SEA (--experimental-sea-config) bundle structurally EXCLUDES the plugin dir-tree — esbuild-sea.mjs bundles only bin/quay.ts (Core CLI), sea-config.json has no plugin assets, so quay-sea-0.4.0-*.tar.gz (the RECOMMENDED release distribution) contains ./quay ./quay-native ./tasks/ ./.quay/config.yml but NO plugin/ (archguard string-scan + manager tar tzf double-confirmed 2026-08-06); package.json.files affects npm tgz only — two independent mechanisms, AC16's files+plugin fix never touched the SEA distribution; SEA single-binary vs plugin dir-tree is a STRUCTURAL conflict needing an architecture decision (embed? sidecar bundle? make npm the recommended distribution?)"
-status: ready
+status: done
 labels:
   - gap
   - defect

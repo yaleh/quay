@@ -10,7 +10,7 @@ title: "quay-init --loop upgrade for EXISTING downstream consumers either STOPS
   posture (same as the bare-✖ shape); config confirmed intact (stopped before
   writing); fix: config-PRESERVING incremental upgrade entry (backup config,
   apply mechanism files, keep config values)"
-status: ready
+status: done
 labels:
   - gap
   - defect

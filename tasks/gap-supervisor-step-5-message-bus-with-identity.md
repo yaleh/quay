@@ -1,7 +1,7 @@
 ---
 id: gap-supervisor-step-5-message-bus-with-identity
 title: "supervisor 基座步骤⑤：消息总线带发送者身份（message bus with sender identity）——把「跨会话投递」从各会话裸 send-keys（无身份、无法归因）收编为会话外进程的一条带身份消息通道；每条消息携带发送者身份（哪层/哪项目），送达校验用 transcript（唯一可信信号）；越界判据（任何一行需理解任务在讲什么 = 越界）在代码评审可查"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

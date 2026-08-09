@@ -10,7 +10,7 @@ title: "Telemetry UNDER-report (mirror of the done high-report task):
   into task brackets (wrong semantics), add a 'non-task subagents in-flight'
   count to --slots and have self-check ① use real concurrency (brackets +
   non-task subagents)"
-status: ready
+status: done
 labels:
   - gap
   - defect
