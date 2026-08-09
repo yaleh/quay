@@ -42,17 +42,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 17:15 行手跑 FAIL / 套件内 PASS 的运气差实证 + 根因（窗口锚定 log mtime 前向查找）（本任务 Proposal 已含；内层补：构造「证据提交在 log 前 + 无后续提交」fixture ⇒ 假 FAIL）
-- [ ] AC2: **窗口修正**——L2 trace 窗口起点改为该 tick 自己的起点（上一行写入 / 行内 epoch / 保守回退），动作行的证据提交必然落窗
-- [ ] AC3: **不削弱原判据**——欺骗输入（escalate/correct/unblock + 真无提交）仍 FAIL；no-action + 五条全假仍 PASS
-- [ ] AC4: **可复现**——同一动作行在任意时刻跑 checker 结果一致（不再靠 log 写入后有无无关提交）
-- [ ] AC5: **既有不回归**——`--for-task` scoped 门绿（outer-tick-log-check 的既有 11/11 测试全过）
+- [x] AC1: **复现固化**——任务体记录 17:15 行手跑 FAIL / 套件内 PASS 的运气差实证 + 根因（窗口锚定 log mtime 前向查找）（本任务 Proposal 已含；内层补：构造「证据提交在 log 前 + 无后续提交」fixture ⇒ 假 FAIL）
+- [x] AC2: **窗口修正**——L2 trace 窗口起点改为该 tick 自己的起点（上一行写入 / 行内 epoch / 保守回退），动作行的证据提交必然落窗
+- [x] AC3: **不削弱原判据**——欺骗输入（escalate/correct/unblock + 真无提交）仍 FAIL；no-action + 五条全假仍 PASS
+- [x] AC4: **可复现**——同一动作行在任意时刻跑 checker 结果一致（不再靠 log 写入后有无无关提交）
+- [x] AC5: **既有不回归**——`--for-task` scoped 门绿（outer-tick-log-check 的既有 11/11 测试全过）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：构造「证据在 log 前 + 无后续提交」⇒ PASS（贴任务体）；欺骗输入 ⇒ 仍 FAIL
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：构造「证据在 log 前 + 无后续提交」⇒ PASS（贴任务体）；欺骗输入 ⇒ 仍 FAIL
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -76,3 +76,35 @@ resume    窗口起点 + fixture 分两步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-09
 changed: 建任务——17:17 手跑 checker 对 17:15 合法 unblock 行假 FAIL（action-claimed-but-no-git-trace），套件内同行 PASS，根因是 git-trace 窗口锚定 tick-log mtime 前向查找，act-then-log 下动作提交必然在窗外。phantom-red 家族，接线 run_static_checks 全量必跑。实现归内层
+
+## Evidence（内层实现 2026-08-09）
+
+**根因确认**：`plugin/scripts/outer-tick-log-check.sh` 原 L2 trace 用 `LAST_EPOCH="$(date -r "$LOG" +%s)"`（tick-log mtime）作 `git log --since="@$LAST_EPOCH"` 的窗口起点。act-then-log（先 B1 收尾提交、再 B13 追加 log）下，动作行的证据提交严格在 log 写入之前 ⇒ 被 `--since` 排除 ⇒ 计数 0 ⇒ 假 FAIL「action-claimed-but-no-git-trace」。通过与否只取决于「log 写入后是否有无关提交落地」——运气判据，phantom-red。
+
+**窗口修正（AC2）**：窗口改为该 tick 自己的窗口 `[该 tick 起点, log 写入时刻]`（`git log --since=@<TRACE_START_EPOCH> --until=@<LAST_EPOCH>`）。`TRACE_START_EPOCH` 按优先级解析：
+1. 上一 tick 段行内 `epoch=<ts>`（B13 前向兼容：每行记该 tick 写入时刻）；
+2. 本 tick 段行内 `epoch=<ts>`（契约 = 该 tick 起点时刻）；
+3. 上一 tick 段 `### HH:MM` 表头 → 当日 epoch − 120s 缓冲（分钟粒度 + 实际写入可能早于表头；校验不晚于 log mtime，防跨日/掩码时间）；
+4. 均不可解析 ⇒ `TRACE_START_EPOCH` 为空 ⇒ 跳过 L2 trace 判据（不假红，spec 明令）。
+
+动作行的证据提交必然落在 `(上一行写入, log 写入)` 内 ⇒ 落窗 ⇒ PASS；`--until=@<log mtime>` 把 log 写入后的无关提交排除在外 ⇒ 同一行任意时刻跑结果一致（AC4）。
+
+**不削弱原判据（AC3）**：欺骗输入（escalate/correct/unblock + 真无本 tick 提交）仍 FAIL——即使仓库存在更早提交但落在 tick 窗口外，`TRACE_EMPTY` ⇒ 红；no-action + 五条全假仍 PASS。
+
+**AC1 复现固化（内层补）**：构造受控 fixture（真实 git 仓库 + 提交时刻受控）验证窗口方向：
+```
+证据提交 t=E，tick 起点 t=E-60，log 写入 t=E+180（act-then-log 严格次序）
+OLD 窗口 [log_mtime, now]            : 0 commits  ⇒ 假 FAIL（证据在窗外）
+NEW 窗口 [tick_start, log_mtime]     : 1 commits  ⇒ 证据落窗 ⇒ PASS
+```
+同形即 17:15 行手跑 FAIL / 套件内 PASS 的运气差；修后该 fixture 在任意时刻跑均 PASS。
+
+**测试（AC5）**：`plugin/test/outer-tick-log-check.test.mjs` 既有 11 例全过 + 新增 4 例（`// @test-group engine`）：
+- AC1/AC4 — 证据提交在 log 写入前 + 无后续提交 ⇒ PASS（不再假红）
+- AC4 — log 写入后无关提交落地，动作行结果不变（`--until` 锚定 log mtime）
+- AC3 — 仓库有更早提交但本 tick 窗口内无 ⇒ 仍 FAIL（不削弱原判据）
+- AC2 — 窗口回退：无 `epoch=` 时用上一 tick 表头锚定该 tick 起点 ⇒ PASS
+
+**scoped 门**：`bash scripts/test.sh --for-task gap-outer-tick-log-check-trace-window-anchored-at-log-mtime --allow-thin` ⇒ **exit 0**，fail 0 / cancelled 0，task-contract-check no violations。既有 11/11 + 新增 4/4 = 15/15 绿。真实仓库实跑 `outer-tick-log-check.sh --root <repo> --log <tick-log>` 连续 3 次 exit 0（确定性）。
+
+**full-suite DoD 行未勾**：全量套件绿留外层 verification-round 验证（`@static-tier full` 接线在 scripts/test.sh，本分支未触碰）。

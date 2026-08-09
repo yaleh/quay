@@ -23,7 +23,9 @@
 #       - 比对行内读数 vs 实测真值：行内标 `[当前假` 但实测为真 ⇒ FAIL（读数撒谎或漏报）
 #       - 判词与实测不符：判词写 no-action 但实测 ①-⑤ 任一为真 ⇒ FAIL（欠动作）
 #       - 欺骗输入：判词写 escalate/correct/unblock 但该轮实际 git 无任何提交痕迹（git log --since
-#         该 tick 时刻为空）⇒ FAIL（「说动了却没动」）
+#         该 tick 时刻为空）⇒ FAIL（「说动了却没动」）。trace 窗口锚定该 tick 自己的起点（上一行
+#         写入/行内 epoch/保守回退），不是 log 写入时刻——act-then-log 下动作证据提交在 log 前，
+#         窗口必须含它（gap-outer-tick-log-check-trace-window-anchored-at-log-mtime）。
 #   L3 新鲜度上界：行时间 > 上界 ⇒ 跳过 L2（只跑 L1 自洽）——不拿此刻真值判 20 分钟前的行。
 #
 # 用法：
@@ -132,6 +134,57 @@ if [ -n "$LAST_EPOCH" ]; then
   if [ "$AGE_SECONDS" -le $(( FRESH_MINUTES * 60 )) ]; then IS_FRESH=1; fi
 fi
 
+# ── L2 trace 窗口起点：锚定该 tick 自己的起点，而非 log 写入时刻 ─────────────────────────
+# gap-outer-tick-log-check-trace-window-anchored-at-log-mtime: act-then-log 下动作行的证据提交
+# 严格在 log 写入之前；用 log mtime 当窗口起点（--since=@<mtime>）必然排除动作提交 ⇒ 假红
+# （phantom-red：17:15 行手跑 FAIL / 套件内 PASS 全靠 log 后有无无关提交）。正确窗口 =
+# [上一行写入, 本行写入]（[该 tick 起点, log mtime]）。窗口起点按优先级解析：
+#   ① 上一 tick 段行内 epoch（`epoch=<ts>`，B13 前向兼容：每行记该 tick 写入时刻）——精确。
+#   ② 本 tick 段行内 epoch（`epoch=<ts>`，契约 = 该 tick 起点时刻）——精确。
+#   ③ 上一 tick 段 `### HH:MM` 表头 → 当日 epoch 减 120s 缓冲（分钟粒度 + 实际写入可能早于表头）
+#      ——校验不晚于 log mtime（防跨日/掩码时间）。
+#   ④ 均不可解析 ⇒ TRACE_START_EPOCH 为空 ⇒ 跳过 L2 trace 判据（不假红，spec 明令）。
+PREV_SECTION="$(awk '
+  /^### / {
+    if (prev != "") last = prev
+    prev = ""
+    collecting = 1
+  }
+  collecting { prev = prev $0 "\n" }
+  END { printf "%s", last }
+' "$LOG")"
+
+TRACE_START_EPOCH=""
+# ① 上一 tick 段行内 epoch
+PREV_EPOCH="$(printf '%s' "$PREV_SECTION" | grep -m1 -oE 'epoch=[0-9]+' | head -1 | sed 's/epoch=//')"
+case "$PREV_EPOCH" in
+  ''|*[!0-9]*|0*) ;;
+  *)
+    if [ "$PREV_EPOCH" -le $(( NOW_EPOCH + 3600 )) ] 2>/dev/null; then TRACE_START_EPOCH="$PREV_EPOCH"; fi ;;
+esac
+# ② 本 tick 段行内 epoch
+if [ -z "$TRACE_START_EPOCH" ]; then
+  CUR_EPOCH="$(printf '%s' "$LAST_SECTION" | grep -m1 -oE 'epoch=[0-9]+' | head -1 | sed 's/epoch=//')"
+  case "$CUR_EPOCH" in
+    ''|*[!0-9]*|0*) ;;
+    *)
+      if [ "$CUR_EPOCH" -le $(( NOW_EPOCH + 3600 )) ] 2>/dev/null; then TRACE_START_EPOCH="$CUR_EPOCH"; fi ;;
+  esac
+fi
+# ③ 上一 tick 表头 HH:MM → 当日 epoch - 120s
+if [ -z "$TRACE_START_EPOCH" ]; then
+  PREV_HEADER="$(printf '%s' "$PREV_SECTION" | grep -m1 -oE '^### [0-9]{2}:[0-9]{2}' | sed 's/^### //')"
+  if [ -n "$PREV_HEADER" ] && [ -n "$LAST_EPOCH" ]; then
+    HH="${PREV_HEADER%%:*}"; MM="${PREV_HEADER##*:}"
+    if [ "${HH#0}" -ge 0 ] 2>/dev/null && [ "${HH#0}" -le 23 ] && [ "${MM#0}" -ge 0 ] 2>/dev/null && [ "${MM#0}" -le 59 ]; then
+      HEADER_EPOCH="$(date -d "$(date +%Y-%m-%d) ${HH}:${MM}:00" +%s 2>/dev/null || echo "")"
+      if [ -n "$HEADER_EPOCH" ] && [ "$HEADER_EPOCH" -le "$LAST_EPOCH" ]; then
+        TRACE_START_EPOCH=$(( HEADER_EPOCH - 120 ))
+      fi
+    fi
+  fi
+fi
+
 # ── L2 重新测量（仅当新鲜）────────────────────────────────────────────────────────────
 # 实测真值来源：--truth 注入（测试接缝）优先；否则只在真实仓库根下跑命令重测
 # （fixture --root 指向非仓库目录且无 --truth 时命令不可用 ⇒ 跳过 L2，只判 L1）。
@@ -146,13 +199,17 @@ if [ "$IS_FRESH" = "1" ] && [ -n "$TRUTH" ]; then
   fi
   # 欺骗输入（--truth 接缝下可测）：判词是动作类型（escalate/correct/unblock），但五条实测任一为真
   # 且该轮无 git 提交痕迹——「说动了却没动」。动作类型 + 真值仍有 + 无痕迹 ⇒ 声称的动作没发生。
+  # trace 窗口 = [该 tick 起点, log 写入时刻]（TRACE_START_EPOCH..LAST_EPOCH）。动作证据提交
+  # 必然落窗；log 后的无关提交被 --until 排除 ⇒ 任意时刻跑结果一致（AC4）。窗口不可解析 ⇒ 跳过。
   if [ "$ACTION" != "no-action" ] && [ -n "$ACTION" ] && [ "$ANY_TRUE" = "1" ]; then
     TRACE_EMPTY=1
-    if [ -n "$LAST_EPOCH" ]; then
-      TRACE_COUNT="$(git -C "$ROOT" log --since="@$LAST_EPOCH" --oneline 2>/dev/null | wc -l | tr -d ' ')"
+    if [ -n "$TRACE_START_EPOCH" ]; then
+      TRACE_UNTIL=""
+      [ -n "$LAST_EPOCH" ] && TRACE_UNTIL="--until=@$LAST_EPOCH"
+      TRACE_COUNT="$(git -C "$ROOT" log --since="@$TRACE_START_EPOCH" $TRACE_UNTIL --oneline 2>/dev/null | wc -l | tr -d ' ')"
       [ -n "$TRACE_COUNT" ] && [ "$TRACE_COUNT" -gt 0 ] && TRACE_EMPTY=0
     fi
-    if [ "$TRACE_EMPTY" = "1" ]; then
+    if [ "$TRACE_EMPTY" = "1" ] && [ -n "$TRACE_START_EPOCH" ]; then
       L2_FAIL="action-claimed-but-no-git-trace"
     fi
   fi
@@ -199,14 +256,17 @@ elif [ "$IS_FRESH" = "1" ] && [ -d "$ROOT/.git" ]; then
   if [ "$ACTION" = "no-action" ] && [ "$ANY_TRUE" = "1" ]; then
     L2_FAIL="no-action-but-remeasured-true"
   fi
-  # 欺骗输入：判词 escalate/correct/unblock 但该轮实际 git 无提交痕迹
+  # 欺骗输入：判词 escalate/correct/unblock 但该轮实际 git 无提交痕迹。窗口 = [该 tick 起点, log
+  # 写入时刻]；不可解析窗口起点 ⇒ 跳过（不假红）。动作证据提交必然落窗。
   if [ "$ACTION" != "no-action" ] && [ -n "$ACTION" ]; then
     TRACE_EMPTY=1
-    if [ -n "$LAST_EPOCH" ]; then
-      TRACE_COUNT="$(git -C "$ROOT" log --since="@$LAST_EPOCH" --oneline 2>/dev/null | wc -l | tr -d ' ')"
+    if [ -n "$TRACE_START_EPOCH" ]; then
+      TRACE_UNTIL=""
+      [ -n "$LAST_EPOCH" ] && TRACE_UNTIL="--until=@$LAST_EPOCH"
+      TRACE_COUNT="$(git -C "$ROOT" log --since="@$TRACE_START_EPOCH" $TRACE_UNTIL --oneline 2>/dev/null | wc -l | tr -d ' ')"
       [ -n "$TRACE_COUNT" ] && [ "$TRACE_COUNT" -gt 0 ] && TRACE_EMPTY=0
     fi
-    if [ "$TRACE_EMPTY" = "1" ]; then
+    if [ "$TRACE_EMPTY" = "1" ] && [ -n "$TRACE_START_EPOCH" ]; then
       L2_FAIL="action-claimed-but-no-git-trace"
     fi
   fi
@@ -214,7 +274,7 @@ fi
 
 if [ -n "$L2_FAIL" ]; then
   if [ "$JSON" = 1 ]; then
-    printf '{"ok":false,"reason":"%s","action":"%s","tickTime":"%s","fresh":%s}\n' "$L2_FAIL" "$ACTION" "$TICK_TIME" "$IS_FRESH"
+    printf '{"ok":false,"reason":"%s","action":"%s","tickTime":"%s","fresh":%s,"traceStart":%s}\n' "$L2_FAIL" "$ACTION" "$TICK_TIME" "$IS_FRESH" "${TRACE_START_EPOCH:-0}"
   else
     echo "outer-tick-log-check: FAIL — re-measured truth contradicts the row (reason=$L2_FAIL, action=$ACTION, tick=$TICK_TIME, fresh=$IS_FRESH)"
   fi
