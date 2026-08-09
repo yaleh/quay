@@ -46,6 +46,8 @@ import {
   tailFromByteOffset,
 } from "../scripts/transcript-delivery-check.ts";
 
+import { newHermeticTmux } from "./helpers/hermetic-tmux.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "send-keys-reliable.sh");
 const CHECKER = path.resolve(__dirname, "..", "scripts", "transcript-delivery-check.ts");
@@ -361,9 +363,9 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
     return;
   }
   const session = uniqueName("skr-e2e");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skr-e2e-"));
-  const fixture = path.join(tmp, "fixture.sh");
-  const transcript = path.join(tmp, "transcript.jsonl");
+  const h = newHermeticTmux("skr-e2e-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
   fs.writeFileSync(fixture, fixtureScriptSrc(transcript), "utf8");
   // NOT fresh: seed the transcript with a prior user message so the fresh-session skip does NOT
   // fire — this forces the script through the NBSP clear-loop path (AC2 regression protection).
@@ -372,13 +374,13 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
   let result = null;
   let cap = null;
   try {
-    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
 
     // Wait (bounded) for the fixture pane to render the NBSP prompt.
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
-      cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      cap = h.capture(session);
       if (cap.status === 0 && cap.stdout.includes("❯")) ready = true;
       else await new Promise((r) => setTimeout(r, 100));
     }
@@ -388,7 +390,7 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
       encoding: "utf8",
       timeout: 90000,
       env: {
-        ...process.env,
+        ...h.env,
         RELIABLE_CLEAR_MAX: "2",          // if the NBSP empty-check regresses, the clear loop exhausts at 2 and fails loud
         RELIABLE_STABLE_TIMEOUT_S: "3",
         RELIABLE_DELIVERY_FIRST_S: "3",
@@ -403,8 +405,7 @@ test("AC2 e2e: NBSP-prompt fixture pane on an ALREADY-ACTIVE (non-fresh) session
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
   } finally {
-    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
   }
 });
 
@@ -436,21 +437,21 @@ test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) �
     return;
   }
   const session = uniqueName("skr-ghost");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skr-ghost-"));
-  const fixture = path.join(tmp, "fixture.sh");
-  const transcript = path.join(tmp, "transcript.jsonl");
+  const h = newHermeticTmux("skr-ghost-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
   fs.writeFileSync(fixture, ghostFixtureScriptSrc(transcript), "utf8");
   // Transcript is deliberately ABSENT — a fresh session (nothing typed yet).
   const marker = `skr-ghost-marker-${process.pid}`;
   let result = null;
   try {
-    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
 
     // Wait (bounded) for the fixture pane to render the ghost welcome text.
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
-      const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      const cap = h.capture(session);
       if (cap.status === 0 && cap.stdout.includes(GHOST_WELCOME)) ready = true;
       else await new Promise((r) => setTimeout(r, 100));
     }
@@ -460,7 +461,7 @@ test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) �
       encoding: "utf8",
       timeout: 90000,
       env: {
-        ...process.env,
+        ...h.env,
         RELIABLE_CLEAR_MAX: "2",          // if the fresh-skip regresses, the clear loop exhausts at 2 against the ghost text and fails loud
         RELIABLE_STABLE_TIMEOUT_S: "3",
         RELIABLE_DELIVERY_FIRST_S: "3",
@@ -477,8 +478,7 @@ test("AC1 e2e: fresh welcome-screen ghost text (`❯ Try \"fix lint errors\"`) �
     const transcriptText = fs.readFileSync(transcript, "utf8");
     assert.match(transcriptText, new RegExp(`"content":"${marker}"`), `marker should appear as a real user message in the transcript:\n${transcriptText}`);
   } finally {
-    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
   }
 });
 

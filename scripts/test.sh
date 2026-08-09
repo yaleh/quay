@@ -246,6 +246,15 @@ run_static_checks() {
   # @static-tier change
   # @static-object plugin/test/ packages/*/test/ experiments/*/test/
   run_checker "test-isolation-check" bash "${repo_root}/plugin/scripts/test-isolation-check.sh" "${repo_root}"
+  echo "== tmux-test-isolation check (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe, AC3/AC4) =="
+  # A MECHANICAL ban (not a prose rule) on test files that spawn real tmux with no isolation
+  # mechanism reference AND missing a mandatory condition (env -u TMUX / explicit -S). The L0 .sh
+  # guard had ZERO consumers and the machine's tmux server died a fifth time — the check catches a
+  # future bare `tmux new-session` at commit time, before it can land on the default socket. The
+  # negative control is the checker's mutation case + plugin/test/tmux-test-isolation-check.test.mjs.
+  # @static-tier change
+  # @static-object plugin/test/
+  run_checker "tmux-test-isolation-check" node --no-warnings --experimental-strip-types "${repo_root}/plugin/scripts/tmux-test-isolation-check.ts" --root "${repo_root}"
   echo "== test-impl-census check (gap-experiment-legacy-reclaim-and-touches-heuristic AC5) =="
   # Mechanized criterion "被测实现不存在的测试文件随实现删除": a test file that imports a
   # scripts/<name> module that exists NOWHERE (plugin/scripts, experiments/scripts, repo scripts/

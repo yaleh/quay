@@ -41,6 +41,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
+// STAGE 1/3 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): the hermetic tmux
+// helpers already stripped $TMUX + carried an explicit -S; route them through the tmux-session
+// library so BOTH conditions are structural (a call form, not a caller's memory).
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HELPER = path.resolve(__dirname, "..", "scripts", "send-keys-verified.sh");
 
@@ -57,17 +62,21 @@ function isolateTmuxEnv(sockDir) {
 }
 
 function tmux(args, env) {
-  const r = spawnSync("tmux", args, { encoding: "utf8", env });
-  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  // Bare helper used for env-only resolution (e.g. -V availability checks / helper-script targets):
+  // routes through the library, which strips $TMUX and forces an explicit -S (default private
+  // socket when no sockDir is in play).
+  return isolatedTmux(args, { env });
 }
 
 // tmuxAt — tmux with an EXPLICIT `-S <socket>` argv (AC2c, gap-tests-leak-tmux-servers-main-...):
 // the socket selection rides in the CLI arg, NOT the environment. An env var can be silently
 // dropped (the 09:2xZ fourth-wipe shape); a lost -S argument ERRORS instead of falling back to
-// the default socket. sockPath === null/undefined ⇒ bare `tmux` (default-socket resolution).
+// the default socket. sockPath === null/undefined ⇒ bare `tmux` (default-socket resolution) —
+// used only for a scoped kill-session on the default server, never a server-creating/killing
+// command. The hermetic path (sockPath provided) goes through the tmux-session library.
 function tmuxAt(sockPath, args, env) {
-  const argv = sockPath ? ["-S", sockPath, ...args] : args;
-  const r = spawnSync("tmux", argv, { encoding: "utf8", env });
+  if (sockPath) return isolatedTmux(args, { socket: sockPath, env });
+  const r = spawnSync("tmux", args, { encoding: "utf8", env });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 

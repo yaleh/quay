@@ -33,6 +33,8 @@ import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { newHermeticTmux } from "./helpers/hermetic-tmux.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "supervisor-bus.sh");
 const DELIVER = path.resolve(__dirname, "..", "scripts", "supervisor-deliver.sh");
@@ -196,20 +198,20 @@ test("AC3 e2e: real target session receives the payload, transcript verifies, le
     return;
   }
   const session = uniqueName("sup-bus-e2e");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sup-bus-e2e-"));
-  const fixture = path.join(tmp, "fixture.sh");
-  const transcript = path.join(tmp, "transcript.jsonl");
+  const h = newHermeticTmux("sup-bus-e2e-");
+  const fixture = path.join(h.tmp, "fixture.sh");
+  const transcript = path.join(h.tmp, "transcript.jsonl");
   fs.writeFileSync(fixture, fixtureScriptSrc(transcript), "utf8");
-  const ledger = path.join(tmp, "ledger.jsonl");
+  const ledger = path.join(h.tmp, "ledger.jsonl");
   const marker = `sup-bus-marker-${process.pid}`;
   let result = null;
   try {
-    const start = spawnSync("tmux", ["new-session", "-d", "-s", session, "bash", fixture], { encoding: "utf8" });
+    const start = h.newSession(session, `bash ${fixture}`);
     assert.equal(start.status, 0, `tmux new-session failed: ${start.stderr}`);
 
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
-      const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", session], { encoding: "utf8" });
+      const cap = h.capture(session);
       if (cap.status === 0 && cap.stdout.includes("❯")) ready = true;
       else await new Promise((r) => setTimeout(r, 100));
     }
@@ -218,7 +220,7 @@ test("AC3 e2e: real target session receives the payload, transcript verifies, le
     result = spawnSync("bash", [SCRIPT, "--send", "--from", "outer", "--to", session, "--payload", marker, "--transcript", transcript, "--ledger", ledger, "--project", "quay"], {
       encoding: "utf8",
       timeout: 90000,
-      env: { ...process.env, RELIABLE_DELIVERY_VERIFY_S: "20", SUPERVISOR_DELIVER_VERIFY_S: "20" },
+      env: { ...h.env, RELIABLE_DELIVERY_VERIFY_S: "20", SUPERVISOR_DELIVER_VERIFY_S: "20" },
     });
     assert.equal(result.status, 0, `bus --send failed (exit ${result.status}):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /^delivered=true /, `Contract measure delivered=true:\n${result.stdout}`);
@@ -236,8 +238,7 @@ test("AC3 e2e: real target session receives the payload, transcript verifies, le
     assert.equal(rec.target, session);
     assert.ok(rec.sentAt, "sentAt recorded (when)");
   } finally {
-    try { spawnSync("tmux", ["kill-session", "-t", session], { encoding: "utf8" }); } catch { /* best-effort */ }
-    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ }
+    h.cleanup();
   }
 });
 
@@ -247,14 +248,16 @@ test("AC3 negative control: a BROKEN delivery is intercepted (delivered=false + 
     t.skip("tmux not available — skipping");
     return;
   }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sup-bus-neg-"));
-  const ledger = path.join(tmp, "ledger.jsonl");
-  t.after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  const h = newHermeticTmux("sup-bus-neg-");
+  const ledger = path.join(h.tmp, "ledger.jsonl");
+  t.after(() => { try { h.cleanup(); } catch { /* best-effort */ } });
   // A nonexistent target = a broken delivery. The bus must report delivered=false and exit 1
   // (fail loud) — the NBSP counterexample's structural fix: the test intercepts the bad
-  // delivery rather than 3 consumers each silently hand-writing around it.
+  // delivery rather than 3 consumers each silently hand-writing around it. The bus's bare `tmux`
+  // resolves to the hermetic socket (h.env), so the probe never touches the default server.
   const r = spawnSync("bash", [SCRIPT, "--send", "--from", "inner", "--to", uniqueName("no-target"), "--payload", "x", "--ledger", ledger], {
     encoding: "utf8",
+    env: h.env,
   });
   assert.equal(r.status, 1, `broken delivery must fail loud, got ${r.status}\n${r.stdout}\n${r.stderr}`);
   assert.match(r.stdout, /^delivered=false /);

@@ -47,6 +47,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+// STAGE 1/3 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): the hermetic helper
+// already stripped $TMUX + carried an explicit -S; route it through the tmux-session library so
+// BOTH conditions are structural. The sockPath === null form stays a bare spawn (scoped
+// kill-session of factory sessions on the default socket — never new-session/kill-server).
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
 
@@ -94,8 +100,10 @@ function isolateTmuxEnv(sockDir) {
   return env;
 }
 function tmuxAt(sockPath, args, env) {
-  const argv = sockPath ? ["-S", sockPath, ...args] : args;
-  const r = spawnSync("tmux", argv, { encoding: "utf8", env: env ?? process.env });
+  if (sockPath) {
+    return isolatedTmux(args, { socket: sockPath, env: env ?? process.env });
+  }
+  const r = spawnSync("tmux", args, { encoding: "utf8", env: env ?? process.env });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 function newHermetic(prefix = "quay-topo-") {

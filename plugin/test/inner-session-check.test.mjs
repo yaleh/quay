@@ -33,6 +33,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+// STAGE 1/3 (gap-tmux-isolated-guard-has-zero-consumers-fifth-machine-wipe): route the hermetic
+// tmux path through the tmux-session library so BOTH isolation conditions are structural. The
+// sockPath === null form (default-socket kill of factory-created sessions) deliberately stays a
+// bare spawn — a scoped kill-session on the default socket, never kill-server/new-session.
+import { tmux as isolatedTmux } from "../scripts/tmux-session.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginDir = path.resolve(__dirname, "..");
 
@@ -54,8 +60,13 @@ function isolateTmuxEnv(sockDir) {
   return env;
 }
 function tmuxAt(sockPath, args, env) {
-  const argv = sockPath ? ["-S", sockPath, ...args] : args;
-  const r = spawnSync("tmux", argv, { encoding: "utf8", env: env ?? process.env });
+  if (sockPath) {
+    // Hermetic path: the library forces explicit -S + $TMUX-stripped env (both conditions).
+    return isolatedTmux(args, { socket: sockPath, env: env ?? process.env });
+  }
+  // Default-socket path (sockPath === null/undefined): a scoped kill-session of a factory-created
+  // session on the real default socket. Deliberate, never a server-creating/killing command.
+  const r = spawnSync("tmux", args, { encoding: "utf8", env: env ?? process.env });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 function newHermetic(prefix = "quay-isc-") {
