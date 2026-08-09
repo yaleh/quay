@@ -46,7 +46,7 @@
 // for a start/end pair (no orphaned pollution). SCHEMA_VERSION stays "1".
 //
 // Run:
-//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--pane <pane.txt>]   (MECHANICAL trigger — see below)
+//   node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--pane <pane.txt>] [--tmux-target <target>]   (MECHANICAL trigger — see below)
 //   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
 //   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
 //   node --experimental-strip-types inner-blocked-signal.ts --timeout [--max-age-ms N] [--root <dir>] [--target <name>]   (CONSUMPTION TIMEOUT / auto-upgrade — alias of --escalate-stale; a consumed-by-nobody block older than N minutes is auto-archived (升级/归档), so inner never freezes on a stale signal)
@@ -117,6 +117,17 @@
 // 5min p100 budget, AC2) writes a ruling-required block with an actionable question + the bottom
 // region as evidence. `--transcript` is preserved as side evidence for "session actually dead" but
 // is no longer the primary criterion (AC3); `--clear` also resets the observer's rolling counter.
+//
+// gap-last-pane-txt-has-no-writer (2026-08-09, candidate B): `.quay/last-pane.txt` is a dead file with
+// NO writer — A7 was reading a 4h-stale snapshot forever (`pane_decision=busy branch=reset
+// consecutive=0/3`), so the inner could sit on a permission dialog and the outer never saw it. The
+// SCREEN OBSERVER now treats a STALE (mtime > PANE_STALENESS_MS / 300s) or ABSENT --pane snapshot as
+// UNTRUSTED and reads a LIVE `tmux capture-pane -p -t <tmux-target>` instead (the same read-only
+// primitive session-liveness.sh uses), eliminating the dead-snapshot class. Live capture is EXPLICIT
+// config (--tmux-target > env INNER_BLOCKED_TMUX_TARGET / SESSION_TMUX_TARGET > SESSION_TMUX_SESSION
+// env or <root>/orchestration/session-liveness.env resolved as `<session>:<target>`), never a guess;
+// when neither a fresh file nor a live source is available the observation is "unreadable" (counter
+// resets — no false positive on stale data). The pane_decision line now carries `source=file|live`.
 //
 // Storage: `.quay/inner-blocked.json` for `--target inner` (gitignored, same family as
 // gate-events.jsonl); `.quay/blocked-signals/<target>.json` for any other target.
@@ -1001,13 +1012,99 @@ export async function telemetryHasInProgressTask(root) {
 }
 
 /**
+ * Pane-snapshot staleness threshold (ms) — gap-last-pane-txt-has-no-writer.
+ * `.quay/last-pane.txt` is a dead file with NO writer: A7's `--detect-stop --pane` was reading a
+ * 4h-stale snapshot forever (`pane_decision=busy branch=reset consecutive=0/3`), so the inner could
+ * sit on a permission dialog and the outer would never see it. A snapshot file older than this is
+ * UNTRUSTED — the observer reads a LIVE `tmux capture-pane` of the target pane instead of the stale
+ * bytes (candidate B, eliminating the dead-snapshot class). Calibrated to the Contract band
+ * `last_pane_staleness ≤ 300s`. Env override INNER_BLOCKED_PANE_STALE_MS is a test/ops override
+ * (same style as INNER_BLOCKED_RULING_SAMPLES).
+ */
+export const PANE_STALENESS_MS = 300_000;
+
+function envNonNegMs(name, fallback) {
+  const raw = process.env[name];
+  const n = raw !== undefined ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/**
+ * Resolve the tmux control socket — the SAME resolution session-liveness.sh uses (lines 296-305):
+ * SESSION_TMUX_SOCKET explicit override → TMUX_TMPDIR/tmux-<uid>/default → ${TMPDIR:-/tmp}/tmux-<uid>/default.
+ */
+export function resolveTmuxSocket() {
+  if (process.env.SESSION_TMUX_SOCKET) return process.env.SESSION_TMUX_SOCKET;
+  const base = process.env.TMUX_TMPDIR || process.env.TMPDIR || "/tmp";
+  const uid = typeof process.getuid === "function" ? process.getuid() : "";
+  return path.join(base, `tmux-${uid}`, "default");
+}
+
+/**
+ * Minimal KEY=VALUE parse of a session-liveness.env file (the shell file session-liveness.sh sources).
+ * Values are unquoted or double-quoted (double-quoted may contain spaces). Comments/blank lines skipped.
+ * @param {string} filePath
+ * @returns {Record<string,string>}
+ */
+export function parseEnvFileVars(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const out = {};
+  for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|([^#\s][^\s]*))\s*$/);
+    if (m) out[m[1]] = m[2] !== undefined ? m[2] : (m[3] ?? "");
+  }
+  return out;
+}
+
+/**
+ * Resolve the tmux target (`<session>[:<window>]`) for a LIVE capture of the observed layer.
+ * Precedence — EXPLICIT CONFIG, never a guess (same discipline as session-liveness.sh's
+ * "NO guess" rule):
+ *   1. INNER_BLOCKED_TMUX_TARGET env  (test/ops explicit override)
+ *   2. SESSION_TMUX_TARGET env        (session-liveness explicit target override)
+ *   3. SESSION_TMUX_SESSION env       → `<session>:<target>` role window
+ *   4. <root>/orchestration/session-liveness.env SESSION_TMUX_SESSION → `<session>:<target>`
+ * Returns null when nothing is configured ⇒ live capture unavailable; the observer fails toward
+ * "unreadable" (counter reset), NEVER toward trusting a stale snapshot.
+ * @param {string} root
+ * @param {string} [target]
+ * @returns {string|null}
+ */
+export function resolveTmuxTarget(root, target = DEFAULT_TARGET) {
+  const t = resolveTarget(target);
+  const explicit = (process.env.INNER_BLOCKED_TMUX_TARGET || process.env.SESSION_TMUX_TARGET || "").trim();
+  if (explicit) return explicit;
+  const session = (process.env.SESSION_TMUX_SESSION || "").trim()
+    || parseEnvFileVars(path.join(root, "orchestration", "session-liveness.env")).SESSION_TMUX_SESSION || "";
+  return session.trim() ? `${session.trim()}:${t}` : null;
+}
+
+/**
+ * Live pane capture via `tmux -S <socket> capture-pane -p -t <target>` — the same READ-ONLY
+ * primitive session-liveness.sh uses (line 1113). Returns the captured text, or null when tmux is
+ * absent / the socket is unreachable / the target pane does not exist.
+ * @param {string} tmuxTarget
+ * @param {{socket?: string}} [opts]
+ * @returns {string|null}
+ */
+export function capturePaneLive(tmuxTarget, { socket = resolveTmuxSocket() } = {}) {
+  const r = spawnSync("tmux", ["-S", socket, "capture-pane", "-p", "-t", tmuxTarget], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (r.status !== 0) return null;
+  return r.stdout || null;
+}
+
+/**
  * Ruling-required from the SCREEN observer — the PRIMARY trigger for reason "ruling-required"
  * (gap-ruling-required-trigger-is-dead-code-never-wired-into-any-tick).
  *
- * Reads the pane text file, classifies its BOTTOM REGION with `classifyPaneState` (a pure SHAPE
- * classifier — ADR-016 Amendment: no whole-screen equality/hash anywhere in the decision path),
- * and requires N CONSECUTIVE needs-input samples before producing a stop condition. The rolling
- * counter lives in `<root>/.quay/.ruling-observer-state.json`.
+ * Reads the pane text (from a FRESH snapshot file, or a LIVE tmux capture when the snapshot is
+ * stale/absent — gap-last-pane-txt-has-no-writer, candidate B), classifies its BOTTOM REGION with
+ * `classifyPaneState` (a pure SHAPE classifier — ADR-016 Amendment: no whole-screen equality/hash
+ * anywhere in the decision path), and requires N CONSECUTIVE needs-input samples before producing a
+ * stop condition. The rolling counter lives in `<root>/.quay/.ruling-observer-state.json`.
  *
  * Disambiguation (outer ruling 2026-08-04): a WAITING-INPUT shape counts as a needs-input sample
  * ONLY when the session is not waiting on its own background subagent / in-flight task — "waiting for
@@ -1016,33 +1113,87 @@ export async function telemetryHasInProgressTask(root) {
  * never "waiting for my subagent". Busy / error-banner / unknown are never needs-input.
  *
  * Fail-closed (AC4 priority — a false positive is the worse trade):
- *   - no `panePath` ⇒ no-op (never inferred);
- *   - missing/unreadable pane file ⇒ reset the counter, no condition;
+ *   - no `panePath` AND no resolvable tmux target ⇒ no-op (never inferred);
+ *   - missing/unreadable pane file AND live capture unavailable ⇒ reset the counter, no condition;
+ *   - STALE pane file (mtime older than `paneStaleMs`/PANE_STALENESS_MS) is UNTRUSTED — never
+ *     classified; the observer reads a LIVE capture-pane of the target pane instead (candidate B),
+ *     and if that is also unavailable ⇒ reset the counter, no condition;
  *   - busy / error-banner / unknown shapes ⇒ reset the counter, no condition;
  *   - waiting-input (no in-flight agent/task) / permission-prompt ⇒ increment; only at `samples`
  *     consecutive does a ruling-required condition emerge.
  *
- * `panePath` is EXPLICIT CONFIG. `samples` is the multi-sample consistency requirement
- * (--samples overrides it; INNER_BLOCKED_RULING_SAMPLES remains a test/ops override). `target` names
- * WHO is being observed — it selects the per-target rolling counter and the recorded taskId/question
- * (the observation primitive is direction-parameterized, AC1/AC5).
+ * `panePath` is EXPLICIT CONFIG (the A7 snapshot file). `tmuxTarget` / the env / env-file resolution
+ * is the EXPLICIT CONFIG for the LIVE fallback (never a guessed session name). `samples` is the
+ * multi-sample consistency requirement (--samples overrides it; INNER_BLOCKED_RULING_SAMPLES remains
+ * a test/ops override). `target` names WHO is being observed — it selects the per-target rolling
+ * counter and the recorded taskId/question (the observation primitive is direction-parameterized,
+ * AC1/AC5). The returned `source` field ("file" | "live") records which pane source produced the
+ * observation — the verification anchor for the dead-snapshot fix.
  *
  * @param {string} root
- * @param {{panePath?: string, nowMs?: number, samples?: number, target?: string}} [opts]
- * @returns {Promise<{state: string, confidence: number, consecutive: number, needsInput: boolean, condition: object|null}>}
+ * @param {{panePath?: string, nowMs?: number, samples?: number, target?: string, tmuxTarget?: string, liveCaptureFn?: (target: string) => string|null, paneStaleMs?: number}} [opts]
+ * @returns {Promise<{state: string, confidence: number, consecutive: number, needsInput: boolean, condition: object|null, source: string|null}>}
  */
-export async function observePaneForRuling(root, { panePath, nowMs = Date.now(), samples = RULING_REQUIRED_PANE_SAMPLES, target = DEFAULT_TARGET } = {}) {
+export async function observePaneForRuling(root, {
+  panePath,
+  nowMs = Date.now(),
+  samples = RULING_REQUIRED_PANE_SAMPLES,
+  target = DEFAULT_TARGET,
+  tmuxTarget,
+  liveCaptureFn = capturePaneLive,
+  paneStaleMs,
+} = {}) {
   const t = resolveTarget(target);
-  if (!panePath) {
-    return { state: "unobserved", confidence: 0, consecutive: 0, needsInput: false, condition: null };
+  const staleMs = Number.isFinite(paneStaleMs) ? paneStaleMs : envNonNegMs("INNER_BLOCKED_PANE_STALE_MS", PANE_STALENESS_MS);
+
+  // Decide the pane source. A FRESH snapshot file wins (the file is the explicit config). A stale or
+  // ABSENT snapshot is UNTRUSTED — the observer reads a LIVE capture-pane of the target pane instead
+  // (eliminating the dead-snapshot class: `.quay/last-pane.txt` had NO writer, so its 4h-old bytes
+  // were classified busy / never-accumulate forever). Live capture is itself explicit config (a
+  // resolvable tmux target) — never a guess; when neither a fresh file nor a live source is
+  // available the observation is "unreadable" (counter resets, no false positive on stale data).
+  let paneText = null;
+  let paneSource = null;
+  if (panePath) {
+    let st = null;
+    try {
+      st = fs.statSync(panePath);
+    } catch {
+      st = null; // absent snapshot → live capture below
+    }
+    if (st && nowMs - st.mtimeMs <= staleMs) {
+      try {
+        paneText = fs.readFileSync(panePath, "utf8");
+        paneSource = "file";
+      } catch {
+        paneText = null; // unreadable → live capture below
+      }
+    }
   }
-  let paneText;
-  try {
-    paneText = fs.readFileSync(panePath, "utf8");
-  } catch {
-    writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: nowMs }, t);
-    return { state: "unreadable", confidence: 0, consecutive: 0, needsInput: false, condition: null };
+  if (paneText == null) {
+    const liveTarget = tmuxTarget ?? resolveTmuxTarget(root, t);
+    if (liveTarget) {
+      const live = liveCaptureFn(liveTarget);
+      if (live && live.trim()) {
+        paneText = live;
+        paneSource = "live";
+      }
+    }
   }
+  if (paneText == null) {
+    if (panePath) {
+      writeRulingObserverState(root, { consecutiveNeedsInput: 0, updatedAtMs: nowMs }, t);
+    }
+    return {
+      state: panePath ? "unreadable" : "unobserved",
+      confidence: 0,
+      consecutive: 0,
+      needsInput: false,
+      condition: null,
+      source: null,
+    };
+  }
+
   const cls = classifyPaneState(paneText);
   const needsInputShape = cls.state === "waiting-input" || cls.state === "permission-prompt";
   // waiting-input is suppressed while the session is waiting on its own background agent/task;
@@ -1061,7 +1212,7 @@ export async function observePaneForRuling(root, { panePath, nowMs = Date.now(),
   writeRulingObserverState(root, { consecutiveNeedsInput: consecutive, updatedAtMs: nowMs }, t);
 
   if (consecutive < samples) {
-    return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition: null };
+    return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition: null, source: paneSource };
   }
 
   const question = cls.state === "permission-prompt"
@@ -1074,10 +1225,11 @@ export async function observePaneForRuling(root, { panePath, nowMs = Date.now(),
     evidence: [
       `pane classified ${cls.state} (confidence ${cls.confidence})`,
       `${consecutive} consecutive needs-input samples (threshold ${samples})`,
+      `pane source: ${paneSource}${paneSource === "live" ? " (snapshot stale/absent — live tmux capture)" : ""}`,
       `bottom region:\n${cls.region}`,
     ],
   };
-  return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition };
+  return { state: cls.state, confidence: cls.confidence, consecutive, needsInput, condition, source: paneSource };
 }
 
 /**
@@ -1129,7 +1281,7 @@ const usage = `inner-blocked-signal.ts — explicit "who-is-waiting" observation
 not-manager-to-outer)
 
 Usage:
-  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--transcript <path>] [--pane <path>]
+  node --experimental-strip-types inner-blocked-signal.ts --detect-stop [--root <dir>] [--target <name>] [--samples <N>] [--action <a>] [--action-command <cmd>] [--transcript <path>] [--pane <path>] [--tmux-target <target>]
   node --experimental-strip-types inner-blocked-signal.ts --assert-blocked --taskId <id> --reason <r> --question <q> [--options '<json>'] [--evidence '<json>'] [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --clear [--root <dir>] [--target <name>]
   node --experimental-strip-types inner-blocked-signal.ts --timeout [--max-age-ms N] [--root <dir>] [--target <name>]   (consumption-timeout auto-upgrade: archive a consumed-by-nobody stale block — 升级/归档)
@@ -1159,6 +1311,15 @@ hash) and, after N CONSECUTIVE waiting-input / permission-prompt samples (60s po
 latency ≤ 5min p100 budget, AC2), a ruling-required stop condition is produced. busy / error-banner /
 unknown, a missing pane file, or an explicit --clear all reset the rolling counter (AC4). Explicit
 config, never inferred.
+--tmux-target <target> — the tmux target (<session>[:<window>]) for a LIVE pane capture
+(gap-last-pane-txt-has-no-writer, candidate B). When the --pane snapshot is STALE (mtime older than
+300s) or ABSENT — the dead-snapshot defect class (.quay/last-pane.txt has NO writer) — the observer
+reads a live 'tmux capture-pane -p -t <target>' on the LIVE pane instead of the stale bytes,
+eliminating the dead-snapshot class. Precedence (explicit config, never a guess): --tmux-target > env
+INNER_BLOCKED_TMUX_TARGET / SESSION_TMUX_TARGET > SESSION_TMUX_SESSION (env or
+<root>/orchestration/session-liveness.env) resolved as <session>:<target>. When neither a fresh
+file nor a live source is available the observation is "unreadable" (counter resets — no false
+positive on stale data).
 --transcript <path> (or env INNER_BLOCKED_TRANSCRIPT) additionally enables the "ruling-required"
 composite trace (gap-the-one-condition-the-channel-was-built-for-still-has-no-trigger; INNER-LAYER
 only — ignored for non-inner targets): transcript heartbeat stale ≥30m AND a task in-progress AND a
@@ -1301,6 +1462,9 @@ export async function main(argv) {
         : undefined;
       const paneArg = getArgValue(args, "--pane");
       const panePath = paneArg ? path.resolve(paneArg) : undefined;
+      // gap-last-pane-txt-has-no-writer (candidate B): a stale/absent --pane snapshot falls back to
+      // a LIVE tmux capture-pane of this target. Explicit config (flag > env > env-file), never a guess.
+      const tmuxTargetArg = getArgValue(args, "--tmux-target") || process.env.INNER_BLOCKED_TMUX_TARGET || undefined;
       const samplesArg = getArgValue(args, "--samples");
       const envSamples = process.env.INNER_BLOCKED_RULING_SAMPLES;
       const samplesRaw = samplesArg !== undefined ? samplesArg : envSamples;
@@ -1308,8 +1472,8 @@ export async function main(argv) {
       const samples = Number.isFinite(samplesOverride) && samplesOverride >= 1
         ? Math.floor(samplesOverride)
         : RULING_REQUIRED_PANE_SAMPLES;
-      const paneObservation = panePath
-        ? await observePaneForRuling(root, { panePath, samples, target })
+      const paneObservation = (panePath || tmuxTargetArg)
+        ? await observePaneForRuling(root, { panePath, samples, target, tmuxTarget: tmuxTargetArg })
         : null;
       const found = await detectStopConditions(root, {
         transcriptPath,
@@ -1331,8 +1495,11 @@ export async function main(argv) {
           : paneObservation.needsInput
             ? "accumulating"
             : "reset";
+        // `source=file|live` names which pane source produced the observation — the verification
+        // anchor for the dead-snapshot fix (a stale .quay/last-pane.txt is no longer classified).
+        const sourceSuffix = paneObservation.source ? ` source=${paneObservation.source}` : "";
         console.log(
-          `detect-stop: pane_decision=${paneObservation.state} branch=${branch} consecutive=${paneObservation.consecutive}/${samples}`,
+          `detect-stop: pane_decision=${paneObservation.state} branch=${branch} consecutive=${paneObservation.consecutive}/${samples}${sourceSuffix}`,
         );
       }
       const reasons = found.map((c) => c.reason);
