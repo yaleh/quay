@@ -200,3 +200,17 @@ measure suite_freshness=1080x
 - `plugin/scripts/suite-state-trigger.ts` — `finishedAt` 类型 `number | string | null`。
 - `plugin/loop/orchestrator-loop-tick.md` + `plugin/loop/fast-mode-loop-tick.md` — suiteGreen 定义加新鲜度（同源防漂移）。
 - `plugin/test/integration-batch-merge.test.mjs` / `plugin/test/full-suite-runner.test.mjs` — 新测试 + 断言更新。
+
+### 外层独立复核（2026-08-09，outer dispatch 验证）
+
+执行代理（isolated worktree，fork from integration tip）独立复核：实现已由内层落地并合入 integration。
+
+- 实现提交：`bb769453`（gap-batch-merge-gate-reads-stale-green: freshness gate on the integration→develop
+  batch merge），经 `7774e8e8` fan-in 合入 integration；本任务分支 HEAD（`56a85c5a`）为 integration 祖先，含全部实现。
+- scoped gate：`bash scripts/test.sh --for-task gap-batch-merge-gate-reads-stale-green --allow-thin` → **exit 0**；
+  task-contract-check / adr016-screen-use-check / dead-code-after-return-check / drive-contract-check 均
+  `violations: 0`；97 tests pass / 0 fail。
+- 直接跑测试（无回归）：`plugin/test/integration-batch-merge.test.mjs` **31 pass / 0 fail**、
+  `plugin/test/full-suite-runner.test.mjs` **52 pass / 0 fail**、`plugin/test/suite-state-trigger.test.mjs`
+  **14 pass / 0 fail**——finishedAt epoch 规范化后全绿。
+- Contract `invoke` 行在位（`python3 -c "... print(d.get('finishedAt'))"`），self-touch 在位。
