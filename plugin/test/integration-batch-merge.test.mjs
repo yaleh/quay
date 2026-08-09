@@ -800,7 +800,10 @@ test("REVERSE-EDGE contract measure: --merge --integration-authoritative 'orches
 // Build an FF-able two-line repo (develop at base, integration = base + one fan-in committed at a
 // CONTROLLED epoch) so the freshness gate's COVERAGE axis is deterministic (git commit dates are
 // otherwise "now" and would race the suite times the test writes).
-function freshnessRepo(prefix, fanInEpochSec) {
+// `docOnly` makes the fan-in touch ONLY .md/.jsonl files (the doc-only-exemption shape — the
+// observed phase-goal / SPEC-goal-store / SPEC-edit commits); `codeFile` makes it add a real code
+// file (feature.ts) instead. The default keeps the historical `int-only.txt` fan-in.
+function freshnessRepo(prefix, fanInEpochSec, { docOnly = false, codeFile = false } = {}) {
   const dir = makeTmp(prefix);
   initGitRepo(dir);
   mkdirSync(join(dir, "orchestration"), { recursive: true });
@@ -809,7 +812,16 @@ function freshnessRepo(prefix, fanInEpochSec) {
   gitCmd(dir, "branch", "-M", "master");
   gitCmd(dir, "checkout", "-q", "-b", "develop");
   gitCmd(dir, "checkout", "-q", "-b", "integration");
-  writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
+  if (docOnly) {
+    // The doc-only fan-in: .md + .jsonl only — the phase-goal / SPEC-goal-store / SPEC-edit shape.
+    writeFileSync(join(dir, "orchestration", "tick-log.md"), "tick int doc\n", "utf8");
+    writeFileSync(join(dir, "orchestration", "SPEC-goal-store.md"), "SPEC update\n", "utf8");
+    writeFileSync(join(dir, "orchestration", "events.jsonl"), '{"event":1}\n', "utf8");
+  } else if (codeFile) {
+    writeFileSync(join(dir, "feature.ts"), "export const x = 1;\n", "utf8");
+  } else {
+    writeFileSync(join(dir, "int-only.txt"), "int only\n", "utf8");
+  }
   const env = {
     ...process.env,
     GIT_AUTHOR_DATE: new Date(fanInEpochSec * 1000).toISOString(),
@@ -904,6 +916,94 @@ test("FRESHNESS GATE (coverage axis): a fresh green (within window) that did NOT
     assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
     assert.match(r.stderr, /a fan-in landed on integration after the suite started/);
     assert.match(r.stdout, /measure suite_freshness=3\d/, "age ≈ 30s, within the window — the coverage axis is what blocks");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── FRESHNESS GATE DOC-ONLY EXEMPTION (gap-batch-merge-freshness-gate-doc-only-exemption) ───────────
+//
+// 3 consecutive doc-only blocks (rounds 153/157/158 — manager AC35 phase-goal →
+// orchestration/manager-phase-goal.md, MILESTONE-NNN adjudication → orchestration/SPEC-goal-store.md,
+// ongoing manager SPEC edits → orchestration/*.md) each cost a 17-min full-suite re-run: the batch
+// merge ran green on the integration tip, a DOC-ONLY commit landed after the suite started, and the
+// coverage axis fail-closed because the gate could not distinguish doc from code. The fix: when the
+// fan-in(s) after the suite started touch ONLY .md/.jsonl files (which cannot change the test
+// surface), the coverage axis is EXEMPT — the merge proceeds without a re-run. A fan-in touching ANY
+// other file type (a code file) is NOT exempt — fail-closed exactly as before (negative control, AC3).
+
+test("FRESHNESS GATE (doc-only exemption, AC2): a fan-in that landed after the suite started but touches ONLY .md/.jsonl ⇒ EXEMPT — no re-run, develop fast-forwards", () => {
+  const now = Math.floor(Date.now() / 1000);
+  // The observed shape: suite green on the integration tip, then a doc-only fan-in (phase-goal/SPEC
+  // edit) landed AFTER the suite started. The AGE (finished 30s ago) + SCOPE (main) axes pass; the
+  // COVERAGE axis would block — but the pending content is doc-only (.md/.jsonl), so the exemption
+  // applies and the merge proceeds WITHOUT a re-run.
+  const dir = freshnessRepo("fsd1", now - 60, { docOnly: true });
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `a doc-only fan-in after the suite start must be exempt: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /DOC-ONLY EXEMPT/);
+    assert.match(r.stdout, /freshness-gate DOC-ONLY EXEMPT/);
+    assert.match(r.stdout, /measure suite_freshness=\d+/);
+    assert.match(r.stdout, /fast-forwarded to integration/);
+    // Develop advanced to the integration tip; integration absorbed.
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "0");
+    assert.equal(gitCmd(dir, "show", "develop:orchestration/SPEC-goal-store.md").stdout, "SPEC update\n");
+    assert.equal(gitCmd(dir, "show", "develop:orchestration/events.jsonl").stdout, '{"event":1}\n');
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (doc-only exemption, AC2 negative control): a fan-in that landed after the suite started and touches a CODE file ⇒ NOT exempt ⇒ BLOCKED, nothing moved", () => {
+  const now = Math.floor(Date.now() / 1000);
+  // The negative control: a real code file (feature.ts) in the pending fan-in — the exemption must
+  // NOT apply, the coverage axis fails closed exactly as before.
+  const dir = freshnessRepo("fsd2", now - 60, { codeFile: true });
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "a code-touching fan-in after the suite start must still block");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /a fan-in landed on integration after the suite started/);
+    assert.ok(!/DOC-ONLY EXEMPT/.test(r.stdout), "a code-touching fan-in must NOT be exempt");
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (doc-only exemption, dry-run): --dry-run on a doc-only fan-in reports the exemption and does NOT report a would-block (no ref moved)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fsd3", now - 60, { docOnly: true });
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    assert.equal(r.status, 0, "dry-run of a doc-only-exempt batch merge must not fail");
+    assert.match(r.stdout, /DOC-ONLY EXEMPT/);
+    assert.ok(!/WOULD fail closed/.test(r.stdout), "a doc-only exempt merge must not report a would-block");
+    assert.ok(!/FRESHNESS-GATE FAIL-CLOSED/.test(r.stderr), "no fail-closed verdict for an exempt merge");
+    // No ref moved (dry-run).
     assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
     assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
   } finally {

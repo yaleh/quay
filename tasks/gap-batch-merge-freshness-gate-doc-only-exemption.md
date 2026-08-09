@@ -36,18 +36,43 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 3 次 doc-only 挡实例（phase-goal / SPEC-goal-store / 持续 SPEC 编辑）+ 每次重跑 17min 成本（本任务 Proposal 已含；内层补构造：doc-only 提交 vs 代码提交各一次）
-- [ ] AC2: **doc-only 豁免**——freshness gate 检查未测提交是否全 doc-only（`git diff --name-only` 全 `.md`/`.jsonl`）⇒ 豁免不重跑
-- [ ] AC3: **代码提交不豁免**——含任一代码文件 ⇒ 仍 fail-closed（负控制）
-- [ ] AC4: **--skip 语义不混淆**——现有 `--skip-freshness-gate` 调用方（OTHER gates 隔离）不受影响
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（integration-batch-merge 相关测试）
+- [x] AC1: **复现固化**——任务体记录 3 次 doc-only 挡实例（phase-goal / SPEC-goal-store / 持续 SPEC 编辑）+ 每次重跑 17min 成本（本任务 Proposal 已含；内层补构造：doc-only 提交 vs 代码提交各一次 —— `plugin/test/integration-batch-merge.test.mjs` 新增 `fsd1`（doc-only fan-in）与 `fsd2`（code fan-in）两个 fixture）
+- [x] AC2: **doc-only 豁免**——freshness gate 检查未测提交是否全 doc-only（`git diff --name-only` 全 `.md`/`.jsonl`）⇒ 豁免不重跑（`check_freshness_gate` COVERAGE 轴接入 `pending_is_doc_only()`）
+- [x] AC3: **代码提交不豁免**——含任一代码文件 ⇒ 仍 fail-closed（负控制：`fsd2` 代码 fan-in 测试 + 既有 `fsa3` .txt fan-in 测试均仍挡）
+- [x] AC4: **--skip 语义不混淆**——现有 `--skip-freshness-gate` 调用方（OTHER gates 隔离）不受影响（merge-mechanics 测试全绿，skip 分支在 gate 顶部、原样保留）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（integration-batch-merge 相关测试 34/34 绿，exit 0，violations: 0）
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：doc-only 提交骑绿通过（不重跑）、代码提交仍挡（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
-- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：doc-only 提交骑绿通过（不重跑）、代码提交仍挡（贴任务体）——见下方 Evidence（inner 2026-08-09）
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）——34/34 绿（既有 31 + 新增 3），exit 0，violations: 0
+- [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——**外层 verification-round 验证**（inner 只跑 scoped 门；全量套件由外层在集成后实跑）
+
+## Evidence (inner 2026-08-09)
+
+**构造**：两个 self-contained 临时 git 仓库（integration fan-in 提交在 suite 起点后，`scope: main`、green、finished 30s 前）。doc-only fan-in 改 `orchestration/tick-log.md` + 新增 `orchestration/SPEC-goal-store.md` + `orchestration/events.jsonl`；code fan-in 新增 `feature.ts`。
+
+**doc-only invoke（--dry-run）**：
+```
+$ bash plugin/scripts/integration-batch-merge.sh --root <ws> --develop develop --integration integration --dry-run
+integration-batch-merge: measure unmerged_develop_files=0
+integration-batch-merge: freshness-gate DOC-ONLY EXEMPT — the fan-in(s) after the suite started touch only .md/.jsonl (doc-only); the green still covers the test surface — no re-run needed
+integration-batch-merge: measure suite_freshness=31
+integration-batch-merge: FF-OK — integration is a descendant of develop
+（exit 0；grep -c "FRESHNESS-GATE FAIL-CLOSED" = 0 → Contract band doc_only_merge_passes = 0 满足）
+```
+
+**code invoke（--dry-run / real）**：
+```
+$ bash plugin/scripts/integration-batch-merge.sh --root <ws> --develop develop --integration integration --dry-run
+integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: a fan-in landed on integration after the suite started … the green did NOT test the pending tip
+
+$ bash plugin/scripts/integration-batch-merge.sh --root <ws> --develop develop --integration integration
+integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — a fan-in landed on integration after the suite started …; nothing moved（exit 1）
+```
+
+**scoped gate**：`bash scripts/test.sh --for-task gap-batch-merge-freshness-gate-doc-only-exemption --allow-thin` → exit 0，34/34 绿，所有 scoped static checker `violations: 0`（含 task-contract-check strict-subset）。
 
 ## Touches
 
