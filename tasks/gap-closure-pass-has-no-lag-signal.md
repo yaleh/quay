@@ -32,18 +32,31 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 8.5h 停跑实证（outer:close 时间序列 + not-yet-flipped 42/51）+ AC23 只验 tick 不验步骤（本任务 Proposal 已含）
-- [ ] AC2: **closure-lag 信号**——not-yet-flipped 超阈值或 closure-pass 超时未跑 ⇒ 机械信号（WARN/事件）报出
-- [ ] AC3: **执行可验证**——closure-pass 每次执行留痕（时间戳 + 翻转数），消费方可查
-- [ ] AC4: **1b 不随红窗停**——文档明确收尾不受套件状态门控；红窗期间照常收尾（或机械强制）
-- [ ] AC5: **既有机制不回归**——ready-pool-check / closure 相关测试全绿（`--for-task` scoped）
+- [x] AC1: **复现固化**——任务体记录 8.5h 停跑实证（outer:close 时间序列 + not-yet-flipped 42/51）+ AC23 只验 tick 不验步骤（本任务 Proposal 已含）
+- [x] AC2: **closure-lag 信号**——not-yet-flipped 超阈值或 closure-pass 超时未跑 ⇒ 机械信号（WARN/事件）报出。落地 `plugin/scripts/closure-lag-check.sh`：退出码即信号（0 静默 / 1 报出 / 2 错误）。**实跑（2026-08-09 实现后，本 worktree 真实现场）**：`bash plugin/scripts/closure-lag-check.sh` → `CLOSURE-LAG-WARN: closure-pass-never-ran with 22 task(s) awaiting closure`，`exit=1`（当前 22 个 not-yet-flipped、无留痕 ⇒ 信号报出——正是 8.5h 静默缺陷类）。注入高 not-yet-flipped / 停跑 closure-pass ⇒ 报出；正常 ⇒ 静默，见 DoD 实跑注。
+- [x] AC3: **执行可验证**——closure-pass 每次执行留痕（时间戳 + 翻转数），消费方可查。`closure-lag-check.sh --record --flipped <N>` 写 `.quay/closure-pass-last-run.json`（`{ranAt, flipped, at}`，gitignored 运行时态）；消费方（measure / monitor）对比间隔。测试 `plugin/test/closure-lag-check.test.mjs` AC3 用例验证写入 + 读出。
+- [x] AC4: **1b 不随红窗停**——文档明确收尾不受套件状态门控；红窗期间照常收尾（或机械强制）。`plugin/loop/orchestrator-loop-tick.md` + `orchestration/orchestrator-loop-tick.md` 的 1b 顶部新增「**1b 不随红窗停（AC4）**」段：`state: red` 停的是派发与合并推进，**不停收尾**；红窗期间照常跑收尾例程；「dirty-tree 顾虑」不构成延后收尾的理由。
+- [x] AC5: **既有机制不回归**——ready-pool-check / closure 相关测试全绿（`--for-task` scoped）。`bash scripts/test.sh --for-task gap-closure-pass-has-no-lag-signal --allow-thin` → 通过（详见 DoD）；新增 `plugin/test/closure-lag-check.test.mjs` 8/8 绿，复用现有 ready-pool-check 探测（未改其实现）。
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：注入高 not-yet-flipped / 停跑 closure-pass ⇒ 信号报出；正常跑 ⇒ 静默（贴任务体）
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [x] AC1–AC5 全部勾上
+- [x] 修后实跑：注入高 not-yet-flipped / 停跑 closure-pass ⇒ 信号报出；正常跑 ⇒ 静默（贴任务体）
+      **实跑（2026-08-09，`bash plugin/scripts/closure-lag-check.sh`，temp workspace + 本 worktree 现场）**：
+      - **本 worktree 真实现场**（22 not-yet-flipped、无留痕）：`CLOSURE-LAG-WARN: closure-pass-never-ran
+        with 22 task(s) awaiting closure`，`exit=1`——**停跑（从未留痕）⇒ 报出**。
+      - **注入高 not-yet-flipped（> 阈值）**：temp workspace 2 个 all-ACs-checked ready 任务，
+        `--threshold 1` → `CLOSURE-LAG-WARN: ... not-yet-flipped=2 > threshold=1`，`exit=1`。
+      - **停跑 closure-pass（留痕超时）**：写旧留痕 `ranAt = now-5000s`，`--timeout 1` →
+        `CLOSURE-LAG-WARN: ... closure-pass-overdue`，`exit=1`。
+      - **正常跑 ⇒ 静默**：`--record --flipped 2` 留痕后，1 not-yet-flipped ≤ 阈值 30 →
+        `closure-lag-check: ok (not-yet-flipped=1 ≤ threshold=30; closure-pass fresh)`，`exit=0`。
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
+      `bash scripts/test.sh --for-task gap-closure-pass-has-no-lag-signal --allow-thin`：scoped
+      static checks 全 PASS（`violations: 0`），新增 `plugin/test/closure-lag-check.test.mjs` 8/8 绿，
+      `EXIT=0`（task-contract-check 对任务文件 `--strict-subset` 通过）。
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+      （本 task 在隔离 worktree 实现，全量套件由外层 verification-round 在本分支合入 integration 后验证）
 
 ## Touches
 
