@@ -115,15 +115,21 @@ test("--group product runs a product fixture; product has no skip block", () => 
 
 test("AC7: an undeclared file defaults to engine in --list-groups", () => {
   const tempFile = join(repoRoot, "plugin", "test", "zz-runner-grouping-undeclared.test.mjs");
-  rmSync(tempFile, { force: true }); // a stale copy leaked by a file-level cancel (finally is skipped) must not skew the +1 baseline or trip the policy checker
-  const before = parseGroups(runTestSh("--list-groups"));
+  rmSync(tempFile, { force: true }); // a stale copy leaked by a file-level cancel (finally is skipped) must not skew the membership check or trip the policy checker
   try {
     writeFileSync(tempFile, 'import { test } from "node:test";\ntest("und", () => {});\n');
-    const after = parseGroups(runTestSh("--list-groups"));
-    // Relationship: one undeclared file → exactly +1 engine and +1 total. No absolute count.
-    assert.equal(after.engine, before.engine + 1, "undeclared file should count as engine");
-    assert.equal(after.total, before.total + 1);
-    assert.equal(after.product, before.product, "undeclared file must not touch product");
+    // DIRECT membership, not a before/after count delta
+    // (gap-runner-grouping-ac7-nested-spawn-load-flake): the OLD form took a `--list-groups`
+    // snapshot before + after creating the temp file and asserted engine grew exactly +1. That
+    // delta is fragile to a CONCURRENT tree mutation landing between the two snapshots — round-168
+    // red: a fan-in merged a new engine test file mid-test, so engine grew +2, not +1 (the test
+    // itself was fine; the delta saw someone else's addition). Membership is the real contract:
+    // the undeclared temp file is CLASSIFIED engine (listed under --group engine --list-files),
+    // and NOT product. A concurrent addition of an unrelated file cannot un-list it.
+    const engineFiles = runTestSh("--group", "engine", "--list-files").trim().split("\n").filter(Boolean);
+    assert.ok(engineFiles.includes(tempFile), `undeclared file should be classified engine (listed under --group engine --list-files): ${tempFile}\nengine files: ${engineFiles.length}`);
+    const productFiles = runTestSh("--group", "product", "--list-files").trim().split("\n").filter(Boolean);
+    assert.ok(!productFiles.includes(tempFile), "undeclared file must not be classified product");
   } finally {
     if (existsSync(tempFile)) rmSync(tempFile);
   }
