@@ -25,5 +25,15 @@ extra:
 
 全文见 git 历史（`git log -p -- tasks/DIR-124-F-learn.md`）。
 
+## Proposal
+
+Close the loop: when PlanCheck returns a `grounded-fact-gap` finding (per F-plancheck's typed
+classification), mechanically promote it into the GroundTruthRegistry (F-core) with a version bump.
+The promotion is mechanically validated (category whitelist, duplicate exact-match, non-blocking on
+failure). An already-registered fact that appears as a PlanCheck finding is an injection defect
+(registry fact not reaching PlanAuthor prompt), not a new discovery.
+
+Depends on DIR-124-F-core (registry CLI) and DIR-124-F-plancheck (typed findings). 1 mechanism.
+
 ## Touches
 - tasks/DIR-124-F-learn.md（自身文件）

@@ -1,15 +1,15 @@
 ---
 id: gap-b-machine-periodic-push-backup-to-bare-repo
 title: "B machine periodic push backup — low-frequency cron (every 10-15 min)
-  running git push to ~/work/quay-sync.git, PURELY to prevent single-point
-  loss (B's commits exist only on B's disk; disk death = work gone, incl new
-  SKILL.md + test file); NARROW scope: periodic commit backup ONLY — does NOT
-  involve claiming/authority/conflict-resolution (those stay in
+  running git push to ~/work/quay-sync.git, PURELY to prevent single-point loss
+  (B's commits exist only on B's disk; disk death = work gone, incl new SKILL.md
+  + test file); NARROW scope: periodic commit backup ONLY — does NOT involve
+  claiming/authority/conflict-resolution (those stay in
   gap-two-machine-collaboration); B has the remote already (just never pushed);
   executor: manager on B (has context) or B's outer (one-line cron); verified
   2026-08-05: no narrow task exists, only mentioned within the larger claiming
   design — this should NOT wait for the claiming mechanism"
-status: needs-human
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -54,6 +54,9 @@ remote，只是从未用过。
 - [x] AC3: 范围窄——未触碰认领/权威/冲突逻辑（grep 无相关改动）
   - 分支 diff 中 claim-task.sh / release-task.sh / 认领相关文件零改动（grep 证据见文末）。
   - 「AC3 control」测试证明备份在 claim marker 存在时仍不覆盖它（git 非快进保护——认领互斥不被备份破坏）。
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：superseded in body (2026-08-06): replaced by gap-cross-machine-sync-has-no-mechanism-only-manual-pushes, which covers all intent and bans system crontab (AC6).）**
+全文见 git 历史（`git log -p -- tasks/gap-b-machine-periodic-push-backup-to-bare-repo.md`）。
 
 ## Touches
 - plugin/scripts/periodic-push-backup.sh（new：备份机制脚本）

@@ -30,5 +30,18 @@ Build/read-only audit shards/deterministic Reconcile）**未证明**，缺口移
 
 全文见 git 历史（`git log -p -- tasks/DIR-119-C.md`），含完整的 Audit disposition 记录。
 
+## Proposal
+
+Provide the non-self-referential wiring proof for DIR-119-A/B. From a cold runtime generation
+materialized after both implementations land, run the normal task pool through the new SELECT.
+SELECT—not a human after selection—must synthesize, score, prepare, and choose a valid composite
+containing at least three real tasks. Execute it through the installed arbitrary-width workflow,
+read-only audit shards, deterministic reconciliation, gates, and atomic Land, then independently
+audit primary artifacts and accounting.
+
+The ≥3 requirement proves removal of the former two-task design assumption; it is a proof threshold,
+not a production cardinality cap. If the real pool has no admissible ≥3-task group, leave this child
+`todo`/`awaiting-real-composite-proof` rather than force unrelated tasks together.
+
 ## Touches
 - tasks/DIR-119-C.md（自身文件）

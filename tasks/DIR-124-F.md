@@ -32,5 +32,16 @@ ProposalReview/PlanCheck，本任务群的注入点不复存在。
 
 全文见 git 历史（`git log -p -- tasks/DIR-124-F.md`）。
 
+## Proposal
+
+Mechanize the recurring "grounded facts" problem: PlanAuthor/PlanCheck repeatedly fail on
+the SAME repo-runtime-contract facts (CLI binary path, Node coverage output format, Touches
+matching rules, provider runtime defaults, shared-module signatures), each task paying a
+failed-PlanCheck-round + per-task grounding-fact fix. Build a **versioned, hash-bound
+`GroundTruthRegistry`** of repo-invariant facts that `prepare-milestone.js` injects into the
+PlanAuthor and PlanCheck prompts, and a **learning loop** that promotes `grounded-fact-gap`
+PlanCheck findings into the registry (with a version bump) so a fact is never re-discovered
+by a later task.
+
 ## Touches
 - tasks/DIR-124-F.md（自身文件）

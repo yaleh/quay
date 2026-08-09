@@ -29,5 +29,15 @@ control rules。Proposal 明确依赖 [[DIR-124-C]] 的 kernel——DIR-124-C �
 
 全文见 git 历史（`git log -p -- tasks/DIR-124-D.md`）。
 
+## Proposal
+
+Move stable task routing, required gates, test profiles, audit profiles, learning barriers, and
+resource claims out of workflow prompts into one versioned execution-policy registry consumed by
+the [[DIR-124-C]] kernel. Cut over production callers, then delete or reduce superseded
+workflow/OUTER-LOOP representations.
+
+This is a subtractive crystallization task. Creating a registry while retaining all old prompt
+branches as independently maintained truth fails the directive.
+
 ## Touches
 - tasks/DIR-124-D.md（自身文件）

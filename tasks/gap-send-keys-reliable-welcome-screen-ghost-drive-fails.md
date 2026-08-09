@@ -5,7 +5,7 @@ title: "send-keys-reliable pane-empty check fails on welcome-screen ghost text
   fail-loud) — the TRUE root of watchdog 11:40 drive failure; NBSP fix (11:46
   sync) doesn't cover it; fix: fresh-session (no transcript/zero user msgs)
   skips clear-loop, sends directly (archguard manual seq proven)"
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -108,6 +108,9 @@ scoped check: run_checker "adr016-screen-use-check" … PASS: active whole-scree
 - [ ] fresh welcome 屏实测：send-keys-reliable 跳过清屏直接发送，rc=0，transcript 出现驱动文本的 user 消息（AC1/AC4 实跑输出贴任务体）
 - [ ] 正常空框（`❯`+NBSP）仍走 NBSP 清屏路径，rc=0（AC2 不回归，实跑输出贴任务体）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：fix a75dde7e landed on integration+develop; AC1-AC3 verified with real fresh-session + active-session evidence (28 scoped tests pass); AC4 is a live watchdog-relaunch verification the outer runs, not a human decision.）**
+全文见 git 历史（`git log -p -- tasks/gap-send-keys-reliable-welcome-screen-ghost-drive-fails.md`）。
 
 ## Touches
 - tasks/gap-send-keys-reliable-welcome-screen-ghost-drive-fails.md（自身文件：勾 AC + 贴 invoke 证据授权）

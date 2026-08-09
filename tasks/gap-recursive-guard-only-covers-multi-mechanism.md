@@ -1,8 +1,8 @@
 ---
 id: gap-recursive-guard-only-covers-multi-mechanism
-title: "split-recursive-guard only fires for split-multi-mechanism — a depth-2+
-  leaf triggering any other split code still auto-splits"
-status: needs-human
+title: split-recursive-guard only fires for split-multi-mechanism — a depth-2+
+  leaf triggering any other split code still auto-splits
+status: done
 labels:
   - gap
   - defect
@@ -98,6 +98,9 @@ would fire on every deep task even when no split is warranted.
 - [ ] `_splitCheck()` in both `prepare-milestone.js` mirrors matches
 - [ ] Tests cover AC1-AC5; existing `checkSplitRecommendation` tests still pass
 - [ ] `scripts/test.sh` green
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：AC7's carrier prepare-milestone.js physically deleted under ADR-022; guard hoist itself landed (proposal-convergence.ts L226-234, AC1-AC6 tests pass); zero-caller wiring gap tracked separately in gap-checksplitrecommendation-preserved-by-adr-022-but-never-wired-into-fast-mode.）**
+全文见 git 历史（`git log -p -- tasks/gap-recursive-guard-only-covers-multi-mechanism.md`）。
 
 ## Touches
 

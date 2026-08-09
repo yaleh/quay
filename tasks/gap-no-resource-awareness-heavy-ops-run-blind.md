@@ -2,7 +2,7 @@
 id: gap-no-resource-awareness-heavy-ops-run-blind
 title: Heavy operations run blind to CPU/memory — measured 4.25x
   oversubscription and swap is 0, so OOM is a cliff
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -342,6 +342,9 @@ gate 的作用不是让测试更快，是让「现在能不能跑」成为一个
 外层同时在跑核实命令——两层都在目测且互为负载源。现在 `scripts/test.sh` 与两个 tick 文件都调用
 同一个 gate：同一套 `/proc/pressure/cpu` 读数、同一个 `pgrep -xc node-MainThread`、同一个
 `free -m` available。WAIT 的「原因」是打印出来的数字，不是各自脑中的印象。
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：re-open AC12-17 landed: full-suite-runner.ts laneCount nproc-derived with replace-splice + resource-gate (commits 264ef5b9/916b1feb), resource-gate.sh exists, scripts/test.sh consults it on default path, CLAUDE.md documents budget-aware derivation.）**
+全文见 git 历史（`git log -p -- tasks/gap-no-resource-awareness-heavy-ops-run-blind.md`）。
 
 ## Touches
 - tasks/gap-no-resource-awareness-heavy-ops-run-blind.md（自身文件：勾 AC + 贴 invoke 证据授权）

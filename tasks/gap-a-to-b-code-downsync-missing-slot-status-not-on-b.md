@@ -1,8 +1,16 @@
 ---
 id: gap-a-to-b-code-downsync-missing-slot-status-not-on-b
-
-title: "NO A→B code downsync mechanism — B machine is running stale quay code and re-enters A's earlier blind spot (--slot-status missing on B: grep -c slot-status B's fast-mode-telemetry.ts=0, B telemetry shows 5 in-flight brackets indistinguishable real vs stale, no tool to verify; A resolved this exact blind spot hours ago via --slot-status/gap-telemetry-brackets; AC15 criterion ③ only covers B→A BACKUP direction (quay-sync.git = B pushes to A), NO A→B code downsync; manager B-machine measurement 2026-08-06 04:1xZ; SAME CLASS as archguard config-preserving (improved mechanisms don't reach running downstream) but DIFFERENT mechanism (repo-layer cross-machine sync vs install-layer upgrade), filed separately + cross-ref"
-status: needs-human
+title: "NO A→B code downsync mechanism — B machine is running stale quay code
+  and re-enters A's earlier blind spot (--slot-status missing on B: grep -c
+  slot-status B's fast-mode-telemetry.ts=0, B telemetry shows 5 in-flight
+  brackets indistinguishable real vs stale, no tool to verify; A resolved this
+  exact blind spot hours ago via --slot-status/gap-telemetry-brackets; AC15
+  criterion ③ only covers B→A BACKUP direction (quay-sync.git = B pushes to A),
+  NO A→B code downsync; manager B-machine measurement 2026-08-06 04:1xZ; SAME
+  CLASS as archguard config-preserving (improved mechanisms don't reach running
+  downstream) but DIFFERENT mechanism (repo-layer cross-machine sync vs
+  install-layer upgrade), filed separately + cross-ref"
+status: done
 labels:
   - gap
   - defect
@@ -50,6 +58,9 @@ incremental-upgrade）同类——「改进的机制不会自动到达已在跑�
        A→B 下行方向
 - [ ] AC4: 与 gap-quay-init-config-preserving-incremental-upgrade 交叉标注——同族（改进机制不到达
        下游）不同机制（仓库层 vs 安装层）
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：withdrawn in body (2026-08-06): frame corrected, narrow A→B downsync superseded by gap-two-peer-quay-developers-continuous-bidirectional-merge.）**
+全文见 git 历史（`git log -p -- tasks/gap-a-to-b-code-downsync-missing-slot-status-not-on-b.md`）。
 
 ## Touches
 

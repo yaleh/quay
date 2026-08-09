@@ -23,5 +23,19 @@ extra:
 
 全文见 git 历史（`git log -p -- tasks/DIR-124-F-core.md`）。
 
+## Proposal
+
+Build a versioned, hash-bound `GroundTruthRegistry`: a checked-in JSON data file
+(`experiments/quay-perpetual-stream/scripts/ground-truth-registry.json`, byte-identical mirror at
+`plugin/scripts/ground-truth-registry.json`) and a TS CLI module (`ground-truth-registry.ts`)
+owning the registry shape, validation, versioning, hashing, and promotion. Seed from the 8
+sections of `docs/references/repo-ground-truth.md` with the M205 correction applied (the false §3
+first bullet about parenthetical-backtick-breaking is REPLACED with the corrected fact: the real
+`preflight-touches-mismatch` cause is an undeclared Plan `- Files:` line).
+
+Merged from original DIR-124-F1 (template hygiene gate), F3 (touches coverage), F4 (fact-class
+reconciliation), and F5 (seed integrity) — all are aspects of ONE mechanism: a single-source
+registry of repo-invariant facts with a CLI surface.
+
 ## Touches
 - tasks/DIR-124-F-core.md（自身文件）

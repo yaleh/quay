@@ -34,5 +34,37 @@ outer 的详细 needs-human 裁定（逐条核实了 `concurrent-batch-scheduler
 
 全文见 git 历史（`git log -p -- tasks/DIR-119-D.md`）。
 
+## Proposal
+
+Close, as literal callable production code, the execution-side gaps that DIR-119-B deliberately
+left as tested-but-uninvoked contract modules and that DIR-119-C's real canary run neither
+delivered nor (in its independent audit) checked for. **Split 2026-07-29 (DIR-026
+SPLIT-OR-COMMIT)**, after a real `prepare-milestone.js` `ProposalReview` run against this task's
+own (already wiring-coverage-complete, schema-passing) Proposal returned
+`needs-human`/`split-recommended` with code `split-multi-mechanism` ("candidate contains 5
+independently landable mechanisms (> 2)") — a real, mechanically-detected structural finding, not
+an infrastructure fault (the same run also caught 3 genuine content defects in this task's own
+prior text: a self-contradicting `select-preflight.js` "both wrappers" AC item, a missing
+`## Touches` entry for the file the Proposal itself said it would edit, and a stale
+`## Requested action` block written before the reconciled Proposal's actual fusion-not-isolation
+mechanism existed).
+
+Parent completion is exactly the completion of DIR-119-D1 through DIR-119-D5, in that dependency
+order:
+
+1. [[DIR-119-D1]] — real manifest phase/shard synthesis (`composite-manifest-synthesis.ts`) at the
+   SELECT/dispatch boundary. No dependencies within this split.
+2. [[DIR-119-D2]] — Build becomes a real phase-DAG dispatcher (`composite-build.ts`). Depends on D1.
+3. [[DIR-119-D3]] — Audit becomes per-shard, mechanically-enforced read-only dispatch
+   (`composite-audit.ts`). Depends on D1, D2.
+4. [[DIR-119-D4]] — literal Reconcile phase as sole composite state writer, plus the Gate-failure
+   attribution fix (`composite-reconcile.ts`). Depends on D1, D2, D3.
+5. [[DIR-119-D5]] — Land as an atomic transaction validator (`composite-land.ts`), the single real
+   end-to-end pipeline proof, and the fresh independent wiring audit DIR-119-D's own Requested
+   action item 9 requires. Depends on D1 through D4 all being `done`.
+
+This parent is not independently SELECTable — each child carries its own full Proposal/Plan/AC/DoD
+and is dispatched (prepared + executed) on its own.
+
 ## Touches
 - tasks/DIR-119-D.md（自身文件）

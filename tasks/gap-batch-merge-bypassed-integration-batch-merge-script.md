@@ -5,7 +5,7 @@ title: 批量合 integration→develop 绕过了
   06:08:19 reset 完成的，而脚本头部自述 REF-LEVEL（git update-ref CAS / 临时 worktree
   merge），绝不碰主检出工作树；绕过路径丢掉脚本全部保护：CAS、共享文件冲突自动解、 真代码冲突
   fail-closed（author/committer 同 Yale Huang，三个 agent 同身份无法区分，不猜是谁）
-status: needs-human
+status: done
 labels:
   - gap
   - defect
@@ -76,6 +76,9 @@ resume 若中断，先跑 measure 确认 reflog 形态，不要假设已修
 ## Definition of Done
 
 - [ ] AC1-AC3 实跑输出贴任务体（reflog 对照：绕过路径 vs 脚本路径）
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：withdrawn in body (2026-08-08): reflog 'reset: moving to HEAD' is a legitimate REF-LEVEL update-ref side effect, not a manual bypass; batch merges do go through integration-batch-merge.sh. Premise disproven.）**
+全文见 git 历史（`git log -p -- tasks/gap-batch-merge-bypassed-integration-batch-merge-script.md`）。
 
 ## Touches
 - plugin/scripts/integration-batch-merge.sh（或调用侧：批量合必须走脚本的机械检查）

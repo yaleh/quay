@@ -3,7 +3,7 @@ id: gap-the-token-measures-the-wait-and-throws-it-away
 title: The token already computes waited_ms and prints it to stdout, where it
   evaporates — so the halt-or-not decision its own header deferred cannot be
   made
-status: needs-human
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -156,6 +156,9 @@ resume 先落盘既有的 waited_ms，再谈 halt 与否
 - [ ] 完整套件连跑 2 次全绿（**判据是 `fail 0` 且 `cancelled 0`**）
 - [ ] 任务体记录：**`heavy-op-token.sh:61` 早就写明「先让饥饿可观测，策略决定往后放」**——
       **而那个策略决定（halt 与否）今天被问到了，答不出来，因为观测被打到 stdout 然后蒸发**
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：carrier deleted by human ruling: heavy-op-token.sh retired in commit 2f9d4575 (2026-08-06); heavy-op token mechanism removed, no waited_ms/ACQUIRED persistence exists anywhere.）**
+全文见 git 历史（`git log -p -- tasks/gap-the-token-measures-the-wait-and-throws-it-away.md`）。
 
 ## Touches
 - tasks/gap-the-token-measures-the-wait-and-throws-it-away.md（自身文件：勾 AC + 贴 invoke 证据授权）

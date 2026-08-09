@@ -1,7 +1,17 @@
 ---
 id: gap-dispatch-fork-does-not-read-config-fork-baseline
-title: "dispatch fork action does NOT read config's fork_baseline — task/gap-supervisor-base-layer created 07:10:11 (AFTER fork_baseline:develop landed in .quay/config.yml at 07:09:43) still forked from master: git rev-list develop..branch = 49, intersection with develop..master = 49 (100% on master line, structural proof not merge-base); develop still frozen at 926d771b, master ahead 52; inner's fan-in note 'config activation deferred to outer (stale-baseline timing risk, gitignored human-owned file)' — fork fell back to master WITHOUT re-reading the now-active config; manager 3-step measurement 2026-08-06: config effective ≠ call-site changed, same class as hardcode-master's own finding; only next dispatch can confirm scope (one-branch timing vs fork-never-reads-config)"
-status: needs-human
+title: "dispatch fork action does NOT read config's fork_baseline —
+  task/gap-supervisor-base-layer created 07:10:11 (AFTER fork_baseline:develop
+  landed in .quay/config.yml at 07:09:43) still forked from master: git rev-list
+  develop..branch = 49, intersection with develop..master = 49 (100% on master
+  line, structural proof not merge-base); develop still frozen at 926d771b,
+  master ahead 52; inner's fan-in note 'config activation deferred to outer
+  (stale-baseline timing risk, gitignored human-owned file)' — fork fell back to
+  master WITHOUT re-reading the now-active config; manager 3-step measurement
+  2026-08-06: config effective ≠ call-site changed, same class as
+  hardcode-master's own finding; only next dispatch can confirm scope
+  (one-branch timing vs fork-never-reads-config)"
+status: done
 labels:
   - gap
   - defect
@@ -49,6 +59,9 @@ config 有 fork_baseline、AC2 scratch 跑通），但**真实 dispatch 的 fork
 - [ ] AC3: 与 gap-two-layer-loop-tick-docs-hardcode-master（done）交叉标注——本任务是它「配置生效 ≠
        调用点改变」在真实 dispatch 层的复现
 - [ ] AC4: 负控制——下游（无 fork_baseline 配置）仍从 master 分叉（共享默认不变）
+
+**needs-human 时效性分诊关闭（2026-08-09，outer 依人裁定执行；判定：non-reproduction confirmed in body: next dispatch reflog shows 'Created from develop' (fork_baseline read); supervisor was the last pre-activation master fork. No fix implemented because nothing to fix.）**
+全文见 git 历史（`git log -p -- tasks/gap-dispatch-fork-does-not-read-config-fork-baseline.md`）。
 
 ## Touches
 

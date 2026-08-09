@@ -29,5 +29,17 @@ backpressure。Proposal 原文明确：「Use [[DIR-123]] worktrees, [[DIR-124-B
 
 全文见 git 历史（`git log -p -- tasks/DIR-124-E.md`）。
 
+## Proposal
+
+Use [[DIR-123]] worktrees, [[DIR-124-B]] receipts, [[DIR-124-C]] stage adapters, and
+[[DIR-124-D]] resource profiles to schedule stages—not whole milestone workflows—across selected
+candidates. Allow Verify, Build, Audit, and Gate work from different milestones to overlap while
+bounded semaphores prevent full-suite, port, CPU, memory, agent, package-build, and integration
+contention.
+
+This child is the first resource-aware pipeline release. Preserve one fenced integration writer and
+a conservative serial fan-in/Land policy initially. Use real measurements to decide whether a
+separate rolling Ready-to-Land/effect-lease child is worth its additional recovery complexity.
+
 ## Touches
 - tasks/DIR-124-E.md（自身文件）
