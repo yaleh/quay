@@ -2,7 +2,7 @@
 id: gap-release-artifact-missing-plugin-ac16
 title: "quay-sea v0.4.0 release 产物缺 plugin——tarball 只有二进制无 plugin/，strings 搜 6
   机制名全未中，AC16 产物层未达成，升级通道不通根因（archguard 报告 #13，躺 3 天）"
-status: ready
+status: done
 labels:
   - gap
   - defect

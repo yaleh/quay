@@ -2,7 +2,7 @@
 id: gap-todo-shape-mismatch-author-gate
 title: "todo 形状与晋级闸不匹配——38/42 todo 缺 ## Contract（DIR-* 指令类 Contract=0 AC=0），过不了
   author→ready 闸，② 阻塞的机制根；meta-cc 同病两犯（14 todo 全被拒）"
-status: ready
+status: done
 labels:
   - gap
   - defect

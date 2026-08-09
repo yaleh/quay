@@ -2,7 +2,7 @@
 id: gap-last-pane-txt-has-no-writer
 title: "`.quay/last-pane.txt` 是没有写入者的死文件——mtime 4h 陈旧、无任何脚本写它（只有测试 fixture
   提及），A7 对着死快照永远判 busy/reset/0/3，inner 卡多久都不写块"
-status: ready
+status: done
 labels:
   - gap
   - defect

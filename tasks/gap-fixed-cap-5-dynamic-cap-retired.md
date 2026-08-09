@@ -2,7 +2,7 @@
 id: gap-fixed-cap-5-dynamic-cap-retired
 title: 动态 cap 作废改固定 5（人裁定）——effective_cap 是被包装成数字的布尔量且算错了（process-budget 报
   in_use=5 实 1 个 MainThread）；cap-from-gate/slot-refill 固定 5，process-budget 降级观测
-status: ready
+status: done
 labels:
   - gap
   - defect
