@@ -72,19 +72,62 @@ const substantive = (label) =>
   `${label} — this is real, substantive prose describing the ${label.toLowerCase()} in enough detail to exceed the minimum content threshold for this section, well past forty characters.`;
 
 // ── workspace lifecycle (AC8: destroyed after the file runs, no shared-checkout residue) ─────────────
+// gap-serial-phase-install-test-residue-dependency: EVERY install in this file now gets a UNIQUE
+// disk-backed worktree root + a per-workspace tmux session name (independent env namespace — task
+// fix direction B). The pre-fix runInit did NOT pass --worktree-root, so all ~19 installs recorded
+// the SAME sibling-of-repo default `/srv/target-worktrees` — a FIXED, cross-test shared namespace
+// that also does not exist on disk, so it can never be cleaned. Two install tests in the same
+// serial phase (concurrency 1, but order-adjacent) must not present a shared namespace the other
+// could trip on; this file is the FIRST runner in the round-161 ordering dependency, so its
+// isolation is the load-bearing half.
 const _tmp = [];
+const _wtRoots = [];
+after(() => {
+  for (const ws of _tmp) fs.rmSync(ws, { recursive: true, force: true });
+  for (const wt of _wtRoots) fs.rmSync(wt, { recursive: true, force: true });
+});
+
+// A disk-backed (non-tmpfs) worktree root, unique per call, tracked for after() cleanup. Mirrors
+// quay-init-loop-helpers.diskWorktreeRoot (the loop family already isolates per-install this way);
+// duplicated here because a plugin/test helper importing a packages/quay/test file would invert the
+// dependency direction. /var/tmp is the disk-backed tmp on Linux; /tmp may be tmpfs on dev boxes —
+// validate_worktree_root in quay-init.sh rejects tmpfs (exit 2 → the "init must exit 0" failure
+// class this task is fixing), so a tmpfs root is never a safe fallback.
+function diskWorktreeRoot() {
+  let dir = null;
+  for (const base of ["/var/tmp", os.tmpdir()]) {
+    try {
+      const t = spawnSync("stat", ["-f", "-c", "%T", base], { encoding: "utf8" });
+      if (t.status === 0 && t.stdout.trim() !== "tmpfs") { dir = fs.mkdtempSync(path.join(base, "install-e2e-wt-")); break; }
+    } catch { /* try next base */ }
+  }
+  if (!dir) dir = fs.mkdtempSync(path.join(os.tmpdir(), "install-e2e-wt-"));
+  _wtRoots.push(dir);
+  return dir;
+}
+
 function makeWorkspace(prefix = "install-e2e-") {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   _tmp.push(ws);
   return ws;
 }
-after(() => {
-  for (const ws of _tmp) fs.rmSync(ws, { recursive: true, force: true });
-});
 
 // ── quay-init invocation ──────────────────────────────────────────────────────────────────────────────
-function runInit(ws, { pluginRoot = PLUGIN_ROOT, repoRoot = "/srv/target", project = "proj", tmux = "proj-0:0.0", testCommand, addArgs = [] } = {}) {
-  const args = ["--loop", "--root", ws, "--project", project, "--tmux-session", tmux, "--repo-root", repoRoot];
+// gap-serial-phase-install-test-residue-dependency: each install gets a UNIQUE --worktree-root (a
+// per-call diskWorktreeRoot) and a per-workspace tmux session (derived from the workspace's own
+// basename — a workspace's re-installs keep the same session, two workspaces never share one).
+// Previously the worktree root was the shared sibling-of-repo default `/srv/target-worktrees` and
+// the tmux session default was the fixed `proj-0:0.0` shared by every install in this file AND by
+// the quay-init-loop family (STANDARD_INIT_ARGS) — shared env namespaces across serial-phase-
+// adjacent install tests. Both values are CONFIG_CLASS (excluded from A1's byte-identity), so the
+// independence does not disturb the config-driven byte-identity assertions.
+// `worktreeRoot` option: undefined → a fresh unique disk root per call; a string → that root;
+// null → pass NO --worktree-root (the config-preserving upgrade path: quay-init keeps the
+// consumer's recorded loop.worktree_root — the AC6/AC1 + AC2 "entire loop section unchanged" path).
+function runInit(ws, { pluginRoot = PLUGIN_ROOT, repoRoot = "/srv/target", project = "proj", tmux, testCommand, worktreeRoot, addArgs = [] } = {}) {
+  const session = tmux ?? `p-${path.basename(ws).slice(-12)}-0:0.0`;
+  const args = ["--loop", "--root", ws, "--project", project, "--tmux-session", session, "--repo-root", repoRoot];
+  if (worktreeRoot !== null) args.push("--worktree-root", worktreeRoot ?? diskWorktreeRoot());
   if (testCommand) args.push("--test-command", testCommand);
   args.push(...addArgs);
   return spawnSync("bash", [path.join(pluginRoot, "scripts", "quay-init.sh"), ...args], {
@@ -469,8 +512,11 @@ test("AC6/AC1 — an organically evolved consumer keeps the ENTIRE loop section 
 
   // Config-preserving upgrade WITHOUT --force (AC1). The test command is deliberately NOT passed:
   // the prefer-existing path must keep the consumer's recorded loop.test_command (a real
-  // downstream run of `quay init --loop` has no fresh detection clobbering it).
-  const r = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session" });
+  // downstream run of `quay init --loop` has no fresh detection clobbering it). worktreeRoot: null
+  // keeps the consumer's recorded loop.worktree_root too — this is the upgrade path that must
+  // preserve the ENTIRE loop section (task gap-serial-phase-install-test-residue-dependency: the
+  // default unique-root injection must NOT clobber an organic consumer's recorded root).
+  const r = runInit(ws, { repoRoot: "/srv/proj", tmux: "proj-session", worktreeRoot: null });
   assert.equal(r.status, 0, `config-preserving upgrade must succeed:\n${r.stderr}`);
 
   // AC1 first half: mechanism files ARE laid down.

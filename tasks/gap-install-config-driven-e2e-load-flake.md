@@ -30,6 +30,8 @@ extra: {}
 
 **为什么重要**：它是「真实 install 字节一致」的承重 e2e（config-driven install 的负控制），负载红会**间歇性挡批量合**（round-155 因此没绿，freshness 又加码）。不是假红，是「并发下 install 争抢」的真问题。
 
+**交叉标注（gap-serial-phase-install-test-residue-dependency，2026-08-09）**：本任务候选 A 的落地（把 install-config 从 lowconc 挪到 serial，提交 e09089f3）是**顺序残留依赖的引入源头**——install-config 挪到 serial 后与 quay-init-loop-core 同相位相邻，round-161 出现 install-config passed → quay-init-loop-core failed（AC2/AC4）的顺序依赖。两个任务互为因果：本任务解决「并发 3 下 install 争抢」时把该文件送进 serial，serial 相位暴露了「并发 1 但顺序相邻」的残留依赖；后者（gap-serial-phase-install-test-residue-dependency）已在内层以**测试内隔离强化**修复（install-config 每 install 独立 `--worktree-root` + 每 workspace 独立 tmux session + `after()` 彻底清理）。本文件即那两个任务的负控制边界：隔离后连续 2 轮 serial 相位两 install 测试都绿。
+
 **修的方向（实现归内层）**：
 - 候选 A：**挪 serial 组**——install e2e 从 lowconc 挪到 serial（并发 1，完全隔离）。但 serial 判据是「nested-runner」，本测试不 spawn worker-pool ⇒ 需扩 serial 判据或另设。
 - 候选 B：**组内隔离**——给 install 族单独一组（如 `install` 组，并发 1 或 2），与其他 hermetic 测试分开。

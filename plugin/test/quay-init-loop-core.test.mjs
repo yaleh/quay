@@ -12,6 +12,19 @@
 // at ~167s with 'Promise resolution is still pending'. Each split file keeps < ~19 tests, under the
 // exhaustion threshold. Shared helpers live in quay-init-loop-helpers.mjs.
 // gap-quay-init-laydown-dominant-red-suite-blocker root-cause verdict 2026-08-07.
+//
+// gap-serial-phase-install-test-residue-dependency (serial-phase ordering residue): this file is a
+// SECOND runner in the round-161 ordering dependency (install-config-driven-e2e passed first, then
+// this file's AC2 "init must exit 0" + AC4 "tick docs must NOT be residue-cleaned" failed). Its
+// installs were NOT the residue source — every --loop run here already gets a UNIQUE disk worktree
+// root (quay-init-loop-helpers.runInit injects --worktree-root diskWorktreeRoot()) and a
+// fresh makeTmp/laydownWorkspace per test. The residue came from the FIRST runner's shared default
+// namespace (the fixed sibling-of-repo worktree root + the fixed tmux session `proj-0:0.0`), which
+// packages/quay/test/install-config-driven-e2e.test.mjs now isolates (unique --worktree-root per
+// install + per-workspace tmux session + after() cleanup). Isolation contract for this file: keep
+// every install's env namespace independent (unique worktree root via helpers, per-test workspace),
+// and do NOT re-introduce a fixed cross-file tmux session as the shared default — `proj-0:0.0`
+// below is now EXCLUSIVE to this loop family (no other install test targets it).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
