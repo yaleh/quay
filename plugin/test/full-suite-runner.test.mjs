@@ -682,6 +682,34 @@ test("AC2/AC3/AC4 — a static-check-red run writes reason=static-check + machin
   }
 });
 
+test("AC2b — the static-check phase gate: test-phase output (selected N files) stops static-check patterns firing on test fixtures (round-6 2026-08-09 false-red)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-pgate-"));
+  // The round-6 false-red shape: a passing test (candidate-contracts.test.mjs) prints
+  // "ANTI-DRIFT HARD FAIL: N violation(s)" fixture lines DURING its run — after test.sh's
+  // "selected N files (groups=…)" test-phase marker, before any "# tests" summary. The static-check
+  // patterns must NOT fire on those (the suite is genuinely green), but MUST still fire BEFORE the
+  // test phase begins (covered by the AC2/AC3/AC4 test above, whose fake suite has no "selected").
+  const { f, dir } = fakeSuite(
+    'echo "selected 252 files (groups=product,engine)"\n' +
+      'echo "ANTI-DRIFT HARD FAIL: 1 violation(s)"\n' +
+      'echo "  cross-build-overlap: builds A & B both touched shared/s.js"\n' +
+      'echo "# tests 42"\n' +
+      'echo "# pass 42"\n' +
+      'echo "# fail 0"\n' +
+      "exit 0",
+  );
+  try {
+    const child = runRunner({ root, command: `bash ${f}` });
+    const { code } = await waitExit(child);
+    assert.equal(code, 0, "runner exits 0 (the suite is genuinely green — the ANTI-DRIFT lines are test fixtures)");
+    const s = readState(root);
+    assert.equal(s.state, "green", "no false static-check red once the test phase has started");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("AC5 — a real test failure dominates a static-check marker: reason stays failed, failures[] carries the test failure", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sc-dom-"));
   const { f, dir } = fakeSuite(
