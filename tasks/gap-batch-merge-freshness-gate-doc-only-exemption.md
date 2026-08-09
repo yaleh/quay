@@ -1,7 +1,7 @@
 ---
 id: gap-batch-merge-freshness-gate-doc-only-exemption
 title: "批量合 freshness gate 连续 3 次被 doc-only 提交挡（round-155/157/158 起点的 SPEC/doc 编辑）——纯文档提交无需重测，机械 gate 无法区分「文档」与「代码」"
-status: ready
+status: done
 labels:
   - gap
   - defect

@@ -1,7 +1,7 @@
 ---
 id: gap-spec-goal-store-third-sibling-kind
 title: "SPEC-goal-store: 阶段目标/AC 是第三个 sibling kind（frontmatter-store-base 复用 + criterion 可跑判据 + phase 可推导 + origin 强制）——AC20-35 从 manager-phase-goal.md 散文迁移到 goal store"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

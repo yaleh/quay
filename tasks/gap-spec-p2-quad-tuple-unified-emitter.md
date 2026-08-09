@@ -1,7 +1,7 @@
 ---
 id: gap-spec-p2-quad-tuple-unified-emitter
 title: "SPEC P2-9: 四元组的统一发射器（三层共用一个实现）——当前三层各自的账本行手工拼、无共用发射器（SPEC-three-layer-unified-architecture §2.5）"
-status: ready
+status: done
 labels:
   - gap
   - milestone-candidate

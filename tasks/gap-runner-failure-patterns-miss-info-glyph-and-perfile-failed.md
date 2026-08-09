@@ -1,7 +1,7 @@
 ---
 id: gap-runner-failure-patterns-miss-info-glyph-and-perfile-failed
 title: "full-suite-runner 的 FAILURE_PATTERNS 漏 `ℹ fail N`/`✖`/`__PERFILE__ passed=false`——真实失败红 state=red reason=failed 但 failures=[] redAt=null（第三种路径，42aad5fe 只修了 testsSeen 没修 FAILURE_PATTERNS）"
-status: ready
+status: done
 labels:
   - gap
   - defect
