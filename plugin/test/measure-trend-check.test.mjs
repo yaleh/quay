@@ -355,3 +355,66 @@ test("AC3 — large-test absolute growth EXCEEDING its historical max still flag
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── gap-measure-trend-relative-trigger-lacks-hist-variance-exemption AC2/AC3 ────────────────
+// The RELATIVE ≥2× trigger lacked the withinHistMax guard the ABSOLUTE trigger had
+// (d83916e4 only exempted absolute). A high-variance LARGE test returning to its OWN normal
+// band after a low point was misreported as "doubling" (round-199: task-check-passthrough
+// 9575→21293ms 2.22×, acceptance-env 10304→20974ms 2.04× — both ≤ their own historical max
+// 23183/21445). The guard is now isomorphic across BOTH triggers: in-band ⇒ exempt;
+// beyond-hist-max ⇒ still flags (real regression never suppressed).
+
+test("AC2 — in-band relative ≥2× on a large test is NOT flagged (round-199 hist-variance scenario)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-relband-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    // Round-199 real history shapes: each file swings to its max (round-32), dips to a low
+    // point (round-35), then returns to its normal band (round-36) — the low→band hop is
+    // ≥2× relative but stays within the file's own historical max ⇒ must NOT flag.
+    const rounds = [
+      [["/task-check-passthrough.test.mjs", 9_079], ["/acceptance-env.test.mjs", 9_166]], // min values
+      [["/task-check-passthrough.test.mjs", 23_183], ["/acceptance-env.test.mjs", 21_445]], // round-32 hist max
+      [["/task-check-passthrough.test.mjs", 9_575], ["/acceptance-env.test.mjs", 10_304]], // round-35 low point
+      [["/task-check-passthrough.test.mjs", 21_293], ["/acceptance-env.test.mjs", 20_974]], // round-36 normal band
+    ];
+    for (const r of rounds) {
+      writeFileSync(logFile, fakeLog(r), "utf8");
+      landMeasureHistory({ historyFile, logFile });
+    }
+
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 0, `in-band relative ≥2× must NOT flag: ${JSON.stringify(growth)}`);
+    // Sanity-check the scenario actually IS a ≥2× relative hop (else the test is vacuous).
+    assert.ok(21_293 / 9_575 >= 2, "task-check-passthrough round-35→36 is ≥2× relative");
+    assert.ok(20_974 / 10_304 >= 2, "acceptance-env round-35→36 is ≥2× relative");
+    assert.ok(21_293 <= 23_183, "task-check-passthrough round-36 within its own hist max");
+    assert.ok(20_974 <= 21_445, "acceptance-env round-36 within its own hist max");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AC3 — relative ≥2× EXCEEDING the historical max still flags (real regression not swallowed)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "mtc-relband2-"));
+  try {
+    const historyFile = path.join(dir, "measure-history.jsonl");
+    const logFile = path.join(dir, "full-suite.log");
+    // hist max 16s; round 3 jumps to 33s — 2.06× relative vs prev 16s, > hist max 16s, but
+    // +17s absolute is BELOW the +30s absolute threshold ⇒ only the relative trigger can fire.
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 10_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 16_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+    writeFileSync(logFile, fakeLog([["/a.test.mjs", 33_000]]), "utf8");
+    landMeasureHistory({ historyFile, logFile });
+
+    const growth = compareLastTwoRounds(historyFile);
+    assert.equal(growth.length, 1, "beyond-hist-max relative ≥2× must flag");
+    assert.equal(growth[0].file, "/a.test.mjs");
+    assert.equal(growth[0].reason, "relative", "flags via the RELATIVE trigger (absolute +17s < +30s would not fire)");
+    assert.ok(growth[0].currMs > 16_000, "curr exceeds the file's historical max");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -64,6 +64,7 @@ extra: {}
 - plugin/scripts/measure-trend-check.ts（候选 A/B/C：历史方差感知 / 连续 2 轮 / 负载归一）
 - plugin/test/measure-trend-check.test.mjs（新增：大测试负载波动不 flag；连续 2 轮仍 flag）
 - tasks/gap-measure-trend-load-noise-false-positive.md（交叉标注——本任务是它修复不完整的后续）
+- tasks/gap-measure-trend-relative-trigger-lacks-hist-variance-exemption.md（交叉标注——同族后续：相对 ≥2× 触发器也缺 withinHistMax 守卫，高方差大测试低点后回正常带被误判翻倍，round-199）
 - tasks/gap-measure-trend-large-test-load-noise.md（自身：勾 AC + 贴证据）
 
 ## Contract
