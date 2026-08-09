@@ -99,6 +99,7 @@ Linux-only 违反可移植性。修复：第 5 项移除 os-anchor 或改判据�
 
 **这是「子代发现亲代盲区」第三实例**（管理者先在亲代查出一半、子代补上另两半）——分工价值第二个实证。
 
+
 ## Evidence（内层实现 2026-08-09）
 
 **根因**：verify-delivery-surface.ts 的 MANIFEST 把交付物钉在 quay 源布局（plugin/scripts/…、plugin/loop/…），
@@ -138,3 +139,19 @@ laidFiles/laidCategories 硬编码只记 2 个 tick 文档，记录与交付不�
 - `plugin/scripts/quay-init.sh` — 铺设集加 verify-delivery-surface.ts；write_state_file 全量 laidFiles/laidCategories
 - `tasks/gap-release-excludes-plugin-bundle-agent-surface.md` — AC3 交叉标注
 - 本任务文件 — AC1-AC4 勾选 + 本 Evidence
+
+## 交叉标注——loop-shipping cross-cut 回归（2026-08-09，gap-loop-shipping-verify-delivery-surface-consumer-laid-ref）
+
+**本任务的 LAID_MANIFEST（08853779 fan-in）引入了 loop-shipping cross-cut 盲区，已由下游任务修复。**
+
+本任务实现新增的 `LAID_MANIFEST`（consumer-laid 交付物）deliverables 有意引用 laid 目标布局的
+tick-doc 路径（`orchestration/orchestrator-loop-tick.md` + `docs/analysis/fast-mode-loop-tick.md`），
+但 `plugin/scripts/verify-delivery-surface.ts` 当时**不在** loop-shipping 排除表
+（`plugin/scripts/loop-shipping-exclusion-data.mjs`）——改 checker 但没把 verify-delivery-surface.ts
+收编进排除表（同族：adr016-screen-use-check / no-manager-tick-doc-check / instrument-failure-check 都进表了）。
+round-203 全量套件红于 `loop-shipping.test.mjs` AC1b（唯一失败，13.4s）。
+
+**修复（gap-loop-shipping-verify-delivery-surface-consumer-laid-ref，2026-08-09）**：
+`verify-delivery-surface.ts` 收编进 loop-shipping 排除表，reason=「consumer-laid 目标布局引用」
+（`--layout laid` 验证消费者 orchestration/ + docs/analysis/ 副本，是有意引用非 stale 源引用），
+并带 retainedNote（源-only checkout 下 LAID_MANIFEST 缺失时条目惰性）。既有排除条目不动。
