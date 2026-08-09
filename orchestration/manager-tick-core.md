@@ -23,7 +23,7 @@
 | A4 | 两层忙闲 = pane 尾部 `esc to interrupt` | pane-only;`LOOP_MIN=0` 才看得到全部事件 |
 | A5 | 三项目 `.halt` 存在性 | quay / archguard / meta-cc |
 | A6 | `git merge-base --is-ancestor develop integration` + 两方向 `rev-list --count` | AC27 |
-| A7 | 套件末轮:读 `.quay/verification-round.jsonl` **末行** | **单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」**(它每轮覆盖) |
+| A7 | 套件末轮:读 `.quay/verification-round.jsonl`,**先按 `startedAt` 非空过滤再取末条** | ①单状态文件只答「此刻在跑什么」,不答「第 N 轮结果」(它每轮覆盖);②**该 jsonl 是异构日志,两种记录混写**:套件轮次 `{startedAt,durationMs,state,reason,…}` 与收尾轮次 `{at,suiteGreen,closed:[…]}`(实测 75/150 是后者)。**直接取末行会在末行恰为收尾记录时报 `state=None`,看起来像"空记录/记录缺陷",实则是我取错了类型**(2026-08-09 06:3xZ 亲历并误报过一次) |
 | A8 | `git status --porcelain \| wc -l` | 脏树 |
 | A9 | `meta-cc query_session_content role=tool tool_name=Workflow` → `last(timestamp)` | §2.4c;>3 个 tick 周期未调用 ⇒ 写明「已停用/已替代/是缺陷」三选一 |
 | A10 | 我跑的 `session-liveness` 是不是旧版 | 逐行 `ps` 看进程与其脚本路径(C1);**版本落后 = 观测的是未修版**(档案 §1.4) |
