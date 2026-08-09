@@ -126,3 +126,15 @@ load-flake 任务）对账到 integration 当前内容 + 本任务增量：round
 
 **AC2（连续 3 轮 install 家族全绿）与 DoD 全量套件归外层 verification-round 验证**——内层只交付
 scoped 门绿 + 组契约绿 + 单独跑绿 + 无静默漏测。
+
+**再派发复验（inner re-dispatch 2026-08-09）**：实现已随 6668a4e8 fan-in 落在 develop（本工作树
+基于 develop HEAD，包含全部 12 文件 serial 收编 + KLS 标记 + test.sh 注释系统化）。本内层复跑三项
+核验全过，与上述证据逐字吻合：
+- `bash scripts/test.sh --for-task gap-install-family-tests-rotate-flakes-under-full-suite --allow-thin`
+  → **exit 0**（task-contract strict-subset **no violations** 对三任务文件；adr016-screen-use **0 违规**
+  （2 retired 不计）；dead-code-after-return **0 违规**；selector 0/5 thin allowed）。
+- 组系统契约：`runner-grouping + known-load-sensitive + load-sensitive-release-check` 连跑
+  **35/35 绿 / 0 fail / 0 cancelled / 0 skipped**（EXIT=0，206.3s）。
+- AC3 单独跑（抽样 3）：`quay-init-check-drift + quay-init-drift-report + runtime-landing` 连跑
+  **15/15 绿 / 0 fail / 0 skipped**（EXIT=0，93.8s）。
+AC 勾选状态不变（AC1/3/4/5 勾、AC2 + DoD 留外层）。
