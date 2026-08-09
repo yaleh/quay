@@ -32,6 +32,7 @@ checklist 执行。
 | A11 | 读 `.quay/full-suite-state.json` 的 `state`/`reason`/`durationMs` | `green`⇒suiteGreen;`running`⇒true(proceed);`red`⇒false;**缺文件⇒true**。`reason: aborted` **不**触发停派 (src:738) |
 | A12 | 独立核实内层至少一项声称:`inner-forensics.mjs verify <类别> --since <上次 tick ISO>` / `timecost` | 以 git 和实测为准,不以内层自述为准;零命中 ≠ 没做过(先用类别形式复核);见 `⚠ 更早会话未被包含` 即窗口不完整 (src:630) |
 | A13 | `self-report-vocab-audit.ts --git-log 15 --exclude-prefix outer: --window 3 --json` | 读 `inner_self_report_vocab` + `converged`;连续 3 轮无 batch 式自述 = 收敛 (src:851) |
+| A14 | **账本·本轮 closure-pass 是否被调用**(FINDING §6①,每 tick):`meta-cc query_session_content role=tool tool_name=closure-lag-check` → `last(timestamp)` | 抓「收尾 pass 自述做了但没真调用」——与 manager A9 同手法(抓 workflow 21.5h 死掉那次);`--record` 心跳缺失 >3 个 tick 周期 ⇒ 写明「已停用/已替代/是缺陷」三选一 (src:668) |
 
 ## B. 每轮必产出
 
