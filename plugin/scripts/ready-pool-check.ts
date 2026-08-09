@@ -311,6 +311,13 @@ export const BLOCKING_WEIGHT = 2;
 // dispatch: contract → finding → plan; unknown fails closed). The four artifacts are the shape's own
 // registered sections — a `finding`-shape task has no plan dimension, a `contract`-shape task uses
 // `## Contract` as its plan artifact.
+//
+// GAP-TODO-SHAPE-MISMATCH (2026-08-09, tasks/gap-todo-shape-mismatch-author-gate): the finding shape
+// additionally recognizes the draft-heading variants `## AC（draft）` / `## DoD（draft）` (and their
+// half-width-paren form `## AC (draft)`) that 9 real finding-shape gap-* tasks in this store use for
+// their AC/DoD sections. They ARE the AC/DoD artifacts — the `（draft）` suffix is a heading-label
+// convention, not an absent section — so the four-artifacts gate must count them, or those todo tasks
+// are wrongly ineligible for author→ready promotion (the 38-todo shape-vs-gate mismatch).
 const SHAPE_SECTIONS = {
   contract: {
     proposal: ["Proposal"],
@@ -320,8 +327,8 @@ const SHAPE_SECTIONS = {
   },
   finding: {
     proposal: ["Finding"],
-    ac: ["AC", "Acceptance Criteria"],
-    dod: ["DoD", "Definition of Done"],
+    ac: ["AC", "Acceptance Criteria", "AC（draft）", "AC (draft)"],
+    dod: ["DoD", "Definition of Done", "DoD（draft）", "DoD (draft)"],
   },
   plan: {
     proposal: ["Proposal"],
@@ -339,8 +346,16 @@ export function detectShape(body) {
   return "unknown";
 }
 
+/** Escape regex-special characters so a heading is matched LITERALLY. `extractSection` builds its
+ *  heading regex from the caller's string — without escaping, a heading like `AC (draft)` would be
+ *  interpreted as a capture group and never match the literal `## AC (draft)` line. All registered
+ *  headings are plain section names; escaping is a no-op for them. */
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function sectionNonWsLength(body, heading) {
-  const sec = extractSection(body, heading);
+  const sec = extractSection(body, escapeRegExp(heading));
   return sec === null ? 0 : sec.replace(/\s/g, "").length;
 }
 

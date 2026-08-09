@@ -82,6 +82,16 @@ Standard `inherited-core.md` DoD clauses apply.
 - [ ] `prepare-milestone.js` PlanAuthor/PlanCheck prompts include injected facts
 - [ ] Independent wiring audit confirms zero stale facts (M205 correction verified)
 
+## Contract
+
+measure   registry_seeded = `grep -c '"id":' plugin/scripts/ground-truth-registry.json` 输出的计数（seed 后的事实条数）
+band      registry_seeded = ≥ 8（8 类至少各 1 条，seed 完成）
+invariant mirrors_byte_identical = 1（plugin/ 与 experiments/ 两镜像 diff 为空）
+invariant validate_passes = 1（`ground-truth-registry.ts --validate` 对已播种 registry 退出 0）
+invoke    `node --experimental-strip-types plugin/scripts/ground-truth-registry.ts --validate`
+control   --validate 退出 0 且 contentHash 与 --hash 一致；两镜像 diff 为空
+resume    registry 数据文件 + CLI 模块分步提交；AC1/AC2 完成即写盘
+
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/ground-truth-registry.json
@@ -94,3 +104,9 @@ Standard `inherited-core.md` DoD clauses apply.
 - plugin/scripts/task-schema.ts
 - experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts
 - plugin/scripts/prepare-admission-check.ts
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-09
+changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，无 review 记录）

@@ -54,9 +54,25 @@ Standard `inherited-core.md` DoD clauses apply.
 - [ ] PlanCheck integration: `grounded-fact-gap` findings trigger `--promote` if mechanically valid
 - [ ] Independent wiring audit confirms promotion path is fire-and-forget (non-blocking)
 
+## Contract
+
+measure   promote_wired = `grep -c 'grounded-fact-gap' plugin/scripts/ground-truth-registry.ts` 输出的计数（--promote 接受该 finding 类的接线点）
+band      promote_wired = ≥ 1（--promote 接受 grounded-fact-gap finding JSON）
+invariant duplicate_rejected = 1（重复 exact-match fact 被拒绝，不入库）
+invariant category_whitelist = 1（未知 category 被拒绝）
+invoke    `node --experimental-strip-types plugin/scripts/ground-truth-registry.ts --promote`
+control   重复 exact-match 与未知 category 均非零退出；非阻断路径在 PlanCheck 集成中可证
+resume    --promote 校验 + PlanCheck 集成分步提交
+
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/ground-truth-registry.ts
 - plugin/scripts/ground-truth-registry.ts
 - .claude/workflows/prepare-milestone.js
 - plugin/workflows/prepare-milestone.js
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-09
+changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，无 review 记录）

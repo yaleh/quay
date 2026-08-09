@@ -106,6 +106,16 @@ session-bootstrap step.
 - [ ] The 3 children + the 2 linked prerequisites are all `status: done`
 - [ ] `gap-quay-self-hosting-e2e-proof`'s six-key table (all `true`) pasted into this task body
 
+## Contract
+
+measure   children_done = `grep -l '^status: done' tasks/gap-cold-start-skill-has-no-recovery-branch.md tasks/gap-no-formalized-bare-metal-session-bootstrap.md tasks/gap-quay-self-hosting-e2e-proof.md | wc -l` 输出的计数
+band      children_done = 3（三个 child 全部 done）
+invariant deps_landed = 1（两个 prerequisite：gap-send-keys-verified... 与 gap-retire-inner-state... 已 done）
+invariant capstone_self_certify = 1（SH4 六键表全 true，无 human-in-the-loop）
+invoke    `node --no-warnings --experimental-strip-types plugin/scripts/ready-pool-check.ts --root . --json`
+control   ready-pool 该 parent 可晋（fourArtifacts complete + deps ready）；六键表贴任务体
+resume    依赖顺序按 SPEC 落；capstone 最后
+
 ## Touches
 
 (compound task — see each child's own `## Touches`)

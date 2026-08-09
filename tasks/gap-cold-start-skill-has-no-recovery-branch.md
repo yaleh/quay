@@ -76,6 +76,16 @@ specific state classes both real recoveries actually hit tonight, not speculativ
 - [ ] AC1/AC4 real-run outputs (both directions) pasted into this task body
 - [ ] Full suite 2x green (`fail 0` and `cancelled 0`)
 
+## Contract
+
+measure   recovery_branch = `grep -c 'recovery' plugin/skills/cold-start/SKILL.md` 输出的计数（SKILL 中 recovery 分支提及数）
+band      recovery_branch = ≥ 1（SKILL 含 recovery 分支）
+invariant fresh_start_preserved = 1（fresh-start 分支仍在，recovery 分支不替代它）
+invariant zero_new_detection = 1（recovery 分支复用既有工具，diff 无新检测逻辑）
+invoke    `bash scripts/test.sh --for-task gap-cold-start-skill-has-no-recovery-branch`
+control   scoped 门绿（fail 0 / cancelled 0）；AC1 双方向实跑输出贴任务体
+resume    分支骨架 + 三状态类接线 + 负控制分步提交
+
 ## Touches
 
 - plugin/skills/cold-start/SKILL.md

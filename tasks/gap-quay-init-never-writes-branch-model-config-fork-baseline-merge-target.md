@@ -68,9 +68,26 @@ not-read-config-fork-baseline` AC4 甚至把这个状态命名为"共享默认�
 
 ## Definition of Done
 
-- [ ] AC1-AC4 实跑输出贴进任务体
+- [ ] AC1-AC4 实跑输出贴进任务体（quay-init --loop 生成的 config 含 fork_baseline/merge_target 两键，实跑输出贴出）
 - [ ] 完整套件连跑 2 次全绿
+- [ ] grep 可证 write_provider_config heredoc 含两键；已配置主机升级路径不覆盖已存在正确值（AC3 负控制）
+
+## Contract
+
+measure   config_keys = `grep -c 'fork_baseline\|merge_target' plugin/scripts/quay-init.sh` 输出的计数
+band      config_keys = ≥ 2（write_provider_config heredoc 写两键）
+invariant negative_control = 1（改前同一命令两键不存在——AC2 实跑证明）
+invariant upgrade_safe = 1（已配置主机升级路径不覆盖已存在正确值——AC3）
+invoke    `bash scripts/test.sh --for-task gap-quay-init-never-writes-branch-model-config-fork-baseline-merge-target`
+control   scoped 门绿；AC1/AC2 实跑输出贴任务体
+resume    heredoc 加键 + 负控制 + 升级路径测试分步提交
 
 ## Touches
 - plugin/scripts/quay-init.sh
 - tasks/gap-dispatch-fork-does-not-read-config-fork-baseline.md（交叉标注）
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-09
+changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，无 review 记录）

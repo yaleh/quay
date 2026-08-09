@@ -46,6 +46,16 @@ The checker's 14 WARNs on the live tree, by class:
 - [ ] Either the metadata mentions the mechanisms OR a documented decision records the omission as intentional
 - [ ] `workflow-metadata-conformance.mjs` reports the decided state; tests pin it
 
+## Contract
+
+measure   warn_count = `node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs 2>&1 | grep -c 'WARN'` 输出的计数
+band      warn_count = 0（修复后）或每剩余 WARN 有文档 rationale
+invariant mirror_byte_identity = 1（两份 workflow 镜像 diff 为空——AC3）
+invariant tests_pinned = 1（workflow-metadata-conformance 测试更新到新基线）
+invoke    `bash scripts/test.sh --for-task gap-workflow-metadata-warn-omissions`
+control   scoped 门绿；WARN 计数与决策记录一致
+resume    逐 WARN 类决策（修 or 记录）分步提交
+
 ## Touches
 
 - .claude/workflows/execute-milestone.js
@@ -54,3 +64,9 @@ The checker's 14 WARNs on the live tree, by class:
 - plugin/workflows/prepare-milestone.js
 - plugin/test/workflow-metadata-conformance.test.mjs
 - experiments/quay-perpetual-stream/scripts/workflow-metadata-conformance.mjs
+
+## Dispatch review
+
+reviewer: none
+at: 2026-08-09
+changed: 无（本任务补 ## Contract 六键晋级 Contract，非新派发，无 review 记录）

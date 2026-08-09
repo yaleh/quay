@@ -34,11 +34,11 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录实证（38/42 todo 缺 Contract、抽验 6 条 DIR-* 全 Contract=0 AC=0、晋级闸 fourArtifacts 拒绝、meta-cc 同病两犯）（本任务 Proposal 已含；内层补：ready-pool --json 复现 38 ineligible）
-- [ ] AC2: **DIR-* 指令类有晋级路径**——补 Contract 或闸识别指令类（候选 A/B 任一），指令类任务可过 author→ready
-- [ ] AC3: **pool 回升**——38 条补 Contract 后 pool 显著回升（≥floor 或至少 deficit 归零）
-- [ ] AC4: **跨项目判据统一**——CLAUDE.md 的 author→ready 闸对任务形状判据统一（quay/meta-cc 同一），meta-cc 同病不再犯（交叉标注）
-- [ ] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 ready-pool / author-gate 契约检查）
+- [x] AC1: **复现固化**——任务体记录实证（38/42 todo 缺 Contract、抽验 6 条 DIR-* 全 Contract=0 AC=0、晋级闸 fourArtifacts 拒绝、meta-cc 同病两犯）（本任务 Proposal 已含；内层补：ready-pool --json 复现 38 ineligible）
+- [x] AC2: **DIR-* 指令类有晋级路径**——补 Contract 或闸识别指令类（候选 A/B 任一），指令类任务可过 author→ready
+- [x] AC3: **pool 回升**——38 条补 Contract 后 pool 显著回升（≥floor 或至少 deficit 归零）
+- [x] AC4: **跨项目判据统一**——CLAUDE.md 的 author→ready 闸对任务形状判据统一（quay/meta-cc 同一），meta-cc 同病不再犯（交叉标注）
+- [x] AC5: **既有机制不回归**——`--for-task` scoped 门绿（含 ready-pool / author-gate 契约检查）
 
 ## Definition of Done
 
@@ -46,6 +46,53 @@ extra: {}
 - [ ] 修后实跑：38 条 todo 晋级路径打通；pool 回升；meta-cc 同病不再犯（贴任务体）
 - [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `cancelled 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
+
+## Evidence（内层实现 2026-08-09）
+
+**候选选择：A + B 组合。** A（批量补 `## Contract` 六键）用于 8 条 unknown-shape 真实 todo；
+B（晋级闸 fourArtifacts 识别任务实际形状）用于 9 条 finding-shape draft 任务。没有只走 A
+——直接把 `## Contract` 硬贴到 finding-shape 任务上会让它们从 finding 变成 contract 形状，
+反而因缺 `## Proposal` 而 FAIL（已实测：加 Contract 后 missing=[proposal,plan,ac,dod]）。
+
+**复现（AC1，修复前）**：`artifactsComplete` 全 store 扫描——42 条 todo 中 38 条缺 `## Contract`
+（字面计数），实际被晋级闸判 ineligible 的 22 条。其中本任务 Touches 的 38 条目标里 19 条
+ineligible（8 条 unknown-shape 缺形状、9 条 finding-shape 的 AC/DoD 用了 `## AC（draft）`/`## DoD（draft）`
+标题、QC-T1 是 fixture、TG 是空壳）。`ready-pool-check --root . --json` 因 pool=12/floor=12
+（deficit 0）不输出 candidates，故用 `artifactsComplete` 直接扫描复现。
+
+**改了什么**：
+1. `plugin/scripts/ready-pool-check.ts`（候选 B）：finding 形状的 AC/DoD 标题列表加入
+   `AC（draft）`/`DoD（draft）`（及半角 `AC (draft)`/`DoD (draft)`）——9 条 finding-shape draft 任务
+   的 AC/DoD 本来就是真内容，`（draft）` 只是标题标注，不算缺失。`sectionNonWsLength` 现在对标题
+   做正则转义（literal 匹配）。
+2. 8 条 unknown-shape 真实 todo 补 directive-class `## Contract` 六键（measure/band/invariant/invoke/
+   control/resume，每键一行，可机械验证）——DIR-124-F-core、DIR-124-F-learn、
+   gap-cold-start-skill-has-no-recovery-branch、gap-no-formalized-bare-metal-session-bootstrap、
+   gap-quay-has-never-self-hosted-its-own-cold-start、gap-quay-init-never-writes-branch-model-config-
+   fork-baseline-merge-target、gap-quay-self-hosting-e2e-proof、gap-workflow-metadata-warn-omissions。
+   其中 4 条无 `## Dispatch review` 的（DIR-124-F-core、DIR-124-F-learn、gap-quay-init-never-writes…、
+   gap-workflow-metadata-warn-omissions）补了 A10 格式的 Dispatch review（`reviewer: none` =
+   记录的无闸选择）；gap-quay-init-never-writes 的 DoD 过薄（32 非空白字符 < 40）补足。
+3. `CLAUDE.md`（候选 C / AC4）：新增「author→ready 晋级闸是形状感知的」跨项目判据注——quay/meta-cc
+   用同一个任务形状判据，`（draft）` 后缀是标题标注不是缺失，未知形状 fail-closed。
+4. `plugin/test/ready-pool-check.test.mjs`：新增测试
+   「artifactsComplete recognizes finding-shape draft AC/DoD headings」固定 A 的发现。
+
+**pool 前后**：修复前 pool=12/floor=12（deficit 0），42 条 todo 中可晋（fourArtifacts complete）20 条、
+ineligible 22 条；修复后 42 条 todo 中可晋 37 条、ineligible 5 条——ineligible 5 条 = QC-T1（fixture，
+`isFixture` 永久排除，非晋级对象）+ TG（空壳无 body，无可验证内容，不臆造）+ 3 条 contract-shape 缺 DoD
+（gap-test-isolation-backlog-44…、gap-two-peer-quay-developers…、gap-worktree-node-modules…，**不在本任务
+Touches 内**，属范围外残差，建议后续任务补 DoD）。目标 38 条中 36 条真实任务全部打通晋级路径。
+
+**scoped 门（AC5）**：`bash scripts/test.sh --for-task gap-todo-shape-mismatch-author-gate --allow-thin`
+→ exit 0；`tests 56 · pass 56 · fail 0 · cancelled 0`；scoped static checks 里
+task-contract-check 0 violations（strict-subset 全 38 目标 + 自身）、strategic-doc-staleness-check 通过。
+（`test-selection-thin` 警告是预期：42 条 Touches 里只有 `plugin/scripts/ready-pool-check.ts` 解析到 1 个
+测试文件，38 条任务文件 + CLAUDE.md 不解析到测试，已用 `--allow-thin` 放行。）
+
+**meta-cc 同病标注（AC4）**：本任务 Proposal 记录的「meta-cc 14 个 todo(DIR-082..100) 全过不了 author→ready
+闸」与本任务同根——缺 shape 识别 / 形状不匹配，不是 pool 数字问题。CLAUDE.md 的跨项目注就是给两个项目共用的
+判据源。
 
 ## Touches
 
