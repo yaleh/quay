@@ -2,7 +2,7 @@
 id: gap-sync-vendor-proposal-convergence-mirror-drift
 title: sync-vendor 镜像漂移：a551dd5f 只改 experiments/ 的 proposal-convergence.ts 未镜像
   plugin/ ——M136 --check 报 DRIFT，round-166 红（solo 也红=真实回归），阻塞批量合
-status: ready
+status: done
 labels:
   - gap
   - defect

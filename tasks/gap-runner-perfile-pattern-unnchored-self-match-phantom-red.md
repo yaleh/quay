@@ -3,7 +3,7 @@ id: gap-runner-perfile-pattern-unnchored-self-match-phantom-red
 title: full-suite-runner FAILURE_PATTERNS `__PERFILE__.*passed=false`
   未锚定——round-163 幻影红：匹配到自身通过测试名（`✔ AC2/AC3 e2e — a __PERFILE__ ... passed=false
   per-file line flips red...`），全量套件实际全绿（ℹ fail 0），批量合被卡
-status: ready
+status: done
 labels:
   - gap
   - defect

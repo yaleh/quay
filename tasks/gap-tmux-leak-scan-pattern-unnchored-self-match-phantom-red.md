@@ -2,7 +2,7 @@
 id: gap-tmux-leak-scan-pattern-unnchored-self-match-phantom-red
 title: "full-suite-runner FAILURE_PATTERNS `tmux-leak-scan: FAIL` 未锚定——round-167
   幻影红（self-match 家族第 3 例，c83ce4be/a1b78104 锚了 ✖/__PERFILE__ 漏了它），全量实际全绿"
-status: ready
+status: done
 labels:
   - gap
   - defect

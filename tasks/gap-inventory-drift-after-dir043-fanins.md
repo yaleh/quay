@@ -3,7 +3,7 @@ id: gap-inventory-drift-after-dir043-fanins
 title: delivery-inventory 快照漂移——DIR-043 等 fan-in 加脚本/探针没重生成 outline
   §6（inventory_drift=2：scripts 180/179、probes 5/4），round-169 红、solo 也红，同
   ffe7dd21 族
-status: ready
+status: done
 labels:
   - gap
   - defect

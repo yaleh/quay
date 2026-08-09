@@ -3,7 +3,7 @@ id: gap-runner-no-kill-on-red-and-no-max-runtime-hang-leak
 title: full-suite-runner 判定 red 后不终止 test.sh 子进程且无最大运行时限——round-164 子进程挂起导致
   runner 泄漏 20+ 分钟，与 round-165 并发争抢/串写同一 full-suite.log ⇒ round-165 幻影式
   red（failures=[]、日志截断）
-status: ready
+status: done
 labels:
   - gap
   - defect
