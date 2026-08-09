@@ -131,11 +131,18 @@
 #                two-dot `git diff integration develop` — the two-dot also lists integration's OWN
 #                tested files, a false positive the gate must avoid.
 #
-#   FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green): before ANY merge (ff or real), the helper
-#                requires a FRESH suite green — the batch-merge gate previously read ONLY
-#                `state == green` and treated a 3-hour-old green (measuring a DIFFERENT batch of
-#                commits) as a pass for THIS tree (7b1ac3a1, 2026-08-08). Two dimensions, both required:
+#   FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green; gap-batch-merge-freshness-gate-ignores-scope):
+#                before ANY merge (ff or real), the helper requires a FRESH suite green — the batch-merge
+#                gate previously read ONLY `state == green` and treated a 3-hour-old green (measuring a
+#                DIFFERENT batch of commits) as a pass for THIS tree (7b1ac3a1, 2026-08-08). The gate
+#                also previously IGNORED the state's `scope` field, so a green from ANY linked worktree
+#                (even one testing a completely unrelated tree) satisfied the gate. Three dimensions,
+#                all required:
 #                  state == green (not running/red; a missing state file FAILS CLOSED — no valid green)
+#                  scope == main (a WORKTREE-sourced green is DEFERRABLE — the runner tags every state
+#                    `scope: main|worktree`, gap-worktree-scoped-runs-consume-resources-but-produce-no-
+#                    signal AC1; only a main-repo green is the authoritative signal the batch merge may
+#                    trust — the SCOPE axis). scope absent (legacy state) = treat as main (fail-open)
 #                  finishedAt within --freshness-window (default 3600s) of now  — the AGE axis
 #                  suite startedAt >= most-recent integration fan-in commit time — the COVERAGE axis
 #                FAILS CLOSED (nothing moved) on any violation. `--skip-freshness-gate` is the explicit
@@ -148,7 +155,7 @@
 #   1  NOT a fast-forward and no --merge (needs a human), OR a real code conflict in --merge mode
 #      (fail-closed, nothing moved), OR the object gate blocked (develop-side code files outside the
 #      tested tree — fail-closed, nothing moved), OR the freshness gate blocked (no valid fresh green —
-#      stale/missing/running suite state — fail-closed, nothing moved)
+#      stale/missing/running/non-main-scope suite state — fail-closed, nothing moved)
 #   2  usage / missing ref
 set -uo pipefail
 
@@ -475,21 +482,29 @@ check_object_gate() {
   return 1
 }
 
-# ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green) ───────────────────────────────────────
+# ── FRESHNESS GATE (gap-batch-merge-gate-reads-stale-green; gap-batch-merge-freshness-gate-ignores-scope) ──
 # The batch merge may only proceed when the suite green is a FRESH green that actually verified the
 # CURRENT integration tip. Root cause (7b1ac3a1, 2026-08-08): the gate read ONLY `state == green` and
 # treated a 3-hour-old green — measuring a COMPLETELY DIFFERENT batch of commits — as a pass for THIS
-# tree. Freshness has two dimensions:
-#   1. AGE — `finishedAt` within `--freshness-window` of now (default 3600s). An old green with NO new
+# tree. Freshness has three dimensions:
+#   1. SCOPE — the green must be MAIN-sourced (`scope == "main"`). The runner tags every state with
+#      `scope: main|worktree` (gap-worktree-scoped-runs-consume-resources-but-produce-no-signal AC1):
+#      main = the authoritative signal subagents wait for; worktree = DEFERRABLE (its completion
+#      "updates nothing anyone waits on"). A worktree green may have tested a completely different
+#      tree (ANY linked worktree — another task's checkout); the OLD gate ignored scope entirely, so
+#      an unverified tree could be merged into develop (gap-batch-merge-freshness-gate-ignores-scope).
+#      scope ABSENT (legacy pre-scope state) ⇒ treat as main (fail-open, the runner's documented
+#      legacy semantics). scope present but != main ⇒ fail-closed.
+#   2. AGE — `finishedAt` within `--freshness-window` of now (default 3600s). An old green with NO new
 #      fan-in is still stale: a 3-hour-old green did not test today's tree.
-#   2. COVERAGE — the suite STARTED at/after the most recent integration fan-in (`git log -1 --format=%ct
+#   3. COVERAGE — the suite STARTED at/after the most recent integration fan-in (`git log -1 --format=%ct
 #      <integration>`). A fan-in that landed after the suite ran means the green did NOT test the pending
 #      content. (Started-at, not finished-at, is the coverage basis — a suite cannot have tested a fan-in
 #      that landed after it started; startedAt is the runner's ISO marker, finishedAt is epoch.)
-# Fail-closed conditions (all mean "no valid green" ⇒ nothing moved): state != green, finishedAt
-# missing/unparseable, age > window, suite started before the most recent fan-in, OR the state file is
-# absent. This is the TIME-AXIS gate, complementary to the OBJECT gate's MERGE-RESULT axis
-# (gap-batch-merge-gate-validates-tip-not-merge-result); both run before any ref moves.
+# Fail-closed conditions (all mean "no valid green" ⇒ nothing moved): state != green, scope present but
+# != main, finishedAt missing/unparseable, age > window, suite started before the most recent fan-in,
+# OR the state file is absent. This is the TIME/SOURCE-AXIS gate, complementary to the OBJECT gate's
+# MERGE-RESULT axis (gap-batch-merge-gate-validates-tip-not-merge-result); both run before any ref moves.
 # In --dry-run this reports the would-block measure without failing (mirrors check_object_gate).
 check_freshness_gate() {
   if [ "${skip_freshness_gate}" -eq 1 ]; then
@@ -518,6 +533,26 @@ check_freshness_gate() {
   state="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('state',''))" "${state_file}" 2>/dev/null || true)"
   if [ "${state}" != "green" ]; then
     verdict="suite-state state='${state:-<missing>}' (batch merge requires state==green)"
+    echo "integration-batch-merge: measure suite_freshness=unknown"
+    if [ "${dry_run}" -eq 1 ]; then
+      echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"
+      return 0
+    fi
+    echo "integration-batch-merge: FRESHNESS-GATE FAIL-CLOSED — ${verdict}; nothing moved" >&2
+    return 1
+  fi
+
+  # SCOPE dimension (gap-batch-merge-freshness-gate-ignores-scope) — the green must be MAIN-sourced.
+  # The runner tags every state `scope: main|worktree` (gap-worktree-scoped-runs-consume-resources-but-
+  # produce-no-signal AC1): main = the authoritative signal the batch merge may trust; worktree =
+  # DEFERRABLE — it may have tested a COMPLETELY DIFFERENT tree (ANY linked worktree), and the old gate
+  # (state==green + time freshness only) would have accepted it, shipping unverified content into
+  # develop. scope ABSENT (legacy pre-scope state) ⇒ treat as main (fail-open — the runner's documented
+  # legacy semantics); scope present but != "main" (incl. unknown values) ⇒ fail-closed.
+  local scope=""
+  scope="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('scope',''))" "${state_file}" 2>/dev/null || true)"
+  if [ -n "${scope}" ] && [ "${scope}" != "main" ]; then
+    verdict="suite-state scope='${scope}' (batch merge requires a MAIN-sourced green — a worktree green is deferrable and may not have tested the merge target)"
     echo "integration-batch-merge: measure suite_freshness=unknown"
     if [ "${dry_run}" -eq 1 ]; then
       echo "integration-batch-merge: DRY-RUN — freshness gate WOULD fail closed: ${verdict} (no ref moved in dry-run)"

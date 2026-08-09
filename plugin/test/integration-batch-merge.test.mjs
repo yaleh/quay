@@ -824,7 +824,10 @@ function freshnessRepo(prefix, fanInEpochSec) {
 
 // Write a suite-state file (finishedAt EPOCH SECONDS — the format the runner now writes, and the
 // format the freshness gate's Contract measure `int(time.time() - finishedAt)` consumes).
-function writeSuiteStateFile(dir, { state = "green", finishedAtEpoch, startedAtIso } = {}) {
+// `scope` (main|worktree) is written by the runner (gap-worktree-scoped-runs-consume-resources-but-
+// produce-no-signal AC1); when omitted the state is a legacy pre-scope file — the gate must treat it
+// as main (fail-open, the runner's documented legacy semantics).
+function writeSuiteStateFile(dir, { state = "green", scope, finishedAtEpoch, startedAtIso } = {}) {
   const stateDir = join(dir, ".quay");
   mkdirSync(stateDir, { recursive: true });
   const data = {
@@ -835,6 +838,7 @@ function writeSuiteStateFile(dir, { state = "green", finishedAtEpoch, startedAtI
     durationMs: 1000,
     laneCount: 8,
   };
+  if (scope !== undefined) data.scope = scope;
   const file = join(stateDir, "full-suite-state.json");
   writeFileSync(file, JSON.stringify(data), "utf8");
   return file;
@@ -979,6 +983,111 @@ test("FRESHNESS GATE: legacy ISO finishedAt (pre-normalization state file) is pa
     assert.match(r.stdout, /freshness-gate OK/);
     assert.match(r.stdout, /measure suite_freshness=\d+/);
     assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── FRESHNESS GATE SCOPE AXIS (gap-batch-merge-freshness-gate-ignores-scope) ───────────────────────
+//
+// The batch-merge gate previously read ONLY `state == green` + time freshness and IGNORED the state's
+// `scope` field — so a green from ANY linked worktree (even one testing a completely unrelated tree,
+// e.g. another task's checkout) satisfied the gate and an unverified tree could be merged into
+// develop. The runner tags every state `scope: main|worktree` (gap-worktree-scoped-runs-consume-
+// resources-but-produce-no-signal AC1): main = the authoritative signal (the batch merge may trust
+// it); worktree = DEFERRABLE ("its completion updates nothing anyone waits on"). The fix adds the
+// SCOPE axis: a green with `scope` present but != "main" FAILS CLOSED; a green with scope=="main"
+// (or scope ABSENT — a legacy pre-scope state, treated as main per the runner's documented fail-open
+// legacy semantics) passes the axis. The batch merge therefore requires a MAIN-sourced green — the
+// outer verification-round's full-suite run IS main-sourced (orchestrator-loop-tick.md step 3 runs
+// full-suite-runner from the outer layer), so a same-tree worktree green is NOT a substitute: the
+// authoritative verification happens on main.
+
+test("FRESHNESS GATE (scope axis, gap-batch-merge-freshness-gate-ignores-scope): a WORKTREE-sourced green (scope=='worktree', fresh + covering the tip) ⇒ BLOCKED, nothing moved", () => {
+  // The green is fresh (finished 30s ago) and the suite STARTED after the fan-in — the AGE and
+  // COVERAGE axes would pass; ONLY the SCOPE axis (worktree, not main) blocks.
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fss1", now - 600); // last fan-in 10m ago — BEFORE the suite ran
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      scope: "worktree",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.notEqual(r.status, 0, "a worktree-sourced green must NOT satisfy the batch merge gate");
+    assert.match(r.stderr, /FRESHNESS-GATE FAIL-CLOSED/);
+    assert.match(r.stderr, /scope='worktree'/);
+    assert.match(r.stdout, /measure suite_freshness=unknown/);
+    // Nothing moved: develop unchanged, integration NOT absorbed.
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (scope axis negative control): a MAIN-sourced green (scope=='main', fresh + covering the tip) ⇒ ALLOWED (develop fast-forwards)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fss2", now - 600);
+  try {
+    writeSuiteStateFile(dir, {
+      scope: "main",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `a main-sourced green must pass the batch merge gate: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /freshness-gate OK/);
+    assert.match(r.stdout, /measure suite_freshness=\d+/);
+    assert.match(r.stdout, /fast-forwarded to integration/);
+    // Develop advanced to the integration tip; integration absorbed.
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+    assert.equal(gitCmd(dir, "rev-list", "--count", "develop..integration").stdout.trim(), "0");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (scope axis legacy): an ABSENT scope field (pre-scope state) ⇒ treated as main ⇒ ALLOWED (fail-open legacy semantics)", () => {
+  // The runner documented the legacy rule itself: "Absent (legacy states) ⇒ treat as main (fail-open)".
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fss3", now - 600);
+  try {
+    writeSuiteStateFile(dir, {
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir]);
+    assert.equal(r.status, 0, `a legacy no-scope green must be treated as main (fail-open): ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /freshness-gate OK/);
+    assert.match(r.stdout, /fast-forwarded to integration/);
+    assert.equal(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("FRESHNESS GATE (scope axis dry-run): a worktree-sourced green in --dry-run reports the would-block WITHOUT failing (no ref moved)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const dir = freshnessRepo("fss4", now - 600);
+  try {
+    const devBefore = gitCmd(dir, "rev-parse", "develop").stdout.trim();
+    writeSuiteStateFile(dir, {
+      scope: "worktree",
+      finishedAtEpoch: now - 30,
+      startedAtIso: new Date((now - 120) * 1000).toISOString(),
+    });
+    const r = run([batchMerge, "--root", dir, "--dry-run"]);
+    // Dry-run does NOT fail even when the scope gate would block — it reports the would-block
+    // (mirrors the object gate's and the other freshness axes' dry-run contract). No ref moved.
+    assert.equal(r.status, 0, "dry-run must not fail even when the scope gate would block");
+    assert.match(r.stdout, /DRY-RUN — freshness gate WOULD fail closed/);
+    assert.match(r.stdout, /scope='worktree'/);
+    assert.match(r.stdout, /measure suite_freshness=unknown/);
+    assert.equal(gitCmd(dir, "rev-parse", "develop").stdout.trim(), devBefore);
+    assert.notEqual(gitCmd(dir, "merge-base", "--is-ancestor", "integration", "develop").status, 0);
   } finally {
     cleanup(dir);
   }
