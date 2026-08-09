@@ -1199,3 +1199,21 @@ K=2 升级给人、K=3 关生产闸。**`.halt` 不能用作 K=3 的手段**:代
 `slot-refill.in_flight_count` 是入参不是测量(绕过去自己数 pane ⇒ in_flight 至今无可信来源)、
 `.quay/last-pane.txt` 无写入者(绕过用 capture-pane ⇒ A7 死判据留到今天)、
 `FAILURE_PATTERNS` 前两次只修触发的那条(第三次复发)。
+
+**A15(收件箱)的理由**(2026-08-09 16:4x,人重申「最怕的就是看不到,或者沉默地失败了」后当场实测):
+`.quay/manager-inbox/` 里躺着 **6 封 archguard 的报告**,最新一封 2026-08-06 13:26(三天前),
+**我的执行核里 `inbox` 命中 0 条——我从来没读过收件箱**。而 outer 的核 A5 早就有
+`supervisor-bus-identity.sh inbox-summary`,判据写着「unread 逐条进决策;delivered ≠ consumed」
+——**又一次跨层不对称,方向和 C9 一模一样:outer 有、我没有**。
+
+**更关键:机械计数器沉默失败了。** `supervisor-bus-identity.sh inbox-summary` 实测输出
+`delivered=0 consumed=0 unread=0`,而目录里明明有 6 个文件。**即使我当初照抄了 outer 的 A5,
+它也会告诉我「无未读」。** 这是「看不到 + 沉默地失败」两种最坏情况叠在一起的实例,
+也是「语义是必须的,机械检查仅做辅助」的最强证据:计数器说 0,只有 `ls` 那个目录才看得见 6。
+⇒ **A15 的判据必须是列目录本身,不得依赖任何未读计数器。**
+
+**未处置的内容(报告 #13,2026-08-06 10:15Z)**:archguard 下载真产物验证
+`quay-sea-0.4.0-linux-x64.tar.gz`(69MB),**release 产物不含 plugin 包**——对二进制 strings 搜
+6 个新机制名全未找到;`quay init --loop` 仍停在 config 冲突。结论:「package.json files 字段含
+plugin(source 层面)≠ release 产物含 plugin(消费方下载的)」,**AC16 在产物层面未达成**,
+这解释了升级通道为什么一直不通。**实测查证:此问题从未被立案。**
