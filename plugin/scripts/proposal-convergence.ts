@@ -1910,10 +1910,25 @@ function _acquireEpochLock(workspace, taskId) {
         }
       }
       if (age !== null && age >= EPOCH_LOCK_STALE_MS) {
-        // Stale — reclaim by removing the orphaned lock file, then retry immediately (still
-        // bounded by this SAME loop's own attempt count, never an unbounded reclaim/retry cycle).
-        try { fs.rmSync(lockPath, { force: true }); } catch { /* another racer may have reclaimed it first */ }
-        continue;
+        // Stale age alone is NOT proof the holder crashed — a holder that is ALIVE but slow
+        // (its critical section runs > EPOCH_LOCK_STALE_MS under load) must NOT be reclaimed:
+        // reclaiming it breaks mutual exclusion (two callers inside the critical section), which
+        // lets the hard ceiling be exceeded (proposal-convergence 20-concurrency --new-epoch
+        // REGRESSION red under the suite's systemd-scoped load: succeeded.length > maxNewEpochResetCount).
+        // Probe holder liveness via process.kill(pid, 0) (no signal sent): ESRCH ⇒ genuinely
+        // crashed ⇒ reclaim the orphaned lock; alive (or PID unknown on a corrupt lock) ⇒ treat
+        // as LIVE contention and fall through to the bounded retry sleep below.
+        const holderPid = existing?.pid;
+        let holderDead = true;
+        if (Number.isFinite(holderPid)) {
+          try { process.kill(holderPid, 0); holderDead = false; } catch { holderDead = true; }
+        }
+        if (holderDead) {
+          // genuinely crashed holder — reclaim by removing the orphaned lock file, retry immediately
+          // (still bounded by this SAME loop's own attempt count, never an unbounded reclaim/retry cycle).
+          try { fs.rmSync(lockPath, { force: true }); } catch { /* another racer may have reclaimed it first */ }
+          continue;
+        }
       }
       if (attempt < EPOCH_LOCK_RETRY_DELAYS_MS.length) {
         _syncSleepMs(EPOCH_LOCK_RETRY_DELAYS_MS[attempt]);
