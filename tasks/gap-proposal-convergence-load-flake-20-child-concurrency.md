@@ -3,7 +3,7 @@ id: gap-proposal-convergence-load-flake-20-child-concurrency
 title: proposal-convergence.test.mjs 的 20-并发-child 子测试在全量套件负载下轮换性
   flake——round-164 红（66.7s 重测试），solo 218/218 绿、round-163 同负载同表面绿、无 pending
   commit 触及该代码；与 install 家族轮换 flake 同族
-status: done
+status: ready
 labels:
   - gap
   - defect
