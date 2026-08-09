@@ -49,12 +49,14 @@ extra: {}
 （red/aborted/缺 state 同路径：不批量合）。注意 `fast-mode-loop-tick.md` 与
 `orchestrator-loop-tick.md` 两处读 state 的地方要同步改（同源，防漂移）。
 
+**invoke 实跑证据（2026-08-09）**：`python3 -c "import json; d=json.load(open('.quay/full-suite-state.json')); print(d.get('finishedAt'))"` → `1786250942`（round-14 终态 finishedAt 实测；命令可原样跑、输出可贴回）
+
 ## Contract
 
 ```
 measure suite_freshness = `python3 -c "import json,time; d=json.load(open('.quay/full-suite-state.json')); print(int(time.time()-d.get('finishedAt',0)))"` stdout 数字段
 band suite_freshness = <窗口秒数>（修复后 finishedAt 距今 ≤ 窗口才视为有效绿；当前 7b1ac3a1 场景远超窗口）
-invoke `python3 -c "import json; d=json.load(open('.quay/full-suite-state.json')); print(d.get('finishedAt'))"`
+invoke `bash plugin/scripts/integration-batch-merge.sh --dry-run --root <repo> --develop develop --integration integration 2>&1 | tail -3`
 control 对照：新绿（suite 刚跑完）必须放行；旧绿（如 7b1ac3a1 场景，3 小时前）必须拦截为「无有效绿」
 resume 若中断，先跑 measure 确认 finishedAt 距今秒数，不要假设已修
 ```

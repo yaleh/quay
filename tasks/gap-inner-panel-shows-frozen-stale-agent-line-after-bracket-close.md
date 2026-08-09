@@ -63,12 +63,14 @@ agent）。**不是「冻结时长永久留在面板上」**，而是【已死�
    即可分辨；
 3. **机械可检出**：括号关闭后该 agent 行仍存在 ⇒ 应可被机械检出（与 instrument-failure 检出器族呼应）。
 
+**invoke 实跑证据（2026-08-09）**：`tmux capture-pane -p -t quay-0:inner 2>/dev/null | grep -E 'observer-registry|Committing'` → 当前 inner pane 无 observer-registry/Committing 行（空输出——面板无该残留行；命令可原样跑、输出可贴回）
+
 ## Contract
 
 ```
 measure stale_panel_lines = `tmux capture-pane -p -t quay-0:inner 2>/dev/null | grep -cE 'Committing|Running|Waiting|Execute|Checking|Monitoring|Verifying'` stdout 数字段（与 inProgress 对照的差异面）
 invariant 面板上括号已关闭任务的 agent 行不得以「冻结计时」形态与存活行外观相同；观测视图必须表达状态转换
-invoke `tmux capture-pane -p -t quay-0:inner 2>/dev/null | grep -E 'observer-registry|Committing'`
+invoke `node --experimental-strip-types plugin/scripts/inner-panel-stale-check.ts --target quay-0:inner --root <repo> 2>&1 | tail -3`
 control 人为关闭一个括号后保留面板行 ⇒ 检测必须报出该行是冻结行（计时未动）；修复后该行被清除或标记
 resume 若中断，先跑 measure 读当前面板残留行，再对照 inProgress 区分存活/冻结
 ```

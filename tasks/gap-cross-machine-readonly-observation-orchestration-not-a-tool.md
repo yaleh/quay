@@ -69,7 +69,7 @@ band observe_call_shape_consistent = 1
 measure fetch_before_compare = `bash plugin/scripts/<跨机观测脚本> observe --host <target> --root <path> --json | python3 -c "import json,sys;print(json.load(sys.stdin)['git_state']['behind'])"` stdout 的数字段（须与人工 `ssh <target> "git fetch && git rev-list --count HEAD..origin/<branch>"` 的结果一致）
 band fetch_before_compare = 1
 invariant 任何跨主机只读观测调用，manager 不得手写 ssh+git 组合命令；必须调用这一个实现
-invoke `bash plugin/scripts/<跨机观测脚本> observe --host <target> --root <path>`
+invoke `bash plugin/scripts/supervisor-observe.sh observe --host <target> --root <path>`
 control 故意让远程目标的 git ref 落后于人工制造的新提交，不 fetch 直接跑 observe()，输出必须已经是刷新后的值（不能是陈旧值）；若不是，说明"先 fetch 再比较"没有真正封装进去
 resume 若中断，先跑 measure 读当前实现覆盖了 observe() 的哪些字段，不要假设全覆盖
 ```
