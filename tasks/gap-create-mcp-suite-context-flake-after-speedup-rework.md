@@ -57,8 +57,8 @@ extra: {}
 ## Touches
 
 - packages/quay-github/test/create-mcp.test.mjs（超时放宽 / 隔离标记 / 失败诊断）
-- plugin/scripts/（若走 KNOWN-LOAD-SENSITIVE 白名单：known-load-sensitive.ts）
-- scripts/test.sh（若走 serial/lowconc 隔离：组别调整）
+- plugin/scripts/known-load-sensitive.ts（若修法选 KNOWN-LOAD-SENSITIVE 白名单：新增 create-mcp 条目）
+- scripts/test.sh（若修法选 serial/lowconc 隔离：create-mcp 组别调整）
 - tasks/gap-create-mcp-suite-context-flake-after-speedup-rework.md（自身：勾 AC + 贴证据）
 
 ## Contract
