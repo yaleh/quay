@@ -100,6 +100,45 @@ test("AC4 — an absent inbox reports all-zero (the mount point never dies)", (t
   assert.match(out, /^delivered=0 consumed=0 unread=0$/);
 });
 
+// ── non-JSON delivered files (gap-inbox-counter-disconnected-from-files) ─────────────────────────────
+// The archguard reports are delivered as .md, NOT .json. The old counter filtered .endsWith(".json")
+// AND `continue`-ed on a JSON.parse failure — double exclusion ⇒ delivered=0 while the dir held 6
+// files. delivered must count EVERY file; a non-JSON file is delivered-but-unread unless a
+// "<f>.consumed" sidecar (the AC4 trace) marks it handled.
+
+test("AC2 — a non-JSON (.md) report counts as delivered with a file= unread line", (t) => {
+  const { inbox } = tmpInbox(t);
+  fs.writeFileSync(path.join(inbox, "archguard-20260806-101500Z.md"), "# archguard report\n", "utf8");
+  const out = execFileSync("bash", [SCRIPT, "inbox-summary", "--inbox", inbox], { encoding: "utf8" });
+  const summary = out.split("\n").find((l) => l.startsWith("delivered="));
+  assert.match(summary, /^delivered=1 consumed=0 unread=1$/, `md report must be counted: ${summary}`);
+  const unreadLines = out.split("\n").filter((l) => l.startsWith("unread: "));
+  assert.equal(unreadLines.length, 1);
+  assert.match(unreadLines[0], /file=archguard-20260806-101500Z\.md/);
+});
+
+test("AC4 — a <f>.consumed sidecar marks a non-JSON report consumed (delivered≠consumed trace)", (t) => {
+  const { inbox } = tmpInbox(t);
+  fs.writeFileSync(path.join(inbox, "archguard-20260806-101500Z.md"), "# archguard report\n", "utf8");
+  fs.writeFileSync(path.join(inbox, "archguard-20260806-101500Z.md.consumed"), "consumed\n", "utf8");
+  const out = execFileSync("bash", [SCRIPT, "inbox-summary", "--inbox", inbox], { encoding: "utf8" });
+  const summary = out.split("\n").find((l) => l.startsWith("delivered="));
+  assert.match(summary, /^delivered=1 consumed=1 unread=0$/, `sidecar → consumed: ${summary}`);
+});
+
+test("AC2 — mixed json + .md inbox reports both, one unread line each with its own identifier", (t) => {
+  const { inbox } = tmpInbox(t);
+  writeDelivered(inbox, { id: "msg-a", seq: 1, from: "manager", text: "please read" });
+  fs.writeFileSync(path.join(inbox, "archguard-20260806-101500Z.md"), "# archguard report\n", "utf8");
+  const out = execFileSync("bash", [SCRIPT, "inbox-summary", "--inbox", inbox], { encoding: "utf8" });
+  const summary = out.split("\n").find((l) => l.startsWith("delivered="));
+  assert.match(summary, /^delivered=2 consumed=0 unread=2$/);
+  const unreadLines = out.split("\n").filter((l) => l.startsWith("unread: "));
+  assert.equal(unreadLines.length, 2);
+  assert.ok(unreadLines.some((l) => l.startsWith("unread: seq=1 from=manager please read")));
+  assert.ok(unreadLines.some((l) => l.startsWith("unread: file=archguard-20260806-101500Z.md")));
+});
+
 // ── usage / fail-loud ───────────────────────────────────────────────────────────────────────────────
 
 test("usage — an unknown subcommand fails loud (exit 2)", () => {

@@ -103,19 +103,36 @@ inbox_summary() {
     const fs = require("fs");
     const path = require("path");
     const inbox = process.argv[1];
+    // Count EVERY message file in the inbox, not just .json — the archguard reports are delivered
+    // as .md (gap-inbox-counter-disconnected-from-files: the counter said delivered=0 while the dir
+    // held 6 .md reports; a .json-only filter silently hid them). A delivered message is any file
+    // EXCEPT a "<f>.consumed" sidecar — that is the AC4 consumption TRACE, not a message, and must
+    // never be counted as delivered (it would inflate delivered by 1 per handled message).
     let files = [];
-    try { files = fs.readdirSync(inbox).filter((f) => f.endsWith(".json")).sort(); } catch { files = []; }
+    try { files = fs.readdirSync(inbox).filter((f) => !f.endsWith(".consumed")).sort(); } catch { files = []; }
     let delivered = 0;
     let consumed = 0;
     const unread = [];
     for (const f of files) {
+      const p = path.join(inbox, f);
       let rec = null;
-      try { rec = JSON.parse(fs.readFileSync(path.join(inbox, f), "utf8")); } catch { continue; }
-      delivered += 1;
-      if (rec.consumed === true) { consumed += 1; }
-      else {
-        const text = rec && rec.payload && rec.payload.text ? ` ${rec.payload.text}` : "";
-        unread.push(`unread: seq=${rec && rec.seq != null ? rec.seq : "?"} from=${rec && rec.from ? rec.from : "?"}${text}`);
+      let parsed = false;
+      try { rec = JSON.parse(fs.readFileSync(p, "utf8")); parsed = true; } catch { /* non-JSON (.md report) */ }
+      if (parsed && rec) {
+        // Bus record: the receipt is the in-file consumed field (inbox-reader writes it).
+        delivered += 1;
+        if (rec.consumed === true) { consumed += 1; }
+        else {
+          const text = rec.payload && rec.payload.text ? ` ${rec.payload.text}` : "";
+          unread.push(`unread: seq=${rec.seq != null ? rec.seq : "?"} from=${rec.from ? rec.from : "?"}${text}`);
+        }
+      } else {
+        // Non-JSON delivered file (e.g. archguard .md report): no receipt field. A "<f>.consumed"
+        // sidecar is the AC4 trace that marks it handled; absent → delivered-but-unread, REPORTED
+        // not swallowed (candidate C: no-receipt mechanism ⇒ delivered>0 即报).
+        delivered += 1;
+        if (fs.existsSync(`${p}.consumed`)) { consumed += 1; }
+        else { unread.push(`unread: file=${f}`); }
       }
     }
     console.log(`delivered=${delivered} consumed=${consumed} unread=${delivered - consumed}`);
