@@ -118,7 +118,7 @@ AC16③ 收口**。ad-arm1 因 aarch64 无 release 产物，本任务不覆盖�
 
 ## Touches
 - 跨机真机复测（B orangevps / C ad-arm1，manager 可触达）
-- README（若复测暴露文档缺口）
+- README.md（复测暴露文档缺口时补——具体文件，非裸目录）
 - tasks/gap-npm-install-does-not-register-the-plugin-with-claude-code.md（AC4 交叉标注）
 - tasks/gap-cli-quay-init-collides-with-the-canonical-slash-quay-init.md（AC4 交叉标注）
 - tasks/gap-readme-source-install-commands-are-all-broken-quay-js-does-not-exist.md（AC4 交叉标注）

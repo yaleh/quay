@@ -57,8 +57,7 @@ AssertionError: GO band must equal the injected hermetic value, got 2
 
 ## Touches
 
-- experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs（REGRESSION 白名单，若选簇 A 候选②）
-- experiments/quay-perpetual-stream/scripts/（spawnConvergenceCli kill-timeout 返回码，若选簇 A 候选①）
+- experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs（REGRESSION 白名单，选簇 A 候选②——kill-timeout 60s）
 - plugin/test/cap-from-gate.test.mjs + plugin/scripts/cap-from-gate.ts（簇 B seam 密封性）
 - plugin/scripts/resource-gate.sh（若 seam 传递链涉及）
 - tasks/gap-round5-red-killtimeout-sigkill-and-capfromgate-seam-under-load.md（自身：勾 AC + 贴证据）
