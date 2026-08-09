@@ -85,7 +85,7 @@ export const MANIFEST: DeliveryCategory[] = [
     deliverables: [".claude/launch.settings.json", "plugin/scripts/quay-launch.sh"],
     attribution: ["gap-crystallize-launch-config-into-checked-in-settings-file"],
     criterion:
-      "启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 .claude/launch.settings.json；quay-launch.sh 读取并生成启动命令（不再靠手打一行 shell）",
+      "启动命令/模型/上下文环境变量/TUI 环境变量结晶进检查进仓库的 .claude/launch.settings.json；quay-launch.sh 是内部实现（非用户直接调用面），读取 settings 并生成启动命令（不再靠手打一行 shell）",
   },
   {
     id: 4,

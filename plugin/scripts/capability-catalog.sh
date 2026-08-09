@@ -323,7 +323,12 @@ declare -A PUBLIC_ENTRYPOINTS=(
   [outer-tick-log-check.sh]="consumer-facing: the outer's no-action-must-carry-all-five-false-evidence detector (B8/B13) in the orchestrator tick docs"
   [monitor-mount-check.sh]="consumer-facing: the loop-monitor mount/aim check in the tick docs"
   [process-budget.sh]="consumer-facing: the total test-process budget authority consumed by test.sh / cap-from-gate / resource-gate"
-  [quay-launch.sh]="consumer-facing today: the per-role launch command in 4 skill docs (demotion to skill-internal tracked by gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal)"
+  # quay-launch.sh is NOT declared here: it is INTERNAL (surface=internal) — the per-role launch
+  # command is invoked by session-bootstrap.sh / quay-topology.sh / this skill set's own inner
+  # implementation, never by a consumer. Demoted by
+  # gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal (AC3): a skill is the
+  # user-facing interface; the launcher is the skill's hidden pipe. The QUESTION entry above stays
+  # (the script still answers "what is the exact per-role launch command").
   [quay-topology.sh]="consumer-facing: the two-window topology factory in the tick docs"
   [release-task.sh]="consumer-facing: the claim-release command documented in the tick docs"
   [real-target-verify.sh]="consumer-facing: the real-downstream install/upgrade verification command in the verification-round docs"

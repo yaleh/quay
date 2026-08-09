@@ -86,9 +86,13 @@ test('AC4 — the launch config 三件套 (deepseek-v4-flash + CLAUDE_CODE_MAX_C
   const outer = s._launchSpec?.roles?.outer;
   assert.equal(outer?.launcher, 'claude-deepseek', 'outer role must use claude-deepseek launcher (三件套 #2)');
   assert.equal(outer?.model, 'deepseek-v4-flash', 'outer role must pin deepseek-v4-flash (三件套 #3)');
-  // The manager skill references the launch config for the manager's own start (tribal → installable).
-  assert.match(managerSkill, /quay-launch\.sh manager/s,
-    'the manager skill must teach launching the manager via the launch config, not a hand-typed one-liner');
+  // The manager skill references the launch config for the manager's own start (tribal → installable),
+  // WITHOUT exposing the bare launcher script — a skill is the user-facing interface, the launcher is
+  // skill-internal (gap-quay-launch-sh-is-a-user-facing-surface-should-be-skill-internal AC2/AC4).
+  assert.match(managerSkill, /launch\.settings\.json/,
+    'the manager skill must teach launching the manager via the checked-in launch config, not a hand-typed one-liner');
+  assert.ok(!/quay-launch\.sh/.test(managerSkill),
+    'the manager skill must NOT reference the bare launcher script (it is skill-internal; users interact via the skill)');
 });
 
 // ── AC5 — the planning function has a live roadmap/strategic counterpart ─────────────────────────────

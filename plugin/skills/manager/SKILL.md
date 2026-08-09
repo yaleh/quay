@@ -137,13 +137,14 @@ implementation appearing in the manager's hands is the overreach signal.
 
 ## How the manager itself starts (launch config, not tribal knowledge)
 
-The per-role launch command lives in the checked-in `.claude/launch.settings.json`
-(`_launchSpec.roles.*`, settings-schema keys + `_launchSpec` extension) and is materialized by
-`plugin/scripts/quay-launch.sh`. The manager starts itself with
-`bash <root>/plugin/scripts/quay-launch.sh manager` (the manager role runs the Anthropic default
-model — the deepseek 917k context/compaction vars are outer/inner-only by `_launchSpec` design).
-Never hand-type a shell one-liner from memory. Verify first:
-`bash <root>/plugin/scripts/quay-launch.sh manager --dry-run`.
+The manager's launch command is an INTERNAL implementation detail of the launch mechanism — a
+human/agent never types it directly. The per-role launch command lives in the checked-in
+`.claude/launch.settings.json` (`_launchSpec.roles.*`, settings-schema keys + `_launchSpec`
+extension); the manager role runs the Anthropic default model — the deepseek 917k
+context/compaction vars are outer/inner-only by `_launchSpec` design. To start the manager,
+invoke the skill that owns launching (the `quay-session-topology` skill's Method, or the session
+bootstrap) — never hand-type a shell one-liner from memory. The launch script is the skill's
+internal pipe, not a user-facing deliverable.
 
 ## Delivery ≠ startup (AC8)
 
@@ -290,16 +291,14 @@ allowed-tools: Bash, Read, Monitor
 ## 5. 启动配置（可安装）——部落知识 → 交付物
 
 启动参数**只存在于检查进仓库的** `.claude/launch.settings.json`（settings-schema 键 + `_launchSpec`
-扩展），由 `plugin/scripts/quay-launch.sh <role>` 物化为真实命令——**永不手打一行 shell**
-（`gap-crystallize-launch-config-into-checked-in-settings-file`）。
+扩展），由本 skill 的内部启动器物化为真实命令——**永不手打一行 shell**；启动脚本是 skill 背后的
+内部实现，不是用户/agent 直接调用面（启动走 `quay-session-topology` skill 的 Method）。
 
 - **outer / inner**：`claude-deepseek --model deepseek-v4-flash` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=917000`
   （launcher 统一追加 `--prompt-suggestions false`——**REQUIRED**，ghost-suggestion 故障 6 从源头消除，
   `gap-ghost-suggestion-eliminated-at-source-prompt-suggestions-false`；`_launchSpec.promptSuggestions:false`）
 - **manager**：`claude`（Anthropic 默认模型，不带 917k 覆盖——917k 只给 deepseek 角色，避免真实窗口
   之上压缩过晚导致 API 报错，session-launch-recipes §5）
-- 验证不启动：`bash plugin/scripts/quay-launch.sh <role> --dry-run`
-- 一次性验证会话：`bash plugin/scripts/quay-launch.sh <role> --bare`
 
 ---
 
