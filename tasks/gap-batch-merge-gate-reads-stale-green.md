@@ -5,7 +5,7 @@ title: 批量合闸门只读 .quay/full-suite-state.json 的
   三小时前、测完全不同一批提交的绿当通行证； state 文件 mtime 04:49:29 远早于 merge；按
   orchestrator-loop-tick.md:638-649 批量合硬前置是 suiteGreen==true，闸门满足但新鲜度为零——管理者判准
   ②「陈旧当现状」长在批量合闸门上
-status: ready
+status: done
 labels:
   - gap
   - defect
