@@ -1,7 +1,8 @@
 ---
 id: gap-fast-mode-loop-tick-duplicate-paste-blocks
-title: "fast-mode-loop-tick.md 有明显重复粘贴段（270/271 两条①、459-471 rebase 块、820-832 scheduler 块、956-961 步骤 6）——单源原则被破坏，同一条规则两处表述、行号漂移后消费方读不到权威版"
-status: ready
+title: fast-mode-loop-tick.md 有明显重复粘贴段（270/271 两条①、459-471 rebase 块、820-832
+  scheduler 块、956-961 步骤 6）——单源原则被破坏，同一条规则两处表述、行号漂移后消费方读不到权威版
+status: done
 labels:
   - gap
   - defect
