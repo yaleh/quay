@@ -947,6 +947,19 @@ function main(argv) {
       inFlightIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (args[i] === "--closed-but-live") {
       closedButLiveIds = String(args[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === "--promote") {
+      // gap-ready-pool-unknown-flag-fail-open AC3: `--promote` is NOT a flag here — promote is
+      // executed by `quay promote <id>` (the caller reads stdout `targeted_promotion`/`promotions`
+      // and runs it). Accepting it as a silent no-op would be the exact fail-open this task kills.
+      // Fail closed with the pointer so a typo'd `--promote` never "looks done but isn't".
+      console.error("ready-pool-check: --promote is not a flag. Use `quay promote <id>` (or `--targeted <id>` to query, then run quay promote).");
+      process.exit(2);
+    } else {
+      // gap-ready-pool-unknown-flag-fail-open AC2: unknown flag ⇒ fail closed. Before this fix an
+      // invented/misspelled flag (e.g. `--this-flag-does-not-exist-xyz`) was silently ignored with a
+      // normal JSON + exit 0 — "looks done but isn't" (same family as no-action-zero-cost, 1/4-as-label).
+      console.error(`ready-pool-check: unknown flag: ${args[i]} (run with --help for the full flag list)`);
+      process.exit(2);
     }
   }
   const rootDir = root ? path.resolve(root) : findRepoRoot(process.cwd());
