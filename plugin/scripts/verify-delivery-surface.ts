@@ -30,6 +30,11 @@
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <dir>
 //   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --json [--root <dir>]
+//   node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface --root <consumer-dir> [--layout source|laid|auto]
+//     (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid: --layout laid checks a
+//      quay-init --loop CONSUMER's laid layout — orchestration/+docs/analysis/ — instead of the
+//      SOURCE bundle layout. Default --layout auto detects: scripts/test.sh present ⇒ source;
+//      orchestration/ + docs/analysis/ present ⇒ laid.)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -124,6 +129,108 @@ export const MANIFEST: DeliveryCategory[] = [
       "L1 六类完整性检查（本条）+ AC8c 六键（启动瞬间）+ L2 趋势判据（gap-quality-criteria-are-point-in-time-no-trend-criteria 承载）",
   },
 ];
+
+// ── Consumer LAID layout manifest (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid) ──
+// The SOURCE manifest above checks quay's OWN repo layout (plugin/scripts/…, plugin/loop/…). A quay-init
+// --loop CONSUMER is laid out differently: tick docs land in orchestration/ + docs/analysis/, the
+// installer (quay-init.sh) and dev-tree tools (sync-vendor.sh) are NOT laid, the vendor runtime lands in
+// .quay/runtime/, and the observer is session-liveness.sh + its generated orchestration/session-liveness.env.
+// Checking a consumer against the SOURCE manifest is structurally impossible (0/6 for EVERY consumer — the
+// parent-defect this task kills: "the check that validates delivery completeness CANNOT see the layout it
+// validates"). LAID_MANIFEST is the SAME six-category surface, expressed at the CONSUMER's laid paths.
+// Single-source note: this is a SECOND executable manifest, kept honest by tests that pin BOTH 6/6 on the
+// bundle (source) AND 6/6 on a fixture that mirrors a real quay-init --loop consumer (laid). `--layout laid`
+// (or auto-detection when the root is a consumer, see detectLayout) selects it.
+
+export const LAID_MANIFEST: DeliveryCategory[] = [
+  {
+    id: 1,
+    name: "mechanism-and-runtime",
+    label: "机件与运行时（laid）",
+    deliverables: [
+      ".quay/config.yml",
+      ".quay/runtime/bin/quay.js",
+      ".quay/runtime/bin/quay-native.js",
+      ".quay/runtime/provider.yml",
+    ],
+    attribution: [],
+    criterion:
+      "消费者自包含机制+运行时：.quay/config.yml（provider 映射）+ .quay/runtime/（quay-init 铺入的自包含 vendor 运行时，非 dev-tree 依赖）",
+  },
+  {
+    id: 2,
+    name: "loop-docs",
+    label: "循环文档（laid）",
+    deliverables: ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md"],
+    attribution: ["gap-productize-the-manager-layer"],
+    criterion:
+      "outer+inner 两层 tick 文档铺入消费者 orchestration/ 与 docs/analysis/（laid 真实位置；源布局 plugin/loop/ 不铺）",
+  },
+  {
+    id: 3,
+    name: "launch-config",
+    label: "启动配置（laid）",
+    deliverables: ["plugin/scripts/quay-launch.sh"],
+    attribution: ["gap-crystallize-launch-config-into-checked-in-settings-file"],
+    criterion:
+      "quay-launch.sh 随派生铺设集铺入消费者 plugin/scripts/（由 manager SKILL.md 的 plugin/scripts/ 引用派生）",
+  },
+  {
+    id: 4,
+    name: "session-topology",
+    label: "会话拓扑（laid）",
+    deliverables: ["plugin/scripts/session-liveness.sh", "orchestration/session-liveness.env"],
+    attribution: ["gap-tmux-session-topology-no-factory-definition"],
+    criterion:
+      "session-liveness 监控（唯一 observer）铺入 plugin/scripts/ + 生成 orchestration/session-liveness.env（laid 会话拓扑）",
+  },
+  {
+    id: 5,
+    name: "periodic-anchor",
+    label: "周期锚点（已排除，非交付物）",
+    deliverables: [],
+    attribution: ["gap-loop-has-no-os-level-anchor-cannot-self-recover-after-crash"],
+    criterion:
+      "OS 级周期锚点工具（os-anchor-install.sh / os-anchor-watchdog.sh）——人裁定为开发阶段工具，明确排除出交付物，仅供人工显式使用",
+  },
+  {
+    id: 6,
+    name: "observation-and-verification",
+    label: "观测与校验（laid）",
+    deliverables: ["plugin/scripts/verify-delivery-surface.ts", "plugin/scripts/l1-delivery-surface-check.ts"],
+    attribution: ["gap-quality-criteria-are-point-in-time-no-trend-criteria"],
+    criterion:
+      "L1 六类完整性检查随铺设集交付（verify-delivery-surface.ts + l1-delivery-surface-check.ts）——消费方装后可自检（追加两半 #2：检查本身必须随铺设集交付）",
+  },
+];
+
+// ── Layout detection (source bundle vs consumer laid) ───────────────────────────────────────────────
+// The SAME six-category surface is expressed at two layouts: the bundle's OWN repo layout (source) and a
+// quay-init --loop consumer's laid layout. Detection is by distinguishing markers, NOT by best-effort:
+//   - a bundle/source root has scripts/test.sh (quay-init NEVER lays it into a consumer — the consumer
+//     keeps its own test command);
+//   - a consumer laid root has BOTH orchestration/ AND docs/analysis/ (quay-init --loop mkdir -p's both).
+// Anything else defaults to source (backward compatible with bare fixtures / plain dirs).
+
+export type Layout = "source" | "laid";
+
+export function detectLayout(root: string): Layout {
+  if (
+    fs.existsSync(path.join(root, "scripts", "test.sh")) &&
+    fs.existsSync(path.join(root, "plugin")) &&
+    fs.existsSync(path.join(root, "package.json"))
+  ) {
+    return "source";
+  }
+  if (fs.existsSync(path.join(root, "orchestration")) && fs.existsSync(path.join(root, "docs", "analysis"))) {
+    return "laid";
+  }
+  return "source";
+}
+
+export function manifestForLayout(layout: Layout): DeliveryCategory[] {
+  return layout === "laid" ? LAID_MANIFEST : MANIFEST;
+}
 
 // ── Delivery inventory (AC1/AC2 — single source for the plugin-bundle directory counts) ───────────
 // gap-delivery-outline-vs-verify-surface-single-source (human ruling 2026-08-06):
@@ -316,26 +423,29 @@ export function manifestsEqual(a: DeliveryCategory[], b: DeliveryCategory[]): bo
 // ── Root resolution ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Walk up to the workspace root. Sentinel is worktree-safe: the main checkout and every task
- * worktree have `package.json` + `plugin/` + `scripts/test.sh`, while a quay-init target does NOT
- * lay down `scripts/test.sh` (SPEC §1) — so auto-detection resolves the BUNDLE root, never a target.
- * (`--root <dir>` is the explicit way to point at a target workspace after install.)
+ * Walk up to the workspace root. Two root shapes are recognized:
+ *   - a BUNDLE root (quay's own repo / a task worktree): `package.json` + `plugin/` + `scripts/test.sh`;
+ *   - a CONSUMER root (a quay-init --loop target, e.g. a laid-down copy of this script): `package.json`
+ *     + `.quay/config.yml` (the consumer's provider map). The consumer never has `scripts/test.sh`.
+ *   (`--root <dir>` is the explicit way to point at a target workspace after install.)
  */
 export function findRepoRoot(startDir = path.dirname(fileURLToPath(import.meta.url))): string {
   let dir = path.resolve(startDir);
   for (let i = 0; i < 12; i++) {
-    if (
-      fs.existsSync(path.join(dir, "package.json")) &&
-      fs.existsSync(path.join(dir, "plugin")) &&
-      fs.existsSync(path.join(dir, "scripts", "test.sh"))
-    ) {
+    const hasPkg = fs.existsSync(path.join(dir, "package.json"));
+    if (hasPkg && fs.existsSync(path.join(dir, "plugin")) && fs.existsSync(path.join(dir, "scripts", "test.sh"))) {
+      return dir;
+    }
+    if (hasPkg && fs.existsSync(path.join(dir, ".quay", "config.yml"))) {
       return dir;
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("Cannot find bundle root (package.json + plugin/ + scripts/test.sh) upward from " + startDir);
+  throw new Error(
+    "Cannot find bundle or consumer root (package.json + plugin/ + scripts/test.sh, or package.json + .quay/config.yml) upward from " + startDir
+  );
 }
 
 // ── Surface check ───────────────────────────────────────────────────────────────────────────────────
@@ -352,6 +462,7 @@ export interface CategoryResult {
 
 export interface SurfaceReport {
   root: string;
+  layout: Layout;
   categories: CategoryResult[];
   covered: number;
   total: number;
@@ -359,8 +470,8 @@ export interface SurfaceReport {
   specLiveReason: string;
 }
 
-/** Run the six-category coverage check against a root. */
-export function checkSurface(root: string, manifest: DeliveryCategory[] = MANIFEST): SurfaceReport {
+/** Run the six-category coverage check against a root for the given layout. */
+export function checkSurface(root: string, manifest: DeliveryCategory[] = MANIFEST, layout: Layout = "source"): SurfaceReport {
   const categories: CategoryResult[] = manifest.map((c) => {
     const missing = c.deliverables.filter((d) => !fs.existsSync(path.join(root, d)));
     const attributionHoles = c.attribution.filter((t) => !fs.existsSync(path.join(root, "tasks", `${t}.md`)));
@@ -395,7 +506,7 @@ export function checkSurface(root: string, manifest: DeliveryCategory[] = MANIFE
     }
   }
 
-  return { root, categories, covered, total: manifest.length, specLive, specLiveReason };
+  return { root, layout, categories, covered, total: manifest.length, specLive, specLiveReason };
 }
 
 // ── Output ──────────────────────────────────────────────────────────────────────────────────────────
@@ -403,6 +514,13 @@ export function checkSurface(root: string, manifest: DeliveryCategory[] = MANIFE
 export function formatSurface(report: SurfaceReport): string {
   const lines: string[] = [];
   lines.push(`surface_categories_covered=${report.covered}/${report.total}`);
+  lines.push(`layout=${report.layout}`);
+  // Contract measure (consumer_surface): the outer greps stdout for `ok|PASS`. For a LAID consumer,
+  // a non-zero covered surface IS the goal (AC1 — "不再 0/6"); emit an explicit ok token so a partial
+  // consumer is countable (>0), not silently 0.
+  if (report.layout === "laid") {
+    lines.push(`consumer_surface_ok=${report.covered > 0 ? "1" : "0"}`);
+  }
   lines.push(
     `spec_is_live=${report.specLive === null ? "n/a" : report.specLive ? "1" : "0"}${report.specLiveReason === "n/a" ? "" : ` (${report.specLiveReason})`}`
   );
@@ -424,6 +542,7 @@ export function main(argv: string[]): number {
   let asJson = false;
   let inventoryMode = false;
   let writeInventoryMode = false;
+  let layoutArg: Layout | "auto" | null = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") {
       root = args[i + 1];
@@ -436,6 +555,21 @@ export function main(argv: string[]): number {
       inventoryMode = true;
     } else if (args[i] === "--write-inventory") {
       writeInventoryMode = true;
+    } else if (args[i] === "--layout") {
+      const v = args[i + 1];
+      if (v !== "source" && v !== "laid" && v !== "auto") {
+        console.error(`ERROR: unknown --layout value: ${v} (expected source|laid|auto)`);
+        return 2;
+      }
+      layoutArg = v as Layout | "auto";
+      i++;
+    } else if (args[i].startsWith("--layout=")) {
+      const v = args[i].slice("--layout=".length);
+      if (v !== "source" && v !== "laid" && v !== "auto") {
+        console.error(`ERROR: unknown --layout value: ${v} (expected source|laid|auto)`);
+        return 2;
+      }
+      layoutArg = v as Layout | "auto";
     } else if (args[i] === "--surface" || args[i] === "--help") {
       // accepted; --surface is the default surface mode
     } else {
@@ -505,7 +639,8 @@ export function main(argv: string[]): number {
     return 2;
   }
 
-  const report = checkSurface(resolved);
+  const layout: Layout = layoutArg === null || layoutArg === "auto" ? detectLayout(resolved) : layoutArg;
+  const report = checkSurface(resolved, manifestForLayout(layout), layout);
   const ok = report.covered === report.total && report.specLive !== false;
 
   if (asJson) {
@@ -513,6 +648,7 @@ export function main(argv: string[]): number {
       JSON.stringify(
         {
           ok,
+          layout,
           surface_categories_covered: `${report.covered}/${report.total}`,
           covered: report.covered,
           total: report.total,

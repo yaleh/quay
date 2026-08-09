@@ -345,3 +345,16 @@ publish-plugin-dist.yml` + `marketplace.json` plugins[0].version=0.4.0（source 
 **改动清单（本二次执行）**：仅任务文件本体 self-edit（status todo→ready 与开发侧派发预备对齐、补 DoD
 勾选、补 self-touch Touches 条目、本验证记录）。无代码改动——实现已在 integration 上（fan-in 7adb6307 +
 96076d12）。
+
+## Cross-annotation (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid)
+
+**AC3 交叉标注（2026-08-09，执行方）**：`gap-verify-delivery-surface-checks-source-layout-not-consumer-laid`
+是 AC16 判据 2（完整性）的**机械证据链**。本任务把 plugin bundle 放进 release（files 加 plugin/ +
+package.sh 快照），但「完整性」本身需要一把能验消费者 laid 布局的尺——verify-delivery-surface 原查 quay
+**源布局**（plugin/loop/ 等），对任何消费方结构性报 0/6（archguard 实证，da0b2cbf 2026-08-06）：拿它当
+AC16 完整性证据会得**结构上不可能为真的绿**（「亲代环境掩盖亲代缺陷」）。`gap-verify-delivery-surface-
+checks-source-layout-not-consumer-laid` 修复：verify-delivery-surface 新增 `--layout laid`（消费者
+laid 布局：orchestration/ + docs/analysis/，自动检测），并把 verify-delivery-surface.ts 加入 quay-init
+铺设集（追加两半 #2——检查本身随铺设集交付，消费者装后可自检）。由此：release 装出的消费者跑
+`verify-delivery-surface --surface`（laid 模式）≥ 6/6 即 AC16 判据 2 的机械证据；与 `npm-pack-e2e`
+（bundle_in_pack>0，产物含 plugin）成对——一个验「装得到」，一个验「铺得对、可自验」。

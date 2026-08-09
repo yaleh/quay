@@ -669,15 +669,39 @@ EOF
 }
 
 # write_state_file: record what --loop laid down, for the upgrade path (AC5).
+# gap-verify-delivery-surface-checks-source-layout-not-consumer-laid (追加两半 #3): the record must
+# match the DELIVERY, not a hand-picked 2 tick docs. archguard found laidFiles hardcoded only
+# ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md"] and
+# laidCategories only {"loop"} — while the lay-down actually ships scripts/probes/session-liveness/
+# runtime/config/workflows/agents. Fix: enumerate EVERY root-relative path quay-init owns/lays,
+# sha256 each existing file, and derive the category list from the laid roots.
 write_state_file() {
   if [ "$DRY_RUN" = true ]; then return; fi
   if [ ! -d "$WORKSPACE_ROOT/.quay" ]; then
     # A workspace without .quay/ still gets the state record in a sibling location.
     mkdir -p "$WORKSPACE_ROOT/.quay"
   fi
-  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" <<'PYEOF'
+  local laid_rel_file root f
+  laid_rel_file="$(mktemp)"
+  : > "$laid_rel_file"
+  # Every root-relative path quay-init --loop lays/owns. Files listed directly; dirs expand to all
+  # files under them (sorted). .quay/quay-init-state.json is included so the record self-tracks.
+  for root in \
+    "plugin/scripts" "plugin/probes" "orchestration" "docs/analysis" \
+    ".quay/config.yml" ".quay/quay-init-state.json" ".quay/runtime" \
+    ".claude/workflows" ".claude/agents"; do
+    if [ -f "$WORKSPACE_ROOT/$root" ]; then
+      printf '%s\n' "$root" >> "$laid_rel_file"
+    elif [ -d "$WORKSPACE_ROOT/$root" ]; then
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        printf '%s\n' "${f#"$WORKSPACE_ROOT"/}" >> "$laid_rel_file"
+      done < <(find "$WORKSPACE_ROOT/$root" -type f | sort)
+    fi
+  done
+  python3 - "$PLUGIN_VERSION" "$WORKSPACE_ROOT/.quay/quay-init-state.json" "$WORKSPACE_ROOT" "$laid_rel_file" <<'PYEOF'
 import json, os, sys, time, hashlib
-version, path, workspace_root = sys.argv[1], sys.argv[2], sys.argv[3]
+version, path, workspace_root, rel_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 state = {}
 if os.path.exists(path):
     try:
@@ -689,26 +713,37 @@ prev = state.get("pluginVersion")
 state["pluginVersion"] = version
 state["previousPluginVersion"] = prev if prev and prev != version else state.get("previousPluginVersion")
 state["laidAt"] = time.time()
-state["laidCategories"] = sorted(set(state.get("laidCategories", [])) | {"loop"})
-# laidFiles: sha256 of each install-managed (tick-doc) product file's CURRENT content — the
-# upgrade path's record of "what quay-init laid down". A file that on a later run still equals
-# this hash is stale install-managed content from an OLDER plugin version (replaced, AC5); a
-# file that differs from BOTH this hash and the new product is a genuine user edit (CONFLICT,
-# AC6). The config-driven install makes this distinction possible: every laid-down file is
-# byte-identical to the product, so the ONLY reason a managed file can differ on upgrade is
-# either a stale previous install or a user edit — and the hash tells them apart.
+with open(rel_file, encoding="utf-8") as f:
+    rels = [line.strip() for line in f if line.strip()]
+# laidCategories: derive from the laid roots (stable tokens, not just {"loop"}).
+cats = set(state.get("laidCategories", []))
+if any(r.startswith("plugin/scripts") for r in rels): cats.add("scripts")
+if any(r.startswith("plugin/probes") for r in rels): cats.add("probes")
+if any(r.startswith("orchestration") or r.startswith("docs/analysis") for r in rels): cats.add("loop")
+if any(r.startswith(".quay/runtime") for r in rels): cats.add("runtime")
+if any(r.startswith(".claude/workflows") for r in rels): cats.add("workflows")
+if any(r.startswith(".claude/agents") for r in rels): cats.add("agents")
+state["laidCategories"] = sorted(cats)
+# laidFiles: sha256 of each install-managed product file's CURRENT content — the upgrade path's
+# record of "what quay-init laid down". A file that on a later run still equals this hash is stale
+# install-managed content from an OLDER plugin version (replaced, AC5); a file that differs from
+# BOTH this hash and the new product is a genuine user edit (CONFLICT, AC6). The config-driven
+# install makes this distinction possible: every laid-down file is byte-identical to the product,
+# so the ONLY reason a managed file can differ on upgrade is either a stale previous install or a
+# user edit — and the hash tells them apart.
 laid = {}
-for rel in ["orchestration/orchestrator-loop-tick.md", "docs/analysis/fast-mode-loop-tick.md"]:
+for rel in rels:
     p = os.path.join(workspace_root, rel)
-    if os.path.exists(p):
+    if os.path.isfile(p):
         with open(p, "rb") as f:
             laid[rel] = hashlib.sha256(f.read()).hexdigest()
 state["laidFiles"] = laid
 with open(path, "w", encoding="utf-8") as f:
     json.dump(state, f, indent=2)
     f.write("\n")
-print(f"  state: .quay/quay-init-state.json pluginVersion={version} previous={prev or 'none'}")
+print(f"  state: .quay/quay-init-state.json pluginVersion={version} previous={prev or 'none'} laidFiles={len(laid)} laidCategories={','.join(sorted(cats))}")
 PYEOF
+  rm -f "$laid_rel_file"
 }
 
 # write_session_env: generate/update orchestration/session-liveness.env with the session-liveness
@@ -846,6 +881,11 @@ derive_loop_scripts() {
   #   SIX-category L1 delivery-completeness check ships with the loop so an installed project can
   #   re-run it (装后能跑). Deliberate explicit addition — no shipped doc references it by path
   #   (the SPEC §6 machine-readable list is its single source, resolved via --spec).
+  #   verify-delivery-surface.ts (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid,
+  #   追加两半 #2): the embedded-manifest L1 check ships with the loop so an installed project can
+  #   SELF-CHECK its six-category delivery surface in the LAID layout (--layout laid auto-detects a
+  #   consumer root). Archguard's 0/6 had two halves — wrong layout AND the check not being delivered;
+  #   this explicit addition closes the "检查本身没交付" half. Same class as l1-delivery-surface-check.ts.
   #   dead-loop-check.sh (gap-l2-continuous-health-dead-loop-criterion-loop-running-not-installed):
   #   the L2 continuous-health DEAD-LOOP criterion (transcript user messages + git commit window)
   #   ships with the loop so an installed project's manager can ask "is the loop actually running".
@@ -865,7 +905,8 @@ derive_loop_scripts() {
   printf '%s\n' inner-idle-log.ts it0-split-or-commit-check.ts pipe-exit-code-check.sh \
     gate-script-base.ts workflow-event-schema.mjs task-schema.ts touches-parser.ts wiring-coverage-check.ts \
     capability-catalog.sh l1-delivery-surface-check.ts dead-loop-check.sh inner-blocked-signal.ts \
-    inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts >> "$out"
+    inner-forensics.mjs task-contract-check.ts task-status-drift-check.ts touches-orthogonality-check.ts \
+    verify-delivery-surface.ts >> "$out"
   # (c2) consolidated grouped-entry members (SPEC-instruments-behind-one-entry.md AC8/AC12): the
   #   docs invoke them via `quay-<group>.ts <member>` (a subcommand, never a plugin/scripts/ path),
   #   so (a)/(b) cannot see them — but the entry point must dispatch to them, so they ship. Only

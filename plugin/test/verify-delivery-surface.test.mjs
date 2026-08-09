@@ -100,6 +100,22 @@ function buildFixture(manifest, specDocText) {
   return base;
 }
 
+// Consumer LAID fixture (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid): builds
+// a quay-init --loop consumer's laid layout — every laid-manifest deliverable at its consumer path
+// (orchestration/+docs/analysis/+plugin/scripts/+.quay/runtime). Attribution tasks are NOT created:
+// a consumer does not own quay's gap tasks (reported as attribution-holes, not fatal).
+function buildLaidFixture(manifest) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-laid-"));
+  for (const cat of manifest) {
+    for (const d of cat.deliverables) {
+      const p = path.join(base, d);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, "");
+    }
+  }
+  return base;
+}
+
 function rmrf(p) {
   fs.rmSync(p, { recursive: true, force: true });
 }
@@ -321,6 +337,97 @@ test("AC1 generation — --write-inventory regenerates the outline snapshot to m
     const after = fs.readFileSync(outlineFile, "utf8");
     assert.match(after, /scripts=1/, "the regenerated snapshot must carry the disk count");
   } finally { rmrf(base); }
+});
+
+// ── LAID layout (gap-verify-delivery-surface-checks-source-layout-not-consumer-laid) ────────────────
+// The task: verify-delivery-surface checked the SOURCE layout (plugin/loop/, plugin/scripts/ = quay's
+// own repo) and reported 0/6 for EVERY quay-init consumer (archguard's laid layout is orchestration/ +
+// docs/analysis/). AC1 — a consumer laid root must report covered > 0 (not 0/6); AC2 — a complete
+// current-release consumer must pass laid mode 6/6; AC4 — the source layout must stay supported.
+
+test("AC1 — a partial consumer (archguard shape: tick docs only) auto-detects laid layout and reports covered > 0", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "l1-laid-partial-"));
+  try {
+    fs.mkdirSync(path.join(base, "orchestration"), { recursive: true });
+    fs.mkdirSync(path.join(base, "docs", "analysis"), { recursive: true });
+    fs.writeFileSync(path.join(base, "orchestration", "orchestrator-loop-tick.md"), "");
+    fs.writeFileSync(path.join(base, "docs", "analysis", "fast-mode-loop-tick.md"), "");
+    const r = runScript(["--surface", "--root", base]);
+    assert.ok(r.stdout.includes("layout=laid"), "consumer root must auto-detect laid layout");
+    const covered = Number(/surface_categories_covered=(\d+)\/6/.exec(r.stdout)?.[1]);
+    assert.ok(Number.isFinite(covered) && covered > 0,
+      `a laid consumer must report covered > 0 (was structurally 0/6 before the fix), got:\n${r.stdout}`);
+    assert.ok(r.stdout.includes("consumer_surface_ok=1"), "the outer's ok/PASS measure must count the consumer surface");
+  } finally { rmrf(base); }
+});
+
+test("AC2 — a complete quay-init --loop consumer fixture passes laid mode 6/6 (explicit --layout laid AND auto-detect)", async () => {
+  const m = await mod();
+  const root = buildLaidFixture(m.LAID_MANIFEST);
+  try {
+    const r = runScript(["--surface", "--root", root, "--layout", "laid"]);
+    assert.equal(r.status, 0, `complete laid fixture must pass:\n${r.stderr ?? ""}\n${r.stdout}`);
+    assert.match(r.stdout, /surface_categories_covered=6\/6/, "laid fixture must report 6/6");
+    assert.match(r.stdout, /layout=laid/);
+    assert.match(r.stdout, /spec_is_live=n\/a/, "a consumer has no SPEC doc → n/a, not a false fail");
+    // Auto-detection (no --layout) must resolve the same consumer to laid and pass.
+    const ra = runScript(["--surface", "--root", root]);
+    assert.equal(ra.status, 0, `auto-detect laid must pass:\n${ra.stderr ?? ""}\n${ra.stdout}`);
+    assert.match(ra.stdout, /layout=laid/);
+  } finally { rmrf(root); }
+});
+
+test("AC4 — source layout preserved: the bundle root still reports 6/6 with explicit --layout source", async () => {
+  const r = runScript(["--surface", "--root", REPO_ROOT, "--layout", "source"]);
+  assert.equal(r.status, 0, `bundle root with --layout source must pass:\n${r.stderr ?? ""}\n${r.stdout}`);
+  assert.match(r.stdout, /layout=source/);
+  assert.match(r.stdout, /surface_categories_covered=6\/6/);
+});
+
+test("AC4 — both manifests carry six categories; auto-detection maps bundle→source and consumer→laid", async () => {
+  const m = await mod();
+  assert.equal(m.MANIFEST.length, 6, "source manifest must declare exactly six categories");
+  assert.equal(m.LAID_MANIFEST.length, 6, "laid manifest must declare exactly six categories");
+  assert.equal(m.detectLayout(REPO_ROOT), "source", "the bundle root auto-detects source (has scripts/test.sh)");
+  const consumer = buildLaidFixture(m.LAID_MANIFEST);
+  try {
+    assert.equal(m.detectLayout(consumer), "laid", "a consumer root auto-detects laid (orchestration/ + docs/analysis/)");
+  } finally { rmrf(consumer); }
+});
+
+test("Contract control — removing one laid category's deliverables makes laid mode report it MISSING", async () => {
+  const m = await mod();
+  for (const cat of m.LAID_MANIFEST) {
+    if (cat.deliverables.length === 0) continue;
+    const root = buildLaidFixture(m.LAID_MANIFEST);
+    try {
+      removeCategoryDeliverables(root, cat);
+      const r = runScript(["--surface", "--root", root, "--layout", "laid"]);
+      assert.equal(r.status, 1, `laid category ${cat.name} (deliverables removed) must fail`);
+      assert.match(
+        r.stdout,
+        new RegExp(`\\[${cat.id}/6\\] ${cat.name} .*: MISSING`),
+        `laid category ${cat.name} must be reported MISSING`
+      );
+    } finally { rmrf(root); }
+  }
+});
+
+test("CLI — --layout with an unknown value fails closed (usage error, exit 2)", async () => {
+  const r = runScript(["--surface", "--layout", "bogus"]);
+  assert.equal(r.status, 2, "unknown --layout value must be a usage error");
+  assert.match(r.stderr ?? "", /unknown --layout value/, "the error must name the bad value");
+});
+
+test("Contract measure — a complete laid consumer emits an ok/PASS token the outer's grep counts", async () => {
+  const m = await mod();
+  const root = buildLaidFixture(m.LAID_MANIFEST);
+  try {
+    const r = runScript(["--surface", "--root", root]);
+    assert.equal(r.status, 0, "complete laid consumer must pass");
+    const matches = (r.stdout.match(/ok|PASS/g) ?? []).length;
+    assert.ok(matches > 0, `the consumer_surface measure greps 'ok|PASS' and must find > 0, got:\n${r.stdout}`);
+  } finally { rmrf(root); }
 });
 
 // ── AC5: this file uses node:test with a governance group declaration (checked by policy) ─────────
