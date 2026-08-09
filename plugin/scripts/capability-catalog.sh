@@ -242,6 +242,7 @@ declare -A QUESTION=(
   [test-framework-policy-check.sh]="Do new tests use node:test, and is the exemption list shrinking (ratchet)?"
   [test-framework-policy-check.ts]="Do new tests use node:test and carry @test-group (mechanical policy)?"
   [test-impl-census-check.ts]="Are there test files whose tested implementation no longer exists (impl-deleted tests that should be removed with their implementation)?"
+  [threshold-scope-check.ts]="Does a driver doc's quantified stop-condition name its set AND window, and does every backtick-named path resolve (three-layer judgment, placeholder-skipped, with the violations ratchet shrinking)?"
   [test-isolation-check.sh]="Is every test isolated per the test-isolation contract (and is the violation ratchet shrinking)?"
   [test-isolation-check.ts]="Is every test isolated per the contract (report-only scan)?"
   [tmux-isolated.sh]="Is TMUX unset before the test runs (isolation from the driver session)?"
