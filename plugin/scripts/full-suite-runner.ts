@@ -265,8 +265,8 @@ const FAILURE_PATTERNS: RegExp[] = [
   /❯\s+\S+\s+\(\d+\s+tests?\s*\|\s*[1-9]\d*\s+failed(?:[^)]*)\)/, // vitest per-file: ❯ <file> (N tests | M failed [| K skipped])
   /Test Files\s+[1-9]\d*\s+failed/, // vitest summary: Test Files <N> failed
   /FULL-SUITE-EXIT=[^0]/, // the repo's own full-suite exit marker, non-zero
-  /✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms)
-  /✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed)
+  /^✖\s+\S.*\(\d+(?:\.\d+)?ms\)/, // node:test spec-reporter per-test failure: ✖ <testname> (Nms) — ^ anchored: a REAL reporter failure starts the line; a PASSING test whose NAME quotes the `✖ <name> (Nms)` shape (runner-failure-patterns' own e2e names) is `✔`-prefixed and must not match
+  /^✖\s+failing tests?/, // node:test spec-reporter failure-block header: `✖ failing tests:` (only emitted when tests failed) — ^ anchored, same reasoning
   /__PERFILE__.*passed=false/, // measure-suite-reporter per-file failure: __PERFILE__ duration_ms=<d> <path> passed=false
   /tmux-leak-scan: FAIL/, // suite-tail leak scan's residual report (candidate C)
 ];
