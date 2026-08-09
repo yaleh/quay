@@ -3,8 +3,8 @@
 // (tasks/gap-quantified-stop-conditions-have-no-scope). TWO detectors, ONE scan surface:
 //
 //   SCAN SURFACE (the three normative driver docs — the set is a Contract invariant, see below):
-//     docs/analysis/fast-mode-loop-tick.md
-//     orchestration/orchestrator-loop-tick.md
+//     plugin/loop/fast-mode-loop-tick.md
+//     plugin/loop/orchestrator-loop-tick.md
 //     CLAUDE.md
 //   `tasks/` is deliberately NOT scanned — task-body thresholds are task-contract-check.ts's
 //   jurisdiction (same two-judgment family, different objects).
@@ -82,8 +82,8 @@ export const DATA_FILE_REL = "docs/analysis/threshold-scope-violations.md";
 
 /** The fixed scan surface (a Contract invariant — the doc set must stay byte-identical across runs). */
 export const SCAN_DOCS = [
-  "docs/analysis/fast-mode-loop-tick.md",
-  "orchestration/orchestrator-loop-tick.md",
+  "plugin/loop/fast-mode-loop-tick.md",
+  "plugin/loop/orchestrator-loop-tick.md",
   "CLAUDE.md",
 ] as const;
 
@@ -439,7 +439,7 @@ export function writeRatchet(root: string, currentKeys: string[], { reset = fals
   const lines = [
     "# threshold-scope-violations.md — shrink-only ratchet list for the quantified stop-condition scope",
     "# and stale-path checks (tasks/gap-quantified-stop-conditions-have-no-scope). A violation here means",
-    "# a scanned driver doc (docs/analysis/fast-mode-loop-tick.md / orchestration/orchestrator-loop-tick.md",
+    "# a scanned driver doc (plugin/loop/fast-mode-loop-tick.md / plugin/loop/orchestrator-loop-tick.md",
     "# / CLAUDE.md) carries a count-threshold stop/trigger condition without naming its window, or a",
     "# backtick-named path that cannot be resolved (three-layer judgment, placeholder-skipped).",
     "#",

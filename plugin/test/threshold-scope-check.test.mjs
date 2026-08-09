@@ -193,8 +193,8 @@ test("AC6/default — the real-repo gate exits 0 and the current violation set m
   const out = JSON.parse(res.stdout);
   assert.equal(out.mode, "threshold-scope-docs");
   assert.equal(out.scanned.length, 3, `expected 3 scanned docs, got ${out.scanned.length}`);
-  assert.equal(out.scanned[0], "docs/analysis/fast-mode-loop-tick.md");
-  assert.equal(out.scanned[1], "orchestration/orchestrator-loop-tick.md");
+  assert.equal(out.scanned[0], "plugin/loop/fast-mode-loop-tick.md");
+  assert.equal(out.scanned[1], "plugin/loop/orchestrator-loop-tick.md");
   assert.equal(out.scanned[2], "CLAUDE.md");
   // The ## Contract measures: violations / stalePaths array lengths + skippedByMarker count.
   assert.equal(typeof out.violations.length, "number");
@@ -205,9 +205,10 @@ test("AC6/default — the real-repo gate exits 0 and the current violation set m
   assert.equal(out.ratchet.currentCount, current, `ratchet currentCount must equal the violation+stale total`);
   assert.equal(out.ratchet.growth, false, `no growth on the current docs`);
   assert.equal(out.ratchet.currentCount, out.ratchet.baselineCount, `current violation set must match the shrink-only baseline`);
-  // The two known threshold violations are the 2026-08-03 dispatch-freeze shape.
+  // The threshold violations include the two 2026-08-03 dispatch-freeze shapes (needs-human 积压 ≥3)
+  // plus the 注册表 ≥2 stop-condition surfaced by the canonical plugin/loop/ scan surface.
   const thresholdHits = out.violations.filter((v) => v.hit.includes("≥"));
-  assert.equal(thresholdHits.length, 2, `expected the 2 needs-human 积压 ≥3 violations, got ${thresholdHits.length}`);
+  assert.equal(thresholdHits.length, 3, `expected 3 unscoped count-threshold violations, got ${thresholdHits.length}`);
 });
 
 // ── the ratchet data file exists and is well-formed (the AC5 deliverable) ───────────────────────────

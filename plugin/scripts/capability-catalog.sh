@@ -245,6 +245,7 @@ declare -A QUESTION=(
   [threshold-scope-check.ts]="Does a driver doc's quantified stop-condition name its set AND window, and does every backtick-named path resolve (three-layer judgment, placeholder-skipped, with the violations ratchet shrinking)?"
   [test-isolation-check.sh]="Is every test isolated per the test-isolation contract (and is the violation ratchet shrinking)?"
   [test-isolation-check.ts]="Is every test isolated per the contract (report-only scan)?"
+  [threshold-scope-check.ts]="Does a driver doc's quantified stop-condition name its set AND window, and does every backtick-named path resolve (three-layer judgment, placeholder-skipped, with the violations ratchet shrinking)?"
   [tmux-isolated.sh]="Is TMUX unset before the test runs (isolation from the driver session)?"
   [tmux-leak-scan.sh]="Did a test run leak any tmux server or characteristic temp dir (suite-tail residual-leak assertion)?"
   [tmux-session.ts]="Is a test's tmux invocation isolated to a private socket (explicit -S + $TMUX stripped — both mandatory conditions structural)?"

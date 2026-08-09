@@ -97,6 +97,7 @@ export function exclusionEntries(repoRoot, pluginDir) {
       rel: 'orchestration/manager-tick-log.md',
       target: path.join(repoRoot, 'orchestration', 'manager-tick-log.md'),
       reason: "the manager's running tick log — a GITIGNORED runtime ledger (16:1x rule, never committed) whose historical entries quote deployed tick-doc paths verbatim (orchestrator-loop-tick.md:320/:605). Same class as manager-pending.md / tick-log.md above: the ledger documents the DEPLOYED target layout as living reference (surfaced by the AC1b scan 2026-08-09)",
+      retainedNote: "kept despite currently inert in a FRESH checkout (the target is a GITIGNORED runtime ledger — 16:1x rule, never committed — so it does NOT exist in a fresh clone and the necessity scan sees 0 hits only because the file is absent). The manager appends/edits this ledger during operation (its running tick log), and its entries quote deployed tick-doc paths verbatim; when the manager next writes a quoted deployed tick-doc line the AC1b scan would flag the ledger as a live reference. The entry must stay to keep the scan from mis-attributing the ledger's own quotes — same oscillation class as manager-pending.md / tick-log.md.",
     },
     { rel: 'test/cold-start-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-e2e.sh'), reason: 'target layout (asserts the laid-down project)' },
     { rel: 'test/cold-start-oneliner-e2e.sh', target: path.join(repoRoot, 'test', 'cold-start-oneliner-e2e.sh'), reason: 'AC8d target-layout paths (the cold start operates on orchestration/ + docs/analysis/)' },

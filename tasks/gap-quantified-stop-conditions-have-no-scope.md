@@ -15,6 +15,15 @@ extra:
 
 ## Proposal
 
+> **交叉标注（2026-08-09，`gap-loop-shipping-threshold-scope-check-old-path-regression`）**：本检查器
+> 初版 `SCAN_DOCS` 引用**旧部署副本路径**（`docs/analysis/fast-mode-loop-tick.md` +
+> `orchestration/orchestrator-loop-tick.md`），不在 loop-shipping 排除表内 → round-200 全量套件在
+> loop-shipping AC1b（176 绿仅此 1 红）。修复：`SCAN_DOCS` 改为 `plugin/loop/` **规范路径**
+> （`plugin/loop/fast-mode-loop-tick.md` + `plugin/loop/orchestrator-loop-tick.md` + `CLAUDE.md`），
+> ratchet 经 `--write-ratchet --reset-baseline` 重锚到新扫描面（baseline 3→5：2 条旧
+> `orchestration/` 键解析，新增 `注册表 ≥2`、`last-pane.txt` 两条 canonical 文档真实违规）。扫描面
+> 不丢（CLAUDE.md + 有效 tick-doc 面仍在），既有 checker 不回归。
+
 > **生成器标注（AC4，`gap-axis-generator-question-what-range-every-standing-criterion`）**：本条是轴
 > 生成器在**作用域轴**上的一个投影。生成器问句：「『needs-human 积压 ≥ 3』量化的是哪一个范围？」
 > ⇒ 无命名集合、无窗口（全局一刀切）⇒ **作用域轴未打开**。本任务即该未打开轴的一个实例，与
