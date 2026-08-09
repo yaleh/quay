@@ -152,6 +152,22 @@ export function listTestFiles(root) {
       }
     }
   }
+  // gap-known-load-sensitive-scan-glob-lags-suite-glob (2026-08-09): scripts/test.sh's canonical glob
+  // ALSO includes experiments/*/test/*.test.mjs (AC2), but this scanner only covered plugin/test/ and
+  // packages/*/test/ — so an experiments/ test carrying the KNOWN-LOAD-SENSITIVE + @load-sensitive
+  // markers (e.g. proposal-convergence.test.mjs, round-164/186/193/204 rotate-red) was INVISIBLE to
+  // the load-sensitive partition and never routed to the serial phase. Mirror the packages/ shape so
+  // the scan glob stays aligned with the suite glob (single source: scripts/test.sh's own glob).
+  const experiments = path.join(root, "experiments");
+  if (fs.existsSync(experiments)) {
+    for (const exp of fs.readdirSync(experiments)) {
+      const expTest = path.join(experiments, exp, "test");
+      if (!fs.existsSync(expTest)) continue;
+      for (const f of fs.readdirSync(expTest)) {
+        if (f.endsWith(".test.mjs")) out.push(path.posix.join("experiments", exp, "test", f));
+      }
+    }
+  }
   return out.sort();
 }
 
