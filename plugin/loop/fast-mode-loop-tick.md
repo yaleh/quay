@@ -149,7 +149,6 @@ orchestrator-loop-tick.md 同源防漂移）**：外层验证轮只在 `state: g
 任务级那份重复，批量合边界那道闸**原封不动**（保护总量不变、耦合消失）。把「少跑全量」当目标就是把方向 C
 做成方向 A。
 
-**判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a 那次（历史引用）
 **判绿三条件（2026-08-03，外层：fail 0 ≠ 绿）**：崩溃的套件也可能报 `fail 0`——batch4a（**历史批名**，指旧的全量验证轮次，保留不改名）那次
 `fail 0` 但 `cancelled 2`、`tests 2246`（非参考值 2361），两个重型测试被 cancelled
 （'Promise resolution is still pending'）不计入 fail。**判绿必须三条同时成立**：
@@ -158,9 +157,6 @@ grep 'cancelled 0'   # cancelled == 0（cancelled 不计入 fail，必须显式�
 grep 'FULL-SUITE-EXIT=0'
 grep 'tests 2239'    # tests 数等于参考值（2026-08-04 实测 2239＝2227+readyqueue touches-resolve 新测试，全量套件全绿；套件构成每次变都要重测参考值）
 ```
-只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c 稳定 2361（历史引用）→ … → +14 resource-gate =
-**判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
-（gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a 的 cancelled（历史引用）可能有
 只查 fail 会把崩溃读成绿。reference `tests` 数演变：batch4b/4c（**历史批名**）稳定 2361 → … → +14 resource-gate =
 **判绿理由（2026-08-03 外层更正）**：cancelled 的成因**不是**「饥饿必然导致 cancelled」——sigma 高压负控制
 （gate WAIT 41→99）仍 155/155 完整捕获、cancelled 未发生，推翻那个普适性。batch4a（**历史批名**）的 cancelled 可能有
@@ -290,7 +286,6 @@ exp5 已退役（`.claude/loop.md` 已删除），`.halt` 从「暂停 exp5 循�
 | # | 核对项 | 机械判据 |
 |---|---|---|
 | ① | 在飞 agent 是否符合文档 | **读槽位视角，不读原始括号**（`gap-telemetry-brackets-vs-subagents-no-slot-visibility`——括号 ≠ subagent，红窗遗留的未闭合 start 会把健康态误判成满负荷）：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}" --root "$(pwd)" --json` 的 **`realConcurrency` ≤ `effective_cap`**（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）。**`realConcurrency` = `realInFlight`（括号真实在飞）+ `subagentsInFlight`（非任务 subagent 进程——调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`）**——**真实并发 = 括号 + 非任务 subagent**，只读 `realInFlight` 会把调查型 subagent 漏算成空槽（实测 0/3 而实际 1 个 187k-token subagent 在跑 ⇒ 真实并发 4 不是 3）。**`realConcurrency > cap` ⇒ 并发违规（真超派发），判据抓住**；`brackets_reflect_subagents: false` ⇒ 有陈旧括号未 reconcile（`--reconcile` 处理）或 `--task-start`/`--task-end` 对没调齐（AC4）——是偏差，对齐而非误判健康。**反向维度（`gap-closed-bracket-leaves-live-agent-consuming-slots`：括号关 ≠ 进程退）**：`--slots` 的 `closedButLive` / `occupied_slots`（= `realConcurrency` + 已关括号但 executor 仍存在者）——**括号关 ≠ 槽空**，executor 仍在（worktree 未清 / 进程未退）的已关括号仍占槽，`occupied_slots > cap` 同样并发违规；该槽不得派新任务。每个在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
-| ① | 在飞 agent 是否符合文档 | 遥测 **`realConcurrency`** ≤ `effective_cap`（步骤 4 并发上限，由 `cap-from-gate.sh` 在派发时刻读 cpu 压力（some avg10）算出——见步骤 3.6 前置块；不再固定 3）；**不用原始 `inProgress[]` 括号数**——括号 ≠ subagent（5 个红窗遗留括号 ≠ 1 个真实 subagent，用括号会把恒真空检查当判据，`gap-telemetry-brackets-vs-subagents-no-slot-visibility` AC3）。**`realConcurrency`（`--slots` 输出）= `realInFlight` + `subagentsInFlight`**——真实并发 = 括号真实在飞 + 非任务 subagent 进程（调查型无括号，`gap-telemetry-underreport-nontask-subagents-not-counted-in-slots`：只读 realInFlight 会把 1 个在跑调查型 subagent 漏算成 0/3 空槽，空派 3 个任务）。读取形态：`node --experimental-strip-types plugin/scripts/fast-mode-telemetry.ts --slots --cap "${effective_cap:-3}"` 的 `real-concurrency` 字段（或 `realInFlight + subagentsInFlight` 之和）。每个真实在飞任务有 worktree 且在 `$WORKTREE_ROOT/<slug>`（磁盘，非 `/tmp`） |
 | ② | 就绪池是否维护 | `node --experimental-strip-types plugin/scripts/ready-pool-check.ts --root "$(pwd)" --cap "${effective_cap:-3}"` 的 `pool` / `dispatchable_disjoint` 字段（`effective_cap` 见步骤 3.6 前置块）；`pool < floor`（=cap×4）或 `dispatchable_disjoint < cap` 时是否已按步骤 3.6 补晋 |
 | ③ | 是否在偷偷做收尾 | inner 已无收尾职责（步骤 2 不写任务状态、步骤 3.5 只写 `--task-start`；收尾是外层步骤 1b 的异步活）。核对：本回合未合并改动里无 `status: *done` 写入、无 `--task-end` 调用、无轮次记录写入。**closure-lag 留痕/信号是外层 1b 的活**（`.quay/closure-pass-last-run.json` 由外层 `closure-lag-check.sh --record` 写、`closure-lag-check.sh` 是外层 tick 的每 tick 检查）——inner 不写不读不碰（`gap-closure-pass-has-no-lag-signal`）。红窗只停派发/合并推进，不停外层收尾 |
 | ④ | 停止条件是否被遵守 | 步骤 3 命中项（合并冲突 / OVER90 / ruling-required / 外层 suite-state `state: red` / 就绪队列空 / 窗口新增 needs-human ≥3）命中时是否停止派发；`.halt` 存在则本 tick 空转 |
@@ -487,19 +482,6 @@ unread = delivered − consumed。本步只读不写回执（消费是人的动�
    rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
 1. `git merge --no-ff task/<taskId>`（合并目标 = 当前检出的 `$MERGE_TARGET`——两线模型下内层共享检出
    立在 `$MERGE_TARGET` 上，不是 `$FORK_BASELINE`；`$FORK_BASELINE` 只由外层批量合推进）
-0. **先 rebase 到当前 integration**（待验证汇入点，两线模型——`orchestration/SPEC-branching-model-integration-branch-2026-08-05.md`）：
-   ```bash
-   git -C $WORKTREE_ROOT/<slug> rebase integration
-   ```
-   worktree 建立时对**分叉基线**（独立任务 = `develop` / 声明依赖 = `integration`，见步骤 4 的
-   `--fork-baseline` 判定）取了快照，之后并发合并的其它任务它看不到。B3-2 就是这样红的——
-   它的 worktree 建于 B3-1 合并前 13 分钟，于是对全局测试文件计数的断言过期（该断言形态已由
-   `gap-global-count-assertions-fragile-relative-baseline` 改成相对基线判据）。
-   **并发窗口是并发模型固有的，不是偶发**，所以 rebase 是必需步骤不是可选优化。
-   rebase 冲突 → 停止该任务的 fan-in，标 needs-human，报告；不要 `--skip`、不要 `-X ours`。
-1. `git merge --no-ff task/<taskId>` —— **合回 integration**（待验证汇入点；红窗期照常接收合并，
-   这是停派被结构性消除的一半）。**不直接合 develop**——develop 只接受外层 verification-round 的
-   批量 fast-forward 合并（`orchestrator-loop-tick.md` 步骤 1b）。
 2. 冲突 → `git merge --abort`，标 needs-human，**停止本 tick 的后续合并与派发**，报告
 3. 跑 `$TEST_COMMAND --for-task <taskId>`（该任务自己的选中集，秒级；`TEST_COMMAND` 见 `.quay/config.yml` `loop.test_command`）
 4. 选中集非绿 → 回退该 merge，标 needs-human，停止，报告
@@ -862,12 +844,6 @@ node --experimental-strip-types plugin/scripts/concurrent-batch-scheduler.ts --r
 # deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
 ```
 
-重叠 → 不同时派发，等下一 tick（**分派是滚动的，不是攒批门控**）。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
-# 输出 { batch, deferred }（`batch`/`deferred` 是机件输出字段名，保留）。两者都在 batch ⇒ disjoint，
-# 可并发/无触摸重叠，非门控分批；
-# deferred 的 reason 里 `(overlap: <file>)` 指名冲突文件（两个任务要创建同一个文件也会指名）。
-```
-
 重叠 → 不可并发，等下一 tick。**不要凭读 Touches 列表目测**——本会话有过目测判断被实测推翻的先例。
 
 4. **分叉基线判定（两线模型 AC2，`gap-branch-model-integration-branch-splits-fork-baseline-from-merge-point`）**：
@@ -995,9 +971,6 @@ push 失败（非快进 = 真分歧）只报告、不覆写、下一 tick 重试
 `ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起——完成即触发
 派发评估（见「事件驱动派发（槽位回填）」）；tick 是兜底必跑心跳（每 tick 无条件跑 slot-refill，见步骤 4），
 不是派发的主节奏也不是新轮询源。
-`ScheduleWakeup`，间隔 **1200–1800 秒**。理由：后台完成有 task-notification 自动唤起（那是派发触发源，
-见步骤 4 的「槽位释放回填」），这只是兜底——**tick 间隔不是派发节奏**，派发节奏由完成事件驱动
-（`gap-dispatch-evaluated-only-at-inner-tick-boundary-not-slot-release`）。
 
 ---
 
