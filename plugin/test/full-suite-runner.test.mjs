@@ -710,6 +710,42 @@ test("AC2b — the static-check phase gate: test-phase output (selected N files)
   }
 });
 
+test("AC2 — both testsSeen summary forms (`# tests N` AND the reporter's `ℹ tests N`) arm the static-check phase gate on their own (round-6 regex root cause)", async () => {
+  // Round-6 root cause (gap-static-check-false-positive-testsseen-regex-does-not-match-reporter-format):
+  // the testsSeen parser only accepted the TAP `# tests N` form, but measure-suite-reporter emits the
+  // info-glyph `ℹ tests N` — so testsSeen stayed 0 and the `testsSeen === 0` static-check guard was
+  // INERT, letting STATIC_CHECK_FAILURE_PATTERNS fire on test-fixture output (candidate-contracts'
+  // "ANTI-DRIFT HARD FAIL" lines). 42aad5fe accepts both prefixes; the Contract measure is
+  // `tests_seen_after_test_phase > 0`. This test proves EACH summary form ALONE (no "selected N files"
+  // marker) increments testsSeen ⇒ testPhaseStarted, so an ANTI-DRIFT fixture line printed after the
+  // summary no longer false-triggers static-check red and the suite stays green.
+  for (const summary of ['echo "# tests 5"', 'echo "ℹ tests 5"']) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-glyph-"));
+    const { f, dir } = fakeSuite(
+      summary +
+        '\necho "ANTI-DRIFT HARD FAIL: 1 violation(s)"\n' +
+        'echo "  cross-build-overlap: builds A & B both touched shared/s.js"\n' +
+        'echo "# pass 5"\n' +
+        'echo "# fail 0"\n' +
+        "exit 0",
+    );
+    try {
+      const child = runRunner({ root, command: `bash ${f}` });
+      const { code } = await waitExit(child);
+      assert.equal(code, 0, `runner exits 0 (genuinely green) for summary form: ${summary.trim()}`);
+      const s = readState(root);
+      assert.equal(
+        s.state,
+        "green",
+        `summary form ${summary.trim()} ⇒ testsSeen>0 ⇒ phase gate armed ⇒ ANTI-DRIFT fixture line does NOT false-red (AC2/AC3/AC4)`,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("AC5 — a real test failure dominates a static-check marker: reason stays failed, failures[] carries the test failure", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fsr-sc-dom-"));
   const { f, dir } = fakeSuite(
