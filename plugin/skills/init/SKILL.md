@@ -158,6 +158,9 @@ documented reference from a genuine missing file:
 <!-- reference-doc: orchestration/SPEC-branching-model-integration-branch-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-integration-architecture-2026-08-05.md -->
 <!-- reference-doc: orchestration/SPEC-inbox-service-2026-08-08.md -->
+<!-- reference-doc: orchestration/SPEC-three-layer-unified-architecture-2026-08-09.md -->
+<!-- reference-doc: orchestration/orchestrator-tick-core.md -->
+<!-- reference-doc: orchestration/fast-mode-tick-core.md -->
 
 ## Behavior
 
