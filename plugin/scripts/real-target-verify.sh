@@ -97,7 +97,7 @@ PYEOF
 if [ "$LIST" = 1 ]; then
   # The real-target list is per-workspace policy (the mechanism is generic). A workspace declares
   # its real downstreams via QUAY_REAL_TARGETS (space-separated absolute dirs). quay's own list is
-  # archguard + meta-cc (see orchestration/orchestrator-loop-tick.md, the verification-round step).
+  # archguard + meta-cc (see plugin/loop/orchestrator-loop-tick.md, the verification-round step).
   for t in ${QUAY_REAL_TARGETS:-}; do
     printf '%s\n' "$t"
   done
