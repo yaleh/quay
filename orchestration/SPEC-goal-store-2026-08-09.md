@@ -80,6 +80,39 @@ evidence:               # 最近一次评估
 ——**全是 `<KIND>-<NNN>`,含义在 `title`,id 永不移动**。今晚我给 ADR-009 加了两次修订、
 推翻了它自己的 enforcement 判断,**它的 id 一个字没动**。⇒ `PHASE-NNN` 是第四次沿用。
 
+#### 已考虑并否决:`MILESTONE-NNN`(人 2026-08-09 08:2xZ 提出,同日经数据否决)
+
+人的提法:「更愿意称呼为 milestone;『阶段/phase』已用在许多任务内部的计划中;
+『milestone』也曾被用于 outer 的计划(**后被淡化**)」。**实测否掉了"后被淡化"这个前提**:
+
+| 词 | 当前占用(2026-08-09 实测) |
+|---|---|
+| **milestone** | `tasks/` **645 / 887** 个文件;`M<NNN>` 编号 **4215 次**;`label:milestone-candidate` **569** 个任务;**近 7 天 226 个提交改动过该标签,最近一次 08-09 07:58**;`dashboard.md` 的 `milestone_counter: 206`;`milestones/` **190** 个目录(最新 M254);`CLAUDE.md:207` 仍写 *workflows at milestone granularity* |
+| **阶段 / phase** | `tasks/` **50 / 887** 个文件;其中真在 `## Plan` 里用的 **4** 个;主要形态是 `Phase 1/2/3`(272 次)——**计划【内部】的次级切分,从属词** |
+
+**ADR-022 退役的是 classic milestone LOOP**(`prepare-milestone.js`/`execute-milestone.js`/
+`OUTER-LOOP.md`/`composite-*.ts`)——**退的是循环,不是概念**。标签、计数器、目录、
+CLAUDE.md 表述全都活着。
+
+**⇒ 用 milestone 命名阶段目标,撞得比 phase 严重得多,不是更轻。**
+
+**三条否决理由(可核)**:
+
+1. **撞名只在【同形】时发生**,而带前缀的形式基本无人占用:
+   `PHASE-` 今天仅 1 处、`MILESTONE-` 0 处、`GOAL-` 3 处。
+   `MILESTONE-003` 自身不撞,**但会让读者立刻联想到那 4215 个 `M<NNN>`——语义污染比字面撞名更难拆**。
+2. **层级倒置**:`milestone` 在本仓的既有含义是**一次开发批次的编号单位**(M254);
+   而一个阶段目标**横跨很多个 milestone**(AC20-27 那个阶段远不止一个 M)。
+   **用 milestone 命名一个比 milestone 大的东西,层级是反的。**
+3. **`Phase 2` 与 `PHASE-003` 不同形**:前者是计划内部的第几步,后者是一等 id——
+   关系正如散文里的"指示"与 `DIR-028`。
+
+**次选(若将来仍想避开中文「阶段」的歧义)**:`EPOCH-NNN`(0 占用,
+且"纪元"天然表达"比 milestone 大、跨越多个 milestone"),**不是** `MILESTONE-NNN`。
+
+**人 2026-08-09 08:2xZ 裁定:同意保留 `PHASE-NNN`。** 本小节保留,
+使该问题**不必再被重新讨论**——重开前请先推翻上表的数据。
+
 ### 结构:phase 与 goal 合一,不是两种对象
 
 人:「一个阶段应当有一个明确的目标和若干 AC」⇒
