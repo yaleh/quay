@@ -175,6 +175,12 @@ export function exclusionEntries(repoRoot, pluginDir) {
       target: path.join(pluginDir, 'test', 'quay-init-loop.test.mjs'),
       reason: "asserts quay-init's DEPLOYED layout — quay-init.sh lays tick docs at orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md (target layout); the assertion verifies the consumer workspace tracks the deployed copies, not a stale source-copy reference",
     },
+    {
+      rel: 'plugin/scripts/verify-delivery-surface.ts',
+      target: path.join(pluginDir, 'scripts', 'verify-delivery-surface.ts'),
+      reason: "consumer-laid target layout reference — verify-delivery-surface.ts's LAID_MANIFEST deliverables intentionally reference the consumer's laid tick-doc paths (orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md, added by gap-verify-delivery-surface-checks-source-layout-not-consumer-laid; --layout laid verifies a quay-init --loop consumer's orchestration/ + docs/analysis/ copies) — same class as adr016-screen-use-check / no-manager-tick-doc-check / instrument-failure-check",
+      retainedNote: "kept despite possibly inert in a SOURCE-only checkout (develop pre-fan-in): the LAID_MANIFEST consumer-laid deliverables only exist when the consumer-laid manifest is present — the main-checkout state the AC1b scan flags. In that state the deliverables carry the old tick-doc paths VERBATIM and AC1b would flag the checker as a live reference; the reference is INTENTIONAL (the laid-layout completeness check validates the consumer's deployed copies, not a stale source-copy). The entry oscillates between inert (source-only checkout) and live (consumer-laid manifest present) — same oscillation class as the batch2-queue-state / tick-log / manager-pending entries",
+    },
     // NOTE: plugin/loop/ is fully excluded: the tick-doc templates legitimately spell the TARGET
     // layout (orchestration/ + docs/analysis/ for a cold-started project). Their own old-path
     // strings are therefore only policed by AC1c's three assertions, and AC1c's liveLines filter
@@ -183,7 +189,9 @@ export function exclusionEntries(repoRoot, pluginDir) {
     //
     // The necessity-check invariant (## Contract): every exclusion entry must either suppress a
     // hit of the 5 old-path patterns in its own target (non-inert), or carry a `retainedNote`
-    // justifying why it is kept while inert. None of the entries above carry a retainedNote today —
-    // every file-level target currently contains at least one old-path pattern hit.
+    // justifying why it is kept while inert. All file-level targets above contain at least one
+    // old-path pattern hit EXCEPT the verify-delivery-surface.ts entry, which carries a retainedNote:
+    // its old-path references live in LAID_MANIFEST (consumer-laid deliverables) that is absent from
+    // a SOURCE-only checkout but present in the main-checkout state the AC1b scan flags.
   ];
 }

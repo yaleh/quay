@@ -39,17 +39,17 @@ extra: {}
 
 ## Acceptance Criteria
 
-- [ ] AC1: **复现固化**——任务体记录 round-203 实证（verify-delivery-surface.ts:164 consumer-laid deliverables 引用旧路径 + 不在排除表 + 08853779 新增）（本任务 Proposal 已含）
-- [ ] AC2: **排除表收编**——verify-delivery-surface.ts 进 loop-shipping 排除表（consumer-laid 目标布局引用，与同类 checker 一致）
-- [ ] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12
-- [ ] AC4: **verify-delivery-surface 功能不丢**——consumer-laid 校验仍工作（--surface 模式 6/6 COVERED）
-- [ ] AC5: **全量套件绿**——round-203 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）
+- [x] AC1: **复现固化**——任务体记录 round-203 实证（verify-delivery-surface.ts:164 consumer-laid deliverables 引用旧路径 + 不在排除表 + 08853779 新增）（本任务 Proposal 已含）
+- [x] AC2: **排除表收编**——verify-delivery-surface.ts 进 loop-shipping 排除表（consumer-laid 目标布局引用，与同类 checker 一致）
+- [x] AC3: **loop-shipping 绿**——AC1b 回归验证 12/12
+- [x] AC4: **verify-delivery-surface 功能不丢**——consumer-laid 校验仍工作（--surface 模式 6/6 COVERED）
+- [ ] AC5: **全量套件绿**——round-203 类场景不再红（fail 0 且 cancelled 0 且 FULL-SUITE-EXIT=0）——外层 verification-round 验证
 
 ## Definition of Done
 
-- [ ] AC1–AC5 全部勾上
-- [ ] 修后实跑：loop-shipping 12/12 绿（贴任务体）；verify-delivery-surface --surface 6/6 COVERED
-- [ ] 既有测试 + 新增测试全绿（`--for-task` scoped）
+- [ ] AC1–AC5 全部勾上（AC5 未勾——全量套件归外层 verification-round）
+- [x] 修后实跑：loop-shipping 12/12 绿（贴任务体）；verify-delivery-surface --surface 6/6 COVERED
+- [x] 既有测试 + 新增测试全绿（`--for-task` scoped）
 - [ ] 全量套件绿（`fail 0` 且 `caused 0` 且 `FULL-SUITE-EXIT=0`）——外层 verification-round 验证
 
 ## Touches
@@ -74,3 +74,31 @@ resume    排除表条目 + 验证分步提交，任一步完成即写盘
 reviewer: outer
 at: 2026-08-09
 changed: 红窗分诊（round-203 红于 loop-shipping AC1b）——verify-delivery-surface.ts:164 consumer-laid deliverables 引用旧 tick-doc 路径且不在排除表，08853779 fan-in 新增。consumer-laid 引用是有意的（任务本意），正确修法=收编排除表（同族 adr016/no-manager/instrument-failure）。实现归内层
+
+## Evidence（内层实现 2026-08-09）
+
+**修复**：`plugin/scripts/loop-shipping-exclusion-data.mjs` 排除表新增
+`plugin/scripts/verify-delivery-surface.ts` 条目（rel=plugin/scripts/verify-delivery-surface.ts），
+reason=「consumer-laid target layout reference」——LAID_MANIFEST deliverables 有意引用消费者 laid
+布局的 tick-doc 路径（orchestration/orchestrator-loop-tick.md + docs/analysis/fast-mode-loop-tick.md，
+--layout laid 验证消费者 orchestration/ + docs/analysis/ 副本），与 adr016-screen-use-check /
+no-manager-tick-doc-check / instrument-failure-check 同类。带 retainedNote（源-only checkout 下
+LAID_MANIFEST 缺失时条目惰性——oscillation 同 batch2-queue-state/tick-log 类）。既有排除条目不动。
+同步更新数据文件末尾「None of the entries above carry a retainedNote」注释（现已不成立）。
+
+**回归源头交叉标注**：tasks/gap-verify-delivery-surface-checks-source-layout-not-consumer-laid.md
+追加「交叉标注——loop-shipping cross-cut 回归」段（LAID_MANIFEST fan-in 引入盲区 + 本任务修复）。
+
+**Contract invoke 实跑（worktree 内）**：
+- `node --no-warnings --experimental-strip-types --test plugin/test/loop-shipping.test.mjs`
+  → **12/12 pass, 0 fail, 0 cancelled**（`grep -c '✖ AC1b'` = 0，AC1b 绿）
+- `node --experimental-strip-types plugin/scripts/verify-delivery-surface.ts --surface`
+  → **surface_categories_covered=6/6**, spec_is_live=1, PASS: all 6 delivery categories covered
+- necessity-check 手工复核：`plugin/scripts/verify-delivery-surface.ts` 条目分类为
+  `inert ... retainedNote=YES`（非违规）；`inert_exclusions` 计数中的唯一 VIOLATION 是
+  `orchestration/manager-tick-log.md`（gitignored runtime ledger，fresh worktree 缺失故惰性且无
+  retainedNote）——**既有条目，main checkout 中该文件存在故非惰性**，非本任务引入、按
+  「既有排除条目不动」不改。
+
+**AC 勾选**：AC1–AC4 已勾（复现固化 / 排除表收编 / loop-shipping 12/12 / --surface 6/6）。
+AC5（全量套件）未勾——归外层 verification-round；DoD 全量套件行亦未勾。
