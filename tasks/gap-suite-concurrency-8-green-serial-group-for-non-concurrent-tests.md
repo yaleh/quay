@@ -157,6 +157,38 @@ install 族（quay-init-loop-* / runtime-landing / install-config-driven-e2e）�
 等）**未缩短任何等待窗口**（R8 原则，serial 隔离保留）。serial 段投影从 1080s 降到 ~720-750s（-32~35%），
 ≥45% 目标的残余大头是 B 类挂钟与需真实首装的 install 测试——均超出本任务 Touches。
 
+## Evidence（内层实现 2026-08-09）
+
+### 内层复验（worktree fork 自 develop HEAD 后重新机械验证）
+
+任务主体（serial 组机制 + D 类快照修复）已由内层于 2026-08-07 实现并合并进 develop（commit
+`f062caf9`），此后 develop 又叠加了 lowconc 组（`e92c54d8`）与 verify-round-9 修复（`89f48a3d`）。
+2026-08-09 内层在本 worktree（branch `task/gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests`，
+fork 自 develop HEAD = `2e7ccc5a`）对当前状态做机械复验：
+
+- **scoped gate**：`bash scripts/test.sh --for-task gap-suite-concurrency-8-green-serial-group-for-non-concurrent-tests --allow-thin`
+  → `ℹ tests 94 / ℹ pass 94 / ℹ fail 0 / ℹ cancelled 0 / ℹ skipped 0`，**EXIT=0**。含 runner-grouping 的
+  serial 机制结构性/行为测试、select-tests-for-touches 全套、test-file-snapshot 快照竞态、send-keys-verified 等。
+- **task-contract-check**：`violations: 0`，`new since baseline: 0`（strict-subset 无违规）。
+- **serial 组路由**：`--group serial --list-files` 列 15 个成员并 EXIT=0；默认 `--list-files` 主体 **0 个 serial
+  成员**（AC4 负控制：serial 成员被机械路由出并发 8 主体）。Contract measure
+  `grep -rlE '@test-group[[:space:]]+serial' ... | wc -l` = **16（≥9）**——+1 来自 test-coverage-check.test.mjs
+  文档注释中的旧字样，其实际声明已由 lowconc 任务改回 `engine`。
+- **`--group serial` 全组跑**：`ℹ tests 139 / ℹ pass 139 / ℹ fail 0 / ℹ cancelled 0 / ℹ skipped 0`，**EXIT=0**
+  （concurrency 1 硬编码，test.sh 剥离任何显式 `--test-concurrency`）。
+- **D 类修复**：`plugin/scripts/test-file-snapshot.sh` `current_files()` 排除 `zz-*` 运行期夹具；test-file-snapshot
+  的 AC2（canonical 集）与 AC3 负控制（真删除仍报 REMOVED）均绿。
+
+**机制演进说明（供外层核对）**：2026-08-07 的 lowconc 组（`e92c54d8`）把原 B 类（measure-suite /
+monitor-mount-check / send-keys-verified / build-dist-smoke / cold-start-skill）与大部分 install 族迁至
+lowconc（并发 3），并重声明 test-coverage-check 为 engine（A 类「stay engine」）；当前 serial 组成员 =
+runner-grouping / select-tests-for-touches（A 类嵌套 runner）+ session-liveness-sweep + quay-init-tmux-detection +
+quay-init-loop-core + 7 个 quay-init/loop 成员 + runtime-landing + install-config-driven-e2e + npm-pack-e2e。
+serial 隔离机制不变：默认主体并发 N 之后追加 serial 阶段，concurrency 1 硬编码。
+
+**AC3 / DoD 第 2 行**（并发 8 全量真绿实跑）按任务体裁定留给外层验证轮——worktree 资源门在 serial 跑时 WAIT，
+全量 ~30-40 min 超出 worktree 验证预算；机制已机械证明如上（serial 成员移出主体 + serial 组单独绿 + D 类修复）。
+
 ## Touches
 - scripts/test.sh（serial 组路由）
 - plugin/test/runner-grouping.test.mjs（A类 serial + D类夹具保留，快照侧排除）
