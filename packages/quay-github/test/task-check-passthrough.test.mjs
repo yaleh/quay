@@ -61,9 +61,16 @@
 // four Core-aggregation cases share ONE `quay mcp` process — every
 // assertion below is byte-identical to the pre-consolidation version, only
 // the process that serves the request differs. The three adversarial
-// break/restore cases MUST keep their own fresh spawns (they mutate
-// github-client.js on disk between checks). Also relies on the
-// gap-suite-speedup src fix: all three MCP server entry points now exit
+// break/restore cases MUST keep their own fresh spawns, but (since
+// gap-github-client-iscompound-sabotaged-uncommitted) they mutate a TEMP COPY
+// of github-client.js under os.tmpdir() (withAdversarialCopy), never the
+// real packages/quay-github/src/github-client.ts — the old write-the-real-file
+// + finally-restore pattern left the isCompound=false mutation behind when the
+// test process was killed mid-await (round-190 early-red, 2026-08-09). Also
+// relies on the gap-suite-speedup src fix: all three MCP server entry points
+// now exit promptly on stdin EOF (previously a disconnected server whose event
+// loop held a live child handle waited out the SDK client's full 2s SIGTERM
+// timeout — and orphaned Provider processes were left running).
 // promptly on stdin EOF (previously a disconnected server whose event loop
 // held a live child handle waited out the SDK client's full 2s SIGTERM
 // timeout — and orphaned Provider processes were left running).
@@ -83,6 +90,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const coreBin = QUAY_CLI;
 const githubBin = path.join(__dirname, "..", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
+const githubSrcDir = path.join(__dirname, "..", "src");
 const fakeGhScript = path.join(__dirname, "fixtures", "fake-gh.mjs");
 
 let failures = 0;
@@ -160,7 +168,12 @@ function mkIssueObj({ number, labels, state = "open", childRefs = [] }) {
   };
 }
 
-async function withGithubMcpFor(fakeIssueJson, run) {
+// gap-github-client-iscompound-sabotaged-uncommitted: `opts` lets the
+// adversarial break/restore cases point the spawned MCP server at a TEMP COPY
+// of the package (bin + src), never the real source — see withAdversarialCopy
+// below. Defaults to the real bin/cwd for the shared-server non-adversarial
+// cases (byte-identical behavior).
+async function withGithubMcpFor(fakeIssueJson, run, opts = {}) {
   const fakeGhDir = makeFakeGhPathDir();
   const env = {
     ...process.env,
@@ -168,7 +181,9 @@ async function withGithubMcpFor(fakeIssueJson, run) {
     QUAY_GITHUB_REPO: "yaleh/quay-fixture", // never actually reached over the network — fake gh ignores it
     FAKE_GH_ISSUE_JSON: fakeIssueJson,
   };
-  const { client, transport } = await connectStdio("node", [githubBin, "mcp"], githubProviderDir, env);
+  const bin = opts.bin ?? githubBin;
+  const cwd = opts.cwd ?? githubProviderDir;
+  const { client, transport } = await connectStdio("node", [bin, "mcp"], cwd, env);
   try {
     await run(client);
   } finally {
@@ -182,7 +197,7 @@ async function withGithubMcpFor(fakeIssueJson, run) {
 // mode) instead of the single-issue FAKE_GH_ISSUE_JSON — needed for a
 // compound (epic) task, whose check() recursively fetches each child issue
 // by its own number via the identical single-issue GET endpoint.
-async function withGithubMcpForMulti(issuesByNumber, run) {
+async function withGithubMcpForMulti(issuesByNumber, run, opts = {}) {
   const fakeGhDir = makeFakeGhPathDir();
   const env = {
     ...process.env,
@@ -190,12 +205,53 @@ async function withGithubMcpForMulti(issuesByNumber, run) {
     QUAY_GITHUB_REPO: "yaleh/quay-fixture",
     FAKE_GH_ISSUES_JSON: JSON.stringify(issuesByNumber),
   };
-  const { client, transport } = await connectStdio("node", [githubBin, "mcp"], githubProviderDir, env);
+  const bin = opts.bin ?? githubBin;
+  const cwd = opts.cwd ?? githubProviderDir;
+  const { client, transport } = await connectStdio("node", [bin, "mcp"], cwd, env);
   try {
     await run(client);
   } finally {
     await client.close();
     fs.rmSync(fakeGhDir, { recursive: true, force: true });
+  }
+}
+
+// gap-github-client-iscompound-sabotaged-uncommitted (AC3/AC4 root cause): run
+// an adversarial break/restore against a TEMP COPY of the quay-github package
+// (bin + src), NEVER the real source file. The previous pattern wrote the
+// broken variant into packages/quay-github/src/github-client.ts and restored it
+// only in a `finally` — a killed/crashed/SIGKILLed run left the mutation behind
+// as an uncommitted working-tree edit that bypassed every gate (scoped and
+// static checks read HEAD/task files, not the working-tree runtime state) and
+// only surfaced at the full-suite red window. Observed twice with the SAME
+// signature: 2026-08-03 (done-branch line-566 at 20:21, during a suite run)
+// and 2026-08-09 (both isCompound branches at 18:3x, round-190 early-red).
+//
+// The temp copy lives under os.tmpdir() (the test-isolation SAFE root — R8
+// shared-root-mkdtemp forbids mkdtemp rooted in the shared checkout) with the
+// repo root node_modules symlinked in so the copied bin/src still resolve
+// @modelcontextprotocol/sdk / zod / yaml. The shared checkout is untouchable:
+// even a SIGKILL leaves at worst a /tmp/quay-adv-* dir the OS reaps, never a
+// broken production source. `mutateCopySrc(srcText)` returns the mutated copy
+// text; `run({ bin, cwd })` is invoked with the copied entry point + pkg dir.
+async function withAdversarialCopy(mutateCopySrc, run) {
+  const tmpPkg = fs.mkdtempSync(path.join(os.tmpdir(), "quay-adv-"));
+  try {
+    fs.mkdirSync(path.join(tmpPkg, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(tmpPkg, "src"), { recursive: true });
+    fs.copyFileSync(githubBin, path.join(tmpPkg, "bin", "quay-github.ts"));
+    for (const f of fs.readdirSync(githubSrcDir)) {
+      fs.copyFileSync(path.join(githubSrcDir, f), path.join(tmpPkg, "src", f));
+    }
+    fs.symlinkSync(path.join(__dirname, "..", "..", "..", "node_modules"), path.join(tmpPkg, "node_modules"), "dir");
+    const copyPath = path.join(tmpPkg, "src", "github-client.ts");
+    fs.writeFileSync(copyPath, mutateCopySrc(fs.readFileSync(copyPath, "utf8")));
+    await run({
+      bin: path.join(tmpPkg, "bin", "quay-github.ts"),
+      cwd: tmpPkg,
+    });
+  } finally {
+    fs.rmSync(tmpPkg, { recursive: true, force: true });
   }
 }
 
@@ -435,25 +491,28 @@ async function main() {
     if (!original.includes(needle)) {
       assert(false, "adversarial break/restore (QN-072): expected done-branch isCompound text not found verbatim in github-client.js — source may have changed shape; aborting this check honestly rather than silently skipping it");
     } else {
-      const broken = original.replace(needle, needle.replace('role === "compound" && (children || []).length > 0', "false"));
-      fs.writeFileSync(srcPath, broken);
-      try {
-        await withGithubMcpForMulti(
-          {
-            701: mkIssueObj({ number: 701, labels: ["status:todo"], state: "open" }),
-            700: mkIssueObj({ number: 700, labels: [], state: "closed", childRefs: [701] }),
-          },
-          async (client) => {
-            const r = await client.callTool({ name: "task_check", arguments: { id: "gh-700" } });
-            assert(
-              r.structuredContent?.ok === true && r.structuredContent?.childrenStatus === undefined,
-              `adversarial check (QN-072): with isCompound forced false, the same "epic done but child todo" fixture now WRONGLY reports ok:true with no childrenStatus (got: ${JSON.stringify(r.structuredContent)}) — confirms Case 3's ok:false/childrenStatus assertions above have real teeth, not merely checking passthrough plumbing`
-            );
-          }
-        );
-      } finally {
-        fs.writeFileSync(srcPath, original);
-      }
+      // gap-github-client-iscompound-sabotaged-uncommitted: mutate a TEMP COPY,
+      // never the real source (withAdversarialCopy) — a killed run used to leave
+      // the isCompound=false edit behind in the working tree.
+      await withAdversarialCopy(
+        (copySrc) => copySrc.replace(needle, needle.replace('role === "compound" && (children || []).length > 0', "false")),
+        async ({ bin, cwd }) => {
+          await withGithubMcpForMulti(
+            {
+              701: mkIssueObj({ number: 701, labels: ["status:todo"], state: "open" }),
+              700: mkIssueObj({ number: 700, labels: [], state: "closed", childRefs: [701] }),
+            },
+            async (client) => {
+              const r = await client.callTool({ name: "task_check", arguments: { id: "gh-700" } });
+              assert(
+                r.structuredContent?.ok === true && r.structuredContent?.childrenStatus === undefined,
+                `adversarial check (QN-072): with isCompound forced false, the same "epic done but child todo" fixture now WRONGLY reports ok:true with no childrenStatus (got: ${JSON.stringify(r.structuredContent)}) — confirms Case 3's ok:false/childrenStatus assertions above have real teeth, not merely checking passthrough plumbing`
+              );
+            },
+            { bin, cwd }
+          );
+        }
+      );
       const restored = fs.readFileSync(srcPath, "utf8");
       assert(restored === original, "adversarial check (QN-072): github-client.js is byte-identical to its original content after the isCompound break/restore cycle");
     }
@@ -477,25 +536,27 @@ async function main() {
     if (!original.includes(needle)) {
       assert(false, "adversarial break/restore (QN-073): expected ready-branch isCompound text not found verbatim in github-client.js — source may have changed shape; aborting this check honestly rather than silently skipping it");
     } else {
-      const broken = original.replace(needle, needle.replace('role === "compound" && (children || []).length > 0', "false"));
-      fs.writeFileSync(srcPath, broken);
-      try {
-        await withGithubMcpForMulti(
-          {
-            621: mkIssueObj({ number: 621, labels: ["status:todo"], state: "open" }),
-            620: mkIssueObj({ number: 620, labels: ["status:ready"], state: "open", childRefs: [621] }),
-          },
-          async (client) => {
-            const r = await client.callTool({ name: "task_check", arguments: { id: "gh-620" } });
-            assert(
-              r.structuredContent?.ok === true && r.structuredContent?.childrenStatus === undefined,
-              `adversarial check (QN-073): with the ready-branch isCompound forced false, the same "ready epic, child todo" fixture now WRONGLY reports ok:true with no childrenStatus (got: ${JSON.stringify(r.structuredContent)}) — confirms Case 4's ok:false/childrenStatus assertions above have real teeth, and are testing a genuinely distinct code path from Case 3's done-branch fix`
-            );
-          }
-        );
-      } finally {
-        fs.writeFileSync(srcPath, original);
-      }
+      // gap-github-client-iscompound-sabotaged-uncommitted: temp-copy isolation
+      // (same rationale as the QN-072 block above).
+      await withAdversarialCopy(
+        (copySrc) => copySrc.replace(needle, needle.replace('role === "compound" && (children || []).length > 0', "false")),
+        async ({ bin, cwd }) => {
+          await withGithubMcpForMulti(
+            {
+              621: mkIssueObj({ number: 621, labels: ["status:todo"], state: "open" }),
+              620: mkIssueObj({ number: 620, labels: ["status:ready"], state: "open", childRefs: [621] }),
+            },
+            async (client) => {
+              const r = await client.callTool({ name: "task_check", arguments: { id: "gh-620" } });
+              assert(
+                r.structuredContent?.ok === true && r.structuredContent?.childrenStatus === undefined,
+                `adversarial check (QN-073): with the ready-branch isCompound forced false, the same "ready epic, child todo" fixture now WRONGLY reports ok:true with no childrenStatus (got: ${JSON.stringify(r.structuredContent)}) — confirms Case 4's ok:false/childrenStatus assertions above have real teeth, and are testing a genuinely distinct code path from Case 3's done-branch fix`
+              );
+            },
+            { bin, cwd }
+          );
+        }
+      );
       const restored = fs.readFileSync(srcPath, "utf8");
       assert(restored === original, "adversarial check (QN-073): github-client.js is byte-identical to its original content after the ready-branch isCompound break/restore cycle");
     }
@@ -514,20 +575,25 @@ async function main() {
     if (!original.includes(needle)) {
       assert(false, "adversarial break/restore: expected needs-human branch text not found verbatim in github-client.js — source may have changed shape; aborting this check honestly rather than silently skipping it");
     } else {
-      const broken = original.replace(needle, "");
-      fs.writeFileSync(srcPath, broken);
-      try {
-        await withGithubMcpFor(mkIssueJson({ number: 505, labels: ["status:needs-human"] }), async (client) => {
-          const r = await client.callTool({ name: "task_check", arguments: { id: "gh-505" } });
-          assert(
-            r.structuredContent?.gate === "unknown" &&
-              r.structuredContent?.reason === "unrecognized status needs-human",
-            `adversarial check: with the needs-human branch removed, the same fixture now falls through to the unrecognized-status shape (got: ${JSON.stringify(r.structuredContent)}) — confirms this test file's needs-human assertions have real teeth, not merely checking the passthrough machinery`
+      // gap-github-client-iscompound-sabotaged-uncommitted: temp-copy isolation
+      // (same rationale as the QN-072/QN-073 blocks above).
+      await withAdversarialCopy(
+        (copySrc) => copySrc.replace(needle, ""),
+        async ({ bin, cwd }) => {
+          await withGithubMcpFor(
+            mkIssueJson({ number: 505, labels: ["status:needs-human"] }),
+            async (client) => {
+              const r = await client.callTool({ name: "task_check", arguments: { id: "gh-505" } });
+              assert(
+                r.structuredContent?.gate === "unknown" &&
+                  r.structuredContent?.reason === "unrecognized status needs-human",
+                `adversarial check: with the needs-human branch removed, the same fixture now falls through to the unrecognized-status shape (got: ${JSON.stringify(r.structuredContent)}) — confirms this test file's needs-human assertions have real teeth, not merely checking the passthrough machinery`
+              );
+            },
+            { bin, cwd }
           );
-        });
-      } finally {
-        fs.writeFileSync(srcPath, original);
-      }
+        }
+      );
       const restored = fs.readFileSync(srcPath, "utf8");
       assert(restored === original, "adversarial check: github-client.js is byte-identical to its original content after the break/restore cycle");
     }
