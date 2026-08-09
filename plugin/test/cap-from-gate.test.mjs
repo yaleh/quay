@@ -77,6 +77,16 @@ const GATE = path.join(REPO_ROOT, "plugin", "scripts", "resource-gate.sh");
 // loudly instead of passing by coincidence.
 const TEST_BANDS = { go: 3, wait: 2, extreme_wait: 1 };
 
+// Hermetic budget baseline (2026-08-09, red-window #10): every budget-dependent assertion below
+// assumes a 4-core total_budget (available = nproc − in_use; the BUDGET test asserts available=4,
+// the saturated case nproc−20=0, the constrained case nproc−3=1). The suite runs inside a
+// systemd-run --user --scope with CPUQuota=200% → `nproc` reads 2 inside the scope → total_budget=2
+// → the budget bound collapses the effective cap below the injected GO value (got 2, expected 3)
+// whenever the suite verifies on this host. Pin the nproc seam to 4 so the budget logic is
+// deterministic under BOTH the host (nproc=4) and the systemd scope (nproc=2), matching the
+// 4-core baseline the tests assert. Flows through every `{ ...process.env, ... }` env object.
+process.env.RESOURCE_GATE_TEST_NPROC = "4";
+
 // R6 carrier-array cleanup: every mkdtemp dir is tracked and removed after the run (no tmp leak).
 const _createdDirs = [];
 function tmpState(prefix) {
