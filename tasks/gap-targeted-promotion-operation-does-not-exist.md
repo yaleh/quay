@@ -128,6 +128,53 @@ develop），无法在本条 worktree 内写注——见提交说明。
 **测试**——`scripts/test.sh plugin/test/ready-pool-check.test.mjs` ⇒ tests 37 / pass 37 / fail 0
 （新增 6 条 `--targeted` 用例，`node:test` + 既有 `// @test-group governance`）。
 
+## Evidence（内层实现 2026-08-09）
+
+**本轮形态：worktree 分支 `task/gap-targeted-promotion-operation-does-not-exist` 自 develop
+（2e7ccc5a）分叉，分叉基线已含 2026-08-08 落地实现（`9aa945fa task(gap-...)`: add --targeted
+floor-independent promotion path 及其 AC1-AC5 落地提交），故本内层轮为**对既有实现的完整核验 +
+任务文件收尾**，无需新增代码。
+
+**根因（与任务 Proposal 一致）**——「定向晋级」不是一个操作：2026-08-04 裁定被超额执行，外层候选集
+构造规则整体搬进 inner 的 `ready-pool-check.ts`（kind 排序 gap→DIR→other，无阶段目标输入），且
+`pool < floor`（=cap×4）门把阶段目标要的任务挡在 todo（实测 pool=24>floor=20，生产 cap=5 ⇒ floor=20）。
+修法：定向晋级 targeted 是**独立操作**，不受 floor 约束，由外层按阶段目标挑任务。
+
+**机制落位（AC1-AC3，代码已在分叉基线）**——`plugin/scripts/ready-pool-check.ts` 加
+`--targeted <id>` 入口 + `buildTargetedPromotion()`：外层传目标 id（checker 仍不含阶段目标输入，AC3），
+机械校验四件套/依赖/触摸可解析 + 退役机制拦截，输出 `targeted_promotion { eligible, floor_independent,
+promote_cmd }`；`floor_independent: true` 恒真（`never walks the pool<floor gate`，AC2），批量
+`promotions`/`candidates` 输出不受影响（AC3，deepEqual 测试）。
+
+**scoped 门实跑（本内层轮）**——
+```
+$ bash scripts/test.sh --for-task gap-targeted-promotion-operation-does-not-exist --allow-thin
+EXIT=0
+task-contract-check: no violations.        # --strict-subset 扫描本任务 + gap-promotion-cadence 任务
+tests 55 / pass 55 / fail 0 / cancelled 0  # ready-pool-check.test.mjs 全绿，含 6 条 --targeted 用例
+```
+scoped 静态集含 task-contract-check（本任务 ## Contract 消费端）、strategic-doc-staleness-check、
+drive-contract-check、instrument-failure-check、adr016-screen-use-check，全过。
+
+**Contract 量测**——
+- `measure targeted_promote_path`：`grep -cE "定向晋级|--targeted|targeted.*promote"` ⇒
+  ready-pool-check.ts=7 / fast-mode-loop-tick.md=3 / orchestrator-loop-tick.md=6，band ≥1 ✓（修复前=0）。
+- `measure floor_independent`：定向晋级路径 `floor_independent: true`，代码/注释均不把定向挂到
+  `pool < floor` 门（`ready-pool-check.ts:566/838`「NEVER gated on pool < floor」）；`pool < floor`
+  仅约束补充 refill 路径。
+
+**invoke 实跑（本内层轮，2026-08-09）**——
+- **负控制（本任务自身）**：本任务已被外层 todo→ready 定向晋级，live `--targeted` 返回
+  `{ found: true, status: "ready", eligible: false, floor_independent: true, reason: "status-ready" }` ——
+  状态护栏生效（不重复 promote 已 ready 的任务）。
+- **正控制（合成 todo 目标，AC2 负控制形状）**：cap=2/floorMult=1 ⇒ floor=2，两个 ready（pool=2≥floor，
+  deficit=0），`--targeted gap-target`（todo 四件套齐）⇒ `eligible: true`、`floor_independent: true`、
+  `promote_cmd: "quay promote gap-target"`，同时批量 `promotions: []`（补充 refill 因 deficit=0 不推荐）——
+  定向晋级与补充解耦，pool≥floor 仍发生 ✓。
+
+**AC 勾选**——AC1-AC5 [x]（2026-08-08 落地时勾）；AC6 池机制三件套 **推迟**（见 AC6 注，不在本条
+Touches 范围，单独立项），DoD AC6 行保持未勾；`status: ready` 不变（ready→done 由外层全量门收口）。
+
 ## Touches
 - tasks/gap-targeted-promotion-operation-does-not-exist.md（自身文件——self-touch，2026-08-08 内层补：缺此条不满足派发资格闸 step 4.5）
 - plugin/scripts/ready-pool-check.ts（加 --targeted 入口；补充逻辑不动）
